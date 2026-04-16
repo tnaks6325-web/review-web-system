@@ -2,9 +2,9 @@ const jwt     = require('jsonwebtoken');
 const bcrypt  = require('bcryptjs');
 const pool    = require('../db/pool');
 
-/**
- * 관리자 로그인 (GAS: handleAdminLoginV2)
- */
+// ═══════════════════════════════════════════════════════════
+// 관리자 로그인 (GAS: handleAdminLoginV2)
+// ═══════════════════════════════════════════════════════════
 async function loginAdmin(name, pw) {
   if (!name || !pw) {
     return { success: false, error: '이름과 비밀번호를 입력하세요.' };
@@ -26,7 +26,7 @@ async function loginAdmin(name, pw) {
 
   // 일반 관리자 계정 — PostgreSQL 조회
   const { rows } = await pool.query(
-    'SELECT * FROM admin_users WHERE username = $1 LIMIT 1', [name]
+    'SELECT * FROM admin_users WHERE username = $1 AND active = TRUE LIMIT 1', [name]
   );
   if (rows.length === 0) {
     return { success: false, error: '존재하지 않는 계정입니다.' };
@@ -46,55 +46,164 @@ async function loginAdmin(name, pw) {
   return { success: true, name: user.username, role: user.role, token };
 }
 
-/**
- * 관리자 계정 추가 (마스터 전용)
- */
+// ═══════════════════════════════════════════════════════════
+// 영업담당자(Staff) 로그인 (GAS: handleStaffLogin)
+// ═══════════════════════════════════════════════════════════
+async function loginStaff(name, pw) {
+  if (!name || !pw) {
+    return { success: false, error: '이름과 비밀번호를 입력하세요.' };
+  }
+
+  const { rows } = await pool.query(
+    'SELECT * FROM staff_users WHERE username = $1 AND active = TRUE LIMIT 1', [name]
+  );
+  if (rows.length === 0) {
+    return { success: false, error: '이름 또는 비밀번호가 올바르지 않습니다.' };
+  }
+
+  const user = rows[0];
+  const isMatch = await bcrypt.compare(pw, user.pw_hash);
+  if (!isMatch) {
+    return { success: false, error: '이름 또는 비밀번호가 올바르지 않습니다.' };
+  }
+
+  const token = jwt.sign(
+    { name: user.username, role: 'staff' },
+    process.env.JWT_SECRET,
+    { expiresIn: process.env.JWT_EXPIRES_IN || '8h' }
+  );
+  return { success: true, name: user.username, role: 'staff', token };
+}
+
+// ═══════════════════════════════════════════════════════════
+// 관리자 계정 CRUD
+// ═══════════════════════════════════════════════════════════
 async function addAdminUser(name, pw) {
+  if (name === process.env.MASTER_ADMIN_NAME) {
+    throw new Error('사용할 수 없는 이름입니다.');
+  }
+  // 중복 확인
+  const existing = await pool.query('SELECT 1 FROM admin_users WHERE username = $1', [name]);
+  if (existing.rows.length > 0) throw new Error('이미 존재하는 이름입니다.');
+
   const pw_hash = await bcrypt.hash(pw, 10);
   await pool.query(
     'INSERT INTO admin_users (username, pw_hash, role) VALUES ($1, $2, $3)',
     [name, pw_hash, 'admin']
   );
-  return { ok: true };
+  // GAS 호환: users 목록 반환
+  const users = await listAdminUsers();
+  return { success: true, users };
 }
 
-/**
- * 관리자 계정 수정
- */
-async function editAdminUser(name, newPw) {
-  const pw_hash = await bcrypt.hash(newPw, 10);
+async function editAdminUser(name, newPw, active) {
+  const updates = [];
+  const values = [];
+  let idx = 1;
+
+  if (newPw !== undefined && newPw.length >= 4) {
+    const pw_hash = await bcrypt.hash(newPw, 10);
+    updates.push(`pw_hash = $${idx++}`);
+    values.push(pw_hash);
+  }
+  if (active !== undefined) {
+    updates.push(`active = $${idx++}`);
+    values.push(active);
+  }
+
+  if (updates.length === 0) throw new Error('변경할 항목이 없습니다.');
+
+  values.push(name);
   const result = await pool.query(
-    'UPDATE admin_users SET pw_hash = $1 WHERE username = $2 RETURNING *',
-    [pw_hash, name]
+    `UPDATE admin_users SET ${updates.join(', ')} WHERE username = $${idx}`,
+    values
   );
-  if (result.rowCount === 0) throw new Error('계정을 찾을 수 없습니다.');
-  return { ok: true };
+  if (result.rowCount === 0) throw new Error('존재하지 않는 관리자입니다.');
+
+  const users = await listAdminUsers();
+  return { success: true, users };
 }
 
-/**
- * 관리자 계정 삭제
- */
 async function deleteAdminUser(name) {
   const result = await pool.query(
     'DELETE FROM admin_users WHERE username = $1', [name]
   );
-  if (result.rowCount === 0) throw new Error('계정을 찾을 수 없습니다.');
-  return { ok: true };
+  if (result.rowCount === 0) throw new Error('존재하지 않는 관리자입니다.');
+  const users = await listAdminUsers();
+  return { success: true, users };
 }
 
-/**
- * 관리자 목록 조회
- */
 async function listAdminUsers() {
   const { rows } = await pool.query(
-    'SELECT username, role, created_at FROM admin_users ORDER BY created_at'
+    'SELECT username AS name, role, active, created_at AS "createdAt" FROM admin_users ORDER BY created_at'
   );
-  return rows;
+  // GAS 호환: pw 필드는 반환하지 않지만, active 필드 포함
+  return rows.map(r => ({ name: r.name, active: r.active !== false, role: r.role }));
 }
 
-/**
- * 비밀번호 변경
- */
+// ═══════════════════════════════════════════════════════════
+// 영업담당자(Staff) 계정 CRUD (GAS: handleAddStaffUser 등)
+// ═══════════════════════════════════════════════════════════
+async function addStaffUser(name, pw) {
+  const existing = await pool.query('SELECT 1 FROM staff_users WHERE username = $1', [name]);
+  if (existing.rows.length > 0) throw new Error('이미 존재하는 이름입니다.');
+
+  const pw_hash = await bcrypt.hash(pw, 10);
+  await pool.query(
+    'INSERT INTO staff_users (username, pw_hash) VALUES ($1, $2)',
+    [name, pw_hash]
+  );
+  const users = await listStaffUsers();
+  return { success: true, users };
+}
+
+async function editStaffUser(name, newPw, active) {
+  const updates = [];
+  const values = [];
+  let idx = 1;
+
+  if (newPw !== undefined && newPw.length >= 4) {
+    const pw_hash = await bcrypt.hash(newPw, 10);
+    updates.push(`pw_hash = $${idx++}`);
+    values.push(pw_hash);
+  }
+  if (active !== undefined) {
+    updates.push(`active = $${idx++}`);
+    values.push(active);
+  }
+
+  if (updates.length === 0) throw new Error('변경할 항목이 없습니다.');
+
+  values.push(name);
+  const result = await pool.query(
+    `UPDATE staff_users SET ${updates.join(', ')} WHERE username = $${idx}`,
+    values
+  );
+  if (result.rowCount === 0) throw new Error('존재하지 않는 영업담당자입니다.');
+
+  const users = await listStaffUsers();
+  return { success: true, users };
+}
+
+async function deleteStaffUser(name) {
+  const result = await pool.query(
+    'DELETE FROM staff_users WHERE username = $1', [name]
+  );
+  if (result.rowCount === 0) throw new Error('존재하지 않는 영업담당자입니다.');
+  const users = await listStaffUsers();
+  return { success: true, users };
+}
+
+async function listStaffUsers() {
+  const { rows } = await pool.query(
+    'SELECT username AS name, active, created_at AS "createdAt" FROM staff_users ORDER BY created_at'
+  );
+  return rows.map(r => ({ name: r.name, active: r.active !== false }));
+}
+
+// ═══════════════════════════════════════════════════════════
+// 비밀번호 변경
+// ═══════════════════════════════════════════════════════════
 async function changePw(username, currentPw, newPw) {
   if (!newPw || newPw.length < 4) {
     return { ok: false, error: '새 비밀번호는 4자 이상이어야 합니다.' };
@@ -105,7 +214,6 @@ async function changePw(username, currentPw, newPw) {
     if (currentPw !== process.env.MASTER_ADMIN_PW) {
       return { ok: false, error: '현재 비밀번호가 틀렸습니다.' };
     }
-    // 환경변수 기반 마스터 비밀번호는 런타임에 변경 불가 (Railway 환경변수 수정 필요)
     return { ok: false, error: '마스터 비밀번호는 서버 환경변수에서 변경해야 합니다.' };
   }
 
@@ -123,4 +231,37 @@ async function changePw(username, currentPw, newPw) {
   return { ok: true };
 }
 
-module.exports = { loginAdmin, addAdminUser, editAdminUser, deleteAdminUser, listAdminUsers, changePw };
+// ═══════════════════════════════════════════════════════════
+// 마스터 비밀번호 변경 (GAS: handleChangeMasterPw)
+// ═══════════════════════════════════════════════════════════
+async function changeMasterPw(currentMasterPw, newPw) {
+  if (currentMasterPw !== process.env.MASTER_ADMIN_PW) {
+    return { error: '현재 마스터 비밀번호가 틀렸습니다.' };
+  }
+  if (!newPw || newPw.length < 4) {
+    return { error: '새 비밀번호는 4자 이상이어야 합니다.' };
+  }
+  // DB에 마스터 비밀번호 저장 (환경변수 대체)
+  await pool.query(
+    `INSERT INTO app_settings (key, value, updated_at)
+     VALUES ('MASTER_PW_OVERRIDE', $1, NOW())
+     ON CONFLICT (key) DO UPDATE SET value = $1, updated_at = NOW()`,
+    [newPw]
+  );
+  return { success: true };
+}
+
+module.exports = {
+  loginAdmin,
+  loginStaff,
+  addAdminUser,
+  editAdminUser,
+  deleteAdminUser,
+  listAdminUsers,
+  addStaffUser,
+  editStaffUser,
+  deleteStaffUser,
+  listStaffUsers,
+  changePw,
+  changeMasterPw,
+};

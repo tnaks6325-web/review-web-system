@@ -30,18 +30,36 @@ app.use(morgan('combined'));
 app.use('/api/', rateLimiter);
 
 // ── 라우터 등록 ──
+// 검색/인덱스 (Section 5)
 app.use('/api/search',    indexRoutes);
 app.use('/api/index',     indexRoutes);
+
+// 탭 설정 (Section 6)
 app.use('/api/tab',       tabRoutes);
+
+// 리뷰어 관리 (Section 7)
 app.use('/api/reviewer',  reviewerRoutes);
+
+// 관리자 인증 + Staff (Section 8)
 app.use('/api/admin',     adminRoutes);
+
+// Drive 폴더 (Section 9)
 app.use('/api/drive',     driveRoutes);
+
+// 단축URL (Section 10)
 app.use('/api/short',     shortRoutes);
+
+// 메모 (Section 10)
 app.use('/api/memo',      memoRoutes);
+
+// 입금처리 (Section 11)
 app.use('/api/payment',   paymentRoutes);
+
+// 리뷰제출 + 구매양식 (Section 5/12)
 app.use('/api/submit',    submitRoutes);
+
+// 진단/디버그/뷰어/블랙리스트/캠페인/이미지 (Section 12)
 app.use('/api/diag',      diagRoutes);
-// 뷰어/이미지/블랙리스트/캠페인 — diag 라우터에 통합
 app.use('/api/viewer',    diagRoutes);
 app.use('/api/image',     diagRoutes);
 app.use('/api/blacklist', diagRoutes);
@@ -62,7 +80,20 @@ app.get('/health', async (req, res) => {
     ts: Date.now(),
     env: process.env.NODE_ENV || 'development',
     db: dbStatus,
-    version: '1.0.0',
+    version: '2.0.0',
+    routes: {
+      search: '/api/search?query=',
+      index: '/api/index/status',
+      tab: '/api/tab/config',
+      reviewer: '/api/reviewer/*',
+      admin: '/api/admin/login',
+      drive: '/api/drive/*',
+      short: '/api/short/*',
+      memo: '/api/memo',
+      payment: '/api/payment/targets',
+      submit: '/api/submit/*',
+      diag: '/api/diag/*',
+    }
   });
 });
 

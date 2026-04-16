@@ -1,10 +1,17 @@
 const express = require('express');
 const router = express.Router();
 const { authMiddleware, masterOnlyMiddleware } = require('../middleware/auth.middleware');
-const { loginAdmin, addAdminUser, editAdminUser, deleteAdminUser, listAdminUsers, changePw } = require('../services/auth.service');
+const {
+  loginAdmin, loginStaff,
+  addAdminUser, editAdminUser, deleteAdminUser, listAdminUsers,
+  addStaffUser, editStaffUser, deleteStaffUser, listStaffUsers,
+  changePw, changeMasterPw,
+} = require('../services/auth.service');
 const pool = require('../db/pool');
 
+// ═══════════════════════════════════════════════════════════
 // POST /api/admin/login — 관리자 로그인 (GAS: adminLoginV2)
+// ═══════════════════════════════════════════════════════════
 router.post('/login', async (req, res, next) => {
   try {
     const { name, pw } = req.body;
@@ -15,18 +22,22 @@ router.post('/login', async (req, res, next) => {
   }
 });
 
-// POST /api/admin/staff-login — AE 로그인 (staff.html용)
+// ═══════════════════════════════════════════════════════════
+// POST /api/admin/staff-login — 영업담당자 로그인 (GAS: staffLogin)
+// ═══════════════════════════════════════════════════════════
 router.post('/staff-login', async (req, res, next) => {
   try {
     const { name, pw } = req.body;
-    const result = await loginAdmin(name, pw);
+    const result = await loginStaff(name, pw);
     res.json(result);
   } catch (err) {
     next(err);
   }
 });
 
+// ═══════════════════════════════════════════════════════════
 // POST /api/admin/change-pw — 비밀번호 변경 (GAS: adminChangePw)
+// ═══════════════════════════════════════════════════════════
 router.post('/change-pw', authMiddleware, async (req, res, next) => {
   try {
     const { currentPw, newPw } = req.body;
@@ -37,41 +48,87 @@ router.post('/change-pw', authMiddleware, async (req, res, next) => {
   }
 });
 
-// POST /api/admin/users — 관리자 계정 CRUD (GAS: addAdminUser/editAdminUser/deleteAdminUser)
+// ═══════════════════════════════════════════════════════════
+// POST /api/admin/change-master-pw — 마스터 비밀번호 변경 (GAS: changeMasterPw)
+// ═══════════════════════════════════════════════════════════
+router.post('/change-master-pw', authMiddleware, masterOnlyMiddleware, async (req, res, next) => {
+  try {
+    const { masterPw, newPw } = req.body;
+    const result = await changeMasterPw(masterPw, newPw);
+    res.json(result);
+  } catch (err) {
+    next(err);
+  }
+});
+
+// ═══════════════════════════════════════════════════════════
+// POST /api/admin/users — 관리자 계정 CRUD (GAS: add/edit/delete/listAdminUser)
+// ═══════════════════════════════════════════════════════════
 router.post('/users', authMiddleware, masterOnlyMiddleware, async (req, res, next) => {
   try {
-    const { action, masterPw, name, pw } = req.body;
+    const { action, masterPw, name, pw, newPw, active } = req.body;
 
-    // 마스터 비밀번호 확인
     if (masterPw !== process.env.MASTER_ADMIN_PW) {
       return res.json({ ok: false, error: '마스터 비밀번호가 틀렸습니다.' });
     }
 
     switch (action) {
       case 'add':
-        if (!name || !pw) return res.json({ error: '이름과 비밀번호가 필요합니다.' });
-        await addAdminUser(name, pw);
-        return res.json({ ok: true });
+        if (!name || !pw) return res.json({ error: '이름과 비밀번호를 입력하세요.' });
+        return res.json(await addAdminUser(name, pw));
       case 'edit':
-        if (!name || !pw) return res.json({ error: '이름과 새 비밀번호가 필요합니다.' });
-        await editAdminUser(name, pw);
-        return res.json({ ok: true });
+        if (!name) return res.json({ error: '이름이 필요합니다.' });
+        return res.json(await editAdminUser(name, newPw || pw, active));
       case 'delete':
         if (!name) return res.json({ error: '삭제할 계정 이름이 필요합니다.' });
-        await deleteAdminUser(name);
-        return res.json({ ok: true });
+        return res.json(await deleteAdminUser(name));
       case 'list':
         const users = await listAdminUsers();
-        return res.json({ ok: true, users });
+        return res.json({ success: true, users });
       default:
-        return res.json({ error: '알 수 없는 action' });
+        return res.json({ error: '알 수 없는 action: ' + action });
     }
   } catch (err) {
-    next(err);
+    // GAS 호환: error 필드로 반환
+    res.json({ error: err.message });
   }
 });
 
+// ═══════════════════════════════════════════════════════════
+// POST /api/admin/staff-users — 영업담당자 계정 CRUD (GAS: add/edit/delete/listStaffUser)
+// ═══════════════════════════════════════════════════════════
+router.post('/staff-users', authMiddleware, masterOnlyMiddleware, async (req, res, next) => {
+  try {
+    const { action, masterPw, name, pw, newPw, active } = req.body;
+
+    if (masterPw !== process.env.MASTER_ADMIN_PW) {
+      return res.json({ error: '마스터 권한이 필요합니다.' });
+    }
+
+    switch (action) {
+      case 'add':
+        if (!name || !pw) return res.json({ error: '이름과 비밀번호를 입력하세요.' });
+        return res.json(await addStaffUser(name, pw));
+      case 'edit':
+        if (!name) return res.json({ error: '이름이 필요합니다.' });
+        return res.json(await editStaffUser(name, newPw || pw, active));
+      case 'delete':
+        if (!name) return res.json({ error: '삭제할 이름이 필요합니다.' });
+        return res.json(await deleteStaffUser(name));
+      case 'list':
+        const users = await listStaffUsers();
+        return res.json({ success: true, users });
+      default:
+        return res.json({ error: '알 수 없는 action: ' + action });
+    }
+  } catch (err) {
+    res.json({ error: err.message });
+  }
+});
+
+// ═══════════════════════════════════════════════════════════
 // GET /api/admin/dashboard — 대시보드 데이터 (GAS: dashboard — staff.html)
+// ═══════════════════════════════════════════════════════════
 router.get('/dashboard', authMiddleware, async (req, res, next) => {
   try {
     // 탭 통계 (index_master 기반)
@@ -95,10 +152,11 @@ router.get('/dashboard', authMiddleware, async (req, res, next) => {
     const { rows: campaigns } = await pool.query(`
       SELECT DISTINCT sheet_id AS "sheetId", campaign_name AS "campaignName", sheet_url AS "sheetUrl"
       FROM tab_configs
+      WHERE campaign_name IS NOT NULL AND campaign_name != ''
       ORDER BY campaign_name
     `);
 
-    // detailMap 구축
+    // detailMap 구축 (GAS 호환 — tab_key 형식)
     const { rows: allConfigs } = await pool.query('SELECT * FROM tab_configs');
     const detailMap = {};
     allConfigs.forEach(r => {
@@ -122,6 +180,7 @@ router.get('/dashboard', authMiddleware, async (req, res, next) => {
         transferBank: r.transfer_bank,
         incomeType: r.income_type,
         campaignName: r.campaign_name,
+        sheetUrl: r.sheet_url,
       };
     });
 
@@ -131,10 +190,14 @@ router.get('/dashboard', authMiddleware, async (req, res, next) => {
   }
 });
 
+// ═══════════════════════════════════════════════════════════
 // POST /api/admin/release-lock — 빌드 잠금 해제 (GAS: releaseBuildLock)
+// ═══════════════════════════════════════════════════════════
 router.post('/release-lock', authMiddleware, async (req, res, next) => {
   try {
-    // Node.js에서는 DB 레벨 락을 사용하지 않으므로 항상 성공
+    await pool.query(
+      `UPDATE build_locks SET is_locked = FALSE, locked_at = NULL, locked_by = NULL WHERE lock_key = 'INDEX_BUILD'`
+    );
     res.json({ ok: true, message: '빌드 잠금이 해제되었습니다.' });
   } catch (err) {
     next(err);
