@@ -32,13 +32,52 @@ router.get('/debug', async (req, res, next) => {
 });
 
 // ═══════════════════════════════════════════════════════════
-// POST /api/index/build — 인덱스 빌드 (GAS: buildIndexSmart)
+// POST /api/index/build — 인덱스 빌드 (비동기: 즉시 응답 + 백그라운드 처리)
+// 
+// 55개+ 캠페인 × N개 탭을 Google Sheets API로 읽어오므로
+// 동기 방식은 5분 이상 소요 → 프론트엔드 타임아웃 발생.
+// 해결: 즉시 accepted 응답 반환 → 백그라운드에서 빌드 → 
+//       프론트엔드는 /api/index/status 폴링으로 완료 감지.
 // ═══════════════════════════════════════════════════════════
 router.post('/build', authMiddleware, async (req, res, next) => {
   try {
     const { forceFullRebuild } = req.body;
-    const result = await buildIndexSmart(forceFullRebuild === true);
-    res.json(result);
+
+    // 이미 빌드 중인지 확인 (잠금 상태)
+    const { rows: lockRows } = await pool.query(
+      "SELECT * FROM build_locks WHERE lock_key = 'INDEX_BUILD'"
+    );
+    if (lockRows.length > 0 && lockRows[0].is_locked) {
+      const lock = lockRows[0];
+      const elapsed = lock.locked_at ? Date.now() - new Date(lock.locked_at).getTime() : 0;
+      // TTL(7분) 미만이면 이미 진행 중
+      if (elapsed < 7 * 60 * 1000) {
+        return res.json({
+          ok: false,
+          error: '타 사용자가 갱신중입니다. 잠시 후 다시 시도해주세요.',
+          locked: true,
+          elapsedSec: Math.round(elapsed / 1000),
+        });
+      }
+    }
+
+    // ★ 즉시 응답 반환 (accepted) — 빌드는 백그라운드에서 실행
+    res.json({
+      ok: true,
+      success: true,
+      mode: 'async',
+      message: '인덱스 빌드가 시작되었습니다. 완료 시 자동으로 업데이트됩니다.',
+    });
+
+    // ★ 백그라운드에서 빌드 실행 (응답 이후 비동기 처리)
+    setImmediate(async () => {
+      try {
+        const result = await buildIndexSmart(forceFullRebuild === true);
+        console.log('[index/build] 백그라운드 빌드 완료:', JSON.stringify(result));
+      } catch (err) {
+        console.error('[index/build] 백그라운드 빌드 실패:', err.message);
+      }
+    });
   } catch (err) {
     next(err);
   }
@@ -83,17 +122,36 @@ router.get('/status', authMiddleware, async (req, res, next) => {
     // 인덱스 만료 체크 (2시간)
     const builtAt = meta.built_at ? new Date(meta.built_at).getTime() : 0;
     const isExpired = (Date.now() - builtAt) > 2 * 60 * 60 * 1000;
+    const indexCount = parseInt(meta.count) || 0;
+
+    // builtAt을 KST 문자열로 변환 (프론트엔드 builtAtStr 필드)
+    let builtAtStr = '-';
+    if (meta.built_at) {
+      const d = new Date(meta.built_at);
+      builtAtStr = d.toLocaleString('ko-KR', { timeZone: 'Asia/Seoul' });
+    }
 
     res.json({
       ok: true,
+      // ★ 프론트엔드 호환 필드 (GAS 응답 형식 유지)
+      exists: indexCount > 0,
+      expired: isExpired,
+      count: indexCount,
+      builtAt: meta.built_at || null,
+      builtAtStr,
+      // 추가 메타 (구조화된 형식)
       meta: {
-        count: parseInt(meta.count) || 0,
+        count: indexCount,
         builtAt: meta.built_at || null,
         isExpired,
       },
       master: masterData,
       lock: lockStatus,
-      codeVersion: new Date().toISOString().slice(0, 16).replace('T', ' '),
+      buildLock: {
+        locked: lockStatus.isLocked,
+        elapsedSec: lockStatus.elapsedSec || 0,
+      },
+      codeVersion: new Date().toLocaleString('ko-KR', { timeZone: 'Asia/Seoul' }),
     });
   } catch (err) {
     next(err);
