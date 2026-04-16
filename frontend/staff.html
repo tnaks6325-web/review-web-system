@@ -270,6 +270,7 @@ body{font-family:var(--font);background:var(--bg);color:var(--t1);font-size:14px
 .cs-result2.success{background:#F0FDF4;border:1px solid #A7F3D0;color:#065F46}
 .cs-result2.error{background:#FEF2F2;border:1px solid #FECACA;color:#991B1B}
 </style>
+<script src="api.js"></script>
 </head>
 <body>
 <div id="toastWrap"></div>
@@ -480,7 +481,8 @@ body{font-family:var(--font);background:var(--bg);color:var(--t1);font-size:14px
    STAFF.HTML – 영업담당자 읽기전용 대시보드
    세션: sessionStorage 기반 (브라우저 닫으면 로그아웃)
 ════════════════════════════════════════════════ */
-const BOOTSTRAP_GAS_URL = "https://script.google.com/macros/s/AKfycbyh-FzR29Uj-8jwECVhpD9UWQqlqUotT8FtH0-wsaEzE5tYaAuU3wMxvibSuC5v1mZEUw/exec";
+// ★ [Node.js 이관] GAS URL → API_BASE_URL 대체
+const BOOTSTRAP_GAS_URL = typeof API_BASE_URL !== "undefined" ? API_BASE_URL : "http://localhost:3000";
 const STAFF_SESSION_KEY = "rapp_staff_session"; // { name, loginAt }
 const GAS_URL = (() => {
   try {
@@ -684,29 +686,30 @@ function _jsonpGet(url, timeoutMs = 30000) {
 }
 
 // GET 요청 (JSONP)
-async function gasGet(params) {
-  const qs = new URLSearchParams(
-    Object.fromEntries(
-      Object.entries(params).map(([k,v]) => [k, String(v)])
-    )
-  ).toString();
-  return _jsonpGet(GAS_URL + "?" + qs, 30000);
-}
-
-// POST 요청 — 단순 액션은 JSONP(GET)으로 CORS 우회
-async function gasPost(body, timeoutMs = 30000) {
-  const params = { ...body, _method: "POST" };
-  const qs = new URLSearchParams(
-    Object.fromEntries(
-      Object.entries(params).map(([k,v]) =>
-        [k, typeof v === "object" ? JSON.stringify(v) : String(v)]
-      )
-    )
-  ).toString();
-  const json = await _jsonpGet(GAS_URL + "?" + qs, timeoutMs);
-  if (json && json.error) throw new Error(json.error);
-  return json;
-}
+// ★ [Node.js 이관] api.js로 대체됨
+// // async function gasGet(params) {
+//   const qs = new URLSearchParams(
+//     Object.fromEntries(
+//       Object.entries(params).map(([k,v]) => [k, String(v)])
+//     )
+//   ).toString();
+//   return _jsonpGet(GAS_URL + "?" + qs, 30000);
+// }
+// 
+// // POST 요청 — 단순 액션은 JSONP(GET)으로 CORS 우회
+// async function gasPost(body, timeoutMs = 30000) {
+//   const params = { ...body, _method: "POST" };
+//   const qs = new URLSearchParams(
+//     Object.fromEntries(
+//       Object.entries(params).map(([k,v]) =>
+//         [k, typeof v === "object" ? JSON.stringify(v) : String(v)]
+//       )
+//     )
+//   ).toString();
+//   const json = await _jsonpGet(GAS_URL + "?" + qs, timeoutMs);
+//   if (json && json.error) throw new Error(json.error);
+//   return json;
+// }
 
 /* ══ 로그인 / 로그아웃 ════════════════════════════ */
 async function doStaffLogin() {

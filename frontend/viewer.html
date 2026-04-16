@@ -333,6 +333,7 @@ body{font-family:'Pretendard',sans-serif;background:var(--bg);color:var(--t1);mi
 .v-reviewer-table col.col-addr  {width:auto}
 .v-reviewer-table col.col-status{width:68px}
 </style>
+<script src="api.js"></script>
 </head>
 <body>
 
@@ -430,7 +431,8 @@ body{font-family:'Pretendard',sans-serif;background:var(--bg);color:var(--t1);mi
 
 <script>
 /* ── 설정 ── */
-const BOOTSTRAP_GAS_URL = "https://script.google.com/macros/s/AKfycbyh-FzR29Uj-8jwECVhpD9UWQqlqUotT8FtH0-wsaEzE5tYaAuU3wMxvibSuC5v1mZEUw/exec"; // index.html 과 동일하게 입력 (빌드 시 자동 주입)
+// ★ [Node.js 이관] GAS URL → API_BASE_URL 대체
+const BOOTSTRAP_GAS_URL = typeof API_BASE_URL !== "undefined" ? API_BASE_URL : "http://localhost:3000";
 
 /* ── URL 파라미터 파싱 ── */
 function _getParams() {

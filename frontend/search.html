@@ -1117,6 +1117,7 @@ body.col-resizing .col-drag-handle{pointer-events:auto!important}
 .btn-reg-close{width:100%;display:flex;align-items:center;justify-content:center;gap:6px;background:#F3F4F6;color:#6B7280;border:1.5px solid #E5E7EB;border-radius:var(--rs);padding:10px;font-size:.87rem;font-weight:600;cursor:pointer;transition:var(--tr)}
 .btn-reg-close:hover{background:#E5E7EB;color:#374151}
   </style>
+<script src="api.js"></script>
 </head>
 <body>
 
@@ -2310,7 +2311,8 @@ body.col-resizing .col-drag-handle{pointer-events:auto!important}
 // 이후 모든 접속자가 자동으로 동일한 URL을 사용합니다.
 // saveGasUrl() 실행 시 GAS PropertiesService에도 저장되어
 // 다음 접속자는 GAS에서 자동으로 URL을 가져옵니다.
-const BOOTSTRAP_GAS_URL = "https://script.google.com/macros/s/AKfycbyh-FzR29Uj-8jwECVhpD9UWQqlqUotT8FtH0-wsaEzE5tYaAuU3wMxvibSuC5v1mZEUw/exec"; // ← 최초 배포 시 여기에 GAS URL 입력
+// ★ [Node.js 이관] GAS URL → API_BASE_URL 대체
+const BOOTSTRAP_GAS_URL = typeof API_BASE_URL !== "undefined" ? API_BASE_URL : "http://localhost:3000";
 
 const DEFAULT_CONFIG = {
   GAS_WEB_APP_URL: BOOTSTRAP_GAS_URL,
@@ -10215,72 +10217,73 @@ function _jsonpGet(fullUrl, timeoutMs) {
   });
 }
 
-async function gasGet(params, timeoutMs) {
-  const url = APP_CONFIG.GAS_WEB_APP_URL;
-  if (!url) throw new Error("GAS URL 없음");
-  const qs      = new URLSearchParams(params).toString();
-  const fullUrl = `${url}?${qs}`;
-  const json = await _jsonpGet(fullUrl, timeoutMs || 60000);
-  if (json && json.error) throw new Error(json.error);
-  return json;
-}
-async function gasPost(body) {
-  const url = APP_CONFIG.GAS_WEB_APP_URL;
-  if (!url) throw new Error("GAS URL 없음");
-
-  // ★ 파일 데이터가 있거나, submitOrderForm 같이 데이터가 긴 action은 실제 fetch POST 사용
-  const hasFiles = body.files || body.fileBase64 || body.fileData;
-  const forcePost = hasFiles || ["submitOrderForm","checkDuplicateOrder","extractOrderImage","uploadOrderImage"].includes(body.action);
-
-  if (forcePost) {
-    // ── 1차 시도: fetch POST (redirect:follow 로 GAS 302 리디렉션 자동 처리) ──
-    let lastFetchErr = null;
-    for (let attempt = 1; attempt <= 2; attempt++) {
-      try {
-        const resp = await fetch(url, {
-          method:   "POST",
-          headers:  { "Content-Type": "text/plain;charset=UTF-8" },
-          body:     JSON.stringify(body),
-          redirect: "follow"   // ★ GAS 302 리디렉션 자동 추적
-        });
-        if (!resp.ok) throw new Error("HTTP " + resp.status);
-        // GAS가 가끔 text/html을 반환하는 경우 대비 — JSON 파싱 방어
-        const text = await resp.text();
-        let json;
-        try { json = JSON.parse(text); }
-        catch (_) { throw new Error("서버 응답을 파싱할 수 없습니다 (HTML 반환 의심)"); }
-        if (json && json.error) throw new Error(json.error);
-        return json;
-      } catch (e) {
-        lastFetchErr = e;
-        if (attempt < 2) {
-          console.warn("[gasPost] fetch POST 1차 실패, 1.5초 후 재시도:", e.message);
-          await new Promise(r => setTimeout(r, 1500));
-        }
-      }
-    }
-    // fetch POST 2회 모두 실패 시 명확한 에러 throw
-    throw new Error(
-      (lastFetchErr?.message && lastFetchErr.message !== "Failed to fetch")
-        ? lastFetchErr.message
-        : "서버 연결에 실패했습니다. 네트워크를 확인하고 다시 시도해주세요."
-    );
-  }
-
-  // ★ 단순 action 요청: JSONP(GET)로 CORS 우회
-  const params = { ...body, _method: "POST" };
-  const qs = new URLSearchParams(
-    Object.fromEntries(
-      Object.entries(params).map(([k,v]) =>
-        [k, typeof v === "object" ? JSON.stringify(v) : String(v)]
-      )
-    )
-  ).toString();
-  const fullUrl = `${url}?${qs}`;
-  const json = await _jsonpGet(fullUrl, 30000);
-  if (json && json.error) throw new Error(json.error);
-  return json;
-}
+// ★ [Node.js 이관] api.js로 대체됨
+// // async function gasGet(params, timeoutMs) {
+//   const url = APP_CONFIG.GAS_WEB_APP_URL;
+//   if (!url) throw new Error("GAS URL 없음");
+//   const qs      = new URLSearchParams(params).toString();
+//   const fullUrl = `${url}?${qs}`;
+//   const json = await _jsonpGet(fullUrl, timeoutMs || 60000);
+//   if (json && json.error) throw new Error(json.error);
+//   return json;
+// }
+// async function gasPost(body) {
+//   const url = APP_CONFIG.GAS_WEB_APP_URL;
+//   if (!url) throw new Error("GAS URL 없음");
+// 
+//   // ★ 파일 데이터가 있거나, submitOrderForm 같이 데이터가 긴 action은 실제 fetch POST 사용
+//   const hasFiles = body.files || body.fileBase64 || body.fileData;
+//   const forcePost = hasFiles || ["submitOrderForm","checkDuplicateOrder","extractOrderImage","uploadOrderImage"].includes(body.action);
+// 
+//   if (forcePost) {
+//     // ── 1차 시도: fetch POST (redirect:follow 로 GAS 302 리디렉션 자동 처리) ──
+//     let lastFetchErr = null;
+//     for (let attempt = 1; attempt <= 2; attempt++) {
+//       try {
+//         const resp = await fetch(url, {
+//           method:   "POST",
+//           headers:  { "Content-Type": "text/plain;charset=UTF-8" },
+//           body:     JSON.stringify(body),
+//           redirect: "follow"   // ★ GAS 302 리디렉션 자동 추적
+//         });
+//         if (!resp.ok) throw new Error("HTTP " + resp.status);
+//         // GAS가 가끔 text/html을 반환하는 경우 대비 — JSON 파싱 방어
+//         const text = await resp.text();
+//         let json;
+//         try { json = JSON.parse(text); }
+//         catch (_) { throw new Error("서버 응답을 파싱할 수 없습니다 (HTML 반환 의심)"); }
+//         if (json && json.error) throw new Error(json.error);
+//         return json;
+//       } catch (e) {
+//         lastFetchErr = e;
+//         if (attempt < 2) {
+//           console.warn("[gasPost] fetch POST 1차 실패, 1.5초 후 재시도:", e.message);
+//           await new Promise(r => setTimeout(r, 1500));
+//         }
+//       }
+//     }
+//     // fetch POST 2회 모두 실패 시 명확한 에러 throw
+//     throw new Error(
+//       (lastFetchErr?.message && lastFetchErr.message !== "Failed to fetch")
+//         ? lastFetchErr.message
+//         : "서버 연결에 실패했습니다. 네트워크를 확인하고 다시 시도해주세요."
+//     );
+//   }
+// 
+//   // ★ 단순 action 요청: JSONP(GET)로 CORS 우회
+//   const params = { ...body, _method: "POST" };
+//   const qs = new URLSearchParams(
+//     Object.fromEntries(
+//       Object.entries(params).map(([k,v]) =>
+//         [k, typeof v === "object" ? JSON.stringify(v) : String(v)]
+//       )
+//     )
+//   ).toString();
+//   const fullUrl = `${url}?${qs}`;
+//   const json = await _jsonpGet(fullUrl, 30000);
+//   if (json && json.error) throw new Error(json.error);
+//   return json;
+// }
 
 /* ── 유틸 ── */
 function fileToBase64(file) {
