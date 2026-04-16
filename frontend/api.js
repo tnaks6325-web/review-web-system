@@ -160,7 +160,7 @@ function _getAuthHeaders() {
 // 기존 호출: gasGet({ action: "searchAll", query: "홍길동" })
 // 변환 후:   GET /api/search?query=홍길동
 // ═══════════════════════════════════════════════════════════
-async function gasGet(params) {
+async function gasGet(params, timeout) {
   const action = params.action || '';
   const route = _ACTION_MAP[action];
 
@@ -169,24 +169,40 @@ async function gasGet(params) {
     return { error: '알 수 없는 action: ' + action };
   }
 
-  // action 필드 제거 후 나머지를 쿼리스트링 구성
+  // action 필드 제거 후 나머지 파라미터 분리
   const { action: _, ...queryParams } = params;
-  const qs = new URLSearchParams();
-  Object.entries(queryParams).forEach(([k, v]) => {
-    if (v !== undefined && v !== null && v !== '') qs.set(k, v);
-  });
+  const actualMethod = route.method || 'GET';
+  const timeoutMs = timeout || 30000;
 
-  const url = API_BASE_URL + route.path + (qs.toString() ? '?' + qs.toString() : '');
+  let url, fetchOpts;
+
+  if (actualMethod === 'POST') {
+    // ★ POST 매핑된 action은 body로 전송 (buildIndex, buildIndexSmart 등)
+    url = API_BASE_URL + route.path;
+    fetchOpts = {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', ..._getAuthHeaders() },
+      body: JSON.stringify(queryParams),
+    };
+  } else {
+    // GET 매핑은 쿼리스트링으로
+    const qs = new URLSearchParams();
+    Object.entries(queryParams).forEach(([k, v]) => {
+      if (v !== undefined && v !== null && v !== '') qs.set(k, v);
+    });
+    url = API_BASE_URL + route.path + (qs.toString() ? '?' + qs.toString() : '');
+    fetchOpts = {
+      method: 'GET',
+      headers: { ..._getAuthHeaders() },
+    };
+  }
 
   try {
     const controller = new AbortController();
-    const timer = setTimeout(() => controller.abort(), 30000);
+    const timer = setTimeout(() => controller.abort(), timeoutMs);
+    fetchOpts.signal = controller.signal;
 
-    const res = await fetch(url, {
-      method: 'GET',
-      headers: { ..._getAuthHeaders() },
-      signal: controller.signal,
-    });
+    const res = await fetch(url, fetchOpts);
     clearTimeout(timer);
 
     const json = await res.json();
