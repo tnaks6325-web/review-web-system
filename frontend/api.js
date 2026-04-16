@@ -34,9 +34,8 @@ const API_BASE_URL = (function() {
   if (typeof window !== 'undefined' && window.location.hostname === 'localhost') {
     return 'http://localhost:3000';
   }
-  // ★ Railway 배포 후 아래 URL을 Railway URL로 변경하세요
-  // 예: return 'https://review-system-production.up.railway.app';
-  return 'https://3000-i38yiadr8uqfj3spfxinm-5185f4aa.sandbox.novita.ai';
+  // ★ Railway 프로덕션 URL
+  return 'https://sublime-magic-production-790b.up.railway.app';
 })();
 
 // ═══════════════════════════════════════════════════════════

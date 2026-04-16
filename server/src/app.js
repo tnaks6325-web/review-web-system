@@ -64,6 +64,51 @@ app.use('/api/viewer',    diagRoutes);
 app.use('/api/image',     diagRoutes);
 app.use('/api/blacklist', diagRoutes);
 
+// ── 임시 마이그레이션 엔드포인트 (배포 후 DDL 실행용) ──
+app.post('/api/admin/run-migrate', async (req, res) => {
+  try {
+    // master 인증 확인
+    const { masterPw } = req.body;
+    if (masterPw !== process.env.MASTER_ADMIN_PW) {
+      return res.status(403).json({ error: 'Forbidden' });
+    }
+
+    const pool = require('./db/pool');
+    const fs = require('fs');
+    const path = require('path');
+
+    const migrationsDir = path.resolve(__dirname, '../migrations');
+    const files = fs.readdirSync(migrationsDir)
+      .filter(f => f.endsWith('.sql'))
+      .sort();
+
+    const results = [];
+    for (const file of files) {
+      const filePath = path.join(migrationsDir, file);
+      const sql = fs.readFileSync(filePath, 'utf8');
+      try {
+        await pool.query(sql);
+        results.push({ file, status: 'ok' });
+      } catch (err) {
+        results.push({ file, status: 'error', message: err.message });
+      }
+    }
+
+    // 테이블 수 확인
+    const tableCount = await pool.query(
+      "SELECT COUNT(*) FROM information_schema.tables WHERE table_schema = 'public' AND table_type = 'BASE TABLE'"
+    );
+
+    res.json({
+      success: true,
+      migrations: results,
+      tableCount: parseInt(tableCount.rows[0].count),
+    });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
 // ── 헬스체크 ──
 app.get('/health', async (req, res) => {
   let dbStatus = 'disconnected';

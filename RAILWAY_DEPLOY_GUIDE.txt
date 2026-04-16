@@ -1,0 +1,285 @@
+# ═══════════════════════════════════════════════
+# Railway 배포 가이드 — 6단계 순서
+# ═══════════════════════════════════════════════
+#
+# 이 문서는 리뷰웹시스템 서버를 Railway에 배포하는
+# 전체 과정을 순서대로 설명합니다.
+# 
+# 소요 시간: 약 30~40분
+# 필요한 것: GitHub 계정, Railway 계정, Google Service Account JSON
+# ═══════════════════════════════════════════════
+
+
+# ╔═══════════════════════════════════════════════╗
+# ║  Step 1. GitHub 저장소 준비                    ║
+# ╚═══════════════════════════════════════════════╝
+#
+# Railway는 GitHub 저장소와 연결하여 자동 배포합니다.
+#
+# ── 방법 A: 새 저장소 생성 (권장) ──
+#
+#   1. https://github.com/new 접속
+#   2. Repository name: review-web-system
+#   3. Private 선택
+#   4. Create repository 클릭
+#
+# ── 방법 B: 기존 저장소 사용 ──
+#
+#   이미 저장소가 있다면 그대로 사용합니다.
+#
+# ── 코드 푸시 ──
+#
+#   cd /home/user/webapp
+#   git remote add origin https://github.com/<your-username>/review-web-system.git
+#   git push -f origin main
+#
+# ★ 중요: server/ 디렉토리가 루트가 아닌 서브디렉토리임을 기억하세요.
+#   Railway 설정에서 Root Directory를 server 로 지정해야 합니다.
+
+
+# ╔═══════════════════════════════════════════════╗
+# ║  Step 2. Railway 프로젝트 생성                  ║
+# ╚═══════════════════════════════════════════════╝
+#
+# ── 2-1. Railway 가입/로그인 ──
+#
+#   1. https://railway.app 접속
+#   2. GitHub 계정으로 로그인 (Sign in with GitHub)
+#      → 처음이면 무료 Trial 플랜이 자동 적용됩니다
+#      → 월 $5 무료 크레딧 제공 (충분)
+#
+# ── 2-2. 새 프로젝트 생성 ──
+#
+#   1. 대시보드에서 [+ New Project] 클릭
+#   2. [Deploy from GitHub repo] 선택
+#   3. review-web-system 저장소 선택
+#   4. ★★★ [Settings] 탭에서 반드시 설정: ★★★
+#      
+#      Root Directory: server
+#      
+#      (이렇게 하면 Railway가 server/ 폴더만 빌드합니다)
+#
+#   5. 아직 Deploy를 누르지 마세요! → Step 3 먼저 진행
+
+
+# ╔═══════════════════════════════════════════════╗
+# ║  Step 3. PostgreSQL 데이터베이스 추가           ║
+# ╚═══════════════════════════════════════════════╝
+#
+# ── 3-1. PostgreSQL 플러그인 추가 ──
+#
+#   1. 프로젝트 화면에서 [+ New] 클릭
+#   2. [Database] → [PostgreSQL] 선택
+#   3. 자동으로 PostgreSQL 인스턴스가 생성됩니다
+#
+# ── 3-2. DATABASE_URL 자동 연결 ──
+#
+#   1. 생성된 PostgreSQL 서비스 클릭
+#   2. [Connect] 탭에서 DATABASE_URL 확인 가능
+#      (형식: postgresql://postgres:xxxxx@xxxxx.railway.app:5432/railway)
+#   3. Railway는 같은 프로젝트 내 서비스끼리 자동 연결합니다
+#
+# ── 3-3. 서버 서비스에 DATABASE_URL 연결 ──
+#
+#   1. 서버 서비스(review-web-system) 클릭
+#   2. [Variables] 탭 클릭
+#   3. [+ New Variable] 클릭
+#   4. 이름: DATABASE_URL
+#      값: ${{Postgres.DATABASE_URL}}
+#      (이것은 Railway 내부 참조 문법입니다. 자동으로 실제 URL로 치환됩니다)
+#   5. [Add] 클릭
+
+
+# ╔═══════════════════════════════════════════════╗
+# ║  Step 4. 환경변수 설정 (필수 11개)              ║
+# ╚═══════════════════════════════════════════════╝
+#
+# 서버 서비스의 [Variables] 탭에서 아래 변수를 모두 추가합니다.
+# [+ New Variable] 를 클릭하여 하나씩 추가하세요.
+#
+# ── 4-1. 필수 환경변수 ──
+#
+#   ┌─────────────────────────────┬─────────────────────────────────────────────┐
+#   │ 변수명                      │ 값 (예시)                                    │
+#   ├─────────────────────────────┼─────────────────────────────────────────────┤
+#   │ DATABASE_URL                │ ${{Postgres.DATABASE_URL}}                   │
+#   │ NODE_ENV                    │ production                                   │
+#   │ JWT_SECRET                  │ (32자 이상 랜덤 문자열, 아래 생성 방법 참고)      │
+#   │ JWT_EXPIRES_IN              │ 8h                                           │
+#   │ MASTER_ADMIN_NAME           │ master    (또는 실제 관리자 이름)                │
+#   │ MASTER_ADMIN_PW             │ 931118    (또는 실제 비밀번호)                   │
+#   │ GOOGLE_SERVICE_ACCOUNT_EMAIL│ (서비스 계정 이메일, 아래 설명 참고)              │
+#   │ GOOGLE_PRIVATE_KEY          │ (서비스 계정 프라이빗 키, 아래 설명 참고)          │
+#   │ BASE_SHEET_ID               │ 1YW2KgPo-fvwBUS1nuzWTutqE_n2RVAnHPXXYVn4o2i4│
+#   │ DRIVE_ROOT_FOLDER_ID        │ 1afBtCDYs-A-LenIKhsiKJWvkuFmUYV8d            │
+#   │ ALLOWED_ORIGINS             │ https://review-web-system.pages.dev           │
+#   └─────────────────────────────┴─────────────────────────────────────────────┘
+#
+# ── 4-2. JWT_SECRET 생성 방법 ──
+#
+#   터미널에서 실행:
+#     node -e "console.log(require('crypto').randomBytes(32).toString('hex'))"
+#
+#   또는 온라인: https://generate-secret.vercel.app/32
+#
+#   예시 결과: a3f8b2c4d5e6f7a8b9c0d1e2f3a4b5c6d7e8f9a0b1c2d3e4f5a6b7c8d9e0f1a2
+#
+# ── 4-3. Google Service Account 설정 방법 ──
+#
+#   이미 서비스 계정 JSON 파일이 있다면:
+#
+#   1. JSON 파일을 텍스트 에디터로 엽니다
+#   2. GOOGLE_SERVICE_ACCOUNT_EMAIL에는 "client_email" 값을 복사합니다
+#      예: review-bot@my-project-123456.iam.gserviceaccount.com
+#   3. GOOGLE_PRIVATE_KEY에는 "private_key" 값을 복사합니다
+#      ★ 중요: JSON 파일에서 복사할 때 따옴표를 제거합니다
+#      ★ 중요: \n은 그대로 두세요 (Railway가 자동 처리)
+#      예시: -----BEGIN RSA PRIVATE KEY-----\nMIIEvgIBADANBg...
+#
+#   서비스 계정이 없다면 (새로 만들기):
+#
+#   1. https://console.cloud.google.com 접속
+#   2. 프로젝트 선택 (없으면 새로 생성)
+#   3. [IAM 및 관리자] → [서비스 계정] → [+ 서비스 계정 만들기]
+#   4. 이름: review-system-bot
+#   5. 역할: 편집자(Editor) 선택
+#   6. [키] 탭 → [키 추가] → [새 키 만들기] → JSON
+#   7. 다운로드된 JSON에서 client_email과 private_key 추출
+#   8. Google Sheets API, Google Drive API 활성화:
+#      [API 및 서비스] → [라이브러리] → 검색하여 '사용 설정'
+#   9. 스프레드시트에 서비스 계정 이메일로 공유 설정 (편집자 권한)
+
+
+# ╔═══════════════════════════════════════════════╗
+# ║  Step 5. 배포 + 데이터베이스 마이그레이션        ║
+# ╚═══════════════════════════════════════════════╝
+#
+# ── 5-1. 첫 배포 ──
+#
+#   환경변수를 모두 설정한 후:
+#   1. Railway 대시보드에서 서버 서비스 클릭
+#   2. [Deployments] 탭 확인 → 자동으로 빌드 시작됨
+#      (GitHub push 시마다 자동 배포됩니다)
+#   3. 빌드 로그에서 "✅ 리뷰웹시스템 API 서버 시작" 확인
+#   4. [Settings] 탭 → [Networking] → [Generate Domain] 클릭
+#      → 공개 URL이 생성됩니다
+#      예: https://review-web-system-production.up.railway.app
+#
+# ── 5-2. 헬스체크 확인 ──
+#
+#   브라우저에서 접속:
+#     https://<your-railway-url>/health
+#
+#   정상 응답 예시:
+#     {
+#       "ok": true,
+#       "db": "connected",
+#       "version": "2.0.0",
+#       "google": "configured"
+#     }
+#
+#   ★ db가 "connected"가 아니면 DATABASE_URL 확인
+#   ★ google이 "not_configured"이면 GOOGLE_* 환경변수 확인
+#
+# ── 5-3. DDL 마이그레이션 (테이블 생성) ──
+#
+#   방법 A: Railway CLI 사용 (권장)
+#
+#     # Railway CLI 설치 (맥/리눅스)
+#     npm install -g @railway/cli
+#     
+#     # 로그인
+#     railway login
+#     
+#     # 프로젝트 연결
+#     railway link
+#     
+#     # DDL 실행 (14개 테이블 + 34개 인덱스 생성)
+#     railway run -- npm run migrate
+#
+#   방법 B: Railway 대시보드 Shell 사용
+#
+#     1. 서버 서비스 클릭
+#     2. 우측 [...] → [Open Shell] 클릭
+#     3. 터미널에서 실행:
+#        npm run migrate
+#
+#   성공 시 출력:
+#     Found 1 migration file(s)
+#     Running: 001_create_tables.sql...
+#       ✅ 001_create_tables.sql 완료
+#     ✅ 모든 마이그레이션 완료
+#
+# ── 5-4. 데이터 마이그레이션 (GAS → PostgreSQL) ──
+#
+#   ★ Google Service Account가 설정된 후에만 가능합니다
+#
+#   방법 A: Railway CLI
+#     railway run -- npm run migrate:detail     # 세부목록 → tab_configs
+#     railway run -- npm run migrate:reviewers  # 인애드명단 → reviewers
+#
+#   방법 B: Railway Shell
+#     npm run migrate:detail
+#     npm run migrate:reviewers
+#
+#   성공 시 출력:
+#     ═══ 세부목록 → tab_configs 마이그레이션 ═══
+#     시작: 시트 읽기...
+#     (n)행 읽음
+#     ...inserted: XX, skipped: XX
+#     ✅ 완료
+
+
+# ╔═══════════════════════════════════════════════╗
+# ║  Step 6. 프론트엔드 API URL 업데이트            ║
+# ╚═══════════════════════════════════════════════╝
+#
+# ── 6-1. api.js 수정 ──
+#
+#   파일: frontend/api.js
+#   변경할 부분 (약 39번째 줄):
+#
+#   변경 전:
+#     return 'https://3000-i38yiadr8uqfj3spfxinm-5185f4aa.sandbox.novita.ai';
+#
+#   변경 후:
+#     return 'https://<your-railway-url>';
+#
+#   예시:
+#     return 'https://review-web-system-production.up.railway.app';
+#
+# ── 6-2. Cloudflare Pages 재배포 ──
+#
+#   npx wrangler pages deploy frontend --project-name review-web-system --commit-dirty=true
+#
+# ── 6-3. 최종 확인 ──
+#
+#   1. https://review-web-system.pages.dev 접속
+#   2. 관리자 로그인 (master / 931118)
+#   3. 검색, 탭 설정, 리뷰어 관리 등 기능 테스트
+#
+# ★ CORS 에러 발생 시:
+#   Railway 환경변수 ALLOWED_ORIGINS에 Cloudflare Pages URL이 포함되어 있는지 확인
+#   값: https://review-web-system.pages.dev
+
+
+# ╔═══════════════════════════════════════════════╗
+# ║  요약 체크리스트                                ║
+# ╚═══════════════════════════════════════════════╝
+#
+# □ Step 1: GitHub 저장소 생성 + 코드 push
+# □ Step 2: Railway 프로젝트 생성 (Root Directory: server)
+# □ Step 3: PostgreSQL 플러그인 추가
+# □ Step 4: 환경변수 11개 설정
+# □ Step 5-1: 배포 + Domain 생성
+# □ Step 5-2: /health 헬스체크 확인
+# □ Step 5-3: npm run migrate (DDL)
+# □ Step 5-4: npm run migrate:detail + migrate:reviewers
+# □ Step 6-1: api.js에 Railway URL 입력
+# □ Step 6-2: Cloudflare Pages 재배포
+# □ Step 6-3: 프론트엔드에서 최종 테스트
+#
+# 모든 단계 완료 후:
+#   프론트엔드: https://review-web-system.pages.dev
+#   백엔드 API: https://<your-railway-url>
+#   헬스체크:   https://<your-railway-url>/health
