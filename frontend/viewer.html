@@ -1,0 +1,767 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1">
+<title>캠페인 현황 — 광고주 뷰</title>
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@fortawesome/fontawesome-free@6.4.0/css/all.min.css">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Pretendard:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+<style>
+/* ── 기본 리셋 / 변수 ── */
+*,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
+:root{
+  --p:#7C3AED;--p-l:#EDE9FE;--p-d:#5B21B6;
+  --ok:#059669;--ok-l:#D1FAE5;
+  --warn:#D97706;--warn-l:#FEF3C7;
+  --err:#DC2626;--err-l:#FEF2F2;
+  --bg:#F0EEFF;--card:#fff;
+  --t1:#111827;--t2:#374151;--t3:#6B7280;--t4:#9CA3AF;
+  --border:#E5E7EB;--border2:#DDD6FE;
+  --r:10px;--rs:7px;
+  --sh:0 1px 3px rgba(0,0,0,.06);
+  --shm:0 4px 16px rgba(124,58,237,.13);
+  /* 구매일자 날짜별 배경 색상 팔레트 (10가지 파스텔) */
+  --dc0:#EEF2FF;--dc1:#F0FDF4;--dc2:#FFF7ED;--dc3:#FDF4FF;
+  --dc4:#F0F9FF;--dc5:#FEFCE8;--dc6:#FFF1F2;--dc7:#F0FDFA;
+  --dc8:#FAF5FF;--dc9:#ECFDF5;
+  --dc0t:#4338CA;--dc1t:#16A34A;--dc2t:#C2410C;--dc3t:#9333EA;
+  --dc4t:#0284C7;--dc5t:#A16207;--dc6t:#BE123C;--dc7t:#0F766E;
+  --dc8t:#7E22CE;--dc9t:#065F46;
+}
+body{font-family:'Pretendard',sans-serif;background:var(--bg);color:var(--t1);min-height:100vh;font-size:13px}
+
+/* ── 헤더 ── */
+.v-header{
+  background:linear-gradient(135deg,#5B21B6 0%,#7C3AED 60%,#A78BFA 100%);
+  padding:14px 24px 16px;color:#fff;position:relative;overflow:hidden
+}
+.v-header::after{content:'';position:absolute;right:-60px;top:-60px;width:220px;height:220px;
+  border-radius:50%;background:rgba(255,255,255,.06)}
+.v-header-logo{display:flex;align-items:center;gap:8px;margin-bottom:8px}
+.v-header-logo i{font-size:1.1rem;opacity:.9}
+.v-header-logo span{font-size:.78rem;font-weight:500;opacity:.8;letter-spacing:.03em}
+.v-header-title{font-size:1.2rem;font-weight:700;margin-bottom:4px;line-height:1.3}
+.v-header-sub{font-size:.75rem;opacity:.75;display:flex;align-items:center;gap:8px;flex-wrap:wrap}
+.v-header-badge{background:rgba(255,255,255,.18);border:1px solid rgba(255,255,255,.3);
+  padding:1px 8px;border-radius:20px;font-size:.68rem;font-weight:600}
+.v-header-updated{font-size:.68rem;opacity:.6;margin-left:auto}
+
+/* ── 바디 ── */
+.v-body{max-width:1400px;margin:0 auto;padding:16px 20px 60px}
+
+/* ── 요약 카드 ── */
+.v-summary{display:grid;grid-template-columns:repeat(3,1fr);gap:10px;margin-bottom:14px}
+.v-stat-card{background:var(--card);border-radius:var(--r);border:1px solid var(--border);
+  padding:12px;text-align:center;box-shadow:var(--sh)}
+.v-stat-num{font-size:1.5rem;font-weight:700;color:var(--p);line-height:1}
+.v-stat-label{font-size:.68rem;color:var(--t3);margin-top:4px;font-weight:500}
+
+/* ══════════════════════════════════════════════
+   탭 목록 — 테이블 레이아웃
+   table-layout:fixed + 명시적 col width 로 열 고정
+   열 순서: 탭명 | 상품명 | 차수 | 리뷰타입 | 주문시간대 | 완료 | 마감 | 진행률 | 건수 | ▼
+══════════════════════════════════════════════ */
+
+/* ── 탭 목록 컨테이너 ── */
+#vTabListWrap{
+  border:1px solid var(--border);
+  border-radius:var(--r);
+  overflow:hidden;
+  background:var(--card);
+}
+/* 테이블 자체의 border 제거 (wrapper가 담당) */
+#vTabList{
+  border:none;
+  border-radius:0;
+  overflow:visible;
+  background:transparent;
+}
+
+/* ── 탭 헤더 전체를 감싸는 테이블 ── */
+.v-tab-table{
+  width:100%;table-layout:fixed;border-collapse:collapse;
+}
+
+/* ── 열 너비 col 태그 ── */
+.v-tab-table col.vtc-name   {width:22%}
+.v-tab-table col.vtc-product{width:16%}
+.v-tab-table col.vtc-round  {width:60px}
+.v-tab-table col.vtc-rtype  {width:70px}
+.v-tab-table col.vtc-time   {width:11%}
+.v-tab-table col.vtc-done   {width:64px}
+.v-tab-table col.vtc-closed {width:60px}
+.v-tab-table col.vtc-bar    {width:14%}
+.v-tab-table col.vtc-pnum   {width:52px}
+.v-tab-table col.vtc-arrow  {width:32px}
+
+/* ── 헤더 th ── */
+.v-tab-table thead th{
+  font-size:.6rem;font-weight:700;color:var(--p);
+  background:#F3F0FF;
+  padding:6px 8px;
+  border-bottom:2px solid var(--border2);
+  border-right:1px solid var(--border2);
+  white-space:nowrap;overflow:hidden;text-overflow:ellipsis;
+  text-align:left;
+  position:sticky;top:0;z-index:10;
+}
+.v-tab-table thead th:last-child{border-right:none}
+
+/* ── 데이터 td ── */
+.v-tab-table tbody td{
+  padding:7px 8px;
+  border-bottom:1px solid var(--border);
+  border-right:1px solid #F0EEFF;
+  vertical-align:middle;
+  overflow:hidden;
+  white-space:nowrap;
+  min-width:0;
+}
+.v-tab-table tbody td:last-child{border-right:none}
+.v-tab-table tbody tr:last-child td{border-bottom:none}
+
+/* ── 행 클릭 가능 ── */
+.v-tab-table tbody tr.v-tab-header{
+  cursor:pointer;user-select:none;
+  transition:background .12s;
+}
+.v-tab-table tbody tr.v-tab-header:hover{background:#F8F5FF}
+.v-tab-table tbody tr.v-tab-header.open{background:#F5F3FF}
+
+/* ── 완료 행 배경 ── */
+.v-tab-table tbody tr.v-tab-header.row-done{background:#F0FDF4}
+.v-tab-table tbody tr.v-tab-header.row-done:hover{background:#DCFCE7}
+.v-tab-table tbody tr.v-tab-header.row-closed{opacity:.62}
+
+/* ── 탭 카드 ── */
+.v-tab-card{
+  display:contents; /* tbody 안에서 tr 직접 삽입 위해 */
+}
+
+/* 탭명 */
+.v-tab-name{
+  font-size:.82rem;font-weight:700;color:var(--t1);
+  white-space:nowrap;overflow:hidden;text-overflow:ellipsis;display:block
+}
+/* 상품명 */
+.v-tab-product{
+  font-size:.73rem;color:var(--p);font-weight:600;
+  white-space:nowrap;overflow:hidden;text-overflow:ellipsis;display:block
+}
+
+/* ── 진행 게이지 ── */
+.v-progress-wrap{display:flex;align-items:center;gap:5px;width:100%}
+.v-progress-bar-bg{flex:1;height:6px;background:#EDE9FE;border-radius:4px;overflow:hidden;min-width:40px}
+.v-progress-bar{height:100%;border-radius:4px;transition:width .5s ease;
+  background:linear-gradient(90deg,var(--p),#A78BFA)}
+.v-progress-bar.done{background:linear-gradient(90deg,#059669,#34D399)}
+.v-progress-label{
+  font-size:.7rem;font-weight:700;color:var(--p);
+  white-space:nowrap;text-align:right;min-width:42px;
+}
+.v-progress-label.done{color:var(--ok)}
+
+/* ── 배지 ── */
+.v-badge{display:inline-flex;align-items:center;padding:1px 6px;border-radius:20px;
+  font-size:.63rem;font-weight:700;white-space:nowrap}
+.v-badge-round {background:#EDE9FE;color:#5B21B6;border:1px solid #DDD6FE}
+.v-badge-review{background:#FEF3C7;color:#92400E;border:1px solid #FDE68A}
+.v-badge-done  {background:var(--ok-l);color:#065F46;border:1px solid #6EE7B7}
+.v-badge-closed{background:#F3F4F6;color:#6B7280;border:1px solid #D1D5DB}
+.v-badge-time  {background:#F0F9FF;color:#0369A1;border:1px solid #BAE6FD;font-size:.6rem}
+
+/* ── 탭 바디 행 ── */
+.v-tab-body-row{display:none}
+.v-tab-body-row.open{display:table-row}
+.v-tab-body-cell{padding:0!important;border-right:none!important}
+
+/* ── 폴더 링크 행 ── */
+.v-folder-row{display:flex;gap:6px;padding:7px 14px;background:#FAFAFF;
+  border-bottom:1px solid var(--border);flex-wrap:wrap;align-items:center}
+.v-folder-btn{display:inline-flex;align-items:center;gap:4px;padding:3px 10px;
+  border-radius:6px;font-size:.68rem;font-weight:600;text-decoration:none;
+  border:1.5px solid;transition:opacity .15s;white-space:nowrap}
+.v-folder-btn:hover{opacity:.8}
+.v-folder-capture{color:#7C3AED;background:#F5F3FF;border-color:#DDD6FE}
+.v-folder-review{color:#065F46;background:#F0FDF4;border-color:#6EE7B7}
+.v-folder-none{color:var(--t4);font-size:.68rem}
+
+/* ── 리뷰어 테이블 ── */
+.v-reviewer-table{width:100%;border-collapse:collapse;table-layout:fixed}
+.v-reviewer-table th{
+  font-size:.63rem;font-weight:700;color:var(--t3);
+  padding:5px 8px;border-bottom:2px solid var(--border);
+  text-align:left;background:#FAFAFF;white-space:nowrap;
+  position:sticky;top:0;z-index:1
+}
+.v-reviewer-table td{
+  padding:4px 8px;border-bottom:1px solid #F3F4F6;
+  font-size:.75rem;color:var(--t2);vertical-align:middle;
+  white-space:nowrap;overflow:hidden;text-overflow:ellipsis
+}
+/* 주소 열만 2줄 허용, 나머지는 1줄 강제 */
+.v-reviewer-table td.td-addr{
+  white-space:normal;word-break:break-all;line-height:1.3;
+  font-size:.68rem
+}
+.v-reviewer-table tr:last-child td{border-bottom:none}
+.v-reviewer-table tr:hover td{background:#FAFAFF}
+
+/* ── 구매일자 날짜별 색상 배경 ── */
+.dc-0 td.td-date{background:var(--dc0);color:var(--dc0t)!important;font-weight:700}
+.dc-1 td.td-date{background:var(--dc1);color:var(--dc1t)!important;font-weight:700}
+.dc-2 td.td-date{background:var(--dc2);color:var(--dc2t)!important;font-weight:700}
+.dc-3 td.td-date{background:var(--dc3);color:var(--dc3t)!important;font-weight:700}
+.dc-4 td.td-date{background:var(--dc4);color:var(--dc4t)!important;font-weight:700}
+.dc-5 td.td-date{background:var(--dc5);color:var(--dc5t)!important;font-weight:700}
+.dc-6 td.td-date{background:var(--dc6);color:var(--dc6t)!important;font-weight:700}
+.dc-7 td.td-date{background:var(--dc7);color:var(--dc7t)!important;font-weight:700}
+.dc-8 td.td-date{background:var(--dc8);color:var(--dc8t)!important;font-weight:700}
+.dc-9 td.td-date{background:var(--dc9);color:var(--dc9t)!important;font-weight:700}
+
+/* ── 행 상태 ── */
+.v-row-submitted .v-status-badge{background:var(--ok-l);color:#065F46;border-color:#6EE7B7}
+.v-row-pending   .v-status-badge{background:var(--warn-l);color:#92400E;border-color:#FDE68A}
+.v-status-badge{display:inline-flex;align-items:center;gap:2px;padding:2px 7px;
+  border-radius:20px;font-size:.63rem;font-weight:700;border:1px solid;white-space:nowrap}
+
+.v-name-cell{font-weight:700;color:var(--t1)}
+.v-order-num{font-size:.7rem;color:var(--t3);font-family:monospace}
+.v-price{font-size:.75rem;font-weight:700;color:var(--p)}
+.v-phone{font-size:.7rem;color:var(--t3);font-family:monospace}
+.v-option{font-size:.7rem;color:var(--t2)}
+.v-empty-cell{color:var(--t4)}
+
+/* ── 툴바 (버튼 묶음) ── */
+.v-toolbar{display:flex;align-items:center;gap:8px;margin-bottom:12px;flex-wrap:wrap}
+
+/* ── 공통 버튼 베이스 ── */
+.v-btn{
+  display:inline-flex;align-items:center;gap:5px;
+  padding:6px 13px;
+  border-radius:8px;
+  font-size:.72rem;font-weight:600;
+  cursor:pointer;
+  border:1.5px solid;
+  transition:background .15s,opacity .15s;
+  white-space:nowrap;
+  background:var(--card);
+}
+.v-btn i{font-size:.65rem}
+
+/* 전체 펼치기/접기 — 보라 */
+.v-toggle-all{
+  color:var(--p);
+  border-color:var(--border2);
+}
+.v-toggle-all:hover{background:var(--p-l)}
+
+/* 완료 숨기기/보이기 — 그린 */
+.v-btn-hide-done{
+  color:#065F46;
+  border-color:#6EE7B7;
+  background:#F0FDF4;
+}
+.v-btn-hide-done:hover{background:#DCFCE7}
+.v-btn-hide-done.active{
+  background:#059669;
+  color:#fff;
+  border-color:#059669;
+}
+
+/* 숨겨진 건수 뱃지 */
+.v-hidden-count{
+  display:none;
+  font-size:.65rem;font-weight:700;
+  background:#059669;color:#fff;
+  padding:1px 7px;border-radius:20px;
+  margin-left:2px;
+}
+.v-btn-hide-done.active .v-hidden-count{display:inline}
+
+/* ── 로딩 / 오류 ── */
+.v-loading{text-align:center;padding:60px 20px;color:var(--t3)}
+.v-loading i{font-size:2rem;color:var(--p);animation:spin .8s linear infinite;margin-bottom:12px;display:block}
+@keyframes spin{to{transform:rotate(360deg)}}
+.v-error{text-align:center;padding:60px 20px}
+.v-error i{font-size:2rem;color:var(--err);margin-bottom:12px;display:block}
+.v-error h3{color:var(--t1);margin-bottom:8px}
+.v-error p{font-size:.82rem;color:var(--t3)}
+
+/* ── 반응형 ── */
+@media(max-width:1100px){
+  /* 주문시간대 col 축소 */
+  .v-tab-table col.vtc-time{width:8%}
+  .v-tab-table col.vtc-bar {width:11%}
+}
+@media(max-width:900px){
+  .v-reviewer-table th:nth-child(4),
+  .v-reviewer-table td:nth-child(4){display:none} /* 옵션 숨김 */
+  .v-tab-table col.vtc-product{width:12%}
+  .v-tab-table col.vtc-time  {width:7%}
+  .v-tab-table col.vtc-done  {width:52px}
+  .v-tab-table col.vtc-closed{width:50px}
+}
+@media(max-width:600px){
+  .v-summary{grid-template-columns:repeat(3,1fr);gap:6px}
+  .v-stat-num{font-size:1.3rem}
+  .v-reviewer-table th:nth-child(7),
+  .v-reviewer-table td:nth-child(7),
+  .v-reviewer-table th:nth-child(8),
+  .v-reviewer-table td:nth-child(8){display:none} /* 번호·주소 숨김 */
+  .v-body{padding:10px 8px 50px}
+  #vTabListWrap{overflow-x:scroll}
+  .v-tab-table{min-width:800px}
+}
+
+/* ── 빈 상태 ── */
+.v-empty{text-align:center;padding:20px;color:var(--t4);font-size:.75rem}
+.v-empty i{display:block;font-size:1.2rem;margin-bottom:6px;color:var(--border)}
+
+/* ── 푸터 ── */
+.v-footer{text-align:center;padding:16px;font-size:.68rem;color:var(--t4)}
+
+/* ── 테이블 열 너비 고정 ── */
+.v-reviewer-table col.col-num   {width:34px}
+.v-reviewer-table col.col-date  {width:72px}
+.v-reviewer-table col.col-order {width:130px}
+.v-reviewer-table col.col-opt   {width:90px}
+.v-reviewer-table col.col-price {width:72px}
+.v-reviewer-table col.col-name  {width:60px}
+.v-reviewer-table col.col-phone {width:100px}
+.v-reviewer-table col.col-addr  {width:auto}
+.v-reviewer-table col.col-status{width:68px}
+</style>
+</head>
+<body>
+
+<!-- 헤더 -->
+<div class="v-header" id="vHeader">
+  <div class="v-header-logo">
+    <i class="fas fa-star-half-alt"></i>
+    <span>InAd 리뷰 관리 · 광고주 뷰</span>
+  </div>
+  <div class="v-header-title" id="vCampaignTitle">캠페인 현황 조회</div>
+  <div class="v-header-sub">
+    <span class="v-header-badge" id="vSheetBadge">불러오는 중...</span>
+    <span class="v-header-updated" id="vUpdatedAt"></span>
+  </div>
+</div>
+
+<!-- 바디 -->
+<div class="v-body">
+  <!-- 로딩 -->
+  <div id="vLoading" class="v-loading">
+    <i class="fas fa-circle-notch"></i>
+    <p>캠페인 데이터를 불러오는 중입니다...</p>
+  </div>
+
+  <!-- 오류 -->
+  <div id="vError" class="v-error" style="display:none">
+    <i class="fas fa-exclamation-circle"></i>
+    <h3 id="vErrorTitle">데이터를 불러올 수 없습니다</h3>
+    <p id="vErrorMsg">URL을 확인하거나 담당자에게 문의하세요.</p>
+  </div>
+
+  <!-- 콘텐츠 -->
+  <div id="vContent" style="display:none">
+    <!-- 요약 -->
+    <div class="v-summary">
+      <div class="v-stat-card">
+        <div class="v-stat-num" id="statTabs">—</div>
+        <div class="v-stat-label">전체 탭</div>
+      </div>
+      <div class="v-stat-card">
+        <div class="v-stat-num" id="statTotal">—</div>
+        <div class="v-stat-label">전체 리뷰어</div>
+      </div>
+      <div class="v-stat-card">
+        <div class="v-stat-num" id="statDone" style="color:var(--ok)">—</div>
+        <div class="v-stat-label">제출 완료</div>
+      </div>
+    </div>
+
+    <!-- 툴바 -->
+    <div class="v-toolbar">
+      <button class="v-btn v-toggle-all" id="btnToggleAll" onclick="_toggleAll()">
+        <i class="fas fa-chevron-down"></i> 전체 펼치기
+      </button>
+      <button class="v-btn v-btn-hide-done" id="btnHideDone" onclick="_toggleHideDone()">
+        <i class="fas fa-eye-slash"></i> 완료 숨기기
+        <span class="v-hidden-count" id="hiddenDoneCount">0</span>
+      </button>
+    </div>
+
+    <!-- 탭 목록 테이블 -->
+    <div id="vTabListWrap" style="overflow-x:auto">
+      <table class="v-tab-table" id="vTabList">
+        <colgroup>
+          <col class="vtc-name"><col class="vtc-product">
+          <col class="vtc-round"><col class="vtc-rtype">
+          <col class="vtc-time"><col class="vtc-done">
+          <col class="vtc-closed"><col class="vtc-bar">
+          <col class="vtc-pnum"><col class="vtc-arrow">
+        </colgroup>
+        <thead>
+          <tr>
+            <th>탭명</th>
+            <th>상품명</th>
+            <th style="text-align:center">차수</th>
+            <th style="text-align:center">리뷰타입</th>
+            <th>주문시간대</th>
+            <th style="text-align:center">완료</th>
+            <th style="text-align:center">마감</th>
+            <th>진행률</th>
+            <th style="text-align:right">건수</th>
+            <th></th>
+          </tr>
+        </thead>
+        <tbody id="vTabBody">
+        </tbody>
+      </table>
+    </div>
+  </div>
+</div>
+
+<div class="v-footer">
+  InAd 리뷰 관리 시스템 · 광고주 전용 조회 페이지 · 읽기 전용
+</div>
+
+<script>
+/* ── 설정 ── */
+const BOOTSTRAP_GAS_URL = "https://script.google.com/macros/s/AKfycbyh-FzR29Uj-8jwECVhpD9UWQqlqUotT8FtH0-wsaEzE5tYaAuU3wMxvibSuC5v1mZEUw/exec"; // index.html 과 동일하게 입력 (빌드 시 자동 주입)
+
+/* ── URL 파라미터 파싱 ── */
+function _getParams() {
+  const p  = new URLSearchParams(location.search);
+  const code = p.get("code"); // 단축코드
+  const s  = p.get("s");      // sheetId (직접 접근)
+  return { code, s };
+}
+
+/* ── GAS URL 결정 ── */
+function _getGasUrl() {
+  return BOOTSTRAP_GAS_URL || localStorage.getItem("rapp_gas_viewer") || "";
+}
+
+/* ── JSONP 요청 ── */
+let _seq = 0;
+function _gasGet(params) {
+  return new Promise((resolve, reject) => {
+    const gasUrl = _getGasUrl();
+    if (!gasUrl) { reject(new Error("GAS URL이 설정되지 않았습니다.")); return; }
+    const qs  = Object.entries(params).map(([k,v]) => k + "=" + encodeURIComponent(v)).join("&");
+    const cb  = "__vCb" + (++_seq) + "_" + Date.now();
+    const url = gasUrl + "?" + qs + "&callback=" + cb;
+    const s   = document.createElement("script");
+    const timer = setTimeout(() => {
+      cleanup(); reject(new Error("요청 시간 초과"));
+    }, 25000);
+    function cleanup() { clearTimeout(timer); delete window[cb]; if (s.parentNode) s.parentNode.removeChild(s); }
+    window[cb] = (data) => { cleanup(); resolve(data); };
+    s.onerror  = () => { cleanup(); reject(new Error("네트워크 오류")); };
+    document.head.appendChild(s);
+    s.src = url;
+  });
+}
+
+/* ── 유틸 ── */
+function _esc(s) {
+  return String(s||"").replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;").replace(/"/g,"&quot;");
+}
+function _fmt(ts) {
+  if (!ts) return "";
+  // "2026-03-26 13:52" or Date 문자열 모두 지원
+  try {
+    const d = new Date(ts);
+    if (isNaN(d)) return String(ts).slice(0,16);
+    const pad = n => String(n).padStart(2,"0");
+    return `${d.getFullYear()}.${pad(d.getMonth()+1)}.${pad(d.getDate())} ${pad(d.getHours())}:${pad(d.getMinutes())}`;
+  } catch(_) { return String(ts).slice(0,16); }
+}
+
+/* ── 오류 표시 ── */
+function _showError(title, msg) {
+  document.getElementById("vLoading").style.display  = "none";
+  document.getElementById("vContent").style.display  = "none";
+  document.getElementById("vError").style.display    = "";
+  document.getElementById("vErrorTitle").textContent = title;
+  document.getElementById("vErrorMsg").textContent   = msg || "";
+}
+
+/* ── 완료 탭 숨기기 ── */
+let _hideDone = true; // ★ 기본값: 완료건 숨김
+function _toggleHideDone() {
+  _hideDone = !_hideDone;
+  const btn  = document.getElementById('btnHideDone');
+  const badge= document.getElementById('hiddenDoneCount');
+  const rows = document.querySelectorAll('tr.v-tab-header.row-done');
+
+  rows.forEach(tr => {
+    // 헤더 tr + 바로 다음 바디 tr 함께 숨김
+    const bodyTr = tr.nextElementSibling;
+    if (_hideDone) {
+      tr.style.display = 'none';
+      if (bodyTr) bodyTr.style.display = 'none';
+    } else {
+      tr.style.display = '';
+      // 바디 tr은 open 클래스 있을 때만 다시 표시
+      if (bodyTr) bodyTr.style.display = bodyTr.classList.contains('open') ? 'table-row' : '';
+    }
+  });
+
+  const cnt = rows.length;
+  badge.textContent = cnt;
+  btn.classList.toggle('active', _hideDone);
+  btn.querySelector('i').className = _hideDone ? 'fas fa-eye' : 'fas fa-eye-slash';
+  btn.childNodes[1].nodeValue = ' ' + (_hideDone ? '완료 보이기' : '완료 숨기기') + ' ';
+  // textNode 처리를 innerHTML 방식으로 교체
+  btn.innerHTML = _hideDone
+    ? '<i class="fas fa-eye"></i> 완료 보이기 <span class="v-hidden-count" id="hiddenDoneCount" style="display:inline">' + cnt + '</span>'
+    : '<i class="fas fa-eye-slash"></i> 완료 숨기기 <span class="v-hidden-count" id="hiddenDoneCount">0</span>';
+}
+
+/* ── 전체 펼치기/접기 ── */
+let _allOpen = false;
+function _toggleAll() {
+  _allOpen = !_allOpen;
+  document.querySelectorAll(".v-tab-body-row").forEach(el => {
+    el.classList.toggle("open", _allOpen);
+  });
+  document.querySelectorAll("tr.v-tab-header").forEach(el => {
+    el.classList.toggle("open", _allOpen);
+    const icon = el.querySelector(".v-toggle-icon");
+    if (icon) icon.style.transform = _allOpen ? "rotate(180deg)" : "";
+  });
+  const btn = document.getElementById("btnToggleAll");
+  btn.innerHTML = _allOpen
+    ? '<i class="fas fa-chevron-up"></i> 전체 접기'
+    : '<i class="fas fa-chevron-down"></i> 전체 펼치기';
+}
+
+function _toggleTab(trEl) {
+  const headerTr = trEl.closest("tr.v-tab-header");
+  const bodyTr   = headerTr ? headerTr.nextElementSibling : null;
+  const icon     = headerTr ? headerTr.querySelector(".v-toggle-icon") : null;
+  if (!bodyTr) return;
+  const isOpen = bodyTr.classList.toggle("open");
+  if (headerTr) headerTr.classList.toggle("open", isOpen);
+  if (icon) icon.style.transform = isOpen ? "rotate(180deg)" : "";
+}
+
+/* ── 렌더링 ── */
+function _render(data) {
+  document.getElementById("vLoading").style.display = "none";
+
+  // 헤더
+  document.title = (data.campaignName || "캠페인") + " — 광고주 뷰";
+  document.getElementById("vCampaignTitle").textContent = data.campaignName || "캠페인 현황";
+  document.getElementById("vSheetBadge").textContent    = data.tabs.length + "개 탭";
+  document.getElementById("vUpdatedAt").textContent     = "조회: " + _fmt(data.builtAt);
+
+  // 요약 집계
+  const totalReviewers = data.tabs.reduce((s, t) => s + t.total, 0);
+  const totalDone      = data.tabs.reduce((s, t) => s + t.submitted, 0);
+  document.getElementById("statTabs").textContent  = data.tabs.length;
+  document.getElementById("statTotal").textContent = totalReviewers;
+  document.getElementById("statDone").textContent  = totalDone;
+
+  // tbody 초기화
+  const tbody = document.getElementById("vTabBody");
+  tbody.innerHTML = "";
+
+  data.tabs.forEach((tab, idx) => {
+    const pct       = tab.total > 0 ? Math.round(tab.submitted / tab.total * 100) : 0;
+    const isDone    = pct === 100;
+    
+    // ★ 완료된 탭은 기본적으로 숨김 (display:none)
+    const rowHiddenStyle = isDone ? ' style="display:none"' : '';
+    
+    const rowDoneCls   = isDone       ? " row-done"   : "";
+    const rowClosedCls = tab.isClosed ? " row-closed" : "";
+    const _barCls   = isDone ? " done" : "";
+
+    // 배지
+    const _round   = tab.round      ? '<span class="v-badge v-badge-round">'  + _esc(tab.round)      + '</span>' : '';
+    const _rtype   = tab.reviewType ? '<span class="v-badge v-badge-review">' + _esc(tab.reviewType) + '</span>' : '';
+    const _time    = tab.timeRange  ? '<span class="v-badge v-badge-time"><i class="fas fa-clock" style="font-size:.52rem;margin-right:2px"></i>' + _esc(tab.timeRange) + '</span>' : '';
+    const _done    = isDone         ? '<span class="v-badge v-badge-done"><i class="fas fa-check" style="font-size:.52rem;margin-right:2px"></i>완료</span>' : '';
+    const _closed  = tab.isClosed   ? '<span class="v-badge v-badge-closed">마감</span>' : '';
+    const _product = tab.displayName? '<span class="v-tab-product" title="' + _esc(tab.displayName) + '">' + _esc(tab.displayName) + '</span>' : '';
+
+    // 폴더 링크
+    let folderHtml = "";
+    if (tab.captureFolderUrl || tab.folderUrl) {
+      folderHtml = '<div class="v-folder-row">';
+      if (tab.captureFolderUrl)
+        folderHtml += '<a class="v-folder-btn v-folder-capture" href="' + _esc(tab.captureFolderUrl) + '" target="_blank"><i class="fas fa-camera"></i> 캡처폴더</a>';
+      if (tab.folderUrl)
+        folderHtml += '<a class="v-folder-btn v-folder-review" href="' + _esc(tab.folderUrl) + '" target="_blank"><i class="fas fa-folder-open"></i> 리뷰폴더</a>';
+      folderHtml += '</div>';
+    }
+
+    // 리뷰어 테이블
+    let tableHtml = "";
+    if (tab.rows.length === 0) {
+      tableHtml = '<div class="v-empty"><i class="fas fa-inbox"></i>리뷰어 데이터가 없습니다</div>';
+    } else {
+      const dateColorMap = {};
+      let dateColorIdx = 0;
+      tab.rows.forEach(row => {
+        const d = row.buyDate ? String(row.buyDate).slice(0,10) : "";
+        if (d && !(d in dateColorMap)) { dateColorMap[d] = dateColorIdx % 10; dateColorIdx++; }
+      });
+
+      tableHtml = '<div style="overflow-x:auto"><table class="v-reviewer-table"><colgroup>' +
+        '<col class="col-num"><col class="col-date"><col class="col-order">' +
+        '<col class="col-opt"><col class="col-price"><col class="col-name">' +
+        '<col class="col-phone"><col class="col-addr"><col class="col-status">' +
+        '</colgroup><thead><tr>' +
+        '<th>#</th><th>구매일자</th><th>주문번호</th><th>옵션</th>' +
+        '<th>결제금액</th><th>리뷰어</th><th>번호</th><th>주소</th><th>상태</th>' +
+        '</tr></thead><tbody>';
+
+      tab.rows.forEach((row, ri) => {
+        const statusBadge = row.isSubmitted
+          ? '<span class="v-status-badge"><i class="fas fa-check" style="font-size:.55rem"></i> 완료</span>'
+          : '<span class="v-status-badge"><i class="fas fa-clock" style="font-size:.55rem"></i> 대기</span>';
+        const rowCls   = row.isSubmitted ? "v-row-submitted" : "v-row-pending";
+        const dateKey  = row.buyDate ? String(row.buyDate).slice(0,10) : "";
+        const dateCIdx = dateKey !== "" ? dateColorMap[dateKey] : -1;
+        const rowDcCls = dateCIdx >= 0 ? " dc-" + dateCIdx : "";
+        let buyDateShort = "";
+        if (row.buyDate) {
+          const ds = String(row.buyDate).slice(0,10);
+          const pp = ds.split("-");
+          buyDateShort = pp.length >= 3 ? pp[1] + "/" + pp[2] : ds;
+        }
+        const buyDateDisp  = buyDateShort ? buyDateShort : '<span class="v-empty-cell">—</span>';
+        const orderNumDisp = row.orderNum  ? '<span class="v-order-num">' + _esc(row.orderNum) + '</span>' : '<span class="v-empty-cell">—</span>';
+        const optionDisp   = row.optionVal ? '<span class="v-option">'   + _esc(row.optionVal) + '</span>' : '<span class="v-empty-cell">—</span>';
+        const priceDisp    = row.price     ? '<span class="v-price">'    + _esc(row.price) + '원</span>'   : '<span class="v-empty-cell">—</span>';
+        const phoneDisp    = row.phone     ? '<span class="v-phone">'    + _esc(row.phone) + '</span>'     : '<span class="v-empty-cell">—</span>';
+        const addrDisp     = row.address   ? _esc(row.address) : '<span class="v-empty-cell">—</span>';
+
+        tableHtml +=
+          '<tr class="' + rowCls + rowDcCls + '">' +
+          '<td style="text-align:center;color:var(--t4);font-size:.65rem">' + (ri+1) + '</td>' +
+          '<td class="td-date" style="text-align:center;font-size:.7rem">' + buyDateDisp + '</td>' +
+          '<td>' + orderNumDisp + '</td>' +
+          '<td>' + optionDisp   + '</td>' +
+          '<td style="text-align:right">' + priceDisp + '</td>' +
+          '<td class="v-name-cell">' + _esc(row.displayName||"—") + '</td>' +
+          '<td>' + phoneDisp + '</td>' +
+          '<td class="td-addr">' + addrDisp + '</td>' +
+          '<td style="text-align:center">' + statusBadge + '</td>' +
+          '</tr>';
+      });
+      tableHtml += '</tbody></table></div>';
+    }
+
+    // ── 헤더 tr ──
+    const headerTr = document.createElement("tr");
+    headerTr.className = "v-tab-header" + rowDoneCls + rowClosedCls;
+    headerTr.onclick   = function(){ _toggleTab(this); };
+    // ★ 완료된 탭은 기본적으로 숨김
+    if (isDone) headerTr.style.display = "none";
+    headerTr.innerHTML =
+      '<td><span class="v-tab-name" title="' + _esc(tab.tabName) + '">' + _esc(tab.tabName) + '</span></td>' +
+      '<td>' + _product + '</td>' +
+      '<td style="text-align:center">' + _round   + '</td>' +
+      '<td style="text-align:center">' + _rtype   + '</td>' +
+      '<td>' + _time    + '</td>' +
+      '<td style="text-align:center">' + _done    + '</td>' +
+      '<td style="text-align:center">' + _closed  + '</td>' +
+      '<td>' +
+        '<div class="v-progress-wrap">' +
+          '<div class="v-progress-bar-bg"><div class="v-progress-bar' + _barCls + '" style="width:' + pct + '%"></div></div>' +
+        '</div>' +
+      '</td>' +
+      '<td style="text-align:right"><span class="v-progress-label' + _barCls + '">' + tab.submitted + '/' + tab.total + '</span></td>' +
+      '<td style="text-align:center"><i class="fas fa-chevron-down v-toggle-icon" style="color:var(--t4);font-size:.7rem;transition:transform .2s"></i></td>';
+
+    // ── 바디 tr ──
+    const bodyTr = document.createElement("tr");
+    bodyTr.className = "v-tab-body-row";
+    // ★ 완료된 탭의 바디도 기본적으로 숨김
+    if (isDone) bodyTr.style.display = "none";
+    const bodyTd = document.createElement("td");
+    bodyTd.className = "v-tab-body-cell";
+    bodyTd.colSpan = 10;
+    bodyTd.innerHTML = folderHtml + tableHtml;
+    bodyTr.appendChild(bodyTd);
+
+    tbody.appendChild(headerTr);
+    tbody.appendChild(bodyTr);
+  });
+
+  // ★ 완료건 숨김 버튼 초기 상태 업데이트
+  const doneRows = document.querySelectorAll('tr.v-tab-header.row-done');
+  const doneCount = doneRows.length;
+  const btnHideDone = document.getElementById('btnHideDone');
+  if (btnHideDone && doneCount > 0) {
+    btnHideDone.classList.add('active');
+    btnHideDone.innerHTML = '<i class="fas fa-eye"></i> 완료 보이기 <span class="v-hidden-count" id="hiddenDoneCount" style="display:inline">' + doneCount + '</span>';
+  }
+
+  document.getElementById("vContent").style.display = "";
+}
+/* ── 메인 진입 ── */
+async function _init() {
+  const { code, s } = _getParams();
+  const gasUrl = _getGasUrl();
+
+  if (!gasUrl) {
+    // GAS URL이 없으면 localStorage 탐색 (index.html 과 공유)
+    const stored = localStorage.getItem("rapp_cfg");
+    if (stored) {
+      try {
+        const cfg = JSON.parse(stored);
+        if (cfg.GAS_WEB_APP_URL) {
+          localStorage.setItem("rapp_gas_viewer", cfg.GAS_WEB_APP_URL);
+        }
+      } catch(_) {}
+    }
+  }
+
+  let sheetId = s;
+
+  // 단축코드로 접근한 경우 → sheetId 조회
+  if (!sheetId && code) {
+    try {
+      const res = await _gasGet({ action: "resolveShort", code });
+      if (res && res.success && res.s) {
+        sheetId = res.s;
+      } else {
+        _showError("유효하지 않은 링크", "만료되었거나 존재하지 않는 링크입니다.");
+        return;
+      }
+    } catch(e) {
+      _showError("링크 확인 실패", e.message);
+      return;
+    }
+  }
+
+  if (!sheetId) {
+    _showError("URL 오류", "캠페인 정보(s 파라미터)가 없습니다. 올바른 링크로 접근해 주세요.");
+    return;
+  }
+
+  // 데이터 조회
+  try {
+    const data = await _gasGet({ action: "getViewerData", s: sheetId });
+    if (!data || !data.ok) {
+      _showError("데이터 조회 실패", (data && data.error) || "알 수 없는 오류");
+      return;
+    }
+    _render(data);
+  } catch(e) {
+    _showError("서버 연결 오류", e.message);
+  }
+}
+
+document.addEventListener("DOMContentLoaded", _init);
+</script>
+</body>
+</html>
