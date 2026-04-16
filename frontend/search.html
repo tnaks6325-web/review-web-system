@@ -3016,10 +3016,9 @@ async function _submitRegister(name, phone, p1, p2) {
    action=indexStatus → doGet에 등록된 부작용 없는 경량 액션 사용.
    ──────────────────────────────────────────────────────────── */
 function _warmUpGas() {
-  const url = APP_CONFIG.GAS_WEB_APP_URL;
-  if (!url) return;
-  // no-cors: 응답 본문 불필요, 인스턴스 기동 목적만
-  fetch(url + "?action=indexStatus", { method: "GET", mode: "no-cors" })
+  // ★ [Node.js 이관] GAS 워밍업 대신 API 서버 헬스체크로 대체
+  if (typeof API_BASE_URL === 'undefined' || !API_BASE_URL) return;
+  fetch(API_BASE_URL + '/health', { method: 'GET', mode: 'cors' })
     .catch(() => {}); // 실패해도 무시
 }
 
@@ -3058,21 +3057,17 @@ document.addEventListener("DOMContentLoaded", () => {
  * 3. 둘 다 없으면 gasNotSet 배너 표시
  */
 async function bootstrapGasUrl() {
-  // 1) 이미 URL이 있는 경우 (하드코딩 or localStorage)
+  // ★ [Node.js 이관] GAS URL 부트스트랩 → API_BASE_URL 헬스체크로 대체
   if (APP_CONFIG.GAS_WEB_APP_URL) {
     hide("gasNotSet");
-    // 백그라운드로 GAS PropertiesService의 최신 URL 동기화
+    // 백그라운드로 API 서버 상태 확인 (GAS getAppUrl 대신)
     try {
-      const res = await fetch(APP_CONFIG.GAS_WEB_APP_URL + "?action=getAppUrl", { redirect: "follow" });
+      const res = await fetch((typeof API_BASE_URL !== 'undefined' ? API_BASE_URL : APP_CONFIG.GAS_WEB_APP_URL) + '/health');
       if (res.ok) {
         const json = await res.json();
-        if (json.url && json.url !== APP_CONFIG.GAS_WEB_APP_URL) {
-          saveConfig({ GAS_WEB_APP_URL: json.url });
-          APP_CONFIG.GAS_WEB_APP_URL = json.url;
-          console.log("[bootstrap] GAS URL 업데이트:", json.url);
-        }
+        console.log("[bootstrap] API 서버 상태:", json.ok ? "정상" : "오류");
       }
-    } catch (_) { /* 백그라운드 동기화 실패는 무시 */ }
+    } catch (_) { /* 서버 연결 실패는 무시 */ }
     return;
   }
   // 2) URL이 전혀 없는 경우 → gasNotSet 배너 표시
@@ -7730,13 +7725,11 @@ async function _callCardExtractAi(cid, base64, mimeType) {
 
   try {
     const payload = { action: "extractOrderImage", imageBase64: base64, mimeType };
-    const url = gasUrl.includes("?") ? gasUrl+"&action=extractOrderImage" : gasUrl+"?action=extractOrderImage";
     let json;
     try {
-      const resp = await fetch(url, { method:"POST", headers:{"Content-Type":"text/plain;charset=UTF-8"}, body: JSON.stringify(payload), redirect:"follow", signal: st.abortCtrl?.signal });
+      // ★ [Node.js 이관] gasPost()를 통해 API 서버로 전송
+      json = await gasPost(payload);
       clearTimeout(tid);
-      const text = await resp.text();
-      json = JSON.parse(text);
     } catch(fe) {
       clearTimeout(tid);
       _stopCardCountdown(cid);
@@ -8209,16 +8202,9 @@ async function submitOrderForm() {
       let res;
       try { res = await gasPost(payload); } catch(e1) {
         console.warn(`[제출 ${i+1}] gasPost 실패:`, e1.message);
-        // gasPost가 실패하면 직접 fetch POST로 한 번 더 시도 (JSONP GET 사용 안 함 — URL 길이 초과 방지)
+        // ★ [Node.js 이관] gasPost 재시도 (1회)
         try {
-          const resp = await fetch(APP_CONFIG.GAS_WEB_APP_URL, {
-            method: "POST",
-            headers: { "Content-Type": "text/plain;charset=UTF-8" },
-            body: JSON.stringify(payload),
-            redirect: "follow"
-          });
-          const text = await resp.text();
-          res = JSON.parse(text);
+          res = await gasPost(payload);
         } catch(e2) { throw new Error("서버 연결 실패"); }
       }
       if (!res) throw new Error("서버 응답이 없습니다.");
@@ -8234,13 +8220,11 @@ async function submitOrderForm() {
           const ext     = mime==="image/png"?"png":mime==="image/webp"?"webp":"jpg";
           const namePart= [o.recipient||o.orderer, o.orderer!==o.recipient?o.orderer:""].filter(Boolean).join("_")||"주문캡처";
           const upPayload = { action:"uploadOrderImage", imageBase64:base64, mimeType:mime, fileName:namePart+"."+ext, displayName:ctx.displayName||"", tabName:ctx.tabName, round:ctx.round||"", sheetId:ctx.sheetId||"" };
-          const gasUrl  = APP_CONFIG.GAS_WEB_APP_URL;
-          const upUrl   = gasUrl+(gasUrl.includes("?")?"&":"?")+"action=uploadOrderImage";
+          // ★ [Node.js 이관] gasPost()를 통해 API 서버로 전송
           let upJson = null;
           for (let at=1; at<=2; at++) {
             try {
-              const upR  = await fetch(upUrl, { method:"POST", headers:{"Content-Type":"text/plain;charset=UTF-8"}, body:JSON.stringify(upPayload), redirect:"follow" });
-              upJson = JSON.parse(await upR.text()); break;
+              upJson = await gasPost(upPayload); break;
             } catch(fe) { if(at<2){ await new Promise(r=>setTimeout(r,1500)); } }
           }
           if (upJson?.ok && upJson.captureFolderUrl && !firstCaptureFolderUrl) {
@@ -8284,9 +8268,8 @@ async function submitOrderForm() {
   if (firstCaptureFolderUrl) {
     try {
       const sfP = { action:"saveCaptureFolder", sheetId:ctx.sheetId||"", sheetUrl:ctx.sheetUrl||"", tabName:ctx.tabName, captureFolderUrl:firstCaptureFolderUrl };
-      const gasUrl2 = APP_CONFIG.GAS_WEB_APP_URL;
-      const sfR = await fetch(gasUrl2, { method:"POST", headers:{"Content-Type":"text/plain;charset=UTF-8"}, body:JSON.stringify(sfP), redirect:"follow" });
-      const sfJ = JSON.parse(await sfR.text());
+      // ★ [Node.js 이관] gasPost()를 통해 API 서버로 전송
+      const sfJ = await gasPost(sfP);
       if (sfJ?.ok) console.log("[캡처폴더] 저장 완료");
     } catch(sfErr) { console.warn("[캡처폴더] 저장 실패:", sfErr.message); }
   }
