@@ -67,20 +67,28 @@ app.use('/api/blacklist', diagRoutes);
 // ── 헬스체크 ──
 app.get('/health', async (req, res) => {
   let dbStatus = 'disconnected';
+  let dbTime = null;
   try {
     const pool = require('./db/pool');
     const result = await pool.query('SELECT NOW() AS now');
     dbStatus = 'connected';
+    dbTime = result.rows[0]?.now;
   } catch (err) {
     dbStatus = `error: ${err.message}`;
   }
+
+  const googleStatus = process.env.GOOGLE_SERVICE_ACCOUNT_EMAIL ? 'configured' : 'not_configured';
 
   res.json({
     ok: true,
     ts: Date.now(),
     env: process.env.NODE_ENV || 'development',
     db: dbStatus,
+    dbTime,
+    google: googleStatus,
     version: '2.0.0',
+    uptime: Math.floor(process.uptime()),
+    memory: Math.round(process.memoryUsage().heapUsed / 1024 / 1024) + 'MB',
     routes: {
       search: '/api/search?query=',
       index: '/api/index/status',

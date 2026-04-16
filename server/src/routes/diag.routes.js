@@ -140,8 +140,9 @@ router.get('/viewer-data', async (req, res, next) => {
 
 // ═══════════════════════════════════════════════════════════
 // POST /api/blacklist — 블랙리스트 관리 (GAS: blacklist)
+// 주의: app.js에서 app.use('/api/blacklist', diagRoutes) 로 마운트하므로 path='/'
 // ═══════════════════════════════════════════════════════════
-router.post('/blacklist', authMiddleware, async (req, res, next) => {
+router.post('/', authMiddleware, async (req, res, next) => {
   try {
     const { action, action2, phone, name, reason } = req.body;
     const act = action || action2 || 'list';

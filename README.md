@@ -1,204 +1,178 @@
-# 리뷰웹시스템 — Node.js + PostgreSQL 이관 프로젝트
+# 리뷰웹시스템 (Review Web System)
 
-> GAS v10.5 → Node.js/Express on Railway + PostgreSQL + Cloudflare Pages
+GAS(Google Apps Script) 기반 리뷰 관리 시스템을 Node.js/Express + PostgreSQL로 마이그레이션한 프로젝트.
 
-## 프로젝트 상태
+## URLs
+- **프론트엔드 (Cloudflare Pages)**: https://review-web-system.pages.dev
+- **API 서버 (Sandbox)**: https://3000-i38yiadr8uqfj3spfxinm-5185f4aa.sandbox.novita.ai
+- **API 헬스체크**: /health
 
-| Phase | 상태 | 설명 |
-|-------|------|------|
-| **Phase 1** | ✅ 완료 | 서버 골격, DDL, 미들웨어, 유틸, 설정 |
-| **Phase 2 (B)** | ✅ 완료 | 40+ 엔드포인트 비즈니스 로직 완전 구현 |
-| Phase 3 (C) | ⏳ 예정 | 프론트엔드 gasGet/gasPost → fetch 교체 |
-| Phase 4 (D) | ⏳ 예정 | 데이터 마이그레이션 (Sheets → PostgreSQL) |
-| Phase 5 (E) | ⏳ 예정 | Cloudflare Pages 배포, Railway 배포 |
+## 기술 스택
+| 구성 | 기술 |
+|------|------|
+| 백엔드 | Node.js 18+ / Express 4 |
+| 데이터베이스 | PostgreSQL (14개 테이블, 34개 인덱스) |
+| 프론트엔드 | 정적 HTML/JS (Cloudflare Pages) |
+| 인증 | JWT (jsonwebtoken / bcryptjs) |
+| 외부 API | Google Sheets API, Google Drive API |
+| 스케줄러 | node-cron (인덱스 자동 빌드) |
+| 배포 | Railway (서버) + Cloudflare Pages (프론트) |
 
----
+## 완료된 기능 (Phase B+C+D)
 
-## 아키텍처
+### API 엔드포인트 (40+)
+| 카테고리 | 엔드포인트 | 설명 |
+|----------|-----------|------|
+| 헬스 | GET /health | 서버 상태 (DB, Google, 메모리) |
+| 검색 | GET /api/search | 리뷰어 검색 (이름/전화번호) |
+| 인덱스 | GET /api/index/status | 인덱스 상태 조회 |
+| 인덱스 | POST /api/index/build | 인덱스 빌드 (증분/전체) |
+| 탭 설정 | GET/POST /api/tab/config | 탭 설정 CRUD |
+| 탭 설정 | POST /api/tab/force-done | 강제완료 처리 |
+| 탭 설정 | POST /api/tab/closed | 마감 처리 |
+| 탭 설정 | GET /api/tab/options | 탭 옵션 목록 |
+| 리뷰어 | POST /api/reviewer/register | 리뷰어 등록 |
+| 리뷰어 | GET /api/reviewer/verify | 전화번호 인증 |
+| 리뷰어 | GET /api/reviewer/list | 리뷰어 목록 |
+| 리뷰어 | POST /api/reviewer/profile | 프로필 관리 |
+| 관리자 | POST /api/admin/login | 관리자 로그인 (JWT) |
+| 관리자 | POST /api/admin/users | 관리자 CRUD |
+| 관리자 | POST /api/admin/staff-login | 영업담당자 로그인 |
+| 관리자 | POST /api/admin/staff-users | 영업담당자 CRUD |
+| 관리자 | GET /api/admin/dashboard | 대시보드 데이터 |
+| 관리자 | POST /api/admin/release-lock | 빌드 잠금 해제 |
+| Drive | POST /api/drive/sync-* | 폴더 동기화 |
+| 단축URL | POST /api/short/create | 단축URL 생성 |
+| 단축URL | GET /api/short/resolve | 단축URL 해석 |
+| 메모 | GET/POST/DELETE /api/memo | 메모 CRUD |
+| 입금 | GET /api/payment/targets | 입금 대상 조회 |
+| 입금 | POST /api/payment/mark-done | 입금 처리 |
+| 제출 | POST /api/submit/review | 리뷰 제출 |
+| 제출 | POST /api/submit/order | 구매양식 제출 |
+| 블랙리스트 | POST /api/blacklist | 블랙리스트 관리 |
+| 진단 | GET /api/diag/* | 디버그 엔드포인트 |
 
-```
-Browser → HTTPS → Cloudflare Pages (정적 HTML)
-                        ↓
-               Railway Node.js/Express API
-                        ↓
-              PostgreSQL + Google Sheets/Drive APIs
-```
-
-## API 엔드포인트 (40+)
-
-### 검색/인덱스 (Section 5)
-| Method | Path | Auth | GAS 원본 |
-|--------|------|------|----------|
-| GET | `/api/search?query=&phone8=` | ✗ | searchAll |
-| GET | `/api/search/debug?query=` | ✗ | searchAllDebug |
-| POST | `/api/index/build` | ✓ | buildIndexSmart |
-| GET | `/api/index/status` | ✓ | indexStatus |
-
-### 탭 설정 (Section 6)
-| Method | Path | Auth | GAS 원본 |
-|--------|------|------|----------|
-| POST | `/api/tab/config` | ✓ | setTabConfig |
-| GET | `/api/tab/config` | ✓ | getTabConfig |
-| POST | `/api/tab/force-done` | ✓ | setForceDone |
-| POST | `/api/tab/closed` | ✓ | setClosed |
-| GET | `/api/tab/options` | ✗ | getTabOptions |
-| GET | `/api/tab/end-date` | ✗ | getTabEndDate |
-| GET | `/api/tab/stats` | ✓ | getCampaignStats |
-
-### 리뷰어 관리 (Section 7)
-| Method | Path | Auth | GAS 원본 |
-|--------|------|------|----------|
-| POST | `/api/reviewer/register` | ✗ | registerReviewer |
-| GET | `/api/reviewer/verify` | ✗ | verifyReviewer |
-| GET | `/api/reviewer/lookup` | ✗ | lookupPhone |
-| GET | `/api/reviewer/list` | ✓ | getReviewerList |
-| POST | `/api/reviewer/delete` | ✓ | deleteReviewer |
-| POST | `/api/reviewer/profile` | ✗ | getReviewerProfile/saveSubAccounts/saveIncomeInfo |
-| GET | `/api/reviewer/inaed-list` | ✓ | getInaedList (관리자) |
-
-### 관리자 인증 (Section 8)
-| Method | Path | Auth | GAS 원본 |
-|--------|------|------|----------|
-| POST | `/api/admin/login` | ✗ | adminLoginV2 |
-| POST | `/api/admin/staff-login` | ✗ | staffLogin |
-| POST | `/api/admin/change-pw` | ✓ | adminChangePw |
-| POST | `/api/admin/change-master-pw` | ✓(M) | changeMasterPw |
-| POST | `/api/admin/users` | ✓(M) | add/edit/delete/listAdminUser |
-| POST | `/api/admin/staff-users` | ✓(M) | add/edit/delete/listStaffUser |
-| GET | `/api/admin/dashboard` | ✓ | dashboard |
-| POST | `/api/admin/release-lock` | ✓ | releaseBuildLock |
-
-### Drive 폴더 (Section 9)
-| Method | Path | Auth | GAS 원본 |
-|--------|------|------|----------|
-| POST | `/api/drive/sync-capture` | ✓ | syncCaptureFolders |
-| POST | `/api/drive/sync-review` | ✓ | syncReviewFolders |
-| POST | `/api/drive/sync-all` | ✓ | syncAllFolders |
-| POST | `/api/drive/batch-create` | ✓ | batchCreateFolders |
-| POST | `/api/drive/reset-folder-urls` | ✓ | resetTabFolderUrls |
-| POST | `/api/drive/migrate-names` | ✓ | migrateFolderNames |
-| POST | `/api/drive/organize-capture` | ✓ | organizeCaptureFolders |
-| POST | `/api/drive/save-capture` | ✓ | saveCaptureFolder |
-| POST | `/api/drive/update-urls` | ✓ | updateFolderUrls |
-| GET | `/api/drive/diag` | ✓ | diagCaptureFolders |
-
-### 단축URL / 메모 (Section 10)
-| Method | Path | Auth | GAS 원본 |
-|--------|------|------|----------|
-| POST | `/api/short/create` | ✗ | createShort |
-| GET | `/api/short/resolve?code=` | ✗ | resolveShort |
-| GET | `/api/memo` | ✗ | getMemo |
-| POST | `/api/memo` | ✗ | saveMemo |
-| DELETE | `/api/memo` | ✓ | deleteMemo |
-
-### 입금처리 (Section 11)
-| Method | Path | Auth | GAS 원본 |
-|--------|------|------|----------|
-| GET | `/api/payment/targets` | ✓ | getPaymentTargets |
-| POST | `/api/payment/mark-done` | ✓ | markPaymentDone |
-| GET | `/api/payment/history` | ✓ | (신규) |
-
-### 제출/주문 (Section 12)
-| Method | Path | Auth | GAS 원본 |
-|--------|------|------|----------|
-| POST | `/api/submit/review` | ✗ | submitReview |
-| POST | `/api/submit/order` | ✗ | submitOrderForm |
-| POST | `/api/submit/check-duplicate` | ✗ | checkDuplicateOrder |
-| POST | `/api/submit/check-files` | ✗ | checkReviewFiles |
-
-### 진단/기타 (Section 12)
-| Method | Path | Auth | GAS 원본 |
-|--------|------|------|----------|
-| GET | `/api/diag/debug-tab` | ✓ | debugTabConfig |
-| GET | `/api/diag/debug-sheet` | ✓ | debugSheet |
-| GET | `/api/diag/debug-base` | ✓ | debugBaseSheet |
-| GET | `/api/diag/campaign-list` | ✗ | campaignList |
-| GET | `/api/diag/campaign-stats` | ✗ | getCampaignStats |
-| GET | `/api/diag/inaed-list` | ✗ | getInaedList |
-| POST | `/api/diag/add-campaign` | ✓ | addCampaign |
-| POST | `/api/blacklist` | ✓ | blacklist |
-| GET | `/api/viewer/viewer-data` | ✗ | getViewerData |
-| POST | `/api/image/image-extract` | ✗ | extractOrderImage |
-| POST | `/api/image/image-upload` | ✗ | uploadOrderImage |
-| GET | `/health` | ✗ | (신규) |
-
----
-
-## PostgreSQL 스키마 (14 테이블)
-
-| 테이블 | 용도 | GAS 대체 |
+### 데이터베이스 (14개 테이블)
+| 테이블 | 설명 | GAS 대응 |
 |--------|------|----------|
-| campaigns | 캠페인(베이스시트) 목록 | 작업목록 탭 |
-| tab_configs | 탭별 세부 설정 | 세부목록 탭 |
+| campaigns | 캠페인 목록 | 베이스시트 |
+| tab_configs | 탭별 설정 | 세부목록 탭 |
 | review_index | 검색 인덱스 | 검색인덱스 탭 |
-| index_master | 빌드 메타/체크섬 | 인덱스마스터 탭 |
-| reviewers | 리뷰어 회원 | 인애드명단 시트 |
+| index_master | 인덱스 메타 | 인덱스마스터 탭 |
+| reviewers | 리뷰어 회원 | 인애드명단 |
 | admin_users | 관리자 계정 | PropertiesService |
-| staff_users | 영업담당자 계정 | PropertiesService |
-| memos | 메모 | PropertiesService |
+| staff_users | 영업담당자 | PropertiesService |
+| memos | 메모 | 시트별 메모 |
 | short_links | 단축 URL | PropertiesService |
-| blacklist | 블랙리스트 | PropertiesService |
-| payment_records | 입금처리 이력 | (신규) |
-| order_submissions | 주문 제출 이력 | (신규) |
+| blacklist | 블랙리스트 | 시트/PropertiesService |
+| payment_records | 입금 이력 | - |
+| order_submissions | 주문 이력 | - |
 | build_locks | 빌드 잠금 | LockService |
 | app_settings | 앱 설정 | PropertiesService |
 
----
+### 프론트엔드 파일
+| 파일 | 설명 |
+|------|------|
+| index.html | 관리자 대시보드 (811KB) |
+| search.html | 리뷰어 검색 (570KB) |
+| staff.html | 영업담당자 (71KB) |
+| viewer.html | 뷰어 (32KB) |
+| recruit.html | 리크루팅 (16KB) |
+| api.js | GAS→Node.js API 통신 모듈 (14KB) |
 
-## 핵심 상수 (GAS 동일)
-
-```
-BASE_SHEET_ID = "1YW2KgPo-fvwBUS1nuzWTutqE_n2RVAnHPXXYVn4o2i4"
-ADMIN_PW_DEFAULT = "931118"
-SUBMITTED_VALUES = ["TRUE","true","1","제출","O","o","완료","Y","y"]
-SHORT_CODE_LEN = 6
-tab_key 형식: "sheetId||tabName" (구분자 유지)
-```
-
----
-
-## 파일 구조
-
+## 프로젝트 구조
 ```
 webapp/
-├── server/
+├── frontend/              # Cloudflare Pages 정적 파일
+│   ├── api.js             # gasGet/gasPost → fetch 매핑 (40+ 액션)
+│   ├── index.html         # 관리자 대시보드
+│   ├── search.html        # 검색 페이지
+│   ├── staff.html         # 영업담당자 페이지
+│   ├── viewer.html        # 뷰어
+│   ├── recruit.html       # 리크루팅
+│   └── _headers           # Cloudflare 보안 헤더
+├── server/                # Railway Node.js API 서버
+│   ├── index.js           # 엔트리 (graceful shutdown)
 │   ├── src/
-│   │   ├── routes/        # 10개 라우터 파일
-│   │   ├── services/      # 6개 서비스 (auth, sheets, drive, search, indexBuilder, reviewer)
-│   │   ├── middleware/     # 4개 (auth, cors, error, rateLimit)
+│   │   ├── app.js         # Express 앱 (미들웨어, 라우터, 헬스체크)
+│   │   ├── routes/        # 10개 라우트 파일
+│   │   ├── services/      # 6개 서비스 (auth, search, indexBuilder, reviewer, sheets, drive)
+│   │   ├── middleware/     # 4개 미들웨어 (auth, cors, error, rateLimit)
+│   │   ├── utils/         # 유틸 (gasCompat, checksum, logger)
 │   │   ├── db/            # pool.js, migrate.js
-│   │   ├── jobs/          # cron.js
-│   │   ├── utils/         # gasCompat.js, checksum.js, logger.js
-│   │   └── app.js
-│   ├── scripts/           # migrate-detail.js, migrate-reviewers.js
-│   ├── migrations/        # 001_create_tables.sql (14 테이블)
-│   ├── index.js, package.json, Procfile, railway.json
-├── frontend/              # index.html, search.html, staff.html, viewer.html, recruit.html
-├── .env.example
+│   │   └── jobs/          # cron.js (인덱스 스케줄러)
+│   ├── migrations/        # DDL SQL
+│   ├── scripts/           # 마이그레이션/테스트 스크립트
+│   ├── Procfile           # Railway 배포
+│   ├── railway.json       # Railway 설정
+│   └── package.json       # v2.0.0
+├── .env                   # 환경변수 (gitignore)
+├── .env.example           # 환경변수 템플릿
+├── ecosystem.config.cjs   # PM2 설정
 └── README.md
 ```
 
----
+## Railway 배포 가이드
 
-## 다음 단계
+### 1. Railway 프로젝트 생성
+```bash
+# Railway 대시보드에서 새 프로젝트 생성 → GitHub 연결 (root directory: server)
+# 또는 Railway CLI 사용
+```
 
-### Phase C: 프론트엔드 교체
-- `gasGet(params)` → fetch GET to `/api/{endpoint}`
-- `gasPost(body)` → fetch POST to `/api/{endpoint}`
-- `_actionToEndpoint` 매핑 테이블 구현
-- JWT 토큰 → `sessionStorage.admin_token` 저장/헤더 주입
+### 2. PostgreSQL 플러그인 추가
+```
+Railway 대시보드 → Add Service → PostgreSQL
+→ DATABASE_URL 자동 주입
+```
 
-### Phase D: 데이터 마이그레이션
-1. PostgreSQL DDL 실행 (`node src/db/migrate.js`)
-2. 세부목록 → tab_configs (`node scripts/migrate-detail.js`)
-3. 인애드명단 → reviewers (`node scripts/migrate-reviewers.js`)
-4. 인덱스 전체 재빌드 (`POST /api/index/build { forceFullRebuild: true }`)
+### 3. 환경변수 설정 (필수)
+```
+JWT_SECRET=<강력한 랜덤 32자 이상>
+MASTER_ADMIN_NAME=master
+MASTER_ADMIN_PW=<마스터 비밀번호>
+GOOGLE_SERVICE_ACCOUNT_EMAIL=<서비스 계정 이메일>
+GOOGLE_PRIVATE_KEY=<서비스 계정 프라이빗 키>
+BASE_SHEET_ID=1YW2KgPo-fvwBUS1nuzWTutqE_n2RVAnHPXXYVn4o2i4
+DRIVE_ROOT_FOLDER_ID=1afBtCDYs-A-LenIKhsiKJWvkuFmUYV8d
+ALLOWED_ORIGINS=https://review-web-system.pages.dev
+NODE_ENV=production
+```
 
-### Phase E: 배포
-- Frontend → Cloudflare Pages
-- Backend → Railway (Node.js + PostgreSQL)
-- Google Service Account 설정
+### 4. 배포 후 마이그레이션
+```bash
+railway run -- npm run migrate          # DDL
+railway run -- npm run migrate:detail   # 세부목록 → tab_configs
+railway run -- npm run migrate:reviewers # 인애드명단 → reviewers
+```
 
----
+### 5. api.js URL 업데이트
+```javascript
+// frontend/api.js 의 return 값을 Railway URL로 변경
+return 'https://<your-app>.up.railway.app';
+```
+→ Cloudflare Pages 재배포:
+```bash
+npx wrangler pages deploy frontend --project-name review-web-system
+```
 
-**최종 수정: 2026-04-16 | 버전: v2.0.0 (Phase B 완료)**
+## 통합 테스트 결과
+```
+✅ 34개 통과 / ❌ 0개 실패 / 총 34개
+  헬스체크, 관리자 인증, CRUD (admin/staff/reviewer),
+  탭 설정, 검색, 인덱스, 메모, 단축URL, 입금처리,
+  블랙리스트, 대시보드, 빌드잠금, 진단
+```
+
+## 미구현/추가 예정
+- [ ] Railway 프로덕션 배포 (Railway 계정 및 PostgreSQL 플러그인 필요)
+- [ ] Google Service Account 실제 연동 (이메일 + 프라이빗 키 설정 필요)
+- [ ] 데이터 마이그레이션 실행 (Google Sheets → PostgreSQL)
+- [ ] 이미지 분석 AI API 연동 (extractOrderImage)
+- [ ] 이미지 Drive 업로드 구현 (uploadOrderImage)
+- [ ] 프론트엔드 기능별 세부 테스트
+
+## 최종 업데이트
+- **날짜**: 2026-04-16
+- **버전**: 2.0.0
+- **상태**: 개발 서버 운영 중 (Sandbox + Cloudflare Pages)

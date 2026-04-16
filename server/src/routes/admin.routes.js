@@ -68,7 +68,9 @@ router.post('/users', authMiddleware, masterOnlyMiddleware, async (req, res, nex
   try {
     const { action, masterPw, name, pw, newPw, active } = req.body;
 
-    if (masterPw !== process.env.MASTER_ADMIN_PW) {
+    // masterOnlyMiddleware에서 이미 role='master' 검증 완료
+    // masterPw는 선택 사항 — GAS 호환용 (보내면 추가 검증)
+    if (masterPw && masterPw !== process.env.MASTER_ADMIN_PW) {
       return res.json({ ok: false, error: '마스터 비밀번호가 틀렸습니다.' });
     }
 
@@ -101,7 +103,8 @@ router.post('/staff-users', authMiddleware, masterOnlyMiddleware, async (req, re
   try {
     const { action, masterPw, name, pw, newPw, active } = req.body;
 
-    if (masterPw !== process.env.MASTER_ADMIN_PW) {
+    // masterOnlyMiddleware에서 이미 role='master' 검증 완료
+    if (masterPw && masterPw !== process.env.MASTER_ADMIN_PW) {
       return res.json({ error: '마스터 권한이 필요합니다.' });
     }
 

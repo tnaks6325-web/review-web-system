@@ -92,7 +92,7 @@ async function getReviewerList() {
     FROM reviewers
     ORDER BY registered_at DESC
   `);
-  return { reviewers: rows, total: rows.length };
+  return { ok: true, reviewers: rows, total: rows.length };
 }
 
 /**
