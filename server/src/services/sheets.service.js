@@ -103,12 +103,27 @@ async function batchReadSheet(spreadsheetId, ranges) {
   return res.data.valueRanges || [];
 }
 
+/**
+ * Drive API로 스프레드시트 최종 수정시각 조회
+ * 인덱스 빌드 시 변경 여부를 빠르게 판단 (API 1회 = ~100ms)
+ * @returns {string|null} ISO 8601 문자열 (예: "2026-04-17T05:00:00.000Z")
+ */
+async function getSheetModifiedTime(spreadsheetId) {
+  if (!drive) throw new Error('Google Drive API가 설정되지 않았습니다.');
+  const res = await drive.files.get({
+    fileId: spreadsheetId,
+    fields: 'modifiedTime',
+  });
+  return res.data.modifiedTime || null;
+}
+
 module.exports = {
   readSheet,
   writeSheet,
   appendSheet,
   getSpreadsheetMeta,
   batchReadSheet,
+  getSheetModifiedTime,
   sheets,
   drive,
   auth,
