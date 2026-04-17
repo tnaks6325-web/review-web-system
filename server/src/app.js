@@ -86,9 +86,10 @@ app.get('/health', async (req, res) => {
     db: dbStatus,
     dbTime,
     google: googleStatus,
-    version: '2.0.0',
+    version: '2.1.0-phase1',
     uptime: Math.floor(process.uptime()),
     memory: Math.round(process.memoryUsage().heapUsed / 1024 / 1024) + 'MB',
+    phase1: true,
     routes: {
       search: '/api/search?query=',
       index: '/api/index/status',

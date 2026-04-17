@@ -145,6 +145,12 @@ const _ACTION_MAP = {
   'saveAppUrl':     { method: 'POST', path: '/api/diag/app-url' },
   'convertToNcHeaders': { method: 'POST', path: '/api/diag/convert-nc-headers' },
   'createCampaignSheet': { method: 'POST', path: '/api/diag/create-campaign-sheet' },
+
+  // Phase 2-5: Sync Queue + Build History
+  'syncQueueStats':     { method: 'GET',  path: '/api/diag/sync-queue' },
+  'syncQueueRetry':     { method: 'POST', path: '/api/diag/sync-queue/retry' },
+  'syncQueuePurge':     { method: 'POST', path: '/api/diag/sync-queue/purge' },
+  'buildHistory':       { method: 'GET',  path: '/api/diag/build-history' },
 };
 
 // ═══════════════════════════════════════════════════════════

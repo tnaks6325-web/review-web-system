@@ -2440,6 +2440,49 @@ textarea.rform-input{line-height:1.5}
             <i class="fas fa-circle-notch fa-spin"></i> 불러오는 중...
           </div>
         </div>
+        <!-- ═══════════════════════════════════════════════════════ -->
+        <!-- Phase 5: Sync Queue 모니터링 + 빌드 히스토리 패널 -->
+        <!-- ═══════════════════════════════════════════════════════ -->
+        <div class="admin-section-header" style="margin-top:24px">
+          <span style="font-size:.95rem;font-weight:700;color:var(--t1)">
+            <i class="fas fa-tasks" style="color:#6366F1;margin-right:6px"></i>시스템 모니터링
+          </span>
+          <button class="btn-sm" onclick="loadSystemMonitor()" style="margin-left:auto;font-size:.78rem">
+            <i class="fas fa-sync-alt"></i> 새로고침
+          </button>
+        </div>
+
+        <div style="display:grid;grid-template-columns:1fr 1fr;gap:16px;margin-top:12px" id="sysMonitorGrid">
+          <!-- Sync Queue 현황 -->
+          <div style="background:#fff;border-radius:12px;padding:16px;box-shadow:0 1px 4px rgba(0,0,0,.06);border:1px solid var(--border)">
+            <h4 style="margin:0 0 12px;font-size:.88rem;color:var(--t1)">
+              <i class="fas fa-stream" style="color:#6366F1"></i> Sync Queue
+            </h4>
+            <div id="syncQueueStats" style="font-size:.82rem;color:var(--t2)">
+              <i class="fas fa-circle-notch fa-spin"></i> 불러오는 중...
+            </div>
+            <div id="syncQueueActions" class="hidden" style="margin-top:10px;display:flex;gap:6px">
+              <button class="btn-sm" onclick="retrySyncAll()" style="font-size:.72rem;background:#EF4444;color:#fff;border:none;padding:4px 10px;border-radius:6px;cursor:pointer">
+                <i class="fas fa-redo"></i> 실패 전체 재시도
+              </button>
+              <button class="btn-sm" onclick="purgeSyncQueue()" style="font-size:.72rem;background:#6B7280;color:#fff;border:none;padding:4px 10px;border-radius:6px;cursor:pointer">
+                <i class="fas fa-broom"></i> 완료 항목 정리
+              </button>
+            </div>
+          </div>
+
+          <!-- 빌드 히스토리 -->
+          <div style="background:#fff;border-radius:12px;padding:16px;box-shadow:0 1px 4px rgba(0,0,0,.06);border:1px solid var(--border)">
+            <h4 style="margin:0 0 12px;font-size:.88rem;color:var(--t1)">
+              <i class="fas fa-history" style="color:#F59E0B"></i> 빌드 히스토리
+            </h4>
+            <div id="buildHistoryPanel" style="font-size:.82rem;color:var(--t2)">
+              <i class="fas fa-circle-notch fa-spin"></i> 불러오는 중...
+            </div>
+          </div>
+        </div>
+        <!-- /Phase 5 -->
+
       </div><!-- /tab-dashboard -->
 
       <!-- ★ 리뷰어 관리 탭 -->
@@ -5376,6 +5419,7 @@ function switchAdminTab(tabName) {
   if (tabName === "reviewers") loadReviewerList();
   if (tabName === "recruit")   { loadRecruitList(); loadRecruitTabOptions(); }
   if (tabName === "payment")   initPaymentPanel();
+  if (tabName === "dashboard") { try { loadSystemMonitor(); } catch(_){} }
   // ★ 컨텍스트 툴바 업데이트
   _updateContextToolbar(tabName);
 }
@@ -15873,6 +15917,155 @@ async function saveDepositNames() {
       if (warningEl) warningEl.style.display = "none";
     }
     _renderPayPreview(_payFiltered);
+  }
+}
+
+// ═══════════════════════════════════════════════════════════
+// Phase 5: 시스템 모니터링 (Sync Queue + Build History)
+// ═══════════════════════════════════════════════════════════
+
+async function loadSystemMonitor() {
+  loadSyncQueueStats();
+  loadBuildHistory();
+}
+
+async function loadSyncQueueStats() {
+  const el = document.getElementById("syncQueueStats");
+  const actionsEl = document.getElementById("syncQueueActions");
+  if (!el) return;
+
+  try {
+    const data = await gasGet({ action: "syncQueueStats" });
+    if (!data || data.error) {
+      el.innerHTML = `<span style="color:var(--t3)">큐 데이터 없음</span>`;
+      return;
+    }
+
+    const s = data.stats || {};
+    const hasFailed = (s.failed || 0) > 0;
+
+    el.innerHTML = `
+      <div style="display:grid;grid-template-columns:repeat(4,1fr);gap:8px;text-align:center">
+        <div style="background:#F0FDF4;border-radius:8px;padding:8px">
+          <div style="font-size:1.2rem;font-weight:700;color:#16A34A">${s.done || 0}</div>
+          <div style="font-size:.7rem;color:#6B7280">완료</div>
+        </div>
+        <div style="background:#FEF3C7;border-radius:8px;padding:8px">
+          <div style="font-size:1.2rem;font-weight:700;color:#D97706">${s.pending || 0}</div>
+          <div style="font-size:.7rem;color:#6B7280">대기중</div>
+        </div>
+        <div style="background:#EDE9FE;border-radius:8px;padding:8px">
+          <div style="font-size:1.2rem;font-weight:700;color:#7C3AED">${s.processing || 0}</div>
+          <div style="font-size:.7rem;color:#6B7280">처리중</div>
+        </div>
+        <div style="background:${hasFailed ? '#FEE2E2' : '#F3F4F6'};border-radius:8px;padding:8px">
+          <div style="font-size:1.2rem;font-weight:700;color:${hasFailed ? '#DC2626' : '#9CA3AF'}">${s.failed || 0}</div>
+          <div style="font-size:.7rem;color:#6B7280">실패</div>
+        </div>
+      </div>
+      ${data.recentFailed && data.recentFailed.length > 0 ? `
+        <div style="margin-top:10px;font-size:.75rem">
+          <div style="font-weight:600;color:#DC2626;margin-bottom:4px">최근 실패 항목:</div>
+          ${data.recentFailed.map(f => `
+            <div style="background:#FEF2F2;padding:4px 8px;border-radius:4px;margin-bottom:3px;display:flex;justify-content:space-between;align-items:center">
+              <span><b>#${f.id}</b> ${f.type} — ${(f.error_msg || '').substring(0, 50)}</span>
+              <button onclick="retrySyncItem(${f.id})" style="font-size:.68rem;background:#3B82F6;color:#fff;border:none;padding:2px 8px;border-radius:4px;cursor:pointer">재시도</button>
+            </div>
+          `).join('')}
+        </div>
+      ` : ''}
+    `;
+
+    if (actionsEl) {
+      actionsEl.classList.toggle("hidden", !hasFailed && (s.pending || 0) === 0);
+    }
+  } catch (err) {
+    el.innerHTML = `<span style="color:#EF4444">로드 실패: ${err.message}</span>`;
+  }
+}
+
+async function loadBuildHistory() {
+  const el = document.getElementById("buildHistoryPanel");
+  if (!el) return;
+
+  try {
+    const data = await gasGet({ action: "buildHistory", limit: 10 });
+    if (!data || !data.history || data.history.length === 0) {
+      el.innerHTML = `<span style="color:var(--t3)">빌드 히스토리 없음</span>`;
+      return;
+    }
+
+    const rows = data.history;
+    el.innerHTML = `
+      <div style="max-height:250px;overflow-y:auto">
+        <table style="width:100%;font-size:.75rem;border-collapse:collapse">
+          <thead>
+            <tr style="background:#F8FAFC;position:sticky;top:0">
+              <th style="padding:4px 6px;text-align:left;border-bottom:1px solid var(--border)">시각</th>
+              <th style="padding:4px 6px;text-align:right;border-bottom:1px solid var(--border)">소요</th>
+              <th style="padding:4px 6px;text-align:right;border-bottom:1px solid var(--border)">갱신</th>
+              <th style="padding:4px 6px;text-align:right;border-bottom:1px solid var(--border)">스킵</th>
+              <th style="padding:4px 6px;text-align:right;border-bottom:1px solid var(--border)">에러</th>
+              <th style="padding:4px 6px;text-align:center;border-bottom:1px solid var(--border)">트리거</th>
+            </tr>
+          </thead>
+          <tbody>
+            ${rows.map(r => {
+              const dt = new Date(r.started_at);
+              const timeStr = dt.toLocaleString("ko-KR", { timeZone: "Asia/Seoul", month: "numeric", day: "numeric", hour: "2-digit", minute: "2-digit" });
+              const elapsedSec = r.elapsed_ms ? (r.elapsed_ms / 1000).toFixed(1) + 's' : '-';
+              const errColor = r.errors > 0 ? '#DC2626' : '#6B7280';
+              const triggerBadge = r.trigger_by === 'manual_full' ? '🔄전체'
+                : r.trigger_by === 'manual' ? '👆수동'
+                : r.trigger_by === 'cron' ? '⏰자동'
+                : r.trigger_by || '-';
+              return `<tr style="border-bottom:1px solid #F1F5F9">
+                <td style="padding:3px 6px">${timeStr}</td>
+                <td style="padding:3px 6px;text-align:right;font-weight:600">${elapsedSec}</td>
+                <td style="padding:3px 6px;text-align:right;color:#16A34A">${r.rebuilt || 0}</td>
+                <td style="padding:3px 6px;text-align:right;color:#6B7280">${r.skipped || 0}</td>
+                <td style="padding:3px 6px;text-align:right;color:${errColor}">${r.errors || 0}</td>
+                <td style="padding:3px 6px;text-align:center;font-size:.7rem">${triggerBadge}</td>
+              </tr>`;
+            }).join('')}
+          </tbody>
+        </table>
+      </div>
+    `;
+  } catch (err) {
+    el.innerHTML = `<span style="color:#EF4444">로드 실패: ${err.message}</span>`;
+  }
+}
+
+async function retrySyncItem(id) {
+  try {
+    await gasPost({ action: "syncQueueRetry", id: String(id) });
+    showToast("재시도 등록 완료", "success");
+    setTimeout(() => loadSyncQueueStats(), 1000);
+  } catch (err) {
+    showToast("재시도 실패: " + err.message, "error");
+  }
+}
+
+async function retrySyncAll() {
+  if (!confirm("모든 실패 항목을 재시도합니까?")) return;
+  try {
+    await gasPost({ action: "syncQueueRetry", id: "all" });
+    showToast("전체 재시도 등록 완료", "success");
+    setTimeout(() => loadSyncQueueStats(), 1000);
+  } catch (err) {
+    showToast("재시도 실패: " + err.message, "error");
+  }
+}
+
+async function purgeSyncQueue() {
+  if (!confirm("완료된 큐 항목을 정리합니까? (24시간 이상 경과)")) return;
+  try {
+    await gasPost({ action: "syncQueuePurge", hours: 24 });
+    showToast("정리 완료", "success");
+    setTimeout(() => loadSyncQueueStats(), 1000);
+  } catch (err) {
+    showToast("정리 실패: " + err.message, "error");
   }
 }
 </script>

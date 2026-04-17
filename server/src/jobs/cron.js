@@ -1,5 +1,6 @@
 const cron = require('node-cron');
 const { buildIndexSmart } = require('../services/indexBuilder.service');
+const { processQueue, purgeCompleted } = require('../services/syncQueue.service');
 const { logger } = require('../utils/logger');
 
 /**
@@ -9,6 +10,7 @@ const { logger } = require('../utils/logger');
 function startCronJobs() {
   const schedule = process.env.INDEX_CRON_SCHEDULE || '0 9-19 * * 1-6';
 
+  // ── 인덱스 빌드: 매 정시 ──
   cron.schedule(schedule, async () => {
     logger.info(`[CRON] 인덱스 빌드 시작: ${new Date().toISOString()}`);
     try {
@@ -21,7 +23,7 @@ function startCronJobs() {
     timezone: 'Asia/Seoul',
   });
 
-  // 전체 재빌드: 6시간마다
+  // ── 전체 재빌드: 6시간마다 ──
   cron.schedule('0 */6 * * *', async () => {
     logger.info('[CRON] 전체 재빌드 시작');
     try {
@@ -32,7 +34,29 @@ function startCronJobs() {
     }
   }, { timezone: 'Asia/Seoul' });
 
-  logger.info(`[CRON] 스케줄러 등록 완료: ${schedule}`);
+  // ── Phase 2: Sync Queue 워커 — 30초마다 pending 작업 처리 ──
+  cron.schedule('*/30 * * * * *', async () => {
+    try {
+      const result = await processQueue(10);
+      if (result.processed > 0) {
+        logger.info(`[CRON-Queue] 처리: ${result.succeeded}/${result.processed} 성공, ${result.failed} 실패, ${result.elapsed}ms`);
+      }
+    } catch (err) {
+      logger.error(`[CRON-Queue] 큐 처리 오류: ${err.message}`);
+    }
+  });
+
+  // ── 완료된 큐 항목 정리: 매일 새벽 3시 (24시간 이상 경과) ──
+  cron.schedule('0 3 * * *', async () => {
+    try {
+      const result = await purgeCompleted(24);
+      logger.info(`[CRON-Queue] 정리: ${result.purged}건 완료 항목 삭제`);
+    } catch (err) {
+      logger.error(`[CRON-Queue] 정리 오류: ${err.message}`);
+    }
+  }, { timezone: 'Asia/Seoul' });
+
+  logger.info(`[CRON] 스케줄러 등록 완료: 인덱스=${schedule}, 큐워커=30초, 정리=매일03시`);
 }
 
 module.exports = { startCronJobs };

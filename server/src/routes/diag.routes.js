@@ -3,6 +3,7 @@ const router = express.Router();
 const { authMiddleware } = require('../middleware/auth.middleware');
 const pool = require('../db/pool');
 const { readSheet, getSpreadsheetMeta } = require('../services/sheets.service');
+const { getQueueStats, retryItem, retryAllFailed, purgeCompleted } = require('../services/syncQueue.service');
 
 // ═══════════════════════════════════════════════════════════
 // GET /api/diag/debug-tab — 세부목록 현재 상태 진단 (GAS: debugTabConfig)
@@ -378,6 +379,64 @@ router.post('/create-campaign-sheet', authMiddleware, async (req, res, next) => 
       return res.json({ error: '템플릿 시트ID와 캠페인명이 필요합니다.' });
     }
     res.json({ ok: true, message: '캠페인 시트 생성 — Sheets API 연동 필요' });
+  } catch (err) {
+    next(err);
+  }
+});
+
+// ═══════════════════════════════════════════════════════════
+// Phase 2: Sync Queue 모니터링 엔드포인트
+// ═══════════════════════════════════════════════════════════
+
+// GET /api/diag/sync-queue — 큐 현황
+router.get('/sync-queue', authMiddleware, async (req, res, next) => {
+  try {
+    const result = await getQueueStats();
+    res.json({ ok: true, ...result });
+  } catch (err) {
+    next(err);
+  }
+});
+
+// POST /api/diag/sync-queue/retry — 특정 항목 재시도
+router.post('/sync-queue/retry', authMiddleware, async (req, res, next) => {
+  try {
+    const { id } = req.body;
+    if (id === 'all') {
+      const result = await retryAllFailed();
+      return res.json({ ok: true, ...result });
+    }
+    if (!id) return res.json({ error: 'id 필요' });
+    const result = await retryItem(parseInt(id));
+    res.json({ ok: true, ...result });
+  } catch (err) {
+    next(err);
+  }
+});
+
+// POST /api/diag/sync-queue/purge — 완료 항목 정리
+router.post('/sync-queue/purge', authMiddleware, async (req, res, next) => {
+  try {
+    const hours = parseInt(req.body.hours) || 24;
+    const result = await purgeCompleted(hours);
+    res.json({ ok: true, ...result });
+  } catch (err) {
+    next(err);
+  }
+});
+
+// GET /api/diag/build-history — 빌드 히스토리
+router.get('/build-history', authMiddleware, async (req, res, next) => {
+  try {
+    const limit = parseInt(req.query.limit) || 20;
+    const { rows } = await pool.query(
+      `SELECT id, started_at, elapsed_ms, rebuilt, skipped, errors, total, trigger_by
+       FROM build_history
+       ORDER BY started_at DESC
+       LIMIT $1`,
+      [limit]
+    );
+    res.json({ ok: true, history: rows });
   } catch (err) {
     next(err);
   }
