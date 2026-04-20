@@ -377,18 +377,26 @@ router.post('/image-upload', async (req, res, next) => {
 
     // 2. capture_folder_url 없으면 → 캠페인 폴더 자동 생성
     if (!targetFolderId) {
-      const folderName = `[캡처] ${displayName || tabName || '기타'}`;
-      const folder = await driveService.findFolderByName(folderName, rootFolderId)
-                  || await driveService.createFolder(folderName, rootFolderId);
-      targetFolderId = folder.id;
+      try {
+        const folderName = `[캡처] ${displayName || tabName || '기타'}`;
+        logger.info(`[image-upload] 폴더 검색/생성: "${folderName}" in ${rootFolderId}`);
+        const folder = await driveService.findFolderByName(folderName, rootFolderId)
+                    || await driveService.createFolder(folderName, rootFolderId);
+        targetFolderId = folder.id;
+        logger.info(`[image-upload] 폴더 확보: ${targetFolderId}`);
 
-      // tab_configs에 캡처폴더 URL 저장
-      if (sheetId && tabName) {
-        const folderUrl = `https://drive.google.com/drive/folders/${folder.id}`;
-        await pool.query(
-          'UPDATE tab_configs SET capture_folder_url = $1, updated_at = NOW() WHERE sheet_id = $2 AND tab_name = $3',
-          [folderUrl, sheetId, tabName]
-        );
+        // tab_configs에 캡처폴더 URL 저장
+        if (sheetId && tabName) {
+          const folderUrl = `https://drive.google.com/drive/folders/${folder.id}`;
+          await pool.query(
+            'UPDATE tab_configs SET capture_folder_url = $1, updated_at = NOW() WHERE sheet_id = $2 AND tab_name = $3',
+            [folderUrl, sheetId, tabName]
+          );
+        }
+      } catch (folderErr) {
+        logger.error(`[image-upload] 폴더 생성 실패: ${folderErr.message}`);
+        // 폴더 생성 실패 시 루트 폴더에 직접 업로드 시도
+        targetFolderId = rootFolderId;
       }
     }
 

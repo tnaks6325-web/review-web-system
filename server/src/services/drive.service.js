@@ -108,18 +108,27 @@ async function uploadFileBase64(base64Data, fileName, mimeType, parentFolderId) 
       supportsAllDrives: true,
     });
     driveId = folderMeta.data.driveId || null;
-  } catch (_) { /* 개인 드라이브 폴더 — driveId 없음 */ }
+    console.log(`[Drive] 폴더 ${parentFolderId} driveId=${driveId || '(개인드라이브)'}`);
+  } catch (metaErr) {
+    console.warn(`[Drive] 폴더 메타 조회 실패: ${metaErr.message}`);
+  }
 
   // ── googleapis SDK로 업로드 (공유 드라이브 대응) ──
   const stream = new Readable();
   stream.push(buffer);
   stream.push(null);
 
+  const requestBody = {
+    name: fileName,
+    parents: [parentFolderId],
+  };
+  // 공유 드라이브인 경우 driveId 명시
+  if (driveId) {
+    requestBody.driveId = driveId;
+  }
+
   const createParams = {
-    requestBody: {
-      name: fileName,
-      parents: [parentFolderId],
-    },
+    requestBody,
     media: {
       mimeType: mimeType || 'image/jpeg',
       body: stream,
@@ -128,8 +137,10 @@ async function uploadFileBase64(base64Data, fileName, mimeType, parentFolderId) 
     supportsAllDrives: true,
   };
 
+  console.log(`[Drive] 업로드 시작: ${fileName} → ${parentFolderId} (driveId=${driveId || 'none'})`);
   const res = await drive.files.create(createParams);
   const data = res.data;
+  console.log(`[Drive] 업로드 성공: ${data.id}`);
 
   // 파일을 "링크가 있는 모든 사용자" 읽기 가능으로 설정
   try {
