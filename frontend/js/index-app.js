@@ -1778,7 +1778,7 @@ function switchAdminTab(tabName) {
   if (tabName === "recruit")   { loadRecruitList(); loadRecruitTabOptions(); }
   if (tabName === "payment")   initPaymentPanel();
   if (tabName === "dashboard") { try { loadSystemMonitor(); } catch(_){} try { loadStatsOverview(); } catch(_){} }
-  if (tabName === "archive")   { try { loadArchiveList(); } catch(_){} }
+  if (tabName === "archive")   { try { loadArchiveList(); } catch(_){} try { _loadArchiveHistory(); } catch(_){} }
   // ★ 컨텍스트 툴바 업데이트
   _updateContextToolbar(tabName);
 }
@@ -10565,3 +10565,231 @@ function toggleDashPolling() {
 }
 
 // 관리자 대시보드 로드 완료 후 스냅샷은 loadAdminDashboard 내부에서 직접 갱신됨
+
+/* ══════════════════════════════════════════════════════════════
+   ★ Phase 12: 아카이브 시스템 (탭 단위, 반자동)
+   ══════════════════════════════════════════════════════════════ */
+
+// ── 아카이브 목록 로드 (검색/기간필터 지원) ──
+async function loadArchiveList() {
+  const wrap = document.getElementById('archiveListWrap');
+  if (!wrap) return;
+  wrap.innerHTML = '<i class="fas fa-circle-notch fa-spin"></i> 불러오는 중...';
+
+  try {
+    const q = (document.getElementById('archiveSearchInput')?.value || '').trim();
+    const from = document.getElementById('archiveDateFrom')?.value || '';
+    const to = document.getElementById('archiveDateTo')?.value || '';
+
+    const params = {};
+    if (q) params.q = q;
+    if (from) params.from = from;
+    if (to) params.to = to;
+
+    const data = await gasGet({ action: 'archiveList', ...params });
+
+    if (data.error) {
+      wrap.innerHTML = '<span style="color:#EF4444"><i class="fas fa-exclamation-circle"></i> ' + escHtml(data.error) + '</span>';
+      return;
+    }
+
+    const campaigns = data.campaigns || [];
+
+    // 요약 카드 업데이트
+    const el = id => document.getElementById(id);
+    if (el('archiveCampCount')) el('archiveCampCount').textContent = data.totalCampaigns || 0;
+    if (el('archiveTabCount'))  el('archiveTabCount').textContent = data.totalTabs || 0;
+    if (el('archiveRowCount'))  el('archiveRowCount').textContent = (data.totalRows || 0).toLocaleString();
+
+    if (campaigns.length === 0) {
+      wrap.innerHTML = '<div style="text-align:center;padding:32px;color:var(--t3)"><i class="fas fa-inbox" style="font-size:2rem;margin-bottom:8px;display:block"></i>아카이브된 데이터가 없습니다</div>';
+      _loadArchiveHistory();
+      return;
+    }
+
+    // 캠페인별 목록 렌더링
+    let html = '';
+    campaigns.forEach(camp => {
+      const totalRate = camp.totalRows > 0 ? Math.round(camp.totalSubmitted / camp.totalRows * 100) : 0;
+      html += `<div style="margin-bottom:12px;border:1px solid #E5E7EB;border-radius:10px;overflow:hidden">
+        <div style="background:#F9FAFB;padding:10px 14px;display:flex;align-items:center;gap:8px;cursor:pointer" onclick="this.nextElementSibling.style.display=this.nextElementSibling.style.display==='none'?'block':'none'">
+          <i class="fas fa-chevron-right" style="font-size:.7rem;color:#9CA3AF;transition:transform .2s"></i>
+          <span style="font-weight:600;color:var(--t1);font-size:.85rem">${escHtml(camp.campaignName)}</span>
+          <span style="margin-left:auto;font-size:.75rem;color:#6B7280">${camp.tabs.length}탭 · ${camp.totalRows.toLocaleString()}행 · ${totalRate}%</span>
+        </div>
+        <div style="display:none">
+          <table style="width:100%;font-size:.78rem;border-collapse:collapse">
+            <thead><tr style="background:#F3F4F6">
+              <th style="padding:6px 10px;text-align:left;color:#6B7280">탭명</th>
+              <th style="padding:6px 8px;text-align:right;color:#6B7280;width:60px">행</th>
+              <th style="padding:6px 8px;text-align:right;color:#6B7280;width:60px">제출</th>
+              <th style="padding:6px 8px;text-align:center;color:#6B7280;width:70px">사유</th>
+              <th style="padding:6px 8px;text-align:right;color:#6B7280;width:110px">아카이브일</th>
+            </tr></thead><tbody>`;
+      camp.tabs.forEach(t => {
+        const reasonLabel = t.archiveReason === 'closed' ? '마감' :
+                            t.archiveReason === 'force_done' ? '강제완료' :
+                            t.archiveReason === 'completed' ? '100%완료' : (t.archiveReason || '-');
+        const reasonColor = t.archiveReason === 'closed' ? '#EF4444' :
+                            t.archiveReason === 'force_done' ? '#F59E0B' : '#10B981';
+        const dateStr = t.archivedAt ? new Date(t.archivedAt).toLocaleDateString('ko-KR') : '-';
+        html += `<tr style="border-top:1px solid #F3F4F6">
+          <td style="padding:5px 10px">${escHtml(t.tabName)}</td>
+          <td style="padding:5px 8px;text-align:right">${(t.rowCount||0).toLocaleString()}</td>
+          <td style="padding:5px 8px;text-align:right">${(t.submittedCount||0).toLocaleString()}</td>
+          <td style="padding:5px 8px;text-align:center"><span style="background:${reasonColor}15;color:${reasonColor};padding:2px 6px;border-radius:4px;font-size:.7rem">${reasonLabel}</span></td>
+          <td style="padding:5px 8px;text-align:right;color:#9CA3AF">${dateStr}</td>
+        </tr>`;
+      });
+      html += '</tbody></table></div></div>';
+    });
+
+    wrap.innerHTML = html;
+    _loadArchiveHistory();
+  } catch (err) {
+    wrap.innerHTML = '<span style="color:#EF4444">로드 실패: ' + escHtml(err.message) + '</span>';
+  }
+}
+
+// ── 아카이브 이력 로드 ──
+async function _loadArchiveHistory() {
+  const wrap = document.getElementById('archiveHistoryWrap');
+  if (!wrap) return;
+
+  try {
+    const data = await gasGet({ action: 'archiveHistory', limit: 20 });
+    if (!data.history || data.history.length === 0) {
+      wrap.innerHTML = '<span style="color:var(--t3)">이력 없음</span>';
+      return;
+    }
+
+    let html = '<div style="display:flex;flex-direction:column;gap:6px">';
+    data.history.forEach(h => {
+      const icon = h.action === 'archive' ? 'fa-box' : 'fa-undo';
+      const color = h.action === 'archive' ? '#8B5CF6' : '#3B82F6';
+      const dateStr = h.performedAt ? new Date(h.performedAt).toLocaleString('ko-KR', { timeZone: 'Asia/Seoul' }) : '';
+      html += `<div style="display:flex;align-items:center;gap:8px;padding:6px 0;border-bottom:1px solid #F3F4F6">
+        <i class="fas ${icon}" style="color:${color};width:16px;text-align:center"></i>
+        <span style="flex:1;font-size:.78rem">${escHtml(h.note || h.campaignName || '')}</span>
+        <span style="font-size:.72rem;color:#9CA3AF;white-space:nowrap">${h.performedBy || ''} · ${dateStr}</span>
+      </div>`;
+    });
+    html += '</div>';
+    wrap.innerHTML = html;
+  } catch (_) {
+    wrap.innerHTML = '<span style="color:var(--t3)">이력 로드 실패</span>';
+  }
+}
+
+// ── 완료건 자동감지 (반자동: 감지 → 확인 → 실행) ──
+async function archiveAutoDetect() {
+  const detectWrap = document.getElementById('archiveDetectWrap');
+  if (!detectWrap) return;
+
+  detectWrap.style.display = 'block';
+  detectWrap.innerHTML = '<div style="text-align:center;padding:16px;color:var(--t2)"><i class="fas fa-circle-notch fa-spin"></i> 완료건 감지 중...</div>';
+
+  try {
+    const data = await gasGet({ action: 'archiveDetect' });
+
+    if (data.error) {
+      detectWrap.innerHTML = '<div style="padding:12px;background:#FEF2F2;border:1px solid #FECACA;border-radius:8px;color:#DC2626"><i class="fas fa-exclamation-circle"></i> ' + escHtml(data.error) + '</div>';
+      return;
+    }
+
+    if (!data.campaigns || data.totalTabs === 0) {
+      detectWrap.innerHTML = '<div style="padding:12px;background:#F0FDF4;border:1px solid #BBF7D0;border-radius:8px;color:#16A34A"><i class="fas fa-check-circle"></i> 아카이브 대상이 없습니다. 모든 인덱스가 진행중입니다.</div>';
+      return;
+    }
+
+    // 감지 결과 렌더링 + 전체선택/개별선택 체크박스
+    let html = `<div style="background:#F5F3FF;border:1px solid #DDD6FE;border-radius:10px;padding:14px">
+      <div style="display:flex;align-items:center;gap:8px;margin-bottom:12px">
+        <span style="font-weight:700;color:#7C3AED;font-size:.9rem"><i class="fas fa-magic"></i> 감지 결과: ${data.totalTabs}개 탭 (${data.totalCampaigns}개 캠페인)</span>
+        <button onclick="_archiveExecuteSelected()" style="margin-left:auto;background:#8B5CF6;color:#fff;border:none;padding:5px 14px;border-radius:6px;font-size:.78rem;cursor:pointer">
+          <i class="fas fa-archive"></i> 선택 항목 아카이브
+        </button>
+        <button onclick="document.getElementById('archiveDetectWrap').style.display='none'" style="background:#E5E7EB;border:none;padding:5px 12px;border-radius:6px;font-size:.78rem;cursor:pointer">
+          닫기
+        </button>
+      </div>
+      <div style="margin-bottom:8px">
+        <label style="cursor:pointer;font-size:.78rem;color:#6B7280">
+          <input type="checkbox" id="archiveSelectAll" onchange="_archiveToggleAll(this.checked)" checked> 전체 선택
+        </label>
+      </div>`;
+
+    data.campaigns.forEach(camp => {
+      html += `<div style="margin-bottom:8px;background:#fff;border-radius:8px;padding:8px 12px;border:1px solid #E5E7EB">
+        <div style="font-weight:600;font-size:.82rem;color:var(--t1);margin-bottom:4px">${escHtml(camp.campaignName)}</div>`;
+      camp.tabs.forEach(t => {
+        const reasonLabel = t.reason === 'closed' ? '마감' :
+                            t.reason === 'force_done' ? '강제완료' :
+                            t.reason === 'completed' ? '100%완료' : t.reason;
+        const reasonColor = t.reason === 'closed' ? '#EF4444' :
+                            t.reason === 'force_done' ? '#F59E0B' : '#10B981';
+        html += `<label style="display:flex;align-items:center;gap:6px;padding:3px 0;font-size:.78rem;cursor:pointer">
+          <input type="checkbox" class="archive-detect-cb" data-sheet="${escHtml(camp.sheetId)}" data-tab="${escHtml(t.tabName)}" checked>
+          <span style="flex:1">${escHtml(t.tabName)}</span>
+          <span style="font-size:.72rem;color:#9CA3AF">${(t.rowCount||0).toLocaleString()}행</span>
+          <span style="background:${reasonColor}15;color:${reasonColor};padding:1px 6px;border-radius:4px;font-size:.68rem">${reasonLabel}</span>
+        </label>`;
+      });
+      html += '</div>';
+    });
+
+    html += '</div>';
+    detectWrap.innerHTML = html;
+  } catch (err) {
+    detectWrap.innerHTML = '<div style="padding:12px;background:#FEF2F2;border:1px solid #FECACA;border-radius:8px;color:#DC2626">감지 실패: ' + escHtml(err.message) + '</div>';
+  }
+}
+
+// ── 전체 선택/해제 토글 ──
+function _archiveToggleAll(checked) {
+  document.querySelectorAll('.archive-detect-cb').forEach(cb => { cb.checked = checked; });
+}
+
+// ── 선택 항목 아카이브 실행 ──
+async function _archiveExecuteSelected() {
+  const checkboxes = document.querySelectorAll('.archive-detect-cb:checked');
+  if (checkboxes.length === 0) {
+    alert('아카이브할 항목을 선택해주세요.');
+    return;
+  }
+
+  const tabs = [];
+  checkboxes.forEach(cb => {
+    tabs.push({ sheetId: cb.dataset.sheet, tabName: cb.dataset.tab });
+  });
+
+  if (!confirm(`${tabs.length}개 탭을 아카이브합니다.\n\n아카이브하면 대시보드에서 제외되고 인덱스 빌드에서 스킵됩니다.\n\n계속하시겠습니까?`)) {
+    return;
+  }
+
+  const detectWrap = document.getElementById('archiveDetectWrap');
+  if (detectWrap) {
+    detectWrap.innerHTML = '<div style="text-align:center;padding:16px;color:var(--t2)"><i class="fas fa-circle-notch fa-spin"></i> 아카이브 실행 중...</div>';
+  }
+
+  try {
+    const data = await gasGet({ action: 'archiveTabs', tabs: tabs, reason: 'auto_detect' });
+
+    if (data.error) {
+      alert('아카이브 실패: ' + data.error);
+      if (detectWrap) detectWrap.style.display = 'none';
+      return;
+    }
+
+    const msg = `아카이브 완료!\n\n• ${data.archivedTabs || 0}개 탭 처리\n• ${(data.archivedRows || 0).toLocaleString()}개 행 이동`;
+    alert(msg);
+
+    if (detectWrap) detectWrap.style.display = 'none';
+
+    // 아카이브 목록 새로고침
+    loadArchiveList();
+  } catch (err) {
+    alert('아카이브 실패: ' + err.message);
+    if (detectWrap) detectWrap.style.display = 'none';
+  }
+}

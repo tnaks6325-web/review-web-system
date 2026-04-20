@@ -120,6 +120,20 @@ async function buildIndexSmart(forceFullRebuild = false) {
     const tcMap = {};
     tcRows.forEach(r => { tcMap[`${r.sheet_id}||${r.tab_name}`] = r; });
 
+    // ── 2.5단계: 아카이브된 탭 목록 로드 ──
+    // 아카이브된 탭은 인덱스 빌드에서 완전히 제외
+    const { rows: archivedRows } = await pool.query(
+      'SELECT sheet_id, tab_name FROM index_master_archive'
+    );
+    const archivedSet = new Set();
+    const archivedSheetCounts = {}; // sheetId → 아카이브된 탭 수
+    archivedRows.forEach(r => {
+      archivedSet.add(`${r.sheet_id}||${r.tab_name}`);
+      archivedSheetCounts[r.sheet_id] = (archivedSheetCounts[r.sheet_id] || 0) + 1;
+    });
+
+    logger.info(`[buildIndex] 아카이브된 탭: ${archivedRows.length}개 (${Object.keys(archivedSheetCounts).length}개 시트)`);
+
     // ── 3단계: 시트별 병렬 처리 ──
     // 각 시트를 독립적으로 처리하고 결과를 모음
     const sheetResults = await Promise.allSettled(
@@ -128,6 +142,7 @@ async function buildIndexSmart(forceFullRebuild = false) {
         checksumMap,
         sheetModifiedMap,
         tcMap,
+        archivedSet,
         startTime,
       }))
     );
@@ -217,7 +232,7 @@ async function buildIndexSmart(forceFullRebuild = false) {
 // ═══════════════════════════════════════════════════════════
 
 async function _processOneSheet(sheetId, opts) {
-  const { forceFullRebuild, checksumMap, sheetModifiedMap, tcMap, startTime } = opts;
+  const { forceFullRebuild, checksumMap, sheetModifiedMap, tcMap, archivedSet, startTime } = opts;
   const sheetStart = Date.now();
   let rebuilt = 0, skipped = 0, errors = 0;
 
@@ -254,9 +269,14 @@ async function _processOneSheet(sheetId, opts) {
     return { rebuilt: 0, skipped: 0, errors: 0, elapsed: Date.now() - sheetStart };
   }
 
-  // force_done/is_closed 탭 필터링
+  // force_done/is_closed/아카이브 탭 필터링
   const activeTabs = validTabs.filter(t => {
     const key = `${sheetId}||${t.properties.title}`;
+    // 아카이브된 탭은 완전히 스킵
+    if (archivedSet.has(key)) {
+      skipped++;
+      return false;
+    }
     const tc = tcMap[key];
     if (tc && (tc.force_done || tc.is_closed)) {
       skipped++;

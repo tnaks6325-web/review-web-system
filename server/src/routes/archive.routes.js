@@ -1,14 +1,243 @@
 const express = require('express');
 const router = express.Router();
-const { authMiddleware, masterOnlyMiddleware } = require('../middleware/auth.middleware');
+const { authMiddleware } = require('../middleware/auth.middleware');
 const pool = require('../db/pool');
 const { logger } = require('../utils/logger');
 
 // ═══════════════════════════════════════════════════════════
-// GET /api/archive/list — 아카이브된 캠페인 목록
+// GET /api/archive/detect — 아카이브 대상 자동 감지 (반자동: 감지만)
+// 조건: is_closed=true OR force_done=true OR (row_count>0 AND submitted_count>=row_count)
+// 개별 탭 단위로 반환
+// ═══════════════════════════════════════════════════════════
+router.get('/detect', authMiddleware, async (req, res, next) => {
+  try {
+    const { rows } = await pool.query(`
+      SELECT
+        im.sheet_id       AS "sheetId",
+        im.tab_name       AS "tabName",
+        im.campaign_name  AS "campaignName",
+        im.row_count      AS "rowCount",
+        im.submitted_count AS "submittedCount",
+        im.built_at       AS "builtAt",
+        CASE
+          WHEN tc.is_closed = TRUE THEN 'closed'
+          WHEN tc.force_done = TRUE THEN 'force_done'
+          WHEN im.row_count > 0 AND im.submitted_count >= im.row_count THEN 'completed'
+          ELSE 'unknown'
+        END AS "reason"
+      FROM index_master im
+      LEFT JOIN tab_configs tc ON im.sheet_id = tc.sheet_id AND im.tab_name = tc.tab_name
+      WHERE im.status = 'active'
+        AND (
+          tc.is_closed = TRUE
+          OR tc.force_done = TRUE
+          OR (im.row_count > 0 AND im.submitted_count >= im.row_count)
+        )
+      ORDER BY im.campaign_name, im.tab_name
+    `);
+
+    // 캠페인별 그룹핑 (프론트엔드 표시용)
+    const campMap = new Map();
+    rows.forEach(r => {
+      if (!campMap.has(r.sheetId)) {
+        campMap.set(r.sheetId, {
+          sheetId: r.sheetId,
+          campaignName: r.campaignName || '미분류',
+          tabs: [],
+        });
+      }
+      campMap.get(r.sheetId).tabs.push({
+        tabName: r.tabName,
+        rowCount: parseInt(r.rowCount) || 0,
+        submittedCount: parseInt(r.submittedCount) || 0,
+        reason: r.reason,
+        builtAt: r.builtAt,
+      });
+    });
+
+    const campaigns = Array.from(campMap.values());
+    res.json({
+      ok: true,
+      totalTabs: rows.length,
+      totalCampaigns: campaigns.length,
+      campaigns,
+    });
+  } catch (err) {
+    next(err);
+  }
+});
+
+// ═══════════════════════════════════════════════════════════
+// POST /api/archive/tabs — 개별 탭 단위 아카이브 실행
+// body: { tabs: [{ sheetId, tabName }], reason? }
+// 관리자가 감지 결과 확인 후 선택적으로 실행
+// ═══════════════════════════════════════════════════════════
+router.post('/tabs', authMiddleware, async (req, res, next) => {
+  const client = await pool.connect();
+  try {
+    const { tabs, reason } = req.body;
+    if (!tabs || !Array.isArray(tabs) || tabs.length === 0) {
+      return res.status(400).json({ error: '아카이브할 탭 목록이 필요합니다.' });
+    }
+
+    const adminName = req.admin?.name || 'system';
+    const archiveReason = reason || 'manual';
+
+    await client.query('BEGIN');
+
+    let archivedTabs = 0;
+    let archivedRows = 0;
+    const results = [];
+
+    for (const { sheetId, tabName } of tabs) {
+      if (!sheetId || !tabName) continue;
+
+      try {
+        // 1. index_master에서 해당 탭 확인
+        const { rows: masterRows } = await client.query(
+          'SELECT * FROM index_master WHERE sheet_id = $1 AND tab_name = $2',
+          [sheetId, tabName]
+        );
+        if (masterRows.length === 0) {
+          results.push({ sheetId, tabName, status: 'skipped', reason: '데이터 없음' });
+          continue;
+        }
+
+        const mr = masterRows[0];
+
+        // 2. index_master → index_master_archive 이동
+        await client.query(`
+          INSERT INTO index_master_archive
+            (sheet_id, tab_name, tab_gid, campaign_name, row_count, submitted_count,
+             last_date, checksum, built_at, status, skip_reason, error_msg,
+             sheet_modified_at, archived_by, archive_reason)
+          VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,'archived',$10,$11,$12,$13,$14)
+          ON CONFLICT (sheet_id, tab_name) DO UPDATE SET
+            campaign_name = EXCLUDED.campaign_name,
+            row_count = EXCLUDED.row_count,
+            submitted_count = EXCLUDED.submitted_count,
+            checksum = EXCLUDED.checksum,
+            built_at = EXCLUDED.built_at,
+            archived_at = NOW(),
+            archived_by = EXCLUDED.archived_by,
+            archive_reason = EXCLUDED.archive_reason
+        `, [
+          mr.sheet_id, mr.tab_name, mr.tab_gid, mr.campaign_name,
+          mr.row_count, mr.submitted_count, mr.last_date, mr.checksum,
+          mr.built_at, mr.skip_reason, mr.error_msg, mr.sheet_modified_at,
+          adminName, archiveReason,
+        ]);
+
+        // 3. review_index → review_index_archive 이동
+        const { rowCount: reviewCount } = await client.query(`
+          INSERT INTO review_index_archive
+            (reviewer_name, sheet_id, tab_gid, tab_name, campaign_name,
+             row_index, is_submitted, is_submitted2, product_url, product_name,
+             submit_col, submit_col2, row_json, start_date, end_date,
+             round, phone8, built_at, archived_at)
+          SELECT
+            reviewer_name, sheet_id, tab_gid, tab_name, campaign_name,
+            row_index, is_submitted, is_submitted2, product_url, product_name,
+            submit_col, submit_col2, row_json, start_date, end_date,
+            round, phone8, built_at, NOW()
+          FROM review_index
+          WHERE sheet_id = $1 AND tab_name = $2
+        `, [sheetId, tabName]);
+
+        // 4. 원본 테이블에서 삭제
+        await client.query(
+          'DELETE FROM review_index WHERE sheet_id = $1 AND tab_name = $2',
+          [sheetId, tabName]
+        );
+        await client.query(
+          'DELETE FROM index_master WHERE sheet_id = $1 AND tab_name = $2',
+          [sheetId, tabName]
+        );
+
+        archivedTabs++;
+        archivedRows += reviewCount;
+        results.push({
+          sheetId, tabName,
+          campaignName: mr.campaign_name,
+          rowCount: reviewCount,
+          status: 'archived',
+        });
+
+      } catch (tabErr) {
+        results.push({ sheetId, tabName, status: 'error', error: tabErr.message });
+        logger.error(`[archive/tabs] 탭 아카이브 실패: ${sheetId}/${tabName} — ${tabErr.message}`);
+      }
+    }
+
+    // 5. 아카이브 이력 기록 (전체를 한 건으로)
+    if (archivedTabs > 0) {
+      await client.query(`
+        INSERT INTO archive_history (action, sheet_id, campaign_name, tab_count, row_count, performed_by, note)
+        VALUES ('archive', $1, $2, $3, $4, $5, $6)
+      `, [
+        'multi', '일괄 아카이브', archivedTabs, archivedRows, adminName,
+        `${archiveReason}: ${archivedTabs}개 탭, ${archivedRows}개 행 아카이브`,
+      ]);
+    }
+
+    await client.query('COMMIT');
+
+    logger.info(`[archive/tabs] 탭 아카이브 완료: ${archivedTabs}탭, ${archivedRows}행 by ${adminName}`);
+
+    res.json({
+      ok: true,
+      archivedTabs,
+      archivedRows,
+      results,
+    });
+  } catch (err) {
+    await client.query('ROLLBACK').catch(() => {});
+    next(err);
+  } finally {
+    client.release();
+  }
+});
+
+// ═══════════════════════════════════════════════════════════
+// GET /api/archive/list — 아카이브된 탭 목록 (조회/검색/기간필터)
+// query: ?q=검색어&from=2026-01-01&to=2026-04-20&page=1&limit=50
 // ═══════════════════════════════════════════════════════════
 router.get('/list', authMiddleware, async (req, res, next) => {
   try {
+    const { q, from, to, page = 1, limit = 200 } = req.query;
+    const offset = (parseInt(page) - 1) * parseInt(limit);
+    const params = [];
+    const conditions = [];
+    let paramIdx = 1;
+
+    if (q) {
+      conditions.push(`(ima.campaign_name ILIKE $${paramIdx} OR ima.tab_name ILIKE $${paramIdx})`);
+      params.push(`%${q}%`);
+      paramIdx++;
+    }
+    if (from) {
+      conditions.push(`ima.archived_at >= $${paramIdx}`);
+      params.push(from);
+      paramIdx++;
+    }
+    if (to) {
+      conditions.push(`ima.archived_at <= $${paramIdx}::date + interval '1 day'`);
+      params.push(to);
+      paramIdx++;
+    }
+
+    const whereClause = conditions.length > 0
+      ? 'WHERE ' + conditions.join(' AND ')
+      : '';
+
+    // 전체 카운트
+    const { rows: countRows } = await pool.query(
+      `SELECT COUNT(*) AS total FROM index_master_archive ima ${whereClause}`,
+      params
+    );
+    const totalCount = parseInt(countRows[0].total);
+
+    // 데이터 조회
     const { rows } = await pool.query(`
       SELECT
         ima.sheet_id        AS "sheetId",
@@ -18,13 +247,17 @@ router.get('/list', authMiddleware, async (req, res, next) => {
         ima.submitted_count AS "submittedCount",
         ima.archived_at     AS "archivedAt",
         ima.archived_by     AS "archivedBy",
-        ima.archive_reason  AS "archiveReason"
+        ima.archive_reason  AS "archiveReason",
+        ima.built_at        AS "builtAt"
       FROM index_master_archive ima
+      ${whereClause}
       ORDER BY ima.archived_at DESC
-    `);
+      LIMIT $${paramIdx} OFFSET $${paramIdx + 1}
+    `, [...params, parseInt(limit), offset]);
 
     // sheetId별 그룹핑
     const campMap = new Map();
+    let totalRows = 0, totalSubmitted = 0;
     rows.forEach(r => {
       if (!campMap.has(r.sheetId)) {
         campMap.set(r.sheetId, {
@@ -33,215 +266,43 @@ router.get('/list', authMiddleware, async (req, res, next) => {
           tabs: [],
           totalRows: 0,
           totalSubmitted: 0,
-          archivedAt: r.archivedAt,
-          archivedBy: r.archivedBy,
         });
       }
       const camp = campMap.get(r.sheetId);
+      const rowCount = parseInt(r.rowCount) || 0;
+      const submittedCount = parseInt(r.submittedCount) || 0;
       camp.tabs.push({
         tabName: r.tabName,
-        rowCount: parseInt(r.rowCount) || 0,
-        submittedCount: parseInt(r.submittedCount) || 0,
+        rowCount,
+        submittedCount,
         archivedAt: r.archivedAt,
+        archivedBy: r.archivedBy,
         archiveReason: r.archiveReason,
       });
-      camp.totalRows += parseInt(r.rowCount) || 0;
-      camp.totalSubmitted += parseInt(r.submittedCount) || 0;
+      camp.totalRows += rowCount;
+      camp.totalSubmitted += submittedCount;
+      totalRows += rowCount;
+      totalSubmitted += submittedCount;
     });
 
     const campaigns = Array.from(campMap.values());
-    res.json({ ok: true, campaigns, total: campaigns.length });
-  } catch (err) {
-    next(err);
-  }
-});
-
-// ═══════════════════════════════════════════════════════════
-// POST /api/archive/campaign — 캠페인(시트) 단위 아카이브
-// body: { sheetId, reason? }
-// 해당 sheetId의 모든 탭을 아카이브 테이블로 이동
-// ═══════════════════════════════════════════════════════════
-router.post('/campaign', authMiddleware, async (req, res, next) => {
-  const client = await pool.connect();
-  try {
-    const { sheetId, reason } = req.body;
-    if (!sheetId) return res.status(400).json({ error: 'sheetId가 필요합니다.' });
-
-    const adminName = req.admin?.name || 'system';
-    const archiveReason = reason || 'manual';
-
-    await client.query('BEGIN');
-
-    // 1. index_master에서 해당 시트의 탭 목록 확인
-    const { rows: masterRows } = await client.query(
-      'SELECT * FROM index_master WHERE sheet_id = $1', [sheetId]
-    );
-    if (masterRows.length === 0) {
-      await client.query('ROLLBACK');
-      return res.json({ ok: false, error: '해당 시트에 인덱스 데이터가 없습니다.' });
-    }
-
-    // 2. index_master → index_master_archive 이동
-    for (const row of masterRows) {
-      await client.query(`
-        INSERT INTO index_master_archive
-          (sheet_id, tab_name, tab_gid, campaign_name, row_count, submitted_count,
-           last_date, checksum, built_at, status, skip_reason, error_msg,
-           sheet_modified_at, archived_by, archive_reason)
-        VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,'archived',$10,$11,$12,$13,$14)
-        ON CONFLICT (sheet_id, tab_name) DO UPDATE SET
-          campaign_name = EXCLUDED.campaign_name,
-          row_count = EXCLUDED.row_count,
-          submitted_count = EXCLUDED.submitted_count,
-          checksum = EXCLUDED.checksum,
-          built_at = EXCLUDED.built_at,
-          archived_at = NOW(),
-          archived_by = EXCLUDED.archived_by,
-          archive_reason = EXCLUDED.archive_reason
-      `, [
-        row.sheet_id, row.tab_name, row.tab_gid, row.campaign_name,
-        row.row_count, row.submitted_count, row.last_date, row.checksum,
-        row.built_at, row.skip_reason, row.error_msg, row.sheet_modified_at,
-        adminName, archiveReason,
-      ]);
-    }
-
-    // 3. review_index → review_index_archive 이동
-    const { rowCount: reviewCount } = await client.query(`
-      INSERT INTO review_index_archive
-        (reviewer_name, sheet_id, tab_gid, tab_name, campaign_name,
-         row_index, is_submitted, is_submitted2, product_url, product_name,
-         submit_col, submit_col2, row_json, start_date, end_date,
-         round, phone8, built_at, archived_at)
-      SELECT
-        reviewer_name, sheet_id, tab_gid, tab_name, campaign_name,
-        row_index, is_submitted, is_submitted2, product_url, product_name,
-        submit_col, submit_col2, row_json, start_date, end_date,
-        round, phone8, built_at, NOW()
-      FROM review_index
-      WHERE sheet_id = $1
-    `, [sheetId]);
-
-    // 4. 원본 테이블에서 삭제
-    await client.query('DELETE FROM review_index WHERE sheet_id = $1', [sheetId]);
-    await client.query('DELETE FROM index_master WHERE sheet_id = $1', [sheetId]);
-
-    // 5. 아카이브 이력 기록
-    const campName = masterRows[0]?.campaign_name || '미분류';
-    await client.query(`
-      INSERT INTO archive_history (action, sheet_id, campaign_name, tab_count, row_count, performed_by, note)
-      VALUES ('archive', $1, $2, $3, $4, $5, $6)
-    `, [sheetId, campName, masterRows.length, reviewCount, adminName,
-        `${archiveReason}: ${masterRows.length}개 탭, ${reviewCount}개 행 아카이브`]);
-
-    await client.query('COMMIT');
-
-    logger.info(`[archive] 캠페인 아카이브 완료: ${campName} (${sheetId.substring(0,15)}...) → ${masterRows.length}탭, ${reviewCount}행 by ${adminName}`);
-
     res.json({
       ok: true,
-      message: `${campName} 아카이브 완료`,
-      archived: { tabCount: masterRows.length, rowCount: reviewCount },
+      campaigns,
+      totalCampaigns: campaigns.length,
+      totalTabs: totalCount,
+      totalRows,
+      totalSubmitted,
+      page: parseInt(page),
+      limit: parseInt(limit),
     });
   } catch (err) {
-    await client.query('ROLLBACK').catch(() => {});
     next(err);
-  } finally {
-    client.release();
   }
 });
 
 // ═══════════════════════════════════════════════════════════
-// POST /api/archive/restore — 아카이브 캠페인 복원
-// body: { sheetId }
-// ═══════════════════════════════════════════════════════════
-router.post('/restore', authMiddleware, async (req, res, next) => {
-  const client = await pool.connect();
-  try {
-    const { sheetId } = req.body;
-    if (!sheetId) return res.status(400).json({ error: 'sheetId가 필요합니다.' });
-
-    const adminName = req.admin?.name || 'system';
-
-    await client.query('BEGIN');
-
-    // 1. 아카이브 마스터 확인
-    const { rows: archiveMaster } = await client.query(
-      'SELECT * FROM index_master_archive WHERE sheet_id = $1', [sheetId]
-    );
-    if (archiveMaster.length === 0) {
-      await client.query('ROLLBACK');
-      return res.json({ ok: false, error: '아카이브된 데이터가 없습니다.' });
-    }
-
-    // 2. index_master_archive → index_master 복원
-    for (const row of archiveMaster) {
-      await client.query(`
-        INSERT INTO index_master
-          (sheet_id, tab_name, tab_gid, campaign_name, row_count, submitted_count,
-           last_date, checksum, built_at, status, skip_reason, error_msg, sheet_modified_at)
-        VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,'active',$10,$11,$12)
-        ON CONFLICT (sheet_id, tab_name) DO UPDATE SET
-          campaign_name = EXCLUDED.campaign_name,
-          row_count = EXCLUDED.row_count,
-          submitted_count = EXCLUDED.submitted_count,
-          checksum = EXCLUDED.checksum,
-          built_at = EXCLUDED.built_at,
-          status = 'active'
-      `, [
-        row.sheet_id, row.tab_name, row.tab_gid, row.campaign_name,
-        row.row_count, row.submitted_count, row.last_date, row.checksum,
-        row.built_at, row.skip_reason, row.error_msg, row.sheet_modified_at,
-      ]);
-    }
-
-    // 3. review_index_archive → review_index 복원
-    const { rowCount: reviewCount } = await client.query(`
-      INSERT INTO review_index
-        (reviewer_name, sheet_id, tab_gid, tab_name, campaign_name,
-         row_index, is_submitted, is_submitted2, product_url, product_name,
-         submit_col, submit_col2, row_json, start_date, end_date,
-         round, phone8, built_at)
-      SELECT
-        reviewer_name, sheet_id, tab_gid, tab_name, campaign_name,
-        row_index, is_submitted, is_submitted2, product_url, product_name,
-        submit_col, submit_col2, row_json, start_date, end_date,
-        round, phone8, built_at
-      FROM review_index_archive
-      WHERE sheet_id = $1
-    `, [sheetId]);
-
-    // 4. 아카이브 테이블에서 삭제
-    await client.query('DELETE FROM review_index_archive WHERE sheet_id = $1', [sheetId]);
-    await client.query('DELETE FROM index_master_archive WHERE sheet_id = $1', [sheetId]);
-
-    // 5. 복원 이력 기록
-    const campName = archiveMaster[0]?.campaign_name || '미분류';
-    await client.query(`
-      INSERT INTO archive_history (action, sheet_id, campaign_name, tab_count, row_count, performed_by, note)
-      VALUES ('restore', $1, $2, $3, $4, $5, $6)
-    `, [sheetId, campName, archiveMaster.length, reviewCount, adminName,
-        `복원: ${archiveMaster.length}개 탭, ${reviewCount}개 행 복원`]);
-
-    await client.query('COMMIT');
-
-    logger.info(`[archive] 캠페인 복원 완료: ${campName} (${sheetId.substring(0,15)}...) → ${archiveMaster.length}탭, ${reviewCount}행 by ${adminName}`);
-
-    res.json({
-      ok: true,
-      message: `${campName} 복원 완료`,
-      restored: { tabCount: archiveMaster.length, rowCount: reviewCount },
-    });
-  } catch (err) {
-    await client.query('ROLLBACK').catch(() => {});
-    next(err);
-  } finally {
-    client.release();
-  }
-});
-
-// ═══════════════════════════════════════════════════════════
-// GET /api/archive/history — 아카이브/복원 이력
+// GET /api/archive/history — 아카이브 이력
 // ═══════════════════════════════════════════════════════════
 router.get('/history', authMiddleware, async (req, res, next) => {
   try {
@@ -256,118 +317,6 @@ router.get('/history', authMiddleware, async (req, res, next) => {
       LIMIT $1
     `, [limit]);
     res.json({ ok: true, history: rows });
-  } catch (err) {
-    next(err);
-  }
-});
-
-// ═══════════════════════════════════════════════════════════
-// POST /api/archive/auto — 완료 캠페인 자동 아카이브
-// 모든 탭의 제출률이 100%이거나 force_done/is_closed인 캠페인을 자동 아카이브
-// ═══════════════════════════════════════════════════════════
-router.post('/auto', authMiddleware, async (req, res, next) => {
-  try {
-    const adminName = req.admin?.name || 'system';
-
-    // sheetId별로 모든 탭이 완료인 캠페인 찾기
-    const { rows } = await pool.query(`
-      SELECT im.sheet_id,
-        COUNT(*) AS total_tabs,
-        COUNT(*) FILTER (
-          WHERE im.row_count > 0 AND im.submitted_count >= im.row_count
-            OR tc.force_done = TRUE
-            OR tc.is_closed = TRUE
-        ) AS done_tabs
-      FROM index_master im
-      LEFT JOIN tab_configs tc ON im.sheet_id = tc.sheet_id AND im.tab_name = tc.tab_name
-      WHERE im.status = 'active'
-      GROUP BY im.sheet_id
-      HAVING COUNT(*) = COUNT(*) FILTER (
-        WHERE im.row_count > 0 AND im.submitted_count >= im.row_count
-          OR tc.force_done = TRUE
-          OR tc.is_closed = TRUE
-      )
-      AND COUNT(*) > 0
-    `);
-
-    if (rows.length === 0) {
-      return res.json({ ok: true, message: '아카이브할 완료 캠페인이 없습니다.', archived: 0 });
-    }
-
-    let archivedCount = 0;
-    const results = [];
-
-    for (const row of rows) {
-      try {
-        // 내부적으로 archive/campaign과 동일한 로직 실행
-        const client = await pool.connect();
-        try {
-          await client.query('BEGIN');
-
-          const { rows: masterRows } = await client.query(
-            'SELECT * FROM index_master WHERE sheet_id = $1', [row.sheet_id]
-          );
-
-          for (const mr of masterRows) {
-            await client.query(`
-              INSERT INTO index_master_archive
-                (sheet_id, tab_name, tab_gid, campaign_name, row_count, submitted_count,
-                 last_date, checksum, built_at, status, skip_reason, error_msg,
-                 sheet_modified_at, archived_by, archive_reason)
-              VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,'archived',$10,$11,$12,$13,'completed')
-              ON CONFLICT (sheet_id, tab_name) DO UPDATE SET
-                row_count = EXCLUDED.row_count,
-                submitted_count = EXCLUDED.submitted_count,
-                archived_at = NOW(),
-                archive_reason = 'completed'
-            `, [
-              mr.sheet_id, mr.tab_name, mr.tab_gid, mr.campaign_name,
-              mr.row_count, mr.submitted_count, mr.last_date, mr.checksum,
-              mr.built_at, mr.skip_reason, mr.error_msg, mr.sheet_modified_at,
-              adminName,
-            ]);
-          }
-
-          const { rowCount: reviewCount } = await client.query(`
-            INSERT INTO review_index_archive
-              (reviewer_name, sheet_id, tab_gid, tab_name, campaign_name,
-               row_index, is_submitted, is_submitted2, product_url, product_name,
-               submit_col, submit_col2, row_json, start_date, end_date,
-               round, phone8, built_at, archived_at)
-            SELECT
-              reviewer_name, sheet_id, tab_gid, tab_name, campaign_name,
-              row_index, is_submitted, is_submitted2, product_url, product_name,
-              submit_col, submit_col2, row_json, start_date, end_date,
-              round, phone8, built_at, NOW()
-            FROM review_index WHERE sheet_id = $1
-          `, [row.sheet_id]);
-
-          await client.query('DELETE FROM review_index WHERE sheet_id = $1', [row.sheet_id]);
-          await client.query('DELETE FROM index_master WHERE sheet_id = $1', [row.sheet_id]);
-
-          const campName = masterRows[0]?.campaign_name || '미분류';
-          await client.query(`
-            INSERT INTO archive_history (action, sheet_id, campaign_name, tab_count, row_count, performed_by, note)
-            VALUES ('archive', $1, $2, $3, $4, $5, $6)
-          `, [row.sheet_id, campName, masterRows.length, reviewCount, adminName,
-              `자동 아카이브: 모든 탭 완료`]);
-
-          await client.query('COMMIT');
-          archivedCount++;
-          results.push({ sheetId: row.sheet_id, campaignName: campName, tabs: masterRows.length, rows: reviewCount });
-        } catch (innerErr) {
-          await client.query('ROLLBACK').catch(() => {});
-          logger.error(`[archive/auto] 시트 ${row.sheet_id.substring(0,15)} 아카이브 실패: ${innerErr.message}`);
-        } finally {
-          client.release();
-        }
-      } catch (connErr) {
-        logger.error(`[archive/auto] DB 연결 실패: ${connErr.message}`);
-      }
-    }
-
-    logger.info(`[archive/auto] 자동 아카이브 완료: ${archivedCount}/${rows.length}개 캠페인 by ${adminName}`);
-    res.json({ ok: true, archived: archivedCount, total: rows.length, results });
   } catch (err) {
     next(err);
   }

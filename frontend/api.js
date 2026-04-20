@@ -153,12 +153,11 @@ const _ACTION_MAP = {
   'syncQueuePurge':     { method: 'POST', path: '/api/diag/sync-queue/purge' },
   'buildHistory':       { method: 'GET',  path: '/api/diag/build-history' },
 
-  // Phase 10: Archive
+  // Phase 10: Archive (탭 단위 아카이브)
+  'archiveDetect':      { method: 'GET',  path: '/api/archive/detect' },
+  'archiveTabs':        { method: 'POST', path: '/api/archive/tabs' },
   'archiveList':        { method: 'GET',  path: '/api/archive/list' },
-  'archiveCampaign':    { method: 'POST', path: '/api/archive/campaign' },
-  'archiveRestore':     { method: 'POST', path: '/api/archive/restore' },
   'archiveHistory':     { method: 'GET',  path: '/api/archive/history' },
-  'archiveAuto':        { method: 'POST', path: '/api/archive/auto' },
 
   // Phase 11: Campaign Name Fix
   'fixCampaignNames':   { method: 'POST', path: '/api/diag/fix-campaign-names' },
