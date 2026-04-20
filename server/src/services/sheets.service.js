@@ -85,9 +85,13 @@ async function getSpreadsheetMeta(spreadsheetId) {
   const res = await sheets.spreadsheets.get({
     spreadsheetId,
     includeGridData: false,
-    fields: 'sheets(properties(sheetId,title,gridProperties))',
+    fields: 'properties(title),sheets(properties(sheetId,title,gridProperties))',
   });
-  return res.data.sheets;
+  // 스프레드시트 제목을 각 시트 메타에 첨부하여 반환
+  const spreadsheetTitle = res.data.properties?.title || '';
+  const sheetsArr = res.data.sheets || [];
+  sheetsArr._spreadsheetTitle = spreadsheetTitle;
+  return sheetsArr;
 }
 
 /**

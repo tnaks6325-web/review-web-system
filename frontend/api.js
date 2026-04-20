@@ -152,6 +152,13 @@ const _ACTION_MAP = {
   'syncQueueRetry':     { method: 'POST', path: '/api/diag/sync-queue/retry' },
   'syncQueuePurge':     { method: 'POST', path: '/api/diag/sync-queue/purge' },
   'buildHistory':       { method: 'GET',  path: '/api/diag/build-history' },
+
+  // Phase 10: Archive
+  'archiveList':        { method: 'GET',  path: '/api/archive/list' },
+  'archiveCampaign':    { method: 'POST', path: '/api/archive/campaign' },
+  'archiveRestore':     { method: 'POST', path: '/api/archive/restore' },
+  'archiveHistory':     { method: 'GET',  path: '/api/archive/history' },
+  'archiveAuto':        { method: 'POST', path: '/api/archive/auto' },
 };
 
 // ═══════════════════════════════════════════════════════════

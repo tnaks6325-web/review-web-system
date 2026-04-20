@@ -22,6 +22,7 @@ const memoRoutes     = require('./routes/memo.routes');
 const paymentRoutes  = require('./routes/payment.routes');
 const submitRoutes   = require('./routes/submit.routes');
 const diagRoutes     = require('./routes/diag.routes');
+const archiveRoutes  = require('./routes/archive.routes');
 
 const app = express();
 
@@ -67,6 +68,7 @@ app.use('/api/submit',    submitRoutes);
 
 // 진단/디버그/뷰어/블랙리스트/캠페인/이미지 (Section 12)
 app.use('/api/diag',      diagRoutes);
+app.use('/api/archive',   archiveRoutes);
 app.use('/api/viewer',    diagRoutes);
 app.use('/api/image',     diagRoutes);
 app.use('/api/blacklist', diagRoutes);
@@ -93,7 +95,7 @@ app.get('/health', async (req, res) => {
     db: dbStatus,
     dbTime,
     google: googleStatus,
-    version: '2.9.1-dashboard-fix',
+    version: '2.10.0-campaign-grouping-archive',
     uptime: Math.floor(process.uptime()),
     memory: Math.round(process.memoryUsage().heapUsed / 1024 / 1024) + 'MB',
     sentry: isSentryEnabled() ? 'active' : 'inactive',

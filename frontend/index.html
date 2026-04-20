@@ -697,6 +697,9 @@
         <button class="admin-tab-btn" data-tab="payment" onclick="switchAdminTab('payment')">
           <i class="fas fa-money-bill-wave"></i> 입금처리
         </button>
+        <button class="admin-tab-btn" data-tab="archive" onclick="switchAdminTab('archive')">
+          <i class="fas fa-archive"></i> 아카이브
+        </button>
       </nav>
 
       <!-- 제출 현황 대시보드 -->
@@ -1205,6 +1208,56 @@
           <p id="payEmptyMsg" style="font-size:.83rem;margin:0">대상 조회 버튼을 클릭하세요.</p>
         </div>
       </div><!-- /tab-payment -->
+
+      <!-- ═══════════════════════════════════════════════════════ -->
+      <!-- Phase 10: 아카이브 관리 탭 -->
+      <!-- ═══════════════════════════════════════════════════════ -->
+      <div id="tab-archive" class="admin-tab-pane" style="padding:16px">
+        <div class="admin-section-header">
+          <span style="font-size:.95rem;font-weight:700;color:var(--t1)">
+            <i class="fas fa-archive" style="color:#8B5CF6;margin-right:6px"></i>완료 캠페인 아카이브
+          </span>
+          <div style="display:flex;gap:6px;margin-left:auto">
+            <button class="btn-sm" onclick="archiveAutoDetect()" style="font-size:.78rem;background:#8B5CF6;color:#fff;border:none;padding:4px 12px;border-radius:6px;cursor:pointer">
+              <i class="fas fa-magic"></i> 완료건 자동감지
+            </button>
+            <button class="btn-sm" onclick="loadArchiveList()" style="font-size:.78rem">
+              <i class="fas fa-sync-alt"></i> 새로고침
+            </button>
+          </div>
+        </div>
+
+        <!-- 아카이브 요약 카드 -->
+        <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:12px;margin:16px 0">
+          <div style="background:#F5F3FF;border-radius:12px;padding:14px;text-align:center;border:1px solid #DDD6FE">
+            <div id="archiveCampCount" style="font-size:1.4rem;font-weight:700;color:#7C3AED">0</div>
+            <div style="font-size:.75rem;color:#6B7280">아카이브 캠페인</div>
+          </div>
+          <div style="background:#FEF3C7;border-radius:12px;padding:14px;text-align:center;border:1px solid #FDE68A">
+            <div id="archiveTabCount" style="font-size:1.4rem;font-weight:700;color:#D97706">0</div>
+            <div style="font-size:.75rem;color:#6B7280">아카이브 탭</div>
+          </div>
+          <div style="background:#F0FDF4;border-radius:12px;padding:14px;text-align:center;border:1px solid #BBF7D0">
+            <div id="archiveRowCount" style="font-size:1.4rem;font-weight:700;color:#16A34A">0</div>
+            <div style="font-size:.75rem;color:#6B7280">아카이브 행</div>
+          </div>
+        </div>
+
+        <!-- 아카이브 목록 -->
+        <div id="archiveListWrap" style="font-size:.82rem;color:var(--t2)">
+          <i class="fas fa-circle-notch fa-spin"></i> 불러오는 중...
+        </div>
+
+        <!-- 아카이브 이력 -->
+        <div class="admin-section-header" style="margin-top:24px">
+          <span style="font-size:.88rem;font-weight:600;color:var(--t1)">
+            <i class="fas fa-history" style="color:#6366F1;margin-right:6px"></i>아카이브 이력
+          </span>
+        </div>
+        <div id="archiveHistoryWrap" style="font-size:.82rem;color:var(--t2);margin-top:8px">
+          <span style="color:var(--t3)">탭 전환 시 자동 로드</span>
+        </div>
+      </div><!-- /tab-archive -->
 
     </main>
   </div><!-- /screenAdmin -->

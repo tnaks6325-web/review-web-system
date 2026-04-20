@@ -1778,6 +1778,7 @@ function switchAdminTab(tabName) {
   if (tabName === "recruit")   { loadRecruitList(); loadRecruitTabOptions(); }
   if (tabName === "payment")   initPaymentPanel();
   if (tabName === "dashboard") { try { loadSystemMonitor(); } catch(_){} try { loadStatsOverview(); } catch(_){} }
+  if (tabName === "archive")   { try { loadArchiveList(); } catch(_){} }
   // ★ 컨텍스트 툴바 업데이트
   _updateContextToolbar(tabName);
 }

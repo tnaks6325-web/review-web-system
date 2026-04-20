@@ -192,20 +192,26 @@ router.get('/dashboard', authMiddleware, async (req, res, next) => {
       ? new Date(buildRows[0].maxBuilt).toLocaleString('ko-KR', { timeZone: 'Asia/Seoul' })
       : null;
 
-    // 4. 캠페인별 그룹핑 → stats 배열 생성
-    const campMap = new Map(); // campaignName → { campaign, total, submitted, tabs:[] }
+    // 4. sheetId(광고주 구글시트) 기준 그룹핑 → stats 배열 생성
+    // 같은 sheetId의 탭들이 하나의 캠페인 블록으로 묶임
+    const campMap = new Map(); // sheetId → { campaign, total, submitted, tabs:[] }
     let grandTotal = 0, grandSubmitted = 0;
 
     tabs.forEach(t => {
-      const campName = t.campaignName || t.tcCampaignName || '미분류';
+      const groupKey  = t.sheetId; // sheetId 기준 그룹핑
+      const campName  = t.campaignName || t.tcCampaignName || '미분류';
       const total     = parseInt(t.totalCount) || 0;
       const submitted = parseInt(t.submittedCount) || 0;
       const pending   = total - submitted;
 
-      if (!campMap.has(campName)) {
-        campMap.set(campName, { campaign: campName, total: 0, submitted: 0, tabs: [], closedOnly: false });
+      if (!campMap.has(groupKey)) {
+        campMap.set(groupKey, { campaign: campName, sheetId: groupKey, total: 0, submitted: 0, tabs: [], closedOnly: false });
       }
-      const camp = campMap.get(campName);
+      const camp = campMap.get(groupKey);
+      // 캠페인명 업데이트 (빈 문자열이 아닌 첫 번째 유효한 이름 사용)
+      if ((!camp.campaign || camp.campaign === '미분류') && campName && campName !== '미분류') {
+        camp.campaign = campName;
+      }
       camp.total     += total;
       camp.submitted += submitted;
       grandTotal     += total;

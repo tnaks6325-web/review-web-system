@@ -247,6 +247,7 @@ async function _processOneSheet(sheetId, opts) {
 
   // ── Step 2: 시트 메타 조회 → 유효 탭 목록 ──
   const meta = await getSpreadsheetMeta(sheetId);
+  const spreadsheetTitle = meta._spreadsheetTitle || sheetId; // 스프레드시트 제목 (캠페인명)
   const validTabs = meta.filter(s => !SYSTEM_TABS.includes(s.properties.title));
 
   if (validTabs.length === 0) {
@@ -327,7 +328,7 @@ async function _processOneSheet(sheetId, opts) {
       }
 
       // 헤더 파싱 + DB 업데이트
-      const rows = parseTabRows(values, sheetId, tabName, tabGid);
+      const rows = parseTabRows(values, sheetId, tabName, tabGid, spreadsheetTitle);
       await _upsertTabIndex(sheetId, tabName, tabGid, newChecksum, rows, currentModifiedTime);
       rebuilt++;
 
@@ -436,7 +437,7 @@ async function _upsertTabIndex(sheetId, tabName, tabGid, checksum, rows, modifie
 // 탭 데이터 파싱 (기존 로직 100% 유지)
 // ═══════════════════════════════════════════════════════════
 
-function parseTabRows(values, sheetId, tabName, tabGid) {
+function parseTabRows(values, sheetId, tabName, tabGid, campaignTitle) {
   let headerRowIdx = -1;
   for (let i = 0; i < Math.min(values.length, 10); i++) {
     const cells = values[i] ? values[i].map(c => String(c || '').trim()) : [];
@@ -517,7 +518,7 @@ function parseTabRows(values, sheetId, tabName, tabGid) {
         startDate: startDateIdx >= 0 ? _formatDate(row[startDateIdx]) : null,
         endDate: endDateIdx >= 0 ? _formatDate(row[endDateIdx]) : null,
         round: roundIdx >= 0 ? String(row[roundIdx] || '').trim() : '',
-        campaignName: tabName,
+        campaignName: campaignTitle || tabName,
         phone8,
       };
     })

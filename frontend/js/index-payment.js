@@ -1246,3 +1246,163 @@ function _renderCampaignTable(campaigns, totals) {
   html += '</tbody></table>';
   el.innerHTML = html;
 }
+
+// ═══════════════════════════════════════════════════════════
+// Phase 10: 아카이브 관리
+// ═══════════════════════════════════════════════════════════
+
+async function loadArchiveList() {
+  var el = document.getElementById('archiveListWrap');
+  if (!el) return;
+  el.innerHTML = '<i class="fas fa-circle-notch fa-spin"></i> 불러오는 중...';
+
+  try {
+    var data = await gasGet({ action: 'archiveList' });
+    if (!data || data.error) {
+      el.innerHTML = '<span style="color:var(--t3)">아카이브 데이터를 불러올 수 없습니다.</span>';
+      return;
+    }
+
+    var campaigns = data.campaigns || [];
+    // 요약 카드 업데이트
+    var totalTabs = 0, totalRows = 0;
+    campaigns.forEach(function(c) { totalTabs += c.tabs.length; totalRows += c.totalRows; });
+    _setText('archiveCampCount', campaigns.length);
+    _setText('archiveTabCount', totalTabs);
+    _setText('archiveRowCount', totalRows.toLocaleString());
+
+    if (campaigns.length === 0) {
+      el.innerHTML = '<div style="text-align:center;padding:30px;color:var(--t3)"><i class="fas fa-inbox" style="font-size:2rem;margin-bottom:8px;display:block"></i>아카이브된 캠페인이 없습니다</div>';
+      return;
+    }
+
+    var html = '';
+    campaigns.forEach(function(c, ci) {
+      var rate = c.totalRows > 0 ? Math.round(c.totalSubmitted / c.totalRows * 100) : 0;
+      var dateStr = c.archivedAt ? new Date(c.archivedAt).toLocaleDateString('ko-KR') : '';
+      html += '<div style="background:#fff;border:1px solid var(--border);border-radius:10px;margin-bottom:10px;overflow:hidden">';
+      html += '<div style="display:flex;align-items:center;justify-content:space-between;padding:10px 14px;background:#FAFAFA;cursor:pointer" onclick="toggleArchiveDetail(\'archDetail' + ci + '\')">';
+      html += '  <div style="display:flex;align-items:center;gap:8px">';
+      html += '    <i class="fas fa-chevron-right" style="font-size:.7rem;color:var(--t3);transition:transform .2s"></i>';
+      html += '    <span style="font-weight:600;color:var(--t1)">' + escHtml(c.campaignName) + '</span>';
+      html += '    <span style="font-size:.72rem;background:#EDE9FE;color:#7C3AED;padding:1px 8px;border-radius:10px">' + c.tabs.length + '개 탭</span>';
+      html += '    <span style="font-size:.72rem;color:var(--t3)">' + c.totalSubmitted + '/' + c.totalRows + ' (' + rate + '%)</span>';
+      html += '  </div>';
+      html += '  <div style="display:flex;align-items:center;gap:8px">';
+      html += '    <span style="font-size:.7rem;color:var(--t3)">' + dateStr + '</span>';
+      html += '    <button onclick="event.stopPropagation();restoreArchive(\'' + escHtml(c.sheetId) + '\',\'' + escHtml(c.campaignName) + '\')" style="font-size:.7rem;background:#3B82F6;color:#fff;border:none;padding:3px 10px;border-radius:4px;cursor:pointer" title="활성 데이터로 복원">';
+      html += '      <i class="fas fa-undo"></i> 복원';
+      html += '    </button>';
+      html += '  </div>';
+      html += '</div>';
+      html += '<div id="archDetail' + ci + '" style="display:none;padding:8px 14px;font-size:.75rem">';
+      c.tabs.forEach(function(t) {
+        var tRate = t.rowCount > 0 ? Math.round(t.submittedCount / t.rowCount * 100) : 0;
+        html += '<div style="display:flex;justify-content:space-between;padding:3px 0;border-bottom:1px solid #F1F5F9">';
+        html += '  <span style="color:var(--t2)">' + escHtml(t.tabName) + '</span>';
+        html += '  <span>' + t.submittedCount + '/' + t.rowCount + ' <b style="color:' + (tRate >= 100 ? '#16A34A' : '#D97706') + '">' + tRate + '%</b></span>';
+        html += '</div>';
+      });
+      html += '</div></div>';
+    });
+
+    el.innerHTML = html;
+    loadArchiveHistory();
+  } catch (err) {
+    el.innerHTML = '<span style="color:#EF4444">로드 실패: ' + err.message + '</span>';
+  }
+}
+
+function toggleArchiveDetail(id) {
+  var el = document.getElementById(id);
+  if (!el) return;
+  var isOpen = el.style.display !== 'none';
+  el.style.display = isOpen ? 'none' : 'block';
+  // 아이콘 회전
+  var parent = el.previousElementSibling;
+  if (parent) {
+    var icon = parent.querySelector('.fa-chevron-right');
+    if (icon) icon.style.transform = isOpen ? '' : 'rotate(90deg)';
+  }
+}
+
+async function restoreArchive(sheetId, campName) {
+  if (!confirm('"' + campName + '" 캠페인을 활성 데이터로 복원합니까?\n아카이브에서 제거되고 메인 대시보드에 다시 표시됩니다.')) return;
+  try {
+    var data = await gasPost({ action: 'archiveRestore', sheetId: sheetId });
+    if (data && data.ok) {
+      showToast(campName + ' 복원 완료 (' + (data.restored?.tabCount || 0) + '탭)', 'success');
+      loadArchiveList();
+    } else {
+      showToast('복원 실패: ' + (data?.error || '알 수 없는 오류'), 'error');
+    }
+  } catch (err) {
+    showToast('복원 실패: ' + err.message, 'error');
+  }
+}
+
+async function archiveAutoDetect() {
+  if (!confirm('모든 탭이 완료된 캠페인을 자동으로 아카이브합니까?\n(제출률 100% 또는 강제완료/마감 처리된 탭만)')) return;
+  try {
+    showToast('자동 아카이브 처리 중...', 'info');
+    var data = await gasPost({ action: 'archiveAuto' });
+    if (data && data.ok) {
+      if (data.archived > 0) {
+        showToast(data.archived + '개 캠페인 아카이브 완료!', 'success');
+        loadArchiveList();
+        // 메인 대시보드도 갱신
+        if (typeof loadAdminDashboard === 'function') setTimeout(loadAdminDashboard, 500);
+      } else {
+        showToast('아카이브할 완료 캠페인이 없습니다.', 'info');
+      }
+    } else {
+      showToast('자동 아카이브 실패: ' + (data?.error || ''), 'error');
+    }
+  } catch (err) {
+    showToast('자동 아카이브 실패: ' + err.message, 'error');
+  }
+}
+
+async function archiveCampaign(sheetId, campName) {
+  if (!confirm('"' + campName + '" 캠페인을 아카이브합니까?\n메인 대시보드에서 제거되고 아카이브 탭에서 조회 가능합니다.')) return;
+  try {
+    var data = await gasPost({ action: 'archiveCampaign', sheetId: sheetId, reason: 'manual' });
+    if (data && data.ok) {
+      showToast(campName + ' 아카이브 완료 (' + (data.archived?.tabCount || 0) + '탭)', 'success');
+      if (typeof loadAdminDashboard === 'function') loadAdminDashboard();
+    } else {
+      showToast('아카이브 실패: ' + (data?.error || '알 수 없는 오류'), 'error');
+    }
+  } catch (err) {
+    showToast('아카이브 실패: ' + err.message, 'error');
+  }
+}
+
+async function loadArchiveHistory() {
+  var el = document.getElementById('archiveHistoryWrap');
+  if (!el) return;
+
+  try {
+    var data = await gasGet({ action: 'archiveHistory', limit: 20 });
+    if (!data || !data.history || data.history.length === 0) {
+      el.innerHTML = '<span style="color:var(--t3)">이력 없음</span>';
+      return;
+    }
+
+    var html = '<div style="max-height:200px;overflow-y:auto">';
+    data.history.forEach(function(h) {
+      var icon = h.action === 'archive' ? '<i class="fas fa-archive" style="color:#8B5CF6"></i>' : '<i class="fas fa-undo" style="color:#3B82F6"></i>';
+      var dateStr = new Date(h.performedAt).toLocaleString('ko-KR', { timeZone: 'Asia/Seoul', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit' });
+      html += '<div style="display:flex;align-items:center;gap:8px;padding:4px 0;border-bottom:1px solid #F1F5F9;font-size:.75rem">';
+      html += '  ' + icon;
+      html += '  <span style="font-weight:600">' + escHtml(h.campaignName || '') + '</span>';
+      html += '  <span style="color:var(--t3)">' + h.tabCount + '탭 / ' + h.rowCount + '행</span>';
+      html += '  <span style="margin-left:auto;color:var(--t3)">' + escHtml(h.performedBy || '') + ' · ' + dateStr + '</span>';
+      html += '</div>';
+    });
+    html += '</div>';
+    el.innerHTML = html;
+  } catch (err) {
+    el.innerHTML = '<span style="color:#EF4444">이력 로드 실패</span>';
+  }
+}
