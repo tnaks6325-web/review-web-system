@@ -329,7 +329,7 @@ async function _processOneSheet(sheetId, opts) {
 
       // 헤더 파싱 + DB 업데이트
       const rows = parseTabRows(values, sheetId, tabName, tabGid, spreadsheetTitle);
-      await _upsertTabIndex(sheetId, tabName, tabGid, newChecksum, rows, currentModifiedTime);
+      await _upsertTabIndex(sheetId, tabName, tabGid, newChecksum, rows, currentModifiedTime, spreadsheetTitle);
       rebuilt++;
 
     } catch (err) {
@@ -354,7 +354,7 @@ async function _processOneSheet(sheetId, opts) {
 // DB 업데이트 (트랜잭션) — 기존 로직 그대로 유지
 // ═══════════════════════════════════════════════════════════
 
-async function _upsertTabIndex(sheetId, tabName, tabGid, checksum, rows, modifiedTime) {
+async function _upsertTabIndex(sheetId, tabName, tabGid, checksum, rows, modifiedTime, campaignName) {
   const client = await pool.connect();
   try {
     await client.query('BEGIN');
@@ -412,7 +412,7 @@ async function _upsertTabIndex(sheetId, tabName, tabGid, checksum, rows, modifie
         error_msg = NULL,
         sheet_modified_at = EXCLUDED.sheet_modified_at
     `, [
-      sheetId, tabName, tabGid, tabName,
+      sheetId, tabName, tabGid, campaignName || tabName,
       checksum, rows.length, rows.filter(r => r.isSubmitted).length,
       modifiedTime || null
     ]);

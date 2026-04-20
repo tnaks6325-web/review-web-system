@@ -1136,6 +1136,149 @@ router.get('/stats/overview', authMiddleware, async (req, res, next) => {
   }
 });
 
+// ═══════════════════════════════════════════════════════════
+// POST /api/diag/fix-campaign-names — 캠페인명 일괄 수정
+// 각 sheetId에 대해 Google Sheets API로 실제 스프레드시트 제목을 가져와
+// index_master와 review_index의 campaign_name을 업데이트
+// ═══════════════════════════════════════════════════════════
+router.post('/fix-campaign-names', authMiddleware, async (req, res, next) => {
+  try {
+    const { dryRun } = req.body || {};
+
+    // 1. 고유 sheetId 목록 조회
+    const { rows: sheetRows } = await pool.query(`
+      SELECT DISTINCT sheet_id FROM index_master WHERE status = 'active'
+    `);
+
+    if (sheetRows.length === 0) {
+      return res.json({ ok: true, message: '업데이트할 시트가 없습니다.', updated: 0 });
+    }
+
+    const results = [];
+    let updatedSheets = 0;
+    let updatedMasterRows = 0;
+    let updatedIndexRows = 0;
+    let errorCount = 0;
+
+    // 2. 각 sheetId에 대해 스프레드시트 제목 조회
+    for (const row of sheetRows) {
+      const sheetId = row.sheet_id;
+      try {
+        const meta = await getSpreadsheetMeta(sheetId);
+        const spreadsheetTitle = meta._spreadsheetTitle || '';
+
+        if (!spreadsheetTitle) {
+          results.push({ sheetId: sheetId.substring(0, 20) + '...', title: '(제목 없음)', status: 'skipped' });
+          continue;
+        }
+
+        // 현재 DB의 캠페인명 확인
+        const { rows: currentNames } = await pool.query(
+          `SELECT DISTINCT campaign_name FROM index_master WHERE sheet_id = $1`,
+          [sheetId]
+        );
+        const currentName = currentNames.map(r => r.campaign_name).join(', ');
+
+        if (!dryRun) {
+          // index_master 업데이트
+          const masterResult = await pool.query(
+            `UPDATE index_master SET campaign_name = $1 WHERE sheet_id = $2 AND campaign_name != $1`,
+            [spreadsheetTitle, sheetId]
+          );
+          updatedMasterRows += masterResult.rowCount;
+
+          // review_index 업데이트
+          const indexResult = await pool.query(
+            `UPDATE review_index SET campaign_name = $1 WHERE sheet_id = $2 AND campaign_name != $1`,
+            [spreadsheetTitle, sheetId]
+          );
+          updatedIndexRows += indexResult.rowCount;
+        }
+
+        results.push({
+          sheetId: sheetId.substring(0, 20) + '...',
+          oldCampaignName: currentName,
+          newCampaignName: spreadsheetTitle,
+          changed: currentName !== spreadsheetTitle,
+          status: dryRun ? 'dry_run' : 'updated',
+        });
+        updatedSheets++;
+
+      } catch (err) {
+        results.push({
+          sheetId: sheetId.substring(0, 20) + '...',
+          status: 'error',
+          error: err.message,
+        });
+        errorCount++;
+      }
+    }
+
+    res.json({
+      ok: true,
+      dryRun: !!dryRun,
+      totalSheets: sheetRows.length,
+      updatedSheets,
+      updatedMasterRows,
+      updatedIndexRows,
+      errorCount,
+      results,
+    });
+  } catch (err) {
+    next(err);
+  }
+});
+
+// ═══════════════════════════════════════════════════════════
+// GET /api/diag/sheet-titles — 현재 등록된 모든 시트의 실제 제목 조회 (진단용)
+// ═══════════════════════════════════════════════════════════
+router.get('/sheet-titles', authMiddleware, async (req, res, next) => {
+  try {
+    // DB에서 고유 sheetId + 현재 campaign_name 조회
+    const { rows: sheetRows } = await pool.query(`
+      SELECT sheet_id, campaign_name, COUNT(*) AS tab_count
+      FROM index_master
+      WHERE status = 'active'
+      GROUP BY sheet_id, campaign_name
+      ORDER BY tab_count DESC
+    `);
+
+    // 각 sheetId에 대해 Google API로 실제 제목 조회
+    const titles = [];
+    for (const row of sheetRows) {
+      const sheetId = row.sheet_id;
+      let actualTitle = null;
+      let error = null;
+
+      try {
+        const meta = await getSpreadsheetMeta(sheetId);
+        actualTitle = meta._spreadsheetTitle || null;
+      } catch (err) {
+        error = err.message;
+      }
+
+      titles.push({
+        sheetId: sheetId.substring(0, 20) + '...',
+        fullSheetId: sheetId,
+        currentCampaignName: row.campaign_name,
+        actualSpreadsheetTitle: actualTitle,
+        tabCount: parseInt(row.tab_count),
+        mismatch: actualTitle && actualTitle !== row.campaign_name,
+        error,
+      });
+    }
+
+    res.json({
+      ok: true,
+      total: titles.length,
+      mismatches: titles.filter(t => t.mismatch).length,
+      titles,
+    });
+  } catch (err) {
+    next(err);
+  }
+});
+
 // ── 헬퍼 ──
 function extractSheetId(url) {
   const m = (url || '').match(/\/spreadsheets\/d\/([a-zA-Z0-9_-]+)/);

@@ -159,6 +159,10 @@ const _ACTION_MAP = {
   'archiveRestore':     { method: 'POST', path: '/api/archive/restore' },
   'archiveHistory':     { method: 'GET',  path: '/api/archive/history' },
   'archiveAuto':        { method: 'POST', path: '/api/archive/auto' },
+
+  // Phase 11: Campaign Name Fix
+  'fixCampaignNames':   { method: 'POST', path: '/api/diag/fix-campaign-names' },
+  'sheetTitles':        { method: 'GET',  path: '/api/diag/sheet-titles' },
 };
 
 // ═══════════════════════════════════════════════════════════

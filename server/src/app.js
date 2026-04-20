@@ -95,7 +95,7 @@ app.get('/health', async (req, res) => {
     db: dbStatus,
     dbTime,
     google: googleStatus,
-    version: '2.10.0-campaign-grouping-archive',
+    version: '2.11.0-fix-campaign-names',
     uptime: Math.floor(process.uptime()),
     memory: Math.round(process.memoryUsage().heapUsed / 1024 / 1024) + 'MB',
     sentry: isSentryEnabled() ? 'active' : 'inactive',
