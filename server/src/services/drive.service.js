@@ -1,4 +1,4 @@
-const { drive } = require('./sheets.service');
+const { drive, auth } = require('./sheets.service');
 const { Readable } = require('stream');
 
 /**
@@ -99,27 +99,46 @@ async function uploadFileBase64(base64Data, fileName, mimeType, parentFolderId) 
   const cleanBase64 = base64Data.replace(/^data:[^;]+;base64,/, '');
   const buffer = Buffer.from(cleanBase64, 'base64');
 
-  const stream = new Readable();
-  stream.push(buffer);
-  stream.push(null);
-
-  const res = await drive.files.create({
-    requestBody: {
-      name: fileName,
-      parents: [parentFolderId],
-    },
-    media: {
-      mimeType: mimeType || 'image/jpeg',
-      body: stream,
-    },
-    fields: 'id, name, webViewLink, webContentLink',
-    supportsAllDrives: true,
+  // ── 직접 multipart upload (Service Account 쿼터 문제 우회) ──
+  const boundary = '===multipart_boundary_' + Date.now() + '===';
+  const metadata = JSON.stringify({
+    name: fileName,
+    parents: [parentFolderId],
   });
+
+  const multipartBody = Buffer.concat([
+    Buffer.from(`--${boundary}\r\nContent-Type: application/json; charset=UTF-8\r\n\r\n${metadata}\r\n--${boundary}\r\nContent-Type: ${mimeType || 'image/jpeg'}\r\nContent-Transfer-Encoding: base64\r\n\r\n`),
+    Buffer.from(cleanBase64),
+    Buffer.from(`\r\n--${boundary}--`),
+  ]);
+
+  const accessToken = await auth.getAccessToken();
+  const token = typeof accessToken === 'string' ? accessToken : accessToken?.token;
+
+  const response = await fetch(
+    'https://www.googleapis.com/upload/drive/v3/files?uploadType=multipart&supportsAllDrives=true&fields=id,name,webViewLink,webContentLink',
+    {
+      method: 'POST',
+      headers: {
+        'Authorization': `Bearer ${token}`,
+        'Content-Type': `multipart/related; boundary=${boundary}`,
+        'Content-Length': String(multipartBody.length),
+      },
+      body: multipartBody,
+    }
+  );
+
+  if (!response.ok) {
+    const errText = await response.text();
+    throw new Error(`Drive upload failed (${response.status}): ${errText}`);
+  }
+
+  const data = await response.json();
 
   // 파일을 "링크가 있는 모든 사용자" 읽기 가능으로 설정
   try {
     await drive.permissions.create({
-      fileId: res.data.id,
+      fileId: data.id,
       requestBody: {
         role: 'reader',
         type: 'anyone',
@@ -131,7 +150,7 @@ async function uploadFileBase64(base64Data, fileName, mimeType, parentFolderId) 
     console.warn(`[Drive] 권한 설정 실패 (무시): ${permErr.message}`);
   }
 
-  return res.data;
+  return data;
 }
 
 /**
