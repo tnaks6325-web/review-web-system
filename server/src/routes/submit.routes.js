@@ -4,6 +4,7 @@ const { writeSheet, readSheet, appendSheet } = require('../services/sheets.servi
 const { enqueue } = require('../services/syncQueue.service');
 const pool = require('../db/pool');
 const { logger } = require('../utils/logger');
+const { emitReviewSubmit, emitOrderSubmit } = require('../utils/sse');
 
 // ═══════════════════════════════════════════════════════════
 // 헤더 캐시 — 같은 탭의 헤더를 5분간 캐시 (Phase 3 최적화)
@@ -88,6 +89,16 @@ router.post('/review', async (req, res, next) => {
       }
     }
 
+    // ── SSE 알림: 리뷰 제출 ──
+    emitReviewSubmit({
+      tabName,
+      sheetId,
+      reviewer: req.body.reviewerName || '',
+      rowIndex,
+      dbUpdated,
+      sheetsWritten,
+    });
+
     res.json({
       ok: true,
       submitted: submitValue,
@@ -169,6 +180,16 @@ router.post('/order', async (req, res, next) => {
         logger.error(`[submit/order] 큐 등록도 실패: ${queueErr.message}`);
       }
     }
+
+    // ── SSE 알림: 구매양식 제출 ──
+    emitOrderSubmit({
+      tabName,
+      sheetId,
+      orderer: orderer || '',
+      recipient: recipient || '',
+      dbSaved,
+      sheetsWritten,
+    });
 
     res.json({
       ok: true,

@@ -6,7 +6,12 @@ const jwt = require('jsonwebtoken');
  */
 function authMiddleware(req, res, next) {
   const authHeader = req.headers['authorization'];
-  const token = authHeader && authHeader.split(' ')[1];
+  let token = authHeader && authHeader.split(' ')[1];
+
+  // SSE 등 EventSource는 커스텀 헤더 불가 → 쿼리 파라미터 fallback
+  if (!token && req.query && req.query.token) {
+    token = req.query.token;
+  }
 
   if (!token) {
     return res.status(401).json({ error: '인증이 필요합니다.' });

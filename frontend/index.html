@@ -878,6 +878,30 @@
           </div>
         </div>
         <!-- ═══════════════════════════════════════════════════════ -->
+        <!-- Phase 8: 실시간 알림 피드 (SSE) -->
+        <!-- ═══════════════════════════════════════════════════════ -->
+        <div class="admin-section-header" style="margin-top:24px">
+          <span style="font-size:.95rem;font-weight:700;color:var(--t1)">
+            <i class="fas fa-bell" style="color:#F59E0B;margin-right:6px"></i>실시간 알림
+            <span id="sseBadge" style="display:none;background:#EF4444;color:#fff;font-size:.65rem;padding:1px 6px;border-radius:99px;margin-left:6px;animation:pulse 2s infinite">0</span>
+            <span id="sseStatus" style="font-size:.7rem;color:#9CA3AF;margin-left:8px">● 연결 대기</span>
+          </span>
+          <div style="margin-left:auto;display:flex;gap:6px">
+            <button class="btn-sm" onclick="clearNotifications()" style="font-size:.72rem">
+              <i class="fas fa-trash-alt"></i> 비우기
+            </button>
+            <button class="btn-sm" id="sseToggleBtn" onclick="toggleSSE()" style="font-size:.72rem">
+              <i class="fas fa-plug"></i> 연결
+            </button>
+          </div>
+        </div>
+        <div id="sseNotifFeed" style="margin-top:10px;max-height:220px;overflow-y:auto;border:1px solid var(--border);border-radius:10px;background:#FAFAFA;padding:8px">
+          <div style="text-align:center;color:var(--t3);font-size:.78rem;padding:16px">
+            <i class="fas fa-satellite-dish" style="margin-right:4px"></i>관리자 로그인 후 자동 연결됩니다
+          </div>
+        </div>
+
+        <!-- ═══════════════════════════════════════════════════════ -->
         <!-- Phase 5: Sync Queue 모니터링 + 빌드 히스토리 패널 -->
         <!-- ═══════════════════════════════════════════════════════ -->
         <div class="admin-section-header" style="margin-top:24px">

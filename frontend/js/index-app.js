@@ -917,8 +917,17 @@ function enterAdminScreen() {
   _updateContextToolbar('dashboard');
 
   loadAdminDashboard();
+
+  // ── Phase 8: SSE 실시간 알림 자동 연결 ──
+  if (typeof connectSSE === 'function') {
+    setTimeout(connectSSE, 500);
+  }
 }
-function exitAdmin() { clearAdminSession(); showScreen("screenGate"); }
+function exitAdmin() {
+  clearAdminSession();
+  if (typeof disconnectSSE === 'function') disconnectSSE();
+  showScreen("screenGate");
+}
 
 /* ════════════════════════════════════════════════════
    관리자 계정 관리 (마스터 전용)

@@ -2,6 +2,7 @@ const pool = require('../db/pool');
 const { readSheet, getSpreadsheetMeta, batchReadSheet, getSheetModifiedTime } = require('./sheets.service');
 const { computeChecksum } = require('../utils/checksum');
 const { logger } = require('../utils/logger');
+const { emitIndexBuild } = require('../utils/sse');
 
 // GAS 원본 상수 (그대로 유지)
 const SUBMITTED_VALUES = ['TRUE', 'true', '1', '제출', 'O', 'o', '완료', 'Y', 'y'];
@@ -191,6 +192,17 @@ async function buildIndexSmart(forceFullRebuild = false) {
   } catch (_) {}
 
   logger.info(`[buildIndex] 완료: rebuilt=${rebuilt}, skipped=${skipped}, errors=${errors}, ${elapsed}ms`);
+
+  // ── SSE 알림: 인덱스 빌드 완료 ──
+  emitIndexBuild({
+    rebuilt,
+    skipped,
+    errors,
+    total: rebuilt + skipped + errors,
+    elapsed: `${elapsed}ms`,
+    trigger: forceFullRebuild ? 'full' : 'smart',
+  });
+
   return result;
 }
 

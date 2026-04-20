@@ -3,6 +3,7 @@ const router = express.Router();
 const { searchByName, searchByNameDebug } = require('../services/search.service');
 const { buildIndexSmart } = require('../services/indexBuilder.service');
 const { authMiddleware } = require('../middleware/auth.middleware');
+const { emitIndexBuild } = require('../utils/sse');
 const pool = require('../db/pool');
 
 // ═══════════════════════════════════════════════════════════
@@ -74,6 +75,14 @@ router.post('/build', authMiddleware, async (req, res, next) => {
       try {
         const result = await buildIndexSmart(forceFullRebuild === true);
         console.log('[index/build] 백그라운드 빌드 완료:', JSON.stringify(result));
+        // ── SSE 알림: 인덱스 빌드 완료 ──
+        emitIndexBuild({
+          rebuilt: result.rebuilt || 0,
+          skipped: result.skipped || 0,
+          errors: result.errors || 0,
+          elapsed: result.elapsed || '',
+          trigger: 'manual',
+        });
       } catch (err) {
         console.error('[index/build] 백그라운드 빌드 실패:', err.message);
       }

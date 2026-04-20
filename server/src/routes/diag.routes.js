@@ -9,6 +9,7 @@ const { extractOrderFromImage, verifyAddressMatch } = require('../services/gemin
 const driveService = require('../services/drive.service');
 const { getMetricsSummary, resetMetrics } = require('../middleware/metrics.middleware');
 const { isSentryEnabled } = require('../utils/sentry');
+const { addClient, getStatus: getSSEStatus, emitImageExtract, emitImageUpload } = require('../utils/sse');
 const { logger } = require('../utils/logger');
 
 // ═══════════════════════════════════════════════════════════
@@ -403,6 +404,16 @@ router.post('/image-extract', imageApiLimiter, async (req, res, next) => {
 
     const result = await extractOrderFromImage(imageBase64, mimeType || 'image/jpeg');
     // result: { ok, orderNumber, recipient, phone, address, price, orderer, productName, orderDate, store, elapsed }
+
+    // ── SSE 알림: AI 분석 완료 ──
+    if (result.ok) {
+      emitImageExtract({
+        recipient: result.recipient || '',
+        orderNumber: result.orderNumber || '',
+        elapsed: result.elapsed || 0,
+      });
+    }
+
     res.json(result);
   } catch (err) {
     logger.error(`[image-extract] ${err.message}`);
@@ -480,6 +491,14 @@ router.post('/image-upload', imageApiLimiter, async (req, res, next) => {
     );
 
     logger.info(`[image-upload] 업로드 완료: ${uploaded.name} → ${uploaded.id}`);
+
+    // ── SSE 알림: 이미지 업로드 완료 ──
+    emitImageUpload({
+      fileName: uploaded.name,
+      fileId: uploaded.id,
+      tabName: tabName || '',
+      displayName: displayName || '',
+    });
 
     res.json({
       ok: true,
@@ -846,6 +865,21 @@ router.post('/client-error', async (req, res) => {
   } catch (err) {
     res.json({ ok: false });
   }
+});
+
+// ═══════════════════════════════════════════════════════════
+// GET /api/diag/events — SSE 실시간 알림 스트림 (관리자 전용)
+// Phase 8: 새 제출/분석완료 알림을 대시보드에 실시간 전달
+// ═══════════════════════════════════════════════════════════
+router.get('/events', authMiddleware, (req, res) => {
+  addClient(req, res);
+});
+
+// ═══════════════════════════════════════════════════════════
+// GET /api/diag/sse-status — SSE 연결 상태 (관리자 전용)
+// ═══════════════════════════════════════════════════════════
+router.get('/sse-status', authMiddleware, (req, res) => {
+  res.json({ ok: true, ...getSSEStatus() });
 });
 
 // ── 헬퍼 ──

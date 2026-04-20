@@ -9,6 +9,7 @@ const { errorHandler }    = require('./middleware/error.middleware');
 const { rateLimiter }     = require('./middleware/rateLimit.middleware');
 const { metricsMiddleware, errorMetricsMiddleware, getMetricsSummary } = require('./middleware/metrics.middleware');
 const { initSentry, isSentryEnabled } = require('./utils/sentry');
+const { getStatus: getSSEStatus } = require('./utils/sse');
 
 // 라우터
 const indexRoutes    = require('./routes/index.routes');
@@ -92,10 +93,13 @@ app.get('/health', async (req, res) => {
     db: dbStatus,
     dbTime,
     google: googleStatus,
-    version: '2.7.0-search-trgm',
+    version: '2.8.0-sse-realtime',
     uptime: Math.floor(process.uptime()),
     memory: Math.round(process.memoryUsage().heapUsed / 1024 / 1024) + 'MB',
     sentry: isSentryEnabled() ? 'active' : 'inactive',
+    sse: {
+      connections: getSSEStatus().activeConnections,
+    },
     metrics: {
       totalRequests: getMetricsSummary().totalRequests,
       errorRate: getMetricsSummary().errorRate,

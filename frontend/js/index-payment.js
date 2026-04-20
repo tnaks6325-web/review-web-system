@@ -789,3 +789,167 @@ async function resetApiMetrics() {
     showToast("초기화 실패: " + err.message, "error");
   }
 }
+
+// ═══════════════════════════════════════════════════════════
+// Phase 8: SSE 실시간 알림 수신
+// ═══════════════════════════════════════════════════════════
+
+let _sseSource = null;
+let _sseNotifs = [];
+const _SSE_MAX_NOTIFS = 50;
+let _sseUnread = 0;
+
+const _SSE_ICONS = {
+  review_submit: { icon: 'fa-check-circle', color: '#16A34A', label: '리뷰 제출' },
+  order_submit:  { icon: 'fa-shopping-cart', color: '#2563EB', label: '구매양식' },
+  image_extract: { icon: 'fa-magic', color: '#7C3AED', label: 'AI 분석' },
+  image_upload:  { icon: 'fa-cloud-upload-alt', color: '#06B6D4', label: '업로드' },
+  index_build:   { icon: 'fa-database', color: '#F59E0B', label: '인덱스' },
+  system:        { icon: 'fa-info-circle', color: '#6B7280', label: '시스템' },
+  connected:     { icon: 'fa-plug', color: '#10B981', label: '연결됨' },
+};
+
+function connectSSE() {
+  const token = sessionStorage.getItem('admin_token');
+  if (!token) {
+    _updateSSEStatus('disconnected', '로그인 필요');
+    return;
+  }
+  if (_sseSource) {
+    _sseSource.close();
+    _sseSource = null;
+  }
+
+  _updateSSEStatus('connecting', '연결 중...');
+
+  // SSE는 URL에 token을 쿼리 파라미터로 전달 (EventSource는 커스텀 헤더 불가)
+  // 서버 측에서 쿼리 파라미터도 인증 처리 필요 → 별도 처리
+  // 대안: fetch + ReadableStream 사용
+  try {
+    _sseSource = new EventSource(API_BASE_URL + '/api/diag/events?token=' + encodeURIComponent(token));
+
+    _sseSource.onopen = function() {
+      _updateSSEStatus('connected', '연결됨');
+    };
+
+    _sseSource.onmessage = function(event) {
+      try {
+        const data = JSON.parse(event.data);
+        _addNotification(data);
+      } catch (_) {}
+    };
+
+    // 이벤트별 핸들러
+    ['review_submit', 'order_submit', 'image_extract', 'image_upload', 'index_build', 'system'].forEach(function(evtType) {
+      _sseSource.addEventListener(evtType, function(event) {
+        try {
+          const data = JSON.parse(event.data);
+          _addNotification(data);
+        } catch (_) {}
+      });
+    });
+
+    _sseSource.onerror = function() {
+      _updateSSEStatus('error', '연결 끊김');
+      // 자동 재연결은 EventSource가 처리
+    };
+  } catch (err) {
+    _updateSSEStatus('error', '연결 실패');
+  }
+}
+
+function disconnectSSE() {
+  if (_sseSource) {
+    _sseSource.close();
+    _sseSource = null;
+  }
+  _updateSSEStatus('disconnected', '수동 해제');
+}
+
+function toggleSSE() {
+  if (_sseSource && _sseSource.readyState !== 2) {
+    disconnectSSE();
+  } else {
+    connectSSE();
+  }
+}
+
+function _updateSSEStatus(state, text) {
+  var el = document.getElementById('sseStatus');
+  var btn = document.getElementById('sseToggleBtn');
+  if (!el) return;
+
+  var colors = { connected: '#10B981', connecting: '#F59E0B', disconnected: '#9CA3AF', error: '#EF4444' };
+  el.innerHTML = '<span style="color:' + (colors[state] || '#9CA3AF') + '">● ' + text + '</span>';
+
+  if (btn) {
+    btn.innerHTML = (state === 'connected')
+      ? '<i class="fas fa-plug"></i> 해제'
+      : '<i class="fas fa-plug"></i> 연결';
+  }
+}
+
+function _addNotification(data) {
+  var type = data.type || 'system';
+  if (type === 'connected') return; // 연결 확인 메시지 무시
+
+  var cfg = _SSE_ICONS[type] || _SSE_ICONS.system;
+  var now = new Date();
+  var timeStr = now.toLocaleTimeString('ko-KR', { hour: '2-digit', minute: '2-digit', second: '2-digit' });
+
+  _sseNotifs.unshift({
+    type: type,
+    message: data.message || type,
+    time: timeStr,
+    ts: now.getTime(),
+    icon: cfg.icon,
+    color: cfg.color,
+    label: cfg.label,
+    data: data,
+  });
+  if (_sseNotifs.length > _SSE_MAX_NOTIFS) _sseNotifs.length = _SSE_MAX_NOTIFS;
+
+  _sseUnread++;
+  _renderNotifications();
+
+  // 토스트 알림 (화면에 보이지 않을 때)
+  if (typeof showToast === 'function') {
+    showToast(cfg.label + ': ' + (data.message || '').substring(0, 60), 'info');
+  }
+}
+
+function _renderNotifications() {
+  var feed = document.getElementById('sseNotifFeed');
+  var badge = document.getElementById('sseBadge');
+  if (!feed) return;
+
+  if (_sseNotifs.length === 0) {
+    feed.innerHTML = '<div style="text-align:center;color:var(--t3);font-size:.78rem;padding:16px"><i class="fas fa-bell-slash" style="margin-right:4px"></i>알림 없음</div>';
+    if (badge) { badge.style.display = 'none'; }
+    return;
+  }
+
+  if (badge && _sseUnread > 0) {
+    badge.textContent = _sseUnread > 99 ? '99+' : _sseUnread;
+    badge.style.display = 'inline';
+  }
+
+  feed.innerHTML = _sseNotifs.map(function(n) {
+    return '<div style="display:flex;align-items:flex-start;gap:8px;padding:6px 8px;border-bottom:1px solid #F1F5F9;font-size:.78rem">'
+      + '<i class="fas ' + n.icon + '" style="color:' + n.color + ';margin-top:2px;flex-shrink:0"></i>'
+      + '<div style="flex:1;min-width:0">'
+        + '<div style="display:flex;justify-content:space-between;align-items:center">'
+          + '<span style="font-weight:600;color:' + n.color + '">' + n.label + '</span>'
+          + '<span style="color:#9CA3AF;font-size:.68rem;flex-shrink:0">' + n.time + '</span>'
+        + '</div>'
+        + '<div style="color:var(--t2);margin-top:1px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">' + (n.message || '').substring(0, 80) + '</div>'
+      + '</div>'
+    + '</div>';
+  }).join('');
+}
+
+function clearNotifications() {
+  _sseNotifs = [];
+  _sseUnread = 0;
+  _renderNotifications();
+}

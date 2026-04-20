@@ -2,6 +2,7 @@ const cron = require('node-cron');
 const { buildIndexSmart } = require('../services/indexBuilder.service');
 const { processQueue, purgeCompleted } = require('../services/syncQueue.service');
 const { logger } = require('../utils/logger');
+const { emitIndexBuild } = require('../utils/sse');
 
 /**
  * GAS autoRebuildIndex 트리거 대체
@@ -16,6 +17,7 @@ function startCronJobs() {
     try {
       const result = await buildIndexSmart(false);
       logger.info(`[CRON] 인덱스 빌드 완료: rebuilt=${result.rebuilt}, skipped=${result.skipped}, ${result.elapsed}`);
+      emitIndexBuild({ rebuilt: result.rebuilt || 0, skipped: result.skipped || 0, errors: result.errors || 0, elapsed: result.elapsed || '', trigger: 'cron' });
     } catch (err) {
       logger.error(`[CRON] 인덱스 빌드 오류: ${err.message}`);
     }
@@ -29,6 +31,7 @@ function startCronJobs() {
     try {
       await buildIndexSmart(true);
       logger.info('[CRON] 전체 재빌드 완료');
+      emitIndexBuild({ trigger: 'cron_full' });
     } catch (err) {
       logger.error(`[CRON] 전체 재빌드 오류: ${err.message}`);
     }
