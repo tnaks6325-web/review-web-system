@@ -510,6 +510,7 @@ async function saveDepositNames() {
 async function loadSystemMonitor() {
   loadSyncQueueStats();
   loadBuildHistory();
+  loadApiMetrics();
 }
 
 async function loadSyncQueueStats() {
@@ -649,5 +650,142 @@ async function purgeSyncQueue() {
     setTimeout(() => loadSyncQueueStats(), 1000);
   } catch (err) {
     showToast("정리 실패: " + err.message, "error");
+  }
+}
+
+// ═══════════════════════════════════════════════════════════
+// Phase 6: API 메트릭 대시보드 (서버 /api/diag/metrics)
+// ═══════════════════════════════════════════════════════════
+
+async function loadApiMetrics() {
+  const summaryEl = document.getElementById("apiMetricsSummary");
+  const detailEl  = document.getElementById("apiMetricsDetail");
+  if (!summaryEl) return;
+
+  try {
+    // 직접 fetch (인증 필요 엔드포인트)
+    const token = sessionStorage.getItem('admin_token');
+    const res = await fetch(API_BASE_URL + '/api/diag/metrics', {
+      headers: token ? { 'Authorization': 'Bearer ' + token } : {},
+    });
+    const m = await res.json();
+
+    if (!m || !m.ok) {
+      summaryEl.innerHTML = `<span style="color:var(--t3)">메트릭 데이터 없음</span>`;
+      if (detailEl) detailEl.innerHTML = '';
+      return;
+    }
+
+    // ── 요약 패널 ──
+    const uptimeH = Math.floor((m.uptime || 0) / 3600);
+    const uptimeM = Math.floor(((m.uptime || 0) % 3600) / 60);
+    const sentryBadge = m.sentry === 'active'
+      ? '<span style="background:#10B981;color:#fff;font-size:.65rem;padding:1px 6px;border-radius:4px">Sentry ON</span>'
+      : '<span style="background:#9CA3AF;color:#fff;font-size:.65rem;padding:1px 6px;border-radius:4px">Sentry OFF</span>';
+
+    const errRate = m.errorRate || '0%';
+    const errColor = parseFloat(errRate) > 5 ? '#DC2626' : parseFloat(errRate) > 1 ? '#D97706' : '#16A34A';
+
+    summaryEl.innerHTML = `
+      <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:8px;text-align:center;margin-bottom:12px">
+        <div style="background:#F0FDF4;border-radius:8px;padding:8px">
+          <div style="font-size:1.2rem;font-weight:700;color:#16A34A">${m.totalRequests || 0}</div>
+          <div style="font-size:.7rem;color:#6B7280">총 요청</div>
+        </div>
+        <div style="background:#FEF3C7;border-radius:8px;padding:8px">
+          <div style="font-size:1.2rem;font-weight:700;color:#D97706">${m.rpm || 0}</div>
+          <div style="font-size:.7rem;color:#6B7280">RPM (분당)</div>
+        </div>
+        <div style="background:${parseFloat(errRate) > 1 ? '#FEE2E2' : '#F3F4F6'};border-radius:8px;padding:8px">
+          <div style="font-size:1.2rem;font-weight:700;color:${errColor}">${errRate}</div>
+          <div style="font-size:.7rem;color:#6B7280">에러율</div>
+        </div>
+      </div>
+      <div style="display:flex;justify-content:space-between;align-items:center;font-size:.75rem;color:var(--t3)">
+        <span>Uptime: ${uptimeH}h ${uptimeM}m</span>
+        <span>5xx: ${m.totalErrors || 0} · 4xx: ${m.clientErrors || 0}</span>
+        ${sentryBadge}
+      </div>
+      ${m.statusCodes ? `
+        <div style="margin-top:8px;font-size:.7rem;color:var(--t3)">
+          상태코드: ${Object.entries(m.statusCodes).sort((a,b) => b[1]-a[1]).map(([code, cnt]) => {
+            const c = code >= 500 ? '#DC2626' : code >= 400 ? '#D97706' : '#16A34A';
+            return `<span style="color:${c}">${code}</span>:<b>${cnt}</b>`;
+          }).join(' · ')}
+        </div>
+      ` : ''}
+    `;
+
+    // ── 상세 패널: 느린 라우트 + 최근 에러 ──
+    if (!detailEl) return;
+    let detailHtml = '';
+
+    // 느린 라우트
+    if (m.slowRoutes && m.slowRoutes.length > 0) {
+      detailHtml += `
+        <div style="font-weight:600;font-size:.78rem;margin-bottom:6px;color:var(--t1)">🐌 느린 라우트 Top 5</div>
+        <div style="max-height:130px;overflow-y:auto;margin-bottom:10px">
+          ${m.slowRoutes.slice(0, 5).map(r => {
+            const avgColor = r.avgMs > 2000 ? '#DC2626' : r.avgMs > 800 ? '#D97706' : '#16A34A';
+            return `<div style="display:flex;justify-content:space-between;font-size:.72rem;padding:3px 0;border-bottom:1px solid #F1F5F9">
+              <span style="color:var(--t2);max-width:55%;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="${r.route}">${r.route}</span>
+              <span>avg <b style="color:${avgColor}">${r.avgMs}ms</b> · max ${r.maxMs}ms · <span style="color:#6B7280">${r.count}회</span></span>
+            </div>`;
+          }).join('')}
+        </div>
+      `;
+    }
+
+    // 최근 에러
+    if (m.recentErrors && m.recentErrors.length > 0) {
+      detailHtml += `
+        <div style="font-weight:600;font-size:.78rem;margin-bottom:6px;color:#DC2626">⚠️ 최근 에러 (${m.recentErrors.length}건)</div>
+        <div style="max-height:130px;overflow-y:auto">
+          ${m.recentErrors.slice(0, 5).map(e => {
+            const t = new Date(e.ts).toLocaleString("ko-KR", { timeZone: "Asia/Seoul", hour: "2-digit", minute: "2-digit", second: "2-digit" });
+            return `<div style="background:#FEF2F2;padding:4px 8px;border-radius:4px;margin-bottom:3px;font-size:.72rem">
+              <div style="display:flex;justify-content:space-between">
+                <b>${e.method} ${e.path}</b>
+                <span style="color:#6B7280">${t}</span>
+              </div>
+              <div style="color:#DC2626;margin-top:2px">${(e.message || '').substring(0, 80)}</div>
+            </div>`;
+          }).join('')}
+        </div>
+      `;
+    }
+
+    if (!detailHtml) {
+      detailHtml = '<span style="color:var(--t3)">느린 라우트 및 에러 없음 ✅</span>';
+    }
+
+    // 리셋 버튼
+    detailHtml += `
+      <div style="margin-top:10px;text-align:right">
+        <button onclick="resetApiMetrics()" style="font-size:.7rem;background:#6B7280;color:#fff;border:none;padding:3px 10px;border-radius:4px;cursor:pointer">
+          <i class="fas fa-redo"></i> 메트릭 초기화
+        </button>
+      </div>
+    `;
+
+    detailEl.innerHTML = detailHtml;
+  } catch (err) {
+    summaryEl.innerHTML = `<span style="color:#EF4444">메트릭 로드 실패: ${err.message}</span>`;
+    if (detailEl) detailEl.innerHTML = '';
+  }
+}
+
+async function resetApiMetrics() {
+  if (!confirm("API 메트릭을 초기화합니까?")) return;
+  try {
+    const token = sessionStorage.getItem('admin_token');
+    await fetch(API_BASE_URL + '/api/diag/metrics/reset', {
+      method: 'POST',
+      headers: token ? { 'Authorization': 'Bearer ' + token, 'Content-Type': 'application/json' } : {},
+    });
+    showToast("메트릭 초기화 완료", "success");
+    setTimeout(() => loadApiMetrics(), 500);
+  } catch (err) {
+    showToast("초기화 실패: " + err.message, "error");
   }
 }

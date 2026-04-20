@@ -7,6 +7,8 @@ const { getQueueStats, retryItem, retryAllFailed, purgeCompleted } = require('..
 const { imageApiLimiter } = require('../middleware/rateLimit.middleware');
 const { extractOrderFromImage, verifyAddressMatch } = require('../services/gemini.service');
 const driveService = require('../services/drive.service');
+const { getMetricsSummary, resetMetrics } = require('../middleware/metrics.middleware');
+const { isSentryEnabled } = require('../utils/sentry');
 const { logger } = require('../utils/logger');
 
 // ═══════════════════════════════════════════════════════════
@@ -804,6 +806,45 @@ router.post('/app-url', async (req, res, next) => {
     res.json({ ok: true, url });
   } catch (err) {
     next(err);
+  }
+});
+
+// ═══════════════════════════════════════════════════════════
+// GET /api/diag/metrics — API 메트릭 조회 (관리자 전용)
+// ═══════════════════════════════════════════════════════════
+router.get('/metrics', authMiddleware, async (req, res) => {
+  const summary = getMetricsSummary();
+  res.json({
+    ok: true,
+    sentry: isSentryEnabled() ? 'active' : 'inactive',
+    ...summary,
+  });
+});
+
+// ═══════════════════════════════════════════════════════════
+// POST /api/diag/metrics/reset — 메트릭 초기화 (관리자 전용)
+// ═══════════════════════════════════════════════════════════
+router.post('/metrics/reset', authMiddleware, async (req, res) => {
+  resetMetrics();
+  logger.info('[Metrics] 메트릭 수동 초기화');
+  res.json({ ok: true, message: '메트릭 초기화 완료' });
+});
+
+// ═══════════════════════════════════════════════════════════
+// POST /api/diag/client-error — 프론트엔드 JS 에러 수집
+// ═══════════════════════════════════════════════════════════
+router.post('/client-error', async (req, res) => {
+  try {
+    const { message, source, lineno, colno, stack, page, userAgent } = req.body;
+    logger.error({
+      message: `[ClientError] ${message}`,
+      source, lineno, colno, page,
+      stack: (stack || '').substring(0, 500),
+      ip: req.ip,
+    });
+    res.json({ ok: true });
+  } catch (err) {
+    res.json({ ok: false });
   }
 });
 

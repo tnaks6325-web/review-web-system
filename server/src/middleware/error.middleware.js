@@ -1,4 +1,5 @@
 const { logger } = require('../utils/logger');
+const { captureException, isSentryEnabled } = require('../utils/sentry');
 
 /**
  * Express 글로벌 에러 핸들러
@@ -6,13 +7,31 @@ const { logger } = require('../utils/logger');
  *
  * GAS 호환성: 가능한 한 HTTP 200 + error 필드로 반환
  * (프론트가 res.error 로 에러 감지하므로)
+ *
+ * Phase 6: Sentry captureException 통합
  */
 function errorHandler(err, req, res, next) {
-  logger.error({
+  // ── 구조화 로깅 ──
+  const errorContext = {
     message: err.message,
     stack: err.stack,
     path: req.path,
     method: req.method,
+    query: Object.keys(req.query || {}).length ? req.query : undefined,
+    ip: req.ip,
+    userAgent: (req.headers['user-agent'] || '').substring(0, 120),
+    statusCode: err.status || err.statusCode || 500,
+  };
+
+  logger.error(errorContext);
+
+  // ── Sentry 에러 전송 ──
+  captureException(err, {
+    path: req.path,
+    method: req.method,
+    query: req.query,
+    ip: req.ip,
+    statusCode: errorContext.statusCode,
   });
 
   // CORS 오류

@@ -920,6 +920,39 @@
         </div>
         <!-- /Phase 5 -->
 
+        <!-- ═══════════════════════════════════════════════════════ -->
+        <!-- Phase 6: API 메트릭 & 에러 모니터링 대시보드 -->
+        <!-- ═══════════════════════════════════════════════════════ -->
+        <div class="admin-section-header" style="margin-top:24px">
+          <span style="font-size:.95rem;font-weight:700;color:var(--t1)">
+            <i class="fas fa-chart-line" style="color:#06B6D4;margin-right:6px"></i>API 메트릭 & 에러
+          </span>
+          <button class="btn-sm" onclick="loadApiMetrics()" style="margin-left:auto;font-size:.78rem">
+            <i class="fas fa-sync-alt"></i> 새로고침
+          </button>
+        </div>
+        <div style="display:grid;grid-template-columns:1fr 1fr;gap:16px;margin-top:12px" id="metricsGrid">
+          <!-- API 요약 -->
+          <div style="background:#fff;border-radius:12px;padding:16px;box-shadow:0 1px 4px rgba(0,0,0,.06);border:1px solid var(--border)">
+            <h4 style="margin:0 0 12px;font-size:.88rem;color:var(--t1)">
+              <i class="fas fa-tachometer-alt" style="color:#06B6D4"></i> API 현황
+            </h4>
+            <div id="apiMetricsSummary" style="font-size:.82rem;color:var(--t2)">
+              <i class="fas fa-circle-notch fa-spin"></i> 불러오는 중...
+            </div>
+          </div>
+          <!-- 느린 라우트 / 최근 에러 -->
+          <div style="background:#fff;border-radius:12px;padding:16px;box-shadow:0 1px 4px rgba(0,0,0,.06);border:1px solid var(--border)">
+            <h4 style="margin:0 0 12px;font-size:.88rem;color:var(--t1)">
+              <i class="fas fa-exclamation-triangle" style="color:#EF4444"></i> 느린 라우트 & 에러
+            </h4>
+            <div id="apiMetricsDetail" style="font-size:.82rem;color:var(--t2)">
+              <i class="fas fa-circle-notch fa-spin"></i> 불러오는 중...
+            </div>
+          </div>
+        </div>
+        <!-- /Phase 6 -->
+
       </div><!-- /tab-dashboard -->
 
       <!-- ★ 리뷰어 관리 탭 -->

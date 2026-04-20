@@ -290,5 +290,89 @@ function clearAdminSession() {
   sessionStorage.removeItem('rapp_staff_session');
 }
 
+// ═══════════════════════════════════════════════════════════
+// Phase 6: 프론트엔드 에러 자동 캡처 & 서버 전송
+// window.onerror, unhandledrejection → POST /api/diag/client-error
+// ═══════════════════════════════════════════════════════════
+(function _initErrorCapture() {
+  const _errQueue = [];
+  let _sending = false;
+  const _MAX_QUEUE = 20;
+  const _THROTTLE_MS = 2000;   // 최소 2초 간격 전송
+  let _lastSentAt = 0;
+  const _sentHashes = new Set(); // 중복 방지용
+
+  function _hashErr(msg, src, line) {
+    return `${msg}|${src}|${line}`;
+  }
+
+  function _enqueue(entry) {
+    const h = _hashErr(entry.message, entry.source, entry.lineno);
+    if (_sentHashes.has(h)) return;
+    _sentHashes.add(h);
+    if (_sentHashes.size > 100) _sentHashes.clear(); // 메모리 보호
+
+    _errQueue.push(entry);
+    if (_errQueue.length > _MAX_QUEUE) _errQueue.shift();
+    _flush();
+  }
+
+  async function _flush() {
+    if (_sending || !_errQueue.length) return;
+    const now = Date.now();
+    if (now - _lastSentAt < _THROTTLE_MS) {
+      setTimeout(_flush, _THROTTLE_MS - (now - _lastSentAt));
+      return;
+    }
+    _sending = true;
+    _lastSentAt = now;
+
+    const batch = _errQueue.splice(0, 5); // 최대 5개씩
+    for (const entry of batch) {
+      try {
+        await fetch(API_BASE_URL + '/api/diag/client-error', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(entry),
+        });
+      } catch (_) { /* 전송 실패 무시 — 에러 리포팅이 앱을 방해하면 안 됨 */ }
+    }
+    _sending = false;
+    if (_errQueue.length) setTimeout(_flush, _THROTTLE_MS);
+  }
+
+  // ── window.onerror: 동기 JS 에러 ──
+  const _prevOnError = window.onerror;
+  window.onerror = function(message, source, lineno, colno, error) {
+    _enqueue({
+      message: String(message).substring(0, 500),
+      source: String(source || '').substring(0, 200),
+      lineno: lineno || 0,
+      colno: colno || 0,
+      stack: (error && error.stack) ? error.stack.substring(0, 800) : '',
+      page: location.pathname,
+      userAgent: navigator.userAgent.substring(0, 150),
+      ts: new Date().toISOString(),
+    });
+    if (_prevOnError) return _prevOnError.apply(this, arguments);
+    return false; // 기본 콘솔 출력 유지
+  };
+
+  // ── unhandledrejection: Promise 에러 ──
+  window.addEventListener('unhandledrejection', function(event) {
+    const reason = event.reason;
+    _enqueue({
+      message: '[UnhandledRejection] ' + String(reason && reason.message || reason).substring(0, 500),
+      source: '',
+      lineno: 0,
+      colno: 0,
+      stack: (reason && reason.stack) ? reason.stack.substring(0, 800) : '',
+      page: location.pathname,
+      userAgent: navigator.userAgent.substring(0, 150),
+      ts: new Date().toISOString(),
+    });
+  });
+})();
+
 // console에서 확인용
 console.log('[api.js] 리뷰웹시스템 API 모듈 로드됨 — 서버:', API_BASE_URL);

@@ -7,6 +7,8 @@ require('dotenv').config();
 const { corsOptions }     = require('./middleware/cors.middleware');
 const { errorHandler }    = require('./middleware/error.middleware');
 const { rateLimiter }     = require('./middleware/rateLimit.middleware');
+const { metricsMiddleware, errorMetricsMiddleware, getMetricsSummary } = require('./middleware/metrics.middleware');
+const { initSentry, isSentryEnabled } = require('./utils/sentry');
 
 // 라우터
 const indexRoutes    = require('./routes/index.routes');
@@ -22,12 +24,16 @@ const diagRoutes     = require('./routes/diag.routes');
 
 const app = express();
 
+// ── Sentry 초기화 (가장 먼저) ──
+initSentry(app);
+
 // ── 미들웨어 ──
 app.use(helmet());
 app.use(cors(corsOptions));
 app.use(express.json({ limit: '10mb' }));
 app.use(morgan('combined'));
 app.use('/api/', rateLimiter);
+app.use(metricsMiddleware);  // API 메트릭 수집
 
 // ── 라우터 등록 ──
 // 검색/인덱스 (Section 5)
@@ -86,10 +92,15 @@ app.get('/health', async (req, res) => {
     db: dbStatus,
     dbTime,
     google: googleStatus,
-    version: '2.5.0-drive-oauth-sync',
+    version: '2.6.0-monitoring',
     uptime: Math.floor(process.uptime()),
     memory: Math.round(process.memoryUsage().heapUsed / 1024 / 1024) + 'MB',
-    phase1: true,
+    sentry: isSentryEnabled() ? 'active' : 'inactive',
+    metrics: {
+      totalRequests: getMetricsSummary().totalRequests,
+      errorRate: getMetricsSummary().errorRate,
+      rpm: getMetricsSummary().rpm,
+    },
     routes: {
       search: '/api/search?query=',
       index: '/api/index/status',
@@ -105,6 +116,9 @@ app.get('/health', async (req, res) => {
     }
   });
 });
+
+// ── 에러 메트릭 수집 (Sentry + 자체 로그) ──
+app.use(errorMetricsMiddleware);
 
 // ── 글로벌 에러 핸들러 ──
 app.use(errorHandler);
