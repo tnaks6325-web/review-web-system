@@ -63,50 +63,71 @@ function _getReadDrive() {
 // ═══════════════════════════════════════════════════════════
 
 /**
- * 폴더 내 파일/폴더 목록 조회
+ * 폴더 내 파일/폴더 목록 조회 (SA 우선 → OAuth 폴백)
  */
 async function listFolderContents(folderId, mimeType = null) {
-  const d = _getReadDrive();
-  if (!d) throw new Error('Google Drive API가 설정되지 않았습니다.');
   let q = `'${folderId}' in parents and trashed = false`;
   if (mimeType) q += ` and mimeType = '${mimeType}'`;
 
-  const res = await d.files.list({
+  const params = {
     q,
     fields: 'files(id, name, mimeType, webViewLink, createdTime)',
     pageSize: 1000,
     supportsAllDrives: true,
     includeItemsFromAllDrives: true,
-  });
-  return res.data.files || [];
+  };
+
+  // SA로 먼저 시도
+  const sa = _getReadDrive();
+  if (sa) {
+    try {
+      const res = await sa.files.list(params);
+      return res.data.files || [];
+    } catch (saErr) {
+      logger.warn(`[Drive] SA listFolder 실패 (OAuth 재시도): ${saErr.message}`);
+    }
+  }
+
+  // OAuth로 재시도
+  const oauth = _getOAuthDrive();
+  if (oauth) {
+    const res = await oauth.files.list(params);
+    return res.data.files || [];
+  }
+
+  throw new Error('Google Drive API가 설정되지 않았습니다.');
 }
 
 /**
- * 파일/폴더 이름 변경
+ * 파일/폴더 이름 변경 (OAuth 우선 — 쓰기 작업)
  */
 async function renameFile(fileId, newName) {
-  const d = _getReadDrive();
-  if (!d) throw new Error('Google Drive API가 설정되지 않았습니다.');
+  const d = _getUploadDrive();
+  if (!d) throw new Error('Google Drive API가 설정되지 않았습니다. (OAuth 또는 SA 필요)');
   const res = await d.files.update({
     fileId,
     requestBody: { name: newName },
     fields: 'id, name',
+    supportsAllDrives: true,
   });
+  logger.info(`[Drive] 이름 변경: ${fileId} → "${newName}" (${oauthDrive ? 'OAuth' : 'SA'})`);
   return res.data;
 }
 
 /**
- * 파일/폴더 이동 (부모 변경)
+ * 파일/폴더 이동 (부모 변경) (OAuth 우선 — 쓰기 작업)
  */
 async function moveFile(fileId, newParentId, oldParentId) {
-  const d = _getReadDrive();
-  if (!d) throw new Error('Google Drive API가 설정되지 않았습니다.');
+  const d = _getUploadDrive();
+  if (!d) throw new Error('Google Drive API가 설정되지 않았습니다. (OAuth 또는 SA 필요)');
   const res = await d.files.update({
     fileId,
     addParents: newParentId,
     removeParents: oldParentId,
     fields: 'id, parents',
+    supportsAllDrives: true,
   });
+  logger.info(`[Drive] 파일 이동: ${fileId} → parent ${newParentId} (${oauthDrive ? 'OAuth' : 'SA'})`);
   return res.data;
 }
 

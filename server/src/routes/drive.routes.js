@@ -130,7 +130,6 @@ router.post('/sync-review', authMiddleware, async (req, res, next) => {
 router.post('/sync-all', authMiddleware, async (req, res, next) => {
   try {
     const { force } = req.body;
-    // 순차 실행
     const captureResult = await syncCaptureFoldersInternal(force);
     const reviewResult = await syncReviewFoldersInternal(force);
     res.json({
@@ -278,8 +277,52 @@ router.post('/migrate-names', authMiddleware, async (req, res, next) => {
 // ═══════════════════════════════════════════════════════════
 router.post('/organize-capture', authMiddleware, async (req, res, next) => {
   try {
-    const { dryRun, force } = req.body;
-    res.json({ ok: true, message: '캡처폴더 재배치 완료', dryRun: !!dryRun });
+    const { dryRun } = req.body;
+    const rootFolderId = process.env.DRIVE_ROOT_FOLDER_ID;
+    if (!rootFolderId) return res.json({ error: 'DRIVE_ROOT_FOLDER_ID 미설정' });
+
+    // DB에서 캡처폴더 URL이 있는 탭만 조회
+    const { rows: tabs } = await pool.query(
+      `SELECT sheet_id, tab_name, campaign_name, capture_folder_url
+       FROM tab_configs
+       WHERE capture_folder_url IS NOT NULL AND capture_folder_url <> ''`
+    );
+
+    let moved = 0, errors = 0, skipped = 0;
+    const actions = [];
+
+    // 루트 폴더 내 폴더 목록 조회 (1회)
+    let rootChildren = [];
+    try {
+      rootChildren = await driveService.listFolderContents(rootFolderId, 'application/vnd.google-apps.folder');
+    } catch (listErr) {
+      logger.warn(`[organizeCapture] 루트 폴더 목록 조회 실패: ${listErr.message}`);
+    }
+    const rootChildIds = new Set(rootChildren.map(f => f.id));
+
+    for (const tab of tabs) {
+      try {
+        const folderId = extractFolderId(tab.capture_folder_url);
+        if (!folderId) { skipped++; continue; }
+
+        if (rootChildIds.has(folderId)) {
+          skipped++;
+          continue; // 이미 루트 폴더 내에 있음
+        }
+
+        // 루트 폴더로 이동
+        if (!dryRun) {
+          await driveService.moveFile(folderId, rootFolderId, null);
+        }
+        actions.push({ tabName: tab.tab_name, folderId, action: 'moved_to_root' });
+        moved++;
+      } catch (err) {
+        logger.error(`[organizeCapture] 오류 (${tab.tab_name}): ${err.message}`);
+        errors++;
+      }
+    }
+
+    res.json({ ok: true, moved, skipped, errors, dryRun: !!dryRun, actions });
   } catch (err) {
     next(err);
   }
@@ -351,6 +394,7 @@ router.get('/diag', authMiddleware, async (req, res, next) => {
       total: rows.length,
       noFolderUrl: noFolder.length,
       noCaptureFolderUrl: noCapture.length,
+      oauthStatus: driveService.getOAuthStatus(),
       details: rows,
     });
   } catch (err) {
@@ -358,12 +402,89 @@ router.get('/diag', authMiddleware, async (req, res, next) => {
   }
 });
 
-// ── 내부 헬퍼 (sync-all 에서 재사용) ──
+// ── 내부 헬퍼 (sync-all 에서 재사용) — OAuth driveService 경유 ──
 async function syncCaptureFoldersInternal(force) {
-  return { ok: true, message: '캡처폴더 동기화' };
+  const rootFolderId = process.env.DRIVE_ROOT_FOLDER_ID;
+  if (!rootFolderId) return { ok: false, error: 'DRIVE_ROOT_FOLDER_ID 미설정' };
+
+  const { rows: tabs } = await pool.query(
+    `SELECT sheet_id, tab_name, campaign_name, capture_folder_url
+     FROM tab_configs
+     WHERE (force_done = FALSE OR force_done IS NULL)
+       AND (is_closed = FALSE OR is_closed IS NULL)`
+  );
+
+  let synced = 0, created = 0, errors = 0;
+
+  for (const tab of tabs) {
+    try {
+      if (tab.capture_folder_url && !force) { synced++; continue; }
+
+      const folderName = `[캡처] ${tab.campaign_name || tab.tab_name}`;
+      let folder = await driveService.findFolderByName(folderName, rootFolderId).catch(() => null);
+
+      if (!folder) {
+        folder = await driveService.createFolder(folderName, rootFolderId);
+        created++;
+      }
+
+      if (folder) {
+        const folderUrl = `https://drive.google.com/drive/folders/${folder.id}`;
+        await pool.query(
+          'UPDATE tab_configs SET capture_folder_url = $1, updated_at = NOW() WHERE sheet_id = $2 AND tab_name = $3',
+          [folderUrl, tab.sheet_id, tab.tab_name]
+        );
+      }
+      synced++;
+    } catch (err) {
+      logger.error(`[syncCapture:internal] 오류 (${tab.tab_name}): ${err.message}`);
+      errors++;
+    }
+  }
+
+  return { ok: true, synced, created, errors, total: tabs.length };
 }
+
 async function syncReviewFoldersInternal(force) {
-  return { ok: true, message: '리뷰폴더 동기화' };
+  const rootFolderId = process.env.DRIVE_ROOT_FOLDER_ID;
+  if (!rootFolderId) return { ok: false, error: 'DRIVE_ROOT_FOLDER_ID 미설정' };
+
+  const { rows: tabs } = await pool.query(
+    `SELECT sheet_id, tab_name, campaign_name, folder_url
+     FROM tab_configs
+     WHERE (force_done = FALSE OR force_done IS NULL)
+       AND (is_closed = FALSE OR is_closed IS NULL)`
+  );
+
+  let synced = 0, created = 0, errors = 0;
+
+  for (const tab of tabs) {
+    try {
+      if (tab.folder_url && !force) { synced++; continue; }
+
+      const folderName = `[리뷰] ${tab.campaign_name || tab.tab_name}`;
+      let folder = await driveService.findFolderByName(folderName, rootFolderId).catch(() => null);
+
+      if (!folder) {
+        folder = await driveService.createFolder(folderName, rootFolderId);
+        created++;
+      }
+
+      if (folder) {
+        const folderUrl = `https://drive.google.com/drive/folders/${folder.id}`;
+        await pool.query(
+          'UPDATE tab_configs SET folder_url = $1, updated_at = NOW() WHERE sheet_id = $2 AND tab_name = $3',
+          [folderUrl, tab.sheet_id, tab.tab_name]
+        );
+      }
+      synced++;
+    } catch (err) {
+      logger.error(`[syncReview:internal] 오류 (${tab.tab_name}): ${err.message}`);
+      errors++;
+    }
+  }
+
+  return { ok: true, synced, created, errors, total: tabs.length };
 }
 
 module.exports = router;
