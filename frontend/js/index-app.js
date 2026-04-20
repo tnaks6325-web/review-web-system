@@ -918,6 +918,11 @@ function enterAdminScreen() {
 
   loadAdminDashboard();
 
+  // ── Phase 5/6: 시스템 모니터링 + API 메트릭 자동 로드 ──
+  if (typeof loadSystemMonitor === 'function') {
+    setTimeout(loadSystemMonitor, 600);
+  }
+
   // ── Phase 9: 통계 대시보드 자동 로드 ──
   if (typeof loadStatsOverview === 'function') {
     setTimeout(loadStatsOverview, 800);

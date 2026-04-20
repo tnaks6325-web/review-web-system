@@ -130,64 +130,139 @@ router.post('/staff-users', authMiddleware, masterOnlyMiddleware, async (req, re
 });
 
 // ═══════════════════════════════════════════════════════════
-// GET /api/admin/dashboard — 대시보드 데이터 (GAS: dashboard — staff.html)
+// GET /api/admin/dashboard — 대시보드 데이터 (GAS 호환 stats/grand 형식)
+// 프론트엔드가 기대하는 형식:
+//   { stats: [{ campaign, total, submitted, tabs:[...] }], grand: { total, submitted, pending }, closedTabs, indexBuiltAt }
 // ═══════════════════════════════════════════════════════════
 router.get('/dashboard', authMiddleware, async (req, res, next) => {
   try {
-    // 탭 통계 (index_master 기반)
+    // 1. 탭 통계 (index_master + tab_configs JOIN + review_index에서 시작일/종료일 추출)
     const { rows: tabs } = await pool.query(`
       SELECT
-        im.sheet_id AS "sheetId",
-        im.tab_name AS "tabName",
-        im.campaign_name AS "campaignName",
-        im.row_count AS "totalCount",
+        im.sheet_id       AS "sheetId",
+        im.tab_name       AS "tabName",
+        im.campaign_name  AS "campaignName",
+        im.row_count      AS "totalCount",
         im.submitted_count AS "submittedCount",
+        im.built_at       AS "builtAt",
         tc.manager,
-        tc.force_done AS "forceDone",
-        tc.is_closed AS "isClosed"
+        tc.time_range     AS "timeRange",
+        tc.review_type    AS "reviewType",
+        tc.payment_type   AS "paymentType",
+        tc.display_name   AS "displayName",
+        tc.force_done     AS "forceDone",
+        tc.is_closed      AS "isClosed",
+        tc.folder_url     AS "folderUrl",
+        tc.capture_folder_url AS "captureFolderUrl",
+        tc.is_bulk        AS "isBulk",
+        tc.delivery_type  AS "deliveryType",
+        tc.round,
+        tc.nc_mode        AS "ncMode",
+        tc.deposit_name   AS "depositName",
+        tc.transfer_bank  AS "transferBank",
+        tc.income_type    AS "incomeType",
+        tc.taekhap,
+        tc.sheet_url      AS "sheetUrl",
+        tc.campaign_name  AS "tcCampaignName",
+        sd.start_date     AS "startDate",
+        sd.end_date       AS "endDate"
       FROM index_master im
       LEFT JOIN tab_configs tc ON im.sheet_id = tc.sheet_id AND im.tab_name = tc.tab_name
+      LEFT JOIN LATERAL (
+        SELECT MIN(ri.start_date) AS start_date, MAX(ri.end_date) AS end_date
+        FROM review_index ri
+        WHERE ri.sheet_id = im.sheet_id AND ri.tab_name = im.tab_name
+          AND (ri.start_date IS NOT NULL OR ri.end_date IS NOT NULL)
+      ) sd ON true
       WHERE im.status = 'active'
       ORDER BY im.built_at DESC NULLS LAST
     `);
 
-    // 캠페인 목록
-    const { rows: campaigns } = await pool.query(`
-      SELECT DISTINCT sheet_id AS "sheetId", campaign_name AS "campaignName", sheet_url AS "sheetUrl"
-      FROM tab_configs
-      WHERE campaign_name IS NOT NULL AND campaign_name != ''
-      ORDER BY campaign_name
+    // 2. 마감 탭 목록 (is_closed=true인 tab_configs — 인덱스에 없을 수 있음)
+    const { rows: closedConfigs } = await pool.query(`
+      SELECT sheet_id AS "sheetId", tab_name AS "tabName", campaign_name AS "campaignName"
+      FROM tab_configs WHERE is_closed = TRUE
     `);
 
-    // detailMap 구축 (GAS 호환 — tab_key 형식)
-    const { rows: allConfigs } = await pool.query('SELECT * FROM tab_configs');
-    const detailMap = {};
-    allConfigs.forEach(r => {
-      const key = `${r.sheet_id}||${r.tab_name}`;
-      detailMap[key] = {
-        manager: r.manager,
-        timeRange: r.time_range,
-        reviewType: r.review_type,
-        taekhap: r.taekhap,
-        paymentType: r.payment_type,
-        displayName: r.display_name,
-        forceDone: r.force_done,
-        isClosed: r.is_closed,
-        folderUrl: r.folder_url,
-        captureFolderUrl: r.capture_folder_url,
-        isBulk: r.is_bulk,
-        deliveryType: r.delivery_type,
-        round: r.round,
-        ncMode: r.nc_mode,
-        depositName: r.deposit_name,
-        transferBank: r.transfer_bank,
-        incomeType: r.income_type,
-        campaignName: r.campaign_name,
-        sheetUrl: r.sheet_url,
-      };
+    // 3. 최근 인덱스 빌드 시각
+    const { rows: buildRows } = await pool.query(`
+      SELECT MAX(built_at) AS "maxBuilt" FROM index_master
+    `);
+    const indexBuiltAt = buildRows[0]?.maxBuilt
+      ? new Date(buildRows[0].maxBuilt).toLocaleString('ko-KR', { timeZone: 'Asia/Seoul' })
+      : null;
+
+    // 4. 캠페인별 그룹핑 → stats 배열 생성
+    const campMap = new Map(); // campaignName → { campaign, total, submitted, tabs:[] }
+    let grandTotal = 0, grandSubmitted = 0;
+
+    tabs.forEach(t => {
+      const campName = t.campaignName || t.tcCampaignName || '미분류';
+      const total     = parseInt(t.totalCount) || 0;
+      const submitted = parseInt(t.submittedCount) || 0;
+      const pending   = total - submitted;
+
+      if (!campMap.has(campName)) {
+        campMap.set(campName, { campaign: campName, total: 0, submitted: 0, tabs: [], closedOnly: false });
+      }
+      const camp = campMap.get(campName);
+      camp.total     += total;
+      camp.submitted += submitted;
+      grandTotal     += total;
+      grandSubmitted += submitted;
+
+      // 시작일/종료일 (review_index LATERAL JOIN에서 추출)
+      const startDate = t.startDate || '';
+      const endDate   = t.endDate || '';
+
+      camp.tabs.push({
+        sheetId:     t.sheetId,
+        tab:         t.tabName,
+        total,
+        submitted,
+        pending,
+        forceDone:   !!t.forceDone,
+        isClosed:    !!t.isClosed,
+        displayName: t.displayName || '',
+        manager:     t.manager || '',
+        timeRange:   t.timeRange || '',
+        reviewType:  t.reviewType || '',
+        paymentType: t.paymentType || '',
+        startDate:   startDate,
+        endDate:     endDate,
+        sheetUrl:    t.sheetUrl || '',
+        taekhap:     !!t.taekhap,
+        isBulk:      !!t.isBulk,
+        deliveryType: t.deliveryType || '',
+        round:       t.round || '',
+        ncMode:      !!t.ncMode,
+        depositName: t.depositName || '',
+        transferBank: t.transferBank || '',
+        incomeType:  t.incomeType || '',
+        folderUrl:   t.folderUrl || '',
+        captureFolderUrl: t.captureFolderUrl || '',
+      });
     });
 
-    res.json({ tabs, campaigns, detailMap });
+    // 5. 마감 탭 중 index_master에 없는 것도 closedTabs에 포함
+    const closedTabs = closedConfigs.map(c => ({
+      sheetId: c.sheetId,
+      tab:     c.tabName,
+    }));
+
+    // 6. stats 배열 정렬 (캠페인명 순)
+    const stats = Array.from(campMap.values()).sort((a, b) => a.campaign.localeCompare(b.campaign));
+
+    res.json({
+      stats,
+      grand: {
+        total:     grandTotal,
+        submitted: grandSubmitted,
+        pending:   grandTotal - grandSubmitted,
+      },
+      closedTabs,
+      indexBuiltAt,
+    });
   } catch (err) {
     next(err);
   }
