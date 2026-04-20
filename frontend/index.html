@@ -700,6 +700,9 @@
         <button class="admin-tab-btn" data-tab="archive" onclick="switchAdminTab('archive')">
           <i class="fas fa-archive"></i> 아카이브
         </button>
+        <button class="admin-tab-btn" data-tab="settings" onclick="switchAdminTab('settings')">
+          <i class="fas fa-cog"></i> 설정 <span id="unrecogBadge" style="display:none;background:#EF4444;color:#fff;font-size:.65rem;padding:1px 5px;border-radius:8px;margin-left:4px;font-weight:700">0</span>
+        </button>
       </nav>
 
       <!-- 제출 현황 대시보드 -->
@@ -1272,6 +1275,74 @@
           <span style="color:var(--t3)">탭 전환 시 자동 로드</span>
         </div>
       </div><!-- /tab-archive -->
+
+      <!-- ★ Phase 14: 설정 탭 (키워드 관리 + 인식 실패 탭) -->
+      <div id="tab-settings" class="admin-tab-pane" style="padding:16px">
+
+        <!-- 인식 실패 탭 진단 -->
+        <div class="admin-section-header">
+          <span style="font-size:.95rem;font-weight:700;color:var(--t1)">
+            <i class="fas fa-exclamation-triangle" style="color:#F59E0B;margin-right:6px"></i>인식 실패 탭 진단
+          </span>
+          <div style="display:flex;gap:6px;margin-left:auto">
+            <button class="btn-sm" onclick="loadUnrecognizedTabs()" style="font-size:.78rem">
+              <i class="fas fa-sync-alt"></i> 새로고침
+            </button>
+          </div>
+        </div>
+        <p style="font-size:.78rem;color:var(--t3);margin:8px 0 12px">
+          인덱스 빌드 시 헤더를 인식하지 못한 탭 목록입니다. 가이드라인 등 비인덱스 탭은 "무시"로 처리하세요.
+        </p>
+        <div id="unrecogFilterWrap" style="display:flex;gap:8px;margin-bottom:12px;align-items:center">
+          <select id="unrecogStatusFilter" onchange="loadUnrecognizedTabs()" style="padding:5px 8px;border:1px solid #D1D5DB;border-radius:8px;font-size:.78rem">
+            <option value="">전체</option>
+            <option value="pending" selected>대기중</option>
+            <option value="ignored">무시됨</option>
+            <option value="resolved">해결됨</option>
+          </select>
+          <button id="btnIgnoreSelected" onclick="ignoreSelectedUnrecognized()" style="display:none;padding:4px 12px;background:#F59E0B;color:#fff;border:none;border-radius:6px;font-size:.78rem;cursor:pointer">
+            <i class="fas fa-eye-slash"></i> 선택 무시
+          </button>
+        </div>
+        <div id="unrecogListWrap" style="font-size:.82rem;color:var(--t2)">
+          <span style="color:var(--t3)">탭 전환 시 자동 로드</span>
+        </div>
+
+        <!-- 인덱스 파싱 키워드 관리 -->
+        <div class="admin-section-header" style="margin-top:28px">
+          <span style="font-size:.95rem;font-weight:700;color:var(--t1)">
+            <i class="fas fa-key" style="color:#8B5CF6;margin-right:6px"></i>인덱스 파싱 키워드 관리
+          </span>
+        </div>
+        <p style="font-size:.78rem;color:var(--t3);margin:8px 0 12px">
+          헤더행 감지, 이름 컬럼 감지, 시스템 탭 제외 등에 사용되는 키워드를 관리합니다. 키워드 추가 후 다음 빌드부터 자동 적용됩니다.
+        </p>
+
+        <!-- 키워드 추가 폼 -->
+        <div style="display:flex;gap:8px;margin-bottom:16px;flex-wrap:wrap;align-items:center">
+          <select id="kwCategorySelect" style="padding:5px 8px;border:1px solid #D1D5DB;border-radius:8px;font-size:.78rem">
+            <option value="data_tab">헤더행 감지 (data_tab)</option>
+            <option value="name">이름 컬럼 (name)</option>
+            <option value="submit">제출 컬럼 (submit)</option>
+            <option value="system_tab">시스템 탭 (system_tab)</option>
+            <option value="product">상품명 (product)</option>
+            <option value="url">상품URL (url)</option>
+            <option value="phone">연락처 (phone)</option>
+            <option value="start_date">시작일 (start_date)</option>
+            <option value="end_date">종료일 (end_date)</option>
+            <option value="round">회차 (round)</option>
+          </select>
+          <input type="text" id="kwNewKeyword" placeholder="새 키워드 입력..." style="flex:1;min-width:100px;padding:5px 10px;border:1px solid #D1D5DB;border-radius:8px;font-size:.78rem" onkeyup="if(event.key==='Enter')addKeywordAction()">
+          <button onclick="addKeywordAction()" style="padding:5px 12px;background:#8B5CF6;color:#fff;border:none;border-radius:6px;font-size:.78rem;cursor:pointer">
+            <i class="fas fa-plus"></i> 추가
+          </button>
+        </div>
+
+        <!-- 키워드 목록 -->
+        <div id="keywordListWrap" style="font-size:.82rem;color:var(--t2)">
+          <span style="color:var(--t3)">탭 전환 시 자동 로드</span>
+        </div>
+      </div><!-- /tab-settings -->
 
     </main>
   </div><!-- /screenAdmin -->

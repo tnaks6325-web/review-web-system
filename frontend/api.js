@@ -165,6 +165,15 @@ const _ACTION_MAP = {
 
   // Phase 13: Empty Index Cleanup
   'cleanupEmptyIndexes': { method: 'POST', path: '/api/diag/cleanup-empty-indexes' },
+
+  // Phase 14: 키워드 관리 + 인식 실패 탭 진단
+  'getKeywords':           { method: 'GET',    path: '/api/admin/keywords' },
+  'addKeyword':            { method: 'POST',   path: '/api/admin/keywords' },
+  'toggleKeyword':         { method: 'PUT',    path: '/api/admin/keywords' },    // /:id 는 호출 시 path 조합
+  'deleteKeyword':         { method: 'DELETE', path: '/api/admin/keywords' },    // /:id
+  'getUnrecognized':       { method: 'GET',    path: '/api/admin/unrecognized' },
+  'ignoreUnrecognized':    { method: 'POST',   path: '/api/admin/unrecognized/ignore' },
+  'resolveUnrecognized':   { method: 'POST',   path: '/api/admin/unrecognized/resolve' },
 };
 
 // ═══════════════════════════════════════════════════════════

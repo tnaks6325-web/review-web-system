@@ -288,4 +288,127 @@ router.post('/release-lock', authMiddleware, async (req, res, next) => {
   }
 });
 
+// ═══════════════════════════════════════════════════════════
+// Phase 14: 인덱스 키워드 관리 API
+// ═══════════════════════════════════════════════════════════
+
+// GET /api/admin/keywords — 키워드 목록 조회
+router.get('/keywords', authMiddleware, async (req, res, next) => {
+  try {
+    const { category } = req.query;
+    let sql = 'SELECT id, category, keyword, active, created_at, created_by FROM index_keywords';
+    const params = [];
+    if (category) {
+      sql += ' WHERE category = $1';
+      params.push(category);
+    }
+    sql += ' ORDER BY category, keyword';
+    const { rows } = await pool.query(sql, params);
+
+    const grouped = {};
+    rows.forEach(r => {
+      if (!grouped[r.category]) grouped[r.category] = [];
+      grouped[r.category].push(r);
+    });
+
+    res.json({ ok: true, keywords: rows, grouped, total: rows.length });
+  } catch (err) { next(err); }
+});
+
+// POST /api/admin/keywords — 키워드 추가
+router.post('/keywords', authMiddleware, masterOnlyMiddleware, async (req, res, next) => {
+  try {
+    const { category, keyword } = req.body;
+    if (!category || !keyword) return res.json({ error: 'category와 keyword 필요' });
+
+    const validCategories = ['data_tab', 'name', 'submit', 'product', 'url', 'phone', 'start_date', 'end_date', 'round', 'system_tab'];
+    if (!validCategories.includes(category)) return res.json({ error: '유효하지 않은 category: ' + category });
+
+    const { rows } = await pool.query(
+      `INSERT INTO index_keywords (category, keyword, created_by)
+       VALUES ($1, $2, $3)
+       ON CONFLICT (category, keyword) DO UPDATE SET active = TRUE
+       RETURNING id, category, keyword, active`,
+      [category, keyword.trim(), req.user?.name || 'admin']
+    );
+    res.json({ ok: true, keyword: rows[0] });
+  } catch (err) { next(err); }
+});
+
+// PUT /api/admin/keywords/:id — 키워드 활성/비활성 토글
+router.put('/keywords/:id', authMiddleware, masterOnlyMiddleware, async (req, res, next) => {
+  try {
+    const { id } = req.params;
+    const { active } = req.body;
+    if (typeof active !== 'boolean') return res.json({ error: 'active 필드 필요 (boolean)' });
+
+    const { rowCount } = await pool.query('UPDATE index_keywords SET active = $1 WHERE id = $2', [active, id]);
+    if (rowCount === 0) return res.json({ error: '키워드를 찾을 수 없습니다.' });
+    res.json({ ok: true });
+  } catch (err) { next(err); }
+});
+
+// DELETE /api/admin/keywords/:id — 키워드 삭제
+router.delete('/keywords/:id', authMiddleware, masterOnlyMiddleware, async (req, res, next) => {
+  try {
+    const { id } = req.params;
+    const { rowCount } = await pool.query('DELETE FROM index_keywords WHERE id = $1', [id]);
+    if (rowCount === 0) return res.json({ error: '키워드를 찾을 수 없습니다.' });
+    res.json({ ok: true });
+  } catch (err) { next(err); }
+});
+
+// ═══════════════════════════════════════════════════════════
+// Phase 14: 인식 실패 탭 진단 API
+// ═══════════════════════════════════════════════════════════
+
+// GET /api/admin/unrecognized — 인식 실패 탭 목록
+router.get('/unrecognized', authMiddleware, async (req, res, next) => {
+  try {
+    const { status } = req.query;
+    let sql = `SELECT id, sheet_id, tab_name, tab_gid, campaign_name, sample_rows, reason, status, ignored_by, ignored_at, detected_at
+               FROM unrecognized_tabs`;
+    const params = [];
+    if (status) {
+      sql += ' WHERE status = $1';
+      params.push(status);
+    }
+    sql += ' ORDER BY detected_at DESC';
+    const { rows } = await pool.query(sql, params);
+
+    const pendingCount = rows.filter(r => r.status === 'pending').length;
+    res.json({ ok: true, tabs: rows, total: rows.length, pendingCount });
+  } catch (err) { next(err); }
+});
+
+// POST /api/admin/unrecognized/ignore — 탭 무시 처리
+router.post('/unrecognized/ignore', authMiddleware, masterOnlyMiddleware, async (req, res, next) => {
+  try {
+    const { ids } = req.body;
+    if (!ids || !Array.isArray(ids) || ids.length === 0) return res.json({ error: 'ids 배열 필요' });
+
+    const { rowCount } = await pool.query(
+      `UPDATE unrecognized_tabs SET status = 'ignored', ignored_by = $1, ignored_at = NOW()
+       WHERE id = ANY($2) AND status = 'pending'`,
+      [req.user?.name || 'admin', ids]
+    );
+    res.json({ ok: true, updated: rowCount });
+  } catch (err) { next(err); }
+});
+
+// POST /api/admin/unrecognized/resolve — 탭 해결됨 처리
+router.post('/unrecognized/resolve', authMiddleware, masterOnlyMiddleware, async (req, res, next) => {
+  try {
+    const { ids } = req.body;
+    if (!ids || !Array.isArray(ids) || ids.length === 0) return res.json({ error: 'ids 배열 필요' });
+
+    const { rowCount } = await pool.query(
+      `UPDATE unrecognized_tabs SET status = 'resolved', ignored_by = $1, ignored_at = NOW()
+       WHERE id = ANY($2)`,
+      [req.user?.name || 'admin', ids]
+    );
+    res.json({ ok: true, updated: rowCount });
+  } catch (err) { next(err); }
+});
+
 module.exports = router;

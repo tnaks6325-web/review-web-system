@@ -1779,6 +1779,7 @@ function switchAdminTab(tabName) {
   if (tabName === "payment")   initPaymentPanel();
   if (tabName === "dashboard") { try { loadSystemMonitor(); } catch(_){} try { loadStatsOverview(); } catch(_){} }
   if (tabName === "archive")   { try { loadArchiveList(); } catch(_){} try { _loadArchiveHistory(); } catch(_){} }
+  if (tabName === "settings")  { try { loadUnrecognizedTabs(); } catch(_){} try { loadKeywordList(); } catch(_){} }
   // ★ 컨텍스트 툴바 업데이트
   _updateContextToolbar(tabName);
 }
@@ -2047,6 +2048,9 @@ async function loadAdminDashboard() {
     document.getElementById("sumPending").textContent = grand.pending.toLocaleString();
     document.getElementById("sumRate").textContent    = rate + "%";
     show("dashboardSummary");
+
+    // Phase 14: 인식 실패 탭 배지 업데이트
+    _updateUnrecogBadge();
 
     if (!stats.length) {
       wrap.innerHTML = '<div class="admin-empty"><i class="fas fa-inbox"></i><p>데이터가 없습니다</p></div>';
@@ -10791,5 +10795,297 @@ async function _archiveExecuteSelected() {
   } catch (err) {
     alert('아카이브 실패: ' + err.message);
     if (detectWrap) detectWrap.style.display = 'none';
+  }
+}
+
+/* ══════════════════════════════════════════════════════════════
+   ★ Phase 14: 키워드 DB 관리 + 인식 실패 탭 진단 UI
+   ══════════════════════════════════════════════════════════════ */
+
+// ── 인식 실패 탭 배지 업데이트 (대시보드에서 호출) ──
+async function _updateUnrecogBadge() {
+  try {
+    const data = await gasGet({ action: 'getUnrecognized', status: 'pending' });
+    const badge = document.getElementById('unrecogBadge');
+    if (!badge) return;
+    const count = data.pendingCount || 0;
+    if (count > 0) {
+      badge.textContent = count;
+      badge.style.display = 'inline';
+    } else {
+      badge.style.display = 'none';
+    }
+  } catch (_) {}
+}
+
+// ── 인식 실패 탭 목록 로드 ──
+async function loadUnrecognizedTabs() {
+  const wrap = document.getElementById('unrecogListWrap');
+  if (!wrap) return;
+  wrap.innerHTML = '<div style="text-align:center;padding:12px;color:var(--t3)"><i class="fas fa-circle-notch fa-spin"></i> 불러오는 중...</div>';
+
+  const status = document.getElementById('unrecogStatusFilter')?.value || '';
+  try {
+    const data = await gasGet({ action: 'getUnrecognized', status });
+    if (data.error) {
+      wrap.innerHTML = `<div style="padding:12px;color:#EF4444"><i class="fas fa-exclamation-circle"></i> ${escHtml(data.error)}</div>`;
+      return;
+    }
+
+    const tabs = data.tabs || [];
+    const btnIgnore = document.getElementById('btnIgnoreSelected');
+
+    if (tabs.length === 0) {
+      wrap.innerHTML = '<div style="text-align:center;padding:20px;color:var(--t3)"><i class="fas fa-check-circle" style="color:#10B981"></i> 인식 실패 탭이 없습니다.</div>';
+      if (btnIgnore) btnIgnore.style.display = 'none';
+      return;
+    }
+
+    const hasPending = tabs.some(t => t.status === 'pending');
+    if (btnIgnore) btnIgnore.style.display = hasPending ? 'inline-block' : 'none';
+
+    const reasonLabels = {
+      'no_header': '헤더 미발견',
+      'no_name_col': '이름 컬럼 없음',
+      'empty': '빈 시트',
+      'few_rows': '행 부족',
+      'unknown': '알 수 없음',
+    };
+    const reasonColors = {
+      'no_header': '#F59E0B',
+      'no_name_col': '#EF4444',
+      'empty': '#6B7280',
+      'few_rows': '#6B7280',
+      'unknown': '#6B7280',
+    };
+    const statusLabels = {
+      'pending': '대기',
+      'ignored': '무시됨',
+      'resolved': '해결됨',
+    };
+    const statusColors = {
+      'pending': '#F59E0B',
+      'ignored': '#6B7280',
+      'resolved': '#10B981',
+    };
+
+    let html = `<div style="font-size:.75rem;color:var(--t3);margin-bottom:8px">총 ${tabs.length}건</div>`;
+    tabs.forEach(t => {
+      const rl = reasonLabels[t.reason] || t.reason;
+      const rc = reasonColors[t.reason] || '#6B7280';
+      const sl = statusLabels[t.status] || t.status;
+      const sc = statusColors[t.status] || '#6B7280';
+      const dateStr = t.detected_at ? new Date(t.detected_at).toLocaleString('ko-KR', { timeZone: 'Asia/Seoul' }) : '';
+
+      html += `<div style="border:1px solid #E5E7EB;border-radius:10px;padding:12px;margin-bottom:8px;background:#fff" data-unrecog-id="${t.id}">
+        <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap">
+          ${t.status === 'pending' ? `<input type="checkbox" class="unrecog-check" value="${t.id}" style="width:16px;height:16px">` : ''}
+          <span style="font-weight:600;color:var(--t1);font-size:.85rem">${escHtml(t.tab_name)}</span>
+          <span style="font-size:.7rem;background:${rc}22;color:${rc};padding:2px 8px;border-radius:6px;font-weight:600">${rl}</span>
+          <span style="font-size:.7rem;background:${sc}22;color:${sc};padding:2px 8px;border-radius:6px;font-weight:600">${sl}</span>
+          <span style="font-size:.7rem;color:var(--t3);margin-left:auto">${dateStr}</span>
+        </div>
+        <div style="font-size:.75rem;color:var(--t3);margin-top:4px">
+          <i class="fas fa-file-alt" style="margin-right:4px"></i>${escHtml(t.campaign_name || '미분류')}
+        </div>
+        ${t.sample_rows ? `<details style="margin-top:8px">
+          <summary style="font-size:.72rem;color:#8B5CF6;cursor:pointer">샘플 데이터 (첫 25행) 보기</summary>
+          <div style="max-height:200px;overflow:auto;margin-top:6px;font-size:.68rem;background:#F9FAFB;border-radius:6px;padding:8px">
+            <table style="border-collapse:collapse;width:100%">
+              ${_buildUnrecogSampleTable(t.sample_rows)}
+            </table>
+          </div>
+        </details>` : ''}
+      </div>`;
+    });
+
+    wrap.innerHTML = html;
+
+    // 배지 업데이트
+    _updateUnrecogBadge();
+  } catch (err) {
+    wrap.innerHTML = `<div style="padding:12px;color:#EF4444"><i class="fas fa-exclamation-circle"></i> ${escHtml(err.message)}</div>`;
+  }
+}
+
+function _buildUnrecogSampleTable(sampleRows) {
+  if (!sampleRows || !Array.isArray(sampleRows)) return '<tr><td>데이터 없음</td></tr>';
+  let parsed = sampleRows;
+  if (typeof sampleRows === 'string') {
+    try { parsed = JSON.parse(sampleRows); } catch (_) { return '<tr><td>파싱 오류</td></tr>'; }
+  }
+  return parsed.map((row, i) => {
+    const cells = (Array.isArray(row) ? row : []).map(c => `<td style="border:1px solid #E5E7EB;padding:2px 4px;white-space:nowrap;max-width:120px;overflow:hidden;text-overflow:ellipsis">${escHtml(String(c || ''))}</td>`).join('');
+    return `<tr><td style="border:1px solid #E5E7EB;padding:2px 4px;color:var(--t3);font-weight:600">${i + 1}</td>${cells}</tr>`;
+  }).join('');
+}
+
+// ── 선택된 인식 실패 탭 무시 처리 ──
+async function ignoreSelectedUnrecognized() {
+  const checks = document.querySelectorAll('.unrecog-check:checked');
+  if (checks.length === 0) {
+    showToast('무시할 탭을 선택하세요.', 'warning');
+    return;
+  }
+  const ids = Array.from(checks).map(c => c.value);
+  if (!confirm(`${ids.length}개 탭을 무시 처리하시겠습니까?\n(가이드라인 등 비인덱스 탭)`)) return;
+
+  try {
+    const data = await gasPost({ action: 'ignoreUnrecognized', ids });
+    if (data.error) {
+      showToast('실패: ' + data.error, 'error');
+      return;
+    }
+    showToast(`${data.updated || 0}개 탭 무시 처리 완료`, 'success');
+    loadUnrecognizedTabs();
+  } catch (err) {
+    showToast('오류: ' + err.message, 'error');
+  }
+}
+
+// ── 키워드 목록 로드 ──
+async function loadKeywordList() {
+  const wrap = document.getElementById('keywordListWrap');
+  if (!wrap) return;
+  wrap.innerHTML = '<div style="text-align:center;padding:12px;color:var(--t3)"><i class="fas fa-circle-notch fa-spin"></i> 불러오는 중...</div>';
+
+  try {
+    const data = await gasGet({ action: 'getKeywords' });
+    if (data.error) {
+      wrap.innerHTML = `<div style="padding:12px;color:#EF4444"><i class="fas fa-exclamation-circle"></i> ${escHtml(data.error)}</div>`;
+      return;
+    }
+
+    const grouped = data.grouped || {};
+    const categoryLabels = {
+      'data_tab': '헤더행 감지',
+      'name': '이름 컬럼',
+      'submit': '제출 컬럼',
+      'system_tab': '시스템 탭',
+      'product': '상품명',
+      'url': '상품URL',
+      'phone': '연락처',
+      'start_date': '시작일',
+      'end_date': '종료일',
+      'round': '회차',
+    };
+    const categoryColors = {
+      'data_tab': '#3B82F6',
+      'name': '#10B981',
+      'submit': '#F59E0B',
+      'system_tab': '#EF4444',
+      'product': '#8B5CF6',
+      'url': '#EC4899',
+      'phone': '#6366F1',
+      'start_date': '#14B8A6',
+      'end_date': '#F97316',
+      'round': '#06B6D4',
+    };
+
+    const categories = Object.keys(categoryLabels);
+    let html = '';
+
+    categories.forEach(cat => {
+      const kws = grouped[cat] || [];
+      const label = categoryLabels[cat] || cat;
+      const color = categoryColors[cat] || '#6B7280';
+
+      html += `<div style="margin-bottom:16px">
+        <div style="display:flex;align-items:center;gap:8px;margin-bottom:6px">
+          <span style="font-weight:700;font-size:.82rem;color:${color}"><i class="fas fa-tag" style="margin-right:4px"></i>${label}</span>
+          <span style="font-size:.7rem;color:var(--t3)">(${cat})</span>
+          <span style="font-size:.7rem;background:${color}22;color:${color};padding:1px 6px;border-radius:6px">${kws.length}개</span>
+        </div>
+        <div style="display:flex;flex-wrap:wrap;gap:6px">`;
+
+      if (kws.length === 0) {
+        html += `<span style="font-size:.75rem;color:var(--t3)">키워드 없음</span>`;
+      } else {
+        kws.forEach(kw => {
+          const opacity = kw.active ? '1' : '0.4';
+          html += `<span style="display:inline-flex;align-items:center;gap:4px;padding:3px 10px;border-radius:16px;font-size:.75rem;font-weight:500;background:${color}15;color:${color};border:1px solid ${color}40;opacity:${opacity}" data-kw-id="${kw.id}">
+            ${escHtml(kw.keyword)}
+            <button onclick="toggleKeywordAction('${kw.id}', ${!kw.active})" style="background:none;border:none;cursor:pointer;padding:0;font-size:.7rem;color:${kw.active ? '#F59E0B' : '#10B981'}" title="${kw.active ? '비활성화' : '활성화'}">
+              <i class="fas ${kw.active ? 'fa-toggle-on' : 'fa-toggle-off'}"></i>
+            </button>
+            <button onclick="deleteKeywordAction('${kw.id}','${escHtml(kw.keyword)}')" style="background:none;border:none;cursor:pointer;padding:0;font-size:.7rem;color:#EF4444" title="삭제">
+              <i class="fas fa-times"></i>
+            </button>
+          </span>`;
+        });
+      }
+
+      html += `</div></div>`;
+    });
+
+    wrap.innerHTML = html || '<div style="text-align:center;padding:20px;color:var(--t3)">키워드 데이터가 없습니다.</div>';
+  } catch (err) {
+    wrap.innerHTML = `<div style="padding:12px;color:#EF4444"><i class="fas fa-exclamation-circle"></i> ${escHtml(err.message)}</div>`;
+  }
+}
+
+// ── 키워드 추가 ──
+async function addKeywordAction() {
+  const category = document.getElementById('kwCategorySelect')?.value;
+  const keyword = document.getElementById('kwNewKeyword')?.value?.trim();
+  if (!category || !keyword) {
+    showToast('카테고리와 키워드를 입력하세요.', 'warning');
+    return;
+  }
+
+  try {
+    const data = await gasPost({ action: 'addKeyword', category, keyword });
+    if (data.error) {
+      showToast('실패: ' + data.error, 'error');
+      return;
+    }
+    showToast(`키워드 "${keyword}" 추가 완료`, 'success');
+    document.getElementById('kwNewKeyword').value = '';
+    loadKeywordList();
+  } catch (err) {
+    showToast('오류: ' + err.message, 'error');
+  }
+}
+
+// ── 키워드 활성/비활성 토글 ──
+async function toggleKeywordAction(id, active) {
+  try {
+    const url = getApiBaseUrl() + '/api/admin/keywords/' + id;
+    const res = await fetch(url, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json', ...(_getAuthHeaders ? _getAuthHeaders() : {}) },
+      body: JSON.stringify({ active }),
+    });
+    const data = await res.json();
+    if (data.error) {
+      showToast('실패: ' + data.error, 'error');
+      return;
+    }
+    showToast(active ? '키워드 활성화' : '키워드 비활성화', 'success');
+    loadKeywordList();
+  } catch (err) {
+    showToast('오류: ' + err.message, 'error');
+  }
+}
+
+// ── 키워드 삭제 ──
+async function deleteKeywordAction(id, keyword) {
+  if (!confirm(`"${keyword}" 키워드를 삭제하시겠습니까?`)) return;
+
+  try {
+    const url = getApiBaseUrl() + '/api/admin/keywords/' + id;
+    const res = await fetch(url, {
+      method: 'DELETE',
+      headers: { ...(_getAuthHeaders ? _getAuthHeaders() : {}) },
+    });
+    const data = await res.json();
+    if (data.error) {
+      showToast('실패: ' + data.error, 'error');
+      return;
+    }
+    showToast(`"${keyword}" 키워드 삭제 완료`, 'success');
+    loadKeywordList();
+  } catch (err) {
+    showToast('오류: ' + err.message, 'error');
   }
 }

@@ -4,11 +4,52 @@ const { computeChecksum } = require('../utils/checksum');
 const { logger } = require('../utils/logger');
 const { emitIndexBuild } = require('../utils/sse');
 
-// GAS 원본 상수 (그대로 유지)
-const SUBMITTED_VALUES = ['TRUE', 'true', '1', '제출', 'O', 'o', '완료', 'Y', 'y'];
-const NAME_KEYWORDS = ['수취인', '이름', '신청자', '참여자', '수취인명', '주문자', '성함', '예금주', '성명'];
-const SYSTEM_TABS = ['세부목록', '검색인덱스', '인덱스마스터', '인덱스데이터', '마감', '상세목록', '탭설정', '설정', 'detail', 'config'];
-const DATA_TAB_KEYWORDS = ['번호', '주문자', '수취인', '수취인명', '성함', '이름', '성명', '신청자', '연락처', '전화번호'];
+// ═══════════════════════════════════════════════════════════
+// Phase 14: DB에서 키워드 로드 (하드코딩 폴백)
+// ═══════════════════════════════════════════════════════════
+
+// 기본 폴백 상수 (DB 로드 실패 시 사용)
+const DEFAULT_SUBMITTED_VALUES = ['TRUE', 'true', '1', '제출', 'O', 'o', '완료', 'Y', 'y'];
+const DEFAULT_NAME_KEYWORDS = ['수취인', '이름', '신청자', '참여자', '수취인명', '주문자', '성함', '예금주', '성명'];
+const DEFAULT_SYSTEM_TABS = ['세부목록', '검색인덱스', '인덱스마스터', '인덱스데이터', '마감', '상세목록', '탭설정', '설정', 'detail', 'config'];
+const DEFAULT_DATA_TAB_KEYWORDS = ['번호', '주문자', '수취인', '수취인명', '성함', '이름', '성명', '신청자', '연락처', '전화번호'];
+const DEFAULT_SUBMIT_KEYWORDS = ['리뷰완료', '제출', '완료', 'submit', '제출완료', '리뷰제출'];
+
+// 빌드 시 DB에서 로드되는 동적 키워드
+let SUBMITTED_VALUES = [...DEFAULT_SUBMITTED_VALUES];
+let NAME_KEYWORDS = [...DEFAULT_NAME_KEYWORDS];
+let SYSTEM_TABS = [...DEFAULT_SYSTEM_TABS];
+let DATA_TAB_KEYWORDS = [...DEFAULT_DATA_TAB_KEYWORDS];
+let SUBMIT_KEYWORDS = [...DEFAULT_SUBMIT_KEYWORDS];
+
+// DB에서 활성 키워드를 로드하는 함수
+async function _loadKeywordsFromDB() {
+  try {
+    const { rows } = await pool.query(
+      "SELECT category, keyword FROM index_keywords WHERE active = TRUE ORDER BY category, keyword"
+    );
+    if (rows.length === 0) {
+      logger.info('[keywords] DB 키워드 없음 → 기본값 사용');
+      return;
+    }
+
+    const grouped = {};
+    rows.forEach(r => {
+      if (!grouped[r.category]) grouped[r.category] = [];
+      grouped[r.category].push(r.keyword);
+    });
+
+    DATA_TAB_KEYWORDS = grouped['data_tab'] || [...DEFAULT_DATA_TAB_KEYWORDS];
+    NAME_KEYWORDS = grouped['name'] || [...DEFAULT_NAME_KEYWORDS];
+    SYSTEM_TABS = grouped['system_tab'] || [...DEFAULT_SYSTEM_TABS];
+    SUBMIT_KEYWORDS = grouped['submit'] || [...DEFAULT_SUBMIT_KEYWORDS];
+
+    logger.info(`[keywords] DB 로드 완료: data_tab=${DATA_TAB_KEYWORDS.length}, name=${NAME_KEYWORDS.length}, system=${SYSTEM_TABS.length}, submit=${SUBMIT_KEYWORDS.length}`);
+  } catch (err) {
+    logger.warn(`[keywords] DB 로드 실패, 기본값 사용: ${err.message}`);
+    // 테이블 미존재 등 → 기본값 유지
+  }
+}
 
 // 빌드 잠금 TTL (10분 — batchGet 병렬 처리로 빨라졌지만 여유 확보)
 const BUILD_LOCK_TTL_MS = 10 * 60 * 1000;
@@ -86,6 +127,9 @@ async function buildIndexSmart(forceFullRebuild = false) {
   }
 
   try {
+    // ── 0단계: DB에서 키워드 로드 ──
+    await _loadKeywordsFromDB();
+
     // ── 1단계: 시트 ID 목록 수집 ──
     const { rows: campaignRows } = await pool.query(
       'SELECT DISTINCT sheet_id FROM campaigns UNION SELECT DISTINCT sheet_id FROM tab_configs'
@@ -353,11 +397,14 @@ async function _processOneSheet(sheetId, opts) {
       // 리뷰 인덱스 구성요건 미충족 (헤더 없음 or 데이터 0건) → 인덱스 등록 스킵 + 기존 데이터 삭제
       if (rows.length === 0) {
         await _removeNonIndexTab(sheetId, tabName);
+        // Phase 14: 인식 실패 탭을 unrecognized_tabs에 기록
+        await _recordUnrecognizedTab(sheetId, tabName, tabGid, spreadsheetTitle, values);
         skipped++;
         continue;
       }
 
       await _upsertTabIndex(sheetId, tabName, tabGid, newChecksum, rows, currentModifiedTime, spreadsheetTitle);
+      await _resolveRecognizedTab(sheetId, tabName);
       rebuilt++;
 
     } catch (err) {
@@ -507,7 +554,7 @@ function parseTabRows(values, sheetId, tabName, tabGid, campaignTitle) {
   );
   if (nameColIdx < 0) return [];
 
-  const submitKeywords = ['리뷰완료', '제출', '완료', 'submit', '제출완료', '리뷰제출'];
+  const submitKeywords = SUBMIT_KEYWORDS;
   const submitColIdx = headers.findIndex(h =>
     submitKeywords.some(k => h.toLowerCase().includes(k.toLowerCase()))
   );
@@ -602,6 +649,67 @@ function _formatDate(val) {
     return date.toISOString().split('T')[0];
   }
   return s;
+}
+
+// ═══════════════════════════════════════════════════════════
+// Phase 14: 인식 실패 탭 기록
+// parseTabRows가 빈 배열을 반환한 탭을 unrecognized_tabs에 기록
+// ═══════════════════════════════════════════════════════════
+
+async function _recordUnrecognizedTab(sheetId, tabName, tabGid, campaignName, values) {
+  try {
+    // 실패 원인 분석
+    let reason = 'unknown';
+    if (!values || values.length === 0) {
+      reason = 'empty';
+    } else if (values.length < 2) {
+      reason = 'few_rows';
+    } else {
+      // 헤더 행 탐지 시도
+      let headerFound = false;
+      for (let i = 0; i < Math.min(values.length, 20); i++) {
+        const cells = values[i] ? values[i].map(c => String(c || '').trim()) : [];
+        if (_isDataTabRow(cells)) {
+          headerFound = true;
+          break;
+        }
+      }
+      if (!headerFound) {
+        reason = 'no_header';
+      } else {
+        reason = 'no_name_col';
+      }
+    }
+
+    // 첫 25행 샘플 (분석용)
+    const sampleRows = (values || []).slice(0, 25).map(row =>
+      (row || []).map(c => String(c || '').trim()).slice(0, 15)
+    );
+
+    await pool.query(`
+      INSERT INTO unrecognized_tabs (sheet_id, tab_name, tab_gid, campaign_name, sample_rows, reason, status, detected_at)
+      VALUES ($1, $2, $3, $4, $5, $6, 'pending', NOW())
+      ON CONFLICT (sheet_id, tab_name) DO UPDATE SET
+        campaign_name = EXCLUDED.campaign_name,
+        sample_rows = EXCLUDED.sample_rows,
+        reason = EXCLUDED.reason,
+        status = CASE WHEN unrecognized_tabs.status = 'ignored' THEN 'ignored' ELSE 'pending' END,
+        detected_at = NOW()
+    `, [sheetId, tabName, tabGid, campaignName, JSON.stringify(sampleRows), reason]);
+  } catch (err) {
+    // 기록 실패는 무시 (빌드 중단 방지)
+    logger.warn(`[buildIndex] 인식 실패 탭 기록 오류 (${tabName}): ${err.message}`);
+  }
+}
+
+// 인식 성공한 탭은 unrecognized_tabs에서 제거 (해결됨)
+async function _resolveRecognizedTab(sheetId, tabName) {
+  try {
+    await pool.query(
+      `UPDATE unrecognized_tabs SET status = 'resolved' WHERE sheet_id = $1 AND tab_name = $2 AND status = 'pending'`,
+      [sheetId, tabName]
+    );
+  } catch (_) {}
 }
 
 module.exports = { buildIndexSmart, acquireBuildLock, releaseBuildLock };
