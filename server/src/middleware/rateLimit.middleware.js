@@ -1,4 +1,5 @@
 const rateLimit = require('express-rate-limit');
+const jwt = require('jsonwebtoken');
 
 const rateLimiter = rateLimit({
   windowMs: 60 * 1000,  // 1분
@@ -16,4 +17,26 @@ const registerLimiter = rateLimit({
   message: { error: '등록 요청이 너무 많습니다.' },
 });
 
-module.exports = { rateLimiter, registerLimiter };
+// ── 이미지 API 전용 rate limiter (Gemini/Drive 비용 보호) ──
+// 관리자 로그인 시 skip, 비로그인은 분당 10회 제한
+const imageApiLimiter = rateLimit({
+  windowMs: 60 * 1000,  // 1분
+  max: 10,              // 분당 10회 (비로그인 사용자)
+  message: { ok: false, error: '이미지 분석 요청이 너무 많습니다. 잠시 후 다시 시도하세요.' },
+  standardHeaders: true,
+  legacyHeaders: false,
+  skip: (req) => {
+    // JWT 토큰이 있고 유효하면 rate limit 건너뛰기
+    const authHeader = req.headers['authorization'];
+    const token = authHeader && authHeader.split(' ')[1];
+    if (!token) return false;
+    try {
+      jwt.verify(token, process.env.JWT_SECRET);
+      return true; // 인증된 관리자 → 제한 없음
+    } catch (_) {
+      return false; // 토큰 무효 → 제한 적용
+    }
+  },
+});
+
+module.exports = { rateLimiter, registerLimiter, imageApiLimiter };

@@ -2,8 +2,9 @@ const express = require('express');
 const router = express.Router();
 const { authMiddleware } = require('../middleware/auth.middleware');
 const pool = require('../db/pool');
-const { readSheet, getSpreadsheetMeta } = require('../services/sheets.service');
+const { readSheet, getSpreadsheetMeta, writeSheet, copySpreadsheet, copySheetToSpreadsheet, renameSheet } = require('../services/sheets.service');
 const { getQueueStats, retryItem, retryAllFailed, purgeCompleted } = require('../services/syncQueue.service');
+const { imageApiLimiter } = require('../middleware/rateLimit.middleware');
 const { extractOrderFromImage, verifyAddressMatch } = require('../services/gemini.service');
 const driveService = require('../services/drive.service');
 const { logger } = require('../utils/logger');
@@ -393,7 +394,7 @@ router.get('/drive-diag', async (req, res) => {
 // POST /api/image/extract — 주문이미지 AI 분석 (Gemini Vision)
 // 프론트엔드 기대 응답: { ok, orderNumber, recipient, phone, address, price, orderer, ... }
 // ═══════════════════════════════════════════════════════════
-router.post('/image-extract', async (req, res, next) => {
+router.post('/image-extract', imageApiLimiter, async (req, res, next) => {
   try {
     const { imageBase64, mimeType } = req.body;
     if (!imageBase64) return res.json({ ok: false, error: '이미지 데이터가 필요합니다.' });
@@ -415,7 +416,7 @@ router.post('/image-extract', async (req, res, next) => {
 // POST /api/image/upload — 주문이미지 Drive 업로드 (Google Drive API)
 // 프론트엔드 페이로드: { imageBase64, mimeType, fileName, displayName, tabName, round, sheetId }
 // ═══════════════════════════════════════════════════════════
-router.post('/image-upload', async (req, res, next) => {
+router.post('/image-upload', imageApiLimiter, async (req, res, next) => {
   try {
     const { imageBase64, mimeType, fileName, displayName, tabName, round, sheetId } = req.body;
     if (!imageBase64) return res.json({ ok: false, error: '이미지 데이터가 필요합니다.' });
@@ -495,7 +496,7 @@ router.post('/image-upload', async (req, res, next) => {
 // POST /api/image/verify-address — AI 주소 동일인 비교 (Gemini)
 // 프론트엔드 기대 응답: { ok, isSamePerson, confidence, reason }
 // ═══════════════════════════════════════════════════════════
-router.post('/verify-address', async (req, res, next) => {
+router.post('/verify-address', imageApiLimiter, async (req, res, next) => {
   try {
     const {
       naverRecipient, naverPhone, naverAddress,
@@ -524,29 +525,191 @@ router.post('/verify-address', async (req, res, next) => {
 });
 
 // ═══════════════════════════════════════════════════════════
-// POST /api/diag/convert-nc-headers — NC 헤더 변환 (GAS: convertToNcHeaders)
+// POST /api/diag/convert-nc-headers — NC 헤더 변환 (네이버+쿠팡 동시진행 모드)
+// 주문번호 → 네이버주문번호 + 쿠팡주문번호
+// 아이디   → 네이버ID + 쿠팡ID
+// 결제금액 → 네이버결제금액 + 쿠팡결제금액
 // ═══════════════════════════════════════════════════════════
 router.post('/convert-nc-headers', authMiddleware, async (req, res, next) => {
   try {
     const { sheetId, tabName } = req.body;
-    if (!sheetId || !tabName) return res.json({ error: 'sheetId, tabName 필요' });
-    res.json({ ok: true, message: 'NC 헤더 변환 — Sheets API 연동 필요' });
+    if (!sheetId || !tabName) return res.json({ ok: false, error: 'sheetId, tabName 필요' });
+
+    // 1. 현재 헤더(1행) 읽기
+    const headerRange = `'${tabName}'!1:1`;
+    const rows = await readSheet(sheetId, headerRange);
+    if (!rows || rows.length === 0) {
+      return res.json({ ok: false, error: '시트 헤더를 읽을 수 없습니다.' });
+    }
+
+    const headers = rows[0];
+    logger.info(`[NC 변환] 원본 헤더 (${headers.length}개): ${headers.slice(0, 15).join(', ')}`);
+
+    // 2. 이미 변환 여부 확인
+    const ncKeywords = ['네이버주문번호', '쿠팡주문번호', '네이버ID', '쿠팡ID', '네이버결제금액', '쿠팡결제금액'];
+    const alreadyConverted = ncKeywords.some(kw => headers.includes(kw));
+    if (alreadyConverted) {
+      return res.json({ ok: true, alreadyConverted: true, message: '이미 네이버+쿠팡 모드로 변환된 탭입니다.' });
+    }
+
+    // 3. 변환 대상 컬럼 인덱스 찾기
+    const findCol = (keywords) => headers.findIndex(h =>
+      keywords.some(kw => String(h || '').includes(kw))
+    );
+
+    const orderIdx  = findCol(['주문번호', '번호']);
+    const userIdx   = findCol(['아이디', 'ID', 'id']);
+    const priceIdx  = findCol(['결제금액', '결제', '금액']);
+
+    if (orderIdx < 0 && userIdx < 0 && priceIdx < 0) {
+      return res.json({ ok: false, error: '변환할 헤더(주문번호/아이디/결제금액)를 찾을 수 없습니다.' });
+    }
+
+    // 4. 새 헤더 배열 구성 (원본 복사 후 치환)
+    const newHeaders = [...headers];
+
+    // 변환 매핑 (인덱스 큰 것부터 처리 → splice 영향 방지)
+    const replacements = [];
+    if (orderIdx >= 0) replacements.push({ idx: orderIdx, from: headers[orderIdx], to: ['네이버주문번호', '쿠팡주문번호'] });
+    if (userIdx >= 0)  replacements.push({ idx: userIdx,  from: headers[userIdx],  to: ['네이버ID', '쿠팡ID'] });
+    if (priceIdx >= 0) replacements.push({ idx: priceIdx, from: headers[priceIdx], to: ['네이버결제금액', '쿠팡결제금액'] });
+
+    // 인덱스 큰 것부터 splice
+    replacements.sort((a, b) => b.idx - a.idx);
+    for (const r of replacements) {
+      newHeaders.splice(r.idx, 1, ...r.to);
+    }
+
+    // 5. 시트에 새 헤더 쓰기
+    const writeRange = `'${tabName}'!A1`;
+    await writeSheet(sheetId, writeRange, [newHeaders]);
+
+    logger.info(`[NC 변환] 완료: ${tabName} — 변환 ${replacements.length}건`);
+
+    res.json({
+      ok: true,
+      alreadyConverted: false,
+      converted: replacements.map(r => `${r.from} → ${r.to.join(' + ')}`),
+      newHeaderCount: newHeaders.length,
+    });
   } catch (err) {
+    logger.error(`[NC 변환] 오류: ${err.message}`);
     next(err);
   }
 });
 
 // ═══════════════════════════════════════════════════════════
-// POST /api/diag/create-campaign-sheet — 캠페인 시트 생성 (GAS: createCampaignSheet)
+// POST /api/diag/create-campaign-sheet — 캠페인 시트 생성
+// 모드 1 (registerMode=new): 템플릿 스프레드시트 전체 복사 → 새 파일
+// 모드 2 (registerMode=existing): 템플릿의 특정 탭을 기존 시트에 복사
+// 기대 응답: { ok, mode, fileTitle, campaignName, sheetUrl, sheetId, newTabName, tabUrl }
 // ═══════════════════════════════════════════════════════════
 router.post('/create-campaign-sheet', authMiddleware, async (req, res, next) => {
   try {
-    const { templateSheetId, campaignName } = req.body;
-    if (!templateSheetId || !campaignName) {
-      return res.json({ error: '템플릿 시트ID와 캠페인명이 필요합니다.' });
+    const {
+      templateSheetId,   // 템플릿 시트 ID
+      fileTitle,         // 새 파일명 또는 새 탭명
+      registerMode,      // 'new' | 'existing'
+      campaignName,      // 캠페인명
+      existingSheetId,   // 기존 시트 ID (existing 모드)
+      templateTabName,   // 복사할 템플릿 탭 이름 (existing 모드)
+    } = req.body;
+
+    if (!templateSheetId || !fileTitle) {
+      return res.json({ ok: false, error: '템플릿 시트ID와 파일명이 필요합니다.' });
     }
-    res.json({ ok: true, message: '캠페인 시트 생성 — Sheets API 연동 필요' });
+
+    const mode = registerMode || 'new';
+    const resolvedCampaignName = campaignName || fileTitle;
+
+    // ── 모드 1: 새 스프레드시트 생성 (전체 복사) ──
+    if (mode === 'new') {
+      const copied = await copySpreadsheet(templateSheetId, fileTitle);
+      logger.info(`[createSheet] 새 시트 생성: ${copied.name} (${copied.id})`);
+
+      // campaigns 테이블에 등록
+      await pool.query(
+        `INSERT INTO campaigns (sheet_id, campaign_name, sheet_url)
+         VALUES ($1, $2, $3)
+         ON CONFLICT (sheet_id, campaign_name) DO UPDATE SET
+           sheet_url = EXCLUDED.sheet_url, updated_at = NOW()`,
+        [copied.id, resolvedCampaignName, copied.url]
+      );
+
+      return res.json({
+        ok: true,
+        mode: 'new',
+        fileTitle: copied.name,
+        campaignName: resolvedCampaignName,
+        sheetUrl: copied.url,
+        sheetId: copied.id,
+      });
+    }
+
+    // ── 모드 2: 기존 시트에 탭 추가 (탭 복사) ──
+    if (mode === 'existing') {
+      if (!existingSheetId) {
+        return res.json({ ok: false, error: '기존 시트 ID가 필요합니다.' });
+      }
+
+      // 템플릿에서 복사할 탭의 sheetId(gid) 찾기
+      const templateMeta = await getSpreadsheetMeta(templateSheetId);
+      let sourceTab = null;
+
+      if (templateTabName) {
+        sourceTab = templateMeta.find(s => s.properties.title === templateTabName);
+      }
+      if (!sourceTab) {
+        // 첫 번째 탭 사용
+        sourceTab = templateMeta[0];
+      }
+      if (!sourceTab) {
+        return res.json({ ok: false, error: '템플릿에서 복사할 탭을 찾을 수 없습니다.' });
+      }
+
+      const sourceGid = sourceTab.properties.sheetId;
+
+      // 탭 복사
+      const copiedTab = await copySheetToSpreadsheet(templateSheetId, sourceGid, existingSheetId);
+      logger.info(`[createSheet] 탭 복사 완료: ${copiedTab.title} → gid=${copiedTab.sheetId}`);
+
+      // 탭 이름 변경 ("Copy of 원본" → 원하는 이름)
+      const newTabName = fileTitle;
+      try {
+        await renameSheet(existingSheetId, copiedTab.sheetId, newTabName);
+        logger.info(`[createSheet] 탭 이름 변경: ${copiedTab.title} → ${newTabName}`);
+      } catch (renameErr) {
+        logger.warn(`[createSheet] 탭 이름 변경 실패 (무시): ${renameErr.message}`);
+        // 이름 변경 실패해도 복사 자체는 성공
+      }
+
+      const sheetUrl = `https://docs.google.com/spreadsheets/d/${existingSheetId}/edit`;
+      const tabUrl = `${sheetUrl}#gid=${copiedTab.sheetId}`;
+
+      // tab_configs에 등록
+      await pool.query(
+        `INSERT INTO tab_configs (sheet_id, tab_name, campaign_name, sheet_url)
+         VALUES ($1, $2, $3, $4)
+         ON CONFLICT (sheet_id, tab_name) DO UPDATE SET
+           campaign_name = COALESCE(NULLIF(tab_configs.campaign_name,''), EXCLUDED.campaign_name),
+           updated_at = NOW()`,
+        [existingSheetId, newTabName, resolvedCampaignName, sheetUrl]
+      );
+
+      return res.json({
+        ok: true,
+        mode: 'existing',
+        newTabName,
+        campaignName: resolvedCampaignName,
+        sheetUrl,
+        tabUrl,
+        sheetId: existingSheetId,
+      });
+    }
+
+    return res.json({ ok: false, error: `알 수 없는 registerMode: ${mode}` });
   } catch (err) {
+    logger.error(`[createSheet] 오류: ${err.message}`);
     next(err);
   }
 });
@@ -604,6 +767,41 @@ router.get('/build-history', authMiddleware, async (req, res, next) => {
       [limit]
     );
     res.json({ ok: true, history: rows });
+  } catch (err) {
+    next(err);
+  }
+});
+
+// ═══════════════════════════════════════════════════════════
+// GET /api/diag/app-url — 앱 URL 조회 (GAS: getAppUrl)
+// ═══════════════════════════════════════════════════════════
+router.get('/app-url', async (req, res, next) => {
+  try {
+    const { rows } = await pool.query(
+      "SELECT value FROM app_settings WHERE key = 'APP_URL'"
+    );
+    const url = rows[0]?.value || '';
+    res.json({ ok: true, url });
+  } catch (err) {
+    next(err);
+  }
+});
+
+// ═══════════════════════════════════════════════════════════
+// POST /api/diag/app-url — 앱 URL 저장 (GAS: saveAppUrl)
+// ═══════════════════════════════════════════════════════════
+router.post('/app-url', async (req, res, next) => {
+  try {
+    const { url } = req.body;
+    if (!url) return res.json({ ok: false, error: 'URL이 필요합니다.' });
+
+    await pool.query(
+      `INSERT INTO app_settings (key, value, updated_at)
+       VALUES ('APP_URL', $1, NOW())
+       ON CONFLICT (key) DO UPDATE SET value = $1, updated_at = NOW()`,
+      [url]
+    );
+    res.json({ ok: true, url });
   } catch (err) {
     next(err);
   }

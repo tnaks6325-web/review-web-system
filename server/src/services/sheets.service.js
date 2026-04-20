@@ -117,6 +117,60 @@ async function getSheetModifiedTime(spreadsheetId) {
   return res.data.modifiedTime || null;
 }
 
+/**
+ * 스프레드시트 복사 (Drive API — 새 파일 생성)
+ * @returns {{ id, name, url }}
+ */
+async function copySpreadsheet(sourceSpreadsheetId, newTitle) {
+  if (!drive) throw new Error('Google Drive API가 설정되지 않았습니다.');
+  const res = await drive.files.copy({
+    fileId: sourceSpreadsheetId,
+    requestBody: { name: newTitle },
+    fields: 'id, name',
+  });
+  const id = res.data.id;
+  return {
+    id,
+    name: res.data.name,
+    url: `https://docs.google.com/spreadsheets/d/${id}/edit`,
+  };
+}
+
+/**
+ * 시트(탭) 복사 — 소스 스프레드시트의 특정 탭을 대상 스프레드시트에 복사
+ * @returns {{ sheetId, title }}
+ */
+async function copySheetToSpreadsheet(sourceSpreadsheetId, sourceSheetId, destSpreadsheetId) {
+  if (!sheets) throw new Error('Google Sheets API가 설정되지 않았습니다.');
+  const res = await sheets.spreadsheets.sheets.copyTo({
+    spreadsheetId: sourceSpreadsheetId,
+    sheetId: sourceSheetId,
+    requestBody: { destinationSpreadsheetId: destSpreadsheetId },
+  });
+  return {
+    sheetId: res.data.sheetId,
+    title: res.data.title,
+  };
+}
+
+/**
+ * 시트(탭) 이름 변경
+ */
+async function renameSheet(spreadsheetId, sheetId, newTitle) {
+  if (!sheets) throw new Error('Google Sheets API가 설정되지 않았습니다.');
+  await sheets.spreadsheets.batchUpdate({
+    spreadsheetId,
+    requestBody: {
+      requests: [{
+        updateSheetProperties: {
+          properties: { sheetId, title: newTitle },
+          fields: 'title',
+        },
+      }],
+    },
+  });
+}
+
 module.exports = {
   readSheet,
   writeSheet,
@@ -124,6 +178,9 @@ module.exports = {
   getSpreadsheetMeta,
   batchReadSheet,
   getSheetModifiedTime,
+  copySpreadsheet,
+  copySheetToSpreadsheet,
+  renameSheet,
   sheets,
   drive,
   auth,
