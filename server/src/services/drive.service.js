@@ -18,6 +18,8 @@ async function listFolderContents(folderId, mimeType = null) {
     q,
     fields: 'files(id, name, mimeType, webViewLink, createdTime)',
     pageSize: 1000,
+    supportsAllDrives: true,
+    includeItemsFromAllDrives: true,
   });
   return res.data.files || [];
 }
@@ -34,6 +36,7 @@ async function createFolder(name, parentFolderId) {
       parents: [parentFolderId],
     },
     fields: 'id, name, webViewLink',
+    supportsAllDrives: true,
   });
   return res.data;
 }
@@ -75,6 +78,8 @@ async function findFolderByName(name, parentFolderId) {
     q,
     fields: 'files(id, name, webViewLink)',
     pageSize: 1,
+    supportsAllDrives: true,
+    includeItemsFromAllDrives: true,
   });
   return (res.data.files || [])[0] || null;
 }
@@ -108,16 +113,23 @@ async function uploadFileBase64(base64Data, fileName, mimeType, parentFolderId) 
       body: stream,
     },
     fields: 'id, name, webViewLink, webContentLink',
+    supportsAllDrives: true,
   });
 
   // 파일을 "링크가 있는 모든 사용자" 읽기 가능으로 설정
-  await drive.permissions.create({
-    fileId: res.data.id,
-    requestBody: {
-      role: 'reader',
-      type: 'anyone',
-    },
-  });
+  try {
+    await drive.permissions.create({
+      fileId: res.data.id,
+      requestBody: {
+        role: 'reader',
+        type: 'anyone',
+      },
+      supportsAllDrives: true,
+    });
+  } catch (permErr) {
+    // 공유 드라이브 정책상 권한 설정 불가 시 무시 (업로드 자체는 성공)
+    console.warn(`[Drive] 권한 설정 실패 (무시): ${permErr.message}`);
+  }
 
   return res.data;
 }
