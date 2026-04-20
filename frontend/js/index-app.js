@@ -1,0 +1,10547 @@
+/* ══════════════════════════════════════════
+   app.js v4 [인라인]
+══════════════════════════════════════════ */
+
+/* ── 숨김/표시 헬퍼 ── */
+function hide(idOrEl) {
+  const el = typeof idOrEl === "string" ? document.getElementById(idOrEl) : idOrEl;
+  if (!el) return;
+  el.classList.add("hidden");
+  el.style.display = "none";
+}
+function show(idOrEl, displayType) {
+  const el = typeof idOrEl === "string" ? document.getElementById(idOrEl) : idOrEl;
+  if (!el) return;
+  el.classList.remove("hidden");
+  el.style.display = displayType || "";
+}
+
+/* ── 전역 상태 ── */
+const S = { selectedRow: null, files: [], step: 1 };
+const ADMIN_SESSION_KEY = "rapp_admin_exp";
+const ADMIN_SESSION_MS  = 8 * 60 * 60 * 1000;
+
+/* ── GAS 워밍업 핑 ──────────────────────────────────────────
+   페이지 로드 직후 GAS 인스턴스를 미리 깨워 콜드스타트 제거.
+   fire-and-forget: 응답을 기다리지 않고 병렬 실행.
+   action=indexStatus → doGet에 등록된 부작용 없는 경량 액션 사용.
+   ──────────────────────────────────────────────────────────── */
+function _warmUpGas() {
+  // ★ [Node.js 이관] GAS 워밍업 대신 API 서버 헬스체크로 대체
+  if (typeof API_BASE_URL === 'undefined' || !API_BASE_URL) return;
+  fetch(API_BASE_URL + '/health', { method: 'GET', mode: 'cors' })
+    .catch(() => {}); // 실패해도 무시
+}
+
+/* ── 초기화 ── */
+document.addEventListener("DOMContentLoaded", () => {
+  _warmUpGas(); // ★ 콜드스타트 방지: 가장 먼저 실행
+  hideLoading();
+  // ★ GAS URL 자동 부트스트랩
+  bootstrapGasUrl();
+
+  // ── 창 크기 변경 시 sticky 위치 재보정 ──
+  window.addEventListener("resize", () => _fixStickyPositions());
+
+  // ★ 관리자 페이지 직접 접속: 세션 있으면 바로 대시보드, 없으면 진입 선택 화면
+  if (isAdminLoggedIn()) {
+    enterAdminScreen();
+  } else {
+    // screenGate 표시 (이미 active 상태, 추가 작업 불필요)
+    // openAdminLogin()은 관리자 카드 클릭 시에만 호출
+  }
+});
+
+/**
+ * GAS URL 자동 로드 순서:
+ * 1. BOOTSTRAP_GAS_URL 하드코딩값 → 있으면 즉시 사용
+ * 2. localStorage 저장값 → 있으면 그 URL로 GAS getAppUrl 호출해서 최신값 확인
+ * 3. 둘 다 없으면 gasNotSet 배너 표시
+ */
+async function bootstrapGasUrl() {
+  // ★ [Node.js 이관] GAS URL 부트스트랩 → API_BASE_URL 헬스체크로 대체
+  if (APP_CONFIG.GAS_WEB_APP_URL) {
+    hide("gasNotSet");
+    // 백그라운드로 API 서버 상태 확인 (GAS getAppUrl 대신)
+    try {
+      const res = await fetch((typeof API_BASE_URL !== 'undefined' ? API_BASE_URL : APP_CONFIG.GAS_WEB_APP_URL) + '/health');
+      if (res.ok) {
+        const json = await res.json();
+        console.log("[bootstrap] API 서버 상태:", json.ok ? "정상" : "오류");
+      }
+    } catch (_) { /* 서버 연결 실패는 무시 */ }
+    return;
+  }
+  // 2) URL이 전혀 없는 경우 → gasNotSet 배너 표시
+  show("gasNotSet");
+}
+
+function bindEnter() {
+  const el = document.getElementById("nameInput");
+  if (el) el.addEventListener("keydown", e => { if (e.key === "Enter") doSearch(); });
+}
+
+/* ── 스크린 전환 ── */
+// 화면별 타이틀 정의
+const SCREEN_TITLES = {
+  screenGate:      "리뷰웹시스템",
+  screenAdmin:     "관리자"
+};
+function showScreen(id) {
+  document.querySelectorAll(".screen").forEach(s => {
+    s.classList.remove("active");
+    s.style.display = "none";
+  });
+  const target = document.getElementById(id);
+  if (!target) return;
+  target.classList.add("active");
+  target.style.display = "flex";
+  window.scrollTo({ top: 0, behavior: "instant" });
+
+  // ── 화면별 타이틀 동적 변경 ──
+  const title = SCREEN_TITLES[id];
+  if (title) {
+    document.title = title;
+  }
+}
+
+function backToSearch() {
+  location.href = 'search.html';
+}
+
+/* ── 검색 ── */
+async function doSearch() {
+  const q = document.getElementById("nameInput").value.trim();
+  if (!q || q.length < 2) { showToast("이름을 2글자 이상 입력하세요.", "warning"); return; }
+  if (!APP_CONFIG.GAS_WEB_APP_URL) {
+    showToast("GAS URL을 먼저 설정해주세요.", "error"); return;
+  }
+  hide("resultsSection");
+  hide("noResultView");
+  hide("gasNotSet");
+  startProgress();
+  try {
+    const data    = await gasGet({ action: "searchAll", query: q });
+    stopProgress();
+    const results = data.results || [];
+    if (results.length === 0) {
+      show("noResultView");
+    } else {
+      renderResults(results);
+    }
+  } catch (err) {
+    stopProgress();
+    const emsg = err.message || "";
+    if (emsg === "요청 시간 초과") {
+      showToast("⏱ 검색 시간 초과 — 잠시 후 다시 시도해주세요.", "warning");
+    } else if (emsg.includes("fetch") || emsg.includes("Failed to fetch") || emsg.includes("NetworkError")) {
+      showToast("❌ 네트워크 오류 — GAS URL을 확인하거나 잠시 후 재시도하세요.", "error");
+    } else {
+      showToast("❌ 검색 오류: " + emsg.substring(0, 100), "error");
+    }
+    if (!APP_CONFIG.GAS_WEB_APP_URL) show("gasNotSet");
+  }
+}
+
+/* ── 진행 애니메이션 ── */
+let _progressTimer = null;
+function startProgress() {
+  const wrap = document.getElementById("searchProgress");
+  const bar  = document.getElementById("progressBar");
+  const txt  = document.getElementById("progressText");
+  show(wrap, "block");
+  bar.style.width = "0%";
+  let pct = 0;
+  _progressTimer = setInterval(() => {
+    pct = pct < 70 ? pct + 5 : pct < 90 ? pct + 1 : pct;
+    bar.style.width = pct + "%";
+    const msgs = ["인덱스 검색 중...", "결과 취합 중...", "거의 다 됐어요...", "잠시만요..."];
+    txt.textContent = msgs[Math.floor(pct / 25)] || "검색 중...";
+  }, 150);
+}
+function stopProgress() {
+  if (_progressTimer) { clearInterval(_progressTimer); _progressTimer = null; }
+  const bar  = document.getElementById("progressBar");
+  const wrap = document.getElementById("searchProgress");
+  if (bar) bar.style.width = "100%";
+  setTimeout(() => hide(wrap), 400);
+}
+
+/* ── 결과 렌더링 ── */
+
+/**
+ * item.row 에서 상품명·옵션 값을 추출해 표시용 문자열 반환
+ * - "상품" 포함 헤더 → 상품명
+ * - "옵션" / "option" 포함 헤더 → 옵션1, 옵션2, ... (순서대로)
+ * 반환: { product: "젤리스틱", options: ["100포"] }  (없으면 빈문자/빈배열)
+ */
+function extractProductOption(row) {
+  if (!row || typeof row !== "object") return { product: "", options: [] };
+  const entries = Object.entries(row);
+  let product = "";
+  const options = [];
+  // 상품 헤더: "상품" 포함 (단, "상품명"은 tcDisplayName과 중복이므로 표시 포함)
+  for (const [k, v] of entries) {
+    const kl = k.trim().toLowerCase();
+    if (!kl || kl.startsWith("_")) continue;
+    if (!product && kl.includes("상품")) {
+      const val = String(v || "").trim();
+      if (val) product = val;
+    }
+  }
+  // 옵션 헤더: "옵션" 또는 "option" 포함 헤더를 원래 key 순서대로 수집
+  for (const [k, v] of entries) {
+    const kl = k.trim().toLowerCase();
+    if (!kl || kl.startsWith("_")) continue;
+    if (kl.includes("옵션") || kl.includes("option")) {
+      const val = String(v || "").trim();
+      if (val) options.push({ header: k.trim(), value: val });
+    }
+  }
+  return { product, options };
+}
+
+function renderResults(results) {
+  const section = document.getElementById("resultsSection");
+  const list    = document.getElementById("resultsList");
+  const pending = results.filter(item => !item.isSubmitted);
+
+  document.getElementById("resultsCount").textContent = `${pending.length}건`;
+  list.innerHTML = "";
+
+  if (pending.length === 0) {
+    show("noResultView");
+    hide(section);
+    return;
+  }
+
+  pending.forEach(item => {
+    const name = item.displayName || "이름 없음";
+    // 상품명: 세부목록 displayName 우선, 없으면 안내문구
+    const productLabel = item.tcDisplayName || "";
+    // ★ v8.2: 차수 배지
+    const roundBadge = item.round
+      ? `<span style="display:inline-block;font-size:.6rem;font-weight:700;padding:1px 6px;border-radius:10px;background:#EEF2FF;color:#4338CA;border:1px solid #C7D2FE;margin-left:4px;vertical-align:middle">${escHtml(item.round)}</span>`
+      : "";
+
+    // ★ 상품/옵션 추출 (시트 row 기반)
+    const { product, options } = extractProductOption(item.row || {});
+
+    // 옵션 배지 HTML 생성
+    let optionHtml = "";
+    if (options.length > 0) {
+      const badges = options.map(o =>
+        `<span class="result-option-badge">${escHtml(o.value)}</span>`
+      ).join("");
+      optionHtml = `<div class="result-option-row">${badges}</div>`;
+    }
+
+    // 상품 라인: tcDisplayName 우선, 없으면 시트 상품 컬럼값, 없으면 안내문구
+    const displayProduct = productLabel || product;
+    const productHtml = displayProduct
+      ? `<div class="result-name result-product-name">${escHtml(name)}${roundBadge}</div>
+         <div class="result-product-label">${escHtml(displayProduct)}</div>
+         ${optionHtml}`
+      : `<div class="result-name result-product-name">${escHtml(name)}${roundBadge}</div>
+         <div class="result-product-label result-product-empty">상품명이 입력되지 않았습니다.</div>
+         ${optionHtml}`;
+
+    const card = document.createElement("div");
+    card.className = "result-card";
+    card.innerHTML = `
+      <div class="result-avatar"></div>
+      <div class="result-body">${productHtml}</div>
+      <div class="result-right">
+        <span class="status-badge status-pending">미제출</span>
+        <i class="fas fa-chevron-right result-chevron"></i>
+      </div>`;
+    card.addEventListener("click", () => openSubmit(item));
+    list.appendChild(card);
+  });
+
+  show(section);
+}
+
+/* ── 리뷰 제출 화면 ── */
+function openSubmit(item) {
+  S.selectedRow = item;
+  S.files = [];
+  S.step  = 1;
+
+  // 제출 화면 타이틀: 상품명(세부목록) > productName(시트) > "구매양식 제출" 순 fallback
+  const workLabel = item.tcDisplayName || item.productName || "";
+  document.getElementById("submitTitle").textContent    = workLabel || "리뷰제출";
+  document.getElementById("submitSubtitle").textContent = workLabel ? "" : (item.campaignName || "");
+  // ★ 보안: 헤더 타이틀에 캠페인명/탭명/상품명 노출 차단
+  // submitTitle → 항상 "구매양식 제출" 고정
+  // submitSubtitle → 항상 빈칸
+  document.getElementById("submitTitle").textContent    = "구매양식 제출";
+  document.getElementById("submitSubtitle").textContent = "";
+
+  const link = document.getElementById("productLink");
+  if (item.productUrl) {
+    link.href = item.productUrl;
+    show(link, "inline-flex");
+    // 상품 URL 있을 때만 스트립 노출 (링크만, 이름은 숨김)
+    const strip = document.getElementById("productStrip");
+    if (strip) {
+      // 썸네일·이름 숨기고 링크만 표시
+      const thumbWrap = strip.querySelector(".thumb-wrap");
+      const labelEl   = strip.querySelector(".product-label");
+      const nameEl    = document.getElementById("productName");
+      if (thumbWrap) thumbWrap.style.display = "none";
+      if (labelEl)   labelEl.style.display   = "none";
+      if (nameEl)    nameEl.style.display     = "none";
+      strip.style.display = "";
+    }
+  } else {
+    hide(link);
+    // 상품 URL 없으면 스트립 전체 숨김
+    const strip = document.getElementById("productStrip");
+    if (strip) strip.style.display = "none";
+  }
+
+  renderInfoGrid(item.row, item.tcDisplayName || "");
+
+  const doneBox  = document.getElementById("alreadyDoneBox");
+  const btnStep2 = document.getElementById("btnToStep2");
+  doneBox.classList.toggle("hidden", !item.isSubmitted);
+  doneBox.style.display = item.isSubmitted ? "" : "none";
+  btnStep2.disabled = item.isSubmitted;
+
+  goStep(1);
+  showScreen("screenSubmit");
+}
+
+/* ── STEP 이동 ── */
+function goStep(n) {
+  [1, 2].forEach(i => {
+    document.getElementById(`step${i}`).classList.toggle("active", i === n);
+    const sl = document.getElementById(`sl${i}`);
+    sl.classList.remove("active", "done");
+    if (i < n)        sl.classList.add("done");
+    else if (i === n) sl.classList.add("active");
+  });
+  document.getElementById("stepFill").style.width = n === 1 ? "25%" : "100%";
+  S.step = n;
+  window.scrollTo({ top: 0, behavior: "smooth" });
+}
+
+/* ── 정보 그리드 ── */
+function renderInfoGrid(row, tabDisplayName) {
+  const grid = document.getElementById("infoGrid");
+  grid.innerHTML = "";
+
+  // ── 전화번호 마스킹: 010-1234-5678 → 010-****-5678
+  function maskPhone(val) {
+    const s = String(val).trim();
+    const m1 = s.match(/^(\d{2,3})[-.\s]?(\d{3,4})[-.\s]?(\d{4})$/);
+    if (m1) return m1[1] + "-****-" + m1[3];
+    const m2 = s.match(/^(\d{3})(\d{4})(\d{4})$/);
+    if (m2) return m2[1] + "-****-" + m2[3];
+    return s;
+  }
+
+  // ── row 키 정규화 맵 (소문자 trim)
+  const rowLower = {};
+  Object.entries(row).forEach(([k, v]) => { rowLower[k.trim().toLowerCase()] = v; });
+  const rowLowerKeys = Object.keys(rowLower);
+
+  /**
+   * keys 배열에서 값 찾기
+   * 1단계: 정확 일치
+   * 2단계: 소문자 정확 일치
+   * 3단계: 부분 포함 일치 (예: "쿠팡id", "네이버ID")
+   */
+  function findVal(keys) {
+    for (const k of keys) {
+      const v = row[k];
+      if (v !== undefined && v !== null && String(v).trim() !== "") return v;
+    }
+    for (const k of keys) {
+      const v = rowLower[k.trim().toLowerCase()];
+      if (v !== undefined && v !== null && String(v).trim() !== "") return v;
+    }
+    for (const k of keys) {
+      const kLow = k.trim().toLowerCase();
+      for (const rk of rowLowerKeys) {
+        if (rk.includes(kLow)) {
+          const v = rowLower[rk];
+          if (v !== undefined && v !== null && String(v).trim() !== "") return v;
+        }
+      }
+    }
+    return undefined;
+  }
+
+  /**
+   * 결제금액: 헤더에 "결제" 또는 "금액" 이 포함된 키를 찾아 반환
+   * (정확 일치 우선 → 부분 포함 순)
+   */
+  function findPaymentVal() {
+    const keywords = ["결제", "금액"];
+    // 내부 skip 키 제외
+    const skipKeys = new Set(["_rowIndex","_sheetId","_gid","_submitCol","_tabName","_campaignName"]);
+    for (const rk of rowLowerKeys) {
+      if (skipKeys.has(rk)) continue;
+      for (const kw of keywords) {
+        if (rk.includes(kw)) {
+          const v = rowLower[rk];
+          if (v !== undefined && v !== null && String(v).trim() !== "") return String(v).trim();
+        }
+      }
+    }
+    return undefined;
+  }
+
+  // ── 헬퍼: 일반 단일 행 생성
+  function makeRow(label, value, extraClass) {
+    const el = document.createElement("div");
+    el.className = "ig-row" + (extraClass ? " " + extraClass : "");
+    el.innerHTML = `<div class="ig-label">${escHtml(label)}</div><div class="ig-value"><span>${escHtml(String(value))}</span></div>`;
+    return el;
+  }
+
+  // ── 헬퍼: 한 행에 2칸 표시 (페어 행)
+  function makePairRow(labelA, valA, labelB, valB, maskFnA, maskFnB) {
+    const dispA = valA ? (maskFnA ? maskFnA(valA) : String(valA)) : null;
+    const dispB = valB ? (maskFnB ? maskFnB(valB) : String(valB)) : null;
+    if (!dispA && !dispB) return null;
+
+    const el = document.createElement("div");
+    el.className = "ig-row-pair";
+
+    // 왼쪽 칸
+    const cellA = document.createElement("div");
+    cellA.className = "ig-pair-cell";
+    if (dispA) {
+      cellA.innerHTML = `<div class="ig-label">${escHtml(labelA)}</div><div class="ig-value"><span>${escHtml(dispA)}</span></div>`;
+    } else {
+      cellA.innerHTML = `<div class="ig-label">${escHtml(labelA)}</div><div class="ig-value" style="color:var(--t3);font-size:.8rem"><span>-</span></div>`;
+    }
+
+    // 오른쪽 칸
+    const cellB = document.createElement("div");
+    cellB.className = "ig-pair-cell";
+    if (dispB) {
+      cellB.innerHTML = `<div class="ig-label">${escHtml(labelB)}</div><div class="ig-value"><span>${escHtml(dispB)}</span></div>`;
+    } else {
+      cellB.innerHTML = `<div class="ig-label">${escHtml(labelB)}</div><div class="ig-value" style="color:var(--t3);font-size:.8rem"><span>-</span></div>`;
+    }
+
+    el.appendChild(cellA);
+    el.appendChild(cellB);
+    return el;
+  }
+
+  // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+  // 표시 순서:
+  //  1. 상품명 (세부목록 displayName)
+  //  1-1. 상품 컬럼값 (시트 "상품" 헤더) — displayName과 다를 때
+  //  1-2. 옵션 (시트 "옵션"/"옵션1"/"옵션2"... 헤더) — 있을 때만
+  //  2. 결제금액
+  //  3. 주문자 / 수취인
+  //  4. 아이디 / 전화번호
+  //  5. 예금주
+  // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+  let hasAny = false;
+
+  // 1. 상품명 (세부목록 displayName)
+  if (tabDisplayName && tabDisplayName.trim()) {
+    grid.appendChild(makeRow("상품명", tabDisplayName.trim(), "ig-row-product"));
+    hasAny = true;
+  }
+
+  // 1-1. 시트 상품 컬럼 (헤더에 "상품" 포함)
+  const { product: sheetProduct, options: sheetOptions } = extractProductOption(row);
+  if (sheetProduct) {
+    // displayName과 같으면 중복 표시 생략
+    if (sheetProduct !== tabDisplayName.trim()) {
+      grid.appendChild(makeRow("상품", sheetProduct, "ig-row-product"));
+      hasAny = true;
+    }
+  }
+
+  // 1-2. 옵션 (있을 때만, 헤더명과 값을 함께 표시)
+  if (sheetOptions.length > 0) {
+    sheetOptions.forEach(opt => {
+      grid.appendChild(makeRow(opt.header, opt.value, "ig-row-option"));
+    });
+    hasAny = true;
+  }
+
+  // 2. 결제금액
+  const paymentVal = findPaymentVal();
+  if (paymentVal) {
+    grid.appendChild(makeRow("결제금액", paymentVal, "ig-row-price"));
+    hasAny = true;
+  }
+
+  // 3. 주문자 / 수취인 (페어)
+  const ordererVal   = findVal(APP_CONFIG.COL_ALIASES.orderer);
+  const recipientVal = findVal(APP_CONFIG.COL_ALIASES.recipient);
+  if (ordererVal || recipientVal) {
+    const pairRow = makePairRow("주문자", ordererVal, "수취인", recipientVal);
+    if (pairRow) { grid.appendChild(pairRow); hasAny = true; }
+  }
+
+  // 4. 아이디 / 전화번호 (페어)
+  const userIdVal = findVal(APP_CONFIG.COL_ALIASES.userId);
+  const phoneVal  = findVal(APP_CONFIG.COL_ALIASES.phone);
+  if (userIdVal || phoneVal) {
+    const pairRow = makePairRow("아이디", userIdVal, "전화번호", phoneVal, null, maskPhone);
+    if (pairRow) { grid.appendChild(pairRow); hasAny = true; }
+  }
+
+  // 5. 예금주
+  const depositorVal = findVal(APP_CONFIG.COL_ALIASES.depositor);
+  if (depositorVal) {
+    grid.appendChild(makeRow("예금주", depositorVal));
+    hasAny = true;
+  }
+
+  // 데이터가 전혀 없으면 폴백: row의 모든 비어있지 않은 필드 표시
+  if (!hasAny) {
+    const skip = new Set(["_rowIndex","_sheetId","_gid","_submitCol","_tabName","_campaignName"]);
+    Object.entries(row).forEach(([k, v]) => {
+      if (skip.has(k) || !v || !String(v).trim()) return;
+      grid.appendChild(makeRow(k, String(v)));
+    });
+  }
+}
+
+/* ── 파일 업로드 ── */
+function bindDragDrop() {
+  const zone = document.getElementById("dropZone");
+  if (!zone) return;
+  zone.addEventListener("dragover",  e => { e.preventDefault(); zone.classList.add("drag-over"); });
+  zone.addEventListener("dragleave", () => zone.classList.remove("drag-over"));
+  zone.addEventListener("drop", e => {
+    e.preventDefault(); zone.classList.remove("drag-over");
+    addFiles(Array.from(e.dataTransfer.files).filter(f => APP_CONFIG.ALLOWED_MIME.includes(f.type)));
+  });
+}
+function onFilesSelected(e) { addFiles(Array.from(e.target.files)); e.target.value = ""; }
+function addFiles(files) {
+  const valid = files.filter(f => {
+    if (!APP_CONFIG.ALLOWED_MIME.includes(f.type)) { showToast(`${f.name}: 지원하지 않는 형식`, "error"); return false; }
+    if (f.size > APP_CONFIG.MAX_FILE_SIZE)          { showToast(`${f.name}: 10MB 초과`, "error");        return false; }
+    return true;
+  });
+  S.files.push(...valid);
+  renderPreviews();
+}
+function removeFile(i) { S.files.splice(i, 1); renderPreviews(); }
+function renderPreviews() {
+  const ph   = document.getElementById("dzPlaceholder");
+  const prev = document.getElementById("dzPreview");
+  if (!ph || !prev) return;
+  if (S.files.length === 0) { ph.style.display = ""; hide(prev); prev.innerHTML = ""; return; }
+  ph.style.display = "none"; show(prev); prev.innerHTML = "";
+  S.files.forEach((f, i) => {
+    const item = document.createElement("div"); item.className = "prev-item";
+    const img  = document.createElement("img");
+    img.src = URL.createObjectURL(f); img.onload = () => URL.revokeObjectURL(img.src);
+    const del = document.createElement("button"); del.className = "prev-del";
+    del.innerHTML = '<i class="fas fa-times"></i>';
+    del.onclick = e => { e.stopPropagation(); removeFile(i); };
+    item.append(img, del); prev.appendChild(item);
+  });
+  const add = document.createElement("div"); add.className = "prev-add";
+  add.innerHTML = '<i class="fas fa-plus"></i><span>추가</span>';
+  add.onclick = e => { e.stopPropagation(); document.getElementById("imgInput").click(); };
+  prev.appendChild(add);
+}
+
+/* ── 리뷰 제출 ── */
+async function submitReview() {
+  if (S.files.length === 0)  { showToast("이미지를 1장 이상 첨부해주세요.", "warning"); return; }
+  if (!S.selectedRow)        { showToast("주문 정보를 다시 확인해주세요.", "error");    return; }
+  if (!APP_CONFIG.GAS_WEB_APP_URL) { showToast("GAS URL을 설정해주세요.", "error");    return; }
+
+  const btn = document.getElementById("btnSubmit");
+  btn.disabled = true;
+  btn.innerHTML = '<i class="fas fa-circle-notch fa-spin"></i> 제출 중...';
+
+  try {
+    showLoading("이미지 변환 중...");
+    const fileData = await Promise.all(S.files.map(f => fileToBase64(f)));
+
+    showLoading("업로드 중...");
+    const item         = S.selectedRow;
+    const reviewerName = item.displayName || "이름없음";
+    const memo         = document.getElementById("memoTxt").value.trim();
+
+    const result = await gasPost({
+      action:       "submitReview",
+      sheetId:      item.sheetId,
+      gid:          item.gid,
+      rowIndex:     item.row._rowIndex,
+      reviewerName,
+      submitCol:    item.submitCol,
+      campaignName: item.campaignName,
+      memo,
+      files: fileData.map((b64, i) => ({
+        name:     reviewerName + "_" + (i + 1),
+        mimeType: S.files[i].type,
+        data:     b64,
+      }))
+    });
+
+    hideLoading();
+    if (result.success) {
+      document.getElementById("successMessage").innerHTML =
+        `<strong>${escHtml(reviewerName)}</strong>님의 리뷰가 제출되었습니다 😊`;
+      show("successModal", "flex");
+    } else {
+      throw new Error(result.error || "알 수 없는 오류");
+    }
+  } catch (err) {
+    hideLoading();
+    showToast("제출 실패: " + err.message, "error");
+  } finally {
+    btn.disabled = false;
+    btn.innerHTML = '<i class="fas fa-paper-plane"></i> 제출하기';
+  }
+}
+
+function resetApp() {
+  hide("successModal");
+  S.files = []; S.selectedRow = null;
+  location.href = 'search.html';
+}
+
+/* ── 관리자 로그인 / 세션 ── */
+const ADMIN_SESSION_NAME_KEY = "rapp_admin_name";
+const ADMIN_SESSION_ROLE_KEY = "rapp_admin_role";
+
+function isAdminLoggedIn() {
+  const exp = Number(sessionStorage.getItem(ADMIN_SESSION_KEY) || 0);
+  return exp > Date.now();
+}
+function setAdminSession(name, role) {
+  sessionStorage.setItem(ADMIN_SESSION_KEY,      String(Date.now() + ADMIN_SESSION_MS));
+  sessionStorage.setItem(ADMIN_SESSION_NAME_KEY, name || "관리자");
+  sessionStorage.setItem(ADMIN_SESSION_ROLE_KEY, role || "admin");
+}
+function clearAdminSession() {
+  sessionStorage.removeItem(ADMIN_SESSION_KEY);
+  sessionStorage.removeItem(ADMIN_SESSION_NAME_KEY);
+  sessionStorage.removeItem(ADMIN_SESSION_ROLE_KEY);
+  sessionStorage.removeItem("rapp_master_pw_cache");
+}
+function getAdminName() {
+  return sessionStorage.getItem(ADMIN_SESSION_NAME_KEY) || "관리자";
+}
+function getAdminRole() {
+  return sessionStorage.getItem(ADMIN_SESSION_ROLE_KEY) || "admin";
+}
+function isMaster() {
+  return getAdminRole() === "master";
+}
+function getAdminSessionRemaining() {
+  const exp  = Number(sessionStorage.getItem(ADMIN_SESSION_KEY) || 0);
+  const diff = exp - Date.now();
+  if (diff <= 0) return null;
+  const h = Math.floor(diff / 3600000);
+  const m = Math.floor((diff % 3600000) / 60000);
+  return h > 0 ? `${h}시간 ${m}분 남음` : `${m}분 남음`;
+}
+
+/* ── GAS URL 설정 모달 (비밀번호 인증) ── */
+const GAS_URL_PW = "rhakdnjdy1!"; // 설정 접근 비밀번호
+
+function openGasUrlModal() {
+  // 항상 STEP1(비밀번호)부터 시작
+  show("gasUrlStep1");
+  hide("gasUrlStep2");
+  const pwEl = document.getElementById("gasUrlPwInput");
+  pwEl.value = "";
+  hide("gasUrlPwError");
+  hide("gasUrlError");
+  show("gasUrlModal", "flex");
+  setTimeout(() => pwEl.focus(), 100);
+}
+function closeGasUrlModal() {
+  hide("gasUrlModal");
+}
+function verifyGasUrlPw() {
+  const pw    = document.getElementById("gasUrlPwInput").value;
+  const errEl = document.getElementById("gasUrlPwError");
+  hide(errEl);
+  if (!pw) {
+    errEl.textContent = "비밀번호를 입력하세요.";
+    show(errEl);
+    return;
+  }
+  if (pw !== GAS_URL_PW) {
+    errEl.textContent = "비밀번호가 틀렸습니다.";
+    show(errEl);
+    document.getElementById("gasUrlPwInput").value = "";
+    document.getElementById("gasUrlPwInput").focus();
+    return;
+  }
+  // 비밀번호 확인 성공 → STEP2로 전환
+  hide("gasUrlStep1");
+  const urlInput = document.getElementById("gasUrlInput");
+  urlInput.value = APP_CONFIG.GAS_WEB_APP_URL || "";
+  hide("gasUrlError");
+  show("gasUrlStep2");
+  _renderGasUrlHistory(); // ← 이력 목록 갱신
+  setTimeout(() => urlInput.focus(), 100);
+}
+function saveGasUrl() {
+  const url   = document.getElementById("gasUrlInput").value.trim();
+  const errEl = document.getElementById("gasUrlError");
+  hide(errEl);
+  if (!url) {
+    errEl.textContent = "URL을 입력해주세요.";
+    show(errEl);
+    return;
+  }
+  if (!url.includes("script.google.com/macros/s/")) {
+    errEl.textContent = "올바른 GAS 배포 URL 형식이 아닙니다. (/macros/s/.../exec)";
+    show(errEl);
+    return;
+  }
+  // ── 변경 이력 기록 ──
+  _addGasUrlHistory(url);
+  saveConfig({ GAS_WEB_APP_URL: url });
+  APP_CONFIG.GAS_WEB_APP_URL = url;
+  // ★ GAS PropertiesService에도 저장 → 다른 접속자에게 자동 반영
+  _saveAppUrlToGas(url);
+  closeGasUrlModal();
+  hide("gasNotSet");
+  showToast("GAS URL이 저장되었습니다. 다른 접속자에게도 자동 반영됩니다.", "success");
+}
+
+/* ── GAS URL 변경 이력 관리 ── */
+const GAS_URL_HISTORY_KEY = "rapp_url_history";
+const GAS_URL_HISTORY_MAX = 10; // 최대 보관 건수
+
+/** 이력 배열 반환 (최신순) */
+function _loadGasUrlHistory() {
+  try {
+    const raw = localStorage.getItem(GAS_URL_HISTORY_KEY);
+    return raw ? JSON.parse(raw) : [];
+  } catch (_) { return []; }
+}
+
+/** URL 저장 시 이력에 추가 */
+function _addGasUrlHistory(url) {
+  const list = _loadGasUrlHistory();
+  // 버전 번호: 현재 이력 중 같은 URL의 최대 버전 + 1, 없으면 전체 최대 버전 + 1
+  const allVersions = list.map(h => h.version || 0);
+  const nextVersion = (allVersions.length ? Math.max(...allVersions) : 0) + 1;
+
+  // 동일 URL이 최신 항목이면 중복 추가 안 함
+  if (list.length && list[0].url === url) return;
+
+  const entry = {
+    version:   nextVersion,
+    url:       url,
+    savedAt:   Date.now()  // ms timestamp
+  };
+  list.unshift(entry); // 최신을 앞에
+  if (list.length > GAS_URL_HISTORY_MAX) list.splice(GAS_URL_HISTORY_MAX);
+  try { localStorage.setItem(GAS_URL_HISTORY_KEY, JSON.stringify(list)); } catch (_) {}
+}
+
+/** 이력 전체 삭제 */
+function clearGasUrlHistory() {
+  if (!confirm("변경 이력을 모두 삭제하시겠습니까?")) return;
+  try { localStorage.removeItem(GAS_URL_HISTORY_KEY); } catch (_) {}
+  _renderGasUrlHistory();
+}
+
+/** 이력 목록을 모달에 렌더링 */
+function _renderGasUrlHistory() {
+  const wrap = document.getElementById("gasUrlHistoryWrap");
+  const list = document.getElementById("gasUrlHistoryList");
+  if (!wrap || !list) return;
+  const history = _loadGasUrlHistory();
+  if (!history.length) { wrap.style.display = "none"; return; }
+  wrap.style.display = "block";
+  list.innerHTML = history.map((h, i) => {
+    const dt  = new Date(h.savedAt);
+    const pad = n => String(n).padStart(2, "0");
+    const dateStr = `${dt.getFullYear()}.${pad(dt.getMonth()+1)}.${pad(dt.getDate())} ${pad(dt.getHours())}:${pad(dt.getMinutes())}`;
+    // URL 중간 생략 (앞 30자 + … + 끝 20자)
+    const short = h.url.length > 54
+      ? h.url.slice(0, 32) + "…" + h.url.slice(-20)
+      : h.url;
+    const isCurrent = (APP_CONFIG.GAS_WEB_APP_URL === h.url);
+    return `
+      <div class="gas-url-history-item${isCurrent ? ' gas-url-history-current' : ''}"
+           onclick="_selectGasUrlHistory('${i}')" title="${h.url}">
+        <div style="display:flex;align-items:center;gap:6px;min-width:0">
+          <span class="gas-url-ver-badge">v${h.version}</span>
+          <span class="gas-url-history-url">${short}</span>
+          ${isCurrent ? '<span class="gas-url-cur-tag">현재</span>' : ''}
+        </div>
+        <span class="gas-url-history-date">${dateStr}</span>
+      </div>`;
+  }).join('');
+}
+
+/** 이력 항목 클릭 → 입력칸에 자동 입력 */
+function _selectGasUrlHistory(idx) {
+  const history = _loadGasUrlHistory();
+  const entry   = history[Number(idx)];
+  if (!entry) return;
+  const input = document.getElementById("gasUrlInput");
+  if (input) {
+    input.value = entry.url;
+    input.focus();
+    // 선택 피드백
+    document.querySelectorAll(".gas-url-history-item").forEach((el, i) => {
+      el.classList.toggle("gas-url-history-selected", i === Number(idx));
+    });
+  }
+}
+
+/** GAS PropertiesService에 URL 저장 (백그라운드, 비동기) */
+async function _saveAppUrlToGas(url) {
+  try {
+    const pw = GAS_URL_PW; // 설정 비밀번호 (기존 상수 그대로 사용)
+    const res = await fetch(`${url}?action=saveAppUrl&url=${encodeURIComponent(url)}&pw=${encodeURIComponent(pw)}`, { redirect: "follow" });
+    if (res.ok) {
+      const json = await res.json();
+      if (json.ok) console.log("[GAS] URL PropertiesService 저장 완료");
+      else console.warn("[GAS] URL 저장 실패:", json.error);
+    }
+  } catch (e) {
+    console.warn("[GAS] URL 저장 오류 (무시):", e.message);
+  }
+}
+
+/* ── 관리자 로그인 모달 열기 ── */
+function openAdminLogin() {
+  if (isAdminLoggedIn()) { enterAdminScreen(); return; }
+  if (!APP_CONFIG.GAS_WEB_APP_URL) {
+    openGasUrlModal();
+    showToast("먼저 GAS URL을 설정해주세요.", "warning");
+    return;
+  }
+  document.getElementById("adminNameInput").value = "";
+  document.getElementById("adminPwInput").value = "";
+  hide("adminLoginError");
+  show("adminLoginModal", "flex");
+  setTimeout(() => document.getElementById("adminNameInput").focus(), 100);
+}
+function closeAdminLogin() { hide("adminLoginModal"); }
+
+async function submitAdminLogin() {
+  const name = document.getElementById("adminNameInput").value.trim();
+  const pw   = document.getElementById("adminPwInput").value;
+  if (!name) { showToast("이름을 입력하세요.", "warning"); return; }
+  if (!pw)   { showToast("비밀번호를 입력하세요.", "warning"); return; }
+  if (!APP_CONFIG.GAS_WEB_APP_URL) { showToast("GAS URL을 먼저 설정해주세요.", "error"); return; }
+
+  const errEl = document.getElementById("adminLoginError");
+  hide(errEl);
+  showLoading("확인 중...");
+  try {
+    let data;
+    try {
+      // ★ 신버전 GAS: adminLoginV2 (이름+비번, 다중 관리자)
+      data = await gasPost({ action: "adminLoginV2", name, pw });
+      // 구버전 GAS는 "알 수 없는 action" 오류를 반환 → 폴백
+      if (data && data.error && data.error.includes("알 수 없는")) throw new Error("FALLBACK");
+    } catch (innerErr) {
+      if (innerErr.message !== "FALLBACK" && !innerErr.message.includes("알 수 없는")) throw innerErr;
+      // ★ 구버전 GAS 폴백: 단일 비밀번호 방식 (adminLogin GET)
+      const fallback = await gasGet({ action: "adminLogin", pw });
+      if (!fallback.success) {
+        data = { success: false, error: "비밀번호가 올바르지 않습니다." };
+      } else {
+        // 구버전에서는 이름 검증 없이 비번만 확인 → 마스터 이름("김수만")이면 마스터, 아니면 admin
+        data = { success: true, name, role: name === "김수만" ? "master" : "admin" };
+      }
+    }
+    hideLoading();
+    if (data.success) {
+      setAdminSession(data.name || name, data.role || "admin"); // 이름·역할 저장
+      // 마스터인 경우 비밀번호 캐시 저장 (계정 관리 모달에서 사용)
+      if ((data.role || "admin") === "master") sessionStorage.setItem("rapp_master_pw_cache", pw);
+      closeAdminLogin();
+      enterAdminScreen();
+    } else {
+      errEl.textContent = data.error || "이름 또는 비밀번호가 올바르지 않습니다.";
+      show(errEl);
+      document.getElementById("adminPwInput").value = "";
+      document.getElementById("adminPwInput").focus();
+    }
+  } catch (err) {
+    hideLoading();
+    showToast("오류: " + err.message, "error");
+  }
+}
+
+function enterAdminScreen() {
+  const rem  = getAdminSessionRemaining();
+  const name = getAdminName();
+  const role = getAdminRole();
+  // 헤더 이름 표시 (마스터는 👑 배지)
+  const headerNameEl = document.getElementById("adminHeaderName");
+  if (headerNameEl) {
+    headerNameEl.innerHTML = role === "master"
+      ? `<span style="color:#F59E0B">&#9813;</span> ${name} <span style="font-size:.65rem;background:#FEF3C7;color:#92400E;border-radius:6px;padding:1px 5px;font-weight:700;vertical-align:middle">마스터</span>`
+      : `${name}`;
+  }
+  document.getElementById("adminSessionInfo").textContent = rem || "세션 유지 중";
+  // 마스터 전용 계정 관리 버튼 표시 제어
+  const keyMenuAccounts = document.getElementById("keyMenuAccounts");
+  if (keyMenuAccounts) keyMenuAccounts.style.display = role === "master" ? "" : "none";
+  // 마스터 전용 UI 편집 모드 버튼 표시 제어
+  const keyMenuUIEdit = document.getElementById("keyMenuUIEdit");
+  if (keyMenuUIEdit) keyMenuUIEdit.style.display = role === "master" ? "" : "none";
+  showScreen("screenAdmin");
+
+  // ── 기본 상태: 전체 펼치기 ON + 완료건 숨김 ON ──
+  hideDoneMode = true;
+  allExpanded  = true;
+  // 버튼 UI 즉시 반영 (loadAdminDashboard 완료 전에도 정확한 라벨 표시)
+  const btnDone   = document.getElementById("btnHideDone");
+  const btnExpand = document.getElementById("btnExpandAll");
+  if (btnDone) {
+    btnDone.innerHTML = '<i class="fas fa-eye"></i> 완료건 표시';
+    btnDone.classList.add("active");
+  }
+  if (btnExpand) {
+    btnExpand.innerHTML = '<i class="fas fa-compress-alt"></i> 전체 접기';
+    btnExpand.classList.add("active");
+  }
+
+  // ★ 컨텍스트 툴바 초기화 (버튼 상태 반영 후 호출)
+  _updateContextToolbar('dashboard');
+
+  loadAdminDashboard();
+}
+function exitAdmin() { clearAdminSession(); showScreen("screenGate"); }
+
+/* ════════════════════════════════════════════════════
+   관리자 계정 관리 (마스터 전용)
+════════════════════════════════════════════════════ */
+function openAccountMgmt() {
+  if (!isMaster()) { showToast("마스터 권한이 필요합니다.", "error"); return; }
+  show("accountMgmtModal", "flex");
+  switchAcctTab("admin");  // 항상 관리자 탭으로 초기화
+  loadAdminList();
+}
+function closeAccountMgmt() { hide("accountMgmtModal"); }
+
+async function loadAdminList() {
+  const wrap = document.getElementById("adminListWrap");
+  if (!wrap) return;
+  wrap.innerHTML = '<div style="padding:12px;text-align:center;color:var(--t3);font-size:.8rem"><i class="fas fa-circle-notch fa-spin"></i> 불러오는 중...</div>';
+  try {
+    const masterPw = _getMasterPwFromSession();
+    const data = await gasPost({ action: "listAdminUsers", masterPw });
+    if (!data.success) { wrap.innerHTML = `<div style="padding:12px;color:#EF4444;font-size:.8rem">${data.error || "오류"}</div>`; return; }
+    const users = data.users || [];
+    if (!users.length) { wrap.innerHTML = '<div style="padding:12px;text-align:center;color:var(--t3);font-size:.8rem">등록된 관리자가 없습니다.</div>'; return; }
+    wrap.innerHTML = users.map((u, i) => `
+      <div style="display:flex;align-items:center;gap:8px;padding:9px 12px;border-bottom:1px solid #F3F4F6;background:${u.active ? '#fff' : '#F9FAFB'}">
+        <span style="flex:1;font-size:.83rem;font-weight:600;color:${u.active ? 'var(--t1)' : 'var(--t3)'}">
+          ${escHtml(u.name)}
+          ${u.active ? '' : '<span style="font-size:.68rem;background:#F3F4F6;color:var(--t3);padding:1px 5px;border-radius:5px;margin-left:4px">비활성</span>'}
+        </span>
+        <button onclick="toggleAdminActive('${escHtml(u.name)}', ${!u.active})"
+          style="font-size:.7rem;padding:3px 8px;border:none;border-radius:5px;cursor:pointer;font-weight:600;
+                 background:${u.active ? '#FEE2E2' : '#D1FAE5'};color:${u.active ? '#DC2626' : '#065F46'}">
+          ${u.active ? '<i class="fas fa-ban"></i> 비활성화' : '<i class="fas fa-check"></i> 활성화'}
+        </button>
+        <button onclick="openEditAdminPw('${escHtml(u.name)}')"
+          style="font-size:.7rem;padding:3px 8px;border:none;border-radius:5px;cursor:pointer;font-weight:600;background:#EEF2FF;color:var(--p)">
+          <i class="fas fa-key"></i> 비번변경
+        </button>
+        <button onclick="deleteAdminUser('${escHtml(u.name)}')"
+          style="font-size:.7rem;padding:3px 8px;border:none;border-radius:5px;cursor:pointer;font-weight:600;background:#FEE2E2;color:#DC2626">
+          <i class="fas fa-trash"></i>
+        </button>
+      </div>
+    `).join("");
+  } catch (e) {
+    wrap.innerHTML = `<div style="padding:12px;color:#EF4444;font-size:.8rem">오류: ${e.message}</div>`;
+  }
+}
+
+async function addAdminUser() {
+  const name   = (document.getElementById("newAdminName").value || "").trim();
+  const pw     = (document.getElementById("newAdminPw").value  || "").trim();
+  const errEl  = document.getElementById("addAdminError");
+  hide(errEl);
+  if (!name) { errEl.textContent = "이름을 입력하세요."; show(errEl); return; }
+  if (!pw || pw.length < 4) { errEl.textContent = "비밀번호는 4자 이상이어야 합니다."; show(errEl); return; }
+  const masterPw = _getMasterPwFromSession();
+  try {
+    const data = await gasPost({ action: "addAdminUser", masterPw, name, pw });
+    if (!data.success) { errEl.textContent = data.error || "추가 실패"; show(errEl); return; }
+    document.getElementById("newAdminName").value = "";
+    document.getElementById("newAdminPw").value   = "";
+    showToast(`${name} 관리자가 추가되었습니다.`, "success");
+    loadAdminList();
+  } catch (e) { errEl.textContent = e.message; show(errEl); }
+}
+
+async function deleteAdminUser(name) {
+  if (!confirm(`'${name}' 계정을 삭제하시겠습니까?`)) return;
+  const masterPw = _getMasterPwFromSession();
+  try {
+    const data = await gasPost({ action: "deleteAdminUser", masterPw, name });
+    if (!data.success) { showToast(data.error || "삭제 실패", "error"); return; }
+    showToast(`${name} 계정이 삭제되었습니다.`, "success");
+    loadAdminList();
+  } catch (e) { showToast(e.message, "error"); }
+}
+
+async function toggleAdminActive(name, active) {
+  const masterPw = _getMasterPwFromSession();
+  try {
+    const data = await gasPost({ action: "editAdminUser", masterPw, name, active });
+    if (!data.success) { showToast(data.error || "변경 실패", "error"); return; }
+    showToast(`${name} 계정이 ${active ? "활성화" : "비활성화"}되었습니다.`, "success");
+    loadAdminList();
+  } catch (e) { showToast(e.message, "error"); }
+}
+
+function openEditAdminPw(name) {
+  const newPw = prompt(`'${name}' 계정의 새 비밀번호를 입력하세요 (4자 이상):`);
+  if (newPw === null) return;
+  if (!newPw || newPw.length < 4) { showToast("비밀번호는 4자 이상이어야 합니다.", "warning"); return; }
+  _doEditAdminPw(name, newPw);
+}
+
+async function _doEditAdminPw(name, newPw) {
+  const masterPw = _getMasterPwFromSession();
+  try {
+    const data = await gasPost({ action: "editAdminUser", masterPw, name, newPw });
+    if (!data.success) { showToast(data.error || "변경 실패", "error"); return; }
+    showToast(`${name} 비밀번호가 변경되었습니다.`, "success");
+  } catch (e) { showToast(e.message, "error"); }
+}
+
+async function changeMasterPw() {
+  const currentPw = (document.getElementById("masterCurrentPw").value || "").trim();
+  const newPw     = (document.getElementById("masterNewPw").value     || "").trim();
+  const errEl     = document.getElementById("masterPwError");
+  hide(errEl);
+  if (!currentPw) { errEl.textContent = "현재 비밀번호를 입력하세요."; show(errEl); return; }
+  if (!newPw || newPw.length < 4) { errEl.textContent = "새 비밀번호는 4자 이상이어야 합니다."; show(errEl); return; }
+  try {
+    const data = await gasPost({ action: "changeMasterPw", masterPw: currentPw, newPw });
+    if (!data.success) { errEl.textContent = data.error || "변경 실패"; show(errEl); return; }
+    // 세션의 마스터 비번 캐시 업데이트
+    sessionStorage.setItem("rapp_master_pw_cache", newPw);
+    document.getElementById("masterCurrentPw").value = "";
+    document.getElementById("masterNewPw").value     = "";
+    showToast("마스터 비밀번호가 변경되었습니다.", "success");
+  } catch (e) { errEl.textContent = e.message; show(errEl); }
+}
+
+/** 세션에서 마스터 비밀번호 캐시를 가져오는 헬퍼 (모달 인증용) */
+function _getMasterPwFromSession() {
+  // 마스터 비밀번호를 세션에 캐싱 (처음 한 번만 입력)
+  let cached = sessionStorage.getItem("rapp_master_pw_cache");
+  if (!cached) {
+    cached = prompt("마스터 비밀번호를 입력하세요:");
+    if (!cached) throw new Error("비밀번호 입력이 취소되었습니다.");
+    sessionStorage.setItem("rapp_master_pw_cache", cached);
+  }
+  return cached;
+}
+
+/* ════════════════════════════════════════════════════
+   UI 편집 모드 (마스터 전용)
+════════════════════════════════════════════════════ */
+
+let UI_EDIT_MODE = false;
+let UI_EDIT_RECORD_ID = null;
+let UI_EDIT_TEMP_CONFIG = null;
+
+// 편집 가능한 섹션 정의
+const EDITABLE_SECTIONS = [
+  {
+    id: 'dashboardSummary',
+    label: 'KPI 요약 카드',
+    selector: '.dashboard-summary',
+    properties: ['marginTop', 'marginBottom', 'marginLeft', 'marginRight', 'gap', 'padding']
+  },
+  {
+    id: 'adminSectionHeader',
+    label: '섹션 헤더',
+    selector: '.admin-section-header',
+    properties: ['top', 'padding', 'height', 'marginBottom']
+  },
+  {
+    id: 'dashSearchBar',
+    label: '검색 바',
+    selector: '.dash-search-bar',
+    properties: ['top', 'padding', 'marginBottom']
+  },
+  {
+    id: 'dashColHeader',
+    label: '컬럼 헤더',
+    selector: '.dash-col-header',
+    properties: ['top', 'padding', 'minHeight', 'borderRadius', 'boxShadow']
+  },
+  {
+    id: 'dashTabRow',
+    label: '탭 행',
+    selector: '.dash-tab-row',
+    properties: ['padding', 'minHeight', 'borderBottom', 'marginTop', 'marginBottom']
+  },
+  {
+    id: 'dashCampaignHeader',
+    label: '캠페인 헤더',
+    selector: '.dash-campaign-header',
+    properties: ['padding', 'borderBottom', 'marginTop', 'marginBottom']
+  }
+];
+
+// 전역 레이아웃 불러오기
+async function loadGlobalLayout() {
+  try {
+    const response = await fetch('tables/ui_layouts?limit=1&search=global_dashboard');
+    const data = await response.json();
+    
+    if (data.data && data.data.length > 0) {
+      const record = data.data[0];
+      UI_EDIT_RECORD_ID = record.id;
+      const config = JSON.parse(record.config);
+      // DOM 렌더 완료 후 적용 (requestAnimationFrame으로 타이밍 보정)
+      requestAnimationFrame(() => applyLayoutConfig(config));
+      return config;
+    }
+  } catch (err) {
+    console.warn('[UI Layout] 저장된 레이아웃이 없거나 불러오기 실패:', err);
+  }
+  return null;
+}
+
+// 레이아웃 설정 적용
+function applyLayoutConfig(config) {
+  if (!config) return;
+  
+  // ── ① 섹션별 스타일 적용 ──
+  if (config.sections) {
+    Object.keys(config.sections).forEach(sectionId => {
+      const sectionConfig = config.sections[sectionId];
+      const section = EDITABLE_SECTIONS.find(s => s.id === sectionId);
+      if (!section) return;
+      
+      const elements = document.querySelectorAll(section.selector);
+      elements.forEach(el => {
+        Object.keys(sectionConfig).forEach(prop => {
+          const val = sectionConfig[prop];
+          if (val === '' || val === null || val === undefined) return;
+          el.style[prop] = val;
+        });
+      });
+    });
+  }
+  
+  // ── ② 컬럼 너비 CSS 변수 적용 ──
+  if (config.columns) {
+    Object.keys(config.columns).forEach(colKey => {
+      const width = config.columns[colKey];
+      if (!isNaN(width) && width > 0) {
+        document.documentElement.style.setProperty(`--dc-${colKey}`, `${width}px`);
+      }
+    });
+  }
+  
+  // ── ③ sticky top 재계산 (top 속성이 저장된 경우 _fixStickyPositions 일시 해제) ──
+  // top 속성이 명시적으로 저장돼 있으면 사용자 값 우선, 그 외엔 자동 계산
+  const hasSavedTop = config.sections && (
+    (config.sections.adminSectionHeader && config.sections.adminSectionHeader.top) ||
+    (config.sections.dashSearchBar && config.sections.dashSearchBar.top) ||
+    (config.sections.dashColHeader && config.sections.dashColHeader.top)
+  );
+  // hasSavedTop 이면 _fixStickyPositions 덮어씌움 방지 플래그 ON
+  window._uiLayoutTopLocked = !!hasSavedTop;
+  if (!hasSavedTop) {
+    // 저장된 top 없으면 자동 계산
+    if (typeof _fixStickyPositions === 'function') _fixStickyPositions();
+  }
+}
+
+// 현재 레이아웃 설정 수집
+function collectCurrentLayout() {
+  const config = {
+    version: '1.0',
+    timestamp: Date.now(),
+    sections: {},
+    columns: {},
+    visibility: {}
+  };
+  
+  // 섹션별 현재 스타일 수집
+  EDITABLE_SECTIONS.forEach(section => {
+    const el = document.querySelector(section.selector);
+    if (!el) return;
+    
+    config.sections[section.id] = {};
+    section.properties.forEach(prop => {
+      const value = getComputedStyle(el)[prop];
+      if (value) {
+        config.sections[section.id][prop] = value;
+      }
+    });
+  });
+  
+  // 컬럼 너비 수집
+  const colWidthKeys = [
+    'forcecb', 'closedcb', 'tabname', 'capture', 'folder', 'round', 
+    'date', 'product', 'time', 'review', 'formlink', 'manager', 
+    'bar', 'nums', 'payment', 'income', 'depositname', 'bank', 
+    'taekhap', 'memo', 'enddate', 'info'
+  ];
+  
+  colWidthKeys.forEach(key => {
+    const value = getComputedStyle(document.documentElement).getPropertyValue(`--dc-${key}`);
+    if (value) {
+      config.columns[key] = parseInt(value);
+    }
+  });
+  
+  return config;
+}
+
+// 전역 레이아웃 저장
+async function saveGlobalLayout(config, masterName) {
+  try {
+    const body = {
+      layout_id: 'global_dashboard',
+      config: JSON.stringify(config),
+      last_modified_by: masterName || 'master'
+    };
+    
+    let response;
+    if (UI_EDIT_RECORD_ID) {
+      // 업데이트
+      response = await fetch(`tables/ui_layouts/${UI_EDIT_RECORD_ID}`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(body)
+      });
+    } else {
+      // 생성
+      response = await fetch('tables/ui_layouts', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(body)
+      });
+    }
+    
+    const result = await response.json();
+    if (result.id) {
+      UI_EDIT_RECORD_ID = result.id;
+    }
+    
+    return true;
+  } catch (err) {
+    console.error('[UI Layout] 저장 실패:', err);
+    return false;
+  }
+}
+
+// UI 편집 모드 토글
+async function toggleUIEditMode() {
+  // 마스터 권한 확인
+  if (!isMaster()) {
+    showToast("마스터 권한이 필요합니다.", "error");
+    return;
+  }
+  
+  if (!UI_EDIT_MODE) {
+    // 편집 모드 활성화
+    UI_EDIT_MODE = true;
+    
+    // body에 클래스 추가 (개발자 라벨 표시용)
+    document.body.classList.add('ui-edit-mode');
+    
+    // 버튼 텍스트 변경
+    const btnText = document.getElementById('uiEditBtnText');
+    if (btnText) btnText.textContent = '편집 모드 종료';
+    
+    // 안내 토스트
+    showToast("🎨 UI 편집 모드가 활성화되었습니다. 편집할 섹션을 클릭하세요.", "success", 3000);
+    
+    // 편집 오버레이 추가
+    addEditOverlays();
+    
+    // 속성 패널 생성
+    createPropertyPanel();
+    
+  } else {
+    // 편집 모드 종료
+    UI_EDIT_MODE = false;
+    
+    // body에서 클래스 제거 (개발자 라벨 숨김)
+    document.body.classList.remove('ui-edit-mode');
+    
+    // 버튼 텍스트 변경
+    const btnText = document.getElementById('uiEditBtnText');
+    if (btnText) btnText.textContent = 'UI 편집 모드';
+    
+    // 오버레이 제거
+    removeEditOverlays();
+    
+    // 속성 패널 제거
+    removePropertyPanel();
+    
+    showToast("UI 편집 모드가 종료되었습니다.", "info");
+  }
+}
+
+// 편집 오버레이 추가
+function addEditOverlays() {
+  EDITABLE_SECTIONS.forEach(section => {
+    const elements = document.querySelectorAll(section.selector);
+    elements.forEach(el => {
+      // 이미 오버레이가 있으면 스킵
+      if (el.querySelector('.ui-edit-overlay')) return;
+      
+      // 오버레이 생성
+      const overlay = document.createElement('div');
+      overlay.className = 'ui-edit-overlay';
+      overlay.innerHTML = `
+        <div class="ui-edit-label">${section.label}</div>
+      `;
+      
+      // 클릭 이벤트
+      overlay.addEventListener('click', (e) => {
+        e.stopPropagation();
+        openPropertyPanel(section, el);
+      });
+      
+      // 부모 요소에 상대 포지션 추가
+      const originalPosition = getComputedStyle(el).position;
+      if (originalPosition === 'static') {
+        el.style.position = 'relative';
+        el.dataset.originalPosition = 'static';
+      }
+      
+      el.appendChild(overlay);
+    });
+  });
+}
+
+// 편집 오버레이 제거
+function removeEditOverlays() {
+  document.querySelectorAll('.ui-edit-overlay').forEach(overlay => {
+    const parent = overlay.parentElement;
+    overlay.remove();
+    
+    // 원래 position 복원
+    if (parent && parent.dataset.originalPosition === 'static') {
+      parent.style.position = '';
+      delete parent.dataset.originalPosition;
+    }
+  });
+}
+
+// 속성 패널 생성
+function createPropertyPanel() {
+  if (document.getElementById('uiPropertyPanel')) return;
+  
+  const panel = document.createElement('div');
+  panel.id = 'uiPropertyPanel';
+  panel.innerHTML = `
+    <div class="ui-prop-header">
+      <h3>속성 편집</h3>
+      <button class="ui-prop-close" onclick="removePropertyPanel()">
+        <i class="fas fa-times"></i>
+      </button>
+    </div>
+    <div class="ui-prop-body" id="uiPropBody">
+      <div class="ui-prop-empty">
+        <i class="fas fa-mouse-pointer"></i>
+        <p>편집할 섹션을 클릭하세요</p>
+      </div>
+    </div>
+    <div class="ui-prop-footer">
+      <button class="ui-prop-btn ui-prop-btn-cancel" onclick="removePropertyPanel()">
+        <i class="fas fa-times"></i> 취소
+      </button>
+      <button class="ui-prop-btn ui-prop-btn-apply" onclick="applyAndSaveLayout()">
+        <i class="fas fa-check"></i> 적용 및 저장
+      </button>
+    </div>
+  `;
+  
+  document.body.appendChild(panel);
+}
+
+// 속성 패널 제거
+function removePropertyPanel() {
+  const panel = document.getElementById('uiPropertyPanel');
+  if (panel) panel.remove();
+}
+
+// 속성 패널 열기
+function openPropertyPanel(section, element) {
+  const body = document.getElementById('uiPropBody');
+  if (!body) return;
+  
+  const currentStyles = getComputedStyle(element);
+  
+  let html = `
+    <div class="ui-prop-section-title">
+      <i class="fas fa-paint-brush"></i> ${section.label}
+    </div>
+    <div class="ui-prop-help">
+      💡 값 입력 예시: <code>10px</code>, <code>1rem</code>, <code>auto</code>
+    </div>
+  `;
+  
+  // 속성을 카테고리별로 그룹화
+  const positionProps = ['top', 'bottom', 'left', 'right'];
+  const marginProps = ['marginTop', 'marginBottom', 'marginLeft', 'marginRight'];
+  const otherProps = section.properties.filter(p => 
+    !positionProps.includes(p) && !marginProps.includes(p)
+  );
+  
+  // 위치 속성 (sticky/fixed 요소만)
+  const hasPosition = section.properties.some(p => positionProps.includes(p));
+  if (hasPosition) {
+    html += `
+      <div class="ui-prop-category">
+        <i class="fas fa-arrows-alt"></i> 위치
+      </div>
+    `;
+    section.properties.forEach(prop => {
+      if (positionProps.includes(prop)) {
+        const currentValue = currentStyles[prop];
+        const label = getPropLabel(prop);
+        html += `
+          <div class="ui-prop-field">
+            <label class="ui-prop-label">${label}</label>
+            <input type="text" 
+              class="ui-prop-input" 
+              data-section="${section.id}" 
+              data-property="${prop}" 
+              value="${currentValue}"
+              placeholder="${currentValue}">
+          </div>
+        `;
+      }
+    });
+  }
+  
+  // 여백 속성
+  const hasMargin = section.properties.some(p => marginProps.includes(p));
+  if (hasMargin) {
+    html += `
+      <div class="ui-prop-category">
+        <i class="fas fa-expand-arrows-alt"></i> 여백
+      </div>
+    `;
+    section.properties.forEach(prop => {
+      if (marginProps.includes(prop)) {
+        const currentValue = currentStyles[prop];
+        const label = getPropLabel(prop);
+        html += `
+          <div class="ui-prop-field">
+            <label class="ui-prop-label">${label}</label>
+            <input type="text" 
+              class="ui-prop-input" 
+              data-section="${section.id}" 
+              data-property="${prop}" 
+              value="${currentValue}"
+              placeholder="${currentValue}">
+          </div>
+        `;
+      }
+    });
+  }
+  
+  // 기타 속성
+  if (otherProps.length > 0) {
+    html += `
+      <div class="ui-prop-category">
+        <i class="fas fa-sliders-h"></i> 기타
+      </div>
+    `;
+    otherProps.forEach(prop => {
+      const currentValue = currentStyles[prop];
+      const label = getPropLabel(prop);
+      html += `
+        <div class="ui-prop-field">
+          <label class="ui-prop-label">${label}</label>
+          <input type="text" 
+            class="ui-prop-input" 
+            data-section="${section.id}" 
+            data-property="${prop}" 
+            value="${currentValue}"
+            placeholder="${currentValue}">
+        </div>
+      `;
+    });
+  }
+  
+  // 컬럼 너비 조절 (컬럼 헤더인 경우)
+  if (section.id === 'dashColHeader') {
+    html += `
+      <div class="ui-prop-divider"></div>
+      <div class="ui-prop-section-title">
+        <i class="fas fa-columns"></i> 컬럼 너비
+      </div>
+      <div class="ui-prop-help">
+        💡 단위: px (숫자만 입력)
+      </div>
+    `;
+    
+    const colDefs = [
+      { key: 'tabname', label: '탭명' },
+      { key: 'capture', label: '캡처폴더' },
+      { key: 'folder', label: '리뷰폴더' },
+      { key: 'round', label: '차수' },
+      { key: 'date', label: '시작일' },
+      { key: 'product', label: '상품명' },
+      { key: 'time', label: '주문시간대' },
+      { key: 'review', label: '리뷰타입' },
+      { key: 'formlink', label: '폼링크' },
+      { key: 'manager', label: '담당' },
+      { key: 'bar', label: '진행률' },
+      { key: 'nums', label: '리뷰수' },
+      { key: 'payment', label: '입금' },
+      { key: 'income', label: '진행방식' },
+      { key: 'depositname', label: '입금명' },
+      { key: 'bank', label: '이체은행' },
+      { key: 'taekhap', label: '택대' },
+      { key: 'memo', label: '비고' },
+      { key: 'enddate', label: '마감일' },
+      { key: 'info', label: '부가정보' }
+    ];
+    
+    colDefs.forEach(col => {
+      const currentWidth = getComputedStyle(document.documentElement).getPropertyValue(`--dc-${col.key}`);
+      html += `
+        <div class="ui-prop-field">
+          <label class="ui-prop-label">${col.label}</label>
+          <input type="number" 
+            class="ui-prop-input ui-prop-col-width" 
+            data-column="${col.key}" 
+            value="${parseInt(currentWidth) || 0}"
+            placeholder="px">
+        </div>
+      `;
+    });
+  }
+  
+  body.innerHTML = html;
+  
+  // 실시간 미리보기 이벤트 (선택사항)
+  body.querySelectorAll('.ui-prop-input').forEach(input => {
+    input.addEventListener('input', (e) => {
+      // 여기서는 미리보기 하지 않음 (적용 버튼 클릭 시에만)
+      // 필요시 실시간 미리보기 로직 추가 가능
+    });
+  });
+}
+
+// 속성 라벨 변환
+function getPropLabel(prop) {
+  const labels = {
+    // 여백
+    marginTop: '상단 여백',
+    marginBottom: '하단 여백',
+    marginLeft: '좌측 여백',
+    marginRight: '우측 여백',
+    
+    // 레이아웃
+    gap: '간격',
+    padding: '내부 여백',
+    height: '높이',
+    minHeight: '최소 높이',
+    
+    // 위치 (sticky/fixed 요소용)
+    top: '상단 위치',
+    bottom: '하단 위치',
+    left: '좌측 위치',
+    right: '우측 위치',
+    
+    // 스타일
+    borderRadius: '모서리 둥글기',
+    boxShadow: '그림자',
+    borderBottom: '하단 테두리'
+  };
+  return labels[prop] || prop;
+}
+
+// 적용 및 저장
+async function applyAndSaveLayout() {
+  if (!isMaster()) {
+    showToast("마스터 권한이 필요합니다.", "error");
+    return;
+  }
+  
+  const config = {
+    version: '1.0',
+    timestamp: Date.now(),
+    sections: {},
+    columns: {}
+  };
+  
+  // ── ① 패널에서 섹션 속성 수집 ──
+  document.querySelectorAll('.ui-prop-input[data-section]').forEach(input => {
+    const sectionId = input.dataset.section;
+    const property  = input.dataset.property;
+    const value     = input.value.trim();
+    if (!value) return;                          // 빈 값은 저장하지 않음
+    if (!config.sections[sectionId]) config.sections[sectionId] = {};
+    config.sections[sectionId][property] = value;
+  });
+  
+  // ── ② 컬럼 너비 수집 ──
+  document.querySelectorAll('.ui-prop-col-width').forEach(input => {
+    const colKey = input.dataset.column;
+    const value  = parseInt(input.value);
+    if (!isNaN(value) && value >= 0) config.columns[colKey] = value;
+  });
+  
+  // ── ③ 즉시 DOM 에 반영 ──
+  applyLayoutConfig(config);
+  
+  // ── ④ 서버 저장 ──
+  const masterName = getAdminName() || 'master';
+  const saveBtn = document.querySelector('.ui-prop-btn-apply');
+  if (saveBtn) { saveBtn.disabled = true; saveBtn.innerHTML = '<i class="fas fa-circle-notch fa-spin"></i> 저장 중...'; }
+  
+  const success = await saveGlobalLayout(config, masterName);
+  
+  if (saveBtn) { saveBtn.disabled = false; saveBtn.innerHTML = '<i class="fas fa-check"></i> 적용 및 저장'; }
+  
+  if (success) {
+    showToast("✅ 레이아웃이 저장되었습니다. 모든 관리자에게 적용됩니다.", "success", 3000);
+    removePropertyPanel();
+  } else {
+    showToast("레이아웃 저장에 실패했습니다.", "error");
+  }
+}
+
+/* ── 계정 관리 모달 탭 전환 (관리자 / 영업담당자) ── */
+function switchAcctTab(tab) {
+  const isAdmin = tab === 'admin';
+  // 탭 버튼 스타일
+  const btnAdmin = document.getElementById('acctTabAdmin');
+  const btnStaff = document.getElementById('acctTabStaff');
+  if (btnAdmin) {
+    btnAdmin.style.color        = isAdmin ? 'var(--p)' : 'var(--t3)';
+    btnAdmin.style.borderBottom = isAdmin ? '2px solid var(--p)' : '2px solid transparent';
+  }
+  if (btnStaff) {
+    btnStaff.style.color        = !isAdmin ? '#059669' : 'var(--t3)';
+    btnStaff.style.borderBottom = !isAdmin ? '2px solid #059669' : '2px solid transparent';
+  }
+  // 패널 표시/숨김
+  const panelAdmin = document.getElementById('acctPanelAdmin');
+  const panelStaff = document.getElementById('acctPanelStaff');
+  if (panelAdmin) panelAdmin.style.display = isAdmin  ? '' : 'none';
+  if (panelStaff) panelStaff.style.display = !isAdmin ? '' : 'none';
+  // 탭 전환 시 목록 자동 로드
+  if (!isAdmin) loadStaffList();
+}
+
+/* ════════════════════════════════════════════════════
+   영업담당자 계정 관리 (마스터 전용)
+════════════════════════════════════════════════════ */
+async function loadStaffList() {
+  const wrap = document.getElementById("staffListWrap");
+  if (!wrap) return;
+  wrap.innerHTML = '<div style="padding:12px;text-align:center;color:var(--t3);font-size:.8rem"><i class="fas fa-circle-notch fa-spin"></i> 불러오는 중...</div>';
+  try {
+    const masterPw = _getMasterPwFromSession();
+    const data = await gasPost({ action: "listStaffUsers", masterPw });
+    if (!data.success) {
+      wrap.innerHTML = `<div style="padding:12px;color:#EF4444;font-size:.8rem">${data.error || "오류"}</div>`;
+      return;
+    }
+    const users = data.users || [];
+    if (!users.length) {
+      wrap.innerHTML = '<div style="padding:12px;text-align:center;color:var(--t3);font-size:.8rem">등록된 영업담당자가 없습니다.</div>';
+      return;
+    }
+    wrap.innerHTML = users.map(u => `
+      <div style="display:flex;align-items:center;gap:8px;padding:9px 12px;border-bottom:1px solid #F3F4F6;background:${u.active !== false ? '#fff' : '#F9FAFB'}">
+        <span style="flex:1;font-size:.83rem;font-weight:600;color:${u.active !== false ? 'var(--t1)' : 'var(--t3)'}">
+          <i class="fas fa-user-tie" style="color:#059669;margin-right:4px;font-size:.75rem"></i>${escHtml(u.name)}
+          ${u.active !== false ? '' : '<span style="font-size:.68rem;background:#F3F4F6;color:var(--t3);padding:1px 5px;border-radius:5px;margin-left:4px">비활성</span>'}
+        </span>
+        <button onclick="toggleStaffActive('${escHtml(u.name)}', ${u.active === false})"
+          style="font-size:.7rem;padding:3px 8px;border:none;border-radius:5px;cursor:pointer;font-weight:600;
+                 background:${u.active !== false ? '#FEE2E2' : '#D1FAE5'};color:${u.active !== false ? '#DC2626' : '#065F46'}">
+          ${u.active !== false ? '<i class="fas fa-ban"></i> 비활성화' : '<i class="fas fa-check"></i> 활성화'}
+        </button>
+        <button onclick="openEditStaffPw('${escHtml(u.name)}')"
+          style="font-size:.7rem;padding:3px 8px;border:none;border-radius:5px;cursor:pointer;font-weight:600;background:#ECFDF5;color:#059669">
+          <i class="fas fa-key"></i> 비번변경
+        </button>
+        <button onclick="deleteStaffUser('${escHtml(u.name)}')"
+          style="font-size:.7rem;padding:3px 8px;border:none;border-radius:5px;cursor:pointer;font-weight:600;background:#FEE2E2;color:#DC2626">
+          <i class="fas fa-trash"></i>
+        </button>
+      </div>
+    `).join("");
+  } catch (e) {
+    wrap.innerHTML = `<div style="padding:12px;color:#EF4444;font-size:.8rem">오류: ${e.message}</div>`;
+  }
+}
+
+async function addStaffUser() {
+  const name  = (document.getElementById("newStaffName").value || "").trim();
+  const pw    = (document.getElementById("newStaffPw").value   || "").trim();
+  const errEl = document.getElementById("addStaffError");
+  hide(errEl);
+  if (!name) { errEl.textContent = "이름을 입력하세요."; show(errEl); return; }
+  if (!pw || pw.length < 4) { errEl.textContent = "비밀번호는 4자 이상이어야 합니다."; show(errEl); return; }
+  const masterPw = _getMasterPwFromSession();
+  try {
+    const data = await gasPost({ action: "addStaffUser", masterPw, name, pw });
+    if (!data.success) { errEl.textContent = data.error || "추가 실패"; show(errEl); return; }
+    document.getElementById("newStaffName").value = "";
+    document.getElementById("newStaffPw").value   = "";
+    showToast(`${name} 영업담당자가 추가되었습니다.`, "success");
+    loadStaffList();
+  } catch (e) { errEl.textContent = e.message; show(errEl); }
+}
+
+async function deleteStaffUser(name) {
+  if (!confirm(`'${name}' 영업담당자 계정을 삭제하시겠습니까?`)) return;
+  const masterPw = _getMasterPwFromSession();
+  try {
+    const data = await gasPost({ action: "deleteStaffUser", masterPw, name });
+    if (!data.success) { showToast(data.error || "삭제 실패", "error"); return; }
+    showToast(`${name} 계정이 삭제되었습니다.`, "success");
+    loadStaffList();
+  } catch (e) { showToast(e.message, "error"); }
+}
+
+async function toggleStaffActive(name, active) {
+  const masterPw = _getMasterPwFromSession();
+  try {
+    const data = await gasPost({ action: "editStaffUser", masterPw, name, active });
+    if (!data.success) { showToast(data.error || "변경 실패", "error"); return; }
+    showToast(`${name} 계정이 ${active ? "활성화" : "비활성화"}되었습니다.`, "success");
+    loadStaffList();
+  } catch (e) { showToast(e.message, "error"); }
+}
+
+function openEditStaffPw(name) {
+  const newPw = prompt(`'${name}' 영업담당자의 새 비밀번호를 입력하세요 (4자 이상):`);
+  if (newPw === null) return;
+  if (!newPw || newPw.length < 4) { showToast("비밀번호는 4자 이상이어야 합니다.", "warning"); return; }
+  _doEditStaffPw(name, newPw);
+}
+
+async function _doEditStaffPw(name, newPw) {
+  const masterPw = _getMasterPwFromSession();
+  try {
+    const data = await gasPost({ action: "editStaffUser", masterPw, name, newPw });
+    if (!data.success) { showToast(data.error || "변경 실패", "error"); return; }
+    showToast(`${name} 비밀번호가 변경되었습니다.`, "success");
+  } catch (e) { showToast(e.message, "error"); }
+}
+
+/* ── 관리자 탭 전환 ── */
+function switchAdminTab(tabName) {
+  document.querySelectorAll(".admin-tab-btn").forEach(b => b.classList.remove("active"));
+  document.querySelectorAll(".admin-tab-pane").forEach(p => p.classList.remove("active"));
+  const btn  = document.querySelector(`.admin-tab-btn[data-tab="${tabName}"]`);
+  const pane = document.getElementById(`tab-${tabName}`);
+  if (btn)  btn.classList.add("active");
+  if (pane) pane.classList.add("active");
+  // 탭별 자동 로드
+  if (tabName === "reviewers") loadReviewerList();
+  if (tabName === "recruit")   { loadRecruitList(); loadRecruitTabOptions(); }
+  if (tabName === "payment")   initPaymentPanel();
+  if (tabName === "dashboard") { try { loadSystemMonitor(); } catch(_){} }
+  // ★ 컨텍스트 툴바 업데이트
+  _updateContextToolbar(tabName);
+}
+
+/* ══════════════════════════════════════════════════════════════
+   ★ 컨텍스트 툴바 (탭별 버튼)
+   ══════════════════════════════════════════════════════════════ */
+// 탭별 버튼 정의
+const _CTX_TOOLBAR_DEFS = {
+  dashboard: [
+    { id:'ctx-filter',      label:'필터',     icon:'fa-filter',      style:'',           onclick:"document.getElementById('dashFilterBtn')?.click()", title:'캠페인 필터'},
+    { id:'ctx-add',         label:'업체추가',  icon:'fa-plus',        style:'green',      onclick:"openAddCampaign()", title:'캠페인 추가'},
+    { sep: true },
+    { id:'ctx-expand',      label:'펼치기',    icon:'fa-expand-alt',  style:'',           onclick:"toggleAllCampaigns(); _updateContextToolbar('dashboard')", title:'전체 펼치기/접기', elId:'btnExpandAll'},
+    { id:'ctx-hide-done',   label:'완료숨김',  icon:'fa-eye-slash',   style:'',           onclick:"toggleHideDone(); _updateContextToolbar('dashboard')", title:'완료건 숨김/표시', elId:'btnHideDone'},
+    { id:'ctx-campname',    label:'캠페인명',  icon:'fa-tag',         style:'',           onclick:"toggleHideCampName(); _updateContextToolbar('dashboard')", title:'캠페인명 표시/숨김', elId:'btnHideCampName'},
+    { sep: true },
+    { id:'ctx-refresh',     label:'새로고침',  icon:'fa-sync-alt',    style:'',           onclick:"loadAdminDashboard()", title:'대시보드 새로고침'},
+    { id:'ctx-poll',        label:'완료알림',  icon:'fa-bell',        style:'orange',     onclick:"toggleDashPolling(); _updateContextToolbar('dashboard')", title:'탭 완료 알림 폴링', elId:'pollToggleBtn'},
+  ],
+  reviewers: [
+    { id:'ctx-rev-refresh', label:'새로고침',  icon:'fa-sync-alt',    style:'',           onclick:"loadReviewerList()", title:'리뷰어 목록 새로고침'},
+    { id:'ctx-blacklist',   label:'블랙리스트',icon:'fa-ban',         style:'red',        onclick:"openBlPanel()", title:'블랙리스트 관리'},
+  ],
+  recruit: [
+    { id:'ctx-rec-add',     label:'공고추가',  icon:'fa-plus',        style:'green',      onclick:"openRecruitModal(null)", title:'공고 추가'},
+    { id:'ctx-rec-notice',  label:'공지설정',  icon:'fa-bullhorn',    style:'yellow',     onclick:"openNoticePanel()", title:'공지 배너 설정'},
+    { id:'ctx-rec-preview', label:'미리보기',  icon:'fa-eye',         style:'',           onclick:"window.open('recruit.html','_blank')", title:'모집 페이지 미리보기'},
+  ],
+  payment: [
+    { id:'ctx-pay-refresh', label:'새로고침',  icon:'fa-sync-alt',    style:'',           onclick:"initPaymentPanel()", title:'입금 목록 새로고침'},
+  ],
+};
+
+const _CTX_STYLE_MAP = {
+  '':       'background:rgba(255,255,255,.09);border-color:rgba(255,255,255,.22);color:rgba(255,255,255,.85)',
+  'green':  'background:rgba(16,185,129,.2);border-color:rgba(16,185,129,.5);color:#6EE7B7',
+  'red':    'background:rgba(239,68,68,.15);border-color:rgba(239,68,68,.45);color:#FCA5A5',
+  'yellow': 'background:rgba(251,191,36,.18);border-color:rgba(251,191,36,.5);color:#FCD34D',
+  'orange': 'background:rgba(249,115,22,.15);border-color:rgba(249,115,22,.45);color:#FDBA74',
+  'colvis': 'background:rgba(99,102,241,.18);border-color:rgba(99,102,241,.5);color:#A5B4FC',
+};
+
+function _updateContextToolbar(tabName) {
+  const toolbar = document.getElementById("adminContextToolbar");
+  if (!toolbar) return;
+  const defs = _CTX_TOOLBAR_DEFS[tabName] || [];
+  toolbar.innerHTML = '';
+
+  defs.forEach(d => {
+    if (d.sep) {
+      const sep = document.createElement('span');
+      sep.className = 'ctx-sep';
+      toolbar.appendChild(sep);
+      return;
+    }
+
+    const btn = document.createElement('button');
+    const styleStr = _CTX_STYLE_MAP[d.style] || _CTX_STYLE_MAP[''];
+    btn.id = 'ctx-hdr-' + (d.id || '');
+    btn.title = d.title || '';
+    btn.style.cssText = `display:inline-flex;align-items:center;gap:5px;padding:4px 10px;border:1px solid;border-radius:8px;font-size:.72rem;font-weight:600;cursor:pointer;transition:all .15s;white-space:nowrap;${styleStr}`;
+    btn.innerHTML = `<i class="fas ${d.icon}" style="font-size:.7rem"></i>${d.label}`;
+    btn.setAttribute('onclick', d.onclick);
+
+    // 원본 버튼의 active 상태 동기화
+    if (d.elId) {
+      const orig = document.getElementById(d.elId);
+      if (orig && orig.classList.contains('active')) {
+        btn.style.filter = 'brightness(1.4)';
+        btn.style.boxShadow = '0 0 0 2px rgba(255,255,255,.25)';
+      }
+    }
+
+    toolbar.appendChild(btn);
+  });
+}
+
+// 툴바 버튼 active 상태 동기화 헬퍼
+function _syncCtxBtnActive(ctxId, isActive) {
+  const btn = document.getElementById(ctxId);
+  if (!btn) return;
+  if (isActive) {
+    btn.style.filter = 'brightness(1.4)';
+    btn.style.boxShadow = '0 0 0 2px rgba(255,255,255,.3)';
+  } else {
+    btn.style.filter = '';
+    btn.style.boxShadow = '';
+  }
+}
+
+/* ══════════════════════════════════════════════════════════════
+   ★ 리뷰어 관리 탭
+   ══════════════════════════════════════════════════════════════ */
+let _allReviewers = []; // 전체 데이터 캐시
+
+async function loadReviewerList() {
+  if (!isAdminLoggedIn()) { showToast("세션이 만료되었습니다.", "warning"); return; }
+  const wrap = document.getElementById("reviewerListWrap");
+  if (!wrap) return;
+  wrap.innerHTML = '<div style="padding:30px;text-align:center;color:var(--t3)"><i class="fas fa-circle-notch fa-spin"></i> 불러오는 중...</div>';
+
+  try {
+    const data = await gasGet({ action: "getReviewerList" });
+    if (!data || data.error) throw new Error(data?.error || "응답 오류");
+
+    _allReviewers = data.reviewers || [];
+    _renderReviewerList(_allReviewers);
+
+    // 요약 배지
+    const summaryBar  = document.getElementById("reviewerSummaryBar");
+    const totalBadge  = document.getElementById("reviewerTotalBadge");
+    const recentBadge = document.getElementById("reviewerRecentBadge");
+    if (summaryBar) summaryBar.style.display = "flex";
+    if (totalBadge) totalBadge.textContent = `전체 ${_allReviewers.length}명`;
+    const now = Date.now();
+    const recent7 = _allReviewers.filter(r => {
+      if (!r.registeredAt) return false;
+      const d = new Date(r.registeredAt);
+      return (now - d.getTime()) < 7 * 24 * 3600 * 1000;
+    }).length;
+    if (recentBadge) recentBadge.textContent = `최근 7일 신규 ${recent7}명`;
+
+  } catch(e) {
+    wrap.innerHTML = `<div style="padding:20px;text-align:center;color:#DC2626"><i class="fas fa-exclamation-circle"></i> ${escHtml(e.message)}</div>`;
+  }
+}
+
+function _renderReviewerList(list) {
+  const wrap = document.getElementById("reviewerListWrap");
+  if (!wrap) return;
+
+  if (!list || list.length === 0) {
+    wrap.innerHTML = '<div style="padding:30px;text-align:center;color:var(--t3)"><i class="fas fa-users-slash" style="font-size:1.5rem;margin-bottom:8px;display:block"></i>등록된 리뷰어가 없습니다.</div>';
+    return;
+  }
+
+  const rows = list.map((r, i) => {
+    const name    = escHtml(r.name || "-");
+    const phone   = escHtml(r.phone || "-");
+    const regAt   = escHtml(r.registeredAt || "-");
+    const consent = r.consent ? '<span style="color:#059669;font-weight:700">동의</span>' : '<span style="color:#9CA3AF">-</span>';
+    const memo    = escHtml(r.memo || "");
+    const rowBg   = i % 2 === 0 ? "#fff" : "#F9FAFB";
+    const nameSafe  = (r.name  || "").replace(/'/g, "\\'");
+    const phoneSafe = (r.phone || "").replace(/'/g, "\\'");
+    return `<tr style="background:${rowBg};border-bottom:1px solid #F3F4F6">
+      <td style="padding:9px 12px;font-size:.82rem;color:var(--t3);text-align:center">${i+1}</td>
+      <td style="padding:9px 12px;font-size:.88rem;font-weight:600;color:var(--t1)">${name}</td>
+      <td style="padding:9px 12px;font-size:.85rem;color:var(--t2);font-family:monospace">${phone}</td>
+      <td style="padding:9px 12px;font-size:.78rem;color:var(--t3)">${regAt}</td>
+      <td style="padding:9px 12px;font-size:.8rem;text-align:center">${consent}</td>
+      <td style="padding:9px 12px;font-size:.78rem;color:var(--t3)">${memo}</td>
+      <td style="padding:9px 12px;text-align:center">
+        <button onclick="_deleteReviewer('${nameSafe}','${phoneSafe}')"
+          style="padding:3px 10px;background:#FEF2F2;color:#DC2626;border:1px solid #FECACA;border-radius:6px;font-size:.72rem;font-weight:600;cursor:pointer">
+          <i class="fas fa-trash-alt"></i> 삭제
+        </button>
+      </td>
+    </tr>`;
+  }).join("");
+
+  wrap.innerHTML = `
+    <div style="overflow-x:auto">
+      <table style="width:100%;border-collapse:collapse">
+        <thead>
+          <tr style="background:#F5F3FF;border-bottom:2px solid #DDD6FE">
+            <th style="padding:10px 12px;font-size:.75rem;color:#5B21B6;font-weight:700;text-align:center;white-space:nowrap">#</th>
+            <th style="padding:10px 12px;font-size:.75rem;color:#5B21B6;font-weight:700;text-align:left;white-space:nowrap">이름</th>
+            <th style="padding:10px 12px;font-size:.75rem;color:#5B21B6;font-weight:700;text-align:left;white-space:nowrap">전화번호</th>
+            <th style="padding:10px 12px;font-size:.75rem;color:#5B21B6;font-weight:700;text-align:left;white-space:nowrap">등록일시</th>
+            <th style="padding:10px 12px;font-size:.75rem;color:#5B21B6;font-weight:700;text-align:center;white-space:nowrap">동의</th>
+            <th style="padding:10px 12px;font-size:.75rem;color:#5B21B6;font-weight:700;text-align:left;white-space:nowrap">비고</th>
+            <th style="padding:10px 12px;font-size:.75rem;color:#5B21B6;font-weight:700;text-align:center;white-space:nowrap">관리</th>
+          </tr>
+        </thead>
+        <tbody>${rows}</tbody>
+      </table>
+    </div>`;
+}
+
+function _filterReviewerList(keyword) {
+  if (!keyword) { _renderReviewerList(_allReviewers); return; }
+  const kw = keyword.trim().toLowerCase();
+  const filtered = _allReviewers.filter(r =>
+    (r.name  || "").toLowerCase().includes(kw) ||
+    (r.phone || "").replace(/-/g,"").includes(kw)
+  );
+  _renderReviewerList(filtered);
+  const totalBadge = document.getElementById("reviewerTotalBadge");
+  if (totalBadge) totalBadge.textContent = `검색결과 ${filtered.length}명 / 전체 ${_allReviewers.length}명`;
+}
+
+async function _deleteReviewer(name, phone) {
+  if (!confirm(`'${name}' (${phone}) 님을 삭제하시겠습니까?\n삭제 후 해당 리뷰어는 로그인할 수 없습니다.`)) return;
+  try {
+    let data;
+    try {
+      data = await gasPost({ action: "deleteReviewer", name, phone });
+    } catch(_) {
+      data = await gasGet({ action: "deleteReviewer", name, phone });
+    }
+    if (data && data.error) throw new Error(data.error);
+    showToast(`${name}님이 삭제되었습니다.`, "success");
+    loadReviewerList();
+  } catch(e) {
+    showToast("삭제 오류: " + e.message, "error");
+  }
+}
+
+/* ── 제출 현황 대시보드 ── */
+async function loadAdminDashboard() {
+  if (!isAdminLoggedIn()) { showToast("세션이 만료되었습니다. 다시 로그인하세요.", "warning"); exitAdmin(); return; }
+  
+  // ── 전역 레이아웃 불러오기 (최초 1회만) ──
+  if (!window._layoutLoaded) {
+    await loadGlobalLayout();
+    window._layoutLoaded = true;
+  }
+  
+  // ── section-header sticky 위치를 데이터 로드 전 즉시 보정 ──
+  _fixStickyPositions();
+  const wrap = document.getElementById("dashboardWrap");
+  wrap.innerHTML = '<div class="admin-loading"><i class="fas fa-circle-notch fa-spin"></i> 불러오는 중...</div>';
+  hide("dashboardSummary");
+
+  try {
+    const data  = await gasGet({ action: "dashboard" });
+    if (data.error) {
+      wrap.innerHTML = `<div class="admin-error"><i class="fas fa-exclamation-circle"></i> ${escHtml(data.error)}</div>`;
+      return;
+    }
+
+    const stats = data.stats || [];
+    const grand = data.grand || { total: 0, submitted: 0, pending: 0 };
+
+    // ★ 서버(베이스시트)의 forceDone 상태를 _forceDoneSet에 반영
+    // → 모든 관리자가 동일한 강제완료 상태를 공유
+    _forceDoneSet = new Set();
+    _closedSet    = new Set();
+    stats.forEach(c => {
+      (c.tabs || []).forEach(t => {
+        if (t.forceDone) {
+          const key = (t.sheetId || "") + "||" + (t.tab || "");
+          _forceDoneSet.add(key);
+        }
+        if (t.isClosed) {
+          const key = (t.sheetId || "") + "||" + (t.tab || "");
+          _closedSet.add(key);
+        }
+      });
+    });
+    // ★ 마감탭 Set (인덱스에서 제외된 항목도 포함)
+    (data.closedTabs || []).forEach(t => {
+      const key = (t.sheetId || "") + "||" + (t.tab || "");
+      _closedSet.add(key);
+    });
+
+    if (data.indexBuiltAt) {
+      document.getElementById("dashboardIndexInfo").textContent = "인덱스 기준: " + data.indexBuiltAt;
+    }
+
+    const rate = grand.total > 0 ? Math.round(grand.submitted / grand.total * 100) : 0;
+    document.getElementById("sumTotal").textContent   = grand.total.toLocaleString();
+    document.getElementById("sumDone").textContent    = grand.submitted.toLocaleString();
+    document.getElementById("sumPending").textContent = grand.pending.toLocaleString();
+    document.getElementById("sumRate").textContent    = rate + "%";
+    show("dashboardSummary");
+
+    if (!stats.length) {
+      wrap.innerHTML = '<div class="admin-empty"><i class="fas fa-inbox"></i><p>데이터가 없습니다</p></div>';
+      return;
+    }
+
+    wrap.innerHTML = "";
+    wrap.classList.add('has-dev-label');
+
+    // 대시보드 래퍼 라벨 추가
+    const wrapLabel = document.createElement('span');
+    wrapLabel.className = 'dev-label';
+    wrapLabel.textContent = '대시보드 래퍼 / Dashboard Wrapper';
+    wrap.appendChild(wrapLabel);
+
+    // ── 컬럼 헤더: wrap 직속 (scrollOuter 밖) → sticky 정상 동작 ──
+    const colHeader = document.createElement("div");
+    colHeader.id = "dashColHeader";
+    colHeader.className = "dash-col-header has-dev-label";
+    _buildColHeader(colHeader);
+    
+    // 컬럼 헤더 라벨 추가
+    const headerLabel = document.createElement('span');
+    headerLabel.className = 'dev-label';
+    headerLabel.textContent = '컬럼 헤더 / Column Header';
+    colHeader.appendChild(headerLabel);
+    
+    wrap.appendChild(colHeader);
+
+    // ── 가로 스크롤 래퍼 (캠페인 블록만 포함) ──
+    const scrollOuter1 = document.createElement("div");
+    scrollOuter1.id = "dashboardScrollOuter";
+    const scrollInner1 = document.createElement("div");
+    scrollInner1.id = "dashboardScrollInner";
+    scrollOuter1.appendChild(scrollInner1);
+    wrap.appendChild(scrollOuter1);
+
+    stats.forEach((c, ci) => {
+      const cRate    = c.total > 0 ? Math.round(c.submitted / c.total * 100) : 0;
+      const tableId  = `dct-${ci}`;
+      const block    = document.createElement("div");
+      // 마감업체 조건: 모든 탭이 완료(pending===0) 또는 강제완료(forceDone) 또는 마감(isClosed)인 경우
+      // ★ v9.13 fix: 마감(isClosed) 탭은 인덱스에서 제외돼 total=0이므로 별도 조건 추가
+      // ★ v9.13 fix2: GAS closedOnly:true (마감 탭만 있는 캠페인)는 항상 camp-all-done
+      const isCampDone = c.closedOnly === true || (c.tabs.length > 0 && c.tabs.every(t => {
+        const key = (t.sheetId||"")+"||"+(t.tab||"");
+        return _forceDoneSet.has(key) || _closedSet.has(key) || (t.total > 0 && t.pending === 0);
+      }));
+      // 마감 탭 포함 여부
+      const hasClosed = c.closedOnly === true || c.tabs.some(t => _closedSet.has((t.sheetId||"")+"||"+(t.tab||"")));
+      block.className  = "dash-campaign-block" + (isCampDone ? " camp-all-done" : "") + (hasClosed ? " camp-has-closed" : "");
+      block.dataset.campname = (c.campaign || "").toLowerCase(); // ★ 검색용
+
+      const campSheetId = (c.tabs[0] && c.tabs[0].sheetId) ? c.tabs[0].sheetId : "";
+      const header = document.createElement("div");
+      header.className = "dash-campaign-header has-dev-label";
+      header.innerHTML = `
+        <span class="dev-label">캠페인 헤더 / Campaign Header</span>
+        <div class="dash-campaign-left">
+          <i class="fas fa-chevron-down dash-toggle-icon"></i>
+          ${campSheetId ? `<button class="btn-camp-refresh" data-sheetid="${escHtml(campSheetId)}" data-campname="${escHtml(c.campaign)}" onclick="event.stopPropagation();refreshCampaignIndex(this)" title="이 캠페인만 인덱스 갱신"><i class="fas fa-sync-alt"></i> 갱신</button>` : ""}
+          ${campSheetId ? `<button class="btn-camp-viewer" data-sheetid="${escHtml(campSheetId)}" onclick="event.stopPropagation();copyCampViewerLink(this)" title="광고주 URL 복사"><i class="fas fa-eye"></i> 광고주URL</button>` : ""}
+          <span class="dash-campaign-name">${escHtml(c.campaign)}</span>
+        </div>
+        <span class="dash-campaign-total">${c.submitted}/${c.total} (${cRate}%)</span>`;
+      header.addEventListener("click", () => toggleDashTab(tableId, header));
+
+      const table = document.createElement("div");
+      table.id        = tableId;
+      table.className = "dash-tab-table collapsed";
+
+      c.tabs.forEach(t => {
+        const tRate     = t.total > 0 ? Math.round(t.submitted / t.total * 100) : 0;
+        // ★ 강제완료/마감 키: sheetId||tabName 조합
+        const tabKey    = (t.sheetId || "") + "||" + (t.tab || "");
+        const isForceDone = _forceDoneSet.has(tabKey);
+        const isClosedTab = _closedSet.has(tabKey);
+        const isTabDone = isForceDone || (t.total > 0 && t.pending === 0);
+        // ── 긴급 경과 판단 ──
+        const _ovDays2 = (!isTabDone && !isClosedTab) ? _calcOverdueDays(t.startDate) : null;
+        const isOverdue2 = _ovDays2 !== null && _ovDays2 >= 25;
+        const row       = document.createElement("div");
+        row.className   = "dash-tab-row"
+          + (isTabDone   ? " tab-done" : "")
+          + (isForceDone ? " force-completed" : "")
+          + (isClosedTab ? " is-closed-row" : "")
+          + (isOverdue2  ? " urgent-overdue" : "")
+          // ★ 상품명 없는 탭: 마감/강제완료 제외 시 경고 배경색
+          + (!t.displayName && !isForceDone && !isClosedTab ? " no-product-warn" : "");
+        row.dataset.tabkey = tabKey;
+        row.setAttribute('oncontextmenu', `_openAdminContextMenu(event,'${escHtml(tabKey)}')`);
+        // ★ 정렬용 data 속성 (일부는 아래 변수 선언 후 채움)
+        row.dataset.sortTabname  = (t.tab || "").toLowerCase();
+        row.dataset.sortProduct  = (t.displayName || "").toLowerCase();
+        row.dataset.sortTime     = (t.timeRange || "").toLowerCase();
+        row.dataset.sortReview   = (t.reviewType || "").toLowerCase();
+        row.dataset.sortManager  = (t.manager || "").toLowerCase();
+        row.dataset.sortBar      = tRate;
+        row.dataset.sortNums     = (t.submitted || 0);
+        row.dataset.sortPayment  = (t.paymentType || "").toLowerCase();
+        row.dataset.sortIncome   = (t.incomeType || "").toLowerCase();    // ★ v9.17: 진행방식 검색
+        row.dataset.sortDepositname = (t.depositName || "").toLowerCase(); // ★ v9.17: 입금명 검색
+        row.dataset.sortBank     = (t.transferBank || "").toLowerCase();  // ★ v9.17: 이체은행 검색
+        row.dataset.sortTaekhap  = t.taekhap ? "1" : "0";
+        row.dataset.sortEnddate  = (() => {
+          const ed = localStorage.getItem("rapp_enddate_" + tabKey) || t.endDate || "";
+          const dv = _calcDdayFromEndDate(ed);
+          return dv !== null ? dv : 9999;
+        })();
+
+        // ── 탭명 + overdue 박지 ──
+        const _overdueBadge2 = isOverdue2
+          ? `<span class="badge-overdue"><i class="fas fa-fire" style="font-size:.55rem"></i> D+${_ovDays2}</span>`
+          : "";
+        const tabNameHtml = t.sheetUrl
+          ? `<a class="dash-tab-link" href="${escHtml(t.sheetUrl)}" target="_blank">${escHtml(t.tab)} <i class="fas fa-external-link-alt dash-tab-ext"></i></a>${_overdueBadge2}`
+          : `<span>${escHtml(t.tab)}</span>${_overdueBadge2}`;
+
+        // 시작일 배지 (수동 수정값 우선 적용)
+        const _manualSD = _getManualStartDate(tabKey);
+        const _effectiveSD = _manualSD || t.startDate || "";
+        row.dataset.sortDate = _effectiveSD || "9999"; // ★ _effectiveSD 선언 후 설정
+        const startDateHtml = _effectiveSD
+          ? `<span class="tab-start-date${_manualSD ? ' manual-date' : ''}" data-tabkey="${escHtml(tabKey)}" data-rawsd="${escHtml(t.startDate||'')}" onclick="event.stopPropagation();openStartDatePopup(event,this)" title="클릭하여 시작일 수정${_manualSD ? ' (수동 수정됨)' : ''}"><i class="fas fa-calendar-day"></i> ${escHtml(_effectiveSD)}</span>`
+          : `<span class="tab-date-empty" data-tabkey="${escHtml(tabKey)}" data-rawsd="" onclick="event.stopPropagation();openStartDatePopup(event,this)" title="시작일 클릭하여 입력"><i class="fas fa-calendar-plus"></i> 날짜</span>`;
+
+        // ★ v9.9: 종료 예정일 D-Day 배지 (endDate 기반)
+        // - localStorage에 캐싱된 종료일 우선 → GAS 반환 endDate 사용
+        const _cachedEndDate = localStorage.getItem("rapp_enddate_" + tabKey) || t.endDate || "";
+        const endDateHtml = _buildEndDateHtml(tabKey, _cachedEndDate, isTabDone, isClosedTab);
+        const tuip    = t.tuip    || 0;
+        const chuihap = t.chuihap || 0;
+
+        // 상태 오버레이 HTML 생성 헬퍼
+        const total = t.total || 0;
+        // 상태 셀: 마감 > 강제완료 > 완료 > 투입중/취합중(동시가능) > 없음
+        let stateHtml = "";
+        if (isClosedTab) {
+          stateHtml = `<span class="bar-lbl-center">⬛ 마감</span>`;
+        } else if (isForceDone) {
+          stateHtml = `<span class="bar-lbl-center">⚑ 강제완료</span>`;
+        } else if (isTabDone) {
+          stateHtml = `<span class="bar-lbl-center">✓ 완료</span>`;
+        } else if (tuip > 0 || chuihap > 0) {
+          const leftHtml  = tuip    > 0 ? `<span class="bar-lbl-left"><i class="fas fa-user-plus"></i> 투입중 ${tuip}/${total}</span>`       : `<span class="bar-lbl-left"></span>`;
+          const rightHtml = chuihap > 0 ? `<span class="bar-lbl-right"><i class="fas fa-layer-group"></i> 취합중 ${chuihap}/${total}</span>` : `<span class="bar-lbl-right"></span>`;
+          stateHtml = leftHtml + rightHtml;
+        }
+
+        // 탭설정 데이터 (data-tc 속성으로 전달 → onclick 이스케이프 문제 방지)
+        // ★ tcRound: 세부목록의 round 값 (차수별 행 렌더링 시 해당 차수로 덮어씀)
+        const tcData = { sheetId: t.sheetId, sheetUrl: t.sheetUrl || "", tabName: t.tab,
+          manager: t.manager||"", timeRange: t.timeRange||"",
+          taekhap: t.taekhap||false, reviewType: t.reviewType||"",
+          paymentType: t.paymentType||"", displayName: t.displayName||"",
+          deliveryType: t.deliveryType||"", folderUrl: t.folderUrl||"",
+          captureFolderUrl: t.captureFolderUrl||"",
+          isBulk: t.isBulk||false,
+          tcRound: t.tcRound || t.round || "",
+          incomeType: t.incomeType||"",
+          depositName: t.depositName||"", transferBank: t.transferBank||"",
+          // ★ 마감/강제완료 플래그 (저장 시 상품명 예외 처리용)
+          _isClosed: isClosedTab,
+          _isForceDone: isForceDone };
+        const tcAttr = escHtml(JSON.stringify(tcData));
+
+        // ★ 차수 렌더링:
+        //   - roundList 1개 이상 → 각 차수마다 독립 행 (탭명 동일, 차수 배지만 다름)
+        //   - roundList 없음     → 단독 행 1개 ("단독" 배지)
+        if (t.roundList && t.roundList.length >= 1) {
+          t.roundList.forEach(rd => {
+            const rdRow = document.createElement("div");
+            const rdDone = isForceDone || (rd.total > 0 && rd.pending === 0);
+            // ★ 차수별 독립 tabKey: sheetId||탭명||차수 (수동 시작일이 차수간 공유되지 않도록)
+            const rdTabKey2 = tabKey + "||" + (rd.round || "");
+            // ── 차수 행 긴급 경과 ──
+            const rdStartDateRaw2 = rd.startDate || t.startDate || "";
+            // 수동값: 차수별 키 우선 → 없으면 탭 전체 키 확인 (하위호환)
+            const _rdManualSD2 = _getManualStartDate(rdTabKey2) || _getManualStartDate(tabKey + "||" + (rd.round || "").replace(/.*/, ""));
+            const _rdEffectiveSD2 = _rdManualSD2 || rdStartDateRaw2;
+            const _rdOvDays2 = (!rdDone && !isClosedTab) ? _calcOverdueDays(_rdEffectiveSD2) : null;
+            const rdIsOverdue2 = _rdOvDays2 !== null && _rdOvDays2 >= 25;
+            rdRow.className = "dash-tab-row" + (rdDone ? " tab-done" : "") + (isForceDone ? " force-completed" : "") + (isClosedTab ? " is-closed-row" : "") + (rdIsOverdue2 ? " urgent-overdue" : "");
+            rdRow.dataset.tabkey = rdTabKey2;
+            // ★ 차수 행 정렬용 data 속성 (rdRate 선언 전 항목만 먼저 설정)
+            rdRow.dataset.sortTabname  = (t.tab || "").toLowerCase();
+            rdRow.dataset.sortProduct  = (t.displayName || "").toLowerCase();
+            rdRow.dataset.sortDate     = _rdEffectiveSD2 || "9999";
+            rdRow.dataset.sortTime     = (t.timeRange || "").toLowerCase();
+            rdRow.dataset.sortReview   = (t.reviewType || "").toLowerCase();
+            rdRow.dataset.sortManager  = (t.manager || "").toLowerCase();
+            rdRow.dataset.sortPayment  = (t.paymentType || "").toLowerCase();
+            rdRow.dataset.sortTaekhap  = t.taekhap ? "1" : "0";
+            rdRow.dataset.sortEnddate  = 9999;
+            const rdRate = rd.total > 0 ? Math.round(rd.submitted / rd.total * 100) : 0;
+            rdRow.dataset.sortBar      = rdRate;  // ★ rdRate 선언 후 설정
+            rdRow.dataset.sortNums     = (rd.submitted || 0);
+            // 차수별 시작일: 수동 수정값(차수별 키) > rd.startDate > 탭 전체 startDate
+            const rdStartDate = _rdEffectiveSD2;
+            const rdStartDateHtml = rdStartDate
+              ? `<span class="tab-start-date${_rdManualSD2 ? ' manual-date' : ''}" data-tabkey="${escHtml(rdTabKey2)}" data-rawsd="${escHtml(rdStartDateRaw2)}" onclick="event.stopPropagation();openStartDatePopup(event,this)" title="클릭하여 시작일 수정"><i class="fas fa-calendar-day"></i> ${escHtml(rdStartDate)}</span>`
+              : `<span class="tab-date-empty" data-tabkey="${escHtml(rdTabKey2)}" data-rawsd="" onclick="event.stopPropagation();openStartDatePopup(event,this)" title="시작일 입력"><i class="fas fa-calendar-plus"></i> 날짜</span>`;
+            // 차수 탭명 + overdue 백지
+            const _rdOverdueBadge2 = rdIsOverdue2
+              ? `<span class="badge-overdue"><i class="fas fa-fire" style="font-size:.55rem"></i> D+${_rdOvDays2}</span>`
+              : "";
+            const rdTabNameHtml2 = t.sheetUrl
+              ? `<a class="dash-tab-link" href="${escHtml(t.sheetUrl)}" target="_blank">${escHtml(t.tab)} <i class="fas fa-external-link-alt dash-tab-ext"></i></a>${_rdOverdueBadge2}`
+              : `<span>${escHtml(t.tab)}</span>${_rdOverdueBadge2}`;
+            let rdStateHtml = "";
+            if (isForceDone) {
+              rdStateHtml = `<span class="bar-lbl-center">⚑ 강제완료</span>`;
+            } else if (isClosedTab) {
+              rdStateHtml = `<span class="bar-lbl-center">⬛ 마감</span>`;
+            } else if (rdDone) {
+              rdStateHtml = `<span class="bar-lbl-center">✓ 완료</span>`;
+            } else if ((rd.tuip||0) > 0 || (rd.chuihap||0) > 0) {
+              const rdTotal = rd.total || 0;
+              const rdLeftHtml  = (rd.tuip||0)    > 0 ? `<span class="bar-lbl-left"><i class="fas fa-user-plus"></i> 투입중 ${rd.tuip}/${rdTotal}</span>`          : `<span class="bar-lbl-left"></span>`;
+              const rdRightHtml = (rd.chuihap||0) > 0 ? `<span class="bar-lbl-right"><i class="fas fa-layer-group"></i> 취합중 ${rd.chuihap}/${rdTotal}</span>` : `<span class="bar-lbl-right"></span>`;
+              rdStateHtml = rdLeftHtml + rdRightHtml;
+            }
+            const tRd = Object.assign({}, t, { submitted: rd.submitted, total: rd.total, pending: rd.pending, noRecipient: t.noRecipient, tuip: rd.tuip||0, chuihap: rd.chuihap||0 });
+            // ★ 차수별 tcAttr: 해당 행의 round를 tcRound에 주입 → openFormLink에서 URL rd 파라미터로 활용
+            const rdTcData2 = Object.assign({}, JSON.parse(tcAttr.replace(/&quot;/g,'"').replace(/&amp;/g,'&').replace(/&#39;/g,"'").replace(/&lt;/g,'<').replace(/&gt;/g,'>')), { tcRound: rd.round || "" });
+            const rdTcAttr2 = escHtml(JSON.stringify(rdTcData2));
+            rdRow.dataset.state = _rowState(isForceDone, isClosedTab, rdDone, rd.tuip||0, rd.chuihap||0);
+            rdRow.innerHTML = _buildTabRowHtml(tRd, rdTabKey2, isForceDone, isClosedTab, rdTabNameHtml2, rdStartDateHtml, rdRate, rdStateHtml, rdTcAttr2, rd.round, null);
+            table.appendChild(rdRow);
+          });
+        } else {
+          row.dataset.state = _rowState(isForceDone, isClosedTab, isTabDone, tuip, chuihap);
+          row.innerHTML = _buildTabRowHtml(t, tabKey, isForceDone, isClosedTab, tabNameHtml, startDateHtml, tRate, stateHtml, tcAttr, null, endDateHtml);
+          table.appendChild(row);
+        }
+
+        if (t.hasMonthly) {
+          const tRate2     = t.total2 > 0 ? Math.round(t.submitted2 / t.total2 * 100) : 0;
+          const isTab2Done = t.total2 > 0 && t.pending2 === 0;
+          const row2       = document.createElement("div");
+          row2.className   = "dash-tab-row dash-tab-row-monthly" + (isTab2Done ? " tab-done" : "");
+          row2.innerHTML   = `
+            <div class="force-cb-wrap"></div>
+            <div class="closed-cb-wrap"></div>
+            <div class="dash-tab-name dash-tab-name-monthly"><i class="fas fa-calendar-alt"></i> 한달리뷰</div>
+            <div></div>
+            <div></div>
+            <div></div>
+            <div class="dash-tab-date-col"></div>
+            <div></div>
+            <div></div>
+            <div></div>
+            <div></div>
+            <div></div>
+            <div class="dash-tab-bar-col">
+              ${(t.noRecipient || t.total2 === 0)
+                ? `<span class="bar-no-recipient" title="시트에 수취인 컬럼이 없거나 데이터가 없어 진행률을 계산할 수 없습니다"><i class="fas fa-exclamation-triangle"></i>수취인헤더없음</span>`
+                : (() => {
+                    const barClass2 = tRate2 === 100 ? 'bar-full' : tRate2 >= 50 ? 'bar-half' : 'bar-low';
+                    const stateHtml2 = isTab2Done ? `<span class="bar-lbl-center">✓ 완료</span>` : '';
+                    const lblClass2  = isTab2Done ? 'bar-label-done' : 'bar-label-dark';
+                    return `${stateHtml2 ? `<span class="bar-label ${lblClass2} bar-label-center">${stateHtml2}</span>` : ''}
+                            <div class="dash-tab-bar-wrap"><div class="dash-tab-bar ${barClass2}" style="width:${tRate2}%"></div></div>`;
+                  })()
+              }
+            </div>
+            <div class="dash-tab-nums">
+              ${(t.noRecipient || t.total2 === 0)
+                ? `<span style="color:#D1D5DB;font-size:.65rem">—</span>`
+                : `<span class="dash-done">${t.submitted2}</span><span class="dash-sep">/</span><span class="dash-total">${t.total2}</span>`
+              }
+            </div>
+            <div></div>
+            <div></div>
+            <div></div>
+            <div></div>
+            <div></div>`;
+          table.appendChild(row2);
+        }
+      });
+
+      block.appendChild(header);
+      block.appendChild(table);
+      scrollInner1.appendChild(block);
+    });
+
+    if (hideDoneMode) wrap.classList.add("hide-done-mode");
+    else              wrap.classList.remove("hide-done-mode");
+    if (hideClosedCampMode) wrap.classList.add("hide-closed-camp-mode");
+    else                    wrap.classList.remove("hide-closed-camp-mode");
+    if (hideClosedTabMode)  wrap.classList.add("hide-closed-tab-mode");
+    else                    wrap.classList.remove("hide-closed-tab-mode");
+    // ★ v9.13: 마감업체 숨김 버튼 텍스트/스타일 초기 동기화
+    const _btnHCC = document.getElementById("btnHideClosedCamp");
+    if (_btnHCC) {
+      if (hideClosedCampMode) {
+        _btnHCC.innerHTML = '<i class="fas fa-building"></i> 마감업체 표시';
+        _btnHCC.classList.add("active");
+      } else {
+        _btnHCC.innerHTML = '<i class="fas fa-building"></i> 마감업체 숨김';
+        _btnHCC.classList.remove("active");
+      }
+    }
+    // 캠페인명 숨김 모드 재적용
+    if (hideCampNameMode) {
+      wrap.classList.add("hide-camp-name-mode");
+      wrap.querySelectorAll(".dash-tab-table").forEach(t => t.classList.remove("collapsed"));
+    } else {
+      wrap.classList.remove("hide-camp-name-mode");
+    }
+
+    // 강제완료 모드가 켜져 있었다면 유지
+    if (_forceDoneMode) wrap.classList.add("force-done-mode");
+    // 마감 모드가 켜져 있었다면 유지
+    if (_closedMode)    wrap.classList.add("closed-mode");
+
+    // ── allExpanded ON: 모든 탭 테이블 펼침 ──
+    if (allExpanded) {
+      wrap.querySelectorAll(".dash-tab-table").forEach(t => t.classList.remove("collapsed"));
+      wrap.querySelectorAll(".dash-toggle-icon").forEach(i => i.classList.add("rotated"));
+    }
+
+    // 필터가 활성화된 경우 재적용
+    if (activeFilters.size > 0) applyDashFilter();
+
+    _fixStickyPositions();
+    _bindScrollSync();
+    _closeColResizePopup();
+    loadColWidths();    // ★ 렌더 후 저장된 컬럼 너비 재적용 (DOM 재빌드 시 인라인 스타일 유지)
+    _loadHiddenCols();  // ★ 열 숨김 상태 복원
+    _resetSort();       // ★ 정렬 초기화
+    _bindMemoPreviewTooltips(); // ★ 메모 툴팁 바인딩
+    clearDashSearch();  // ★ 새로고침 시 검색 초기화
+    setTimeout(_attachDashResizeObserver, 50); // ★ 렌더 완료 후 반응형 컬럼 너비 감지 연결
+    _lastDashData = data;
+    // ★ v9.9: 폴링 스냅샷 갱신 (폴링 활성화 여부 무관)
+    if (typeof _buildTabSnap === "function" && data.stats) {
+      _dashPollTabSnap = _buildTabSnap(data.stats);
+    }
+
+    // ★ v10.0 P1-D: 대시보드 로드 완료 후 dirty 배지 자동 갱신
+    // openIndexModal 에서만 호출되던 것을 여기서도 호출 → 대시보드 상시 표시
+    if (APP_CONFIG.GAS_WEB_APP_URL) {
+      _updateSmartDirtyBadge();
+    }
+
+  } catch (err) {
+    wrap.innerHTML = `<div class="admin-error"><i class="fas fa-exclamation-circle"></i> ${escHtml(err.message)}</div>`;
+  }
+}
+
+// 대시보드 렌더링 (외부에서 data를 직접 넘겨 재렌더링 가능)
+function renderDashboard(data) {
+  const wrap  = document.getElementById("dashboardWrap");
+  const stats = data.stats || [];
+  const grand = data.grand || { total: 0, submitted: 0, pending: 0 };
+  const rate  = grand.total > 0 ? Math.round(grand.submitted / grand.total * 100) : 0;
+  document.getElementById("sumTotal").textContent   = grand.total.toLocaleString();
+  document.getElementById("sumDone").textContent    = grand.submitted.toLocaleString();
+  document.getElementById("sumPending").textContent = grand.pending.toLocaleString();
+  document.getElementById("sumRate").textContent    = rate + "%";
+  show("dashboardSummary");
+  if (!stats.length) {
+    wrap.innerHTML = '<div class="admin-empty"><i class="fas fa-inbox"></i><p>데이터가 없습니다</p></div>';
+    return;
+  }
+  // 기존 렌더링 로직 재사용: loadAdminDashboard의 render 부분을 그대로 실행
+  // stats를 직접 주입해 재렌더링
+  wrap.innerHTML = "";
+
+  // ── 컬럼 헤더: wrap 직속 (scrollOuter 밖) → sticky 정상 동작 ──
+  const colHdr = document.createElement("div");
+  colHdr.id = "dashColHeader";
+  colHdr.className = "dash-col-header";
+  _buildColHeader(colHdr);
+  wrap.appendChild(colHdr);
+
+  // ── 가로 스크롤 래퍼 (캠페인 블록만 포함) ──
+  const scrollOuter2 = document.createElement("div");
+  scrollOuter2.id = "dashboardScrollOuter";
+  const scrollInner2 = document.createElement("div");
+  scrollInner2.id = "dashboardScrollInner";
+  scrollOuter2.appendChild(scrollInner2);
+  wrap.appendChild(scrollOuter2);
+
+  stats.forEach((c, ci) => {
+    const cRate    = c.total > 0 ? Math.round(c.submitted / c.total * 100) : 0;
+    const tableId  = `dct-r-${ci}`;
+    const block    = document.createElement("div");
+    // 강제완료된 탭이 있으면 camp-all-done 재계산
+    // ★ v9.13 fix: 마감(isClosed) 탭도 완료 조건에 포함
+    // ★ v9.13 fix2: closedOnly:true (마감 탭만인 캠페인) 항상 camp-all-done
+    const forcedInCamp = c.tabs.some(t => _forceDoneSet.has((t.sheetId||"")+"||"+(t.tab||"")));
+    const allDone      = c.closedOnly === true || c.tabs.every(t => {
+      const key = (t.sheetId||"")+"||"+(t.tab||"");
+      return _forceDoneSet.has(key) || _closedSet.has(key) || (t.total > 0 && t.pending === 0);
+    });
+    const hasClosed = c.closedOnly === true || c.tabs.some(t => _closedSet.has((t.sheetId||"")+"||"+(t.tab||"")));
+    block.className = "dash-campaign-block" + (allDone ? " camp-all-done" : "") + (hasClosed ? " camp-has-closed" : "");
+    block.dataset.campname = (c.campaign || "").toLowerCase(); // ★ 검색용
+    const campSheetId2 = (c.tabs[0] && c.tabs[0].sheetId) ? c.tabs[0].sheetId : "";
+    const header = document.createElement("div");
+    header.className = "dash-campaign-header";
+    header.innerHTML = `
+      <div class="dash-campaign-left">
+        <i class="fas fa-chevron-down dash-toggle-icon"></i>
+        ${campSheetId2 ? `<button class="btn-camp-refresh" data-sheetid="${escHtml(campSheetId2)}" data-campname="${escHtml(c.campaign)}" onclick="event.stopPropagation();refreshCampaignIndex(this)" title="이 캠페인만 인덱스 갱신"><i class="fas fa-sync-alt"></i> 갱신</button>` : ""}
+        ${campSheetId2 ? `<button class="btn-camp-viewer" data-sheetid="${escHtml(campSheetId2)}" onclick="event.stopPropagation();copyCampViewerLink(this)" title="광고주 URL 복사"><i class="fas fa-eye"></i> 광고주URL</button>` : ""}
+        <span class="dash-campaign-name">${escHtml(c.campaign)}</span>
+      </div>
+      <div style="display:flex;align-items:center;gap:6px;flex-shrink:0">
+        <span class="dash-campaign-total">${c.submitted}/${c.total} (${cRate}%)</span>
+      </div>`;
+    header.addEventListener("click", () => toggleDashTab(tableId, header));
+    const table = document.createElement("div");
+    table.id        = tableId;
+    table.className = "dash-tab-table collapsed";
+    c.tabs.forEach(t => {
+      const tRate      = t.total > 0 ? Math.round(t.submitted / t.total * 100) : 0;
+      const tabKey     = (t.sheetId||"")+"||"+(t.tab||"");
+      const isForceDone = _forceDoneSet.has(tabKey);
+      const isClosedTab = _closedSet.has(tabKey);
+      const isTabDone  = isForceDone || (t.total > 0 && t.pending === 0);
+      // ── 긴급 경과 판단 (수동 수정일 우선) ──
+      const _mainManualSD = _getManualStartDate(tabKey);
+      const _mainEffectiveSD = _mainManualSD || t.startDate || "";
+      const _ovDays = (!isTabDone && !isClosedTab) ? _calcOverdueDays(_mainEffectiveSD) : null;
+      const isOverdue = _ovDays !== null && _ovDays >= 25;
+      const row        = document.createElement("div");
+      row.className    = "dash-tab-row"+(isTabDone?" tab-done":"")+(isForceDone?" force-completed":"")+(isClosedTab?" is-closed-row":"")+(isOverdue?" urgent-overdue":"")
+        +(!t.displayName && !isForceDone && !isClosedTab?" no-product-warn":"");
+      row.dataset.tabkey = tabKey;
+      row.setAttribute('oncontextmenu', `_openAdminContextMenu(event,'${escHtml(tabKey)}')`);
+      const _overdueBadge = isOverdue
+        ? `<span class="badge-overdue"><i class="fas fa-fire" style="font-size:.55rem"></i> D+${_ovDays}</span>`
+        : "";
+      const tabNameHtml = t.sheetUrl
+        ? `<a class="dash-tab-link" href="${escHtml(t.sheetUrl)}" target="_blank">${escHtml(t.tab)} <i class="fas fa-external-link-alt dash-tab-ext"></i></a>${_overdueBadge}`
+        : `<span>${escHtml(t.tab)}</span>${_overdueBadge}`;
+      const _manualSD2 = _getManualStartDate(tabKey);
+      const _effectiveSD2 = _manualSD2 || t.startDate || "";
+      const startDateHtml = _effectiveSD2
+        ? `<span class="tab-start-date${_manualSD2 ? ' manual-date' : ''}" data-tabkey="${escHtml(tabKey)}" data-rawsd="${escHtml(t.startDate||'')}" onclick="event.stopPropagation();openStartDatePopup(event,this)" title="클릭하여 시작일 수정${_manualSD2 ? ' (수동 수정됨)' : ''}"><i class="fas fa-calendar-day"></i> ${escHtml(_effectiveSD2)}</span>`
+        : `<span class="tab-date-empty" data-tabkey="${escHtml(tabKey)}" data-rawsd="" onclick="event.stopPropagation();openStartDatePopup(event,this)" title="시작일 클릭하여 입력"><i class="fas fa-calendar-plus"></i> 날짜</span>`;
+      const tuip = t.tuip||0, chuihap = t.chuihap||0;
+      let stateHtml = "";
+      if (isClosedTab)  stateHtml = `<span class="dash-pending-badge badge-done" style="background:#EEF2FF;color:#3730A3;border-color:#C7D2FE">⬛ 마감</span>`;
+      else if (isForceDone) stateHtml = `<span class="dash-pending-badge badge-done" style="background:#FEE2E2;color:#991B1B;border-color:#FCA5A5">⚑ 강제완료</span>`;
+      else if (isTabDone) stateHtml = `<span class="dash-pending-badge badge-done">✓ 완료</span>`;
+      else if (tuip>0) stateHtml = `<span class="work-badge badge-tuip"><i class="fas fa-user-plus"></i> 투입중 ${tuip}</span>`;
+      else if (chuihap>0) stateHtml = `<span class="work-badge badge-chuihap"><i class="fas fa-layer-group"></i> 취합중 ${chuihap}</span>`;
+      const tcData = { sheetId:t.sheetId, sheetUrl:t.sheetUrl||"", tabName:t.tab,
+        manager:t.manager||"", timeRange:t.timeRange||"", taekhap:t.taekhap||false,
+        reviewType:t.reviewType||"", paymentType:t.paymentType||"", displayName:t.displayName||"",
+        deliveryType:t.deliveryType||"", folderUrl:t.folderUrl||"",
+        captureFolderUrl:t.captureFolderUrl||"",
+        isBulk:t.isBulk||false,
+        tcRound: t.tcRound || t.round || "",
+        ncMode: !!(t.ncMode === true || t.ncMode === "true"),
+        incomeType: t.incomeType||"",
+        depositName: t.depositName||"", transferBank: t.transferBank||"",
+        // ★ 마감/강제완료 플래그 (저장 시 상품명 예외 처리용)
+        _isClosed: isClosedTab,
+        _isForceDone: isForceDone };
+      const tcAttr = escHtml(JSON.stringify(tcData));
+      // ★ v9.9: 종료 예정일 D-Day 배지
+      const _cachedED2 = localStorage.getItem("rapp_enddate_" + tabKey) || t.endDate || "";
+      const endDateHtml2 = _buildEndDateHtml(tabKey, _cachedED2, isTabDone, isClosedTab);
+      if (t.roundList && t.roundList.length >= 1) {
+        t.roundList.forEach(rd => {
+          const rdRow = document.createElement("div");
+          const rdDone = isForceDone || (rd.total > 0 && rd.pending === 0);
+          // ★ 차수별 독립 tabKey: sheetId||탭명||차수 (수동 시작일이 차수간 공유되지 않도록)
+          const rdTabKey = tabKey + "||" + (rd.round || "");
+          // ── 차수 행 긴급 경과 판단 ──
+          const rdStartDateRaw = rd.startDate || t.startDate || "";
+          // 수동값: 차수별 키 우선
+          const _rdManualSD = _getManualStartDate(rdTabKey);
+          const _rdEffectiveSD = _rdManualSD || rdStartDateRaw;
+          const _rdOvDays = (!rdDone && !isClosedTab) ? _calcOverdueDays(_rdEffectiveSD) : null;
+          const rdIsOverdue = _rdOvDays !== null && _rdOvDays >= 25;
+          rdRow.className = "dash-tab-row"+(rdDone?" tab-done":"")+(isForceDone?" force-completed":"")+(isClosedTab?" is-closed-row":"")+(rdIsOverdue?" urgent-overdue":"");
+          rdRow.dataset.tabkey = rdTabKey;
+          const rdRate = rd.total > 0 ? Math.round(rd.submitted / rd.total * 100) : 0;
+          const rdStartDate = _rdEffectiveSD;
+          const rdStartDateHtml = rdStartDate
+            ? `<span class="tab-start-date${_rdManualSD ? ' manual-date' : ''}" data-tabkey="${escHtml(rdTabKey)}" data-rawsd="${escHtml(rdStartDateRaw)}" onclick="event.stopPropagation();openStartDatePopup(event,this)" title="클릭하여 시작일 수정"><i class="fas fa-calendar-day"></i> ${escHtml(rdStartDate)}</span>`
+            : `<span class="tab-date-empty" data-tabkey="${escHtml(rdTabKey)}" data-rawsd="" onclick="event.stopPropagation();openStartDatePopup(event,this)" title="시작일 입력"><i class="fas fa-calendar-plus"></i> 날짜</span>`;
+          // ── 차수 행 탭명 뱃지 ──
+          const _rdOverdueBadge = rdIsOverdue
+            ? `<span class="badge-overdue"><i class="fas fa-fire" style="font-size:.55rem"></i> D+${_rdOvDays}</span>`
+            : "";
+          const rdTabNameHtml = t.sheetUrl
+            ? `<a class="dash-tab-link" href="${escHtml(t.sheetUrl)}" target="_blank">${escHtml(t.tab)} <i class="fas fa-external-link-alt dash-tab-ext"></i></a>${_rdOverdueBadge}`
+            : `<span>${escHtml(t.tab)}</span>${_rdOverdueBadge}`;
+          let rdStateHtml = "";
+          if (isClosedTab)      rdStateHtml = `<span class="bar-lbl-center">⬛ 마감</span>`;
+          else if (isForceDone) rdStateHtml = `<span class="bar-lbl-center">⚑ 강제완료</span>`;
+          else if (rdDone)      rdStateHtml = `<span class="bar-lbl-center">✓ 완료</span>`;
+          else if ((rd.tuip||0) > 0 || (rd.chuihap||0) > 0) {
+            const rdTotal2 = rd.total || 0;
+            const rdLeft  = (rd.tuip||0)    > 0 ? `<span class="bar-lbl-left"><i class="fas fa-user-plus"></i> 투입중 ${rd.tuip}/${rdTotal2}</span>`          : `<span class="bar-lbl-left"></span>`;
+            const rdRight = (rd.chuihap||0) > 0 ? `<span class="bar-lbl-right"><i class="fas fa-layer-group"></i> 취합중 ${rd.chuihap}/${rdTotal2}</span>` : `<span class="bar-lbl-right"></span>`;
+            rdStateHtml = rdLeft + rdRight;
+          }
+          const tRd = Object.assign({}, t, { submitted: rd.submitted, total: rd.total, pending: rd.pending, tuip: rd.tuip||0, chuihap: rd.chuihap||0 });
+          // ★ 차수별 tcAttr: 해당 행의 round를 tcRound에 주입 → openFormLink에서 URL rd 파라미터로 활용
+          const rdTcData = Object.assign({}, JSON.parse(tcAttr.replace(/&quot;/g,'"').replace(/&amp;/g,'&').replace(/&#39;/g,"'").replace(/&lt;/g,'<').replace(/&gt;/g,'>')), { tcRound: rd.round || "" });
+          const rdTcAttr = escHtml(JSON.stringify(rdTcData));
+          rdRow.dataset.state = _rowState(isForceDone, isClosedTab, rdDone, rd.tuip||0, rd.chuihap||0);
+          rdRow.innerHTML = _buildTabRowHtml(tRd, rdTabKey, isForceDone, isClosedTab, rdTabNameHtml, rdStartDateHtml, rdRate, rdStateHtml, rdTcAttr, rd.round, null);
+          table.appendChild(rdRow);
+        });
+      } else {
+        row.dataset.state = _rowState(isForceDone, isClosedTab, isTabDone, tuip, chuihap);
+        row.innerHTML = _buildTabRowHtml(t, tabKey, isForceDone, isClosedTab, tabNameHtml, startDateHtml, tRate, stateHtml, tcAttr, null, endDateHtml2);
+        table.appendChild(row);
+      }
+    });
+    block.appendChild(header);
+    block.appendChild(table);
+    scrollInner2.appendChild(block);
+  });
+  if (hideDoneMode) wrap.classList.add("hide-done-mode");
+  else wrap.classList.remove("hide-done-mode");
+  if (hideClosedCampMode) wrap.classList.add("hide-closed-camp-mode");
+  else                    wrap.classList.remove("hide-closed-camp-mode");
+  if (hideClosedTabMode)  wrap.classList.add("hide-closed-tab-mode");
+  else                    wrap.classList.remove("hide-closed-tab-mode");
+  // 캠페인명 숨김 모드 재적용
+  if (hideCampNameMode) {
+    wrap.classList.add("hide-camp-name-mode");
+    wrap.querySelectorAll(".dash-tab-table").forEach(t => t.classList.remove("collapsed"));
+  } else {
+    wrap.classList.remove("hide-camp-name-mode");
+  }
+  if (_forceDoneMode)     wrap.classList.add("force-done-mode");
+  if (_closedMode)        wrap.classList.add("closed-mode");
+  // ── allExpanded ON: 모든 탭 테이블 펼침 ──
+  if (allExpanded) {
+    wrap.querySelectorAll(".dash-tab-table").forEach(t => t.classList.remove("collapsed"));
+    wrap.querySelectorAll(".dash-toggle-icon").forEach(i => i.classList.add("rotated"));
+  }
+  if (activeFilters.size > 0) applyDashFilter();
+  _fixStickyPositions();
+  _bindScrollSync();
+  _syncHorizontalScroll(); // ★ 가로 스크롤 동기화
+  _closeColResizePopup();
+  loadColWidths();    // ★ 렌더 후 저장된 컬럼 너비 재적용
+  _loadHiddenCols();  // ★ 열 숨김 상태 복원
+  _resetSort();       // ★ 정렬 초기화
+  _bindMemoPreviewTooltips(); // ★ 메모 툴팁 바인딩
+  clearDashSearch();  // ★ 렌더 시 검색 초기화
+  setTimeout(_attachDashResizeObserver, 50); // ★ 렌더 완료 후 반응형 컬럼 너비 감지 연결
+  // ★ v10.0 P1-D: 재렌더 후 dirty 배지도 갱신
+  if (APP_CONFIG.GAS_WEB_APP_URL) {
+    _updateSmartDirtyBadge();
+  }
+}
+
+// ═══════════════════════════════════════════════════════
+// 탭 행 HTML 빌더 (loadAdminDashboard + renderDashboard 공용)
+// 열 순서: 체크박스 | 탭명 | 시작일 | 상품명 | 주문시간대 | 리뷰타입 | 담당자 | 진행률 | 리뷰 | 상태 | 입금방식 | 택대 | +정보
+// ═══════════════════════════════════════════════════════
+// ★ roundLabel: 차수 배지 HTML (호출 시 전달 — "단독" 또는 "1차" 등)
+// ── 긴급 경과일 계산 ──────────────────────────────────────────
+/**
+ * "YY.MM.DD" 또는 "YYYY.MM.DD" 형식 startDate → 오늘 기준 경과일 반환
+ * 파싱 실패 시 null 반환
+ */
+function _parseStartDate(sd) {
+  if (!sd) return null;
+  const s = String(sd).trim();
+  // 종료일 연도는 2026년으로 강제
+  const FIXED_YEAR = 2026;
+
+  // YY.MM.DD(요일) — 예: "25.03.12(목)"
+  let m = s.match(/^(\d{2})\.(\d{1,2})\.(\d{1,2})\([월화수목금토일]\)$/);
+  if (m) {
+    return new Date(FIXED_YEAR, parseInt(m[2], 10) - 1, parseInt(m[3], 10));
+  }
+
+  // YY.MM.DD 또는 YYYY.MM.DD
+  m = s.match(/^(\d{2,4})[.\-\/](\d{1,2})[.\-\/](\d{1,2})$/);
+  if (!m) return null;
+  const month = parseInt(m[2], 10) - 1; // 0-indexed
+  const day   = parseInt(m[3], 10);
+  return new Date(FIXED_YEAR, month, day);
+}
+function _calcOverdueDays(sd) {
+  const d = _parseStartDate(sd);
+  if (!d) return null;
+  const today = new Date();
+  today.setHours(0, 0, 0, 0);
+  const diff = Math.floor((today - d) / 86400000);
+  return diff >= 0 ? diff : null;
+}
+
+/* ── v9.9: 종료 예정일 D-Day 배지 HTML 생성 ── */
+function _calcDdayFromEndDate(ed) {
+  // ed: "YY.MM.DD" 형식
+  const d = _parseStartDate(ed);
+  if (!d) return null;
+  const today = new Date();
+  today.setHours(0, 0, 0, 0);
+  d.setHours(0, 0, 0, 0);
+  return Math.floor((d - today) / 86400000); // 양수=미래, 0=오늘, 음수=과거
+}
+
+function _buildEndDateHtml(tabKey, endDate, isTabDone, isClosedTab) {
+  const tcData_ed = escHtml(JSON.stringify({ tabKey }));
+  const refreshBtn = `<button class="btn-enddate-refresh" onclick="event.stopPropagation();refreshTabEndDate(this,'${escHtml(tabKey)}')" title="구매일자 마지막값으로 종료일 갱신" style="background:none;border:none;cursor:pointer;color:#9CA3AF;font-size:.65rem;padding:1px 3px;margin-left:2px"><i class="fas fa-sync-alt"></i></button>`;
+
+  if (!endDate) {
+    return `<span style="color:#D1D5DB;font-size:.6rem">—</span>${refreshBtn}`;
+  }
+
+  const dday = _calcDdayFromEndDate(endDate);
+  if (dday === null) return `<span style="color:#D1D5DB;font-size:.6rem">${escHtml(endDate)}</span>${refreshBtn}`;
+
+  let badge = "";
+  if (isTabDone || isClosedTab) {
+    badge = `<span class="dday-badge dday-done" title="종료일: ${escHtml(endDate)}">완료</span>`;
+  } else if (dday < 0) {
+    // 이미 지남 → 🔥 긴급
+    badge = `<span class="dday-badge dday-over" title="종료일: ${escHtml(endDate)}"><i class="fas fa-fire" style="font-size:.6rem"></i> 마감 ${Math.abs(dday)}일경과</span>`;
+  } else if (dday <= 3) {
+    // D-Day ~ D-3
+    badge = `<span class="dday-badge dday-near" title="종료일: ${escHtml(endDate)}">${dday === 0 ? '마감 당일' : '마감 ' + dday + '일전'}</span>`;
+  } else {
+    badge = `<span class="dday-badge dday-normal" title="종료일: ${escHtml(endDate)}">마감 ${dday}일전</span>`;
+  }
+  return `<span style="display:flex;align-items:center;gap:2px">${badge}${refreshBtn}</span>`;
+}
+
+/* ── v9.9: 메모 공유 패널 ── */
+let _memoCurrentTab = null; // { sheetId, tabName, displayName }
+
+async function openMemoPanel(sheetId, tabName, displayName) {
+  _memoCurrentTab = { sheetId, tabName, displayName };
+  const overlay = document.getElementById("memoOverlay");
+  const titleEl = document.getElementById("memoModalTitle");
+  if (titleEl) titleEl.textContent = (displayName || tabName) + " 메모";
+  overlay.classList.add("open");
+  await _loadMemoMessages();
+}
+
+function closeMemoPanel() {
+  document.getElementById("memoOverlay").classList.remove("open");
+  _memoCurrentTab = null;
+}
+
+async function _loadMemoMessages() {
+  const chatArea = document.getElementById("memoChatArea");
+  if (!chatArea || !_memoCurrentTab) return;
+  chatArea.innerHTML = '<div class="memo-empty"><i class="fas fa-circle-notch fa-spin"></i> 불러오는 중...</div>';
+  try {
+    const data = await gasGet({ action: "getMemo", sheetId: _memoCurrentTab.sheetId, tabName: _memoCurrentTab.tabName });
+    const msgs = (data && data.messages) ? data.messages : [];
+    if (msgs.length === 0) {
+      chatArea.innerHTML = '<div class="memo-empty">아직 메모가 없습니다.<br>첫 메모를 남겨보세요!</div>';
+      return;
+    }
+    chatArea.innerHTML = msgs.map(m => {
+      const roleClass  = m.role === "admin" ? "admin" : "staff";
+      const roleLabel  = m.role === "admin" ? "👔 관리자" : "💼 AE";
+      const timeStr    = m.ts ? new Date(m.ts).toLocaleString("ko-KR", { month:"2-digit", day:"2-digit", hour:"2-digit", minute:"2-digit" }) : "";
+      return `<div class="memo-bubble ${roleClass}">
+        <div>${escHtml(m.text)}</div>
+        <div class="memo-bubble-meta">${roleLabel} ${escHtml(m.name)} · ${timeStr}</div>
+      </div>`;
+    }).join("");
+    chatArea.scrollTop = chatArea.scrollHeight;
+  } catch(e) {
+    chatArea.innerHTML = `<div class="memo-empty" style="color:#EF4444">불러오기 실패: ${escHtml(e.message)}</div>`;
+  }
+}
+
+async function sendMemoMsg() {
+  if (!_memoCurrentTab) return;
+  const textEl = document.getElementById("memoInputText");
+  const text   = (textEl ? textEl.value : "").trim();
+  if (!text) { showToast("메모 내용을 입력하세요.", "warning"); return; }
+
+  // 관리자 세션에서 이름 가져오기
+  const _sess = (() => {
+    try {
+      const raw = localStorage.getItem(SESSION_KEY);
+      return raw ? JSON.parse(raw) : null;
+    } catch(_) { return null; }
+  })();
+  if (!_sess || !_sess.name) { showToast("로그인이 필요합니다.", "error"); return; }
+
+  const sendBtn = document.querySelector(".memo-send-btn");
+  if (sendBtn) { sendBtn.disabled = true; sendBtn.innerHTML = '<i class="fas fa-circle-notch fa-spin"></i>'; }
+  try {
+    await gasGet({ action: "saveMemo",
+      sheetId: _memoCurrentTab.sheetId, tabName: _memoCurrentTab.tabName,
+      role: "admin", name: _sess.name, text });
+    if (textEl) textEl.value = "";
+    await _loadMemoMessages();
+    // ★ 메모 미리보기 캐시 무효화
+    const tabKey = _memoCurrentTab.sheetId + "||" + _memoCurrentTab.tabName;
+    _invalidateMemoCache(tabKey);
+    document.querySelectorAll(`.btn-tab-memo`).forEach(btn => {
+      if (btn.closest("[data-tabkey='" + tabKey + "']") || btn.onclick?.toString().includes(escHtml(tabKey))) {
+        btn.classList.add("has-memo");
+      }
+    });
+  } catch(e) {
+    showToast("메모 저장 실패: " + e.message, "error");
+  } finally {
+    if (sendBtn) { sendBtn.disabled = false; sendBtn.innerHTML = '<i class="fas fa-paper-plane"></i>'; }
+  }
+}
+async function refreshTabEndDate(btnEl, tabKey) {
+  const parts = tabKey.split("||");
+  if (parts.length < 2) return;
+  const sheetId = parts[0], tabName = parts[1];
+  const origHtml = btnEl.innerHTML;
+  btnEl.innerHTML = '<i class="fas fa-circle-notch fa-spin"></i>';
+  btnEl.disabled = true;
+  try {
+    const data = await gasGet({ action: "getTabEndDate", sheetId, tabName });
+    if (data && data.endDate !== undefined) {
+      if (data.endDate) {
+        localStorage.setItem("rapp_enddate_" + tabKey, data.endDate);
+        showToast(`📅 종료 예정일 갱신: ${data.endDate}`, "success");
+      } else {
+        showToast("구매일자 열을 찾을 수 없습니다.", "warning");
+      }
+      // 해당 행 re-render는 다음 대시보드 갱신 시 적용 (즉시 DOM 업데이트)
+      const endDateCell = btnEl.closest(".dash-enddate-col");
+      if (endDateCell) {
+        const isTabDone  = btnEl.closest(".tab-done")  !== null;
+        const isClosedTab = btnEl.closest(".is-closed-row") !== null;
+        endDateCell.innerHTML = _buildEndDateHtml(tabKey, data.endDate, isTabDone, isClosedTab);
+      }
+    }
+  } catch(e) {
+    showToast("종료일 조회 실패: " + e.message, "error");
+  } finally {
+    btnEl.innerHTML = origHtml;
+    btnEl.disabled = false;
+  }
+}
+// ─────────────────────────────────────────────────────────────
+function _buildTabRowHtml(t, tabKey, isForceDone, isClosedTab, tabNameHtml, startDateHtml, tRate, stateHtml, tcAttr, roundLabel, endDateHtml) {
+  // 각 열 셀 값 (없으면 회색 dash)
+  const empty = `<span style="color:#D1D5DB;font-size:.65rem">—</span>`;
+
+  // ── qe(빠른입력) 셀 래퍼 생성 헬퍼 ──
+  function qeWrap(field, hasValue, inner, extraStyle) {
+    const base = `overflow:hidden;min-width:0;padding:0 3px;display:flex;align-items:center;${extraStyle||''}`;
+    const label = hasValue ? `클릭하여 ${field} 수정` : `클릭하여 ${field} 입력`;
+    // 값 유무에 관계없이 항상 클릭 가능
+    return `<div class="qe-cell" style="${base}" data-field="${field}" data-tabkey="${escHtml(tabKey)}" data-tc="${tcAttr}" onclick="quickEditCell(event,this)" title="${label}">${inner}</div>`;
+  }
+
+  // 상품명 열 (배송유형 배지 포함)
+  // ★ 상품명 없는 탭: 마감/강제완료 제외 시 경고 배지 표시
+  const _hasNoProduct = !t.displayName && !isForceDone && !isClosedTab;
+  // 배송타입 배지는 부가정보 열로 이동 (상품명 열에서 제거)
+  const noProductBadge = _hasNoProduct
+    ? `<span class="badge-no-product" title="⚙ 탭설정에서 상품명을 입력해주세요"><i class="fas fa-exclamation-triangle" style="font-size:.55rem"></i> 상품명없음</span>`
+    : "";
+  const nameCell = (t.displayName || _hasNoProduct)
+    ? `<span style="display:flex;align-items:center;gap:3px;flex-wrap:wrap">${t.displayName ? `<span class="dash-cell-name" title="${escHtml(t.displayName)}">${escHtml(t.displayName)}</span>` : ""}${noProductBadge}</span>`
+    : empty;
+
+  // 주문시간대 열
+  const timeCell = t.timeRange
+    ? `<span class="dash-cell-time">${escHtml(t.timeRange)}</span>`
+    : empty;
+
+  // 리뷰타입 열
+  const reviewClass = {
+    '실배송': 'tc-review-실배송',
+    '빈박스': 'tc-review-빈박스',
+    '구매확정': 'tc-review-구매확정',
+    '믹스': 'tc-review-믹스'
+  }[t.reviewType] || '';
+  const reviewCell = t.reviewType
+    ? `<span class="tc-badge ${reviewClass}" style="font-size:.65rem">${escHtml(t.reviewType)}</span>`
+    : empty;
+
+  // 담당자 열
+  const managerClass = t.manager === '만두' ? 'tc-mandu' : t.manager === '망고' ? 'tc-mango' : '';
+  const managerCell = t.manager
+    ? `<span class="tc-badge ${managerClass}" style="font-size:.65rem">${escHtml(t.manager)}</span>`
+    : empty;
+
+  // 입금방식 열
+  const paymentClass = t.paymentType === '인애드' ? 'tc-payment-인애드' : t.paymentType === '업체' ? 'tc-payment-업체' : '';
+  const paymentCell = t.paymentType
+    ? `<span class="tc-badge ${paymentClass}" style="font-size:.64rem">${escHtml(t.paymentType)}</span>`
+    : empty;
+
+  // ★ v9.14: 진행방식 셀 (현금/사업자현영/소득신고)
+  const incomeTypeClass = t.incomeType === '소득신고' ? 'style="background:#EDE9FE;color:#5B21B6;border-color:#A78BFA"'
+    : t.incomeType === '사업자현영' ? 'style="background:#FEF3C7;color:#92400E;border-color:#FCD34D"'
+    : t.incomeType === '현금' ? 'style="background:#D1FAE5;color:#065F46;border-color:#6EE7B7"' : '';
+  const incomeTypeCell = t.incomeType
+    ? `<span class="tc-badge" ${incomeTypeClass} style="font-size:.62rem">[${escHtml(t.incomeType)}]</span>`
+    : empty;
+
+  // ★ v9.14: 입금명 셀
+  const depositNameCell = t.depositName
+    ? `<span class="tc-badge" style="background:#DBEAFE;color:#1E40AF;border-color:#93C5FD;font-size:.62rem">[${escHtml(t.depositName)}]</span>`
+    : empty;
+
+  // ★ v9.14: 이체은행 셀
+  const bankClass = t.transferBank === '케이뱅크' ? 'style="background:#FED7AA;color:#9A3412;border-color:#FDBA74"'
+    : t.transferBank === '하나은행' ? 'style="background:#D1FAE5;color:#065F46;border-color:#6EE7B7"' : '';
+  const bankCell = t.transferBank
+    ? `<span class="tc-badge" ${bankClass} style="font-size:.62rem">[${escHtml(t.transferBank)}]</span>`
+    : empty;
+
+  // 택대 열
+  const taekhapCell = t.taekhap
+    ? `<span class="tc-badge tc-taekhap-on" style="font-size:.63rem">✔ 택대</span>`
+    : empty;
+
+  // 캡처폴더 열
+  const captureFolderCell = t.captureFolderUrl
+    ? `<a class="dash-folder-link" style="color:#7C3AED;background:#F5F3FF;border-color:#DDD6FE" href="${escHtml(t.captureFolderUrl)}" target="_blank" onclick="event.stopPropagation()"><i class="fas fa-camera"></i> 캡처폴더</a>`
+    : `<span style="color:#D1D5DB;font-size:.6rem">—</span>`;
+
+  // 리뷰폴더 열 (대량건 배지 제거 → 부가정보 열로 이동)
+  const folderCell = t.folderUrl
+    ? `<a class="dash-folder-link" href="${escHtml(t.folderUrl)}" target="_blank" onclick="event.stopPropagation()"><i class="fas fa-folder-open"></i> 리뷰폴더</a>`
+    : `<span style="color:#D1D5DB;font-size:.6rem">—</span>`;
+
+  // 차수 열: 호출 시 전달된 roundLabel 사용 (없으면 "단독")
+  const roundBadgeHtml = roundLabel
+    ? `<span class="dash-round-col-badge badge-nth">${escHtml(roundLabel)}</span>`
+    : `<span class="dash-round-col-badge badge-solo">단독</span>`;
+  const roundColHtml = `<div style="display:flex;align-items:center;justify-content:center;overflow:hidden;padding:0 2px">${roundBadgeHtml}</div>`;
+
+  // 비고 열 (localStorage 기반 + 공유 메모 버튼)
+  const memoVal = _getTabMemo(tabKey);
+  const memoInner = memoVal
+    ? `<span class="dash-cell-memo" title="${escHtml(memoVal)}">${escHtml(memoVal)}</span>`
+    : empty;
+
+  // ★ 부가정보 열: [대량건] → [배송타입] → [D-Day] 순서로 배지 합산
+  const bulkBadge   = t.isBulk
+    ? `<span class="tc-badge tc-bulk-badge" style="font-size:.6rem">대량건</span>`
+    : "";
+  const deliveryBadge = t.deliveryType
+    ? `<span class="tc-badge tc-delivery-badge" style="font-size:.6rem">${escHtml(t.deliveryType)}</span>`
+    : "";
+  // endDateHtml은 이미 <span>으로 감싸진 배지+버튼 HTML이므로 그대로 사용
+  const ddayContent = endDateHtml || "";
+  // 배지들은 inline으로 배치, D-Day는 이미 flex span으로 감싸져있음
+  const badgePart = [bulkBadge, deliveryBadge].filter(Boolean).join("");
+  const endDateCell = (badgePart || ddayContent)
+    ? `<span style="display:flex;align-items:center;justify-content:center;flex-wrap:wrap;gap:3px">${badgePart}${ddayContent}</span>`
+    : `<span style="color:#D1D5DB;font-size:.6rem">—</span>`;
+
+  return `
+    <div class="force-cb-wrap">
+      <input type="checkbox" class="force-cb" data-tabkey="${escHtml(tabKey)}" ${isForceDone ? "checked" : ""} onclick="event.stopPropagation()">
+    </div>
+    <div class="closed-cb-wrap">
+      <input type="checkbox" class="closed-cb" data-tabkey="${escHtml(tabKey)}" ${isClosedTab ? "checked" : ""} onclick="event.stopPropagation()">
+    </div>
+    <div class="dash-tab-name">${tabNameHtml}</div>
+    ${qeWrap('상품명', !!t.displayName, nameCell)}
+    <div style="display:flex;align-items:center;justify-content:center;overflow:hidden;min-width:0;padding:0 2px">${captureFolderCell}</div>
+    <div style="display:flex;align-items:center;justify-content:center;overflow:hidden;min-width:0;padding:0 2px">${folderCell}</div>
+    ${roundColHtml}
+    <div class="dash-tab-date-col">${startDateHtml}</div>
+    ${t.timeRange
+      ? `<div class="qe-cell" style="overflow:hidden;min-width:0;padding:0 3px;display:flex;align-items:center" data-field="주문시간대" data-tabkey="${escHtml(tabKey)}" data-tc="${tcAttr}" onclick="quickEditCell(event,this)" title="클릭하여 주문시간대 수정">${timeCell}</div>`
+      : qeWrap('주문시간대', false, timeCell)}
+    ${qeWrap('리뷰타입', !!t.reviewType, reviewCell)}
+    <div class="form-link-wrap">
+      <button class="short-link-btn" data-tc="${tcAttr}" onclick="event.stopPropagation();copyShortLink(this)" title="단축 URL 복사 📋"><i class="fas fa-link"></i></button>
+    </div>
+    ${qeWrap('담당자', !!t.manager, managerCell, 'justify-content:center')}
+    <div class="dash-tab-bar-col">
+      ${(t.noRecipient || t.total === 0)
+        ? `<span class="bar-no-recipient" title="시트에 수취인 컬럼이 없거나 데이터가 없어 진행률을 계산할 수 없습니다"><i class="fas fa-exclamation-triangle"></i>수취인헤더없음</span>`
+        : (() => {
+            const isCenterState = stateHtml.includes('bar-lbl-center');
+            const centerCls = isCenterState ? ' bar-label-center' : '';
+            const total = t.total || 0;
+            const tuip    = t.tuip    || 0;
+            const chuihap = t.chuihap || 0;
+            const tuipRate    = (tuip    > 0 && total > 0) ? Math.min(100, Math.round(tuip    / total * 100)) : 0;
+            const chuihapRate = (chuihap > 0 && total > 0) ? Math.min(100, Math.round(chuihap / total * 100)) : 0;
+            const hasDual = tuipRate > 0 && chuihapRate > 0;
+            const hasTuipOnly    = tuipRate > 0 && chuihapRate === 0;
+            const hasChuihapOnly = chuihapRate > 0 && tuipRate === 0;
+            // 텍스트 색상: 투입중=노랑계, 취합중=보라계, 완료=초록계
+            let lblClass;
+            if (isCenterState) {
+              lblClass = tRate === 100 ? 'bar-label-done' : 'bar-label-dark';
+            } else if (hasDual || hasChuihapOnly) {
+              lblClass = 'bar-label-light'; // 보라색 계열
+            } else if (hasTuipOnly) {
+              lblClass = 'bar-label-dark';  // 노란색 계열
+            } else {
+              lblClass = tRate >= 50 ? 'bar-label-light' : 'bar-label-dark';
+            }
+            // 레이어 구성
+            let layers = '';
+            if (hasDual) {
+              layers = `<div class="bar-layer-tuip" style="width:${tuipRate}%"></div>
+                        <div class="bar-layer-chuihap" style="width:${chuihapRate}%"></div>`;
+            } else if (hasTuipOnly) {
+              layers = `<div class="bar-layer-tuip" style="width:${tuipRate}%"></div>`;
+            } else if (hasChuihapOnly) {
+              layers = `<div class="bar-layer-chuihap" style="width:${chuihapRate}%"></div>`;
+            } else {
+              const barClass = tRate === 100 ? 'bar-full' : tRate >= 50 ? 'bar-half' : 'bar-low';
+              layers = `<div class="dash-tab-bar ${barClass}" style="width:${tRate}%"></div>`;
+            }
+            // 게이지 바 (좁게) + 텍스트 레이블 (바 밖, 위쪽에 배치)
+            return `${stateHtml ? `<span class="bar-label ${lblClass}${centerCls}">${stateHtml}</span>` : ''}
+                    <div class="dash-tab-bar-wrap">${layers}</div>`;
+          })()
+      }
+    </div>
+    <div class="dash-tab-nums">
+      ${(t.noRecipient || t.total === 0)
+        ? `<span style="color:#D1D5DB;font-size:.65rem">—</span>`
+        : `<span class="dash-done">${t.submitted}</span><span class="dash-sep">/</span><span class="dash-total">${t.total}</span>`
+      }
+    </div>
+
+    ${qeWrap('입금방식', !!t.paymentType, paymentCell, 'justify-content:center')}
+    ${qeWrap('진행방식', !!t.incomeType, incomeTypeCell, 'justify-content:center')}
+    ${qeWrap('입금명', !!t.depositName, depositNameCell, 'justify-content:center')}
+    ${qeWrap('이체은행', !!t.transferBank, bankCell, 'justify-content:center')}
+    ${qeWrap('택대', t.taekhap === true, taekhapCell, 'justify-content:center')}
+    <div class="qe-cell" style="overflow:hidden;min-width:0;padding:0 3px;display:flex;align-items:center" data-field="비고" data-tabkey="${escHtml(tabKey)}" data-tc="${tcAttr}" onclick="quickEditCell(event,this)" title="${memoVal ? '비고 수정' : '비고 입력'}">${memoInner}</div>
+    <div class="dash-enddate-col" style="display:flex;align-items:center;justify-content:center;overflow:hidden;min-width:0;padding:0 2px">${endDateCell}</div>
+    <div style="display:flex;align-items:center;justify-content:center;gap:3px;flex-wrap:nowrap;overflow:hidden;min-width:0;padding:0 2px">
+      <button class="tc-info-btn tc-clickable" data-tc="${tcAttr}" title="일괄 정보 입력·수정" style="flex-shrink:0">+정보</button>
+      <button class="btn-tab-stats" onclick="event.stopPropagation();openStatsPanel('${escHtml(t.sheetId||'')}','${escHtml(t.tab||'')}','${escHtml(t.displayName||t.tab||'')}')" title="진행률 상세 보기" style="flex-shrink:0;padding:2px 5px"><i class="fas fa-chart-bar"></i></button>
+      <button class="btn-tab-memo" onclick="event.stopPropagation();openMemoPanel('${escHtml(t.sheetId||'')}','${escHtml(t.tab||'')}','${escHtml(t.displayName||t.tab||'')}')" title="메모 보기/입력" style="flex-shrink:0;padding:2px 5px"><i class="fas fa-comment-dots"></i></button>
+    </div>`;
+}
+
+// ═══════════════════════════════════════════════════════
+// 컬럼 리사이즈 시스템
+// ═══════════════════════════════════════════════════════
+
+/** 컬럼 정의 (index 0=강완CB, 1=마감CB, 2=탭명, ... 19=⚙)
+ *  forcecb / closedcb: 기본 0px, 모드 진입 시 JS에서 28px로 전환
+ */
+const DASH_COL_DEFS = [
+  { key: 'forcecb',     varName: '--dc-forcecb',     label: '강완',       minPx: 20,  default: 0,   isCb: true },
+  { key: 'closedcb',    varName: '--dc-closedcb',    label: '마감',       minPx: 20,  default: 0,   isCb: true },
+  { key: 'tabname',     varName: '--dc-tabname',     label: '탭명',       minPx: 60,  default: 280               },
+  { key: 'product',     varName: '--dc-product',     label: '상품명',     minPx: 60,  default: 200               },
+  { key: 'capture',     varName: '--dc-capture',     label: '캡처폴더',   minPx: 35,  default: 65                },
+  { key: 'folder',      varName: '--dc-folder',      label: '리뷰폴더',   minPx: 35,  default: 65                },
+  { key: 'round',       varName: '--dc-round',       label: '차수',       minPx: 28,  default: 40                },
+  { key: 'date',        varName: '--dc-date',        label: '시작일',     minPx: 40,  default: 65                },
+  { key: 'time',        varName: '--dc-time',        label: '주문시간대', minPx: 50,  default: 85                },
+  { key: 'review',      varName: '--dc-review',      label: '리뷰타입',   minPx: 35,  default: 50                },
+  { key: 'formlink',    varName: '--dc-formlink',    label: '폼링크',     minPx: 28,  default: 35                },
+  { key: 'manager',     varName: '--dc-manager',     label: '담당',       minPx: 28,  default: 50                },
+  { key: 'bar',         varName: '--dc-bar',         label: '진행률',     minPx: 70,  default: 70                },
+  { key: 'nums',        varName: '--dc-nums',        label: '리뷰',       minPx: 40,  default: 65                },
+  { key: 'payment',     varName: '--dc-payment',     label: '입금',       minPx: 28,  default: 45                },
+  { key: 'income',      varName: '--dc-income',      label: '진행방식',   minPx: 70,  default: 90                },  // ★ v9.14
+  { key: 'depositname', varName: '--dc-depositname', label: '입금명',     minPx: 100, default: 140               },  // ★ v9.14
+  { key: 'bank',        varName: '--dc-bank',        label: '이체은행',   minPx: 70,  default: 100               },  // ★ v9.14
+  { key: 'taekhap',     varName: '--dc-taekhap',     label: '택대',       minPx: 28,  default: 45                },
+  { key: 'memo',        varName: '--dc-memo',        label: '비고',       minPx: 40,  default: 185               },
+  { key: 'enddate',     varName: '--dc-enddate',     label: '부가정보',   minPx: 70,  default: 110               },
+  { key: 'info',        varName: '--dc-info',        label: '⚙',         minPx: 82,  default: 90, noScale: true  }, // ★ 1fr로 남는 공간 차지
+];
+const COL_WIDTH_LS_KEY = 'dashColWidths_v8'; // ★ v10.4: 입금명/이체은행 퀵에딧 추가, tcData incomeType 누락 수정
+
+/** 컨테이너 content 너비 반환 (padding/border 제외, 실제 사용 가능한 너비) */
+function _getContainerWidth() {
+  // ★ v10.5: dashboardScrollOuter의 실제 clientWidth를 가장 먼저 사용
+  // dashboardScrollOuter는 width:100%, overflow:hidden이므로
+  // 부모(admin-tab-pane) 크기를 정확히 따름
+  const outer = document.getElementById('dashboardScrollOuter');
+  if (outer && outer.clientWidth > 0) {
+    return outer.clientWidth; // padding 없으므로 그대로 사용
+  }
+  // 폴백 1: admin-tab-pane 기준 (padding 16px 제외)
+  const pane = document.querySelector('#tab-dashboard.admin-tab-pane, .admin-tab-pane.active');
+  if (pane && pane.clientWidth > 0) {
+    const style = getComputedStyle(pane);
+    const pl = parseFloat(style.paddingLeft)  || 0;
+    const pr = parseFloat(style.paddingRight) || 0;
+    return pane.clientWidth - pl - pr;
+  }
+  // 폴백 2: admin-body 기준 (padding 24px×2 제외, tab-pane padding 16px×2 추가 제외)
+  const adminBody = document.querySelector('.admin-body');
+  if (adminBody) {
+    const style = getComputedStyle(adminBody);
+    const pl = parseFloat(style.paddingLeft)  || 0;
+    const pr = parseFloat(style.paddingRight) || 0;
+    const bodyW = adminBody.getBoundingClientRect().width;
+    if (bodyW > 0) return bodyW - pl - pr - 32; // tab-pane padding 16×2
+  }
+  // 폴백 3: window 너비 - 여백
+  return window.innerWidth - 80;
+}
+
+/** localStorage에서 저장된 너비 로드 후 CSS 변수 적용 (CB 컬럼 제외 - 모드 토글이 관리) */
+function loadColWidths() {
+  let saved = {};
+  try { saved = JSON.parse(localStorage.getItem(COL_WIDTH_LS_KEY) || '{}'); } catch(_) {}
+  const root = document.documentElement;
+  let applied = 0;
+  DASH_COL_DEFS.forEach(col => {
+    if (col.isCb || col.noScale) return; // CB·noScale 컬럼은 제외
+    const w = saved[col.key];
+    if (w && Number.isFinite(w) && w >= col.minPx) {
+      root.style.setProperty(col.varName, w + 'px');
+      applied++;
+    }
+  });
+  // 저장값 적용 후 반응형 너비 재계산 (뷰포트 좁은 경우 대비)
+  _lastAppliedW = 0; // 강제 재계산
+  _syncTabnameWidth();
+  return applied; // 디버그용
+}
+
+/** 현재 실제 적용 너비를 localStorage에 저장 (CB 컬럼 제외) */
+function saveColWidths() {
+  const data = {};
+  DASH_COL_DEFS.forEach(col => {
+    if (col.isCb || col.noScale) return; // CB·noScale 컬럼은 저장 안 함
+    // _getColWidth: inline style 우선, 없으면 computed style 폴백
+    const w = _getColWidth(col);
+    if (w && Number.isFinite(w) && w > 0) data[col.key] = w;
+  });
+  try { localStorage.setItem(COL_WIDTH_LS_KEY, JSON.stringify(data)); } catch(_) {}
+}
+
+/** (호환성 stub) */
+function _updateDashMinWidth() {}
+
+/* ══════════════════════════════════════════════════════════
+   ★ 반응형 컬럼 너비 축소 시스템 (v10.4)
+   - 컨테이너 너비가 기준(BASE_W)보다 좁아질 때 비율에 맞게 축소
+   - "유연" 컬럼(tabname, product, memo, depositname)을 우선 축소
+   - 나머지 컬럼은 minPx 이하로 축소 안 함
+   - ResizeObserver로 컨테이너 너비 변화 감지
+   ══════════════════════════════════════════════════════════ */
+
+// 마지막으로 반응형 계산을 적용한 컨테이너 너비 (중복 재계산 방지)
+let _lastAppliedW = 0;
+
+/**
+ * 컨테이너 너비에 맞춰 컬럼 너비를 단계적으로 축소/숨김
+ *
+ * 전략:
+ *  1단계 (availW < 기본): flex 컬럼 비율 축소
+ *  2단계 (여전히 부족): 부가정보 컬럼 순서로 0px 숨김
+ *  3단계 (극소 화면): 필수 컬럼만 남기고 나머지 숨김
+ *
+ * @param {number} availW - 사용 가능한 컨테이너 너비(px)
+ */
+function _syncTabnameWidth(availW) {
+  if (availW == null) availW = _getContainerWidth();
+  if (!availW || availW < 100) return;
+  if (Math.abs(availW - _lastAppliedW) < 1) return;
+  _lastAppliedW = availW;
+
+  const root = document.documentElement;
+  const savedWidths = (() => {
+    try { return JSON.parse(localStorage.getItem(COL_WIDTH_LS_KEY) || '{}'); } catch(_) { return {}; }
+  })();
+  const pad = 28; // 좌우 padding 합계
+
+  // 사용자가 수동으로 숨긴 열 (col-hidden 시스템)
+  // _colsHiddenActive 상태일 때 _selectedHideCols 사용
+  const manualHidden = (typeof _colsHiddenActive !== 'undefined' && _colsHiddenActive && typeof _selectedHideCols !== 'undefined')
+    ? _selectedHideCols
+    : new Set();
+
+  // 각 컬럼의 "원하는 기준 너비" (사용자 저장값 우선, 없으면 default)
+  // 수동 숨김 열은 0으로 처리
+  const baseW = {};
+  DASH_COL_DEFS.forEach(col => {
+    if (col.isCb) { baseW[col.key] = 0; return; }
+    if (manualHidden.has(col.key)) { baseW[col.key] = 0; return; }
+    const saved = savedWidths[col.key];
+    baseW[col.key] = (saved && Number.isFinite(saved) && saved >= col.minPx) ? saved : (col.default || 0);
+  });
+
+  // CB 컬럼 현재 너비 (강완/마감 모드)
+  const cbW = DASH_COL_DEFS.filter(c => c.isCb).reduce((sum, c) => {
+    const v = parseInt(getComputedStyle(root).getPropertyValue(c.varName)) || 0;
+    return sum + v;
+  }, 0);
+
+  // 기준 전체 너비 (저장값 반영, noScale 컬럼은 1fr이므로 제외, 수동숨김 열 제외)
+  const totalBase = DASH_COL_DEFS.reduce((s, c) => s + (c.isCb || c.noScale || manualHidden.has(c.key) ? 0 : (baseW[c.key] || 0)), 0) + cbW + pad;
+
+  if (availW >= totalBase) {
+    // ── 충분히 넓음: 기준 너비 그대로 복원 ──
+    DASH_COL_DEFS.forEach(col => {
+      if (col.isCb || col.noScale) return; // noScale(info)은 CSS 1fr 유지
+      root.style.setProperty(col.varName, baseW[col.key] + 'px');
+    });
+    return;
+  }
+
+  // ── 축소 필요 ──
+  // 단계적 숨김 순서: 덜 중요한 컬럼부터
+  // (숨김 = 0px, 복원 = 기준값)
+  const HIDE_ORDER = [
+    'memo',        // 비고 (185px): 첫 번째로 숨김
+    'capture',     // 캡처폴더 (65px)
+    'folder',      // 리뷰폴더 (65px)
+    'taekhap',     // 택대 (45px)
+    'round',       // 차수 (40px)
+    'bank',        // 이체은행 (100px)
+    'depositname', // 입금명 (140px)
+    'income',      // 진행방식 (90px)
+    'review',      // 리뷰타입 (50px)
+    'formlink',    // 폼링크 (35px)
+    'enddate',     // 부가정보 (110px)
+  ];
+
+  // 유연 축소 대상: 숨기지 않은 상태에서 비율 조정
+  const FLEX_KEYS = ['tabname', 'product'];
+
+  // 현재 숨길 컬럼 결정
+  const hiddenSet = new Set();
+  let remaining = availW - cbW - pad;
+
+  // 숨기지 않은 컬럼들의 고정 너비 합산 함수
+  const calcTotal = () => {
+    return DASH_COL_DEFS.reduce((s, c) => {
+      if (c.isCb || c.noScale || hiddenSet.has(c.key) || manualHidden.has(c.key)) return s;
+      if (FLEX_KEYS.includes(c.key)) return s + (c.minPx || 60);
+      return s + (baseW[c.key] || 0);
+    }, 0);
+  };
+
+  // 순서대로 숨겨가며 예산 확보
+  for (const key of HIDE_ORDER) {
+    const needed = calcTotal();
+    if (needed <= remaining) break; // 충분히 작아졌으면 중단
+    hiddenSet.add(key);
+  }
+
+  // flex 컬럼에 남은 예산 배분
+  const fixedSum = DASH_COL_DEFS.reduce((s, c) => {
+    if (c.isCb || c.noScale || hiddenSet.has(c.key) || FLEX_KEYS.includes(c.key)) return s;
+    return s + (baseW[c.key] || 0);
+  }, 0);
+  const flexBudget = Math.max(0, remaining - fixedSum);
+  const flexBaseSum = FLEX_KEYS.reduce((s, k) => {
+    if (hiddenSet.has(k)) return s;
+    const col = DASH_COL_DEFS.find(c => c.key === k);
+    return s + (col ? (baseW[k] || 0) : 0);
+  }, 0);
+  const flexRatio = flexBaseSum > 0 ? Math.min(1, flexBudget / flexBaseSum) : 1;
+
+  // ── 비상: 모든 숨김 후에도 고정 컬럼 합이 remaining 초과 시 고정 컬럼도 비율 축소
+  const allVisibleFixed = fixedSum;
+  const allVisibleFlex  = FLEX_KEYS.reduce((s, k) => {
+    if (hiddenSet.has(k)) return s;
+    const col = DASH_COL_DEFS.find(c => c.key === k);
+    return s + (col ? (col.minPx || 60) : 0);
+  }, 0);
+  const totalVisible = allVisibleFixed + allVisibleFlex;
+  // 전체 비율 (remaining이 너무 좁으면 모든 컬럼을 비율 축소)
+  const emergencyRatio = totalVisible > 0 && remaining < totalVisible
+    ? Math.max(0.3, remaining / totalVisible) // 최소 30%까지만 축소
+    : 1;
+
+  // 최종 너비 적용
+  DASH_COL_DEFS.forEach(col => {
+    if (col.isCb) return;
+    if (col.noScale) return; // ★ info 등 1fr 처리 컬럼은 JS px 설정 제외
+    if (manualHidden.has(col.key)) return; // 수동 숨김 열은 CSS !important가 처리
+    let w;
+    if (hiddenSet.has(col.key)) {
+      w = 0;
+    } else if (FLEX_KEYS.includes(col.key)) {
+      const base = Math.max(col.minPx || 60, Math.round((baseW[col.key] || 0) * flexRatio));
+      w = emergencyRatio < 1 ? Math.max(30, Math.round(base * emergencyRatio)) : base;
+    } else {
+      w = emergencyRatio < 1
+        ? Math.max(col.minPx || 0, Math.round((baseW[col.key] || 0) * emergencyRatio))
+        : (baseW[col.key] || 0);
+    }
+    root.style.setProperty(col.varName, w + 'px');
+  });
+}
+
+/* ── ResizeObserver: 브라우저 가로 너비 변화 감지 ── */
+let _dashResizeObs = null;
+let _dashResizeTimer = null; // 디바운싱용 타이머
+
+/** 디바운싱된 반응형 컬럼 너비 재계산 */
+function _debouncedSyncCols() {
+  if (_dashResizeTimer) clearTimeout(_dashResizeTimer);
+  _dashResizeTimer = setTimeout(() => {
+    _lastAppliedW = 0; // 강제 재계산
+    _syncTabnameWidth(_getContainerWidth());
+  }, 50); // 50ms 디바운싱 (resize 이벤트 폭발 방지 + DOM 크기 확정 대기)
+}
+
+function _attachDashResizeObserver() {
+  if (_dashResizeObs) { _dashResizeObs.disconnect(); _dashResizeObs = null; }
+
+  // ★ v10.5: document.documentElement(html 태그)를 observe
+  // → window 크기 변화에 직접 반응, admin-body max-width 제한 우회
+  const target = document.documentElement;
+
+  if (typeof ResizeObserver !== 'undefined') {
+    _dashResizeObs = new ResizeObserver((entries) => {
+      // entries[0].contentRect.width = html 요소의 content 너비 = viewport width
+      _debouncedSyncCols();
+    });
+    _dashResizeObs.observe(target);
+  }
+
+  // window resize 이벤트도 병행 등록 (ResizeObserver 미지원 브라우저 대비)
+  if (!window._dashResizeListenerAttached) {
+    window._dashResizeListenerAttached = true;
+    window.addEventListener('resize', _debouncedSyncCols, { passive: true });
+  }
+
+  // 즉시 1회 실행
+  _lastAppliedW = 0;
+  _syncTabnameWidth(_getContainerWidth());
+}
+
+/** 컬럼 너비를 기본값으로 초기화 (CB 컬럼 제외) */
+function resetColWidths() {
+  const root = document.documentElement;
+  DASH_COL_DEFS.forEach(col => {
+    if (col.isCb) return; // CB 컬럼은 모드 토글이 관리
+    root.style.removeProperty(col.varName);
+  });
+  try { localStorage.removeItem(COL_WIDTH_LS_KEY); } catch(_) {}
+  _closeColResizePopup();
+  _lastAppliedW = 0; // 강제 재계산
+  _syncTabnameWidth(); // 초기화 후 반응형 재계산
+  showToast('컬럼 너비가 기본값으로 초기화되었습니다.');
+}
+
+/* ══════════════════════════════════════════════════════════
+   ★ 기능 1: 열 표시/숨김 토글
+   ══════════════════════════════════════════════════════════ */
+const COL_VIS_LS_KEY        = 'dashColHidden_v1';
+const COL_VIS_SELECTED_KEY  = 'dashColSelected_v1'; // ★ 새: 숨김 대상 선택 저장
+// 숨길 수 있는 열 정의 (forcecb, closedcb, tabname, info 제외)
+const COL_VIS_DEFS = [
+  { key: 'product',  label: '상품명',     icon: 'fa-box'          },
+  { key: 'capture',  label: '캡처폴더',   icon: 'fa-camera'       },
+  { key: 'folder',   label: '리뷰폴더',   icon: 'fa-folder'       },
+  { key: 'round',    label: '차수',       icon: 'fa-layer-group'  },
+  { key: 'date',     label: '시작일',     icon: 'fa-calendar-day' },
+  { key: 'time',     label: '주문시간대', icon: 'fa-clock'        },
+  { key: 'review',   label: '리뷰타입',   icon: 'fa-star'         },
+  { key: 'formlink', label: '폼링크',     icon: 'fa-link'         },
+  { key: 'manager',  label: '담당',       icon: 'fa-user'         },
+  { key: 'bar',      label: '진행률',     icon: 'fa-chart-bar'    },
+  { key: 'nums',     label: '리뷰수',     icon: 'fa-check-double' },
+  { key: 'payment',     label: '입금',     icon: 'fa-won-sign'     },
+  { key: 'income',     label: '진행방식', icon: 'fa-coins'        },  // ★ v9.14
+  { key: 'depositname',label: '입금명',   icon: 'fa-id-card'      },
+  { key: 'bank',       label: '이체은행', icon: 'fa-landmark'     },
+  { key: 'taekhap',    label: '택대',     icon: 'fa-truck'        },
+  { key: 'memo',     label: '비고',       icon: 'fa-sticky-note'  },
+  { key: 'enddate',  label: 'D-Day',      icon: 'fa-calendar-check' },
+];
+
+// ★ 숨김 대상으로 선택된 열 집합 (체크박스로 선택)
+let _selectedHideCols = new Set();
+// ★ 현재 열들이 실제로 숨겨진 상태인지 여부
+let _colsHiddenActive = false;
+
+/** localStorage에서 선택 열 + 토글 상태 로드 */
+function _loadHiddenCols() {
+  try {
+    // 선택 열 목록 복원
+    const rawSel = localStorage.getItem(COL_VIS_SELECTED_KEY);
+    _selectedHideCols = rawSel ? new Set(JSON.parse(rawSel)) : new Set();
+    // 이전 숨김 활성 상태 복원
+    const rawHid = localStorage.getItem(COL_VIS_LS_KEY);
+    _colsHiddenActive = rawHid === 'true';
+  } catch(_) { _selectedHideCols = new Set(); _colsHiddenActive = false; }
+  _applyHiddenCols();
+}
+
+/** 현재 토글 상태에 따라 body 클래스 적용 */
+function _applyHiddenCols() {
+  const body = document.body;
+  // 기존 col-hidden 클래스 전부 제거
+  const toRemove = [...body.classList].filter(c => c.startsWith('col-hidden-'));
+  toRemove.forEach(c => body.classList.remove(c));
+  // 숨김 활성 상태일 때만 선택된 열에 col-hidden 클래스 추가
+  if (_colsHiddenActive) {
+    _selectedHideCols.forEach(key => body.classList.add('col-hidden-' + key));
+  }
+  // 툴바 버튼 상태 업데이트
+  const btn = document.getElementById('btnColVis');
+  if (btn) {
+    btn.classList.toggle('has-selected', _selectedHideCols.size > 0);
+    btn.classList.toggle('is-cols-hidden', _colsHiddenActive);
+    // 버튼 텍스트/아이콘 업데이트
+    const iconEl = btn.querySelector('i');
+    if (_colsHiddenActive) {
+      if (iconEl) iconEl.className = 'fas fa-eye-slash';
+      btn.childNodes[btn.childNodes.length - 1].textContent = ' 열 숨김 중';
+    } else {
+      if (iconEl) iconEl.className = 'fas fa-columns';
+      btn.childNodes[btn.childNodes.length - 1].textContent = ' 열 설정';
+    }
+  }
+  // 드롭다운이 열려있으면 토글 버튼 상태도 갱신
+  _refreshDropdownToggleBtn();
+}
+
+/** 선택 열 목록 저장 */
+function _saveSelectedCols() {
+  try { localStorage.setItem(COL_VIS_SELECTED_KEY, JSON.stringify([..._selectedHideCols])); } catch(_) {}
+}
+
+/** 숨김 활성 상태 저장 */
+function _saveHiddenCols() {
+  try { localStorage.setItem(COL_VIS_LS_KEY, String(_colsHiddenActive)); } catch(_) {}
+}
+
+/** 드롭다운 내 토글 버튼 상태만 갱신 */
+function _refreshDropdownToggleBtn() {
+  const toggleBtn = document.getElementById('colVisToggleBtn');
+  const statusBar = document.getElementById('colVisStatusBar');
+  if (!toggleBtn) return;
+  if (_colsHiddenActive) {
+    toggleBtn.className = 'col-vis-toggle-btn is-hidden-mode';
+    toggleBtn.innerHTML = '<i class="fas fa-eye"></i> 열 표시하기';
+    if (statusBar) {
+      statusBar.className = 'col-vis-toggle-status is-hidden';
+      statusBar.innerHTML = '<i class="fas fa-eye-slash" style="font-size:.7rem"></i> ' + _selectedHideCols.size + '개 열 숨김 중';
+    }
+  } else {
+    toggleBtn.className = 'col-vis-toggle-btn';
+    toggleBtn.innerHTML = '<i class="fas fa-eye-slash"></i> 선택 열 숨기기';
+    if (statusBar) {
+      statusBar.className = 'col-vis-toggle-status';
+      const cnt = _selectedHideCols.size;
+      statusBar.innerHTML = cnt > 0
+        ? '<i class="fas fa-check-square" style="font-size:.7rem"></i> ' + cnt + '개 열 선택됨'
+        : '<i class="fas fa-info-circle" style="font-size:.7rem"></i> 숨길 열을 선택하세요';
+    }
+  }
+  // 토글 버튼 비활성화 (선택 열 없을 때)
+  toggleBtn.disabled = _selectedHideCols.size === 0;
+  if (_selectedHideCols.size === 0) {
+    toggleBtn.style.opacity = '0.4';
+    toggleBtn.style.cursor  = 'not-allowed';
+  } else {
+    toggleBtn.style.opacity = '1';
+    toggleBtn.style.cursor  = 'pointer';
+  }
+}
+
+/** 열 설정 드롭다운 열기/닫기 */
+function toggleColVisDropdown(e) {
+  e.stopPropagation();
+  const dd = document.getElementById('colVisDropdown');
+  if (!dd) return;
+  const isOpen = dd.style.display !== 'none';
+  if (isOpen) { dd.style.display = 'none'; return; }
+  _buildColVisDropdown();
+  dd.style.display = 'block';
+}
+
+/** 드롭다운 내용 빌드 */
+function _buildColVisDropdown() {
+  const dd = document.getElementById('colVisDropdown');
+  if (!dd) return;
+
+  const cnt = _selectedHideCols.size;
+  const statusText = _colsHiddenActive
+    ? '<i class="fas fa-eye-slash" style="font-size:.7rem"></i> ' + cnt + '개 열 숨김 중'
+    : (cnt > 0
+        ? '<i class="fas fa-check-square" style="font-size:.7rem"></i> ' + cnt + '개 열 선택됨'
+        : '<i class="fas fa-info-circle" style="font-size:.7rem"></i> 숨길 열을 선택하세요');
+  const statusClass = _colsHiddenActive ? 'col-vis-toggle-status is-hidden' : 'col-vis-toggle-status';
+
+  let html = `<div class="col-vis-header">열 설정</div>`;
+  html += `<div id="colVisStatusBar" class="${statusClass}">${statusText}</div>`;
+
+  // 열 목록 체크박스 (숨김 대상 선택용)
+  COL_VIS_DEFS.forEach(def => {
+    const checked  = _selectedHideCols.has(def.key) ? 'checked' : '';
+    const selClass = _selectedHideCols.has(def.key) ? 'col-vis-item is-selected' : 'col-vis-item';
+    html += `<label class="${selClass}" id="colVisItem_${def.key}">
+      <input type="checkbox" ${checked} onchange="onColVisSelect('${def.key}', this.checked)">
+      <i class="fas ${def.icon}" style="width:13px;color:#6366F1;font-size:.72rem"></i>
+      ${def.label}
+    </label>`;
+  });
+
+  // 하단 버튼 영역
+  const toggleClass  = _colsHiddenActive ? 'col-vis-toggle-btn is-hidden-mode' : 'col-vis-toggle-btn';
+  const toggleLabel  = _colsHiddenActive
+    ? '<i class="fas fa-eye"></i> 열 표시하기'
+    : '<i class="fas fa-eye-slash"></i> 선택 열 숨기기';
+  const toggleDisabled = cnt === 0 ? 'disabled style="opacity:.4;cursor:not-allowed"' : '';
+
+  html += `
+  <hr class="col-vis-sep">
+  <div class="col-vis-footer">
+    <button id="colVisToggleBtn" class="${toggleClass}" onclick="doColVisToggle()" ${toggleDisabled}>
+      ${toggleLabel}
+    </button>
+    <button class="col-vis-save" onclick="saveColVisSel()">
+      <i class="fas fa-save" style="font-size:.72rem"></i> 선택 저장
+    </button>
+    <button class="col-vis-reset" onclick="resetColVisSel()">
+      <i class="fas fa-undo" style="font-size:.68rem"></i> 선택 초기화
+    </button>
+  </div>`;
+
+  dd.innerHTML = html;
+}
+
+/** 체크박스 변경 → 숨김 대상 선택/해제 */
+function onColVisSelect(key, checked) {
+  if (checked) { _selectedHideCols.add(key); }
+  else         { _selectedHideCols.delete(key); }
+  // 아이템 강조 갱신
+  const item = document.getElementById('colVisItem_' + key);
+  if (item) item.className = checked ? 'col-vis-item is-selected' : 'col-vis-item';
+  // 드롭다운 토글 버튼 상태 즉시 갱신
+  _refreshDropdownToggleBtn();
+  // 숨김 활성 중이면 즉시 적용
+  if (_colsHiddenActive) { _applyHiddenCols(); }
+}
+
+/** 선택 저장 버튼 */
+function saveColVisSel() {
+  _saveSelectedCols();
+  const cnt = _selectedHideCols.size;
+  showToast(cnt > 0 ? cnt + '개 열 선택이 저장되었습니다.' : '선택이 초기화되었습니다.');
+}
+
+/** 열 숨기기/표시 토글 (메인 동작) */
+function doColVisToggle() {
+  if (_selectedHideCols.size === 0) {
+    showToast('먼저 숨길 열을 선택해주세요.', 'warning');
+    return;
+  }
+  _colsHiddenActive = !_colsHiddenActive;
+  _applyHiddenCols();
+  _saveHiddenCols();
+  const msg = _colsHiddenActive
+    ? _selectedHideCols.size + '개 열이 숨겨졌습니다.'
+    : '열이 모두 표시됩니다.';
+  showToast(msg);
+}
+
+/** 선택 초기화 */
+function resetColVisSel() {
+  _selectedHideCols.clear();
+  _colsHiddenActive = false;
+  _applyHiddenCols();
+  _saveSelectedCols();
+  _saveHiddenCols();
+  // 드롭다운 재빌드
+  _buildColVisDropdown();
+  showToast('열 선택이 초기화되었습니다.');
+}
+
+// 구버전 함수명 호환 (혹시 다른 곳에서 호출 시)
+function onColVisChange(key, visible) { onColVisSelect(key, visible); }
+function resetColVis() { resetColVisSel(); }
+
+// 드롭다운 외부 클릭 닫기 등록
+document.addEventListener('click', function(e) {
+  const dd = document.getElementById('colVisDropdown');
+  if (dd && dd.style.display !== 'none') {
+    const wrap = document.getElementById('colVisWrap');
+    if (wrap && !wrap.contains(e.target)) dd.style.display = 'none';
+  }
+});
+
+/* ══════════════════════════════════════════════════════════
+   ★ 기능 2: 열 클릭 정렬
+   ══════════════════════════════════════════════════════════ */
+let _sortKey  = null;  // 현재 정렬 기준 열
+let _sortDir  = 'asc'; // 'asc' | 'desc'
+
+/** 헤더 클릭 → 정렬 실행 */
+function _onColHeaderClick(e) {
+  // 드래그 핸들 클릭은 무시
+  if (e.target.classList.contains('col-drag-handle') ||
+      e.target.closest('.col-drag-handle')) return;
+
+  const cell = e.currentTarget;
+  const key  = cell.dataset.sortKey;
+  if (!key) return;
+
+  if (_sortKey === key) {
+    // 같은 열 재클릭: 방향 토글
+    _sortDir = _sortDir === 'asc' ? 'desc' : 'asc';
+  } else {
+    _sortKey = key;
+    _sortDir = 'asc';
+  }
+
+  // 헤더 아이콘 업데이트
+  _updateSortHeaderIcons();
+  // 모든 캠페인 블록 내 행 정렬
+  _sortAllDashRows();
+}
+
+/** 헤더 셀 아이콘 업데이트 */
+function _updateSortHeaderIcons() {
+  document.querySelectorAll('.dash-col-header-cell[data-sort-key]').forEach(cell => {
+    const key = cell.dataset.sortKey;
+    cell.classList.remove('sort-asc', 'sort-desc');
+    const icon = cell.querySelector('.col-sort-icon');
+    if (icon) icon.innerHTML = '⇅';
+    if (key === _sortKey) {
+      cell.classList.add(_sortDir === 'asc' ? 'sort-asc' : 'sort-desc');
+      if (icon) icon.innerHTML = _sortDir === 'asc' ? '▲' : '▼';
+    }
+  });
+}
+
+/** 정렬 키에 따른 행 값 추출 (숫자/문자 자동 판별) */
+function _getSortVal(row, key) {
+  const attr = 'sort' + key.charAt(0).toUpperCase() + key.slice(1);
+  const val = row.dataset[attr];
+  if (val === undefined || val === null) return _sortDir === 'asc' ? '🿿' : '';
+  // 숫자 열
+  if (['bar','nums','enddate'].includes(key)) return parseFloat(val) || 0;
+  return val;
+}
+
+/** 모든 캠페인 블록의 행 정렬 */
+function _sortAllDashRows() {
+  const wrap = document.getElementById('dashboardWrap');
+  if (!wrap) return;
+  wrap.querySelectorAll('.dash-tab-table').forEach(table => {
+    const rows = [...table.querySelectorAll('.dash-tab-row:not(.dash-tab-row-monthly)')];
+    if (rows.length < 2) return;
+    rows.sort((a, b) => {
+      const av = _getSortVal(a, _sortKey);
+      const bv = _getSortVal(b, _sortKey);
+      let cmp = 0;
+      if (typeof av === 'number' && typeof bv === 'number') {
+        cmp = av - bv;
+      } else {
+        cmp = String(av).localeCompare(String(bv), 'ko');
+      }
+      return _sortDir === 'asc' ? cmp : -cmp;
+    });
+    // 월간 행은 항상 맨 뒤
+    const monthlyRows = [...table.querySelectorAll('.dash-tab-row-monthly')];
+    rows.forEach(r => table.appendChild(r));
+    monthlyRows.forEach(r => table.appendChild(r));
+  });
+}
+
+/** 정렬 초기화 (새로고침 시 호출) */
+function _resetSort() {
+  _sortKey = null;
+  _sortDir = 'asc';
+  document.querySelectorAll('.dash-col-header-cell[data-sort-key]').forEach(cell => {
+    cell.classList.remove('sort-asc', 'sort-desc');
+    const icon = cell.querySelector('.col-sort-icon');
+    if (icon) icon.innerHTML = '⇅';
+  });
+}
+
+/* ══════════════════════════════════════════════════════════
+   ★ 기능 3: 메모 미리보기 툴팁
+   ══════════════════════════════════════════════════════════ */
+// 탭키별 메모 최근 내용 캐시 { tabKey: "최근메모텍스트" }
+const _memoPreviewCache = {};
+let _memoTooltipTimer = null;
+
+/** 메모 버튼에 hover 이벤트 등록 (대시보드 렌더 후 호출) */
+function _bindMemoPreviewTooltips() {
+  const wrap = document.getElementById('dashboardWrap');
+  if (!wrap) return;
+
+  // 위임 방식으로 등록 (행이 동적으로 추가되어도 동작)
+  wrap.addEventListener('mouseenter', _onMemoMouseEnter, true);
+  wrap.addEventListener('mouseleave', _onMemoMouseLeave, true);
+}
+
+function _onMemoMouseEnter(e) {
+  const btn = e.target.closest('.btn-tab-memo.has-memo');
+  if (!btn) return;
+
+  // onclick 속성에서 tabKey 추출 (sheetId + tabName)
+  const onclickStr = btn.getAttribute('onclick') || '';
+  const m = onclickStr.match(/openMemoPanel\('([^']+)'\s*,\s*'([^']+)'/);
+  if (!m) return;
+  const sheetId = m[1];
+  const tabName = m[2];
+  const tabKey  = sheetId + '||' + tabName;
+
+  clearTimeout(_memoTooltipTimer);
+  _memoTooltipTimer = setTimeout(async () => {
+    const tooltip = document.getElementById('memoPreviewTooltip');
+    if (!tooltip) return;
+
+    // 캐시 없으면 GAS 호출
+    if (!_memoPreviewCache[tabKey]) {
+      tooltip.textContent = '📝 로딩 중...';
+      _showMemoTooltipAt(tooltip, btn);
+      try {
+        const data = await gasGet({ action: 'getMemo', sheetId, tabName });
+        const msgs = (data && data.messages) ? data.messages : [];
+        if (msgs.length === 0) {
+          _memoPreviewCache[tabKey] = '(메모 없음)';
+        } else {
+          const last = msgs[msgs.length - 1];
+          const role = last.role === 'admin' ? '관리자' : 'AE';
+          const text = (last.text || '').slice(0, 60) + ((last.text||'').length > 60 ? '…' : '');
+          _memoPreviewCache[tabKey] = `💬 ${role}: ${text}`;
+        }
+      } catch(_) {
+        _memoPreviewCache[tabKey] = '(불러오기 실패)';
+      }
+    }
+
+    // 툴팁이 아직 표시 중이면 내용 업데이트
+    if (tooltip.style.display !== 'none') {
+      tooltip.textContent = _memoPreviewCache[tabKey] || '';
+      _showMemoTooltipAt(tooltip, btn);
+    }
+  }, 400); // 400ms 딜레이
+}
+
+function _onMemoMouseLeave(e) {
+  const btn = e.target.closest('.btn-tab-memo');
+  if (!btn) return;
+  clearTimeout(_memoTooltipTimer);
+  const tooltip = document.getElementById('memoPreviewTooltip');
+  if (tooltip) tooltip.style.display = 'none';
+}
+
+function _showMemoTooltipAt(tooltip, anchor) {
+  const rect = anchor.getBoundingClientRect();
+  tooltip.style.display = 'block';
+  tooltip.style.left = (rect.left + window.scrollX) + 'px';
+  tooltip.style.top  = (rect.top  + window.scrollY - tooltip.offsetHeight - 10) + 'px';
+  // 화면 오른쪽 초과 방지
+  const tw = tooltip.offsetWidth;
+  const overRight = rect.left + tw - window.innerWidth + 12;
+  if (overRight > 0) {
+    tooltip.style.left = (rect.left + window.scrollX - overRight) + 'px';
+  }
+}
+
+// 메모 캐시 무효화 (메모 전송 후 호출)
+function _invalidateMemoCache(tabKey) {
+  delete _memoPreviewCache[tabKey];
+}
+
+/**
+ * 컬럼 헤더 요소 빌드
+ * DASH_COL_DEFS 인덱스: 0=forcecb, 1=closedcb, 2=tabname, 3=product, ... 17=memo, 18(17)=enddate(신규), 19(18)=info(⚙)
+ * 데이터 행 child 인덱스도 동일 (0=force-cb-wrap, 1=closed-cb-wrap, 2=탭명, ...)
+ */
+function _buildColHeader(container) {
+  // colIdx = DASH_COL_DEFS 인덱스와 1:1 대응
+  const CELLS = [
+    // isCb 컬럼: 평소 0px(숨김) → 모드 진입 시 28px
+    { colIdx: 0,  inner: '<i class="fas fa-check-square" style="font-size:.6rem;color:#DC2626"></i>',  style: 'justify-content:center', title: '강제완료 선택', cbClass: 'force-cb-wrap'  },
+    { colIdx: 1,  inner: '<i class="fas fa-archive"      style="font-size:.6rem;color:#7C3AED"></i>',  style: 'justify-content:center', title: '마감 선택',    cbClass: 'closed-cb-wrap' },
+    { colIdx: 2,  inner: '<i class="fas fa-tag" style="font-size:.55rem"></i> 탭명',              style: '' },
+    { colIdx: 3,  inner: '<i class="fas fa-box" style="font-size:.55rem"></i> 상품명',            style: '' },
+    { colIdx: 4,  inner: '<i class="fas fa-camera" style="font-size:.55rem;color:#7C3AED"></i> 캡처폴더', style: 'justify-content:center', title: '주문캡처 저장 폴더' },
+    { colIdx: 5,  inner: '<i class="fas fa-folder" style="font-size:.55rem;color:#F59E0B"></i> 리뷰폴더',  style: 'justify-content:center', title: '리뷰 저장 폴더'    },
+    { colIdx: 6,  inner: '<i class="fas fa-layer-group" style="font-size:.55rem;color:#4338CA"></i> 차수',  style: 'justify-content:center', title: '진행 차수'         },
+    { colIdx: 7,  inner: '<i class="fas fa-calendar-day" style="font-size:.55rem"></i> 시작일',   style: '' },
+    { colIdx: 8,  inner: '<i class="fas fa-clock" style="font-size:.55rem"></i> 주문시간대',      style: '' },
+    { colIdx: 9,  inner: '<i class="fas fa-star" style="font-size:.55rem"></i> 리뷰타입',         style: '' },
+    { colIdx: 10, inner: '<i class="fas fa-link" style="font-size:.55rem;color:#7C3AED"></i>',    style: 'justify-content:center', title: '구매양식 제출링크 생성' },
+    { colIdx: 11, inner: '<i class="fas fa-user" style="font-size:.55rem"></i> 담당',             style: 'justify-content:center' },
+    { colIdx: 12, inner: '<i class="fas fa-chart-bar" style="font-size:.55rem"></i> 진행률',      style: '' },
+    { colIdx: 13, inner: '<i class="fas fa-check-double" style="font-size:.55rem"></i> 리뷰',     style: 'justify-content:flex-end' },
+    { colIdx: 14, inner: '<i class="fas fa-won-sign" style="font-size:.55rem"></i> 입금',         style: 'justify-content:center' },
+    { colIdx: 15, inner: '<i class="fas fa-receipt" style="font-size:.55rem;color:#7C3AED"></i> 진행방식', style: 'justify-content:center', title: '진행방식 (현금/사업자현영/소득신고)' },  // ★ v9.14
+    { colIdx: 16, inner: '<i class="fas fa-signature" style="font-size:.55rem;color:#1D4ED8"></i> 입금명',  style: 'justify-content:center', title: '입금자명'  },  // ★ v9.14
+    { colIdx: 17, inner: '<i class="fas fa-university" style="font-size:.55rem;color:#92400E"></i> 이체은행', style: 'justify-content:center', title: '이체 은행' },  // ★ v9.14
+    { colIdx: 18, inner: '<i class="fas fa-truck" style="font-size:.55rem"></i> 택대',            style: 'justify-content:center' },
+    { colIdx: 19, inner: '<i class="fas fa-sticky-note" style="font-size:.55rem;color:#F59E0B"></i> 비고', style: '' },
+    { colIdx: 20, inner: '<i class="fas fa-info-circle" style="font-size:.55rem;color:#6366F1"></i> 부가정보', style: 'justify-content:center', title: '대량건·배송타입·마감D-Day 등 부가 정보' },
+    { colIdx: 21, inner: '<i class="fas fa-cog" style="font-size:.55rem"></i>', style: 'justify-content:center' },  // ⚙ 마지막
+  ];
+
+  container.innerHTML = '';
+
+  // 정렬 가능한 열 키 목록
+  const SORTABLE_KEYS = new Set(['tabname','product','date','time','review','manager','bar','nums','payment','taekhap','enddate']);
+
+  CELLS.forEach(c => {
+    const colDef = DASH_COL_DEFS[c.colIdx];
+    const div = document.createElement('div');
+
+    // CB 컬럼: 평소엔 숨겨진 래퍼 역할 + 드래그 조절 지원
+    if (colDef && colDef.isCb) {
+      div.className = 'dash-col-header-cell ' + (c.cbClass || '');
+    } else {
+      div.className = 'dash-col-header-cell';
+    }
+
+    if (c.style) div.setAttribute('style', c.style);
+    if (c.title) div.title = c.title;
+    div.innerHTML = c.inner;
+
+    // 정렬 아이콘 추가 (정렬 가능한 열만)
+    if (colDef && SORTABLE_KEYS.has(colDef.key)) {
+      const sortIcon = document.createElement('span');
+      sortIcon.className = 'col-sort-icon';
+      sortIcon.innerHTML = '⇅';
+      div.appendChild(sortIcon);
+      div.dataset.sortKey = colDef.key;
+      div.addEventListener('click', _onColHeaderClick);
+    }
+
+    // D-Day·⚙ 컬럼도 드래그 리사이즈 지원 (noResize 플래그 없음)
+    if (!c.noResize && !colDef?.noResize && colDef) {
+      div.dataset.colKey = colDef.key;
+      div.dataset.colIdx = c.colIdx;
+
+      // 드래그 핸들 div (헤더 셀 우측 경계)
+      const handle = document.createElement('div');
+      handle.className = 'col-drag-handle';
+      handle.title = colDef.key === 'forcecb' ? '강제완료 체크박스 너비 조절' :
+                     colDef.key === 'closedcb' ? '마감 체크박스 너비 조절' : '';
+      handle.addEventListener('mousedown', _onColDragStart);
+      handle.dataset.colKey = colDef.key;
+      handle.dataset.colIdx = c.colIdx;
+      div.appendChild(handle);
+    }
+
+    container.appendChild(div);
+  });
+}
+
+/* ══════════════════════════════════════════════
+   엑셀 스타일 컬럼 드래그 리사이즈 시스템
+   ══════════════════════════════════════════════ */
+
+/** 현재 컬럼 너비(px) 반환 - JS style 직접 설정값 우선, 없으면 CSS :root 기본값 */
+function _getColWidth(colDef) {
+  const inlineVal = document.documentElement.style.getPropertyValue(colDef.varName).trim();
+  if (inlineVal && inlineVal.endsWith('px')) return parseInt(inlineVal);
+  const cssVal = getComputedStyle(document.documentElement).getPropertyValue(colDef.varName).trim();
+  if (cssVal && cssVal.endsWith('px')) return parseInt(cssVal);
+  return colDef.default || 70;
+}
+
+// 드래그 상태 변수
+let _dragColDef   = null;  // 현재 드래그 중인 컬럼 정의
+let _dragStartX   = 0;     // 드래그 시작 X (pageX)
+let _dragStartW   = 0;     // 드래그 시작 시점의 컬럼 너비
+let _dragHandle   = null;  // 드래그 핸들 요소
+
+const _tooltip = document.getElementById('colDragTooltip');
+const _dragLine = document.getElementById('colDragLine');
+
+/**
+ * 드래그 중 현재 컬럼의 최대 허용 너비 계산
+ * = 컨테이너 너비 - padding - CB너비 - (다른 모든 표시 컬럼 합계) - ⚙최소너비
+ * → ⚙(info) 컬럼이 항상 minPx 이상을 유지하도록 보장
+ */
+function _calcDragMaxW(draggingColDef) {
+  const availW = _getContainerWidth();
+  const pad = 28;
+  const root = document.documentElement;
+
+  // ⚙(info) 컬럼의 최소너비
+  const infoDef = DASH_COL_DEFS.find(c => c.noScale);
+  const infoMin = infoDef ? (infoDef.minPx || 90) : 90;
+
+  // CB 컬럼 너비 합
+  const cbW = DASH_COL_DEFS.filter(c => c.isCb).reduce((s, c) => {
+    return s + (parseInt(root.style.getPropertyValue(c.varName)) ||
+                parseInt(getComputedStyle(root).getPropertyValue(c.varName)) || 0);
+  }, 0);
+
+  // 드래그 중인 컬럼 제외, noScale·isCb 제외한 나머지 컬럼 너비 합
+  const othersW = DASH_COL_DEFS.reduce((s, c) => {
+    if (c.isCb || c.noScale) return s;          // CB·⚙ 제외
+    if (c.key === draggingColDef.key) return s; // 드래그 컬럼 제외
+    return s + _getColWidth(c);
+  }, 0);
+
+  // 드래그 컬럼의 최대 너비 = 전체 - 패딩 - CB - 다른컬럼 - ⚙최소
+  return Math.max(draggingColDef.minPx, availW - pad - cbW - othersW - infoMin);
+}
+
+/** 드래그 시작 */
+let _dragMaxW = Infinity; // 드래그 중 상한 너비
+
+function _onColDragStart(e) {
+  if (e.button !== 0) return; // 좌클릭만
+  e.preventDefault();
+  e.stopPropagation();
+
+  const key = e.currentTarget.dataset.colKey;
+  const colDef = DASH_COL_DEFS.find(d => d.key === key);
+  if (!colDef) return;
+
+  // CB 컬럼이 0px(비활성)이면 드래그 불가
+  if (colDef.isCb && _getColWidth(colDef) === 0) {
+    showToast('강제완료 또는 마감 모드 진입 후 너비를 조절할 수 있습니다.');
+    return;
+  }
+
+  _dragColDef  = colDef;
+  _dragStartX  = e.pageX;
+  _dragStartW  = _getColWidth(colDef);
+  _dragHandle  = e.currentTarget;
+  _dragMaxW    = _calcDragMaxW(colDef); // ★ 상한 너비 계산 (⚙ 보호)
+
+  // 핸들 강조
+  _dragHandle.classList.add('dragging');
+  // 헤더 셀 강조
+  const headerCell = _dragHandle.closest('.dash-col-header-cell');
+  if (headerCell) headerCell.classList.add('col-drag-active');
+
+  // 드래그 중 커서 고정
+  document.body.classList.add('col-resizing');
+
+  // 수직 가이드라인 표시
+  if (_dragLine) {
+    _dragLine.style.left  = e.clientX + 'px';
+    _dragLine.style.display = 'block';
+  }
+
+  // 툴팁 표시
+  if (_tooltip) {
+    _tooltip.textContent = _dragStartW + 'px';
+    _tooltip.style.left  = e.clientX + 'px';
+    _tooltip.style.top   = e.clientY + 'px';
+    _tooltip.style.display = 'block';
+  }
+
+  document.addEventListener('mousemove', _onColDragMove);
+  document.addEventListener('mouseup',   _onColDragEnd);
+}
+
+/** 드래그 이동 */
+function _onColDragMove(e) {
+  if (!_dragColDef) return;
+
+  const delta  = e.pageX - _dragStartX;
+  // ★ 하한(minPx) + 상한(_dragMaxW) 양방향 클램프
+  let newW = Math.min(_dragMaxW, Math.max(_dragColDef.minPx, _dragStartW + delta));
+
+  // 수직 가이드라인 이동
+  if (_dragLine) _dragLine.style.left = e.clientX + 'px';
+
+  // 툴팁 업데이트
+  if (_tooltip) {
+    _tooltip.textContent = newW + 'px';
+    _tooltip.style.left  = e.clientX + 'px';
+    _tooltip.style.top   = e.clientY + 'px';
+  }
+
+  // 실시간 CSS 변수 업데이트
+  document.documentElement.style.setProperty(_dragColDef.varName, newW + 'px');
+}
+
+/** 드래그 종료 */
+function _onColDragEnd(e) {
+  if (!_dragColDef) return;
+
+  const delta  = e.pageX - _dragStartX;
+  // ★ 종료 시에도 동일하게 상한 적용
+  let newW = Math.min(_dragMaxW, Math.max(_dragColDef.minPx, _dragStartW + delta));
+
+  // 최종 너비 적용 & 저장
+  document.documentElement.style.setProperty(_dragColDef.varName, newW + 'px');
+  saveColWidths();
+
+  // 정리
+  if (_dragHandle) _dragHandle.classList.remove('dragging');
+  document.querySelectorAll('.dash-col-header-cell.col-drag-active')
+    .forEach(c => c.classList.remove('col-drag-active'));
+
+  document.body.classList.remove('col-resizing');
+  if (_dragLine)   _dragLine.style.display   = 'none';
+  if (_tooltip)    _tooltip.style.display    = 'none';
+
+  _dragColDef = null;
+  _dragHandle = null;
+  _dragMaxW   = Infinity; // 상한 초기화
+
+  document.removeEventListener('mousemove', _onColDragMove);
+  document.removeEventListener('mouseup',   _onColDragEnd);
+
+  // 드래그 후 반응형 재계산 (사용자가 직접 늘린 경우 뷰포트 대비 재조정)
+  _lastAppliedW = 0;
+  _syncTabnameWidth();
+}
+
+/** (호환성 stub - 이전 팝업 방식 제거 후 빈 함수 유지) */
+function _closeColResizePopup() {}
+
+// 페이지 로드 시 저장된 너비 즉시 적용 + window resize 리스너 등록
+// (ResizeObserver는 대시보드 렌더 후 _attachDashResizeObserver에서 등록)
+if (document.readyState === 'loading') {
+  document.addEventListener('DOMContentLoaded', () => {
+    loadColWidths(); _loadHiddenCols();
+  });
+} else {
+  requestAnimationFrame(() => {
+    loadColWidths(); _loadHiddenCols();
+  });
+}
+
+/** (overflow:visible 전환으로 불필요 - 호환성 stub) */
+function _syncColHeaderScroll() {}
+
+/** (overflow:visible 전환으로 불필요 - 호환성 stub) */
+function _bindScrollSync() {}
+
+// ═══════════════════════════════════════════════════════
+function toggleDashTab(tableId, header) {
+  const table = document.getElementById(tableId);
+  const icon  = header ? header.querySelector(".dash-toggle-icon") : null;
+  if (!table) return;
+  const isCollapsed = table.classList.contains("collapsed");
+  table.classList.toggle("collapsed", !isCollapsed);
+  if (icon) icon.classList.toggle("rotated", isCollapsed);
+}
+
+let hideDoneMode = false;
+function toggleHideDone() {
+  hideDoneMode = !hideDoneMode;
+  const btn  = document.getElementById("btnHideDone");
+  const wrap = document.getElementById("dashboardWrap");
+  if (hideDoneMode) {
+    btn.innerHTML = '<i class="fas fa-eye"></i> 완료건 표시';
+    btn.classList.add("active");
+    wrap.classList.add("hide-done-mode");
+  } else {
+    btn.innerHTML = '<i class="fas fa-eye-slash"></i> 완료건 숨김';
+    btn.classList.remove("active");
+    wrap.classList.remove("hide-done-mode");
+  }
+}
+
+// ── 캠페인명 숨김: 캠페인 헤더(구분행)만 숨기고 하위 인덱스 행은 그대로 나열 ──
+let hideCampNameMode = false;
+function toggleHideCampName() {
+  hideCampNameMode = !hideCampNameMode;
+  const btn  = document.getElementById("btnHideCampName");
+  const wrap = document.getElementById("dashboardWrap");
+  if (hideCampNameMode) {
+    // 숨김 ON → 캠페인 헤더 숨기고, 탭 테이블 펼치기
+    btn.innerHTML = '<i class="fas fa-tag"></i> 캠페인명 숨김';
+    btn.classList.add("active");
+    wrap.classList.add("hide-camp-name-mode");
+    // 모든 탭 테이블 강제 펼침 (헤더 클릭 불가하므로)
+    wrap.querySelectorAll(".dash-tab-table").forEach(t => {
+      t.classList.remove("collapsed");
+      const icon = t.previousElementSibling && t.previousElementSibling.querySelector(".dash-toggle-icon");
+      if (icon) icon.classList.remove("rotated");
+    });
+  } else {
+    // 숨김 OFF → 캠페인 헤더 다시 표시
+    btn.innerHTML = '<i class="fas fa-tag"></i> 캠페인명 표시';
+    btn.classList.remove("active");
+    wrap.classList.remove("hide-camp-name-mode");
+  }
+}
+
+// ── 마감업체 숨김: 모든 탭이 완료인 캠페인 전체 숨김 ──
+// ★ v9.13 fix: 기본값 true (마감 캠페인 기본 숨김), localStorage에 상태 저장
+let hideClosedCampMode = localStorage.getItem("rapp_hide_closed_camp") !== "0"; // 기본 true
+function toggleHideClosedCamp() {
+  hideClosedCampMode = !hideClosedCampMode;
+  localStorage.setItem("rapp_hide_closed_camp", hideClosedCampMode ? "1" : "0");
+  const btn  = document.getElementById("btnHideClosedCamp");
+  const wrap = document.getElementById("dashboardWrap");
+  if (hideClosedCampMode) {
+    btn.innerHTML = '<i class="fas fa-building"></i> 마감업체 표시';
+    btn.classList.add("active");
+    wrap.classList.add("hide-closed-camp-mode");
+  } else {
+    btn.innerHTML = '<i class="fas fa-building"></i> 마감업체 숨김';
+    btn.classList.remove("active");
+    wrap.classList.remove("hide-closed-camp-mode");
+  }
+}
+
+let hideClosedTabMode = false;
+function toggleHideClosedTab() {
+  hideClosedTabMode = !hideClosedTabMode;
+  const btn  = document.getElementById("btnHideClosedTab");
+  const wrap = document.getElementById("dashboardWrap");
+  if (hideClosedTabMode) {
+    btn.innerHTML = '<i class="fas fa-archive"></i> 마감탭 표시';
+    btn.classList.add("active");
+    wrap.classList.add("hide-closed-tab-mode");
+  } else {
+    btn.innerHTML = '<i class="fas fa-archive"></i> 마감탭 숨김';
+    btn.classList.remove("active");
+    wrap.classList.remove("hide-closed-tab-mode");
+  }
+}
+
+// ═══════════════════════════════════════════════════════════
+// ★ 강제완료 처리
+// ═══════════════════════════════════════════════════════════
+// ★ 강제완료 처리 — 베이스시트 기반 (모든 관리자 공유)
+// ═══════════════════════════════════════════════════════════
+
+// 강제완료된 tabKey Set — dashboard API 응답의 forceDone 값으로 채워짐
+// localStorage 미사용: 항상 서버(베이스시트) 상태가 진실
+let _forceDoneSet = new Set();
+
+// 강제완료 모드 ON/OFF (체크박스+실행버튼 토글)
+let _forceDoneMode = false;
+function toggleForceDoneMode() {
+  _forceDoneMode = !_forceDoneMode;
+  const btn      = document.getElementById("btnForceDone");
+  const execBtn  = document.getElementById("btnForceExec");
+  const wrap     = document.getElementById("dashboardWrap");
+  if (_forceDoneMode) {
+    btn.classList.add("active");
+    btn.innerHTML = '<i class="fas fa-flag-checkered"></i> 강제완료 <span style="font-size:.68rem;opacity:.8">(선택 중)</span>';
+    execBtn.style.display = "flex";
+    wrap.classList.add("force-done-mode");
+    document.documentElement.style.setProperty('--dc-forcecb', '28px');
+    document.documentElement.style.setProperty('--dc-closedcb', '0px');
+  } else {
+    btn.classList.remove("active");
+    btn.innerHTML = '<i class="fas fa-flag-checkered"></i> 강제완료';
+    execBtn.style.display = "none";
+    wrap.classList.remove("force-done-mode");
+    document.documentElement.style.setProperty('--dc-forcecb', '0px');
+  }
+  _lastAppliedW = 0; // 강제 재계산
+  _syncTabnameWidth(); // 체크박스 열(28px) 추가/제거에 따라 컬럼 너비 재계산
+}
+
+// [실행] 버튼 → 변경 내역 확인 후 팝업
+function execForceDone() {
+  const cbs = document.querySelectorAll("#dashboardWrap .force-cb");
+  if (!cbs.length) { showToast("표시된 탭이 없습니다.", true); return; }
+
+  let toAdd = 0, toRemove = 0;
+  cbs.forEach(cb => {
+    const key = cb.dataset.tabkey || "";
+    if (cb.checked  && !_forceDoneSet.has(key)) toAdd++;
+    if (!cb.checked &&  _forceDoneSet.has(key)) toRemove++;
+  });
+
+  if (toAdd === 0 && toRemove === 0) {
+    showToast("변경된 항목이 없습니다."); return;
+  }
+
+  const parts = [];
+  if (toAdd    > 0) parts.push(`<b>${toAdd}건</b> 강제완료 처리`);
+  if (toRemove > 0) parts.push(`<b>${toRemove}건</b> 강제완료 해제`);
+  document.getElementById("forceConfirmMsg").innerHTML =
+    `강제마감 시, 상태가 강제로 <b>"완료"</b>로 변경됩니다.<br>` +
+    `대상: ${parts.join(" / ")}<br><br>` +
+    `되돌리려면 다시 강제완료 체크를 <b>해제</b>하면 복구됩니다.`;
+
+  document.getElementById("forceConfirmOverlay").classList.add("open");
+}
+
+// 팝업 취소
+function cancelForceDone() {
+  document.getElementById("forceConfirmOverlay").classList.remove("open");
+}
+
+// 팝업 확인 → GAS 베이스시트에 저장 (모든 관리자 공유)
+async function confirmForceDone() {
+  document.getElementById("forceConfirmOverlay").classList.remove("open");
+
+  const cbs = document.querySelectorAll("#dashboardWrap .force-cb");
+  const items = [];
+  cbs.forEach(cb => {
+    const key       = cb.dataset.tabkey || "";
+    if (!key) return;
+    const [sheetId, tabName] = key.split("||");
+    const wasForced  = _forceDoneSet.has(key);
+    const isChecked  = cb.checked;
+    if (isChecked === wasForced) return; // 변경 없음 → 전송 제외
+    items.push({ sheetId: sheetId || "", tabName: tabName || "", forceDone: isChecked });
+  });
+
+  if (!items.length) { _exitForceDoneMode(); return; }
+
+  // ① 즉시 로컬 Set 업데이트 → UI 즉시 반영 (낙관적 업데이트)
+  items.forEach(({ sheetId, tabName, forceDone }) => {
+    const key = (sheetId || "") + "||" + (tabName || "");
+    if (forceDone) _forceDoneSet.add(key);
+    else           _forceDoneSet.delete(key);
+  });
+
+  _exitForceDoneMode();
+  _reRenderDashboard(); // 즉시 화면 갱신
+
+  // ② GAS 베이스시트에 비동기 저장 (실패해도 토스트로 안내)
+  try {
+    const json = await gasPost({ action: "setForceDone", items });
+    if (!json.ok) {
+      showToast("⚠️ 서버 저장 실패: " + (json.error || "알 수 없는 오류"), true);
+      // 실패 시 서버 상태로 복원하기 위해 대시보드 새로고침
+      loadAdminDashboard();
+    } else {
+      showToast(`✅ 강제완료 변경이 저장되었습니다. (${items.length}건)`);
+    }
+  } catch (err) {
+    showToast("⚠️ 서버 연결 오류: " + err.message + " (새로고침 권장)", true);
+    loadAdminDashboard();
+  }
+}
+
+function _exitForceDoneMode() {
+  _forceDoneMode = false;
+  const btn     = document.getElementById("btnForceDone");
+  const execBtn = document.getElementById("btnForceExec");
+  const wrap    = document.getElementById("dashboardWrap");
+  btn.classList.remove("active");
+  btn.innerHTML = '<i class="fas fa-flag-checkered"></i> 강제완료';
+  execBtn.style.display = "none";
+  wrap.classList.remove("force-done-mode");
+  document.documentElement.style.setProperty('--dc-forcecb', '0px');
+}
+
+// ═══════════════════════════════════════════════════════════
+// ★ 마감 처리 — 베이스시트 is_closed 컬럼 기반
+//   마감된 탭은 인덱스 갱신 시 완전히 제외 (검색 불가)
+//   강제완료와 다르게 인덱스에서 행 자체를 제외함
+// ═══════════════════════════════════════════════════════════
+
+// 마감된 tabKey Set — dashboard API 응답의 isClosed 값으로 채워짐
+let _closedSet = new Set();
+
+// 마감 모드 ON/OFF
+let _closedMode = false;
+function toggleClosedMode() {
+  // 강제완료 모드 중이면 먼저 종료
+  if (_forceDoneMode) _exitForceDoneMode();
+
+  _closedMode = !_closedMode;
+  const btn     = document.getElementById("btnClosed");
+  const execBtn = document.getElementById("btnClosedExec");
+  const wrap    = document.getElementById("dashboardWrap");
+  if (_closedMode) {
+    btn.classList.add("active");
+    btn.innerHTML = '<i class="fas fa-archive"></i> 마감 <span style="font-size:.68rem;opacity:.8">(선택 중)</span>';
+    execBtn.style.display = "flex";
+    wrap.classList.add("closed-mode");
+    document.documentElement.style.setProperty('--dc-closedcb', '28px');
+    document.documentElement.style.setProperty('--dc-forcecb', '0px');
+  } else {
+    btn.classList.remove("active");
+    btn.innerHTML = '<i class="fas fa-archive"></i> 마감';
+    execBtn.style.display = "none";
+    wrap.classList.remove("closed-mode");
+    document.documentElement.style.setProperty('--dc-closedcb', '0px');
+  }
+  _lastAppliedW = 0; // 강제 재계산
+  _syncTabnameWidth(); // 체크박스 열(28px) 추가/제거에 따라 컬럼 너비 재계산
+}
+
+// [실행] 버튼 → 변경 내역 확인 후 팝업
+function execClosed() {
+  const cbs = document.querySelectorAll("#dashboardWrap .closed-cb");
+  if (!cbs.length) { showToast("표시된 탭이 없습니다.", true); return; }
+
+  let toClose = [], toOpen = [];
+  cbs.forEach(cb => {
+    const key = cb.dataset.tabkey || "";
+    const tabName = (key.split("||")[1] || "").trim();
+    if (cb.checked  && !_closedSet.has(key)) toClose.push({ key, tabName });
+    if (!cb.checked &&  _closedSet.has(key)) toOpen.push({ key, tabName });
+  });
+
+  if (!toClose.length && !toOpen.length) {
+    showToast("변경된 항목이 없습니다."); return;
+  }
+
+  // 목록 렌더링
+  const listEl = document.getElementById("closedConfirmList");
+  listEl.innerHTML = "";
+  toClose.forEach(({ tabName }) => {
+    const el = document.createElement("div");
+    el.className = "closed-confirm-list-item";
+    el.innerHTML = `<i class="fas fa-archive" style="color:#4F46E5;font-size:.75rem"></i> ${tabName} → <b>마감</b>`;
+    listEl.appendChild(el);
+  });
+  toOpen.forEach(({ tabName }) => {
+    const el = document.createElement("div");
+    el.className = "closed-confirm-list-item remove-item";
+    el.innerHTML = `<i class="fas fa-undo" style="font-size:.75rem"></i> ${tabName} → <b>마감 해제</b>`;
+    listEl.appendChild(el);
+  });
+
+  const parts = [];
+  if (toClose.length) parts.push(`<b>${toClose.length}건</b> 마감`);
+  if (toOpen.length)  parts.push(`<b>${toOpen.length}건</b> 해제`);
+  document.getElementById("closedConfirmMsg").innerHTML =
+    `선택한 인덱스를 마감 처리합니다.<br>` +
+    `대상: ${parts.join(" / ")}<br>` +
+    `<span style="color:#EF4444;font-size:.8rem">⚠️ 마감된 인덱스는 인덱스 갱신 후 검색에서 제외됩니다.</span>`;
+
+  document.getElementById("closedConfirmOverlay").classList.add("open");
+}
+
+// 팝업 취소
+function cancelClosed() {
+  document.getElementById("closedConfirmOverlay").classList.remove("open");
+}
+
+// 팝업 확인 → GAS 베이스시트에 저장
+async function confirmClosed() {
+  document.getElementById("closedConfirmOverlay").classList.remove("open");
+
+  const cbs = document.querySelectorAll("#dashboardWrap .closed-cb");
+  const items = [];
+  cbs.forEach(cb => {
+    const key = cb.dataset.tabkey || "";
+    if (!key) return;
+    const [sheetId, tabName] = key.split("||");
+    const wasClosed  = _closedSet.has(key);
+    const isChecked  = cb.checked;
+    if (isChecked === wasClosed) return;
+    items.push({ sheetId: sheetId || "", tabName: tabName || "", isClosed: isChecked });
+  });
+
+  if (!items.length) { _exitClosedMode(); return; }
+
+  // 낙관적 업데이트
+  items.forEach(({ sheetId, tabName, isClosed }) => {
+    const key = (sheetId || "") + "||" + (tabName || "");
+    if (isClosed) _closedSet.add(key);
+    else          _closedSet.delete(key);
+  });
+
+  _exitClosedMode();
+  _reRenderDashboard();
+
+  try {
+    const json = await gasPost({ action: "setClosed", items });
+    if (!json.ok) {
+      showToast("⚠️ 서버 저장 실패: " + (json.error || "알 수 없는 오류"), true);
+      loadAdminDashboard();
+    } else {
+      const closeCount  = items.filter(i => i.isClosed).length;
+      const openCount   = items.filter(i => !i.isClosed).length;
+      let msg = "";
+      if (closeCount) msg += `${closeCount}건 마감 완료. `;
+      if (openCount)  msg += `${openCount}건 마감 해제. `;
+      msg += "인덱스 재갱신 후 적용됩니다.";
+      showToast("✅ " + msg);
+    }
+  } catch (err) {
+    showToast("⚠️ 서버 연결 오류: " + err.message + " (새로고침 권장)", true);
+    loadAdminDashboard();
+  }
+}
+
+function _exitClosedMode() {
+  _closedMode = false;
+  const btn     = document.getElementById("btnClosed");
+  const execBtn = document.getElementById("btnClosedExec");
+  const wrap    = document.getElementById("dashboardWrap");
+  btn.classList.remove("active");
+  btn.innerHTML = '<i class="fas fa-archive"></i> 마감';
+  execBtn.style.display = "none";
+  wrap.classList.remove("closed-mode");
+  document.documentElement.style.setProperty('--dc-closedcb', '0px');
+}
+
+// ── 비고(메모) 관리 ──
+const _TAB_MEMO_KEY = "rapp_tab_memo";     // { tabKey: memoString, ... }
+
+function _loadMemoStore() {
+  try {
+    const raw = localStorage.getItem(_TAB_MEMO_KEY);
+    return raw ? JSON.parse(raw) : {};
+  } catch (_) { return {}; }
+}
+function _getTabMemo(tabKey) {
+  return _loadMemoStore()[tabKey] || "";
+}
+function _setTabMemo(tabKey, memo) {
+  const store = _loadMemoStore();
+  if (memo) store[tabKey] = memo;
+  else delete store[tabKey];
+  try { localStorage.setItem(_TAB_MEMO_KEY, JSON.stringify(store)); } catch (_) {}
+}
+
+// 대시보드 재렌더링 (마지막 로드 데이터 재사용 — API 재호출 없이 즉시)
+let _lastDashData = null;
+function _reRenderDashboard() {
+  if (_lastDashData) {
+    renderDashboard(_lastDashData);
+  } else {
+    loadAdminDashboard();
+  }
+}
+
+/**
+ * ★ GAS 저장 성공 후 _lastDashData의 해당 탭 필드만 교체 → 로딩 없이 즉시 재렌더
+ * @param {string} sheetId   - 탭의 sheetId
+ * @param {string} tabName   - 탭명
+ * @param {object} patch     - { displayName, manager, timeRange, taekhap, reviewType, paymentType, ... }
+ */
+function _patchTabAndRerender(sheetId, tabName, patch) {
+  if (!_lastDashData || !_lastDashData.stats) {
+    // 캐시 없으면 전체 새로고침 (예외 상황)
+    loadAdminDashboard();
+    return;
+  }
+  // stats 배열 → campaigns → tabs 탐색해서 해당 탭 업데이트
+  _lastDashData.stats.forEach(c => {
+    (c.tabs || []).forEach(t => {
+      if (t.sheetId === sheetId && t.tab === tabName) {
+        Object.assign(t, patch);
+      }
+    });
+  });
+  renderDashboard(_lastDashData);
+}
+
+// ═══════════════════════════════════════════════════════
+// ★ 시작일 수동 수정 — localStorage 기반
+//   키: rapp_manual_startdate  /  값: { tabKey: "YY.MM.DD" }
+//   인덱스 재갱신/새로고침 후에도 유지 (원본 인덱스 덮어쓰지 않음)
+// ═══════════════════════════════════════════════════════
+const _MANUAL_SD_KEY = "rapp_manual_startdate";
+
+function _loadManualSDStore() {
+  try { return JSON.parse(localStorage.getItem(_MANUAL_SD_KEY) || "{}"); } catch(_){ return {}; }
+}
+function _getManualStartDate(tabKey) {
+  return _loadManualSDStore()[tabKey] || null;
+}
+function _setManualStartDate(tabKey, val) {
+  const store = _loadManualSDStore();
+  if (val) store[tabKey] = val;
+  else delete store[tabKey];
+  try { localStorage.setItem(_MANUAL_SD_KEY, JSON.stringify(store)); } catch(_) {}
+}
+
+// ── 시작일 편집 팝업 ──────────────────────────────────
+let _sdpTabKey = null;   // 현재 편집 중인 tabKey
+let _sdpRawSD  = null;   // 인덱스 원본 startDate
+
+function openStartDatePopup(event, el) {
+  event.stopPropagation();
+  _sdpTabKey = el.dataset.tabkey || null;
+  _sdpRawSD  = el.dataset.rawsd  || "";
+  if (!_sdpTabKey) return;
+
+  // 현재 표시값 (수동값 우선)
+  const manualVal = _getManualStartDate(_sdpTabKey);
+  const currentVal = manualVal || _sdpRawSD || "";
+
+  // 년도 select: 현재연도 -3 ~ +3
+  const nowYear = new Date().getFullYear();
+  const yearSel = document.getElementById("sdpYear");
+  const monSel  = document.getElementById("sdpMonth");
+  const daySel  = document.getElementById("sdpDay");
+
+  // 파싱: YY.MM.DD(요일) 또는 YY.MM.DD 또는 YYYY.MM.DD
+  let initY = nowYear % 100, initM = 1, initD = 1;
+  // 요일 포함 패턴 먼저 시도
+  let m = currentVal.match(/^(\d{2})\.(\d{1,2})\.(\d{1,2})\([월화수목금토일]\)$/);
+  if (!m) m = currentVal.match(/^(\d{2,4})[.\-\/](\d{1,2})[.\-\/](\d{1,2})$/);
+  if (m) {
+    initY = parseInt(m[1], 10);
+    if (initY >= 100) initY = initY % 100; // 4자리면 2자리로
+    initM = parseInt(m[2], 10);
+    initD = parseInt(m[3], 10);
+  }
+
+  // 년도 옵션: 20 ~ 99 (2020~2099)
+  yearSel.innerHTML = "";
+  for (let y = 20; y <= 35; y++) {
+    const opt = document.createElement("option");
+    opt.value = y;
+    opt.textContent = "20" + String(y).padStart(2,"0") + "년";
+    if (y === initY) opt.selected = true;
+    yearSel.appendChild(opt);
+  }
+
+  // 월 옵션
+  monSel.innerHTML = "";
+  for (let mo = 1; mo <= 12; mo++) {
+    const opt = document.createElement("option");
+    opt.value = mo;
+    opt.textContent = mo + "월";
+    if (mo === initM) opt.selected = true;
+    monSel.appendChild(opt);
+  }
+
+  // 일 옵션
+  _rebuildDayOptions(initY + 2000, initM, initD);
+
+  // 월 변경 시 일 옵션 재구성
+  monSel.onchange = () => {
+    const curD = parseInt(daySel.value, 10);
+    _rebuildDayOptions(parseInt(yearSel.value, 10) + 2000, parseInt(monSel.value, 10), curD);
+  };
+  yearSel.onchange = () => {
+    const curD = parseInt(daySel.value, 10);
+    _rebuildDayOptions(parseInt(yearSel.value, 10) + 2000, parseInt(monSel.value, 10), curD);
+  };
+
+  // 팝업 위치: 클릭 요소 기준 아래쪽
+  const popup = document.getElementById("startDatePopup");
+  popup.classList.add("visible");
+  const rect = el.getBoundingClientRect();
+  let top = rect.bottom + 6;
+  let left = rect.left;
+  // 화면 벗어나면 보정
+  const pw = 230;
+  if (left + pw > window.innerWidth - 8) left = window.innerWidth - pw - 8;
+  if (top + 180 > window.innerHeight - 8) top = rect.top - 180;
+  popup.style.top  = top  + "px";
+  popup.style.left = left + "px";
+
+  // 외부 클릭 시 닫기
+  setTimeout(() => { document.addEventListener("click", _sdpOutsideClick, true); }, 10);
+}
+
+function _rebuildDayOptions(fullYear, month, selectDay) {
+  const daySel = document.getElementById("sdpDay");
+  const maxDay = new Date(fullYear, month, 0).getDate();
+  daySel.innerHTML = "";
+  for (let d = 1; d <= maxDay; d++) {
+    const opt = document.createElement("option");
+    opt.value = d;
+    opt.textContent = d + "일";
+    if (d === selectDay) opt.selected = true;
+    daySel.appendChild(opt);
+  }
+}
+
+function applyStartDate() {
+  if (!_sdpTabKey) return;
+  const y  = String(parseInt(document.getElementById("sdpYear").value, 10)).padStart(2,"0");
+  const mo = String(parseInt(document.getElementById("sdpMonth").value, 10)).padStart(2,"0");
+  const d  = String(parseInt(document.getElementById("sdpDay").value, 10)).padStart(2,"0");
+  const newVal = `${y}.${mo}.${d}`; // YY.MM.DD 형식
+  _setManualStartDate(_sdpTabKey, newVal);
+  closeStartDatePopup();
+  _reRenderDashboard();
+  showToast(`✅ 시작일 수정: ${newVal} (수동 설정, 갱신 후에도 유지됨)`);
+}
+
+function resetStartDate() {
+  if (!_sdpTabKey) return;
+  _setManualStartDate(_sdpTabKey, null); // 수동값 삭제 → 원본 인덱스값 복원
+  closeStartDatePopup();
+  _reRenderDashboard();
+  showToast("↩️ 시작일 초기화 — 인덱스 원본값으로 복원됨");
+}
+
+function closeStartDatePopup() {
+  document.getElementById("startDatePopup").classList.remove("visible");
+  document.removeEventListener("click", _sdpOutsideClick, true);
+  _sdpTabKey = null;
+}
+
+function _sdpOutsideClick(e) {
+  const popup = document.getElementById("startDatePopup");
+  if (popup && !popup.contains(e.target)) {
+    closeStartDatePopup();
+  }
+}
+
+// 컬럼 헤더 sticky top 위치 보정
+// sticky 요소들의 실제 '점유 높이'를 offsetHeight 기준으로 합산
+function _fixColHeaderTop() {
+  requestAnimationFrame(() => {
+    const colHdr = document.getElementById("dashColHeader");
+    if (!colHdr) return;
+
+    const appHdr     = document.querySelector("#screenAdmin .app-header");
+    const sectionHdr = document.querySelector("#tab-dashboard .admin-section-header");
+    // offsetHeight = 렌더된 실제 픽셀 높이 (스크롤 위치 무관)
+    const appH     = appHdr     ? appHdr.offsetHeight     : 0;
+    const sectionH = sectionHdr ? sectionHdr.offsetHeight : 0;
+    colHdr.style.top = (appH + sectionH) + "px";
+  });
+}
+
+// ── 관리자 화면 sticky 위치 전체 보정 ──
+// app-header 높이를 측정해 section-header · col-header 순으로 top 값을 확정
+// _uiLayoutTopLocked = true 이면 사용자가 수동 지정한 top 값이 있으므로 덮어쓰지 않음
+window._uiLayoutTopLocked = false;
+
+function _fixStickyPositions() {
+  // 사용자가 UI 편집 모드에서 top 값을 직접 저장한 경우 자동 재계산 스킵
+  if (window._uiLayoutTopLocked) return;
+
+  requestAnimationFrame(() => {
+    const sectionHdr = document.querySelector("#tab-dashboard .admin-section-header");
+    const searchBar  = document.getElementById("dashSearchBar");
+    const colHdr     = document.getElementById("dashColHeader");
+
+    // ① 섹션 헤더 → 0px
+    if (sectionHdr) sectionHdr.style.top = "0px";
+
+    // ② 검색창 → 0px
+    if (searchBar) searchBar.style.top = "0px";
+
+    // ③ 컬럼 헤더 → 0px
+    if (colHdr) colHdr.style.top = "0px";
+  });
+}
+
+// ═══════════════════════════════════════════════════════
+// ★ 가로 스크롤 동기화: 헤더와 테이블 스크롤 연동
+// ═══════════════════════════════════════════════════════
+function _syncHorizontalScroll() {
+  const colHdr = document.getElementById("dashColHeader");
+  const scrollOuter = document.getElementById("dashboardScrollOuter");
+  
+  if (!colHdr || !scrollOuter) return;
+
+  // 테이블 스크롤 → 헤더 스크롤
+  scrollOuter.addEventListener('scroll', function() {
+    colHdr.scrollLeft = this.scrollLeft;
+  });
+
+  // 헤더 스크롤 → 테이블 스크롤
+  colHdr.addEventListener('scroll', function() {
+    scrollOuter.scrollLeft = this.scrollLeft;
+  });
+}
+
+
+let allExpanded = false;
+
+// ═══════════════════════════════════════════════════════
+// ★ 빠른 인라인 편집 (빈 셀 클릭 시)
+// ═══════════════════════════════════════════════════════
+let _qePopup = null; // 현재 열려있는 팝업
+let _qePopupCell = null; // 현재 팝업을 연 셀 (토글 판단용)
+
+function _closeQePopup() {
+  if (_qePopup) { _qePopup.remove(); _qePopup = null; }
+  _qePopupCell = null;
+}
+
+// 팝업 외부 클릭 시 닫기
+document.addEventListener("click", function(e) {
+  if (_qePopup && !_qePopup.contains(e.target)) _closeQePopup();
+}, true);
+
+// ═══════════════════════════════════════════════════════
+// 구매양식 폼링크 생성 & 제출 (mode=form)
+// ═══════════════════════════════════════════════════════
+
+/**
+ * 대시보드 행의 [🔗] 버튼 클릭 시 호출
+ * tcAttr(JSON 문자열)에서 sheetId, gid, tabName, displayName 추출 → URL 생성 → 클립보드 복사
+ */
+/**
+ * 대시보드 행의 [↗] 버튼 클릭 시 호출
+ * data-tc 속성에서 인덱스 정보 읽기 → 구매양식 URL 생성 → 새 탭으로 열기 + 링크 복사
+ */
+function openFormLink(btnEl) {
+  // data-tc 속성에서 tcData 파싱
+  let tc = {};
+  try {
+    const raw = btnEl.getAttribute("data-tc") || "";
+    const decoded = raw
+      .replace(/&quot;/g, '"')
+      .replace(/&amp;/g,  '&')
+      .replace(/&#39;/g,  "'")
+      .replace(/&lt;/g,   '<')
+      .replace(/&gt;/g,   '>');
+    tc = JSON.parse(decoded);
+  } catch (e) {
+    showToast("링크 생성 실패: tcData 파싱 오류", "error");
+    return;
+  }
+
+  const sheetId     = tc.sheetId     || "";
+  const sheetUrl    = tc.sheetUrl    || "";
+  const tabName     = tc.tabName     || "";
+  const displayName = tc.displayName || "";
+  const round       = tc.tcRound     || tc.round || ""; // ★ 차수 (차수별 행에서 tcRound로 주입됨)
+  const ncMode      = !!tc.ncMode;  // ★ 네이버+쿠팡 모드 플래그
+
+  if (!sheetId || !tabName) {
+    showToast("링크 생성 실패: sheetId 또는 tabName이 없습니다.", "error");
+    return;
+  }
+
+  // gid: sheetUrl에서 추출
+  const gidMatch = sheetUrl.match(/[?&]gid=(\d+)/);
+  const gid = gidMatch ? gidMatch[1] : "";
+
+  // gasUrl은 URL에 포함하지 않음 → 링크를 짧고 깔끔하게 유지
+  // 리뷰어 접속 시 BOOTSTRAP_GAS_URL(하드코딩) 또는 localStorage에서 자동 확보
+  // ★ base: 항상 search.html 고정 (관리자/리뷰어 페이지 분리)
+  const base   = location.origin + location.pathname.replace(/[^/]*$/, "") + "search.html";
+  const params = new URLSearchParams({
+    s: sheetId,    // sheetId 단축
+    g: gid,        // gid 단축
+    t: tabName,    // tabName 단축
+    d: displayName, // displayName 단축
+    rd: round       // ★ 차수 (search.html에서 폴더 라우팅에 사용)
+  });
+  // nc 모드 플래그 추가
+  if (ncMode) params.set("nc", "1");
+  // 빈 값 제거 (URL 최소화)
+  [...params.keys()].forEach(k => { if (k !== "nc" && !params.get(k)) params.delete(k); });
+  const link = base + "?" + params.toString();
+
+  // ① 새 탭으로 바로 열기
+  window.open(link, "_blank");
+
+  // ② 클립보드에도 복사 (성공 시 버튼 피드백)
+  const markCopied = () => {
+    btnEl.classList.add("copied");
+    btnEl.innerHTML = '<i class="fas fa-check"></i>';
+    setTimeout(() => {
+      btnEl.classList.remove("copied");
+      btnEl.innerHTML = '<i class="fas fa-external-link-alt"></i>';
+    }, 2500);
+  };
+
+  if (navigator.clipboard && navigator.clipboard.writeText) {
+    navigator.clipboard.writeText(link).then(() => {
+      markCopied();
+      showToast("🔗 새 탭으로 열었습니다. 링크도 클립보드에 복사됐습니다!", "success");
+    }).catch(() => {
+      showToast("🔗 새 탭으로 열었습니다.", "success");
+    });
+  } else {
+    try {
+      const ta = document.createElement("textarea");
+      ta.value = link;
+      ta.style.cssText = "position:fixed;top:-9999px;left:-9999px";
+      document.body.appendChild(ta);
+      ta.select();
+      document.execCommand("copy");
+      document.body.removeChild(ta);
+      markCopied();
+      showToast("🔗 새 탭으로 열었습니다. 링크도 클립보드에 복사됐습니다!", "success");
+    } catch (_) {
+      showToast("🔗 새 탭으로 열었습니다.", "success");
+    }
+  }
+}
+
+/**
+ * ★ 단축 URL 생성 후 클립보드 복사
+ * - GAS createShort 호출 → 6자리 코드 획득
+ * - search.html?r=CODE 형태로 복사
+ * - GAS 미배포(구버전) 시 기존 긴 URL 복사로 폴백
+ */
+async function copyShortLink(btnEl) {
+  // tcData 파싱
+  let tc = {};
+  try {
+    const raw = btnEl.getAttribute("data-tc") || "";
+    tc = JSON.parse(raw.replace(/&quot;/g,'"').replace(/&amp;/g,'&').replace(/&#39;/g,"'").replace(/&lt;/g,'<').replace(/&gt;/g,'>'));
+  } catch (e) {
+    showToast("링크 생성 실패: 데이터 파싱 오류", "error");
+    return;
+  }
+
+  const sheetId     = tc.sheetId     || "";
+  const sheetUrl    = tc.sheetUrl    || "";
+  const tabName     = tc.tabName     || "";
+  const displayName = tc.displayName || "";
+  const tcRound     = tc.tcRound     || tc.round || ""; // ★ 차수
+  if (!sheetId || !tabName) {
+    showToast("링크 생성 실패: sheetId 또는 tabName이 없습니다.", "error");
+    return;
+  }
+
+  const gidMatch = sheetUrl.match(/[?&]gid=(\d+)/);
+  const gid = gidMatch ? gidMatch[1] : "";
+  const incomeType = tc.incomeType || "";  // ★ v9.14
+
+  // 긴 URL (폴백용) — round + incomeType 포함
+  const base = location.origin + location.pathname.replace(/[^/]*$/, "") + "search.html";
+  const longParams = new URLSearchParams({ s: sheetId, g: gid, t: tabName, d: displayName, rd: tcRound, ic: incomeType });
+  [...longParams.keys()].forEach(k => { if (!longParams.get(k)) longParams.delete(k); });
+  const longUrl = base + "?" + longParams.toString();
+
+  // 로딩 상태 표시
+  const origHtml = btnEl.innerHTML;
+  btnEl.classList.add("loading");
+  btnEl.innerHTML = '<i class="fas fa-circle-notch fa-spin"></i>';
+  btnEl.disabled = true;
+
+  let shortUrl = null;
+  try {
+    if (APP_CONFIG.GAS_WEB_APP_URL) {
+      // ★ 1단계: 탭의 옵션 목록 조회 (결제금액 포함)
+      let optionList = [];
+      try {
+        const optData = await gasGet({ action: "getTabOptions", s: sheetId, g: gid, t: tabName });
+        if (optData && Array.isArray(optData.optionList)) {
+          optionList = optData.optionList; // [{ label, price }]
+        }
+      } catch (optErr) {
+        console.warn("[shortLink] 옵션 조회 실패 (무시):", optErr.message);
+      }
+
+      // ★ 2단계: 단축코드 생성 (optionList 포함)
+      const data = await gasGet({
+        action: "createShort",
+        s: sheetId, g: gid, t: tabName, d: displayName, ic: incomeType,
+        optionList: JSON.stringify(optionList)
+      });
+      if (data && data.success && data.code) {
+        shortUrl = base + "?r=" + data.code;
+      }
+    }
+  } catch (e) {
+    console.warn("[shortLink] GAS 오류, 긴 URL로 폴백:", e.message);
+  }
+
+  btnEl.classList.remove("loading");
+  btnEl.disabled = false;
+
+  const urlToCopy = shortUrl || longUrl;
+  const isShort   = !!shortUrl;
+
+  // 복사 성공 피드백
+  const markCopied = (ok) => {
+    btnEl.classList.add(ok ? "copied" : "error");
+    btnEl.innerHTML = ok ? '<i class="fas fa-check"></i>' : '<i class="fas fa-times"></i>';
+    setTimeout(() => {
+      btnEl.classList.remove("copied", "error");
+      btnEl.innerHTML = origHtml;
+    }, 2500);
+  };
+
+  const copyText = async (text) => {
+    if (navigator.clipboard && navigator.clipboard.writeText) {
+      await navigator.clipboard.writeText(text);
+    } else {
+      const ta = document.createElement("textarea");
+      ta.value = text;
+      ta.style.cssText = "position:fixed;top:-9999px;left:-9999px";
+      document.body.appendChild(ta);
+      ta.select();
+      document.execCommand("copy");
+      document.body.removeChild(ta);
+    }
+  };
+
+  try {
+    await copyText(urlToCopy);
+    markCopied(true);
+    if (isShort) {
+      showToast(`📋 단축 URL 복사 완료! (search.html?r=${shortUrl.split("?r=")[1]})`, "success");
+    } else {
+      showToast("📋 링크 복사 완료! (단축 URL 생성 실패 — 원본 URL)", "success");
+    }
+  } catch (e) {
+    markCopied(false);
+    showToast("❌ 클립보드 복사 실패: " + e.message, "error");
+  }
+}
+
+/* ── 광고주 뷰 URL 복사 (sheetId 단위 고정 URL + 단축URL) ── */
+/* 캠페인 헤더 광고주 URL 복사 (sheetId 직접 전달) */
+async function copyCampViewerLink(btnEl) {
+  const sheetId = btnEl.getAttribute("data-sheetid") || "";
+  if (!sheetId) {
+    showToast("광고주 URL 생성 실패: sheetId가 없습니다.", "error");
+    return;
+  }
+
+  const base    = location.origin + location.pathname.replace(/[^/]*$/, "") + "viewer.html";
+  const longUrl = base + "?s=" + encodeURIComponent(sheetId);
+
+  const origHtml = btnEl.innerHTML;
+  btnEl.classList.add("loading");
+  btnEl.innerHTML = '<i class="fas fa-circle-notch fa-spin"></i>';
+  btnEl.disabled  = true;
+
+  let finalUrl = longUrl;
+  try {
+    if (APP_CONFIG.GAS_WEB_APP_URL) {
+      const data = await gasGet({
+        action: "createShort",
+        s: sheetId, g: "", t: "__viewer__", d: ""
+      });
+      if (data && data.success && data.code) {
+        finalUrl = base + "?code=" + data.code;
+      }
+    }
+  } catch(e) {
+    console.warn("[campViewerLink] 단축URL 실패, 긴URL로 폴백:", e.message);
+  }
+
+  btnEl.classList.remove("loading");
+  btnEl.disabled = false;
+
+  const _markCopied = (ok) => {
+    btnEl.classList.add(ok ? "copied" : "error");
+    btnEl.innerHTML = ok
+      ? '<i class="fas fa-check"></i> 복사됨'
+      : '<i class="fas fa-times"></i> 실패';
+    setTimeout(() => {
+      btnEl.classList.remove("copied", "error");
+      btnEl.innerHTML = origHtml;
+    }, 2500);
+  };
+
+  try {
+    if (navigator.clipboard && navigator.clipboard.writeText) {
+      await navigator.clipboard.writeText(finalUrl);
+    } else {
+      const ta = document.createElement("textarea");
+      ta.value = finalUrl;
+      ta.style.cssText = "position:fixed;top:-9999px;left:-9999px";
+      document.body.appendChild(ta);
+      ta.select();
+      document.execCommand("copy");
+      document.body.removeChild(ta);
+    }
+    _markCopied(true);
+    showToast("👁 광고주 URL 복사 완료!", "success");
+  } catch(e) {
+    _markCopied(false);
+    showToast("복사 실패: " + e.message, "error");
+  }
+}
+
+async function copyViewerLink(btnEl) {
+  let tc = {};
+  try {
+    const raw = btnEl.getAttribute("data-tc") || "";
+    tc = JSON.parse(raw.replace(/&quot;/g,'"').replace(/&amp;/g,'&').replace(/&#39;/g,"'").replace(/&lt;/g,'<').replace(/&gt;/g,'>'));
+  } catch(e) {
+    showToast("광고주 URL 생성 실패: 데이터 파싱 오류", "error");
+    return;
+  }
+
+  const sheetId = tc.sheetId || "";
+  if (!sheetId) {
+    showToast("광고주 URL 생성 실패: sheetId가 없습니다.", "error");
+    return;
+  }
+
+  // viewer.html 기본 URL (sheetId만 사용)
+  const base    = location.origin + location.pathname.replace(/[^/]*$/, "") + "viewer.html";
+  const longUrl = base + "?s=" + encodeURIComponent(sheetId);
+
+  const origHtml = btnEl.innerHTML;
+  btnEl.classList.add("loading");
+  btnEl.innerHTML = '<i class="fas fa-circle-notch fa-spin"></i>';
+  btnEl.disabled  = true;
+
+  // 단축 URL 생성 (viewer 타입 — tabName을 "__viewer__"로 구분)
+  let finalUrl = longUrl;
+  try {
+    if (APP_CONFIG.GAS_WEB_APP_URL) {
+      const data = await gasGet({
+        action: "createShort",
+        s: sheetId, g: "", t: "__viewer__", d: ""
+      });
+      if (data && data.success && data.code) {
+        finalUrl = base + "?code=" + data.code;
+      }
+    }
+  } catch(e) {
+    console.warn("[viewerLink] 단축URL 실패, 긴URL로 폴백:", e.message);
+  }
+
+  btnEl.classList.remove("loading");
+  btnEl.disabled = false;
+
+  // 복사
+  const _markCopied = (ok) => {
+    btnEl.classList.add(ok ? "copied" : "error");
+    btnEl.innerHTML = ok ? '<i class="fas fa-check"></i>' : '<i class="fas fa-times"></i>';
+    setTimeout(() => {
+      btnEl.classList.remove("copied","error");
+      btnEl.innerHTML = origHtml;
+    }, 2500);
+  };
+
+  try {
+    if (navigator.clipboard && navigator.clipboard.writeText) {
+      await navigator.clipboard.writeText(finalUrl);
+    } else {
+      const ta = document.createElement("textarea");
+      ta.value = finalUrl;
+      ta.style.cssText = "position:fixed;top:-9999px;left:-9999px";
+      document.body.appendChild(ta);
+      ta.select();
+      document.execCommand("copy");
+      document.body.removeChild(ta);
+    }
+    _markCopied(true);
+    showToast("👁 광고주 URL 복사 완료!", "success");
+  } catch(e) {
+    _markCopied(false);
+    showToast("❌ 복사 실패: " + e.message, "error");
+  }
+}
+
+/**
+ * 구매양식 전용 화면을 표시하고 true 반환 (일반 초기화 스킵)
+ */
+function initOrderFormMode() {
+  const params      = new URLSearchParams(location.search);
+  if (params.get("mode") !== "form" && !params.get("r") && !params.get("s") && !params.get("sheetId")) return false;
+
+  // ★ [방법B] 단축 URL 처리: ?r=CODE → GAS resolveShort → 파라미터 복원 후 폼 진입
+  const shortCode = params.get("r") || "";
+  if (shortCode) {
+    document.querySelectorAll(".screen").forEach(s => { s.classList.remove("active"); s.style.display = "none"; });
+    const loadingEl = document.getElementById("loadingOverlay");
+    const loadingTxt = document.getElementById("loadingText");
+    if (loadingEl) { if (loadingTxt) loadingTxt.textContent = "링크 확인 중..."; loadingEl.style.display = "flex"; }
+
+    const savedUrl = (() => { try { return JSON.parse(localStorage.getItem("reviewAppConfig")||"{}").GAS_WEB_APP_URL||""; } catch(_){return "";} })();
+    const gasUrl   = BOOTSTRAP_GAS_URL || savedUrl || "";
+
+    if (!gasUrl) {
+      if (loadingEl) loadingEl.style.display = "none";
+      alert("GAS URL이 설정되지 않아 링크를 복원할 수 없습니다.");
+      return false;
+    }
+
+    _jsonpGet(gasUrl + "?action=resolveShort&code=" + encodeURIComponent(shortCode), 10000)
+      .then(data => {
+        if (loadingEl) loadingEl.style.display = "none";
+        if (!data || !data.success) {
+          alert("유효하지 않거나 만료된 링크입니다.\n(" + (data && data.error ? data.error : "알 수 없는 오류") + ")");
+          return;
+        }
+        const newParams = new URLSearchParams({ mode: "form", s: data.s||"", g: data.g||"", t: data.t||"", d: data.d||"", rd: data.rd||"" });
+        [...newParams.keys()].forEach(k => { if (!newParams.get(k)) newParams.delete(k); });
+        const newUrl = location.pathname + "?" + newParams.toString();
+        history.replaceState(null, "", newUrl);
+        initOrderFormMode(); // 재귀 호출
+      })
+      .catch(err => {
+        if (loadingEl) loadingEl.style.display = "none";
+        alert("링크 복원 중 오류가 발생했습니다: " + err.message);
+      });
+    return true;
+  }
+
+  const sheetId     = params.get("s") || params.get("sheetId")     || "";
+  const gid         = params.get("g") || params.get("gid")         || "";
+  const tabName     = params.get("t") || params.get("tabName")     || "";
+  const displayName = params.get("d") || params.get("displayName") || "";
+  const incomeType  = params.get("income") || params.get("incomeType") || "";
+
+  // GAS URL 확보 순서:
+  // 1) URL 파라미터 gasUrl (구버전 링크 하위 호환용)
+  // 2) BOOTSTRAP_GAS_URL (하드코딩 — 가장 신뢰할 수 있는 값)
+  // 3) localStorage 저장값
+  const gasUrlParam = params.get("gasUrl") || "";
+  const savedUrl    = (() => { try { return JSON.parse(localStorage.getItem("reviewAppConfig") || "{}").GAS_WEB_APP_URL || ""; } catch(_){ return ""; } })();
+  const resolvedGasUrl = gasUrlParam || BOOTSTRAP_GAS_URL || savedUrl || "";
+  if (resolvedGasUrl) APP_CONFIG.GAS_WEB_APP_URL = resolvedGasUrl;
+
+  // 전역에 폼 컨텍스트 저장 (sheetUrl 포함)
+  const _sheetUrl = sheetId ? "https://docs.google.com/spreadsheets/d/" + sheetId + "/edit" : "";
+  window._orderFormCtx = { sheetId, gid, tabName, displayName, sheetUrl: _sheetUrl };
+
+  // 헤더 제목 설정: "상품명의 구매양식 제출"
+  const titleEl    = document.getElementById("orderFormTitle");
+  const subtitleEl = document.getElementById("orderFormSubtitle");
+  const productEl  = document.getElementById("orderFormProductName");
+
+  const titleText = displayName
+    ? `${displayName}의 구매양식 제출`
+    : "구매양식 제출";
+  if (titleEl)    titleEl.textContent    = titleText;
+  if (subtitleEl) subtitleEl.textContent = tabName || "";
+  if (productEl)  productEl.textContent  = displayName || "상품명 정보 없음";
+
+  // 페이지 title도 변경
+  document.title = titleText;
+
+  // 구매양식 화면만 표시 — showScreen과 동일한 방식으로 active 클래스 사용
+  document.querySelectorAll(".screen").forEach(s => {
+    s.classList.remove("active");
+    s.style.display = "none";
+  });
+  const formScreen = document.getElementById("screenOrderForm");
+  if (formScreen) {
+    formScreen.classList.add("active");
+    formScreen.style.display = "flex";
+  }
+  window.scrollTo({ top: 0, behavior: "instant" });
+
+  // ★ 소득신고 섹션: URL 파라미터 income=소득신고 일 때만 표시
+  window._incomeType = incomeType;
+  const incomeSec = document.getElementById("ofIncomeSection");
+  if (incomeSec) incomeSec.style.display = (incomeType === "소득신고") ? "" : "none";
+
+  // ── 인애드명단 자동완성 목록 비동기 로드 (화면 표시와 병렬)
+  _loadInaedList(sheetId, gid, tabName);
+
+  return true;
+}
+
+/* ══════════════════════════════════════════════════════════
+   인애드명단 자동완성 로직
+══════════════════════════════════════════════════════════ */
+
+// 전역 자동완성 데이터
+let _inaedNames      = [];   // GAS에서 받아온 전체 목록 [{ name, date, options, rowIndex }]
+let _acActiveIdx     = -1;   // 키보드 선택 인덱스
+let _acBlurTimer     = null; // blur 딜레이 타이머
+let _optionHeaders   = [];   // 옵션 헤더명 목록 (최대 3개)
+let _memoHeader      = "";   // 비고 헤더명
+let _orderNumHeader  = "";   // 주문번호 헤더명 (없으면 "")
+
+/** GAS에서 인애드명단 목록 로드 */
+async function _loadInaedList(sheetId, gid, tabName) {
+  try {
+    if (!APP_CONFIG.GAS_WEB_APP_URL) return;
+    const data = await gasGet({ action: "getInaedList", sheetId, gid, tabName });
+    if (data && Array.isArray(data.names)) {
+      _inaedNames     = data.names;                     // [{ name, date, options, rowIndex }]
+      _optionHeaders  = data.optionHeaders  || [];      // ["옵션1","옵션2",...]
+      _memoHeader     = data.memoHeader     || "";      // "비고(닉네임)" 등
+      _orderNumHeader = data.orderNumHeader || "";      // "주문번호" 등
+      console.log("[자동완성] 인애드명단 로드 완료:", _inaedNames.length, "명",
+        "| 옵션헤더:", _optionHeaders, "| 비고:", _memoHeader, "| 주문번호:", _orderNumHeader);
+      // 비고/주문번호 입력란 동적 표시
+      _renderDynamicFields();
+    }
+  } catch (err) {
+    console.warn("[자동완성] 인애드명단 로드 실패:", err.message);
+  }
+}
+
+/** 비고·주문번호 입력란을 동적으로 표시/숨김 */
+function _renderDynamicFields() {
+  // 주문번호 입력란: 항상 표시 (AI 캡처 분석 후 자동기입 기준)
+  const orderNumWrap = document.getElementById("of_orderNum_wrap");
+  if (orderNumWrap) orderNumWrap.style.display = "";
+
+  // 비고 입력란: 시트에 비고 헤더가 있을 때만 표시 + 라벨에 실제 헤더명 반영
+  const memoWrap = document.getElementById("of_memo_wrap");
+  const memoLabel = document.getElementById("of_memo_label");
+  if (memoWrap) memoWrap.style.display = _memoHeader ? "" : "none";
+  if (memoLabel && _memoHeader) memoLabel.textContent = _memoHeader;
+}
+
+/** 입력값에 맞는 후보 필터링 */
+function _filterInaed(query) {
+  // _inaedNames 는 [{ name, date }] 배열
+  if (!query) return _inaedNames.slice(0, 30); // 빈 쿼리 → 전체 표시 (최대 30)
+  const q = query.toLowerCase();
+  return _inaedNames.filter(item => {
+    const n = typeof item === "string" ? item : (item.name || "");
+    return n.toLowerCase().includes(q);
+  }).slice(0, 30);
+}
+
+/** 이름 안에서 검색어 부분을 <b> 태그로 강조 */
+function _highlightMatch(text, query) {
+  if (!query) return escHtml(text);
+  const idx = text.toLowerCase().indexOf(query.toLowerCase());
+  if (idx < 0) return escHtml(text);
+  return escHtml(text.slice(0, idx))
+    + `<span class="of-ac-highlight">${escHtml(text.slice(idx, idx + query.length))}</span>`
+    + escHtml(text.slice(idx + query.length));
+}
+
+/** 드롭다운 렌더링 */
+function _renderAcList(items, query) {
+  const listEl = document.getElementById("of_orderer_list");
+  if (!listEl) return;
+  if (!items.length) {
+    listEl.innerHTML = `<div class="of-ac-empty">일치하는 이름이 없습니다</div>`;
+  } else {
+    listEl.innerHTML = items.map((item, i) => {
+      // item 은 { name, date } 또는 구버전 문자열 호환
+      const name = typeof item === "string" ? item : (item.name || "");
+      const date = typeof item === "string" ? "" : (item.date || "");
+      const nameHtml = _highlightMatch(name, query);
+      const dateHtml = date
+        ? `<span class="ac-date">${escHtml(date)}</span>`
+        : "";
+      return `<div class="of-ac-item" data-idx="${i}" data-name="${escHtml(name)}" onmousedown="selectAcItem('${escHtml(name)}')">`
+        + dateHtml
+        + `<i class="fas fa-user ac-icon"></i>`
+        + `<span>${nameHtml}</span>`
+        + `</div>`;
+    }).join("");
+  }
+  _acActiveIdx = -1;
+  listEl.classList.add("open");
+}
+
+/** 드롭다운 닫기 */
+function _closeAcList() {
+  const listEl = document.getElementById("of_orderer_list");
+  if (listEl) listEl.classList.remove("open");
+  _acActiveIdx = -1;
+}
+
+/** 자동완성 항목 선택 */
+function selectAcItem(name) {
+  const input = document.getElementById("of_orderer");
+  if (input) {
+    input.value = name;
+    input.dispatchEvent(new Event("input"));
+  }
+  _closeAcList();
+
+  // ── 선택된 이름에 매핑되는 옵션 표시 ──
+  const matched = _inaedNames.find(item => {
+    const n = typeof item === "string" ? item : (item.name || "");
+    return n === name;
+  });
+  _showSelectedOptions(matched ? (matched.options || []) : []);
+
+  // 다음 필드(아이디)로 포커스 이동
+  const next = document.getElementById("of_userId");
+  if (next) next.focus();
+}
+
+/** oninput 핸들러 */
+function onOrdererInput(el) {
+  const q = el.value.trim();
+  const candidates = _filterInaed(q);
+  if (_inaedNames.length === 0) {
+    // 아직 목록 로딩 전이면 드롭다운 숨김
+    _closeAcList();
+    return;
+  }
+  _renderAcList(candidates, q);
+}
+
+/** onfocus 핸들러 */
+function onOrdererFocus() {
+  if (_acBlurTimer) { clearTimeout(_acBlurTimer); _acBlurTimer = null; }
+  const q = (document.getElementById("of_orderer")?.value || "").trim();
+  const candidates = _filterInaed(q);
+  if (candidates.length > 0 || q) _renderAcList(candidates, q);
+}
+
+/** onblur 핸들러 — 클릭 이벤트보다 늦게 닫히도록 딜레이 */
+function onOrdererBlur() {
+  _acBlurTimer = setTimeout(() => { _closeAcList(); }, 200);
+}
+
+/** onkeydown 핸들러 (화살표 키 / Enter / Escape) */
+function onOrdererKeydown(e) {
+  const listEl = document.getElementById("of_orderer_list");
+  if (!listEl || !listEl.classList.contains("open")) return;
+  const items = listEl.querySelectorAll(".of-ac-item");
+  if (!items.length) return;
+
+  if (e.key === "ArrowDown") {
+    e.preventDefault();
+    _acActiveIdx = Math.min(_acActiveIdx + 1, items.length - 1);
+    _updateAcActive(items);
+  } else if (e.key === "ArrowUp") {
+    e.preventDefault();
+    _acActiveIdx = Math.max(_acActiveIdx - 1, 0);
+    _updateAcActive(items);
+  } else if (e.key === "Enter") {
+    if (_acActiveIdx >= 0 && items[_acActiveIdx]) {
+      e.preventDefault();
+      selectAcItem(items[_acActiveIdx].dataset.name);
+    }
+  } else if (e.key === "Escape") {
+    _closeAcList();
+  }
+}
+
+function _updateAcActive(items) {
+  items.forEach((el, i) => el.classList.toggle("active", i === _acActiveIdx));
+  if (_acActiveIdx >= 0) items[_acActiveIdx].scrollIntoView({ block: "nearest" });
+}
+
+/* ══════════════════════════════════════════════════════════
+   은행 자동완성 로직
+══════════════════════════════════════════════════════════ */
+
+const BANK_LIST = [
+  "국민","기업","신한","우리","KEB하나","농협",
+  "케이뱅크","카카오뱅크","토스뱅크","새마을금고",
+  "SC제일","우체국","신협","수협","대구아이엠뱅크",
+  "부산","광주","전북","경남","저축은행","한국씨티","산업"
+];
+
+let _bankActiveIdx = -1;
+let _bankBlurTimer = null;
+
+function _closeBankList() {
+  const el = document.getElementById("of_bank_list");
+  if (el) { el.innerHTML = ""; el.classList.remove("open"); }
+  _bankActiveIdx = -1;
+}
+
+function _renderBankList(items) {
+  const listEl = document.getElementById("of_bank_list");
+  if (!listEl) return;
+  if (!items.length) { _closeBankList(); return; }
+  const q = (document.getElementById("of_bank")?.value || "").trim();
+  listEl.innerHTML = items.map((name, i) =>
+    `<div class="of-ac-item" role="option" data-name="${escHtml(name)}"
+      onmousedown="selectBankItem('${escHtml(name)}')">${_highlightMatch(name, q)}</div>`
+  ).join("");
+  listEl.classList.add("open");
+  _bankActiveIdx = -1;
+}
+
+function onBankInput(input) {
+  clearTimeout(_bankBlurTimer);
+  const q = input.value.trim();
+  if (!q) { _renderBankList(BANK_LIST); return; }
+  const filtered = BANK_LIST.filter(b => b.includes(q));
+  _renderBankList(filtered);
+}
+
+function onBankFocus() {
+  clearTimeout(_bankBlurTimer);
+  const q = (document.getElementById("of_bank")?.value || "").trim();
+  const filtered = q ? BANK_LIST.filter(b => b.includes(q)) : BANK_LIST;
+  _renderBankList(filtered);
+}
+
+function onBankBlur() {
+  _bankBlurTimer = setTimeout(() => { _closeBankList(); }, 200);
+}
+
+function onBankKeydown(e) {
+  const listEl = document.getElementById("of_bank_list");
+  if (!listEl || !listEl.classList.contains("open")) return;
+  const items = listEl.querySelectorAll(".of-ac-item");
+  if (!items.length) return;
+  if (e.key === "ArrowDown") {
+    e.preventDefault();
+    _bankActiveIdx = Math.min(_bankActiveIdx + 1, items.length - 1);
+    items.forEach((el, i) => el.classList.toggle("active", i === _bankActiveIdx));
+    if (_bankActiveIdx >= 0) items[_bankActiveIdx].scrollIntoView({ block: "nearest" });
+  } else if (e.key === "ArrowUp") {
+    e.preventDefault();
+    _bankActiveIdx = Math.max(_bankActiveIdx - 1, 0);
+    items.forEach((el, i) => el.classList.toggle("active", i === _bankActiveIdx));
+    if (_bankActiveIdx >= 0) items[_bankActiveIdx].scrollIntoView({ block: "nearest" });
+  } else if (e.key === "Enter") {
+    if (_bankActiveIdx >= 0 && items[_bankActiveIdx]) {
+      e.preventDefault();
+      selectBankItem(items[_bankActiveIdx].dataset.name);
+    }
+  } else if (e.key === "Escape") {
+    _closeBankList();
+  }
+}
+
+function selectBankItem(name) {
+  const input = document.getElementById("of_bank");
+  if (input) { input.value = name; input.focus(); }
+  _closeBankList();
+}
+
+
+
+let _aiExtracted = null; // 마지막 추출 결과 저장
+
+/** 파일 인풋 변경 */
+function onImgSelected(input) {
+  if (!input.files || !input.files[0]) return;
+  _processImgFile(input.files[0]);
+}
+
+/** 드래그&드롭 */
+function onImgDrop(e) {
+  e.preventDefault();
+  document.getElementById("ofImgZone").classList.remove("drag-over");
+  const file = e.dataTransfer?.files?.[0];
+  if (!file || !file.type.startsWith("image/")) {
+    showToast("이미지 파일만 업로드 가능합니다.", true);
+    return;
+  }
+  _processImgFile(file);
+}
+
+/** 이미지 제거 */
+function removeImg() {
+  _resetImgUI();
+}
+
+/** UI 초기화 */
+function _resetImgUI() {
+  // 파일 인풋 초기화
+  const inp = document.getElementById("ofImgInput");
+  if (inp) inp.value = "";
+  // 미리보기 숨김
+  const prev = document.getElementById("ofImgPreview");
+  if (prev) { prev.style.display = "none"; document.getElementById("ofImgThumb").src = ""; }
+  // 업로드 존 다시 보이기
+  const zone = document.getElementById("ofImgZone");
+  if (zone) zone.style.display = "";
+  // 결과/로딩/오류 숨김
+  document.getElementById("ofAiLoading").classList.remove("show");
+  document.getElementById("ofAiResult").classList.remove("show");
+  document.getElementById("ofAiError").style.display = "none";
+  // ★ 별표 경고 숨김
+  const asteriskWarn = document.getElementById("ofAiAsteriskWarn");
+  if (asteriskWarn) asteriskWarn.style.display = "none";
+  _aiExtracted = null;
+  // ai-filled 클래스 제거
+  ["of_recipient","of_phone","of_address"].forEach(id => {
+    document.getElementById(id)?.classList.remove("ai-filled");
+  });
+}
+
+/** 이미지 파일 처리: 미리보기 표시 → base64 변환 → GAS 호출 */
+function _processImgFile(file) {
+  // 10MB 제한
+  if (file.size > 10 * 1024 * 1024) {
+    showToast("이미지 크기는 10MB 이하여야 합니다.", true);
+    return;
+  }
+
+  // 미리보기 표시
+  const reader = new FileReader();
+  reader.onload = async function(ev) {
+    const dataUrl = ev.target.result; // data:image/jpeg;base64,XXXX
+
+    // 미리보기 UI
+    document.getElementById("ofImgThumb").src = dataUrl;
+    document.getElementById("ofImgPreview").style.display = "flex";
+    document.getElementById("ofImgZone").style.display = "none";
+    document.getElementById("ofAiResult").classList.remove("show");
+    document.getElementById("ofAiError").style.display = "none";
+    // 파일명 표시
+    const lbl = document.getElementById("ofImgLabel");
+    if (lbl) lbl.textContent = file.name + "  ·  AI 분석 중…";
+
+    // base64 부분만 추출 (data:xxx;base64, 제거)
+    const base64 = dataUrl.split(",")[1];
+    const mimeType = file.type || "image/jpeg";
+
+    // GAS 호출
+    await _callExtractOrderImage(base64, mimeType);
+  };
+  reader.readAsDataURL(file);
+}
+
+/** GAS extractOrderImage POST 호출 */
+async function _callExtractOrderImage(base64, mimeType) {
+  const gasUrl = APP_CONFIG.GAS_WEB_APP_URL;
+  if (!gasUrl) {
+    _showAiError("GAS 웹앱 URL이 설정되지 않았습니다.");
+    return;
+  }
+
+  // 로딩 표시
+  document.getElementById("ofAiLoading").classList.add("show");
+  document.getElementById("ofAiError").style.display = "none";
+
+  try {
+    // ★ [Node.js 이관] gasPost()를 통해 API 서버로 전송
+    let json;
+    try {
+      json = await gasPost({
+        action:      "extractOrderImage",
+        imageBase64: base64,
+        mimeType:    mimeType
+      });
+      console.log("[AI추출] 응답:", JSON.stringify(json).slice(0, 200));
+    } catch(postErr) {
+      console.warn("[AI추출] POST 실패:", postErr.message);
+      _showAiError("이미지 전송 실패: " + postErr.message);
+      document.getElementById("ofAiLoading").classList.remove("show");
+      return;
+    }
+
+    document.getElementById("ofAiLoading").classList.remove("show");
+    // 라벨 업데이트
+    const lblDone = document.getElementById("ofImgLabel");
+    if (lblDone) lblDone.textContent = "분석 완료 ✓";
+
+    if (!json || json.error) {
+      _showAiError(json?.error || "알 수 없는 오류가 발생했습니다.");
+      return;
+    }
+
+    // 추출 결과 저장 및 표시
+    _aiExtracted = {
+      orderNumber: json.orderNumber || "",
+      recipient:   json.recipient   || "",
+      phone:       json.phone       || "",
+      address:     json.address     || "",
+      price:       json.price       || ""
+    };
+    _showAiResult(_aiExtracted);
+
+  } catch(err) {
+    document.getElementById("ofAiLoading").classList.remove("show");
+    _showAiError(err.message);
+  }
+}
+
+/** 추출 결과 카드 표시 */
+/** 선택된 주문자의 옵션 표시 (읽기 전용) */
+function _showSelectedOptions(optionValues) {
+  const wrap = document.getElementById("of_options_wrap");
+  if (!wrap) return;
+  // 유효한 옵션 헤더가 없거나, 모든 옵션값이 비어 있으면 숨김
+  const hasOption = _optionHeaders.length > 0
+    && optionValues.some(v => v && v.trim());
+  if (!hasOption) { wrap.style.display = "none"; return; }
+
+  const rows = _optionHeaders.map((header, i) => {
+    const val = (optionValues[i] || "").trim();
+    if (!header) return "";
+    return `<div class="of-option-row">
+      <span class="of-option-label">${escHtml(header)}</span>
+      <span class="of-option-val">${val ? escHtml(val) : '<span style="color:#9CA3AF">없음</span>'}</span>
+    </div>`;
+  }).join("");
+  document.getElementById("of_options_body").innerHTML = rows;
+  wrap.style.display = "";
+}
+
+function _showAiResult(data) {
+  const setVal = (id, val) => {
+    const el = document.getElementById(id);
+    if (!el) return;
+    if (val) {
+      el.textContent = val;
+      el.classList.remove("empty");
+    } else {
+      el.textContent = "추출 실패";
+      el.classList.add("empty");
+    }
+  };
+  setVal("aiValOrder",     data.orderNumber);
+  setVal("aiValRecipient", data.recipient);
+  setVal("aiValPhone",     data.phone);
+  setVal("aiValAddress",   data.address);
+  // 결제금액: 숫자면 콤마 포맷으로 표시
+  const priceEl = document.getElementById("aiValPrice");
+  if (priceEl) {
+    if (data.price) {
+      const fmt = Number(data.price).toLocaleString("ko-KR");
+      priceEl.textContent = fmt + "원";
+      priceEl.classList.remove("empty");
+    } else {
+      priceEl.textContent = "추출 실패";
+      priceEl.classList.add("empty");
+    }
+  }
+
+  // ★ 별표(*) 탐지: 수취인/전화번호/주소에 * 포함 시 경고 표시 + 적용 버튼 비활성화
+  const hasAsterisk = [data.recipient, data.phone, data.address].some(v => v && v.includes("*"));
+  const asteriskWarn = document.getElementById("ofAiAsteriskWarn");
+  if (asteriskWarn) asteriskWarn.style.display = hasAsterisk ? "block" : "none";
+
+  document.getElementById("ofAiResult").classList.add("show");
+  document.getElementById("ofAiError").style.display = "none";
+
+  // 하나라도 추출됐으면 버튼 활성화 (단, 별표 있으면 비활성화)
+  const hasAny = data.orderNumber || data.recipient || data.phone || data.address;
+  const applyBtn = document.getElementById("ofAiApplyBtn");
+  if (applyBtn) {
+    applyBtn.disabled = !hasAny || hasAsterisk;
+    if (hasAsterisk) {
+      applyBtn.innerHTML = '<i class="fas fa-ban"></i> 별표(*) 포함 — 직접 입력 필요';
+      applyBtn.style.background = "#9CA3AF";
+    } else {
+      applyBtn.innerHTML = '<i class="fas fa-check-circle"></i> 위 정보를 입력칸에 적용하기';
+      applyBtn.style.background = "";
+    }
+  }
+}
+
+/** 오류 메시지 표시 */
+function _showAiError(msg) {
+  document.getElementById("ofAiLoading").classList.remove("show");
+  document.getElementById("ofAiError").style.display = "block";
+  document.getElementById("ofAiErrorMsg").textContent = msg;
+}
+
+/** 추출 결과를 입력칸에 적용 */
+function applyAiResult() {
+  if (!_aiExtracted) return;
+
+  // ★ 별표(*) 재검증: 수취인/전화번호/주소에 * 있으면 적용 차단
+  const hasAsterisk = [_aiExtracted.recipient, _aiExtracted.phone, _aiExtracted.address]
+    .some(v => v && v.includes("*"));
+  if (hasAsterisk) {
+    showToast("⚠️ 수취인·전화번호·주소에 별표(*)가 포함되어 있어 적용할 수 없습니다. 쿠팡 캡처는 개인정보가 *로 가려지므로 직접 입력해주세요.", "error");
+    return;
+  }
+
+  // 수취인 — 값이 있을 때만 채움
+  if (_aiExtracted.recipient) {
+    const el = document.getElementById("of_recipient");
+    if (el) { el.value = _aiExtracted.recipient; el.classList.add("ai-filled"); }
+  }
+  // 전화번호
+  if (_aiExtracted.phone) {
+    const el = document.getElementById("of_phone");
+    if (el) { el.value = _aiExtracted.phone; el.classList.add("ai-filled"); }
+  }
+  // 주소
+  if (_aiExtracted.address) {
+    const el = document.getElementById("of_address");
+    if (el) { el.value = _aiExtracted.address; el.classList.add("ai-filled"); }
+  }
+  // 결제금액
+  if (_aiExtracted.price) {
+    const el = document.getElementById("of_price");
+    if (el) {
+      // 숫자만 남긴 후 포맷
+      const digits = _aiExtracted.price.replace(/[^0-9]/g, "");
+      if (digits) {
+        el.value = Number(digits).toLocaleString("ko-KR");
+        el.classList.add("ai-filled");
+      }
+    }
+  }
+  // 주문번호 — of_orderNumber 입력란이 있으면 채움 (시트에 주문번호 헤더 있을 때만 표시됨)
+  if (_aiExtracted.orderNumber) {
+    const el = document.getElementById("of_orderNumber");
+    if (el) { el.value = _aiExtracted.orderNumber; el.classList.add("ai-filled"); }
+    showToast("✅ 정보가 입력칸에 적용되었습니다. 주문번호: " + _aiExtracted.orderNumber);
+  } else {
+    showToast("✅ 정보가 입력칸에 적용되었습니다. 내용을 확인해주세요.");
+  }
+
+  // 버튼 상태 변경
+  const btn = document.getElementById("ofAiApplyBtn");
+  if (btn) {
+    btn.innerHTML = '<i class="fas fa-check"></i> 적용 완료';
+    btn.disabled = true;
+    btn.style.background = "#10B981";
+  }
+
+  // 주문자 칸이 비어있으면 포커스
+  const orderer = document.getElementById("of_orderer");
+  if (orderer && !orderer.value) orderer.focus();
+}
+
+// ── 연락처 실시간 포맷: 숫자만 추출 후 000-0000-0000 형식 적용
+function formatPhoneInput(el) {
+  // 숫자만 추출
+  const digits = el.value.replace(/\D/g, "").slice(0, 11);
+  let formatted = digits;
+  if (digits.length <= 3) {
+    formatted = digits;
+  } else if (digits.length <= 7) {
+    formatted = digits.slice(0, 3) + "-" + digits.slice(3);
+  } else {
+    // 010-xxxx-xxxx (11자리) 또는 02-xxx-xxxx (10자리) 처리
+    if (digits.startsWith("02")) {
+      // 서울 지역번호 02: 02-XXXX-XXXX
+      if (digits.length <= 9) {
+        formatted = digits.slice(0, 2) + "-" + digits.slice(2, 5) + "-" + digits.slice(5);
+      } else {
+        formatted = digits.slice(0, 2) + "-" + digits.slice(2, 6) + "-" + digits.slice(6);
+      }
+    } else {
+      // 010, 011, 016, 017, 018, 019, 031~ 등 3자리 국번
+      if (digits.length <= 10) {
+        formatted = digits.slice(0, 3) + "-" + digits.slice(3, 6) + "-" + digits.slice(6);
+      } else {
+        formatted = digits.slice(0, 3) + "-" + digits.slice(3, 7) + "-" + digits.slice(7);
+      }
+    }
+  }
+  // 커서 위치 보정을 위해 값만 교체
+  el.value = formatted;
+}
+
+// ── 결제금액 실시간 쉼표 포맷: 숫자만 추출 후 1,000 단위 쉼표
+function formatPriceInput(el) {
+  const digits = el.value.replace(/[^\d]/g, "");
+  if (!digits) { el.value = ""; return; }
+  el.value = Number(digits).toLocaleString("ko-KR");
+}
+
+/** 주민등록번호 자동 포맷: 6자리 입력 후 '-' 삽입 */
+function _formatResidentNo(input) {
+  let v = input.value.replace(/[^0-9]/g, "").slice(0, 13);
+  if (v.length > 6) v = v.slice(0, 6) + "-" + v.slice(6);
+  input.value = v;
+  const hint = document.getElementById("ofResidentNoHint");
+  if (hint) {
+    const digits = v.replace(/[^0-9]/g, "");
+    if (digits.length === 13) {
+      hint.textContent = "✅ 13자리 입력 완료";
+      hint.style.color = "#10B981";
+    } else {
+      hint.textContent = "숫자 13자리 자동 형식화 (000000-0000000)";
+      hint.style.color = "#9CA3AF";
+    }
+    // 테두리 색 복원
+    input.style.borderColor = digits.length === 13 ? "#10B981" : "#A78BFA";
+  }
+}
+
+/**
+ * [제출] 버튼 클릭 시 호출
+ * 입력값 수집 → GAS submitOrderForm 호출 → 완료 화면 표시
+ */
+/** 필수 입력 오류 표시 헬퍼 */
+function _ofShowError(inputId) {
+  const el = document.getElementById(inputId);
+  if (el) el.classList.add("of-input--error");
+  const msg = document.getElementById(inputId + "_err");
+  if (msg) msg.classList.add("visible");
+}
+/** 필수 입력 오류 해제 헬퍼 (입력 중 실시간 클리어) */
+function _ofClearError(inputId) {
+  const el = document.getElementById(inputId);
+  if (el && el.value.trim()) {
+    el.classList.remove("of-input--error");
+    const msg = document.getElementById(inputId + "_err");
+    if (msg) msg.classList.remove("visible");
+  }
+}
+
+async function submitOrderForm() {
+  // ★★★ 연속클릭 방지: 함수 진입 즉시 전역 플래그 + 버튼 비활성화 ★★★
+  // async 함수 특성상 첫 await 이전에 동기적으로 실행되므로 가장 확실한 위치
+  if (window._submitOrderFormInProgress) {
+    console.warn("[submitOrderForm] 이미 제출 진행 중 — 중복 클릭 무시");
+    return;
+  }
+  window._submitOrderFormInProgress = true;
+  const btn = document.getElementById("btnOrderFormSubmit");
+  if (btn) {
+    btn.disabled = true;
+    btn.innerHTML = '<i class="fas fa-spinner fa-spin"></i> 처리 중...';
+  }
+
+  // 내부에서 early return 할 때마다 플래그·버튼을 복원하는 헬퍼
+  function _resetBtn(label) {
+    window._submitOrderFormInProgress = false;
+    if (btn) {
+      btn.disabled = false;
+      btn.innerHTML = label || '<i class="fas fa-paper-plane"></i> 제출';
+    }
+  }
+
+  const ctx = window._orderFormCtx || {};
+  // ★ [방법A] gid가 있으면 tabName 없이도 제출 가능 (탭명 변경 대응)
+  if (!ctx.sheetId || (!ctx.tabName && !ctx.gid)) {
+    showToast("잘못된 링크입니다. (sheetId/tabName 또는 gid 필요)", "error");
+    _resetBtn(); return;
+  }
+
+  // GAS URL 최종 확보 (BOOTSTRAP → localStorage 폴백)
+  if (!APP_CONFIG.GAS_WEB_APP_URL) {
+    const savedUrl = (() => { try { return JSON.parse(localStorage.getItem("reviewAppConfig") || "{}").GAS_WEB_APP_URL || ""; } catch(_){ return ""; } })();
+    if (savedUrl) APP_CONFIG.GAS_WEB_APP_URL = savedUrl;
+  }
+  if (!APP_CONFIG.GAS_WEB_APP_URL) {
+    showToast("서버 연결 정보가 없습니다. 관리자에게 문의해주세요.", "error");
+    _resetBtn(); return;
+  }
+
+  // 입력값 수집
+  const getValue = id => (document.getElementById(id)?.value || "").trim();
+  const orderer   = getValue("of_orderer");
+  const recipient = getValue("of_recipient");
+  const userId    = getValue("of_userId");
+  // 연락처: 표시용 포맷(010-1234-5678) 그대로 전송
+  const phone     = getValue("of_phone");
+  const address   = getValue("of_address");
+  const bank      = getValue("of_bank");
+  const account   = getValue("of_account");
+  const depositor = getValue("of_depositor");
+  // 결제금액: 쉼표 제거 후 순수 숫자만 전송 (예: "47,000" → "47000")
+  const price     = getValue("of_price").replace(/,/g, "");
+  // ★ 주문번호 (시트에 헤더 있을 때만 값 있음, 없으면 빈 문자열)
+  const orderNum  = getValue("of_orderNumber");
+  // ★ 비고 (시트에 헤더 있을 때만 표시됨, 빈 문자열로 제출 가능)
+  const memo      = getValue("of_memo");
+
+  // ── 필수 항목 유효성 검사 ──────────────────────────────────
+  let hasError = false;
+  if (!orderer) {
+    _ofShowError("of_orderer");
+    hasError = true;
+  }
+  if (!userId) {
+    _ofShowError("of_userId");
+    hasError = true;
+  }
+  if (hasError) {
+    // 첫 번째 오류 필드로 스크롤
+    const firstErr = document.querySelector(".of-input--error");
+    if (firstErr) firstErr.scrollIntoView({ behavior: "smooth", block: "center" });
+    showToast("필수 항목을 입력해주세요.", "warning");
+    _resetBtn(); return;
+  }
+
+  // 날짜: 제출 시점 자동 생성 (MM / D (요일))
+  const now   = new Date();
+  const month = now.getMonth() + 1;
+  const day   = now.getDate();
+  const days  = ["일","월","화","수","목","금","토"];
+  const dow   = days[now.getDay()];
+  const dateStr = `${month} / ${day} (${dow})`;
+
+  // ★ 소득신고 유효성 검사 및 수집
+  let incomeName = "";
+  let residentNo = "";
+  const incomeSection = document.getElementById("ofIncomeSection");
+  if (incomeSection && incomeSection.style.display !== "none") {
+    incomeName = getValue("ofIncomeName");
+    const residentRaw = getValue("ofResidentNo").replace(/[^0-9]/g, "");
+    if (!incomeName) {
+      const el = document.getElementById("ofIncomeName");
+      if (el) { el.style.borderColor = "#EF4444"; el.focus(); }
+      showToast("소득신고 명의를 입력해주세요.", "warning");
+      _resetBtn(); return;
+    }
+    if (residentRaw.length !== 13) {
+      const el = document.getElementById("ofResidentNo");
+      if (el) { el.style.borderColor = "#EF4444"; el.focus(); }
+      showToast("주민등록번호 13자리를 정확히 입력해주세요.", "warning");
+      _resetBtn(); return;
+    }
+    residentNo = residentRaw.slice(0, 6) + "-" + residentRaw.slice(6);
+  }
+
+  const payload = {
+    action:     "submitOrderForm",
+    sheetId:    ctx.sheetId,
+    gid:        ctx.gid    || "",
+    tabName:    ctx.tabName,
+    orderer, recipient, userId, phone, address,
+    bank, account, depositor, price,
+    orderNum, memo,
+    dateStr,
+    incomeName, residentNo
+  };
+
+  // 버튼은 이미 함수 상단에서 비활성화됨 — 텍스트만 "제출 중..."으로 업데이트
+  if (btn) btn.innerHTML = '<i class="fas fa-spinner fa-spin"></i> 제출 중...';
+
+  try {
+    // ── 1단계: 양식 데이터 시트에 기입 ──
+    let res;
+    let stage1Err = null;
+    try {
+      res = await gasPost(payload);
+    } catch (e1) {
+      stage1Err = e1;
+      console.warn("[submitOrderForm] gasPost 실패, gasGet으로 재시도:", e1.message);
+      try {
+        res = await gasGet(payload);
+      } catch (e2) {
+        const netMsg = (e2.message && e2.message !== "undefined")
+          ? e2.message : "서버 연결에 실패했습니다. 네트워크를 확인하고 다시 시도해주세요.";
+        throw new Error(netMsg);
+      }
+    }
+    if (!res) throw new Error("서버 응답이 없습니다. 잠시 후 다시 시도해주세요.");
+    if (res && res.ok) {
+
+      // ── 2단계: 이미지가 있으면 드라이브에 업로드 (백그라운드, 실패해도 제출 완료) ──
+      const imgThumb = document.getElementById("ofImgThumb");
+      if (imgThumb && imgThumb.src && imgThumb.src.startsWith("data:")) {
+        try {
+          const dataUrl  = imgThumb.src;
+          const mimeType = dataUrl.split(";")[0].split(":")[1] || "image/jpeg";
+          const base64   = dataUrl.split(",")[1];
+          const ext      = mimeType === "image/png" ? "png" : mimeType === "image/webp" ? "webp" : "jpg";
+          // 파일명: 수취인이름_주문자이름.확장자 (수취인 없으면 주문자만)
+          const namePart = [recipient || orderer, orderer !== recipient ? orderer : ""]
+            .filter(Boolean).join("_") || "주문캡처";
+          const fileName = namePart + "." + ext;
+
+          const uploadPayload = {
+            action:      "uploadOrderImage",
+            imageBase64: base64,
+            mimeType:    mimeType,
+            fileName:    fileName,
+            displayName: ctx.displayName || "",  // 상품명 → 캠페인폴더명
+            tabName:     ctx.tabName,            // 탭명 → 인덱스폴더명 기준
+            round:       ctx.round       || "",  // 차수 → 폴더명에 삽입
+            sheetId:     ctx.sheetId     || ""   // ★ 탭명 변경 대응: ID로 세부목록 조회
+          };
+
+          // ★ [Node.js 이관] gasPost()를 통해 API 서버로 전송 — 2회 재시도
+          let upJson = null;
+          for (let attempt = 1; attempt <= 2; attempt++) {
+            try {
+              upJson = await gasPost(uploadPayload);
+              break;
+            } catch (fetchErr) {
+              if (attempt < 2) {
+                console.warn("[이미지 업로드] " + attempt + "차 실패, 1.5초 후 재시도:", fetchErr.message);
+                await new Promise(r => setTimeout(r, 1500));
+              } else {
+                throw fetchErr;
+              }
+            }
+          }
+          if (upJson && upJson.ok) {
+            console.log("[이미지 업로드] 완료:", upJson.fileUrl);
+            // ── 캡처 폴더 URL을 세부목록에 저장 (대시보드 바로가기 버튼용) ──
+            if (upJson.captureFolderUrl) {
+              try {
+                // ★ [Node.js 이관] gasPost()를 통해 API 서버로 전송
+                const sfJson = await gasPost({
+                  action:           "saveCaptureFolder",
+                  sheetId:          ctx.sheetId  || "",
+                  sheetUrl:         ctx.sheetUrl || "",
+                  tabName:          ctx.tabName,
+                  captureFolderUrl: upJson.captureFolderUrl
+                });
+                if (sfJson && sfJson.ok) {
+                  console.log("[캡처폴더 저장] 완료:", upJson.captureFolderUrl);
+                } else {
+                  console.warn("[캡처폴더 저장] 실패:", sfJson?.error);
+                }
+              } catch(sfErr) {
+                console.warn("[캡처폴더 저장] 실패 (무시):", sfErr.message);
+              }
+            }
+          } else {
+            console.warn("[이미지 업로드] 실패:", upJson?.error);
+          }
+        } catch (upErr) {
+          console.warn("[이미지 업로드] 오류 (제출은 완료됨):", upErr.message);
+        }
+      }
+
+      // ── 3단계: 완료 화면 표시 ──
+      window._submitOrderFormInProgress = false; // ★ 플래그 해제 (완료 시 버튼은 숨기므로 복원 불필요)
+      const card = document.getElementById("orderFormCard");
+      const doneEl = document.getElementById("orderFormDone");
+      const submitBtn = document.getElementById("btnOrderFormSubmit");
+      if (card)      card.style.display      = "none";
+      if (submitBtn) submitBtn.style.display = "none";
+      if (doneEl)    doneEl.style.display    = "";
+      // 안내 문구도 숨김
+      const guideEl = document.querySelector("#screenOrderForm main > div:nth-child(3)");
+      if (guideEl) guideEl.style.display = "none";
+    } else {
+      const msg = (res?.error && res.error !== "undefined") ? res.error : "제출에 실패했습니다. 다시 시도해주세요.";
+      showToast("❌ " + msg, "error");
+      _resetBtn(); // ★ 실패 시 버튼 복원 + 플래그 해제
+    }
+  } catch (err) {
+    const displayMsg = (err.message && err.message !== "undefined" && err.message !== "null")
+      ? err.message : "제출에 실패했습니다. 네트워크를 확인하고 다시 시도해주세요.";
+    showToast("❌ " + displayMsg, "error");
+    console.error("[submitOrderForm] 오류:", err);
+    _resetBtn(); // ★ 오류 시 버튼 복원 + 플래그 해제
+  }
+}
+
+async function quickEditCell(e, cell) {
+  e.stopPropagation();
+
+  // ★ 토글: 이미 열려있는 팝업의 셀을 다시 클릭하면 닫기만 하고 종료
+  if (_qePopup && _qePopupCell === cell) {
+    _closeQePopup();
+    return;
+  }
+  _closeQePopup();
+
+  const field   = cell.dataset.field;   // '상품명' | '주문시간대' | '리뷰타입' | '담당자' | '입금방식' | '택대'
+  const tcData  = JSON.parse(cell.dataset.tc.replace(/&amp;/g,'&').replace(/&lt;/g,'<').replace(/&gt;/g,'>').replace(/&quot;/g,'"').replace(/&#39;/g,"'"));
+
+  // ── 팝업 DOM 생성 ──
+  const popup = document.createElement("div");
+  popup.className = "qe-popup";
+  _qePopup = popup;
+  _qePopupCell = cell; // ★ 토글 판단용: 현재 팝업을 연 셀 저장
+
+  // 아이콘 맵
+  const iconMap = { '상품명':'fa-box', '주문시간대':'fa-clock', '리뷰타입':'fa-star', '담당자':'fa-user', '입금방식':'fa-won-sign', '택대':'fa-truck', '비고':'fa-sticky-note',
+    '진행방식':'fa-receipt', '입금명':'fa-signature', '이체은행':'fa-university' };  // ★ v9.14
+  // 기존값 유무 판단 (각 필드별 tcData 접근)
+  const _fieldValMap = { '상품명': tcData.displayName, '주문시간대': tcData.timeRange, '리뷰타입': tcData.reviewType, '담당자': tcData.manager, '입금방식': tcData.paymentType, '택대': tcData.taekhap,
+    '진행방식': tcData.incomeType, '입금명': tcData.depositName, '이체은행': tcData.transferBank };  // ★ v9.14
+  const _hasExistingVal = field === '비고' ? false : !!(String(_fieldValMap[field] || '').trim());
+  const _titleAction = _hasExistingVal ? '수정' : '입력';
+  popup.innerHTML = `<div class="qe-popup-title"><i class="fas ${iconMap[field]||'fa-pen'}" style="font-size:.65rem;color:var(--p)"></i>${field} ${_titleAction}</div>`;
+
+  let getValue; // 팝업 확인 시 선택값을 반환하는 함수
+
+  if (field === '상품명') {
+    const _existingName = (tcData.displayName || '').trim();
+    popup.innerHTML += `<input type="text" id="qeInput" placeholder="예: OO브랜드 후기작업 3월" maxlength="60" value="${escHtml(_existingName)}">`;
+    getValue = () => document.getElementById("qeInput").value.trim();
+
+  } else if (field === '주문시간대') {
+    // ── [+정보]와 동일한 모드버튼 + 48슬롯 그리드 UI ──
+    // 기존 값 파싱
+    const _existingTime = (tcData.timeRange || '').trim();
+    let _qeTimeMode, _qeTimeStart, _qeTimeEnd;
+    if (!_existingTime || _existingTime === '') {
+      _qeTimeMode = ''; _qeTimeStart = null; _qeTimeEnd = null;
+    } else if (_existingTime === '자유') {
+      _qeTimeMode = '자유'; _qeTimeStart = null; _qeTimeEnd = null;
+    } else {
+      _qeTimeMode = 'timed';
+      const parts = _existingTime.split('~').map(s => s.trim());
+      _qeTimeStart = parts[0] || null;
+      _qeTimeEnd   = (parts[1] && parts[1] !== '') ? parts[1] : null;
+    }
+
+    popup.innerHTML += `
+      <div class="tc-option-row" id="qeTimeModeRow" style="margin-bottom:4px">
+        <button class="tc-opt qe-tm" data-val="">미지정</button>
+        <button class="tc-opt qe-tm" data-val="자유">자유</button>
+        <button class="tc-opt qe-tm" data-val="timed">타임지정</button>
+      </div>
+      <div id="qeTimePicker" class="tc-time-picker tc-time-picker-disabled" style="margin-bottom:6px">
+        <div class="tc-time-picker-hint" id="qeTimeHint">타임지정을 선택하면 활성화됩니다</div>
+        <div class="tc-time-grid" id="qeTimeGrid"></div>
+        <button class="tc-time-clear" type="button" id="qeTimeClear">시간 초기화</button>
+      </div>`;
+
+    // 그리드 셀 생성
+    const qeGrid = popup.querySelector("#qeTimeGrid");
+    TC_TIME_SLOTS.forEach(slot => {
+      const btn = document.createElement("button");
+      btn.className   = "tc-time-cell";
+      btn.textContent = slot;
+      btn.type        = "button";
+      btn.addEventListener("click", ev => {
+        ev.stopPropagation();
+        if (!_qeTimeStart) {
+          _qeTimeStart = slot; _qeTimeEnd = null;
+        } else if (!_qeTimeEnd) {
+          if (slot === _qeTimeStart)      { _qeTimeStart = null; }
+          else if (slot < _qeTimeStart)   { _qeTimeEnd = _qeTimeStart; _qeTimeStart = slot; }
+          else                             { _qeTimeEnd = slot; }
+        } else {
+          _qeTimeStart = slot; _qeTimeEnd = null;
+        }
+        _syncQeTimePicker();
+      });
+      qeGrid.appendChild(btn);
+    });
+
+    // 초기화 버튼
+    popup.querySelector("#qeTimeClear").addEventListener("click", ev => {
+      ev.stopPropagation();
+      _qeTimeStart = null; _qeTimeEnd = null;
+      _syncQeTimePicker();
+    });
+
+    // 모드 버튼 클릭
+    popup.querySelectorAll(".qe-tm").forEach(btn => {
+      btn.addEventListener("click", ev => {
+        ev.stopPropagation();
+        _qeTimeMode = btn.dataset.val;
+        if (_qeTimeMode !== "timed") { _qeTimeStart = null; _qeTimeEnd = null; }
+        _syncQeTimePicker();
+      });
+    });
+
+    // 동기화 함수 (클로저)
+    function _syncQeTimePicker() {
+      const picker = popup.querySelector("#qeTimePicker");
+      const hint   = popup.querySelector("#qeTimeHint");
+      popup.querySelectorAll(".qe-tm").forEach(b => b.classList.toggle("sel", b.dataset.val === _qeTimeMode));
+      const isTimed = (_qeTimeMode === "timed");
+      picker.classList.toggle("tc-time-picker-disabled", !isTimed);
+      picker.querySelectorAll(".tc-time-cell").forEach(c => {
+        const v = c.textContent;
+        c.classList.remove("tc-sel-start","tc-sel-end","tc-in-range");
+        if (!isTimed) return;
+        if (v === _qeTimeStart) c.classList.add("tc-sel-start");
+        if (v === _qeTimeEnd)   c.classList.add("tc-sel-end");
+        if (_qeTimeStart && _qeTimeEnd && v > _qeTimeStart && v < _qeTimeEnd)
+          c.classList.add("tc-in-range");
+      });
+      if (!isTimed) {
+        hint.textContent = _qeTimeMode === "자유" ? "시간 제한 없음" : "타임지정을 선택하면 활성화됩니다";
+      } else if (!_qeTimeStart) {
+        hint.textContent = "① 시작 시간을 클릭하세요";
+      } else if (!_qeTimeEnd) {
+        hint.textContent = "✔ " + _qeTimeStart + "~  ← 종료시간(선택사항)";
+      } else {
+        hint.textContent = "✔ " + _qeTimeStart + " ~ " + _qeTimeEnd;
+      }
+    }
+    _syncQeTimePicker();
+
+    // 팝업 너비를 넉넉하게 확보 (그리드 6열 표시용)
+    popup.style.minWidth = "280px";
+
+    getValue = () => {
+      if (_qeTimeMode === "")      return "";
+      if (_qeTimeMode === "자유")   return "자유";
+      if (_qeTimeStart && _qeTimeEnd) return _qeTimeStart + " ~ " + _qeTimeEnd;
+      if (_qeTimeStart)               return _qeTimeStart + " ~";
+      return "";
+    };
+
+  } else if (field === '리뷰타입') {
+    const _existingReview = (tcData.reviewType || '').trim();
+    const opts = ['실배송','빈박스','구매확정','믹스'];
+    popup.innerHTML += `<div class="qe-opt-row">${opts.map(o=>`<button class="qe-opt" data-val="${o}">${o}</button>`).join('')}</div>`;
+    getValue = () => { const s = popup.querySelector(".qe-opt.sel"); return s ? s.dataset.val : ''; };
+    // 기존값 pre-select
+    if (_existingReview) {
+      popup.querySelectorAll(".qe-opt").forEach(b => { if (b.dataset.val === _existingReview) b.classList.add("sel"); });
+    }
+    popup.querySelectorAll(".qe-opt").forEach(btn => {
+      btn.addEventListener("click", ev => {
+        ev.stopPropagation();
+        popup.querySelectorAll(".qe-opt").forEach(b => b.classList.remove("sel"));
+        btn.classList.toggle("sel", !btn.classList.contains("sel") || true);
+        btn.classList.add("sel");
+      });
+    });
+
+  } else if (field === '담당자') {
+    const _existingManager = (tcData.manager || '').trim();
+    const opts = ['만두','망고'];
+    popup.innerHTML += `<div class="qe-opt-row">${opts.map(o=>`<button class="qe-opt" data-val="${o}">${o}</button>`).join('')}</div>`;
+    getValue = () => { const s = popup.querySelector(".qe-opt.sel"); return s ? s.dataset.val : ''; };
+    // 기존값 pre-select
+    if (_existingManager) {
+      popup.querySelectorAll(".qe-opt").forEach(b => { if (b.dataset.val === _existingManager) b.classList.add("sel"); });
+    }
+    popup.querySelectorAll(".qe-opt").forEach(btn => {
+      btn.addEventListener("click", ev => {
+        ev.stopPropagation();
+        popup.querySelectorAll(".qe-opt").forEach(b => b.classList.remove("sel"));
+        btn.classList.add("sel");
+      });
+    });
+
+  } else if (field === '입금방식') {
+    const _existingPayment = (tcData.paymentType || '').trim();
+    const opts = ['인애드','업체'];
+    popup.innerHTML += `<div class="qe-opt-row">${opts.map(o=>`<button class="qe-opt" data-val="${o}">${o}</button>`).join('')}</div>`;
+    getValue = () => { const s = popup.querySelector(".qe-opt.sel"); return s ? s.dataset.val : ''; };
+    // 기존값 pre-select
+    if (_existingPayment) {
+      popup.querySelectorAll(".qe-opt").forEach(b => { if (b.dataset.val === _existingPayment) b.classList.add("sel"); });
+    }
+    popup.querySelectorAll(".qe-opt").forEach(btn => {
+      btn.addEventListener("click", ev => {
+        ev.stopPropagation();
+        popup.querySelectorAll(".qe-opt").forEach(b => b.classList.remove("sel"));
+        btn.classList.add("sel");
+      });
+    });
+
+  } else if (field === '진행방식') {  // ★ v9.14
+    const _existingIncome = (tcData.incomeType || '').trim();
+    const opts = ['현금','사업자현영','소득신고'];
+    popup.innerHTML += `<div class="qe-opt-row">${opts.map(o=>`<button class="qe-opt" data-val="${o}">${o}</button>`).join('')}</div>`;
+    getValue = () => { const s = popup.querySelector(".qe-opt.sel"); return s ? s.dataset.val : ''; };
+    if (_existingIncome) {
+      popup.querySelectorAll(".qe-opt").forEach(b => { if (b.dataset.val === _existingIncome) b.classList.add("sel"); });
+    }
+    popup.querySelectorAll(".qe-opt").forEach(btn => {
+      btn.addEventListener("click", ev => {
+        ev.stopPropagation();
+        popup.querySelectorAll(".qe-opt").forEach(b => b.classList.remove("sel"));
+        btn.classList.add("sel");
+      });
+    });
+
+  } else if (field === '택대') {
+    const _existingTaekhap = tcData.taekhap === true || tcData.taekhap === 'true';
+    popup.innerHTML += `<div class="qe-opt-row">
+      <button class="qe-opt${_existingTaekhap ? '' : ' sel'}" data-val="true">✔ 택대 ON</button>
+      <button class="qe-opt${_existingTaekhap ? ' sel' : ''}" data-val="false">✖ 택대 OFF</button>
+    </div>`;
+    getValue = () => { const s = popup.querySelector(".qe-opt.sel"); return s ? s.dataset.val : 'true'; };
+    popup.querySelectorAll(".qe-opt").forEach(btn => {
+      btn.addEventListener("click", ev => {
+        ev.stopPropagation();
+        popup.querySelectorAll(".qe-opt").forEach(b => b.classList.remove("sel"));
+        btn.classList.add("sel");
+      });
+    });
+
+  } else if (field === '입금명') {  // ★ v9.14
+    const _existingDepositName = (tcData.depositName || '').trim();
+    popup.innerHTML += `<input type="text" id="qeInput" placeholder="예: 홍길동" maxlength="30" value="${escHtml(_existingDepositName)}">`;
+    getValue = () => document.getElementById("qeInput").value.trim();
+
+  } else if (field === '이체은행') {  // ★ v9.14
+    const _existingBank = (tcData.transferBank || '').trim();
+    const opts = ['케이뱅크','하나은행','국민은행','신한은행','우리은행','농협','카카오뱅크'];
+    popup.innerHTML += `<div class="qe-opt-row">${opts.map(o=>`<button class="qe-opt" data-val="${o}">${o}</button>`).join('')}</div>`;
+    // 직접입력 옵션
+    popup.innerHTML += `<input type="text" id="qeInput" placeholder="직접 입력..." maxlength="20" value="" style="margin-top:5px;width:100%;border:1.5px solid var(--bd);border-radius:7px;padding:5px 8px;font-size:.8rem;outline:none;box-sizing:border-box;font-family:inherit">`;
+    getValue = () => {
+      const sel = popup.querySelector(".qe-opt.sel");
+      const txt = (document.getElementById("qeInput")?.value || '').trim();
+      return txt || (sel ? sel.dataset.val : '');
+    };
+    // 기존값 pre-select
+    if (_existingBank) {
+      const matched = popup.querySelector(`.qe-opt[data-val="${_existingBank}"]`);
+      if (matched) matched.classList.add('sel');
+      else document.getElementById('qeInput').value = _existingBank;
+    }
+    popup.querySelectorAll(".qe-opt").forEach(btn => {
+      btn.addEventListener("click", ev => {
+        ev.stopPropagation();
+        popup.querySelectorAll(".qe-opt").forEach(b => b.classList.remove("sel"));
+        btn.classList.add("sel");
+        const inp = document.getElementById("qeInput");
+        if (inp) inp.value = '';  // 버튼 선택 시 직접입력 초기화
+      });
+    });
+
+  } else if (field === '비고') {
+    // 비고 – localStorage 전용 (GAS 저장 없음), 기존 값 미리 채워짐
+    const existingMemo = _getTabMemo(cell.dataset.tabkey || '');
+    popup.innerHTML += `<textarea id="qeMemoInput" rows="3" placeholder="자유롭게 메모하세요..." maxlength="200" style="width:100%;border:1.5px solid var(--bd);border-radius:7px;padding:7px 9px;font-size:.8rem;outline:none;box-sizing:border-box;resize:vertical;font-family:inherit;line-height:1.4">${escHtml(existingMemo)}</textarea><p style="font-size:.62rem;color:var(--t3);margin:2px 0 5px">이 기기에만 저장됩니다 (최대 200자)</p>`;
+    getValue = () => document.getElementById("qeMemoInput").value.trim();
+    popup.style.minWidth = "240px";
+    // 기존 값 있으면 제목에 '수정' 표시
+    if (existingMemo) {
+      popup.querySelector('.qe-popup-title').innerHTML =
+        `<i class="fas fa-sticky-note" style="font-size:.65rem;color:var(--p)"></i>비고 수정`;
+    }
+  }
+
+  // 적용 버튼
+  const applyBtn = document.createElement("button");
+  applyBtn.className = "qe-apply";
+  applyBtn.textContent = "✔ 적용";
+  popup.appendChild(applyBtn);
+
+  // ── 팝업 위치 계산 (셀 아래, 화면 밖으로 나가지 않도록) ──
+  document.body.appendChild(popup);
+  const cr   = cell.getBoundingClientRect();
+  const pw   = popup.offsetWidth;
+  const ph   = popup.offsetHeight;
+  let left   = cr.left;
+  let top    = cr.bottom + 4;
+  if (left + pw > window.innerWidth - 8)  left = window.innerWidth - pw - 8;
+  if (top  + ph > window.innerHeight - 8) top  = cr.top - ph - 4;
+  popup.style.left = Math.max(4, left) + "px";
+  popup.style.top  = Math.max(4, top)  + "px";
+
+  // input 포커스
+  const inp = popup.querySelector("input[type=text]");
+  if (inp) setTimeout(() => inp.focus(), 30);
+
+  // ── 적용 클릭 → GAS 저장 (비고는 localStorage 전용) ──
+  applyBtn.addEventListener("click", async (ev) => {
+    ev.stopPropagation();
+    const val = getValue ? getValue() : '';
+    if (!val && field !== '택대' && field !== '주문시간대' && field !== '비고' && field !== '입금명' && field !== '이체은행') { showToast("값을 입력하거나 선택해주세요.", true); return; }
+
+    _closeQePopup();
+
+    // ── 비고: localStorage만 저장 후 행 DOM 즉시 갱신 ──
+    if (field === '비고') {
+      const tabKey = cell.dataset.tabkey || '';
+      _setTabMemo(tabKey, val);
+      // 해당 셀 내용 직접 교체
+      const memoInner = val
+        ? `<span class="dash-cell-memo" title="${escHtml(val)}">${escHtml(val)}</span>`
+        : `<span style="color:#D1D5DB;font-size:.65rem">—</span>`;
+      cell.innerHTML = memoInner;
+      cell.title = val ? '비고 수정' : '비고 입력';
+      showToast(val ? "비고가 저장되었습니다." : "비고가 삭제되었습니다.");
+      return; // GAS 전송 없이 종료
+    }
+
+    // 기존 tcData에서 해당 필드만 교체
+    const fieldKey = { '상품명':'displayName', '주문시간대':'timeRange', '리뷰타입':'reviewType', '담당자':'manager', '입금방식':'paymentType', '진행방식':'incomeType', '택대':'taekhap', '입금명':'depositName', '이체은행':'transferBank' }[field];  // ★ v9.14
+    const newTcData = { ...tcData };
+    if (field === '택대') newTcData.taekhap = (val === 'true' || val === true);
+    else newTcData[fieldKey] = val;
+
+    const resolvedSheetId  = newTcData.sheetId || APP_CONFIG.BASE_SHEET_ID || "";
+    const rawSheetUrl      = newTcData.sheetUrl || (resolvedSheetId ? "https://docs.google.com/spreadsheets/d/"+resolvedSheetId+"/edit" : "");
+    const resolvedSheetUrl = rawSheetUrl.split("#")[0];
+
+    const payload = {
+      action:      "setTabConfig",
+      sheetId:     resolvedSheetId,
+      sheetUrl:    resolvedSheetUrl,
+      tabName:     newTcData.tabName     || "",
+      manager:     newTcData.manager     || "",
+      timeRange:   newTcData.timeRange   || "",
+      taekhap:     newTcData.taekhap     ? "true" : "false",
+      reviewType:  newTcData.reviewType  || "",
+      paymentType: newTcData.paymentType || "",
+      displayName: newTcData.displayName || "",
+      incomeType:  newTcData.incomeType  || "",   // ★ v9.14
+      depositName: newTcData.depositName || "",   // ★ v9.14
+      transferBank: newTcData.transferBank || ""  // ★ v9.14
+    };
+
+    console.log("[QE] 저장 payload:", JSON.stringify(payload));
+    try {
+      let json;
+      try { json = await gasPost(payload); }
+      catch { json = await gasGet(payload); }
+      if (json.ok) {
+        showToast(`✅ ${field} 저장 완료`);
+        // ★ 전체 새로고침 대신 해당 탭 데이터만 패치 → 로딩 없이 즉시 반영
+        _patchTabAndRerender(payload.sheetId, payload.tabName, {
+          displayName: payload.displayName,
+          manager:     payload.manager,
+          timeRange:   payload.timeRange,
+          taekhap:     payload.taekhap === "true",
+          reviewType:  payload.reviewType,
+          paymentType: payload.paymentType,
+          incomeType:  payload.incomeType,  // ★ v9.14
+          depositName: payload.depositName,  // ★ v9.14
+          transferBank: payload.transferBank // ★ v9.14
+        });
+      } else {
+        showToast("❌ 저장 실패: " + (json.error || ""), true);
+      }
+    } catch (err) {
+      showToast("❌ 오류: " + err.message, true);
+    }
+  });
+}
+
+function toggleAllCampaigns() {
+  const wrap   = document.getElementById("dashboardWrap");
+  if (!wrap) return;
+
+  const tables  = wrap.querySelectorAll(".dash-tab-table");
+  const headers = wrap.querySelectorAll(".dash-campaign-header");
+  const btn     = document.getElementById("btnExpandAll");
+  if (!tables.length) return;
+
+  // 현재 상태: 하나라도 펼쳐져 있으면 → 전체 접기, 모두 접혀 있으면 → 전체 펼치기
+  const anyOpen = Array.from(tables).some(t => !t.classList.contains("collapsed"));
+  allExpanded   = !anyOpen;
+
+  tables.forEach((table, i) => {
+    const header = headers[i];
+    const icon   = header ? header.querySelector(".dash-toggle-icon") : null;
+    if (allExpanded) {
+      table.classList.remove("collapsed");
+      if (icon) icon.classList.add("rotated");
+    } else {
+      table.classList.add("collapsed");
+      if (icon) icon.classList.remove("rotated");
+    }
+  });
+
+  if (allExpanded) {
+    btn.innerHTML = '<i class="fas fa-compress-alt"></i> 전체 접기';
+    btn.classList.add("active");
+  } else {
+    btn.innerHTML = '<i class="fas fa-expand-alt"></i> 전체 펼치기';
+    btn.classList.remove("active");
+  }
+}
+
+/* ── 대시보드 필터 드롭다운 ─────────────────────────────────
+   activeFilters: Set (비어있으면 전체 표시)
+   필터 종류: tuip / chuihap / monthly
+   복수 선택 OR 조건
+─────────────────────────────────────────────────────────── */
+const activeFilters = new Set();
+
+function toggleFilterDropdown(e) {
+  e.stopPropagation();
+  const dd = document.getElementById("dashFilterDropdown");
+  dd.classList.toggle("open");
+}
+
+// 드롭다운 외부 클릭 시 닫기
+document.addEventListener("click", function(e) {
+  const wrap = document.getElementById("dashFilterWrap");
+  if (wrap && !wrap.contains(e.target)) {
+    const dd = document.getElementById("dashFilterDropdown");
+    if (dd) dd.classList.remove("open");
+  }
+});
+
+function onFilterChange(checkbox) {
+  const f = checkbox.value;
+  const item = checkbox.closest(".dash-filter-item");
+  if (checkbox.checked) {
+    activeFilters.add(f);
+    if (item) item.classList.add("checked");
+  } else {
+    activeFilters.delete(f);
+    if (item) item.classList.remove("checked");
+  }
+  updateFilterBtn();
+  applyDashFilter();
+}
+
+function updateFilterBtn() {
+  const btn = document.getElementById("dashFilterBtn");
+  if (!btn) return;
+  const count = activeFilters.size;
+  if (count > 0) {
+    btn.classList.add("has-filter");
+    btn.innerHTML = `<i class="fas fa-filter"></i> 필터 <span class="filter-badge">${count}</span>`;
+  } else {
+    btn.classList.remove("has-filter");
+    btn.innerHTML = `<i class="fas fa-filter"></i> 필터`;
+  }
+}
+
+/* ══════════════════════════════════════════════════════════
+   캠페인별 인덱스 부분 갱신
+══════════════════════════════════════════════════════════ */
+async function refreshCampaignIndex(btn) {
+  const sheetId  = btn.dataset.sheetid  || "";
+  const campName = btn.dataset.campname || "선택한 캠페인";
+  if (!sheetId) { showToast("sheetId가 없습니다.", "error"); return; }
+
+  // 확인 메시지
+  const ok = confirm(`"${campName}" 캠페인만 인덱스를 갱신합니다.\n\n선택한 캠페인만 인덱스갱신됩니다.\n계속하시겠습니까?`);
+  if (!ok) return;
+
+  // 버튼 로딩 상태
+  btn.classList.add("loading");
+  btn.innerHTML = '<i class="fas fa-spinner fa-spin"></i> 갱신 중...';
+
+  try {
+    const res = await gasGet({ action: "buildIndexByCampaign", sheetId });
+
+    if (res.error) {
+      showToast("갱신 실패: " + res.error, "error");
+    } else {
+      showToast(`✅ ${res.message || campName + " 갱신 완료"}`, "success");
+      // 대시보드 새로고침 (갱신된 데이터 반영)
+      await loadAdminDashboard();
+    }
+  } catch(err) {
+    showToast("갱신 오류: " + err.message, "error");
+  } finally {
+    // 버튼 복원 (loadAdminDashboard가 DOM 재빌드하므로 사실상 새 버튼으로 교체됨)
+    if (btn && btn.isConnected) {
+      btn.classList.remove("loading");
+      btn.innerHTML = '<i class="fas fa-sync-alt"></i> 갱신';
+    }
+  }
+}
+
+// 행 상태값 결정 헬퍼 (data-state 속성에 저장 → 필터가 읽음)
+// 반환값: "closed" | "forcedone" | "done" | "tuip" | "chuihap" | "tuip chuihap" | ""
+function _rowState(isForceDone, isClosedTab, isDone, tuip, chuihap) {
+  if (isClosedTab)  return "closed";
+  if (isForceDone)  return "forcedone";
+  if (isDone)       return "done";
+  const parts = [];
+  if (tuip    > 0) parts.push("tuip");
+  if (chuihap > 0) parts.push("chuihap");
+  return parts.join(" ");
+}
+
+/* ══════════════════════════════════════════════════════════
+   ★ 대시보드 빠른 검색
+══════════════════════════════════════════════════════════ */
+let _dashSearchQuery = ''; // 현재 검색어
+let _dashSearchTimer = null; // 디바운스 타이머
+
+/**
+ * 검색어 입력 핸들러 (실시간 — 150ms 디바운스)
+ */
+function onDashSearch(val) {
+  _dashSearchQuery = val.trim();
+
+  // ✕ 버튼 & 입력창 상태
+  const clearBtn = document.getElementById('dashSearchClear');
+  const input    = document.getElementById('dashSearchInput');
+  if (clearBtn) clearBtn.classList.toggle('visible', _dashSearchQuery.length > 0);
+  if (input)    input.classList.toggle('has-query', _dashSearchQuery.length > 0);
+
+  // 디바운스: 150ms 후 실제 필터 실행
+  clearTimeout(_dashSearchTimer);
+  _dashSearchTimer = setTimeout(() => {
+    applyDashFilter();
+  }, 150);
+}
+
+/**
+ * 검색어 초기화 (✕ 버튼 / ESC 키)
+ */
+function clearDashSearch() {
+  _dashSearchQuery = '';
+  const input    = document.getElementById('dashSearchInput');
+  const clearBtn = document.getElementById('dashSearchClear');
+  const countEl  = document.getElementById('dashSearchCount');
+  if (input)    { input.value = ''; input.classList.remove('has-query'); input.focus(); }
+  if (clearBtn) clearBtn.classList.remove('visible');
+  if (countEl)  { countEl.textContent = ''; countEl.classList.remove('visible', 'no-result'); }
+  applyDashFilter();
+}
+
+/**
+ * 행이 검색어와 매칭되는지 판단
+ * 검색 대상: 탭명(data-sort-tabname) + 상품명(data-sort-product) +
+ *            담당자(data-sort-manager) + 리뷰타입(data-sort-review) +
+ *            진행방식(data-sort-income) + 입금명(data-sort-depositname) + 이체은행(data-sort-bank) +
+ *            캠페인명(블록 헤더)
+ */
+function _rowMatchesSearch(row, query, campName) {
+  if (!query) return true;
+  const q = query.toLowerCase();
+  // 캠페인명
+  if (campName && campName.includes(q)) return true;
+  // data 속성 (렌더 시 이미 소문자로 저장)
+  const fields = [
+    row.dataset.sortTabname  || '',
+    row.dataset.sortProduct  || '',
+    row.dataset.sortManager  || '',
+    row.dataset.sortReview   || '',
+    row.dataset.sortIncome   || '',      // ★ v9.17: 진행방식
+    row.dataset.sortDepositname || '',   // ★ v9.17: 입금명
+    row.dataset.sortBank     || '',      // ★ v9.17: 이체은행
+  ];
+  return fields.some(f => f.includes(q));
+}
+
+function applyDashFilter() {
+  const wrap = document.getElementById("dashboardWrap");
+  if (!wrap) return;
+
+  const blocks   = wrap.querySelectorAll(".dash-campaign-block");
+  const noFilter = activeFilters.size === 0;
+  const query    = _dashSearchQuery.toLowerCase();
+  const hasQuery = query.length > 0;
+
+  let totalMatchCount = 0; // 검색 결과 총 행 수
+
+  blocks.forEach(block => {
+    // 캠페인명 추출 — data-campname 속성 (렌더 시 저장)
+    const campName = block.dataset.campname || '';
+
+    const rows = block.querySelectorAll(".dash-tab-row");
+    let visibleCount = 0;
+
+    rows.forEach(row => {
+      // ① 체크박스 필터 판단
+      let passFilter = noFilter;
+      if (!noFilter) {
+        const rowState = (row.dataset.state || "").split(" ");
+        if (!passFilter && activeFilters.has("tuip"))    { if (rowState.includes("tuip"))  passFilter = true; }
+        if (!passFilter && activeFilters.has("chuihap")) { if (rowState.includes("chuihap")) passFilter = true; }
+        if (!passFilter && activeFilters.has("monthly")) { if (row.classList.contains("dash-tab-row-monthly")) passFilter = true; }
+        if (!passFilter && activeFilters.has("taekhap")) { if (row.querySelector(".tc-taekhap-on")) passFilter = true; }
+        if (!passFilter && activeFilters.has("done"))    { if (row.classList.contains("tab-done") || row.classList.contains("force-completed")) passFilter = true; }
+        if (!passFilter && activeFilters.has("closed"))  { if (row.classList.contains("is-closed-row")) passFilter = true; }
+        for (const f of activeFilters) {
+          if (f.startsWith("review:")) {
+            if (row.querySelector(`.tc-review-${f.slice(7)}`)) { passFilter = true; break; }
+          }
+        }
+        for (const f of activeFilters) {
+          if (f.startsWith("manager:")) {
+            const cls = f.slice(8) === "만두" ? ".tc-mandu" : ".tc-mango";
+            if (row.querySelector(cls)) { passFilter = true; break; }
+          }
+        }
+      }
+
+      // ② 검색어 필터 판단 (AND 조건)
+      const passSearch = !hasQuery || _rowMatchesSearch(row, query, campName);
+
+      const show = passFilter && passSearch;
+      row.style.display = show ? "" : "none";
+      if (show) { visibleCount++; totalMatchCount++; }
+    });
+
+    // 블록 표시 여부
+    block.style.display = visibleCount === 0 ? "none" : "";
+
+    // 매칭 행이 있으면 테이블 자동 펼침
+    if (visibleCount > 0 && (hasQuery || (!noFilter))) {
+      const table = block.querySelector(".dash-tab-table");
+      const icon  = block.querySelector(".dash-toggle-icon");
+      if (table) table.classList.remove("collapsed");
+      if (icon)  icon.classList.add("rotated");
+    }
+  });
+
+  // ③ 결과 카운트 업데이트
+  const countEl = document.getElementById('dashSearchCount');
+  if (countEl) {
+    if (hasQuery) {
+      countEl.classList.add('visible');
+      if (totalMatchCount === 0) {
+        countEl.textContent  = '결과 없음';
+        countEl.classList.add('no-result');
+      } else {
+        countEl.textContent  = `${totalMatchCount}개 매칭`;
+        countEl.classList.remove('no-result');
+      }
+    } else {
+      countEl.classList.remove('visible', 'no-result');
+      countEl.textContent = '';
+    }
+  }
+}
+
+/* ══════════════════════════════════════════════════════════
+   탭설정 팝오버 & 저장 로직
+══════════════════════════════════════════════════════════ */
+let _tcCurrent = null; // 현재 편집 중인 탭 데이터
+
+function openTcPopover(e, tcData) {
+  e.stopPropagation();
+  _tcCurrent = tcData;
+  // ★ 디버그: 팝오버 열릴 때 tcData 확인 (브라우저 콘솔에서 확인)
+  console.log("[TC] openTcPopover tcData:", JSON.stringify(tcData));
+  const pop = document.getElementById("tcPopover");
+
+  // 제목
+  document.getElementById("tcPopTitle").textContent = tcData.tabName || "설정";
+
+  // 담당자 옵션 선택 반영
+  document.querySelectorAll("#tcOptManager .tc-opt").forEach(btn => {
+    btn.classList.toggle("sel", btn.dataset.val === (tcData.manager || ""));
+  });
+  // 리뷰타입 옵션 선택 반영
+  document.querySelectorAll("#tcOptReview .tc-opt").forEach(btn => {
+    btn.classList.toggle("sel", btn.dataset.val === (tcData.reviewType || ""));
+  });
+  // 입금방식 옵션 선택 반영
+  document.querySelectorAll("#tcOptPayment .tc-opt").forEach(btn => {
+    btn.classList.toggle("sel", btn.dataset.val === (tcData.paymentType || ""));
+  });
+  // 상품명
+  document.getElementById("tcDisplayInput").value = tcData.displayName || "";
+  // ★ 상품명 공란이면 즉시 빨간 강조 표시
+  _checkTcDisplayRequired(tcData.displayName || "");
+  // 진행차수 옵션 선택 반영
+  document.querySelectorAll("#tcOptRound .tc-opt").forEach(btn => {
+    btn.classList.toggle("sel", btn.dataset.val === (tcData.tcRound || tcData.round || ""));
+  });
+  // 배송유형 옵션 선택 반영
+  document.querySelectorAll("#tcOptDelivery .tc-opt").forEach(btn => {
+    btn.classList.toggle("sel", btn.dataset.val === (tcData.deliveryType || ""));
+  });
+  // 시간대 → 피커 초기화
+  initTcTimePicker(tcData.timeRange || "");
+  // 택대
+  document.getElementById("tcTaekhapCheck").checked = !!tcData.taekhap;
+  // 대량건
+  document.getElementById("tcBulkCheck").checked = !!tcData.isBulk;
+  // 리뷰 폴더 URL
+  document.getElementById("tcFolderUrlInput").value = tcData.folderUrl || "";
+  // 캡처 폴더 URL
+  document.getElementById("tcCaptureFolderUrlInput").value = tcData.captureFolderUrl || "";
+  // 네이버+쿠팡 모드
+  document.getElementById("tcNcModeCheck").checked = !!tcData.ncMode;
+  // 입금명
+  document.getElementById("tcDepositNameInput").value = tcData.depositName || "";
+  _checkTcDepositRequired(tcData.depositName || "");
+  // 이체은행
+  document.querySelectorAll("#tcOptTransferBank .tc-opt").forEach(btn => {
+    btn.classList.toggle("sel", btn.dataset.val === (tcData.transferBank || ""));
+  });
+  // ★ v9.14: 진행방식 옵션 선택 반영
+  document.querySelectorAll("#tcOptIncomeType .tc-opt").forEach(btn => {
+    btn.classList.toggle("sel", btn.dataset.val === (tcData.incomeType || ""));
+  });
+  
+  // ★ v9.14: 진행방식 = 소득신고 → 이체은행 자동 설정 = 케이뱅크
+  if (tcData.incomeType === "소득신고") {
+    document.querySelectorAll("#tcOptTransferBank .tc-opt").forEach(btn => {
+      btn.classList.toggle("sel", btn.dataset.val === "케이뱅크");
+    });
+  }
+
+  // 위치 계산 — 뷰포트 경계 감지하여 자동 조정
+  pop.classList.add("open"); // 먼저 열어서 실제 크기 측정
+  const pw = pop.offsetWidth  || 304;
+  const ph = pop.offsetHeight || 480;
+  const vw = window.innerWidth;
+  const vh = window.innerHeight;
+  const cx = e.clientX;
+  const cy = e.clientY;
+  const margin = 8; // 화면 가장자리 여백
+  // 좌우: 커서 오른쪽에 공간 없으면 왼쪽으로
+  let left = cx + margin;
+  if (left + pw > vw - margin) left = cx - pw - margin;
+  if (left < margin) left = margin;
+  // 상하: 커서 아래에 공간 없으면 위쪽으로
+  let top = cy + margin;
+  if (top + ph > vh - margin) top = cy - ph - margin;
+  if (top < margin) top = margin;
+  pop.style.left = left + "px";
+  pop.style.top  = top  + "px";
+}
+
+// ★ 상품명 필수 검증 헬퍼 함수들
+/** 상품명 공란 여부에 따라 입력란 강조/해제 */
+function _checkTcDisplayRequired(val) {
+  const input   = document.getElementById("tcDisplayInput");
+  const warnMsg = document.getElementById("tcDisplayRequiredMsg");
+  if (!input) return;
+  const isEmpty = !val || !val.trim();
+  input.classList.toggle("required-warn", isEmpty);
+  if (warnMsg) warnMsg.classList.toggle("show", isEmpty);
+}
+
+/** 입금명 입력 시 실시간 강조 해제 */
+function _onTcDepositInput(input) {
+  const warnMsg = document.getElementById("tcDepositRequiredMsg");
+  const isEmpty = !input.value.trim();
+  input.classList.toggle("required-warn", isEmpty);
+  if (warnMsg) warnMsg.classList.toggle("show", isEmpty);
+}
+
+/** 입금명 공란 여부에 따라 입력란 강조/해제 */
+function _checkTcDepositRequired(val) {
+  const input   = document.getElementById("tcDepositNameInput");
+  const warnMsg = document.getElementById("tcDepositRequiredMsg");
+  if (!input) return;
+  const isEmpty = !val || !val.trim();
+  input.classList.toggle("required-warn", isEmpty);
+  if (warnMsg) warnMsg.classList.toggle("show", isEmpty);
+}
+
+
+/** 상품명 입력 시 실시간 강조 해제 */
+function _onTcDisplayInput(input) {
+  const warnMsg = document.getElementById("tcDisplayRequiredMsg");
+  const isEmpty = !input.value.trim();
+  input.classList.toggle("required-warn", isEmpty);
+  if (warnMsg) warnMsg.classList.toggle("show", isEmpty);
+}
+
+
+//
+//  모드 버튼: 미지정 / 자유 / 타임지정
+//  - 미지정  → 그리드 비활성화, 저장값: ""
+//  - 자유    → 그리드 비활성화, 저장값: "자유"
+//  - 타임지정 → 그리드 활성화
+//              1클릭 = 시작시간  → 저장값: "15:00 ~"
+//              2클릭 = 종료시간  → 저장값: "15:00 ~ 16:30"
+//              (같은 칸 재클릭 시 종료 선택 취소)
+// ══════════════════════════════════════════════════════
+const TC_TIME_SLOTS = (() => {
+  const slots = [];
+  for (let h = 0; h <= 23; h++) {
+    for (const m of [0, 30]) {
+      slots.push(String(h).padStart(2,"0") + ":" + String(m).padStart(2,"0"));
+    }
+  }
+  return slots; // 48개 (자유 버튼은 모드 버튼으로 분리)
+})();
+
+let _tcTimeMode  = "";   // "" | "자유" | "timed"
+let _tcTimeStart = null; // "HH:MM" 또는 null
+let _tcTimeEnd   = null; // "HH:MM" 또는 null
+
+/** 팝오버 열릴 때 기존 값으로 초기화 */
+function initTcTimePicker(val) {
+  _tcTimeStart = null;
+  _tcTimeEnd   = null;
+
+  if (!val || val === "") {
+    _tcTimeMode = "";
+  } else if (val === "자유") {
+    _tcTimeMode = "자유";
+  } else {
+    // "HH:MM ~ HH:MM" 또는 "HH:MM ~" 또는 "HH:MM~HH:MM" 등 파싱
+    _tcTimeMode = "timed";
+    const clean = val.replace(/\s/g, "");          // 공백 제거
+    const parts = clean.split("~");
+    if (parts[0] && parts[0].includes(":")) _tcTimeStart = parts[0];
+    if (parts[1] && parts[1].includes(":")) _tcTimeEnd   = parts[1];
+  }
+
+  // 그리드 셀 생성 (최초 1회 or 비어있을 때)
+  const grid = document.getElementById("tcTimeGrid");
+  if (!grid.children.length) {
+    TC_TIME_SLOTS.forEach(slot => {
+      const btn = document.createElement("button");
+      btn.className   = "tc-time-cell";
+      btn.textContent = slot;
+      btn.type        = "button";
+      btn.onclick     = () => onTcTimeClick(slot);
+      grid.appendChild(btn);
+    });
+  }
+
+  _syncTcTimePicker();
+}
+
+/** 모드 버튼 클릭: "" | "자유" | "timed" */
+function setTcTimeMode(mode) {
+  _tcTimeMode = mode;
+  if (mode !== "timed") {
+    // 타임지정 아닐 때 시간 선택 초기화
+    _tcTimeStart = null;
+    _tcTimeEnd   = null;
+  }
+  _syncTcTimePicker();
+}
+
+/** 그리드 셀 클릭 (타임지정 모드에서만 호출됨) */
+function onTcTimeClick(slot) {
+  if (!_tcTimeStart) {
+    // 첫 클릭 → 시작 설정
+    _tcTimeStart = slot;
+    _tcTimeEnd   = null;
+  } else if (!_tcTimeEnd) {
+    if (slot === _tcTimeStart) {
+      // 시작과 같은 칸 재클릭 → 시작 취소
+      _tcTimeStart = null;
+    } else if (slot < _tcTimeStart) {
+      // 시작보다 이른 시간 → swap
+      _tcTimeEnd   = _tcTimeStart;
+      _tcTimeStart = slot;
+    } else {
+      // 두 번째 클릭 → 종료 설정
+      _tcTimeEnd = slot;
+    }
+  } else {
+    // 이미 시작+종료 모두 있음 → 처음부터 다시
+    _tcTimeStart = slot;
+    _tcTimeEnd   = null;
+  }
+  _syncTcTimePicker();
+}
+
+/** 그리드 초기화 버튼 */
+function clearTcTimeGrid() {
+  _tcTimeStart = null;
+  _tcTimeEnd   = null;
+  _syncTcTimePicker();
+}
+
+/** hidden input·UI 일괄 동기화 */
+function _syncTcTimePicker() {
+  const picker  = document.getElementById("tcTimePicker");
+  const hint    = document.getElementById("tcTimeHint");
+  const display = document.getElementById("tcTimeDisplay");
+  const input   = document.getElementById("tcTimeInput");
+
+  // ── 모드 버튼 sel 표시 ──────────────────────────────
+  document.querySelectorAll("#tcOptTimeMode .tc-opt").forEach(btn => {
+    btn.classList.toggle("sel", btn.dataset.val === _tcTimeMode);
+  });
+
+  // ── 그리드 활성·비활성 ──────────────────────────────
+  const isTimed = (_tcTimeMode === "timed");
+  picker.classList.toggle("tc-time-picker-disabled", !isTimed);
+
+  // ── 셀 강조 표시 ────────────────────────────────────
+  const cells = picker.querySelectorAll(".tc-time-cell");
+  cells.forEach(btn => {
+    const v = btn.textContent;
+    btn.classList.remove("tc-sel-start","tc-sel-end","tc-in-range");
+    if (!isTimed) return;
+    if (v === _tcTimeStart && !_tcTimeEnd) btn.classList.add("tc-sel-start");
+    else if (v === _tcTimeStart)           btn.classList.add("tc-sel-start");
+    else if (v === _tcTimeEnd)             btn.classList.add("tc-sel-end");
+    else if (_tcTimeStart && _tcTimeEnd && v > _tcTimeStart && v < _tcTimeEnd)
+      btn.classList.add("tc-in-range");
+  });
+
+  // ── 힌트 텍스트 ─────────────────────────────────────
+  if (!isTimed) {
+    hint.textContent = _tcTimeMode === "자유"
+      ? "시간 제한 없음"
+      : "타임지정을 선택하면 활성화됩니다";
+  } else if (!_tcTimeStart) {
+    hint.textContent = "① 시작 시간을 클릭하세요";
+  } else if (!_tcTimeEnd) {
+    hint.textContent = "✔ " + _tcTimeStart + "~  ← 종료시간(선택사항)";
+  } else {
+    hint.textContent = "✔ " + _tcTimeStart + " ~ " + _tcTimeEnd;
+  }
+
+  // ── 저장값 및 상단 표시 ─────────────────────────────
+  let saveVal = "";
+  let dispStr = "";
+  if (_tcTimeMode === "") {
+    saveVal = "";
+    dispStr = "";
+  } else if (_tcTimeMode === "자유") {
+    saveVal = "자유";
+    dispStr = "자유";
+  } else {
+    // timed
+    if (_tcTimeStart && _tcTimeEnd) {
+      saveVal = _tcTimeStart + " ~ " + _tcTimeEnd;
+      dispStr = saveVal;
+    } else if (_tcTimeStart) {
+      saveVal = _tcTimeStart + " ~";  // 시작만 선택된 상태
+      dispStr = saveVal;
+    } else {
+      saveVal = "";
+      dispStr = "";
+    }
+  }
+  input.value         = saveVal;
+  display.textContent = dispStr;
+}
+
+function closeTcPopover() {
+  document.getElementById("tcPopover").classList.remove("open");
+  _tcCurrent = null;
+}
+
+/* ── 네이버+쿠팡 모드 헤더 변환 ── */
+async function convertToNcHeaders() {
+  if (!_tcCurrent) return;
+  const btn = document.getElementById("btnConvertNcHeaders");
+  if (!APP_CONFIG.GAS_WEB_APP_URL) { showToast("GAS URL이 설정되지 않았습니다.", "error"); return; }
+
+  const sheetId = _tcCurrent.sheetId || APP_CONFIG.BASE_SHEET_ID || "";
+  const tabName = _tcCurrent.tabName || "";
+  if (!sheetId || !tabName) { showToast("sheetId 또는 tabName이 없습니다.", "error"); return; }
+
+  if (!confirm(`"${tabName}" 탭의 시트 헤더를 네이버+쿠팡 모드로 변환하시겠습니까?\n\n기존 주문번호·아이디·결제금액 컬럼 데이터가 삭제됩니다.`)) return;
+
+  if (btn) { btn.disabled = true; btn.innerHTML = '<i class="fas fa-spinner fa-spin"></i> 변환 중...'; }
+
+  try {
+    const payload = { action: "convertToNcHeaders", sheetId, tabName };
+    let res = null;
+    try { res = await gasPost(payload); } catch(e){ try { res = await gasGet(payload); } catch(e2){} }
+
+    if (res?.ok) {
+      if (res.alreadyConverted) {
+        showToast("ℹ️ 이미 네이버+쿠팡 모드로 변환된 탭입니다.", "info");
+      } else {
+        showToast("✅ 헤더 변환 완료! 네이버+쿠팡 모드가 적용되었습니다.", "success");
+      }
+    } else {
+      showToast("❌ 변환 실패: " + (res?.error || "알 수 없는 오류"), "error");
+    }
+  } catch(err) {
+    showToast("❌ 오류: " + err.message, "error");
+  } finally {
+    if (btn) { btn.disabled = false; btn.innerHTML = '<i class="fas fa-exchange-alt"></i> 이 탭 시트 헤더 → 네이버+쿠팡 모드 변환'; }
+  }
+}
+// 팝오버 UI만 닫고 _tcCurrent는 유지 (confirmTcSave 내부용)
+function _closeTcPopoverUiOnly() {
+  document.getElementById("tcPopover").classList.remove("open");
+}
+
+// 팝오버 외부 클릭 시 닫기
+document.addEventListener("click", function(e) {
+  const pop = document.getElementById("tcPopover");
+  if (pop && pop.classList.contains("open") && !pop.contains(e.target)) {
+    closeTcPopover();
+  }
+});
+
+// ★ tc-clickable 셀 클릭 → data-tc 파싱 → 팝오버 오픈 (onclick 속성 방식 대체)
+document.addEventListener("click", function(e) {
+  const cell = e.target.closest(".tc-clickable");
+  if (!cell) return;
+  const raw = cell.getAttribute("data-tc");
+  if (!raw) return;
+  let tcData;
+  try { tcData = JSON.parse(raw); } catch(_) { return; }
+  openTcPopover(e, tcData);
+});
+
+// 옵션 버튼 클릭 (단일 선택 토글)
+document.addEventListener("click", function(e) {
+  const opt = e.target.closest("#tcOptManager .tc-opt, #tcOptReview .tc-opt, #tcOptPayment .tc-opt, #tcOptDelivery .tc-opt, #tcOptRound .tc-opt, #tcOptTransferBank .tc-opt, #tcOptIncomeType .tc-opt");
+  if (!opt) return;
+  const group = opt.closest(".tc-option-row");
+  group.querySelectorAll(".tc-opt").forEach(b => b.classList.remove("sel"));
+  opt.classList.add("sel");
+  
+  // ★ v9.14: 진행방식 = 소득신고 → 이체은행 자동 설정 = 케이뱅크
+  if (opt.closest("#tcOptIncomeType") && opt.dataset.val === "소득신고") {
+    const bankGroup = document.querySelector("#tcOptTransferBank");
+    if (bankGroup) {
+      bankGroup.querySelectorAll(".tc-opt").forEach(b => b.classList.remove("sel"));
+      const kbankBtn = Array.from(bankGroup.querySelectorAll(".tc-opt")).find(b => b.dataset.val === "케이뱅크");
+      if (kbankBtn) kbankBtn.classList.add("sel");
+    }
+  }
+});
+
+// 저장 버튼 → 경고 팝업 띄우기
+function requestTcSave() {
+  if (!_tcCurrent) return;
+  // 현재 입력값 snapshot
+  _tcCurrent._pendingManager      = (document.querySelector("#tcOptManager .tc-opt.sel")   || {}).dataset?.val ?? "";
+
+  _tcCurrent._pendingReviewType   = (document.querySelector("#tcOptReview .tc-opt.sel")    || {}).dataset?.val ?? "";
+  _tcCurrent._pendingPaymentType  = (document.querySelector("#tcOptPayment .tc-opt.sel")   || {}).dataset?.val ?? "";
+  _tcCurrent._pendingDeliveryType = (document.querySelector("#tcOptDelivery .tc-opt.sel")  || {}).dataset?.val ?? "";
+  _tcCurrent._pendingDisplayName  = document.getElementById("tcDisplayInput").value.trim();
+  _tcCurrent._pendingRound        = (document.querySelector("#tcOptRound .tc-opt.sel") || {}).dataset?.val ?? "";
+  _tcCurrent._pendingTimeRange    = document.getElementById("tcTimeInput").value.trim();
+  _tcCurrent._pendingTaekhap      = document.getElementById("tcTaekhapCheck").checked;
+  _tcCurrent._pendingIsBulk       = document.getElementById("tcBulkCheck").checked;
+  _tcCurrent._pendingFolderUrl    = document.getElementById("tcFolderUrlInput").value.trim();
+  _tcCurrent._pendingCaptureUrl   = document.getElementById("tcCaptureFolderUrlInput").value.trim();
+  _tcCurrent._pendingNcMode       = document.getElementById("tcNcModeCheck").checked;
+  _tcCurrent._pendingDepositName  = document.getElementById("tcDepositNameInput").value.trim();
+  _tcCurrent._pendingTransferBank = (document.querySelector("#tcOptTransferBank .tc-opt.sel") || {}).dataset?.val ?? "";
+  _tcCurrent._pendingIncomeType   = (document.querySelector("#tcOptIncomeType .tc-opt.sel")   || {}).dataset?.val ?? "";  // ★ v9.14
+
+  // ★ 상품명 필수 검증 (마감/강제완료 탭은 예외)
+  const _isClosedOrDone = !!_tcCurrent._isClosed || !!_tcCurrent._isForceDone;
+  if (!_tcCurrent._pendingDisplayName && !_isClosedOrDone) {
+    // 입력란 강조 + 스크롤
+    _checkTcDisplayRequired("");
+    const input = document.getElementById("tcDisplayInput");
+    if (input) { input.focus(); input.scrollIntoView({ behavior: "smooth", block: "center" }); }
+    showToast("⚠️ 상품명은 필수 항목입니다. 입력 후 저장해주세요.", "warning");
+    return; // 저장 중단
+  }
+
+
+  // ★ nc 모드가 새로 켜지는 경우 → 전용 확인 팝업 표시
+  const prevNcMode = !!_tcCurrent.ncMode;
+  if (_tcCurrent._pendingNcMode && !prevNcMode) {
+    document.getElementById("tcNcConfirmOverlay").classList.add("open");
+    return; // 일반 confirm 팝업은 띄우지 않음
+  }
+
+  const _prevDisp  = _tcCurrent.displayName || "";
+  const _newDisp   = _tcCurrent._pendingDisplayName || "";
+  const _prevRound = _tcCurrent.tcRound || _tcCurrent.round || "";
+  const _newRound  = _tcCurrent._pendingRound ?? "";
+  const _dispChanged  = _newDisp  && _prevDisp  && _newDisp  !== _prevDisp;
+  const _roundChanged = _newRound !== _prevRound;
+  const _folderWarn   = (_dispChanged || _roundChanged) && (_tcCurrent.captureFolderUrl || _tcCurrent.folderUrl)
+    ? `<br><span style="color:#D97706;font-size:.82em">📁 상품명/차수 변경 감지 → 캡처/리뷰 폴더명이 자동으로 rename됩니다.</span>`
+    : "";
+  document.getElementById("tcConfirmMsg").innerHTML =
+    `<b>${escHtml(_tcCurrent.tabName)}</b> 탭의 설정을 변경하시겠습니까?<br>저장하면 베이스시트에 즉시 반영됩니다.${_folderWarn}`;
+  document.getElementById("tcConfirmOverlay").classList.add("open");
+}
+
+function closeTcNcConfirm() {
+  document.getElementById("tcNcConfirmOverlay").classList.remove("open");
+}
+
+// nc 모드 확인 팝업 → [확인] 클릭
+function confirmTcNcSave() {
+  closeTcNcConfirm();
+  // 일반 저장 로직 진행 (confirmTcSave와 동일)
+  confirmTcSave();
+}
+
+function closeTcConfirm() {
+  document.getElementById("tcConfirmOverlay").classList.remove("open");
+}
+
+async function confirmTcSave() {
+  closeTcConfirm();
+  _closeTcPopoverUiOnly(); // _tcCurrent는 유지한 채 팝오버 UI만 닫음
+  if (!_tcCurrent) return;
+
+  // ① GAS URL 설정 여부 확인
+  if (!APP_CONFIG.GAS_WEB_APP_URL) {
+    showToast("❌ GAS 웹앱 URL이 설정되지 않았습니다. 설정 화면에서 URL을 먼저 입력해주세요.", true);
+    _tcCurrent = null;
+    openGasUrlModal();
+    return;
+  }
+
+  // ② sheetId 폴백: 탭 데이터에 sheetId가 없으면 BASE_SHEET_ID 사용
+  const resolvedSheetId = _tcCurrent.sheetId || APP_CONFIG.BASE_SHEET_ID || "";
+  if (!resolvedSheetId) {
+    showToast("❌ sheetId를 특정할 수 없습니다. 인덱스를 먼저 갱신해주세요.", true);
+    _tcCurrent = null;
+    return;
+  }
+
+  // ③ 저장할 파라미터 구성
+  // sheetUrl: 세부목록 탭에 URL로 저장하기 위해 함께 전송
+  // #gid= 이후 앵커 제거 → URL 매칭 일관성 확보
+  const rawSheetUrl = _tcCurrent.sheetUrl
+    || (resolvedSheetId ? "https://docs.google.com/spreadsheets/d/" + resolvedSheetId + "/edit" : "");
+  const resolvedSheetUrl = rawSheetUrl.split("#")[0]; // #gid=xxx 제거
+  const payload = {
+    action:       "setTabConfig",
+    sheetId:      resolvedSheetId,
+    sheetUrl:     resolvedSheetUrl,
+    tabName:      _tcCurrent.tabName              || "",
+    manager:      _tcCurrent._pendingManager      || "",
+    timeRange:    _tcCurrent._pendingTimeRange    || "",
+    taekhap:      _tcCurrent._pendingTaekhap ? "true" : "false",
+    reviewType:   _tcCurrent._pendingReviewType   || "",
+    paymentType:  _tcCurrent._pendingPaymentType  || "",
+    displayName:  _tcCurrent._pendingDisplayName  || "",
+    deliveryType: _tcCurrent._pendingDeliveryType || "",
+    isBulk:       _tcCurrent._pendingIsBulk ? "true" : "false",
+    round:        _tcCurrent._pendingRound,        // 차수 (undefined면 GAS에서 기존값 보존)
+    folderUrl:    _tcCurrent._pendingFolderUrl,   // undefined면 GAS에서 기존값 보존
+    ncMode:       _tcCurrent._pendingNcMode ? "true" : "false",
+    depositName:  _tcCurrent._pendingDepositName  ?? "",
+    transferBank: _tcCurrent._pendingTransferBank ?? "",
+    incomeType:   _tcCurrent._pendingIncomeType   ?? ""    // ★ v9.14: 진행방식 (undefined → 기존값 보존, "" → 빈값으로 저장)
+  };
+
+  // ④ 디버그 로그 (F12 콘솔에서 확인)
+  console.log("[TC] 저장 payload:", JSON.stringify(payload));
+
+  try {
+    // ★ POST 방식으로 전송 (한글·특수문자 안전, displayName 등 누락 방지)
+    // POST 실패 시 GET으로 폴백 (CORS 환경 대응)
+    let json;
+    try {
+      json = await gasPost(payload);
+    } catch (postErr) {
+      console.warn("[TC] POST 실패, GET으로 폴백:", postErr.message);
+      json = await gasGet(payload);
+    }
+    console.log("[TC] 응답:", json);
+
+    if (json.ok) {
+      console.log("[TC] 저장 완료. tabName:", json.tabName, "updated:", json.updated, "row:", json.row);
+
+      // ★ 캡처폴더 URL이 변경된 경우 updateFolderUrls로 별도 저장
+      const prevCaptureUrl = _tcCurrent.captureFolderUrl || "";
+      const newCaptureUrl  = _tcCurrent._pendingCaptureUrl;
+      if (newCaptureUrl !== undefined && newCaptureUrl !== prevCaptureUrl) {
+        try {
+          const folderPayload = {
+            action:           "updateFolderUrls",
+            sheetId:          resolvedSheetId,
+            tabName:          _tcCurrent.tabName || "",
+            captureFolderUrl: newCaptureUrl
+          };
+          const folderJson = await gasPost(folderPayload);
+          if (folderJson && folderJson.ok) {
+            console.log("[TC] 캡처폴더 URL 수정 완료:", newCaptureUrl);
+          } else {
+            console.warn("[TC] 캡처폴더 URL 수정 실패:", folderJson?.error);
+          }
+        } catch (fe) {
+          console.warn("[TC] 캡처폴더 URL 수정 오류:", fe.message);
+        }
+      }
+
+      // 폴더 rename 결과 토스트
+      const _fr = json.folderRename;
+      let _toastMsg = "✅ 설정이 저장되었습니다." + (json.updated ? " (업데이트)" : " (신규)");
+      if (_fr && (_fr.renamedCapture || _fr.renamedReview)) {
+        const _rParts = [];
+        if (_fr.renamedCapture) _rParts.push("캡처");
+        if (_fr.renamedReview)  _rParts.push("리뷰");
+        _toastMsg += ` 📁 ${_rParts.join("/")}폴더 rename 완료`;
+      } else if (_fr && _fr.errors && _fr.errors.length > 0) {
+        _toastMsg += " ⚠️ 폴더 rename 중 오류 발생 (콘솔 확인)";
+        console.warn("[TC] 폴더 rename 오류:", _fr.errors);
+      }
+      showToast(_toastMsg);
+      // ★ 전체 새로고침 대신 해당 탭 데이터만 패치 → 로딩 없이 즉시 반영
+      _patchTabAndRerender(payload.sheetId, payload.tabName, {
+        displayName:       payload.displayName,
+        manager:           payload.manager,
+        timeRange:         payload.timeRange,
+        taekhap:           payload.taekhap === "true",
+        reviewType:        payload.reviewType,
+        paymentType:       payload.paymentType,
+        deliveryType:      payload.deliveryType,
+        isBulk:            payload.isBulk === "true",
+        tcRound:           payload.round,
+        folderUrl:         payload.folderUrl !== undefined ? payload.folderUrl : (_tcCurrent.folderUrl || ""),
+        captureFolderUrl:  (newCaptureUrl !== undefined && newCaptureUrl !== prevCaptureUrl)
+                             ? newCaptureUrl
+                             : prevCaptureUrl,
+        depositName:       payload.depositName  || "",
+        transferBank:      payload.transferBank || "",
+        incomeType:        payload.incomeType   || ""     // ★ v9.14: 진행방식
+      });
+    } else {
+      console.error("[TC] 저장 실패 응답:", json);
+      showToast("❌ 저장 실패: " + (json.error || JSON.stringify(json)), true);
+    }
+  } catch (err) {
+    console.error("[TC] 요청 오류:", err);
+    showToast("❌ 오류: " + err.message + " (F12 콘솔 확인)", true);
+  }
+  _tcCurrent = null;
+}
+
+/** 간단한 토스트 메시지 */
+function showToast(msg, isErr) {
+  let t = document.getElementById("_toast");
+  if (!t) {
+    t = document.createElement("div");
+    t.id = "_toast";
+    Object.assign(t.style, {
+      position:"fixed", bottom:"24px", left:"50%", transform:"translateX(-50%)",
+      background: isErr ? "#EF4444" : "#10B981",
+      color:"#fff", padding:"8px 20px", borderRadius:"20px",
+      fontSize:".82rem", fontWeight:"600", zIndex:"9999",
+      boxShadow:"0 4px 14px rgba(0,0,0,.2)", transition:"opacity .3s"
+    });
+    document.body.appendChild(t);
+  }
+  t.style.background = isErr ? "#EF4444" : "#10B981";
+  t.textContent = msg;
+  t.style.opacity = "1";
+  clearTimeout(t._tid);
+  t._tid = setTimeout(() => { t.style.opacity = "0"; }, 2500);
+}
+
+/* ── GAS 설정 모달 ── */
+/* ── 인덱스 갱신 모달 ── */
+function openIndexModal() {
+  show("indexModal", "flex");
+  if (APP_CONFIG.GAS_WEB_APP_URL) {
+    loadIndexStatus();
+    _updateSmartDirtyBadge();
+  }
+}
+function closeIndexModal() {
+  hide("indexModal");
+  // 인덱스 관련 UI 초기화
+  const elapsedRow = document.getElementById("indexElapsedRow");
+  const resultRow  = document.getElementById("indexResultRow");
+  if (elapsedRow) elapsedRow.style.display = "none";
+  if (resultRow)  resultRow.style.display  = "none";
+  const gasErrBanner = document.getElementById("gasErrorBanner");
+  if (gasErrBanner) gasErrBanner.style.display = "none";
+}
+
+/* ══════════════════════════════════════════════════════════════
+   ★ 우클릭 컨텍스트 메뉴 (대시보드 캠페인 행에서 사용)
+   ══════════════════════════════════════════════════════════════ */
+let _ctxTargetTabKey = null;
+let _ctxTargetCampIdx = null;
+
+function _openAdminContextMenu(e, tabKey, campIdx) {
+  e.preventDefault();
+  _ctxTargetTabKey  = tabKey  || null;
+  _ctxTargetCampIdx = campIdx || null;
+
+  const menu = document.getElementById("adminContextMenu");
+  if (!menu) return;
+
+  const isTabRow = !!tabKey;
+  menu.innerHTML = `
+    ${isTabRow ? `<div class="ctx-menu-title">⚡ 빠른 작업</div>` : ''}
+    ${isTabRow ? `
+      <button class="ctx-menu-item danger" onclick="_ctxForceDone()">
+        <i class="fas fa-flag-checkered"></i> 강제완료 처리
+      </button>
+      <button class="ctx-menu-item indigo" onclick="_ctxCloseCamp()">
+        <i class="fas fa-archive"></i> 마감 처리
+      </button>
+      <hr class="ctx-menu-sep">
+    ` : ''}
+    <div class="ctx-menu-title">🔧 관리</div>
+    <button class="ctx-menu-item" onclick="openAddCampaign(); closeAdminContextMenu()">
+      <i class="fas fa-plus"></i> 업체 추가
+    </button>
+    <button class="ctx-menu-item" onclick="openBlPanel(); closeAdminContextMenu()">
+      <i class="fas fa-ban"></i> 블랙리스트 관리
+    </button>
+    <button class="ctx-menu-item" onclick="openNoticePanel(); closeAdminContextMenu()">
+      <i class="fas fa-bullhorn"></i> 공지 설정
+    </button>
+    <hr class="ctx-menu-sep">
+    <div class="ctx-menu-title">📊 대시보드</div>
+    <button class="ctx-menu-item" onclick="loadAdminDashboard(); closeAdminContextMenu()">
+      <i class="fas fa-sync-alt"></i> 새로고침
+    </button>
+    <button class="ctx-menu-item" onclick="toggleHideDone(); closeAdminContextMenu()">
+      <i class="fas fa-eye-slash"></i> 완료건 숨김 토글
+    </button>
+    <button class="ctx-menu-item" onclick="toggleAllCampaigns(); closeAdminContextMenu()">
+      <i class="fas fa-expand-alt"></i> 전체 펼치기/접기
+    </button>
+  `;
+
+  menu.classList.add("open");
+
+  // 화면 경계 처리
+  const mw = 210, mh = 280;
+  let x = e.clientX + 4, y = e.clientY + 4;
+  if (x + mw > window.innerWidth)  x = e.clientX - mw;
+  if (y + mh > window.innerHeight) y = e.clientY - mh;
+  menu.style.left = x + 'px';
+  menu.style.top  = y + 'px';
+
+  // 외부 클릭 시 닫기
+  setTimeout(() => {
+    document.addEventListener("click", closeAdminContextMenu, { once: true });
+    document.addEventListener("contextmenu", closeAdminContextMenu, { once: true });
+  }, 0);
+}
+
+function closeAdminContextMenu() {
+  const menu = document.getElementById("adminContextMenu");
+  if (menu) menu.classList.remove("open");
+  _ctxTargetTabKey  = null;
+  _ctxTargetCampIdx = null;
+}
+
+// 컨텍스트 메뉴에서 강제완료
+function _ctxForceDone() {
+  closeAdminContextMenu();
+  if (!_ctxTargetTabKey) return;
+  if (!_forceDoneMode) toggleForceDoneMode();
+  // 해당 탭의 checkbox 선택
+  const cb = document.querySelector(`.force-cb[data-tabkey="${_ctxTargetTabKey}"]`);
+  if (cb) { cb.checked = true; }
+  showToast(`'${_ctxTargetTabKey}' 강제완료 선택됨. [실행] 버튼으로 확정하세요.`, "info");
+}
+
+// 컨텍스트 메뉴에서 마감
+function _ctxCloseCamp() {
+  closeAdminContextMenu();
+  if (!_ctxTargetTabKey) return;
+  if (!_closedMode) toggleClosedMode();
+  const cb = document.querySelector(`.closed-cb[data-tabkey="${_ctxTargetTabKey}"]`);
+  if (cb) { cb.checked = true; }
+  showToast(`'${_ctxTargetTabKey}' 마감 선택됨. [실행] 버튼으로 확정하세요.`, "info");
+}
+
+/* ── 각종 진단 모달 ── */
+function openDiagModal() {
+  show("diagModal", "flex");
+}
+function closeDiagModal() {
+  hide("diagModal");
+  // 진단 UI 초기화
+  const inp = document.getElementById("debugSheetIdInput");
+  if (inp) inp.value = "";
+  const choiceWrap = document.getElementById("debugSheetChoiceWrap");
+  if (choiceWrap) choiceWrap.style.display = "none";
+  const singleRes = document.getElementById("debugSingleResult");
+  if (singleRes) { singleRes.innerHTML = ""; singleRes.className = "hidden"; singleRes.style.display = "none"; }
+  const baseRes = document.getElementById("debugBaseResult");
+  if (baseRes) { baseRes.innerHTML = ""; baseRes.className = "hidden"; }
+  const tabRes = document.getElementById("debugTabConfigResult");
+  if (tabRes) { tabRes.textContent = ""; tabRes.className = "hidden"; }
+  const jsonpRes = document.getElementById("jsonpTestResult");
+  if (jsonpRes) jsonpRes.style.display = "none";
+}
+// 진단 모달 내 파일존재확인 (모달 열기)
+function openCheckFilesModalFromDiag() {
+  closeDiagModal();
+  openCheckFilesModal();
+}
+
+/* ── 하위 호환: 구 함수명 alias ── */
+function openAdminSetting() { openIndexModal(); }
+function closeAdminSetting() { closeIndexModal(); }
+function saveAdminSetting() { closeIndexModal(); }
+
+
+/* ── 인덱스 상태 / 갱신 ── */
+
+/**
+ * ★ v9.12: dirty 탭 수를 조회하여 "빠른 갱신" 버튼 배지 업데이트
+ * dirty 탭이 있으면 변경된 캠페인 수를 배지로 표시
+ */
+async function _updateSmartDirtyBadge() {
+  try {
+    // indexStatus 응답에 dirtyCount 정보가 있으면 활용 (없으면 표시 안 함)
+    const data = await gasGet({ action: "indexStatus" }, 6000);
+    const badge   = document.getElementById("smartDirtyBadge");
+    const hintEl  = document.getElementById("smartModeHint");
+    const hintTxt = document.getElementById("smartModeHintText");
+    if (!badge) return;
+    const dirtyCnt = data.dirtyCount || 0;
+    if (dirtyCnt > 0) {
+      // ★ v10.0: 배지 스타일 강화 — 흰 반투명 → 빨간 배지로 더 눈에 띄게
+      badge.textContent = dirtyCnt + "개 변경";
+      badge.style.cssText = "display:inline;background:#DC2626;color:#fff;padding:1px 7px;border-radius:10px;font-size:.7rem;font-weight:700;margin-left:5px;";
+      if (hintEl && hintTxt) {
+        hintTxt.textContent = `🔴 변경된 캠페인 ${dirtyCnt}개 — 빠른 갱신 클릭 시 해당 캠페인만 재갱신합니다.`;
+        hintEl.style.display = "";
+        hintEl.style.color = "#DC2626";
+      }
+    } else {
+      badge.style.display = "none";
+      if (hintEl && hintTxt) {
+        hintTxt.textContent = "변경된 탭 없음 — 클릭 시 전체 갱신 주기 도래 여부에 따라 자동 판단합니다.";
+        hintEl.style.display = "";
+        hintEl.style.color = "#6b7280";
+      }
+    }
+    // ★ v10.2 P2-C: 고아 행 경고 (orphanCount > 0)
+    _handleOrphanRowsWarning(data.orphanCount || 0, data.orphanRows || []);
+  } catch (_) {}
+}
+
+// ★ v10.2 P2-C: 고아 행 경고 배너 처리
+let _lastOrphanCount = 0;
+function _handleOrphanRowsWarning(orphanCount, orphanRows) {
+  _lastOrphanCount = orphanCount;
+  // 기존 배너 제거
+  const existBanner = document.getElementById("orphanRowsBanner");
+  if (existBanner) existBanner.remove();
+  if (orphanCount <= 0) return;
+
+  // 경고 배너 생성
+  const banner = document.createElement("div");
+  banner.id = "orphanRowsBanner";
+  banner.style.cssText = "background:#FFF7ED;border:1px solid #FB923C;border-radius:8px;padding:12px 16px;"
+    + "margin:8px 0;font-size:.85rem;color:#9A3412;line-height:1.6;";
+
+  const sampleHtml = (orphanRows && orphanRows.length > 0)
+    ? orphanRows.slice(0, 5).map(o =>
+        `<span style="font-family:monospace;font-size:.78rem">• ${escHtml(o.tabName || o.sheetId)} (행 ${o.rowNum})</span>`
+      ).join("<br>")
+    : "";
+
+  banner.innerHTML = `<b><i class="fas fa-broom" style="color:#F97316"></i> 미사용 세부목록 행 ${orphanCount}개 감지</b>`
+    + (sampleHtml ? `<br><div style="margin:6px 0 4px;padding:6px 8px;background:#FED7AA;border-radius:4px;font-size:.78rem">${sampleHtml}</div>` : "")
+    + `<br><button onclick="cleanOrphanRows()" style="margin-top:4px;padding:4px 14px;background:#EA580C;color:#fff;`
+    + `border:none;border-radius:6px;font-size:.8rem;cursor:pointer;font-weight:700">`
+    + `<i class="fas fa-trash-alt"></i> 미사용 설정 정리</button>`
+    + `<button onclick="document.getElementById('orphanRowsBanner').remove()" style="margin-left:8px;padding:4px 10px;`
+    + `background:transparent;color:#9A3412;border:1px solid #FB923C;border-radius:6px;font-size:.8rem;cursor:pointer">`
+    + `무시</button>`;
+
+  // gasErrorBanner 앞에 삽입 (없으면 debugBaseResult 앞)
+  const anchor = document.getElementById("gasErrorBanner") || document.getElementById("debugBaseResult");
+  if (anchor && anchor.parentNode) {
+    anchor.parentNode.insertBefore(banner, anchor);
+  }
+}
+
+/**
+ * ★ v10.2 P2-C: 고아 세부목록 행 일괄 삭제
+ */
+async function cleanOrphanRows() {
+  if (!confirm(`미사용 세부목록 행 ${_lastOrphanCount}개를 삭제합니다.\n삭제된 행은 복구할 수 없습니다. 계속하시겠습니까?`)) return;
+  try {
+    showToast("⏳ 미사용 설정 정리 중...", false);
+    const data = await gasGet({ action: "cleanOrphanDetailRows" }, 30000);
+    if (data.ok) {
+      showToast(`✅ ${data.deleted}개 미사용 행 삭제 완료`, "success");
+      const banner = document.getElementById("orphanRowsBanner");
+      if (banner) banner.remove();
+      _lastOrphanCount = 0;
+    } else {
+      showToast("❌ 정리 오류: " + (data.error || "알 수 없는 오류"), "error");
+    }
+  } catch (e) {
+    showToast("❌ 요청 실패: " + e.message, "error");
+  }
+}
+
+/**
+ * ★ v10.3: 세부목록 campaign_name 열 자동 생성 + 일괄 채우기
+ * @param {boolean} overwrite - true이면 기존 값도 덮어쓰기
+ */
+async function migrateCampaignNames(overwrite) {
+  const resultEl = document.getElementById("migrateCampaignNamesResult");
+  const btn1 = document.getElementById("btnMigrateCampaignNames");
+  const btn2 = document.getElementById("btnMigrateCampaignNamesOverwrite");
+
+  const confirmMsg = overwrite
+    ? "⚠ 이미 입력된 캠페인명도 모두 덮어씁니다.\n계속하시겠습니까?"
+    : "세부목록의 빈 campaign_name 셀을 자동으로 채웁니다.\n(이미 값이 있는 셀은 유지됩니다)\n계속하시겠습니까?";
+  if (!confirm(confirmMsg)) return;
+
+  // 버튼 비활성화 + 로딩
+  [btn1, btn2].forEach(b => { if (b) { b.disabled = true; } });
+  if (resultEl) {
+    resultEl.style.display = "block";
+    resultEl.style.background = "#F0F9FF";
+    resultEl.style.border = "1px solid #BAE6FD";
+    resultEl.style.color = "#0369A1";
+    resultEl.innerHTML = '<i class="fas fa-spinner fa-spin"></i> 캠페인명 채우는 중... (잠시 기다려주세요)';
+  }
+
+  try {
+    const data = await gasGet({ action: "migrateCampaignNames", overwrite }, 60000);
+
+    if (data.ok) {
+      const colInfo = data.colIndex ? ` (${data.colIndex}번째 열)` : "";
+      const apiInfo = data.apiFetched > 0 ? `<br>• Sheets API 조회: ${data.apiFetched}회 (작업목록에 없는 캠페인)` : "";
+
+      if (resultEl) {
+        resultEl.style.background = "#F0FDF4";
+        resultEl.style.border = "1px solid #BBF7D0";
+        resultEl.style.color = "#166534";
+        resultEl.innerHTML =
+          `<b><i class="fas fa-check-circle"></i> 완료${colInfo}</b><br>` +
+          `• 채운 셀: <b>${data.filled}개</b>${apiInfo}<br>` +
+          `• 건너뜀(이미 있거나 URL 없음): ${data.skipped}개`;
+      }
+
+      if (data.filled > 0) {
+        showToast(`✅ 캠페인명 ${data.filled}개 셀 자동 채우기 완료!`, "success");
+      } else {
+        showToast("ℹ 채울 빈 셀이 없습니다. (모두 이미 입력됨)", "info");
+      }
+
+    } else {
+      const errMsg = data.error || "알 수 없는 오류";
+      if (resultEl) {
+        resultEl.style.background = "#FFF1F2";
+        resultEl.style.border = "1px solid #FECDD3";
+        resultEl.style.color = "#9F1239";
+        resultEl.innerHTML = `<b><i class="fas fa-exclamation-circle"></i> 오류</b><br>${escHtml(errMsg)}`;
+      }
+      showToast("❌ 캠페인명 채우기 실패: " + errMsg, "error");
+    }
+  } catch (e) {
+    if (resultEl) {
+      resultEl.style.background = "#FFF1F2";
+      resultEl.style.border = "1px solid #FECDD3";
+      resultEl.style.color = "#9F1239";
+      resultEl.innerHTML = `<b><i class="fas fa-exclamation-circle"></i> 요청 실패</b><br>${escHtml(e.message)}`;
+    }
+    showToast("❌ 요청 실패: " + e.message, "error");
+  } finally {
+    [btn1, btn2].forEach(b => { if (b) b.disabled = false; });
+  }
+}
+
+async function loadIndexStatus() {
+  const builtAt = document.getElementById("indexBuiltAt");
+  const count   = document.getElementById("indexCount");
+  const badge   = document.getElementById("indexStatusBadge");
+  if (!badge) return;
+  badge.className = "index-badge index-badge-unknown";
+  badge.textContent = "조회 중...";
+  builtAt.textContent = "-";
+  count.textContent   = "-";
+  // 코드 버전 행 초기화
+  const codeVerRow  = document.getElementById("codeVersionRow");
+  const codeVerText = document.getElementById("codeVersionText");
+  if (codeVerRow) codeVerRow.style.display = "none";
+  // 소요시간/결과 행은 buildIndex 완료 시에만 표시 → 단순 조회 시 숨김 유지
+  try {
+    const data = await gasGet({ action: "indexStatus" });
+    // ★ GAS 코드 버전 표시 (재배포할 때마다 갱신됨)
+    if (data.codeVersion && codeVerRow && codeVerText) {
+      codeVerText.textContent = data.codeVersion;
+      codeVerRow.style.display = "";
+    }
+    if (!data.exists) {
+      badge.className = "index-badge index-badge-none";
+      badge.textContent = "없음";
+      builtAt.textContent = "인덱스가 없습니다. 갱신 버튼을 눌러주세요.";
+    } else if (data.expired) {
+      badge.className = "index-badge index-badge-expired";
+      badge.textContent = "만료됨";
+      builtAt.textContent = data.builtAtStr || "-";
+      count.textContent   = (data.count || 0).toLocaleString() + "건";
+    } else {
+      badge.className = "index-badge index-badge-ok";
+      badge.textContent = "정상";
+      builtAt.textContent = data.builtAtStr || "-";
+      count.textContent   = (data.count || 0).toLocaleString() + "건";
+    }
+    // ★ v10.2 P2-C: 고아 행 경고 처리
+    _handleOrphanRowsWarning(data.orphanCount || 0, data.orphanRows || []);
+  } catch (err) {
+    badge.className = "index-badge index-badge-error";
+    badge.textContent = "오류";
+    const emsg = err.message || "";
+    if (emsg.includes("fetch") || emsg.includes("Failed to fetch") || emsg.includes("NetworkError")) {
+      builtAt.textContent = "❌ GAS 응답 없음 — URL 확인 또는 GAS 재배포 필요";
+    } else if (emsg === "GAS URL 없음") {
+      builtAt.textContent = "GAS URL을 먼저 저장하세요.";
+    } else {
+      builtAt.textContent = "❌ " + emsg.substring(0, 60);
+    }
+  }
+}
+
+/* ── 인덱스 갱신 진행 표시 ── */
+let _buildTimer = null;
+// v6: Sheets API 배치 처리 기준 예상시간 (기존 120초 → 60초로 단축)
+// 실제 캠페인 수에 따라 동적 조정
+let BUILD_EXPECTED_SEC = 60;
+
+function startBuildProgress(campaignCount) {
+  // 캠페인 수에 따라 예상시간 동적 설정
+  // Sheets API batchGet 사용 시: 탭 목록 ~5초 + 헤더스캔 ~(N*0.5)초 + 데이터 ~(N*0.8)초
+  if (campaignCount && campaignCount > 0) {
+    BUILD_EXPECTED_SEC = Math.min(270, Math.max(30, Math.round(5 + campaignCount * 1.2)));
+  } else {
+    BUILD_EXPECTED_SEC = 60;
+  }
+
+  const wrap    = document.getElementById("buildProgressWrap");
+  const bar     = document.getElementById("buildProgressBar");
+  const label   = document.getElementById("buildProgressLabel");
+  const pct     = document.getElementById("buildProgressPct");
+  const eta     = document.getElementById("buildProgressEta");
+  const elapsed = document.getElementById("buildProgressTime");
+  show(wrap);
+  bar.style.width = "0%";
+  let sec = 0;
+
+  // v6 단계별 메시지 (Sheets API 배치 처리 흐름 반영)
+  const stages = [
+    { pct: 0,  msg: "베이스시트 캠페인 목록 읽는 중..." },
+    { pct: 15, msg: "탭 메타정보 조회 중 (Sheets API)..." },
+    { pct: 35, msg: "헤더 배치 스캔 중..." },
+    { pct: 55, msg: "데이터 배치 읽기 중..." },
+    { pct: 75, msg: "인덱스 행 파싱 중..." },
+    { pct: 88, msg: "캐시 저장 중..." },
+    { pct: 94, msg: "거의 완료됐어요..." },
+  ];
+
+  _buildTimer = setInterval(() => {
+    sec++;
+    // 로그 스케일 진행 (최대 95%)
+    const progress = Math.min(95, Math.round(
+      (1 - Math.exp(-sec / (BUILD_EXPECTED_SEC * 0.55))) * 100
+    ));
+    bar.style.width = progress + "%";
+    pct.textContent = progress + "%";
+    elapsed.textContent = sec + "초 경과";
+
+    // 단계 메시지
+    let curMsg = stages[0].msg;
+    for (const s of stages) { if (progress >= s.pct) curMsg = s.msg; }
+    label.textContent = curMsg;
+
+    // 잔여 시간
+    const remaining = Math.max(0, Math.round(
+      BUILD_EXPECTED_SEC * (1 - progress / 100) * 1.15
+    ));
+    if (progress < 92) {
+      eta.textContent = "예상 잔여: 약 " + (remaining >= 60
+        ? Math.ceil(remaining / 60) + "분 " + (remaining % 60) + "초"
+        : remaining + "초");
+    } else {
+      eta.textContent = "마무리 중...";
+    }
+  }, 1000);
+}
+
+function stopBuildProgress() {
+  if (_buildTimer) { clearInterval(_buildTimer); _buildTimer = null; }
+  const wrap  = document.getElementById("buildProgressWrap");
+  const bar   = document.getElementById("buildProgressBar");
+  const pct   = document.getElementById("buildProgressPct");
+  const eta   = document.getElementById("buildProgressEta");
+  const label = document.getElementById("buildProgressLabel");
+  bar.style.width   = "100%";
+  pct.textContent   = "100%";
+  eta.textContent   = "완료!";
+  label.textContent = "갱신 완료 ✓";
+  bar.style.background = "linear-gradient(90deg,#10B981,#059669)";
+  setTimeout(() => {
+    hide(wrap);
+    // 바 색상 원복
+    bar.style.background = "linear-gradient(90deg,var(--p),#7C3AED)";
+  }, 2500);
+}
+
+async function debugBaseSheet() {
+  if (!APP_CONFIG.GAS_WEB_APP_URL) { showToast("GAS URL을 먼저 저장해주세요.", "warning"); return; }
+  const btn = document.getElementById("btnDebugBase");
+  const resEl = document.getElementById("debugBaseResult");
+  btn.disabled = true;
+  btn.innerHTML = '<i class="fas fa-spinner fa-spin"></i> 진단 중...';
+  show(resEl);
+  resEl.textContent = "베이스시트 파싱 중...";
+  try {
+    const data = await gasGet({ action: "debugBaseSheet" }, 15000);
+    if (data.ok) {
+      const camps = (data.campaigns || []).map(c => `• ${c.name} (${c.id.substring(0,12)}...)`).join("\n");
+      resEl.innerHTML =
+        `<b>✅ 파싱 성공</b><br>` +
+        `시트명: ${data.sheetName || "-"}<br>` +
+        `총 행수: ${data.lastRow}, 열수: ${data.lastCol}<br>` +
+        `<b>캠페인 수: ${data.campaignCount}개</b><br><br>` +
+        `<b>[캠페인 목록 (최대 10개)]</b><br>` +
+        (camps ? camps.replace(/\n/g,"<br>") : "없음") +
+        (data.sampleRows && data.sampleRows.length ?
+          `<br><br><b>[첫 ${data.sampleRows.length}행 원본]</b><br>` +
+          data.sampleRows.map(r => `행${r.row}: ${JSON.stringify(r.cells)}`).join("<br>")
+          : "");
+      if (data.campaignCount === 0) {
+        resEl.innerHTML += `<br><br><b style="color:#EF4444">⚠ 캠페인 URL을 찾지 못했습니다.<br>베이스시트 A열에 spreadsheets URL이 있는지 확인하세요.</b>`;
+      }
+    } else {
+      resEl.innerHTML = `<b style="color:#EF4444">❌ 오류: ${data.error}</b><br><small>${data.stack||""}</small>`;
+    }
+  } catch(e) {
+    resEl.textContent = "오류: " + e.message;
+  } finally {
+    btn.disabled = false;
+    btn.innerHTML = '<i class="fas fa-bug"></i> 베이스시트 파싱 진단';
+  }
+}
+
+async function debugBuildStep(step) {
+  if (!APP_CONFIG.GAS_WEB_APP_URL) { showToast("GAS URL을 먼저 저장해주세요.", "warning"); return; }
+  const resEl = document.getElementById("debugBaseResult");
+  show(resEl);
+  resEl.innerHTML = `<i class="fas fa-spinner fa-spin"></i> Step ${step} 진단 중...`;
+  try {
+    const data = await gasGet({ action: "debugBuildStep", step: String(step) }, 30000);
+    const logHtml = (data.log || []).map(l => {
+      if (l.includes("실패") || l.includes("오류") || l.includes("error")) return `<span style="color:#EF4444">${l}</span>`;
+      if (l.includes("성공") || l.includes("정상") || l.includes("완료")) return `<span style="color:#10B981">${l}</span>`;
+      return `<span style="color:#374151">${l}</span>`;
+    }).join("<br>");
+
+    let extra = "";
+    if (data.campaigns)  extra += `<br><b>캠페인:</b> ${data.campaigns.map(c=>`${c.name}`).join(", ")}`;
+    if (data.tabs)       extra += `<br><b>탭목록:</b> ${data.tabs.join(", ")} <i style="color:#6B7280">(방법: ${data.tabMethod})</i>`;
+    if (data.headerMethod) extra += `<br><b>헤더 읽기:</b> ${data.headerMethod}`;
+    if (data.preview)    extra += `<br><b>헤더 미리보기:</b><br>${data.preview.slice(0,3).map(r=>JSON.stringify(r)).join("<br>")}`;
+    if (data.elapsed)    extra += `<br><b>소요: ${data.elapsed}</b>`;
+
+    if (data.ok) {
+      resEl.innerHTML = `<b style="color:#10B981">✅ Step ${step} 정상</b><br>${logHtml}${extra}`;
+    } else {
+      resEl.innerHTML =
+        `<b style="color:#EF4444">❌ Step ${step} 실패</b><br>` +
+        `<b>오류: ${data.error || ""}</b><br>` +
+        logHtml + extra +
+        (data.stack ? `<br><small style="color:#9CA3AF">${data.stack.replace(/\n/g,"<br>")}</small>` : "");
+    }
+  } catch(e) {
+    resEl.innerHTML = `<b style="color:#EF4444">❌ 네트워크 오류: ${e.message}</b>`;
+  }
+}
+
+/** ─── 특정 시트 개별 진단: 입력값 변경 시 gid 여부 판단 ─── */
+function onDebugSheetInput() {
+  const raw = (document.getElementById("debugSheetIdInput").value || "").trim();
+  const choiceWrap = document.getElementById("debugSheetChoiceWrap");
+  // gid 포함 여부 확인
+  const hasGid = /[?#&]gid=\d+/.test(raw) || /\/edit.*#gid=\d+/.test(raw);
+  if (hasGid && raw.includes("/spreadsheets/d/")) {
+    choiceWrap.style.display = "block";
+  } else {
+    choiceWrap.style.display = "none";
+  }
+}
+
+/** 진단 버튼 클릭 시 처리 */
+function onDebugSheetDiagClick() {
+  const raw = (document.getElementById("debugSheetIdInput").value || "").trim();
+  if (!raw) { showToast("sheetId 또는 URL을 입력하세요.", "warning"); return; }
+  const hasGid = /[?#&]gid=\d+/.test(raw) || /\/edit.*#gid=\d+/.test(raw);
+  if (hasGid && raw.includes("/spreadsheets/d/")) {
+    // gid 포함: 선택지 표시만 (이미 onDebugSheetInput에서 열렸을 수 있으나 확실히 표시)
+    document.getElementById("debugSheetChoiceWrap").style.display = "block";
+    // 결과 영역 초기화
+    const resEl = document.getElementById("debugSingleResult");
+    resEl.className = "hidden";
+    resEl.style.display = "none";
+    showToast("진단 방식을 선택해주세요.", "info");
+  } else {
+    // gid 없음: 바로 전체진단 실행
+    debugSingleSheet("full");
+  }
+}
+
+/** ─── 특정 시트 개별 진단 (mode: 'tab' | 'full') ─── */
+async function debugSingleSheet(mode) {
+  if (!APP_CONFIG.GAS_WEB_APP_URL) { showToast("GAS URL을 먼저 저장해주세요.", "warning"); return; }
+
+  const raw   = (document.getElementById("debugSheetIdInput").value || "").trim();
+  const resEl = document.getElementById("debugSingleResult");
+  if (!raw) { showToast("sheetId 또는 URL을 입력하세요.", "warning"); return; }
+
+  // sheetId 및 gid 추출
+  const mId  = raw.match(/\/spreadsheets\/d\/([a-zA-Z0-9_-]{20,})/);
+  const sheetId = mId ? mId[1] : raw;
+  const mGid = raw.match(/[?#&]gid=(\d+)/);
+  const gid  = mGid ? mGid[1] : null;
+
+  // mode 결정: gid 있고 'tab' 모드면 단일탭 진단, 나머지는 전체진단
+  const diagMode = (mode === "tab" && gid) ? "tab" : "full";
+  const diagGid  = diagMode === "tab" ? gid : null;
+
+  // 선택지 영역 숨기기
+  document.getElementById("debugSheetChoiceWrap").style.display = "none";
+
+  show(resEl);
+  resEl.style.display = "";
+  const modeLabel = diagMode === "tab" ? `gid:${diagGid} (단일탭)` : "전체진단";
+  resEl.innerHTML = `<i class="fas fa-spinner fa-spin"></i> <b>${sheetId.substring(0,16)}…</b> 진단 중 <span style="color:#7C3AED">[${modeLabel}]</span>...`;
+
+  try {
+    const params = { action: "debugSingleSheet", sheetId };
+    if (diagGid) params.gid = diagGid;
+    const data = await gasGet(params, 40000);
+
+    // 결과 렌더링 헬퍼
+    const ok    = s => `<span style="color:#10B981;font-weight:700">${s}</span>`;
+    const err   = s => `<span style="color:#EF4444;font-weight:700">${s}</span>`;
+    const warn  = s => `<span style="color:#D97706;font-weight:700">${s}</span>`;
+    const gray  = s => `<span style="color:#6B7280">${s}</span>`;
+
+    const totalTabs = (data.allTabs || []).length;
+    const validCount = (data.validTabs || []).length;
+
+    let html = `<b>🔍 진단 대상:</b> ${gray(sheetId)}`;
+    if (diagMode === "tab") html += ` ${gray(`(gid:${diagGid} 탭만)`)}`;
+    html += `<br><br>`;
+
+    // ① 베이스시트 등록 여부
+    html += `<b>① 베이스시트 등록</b>: `;
+    if (data.registered === true)  html += ok("✅ 등록됨");
+    else if (data.registered === false) html += err("❌ 미등록 → [+업체추가]로 먼저 등록하세요");
+    else html += warn("⚠ 확인 불가");
+    html += `<br>`;
+
+    // ② 시트 접근 권한
+    html += `<b>② 시트 접근 권한</b>: `;
+    if (data.accessible === true)       html += ok("✅ 접근 가능");
+    else if (data.accessible === false) html += err(`❌ 접근 불가 → ${escHtml(data.accessError || "공유 권한 확인 필요")}`);
+    else html += warn("⚠ 확인 불가");
+    html += `<br>`;
+
+    // ③ 시트 제목
+    if (data.sheetTitle) {
+      html += `<b>③ 스프레드시트 제목</b>: ${escHtml(data.sheetTitle)}<br>`;
+    }
+
+    // ④ 탭 목록 — 헤더에 "총 N개 중 인덱스 반영 탭 M개" 표시
+    if (diagMode === "tab") {
+      // 단일탭 진단: 해당 탭 1개만 표시
+      html += `<b>④ 탭 목록 (단일탭 진단)</b>: `;
+      if (data.allTabs && data.allTabs.length) {
+        const tab = data.allTabs[0];
+        const isValid = data.validTabs && data.validTabs.includes(tab);
+        html += `탭명: ${escHtml(tab)} — ${isValid ? ok("인덱스 반영") : err("스킵됨")}<br>`;
+      } else {
+        html += warn("해당 탭을 찾을 수 없음") + "<br>";
+      }
+    } else {
+      // 전체진단: 총 N개 중 M개
+      html += `<b>④ 탭 목록 (전체)</b>: `;
+      if (totalTabs > 0) {
+        html += `총 ${totalTabs}개 중 인덱스 반영 탭 ${ok(String(validCount) + "개")}<br>`;
+        html += data.allTabs.map(tab => {
+          const isValid = data.validTabs && data.validTabs.includes(tab);
+          return `  ${isValid ? ok("●") : gray("○")} ${escHtml(tab)}${isValid ? "" : gray(" (스킵됨)")}`;
+        }).join("<br>") + "<br>";
+      } else {
+        html += warn("탭 없음 또는 읽기 실패") + "<br>";
+      }
+    }
+
+    // ⑤ 스킵 원인 (간소화) — 단일탭 모드는 해당 탭 1개만 표시
+    if (data.skipReasons && Object.keys(data.skipReasons).length) {
+      // 단일탭 모드: GAS가 전체 탭 스캔 결과를 반환해도 해당 탭만 표시
+      let skipEntries = Object.entries(data.skipReasons);
+      if (diagMode === "tab" && data.allTabs && data.allTabs.length) {
+        const targetTab = data.allTabs[0]; // 단일탭의 탭명
+        skipEntries = skipEntries.filter(([tab]) => tab === targetTab);
+      }
+      if (skipEntries.length > 0) {
+        html += `<b>⑤ 스킵 원인</b>:<br>`;
+        skipEntries.forEach(([tab, reason]) => {
+          const simpleReason = _simplifySkipReason(reason);
+          html += `  ${err("✗")} ${escHtml(tab)} → ${warn(simpleReason)}<br>`;
+        });
+      }
+    }
+
+    // ⑥ 헤더 샘플 (첫 번째 유효 탭)
+    if (data.headerSample) {
+      const sampleTabLabel = data.headerSampleTab ? ` (${escHtml(data.headerSampleTab)})` : "";
+      html += `<b>⑥ 헤더 샘플${sampleTabLabel}</b>:<br>`;
+      html += gray(JSON.stringify(data.headerSample).substring(0, 200)) + "<br>";
+    }
+
+    // 오류 로그
+    if (data.errors && data.errors.length) {
+      html += `<br><b>⚠ 오류 로그</b>:<br>`;
+      data.errors.forEach(e => { html += `  ${err("→")} ${escHtml(e)}<br>`; });
+    }
+
+    // 최종 판정
+    html += `<br><b>🏁 최종 판정</b>: `;
+    if (data.verdict === "ok") {
+      // 단일탭 모드: 인덱스 실제 포함 여부 추가 표시
+      if (diagMode === "tab") {
+        if (data.isInIndex === true) {
+          html += ok("✅ 정상 + 현재 인덱스에도 포함됨 (대시보드에 바로 표시)");
+        } else if (data.isInIndex === false) {
+          html += warn("⚠ 헤더 정상 (스킵 없음) — 그러나 현재 인덱스에 미포함") +
+            `<br><small style="color:#D97706;margin-left:2px">→ [인덱스 지금 갱신] 버튼을 눌러야 대시보드에 반영됩니다.</small>`;
+        } else {
+          html += ok("✅ 정상 — 인덱스 갱신 시 포함됩니다");
+        }
+      } else {
+        html += ok("✅ 정상 — 인덱스 갱신 시 포함됩니다");
+      }
+    }
+    else if (data.verdict === "tab_not_found") html += err(`❌ gid:${diagGid} 탭을 찾을 수 없음 — URL의 gid 값을 확인하세요`);
+    else if (data.verdict === "no_tab" || data.verdict === "no_valid_tab") html += err("❌ 유효 탭 없음 — 탭명 패턴 또는 헤더 확인 필요");
+    else if (data.verdict === "no_access") html += err("❌ 접근 불가 — 시트 공유 설정 확인");
+    else if (data.verdict === "not_registered") html += err("❌ 미등록 — [+업체추가] 필요");
+    else if (data.verdict)                 html += warn(escHtml(data.verdict));
+    else if (data.error)                   html += err(escHtml(data.error));
+
+    // 단일탭 모드에서 인덱스 미포함인 경우 원인 힌트 추가
+    if (diagMode === "tab" && data.isInIndex === false && data.verdict === "ok") {
+      const tabName = data.allTabs && data.allTabs[0] ? data.allTabs[0] : "";
+      html += `<br><br><b>💡 대시보드 미표시 원인 후보:</b><br>`;
+      html += `&nbsp;&nbsp;1. 인덱스 갱신 전 상태 → <b>[인덱스 지금 갱신]</b> 클릭 후 재확인<br>`;
+      html += `&nbsp;&nbsp;2. 갱신 시 해당 탭이 스킵됐을 가능성 → 갱신 후 재진단<br>`;
+      html += `&nbsp;&nbsp;3. 세부목록에 해당 탭 미등록 → ⚙ 탭설정 후 저장<br>`;
+      if (tabName) html += `&nbsp;&nbsp;4. 탭명 특수문자/공백 문제: <i>"${escHtml(tabName)}"</i><br>`;
+    }
+
+    resEl.innerHTML = html;
+
+  } catch(e) {
+    resEl.innerHTML = `<b style="color:#EF4444">❌ 네트워크/GAS 오류: ${escHtml(e.message)}</b><br><small>GAS 백엔드에 debugSingleSheet 액션이 구현되어 있어야 합니다.</small>`;
+  }
+}
+
+/** 스킵 원인 문자열 간소화 헬퍼 */
+function _simplifySkipReason(reason) {
+  if (!reason) return "알 수 없음";
+  const r = String(reason);
+  // 헤더 키워드 없음 패턴
+  if (r.includes("DATA_TAB_KEYWORDS") || r.includes("헤더 키워드") || r.includes("header keyword") || r.includes("번호") || r.includes("주문자")) {
+    return "헤더 키워드 없음 (번호/주문자/수취인/수취인명/성함 중 없음)";
+  }
+  // 검색 컬럼 없음
+  if (r.includes("SEARCH_COL") || r.includes("검색 컬럼") || r.includes("name column")) {
+    return "이름 컬럼 없음 (수취인/주문자/성함 등 없음)";
+  }
+  // 숨김 탭
+  if (r.includes("hidden") || r.includes("숨김")) {
+    return "숨겨진 탭";
+  }
+  // 시스템 탭
+  if (r.includes("INDEX_TAB") || r.includes("인덱스") || r.includes("세부목록") || r.includes("탭설정")) {
+    return "시스템 탭 (제외 대상)";
+  }
+  // 빈 탭
+  if (r.includes("empty") || r.includes("비어") || r.includes("데이터 없")) {
+    return "데이터 없음 (빈 탭)";
+  }
+  // 기타: 100자 이상이면 잘라냄
+  return r.length > 80 ? r.substring(0, 80) + "…" : r;
+}
+
+/** ─── 세부목록(탭설정) 진단 함수들 ─── */
+async function debugTabConfig() {
+  if (!APP_CONFIG.GAS_WEB_APP_URL) { showToast("GAS URL을 먼저 저장해주세요.", "warning"); return; }
+  const resEl = document.getElementById("debugTabConfigResult");
+  show(resEl);
+  resEl.innerHTML = "⏳ 세부목록 현황 조회 중...";
+  try {
+    const data = await gasGet({ action: "debugTabConfig" }, 15000);
+    const dl = data.detailSheet || {};
+
+    // ── 헤더 분석 ──
+    let headerHtml = "";
+    if (dl.exists && dl.data && dl.data.length > 0) {
+      const headers = dl.data[0].map(c => String(c || "").trim());
+      const expectedCols = ["sheet_url","tab_name","manager","time_range","taekhap","review_type",
+        "payment_type","display_name","force_done","updated_at","folder_url","is_bulk",
+        "capture_folder_url","is_closed","delivery_type","round","nc_mode","deposit_name",
+        "transfer_bank","income_type"];
+      const missing = expectedCols.filter(c => !headers.includes(c));
+      const extra   = headers.filter(c => c && !expectedCols.includes(c));
+
+      headerHtml = `<br><b>📋 헤더 컬럼 (${headers.filter(h=>h).length}개):</b><br>`;
+      headerHtml += headers.map((h, i) => {
+        if (!h) return "";
+        const ok = expectedCols.includes(h);
+        return `<span style="color:${ok?'#059669':'#7C3AED'};font-family:monospace">[${i}]${h}</span>`;
+      }).filter(Boolean).join(" ");
+
+      if (missing.length > 0) {
+        headerHtml += `<br><b style="color:#EF4444">⚠ 누락 컬럼 (${missing.length}개):</b> `;
+        headerHtml += missing.map(c => `<code style="color:#DC2626">${c}</code>`).join(", ");
+      }
+      if (extra.length > 0) {
+        headerHtml += `<br><b style="color:#F59E0B">📌 추가 컬럼:</b> ${extra.join(", ")}`;
+      }
+
+      // ── 데이터 샘플 ──
+      if (dl.data.length > 1) {
+        headerHtml += `<br><br><b>📄 데이터 샘플 (최대 5행):</b>`;
+        dl.data.slice(1, 6).forEach((row, i) => {
+          const tabNameIdx = headers.indexOf("tab_name");
+          const mgrIdx     = headers.indexOf("manager");
+          const timeIdx    = headers.indexOf("time_range");
+          const fdIdx      = headers.indexOf("force_done");
+          const closedIdx  = headers.indexOf("is_closed");
+          const urlIdx     = headers.indexOf("sheet_url");
+          const tabName    = tabNameIdx >= 0 ? String(row[tabNameIdx] || "-") : "-";
+          const mgr        = mgrIdx >= 0     ? String(row[mgrIdx]     || "-") : "-";
+          const time       = timeIdx >= 0    ? String(row[timeIdx]    || "-") : "-";
+          const fd         = fdIdx >= 0      ? String(row[fdIdx]      || "-") : "-";
+          const closed     = closedIdx >= 0  ? String(row[closedIdx]  || "-") : "-";
+          const urlShort   = urlIdx >= 0 && row[urlIdx]
+            ? String(row[urlIdx]).replace(/https?:\/\/docs\.google\.com\/spreadsheets\/d\//, "").substring(0, 20) + "..."
+            : "-";
+          headerHtml += `<br><span style="font-family:monospace;font-size:.72rem">행${i+2}: [${tabName}] 담당:${mgr} 시간:${time} 완료:${fd} 마감:${closed} sid:${urlShort}</span>`;
+        });
+      }
+    }
+
+    const statusColor = dl.exists ? "#059669" : "#EF4444";
+    const statusText  = dl.exists ? "✅ 존재함" : "❌ 없음";
+
+    resEl.innerHTML =
+      `<b>세부목록 탭(${data.DETAIL_SHEET_NAME || "세부목록"}):</b> <span style="color:${statusColor}">${statusText}</span><br>` +
+      `📊 행 수: <b>${dl.lastRow || 0}</b>행 (헤더 포함)<br>` +
+      `🆔 BASE_SHEET_ID: <code style="font-size:.7rem">${data.BASE_SHEET_ID || "-"}</code>` +
+      headerHtml +
+      (!dl.exists ? `<br><br><b style="color:#EF4444">⚠ 세부목록 탭이 없습니다.<br>→ [저장 동작 테스트] 버튼으로 탭 자동 생성을 시도하세요.</b>` : "") +
+      (dl.exists && dl.lastRow <= 1 ? `<br><br><i style="color:#6B7280">ℹ 헤더만 있고 데이터가 없습니다. 탭 설정을 저장하면 데이터가 생성됩니다.</i>` : "");
+
+  } catch(e) {
+    resEl.innerHTML = `<b style="color:#EF4444">❌ 오류: ${escHtml(e.message)}</b><br><small>(GAS 최신 버전 재배포 확인)</small>`;
+  }
+}
+
+async function testTabConfigSave() {
+  if (!APP_CONFIG.GAS_WEB_APP_URL) { showToast("GAS URL을 먼저 저장해주세요.", "warning"); return; }
+  const resEl = document.getElementById("debugTabConfigResult");
+  show(resEl);
+  resEl.textContent = "⏳ 테스트 저장 중... (베이스시트 세부목록에 테스트 행 추가)";
+  try {
+    const data = await gasGet({ action: "testTabConfig" }, 15000);
+    if (data.ok) {
+      resEl.textContent =
+        `✅ 저장 테스트 성공!\n` +
+        `tabName: ${data.tabName || "테스트탭"}\n` +
+        `행 위치: ${data.row}행\n` +
+        `신규/업데이트: ${data.updated ? "업데이트" : "신규 추가"}\n\n` +
+        `→ 베이스시트의 "세부목록" 탭을 확인하세요.`;
+      showToast("✅ 테스트 저장 성공! 세부목록 탭을 확인하세요.");
+    } else {
+      resEl.textContent = `❌ 저장 실패: ${data.error || JSON.stringify(data)}\n\n(GAS 재배포 필요 여부 확인)`;
+    }
+  } catch(e) {
+    resEl.textContent =
+      `❌ 네트워크/GAS 오류: ${e.message}\n\n` +
+      `가능한 원인:\n` +
+      `1. GAS가 구버전으로 배포됨 → 새 버전으로 재배포 필요\n` +
+      `2. GAS URL이 잘못됨 → 설정에서 URL 확인\n` +
+      `3. 스프레드시트 권한 없음 → BASE_SHEET_ID 확인`;
+  }
+}
+
+// ── 탭 파싱 진단 ────────────────────────────────────────────────
+async function runSheetDiag() {
+  if (!APP_CONFIG.GAS_WEB_APP_URL) { showToast("GAS URL을 먼저 저장해주세요.", "warning"); return; }
+  const urlInput = document.getElementById("diagSheetUrl");
+  const resultEl = document.getElementById("diagResult");
+  const rawUrl   = (urlInput?.value || "").trim();
+  if (!rawUrl) { showToast("시트 URL을 입력해주세요.", "warning"); return; }
+
+  // URL에서 sheetId, gid 추출
+  const sheetIdMatch = rawUrl.match(/\/spreadsheets\/d\/([a-zA-Z0-9_-]+)/);
+  const gidMatch     = rawUrl.match(/[#&?]gid=(\d+)/);
+  if (!sheetIdMatch) { showToast("올바른 스프레드시트 URL이 아닙니다.", "error"); return; }
+
+  const sheetId = sheetIdMatch[1];
+  const gid     = gidMatch ? gidMatch[1] : "";
+
+  resultEl.style.display = "block";
+  resultEl.innerHTML = '<span style="color:#6366F1"><i class="fas fa-circle-notch fa-spin"></i> 진단 중...</span>';
+
+  try {
+    const data = await gasGet({ action: "debugSheet", sheetId, gid }, 30000);
+
+    if (data.error) {
+      resultEl.innerHTML = `<div style="color:#EF4444;padding:6px;background:#FEF2F2;border-radius:6px">❌ ${escHtml(data.error)}</div>`;
+      return;
+    }
+
+    const willParse = data.willParse;
+    const bg        = willParse ? "#F0FDF4" : "#FFF7ED";
+    const border    = willParse ? "#BBF7D0" : "#FED7AA";
+    const icon      = willParse ? "✅" : "⚠️";
+    const statusMsg = willParse
+      ? "정상 파싱 가능 — 인덱스 갱신 시 조회됩니다"
+      : "파싱 불가 — 헤더 키워드가 인식되지 않아 인덱스에서 제외됩니다";
+
+    const headerPreview  = (data.detectedHeaders || []).filter(h => h).join(", ") || "(헤더 탐지 실패)";
+    const nameColsPreview = (data.nameColsFound  || []).map(x => `${x.header}(${x.keyword})`).join(", ") || "(없음)";
+    const previewHtml    = (data.previewRows || []).map(r =>
+      `<div style="color:${r.isDataRow ? "#166534" : "#6B7280"}">행${r.rowNum}${r.isDataRow ? " ★헤더" : ""}: ${escHtml(r.cells.substring(0,80))}</div>`
+    ).join("");
+
+    resultEl.innerHTML = `
+      <div style="padding:8px;background:${bg};border:1px solid ${border};border-radius:6px;line-height:1.6">
+        <div style="font-weight:700;font-size:.78rem">${icon} ${data.sheetName} — ${statusMsg}</div>
+        <div style="margin-top:4px;font-size:.71rem;color:#374151">
+          <b>헤더 행:</b> ${data.detectedHeaderRow > 0 ? data.detectedHeaderRow + "행" : "미탐지"}<br>
+          <b>인식된 헤더:</b> ${escHtml(headerPreview)}<br>
+          <b>이름 컬럼:</b> ${escHtml(nameColsPreview)}<br>
+          <b>전체 행수:</b> ${data.totalRows}행 / <b>전체 열수:</b> ${data.totalCols}열
+        </div>
+        ${!willParse ? `
+        <div style="margin-top:6px;font-size:.71rem;color:#92400E;border-top:1px solid ${border};padding-top:5px">
+          <b>탐지 키워드:</b> ${escHtml((data.DATA_TAB_KEYWORDS||[]).join(", "))}<br>
+          <b>이름 키워드:</b> ${escHtml((data.SEARCH_COLS||[]).join(", "))}<br>
+          → 위 키워드가 헤더에 없으면 GAS 담당자에게 헤더 확인 요청이 필요합니다.
+        </div>` : ""}
+        <details style="margin-top:4px">
+          <summary style="font-size:.7rem;color:#6B7280;cursor:pointer">상위 행 미리보기</summary>
+          <div style="font-size:.68rem;color:#4B5563;margin-top:2px">${previewHtml}</div>
+        </details>
+      </div>`;
+  } catch (err) {
+    resultEl.innerHTML = `<div style="color:#EF4444">❌ 오류: ${escHtml(err.message)}</div>`;
+  }
+}
+
+// ── 폴더 일괄 생성/배치 ──────────────────────────────────────
+// target: "capture" | "review" | "both"
+
+// ── 캡처폴더 현황 진단 ────────────────────────────────────────
+// 드라이브 실제 폴더명 vs 세부목록 tab_name/display_name 매핑 결과 표시
+async function diagCaptureFolders() {
+  const btn   = document.getElementById("btnDiagCapture");
+  const resEl = document.getElementById("diagCaptureResult");
+  if (btn) btn.disabled = true;
+  resEl.style.display = "block";
+  resEl.innerHTML = `<span style="color:#6B7280"><i class="fas fa-spinner fa-spin"></i> 드라이브 폴더 스캔 중...</span>`;
+
+  try {
+    const data = await gasGet({ action: "diagCaptureFolders" });
+    if (!data || data.error) {
+      resEl.innerHTML = `<span style="color:#EF4444">❌ 오류: ${escHtml(data?.error || "응답 없음")}</span>`;
+      return;
+    }
+
+    const mapping    = data.mapping     || [];
+    const detail     = data.detailSample || [];
+    const campList   = data.campaignList  || [];
+
+    // ── 헤더 요약 ──
+    const moveCount    = data.moveCount    ?? mapping.filter(m => m.status.includes("이동 가능")).length;
+    const failCount    = data.failCount    ?? mapping.filter(m => m.status.includes("⚠")).length;
+    const strippedCount = data.strippedCount ?? mapping.filter(m => m.usedStripped).length;
+    let html = `<div style="padding:5px 7px;background:#EFF6FF;border:1px solid #BFDBFE;border-radius:5px;margin-bottom:6px;font-size:.72rem">
+      <b style="color:#1D4ED8">📊 진단 결과</b>
+      &nbsp;·&nbsp; 드라이브 폴더 <b>${data.driveFolders}개</b>
+      &nbsp;·&nbsp; 이동 가능 <b style="color:#166534">${moveCount}개</b>
+      ${strippedCount > 0 ? `&nbsp;·&nbsp; 날짜제거 매핑 <b style="color:#0369A1">${strippedCount}개</b>` : ""}
+      ${failCount > 0 ? `&nbsp;·&nbsp; 매핑 실패 <b style="color:#BE123C">${failCount}개</b>` : ""}
+      &nbsp;·&nbsp; 캠페인 <b>${data.campaignCount || campList.length}개</b>
+      &nbsp;·&nbsp; 세부목록 <b>${data.detailRows}행</b>
+    </div>`;
+
+    // ── 베이스시트 캠페인 목록 (캠페인폴더명 기준) ──
+    if (campList.length > 0) {
+      html += `<details style="margin-bottom:5px"><summary style="font-size:.7rem;color:#6B7280;cursor:pointer;font-weight:600">📋 베이스시트 캠페인명 목록 (폴더 생성 기준)</summary>
+        <div style="padding:4px 6px;font-size:.67rem;color:#374151;line-height:1.8">
+          ${campList.map(c => `<span style="display:inline-block;background:#EFF6FF;border:1px solid #BFDBFE;border-radius:4px;padding:1px 6px;margin:1px">${escHtml(c)}</span>`).join("")}
+        </div>
+      </details>`;
+    }
+
+    // ── 드라이브 폴더 vs 매핑 결과 테이블 ──
+    html += `<div style="font-weight:700;color:#374151;margin-bottom:3px;font-size:.72rem">📂 드라이브 실제 폴더 목록 & 매핑 결과</div>`;
+    html += `<table style="width:100%;border-collapse:collapse;font-size:.68rem">
+      <tr style="background:#F3F4F6">
+        <th style="padding:3px 5px;border:1px solid #E5E7EB;text-align:left">드라이브 폴더명</th>
+        <th style="padding:3px 5px;border:1px solid #E5E7EB;text-align:left">하위폴더</th>
+        <th style="padding:3px 5px;border:1px solid #E5E7EB;text-align:left">매핑 결과</th>
+      </tr>`;
+
+    mapping.forEach(m => {
+      const isOk      = m.status.includes("이동 가능");
+      const isFail    = m.status.includes("⚠");
+      const isCamp    = m.status.includes("캠페인폴더(상위)");
+      const rowColor    = isOk ? (m.usedStripped ? "#EFF6FF" : "#F0FDF4") : isFail ? "#FFF1F2" : "#F9FAFB";
+      const statusColor = isOk ? (m.usedStripped ? "#1D4ED8" : "#166534") : isFail ? "#BE123C" : "#6B7280";
+      const folderLabel = m.usedStripped
+        ? `${escHtml(m.driveFolderName)} <span style="font-size:.63rem;color:#0369A1;background:#DBEAFE;padding:1px 4px;border-radius:3px">🗓날짜제거</span>`
+        : escHtml(m.driveFolderName);
+      const childTxt = m.hasChildren
+        ? `<span style="color:#0369A1">${m.children.length}개: ${escHtml(m.children.slice(0,3).join(", "))}${m.children.length>3?"…":""}</span>`
+        : `<span style="color:#9CA3AF">없음(단층)</span>`;
+      html += `<tr style="background:${rowColor}">
+        <td style="padding:3px 5px;border:1px solid #E5E7EB;font-weight:600;color:#1F2937">${folderLabel}</td>
+        <td style="padding:3px 5px;border:1px solid #E5E7EB">${childTxt}</td>
+        <td style="padding:3px 5px;border:1px solid #E5E7EB;color:${statusColor}">${escHtml(m.status)}</td>
+      </tr>`;
+    });
+    html += `</table>`;
+
+    // ── 날짜제거 매핑 성공 항목 안내 ──
+    const strippedItems = mapping.filter(m => m.usedStripped);
+    if (strippedItems.length > 0) {
+      html += `<div style="margin-top:6px;padding:5px 8px;background:#EFF6FF;border:1px solid #BFDBFE;border-radius:5px;font-size:.69rem;color:#1D4ED8">
+        <b>🗓 날짜 접두사 제거 후 자동 매핑된 폴더 ${strippedItems.length}개</b><br>
+        ${strippedItems.map(m=>`<code style="background:#DBEAFE;padding:1px 4px;border-radius:3px">${escHtml(m.driveFolderName)}</code> → <b>${escHtml(m.mappedCampaign)}</b>`).join("<br>")}<br>
+        <span style="color:#6B7280;font-size:.66rem">※ 날짜 접두사(3/23, 0324, 3.11, 3월 등)를 제거하고 tab_name과 매핑했습니다. 폴더명은 변경되지 않습니다.</span>
+      </div>`;
+    }
+
+    // ── 매핑 실패 항목 → 원인 상세 분석 ──
+    const failItems    = mapping.filter(m => m.status.includes("⚠"));
+    const failAnalysis = data.failAnalysis || [];
+    if (failItems.length > 0) {
+      html += `<div style="margin-top:8px;padding:6px 8px;background:#FFF1F2;border:1px solid #FECDD3;border-radius:5px;font-size:.69rem;color:#BE123C">
+        <b>⚠ 매핑 실패 ${failItems.length}개</b> — 아래 폴더명이 세부목록 tab_name / display_name 과 일치하지 않습니다<br>
+        <span style="color:#6B7280;font-size:.66rem">※ 폴더는 이동되지 않으며 캡처이미지도 영향받지 않습니다</span>
+      </div>`;
+
+      // 실패 폴더별 상세 원인 분석 테이블
+      html += `<table style="width:100%;border-collapse:collapse;font-size:.67rem;margin-top:4px">
+        <tr style="background:#FEF2F2">
+          <th style="padding:3px 6px;border:1px solid #FECDD3;text-align:left;width:35%">드라이브 폴더명(변경없음)</th>
+          <th style="padding:3px 6px;border:1px solid #FECDD3;text-align:left">세부목록에서 유사한 tab_name 후보</th>
+        </tr>`;
+      failItems.forEach(m => {
+        const analysis = failAnalysis.find(a => a.driveFolderName === m.driveFolderName);
+        const candidates = analysis?.candidates || [];
+        const candidateHtml = candidates.length > 0
+          ? candidates.map(c =>
+              `<span style="display:inline-block;background:#FFF7ED;border:1px solid #FED7AA;border-radius:3px;padding:1px 5px;margin:1px;color:#92400E">
+                <b>${escHtml(c.tabName)}</b>${c.campName ? ` <span style="color:#6B7280">(${escHtml(c.campName)})</span>` : ""}
+              </span>`
+            ).join("")
+          : `<span style="color:#9CA3AF;font-style:italic">유사한 tab_name 없음 — 세부목록에 미등록된 폴더일 수 있음</span>`;
+        html += `<tr style="background:#FFF8F8">
+          <td style="padding:3px 6px;border:1px solid #FECDD3;font-weight:700;color:#991B1B;font-family:monospace">
+            📁 ${escHtml(m.driveFolderName)}
+          </td>
+          <td style="padding:3px 6px;border:1px solid #FECDD3">${candidateHtml}</td>
+        </tr>`;
+      });
+      html += `</table>
+      <div style="margin-top:5px;padding:4px 7px;background:#FFF7ED;border:1px solid #FED7AA;border-radius:4px;font-size:.67rem;color:#92400E">
+        💡 <b>해결 방법:</b> 위 후보 tab_name이 맞다면 → 해당 폴더명을 알려주시면 추가 매핑 패턴을 코드에 등록합니다.<br>
+        후보가 없다면 → 해당 폴더는 세부목록에 없는 탭이므로 직접 캠페인폴더로 드래그하거나 무시하셔도 됩니다.
+      </div>`;
+
+    } else if (mapping.length > 0) {
+      html += `<div style="margin-top:6px;padding:5px 8px;background:#F0FDF4;border:1px solid #86EFAC;border-radius:5px;font-size:.69rem;color:#166534">
+        ✅ 매핑 실패 없음 — ② 미리보기 → ③ 실제 재편성으로 진행하세요.
+      </div>`;
+    }
+
+    // ── 세부목록 샘플 ──
+    if (detail.length > 0) {
+      html += `<details style="margin-top:6px" id="detailSampleSection">
+        <summary style="font-size:.7rem;color:#6B7280;cursor:pointer;font-weight:600">
+          📋 세부목록 tab_name 목록 (${detail.length}행) — 매핑 실패 폴더명과 비교 확인용
+        </summary>
+        <div style="margin:4px 0 2px">
+          <input type="text" id="detailSearchInput" placeholder="tab_name 검색..." oninput="filterDetailTable(this.value)"
+            style="width:100%;box-sizing:border-box;padding:3px 7px;font-size:.68rem;border:1px solid #D1D5DB;border-radius:4px">
+        </div>
+        <table id="detailSampleTable" style="width:100%;border-collapse:collapse;font-size:.66rem;margin-top:2px">
+          <tr style="background:#F3F4F6">
+            <th style="padding:3px 5px;border:1px solid #E5E7EB;text-align:left">tab_name</th>
+            <th style="padding:3px 5px;border:1px solid #E5E7EB;text-align:left">display_name</th>
+            <th style="padding:3px 5px;border:1px solid #E5E7EB;text-align:left">캠페인명</th>
+            <th style="padding:3px 5px;border:1px solid #E5E7EB;text-align:center">캡처URL</th>
+          </tr>
+          ${detail.map(r => `<tr class="detail-row">
+            <td style="padding:2px 5px;border:1px solid #E5E7EB;font-family:monospace;color:#1F2937">${escHtml(r.tabName)}</td>
+            <td style="padding:2px 5px;border:1px solid #E5E7EB;color:${r.dispName?"#166534":"#9CA3AF"}">${escHtml(r.dispName || "(없음)")}</td>
+            <td style="padding:2px 5px;border:1px solid #E5E7EB;color:#1D4ED8">${escHtml(r.campName || "—")}</td>
+            <td style="padding:2px 5px;border:1px solid #E5E7EB;text-align:center">${r.capUrl ? "✅" : "—"}</td>
+          </tr>`).join("")}
+        </table>
+      </details>`;
+    }
+
+    resEl.innerHTML = html;
+
+  } catch (err) {
+    resEl.innerHTML = `<span style="color:#EF4444">❌ 예외: ${escHtml(err.message)}</span>`;
+    console.error("[diagCaptureFolders] 오류:", err);
+  } finally {
+    if (btn) btn.disabled = false;
+  }
+}
+
+// ── 세부목록 샘플 테이블 검색 필터 ────────────────────────────
+function filterDetailTable(q) {
+  const table = document.getElementById("detailSampleTable");
+  if (!table) return;
+  const rows = table.querySelectorAll("tr.detail-row");
+  const kw   = q.trim().toLowerCase();
+  rows.forEach(tr => {
+    const text = tr.textContent.toLowerCase();
+    tr.style.display = (!kw || text.includes(kw)) ? "" : "none";
+  });
+}
+
+// ── 캡처폴더 구조 재편성 (단층 → 캠페인폴더 하위) ─────────────
+// dryRun=true → 미리보기 / dryRun=false → 실제 이동
+async function organizeCaptureFolders(dryRun) {
+  const btnDry = document.getElementById("btnOrganizeDry");
+  const btnRun = document.getElementById("btnOrganizeRun");
+  const resEl  = document.getElementById("organizeResult");
+
+  if (btnDry) btnDry.disabled = true;
+  if (btnRun) btnRun.disabled = true;
+  resEl.style.display = "block";
+  resEl.innerHTML = `<span style="color:#6B7280"><i class="fas fa-spinner fa-spin"></i> ${dryRun ? "미리보기 분석 중..." : "폴더 재편성 실행 중..."}</span>`;
+
+  try {
+    const payload = { action: "organizeCaptureFolders", dryRun: dryRun ? "true" : "false" };
+    const timeout = dryRun ? 60000 : 300000;
+    const data = dryRun
+      ? await gasGet({ action: "organizeCaptureFolders", dryRun: "true" })
+      : await gasPost(payload, timeout, { forcePost: true });
+
+    if (!data || data.error) {
+      resEl.innerHTML = `<span style="color:#EF4444">❌ 오류: ${escHtml(data?.error || "응답 없음")}</span>`;
+      return;
+    }
+
+    const movedCount   = (data.moved   || []).length;
+    const createdCount = (data.created || []).length;
+    const skippedCount = (data.skipped || []).length;
+    const errorCount   = (data.errors  || []).length;
+    const isDry        = data.dryRun;
+
+    // ── 결과 헤더 ──
+    let html = `<div style="padding:6px 8px;background:${isDry ? "#FFFBEB" : "#F0FDF4"};border:1px solid ${isDry ? "#FDE68A" : "#86EFAC"};border-radius:6px;margin-bottom:4px">
+      <b style="color:${isDry ? "#92400E" : "#166534"}">${isDry ? "🔍 미리보기 결과" : "✅ 재편성 완료"}</b>
+      &nbsp;·&nbsp; 이동 <b>${movedCount}건</b>
+      &nbsp;·&nbsp; 신규 캠페인폴더 <b>${createdCount}건</b>
+      &nbsp;·&nbsp; 스킵 <b>${skippedCount}건</b>
+      ${errorCount > 0 ? `&nbsp;·&nbsp; <span style="color:#EF4444">오류 ${errorCount}건</span>` : ""}
+      &nbsp;·&nbsp; <span style="color:#6B7280">${data.elapsed}초</span>
+    </div>`;
+
+    // ── 이동 목록 ──
+    if (movedCount > 0) {
+      html += `<div style="font-weight:700;color:#166534;margin:4px 0 2px">
+        📂 이동${isDry ? "(예정)" : "완료"} — 결과 경로: 📁캠페인폴더 / 📁인덱스폴더(원본명 그대로) / 🖼️캡처이미지
+      </div>`;
+      (data.moved || []).forEach(m => {
+        html += `<div style="padding:3px 6px;border-bottom:1px solid #E5E7EB;font-size:.68rem;display:flex;align-items:center;gap:3px">
+          <span style="color:#6B7280;font-size:.63rem">이전:</span>
+          <span style="color:#9CA3AF;font-family:monospace">📁${escHtml(m.folder)}</span>
+          <span style="color:#9CA3AF;font-size:.65rem"> ▶ </span>
+          <span style="color:#6B7280;font-size:.63rem">이후:</span>
+          <span style="font-family:monospace">
+            📁<b style="color:#166534">${escHtml(m.campFolder)}</b>
+            <span style="color:#9CA3AF">/</span>
+            📁<span style="color:#1F2937">${escHtml(m.folder)}</span>
+            <span style="color:#9CA3AF;font-size:.62rem"> / 🖼️이미지</span>
+          </span>
+        </div>`;
+      });
+    }
+
+    // ── 신규 생성 캠페인폴더 ──
+    if (createdCount > 0) {
+      html += `<div style="font-weight:700;color:#0369A1;margin:4px 0 2px">🆕 생성된 캠페인폴더${isDry ? "(예정)" : ""}:</div>`;
+      (data.created || []).forEach(c => {
+        html += `<div style="padding:2px 4px;color:#0369A1">📁 ${escHtml(c.campFolder)}</div>`;
+      });
+    }
+
+    // ── 스킵 목록 ──
+    if (skippedCount > 0) {
+      html += `<details style="margin-top:4px"><summary style="font-size:.7rem;color:#6B7280;cursor:pointer">스킵 ${skippedCount}건 (클릭해서 보기)</summary>`;
+      (data.skipped || []).forEach(s => {
+        html += `<div style="padding:2px 4px;font-size:.68rem;color:#6B7280;border-bottom:1px solid #F3F4F6">
+          <span style="color:#374151">${escHtml(s.folder)}</span> — ${escHtml(s.reason)}
+        </div>`;
+      });
+      html += `</details>`;
+    }
+
+    // ── 오류 ──
+    if (errorCount > 0) {
+      html += `<div style="font-weight:700;color:#EF4444;margin:4px 0 2px">❌ 오류:</div>`;
+      (data.errors || []).forEach(er => {
+        html += `<div style="padding:2px 4px;color:#EF4444;font-size:.68rem">${escHtml(er.folder)}: ${escHtml(er.message)}</div>`;
+      });
+    }
+
+    // ── 실행 후 안내 ──
+    if (!isDry && movedCount > 0) {
+      html += `<div style="margin-top:6px;padding:5px 8px;background:#EFF6FF;border:1px solid #BFDBFE;border-radius:6px;font-size:.69rem;color:#1D4ED8">
+        <i class="fas fa-info-circle"></i>
+        이동 완료! <b>폴더 URL 동기화</b> 버튼을 눌러 세부목록 URL을 갱신하세요.
+      </div>`;
+    }
+
+    resEl.innerHTML = html;
+
+    if (!isDry && movedCount > 0) {
+      showToast(`✅ 캡처폴더 재편성 완료 — ${movedCount}건 이동, 캠페인폴더 ${createdCount}건 생성`, "success");
+    }
+
+  } catch (err) {
+    resEl.innerHTML = `<span style="color:#EF4444">❌ 예외: ${escHtml(err.message)}</span>`;
+    console.error("[organizeCaptureFolders] 오류:", err);
+  } finally {
+    if (btnDry) btnDry.disabled = false;
+    if (btnRun) btnRun.disabled = false;
+  }
+}
+
+// ── 구버전 폴더명 → 신규형식 일괄 마이그레이션 ────────────────
+async function migrateFolderNames(dryRun) {
+  if (!APP_CONFIG.GAS_WEB_APP_URL) { showToast("GAS URL을 먼저 저장해주세요.", "warning"); return; }
+
+  const resultEl = document.getElementById("migrateResult");
+
+  // 실제 변환은 확인 팝업
+  if (!dryRun) {
+    const ok = confirm(
+      "⚠️ 구버전 폴더명 실제 변환\n\n" +
+      "Drive 폴더명이 {탭명} → {탭명}_{캠페인명} 형식으로 변경됩니다.\n" +
+      "파일이 신규 폴더에 이미 존재하면 파일이동 후 구버전 폴더는 휴지통으로 이동합니다.\n\n" +
+      "폴더 ID는 그대로이므로 기존 북마크/링크는 계속 동작합니다.\n\n계속하시겠습니까?"
+    );
+    if (!ok) return;
+  }
+
+  const dryBtn = document.getElementById("btnMigrateDry");
+  const runBtn = document.getElementById("btnMigrateRun");
+  if (dryBtn) dryBtn.disabled = true;
+  if (runBtn) runBtn.disabled = true;
+  if (dryBtn) dryBtn.innerHTML = '<i class="fas fa-circle-notch fa-spin"></i> ' + (dryRun ? "분석 중..." : "변환 중...");
+
+  if (resultEl) { resultEl.style.display = "none"; resultEl.innerHTML = ""; }
+
+  try {
+    // 미리보기: JSONP GET (빠름) / 실제 변환: fetch POST 강제 (Drive 작업이 길어도 안전)
+    const data = dryRun
+      ? await gasPost({ action: "migrateFolderNames", target: "both", dryRun: "true"  }, 60000)
+      : await gasPost({ action: "migrateFolderNames", target: "both", dryRun: "false" }, 300000, { forcePost: true });
+
+    if (data && data.ok) {
+      const s = data.summary || {};
+      const renamed = data.renamed || [];
+      const skipped = data.skipped || [];
+      const errors  = data.errors  || [];
+
+      // 변환 예정/완료 목록 테이블 생성
+      let rows = "";
+      renamed.forEach(r => {
+        const badge = r.action === "이름변경"
+          ? `<span style="color:#059669;background:#D1FAE5;padding:1px 5px;border-radius:3px;font-size:.65rem">${r.action}</span>`
+          : `<span style="color:#D97706;background:#FEF3C7;padding:1px 5px;border-radius:3px;font-size:.65rem">${r.action}</span>`;
+        rows += `<tr style="border-bottom:1px solid #F3F4F6">
+          <td style="padding:3px 5px">${escHtml(r.type)}</td>
+          <td style="padding:3px 5px;color:#6B7280">${escHtml(r.old)}</td>
+          <td style="padding:3px 5px">→</td>
+          <td style="padding:3px 5px;color:#1D4ED8;font-weight:600">${escHtml(r.newName)}</td>
+          <td style="padding:3px 5px">${badge}</td>
+        </tr>`;
+      });
+
+      // 오류 행
+      errors.forEach(e => {
+        rows += `<tr style="background:#FEF2F2;border-bottom:1px solid #FECACA">
+          <td style="padding:3px 5px;color:#EF4444">${escHtml(e.type)}</td>
+          <td colspan="3" style="padding:3px 5px;color:#EF4444">${escHtml(e.tab)}: ${escHtml(e.message)}</td>
+          <td></td>
+        </tr>`;
+      });
+
+      const headerColor = dryRun ? "#FFFBEB" : "#F0FDF4";
+      const headerBorder = dryRun ? "#FDE68A" : "#BBF7D0";
+      const titleIcon = dryRun ? "🔍" : "✅";
+
+      let html = `<div style="padding:6px 8px;background:${headerColor};border:1px solid ${headerBorder};border-radius:6px;line-height:1.6">`;
+      html += `<b>${titleIcon} ${dryRun ? "[미리보기]" : "[완료]"} 폴더명 변환</b> (${data.elapsed}초)<br>`;
+      html += `캡처폴더 <b>${s.capture ? s.capture.renamed : 0}</b>건, 리뷰폴더 <b>${s.review ? s.review.renamed : 0}</b>건 변환 / 스킵 <b>${s.skipped || 0}</b>건`;
+      if (s.errors) html += ` / <span style="color:#EF4444">오류 ${s.errors}건</span>`;
+      html += `</div>`;
+
+      if (rows) {
+        html += `<div style="margin-top:4px;overflow-x:auto">
+          <table style="width:100%;border-collapse:collapse;font-size:.69rem">
+            <thead><tr style="background:#F9FAFB;font-weight:700">
+              <th style="padding:3px 5px;text-align:left">구분</th>
+              <th style="padding:3px 5px;text-align:left">기존 경로</th>
+              <th></th>
+              <th style="padding:3px 5px;text-align:left">신규 폴더명</th>
+              <th style="padding:3px 5px;text-align:left">처리</th>
+            </tr></thead>
+            <tbody>${rows}</tbody>
+          </table>
+        </div>`;
+      } else {
+        html += `<div style="color:#6B7280;font-size:.71rem;margin-top:3px">변환 대상 폴더 없음 (이미 모두 신규형식)</div>`;
+      }
+
+      if (resultEl) { resultEl.style.display = "block"; resultEl.innerHTML = html; }
+      showToast((dryRun ? "🔍 미리보기 완료" : "✅ 변환 완료") + " — " + renamed.length + "건", dryRun ? "" : "success");
+
+    } else {
+      const errMsg = data?.error || "알 수 없는 오류";
+      if (resultEl) {
+        resultEl.style.display = "block";
+        resultEl.innerHTML = `<div style="padding:6px 8px;background:#FEF2F2;border:1px solid #FECACA;border-radius:6px;color:#EF4444">❌ 실패: ${escHtml(errMsg)}</div>`;
+      }
+      showToast("❌ 실패: " + errMsg, "error");
+    }
+  } catch (err) {
+    const errMsg = err.message || "";
+    if (resultEl) {
+      resultEl.style.display = "block";
+      resultEl.innerHTML = `<div style="padding:6px 8px;background:#FEF2F2;border:1px solid #FECACA;border-radius:6px;color:#EF4444">❌ 오류: ${escHtml(errMsg)}</div>`;
+    }
+    showToast("❌ 오류: " + errMsg, "error");
+    console.error("[migrateFolderNames] 오류:", err);
+  } finally {
+    if (dryBtn) { dryBtn.disabled = false; dryBtn.innerHTML = '<i class="fas fa-search"></i> 미리보기'; }
+    if (runBtn) { runBtn.disabled = false; runBtn.innerHTML = '<i class="fas fa-play"></i> 실제 변환'; }
+  }
+}
+
+async function batchCreateFolders(target) {
+  if (!APP_CONFIG.GAS_WEB_APP_URL) { showToast("GAS URL을 먼저 저장해주세요.", "warning"); return; }
+
+  const labelMap = { capture: "캡처폴더", review: "리뷰폴더", both: "캡처+리뷰폴더" };
+  const label    = labelMap[target] || target;
+
+  const ok = confirm(
+    `📂 ${label} 일괄 생성/배치\n\n` +
+    `세부목록의 미완료 탭에 대해 드라이브 폴더를 생성하고 세부목록 URL을 업데이트합니다.\n` +
+    `이미 폴더가 있는 경우 그대로 유지됩니다.\n\n계속하시겠습니까?`
+  );
+  if (!ok) return;
+
+  // 버튼 비활성화
+  const btns = ["btnBatchCapture", "btnBatchReview", "btnBatchBoth"].map(id => document.getElementById(id)).filter(Boolean);
+  btns.forEach(b => { b.disabled = true; });
+  const targetBtn = document.getElementById(target === "capture" ? "btnBatchCapture" : target === "review" ? "btnBatchReview" : "btnBatchBoth");
+  if (targetBtn) targetBtn.innerHTML = '<i class="fas fa-circle-notch fa-spin"></i> 생성 중...';
+
+  const resultEl = document.getElementById("batchFolderResult");
+  if (resultEl) { resultEl.style.display = "none"; resultEl.innerHTML = ""; }
+
+  try {
+    const data = await gasPost({ action: "batchCreateFolders", target }, 120000);
+
+    if (data && data.ok) {
+      const c = data.capture || {};
+      const r = data.review  || {};
+      const errNote = data.errors && data.errors.length
+        ? `<div style="color:#EF4444;margin-top:3px">⚠️ 오류 ${data.errors.length}건: ${escHtml(data.errors.slice(0,3).join(" / "))}</div>`
+        : "";
+
+      let html = `<div style="padding:6px 8px;background:#F0FDF4;border:1px solid #BBF7D0;border-radius:6px;line-height:1.6">`;
+      html += `<b>✅ ${label} 일괄 생성/배치 완료</b> (${data.elapsed}초)<br>`;
+      if (target === "both" || target === "capture")
+        html += `📂 캡처폴더: 신규 <b>${c.created}</b>개 생성 / 기존 <b>${c.exists}</b>개 배치 / 완료·마감 <b>${c.skipped}</b>건 스킵<br>`;
+      if (target === "both" || target === "review")
+        html += `📁 리뷰폴더: 신규 <b>${r.created}</b>개 생성 / 기존 <b>${r.exists}</b>개 배치 / 완료·마감 <b>${r.skipped}</b>건 스킵`;
+      html += errNote + `</div>`;
+
+      if (resultEl) { resultEl.style.display = "block"; resultEl.innerHTML = html; }
+      showToast("✅ " + label + " 일괄 생성/배치 완료 (" + data.elapsed + "초)", "success");
+      try { await loadAdminDashboard(); } catch(_) {}
+    } else {
+      const errMsg = data?.error || "알 수 없는 오류";
+      if (resultEl) {
+        resultEl.style.display = "block";
+        resultEl.innerHTML = `<div style="padding:6px 8px;background:#FEF2F2;border:1px solid #FECACA;border-radius:6px;color:#EF4444">❌ 실패: ${escHtml(errMsg)}</div>`;
+      }
+      showToast("❌ 생성/배치 실패: " + errMsg, "error");
+    }
+  } catch (err) {
+    const errMsg = err.message || "";
+    if (resultEl) {
+      resultEl.style.display = "block";
+      resultEl.innerHTML = `<div style="padding:6px 8px;background:#FEF2F2;border:1px solid #FECACA;border-radius:6px;color:#EF4444">❌ 오류: ${escHtml(errMsg)}</div>`;
+    }
+    showToast("❌ 오류: " + errMsg, "error");
+    console.error("[batchCreateFolders] 오류:", err);
+  } finally {
+    btns.forEach(b => { b.disabled = false; });
+    const iconMap = { capture: '<i class="fas fa-camera"></i> 캡처폴더', review: '<i class="fas fa-folder-open"></i> 리뷰폴더', both: '<i class="fas fa-layer-group"></i> 전체' };
+    btns.forEach(b => {
+      const t = b.id === "btnBatchCapture" ? "capture" : b.id === "btnBatchReview" ? "review" : "both";
+      if (iconMap[t]) b.innerHTML = iconMap[t];
+    });
+  }
+}
+
+// ── 구매캡쳐/리뷰저장 폴더 일괄 동기화 ────────────────────────
+async function syncAllFolders() {
+  if (!APP_CONFIG.GAS_WEB_APP_URL) { showToast("GAS URL을 먼저 저장해주세요.", "warning"); return; }
+
+  const forceChk = document.getElementById("chkForceSync");
+  const force    = forceChk && forceChk.checked;
+
+  // 강제 재설정이면 한 번 더 확인
+  if (force) {
+    const ok = confirm("⚠️ 강제 재설정 모드\n\n기존에 저장된 폴더 URL을 모두 지우고 드라이브에서 다시 탐색합니다.\n\n계속하시겠습니까?");
+    if (!ok) return;
+  }
+
+  const btn = document.getElementById("btnSyncAllFolders");
+  btn.disabled  = true;
+  btn.innerHTML = '<i class="fas fa-circle-notch fa-spin"></i> ' + (force ? "재설정 중..." : "동기화 중...");
+
+  try {
+    const data = await gasGet({ action: "syncAllFolders", force: force ? "true" : "false" }, 120000);
+    if (data.error) {
+      showToast("❌ 폴더 동기화 실패: " + data.error, "error");
+    } else {
+      const lines = [];
+      if (data.capture) lines.push(`📂 캡쳐폴더 ${data.capture.updated}건 업데이트, ${data.capture.skipped}건 유지`);
+      if (data.review)  lines.push(`📁 리뷰폴더 ${data.review.updated}건 업데이트, ${data.review.skipped}건 유지${data.review.notFound > 0 ? `, ${data.review.notFound}건 미매칭` : ""}`);
+      const modeLabel = force ? "[강제재설정] " : "";
+      showToast("✅ " + modeLabel + "동기화 완료 (" + data.elapsed + "초)\n" + lines.join(" / "), "success");
+      if (forceChk) forceChk.checked = false; // 완료 후 체크박스 해제
+      try { await loadAdminDashboard(); } catch(_) {}
+    }
+  } catch (err) {
+    showToast("❌ 폴더 동기화 오류: " + (err.message || ""), "error");
+  } finally {
+    btn.disabled  = false;
+    btn.innerHTML = '<i class="fas fa-folder-sync"></i> 구매캡쳐/리뷰저장 폴더 일괄동기화';
+  }
+}
+
+// ── 탭 단위 폴더 재설정 ────────────────────────────────────────
+// target: "capture" | "review" | "both"
+async function resetTabFolder(target) {
+  if (!APP_CONFIG.GAS_WEB_APP_URL) { showToast("GAS URL을 먼저 저장해주세요.", "warning"); return; }
+  if (!_tcCurrent) { showToast("탭 정보를 확인할 수 없습니다.", "error"); return; }
+
+  const targetLabel = { capture: "캡처폴더", review: "리뷰폴더", both: "캡처+리뷰폴더" }[target] || target;
+  const ok = confirm(`⚠️ ${_tcCurrent.tabName || "이 탭"}\n\n${targetLabel}의 URL을 초기화하고 드라이브에서 다시 탐색합니다.\n드라이브에 폴더가 없으면 빈값으로 유지됩니다.\n\n계속하시겠습니까?`);
+  if (!ok) return;
+
+  // 버튼 피드백 (세 버튼 모두 비활성화)
+  const resetBtns = document.querySelectorAll("#tcPopover button[onclick^=\"resetTabFolder\"]");
+  resetBtns.forEach(b => { b.disabled = true; });
+  const targetBtn = document.querySelector(`#tcPopover button[onclick="resetTabFolder('${target}')"]`);
+  if (targetBtn) targetBtn.innerHTML = '<i class="fas fa-circle-notch fa-spin"></i> 탐색 중...';
+
+  try {
+    const data = await gasPost({
+      action:   "resetTabFolderUrls",
+      sheetId:  _tcCurrent.sheetId || "",
+      tabName:  _tcCurrent.tabName || "",
+      target:   target
+    });
+
+    if (data && data.ok) {
+      // ★ 결과값으로 입력란 즉시 업데이트
+      if ((target === "both" || target === "capture") && data.captureUrl && data.captureUrl !== "(미발견)") {
+        document.getElementById("tcCaptureFolderUrlInput").value = data.captureUrl;
+        _tcCurrent.captureFolderUrl = data.captureUrl;
+      }
+      if ((target === "both" || target === "review") && data.folderUrl && data.folderUrl !== "(미발견)") {
+        document.getElementById("tcFolderUrlInput").value = data.folderUrl;
+        _tcCurrent.folderUrl = data.folderUrl;
+      }
+
+      const captureMsg = (target === "both" || target === "capture")
+        ? `\n📂 캡처: ${data.captureUrl}` : "";
+      const reviewMsg  = (target === "both" || target === "review")
+        ? `\n📁 리뷰: ${data.folderUrl}`  : "";
+      showToast("✅ " + targetLabel + " 재설정 완료" + captureMsg + reviewMsg, "success");
+
+      // 대시보드 탭 데이터도 즉시 반영
+      _patchTabAndRerender(_tcCurrent.sheetId, _tcCurrent.tabName, {
+        folderUrl:        (target === "both" || target === "review")  ? (data.folderUrl  !== "(미발견)" ? data.folderUrl  : _tcCurrent.folderUrl)        : _tcCurrent.folderUrl,
+        captureFolderUrl: (target === "both" || target === "capture") ? (data.captureUrl !== "(미발견)" ? data.captureUrl : _tcCurrent.captureFolderUrl) : _tcCurrent.captureFolderUrl
+      });
+    } else {
+      showToast("❌ 재설정 실패: " + (data?.error || "서버 오류"), "error");
+    }
+  } catch (err) {
+    showToast("❌ 재설정 오류: " + (err.message || ""), "error");
+    console.error("[resetTabFolder] 오류:", err);
+  } finally {
+    resetBtns.forEach(b => { b.disabled = false; });
+    // 버튼 텍스트 원복
+    const labels = { capture: '<i class="fas fa-camera"></i> 캡처폴더 재설정', review: '<i class="fas fa-folder-open"></i> 리뷰폴더 재설정', both: '<i class="fas fa-sync-alt"></i> 전체 재설정' }; // 라벨 유지
+    resetBtns.forEach(b => {
+      const t = b.getAttribute("onclick")?.match(/resetTabFolder\('(.+?)'\)/)?.[1];
+      if (t && labels[t]) b.innerHTML = labels[t];
+    });
+  }
+}
+
+// ★ v9.12: 스마트 인덱스 갱신 (증분 우선)
+// dirty 탭 있으면 해당 캠페인만 빠르게 갱신, 없으면 전체 갱신
+async function buildIndexSmart() {
+  if (!APP_CONFIG.GAS_WEB_APP_URL) { showToast("GAS URL을 먼저 저장해주세요.", "warning"); return; }
+  const btnSmart = document.getElementById("btnBuildIndexSmart");
+  const btnFull  = document.getElementById("btnBuildIndex");
+  const badge    = document.getElementById("indexStatusBadge");
+
+  btnSmart.disabled  = true;
+  btnFull.disabled   = true;
+  btnSmart.innerHTML = '<i class="fas fa-circle-notch fa-spin"></i> 증분 갱신 중...';
+  badge.className    = "index-badge index-badge-unknown";
+  badge.textContent  = "갱신 중...";
+
+  const elapsedRow = document.getElementById("indexElapsedRow");
+  const resultRow  = document.getElementById("indexResultRow");
+  const elapsedEl  = document.getElementById("indexElapsed");
+  const resultEl   = document.getElementById("indexResult");
+  if (elapsedRow) elapsedRow.style.display = "none";
+  if (resultRow)  resultRow.style.display  = "none";
+  const hintEl = document.getElementById("smartModeHint");
+  const hintTextEl = document.getElementById("smartModeHintText");
+  if (hintEl) hintEl.style.display = "none";
+
+  const _buildStart = Date.now();
+
+  // ★ 진행 표시 (증분은 짧게)
+  const progressWrap = document.getElementById("buildProgressWrap");
+  const progressBar  = document.getElementById("buildProgressBar");
+  const progressLabel = document.getElementById("buildProgressLabel");
+  const progressTime  = document.getElementById("buildProgressTime");
+  const progressPct   = document.getElementById("buildProgressPct");
+  if (progressWrap) { progressWrap.style.display = ""; progressWrap.classList.remove("hidden"); }
+  if (progressBar)  { progressBar.style.width = "5%"; progressBar.style.background = "linear-gradient(90deg,#0ea5e9,#2563eb)"; }
+  if (progressLabel) progressLabel.textContent = "스마트 갱신 중...";
+
+  let _progressTimerSmart = null;
+  const _startSmartProgress = () => {
+    let sec = 0;
+    _progressTimerSmart = setInterval(() => {
+      sec++;
+      const pct = Math.min(90, Math.round((1 - Math.exp(-sec / 15)) * 100));
+      if (progressBar)  progressBar.style.width = pct + "%";
+      if (progressTime) progressTime.textContent = sec + "초 경과";
+      if (progressPct)  progressPct.textContent  = pct + "%";
+    }, 1000);
+  };
+  const _stopSmartProgress = () => {
+    if (_progressTimerSmart) clearInterval(_progressTimerSmart);
+    if (progressBar)  { progressBar.style.width = "100%"; progressBar.style.background = "linear-gradient(90deg,#10b981,#059669)"; }
+    if (progressPct)  progressPct.textContent = "100%";
+    setTimeout(() => { if (progressWrap) { progressWrap.style.display = "none"; progressWrap.classList.add("hidden"); } }, 1800);
+  };
+  let _smartPollingMode = false; // ★ v9.19: polling 모드 플래그 (finally 버튼 복원 차단)
+  _startSmartProgress();
+
+  try {
+    // ★ v9.13: 병렬 fetchAll 적용으로 속도 개선 → 타임아웃 60초로 증가
+    // (dirty 캠페인 수 × ~10s 순차 → 병렬 ~10s + 파싱 ~5s ≈ 15~25s)
+    // ★ v9.19: 60초→90초 (dirty 캠페인이 많을 때 여유 확보)
+    const data = await gasGet({ action: "buildIndexSmart" }, 90 * 1000);
+
+    if (data.locked) {
+      // ★ v9.17: 잠금 감지 시 스마트 처리 (좀비 기준 3분으로 단축)
+      // elapsedSec 숫자 필드 우선, 없으면 에러 문자열에서 파싱
+      const lockElapsed = typeof data.elapsedSec === "number"
+        ? data.elapsedSec
+        : (() => { const m = (data.error || "").match(/(\d+)초 전 시작/); return m ? parseInt(m[1], 10) : null; })();
+
+      // ★ v9.20: ZOMBIE_SEC = TTL(7분=420초)
+      // GAS BUILD_LOCK_TTL_MS = 7분 → 7분 지나면 acquireBuildLock이 자동 만료 처리
+      // 3분 기준은 TTL(8분) 내라 handleReleaseBuildLock이 "진행 중" 거부했음
+      const ZOMBIE_SEC = 420; // 7분 (= BUILD_LOCK_TTL_MS)
+
+      if (lockElapsed !== null && lockElapsed >= ZOMBIE_SEC) {
+        // ① 좀비 잠금 (7분 이상, TTL 만료) → 자동 해제 후 재시도
+        _stopSmartProgress();
+        badge.textContent = "잠금 해제 중...";
+        showToast(`🔓 이전 갱신이 ${lockElapsed}초 전에 멈췄습니다. 자동으로 잠금 해제 후 재시도합니다.`, "info");
+        try { await gasGet({ action: "releaseBuildLock" }, 10000); } catch(_) {}
+        await new Promise(r => setTimeout(r, 1000));
+        btnSmart.disabled = false;
+        btnSmart.innerHTML = '<i class="fas fa-bolt"></i> 빠른 갱신 <span id="smartDirtyBadge" style="display:none;background:rgba(255,255,255,0.25);padding:1px 6px;border-radius:10px;font-size:.7rem;margin-left:3px"></span>';
+        btnFull.disabled = false;
+        setTimeout(() => buildIndexSmart(), 300);
+        return;
+      } else {
+        // ② 진행 중 잠금 (3분 미만) → buildIndex polling 흐름으로 전환
+        // GAS가 실제로 실행 중이면 완료 시 builtAt이 바뀌어 감지됨
+        // GAS가 죽었으면 잠금이 풀리고 자동 재시도
+        _stopSmartProgress();
+        showToast(
+          lockElapsed !== null
+            ? `⏳ 이전 갱신이 진행 중입니다 (${lockElapsed}초 경과). 완료를 자동 감지합니다.`
+            : `⏳ 다른 갱신이 진행 중입니다. 완료를 자동 감지합니다.`,
+          "info"
+        );
+        badge.textContent = "완료 대기 중...";
+        _smartPollingMode = true; // ★ v9.19: finally 버튼 복원 차단
+        // 2초 후 buildIndex(polling 모드 포함) 재시도 — 딜레이 단축
+        setTimeout(() => buildIndex(), 2000);
+        return;
+      }
+    }
+    if (!data.success && !data.ok) {
+      throw new Error(data.error || "알 수 없는 오류");
+    }
+
+    // ★ [Node.js 이관] 비동기 빌드 응답 → polling 모드로 전환
+    // 서버가 빌드를 백그라운드에서 처리하고 즉시 응답하므로,
+    // 프론트엔드는 /api/index/status를 폴링하여 완료를 감지
+    if (data.mode === "async") {
+      _stopSmartProgress();
+      if (hintEl && hintTextEl) {
+        hintTextEl.textContent = "🔄 백그라운드에서 인덱스 갱신 중... 완료 시 자동 감지됩니다.";
+        hintEl.style.display = "";
+        hintEl.style.color = "#2563eb";
+      }
+      showToast("🔄 인덱스 갱신이 시작되었습니다. 완료 시 자동으로 업데이트됩니다.", "info");
+      badge.textContent = "갱신중(백그라운드)";
+      badge.className = "index-badge index-badge-unknown";
+
+      // builtAt 스냅샷 가져오기
+      let prevBA = null;
+      try { const s = await gasGet({ action: "indexStatus" }, 5000); prevBA = s.meta ? s.meta.builtAt : (s.builtAt || null); } catch(_) {}
+
+      // polling 시작 (5초마다, 최대 10분)
+      let pCount = 0;
+      const maxP = 120; // 10분
+      const pTimer = setInterval(async () => {
+        pCount++;
+        try {
+          const s2 = await gasGet({ action: "indexStatus" }, 8000);
+          const newBA = s2.meta ? s2.meta.builtAt : (s2.builtAt || null);
+          const cnt = s2.meta ? s2.meta.count : (s2.count || 0);
+
+          // builtAt이 변경되면 빌드 완료
+          if (newBA && newBA !== prevBA) {
+            clearInterval(pTimer);
+            showToast(`✅ 인덱스 갱신 완료 (${cnt.toLocaleString()}건)`, "success");
+            badge.className = "index-badge index-badge-ok";
+            badge.textContent = "정상";
+            await loadIndexStatus();
+            const elapsedSec = Math.round((Date.now() - _buildStart) / 1000);
+            if (elapsedRow && elapsedEl) { elapsedEl.textContent = elapsedSec + "초 (비동기)"; elapsedRow.style.display = ""; }
+            if (resultRow && resultEl) { resultEl.innerHTML = `<span style="color:#10B981;font-weight:700">✅ 인덱스 갱신 완료</span>`; resultRow.style.display = ""; }
+            // 버튼 복원
+            btnSmart.disabled = false;
+            btnSmart.innerHTML = '<i class="fas fa-bolt"></i> 빠른 갱신 <span id="smartDirtyBadge" style="display:none;background:rgba(255,255,255,0.25);padding:1px 6px;border-radius:10px;font-size:.7rem;margin-left:3px"></span>';
+            btnFull.disabled = false;
+            _autoRefreshDashboardAfterBuild();
+            _updateSmartDirtyBadge();
+            return;
+          }
+          // 진행 중 메시지 업데이트
+          if (hintEl && hintTextEl) {
+            hintTextEl.textContent = `🔄 백그라운드 갱신 중... (${pCount * 5}초 경과)`;
+          }
+        } catch(_) {}
+        if (pCount >= maxP) {
+          clearInterval(pTimer);
+          showToast("⏱ 갱신 대기 시간 초과 — 잠시 후 다시 확인하세요.", "warning");
+          badge.className = "index-badge index-badge-expired"; badge.textContent = "확인 필요";
+          btnSmart.disabled = false;
+          btnSmart.innerHTML = '<i class="fas fa-bolt"></i> 빠른 갱신 <span id="smartDirtyBadge" style="display:none;background:rgba(255,255,255,0.25);padding:1px 6px;border-radius:10px;font-size:.7rem;margin-left:3px"></span>';
+          btnFull.disabled = false;
+        }
+      }, 5000);
+      _smartPollingMode = true; // polling 모드이므로 finally에서 버튼 복원 안 함
+      return;
+    }
+
+    // ★ v9.12: 전체 재빌드 필요 신호 → buildIndex(polling) 흐름으로 자동 전환
+    if (data.needFullRebuild) {
+      _stopSmartProgress();
+      const reason = data.reason || "전체 갱신 필요";
+      if (hintEl && hintTextEl) {
+        hintTextEl.textContent = `🔄 전체 갱신으로 전환 중... (${reason})`;
+        hintEl.style.display = "";
+        hintEl.style.color = "#6b7280";
+      }
+      showToast(`🔄 ${reason} — 전체 갱신을 시작합니다.`, "info");
+      _smartPollingMode = true; // ★ v9.19: buildIndex가 버튼 관리 담당
+      // 약간 딜레이 후 전체 갱신 자동 실행
+      setTimeout(() => buildIndex(), 300);
+      return;
+    }
+
+    // ★ skip 모드: 인덱스 최신 상태
+    if (data.mode === "skip") {
+      _stopSmartProgress();
+      const elapsedSec = Math.round((Date.now() - _buildStart) / 1000);
+      if (hintEl && hintTextEl) {
+        hintTextEl.textContent = `✅ 인덱스가 최신 상태입니다 (변경된 탭 없음, ${elapsedSec}초)`;
+        hintEl.style.display = "";
+        hintEl.style.color = "#059669";
+      }
+      showToast(`✅ 인덱스 최신 상태 — 변경된 탭이 없어 갱신을 건너뜁니다. (${(data.count||0).toLocaleString()}건)`, "success");
+      badge.className = "index-badge index-badge-ok"; badge.textContent = "최신";
+      await loadIndexStatus();
+      if (elapsedRow && elapsedEl) { elapsedEl.textContent = elapsedSec + "초 (스킵)"; elapsedRow.style.display = ""; }
+      if (resultRow && resultEl) { resultEl.innerHTML = `<span style="color:#059669;font-weight:700">✅ 최신 상태 (갱신 불필요)</span>`; resultRow.style.display = ""; }
+      return;
+    }
+
+    _stopSmartProgress();
+    const elapsedSec = Math.round((Date.now() - _buildStart) / 1000);
+
+    // 모드별 안내
+    const isIncremental = data.mode === "incremental";
+    const modeLabel = isIncremental
+      ? `⚡ 증분 갱신 (${data.updatedCampaigns || 0}개 캠페인 / ${elapsedSec}초)`
+      : `🔄 전체 갱신 (이유: ${data.reason || "주기 도래"} / ${elapsedSec}초)`;
+
+    if (hintEl && hintTextEl) {
+      hintTextEl.textContent = modeLabel;
+      hintEl.style.display = "";
+      hintEl.style.color = isIncremental ? "#2563eb" : "#6b7280";
+    }
+
+    const warnInfo = data.warning ? ` ⚠ 일부 경고` : "";
+    const skipInfo = data.skipped > 0
+      ? ` · 완료탭 ${data.skipped}개 스킵(${(data.reused||0).toLocaleString()}행 재사용)` : "";
+
+    if (isIncremental) {
+      showToast(
+        `⚡ 증분 갱신 완료 (${data.updatedCampaigns||0}개 캠페인 / 전체 ${(data.count||0).toLocaleString()}건 / ${elapsedSec}초)${warnInfo}`,
+        data.warning ? "warning" : "success"
+      );
+    } else {
+      showToast(
+        `✅ 전체 갱신 완료 (${(data.count||0).toLocaleString()}건${skipInfo} / ${elapsedSec}초)${warnInfo}`,
+        data.warning ? "warning" : "success"
+      );
+    }
+
+    await loadIndexStatus();
+    const countEl = document.getElementById("indexCount");
+    if (countEl) countEl.textContent = (data.count||0).toLocaleString() + "건";
+    if (elapsedRow && elapsedEl) { elapsedEl.textContent = elapsedSec + "초 (" + (isIncremental ? "증분" : "전체") + ")"; elapsedRow.style.display = ""; }
+    if (resultRow && resultEl) {
+      resultEl.innerHTML = isIncremental
+        ? `<span style="color:#2563EB;font-weight:700">⚡ 증분 갱신 완료 (${data.updatedCampaigns||0}개 캠페인)</span>`
+        : `<span style="color:#10B981;font-weight:700">✅ 전체 갱신 완료</span>`;
+      resultRow.style.display = "";
+    }
+    // ★ v10.0: dirty 배지 — 단순 숨김 대신 실제 최신 dirtyCount 반영
+    _updateSmartDirtyBadge();
+
+    _autoRefreshDashboardAfterBuild();
+
+  } catch (err) {
+    _stopSmartProgress();
+    const msg = err.message || "";
+    if (resultRow && resultEl) { resultEl.innerHTML = `<span style="color:#DC2626;font-weight:700">❌ 갱신 실패</span>`; resultRow.style.display = ""; }
+    if (msg === "요청 시간 초과") {
+      // 타임아웃 = 증분이 예상보다 오래 걸림(60초 초과) → polling 전환
+      // ★ v9.13: 병렬 fetchAll 적용 후에도 타임아웃 시 백그라운드 polling 유지
+      showToast("⏱ 빠른 갱신 진행 중 (백그라운드)... 완료 시 자동 감지합니다.", "info");
+      badge.textContent = "갱신중(백그라운드)";
+      // prevBuiltAt 스냅샷 필요
+      let prevBA = null;
+      try { const s = await gasGet({ action: "indexStatus" }, 5000); prevBA = s.builtAt || null; } catch(_) {}
+      // polling 시작 (buildIndex의 _startPolling 대신 간단한 polling)
+      let pCount = 0;
+      const maxP = 120; // 10분
+      let pAutoRetried = false; // ★ v9.19: 자동 재시도 플래그
+      const pTimer = setInterval(async () => {
+        pCount++;
+        try {
+          const s2 = await gasGet({ action: "indexStatus" }, 8000);
+          const newBA   = s2.builtAt || null;
+          const isLocked2 = s2.buildLock ? s2.buildLock.locked : false;
+          const lockElapsed2 = (s2.buildLock && typeof s2.buildLock.elapsedSec === "number")
+            ? s2.buildLock.elapsedSec : null;
+
+          // ① builtAt 변경 → 완료
+          if (newBA && newBA !== prevBA) {
+            clearInterval(pTimer);
+            showToast(`✅ 갱신 완료 (${(s2.count||0).toLocaleString()}건)`, "success");
+            await loadIndexStatus();
+            _autoRefreshDashboardAfterBuild();
+            const btnSmF = document.getElementById("btnBuildIndexSmart");
+            if (btnSmF) { btnSmF.disabled = false; btnSmF.innerHTML = '<i class="fas fa-bolt"></i> 빠른 갱신 <span id="smartDirtyBadge" style="display:none;background:rgba(255,255,255,0.25);padding:1px 6px;border-radius:10px;font-size:.7rem;margin-left:3px"></span>'; }
+            const btnFuF = document.getElementById("btnBuildIndex");
+            if (btnFuF) btnFuF.disabled = false;
+            // ★ v10.0: 버튼 복원 후 dirty 배지 즉시 재갱신
+            _updateSmartDirtyBadge();
+            return;
+          }
+          // ② 좀비 잠금 감지 (3분 이상) — ★ v9.19 추가
+          // ★ v9.20: 420초(TTL) 이상이면 TTL 만료 좀비 잠금
+          if (isLocked2 && lockElapsed2 !== null && lockElapsed2 >= 420 && !pAutoRetried) {
+            clearInterval(pTimer);
+            pAutoRetried = true;
+            showToast(`🔓 잠금 ${lockElapsed2}초 경과(TTL 만료) — 자동 해제 후 빠른갱신 재시도`, "info");
+            try { await gasGet({ action: "releaseBuildLock" }, 8000); } catch(_) {}
+            await new Promise(r => setTimeout(r, 800));
+            const btnSmR = document.getElementById("btnBuildIndexSmart");
+            if (btnSmR) { btnSmR.disabled = false; btnSmR.innerHTML = '<i class="fas fa-bolt"></i> 빠른 갱신 <span id="smartDirtyBadge" style="display:none;background:rgba(255,255,255,0.25);padding:1px 6px;border-radius:10px;font-size:.7rem;margin-left:3px"></span>'; }
+            const btnFuR = document.getElementById("btnBuildIndex");
+            if (btnFuR) btnFuR.disabled = false;
+            setTimeout(() => buildIndexSmart(), 300);
+            return;
+          }
+          // ③ 잠금 없고 builtAt 미변경 + 40초 경과 → 조기 완료 감지 시도
+          if (!isLocked2 && pCount >= 8 && !pAutoRetried) {
+            clearInterval(pTimer);
+            pAutoRetried = true;
+            showToast("🔄 빠른 갱신 재시도 중...", "info");
+            const btnSmR2 = document.getElementById("btnBuildIndexSmart");
+            if (btnSmR2) { btnSmR2.disabled = false; btnSmR2.innerHTML = '<i class="fas fa-bolt"></i> 빠른 갱신 <span id="smartDirtyBadge" style="display:none;background:rgba(255,255,255,0.25);padding:1px 6px;border-radius:10px;font-size:.7rem;margin-left:3px"></span>'; }
+            const btnFuR2 = document.getElementById("btnBuildIndex");
+            if (btnFuR2) btnFuR2.disabled = false;
+            try { await gasGet({ action: "releaseBuildLock" }, 5000); } catch(_) {}
+            setTimeout(() => buildIndexSmart(), 500);
+            return;
+          }
+        } catch(_) {}
+        if (pCount >= maxP) {
+          clearInterval(pTimer);
+          showToast("⏱ 대기 시간 초과 — 잠금 강제 해제 후 재시도하세요.", "warning");
+          const btnSmE = document.getElementById("btnBuildIndexSmart");
+          if (btnSmE) { btnSmE.disabled = false; btnSmE.innerHTML = '<i class="fas fa-bolt"></i> 빠른 갱신 <span id="smartDirtyBadge" style="display:none;background:rgba(255,255,255,0.25);padding:1px 6px;border-radius:10px;font-size:.7rem;margin-left:3px"></span>'; }
+          const btnFuE = document.getElementById("btnBuildIndex");
+          if (btnFuE) btnFuE.disabled = false;
+        }
+      }, 5000);
+      _smartPollingMode = true; // ★ v9.19: polling 진입 — finally 버튼 복원 차단
+      return; // finally 버튼 복원 하지 않음 (polling이 담당)
+    } else {
+      showToast("❌ 스마트 갱신 실패: " + msg.substring(0, 120), "error");
+    }
+    badge.className = "index-badge index-badge-error"; badge.textContent = "오류";
+  } finally {
+    // ★ v9.19: polling 모드이면 버튼 복원 안 함 (polling이 완료 후 복원)
+    if (!_smartPollingMode) {
+      btnSmart.disabled  = false;
+      btnSmart.innerHTML = '<i class="fas fa-bolt"></i> 빠른 갱신 <span id="smartDirtyBadge" style="display:none;background:rgba(255,255,255,0.25);padding:1px 6px;border-radius:10px;font-size:.7rem;margin-left:3px"></span>';
+      btnFull.disabled   = false;
+    }
+  }
+}
+
+async function buildIndex() {
+  if (!APP_CONFIG.GAS_WEB_APP_URL) { showToast("GAS URL을 먼저 저장해주세요.", "warning"); return; }
+  const btn   = document.getElementById("btnBuildIndex");
+  const badge = document.getElementById("indexStatusBadge");
+  btn.disabled    = true;
+  btn.innerHTML   = '<i class="fas fa-circle-notch fa-spin"></i> 갱신 중...';
+  badge.className = "index-badge index-badge-unknown";
+  badge.textContent = "갱신 중...";
+
+  let _buildPollingMode = false; // ★ v9.19: polling 진입 시 finally 버튼 복원 차단
+
+  const elapsedRow = document.getElementById("indexElapsedRow");
+  const resultRow  = document.getElementById("indexResultRow");
+  const elapsedEl  = document.getElementById("indexElapsed");
+  const resultEl   = document.getElementById("indexResult");
+  if (elapsedRow) elapsedRow.style.display = "none";
+  if (resultRow)  resultRow.style.display  = "none";
+  const _buildStart = Date.now();
+
+  // 캠페인 수 가져오기
+  let campCount = 0;
+  try {
+    const campData = await gasGet({ action: "campaignList" }, 10000);
+    campCount = (campData.campaigns || []).length;
+  } catch (_) {}
+  startBuildProgress(campCount);
+
+  // 갱신 전 builtAt 스냅샷 (polling 완료 판단용)
+  let prevBuiltAt = null;
+  try {
+    const statusSnap = await gasGet({ action: "indexStatus" }, 8000);
+    prevBuiltAt = statusSnap.builtAt || null;
+  } catch (_) {}
+
+  // ★ 헬퍼: 갱신 성공 처리
+  const _onBuildSuccess = async (data) => {
+    stopBuildProgress();
+    const elapsedSec = Math.round((Date.now() - _buildStart) / 1000);
+    const skipInfo = (data.skipped > 0)
+      ? ` · 완료탭 ${data.skipped}개 스킵(${(data.reused||0).toLocaleString()}행 재사용)` : "";
+    // ★ v10.1: 타임아웃 시 재갱신 안내 메시지 강화
+    const timeoutInfo = data.timedOut ? ` ⏱ 부분갱신 — 빠른갱신 재실행 필요` : "";
+    if (data.warning) {
+      const isTimeout = data.timedOut || data.warning.includes("실행시간 초과");
+      showToast(`${isTimeout ? "⏱" : "✅"} 인덱스 갱신 완료 (${(data.count||0).toLocaleString()}건)${skipInfo}${timeoutInfo} ⚠ 일부 시트 경고`, "warning");
+      const builtAtEl = document.getElementById("indexBuiltAt");
+      if (builtAtEl) builtAtEl.textContent = data.builtAtStr || "-";
+      const resEl = document.getElementById("debugBaseResult");
+      if (resEl) {
+        // warning 항목별 아이콘 분류
+        const warnLines = data.warning.split(" | ").filter(Boolean);
+        const lineHtml = warnLines.map(line => {
+          const isBandwidth = line.includes("대역폭") || line.includes("quota") || line.includes("Bandwidth") || line.includes("할당량");
+          const isPermission = line.includes("접근 권한") || line.includes("403") || line.includes("permission");
+          const isFallbackOk = line.includes("폴백 완료") || line.includes("FALLBACK");
+          const isTimeoutWarn = line.includes("실행시간 초과") || line.includes("⏱");
+          let icon, color;
+          if (isPermission)      { icon = "🔒"; color = "#B45309"; }
+          else if (isBandwidth)  { icon = "⚡"; color = "#7C3AED"; }
+          else if (isFallbackOk) { icon = "♻️"; color = "#059669"; }
+          else if (isTimeoutWarn){ icon = "⏱"; color = "#2563EB"; }
+          else                   { icon = "⚠";  color = "#D97706"; }
+          return `<span style="color:${color}">${icon} ${escHtml(line)}</span>`;
+        }).join("<br>");
+        resEl.innerHTML = `<b style="color:#D97706">⚠ 인덱스 갱신 완료 (${(data.count||0).toLocaleString()}건) — 일부 시트 경고:</b><br><br>${lineHtml}`
+          + (data.timedOut ? `<br><br><b style="color:#2563EB">⏱ 실행시간 초과로 일부 시트는 기존 인덱스 유지 — 다시 갱신하면 완전히 업데이트됩니다.</b>` : "");
+        show(resEl);
+      }
+    } else {
+      showToast(`✅ 인덱스 갱신 완료 (${(data.count||0).toLocaleString()}건)${skipInfo}${timeoutInfo}`, data.timedOut ? "warning" : "success");
+    }
+    await loadIndexStatus();
+    const countEl = document.getElementById("indexCount");
+    if (countEl) {
+      countEl.textContent = (data.count||0).toLocaleString() + "건"
+        + (data.skipped > 0 ? ` · 완료탭 ${data.skipped}개 스킵(${(data.reused||0).toLocaleString()}행 재사용)` : "");
+    }
+    if (elapsedRow && elapsedEl) { elapsedEl.textContent = elapsedSec + "초"; elapsedRow.style.display = ""; }
+    if (resultRow  && resultEl)  {
+      if (data.timedOut) {
+        // ★ v10.1: 타임아웃 시 재시도 버튼 표시
+        resultEl.innerHTML = `<span style="color:#2563EB;font-weight:700">⏱ 부분 갱신 완료 (시간 초과 — 미처리 탭 있음)</span>`
+          + ` <button onclick="buildIndexSmart()" style="margin-left:10px;padding:3px 12px;background:#2563EB;color:#fff;border:none;border-radius:6px;font-size:.82rem;cursor:pointer;font-weight:700">⚡ 재갱신</button>`;
+      } else if (data.warning) {
+        resultEl.innerHTML = `<span style="color:#D97706;font-weight:700">⚠ 일부 시트 스킵 (갱신 완료)</span>`;
+      } else {
+        resultEl.innerHTML = `<span style="color:#10B981;font-weight:700">✅ 인덱스 갱신 완료</span>`;
+      }
+      resultRow.style.display = "";
+    }
+    // ★ 403 접근 권한 경고 배너 표시
+    const bannerEl = document.getElementById("gasErrorBanner");
+    if (data.warning && (data.warning.includes("403") || data.warning.includes("접근 권한 없음"))) {
+      // warning 문자열 파싱: "[캠페인명] 접근 권한 없음 ... 시트제목: "xxx" ... sheetId: yyy"
+      const entries = data.warning.split(" | ").filter(w => w.includes("접근 권한 없음"));
+      const rows = entries.map(entry => {
+        // 캠페인명 추출
+        const campMatch = entry.match(/^\[([^\]]+)\]/);
+        const camp = campMatch ? campMatch[1] : "?";
+        // 시트 제목 추출 (Drive API로 가져온 경우)
+        const titleMatch = entry.match(/시트제목:\s*"([^"]+)"/);
+        const title = titleMatch ? titleMatch[1] : null;
+        // sheetId 추출
+        const idMatch = entry.match(/sheetId:\s*([A-Za-z0-9_-]{20,})/);
+        const sid = idMatch ? idMatch[1] : null;
+        return { camp, title, sid };
+      });
+
+      const listHtml = rows.map(r => {
+        const label = r.title && r.title !== r.camp
+          ? `<b>${escHtml(r.title)}</b> <span style="color:#B45309">(캠페인명: ${escHtml(r.camp)})</span>`
+          : `<b>${escHtml(r.camp)}</b>`;
+        const sheetUrl = r.sid
+          ? `https://docs.google.com/spreadsheets/d/${r.sid}/edit`
+          : null;
+        const idHint = r.sid
+          ? `<br><span style="font-family:monospace;font-size:.72rem;color:#B45309;user-select:all">${r.sid}</span>`
+            + `<br><a href="${sheetUrl}" target="_blank" style="font-size:.73rem;color:#2563EB;text-decoration:underline;word-break:break-all">${sheetUrl}</a>`
+          : "";
+        return `• ${label}${idHint}`;
+      }).join("<br><br>");
+
+      if (bannerEl) {
+        bannerEl.innerHTML =
+          `<b><i class="fas fa-lock" style="color:#F59E0B"></i> 접근 권한 없는 시트 발견 — 스킵됨 (나머지는 정상 갱신)</b><br><br>` +
+          listHtml + `<br><br>` +
+          `<b>해결 방법:</b> 위 스프레드시트에 <b>tnaks6325@gmail.com</b> (리뷰웹 제작자)의 <b>편집 권한</b>이 추가되어야 인덱스 갱신이 가능합니다.`;
+        bannerEl.style.background = "#FFFBEB";
+        bannerEl.style.borderColor = "#FCD34D";
+        bannerEl.style.color = "#78350F";
+        bannerEl.style.display = "block";
+      }
+    } else if (bannerEl) {
+      bannerEl.style.display = "none";
+    }
+    _autoRefreshDashboardAfterBuild();
+    // ★ v10.0: 전체 갱신 완료 후 dirty 배지 재갱신
+    _updateSmartDirtyBadge();
+
+    // ★ v10.1: 타임아웃으로 부분 갱신된 경우 → dirty 배지가 남아 있으면 10초 후 재갱신 안내 토스트
+    if (data.timedOut) {
+      setTimeout(async () => {
+        try {
+          const st = await gasGet({ action: "indexStatus" }, 5000);
+          const dc = (st && st.dirtyCount) ? st.dirtyCount : 0;
+          if (dc > 0) {
+            showToast(`⏱ ${dc}개 캠페인이 아직 미처리입니다. 빠른 갱신을 한 번 더 실행해주세요.`, "warning", 7000);
+          }
+        } catch(_) {}
+      }, 10000); // 10초 후 재확인
+    }
+  };
+
+  // ★ polling 모드: indexStatus를 주기적으로 확인해 builtAt 변경 감지
+  // ★ v9.19 개선: GAS 강제종료(6분 한계) 후 자동 재시도 + 상세 피드백
+  const _startPolling = (maxWaitMs = 12 * 60 * 1000) => {
+    const pollInterval  = 5000;  // 5초마다 확인
+    let   pollCount     = 0;
+    let   autoRetried   = false; // 자동 재시도 1회 플래그
+    const maxPolls      = Math.ceil(maxWaitMs / pollInterval);
+    const builtAtEl     = document.getElementById("indexBuiltAt");
+    const _updateMsg = (html) => { if (builtAtEl) builtAtEl.innerHTML = html; };
+    _updateMsg("⏳ GAS 실행 중... (백그라운드 완료 대기)");
+    badge.textContent = "갱신중(백그라운드)";
+
+    // 잠금 강제 해제 버튼 표시 (90초 이후)
+    let _forceReleaseShown = false;
+    const _showForceRelease = () => {
+      if (_forceReleaseShown) return;
+      _forceReleaseShown = true;
+      _updateMsg(
+        '⏳ GAS 실행 중 (장시간 소요) ' +
+        '<button onclick="_forceReleaseBuildLock()" style="margin-left:8px;padding:2px 8px;font-size:.72rem;background:#F59E0B;color:#fff;border:none;border-radius:4px;cursor:pointer">🔓 잠금 강제 해제</button>' +
+        '<br><span style="font-size:.75rem;color:#6B7280">GAS 실행 6분 한계로 자동 종료됐을 수 있습니다. 해제 후 재갱신하세요.</span>'
+      );
+    };
+
+    const _restoreBtn = () => {
+      btn.disabled  = false;
+      btn.innerHTML = '<i class="fas fa-sync-alt"></i> 전체 갱신';
+      const sm = document.getElementById("btnBuildIndexSmart");
+      if (sm) sm.disabled = false;
+    };
+
+    const pollTimer = setInterval(async () => {
+      pollCount++;
+      const elapsedSec = pollCount * 5;
+
+      // 90초 경과 시 강제 해제 버튼 표시
+      if (elapsedSec >= 90 && !_forceReleaseShown) _showForceRelease();
+
+      try {
+        const status    = await gasGet({ action: "indexStatus" }, 8000);
+        const newBuiltAt = status.builtAt || null;
+        const isLocked   = status.buildLock ? status.buildLock.locked : true;
+        // ★ v9.15: indexStatus에서 잠금 경과 시간 수신
+        const lockElapsedFromStatus = (status.buildLock && typeof status.buildLock.elapsedSec === "number")
+          ? status.buildLock.elapsedSec : null;
+
+        // ① builtAt 변경 → 갱신 완료
+        if (newBuiltAt && newBuiltAt !== prevBuiltAt) {
+          clearInterval(pollTimer);
+          await _onBuildSuccess({ success:true, count: status.count || 0, skipped:0, reused:0 });
+          _restoreBtn();
+          return;
+        }
+
+        // ★ v9.20: 잠금 경과 7분(420초) 이상 → TTL 만료, 좀비 잠금, 자동 해제 후 재시도
+        // BUILD_LOCK_TTL_MS = 7분 → 7분 지나면 acquireBuildLock에서 자동 만료 처리
+        // (3분 기준은 실제 GAS가 실행 중일 수 있어 handleReleaseBuildLock이 거부함)
+        if (isLocked && lockElapsedFromStatus !== null && lockElapsedFromStatus >= 420) {
+          clearInterval(pollTimer);
+          stopBuildProgress();
+          if (!autoRetried) {
+            autoRetried = true;
+            _updateMsg(`🔓 잠금이 ${lockElapsedFromStatus}초 경과 (좀비). 자동 해제 후 재시도 중...`);
+            showToast(`🔓 잠금이 ${lockElapsedFromStatus}초 경과 — 자동 해제 후 재갱신합니다.`, "info");
+            badge.textContent = "잠금 해제 중...";
+            try { await gasGet({ action: "releaseBuildLock" }, 10000); } catch(_) {}
+            await new Promise(r => setTimeout(r, 1000));
+            setTimeout(() => { buildIndex(); }, 300);
+          } else {
+            showToast("⚠ 잠금 해제 후 재시도도 실패. GAS 실행 로그를 확인하세요.", "warning");
+            badge.className = "index-badge index-badge-expired"; badge.textContent = "확인 필요";
+            _restoreBtn();
+          }
+          return;
+        }
+
+        // ② 잠금 해제 + builtAt 동일 → GAS 강제종료로 인덱스 미업데이트
+        // ★ v9.20: 80초(16 polls) 이후로 조정
+        // 이유: GAS 빌드 20~40초 + 응답 전달 지연 → 50초는 너무 빠름
+        //       80초면 충분히 기다린 후 재시도, 6분 전체 갱신이 완료되기 전에는 실행 안 됨
+        if (!isLocked && newBuiltAt === prevBuiltAt && pollCount >= 16) { // 80초 이후
+          clearInterval(pollTimer);
+          stopBuildProgress();
+
+          if (!autoRetried) {
+            // ★ 자동 재시도 1회: GAS가 도중에 종료됐으면 다시 buildIndex 트리거
+            autoRetried = true;
+            _updateMsg('🔄 GAS 실행 종료 감지 — 인덱스 미완성. 자동 재시도 중...');
+            showToast("🔄 GAS 실행 종료 후 인덱스 미완성 — 자동 재갱신을 시작합니다.", "info");
+            badge.textContent = "재갱신 중...";
+            // 잠금 해제 후 재시도
+            try { await gasGet({ action: "releaseBuildLock" }, 5000); } catch(_){}
+            // 0.5초 후 buildIndex 재호출
+            setTimeout(() => { buildIndex(); }, 500);
+          } else {
+            // 2회 연속 실패 → 사용자에게 알림
+            showToast("⚠ 인덱스 갱신 2회 시도 모두 실패. GAS 실행 로그를 확인하세요.", "warning");
+            badge.className = "index-badge index-badge-expired"; badge.textContent = "확인 필요";
+            _updateMsg(
+              '❌ GAS 실행시간(6분) 초과로 2회 모두 실패.<br>' +
+              '<span style="font-size:.75rem;color:#6B7280">Google Apps Script 실행 로그를 확인하거나, ' +
+              '빠른 갱신(증분)을 반복 사용하세요.</span><br>' +
+              '<button onclick="_forceReleaseBuildLock()" style="margin-top:4px;padding:2px 8px;font-size:.72rem;background:#EF4444;color:#fff;border:none;border-radius:4px;cursor:pointer">🔓 잠금 해제</button>'
+            );
+            _restoreBtn();
+          }
+          return;
+        }
+
+        // 진행 중 메시지 업데이트 (미확정 상태)
+        if (!_forceReleaseShown) {
+          const dotCount = (pollCount % 3) + 1;
+          _updateMsg(`⏳ GAS 실행 중${'.'.repeat(dotCount)} (${elapsedSec}초 경과, 5초마다 완료 확인 중)`);
+        }
+
+      } catch (_) {}
+
+      // 최대 대기 초과
+      if (pollCount >= maxPolls) {
+        clearInterval(pollTimer);
+        stopBuildProgress();
+        showToast("⏱ 최대 대기 시간(12분) 초과. 잠금 강제 해제 후 재시도하세요.", "warning");
+        badge.className = "index-badge index-badge-expired"; badge.textContent = "확인 필요";
+        _restoreBtn();
+        _showForceRelease();
+      }
+    }, pollInterval);
+  };
+
+  try {
+    // ─── 1차 시도: JSONP buildIndex (최대 120초) ─────────────────────
+    // ★ v9.17: 타임아웃 90s→120s (GAS 빌드 20~40초 + 연결 지연 여유)
+    let data;
+    try {
+      data = await gasGet({ action: "buildIndex" }, 120 * 1000);
+    } catch (firstErr) {
+      const m1 = firstErr.message || "";
+      // 타임아웃 or 스크립트 로드 실패 → polling 모드로 전환
+      if (m1 === "요청 시간 초과" || m1.includes("스크립트 로드 실패")) {
+        showToast("⏳ GAS 빌드 중 (백그라운드)... 완료 시 자동 감지합니다.", "info");
+        _buildPollingMode = true; // ★ v9.19: finally 버튼 복원 차단
+        _startPolling(12 * 60 * 1000); // 12분 (GAS 6분 실행 + 재시도 여유)
+        return; // finally에서 버튼은 복원 안 함 (polling이 복원)
+      }
+      throw firstErr; // 다른 오류는 그대로 throw
+    }
+
+    // 잠금 상태 처리 — ★ v9.17: 좌비 감지 3분으로 단축
+    if (data.locked) {
+      const lockElapsed = typeof data.elapsedSec === "number"
+        ? data.elapsedSec
+        : (() => { const m = (data.error || "").match(/(\d+)초 전 시작/); return m ? parseInt(m[1], 10) : null; })();
+
+      // ★ v9.20: ZOMBIE_SEC = TTL(7분=420초)
+      const ZOMBIE_SEC = 420; // 7분 (= BUILD_LOCK_TTL_MS)
+
+      if (lockElapsed !== null && lockElapsed >= ZOMBIE_SEC) {
+        // ① 좀비 잠금 (7분 이상, TTL 만료) → 자동 해제 후 재시도
+        stopBuildProgress();
+        badge.textContent = "잠금 해제 중...";
+        showToast(`🔓 이전 갱신이 ${lockElapsed}초 전에 멈췄습니다. 자동으로 잠금 해제 후 재시도합니다.`, "info");
+        try { await gasGet({ action: "releaseBuildLock" }, 10000); } catch(_) {}
+        await new Promise(r => setTimeout(r, 1000));
+        badge.textContent = "재시도 중...";
+        setTimeout(() => buildIndex(), 300);
+        return;
+      } else {
+        // ② 진행 중 잠금 (3분 미만) → polling 모드로 자동 전환
+        // GAS가 실제로 완료되면 builtAt 변경으로 감지, 죽었으면 잠금 해제 후 자동 재시도
+        stopBuildProgress();
+        showToast(
+          lockElapsed !== null
+            ? `⏳ 갱신이 진행 중입니다 (${lockElapsed}초 경과). 완료를 자동으로 감지합니다...`
+            : `⏳ 다른 갱신이 진행 중입니다. 완료를 자동 감지합니다.`,
+          "info"
+        );
+        badge.textContent = "완료 감지 중...";
+        _buildPollingMode = true; // ★ v9.19: finally 버튼 복원 차단
+        // polling 모드 진입: GAS 완료(builtAt 변경) or 잠금 해제(자동 재시도) 감지
+        _startPolling((Math.max(ZOMBIE_SEC - (lockElapsed || 0), 30) + 60) * 1000);
+        return; // finally에서 버튼 복원 안 함 (polling이 복원)
+      }
+    }
+
+    // ★ [Node.js 이관] 비동기 빌드 응답 처리
+    if (data.ok && data.mode === "async") {
+      stopBuildProgress();
+      showToast("🔄 인덱스 갱신이 시작되었습니다. 완료 시 자동으로 업데이트됩니다.", "info");
+      badge.textContent = "갱신중(백그라운드)";
+      badge.className = "index-badge index-badge-unknown";
+      _buildPollingMode = true;
+      _startPolling(10 * 60 * 1000); // 10분 polling
+      return;
+    }
+
+    if (data.success) {
+      await _onBuildSuccess(data);
+    } else {
+      const errMsg = data.error || "알 수 없는 오류";
+      throw new Error(errMsg + (data.detail ? "\n" + data.detail.substring(0,200) : ""));
+    }
+
+  } catch (err) {
+    stopBuildProgress();
+    const msg = err.message || "";
+    const builtAtEl = document.getElementById("indexBuiltAt");
+    if (resultRow && resultEl) { resultEl.innerHTML = `<span style="color:#DC2626;font-weight:700">❌ 갱신 실패</span>`; resultRow.style.display = ""; }
+
+    if (msg === "요청 시간 초과") {
+      showToast("⏱ 요청 시간 초과 — GAS 실행은 계속 중일 수 있습니다. 잠시 후 상태를 확인하세요.", "warning");
+      if (builtAtEl) builtAtEl.textContent = "⏱ 타임아웃 (GAS 계속 실행 중일 수 있음)";
+    } else if (msg.includes("스크립트 로드 실패") || msg.includes("Script load failed")) {
+      showToast("❌ GAS 버전 불일치 — Code.gs를 최신 버전으로 재배포 후 다시 시도하세요.", "error");
+      if (builtAtEl) builtAtEl.textContent = "❌ GAS 재배포 필요 (JSONP 미지원 버전)";
+      const bannerEl2 = document.getElementById("gasErrorBanner");
+      if (bannerEl2) { bannerEl2.style.display = "block"; }
+    } else if (msg.includes("fetch") || msg.includes("Failed to fetch") || msg.includes("NetworkError") || msg.includes("network")) {
+      showToast("❌ 네트워크 오류 — GAS URL을 확인하거나 잠시 후 재시도하세요.", "error");
+      if (builtAtEl) builtAtEl.textContent = "❌ 네트워크 오류 (GAS URL 확인 필요)";
+    } else if (msg.includes("HTTP 4") || msg.includes("HTTP 5")) {
+      showToast("❌ GAS 서버 오류: " + msg + " — GAS 재배포 여부를 확인하세요.", "error");
+      if (builtAtEl) builtAtEl.textContent = "❌ " + msg;
+    } else if (msg.includes("베이스시트") || msg.includes("캠페인이 없")) {
+      showToast("❌ 베이스시트에 캠페인 URL이 없습니다. GAS 로그를 확인하세요.", "error");
+    } else {
+      showToast("❌ 갱신 실패: " + msg.substring(0, 120), "error");
+      if (builtAtEl) builtAtEl.textContent = "❌ " + msg.substring(0, 80);
+    }
+    badge.className = "index-badge index-badge-error"; badge.textContent = "오류";
+    const bannerEl = document.getElementById("gasErrorBanner");
+    if (bannerEl && !bannerEl.style.display || bannerEl.style.display === "none") {
+      const isNetErr = msg.includes("fetch") || msg.includes("NetworkError") || msg.includes("HTTP") || msg === "요청 시간 초과";
+      if (bannerEl) bannerEl.style.display = isNetErr ? "block" : "none";
+    }
+  } finally {
+    // ★ v9.19: polling 모드이면 버튼 복원 안 함 (polling이 완료 후 복원)
+    if (!_buildPollingMode) {
+      btn.disabled  = false;
+      btn.innerHTML = '<i class="fas fa-sync-alt"></i> 전체 갱신';
+      const btnSm = document.getElementById("btnBuildIndexSmart");
+      if (btnSm) btnSm.disabled = false;
+    }
+  }
+}
+
+/** ★ 인덱스 갱신 완료 후 대시보드 자동 새로고침 */
+function _autoRefreshDashboardAfterBuild() {
+  // 관리자 화면이 열려 있고, 대시보드 탭이 보이는 상태일 때만 자동 갱신
+  const screenAdmin = document.getElementById("screenAdmin");
+  if (!screenAdmin || !screenAdmin.classList.contains("active")) return;
+  const dashWrap = document.getElementById("dashboardWrap");
+  if (!dashWrap) return;
+  // 약간의 딜레이 후 새로고침 (GAS 캐시 반영 대기)
+  setTimeout(() => {
+    showToast("🔄 대시보드 자동 새로고침 중...", "info");
+    loadAdminDashboard();
+  }, 800);
+}
+
+/** ★ 빌드 잠금 강제 해제 (타임아웃 후 재갱신 가능하도록) */
+async function _forceReleaseBuildLock() {
+  if (!APP_CONFIG.GAS_WEB_APP_URL) { showToast("GAS URL을 먼저 설정해주세요.", "warning"); return; }
+  const pw = prompt("관리자 비밀번호를 입력하세요:");
+  if (!pw) return;
+  try {
+    let json;
+    try { json = await gasPost({ action: "releaseBuildLock", adminPw: pw }); }
+    catch(e) { json = await gasGet({ action: "releaseBuildLock", pw }); }
+    if (json.error) throw new Error(json.error);
+    showToast("🔓 빌드 잠금이 해제되었습니다. 이제 인덱스 갱신을 다시 시도하세요.", "success");
+    // 버튼 복원
+    const btn = document.getElementById("buildIndexBtn");
+    if (btn) { btn.disabled = false; btn.innerHTML = '<i class="fas fa-sync-alt"></i> 인덱스 지금 갱신'; }
+    const builtAtEl = document.getElementById("indexBuiltAt");
+    if (builtAtEl) builtAtEl.textContent = "잠금 해제됨 — 다시 갱신하세요";
+  } catch(err) {
+    showToast("❌ 잠금 해제 실패: " + err.message, "error");
+  }
+}
+
+/* ── 업체(캠페인) 추가 ── */
+function openAddCampaign() {
+  if (!APP_CONFIG.GAS_WEB_APP_URL) {
+    showToast("❌ GAS 웹앱 URL이 설정되지 않았습니다.", true); return;
+  }
+  document.getElementById("addCampUrl").value = "";
+  document.getElementById("addCampPreview").textContent = "";
+  document.getElementById("addCampError").textContent = "";
+  document.getElementById("addCampSubmitBtn").disabled = true;
+  document.getElementById("addCampUrl").classList.remove("has-val");
+  document.getElementById("addCampOverlay").classList.add("open");
+  setTimeout(() => document.getElementById("addCampUrl").focus(), 80);
+}
+function closeAddCampaign() {
+  document.getElementById("addCampOverlay").classList.remove("open");
+}
+
+/** URL 입력 시 실시간 정제 미리보기 */
+function onAddCampInput() {
+  const raw = document.getElementById("addCampUrl").value.trim();
+  const errEl = document.getElementById("addCampError");
+  const preEl = document.getElementById("addCampPreview");
+  const btn   = document.getElementById("addCampSubmitBtn");
+  const inp   = document.getElementById("addCampUrl");
+  errEl.textContent = "";
+  if (!raw) {
+    preEl.textContent = ""; btn.disabled = true; inp.classList.remove("has-val"); return;
+  }
+  // sheetId 추출 정규식
+  const m = raw.match(/\/spreadsheets\/d\/([a-zA-Z0-9_-]{20,})/);
+  if (!m) {
+    preEl.textContent = "";
+    errEl.textContent = "구글 스프레드시트 URL 형식이 아닙니다.";
+    btn.disabled = true; inp.classList.remove("has-val"); return;
+  }
+  const cleanUrl = "https://docs.google.com/spreadsheets/d/" + m[1] + "/edit";
+  preEl.textContent = "→ " + cleanUrl;
+  btn.disabled = false;
+  inp.classList.add("has-val");
+}
+
+/** 등록 실행 */
+async function submitAddCampaign() {
+  const raw = document.getElementById("addCampUrl").value.trim();
+  const errEl = document.getElementById("addCampError");
+  const btn   = document.getElementById("addCampSubmitBtn");
+  if (!raw) return;
+  errEl.textContent = "";
+  btn.disabled = true;
+  btn.innerHTML = '<i class="fas fa-spinner fa-spin"></i> 등록 중...';
+  try {
+    const data = await gasGet({ action: "addCampaign", url: raw });
+    closeAddCampaign();
+    showToast(`✅ 등록 완료: ${data.campaignName} (${data.url})`);
+    // ★ v10.2 P2-B: 세부목록 기본 행 자동 삽입 결과 안내
+    if (data.autoInsertedTabs > 0) {
+      setTimeout(() => showToast(
+        `📋 세부목록에 ${data.autoInsertedTabs}개 탭 기본 행이 자동으로 추가됐습니다. 담당자/시간대를 설정해주세요.`,
+        "success"), 1200);
+    } else {
+      // 등록 후 인덱스 갱신 안내 토스트
+      setTimeout(() => showToast("💡 인덱스 갱신 버튼을 눌러 대시보드에 반영하세요.", false), 2200);
+    }
+  } catch (err) {
+    errEl.textContent = err.message || "등록 실패";
+  } finally {
+    btn.disabled = false;
+    btn.innerHTML = '<i class="fas fa-plus"></i> 등록';
+  }
+}
+// ESC 키로 모달 닫기
+document.addEventListener("keydown", function(e) {
+  if (e.key === "Escape") {
+    if (document.getElementById("addCampOverlay").classList.contains("open"))
+      closeAddCampaign();
+    if (document.getElementById("createSheetOverlay").classList.contains("open"))
+      closeCreateSheetModal();
+  }
+});
+
+/* ════════════════════════════════════════════════════════════
+   ★ v9.10: 캠페인 시트 생성 모달
+   ════════════════════════════════════════════════════════════ */
+
+/** localStorage 키 */
+const _TMPL_SHEET_KEY = "rapp_template_sheet_id";
+
+/** 저장된 템플릿 sheetId 가져오기 */
+function _getTemplateSheetId() {
+  return localStorage.getItem(_TMPL_SHEET_KEY) || "";
+}
+
+/** URL → sheetId 추출 헬퍼 */
+function _extractSheetIdFromUrl(url) {
+  const m = (url || "").match(/\/spreadsheets\/d\/([a-zA-Z0-9_-]{20,})/);
+  return m ? m[1] : "";
+}
+
+/* ── 계정설정 모달: 템플릿 URL 입력 처리 ── */
+function onTemplateUrlInput() {
+  const val = (document.getElementById("templateSheetUrlInput").value || "").trim();
+  const titleEl = document.getElementById("templateSheetTitle");
+  const errEl   = document.getElementById("templateSheetError");
+  errEl.textContent = "";
+  if (!val) { titleEl.textContent = ""; return; }
+  const sid = _extractSheetIdFromUrl(val);
+  if (!sid) {
+    titleEl.textContent = "";
+    errEl.textContent = "구글 스프레드시트 URL 형식이 아닙니다.";
+    return;
+  }
+  titleEl.textContent = "ID: " + sid;
+}
+
+async function saveTemplateSheetUrl() {
+  const val   = (document.getElementById("templateSheetUrlInput").value || "").trim();
+  const errEl = document.getElementById("templateSheetError");
+  const tEl   = document.getElementById("templateSheetTitle");
+  errEl.textContent = "";
+  if (!val) { errEl.textContent = "URL을 입력하세요."; return; }
+  const sid = _extractSheetIdFromUrl(val);
+  if (!sid) { errEl.textContent = "유효한 구글 스프레드시트 URL이 아닙니다."; return; }
+
+  tEl.textContent = "확인 중...";
+  try {
+    const data = await gasGet({ action: "getTemplateSheetTitle", sheetId: sid });
+    if (data && data.ok) {
+      localStorage.setItem(_TMPL_SHEET_KEY, sid);
+      tEl.textContent = "✅ 저장 완료: " + (data.title || sid);
+      showToast("✅ 템플릿 시트 저장: " + (data.title || sid), false, 3000);
+    } else {
+      tEl.textContent = "";
+      errEl.textContent = (data && data.error) ? data.error : "시트를 확인할 수 없습니다.";
+    }
+  } catch(e) {
+    tEl.textContent = "";
+    errEl.textContent = "오류: " + e.message;
+  }
+}
+
+/* ── 시트 생성 모달 열기/닫기 ── */
+async function openCreateSheetModal() {
+  const overlay = document.getElementById("createSheetOverlay");
+  const warnEl  = document.getElementById("csTemplateWarn");
+  const tmplId  = _getTemplateSheetId();
+
+  // 초기화
+  document.getElementById("csFileTitle").value = "";
+  document.getElementById("csCampName").value  = "";
+  const _initTabSel = document.getElementById("csTmplTabSelect");
+  _initTabSel.innerHTML = '<option value="">-- 위에서 캠페인을 먼저 선택하세요 --</option>';
+  _initTabSel.disabled  = true;
+  document.getElementById("csTmplTabHint").textContent = "캠페인 선택 후 템플릿 탭 목록이 자동으로 표시됩니다.";
+  document.getElementById("csResult").style.display = "none";
+  document.getElementById("csResult").className = "cs-result";
+  document.getElementById("csBtnOk").disabled  = true;
+  document.querySelectorAll('input[name="csMode"]')[0].checked = true;
+  onCsModeChange();
+
+  // 템플릿 미설정 경고
+  warnEl.style.display = tmplId ? "none" : "flex";
+
+  // 기존 캠페인 목록 채우기
+  await _fillCsExistingSelect();
+
+  overlay.classList.add("open");
+  setTimeout(() => document.getElementById("csFileTitle").focus(), 80);
+}
+
+function closeCreateSheetModal() {
+  document.getElementById("createSheetOverlay").classList.remove("open");
+}
+
+/** 등록 방식 라디오 변경 */
+function onCsModeChange() {
+  const mode = document.querySelector('input[name="csMode"]:checked').value;
+  document.getElementById("csCampNameWrap").style.display  = mode === "new"      ? "" : "none";
+  document.getElementById("csExistingWrap").style.display  = mode === "existing" ? "" : "none";
+  document.getElementById("csTmplTabWrap").style.display   = mode === "existing" ? "" : "none";
+  // existing 모드 전환 시 탭 드롭다운 초기화
+  if (mode === "existing") {
+    const sel = document.getElementById("csTmplTabSelect");
+    sel.innerHTML = '<option value="">-- 위에서 캠페인을 먼저 선택하세요 --</option>';
+    sel.disabled = true;
+    document.getElementById("csTmplTabHint").textContent = "캠페인 선택 후 템플릿 탭 목록이 자동으로 표시됩니다.";
+  }
+  onCsInput();
+}
+
+/** 기존 캠페인 SELECT 변경 시 템플릿 탭 목록 로드 */
+function onCsExistingChange() {
+  onCsInput();
+  const existSId = document.getElementById("csExistingSelect").value;
+  if (existSId) _loadCsTmplTabs(existSId);
+  else {
+    const sel = document.getElementById("csTmplTabSelect");
+    sel.innerHTML = '<option value="">-- 위에서 캠페인을 먼저 선택하세요 --</option>';
+    sel.disabled = true;
+    document.getElementById("csTmplTabHint").textContent = "캠페인 선택 후 템플릿 탭 목록이 자동으로 표시됩니다.";
+    onCsInput();
+  }
+}
+
+/** 템플릿 탭 목록 로드 (templateSheetId 사용, 없으면 existingSheetId 폴백) */
+async function _loadCsTmplTabs(existingSheetIdFallback) {
+  const tmplId  = _getTemplateSheetId() || existingSheetIdFallback || "";
+  const sel     = document.getElementById("csTmplTabSelect");
+  const hintEl  = document.getElementById("csTmplTabHint");
+
+  if (!tmplId) {
+    sel.innerHTML = '<option value="">템플릿 시트를 먼저 등록해주세요</option>';
+    sel.disabled = true;
+    if (hintEl) hintEl.textContent = "계정설정에서 템플릿 시트 URL을 등록하면 자동으로 탭 목록이 로드됩니다.";
+    return;
+  }
+
+  sel.innerHTML = '<option value="">탭 목록 불러오는 중...</option>';
+  sel.disabled  = true;
+  if (hintEl) hintEl.textContent = "템플릿 탭 목록을 가져오는 중...";
+
+  try {
+    const data = await gasGet({ action: "getTemplateSheetTabs", sheetId: tmplId }, 15000);
+    if (data && data.tabs && data.tabs.length) {
+      sel.innerHTML = '<option value="">-- 탭을 선택하세요 --</option>';
+      data.tabs.forEach(tabName => {
+        const opt = document.createElement("option");
+        opt.value = tabName;
+        opt.textContent = tabName;
+        sel.appendChild(opt);
+      });
+      if (hintEl) hintEl.textContent = `총 ${data.tabs.length}개 탭 | 복사할 탭을 선택하세요.`;
+    } else {
+      sel.innerHTML = '<option value="">탭을 찾을 수 없습니다</option>';
+      if (hintEl) hintEl.textContent = "탭이 없습니다.";
+    }
+  } catch(e) {
+    sel.innerHTML = '<option value="">탭 목록 로드 실패 (재시도 가능)</option>';
+    if (hintEl) hintEl.textContent = "오류: " + (e.message || "탭 목록을 불러올 수 없습니다.");
+  } finally {
+    sel.disabled = false;
+    onCsInput();
+  }
+}
+
+/** 입력 유효성 → 버튼 활성화 */
+function onCsInput() {
+  const title   = (document.getElementById("csFileTitle").value || "").trim();
+  const mode    = document.querySelector('input[name="csMode"]:checked').value;
+  const camp    = (document.getElementById("csCampName").value || "").trim();
+  const selCamp = document.getElementById("csExistingSelect").value;
+  const selTab  = document.getElementById("csTmplTabSelect").value;
+  const ok = title &&
+             (mode === "new"      ? !!camp :
+              mode === "existing" ? (!!selCamp && !!selTab) : false);
+  document.getElementById("csBtnOk").disabled = !ok;
+}
+
+/** 기존 캠페인 목록 SELECT 채우기 (_lastDashData 활용) */
+async function _fillCsExistingSelect() {
+  const sel = document.getElementById("csExistingSelect");
+  sel.innerHTML = '<option value="">-- 캠페인을 선택하세요 --</option>';
+  const stats = (_lastDashData && _lastDashData.stats) ? _lastDashData.stats : [];
+  if (!stats.length) {
+    // 데이터 없으면 GAS에서 빠르게 조회
+    try {
+      const data = await gasGet({ action: "dashboard" }, 20000);
+      (data.stats || []).forEach(c => {
+        const firstTab = (c.tabs || [])[0];
+        if (!firstTab || !firstTab.sheetId) return;
+        const opt = document.createElement("option");
+        opt.value = firstTab.sheetId;
+        opt.textContent = c.campaign || firstTab.sheetId;
+        sel.appendChild(opt);
+      });
+    } catch(_) {}
+    return;
+  }
+  // 중복 sheetId 제거 (한 캠페인에 여러 시트 가능 → 대표 sheetId 1개만)
+  const seen = new Set();
+  stats.forEach(c => {
+    (c.tabs || []).forEach(t => {
+      if (!t.sheetId || seen.has(t.sheetId)) return;
+      seen.add(t.sheetId);
+      const opt = document.createElement("option");
+      opt.value       = t.sheetId;
+      opt.textContent = c.campaign || t.sheetId;
+      opt.dataset.campName = c.campaign || "";
+      sel.appendChild(opt);
+    });
+  });
+}
+
+/** 시트 생성 실행 */
+async function submitCreateSheet() {
+  const tmplId   = _getTemplateSheetId();
+  const fileTitle = (document.getElementById("csFileTitle").value || "").trim();
+  const mode      = document.querySelector('input[name="csMode"]:checked').value;
+  const campName  = (document.getElementById("csCampName").value || "").trim();
+  const selEl     = document.getElementById("csExistingSelect");
+  const existSId  = selEl.value;
+  const resultEl  = document.getElementById("csResult");
+  const btn       = document.getElementById("csBtnOk");
+
+  resultEl.style.display = "none";
+
+  if (!tmplId) {
+    resultEl.className = "cs-result error";
+    resultEl.innerHTML = "⚠️ 템플릿 시트가 설정되지 않았습니다.<br>계정설정에서 먼저 등록해 주세요.";
+    resultEl.style.display = "block";
+    return;
+  }
+  if (!fileTitle) { showToast("파일명을 입력해 주세요.", true); return; }
+
+  btn.disabled  = true;
+  btn.innerHTML = '<i class="fas fa-circle-notch fa-spin"></i> 생성 중...';
+
+  try {
+    const tmplTabName = (document.getElementById("csTmplTabSelect").value || "").trim();
+    const params = {
+      action:           "createCampaignSheet",
+      templateSheetId:  tmplId,
+      fileTitle:        fileTitle,
+      registerMode:     mode,
+      campaignName:     campName,
+      existingSheetId:  existSId,
+      templateTabName:  tmplTabName
+    };
+    const data = await gasGet(params, 60000); // 복사 최대 60초
+
+    if (data && data.ok) {
+      resultEl.className = "cs-result success";
+      const isExisting = data.mode === "existing";
+      resultEl.innerHTML =
+        `✅ <b>시트 생성 완료!</b><br>` +
+        (isExisting
+          ? `📑 추가된 탭: <b>${escHtml(data.newTabName || fileTitle)}</b><br>`
+          : `📄 파일명: <b>${escHtml(data.fileTitle)}</b><br>`) +
+        `🏷 캠페인: <b>${escHtml(data.campaignName)}</b><br>` +
+        (isExisting
+          ? `🔗 <a href="${escHtml(data.tabUrl || data.sheetUrl)}" target="_blank" style="color:#059669;font-weight:700">해당 탭 바로가기 →</a>`
+          : `🔗 <a href="${escHtml(data.sheetUrl)}" target="_blank" style="color:#059669;font-weight:700">구글시트 바로가기 →</a>`);
+      resultEl.style.display = "block";
+      btn.innerHTML = '<i class="fas fa-check"></i> 완료';
+      showToast("✅ 시트 생성 완료! 인덱스 갱신 후 대시보드에 반영됩니다.", false, 5000);
+      setTimeout(() => showToast("💡 [인덱스 지금 갱신] 버튼을 눌러 대시보드에 반영하세요.", false, 5000), 2500);
+    } else {
+      throw new Error((data && data.error) ? data.error : "알 수 없는 오류");
+    }
+  } catch(e) {
+    resultEl.className = "cs-result error";
+    resultEl.innerHTML = "❌ 오류: " + escHtml(e.message || "생성 실패");
+    resultEl.style.display = "block";
+    btn.disabled  = false;
+    btn.innerHTML = '<i class="fas fa-plus"></i> 시트 생성';
+  }
+}
+
+/* ── 계정설정 모달 열릴 때 저장된 템플릿 ID 자동 표시 ── */
+const _origOpenGasUrlModal = window.openGasUrlModal;
+window.openGasUrlModal = function() {
+  if (_origOpenGasUrlModal) _origOpenGasUrlModal.apply(this, arguments);
+  // Step2가 표시된 후에 값 주입 (약간 딜레이)
+  setTimeout(() => {
+    const tmplId = _getTemplateSheetId();
+    const inp    = document.getElementById("templateSheetUrlInput");
+    const tEl    = document.getElementById("templateSheetTitle");
+    if (inp && tmplId) {
+      inp.value = "https://docs.google.com/spreadsheets/d/" + tmplId + "/edit";
+      if (tEl) tEl.textContent = "저장된 ID: " + tmplId;
+    }
+  }, 400);
+};
+
+/* ── 열쇠 드롭다운 메뉴 ── */
+function toggleKeyMenu(e) {
+  e.stopPropagation();
+  const dd = document.getElementById('keyDropdown');
+  const isHidden = dd.style.display === 'none' || !dd.style.display;
+  dd.style.display = isHidden ? 'block' : 'none';
+}
+function closeKeyMenu() {
+  const dd = document.getElementById('keyDropdown');
+  if (dd) dd.style.display = 'none';
+}
+// 외부 클릭 시 드롭다운 닫기
+document.addEventListener('click', function(e) {
+  const wrap = document.getElementById('keyMenuWrap');
+  if (wrap && !wrap.contains(e.target)) closeKeyMenu();
+});
+
+/* ── 비밀번호 변경 ── */
+function openChangePw() {
+  document.getElementById("cpCurrentPw").value = "";
+  document.getElementById("cpNewPw").value     = "";
+  document.getElementById("cpNewPw2").value    = "";
+  hide("changePwError");
+  show("changePwModal", "flex");
+}
+function closeChangePw() { hide("changePwModal"); }
+async function submitChangePw() {
+  const currentPw = document.getElementById("cpCurrentPw").value;
+  const newPw     = document.getElementById("cpNewPw").value;
+  const newPw2    = document.getElementById("cpNewPw2").value;
+  const errEl     = document.getElementById("changePwError");
+  hide(errEl);
+  if (!currentPw || !newPw || !newPw2) { errEl.textContent = "모든 항목을 입력하세요."; show(errEl); return; }
+  if (newPw !== newPw2)                { errEl.textContent = "새 비밀번호가 일치하지 않습니다."; show(errEl); return; }
+  if (newPw.length < 4)               { errEl.textContent = "새 비밀번호는 4자 이상이어야 합니다."; show(errEl); return; }
+  showLoading("변경 중...");
+  try {
+    const data = await gasPost({ action: "adminChangePw", currentPw, newPw });
+    hideLoading();
+    if (data.success) {
+      closeChangePw();
+      showToast("비밀번호가 변경되었습니다.", "success");
+    } else {
+      errEl.textContent = data.error || "오류가 발생했습니다.";
+      show(errEl);
+    }
+  } catch (err) {
+    hideLoading();
+    showToast("오류: " + err.message, "error");
+  }
+}
+
+function togglePwVisible(inputId, btn) {
+  const input = document.getElementById(inputId);
+  const icon  = btn.querySelector("i");
+  if (input.type === "password") {
+    input.type     = "text";
+    icon.className = "fas fa-eye-slash";
+  } else {
+    input.type     = "password";
+    icon.className = "fas fa-eye";
+  }
+}
+
+/* ── GAS 통신 ──
+/**
+ * ★ GAS JSONP 테스트 함수
+ * indexStatus를 JSONP로 호출해 현재 배포된 GAS가 callback 파라미터를 처리하는지 확인
+ */
+async function testGasJsonp() {
+  const btn    = document.getElementById("btnTestJsonp");
+  const resEl  = document.getElementById("jsonpTestResult");
+  const url    = APP_CONFIG.GAS_WEB_APP_URL;
+  if (!url) { showToast("GAS URL을 먼저 저장해주세요.", "warning"); return; }
+
+  btn.disabled = true;
+  btn.innerHTML = '<i class="fas fa-circle-notch fa-spin"></i> 테스트 중...';
+  resEl.style.display = "block";
+  resEl.innerHTML = '<i class="fas fa-spinner fa-spin"></i> JSONP 테스트 중...';
+
+  try {
+    const t0   = Date.now();
+    const data = await _jsonpGet(`${url}?action=indexStatus`, 10000);
+    const ms   = Date.now() - t0;
+    if (data && (data.exists !== undefined || data.count !== undefined)) {
+      const verBadge = data.codeVersion
+        ? `<br><span style="color:#7C3AED;font-weight:600">📌 Code.gs 버전: ${escHtml(data.codeVersion)}</span>`
+        : "";
+      resEl.innerHTML =
+        `<span style="color:#059669;font-weight:700">✅ JSONP 지원 확인됨</span> (${ms}ms)<br>` +
+        `GAS 버전이 정상입니다. 인덱스 갱신을 진행할 수 있습니다.${verBadge}<br>` +
+        `<small style="color:#6B7280">응답: count=${data.count||0}, exists=${data.exists}</small>`;
+      // 코드 버전 행 갱신
+      const cvRow  = document.getElementById("codeVersionRow");
+      const cvText = document.getElementById("codeVersionText");
+      if (data.codeVersion && cvRow && cvText) { cvText.textContent = data.codeVersion; cvRow.style.display = ""; }
+      // 오류 배너 숨김
+      const b = document.getElementById("gasErrorBanner");
+      if (b) b.style.display = "none";
+    } else if (data && data.error) {
+      resEl.innerHTML =
+        `<span style="color:#D97706;font-weight:700">⚠ JSONP는 됐지만 GAS 오류:</span> ${escHtml(data.error)}`;
+    } else {
+      resEl.innerHTML =
+        `<span style="color:#D97706;font-weight:700">⚠ 응답 형식 이상:</span> ${JSON.stringify(data).substring(0,100)}`;
+    }
+  } catch (e) {
+    const m = e.message || "";
+    if (m.includes("스크립트 로드 실패") || m.includes("Script load failed")) {
+      resEl.innerHTML =
+        `<span style="color:#DC2626;font-weight:700">❌ JSONP 미지원</span><br>` +
+        `현재 배포된 GAS가 <b>구버전</b>입니다.<br>` +
+        `<b>Code.gs를 최신 버전으로 재배포</b>하면 해결됩니다.<br>` +
+        `<small style="color:#6B7280">▶ 배포 → 기존 배포 관리 → 수정(연필) → 새 버전 → 배포</small>`;
+      document.getElementById("gasErrorBanner").style.display = "block";
+    } else if (m.includes("시간 초과")) {
+      resEl.innerHTML = `<span style="color:#D97706;font-weight:700">⚠ 시간 초과</span> — GAS가 응답하지 않습니다.`;
+    } else {
+      resEl.innerHTML = `<span style="color:#DC2626;font-weight:700">❌ 오류:</span> ${escHtml(m)}`;
+    }
+  } finally {
+    btn.disabled = false;
+    btn.innerHTML = '<i class="fas fa-plug"></i> GAS 연결 테스트 (JSONP 지원 여부)';
+  }
+}
+
+/*
+ * GAS 웹앱은 긴 요청 시 302 리다이렉트 발생 → CORS 헤더 유실 문제
+ * 해결: <script> 태그 JSONP 방식으로 완전 우회 (preflight 없음, CORS 무관)
+ */
+let _jsonpSeq = 0;
+function _jsonpGet(fullUrl, timeoutMs) {
+  return new Promise((resolve, reject) => {
+    const cbName = "__gasCb" + (++_jsonpSeq) + "_" + Date.now();
+    const script  = document.createElement("script");
+    let   settled = false;
+    const tid = setTimeout(() => {
+      if (settled) return;
+      settled = true;
+      script.remove();
+      delete window[cbName];
+      reject(new Error("요청 시간 초과"));
+    }, timeoutMs || 60000);
+
+    window[cbName] = function(data) {
+      if (settled) return;
+      settled = true;
+      clearTimeout(tid);
+      script.remove();
+      delete window[cbName];
+      resolve(data);
+    };
+
+    // GAS에 callback 파라미터 추가
+    const sep = fullUrl.includes("?") ? "&" : "?";
+    script.src = fullUrl + sep + "callback=" + cbName;
+    script.onerror = function() {
+      if (settled) return;
+      settled = true;
+      clearTimeout(tid);
+      script.remove();
+      delete window[cbName];
+      reject(new Error("스크립트 로드 실패 (GAS URL 확인)"));
+    };
+    document.head.appendChild(script);
+  });
+}
+
+// ★ [Node.js 이관] api.js로 대체됨 — 기존 GAS 함수 비활성화
+// // async function gasGet(params, timeoutMs) {
+//   const url = APP_CONFIG.GAS_WEB_APP_URL;
+//   if (!url) throw new Error("GAS URL 없음");
+//   const qs      = new URLSearchParams(params).toString();
+//   const fullUrl = `${url}?${qs}`;
+//   const json = await _jsonpGet(fullUrl, timeoutMs || 60000);
+//   if (json && json.error) throw new Error(json.error);
+//   return json;
+// }
+// async function gasPost(body, timeoutMs, opts) {
+//   const url = APP_CONFIG.GAS_WEB_APP_URL;
+//   if (!url) throw new Error("GAS URL 없음");
+// 
+//   // ★ 파일 데이터가 있거나 forcePost:true 이면 실제 fetch POST 사용
+//   // (오래 걸리는 작업은 JSONP 대신 POST로 타임아웃 없이 처리)
+//   const hasFiles  = body.files || body.fileBase64 || body.fileData;
+//   const forcePost = opts && opts.forcePost;
+//   if (hasFiles || forcePost) {
+//     const ctrl = new AbortController();
+//     const tid  = timeoutMs ? setTimeout(() => ctrl.abort(), timeoutMs) : null;
+//     try {
+//       const resp = await fetch(url, {
+//         method:  "POST",
+//         headers: { "Content-Type": "text/plain" },
+//         body:    JSON.stringify(body),
+//         signal:  ctrl.signal
+//       });
+//       if (!resp.ok) throw new Error("HTTP " + resp.status);
+//       const json = await resp.json();
+//       if (json && json.error) throw new Error(json.error);
+//       return json;
+//     } catch (e) {
+//       if (e.name === "AbortError") throw new Error("요청 시간 초과");
+//       throw e;
+//     } finally {
+//       if (tid) clearTimeout(tid);
+//     }
+//   }
+// 
+//   // ★ 단순 action 요청: JSONP(GET)로 CORS 우회
+//   const params = { ...body, _method: "POST" };
+//   const qs = new URLSearchParams(
+//     Object.fromEntries(
+//       Object.entries(params).map(([k,v]) =>
+//         [k, typeof v === "object" ? JSON.stringify(v) : String(v)]
+//       )
+//     )
+//   ).toString();
+//   const fullUrl = `${url}?${qs}`;
+//   const json = await _jsonpGet(fullUrl, timeoutMs || 30000);
+//   if (json && json.error) throw new Error(json.error);
+//   return json;
+// }
+
+/* ── 유틸 ── */
+function fileToBase64(file) {
+  return new Promise((res, rej) => {
+    const r = new FileReader();
+    r.onload  = () => res(r.result.split(",")[1]);
+    r.onerror = rej;
+    r.readAsDataURL(file);
+  });
+}
+function escHtml(s) {
+  return String(s).replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;").replace(/"/g,"&quot;");
+}
+function showLoading(text="처리 중...") {
+  const el = document.getElementById("loadingOverlay");
+  const t  = document.getElementById("loadingText");
+  if (t) t.textContent = text;
+  el.classList.remove("fade-out"); el.style.display = "flex";
+}
+function hideLoading() {
+  const el = document.getElementById("loadingOverlay");
+  el.classList.add("fade-out");
+  setTimeout(() => { el.style.display = "none"; el.classList.remove("fade-out"); }, 280);
+}
+
+// ══════════════════════════════════════════════════════════
+// ★ 파일 존재 확인 모달
+// ══════════════════════════════════════════════════════════
+function openCheckFilesModal() {
+  const modal = document.getElementById("checkFilesModal");
+  if (!modal) return;
+  // 초기화
+  document.getElementById("checkFilesPwInput").value = "";
+  const res = document.getElementById("checkFilesResult");
+  res.style.display = "none";
+  res.innerHTML = "";
+  modal.classList.add("open");
+  setTimeout(() => document.getElementById("checkFilesPwInput").focus(), 80);
+}
+
+function closeCheckFilesModal() {
+  const modal = document.getElementById("checkFilesModal");
+  if (modal) modal.classList.remove("open");
+}
+
+// ESC 키로 모달 닫기
+document.addEventListener("keydown", e => {
+  if (e.key === "Escape") closeCheckFilesModal();
+});
+
+// 모달 바깥 클릭 시 닫기
+document.getElementById("checkFilesModal")?.addEventListener("click", function(e) {
+  if (e.target === this) closeCheckFilesModal();
+});
+
+async function runCheckReviewFiles() {
+  const pwInput = document.getElementById("checkFilesPwInput");
+  const pw = (pwInput?.value || "").trim();
+  if (!pw) { showToast("비밀번호를 입력하세요.", "error"); pwInput?.focus(); return; }
+
+  const resEl = document.getElementById("checkFilesResult");
+  resEl.style.display = "";
+  resEl.innerHTML = `<div class="cfr-summary running">
+    <i class="fas fa-spinner fa-spin"></i> 전체 시트 순회 중… 수십 초 소요될 수 있습니다.
+  </div>`;
+
+  // 실행 버튼 비활성화
+  const runBtn = resEl.closest(".check-files-box")?.querySelector("button[onclick='runCheckReviewFiles()']");
+  if (runBtn) { runBtn.disabled = true; runBtn.innerHTML = '<i class="fas fa-spinner fa-spin"></i> 실행 중…'; }
+
+  try {
+    let res;
+    try {
+      res = await gasPost({ action: "checkReviewFiles", pw });
+    } catch (_) {
+      res = await gasGet({ action: "checkReviewFiles", pw });
+    }
+
+    if (res.error) {
+      resEl.innerHTML = `<div class="cfr-item error">
+        <i class="fas fa-times-circle"></i> ${escHtml(res.error)}
+      </div>`;
+      return;
+    }
+
+    const { restored = 0, results = [], errors = [] } = res;
+    let html = "";
+
+    // 요약
+    if (restored === 0 && errors.length === 0) {
+      html += `<div class="cfr-summary ok">
+        <i class="fas fa-check-circle"></i> 삭제된 파일 없음 — 모든 리뷰 파일이 정상입니다.
+      </div>`;
+    } else if (restored > 0) {
+      html += `<div class="cfr-summary warn">
+        <i class="fas fa-undo-alt"></i> ${restored}건 복원됨 — 대시보드를 새로고침하면 반영됩니다.
+      </div>`;
+    }
+
+    // 복원 항목
+    results.forEach(item => {
+      html += `<div class="cfr-item restored">
+        <b>${escHtml(item.name)}</b>
+        <span style="color:#059669;margin-left:6px">${escHtml(item.tabName)}</span>
+        <span style="font-size:.75rem;color:#6B7280;margin-left:4px">행${item.rowIndex}</span><br>
+        <span style="font-size:.75rem">${escHtml(item.reason)}</span>
+      </div>`;
+    });
+
+    // 오류 항목
+    errors.forEach(err => {
+      html += `<div class="cfr-item error">
+        <i class="fas fa-exclamation-triangle"></i> ${escHtml(String(err))}
+      </div>`;
+    });
+
+    if (!html) {
+      html = `<div class="cfr-item empty">결과 없음</div>`;
+    }
+
+    resEl.innerHTML = html;
+
+    // 복원이 있으면 비밀번호 입력란 비우기
+    if (restored > 0) {
+      pwInput.value = "";
+      showToast(restored + "건 복원 완료. 대시보드를 새로고침하세요.", "success");
+    }
+
+  } catch (err) {
+    resEl.innerHTML = `<div class="cfr-item error">
+      <i class="fas fa-times-circle"></i> 통신 오류: ${escHtml(err.message || String(err))}
+    </div>`;
+  } finally {
+    if (runBtn) {
+      runBtn.disabled = false;
+      runBtn.innerHTML = '<i class="fas fa-search"></i> 확인 실행';
+    }
+  }
+}
+function showToast(msg, type="info") {
+  const c = document.getElementById("toastContainer");
+  const t = document.createElement("div");
+  t.className = `toast ${type}`;
+  const icons = { error:"fa-circle-xmark", success:"fa-circle-check", warning:"fa-triangle-exclamation", info:"fa-circle-info" };
+  t.innerHTML = `<i class="fas ${icons[type]||"fa-circle-info"}"></i>${escHtml(msg)}`;
+  c.appendChild(t);
+  setTimeout(() => { t.style.transition="opacity .3s"; t.style.opacity="0"; setTimeout(()=>t.remove(),300); }, 3500);
+}
+
+/* ══════════════════════════════════════════════
+   검색 진단 모달 (searchAll GAS 응답 직접 조회)
+   ══════════════════════════════════════════════ */
+function openSearchDebugModal() {
+  document.getElementById('searchDebugModal').style.display = 'flex';
+  document.getElementById('debugNameInput').focus();
+}
+function closeSearchDebugModal() {
+  document.getElementById('searchDebugModal').style.display = 'none';
+}
+
+async function runSearchDebug() {
+  const q = document.getElementById('debugNameInput').value.trim();
+  if (!q || q.length < 2) { showToast('이름을 2글자 이상 입력하세요.', 'warning'); return; }
+
+  // UI 초기화
+  const elResult  = document.getElementById('debugResult');
+  const elLoading = document.getElementById('debugLoading');
+  const elEmpty   = document.getElementById('debugEmpty');
+  const elError   = document.getElementById('debugError');
+  elResult.style.display  = 'none';
+  elLoading.style.display = 'block';
+  elEmpty.style.display   = 'none';
+  elError.style.display   = 'none';
+
+  try {
+    // GAS searchAll 원본 응답 (isSubmitted 포함 전체 행)
+    const data = await gasGet({ action: 'searchAllDebug', query: q });
+    elLoading.style.display = 'none';
+
+    // GAS가 searchAllDebug를 지원하지 않으면 일반 searchAll 사용
+    const rawResults = data.results || data.allResults || [];
+
+    if (!rawResults.length) {
+      elEmpty.style.display = 'block';
+      return;
+    }
+
+    // 통계
+    const total     = rawResults.length;
+    const submitted = rawResults.filter(r => r.isSubmitted).length;
+    const pending   = total - submitted;
+    document.getElementById('debugSummary').innerHTML =
+      `전체 <b>${total}건</b> | ` +
+      `<span style="color:#DC2626">isSubmitted=true: <b>${submitted}건</b></span> | ` +
+      `<span style="color:#059669">isSubmitted=false(검색 노출): <b>${pending}건</b></span>`;
+
+    // 테이블 렌더
+    const tbody = document.getElementById('debugTableBody');
+    tbody.innerHTML = '';
+    rawResults.forEach((r, i) => {
+      const isS    = r.isSubmitted;
+      const rdRaw  = r.reviewDoneRaw !== undefined ? r.reviewDoneRaw : (r.row ? r.row[r.submitCol] : '—');
+      const tr = document.createElement('tr');
+      tr.style.background = isS ? '#FEF2F2' : '#F0FDF4';
+      tr.innerHTML = `
+        <td style="padding:5px 8px;border:1px solid #E5E7EB;color:#6B7280">${i+1}</td>
+        <td style="padding:5px 8px;border:1px solid #E5E7EB;font-weight:600">${escHtml(r.displayName||'')}</td>
+        <td style="padding:5px 8px;border:1px solid #E5E7EB;font-size:.7rem;color:#4B5563">${escHtml((r.campaignName||'')+(r.tabName?(' / '+r.tabName):''))}</td>
+        <td style="padding:5px 8px;border:1px solid #E5E7EB;font-size:.7rem">${escHtml(r.productName||r.tcDisplayName||'')}</td>
+        <td style="padding:5px 8px;border:1px solid #E5E7EB;text-align:center;font-weight:700;color:${isS?'#DC2626':'#059669'}">${isS?'✅ true':'⬜ false'}</td>
+        <td style="padding:5px 8px;border:1px solid #E5E7EB;font-family:monospace;font-size:.72rem;color:#92400E">${escHtml(String(rdRaw??''))}</td>
+        <td style="padding:5px 8px;border:1px solid #E5E7EB;font-family:monospace;font-size:.65rem;color:#9CA3AF">${escHtml(r.sheetId||'')}</td>
+        <td style="padding:5px 8px;border:1px solid #E5E7EB;text-align:center;color:#6B7280">${escHtml(String(r.row?._rowIndex??r.rowIndex??''))}</td>`;
+      tbody.appendChild(tr);
+    });
+
+    elResult.style.display = 'block';
+
+  } catch(err) {
+    elLoading.style.display = 'none';
+    // searchAllDebug 미지원 시 일반 searchAll로 재시도
+    if (err.message && (err.message.includes('알 수 없는') || err.message.includes('지원') || err.message.includes('action'))) {
+      await _runSearchDebugFallback(q);
+    } else {
+      elError.style.display = 'block';
+      elError.textContent   = '오류: ' + err.message;
+    }
+  }
+}
+
+/** searchAllDebug 미지원 시 일반 searchAll(isSubmitted 포함 전체)로 폴백 */
+async function _runSearchDebugFallback(q) {
+  const elLoading = document.getElementById('debugLoading');
+  const elEmpty   = document.getElementById('debugEmpty');
+  const elError   = document.getElementById('debugError');
+  const elResult  = document.getElementById('debugResult');
+  elLoading.style.display = 'block';
+
+  try {
+    // 일반 searchAll은 모든 결과를 반환하는지 확인
+    const data = await gasGet({ action: 'searchAll', query: q });
+    elLoading.style.display = 'none';
+
+    const rawResults = data.results || [];
+    if (!rawResults.length) {
+      elEmpty.style.display = 'block';
+      return;
+    }
+
+    const total     = rawResults.length;
+    const submitted = rawResults.filter(r => r.isSubmitted).length;
+    const pending   = total - submitted;
+    document.getElementById('debugSummary').innerHTML =
+      `<span style="color:#B45309">⚠ GAS가 searchAllDebug 미지원 → searchAll 응답 표시 (isSubmitted=true인 행이 반환 목록에 포함되지 않을 수 있음)</span><br>` +
+      `반환된 전체 <b>${total}건</b> | ` +
+      `<span style="color:#DC2626">isSubmitted=true: <b>${submitted}건</b></span> | ` +
+      `<span style="color:#059669">isSubmitted=false(검색 노출): <b>${pending}건</b></span>`;
+
+    const tbody = document.getElementById('debugTableBody');
+    tbody.innerHTML = '';
+    rawResults.forEach((r, i) => {
+      const isS = r.isSubmitted;
+      const rdRaw = r.reviewDoneRaw !== undefined ? r.reviewDoneRaw : '(GAS 미전달)';
+      const tr = document.createElement('tr');
+      tr.style.background = isS ? '#FEF2F2' : '#F0FDF4';
+      tr.innerHTML = `
+        <td style="padding:5px 8px;border:1px solid #E5E7EB;color:#6B7280">${i+1}</td>
+        <td style="padding:5px 8px;border:1px solid #E5E7EB;font-weight:600">${escHtml(r.displayName||'')}</td>
+        <td style="padding:5px 8px;border:1px solid #E5E7EB;font-size:.7rem;color:#4B5563">${escHtml((r.campaignName||'')+(r.tabName?(' / '+r.tabName):''))}</td>
+        <td style="padding:5px 8px;border:1px solid #E5E7EB;font-size:.7rem">${escHtml(r.productName||r.tcDisplayName||'')}</td>
+        <td style="padding:5px 8px;border:1px solid #E5E7EB;text-align:center;font-weight:700;color:${isS?'#DC2626':'#059669'}">${isS?'✅ true':'⬜ false'}</td>
+        <td style="padding:5px 8px;border:1px solid #E5E7EB;font-family:monospace;font-size:.72rem;color:#92400E">${escHtml(String(rdRaw??''))}</td>
+        <td style="padding:5px 8px;border:1px solid #E5E7EB;font-family:monospace;font-size:.65rem;color:#9CA3AF">${escHtml(r.sheetId||'')}</td>
+        <td style="padding:5px 8px;border:1px solid #E5E7EB;text-align:center;color:#6B7280">${escHtml(String(r.row?._rowIndex??r.rowIndex??''))}</td>`;
+      tbody.appendChild(tr);
+    });
+    elResult.style.display = 'block';
+
+  } catch(err2) {
+    elLoading.style.display = 'none';
+    elError.style.display = 'block';
+    elError.innerHTML = `<b>GAS 오류:</b> ${escHtml(err2.message)}<br><br>` +
+      `<b>확인 방법:</b><br>` +
+      `1. GAS 스크립트 편집기에서 <code>doGet</code> 함수의 <code>searchAll</code> action을 찾으세요<br>` +
+      `2. <code>isSubmitted</code> 판단 로직이 어떤 컬럼을 읽는지 확인하세요<br>` +
+      `3. 스프레드시트에서 리뷰제출여부 컬럼의 실제 값을 확인하세요<br>` +
+      `4. <code>SUBMITTED_VALUES</code> 배열에 해당 값이 포함되는지 확인하세요`;
+  }
+}
+
+// 모달 외부 클릭 시 닫기
+document.getElementById('searchDebugModal')?.addEventListener('click', function(e) {
+  if (e.target === this) closeSearchDebugModal();
+});
+document.getElementById('dashRawModal')?.addEventListener('click', function(e) {
+  if (e.target === this) closeDashRawModal();
+});
+
+/* ══════════════════════════════════════════════
+   집계 진단 모달 (dashboard GAS 응답 원본 조회)
+   ══════════════════════════════════════════════ */
+let _dashRawData = null; // 마지막 조회 결과 캐시
+
+function openDashRawModal() {
+  document.getElementById('dashRawModal').style.display = 'flex';
+  // 이미 캐시된 데이터가 있으면 바로 표시, 없으면 새로 조회
+  if (_dashRawData) {
+    _renderDashRawTable(_dashRawData);
+  } else {
+    reloadDashRaw();
+  }
+}
+function closeDashRawModal() {
+  document.getElementById('dashRawModal').style.display = 'none';
+}
+
+async function reloadDashRaw() {
+  const elLoading = document.getElementById('dashRawLoading');
+  const elContent = document.getElementById('dashRawContent');
+  const elError   = document.getElementById('dashRawError');
+  elLoading.style.display = 'block';
+  elContent.style.display = 'none';
+  elError.style.display   = 'none';
+  document.getElementById('dashRawFilter').value = '';
+
+  try {
+    const data = await gasGet({ action: 'dashboard' });
+    _dashRawData = data;
+    elLoading.style.display = 'none';
+    _renderDashRawTable(data);
+  } catch(err) {
+    elLoading.style.display = 'none';
+    elError.style.display   = 'block';
+    elError.textContent = 'GAS 오류: ' + err.message;
+  }
+}
+
+function _renderDashRawTable(data) {
+  const elContent = document.getElementById('dashRawContent');
+  const elMeta    = document.getElementById('dashRawMeta');
+  const tbody     = document.getElementById('dashRawBody');
+
+  const stats = data.stats || [];
+  const grand = data.grand || {};
+
+  // 메타 요약
+  elMeta.innerHTML =
+    `조회 시각: <b>${new Date().toLocaleTimeString()}</b> &nbsp;|&nbsp; ` +
+    `총 캠페인: <b>${stats.length}</b> &nbsp;|&nbsp; ` +
+    `grand.total: <b>${grand.total ?? '—'}</b> &nbsp;|&nbsp; ` +
+    `grand.submitted: <b>${grand.submitted ?? '—'}</b> &nbsp;|&nbsp; ` +
+    `grand.pending: <b>${grand.pending ?? '—'}</b>` +
+    (data.indexBuiltAt ? ` &nbsp;|&nbsp; 인덱스: <b>${escHtml(data.indexBuiltAt)}</b>` : '');
+
+  tbody.innerHTML = '';
+  stats.forEach(c => {
+    (c.tabs || []).forEach(t => {
+      const rate = t.total > 0 ? Math.round(t.submitted / t.total * 100) : 0;
+      // 차수 요약
+      let roundSummary = '—';
+      if (t.roundList && t.roundList.length) {
+        roundSummary = t.roundList.map(rd =>
+          `<span style="white-space:nowrap">${escHtml(rd.round||'?')}: ${rd.submitted}/${rd.total}</span>`
+        ).join(' &nbsp; ');
+      }
+      // 이상 여부 강조 (total>0인데 submitted=0 이면 주황)
+      const isAnomal = t.total > 0 && t.submitted === 0;
+      // total=0 이면 회색
+      const isEmpty  = t.total === 0;
+
+      const tr = document.createElement('tr');
+      tr.dataset.campaign = (c.campaign || '').toLowerCase();
+      tr.dataset.tab      = (t.tab || '').toLowerCase();
+      tr.style.background = isAnomal ? '#FFFBEB' : isEmpty ? '#F9FAFB' : '';
+
+      tr.innerHTML = `
+        <td style="padding:5px 8px;border:1px solid #E5E7EB;color:#374151;white-space:nowrap">${escHtml(c.campaign||'')}</td>
+        <td style="padding:5px 8px;border:1px solid #E5E7EB;font-weight:600;white-space:nowrap">${escHtml(t.tab||'')}</td>
+        <td style="padding:5px 8px;border:1px solid #E5E7EB;text-align:center;font-weight:700;color:${isEmpty?'#9CA3AF':'#1F2937'}">${t.total ?? '—'}</td>
+        <td style="padding:5px 8px;border:1px solid #E5E7EB;text-align:center;font-weight:700;color:${t.submitted>0?'#059669':isAnomal?'#D97706':'#9CA3AF'}">${t.submitted ?? '—'}</td>
+        <td style="padding:5px 8px;border:1px solid #E5E7EB;text-align:center;color:${t.pending>0?'#DC2626':'#6B7280'}">${t.pending ?? '—'}</td>
+        <td style="padding:5px 8px;border:1px solid #E5E7EB;text-align:center">
+          ${isEmpty
+            ? `<span style="color:#9CA3AF;font-size:.68rem">수취인없음</span>`
+            : `<span style="color:${rate===100?'#059669':rate>=50?'#7C3AED':'#D97706'};font-weight:700">${rate}%</span>`
+          }
+        </td>
+        <td style="padding:5px 8px;border:1px solid #E5E7EB;text-align:center;font-size:.7rem">
+          ${isAnomal
+            ? `<span style="color:#D97706;font-weight:700">⚠ 제출0</span>`
+            : isEmpty
+              ? `<span style="color:#9CA3AF">빈탭</span>`
+              : `<span style="color:#059669">정상</span>`
+          }
+        </td>
+        <td style="padding:5px 8px;border:1px solid #E5E7EB;font-size:.7rem;color:#4B5563">${roundSummary}</td>
+        <td style="padding:5px 8px;border:1px solid #E5E7EB;font-family:monospace;font-size:.62rem;color:#9CA3AF;max-width:120px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="${escHtml(t.sheetId||'')}">${escHtml(t.sheetId||'—')}</td>`;
+      tbody.appendChild(tr);
+    });
+  });
+
+  elContent.style.display = 'block';
+}
+
+function filterDashRawTable() {
+  const q = document.getElementById('dashRawFilter').value.toLowerCase().trim();
+  document.querySelectorAll('#dashRawBody tr').forEach(tr => {
+    const match = !q || tr.dataset.campaign.includes(q) || tr.dataset.tab.includes(q);
+    tr.style.display = match ? '' : 'none';
+  });
+}
+
+/* ══════════════════════════════════════════════════════════
+   ★ v9.9: 대시보드 완료 탭 감지 자동 폴링 + Push Notification
+   ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+   · 5분마다 GAS dashboard를 조회해 이전 상태와 비교
+   · 탭 완료 조건: pending===0 && total>0 또는 forceDone===true
+   · 알림: 토스트 팝업 + 브라우저 Push Notification
+   ══════════════════════════════════════════════════════════ */
+const _DASH_POLL_INTERVAL_MS = 5 * 60 * 1000; // 5분
+let   _dashPollTimer   = null;
+let   _dashPollTabSnap = {}; // { "sheetId||tabName": { done: bool, total: int } }
+
+/** 탭 완료 여부 판정 (대시보드 표시 기준과 동일) */
+function _isTabComplete(t) {
+  return t.isClosed || t.forceDone || (t.pending === 0 && t.total > 0);
+}
+
+/** 현재 stats에서 스냅샷 생성 */
+function _buildTabSnap(stats) {
+  const snap = {};
+  (stats || []).forEach(c => {
+    (c.tabs || []).forEach(t => {
+      const key = (t.sheetId || "") + "||" + (t.tab || "");
+      snap[key] = { done: _isTabComplete(t), total: t.total || 0, campaign: c.campaign || "", tab: t.tab || "" };
+    });
+  });
+  return snap;
+}
+
+/** Push Notification 권한 요청 */
+async function _requestNotifPermission() {
+  if (!("Notification" in window)) return false;
+  if (Notification.permission === "granted") return true;
+  if (Notification.permission === "denied") return false;
+  const perm = await Notification.requestPermission();
+  return perm === "granted";
+}
+
+/** 브라우저 Push Notification 표시 */
+function _sendPushNotif(title, body, tag) {
+  if (!("Notification" in window) || Notification.permission !== "granted") return;
+  try {
+    const n = new Notification(title, {
+      body,
+      icon: "https://cdn.jsdelivr.net/npm/@fortawesome/fontawesome-free@6.4.0/svgs/solid/check-circle.svg",
+      tag: tag || "dash-complete",
+      requireInteraction: false,
+      silent: false
+    });
+    setTimeout(() => n.close(), 8000);
+  } catch(e) { /* 알림 실패 무시 */ }
+}
+
+/** 폴링 1회 실행 — 완료된 탭 감지 후 알림 */
+async function _pollDashboardOnce() {
+  if (!isAdminLoggedIn()) return;
+  try {
+    const data  = await gasGet({ action: "dashboard" }, 25000);
+    if (!data || data.error || !data.stats) return;
+
+    const newSnap = _buildTabSnap(data.stats);
+    const newlyDone = [];
+
+    Object.entries(newSnap).forEach(([key, cur]) => {
+      const prev = _dashPollTabSnap[key];
+      if (!prev) return; // 첫 로드 시에는 비교 대상 없음
+      // 이전에는 완료 아니었는데 지금 완료된 경우
+      if (!prev.done && cur.done && cur.total > 0) {
+        newlyDone.push({ key, campaign: cur.campaign, tab: cur.tab });
+      }
+    });
+
+    // 스냅샷 갱신 (처음 실행 시 기준값만 저장)
+    _dashPollTabSnap = newSnap;
+
+    if (!newlyDone.length) return;
+
+    // 알림 발송
+    newlyDone.forEach(({ campaign, tab }) => {
+      const msg = `✅ [${campaign}] ${tab} 탭이 완료되었습니다!`;
+      showToast(msg, "success", 6000);
+      _sendPushNotif("리뷰 운영 완료 알림", `[${campaign}] ${tab} 탭 완료!`, "tab-done-" + tab);
+    });
+
+    // 대시보드 데이터 업데이트 (배경 갱신)
+    _lastDashData = data;
+
+    // 탭 타이틀 업데이트
+    const cnt = newlyDone.length;
+    const orig = document.title.replace(/^\(🔔\s*\d+건\s*완료\)\s*/, "");
+    document.title = `(🔔 ${cnt}건 완료) ${orig}`;
+    setTimeout(() => { document.title = orig; }, 30000);
+
+  } catch(e) { /* 폴링 오류 무시 */ }
+}
+
+/** 대시보드 폴링 시작 */
+async function startDashPolling() {
+  if (_dashPollTimer) return; // 이미 실행 중
+  // Push 권한 요청 (최초 1회)
+  await _requestNotifPermission();
+  // 즉시 스냅샷 초기화 (알림 없이)
+  if (_lastDashData && _lastDashData.stats) {
+    _dashPollTabSnap = _buildTabSnap(_lastDashData.stats);
+  }
+  _dashPollTimer = setInterval(_pollDashboardOnce, _DASH_POLL_INTERVAL_MS);
+  showToast("🔔 탭 완료 자동 알림이 활성화되었습니다. (5분 간격)", "info", 4000);
+  console.log("[Poll] 대시보드 완료 감지 폴링 시작 (5분 간격)");
+}
+
+/** 대시보드 폴링 중지 */
+function stopDashPolling() {
+  if (_dashPollTimer) {
+    clearInterval(_dashPollTimer);
+    _dashPollTimer = null;
+    showToast("🔕 자동 알림이 비활성화되었습니다.", "info", 3000);
+  }
+}
+
+/** 폴링 토글 버튼 처리 */
+function toggleDashPolling() {
+  if (_dashPollTimer) {
+    stopDashPolling();
+    const btn = document.getElementById("pollToggleBtn");
+    if (btn) { btn.innerHTML = '<i class="fas fa-bell"></i> 완료알림 켜기'; btn.classList.remove("active"); }
+  } else {
+    startDashPolling();
+    const btn = document.getElementById("pollToggleBtn");
+    if (btn) { btn.innerHTML = '<i class="fas fa-bell-slash"></i> 완료알림 끄기'; btn.classList.add("active"); }
+  }
+}
+
+// 관리자 대시보드 로드 완료 후 스냅샷은 loadAdminDashboard 내부에서 직접 갱신됨
