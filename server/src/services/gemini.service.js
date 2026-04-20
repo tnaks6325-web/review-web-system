@@ -29,8 +29,8 @@ function _initGemini() {
 
   try {
     genAI = new GoogleGenerativeAI(apiKey);
-    model = genAI.getGenerativeModel({ model: 'gemini-2.0-flash' });
-    logger.info('[Gemini] 초기화 완료 (gemini-2.0-flash)');
+    model = genAI.getGenerativeModel({ model: 'gemini-2.5-flash' });
+    logger.info('[Gemini] 초기화 완료 (gemini-2.5-flash)');
     return true;
   } catch (err) {
     logger.error(`[Gemini] 초기화 실패: ${err.message}`);
