@@ -162,6 +162,9 @@ const _ACTION_MAP = {
   // Phase 11: Campaign Name Fix
   'fixCampaignNames':   { method: 'POST', path: '/api/diag/fix-campaign-names' },
   'sheetTitles':        { method: 'GET',  path: '/api/diag/sheet-titles' },
+
+  // Phase 13: Empty Index Cleanup
+  'cleanupEmptyIndexes': { method: 'POST', path: '/api/diag/cleanup-empty-indexes' },
 };
 
 // ═══════════════════════════════════════════════════════════

@@ -1285,4 +1285,59 @@ function extractSheetId(url) {
   return m ? m[1] : null;
 }
 
+// ═══════════════════════════════════════════════════════════
+// POST /api/diag/cleanup-empty-indexes — row_count=0인 탭 일괄 정리
+// ═══════════════════════════════════════════════════════════
+router.post('/cleanup-empty-indexes', authMiddleware, async (req, res) => {
+  try {
+    const dryRun = req.body.dryRun !== false; // 기본값 dry-run
+
+    // 정리 대상 조회
+    const { rows: targets } = await pool.query(`
+      SELECT sheet_id, tab_name, campaign_name, row_count, submitted_count
+      FROM index_master
+      WHERE row_count = 0 OR row_count IS NULL
+      ORDER BY campaign_name, tab_name
+    `);
+
+    if (dryRun) {
+      return res.json({
+        ok: true,
+        dryRun: true,
+        totalTargets: targets.length,
+        targets: targets.map(t => ({
+          sheetId: t.sheet_id,
+          tabName: t.tab_name,
+          campaignName: t.campaign_name,
+        })),
+      });
+    }
+
+    // 실제 삭제 실행
+    let masterDeleted = 0, indexDeleted = 0;
+    for (const t of targets) {
+      const r1 = await pool.query(
+        'DELETE FROM index_master WHERE sheet_id = $1 AND tab_name = $2',
+        [t.sheet_id, t.tab_name]
+      );
+      const r2 = await pool.query(
+        'DELETE FROM review_index WHERE sheet_id = $1 AND tab_name = $2',
+        [t.sheet_id, t.tab_name]
+      );
+      masterDeleted += r1.rowCount;
+      indexDeleted += r2.rowCount;
+    }
+
+    res.json({
+      ok: true,
+      dryRun: false,
+      totalTargets: targets.length,
+      masterDeleted,
+      indexDeleted,
+    });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
 module.exports = router;

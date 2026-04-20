@@ -349,6 +349,14 @@ async function _processOneSheet(sheetId, opts) {
 
       // 헤더 파싱 + DB 업데이트
       const rows = parseTabRows(values, sheetId, tabName, tabGid, spreadsheetTitle);
+
+      // 리뷰 인덱스 구성요건 미충족 (헤더 없음 or 데이터 0건) → 인덱스 등록 스킵 + 기존 데이터 삭제
+      if (rows.length === 0) {
+        await _removeNonIndexTab(sheetId, tabName);
+        skipped++;
+        continue;
+      }
+
       await _upsertTabIndex(sheetId, tabName, tabGid, newChecksum, rows, currentModifiedTime, spreadsheetTitle);
       rebuilt++;
 
@@ -368,6 +376,29 @@ async function _processOneSheet(sheetId, opts) {
   }
 
   return { rebuilt, skipped, errors, elapsed: Date.now() - sheetStart };
+}
+
+// ═══════════════════════════════════════════════════════════
+// 리뷰 인덱스 구성요건 미충족 탭 정리
+// 헤더가 없거나 데이터가 0건인 탭 → index_master + review_index에서 삭제
+// ═══════════════════════════════════════════════════════════
+
+async function _removeNonIndexTab(sheetId, tabName) {
+  try {
+    const { rowCount: masterDeleted } = await pool.query(
+      'DELETE FROM index_master WHERE sheet_id = $1 AND tab_name = $2',
+      [sheetId, tabName]
+    );
+    const { rowCount: indexDeleted } = await pool.query(
+      'DELETE FROM review_index WHERE sheet_id = $1 AND tab_name = $2',
+      [sheetId, tabName]
+    );
+    if (masterDeleted > 0 || indexDeleted > 0) {
+      logger.info(`[buildIndex] 비인덱스 탭 정리: ${tabName} (master:${masterDeleted}, index:${indexDeleted})`);
+    }
+  } catch (err) {
+    logger.warn(`[buildIndex] 비인덱스 탭 정리 실패 (${tabName}): ${err.message}`);
+  }
 }
 
 // ═══════════════════════════════════════════════════════════
@@ -459,7 +490,7 @@ async function _upsertTabIndex(sheetId, tabName, tabGid, checksum, rows, modifie
 
 function parseTabRows(values, sheetId, tabName, tabGid, campaignTitle) {
   let headerRowIdx = -1;
-  for (let i = 0; i < Math.min(values.length, 10); i++) {
+  for (let i = 0; i < Math.min(values.length, 20); i++) {
     const cells = values[i] ? values[i].map(c => String(c || '').trim()) : [];
     if (_isDataTabRow(cells)) {
       headerRowIdx = i;
@@ -546,9 +577,18 @@ function parseTabRows(values, sheetId, tabName, tabGid, campaignTitle) {
 }
 
 function _isDataTabRow(cells) {
-  return DATA_TAB_KEYWORDS.some(kw =>
-    kw === '번호' ? cells.includes(kw) : cells.some(c => c.includes(kw))
-  );
+  // 옵션B: 최소 2개 이상의 DATA_TAB_KEYWORDS가 매칭되어야 헤더로 인정
+  let matchCount = 0;
+  for (const kw of DATA_TAB_KEYWORDS) {
+    const found = kw === '번호'
+      ? cells.includes(kw)
+      : cells.some(c => c.includes(kw));
+    if (found) {
+      matchCount++;
+      if (matchCount >= 2) return true;  // 2개 이상이면 즉시 반환
+    }
+  }
+  return false;
 }
 
 function _formatDate(val) {
