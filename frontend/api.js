@@ -136,9 +136,10 @@ const _ACTION_MAP = {
   // 블랙리스트
   'blacklist':      { method: 'POST', path: '/api/blacklist' },
 
-  // 이미지
-  'extractOrderImage': { method: 'POST', path: '/api/image/image-extract' },
-  'uploadOrderImage':  { method: 'POST', path: '/api/image/image-upload' },
+  // 이미지 (Gemini AI + Drive)
+  'extractOrderImage':   { method: 'POST', path: '/api/image/image-extract' },
+  'uploadOrderImage':    { method: 'POST', path: '/api/image/image-upload' },
+  'verifyAddressMatch':  { method: 'POST', path: '/api/image/verify-address' },
 
   // 기타 GAS 전용 (호환성)
   'getAppUrl':      { method: 'GET',  path: '/api/diag/app-url' },

@@ -1,4 +1,5 @@
 const { drive } = require('./sheets.service');
+const { Readable } = require('stream');
 
 /**
  * Google Drive API 래퍼
@@ -78,10 +79,70 @@ async function findFolderByName(name, parentFolderId) {
   return (res.data.files || [])[0] || null;
 }
 
+/**
+ * Base64 이미지를 Google Drive 폴더에 업로드
+ * @param {string} base64Data - Base64 인코딩된 이미지 데이터 (data URL prefix 포함 가능)
+ * @param {string} fileName - 업로드할 파일명
+ * @param {string} mimeType - MIME 타입 (예: image/jpeg)
+ * @param {string} parentFolderId - 업로드 대상 폴더 ID
+ * @returns {{ id, name, webViewLink, webContentLink }}
+ */
+async function uploadFileBase64(base64Data, fileName, mimeType, parentFolderId) {
+  if (!drive) throw new Error('Google Drive API가 설정되지 않았습니다.');
+
+  // data URL prefix 제거
+  const cleanBase64 = base64Data.replace(/^data:[^;]+;base64,/, '');
+  const buffer = Buffer.from(cleanBase64, 'base64');
+
+  const stream = new Readable();
+  stream.push(buffer);
+  stream.push(null);
+
+  const res = await drive.files.create({
+    requestBody: {
+      name: fileName,
+      parents: [parentFolderId],
+    },
+    media: {
+      mimeType: mimeType || 'image/jpeg',
+      body: stream,
+    },
+    fields: 'id, name, webViewLink, webContentLink',
+  });
+
+  // 파일을 "링크가 있는 모든 사용자" 읽기 가능으로 설정
+  await drive.permissions.create({
+    fileId: res.data.id,
+    requestBody: {
+      role: 'reader',
+      type: 'anyone',
+    },
+  });
+
+  return res.data;
+}
+
+/**
+ * 캡처폴더 하위의 차수별 서브폴더 찾기/생성
+ * 경로: DRIVE_ROOT / [캡처] 캠페인명 / 차수명(또는 탭명) /
+ */
+async function getOrCreateSubFolder(parentFolderId, subFolderName) {
+  if (!drive) throw new Error('Google Drive API가 설정되지 않았습니다.');
+
+  // 기존 서브폴더 검색
+  const existing = await findFolderByName(subFolderName, parentFolderId);
+  if (existing) return existing;
+
+  // 없으면 생성
+  return await createFolder(subFolderName, parentFolderId);
+}
+
 module.exports = {
   listFolderContents,
   createFolder,
   renameFile,
   moveFile,
   findFolderByName,
+  uploadFileBase64,
+  getOrCreateSubFolder,
 };

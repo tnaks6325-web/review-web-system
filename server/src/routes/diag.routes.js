@@ -4,6 +4,9 @@ const { authMiddleware } = require('../middleware/auth.middleware');
 const pool = require('../db/pool');
 const { readSheet, getSpreadsheetMeta } = require('../services/sheets.service');
 const { getQueueStats, retryItem, retryAllFailed, purgeCompleted } = require('../services/syncQueue.service');
+const { extractOrderFromImage, verifyAddressMatch } = require('../services/gemini.service');
+const driveService = require('../services/drive.service');
+const { logger } = require('../utils/logger');
 
 // ═══════════════════════════════════════════════════════════
 // GET /api/diag/debug-tab — 세부목록 현재 상태 진단 (GAS: debugTabConfig)
@@ -323,36 +326,128 @@ router.get('/inaed-list', async (req, res, next) => {
 });
 
 // ═══════════════════════════════════════════════════════════
-// POST /api/image/extract — 주문이미지 AI 분석 (GAS: extractOrderImage)
+// POST /api/image/extract — 주문이미지 AI 분석 (Gemini Vision)
+// 프론트엔드 기대 응답: { ok, orderNumber, recipient, phone, address, price, orderer, ... }
 // ═══════════════════════════════════════════════════════════
 router.post('/image-extract', async (req, res, next) => {
   try {
     const { imageBase64, mimeType } = req.body;
-    if (!imageBase64) return res.json({ error: '이미지 데이터가 필요합니다.' });
+    if (!imageBase64) return res.json({ ok: false, error: '이미지 데이터가 필요합니다.' });
 
-    // TODO: AI API (OpenAI Vision, Gemini 등) 호출로 이미지 분석
-    // 현재는 스텁 반환
-    res.json({
-      ok: true,
-      message: '이미지 분석 — AI API 연동 필요',
-      extracted: {
-        orderer: '', recipient: '', phone: '', address: '',
-        price: '', orderNum: '', dateStr: ''
-      }
-    });
+    const result = await extractOrderFromImage(imageBase64, mimeType || 'image/jpeg');
+    // result: { ok, orderNumber, recipient, phone, address, price, orderer, productName, orderDate, store, elapsed }
+    res.json(result);
   } catch (err) {
-    next(err);
+    logger.error(`[image-extract] ${err.message}`);
+    res.json({
+      ok: false,
+      error: err.message || '이미지 분석 중 오류가 발생했습니다.',
+      orderNumber: '', recipient: '', phone: '', address: '', price: ''
+    });
   }
 });
 
 // ═══════════════════════════════════════════════════════════
-// POST /api/image/upload — 주문이미지 Drive 업로드 (GAS: uploadOrderImage)
+// POST /api/image/upload — 주문이미지 Drive 업로드 (Google Drive API)
+// 프론트엔드 페이로드: { imageBase64, mimeType, fileName, displayName, tabName, round, sheetId }
 // ═══════════════════════════════════════════════════════════
 router.post('/image-upload', async (req, res, next) => {
   try {
-    res.json({ ok: true, message: '이미지 업로드 — Drive API 연동 필요' });
+    const { imageBase64, mimeType, fileName, displayName, tabName, round, sheetId } = req.body;
+    if (!imageBase64) return res.json({ ok: false, error: '이미지 데이터가 필요합니다.' });
+
+    const rootFolderId = process.env.DRIVE_ROOT_FOLDER_ID;
+    if (!rootFolderId) {
+      logger.warn('[image-upload] DRIVE_ROOT_FOLDER_ID 미설정');
+      return res.json({ ok: false, error: 'Drive 루트 폴더가 설정되지 않았습니다.' });
+    }
+
+    // 1. tab_configs에서 capture_folder_url 조회
+    let targetFolderId = null;
+    if (sheetId && tabName) {
+      const { rows } = await pool.query(
+        'SELECT capture_folder_url FROM tab_configs WHERE sheet_id = $1 AND tab_name = $2 LIMIT 1',
+        [sheetId, tabName]
+      );
+      if (rows[0]?.capture_folder_url) {
+        const m = rows[0].capture_folder_url.match(/\/folders\/([a-zA-Z0-9_-]+)/);
+        if (m) targetFolderId = m[1];
+      }
+    }
+
+    // 2. capture_folder_url 없으면 → 캠페인 폴더 자동 생성
+    if (!targetFolderId) {
+      const folderName = `[캡처] ${displayName || tabName || '기타'}`;
+      const folder = await driveService.findFolderByName(folderName, rootFolderId)
+                  || await driveService.createFolder(folderName, rootFolderId);
+      targetFolderId = folder.id;
+
+      // tab_configs에 캡처폴더 URL 저장
+      if (sheetId && tabName) {
+        const folderUrl = `https://drive.google.com/drive/folders/${folder.id}`;
+        await pool.query(
+          'UPDATE tab_configs SET capture_folder_url = $1, updated_at = NOW() WHERE sheet_id = $2 AND tab_name = $3',
+          [folderUrl, sheetId, tabName]
+        );
+      }
+    }
+
+    // 3. 차수별 서브폴더 (round가 있으면)
+    if (round) {
+      const sub = await driveService.getOrCreateSubFolder(targetFolderId, String(round));
+      targetFolderId = sub.id;
+    }
+
+    // 4. 파일 업로드
+    const finalFileName = fileName || `캡처_${Date.now()}.jpg`;
+    const uploaded = await driveService.uploadFileBase64(
+      imageBase64, finalFileName, mimeType || 'image/jpeg', targetFolderId
+    );
+
+    logger.info(`[image-upload] 업로드 완료: ${uploaded.name} → ${uploaded.id}`);
+
+    res.json({
+      ok: true,
+      fileId: uploaded.id,
+      fileName: uploaded.name,
+      webViewLink: uploaded.webViewLink || '',
+      webContentLink: uploaded.webContentLink || '',
+    });
   } catch (err) {
-    next(err);
+    logger.error(`[image-upload] ${err.message}`);
+    res.json({ ok: false, error: err.message || '이미지 업로드 중 오류가 발생했습니다.' });
+  }
+});
+
+// ═══════════════════════════════════════════════════════════
+// POST /api/image/verify-address — AI 주소 동일인 비교 (Gemini)
+// 프론트엔드 기대 응답: { ok, isSamePerson, confidence, reason }
+// ═══════════════════════════════════════════════════════════
+router.post('/verify-address', async (req, res, next) => {
+  try {
+    const {
+      naverRecipient, naverPhone, naverAddress,
+      coupangRecipient, coupangPhone, coupangAddress
+    } = req.body;
+
+    if (!naverAddress && !coupangAddress) {
+      return res.json({ ok: false, error: '비교할 주소 정보가 필요합니다.' });
+    }
+
+    const naverInfo   = { recipient: naverRecipient || '', phone: naverPhone || '', address: naverAddress || '' };
+    const coupangInfo = { recipient: coupangRecipient || '', phone: coupangPhone || '', address: coupangAddress || '' };
+
+    const result = await verifyAddressMatch(naverInfo, coupangInfo);
+    // result: { ok, isSamePerson, confidence, reason, elapsed }
+    res.json(result);
+  } catch (err) {
+    logger.error(`[verify-address] ${err.message}`);
+    res.json({
+      ok: false,
+      isSamePerson: false,
+      confidence: 0,
+      reason: err.message || 'AI 주소 비교 중 오류',
+    });
   }
 });
 
