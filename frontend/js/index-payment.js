@@ -953,3 +953,296 @@ function clearNotifications() {
   _sseUnread = 0;
   _renderNotifications();
 }
+
+// ═══════════════════════════════════════════════════════════
+// Phase 9: 통계/리포트 대시보드 (Chart.js)
+// ═══════════════════════════════════════════════════════════
+
+var _chartInstances = {};
+
+function _destroyChart(id) {
+  if (_chartInstances[id]) {
+    _chartInstances[id].destroy();
+    delete _chartInstances[id];
+  }
+}
+
+function _createChart(canvasId, config) {
+  _destroyChart(canvasId);
+  var ctx = document.getElementById(canvasId);
+  if (!ctx) return null;
+  _chartInstances[canvasId] = new Chart(ctx, config);
+  return _chartInstances[canvasId];
+}
+
+function _fmtNum(n) {
+  if (n === null || n === undefined) return '-';
+  return Number(n).toLocaleString('ko-KR');
+}
+
+function _fmtWon(n) {
+  if (!n || n === 0) return '₩0';
+  if (n >= 10000) return '₩' + (n / 10000).toFixed(1) + '만';
+  return '₩' + _fmtNum(n);
+}
+
+async function loadStatsOverview() {
+  var token = sessionStorage.getItem('admin_token');
+  if (!token) return;
+  var headers = { 'Authorization': 'Bearer ' + token };
+
+  // 요약 카드 로딩
+  var ids = ['statTotalReviews', 'statSubmitRate', 'statCampaigns', 'statPayments'];
+  ids.forEach(function(id) {
+    var el = document.getElementById(id);
+    if (el) el.innerHTML = '<i class="fas fa-spinner fa-spin" style="font-size:.9rem;color:#9CA3AF"></i>';
+  });
+
+  try {
+    // 병렬로 API 3개 호출
+    var results = await Promise.all([
+      fetch(API_BASE_URL + '/api/diag/stats/overview', { headers: headers }).then(function(r) { return r.json(); }),
+      fetch(API_BASE_URL + '/api/diag/stats/campaigns', { headers: headers }).then(function(r) { return r.json(); }),
+      fetch(API_BASE_URL + '/api/diag/stats/reviewers?limit=10', { headers: headers }).then(function(r) { return r.json(); }),
+      fetch(API_BASE_URL + '/api/diag/stats/payments', { headers: headers }).then(function(r) { return r.json(); }),
+    ]);
+
+    var overviewData = results[0];
+    var campaignData = results[1];
+    var reviewerData = results[2];
+    var paymentData  = results[3];
+
+    // ── 요약 카드 업데이트 ──
+    if (overviewData.ok) {
+      var ov = overviewData.overview;
+      _setText('statTotalReviews', _fmtNum(ov.totalReviews));
+      _setText('statSubmitRate', ov.submitRate + '%');
+      _setText('statCampaigns', _fmtNum(ov.campaigns));
+      _setText('statPayments', _fmtWon(ov.paymentTotal));
+    }
+
+    // ── 일별 활동량 차트 ──
+    if (overviewData.ok && overviewData.dailyActivity) {
+      var da = overviewData.dailyActivity;
+      var labels = da.map(function(d) { return d.date.substring(5); }); // MM-DD
+      _createChart('chartDailyActivity', {
+        type: 'line',
+        data: {
+          labels: labels,
+          datasets: [
+            {
+              label: '리뷰 제출',
+              data: da.map(function(d) { return d.reviews; }),
+              borderColor: '#16A34A',
+              backgroundColor: 'rgba(22,163,74,0.1)',
+              fill: true,
+              tension: 0.3,
+              pointRadius: 3,
+              pointHoverRadius: 5,
+            },
+            {
+              label: '구매양식',
+              data: da.map(function(d) { return d.orders; }),
+              borderColor: '#2563EB',
+              backgroundColor: 'rgba(37,99,235,0.1)',
+              fill: true,
+              tension: 0.3,
+              pointRadius: 3,
+              pointHoverRadius: 5,
+            }
+          ]
+        },
+        options: {
+          responsive: true,
+          maintainAspectRatio: false,
+          plugins: { legend: { position: 'top', labels: { font: { size: 11 } } } },
+          scales: {
+            y: { beginAtZero: true, ticks: { font: { size: 10 } } },
+            x: { ticks: { font: { size: 10 } } }
+          }
+        }
+      });
+    }
+
+    // ── 캠페인 제출률 차트 (TOP 10) ──
+    if (campaignData.ok && campaignData.campaigns) {
+      var top10 = campaignData.campaigns.slice(0, 10);
+      var cLabels = top10.map(function(c) {
+        var name = c.displayName || c.tabName || '';
+        return name.length > 10 ? name.substring(0, 10) + '…' : name;
+      });
+      _createChart('chartCampaignRate', {
+        type: 'bar',
+        data: {
+          labels: cLabels,
+          datasets: [
+            {
+              label: '제출률 (%)',
+              data: top10.map(function(c) { return parseFloat(c.submitRate); }),
+              backgroundColor: top10.map(function(c) {
+                var r = parseFloat(c.submitRate);
+                if (r >= 80) return 'rgba(22,163,74,0.7)';
+                if (r >= 50) return 'rgba(245,158,11,0.7)';
+                return 'rgba(239,68,68,0.7)';
+              }),
+              borderRadius: 4,
+            }
+          ]
+        },
+        options: {
+          responsive: true,
+          maintainAspectRatio: false,
+          plugins: { legend: { display: false } },
+          scales: {
+            y: { beginAtZero: true, max: 100, ticks: { font: { size: 10 }, callback: function(v) { return v + '%'; } } },
+            x: { ticks: { font: { size: 9 }, maxRotation: 45 } }
+          }
+        }
+      });
+
+      // 상세 테이블
+      _renderCampaignTable(campaignData.campaigns, campaignData.totals);
+    }
+
+    // ── 리뷰어 활동량 차트 (TOP 10) ──
+    if (reviewerData.ok && reviewerData.reviewers) {
+      var revs = reviewerData.reviewers;
+      _createChart('chartReviewerActivity', {
+        type: 'bar',
+        data: {
+          labels: revs.map(function(r) { return r.name; }),
+          datasets: [
+            {
+              label: '제출',
+              data: revs.map(function(r) { return r.submittedCount; }),
+              backgroundColor: 'rgba(22,163,74,0.7)',
+              borderRadius: 3,
+            },
+            {
+              label: '미제출',
+              data: revs.map(function(r) { return r.pendingCount; }),
+              backgroundColor: 'rgba(239,68,68,0.5)',
+              borderRadius: 3,
+            },
+          ]
+        },
+        options: {
+          responsive: true,
+          maintainAspectRatio: false,
+          indexAxis: 'y',
+          plugins: { legend: { position: 'top', labels: { font: { size: 10 } } } },
+          scales: {
+            x: { beginAtZero: true, stacked: true, ticks: { font: { size: 10 } } },
+            y: { stacked: true, ticks: { font: { size: 10 } } }
+          }
+        }
+      });
+    }
+
+    // ── 입금 추이 차트 ──
+    if (paymentData.ok && paymentData.daily) {
+      var pd = paymentData.daily;
+      _createChart('chartPaymentTrend', {
+        type: 'bar',
+        data: {
+          labels: pd.map(function(d) { return d.date.substring(5); }),
+          datasets: [
+            {
+              label: '입금 건수',
+              data: pd.map(function(d) { return parseInt(d.count); }),
+              backgroundColor: 'rgba(234,88,12,0.6)',
+              borderRadius: 3,
+              yAxisID: 'y',
+            },
+            {
+              label: '금액 (원)',
+              data: pd.map(function(d) { return parseFloat(d.totalAmount); }),
+              type: 'line',
+              borderColor: '#7C3AED',
+              backgroundColor: 'rgba(124,58,237,0.1)',
+              fill: true,
+              tension: 0.3,
+              pointRadius: 2,
+              yAxisID: 'y1',
+            }
+          ]
+        },
+        options: {
+          responsive: true,
+          maintainAspectRatio: false,
+          plugins: { legend: { position: 'top', labels: { font: { size: 10 } } } },
+          scales: {
+            y:  { beginAtZero: true, position: 'left', ticks: { font: { size: 10 } } },
+            y1: { beginAtZero: true, position: 'right', grid: { drawOnChartArea: false }, ticks: { font: { size: 10 }, callback: function(v) { return _fmtWon(v); } } },
+            x:  { ticks: { font: { size: 9 }, maxRotation: 45 } }
+          }
+        }
+      });
+    }
+
+  } catch (err) {
+    console.error('[Stats] 통계 로드 실패:', err);
+    ids.forEach(function(id) {
+      var el = document.getElementById(id);
+      if (el) el.innerHTML = '<span style="color:#EF4444;font-size:.75rem">오류</span>';
+    });
+  }
+}
+
+function _setText(id, text) {
+  var el = document.getElementById(id);
+  if (el) el.textContent = text;
+}
+
+function _renderCampaignTable(campaigns, totals) {
+  var el = document.getElementById('statsCampaignTable');
+  if (!el) return;
+
+  var html = '<table style="width:100%;border-collapse:collapse">';
+  html += '<thead><tr style="background:#F8FAFC;border-bottom:2px solid var(--border)">';
+  html += '<th style="padding:6px 8px;text-align:left;font-weight:600">캠페인/탭</th>';
+  html += '<th style="padding:6px 8px;text-align:right;font-weight:600">전체</th>';
+  html += '<th style="padding:6px 8px;text-align:right;font-weight:600">제출</th>';
+  html += '<th style="padding:6px 8px;text-align:right;font-weight:600">미제출</th>';
+  html += '<th style="padding:6px 8px;text-align:right;font-weight:600">제출률</th>';
+  html += '<th style="padding:6px 8px;text-align:left;font-weight:600">담당자</th>';
+  html += '<th style="padding:6px 8px;text-align:center;font-weight:600">상태</th>';
+  html += '</tr></thead><tbody>';
+
+  campaigns.forEach(function(c, i) {
+    var rate = parseFloat(c.submitRate);
+    var rateColor = rate >= 80 ? '#16A34A' : (rate >= 50 ? '#F59E0B' : '#EF4444');
+    var statusBadge = c.isClosed ? '<span style="background:#EF4444;color:#fff;padding:1px 6px;border-radius:9px;font-size:.65rem">마감</span>'
+                    : c.forceDone ? '<span style="background:#F59E0B;color:#fff;padding:1px 6px;border-radius:9px;font-size:.65rem">완료</span>'
+                    : '<span style="background:#16A34A;color:#fff;padding:1px 6px;border-radius:9px;font-size:.65rem">진행</span>';
+    var bg = i % 2 === 0 ? '' : 'background:#F8FAFC';
+
+    html += '<tr style="border-bottom:1px solid #F1F5F9;' + bg + '">';
+    html += '<td style="padding:5px 8px;max-width:180px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="' + (c.displayName || c.tabName) + '">' + (c.displayName || c.tabName) + '</td>';
+    html += '<td style="padding:5px 8px;text-align:right">' + _fmtNum(c.totalCount) + '</td>';
+    html += '<td style="padding:5px 8px;text-align:right;color:#16A34A;font-weight:600">' + _fmtNum(c.submittedCount) + '</td>';
+    html += '<td style="padding:5px 8px;text-align:right;color:#EF4444">' + _fmtNum(c.pendingCount) + '</td>';
+    html += '<td style="padding:5px 8px;text-align:right;font-weight:700;color:' + rateColor + '">' + rate + '%</td>';
+    html += '<td style="padding:5px 8px">' + (c.manager || '-') + '</td>';
+    html += '<td style="padding:5px 8px;text-align:center">' + statusBadge + '</td>';
+    html += '</tr>';
+  });
+
+  // 합계
+  if (totals) {
+    var tRate = parseFloat(totals.submitRate);
+    var tColor = tRate >= 80 ? '#16A34A' : (tRate >= 50 ? '#F59E0B' : '#EF4444');
+    html += '<tr style="border-top:2px solid var(--border);font-weight:700;background:#F0F9FF">';
+    html += '<td style="padding:6px 8px">합계 (' + campaigns.length + '개 탭)</td>';
+    html += '<td style="padding:6px 8px;text-align:right">' + _fmtNum(totals.total) + '</td>';
+    html += '<td style="padding:6px 8px;text-align:right;color:#16A34A">' + _fmtNum(totals.submitted) + '</td>';
+    html += '<td style="padding:6px 8px;text-align:right;color:#EF4444">' + _fmtNum(totals.pending) + '</td>';
+    html += '<td style="padding:6px 8px;text-align:right;color:' + tColor + '">' + tRate + '%</td>';
+    html += '<td style="padding:6px 8px">-</td>';
+    html += '<td style="padding:6px 8px;text-align:center">-</td>';
+    html += '</tr>';
+  }
+
+  html += '</tbody></table>';
+  el.innerHTML = html;
+}

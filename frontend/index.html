@@ -15,6 +15,7 @@
   <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@fortawesome/fontawesome-free@6.4.0/css/all.min.css"/>
   <!-- SheetJS (엑셀 생성용) -->
   <script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.7/dist/chart.umd.min.js"></script>
   <!-- Google Fonts -->
   <link href="https://fonts.googleapis.com/css2?family=Noto+Sans+KR:wght@300;400;500;600;700&display=swap" rel="stylesheet"/>
   <link rel="stylesheet" href="css/index.css"/>
@@ -976,6 +977,83 @@
           </div>
         </div>
         <!-- /Phase 6 -->
+
+        <!-- Phase 9: 통계/리포트 대시보드 -->
+        <div style="background:#fff;border-radius:14px;padding:16px 18px;box-shadow:0 1px 4px rgba(0,0,0,.06);margin-bottom:14px">
+          <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:12px">
+            <span style="font-weight:700;font-size:.9rem;color:var(--t1)">
+              <i class="fas fa-chart-pie" style="color:#8B5CF6;margin-right:6px"></i>통계 / 리포트
+            </span>
+            <div style="display:flex;gap:6px;align-items:center">
+              <select id="statsDateRange" onchange="loadStatsOverview()" style="font-size:.72rem;padding:3px 8px;border:1px solid var(--border);border-radius:6px;background:#fff">
+                <option value="7">최근 7일</option>
+                <option value="14">최근 14일</option>
+                <option value="30" selected>최근 30일</option>
+              </select>
+              <button class="btn-sm-refresh" onclick="loadStatsOverview()" title="통계 새로고침">
+                <i class="fas fa-sync-alt"></i>
+              </button>
+            </div>
+          </div>
+
+          <!-- 요약 카드 4개 -->
+          <div id="statsOverviewCards" style="display:grid;grid-template-columns:repeat(4,1fr);gap:10px;margin-bottom:16px">
+            <div style="text-align:center;padding:12px 8px;background:#F0FDF4;border-radius:10px">
+              <div style="font-size:1.4rem;font-weight:800;color:#16A34A" id="statTotalReviews">-</div>
+              <div style="font-size:.7rem;color:#6B7280;margin-top:2px">전체 리뷰</div>
+            </div>
+            <div style="text-align:center;padding:12px 8px;background:#EFF6FF;border-radius:10px">
+              <div style="font-size:1.4rem;font-weight:800;color:#2563EB" id="statSubmitRate">-</div>
+              <div style="font-size:.7rem;color:#6B7280;margin-top:2px">제출률</div>
+            </div>
+            <div style="text-align:center;padding:12px 8px;background:#FDF4FF;border-radius:10px">
+              <div style="font-size:1.4rem;font-weight:800;color:#7C3AED" id="statCampaigns">-</div>
+              <div style="font-size:.7rem;color:#6B7280;margin-top:2px">활성 캠페인</div>
+            </div>
+            <div style="text-align:center;padding:12px 8px;background:#FFF7ED;border-radius:10px">
+              <div style="font-size:1.4rem;font-weight:800;color:#EA580C" id="statPayments">-</div>
+              <div style="font-size:.7rem;color:#6B7280;margin-top:2px">총 입금</div>
+            </div>
+          </div>
+
+          <!-- 차트 2줄 그리드 -->
+          <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-bottom:12px">
+            <!-- 일별 활동량 (Line Chart) -->
+            <div style="background:#FAFAFA;border-radius:10px;padding:12px;border:1px solid var(--border)">
+              <div style="font-size:.78rem;font-weight:600;color:var(--t1);margin-bottom:8px"><i class="fas fa-chart-line" style="color:#06B6D4;margin-right:4px"></i>일별 활동량</div>
+              <div style="position:relative;height:200px"><canvas id="chartDailyActivity"></canvas></div>
+            </div>
+            <!-- 캠페인별 제출률 (Bar Chart) -->
+            <div style="background:#FAFAFA;border-radius:10px;padding:12px;border:1px solid var(--border)">
+              <div style="font-size:.78rem;font-weight:600;color:var(--t1);margin-bottom:8px"><i class="fas fa-chart-bar" style="color:#8B5CF6;margin-right:4px"></i>캠페인 제출률 TOP 10</div>
+              <div style="position:relative;height:200px"><canvas id="chartCampaignRate"></canvas></div>
+            </div>
+          </div>
+
+          <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-bottom:12px">
+            <!-- 리뷰어 TOP 10 (Horizontal Bar) -->
+            <div style="background:#FAFAFA;border-radius:10px;padding:12px;border:1px solid var(--border)">
+              <div style="font-size:.78rem;font-weight:600;color:var(--t1);margin-bottom:8px"><i class="fas fa-users" style="color:#16A34A;margin-right:4px"></i>리뷰어 활동량 TOP 10</div>
+              <div style="position:relative;height:200px"><canvas id="chartReviewerActivity"></canvas></div>
+            </div>
+            <!-- 입금 추이 (Line Chart) -->
+            <div style="background:#FAFAFA;border-radius:10px;padding:12px;border:1px solid var(--border)">
+              <div style="font-size:.78rem;font-weight:600;color:var(--t1);margin-bottom:8px"><i class="fas fa-won-sign" style="color:#EA580C;margin-right:4px"></i>입금 추이 (30일)</div>
+              <div style="position:relative;height:200px"><canvas id="chartPaymentTrend"></canvas></div>
+            </div>
+          </div>
+
+          <!-- 상세 테이블 (캠페인별) -->
+          <details style="margin-top:4px">
+            <summary style="cursor:pointer;font-size:.78rem;font-weight:600;color:var(--t2);padding:6px 0">
+              <i class="fas fa-table" style="margin-right:4px"></i>캠페인별 상세 통계 테이블
+            </summary>
+            <div id="statsCampaignTable" style="margin-top:8px;max-height:300px;overflow-y:auto;font-size:.75rem">
+              <div style="text-align:center;color:var(--t3);padding:20px"><i class="fas fa-spinner fa-spin"></i> 로딩 중...</div>
+            </div>
+          </details>
+        </div>
+        <!-- /Phase 9 -->
 
       </div><!-- /tab-dashboard -->
 

@@ -882,6 +882,260 @@ router.get('/sse-status', authMiddleware, (req, res) => {
   res.json({ ok: true, ...getSSEStatus() });
 });
 
+// ═══════════════════════════════════════════════════════════
+// Phase 9: 통계/리포트 대시보드 API
+// ═══════════════════════════════════════════════════════════
+
+// GET /api/diag/stats/campaigns — 캠페인별 제출률 통계
+router.get('/stats/campaigns', authMiddleware, async (req, res, next) => {
+  try {
+    // 캠페인(탭)별 전체·제출·미제출 집계
+    const { rows } = await pool.query(`
+      SELECT
+        ri.campaign_name AS "campaignName",
+        ri.sheet_id      AS "sheetId",
+        ri.tab_name       AS "tabName",
+        tc.display_name   AS "displayName",
+        tc.manager,
+        tc.review_type    AS "reviewType",
+        tc.is_closed      AS "isClosed",
+        tc.force_done     AS "forceDone",
+        COUNT(*)                              AS "totalCount",
+        COUNT(*) FILTER (WHERE ri.is_submitted)  AS "submittedCount",
+        COUNT(*) FILTER (WHERE NOT ri.is_submitted) AS "pendingCount",
+        CASE WHEN COUNT(*) > 0
+          THEN ROUND(100.0 * COUNT(*) FILTER (WHERE ri.is_submitted) / COUNT(*), 1)
+          ELSE 0 END                          AS "submitRate"
+      FROM review_index ri
+      LEFT JOIN tab_configs tc ON ri.sheet_id = tc.sheet_id AND ri.tab_name = tc.tab_name
+      GROUP BY ri.campaign_name, ri.sheet_id, ri.tab_name,
+               tc.display_name, tc.manager, tc.review_type, tc.is_closed, tc.force_done
+      ORDER BY "submitRate" DESC, "totalCount" DESC
+    `);
+
+    // 전체 요약
+    const totals = rows.reduce((acc, r) => {
+      acc.total += parseInt(r.totalCount);
+      acc.submitted += parseInt(r.submittedCount);
+      acc.pending += parseInt(r.pendingCount);
+      return acc;
+    }, { total: 0, submitted: 0, pending: 0 });
+    totals.submitRate = totals.total > 0
+      ? Math.round(1000 * totals.submitted / totals.total) / 10
+      : 0;
+
+    res.json({ ok: true, campaigns: rows, totals, count: rows.length });
+  } catch (err) {
+    next(err);
+  }
+});
+
+// GET /api/diag/stats/reviewers — 리뷰어 활동량 통계
+router.get('/stats/reviewers', authMiddleware, async (req, res, next) => {
+  try {
+    const limit = parseInt(req.query.limit) || 30;
+
+    // 리뷰어별 총 건수, 제출 건수, 미제출 건수
+    const { rows } = await pool.query(`
+      SELECT
+        ri.reviewer_name          AS "name",
+        COUNT(*)                  AS "totalCount",
+        COUNT(*) FILTER (WHERE ri.is_submitted)    AS "submittedCount",
+        COUNT(*) FILTER (WHERE NOT ri.is_submitted) AS "pendingCount",
+        COUNT(DISTINCT ri.campaign_name)            AS "campaignCount",
+        MAX(ri.built_at)                            AS "lastActivity"
+      FROM review_index ri
+      GROUP BY ri.reviewer_name
+      ORDER BY "totalCount" DESC
+      LIMIT $1
+    `, [limit]);
+
+    // 구매양식 제출 건수 병합
+    const { rows: orderRows } = await pool.query(`
+      SELECT orderer AS "name", COUNT(*) AS "orderCount"
+      FROM order_submissions
+      GROUP BY orderer
+    `);
+    const orderMap = {};
+    orderRows.forEach(r => { orderMap[r.name] = parseInt(r.orderCount); });
+
+    const reviewers = rows.map(r => ({
+      ...r,
+      totalCount: parseInt(r.totalCount),
+      submittedCount: parseInt(r.submittedCount),
+      pendingCount: parseInt(r.pendingCount),
+      campaignCount: parseInt(r.campaignCount),
+      orderCount: orderMap[r.name] || 0,
+    }));
+
+    res.json({ ok: true, reviewers, count: reviewers.length });
+  } catch (err) {
+    next(err);
+  }
+});
+
+// GET /api/diag/stats/payments — 입금 현황 통계
+router.get('/stats/payments', authMiddleware, async (req, res, next) => {
+  try {
+    // 탭별 입금 집계
+    const { rows: byTab } = await pool.query(`
+      SELECT
+        pr.tab_name       AS "tabName",
+        pr.sheet_id       AS "sheetId",
+        tc.campaign_name  AS "campaignName",
+        tc.display_name   AS "displayName",
+        pr.status,
+        COUNT(*)          AS "count",
+        COALESCE(SUM(
+          CASE WHEN pr.amount ~ '^[0-9,.]+$'
+               THEN REPLACE(pr.amount, ',', '')::NUMERIC
+               ELSE 0 END
+        ), 0)             AS "totalAmount"
+      FROM payment_records pr
+      LEFT JOIN tab_configs tc ON pr.sheet_id = tc.sheet_id AND pr.tab_name = tc.tab_name
+      GROUP BY pr.tab_name, pr.sheet_id, tc.campaign_name, tc.display_name, pr.status
+      ORDER BY "totalAmount" DESC
+    `);
+
+    // 일별 입금 추이 (최근 30일)
+    const { rows: daily } = await pool.query(`
+      SELECT
+        TO_CHAR(paid_at, 'YYYY-MM-DD') AS "date",
+        COUNT(*)                        AS "count",
+        COALESCE(SUM(
+          CASE WHEN amount ~ '^[0-9,.]+$'
+               THEN REPLACE(amount, ',', '')::NUMERIC
+               ELSE 0 END
+        ), 0)                           AS "totalAmount"
+      FROM payment_records
+      WHERE paid_at >= NOW() - INTERVAL '30 days'
+      GROUP BY TO_CHAR(paid_at, 'YYYY-MM-DD')
+      ORDER BY "date" ASC
+    `);
+
+    // 전체 요약
+    const { rows: summaryRows } = await pool.query(`
+      SELECT
+        COUNT(*) AS "totalPayments",
+        COUNT(DISTINCT reviewer_name) AS "uniqueReviewers",
+        COALESCE(SUM(
+          CASE WHEN amount ~ '^[0-9,.]+$'
+               THEN REPLACE(amount, ',', '')::NUMERIC
+               ELSE 0 END
+        ), 0) AS "grandTotal"
+      FROM payment_records
+    `);
+    const summary = summaryRows[0] || { totalPayments: 0, uniqueReviewers: 0, grandTotal: 0 };
+
+    res.json({
+      ok: true,
+      byTab,
+      daily,
+      summary: {
+        totalPayments: parseInt(summary.totalPayments),
+        uniqueReviewers: parseInt(summary.uniqueReviewers),
+        grandTotal: parseFloat(summary.grandTotal),
+      },
+    });
+  } catch (err) {
+    next(err);
+  }
+});
+
+// GET /api/diag/stats/overview — 전체 대시보드 요약 (한 번에 로드)
+router.get('/stats/overview', authMiddleware, async (req, res, next) => {
+  try {
+    const [
+      { rows: campaignSummary },
+      { rows: recentSubmits },
+      { rows: recentOrders },
+      { rows: paymentSummary },
+      { rows: dailyActivity },
+    ] = await Promise.all([
+      // 1. 캠페인 요약
+      pool.query(`
+        SELECT
+          COUNT(DISTINCT campaign_name) AS "campaignCount",
+          COUNT(*)                      AS "totalReviews",
+          COUNT(*) FILTER (WHERE is_submitted) AS "submitted",
+          COUNT(*) FILTER (WHERE NOT is_submitted) AS "pending"
+        FROM review_index
+      `),
+      // 2. 최근 리뷰 제출 (7일)
+      pool.query(`
+        SELECT TO_CHAR(built_at, 'YYYY-MM-DD') AS "date", COUNT(*) AS "count"
+        FROM review_index
+        WHERE is_submitted = TRUE AND built_at >= NOW() - INTERVAL '7 days'
+        GROUP BY TO_CHAR(built_at, 'YYYY-MM-DD')
+        ORDER BY "date" ASC
+      `),
+      // 3. 최근 구매양식 제출 (7일)
+      pool.query(`
+        SELECT TO_CHAR(submitted_at, 'YYYY-MM-DD') AS "date", COUNT(*) AS "count"
+        FROM order_submissions
+        WHERE submitted_at >= NOW() - INTERVAL '7 days'
+        GROUP BY TO_CHAR(submitted_at, 'YYYY-MM-DD')
+        ORDER BY "date" ASC
+      `),
+      // 4. 입금 요약
+      pool.query(`
+        SELECT
+          COUNT(*) AS "totalPayments",
+          COALESCE(SUM(
+            CASE WHEN amount ~ '^[0-9,.]+$'
+                 THEN REPLACE(amount, ',', '')::NUMERIC ELSE 0 END
+          ), 0) AS "grandTotal"
+        FROM payment_records
+      `),
+      // 5. 일별 활동량 (7일)
+      pool.query(`
+        SELECT d::DATE AS "date",
+          COALESCE(r.cnt, 0) AS "reviews",
+          COALESCE(o.cnt, 0) AS "orders"
+        FROM generate_series(NOW() - INTERVAL '6 days', NOW(), '1 day') d
+        LEFT JOIN (
+          SELECT DATE(built_at) AS dt, COUNT(*) AS cnt
+          FROM review_index WHERE is_submitted AND built_at >= NOW() - INTERVAL '7 days'
+          GROUP BY DATE(built_at)
+        ) r ON r.dt = d::DATE
+        LEFT JOIN (
+          SELECT DATE(submitted_at) AS dt, COUNT(*) AS cnt
+          FROM order_submissions WHERE submitted_at >= NOW() - INTERVAL '7 days'
+          GROUP BY DATE(submitted_at)
+        ) o ON o.dt = d::DATE
+        ORDER BY d ASC
+      `),
+    ]);
+
+    const cs = campaignSummary[0] || {};
+    const ps = paymentSummary[0] || {};
+
+    res.json({
+      ok: true,
+      overview: {
+        campaigns: parseInt(cs.campaignCount) || 0,
+        totalReviews: parseInt(cs.totalReviews) || 0,
+        submitted: parseInt(cs.submitted) || 0,
+        pending: parseInt(cs.pending) || 0,
+        submitRate: cs.totalReviews > 0
+          ? Math.round(1000 * cs.submitted / cs.totalReviews) / 10
+          : 0,
+        totalPayments: parseInt(ps.totalPayments) || 0,
+        paymentTotal: parseFloat(ps.grandTotal) || 0,
+      },
+      dailyActivity: dailyActivity.map(r => ({
+        date: r.date instanceof Date ? r.date.toISOString().split('T')[0] : String(r.date).split('T')[0],
+        reviews: parseInt(r.reviews),
+        orders: parseInt(r.orders),
+      })),
+      recentSubmits,
+      recentOrders,
+    });
+  } catch (err) {
+    next(err);
+  }
+});
+
 // ── 헬퍼 ──
 function extractSheetId(url) {
   const m = (url || '').match(/\/spreadsheets\/d\/([a-zA-Z0-9_-]+)/);

@@ -918,6 +918,11 @@ function enterAdminScreen() {
 
   loadAdminDashboard();
 
+  // ── Phase 9: 통계 대시보드 자동 로드 ──
+  if (typeof loadStatsOverview === 'function') {
+    setTimeout(loadStatsOverview, 800);
+  }
+
   // ── Phase 8: SSE 실시간 알림 자동 연결 ──
   if (typeof connectSSE === 'function') {
     setTimeout(connectSSE, 500);
@@ -1767,7 +1772,7 @@ function switchAdminTab(tabName) {
   if (tabName === "reviewers") loadReviewerList();
   if (tabName === "recruit")   { loadRecruitList(); loadRecruitTabOptions(); }
   if (tabName === "payment")   initPaymentPanel();
-  if (tabName === "dashboard") { try { loadSystemMonitor(); } catch(_){} }
+  if (tabName === "dashboard") { try { loadSystemMonitor(); } catch(_){} try { loadStatsOverview(); } catch(_){} }
   // ★ 컨텍스트 툴바 업데이트
   _updateContextToolbar(tabName);
 }
