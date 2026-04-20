@@ -24,8 +24,8 @@ async function runMigrations() {
       await pool.query(sql);
       logger.info(`[migrate] ✅ ${file}`);
     } catch (err) {
-      // "already exists" 등은 무시 (IF NOT EXISTS 사용)
-      if (err.message.includes('already exists') || err.message.includes('duplicate')) {
+      // "already exists" 등은 무시 (IF NOT EXISTS / IF EXISTS 사용)
+      if (err.message.includes('already exists') || err.message.includes('duplicate') || err.message.includes('does not exist')) {
         logger.info(`[migrate] ⏭ ${file} (이미 적용됨)`);
       } else {
         logger.warn(`[migrate] ⚠️ ${file}: ${err.message}`);
