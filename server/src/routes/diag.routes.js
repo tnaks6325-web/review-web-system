@@ -326,6 +326,55 @@ router.get('/inaed-list', async (req, res, next) => {
 });
 
 // ═══════════════════════════════════════════════════════════
+// GET /api/image/drive-diag — Drive 공유 드라이브 진단 (임시)
+// ═══════════════════════════════════════════════════════════
+router.get('/drive-diag', async (req, res) => {
+  const results = { rootFolderId: process.env.DRIVE_ROOT_FOLDER_ID || 'NOT SET' };
+  const { drive } = require('../services/sheets.service');
+
+  try {
+    // 1. 루트 폴더 메타데이터 조회
+    const meta = await drive.files.get({
+      fileId: results.rootFolderId,
+      fields: 'id, name, mimeType, driveId, teamDriveId',
+      supportsAllDrives: true,
+    });
+    results.folderMeta = meta.data;
+    results.isSharedDrive = !!(meta.data.driveId || meta.data.teamDriveId);
+
+    // 2. 폴더 생성 테스트
+    try {
+      const testFolder = await driveService.createFolder('_진단테스트_삭제가능', results.rootFolderId);
+      results.createFolder = { ok: true, folderId: testFolder.id };
+      // 생성한 테스트 폴더 삭제
+      await drive.files.delete({ fileId: testFolder.id, supportsAllDrives: true });
+      results.createFolder.deleted = true;
+    } catch (folderErr) {
+      results.createFolder = { ok: false, error: folderErr.message };
+    }
+
+    // 3. 파일 업로드 테스트 (1x1 PNG)
+    try {
+      const uploaded = await driveService.uploadFileBase64(
+        'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg==',
+        '_진단테스트.png', 'image/png', results.rootFolderId
+      );
+      results.uploadFile = { ok: true, fileId: uploaded.id };
+      // 테스트 파일 삭제
+      await drive.files.delete({ fileId: uploaded.id, supportsAllDrives: true });
+      results.uploadFile.deleted = true;
+    } catch (uploadErr) {
+      results.uploadFile = { ok: false, error: uploadErr.message };
+    }
+
+    res.json({ ok: true, ...results });
+  } catch (err) {
+    results.error = err.message;
+    res.json({ ok: false, ...results });
+  }
+});
+
+// ═══════════════════════════════════════════════════════════
 // POST /api/image/extract — 주문이미지 AI 분석 (Gemini Vision)
 // 프론트엔드 기대 응답: { ok, orderNumber, recipient, phone, address, price, orderer, ... }
 // ═══════════════════════════════════════════════════════════
