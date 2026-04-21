@@ -6199,7 +6199,7 @@ async function quickEditCell(e, cell) {
     if (field === '택대') newTcData.taekhap = true;
     else newTcData[fieldKey] = val;
 
-    const resolvedSheetId  = newTcData.sheetId || APP_CONFIG.BASE_SHEET_ID || "";
+    const resolvedSheetId  = newTcData.sheetId || "";
     const rawSheetUrl      = newTcData.sheetUrl || (resolvedSheetId ? "https://docs.google.com/spreadsheets/d/"+resolvedSheetId+"/edit" : "");
     const resolvedSheetUrl = rawSheetUrl.split("#")[0];
 
@@ -6707,8 +6707,8 @@ async function confirmTcSave() {
     return;
   }
 
-  // ② sheetId 폴백: 탭 데이터에 sheetId가 없으면 BASE_SHEET_ID 사용
-  const resolvedSheetId = _tcCurrent.sheetId || APP_CONFIG.BASE_SHEET_ID || "";
+  // ② sheetId: 탭 데이터의 sheetId 사용 (DB가 원본)
+  const resolvedSheetId = _tcCurrent.sheetId || "";
   if (!resolvedSheetId) {
     showToast("❌ sheetId를 특정할 수 없습니다. 인덱스를 먼저 갱신해주세요.", true);
     _tcCurrent = null;
@@ -7272,7 +7272,7 @@ async function debugTabConfig() {
     const lines = [
       `📋 세부목록 탭 존재: ${dl.exists ? "✅ 있음" : "❌ 없음"}`,
       `📊 현재 행 수: ${dl.lastRow || 0}행`,
-      `🆔 BASE_SHEET_ID: ${data.BASE_SHEET_ID || "-"}`,
+      `🆔 DB(tab_configs) 기반 관리 중`,
       `📌 탭 이름: "${data.DETAIL_SHEET_NAME || "세부목록"}"`,
     ];
     if (dl.exists && dl.data && dl.data.length > 0) {
@@ -7325,7 +7325,7 @@ async function testTabConfigSave() {
       `가능한 원인:\n` +
       `1. GAS가 구버전으로 배포됨 → 새 버전으로 재배포 필요\n` +
       `2. GAS URL이 잘못됨 → 설정에서 URL 확인\n` +
-      `3. 스프레드시트 권한 없음 → BASE_SHEET_ID 확인`;
+      `3. 스프레드시트 권한 없음 → 시트 접근 권한 확인`;
   }
 }
 

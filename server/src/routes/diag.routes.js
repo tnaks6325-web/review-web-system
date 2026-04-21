@@ -60,20 +60,25 @@ router.get('/debug-sheet', authMiddleware, async (req, res, next) => {
 });
 
 // ═══════════════════════════════════════════════════════════
-// GET /api/diag/debug-base — 베이스시트 진단 (GAS: debugBaseSheet)
+// GET /api/diag/debug-base — [DEPRECATED] 베이스시트 진단
+// 베이스시트 의존성 제거됨 — DB(tab_configs)가 원본
+// 하위 호환을 위해 엔드포인트는 유지하되, DB 기반 정보 반환
 // ═══════════════════════════════════════════════════════════
 router.get('/debug-base', authMiddleware, async (req, res, next) => {
   try {
-    const baseId = process.env.BASE_SHEET_ID;
-    if (!baseId) return res.json({ error: 'BASE_SHEET_ID 미설정' });
-
-    const meta = await getSpreadsheetMeta(baseId);
-    const tabs = meta.map(s => ({
-      title: s.properties.title,
-      gid: s.properties.sheetId,
-      rowCount: s.properties.gridProperties?.rowCount || 0,
-    }));
-    res.json({ ok: true, baseSheetId: baseId, tabs });
+    const { rows } = await pool.query(
+      `SELECT COUNT(*) AS total,
+              COUNT(*) FILTER (WHERE NOT is_closed AND NOT force_done) AS active,
+              COUNT(*) FILTER (WHERE is_closed) AS closed,
+              COUNT(DISTINCT sheet_id) AS sheets
+       FROM tab_configs`
+    );
+    const s = rows[0] || {};
+    res.json({
+      ok: true,
+      message: '베이스시트 의존성 제거됨 — DB(tab_configs) 기반 정보 반환',
+      stats: { total: +s.total, active: +s.active, closed: +s.closed, sheets: +s.sheets },
+    });
   } catch (err) {
     res.json({ ok: false, error: err.message });
   }

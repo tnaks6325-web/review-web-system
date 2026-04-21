@@ -12,7 +12,7 @@ module.exports = {
         JWT_EXPIRES_IN: '8h',
         MASTER_ADMIN_NAME: 'master',
         MASTER_ADMIN_PW: '931118',
-        BASE_SHEET_ID: '1YW2KgPo-fvwBUS1nuzWTutqE_n2RVAnHPXXYVn4o2i4',
+        // [REMOVED] BASE_SHEET_ID — 베이스시트 의존성 제거 완료 (DB가 원본)
         ALLOWED_ORIGINS: 'http://localhost:3000,http://localhost:5500,http://127.0.0.1:5500,https://review-web-system.pages.dev',
       },
       watch: false,

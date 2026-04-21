@@ -2,7 +2,7 @@ const express = require('express');
 const router = express.Router();
 const pool = require('../db/pool');
 const { authMiddleware } = require('../middleware/auth.middleware');
-const { readSheet } = require('../services/sheets.service');
+// [REMOVED] readSheet — 베이스시트 의존성 제거 완료 (DB가 원본)
 const { logger } = require('../utils/logger');
 
 // POST /api/tab/config — 탭 설정 저장/수정 (GAS: setTabConfig)
@@ -215,167 +215,15 @@ router.get('/stats', authMiddleware, async (req, res, next) => {
 });
 
 // ═══════════════════════════════════════════════════════════
-// POST /api/tab/sync-from-sheet — 세부목록 탭 → DB 일괄 동기화
-// 베이스시트의 '세부목록' 탭을 1회 읽어 tab_configs에 UPSERT
+// POST /api/tab/sync-from-sheet — [DEPRECATED] 베이스시트 의존성 완전 제거됨
+// DB(tab_configs)가 원본 — 이 엔드포인트는 더 이상 사용하지 않음
 // ═══════════════════════════════════════════════════════════
-router.post('/sync-from-sheet', authMiddleware, async (req, res, next) => {
-  try {
-    const baseSheetId = process.env.BASE_SHEET_ID;
-    if (!baseSheetId) return res.json({ ok: false, error: 'BASE_SHEET_ID 환경변수가 설정되지 않았습니다.' });
-
-    const startTime = Date.now();
-
-    // 세부목록 탭 전체 읽기 (1회 API 호출)
-    let values;
-    try {
-      values = await readSheet(baseSheetId, '세부목록');
-    } catch (err) {
-      return res.json({ ok: false, error: `세부목록 탭 읽기 실패: ${err.message}` });
-    }
-
-    if (!values || values.length < 2) {
-      return res.json({ ok: false, error: '세부목록 탭에 데이터가 없습니다.' });
-    }
-
-    // 헤더 파싱 (첫 행)
-    const rawHeaders = values[0].map(h => String(h || '').trim().toLowerCase()
-      .replace(/^[a-z][\.:]\s*/i, '') // "A. sheet_url" → "sheet_url" 정규화
-    );
-
-    // 컬럼 인덱스 매핑
-    const COL_MAP = {
-      sheet_url: rawHeaders.indexOf('sheet_url'),
-      tab_name: rawHeaders.indexOf('tab_name'),
-      campaign_name: rawHeaders.indexOf('campaign_name'),
-      manager: rawHeaders.indexOf('manager'),
-      time_range: rawHeaders.indexOf('time_range'),
-      taekhap: rawHeaders.indexOf('taekhap'),
-      review_type: rawHeaders.indexOf('review_type'),
-      payment_type: rawHeaders.indexOf('payment_type'),
-      display_name: rawHeaders.indexOf('display_name'),
-      force_done: rawHeaders.indexOf('force_done'),
-      is_closed: rawHeaders.indexOf('is_closed'),
-      folder_url: rawHeaders.indexOf('folder_url'),
-      capture_folder_url: rawHeaders.indexOf('capture_folder_url'),
-      is_bulk: rawHeaders.indexOf('is_bulk'),
-      delivery_type: rawHeaders.indexOf('delivery_type'),
-      round: rawHeaders.indexOf('round'),
-      nc_mode: rawHeaders.indexOf('nc_mode'),
-      deposit_name: rawHeaders.indexOf('deposit_name'),
-      transfer_bank: rawHeaders.indexOf('transfer_bank'),
-      income_type: rawHeaders.indexOf('income_type'),
-    };
-
-    if (COL_MAP.sheet_url < 0 || COL_MAP.tab_name < 0) {
-      return res.json({ ok: false, error: `필수 헤더 누락: sheet_url(${COL_MAP.sheet_url}), tab_name(${COL_MAP.tab_name})` });
-    }
-
-    // sheet_url에서 sheetId 추출 헬퍼
-    const extractSheetId = (url) => {
-      if (!url) return null;
-      const m = String(url).match(/\/spreadsheets\/d\/([a-zA-Z0-9_-]+)/);
-      return m ? m[1] : null;
-    };
-
-    const _val = (row, idx) => idx >= 0 && idx < row.length ? String(row[idx] || '').trim() : '';
-    const _bool = (row, idx) => {
-      const v = _val(row, idx).toUpperCase();
-      return v === 'TRUE' || v === '1' || v === 'O';
-    };
-
-    let synced = 0, updated = 0, skipped = 0, errors = 0;
-    const errorDetails = [];
-
-    // 데이터 행 처리
-    for (let i = 1; i < values.length; i++) {
-      const row = values[i];
-      try {
-        const sheetUrl = _val(row, COL_MAP.sheet_url);
-        const sheetId = extractSheetId(sheetUrl);
-        const tabName = _val(row, COL_MAP.tab_name);
-
-        if (!sheetId || !tabName) { skipped++; continue; }
-
-        const result = await pool.query(`
-          INSERT INTO tab_configs (sheet_id, tab_name, sheet_url, campaign_name,
-            manager, time_range, taekhap, review_type, payment_type,
-            display_name, force_done, is_closed, folder_url, capture_folder_url,
-            is_bulk, delivery_type, round, nc_mode, deposit_name, transfer_bank,
-            income_type, updated_at)
-          VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21,NOW())
-          ON CONFLICT (sheet_id, tab_name) DO UPDATE SET
-            sheet_url = COALESCE(NULLIF(EXCLUDED.sheet_url,''), tab_configs.sheet_url),
-            campaign_name = COALESCE(NULLIF(EXCLUDED.campaign_name,''), tab_configs.campaign_name),
-            manager = COALESCE(NULLIF(EXCLUDED.manager,''), tab_configs.manager),
-            time_range = COALESCE(NULLIF(EXCLUDED.time_range,''), tab_configs.time_range),
-            taekhap = EXCLUDED.taekhap,
-            review_type = COALESCE(NULLIF(EXCLUDED.review_type,''), tab_configs.review_type),
-            payment_type = COALESCE(NULLIF(EXCLUDED.payment_type,''), tab_configs.payment_type),
-            display_name = COALESCE(NULLIF(EXCLUDED.display_name,''), tab_configs.display_name),
-            force_done = EXCLUDED.force_done,
-            is_closed = EXCLUDED.is_closed,
-            folder_url = COALESCE(NULLIF(EXCLUDED.folder_url,''), tab_configs.folder_url),
-            capture_folder_url = COALESCE(NULLIF(EXCLUDED.capture_folder_url,''), tab_configs.capture_folder_url),
-            is_bulk = EXCLUDED.is_bulk,
-            delivery_type = COALESCE(NULLIF(EXCLUDED.delivery_type,''), tab_configs.delivery_type),
-            round = COALESCE(NULLIF(EXCLUDED.round,''), tab_configs.round),
-            nc_mode = EXCLUDED.nc_mode,
-            deposit_name = COALESCE(NULLIF(EXCLUDED.deposit_name,''), tab_configs.deposit_name),
-            transfer_bank = COALESCE(NULLIF(EXCLUDED.transfer_bank,''), tab_configs.transfer_bank),
-            income_type = COALESCE(NULLIF(EXCLUDED.income_type,''), tab_configs.income_type),
-            updated_at = NOW()
-        `, [
-          sheetId, tabName, sheetUrl,
-          _val(row, COL_MAP.campaign_name),
-          _val(row, COL_MAP.manager),
-          _val(row, COL_MAP.time_range),
-          _bool(row, COL_MAP.taekhap),
-          _val(row, COL_MAP.review_type),
-          _val(row, COL_MAP.payment_type),
-          _val(row, COL_MAP.display_name),
-          _bool(row, COL_MAP.force_done),
-          _bool(row, COL_MAP.is_closed),
-          _val(row, COL_MAP.folder_url),
-          _val(row, COL_MAP.capture_folder_url),
-          _bool(row, COL_MAP.is_bulk),
-          _val(row, COL_MAP.delivery_type),
-          _val(row, COL_MAP.round),
-          _bool(row, COL_MAP.nc_mode),
-          _val(row, COL_MAP.deposit_name),
-          _val(row, COL_MAP.transfer_bank),
-          _val(row, COL_MAP.income_type),
-        ]);
-
-        synced++;
-      } catch (err) {
-        errors++;
-        if (errorDetails.length < 5) errorDetails.push(`행${i+1}: ${err.message}`);
-      }
-    }
-
-    // 동기화 시각 기록
-    await pool.query(
-      `INSERT INTO app_settings (key, value) VALUES ('last_tab_sync', $1)
-       ON CONFLICT (key) DO UPDATE SET value = $1`,
-      [new Date().toISOString()]
-    );
-
-    const elapsed = ((Date.now() - startTime) / 1000).toFixed(1);
-    logger.info(`[tab-sync] 세부목록 동기화 완료: ${synced}건 처리, ${skipped}건 스킵, ${errors}건 오류, ${elapsed}s`);
-
-    res.json({
-      ok: true,
-      synced,
-      updated,
-      skipped,
-      errors,
-      errorDetails: errorDetails.length > 0 ? errorDetails : undefined,
-      totalRows: values.length - 1,
-      elapsed: `${elapsed}s`,
-    });
-  } catch (err) {
-    next(err);
-  }
+router.post('/sync-from-sheet', authMiddleware, async (req, res) => {
+  res.json({
+    ok: false,
+    deprecated: true,
+    message: '베이스시트 의존성이 제거되었습니다. DB(tab_configs)가 원본이므로 시트 동기화가 필요하지 않습니다. 웹 UI에서 직접 탭을 관리하세요.',
+  });
 });
 
 // ═══════════════════════════════════════════════════════════

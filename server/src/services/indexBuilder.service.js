@@ -163,16 +163,15 @@ async function buildIndexSmart(forceFullRebuild = false) {
       }
     } catch (_) {}
 
-    // ── 1단계: 시트 ID 목록 수집 ──
+    // ── 1단계: 시트 ID 목록 수집 (DB 전용 — 베이스시트 의존 제거) ──
     const { rows: campaignRows } = await pool.query(
       'SELECT DISTINCT sheet_id FROM campaigns UNION SELECT DISTINCT sheet_id FROM tab_configs'
     );
-    const sheetIds = [...new Set([
-      process.env.BASE_SHEET_ID,
-      ...campaignRows.map(r => r.sheet_id)
-    ])].filter(Boolean);
+    const sheetIds = [...new Set(
+      campaignRows.map(r => r.sheet_id)
+    )].filter(Boolean);
 
-    logger.info(`[buildIndex] 시작: ${sheetIds.length}개 시트, forceFullRebuild=${forceFullRebuild}`);
+    logger.info(`[buildIndex] 시작: ${sheetIds.length}개 시트 (DB 기반), forceFullRebuild=${forceFullRebuild}`);
 
     // ── 2단계: DB에서 기존 데이터 로드 (1회 쿼리) ──
     const { rows: masterRows } = await pool.query(
@@ -949,13 +948,13 @@ module.exports = { buildIndexSmart, acquireBuildLock, releaseBuildLock, parseTab
 // ═══════════════════════════════════════════════════════════
 
 async function checkDirtySheets() {
+  // DB에서만 시트 ID 수집 (베이스시트 의존 제거)
   const { rows: campaignRows } = await pool.query(
     'SELECT DISTINCT sheet_id FROM campaigns UNION SELECT DISTINCT sheet_id FROM tab_configs'
   );
-  const sheetIds = [...new Set([
-    process.env.BASE_SHEET_ID,
-    ...campaignRows.map(r => r.sheet_id)
-  ])].filter(Boolean);
+  const sheetIds = [...new Set(
+    campaignRows.map(r => r.sheet_id)
+  )].filter(Boolean);
 
   const dirtySheets = [];
 

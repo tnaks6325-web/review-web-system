@@ -6260,7 +6260,7 @@ async function quickEditCell(e, cell) {
     if (field === '택대') newTcData.taekhap = (val === 'true' || val === true);
     else newTcData[fieldKey] = val;
 
-    const resolvedSheetId  = newTcData.sheetId || APP_CONFIG.BASE_SHEET_ID || "";
+    const resolvedSheetId  = newTcData.sheetId || "";
     const rawSheetUrl      = newTcData.sheetUrl || (resolvedSheetId ? "https://docs.google.com/spreadsheets/d/"+resolvedSheetId+"/edit" : "");
     const resolvedSheetUrl = rawSheetUrl.split("#")[0];
 
@@ -6895,7 +6895,7 @@ async function convertToNcHeaders() {
   const btn = document.getElementById("btnConvertNcHeaders");
   if (!APP_CONFIG.GAS_WEB_APP_URL) { showToast("GAS URL이 설정되지 않았습니다.", "error"); return; }
 
-  const sheetId = _tcCurrent.sheetId || APP_CONFIG.BASE_SHEET_ID || "";
+  const sheetId = _tcCurrent.sheetId || "";
   const tabName = _tcCurrent.tabName || "";
   if (!sheetId || !tabName) { showToast("sheetId 또는 tabName이 없습니다.", "error"); return; }
 
@@ -7048,8 +7048,8 @@ async function confirmTcSave() {
     return;
   }
 
-  // ② sheetId 폴백: 탭 데이터에 sheetId가 없으면 BASE_SHEET_ID 사용
-  const resolvedSheetId = _tcCurrent.sheetId || APP_CONFIG.BASE_SHEET_ID || "";
+  // ② sheetId: 탭 데이터의 sheetId 사용 (DB가 원본)
+  const resolvedSheetId = _tcCurrent.sheetId || "";
   if (!resolvedSheetId) {
     showToast("❌ sheetId를 특정할 수 없습니다. 인덱스를 먼저 갱신해주세요.", true);
     _tcCurrent = null;
@@ -7917,7 +7917,7 @@ async function debugTabConfig() {
     resEl.innerHTML =
       `<b>세부목록 탭(${data.DETAIL_SHEET_NAME || "세부목록"}):</b> <span style="color:${statusColor}">${statusText}</span><br>` +
       `📊 행 수: <b>${dl.lastRow || 0}</b>행 (헤더 포함)<br>` +
-      `🆔 BASE_SHEET_ID: <code style="font-size:.7rem">${data.BASE_SHEET_ID || "-"}</code>` +
+      `🆔 DB(tab_configs) 기반 관리 중` +
       headerHtml +
       (!dl.exists ? `<br><br><b style="color:#EF4444">⚠ 세부목록 탭이 없습니다.<br>→ [저장 동작 테스트] 버튼으로 탭 자동 생성을 시도하세요.</b>` : "") +
       (dl.exists && dl.lastRow <= 1 ? `<br><br><i style="color:#6B7280">ℹ 헤더만 있고 데이터가 없습니다. 탭 설정을 저장하면 데이터가 생성됩니다.</i>` : "");
@@ -7950,7 +7950,7 @@ async function testTabConfigSave() {
       `가능한 원인:\n` +
       `1. GAS가 구버전으로 배포됨 → 새 버전으로 재배포 필요\n` +
       `2. GAS URL이 잘못됨 → 설정에서 URL 확인\n` +
-      `3. 스프레드시트 권한 없음 → BASE_SHEET_ID 확인`;
+      `3. 스프레드시트 권한 없음 → 시트 접근 권한 확인`;
   }
 }
 
@@ -11570,7 +11570,7 @@ async function loadTabDashboard() {
     const syncEl = document.getElementById("tabDashSyncInfo");
     if (syncEl) {
       const t = res.lastSync ? new Date(res.lastSync).toLocaleString("ko-KR") : "없음";
-      syncEl.innerHTML = `<i class="fas fa-clock" style="margin-right:4px"></i>마지막 동기화: <b>${t}</b> &middot; <span style="color:#059669">CRON: 평일 08:30 자동 실행</span>`;
+      syncEl.innerHTML = `<i class="fas fa-database" style="margin-right:4px"></i>데이터 원본: <b>DB(tab_configs)</b> &middot; <span style="color:#059669">인덱스 빌드: 매 정시 자동 실행</span>`;
     }
 
     // ── 담당자 필터 ──
@@ -11888,21 +11888,9 @@ function exportTabDashCSV() {
   showToast(`${filtered.length}건 CSV 다운로드`, "success");
 }
 
-// ── 시트 동기화 ──
+// ── [DEPRECATED] 시트 동기화 — 베이스시트 의존성 제거됨, DB가 원본 ──
 async function syncTabFromSheet() {
-  const btn = document.getElementById("btnSyncFromSheet");
-  if (!confirm("베이스시트 '세부목록' 탭의 데이터를 DB로 일괄 동기화합니다.\n\n시트의 최신 데이터가 DB에 반영됩니다.\n계속하시겠습니까?")) return;
-  if (btn) { btn.disabled = true; btn.innerHTML = '<i class="fas fa-spinner fa-spin"></i> 동기화중...'; }
-  try {
-    const res = await gasPost({ action: "syncTabFromSheet" }, 120000);
-    if (res.error) { showToast(res.error, "error"); return; }
-    showToast(`동기화 완료: ${res.synced}건 처리, ${res.skipped}건 스킵, ${res.errors||0}건 오류 (${res.elapsed})`, "success");
-    loadTabDashboard();
-  } catch (err) {
-    showToast("동기화 오류: " + err.message, "error");
-  } finally {
-    if (btn) { btn.disabled = false; btn.innerHTML = '<i class="fas fa-cloud-download-alt"></i> 시트→DB 동기화'; }
-  }
+  showToast("베이스시트 동기화 기능은 제거되었습니다. DB(tab_configs)가 원본이므로 웹 UI에서 직접 관리하세요.", "info");
 }
 
 // ── 마감탭 인덱스 정리 ──

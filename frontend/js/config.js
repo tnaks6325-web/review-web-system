@@ -12,8 +12,10 @@ const BOOTSTRAP_GAS_URL = typeof API_BASE_URL !== "undefined" ? API_BASE_URL : "
 
 const DEFAULT_CONFIG = {
   GAS_WEB_APP_URL: BOOTSTRAP_GAS_URL,
-  BASE_SHEET_ID: "1YW2KgPo-fvwBUS1nuzWTutqE_n2RVAnHPXXYVn4o2i4",
-  BASE_SHEET_GID: "240447267",
+  // [DEPRECATED] 베이스시트 의존성 제거됨 — DB(tab_configs)가 원본
+  // 하위 호환용으로 값은 유지하되, 신규 코드에서 참조하지 않을 것
+  BASE_SHEET_ID: "",
+  BASE_SHEET_GID: "",
   COL_ALIASES: {
     orderer:    ["주문자", "성함"],
     recipient:  ["수취인", "수취인명"],
