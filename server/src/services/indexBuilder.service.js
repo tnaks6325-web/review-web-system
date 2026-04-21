@@ -546,6 +546,9 @@ function parseTabRows(values, sheetId, tabName, tabGid, campaignTitle) {
     }
   }
   if (headerRowIdx < 0) return [];
+  if (headerRowIdx >= 20) {
+    logger.info(`[parseTabRows] 깊은 헤더 발견 — tab=${tabName} row=${headerRowIdx}`);
+  }
 
   const headers = values[headerRowIdx].map(h => String(h || '').trim());
   const dataRows = values.slice(headerRowIdx + 1);
@@ -553,7 +556,10 @@ function parseTabRows(values, sheetId, tabName, tabGid, campaignTitle) {
   const nameColIdx = headers.findIndex(h =>
     NAME_KEYWORDS.some(k => h.includes(k))
   );
-  if (nameColIdx < 0) return [];
+  if (nameColIdx < 0) {
+    logger.warn(`[parseTabRows] 이름 컬럼 미발견 — tab=${tabName} headerRow=${headerRowIdx} headers=${JSON.stringify(headers.slice(0, 20))} NAME_KEYWORDS=${JSON.stringify(NAME_KEYWORDS)}`);
+    return [];
+  }
 
   const submitKeywords = SUBMIT_KEYWORDS;
   const submitColIdx = headers.findIndex(h =>
