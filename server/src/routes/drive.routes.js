@@ -130,12 +130,24 @@ router.post('/sync-review', authMiddleware, async (req, res, next) => {
 router.post('/sync-all', authMiddleware, async (req, res, next) => {
   try {
     const { force } = req.body;
+    const startTime = Date.now();
     const captureResult = await syncCaptureFoldersInternal(force);
     const reviewResult = await syncReviewFoldersInternal(force);
+    const elapsed = Math.round((Date.now() - startTime) / 1000);
     res.json({
       ok: true,
-      capture: captureResult,
-      review: reviewResult,
+      capture: {
+        updated: captureResult.created || 0,
+        skipped: captureResult.synced || 0,
+        errors: captureResult.errors || 0,
+      },
+      review: {
+        updated: reviewResult.created || 0,
+        skipped: reviewResult.synced || 0,
+        notFound: 0,
+        errors: reviewResult.errors || 0,
+      },
+      elapsed,
     });
   } catch (err) {
     next(err);
@@ -158,39 +170,53 @@ router.post('/batch-create', authMiddleware, async (req, res, next) => {
          AND (is_closed = FALSE OR is_closed IS NULL)`
     );
 
-    let created = 0, errors = 0;
+    const startTime = Date.now();
+    const capture = { created: 0, exists: 0, skipped: 0 };
+    const review  = { created: 0, exists: 0, skipped: 0 };
+    const errorList = [];
 
     for (const tab of tabs) {
       try {
-        if ((!target || target === 'both' || target === 'capture') && !tab.capture_folder_url) {
-          const folderName = `[캡처] ${tab.campaign_name || tab.tab_name}`;
-          const folder = await driveService.createFolder(folderName, rootFolderId);
-          if (folder) {
-            await pool.query(
-              'UPDATE tab_configs SET capture_folder_url = $1, updated_at = NOW() WHERE sheet_id = $2 AND tab_name = $3',
-              [`https://drive.google.com/drive/folders/${folder.id}`, tab.sheet_id, tab.tab_name]
-            );
-            created++;
+        // 캡처폴더
+        if ((!target || target === 'both' || target === 'capture')) {
+          if (tab.capture_folder_url) {
+            capture.exists++;
+          } else {
+            const folderName = `[캡처] ${tab.campaign_name || tab.tab_name}`;
+            const folder = await driveService.createFolder(folderName, rootFolderId);
+            if (folder) {
+              await pool.query(
+                'UPDATE tab_configs SET capture_folder_url = $1, updated_at = NOW() WHERE sheet_id = $2 AND tab_name = $3',
+                [`https://drive.google.com/drive/folders/${folder.id}`, tab.sheet_id, tab.tab_name]
+              );
+              capture.created++;
+            }
           }
         }
-        if ((!target || target === 'both' || target === 'review') && !tab.folder_url) {
-          const folderName = `[리뷰] ${tab.campaign_name || tab.tab_name}`;
-          const folder = await driveService.createFolder(folderName, rootFolderId);
-          if (folder) {
-            await pool.query(
-              'UPDATE tab_configs SET folder_url = $1, updated_at = NOW() WHERE sheet_id = $2 AND tab_name = $3',
-              [`https://drive.google.com/drive/folders/${folder.id}`, tab.sheet_id, tab.tab_name]
-            );
-            created++;
+        // 리뷰폴더
+        if ((!target || target === 'both' || target === 'review')) {
+          if (tab.folder_url) {
+            review.exists++;
+          } else {
+            const folderName = `[리뷰] ${tab.campaign_name || tab.tab_name}`;
+            const folder = await driveService.createFolder(folderName, rootFolderId);
+            if (folder) {
+              await pool.query(
+                'UPDATE tab_configs SET folder_url = $1, updated_at = NOW() WHERE sheet_id = $2 AND tab_name = $3',
+                [`https://drive.google.com/drive/folders/${folder.id}`, tab.sheet_id, tab.tab_name]
+              );
+              review.created++;
+            }
           }
         }
       } catch (err) {
         logger.error(`[batchCreate] 오류 (${tab.tab_name}): ${err.message}`);
-        errors++;
+        errorList.push(`${tab.tab_name}: ${err.message}`);
       }
     }
 
-    res.json({ ok: true, created, errors, total: tabs.length });
+    const elapsed = Math.round((Date.now() - startTime) / 1000);
+    res.json({ ok: true, capture, review, errors: errorList, elapsed, total: tabs.length });
   } catch (err) {
     next(err);
   }
@@ -278,6 +304,7 @@ router.post('/migrate-names', authMiddleware, async (req, res, next) => {
 router.post('/organize-capture', authMiddleware, async (req, res, next) => {
   try {
     const { dryRun } = req.body;
+    const isDryRun = dryRun === true || dryRun === 'true';
     const rootFolderId = process.env.DRIVE_ROOT_FOLDER_ID;
     if (!rootFolderId) return res.json({ error: 'DRIVE_ROOT_FOLDER_ID 미설정' });
 
@@ -288,8 +315,8 @@ router.post('/organize-capture', authMiddleware, async (req, res, next) => {
        WHERE capture_folder_url IS NOT NULL AND capture_folder_url <> ''`
     );
 
-    let moved = 0, errors = 0, skipped = 0;
-    const actions = [];
+    const moved = [], skipped = [], errors = [];
+    const startTime = Date.now();
 
     // 루트 폴더 내 폴더 목록 조회 (1회)
     let rootChildren = [];
@@ -303,26 +330,26 @@ router.post('/organize-capture', authMiddleware, async (req, res, next) => {
     for (const tab of tabs) {
       try {
         const folderId = extractFolderId(tab.capture_folder_url);
-        if (!folderId) { skipped++; continue; }
+        if (!folderId) { skipped.push({ folder: tab.tab_name, reason: 'URL 파싱 실패' }); continue; }
 
         if (rootChildIds.has(folderId)) {
-          skipped++;
-          continue; // 이미 루트 폴더 내에 있음
+          skipped.push({ folder: tab.tab_name, reason: '이미 루트 폴더 내' });
+          continue;
         }
 
         // 루트 폴더로 이동
-        if (!dryRun) {
+        if (!isDryRun) {
           await driveService.moveFile(folderId, rootFolderId, null);
         }
-        actions.push({ tabName: tab.tab_name, folderId, action: 'moved_to_root' });
-        moved++;
+        moved.push({ folder: tab.tab_name, folderId, campFolder: tab.campaign_name || tab.tab_name });
       } catch (err) {
         logger.error(`[organizeCapture] 오류 (${tab.tab_name}): ${err.message}`);
-        errors++;
+        errors.push({ folder: tab.tab_name, message: err.message });
       }
     }
 
-    res.json({ ok: true, moved, skipped, errors, dryRun: !!dryRun, actions });
+    const elapsed = Math.round((Date.now() - startTime) / 1000);
+    res.json({ ok: true, moved, created: [], skipped, errors, dryRun: isDryRun, elapsed });
   } catch (err) {
     next(err);
   }

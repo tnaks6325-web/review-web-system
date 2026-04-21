@@ -357,30 +357,6 @@
         <div id="batchFolderResult" style="display:none;font-size:.71rem;margin-top:2px"></div>
       </div>
 
-      <!-- ★ v10.3: 세부목록 캠페인명 자동 채우기 -->
-      <div style="margin-top:8px;border-top:1px solid #E5E7EB;padding-top:8px;display:flex;flex-direction:column;gap:4px">
-        <div style="font-size:.78rem;font-weight:700;color:#374151;margin-bottom:2px">
-          <i class="fas fa-tag"></i> 세부목록 캠페인명 자동 채우기
-          <span style="font-size:.67rem;font-weight:400;color:#6B7280"> (campaign_name 열 자동 생성 포함)</span>
-        </div>
-        <div style="font-size:.68rem;color:#6B7280;line-height:1.5;margin-bottom:3px">
-          세부목록의 <b>campaign_name 열</b>이 없으면 자동 생성하고,<br>
-          작업목록 또는 Sheets API로 캠페인명을 <b>빈 셀에만</b> 자동으로 채웁니다.
-        </div>
-        <div style="display:flex;gap:4px">
-          <button id="btnMigrateCampaignNames" onclick="migrateCampaignNames(false)"
-            style="flex:2;padding:8px 6px;background:#F0FDF4;color:#166534;border:1px solid #BBF7D0;border-radius:6px;font-size:.75rem;font-weight:600;cursor:pointer;display:flex;align-items:center;justify-content:center;gap:5px">
-            <i class="fas fa-magic"></i> 빈 셀 자동 채우기
-          </button>
-          <button id="btnMigrateCampaignNamesOverwrite" onclick="migrateCampaignNames(true)"
-            style="flex:1;padding:8px 6px;background:#FFF7ED;color:#92400E;border:1px solid #FED7AA;border-radius:6px;font-size:.75rem;font-weight:600;cursor:pointer;display:flex;align-items:center;justify-content:center;gap:5px"
-            title="이미 값이 있는 셀도 덮어씁니다">
-            <i class="fas fa-redo"></i> 전체 덮어쓰기
-          </button>
-        </div>
-        <div id="migrateCampaignNamesResult" style="display:none;font-size:.71rem;margin-top:3px;padding:6px 8px;border-radius:6px;line-height:1.6"></div>
-      </div>
-
       <!-- ★ 캡처폴더 구조 재편성 (단층 → 캠페인폴더 하위) -->
       <div style="margin-top:6px;border-top:1px solid #E5E7EB;padding-top:6px;display:flex;flex-direction:column;gap:4px">
         <div style="font-size:.78rem;font-weight:700;color:#374151;margin-bottom:2px">

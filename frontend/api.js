@@ -51,6 +51,7 @@ const _ACTION_MAP = {
   'buildIndexWithChecksum': { method: 'POST', path: '/api/index/build' },
   'indexStatus':            { method: 'GET',  path: '/api/index/status' },
   'getIndexMasterStatus':   { method: 'GET',  path: '/api/index/status' },
+  'buildIndexByCampaign':   { method: 'POST', path: '/api/index/build-sheet' },
 
   // 탭 설정 (Section 6)
   'setTabConfig':     { method: 'POST', path: '/api/tab/config' },
@@ -250,7 +251,7 @@ async function gasGet(params, timeout) {
 // 기존 호출: gasPost({ action: "setTabConfig", sheetId: "...", tabName: "..." })
 // 변환 후:   POST /api/tab/config { sheetId, tabName, ... }
 // ═══════════════════════════════════════════════════════════
-async function gasPost(body) {
+async function gasPost(body, timeout) {
   const action = body.action || '';
   const route = _ACTION_MAP[action];
 
@@ -263,10 +264,11 @@ async function gasPost(body) {
   const { action: _, ...payload } = body;
 
   const url = API_BASE_URL + route.path;
+  const timeoutMs = timeout || 60000;
 
   try {
     const controller = new AbortController();
-    const timer = setTimeout(() => controller.abort(), 60000);
+    const timer = setTimeout(() => controller.abort(), timeoutMs);
 
     const res = await fetch(url, {
       method: 'POST',

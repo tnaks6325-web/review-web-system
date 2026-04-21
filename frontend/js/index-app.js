@@ -7430,76 +7430,6 @@ async function cleanOrphanRows() {
   }
 }
 
-/**
- * ★ v10.3: 세부목록 campaign_name 열 자동 생성 + 일괄 채우기
- * @param {boolean} overwrite - true이면 기존 값도 덮어쓰기
- */
-async function migrateCampaignNames(overwrite) {
-  const resultEl = document.getElementById("migrateCampaignNamesResult");
-  const btn1 = document.getElementById("btnMigrateCampaignNames");
-  const btn2 = document.getElementById("btnMigrateCampaignNamesOverwrite");
-
-  const confirmMsg = overwrite
-    ? "⚠ 이미 입력된 캠페인명도 모두 덮어씁니다.\n계속하시겠습니까?"
-    : "세부목록의 빈 campaign_name 셀을 자동으로 채웁니다.\n(이미 값이 있는 셀은 유지됩니다)\n계속하시겠습니까?";
-  if (!confirm(confirmMsg)) return;
-
-  // 버튼 비활성화 + 로딩
-  [btn1, btn2].forEach(b => { if (b) { b.disabled = true; } });
-  if (resultEl) {
-    resultEl.style.display = "block";
-    resultEl.style.background = "#F0F9FF";
-    resultEl.style.border = "1px solid #BAE6FD";
-    resultEl.style.color = "#0369A1";
-    resultEl.innerHTML = '<i class="fas fa-spinner fa-spin"></i> 캠페인명 채우는 중... (잠시 기다려주세요)';
-  }
-
-  try {
-    const data = await gasGet({ action: "migrateCampaignNames", overwrite }, 60000);
-
-    if (data.ok) {
-      const colInfo = data.colIndex ? ` (${data.colIndex}번째 열)` : "";
-      const apiInfo = data.apiFetched > 0 ? `<br>• Sheets API 조회: ${data.apiFetched}회 (작업목록에 없는 캠페인)` : "";
-
-      if (resultEl) {
-        resultEl.style.background = "#F0FDF4";
-        resultEl.style.border = "1px solid #BBF7D0";
-        resultEl.style.color = "#166534";
-        resultEl.innerHTML =
-          `<b><i class="fas fa-check-circle"></i> 완료${colInfo}</b><br>` +
-          `• 채운 셀: <b>${data.filled}개</b>${apiInfo}<br>` +
-          `• 건너뜀(이미 있거나 URL 없음): ${data.skipped}개`;
-      }
-
-      if (data.filled > 0) {
-        showToast(`✅ 캠페인명 ${data.filled}개 셀 자동 채우기 완료!`, "success");
-      } else {
-        showToast("ℹ 채울 빈 셀이 없습니다. (모두 이미 입력됨)", "info");
-      }
-
-    } else {
-      const errMsg = data.error || "알 수 없는 오류";
-      if (resultEl) {
-        resultEl.style.background = "#FFF1F2";
-        resultEl.style.border = "1px solid #FECDD3";
-        resultEl.style.color = "#9F1239";
-        resultEl.innerHTML = `<b><i class="fas fa-exclamation-circle"></i> 오류</b><br>${escHtml(errMsg)}`;
-      }
-      showToast("❌ 캠페인명 채우기 실패: " + errMsg, "error");
-    }
-  } catch (e) {
-    if (resultEl) {
-      resultEl.style.background = "#FFF1F2";
-      resultEl.style.border = "1px solid #FECDD3";
-      resultEl.style.color = "#9F1239";
-      resultEl.innerHTML = `<b><i class="fas fa-exclamation-circle"></i> 요청 실패</b><br>${escHtml(e.message)}`;
-    }
-    showToast("❌ 요청 실패: " + e.message, "error");
-  } finally {
-    [btn1, btn2].forEach(b => { if (b) b.disabled = false; });
-  }
-}
-
 async function loadIndexStatus() {
   const builtAt = document.getElementById("indexBuiltAt");
   const count   = document.getElementById("indexCount");
@@ -7637,7 +7567,6 @@ function stopBuildProgress() {
 }
 
 async function debugBaseSheet() {
-  if (!APP_CONFIG.GAS_WEB_APP_URL) { showToast("GAS URL을 먼저 저장해주세요.", "warning"); return; }
   const btn = document.getElementById("btnDebugBase");
   const resEl = document.getElementById("debugBaseResult");
   btn.disabled = true;
@@ -7674,7 +7603,6 @@ async function debugBaseSheet() {
 }
 
 async function debugBuildStep(step) {
-  if (!APP_CONFIG.GAS_WEB_APP_URL) { showToast("GAS URL을 먼저 저장해주세요.", "warning"); return; }
   const resEl = document.getElementById("debugBaseResult");
   show(resEl);
   resEl.innerHTML = `<i class="fas fa-spinner fa-spin"></i> Step ${step} 진단 중...`;
@@ -7741,7 +7669,6 @@ function onDebugSheetDiagClick() {
 
 /** ─── 특정 시트 개별 진단 (mode: 'tab' | 'full') ─── */
 async function debugSingleSheet(mode) {
-  if (!APP_CONFIG.GAS_WEB_APP_URL) { showToast("GAS URL을 먼저 저장해주세요.", "warning"); return; }
 
   const raw   = (document.getElementById("debugSheetIdInput").value || "").trim();
   const resEl = document.getElementById("debugSingleResult");
@@ -7928,7 +7855,6 @@ function _simplifySkipReason(reason) {
 
 /** ─── 세부목록(탭설정) 진단 함수들 ─── */
 async function debugTabConfig() {
-  if (!APP_CONFIG.GAS_WEB_APP_URL) { showToast("GAS URL을 먼저 저장해주세요.", "warning"); return; }
   const resEl = document.getElementById("debugTabConfigResult");
   show(resEl);
   resEl.innerHTML = "⏳ 세부목록 현황 조회 중...";
@@ -8002,7 +7928,6 @@ async function debugTabConfig() {
 }
 
 async function testTabConfigSave() {
-  if (!APP_CONFIG.GAS_WEB_APP_URL) { showToast("GAS URL을 먼저 저장해주세요.", "warning"); return; }
   const resEl = document.getElementById("debugTabConfigResult");
   show(resEl);
   resEl.textContent = "⏳ 테스트 저장 중... (베이스시트 세부목록에 테스트 행 추가)";
@@ -8031,7 +7956,6 @@ async function testTabConfigSave() {
 
 // ── 탭 파싱 진단 ────────────────────────────────────────────────
 async function runSheetDiag() {
-  if (!APP_CONFIG.GAS_WEB_APP_URL) { showToast("GAS URL을 먼저 저장해주세요.", "warning"); return; }
   const urlInput = document.getElementById("diagSheetUrl");
   const resultEl = document.getElementById("diagResult");
   const rawUrl   = (urlInput?.value || "").trim();
@@ -8105,172 +8029,98 @@ async function diagCaptureFolders() {
   const resEl = document.getElementById("diagCaptureResult");
   if (btn) btn.disabled = true;
   resEl.style.display = "block";
-  resEl.innerHTML = `<span style="color:#6B7280"><i class="fas fa-spinner fa-spin"></i> 드라이브 폴더 스캔 중...</span>`;
+  resEl.innerHTML = `<span style="color:#6B7280"><i class="fas fa-spinner fa-spin"></i> 폴더 현황 조회 중...</span>`;
 
   try {
     const data = await gasGet({ action: "diagCaptureFolders" });
     if (!data || data.error) {
-      resEl.innerHTML = `<span style="color:#EF4444">❌ 오류: ${escHtml(data?.error || "응답 없음")}</span>`;
+      resEl.innerHTML = `<span style="color:#EF4444">&cross; 오류: ${escHtml(data?.error || "응답 없음")}</span>`;
       return;
     }
 
-    const mapping    = data.mapping     || [];
-    const detail     = data.detailSample || [];
-    const campList   = data.campaignList  || [];
+    const details = data.details || [];
+    const total   = data.total || details.length;
+    const noFolder  = data.noFolderUrl  || 0;
+    const noCapture = data.noCaptureFolderUrl || 0;
+    const oauth     = data.oauthStatus || "unknown";
 
-    // ── 헤더 요약 ──
-    const moveCount    = data.moveCount    ?? mapping.filter(m => m.status.includes("이동 가능")).length;
-    const failCount    = data.failCount    ?? mapping.filter(m => m.status.includes("⚠")).length;
-    const strippedCount = data.strippedCount ?? mapping.filter(m => m.usedStripped).length;
-    let html = `<div style="padding:5px 7px;background:#EFF6FF;border:1px solid #BFDBFE;border-radius:5px;margin-bottom:6px;font-size:.72rem">
-      <b style="color:#1D4ED8">📊 진단 결과</b>
-      &nbsp;·&nbsp; 드라이브 폴더 <b>${data.driveFolders}개</b>
-      &nbsp;·&nbsp; 이동 가능 <b style="color:#166534">${moveCount}개</b>
-      ${strippedCount > 0 ? `&nbsp;·&nbsp; 날짜제거 매핑 <b style="color:#0369A1">${strippedCount}개</b>` : ""}
-      ${failCount > 0 ? `&nbsp;·&nbsp; 매핑 실패 <b style="color:#BE123C">${failCount}개</b>` : ""}
-      &nbsp;·&nbsp; 캠페인 <b>${data.campaignCount || campList.length}개</b>
-      &nbsp;·&nbsp; 세부목록 <b>${data.detailRows}행</b>
+    // 활성/마감 분류
+    const active = details.filter(d => !d.forceDone && !d.isClosed);
+    const activeNoCapture = active.filter(d => !d.captureFolderUrl);
+    const activeNoFolder  = active.filter(d => !d.folderUrl);
+
+    let html = `<div style="padding:6px 8px;background:#EFF6FF;border:1px solid #BFDBFE;border-radius:6px;margin-bottom:6px;font-size:.72rem">
+      <b style="color:#1D4ED8"><i class="fas fa-chart-pie"></i> 진단 결과</b>
+      &nbsp;&middot;&nbsp; 전체 탭 <b>${total}개</b>
+      &nbsp;&middot;&nbsp; 활성 탭 <b>${active.length}개</b>
+      &nbsp;&middot;&nbsp; OAuth <b style="color:${oauth==='ok'?'#166534':'#B45309'}">${oauth}</b>
     </div>`;
 
-    // ── 베이스시트 캠페인 목록 (캠페인폴더명 기준) ──
-    if (campList.length > 0) {
-      html += `<details style="margin-bottom:5px"><summary style="font-size:.7rem;color:#6B7280;cursor:pointer;font-weight:600">📋 베이스시트 캠페인명 목록 (폴더 생성 기준)</summary>
-        <div style="padding:4px 6px;font-size:.67rem;color:#374151;line-height:1.8">
-          ${campList.map(c => `<span style="display:inline-block;background:#EFF6FF;border:1px solid #BFDBFE;border-radius:4px;padding:1px 6px;margin:1px">${escHtml(c)}</span>`).join("")}
-        </div>
-      </details>`;
+    // 요약 카드
+    html += `<div style="display:flex;gap:6px;margin-bottom:6px;font-size:.70rem">
+      <div style="flex:1;padding:5px 8px;background:${activeNoCapture.length?'#FFF7ED':'#F0FDF4'};border:1px solid ${activeNoCapture.length?'#FED7AA':'#BBF7D0'};border-radius:6px">
+        <b>캡처폴더 미설정</b><br>활성 탭 중 <b style="color:${activeNoCapture.length?'#B45309':'#166534'}">${activeNoCapture.length}개</b>
+      </div>
+      <div style="flex:1;padding:5px 8px;background:${activeNoFolder.length?'#FFF7ED':'#F0FDF4'};border:1px solid ${activeNoFolder.length?'#FED7AA':'#BBF7D0'};border-radius:6px">
+        <b>리뷰폴더 미설정</b><br>활성 탭 중 <b style="color:${activeNoFolder.length?'#B45309':'#166534'}">${activeNoFolder.length}개</b>
+      </div>
+    </div>`;
+
+    // 미설정 탭 목록 (활성 중)
+    if (activeNoCapture.length > 0 || activeNoFolder.length > 0) {
+      const missingTabs = active.filter(d => !d.captureFolderUrl || !d.folderUrl);
+      html += `<details style="margin-bottom:6px"><summary style="font-size:.70rem;color:#92400E;cursor:pointer;font-weight:600">
+        <i class="fas fa-exclamation-triangle"></i> 미설정 탭 ${missingTabs.length}개 (클릭해서 보기)
+      </summary>
+      <table style="width:100%;border-collapse:collapse;font-size:.67rem;margin-top:3px">
+        <tr style="background:#F3F4F6">
+          <th style="padding:3px 5px;border:1px solid #E5E7EB;text-align:left">탭명</th>
+          <th style="padding:3px 5px;border:1px solid #E5E7EB;text-align:left">캠페인</th>
+          <th style="padding:3px 5px;border:1px solid #E5E7EB;text-align:center">캡처</th>
+          <th style="padding:3px 5px;border:1px solid #E5E7EB;text-align:center">리뷰</th>
+        </tr>
+        ${missingTabs.map(d => `<tr>
+          <td style="padding:2px 5px;border:1px solid #E5E7EB;font-family:monospace">${escHtml(d.tabName)}</td>
+          <td style="padding:2px 5px;border:1px solid #E5E7EB">${escHtml(d.campaignName||"-")}</td>
+          <td style="padding:2px 5px;border:1px solid #E5E7EB;text-align:center">${d.captureFolderUrl?"&check;":"<span style='color:#EF4444'>&cross;</span>"}</td>
+          <td style="padding:2px 5px;border:1px solid #E5E7EB;text-align:center">${d.folderUrl?"&check;":"<span style='color:#EF4444'>&cross;</span>"}</td>
+        </tr>`).join("")}
+      </table></details>`;
     }
 
-    // ── 드라이브 폴더 vs 매핑 결과 테이블 ──
-    html += `<div style="font-weight:700;color:#374151;margin-bottom:3px;font-size:.72rem">📂 드라이브 실제 폴더 목록 & 매핑 결과</div>`;
-    html += `<table style="width:100%;border-collapse:collapse;font-size:.68rem">
+    // 전체 탭 목록
+    html += `<details><summary style="font-size:.70rem;color:#6B7280;cursor:pointer;font-weight:600">
+      <i class="fas fa-list"></i> 전체 탭 목록 (${total}개)
+    </summary>
+    <table style="width:100%;border-collapse:collapse;font-size:.66rem;margin-top:3px">
       <tr style="background:#F3F4F6">
-        <th style="padding:3px 5px;border:1px solid #E5E7EB;text-align:left">드라이브 폴더명</th>
-        <th style="padding:3px 5px;border:1px solid #E5E7EB;text-align:left">하위폴더</th>
-        <th style="padding:3px 5px;border:1px solid #E5E7EB;text-align:left">매핑 결과</th>
-      </tr>`;
-
-    mapping.forEach(m => {
-      const isOk      = m.status.includes("이동 가능");
-      const isFail    = m.status.includes("⚠");
-      const isCamp    = m.status.includes("캠페인폴더(상위)");
-      const rowColor    = isOk ? (m.usedStripped ? "#EFF6FF" : "#F0FDF4") : isFail ? "#FFF1F2" : "#F9FAFB";
-      const statusColor = isOk ? (m.usedStripped ? "#1D4ED8" : "#166534") : isFail ? "#BE123C" : "#6B7280";
-      const folderLabel = m.usedStripped
-        ? `${escHtml(m.driveFolderName)} <span style="font-size:.63rem;color:#0369A1;background:#DBEAFE;padding:1px 4px;border-radius:3px">🗓날짜제거</span>`
-        : escHtml(m.driveFolderName);
-      const childTxt = m.hasChildren
-        ? `<span style="color:#0369A1">${m.children.length}개: ${escHtml(m.children.slice(0,3).join(", "))}${m.children.length>3?"…":""}</span>`
-        : `<span style="color:#9CA3AF">없음(단층)</span>`;
-      html += `<tr style="background:${rowColor}">
-        <td style="padding:3px 5px;border:1px solid #E5E7EB;font-weight:600;color:#1F2937">${folderLabel}</td>
-        <td style="padding:3px 5px;border:1px solid #E5E7EB">${childTxt}</td>
-        <td style="padding:3px 5px;border:1px solid #E5E7EB;color:${statusColor}">${escHtml(m.status)}</td>
-      </tr>`;
-    });
-    html += `</table>`;
-
-    // ── 날짜제거 매핑 성공 항목 안내 ──
-    const strippedItems = mapping.filter(m => m.usedStripped);
-    if (strippedItems.length > 0) {
-      html += `<div style="margin-top:6px;padding:5px 8px;background:#EFF6FF;border:1px solid #BFDBFE;border-radius:5px;font-size:.69rem;color:#1D4ED8">
-        <b>🗓 날짜 접두사 제거 후 자동 매핑된 폴더 ${strippedItems.length}개</b><br>
-        ${strippedItems.map(m=>`<code style="background:#DBEAFE;padding:1px 4px;border-radius:3px">${escHtml(m.driveFolderName)}</code> → <b>${escHtml(m.mappedCampaign)}</b>`).join("<br>")}<br>
-        <span style="color:#6B7280;font-size:.66rem">※ 날짜 접두사(3/23, 0324, 3.11, 3월 등)를 제거하고 tab_name과 매핑했습니다. 폴더명은 변경되지 않습니다.</span>
-      </div>`;
-    }
-
-    // ── 매핑 실패 항목 → 원인 상세 분석 ──
-    const failItems    = mapping.filter(m => m.status.includes("⚠"));
-    const failAnalysis = data.failAnalysis || [];
-    if (failItems.length > 0) {
-      html += `<div style="margin-top:8px;padding:6px 8px;background:#FFF1F2;border:1px solid #FECDD3;border-radius:5px;font-size:.69rem;color:#BE123C">
-        <b>⚠ 매핑 실패 ${failItems.length}개</b> — 아래 폴더명이 세부목록 tab_name / display_name 과 일치하지 않습니다<br>
-        <span style="color:#6B7280;font-size:.66rem">※ 폴더는 이동되지 않으며 캡처이미지도 영향받지 않습니다</span>
-      </div>`;
-
-      // 실패 폴더별 상세 원인 분석 테이블
-      html += `<table style="width:100%;border-collapse:collapse;font-size:.67rem;margin-top:4px">
-        <tr style="background:#FEF2F2">
-          <th style="padding:3px 6px;border:1px solid #FECDD3;text-align:left;width:35%">드라이브 폴더명(변경없음)</th>
-          <th style="padding:3px 6px;border:1px solid #FECDD3;text-align:left">세부목록에서 유사한 tab_name 후보</th>
+        <th style="padding:3px 5px;border:1px solid #E5E7EB;text-align:left">탭명</th>
+        <th style="padding:3px 5px;border:1px solid #E5E7EB;text-align:left">캠페인</th>
+        <th style="padding:3px 5px;border:1px solid #E5E7EB;text-align:center">캡처</th>
+        <th style="padding:3px 5px;border:1px solid #E5E7EB;text-align:center">리뷰</th>
+        <th style="padding:3px 5px;border:1px solid #E5E7EB;text-align:center">상태</th>
+      </tr>
+      ${details.map(d => {
+        const st = d.isClosed ? "마감" : d.forceDone ? "완료" : "활성";
+        const stColor = d.isClosed ? "#6B7280" : d.forceDone ? "#0369A1" : "#166534";
+        return `<tr style="background:${d.isClosed||d.forceDone?'#F9FAFB':'#fff'}">
+          <td style="padding:2px 5px;border:1px solid #E5E7EB;font-family:monospace">${escHtml(d.tabName)}</td>
+          <td style="padding:2px 5px;border:1px solid #E5E7EB">${escHtml(d.campaignName||"-")}</td>
+          <td style="padding:2px 5px;border:1px solid #E5E7EB;text-align:center">${d.captureFolderUrl?"&check;":"&mdash;"}</td>
+          <td style="padding:2px 5px;border:1px solid #E5E7EB;text-align:center">${d.folderUrl?"&check;":"&mdash;"}</td>
+          <td style="padding:2px 5px;border:1px solid #E5E7EB;text-align:center;color:${stColor}">${st}</td>
         </tr>`;
-      failItems.forEach(m => {
-        const analysis = failAnalysis.find(a => a.driveFolderName === m.driveFolderName);
-        const candidates = analysis?.candidates || [];
-        const candidateHtml = candidates.length > 0
-          ? candidates.map(c =>
-              `<span style="display:inline-block;background:#FFF7ED;border:1px solid #FED7AA;border-radius:3px;padding:1px 5px;margin:1px;color:#92400E">
-                <b>${escHtml(c.tabName)}</b>${c.campName ? ` <span style="color:#6B7280">(${escHtml(c.campName)})</span>` : ""}
-              </span>`
-            ).join("")
-          : `<span style="color:#9CA3AF;font-style:italic">유사한 tab_name 없음 — 세부목록에 미등록된 폴더일 수 있음</span>`;
-        html += `<tr style="background:#FFF8F8">
-          <td style="padding:3px 6px;border:1px solid #FECDD3;font-weight:700;color:#991B1B;font-family:monospace">
-            📁 ${escHtml(m.driveFolderName)}
-          </td>
-          <td style="padding:3px 6px;border:1px solid #FECDD3">${candidateHtml}</td>
-        </tr>`;
-      });
-      html += `</table>
-      <div style="margin-top:5px;padding:4px 7px;background:#FFF7ED;border:1px solid #FED7AA;border-radius:4px;font-size:.67rem;color:#92400E">
-        💡 <b>해결 방법:</b> 위 후보 tab_name이 맞다면 → 해당 폴더명을 알려주시면 추가 매핑 패턴을 코드에 등록합니다.<br>
-        후보가 없다면 → 해당 폴더는 세부목록에 없는 탭이므로 직접 캠페인폴더로 드래그하거나 무시하셔도 됩니다.
-      </div>`;
-
-    } else if (mapping.length > 0) {
-      html += `<div style="margin-top:6px;padding:5px 8px;background:#F0FDF4;border:1px solid #86EFAC;border-radius:5px;font-size:.69rem;color:#166534">
-        ✅ 매핑 실패 없음 — ② 미리보기 → ③ 실제 재편성으로 진행하세요.
-      </div>`;
-    }
-
-    // ── 세부목록 샘플 ──
-    if (detail.length > 0) {
-      html += `<details style="margin-top:6px" id="detailSampleSection">
-        <summary style="font-size:.7rem;color:#6B7280;cursor:pointer;font-weight:600">
-          📋 세부목록 tab_name 목록 (${detail.length}행) — 매핑 실패 폴더명과 비교 확인용
-        </summary>
-        <div style="margin:4px 0 2px">
-          <input type="text" id="detailSearchInput" placeholder="tab_name 검색..." oninput="filterDetailTable(this.value)"
-            style="width:100%;box-sizing:border-box;padding:3px 7px;font-size:.68rem;border:1px solid #D1D5DB;border-radius:4px">
-        </div>
-        <table id="detailSampleTable" style="width:100%;border-collapse:collapse;font-size:.66rem;margin-top:2px">
-          <tr style="background:#F3F4F6">
-            <th style="padding:3px 5px;border:1px solid #E5E7EB;text-align:left">tab_name</th>
-            <th style="padding:3px 5px;border:1px solid #E5E7EB;text-align:left">display_name</th>
-            <th style="padding:3px 5px;border:1px solid #E5E7EB;text-align:left">캠페인명</th>
-            <th style="padding:3px 5px;border:1px solid #E5E7EB;text-align:center">캡처URL</th>
-          </tr>
-          ${detail.map(r => `<tr class="detail-row">
-            <td style="padding:2px 5px;border:1px solid #E5E7EB;font-family:monospace;color:#1F2937">${escHtml(r.tabName)}</td>
-            <td style="padding:2px 5px;border:1px solid #E5E7EB;color:${r.dispName?"#166534":"#9CA3AF"}">${escHtml(r.dispName || "(없음)")}</td>
-            <td style="padding:2px 5px;border:1px solid #E5E7EB;color:#1D4ED8">${escHtml(r.campName || "—")}</td>
-            <td style="padding:2px 5px;border:1px solid #E5E7EB;text-align:center">${r.capUrl ? "✅" : "—"}</td>
-          </tr>`).join("")}
-        </table>
-      </details>`;
-    }
+      }).join("")}
+    </table></details>`;
 
     resEl.innerHTML = html;
 
   } catch (err) {
-    resEl.innerHTML = `<span style="color:#EF4444">❌ 예외: ${escHtml(err.message)}</span>`;
+    resEl.innerHTML = `<span style="color:#EF4444">&cross; 예외: ${escHtml(err.message)}</span>`;
     console.error("[diagCaptureFolders] 오류:", err);
   } finally {
     if (btn) btn.disabled = false;
   }
-}
-
-// ── 세부목록 샘플 테이블 검색 필터 ────────────────────────────
-function filterDetailTable(q) {
-  const table = document.getElementById("detailSampleTable");
-  if (!table) return;
-  const rows = table.querySelectorAll("tr.detail-row");
-  const kw   = q.trim().toLowerCase();
-  rows.forEach(tr => {
-    const text = tr.textContent.toLowerCase();
-    tr.style.display = (!kw || text.includes(kw)) ? "" : "none";
-  });
 }
 
 // ── 캡처폴더 구조 재편성 (단층 → 캠페인폴더 하위) ─────────────
@@ -8386,7 +8236,6 @@ async function organizeCaptureFolders(dryRun) {
 
 // ── 구버전 폴더명 → 신규형식 일괄 마이그레이션 ────────────────
 async function migrateFolderNames(dryRun) {
-  if (!APP_CONFIG.GAS_WEB_APP_URL) { showToast("GAS URL을 먼저 저장해주세요.", "warning"); return; }
 
   const resultEl = document.getElementById("migrateResult");
 
@@ -8498,7 +8347,6 @@ async function migrateFolderNames(dryRun) {
 }
 
 async function batchCreateFolders(target) {
-  if (!APP_CONFIG.GAS_WEB_APP_URL) { showToast("GAS URL을 먼저 저장해주세요.", "warning"); return; }
 
   const labelMap = { capture: "캡처폴더", review: "리뷰폴더", both: "캡처+리뷰폴더" };
   const label    = labelMap[target] || target;
@@ -8568,7 +8416,6 @@ async function batchCreateFolders(target) {
 
 // ── 구매캡쳐/리뷰저장 폴더 일괄 동기화 ────────────────────────
 async function syncAllFolders() {
-  if (!APP_CONFIG.GAS_WEB_APP_URL) { showToast("GAS URL을 먼저 저장해주세요.", "warning"); return; }
 
   const forceChk = document.getElementById("chkForceSync");
   const force    = forceChk && forceChk.checked;
@@ -8607,7 +8454,6 @@ async function syncAllFolders() {
 // ── 탭 단위 폴더 재설정 ────────────────────────────────────────
 // target: "capture" | "review" | "both"
 async function resetTabFolder(target) {
-  if (!APP_CONFIG.GAS_WEB_APP_URL) { showToast("GAS URL을 먼저 저장해주세요.", "warning"); return; }
   if (!_tcCurrent) { showToast("탭 정보를 확인할 수 없습니다.", "error"); return; }
 
   const targetLabel = { capture: "캡처폴더", review: "리뷰폴더", both: "캡처+리뷰폴더" }[target] || target;
@@ -8670,7 +8516,6 @@ async function resetTabFolder(target) {
 // ★ v9.12: 스마트 동기화 (증분 우선)
 // dirty 탭 있으면 해당 캠페인만 빠르게 갱신, 없으면 전체 동기화
 async function buildIndexSmart() {
-  if (!APP_CONFIG.GAS_WEB_APP_URL) { showToast("GAS URL을 먼저 저장해주세요.", "warning"); return; }
   const btnSmart = document.getElementById("btnBuildIndexSmart");
   const btnFull  = document.getElementById("btnBuildIndex");
   const badge    = document.getElementById("indexStatusBadge");
@@ -9012,7 +8857,6 @@ async function buildIndexSmart() {
 }
 
 async function buildIndex() {
-  if (!APP_CONFIG.GAS_WEB_APP_URL) { showToast("GAS URL을 먼저 저장해주세요.", "warning"); return; }
   const btn   = document.getElementById("btnBuildIndex");
   const badge = document.getElementById("indexStatusBadge");
   btn.disabled    = true;
@@ -9298,7 +9142,7 @@ async function buildIndex() {
     // ★ v9.17: 타임아웃 90s→120s (GAS 빌드 20~40초 + 연결 지연 여유)
     let data;
     try {
-      data = await gasGet({ action: "buildIndex" }, 120 * 1000);
+      data = await gasGet({ action: "buildIndex", forceFullRebuild: true }, 120 * 1000);
     } catch (firstErr) {
       const m1 = firstErr.message || "";
       // 타임아웃 or 스크립트 로드 실패 → polling 모드로 전환
