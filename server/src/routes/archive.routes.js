@@ -6,16 +6,17 @@ const { logger } = require('../utils/logger');
 
 // ═══════════════════════════════════════════════════════════
 // GET /api/archive/detect — 아카이브 대상 자동 감지 (반자동: 감지만)
-// 조건: is_closed=true OR force_done=true OR (row_count>0 AND submitted_count>=row_count)
-// 개별 탭 단위로 반환
+// 소스 1: index_master 기준 (submitted >= row_count OR closed/force_done)
+// 소스 2: tab_configs 기준 (closed/force_done이지만 index_master에 없는 경우)
 // ═══════════════════════════════════════════════════════════
 router.get('/detect', authMiddleware, async (req, res, next) => {
   try {
     const { rows } = await pool.query(`
+      -- 소스 1: index_master에 있는 완료/마감 탭
       SELECT
         im.sheet_id       AS "sheetId",
         im.tab_name       AS "tabName",
-        im.campaign_name  AS "campaignName",
+        COALESCE(tc.campaign_name, im.campaign_name) AS "campaignName",
         im.row_count      AS "rowCount",
         im.submitted_count AS "submittedCount",
         im.built_at       AS "builtAt",
@@ -24,7 +25,8 @@ router.get('/detect', authMiddleware, async (req, res, next) => {
           WHEN tc.force_done = TRUE THEN 'force_done'
           WHEN im.row_count > 0 AND im.submitted_count >= im.row_count THEN 'completed'
           ELSE 'unknown'
-        END AS "reason"
+        END AS "reason",
+        TRUE AS "inIndex"
       FROM index_master im
       LEFT JOIN tab_configs tc ON im.sheet_id = tc.sheet_id AND im.tab_name = tc.tab_name
       WHERE im.status = 'active'
@@ -33,7 +35,29 @@ router.get('/detect', authMiddleware, async (req, res, next) => {
           OR tc.force_done = TRUE
           OR (im.row_count > 0 AND im.submitted_count >= im.row_count)
         )
-      ORDER BY im.campaign_name, im.tab_name
+
+      UNION ALL
+
+      -- 소스 2: tab_configs에만 있는 마감/강제완료 탭 (index_master에 없음)
+      SELECT
+        tc.sheet_id       AS "sheetId",
+        tc.tab_name       AS "tabName",
+        tc.campaign_name  AS "campaignName",
+        0                 AS "rowCount",
+        0                 AS "submittedCount",
+        NULL              AS "builtAt",
+        CASE
+          WHEN tc.is_closed = TRUE THEN 'closed'
+          WHEN tc.force_done = TRUE THEN 'force_done'
+          ELSE 'unknown'
+        END AS "reason",
+        FALSE AS "inIndex"
+      FROM tab_configs tc
+      LEFT JOIN index_master im ON tc.sheet_id = im.sheet_id AND tc.tab_name = im.tab_name
+      WHERE (tc.is_closed = TRUE OR tc.force_done = TRUE)
+        AND im.sheet_id IS NULL
+
+      ORDER BY "campaignName", "tabName"
     `);
 
     // 캠페인별 그룹핑 (프론트엔드 표시용)
@@ -52,6 +76,7 @@ router.get('/detect', authMiddleware, async (req, res, next) => {
         submittedCount: parseInt(r.submittedCount) || 0,
         reason: r.reason,
         builtAt: r.builtAt,
+        inIndex: r.inIndex,
       });
     });
 
@@ -98,8 +123,46 @@ router.post('/tabs', authMiddleware, async (req, res, next) => {
           'SELECT * FROM index_master WHERE sheet_id = $1 AND tab_name = $2',
           [sheetId, tabName]
         );
+
         if (masterRows.length === 0) {
-          results.push({ sheetId, tabName, status: 'skipped', reason: '데이터 없음' });
+          // index_master에 없는 경우: tab_configs에서만 정리
+          // (마감/강제완료 상태인데 인덱스에 없는 탭 — 과거 데이터)
+          const { rows: tcRows } = await client.query(
+            'SELECT * FROM tab_configs WHERE sheet_id = $1 AND tab_name = $2',
+            [sheetId, tabName]
+          );
+
+          if (tcRows.length > 0) {
+            const tc = tcRows[0];
+            // index_master_archive에 기록 (인덱스 데이터 없이 설정만)
+            await client.query(`
+              INSERT INTO index_master_archive
+                (sheet_id, tab_name, tab_gid, campaign_name, row_count, submitted_count,
+                 last_date, checksum, built_at, status, skip_reason, error_msg,
+                 sheet_modified_at, archived_by, archive_reason)
+              VALUES ($1,$2,$3,$4,0,0,NULL,NULL,NULL,'archived',NULL,NULL,NULL,$5,$6)
+              ON CONFLICT (sheet_id, tab_name) DO UPDATE SET
+                archived_at = NOW(),
+                archived_by = EXCLUDED.archived_by,
+                archive_reason = EXCLUDED.archive_reason
+            `, [sheetId, tabName, tc.tab_gid || null, tc.campaign_name || '미분류', adminName, archiveReason]);
+
+            // tab_configs에서 삭제 (또는 비활성화)
+            await client.query(
+              'DELETE FROM tab_configs WHERE sheet_id = $1 AND tab_name = $2',
+              [sheetId, tabName]
+            );
+
+            archivedTabs++;
+            results.push({
+              sheetId, tabName,
+              campaignName: tc.campaign_name || '미분류',
+              rowCount: 0,
+              status: 'archived_config_only',
+            });
+          } else {
+            results.push({ sheetId, tabName, status: 'skipped', reason: '데이터 없음' });
+          }
           continue;
         }
 
@@ -151,6 +214,11 @@ router.post('/tabs', authMiddleware, async (req, res, next) => {
         );
         await client.query(
           'DELETE FROM index_master WHERE sheet_id = $1 AND tab_name = $2',
+          [sheetId, tabName]
+        );
+        // tab_configs도 함께 정리 (마감/완료 설정 포함)
+        await client.query(
+          'DELETE FROM tab_configs WHERE sheet_id = $1 AND tab_name = $2',
           [sheetId, tabName]
         );
 

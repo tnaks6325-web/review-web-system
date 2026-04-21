@@ -10732,9 +10732,12 @@ async function archiveAutoDetect() {
                             t.reason === 'completed' ? '100%완료' : t.reason;
         const reasonColor = t.reason === 'closed' ? '#EF4444' :
                             t.reason === 'force_done' ? '#F59E0B' : '#10B981';
+        const indexBadge = t.inIndex === false
+          ? '<span style="background:#FEF3C7;color:#D97706;padding:1px 4px;border-radius:3px;font-size:.65rem;margin-left:2px">인덱스외</span>'
+          : '';
         html += `<label style="display:flex;align-items:center;gap:6px;padding:3px 0;font-size:.78rem;cursor:pointer">
-          <input type="checkbox" class="archive-detect-cb" data-sheet="${escHtml(camp.sheetId)}" data-tab="${escHtml(t.tabName)}" checked>
-          <span style="flex:1">${escHtml(t.tabName)}</span>
+          <input type="checkbox" class="archive-detect-cb" data-sheet="${escHtml(camp.sheetId)}" data-tab="${escHtml(t.tabName)}" data-in-index="${t.inIndex !== false}" checked>
+          <span style="flex:1">${escHtml(t.tabName)}${indexBadge}</span>
           <span style="font-size:.72rem;color:#9CA3AF">${(t.rowCount||0).toLocaleString()}행</span>
           <span style="background:${reasonColor}15;color:${reasonColor};padding:1px 6px;border-radius:4px;font-size:.68rem">${reasonLabel}</span>
         </label>`;
