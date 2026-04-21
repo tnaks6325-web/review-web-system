@@ -536,8 +536,9 @@ async function _upsertTabIndex(sheetId, tabName, tabGid, checksum, rows, modifie
 // ═══════════════════════════════════════════════════════════
 
 function parseTabRows(values, sheetId, tabName, tabGid, campaignTitle) {
+  const HEADER_SCAN_LIMIT = 50; // Phase 14: 20→50 확대 (32행 등 깊은 헤더 대응)
   let headerRowIdx = -1;
-  for (let i = 0; i < Math.min(values.length, 20); i++) {
+  for (let i = 0; i < Math.min(values.length, HEADER_SCAN_LIMIT); i++) {
     const cells = values[i] ? values[i].map(c => String(c || '').trim()) : [];
     if (_isDataTabRow(cells)) {
       headerRowIdx = i;
@@ -667,7 +668,7 @@ async function _recordUnrecognizedTab(sheetId, tabName, tabGid, campaignName, va
     } else {
       // 헤더 행 탐지 시도
       let headerFound = false;
-      for (let i = 0; i < Math.min(values.length, 20); i++) {
+      for (let i = 0; i < Math.min(values.length, 50); i++) {
         const cells = values[i] ? values[i].map(c => String(c || '').trim()) : [];
         if (_isDataTabRow(cells)) {
           headerFound = true;
@@ -681,8 +682,8 @@ async function _recordUnrecognizedTab(sheetId, tabName, tabGid, campaignName, va
       }
     }
 
-    // 첫 25행 샘플 (분석용)
-    const sampleRows = (values || []).slice(0, 25).map(row =>
+    // 첫 55행 샘플 (분석용 — 50행 헤더 + 데이터 5행)
+    const sampleRows = (values || []).slice(0, 55).map(row =>
       (row || []).map(c => String(c || '').trim()).slice(0, 15)
     );
 
