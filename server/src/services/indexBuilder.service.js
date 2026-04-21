@@ -154,12 +154,17 @@ async function buildIndexSmart(forceFullRebuild = false) {
 
     // ── 2단계: DB에서 기존 데이터 로드 (1회 쿼리) ──
     const { rows: masterRows } = await pool.query(
-      'SELECT sheet_id, tab_name, checksum, sheet_modified_at FROM index_master'
+      'SELECT sheet_id, tab_name, tab_gid, checksum, sheet_modified_at FROM index_master'
     );
     const checksumMap = {};
     const sheetModifiedMap = {}; // sheet_id → 마지막으로 기록한 수정시각
+    // ★ GID→탭명 매핑: 탭 이름 변경 감지용
+    const gidToNameMap = {}; // "sheetId||gid" → tab_name (기존 DB 이름)
     masterRows.forEach(r => {
       checksumMap[`${r.sheet_id}||${r.tab_name}`] = r.checksum;
+      if (r.tab_gid) {
+        gidToNameMap[`${r.sheet_id}||${r.tab_gid}`] = r.tab_name;
+      }
       if (r.sheet_modified_at) {
         const existing = sheetModifiedMap[r.sheet_id];
         const current = new Date(r.sheet_modified_at).getTime();
@@ -198,6 +203,7 @@ async function buildIndexSmart(forceFullRebuild = false) {
         sheetModifiedMap,
         tcMap,
         archivedSet,
+        gidToNameMap,
         startTime,
       }))
     );
@@ -365,7 +371,7 @@ async function buildIndexSmart(forceFullRebuild = false) {
 // ═══════════════════════════════════════════════════════════
 
 async function _processOneSheet(sheetId, opts) {
-  const { forceFullRebuild, checksumMap, sheetModifiedMap, tcMap, archivedSet, startTime } = opts;
+  const { forceFullRebuild, checksumMap, sheetModifiedMap, tcMap, archivedSet, gidToNameMap, startTime } = opts;
   const sheetStart = Date.now();
   let rebuilt = 0, skipped = 0, errors = 0;
 
@@ -473,6 +479,35 @@ async function _processOneSheet(sheetId, opts) {
     const tabGid = String(tab.properties.sheetId);
     const key = `${sheetId}||${tabName}`;
 
+    // ★ 탭 이름 변경 감지: 같은 GID인데 DB에 다른 이름으로 저장된 경우
+    const gidKey = `${sheetId}||${tabGid}`;
+    const oldTabName = gidToNameMap ? gidToNameMap[gidKey] : null;
+    if (oldTabName && oldTabName !== tabName) {
+      // 구글 시트에서 탭 이름이 변경됨 → 기존 고아 레코드 정리
+      logger.info(`[buildIndex] 탭 이름 변경 감지: "${oldTabName}" → "${tabName}" (gid=${tabGid}, sheet=${sheetId.substring(0, 15)})`);
+      try {
+        // index_master에서 옛 이름 레코드 삭제
+        await pool.query('DELETE FROM index_master WHERE sheet_id = $1 AND tab_name = $2', [sheetId, oldTabName]);
+        // review_index에서 옛 이름 데이터 삭제
+        await pool.query('DELETE FROM review_index WHERE sheet_id = $1 AND tab_name = $2', [sheetId, oldTabName]);
+        // tab_configs에서 옛 이름 설정 → 새 이름으로 업데이트
+        await pool.query('UPDATE tab_configs SET tab_name = $1 WHERE sheet_id = $2 AND tab_name = $3', [tabName, sheetId, oldTabName]);
+        // unrecognized_tabs에서 옛 이름 삭제
+        await pool.query('DELETE FROM unrecognized_tabs WHERE sheet_id = $1 AND tab_name = $2', [sheetId, oldTabName]);
+        // checksumMap도 갱신 (옛 이름 체크섬을 새 이름으로 이전)
+        const oldKey = `${sheetId}||${oldTabName}`;
+        if (checksumMap[oldKey]) {
+          checksumMap[key] = checksumMap[oldKey];
+          delete checksumMap[oldKey];
+        }
+        // gidToNameMap 갱신
+        if (gidToNameMap) gidToNameMap[gidKey] = tabName;
+        logger.info(`[buildIndex] 탭 이름 변경 적용 완료: "${oldTabName}" → "${tabName}"`);
+      } catch (renameErr) {
+        logger.warn(`[buildIndex] 탭 이름 변경 처리 실패 (${oldTabName} → ${tabName}): ${renameErr.message}`);
+      }
+    }
+
     // 시간 가드 (10분)
     if (Date.now() - startTime > 10 * 60 * 1000) {
       logger.warn(`[buildIndex] 시간 초과 — 나머지 탭 다음 빌드에서 처리`);
@@ -525,6 +560,26 @@ async function _processOneSheet(sheetId, opts) {
       } catch (_) {}
       errors++;
     }
+  }
+
+  // ★ 고아 탭 정리: 구글 시트에 더 이상 존재하지 않는 index_master 레코드 감지 및 삭제
+  // validTabs(필터링 전)의 GID 목록과 DB의 GID 목록을 비교
+  try {
+    const currentGids = new Set(validTabs.map(t => String(t.properties.sheetId)));
+    const { rows: dbTabsForSheet } = await pool.query(
+      "SELECT tab_name, tab_gid FROM index_master WHERE sheet_id = $1 AND status = 'active'",
+      [sheetId]
+    );
+    for (const dbTab of dbTabsForSheet) {
+      if (dbTab.tab_gid && !currentGids.has(String(dbTab.tab_gid))) {
+        // 이 GID는 구글 시트에 더 이상 존재하지 않음 → 고아 레코드 삭제
+        logger.info(`[buildIndex] 고아 탭 정리: "${dbTab.tab_name}" (gid=${dbTab.tab_gid}) — 구글 시트에서 삭제됨`);
+        await pool.query('DELETE FROM index_master WHERE sheet_id = $1 AND tab_name = $2', [sheetId, dbTab.tab_name]);
+        await pool.query('DELETE FROM review_index WHERE sheet_id = $1 AND tab_name = $2', [sheetId, dbTab.tab_name]);
+      }
+    }
+  } catch (orphanErr) {
+    logger.warn(`[buildIndex] 고아 탭 정리 실패 (${sheetId.substring(0, 15)}): ${orphanErr.message}`);
   }
 
   return { rebuilt, skipped, errors, elapsed: Date.now() - sheetStart };
