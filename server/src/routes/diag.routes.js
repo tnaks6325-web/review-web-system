@@ -1340,4 +1340,101 @@ router.post('/cleanup-empty-indexes', authMiddleware, async (req, res) => {
   }
 });
 
+// ═══════════════════════════════════════════════════════════
+// GET /api/diag/debug-parse — 특정 탭의 parseTabRows 디버그
+//   ?sheetId=xxx&tabName=xxx
+// ═══════════════════════════════════════════════════════════
+router.get('/debug-parse', authMiddleware, async (req, res, next) => {
+  try {
+    const { sheetId, tabName } = req.query;
+    if (!sheetId || !tabName) return res.json({ error: 'sheetId, tabName 필요' });
+
+    const { batchReadSheet } = require('../services/sheets.service');
+
+    // 시트 데이터 읽기
+    let values;
+    try {
+      const result = await readSheet(sheetId, `'${tabName}'`);
+      values = result || [];
+    } catch (err) {
+      return res.json({ ok: false, error: `시트 읽기 실패: ${err.message}` });
+    }
+
+    // DB에서 키워드 로드
+    let dataTabKeywords, nameKeywords;
+    try {
+      const { rows } = await pool.query(
+        "SELECT category, keyword FROM index_keywords WHERE active = TRUE ORDER BY category, keyword"
+      );
+      const grouped = {};
+      rows.forEach(r => {
+        if (!grouped[r.category]) grouped[r.category] = [];
+        grouped[r.category].push(r.keyword);
+      });
+      dataTabKeywords = grouped['data_tab'] || ['번호','주문자','수취인','수취인명','성함','이름','성명','신청자','연락처','전화번호'];
+      nameKeywords = grouped['name'] || ['수취인','이름','신청자','참여자','수취인명','주문자','성함','예금주','성명'];
+    } catch (_) {
+      dataTabKeywords = ['번호','주문자','수취인','수취인명','성함','이름','성명','신청자','연락처','전화번호'];
+      nameKeywords = ['수취인','이름','신청자','참여자','수취인명','주문자','성함','예금주','성명'];
+    }
+
+    // _isDataTabRow 시뮬레이션 (50행 스캔)
+    const HEADER_SCAN_LIMIT = 50;
+    let headerRowIdx = -1;
+    const scanResults = [];
+
+    for (let i = 0; i < Math.min(values.length, HEADER_SCAN_LIMIT); i++) {
+      const cells = values[i] ? values[i].map(c => String(c || '').trim()) : [];
+      let matchCount = 0;
+      const matchedKws = [];
+      for (const kw of dataTabKeywords) {
+        const found = kw === '번호'
+          ? cells.includes(kw)
+          : cells.some(c => c.includes(kw));
+        if (found) {
+          matchCount++;
+          matchedKws.push(kw);
+        }
+      }
+      if (matchCount >= 1) {
+        scanResults.push({ row: i, matchCount, matchedKws, cells: cells.slice(0, 20), isHeader: matchCount >= 2 });
+      }
+      if (matchCount >= 2 && headerRowIdx < 0) {
+        headerRowIdx = i;
+      }
+    }
+
+    // nameCol 매칭 시뮬레이션
+    let nameColIdx = -1;
+    let nameMatchDetail = null;
+    if (headerRowIdx >= 0) {
+      const headers = values[headerRowIdx].map(h => String(h || '').trim());
+      nameColIdx = headers.findIndex(h => nameKeywords.some(k => h.includes(k)));
+      if (nameColIdx >= 0) {
+        const matchedKw = nameKeywords.find(k => headers[nameColIdx].includes(k));
+        nameMatchDetail = { colIdx: nameColIdx, header: headers[nameColIdx], matchedKeyword: matchedKw };
+      }
+    }
+
+    res.json({
+      ok: true,
+      totalRows: values.length,
+      totalCols: values[0] ? values[0].length : 0,
+      headerRowIdx,
+      nameColIdx,
+      nameMatchDetail,
+      scanResults,
+      dataTabKeywords,
+      nameKeywords,
+      firstRows: values.slice(0, Math.min(values.length, 55)).map((r, i) => ({
+        row: i,
+        cols: (r || []).length,
+        cells: (r || []).map(c => String(c || '').trim()).slice(0, 20)
+      }))
+    });
+  } catch (err) {
+    next(err);
+  }
+});
+
 module.exports = router;
