@@ -11915,6 +11915,7 @@ async function syncTabNames(dryRun) {
     const parts = [];
     if (res.renamed > 0) parts.push(`탭명 변경 ${res.renamed}건`);
     if (res.urlFixed > 0) parts.push(`URL 교정 ${res.urlFixed}건`);
+    if (res.gidFilled > 0) parts.push(`GID 보충 ${res.gidFilled}건`);
     if (res.errors > 0) parts.push(`오류 ${res.errors}건`);
     if (parts.length === 0) parts.push("변경 없음 — 모든 탭명이 일치합니다");
 
@@ -11927,7 +11928,7 @@ async function syncTabNames(dryRun) {
     }
 
     // 실제 실행 후 대시보드 새로고침
-    if (!dryRun && (res.renamed > 0 || res.urlFixed > 0)) {
+    if (!dryRun && (res.renamed > 0 || res.urlFixed > 0 || res.gidFilled > 0)) {
       loadTabDashboard();
     }
   } catch (err) {
@@ -11945,18 +11946,21 @@ function _showSyncTabNamesResult(res, dryRun) {
   const statusColor = (s) => {
     if (s === 'renamed') return '#059669';
     if (s === 'url_fixed') return '#0369A1';
-    if (s === 'dry_run' || s === 'dry_run_url') return '#7C3AED';
+    if (s === 'gid_filled') return '#0891B2';
+    if (s === 'dry_run' || s === 'dry_run_url' || s === 'dry_run_gid') return '#7C3AED';
     if (s === 'error' || s === 'sheet_error') return '#DC2626';
-    if (s === 'no_gid') return '#D97706';
+    if (s === 'no_gid' || s === 'no_gid_missing') return '#D97706';
     return '#6B7280';
   };
   const statusLabel = (s) => {
     if (s === 'renamed') return '변경 완료';
     if (s === 'url_fixed') return 'URL 교정';
+    if (s === 'gid_filled') return 'GID 보충';
     if (s === 'dry_run') return '변경 예정';
     if (s === 'dry_run_url') return 'URL 교정 예정';
+    if (s === 'dry_run_gid') return 'GID 보충 예정';
     if (s === 'error' || s === 'sheet_error') return '오류';
-    if (s === 'no_gid') return 'GID 없음';
+    if (s === 'no_gid' || s === 'no_gid_missing') return 'GID 없음';
     return s;
   };
 
@@ -11971,11 +11975,23 @@ function _showSyncTabNamesResult(res, dryRun) {
     if (r.urlFixed) {
       detail += `<br><span style="font-size:.65rem;color:#0369A1"><i class="fas fa-link"></i> URL 교정됨</span>`;
     }
+    if (r.gidFilled) {
+      detail += `<br><span style="font-size:.65rem;color:#0891B2"><i class="fas fa-fingerprint"></i> GID=${r.filledGid} 보충${r.status && r.status.includes('dry') ? ' 예정' : '됨'}</span>`;
+    }
     if (r.error) {
       detail += `<br><span style="font-size:.65rem;color:#DC2626">${escHtml(r.error)}</span>`;
     }
     if (r.message) {
       detail += `<br><span style="font-size:.65rem;color:#D97706">${escHtml(r.message)}</span>`;
+    }
+    if (r.hint) {
+      detail += `<br><span style="font-size:.63rem;color:#6366F1"><i class="fas fa-lightbulb"></i> ${escHtml(r.hint)}</span>`;
+    }
+    if (r.affectedTabs && r.affectedTabs.length > 0) {
+      detail += `<br><span style="font-size:.63rem;color:#6B7280">영향 탭(${r.affectedTabCount}개): ${r.affectedTabs.map(t => escHtml(t)).join(', ')}${r.affectedTabCount > 5 ? '...' : ''}</span>`;
+    }
+    if (r.sheetTabs && r.sheetTabs.length > 0) {
+      detail += `<br><span style="font-size:.63rem;color:#9CA3AF">시트 탭 목록: ${r.sheetTabs.map(t => escHtml(t)).join(', ')}</span>`;
     }
     return `<tr>
       <td style="padding:4px 6px;font-size:.72rem;border-bottom:1px solid #F3F4F6">${badge}</td>
@@ -11985,7 +12001,7 @@ function _showSyncTabNamesResult(res, dryRun) {
   }).join('');
 
   const title = dryRun ? "탭명 동기화 미리보기" : "탭명 동기화 결과";
-  const summary = `시트 ${res.totalSheets}개 · 탭 ${res.totalTabs}개 검사 → 변경 ${res.renamed}건, URL교정 ${res.urlFixed}건, 스킵 ${res.skipped}건, 오류 ${res.errors}건 (${res.elapsed})`;
+  const summary = `시트 ${res.totalSheets}개 · 탭 ${res.totalTabs}개 검사 → 변경 ${res.renamed}건, URL교정 ${res.urlFixed}건, GID보충 ${res.gidFilled || 0}건, 스킵 ${res.skipped}건, 오류 ${res.errors}건 (${res.elapsed})`;
 
   const modal = document.createElement('div');
   modal.id = 'syncTabNamesResultModal';

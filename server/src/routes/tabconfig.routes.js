@@ -227,16 +227,22 @@ router.post('/sync-from-sheet', authMiddleware, async (req, res) => {
 });
 
 // ═══════════════════════════════════════════════════════════
-// POST /api/tab/sync-tab-names — 시트 탭명·URL 실시간 동기화
+// POST /api/tab/sync-tab-names — 시트 탭명·URL·GID 실시간 동기화
 // Google Sheets API로 각 시트의 실제 탭명(GID 기반)을 조회하여
 // tab_configs, index_master, review_index의 탭명과 URL을 일괄 업데이트
+//
+// ★ Phase 7.1: GID 없는 탭 자동 보충 로직 추가
+//   - index_master에 tab_gid가 없는 탭: 시트 메타에서 이름 매칭으로 GID 찾아 업데이트
+//   - GID 보충 후 다음 빌드/동기화부터 정확한 GID 기반 매칭 가능
+//   - 권한 오류 시 해당 시트에 속한 캠페인 목록도 표시
 // ═══════════════════════════════════════════════════════════
 router.post('/sync-tab-names', authMiddleware, async (req, res, next) => {
   try {
     const { dryRun } = req.body || {};
     const startTime = Date.now();
 
-    // 1. 활성 탭 목록 (is_closed=FALSE) + index_master의 tab_gid 정보 수집
+    // 1. 활성 탭 목록 + index_master의 tab_gid 정보 수집
+    //    LEFT JOIN으로 index_master에 없는 탭도 포함
     const { rows: allTabs } = await pool.query(`
       SELECT tc.sheet_id, tc.tab_name, tc.sheet_url, tc.campaign_name,
              tc.is_closed, tc.force_done,
@@ -257,7 +263,7 @@ router.post('/sync-tab-names', authMiddleware, async (req, res, next) => {
     logger.info(`[sync-tab-names] ${sheetIds.length}개 시트, ${allTabs.length}개 탭 대상`);
 
     const results = [];
-    let renamed = 0, urlFixed = 0, skipped = 0, errors = 0;
+    let renamed = 0, urlFixed = 0, gidFilled = 0, skipped = 0, errors = 0;
     const errorDetails = [];
 
     // 3. 각 시트별로 실제 탭 메타 조회
@@ -269,8 +275,8 @@ router.post('/sync-tab-names', authMiddleware, async (req, res, next) => {
           continue;
         }
 
-        // 실제 시트의 GID → 탭명 맵
-        const realGidMap = {};  // gid → { title, gid }
+        // 실제 시트의 GID → 탭명 맵 & 탭명 → GID 맵
+        const realGidMap = {};  // gid(string) → { title, gid }
         const realNameMap = {}; // title → { title, gid }
         meta.forEach(s => {
           const gid = String(s.properties.sheetId);
@@ -287,8 +293,10 @@ router.post('/sync-tab-names', authMiddleware, async (req, res, next) => {
           const dbGid = dbTab.tab_gid ? String(dbTab.tab_gid) : null;
           let newName = null;
           let matchMethod = null;
+          let shouldFillGid = false;  // GID 보충 필요 여부
+          let fillGidValue = null;    // 보충할 GID 값
 
-          // 방법 1: GID 기반 매칭 (가장 정확)
+          // ── 방법 1: GID 기반 매칭 (가장 정확) ──
           if (dbGid && realGidMap[dbGid]) {
             const real = realGidMap[dbGid];
             if (real.title !== oldName) {
@@ -297,32 +305,42 @@ router.post('/sync-tab-names', authMiddleware, async (req, res, next) => {
             }
           }
 
-          // 방법 2: GID 없으면 이름 기반 확인 (이름이 시트에 있으면 OK)
-          if (!newName && !dbGid && !realNameMap[oldName]) {
-            // DB에 있는 탭명이 시트에 없음 → 유사 이름 검색 불가, 스킵
-            results.push({
-              sheetId: sheetId.substring(0, 15) + '...',
-              oldName,
-              newName: null,
-              status: 'no_gid',
-              campaign: dbTab.campaign_name || '',
-              message: 'GID 없음 — 수동 확인 필요',
-            });
-            skipped++;
-            continue;
+          // ── 방법 2: GID 없을 때 — 이름 기반 매칭 + GID 자동 보충 ──
+          if (!dbGid) {
+            if (realNameMap[oldName]) {
+              // DB 탭명이 시트에 존재 → GID를 보충 (이름은 정확히 일치)
+              shouldFillGid = true;
+              fillGidValue = realNameMap[oldName].gid;
+              matchMethod = 'name_match_gid_fill';
+            } else {
+              // DB 탭명이 시트에 없음 → 시트에서 삭제되었거나 이름이 변경됨
+              // 이름이 변경된 경우, GID 없이는 어느 탭인지 특정할 수 없음
+              results.push({
+                sheetId: sheetId.substring(0, 15) + '...',
+                oldName,
+                newName: null,
+                status: 'no_gid_missing',
+                campaign: dbTab.campaign_name || '',
+                message: 'GID 없음 + 시트에 해당 탭명 없음 — 삭제되었거나 이름 변경됨',
+                hint: '인덱스 전체 갱신을 실행하면 GID가 자동으로 매핑됩니다.',
+                sheetTabs: meta.map(s => s.properties.title).slice(0, 10),
+              });
+              skipped++;
+              continue;
+            }
           }
 
-          // URL 불일치 확인
+          // ── URL 불일치 확인 ──
           const currentUrl = (dbTab.sheet_url || '').split('#')[0];
           const urlMismatch = currentUrl && currentUrl !== correctSheetUrl;
 
-          if (!newName && !urlMismatch) {
-            // 탭명도 맞고 URL도 맞음 → 스킵
+          // 변경 없고 URL도 맞고 GID 보충도 불필요 → 스킵
+          if (!newName && !urlMismatch && !shouldFillGid) {
             skipped++;
             continue;
           }
 
-          // 변경 사항 발견
+          // ── 변경 사항 발견 → 결과 엔트리 생성 ──
           const entry = {
             sheetId: sheetId.substring(0, 15) + '...',
             fullSheetId: sheetId,
@@ -333,29 +351,31 @@ router.post('/sync-tab-names', authMiddleware, async (req, res, next) => {
             urlFixed: urlMismatch,
             oldUrl: urlMismatch ? currentUrl : null,
             newUrl: urlMismatch ? correctSheetUrl : null,
+            gidFilled: shouldFillGid,
+            filledGid: fillGidValue,
           };
 
           if (newName) {
             entry.status = dryRun ? 'dry_run' : 'renamed';
+          } else if (shouldFillGid && !urlMismatch) {
+            entry.status = dryRun ? 'dry_run_gid' : 'gid_filled';
           } else if (urlMismatch) {
             entry.status = dryRun ? 'dry_run_url' : 'url_fixed';
           }
 
           if (!dryRun) {
             try {
+              // ── 탭명 변경 (GID 기반으로 확인된 rename) ──
               if (newName) {
-                // tab_configs 탭명 변경
                 await pool.query(
                   `UPDATE tab_configs SET tab_name = $1, sheet_url = $2, updated_at = NOW()
                    WHERE sheet_id = $3 AND tab_name = $4`,
                   [newName, correctSheetUrl, sheetId, oldName]
                 );
-                // index_master 탭명 변경
                 await pool.query(
                   'UPDATE index_master SET tab_name = $1 WHERE sheet_id = $2 AND tab_name = $3',
                   [newName, sheetId, oldName]
                 );
-                // review_index 탭명 변경
                 const riResult = await pool.query(
                   'UPDATE review_index SET tab_name = $1 WHERE sheet_id = $2 AND tab_name = $3',
                   [newName, sheetId, oldName]
@@ -364,8 +384,26 @@ router.post('/sync-tab-names', authMiddleware, async (req, res, next) => {
                 renamed++;
                 logger.info(`[sync-tab-names] 탭명 변경: "${oldName}" → "${newName}" (sheet=${sheetId.substring(0, 15)})`);
               }
+
+              // ── GID 보충 (index_master에 tab_gid 업데이트) ──
+              if (shouldFillGid && fillGidValue) {
+                const gidResult = await pool.query(
+                  'UPDATE index_master SET tab_gid = $1 WHERE sheet_id = $2 AND tab_name = $3 AND (tab_gid IS NULL OR tab_gid = \'\')',
+                  [fillGidValue, sheetId, newName || oldName]
+                );
+                // review_index에도 tab_gid 보충
+                await pool.query(
+                  'UPDATE review_index SET tab_gid = $1 WHERE sheet_id = $2 AND tab_name = $3 AND (tab_gid IS NULL OR tab_gid = \'\')',
+                  [fillGidValue, sheetId, newName || oldName]
+                );
+                if (gidResult.rowCount > 0) {
+                  gidFilled++;
+                  logger.info(`[sync-tab-names] GID 보충: "${newName || oldName}" → gid=${fillGidValue} (sheet=${sheetId.substring(0, 15)})`);
+                }
+              }
+
+              // ── URL 교정 ──
               if (urlMismatch) {
-                // URL만 수정
                 await pool.query(
                   'UPDATE tab_configs SET sheet_url = $1, updated_at = NOW() WHERE sheet_id = $2 AND tab_name = $3',
                   [correctSheetUrl, sheetId, newName || oldName]
@@ -385,19 +423,31 @@ router.post('/sync-tab-names', authMiddleware, async (req, res, next) => {
       } catch (sheetErr) {
         // 시트 접근 불가 (삭제됨, 권한 없음 등)
         errors++;
+        const dbTabs = sheetMap[sheetId] || [];
+        const campaigns = [...new Set(dbTabs.map(t => t.campaign_name).filter(Boolean))];
+        const tabNames = dbTabs.map(t => t.tab_name).slice(0, 5);
+
         if (errorDetails.length < 10) {
-          errorDetails.push(`시트 ${sheetId.substring(0, 15)}...: ${sheetErr.message}`);
+          errorDetails.push(`시트 ${sheetId.substring(0, 15)}... (${campaigns.join(', ') || '미분류'}): ${sheetErr.message}`);
         }
         results.push({
           sheetId: sheetId.substring(0, 15) + '...',
           status: 'sheet_error',
           error: sheetErr.message,
+          campaign: campaigns.join(', ') || '미분류',
+          affectedTabs: tabNames,
+          affectedTabCount: dbTabs.length,
+          hint: sheetErr.message.includes('permission')
+            ? '서비스 계정(tnaks6325@gmail.com)에 시트 편집 권한을 공유해주세요.'
+            : sheetErr.message.includes('not found')
+              ? '시트가 삭제되었거나 ID가 잘못되었습니다.'
+              : undefined,
         });
       }
     }
 
     const elapsed = ((Date.now() - startTime) / 1000).toFixed(1);
-    logger.info(`[sync-tab-names] 완료: renamed=${renamed}, urlFixed=${urlFixed}, skipped=${skipped}, errors=${errors}, ${elapsed}s`);
+    logger.info(`[sync-tab-names] 완료: renamed=${renamed}, urlFixed=${urlFixed}, gidFilled=${gidFilled}, skipped=${skipped}, errors=${errors}, ${elapsed}s`);
 
     res.json({
       ok: true,
@@ -406,6 +456,7 @@ router.post('/sync-tab-names', authMiddleware, async (req, res, next) => {
       totalTabs: allTabs.length,
       renamed,
       urlFixed,
+      gidFilled,
       skipped,
       errors,
       errorDetails: errorDetails.length > 0 ? errorDetails : undefined,
