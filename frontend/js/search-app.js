@@ -2066,7 +2066,7 @@ async function loadAdminDashboard() {
           + (isClosedTab ? " is-closed-row" : "");
         row.dataset.tabkey = tabKey;
 
-        const _tabSheetUrl = t.sheetUrl || (t.sheetId ? `https://docs.google.com/spreadsheets/d/${t.sheetId}/edit` : "");
+        const _tabSheetUrl = t.sheetUrl || (t.sheetId ? `https://docs.google.com/spreadsheets/d/${t.sheetId}/edit${t.tabGid ? `?gid=${t.tabGid}#gid=${t.tabGid}` : ''}` : "");
         const tabNameHtml = _tabSheetUrl
           ? `<a class="dash-tab-link" href="${escHtml(_tabSheetUrl)}" target="_blank">${escHtml(t.tab)} <i class="fas fa-external-link-alt dash-tab-ext"></i></a>`
           : `<span>${escHtml(t.tab)}</span>`;
@@ -2291,7 +2291,7 @@ function renderDashboard(data) {
       const row        = document.createElement("div");
       row.className    = "dash-tab-row"+(isTabDone?" tab-done":"")+(isForceDone?" force-completed":"")+(isClosedTab?" is-closed-row":"");
       row.dataset.tabkey = tabKey;
-      const _tabSheetUrl2 = t.sheetUrl || (t.sheetId ? `https://docs.google.com/spreadsheets/d/${t.sheetId}/edit` : "");
+      const _tabSheetUrl2 = t.sheetUrl || (t.sheetId ? `https://docs.google.com/spreadsheets/d/${t.sheetId}/edit${t.tabGid ? `?gid=${t.tabGid}#gid=${t.tabGid}` : ''}` : "");
       const tabNameHtml = _tabSheetUrl2
         ? `<a class="dash-tab-link" href="${escHtml(_tabSheetUrl2)}" target="_blank">${escHtml(t.tab)} <i class="fas fa-external-link-alt dash-tab-ext"></i></a>`
         : `<span>${escHtml(t.tab)}</span>`;

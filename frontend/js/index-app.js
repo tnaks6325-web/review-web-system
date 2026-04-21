@@ -2165,7 +2165,7 @@ async function loadAdminDashboard() {
         const _overdueBadge2 = isOverdue2
           ? `<span class="badge-overdue"><i class="fas fa-fire" style="font-size:.55rem"></i> D+${_ovDays2}</span>`
           : "";
-        const _tabSheetUrl2 = t.sheetUrl || (t.sheetId ? `https://docs.google.com/spreadsheets/d/${t.sheetId}/edit` : "");
+        const _tabSheetUrl2 = t.sheetUrl || (t.sheetId ? `https://docs.google.com/spreadsheets/d/${t.sheetId}/edit${t.tabGid ? `?gid=${t.tabGid}#gid=${t.tabGid}` : ''}` : "");
         const tabNameHtml = _tabSheetUrl2
           ? `<a class="dash-tab-link" href="${escHtml(_tabSheetUrl2)}" target="_blank">${escHtml(t.tab)} <i class="fas fa-external-link-alt dash-tab-ext"></i></a>${_overdueBadge2}`
           : `<span>${escHtml(t.tab)}</span>${_overdueBadge2}`;
@@ -2489,7 +2489,7 @@ function renderDashboard(data) {
       const _overdueBadge = isOverdue
         ? `<span class="badge-overdue"><i class="fas fa-fire" style="font-size:.55rem"></i> D+${_ovDays}</span>`
         : "";
-      const _tabSheetUrl = t.sheetUrl || (t.sheetId ? `https://docs.google.com/spreadsheets/d/${t.sheetId}/edit` : "");
+      const _tabSheetUrl = t.sheetUrl || (t.sheetId ? `https://docs.google.com/spreadsheets/d/${t.sheetId}/edit${t.tabGid ? `?gid=${t.tabGid}#gid=${t.tabGid}` : ''}` : "");
       const tabNameHtml = _tabSheetUrl
         ? `<a class="dash-tab-link" href="${escHtml(_tabSheetUrl)}" target="_blank">${escHtml(t.tab)} <i class="fas fa-external-link-alt dash-tab-ext"></i></a>${_overdueBadge}`
         : `<span>${escHtml(t.tab)}</span>${_overdueBadge}`;

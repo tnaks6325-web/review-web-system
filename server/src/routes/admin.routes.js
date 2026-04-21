@@ -141,6 +141,7 @@ router.get('/dashboard', authMiddleware, async (req, res, next) => {
       SELECT
         im.sheet_id       AS "sheetId",
         im.tab_name       AS "tabName",
+        im.tab_gid        AS "tabGid",
         im.campaign_name  AS "campaignName",
         im.row_count      AS "totalCount",
         im.submitted_count AS "submittedCount",
@@ -224,6 +225,7 @@ router.get('/dashboard', authMiddleware, async (req, res, next) => {
       camp.tabs.push({
         sheetId:     t.sheetId,
         tab:         t.tabName,
+        tabGid:      t.tabGid || '',
         total,
         submitted,
         pending,
