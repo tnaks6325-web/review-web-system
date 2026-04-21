@@ -254,6 +254,7 @@ async function buildIndexSmart(forceFullRebuild = false) {
 
   // ── Post-build: no_name_col 탭 재검증 ──
   // batchGet 인덱스 불일치 등으로 잘못 분류된 탭을 개별 readSheet로 재확인
+  const postBuildLog = [];
   try {
     const { rows: noNameColTabs } = await pool.query(
       "SELECT sheet_id, tab_name, tab_gid, campaign_name FROM unrecognized_tabs WHERE status = 'pending' AND reason = 'no_name_col'"
@@ -264,18 +265,23 @@ async function buildIndexSmart(forceFullRebuild = false) {
       for (const tab of noNameColTabs) {
         try {
           const values = await readSheet(tab.sheet_id, `'${tab.tab_name}'!A:Z`);
+          const valLen = values ? values.length : 0;
+          postBuildLog.push({ tab: tab.tab_name, valLen });
           if (values && values.length >= 2) {
             const rows = parseTabRows(values, tab.sheet_id, tab.tab_name, tab.tab_gid, tab.campaign_name);
+            postBuildLog[postBuildLog.length - 1].parsedRows = rows.length;
             if (rows.length > 0) {
               // 성공! review_index에 upsert + unrecognized에서 resolve
               const checksum = computeChecksum(values);
               await _upsertTabIndex(tab.sheet_id, tab.tab_name, tab.tab_gid, checksum, rows, null, tab.campaign_name);
               await _resolveRecognizedTab(tab.sheet_id, tab.tab_name);
               resolvedCount++;
+              postBuildLog[postBuildLog.length - 1].resolved = true;
               logger.info(`[buildIndex] post-build 해결: ${tab.tab_name} (${rows.length}행)`);
             }
           }
         } catch (err) {
+          postBuildLog.push({ tab: tab.tab_name, error: err.message });
           logger.warn(`[buildIndex] post-build 검증 실패 (${tab.tab_name}): ${err.message}`);
         }
       }
@@ -286,6 +292,16 @@ async function buildIndexSmart(forceFullRebuild = false) {
     }
   } catch (err) {
     logger.warn(`[buildIndex] post-build 검증 오류: ${err.message}`);
+  }
+
+  // post-build 결과를 build_history에 업데이트
+  if (postBuildLog.length > 0) {
+    try {
+      await pool.query(
+        "UPDATE build_history SET build_log = build_log || $1 WHERE id = (SELECT id FROM build_history ORDER BY started_at DESC LIMIT 1)",
+        [JSON.stringify({ postBuild: postBuildLog })]
+      );
+    } catch (_) {}
   }
 
   // ── SSE 알림: 인덱스 빌드 완료 ──
