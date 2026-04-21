@@ -252,6 +252,42 @@ async function buildIndexSmart(forceFullRebuild = false) {
 
   logger.info(`[buildIndex] 완료: rebuilt=${rebuilt}, skipped=${skipped}, errors=${errors}, ${elapsed}ms`);
 
+  // ── Post-build: no_name_col 탭 재검증 ──
+  // batchGet 인덱스 불일치 등으로 잘못 분류된 탭을 개별 readSheet로 재확인
+  try {
+    const { rows: noNameColTabs } = await pool.query(
+      "SELECT sheet_id, tab_name, tab_gid, campaign_name FROM unrecognized_tabs WHERE status = 'pending' AND reason = 'no_name_col'"
+    );
+    if (noNameColTabs.length > 0) {
+      logger.info(`[buildIndex] post-build 검증: no_name_col ${noNameColTabs.length}건 재확인`);
+      let resolvedCount = 0;
+      for (const tab of noNameColTabs) {
+        try {
+          const values = await readSheet(tab.sheet_id, `'${tab.tab_name}'!A:Z`);
+          if (values && values.length >= 2) {
+            const rows = parseTabRows(values, tab.sheet_id, tab.tab_name, tab.tab_gid, tab.campaign_name);
+            if (rows.length > 0) {
+              // 성공! review_index에 upsert + unrecognized에서 resolve
+              const checksum = computeChecksum(values);
+              await _upsertTabIndex(tab.sheet_id, tab.tab_name, tab.tab_gid, checksum, rows, null, tab.campaign_name);
+              await _resolveRecognizedTab(tab.sheet_id, tab.tab_name);
+              resolvedCount++;
+              logger.info(`[buildIndex] post-build 해결: ${tab.tab_name} (${rows.length}행)`);
+            }
+          }
+        } catch (err) {
+          logger.warn(`[buildIndex] post-build 검증 실패 (${tab.tab_name}): ${err.message}`);
+        }
+      }
+      if (resolvedCount > 0) {
+        logger.info(`[buildIndex] post-build 결과: ${resolvedCount}/${noNameColTabs.length}건 해결`);
+        rebuilt += resolvedCount;
+      }
+    }
+  } catch (err) {
+    logger.warn(`[buildIndex] post-build 검증 오류: ${err.message}`);
+  }
+
   // ── SSE 알림: 인덱스 빌드 완료 ──
   emitIndexBuild({
     rebuilt,
