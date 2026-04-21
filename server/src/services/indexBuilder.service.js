@@ -813,4 +813,4 @@ async function _resolveRecognizedTab(sheetId, tabName) {
   } catch (_) {}
 }
 
-module.exports = { buildIndexSmart, acquireBuildLock, releaseBuildLock };
+module.exports = { buildIndexSmart, acquireBuildLock, releaseBuildLock, parseTabRows };

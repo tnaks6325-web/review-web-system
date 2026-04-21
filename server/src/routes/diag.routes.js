@@ -11,6 +11,7 @@ const { getMetricsSummary, resetMetrics } = require('../middleware/metrics.middl
 const { isSentryEnabled } = require('../utils/sentry');
 const { addClient, getStatus: getSSEStatus, emitImageExtract, emitImageUpload } = require('../utils/sse');
 const { logger } = require('../utils/logger');
+const { parseTabRows } = require('../services/indexBuilder.service');
 
 // ═══════════════════════════════════════════════════════════
 // GET /api/diag/debug-tab — 세부목록 현재 상태 진단 (GAS: debugTabConfig)
@@ -1425,6 +1426,30 @@ router.get('/debug-parse', authMiddleware, async (req, res, next) => {
       }
     }
 
+    // 실제 parseTabRows 호출 결과 (production과 동일한 코드 사용)
+    let realParseResult = null;
+    try {
+      const realRows = parseTabRows(values, sheetId, tabName, '0', 'debug');
+      realParseResult = {
+        rowCount: realRows.length,
+        firstRow: realRows.length > 0 ? { name: realRows[0].name, rowIndex: realRows[0].rowIndex, submitCol: realRows[0].submitCol } : null,
+      };
+    } catch (parseErr) {
+      realParseResult = { error: parseErr.message };
+    }
+
+    // batchGet 데이터로도 parseTabRows 호출
+    let batchParseResult = null;
+    try {
+      const batchRows = parseTabRows(valuesBatch, sheetId, tabName, '0', 'debug-batch');
+      batchParseResult = {
+        rowCount: batchRows.length,
+        firstRow: batchRows.length > 0 ? { name: batchRows[0].name, rowIndex: batchRows[0].rowIndex, submitCol: batchRows[0].submitCol } : null,
+      };
+    } catch (parseErr) {
+      batchParseResult = { error: parseErr.message };
+    }
+
     res.json({
       ok: true,
       totalRows: values.length,
@@ -1435,6 +1460,8 @@ router.get('/debug-parse', authMiddleware, async (req, res, next) => {
       scanResults,
       dataTabKeywords,
       nameKeywords,
+      realParseResult,
+      batchParseResult,
       batchComparison: {
         batchRows: valuesBatch.length,
         batchCols: valuesBatch[0] ? valuesBatch[0].length : 0,
