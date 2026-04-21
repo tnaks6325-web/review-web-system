@@ -10891,6 +10891,7 @@ async function loadUnrecognizedTabs() {
         </div>
         <div style="display:flex;align-items:center;gap:8px;margin-top:3px;padding-left:${t.status === 'pending' ? '23px' : '0'}">
           <span style="font-size:.72rem;color:var(--t3)"><i class="fas fa-file-alt" style="margin-right:3px"></i>${escHtml(t.campaign_name || '미분류')}</span>
+          ${t.sheet_id ? `<a href="https://docs.google.com/spreadsheets/d/${t.sheet_id}/edit${t.tab_gid ? '#gid=' + t.tab_gid : ''}" target="_blank" rel="noopener" style="font-size:.7rem;color:#3B82F6;text-decoration:none;flex-shrink:0" title="구글시트에서 열기"><i class="fas fa-external-link-alt"></i> 시트</a>` : ''}
           ${t.sample_rows ? `<details style="display:inline"><summary style="font-size:.7rem;color:#8B5CF6;cursor:pointer;display:inline">샘플 데이터 (첫 25행) 보기</summary><div style="max-height:200px;overflow:auto;margin-top:6px;font-size:.68rem;background:#F9FAFB;border-radius:6px;padding:8px"><table style="border-collapse:collapse;width:100%">${_buildUnrecogSampleTable(t.sample_rows)}</table></div></details>` : ''}
         </div>
       </div>`;
