@@ -1481,4 +1481,84 @@ router.get('/debug-parse', authMiddleware, async (req, res, next) => {
   }
 });
 
+// ═══════════════════════════════════════════════════════════
+// GET /api/diag/archive-detect-debug — 아카이브 감지 디버그
+// tab_configs(is_closed/force_done)와 index_master 매칭 확인
+// ═══════════════════════════════════════════════════════════
+router.get('/archive-detect-debug', authMiddleware, async (req, res, next) => {
+  try {
+    // 1) tab_configs에서 is_closed/force_done 탭 수
+    const { rows: tcStats } = await pool.query(`
+      SELECT 
+        count(*) AS total,
+        count(*) FILTER (WHERE is_closed = TRUE) AS closed_count,
+        count(*) FILTER (WHERE force_done = TRUE) AS force_done_count,
+        count(*) FILTER (WHERE is_closed = TRUE OR force_done = TRUE) AS either_count
+      FROM tab_configs
+    `);
+
+    // 2) index_master 총 건수 및 status 분포
+    const { rows: imStats } = await pool.query(`
+      SELECT 
+        count(*) AS total,
+        count(*) FILTER (WHERE status = 'active') AS active_count,
+        count(*) FILTER (WHERE row_count > 0 AND submitted_count >= row_count) AS completed_count
+      FROM index_master
+    `);
+
+    // 3) tab_configs(closed/force_done)와 index_master의 교집합
+    const { rows: joinStats } = await pool.query(`
+      SELECT 
+        count(*) AS matched_count
+      FROM tab_configs tc
+      INNER JOIN index_master im ON tc.sheet_id = im.sheet_id AND tc.tab_name = im.tab_name
+      WHERE (tc.is_closed = TRUE OR tc.force_done = TRUE)
+        AND im.status = 'active'
+    `);
+
+    // 4) tab_configs(closed/force_done)인데 index_master에 없는 탭 (샘플 10개)
+    const { rows: missingInIM } = await pool.query(`
+      SELECT tc.sheet_id, tc.tab_name, tc.is_closed, tc.force_done, tc.campaign_name
+      FROM tab_configs tc
+      LEFT JOIN index_master im ON tc.sheet_id = im.sheet_id AND tc.tab_name = im.tab_name
+      WHERE (tc.is_closed = TRUE OR tc.force_done = TRUE)
+        AND im.sheet_id IS NULL
+      LIMIT 10
+    `);
+
+    // 5) tab_configs(closed/force_done)인데 index_master status != 'active'
+    const { rows: notActiveInIM } = await pool.query(`
+      SELECT im.sheet_id, im.tab_name, im.status, tc.is_closed, tc.force_done
+      FROM tab_configs tc
+      INNER JOIN index_master im ON tc.sheet_id = im.sheet_id AND tc.tab_name = im.tab_name
+      WHERE (tc.is_closed = TRUE OR tc.force_done = TRUE)
+        AND im.status != 'active'
+      LIMIT 10
+    `);
+
+    // 6) 현재 detect 쿼리와 동일한 결과 (건수만)
+    const { rows: detectResult } = await pool.query(`
+      SELECT count(*) AS detect_count
+      FROM index_master im
+      LEFT JOIN tab_configs tc ON im.sheet_id = tc.sheet_id AND im.tab_name = tc.tab_name
+      WHERE im.status = 'active'
+        AND (
+          tc.is_closed = TRUE
+          OR tc.force_done = TRUE
+          OR (im.row_count > 0 AND im.submitted_count >= im.row_count)
+        )
+    `);
+
+    res.json({
+      ok: true,
+      tab_configs: tcStats[0],
+      index_master: imStats[0],
+      matched_active_count: joinStats[0]?.matched_count || 0,
+      missing_in_index_master: { count: missingInIM.length, sample: missingInIM },
+      not_active_in_index_master: { count: notActiveInIM.length, sample: notActiveInIM },
+      detect_query_count: detectResult[0]?.detect_count || 0,
+    });
+  } catch (err) { next(err); }
+});
+
 module.exports = router;
