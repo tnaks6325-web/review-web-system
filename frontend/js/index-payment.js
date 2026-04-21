@@ -806,6 +806,7 @@ const _SSE_ICONS = {
   image_upload:  { icon: 'fa-cloud-upload-alt', color: '#06B6D4', label: '업로드' },
   index_build:   { icon: 'fa-database', color: '#F59E0B', label: '인덱스' },
   system:        { icon: 'fa-info-circle', color: '#6B7280', label: '시스템' },
+  dirty_detected:{ icon: 'fa-bolt', color: '#D97706', label: '변경 감지' },
   connected:     { icon: 'fa-plug', color: '#10B981', label: '연결됨' },
 };
 
@@ -840,11 +841,15 @@ function connectSSE() {
     };
 
     // 이벤트별 핸들러
-    ['review_submit', 'order_submit', 'image_extract', 'image_upload', 'index_build', 'system'].forEach(function(evtType) {
+    ['review_submit', 'order_submit', 'image_extract', 'image_upload', 'index_build', 'system', 'dirty_detected'].forEach(function(evtType) {
       _sseSource.addEventListener(evtType, function(event) {
         try {
           const data = JSON.parse(event.data);
           _addNotification(data);
+          // ★ Phase 4: dirty_detected 수신 시 대시보드 dirty 배지 갱신
+          if (evtType === 'dirty_detected' && typeof _renderDirtyBadges === 'function') {
+            _renderDirtyBadges(data.dirtySheets || []);
+          }
         } catch (_) {}
       });
     });

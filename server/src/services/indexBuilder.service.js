@@ -918,4 +918,128 @@ async function _resolveRecognizedTab(sheetId, tabName, tabGid) {
   } catch (_) {}
 }
 
-module.exports = { buildIndexSmart, acquireBuildLock, releaseBuildLock, parseTabRows };
+module.exports = { buildIndexSmart, acquireBuildLock, releaseBuildLock, parseTabRows, checkDirtySheets, buildOneSheet };
+
+// ═══════════════════════════════════════════════════════════
+// ★ Phase 4: 경량 변경 감지 (Drive API만 사용, 인덱스 빌드 없음)
+// 각 시트의 modifiedTime을 Drive API로 확인하고
+// DB의 index_master.sheet_modified_at과 비교하여 변경된 시트 목록 반환
+// ═══════════════════════════════════════════════════════════
+
+async function checkDirtySheets() {
+  const { rows: campaignRows } = await pool.query(
+    'SELECT DISTINCT sheet_id FROM campaigns UNION SELECT DISTINCT sheet_id FROM tab_configs'
+  );
+  const sheetIds = [...new Set([
+    process.env.BASE_SHEET_ID,
+    ...campaignRows.map(r => r.sheet_id)
+  ])].filter(Boolean);
+
+  const dirtySheets = [];
+
+  for (const sheetId of sheetIds) {
+    try {
+      const remoteModified = await getSheetModifiedTime(sheetId);
+      if (!remoteModified) continue;
+
+      const { rows } = await pool.query(
+        'SELECT MAX(sheet_modified_at) AS last_modified FROM index_master WHERE sheet_id = $1',
+        [sheetId]
+      );
+      const localModified = rows[0]?.last_modified
+        ? new Date(rows[0].last_modified).getTime() : 0;
+      const remoteMs = new Date(remoteModified).getTime();
+
+      if (remoteMs > localModified) {
+        // 캠페인명 조회
+        const { rows: nameRows } = await pool.query(
+          "SELECT campaign_name FROM index_master WHERE sheet_id = $1 AND campaign_name IS NOT NULL LIMIT 1",
+          [sheetId]
+        );
+        dirtySheets.push({
+          sheetId,
+          campaignName: nameRows[0]?.campaign_name || sheetId.substring(0, 15) + '...',
+          remoteModified,
+          localModified: rows[0]?.last_modified || null,
+          diffSec: Math.round((remoteMs - localModified) / 1000),
+        });
+      }
+    } catch (err) {
+      logger.warn(`[dirtyCheck] 시트 ${sheetId.substring(0, 15)} 확인 실패: ${err.message}`);
+    }
+  }
+
+  return dirtySheets;
+}
+
+// ═══════════════════════════════════════════════════════════
+// ★ Phase 4: 특정 시트 1개만 인덱스 빌드
+// 전체 빌드 없이 변경 감지된 시트만 선택적으로 갱신
+// ═══════════════════════════════════════════════════════════
+
+async function buildOneSheet(sheetId) {
+  const startTime = Date.now();
+
+  // 잠금 획득
+  const lockResult = await acquireBuildLock('buildOneSheet');
+  if (!lockResult.acquired) {
+    return { ok: false, error: '타 사용자가 갱신중입니다.', locked: true };
+  }
+
+  try {
+    await _loadKeywordsFromDB();
+
+    // 기존 데이터 로드
+    const { rows: masterRows } = await pool.query(
+      'SELECT sheet_id, tab_name, tab_gid, checksum, sheet_modified_at FROM index_master WHERE sheet_id = $1',
+      [sheetId]
+    );
+    const checksumMap = {};
+    const sheetModifiedMap = {};
+    const gidToNameMap = {};
+    masterRows.forEach(r => {
+      checksumMap[`${r.sheet_id}||${r.tab_name}`] = r.checksum;
+      if (r.tab_gid) gidToNameMap[`${r.sheet_id}||${r.tab_gid}`] = r.tab_name;
+      if (r.sheet_modified_at) {
+        const existing = sheetModifiedMap[r.sheet_id];
+        const current = new Date(r.sheet_modified_at).getTime();
+        if (!existing || current > existing) sheetModifiedMap[r.sheet_id] = current;
+      }
+    });
+
+    const { rows: tcRows } = await pool.query(
+      'SELECT sheet_id, tab_name, force_done, is_closed FROM tab_configs WHERE sheet_id = $1',
+      [sheetId]
+    );
+    const tcMap = {};
+    tcRows.forEach(r => { tcMap[`${r.sheet_id}||${r.tab_name}`] = r; });
+
+    const { rows: archivedRows } = await pool.query(
+      'SELECT sheet_id, tab_name FROM index_master_archive WHERE sheet_id = $1',
+      [sheetId]
+    );
+    const archivedSet = new Set();
+    archivedRows.forEach(r => archivedSet.add(`${r.sheet_id}||${r.tab_name}`));
+
+    // 강제 빌드 (변경감지 스킵)
+    const result = await _processOneSheet(sheetId, {
+      forceFullRebuild: true,
+      checksumMap,
+      sheetModifiedMap,
+      tcMap,
+      archivedSet,
+      gidToNameMap,
+      startTime,
+    });
+
+    const elapsed = Date.now() - startTime;
+    logger.info(`[buildOneSheet] ${sheetId.substring(0, 15)}... → rebuilt=${result.rebuilt}, skipped=${result.skipped}, ${elapsed}ms`);
+
+    return { ok: true, ...result, elapsed: `${elapsed}ms` };
+  } catch (err) {
+    logger.error(`[buildOneSheet] 오류: ${err.message}`);
+    throw err;
+  } finally {
+    await releaseBuildLock();
+  }
+}

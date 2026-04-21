@@ -1,8 +1,8 @@
 const cron = require('node-cron');
-const { buildIndexSmart } = require('../services/indexBuilder.service');
+const { buildIndexSmart, checkDirtySheets } = require('../services/indexBuilder.service');
 const { processQueue, purgeCompleted } = require('../services/syncQueue.service');
 const { logger } = require('../utils/logger');
-const { emitIndexBuild } = require('../utils/sse');
+const { emitIndexBuild, broadcast } = require('../utils/sse');
 
 /**
  * GAS autoRebuildIndex 트리거 대체
@@ -37,6 +37,23 @@ function startCronJobs() {
     }
   }, { timezone: 'Asia/Seoul' });
 
+  // ── Phase 4: Dirty Check — 5분마다 변경 감지 (빌드 없이 Drive API만) ──
+  cron.schedule('*/5 9-19 * * 1-6', async () => {
+    try {
+      const dirtySheets = await checkDirtySheets();
+      if (dirtySheets.length > 0) {
+        logger.info(`[CRON-Dirty] 변경 감지: ${dirtySheets.length}개 시트 — ${dirtySheets.map(s => s.campaignName).join(', ')}`);
+        broadcast('dirty_detected', {
+          message: `${dirtySheets.length}개 시트에 변경사항 감지`,
+          dirtyCount: dirtySheets.length,
+          dirtySheets,
+        });
+      }
+    } catch (err) {
+      logger.warn(`[CRON-Dirty] 변경 감지 오류: ${err.message}`);
+    }
+  }, { timezone: 'Asia/Seoul' });
+
   // ── Phase 2: Sync Queue 워커 — 30초마다 pending 작업 처리 ──
   cron.schedule('*/30 * * * * *', async () => {
     try {
@@ -59,7 +76,7 @@ function startCronJobs() {
     }
   }, { timezone: 'Asia/Seoul' });
 
-  logger.info(`[CRON] 스케줄러 등록 완료: 인덱스=${schedule}, 전체재빌드=4h, 큐워커=30초, 정리=매일03시`);
+  logger.info(`[CRON] 스케줄러 등록 완료: 인덱스=${schedule}, 전체재빌드=4h, dirty=5분, 큐워커=30초, 정리=매일03시`);
 }
 
 module.exports = { startCronJobs };
