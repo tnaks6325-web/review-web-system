@@ -63,6 +63,7 @@ const _ACTION_MAP = {
   'getTabEndDate':    { method: 'GET',  path: '/api/tab/end-date' },
   'getCampaignStats': { method: 'GET',  path: '/api/diag/campaign-stats' },
   'syncTabFromSheet': { method: 'POST', path: '/api/tab/sync-from-sheet' },
+  'syncTabNames':     { method: 'POST', path: '/api/tab/sync-tab-names' },
   'cleanClosedTabs':  { method: 'POST', path: '/api/tab/clean-closed' },
   'getTabDashboard':  { method: 'GET',  path: '/api/tab/dashboard' },
 

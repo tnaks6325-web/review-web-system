@@ -2,7 +2,7 @@ const express = require('express');
 const router = express.Router();
 const pool = require('../db/pool');
 const { authMiddleware } = require('../middleware/auth.middleware');
-// [REMOVED] readSheet — 베이스시트 의존성 제거 완료 (DB가 원본)
+const { getSpreadsheetMeta } = require('../services/sheets.service');
 const { logger } = require('../utils/logger');
 
 // POST /api/tab/config — 탭 설정 저장/수정 (GAS: setTabConfig)
@@ -224,6 +224,197 @@ router.post('/sync-from-sheet', authMiddleware, async (req, res) => {
     deprecated: true,
     message: '베이스시트 의존성이 제거되었습니다. DB(tab_configs)가 원본이므로 시트 동기화가 필요하지 않습니다. 웹 UI에서 직접 탭을 관리하세요.',
   });
+});
+
+// ═══════════════════════════════════════════════════════════
+// POST /api/tab/sync-tab-names — 시트 탭명·URL 실시간 동기화
+// Google Sheets API로 각 시트의 실제 탭명(GID 기반)을 조회하여
+// tab_configs, index_master, review_index의 탭명과 URL을 일괄 업데이트
+// ═══════════════════════════════════════════════════════════
+router.post('/sync-tab-names', authMiddleware, async (req, res, next) => {
+  try {
+    const { dryRun } = req.body || {};
+    const startTime = Date.now();
+
+    // 1. 활성 탭 목록 (is_closed=FALSE) + index_master의 tab_gid 정보 수집
+    const { rows: allTabs } = await pool.query(`
+      SELECT tc.sheet_id, tc.tab_name, tc.sheet_url, tc.campaign_name,
+             tc.is_closed, tc.force_done,
+             im.tab_gid, im.tab_name AS index_tab_name
+      FROM tab_configs tc
+      LEFT JOIN index_master im ON tc.sheet_id = im.sheet_id AND tc.tab_name = im.tab_name
+      ORDER BY tc.campaign_name, tc.tab_name
+    `);
+
+    // 2. 고유 sheet_id 별로 그룹핑
+    const sheetMap = {};
+    allTabs.forEach(t => {
+      if (!sheetMap[t.sheet_id]) sheetMap[t.sheet_id] = [];
+      sheetMap[t.sheet_id].push(t);
+    });
+
+    const sheetIds = Object.keys(sheetMap);
+    logger.info(`[sync-tab-names] ${sheetIds.length}개 시트, ${allTabs.length}개 탭 대상`);
+
+    const results = [];
+    let renamed = 0, urlFixed = 0, skipped = 0, errors = 0;
+    const errorDetails = [];
+
+    // 3. 각 시트별로 실제 탭 메타 조회
+    for (const sheetId of sheetIds) {
+      try {
+        const meta = await getSpreadsheetMeta(sheetId);
+        if (!meta || meta.length === 0) {
+          skipped++;
+          continue;
+        }
+
+        // 실제 시트의 GID → 탭명 맵
+        const realGidMap = {};  // gid → { title, gid }
+        const realNameMap = {}; // title → { title, gid }
+        meta.forEach(s => {
+          const gid = String(s.properties.sheetId);
+          const title = s.properties.title;
+          realGidMap[gid] = { title, gid };
+          realNameMap[title] = { title, gid };
+        });
+
+        const dbTabs = sheetMap[sheetId];
+        const correctSheetUrl = `https://docs.google.com/spreadsheets/d/${sheetId}/edit`;
+
+        for (const dbTab of dbTabs) {
+          const oldName = dbTab.tab_name;
+          const dbGid = dbTab.tab_gid ? String(dbTab.tab_gid) : null;
+          let newName = null;
+          let matchMethod = null;
+
+          // 방법 1: GID 기반 매칭 (가장 정확)
+          if (dbGid && realGidMap[dbGid]) {
+            const real = realGidMap[dbGid];
+            if (real.title !== oldName) {
+              newName = real.title;
+              matchMethod = 'gid';
+            }
+          }
+
+          // 방법 2: GID 없으면 이름 기반 확인 (이름이 시트에 있으면 OK)
+          if (!newName && !dbGid && !realNameMap[oldName]) {
+            // DB에 있는 탭명이 시트에 없음 → 유사 이름 검색 불가, 스킵
+            results.push({
+              sheetId: sheetId.substring(0, 15) + '...',
+              oldName,
+              newName: null,
+              status: 'no_gid',
+              campaign: dbTab.campaign_name || '',
+              message: 'GID 없음 — 수동 확인 필요',
+            });
+            skipped++;
+            continue;
+          }
+
+          // URL 불일치 확인
+          const currentUrl = (dbTab.sheet_url || '').split('#')[0];
+          const urlMismatch = currentUrl && currentUrl !== correctSheetUrl;
+
+          if (!newName && !urlMismatch) {
+            // 탭명도 맞고 URL도 맞음 → 스킵
+            skipped++;
+            continue;
+          }
+
+          // 변경 사항 발견
+          const entry = {
+            sheetId: sheetId.substring(0, 15) + '...',
+            fullSheetId: sheetId,
+            oldName,
+            newName: newName || oldName,
+            matchMethod: matchMethod || 'name_ok',
+            campaign: dbTab.campaign_name || '',
+            urlFixed: urlMismatch,
+            oldUrl: urlMismatch ? currentUrl : null,
+            newUrl: urlMismatch ? correctSheetUrl : null,
+          };
+
+          if (newName) {
+            entry.status = dryRun ? 'dry_run' : 'renamed';
+          } else if (urlMismatch) {
+            entry.status = dryRun ? 'dry_run_url' : 'url_fixed';
+          }
+
+          if (!dryRun) {
+            try {
+              if (newName) {
+                // tab_configs 탭명 변경
+                await pool.query(
+                  `UPDATE tab_configs SET tab_name = $1, sheet_url = $2, updated_at = NOW()
+                   WHERE sheet_id = $3 AND tab_name = $4`,
+                  [newName, correctSheetUrl, sheetId, oldName]
+                );
+                // index_master 탭명 변경
+                await pool.query(
+                  'UPDATE index_master SET tab_name = $1 WHERE sheet_id = $2 AND tab_name = $3',
+                  [newName, sheetId, oldName]
+                );
+                // review_index 탭명 변경
+                const riResult = await pool.query(
+                  'UPDATE review_index SET tab_name = $1 WHERE sheet_id = $2 AND tab_name = $3',
+                  [newName, sheetId, oldName]
+                );
+                entry.reviewIndexUpdated = riResult.rowCount;
+                renamed++;
+                logger.info(`[sync-tab-names] 탭명 변경: "${oldName}" → "${newName}" (sheet=${sheetId.substring(0, 15)})`);
+              }
+              if (urlMismatch) {
+                // URL만 수정
+                await pool.query(
+                  'UPDATE tab_configs SET sheet_url = $1, updated_at = NOW() WHERE sheet_id = $2 AND tab_name = $3',
+                  [correctSheetUrl, sheetId, newName || oldName]
+                );
+                urlFixed++;
+              }
+            } catch (updateErr) {
+              entry.status = 'error';
+              entry.error = updateErr.message;
+              errors++;
+              if (errorDetails.length < 10) errorDetails.push(`${oldName}: ${updateErr.message}`);
+            }
+          }
+
+          results.push(entry);
+        }
+      } catch (sheetErr) {
+        // 시트 접근 불가 (삭제됨, 권한 없음 등)
+        errors++;
+        if (errorDetails.length < 10) {
+          errorDetails.push(`시트 ${sheetId.substring(0, 15)}...: ${sheetErr.message}`);
+        }
+        results.push({
+          sheetId: sheetId.substring(0, 15) + '...',
+          status: 'sheet_error',
+          error: sheetErr.message,
+        });
+      }
+    }
+
+    const elapsed = ((Date.now() - startTime) / 1000).toFixed(1);
+    logger.info(`[sync-tab-names] 완료: renamed=${renamed}, urlFixed=${urlFixed}, skipped=${skipped}, errors=${errors}, ${elapsed}s`);
+
+    res.json({
+      ok: true,
+      dryRun: !!dryRun,
+      totalSheets: sheetIds.length,
+      totalTabs: allTabs.length,
+      renamed,
+      urlFixed,
+      skipped,
+      errors,
+      errorDetails: errorDetails.length > 0 ? errorDetails : undefined,
+      elapsed: `${elapsed}s`,
+      results: results.filter(r => r.status !== undefined), // 변경 있는 것만
+    });
+  } catch (err) {
+    next(err);
+  }
 });
 
 // ═══════════════════════════════════════════════════════════

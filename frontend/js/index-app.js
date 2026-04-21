@@ -11893,6 +11893,131 @@ async function syncTabFromSheet() {
   showToast("베이스시트 동기화 기능은 제거되었습니다. DB(tab_configs)가 원본이므로 웹 UI에서 직접 관리하세요.", "info");
 }
 
+// ── 탭명·URL 동기화 (시트 실제 탭명 ↔ DB) ──
+async function syncTabNames(dryRun) {
+  const btn = document.getElementById("btnSyncTabNames");
+  const actionLabel = dryRun ? "미리보기" : "동기화";
+
+  if (!dryRun && !confirm(
+    "Google Sheets의 실제 탭명과 URL을 DB에 동기화합니다.\n\n" +
+    "• 시트에서 탭 이름이 변경된 경우 DB를 업데이트\n" +
+    "• 잘못된 시트 URL도 자동 교정\n\n" +
+    "계속하시겠습니까?"
+  )) return;
+
+  if (btn) { btn.disabled = true; btn.innerHTML = `<i class="fas fa-spinner fa-spin"></i> ${actionLabel}중...`; }
+
+  try {
+    const res = await gasPost({ action: "syncTabNames", dryRun: !!dryRun }, 120000);
+    if (res.error) { showToast(res.error, "error"); return; }
+
+    // 결과 요약 토스트
+    const parts = [];
+    if (res.renamed > 0) parts.push(`탭명 변경 ${res.renamed}건`);
+    if (res.urlFixed > 0) parts.push(`URL 교정 ${res.urlFixed}건`);
+    if (res.errors > 0) parts.push(`오류 ${res.errors}건`);
+    if (parts.length === 0) parts.push("변경 없음 — 모든 탭명이 일치합니다");
+
+    const prefix = dryRun ? "[미리보기] " : "";
+    showToast(`${prefix}${parts.join(", ")} (${res.elapsed})`, res.errors > 0 ? "warning" : "success");
+
+    // 변경 상세가 있으면 모달로 표시
+    if (res.results && res.results.length > 0) {
+      _showSyncTabNamesResult(res, dryRun);
+    }
+
+    // 실제 실행 후 대시보드 새로고침
+    if (!dryRun && (res.renamed > 0 || res.urlFixed > 0)) {
+      loadTabDashboard();
+    }
+  } catch (err) {
+    showToast("탭명 동기화 오류: " + err.message, "error");
+  } finally {
+    if (btn) { btn.disabled = false; btn.innerHTML = '<i class="fas fa-exchange-alt"></i> 탭명 동기화'; }
+  }
+}
+
+function _showSyncTabNamesResult(res, dryRun) {
+  // 기존 결과 모달 제거
+  const old = document.getElementById("syncTabNamesResultModal");
+  if (old) old.remove();
+
+  const statusColor = (s) => {
+    if (s === 'renamed') return '#059669';
+    if (s === 'url_fixed') return '#0369A1';
+    if (s === 'dry_run' || s === 'dry_run_url') return '#7C3AED';
+    if (s === 'error' || s === 'sheet_error') return '#DC2626';
+    if (s === 'no_gid') return '#D97706';
+    return '#6B7280';
+  };
+  const statusLabel = (s) => {
+    if (s === 'renamed') return '변경 완료';
+    if (s === 'url_fixed') return 'URL 교정';
+    if (s === 'dry_run') return '변경 예정';
+    if (s === 'dry_run_url') return 'URL 교정 예정';
+    if (s === 'error' || s === 'sheet_error') return '오류';
+    if (s === 'no_gid') return 'GID 없음';
+    return s;
+  };
+
+  let tableRows = res.results.map(r => {
+    const badge = `<span style="display:inline-block;padding:1px 7px;border-radius:10px;font-size:.68rem;font-weight:600;color:#fff;background:${statusColor(r.status)}">${statusLabel(r.status)}</span>`;
+    let detail = '';
+    if (r.newName && r.newName !== r.oldName) {
+      detail += `<span style="color:#DC2626;text-decoration:line-through">${escHtml(r.oldName)}</span> → <b style="color:#059669">${escHtml(r.newName)}</b>`;
+    } else {
+      detail += escHtml(r.oldName || '');
+    }
+    if (r.urlFixed) {
+      detail += `<br><span style="font-size:.65rem;color:#0369A1"><i class="fas fa-link"></i> URL 교정됨</span>`;
+    }
+    if (r.error) {
+      detail += `<br><span style="font-size:.65rem;color:#DC2626">${escHtml(r.error)}</span>`;
+    }
+    if (r.message) {
+      detail += `<br><span style="font-size:.65rem;color:#D97706">${escHtml(r.message)}</span>`;
+    }
+    return `<tr>
+      <td style="padding:4px 6px;font-size:.72rem;border-bottom:1px solid #F3F4F6">${badge}</td>
+      <td style="padding:4px 6px;font-size:.72rem;border-bottom:1px solid #F3F4F6">${escHtml(r.campaign || '')}</td>
+      <td style="padding:4px 6px;font-size:.72rem;border-bottom:1px solid #F3F4F6">${detail}</td>
+    </tr>`;
+  }).join('');
+
+  const title = dryRun ? "탭명 동기화 미리보기" : "탭명 동기화 결과";
+  const summary = `시트 ${res.totalSheets}개 · 탭 ${res.totalTabs}개 검사 → 변경 ${res.renamed}건, URL교정 ${res.urlFixed}건, 스킵 ${res.skipped}건, 오류 ${res.errors}건 (${res.elapsed})`;
+
+  const modal = document.createElement('div');
+  modal.id = 'syncTabNamesResultModal';
+  modal.className = 'modal-overlay';
+  modal.style.cssText = 'display:flex;position:fixed;top:0;left:0;right:0;bottom:0;background:rgba(0,0,0,.45);z-index:10000;align-items:center;justify-content:center';
+  modal.innerHTML = `
+    <div style="background:#fff;border-radius:12px;max-width:600px;width:95%;max-height:80vh;display:flex;flex-direction:column;box-shadow:0 20px 40px rgba(0,0,0,.15)">
+      <div style="padding:12px 16px;border-bottom:1px solid #E5E7EB;display:flex;align-items:center;justify-content:space-between">
+        <h3 style="margin:0;font-size:.95rem;color:#1E293B"><i class="fas fa-exchange-alt" style="color:#7C3AED;margin-right:6px"></i>${title}</h3>
+        <button onclick="this.closest('.modal-overlay').remove()" style="background:none;border:none;cursor:pointer;font-size:1rem;color:#6B7280;padding:4px"><i class="fas fa-times"></i></button>
+      </div>
+      <div style="padding:10px 16px;font-size:.73rem;color:#6B7280;background:#F8FAFC;border-bottom:1px solid #E5E7EB">${summary}</div>
+      <div style="overflow-y:auto;flex:1;padding:0">
+        <table style="width:100%;border-collapse:collapse">
+          <thead><tr style="background:#F9FAFB">
+            <th style="padding:6px;font-size:.7rem;text-align:left;color:#6B7280;font-weight:600;border-bottom:1px solid #E5E7EB">상태</th>
+            <th style="padding:6px;font-size:.7rem;text-align:left;color:#6B7280;font-weight:600;border-bottom:1px solid #E5E7EB">캠페인</th>
+            <th style="padding:6px;font-size:.7rem;text-align:left;color:#6B7280;font-weight:600;border-bottom:1px solid #E5E7EB">탭명</th>
+          </tr></thead>
+          <tbody>${tableRows}</tbody>
+        </table>
+      </div>
+      <div style="padding:10px 16px;border-top:1px solid #E5E7EB;display:flex;gap:8px;justify-content:flex-end">
+        ${dryRun ? `<button onclick="syncTabNames(false);this.closest('.modal-overlay').remove()" style="padding:6px 16px;background:#7C3AED;color:#fff;border:none;border-radius:6px;font-size:.8rem;font-weight:600;cursor:pointer"><i class="fas fa-play"></i> 실행하기</button>` : ''}
+        <button onclick="this.closest('.modal-overlay').remove()" style="padding:6px 16px;background:#6B7280;color:#fff;border:none;border-radius:6px;font-size:.8rem;font-weight:600;cursor:pointer">닫기</button>
+      </div>
+    </div>
+  `;
+  document.body.appendChild(modal);
+  modal.addEventListener('click', (e) => { if (e.target === modal) modal.remove(); });
+}
+
 // ── 마감탭 인덱스 정리 ──
 async function cleanClosedTabs() {
   const btn = document.getElementById("btnCleanClosed");
