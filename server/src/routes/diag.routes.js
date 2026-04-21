@@ -1351,13 +1351,22 @@ router.get('/debug-parse', authMiddleware, async (req, res, next) => {
 
     const { batchReadSheet } = require('../services/sheets.service');
 
-    // 시트 데이터 읽기
-    let values;
+    // 시트 데이터 읽기 (두 가지 방식 비교)
+    let values, valuesBatch;
+    // 방식 1: readSheet (단일 get)
     try {
       const result = await readSheet(sheetId, `'${tabName}'`);
       values = result || [];
     } catch (err) {
       return res.json({ ok: false, error: `시트 읽기 실패: ${err.message}` });
+    }
+    // 방식 2: batchReadSheet (batchGet — buildIndexSmart와 동일)
+    try {
+      const batchResult = await batchReadSheet(sheetId, [`'${tabName}'!A:Z`]);
+      const batchItem = batchResult[0];
+      valuesBatch = batchItem?.values || [];
+    } catch (err) {
+      valuesBatch = [];
     }
 
     // DB에서 키워드 로드
@@ -1426,6 +1435,14 @@ router.get('/debug-parse', authMiddleware, async (req, res, next) => {
       scanResults,
       dataTabKeywords,
       nameKeywords,
+      batchComparison: {
+        batchRows: valuesBatch.length,
+        batchCols: valuesBatch[0] ? valuesBatch[0].length : 0,
+        headerRowMatch: valuesBatch.length > headerRowIdx && headerRowIdx >= 0
+          ? (valuesBatch[headerRowIdx] || []).map(c => String(c || '').trim()).slice(0, 20)
+          : null,
+        identical: values.length === valuesBatch.length,
+      },
       firstRows: values.slice(0, Math.min(values.length, 55)).map((r, i) => ({
         row: i,
         cols: (r || []).length,
