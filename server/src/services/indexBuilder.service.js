@@ -295,7 +295,7 @@ async function buildIndexSmart(forceFullRebuild = false) {
               // 성공! review_index에 upsert + unrecognized에서 resolve
               const checksum = computeChecksum(values);
               await _upsertTabIndex(tab.sheet_id, tab.tab_name, tab.tab_gid, checksum, rows, null, tab.campaign_name);
-              await _resolveRecognizedTab(tab.sheet_id, tab.tab_name);
+              await _resolveRecognizedTab(tab.sheet_id, tab.tab_name, tab.tab_gid);
               resolvedCount++;
               logEntry.resolved = true;
               logger.info(`[buildIndex] post-build 해결: ${tab.tab_name} (${rows.length}행)`);
@@ -498,7 +498,7 @@ async function _processOneSheet(sheetId, opts) {
       }
 
       await _upsertTabIndex(sheetId, tabName, tabGid, newChecksum, rows, currentModifiedTime, spreadsheetTitle);
-      await _resolveRecognizedTab(sheetId, tabName);
+      await _resolveRecognizedTab(sheetId, tabName, tabGid);
       rebuilt++;
 
     } catch (err) {
@@ -823,12 +823,21 @@ async function _recordUnrecognizedTab(sheetId, tabName, tabGid, campaignName, va
 }
 
 // 인식 성공한 탭은 unrecognized_tabs에서 제거 (해결됨)
-async function _resolveRecognizedTab(sheetId, tabName) {
+// tab_name 매칭 + tab_gid 매칭 (탭명 변경 대응)
+async function _resolveRecognizedTab(sheetId, tabName, tabGid) {
   try {
+    // 1) 현재 이름으로 resolve
     await pool.query(
       `UPDATE unrecognized_tabs SET status = 'resolved' WHERE sheet_id = $1 AND tab_name = $2 AND status = 'pending'`,
       [sheetId, tabName]
     );
+    // 2) 같은 시트의 같은 gid인데 다른 이름으로 남아있는 유령 레코드도 resolve
+    if (tabGid) {
+      await pool.query(
+        `UPDATE unrecognized_tabs SET status = 'resolved' WHERE sheet_id = $1 AND tab_gid = $2 AND tab_name != $3 AND status = 'pending'`,
+        [sheetId, tabGid, tabName]
+      );
+    }
   } catch (_) {}
 }
 
