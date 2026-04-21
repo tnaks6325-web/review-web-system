@@ -912,6 +912,13 @@ function _addNotification(data) {
   _sseUnread++;
   _renderNotifications();
 
+  // ★ Phase 3: 대시보드 부분 갱신 이벤트 발행
+  if (type === 'review_submit' || type === 'order_submit' || type === 'index_build') {
+    try {
+      window.dispatchEvent(new CustomEvent('sse-dashboard-update', { detail: data }));
+    } catch (_) {}
+  }
+
   // 토스트 알림 (화면에 보이지 않을 때)
   if (typeof showToast === 'function') {
     showToast(cfg.label + ': ' + (data.message || '').substring(0, 60), 'info');

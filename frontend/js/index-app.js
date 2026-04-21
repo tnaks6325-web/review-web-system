@@ -9541,6 +9541,156 @@ function _autoRefreshDashboardAfterBuild() {
   }, 800);
 }
 
+// ═══════════════════════════════════════════════════════════
+// ★ Phase 3: SSE 기반 대시보드 부분 갱신
+// review_submit / order_submit 이벤트 수신 시 전체 새로고침 없이
+// 해당 탭의 숫자만 실시간 업데이트
+// ═══════════════════════════════════════════════════════════
+
+/**
+ * SSE 이벤트로 대시보드 탭 카운터를 부분 갱신
+ * @param {object} data - SSE 이벤트 데이터 { type, sheetId, tabName, ... }
+ */
+function _sseDashboardPartialUpdate(data) {
+  if (!data || !data.sheetId || !data.tabName) return;
+
+  const screenAdmin = document.getElementById("screenAdmin");
+  if (!screenAdmin || !screenAdmin.classList.contains("active")) return;
+
+  const tabKey = data.sheetId + "||" + data.tabName;
+  const rows = document.querySelectorAll(`.dash-tab-row[data-tabkey="${CSS.escape(tabKey)}"]`);
+  if (rows.length === 0) return;
+
+  if (data.type === 'review_submit') {
+    // 제출 +1: dash-done 숫자 증가, 진행률 바 갱신
+    rows.forEach(function(row) {
+      const numsEl = row.querySelector('.dash-tab-nums');
+      if (!numsEl) return;
+      const doneEl  = numsEl.querySelector('.dash-done');
+      const totalEl = numsEl.querySelector('.dash-total');
+      if (!doneEl || !totalEl) return;
+
+      const newDone  = parseInt(doneEl.textContent) + 1;
+      const total    = parseInt(totalEl.textContent);
+      doneEl.textContent = newDone;
+
+      // 진행률 바 업데이트
+      const barWrap = row.querySelector('.dash-tab-bar-wrap');
+      if (barWrap) {
+        const bar = barWrap.querySelector('.dash-tab-bar');
+        if (bar && total > 0) {
+          const newRate = Math.round(newDone / total * 100);
+          bar.style.width = newRate + '%';
+          bar.className = 'dash-tab-bar ' + (newRate === 100 ? 'bar-full' : newRate >= 50 ? 'bar-half' : 'bar-low');
+        }
+      }
+
+      // 정렬용 데이터 속성 갱신
+      row.dataset.sortNums = newDone;
+      if (total > 0) row.dataset.sortBar = Math.round(newDone / total * 100);
+
+      // 플래시 효과
+      doneEl.style.transition = 'color 0.3s';
+      doneEl.style.color = '#16A34A';
+      doneEl.style.fontWeight = '800';
+      setTimeout(function() { doneEl.style.color = ''; doneEl.style.fontWeight = ''; }, 2000);
+    });
+
+    // 전체 합계 업데이트
+    _sseUpdateGrandTotals(1, 0);
+
+    // 캠페인 헤더 합계 업데이트
+    _sseUpdateCampaignTotal(tabKey, 1, 0);
+
+  } else if (data.type === 'order_submit') {
+    // 구매양식 = 새 행 +1: total 증가
+    rows.forEach(function(row) {
+      const numsEl = row.querySelector('.dash-tab-nums');
+      if (!numsEl) return;
+      const totalEl = numsEl.querySelector('.dash-total');
+      if (!totalEl) return;
+
+      const newTotal = parseInt(totalEl.textContent) + 1;
+      totalEl.textContent = newTotal;
+
+      // 플래시 효과
+      totalEl.style.transition = 'color 0.3s';
+      totalEl.style.color = '#2563EB';
+      totalEl.style.fontWeight = '800';
+      setTimeout(function() { totalEl.style.color = ''; totalEl.style.fontWeight = ''; }, 2000);
+    });
+
+    // 전체 합계: total +1, pending +1
+    _sseUpdateGrandTotals(0, 1);
+    _sseUpdateCampaignTotal(tabKey, 0, 1);
+  }
+}
+
+/** 전체 합계 (sumTotal, sumDone, sumPending) 업데이트 */
+function _sseUpdateGrandTotals(submitDelta, totalDelta) {
+  const elTotal   = document.getElementById("sumTotal");
+  const elDone    = document.getElementById("sumDone");
+  const elPending = document.getElementById("sumPending");
+  const elRate    = document.getElementById("sumRate");
+  if (!elTotal || !elDone || !elPending) return;
+
+  const oldTotal = parseInt(elTotal.textContent.replace(/,/g, '')) || 0;
+  const oldDone  = parseInt(elDone.textContent.replace(/,/g, ''))  || 0;
+
+  const newTotal = oldTotal + totalDelta;
+  const newDone  = oldDone + submitDelta;
+  const newPending = Math.max(0, newTotal - newDone);
+  const newRate    = newTotal > 0 ? Math.round(newDone / newTotal * 100) : 0;
+
+  elTotal.textContent   = newTotal.toLocaleString();
+  elDone.textContent    = newDone.toLocaleString();
+  elPending.textContent = newPending.toLocaleString();
+  if (elRate) elRate.textContent = newRate + "%";
+}
+
+/** 캠페인 헤더의 submitted/total 합계 업데이트 */
+function _sseUpdateCampaignTotal(tabKey, submitDelta, totalDelta) {
+  const sheetId = tabKey.split("||")[0];
+  if (!sheetId) return;
+
+  // 캠페인 블록은 내부 탭의 sheetId로 찾음 — data-sheetid 속성 활용
+  const campRefreshBtns = document.querySelectorAll(`.btn-camp-refresh[data-sheetid="${CSS.escape(sheetId)}"]`);
+  campRefreshBtns.forEach(function(btn) {
+    const header = btn.closest('.dash-campaign-header');
+    if (!header) return;
+    const totalSpan = header.querySelector('.dash-campaign-total');
+    if (!totalSpan) return;
+
+    // "150/300 (50%)" 형태 파싱
+    const match = totalSpan.textContent.match(/(\d+)\/(\d+)\s*\((\d+)%\)/);
+    if (!match) return;
+    const newSubmitted = parseInt(match[1]) + submitDelta;
+    const newTotal     = parseInt(match[2]) + totalDelta;
+    const newRate      = newTotal > 0 ? Math.round(newSubmitted / newTotal * 100) : 0;
+    totalSpan.textContent = `${newSubmitted}/${newTotal} (${newRate}%)`;
+  });
+}
+
+// ═══════════════════════════════════════════════════════════
+// SSE 이벤트 리스너 등록 (기존 알림 시스템과 병행)
+// index-payment.js의 _addNotification과 별도로 대시보드 DOM 직접 갱신
+// ═══════════════════════════════════════════════════════════
+(function _initSSEDashboardListener() {
+  // SSE 이벤트는 index-payment.js에서 EventSource로 수신됨
+  // 여기서는 커스텀 이벤트를 통해 대시보드 갱신을 연결
+  // index-payment.js의 _addNotification에서 window 이벤트를 발행하도록 연동
+  window.addEventListener('sse-dashboard-update', function(e) {
+    if (e.detail) {
+      if (e.detail.type === 'index_build') {
+        // 인덱스 빌드 완료 → 전체 새로고침 (데이터 대폭 변경 가능)
+        _autoRefreshDashboardAfterBuild();
+      } else {
+        _sseDashboardPartialUpdate(e.detail);
+      }
+    }
+  });
+})();
+
 /** ★ 빌드 잠금 강제 해제 (타임아웃 후 재갱신 가능하도록) */
 async function _forceReleaseBuildLock() {
   if (!APP_CONFIG.GAS_WEB_APP_URL) { showToast("GAS URL을 먼저 설정해주세요.", "warning"); return; }
