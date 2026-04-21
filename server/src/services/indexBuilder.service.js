@@ -793,12 +793,23 @@ async function _recordUnrecognizedTab(sheetId, tabName, tabGid, campaignName, va
             return name.length > 0;
           });
           if (!hasAnyName) {
-            reason = 'no_data';  // 헤더/이름컬럼 존재, 데이터 미입력
+            reason = 'no_data';  // 헤더/이름컬럼 존재, 데이터 미입력 → 진행 중인 탭
           } else {
             reason = 'no_name_col';  // 기타 원인
           }
         }
       }
+    }
+
+    // no_data: 헤더 구조는 정상이지만 데이터가 아직 채워지지 않은 진행 중인 탭
+    // → 인식 실패가 아니므로 기록하지 않고, 기존 레코드가 있으면 resolve 처리
+    if (reason === 'no_data') {
+      await pool.query(
+        `UPDATE unrecognized_tabs SET status = 'resolved'
+         WHERE sheet_id = $1 AND (tab_name = $2 OR tab_gid = $3) AND status = 'pending'`,
+        [sheetId, tabName, tabGid]
+      );
+      return;
     }
 
     // 첫 55행 샘플 (분석용 — 50행 헤더 + 데이터 5행)
