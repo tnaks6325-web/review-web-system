@@ -59,6 +59,20 @@ router.post('/review', async (req, res, next) => {
       logger.warn(`[submit/review] DB 업데이트 실패: ${dbErr.message}`);
     }
 
+    // ── Phase 1: index_master 카운트 즉시 반영 ──
+    // 다음 인덱스 빌드에서 시트 원본 기준 재계산되므로 누적 오차 없음
+    if (dbUpdated) {
+      try {
+        await pool.query(
+          `UPDATE index_master
+           SET submitted_count = submitted_count + 1
+           WHERE sheet_id = $1 AND tab_name = $2
+             AND submitted_count < row_count`,
+          [sheetId, tabName]
+        );
+      } catch (_) { /* 대시보드 카운트 보조 — 실패해도 무시 */ }
+    }
+
     // ── Step 2: Sheets 동시 쓰기 시도 ──
     let sheetsWritten = false;
     try {
@@ -153,6 +167,20 @@ router.post('/order', async (req, res, next) => {
       dbSaved = true;
     } catch (dbErr) {
       logger.warn(`[submit/order] DB 저장 실패: ${dbErr.message}`);
+    }
+
+    // ── Phase 1: index_master 카운트 즉시 반영 ──
+    // 구매양식 제출 = 새 행 추가 → row_count +1
+    // 다음 인덱스 빌드에서 시트 원본 기준 재계산되므로 누적 오차 없음
+    if (dbSaved) {
+      try {
+        await pool.query(
+          `UPDATE index_master
+           SET row_count = row_count + 1
+           WHERE sheet_id = $1 AND tab_name = $2`,
+          [sheetId, tabName]
+        );
+      } catch (_) { /* 대시보드 카운트 보조 — 실패해도 무시 */ }
     }
 
     // ── Step 3: Sheets 행 추가 시도 ──
