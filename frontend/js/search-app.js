@@ -856,7 +856,7 @@ async function doSearch() {
     if (emsg === "요청 시간 초과" || emsg.includes("timeout") || emsg.includes("Timeout")) {
       // ★ 타임아웃 = 인덱스 재빌드 중일 가능성 높음 → 안내 + 자동 재시도
       _showNoResult(true);
-      showToast("⏱ 인덱스 갱신 중입니다. 잠시 후 자동으로 다시 검색합니다.", "warning", 5000);
+      showToast("⏱ 동기화 중입니다. 잠시 후 자동으로 다시 검색합니다.", "warning", 5000);
     } else if (emsg.includes("fetch") || emsg.includes("Failed to fetch") || emsg.includes("NetworkError")) {
       showToast("❌ 네트워크 오류 — GAS URL을 확인하거나 잠시 후 재시도하세요.", "error");
     } else {
@@ -887,7 +887,7 @@ function _showNoResult(wasExpired) {
     if (notice) notice.style.display = "";
     if (retry)  retry.style.display  = "";
     _startAutoRetry(20); // 20초 카운트다운 후 자동 재시도
-    showToast("🔄 인덱스 갱신 완료. 20초 후 자동으로 다시 검색합니다.", "warning", 5000);
+    showToast("🔄 동기화 완료. 20초 후 자동으로 다시 검색합니다.", "warning", 5000);
   } else {
     // 정상 인덱스, 진짜 결과 없음
     if (msgEl) msgEl.textContent  = "아직 참여 내역이 없습니다";
@@ -2045,7 +2045,7 @@ async function loadAdminDashboard() {
       header.innerHTML = `
         <div class="dash-campaign-left">
           <i class="fas fa-chevron-down dash-toggle-icon"></i>
-          ${campSheetId ? `<button class="btn-camp-refresh" data-sheetid="${escHtml(campSheetId)}" data-campname="${escHtml(c.campaign)}" onclick="event.stopPropagation();refreshCampaignIndex(this)" title="이 캠페인만 인덱스 갱신"><i class="fas fa-sync-alt"></i> 갱신</button>` : ""}
+          ${campSheetId ? `<button class="btn-camp-refresh" data-sheetid="${escHtml(campSheetId)}" data-campname="${escHtml(c.campaign)}" onclick="event.stopPropagation();refreshCampaignIndex(this)" title="이 캠페인만 동기화"><i class="fas fa-sync-alt"></i> 갱신</button>` : ""}
           <span class="dash-campaign-name">${escHtml(c.campaign)}</span>
         </div>
         <span class="dash-campaign-total">${c.submitted}/${c.total} (${cRate}%)</span>`;
@@ -2275,7 +2275,7 @@ function renderDashboard(data) {
     header.innerHTML = `
       <div class="dash-campaign-left">
         <i class="fas fa-chevron-down dash-toggle-icon"></i>
-        ${campSheetId2 ? `<button class="btn-camp-refresh" data-sheetid="${escHtml(campSheetId2)}" data-campname="${escHtml(c.campaign)}" onclick="event.stopPropagation();refreshCampaignIndex(this)" title="이 캠페인만 인덱스 갱신"><i class="fas fa-sync-alt"></i> 갱신</button>` : ""}
+        ${campSheetId2 ? `<button class="btn-camp-refresh" data-sheetid="${escHtml(campSheetId2)}" data-campname="${escHtml(c.campaign)}" onclick="event.stopPropagation();refreshCampaignIndex(this)" title="이 캠페인만 동기화"><i class="fas fa-sync-alt"></i> 갱신</button>` : ""}
         <span class="dash-campaign-name">${escHtml(c.campaign)}</span>
       </div>
       <div style="display:flex;align-items:center;gap:6px;flex-shrink:0">
@@ -3008,7 +3008,7 @@ function _exitForceDoneMode() {
 
 // ═══════════════════════════════════════════════════════════
 // ★ 마감 처리 — 베이스시트 is_closed 컬럼 기반
-//   마감된 탭은 인덱스 갱신 시 완전히 제외 (검색 불가)
+//   마감된 탭은 동기화 시 완전히 제외 (검색 불가)
 //   강제완료와 다르게 인덱스에서 행 자체를 제외함
 // ═══════════════════════════════════════════════════════════
 
@@ -3081,7 +3081,7 @@ function execClosed() {
   document.getElementById("closedConfirmMsg").innerHTML =
     `선택한 인덱스를 마감 처리합니다.<br>` +
     `대상: ${parts.join(" / ")}<br>` +
-    `<span style="color:#EF4444;font-size:.8rem">⚠️ 마감된 인덱스는 인덱스 갱신 후 검색에서 제외됩니다.</span>`;
+    `<span style="color:#EF4444;font-size:.8rem">⚠️ 마감된 인덱스는 동기화 후 검색에서 제외됩니다.</span>`;
 
   document.getElementById("closedConfirmOverlay").classList.add("open");
 }
@@ -6325,7 +6325,7 @@ async function refreshCampaignIndex(btn) {
   if (!sheetId) { showToast("sheetId가 없습니다.", "error"); return; }
 
   // 확인 메시지
-  const ok = confirm(`"${campName}" 캠페인만 인덱스를 갱신합니다.\n\n선택한 캠페인만 인덱스갱신됩니다.\n계속하시겠습니까?`);
+  const ok = confirm(`"${campName}" 캠페인만 인덱스를 갱신합니다.\n\n선택한 캠페인만 동기화됩니다.\n계속하시겠습니까?`);
   if (!ok) return;
 
   // 버튼 로딩 상태
@@ -6788,7 +6788,7 @@ function showToast(msg, isErr) {
 }
 
 /* ── GAS 설정 모달 ── */
-/* ── 인덱스 갱신 모달 ── */
+/* ── 동기화 모달 ── */
 function openIndexModal() {
   show("indexModal", "flex");
   if (APP_CONFIG.GAS_WEB_APP_URL) loadIndexStatus();
@@ -6886,7 +6886,7 @@ async function loadIndexStatus() {
   }
 }
 
-/* ── 인덱스 갱신 진행 표시 ── */
+/* ── 동기화 진행 표시 ── */
 let _buildTimer = null;
 // v6: Sheets API 배치 처리 기준 예상시간 (기존 120초 → 60초로 단축)
 // 실제 캠페인 수에 따라 동적 조정
@@ -7202,10 +7202,10 @@ async function debugSingleSheet(mode) {
           html += warn("⚠ 헤더 정상 (스킵 없음) — 그러나 현재 인덱스에 미포함") +
             `<br><small style="color:#D97706;margin-left:2px">→ [인덱스 지금 갱신] 버튼을 눌러야 대시보드에 반영됩니다.</small>`;
         } else {
-          html += ok("✅ 정상 — 인덱스 갱신 시 포함됩니다");
+          html += ok("✅ 정상 — 동기화 시 포함됩니다");
         }
       } else {
-        html += ok("✅ 정상 — 인덱스 갱신 시 포함됩니다");
+        html += ok("✅ 정상 — 동기화 시 포함됩니다");
       }
     }
     else if (data.verdict === "tab_not_found") html += err(`❌ gid:${diagGid} 탭을 찾을 수 없음 — URL의 gid 값을 확인하세요`);
@@ -7219,7 +7219,7 @@ async function debugSingleSheet(mode) {
     if (diagMode === "tab" && data.isInIndex === false && data.verdict === "ok") {
       const tabName = data.allTabs && data.allTabs[0] ? data.allTabs[0] : "";
       html += `<br><br><b>💡 대시보드 미표시 원인 후보:</b><br>`;
-      html += `&nbsp;&nbsp;1. 인덱스 갱신 전 상태 → <b>[인덱스 지금 갱신]</b> 클릭 후 재확인<br>`;
+      html += `&nbsp;&nbsp;1. 동기화 전 상태 → <b>[인덱스 지금 갱신]</b> 클릭 후 재확인<br>`;
       html += `&nbsp;&nbsp;2. 갱신 시 해당 탭이 스킵됐을 가능성 → 갱신 후 재진단<br>`;
       html += `&nbsp;&nbsp;3. 세부목록에 해당 탭 미등록 → ⚙ 탭설정 후 저장<br>`;
       if (tabName) html += `&nbsp;&nbsp;4. 탭명 특수문자/공백 문제: <i>"${escHtml(tabName)}"</i><br>`;
@@ -7394,7 +7394,7 @@ async function buildIndex() {
     const skipInfo = (data.skipped > 0)
       ? ` · 완료탭 ${data.skipped}개 스킵(${(data.reused||0).toLocaleString()}행 재사용)` : "";
     if (data.warning) {
-      showToast(`✅ 인덱스 갱신 완료 (${(data.count||0).toLocaleString()}건)${skipInfo} ⚠ 일부 시트 경고`, "warning");
+      showToast(`✅ 동기화 완료 (${(data.count||0).toLocaleString()}건)${skipInfo} ⚠ 일부 시트 경고`, "warning");
       const builtAtEl = document.getElementById("indexBuiltAt");
       if (builtAtEl) builtAtEl.textContent = data.builtAtStr || "-";
       const resEl = document.getElementById("debugBaseResult");
@@ -7412,11 +7412,11 @@ async function buildIndex() {
           else                   { icon = "⚠";  color = "#D97706"; }
           return `<span style="color:${color}">${icon} ${escHtml(line)}</span>`;
         }).join("<br>");
-        resEl.innerHTML = `<b style="color:#D97706">⚠ 인덱스 갱신 완료 (${(data.count||0).toLocaleString()}건) — 일부 시트 경고:</b><br><br>${lineHtml}`;
+        resEl.innerHTML = `<b style="color:#D97706">⚠ 동기화 완료 (${(data.count||0).toLocaleString()}건) — 일부 시트 경고:</b><br><br>${lineHtml}`;
         show(resEl);
       }
     } else {
-      showToast(`✅ 인덱스 갱신 완료 (${(data.count||0).toLocaleString()}건)${skipInfo}`, "success");
+      showToast(`✅ 동기화 완료 (${(data.count||0).toLocaleString()}건)${skipInfo}`, "success");
     }
     await loadIndexStatus();
     const countEl = document.getElementById("indexCount");
@@ -7428,7 +7428,7 @@ async function buildIndex() {
     if (resultRow  && resultEl)  {
       resultEl.innerHTML = data.warning
         ? `<span style="color:#D97706;font-weight:700">⚠ 일부 시트 스킵 (갱신 완료)</span>`
-        : `<span style="color:#10B981;font-weight:700">✅ 인덱스 갱신 완료</span>`;
+        : `<span style="color:#10B981;font-weight:700">✅ 동기화 완료</span>`;
       resultRow.style.display = "";
     }
     // ★ 403 접근 권한 경고 배너 표시
@@ -7467,7 +7467,7 @@ async function buildIndex() {
         bannerEl.innerHTML =
           `<b><i class="fas fa-lock" style="color:#F59E0B"></i> 접근 권한 없는 시트 발견 — 스킵됨 (나머지는 정상 갱신)</b><br><br>` +
           listHtml + `<br><br>` +
-          `<b>해결 방법:</b> 위 스프레드시트에 <b>tnaks6325@gmail.com</b> (리뷰웹 제작자)의 <b>편집 권한</b>이 추가되어야 인덱스 갱신이 가능합니다.`;
+          `<b>해결 방법:</b> 위 스프레드시트에 <b>tnaks6325@gmail.com</b> (리뷰웹 제작자)의 <b>편집 권한</b>이 추가되어야 동기화이 가능합니다.`;
         bannerEl.style.background = "#FFFBEB";
         bannerEl.style.borderColor = "#FCD34D";
         bannerEl.style.color = "#78350F";
@@ -7585,9 +7585,9 @@ async function buildIndex() {
   }
 }
 
-/** ★ 인덱스 갱신 완료 후 대시보드 자동 새로고침 */
+/** ★ 동기화 완료 후 대시보드 자동 새로고침 */
 function _autoRefreshDashboardAfterBuild() {
-  // 관리자 화면이 열려 있고, 대시보드 탭이 보이는 상태일 때만 자동 갱신
+  // 관리자 화면이 열려 있고, 대시보드 탭이 보이는 상태일 때만 자동 동기화
   const screenAdmin = document.getElementById("screenAdmin");
   if (!screenAdmin || !screenAdmin.classList.contains("active")) return;
   const dashWrap = document.getElementById("dashboardWrap");
@@ -7653,8 +7653,8 @@ async function submitAddCampaign() {
     const data = await gasGet({ action: "addCampaign", url: raw });
     closeAddCampaign();
     showToast(`✅ 등록 완료: ${data.campaignName} (${data.url})`);
-    // 등록 후 인덱스 갱신 안내 토스트
-    setTimeout(() => showToast("💡 인덱스 갱신 버튼을 눌러 대시보드에 반영하세요.", false), 2200);
+    // 등록 후 동기화 안내 토스트
+    setTimeout(() => showToast("💡 동기화 버튼을 눌러 대시보드에 반영하세요.", false), 2200);
   } catch (err) {
     errEl.textContent = err.message || "등록 실패";
   } finally {
@@ -7760,7 +7760,7 @@ async function testGasJsonp() {
         : "";
       resEl.innerHTML =
         `<span style="color:#059669;font-weight:700">✅ JSONP 지원 확인됨</span> (${ms}ms)<br>` +
-        `GAS 버전이 정상입니다. 인덱스 갱신을 진행할 수 있습니다.${verBadge}<br>` +
+        `GAS 버전이 정상입니다. 동기화을 진행할 수 있습니다.${verBadge}<br>` +
         `<small style="color:#6B7280">응답: count=${data.count||0}, exists=${data.exists}</small>`;
       // 코드 버전 행 갱신
       const cvRow  = document.getElementById("codeVersionRow");

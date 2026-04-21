@@ -153,11 +153,11 @@
   </div>
 </div>
 
-<!-- ────────── 인덱스 갱신 모달 ────────── -->
+<!-- ────────── 동기화 모달 ────────── -->
 <div id="indexModal" class="modal-overlay hidden" style="display:none">
   <div class="modal-box" style="max-width:440px">
     <div class="modal-header">
-      <h3><i class="fas fa-sync-alt"></i> 인덱스 갱신</h3>
+      <h3><i class="fas fa-sync-alt"></i> 동기화</h3>
       <button class="btn-icon-sm" onclick="closeIndexModal()"><i class="fas fa-times"></i></button>
     </div>
     <div class="modal-body">
@@ -218,7 +218,7 @@
           <span id="buildProgressEta" style="font-size:.72rem;color:var(--t3)">예상 잔여: 계산 중...</span>
         </div>
       </div>
-      <!-- 인덱스 갱신 버튼 -->
+      <!-- 동기화 버튼 -->
       <button id="btnBuildIndex" class="btn-index-build" onclick="buildIndex()" style="margin-top:12px">
         <i class="fas fa-sync-alt"></i> 인덱스 지금 갱신
       </button>
@@ -229,7 +229,7 @@
       <!-- GAS 로그 확인 -->
       <div style="margin-top:8px;padding:6px 8px;background:#F0FDF4;border:1px solid #BBF7D0;border-radius:6px;font-size:.72rem;color:#166534">
         <i class="fas fa-terminal"></i>
-        인덱스 갱신이 계속 실패하면:
+        동기화이 계속 실패하면:
         <a href="https://script.google.com" target="_blank" style="color:#166534;font-weight:700;text-decoration:underline">script.google.com</a>
         → 해당 프로젝트 → <b>실행 로그(Executions)</b>에서 오류 메시지 확인
       </div>
@@ -555,7 +555,7 @@
           <span id="noResultSub">신규 캠페인이 배정되면 이곳에 표시됩니다</span>
           <!-- 인덱스 재빌드 안내 (wasExpired 시 표시) -->
           <div id="indexRebuildNotice" style="display:none;margin-top:16px;background:#FEF3C7;border:1px solid #FCD34D;border-radius:10px;padding:12px 16px;text-align:left;font-size:.82rem;color:#92400E;max-width:340px;margin-left:auto;margin-right:auto">
-            <div style="font-weight:700;margin-bottom:6px"><i class="fas fa-sync-alt fa-spin" style="margin-right:5px"></i>인덱스 갱신 완료 — 재검색 중...</div>
+            <div style="font-weight:700;margin-bottom:6px"><i class="fas fa-sync-alt fa-spin" style="margin-right:5px"></i>동기화 완료 — 재검색 중...</div>
             <div style="color:#78350F;font-size:.78rem">검색 인덱스를 새로 만들었습니다.<br>잠시 후 자동으로 다시 검색합니다. 이름이 목록에 있으면 곧 표시됩니다.<br><span style="color:#92400E;font-weight:600">그래도 나타나지 않으면 담당자에게 문의하세요.</span></div>
             <button id="indexRebuildRetryBtn" onclick="cancelAutoRetry();doSearch()" style="margin-top:10px;width:100%;padding:8px;background:#F59E0B;color:#fff;border:none;border-radius:8px;font-weight:700;cursor:pointer;font-size:.83rem">
               <i class="fas fa-redo"></i> 지금 바로 검색하기
@@ -1161,7 +1161,7 @@
     <div class="closed-confirm-title"><i class="fas fa-archive"></i> 마감 처리 확인</div>
     <p class="closed-confirm-msg" id="closedConfirmMsg">
       선택한 인덱스를 <b>"마감"</b> 처리합니다.<br>
-      마감된 인덱스는 인덱스 갱신 시 <b>완전히 제외</b>되며 검색이 불가합니다.<br>
+      마감된 인덱스는 동기화 시 <b>완전히 제외</b>되며 검색이 불가합니다.<br>
       마감 해제 후 인덱스 재갱신으로 복구할 수 있습니다.
     </p>
     <div id="closedConfirmList" class="closed-confirm-list"></div>

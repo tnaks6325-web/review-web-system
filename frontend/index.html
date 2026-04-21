@@ -226,11 +226,11 @@
   </div>
 </div>
 
-<!-- ────────── 인덱스 갱신 모달 ────────── -->
+<!-- ────────── 동기화 모달 ────────── -->
 <div id="indexModal" class="modal-overlay hidden" style="display:none">
   <div class="modal-box" style="max-width:440px">
     <div class="modal-header">
-      <h3><i class="fas fa-sync-alt"></i> 인덱스 갱신</h3>
+      <h3><i class="fas fa-sync-alt"></i> 동기화</h3>
       <button class="btn-icon-sm" onclick="closeIndexModal()"><i class="fas fa-times"></i></button>
     </div>
     <div class="modal-body">
@@ -259,6 +259,27 @@
         <div class="index-status-row" id="indexResultRow" style="display:none">
           <span class="index-status-label">결과</span>
           <span id="indexResult" class="index-meta">-</span>
+        </div>
+      </div>
+      <!-- ★ Phase 5: 통합 동기화 상태 패널 -->
+      <div id="syncStatusPanel" class="sync-status-panel" style="margin-top:8px">
+        <div class="sync-status-grid">
+          <div class="sync-status-item">
+            <span class="sync-status-icon" id="syncSSEIcon"><i class="fas fa-plug"></i></span>
+            <span class="sync-status-text" id="syncSSEText">SSE 미연결</span>
+          </div>
+          <div class="sync-status-item">
+            <span class="sync-status-icon" id="syncLiveIcon"><i class="fas fa-broadcast-tower"></i></span>
+            <span class="sync-status-text" id="syncLiveText">LIVE OFF</span>
+          </div>
+          <div class="sync-status-item">
+            <span class="sync-status-icon" id="syncDirtyIcon"><i class="fas fa-bolt"></i></span>
+            <span class="sync-status-text" id="syncDirtyText">변경 0건</span>
+          </div>
+          <div class="sync-status-item">
+            <span class="sync-status-icon" id="syncNextIcon"><i class="fas fa-clock"></i></span>
+            <span class="sync-status-text" id="syncNextText">다음 동기화 -</span>
+          </div>
         </div>
       </div>
       <!-- GAS 오류 배너 -->
@@ -291,28 +312,28 @@
           <span id="buildProgressEta" style="font-size:.72rem;color:var(--t3)">예상 잔여: 계산 중...</span>
         </div>
       </div>
-      <!-- 인덱스 갱신 버튼 -->
-      <!-- ★ v9.12: 빠른 갱신(증분) + 전체 갱신 분리 -->
+      <!-- 동기화 버튼 -->
+      <!-- ★ v9.12: 빠른 동기화(증분) + 전체 동기화 분리 -->
       <div style="display:flex;gap:6px;margin-top:12px">
         <button id="btnBuildIndexSmart" class="btn-index-build"
           onclick="buildIndexSmart()"
           style="flex:1.5;background:linear-gradient(135deg,#0ea5e9,#2563eb);font-size:.82rem"
-          title="변경된 탭만 빠르게 갱신합니다 (평균 5~20초)">
-          <i class="fas fa-bolt"></i> 빠른 갱신 <span id="smartDirtyBadge" style="display:none;background:rgba(255,255,255,0.25);padding:1px 6px;border-radius:10px;font-size:.7rem;margin-left:3px"></span>
+          title="변경된 탭만 빠르게 동기화합니다 (평균 5~20초)">
+          <i class="fas fa-bolt"></i> 빠른 동기화 <span id="smartDirtyBadge" style="display:none;background:rgba(255,255,255,0.25);padding:1px 6px;border-radius:10px;font-size:.7rem;margin-left:3px"></span>
         </button>
         <button id="btnBuildIndex" class="btn-index-build"
           onclick="buildIndex()"
           style="flex:1;background:linear-gradient(135deg,#6b7280,#374151);font-size:.82rem"
-          title="모든 캠페인을 처음부터 전체 재갱신합니다 (100~200초)">
-          <i class="fas fa-sync-alt"></i> 전체 갱신
+          title="모든 캠페인을 처음부터 전체 동기화합니다 (100~200초)">
+          <i class="fas fa-sync-alt"></i> 전체 동기화
         </button>
       </div>
       <div id="smartModeHint" style="font-size:.7rem;color:#2563eb;margin-top:4px;display:none">
         <i class="fas fa-info-circle"></i> <span id="smartModeHintText"></span>
       </div>
       <div style="font-size:.7rem;color:#9ca3af;margin-top:3px">
-        <i class="fas fa-bolt" style="color:#0ea5e9"></i> <b>빠른 갱신</b>: 변경된 탭만 재빌드 (5~20초) · 없으면 자동 스킵 또는 전체 갱신으로 전환<br>
-        <i class="fas fa-sync-alt" style="color:#6b7280"></i> <b>전체 갱신</b>: 모든 캠페인 전체 재빌드 (100~200초)
+        <i class="fas fa-bolt" style="color:#0ea5e9"></i> <b>빠른 동기화</b>: 변경된 탭만 동기화 (5~20초) · 없으면 자동 스킵 또는 전체 동기화로 전환<br>
+        <i class="fas fa-sync-alt" style="color:#6b7280"></i> <b>전체 동기화</b>: 모든 캠페인 전체 동기화 (100~200초)
       </div>
       <!-- ★ 폴더 일괄 생성/배치 -->
       <div style="margin-top:8px;display:flex;flex-direction:column;gap:4px">
@@ -432,7 +453,7 @@
       <!-- GAS 로그 확인 -->
       <div style="margin-top:8px;padding:6px 8px;background:#F0FDF4;border:1px solid #BBF7D0;border-radius:6px;font-size:.72rem;color:#166534">
         <i class="fas fa-terminal"></i>
-        인덱스 갱신이 계속 실패하면:
+        동기화가 계속 실패하면:
         <a href="https://script.google.com" target="_blank" style="color:#166534;font-weight:700;text-decoration:underline">script.google.com</a>
         → 해당 프로젝트 → <b>실행 로그(Executions)</b>에서 오류 메시지 확인
       </div>
@@ -612,9 +633,9 @@
           <button class="btn-topbar" onclick="openCreateSheetModal()" title="캠페인 시트 생성">
             <i class="fas fa-table"></i> 새 시트생성
           </button>
-          <!-- 인덱스 갱신 -->
-          <button class="btn-topbar" onclick="openIndexModal()" title="인덱스 갱신">
-            <i class="fas fa-sync-alt"></i> 인덱스갱신
+          <!-- 동기화 -->
+          <button class="btn-topbar" onclick="openIndexModal()" title="동기화">
+            <i class="fas fa-sync-alt"></i> 동기화
           </button>
           <!-- 각종 진단 -->
           <button class="btn-topbar sys" onclick="openDiagModal()" title="각종 진단">
@@ -733,6 +754,12 @@
         <div class="admin-section-header has-dev-label">
           <span class="dev-label">섹션 헤더 / Section Header</span>
           <span id="dashboardIndexInfo" class="section-index-info"></span>
+          <!-- ★ Phase 5: 라이브 모드 토글 -->
+          <label id="liveModeToggleWrap" class="live-mode-toggle" style="display:none" title="30초마다 대시보드 자동 새로고침">
+            <input type="checkbox" id="liveModeCheckbox" onchange="toggleLiveMode(this.checked)">
+            <span class="live-mode-slider"></span>
+            <span class="live-mode-label" id="liveModeLabel">LIVE</span>
+          </label>
           <!-- ★ 자동 빌드 카운트다운 배지 -->
           <span id="cronCountdownBadge" class="cron-countdown-badge" style="display:none"></span>
           <!-- ★ 빌드 진행 중 배너 -->
@@ -2196,7 +2223,7 @@
     <div class="closed-confirm-title"><i class="fas fa-archive"></i> 마감 처리 확인</div>
     <p class="closed-confirm-msg" id="closedConfirmMsg">
       선택한 인덱스를 <b>"마감"</b> 처리합니다.<br>
-      마감된 인덱스는 인덱스 갱신 시 <b>완전히 제외</b>되며 검색이 불가합니다.<br>
+      마감된 인덱스는 동기화 시 <b>완전히 제외</b>되며 검색이 불가합니다.<br>
       마감 해제 후 인덱스 재갱신으로 복구할 수 있습니다.
     </p>
     <div id="closedConfirmList" class="closed-confirm-list"></div>
