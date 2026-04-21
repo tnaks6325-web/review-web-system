@@ -1561,6 +1561,64 @@ textarea.rform-input{line-height:1.5}
 .rbadge-preset:hover{background:#EDE9FE;border-color:#7C3AED;border-style:solid;transform:translateY(-1px)}
 .rbadge-preset:active{transform:translateY(0);background:#DDD6FE}
 
+/* ═══ Phase 5: 통합 동기화 상태 패널 ═══ */
+.sync-status-panel{
+  background:#F8FAFC;border:1px solid #E2E8F0;border-radius:8px;
+  padding:6px 10px;
+}
+.sync-status-grid{
+  display:grid;grid-template-columns:1fr 1fr;gap:4px 12px;
+}
+.sync-status-item{
+  display:flex;align-items:center;gap:5px;
+  font-size:.68rem;color:#475569;
+}
+.sync-status-icon{
+  width:16px;text-align:center;font-size:.7rem;
+}
+.sync-status-icon.sync-ok{color:#10B981}
+.sync-status-icon.sync-warn{color:#F59E0B}
+.sync-status-icon.sync-off{color:#94A3B8}
+.sync-status-text{white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+
+/* ═══ Phase 5: 라이브 모드 토글 ═══ */
+.live-mode-toggle{
+  display:inline-flex;align-items:center;gap:5px;
+  cursor:pointer;user-select:none;margin-left:8px;
+  vertical-align:middle;
+}
+.live-mode-toggle input{display:none}
+.live-mode-slider{
+  position:relative;width:34px;height:18px;
+  background:#CBD5E1;border-radius:18px;
+  transition:background .3s;
+}
+.live-mode-slider::after{
+  content:'';position:absolute;left:2px;top:2px;
+  width:14px;height:14px;border-radius:50%;
+  background:#fff;transition:transform .3s;box-shadow:0 1px 2px rgba(0,0,0,.15);
+}
+.live-mode-toggle input:checked + .live-mode-slider{
+  background:#10B981;
+}
+.live-mode-toggle input:checked + .live-mode-slider::after{
+  transform:translateX(16px);
+}
+.live-mode-label{
+  font-size:.65rem;font-weight:700;color:#6B7280;
+  letter-spacing:.04em;transition:color .3s;
+}
+.live-mode-toggle input:checked ~ .live-mode-label{
+  color:#059669;
+}
+.live-mode-label.live-active{
+  color:#059669;
+  animation:livePulse 2s ease-in-out infinite;
+}
+@keyframes livePulse{
+  0%,100%{opacity:1}50%{opacity:.5}
+}
+
 /* ═══ 자동 빌드 카운트다운 배지 ═══ */
 .cron-countdown-badge{
   display:inline-flex;align-items:center;gap:5px;

@@ -2039,7 +2039,7 @@ async function loadAdminDashboard() {
     });
 
     if (data.indexBuiltAt) {
-      document.getElementById("dashboardIndexInfo").textContent = "인덱스 기준: " + data.indexBuiltAt;
+      document.getElementById("dashboardIndexInfo").textContent = "동기화 기준: " + data.indexBuiltAt;
     }
 
     // ★ 자동 빌드 카운트다운 + 빌드 진행 중 배너
@@ -2047,6 +2047,9 @@ async function loadAdminDashboard() {
 
     // ★ Phase 4: 비동기 dirty check (대시보드 로딩 차단 없음)
     _asyncDirtyCheck();
+
+    // ★ Phase 5: 라이브 모드 토글 초기화
+    _initLiveMode();
 
     const rate = grand.total > 0 ? Math.round(grand.submitted / grand.total * 100) : 0;
     document.getElementById("sumTotal").textContent   = grand.total.toLocaleString();
@@ -2117,7 +2120,7 @@ async function loadAdminDashboard() {
         <span class="dev-label">캠페인 헤더 / Campaign Header</span>
         <div class="dash-campaign-left">
           <i class="fas fa-chevron-down dash-toggle-icon"></i>
-          ${campSheetId ? `<button class="btn-camp-refresh" data-sheetid="${escHtml(campSheetId)}" data-campname="${escHtml(c.campaign)}" onclick="event.stopPropagation();refreshCampaignIndex(this)" title="이 캠페인만 인덱스 갱신"><i class="fas fa-sync-alt"></i> 갱신</button>` : ""}
+          ${campSheetId ? `<button class="btn-camp-refresh" data-sheetid="${escHtml(campSheetId)}" data-campname="${escHtml(c.campaign)}" onclick="event.stopPropagation();refreshCampaignIndex(this)" title="이 캠페인만 동기화"><i class="fas fa-sync-alt"></i> 동기화</button>` : ""}
           ${campSheetId ? `<button class="btn-camp-viewer" data-sheetid="${escHtml(campSheetId)}" onclick="event.stopPropagation();copyCampViewerLink(this)" title="광고주 URL 복사"><i class="fas fa-eye"></i> 광고주URL</button>` : ""}
           <span class="dash-campaign-name">${escHtml(c.campaign)}</span>
         </div>
@@ -2399,7 +2402,7 @@ async function loadAdminDashboard() {
       _dashPollTabSnap = _buildTabSnap(data.stats);
     }
 
-    // ★ v10.0 P1-D: 대시보드 로드 완료 후 dirty 배지 자동 갱신
+    // ★ v10.0 P1-D: 대시보드 로드 완료 후 dirty 배지 자동 동기화
     // openIndexModal 에서만 호출되던 것을 여기서도 호출 → 대시보드 상시 표시
     if (APP_CONFIG.GAS_WEB_APP_URL) {
       _updateSmartDirtyBadge();
@@ -2465,7 +2468,7 @@ function renderDashboard(data) {
     header.innerHTML = `
       <div class="dash-campaign-left">
         <i class="fas fa-chevron-down dash-toggle-icon"></i>
-        ${campSheetId2 ? `<button class="btn-camp-refresh" data-sheetid="${escHtml(campSheetId2)}" data-campname="${escHtml(c.campaign)}" onclick="event.stopPropagation();refreshCampaignIndex(this)" title="이 캠페인만 인덱스 갱신"><i class="fas fa-sync-alt"></i> 갱신</button>` : ""}
+        ${campSheetId2 ? `<button class="btn-camp-refresh" data-sheetid="${escHtml(campSheetId2)}" data-campname="${escHtml(c.campaign)}" onclick="event.stopPropagation();refreshCampaignIndex(this)" title="이 캠페인만 동기화"><i class="fas fa-sync-alt"></i> 동기화</button>` : ""}
         ${campSheetId2 ? `<button class="btn-camp-viewer" data-sheetid="${escHtml(campSheetId2)}" onclick="event.stopPropagation();copyCampViewerLink(this)" title="광고주 URL 복사"><i class="fas fa-eye"></i> 광고주URL</button>` : ""}
         <span class="dash-campaign-name">${escHtml(c.campaign)}</span>
       </div>
@@ -4203,7 +4206,7 @@ function _exitForceDoneMode() {
 
 // ═══════════════════════════════════════════════════════════
 // ★ 마감 처리 — 베이스시트 is_closed 컬럼 기반
-//   마감된 탭은 인덱스 갱신 시 완전히 제외 (검색 불가)
+//   마감된 탭은 동기화 시 완전히 제외 (검색 불가)
 //   강제완료와 다르게 인덱스에서 행 자체를 제외함
 // ═══════════════════════════════════════════════════════════
 
@@ -4277,7 +4280,7 @@ function execClosed() {
   document.getElementById("closedConfirmMsg").innerHTML =
     `선택한 인덱스를 마감 처리합니다.<br>` +
     `대상: ${parts.join(" / ")}<br>` +
-    `<span style="color:#EF4444;font-size:.8rem">⚠️ 마감된 인덱스는 인덱스 갱신 후 검색에서 제외됩니다.</span>`;
+    `<span style="color:#EF4444;font-size:.8rem">⚠️ 마감된 인덱스는 동기화 후 검색에서 제외됩니다.</span>`;
 
   document.getElementById("closedConfirmOverlay").classList.add("open");
 }
@@ -4326,7 +4329,7 @@ async function confirmClosed() {
       let msg = "";
       if (closeCount) msg += `${closeCount}건 마감 완료. `;
       if (openCount)  msg += `${openCount}건 마감 해제. `;
-      msg += "인덱스 재갱신 후 적용됩니다.";
+      msg += "동기화 후 적용됩니다.";
       showToast("✅ " + msg);
     }
   } catch (err) {
@@ -4402,7 +4405,7 @@ function _patchTabAndRerender(sheetId, tabName, patch) {
 // ═══════════════════════════════════════════════════════
 // ★ 시작일 수동 수정 — localStorage 기반
 //   키: rapp_manual_startdate  /  값: { tabKey: "YY.MM.DD" }
-//   인덱스 재갱신/새로고침 후에도 유지 (원본 인덱스 덮어쓰지 않음)
+//   동기화/새로고침 후에도 유지 (원본 인덱스 덮어쓰지 않음)
 // ═══════════════════════════════════════════════════════
 const _MANUAL_SD_KEY = "rapp_manual_startdate";
 
@@ -4531,7 +4534,7 @@ function resetStartDate() {
   _setManualStartDate(_sdpTabKey, null); // 수동값 삭제 → 원본 인덱스값 복원
   closeStartDatePopup();
   _reRenderDashboard();
-  showToast("↩️ 시작일 초기화 — 인덱스 원본값으로 복원됨");
+  showToast("↩️ 시작일 초기화 — 원본값으로 복원됨");
 }
 
 function closeStartDatePopup() {
@@ -6397,7 +6400,7 @@ async function refreshCampaignIndex(btn) {
   if (!sheetId) { showToast("sheetId가 없습니다.", "error"); return; }
 
   // 확인 메시지
-  const ok = confirm(`"${campName}" 캠페인만 인덱스를 갱신합니다.\n\n선택한 캠페인만 인덱스갱신됩니다.\n계속하시겠습니까?`);
+  const ok = confirm(`"${campName}" 캠페인만 동기화합니다.\n\n선택한 캠페인만 동기화됩니다.\n계속하시겠습니까?`);
   if (!ok) return;
 
   // 버튼 로딩 상태
@@ -6420,7 +6423,7 @@ async function refreshCampaignIndex(btn) {
     // 버튼 복원 (loadAdminDashboard가 DOM 재빌드하므로 사실상 새 버튼으로 교체됨)
     if (btn && btn.isConnected) {
       btn.classList.remove("loading");
-      btn.innerHTML = '<i class="fas fa-sync-alt"></i> 갱신';
+      btn.innerHTML = '<i class="fas fa-sync-alt"></i> 동기화';
     }
   }
 }
@@ -7186,13 +7189,14 @@ function showToast(msg, isErr) {
 }
 
 /* ── GAS 설정 모달 ── */
-/* ── 인덱스 갱신 모달 ── */
+/* ── 동기화 모달 ── */
 function openIndexModal() {
   show("indexModal", "flex");
   if (APP_CONFIG.GAS_WEB_APP_URL) {
     loadIndexStatus();
     _updateSmartDirtyBadge();
   }
+  _updateSyncStatusPanel();
 }
 function closeIndexModal() {
   hide("indexModal");
@@ -7334,7 +7338,7 @@ function saveAdminSetting() { closeIndexModal(); }
 /* ── 인덱스 상태 / 갱신 ── */
 
 /**
- * ★ v9.12: dirty 탭 수를 조회하여 "빠른 갱신" 버튼 배지 업데이트
+ * ★ v9.12: dirty 탭 수를 조회하여 "빠른 동기화" 버튼 배지 업데이트
  * dirty 탭이 있으면 변경된 캠페인 수를 배지로 표시
  */
 async function _updateSmartDirtyBadge() {
@@ -7351,14 +7355,14 @@ async function _updateSmartDirtyBadge() {
       badge.textContent = dirtyCnt + "개 변경";
       badge.style.cssText = "display:inline;background:#DC2626;color:#fff;padding:1px 7px;border-radius:10px;font-size:.7rem;font-weight:700;margin-left:5px;";
       if (hintEl && hintTxt) {
-        hintTxt.textContent = `🔴 변경된 캠페인 ${dirtyCnt}개 — 빠른 갱신 클릭 시 해당 캠페인만 재갱신합니다.`;
+        hintTxt.textContent = `🔴 변경된 캠페인 ${dirtyCnt}개 — 빠른 동기화 클릭 시 해당 캠페인만 재갱신합니다.`;
         hintEl.style.display = "";
         hintEl.style.color = "#DC2626";
       }
     } else {
       badge.style.display = "none";
       if (hintEl && hintTxt) {
-        hintTxt.textContent = "변경된 탭 없음 — 클릭 시 전체 갱신 주기 도래 여부에 따라 자동 판단합니다.";
+        hintTxt.textContent = "변경된 탭 없음 — 클릭 시 전체 동기화 주기 도래 여부에 따라 자동 판단합니다.";
         hintEl.style.display = "";
         hintEl.style.color = "#6b7280";
       }
@@ -7548,7 +7552,7 @@ async function loadIndexStatus() {
   }
 }
 
-/* ── 인덱스 갱신 진행 표시 ── */
+/* ── 동기화 진행 표시 ── */
 let _buildTimer = null;
 // v6: Sheets API 배치 처리 기준 예상시간 (기존 120초 → 60초로 단축)
 // 실제 캠페인 수에 따라 동적 조정
@@ -7862,12 +7866,12 @@ async function debugSingleSheet(mode) {
           html += ok("✅ 정상 + 현재 인덱스에도 포함됨 (대시보드에 바로 표시)");
         } else if (data.isInIndex === false) {
           html += warn("⚠ 헤더 정상 (스킵 없음) — 그러나 현재 인덱스에 미포함") +
-            `<br><small style="color:#D97706;margin-left:2px">→ [인덱스 지금 갱신] 버튼을 눌러야 대시보드에 반영됩니다.</small>`;
+            `<br><small style="color:#D97706;margin-left:2px">→ [지금 동기화] 버튼을 눌러야 대시보드에 반영됩니다.</small>`;
         } else {
-          html += ok("✅ 정상 — 인덱스 갱신 시 포함됩니다");
+          html += ok("✅ 정상 — 동기화 시 포함됩니다");
         }
       } else {
-        html += ok("✅ 정상 — 인덱스 갱신 시 포함됩니다");
+        html += ok("✅ 정상 — 동기화 시 포함됩니다");
       }
     }
     else if (data.verdict === "tab_not_found") html += err(`❌ gid:${diagGid} 탭을 찾을 수 없음 — URL의 gid 값을 확인하세요`);
@@ -7881,7 +7885,7 @@ async function debugSingleSheet(mode) {
     if (diagMode === "tab" && data.isInIndex === false && data.verdict === "ok") {
       const tabName = data.allTabs && data.allTabs[0] ? data.allTabs[0] : "";
       html += `<br><br><b>💡 대시보드 미표시 원인 후보:</b><br>`;
-      html += `&nbsp;&nbsp;1. 인덱스 갱신 전 상태 → <b>[인덱스 지금 갱신]</b> 클릭 후 재확인<br>`;
+      html += `&nbsp;&nbsp;1. 동기화 전 상태 → <b>[지금 동기화]</b> 클릭 후 재확인<br>`;
       html += `&nbsp;&nbsp;2. 갱신 시 해당 탭이 스킵됐을 가능성 → 갱신 후 재진단<br>`;
       html += `&nbsp;&nbsp;3. 세부목록에 해당 탭 미등록 → ⚙ 탭설정 후 저장<br>`;
       if (tabName) html += `&nbsp;&nbsp;4. 탭명 특수문자/공백 문제: <i>"${escHtml(tabName)}"</i><br>`;
@@ -8057,7 +8061,7 @@ async function runSheetDiag() {
     const border    = willParse ? "#BBF7D0" : "#FED7AA";
     const icon      = willParse ? "✅" : "⚠️";
     const statusMsg = willParse
-      ? "정상 파싱 가능 — 인덱스 갱신 시 조회됩니다"
+      ? "정상 파싱 가능 — 동기화 시 조회됩니다"
       : "파싱 불가 — 헤더 키워드가 인식되지 않아 인덱스에서 제외됩니다";
 
     const headerPreview  = (data.detectedHeaders || []).filter(h => h).join(", ") || "(헤더 탐지 실패)";
@@ -8663,8 +8667,8 @@ async function resetTabFolder(target) {
   }
 }
 
-// ★ v9.12: 스마트 인덱스 갱신 (증분 우선)
-// dirty 탭 있으면 해당 캠페인만 빠르게 갱신, 없으면 전체 갱신
+// ★ v9.12: 스마트 동기화 (증분 우선)
+// dirty 탭 있으면 해당 캠페인만 빠르게 갱신, 없으면 전체 동기화
 async function buildIndexSmart() {
   if (!APP_CONFIG.GAS_WEB_APP_URL) { showToast("GAS URL을 먼저 저장해주세요.", "warning"); return; }
   const btnSmart = document.getElementById("btnBuildIndexSmart");
@@ -8745,7 +8749,7 @@ async function buildIndexSmart() {
         try { await gasGet({ action: "releaseBuildLock" }, 10000); } catch(_) {}
         await new Promise(r => setTimeout(r, 1000));
         btnSmart.disabled = false;
-        btnSmart.innerHTML = '<i class="fas fa-bolt"></i> 빠른 갱신 <span id="smartDirtyBadge" style="display:none;background:rgba(255,255,255,0.25);padding:1px 6px;border-radius:10px;font-size:.7rem;margin-left:3px"></span>';
+        btnSmart.innerHTML = '<i class="fas fa-bolt"></i> 빠른 동기화 <span id="smartDirtyBadge" style="display:none;background:rgba(255,255,255,0.25);padding:1px 6px;border-radius:10px;font-size:.7rem;margin-left:3px"></span>';
         btnFull.disabled = false;
         setTimeout(() => buildIndexSmart(), 300);
         return;
@@ -8777,11 +8781,11 @@ async function buildIndexSmart() {
     if (data.mode === "async") {
       _stopSmartProgress();
       if (hintEl && hintTextEl) {
-        hintTextEl.textContent = "🔄 백그라운드에서 인덱스 갱신 중... 완료 시 자동 감지됩니다.";
+        hintTextEl.textContent = "🔄 백그라운드에서 동기화 중... 완료 시 자동 감지됩니다.";
         hintEl.style.display = "";
         hintEl.style.color = "#2563eb";
       }
-      showToast("🔄 인덱스 갱신이 시작되었습니다. 완료 시 자동으로 업데이트됩니다.", "info");
+      showToast("🔄 동기화이 시작되었습니다. 완료 시 자동으로 업데이트됩니다.", "info");
       badge.textContent = "갱신중(백그라운드)";
       badge.className = "index-badge index-badge-unknown";
 
@@ -8802,16 +8806,16 @@ async function buildIndexSmart() {
           // builtAt이 변경되면 빌드 완료
           if (newBA && newBA !== prevBA) {
             clearInterval(pTimer);
-            showToast(`✅ 인덱스 갱신 완료 (${cnt.toLocaleString()}건)`, "success");
+            showToast(`✅ 동기화 완료 (${cnt.toLocaleString()}건)`, "success");
             badge.className = "index-badge index-badge-ok";
             badge.textContent = "정상";
             await loadIndexStatus();
             const elapsedSec = Math.round((Date.now() - _buildStart) / 1000);
             if (elapsedRow && elapsedEl) { elapsedEl.textContent = elapsedSec + "초 (비동기)"; elapsedRow.style.display = ""; }
-            if (resultRow && resultEl) { resultEl.innerHTML = `<span style="color:#10B981;font-weight:700">✅ 인덱스 갱신 완료</span>`; resultRow.style.display = ""; }
+            if (resultRow && resultEl) { resultEl.innerHTML = `<span style="color:#10B981;font-weight:700">✅ 동기화 완료</span>`; resultRow.style.display = ""; }
             // 버튼 복원
             btnSmart.disabled = false;
-            btnSmart.innerHTML = '<i class="fas fa-bolt"></i> 빠른 갱신 <span id="smartDirtyBadge" style="display:none;background:rgba(255,255,255,0.25);padding:1px 6px;border-radius:10px;font-size:.7rem;margin-left:3px"></span>';
+            btnSmart.innerHTML = '<i class="fas fa-bolt"></i> 빠른 동기화 <span id="smartDirtyBadge" style="display:none;background:rgba(255,255,255,0.25);padding:1px 6px;border-radius:10px;font-size:.7rem;margin-left:3px"></span>';
             btnFull.disabled = false;
             _autoRefreshDashboardAfterBuild();
             _updateSmartDirtyBadge();
@@ -8827,7 +8831,7 @@ async function buildIndexSmart() {
           showToast("⏱ 갱신 대기 시간 초과 — 잠시 후 다시 확인하세요.", "warning");
           badge.className = "index-badge index-badge-expired"; badge.textContent = "확인 필요";
           btnSmart.disabled = false;
-          btnSmart.innerHTML = '<i class="fas fa-bolt"></i> 빠른 갱신 <span id="smartDirtyBadge" style="display:none;background:rgba(255,255,255,0.25);padding:1px 6px;border-radius:10px;font-size:.7rem;margin-left:3px"></span>';
+          btnSmart.innerHTML = '<i class="fas fa-bolt"></i> 빠른 동기화 <span id="smartDirtyBadge" style="display:none;background:rgba(255,255,255,0.25);padding:1px 6px;border-radius:10px;font-size:.7rem;margin-left:3px"></span>';
           btnFull.disabled = false;
         }
       }, 5000);
@@ -8835,18 +8839,18 @@ async function buildIndexSmart() {
       return;
     }
 
-    // ★ v9.12: 전체 재빌드 필요 신호 → buildIndex(polling) 흐름으로 자동 전환
+    // ★ v9.12: 전체 동기화 필요 신호 → buildIndex(polling) 흐름으로 자동 전환
     if (data.needFullRebuild) {
       _stopSmartProgress();
-      const reason = data.reason || "전체 갱신 필요";
+      const reason = data.reason || "전체 동기화 필요";
       if (hintEl && hintTextEl) {
-        hintTextEl.textContent = `🔄 전체 갱신으로 전환 중... (${reason})`;
+        hintTextEl.textContent = `🔄 전체 동기화으로 전환 중... (${reason})`;
         hintEl.style.display = "";
         hintEl.style.color = "#6b7280";
       }
-      showToast(`🔄 ${reason} — 전체 갱신을 시작합니다.`, "info");
+      showToast(`🔄 ${reason} — 전체 동기화을 시작합니다.`, "info");
       _smartPollingMode = true; // ★ v9.19: buildIndex가 버튼 관리 담당
-      // 약간 딜레이 후 전체 갱신 자동 실행
+      // 약간 딜레이 후 전체 동기화 자동 실행
       setTimeout(() => buildIndex(), 300);
       return;
     }
@@ -8875,7 +8879,7 @@ async function buildIndexSmart() {
     const isIncremental = data.mode === "incremental";
     const modeLabel = isIncremental
       ? `⚡ 증분 갱신 (${data.updatedCampaigns || 0}개 캠페인 / ${elapsedSec}초)`
-      : `🔄 전체 갱신 (이유: ${data.reason || "주기 도래"} / ${elapsedSec}초)`;
+      : `🔄 전체 동기화 (이유: ${data.reason || "주기 도래"} / ${elapsedSec}초)`;
 
     if (hintEl && hintTextEl) {
       hintTextEl.textContent = modeLabel;
@@ -8894,7 +8898,7 @@ async function buildIndexSmart() {
       );
     } else {
       showToast(
-        `✅ 전체 갱신 완료 (${(data.count||0).toLocaleString()}건${skipInfo} / ${elapsedSec}초)${warnInfo}`,
+        `✅ 전체 동기화 완료 (${(data.count||0).toLocaleString()}건${skipInfo} / ${elapsedSec}초)${warnInfo}`,
         data.warning ? "warning" : "success"
       );
     }
@@ -8906,7 +8910,7 @@ async function buildIndexSmart() {
     if (resultRow && resultEl) {
       resultEl.innerHTML = isIncremental
         ? `<span style="color:#2563EB;font-weight:700">⚡ 증분 갱신 완료 (${data.updatedCampaigns||0}개 캠페인)</span>`
-        : `<span style="color:#10B981;font-weight:700">✅ 전체 갱신 완료</span>`;
+        : `<span style="color:#10B981;font-weight:700">✅ 전체 동기화 완료</span>`;
       resultRow.style.display = "";
     }
     // ★ v10.0: dirty 배지 — 단순 숨김 대신 실제 최신 dirtyCount 반영
@@ -8921,7 +8925,7 @@ async function buildIndexSmart() {
     if (msg === "요청 시간 초과") {
       // 타임아웃 = 증분이 예상보다 오래 걸림(60초 초과) → polling 전환
       // ★ v9.13: 병렬 fetchAll 적용 후에도 타임아웃 시 백그라운드 polling 유지
-      showToast("⏱ 빠른 갱신 진행 중 (백그라운드)... 완료 시 자동 감지합니다.", "info");
+      showToast("⏱ 빠른 동기화 진행 중 (백그라운드)... 완료 시 자동 감지합니다.", "info");
       badge.textContent = "갱신중(백그라운드)";
       // prevBuiltAt 스냅샷 필요
       let prevBA = null;
@@ -8946,7 +8950,7 @@ async function buildIndexSmart() {
             await loadIndexStatus();
             _autoRefreshDashboardAfterBuild();
             const btnSmF = document.getElementById("btnBuildIndexSmart");
-            if (btnSmF) { btnSmF.disabled = false; btnSmF.innerHTML = '<i class="fas fa-bolt"></i> 빠른 갱신 <span id="smartDirtyBadge" style="display:none;background:rgba(255,255,255,0.25);padding:1px 6px;border-radius:10px;font-size:.7rem;margin-left:3px"></span>'; }
+            if (btnSmF) { btnSmF.disabled = false; btnSmF.innerHTML = '<i class="fas fa-bolt"></i> 빠른 동기화 <span id="smartDirtyBadge" style="display:none;background:rgba(255,255,255,0.25);padding:1px 6px;border-radius:10px;font-size:.7rem;margin-left:3px"></span>'; }
             const btnFuF = document.getElementById("btnBuildIndex");
             if (btnFuF) btnFuF.disabled = false;
             // ★ v10.0: 버튼 복원 후 dirty 배지 즉시 재갱신
@@ -8962,7 +8966,7 @@ async function buildIndexSmart() {
             try { await gasGet({ action: "releaseBuildLock" }, 8000); } catch(_) {}
             await new Promise(r => setTimeout(r, 800));
             const btnSmR = document.getElementById("btnBuildIndexSmart");
-            if (btnSmR) { btnSmR.disabled = false; btnSmR.innerHTML = '<i class="fas fa-bolt"></i> 빠른 갱신 <span id="smartDirtyBadge" style="display:none;background:rgba(255,255,255,0.25);padding:1px 6px;border-radius:10px;font-size:.7rem;margin-left:3px"></span>'; }
+            if (btnSmR) { btnSmR.disabled = false; btnSmR.innerHTML = '<i class="fas fa-bolt"></i> 빠른 동기화 <span id="smartDirtyBadge" style="display:none;background:rgba(255,255,255,0.25);padding:1px 6px;border-radius:10px;font-size:.7rem;margin-left:3px"></span>'; }
             const btnFuR = document.getElementById("btnBuildIndex");
             if (btnFuR) btnFuR.disabled = false;
             setTimeout(() => buildIndexSmart(), 300);
@@ -8972,9 +8976,9 @@ async function buildIndexSmart() {
           if (!isLocked2 && pCount >= 8 && !pAutoRetried) {
             clearInterval(pTimer);
             pAutoRetried = true;
-            showToast("🔄 빠른 갱신 재시도 중...", "info");
+            showToast("🔄 빠른 동기화 재시도 중...", "info");
             const btnSmR2 = document.getElementById("btnBuildIndexSmart");
-            if (btnSmR2) { btnSmR2.disabled = false; btnSmR2.innerHTML = '<i class="fas fa-bolt"></i> 빠른 갱신 <span id="smartDirtyBadge" style="display:none;background:rgba(255,255,255,0.25);padding:1px 6px;border-radius:10px;font-size:.7rem;margin-left:3px"></span>'; }
+            if (btnSmR2) { btnSmR2.disabled = false; btnSmR2.innerHTML = '<i class="fas fa-bolt"></i> 빠른 동기화 <span id="smartDirtyBadge" style="display:none;background:rgba(255,255,255,0.25);padding:1px 6px;border-radius:10px;font-size:.7rem;margin-left:3px"></span>'; }
             const btnFuR2 = document.getElementById("btnBuildIndex");
             if (btnFuR2) btnFuR2.disabled = false;
             try { await gasGet({ action: "releaseBuildLock" }, 5000); } catch(_) {}
@@ -8986,7 +8990,7 @@ async function buildIndexSmart() {
           clearInterval(pTimer);
           showToast("⏱ 대기 시간 초과 — 잠금 강제 해제 후 재시도하세요.", "warning");
           const btnSmE = document.getElementById("btnBuildIndexSmart");
-          if (btnSmE) { btnSmE.disabled = false; btnSmE.innerHTML = '<i class="fas fa-bolt"></i> 빠른 갱신 <span id="smartDirtyBadge" style="display:none;background:rgba(255,255,255,0.25);padding:1px 6px;border-radius:10px;font-size:.7rem;margin-left:3px"></span>'; }
+          if (btnSmE) { btnSmE.disabled = false; btnSmE.innerHTML = '<i class="fas fa-bolt"></i> 빠른 동기화 <span id="smartDirtyBadge" style="display:none;background:rgba(255,255,255,0.25);padding:1px 6px;border-radius:10px;font-size:.7rem;margin-left:3px"></span>'; }
           const btnFuE = document.getElementById("btnBuildIndex");
           if (btnFuE) btnFuE.disabled = false;
         }
@@ -9001,7 +9005,7 @@ async function buildIndexSmart() {
     // ★ v9.19: polling 모드이면 버튼 복원 안 함 (polling이 완료 후 복원)
     if (!_smartPollingMode) {
       btnSmart.disabled  = false;
-      btnSmart.innerHTML = '<i class="fas fa-bolt"></i> 빠른 갱신 <span id="smartDirtyBadge" style="display:none;background:rgba(255,255,255,0.25);padding:1px 6px;border-radius:10px;font-size:.7rem;margin-left:3px"></span>';
+      btnSmart.innerHTML = '<i class="fas fa-bolt"></i> 빠른 동기화 <span id="smartDirtyBadge" style="display:none;background:rgba(255,255,255,0.25);padding:1px 6px;border-radius:10px;font-size:.7rem;margin-left:3px"></span>';
       btnFull.disabled   = false;
     }
   }
@@ -9051,7 +9055,7 @@ async function buildIndex() {
     const timeoutInfo = data.timedOut ? ` ⏱ 부분갱신 — 빠른갱신 재실행 필요` : "";
     if (data.warning) {
       const isTimeout = data.timedOut || data.warning.includes("실행시간 초과");
-      showToast(`${isTimeout ? "⏱" : "✅"} 인덱스 갱신 완료 (${(data.count||0).toLocaleString()}건)${skipInfo}${timeoutInfo} ⚠ 일부 시트 경고`, "warning");
+      showToast(`${isTimeout ? "⏱" : "✅"} 동기화 완료 (${(data.count||0).toLocaleString()}건)${skipInfo}${timeoutInfo} ⚠ 일부 시트 경고`, "warning");
       const builtAtEl = document.getElementById("indexBuiltAt");
       if (builtAtEl) builtAtEl.textContent = data.builtAtStr || "-";
       const resEl = document.getElementById("debugBaseResult");
@@ -9071,12 +9075,12 @@ async function buildIndex() {
           else                   { icon = "⚠";  color = "#D97706"; }
           return `<span style="color:${color}">${icon} ${escHtml(line)}</span>`;
         }).join("<br>");
-        resEl.innerHTML = `<b style="color:#D97706">⚠ 인덱스 갱신 완료 (${(data.count||0).toLocaleString()}건) — 일부 시트 경고:</b><br><br>${lineHtml}`
+        resEl.innerHTML = `<b style="color:#D97706">⚠ 동기화 완료 (${(data.count||0).toLocaleString()}건) — 일부 시트 경고:</b><br><br>${lineHtml}`
           + (data.timedOut ? `<br><br><b style="color:#2563EB">⏱ 실행시간 초과로 일부 시트는 기존 인덱스 유지 — 다시 갱신하면 완전히 업데이트됩니다.</b>` : "");
         show(resEl);
       }
     } else {
-      showToast(`✅ 인덱스 갱신 완료 (${(data.count||0).toLocaleString()}건)${skipInfo}${timeoutInfo}`, data.timedOut ? "warning" : "success");
+      showToast(`✅ 동기화 완료 (${(data.count||0).toLocaleString()}건)${skipInfo}${timeoutInfo}`, data.timedOut ? "warning" : "success");
     }
     await loadIndexStatus();
     const countEl = document.getElementById("indexCount");
@@ -9093,7 +9097,7 @@ async function buildIndex() {
       } else if (data.warning) {
         resultEl.innerHTML = `<span style="color:#D97706;font-weight:700">⚠ 일부 시트 스킵 (갱신 완료)</span>`;
       } else {
-        resultEl.innerHTML = `<span style="color:#10B981;font-weight:700">✅ 인덱스 갱신 완료</span>`;
+        resultEl.innerHTML = `<span style="color:#10B981;font-weight:700">✅ 동기화 완료</span>`;
       }
       resultRow.style.display = "";
     }
@@ -9133,7 +9137,7 @@ async function buildIndex() {
         bannerEl.innerHTML =
           `<b><i class="fas fa-lock" style="color:#F59E0B"></i> 접근 권한 없는 시트 발견 — 스킵됨 (나머지는 정상 갱신)</b><br><br>` +
           listHtml + `<br><br>` +
-          `<b>해결 방법:</b> 위 스프레드시트에 <b>tnaks6325@gmail.com</b> (리뷰웹 제작자)의 <b>편집 권한</b>이 추가되어야 인덱스 갱신이 가능합니다.`;
+          `<b>해결 방법:</b> 위 스프레드시트에 <b>tnaks6325@gmail.com</b> (리뷰웹 제작자)의 <b>편집 권한</b>이 추가되어야 동기화이 가능합니다.`;
         bannerEl.style.background = "#FFFBEB";
         bannerEl.style.borderColor = "#FCD34D";
         bannerEl.style.color = "#78350F";
@@ -9143,7 +9147,7 @@ async function buildIndex() {
       bannerEl.style.display = "none";
     }
     _autoRefreshDashboardAfterBuild();
-    // ★ v10.0: 전체 갱신 완료 후 dirty 배지 재갱신
+    // ★ v10.0: 전체 동기화 완료 후 dirty 배지 재갱신
     _updateSmartDirtyBadge();
 
     // ★ v10.1: 타임아웃으로 부분 갱신된 경우 → dirty 배지가 남아 있으면 10초 후 재갱신 안내 토스트
@@ -9153,7 +9157,7 @@ async function buildIndex() {
           const st = await gasGet({ action: "indexStatus" }, 5000);
           const dc = (st && st.dirtyCount) ? st.dirtyCount : 0;
           if (dc > 0) {
-            showToast(`⏱ ${dc}개 캠페인이 아직 미처리입니다. 빠른 갱신을 한 번 더 실행해주세요.`, "warning", 7000);
+            showToast(`⏱ ${dc}개 캠페인이 아직 미처리입니다. 빠른 동기화을 한 번 더 실행해주세요.`, "warning", 7000);
           }
         } catch(_) {}
       }, 10000); // 10초 후 재확인
@@ -9186,7 +9190,7 @@ async function buildIndex() {
 
     const _restoreBtn = () => {
       btn.disabled  = false;
-      btn.innerHTML = '<i class="fas fa-sync-alt"></i> 전체 갱신';
+      btn.innerHTML = '<i class="fas fa-sync-alt"></i> 전체 동기화';
       const sm = document.getElementById("btnBuildIndexSmart");
       if (sm) sm.disabled = false;
     };
@@ -9239,7 +9243,7 @@ async function buildIndex() {
         // ② 잠금 해제 + builtAt 동일 → GAS 강제종료로 인덱스 미업데이트
         // ★ v9.20: 80초(16 polls) 이후로 조정
         // 이유: GAS 빌드 20~40초 + 응답 전달 지연 → 50초는 너무 빠름
-        //       80초면 충분히 기다린 후 재시도, 6분 전체 갱신이 완료되기 전에는 실행 안 됨
+        //       80초면 충분히 기다린 후 재시도, 6분 전체 동기화이 완료되기 전에는 실행 안 됨
         if (!isLocked && newBuiltAt === prevBuiltAt && pollCount >= 16) { // 80초 이후
           clearInterval(pollTimer);
           stopBuildProgress();
@@ -9256,12 +9260,12 @@ async function buildIndex() {
             setTimeout(() => { buildIndex(); }, 500);
           } else {
             // 2회 연속 실패 → 사용자에게 알림
-            showToast("⚠ 인덱스 갱신 2회 시도 모두 실패. GAS 실행 로그를 확인하세요.", "warning");
+            showToast("⚠ 동기화 2회 시도 모두 실패. GAS 실행 로그를 확인하세요.", "warning");
             badge.className = "index-badge index-badge-expired"; badge.textContent = "확인 필요";
             _updateMsg(
               '❌ GAS 실행시간(6분) 초과로 2회 모두 실패.<br>' +
               '<span style="font-size:.75rem;color:#6B7280">Google Apps Script 실행 로그를 확인하거나, ' +
-              '빠른 갱신(증분)을 반복 사용하세요.</span><br>' +
+              '빠른 동기화(증분)을 반복 사용하세요.</span><br>' +
               '<button onclick="_forceReleaseBuildLock()" style="margin-top:4px;padding:2px 8px;font-size:.72rem;background:#EF4444;color:#fff;border:none;border-radius:4px;cursor:pointer">🔓 잠금 해제</button>'
             );
             _restoreBtn();
@@ -9347,7 +9351,7 @@ async function buildIndex() {
     // ★ [Node.js 이관] 비동기 빌드 응답 처리
     if (data.ok && data.mode === "async") {
       stopBuildProgress();
-      showToast("🔄 인덱스 갱신이 시작되었습니다. 완료 시 자동으로 업데이트됩니다.", "info");
+      showToast("🔄 동기화이 시작되었습니다. 완료 시 자동으로 업데이트됩니다.", "info");
       badge.textContent = "갱신중(백그라운드)";
       badge.className = "index-badge index-badge-unknown";
       _buildPollingMode = true;
@@ -9398,7 +9402,7 @@ async function buildIndex() {
     // ★ v9.19: polling 모드이면 버튼 복원 안 함 (polling이 완료 후 복원)
     if (!_buildPollingMode) {
       btn.disabled  = false;
-      btn.innerHTML = '<i class="fas fa-sync-alt"></i> 전체 갱신';
+      btn.innerHTML = '<i class="fas fa-sync-alt"></i> 전체 동기화';
       const btnSm = document.getElementById("btnBuildIndexSmart");
       if (btnSm) btnSm.disabled = false;
     }
@@ -9450,9 +9454,9 @@ function _startCronCountdown(cron, buildLock) {
     // 영업시간 외 (일요일 또는 19시 이후)
     badge.style.display = "";
     badge.className = "cron-countdown-badge cron-off";
-    badge.innerHTML = '<i class="fas fa-moon"></i> 자동갱신 대기 (영업시간 외)';
+    badge.innerHTML = '<i class="fas fa-moon"></i> 자동동기화 대기 (영업시간 외)';
     if (fullSec) {
-      // 전체 재빌드만 있는 경우
+      // 전체 동기화만 있는 경우
       let remain = fullSec;
       _updateCountdownText(badge, 'full', remain);
       _cronCountdownTimer = setInterval(() => {
@@ -9461,7 +9465,7 @@ function _startCronCountdown(cron, buildLock) {
           clearInterval(_cronCountdownTimer);
           _cronCountdownTimer = null;
           badge.className = "cron-countdown-badge cron-full";
-          badge.innerHTML = '<i class="fas fa-sync-alt fa-spin"></i> 전체 재빌드 시작...';
+          badge.innerHTML = '<i class="fas fa-sync-alt fa-spin"></i> 전체 동기화 시작...';
           // 3초 후 대시보드 새로고침
           setTimeout(() => loadAdminDashboard(), 3000);
           return;
@@ -9485,7 +9489,7 @@ function _startCronCountdown(cron, buildLock) {
     if (remain <= 0) {
       clearInterval(_cronCountdownTimer);
       _cronCountdownTimer = null;
-      const label = type === 'full' ? '전체 재빌드' : '자동 갱신';
+      const label = type === 'full' ? '전체 동기화' : '자동 동기화';
       badge.className = "cron-countdown-badge " + (type === 'full' ? 'cron-full' : 'cron-auto');
       badge.innerHTML = `<i class="fas fa-sync-alt fa-spin"></i> ${label} 시작...`;
       // 빌드 시작 후 5초 대기 → 대시보드 새로고침 (빌드 중 배너 표시)
@@ -9512,10 +9516,10 @@ function _updateCountdownText(badge, type, remainSec) {
 
   if (type === 'full') {
     badge.className = "cron-countdown-badge cron-full";
-    badge.innerHTML = `<i class="fas fa-redo"></i> 전체 재빌드 <span class="cron-time">${timeStr}</span>`;
+    badge.innerHTML = `<i class="fas fa-redo"></i> 전체 동기화 <span class="cron-time">${timeStr}</span>`;
   } else {
     badge.className = "cron-countdown-badge cron-auto";
-    badge.innerHTML = `<i class="fas fa-bolt"></i> 자동 갱신 <span class="cron-time">${timeStr}</span>`;
+    badge.innerHTML = `<i class="fas fa-bolt"></i> 자동 동기화 <span class="cron-time">${timeStr}</span>`;
   }
 
   // 1분 미만일 때 강조
@@ -9530,9 +9534,9 @@ function _updateCountdownText(badge, type, remainSec) {
   }
 }
 
-/** ★ 인덱스 갱신 완료 후 대시보드 자동 새로고침 */
+/** ★ 동기화 완료 후 대시보드 자동 새로고침 */
 function _autoRefreshDashboardAfterBuild() {
-  // 관리자 화면이 열려 있고, 대시보드 탭이 보이는 상태일 때만 자동 갱신
+  // 관리자 화면이 열려 있고, 대시보드 탭이 보이는 상태일 때만 자동 동기화
   const screenAdmin = document.getElementById("screenAdmin");
   if (!screenAdmin || !screenAdmin.classList.contains("active")) return;
   const dashWrap = document.getElementById("dashboardWrap");
@@ -9643,6 +9647,120 @@ async function _buildDirtySheet(sheetId, badgeEl) {
   } catch (err) {
     if (typeof showToast === 'function') showToast('동기화 요청 실패: ' + err.message, 'error');
     if (badgeEl) badgeEl.remove();
+  }
+}
+
+// ═══════════════════════════════════════════════════════════
+// ★ Phase 5: 라이브 모드 — 30초마다 대시보드 자동 새로고침
+// SSE 실시간 업데이트와 병행하여 데이터 정합성 보장
+// ═══════════════════════════════════════════════════════════
+
+let _liveMode = false;
+let _liveInterval = null;
+const _LIVE_INTERVAL_MS = 30000; // 30초
+
+/** 대시보드 로드 시 라이브 모드 토글 표시 및 이전 상태 복원 */
+function _initLiveMode() {
+  const wrap = document.getElementById('liveModeToggleWrap');
+  const cb   = document.getElementById('liveModeCheckbox');
+  if (!wrap || !cb) return;
+
+  wrap.style.display = 'inline-flex';
+
+  // 이전 세션 상태 복원
+  const saved = sessionStorage.getItem('live_mode');
+  if (saved === 'on') {
+    cb.checked = true;
+    _startLiveMode();
+  }
+}
+
+/** 라이브 모드 토글 핸들러 */
+function toggleLiveMode(on) {
+  if (on) {
+    _startLiveMode();
+    sessionStorage.setItem('live_mode', 'on');
+    if (typeof showToast === 'function') showToast('LIVE 모드 ON — 30초마다 자동 새로고침', 'success');
+  } else {
+    _stopLiveMode();
+    sessionStorage.setItem('live_mode', 'off');
+    if (typeof showToast === 'function') showToast('LIVE 모드 OFF', 'info');
+  }
+}
+
+function _startLiveMode() {
+  _liveMode = true;
+  _stopLiveMode(); // 기존 인터벌 정리
+
+  const label = document.getElementById('liveModeLabel');
+  if (label) label.classList.add('live-active');
+
+  _liveInterval = setInterval(function() {
+    // 관리자 화면이 열려 있고 대시보드 탭이 보이는 경우만
+    const adminPanel = document.getElementById('adminPanel');
+    const dashTab    = document.getElementById('tab-dashboard');
+    if (!adminPanel || adminPanel.style.display === 'none') return;
+    if (!dashTab || !dashTab.classList.contains('active')) return;
+
+    // 빌드 진행 중이면 스킵
+    const banner = document.getElementById('buildInProgressBanner');
+    if (banner && banner.style.display !== 'none') return;
+
+    loadAdminDashboard();
+  }, _LIVE_INTERVAL_MS);
+}
+
+function _stopLiveMode() {
+  _liveMode = false;
+  if (_liveInterval) {
+    clearInterval(_liveInterval);
+    _liveInterval = null;
+  }
+  const label = document.getElementById('liveModeLabel');
+  if (label) label.classList.remove('live-active');
+}
+
+/** 동기화 모달의 통합 상태 패널 업데이트 */
+function _updateSyncStatusPanel() {
+  // SSE 연결 상태
+  const sseIcon = document.getElementById('syncSSEIcon');
+  const sseText = document.getElementById('syncSSEText');
+  if (sseIcon && sseText) {
+    const connected = typeof _sseSource !== 'undefined' && _sseSource && _sseSource.readyState === 1;
+    sseIcon.className = 'sync-status-icon ' + (connected ? 'sync-ok' : 'sync-off');
+    sseText.textContent = connected ? 'SSE 연결됨' : 'SSE 미연결';
+  }
+
+  // 라이브 모드 상태
+  const liveIcon = document.getElementById('syncLiveIcon');
+  const liveText = document.getElementById('syncLiveText');
+  if (liveIcon && liveText) {
+    liveIcon.className = 'sync-status-icon ' + (_liveMode ? 'sync-ok' : 'sync-off');
+    liveText.textContent = _liveMode ? 'LIVE ON (30초)' : 'LIVE OFF';
+  }
+
+  // Dirty 시트 수
+  const dirtyIcon = document.getElementById('syncDirtyIcon');
+  const dirtyText = document.getElementById('syncDirtyText');
+  if (dirtyIcon && dirtyText) {
+    const cnt = (typeof _lastDirtySheets !== 'undefined') ? _lastDirtySheets.length : 0;
+    dirtyIcon.className = 'sync-status-icon ' + (cnt > 0 ? 'sync-warn' : 'sync-ok');
+    dirtyText.textContent = cnt > 0 ? '변경 ' + cnt + '건 감지' : '변경 없음';
+  }
+
+  // 다음 동기화 시각 (카운트다운 배지에서 읽기)
+  const nextIcon = document.getElementById('syncNextIcon');
+  const nextText = document.getElementById('syncNextText');
+  if (nextIcon && nextText) {
+    const cronBadge = document.getElementById('cronCountdownBadge');
+    if (cronBadge && cronBadge.style.display !== 'none') {
+      const timeSpan = cronBadge.querySelector('.cron-time');
+      nextText.textContent = '다음 동기화 ' + (timeSpan ? timeSpan.textContent : '-');
+      nextIcon.className = 'sync-status-icon sync-ok';
+    } else {
+      nextText.textContent = '다음 동기화 —';
+      nextIcon.className = 'sync-status-icon sync-off';
+    }
   }
 }
 
@@ -9806,10 +9924,10 @@ async function _forceReleaseBuildLock() {
     try { json = await gasPost({ action: "releaseBuildLock", adminPw: pw }); }
     catch(e) { json = await gasGet({ action: "releaseBuildLock", pw }); }
     if (json.error) throw new Error(json.error);
-    showToast("🔓 빌드 잠금이 해제되었습니다. 이제 인덱스 갱신을 다시 시도하세요.", "success");
+    showToast("🔓 빌드 잠금이 해제되었습니다. 이제 동기화을 다시 시도하세요.", "success");
     // 버튼 복원
     const btn = document.getElementById("buildIndexBtn");
-    if (btn) { btn.disabled = false; btn.innerHTML = '<i class="fas fa-sync-alt"></i> 인덱스 지금 갱신'; }
+    if (btn) { btn.disabled = false; btn.innerHTML = '<i class="fas fa-sync-alt"></i> 지금 동기화'; }
     const builtAtEl = document.getElementById("indexBuiltAt");
     if (builtAtEl) builtAtEl.textContent = "잠금 해제됨 — 다시 갱신하세요";
   } catch(err) {
@@ -9877,8 +9995,8 @@ async function submitAddCampaign() {
         `📋 세부목록에 ${data.autoInsertedTabs}개 탭 기본 행이 자동으로 추가됐습니다. 담당자/시간대를 설정해주세요.`,
         "success"), 1200);
     } else {
-      // 등록 후 인덱스 갱신 안내 토스트
-      setTimeout(() => showToast("💡 인덱스 갱신 버튼을 눌러 대시보드에 반영하세요.", false), 2200);
+      // 등록 후 동기화 안내 토스트
+      setTimeout(() => showToast("💡 동기화 버튼을 눌러 대시보드에 반영하세요.", false), 2200);
     }
   } catch (err) {
     errEl.textContent = err.message || "등록 실패";
@@ -10160,8 +10278,8 @@ async function submitCreateSheet() {
           : `🔗 <a href="${escHtml(data.sheetUrl)}" target="_blank" style="color:#059669;font-weight:700">구글시트 바로가기 →</a>`);
       resultEl.style.display = "block";
       btn.innerHTML = '<i class="fas fa-check"></i> 완료';
-      showToast("✅ 시트 생성 완료! 인덱스 갱신 후 대시보드에 반영됩니다.", false, 5000);
-      setTimeout(() => showToast("💡 [인덱스 지금 갱신] 버튼을 눌러 대시보드에 반영하세요.", false, 5000), 2500);
+      showToast("✅ 시트 생성 완료! 동기화 후 대시보드에 반영됩니다.", false, 5000);
+      setTimeout(() => showToast("💡 [지금 동기화] 버튼을 눌러 대시보드에 반영하세요.", false, 5000), 2500);
     } else {
       throw new Error((data && data.error) ? data.error : "알 수 없는 오류");
     }
@@ -10280,7 +10398,7 @@ async function testGasJsonp() {
         : "";
       resEl.innerHTML =
         `<span style="color:#059669;font-weight:700">✅ JSONP 지원 확인됨</span> (${ms}ms)<br>` +
-        `GAS 버전이 정상입니다. 인덱스 갱신을 진행할 수 있습니다.${verBadge}<br>` +
+        `GAS 버전이 정상입니다. 동기화을 진행할 수 있습니다.${verBadge}<br>` +
         `<small style="color:#6B7280">응답: count=${data.count||0}, exists=${data.exists}</small>`;
       // 코드 버전 행 갱신
       const cvRow  = document.getElementById("codeVersionRow");
