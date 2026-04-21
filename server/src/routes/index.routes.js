@@ -4,6 +4,7 @@ const { searchByName, searchByNameDebug } = require('../services/search.service'
 const { buildIndexSmart } = require('../services/indexBuilder.service');
 const { authMiddleware } = require('../middleware/auth.middleware');
 const { emitIndexBuild } = require('../utils/sse');
+const { calcNextCronTimes } = require('../utils/cronCalc');
 const pool = require('../db/pool');
 
 // ═══════════════════════════════════════════════════════════
@@ -140,6 +141,9 @@ router.get('/status', authMiddleware, async (req, res, next) => {
       builtAtStr = d.toLocaleString('ko-KR', { timeZone: 'Asia/Seoul' });
     }
 
+    // ── 다음 자동 빌드 / 전체 재빌드 시각 계산 ──
+    const cronSchedule = calcNextCronTimes();
+
     res.json({
       ok: true,
       // ★ 프론트엔드 호환 필드 (GAS 응답 형식 유지)
@@ -161,6 +165,8 @@ router.get('/status', authMiddleware, async (req, res, next) => {
         elapsedSec: lockStatus.elapsedSec || 0,
       },
       codeVersion: new Date().toLocaleString('ko-KR', { timeZone: 'Asia/Seoul' }),
+      // ★ CRON 스케줄 정보
+      cron: cronSchedule,
     });
   } catch (err) {
     next(err);

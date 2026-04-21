@@ -1992,6 +1992,9 @@ async function loadAdminDashboard() {
       document.getElementById("dashboardIndexInfo").textContent = "인덱스 기준: " + data.indexBuiltAt;
     }
 
+    // ★ 자동 빌드 카운트다운 + 빌드 진행 중 배너
+    if (typeof _startCronCountdown === 'function') _startCronCountdown(data.cron, data.buildLock);
+
     const rate = grand.total > 0 ? Math.round(grand.submitted / grand.total * 100) : 0;
     document.getElementById("sumTotal").textContent   = grand.total.toLocaleString();
     document.getElementById("sumDone").textContent    = grand.submitted.toLocaleString();

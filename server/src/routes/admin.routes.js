@@ -261,6 +261,21 @@ router.get('/dashboard', authMiddleware, async (req, res, next) => {
     // 6. stats 배열 정렬 (캠페인명 순)
     const stats = Array.from(campMap.values()).sort((a, b) => a.campaign.localeCompare(b.campaign));
 
+    // 7. 빌드 잠금 상태 + 다음 CRON 실행 시각
+    let buildLock = { locked: false, elapsedSec: 0 };
+    try {
+      const { rows: lockRows } = await pool.query(
+        "SELECT * FROM build_locks WHERE lock_key = 'INDEX_BUILD'"
+      );
+      if (lockRows.length > 0 && lockRows[0].is_locked) {
+        const elapsed = lockRows[0].locked_at ? Date.now() - new Date(lockRows[0].locked_at).getTime() : 0;
+        buildLock = { locked: true, elapsedSec: Math.round(elapsed / 1000) };
+      }
+    } catch (_) {}
+
+    const { calcNextCronTimes } = require('../utils/cronCalc');
+    const cron = calcNextCronTimes();
+
     res.json({
       stats,
       grand: {
@@ -270,6 +285,8 @@ router.get('/dashboard', authMiddleware, async (req, res, next) => {
       },
       closedTabs,
       indexBuiltAt,
+      buildLock,
+      cron,
     });
   } catch (err) {
     next(err);

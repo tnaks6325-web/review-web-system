@@ -733,6 +733,13 @@
         <div class="admin-section-header has-dev-label">
           <span class="dev-label">섹션 헤더 / Section Header</span>
           <span id="dashboardIndexInfo" class="section-index-info"></span>
+          <!-- ★ 자동 빌드 카운트다운 배지 -->
+          <span id="cronCountdownBadge" class="cron-countdown-badge" style="display:none"></span>
+          <!-- ★ 빌드 진행 중 배너 -->
+          <span id="buildInProgressBanner" class="build-in-progress-banner" style="display:none">
+            <i class="fas fa-circle-notch fa-spin"></i> 인덱스 빌드 진행 중...
+            <span id="buildInProgressElapsed"></span>
+          </span>
           <div class="admin-header-btns">
             <div class="dash-filter-wrap" id="dashFilterWrap">
               <button class="dash-filter-btn" id="dashFilterBtn" onclick="toggleFilterDropdown(event)">

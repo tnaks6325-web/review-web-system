@@ -1560,3 +1560,40 @@ textarea.rform-input{line-height:1.5}
 .rbadge-preset::before{content:"+";font-weight:700;opacity:.7}
 .rbadge-preset:hover{background:#EDE9FE;border-color:#7C3AED;border-style:solid;transform:translateY(-1px)}
 .rbadge-preset:active{transform:translateY(0);background:#DDD6FE}
+
+/* ═══ 자동 빌드 카운트다운 배지 ═══ */
+.cron-countdown-badge{
+  display:inline-flex;align-items:center;gap:5px;
+  padding:3px 10px;border-radius:20px;
+  font-size:.7rem;font-weight:600;
+  white-space:nowrap;cursor:default;
+  transition:all .25s;
+}
+.cron-countdown-badge.cron-auto{
+  background:#EFF6FF;color:#1D4ED8;border:1px solid #BFDBFE;
+}
+.cron-countdown-badge.cron-full{
+  background:#FFF7ED;color:#C2410C;border:1px solid #FED7AA;
+}
+.cron-countdown-badge.cron-off{
+  background:#F3F4F6;color:#6B7280;border:1px solid #E5E7EB;
+}
+.cron-countdown-badge .cron-time{
+  font-variant-numeric:tabular-nums;
+  letter-spacing:.3px;
+}
+
+/* ═══ 빌드 진행 중 배너 ═══ */
+.build-in-progress-banner{
+  display:inline-flex;align-items:center;gap:5px;
+  padding:4px 12px;border-radius:20px;
+  background:linear-gradient(135deg,#FEF3C7,#FDE68A);
+  color:#92400E;border:1px solid #F59E0B;
+  font-size:.72rem;font-weight:700;
+  white-space:nowrap;
+  animation:buildPulse 2s ease-in-out infinite;
+}
+@keyframes buildPulse{
+  0%,100%{opacity:1}
+  50%{opacity:.7}
+}

@@ -2042,6 +2042,9 @@ async function loadAdminDashboard() {
       document.getElementById("dashboardIndexInfo").textContent = "인덱스 기준: " + data.indexBuiltAt;
     }
 
+    // ★ 자동 빌드 카운트다운 + 빌드 진행 중 배너
+    _startCronCountdown(data.cron, data.buildLock);
+
     const rate = grand.total > 0 ? Math.round(grand.submitted / grand.total * 100) : 0;
     document.getElementById("sumTotal").textContent   = grand.total.toLocaleString();
     document.getElementById("sumDone").textContent    = grand.submitted.toLocaleString();
@@ -9396,6 +9399,131 @@ async function buildIndex() {
       const btnSm = document.getElementById("btnBuildIndexSmart");
       if (btnSm) btnSm.disabled = false;
     }
+  }
+}
+
+// ═══════════════════════════════════════════════════════════
+// ★ 자동 빌드 카운트다운 + 빌드 진행 중 배너
+// ═══════════════════════════════════════════════════════════
+let _cronCountdownTimer = null;
+
+function _startCronCountdown(cron, buildLock) {
+  // 기존 타이머 정리
+  if (_cronCountdownTimer) { clearInterval(_cronCountdownTimer); _cronCountdownTimer = null; }
+
+  const badge = document.getElementById("cronCountdownBadge");
+  const banner = document.getElementById("buildInProgressBanner");
+  const bannerElapsed = document.getElementById("buildInProgressElapsed");
+  if (!badge || !banner) return;
+
+  // ── 빌드 진행 중 배너 ──
+  if (buildLock && buildLock.locked) {
+    banner.style.display = "";
+    const elapsed = buildLock.elapsedSec || 0;
+    bannerElapsed.textContent = `(${elapsed}초 경과)`;
+    badge.style.display = "none";
+
+    // 1초마다 경과 시간 업데이트
+    let sec = elapsed;
+    _cronCountdownTimer = setInterval(() => {
+      sec++;
+      bannerElapsed.textContent = `(${sec}초 경과)`;
+      // 7분(420초) 초과 시 자동 해제 가능성 표시
+      if (sec > 420) {
+        banner.innerHTML = '<i class="fas fa-exclamation-triangle"></i> 빌드 응답 대기 중... <span id="buildInProgressElapsed">(' + sec + '초)</span>';
+      }
+    }, 1000);
+    return;
+  }
+  banner.style.display = "none";
+
+  // ── CRON 카운트다운 ──
+  if (!cron) { badge.style.display = "none"; return; }
+
+  const autoSec = cron.auto?.nextRunInSec;
+  const fullSec = cron.full?.nextRunInSec;
+
+  if (!autoSec && !fullSec) {
+    // 영업시간 외 (일요일 또는 19시 이후)
+    badge.style.display = "";
+    badge.className = "cron-countdown-badge cron-off";
+    badge.innerHTML = '<i class="fas fa-moon"></i> 자동갱신 대기 (영업시간 외)';
+    if (fullSec) {
+      // 전체 재빌드만 있는 경우
+      let remain = fullSec;
+      _updateCountdownText(badge, 'full', remain);
+      _cronCountdownTimer = setInterval(() => {
+        remain--;
+        if (remain <= 0) {
+          clearInterval(_cronCountdownTimer);
+          _cronCountdownTimer = null;
+          badge.className = "cron-countdown-badge cron-full";
+          badge.innerHTML = '<i class="fas fa-sync-alt fa-spin"></i> 전체 재빌드 시작...';
+          // 3초 후 대시보드 새로고침
+          setTimeout(() => loadAdminDashboard(), 3000);
+          return;
+        }
+        _updateCountdownText(badge, 'full', remain);
+      }, 1000);
+    }
+    return;
+  }
+
+  // 가장 빠른 빌드까지 카운트다운
+  const isFullFirst = fullSec && (!autoSec || fullSec <= autoSec);
+  let remain = isFullFirst ? fullSec : autoSec;
+  const type = isFullFirst ? 'full' : 'auto';
+
+  badge.style.display = "";
+  _updateCountdownText(badge, type, remain);
+
+  _cronCountdownTimer = setInterval(() => {
+    remain--;
+    if (remain <= 0) {
+      clearInterval(_cronCountdownTimer);
+      _cronCountdownTimer = null;
+      const label = type === 'full' ? '전체 재빌드' : '자동 갱신';
+      badge.className = "cron-countdown-badge " + (type === 'full' ? 'cron-full' : 'cron-auto');
+      badge.innerHTML = `<i class="fas fa-sync-alt fa-spin"></i> ${label} 시작...`;
+      // 빌드 시작 후 5초 대기 → 대시보드 새로고침 (빌드 중 배너 표시)
+      setTimeout(() => loadAdminDashboard(), 5000);
+      return;
+    }
+    _updateCountdownText(badge, type, remain);
+  }, 1000);
+}
+
+function _updateCountdownText(badge, type, remainSec) {
+  const h = Math.floor(remainSec / 3600);
+  const m = Math.floor((remainSec % 3600) / 60);
+  const s = remainSec % 60;
+
+  let timeStr;
+  if (h > 0) {
+    timeStr = `${h}시간 ${String(m).padStart(2, '0')}분`;
+  } else if (m > 0) {
+    timeStr = `${m}분 ${String(s).padStart(2, '0')}초`;
+  } else {
+    timeStr = `${s}초`;
+  }
+
+  if (type === 'full') {
+    badge.className = "cron-countdown-badge cron-full";
+    badge.innerHTML = `<i class="fas fa-redo"></i> 전체 재빌드 <span class="cron-time">${timeStr}</span>`;
+  } else {
+    badge.className = "cron-countdown-badge cron-auto";
+    badge.innerHTML = `<i class="fas fa-bolt"></i> 자동 갱신 <span class="cron-time">${timeStr}</span>`;
+  }
+
+  // 1분 미만일 때 강조
+  if (remainSec < 60) {
+    badge.style.fontWeight = '800';
+    if (remainSec < 10) {
+      badge.style.animation = 'buildPulse 1s ease-in-out infinite';
+    }
+  } else {
+    badge.style.fontWeight = '';
+    badge.style.animation = '';
   }
 }
 
