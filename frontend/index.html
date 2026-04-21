@@ -1300,6 +1300,9 @@
             <option value="ignored">무시됨</option>
             <option value="resolved">해결됨</option>
           </select>
+          <label id="unrecogSelectAllWrap" style="display:none;align-items:center;gap:4px;font-size:.78rem;color:var(--t1);cursor:pointer;user-select:none">
+            <input type="checkbox" id="unrecogSelectAll" onchange="toggleAllUnrecogChecks(this.checked)" style="width:15px;height:15px;cursor:pointer"> 전체선택
+          </label>
           <button id="btnIgnoreSelected" onclick="ignoreSelectedUnrecognized()" style="display:none;padding:4px 12px;background:#F59E0B;color:#fff;border:none;border-radius:6px;font-size:.78rem;cursor:pointer">
             <i class="fas fa-eye-slash"></i> 선택 무시
           </button>

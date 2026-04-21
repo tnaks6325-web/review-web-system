@@ -10843,6 +10843,10 @@ async function loadUnrecognizedTabs() {
 
     const hasPending = tabs.some(t => t.status === 'pending');
     if (btnIgnore) btnIgnore.style.display = hasPending ? 'inline-block' : 'none';
+    const selectAllWrap = document.getElementById('unrecogSelectAllWrap');
+    if (selectAllWrap) selectAllWrap.style.display = hasPending ? 'flex' : 'none';
+    const selectAllChk = document.getElementById('unrecogSelectAll');
+    if (selectAllChk) selectAllChk.checked = false;
 
     const reasonLabels = {
       'no_header': '헤더 미발견',
@@ -10875,27 +10879,20 @@ async function loadUnrecognizedTabs() {
       const rc = reasonColors[t.reason] || '#6B7280';
       const sl = statusLabels[t.status] || t.status;
       const sc = statusColors[t.status] || '#6B7280';
-      const dateStr = t.detected_at ? new Date(t.detected_at).toLocaleString('ko-KR', { timeZone: 'Asia/Seoul' }) : '';
+      const dateStr = t.detected_at ? new Date(t.detected_at).toLocaleDateString('ko-KR', { timeZone: 'Asia/Seoul' }) : '';
 
-      html += `<div style="border:1px solid #E5E7EB;border-radius:10px;padding:12px;margin-bottom:8px;background:#fff" data-unrecog-id="${t.id}">
-        <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap">
-          ${t.status === 'pending' ? `<input type="checkbox" class="unrecog-check" value="${t.id}" style="width:16px;height:16px">` : ''}
-          <span style="font-weight:600;color:var(--t1);font-size:.85rem">${escHtml(t.tab_name)}</span>
-          <span style="font-size:.7rem;background:${rc}22;color:${rc};padding:2px 8px;border-radius:6px;font-weight:600">${rl}</span>
-          <span style="font-size:.7rem;background:${sc}22;color:${sc};padding:2px 8px;border-radius:6px;font-weight:600">${sl}</span>
-          <span style="font-size:.7rem;color:var(--t3);margin-left:auto">${dateStr}</span>
+      html += `<div style="border:1px solid #E5E7EB;border-radius:8px;padding:8px 12px;margin-bottom:6px;background:#fff" data-unrecog-id="${t.id}">
+        <div style="display:flex;align-items:center;gap:6px">
+          ${t.status === 'pending' ? `<input type="checkbox" class="unrecog-check" value="${t.id}" style="width:15px;height:15px;flex-shrink:0">` : ''}
+          <span style="font-weight:600;color:var(--t1);font-size:.82rem;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:40%">${escHtml(t.tab_name)}</span>
+          <span style="font-size:.68rem;background:${rc}22;color:${rc};padding:1px 6px;border-radius:5px;font-weight:600;flex-shrink:0">${rl}</span>
+          <span style="font-size:.68rem;background:${sc}22;color:${sc};padding:1px 6px;border-radius:5px;font-weight:600;flex-shrink:0">${sl}</span>
+          <span style="font-size:.72rem;color:var(--t3);margin-left:auto;flex-shrink:0">${dateStr}</span>
         </div>
-        <div style="font-size:.75rem;color:var(--t3);margin-top:4px">
-          <i class="fas fa-file-alt" style="margin-right:4px"></i>${escHtml(t.campaign_name || '미분류')}
+        <div style="display:flex;align-items:center;gap:8px;margin-top:3px;padding-left:${t.status === 'pending' ? '23px' : '0'}">
+          <span style="font-size:.72rem;color:var(--t3)"><i class="fas fa-file-alt" style="margin-right:3px"></i>${escHtml(t.campaign_name || '미분류')}</span>
+          ${t.sample_rows ? `<details style="display:inline"><summary style="font-size:.7rem;color:#8B5CF6;cursor:pointer;display:inline">샘플 데이터 (첫 25행) 보기</summary><div style="max-height:200px;overflow:auto;margin-top:6px;font-size:.68rem;background:#F9FAFB;border-radius:6px;padding:8px"><table style="border-collapse:collapse;width:100%">${_buildUnrecogSampleTable(t.sample_rows)}</table></div></details>` : ''}
         </div>
-        ${t.sample_rows ? `<details style="margin-top:8px">
-          <summary style="font-size:.72rem;color:#8B5CF6;cursor:pointer">샘플 데이터 (첫 25행) 보기</summary>
-          <div style="max-height:200px;overflow:auto;margin-top:6px;font-size:.68rem;background:#F9FAFB;border-radius:6px;padding:8px">
-            <table style="border-collapse:collapse;width:100%">
-              ${_buildUnrecogSampleTable(t.sample_rows)}
-            </table>
-          </div>
-        </details>` : ''}
       </div>`;
     });
 
@@ -10941,6 +10938,11 @@ async function ignoreSelectedUnrecognized() {
   } catch (err) {
     showToast('오류: ' + err.message, 'error');
   }
+}
+
+// ── 전체선택 토글 ──
+function toggleAllUnrecogChecks(checked) {
+  document.querySelectorAll('.unrecog-check').forEach(c => { c.checked = checked; });
 }
 
 // ── 키워드 목록 로드 ──
