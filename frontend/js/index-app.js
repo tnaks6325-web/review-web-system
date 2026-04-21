@@ -2165,8 +2165,9 @@ async function loadAdminDashboard() {
         const _overdueBadge2 = isOverdue2
           ? `<span class="badge-overdue"><i class="fas fa-fire" style="font-size:.55rem"></i> D+${_ovDays2}</span>`
           : "";
-        const tabNameHtml = t.sheetUrl
-          ? `<a class="dash-tab-link" href="${escHtml(t.sheetUrl)}" target="_blank">${escHtml(t.tab)} <i class="fas fa-external-link-alt dash-tab-ext"></i></a>${_overdueBadge2}`
+        const _tabSheetUrl2 = t.sheetUrl || (t.sheetId ? `https://docs.google.com/spreadsheets/d/${t.sheetId}/edit` : "");
+        const tabNameHtml = _tabSheetUrl2
+          ? `<a class="dash-tab-link" href="${escHtml(_tabSheetUrl2)}" target="_blank">${escHtml(t.tab)} <i class="fas fa-external-link-alt dash-tab-ext"></i></a>${_overdueBadge2}`
           : `<span>${escHtml(t.tab)}</span>${_overdueBadge2}`;
 
         // 시작일 배지 (수동 수정값 우선 적용)
@@ -2257,8 +2258,9 @@ async function loadAdminDashboard() {
             const _rdOverdueBadge2 = rdIsOverdue2
               ? `<span class="badge-overdue"><i class="fas fa-fire" style="font-size:.55rem"></i> D+${_rdOvDays2}</span>`
               : "";
-            const rdTabNameHtml2 = t.sheetUrl
-              ? `<a class="dash-tab-link" href="${escHtml(t.sheetUrl)}" target="_blank">${escHtml(t.tab)} <i class="fas fa-external-link-alt dash-tab-ext"></i></a>${_rdOverdueBadge2}`
+            const _rdTabSheetUrl2 = t.sheetUrl || (t.sheetId ? `https://docs.google.com/spreadsheets/d/${t.sheetId}/edit` : "");
+            const rdTabNameHtml2 = _rdTabSheetUrl2
+              ? `<a class="dash-tab-link" href="${escHtml(_rdTabSheetUrl2)}" target="_blank">${escHtml(t.tab)} <i class="fas fa-external-link-alt dash-tab-ext"></i></a>${_rdOverdueBadge2}`
               : `<span>${escHtml(t.tab)}</span>${_rdOverdueBadge2}`;
             let rdStateHtml = "";
             if (isForceDone) {
@@ -2487,8 +2489,9 @@ function renderDashboard(data) {
       const _overdueBadge = isOverdue
         ? `<span class="badge-overdue"><i class="fas fa-fire" style="font-size:.55rem"></i> D+${_ovDays}</span>`
         : "";
-      const tabNameHtml = t.sheetUrl
-        ? `<a class="dash-tab-link" href="${escHtml(t.sheetUrl)}" target="_blank">${escHtml(t.tab)} <i class="fas fa-external-link-alt dash-tab-ext"></i></a>${_overdueBadge}`
+      const _tabSheetUrl = t.sheetUrl || (t.sheetId ? `https://docs.google.com/spreadsheets/d/${t.sheetId}/edit` : "");
+      const tabNameHtml = _tabSheetUrl
+        ? `<a class="dash-tab-link" href="${escHtml(_tabSheetUrl)}" target="_blank">${escHtml(t.tab)} <i class="fas fa-external-link-alt dash-tab-ext"></i></a>${_overdueBadge}`
         : `<span>${escHtml(t.tab)}</span>${_overdueBadge}`;
       const _manualSD2 = _getManualStartDate(tabKey);
       const _effectiveSD2 = _manualSD2 || t.startDate || "";
@@ -2543,8 +2546,9 @@ function renderDashboard(data) {
           const _rdOverdueBadge = rdIsOverdue
             ? `<span class="badge-overdue"><i class="fas fa-fire" style="font-size:.55rem"></i> D+${_rdOvDays}</span>`
             : "";
-          const rdTabNameHtml = t.sheetUrl
-            ? `<a class="dash-tab-link" href="${escHtml(t.sheetUrl)}" target="_blank">${escHtml(t.tab)} <i class="fas fa-external-link-alt dash-tab-ext"></i></a>${_rdOverdueBadge}`
+          const _rdTabSheetUrl = t.sheetUrl || (t.sheetId ? `https://docs.google.com/spreadsheets/d/${t.sheetId}/edit` : "");
+          const rdTabNameHtml = _rdTabSheetUrl
+            ? `<a class="dash-tab-link" href="${escHtml(_rdTabSheetUrl)}" target="_blank">${escHtml(t.tab)} <i class="fas fa-external-link-alt dash-tab-ext"></i></a>${_rdOverdueBadge}`
             : `<span>${escHtml(t.tab)}</span>${_rdOverdueBadge}`;
           let rdStateHtml = "";
           if (isClosedTab)      rdStateHtml = `<span class="bar-lbl-center">⬛ 마감</span>`;

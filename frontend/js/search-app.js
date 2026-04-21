@@ -2066,8 +2066,9 @@ async function loadAdminDashboard() {
           + (isClosedTab ? " is-closed-row" : "");
         row.dataset.tabkey = tabKey;
 
-        const tabNameHtml = t.sheetUrl
-          ? `<a class="dash-tab-link" href="${escHtml(t.sheetUrl)}" target="_blank">${escHtml(t.tab)} <i class="fas fa-external-link-alt dash-tab-ext"></i></a>`
+        const _tabSheetUrl = t.sheetUrl || (t.sheetId ? `https://docs.google.com/spreadsheets/d/${t.sheetId}/edit` : "");
+        const tabNameHtml = _tabSheetUrl
+          ? `<a class="dash-tab-link" href="${escHtml(_tabSheetUrl)}" target="_blank">${escHtml(t.tab)} <i class="fas fa-external-link-alt dash-tab-ext"></i></a>`
           : `<span>${escHtml(t.tab)}</span>`;
 
         // 시작일 배지
@@ -2290,8 +2291,9 @@ function renderDashboard(data) {
       const row        = document.createElement("div");
       row.className    = "dash-tab-row"+(isTabDone?" tab-done":"")+(isForceDone?" force-completed":"")+(isClosedTab?" is-closed-row":"");
       row.dataset.tabkey = tabKey;
-      const tabNameHtml = t.sheetUrl
-        ? `<a class="dash-tab-link" href="${escHtml(t.sheetUrl)}" target="_blank">${escHtml(t.tab)} <i class="fas fa-external-link-alt dash-tab-ext"></i></a>`
+      const _tabSheetUrl2 = t.sheetUrl || (t.sheetId ? `https://docs.google.com/spreadsheets/d/${t.sheetId}/edit` : "");
+      const tabNameHtml = _tabSheetUrl2
+        ? `<a class="dash-tab-link" href="${escHtml(_tabSheetUrl2)}" target="_blank">${escHtml(t.tab)} <i class="fas fa-external-link-alt dash-tab-ext"></i></a>`
         : `<span>${escHtml(t.tab)}</span>`;
       const startDateHtml = t.startDate
         ? `<span class="tab-start-date"><i class="fas fa-calendar-day"></i> ${escHtml(t.startDate)}</span>` : "";
