@@ -767,18 +767,37 @@ async function _recordUnrecognizedTab(sheetId, tabName, tabGid, campaignName, va
       reason = 'few_rows';
     } else {
       // 헤더 행 탐지 시도
-      let headerFound = false;
+      let headerRowIdx = -1;
       for (let i = 0; i < Math.min(values.length, 50); i++) {
         const cells = values[i] ? values[i].map(c => String(c || '').trim()) : [];
         if (_isDataTabRow(cells)) {
-          headerFound = true;
+          headerRowIdx = i;
           break;
         }
       }
-      if (!headerFound) {
+      if (headerRowIdx < 0) {
         reason = 'no_header';
       } else {
-        reason = 'no_name_col';
+        // 헤더가 있지만 parseTabRows가 빈 배열 반환 → 세부 원인 분석
+        const headers = values[headerRowIdx].map(h => String(h || '').trim());
+        const nameColIdx = headers.findIndex(h =>
+          NAME_KEYWORDS.some(k => h.includes(k))
+        );
+        if (nameColIdx < 0) {
+          reason = 'no_name_col';  // 헤더에 이름 키워드 컬럼 자체가 없음
+        } else {
+          // 이름 컬럼은 있지만 데이터 행에 실제 이름 값이 없음
+          const dataRows = values.slice(headerRowIdx + 1);
+          const hasAnyName = dataRows.some(row => {
+            const name = String((row && row[nameColIdx]) || '').trim();
+            return name.length > 0;
+          });
+          if (!hasAnyName) {
+            reason = 'no_data';  // 헤더/이름컬럼 존재, 데이터 미입력
+          } else {
+            reason = 'no_name_col';  // 기타 원인
+          }
+        }
       }
     }
 

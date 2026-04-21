@@ -10851,6 +10851,7 @@ async function loadUnrecognizedTabs() {
     const reasonLabels = {
       'no_header': '헤더 미발견',
       'no_name_col': '이름 컬럼 없음',
+      'no_data': '데이터 미입력',
       'empty': '빈 시트',
       'few_rows': '행 부족',
       'unknown': '알 수 없음',
@@ -10858,6 +10859,7 @@ async function loadUnrecognizedTabs() {
     const reasonColors = {
       'no_header': '#F59E0B',
       'no_name_col': '#EF4444',
+      'no_data': '#8B5CF6',
       'empty': '#6B7280',
       'few_rows': '#6B7280',
       'unknown': '#6B7280',
