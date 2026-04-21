@@ -26,7 +26,7 @@ function startCronJobs() {
   });
 
   // ── 전체 재빌드: 6시간마다 ──
-  cron.schedule('0 */6 * * *', async () => {
+  cron.schedule('0 */4 * * *', async () => {
     logger.info('[CRON] 전체 재빌드 시작');
     try {
       await buildIndexSmart(true);
@@ -59,7 +59,7 @@ function startCronJobs() {
     }
   }, { timezone: 'Asia/Seoul' });
 
-  logger.info(`[CRON] 스케줄러 등록 완료: 인덱스=${schedule}, 큐워커=30초, 정리=매일03시`);
+  logger.info(`[CRON] 스케줄러 등록 완료: 인덱스=${schedule}, 전체재빌드=4h, 큐워커=30초, 정리=매일03시`);
 }
 
 module.exports = { startCronJobs };
