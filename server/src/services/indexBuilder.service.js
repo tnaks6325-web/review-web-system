@@ -266,18 +266,41 @@ async function buildIndexSmart(forceFullRebuild = false) {
         try {
           const values = await readSheet(tab.sheet_id, `'${tab.tab_name}'!A:Z`);
           const valLen = values ? values.length : 0;
-          postBuildLog.push({ tab: tab.tab_name, valLen });
+          const valCols = values && values.length > 0 ? values[0].length : 0;
+          const logEntry = { tab: tab.tab_name, valLen, valCols };
+          postBuildLog.push(logEntry);
           if (values && values.length >= 2) {
+            // 디버그: parseTabRows 호출 전 헤더 탐지 결과 로깅
+            let debugHeaderIdx = -1;
+            for (let di = 0; di < Math.min(values.length, 50); di++) {
+              const dc = values[di] ? values[di].map(c => String(c || '').trim()) : [];
+              if (_isDataTabRow(dc)) { debugHeaderIdx = di; break; }
+            }
+            logEntry.debugHeaderIdx = debugHeaderIdx;
+            if (debugHeaderIdx >= 0) {
+              const dh = values[debugHeaderIdx].map(h => String(h || '').trim());
+              logEntry.debugHeaders = dh.slice(0, 20);
+              const dNameIdx = dh.findIndex(h => NAME_KEYWORDS.some(k => h.includes(k)));
+              logEntry.debugNameColIdx = dNameIdx;
+              if (dNameIdx >= 0) {
+                logEntry.debugNameHeader = dh[dNameIdx];
+                logEntry.debugNameKeyword = NAME_KEYWORDS.find(k => dh[dNameIdx].includes(k));
+              }
+              logEntry.NAME_KEYWORDS_count = NAME_KEYWORDS.length;
+            }
+
             const rows = parseTabRows(values, tab.sheet_id, tab.tab_name, tab.tab_gid, tab.campaign_name);
-            postBuildLog[postBuildLog.length - 1].parsedRows = rows.length;
+            logEntry.parsedRows = rows.length;
             if (rows.length > 0) {
               // 성공! review_index에 upsert + unrecognized에서 resolve
               const checksum = computeChecksum(values);
               await _upsertTabIndex(tab.sheet_id, tab.tab_name, tab.tab_gid, checksum, rows, null, tab.campaign_name);
               await _resolveRecognizedTab(tab.sheet_id, tab.tab_name);
               resolvedCount++;
-              postBuildLog[postBuildLog.length - 1].resolved = true;
+              logEntry.resolved = true;
               logger.info(`[buildIndex] post-build 해결: ${tab.tab_name} (${rows.length}행)`);
+            } else {
+              logger.warn(`[buildIndex] post-build 여전히 실패: ${tab.tab_name} headerIdx=${debugHeaderIdx} nameColIdx=${logEntry.debugNameColIdx} headers=${JSON.stringify((logEntry.debugHeaders || []).slice(0, 10))}`);
             }
           }
         } catch (err) {
@@ -294,12 +317,15 @@ async function buildIndexSmart(forceFullRebuild = false) {
     logger.warn(`[buildIndex] post-build 검증 오류: ${err.message}`);
   }
 
-  // post-build 결과를 build_history에 업데이트
+  // post-build 결과를 build_history에 별도 칼럼으로는 없으므로 로그로 남김
   if (postBuildLog.length > 0) {
+    logger.info(`[buildIndex] post-build 상세: ${JSON.stringify(postBuildLog)}`);
     try {
+      // trigger_by에 결과 요약 추가
+      const summary = `post:${postBuildLog.length}tabs,resolved:${postBuildLog.filter(l => l.resolved).length}`;
       await pool.query(
-        "UPDATE build_history SET build_log = build_log || $1 WHERE id = (SELECT id FROM build_history ORDER BY started_at DESC LIMIT 1)",
-        [JSON.stringify({ postBuild: postBuildLog })]
+        "UPDATE build_history SET trigger_by = trigger_by || ' | ' || $1 WHERE id = (SELECT id FROM build_history ORDER BY started_at DESC LIMIT 1)",
+        [summary]
       );
     } catch (_) {}
   }
@@ -386,12 +412,28 @@ async function _processOneSheet(sheetId, opts) {
   }
 
   // ── Step 3: batchGet으로 모든 활성 탭 데이터 한번에 읽기 ──
-  // 하나의 API 호출로 N개 탭의 데이터를 모두 가져옴
+  // Google Sheets API batchGet은 대량 범위 요청 시 실패할 수 있으므로 청크 단위로 분할
+  const BATCH_CHUNK_SIZE = 50; // Google API 안전 범위: 50개씩
   const ranges = activeTabs.map(t => `'${t.properties.title}'!A:Z`);
-  let batchResults;
+  let batchResults = [];
 
   try {
-    batchResults = await batchReadSheet(sheetId, ranges);
+    if (ranges.length <= BATCH_CHUNK_SIZE) {
+      batchResults = await batchReadSheet(sheetId, ranges);
+    } else {
+      // 대량 탭 시트: 청크로 분할하여 batchGet
+      logger.info(`[buildIndex] 대량 탭 (${ranges.length}개) — ${BATCH_CHUNK_SIZE}개씩 분할 batchGet`);
+      for (let chunkStart = 0; chunkStart < ranges.length; chunkStart += BATCH_CHUNK_SIZE) {
+        const chunkRanges = ranges.slice(chunkStart, chunkStart + BATCH_CHUNK_SIZE);
+        const chunkResult = await batchReadSheet(sheetId, chunkRanges);
+        batchResults.push(...chunkResult);
+      }
+    }
+    // batchResults 길이 검증: activeTabs과 동일해야 함
+    if (batchResults.length !== activeTabs.length) {
+      logger.warn(`[buildIndex] batchResults 길이 불일치: expected=${activeTabs.length}, got=${batchResults.length} — 개별 읽기로 폴백`);
+      throw new Error(`batchResults length mismatch: ${batchResults.length} vs ${activeTabs.length}`);
+    }
   } catch (err) {
     // batchGet 실패 시 → 개별 readSheet로 폴백 (안전장치)
     logger.warn(`[buildIndex] batchGet 실패 (${sheetId.substring(0, 15)}), 개별 읽기로 폴백: ${err.message}`);

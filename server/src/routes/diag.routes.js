@@ -781,7 +781,7 @@ router.get('/build-history', authMiddleware, async (req, res, next) => {
   try {
     const limit = parseInt(req.query.limit) || 20;
     const { rows } = await pool.query(
-      `SELECT id, started_at, elapsed_ms, rebuilt, skipped, errors, total, trigger_by
+      `SELECT id, started_at, elapsed_ms, rebuilt, skipped, errors, total, trigger_by, build_log
        FROM build_history
        ORDER BY started_at DESC
        LIMIT $1`,
