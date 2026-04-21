@@ -1,7 +1,7 @@
 const express = require('express');
 const router = express.Router();
 const { searchByName, searchByNameDebug } = require('../services/search.service');
-const { buildIndexSmart } = require('../services/indexBuilder.service');
+const { buildIndexSmart, checkDirtySheets, buildOneSheet } = require('../services/indexBuilder.service');
 const { authMiddleware } = require('../middleware/auth.middleware');
 const { emitIndexBuild } = require('../utils/sse');
 const { calcNextCronTimes } = require('../utils/cronCalc');
@@ -167,6 +167,55 @@ router.get('/status', authMiddleware, async (req, res, next) => {
       codeVersion: new Date().toLocaleString('ko-KR', { timeZone: 'Asia/Seoul' }),
       // ★ CRON 스케줄 정보
       cron: cronSchedule,
+    });
+  } catch (err) {
+    next(err);
+  }
+});
+
+// ═══════════════════════════════════════════════════════════
+// Phase 4: GET /api/index/dirty — 변경된 시트 감지 (경량, Drive API만)
+// ═══════════════════════════════════════════════════════════
+router.get('/dirty', authMiddleware, async (req, res, next) => {
+  try {
+    const dirtySheets = await checkDirtySheets();
+    res.json({
+      ok: true,
+      dirtyCount: dirtySheets.length,
+      dirtySheets,
+    });
+  } catch (err) {
+    next(err);
+  }
+});
+
+// ═══════════════════════════════════════════════════════════
+// Phase 4: POST /api/index/build-sheet — 특정 시트 1개만 빌드
+// ═══════════════════════════════════════════════════════════
+router.post('/build-sheet', authMiddleware, async (req, res, next) => {
+  try {
+    const { sheetId } = req.body;
+    if (!sheetId) return res.json({ error: 'sheetId 필요' });
+
+    // 즉시 응답
+    res.json({ ok: true, mode: 'async', message: `시트 ${sheetId.substring(0, 15)}... 빌드 시작` });
+
+    // 백그라운드 빌드
+    setImmediate(async () => {
+      try {
+        const result = await buildOneSheet(sheetId);
+        console.log('[index/build-sheet] 완료:', JSON.stringify(result));
+        emitIndexBuild({
+          rebuilt: result.rebuilt || 0,
+          skipped: result.skipped || 0,
+          errors: result.errors || 0,
+          elapsed: result.elapsed || '',
+          trigger: 'partial',
+          sheetId,
+        });
+      } catch (err) {
+        console.error('[index/build-sheet] 실패:', err.message);
+      }
     });
   } catch (err) {
     next(err);

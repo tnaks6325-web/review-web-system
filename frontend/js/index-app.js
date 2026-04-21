@@ -2045,6 +2045,9 @@ async function loadAdminDashboard() {
     // ★ 자동 빌드 카운트다운 + 빌드 진행 중 배너
     _startCronCountdown(data.cron, data.buildLock);
 
+    // ★ Phase 4: 비동기 dirty check (대시보드 로딩 차단 없음)
+    _asyncDirtyCheck();
+
     const rate = grand.total > 0 ? Math.round(grand.submitted / grand.total * 100) : 0;
     document.getElementById("sumTotal").textContent   = grand.total.toLocaleString();
     document.getElementById("sumDone").textContent    = grand.submitted.toLocaleString();
@@ -9539,6 +9542,108 @@ function _autoRefreshDashboardAfterBuild() {
     showToast("🔄 대시보드 자동 새로고침 중...", "info");
     loadAdminDashboard();
   }, 800);
+}
+
+// ═══════════════════════════════════════════════════════════
+// ★ Phase 4: Dirty Tab 변경감지 — 구글시트 변경 시 배지 표시
+// ═══════════════════════════════════════════════════════════
+
+let _lastDirtySheets = [];
+
+/** 대시보드 로드 후 비동기로 dirty check 호출 */
+async function _asyncDirtyCheck() {
+  try {
+    const token = sessionStorage.getItem('admin_token');
+    if (!token) return;
+    const resp = await fetch(API_BASE_URL + '/api/index/dirty', {
+      headers: { 'Authorization': 'Bearer ' + token }
+    });
+    if (!resp.ok) return;
+    const data = await resp.json();
+    if (data.ok) {
+      _lastDirtySheets = data.dirtySheets || [];
+      _renderDirtyBadges(_lastDirtySheets);
+    }
+  } catch (_) { /* 실패 시 무시 — dirty 배지 없이 기존대로 동작 */ }
+}
+
+/** dirty 시트에 해당하는 캠페인 블록에 배지 표시 */
+function _renderDirtyBadges(dirtySheets) {
+  // 기존 dirty 배지 모두 제거
+  document.querySelectorAll('.dirty-badge').forEach(function(el) { el.remove(); });
+
+  if (!dirtySheets || dirtySheets.length === 0) return;
+
+  const dirtyIds = new Set(dirtySheets.map(function(s) { return s.sheetId; }));
+
+  // 캠페인 블록의 갱신 버튼에서 sheetId 매칭
+  document.querySelectorAll('.btn-camp-refresh[data-sheetid]').forEach(function(btn) {
+    const sid = btn.getAttribute('data-sheetid');
+    if (!dirtyIds.has(sid)) return;
+
+    const header = btn.closest('.dash-campaign-header');
+    if (!header) return;
+
+    // 이미 dirty 배지가 있으면 스킵
+    if (header.querySelector('.dirty-badge')) return;
+
+    const badge = document.createElement('span');
+    badge.className = 'dirty-badge';
+    badge.title = '구글시트에서 변경 감지됨 — 클릭하여 이 시트만 동기화';
+    badge.innerHTML = '<i class="fas fa-bolt"></i> 새 변경';
+    badge.style.cssText = 'display:inline-flex;align-items:center;gap:3px;background:#FEF3C7;color:#D97706;border:1px solid #FDE68A;border-radius:4px;padding:1px 7px;font-size:.65rem;font-weight:700;cursor:pointer;margin-left:6px;animation:buildPulse 2s ease-in-out infinite';
+    badge.onclick = function(e) {
+      e.stopPropagation();
+      _buildDirtySheet(sid, badge);
+    };
+
+    // 캠페인 제목 옆에 삽입
+    const titleSpan = header.querySelector('.dash-campaign-name') || header.querySelector('span');
+    if (titleSpan) {
+      titleSpan.parentNode.insertBefore(badge, titleSpan.nextSibling);
+    } else {
+      header.appendChild(badge);
+    }
+  });
+}
+
+/** dirty 시트 클릭 → 해당 시트만 빌드 */
+async function _buildDirtySheet(sheetId, badgeEl) {
+  if (badgeEl) {
+    badgeEl.innerHTML = '<i class="fas fa-sync-alt fa-spin"></i> 동기화 중...';
+    badgeEl.style.background = '#DBEAFE';
+    badgeEl.style.color = '#2563EB';
+    badgeEl.style.borderColor = '#93C5FD';
+    badgeEl.style.animation = 'none';
+    badgeEl.onclick = null;
+  }
+
+  try {
+    const token = sessionStorage.getItem('admin_token');
+    const resp = await fetch(API_BASE_URL + '/api/index/build-sheet', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'Authorization': 'Bearer ' + token },
+      body: JSON.stringify({ sheetId }),
+    });
+    const data = await resp.json();
+    if (data.ok) {
+      if (typeof showToast === 'function') showToast('⚡ 시트 동기화 시작됨 — 완료 시 자동 새로고침', 'success');
+      // 빌드 완료 후 SSE index_build 이벤트로 자동 새로고침됨
+      // 안전장치: 15초 후에도 SSE가 안 오면 수동 새로고침
+      setTimeout(function() {
+        if (badgeEl && badgeEl.parentNode) {
+          badgeEl.remove();
+          loadAdminDashboard();
+        }
+      }, 15000);
+    } else {
+      if (typeof showToast === 'function') showToast(data.error || '동기화 실패', 'error');
+      if (badgeEl) badgeEl.remove();
+    }
+  } catch (err) {
+    if (typeof showToast === 'function') showToast('동기화 요청 실패: ' + err.message, 'error');
+    if (badgeEl) badgeEl.remove();
+  }
 }
 
 // ═══════════════════════════════════════════════════════════
