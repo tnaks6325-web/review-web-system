@@ -10633,9 +10633,12 @@ async function loadArchiveList() {
       camp.tabs.forEach(t => {
         const reasonLabel = t.archiveReason === 'closed' ? '마감' :
                             t.archiveReason === 'force_done' ? '강제완료' :
-                            t.archiveReason === 'completed' ? '100%완료' : (t.archiveReason || '-');
+                            t.archiveReason === 'completed' ? '100%완료' :
+                            t.archiveReason === 'name_completed' ? '(완)탭명' :
+                            t.archiveReason === 'auto_detect' ? '자동감지' : (t.archiveReason || '-');
         const reasonColor = t.archiveReason === 'closed' ? '#EF4444' :
-                            t.archiveReason === 'force_done' ? '#F59E0B' : '#10B981';
+                            t.archiveReason === 'force_done' ? '#F59E0B' :
+                            t.archiveReason === 'name_completed' ? '#6366F1' : '#10B981';
         const dateStr = t.archivedAt ? new Date(t.archivedAt).toLocaleDateString('ko-KR') : '-';
         html += `<tr style="border-top:1px solid #F3F4F6">
           <td style="padding:5px 10px">${escHtml(t.tabName)}</td>
@@ -10729,9 +10732,11 @@ async function archiveAutoDetect() {
       camp.tabs.forEach(t => {
         const reasonLabel = t.reason === 'closed' ? '마감' :
                             t.reason === 'force_done' ? '강제완료' :
-                            t.reason === 'completed' ? '100%완료' : t.reason;
+                            t.reason === 'completed' ? '100%완료' :
+                            t.reason === 'name_completed' ? '(완)탭명' : t.reason;
         const reasonColor = t.reason === 'closed' ? '#EF4444' :
-                            t.reason === 'force_done' ? '#F59E0B' : '#10B981';
+                            t.reason === 'force_done' ? '#F59E0B' :
+                            t.reason === 'name_completed' ? '#6366F1' : '#10B981';
         const indexBadge = t.inIndex === false
           ? '<span style="background:#FEF3C7;color:#D97706;padding:1px 4px;border-radius:3px;font-size:.65rem;margin-left:2px">인덱스외</span>'
           : '';
@@ -10795,6 +10800,8 @@ async function _archiveExecuteSelected() {
 
     // 아카이브 목록 새로고침
     loadArchiveList();
+    // 대시보드 자동 새로고침 (아카이브된 탭 즉시 제거)
+    if (typeof loadAdminDashboard === 'function') loadAdminDashboard();
   } catch (err) {
     alert('아카이브 실패: ' + err.message);
     if (detectWrap) detectWrap.style.display = 'none';

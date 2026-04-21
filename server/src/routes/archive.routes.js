@@ -6,7 +6,7 @@ const { logger } = require('../utils/logger');
 
 // ═══════════════════════════════════════════════════════════
 // GET /api/archive/detect — 아카이브 대상 자동 감지 (반자동: 감지만)
-// 소스 1: index_master 기준 (submitted >= row_count OR closed/force_done)
+// 소스 1: index_master 기준 (submitted >= row_count OR closed/force_done OR (완) 접두사)
 // 소스 2: tab_configs 기준 (closed/force_done이지만 index_master에 없는 경우)
 // ═══════════════════════════════════════════════════════════
 router.get('/detect', authMiddleware, async (req, res, next) => {
@@ -24,6 +24,7 @@ router.get('/detect', authMiddleware, async (req, res, next) => {
           WHEN tc.is_closed = TRUE THEN 'closed'
           WHEN tc.force_done = TRUE THEN 'force_done'
           WHEN im.row_count > 0 AND im.submitted_count >= im.row_count THEN 'completed'
+          WHEN im.tab_name LIKE '(완)%' THEN 'name_completed'
           ELSE 'unknown'
         END AS "reason",
         TRUE AS "inIndex"
@@ -34,6 +35,7 @@ router.get('/detect', authMiddleware, async (req, res, next) => {
           tc.is_closed = TRUE
           OR tc.force_done = TRUE
           OR (im.row_count > 0 AND im.submitted_count >= im.row_count)
+          OR im.tab_name LIKE '(완)%'
         )
 
       UNION ALL
