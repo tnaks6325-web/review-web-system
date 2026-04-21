@@ -363,15 +363,27 @@ router.delete('/keywords/:id', authMiddleware, masterOnlyMiddleware, async (req,
 // ═══════════════════════════════════════════════════════════
 
 // GET /api/admin/unrecognized — 인식 실패 탭 목록
+// no_data (헤더 정상 / 데이터 미입력 = 진행 중인 탭)는 기본적으로 제외
+// ?include_no_data=true 로 포함 가능
 router.get('/unrecognized', authMiddleware, async (req, res, next) => {
   try {
-    const { status } = req.query;
+    const { status, include_no_data } = req.query;
+    const conditions = [];
+    const params = [];
+
+    // no_data 제외 (진행 중인 탭이므로 인식 실패가 아님)
+    if (include_no_data !== 'true') {
+      conditions.push(`reason != 'no_data'`);
+    }
+    if (status) {
+      params.push(status);
+      conditions.push(`status = $${params.length}`);
+    }
+
     let sql = `SELECT id, sheet_id, tab_name, tab_gid, campaign_name, sample_rows, reason, status, ignored_by, ignored_at, detected_at
                FROM unrecognized_tabs`;
-    const params = [];
-    if (status) {
-      sql += ' WHERE status = $1';
-      params.push(status);
+    if (conditions.length > 0) {
+      sql += ' WHERE ' + conditions.join(' AND ');
     }
     sql += ' ORDER BY detected_at DESC';
     const { rows } = await pool.query(sql, params);

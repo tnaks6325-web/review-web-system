@@ -130,6 +130,17 @@ async function buildIndexSmart(forceFullRebuild = false) {
     // ── 0단계: DB에서 키워드 로드 ──
     await _loadKeywordsFromDB();
 
+    // ── 0-1단계: 기존 no_data pending 레코드 일괄 resolved 처리 ──
+    // no_data = 헤더 구조 정상이지만 데이터 미입력 (진행 중인 탭) → 인식 실패가 아님
+    try {
+      const { rowCount } = await pool.query(
+        `UPDATE unrecognized_tabs SET status = 'resolved' WHERE reason = 'no_data' AND status = 'pending'`
+      );
+      if (rowCount > 0) {
+        logger.info(`[buildIndex] no_data pending ${rowCount}건 → resolved 처리`);
+      }
+    } catch (_) {}
+
     // ── 1단계: 시트 ID 목록 수집 ──
     const { rows: campaignRows } = await pool.query(
       'SELECT DISTINCT sheet_id FROM campaigns UNION SELECT DISTINCT sheet_id FROM tab_configs'
