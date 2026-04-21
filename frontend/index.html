@@ -226,230 +226,235 @@
   </div>
 </div>
 
-<!-- ────────── 동기화 모달 ────────── -->
+<!-- ────────── 인덱스 관리 모달 (재정비) ────────── -->
 <div id="indexModal" class="modal-overlay hidden" style="display:none">
-  <div class="modal-box" style="max-width:440px">
+  <div class="modal-box" style="max-width:460px">
     <div class="modal-header">
-      <h3><i class="fas fa-sync-alt"></i> 동기화</h3>
+      <h3><i class="fas fa-database" style="color:#2563EB"></i> 인덱스 관리</h3>
       <button class="btn-icon-sm" onclick="closeIndexModal()"><i class="fas fa-times"></i></button>
     </div>
-    <div class="modal-body">
-      <!-- 인덱스 상태 카드 -->
-      <div class="index-status-card">
-        <div class="index-status-row">
-          <span class="index-status-label">상태</span>
-          <span id="indexStatusBadge" class="index-badge index-badge-unknown">확인 중...</span>
-        </div>
-        <div class="index-status-row" id="codeVersionRow" style="display:none">
-          <span class="index-status-label" style="white-space:nowrap" title="GAS가 이 요청에 응답한 시각 (KST). 배포 후 첫 응답 시 자동 기록됩니다.">GAS 응답시각</span>
-          <span id="codeVersionText" class="index-meta" style="color:#7C3AED;font-weight:600">-</span>
-        </div>
-        <div class="index-status-row">
-          <span class="index-status-label">마지막 갱신</span>
-          <span id="indexBuiltAt" class="index-meta">-</span>
-        </div>
-        <div class="index-status-row">
-          <span class="index-status-label">건수</span>
-          <span id="indexCount" class="index-meta">-</span>
-        </div>
-        <div class="index-status-row" id="indexElapsedRow" style="display:none">
-          <span class="index-status-label">소요시간</span>
-          <span id="indexElapsed" class="index-meta">-</span>
-        </div>
-        <div class="index-status-row" id="indexResultRow" style="display:none">
-          <span class="index-status-label">결과</span>
-          <span id="indexResult" class="index-meta">-</span>
-        </div>
-      </div>
-      <!-- ★ Phase 5: 통합 동기화 상태 패널 -->
-      <div id="syncStatusPanel" class="sync-status-panel" style="margin-top:8px">
-        <div class="sync-status-grid">
-          <div class="sync-status-item">
-            <span class="sync-status-icon" id="syncSSEIcon"><i class="fas fa-plug"></i></span>
-            <span class="sync-status-text" id="syncSSEText">SSE 미연결</span>
+    <div class="modal-body" style="padding:0">
+
+      <!-- ━━━━━ ① 현황 ━━━━━ -->
+      <div style="padding:14px 16px 10px">
+        <div class="index-status-card">
+          <div class="index-status-row">
+            <span class="index-status-label">상태</span>
+            <span id="indexStatusBadge" class="index-badge index-badge-unknown">확인 중...</span>
           </div>
-          <div class="sync-status-item">
-            <span class="sync-status-icon" id="syncLiveIcon"><i class="fas fa-broadcast-tower"></i></span>
-            <span class="sync-status-text" id="syncLiveText">LIVE OFF</span>
+          <div class="index-status-row" id="codeVersionRow" style="display:none">
+            <span class="index-status-label" style="white-space:nowrap" title="서버가 이 요청에 응답한 시각 (KST)">서버 응답시각</span>
+            <span id="codeVersionText" class="index-meta" style="color:#7C3AED;font-weight:600">-</span>
           </div>
-          <div class="sync-status-item">
-            <span class="sync-status-icon" id="syncDirtyIcon"><i class="fas fa-bolt"></i></span>
-            <span class="sync-status-text" id="syncDirtyText">변경 0건</span>
+          <div class="index-status-row">
+            <span class="index-status-label">마지막 갱신</span>
+            <span id="indexBuiltAt" class="index-meta">-</span>
           </div>
-          <div class="sync-status-item">
-            <span class="sync-status-icon" id="syncNextIcon"><i class="fas fa-clock"></i></span>
-            <span class="sync-status-text" id="syncNextText">다음 동기화 -</span>
+          <div class="index-status-row">
+            <span class="index-status-label">인덱스 건수</span>
+            <span id="indexCount" class="index-meta">-</span>
+          </div>
+          <div class="index-status-row" id="indexElapsedRow" style="display:none">
+            <span class="index-status-label">소요시간</span>
+            <span id="indexElapsed" class="index-meta">-</span>
+          </div>
+          <div class="index-status-row" id="indexResultRow" style="display:none">
+            <span class="index-status-label">결과</span>
+            <span id="indexResult" class="index-meta">-</span>
           </div>
         </div>
-      </div>
-      <!-- GAS 오류 배너 -->
-      <div id="gasErrorBanner" style="display:none;margin-top:10px;padding:10px 12px;background:#FFF7ED;border:1px solid #FED7AA;border-radius:8px;font-size:.76rem;color:#92400E;line-height:1.6">
-        <b style="display:block;margin-bottom:4px"><i class="fas fa-exclamation-triangle" style="color:#F59E0B"></i> GAS 재배포 필요</b>
-        <b>현재 배포된 GAS가 구버전(JSONP 미지원)입니다.</b><br>
-        <b>해결 방법:</b><br>
-        1. <b>gas/Code.gs</b> 전체 내용을 복사<br>
-        2. <a href="https://script.google.com" target="_blank" style="color:#B45309;font-weight:700">script.google.com</a> → 해당 프로젝트 열기<br>
-        3. 기존 코드 전체 선택(Ctrl+A) → 붙여넣기(Ctrl+V)<br>
-        4. <b>배포 → 기존 배포 관리 → 수정(연필) → 새 버전 → 배포</b><br>
-        5. 웹앱 URL 변경 없음 ✅ → 재배포 완료 후 다시 [인덱스 지금 갱신] 클릭
-      </div>
-      <p class="field-hint" style="margin-top:6px">
-        <i class="fas fa-info-circle"></i>
-        인덱스가 있으면 검색이 <strong>1~2초</strong>로 단축됩니다.
-        캠페인 추가·변경 후 수동 갱신하세요.
-      </p>
-      <!-- 갱신 진행 표시 -->
-      <div id="buildProgressWrap" class="hidden" style="display:none;margin-top:12px">
-        <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:5px">
-          <span id="buildProgressLabel" style="font-size:.78rem;color:var(--p);font-weight:600">갱신 중...</span>
-          <span id="buildProgressTime" style="font-size:.75rem;color:var(--t3)">0초 경과</span>
+        <!-- 실시간 상태 패널 -->
+        <div id="syncStatusPanel" class="sync-status-panel" style="margin-top:8px">
+          <div class="sync-status-grid">
+            <div class="sync-status-item">
+              <span class="sync-status-icon" id="syncSSEIcon"><i class="fas fa-plug"></i></span>
+              <span class="sync-status-text" id="syncSSEText">SSE 미연결</span>
+            </div>
+            <div class="sync-status-item">
+              <span class="sync-status-icon" id="syncLiveIcon"><i class="fas fa-broadcast-tower"></i></span>
+              <span class="sync-status-text" id="syncLiveText">LIVE OFF</span>
+            </div>
+            <div class="sync-status-item">
+              <span class="sync-status-icon" id="syncDirtyIcon"><i class="fas fa-bolt"></i></span>
+              <span class="sync-status-text" id="syncDirtyText">변경 0건</span>
+            </div>
+            <div class="sync-status-item">
+              <span class="sync-status-icon" id="syncNextIcon"><i class="fas fa-clock"></i></span>
+              <span class="sync-status-text" id="syncNextText">다음 동기화 -</span>
+            </div>
+          </div>
         </div>
-        <div style="height:6px;background:#E5E7EB;border-radius:99px;overflow:hidden">
-          <div id="buildProgressBar" style="height:100%;background:linear-gradient(90deg,var(--p),#7C3AED);border-radius:99px;width:0%;transition:width .5s ease"></div>
-        </div>
-        <div style="display:flex;justify-content:space-between;margin-top:4px">
-          <span id="buildProgressPct" style="font-size:.72rem;color:var(--t3)">0%</span>
-          <span id="buildProgressEta" style="font-size:.72rem;color:var(--t3)">예상 잔여: 계산 중...</span>
-        </div>
-      </div>
-      <!-- 동기화 버튼 -->
-      <!-- ★ v9.12: 빠른 동기화(증분) + 전체 동기화 분리 -->
-      <div style="display:flex;gap:6px;margin-top:12px">
-        <button id="btnBuildIndexSmart" class="btn-index-build"
-          onclick="buildIndexSmart()"
-          style="flex:1.5;background:linear-gradient(135deg,#0ea5e9,#2563eb);font-size:.82rem"
-          title="변경된 탭만 빠르게 동기화합니다 (평균 5~20초)">
-          <i class="fas fa-bolt"></i> 빠른 동기화 <span id="smartDirtyBadge" style="display:none;background:rgba(255,255,255,0.25);padding:1px 6px;border-radius:10px;font-size:.7rem;margin-left:3px"></span>
-        </button>
-        <button id="btnBuildIndex" class="btn-index-build"
-          onclick="buildIndex()"
-          style="flex:1;background:linear-gradient(135deg,#6b7280,#374151);font-size:.82rem"
-          title="모든 캠페인을 처음부터 전체 동기화합니다 (100~200초)">
-          <i class="fas fa-sync-alt"></i> 전체 동기화
-        </button>
-      </div>
-      <div id="smartModeHint" style="font-size:.7rem;color:#2563eb;margin-top:4px;display:none">
-        <i class="fas fa-info-circle"></i> <span id="smartModeHintText"></span>
-      </div>
-      <div style="font-size:.7rem;color:#9ca3af;margin-top:3px">
-        <i class="fas fa-bolt" style="color:#0ea5e9"></i> <b>빠른 동기화</b>: 변경된 탭만 동기화 (5~20초) · 없으면 자동 스킵 또는 전체 동기화로 전환<br>
-        <i class="fas fa-sync-alt" style="color:#6b7280"></i> <b>전체 동기화</b>: 모든 캠페인 전체 동기화 (100~200초)
-      </div>
-      <!-- ★ 폴더 일괄 생성/배치 -->
-      <div style="margin-top:8px;display:flex;flex-direction:column;gap:4px">
-        <div style="font-size:.78rem;font-weight:700;color:#374151;margin-bottom:2px">
-          <i class="fas fa-folder-plus"></i> 폴더 일괄 생성/배치 <span style="font-size:.68rem;font-weight:400;color:#6B7280">(완료·마감 탭 제외)</span>
-        </div>
-        <div style="display:flex;gap:4px">
-          <button id="btnBatchCapture" onclick="batchCreateFolders('capture')"
-            style="flex:1;padding:8px 4px;background:#F0F9FF;color:#0369A1;border:1px solid #BAE6FD;border-radius:6px;font-size:.75rem;font-weight:600;cursor:pointer;display:flex;align-items:center;justify-content:center;gap:5px">
-            <i class="fas fa-camera"></i> 캡처폴더
-          </button>
-          <button id="btnBatchReview" onclick="batchCreateFolders('review')"
-            style="flex:1;padding:8px 4px;background:#F0FFF4;color:#166534;border:1px solid #BBF7D0;border-radius:6px;font-size:.75rem;font-weight:600;cursor:pointer;display:flex;align-items:center;justify-content:center;gap:5px">
-            <i class="fas fa-folder-open"></i> 리뷰폴더
-          </button>
-          <button id="btnBatchBoth" onclick="batchCreateFolders('both')"
-            style="flex:1;padding:8px 4px;background:#FAF5FF;color:#6D28D9;border:1px solid #DDD6FE;border-radius:6px;font-size:.75rem;font-weight:600;cursor:pointer;display:flex;align-items:center;justify-content:center;gap:5px">
-            <i class="fas fa-layer-group"></i> 전체
-          </button>
-        </div>
-        <div id="batchFolderResult" style="display:none;font-size:.71rem;margin-top:2px"></div>
       </div>
 
-      <!-- ★ 캡처폴더 구조 재편성 (단층 → 캠페인폴더 하위) -->
-      <div style="margin-top:6px;border-top:1px solid #E5E7EB;padding-top:6px;display:flex;flex-direction:column;gap:4px">
-        <div style="font-size:.78rem;font-weight:700;color:#374151;margin-bottom:2px">
-          <i class="fas fa-sitemap"></i> 캡처폴더 구조 재편성
-          <span style="font-size:.67rem;font-weight:400;color:#6B7280"> (단층 인덱스폴더 → 캠페인폴더 하위로 이동)</span>
+      <!-- ━━━━━ ② 인덱스 갱신 ━━━━━ -->
+      <div style="padding:0 16px 12px;border-top:1px solid #E5E7EB">
+        <div style="font-size:.8rem;font-weight:700;color:#1E293B;margin:10px 0 6px;display:flex;align-items:center;gap:5px">
+          <i class="fas fa-sync-alt" style="color:#2563EB"></i> 인덱스 갱신
         </div>
-        <div style="font-size:.68rem;color:#6B7280;line-height:1.5;margin-bottom:3px">
-          현재 캡처루트에 단층으로 놓인 폴더들을 리뷰폴더와 동일한 구조로 재배치합니다.<br>
-          <b style="color:#92400E">📁 캡처루트 / {인덱스폴더}</b> →
-          <b style="color:#166534">📁 캡처루트 / {캠페인폴더} / {인덱스폴더}</b><br>
-          ① <b>폴더 현황 진단</b>으로 드라이브 실제 폴더명을 먼저 확인하세요.
+        <!-- GAS 오류 배너 (하위호환 - 표시 안됨) -->
+        <div id="gasErrorBanner" style="display:none;margin-bottom:8px;padding:10px 12px;background:#FFF7ED;border:1px solid #FED7AA;border-radius:8px;font-size:.76rem;color:#92400E;line-height:1.6">
+          <b><i class="fas fa-exclamation-triangle" style="color:#F59E0B"></i> 서버 연결 오류</b>
         </div>
-        <!-- 진단 버튼 -->
-        <button id="btnDiagCapture" onclick="diagCaptureFolders()"
-          style="width:100%;padding:7px 4px;background:#EFF6FF;color:#1D4ED8;border:1px solid #BFDBFE;border-radius:6px;font-size:.75rem;font-weight:600;cursor:pointer;display:flex;align-items:center;justify-content:center;gap:5px">
-          <i class="fas fa-microscope"></i> ① 폴더 현황 진단 (드라이브 실제 폴더명 확인)
-        </button>
-        <div id="diagCaptureResult" style="display:none;font-size:.71rem;margin-top:2px;max-height:280px;overflow-y:auto;border:1px solid #E5E7EB;border-radius:6px;padding:6px;background:#F9FAFB"></div>
-        <!-- 재편성 버튼 -->
-        <div style="display:flex;gap:4px;margin-top:2px">
-          <button id="btnOrganizeDry" onclick="organizeCaptureFolders(true)"
-            style="flex:1;padding:8px 4px;background:#FFFBEB;color:#92400E;border:1px solid #FDE68A;border-radius:6px;font-size:.75rem;font-weight:600;cursor:pointer;display:flex;align-items:center;justify-content:center;gap:5px">
-            <i class="fas fa-search"></i> ② 미리보기
+        <!-- 진행 표시 바 -->
+        <div id="buildProgressWrap" class="hidden" style="display:none;margin-bottom:8px">
+          <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:5px">
+            <span id="buildProgressLabel" style="font-size:.78rem;color:var(--p);font-weight:600">갱신 중...</span>
+            <span id="buildProgressTime" style="font-size:.75rem;color:var(--t3)">0초 경과</span>
+          </div>
+          <div style="height:6px;background:#E5E7EB;border-radius:99px;overflow:hidden">
+            <div id="buildProgressBar" style="height:100%;background:linear-gradient(90deg,var(--p),#7C3AED);border-radius:99px;width:0%;transition:width .5s ease"></div>
+          </div>
+          <div style="display:flex;justify-content:space-between;margin-top:4px">
+            <span id="buildProgressPct" style="font-size:.72rem;color:var(--t3)">0%</span>
+            <span id="buildProgressEta" style="font-size:.72rem;color:var(--t3)">예상 잔여: 계산 중...</span>
+          </div>
+        </div>
+        <!-- 동기화 버튼 -->
+        <div style="display:flex;gap:6px">
+          <button id="btnBuildIndexSmart" class="btn-index-build"
+            onclick="buildIndexSmart()"
+            style="flex:1.5;background:linear-gradient(135deg,#0ea5e9,#2563eb);font-size:.82rem"
+            title="변경된 탭만 빠르게 동기화 (평균 5~20초)">
+            <i class="fas fa-bolt"></i> 빠른 갱신 <span id="smartDirtyBadge" style="display:none;background:rgba(255,255,255,0.25);padding:1px 6px;border-radius:10px;font-size:.7rem;margin-left:3px"></span>
           </button>
-          <button id="btnOrganizeRun" onclick="organizeCaptureFolders(false)"
-            style="flex:1;padding:8px 4px;background:#FFF1F2;color:#BE123C;border:1px solid #FECDD3;border-radius:6px;font-size:.75rem;font-weight:600;cursor:pointer;display:flex;align-items:center;justify-content:center;gap:5px">
-            <i class="fas fa-sitemap"></i> ③ 실제 재편성
+          <button id="btnBuildIndex" class="btn-index-build"
+            onclick="buildIndex()"
+            style="flex:1;background:linear-gradient(135deg,#6b7280,#374151);font-size:.82rem"
+            title="모든 캠페인을 처음부터 전체 동기화 (100~200초)">
+            <i class="fas fa-sync-alt"></i> 전체 갱신
           </button>
         </div>
-        <div id="organizeResult" style="display:none;font-size:.71rem;margin-top:2px;max-height:240px;overflow-y:auto"></div>
+        <div id="smartModeHint" style="font-size:.7rem;color:#2563eb;margin-top:4px;display:none">
+          <i class="fas fa-info-circle"></i> <span id="smartModeHintText"></span>
+        </div>
+        <div style="font-size:.68rem;color:#9ca3af;margin-top:4px;line-height:1.55">
+          <i class="fas fa-bolt" style="color:#0ea5e9"></i> <b>빠른 갱신</b> — 변경된 탭만 (5~20초), 없으면 자동 스킵<br>
+          <i class="fas fa-sync-alt" style="color:#6b7280"></i> <b>전체 갱신</b> — 모든 캠페인 전체 재빌드 (100~200초)<br>
+          <i class="fas fa-clock" style="color:#059669"></i> <b>자동 갱신</b> — 매 정시(09~19시) CRON 자동 실행
+        </div>
       </div>
 
-      <!-- ★ 구버전 폴더명 마이그레이션 -->
-      <div style="margin-top:6px;border-top:1px solid #E5E7EB;padding-top:6px;display:flex;flex-direction:column;gap:4px">
-        <div style="font-size:.78rem;font-weight:700;color:#374151;margin-bottom:2px">
-          <i class="fas fa-exchange-alt"></i> 구버전 폴더명 → 신규형식 일괄 변환
-          <span style="font-size:.67rem;font-weight:400;color:#6B7280"> ({탭명} → {탭명}_{캠페인명})</span>
-        </div>
-        <div style="font-size:.68rem;color:#6B7280;line-height:1.5;margin-bottom:3px">
-          탭명이 동일한 캠페인 간 폴더 충돌 방지를 위해 기존 Drive 폴더명을 새 형식으로 변경합니다.<br>
-          <b>미리보기</b>로 변경 예상 목록을 확인한 뒤 <b>실제 변환</b>을 실행하세요.
-        </div>
-        <div style="display:flex;gap:4px">
-          <button id="btnMigrateDry" onclick="migrateFolderNames(true)"
-            style="flex:1;padding:8px 4px;background:#FFFBEB;color:#92400E;border:1px solid #FDE68A;border-radius:6px;font-size:.75rem;font-weight:600;cursor:pointer;display:flex;align-items:center;justify-content:center;gap:5px">
-            <i class="fas fa-search"></i> 미리보기
+      <!-- ━━━━━ ③ 폴더 관리 (접기/펼치기) ━━━━━ -->
+      <div style="border-top:1px solid #E5E7EB">
+        <button onclick="this.nextElementSibling.style.display=this.nextElementSibling.style.display==='none'?'block':'none'; this.querySelector('.idx-chevron').classList.toggle('fa-chevron-down'); this.querySelector('.idx-chevron').classList.toggle('fa-chevron-right')"
+          style="width:100%;padding:10px 16px;background:#F8FAFC;border:none;cursor:pointer;display:flex;align-items:center;gap:6px;font-size:.8rem;font-weight:700;color:#1E293B;text-align:left">
+          <i class="fas fa-folder-open" style="color:#059669"></i> 폴더 관리
+          <i class="fas fa-chevron-right idx-chevron" style="margin-left:auto;font-size:.65rem;color:#9CA3AF;transition:transform .2s"></i>
+        </button>
+        <div style="display:none;padding:8px 16px 12px">
+          <!-- 폴더 일괄 생성 -->
+          <div style="font-size:.75rem;font-weight:600;color:#374151;margin-bottom:5px">
+            <i class="fas fa-folder-plus" style="color:#059669"></i> 일괄 생성 <span style="font-size:.66rem;font-weight:400;color:#6B7280">(완료·마감 탭 제외)</span>
+          </div>
+          <div style="display:flex;gap:4px">
+            <button id="btnBatchCapture" onclick="batchCreateFolders('capture')"
+              style="flex:1;padding:7px 4px;background:#F0F9FF;color:#0369A1;border:1px solid #BAE6FD;border-radius:6px;font-size:.73rem;font-weight:600;cursor:pointer;display:flex;align-items:center;justify-content:center;gap:4px">
+              <i class="fas fa-camera"></i> 캡처폴더
+            </button>
+            <button id="btnBatchReview" onclick="batchCreateFolders('review')"
+              style="flex:1;padding:7px 4px;background:#F0FFF4;color:#166534;border:1px solid #BBF7D0;border-radius:6px;font-size:.73rem;font-weight:600;cursor:pointer;display:flex;align-items:center;justify-content:center;gap:4px">
+              <i class="fas fa-folder-open"></i> 리뷰폴더
+            </button>
+            <button id="btnBatchBoth" onclick="batchCreateFolders('both')"
+              style="flex:1;padding:7px 4px;background:#FAF5FF;color:#6D28D9;border:1px solid #DDD6FE;border-radius:6px;font-size:.73rem;font-weight:600;cursor:pointer;display:flex;align-items:center;justify-content:center;gap:4px">
+              <i class="fas fa-layer-group"></i> 전체
+            </button>
+          </div>
+          <div id="batchFolderResult" style="display:none;font-size:.71rem;margin-top:3px"></div>
+
+          <!-- 폴더 URL 동기화 -->
+          <div style="margin-top:8px;font-size:.75rem;font-weight:600;color:#374151;margin-bottom:5px">
+            <i class="fas fa-link" style="color:#0369A1"></i> 폴더 URL 동기화 <span style="font-size:.66rem;font-weight:400;color:#6B7280">(드라이브 → DB 매칭)</span>
+          </div>
+          <button id="btnSyncAllFolders" onclick="syncAllFolders()" style="width:100%;padding:8px;background:#F0F9FF;color:#0369A1;border:1px solid #BAE6FD;border-radius:6px;font-size:.78rem;font-weight:600;cursor:pointer;display:flex;align-items:center;justify-content:center;gap:6px">
+            <i class="fas fa-link"></i> 캡처/리뷰 폴더 일괄동기화
           </button>
-          <button id="btnMigrateRun" onclick="migrateFolderNames(false)"
-            style="flex:1;padding:8px 4px;background:#FFF1F2;color:#BE123C;border:1px solid #FECDD3;border-radius:6px;font-size:.75rem;font-weight:600;cursor:pointer;display:flex;align-items:center;justify-content:center;gap:5px">
-            <i class="fas fa-play"></i> 실제 변환
-          </button>
+          <label style="display:flex;align-items:center;gap:6px;padding:5px 8px;background:#FFF7ED;border:1px solid #FED7AA;border-radius:6px;font-size:.72rem;color:#92400E;cursor:pointer;user-select:none;margin-top:4px">
+            <input type="checkbox" id="chkForceSync" style="width:13px;height:13px;accent-color:#EA580C;cursor:pointer">
+            <span><b>강제 재설정</b> — 기존 URL도 덮어쓰기</span>
+          </label>
         </div>
-        <div id="migrateResult" style="display:none;font-size:.71rem;margin-top:2px;max-height:200px;overflow-y:auto"></div>
       </div>
 
-      <!-- 폴더 동기화 -->
-      <div style="margin-top:6px;border-top:1px solid #E5E7EB;padding-top:6px;display:flex;flex-direction:column;gap:4px">
-        <div style="font-size:.78rem;font-weight:700;color:#374151;margin-bottom:2px">
-          <i class="fas fa-folder-sync"></i> 폴더 URL 동기화 <span style="font-size:.68rem;font-weight:400;color:#6B7280">(드라이브 기존폴더 → 세부목록 URL 매칭)</span>
-        </div>
-        <button id="btnSyncAllFolders" onclick="syncAllFolders()" style="width:100%;padding:9px;background:#F0F9FF;color:#0369A1;border:1px solid #BAE6FD;border-radius:var(--rs);font-size:.82rem;font-weight:600;cursor:pointer;display:flex;align-items:center;justify-content:center;gap:7px;transition:background .15s,opacity .15s">
-          <i class="fas fa-link"></i> 구매캡쳐/리뷰저장 폴더 일괄동기화
+      <!-- ━━━━━ ④ 유지보수 도구 (접기/펼치기) ━━━━━ -->
+      <div style="border-top:1px solid #E5E7EB">
+        <button onclick="this.nextElementSibling.style.display=this.nextElementSibling.style.display==='none'?'block':'none'; this.querySelector('.idx-chevron').classList.toggle('fa-chevron-down'); this.querySelector('.idx-chevron').classList.toggle('fa-chevron-right')"
+          style="width:100%;padding:10px 16px;background:#F8FAFC;border:none;cursor:pointer;display:flex;align-items:center;gap:6px;font-size:.8rem;font-weight:700;color:#1E293B;text-align:left">
+          <i class="fas fa-wrench" style="color:#D97706"></i> 유지보수 도구
+          <i class="fas fa-chevron-right idx-chevron" style="margin-left:auto;font-size:.65rem;color:#9CA3AF;transition:transform .2s"></i>
         </button>
-        <!-- 강제 재설정 옵션 -->
-        <label style="display:flex;align-items:center;gap:6px;padding:6px 10px;background:#FFF7ED;border:1px solid #FED7AA;border-radius:6px;font-size:.75rem;color:#92400E;cursor:pointer;user-select:none">
-          <input type="checkbox" id="chkForceSync" style="width:14px;height:14px;accent-color:#EA580C;cursor:pointer">
-          <span><b>강제 재설정</b> — 기존에 저장된 폴더 URL도 덮어씀 (잘못 매칭된 폴더 교정 시 사용)</span>
-        </label>
-      </div>
-      <!-- GAS 로그 확인 -->
-      <div style="margin-top:8px;padding:6px 8px;background:#F0FDF4;border:1px solid #BBF7D0;border-radius:6px;font-size:.72rem;color:#166534">
-        <i class="fas fa-terminal"></i>
-        동기화가 계속 실패하면:
-        <a href="https://script.google.com" target="_blank" style="color:#166534;font-weight:700;text-decoration:underline">script.google.com</a>
-        → 해당 프로젝트 → <b>실행 로그(Executions)</b>에서 오류 메시지 확인
-      </div>
-      <!-- ★ 시트 파싱 진단 -->
-      <div style="margin-top:10px;border-top:1px solid #E5E7EB;padding-top:10px">
-        <div style="font-size:.78rem;font-weight:700;color:#374151;margin-bottom:6px">
-          <i class="fas fa-search"></i> 탭 파싱 진단 — 조회 안 되는 탭 원인 확인
+        <div style="display:none;padding:8px 16px 12px">
+
+          <!-- 캡처폴더 구조 재편성 -->
+          <div style="margin-bottom:8px">
+            <div style="font-size:.75rem;font-weight:600;color:#374151;margin-bottom:4px">
+              <i class="fas fa-sitemap" style="color:#7C3AED"></i> 캡처폴더 구조 재편성
+              <span style="font-size:.64rem;font-weight:400;color:#6B7280">(단층 → 캠페인폴더 하위)</span>
+            </div>
+            <div style="font-size:.66rem;color:#6B7280;line-height:1.45;margin-bottom:4px">
+              <b style="color:#92400E">📁 캡처루트/{폴더}</b> → <b style="color:#166534">📁 캡처루트/{캠페인}/{폴더}</b>
+            </div>
+            <button id="btnDiagCapture" onclick="diagCaptureFolders()"
+              style="width:100%;padding:6px;background:#EFF6FF;color:#1D4ED8;border:1px solid #BFDBFE;border-radius:6px;font-size:.73rem;font-weight:600;cursor:pointer;display:flex;align-items:center;justify-content:center;gap:4px;margin-bottom:3px">
+              <i class="fas fa-microscope"></i> 폴더 현황 진단
+            </button>
+            <div id="diagCaptureResult" style="display:none;font-size:.71rem;margin-bottom:3px;max-height:200px;overflow-y:auto;border:1px solid #E5E7EB;border-radius:6px;padding:6px;background:#F9FAFB"></div>
+            <div style="display:flex;gap:4px">
+              <button id="btnOrganizeDry" onclick="organizeCaptureFolders(true)"
+                style="flex:1;padding:7px;background:#FFFBEB;color:#92400E;border:1px solid #FDE68A;border-radius:6px;font-size:.73rem;font-weight:600;cursor:pointer;display:flex;align-items:center;justify-content:center;gap:4px">
+                <i class="fas fa-search"></i> 미리보기
+              </button>
+              <button id="btnOrganizeRun" onclick="organizeCaptureFolders(false)"
+                style="flex:1;padding:7px;background:#FFF1F2;color:#BE123C;border:1px solid #FECDD3;border-radius:6px;font-size:.73rem;font-weight:600;cursor:pointer;display:flex;align-items:center;justify-content:center;gap:4px">
+                <i class="fas fa-sitemap"></i> 실제 재편성
+              </button>
+            </div>
+            <div id="organizeResult" style="display:none;font-size:.71rem;margin-top:3px;max-height:200px;overflow-y:auto"></div>
+          </div>
+
+          <!-- 폴더명 마이그레이션 -->
+          <div style="margin-bottom:8px;border-top:1px solid #F3F4F6;padding-top:8px">
+            <div style="font-size:.75rem;font-weight:600;color:#374151;margin-bottom:4px">
+              <i class="fas fa-exchange-alt" style="color:#D97706"></i> 폴더명 형식 변환
+              <span style="font-size:.64rem;font-weight:400;color:#6B7280">({탭명} → {탭명}_{캠페인명})</span>
+            </div>
+            <div style="font-size:.66rem;color:#6B7280;line-height:1.45;margin-bottom:4px">
+              탭명이 동일한 캠페인 간 폴더 충돌 방지를 위해 Drive 폴더명 변경
+            </div>
+            <div style="display:flex;gap:4px">
+              <button id="btnMigrateDry" onclick="migrateFolderNames(true)"
+                style="flex:1;padding:7px;background:#FFFBEB;color:#92400E;border:1px solid #FDE68A;border-radius:6px;font-size:.73rem;font-weight:600;cursor:pointer;display:flex;align-items:center;justify-content:center;gap:4px">
+                <i class="fas fa-search"></i> 미리보기
+              </button>
+              <button id="btnMigrateRun" onclick="migrateFolderNames(false)"
+                style="flex:1;padding:7px;background:#FFF1F2;color:#BE123C;border:1px solid #FECDD3;border-radius:6px;font-size:.73rem;font-weight:600;cursor:pointer;display:flex;align-items:center;justify-content:center;gap:4px">
+                <i class="fas fa-play"></i> 실제 변환
+              </button>
+            </div>
+            <div id="migrateResult" style="display:none;font-size:.71rem;margin-top:3px;max-height:180px;overflow-y:auto"></div>
+          </div>
+
+          <!-- 탭 파싱 진단 -->
+          <div style="border-top:1px solid #F3F4F6;padding-top:8px">
+            <div style="font-size:.75rem;font-weight:600;color:#374151;margin-bottom:4px">
+              <i class="fas fa-stethoscope" style="color:#6366F1"></i> 탭 파싱 진단
+              <span style="font-size:.64rem;font-weight:400;color:#6B7280">(조회 안 되는 탭 원인 확인)</span>
+            </div>
+            <div style="display:flex;gap:4px;align-items:center">
+              <input id="diagSheetUrl" type="url" placeholder="시트 URL (gid 포함) 붙여넣기"
+                style="flex:1;padding:6px 8px;border:1px solid #D1D5DB;border-radius:6px;font-size:.72rem">
+              <button onclick="runSheetDiag()"
+                style="padding:6px 10px;background:#6366F1;color:#fff;border:none;border-radius:6px;font-size:.72rem;font-weight:600;cursor:pointer;white-space:nowrap">
+                <i class="fas fa-stethoscope"></i> 진단
+              </button>
+            </div>
+            <div id="diagResult" style="margin-top:5px;font-size:.72rem;display:none"></div>
+          </div>
         </div>
-        <div style="display:flex;gap:4px;align-items:center">
-          <input id="diagSheetUrl" type="url" placeholder="시트 URL (gid 포함) 붙여넣기"
-            style="flex:1;padding:6px 8px;border:1px solid #D1D5DB;border-radius:6px;font-size:.73rem">
-          <button onclick="runSheetDiag()"
-            style="padding:6px 10px;background:#6366F1;color:#fff;border:none;border-radius:6px;font-size:.73rem;font-weight:600;cursor:pointer;white-space:nowrap">
-            <i class="fas fa-stethoscope"></i> 진단
-          </button>
-        </div>
-        <div id="diagResult" style="margin-top:6px;font-size:.72rem;display:none"></div>
       </div>
+
     </div>
-    <div class="modal-actions">
+    <div class="modal-actions" style="border-top:1px solid #E5E7EB">
       <button class="btn-primary" onclick="closeIndexModal()"><i class="fas fa-times"></i> 닫기</button>
     </div>
   </div>
