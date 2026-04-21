@@ -130,6 +130,28 @@ async function buildIndexSmart(forceFullRebuild = false) {
     // ── 0단계: DB에서 키워드 로드 ──
     await _loadKeywordsFromDB();
 
+    // ── 0.5단계: 마감 탭 인덱스 데이터 자동 정리 ──
+    try {
+      const { rows: closedTabs } = await pool.query(
+        `SELECT tc.sheet_id, tc.tab_name FROM tab_configs tc
+         WHERE tc.is_closed = TRUE
+         AND EXISTS (SELECT 1 FROM review_index ri WHERE ri.sheet_id = tc.sheet_id AND ri.tab_name = tc.tab_name)`
+      );
+      if (closedTabs.length > 0) {
+        let cleanedReview = 0, cleanedMaster = 0;
+        for (const t of closedTabs) {
+          const r1 = await pool.query('DELETE FROM review_index WHERE sheet_id = $1 AND tab_name = $2', [t.sheet_id, t.tab_name]);
+          cleanedReview += r1.rowCount || 0;
+          const r2 = await pool.query('DELETE FROM index_master WHERE sheet_id = $1 AND tab_name = $2', [t.sheet_id, t.tab_name]);
+          cleanedMaster += r2.rowCount || 0;
+        }
+        logger.info(`[buildIndex] 마감 탭 정리: ${closedTabs.length}개 탭, review_index ${cleanedReview}행, index_master ${cleanedMaster}행 삭제`);
+      }
+    } catch (cleanErr) {
+      logger.warn(`[buildIndex] 마감 탭 정리 실패 (계속 진행): ${cleanErr.message}`);
+    }
+    await _loadKeywordsFromDB();
+
     // ── 0-1단계: 기존 no_data pending 레코드 일괄 resolved 처리 ──
     // no_data = 헤더 구조 정상이지만 데이터 미입력 (진행 중인 탭) → 인식 실패가 아님
     try {

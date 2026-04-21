@@ -62,6 +62,9 @@ const _ACTION_MAP = {
   'getTabOptions':    { method: 'GET',  path: '/api/tab/options' },
   'getTabEndDate':    { method: 'GET',  path: '/api/tab/end-date' },
   'getCampaignStats': { method: 'GET',  path: '/api/diag/campaign-stats' },
+  'syncTabFromSheet': { method: 'POST', path: '/api/tab/sync-from-sheet' },
+  'cleanClosedTabs':  { method: 'POST', path: '/api/tab/clean-closed' },
+  'getTabDashboard':  { method: 'GET',  path: '/api/tab/dashboard' },
 
   // 리뷰어 관리 (Section 7)
   'registerReviewer':   { method: 'POST', path: '/api/reviewer/register' },

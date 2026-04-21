@@ -639,6 +639,10 @@
               <button class="key-dropdown-item master-only" id="keyMenuUIEdit" style="display:none" onclick="toggleUIEditMode(); closeKeyMenu()">
                 <i class="fas fa-paint-brush"></i> <span id="uiEditBtnText">UI 편집 모드</span>
               </button>
+              <hr style="margin:4px 0;border:none;border-top:1px solid #E5E7EB">
+              <button class="key-dropdown-item" onclick="switchAdminTab('settings'); closeKeyMenu()">
+                <i class="fas fa-th-list" style="color:#1D4ED8"></i> 캠페인 탭 관리
+              </button>
             </div>
           </div>
         </div>
@@ -1288,6 +1292,84 @@
 
       <!-- ★ Phase 14: 설정 탭 (키워드 관리 + 인식 실패 탭) -->
       <div id="tab-settings" class="admin-tab-pane" style="padding:16px">
+
+        <!-- ★ Phase 7: 캠페인 탭 관리 대시보드 (전체 현황) -->
+        <div class="admin-section-header">
+          <span style="font-size:.95rem;font-weight:700;color:var(--t1)">
+            <i class="fas fa-th-list" style="color:#1D4ED8;margin-right:6px"></i>캠페인 탭 관리
+          </span>
+          <div style="display:flex;gap:6px;margin-left:auto;flex-wrap:wrap">
+            <button id="btnSyncFromSheet" class="btn-sm" onclick="syncTabFromSheet()" style="font-size:.78rem;background:#1D4ED8;color:#fff;border:none;border-radius:6px;padding:5px 12px;cursor:pointer">
+              <i class="fas fa-cloud-download-alt"></i> 시트→DB 동기화
+            </button>
+            <button id="btnCleanClosed" class="btn-sm" onclick="cleanClosedTabs()" style="font-size:.78rem;background:#DC2626;color:#fff;border:none;border-radius:6px;padding:5px 12px;cursor:pointer">
+              <i class="fas fa-broom"></i> 마감탭 정리
+            </button>
+            <button class="btn-sm" onclick="exportTabDashCSV()" style="font-size:.78rem;background:#059669;color:#fff;border:none;border-radius:6px;padding:5px 12px;cursor:pointer">
+              <i class="fas fa-file-csv"></i> CSV 내보내기
+            </button>
+            <button class="btn-sm" onclick="loadTabDashboard()" style="font-size:.78rem">
+              <i class="fas fa-sync-alt"></i> 새로고침
+            </button>
+          </div>
+        </div>
+
+        <!-- 동기화 상태 -->
+        <div id="tabDashSyncInfo" style="font-size:.75rem;color:var(--t3);margin:6px 0 10px">
+          마지막 동기화: 로딩중...
+        </div>
+
+        <!-- KPI 카드 -->
+        <div id="tabDashKPI" style="display:grid;grid-template-columns:repeat(auto-fit,minmax(110px,1fr));gap:8px;margin-bottom:14px"></div>
+
+        <!-- 뷰 모드 토글 + 필터 -->
+        <div style="display:flex;gap:8px;margin-bottom:10px;flex-wrap:wrap;align-items:center">
+          <div style="display:flex;border:1px solid #D1D5DB;border-radius:8px;overflow:hidden;font-size:.75rem">
+            <button id="tabDashViewCard" onclick="setTabDashView('card')" style="padding:5px 10px;border:none;cursor:pointer;background:#1D4ED8;color:#fff"><i class="fas fa-id-card"></i> 카드</button>
+            <button id="tabDashViewTable" onclick="setTabDashView('table')" style="padding:5px 10px;border:none;cursor:pointer;background:#fff;color:#374151"><i class="fas fa-table"></i> 테이블</button>
+          </div>
+          <select id="tabDashStatusFilter" onchange="renderTabDashTable()" style="padding:5px 8px;border:1px solid #D1D5DB;border-radius:8px;font-size:.78rem">
+            <option value="">전체 상태</option>
+            <option value="active">활성</option>
+            <option value="forceDone">강제완료</option>
+            <option value="closed">마감</option>
+          </select>
+          <select id="tabDashManagerFilter" onchange="renderTabDashTable()" style="padding:5px 8px;border:1px solid #D1D5DB;border-radius:8px;font-size:.78rem">
+            <option value="">전체 담당자</option>
+          </select>
+          <select id="tabDashCampaignFilter" onchange="renderTabDashTable()" style="padding:5px 8px;border:1px solid #D1D5DB;border-radius:8px;font-size:.78rem;max-width:250px">
+            <option value="">전체 캠페인</option>
+          </select>
+          <select id="tabDashReviewTypeFilter" onchange="renderTabDashTable()" style="padding:5px 8px;border:1px solid #D1D5DB;border-radius:8px;font-size:.78rem">
+            <option value="">전체 리뷰유형</option>
+          </select>
+          <input type="text" id="tabDashSearch" placeholder="탭명/상품명/캠페인/담당자 검색..." oninput="renderTabDashTable()" style="flex:1;min-width:140px;padding:5px 10px;border:1px solid #D1D5DB;border-radius:8px;font-size:.78rem">
+          <span id="tabDashCount" style="font-size:.75rem;color:var(--t3);white-space:nowrap">0건</span>
+        </div>
+
+        <!-- 컬럼 표시 토글 (테이블 모드용) -->
+        <div id="tabDashColToggle" style="display:none;margin-bottom:10px;padding:8px 10px;background:#F9FAFB;border-radius:8px;border:1px solid #E5E7EB">
+          <div style="font-size:.72rem;font-weight:600;color:var(--t2);margin-bottom:6px"><i class="fas fa-columns"></i> 표시 컬럼 선택</div>
+          <div id="tabDashColCheckboxes" style="display:flex;flex-wrap:wrap;gap:4px 10px;font-size:.72rem"></div>
+        </div>
+
+        <!-- 테이블/카드 컨테이너 -->
+        <div id="tabDashTableWrap" style="overflow-x:auto;font-size:.78rem;border-radius:8px;border:1px solid #E5E7EB">
+          <span style="color:var(--t3);padding:12px;display:block">탭 전환 시 자동 로드</span>
+        </div>
+
+        <!-- 상세 모달 -->
+        <div id="tabDashDetailModal" onclick="if(event.target===this)closeTabDashDetail()" style="display:none;position:fixed;inset:0;z-index:9999;background:rgba(0,0,0,.45);justify-content:center;align-items:center">
+          <div style="background:#fff;border-radius:12px;max-width:620px;width:95%;max-height:85vh;overflow-y:auto;padding:24px;box-shadow:0 20px 60px rgba(0,0,0,.2)">
+            <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:16px">
+              <h3 id="tabDashDetailTitle" style="font-size:1rem;font-weight:700;color:var(--t1);margin:0"><i class="fas fa-info-circle" style="color:#1D4ED8;margin-right:6px"></i>탭 상세 정보</h3>
+              <button onclick="closeTabDashDetail()" style="background:none;border:none;font-size:1.2rem;cursor:pointer;color:var(--t3)">&times;</button>
+            </div>
+            <div id="tabDashDetailBody" style="font-size:.82rem"></div>
+          </div>
+        </div>
+
+        <hr style="margin:28px 0;border:none;border-top:1px solid #E5E7EB">
 
         <!-- 인식 실패 탭 진단 -->
         <div class="admin-section-header">

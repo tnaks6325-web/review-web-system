@@ -1779,7 +1779,7 @@ function switchAdminTab(tabName) {
   if (tabName === "payment")   initPaymentPanel();
   if (tabName === "dashboard") { try { loadSystemMonitor(); } catch(_){} try { loadStatsOverview(); } catch(_){} }
   if (tabName === "archive")   { try { loadArchiveList(); } catch(_){} try { _loadArchiveHistory(); } catch(_){} }
-  if (tabName === "settings")  { try { loadUnrecognizedTabs(); } catch(_){} try { loadKeywordList(); } catch(_){} }
+  if (tabName === "settings")  { try { loadTabDashboard(); } catch(_){} try { loadUnrecognizedTabs(); } catch(_){} try { loadKeywordList(); } catch(_){} }
   // ★ 컨텍스트 툴바 업데이트
   _updateContextToolbar(tabName);
 }
@@ -11451,5 +11451,477 @@ async function deleteKeywordAction(id, keyword) {
     loadKeywordList();
   } catch (err) {
     showToast('오류: ' + err.message, 'error');
+  }
+}
+
+/* ══════════════════════════════════════════════════════════════
+   ★ Phase 7: 캠페인 탭 관리 대시보드 (21컬럼 전체 통합 뷰)
+   ── A: 시트→DB 동기화  B: 마감탭 인덱스 정리  C: CRON 자동화
+   ══════════════════════════════════════════════════════════════ */
+let _tabDashData = null;
+let _tabDashView = "card";       // "card" | "table"
+
+// ── 21컬럼 정의: key, 한국어 라벨, 카테고리, 기본표시여부 ──
+const _TAB_DASH_COLS = [
+  { key:"_status",          label:"상태",      cat:"core",  show:true,  align:"center" },
+  { key:"campaign_name",    label:"캠페인",    cat:"core",  show:true,  align:"left" },
+  { key:"tab_name",         label:"탭명",      cat:"core",  show:true,  align:"left" },
+  { key:"display_name",     label:"표시명(상품)", cat:"meta", show:true,  align:"left" },
+  { key:"manager",          label:"담당자",    cat:"core",  show:true,  align:"center" },
+  { key:"review_type",      label:"리뷰유형",  cat:"meta",  show:true,  align:"center" },
+  { key:"payment_type",     label:"결제방식",  cat:"pay",   show:true,  align:"center" },
+  { key:"time_range",       label:"주문시간대", cat:"meta",  show:true,  align:"center" },
+  { key:"round",            label:"차수",      cat:"meta",  show:true,  align:"center" },
+  { key:"_progress",        label:"인원/제출",  cat:"index", show:true,  align:"right" },
+  { key:"taekhap",          label:"택배합배송", cat:"meta",  show:false, align:"center" },
+  { key:"is_bulk",          label:"대량건",    cat:"meta",  show:false, align:"center" },
+  { key:"delivery_type",    label:"배송유형",  cat:"meta",  show:false, align:"center" },
+  { key:"nc_mode",          label:"NC모드",    cat:"meta",  show:false, align:"center" },
+  { key:"deposit_name",     label:"입금자명",  cat:"pay",   show:false, align:"center" },
+  { key:"transfer_bank",    label:"이체은행",  cat:"pay",   show:false, align:"center" },
+  { key:"income_type",      label:"소득유형",  cat:"pay",   show:false, align:"center" },
+  { key:"folder_url",       label:"리뷰폴더",  cat:"link",  show:true,  align:"center" },
+  { key:"capture_folder_url",label:"캡처폴더", cat:"link",  show:false, align:"center" },
+  { key:"sheet_url",        label:"시트링크",  cat:"link",  show:false, align:"center" },
+  { key:"updated_at",       label:"갱신일",    cat:"sys",   show:true,  align:"left" },
+];
+
+// 로컬 저장된 컬럼 표시 설정 로드
+(function _loadColPrefs() {
+  try {
+    const saved = localStorage.getItem("tabDash_colPrefs");
+    if (saved) {
+      const prefs = JSON.parse(saved);
+      _TAB_DASH_COLS.forEach(c => { if (prefs[c.key] !== undefined) c.show = prefs[c.key]; });
+    }
+  } catch(_){}
+})();
+
+function _saveColPrefs() {
+  const prefs = {};
+  _TAB_DASH_COLS.forEach(c => prefs[c.key] = c.show);
+  localStorage.setItem("tabDash_colPrefs", JSON.stringify(prefs));
+}
+
+function setTabDashView(mode) {
+  _tabDashView = mode;
+  const btnCard = document.getElementById("tabDashViewCard");
+  const btnTable = document.getElementById("tabDashViewTable");
+  const colToggle = document.getElementById("tabDashColToggle");
+  if (btnCard) { btnCard.style.background = mode==="card" ? "#1D4ED8" : "#fff"; btnCard.style.color = mode==="card" ? "#fff" : "#374151"; }
+  if (btnTable) { btnTable.style.background = mode==="table" ? "#1D4ED8" : "#fff"; btnTable.style.color = mode==="table" ? "#fff" : "#374151"; }
+  if (colToggle) colToggle.style.display = mode==="table" ? "block" : "none";
+  renderTabDashTable();
+}
+
+// ── 필터링 공통 로직 ──
+function _filterTabDashData() {
+  if (!_tabDashData) return [];
+  const tabs = _tabDashData.tabs || [];
+  const statusF = document.getElementById("tabDashStatusFilter")?.value || "";
+  const mgrF = document.getElementById("tabDashManagerFilter")?.value || "";
+  const campF = document.getElementById("tabDashCampaignFilter")?.value || "";
+  const rtF = document.getElementById("tabDashReviewTypeFilter")?.value || "";
+  const searchQ = (document.getElementById("tabDashSearch")?.value || "").trim().toLowerCase();
+
+  return tabs.filter(t => {
+    if (statusF === "active" && (t.force_done || t.is_closed)) return false;
+    if (statusF === "forceDone" && !t.force_done) return false;
+    if (statusF === "closed" && !t.is_closed) return false;
+    if (mgrF && (t.manager || "(미지정)") !== mgrF) return false;
+    if (campF && (t.campaign_name || "(미지정)") !== campF) return false;
+    if (rtF && (t.review_type || "(미지정)") !== rtF) return false;
+    if (searchQ) {
+      const h = `${t.tab_name} ${t.display_name||""} ${t.campaign_name||""} ${t.manager||""} ${t.review_type||""} ${t.deposit_name||""}`.toLowerCase();
+      if (!h.includes(searchQ)) return false;
+    }
+    return true;
+  });
+}
+
+// ── 메인 로드 ──
+async function loadTabDashboard() {
+  const wrap = document.getElementById("tabDashTableWrap");
+  if (wrap) wrap.innerHTML = '<div style="padding:12px;color:var(--t3)"><i class="fas fa-spinner fa-spin"></i> 로딩중...</div>';
+
+  try {
+    const res = await gasGet({ action: "getTabDashboard" });
+    if (res.error) { showToast(res.error, "error"); return; }
+    _tabDashData = res;
+
+    // ── KPI ──
+    const s = res.stats || {};
+    const kpiEl = document.getElementById("tabDashKPI");
+    if (kpiEl) {
+      const rate = s.totalRows > 0 ? Math.round(s.totalSubmitted / s.totalRows * 100) : 0;
+      kpiEl.innerHTML = [
+        _kpiCard("전체 탭", s.total, "#1D4ED8", "fa-list"),
+        _kpiCard("활성", s.active, "#059669", "fa-play-circle"),
+        _kpiCard("강제완료", s.forceDone, "#D97706", "fa-pause-circle"),
+        _kpiCard("마감", s.closed, "#DC2626", "fa-stop-circle"),
+        _kpiCard("인덱스", s.indexed, "#7C3AED", "fa-database"),
+        _kpiCard("미지정", s.noManager, "#9CA3AF", "fa-user-slash"),
+        _kpiCard("총 인원", (s.totalRows||0).toLocaleString(), "#0891B2", "fa-users"),
+        _kpiCard("제출률", `${rate}%`, rate>=80?"#059669":rate>=50?"#D97706":"#DC2626", "fa-chart-pie"),
+      ].join("");
+    }
+
+    // ── 동기화 시각 ──
+    const syncEl = document.getElementById("tabDashSyncInfo");
+    if (syncEl) {
+      const t = res.lastSync ? new Date(res.lastSync).toLocaleString("ko-KR") : "없음";
+      syncEl.innerHTML = `<i class="fas fa-clock" style="margin-right:4px"></i>마지막 동기화: <b>${t}</b> &middot; <span style="color:#059669">CRON: 평일 08:30 자동 실행</span>`;
+    }
+
+    // ── 담당자 필터 ──
+    _populateFilter("tabDashManagerFilter", "전체 담당자", res.managers);
+    // ── 캠페인 필터 ──
+    _populateFilterObj("tabDashCampaignFilter", "전체 캠페인", res.campaigns);
+    // ── 리뷰유형 필터 ──
+    const rtMap = {};
+    (res.tabs||[]).forEach(t => { const rt = t.review_type || "(미지정)"; rtMap[rt] = (rtMap[rt]||0)+1; });
+    _populateFilter("tabDashReviewTypeFilter", "전체 리뷰유형", rtMap);
+
+    // ── 컬럼 체크박스 ──
+    _buildColToggleUI();
+
+    renderTabDashTable();
+  } catch (err) {
+    if (wrap) wrap.innerHTML = `<div style="padding:12px;color:#DC2626">${err.message}</div>`;
+  }
+}
+
+function _populateFilter(elId, defaultLabel, map) {
+  const el = document.getElementById(elId);
+  if (!el || !map) return;
+  const cur = el.value;
+  el.innerHTML = `<option value="">${defaultLabel}</option>`;
+  Object.keys(map).sort().forEach(k => { el.innerHTML += `<option value="${escHtml(k)}">${escHtml(k)} (${map[k]})</option>`; });
+  el.value = cur;
+}
+function _populateFilterObj(elId, defaultLabel, map) {
+  const el = document.getElementById(elId);
+  if (!el || !map) return;
+  const cur = el.value;
+  el.innerHTML = `<option value="">${defaultLabel}</option>`;
+  Object.keys(map).sort().forEach(k => { el.innerHTML += `<option value="${escHtml(k)}">${escHtml(k)} (${map[k].tabs})</option>`; });
+  el.value = cur;
+}
+
+function _kpiCard(label, value, color, icon) {
+  return `<div style="background:#fff;border-radius:8px;padding:8px 12px;border-left:3px solid ${color};box-shadow:0 1px 3px rgba(0,0,0,.06)">
+    <div style="display:flex;align-items:center;gap:6px"><i class="fas ${icon}" style="color:${color};font-size:.8rem"></i><span style="font-size:1.15rem;font-weight:700;color:${color}">${value}</span></div>
+    <div style="font-size:.68rem;color:var(--t3);margin-top:2px">${label}</div>
+  </div>`;
+}
+
+function _buildColToggleUI() {
+  const wrap = document.getElementById("tabDashColCheckboxes");
+  if (!wrap) return;
+  const cats = { core:"기본", meta:"메타", pay:"입금", link:"링크", index:"인덱스", sys:"시스템" };
+  let html = "";
+  _TAB_DASH_COLS.forEach(c => {
+    html += `<label style="display:flex;align-items:center;gap:3px;cursor:pointer;white-space:nowrap;padding:2px 0">
+      <input type="checkbox" ${c.show?"checked":""} onchange="_toggleDashCol('${c.key}',this.checked)" style="width:13px;height:13px">
+      <span style="color:${c.show?'var(--t1)':'var(--t3)'}">${c.label}</span>
+      <span style="font-size:.6rem;color:#9CA3AF">${cats[c.cat]||""}</span>
+    </label>`;
+  });
+  wrap.innerHTML = html;
+}
+
+function _toggleDashCol(key, checked) {
+  const col = _TAB_DASH_COLS.find(c => c.key === key);
+  if (col) { col.show = checked; _saveColPrefs(); renderTabDashTable(); _buildColToggleUI(); }
+}
+
+// ── 셀값 렌더 헬퍼 ──
+function _cellVal(t, col) {
+  const k = col.key;
+  if (k === "_status") {
+    const st = t.is_closed ? "closed" : t.force_done ? "forceDone" : "active";
+    if (st === "closed") return '<span style="background:#FEE2E2;color:#DC2626;padding:2px 6px;border-radius:8px;font-size:.68rem;font-weight:600">마감</span>';
+    if (st === "forceDone") return '<span style="background:#FEF3C7;color:#D97706;padding:2px 6px;border-radius:8px;font-size:.68rem;font-weight:600">강제완료</span>';
+    return '<span style="background:#D1FAE5;color:#059669;padding:2px 6px;border-radius:8px;font-size:.68rem;font-weight:600">활성</span>';
+  }
+  if (k === "_progress") {
+    const rc = t.row_count || 0, sc = t.submitted_count || 0;
+    if (rc === 0) return '<span style="color:#D1D5DB">—</span>';
+    const pct = Math.round(sc / rc * 100);
+    const clr = pct >= 80 ? "#059669" : pct >= 50 ? "#D97706" : "#DC2626";
+    return `<span style="font-weight:600">${sc}/${rc}</span> <span style="color:${clr};font-size:.68rem">(${pct}%)</span>`;
+  }
+  if (k === "taekhap" || k === "is_bulk" || k === "nc_mode") {
+    return t[k] ? '<i class="fas fa-check-circle" style="color:#059669"></i>' : '<span style="color:#D1D5DB">—</span>';
+  }
+  if (k === "folder_url" || k === "capture_folder_url" || k === "sheet_url") {
+    const url = t[k];
+    if (!url) return '<span style="color:#D1D5DB">—</span>';
+    const icon = k === "folder_url" ? "fa-folder" : k === "capture_folder_url" ? "fa-camera" : "fa-external-link-alt";
+    const clr = k === "folder_url" ? "#059669" : k === "capture_folder_url" ? "#1D4ED8" : "#7C3AED";
+    return `<a href="${escHtml(url)}" target="_blank" style="color:${clr}" title="${escHtml(url)}"><i class="fas ${icon}"></i></a>`;
+  }
+  if (k === "updated_at") {
+    return t.updated_at ? new Date(t.updated_at).toLocaleDateString("ko-KR", { month:"short", day:"numeric", hour:"2-digit", minute:"2-digit" }) : "—";
+  }
+  const v = t[k];
+  return v != null && v !== "" ? escHtml(String(v)) : '<span style="color:#D1D5DB">—</span>';
+}
+
+// ── 렌더 (카드/테이블 분기) ──
+function renderTabDashTable() {
+  const wrap = document.getElementById("tabDashTableWrap");
+  if (!wrap || !_tabDashData) return;
+
+  const filtered = _filterTabDashData();
+  const countEl = document.getElementById("tabDashCount");
+  if (countEl) countEl.textContent = `${filtered.length}건 / ${(_tabDashData.tabs||[]).length}건`;
+
+  if (filtered.length === 0) {
+    wrap.innerHTML = '<div style="padding:16px;text-align:center;color:var(--t3)">조건에 맞는 탭이 없습니다.</div>';
+    return;
+  }
+
+  if (_tabDashView === "card") {
+    _renderCardView(wrap, filtered);
+  } else {
+    _renderFullTableView(wrap, filtered);
+  }
+}
+
+// ── 카드뷰: 한눈에 핵심 + 클릭시 상세 ──
+function _renderCardView(wrap, filtered) {
+  let html = '<div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(320px,1fr));gap:10px;padding:8px">';
+  filtered.forEach((t, idx) => {
+    const st = t.is_closed ? "closed" : t.force_done ? "forceDone" : "active";
+    const stClr = st === "closed" ? "#DC2626" : st === "forceDone" ? "#D97706" : "#059669";
+    const stLabel = st === "closed" ? "마감" : st === "forceDone" ? "강제완료" : "활성";
+    const stBg = st === "closed" ? "#FEF2F2" : st === "forceDone" ? "#FFFBEB" : "#F0FDF4";
+    const rc = t.row_count || 0, sc = t.submitted_count || 0;
+    const pct = rc > 0 ? Math.round(sc / rc * 100) : 0;
+    const pctClr = pct >= 80 ? "#059669" : pct >= 50 ? "#D97706" : "#DC2626";
+
+    const folders = [];
+    if (t.folder_url) folders.push(`<a href="${escHtml(t.folder_url)}" target="_blank" onclick="event.stopPropagation()" style="color:#059669" title="리뷰폴더"><i class="fas fa-folder"></i></a>`);
+    if (t.capture_folder_url) folders.push(`<a href="${escHtml(t.capture_folder_url)}" target="_blank" onclick="event.stopPropagation()" style="color:#1D4ED8" title="캡처폴더"><i class="fas fa-camera"></i></a>`);
+
+    // 하단 메타 태그들
+    const tags = [];
+    if (t.review_type) tags.push(`<span style="background:#EDE9FE;color:#7C3AED;padding:1px 6px;border-radius:6px">${escHtml(t.review_type)}</span>`);
+    if (t.payment_type) tags.push(`<span style="background:#FEF3C7;color:#B45309;padding:1px 6px;border-radius:6px">${escHtml(t.payment_type)}</span>`);
+    if (t.delivery_type) tags.push(`<span style="background:#E0E7FF;color:#3730A3;padding:1px 6px;border-radius:6px">${escHtml(t.delivery_type)}</span>`);
+    if (t.taekhap) tags.push(`<span style="background:#D1FAE5;color:#065F46;padding:1px 6px;border-radius:6px">택합</span>`);
+    if (t.is_bulk) tags.push(`<span style="background:#DBEAFE;color:#1E40AF;padding:1px 6px;border-radius:6px">대량</span>`);
+    if (t.nc_mode) tags.push(`<span style="background:#FED7AA;color:#9A3412;padding:1px 6px;border-radius:6px">NC</span>`);
+
+    html += `<div onclick="openTabDashDetail(${idx})" style="background:#fff;border-radius:10px;border:1px solid #E5E7EB;padding:12px 14px;cursor:pointer;transition:box-shadow .15s;position:relative;overflow:hidden" onmouseover="this.style.boxShadow='0 4px 16px rgba(0,0,0,.1)'" onmouseout="this.style.boxShadow='none'">
+      <div style="position:absolute;top:0;left:0;right:0;height:3px;background:${stClr}"></div>
+      <div style="display:flex;justify-content:space-between;align-items:start;margin-bottom:6px">
+        <div style="flex:1;min-width:0">
+          <div style="font-size:.7rem;color:var(--t3);white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${escHtml(t.campaign_name || "—")}</div>
+          <div style="font-size:.88rem;font-weight:700;color:var(--t1);white-space:nowrap;overflow:hidden;text-overflow:ellipsis" title="${escHtml(t.tab_name)}">${escHtml(t.display_name || t.tab_name)}</div>
+          <div style="font-size:.68rem;color:var(--t3)">${escHtml(t.tab_name !== (t.display_name||t.tab_name) ? t.tab_name : "")}</div>
+        </div>
+        <div style="display:flex;flex-direction:column;align-items:flex-end;gap:4px;flex-shrink:0;margin-left:8px">
+          <span style="background:${stBg};color:${stClr};padding:2px 8px;border-radius:8px;font-size:.68rem;font-weight:600">${stLabel}</span>
+          ${t.manager ? `<span style="font-size:.72rem;color:var(--t2)"><i class="fas fa-user" style="color:#6B7280;margin-right:2px"></i>${escHtml(t.manager)}</span>` : ""}
+        </div>
+      </div>
+      ${rc > 0 ? `<div style="margin:8px 0 6px">
+        <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:3px">
+          <span style="font-size:.72rem;color:var(--t2)">제출 현황</span>
+          <span style="font-size:.75rem;font-weight:600;color:${pctClr}">${sc}/${rc} (${pct}%)</span>
+        </div>
+        <div style="background:#E5E7EB;border-radius:4px;height:6px;overflow:hidden">
+          <div style="background:${pctClr};height:100%;width:${pct}%;border-radius:4px;transition:width .3s"></div>
+        </div>
+      </div>` : ""}
+      ${t.time_range ? `<div style="font-size:.68rem;color:var(--t3);margin-top:4px"><i class="fas fa-clock" style="margin-right:3px"></i>${escHtml(t.time_range)} ${t.round ? `· ${escHtml(t.round)}차` : ""}</div>` : ""}
+      <div style="display:flex;justify-content:space-between;align-items:center;margin-top:8px;padding-top:6px;border-top:1px solid #F3F4F6">
+        <div style="display:flex;gap:4px;flex-wrap:wrap;font-size:.65rem">${tags.length > 0 ? tags.join("") : '<span style="color:#D1D5DB">태그 없음</span>'}</div>
+        <div style="display:flex;gap:6px;font-size:.82rem">${folders.join(" ")||'<span style="color:#D1D5DB;font-size:.7rem">—</span>'}</div>
+      </div>
+    </div>`;
+  });
+  html += "</div>";
+  wrap.innerHTML = html;
+  wrap.style.maxHeight = "700px";
+  wrap.style.overflowY = "auto";
+}
+
+// ── 테이블뷰: 21컬럼 전체 ──
+function _renderFullTableView(wrap, filtered) {
+  const visibleCols = _TAB_DASH_COLS.filter(c => c.show);
+  const thStyle = "padding:7px 5px;font-weight:600;white-space:nowrap;border-bottom:2px solid #D1D5DB;font-size:.72rem;position:sticky;top:0;background:#F3F4F6;z-index:1";
+
+  let html = `<table style="width:100%;border-collapse:collapse;font-size:.75rem">
+    <thead><tr>`;
+  visibleCols.forEach(c => { html += `<th style="${thStyle};text-align:${c.align}">${c.label}</th>`; });
+  html += `<th style="${thStyle};text-align:center">상세</th></tr></thead><tbody>`;
+
+  filtered.forEach((t, idx) => {
+    const st = t.is_closed ? "closed" : t.force_done ? "forceDone" : "active";
+    const bg = st === "closed" ? "#FEF2F2" : st === "forceDone" ? "#FFFBEB" : "#fff";
+    html += `<tr style="background:${bg};border-bottom:1px solid #F3F4F6" onmouseover="this.style.background='#EFF6FF'" onmouseout="this.style.background='${bg}'">`;
+    visibleCols.forEach(c => {
+      html += `<td style="padding:5px;text-align:${c.align};max-width:${c.key==='campaign_name'?'140px':c.key==='tab_name'?'180px':'120px'};overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="${escHtml(String(t[c.key]||''))}">${_cellVal(t, c)}</td>`;
+    });
+    html += `<td style="padding:5px;text-align:center"><button onclick="openTabDashDetail(${idx})" style="background:none;border:none;color:#1D4ED8;cursor:pointer;font-size:.78rem"><i class="fas fa-expand-alt"></i></button></td>`;
+    html += `</tr>`;
+  });
+
+  html += "</tbody></table>";
+  wrap.innerHTML = html;
+  wrap.style.maxHeight = "600px";
+  wrap.style.overflowY = "auto";
+}
+
+// ── 상세 모달 ──
+function openTabDashDetail(idx) {
+  const filtered = _filterTabDashData();
+  const t = filtered[idx];
+  if (!t) return;
+  const modal = document.getElementById("tabDashDetailModal");
+  if (!modal) return;
+
+  const title = document.getElementById("tabDashDetailTitle");
+  const body = document.getElementById("tabDashDetailBody");
+  if (title) title.innerHTML = `<i class="fas fa-info-circle" style="color:#1D4ED8;margin-right:6px"></i>${escHtml(t.display_name || t.tab_name)}`;
+
+  const st = t.is_closed ? "closed" : t.force_done ? "forceDone" : "active";
+  const stLabel = st === "closed" ? "마감" : st === "forceDone" ? "강제완료" : "활성";
+  const stClr = st === "closed" ? "#DC2626" : st === "forceDone" ? "#D97706" : "#059669";
+  const rc = t.row_count || 0, sc = t.submitted_count || 0;
+  const pct = rc > 0 ? Math.round(sc / rc * 100) : 0;
+
+  // 21컬럼 전체를 그룹별로 표시
+  const groups = [
+    { title:"기본 정보", icon:"fa-id-card", color:"#1D4ED8", items:[
+      ["캠페인", t.campaign_name],
+      ["탭명", t.tab_name],
+      ["표시명(상품)", t.display_name],
+      ["담당자", t.manager],
+      ["상태", `<span style="color:${stClr};font-weight:600">${stLabel}</span>`],
+    ]},
+    { title:"운영 설정", icon:"fa-cogs", color:"#7C3AED", items:[
+      ["리뷰유형", t.review_type],
+      ["주문시간대", t.time_range],
+      ["차수", t.round],
+      ["택배합배송", t.taekhap ? "예" : "아니오"],
+      ["대량건", t.is_bulk ? "예" : "아니오"],
+      ["배송유형", t.delivery_type],
+      ["NC모드", t.nc_mode ? "활성" : "비활성"],
+    ]},
+    { title:"입금 정보", icon:"fa-money-bill-wave", color:"#059669", items:[
+      ["결제방식", t.payment_type],
+      ["입금자명", t.deposit_name],
+      ["이체은행", t.transfer_bank],
+      ["소득유형", t.income_type],
+    ]},
+    { title:"인덱스 현황", icon:"fa-chart-bar", color:"#0891B2", items:[
+      ["총 인원", rc > 0 ? rc.toLocaleString() + "명" : "—"],
+      ["제출 완료", rc > 0 ? `${sc}명 / ${rc}명 (${pct}%)` : "—"],
+      ["인덱스 상태", t.index_status || "—"],
+      ["빌드 시각", t.index_built_at ? new Date(t.index_built_at).toLocaleString("ko-KR") : "—"],
+    ]},
+    { title:"링크", icon:"fa-link", color:"#D97706", items:[
+      ["리뷰폴더", t.folder_url ? `<a href="${escHtml(t.folder_url)}" target="_blank" style="color:#059669;word-break:break-all">${escHtml(t.folder_url)}</a>` : "—"],
+      ["캡처폴더", t.capture_folder_url ? `<a href="${escHtml(t.capture_folder_url)}" target="_blank" style="color:#1D4ED8;word-break:break-all">${escHtml(t.capture_folder_url)}</a>` : "—"],
+      ["시트 URL", t.sheet_url ? `<a href="${escHtml(t.sheet_url)}" target="_blank" style="color:#7C3AED;word-break:break-all">${escHtml(t.sheet_url)}</a>` : "—"],
+    ]},
+    { title:"시스템", icon:"fa-server", color:"#6B7280", items:[
+      ["갱신일", t.updated_at ? new Date(t.updated_at).toLocaleString("ko-KR") : "—"],
+      ["시트 ID", t.sheet_id],
+      ["체크섬", t.checksum || "—"],
+    ]},
+  ];
+
+  let html = "";
+  groups.forEach(g => {
+    html += `<div style="margin-bottom:14px">
+      <div style="font-size:.82rem;font-weight:700;color:${g.color};margin-bottom:6px"><i class="fas ${g.icon}" style="margin-right:5px"></i>${g.title}</div>
+      <div style="background:#F9FAFB;border-radius:8px;padding:8px 12px">`;
+    g.items.forEach(([label, val]) => {
+      const display = val != null && val !== "" && val !== undefined ? val : '<span style="color:#D1D5DB">—</span>';
+      html += `<div style="display:flex;justify-content:space-between;padding:4px 0;border-bottom:1px solid #F3F4F6">
+        <span style="color:var(--t3);font-weight:500;min-width:90px">${label}</span>
+        <span style="color:var(--t1);text-align:right;flex:1;margin-left:12px">${display}</span>
+      </div>`;
+    });
+    html += `</div></div>`;
+  });
+
+  body.innerHTML = html;
+  modal.style.display = "flex";
+}
+
+function closeTabDashDetail() {
+  const modal = document.getElementById("tabDashDetailModal");
+  if (modal) modal.style.display = "none";
+}
+
+// ── CSV 내보내기 ──
+function exportTabDashCSV() {
+  if (!_tabDashData || !_tabDashData.tabs) { showToast("먼저 데이터를 로드하세요.", "info"); return; }
+  const filtered = _filterTabDashData();
+  if (filtered.length === 0) { showToast("내보낼 데이터가 없습니다.", "info"); return; }
+
+  const headers = ["상태","캠페인","탭명","표시명","담당자","리뷰유형","결제방식","주문시간대","차수",
+    "총인원","제출완료","택합","대량건","배송유형","NC모드","입금자명","이체은행","소득유형",
+    "리뷰폴더","캡처폴더","시트URL","갱신일"];
+  const rows = filtered.map(t => {
+    const st = t.is_closed ? "마감" : t.force_done ? "강제완료" : "활성";
+    return [st, t.campaign_name, t.tab_name, t.display_name, t.manager, t.review_type,
+      t.payment_type, t.time_range, t.round, t.row_count||0, t.submitted_count||0,
+      t.taekhap?"예":"", t.is_bulk?"예":"", t.delivery_type, t.nc_mode?"예":"",
+      t.deposit_name, t.transfer_bank, t.income_type, t.folder_url, t.capture_folder_url,
+      t.sheet_url, t.updated_at ? new Date(t.updated_at).toLocaleString("ko-KR") : ""];
+  });
+
+  const bom = "\uFEFF";
+  const csv = bom + [headers, ...rows].map(r => r.map(v => `"${String(v||"").replace(/"/g,'""')}"`).join(",")).join("\n");
+  const blob = new Blob([csv], { type: "text/csv;charset=utf-8" });
+  const a = document.createElement("a");
+  a.href = URL.createObjectURL(blob);
+  a.download = `탭설정현황_${new Date().toISOString().slice(0,10)}.csv`;
+  a.click();
+  showToast(`${filtered.length}건 CSV 다운로드`, "success");
+}
+
+// ── 시트 동기화 ──
+async function syncTabFromSheet() {
+  const btn = document.getElementById("btnSyncFromSheet");
+  if (!confirm("베이스시트 '세부목록' 탭의 데이터를 DB로 일괄 동기화합니다.\n\n시트의 최신 데이터가 DB에 반영됩니다.\n계속하시겠습니까?")) return;
+  if (btn) { btn.disabled = true; btn.innerHTML = '<i class="fas fa-spinner fa-spin"></i> 동기화중...'; }
+  try {
+    const res = await gasPost({ action: "syncTabFromSheet" }, 120000);
+    if (res.error) { showToast(res.error, "error"); return; }
+    showToast(`동기화 완료: ${res.synced}건 처리, ${res.skipped}건 스킵, ${res.errors||0}건 오류 (${res.elapsed})`, "success");
+    loadTabDashboard();
+  } catch (err) {
+    showToast("동기화 오류: " + err.message, "error");
+  } finally {
+    if (btn) { btn.disabled = false; btn.innerHTML = '<i class="fas fa-cloud-download-alt"></i> 시트→DB 동기화'; }
+  }
+}
+
+// ── 마감탭 인덱스 정리 ──
+async function cleanClosedTabs() {
+  const btn = document.getElementById("btnCleanClosed");
+  if (!confirm("마감(is_closed=TRUE) 상태의 탭에 연결된 인덱스 데이터를 삭제합니다.\n\n삭제 후 해당 탭은 검색 결과에서 완전히 제거됩니다.\n계속하시겠습니까?")) return;
+  if (btn) { btn.disabled = true; btn.innerHTML = '<i class="fas fa-spinner fa-spin"></i> 정리중...'; }
+  try {
+    const res = await gasPost({ action: "cleanClosedTabs" });
+    if (res.error) { showToast(res.error, "error"); return; }
+    if (res.closedTabs === 0) {
+      showToast("정리할 마감탭이 없습니다.", "info");
+    } else {
+      showToast(`마감탭 정리: ${res.closedTabs}개 탭, review_index ${res.reviewDeleted}행 삭제 (${res.elapsed})`, "success");
+    }
+    loadTabDashboard();
+  } catch (err) {
+    showToast("정리 오류: " + err.message, "error");
+  } finally {
+    if (btn) { btn.disabled = false; btn.innerHTML = '<i class="fas fa-broom"></i> 마감탭 정리'; }
   }
 }
