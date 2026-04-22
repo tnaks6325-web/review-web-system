@@ -11942,7 +11942,11 @@ async function syncTabFromSheet() {
 
 // ── 탭명·URL 동기화 (시트 실제 탭명 ↔ DB) ──
 async function syncTabNames(dryRun) {
-  const btn = document.getElementById("btnSyncTabNames");
+  // ★ 유지보수 도구 버튼(btnSyncTabNamesDry/Run) + 설정 탭 버튼(btnSyncTabNames) 모두 지원
+  const btnDry = document.getElementById("btnSyncTabNamesDry");
+  const btnRun = document.getElementById("btnSyncTabNamesRun");
+  const btnSettings = document.getElementById("btnSyncTabNames");
+  const activeBtn = dryRun ? (btnDry || btnSettings) : (btnRun || btnSettings);
   const actionLabel = dryRun ? "미리보기" : "동기화";
 
   if (!dryRun && !confirm(
@@ -11952,10 +11956,18 @@ async function syncTabNames(dryRun) {
     "계속하시겠습니까?"
   )) return;
 
-  if (btn) { btn.disabled = true; btn.innerHTML = `<i class="fas fa-spinner fa-spin"></i> ${actionLabel}중...`; }
+  // ★ 버튼 로딩 상태 + 즉시 피드백 토스트
+  const _saveBtnHtml = activeBtn ? activeBtn.innerHTML : "";
+  if (activeBtn) { activeBtn.disabled = true; activeBtn.innerHTML = `<i class="fas fa-spinner fa-spin"></i> ${actionLabel}중...`; }
+  // 양쪽 버튼 모두 비활성화
+  if (btnDry && btnDry !== activeBtn) btnDry.disabled = true;
+  if (btnRun && btnRun !== activeBtn) btnRun.disabled = true;
+  if (btnSettings && btnSettings !== activeBtn) btnSettings.disabled = true;
+
+  showToast(`🔄 탭명 ${actionLabel} 진행중... (29개 시트 확인, 약 30~90초 소요)`, "info");
 
   try {
-    const res = await gasPost({ action: "syncTabNames", dryRun: !!dryRun }, 120000);
+    const res = await gasPost({ action: "syncTabNames", dryRun: !!dryRun }, 180000);
     if (res.error) { showToast(res.error, "error"); return; }
 
     // 결과 요약 토스트
@@ -11981,7 +11993,11 @@ async function syncTabNames(dryRun) {
   } catch (err) {
     showToast("탭명 동기화 오류: " + err.message, "error");
   } finally {
-    if (btn) { btn.disabled = false; btn.innerHTML = '<i class="fas fa-exchange-alt"></i> 탭명 동기화'; }
+    // ★ 모든 관련 버튼 복원
+    if (activeBtn) { activeBtn.disabled = false; activeBtn.innerHTML = _saveBtnHtml; }
+    if (btnDry && btnDry !== activeBtn) { btnDry.disabled = false; }
+    if (btnRun && btnRun !== activeBtn) { btnRun.disabled = false; }
+    if (btnSettings && btnSettings !== activeBtn) { btnSettings.disabled = false; btnSettings.innerHTML = '<i class="fas fa-exchange-alt"></i> 탭명 동기화'; }
   }
 }
 
