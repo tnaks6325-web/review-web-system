@@ -4,6 +4,7 @@ const pool = require('../db/pool');
 const { authMiddleware } = require('../middleware/auth.middleware');
 const { getSpreadsheetMeta } = require('../services/sheets.service');
 const { logger } = require('../utils/logger');
+const { throttledCall } = require('../utils/sheetsThrottle');
 
 // POST /api/tab/config — 탭 설정 저장/수정 (GAS: setTabConfig)
 router.post('/config', authMiddleware, async (req, res, next) => {
@@ -266,10 +267,10 @@ router.post('/sync-tab-names', authMiddleware, async (req, res, next) => {
     let renamed = 0, urlFixed = 0, gidFilled = 0, skipped = 0, errors = 0;
     const errorDetails = [];
 
-    // 3. 각 시트별로 실제 탭 메타 조회
+    // 3. 각 시트별로 실제 탭 메타 조회 (throttle 적용 — quota 초과 방지)
     for (const sheetId of sheetIds) {
       try {
-        const meta = await getSpreadsheetMeta(sheetId);
+        const meta = await throttledCall(() => getSpreadsheetMeta(sheetId));
         if (!meta || meta.length === 0) {
           skipped++;
           continue;

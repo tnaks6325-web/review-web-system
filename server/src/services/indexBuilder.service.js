@@ -3,6 +3,7 @@ const { readSheet, getSpreadsheetMeta, batchReadSheet, getSheetModifiedTime } = 
 const { computeChecksum } = require('../utils/checksum');
 const { logger } = require('../utils/logger');
 const { emitIndexBuild } = require('../utils/sse');
+const { throttledCall, throttledMap, getThrottleStatus } = require('../utils/sheetsThrottle');
 
 // ═══════════════════════════════════════════════════════════
 // Phase 14: DB에서 키워드 로드 (하드코딩 폴백)
@@ -215,10 +216,12 @@ async function buildIndexSmart(forceFullRebuild = false) {
 
     logger.info(`[buildIndex] 아카이브된 탭: ${archivedRows.length}개 (${Object.keys(archivedSheetCounts).length}개 시트)`);
 
-    // ── 3단계: 시트별 병렬 처리 ──
-    // 각 시트를 독립적으로 처리하고 결과를 모음
-    const sheetResults = await Promise.allSettled(
-      sheetIds.map(sheetId => _processOneSheet(sheetId, {
+    // ── 3단계: 시트별 처리 (throttle 적용 — quota 초과 방지) ──
+    // 동시 3개씩 + API 호출 간 최소 1.2초 간격 유지
+    logger.info(`[buildIndex] throttle 상태: ${JSON.stringify(getThrottleStatus())}`);
+    const sheetResults = await throttledMap(
+      sheetIds,
+      (sheetId) => _processOneSheet(sheetId, {
         forceFullRebuild,
         checksumMap,
         sheetModifiedMap,
@@ -226,7 +229,8 @@ async function buildIndexSmart(forceFullRebuild = false) {
         archivedSet,
         gidToNameMap,
         startTime,
-      }))
+      }),
+      3 // 동시 3개 시트 처리
     );
 
     // ── 4단계: 결과 집계 ──
@@ -302,7 +306,7 @@ async function buildIndexSmart(forceFullRebuild = false) {
       let resolvedCount = 0;
       for (const tab of noNameColTabs) {
         try {
-          const values = await readSheet(tab.sheet_id, `'${tab.tab_name}'!A:Z`);
+          const values = await throttledCall(() => readSheet(tab.sheet_id, `'${tab.tab_name}'!A:Z`));
           const valLen = values ? values.length : 0;
           const valCols = values && values.length > 0 ? values[0].length : 0;
           const logEntry = { tab: tab.tab_name, valLen, valCols };
@@ -399,7 +403,7 @@ async function _processOneSheet(sheetId, opts) {
   // ── Step 1: Drive API 변경감지 (forceFullRebuild 시 스킵) ──
   if (!forceFullRebuild) {
     try {
-      const modifiedTime = await getSheetModifiedTime(sheetId);
+      const modifiedTime = await throttledCall(() => getSheetModifiedTime(sheetId));
       if (modifiedTime) {
         const remoteModified = new Date(modifiedTime).getTime();
         const lastKnown = sheetModifiedMap[sheetId] || 0;
@@ -420,8 +424,8 @@ async function _processOneSheet(sheetId, opts) {
     }
   }
 
-  // ── Step 2: 시트 메타 조회 → 유효 탭 목록 ──
-  const meta = await getSpreadsheetMeta(sheetId);
+  // ── Step 2: 시트 메타 조회 → 유효 탭 목록 (throttle 적용) ──
+  const meta = await throttledCall(() => getSpreadsheetMeta(sheetId));
   const spreadsheetTitle = meta._spreadsheetTitle || sheetId; // 스프레드시트 제목 (캠페인명)
   const validTabs = meta.filter(s => !SYSTEM_TABS.includes(s.properties.title));
 
@@ -457,13 +461,13 @@ async function _processOneSheet(sheetId, opts) {
 
   try {
     if (ranges.length <= BATCH_CHUNK_SIZE) {
-      batchResults = await batchReadSheet(sheetId, ranges);
+      batchResults = await throttledCall(() => batchReadSheet(sheetId, ranges));
     } else {
-      // 대량 탭 시트: 청크로 분할하여 batchGet
+      // 대량 탭 시트: 청크로 분할하여 batchGet (각 청크마다 throttle)
       logger.info(`[buildIndex] 대량 탭 (${ranges.length}개) — ${BATCH_CHUNK_SIZE}개씩 분할 batchGet`);
       for (let chunkStart = 0; chunkStart < ranges.length; chunkStart += BATCH_CHUNK_SIZE) {
         const chunkRanges = ranges.slice(chunkStart, chunkStart + BATCH_CHUNK_SIZE);
-        const chunkResult = await batchReadSheet(sheetId, chunkRanges);
+        const chunkResult = await throttledCall(() => batchReadSheet(sheetId, chunkRanges));
         batchResults.push(...chunkResult);
       }
     }
@@ -478,7 +482,7 @@ async function _processOneSheet(sheetId, opts) {
     batchResults = [];
     for (const tab of activeTabs) {
       try {
-        const values = await readSheet(sheetId, `'${tab.properties.title}'!A:Z`);
+        const values = await throttledCall(() => readSheet(sheetId, `'${tab.properties.title}'!A:Z`));
         batchResults.push({ values: values || [] });
       } catch (readErr) {
         batchResults.push({ values: [], error: readErr.message });
@@ -491,7 +495,7 @@ async function _processOneSheet(sheetId, opts) {
   // Drive API에서 가져온 수정시각 (모든 탭 공통)
   let currentModifiedTime = null;
   try {
-    currentModifiedTime = await getSheetModifiedTime(sheetId);
+    currentModifiedTime = await throttledCall(() => getSheetModifiedTime(sheetId));
   } catch (_) {}
 
   for (let i = 0; i < activeTabs.length; i++) {
@@ -960,7 +964,7 @@ async function checkDirtySheets() {
 
   for (const sheetId of sheetIds) {
     try {
-      const remoteModified = await getSheetModifiedTime(sheetId);
+      const remoteModified = await throttledCall(() => getSheetModifiedTime(sheetId));
       if (!remoteModified) continue;
 
       const { rows } = await pool.query(
