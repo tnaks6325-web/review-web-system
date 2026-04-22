@@ -65,6 +65,7 @@ const _ACTION_MAP = {
   'syncTabFromSheet': { method: 'POST', path: '/api/tab/sync-from-sheet' },
   'syncTabNames':     { method: 'POST', path: '/api/tab/sync-tab-names' },
   'syncMasterSheet':  { method: 'POST', path: '/api/tab/sync-master' },
+  'scanMasterSheet':  { method: 'POST', path: '/api/tab/scan-master' },
   'cleanClosedTabs':  { method: 'POST', path: '/api/tab/clean-closed' },
   'getTabDashboard':  { method: 'GET',  path: '/api/tab/dashboard' },
 

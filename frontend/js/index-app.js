@@ -11940,6 +11940,111 @@ async function syncTabFromSheet() {
   showToast("베이스시트 동기화 기능은 제거되었습니다. DB(tab_configs)가 원본이므로 웹 UI에서 직접 관리하세요.", "info");
 }
 
+// ── 광고주 시트 스캔 → 마스터 시트 자동 채우기 ──
+async function scanMasterSheet(dryRun) {
+  const btnDry = document.getElementById("btnScanMasterDry");
+  const btnRun = document.getElementById("btnScanMasterRun");
+  const activeBtn = dryRun ? btnDry : btnRun;
+  const actionLabel = dryRun ? "스캔 미리보기" : "스캔 실행";
+
+  if (!dryRun && !confirm(
+    "29개 광고주 시트를 스캔하여 마스터 구글시트를 최신 탭명으로 덮어씁니다.\n\n" +
+    "• 기존 마스터 시트 내용이 전부 교체됩니다\n" +
+    "• DB에 있는 설정값(담당자, 택합 등)은 보존됩니다\n\n" +
+    "계속하시겠습니까?"
+  )) return;
+
+  const _saveBtnHtml = activeBtn ? activeBtn.innerHTML : "";
+  if (activeBtn) { activeBtn.disabled = true; activeBtn.innerHTML = `<i class="fas fa-spinner fa-spin"></i> ${actionLabel}중...`; }
+  if (btnDry && btnDry !== activeBtn) btnDry.disabled = true;
+  if (btnRun && btnRun !== activeBtn) btnRun.disabled = true;
+
+  showToast(`🔍 ${actionLabel} 진행중... (29개 시트 스캔, 약 60~120초 소요)`, "info");
+
+  try {
+    const res = await gasPost({ action: "scanMasterSheet", dryRun: !!dryRun }, 300000);
+    if (res.error) { showToast(res.error, "error"); return; }
+
+    const parts = [];
+    parts.push(`${res.sheetsScanned || 0}개 시트 스캔`);
+    parts.push(`총 ${res.totalTabs || 0}개 탭`);
+    if (res.newTabs > 0) parts.push(`신규 ${res.newTabs}개`);
+    if (res.preservedTabs > 0) parts.push(`기존설정 보존 ${res.preservedTabs}개`);
+    if (res.errors > 0) parts.push(`오류 ${res.errors}건`);
+
+    const prefix = dryRun ? "[미리보기] " : "✅ ";
+    showToast(`${prefix}${parts.join(", ")} (${res.elapsed})`, res.errors > 0 ? "warning" : "success");
+
+    // 미리보기 결과 모달
+    if (res.preview && res.preview.length > 0) {
+      _showScanResult(res, dryRun);
+    }
+  } catch (err) {
+    showToast("스캔 오류: " + err.message, "error");
+  } finally {
+    if (activeBtn) { activeBtn.disabled = false; activeBtn.innerHTML = _saveBtnHtml; }
+    if (btnDry && btnDry !== activeBtn) btnDry.disabled = false;
+    if (btnRun && btnRun !== activeBtn) btnRun.disabled = false;
+  }
+}
+
+function _showScanResult(res, dryRun) {
+  const old = document.getElementById("scanMasterResultModal");
+  if (old) old.remove();
+
+  // 캠페인별 그룹핑
+  const groups = {};
+  (res.preview || []).forEach(p => {
+    const key = p.campaign || '(알 수 없음)';
+    if (!groups[key]) groups[key] = [];
+    groups[key].push(p);
+  });
+
+  let tableHtml = '';
+  for (const [campaign, tabs] of Object.entries(groups)) {
+    tableHtml += `<tr style="background:#F0FDF4"><td colspan="3" style="padding:6px 8px;font-size:.72rem;font-weight:700;color:#15803D">
+      📁 ${campaign} (${tabs.length}개 탭)</td></tr>`;
+    for (const tab of tabs) {
+      const badge = tab.isNew
+        ? '<span style="background:#DBEAFE;color:#1D4ED8;padding:1px 6px;border-radius:4px;font-size:.64rem">신규</span>'
+        : '<span style="background:#F3F4F6;color:#6B7280;padding:1px 6px;border-radius:4px;font-size:.64rem">기존</span>';
+      tableHtml += `<tr>
+        <td style="padding:3px 8px 3px 24px;font-size:.7rem">${tab.tabName}</td>
+        <td style="padding:3px 8px;font-size:.7rem">${badge}</td>
+      </tr>`;
+    }
+  }
+
+  const errHtml = (res.errorDetails || []).length > 0
+    ? `<div style="margin-top:8px;padding:6px;background:#FEF2F2;border-radius:6px;font-size:.68rem;color:#DC2626">
+        <b>오류:</b> ${res.errorDetails.map(e => `${e.sheetId}: ${e.error}`).join('<br>')}</div>` : '';
+
+  const modal = document.createElement('div');
+  modal.id = 'scanMasterResultModal';
+  modal.className = 'modal-overlay';
+  modal.innerHTML = `
+    <div class="modal-box" style="max-width:600px;max-height:80vh;overflow:auto">
+      <div class="modal-header">
+        <h3><i class="fas fa-search" style="color:#15803D"></i>
+          시트 스캔 ${dryRun ? '미리보기' : '결과'}</h3>
+        <button class="btn-icon-sm" onclick="document.getElementById('scanMasterResultModal').remove()">
+          <i class="fas fa-times"></i>
+        </button>
+      </div>
+      <div style="display:flex;gap:12px;margin-bottom:8px;font-size:.72rem;flex-wrap:wrap">
+        <span>📊 ${res.sheetsScanned}개 시트 스캔</span>
+        <span>📄 총 ${res.totalTabs}개 탭</span>
+        <span>🆕 신규 ${res.newTabs}개</span>
+        <span>♻ 설정보존 ${res.preservedTabs}개</span>
+        ${res.errors > 0 ? `<span style="color:#DC2626">❌ 오류 ${res.errors}건</span>` : ''}
+      </div>
+      <table style="width:100%;border-collapse:collapse">${tableHtml}</table>
+      ${errHtml}
+      ${dryRun ? '<div style="margin-top:8px;padding:6px;background:#FEF3C7;border-radius:6px;font-size:.68rem;color:#92400E">⚠ 미리보기 모드 — "스캔 실행"을 클릭해야 마스터 시트에 실제로 기록됩니다.</div>' : ''}
+    </div>`;
+  document.body.appendChild(modal);
+}
+
 // ── 마스터 구글시트 → DB 동기화 ──
 async function syncMasterSheet(dryRun) {
   const btnDry = document.getElementById("btnSyncMasterDry");

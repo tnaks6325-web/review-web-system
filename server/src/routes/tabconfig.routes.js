@@ -3,7 +3,7 @@ const router = express.Router();
 const pool = require('../db/pool');
 const { authMiddleware } = require('../middleware/auth.middleware');
 const { getSpreadsheetMeta } = require('../services/sheets.service');
-const { syncMasterSheetToDB } = require('../services/masterSheet.service');
+const { syncMasterSheetToDB, scanAndPopulateMaster } = require('../services/masterSheet.service');
 const { logger } = require('../utils/logger');
 const { throttledCall } = require('../utils/sheetsThrottle');
 
@@ -591,6 +591,22 @@ router.get('/dashboard', authMiddleware, async (req, res, next) => {
     });
   } catch (err) {
     next(err);
+  }
+});
+
+// ══════════════════════════════════════════════════════════════
+// POST /api/tab/scan-master — 광고주 시트 스캔 → 마스터 시트 자동 채우기
+// ══════════════════════════════════════════════════════════════
+router.post('/scan-master', authMiddleware, async (req, res, next) => {
+  try {
+    const { dryRun = true } = req.body;
+    logger.info(`[scan-master] ${dryRun ? '미리보기' : '실행'} 요청 — by ${req.admin?.name || 'unknown'}`);
+
+    const result = await scanAndPopulateMaster(!!dryRun);
+    res.json({ ok: true, ...result });
+  } catch (err) {
+    logger.error(`[scan-master] 오류: ${err.message}`);
+    res.status(500).json({ error: err.message });
   }
 });
 
