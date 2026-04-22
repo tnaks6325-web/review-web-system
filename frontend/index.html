@@ -385,6 +385,29 @@
         </button>
         <div style="display:none;padding:8px 16px 12px">
 
+          <!-- ★ 마스터 시트 동기화 (최상단) -->
+          <div style="margin-bottom:8px">
+            <div style="font-size:.75rem;font-weight:600;color:#374151;margin-bottom:4px">
+              <i class="fas fa-cloud-download-alt" style="color:#059669"></i> 마스터 시트 동기화
+              <span style="font-size:.64rem;font-weight:400;color:#6B7280">(구글시트 → DB)</span>
+            </div>
+            <div style="font-size:.66rem;color:#6B7280;line-height:1.45;margin-bottom:4px">
+              마스터 구글시트의 데이터를 DB(campaigns, tab_configs)에 동기화합니다. 시트가 원본이며, DB를 시트 기준으로 업데이트합니다.
+            </div>
+            <div style="display:flex;gap:4px">
+              <button id="btnSyncMasterDry" onclick="syncMasterSheet(true)"
+                style="flex:1;padding:7px;background:#ECFDF5;color:#059669;border:1px solid #A7F3D0;border-radius:6px;font-size:.73rem;font-weight:600;cursor:pointer;display:flex;align-items:center;justify-content:center;gap:4px">
+                <i class="fas fa-search"></i> 미리보기
+              </button>
+              <button id="btnSyncMasterRun" onclick="syncMasterSheet(false)"
+                style="flex:1;padding:7px;background:#059669;color:#fff;border:1px solid #059669;border-radius:6px;font-size:.73rem;font-weight:600;cursor:pointer;display:flex;align-items:center;justify-content:center;gap:4px">
+                <i class="fas fa-play"></i> 실행
+              </button>
+            </div>
+          </div>
+
+          <div style="border-top:1px solid #F3F4F6;margin-bottom:8px"></div>
+
           <!-- 탭명·URL 동기화 -->
           <div style="margin-bottom:8px">
             <div style="font-size:.75rem;font-weight:600;color:#374151;margin-bottom:4px">

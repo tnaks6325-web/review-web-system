@@ -11940,6 +11940,132 @@ async function syncTabFromSheet() {
   showToast("베이스시트 동기화 기능은 제거되었습니다. DB(tab_configs)가 원본이므로 웹 UI에서 직접 관리하세요.", "info");
 }
 
+// ── 마스터 구글시트 → DB 동기화 ──
+async function syncMasterSheet(dryRun) {
+  const btnDry = document.getElementById("btnSyncMasterDry");
+  const btnRun = document.getElementById("btnSyncMasterRun");
+  const activeBtn = dryRun ? btnDry : btnRun;
+  const actionLabel = dryRun ? "미리보기" : "동기화";
+
+  if (!dryRun && !confirm(
+    "마스터 구글시트 데이터를 DB에 동기화합니다.\n\n" +
+    "• campaigns 테이블: 시트 목록 추가/삭제\n" +
+    "• tab_configs 테이블: 탭 설정 추가/수정/삭제\n\n" +
+    "⚠ 시트에 없는 DB 데이터는 삭제됩니다.\n계속하시겠습니까?"
+  )) return;
+
+  const _saveBtnHtml = activeBtn ? activeBtn.innerHTML : "";
+  if (activeBtn) { activeBtn.disabled = true; activeBtn.innerHTML = `<i class="fas fa-spinner fa-spin"></i> ${actionLabel}중...`; }
+  if (btnDry && btnDry !== activeBtn) btnDry.disabled = true;
+  if (btnRun && btnRun !== activeBtn) btnRun.disabled = true;
+
+  showToast(`🔄 마스터 시트 ${actionLabel} 진행중...`, "info");
+
+  try {
+    const res = await gasPost({ action: "syncMasterSheet", dryRun: !!dryRun }, 180000);
+    if (res.error) { showToast(res.error, "error"); return; }
+
+    // 결과 요약 토스트
+    const parts = [];
+    const c = res.campaigns || {};
+    const t = res.tabs || {};
+    if (c.added > 0) parts.push(`캠페인 +${c.added}`);
+    if (c.removed > 0) parts.push(`캠페인 -${c.removed}`);
+    if (t.added > 0) parts.push(`탭 +${t.added}`);
+    if (t.updated > 0) parts.push(`탭 ~${t.updated}`);
+    if (t.removed > 0) parts.push(`탭 -${t.removed}`);
+    if (parts.length === 0) parts.push("변경 없음 — DB와 시트가 일치합니다");
+
+    const prefix = dryRun ? "[미리보기] " : "✅ ";
+    const totalChanges = (c.added || 0) + (c.removed || 0) + (t.added || 0) + (t.updated || 0) + (t.removed || 0);
+    showToast(`${prefix}${parts.join(", ")} (${res.elapsed})`, totalChanges > 0 ? (dryRun ? "info" : "success") : "success");
+
+    // 상세 결과 모달 표시
+    if (res.details && res.details.length > 0) {
+      _showMasterSyncResult(res, dryRun);
+    }
+
+    // 실제 실행 후 대시보드 새로고침
+    if (!dryRun && totalChanges > 0) {
+      loadTabDashboard();
+    }
+  } catch (err) {
+    showToast("마스터 시트 동기화 오류: " + err.message, "error");
+  } finally {
+    if (activeBtn) { activeBtn.disabled = false; activeBtn.innerHTML = _saveBtnHtml; }
+    if (btnDry && btnDry !== activeBtn) btnDry.disabled = false;
+    if (btnRun && btnRun !== activeBtn) btnRun.disabled = false;
+  }
+}
+
+function _showMasterSyncResult(res, dryRun) {
+  const old = document.getElementById("masterSyncResultModal");
+  if (old) old.remove();
+
+  const actionColor = (action) => {
+    if (action.includes('add')) return '#059669';
+    if (action.includes('update')) return '#0369A1';
+    if (action.includes('remove')) return '#DC2626';
+    return '#6B7280';
+  };
+  const actionLabel = (action) => {
+    if (action.includes('dry_add')) return '추가 예정';
+    if (action.includes('dry_update')) return '수정 예정';
+    if (action.includes('dry_remove')) return '삭제 예정';
+    if (action.includes('added')) return '추가됨';
+    if (action.includes('updated')) return '수정됨';
+    if (action.includes('removed')) return '삭제됨';
+    return action;
+  };
+
+  const rows = (res.details || []).map(d => {
+    const name = d.type === 'campaign' ? `📁 ${d.name}` : `📄 ${d.campaign || ''} / ${d.tabName}`;
+    const changeDetail = d.changes
+      ? d.changes.map(c => `${c.col}: ${c.from || '(빈값)'} → ${c.to || '(빈값)'}`).join('<br>')
+      : '';
+    return `<tr>
+      <td style="padding:4px 8px;font-size:.72rem;white-space:nowrap">
+        <span style="color:${actionColor(d.action)};font-weight:600">${actionLabel(d.action)}</span>
+      </td>
+      <td style="padding:4px 8px;font-size:.72rem">${name}</td>
+      <td style="padding:4px 8px;font-size:.68rem;color:#6B7280">${changeDetail}</td>
+    </tr>`;
+  }).join('');
+
+  const c = res.campaigns || {};
+  const t = res.tabs || {};
+  const summaryHtml = `
+    <div style="display:flex;gap:12px;margin-bottom:8px;font-size:.72rem">
+      <span>📊 시트 ${res.sheetRows || 0}행</span>
+      <span>📁 캠페인: +${c.added || 0} / -${c.removed || 0} / =${c.unchanged || 0}</span>
+      <span>📄 탭: +${t.added || 0} / ~${t.updated || 0} / -${t.removed || 0} / =${t.unchanged || 0}</span>
+    </div>`;
+
+  const modal = document.createElement('div');
+  modal.id = 'masterSyncResultModal';
+  modal.className = 'modal-overlay';
+  modal.innerHTML = `
+    <div class="modal-box" style="max-width:700px;max-height:80vh;overflow:auto">
+      <div class="modal-header">
+        <h3><i class="fas fa-cloud-download-alt" style="color:#059669"></i>
+          마스터 시트 동기화 ${dryRun ? '미리보기' : '결과'}</h3>
+        <button class="btn-icon-sm" onclick="document.getElementById('masterSyncResultModal').remove()">
+          <i class="fas fa-times"></i>
+        </button>
+      </div>
+      ${summaryHtml}
+      <table style="width:100%;border-collapse:collapse">
+        <thead><tr style="background:#F9FAFB;border-bottom:1px solid #E5E7EB">
+          <th style="padding:6px 8px;text-align:left;font-size:.7rem">상태</th>
+          <th style="padding:6px 8px;text-align:left;font-size:.7rem">대상</th>
+          <th style="padding:6px 8px;text-align:left;font-size:.7rem">변경 내용</th>
+        </tr></thead>
+        <tbody>${rows}</tbody>
+      </table>
+    </div>`;
+  document.body.appendChild(modal);
+}
+
 // ── 탭명·URL 동기화 (시트 실제 탭명 ↔ DB) ──
 async function syncTabNames(dryRun) {
   // ★ 유지보수 도구 버튼(btnSyncTabNamesDry/Run) + 설정 탭 버튼(btnSyncTabNames) 모두 지원

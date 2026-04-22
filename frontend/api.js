@@ -64,6 +64,7 @@ const _ACTION_MAP = {
   'getCampaignStats': { method: 'GET',  path: '/api/diag/campaign-stats' },
   'syncTabFromSheet': { method: 'POST', path: '/api/tab/sync-from-sheet' },
   'syncTabNames':     { method: 'POST', path: '/api/tab/sync-tab-names' },
+  'syncMasterSheet':  { method: 'POST', path: '/api/tab/sync-master' },
   'cleanClosedTabs':  { method: 'POST', path: '/api/tab/clean-closed' },
   'getTabDashboard':  { method: 'GET',  path: '/api/tab/dashboard' },
 

@@ -3,6 +3,7 @@ const router = express.Router();
 const pool = require('../db/pool');
 const { authMiddleware } = require('../middleware/auth.middleware');
 const { getSpreadsheetMeta } = require('../services/sheets.service');
+const { syncMasterSheetToDB } = require('../services/masterSheet.service');
 const { logger } = require('../utils/logger');
 const { throttledCall } = require('../utils/sheetsThrottle');
 
@@ -590,6 +591,22 @@ router.get('/dashboard', authMiddleware, async (req, res, next) => {
     });
   } catch (err) {
     next(err);
+  }
+});
+
+// ══════════════════════════════════════════════════════════════
+// POST /api/tab/sync-master — 마스터 구글시트 → DB 동기화
+// ══════════════════════════════════════════════════════════════
+router.post('/sync-master', authMiddleware, async (req, res, next) => {
+  try {
+    const { dryRun = true } = req.body;
+    logger.info(`[sync-master] ${dryRun ? '미리보기' : '실행'} 요청 — by ${req.admin?.name || 'unknown'}`);
+
+    const result = await syncMasterSheetToDB(!!dryRun);
+    res.json({ ok: true, ...result });
+  } catch (err) {
+    logger.error(`[sync-master] 오류: ${err.message}`);
+    res.status(500).json({ error: err.message });
   }
 });
 
