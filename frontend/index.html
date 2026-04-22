@@ -392,13 +392,13 @@
               <span style="font-size:.64rem;font-weight:400;color:#6B7280">(구글시트 → DB)</span>
             </div>
             <div style="font-size:.66rem;color:#6B7280;line-height:1.45;margin-bottom:4px">
-              마스터 구글시트의 데이터를 DB(campaigns, tab_configs)에 동기화합니다. 시트가 원본이며, DB를 시트 기준으로 업데이트합니다.
+              마스터 구글시트의 데이터를 DB(campaigns, tab_configs)에 동기화합니다. 마스터 시트의 A열 sheet_url에서 직접 시트에 접속하여 campaign_name과 tab_name을 파싱합니다.
             </div>
 
             <!-- STEP 1: 광고주 시트 스캔 → 마스터 시트 채우기 -->
             <div style="margin-bottom:6px">
               <div style="font-size:.68rem;font-weight:600;color:#059669;margin-bottom:3px">
-                STEP 1. 광고주 시트 스캔 → 마스터 시트 자동 채우기
+                STEP 1. sheet_url → 시트 직접 접속 → campaign_name · tab_name 파싱
               </div>
               <div style="display:flex;gap:4px">
                 <button id="btnScanMasterDry" onclick="scanMasterSheet(true)"

@@ -74,7 +74,7 @@ function isSystemTab(tabName) {
 }
 
 // ══════════════════════════════════════════════════════════════
-// 기능 1: 광고주 시트 스캔 → 마스터 시트 자동 채우기
+// 기능 1: 마스터 시트 A열 sheet_url → 각 시트 직접 파싱 → 마스터 시트 채우기
 // ══════════════════════════════════════════════════════════════
 
 /**
@@ -96,41 +96,70 @@ async function _detectMasterTabName() {
 }
 
 /**
- * 29개 광고주 시트를 스캔해서 마스터 시트를 최신 탭명으로 자동 채움
+ * 마스터 시트 A열의 sheet_url 목록을 읽어서
+ * 각 시트에 직접 접속 → 시트 제목(campaign_name) + 탭 목록(tab_name)을 파싱
+ * 기존 마스터 시트의 다른 설정값(manager, folder_url 등)은 행별로 보존
+ *
  * @param {boolean} dryRun - true면 미리보기만, false면 실제 마스터 시트에 쓰기
  */
 async function scanAndPopulateMaster(dryRun = true) {
   const startTime = Date.now();
   if (!MASTER_SHEET_ID) throw new Error('MASTER_SHEET_ID 환경변수 미설정');
 
-  // 1. DB에서 시트 목록 + 기존 tab_configs 로드
-  const { rows: campaignRows } = await pool.query(
-    'SELECT DISTINCT sheet_id, campaign_name, sheet_url FROM campaigns'
+  // 1. 마스터 시트에서 현재 데이터 전체를 읽기 (기존 설정값 보존용)
+  const masterTabName = await _detectMasterTabName();
+  const rawValues = await throttledCall(() =>
+    readSheet(MASTER_SHEET_ID, `'${masterTabName}'!A:Z`)
   );
-  const { rows: dbTabs } = await pool.query('SELECT * FROM tab_configs');
 
-  // 기존 tab_configs를 sheet_id+tab_name으로 맵핑 (설정값 보존용)
-  const dbTabMap = new Map();
-  dbTabs.forEach(t => dbTabMap.set(`${t.sheet_id}||${t.tab_name}`, t));
+  if (!rawValues || rawValues.length < 1) {
+    throw new Error('마스터 시트에 데이터가 없습니다 (헤더 행이 필요합니다).');
+  }
 
-  // campaign_name을 sheet_id로 매핑
-  const campaignNameMap = new Map();
-  campaignRows.forEach(c => {
-    if (!campaignNameMap.has(c.sheet_id)) {
-      campaignNameMap.set(c.sheet_id, c.campaign_name);
+  const headers = rawValues[0].map(h => String(h).trim().toLowerCase());
+  const sheetUrlIdx = headers.indexOf('sheet_url');
+  if (sheetUrlIdx === -1) throw new Error("마스터 시트에 'sheet_url' 컬럼이 없습니다.");
+
+  // 기존 행들을 sheet_url 기반으로 매핑 (설정값 보존용)
+  // key: sheet_url → 해당 행의 설정값 객체 배열 (같은 sheet_url에 여러 행 가능)
+  const existingRowsByUrl = new Map();
+  for (let i = 1; i < rawValues.length; i++) {
+    const row = rawValues[i];
+    if (!row || row.length === 0) continue;
+    const url = (row[sheetUrlIdx] || '').trim();
+    if (!url) continue;
+
+    const obj = {};
+    headers.forEach((header, idx) => {
+      obj[header] = (idx < row.length ? row[idx] : '') || '';
+    });
+
+    const baseUrl = url.split('#')[0].replace(/\/edit.*$/, '/edit');
+    if (!existingRowsByUrl.has(baseUrl)) existingRowsByUrl.set(baseUrl, []);
+    existingRowsByUrl.get(baseUrl).push(obj);
+  }
+
+  // 2. 고유 sheet_url 목록 추출 (A열에서)
+  const uniqueUrls = [...existingRowsByUrl.keys()];
+  const sheetIdToUrl = new Map();
+  const uniqueSheetIds = [];
+
+  for (const url of uniqueUrls) {
+    const sid = extractSheetId(url);
+    if (sid && !sheetIdToUrl.has(sid)) {
+      sheetIdToUrl.set(sid, url);
+      uniqueSheetIds.push(sid);
     }
-  });
+  }
 
-  // 고유 sheet_id 목록
-  const sheetIds = [...new Set(campaignRows.map(r => r.sheet_id))].filter(Boolean);
-  logger.info(`[scanMaster] 스캔 시작: ${sheetIds.length}개 시트`);
+  logger.info(`[scanMaster] 마스터 시트에서 ${uniqueSheetIds.length}개 고유 시트 URL 발견, 스캔 시작`);
 
-  // 2. 각 시트를 스캔 (throttle 적용, 동시 3개)
+  // 3. 각 시트에 직접 접속하여 시트 제목(campaign_name) + 탭 목록(tab_name) 파싱
   const scanResults = [];
   let totalTabs = 0, errorCount = 0;
   const errors = [];
 
-  await throttledMap(sheetIds, async (sheetId) => {
+  await throttledMap(uniqueSheetIds, async (sheetId) => {
     try {
       const meta = await throttledCall(() => getSpreadsheetMeta(sheetId));
       if (!meta || meta.length === 0) {
@@ -139,8 +168,17 @@ async function scanAndPopulateMaster(dryRun = true) {
         return;
       }
 
-      const campaignName = campaignNameMap.get(sheetId) || meta._spreadsheetTitle || '';
+      // ★ 시트 제목을 campaign_name으로 사용 (DB 의존 X)
+      const campaignName = meta._spreadsheetTitle || '';
       const sheetUrl = `https://docs.google.com/spreadsheets/d/${sheetId}/edit`;
+
+      // 기존 마스터 시트에서 이 sheet_url에 해당하는 행의 설정값 목록
+      const existingRows = existingRowsByUrl.get(sheetUrl) || [];
+      // tab_name으로 기존 설정값 빠르게 찾기
+      const existingByTabName = new Map();
+      existingRows.forEach(r => {
+        if (r.tab_name) existingByTabName.set(r.tab_name, r);
+      });
 
       for (const sheet of meta) {
         const tabName = sheet.properties.title;
@@ -149,34 +187,36 @@ async function scanAndPopulateMaster(dryRun = true) {
         // 시스템 탭 제외
         if (isSystemTab(tabName)) continue;
 
-        // 기존 DB 설정값이 있으면 보존
-        const existingConfig = dbTabMap.get(`${sheetId}||${tabName}`);
+        // 기존 마스터 시트에서 같은 tab_name의 설정값이 있으면 보존
+        const existingConfig = existingByTabName.get(tabName);
+        // 매칭된 기존 행은 재사용 방지
+        if (existingConfig) existingByTabName.delete(tabName);
 
         scanResults.push({
-          sheet_id: sheetId,
           sheet_url: sheetUrl,
           campaign_name: campaignName,
           tab_name: tabName,
           tab_gid: tabGid,
-          // 기존 설정값 보존 (있으면 사용, 없으면 빈값)
+          // 기존 마스터 시트 설정값 보존 (있으면 사용, 없으면 빈값)
           manager:            existingConfig?.manager || '',
           time_range:         existingConfig?.time_range || '',
-          taekhap:            existingConfig?.taekhap || false,
-          review_type:        existingConfig?.review_type || '',
+          taekha:             existingConfig?.taekha || '',
+          review_type:        existingConfig?.review_type || existingConfig?.preview_type || '',
           payment_type:       existingConfig?.payment_type || '',
           display_name:       existingConfig?.display_name || '',
-          force_done:         existingConfig?.force_done || false,
+          force_done:         existingConfig?.force_done || '',
           folder_url:         existingConfig?.folder_url || '',
-          is_bulk:            existingConfig?.is_bulk || false,
+          is_bulk:            existingConfig?.is_bulk || '',
           capture_folder_url: existingConfig?.capture_folder_url || '',
-          is_closed:          existingConfig?.is_closed || false,
+          is_closed:          existingConfig?.is_closed || '',
           delivery_type:      existingConfig?.delivery_type || '',
           round:              existingConfig?.round || '',
-          nc_mode:            existingConfig?.nc_mode || false,
+          nc_mode:            existingConfig?.nc_mode || '',
           deposit_name:       existingConfig?.deposit_name || '',
           transfer_bank:      existingConfig?.transfer_bank || '',
           income_type:        existingConfig?.income_type || '',
-          _isNew: !existingConfig,  // DB에 없는 새 탭 표시
+          _isNew: !existingConfig,
+          _hasConfig: !!existingConfig,
         });
         totalTabs++;
       }
@@ -186,12 +226,10 @@ async function scanAndPopulateMaster(dryRun = true) {
     }
   }, 3);
 
-  logger.info(`[scanMaster] 스캔 완료: ${sheetIds.length}개 시트 → ${totalTabs}개 탭, 오류 ${errorCount}건`);
+  logger.info(`[scanMaster] 스캔 완료: ${uniqueSheetIds.length}개 시트 → ${totalTabs}개 탭, 오류 ${errorCount}건`);
 
-  // 3. 마스터 시트 현재 데이터 읽기 (비교용)
-  let existingRows = 0;
-  let newTabs = scanResults.filter(r => r._isNew).length;
-  let preservedTabs = scanResults.filter(r => !r._isNew).length;
+  const newTabs = scanResults.filter(r => r._isNew).length;
+  const preservedTabs = scanResults.filter(r => r._hasConfig).length;
 
   // 4. dryRun이 아니면 마스터 시트에 쓰기
   if (!dryRun) {
@@ -203,24 +241,26 @@ async function scanAndPopulateMaster(dryRun = true) {
   return {
     dryRun,
     elapsed,
-    sheetsScanned: sheetIds.length,
+    sheetsScanned: uniqueSheetIds.length,
     totalTabs,
     newTabs,
     preservedTabs,
     errors: errorCount,
     errorDetails: errors.slice(0, 10),
-    // 미리보기용 상세 데이터 (최대 200개)
-    preview: scanResults.slice(0, 200).map(r => ({
+    // 미리보기용 상세 데이터 (최대 300개)
+    preview: scanResults.slice(0, 300).map(r => ({
       campaign: r.campaign_name,
       tabName: r.tab_name,
       isNew: r._isNew,
-      sheetId: r.sheet_id.substring(0, 12) + '...',
+      hasConfig: r._hasConfig,
+      sheetUrl: r.sheet_url.substring(0, 50) + '...',
     })),
   };
 }
 
 /**
  * 스캔 결과를 마스터 시트에 쓰기
+ * 기존 설정값이 보존된 상태로 campaign_name, tab_name이 새로 채워진 데이터를 씀
  */
 async function _writeMasterSheet(rows) {
   const tabName = await _detectMasterTabName();
@@ -230,23 +270,22 @@ async function _writeMasterSheet(rows) {
 
   for (const row of rows) {
     values.push(MASTER_HEADERS.map(header => {
-      if (header === 'taekha') return row.taekhap ? 'TRUE' : '';
-      if (header === 'force_done') return row.force_done ? 'TRUE' : '';
-      if (header === 'is_bulk') return row.is_bulk ? 'TRUE' : '';
-      if (header === 'is_closed') return row.is_closed ? 'TRUE' : '';
-      if (header === 'nc_mode') return row.nc_mode ? 'TRUE' : '';
+      // updated_at은 현재 시간으로 갱신
       if (header === 'updated_at') return new Date().toISOString().replace('T', ' ').substring(0, 19);
-      return row[header] || '';
+      // 나머지는 기존 값 그대로 (문자열 형태 보존)
+      const val = row[header];
+      if (val === undefined || val === null) return '';
+      return String(val);
     }));
   }
 
-  const range = `'${tabName}'!A1:U${values.length}`;
+  const colLetter = String.fromCharCode(65 + MASTER_HEADERS.length - 1); // U
+  const range = `'${tabName}'!A1:${colLetter}${values.length}`;
   logger.info(`[masterSheet] 마스터 시트 쓰기: ${range} (${values.length - 1}행)`);
 
   await throttledCall(() => writeSheet(MASTER_SHEET_ID, range, values));
 
   // 기존 데이터가 더 많았을 경우 나머지 행 삭제 (빈 행으로 덮어쓰기)
-  // 안전을 위해 500행까지 빈 행으로 클리어
   const clearStart = values.length + 1;
   const clearEnd = Math.max(clearStart, 500);
   const emptyRows = [];
@@ -257,7 +296,7 @@ async function _writeMasterSheet(rows) {
     try {
       await throttledCall(() => writeSheet(
         MASTER_SHEET_ID,
-        `'${tabName}'!A${clearStart}:U${clearEnd}`,
+        `'${tabName}'!A${clearStart}:${colLetter}${clearEnd}`,
         emptyRows
       ));
     } catch (_) {

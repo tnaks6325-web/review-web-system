@@ -11948,9 +11948,10 @@ async function scanMasterSheet(dryRun) {
   const actionLabel = dryRun ? "스캔 미리보기" : "스캔 실행";
 
   if (!dryRun && !confirm(
-    "29개 광고주 시트를 스캔하여 마스터 구글시트를 최신 탭명으로 덮어씁니다.\n\n" +
-    "• 기존 마스터 시트 내용이 전부 교체됩니다\n" +
-    "• DB에 있는 설정값(담당자, 택합 등)은 보존됩니다\n\n" +
+    "마스터 시트 A열의 sheet_url에 직접 접속하여 시트 제목(campaign_name)과 탭 목록(tab_name)을 새로 파싱합니다.\n\n" +
+    "• campaign_name: 각 시트의 실제 제목으로 채워집니다\n" +
+    "• tab_name: 각 시트의 실제 탭 이름으로 채워집니다\n" +
+    "• 기존 설정값(담당자, 택합 등)은 tab_name 기준으로 보존됩니다\n\n" +
     "계속하시겠습니까?"
   )) return;
 
@@ -11959,7 +11960,7 @@ async function scanMasterSheet(dryRun) {
   if (btnDry && btnDry !== activeBtn) btnDry.disabled = true;
   if (btnRun && btnRun !== activeBtn) btnRun.disabled = true;
 
-  showToast(`🔍 ${actionLabel} 진행중... (29개 시트 스캔, 약 60~120초 소요)`, "info");
+  showToast(`🔍 ${actionLabel} 진행중... (마스터 시트 URL에서 직접 파싱, 약 60~120초 소요)`, "info");
 
   try {
     const res = await gasPost({ action: "scanMasterSheet", dryRun: !!dryRun }, 300000);
