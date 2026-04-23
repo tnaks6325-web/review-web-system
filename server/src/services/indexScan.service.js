@@ -160,6 +160,17 @@ async function runIndexScan(dryRun = true) {
           error: '메타데이터 조회 실패 (접근 권한 확인)',
           errorCode: 'META_FAIL',
         });
+        // ── 메타 실패해도 campaigns에는 등록되도록 campaignNameHint 사용 ──
+        if (entry.campaignNameHint) {
+          scanResults.push({
+            sheet_url: entry.sheetUrl,
+            campaign_name: entry.campaignNameHint,
+            tab_url: '',
+            tab_name: '',       // tabName 없으면 tab_configs에는 추가 안 됨
+            _metaFailed: true,
+          });
+          logger.warn(`[indexScan] 메타 실패 시트 campaign 등록: ${entry.campaignNameHint} (${entry.sheetId.substring(0, 12)}...)`);
+        }
         return;
       }
 
@@ -191,6 +202,17 @@ async function runIndexScan(dryRun = true) {
         error: err.message,
         errorCode: err.code || 'UNKNOWN',
       });
+      // ── 에러 발생해도 campaigns에는 등록되도록 campaignNameHint 사용 ──
+      if (entry.campaignNameHint) {
+        scanResults.push({
+          sheet_url: entry.sheetUrl,
+          campaign_name: entry.campaignNameHint,
+          tab_url: '',
+          tab_name: '',
+          _metaFailed: true,
+        });
+        logger.warn(`[indexScan] 에러 시트 campaign 등록: ${entry.campaignNameHint} (${entry.sheetId.substring(0, 12)}...) — ${err.message}`);
+      }
     }
   }, 3); // 동시성 3
 
@@ -225,12 +247,12 @@ async function runIndexScan(dryRun = true) {
     })),
   };
 
-  // 미리보기 시 캐시 저장
+  // 캐시 저장 (dryRun/non-dryRun 모두 — db-rebuild에서 fromCache 사용 가능)
+  _scanCache = { scanResults, summary, cachedAt: Date.now() };
   if (dryRun) {
-    _scanCache = { scanResults, summary, cachedAt: Date.now() };
     logger.info(`[indexScan] 미리보기 결과 캐시 저장 (${totalTabs}개 탭, 5분 유효)`);
   } else {
-    _scanCache = null;
+    logger.info(`[indexScan] 실행 완료 — 캐시 저장 (${totalTabs}개 탭, db-rebuild용)`);
   }
 
   logger.info(`[indexScan] 완료: ${sheetEntries.length}개 시트 → ${totalTabs}개 탭 — ${elapsed}`);
@@ -333,6 +355,9 @@ async function _writeTabList(scanResults) {
   const outputValues = [outputHeaders.map(h => h)]; // 헤더 행
 
   for (const result of scanResults) {
+    // 메타 실패 항목은 탭목록에 쓰지 않음 (campaign만 등록용)
+    if (result._metaFailed || !result.tab_name) continue;
+
     const key = `${extractSheetId(result.sheet_url)}||${result.tab_name}`;
     const existing = existingRowMap.get(key) || {};
 
@@ -446,15 +471,10 @@ async function syncTabListToDB({ dryRun = true, fromCache = false } = {}) {
 
     const campaignName = row.campaign_name || '';
     const tabName = row.tab_name || '';
-    if (!tabName) continue;
-
-    // tab_url에서 gid 추출
-    const gidMatch = (row.tab_url || '').match(/gid=(\d+)/);
-    const tabGid = gidMatch ? gidMatch[1] : '';
 
     const sheetUrl = (row.sheet_url || '').replace(/[?#].*$/, '');
 
-    // 1) campaigns
+    // 1) campaigns — tabName이 없어도 campaign은 등록 (메타 실패 시트 포함)
     const campKey = `${sheetId}||${campaignName}`;
     if (campaignName && !seenCampaigns.has(campKey)) {
       seenCampaigns.add(campKey);
@@ -462,6 +482,13 @@ async function syncTabListToDB({ dryRun = true, fromCache = false } = {}) {
         campaignsToAdd.push({ sheetId, campaignName, sheetUrl });
       }
     }
+
+    // tabName이 없으면 tab_configs / index_master는 스킵
+    if (!tabName) continue;
+
+    // tab_url에서 gid 추출
+    const gidMatch = (row.tab_url || '').match(/gid=(\d+)/);
+    const tabGid = gidMatch ? gidMatch[1] : '';
 
     // 2) tab_configs
     const tabKey = `${sheetId}||${tabName}`;

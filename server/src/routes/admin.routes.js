@@ -565,8 +565,8 @@ router.post('/db-rebuild', authMiddleware, masterOnlyMiddleware, async (req, res
     broadcast('db_rebuild_progress', { step: '3a', message: '시트DB에서 전체 탭 스캔 중... (시간 소요)' });
     const { runIndexScan, syncTabListToDB } = require('../services/indexScan.service');
     const scanResult = await runIndexScan(false);  // dryRun=false: 탭목록 시트에 기록 + 캐시 저장
-    steps.push({ step: '3a', action: 'INDEX_SCAN', sheets: scanResult.totalSheets, tabs: scanResult.totalTabs, elapsed: scanResult.elapsed });
-    logger.info(`[db-rebuild] Step3a 인덱스 스캔 완료: ${scanResult.totalSheets}시트, ${scanResult.totalTabs}탭 (${scanResult.elapsed})`);
+    steps.push({ step: '3a', action: 'INDEX_SCAN', sheets: scanResult.sheetsScanned, tabs: scanResult.totalTabs, errors: scanResult.errors, errorDetails: scanResult.errorDetails, elapsed: scanResult.elapsed });
+    logger.info(`[db-rebuild] Step3a 인덱스 스캔 완료: ${scanResult.sheetsScanned}시트, ${scanResult.totalTabs}탭, 오류 ${scanResult.errors}건 (${scanResult.elapsed})`);
 
     // ── Step 3b: 스캔 캐시를 DB에 반영 (campaigns + tab_configs + index_master 재등록) ──
     broadcast('db_rebuild_progress', { step: '3b', message: '스캔 결과를 DB에 등록 중...' });
