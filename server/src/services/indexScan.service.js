@@ -381,6 +381,227 @@ async function _writeTabList(scanResults) {
 }
 
 // ═══════════════════════════════════════════════════════════
+// 탭목록 → DB 직접 동기화
+// 탭목록 시트(또는 스캔 캐시)의 데이터를 DB에 직접 반영
+//   1) campaigns 테이블 — (sheet_id, campaign_name) UPSERT
+//   2) tab_configs 테이블 — (sheet_id, tab_name) UPSERT + tab_gid 포함
+//   3) index_master 테이블 — (sheet_id, tab_name) UPSERT (row_count=0, status='active')
+// → 대시보드에서 인덱스 빌드 없이 탭 목록 표시 가능
+// ═══════════════════════════════════════════════════════════
+
+const pool = require('../db/pool');
+
+/**
+ * 탭목록 시트 데이터를 DB에 직접 동기화
+ *
+ * @param {object} options
+ * @param {boolean} options.dryRun - true면 미리보기만 (DB 변경 안 함)
+ * @param {boolean} options.fromCache - true면 스캔 캐시에서, false면 탭목록 시트에서 읽기
+ * @returns {object} 동기화 결과 요약
+ */
+async function syncTabListToDB({ dryRun = true, fromCache = false } = {}) {
+  const startTime = Date.now();
+
+  // ── 데이터 소스 결정 ──
+  let rows; // [{ sheet_url, campaign_name, tab_url, tab_name }]
+
+  if (fromCache) {
+    // 스캔 캐시에서 가져오기
+    if (!_scanCache) throw new Error('캐시된 스캔 결과가 없습니다. 인덱스 스캔을 먼저 실행하세요.');
+    if (Date.now() - _scanCache.cachedAt > SCAN_CACHE_TTL) {
+      _scanCache = null;
+      throw new Error('캐시가 만료되었습니다 (5분 초과). 인덱스 스캔을 다시 실행하세요.');
+    }
+    rows = _scanCache.scanResults;
+    logger.info(`[syncTabListToDB] 캐시에서 ${rows.length}행 로드`);
+  } else {
+    // 탭목록 시트에서 읽기
+    rows = await _readTabListFromSheet();
+    logger.info(`[syncTabListToDB] 탭목록 시트에서 ${rows.length}행 로드`);
+  }
+
+  if (rows.length === 0) {
+    return { dryRun, elapsed: '0s', totalRows: 0, campaigns: 0, tabs: 0, indexEntries: 0, message: '동기화할 데이터 없음' };
+  }
+
+  // ── 기존 DB 데이터 조회 ──
+  const { rows: dbCampaigns } = await pool.query('SELECT sheet_id, campaign_name FROM campaigns');
+  const { rows: dbTabs } = await pool.query('SELECT sheet_id, tab_name, tab_gid FROM tab_configs');
+  const { rows: dbIndex } = await pool.query('SELECT sheet_id, tab_name FROM index_master');
+
+  const dbCampSet = new Set(dbCampaigns.map(c => `${c.sheet_id}||${c.campaign_name}`));
+  const dbTabMap = new Map(dbTabs.map(t => [`${t.sheet_id}||${t.tab_name}`, t]));
+  const dbIndexSet = new Set(dbIndex.map(i => `${i.sheet_id}||${i.tab_name}`));
+
+  // ── diff 계산 ──
+  const campaignsToAdd = [];
+  const tabsToAdd = [];
+  const tabsToUpdate = [];
+  const indexToAdd = [];
+  const seenCampaigns = new Set();
+
+  for (const row of rows) {
+    const sheetId = extractSheetId(row.sheet_url);
+    if (!sheetId) continue;
+
+    const campaignName = row.campaign_name || '';
+    const tabName = row.tab_name || '';
+    if (!tabName) continue;
+
+    // tab_url에서 gid 추출
+    const gidMatch = (row.tab_url || '').match(/gid=(\d+)/);
+    const tabGid = gidMatch ? gidMatch[1] : '';
+
+    const sheetUrl = (row.sheet_url || '').replace(/[?#].*$/, '');
+
+    // 1) campaigns
+    const campKey = `${sheetId}||${campaignName}`;
+    if (campaignName && !seenCampaigns.has(campKey)) {
+      seenCampaigns.add(campKey);
+      if (!dbCampSet.has(campKey)) {
+        campaignsToAdd.push({ sheetId, campaignName, sheetUrl });
+      }
+    }
+
+    // 2) tab_configs
+    const tabKey = `${sheetId}||${tabName}`;
+    const existing = dbTabMap.get(tabKey);
+    if (!existing) {
+      tabsToAdd.push({ sheetId, tabName, sheetUrl, campaignName, tabGid });
+    } else if (tabGid && existing.tab_gid !== tabGid) {
+      tabsToUpdate.push({ sheetId, tabName, tabGid, campaignName });
+    }
+
+    // 3) index_master
+    if (!dbIndexSet.has(tabKey)) {
+      indexToAdd.push({ sheetId, tabName, tabGid, campaignName });
+    }
+  }
+
+  const summary = {
+    dryRun,
+    totalRows: rows.length,
+    campaigns: { existing: dbCampaigns.length, toAdd: campaignsToAdd.length },
+    tabs: { existing: dbTabs.length, toAdd: tabsToAdd.length, toUpdate: tabsToUpdate.length },
+    index: { existing: dbIndex.length, toAdd: indexToAdd.length },
+  };
+
+  // ── 미리보기면 여기서 종료 ──
+  if (dryRun) {
+    summary.elapsed = ((Date.now() - startTime) / 1000).toFixed(1) + 's';
+    summary.message = `미리보기: campaigns +${campaignsToAdd.length}, tabs +${tabsToAdd.length}/~${tabsToUpdate.length}, index +${indexToAdd.length}`;
+    logger.info(`[syncTabListToDB] ${summary.message}`);
+    return summary;
+  }
+
+  // ── DB 트랜잭션 실행 ──
+  const client = await pool.connect();
+  try {
+    await client.query('BEGIN');
+
+    // campaigns UPSERT
+    for (const c of campaignsToAdd) {
+      await client.query(
+        `INSERT INTO campaigns (sheet_id, campaign_name, sheet_url)
+         VALUES ($1, $2, $3)
+         ON CONFLICT (sheet_id, campaign_name) DO UPDATE SET sheet_url = $3, updated_at = NOW()`,
+        [c.sheetId, c.campaignName, c.sheetUrl]
+      );
+    }
+
+    // tab_configs INSERT
+    for (const t of tabsToAdd) {
+      await client.query(
+        `INSERT INTO tab_configs (sheet_id, tab_name, sheet_url, campaign_name, tab_gid, updated_at)
+         VALUES ($1, $2, $3, $4, $5, NOW())
+         ON CONFLICT (sheet_id, tab_name) DO UPDATE SET
+           sheet_url = $3, campaign_name = $4, tab_gid = $5, updated_at = NOW()`,
+        [t.sheetId, t.tabName, t.sheetUrl, t.campaignName, t.tabGid]
+      );
+    }
+
+    // tab_configs UPDATE (tab_gid 변경)
+    for (const t of tabsToUpdate) {
+      await client.query(
+        `UPDATE tab_configs SET tab_gid = $1, campaign_name = COALESCE(NULLIF($2, ''), campaign_name), updated_at = NOW()
+         WHERE sheet_id = $3 AND tab_name = $4`,
+        [t.tabGid, t.campaignName, t.sheetId, t.tabName]
+      );
+    }
+
+    // index_master UPSERT (빈 껍데기 — row_count=0, status='active')
+    for (const i of indexToAdd) {
+      await client.query(
+        `INSERT INTO index_master (sheet_id, tab_name, tab_gid, campaign_name, row_count, submitted_count, status, built_at)
+         VALUES ($1, $2, $3, $4, 0, 0, 'active', NOW())
+         ON CONFLICT (sheet_id, tab_name) DO UPDATE SET
+           tab_gid = COALESCE(NULLIF($3, ''), index_master.tab_gid),
+           campaign_name = COALESCE(NULLIF($4, ''), index_master.campaign_name),
+           status = 'active',
+           built_at = NOW()`,
+        [i.sheetId, i.tabName, i.tabGid, i.campaignName]
+      );
+    }
+
+    await client.query('COMMIT');
+    logger.info(`[syncTabListToDB] DB 반영 완료: campaigns +${campaignsToAdd.length}, tabs +${tabsToAdd.length}/~${tabsToUpdate.length}, index +${indexToAdd.length}`);
+  } catch (err) {
+    await client.query('ROLLBACK');
+    logger.error(`[syncTabListToDB] DB 반영 실패: ${err.message}`);
+    throw err;
+  } finally {
+    client.release();
+  }
+
+  summary.elapsed = ((Date.now() - startTime) / 1000).toFixed(1) + 's';
+  summary.message = `완료: campaigns +${campaignsToAdd.length}, tabs +${tabsToAdd.length}/~${tabsToUpdate.length}, index +${indexToAdd.length} (${summary.elapsed})`;
+  return summary;
+}
+
+/**
+ * 탭목록 시트에서 데이터를 읽어 배열로 반환
+ */
+async function _readTabListFromSheet() {
+  if (!MASTER_SHEET_ID) throw new Error('MASTER_SHEET_ID 환경변수 미설정');
+
+  const tabListTabName = await _findTabName(MASTER_SHEET_ID, TAB_LIST_TAB_NAME);
+  const values = await throttledCall(() =>
+    readSheet(MASTER_SHEET_ID, `'${tabListTabName}'!A:Z`)
+  );
+
+  if (!values || values.length < 2) return [];
+
+  const headers = values[0].map(h => String(h).trim().toLowerCase());
+  const urlIdx = headers.indexOf('sheet_url');
+  const campIdx = headers.indexOf('campaign_name');
+  const tabUrlIdx = headers.indexOf('tab_url');
+  const tabNameIdx = headers.indexOf('tab_name');
+
+  if (urlIdx === -1 || tabNameIdx === -1) {
+    throw new Error("탭목록에 'sheet_url' 또는 'tab_name' 컬럼이 없습니다");
+  }
+
+  const rows = [];
+  for (let i = 1; i < values.length; i++) {
+    const row = values[i];
+    if (!row || row.length === 0) continue;
+
+    const sheetUrl = (row[urlIdx] || '').toString().trim();
+    const tabName = (row[tabNameIdx] || '').toString().trim();
+    if (!sheetUrl || !tabName) continue;
+
+    rows.push({
+      sheet_url: sheetUrl,
+      campaign_name: campIdx >= 0 ? (row[campIdx] || '').toString().trim() : '',
+      tab_url: tabUrlIdx >= 0 ? (row[tabUrlIdx] || '').toString().trim() : '',
+      tab_name: tabName,
+    });
+  }
+
+  return rows;
+}
+
+// ═══════════════════════════════════════════════════════════
 // Exports
 // ═══════════════════════════════════════════════════════════
 
@@ -388,6 +609,7 @@ module.exports = {
   runIndexScan,
   applyCachedIndexScan,
   hasIndexScanCache,
+  syncTabListToDB,
   buildTabUrl,
   extractSheetId,
   // 상수

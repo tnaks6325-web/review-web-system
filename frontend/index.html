@@ -405,6 +405,22 @@
               </button>
             </div>
             <div id="indexScanResult" style="display:none;font-size:.71rem;margin-top:4px;max-height:200px;overflow-y:auto;border:1px solid #E5E7EB;border-radius:6px;padding:6px;background:#F9FAFB"></div>
+            <div style="margin-top:6px;border-top:1px dashed #E5E7EB;padding-top:6px">
+              <div style="font-size:.66rem;color:#6B7280;margin-bottom:4px">
+                <i class="fas fa-database" style="color:#7C3AED"></i> <b>DB 동기화</b> — 스캔 결과를 DB에 직접 반영 (대시보드에 표시)
+              </div>
+              <div style="display:flex;gap:4px">
+                <button id="btnIndexSyncDry" onclick="indexScanSync(true)"
+                  style="flex:1;padding:6px;background:#F5F3FF;color:#6D28D9;border:1px solid #DDD6FE;border-radius:6px;font-size:.7rem;font-weight:600;cursor:pointer;display:flex;align-items:center;justify-content:center;gap:4px">
+                  <i class="fas fa-search"></i> DB 미리보기
+                </button>
+                <button id="btnIndexSyncRun" onclick="indexScanSync(false)"
+                  style="flex:1;padding:6px;background:#7C3AED;color:#fff;border:1px solid #7C3AED;border-radius:6px;font-size:.7rem;font-weight:600;cursor:pointer;display:flex;align-items:center;justify-content:center;gap:4px">
+                  <i class="fas fa-database"></i> DB 반영
+                </button>
+              </div>
+              <div id="indexSyncResult" style="display:none;font-size:.71rem;margin-top:4px;max-height:150px;overflow-y:auto;border:1px solid #E5E7EB;border-radius:6px;padding:6px;background:#F9FAFB"></div>
+            </div>
           </div>
 
           <div style="border-top:1px solid #F3F4F6;margin-bottom:8px"></div>

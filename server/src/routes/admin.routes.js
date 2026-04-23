@@ -174,7 +174,7 @@ router.get('/dashboard', authMiddleware, async (req, res, next) => {
         WHERE ri.sheet_id = im.sheet_id AND ri.tab_name = im.tab_name
           AND (ri.start_date IS NOT NULL OR ri.end_date IS NOT NULL)
       ) sd ON true
-      WHERE im.status = 'active' AND im.row_count > 0
+      WHERE im.status = 'active'
       ORDER BY im.built_at DESC NULLS LAST
     `);
 

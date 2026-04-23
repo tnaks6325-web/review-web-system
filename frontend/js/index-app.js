@@ -12024,6 +12024,81 @@ function _showIndexScanPreview(res, resultEl) {
   resultEl.innerHTML = html;
 }
 
+// ═══════════════════════════════════════════════════════════
+// ★ 인덱스 스캔 → DB 동기화 (탭목록 시트 → DB 직접 반영)
+// HTML: btnIndexSyncDry / btnIndexSyncRun → indexScanSync(dryRun)
+// 백엔드: POST /api/tab/index-scan-sync
+// ═══════════════════════════════════════════════════════════
+async function indexScanSync(dryRun) {
+  const btnDry = document.getElementById("btnIndexSyncDry");
+  const btnRun = document.getElementById("btnIndexSyncRun");
+  const resultEl = document.getElementById("indexSyncResult");
+  const activeBtn = dryRun ? btnDry : btnRun;
+  const actionLabel = dryRun ? "미리보기" : "DB 반영";
+
+  if (!dryRun && !confirm(
+    "탭목록 시트 데이터를 DB에 직접 반영합니다.\n\n" +
+    "• campaigns, tab_configs, index_master 테이블에 UPSERT\n" +
+    "• 대시보드에 탭 목록이 즉시 표시됩니다\n" +
+    "• 기존 설정값(담당자, 택배 등)은 보존됩니다\n\n" +
+    "계속하시겠습니까?"
+  )) return;
+
+  const _saveBtnHtml = activeBtn ? activeBtn.innerHTML : "";
+  if (activeBtn) { activeBtn.disabled = true; activeBtn.innerHTML = `<i class="fas fa-spinner fa-spin"></i> ${actionLabel}중...`; }
+  if (btnDry && btnDry !== activeBtn) btnDry.disabled = true;
+  if (btnRun && btnRun !== activeBtn) btnRun.disabled = true;
+
+  showToast(`🔄 DB ${actionLabel} 진행중...`, "info");
+
+  try {
+    const res = await gasPost({ action: "indexScanSync", dryRun: !!dryRun, fromCache: false }, 60000);
+    if (res.error) { showToast(res.error, "error"); return; }
+
+    if (dryRun) {
+      // ── 미리보기 결과 ──
+      const c = res.campaigns || {};
+      const t = res.tabs || {};
+      const ix = res.index || {};
+      const parts = [];
+      parts.push(`campaigns: 기존 ${c.existing || 0} / +${c.toAdd || 0}`);
+      parts.push(`tabs: 기존 ${t.existing || 0} / +${t.toAdd || 0} / ~${t.toUpdate || 0}`);
+      parts.push(`index: 기존 ${ix.existing || 0} / +${ix.toAdd || 0}`);
+      showToast(`[미리보기] ${parts.join(", ")}`, "info");
+
+      if (resultEl) {
+        resultEl.style.display = "block";
+        resultEl.innerHTML = `<div style="font-size:.7rem;color:#374151">
+          <div>📊 총 ${res.totalRows || 0}행 분석 (${res.elapsed || '?'})</div>
+          <div style="margin-top:3px">• campaigns: 기존 ${c.existing || 0} / <b style="color:#15803D">+${c.toAdd || 0}</b></div>
+          <div>• tab_configs: 기존 ${t.existing || 0} / <b style="color:#15803D">+${t.toAdd || 0}</b> / <b style="color:#D97706">~${t.toUpdate || 0}</b></div>
+          <div>• index_master: 기존 ${ix.existing || 0} / <b style="color:#15803D">+${ix.toAdd || 0}</b></div>
+          <div style="margin-top:4px;color:#92400E;font-size:.66rem">⚠ 미리보기 — "DB 반영"을 클릭해야 실제로 저장됩니다.</div>
+        </div>`;
+      }
+    } else {
+      // ── 실행 결과 ──
+      showToast(`✅ DB 동기화 완료: ${res.message || ''}`, "success");
+
+      if (resultEl) {
+        resultEl.style.display = "block";
+        resultEl.innerHTML = `<div style="font-size:.7rem;color:#065F46;background:#D1FAE5;padding:6px;border-radius:4px">
+          ✅ ${res.message || 'DB 반영 완료'}
+        </div>`;
+      }
+
+      // 대시보드 새로고침
+      if (typeof loadAdminDashboard === "function") loadAdminDashboard();
+    }
+  } catch (err) {
+    showToast("DB 동기화 오류: " + err.message, "error");
+  } finally {
+    if (activeBtn) { activeBtn.disabled = false; activeBtn.innerHTML = _saveBtnHtml; }
+    if (btnDry && btnDry !== activeBtn) btnDry.disabled = false;
+    if (btnRun && btnRun !== activeBtn) btnRun.disabled = false;
+  }
+}
+
 async function scanMasterSheet(dryRun) {
   const btnDry = document.getElementById("btnScanMasterDry");
   const btnRun = document.getElementById("btnScanMasterRun");

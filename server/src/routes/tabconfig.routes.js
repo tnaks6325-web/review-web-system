@@ -4,7 +4,7 @@ const pool = require('../db/pool');
 const { authMiddleware } = require('../middleware/auth.middleware');
 const { getSpreadsheetMeta } = require('../services/sheets.service');
 const { syncMasterSheetToDB, scanAndPopulateMaster, applyCachedScanAndSync, hasScanCache, syncSettingsOnly } = require('../services/masterSheet.service');
-const { runIndexScan, applyCachedIndexScan, hasIndexScanCache } = require('../services/indexScan.service');
+const { runIndexScan, applyCachedIndexScan, hasIndexScanCache, syncTabListToDB } = require('../services/indexScan.service');
 const { logger } = require('../utils/logger');
 const { throttledCall } = require('../utils/sheetsThrottle');
 
@@ -703,6 +703,24 @@ router.post('/index-scan', authMiddleware, async (req, res, next) => {
   } catch (err) {
     logger.error(`[index-scan] 오류: ${err.message}`);
     res.status(500).json({ error: err.message, stack: process.env.NODE_ENV === 'development' ? err.stack : undefined });
+  }
+});
+
+// ══════════════════════════════════════════════════════════════
+// POST /api/tab/index-scan-sync — ★ 탭목록 → DB 직접 동기화
+// 인덱스 스캔 결과(탭목록 시트 or 캐시)를 DB에 반영
+// campaigns, tab_configs, index_master에 UPSERT
+// ══════════════════════════════════════════════════════════════
+router.post('/index-scan-sync', authMiddleware, async (req, res, next) => {
+  try {
+    const { dryRun = true, fromCache = false } = req.body;
+    logger.info(`[index-scan-sync] ${dryRun ? '미리보기' : '실행'} 요청 (source: ${fromCache ? '캐시' : '탭목록 시트'}) — by ${req.admin?.name || 'unknown'}`);
+
+    const result = await syncTabListToDB({ dryRun: !!dryRun, fromCache: !!fromCache });
+    res.json({ ok: true, ...result });
+  } catch (err) {
+    logger.error(`[index-scan-sync] 오류: ${err.message}`);
+    res.status(500).json({ error: err.message });
   }
 });
 

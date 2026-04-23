@@ -68,6 +68,7 @@ const _ACTION_MAP = {
   'fullMasterSync':   { method: 'POST', path: '/api/tab/full-sync' },
   'syncSettingsOnly': { method: 'POST', path: '/api/tab/sync-settings' },
   'indexScan':        { method: 'POST', path: '/api/tab/index-scan' },
+  'indexScanSync':    { method: 'POST', path: '/api/tab/index-scan-sync' },
   'resetAllData':     { method: 'POST', path: '/api/tab/reset-all' },
   'cleanClosedTabs':  { method: 'POST', path: '/api/tab/clean-closed' },
   'getTabDashboard':  { method: 'GET',  path: '/api/tab/dashboard' },
