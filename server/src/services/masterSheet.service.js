@@ -20,7 +20,7 @@ const MASTER_TAB_NAME = process.env.MASTER_TAB_NAME || 'tab_configs';
 // ── 마스터 시트 헤더 (고정 순서) ──
 const MASTER_HEADERS = [
   'sheet_url', 'campaign_name', 'tab_name', 'manager', 'time_range',
-  'taekha', 'review_type', 'payment_type', 'display_name', 'updated_at',
+  'taekhap', 'review_type', 'payment_type', 'display_name', 'updated_at',
   'force_done', 'folder_url', 'is_bulk', 'capture_folder_url', 'is_closed',
   'delivery_type', 'round', 'nc_mode', 'deposit_name', 'transfer_bank', 'income_type',
 ];
@@ -32,7 +32,7 @@ const COLUMN_MAP = {
   'tab_name':            'tab_name',
   'manager':             'manager',
   'time_range':          'time_range',
-  'taekha':              'taekhap',
+  'taekhap':             'taekhap',
   'review_type':         'review_type',
   'payment_type':        'payment_type',
   'display_name':        'display_name',
@@ -176,9 +176,16 @@ async function scanAndPopulateMaster(dryRun = true) {
       const existingRows = existingRowsByUrl.get(sheetUrl) || [];
       // tab_name으로 기존 설정값 빠르게 찾기
       const existingByTabName = new Map();
+      // tab_name이 비어있는 행은 순서대로 매칭할 수 있도록 별도 배열
+      const existingNoTabName = [];
       existingRows.forEach(r => {
-        if (r.tab_name) existingByTabName.set(r.tab_name, r);
+        if (r.tab_name && r.tab_name.trim()) {
+          existingByTabName.set(r.tab_name.trim(), r);
+        } else {
+          existingNoTabName.push(r);
+        }
       });
+      let noTabIdx = 0; // tab_name이 비어있는 행의 순서 인덱스
 
       for (const sheet of meta) {
         const tabName = sheet.properties.title;
@@ -187,10 +194,15 @@ async function scanAndPopulateMaster(dryRun = true) {
         // 시스템 탭 제외
         if (isSystemTab(tabName)) continue;
 
-        // 기존 마스터 시트에서 같은 tab_name의 설정값이 있으면 보존
-        const existingConfig = existingByTabName.get(tabName);
-        // 매칭된 기존 행은 재사용 방지
-        if (existingConfig) existingByTabName.delete(tabName);
+        // 매칭 우선순위: 1) tab_name 정확 매칭 → 2) tab_name 비어있는 행 순서 매칭
+        let existingConfig = existingByTabName.get(tabName);
+        if (existingConfig) {
+          existingByTabName.delete(tabName);
+        } else if (noTabIdx < existingNoTabName.length) {
+          // tab_name이 비어있는 기존 행을 순서대로 매칭 (설정값 보존)
+          existingConfig = existingNoTabName[noTabIdx];
+          noTabIdx++;
+        }
 
         scanResults.push({
           sheet_url: sheetUrl,
@@ -200,7 +212,7 @@ async function scanAndPopulateMaster(dryRun = true) {
           // 기존 마스터 시트 설정값 보존 (있으면 사용, 없으면 빈값)
           manager:            existingConfig?.manager || '',
           time_range:         existingConfig?.time_range || '',
-          taekha:             existingConfig?.taekha || '',
+          taekhap:            existingConfig?.taekhap || '',
           review_type:        existingConfig?.review_type || existingConfig?.preview_type || '',
           payment_type:       existingConfig?.payment_type || '',
           display_name:       existingConfig?.display_name || '',
