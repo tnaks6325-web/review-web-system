@@ -648,6 +648,10 @@ router.post('/reset-all', authMiddleware, async (req, res, next) => {
       const r2 = await client.query('DELETE FROM index_master');
       const r3 = await client.query('DELETE FROM tab_configs');
       const r4 = await client.query('DELETE FROM campaigns');
+      const r5 = await client.query('DELETE FROM review_index_archive');
+      const r6 = await client.query('DELETE FROM index_master_archive');
+      const r7 = await client.query('DELETE FROM archive_history');
+      const r8 = await client.query('DELETE FROM unrecognized_tabs');
 
       await client.query('COMMIT');
 
@@ -658,10 +662,14 @@ router.post('/reset-all', authMiddleware, async (req, res, next) => {
           index_master: r2.rowCount,
           tab_configs: r3.rowCount,
           campaigns: r4.rowCount,
+          review_index_archive: r5.rowCount,
+          index_master_archive: r6.rowCount,
+          archive_history: r7.rowCount,
+          unrecognized_tabs: r8.rowCount,
         },
       };
 
-      logger.warn(`[reset-all] ✅ 초기화 완료: review_index=${r1.rowCount}, index_master=${r2.rowCount}, tab_configs=${r3.rowCount}, campaigns=${r4.rowCount}`);
+      logger.warn(`[reset-all] ✅ 초기화 완료: review_index=${r1.rowCount}, index_master=${r2.rowCount}, tab_configs=${r3.rowCount}, campaigns=${r4.rowCount}, archive(${r5.rowCount}+${r6.rowCount}+${r7.rowCount}), unrecognized=${r8.rowCount}`);
       res.json(result);
     } catch (err) {
       await client.query('ROLLBACK');

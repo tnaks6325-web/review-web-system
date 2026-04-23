@@ -11948,7 +11948,9 @@ async function resetAllData() {
     "• campaigns (광고주 시트 목록)\n" +
     "• tab_configs (탭 설정)\n" +
     "• review_index (리뷰어 인덱스)\n" +
-    "• index_master (인덱스 마스터)\n\n" +
+    "• index_master (인덱스 마스터)\n" +
+    "• 아카이브 (archive 3개 테이블)\n" +
+    "• 인식 실패 탭 진단 데이터\n\n" +
     "계속하려면 'RESET' 을 입력하세요:"
   );
   if (step1 !== "RESET") { showToast("초기화 취소됨", "info"); return; }
@@ -11966,8 +11968,10 @@ async function resetAllData() {
 
     const d = res.deleted || {};
     showToast(
-      `✅ 초기화 완료: campaigns ${d.campaigns || 0}건, tab_configs ${d.tab_configs || 0}건, ` +
-      `review_index ${d.review_index || 0}건, index_master ${d.index_master || 0}건 삭제`,
+      `✅ 초기화 완료: campaigns ${d.campaigns || 0}, tab_configs ${d.tab_configs || 0}, ` +
+      `review_index ${d.review_index || 0}, index_master ${d.index_master || 0}, ` +
+      `아카이브 ${(d.index_master_archive || 0) + (d.review_index_archive || 0) + (d.archive_history || 0)}, ` +
+      `인식실패탭 ${d.unrecognized_tabs || 0}건 삭제`,
       "success"
     );
 
