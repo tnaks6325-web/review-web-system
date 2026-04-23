@@ -12229,7 +12229,7 @@ async function syncTabNames(dryRun) {
   if (btnRun && btnRun !== activeBtn) btnRun.disabled = true;
   if (btnSettings && btnSettings !== activeBtn) btnSettings.disabled = true;
 
-  showToast(`🔄 탭명 ${actionLabel} 진행중... (29개 시트 확인, 약 30~90초 소요)`, "info");
+  showToast(`🔄 탭명 ${actionLabel} 진행중... (전체 시트 확인, 약 30~90초 소요)`, "info");
 
   try {
     const res = await gasPost({ action: "syncTabNames", dryRun: !!dryRun }, 180000);
@@ -12244,7 +12244,8 @@ async function syncTabNames(dryRun) {
     if (parts.length === 0) parts.push("변경 없음 — 모든 탭명이 일치합니다");
 
     const prefix = dryRun ? "[미리보기] " : "";
-    showToast(`${prefix}${parts.join(", ")} (${res.elapsed})`, res.errors > 0 ? "warning" : "success");
+    const sheetInfo = res.totalSheets ? `${res.totalSheets}개 시트, ` : "";
+    showToast(`${prefix}${sheetInfo}${parts.join(", ")} (${res.elapsed})`, res.errors > 0 ? "warning" : "success");
 
     // 변경 상세가 있으면 모달로 표시
     if (res.results && res.results.length > 0) {
