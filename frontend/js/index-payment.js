@@ -1584,8 +1584,10 @@ async function triggerDbRebuild() {
               return kv[0] + "=" + kv[1] + "행 삭제";
             }).join(", ");
             detail += "① 초기화: " + delInfo + "\n";
+          } else if (s.action === "INDEX_SCAN") {
+            detail += "③a 시트DB 스캔: " + (s.sheets || 0) + "시트, " + (s.tabs || 0) + "탭\n";
           } else if (s.action === "SYNC_TAB_LIST") {
-            detail += "③ 탭목록 재등록: " + (s.message || "완료") + "\n";
+            detail += "③b DB 등록: " + (s.message || "완료") + "\n";
           }
         });
       }

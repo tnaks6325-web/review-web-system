@@ -561,12 +561,18 @@ router.post('/db-rebuild', authMiddleware, masterOnlyMiddleware, async (req, res
     steps.push({ step: 2, action: 'CACHE_RESET', ...cacheReset });
     logger.info(`[db-rebuild] Step2 캐시 리셋: ${JSON.stringify(cacheReset)}`);
 
-    // ── Step 3: 탭목록 시트에서 campaigns + tab_configs + index_master 재등록 ──
-    broadcast('db_rebuild_progress', { step: 3, message: '탭목록 시트에서 재등록 중...' });
-    const { syncTabListToDB } = require('../services/indexScan.service');
-    const syncResult = await syncTabListToDB({ dryRun: false, fromCache: false });
-    steps.push({ step: 3, action: 'SYNC_TAB_LIST', ...syncResult });
-    logger.info(`[db-rebuild] Step3 탭목록 동기화: ${syncResult.message}`);
+    // ── Step 3a: 시트DB에서 전체 탭 스캔 (시트DB → 각 시트 탭 파싱 → 탭목록 시트 기록) ──
+    broadcast('db_rebuild_progress', { step: '3a', message: '시트DB에서 전체 탭 스캔 중... (시간 소요)' });
+    const { runIndexScan, syncTabListToDB } = require('../services/indexScan.service');
+    const scanResult = await runIndexScan(false);  // dryRun=false: 탭목록 시트에 기록 + 캐시 저장
+    steps.push({ step: '3a', action: 'INDEX_SCAN', sheets: scanResult.totalSheets, tabs: scanResult.totalTabs, elapsed: scanResult.elapsed });
+    logger.info(`[db-rebuild] Step3a 인덱스 스캔 완료: ${scanResult.totalSheets}시트, ${scanResult.totalTabs}탭 (${scanResult.elapsed})`);
+
+    // ── Step 3b: 스캔 캐시를 DB에 반영 (campaigns + tab_configs + index_master 재등록) ──
+    broadcast('db_rebuild_progress', { step: '3b', message: '스캔 결과를 DB에 등록 중...' });
+    const syncResult = await syncTabListToDB({ dryRun: false, fromCache: true });
+    steps.push({ step: '3b', action: 'SYNC_TAB_LIST', ...syncResult });
+    logger.info(`[db-rebuild] Step3b DB 동기화: ${syncResult.message}`);
 
     // ── Step 4: 스마트빌드 1회 실행 (백그라운드) ──
     broadcast('db_rebuild_progress', { step: 4, message: '스마트빌드 실행 시작... (백그라운드)' });
