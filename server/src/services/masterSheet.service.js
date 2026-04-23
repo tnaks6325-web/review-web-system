@@ -23,10 +23,11 @@ const SCAN_CACHE_TTL = 5 * 60 * 1000; // 5분
 
 // ── 마스터 시트 헤더 (고정 순서) ──
 const MASTER_HEADERS = [
-  'sheet_url', 'campaign_name', 'tab_name', 'tab_gid', 'manager', 'time_range',
+  'sheet_url', 'campaign_name', 'tab_name', 'manager', 'time_range',
   'taekhap', 'review_type', 'payment_type', 'display_name', 'updated_at',
   'folder_url', 'is_bulk', 'capture_folder_url', 'is_closed',
   'delivery_type', 'round', 'nc_mode', 'deposit_name', 'transfer_bank', 'income_type',
+  'tab_gid',  // ★ v11.2: 기존 열 순서 유지를 위해 맨 끝에 추가
 ];
 
 // ── 시트 컬럼 → DB 컬럼 매핑 ──
@@ -304,7 +305,7 @@ async function _writeMasterSheet(rows) {
     }));
   }
 
-  const colLetter = String.fromCharCode(65 + MASTER_HEADERS.length - 1); // U
+  const colLetter = String.fromCharCode(65 + MASTER_HEADERS.length - 1); // U (21 cols)
   const range = `'${tabName}'!A1:${colLetter}${values.length}`;
   logger.info(`[masterSheet] 마스터 시트 쓰기: ${range} (${values.length - 1}행)`);
 
@@ -633,7 +634,7 @@ async function syncSettingsOnly(dryRun = true) {
 
   // 1. 마스터시트 읽기 (Google API 1~2회만 소모)
   const tabName = await _detectMasterTabName();
-  const values = await throttledCall(() => readSheet(MASTER_SHEET_ID, `'${tabName}'!A:T`));
+  const values = await throttledCall(() => readSheet(MASTER_SHEET_ID, `'${tabName}'!A:Z`));
 
   if (!values || values.length < 2) {
     throw new Error('마스터 시트에 데이터가 없습니다 (헤더 + 최소 1행 필요).');
