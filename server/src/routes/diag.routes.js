@@ -326,6 +326,8 @@ router.get('/campaign-stats', async (req, res, next) => {
     let sql = `
       SELECT
         im.sheet_id AS "sheetId", im.tab_name AS "tabName",
+        im.tab_gid AS "imTabGid", tc.tab_gid AS "tcTabGid",
+        COALESCE(im.tab_gid, tc.tab_gid) AS "tabGid",
         im.campaign_name AS "campaignName",
         im.row_count AS "totalCount", im.submitted_count AS "submittedCount",
         im.status, im.built_at AS "builtAt",
