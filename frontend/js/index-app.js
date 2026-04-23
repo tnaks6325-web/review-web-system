@@ -11940,22 +11940,25 @@ async function syncTabFromSheet() {
   showToast("베이스시트 동기화 기능은 제거되었습니다. DB(tab_configs)가 원본이므로 웹 UI에서 직접 관리하세요.", "info");
 }
 
-// ── DB 전체 초기화 ──
+// ── DB 선택적 초기화 ──
 async function resetAllData() {
+  // 체크박스에서 선택된 항목 수집
+  const targets = [];
+  const labels = [];
+  if (document.getElementById("resetDashboard")?.checked) { targets.push("dashboard"); labels.push("대시보드"); }
+  if (document.getElementById("resetArchive")?.checked) { targets.push("archive"); labels.push("아카이브"); }
+  if (document.getElementById("resetUnrecognized")?.checked) { targets.push("unrecognized"); labels.push("인식실패탭"); }
+
+  if (targets.length === 0) { showToast("초기화할 항목을 1개 이상 선택하세요.", "warning"); return; }
+
   const step1 = prompt(
-    "⚠ 경고: 대시보드·아카이브의 모든 데이터가 삭제됩니다.\n\n" +
-    "삭제 대상:\n" +
-    "• campaigns (광고주 시트 목록)\n" +
-    "• tab_configs (탭 설정)\n" +
-    "• review_index (리뷰어 인덱스)\n" +
-    "• index_master (인덱스 마스터)\n" +
-    "• 아카이브 (archive 3개 테이블)\n" +
-    "• 인식 실패 탭 진단 데이터\n\n" +
-    "계속하려면 'RESET' 을 입력하세요:"
+    `⚠ 경고: 선택된 항목의 데이터가 삭제됩니다.\n\n` +
+    `삭제 대상: ${labels.join(", ")}\n\n` +
+    `계속하려면 'RESET' 을 입력하세요:`
   );
   if (step1 !== "RESET") { showToast("초기화 취소됨", "info"); return; }
 
-  const step2 = confirm("정말로 모든 데이터를 삭제하시겠습니까?\n이 작업은 되돌릴 수 없습니다.");
+  const step2 = confirm(`[${labels.join(", ")}] 데이터를 삭제합니다.\n이 작업은 되돌릴 수 없습니다.`);
   if (!step2) { showToast("초기화 취소됨", "info"); return; }
 
   const btn = document.getElementById("btnResetAll");
@@ -11963,17 +11966,12 @@ async function resetAllData() {
   if (btn) { btn.disabled = true; btn.innerHTML = '<i class="fas fa-spinner fa-spin"></i> 초기화 중...'; }
 
   try {
-    const res = await gasPost({ action: "resetAllData", confirm: "RESET_ALL_DATA" }, 60000);
+    const res = await gasPost({ action: "resetAllData", confirm: "RESET_ALL_DATA", targets }, 60000);
     if (res.error) { showToast("초기화 오류: " + res.error, "error"); return; }
 
     const d = res.deleted || {};
-    showToast(
-      `✅ 초기화 완료: campaigns ${d.campaigns || 0}, tab_configs ${d.tab_configs || 0}, ` +
-      `review_index ${d.review_index || 0}, index_master ${d.index_master || 0}, ` +
-      `아카이브 ${(d.index_master_archive || 0) + (d.review_index_archive || 0) + (d.archive_history || 0)}, ` +
-      `인식실패탭 ${d.unrecognized_tabs || 0}건 삭제`,
-      "success"
-    );
+    const parts = Object.entries(d).map(([k, v]) => `${k}: ${v}`).join(", ");
+    showToast(`✅ 초기화 완료 [${labels.join("+")}]: ${parts}`, "success");
 
     // 대시보드 새로고침
     if (typeof loadTabDashboard === "function") loadTabDashboard();

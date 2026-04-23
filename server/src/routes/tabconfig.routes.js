@@ -627,50 +627,57 @@ router.post('/sync-master', authMiddleware, async (req, res, next) => {
 });
 
 // ══════════════════════════════════════════════════════════════
-// POST /api/tab/reset-all — 대시보드·아카이브 전체 초기화
-// campaigns, tab_configs, review_index, index_master 테이블 TRUNCATE
+// POST /api/tab/reset-all — 선택적 DB 초기화
+// targets 배열로 초기화할 그룹을 선택
 // ⚠ 사용자/관리자/설정/메모 등은 유지
 // ══════════════════════════════════════════════════════════════
 router.post('/reset-all', authMiddleware, async (req, res, next) => {
   try {
-    const { confirm } = req.body;
+    const { confirm, targets } = req.body;
     if (confirm !== 'RESET_ALL_DATA') {
       return res.status(400).json({ error: '확인 코드가 올바르지 않습니다. confirm: "RESET_ALL_DATA" 필요' });
     }
 
-    logger.warn(`[reset-all] ⚠ 전체 초기화 요청 — by ${req.admin?.name || 'unknown'}`);
+    // 허용 그룹 정의
+    const TARGET_GROUPS = {
+      dashboard:    ['review_index', 'index_master', 'tab_configs', 'campaigns'],
+      archive:      ['review_index_archive', 'index_master_archive', 'archive_history'],
+      unrecognized: ['unrecognized_tabs'],
+    };
+
+    // targets가 없거나 빈 배열이면 전체 초기화
+    const selectedTargets = (Array.isArray(targets) && targets.length > 0)
+      ? targets
+      : Object.keys(TARGET_GROUPS);
+
+    // 유효하지 않은 target 필터링
+    const validTargets = selectedTargets.filter(t => TARGET_GROUPS[t]);
+    if (validTargets.length === 0) {
+      return res.status(400).json({ error: '유효한 초기화 대상이 없습니다. targets: ["dashboard", "archive", "unrecognized"]' });
+    }
+
+    // 삭제할 테이블 목록 결합
+    const tablesToDelete = [];
+    validTargets.forEach(t => tablesToDelete.push(...TARGET_GROUPS[t]));
+
+    logger.warn(`[reset-all] ⚠ 선택적 초기화 요청 — targets: [${validTargets.join(', ')}], tables: [${tablesToDelete.join(', ')}] — by ${req.admin?.name || 'unknown'}`);
 
     const client = await pool.connect();
     try {
       await client.query('BEGIN');
 
-      const r1 = await client.query('DELETE FROM review_index');
-      const r2 = await client.query('DELETE FROM index_master');
-      const r3 = await client.query('DELETE FROM tab_configs');
-      const r4 = await client.query('DELETE FROM campaigns');
-      const r5 = await client.query('DELETE FROM review_index_archive');
-      const r6 = await client.query('DELETE FROM index_master_archive');
-      const r7 = await client.query('DELETE FROM archive_history');
-      const r8 = await client.query('DELETE FROM unrecognized_tabs');
+      const deleted = {};
+      for (const table of tablesToDelete) {
+        const r = await client.query(`DELETE FROM ${table}`);
+        deleted[table] = r.rowCount;
+      }
 
       await client.query('COMMIT');
 
-      const result = {
-        ok: true,
-        deleted: {
-          review_index: r1.rowCount,
-          index_master: r2.rowCount,
-          tab_configs: r3.rowCount,
-          campaigns: r4.rowCount,
-          review_index_archive: r5.rowCount,
-          index_master_archive: r6.rowCount,
-          archive_history: r7.rowCount,
-          unrecognized_tabs: r8.rowCount,
-        },
-      };
+      const logParts = Object.entries(deleted).map(([k, v]) => `${k}=${v}`).join(', ');
+      logger.warn(`[reset-all] ✅ 초기화 완료: ${logParts}`);
 
-      logger.warn(`[reset-all] ✅ 초기화 완료: review_index=${r1.rowCount}, index_master=${r2.rowCount}, tab_configs=${r3.rowCount}, campaigns=${r4.rowCount}, archive(${r5.rowCount}+${r6.rowCount}+${r7.rowCount}), unrecognized=${r8.rowCount}`);
-      res.json(result);
+      res.json({ ok: true, targets: validTargets, deleted });
     } catch (err) {
       await client.query('ROLLBACK');
       throw err;
