@@ -68,16 +68,33 @@ async function _waitAndRecord() {
 // ═══════════════════════════════════════════════════════════
 
 /**
- * 단일 Google API 호출을 throttle로 감싸기
+ * 단일 Google API 호출을 throttle로 감싸기 (retry with backoff 포함)
  * @param {Function} fn — async 함수 (Google API 호출)
+ * @param {number} maxRetries — 최대 재시도 횟수 (기본 2)
  * @returns {Promise<any>} — fn의 반환값
  * 
  * 사용법:
  *   const meta = await throttledCall(() => getSpreadsheetMeta(sheetId));
  */
-async function throttledCall(fn) {
-  await _waitAndRecord();
-  return fn();
+async function throttledCall(fn, maxRetries = 2) {
+  for (let attempt = 0; attempt <= maxRetries; attempt++) {
+    await _waitAndRecord();
+    try {
+      return await fn();
+    } catch (err) {
+      const status = err?.code || err?.response?.status || err?.status;
+      const isRetryable = [429, 500, 503, 'ECONNRESET', 'ETIMEDOUT', 'ENOTFOUND'].includes(status)
+        || (typeof err.message === 'string' && /rate limit|quota|timeout|ECONNRESET/i.test(err.message));
+
+      if (isRetryable && attempt < maxRetries) {
+        const delay = Math.min(2000 * Math.pow(2, attempt), 10000); // 2s, 4s, max 10s
+        logger.warn(`[throttle] API 호출 실패 (attempt ${attempt + 1}/${maxRetries + 1}), ${delay}ms 후 재시도: ${err.message}`);
+        await new Promise(r => setTimeout(r, delay));
+        continue;
+      }
+      throw err;
+    }
+  }
 }
 
 /**
