@@ -309,8 +309,9 @@ function hasIndexScanCache() {
 
 /**
  * 탭목록 탭에 스캔 결과를 기록
- * - 기존 헤더 행을 유지하되, 첫 4컬럼(sheet_url, campaign_name, tab_url, tab_name)은 덮어씀
- * - 기존 탭목록에 있는 추가 컬럼(manager, time_range 등) 데이터를 tab_name 기준으로 보존
+ * ★ v11.8.0: 2탭 통합으로 항상 4컬럼(sheet_url, campaign_name, tab_url, tab_name)만 기록
+ * - 설정 컬럼(manager, folder_url 등)은 DB 원본이므로 시트에 기록하지 않음
+ * - 기존 탭목록에 추가 컬럼이 있더라도 4컬럼으로 덮어씀 (dead data 정리)
  */
 async function _writeTabList(scanResults) {
   if (!MASTER_SHEET_ID) throw new Error('MASTER_SHEET_ID 환경변수 미설정');
@@ -318,80 +319,38 @@ async function _writeTabList(scanResults) {
   // 탭목록 탭 존재 확인
   const tabListTabName = await _findTabName(MASTER_SHEET_ID, TAB_LIST_TAB_NAME);
 
-  // 현재 탭목록의 기존 데이터 읽기 (보존할 컬럼 확인용)
-  const existingValues = await throttledCall(() =>
-    readSheet(MASTER_SHEET_ID, `'${tabListTabName}'!A:Z`)
-  );
-
-  let existingHeaders = [];
-  const existingRowMap = new Map(); // key: sheet_url||tab_name → row data
-
-  if (existingValues && existingValues.length >= 1) {
-    existingHeaders = existingValues[0].map(h => String(h).trim().toLowerCase());
-    
-    const eUrlIdx = existingHeaders.indexOf('sheet_url');
-    const eTabIdx = existingHeaders.indexOf('tab_name');
-
-    if (eUrlIdx >= 0 && eTabIdx >= 0) {
-      for (let i = 1; i < existingValues.length; i++) {
-        const row = existingValues[i];
-        if (!row || row.length === 0) continue;
-        
-        const url = (row[eUrlIdx] || '').toString().trim();
-        const tab = (row[eTabIdx] || '').toString().trim();
-        if (!url || !tab) continue;
-
-        const key = `${extractSheetId(url)}||${tab}`;
-        const obj = {};
-        existingHeaders.forEach((h, idx) => {
-          obj[h] = idx < row.length ? (row[idx] || '') : '';
-        });
-        existingRowMap.set(key, obj);
-      }
-    }
-  }
-
-  // 출력 헤더 결정: 기존 헤더가 있으면 그대로 유지, 없으면 4컬럼만
-  const outputHeaders = existingHeaders.length >= 4 ? existingHeaders : INDEX_HEADERS.slice();
+  // ★ 항상 4컬럼만 사용 (설정 컬럼은 DB 원본이므로 시트에 불필요)
+  const outputHeaders = INDEX_HEADERS.slice(); // ['sheet_url', 'campaign_name', 'tab_url', 'tab_name']
 
   // 출력 데이터 구성
-  const outputValues = [outputHeaders.map(h => h)]; // 헤더 행
+  const outputValues = [outputHeaders]; // 헤더 행
 
   for (const result of scanResults) {
     // 메타 실패 항목은 탭목록에 쓰지 않음 (campaign만 등록용)
     if (result._metaFailed || !result.tab_name) continue;
 
-    const key = `${extractSheetId(result.sheet_url)}||${result.tab_name}`;
-    const existing = existingRowMap.get(key) || {};
-
-    const row = outputHeaders.map(header => {
-      // 핵심 4컬럼은 새 스캔 결과로 덮어씀
-      if (header === 'sheet_url') return result.sheet_url;
-      if (header === 'campaign_name') return result.campaign_name;
-      if (header === 'tab_url') return result.tab_url;
-      if (header === 'tab_name') return result.tab_name;
-      // updated_at은 현재 시간
-      if (header === 'updated_at') return new Date().toISOString().replace('T', ' ').substring(0, 19);
-      // 나머지 컬럼은 기존 값 보존
-      return existing[header] || '';
-    });
-
-    outputValues.push(row);
+    outputValues.push([
+      result.sheet_url,
+      result.campaign_name,
+      result.tab_url,
+      result.tab_name,
+    ]);
   }
 
-  // 쓰기 범위 계산
-  const colLetter = String.fromCharCode(65 + outputHeaders.length - 1);
+  // 쓰기 범위 계산 (A~D = 4컬럼)
+  const colLetter = 'D';
   const range = `'${tabListTabName}'!A1:${colLetter}${outputValues.length}`;
   
   logger.info(`[indexScan] 탭목록 쓰기: ${range} (${outputValues.length - 1}행, ${outputHeaders.length}열)`);
   await throttledCall(() => writeSheet(MASTER_SHEET_ID, range, outputValues));
 
   // 기존 데이터가 더 많았을 경우 나머지 행 비우기
+  // ★ 기존에 추가 컬럼(E~Z)이 있었을 수 있으므로 Z열까지 넓게 비움
   const clearStart = outputValues.length + 1;
   const clearEnd = Math.max(clearStart, 500);
   const emptyRows = [];
   for (let i = clearStart; i <= clearEnd; i++) {
-    emptyRows.push(outputHeaders.map(() => ''));
+    emptyRows.push(['', '', '', '']);
   }
   if (emptyRows.length > 0) {
     try {
@@ -405,7 +364,23 @@ async function _writeTabList(scanResults) {
     }
   }
 
-  logger.info(`[indexScan] 탭목록 쓰기 완료: ${outputValues.length - 1}행`);
+  // ★ 기존 추가 컬럼(E열 이후) 데이터 정리 — 첫 실행 시 dead data 삭제
+  try {
+    const extraClearRows = [];
+    for (let i = 1; i <= clearEnd; i++) {
+      extraClearRows.push(Array(22).fill('')); // E~Z (22컬럼)
+    }
+    await throttledCall(() => writeSheet(
+      MASTER_SHEET_ID,
+      `'${tabListTabName}'!E1:Z${clearEnd}`,
+      extraClearRows
+    ));
+    logger.info(`[indexScan] 탭목록 추가 컬럼(E~Z) 정리 완료`);
+  } catch (_) {
+    // 범위 초과 등 무시 — 다음 실행 시 재시도
+  }
+
+  logger.info(`[indexScan] 탭목록 쓰기 완료: ${outputValues.length - 1}행 (4컬럼 only)`);
 }
 
 // ═══════════════════════════════════════════════════════════

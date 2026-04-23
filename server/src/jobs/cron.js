@@ -1,46 +1,25 @@
 const cron = require('node-cron');
 const { buildIndexSmart, checkDirtySheets, buildOneSheet } = require('../services/indexBuilder.service');
 const { processQueue, purgeCompleted } = require('../services/syncQueue.service');
-const { syncSettingsOnly } = require('../services/masterSheet.service');
+// [DEPRECATED — v11.8.0] syncSettingsOnly 제거: DB가 설정 원본이므로 시트→DB 동기화 불필요
+// const { syncSettingsOnly } = require('../services/masterSheet.service');
 const { logger } = require('../utils/logger');
 const { emitIndexBuild, broadcast } = require('../utils/sse');
 // [REMOVED] readSheet, pool — 세부목록→DB 자동동기화 CRON 제거됨 (DB가 원본)
 
 /**
- * ★ CRON 최적화 (v10.3):
- *   1. 설정 동기화(Group B): 10분마다 — API 1~2회, 1~3초
+ * ★ CRON 최적화 (v11.8.0 — 2탭 통합):
+ *   1. [REMOVED] 설정 동기화(Group B) — DB가 설정 원본이므로 시트→DB 동기화 불필요
  *   2. Dirty Check + 자동 빌드: 15분마다 → 변경 시트 자동 개별 빌드
- *      (기존: 감지만 하고 알림 → 개선: 감지 + 해당 시트만 자동 빌드)
- *   3. 인덱스 전체 빌드: 하루 2회 (09시, 15시) — 대폭 축소
+ *   3. 인덱스 전체 빌드: 하루 2회 (09시, 15시)
  *   4. 전체 재빌드: 하루 1회 새벽 4시
- *
- * ★ 핵심 개선:
- *   - Dirty Check가 변경 감지 시 buildOneSheet()로 해당 시트만 즉시 빌드
- *   - 2시간마다 전체 빌드 → 하루 2회로 축소 (Dirty 자동빌드가 대체)
- *   - API 쿼터 절감: 전체 빌드 감소 + 변경 시트만 선택적 빌드
  */
 function startCronJobs() {
-  // ── Group B: 마스터시트 설정 동기화 — 10분마다 (API 1~2회) ──
-  cron.schedule('*/10 9-19 * * 1-6', async () => {
-    try {
-      const result = await syncSettingsOnly(false); // dryRun=false
-      if (result.updated > 0) {
-        logger.info(`[CRON-Settings] 설정 동기화: ${result.updated}건 업데이트 (${result.elapsed})`);
-        broadcast('settings_synced', {
-          message: `설정 ${result.updated}건 동기화 완료`,
-          updated: result.updated,
-          elapsed: result.elapsed,
-        });
-      }
-    } catch (err) {
-      // MASTER_SHEET_ID 미설정 등 → 경고만 (빌드 중단 아님)
-      logger.warn(`[CRON-Settings] 설정 동기화 오류: ${err.message}`);
-    }
-  }, { timezone: 'Asia/Seoul' });
+  // [DEPRECATED — v11.8.0] Group B 설정 동기화 CRON 제거
+  // DB가 설정 원본이므로 시트→DB 설정 동기화가 불필요합니다.
+  // 설정은 웹 UI(POST /api/tab/config)에서 직접 DB에 저장됩니다.
 
   // ── ★ Dirty Check + 자동 빌드: 15분마다 ──
-  // 기존: 감지만 하고 SSE 알림 → 사용자가 수동 빌드
-  // 개선: 변경 감지된 시트를 자동으로 개별 빌드 (buildOneSheet)
   cron.schedule('*/15 9-19 * * 1-6', async () => {
     try {
       const dirtySheets = await checkDirtySheets();
@@ -54,7 +33,6 @@ function startCronJobs() {
       });
 
       // ★ 변경된 시트만 순차적으로 개별 빌드
-      // (buildOneSheet는 내부적으로 빌드 잠금을 사용하므로 동시 실행 안전)
       let builtCount = 0, failCount = 0;
       for (const dirty of dirtySheets) {
         try {
@@ -63,9 +41,8 @@ function startCronJobs() {
             builtCount++;
             logger.info(`[CRON-Dirty] 자동 빌드 완료: ${dirty.campaignName} (rebuilt=${result.rebuilt}, ${result.elapsed})`);
           } else {
-            // 잠금 충돌 등 → 다음 Dirty Check에서 재시도
             logger.warn(`[CRON-Dirty] 자동 빌드 스킵: ${dirty.campaignName} — ${result.error || 'locked'}`);
-            break; // 잠금 충돌이면 나머지도 실패할 가능성 → 중단
+            break;
           }
         } catch (err) {
           failCount++;
@@ -92,8 +69,7 @@ function startCronJobs() {
     }
   }, { timezone: 'Asia/Seoul' });
 
-  // ── 인덱스 전체 빌드: 하루 2회 (09시, 15시) — 기존 2시간마다에서 축소 ──
-  // Dirty 자동빌드가 15분마다 변경 시트를 처리하므로 전체 빌드 빈도 대폭 축소
+  // ── 인덱스 전체 빌드: 하루 2회 (09시, 15시) ──
   const schedule = process.env.INDEX_CRON_SCHEDULE || '0 9,15 * * 1-6';
   cron.schedule(schedule, async () => {
     logger.info(`[CRON] 인덱스 빌드 시작: ${new Date().toISOString()}`);
@@ -142,7 +118,7 @@ function startCronJobs() {
     }
   }, { timezone: 'Asia/Seoul' });
 
-  logger.info(`[CRON] 스케줄러 등록 완료: 설정동기화=10분, dirty+자동빌드=15분, 인덱스=${schedule}, 전체재빌드=매일04시, 큐워커=30초, 정리=매일03시`);
+  logger.info(`[CRON] 스케줄러 등록 완료: dirty+자동빌드=15분, 인덱스=${schedule}, 전체재빌드=매일04시, 큐워커=30초, 정리=매일03시 [설정동기화=제거(v11.8.0)]`);
 }
 
 module.exports = { startCronJobs };

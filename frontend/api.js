@@ -61,12 +61,14 @@ const _ACTION_MAP = {
   'getTabOptions':    { method: 'GET',  path: '/api/tab/options' },
   'getTabEndDate':    { method: 'GET',  path: '/api/tab/end-date' },
   'getCampaignStats': { method: 'GET',  path: '/api/diag/campaign-stats' },
-  'syncTabFromSheet': { method: 'POST', path: '/api/tab/sync-from-sheet' },
+  'syncTabFromSheet': { method: 'POST', path: '/api/tab/sync-from-sheet' },  // deprecated
   'syncTabNames':     { method: 'POST', path: '/api/tab/sync-tab-names' },
-  'syncMasterSheet':  { method: 'POST', path: '/api/tab/sync-master' },
-  'scanMasterSheet':  { method: 'POST', path: '/api/tab/scan-master' },
-  'fullMasterSync':   { method: 'POST', path: '/api/tab/full-sync' },
-  'syncSettingsOnly': { method: 'POST', path: '/api/tab/sync-settings' },
+  // [DEPRECATED v11.8.0] 2탭 통합으로 폐기된 액션 — 서버에서 deprecated 응답 반환
+  'syncMasterSheet':  { method: 'POST', path: '/api/tab/sync-master' },       // deprecated
+  'scanMasterSheet':  { method: 'POST', path: '/api/tab/scan-master' },       // deprecated
+  'fullMasterSync':   { method: 'POST', path: '/api/tab/full-sync' },         // deprecated
+  'syncSettingsOnly': { method: 'POST', path: '/api/tab/sync-settings' },     // deprecated
+  // 인덱스 스캔 + DB 동기화 (정상 경로)
   'indexScan':        { method: 'POST', path: '/api/tab/index-scan' },
   'indexScanSync':    { method: 'POST', path: '/api/tab/index-scan-sync' },
   'resetAllData':     { method: 'POST', path: '/api/tab/reset-all' },

@@ -11774,153 +11774,18 @@ async function resetAllData() {
 }
 
 // ═══════════════════════════════════════════════════════════
-// ★ 통합 구조 동기화 (스캔 + DB반영 1회에 처리)
-// HTML: btnFullSyncDry / btnFullSyncRun → fullMasterSync(dryRun)
-// 백엔드: POST /api/tab/full-sync
+// [DEPRECATED v11.8.0] 통합 구조 동기화 — 2탭 통합으로 폐기
+// → 인덱스 스캔(indexScan) + DB 동기화(indexScanSync)를 사용하세요
 // ═══════════════════════════════════════════════════════════
 async function fullMasterSync(dryRun) {
-  const btnDry = document.getElementById("btnFullSyncDry");
-  const btnRun = document.getElementById("btnFullSyncRun");
-  const resultEl = document.getElementById("fullSyncResult");
-  const activeBtn = dryRun ? btnDry : btnRun;
-  const actionLabel = dryRun ? "미리보기" : "동기화 실행";
-
-  if (!dryRun && !confirm(
-    "마스터시트 스캔 → DB 동기화를 한 번에 처리합니다.\n\n" +
-    "• 각 시트에 접속하여 campaign_name, tab_name을 파싱\n" +
+  showToast("[v11.8.0] 구조 동기화는 폐기되었습니다. '인덱스 스캔' + 'DB 동기화'를 사용하세요.", "warning");
+}
     "• 파싱 결과를 DB에 즉시 반영 (추가/수정/삭제)\n" +
-    "• 기존 설정값(담당자, 택배 등)은 보존됩니다\n\n" +
-    "구조 변경(탭 추가/삭제)이 있을 때만 실행하세요.\n계속하시겠습니까?"
-  )) return;
-
-  const _saveBtnHtml = activeBtn ? activeBtn.innerHTML : "";
-  if (activeBtn) { activeBtn.disabled = true; activeBtn.innerHTML = `<i class="fas fa-spinner fa-spin"></i> ${actionLabel}중...`; }
-  if (btnDry && btnDry !== activeBtn) btnDry.disabled = true;
-  if (btnRun && btnRun !== activeBtn) btnRun.disabled = true;
-
-  showToast(`🔄 구조 동기화 ${actionLabel} 진행중... (약 60~120초 소요)`, "info");
-
-  try {
-    const res = await gasPost({ action: "fullMasterSync", dryRun: !!dryRun }, 300000);
-    if (res.error) { showToast(res.error, "error"); return; }
-
-    const scan = res.scan || {};
-    const sync = res.sync || {};
-
-    if (dryRun) {
-      // ── 미리보기 결과 ──
-      const parts = [];
-      parts.push(`${scan.sheetsScanned || 0}개 시트 스캔`);
-      parts.push(`총 ${scan.totalTabs || 0}개 탭`);
-      if (scan.newTabs > 0) parts.push(`신규 ${scan.newTabs}개`);
-      if (scan.preservedTabs > 0) parts.push(`설정보존 ${scan.preservedTabs}개`);
-      if (scan.errors > 0) parts.push(`오류 ${scan.errors}건`);
-      showToast(`[미리보기] ${parts.join(", ")} (${scan.elapsed || ''})`, scan.errors > 0 ? "warning" : "info");
-
-      // 미리보기 상세 표시
-      if (scan.preview && scan.preview.length > 0) {
-        _showFullSyncPreview(scan, resultEl);
-      }
-    } else {
-      // ── 실행 결과 ──
-      const parts = [];
-      const c = sync.campaigns || {};
-      const t = sync.tabs || {};
-      if (c.added > 0) parts.push(`캠페인 +${c.added}`);
-      if (c.removed > 0) parts.push(`캠페인 -${c.removed}`);
-      if (t.added > 0) parts.push(`탭 +${t.added}`);
-      if (t.updated > 0) parts.push(`탭 ~${t.updated}`);
-      if (t.removed > 0) parts.push(`탭 -${t.removed}`);
-      if (parts.length === 0) parts.push("변경 없음 — DB와 시트가 일치합니다");
-      const cacheLabel = res.usedCache ? " (캐시 적용 — 재스캔 생략)" : "";
-      showToast(`✅ 구조 동기화 완료: ${parts.join(", ")}${cacheLabel}`, "success");
-
-      // 대시보드 새로고침
-      if (typeof loadTabDashboard === "function") loadTabDashboard();
-    }
-  } catch (err) {
-    showToast("구조 동기화 오류: " + err.message, "error");
-  } finally {
-    if (activeBtn) { activeBtn.disabled = false; activeBtn.innerHTML = _saveBtnHtml; }
-    if (btnDry && btnDry !== activeBtn) btnDry.disabled = false;
-    if (btnRun && btnRun !== activeBtn) btnRun.disabled = false;
-  }
-}
-
-function _showFullSyncPreview(scan, resultEl) {
-  if (!resultEl) return;
-  // 캠페인별 그룹핑
-  const groups = {};
-  (scan.preview || []).forEach(p => {
-    const key = p.campaign || '(알 수 없음)';
-    if (!groups[key]) groups[key] = [];
-    groups[key].push(p);
-  });
-
-  let html = `<div style="margin-bottom:6px;font-size:.72rem;color:#374151">
-    <b>📊 ${scan.sheetsScanned}개 시트</b> · 총 ${scan.totalTabs}탭 · 신규 ${scan.newTabs || 0} · 보존 ${scan.preservedTabs || 0}
-    ${scan.errors > 0 ? ` · <span style="color:#DC2626">오류 ${scan.errors}</span>` : ''}
-  </div>`;
-
-  for (const [campaign, tabs] of Object.entries(groups)) {
-    html += `<div style="margin-top:4px;font-size:.7rem;font-weight:600;color:#15803D">📁 ${campaign} (${tabs.length})</div>`;
-    for (const tab of tabs) {
-      const badge = tab.isNew
-        ? '<span style="background:#DBEAFE;color:#1D4ED8;padding:1px 5px;border-radius:3px;font-size:.63rem;margin-left:4px">신규</span>'
-        : '';
-      html += `<div style="padding:1px 0 1px 12px;font-size:.68rem;color:#4B5563">${tab.tabName}${badge}</div>`;
-    }
-  }
-
-  if (scan.errorDetails && scan.errorDetails.length > 0) {
-    html += `<div style="margin-top:6px;padding:4px 6px;background:#FEF2F2;border-radius:4px;font-size:.66rem;color:#DC2626">
-      <b>오류:</b> ${scan.errorDetails.map(e => `${e.sheetId}: ${e.error}`).join('<br>')}
-    </div>`;
-  }
-
-  html += `<div style="margin-top:6px;font-size:.66rem;color:#92400E;background:#FEF3C7;padding:4px 6px;border-radius:4px">
-    ⚠ 미리보기 모드 — "동기화 실행"을 클릭해야 실제로 반영됩니다.
-  </div>`;
-
-  resultEl.style.display = "block";
-  resultEl.innerHTML = html;
-}
-
-// ═══════════════════════════════════════════════════════════
-// ★ 설정 경량 동기화 (담당자, 택배 등 설정값만 갱신)
-// HTML: btnSyncSettings → syncSettingsOnly()
-// 백엔드: POST /api/tab/sync-settings
-// ═══════════════════════════════════════════════════════════
+// [DEPRECATED v11.8.0] _showFullSyncPreview 제거됨
+// [DEPRECATED v11.8.0] syncSettingsOnly 제거됨 — DB가 설정 원본
 async function syncSettingsOnly() {
-  const btn = document.getElementById("btnSyncSettings");
-  const _saveBtnHtml = btn ? btn.innerHTML : "";
-  if (btn) { btn.disabled = true; btn.innerHTML = '<i class="fas fa-spinner fa-spin"></i> 설정 동기화 중...'; }
-
-  showToast("⚡ 설정 경량 동기화 진행중... (1~3초)", "info");
-
-  try {
-    const res = await gasPost({ action: "syncSettingsOnly", dryRun: false }, 30000);
-    if (res.error) { showToast(res.error, "error"); return; }
-
-    const parts = [];
-    if (res.updated > 0) parts.push(`${res.updated}건 업데이트`);
-    if (res.unchanged > 0) parts.push(`${res.unchanged}건 동일`);
-    if (res.skippedNew > 0) parts.push(`${res.skippedNew}건 신규 스킵`);
-    if (parts.length === 0) parts.push("변경 없음");
-
-    showToast(`✅ 설정 동기화 완료: ${parts.join(", ")} (${res.elapsed || ''})`, res.updated > 0 ? "success" : "info");
-
-    // 대시보드 새로고침
-    if (res.updated > 0 && typeof loadTabDashboard === "function") loadTabDashboard();
-  } catch (err) {
-    showToast("설정 동기화 오류: " + err.message, "error");
-  } finally {
-    if (btn) { btn.disabled = false; btn.innerHTML = _saveBtnHtml; }
-  }
+  showToast("[v11.8.0] 설정 동기화는 폐기되었습니다. DB가 설정 원본이므로 웹 UI에서 직접 설정하세요.", "warning");
 }
-
-// ── [레거시] 광고주 시트 스캔 → 마스터 시트 자동 채우기 ──
-// ★ fullMasterSync()로 대체되었으나 하위 호환성 유지
 
 // ═══════════════════════════════════════════════════════════
 // ★ 인덱스 스캔 (시트DB → 각 시트 파싱 → 탭목록 기록)

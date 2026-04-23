@@ -3,6 +3,8 @@ const router = express.Router();
 const pool = require('../db/pool');
 const { authMiddleware } = require('../middleware/auth.middleware');
 const { getSpreadsheetMeta } = require('../services/sheets.service');
+// [DEPRECATED — v11.8.0] masterSheet.service.js 함수들은 2탭 통합으로 deprecated
+// import는 유지하되 라우트에서 deprecated 응답 반환
 const { syncMasterSheetToDB, scanAndPopulateMaster, applyCachedScanAndSync, hasScanCache, syncSettingsOnly } = require('../services/masterSheet.service');
 const { runIndexScan, applyCachedIndexScan, hasIndexScanCache, syncTabListToDB } = require('../services/indexScan.service');
 const { logger } = require('../utils/logger');
@@ -572,97 +574,55 @@ router.get('/dashboard', authMiddleware, async (req, res, next) => {
 });
 
 // ══════════════════════════════════════════════════════════════
-// POST /api/tab/scan-master — 광고주 시트 스캔 → 마스터 시트 자동 채우기
+// POST /api/tab/scan-master — [DEPRECATED v11.8.0] 2탭 통합으로 폐기
+// → 인덱스 스캔(/api/tab/index-scan)을 사용하세요
 // ══════════════════════════════════════════════════════════════
-router.post('/scan-master', authMiddleware, async (req, res, next) => {
-  try {
-    const { dryRun = true } = req.body;
-    logger.info(`[scan-master] ${dryRun ? '미리보기' : '실행'} 요청 — by ${req.admin?.name || 'unknown'}`);
-
-    const result = await scanAndPopulateMaster(!!dryRun);
-    res.json({ ok: true, ...result });
-  } catch (err) {
-    logger.error(`[scan-master] 오류: ${err.message}`);
-    res.status(500).json({ error: err.message });
-  }
+router.post('/scan-master', authMiddleware, async (req, res) => {
+  res.json({
+    ok: false,
+    deprecated: true,
+    message: '[v11.8.0] scan-master는 폐기되었습니다. /api/tab/index-scan을 사용하세요.',
+    redirect: '/api/tab/index-scan',
+  });
 });
 
 // ══════════════════════════════════════════════════════════════
-// POST /api/tab/sync-master — 마스터 구글시트 → DB 동기화
+// POST /api/tab/sync-master — [DEPRECATED v11.8.0] 2탭 통합으로 폐기
+// → DB 동기화는 /api/tab/index-scan-sync 를 사용하세요
 // ══════════════════════════════════════════════════════════════
-router.post('/sync-master', authMiddleware, async (req, res, next) => {
-  try {
-    const { dryRun = true } = req.body;
-    logger.info(`[sync-master] ${dryRun ? '미리보기' : '실행'} 요청 — by ${req.admin?.name || 'unknown'}`);
-
-    const result = await syncMasterSheetToDB(!!dryRun);
-    res.json({ ok: true, ...result });
-  } catch (err) {
-    logger.error(`[sync-master] 오류: ${err.message}`);
-    res.status(500).json({ error: err.message });
-  }
+router.post('/sync-master', authMiddleware, async (req, res) => {
+  res.json({
+    ok: false,
+    deprecated: true,
+    message: '[v11.8.0] sync-master는 폐기되었습니다. /api/tab/index-scan-sync를 사용하세요.',
+    redirect: '/api/tab/index-scan-sync',
+  });
 });
 
 // ══════════════════════════════════════════════════════════════
-// POST /api/tab/full-sync — ★ 통합 동기화: 스캔 + DB동기화를 1회에 처리
-// 미리보기: 시트 스캔 → 결과 캐시 저장 (5분 유효)
-// 실행:     캐시가 있으면 재스캔 없이 바로 적용, 없으면 새로 스캔
+// POST /api/tab/full-sync — [DEPRECATED v11.8.0] 2탭 통합으로 폐기
+// → 인덱스 스캔(/api/tab/index-scan) + DB 동기화(/api/tab/index-scan-sync) 사용
 // ══════════════════════════════════════════════════════════════
-router.post('/full-sync', authMiddleware, async (req, res, next) => {
-  try {
-    const { dryRun = true } = req.body;
-    logger.info(`[full-sync] ${dryRun ? '미리보기' : '실행'} 요청 — by ${req.admin?.name || 'unknown'}`);
-
-    if (dryRun) {
-      // ── 미리보기: 시트 스캔 + 결과 캐시 ──
-      const scanResult = await scanAndPopulateMaster(true);
-      return res.json({ ok: true, dryRun: true, scan: scanResult, sync: null,
-        message: `미리보기: ${scanResult.totalTabs}개 탭 (신규 ${scanResult.newTabs}개)` });
-    }
-
-    // ── 실행: 캐시 있으면 재스캔 없이 바로 적용 ──
-    if (hasScanCache()) {
-      logger.info('[full-sync] ★ 캐시된 스캔 결과로 바로 적용 (재스캔 생략)');
-      const result = await applyCachedScanAndSync();
-      return res.json({
-        ok: true, dryRun: false,
-        scan: result.scan, sync: result.sync,
-        usedCache: true,
-        message: `완료(캐시): 스캔 결과 즉시 적용 → DB 동기화 (추가 ${result.sync?.tabs?.added || 0}, 수정 ${result.sync?.tabs?.updated || 0}, 삭제 ${result.sync?.tabs?.removed || 0})`,
-      });
-    }
-
-    // ── 캐시 없음: 새로 스캔 + 즉시 적용 ──
-    logger.info('[full-sync] 캐시 없음 — 새로 스캔 후 적용');
-    const scanResult = await scanAndPopulateMaster(false);
-    const syncResult = await syncMasterSheetToDB(false);
-    res.json({
-      ok: true, dryRun: false,
-      scan: scanResult, sync: syncResult,
-      usedCache: false,
-      message: `완료: 스캔 ${scanResult.totalTabs}탭 → DB 동기화 (추가 ${syncResult?.tabs?.added || 0}, 수정 ${syncResult?.tabs?.updated || 0}, 삭제 ${syncResult?.tabs?.removed || 0})`,
-    });
-  } catch (err) {
-    logger.error(`[full-sync] 오류: ${err.message}`);
-    res.status(500).json({ error: err.message });
-  }
+router.post('/full-sync', authMiddleware, async (req, res) => {
+  res.json({
+    ok: false,
+    deprecated: true,
+    message: '[v11.8.0] full-sync는 폐기되었습니다. /api/tab/index-scan → /api/tab/index-scan-sync 를 순서대로 사용하세요.',
+    redirect: '/api/tab/index-scan',
+  });
 });
 
 // ══════════════════════════════════════════════════════════════
-// POST /api/tab/sync-settings — Group B 설정 컬럼만 경량 동기화
-// Google API 1~2회, 1~3초 완료, 인덱스 빌드 불필요
+// POST /api/tab/sync-settings — [DEPRECATED v11.8.0] 2탭 통합으로 폐기
+// DB가 설정 원본이므로 시트→DB 설정 동기화가 불필요합니다.
+// 설정은 웹 UI(POST /api/tab/config)에서 직접 DB에 저장됩니다.
 // ══════════════════════════════════════════════════════════════
-router.post('/sync-settings', authMiddleware, async (req, res, next) => {
-  try {
-    const { dryRun = true } = req.body;
-    logger.info(`[sync-settings] ${dryRun ? '미리보기' : '실행'} 요청 — by ${req.admin?.name || 'unknown'}`);
-
-    const result = await syncSettingsOnly(!!dryRun);
-    res.json({ ok: true, ...result });
-  } catch (err) {
-    logger.error(`[sync-settings] 오류: ${err.message}`);
-    res.status(500).json({ error: err.message });
-  }
+router.post('/sync-settings', authMiddleware, async (req, res) => {
+  res.json({
+    ok: false,
+    deprecated: true,
+    message: '[v11.8.0] sync-settings는 폐기되었습니다. DB가 설정 원본이므로 시트→DB 설정 동기화가 불필요합니다. 웹 UI에서 직접 설정하세요.',
+  });
 });
 
 // ══════════════════════════════════════════════════════════════
