@@ -179,6 +179,36 @@ async function _upsertTab(sheetId, tabName, tabGid, checksum, rows, modifiedTime
   try {
     await client.query('BEGIN');
 
+    // ★ gid 기반 탭 이름 변경 감지 — 동일 gid의 이전 tab_name 행 정리
+    // 구글시트에서 탭 이름이 변경되면 gid는 유지되지만 tab_name이 달라짐
+    // 이전 이름의 행을 삭제하지 않으면 대시보드에 두 개가 표시됨
+    if (tabGid) {
+      const { rows: oldEntries } = await client.query(
+        `SELECT tab_name FROM index_master WHERE sheet_id = $1 AND tab_gid = $2 AND tab_name != $3`,
+        [sheetId, tabGid, tabName]
+      );
+      for (const old of oldEntries) {
+        logger.info(`[smartBuild] 탭 이름 변경 감지: "${old.tab_name}" → "${tabName}" (gid=${tabGid})`);
+        // review_index에서 이전 tab_name 행 삭제
+        await client.query(
+          `DELETE FROM review_index WHERE sheet_id = $1 AND tab_name = $2`,
+          [sheetId, old.tab_name]
+        );
+        // index_master에서 이전 tab_name 행 삭제
+        await client.query(
+          `DELETE FROM index_master WHERE sheet_id = $1 AND tab_name = $2`,
+          [sheetId, old.tab_name]
+        );
+        // tab_configs에서 이전 tab_name 행 삭제
+        await client.query(
+          `DELETE FROM tab_configs WHERE sheet_id = $1 AND tab_name = $2`,
+          [sheetId, old.tab_name]
+        );
+        // 체크섬 캐시에서 이전 키 제거
+        delete _checksumCache[`${sheetId}||${old.tab_name}`];
+      }
+    }
+
     const newRowIndices = new Set();
     if (rows.length > 0) {
       const BATCH_SIZE = 100;
@@ -242,6 +272,7 @@ async function _upsertTab(sheetId, tabName, tabGid, checksum, rows, modifiedTime
                                 row_count, submitted_count, status, sheet_modified_at)
       VALUES ($1,$2,$3,$4,$5,NOW(),$6,$7,'active',$8)
       ON CONFLICT (sheet_id, tab_name) DO UPDATE SET
+        tab_gid = EXCLUDED.tab_gid,
         checksum = EXCLUDED.checksum,
         built_at = NOW(),
         row_count = EXCLUDED.row_count,
@@ -255,6 +286,17 @@ async function _upsertTab(sheetId, tabName, tabGid, checksum, rows, modifiedTime
       checksum, rows.length, rows.filter(r => r.isSubmitted).length,
       modifiedTime || null
     ]);
+
+    // tab_configs도 현재 탭의 tab_gid 갱신
+    if (tabGid) {
+      await client.query(
+        `INSERT INTO tab_configs (sheet_id, tab_name, tab_gid, campaign_name, sheet_url, updated_at)
+         VALUES ($1, $2, $3, $4, $5, NOW())
+         ON CONFLICT (sheet_id, tab_name) DO UPDATE SET
+           tab_gid = $3, campaign_name = COALESCE(NULLIF($4, ''), tab_configs.campaign_name), updated_at = NOW()`,
+        [sheetId, tabName, tabGid, campaignName || '', `https://docs.google.com/spreadsheets/d/${sheetId}/edit`]
+      );
+    }
 
     await client.query('COMMIT');
   } catch (err) {

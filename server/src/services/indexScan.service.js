@@ -505,17 +505,29 @@ async function syncTabListToDB({ dryRun = true, fromCache = false } = {}) {
   // ── 기존 DB 데이터 조회 ──
   const { rows: dbCampaigns } = await pool.query('SELECT sheet_id, campaign_name FROM campaigns');
   const { rows: dbTabs } = await pool.query('SELECT sheet_id, tab_name, tab_gid FROM tab_configs');
-  const { rows: dbIndex } = await pool.query('SELECT sheet_id, tab_name FROM index_master');
+  const { rows: dbIndex } = await pool.query('SELECT sheet_id, tab_name, tab_gid FROM index_master');
 
   const dbCampSet = new Set(dbCampaigns.map(c => `${c.sheet_id}||${c.campaign_name}`));
   const dbTabMap = new Map(dbTabs.map(t => [`${t.sheet_id}||${t.tab_name}`, t]));
   const dbIndexSet = new Set(dbIndex.map(i => `${i.sheet_id}||${i.tab_name}`));
+
+  // ★ gid → 기존 tab_name 역매핑 (탭 이름 변경 감지용)
+  // 동일 sheet_id 내에서 같은 gid를 가진 다른 tab_name이 있으면 이름이 변경된 것
+  const gidToOldTabName = new Map(); // "sheetId||gid" → tab_name (from index_master)
+  for (const idx of dbIndex) {
+    if (idx.tab_gid) gidToOldTabName.set(`${idx.sheet_id}||${idx.tab_gid}`, idx.tab_name);
+  }
+  const gidToOldTabConfig = new Map(); // "sheetId||gid" → tab_name (from tab_configs)
+  for (const tc of dbTabs) {
+    if (tc.tab_gid) gidToOldTabConfig.set(`${tc.sheet_id}||${tc.tab_gid}`, tc.tab_name);
+  }
 
   // ── diff 계산 ──
   const campaignsToAdd = [];
   const tabsToAdd = [];
   const tabsToUpdate = [];
   const indexToAdd = [];
+  const tabsToRename = [];  // ★ gid 기반 탭 이름 변경 목록
   const seenCampaigns = new Set();
 
   for (const row of rows) {
@@ -543,6 +555,22 @@ async function syncTabListToDB({ dryRun = true, fromCache = false } = {}) {
     const gidMatch = (row.tab_url || '').match(/gid=(\d+)/);
     const tabGid = gidMatch ? gidMatch[1] : '';
 
+    // ★ gid 기반 탭 이름 변경 감지
+    // 같은 gid를 가진 다른 tab_name이 DB에 있으면 이름이 변경된 것
+    if (tabGid) {
+      const gidKey = `${sheetId}||${tabGid}`;
+      const oldTabNameIM = gidToOldTabName.get(gidKey);
+      const oldTabNameTC = gidToOldTabConfig.get(gidKey);
+      // index_master에서 이전 이름 발견
+      if (oldTabNameIM && oldTabNameIM !== tabName) {
+        tabsToRename.push({ sheetId, oldTabName: oldTabNameIM, newTabName: tabName, tabGid, source: 'index_master' });
+      }
+      // tab_configs에서 이전 이름 발견 (중복 방지)
+      if (oldTabNameTC && oldTabNameTC !== tabName && oldTabNameTC !== oldTabNameIM) {
+        tabsToRename.push({ sheetId, oldTabName: oldTabNameTC, newTabName: tabName, tabGid, source: 'tab_configs' });
+      }
+    }
+
     // 2) tab_configs
     const tabKey = `${sheetId}||${tabName}`;
     const existing = dbTabMap.get(tabKey);
@@ -562,14 +590,17 @@ async function syncTabListToDB({ dryRun = true, fromCache = false } = {}) {
     dryRun,
     totalRows: rows.length,
     campaigns: { existing: dbCampaigns.length, toAdd: campaignsToAdd.length, supplemented },
-    tabs: { existing: dbTabs.length, toAdd: tabsToAdd.length, toUpdate: tabsToUpdate.length },
+    tabs: { existing: dbTabs.length, toAdd: tabsToAdd.length, toUpdate: tabsToUpdate.length, toRename: tabsToRename.length },
     index: { existing: dbIndex.length, toAdd: indexToAdd.length },
   };
 
   // ── 미리보기면 여기서 종료 ──
   if (dryRun) {
     summary.elapsed = ((Date.now() - startTime) / 1000).toFixed(1) + 's';
-    summary.message = `미리보기: campaigns +${campaignsToAdd.length}${supplemented ? ` (시트DB 보충 ${supplemented})` : ''}, tabs +${tabsToAdd.length}/~${tabsToUpdate.length}, index +${indexToAdd.length}`;
+    summary.message = `미리보기: campaigns +${campaignsToAdd.length}${supplemented ? ` (시트DB 보충 ${supplemented})` : ''}, tabs +${tabsToAdd.length}/~${tabsToUpdate.length}/rename ${tabsToRename.length}, index +${indexToAdd.length}`;
+    if (tabsToRename.length > 0) {
+      summary.renames = tabsToRename.map(r => ({ old: r.oldTabName, new: r.newTabName, gid: r.tabGid }));
+    }
     logger.info(`[syncTabListToDB] ${summary.message}`);
     return summary;
   }
@@ -578,6 +609,19 @@ async function syncTabListToDB({ dryRun = true, fromCache = false } = {}) {
   const client = await pool.connect();
   try {
     await client.query('BEGIN');
+
+    // ★ gid 기반 탭 이름 변경: 이전 tab_name 행 삭제
+    // 새 tab_name으로 다시 생성되므로 이전 이름 행만 제거
+    const renamedSet = new Set();
+    for (const r of tabsToRename) {
+      const renameKey = `${r.sheetId}||${r.oldTabName}`;
+      if (renamedSet.has(renameKey)) continue;
+      renamedSet.add(renameKey);
+      logger.info(`[syncTabListToDB] 탭 이름 변경: "${r.oldTabName}" → "${r.newTabName}" (gid=${r.tabGid})`);
+      await client.query('DELETE FROM review_index WHERE sheet_id = $1 AND tab_name = $2', [r.sheetId, r.oldTabName]);
+      await client.query('DELETE FROM index_master WHERE sheet_id = $1 AND tab_name = $2', [r.sheetId, r.oldTabName]);
+      await client.query('DELETE FROM tab_configs WHERE sheet_id = $1 AND tab_name = $2', [r.sheetId, r.oldTabName]);
+    }
 
     // campaigns UPSERT
     for (const c of campaignsToAdd) {
@@ -624,7 +668,7 @@ async function syncTabListToDB({ dryRun = true, fromCache = false } = {}) {
     }
 
     await client.query('COMMIT');
-    logger.info(`[syncTabListToDB] DB 반영 완료: campaigns +${campaignsToAdd.length}, tabs +${tabsToAdd.length}/~${tabsToUpdate.length}, index +${indexToAdd.length}`);
+    logger.info(`[syncTabListToDB] DB 반영 완료: campaigns +${campaignsToAdd.length}, tabs +${tabsToAdd.length}/~${tabsToUpdate.length}/rename ${tabsToRename.length}, index +${indexToAdd.length}`);
   } catch (err) {
     await client.query('ROLLBACK');
     logger.error(`[syncTabListToDB] DB 반영 실패: ${err.message}`);
@@ -634,7 +678,7 @@ async function syncTabListToDB({ dryRun = true, fromCache = false } = {}) {
   }
 
   summary.elapsed = ((Date.now() - startTime) / 1000).toFixed(1) + 's';
-  summary.message = `완료: campaigns +${campaignsToAdd.length}, tabs +${tabsToAdd.length}/~${tabsToUpdate.length}, index +${indexToAdd.length} (${summary.elapsed})`;
+  summary.message = `완료: campaigns +${campaignsToAdd.length}, tabs +${tabsToAdd.length}/~${tabsToUpdate.length}/rename ${tabsToRename.length}, index +${indexToAdd.length} (${summary.elapsed})`;
   return summary;
 }
 
