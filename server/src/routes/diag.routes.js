@@ -396,6 +396,40 @@ router.get('/tab-gid-check', async (req, res, next) => {
   }
 });
 
+// ═══════════════════════════════════════════════════════════
+// GET /api/diag/dashboard-check — 대시보드 API와 동일 쿼리로 gid↔tab_name 검증
+// ═══════════════════════════════════════════════════════════
+router.get('/dashboard-check', async (req, res, next) => {
+  try {
+    const { sheetId, gid, tabName } = req.query;
+    
+    let sql = `
+      SELECT
+        im.sheet_id AS "sheetId",
+        im.tab_name AS "tabName",
+        COALESCE(im.tab_gid, tc.tab_gid) AS "tabGid",
+        im.tab_gid AS "imTabGid",
+        tc.tab_gid AS "tcTabGid",
+        im.campaign_name AS "campaignName",
+        im.row_count AS "totalCount",
+        im.submitted_count AS "submittedCount",
+        im.status
+      FROM index_master im
+      LEFT JOIN tab_configs tc ON im.sheet_id = tc.sheet_id AND im.tab_name = tc.tab_name
+      WHERE im.status = 'active'
+    `;
+    const params = [];
+    if (sheetId) { params.push(sheetId); sql += ` AND im.sheet_id = $${params.length}`; }
+    if (gid) { params.push(gid); sql += ` AND (im.tab_gid = $${params.length} OR tc.tab_gid = $${params.length})`; }
+    if (tabName) { params.push(tabName); sql += ` AND im.tab_name = $${params.length}`; }
+    sql += ' ORDER BY im.built_at DESC NULLS LAST';
+    
+    const { rows } = await pool.query(sql, params);
+    res.json({ ok: true, count: rows.length, rows });
+  } catch (err) {
+    next(err);
+  }
+});
 
 router.get('/inaed-list', async (req, res, next) => {
   try {
