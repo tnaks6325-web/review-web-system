@@ -780,7 +780,7 @@
                 <i class="fas fa-paint-brush"></i> <span id="uiEditBtnText">UI 편집 모드</span>
               </button>
               <hr style="margin:4px 0;border:none;border-top:1px solid #E5E7EB">
-              <button class="key-dropdown-item" onclick="switchAdminTab('settings'); closeKeyMenu()">
+              <button class="key-dropdown-item" onclick="switchAdminTab('dashboard'); closeKeyMenu()">
                 <i class="fas fa-th-list" style="color:#1D4ED8"></i> 캠페인 탭 관리
               </button>
             </div>
@@ -849,188 +849,107 @@
       <!-- 제출 현황 대시보드 -->
       <div id="tab-dashboard" class="admin-tab-pane active">
 
-        <!-- 전체 요약 -->
-        <div id="dashboardSummary" class="dashboard-summary hidden has-dev-label">
-          <span class="dev-label">KPI 요약 / Summary Cards</span>
-          <div class="summary-card summary-total">
-            <span class="summary-num" id="sumTotal">0</span>
-            <span class="summary-label">전체</span>
-          </div>
-          <div class="summary-card summary-done">
-            <span class="summary-num" id="sumDone">0</span>
-            <span class="summary-label">제출완료</span>
-          </div>
-          <div class="summary-card summary-pending">
-            <span class="summary-num" id="sumPending">0</span>
-            <span class="summary-label">미제출</span>
-          </div>
-          <div class="summary-card summary-rate">
-            <span class="summary-num" id="sumRate">0%</span>
-            <span class="summary-label">제출률</span>
-          </div>
-
-        </div>
-
-        <div class="admin-section-header has-dev-label">
-          <span class="dev-label">섹션 헤더 / Section Header</span>
-          <span id="dashboardIndexInfo" class="section-index-info"></span>
-          <!-- ★ Phase 5: 라이브 모드 토글 -->
-          <label id="liveModeToggleWrap" class="live-mode-toggle" style="display:none" title="30초마다 대시보드 자동 새로고침">
-            <input type="checkbox" id="liveModeCheckbox" onchange="toggleLiveMode(this.checked)">
-            <span class="live-mode-slider"></span>
-            <span class="live-mode-label" id="liveModeLabel">LIVE</span>
-          </label>
-          <!-- ★ 자동 빌드 카운트다운 배지 -->
-          <span id="cronCountdownBadge" class="cron-countdown-badge" style="display:none"></span>
-          <!-- ★ 빌드 진행 중 배너 -->
-          <span id="buildInProgressBanner" class="build-in-progress-banner" style="display:none">
-            <i class="fas fa-circle-notch fa-spin"></i> 인덱스 빌드 진행 중...
-            <span id="buildInProgressElapsed"></span>
+        <!-- ★ 캠페인 탭 관리 (대시보드 메인) -->
+        <div class="admin-section-header">
+          <span style="font-size:.95rem;font-weight:700;color:var(--t1)">
+            <i class="fas fa-th-list" style="color:#1D4ED8;margin-right:6px"></i>캠페인 탭 관리
           </span>
-          <div class="admin-header-btns">
-            <div class="dash-filter-wrap" id="dashFilterWrap">
-              <button class="dash-filter-btn" id="dashFilterBtn" onclick="toggleFilterDropdown(event)">
-                <i class="fas fa-filter"></i> 필터
-              </button>
-              <div class="dash-filter-dropdown" id="dashFilterDropdown">
-                <label class="dash-filter-item" data-filter="tuip">
-                  <input type="checkbox" value="tuip" onchange="onFilterChange(this)">
-                  <i class="fas fa-user-plus" style="color:#D97706"></i> 투입중
-                </label>
-                <label class="dash-filter-item" data-filter="chuihap">
-                  <input type="checkbox" value="chuihap" onchange="onFilterChange(this)">
-                  <i class="fas fa-layer-group" style="color:#7C3AED"></i> 취합중
-                </label>
-                <label class="dash-filter-item" data-filter="monthly">
-                  <input type="checkbox" value="monthly" onchange="onFilterChange(this)">
-                  <i class="fas fa-calendar-alt" style="color:#0891B2"></i> 한달
-                </label>
-                <label class="dash-filter-item" data-filter="taekhap">
-                  <input type="checkbox" value="taekhap" onchange="onFilterChange(this)">
-                  <i class="fas fa-box" style="color:#EF4444"></i> 택대
-                </label>
-                <label class="dash-filter-item" data-filter="done">
-                  <input type="checkbox" value="done" onchange="onFilterChange(this)">
-                  <i class="fas fa-check-circle" style="color:#16A34A"></i> 완료
-                </label>
-                <label class="dash-filter-item" data-filter="closed">
-                  <input type="checkbox" value="closed" onchange="onFilterChange(this)">
-                  <i class="fas fa-archive" style="color:#7C3AED"></i> 마감
-                </label>
-                <div style="border-top:1px solid #F3F4F6;margin:4px 0"></div>
-                <div style="font-size:.68rem;color:var(--t3);font-weight:600;padding:2px 10px">리뷰타입</div>
-                <label class="dash-filter-item" data-filter="review:실배송">
-                  <input type="checkbox" value="review:실배송" onchange="onFilterChange(this)">
-                  <span style="color:#5B21B6">● 실배송</span>
-                </label>
-                <label class="dash-filter-item" data-filter="review:빈박스">
-                  <input type="checkbox" value="review:빈박스" onchange="onFilterChange(this)">
-                  <span style="color:#92400E">● 빈박스</span>
-                </label>
-                <label class="dash-filter-item" data-filter="review:구매확정">
-                  <input type="checkbox" value="review:구매확정" onchange="onFilterChange(this)">
-                  <span style="color:#065F46">● 구매확정</span>
-                </label>
-                <label class="dash-filter-item" data-filter="review:믹스">
-                  <input type="checkbox" value="review:믹스" onchange="onFilterChange(this)">
-                  <span style="color:#9D174D">● 믹스</span>
-                </label>
-                <div style="border-top:1px solid #F3F4F6;margin:4px 0"></div>
-                <div style="font-size:.68rem;color:var(--t3);font-weight:600;padding:2px 10px">담당자</div>
-                <label class="dash-filter-item" data-filter="manager:만두">
-                  <input type="checkbox" value="manager:만두" onchange="onFilterChange(this)">
-                  <span style="color:#92400E">🥟 만두</span>
-                </label>
-                <label class="dash-filter-item" data-filter="manager:망고">
-                  <input type="checkbox" value="manager:망고" onchange="onFilterChange(this)">
-                  <span style="color:#065F46">🥭 망고</span>
-                </label>
-              </div>
-            </div>
-            <!-- 헤더 컨텍스트 툴바로 이동됨 - 숨김 처리 (DOM 유지) -->
-            <button class="btn-add-campaign" onclick="openAddCampaign()" style="display:none">
-              <i class="fas fa-plus"></i> 업체추가
+          <div style="display:flex;gap:6px;margin-left:auto;flex-wrap:wrap;align-items:center">
+            <!-- ★ 빌드 진행 중 배너 -->
+            <span id="buildInProgressBanner" class="build-in-progress-banner" style="display:none">
+              <i class="fas fa-circle-notch fa-spin"></i> 인덱스 빌드 진행 중...
+              <span id="buildInProgressElapsed"></span>
+            </span>
+            <span id="cronCountdownBadge" class="cron-countdown-badge" style="display:none"></span>
+            <span id="dashboardIndexInfo" class="section-index-info" style="font-size:.72rem;color:var(--t3)"></span>
+            <button id="btnSyncTabNames" class="btn-sm" onclick="syncTabNames(false)" style="font-size:.78rem;background:#7C3AED;color:#fff;border:none;border-radius:6px;padding:5px 12px;cursor:pointer" title="시트의 실제 탭명·URL을 DB와 동기화합니다">
+              <i class="fas fa-exchange-alt"></i> 탭명 동기화
             </button>
-            <button class="btn-blacklist-mgr" onclick="openBlPanel()" title="블랙리스트 관리" style="display:none">
-              <i class="fas fa-ban"></i> 블랙리스트
+            <button id="btnCleanClosed" class="btn-sm" onclick="cleanClosedTabs()" style="font-size:.78rem;background:#DC2626;color:#fff;border:none;border-radius:6px;padding:5px 12px;cursor:pointer">
+              <i class="fas fa-broom"></i> 마감탭 정리
             </button>
-            <button class="btn-blacklist-mgr" onclick="openNoticePanel()" title="공지 배너 설정" style="display:none;background:#FEF9C3;color:#92400E;border-color:#FDE68A">
-              <i class="fas fa-bullhorn"></i> 공지설정
+            <button class="btn-sm" onclick="exportTabDashCSV()" style="font-size:.78rem;background:#059669;color:#fff;border:none;border-radius:6px;padding:5px 12px;cursor:pointer">
+              <i class="fas fa-file-csv"></i> CSV 내보내기
             </button>
-            <!-- ⚠ 마감: 위험 액션이므로 섹션 헤더에 유지 -->
-            <button id="btnClosed" class="btn-closed" onclick="toggleClosedMode()">
-              <i class="fas fa-archive"></i> 마감
-            </button>
-            <button id="btnClosedExec" class="btn-closed-exec" onclick="execClosed()" style="display:none">
-              <i class="fas fa-check"></i> 실행
-            </button>
-            <!-- 헤더 컨텍스트 툴바로 이동됨 - 숨김 처리 (DOM 유지 - JS가 참조) -->
-            <button id="btnExpandAll" class="btn-sm-toggle" onclick="toggleAllCampaigns(); _updateContextToolbar('dashboard')" style="display:none">
-              <i class="fas fa-expand-alt"></i> 전체 펼치기
-            </button>
-            <button id="btnHideDone" class="btn-sm-toggle active" onclick="toggleHideDone(); _updateContextToolbar('dashboard')" style="display:none">
-              <i class="fas fa-eye"></i> 완료건 표시
-            </button>
-            <button id="btnHideCampName" class="btn-sm-toggle" onclick="toggleHideCampName(); _updateContextToolbar('dashboard')" style="display:none">
-              <i class="fas fa-tag"></i> 캠페인명 표시
-            </button>
-
-            <!-- ★ 열 표시/숨김 토글 버튼 (DOM 유지 - JS 참조) -->
-            <div style="position:relative" id="colVisWrap">
-              <button id="btnColVis" class="btn-col-vis" onclick="toggleColVisDropdown(event)" title="열 표시/숨김 설정">
-                <i class="fas fa-columns"></i> 열 설정
-              </button>
-              <div id="colVisDropdown" style="display:none">
-                <div class="col-vis-header">열 표시 설정</div>
-                <!-- JS로 채워짐 -->
-              </div>
-            </div>
-
-            <!-- 새로고침/완료알림 숨김 (헤더 컨텍스트로 이동) -->
-            <button class="btn-sm-refresh" onclick="loadAdminDashboard()" style="display:none">
+            <button class="btn-sm" onclick="loadTabDashboard()" style="font-size:.78rem">
               <i class="fas fa-sync-alt"></i> 새로고침
             </button>
-            <button id="pollToggleBtn" class="btn-sm-refresh" onclick="toggleDashPolling(); _updateContextToolbar('dashboard')" title="탭 완료 시 브라우저 알림 (5분 간격 폴링)" style="display:none;background:#FFF7ED;border-color:#FED7AA;color:#C2410C">
-              <i class="fas fa-bell"></i> 완료알림 켜기
-            </button>
           </div>
         </div>
 
-        <!-- ★ 대시보드 빠른 검색창 -->
-        <div class="dash-search-bar has-dev-label" id="dashSearchBar">
-          <span class="dev-label">검색창 / Search Bar</span>
-          <div class="dash-search-wrap">
-            <i class="fas fa-search search-icon"></i>
-            <input
-              type="text"
-              id="dashSearchInput"
-              placeholder="탭명, 상품명, 담당자, 리뷰타입, 진행방식, 입금명, 이체은행, 캠페인명 검색…"
-              oninput="onDashSearch(this.value)"
-              onkeydown="if(event.key==='Escape'){clearDashSearch()}"
-              autocomplete="off"
-              spellcheck="false"
-            />
-            <button class="dash-search-clear" id="dashSearchClear"
-              onclick="clearDashSearch()" title="검색 초기화 (ESC)">
-              <i class="fas fa-times"></i>
-            </button>
-          </div>
-          <div class="dash-search-count" id="dashSearchCount"></div>
-          <span class="dash-search-hint" id="dashSearchHint">
-            <i class="fas fa-keyboard" style="opacity:.5"></i> ESC로 초기화
-          </span>
+        <!-- 동기화 상태 -->
+        <div id="tabDashSyncInfo" style="font-size:.75rem;color:var(--t3);margin:6px 0 10px">
+          데이터 원본: DB(tab_configs) &middot; 로딩중...
         </div>
 
-        <!-- 컬럼 드래그 리사이즈: 실시간 너비 툴팁 -->
-<div id="colDragTooltip"></div>
-<!-- 드래그 수직 가이드라인 -->
-<div id="colDragLine"></div>
-<!-- ★ 메모 미리보기 툴팁 -->
-<div id="memoPreviewTooltip"></div>
-<div id="dashboardWrap">
+        <!-- KPI 카드 -->
+        <div id="tabDashKPI" style="display:grid;grid-template-columns:repeat(auto-fit,minmax(110px,1fr));gap:8px;margin-bottom:14px"></div>
+
+        <!-- 뷰 모드 토글 + 필터 -->
+        <div style="display:flex;gap:8px;margin-bottom:10px;flex-wrap:wrap;align-items:center">
+          <div style="display:flex;border:1px solid #D1D5DB;border-radius:8px;overflow:hidden;font-size:.75rem">
+            <button id="tabDashViewCard" onclick="setTabDashView('card')" style="padding:5px 10px;border:none;cursor:pointer;background:#1D4ED8;color:#fff"><i class="fas fa-id-card"></i> 카드</button>
+            <button id="tabDashViewTable" onclick="setTabDashView('table')" style="padding:5px 10px;border:none;cursor:pointer;background:#fff;color:#374151"><i class="fas fa-table"></i> 테이블</button>
+          </div>
+          <select id="tabDashStatusFilter" onchange="renderTabDashTable()" style="padding:5px 8px;border:1px solid #D1D5DB;border-radius:8px;font-size:.78rem">
+            <option value="">전체 상태</option>
+            <option value="active">활성</option>
+            <option value="closed">마감</option>
+          </select>
+          <select id="tabDashManagerFilter" onchange="renderTabDashTable()" style="padding:5px 8px;border:1px solid #D1D5DB;border-radius:8px;font-size:.78rem">
+            <option value="">전체 담당자</option>
+          </select>
+          <select id="tabDashCampaignFilter" onchange="renderTabDashTable()" style="padding:5px 8px;border:1px solid #D1D5DB;border-radius:8px;font-size:.78rem;max-width:250px">
+            <option value="">전체 캠페인</option>
+          </select>
+          <select id="tabDashReviewTypeFilter" onchange="renderTabDashTable()" style="padding:5px 8px;border:1px solid #D1D5DB;border-radius:8px;font-size:.78rem">
+            <option value="">전체 리뷰유형</option>
+          </select>
+          <input type="text" id="tabDashSearch" placeholder="탭명/상품명/캠페인/담당자 검색..." oninput="renderTabDashTable()" style="flex:1;min-width:140px;padding:5px 10px;border:1px solid #D1D5DB;border-radius:8px;font-size:.78rem">
+          <span id="tabDashCount" style="font-size:.75rem;color:var(--t3);white-space:nowrap">0건</span>
+        </div>
+
+        <!-- 컬럼 표시 토글 (테이블 모드용) -->
+        <div id="tabDashColToggle" style="display:none;margin-bottom:10px;padding:8px 10px;background:#F9FAFB;border-radius:8px;border:1px solid #E5E7EB">
+          <div style="font-size:.72rem;font-weight:600;color:var(--t2);margin-bottom:6px"><i class="fas fa-columns"></i> 표시 컬럼 선택</div>
+          <div id="tabDashColCheckboxes" style="display:flex;flex-wrap:wrap;gap:4px 10px;font-size:.72rem"></div>
+        </div>
+
+        <!-- 테이블/카드 컨테이너 -->
+        <div id="tabDashTableWrap" style="overflow-x:auto;font-size:.78rem;border-radius:8px;border:1px solid #E5E7EB">
           <div class="admin-loading">
             <i class="fas fa-circle-notch fa-spin"></i> 불러오는 중...
           </div>
+        </div>
+
+        <!-- 상세 모달 -->
+        <div id="tabDashDetailModal" onclick="if(event.target===this)closeTabDashDetail()" style="display:none;position:fixed;inset:0;z-index:9999;background:rgba(0,0,0,.45);justify-content:center;align-items:center">
+          <div style="background:#fff;border-radius:12px;max-width:620px;width:95%;max-height:85vh;overflow-y:auto;padding:24px;box-shadow:0 20px 60px rgba(0,0,0,.2)">
+            <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:16px">
+              <h3 id="tabDashDetailTitle" style="font-size:1rem;font-weight:700;color:var(--t1);margin:0"><i class="fas fa-info-circle" style="color:#1D4ED8;margin-right:6px"></i>탭 상세 정보</h3>
+              <button onclick="closeTabDashDetail()" style="background:none;border:none;font-size:1.2rem;cursor:pointer;color:var(--t3)">&times;</button>
+            </div>
+            <div id="tabDashDetailBody" style="font-size:.82rem"></div>
+          </div>
+        </div>
+
+        <!-- 기존 대시보드 기능을 위한 숨겨진 DOM (JS 참조용) -->
+        <div style="display:none">
+          <div id="dashboardSummary" class="hidden">
+            <span id="sumTotal">0</span><span id="sumDone">0</span>
+            <span id="sumPending">0</span><span id="sumRate">0%</span>
+          </div>
+          <div id="dashboardWrap"></div>
+          <div id="dashFilterWrap"><div id="dashFilterDropdown"></div></div>
+          <button id="dashFilterBtn"></button>
+          <button id="btnClosed"></button><button id="btnClosedExec" style="display:none"></button>
+          <button id="btnExpandAll"></button><button id="btnHideDone"></button>
+          <button id="btnHideCampName"></button>
+          <div id="colVisWrap"><button id="btnColVis"></button><div id="colVisDropdown"></div></div>
+          <button id="pollToggleBtn"></button>
+          <div id="dashSearchBar"><input id="dashSearchInput"><div id="dashSearchCount"></div></div>
+          <div id="colDragTooltip"></div><div id="colDragLine"></div><div id="memoPreviewTooltip"></div>
+          <label id="liveModeToggleWrap"><input type="checkbox" id="liveModeCheckbox"><span id="liveModeLabel">LIVE</span></label>
         </div>
         <!-- ═══════════════════════════════════════════════════════ -->
         <!-- Phase 8: 실시간 알림 피드 (SSE) -->
@@ -1427,79 +1346,10 @@
       <!-- ★ Phase 14: 설정 탭 (키워드 관리 + 인식 실패 탭) -->
       <div id="tab-settings" class="admin-tab-pane" style="padding:16px">
 
-        <!-- ★ Phase 7: 캠페인 탭 관리 대시보드 (전체 현황) -->
-        <div class="admin-section-header">
-          <span style="font-size:.95rem;font-weight:700;color:var(--t1)">
-            <i class="fas fa-th-list" style="color:#1D4ED8;margin-right:6px"></i>캠페인 탭 관리
-          </span>
-          <div style="display:flex;gap:6px;margin-left:auto;flex-wrap:wrap">
-            <button id="btnSyncTabNames" class="btn-sm" onclick="syncTabNames(false)" style="font-size:.78rem;background:#7C3AED;color:#fff;border:none;border-radius:6px;padding:5px 12px;cursor:pointer" title="시트의 실제 탭명·URL을 DB와 동기화합니다">
-              <i class="fas fa-exchange-alt"></i> 탭명 동기화
-            </button>
-            <button id="btnCleanClosed" class="btn-sm" onclick="cleanClosedTabs()" style="font-size:.78rem;background:#DC2626;color:#fff;border:none;border-radius:6px;padding:5px 12px;cursor:pointer">
-              <i class="fas fa-broom"></i> 마감탭 정리
-            </button>
-            <button class="btn-sm" onclick="exportTabDashCSV()" style="font-size:.78rem;background:#059669;color:#fff;border:none;border-radius:6px;padding:5px 12px;cursor:pointer">
-              <i class="fas fa-file-csv"></i> CSV 내보내기
-            </button>
-            <button class="btn-sm" onclick="loadTabDashboard()" style="font-size:.78rem">
-              <i class="fas fa-sync-alt"></i> 새로고침
-            </button>
-          </div>
-        </div>
-
-        <!-- 동기화 상태 -->
-        <div id="tabDashSyncInfo" style="font-size:.75rem;color:var(--t3);margin:6px 0 10px">
-          데이터 원본: DB(tab_configs) &middot; 로딩중...
-        </div>
-
-        <!-- KPI 카드 -->
-        <div id="tabDashKPI" style="display:grid;grid-template-columns:repeat(auto-fit,minmax(110px,1fr));gap:8px;margin-bottom:14px"></div>
-
-        <!-- 뷰 모드 토글 + 필터 -->
-        <div style="display:flex;gap:8px;margin-bottom:10px;flex-wrap:wrap;align-items:center">
-          <div style="display:flex;border:1px solid #D1D5DB;border-radius:8px;overflow:hidden;font-size:.75rem">
-            <button id="tabDashViewCard" onclick="setTabDashView('card')" style="padding:5px 10px;border:none;cursor:pointer;background:#1D4ED8;color:#fff"><i class="fas fa-id-card"></i> 카드</button>
-            <button id="tabDashViewTable" onclick="setTabDashView('table')" style="padding:5px 10px;border:none;cursor:pointer;background:#fff;color:#374151"><i class="fas fa-table"></i> 테이블</button>
-          </div>
-          <select id="tabDashStatusFilter" onchange="renderTabDashTable()" style="padding:5px 8px;border:1px solid #D1D5DB;border-radius:8px;font-size:.78rem">
-            <option value="">전체 상태</option>
-            <option value="active">활성</option>
-            <option value="closed">마감</option>
-          </select>
-          <select id="tabDashManagerFilter" onchange="renderTabDashTable()" style="padding:5px 8px;border:1px solid #D1D5DB;border-radius:8px;font-size:.78rem">
-            <option value="">전체 담당자</option>
-          </select>
-          <select id="tabDashCampaignFilter" onchange="renderTabDashTable()" style="padding:5px 8px;border:1px solid #D1D5DB;border-radius:8px;font-size:.78rem;max-width:250px">
-            <option value="">전체 캠페인</option>
-          </select>
-          <select id="tabDashReviewTypeFilter" onchange="renderTabDashTable()" style="padding:5px 8px;border:1px solid #D1D5DB;border-radius:8px;font-size:.78rem">
-            <option value="">전체 리뷰유형</option>
-          </select>
-          <input type="text" id="tabDashSearch" placeholder="탭명/상품명/캠페인/담당자 검색..." oninput="renderTabDashTable()" style="flex:1;min-width:140px;padding:5px 10px;border:1px solid #D1D5DB;border-radius:8px;font-size:.78rem">
-          <span id="tabDashCount" style="font-size:.75rem;color:var(--t3);white-space:nowrap">0건</span>
-        </div>
-
-        <!-- 컬럼 표시 토글 (테이블 모드용) -->
-        <div id="tabDashColToggle" style="display:none;margin-bottom:10px;padding:8px 10px;background:#F9FAFB;border-radius:8px;border:1px solid #E5E7EB">
-          <div style="font-size:.72rem;font-weight:600;color:var(--t2);margin-bottom:6px"><i class="fas fa-columns"></i> 표시 컬럼 선택</div>
-          <div id="tabDashColCheckboxes" style="display:flex;flex-wrap:wrap;gap:4px 10px;font-size:.72rem"></div>
-        </div>
-
-        <!-- 테이블/카드 컨테이너 -->
-        <div id="tabDashTableWrap" style="overflow-x:auto;font-size:.78rem;border-radius:8px;border:1px solid #E5E7EB">
-          <span style="color:var(--t3);padding:12px;display:block">탭 전환 시 자동 로드</span>
-        </div>
-
-        <!-- 상세 모달 -->
-        <div id="tabDashDetailModal" onclick="if(event.target===this)closeTabDashDetail()" style="display:none;position:fixed;inset:0;z-index:9999;background:rgba(0,0,0,.45);justify-content:center;align-items:center">
-          <div style="background:#fff;border-radius:12px;max-width:620px;width:95%;max-height:85vh;overflow-y:auto;padding:24px;box-shadow:0 20px 60px rgba(0,0,0,.2)">
-            <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:16px">
-              <h3 id="tabDashDetailTitle" style="font-size:1rem;font-weight:700;color:var(--t1);margin:0"><i class="fas fa-info-circle" style="color:#1D4ED8;margin-right:6px"></i>탭 상세 정보</h3>
-              <button onclick="closeTabDashDetail()" style="background:none;border:none;font-size:1.2rem;cursor:pointer;color:var(--t3)">&times;</button>
-            </div>
-            <div id="tabDashDetailBody" style="font-size:.82rem"></div>
-          </div>
+        <!-- ★ 캠페인 탭 관리는 대시보드 탭으로 이동됨 -->
+        <div style="padding:16px 0;text-align:center;color:var(--t3);font-size:.82rem">
+          <i class="fas fa-th-list" style="color:#1D4ED8;margin-right:6px"></i>
+          <b>캠페인 탭 관리</b>가 <a href="javascript:switchAdminTab('dashboard')" style="color:#1D4ED8;text-decoration:underline;font-weight:600">대시보드</a> 탭으로 이동되었습니다.
         </div>
 
         <hr style="margin:28px 0;border:none;border-top:1px solid #E5E7EB">

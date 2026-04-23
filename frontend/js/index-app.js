@@ -1777,9 +1777,9 @@ function switchAdminTab(tabName) {
   if (tabName === "reviewers") loadReviewerList();
   if (tabName === "recruit")   { loadRecruitList(); loadRecruitTabOptions(); }
   if (tabName === "payment")   initPaymentPanel();
-  if (tabName === "dashboard") { try { loadSystemMonitor(); } catch(_){} try { loadStatsOverview(); } catch(_){} }
+  if (tabName === "dashboard") { try { loadTabDashboard(); } catch(_){} try { loadSystemMonitor(); } catch(_){} try { loadStatsOverview(); } catch(_){} }
   if (tabName === "archive")   { try { loadArchiveList(); } catch(_){} try { _loadArchiveHistory(); } catch(_){} }
-  if (tabName === "settings")  { try { loadTabDashboard(); } catch(_){} try { loadUnrecognizedTabs(); } catch(_){} try { loadKeywordList(); } catch(_){} }
+  if (tabName === "settings")  { try { loadUnrecognizedTabs(); } catch(_){} try { loadKeywordList(); } catch(_){} }
   // ★ 컨텍스트 툴바 업데이트
   _updateContextToolbar(tabName);
 }
@@ -1797,7 +1797,7 @@ const _CTX_TOOLBAR_DEFS = {
     { id:'ctx-hide-done',   label:'완료숨김',  icon:'fa-eye-slash',   style:'',           onclick:"toggleHideDone(); _updateContextToolbar('dashboard')", title:'완료건 숨김/표시', elId:'btnHideDone'},
     { id:'ctx-campname',    label:'캠페인명',  icon:'fa-tag',         style:'',           onclick:"toggleHideCampName(); _updateContextToolbar('dashboard')", title:'캠페인명 표시/숨김', elId:'btnHideCampName'},
     { sep: true },
-    { id:'ctx-refresh',     label:'새로고침',  icon:'fa-sync-alt',    style:'',           onclick:"loadAdminDashboard()", title:'대시보드 새로고침'},
+    { id:'ctx-refresh',     label:'새로고침',  icon:'fa-sync-alt',    style:'',           onclick:"loadTabDashboard()", title:'대시보드 새로고침'},
     { id:'ctx-poll',        label:'완료알림',  icon:'fa-bell',        style:'orange',     onclick:"toggleDashPolling(); _updateContextToolbar('dashboard')", title:'탭 완료 알림 폴링', elId:'pollToggleBtn'},
   ],
   reviewers: [
@@ -1992,6 +1992,9 @@ async function _deleteReviewer(name, phone) {
 
 /* ── 제출 현황 대시보드 ── */
 async function loadAdminDashboard() {
+  // ★ v11.5: 캠페인 탭 관리 UI로 통합 — 대시보드 메인은 loadTabDashboard()가 담당
+  try { await loadTabDashboard(); } catch(_){}
+  
   if (!isAdminLoggedIn()) { showToast("세션이 만료되었습니다. 다시 로그인하세요.", "warning"); exitAdmin(); return; }
   
   // ── 전역 레이아웃 불러오기 (최초 1회만) ──
