@@ -511,6 +511,7 @@ async function loadSystemMonitor() {
   loadSyncQueueStats();
   loadBuildHistory();
   loadApiMetrics();
+  loadSmartBuildStatus();
 }
 
 async function loadSyncQueueStats() {
@@ -841,7 +842,7 @@ function connectSSE() {
     };
 
     // 이벤트별 핸들러
-    ['review_submit', 'order_submit', 'image_extract', 'image_upload', 'index_build', 'system', 'dirty_detected'].forEach(function(evtType) {
+    ['review_submit', 'order_submit', 'image_extract', 'image_upload', 'index_build', 'system', 'dirty_detected', 'smart_build_done', 'dirty_auto_built'].forEach(function(evtType) {
       _sseSource.addEventListener(evtType, function(event) {
         try {
           const data = JSON.parse(event.data);
@@ -849,6 +850,10 @@ function connectSSE() {
           // ★ Phase 4: dirty_detected 수신 시 대시보드 dirty 배지 갱신
           if (evtType === 'dirty_detected' && typeof _renderDirtyBadges === 'function') {
             _renderDirtyBadges(data.dirtySheets || []);
+          }
+          // ★ 스마트빌드 완료 시 상태 패널 갱신
+          if (evtType === 'smart_build_done' && typeof loadSmartBuildStatus === 'function') {
+            loadSmartBuildStatus();
           }
         } catch (_) {}
       });
@@ -1259,3 +1264,205 @@ function _renderCampaignTable(campaigns, totals) {
 }
 
 // Phase 10 아카이브 관련 함수 → index-app.js로 이전됨 (Phase 12)
+
+// ═══════════════════════════════════════════════════════════
+// ★ 스마트 빌드 상태 모니터링 UI
+// ═══════════════════════════════════════════════════════════
+
+async function loadSmartBuildStatus() {
+  const el = document.getElementById("smartBuildStatusPanel");
+  const badge = document.getElementById("smartBuildStatusBadge");
+  const schedBtn = document.getElementById("btnSmartBuildScheduler");
+  if (!el) return;
+
+  try {
+    const data = await gasGet({ action: "smartBuildStatus" });
+    if (!data || data.error) {
+      el.innerHTML = `<span style="color:var(--t3)">스마트 빌드 데이터 없음</span>`;
+      return;
+    }
+
+    // 스케줄러 상태 배지
+    if (badge) {
+      if (data.running) {
+        badge.textContent = "실행 중";
+        badge.style.background = "#FEF3C7";
+        badge.style.color = "#92400E";
+      } else if (data.schedulerActive) {
+        badge.textContent = "활성";
+        badge.style.background = "#D1FAE5";
+        badge.style.color = "#065F46";
+      } else {
+        badge.textContent = "비활성";
+        badge.style.background = "#FEE2E2";
+        badge.style.color = "#991B1B";
+      }
+    }
+
+    // 스케줄러 버튼
+    if (schedBtn) {
+      if (data.schedulerActive) {
+        schedBtn.innerHTML = '<i class="fas fa-clock"></i> 스케줄러: ON';
+        schedBtn.style.background = "#059669";
+      } else {
+        schedBtn.innerHTML = '<i class="fas fa-clock"></i> 스케줄러: OFF';
+        schedBtn.style.background = "#6B7280";
+      }
+    }
+
+    // 통계 카드
+    const lastRun = data.lastRun;
+    const interval = data.intervalMs ? (data.intervalMs / 60000).toFixed(0) + "분" : "-";
+
+    // 다음 실행까지 남은 시간 계산
+    let nextRunText = "-";
+    if (data.schedulerActive && lastRun && lastRun.timestamp) {
+      const lastTs = new Date(lastRun.timestamp).getTime();
+      const nextTs = lastTs + (data.intervalMs || 300000);
+      const remaining = nextTs - Date.now();
+      if (remaining > 0) {
+        const mins = Math.floor(remaining / 60000);
+        const secs = Math.floor((remaining % 60000) / 1000);
+        nextRunText = `${mins}분 ${secs}초 후`;
+      } else {
+        nextRunText = "곧 실행";
+      }
+    }
+
+    let html = `
+      <div style="display:grid;grid-template-columns:repeat(6,1fr);gap:8px;text-align:center;margin-bottom:12px">
+        <div style="background:#EFF6FF;border-radius:8px;padding:8px">
+          <div style="font-size:1.1rem;font-weight:700;color:#1D4ED8">${data.runCount || 0}</div>
+          <div style="font-size:.7rem;color:#6B7280">총 실행</div>
+        </div>
+        <div style="background:#F0FDF4;border-radius:8px;padding:8px">
+          <div style="font-size:1.1rem;font-weight:700;color:#16A34A">${data.cachedSheets || 0}</div>
+          <div style="font-size:.7rem;color:#6B7280">캐시 시트</div>
+        </div>
+        <div style="background:#FDF4FF;border-radius:8px;padding:8px">
+          <div style="font-size:1.1rem;font-weight:700;color:#7C3AED">${data.cachedChecksums || 0}</div>
+          <div style="font-size:.7rem;color:#6B7280">캐시 체크섬</div>
+        </div>
+        <div style="background:#FFF7ED;border-radius:8px;padding:8px">
+          <div style="font-size:1.1rem;font-weight:700;color:#EA580C">${interval}</div>
+          <div style="font-size:.7rem;color:#6B7280">주기</div>
+        </div>
+        <div style="background:#ECFDF5;border-radius:8px;padding:8px">
+          <div style="font-size:1.1rem;font-weight:700;color:#059669">${nextRunText}</div>
+          <div style="font-size:.7rem;color:#6B7280">다음 실행</div>
+        </div>
+        <div style="background:#F8FAFC;border-radius:8px;padding:8px">
+          <div style="font-size:.9rem;font-weight:600;color:var(--t2)">${data.startedAt ? new Date(data.startedAt).toLocaleString("ko-KR", {timeZone:"Asia/Seoul", month:"numeric", day:"numeric", hour:"2-digit", minute:"2-digit"}) : "-"}</div>
+          <div style="font-size:.7rem;color:#6B7280">시작 시각</div>
+        </div>
+      </div>
+    `;
+
+    // 최근 실행 결과
+    if (lastRun) {
+      const elapsed = lastRun.elapsed ? (lastRun.elapsed / 1000).toFixed(1) + "s" : "-";
+      const ts = lastRun.timestamp ? new Date(lastRun.timestamp).toLocaleString("ko-KR", {timeZone:"Asia/Seoul", month:"numeric", day:"numeric", hour:"2-digit", minute:"2-digit", second:"2-digit"}) : "-";
+      const errColor = (lastRun.errors || 0) > 0 ? "#DC2626" : "#9CA3AF";
+
+      html += `
+        <div style="background:#F8FAFC;border-radius:8px;padding:10px;border:1px solid var(--border)">
+          <div style="font-weight:600;font-size:.78rem;color:var(--t1);margin-bottom:8px">
+            <i class="fas fa-clock" style="color:#6366F1;margin-right:4px"></i>최근 실행 결과
+            <span style="font-size:.7rem;color:var(--t3);margin-left:8px">${ts}</span>
+            <span style="font-size:.7rem;color:var(--t3);margin-left:4px">(${elapsed})</span>
+            ${lastRun.isFirstRun ? '<span style="font-size:.65rem;background:#DBEAFE;color:#1E40AF;padding:1px 6px;border-radius:4px;margin-left:6px">초기 실행</span>' : ''}
+          </div>
+          <div style="display:grid;grid-template-columns:repeat(5,1fr);gap:6px;text-align:center;font-size:.78rem">
+            <div>
+              <div style="font-weight:700;color:#1D4ED8">${lastRun.sheetsChecked || 0}</div>
+              <div style="font-size:.65rem;color:#6B7280">시트 확인</div>
+            </div>
+            <div>
+              <div style="font-weight:700;color:#F59E0B">${lastRun.sheetsChanged || 0}</div>
+              <div style="font-size:.65rem;color:#6B7280">변경 시트</div>
+            </div>
+            <div>
+              <div style="font-weight:700;color:#7C3AED">${lastRun.tabsScanned || 0}</div>
+              <div style="font-size:.65rem;color:#6B7280">탭 스캔</div>
+            </div>
+            <div>
+              <div style="font-weight:700;color:#16A34A">${lastRun.tabsUpdated || 0}</div>
+              <div style="font-size:.65rem;color:#6B7280">탭 갱신</div>
+            </div>
+            <div>
+              <div style="font-weight:700;color:${errColor}">${lastRun.errors || 0}</div>
+              <div style="font-size:.65rem;color:#6B7280">오류</div>
+            </div>
+          </div>
+          ${lastRun.errorDetails && lastRun.errorDetails.length > 0 ? `
+            <div style="margin-top:8px;font-size:.72rem">
+              <div style="font-weight:600;color:#DC2626;margin-bottom:4px"><i class="fas fa-exclamation-triangle"></i> 오류 상세:</div>
+              ${lastRun.errorDetails.slice(0, 5).map(function(e) {
+                return '<div style="background:#FEF2F2;padding:3px 6px;border-radius:4px;margin-bottom:2px">' +
+                  '<b>' + (e.phase || '-') + '</b>: ' + (e.error || '').substring(0, 80) +
+                  '</div>';
+              }).join('')}
+            </div>
+          ` : ''}
+        </div>
+      `;
+    } else {
+      html += `<div style="text-align:center;color:var(--t3);padding:12px;font-size:.78rem"><i class="fas fa-info-circle"></i> 아직 실행된 적이 없습니다. 서버 시작 30초 후 첫 실행됩니다.</div>`;
+    }
+
+    el.innerHTML = html;
+  } catch (err) {
+    el.innerHTML = `<span style="color:#EF4444"><i class="fas fa-exclamation-circle"></i> 로드 실패: ${err.message}</span>`;
+  }
+}
+
+async function triggerSmartBuild() {
+  if (!confirm("스마트 빌드를 수동으로 실행하시겠습니까?\n(Drive API로 변경 감지 → 변경 시트만 Sheets API로 갱신)")) return;
+
+  const badge = document.getElementById("smartBuildStatusBadge");
+  if (badge) {
+    badge.textContent = "실행 중...";
+    badge.style.background = "#FEF3C7";
+    badge.style.color = "#92400E";
+  }
+
+  try {
+    const res = await gasPost({ action: "smartBuildRun" });
+    if (res.ok) {
+      showToast("스마트 빌드 시작됨 — 완료 시 알림됩니다", "info");
+      // 5초 후 상태 갱신
+      setTimeout(loadSmartBuildStatus, 5000);
+      // 30초 후 다시 갱신 (빌드 완료 후)
+      setTimeout(loadSmartBuildStatus, 30000);
+    } else {
+      showToast(res.error || "스마트 빌드 실행 실패", "error");
+      loadSmartBuildStatus();
+    }
+  } catch (err) {
+    showToast("스마트 빌드 오류: " + err.message, "error");
+    loadSmartBuildStatus();
+  }
+}
+
+async function toggleSmartBuildScheduler() {
+  // 현재 상태 확인
+  try {
+    const status = await gasGet({ action: "smartBuildStatus" });
+    const isActive = status && status.schedulerActive;
+    const action = isActive ? "smartBuildStop" : "smartBuildStart";
+    const label = isActive ? "정지" : "시작";
+
+    if (!confirm(`스마트 빌드 스케줄러를 ${label}하시겠습니까?`)) return;
+
+    const res = await gasPost({ action: action });
+    if (res.ok) {
+      showToast(`스마트 빌드 스케줄러 ${label}됨`, "success");
+    } else {
+      showToast(res.error || `스케줄러 ${label} 실패`, "error");
+    }
+    loadSmartBuildStatus();
+  } catch (err) {
+    showToast("스케줄러 토글 오류: " + err.message, "error");
+    loadSmartBuildStatus();
+  }
+}

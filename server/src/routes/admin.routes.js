@@ -440,4 +440,63 @@ router.post('/unrecognized/resolve', authMiddleware, masterOnlyMiddleware, async
   } catch (err) { next(err); }
 });
 
+// ═══════════════════════════════════════════════════════════
+// ★ 스마트 빌드 (Drive API + Sheets batchGet 기반 — 기존 인덱스빌드와 별개)
+// ═══════════════════════════════════════════════════════════
+const {
+  runSmartBuild,
+  startSmartBuild,
+  stopSmartBuild,
+  getSmartBuildStatus,
+} = require('../services/smartBuild.service');
+
+// GET /api/admin/smart-build/status — 스마트 빌드 상태 조회
+router.get('/smart-build/status', authMiddleware, async (req, res, next) => {
+  try {
+    const status = getSmartBuildStatus();
+    res.json({ ok: true, ...status });
+  } catch (err) { next(err); }
+});
+
+// POST /api/admin/smart-build/run — 스마트 빌드 1회 수동 실행
+router.post('/smart-build/run', authMiddleware, async (req, res, next) => {
+  try {
+    // 비동기 실행: 즉시 "시작됨" 응답 → 백그라운드 처리
+    const statusBefore = getSmartBuildStatus();
+    if (statusBefore.running) {
+      return res.json({ ok: false, error: '이미 스마트 빌드가 실행 중입니다.' });
+    }
+
+    // 백그라운드 실행
+    runSmartBuild().then(result => {
+      const { broadcast } = require('../utils/sse');
+      broadcast('smart_build_done', {
+        message: `스마트빌드 완료: ${result.tabsUpdated}탭 갱신, ${result.tabsSkipped}탭 스킵, ${result.errors}건 오류`,
+        ...result,
+      });
+    }).catch(err => {
+      const { logger } = require('../utils/logger');
+      logger.error(`[smartBuild] 수동 실행 오류: ${err.message}`);
+    });
+
+    res.json({ ok: true, message: '스마트 빌드를 시작했습니다. 완료 시 SSE로 알림됩니다.' });
+  } catch (err) { next(err); }
+});
+
+// POST /api/admin/smart-build/start — 스케줄러 시작 (5분 주기)
+router.post('/smart-build/start', authMiddleware, masterOnlyMiddleware, async (req, res, next) => {
+  try {
+    const started = startSmartBuild();
+    res.json({ ok: true, started, status: getSmartBuildStatus() });
+  } catch (err) { next(err); }
+});
+
+// POST /api/admin/smart-build/stop — 스케줄러 정지
+router.post('/smart-build/stop', authMiddleware, masterOnlyMiddleware, async (req, res, next) => {
+  try {
+    const stopped = stopSmartBuild();
+    res.json({ ok: true, stopped, status: getSmartBuildStatus() });
+  } catch (err) { next(err); }
+});
+
 module.exports = router;

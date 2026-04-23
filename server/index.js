@@ -1,6 +1,7 @@
 require('dotenv').config();
 const app = require('./src/app');
 const { startCronJobs } = require('./src/jobs/cron');
+const { startSmartBuild } = require('./src/services/smartBuild.service');
 const { logger } = require('./src/utils/logger');
 const fs = require('fs');
 const path = require('path');
@@ -80,13 +81,20 @@ async function runMigrations() {
       startCronJobs();
       logger.info('✅ 인덱스 빌드 스케줄러 시작됨');
     } else {
-      logger.info('⏭ 개발 환경 — 스케줄러 비활성화 (수동 빌드 사용)');
+      logger.info('⏭ 개발 환경 — 기존 CRON 스케줄러 비활성화 (수동 빌드 사용)');
     }
+
+    // ★ 스마트 빌드 스케줄러 시작 (환경 무관 — 5분 주기)
+    startSmartBuild();
+    logger.info('✅ 스마트 빌드 스케줄러 시작됨 (5분 주기, Drive+Sheets API)');
   });
 
   // ── Graceful Shutdown (Railway / Docker 대응) ──
   function gracefulShutdown(signal) {
     logger.info(`${signal} 수신 — 서버 종료 시작...`);
+    // 스마트 빌드 스케줄러 정지
+    const { stopSmartBuild } = require('./src/services/smartBuild.service');
+    stopSmartBuild();
     server.close(() => {
       logger.info('✅ HTTP 서버 종료 완료');
       const pool = require('./src/db/pool');

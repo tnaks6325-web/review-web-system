@@ -185,6 +185,12 @@ const _ACTION_MAP = {
   'getUnrecognized':       { method: 'GET',    path: '/api/admin/unrecognized' },
   'ignoreUnrecognized':    { method: 'POST',   path: '/api/admin/unrecognized/ignore' },
   'resolveUnrecognized':   { method: 'POST',   path: '/api/admin/unrecognized/resolve' },
+
+  // ★ 스마트 빌드 (Drive API + Sheets batchGet 기반)
+  'smartBuildStatus':      { method: 'GET',  path: '/api/admin/smart-build/status' },
+  'smartBuildRun':         { method: 'POST', path: '/api/admin/smart-build/run' },
+  'smartBuildStart':       { method: 'POST', path: '/api/admin/smart-build/start' },
+  'smartBuildStop':        { method: 'POST', path: '/api/admin/smart-build/stop' },
 };
 
 // ═══════════════════════════════════════════════════════════

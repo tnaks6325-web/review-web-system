@@ -879,7 +879,7 @@
 
         <!-- 동기화 상태 -->
         <div id="tabDashSyncInfo" style="font-size:.75rem;color:var(--t3);margin:6px 0 10px">
-          데이터 원본: DB(tab_configs) &middot; 로딩중...
+          데이터 원본: DB(tab_configs) &middot; 스마트빌드 5분 자동갱신 &middot; 로딩중...
         </div>
 
         <!-- KPI 카드 -->
@@ -988,6 +988,30 @@
         </div>
 
         <div style="display:grid;grid-template-columns:1fr 1fr;gap:16px;margin-top:12px" id="sysMonitorGrid">
+          <!-- ★ 스마트 빌드 상태 (신규) -->
+          <div style="background:#fff;border-radius:12px;padding:16px;box-shadow:0 1px 4px rgba(0,0,0,.06);border:1px solid var(--border);grid-column:1/-1">
+            <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px">
+              <h4 style="margin:0;font-size:.88rem;color:var(--t1)">
+                <i class="fas fa-bolt" style="color:#F59E0B"></i> 스마트 빌드
+                <span id="smartBuildStatusBadge" style="font-size:.65rem;padding:2px 8px;border-radius:99px;margin-left:6px;background:#D1FAE5;color:#065F46">대기중</span>
+              </h4>
+              <div style="display:flex;gap:6px">
+                <button onclick="triggerSmartBuild()" class="btn-sm" style="font-size:.72rem;background:#1D4ED8;color:#fff;border:none;padding:4px 10px;border-radius:6px;cursor:pointer" title="스마트 빌드 1회 수동 실행">
+                  <i class="fas fa-play"></i> 수동 실행
+                </button>
+                <button id="btnSmartBuildScheduler" onclick="toggleSmartBuildScheduler()" class="btn-sm" style="font-size:.72rem;background:#059669;color:#fff;border:none;padding:4px 10px;border-radius:6px;cursor:pointer" title="5분 주기 자동 실행 토글">
+                  <i class="fas fa-clock"></i> 스케줄러: ON
+                </button>
+                <button onclick="loadSmartBuildStatus()" class="btn-sm" style="font-size:.72rem" title="상태 새로고침">
+                  <i class="fas fa-sync-alt"></i>
+                </button>
+              </div>
+            </div>
+            <div id="smartBuildStatusPanel" style="font-size:.82rem;color:var(--t2)">
+              <i class="fas fa-circle-notch fa-spin"></i> 불러오는 중...
+            </div>
+          </div>
+
           <!-- Sync Queue 현황 -->
           <div style="background:#fff;border-radius:12px;padding:16px;box-shadow:0 1px 4px rgba(0,0,0,.06);border:1px solid var(--border)">
             <h4 style="margin:0 0 12px;font-size:.88rem;color:var(--t1)">
