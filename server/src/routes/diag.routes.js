@@ -431,6 +431,69 @@ router.get('/dashboard-check', async (req, res, next) => {
   }
 });
 
+// ═══════════════════════════════════════════════════════════
+// GET /api/diag/sheet-meta — 구글시트 API에서 실제 탭 메타데이터 조회 (gid 검증용)
+// ═══════════════════════════════════════════════════════════
+router.get('/sheet-meta', async (req, res, next) => {
+  try {
+    const { sheetId } = req.query;
+    if (!sheetId) return res.status(400).json({ error: 'sheetId 필수' });
+
+    const meta = await getSpreadsheetMeta(sheetId);
+    if (!meta || meta.length === 0) {
+      return res.json({ ok: false, error: '메타데이터 조회 실패' });
+    }
+
+    const tabs = meta
+      .filter(s => s.properties)
+      .map(s => ({
+        tabName: s.properties.title,
+        gid: String(s.properties.sheetId),
+        index: s.properties.index,
+      }));
+
+    // DB의 tab_configs/index_master와 비교
+    const { rows: dbTabs } = await pool.query(
+      `SELECT tc.tab_name, tc.tab_gid AS tc_gid, im.tab_gid AS im_gid
+       FROM tab_configs tc
+       LEFT JOIN index_master im ON tc.sheet_id = im.sheet_id AND tc.tab_name = im.tab_name
+       WHERE tc.sheet_id = $1
+       ORDER BY tc.tab_name`,
+      [sheetId]
+    );
+
+    // 불일치 감지
+    const dbMap = new Map(dbTabs.map(t => [t.tab_name, t]));
+    const mismatches = [];
+    for (const tab of tabs) {
+      const db = dbMap.get(tab.tabName);
+      if (db) {
+        const dbGid = db.tc_gid || db.im_gid;
+        if (dbGid && dbGid !== tab.gid) {
+          mismatches.push({
+            tabName: tab.tabName,
+            actualGid: tab.gid,
+            dbGid,
+            source: db.tc_gid ? 'tab_configs' : 'index_master',
+          });
+        }
+      }
+    }
+
+    res.json({
+      ok: true,
+      title: meta._spreadsheetTitle || '',
+      totalTabs: tabs.length,
+      dbTabs: dbTabs.length,
+      mismatches: mismatches.length,
+      mismatchDetails: mismatches,
+      tabs: tabs,
+    });
+  } catch (err) {
+    next(err);
+  }
+});
+
 router.get('/inaed-list', async (req, res, next) => {
   try {
     const { rows } = await pool.query(`
