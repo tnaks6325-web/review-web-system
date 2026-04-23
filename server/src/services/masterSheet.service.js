@@ -23,7 +23,7 @@ const SCAN_CACHE_TTL = 5 * 60 * 1000; // 5분
 
 // ── 마스터 시트 헤더 (고정 순서) ──
 const MASTER_HEADERS = [
-  'sheet_url', 'campaign_name', 'tab_name', 'manager', 'time_range',
+  'sheet_url', 'campaign_name', 'tab_name', 'tab_gid', 'manager', 'time_range',
   'taekhap', 'review_type', 'payment_type', 'display_name', 'updated_at',
   'folder_url', 'is_bulk', 'capture_folder_url', 'is_closed',
   'delivery_type', 'round', 'nc_mode', 'deposit_name', 'transfer_bank', 'income_type',
@@ -34,6 +34,7 @@ const COLUMN_MAP = {
   'sheet_url':           'sheet_url',
   'campaign_name':       'campaign_name',
   'tab_name':            'tab_name',
+  'tab_gid':             'tab_gid',
   'manager':             'manager',
   'time_range':          'time_range',
   'taekhap':             'taekhap',

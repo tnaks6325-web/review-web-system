@@ -2057,9 +2057,9 @@ async function loadAdminDashboard() {
           + (isClosedTab ? " is-closed-row" : "");
         row.dataset.tabkey = tabKey;
 
-        const _tabSheetUrl = t.sheetUrl || (t.sheetId ? `https://docs.google.com/spreadsheets/d/${t.sheetId}/edit${t.tabGid ? `?gid=${t.tabGid}#gid=${t.tabGid}` : ''}` : "");
+        const _tabSheetUrl = _buildTabUrl(t.sheetUrl, t.sheetId, t.tabGid);
         const tabNameHtml = _tabSheetUrl
-          ? `<a class="dash-tab-link" href="${escHtml(_tabSheetUrl)}" target="_blank">${escHtml(t.tab)} <i class="fas fa-external-link-alt dash-tab-ext"></i></a>`
+          ? `<a class="dash-tab-link" href="${escHtml(_tabSheetUrl)}" target="_blank" title="${escHtml(_tabSheetUrl)}">${escHtml(t.tab)} <i class="fas fa-external-link-alt dash-tab-ext"></i></a>`
           : `<span>${escHtml(t.tab)}</span>`;
 
         // 시작일 배지
@@ -2202,6 +2202,21 @@ async function loadAdminDashboard() {
   }
 }
 
+/**
+ * ★ v11.2: 탭 URL 구성 헬퍼
+ * sheetUrl(또는 sheetId)에 tabGid를 항상 반영하여 정확한 탭 URL을 반환한다.
+ */
+function _buildTabUrl(sheetUrl, sheetId, tabGid) {
+  let baseUrl = sheetUrl
+    ? sheetUrl.split('#')[0].split('?')[0]
+    : (sheetId ? `https://docs.google.com/spreadsheets/d/${sheetId}/edit` : '');
+  if (!baseUrl) return '';
+  if (tabGid) {
+    baseUrl += `#gid=${tabGid}`;
+  }
+  return baseUrl;
+}
+
 // 대시보드 렌더링 (외부에서 data를 직접 넘겨 재렌더링 가능)
 function renderDashboard(data) {
   const wrap  = document.getElementById("dashboardWrap");
@@ -2271,9 +2286,9 @@ function renderDashboard(data) {
       const row        = document.createElement("div");
       row.className    = "dash-tab-row"+(isTabDone?" tab-done":"")+(isClosedTab?" is-closed-row":"");
       row.dataset.tabkey = tabKey;
-      const _tabSheetUrl2 = t.sheetUrl || (t.sheetId ? `https://docs.google.com/spreadsheets/d/${t.sheetId}/edit${t.tabGid ? `?gid=${t.tabGid}#gid=${t.tabGid}` : ''}` : "");
+      const _tabSheetUrl2 = _buildTabUrl(t.sheetUrl, t.sheetId, t.tabGid);
       const tabNameHtml = _tabSheetUrl2
-        ? `<a class="dash-tab-link" href="${escHtml(_tabSheetUrl2)}" target="_blank">${escHtml(t.tab)} <i class="fas fa-external-link-alt dash-tab-ext"></i></a>`
+        ? `<a class="dash-tab-link" href="${escHtml(_tabSheetUrl2)}" target="_blank" title="${escHtml(_tabSheetUrl2)}">${escHtml(t.tab)} <i class="fas fa-external-link-alt dash-tab-ext"></i></a>`
         : `<span>${escHtml(t.tab)}</span>`;
       const startDateHtml = t.startDate
         ? `<span class="tab-start-date"><i class="fas fa-calendar-day"></i> ${escHtml(t.startDate)}</span>` : "";
