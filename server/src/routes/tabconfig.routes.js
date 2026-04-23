@@ -4,6 +4,7 @@ const pool = require('../db/pool');
 const { authMiddleware } = require('../middleware/auth.middleware');
 const { getSpreadsheetMeta } = require('../services/sheets.service');
 const { syncMasterSheetToDB, scanAndPopulateMaster, applyCachedScanAndSync, hasScanCache, syncSettingsOnly } = require('../services/masterSheet.service');
+const { runIndexScan, applyCachedIndexScan, hasIndexScanCache } = require('../services/indexScan.service');
 const { logger } = require('../utils/logger');
 const { throttledCall } = require('../utils/sheetsThrottle');
 
@@ -660,6 +661,48 @@ router.post('/sync-settings', authMiddleware, async (req, res, next) => {
   } catch (err) {
     logger.error(`[sync-settings] 오류: ${err.message}`);
     res.status(500).json({ error: err.message });
+  }
+});
+
+// ══════════════════════════════════════════════════════════════
+// POST /api/tab/index-scan — ★ 인덱스 스캔: 시트DB → 각 시트 파싱 → 탭목록 쓰기
+// 미리보기: 시트 스캔 → 결과 캐시 저장 (5분 유효)
+// 실행:     캐시가 있으면 재스캔 없이 바로 적용, 없으면 새로 스캔
+// ══════════════════════════════════════════════════════════════
+router.post('/index-scan', authMiddleware, async (req, res, next) => {
+  try {
+    const { dryRun = true } = req.body;
+    logger.info(`[index-scan] ${dryRun ? '미리보기' : '실행'} 요청 — by ${req.admin?.name || 'unknown'}`);
+
+    if (dryRun) {
+      // ── 미리보기: 시트 스캔 + 결과 캐시 ──
+      const result = await runIndexScan(true);
+      return res.json({
+        ok: true, dryRun: true, ...result,
+        message: `미리보기: ${result.totalTabs}개 탭 (${result.sheetsScanned}개 시트 스캔, 오류 ${result.errors}건)`,
+      });
+    }
+
+    // ── 실행: 캐시 있으면 재스캔 없이 바로 적용 ──
+    if (hasIndexScanCache()) {
+      logger.info('[index-scan] ★ 캐시된 스캔 결과로 바로 적용 (재스캔 생략)');
+      const result = await applyCachedIndexScan();
+      return res.json({
+        ok: true, dryRun: false, ...result,
+        message: `완료(캐시): ${result.totalTabs}개 탭 → 탭목록 기록 완료`,
+      });
+    }
+
+    // ── 캐시 없음: 새로 스캔 + 즉시 적용 ──
+    logger.info('[index-scan] 캐시 없음 — 새로 스캔 후 적용');
+    const result = await runIndexScan(false);
+    res.json({
+      ok: true, dryRun: false, ...result,
+      message: `완료: ${result.totalTabs}개 탭 → 탭목록 기록 완료 (${result.elapsed})`,
+    });
+  } catch (err) {
+    logger.error(`[index-scan] 오류: ${err.message}`);
+    res.status(500).json({ error: err.message, stack: process.env.NODE_ENV === 'development' ? err.stack : undefined });
   }
 });
 

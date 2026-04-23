@@ -11911,6 +11911,119 @@ async function syncSettingsOnly() {
 
 // ── [레거시] 광고주 시트 스캔 → 마스터 시트 자동 채우기 ──
 // ★ fullMasterSync()로 대체되었으나 하위 호환성 유지
+
+// ═══════════════════════════════════════════════════════════
+// ★ 인덱스 스캔 (시트DB → 각 시트 파싱 → 탭목록 기록)
+// HTML: btnIndexScanDry / btnIndexScanRun → indexScan(dryRun)
+// 백엔드: POST /api/tab/index-scan
+// ═══════════════════════════════════════════════════════════
+async function indexScan(dryRun) {
+  const btnDry = document.getElementById("btnIndexScanDry");
+  const btnRun = document.getElementById("btnIndexScanRun");
+  const resultEl = document.getElementById("indexScanResult");
+  const activeBtn = dryRun ? btnDry : btnRun;
+  const actionLabel = dryRun ? "미리보기" : "실행";
+
+  if (!dryRun && !confirm(
+    "인덱스 스캔을 실행합니다.\n\n" +
+    "• 시트DB에서 모든 시트 URL을 읽어옵니다\n" +
+    "• 각 시트에 접속하여 탭이름, 탭URL을 파싱합니다\n" +
+    "• 파싱 결과를 탭목록 시트에 기록합니다\n" +
+    "• 기존 설정값(담당자, 택배 등)은 보존됩니다\n\n" +
+    "계속하시겠습니까?"
+  )) return;
+
+  const _saveBtnHtml = activeBtn ? activeBtn.innerHTML : "";
+  if (activeBtn) { activeBtn.disabled = true; activeBtn.innerHTML = `<i class="fas fa-spinner fa-spin"></i> ${actionLabel}중...`; }
+  if (btnDry && btnDry !== activeBtn) btnDry.disabled = true;
+  if (btnRun && btnRun !== activeBtn) btnRun.disabled = true;
+
+  showToast(`🔍 인덱스 스캔 ${actionLabel} 진행중... (약 60~120초 소요)`, "info");
+
+  try {
+    const res = await gasPost({ action: "indexScan", dryRun: !!dryRun }, 300000);
+    if (res.error) { showToast(res.error, "error"); return; }
+
+    if (dryRun) {
+      // ── 미리보기 결과 ──
+      const parts = [];
+      parts.push(`${res.sheetsScanned || 0}개 시트 스캔`);
+      parts.push(`총 ${res.totalTabs || 0}개 탭`);
+      if (res.errors > 0) parts.push(`오류 ${res.errors}건`);
+      showToast(`[미리보기] ${parts.join(", ")} (${res.elapsed || ''})`, res.errors > 0 ? "warning" : "info");
+
+      // 미리보기 상세 표시
+      if (res.preview && res.preview.length > 0 && resultEl) {
+        _showIndexScanPreview(res, resultEl);
+      }
+    } else {
+      // ── 실행 결과 ──
+      const cacheLabel = res.usedCache ? " (캐시 적용 — 재스캔 생략)" : "";
+      showToast(`✅ 인덱스 스캔 완료: ${res.totalTabs || 0}개 탭 기록${cacheLabel} (${res.elapsed || ''})`, "success");
+
+      // 결과 표시
+      if (resultEl) {
+        resultEl.style.display = "block";
+        resultEl.innerHTML = `<div style="font-size:.72rem;color:#065F46;background:#D1FAE5;padding:6px 8px;border-radius:4px">
+          ✅ ${res.totalTabs}개 탭 → 탭목록 시트에 기록 완료 (${res.elapsed})
+          ${res.usedCache ? '<br><small style="color:#92400E">캐시 적용 — 재스캔 생략됨</small>' : ''}
+        </div>`;
+      }
+    }
+  } catch (err) {
+    showToast("인덱스 스캔 오류: " + err.message, "error");
+  } finally {
+    if (activeBtn) { activeBtn.disabled = false; activeBtn.innerHTML = _saveBtnHtml; }
+    if (btnDry && btnDry !== activeBtn) btnDry.disabled = false;
+    if (btnRun && btnRun !== activeBtn) btnRun.disabled = false;
+  }
+}
+
+function _showIndexScanPreview(res, resultEl) {
+  if (!resultEl) return;
+  // 캠페인별 그룹핑
+  const groups = {};
+  (res.preview || []).forEach(p => {
+    const key = p.campaign || '(알 수 없음)';
+    if (!groups[key]) groups[key] = [];
+    groups[key].push(p);
+  });
+
+  let html = `<div style="margin-bottom:6px;font-size:.72rem;color:#374151">
+    <b>📊 ${res.sheetsScanned}개 시트</b> · 총 ${res.totalTabs}탭
+    ${res.errors > 0 ? ` · <span style="color:#DC2626">오류 ${res.errors}</span>` : ''}
+    · 소요: ${res.elapsed || '?'}
+  </div>`;
+
+  for (const [campaign, tabs] of Object.entries(groups)) {
+    html += `<div style="margin-top:4px;font-size:.7rem;font-weight:600;color:#15803D">📁 ${campaign} (${tabs.length})</div>`;
+    for (const tab of tabs) {
+      const tabUrlShort = tab.tabUrl ? tab.tabUrl.replace(/.*#/, '#') : '';
+      html += `<div style="padding:1px 0 1px 12px;font-size:.68rem;color:#4B5563">
+        ${tab.tabName} <span style="color:#9CA3AF;font-size:.6rem">${tabUrlShort}</span>
+      </div>`;
+    }
+  }
+
+  if (res.errorDetails && res.errorDetails.length > 0) {
+    html += `<div style="margin-top:6px;padding:4px 6px;background:#FEF2F2;border-radius:4px;font-size:.66rem;color:#DC2626">
+      ⚠ 오류 ${res.errors}건:
+    </div>`;
+    for (const err of res.errorDetails) {
+      html += `<div style="padding:1px 0 1px 12px;font-size:.64rem;color:#B91C1C">
+        ${err.sheetId || '?'} — ${err.error} (${err.errorCode || ''})
+      </div>`;
+    }
+  }
+
+  html += `<div style="margin-top:6px;font-size:.66rem;color:#92400E;background:#FEF3C7;padding:4px 6px;border-radius:4px">
+    ⚠ 미리보기 모드 — "실행"을 클릭해야 탭목록 시트에 기록됩니다.
+  </div>`;
+
+  resultEl.style.display = "block";
+  resultEl.innerHTML = html;
+}
+
 async function scanMasterSheet(dryRun) {
   const btnDry = document.getElementById("btnScanMasterDry");
   const btnRun = document.getElementById("btnScanMasterRun");
