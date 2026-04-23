@@ -7,30 +7,57 @@ const path = require('path');
 
 const PORT = process.env.PORT || 3000;
 
-// ── 서버 시작 전 자동 마이그레이션 ──
+// ── 서버 시작 전 자동 마이그레이션 (이력 추적) ──
 async function runMigrations() {
   const pool = require('./src/db/pool');
   const migrationsDir = path.resolve(__dirname, 'migrations');
   if (!fs.existsSync(migrationsDir)) return;
 
+  // 마이그레이션 이력 테이블 생성 (최초 1회)
+  await pool.query(`
+    CREATE TABLE IF NOT EXISTS _migrations (
+      id SERIAL PRIMARY KEY,
+      filename TEXT UNIQUE NOT NULL,
+      applied_at TIMESTAMPTZ DEFAULT NOW()
+    )
+  `);
+
+  // 이미 적용된 마이그레이션 조회
+  const { rows: applied } = await pool.query('SELECT filename FROM _migrations');
+  const appliedSet = new Set(applied.map(r => r.filename));
+
   const files = fs.readdirSync(migrationsDir)
     .filter(f => f.endsWith('.sql'))
     .sort();
 
+  let newCount = 0;
   for (const file of files) {
+    if (appliedSet.has(file)) {
+      continue; // 이미 적용됨 → 건너뛰기
+    }
+
     const filePath = path.join(migrationsDir, file);
     const sql = fs.readFileSync(filePath, 'utf8');
     try {
       await pool.query(sql);
-      logger.info(`[migrate] ✅ ${file}`);
+      await pool.query('INSERT INTO _migrations (filename) VALUES ($1) ON CONFLICT DO NOTHING', [file]);
+      logger.info(`[migrate] ✅ ${file} 적용 완료`);
+      newCount++;
     } catch (err) {
-      // "already exists" 등은 무시 (IF NOT EXISTS / IF EXISTS 사용)
-      if (err.message.includes('already exists') || err.message.includes('duplicate') || err.message.includes('does not exist')) {
+      // IF NOT EXISTS 패턴의 무해한 에러는 적용 완료로 처리
+      if (err.message.includes('already exists') || err.message.includes('duplicate')) {
+        await pool.query('INSERT INTO _migrations (filename) VALUES ($1) ON CONFLICT DO NOTHING', [file]);
         logger.info(`[migrate] ⏭ ${file} (이미 적용됨)`);
       } else {
         logger.warn(`[migrate] ⚠️ ${file}: ${err.message}`);
       }
     }
+  }
+
+  if (newCount > 0) {
+    logger.info(`[migrate] 🎉 ${newCount}개 마이그레이션 새로 적용 (총 ${files.length}개)`);
+  } else {
+    logger.info(`[migrate] 모든 마이그레이션 적용 완료 (${files.length}개)`);
   }
 }
 
