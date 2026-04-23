@@ -11490,7 +11490,9 @@ function _cellVal(t, col) {
     if (!url) return '<span style="color:#D1D5DB">—</span>';
     const icon = k === "folder_url" ? "fa-folder" : k === "capture_folder_url" ? "fa-camera" : "fa-external-link-alt";
     const clr = k === "folder_url" ? "#059669" : k === "capture_folder_url" ? "#1D4ED8" : "#7C3AED";
-    return `<a href="${escHtml(url)}" target="_blank" style="color:${clr}" title="${escHtml(url)}"><i class="fas ${icon}"></i></a>`;
+    // sheet_url에 tab_gid가 있으면 #gid= 추가하여 정확한 탭으로 이동
+    const finalUrl = (k === "sheet_url" && t.tab_gid) ? url.replace(/[#?].*$/, '') + '#gid=' + t.tab_gid : url;
+    return `<a href="${escHtml(finalUrl)}" target="_blank" style="color:${clr}" title="${escHtml(finalUrl)}"><i class="fas ${icon}"></i></a>`;
   }
   if (k === "updated_at") {
     return t.updated_at ? new Date(t.updated_at).toLocaleDateString("ko-KR", { month:"short", day:"numeric", hour:"2-digit", minute:"2-digit" }) : "—";
@@ -11535,6 +11537,11 @@ function _renderCardView(wrap, filtered) {
     const folders = [];
     if (t.folder_url) folders.push(`<a href="${escHtml(t.folder_url)}" target="_blank" onclick="event.stopPropagation()" style="color:#059669" title="리뷰폴더"><i class="fas fa-folder"></i></a>`);
     if (t.capture_folder_url) folders.push(`<a href="${escHtml(t.capture_folder_url)}" target="_blank" onclick="event.stopPropagation()" style="color:#1D4ED8" title="캡처폴더"><i class="fas fa-camera"></i></a>`);
+    // 시트 링크 (tab_gid 포함)
+    if (t.sheet_url) {
+      const sheetLink = t.tab_gid ? t.sheet_url.replace(/[#?].*$/, '') + '#gid=' + t.tab_gid : t.sheet_url;
+      folders.push(`<a href="${escHtml(sheetLink)}" target="_blank" onclick="event.stopPropagation()" style="color:#7C3AED" title="구글시트 탭 열기"><i class="fas fa-external-link-alt"></i></a>`);
+    }
 
     // 하단 메타 태그들
     const tags = [];
@@ -11658,7 +11665,7 @@ function openTabDashDetail(idx) {
     { title:"링크", icon:"fa-link", color:"#D97706", items:[
       ["리뷰폴더", t.folder_url ? `<a href="${escHtml(t.folder_url)}" target="_blank" style="color:#059669;word-break:break-all">${escHtml(t.folder_url)}</a>` : "—"],
       ["캡처폴더", t.capture_folder_url ? `<a href="${escHtml(t.capture_folder_url)}" target="_blank" style="color:#1D4ED8;word-break:break-all">${escHtml(t.capture_folder_url)}</a>` : "—"],
-      ["시트 URL", t.sheet_url ? `<a href="${escHtml(t.sheet_url)}" target="_blank" style="color:#7C3AED;word-break:break-all">${escHtml(t.sheet_url)}</a>` : "—"],
+      ["시트 URL", t.sheet_url ? `<a href="${escHtml(t.tab_gid ? t.sheet_url.replace(/[#?].*$/, '') + '#gid=' + t.tab_gid : t.sheet_url)}" target="_blank" style="color:#7C3AED;word-break:break-all">${escHtml(t.tab_gid ? t.sheet_url.replace(/[#?].*$/, '') + '#gid=' + t.tab_gid : t.sheet_url)}</a>` : "—"],
     ]},
     { title:"시스템", icon:"fa-server", color:"#6B7280", items:[
       ["갱신일", t.updated_at ? new Date(t.updated_at).toLocaleString("ko-KR") : "—"],

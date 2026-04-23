@@ -508,6 +508,7 @@ router.get('/dashboard', authMiddleware, async (req, res, next) => {
     const { rows } = await pool.query(`
       SELECT
         tc.sheet_id, tc.tab_name, tc.sheet_url, tc.campaign_name,
+        COALESCE(tc.tab_gid, im.tab_gid) AS tab_gid,
         tc.manager, tc.time_range, tc.taekhap, tc.review_type,
         tc.payment_type, tc.display_name, tc.is_closed,
         tc.folder_url, tc.capture_folder_url, tc.is_bulk, tc.delivery_type,
