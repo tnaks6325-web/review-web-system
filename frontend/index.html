@@ -432,6 +432,24 @@
 
           <div style="border-top:1px solid #F3F4F6;margin-bottom:8px"></div>
 
+          <!-- ⚠ DB 전체 초기화 -->
+          <div style="margin-bottom:8px">
+            <div style="font-size:.75rem;font-weight:600;color:#DC2626;margin-bottom:4px">
+              <i class="fas fa-exclamation-triangle" style="color:#DC2626"></i> DB 전체 초기화
+              <span style="font-size:.64rem;font-weight:400;color:#6B7280">(campaigns, tab_configs, review_index, index_master)</span>
+            </div>
+            <div style="font-size:.66rem;color:#6B7280;line-height:1.45;margin-bottom:4px">
+              대시보드·아카이브의 모든 데이터를 삭제합니다. 마스터 시트 스캔 → 동기화로 새로 구성할 때 사용합니다.
+              <b style="color:#DC2626">되돌릴 수 없습니다.</b>
+            </div>
+            <button id="btnResetAll" onclick="resetAllData()"
+              style="padding:6px 16px;background:#FEF2F2;color:#DC2626;border:1px solid #FECACA;border-radius:6px;font-size:.71rem;font-weight:600;cursor:pointer;display:flex;align-items:center;justify-content:center;gap:4px">
+              <i class="fas fa-trash-alt"></i> 전체 초기화
+            </button>
+          </div>
+
+          <div style="border-top:1px solid #F3F4F6;margin-bottom:8px"></div>
+
           <!-- 탭명·URL 동기화 -->
           <div style="margin-bottom:8px">
             <div style="font-size:.75rem;font-weight:600;color:#374151;margin-bottom:4px">

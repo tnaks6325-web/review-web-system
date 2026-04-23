@@ -11940,6 +11940,46 @@ async function syncTabFromSheet() {
   showToast("베이스시트 동기화 기능은 제거되었습니다. DB(tab_configs)가 원본이므로 웹 UI에서 직접 관리하세요.", "info");
 }
 
+// ── DB 전체 초기화 ──
+async function resetAllData() {
+  const step1 = prompt(
+    "⚠ 경고: 대시보드·아카이브의 모든 데이터가 삭제됩니다.\n\n" +
+    "삭제 대상:\n" +
+    "• campaigns (광고주 시트 목록)\n" +
+    "• tab_configs (탭 설정)\n" +
+    "• review_index (리뷰어 인덱스)\n" +
+    "• index_master (인덱스 마스터)\n\n" +
+    "계속하려면 'RESET' 을 입력하세요:"
+  );
+  if (step1 !== "RESET") { showToast("초기화 취소됨", "info"); return; }
+
+  const step2 = confirm("정말로 모든 데이터를 삭제하시겠습니까?\n이 작업은 되돌릴 수 없습니다.");
+  if (!step2) { showToast("초기화 취소됨", "info"); return; }
+
+  const btn = document.getElementById("btnResetAll");
+  const _save = btn ? btn.innerHTML : "";
+  if (btn) { btn.disabled = true; btn.innerHTML = '<i class="fas fa-spinner fa-spin"></i> 초기화 중...'; }
+
+  try {
+    const res = await gasPost({ action: "resetAllData", confirm: "RESET_ALL_DATA" }, 60000);
+    if (res.error) { showToast("초기화 오류: " + res.error, "error"); return; }
+
+    const d = res.deleted || {};
+    showToast(
+      `✅ 초기화 완료: campaigns ${d.campaigns || 0}건, tab_configs ${d.tab_configs || 0}건, ` +
+      `review_index ${d.review_index || 0}건, index_master ${d.index_master || 0}건 삭제`,
+      "success"
+    );
+
+    // 대시보드 새로고침
+    if (typeof loadTabDashboard === "function") loadTabDashboard();
+  } catch (err) {
+    showToast("초기화 오류: " + err.message, "error");
+  } finally {
+    if (btn) { btn.disabled = false; btn.innerHTML = _save; }
+  }
+}
+
 // ── 광고주 시트 스캔 → 마스터 시트 자동 채우기 ──
 async function scanMasterSheet(dryRun) {
   const btnDry = document.getElementById("btnScanMasterDry");
