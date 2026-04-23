@@ -2,7 +2,7 @@ const express = require('express');
 const router = express.Router();
 const { authMiddleware } = require('../middleware/auth.middleware');
 const pool = require('../db/pool');
-const { readSheet, getSpreadsheetMeta, writeSheet, copySpreadsheet, copySheetToSpreadsheet, renameSheet } = require('../services/sheets.service');
+const { readSheet, getSpreadsheetMeta, writeSheet, appendSheet, copySpreadsheet, copySheetToSpreadsheet, renameSheet } = require('../services/sheets.service');
 const { getQueueStats, retryItem, retryAllFailed, purgeCompleted } = require('../services/syncQueue.service');
 const { imageApiLimiter } = require('../middleware/rateLimit.middleware');
 const { extractOrderFromImage, verifyAddressMatch } = require('../services/gemini.service');
@@ -262,7 +262,39 @@ router.post('/add-campaign', authMiddleware, async (req, res, next) => {
       }
     } catch (_) { /* 메타 로드 실패 시 무시 */ }
 
-    res.json({ ok: true, sheetId: finalSheetId, campaignName: resolvedName });
+    // ★ 시트DB 탭에도 추가 (A열: sheet_url, B열: campaign_name)
+    const finalUrl = sheetUrl || url || `https://docs.google.com/spreadsheets/d/${finalSheetId}/edit`;
+    let addedToSheetDB = false;
+    try {
+      const MASTER_SHEET_ID = process.env.MASTER_SHEET_ID || '';
+      if (MASTER_SHEET_ID) {
+        // 시트DB 탭에서 기존 URL 목록 읽기 (중복 방지)
+        const existing = await readSheet(MASTER_SHEET_ID, "'시트DB'!A:A");
+        const existingIds = new Set();
+        if (existing) {
+          for (const row of existing) {
+            const u = (row[0] || '').toString().trim();
+            const m = u.match(/\/d\/([a-zA-Z0-9_-]+)/);
+            if (m) existingIds.add(m[1]);
+          }
+        }
+
+        if (!existingIds.has(finalSheetId)) {
+          // 마지막 행 다음에 추가
+          await appendSheet(MASTER_SHEET_ID, "'시트DB'!A:B", [[finalUrl, resolvedName]]);
+          addedToSheetDB = true;
+          logger.info(`[add-campaign] 시트DB에 추가: ${resolvedName} (${finalSheetId})`);
+        } else {
+          logger.info(`[add-campaign] 시트DB에 이미 존재: ${finalSheetId}`);
+        }
+      } else {
+        logger.warn('[add-campaign] MASTER_SHEET_ID 미설정 — 시트DB 동기화 건너뜀');
+      }
+    } catch (sheetErr) {
+      logger.error(`[add-campaign] 시트DB 추가 실패 (DB 등록은 완료): ${sheetErr.message}`);
+    }
+
+    res.json({ ok: true, sheetId: finalSheetId, campaignName: resolvedName, addedToSheetDB });
   } catch (err) {
     next(err);
   }
