@@ -351,8 +351,52 @@ router.get('/campaign-stats', async (req, res, next) => {
 });
 
 // ═══════════════════════════════════════════════════════════
-// GET /api/diag/inaed-list — 인애드명단 조회 (GAS: getInaedList — 구매양식 자동완성용)
+// GET /api/diag/tab-gid-check — gid↔tab_name 매핑 검증 (임시 진단용)
+// 특정 sheetId의 모든 탭에 대해 DB와 구글시트 실제 매핑을 비교
 // ═══════════════════════════════════════════════════════════
+router.get('/tab-gid-check', async (req, res, next) => {
+  try {
+    const { sheetId, gid } = req.query;
+    if (!sheetId) return res.status(400).json({ ok: false, error: 'sheetId required' });
+
+    // DB에서 해당 시트의 탭 매핑 (index_master + tab_configs)
+    const { rows: imRows } = await pool.query(
+      'SELECT tab_name, tab_gid, row_count, status FROM index_master WHERE sheet_id = $1 ORDER BY tab_name', [sheetId]
+    );
+    const { rows: tcRows } = await pool.query(
+      'SELECT tab_name, tab_gid FROM tab_configs WHERE sheet_id = $1 ORDER BY tab_name', [sheetId]
+    );
+
+    // 대시보드 쿼리와 동일한 COALESCE 결과 확인
+    let dashboardQuery = `
+      SELECT im.tab_name, COALESCE(im.tab_gid, tc.tab_gid) AS "tabGid",
+             im.tab_gid AS "imGid", tc.tab_gid AS "tcGid", im.row_count
+      FROM index_master im
+      LEFT JOIN tab_configs tc ON im.sheet_id = tc.sheet_id AND im.tab_name = tc.tab_name
+      WHERE im.sheet_id = $1 AND im.status = 'active'
+    `;
+    const params = [sheetId];
+    if (gid) {
+      dashboardQuery += ` AND (im.tab_gid = $2 OR tc.tab_gid = $2)`;
+      params.push(gid);
+    }
+    dashboardQuery += ' ORDER BY im.tab_name';
+    const { rows: dashRows } = await pool.query(dashboardQuery, params);
+
+    res.json({
+      ok: true,
+      sheetId,
+      filterGid: gid || null,
+      indexMaster: gid ? imRows.filter(r => r.tab_gid === gid) : imRows.slice(0, 20),
+      tabConfigs: gid ? tcRows.filter(r => r.tab_gid === gid) : tcRows.slice(0, 20),
+      dashboardView: dashRows,
+    });
+  } catch (err) {
+    next(err);
+  }
+});
+
+
 router.get('/inaed-list', async (req, res, next) => {
   try {
     const { rows } = await pool.query(`
