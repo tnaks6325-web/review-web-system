@@ -8,7 +8,7 @@ const { getSpreadsheetMeta } = require('../services/sheets.service');
 const { syncMasterSheetToDB, scanAndPopulateMaster, applyCachedScanAndSync, hasScanCache, syncSettingsOnly } = require('../services/masterSheet.service');
 const { runIndexScan, applyCachedIndexScan, hasIndexScanCache, syncTabListToDB } = require('../services/indexScan.service');
 const { logger } = require('../utils/logger');
-const { throttledCall } = require('../utils/sheetsThrottle');
+const { throttledCall, throttledMap } = require('../utils/sheetsThrottle');
 
 // POST /api/tab/config — 탭 설정 저장/수정 (GAS: setTabConfig)
 router.post('/config', authMiddleware, async (req, res, next) => {
@@ -248,13 +248,13 @@ router.post('/sync-tab-names', authMiddleware, async (req, res, next) => {
     let renamed = 0, urlFixed = 0, gidFilled = 0, skipped = 0, errors = 0;
     const errorDetails = [];
 
-    // 3. 각 시트별로 실제 탭 메타 조회 (throttle 적용 — quota 초과 방지)
-    for (const sheetId of sheetIds) {
+    // 3. 각 시트별로 실제 탭 메타 조회 (throttledMap 병렬 처리 — 속도 3배 향상)
+    await throttledMap(sheetIds, async (sheetId) => {
       try {
-        const meta = await throttledCall(() => getSpreadsheetMeta(sheetId));
+        const meta = await getSpreadsheetMeta(sheetId);
         if (!meta || meta.length === 0) {
           skipped++;
-          continue;
+          return;
         }
 
         // 실제 시트의 GID → 탭명 맵 & 탭명 → GID 맵
@@ -426,7 +426,7 @@ router.post('/sync-tab-names', authMiddleware, async (req, res, next) => {
               : undefined,
         });
       }
-    }
+    }, 5); // concurrency=5: 5개 시트 동시 처리 → 57시트 기준 약 15~25초
 
     const elapsed = ((Date.now() - startTime) / 1000).toFixed(1);
     logger.info(`[sync-tab-names] 완료: renamed=${renamed}, urlFixed=${urlFixed}, gidFilled=${gidFilled}, skipped=${skipped}, errors=${errors}, ${elapsed}s`);
