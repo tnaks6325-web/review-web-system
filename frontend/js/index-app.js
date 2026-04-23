@@ -2093,6 +2093,7 @@ async function loadAdminDashboard() {
 
     let _prevCampaign = null;
     let _campColorIdx = 0;
+    let _isFirstRowOfCamp = false;
 
     stats.forEach((c, ci) => {
       const campName = c.campaign || "";
@@ -2101,6 +2102,7 @@ async function loadAdminDashboard() {
       if (campName !== _prevCampaign) {
         _campColorIdx++;
         _prevCampaign = campName;
+        _isFirstRowOfCamp = true;
       }
       const campStripe = _campColorIdx % 2 === 0 ? "camp-stripe-even" : "camp-stripe-odd";
 
@@ -2122,9 +2124,11 @@ async function loadAdminDashboard() {
         // ── 공통 행 속성 세팅 헬퍼 ──
         function _setupRow(el, tk, extra) {
           el.className = "dash-tab-row " + campStripe
+            + (_isFirstRowOfCamp ? " camp-first-row" : "")
             + (isTabDone ? " tab-done" : "")
             + (isClosedTab ? " is-closed-row" : "")
             + (extra || "");
+          _isFirstRowOfCamp = false; // 첫 행 마킹 후 리셋
           el.dataset.tabkey = tk;
           el.dataset.campname = campName.toLowerCase();
           el.dataset.campSheetId = campSheetId;
@@ -2392,10 +2396,11 @@ function renderDashboard(data) {
 
   let _prevCamp2 = null;
   let _campIdx2 = 0;
+  let _isFirstOfCamp2 = false;
 
   stats.forEach((c, ci) => {
     const campName = c.campaign || "";
-    if (campName !== _prevCamp2) { _campIdx2++; _prevCamp2 = campName; }
+    if (campName !== _prevCamp2) { _campIdx2++; _prevCamp2 = campName; _isFirstOfCamp2 = true; }
     const campStripe = _campIdx2 % 2 === 0 ? "camp-stripe-even" : "camp-stripe-odd";
     const allDone = c.closedOnly === true || c.tabs.every(t => {
       const key = (t.sheetId||"")+"||"+(t.tab||"");
@@ -2413,8 +2418,9 @@ function renderDashboard(data) {
       const _ovDays = (!isTabDone && !isClosedTab) ? _calcOverdueDays(_mainEffectiveSD) : null;
       const isOverdue = _ovDays !== null && _ovDays >= 25;
       const row        = document.createElement("div");
-      row.className    = "dash-tab-row " + campStripe + (isTabDone?" tab-done":"")+(isClosedTab?" is-closed-row":"")+(isOverdue?" urgent-overdue":"")
+      row.className    = "dash-tab-row " + campStripe + (_isFirstOfCamp2?" camp-first-row":"") + (isTabDone?" tab-done":"")+(isClosedTab?" is-closed-row":"")+(isOverdue?" urgent-overdue":"")
         +(!t.displayName && !isClosedTab?" no-product-warn":"");
+      _isFirstOfCamp2 = false;
       row.dataset.tabkey = tabKey;
       row.dataset.campname = campName.toLowerCase();
       row.dataset.sortCampaign = campName.toLowerCase();
@@ -2935,29 +2941,29 @@ function _buildTabRowHtml(t, tabKey, isSubRow, isClosedTab, tabNameHtml, startDa
  */
 const DASH_COL_DEFS = [
   { key: 'closedcb',    varName: '--dc-closedcb',    label: '마감',       minPx: 20,  default: 0,   isCb: true },
-  { key: 'campaign',    varName: '--dc-campaign',    label: '캠페인',     minPx: 60,  default: 140               },  // ★ v11.0: 엑셀형 플랫 UI
+  { key: 'campaign',    varName: '--dc-campaign',    label: '캠페인',     minPx: 60,  default: 120               },  // ★ v11.0
   { key: 'tabname',     varName: '--dc-tabname',     label: '탭명',       minPx: 60,  default: 200               },
-  { key: 'product',     varName: '--dc-product',     label: '상품명',     minPx: 60,  default: 200               },
-  { key: 'capture',     varName: '--dc-capture',     label: '캡처폴더',   minPx: 35,  default: 65                },
-  { key: 'folder',      varName: '--dc-folder',      label: '리뷰폴더',   minPx: 35,  default: 65                },
-  { key: 'round',       varName: '--dc-round',       label: '차수',       minPx: 28,  default: 40                },
-  { key: 'date',        varName: '--dc-date',        label: '시작일',     minPx: 40,  default: 65                },
-  { key: 'time',        varName: '--dc-time',        label: '주문시간대', minPx: 50,  default: 85                },
+  { key: 'product',     varName: '--dc-product',     label: '상품명',     minPx: 60,  default: 160               },
+  { key: 'capture',     varName: '--dc-capture',     label: '캡처폴더',   minPx: 35,  default: 54                },
+  { key: 'folder',      varName: '--dc-folder',      label: '리뷰폴더',   minPx: 35,  default: 54                },
+  { key: 'round',       varName: '--dc-round',       label: '차수',       minPx: 28,  default: 36                },
+  { key: 'date',        varName: '--dc-date',        label: '시작일',     minPx: 40,  default: 60                },
+  { key: 'time',        varName: '--dc-time',        label: '주문시간대', minPx: 50,  default: 80                },
   { key: 'review',      varName: '--dc-review',      label: '리뷰타입',   minPx: 35,  default: 50                },
-  { key: 'formlink',    varName: '--dc-formlink',    label: '폼링크',     minPx: 28,  default: 35                },
-  { key: 'manager',     varName: '--dc-manager',     label: '담당',       minPx: 28,  default: 50                },
-  { key: 'bar',         varName: '--dc-bar',         label: '진행률',     minPx: 70,  default: 70                },
-  { key: 'nums',        varName: '--dc-nums',        label: '리뷰',       minPx: 40,  default: 65                },
-  { key: 'payment',     varName: '--dc-payment',     label: '입금',       minPx: 28,  default: 45                },
-  { key: 'income',      varName: '--dc-income',      label: '진행방식',   minPx: 70,  default: 90                },  // ★ v9.14
-  { key: 'depositname', varName: '--dc-depositname', label: '입금명',     minPx: 100, default: 140               },  // ★ v9.14
-  { key: 'bank',        varName: '--dc-bank',        label: '이체은행',   minPx: 70,  default: 100               },  // ★ v9.14
-  { key: 'taekhap',     varName: '--dc-taekhap',     label: '택대',       minPx: 28,  default: 45                },
-  { key: 'memo',        varName: '--dc-memo',        label: '비고',       minPx: 40,  default: 185               },
-  { key: 'enddate',     varName: '--dc-enddate',     label: '부가정보',   minPx: 70,  default: 110               },
-  { key: 'info',        varName: '--dc-info',        label: '⚙',         minPx: 82,  default: 90, noScale: true  }, // ★ 1fr로 남는 공간 차지
+  { key: 'formlink',    varName: '--dc-formlink',    label: '폼링크',     minPx: 28,  default: 32                },
+  { key: 'manager',     varName: '--dc-manager',     label: '담당',       minPx: 28,  default: 48                },
+  { key: 'bar',         varName: '--dc-bar',         label: '진행률',     minPx: 120, default: 200               },
+  { key: 'nums',        varName: '--dc-nums',        label: '리뷰',       minPx: 40,  default: 58                },
+  { key: 'payment',     varName: '--dc-payment',     label: '입금',       minPx: 28,  default: 42                },
+  { key: 'income',      varName: '--dc-income',      label: '진행방식',   minPx: 60,  default: 80                },
+  { key: 'depositname', varName: '--dc-depositname', label: '입금명',     minPx: 80,  default: 120               },
+  { key: 'bank',        varName: '--dc-bank',        label: '이체은행',   minPx: 60,  default: 80                },
+  { key: 'taekhap',     varName: '--dc-taekhap',     label: '택대',       minPx: 28,  default: 40                },
+  { key: 'memo',        varName: '--dc-memo',        label: '비고',       minPx: 40,  default: 140               },
+  { key: 'enddate',     varName: '--dc-enddate',     label: '부가정보',   minPx: 70,  default: 90                },
+  { key: 'info',        varName: '--dc-info',        label: '⚙',         minPx: 82,  default: 90, noScale: true  },
 ];
-const COL_WIDTH_LS_KEY = 'dashColWidths_v9'; // ★ v11.0: 캠페인 컬럼 추가 (엑셀형 플랫 UI)
+const COL_WIDTH_LS_KEY = 'dashColWidths_v11'; // ★ v11.1: 새 컬럼 레이아웃
 
 /** 컨테이너 content 너비 반환 (padding/border 제외, 실제 사용 가능한 너비) */
 function _getContainerWidth() {
