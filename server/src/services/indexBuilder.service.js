@@ -151,7 +151,7 @@ async function buildIndexSmart(forceFullRebuild = false) {
     } catch (cleanErr) {
       logger.warn(`[buildIndex] 마감 탭 정리 실패 (계속 진행): ${cleanErr.message}`);
     }
-    await _loadKeywordsFromDB();
+    // ★ 키워드 중복 로드 제거 (0단계에서 이미 로드됨)
 
     // ── 0-1단계: 기존 no_data pending 레코드 일괄 resolved 처리 ──
     // no_data = 헤더 구조 정상이지만 데이터 미입력 (진행 중인 탭) → 인식 실패가 아님
@@ -401,11 +401,13 @@ async function _processOneSheet(sheetId, opts) {
   let rebuilt = 0, skipped = 0, errors = 0;
 
   // ── Step 1: Drive API 변경감지 (forceFullRebuild 시 스킵) ──
+  // ★ modifiedTime을 캐시하여 Step 4에서 재사용 (중복 API 호출 제거)
+  let cachedModifiedTime = null;
   if (!forceFullRebuild) {
     try {
-      const modifiedTime = await throttledCall(() => getSheetModifiedTime(sheetId));
-      if (modifiedTime) {
-        const remoteModified = new Date(modifiedTime).getTime();
+      cachedModifiedTime = await throttledCall(() => getSheetModifiedTime(sheetId));
+      if (cachedModifiedTime) {
+        const remoteModified = new Date(cachedModifiedTime).getTime();
         const lastKnown = sheetModifiedMap[sheetId] || 0;
 
         if (lastKnown > 0 && remoteModified <= lastKnown) {
@@ -414,7 +416,7 @@ async function _processOneSheet(sheetId, opts) {
             rebuilt: 0, skipped: 0, errors: 0,
             elapsed: Date.now() - sheetStart,
             skippedReason: 'not_modified',
-            modifiedTime,
+            modifiedTime: cachedModifiedTime,
           };
         }
       }
@@ -492,11 +494,8 @@ async function _processOneSheet(sheetId, opts) {
   }
 
   // ── Step 4: 탭별 체크섬 비교 + DB 업데이트 ──
-  // Drive API에서 가져온 수정시각 (모든 탭 공통)
-  let currentModifiedTime = null;
-  try {
-    currentModifiedTime = await throttledCall(() => getSheetModifiedTime(sheetId));
-  } catch (_) {}
+  // ★ Step 1에서 캐시한 modifiedTime 재사용 (중복 Drive API 호출 제거)
+  const currentModifiedTime = cachedModifiedTime || null;
 
   for (let i = 0; i < activeTabs.length; i++) {
     const tab = activeTabs[i];
@@ -642,13 +641,13 @@ async function _upsertTabIndex(sheetId, tabName, tabGid, checksum, rows, modifie
   try {
     await client.query('BEGIN');
 
-    // 기존 탭 데이터 삭제
-    await client.query(
-      'DELETE FROM review_index WHERE sheet_id = $1 AND tab_name = $2',
-      [sheetId, tabName]
-    );
+    // ★ Incremental Upsert: DELETE→INSERT 전체 교체 대신
+    //    ON CONFLICT DO UPDATE로 기존 행 갱신 + 고아 행만 삭제
+    //    → 인덱스 재구축 비용 대폭 절감
 
-    // 새 데이터 삽입 (배치)
+    // 새 데이터의 row_index 집합 수집 (고아 삭제용)
+    const newRowIndices = new Set();
+
     if (rows.length > 0) {
       const BATCH_SIZE = 100;
       for (let batchStart = 0; batchStart < rows.length; batchStart += BATCH_SIZE) {
@@ -658,6 +657,7 @@ async function _upsertTabIndex(sheetId, tabName, tabGid, checksum, rows, modifie
         let paramIdx = 1;
 
         for (const row of batch) {
+          newRowIndices.add(row.rowIndex);
           insertPlaceholders.push(
             `($${paramIdx++},$${paramIdx++},$${paramIdx++},$${paramIdx++},$${paramIdx++},$${paramIdx++},$${paramIdx++},$${paramIdx++},$${paramIdx++},$${paramIdx++},$${paramIdx++},$${paramIdx++},$${paramIdx++},$${paramIdx++},$${paramIdx++})`
           );
@@ -676,8 +676,37 @@ async function _upsertTabIndex(sheetId, tabName, tabGid, checksum, rows, modifie
              row_index, is_submitted, product_url, product_name,
              submit_col, row_json, start_date, end_date, round, phone8)
           VALUES ${insertPlaceholders.join(', ')}
+          ON CONFLICT (sheet_id, tab_name, row_index) DO UPDATE SET
+            reviewer_name = EXCLUDED.reviewer_name,
+            tab_gid = EXCLUDED.tab_gid,
+            campaign_name = EXCLUDED.campaign_name,
+            is_submitted = EXCLUDED.is_submitted,
+            product_url = EXCLUDED.product_url,
+            product_name = EXCLUDED.product_name,
+            submit_col = EXCLUDED.submit_col,
+            row_json = EXCLUDED.row_json,
+            start_date = EXCLUDED.start_date,
+            end_date = EXCLUDED.end_date,
+            round = EXCLUDED.round,
+            phone8 = EXCLUDED.phone8,
+            built_at = NOW()
         `, insertValues);
       }
+    }
+
+    // ★ 고아 행 삭제: 시트에서 삭제/이동된 행만 DB에서 제거
+    if (newRowIndices.size > 0) {
+      const idxArray = [...newRowIndices];
+      await client.query(
+        `DELETE FROM review_index WHERE sheet_id = $1 AND tab_name = $2 AND row_index != ALL($3::int[])`,
+        [sheetId, tabName, idxArray]
+      );
+    } else {
+      // 새 행이 없으면 전체 삭제 (탭이 비워진 경우)
+      await client.query(
+        'DELETE FROM review_index WHERE sheet_id = $1 AND tab_name = $2',
+        [sheetId, tabName]
+      );
     }
 
     // index_master 체크섬 + 수정시각 업데이트
@@ -960,6 +989,25 @@ async function checkDirtySheets() {
     campaignRows.map(r => r.sheet_id)
   )].filter(Boolean);
 
+  // ★ 최적화: 사전에 모든 시트의 수정시각·캠페인명을 1회 쿼리로 로드
+  //    기존: 시트별 2회 pool.query (MAX + campaign_name) → 55시트 = 110회 쿼리
+  //    개선: 1회 쿼리로 전체 로드 → 메모리 매핑
+  const { rows: masterSummary } = await pool.query(
+    `SELECT sheet_id,
+            MAX(sheet_modified_at) AS last_modified,
+            (array_agg(campaign_name ORDER BY built_at DESC NULLS LAST) FILTER (WHERE campaign_name IS NOT NULL))[1] AS campaign_name
+     FROM index_master
+     GROUP BY sheet_id`
+  );
+  const localModifiedMap = {};  // sheet_id → { lastModified: ms, campaignName: string }
+  masterSummary.forEach(r => {
+    localModifiedMap[r.sheet_id] = {
+      lastModified: r.last_modified ? new Date(r.last_modified).getTime() : 0,
+      lastModifiedRaw: r.last_modified || null,
+      campaignName: r.campaign_name || null,
+    };
+  });
+
   const dirtySheets = [];
 
   for (const sheetId of sheetIds) {
@@ -967,26 +1015,16 @@ async function checkDirtySheets() {
       const remoteModified = await throttledCall(() => getSheetModifiedTime(sheetId));
       if (!remoteModified) continue;
 
-      const { rows } = await pool.query(
-        'SELECT MAX(sheet_modified_at) AS last_modified FROM index_master WHERE sheet_id = $1',
-        [sheetId]
-      );
-      const localModified = rows[0]?.last_modified
-        ? new Date(rows[0].last_modified).getTime() : 0;
       const remoteMs = new Date(remoteModified).getTime();
+      const local = localModifiedMap[sheetId] || { lastModified: 0, lastModifiedRaw: null, campaignName: null };
 
-      if (remoteMs > localModified) {
-        // 캠페인명 조회
-        const { rows: nameRows } = await pool.query(
-          "SELECT campaign_name FROM index_master WHERE sheet_id = $1 AND campaign_name IS NOT NULL LIMIT 1",
-          [sheetId]
-        );
+      if (remoteMs > local.lastModified) {
         dirtySheets.push({
           sheetId,
-          campaignName: nameRows[0]?.campaign_name || sheetId.substring(0, 15) + '...',
+          campaignName: local.campaignName || sheetId.substring(0, 15) + '...',
           remoteModified,
-          localModified: rows[0]?.last_modified || null,
-          diffSec: Math.round((remoteMs - localModified) / 1000),
+          localModified: local.lastModifiedRaw,
+          diffSec: Math.round((remoteMs - local.lastModified) / 1000),
         });
       }
     } catch (err) {

@@ -541,10 +541,173 @@ function _buildDetails(results, dryRun) {
   return details;
 }
 
+// ══════════════════════════════════════════════════════════════
+// 기능 3: Group B — 마스터 시트 설정 컬럼만 경량 동기화
+//
+// 마스터 시트에서 A:T를 1회 readSheet 후
+// DB tab_configs의 기존 행과 설정 컬럼(D~T)만 diff → UPDATE
+// 신규 행 INSERT나 삭제는 하지 않음 (Group A 영역)
+//
+// API 비용: Google Sheets 1~2회 (vs 전체 동기화 60+회)
+// 소요시간: 1~3초
+// ══════════════════════════════════════════════════════════════
+
+// Group B 설정 컬럼 (sheet_url, campaign_name, tab_name 제외 = 구조 컬럼은 Group A)
+const SETTINGS_COLUMNS = [
+  'manager', 'time_range', 'taekhap', 'review_type', 'payment_type',
+  'display_name', 'folder_url', 'is_bulk', 'capture_folder_url', 'is_closed',
+  'delivery_type', 'round', 'nc_mode', 'deposit_name', 'transfer_bank', 'income_type',
+];
+
+async function syncSettingsOnly(dryRun = true) {
+  const startTime = Date.now();
+
+  if (!MASTER_SHEET_ID) throw new Error('MASTER_SHEET_ID 환경변수 미설정');
+
+  // 1. 마스터시트 읽기 (Google API 1~2회만 소모)
+  const tabName = await _detectMasterTabName();
+  const values = await throttledCall(() => readSheet(MASTER_SHEET_ID, `'${tabName}'!A:T`));
+
+  if (!values || values.length < 2) {
+    throw new Error('마스터 시트에 데이터가 없습니다 (헤더 + 최소 1행 필요).');
+  }
+
+  const headers = values[0].map(h => String(h).trim().toLowerCase());
+  const sheetUrlIdx = headers.indexOf('sheet_url');
+  const tabNameIdx = headers.indexOf('tab_name');
+
+  if (sheetUrlIdx === -1 || tabNameIdx === -1) {
+    throw new Error("마스터 시트에 'sheet_url' 또는 'tab_name' 컬럼이 없습니다.");
+  }
+
+  // 시트 행을 파싱 → { sheet_id, tab_name, ...settings }
+  const sheetRows = [];
+  for (let i = 1; i < values.length; i++) {
+    const row = values[i];
+    if (!row || row.length === 0) continue;
+
+    const url = (row[sheetUrlIdx] || '').trim();
+    const tn = (row[tabNameIdx] || '').trim();
+    if (!url || !tn) continue;
+
+    const sid = extractSheetId(url);
+    if (!sid) continue;
+
+    const obj = { sheet_id: sid, tab_name: tn };
+    headers.forEach((header, idx) => {
+      if (SETTINGS_COLUMNS.includes(header)) {
+        obj[header] = (idx < row.length ? row[idx] : '') || '';
+      }
+    });
+    sheetRows.push(obj);
+  }
+
+  // 2. DB에서 기존 tab_configs 로드
+  const { rows: dbTabs } = await pool.query(
+    'SELECT sheet_id, tab_name, ' + SETTINGS_COLUMNS.join(', ') + ' FROM tab_configs'
+  );
+  const dbMap = new Map(dbTabs.map(t => [`${t.sheet_id}||${t.tab_name}`, t]));
+
+  // 3. diff — 설정 컬럼만 비교
+  const updates = [];
+  let unchanged = 0;
+  let skippedNewRows = 0;
+
+  for (const sheetRow of sheetRows) {
+    const key = `${sheetRow.sheet_id}||${sheetRow.tab_name}`;
+    const dbRow = dbMap.get(key);
+
+    if (!dbRow) {
+      // DB에 없는 행 — Group A(구조 동기화)의 영역이므로 스킵
+      skippedNewRows++;
+      continue;
+    }
+
+    const changes = [];
+    for (const col of SETTINGS_COLUMNS) {
+      const sheetVal = sheetRow[col];
+      const dbVal = dbRow[col];
+
+      if (BOOLEAN_COLS.has(col)) {
+        if (toBool(sheetVal) !== toBool(dbVal)) {
+          changes.push({ col, from: toBool(dbVal), to: toBool(sheetVal) });
+        }
+      } else {
+        const sv = (sheetVal === undefined || sheetVal === null || sheetVal === '') ? '' : String(sheetVal).trim();
+        const dv = (dbVal === undefined || dbVal === null || dbVal === '') ? '' : String(dbVal).trim();
+        if (sv !== dv) {
+          changes.push({ col, from: dv, to: sv });
+        }
+      }
+    }
+
+    if (changes.length > 0) {
+      updates.push({ sheetRow, changes });
+    } else {
+      unchanged++;
+    }
+  }
+
+  // 4. dryRun이 아니면 DB 일괄 UPDATE
+  if (!dryRun && updates.length > 0) {
+    const client = await pool.connect();
+    try {
+      await client.query('BEGIN');
+
+      for (const { sheetRow, changes } of updates) {
+        const setClauses = changes.map((ch, i) => `${ch.col} = $${i + 1}`);
+        setClauses.push('updated_at = NOW()');
+        const vals = changes.map(ch => BOOLEAN_COLS.has(ch.col) ? toBool(ch.to) : (ch.to || ''));
+        vals.push(sheetRow.sheet_id, sheetRow.tab_name);
+
+        await client.query(
+          `UPDATE tab_configs SET ${setClauses.join(', ')}
+           WHERE sheet_id = $${vals.length - 1} AND tab_name = $${vals.length}`,
+          vals
+        );
+      }
+
+      await client.query('COMMIT');
+      logger.info(`[syncSettings] DB 반영 완료: ${updates.length}건 업데이트`);
+    } catch (err) {
+      await client.query('ROLLBACK');
+      logger.error(`[syncSettings] DB 반영 실패: ${err.message}`);
+      throw err;
+    } finally {
+      client.release();
+    }
+  }
+
+  const elapsed = ((Date.now() - startTime) / 1000).toFixed(1) + 's';
+
+  // 변경 상세 생성
+  const details = updates.map(({ sheetRow, changes }) => ({
+    campaign: sheetRow.campaign_name || '',
+    tabName: sheetRow.tab_name,
+    changes: changes.map(c => ({ col: c.col, from: c.from, to: c.to })),
+  }));
+
+  const summary = {
+    dryRun,
+    elapsed,
+    sheetRows: sheetRows.length,
+    updated: updates.length,
+    unchanged,
+    skippedNewRows,
+    details: details.slice(0, 100), // 최대 100건 상세
+  };
+
+  logger.info(`[syncSettings] ${dryRun ? '미리보기' : '완료'}: ` +
+    `updated=${updates.length}, unchanged=${unchanged}, skipped=${skippedNewRows} — ${elapsed}`);
+
+  return summary;
+}
+
 module.exports = {
   readMasterSheet,
   syncMasterSheetToDB,
   scanAndPopulateMaster,
+  syncSettingsOnly,
   extractSheetId,
   MASTER_SHEET_ID,
 };

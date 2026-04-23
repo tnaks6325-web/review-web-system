@@ -3,7 +3,7 @@ const router = express.Router();
 const pool = require('../db/pool');
 const { authMiddleware } = require('../middleware/auth.middleware');
 const { getSpreadsheetMeta } = require('../services/sheets.service');
-const { syncMasterSheetToDB, scanAndPopulateMaster } = require('../services/masterSheet.service');
+const { syncMasterSheetToDB, scanAndPopulateMaster, syncSettingsOnly } = require('../services/masterSheet.service');
 const { logger } = require('../utils/logger');
 const { throttledCall } = require('../utils/sheetsThrottle');
 
@@ -597,6 +597,58 @@ router.post('/sync-master', authMiddleware, async (req, res, next) => {
     res.json({ ok: true, ...result });
   } catch (err) {
     logger.error(`[sync-master] 오류: ${err.message}`);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// ══════════════════════════════════════════════════════════════
+// POST /api/tab/full-sync — ★ 통합 동기화: 스캔 + DB동기화를 1회에 처리
+// 기존의 scan-master → sync-master 2단계를 1단계로 통합
+// API 사용량: 기존 2×N회 → 1×N회 (스캔 1회만, DB동기화는 로컬)
+// ══════════════════════════════════════════════════════════════
+router.post('/full-sync', authMiddleware, async (req, res, next) => {
+  try {
+    const { dryRun = true } = req.body;
+    logger.info(`[full-sync] ${dryRun ? '미리보기' : '실행'} 요청 — by ${req.admin?.name || 'unknown'}`);
+
+    // Step 1: 스캔 (실제 시트 접속 → 마스터시트 채우기)
+    const scanResult = await scanAndPopulateMaster(!dryRun ? false : true);
+
+    // Step 2: DB 동기화 (마스터시트 → DB)
+    // dryRun일 때는 스캔 미리보기만 반환
+    let syncResult = null;
+    if (!dryRun) {
+      syncResult = await syncMasterSheetToDB(false);
+    }
+
+    res.json({
+      ok: true,
+      dryRun,
+      scan: scanResult,
+      sync: syncResult,
+      message: dryRun
+        ? `미리보기: ${scanResult.totalTabs}개 탭 (신규 ${scanResult.newTabs}개)`
+        : `완료: 스캔 ${scanResult.totalTabs}탭 → DB 동기화 (추가 ${syncResult?.tabs?.added || 0}, 수정 ${syncResult?.tabs?.updated || 0}, 삭제 ${syncResult?.tabs?.removed || 0})`,
+    });
+  } catch (err) {
+    logger.error(`[full-sync] 오류: ${err.message}`);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// ══════════════════════════════════════════════════════════════
+// POST /api/tab/sync-settings — Group B 설정 컬럼만 경량 동기화
+// Google API 1~2회, 1~3초 완료, 인덱스 빌드 불필요
+// ══════════════════════════════════════════════════════════════
+router.post('/sync-settings', authMiddleware, async (req, res, next) => {
+  try {
+    const { dryRun = true } = req.body;
+    logger.info(`[sync-settings] ${dryRun ? '미리보기' : '실행'} 요청 — by ${req.admin?.name || 'unknown'}`);
+
+    const result = await syncSettingsOnly(!!dryRun);
+    res.json({ ok: true, ...result });
+  } catch (err) {
+    logger.error(`[sync-settings] 오류: ${err.message}`);
     res.status(500).json({ error: err.message });
   }
 });

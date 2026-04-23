@@ -385,48 +385,67 @@
         </button>
         <div style="display:none;padding:8px 16px 12px">
 
-          <!-- ★ 마스터 시트 동기화 (최상단) -->
+          <!-- ★ 구조 동기화 (스캔+DB반영 통합) -->
           <div style="margin-bottom:8px">
             <div style="font-size:.75rem;font-weight:600;color:#374151;margin-bottom:4px">
-              <i class="fas fa-cloud-download-alt" style="color:#059669"></i> 마스터 시트 동기화
-              <span style="font-size:.64rem;font-weight:400;color:#6B7280">(구글시트 → DB)</span>
+              <i class="fas fa-cloud-download-alt" style="color:#059669"></i> 구조 동기화
+              <span style="font-size:.64rem;font-weight:400;color:#6B7280">(구글시트 스캔 → DB 반영, 1회에 완료)</span>
             </div>
             <div style="font-size:.66rem;color:#6B7280;line-height:1.45;margin-bottom:4px">
-              마스터 구글시트의 데이터를 DB(campaigns, tab_configs)에 동기화합니다. 마스터 시트의 A열 sheet_url에서 직접 시트에 접속하여 campaign_name과 tab_name을 파싱합니다.
+              마스터시트 → 각 시트 스캔 → DB 동기화를 <b>한 번에</b> 처리합니다.
+              탭 추가/삭제 등 <b>구조 변경</b> 시에만 실행하세요.
             </div>
-
-            <!-- STEP 1: 광고주 시트 스캔 → 마스터 시트 채우기 -->
-            <div style="margin-bottom:6px">
-              <div style="font-size:.68rem;font-weight:600;color:#059669;margin-bottom:3px">
-                STEP 1. sheet_url → 시트 직접 접속 → campaign_name · tab_name 파싱
-              </div>
-              <div style="display:flex;gap:4px">
-                <button id="btnScanMasterDry" onclick="scanMasterSheet(true)"
-                  style="flex:1;padding:6px;background:#F0FDF4;color:#15803D;border:1px solid #BBF7D0;border-radius:6px;font-size:.71rem;font-weight:600;cursor:pointer;display:flex;align-items:center;justify-content:center;gap:4px">
-                  <i class="fas fa-search"></i> 스캔 미리보기
-                </button>
-                <button id="btnScanMasterRun" onclick="scanMasterSheet(false)"
-                  style="flex:1;padding:6px;background:#15803D;color:#fff;border:1px solid #15803D;border-radius:6px;font-size:.71rem;font-weight:600;cursor:pointer;display:flex;align-items:center;justify-content:center;gap:4px">
-                  <i class="fas fa-sync-alt"></i> 스캔 실행
-                </button>
-              </div>
+            <div style="display:flex;gap:4px">
+              <button id="btnFullSyncDry" onclick="fullMasterSync(true)"
+                style="flex:1;padding:7px;background:#F0FDF4;color:#15803D;border:1px solid #BBF7D0;border-radius:6px;font-size:.73rem;font-weight:600;cursor:pointer;display:flex;align-items:center;justify-content:center;gap:4px">
+                <i class="fas fa-search"></i> 미리보기
+              </button>
+              <button id="btnFullSyncRun" onclick="fullMasterSync(false)"
+                style="flex:1;padding:7px;background:#15803D;color:#fff;border:1px solid #15803D;border-radius:6px;font-size:.73rem;font-weight:600;cursor:pointer;display:flex;align-items:center;justify-content:center;gap:4px">
+                <i class="fas fa-play"></i> 동기화 실행
+              </button>
             </div>
+            <div id="fullSyncResult" style="display:none;font-size:.71rem;margin-top:4px;max-height:200px;overflow-y:auto;border:1px solid #E5E7EB;border-radius:6px;padding:6px;background:#F9FAFB"></div>
+          </div>
 
-            <!-- STEP 2: 마스터 시트 → DB 동기화 -->
-            <div>
-              <div style="font-size:.68rem;font-weight:600;color:#2563EB;margin-bottom:3px">
-                STEP 2. 마스터 시트 → DB 동기화
-              </div>
-              <div style="display:flex;gap:4px">
-                <button id="btnSyncMasterDry" onclick="syncMasterSheet(true)"
-                  style="flex:1;padding:6px;background:#EFF6FF;color:#1D4ED8;border:1px solid #BFDBFE;border-radius:6px;font-size:.71rem;font-weight:600;cursor:pointer;display:flex;align-items:center;justify-content:center;gap:4px">
-                  <i class="fas fa-search"></i> 동기화 미리보기
-                </button>
-                <button id="btnSyncMasterRun" onclick="syncMasterSheet(false)"
-                  style="flex:1;padding:6px;background:#1D4ED8;color:#fff;border:1px solid #1D4ED8;border-radius:6px;font-size:.71rem;font-weight:600;cursor:pointer;display:flex;align-items:center;justify-content:center;gap:4px">
-                  <i class="fas fa-play"></i> 동기화 실행
-                </button>
-              </div>
+          <div style="border-top:1px solid #F3F4F6;margin-bottom:8px"></div>
+
+          <!-- 설정 경량 동기화 -->
+          <div style="margin-bottom:8px">
+            <div style="font-size:.75rem;font-weight:600;color:#374151;margin-bottom:4px">
+              <i class="fas fa-sliders-h" style="color:#2563EB"></i> 설정 동기화
+              <span style="font-size:.64rem;font-weight:400;color:#6B7280">(담당자, 택배 등 설정만 경량 갱신)</span>
+            </div>
+            <div style="font-size:.66rem;color:#6B7280;line-height:1.45;margin-bottom:4px">
+              구조 변경 없이 <b>설정값만</b> DB에 반영 (API 1회, 1~3초).
+              <span style="color:#059669">10분마다 자동 실행됩니다.</span>
+            </div>
+            <button id="btnSyncSettings" onclick="syncSettingsOnly()"
+              style="width:100%;padding:7px;background:#EFF6FF;color:#1D4ED8;border:1px solid #BFDBFE;border-radius:6px;font-size:.73rem;font-weight:600;cursor:pointer;display:flex;align-items:center;justify-content:center;gap:4px">
+              <i class="fas fa-sliders-h"></i> 설정 동기화 실행
+            </button>
+          </div>
+
+          <div style="border-top:1px solid #F3F4F6;margin-bottom:8px"></div>
+
+          <!-- 탭명·URL 동기화 -->
+          <div style="margin-bottom:8px">
+            <div style="font-size:.75rem;font-weight:600;color:#374151;margin-bottom:4px">
+              <i class="fas fa-exchange-alt" style="color:#7C3AED"></i> 탭명·URL 동기화
+              <span style="font-size:.64rem;font-weight:400;color:#6B7280">(시트 실제 탭명 ↔ DB)</span>
+            </div>
+            <div style="font-size:.66rem;color:#6B7280;line-height:1.45;margin-bottom:4px">
+              Google Sheets에서 탭 이름이 변경된 경우 DB를 일괄 업데이트합니다.
+            </div>
+            <div style="display:flex;gap:4px">
+              <button id="btnSyncTabNamesDry" onclick="syncTabNames(true)"
+                style="flex:1;padding:7px;background:#FAF5FF;color:#6D28D9;border:1px solid #DDD6FE;border-radius:6px;font-size:.73rem;font-weight:600;cursor:pointer;display:flex;align-items:center;justify-content:center;gap:4px">
+                <i class="fas fa-search"></i> 미리보기
+              </button>
+              <button id="btnSyncTabNamesRun" onclick="syncTabNames(false)"
+                style="flex:1;padding:7px;background:#7C3AED;color:#fff;border:1px solid #7C3AED;border-radius:6px;font-size:.73rem;font-weight:600;cursor:pointer;display:flex;align-items:center;justify-content:center;gap:4px">
+                <i class="fas fa-play"></i> 실행
+              </button>
             </div>
           </div>
 
@@ -441,7 +460,6 @@
             <div style="font-size:.66rem;color:#6B7280;line-height:1.45;margin-bottom:6px">
               초기화할 항목을 선택하세요. <b style="color:#DC2626">되돌릴 수 없습니다.</b>
             </div>
-
             <div style="display:flex;flex-direction:column;gap:5px;margin-bottom:6px">
               <label style="display:flex;align-items:center;gap:6px;font-size:.7rem;cursor:pointer;padding:4px 8px;background:#FEF2F2;border:1px solid #FECACA;border-radius:5px">
                 <input type="checkbox" id="resetDashboard" checked style="accent-color:#DC2626">
@@ -456,34 +474,10 @@
                 <span><b>인식 실패 탭</b> — unrecognized_tabs</span>
               </label>
             </div>
-
             <button id="btnResetAll" onclick="resetAllData()"
               style="padding:6px 16px;background:#FEF2F2;color:#DC2626;border:1px solid #FECACA;border-radius:6px;font-size:.71rem;font-weight:600;cursor:pointer;display:flex;align-items:center;justify-content:center;gap:4px">
               <i class="fas fa-trash-alt"></i> 선택 항목 초기화
             </button>
-          </div>
-
-          <div style="border-top:1px solid #F3F4F6;margin-bottom:8px"></div>
-
-          <!-- 탭명·URL 동기화 -->
-          <div style="margin-bottom:8px">
-            <div style="font-size:.75rem;font-weight:600;color:#374151;margin-bottom:4px">
-              <i class="fas fa-exchange-alt" style="color:#7C3AED"></i> 탭명·URL 동기화
-              <span style="font-size:.64rem;font-weight:400;color:#6B7280">(시트 실제 탭명 ↔ DB)</span>
-            </div>
-            <div style="font-size:.66rem;color:#6B7280;line-height:1.45;margin-bottom:4px">
-              Google Sheets에서 탭 이름이 변경된 경우 DB(tab_configs, index_master, review_index)를 일괄 업데이트합니다. 시트 URL 불일치도 자동 교정합니다.
-            </div>
-            <div style="display:flex;gap:4px">
-              <button id="btnSyncTabNamesDry" onclick="syncTabNames(true)"
-                style="flex:1;padding:7px;background:#FAF5FF;color:#6D28D9;border:1px solid #DDD6FE;border-radius:6px;font-size:.73rem;font-weight:600;cursor:pointer;display:flex;align-items:center;justify-content:center;gap:4px">
-                <i class="fas fa-search"></i> 미리보기
-              </button>
-              <button id="btnSyncTabNamesRun" onclick="syncTabNames(false)"
-                style="flex:1;padding:7px;background:#7C3AED;color:#fff;border:1px solid #7C3AED;border-radius:6px;font-size:.73rem;font-weight:600;cursor:pointer;display:flex;align-items:center;justify-content:center;gap:4px">
-                <i class="fas fa-play"></i> 실행
-              </button>
-            </div>
           </div>
 
           <!-- 캡처폴더 구조 재편성 -->

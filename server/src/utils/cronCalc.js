@@ -1,11 +1,14 @@
 /**
  * 다음 CRON 실행 시각 계산 (KST 기준)
- * - 자동 빌드: 월~토 09~19시 매 15분 (환경변수 INDEX_CRON_SCHEDULE)
- * - 전체 재빌드: 4시간마다 (00, 04, 08, 12, 16, 20시)
+ * - Dirty+자동빌드: 월~토 09~19시 매 15분
+ * - 인덱스 빌드: 하루 2회 (09시, 15시) — 환경변수 INDEX_CRON_SCHEDULE
+ * - 전체 재빌드: 매일 새벽 4시
+ * - 설정 동기화: 10분마다
  */
 function calcNextCronTimes() {
-  const cronExpr = process.env.INDEX_CRON_SCHEDULE || '*/15 9-19 * * 1-6';
-  const fullRebuildExpr = '0 */4 * * *';
+  const cronExpr = process.env.INDEX_CRON_SCHEDULE || '0 9,15 * * 1-6';
+  const fullRebuildExpr = '0 4 * * *';
+  const dirtyExpr = '*/15 9-19 * * 1-6';
 
   const now = new Date();
   // KST = UTC+9
@@ -13,13 +16,13 @@ function calcNextCronTimes() {
   const kstHour = kstNow.getUTCHours();
   const kstMin = kstNow.getUTCMinutes();
 
-  // ── 자동 빌드 (월~토 9~19시 매 15분) ──
-  let nextAutoMs = null;
-  let nextAutoStr = null;
+  // ── Dirty+자동빌드 (월~토 9~19시 매 15분) ──
+  let nextDirtyMs = null;
+  let nextDirtyStr = null;
   {
     const validDays = [1, 2, 3, 4, 5, 6]; // 월~토
     const startHour = 9, endHour = 19;
-    const intervalMin = 15; // 15분 간격
+    const intervalMin = 15;
 
     for (let dayOffset = 0; dayOffset <= 7; dayOffset++) {
       const candidate = new Date(kstNow.getTime());
@@ -32,7 +35,6 @@ function calcNextCronTimes() {
         if (h < startHour) continue;
         for (let m = 0; m < 60; m += intervalMin) {
           if (dayOffset === 0) {
-            // 오늘: 현재 시각 이후만
             if (h < kstHour) continue;
             if (h === kstHour && m <= kstMin) continue;
           }
@@ -42,50 +44,80 @@ function calcNextCronTimes() {
           const diffMs = nextKST.getTime() - kstNow.getTime();
           if (diffMs <= 0) continue;
 
-          nextAutoMs = diffMs;
+          nextDirtyMs = diffMs;
           const nextUTC = new Date(nextKST.getTime() - 9 * 60 * 60 * 1000);
-          nextAutoStr = nextUTC.toISOString();
+          nextDirtyStr = nextUTC.toISOString();
           break;
         }
-        if (nextAutoMs !== null && nextAutoMs > 0) break;
+        if (nextDirtyMs !== null && nextDirtyMs > 0) break;
       }
-      if (nextAutoMs !== null && nextAutoMs > 0) break;
+      if (nextDirtyMs !== null && nextDirtyMs > 0) break;
     }
   }
 
-  // ── 전체 재빌드 (4시간마다: 0, 4, 8, 12, 16, 20시 KST) ──
-  let nextFullMs = null;
-  let nextFullStr = null;
+  // ── 인덱스 전체 빌드 (하루 2회: 09시, 15시 KST) ──
+  let nextAutoMs = null;
+  let nextAutoStr = null;
   {
-    const fullHours = [0, 4, 8, 12, 16, 20];
-    for (let dayOffset = 0; dayOffset <= 1; dayOffset++) {
-      for (const h of fullHours) {
+    const validDays = [1, 2, 3, 4, 5, 6];
+    const buildHours = [9, 15];
+
+    for (let dayOffset = 0; dayOffset <= 7; dayOffset++) {
+      for (const h of buildHours) {
         const candidate = new Date(kstNow.getTime());
         candidate.setUTCDate(candidate.getUTCDate() + dayOffset);
+        const candDay = candidate.getUTCDay();
+        if (!validDays.includes(candDay)) continue;
+
         candidate.setUTCHours(h, 0, 0, 0);
         const diffMs = candidate.getTime() - kstNow.getTime();
         if (diffMs > 0) {
-          nextFullMs = diffMs;
+          nextAutoMs = diffMs;
           const nextUTC = new Date(candidate.getTime() - 9 * 60 * 60 * 1000);
-          nextFullStr = nextUTC.toISOString();
+          nextAutoStr = nextUTC.toISOString();
           break;
         }
       }
-      if (nextFullMs !== null) break;
+      if (nextAutoMs !== null) break;
+    }
+  }
+
+  // ── 전체 재빌드 (매일 새벽 4시 KST) ──
+  let nextFullMs = null;
+  let nextFullStr = null;
+  {
+    for (let dayOffset = 0; dayOffset <= 1; dayOffset++) {
+      const candidate = new Date(kstNow.getTime());
+      candidate.setUTCDate(candidate.getUTCDate() + dayOffset);
+      candidate.setUTCHours(4, 0, 0, 0);
+      const diffMs = candidate.getTime() - kstNow.getTime();
+      if (diffMs > 0) {
+        nextFullMs = diffMs;
+        const nextUTC = new Date(candidate.getTime() - 9 * 60 * 60 * 1000);
+        nextFullStr = nextUTC.toISOString();
+        break;
+      }
     }
   }
 
   return {
+    dirty: {
+      schedule: dirtyExpr,
+      description: '월~토 09~19시 매 15분 (변경감지+자동빌드)',
+      nextRunAt: nextDirtyStr,
+      nextRunInMs: nextDirtyMs,
+      nextRunInSec: nextDirtyMs ? Math.round(nextDirtyMs / 1000) : null,
+    },
     auto: {
       schedule: cronExpr,
-      description: '월~토 09~19시 매 15분',
+      description: '월~토 하루 2회 (09시, 15시)',
       nextRunAt: nextAutoStr,
       nextRunInMs: nextAutoMs,
       nextRunInSec: nextAutoMs ? Math.round(nextAutoMs / 1000) : null,
     },
     full: {
       schedule: fullRebuildExpr,
-      description: '4시간마다 (00, 04, 08, 12, 16, 20시)',
+      description: '매일 새벽 4시 전체 재빌드',
       nextRunAt: nextFullStr,
       nextRunInMs: nextFullMs,
       nextRunInSec: nextFullMs ? Math.round(nextFullMs / 1000) : null,
