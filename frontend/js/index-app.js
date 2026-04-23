@@ -11872,7 +11872,8 @@ async function fullMasterSync(dryRun) {
       if (t.updated > 0) parts.push(`탭 ~${t.updated}`);
       if (t.removed > 0) parts.push(`탭 -${t.removed}`);
       if (parts.length === 0) parts.push("변경 없음 — DB와 시트가 일치합니다");
-      showToast(`✅ 구조 동기화 완료: ${parts.join(", ")}`, "success");
+      const cacheLabel = res.usedCache ? " (캐시 적용 — 재스캔 생략)" : "";
+      showToast(`✅ 구조 동기화 완료: ${parts.join(", ")}${cacheLabel}`, "success");
 
       // 대시보드 새로고침
       if (typeof loadTabDashboard === "function") loadTabDashboard();

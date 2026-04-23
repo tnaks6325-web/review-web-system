@@ -17,6 +17,10 @@ const { logger } = require('../utils/logger');
 const MASTER_SHEET_ID = process.env.MASTER_SHEET_ID || '';
 const MASTER_TAB_NAME = process.env.MASTER_TAB_NAME || 'tab_configs';
 
+// ── 스캔 결과 캐시 (미리보기 → 실행 시 재스캔 방지) ──
+let _scanCache = null;         // { scanResults, summary, cachedAt }
+const SCAN_CACHE_TTL = 5 * 60 * 1000; // 5분
+
 // ── 마스터 시트 헤더 (고정 순서) ──
 const MASTER_HEADERS = [
   'sheet_url', 'campaign_name', 'tab_name', 'manager', 'time_range',
@@ -248,7 +252,7 @@ async function scanAndPopulateMaster(dryRun = true) {
 
   const elapsed = ((Date.now() - startTime) / 1000).toFixed(1) + 's';
 
-  return {
+  const summary = {
     dryRun,
     elapsed,
     sheetsScanned: uniqueSheetIds.length,
@@ -266,6 +270,16 @@ async function scanAndPopulateMaster(dryRun = true) {
       sheetUrl: r.sheet_url.substring(0, 50) + '...',
     })),
   };
+
+  // ★ 미리보기 시 스캔 결과를 캐시 (실행 시 재스캔 방지)
+  if (dryRun) {
+    _scanCache = { scanResults, summary, cachedAt: Date.now() };
+    logger.info(`[scanMaster] 미리보기 결과 캐시 저장 (${totalTabs}개 탭, 5분 유효)`);
+  } else {
+    _scanCache = null; // 실행 완료 후 캐시 삭제
+  }
+
+  return summary;
 }
 
 /**
@@ -315,6 +329,58 @@ async function _writeMasterSheet(rows) {
   }
 
   logger.info(`[masterSheet] 마스터 시트 쓰기 완료: ${values.length - 1}행`);
+}
+
+
+// ══════════════════════════════════════════════════════════════
+// ★ 캐시된 스캔 결과로 마스터시트 쓰기 + DB 동기화 (재스캔 없음)
+// 미리보기 → 실행 시 이중 파싱을 방지하기 위한 함수
+// ══════════════════════════════════════════════════════════════
+async function applyCachedScanAndSync() {
+  const startTime = Date.now();
+
+  // 캐시 유효성 검사
+  if (!_scanCache) {
+    throw new Error('캐시된 스캔 결과가 없습니다. 미리보기를 먼저 실행하세요.');
+  }
+  if (Date.now() - _scanCache.cachedAt > SCAN_CACHE_TTL) {
+    _scanCache = null;
+    throw new Error('캐시가 만료되었습니다 (5분 초과). 미리보기를 다시 실행하세요.');
+  }
+
+  const { scanResults, summary: cachedSummary } = _scanCache;
+  logger.info(`[full-sync] 캐시된 스캔 결과 사용 (${scanResults.length}개 탭, ${((Date.now() - _scanCache.cachedAt) / 1000).toFixed(0)}초 전 스캔)`);
+
+  // Step 1: 마스터 시트에 쓰기 (캐시된 결과 사용 — 재스캔 없음)
+  await _writeMasterSheet(scanResults);
+
+  // Step 2: 마스터 시트 → DB 동기화
+  const syncResult = await syncMasterSheetToDB(false);
+
+  // 캐시 삭제 (사용 완료)
+  _scanCache = null;
+
+  const elapsed = ((Date.now() - startTime) / 1000).toFixed(1) + 's';
+  logger.info(`[full-sync] 캐시 적용 완료: ${elapsed} (스캔 생략, 쓰기+DB동기화만 실행)`);
+
+  return {
+    scan: { ...cachedSummary, dryRun: false, elapsed: cachedSummary.elapsed + ' (캐시)' },
+    sync: syncResult,
+    elapsed,
+    usedCache: true,
+  };
+}
+
+/**
+ * 스캔 캐시 존재 여부 확인
+ */
+function hasScanCache() {
+  if (!_scanCache) return false;
+  if (Date.now() - _scanCache.cachedAt > SCAN_CACHE_TTL) {
+    _scanCache = null;
+    return false;
+  }
+  return true;
 }
 
 
@@ -707,6 +773,8 @@ module.exports = {
   readMasterSheet,
   syncMasterSheetToDB,
   scanAndPopulateMaster,
+  applyCachedScanAndSync,
+  hasScanCache,
   syncSettingsOnly,
   extractSheetId,
   MASTER_SHEET_ID,

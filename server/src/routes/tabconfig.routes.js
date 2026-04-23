@@ -3,7 +3,7 @@ const router = express.Router();
 const pool = require('../db/pool');
 const { authMiddleware } = require('../middleware/auth.middleware');
 const { getSpreadsheetMeta } = require('../services/sheets.service');
-const { syncMasterSheetToDB, scanAndPopulateMaster, syncSettingsOnly } = require('../services/masterSheet.service');
+const { syncMasterSheetToDB, scanAndPopulateMaster, applyCachedScanAndSync, hasScanCache, syncSettingsOnly } = require('../services/masterSheet.service');
 const { logger } = require('../utils/logger');
 const { throttledCall } = require('../utils/sheetsThrottle');
 
@@ -603,32 +603,42 @@ router.post('/sync-master', authMiddleware, async (req, res, next) => {
 
 // ══════════════════════════════════════════════════════════════
 // POST /api/tab/full-sync — ★ 통합 동기화: 스캔 + DB동기화를 1회에 처리
-// 기존의 scan-master → sync-master 2단계를 1단계로 통합
-// API 사용량: 기존 2×N회 → 1×N회 (스캔 1회만, DB동기화는 로컬)
+// 미리보기: 시트 스캔 → 결과 캐시 저장 (5분 유효)
+// 실행:     캐시가 있으면 재스캔 없이 바로 적용, 없으면 새로 스캔
 // ══════════════════════════════════════════════════════════════
 router.post('/full-sync', authMiddleware, async (req, res, next) => {
   try {
     const { dryRun = true } = req.body;
     logger.info(`[full-sync] ${dryRun ? '미리보기' : '실행'} 요청 — by ${req.admin?.name || 'unknown'}`);
 
-    // Step 1: 스캔 (실제 시트 접속 → 마스터시트 채우기)
-    const scanResult = await scanAndPopulateMaster(!dryRun ? false : true);
-
-    // Step 2: DB 동기화 (마스터시트 → DB)
-    // dryRun일 때는 스캔 미리보기만 반환
-    let syncResult = null;
-    if (!dryRun) {
-      syncResult = await syncMasterSheetToDB(false);
+    if (dryRun) {
+      // ── 미리보기: 시트 스캔 + 결과 캐시 ──
+      const scanResult = await scanAndPopulateMaster(true);
+      return res.json({ ok: true, dryRun: true, scan: scanResult, sync: null,
+        message: `미리보기: ${scanResult.totalTabs}개 탭 (신규 ${scanResult.newTabs}개)` });
     }
 
+    // ── 실행: 캐시 있으면 재스캔 없이 바로 적용 ──
+    if (hasScanCache()) {
+      logger.info('[full-sync] ★ 캐시된 스캔 결과로 바로 적용 (재스캔 생략)');
+      const result = await applyCachedScanAndSync();
+      return res.json({
+        ok: true, dryRun: false,
+        scan: result.scan, sync: result.sync,
+        usedCache: true,
+        message: `완료(캐시): 스캔 결과 즉시 적용 → DB 동기화 (추가 ${result.sync?.tabs?.added || 0}, 수정 ${result.sync?.tabs?.updated || 0}, 삭제 ${result.sync?.tabs?.removed || 0})`,
+      });
+    }
+
+    // ── 캐시 없음: 새로 스캔 + 즉시 적용 ──
+    logger.info('[full-sync] 캐시 없음 — 새로 스캔 후 적용');
+    const scanResult = await scanAndPopulateMaster(false);
+    const syncResult = await syncMasterSheetToDB(false);
     res.json({
-      ok: true,
-      dryRun,
-      scan: scanResult,
-      sync: syncResult,
-      message: dryRun
-        ? `미리보기: ${scanResult.totalTabs}개 탭 (신규 ${scanResult.newTabs}개)`
-        : `완료: 스캔 ${scanResult.totalTabs}탭 → DB 동기화 (추가 ${syncResult?.tabs?.added || 0}, 수정 ${syncResult?.tabs?.updated || 0}, 삭제 ${syncResult?.tabs?.removed || 0})`,
+      ok: true, dryRun: false,
+      scan: scanResult, sync: syncResult,
+      usedCache: false,
+      message: `완료: 스캔 ${scanResult.totalTabs}탭 → DB 동기화 (추가 ${syncResult?.tabs?.added || 0}, 수정 ${syncResult?.tabs?.updated || 0}, 삭제 ${syncResult?.tabs?.removed || 0})`,
     });
   } catch (err) {
     logger.error(`[full-sync] 오류: ${err.message}`);
