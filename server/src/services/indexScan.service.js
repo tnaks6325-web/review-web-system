@@ -185,6 +185,9 @@ async function runIndexScan(dryRun = true) {
         // 시스템 탭 제외
         if (isSystemTab(tabName)) continue;
 
+        // 숨겨진 탭 제외
+        if (sheet.properties.hidden) continue;
+
         const tabUrl = buildTabUrl(sheetUrl, tabGid);
 
         scanResults.push({

@@ -450,6 +450,7 @@ router.get('/sheet-meta', async (req, res, next) => {
         tabName: s.properties.title,
         gid: String(s.properties.sheetId),
         index: s.properties.index,
+        hidden: !!s.properties.hidden,
       }));
 
     // DB의 tab_configs/index_master와 비교
@@ -484,9 +485,11 @@ router.get('/sheet-meta', async (req, res, next) => {
       ok: true,
       title: meta._spreadsheetTitle || '',
       totalTabs: tabs.length,
+      hiddenTabs: tabs.filter(t => t.hidden).length,
       dbTabs: dbTabs.length,
       mismatches: mismatches.length,
       mismatchDetails: mismatches,
+      hiddenDetails: tabs.filter(t => t.hidden).map(t => ({ tabName: t.tabName, gid: t.gid })),
       tabs: tabs,
     });
   } catch (err) {

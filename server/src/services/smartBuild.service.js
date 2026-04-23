@@ -400,7 +400,11 @@ async function runSmartBuild() {
         const spreadsheetTitle = meta._spreadsheetTitle || '';
         const validTabs = meta.filter(s => {
           const title = s.properties.title;
-          return !SYSTEM_TABS.includes(title);
+          // 시스템 탭 제외
+          if (SYSTEM_TABS.includes(title)) return false;
+          // 숨겨진 탭 제외
+          if (s.properties.hidden) return false;
+          return true;
         });
 
         if (validTabs.length === 0) continue;
