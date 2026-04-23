@@ -191,6 +191,9 @@ const _ACTION_MAP = {
   'smartBuildRun':         { method: 'POST', path: '/api/admin/smart-build/run' },
   'smartBuildStart':       { method: 'POST', path: '/api/admin/smart-build/start' },
   'smartBuildStop':        { method: 'POST', path: '/api/admin/smart-build/stop' },
+
+  // ★ DB 전체 재구축 (초기화 → 탭목록 재등록 → 스마트빌드)
+  'dbRebuild':             { method: 'POST', path: '/api/admin/db-rebuild' },
 };
 
 // ═══════════════════════════════════════════════════════════

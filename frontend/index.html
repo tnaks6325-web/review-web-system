@@ -1014,6 +1014,9 @@
                 <button id="btnSmartBuildScheduler" onclick="toggleSmartBuildScheduler()" class="btn-sm" style="font-size:.72rem;background:#059669;color:#fff;border:none;padding:4px 10px;border-radius:6px;cursor:pointer" title="5분 주기 자동 실행 토글">
                   <i class="fas fa-clock"></i> 스케줄러: ON
                 </button>
+                <button onclick="triggerDbRebuild()" class="btn-sm" style="font-size:.72rem;background:#DC2626;color:#fff;border:none;padding:4px 10px;border-radius:6px;cursor:pointer" title="DB 전체 초기화 → 탭목록 재등록 → 스마트빌드">
+                  <i class="fas fa-database"></i> DB 재구축
+                </button>
                 <button onclick="loadSmartBuildStatus()" class="btn-sm" style="font-size:.72rem" title="상태 새로고침">
                   <i class="fas fa-sync-alt"></i>
                 </button>

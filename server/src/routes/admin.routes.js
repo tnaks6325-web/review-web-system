@@ -448,6 +448,7 @@ const {
   startSmartBuild,
   stopSmartBuild,
   getSmartBuildStatus,
+  resetSmartBuildCache,
 } = require('../services/smartBuild.service');
 
 // GET /api/admin/smart-build/status — 스마트 빌드 상태 조회
@@ -497,6 +498,109 @@ router.post('/smart-build/stop', authMiddleware, masterOnlyMiddleware, async (re
     const stopped = stopSmartBuild();
     res.json({ ok: true, stopped, status: getSmartBuildStatus() });
   } catch (err) { next(err); }
+});
+
+// ══════════════════════════════════════════════════════════════
+// POST /api/admin/db-rebuild — DB 전체 초기화 + 탭목록에서 재등록 + 스마트빌드
+// 단계: ① 4테이블 TRUNCATE ② 캐시 리셋 ③ syncTabListToDB ④ smartBuild
+// ══════════════════════════════════════════════════════════════
+router.post('/db-rebuild', authMiddleware, masterOnlyMiddleware, async (req, res, next) => {
+  const { logger } = require('../utils/logger');
+  const { broadcast } = require('../utils/sse');
+
+  try {
+    const { confirm } = req.body;
+    if (confirm !== 'REBUILD_DB') {
+      return res.status(400).json({
+        error: '확인 코드가 올바르지 않습니다. confirm: "REBUILD_DB" 필요'
+      });
+    }
+
+    // 스마트빌드 실행 중이면 거부
+    const sbStatus = getSmartBuildStatus();
+    if (sbStatus.running) {
+      return res.status(409).json({
+        error: '스마트빌드가 실행 중입니다. 완료 후 다시 시도하세요.'
+      });
+    }
+
+    const startTime = Date.now();
+    const steps = [];
+
+    // ── Step 1: 4개 테이블 TRUNCATE ──
+    logger.warn(`[db-rebuild] ⚠ DB 전체 초기화 시작 — by ${req.admin?.name || 'unknown'}`);
+    broadcast('db_rebuild_progress', { step: 1, message: 'DB 테이블 초기화 중...' });
+
+    const client = await pool.connect();
+    const deleted = {};
+    try {
+      await client.query('BEGIN');
+      const tables = ['review_index', 'index_master', 'tab_configs', 'campaigns'];
+      for (const table of tables) {
+        const r = await client.query(`DELETE FROM ${table}`);
+        deleted[table] = r.rowCount;
+      }
+      // build_history, smart build 로그도 초기화
+      const r2 = await client.query('DELETE FROM build_history');
+      deleted.build_history = r2.rowCount;
+
+      await client.query('COMMIT');
+    } catch (err) {
+      await client.query('ROLLBACK');
+      throw err;
+    } finally {
+      client.release();
+    }
+
+    steps.push({ step: 1, action: 'TRUNCATE', deleted, elapsed: `${((Date.now() - startTime) / 1000).toFixed(1)}s` });
+    logger.info(`[db-rebuild] Step1 완료: ${JSON.stringify(deleted)}`);
+
+    // ── Step 2: 스마트빌드 캐시 리셋 ──
+    broadcast('db_rebuild_progress', { step: 2, message: '캐시 리셋 중...' });
+    const cacheReset = resetSmartBuildCache();
+    steps.push({ step: 2, action: 'CACHE_RESET', ...cacheReset });
+    logger.info(`[db-rebuild] Step2 캐시 리셋: ${JSON.stringify(cacheReset)}`);
+
+    // ── Step 3: 탭목록 시트에서 campaigns + tab_configs + index_master 재등록 ──
+    broadcast('db_rebuild_progress', { step: 3, message: '탭목록 시트에서 재등록 중...' });
+    const { syncTabListToDB } = require('../services/indexScan.service');
+    const syncResult = await syncTabListToDB({ dryRun: false, fromCache: false });
+    steps.push({ step: 3, action: 'SYNC_TAB_LIST', ...syncResult });
+    logger.info(`[db-rebuild] Step3 탭목록 동기화: ${syncResult.message}`);
+
+    // ── Step 4: 스마트빌드 1회 실행 (백그라운드) ──
+    broadcast('db_rebuild_progress', { step: 4, message: '스마트빌드 실행 시작... (백그라운드)' });
+
+    // 백그라운드로 스마트빌드 실행
+    runSmartBuild().then(result => {
+      const totalElapsed = ((Date.now() - startTime) / 1000).toFixed(1);
+      logger.info(`[db-rebuild] Step4 스마트빌드 완료: ${result.tabsUpdated}탭 갱신, ${result.tabsSkipped}탭 스킵`);
+      broadcast('db_rebuild_done', {
+        message: `DB 재구축 완료 (${totalElapsed}s): ${result.tabsUpdated}탭 갱신`,
+        steps: [...steps, { step: 4, action: 'SMART_BUILD', ...result }],
+        totalElapsed: `${totalElapsed}s`,
+      });
+    }).catch(err => {
+      logger.error(`[db-rebuild] Step4 스마트빌드 오류: ${err.message}`);
+      broadcast('db_rebuild_done', {
+        message: `DB 재구축 부분 완료 (스마트빌드 오류): ${err.message}`,
+        steps,
+        error: err.message,
+      });
+    });
+
+    const elapsed = ((Date.now() - startTime) / 1000).toFixed(1);
+    res.json({
+      ok: true,
+      message: `DB 초기화 + 탭목록 재등록 완료 (${elapsed}s). 스마트빌드가 백그라운드에서 실행 중입니다.`,
+      steps,
+      elapsed: `${elapsed}s`,
+    });
+
+  } catch (err) {
+    logger.error(`[db-rebuild] 오류: ${err.message}`);
+    next(err);
+  }
 });
 
 module.exports = router;

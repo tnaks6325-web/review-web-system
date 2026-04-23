@@ -546,6 +546,22 @@ function getSmartBuildStatus() {
 }
 
 // ═══════════════════════════════════════════════════════════
+// 캐시 리셋 — DB 초기화 후 전체 재빌드를 위해
+// ═══════════════════════════════════════════════════════════
+
+function resetSmartBuildCache() {
+  const prev = {
+    modifiedTimeEntries: Object.keys(_modifiedTimeCache).length,
+    checksumEntries: Object.keys(_checksumCache).length,
+  };
+  _modifiedTimeCache = {};
+  _checksumCache = {};
+  _lastRunResult = null;
+  logger.info(`[SmartBuild] 캐시 리셋 완료 — modifiedTime: ${prev.modifiedTimeEntries}→0, checksum: ${prev.checksumEntries}→0`);
+  return prev;
+}
+
+// ═══════════════════════════════════════════════════════════
 // Export
 // ═══════════════════════════════════════════════════════════
 
@@ -554,5 +570,6 @@ module.exports = {
   startSmartBuild,
   stopSmartBuild,
   getSmartBuildStatus,
+  resetSmartBuildCache,
   SMART_BUILD_INTERVAL_MS,
 };

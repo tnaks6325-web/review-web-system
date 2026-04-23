@@ -842,7 +842,7 @@ function connectSSE() {
     };
 
     // 이벤트별 핸들러
-    ['review_submit', 'order_submit', 'image_extract', 'image_upload', 'index_build', 'system', 'dirty_detected', 'smart_build_done', 'dirty_auto_built'].forEach(function(evtType) {
+    ['review_submit', 'order_submit', 'image_extract', 'image_upload', 'index_build', 'system', 'dirty_detected', 'smart_build_done', 'dirty_auto_built', 'db_rebuild_progress', 'db_rebuild_done'].forEach(function(evtType) {
       _sseSource.addEventListener(evtType, function(event) {
         try {
           const data = JSON.parse(event.data);
@@ -858,6 +858,17 @@ function connectSSE() {
             if (_sbBtn && _sbBtn.disabled) _restoreSmartBuildBtn(_sbBtn, null);
             // 대시보드 캠페인 탭 관리 자동 새로고침
             if (typeof loadTabDashboard === 'function') setTimeout(loadTabDashboard, 500);
+          }
+          // ★ DB 재구축 진행/완료
+          if (evtType === 'db_rebuild_progress') {
+            showToast("DB 재구축 Step " + (data.step || "?") + ": " + (data.message || ""), "info", 4000);
+          }
+          if (evtType === 'db_rebuild_done') {
+            showToast(data.message || "DB 재구축 완료", "success", 8000);
+            var _badge = document.getElementById("smartBuildStatusBadge");
+            if (_badge) { _badge.textContent = "완료"; _badge.style.background = "#D1FAE5"; _badge.style.color = "#065F46"; }
+            if (typeof loadSmartBuildStatus === 'function') loadSmartBuildStatus();
+            if (typeof loadTabDashboard === 'function') setTimeout(loadTabDashboard, 1000);
           }
         } catch (_) {}
       });
@@ -1523,5 +1534,80 @@ async function toggleSmartBuildScheduler() {
   } catch (err) {
     showToast("스케줄러 토글 오류: " + err.message, "error");
     loadSmartBuildStatus();
+  }
+}
+
+// ═══════════════════════════════════════════════════════════
+// ★ DB 전체 재구축 (초기화 → 탭목록 재등록 → 스마트빌드)
+// ═══════════════════════════════════════════════════════════
+
+async function triggerDbRebuild() {
+  // 2단계 확인
+  if (!confirm(
+    "⚠️ DB 전체 재구축을 실행하시겠습니까?\n\n" +
+    "다음 테이블이 초기화(0행)됩니다:\n" +
+    "  • campaigns\n" +
+    "  • tab_configs\n" +
+    "  • index_master\n" +
+    "  • review_index\n" +
+    "  • build_history\n\n" +
+    "이후 탭목록 시트에서 재등록하고 스마트빌드를 실행합니다."
+  )) return;
+
+  var confirmCode = prompt(
+    "최종 확인: 'REBUILD_DB'를 입력하세요.\n(취소하려면 아무것도 입력하지 마세요)"
+  );
+  if (confirmCode !== "REBUILD_DB") {
+    showToast("DB 재구축이 취소되었습니다.", "info");
+    return;
+  }
+
+  // UI 상태 변경
+  var badge = document.getElementById("smartBuildStatusBadge");
+  if (badge) {
+    badge.textContent = "재구축 중...";
+    badge.style.background = "#FEF3C7";
+    badge.style.color = "#92400E";
+  }
+
+  try {
+    showToast("DB 재구축을 시작합니다...", "info");
+
+    var res = await gasPost({ action: "dbRebuild", confirm: "REBUILD_DB" });
+    if (res.ok) {
+      // 단계별 결과 표시
+      var detail = "DB 재구축 진행 중:\n";
+      if (res.steps) {
+        res.steps.forEach(function(s) {
+          if (s.action === "TRUNCATE") {
+            var delInfo = Object.entries(s.deleted || {}).map(function(kv) {
+              return kv[0] + "=" + kv[1] + "행 삭제";
+            }).join(", ");
+            detail += "① 초기화: " + delInfo + "\n";
+          } else if (s.action === "SYNC_TAB_LIST") {
+            detail += "③ 탭목록 재등록: " + (s.message || "완료") + "\n";
+          }
+        });
+      }
+      detail += "④ 스마트빌드 실행 중 (백그라운드)...\n완료 시 SSE 알림됩니다.";
+      showToast(detail, "success", 10000);
+
+      // 상태 갱신
+      setTimeout(loadSmartBuildStatus, 2000);
+    } else {
+      showToast(res.error || "DB 재구축 실패", "error");
+      if (badge) {
+        badge.textContent = "오류";
+        badge.style.background = "#FEE2E2";
+        badge.style.color = "#991B1B";
+      }
+    }
+  } catch (err) {
+    showToast("DB 재구축 오류: " + err.message, "error");
+    if (badge) {
+      badge.textContent = "오류";
+      badge.style.background = "#FEE2E2";
+      badge.style.color = "#991B1B";
+    }
   }
 }
