@@ -21,6 +21,19 @@ v2.1에서 인덱스 빌드 최적화, Sync Queue, DB 우선 제출, DB 전용 �
 
 ## v2.1 Phase 1-5 최적화 요약
 
+### ★ v11.6: 스마트 빌드 (Smart Build)
+- **Drive API 변경감지**: 57개 시트의 수정시각을 Drive API로 일괄 조회 (분당 12,000회 한도)
+- **Sheets API batchGet**: 변경된 시트만 탭 데이터를 1회 API로 읽기 (시트당 1호출)
+- **체크섬 비교**: 탭별 MD5 체크섬으로 실제 변경된 탭만 DB 갱신
+- **5분 자동 주기**: 서버 시작 30초 후 첫 실행, 이후 5분마다 자동 반복
+- **독립 모듈**: 기존 indexBuilder 코드와 완전히 분리된 별도 서비스
+- **API 엔드포인트**:
+  - `GET /api/admin/smart-build/status` — 상태 조회
+  - `POST /api/admin/smart-build/run` — 수동 1회 실행
+  - `POST /api/admin/smart-build/start` — 스케줄러 시작
+  - `POST /api/admin/smart-build/stop` — 스케줄러 정지
+- **프론트엔드 UI**: 시스템 모니터링 패널에 스마트빌드 상태 표시, 수동 실행/스케줄러 토글 버튼
+
 ### Phase 1: 인덱스 빌드 속도 최적화
 - **Drive API 변경감지**: `getSheetModifiedTime()`으로 수정시각 확인 → 변경 없는 시트 전체 스킵
 - **batchGet**: 같은 시트의 모든 탭을 1회 API 호출로 읽기 (106회 → 8회)
