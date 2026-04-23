@@ -548,15 +548,18 @@ input,textarea,button{font-family:inherit}
 .hide-done-mode .dash-tab-row.tab-done{display:none}
 .hide-done-mode .dash-tab-row-monthly.tab-done{display:none}
 .hide-done-mode .dash-tab-row-round.tab-done{display:none}
-/* 마감업체 숨김: 모든 탭이 완료(tab-done)인 캠페인 블록 통째로 숨김 */
+/* 마감업체 숨김: 모든 탭이 완료인 캠페인 행 숨김 (v11.0: 플랫 행 단위) */
 .hide-closed-camp-mode .dash-campaign-block.camp-all-done{display:none}
+.hide-closed-camp-mode .dash-tab-row.camp-all-done{display:none}
 /* 마감 탭 숨김: is-closed-row 행 숨김 */
 .hide-closed-tab-mode .dash-tab-row.is-closed-row{display:none}
 .hide-closed-tab-mode .dash-tab-row-round.is-closed-row{display:none}
 /* 마감 탭이 있는 캠페인 헤더 표시 */
 .dash-campaign-block.camp-has-closed .dash-campaign-name::after{content:" 📁";font-size:.7rem;opacity:.6}
-/* ── 캠페인명 숨김 모드: 캠페인 헤더만 숨기고 하위 인덱스 행은 유지 ── */
-/* 캠페인 블록의 border/radius 제거 → 하위 행들이 연속 목록처럼 보임 */
+/* ── 캠페인명 숨김 모드: v11.0에서는 캠페인 컬럼만 숨김 ── */
+.hide-camp-name-mode .dash-tab-campaign{display:none!important}
+.hide-camp-name-mode .dash-col-header-cell:nth-child(2){display:none!important} /* 캠페인 헤더 셀 */
+/* 레거시 호환 */
 .hide-camp-name-mode .dash-campaign-header{display:none!important}
 .hide-camp-name-mode .dash-campaign-block{border:none!important;border-radius:0!important;margin-bottom:0!important;background:transparent!important}
 .hide-camp-name-mode .dash-tab-table{max-height:none!important;opacity:1!important;padding:0!important}
@@ -1043,8 +1046,18 @@ body.col-resizing .col-drag-handle{pointer-events:auto!important}
   [cb] [cb] 탭명  캡처폴더 리뷰폴더 차수  시작일  상품명  주문시간대  리뷰타입  폼링크  담당자  진행률  리뷰   상태   입금  택대  비고  ⚙
   0px  0px  1fr   54px     54px    38px  62px   200px   88px       70px     46px   50px   300px  68px  78px  56px  44px  52px     80px 40px
 */
+/* ★ v11.0: 엑셀형 플랫 테이블 컨테이너 */
+.dash-flat-table{width:100%;min-width:0}
 .dash-tab-row{display:grid;grid-template-columns:var(--dash-grid);align-items:stretch;gap:0;padding:0 14px;border-bottom:1px solid #EEF2FF;min-height:30px;box-sizing:border-box;width:100%;min-width:0;transition:background .12s}
 .dash-tab-row:hover{background:#FAFCFF}
+/* ★ v11.0: 엑셀형 캠페인 스트라이프 — 교대 배경색으로 캠페인 그룹 시각 구분 */
+.dash-tab-row.camp-stripe-even{background:#FFFFFF}
+.dash-tab-row.camp-stripe-odd{background:#F8FAFC}
+.dash-tab-row.camp-stripe-even:hover{background:#F0F7FF}
+.dash-tab-row.camp-stripe-odd:hover{background:#EFF6FF}
+/* ★ v11.0: 캠페인명 셀 */
+.dash-tab-campaign{font-size:.72rem;color:#059669;font-weight:700;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;padding:0 6px;min-width:0;display:flex;align-items:center}
+.dash-cell-campaign{overflow:hidden;text-overflow:ellipsis;white-space:nowrap;min-width:0}
 /* ── 세로 구분선: 자식 div 행 전체 높이 채우기(stretch) + 내용 center 정렬 ── */
 .dash-tab-row>*{border-right:1px solid #EEF2FF;display:flex;align-items:center}
 .dash-tab-row>*:last-child{border-right:none}

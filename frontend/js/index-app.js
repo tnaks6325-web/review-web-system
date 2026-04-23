@@ -2082,87 +2082,75 @@ async function loadAdminDashboard() {
     
     wrap.appendChild(colHeader);
 
-    // ── 가로 스크롤 래퍼 (캠페인 블록만 포함) ──
+    // ── ★ v11.0: 엑셀형 플랫 테이블 (캠페인 블록 제거, 모든 탭을 한 줄씩) ──
     const scrollOuter1 = document.createElement("div");
     scrollOuter1.id = "dashboardScrollOuter";
-    const scrollInner1 = document.createElement("div");
-    scrollInner1.id = "dashboardScrollInner";
-    scrollOuter1.appendChild(scrollInner1);
+    const flatTable = document.createElement("div");
+    flatTable.id = "dashboardScrollInner";
+    flatTable.className = "dash-flat-table";
+    scrollOuter1.appendChild(flatTable);
     wrap.appendChild(scrollOuter1);
 
+    let _prevCampaign = null;
+    let _campColorIdx = 0;
+
     stats.forEach((c, ci) => {
-      const cRate    = c.total > 0 ? Math.round(c.submitted / c.total * 100) : 0;
-      const tableId  = `dct-${ci}`;
-      const block    = document.createElement("div");
-      // 마감업체 조건: 모든 탭이 완료(pending===0) 또는 마감(isClosed)인 경우
-      // ★ v9.13 fix: 마감(isClosed) 탭은 인덱스에서 제외돼 total=0이므로 별도 조건 추가
-      // ★ v9.13 fix2: GAS closedOnly:true (마감 탭만 있는 캠페인)는 항상 camp-all-done
+      const campName = c.campaign || "";
+      const campSheetId = (c.tabs[0] && c.tabs[0].sheetId) ? c.tabs[0].sheetId : "";
+      // 캠페인 전환 시 컬러 인덱스 증가
+      if (campName !== _prevCampaign) {
+        _campColorIdx++;
+        _prevCampaign = campName;
+      }
+      const campStripe = _campColorIdx % 2 === 0 ? "camp-stripe-even" : "camp-stripe-odd";
+
+      // 마감업체 판정 (기존 로직 유지)
       const isCampDone = c.closedOnly === true || (c.tabs.length > 0 && c.tabs.every(t => {
         const key = (t.sheetId||"")+"||"+(t.tab||"");
         return _closedSet.has(key) || (t.total > 0 && t.pending === 0);
       }));
-      // 마감 탭 포함 여부
       const hasClosed = c.closedOnly === true || c.tabs.some(t => _closedSet.has((t.sheetId||"")+"||"+(t.tab||"")));
-      block.className  = "dash-campaign-block" + (isCampDone ? " camp-all-done" : "") + (hasClosed ? " camp-has-closed" : "");
-      block.dataset.campname = (c.campaign || "").toLowerCase(); // ★ 검색용
-
-      const campSheetId = (c.tabs[0] && c.tabs[0].sheetId) ? c.tabs[0].sheetId : "";
-      const header = document.createElement("div");
-      header.className = "dash-campaign-header has-dev-label";
-      header.innerHTML = `
-        <span class="dev-label">캠페인 헤더 / Campaign Header</span>
-        <div class="dash-campaign-left">
-          <i class="fas fa-chevron-down dash-toggle-icon"></i>
-          ${campSheetId ? `<button class="btn-camp-refresh" data-sheetid="${escHtml(campSheetId)}" data-campname="${escHtml(c.campaign)}" onclick="event.stopPropagation();refreshCampaignIndex(this)" title="이 캠페인만 동기화"><i class="fas fa-sync-alt"></i> 동기화</button>` : ""}
-          ${campSheetId ? `<button class="btn-camp-viewer" data-sheetid="${escHtml(campSheetId)}" onclick="event.stopPropagation();copyCampViewerLink(this)" title="광고주 URL 복사"><i class="fas fa-eye"></i> 광고주URL</button>` : ""}
-          <span class="dash-campaign-name">${escHtml(c.campaign)}</span>
-        </div>
-        <span class="dash-campaign-total">${c.submitted}/${c.total} (${cRate}%)</span>`;
-      header.addEventListener("click", () => toggleDashTab(tableId, header));
-
-      const table = document.createElement("div");
-      table.id        = tableId;
-      table.className = "dash-tab-table collapsed";
 
       c.tabs.forEach(t => {
         const tRate     = t.total > 0 ? Math.round(t.submitted / t.total * 100) : 0;
-        // ★ 마감 키: sheetId||tabName 조합
         const tabKey    = (t.sheetId || "") + "||" + (t.tab || "");
-                const isClosedTab = _closedSet.has(tabKey);
+        const isClosedTab = _closedSet.has(tabKey);
         const isTabDone = (t.total > 0 && t.pending === 0);
-        // ── 긴급 경과 판단 ──
         const _ovDays2 = (!isTabDone && !isClosedTab) ? _calcOverdueDays(t.startDate) : null;
         const isOverdue2 = _ovDays2 !== null && _ovDays2 >= 25;
-        const row       = document.createElement("div");
-        row.className   = "dash-tab-row"
-          + (isTabDone   ? " tab-done" : "")
-          
-          + (isClosedTab ? " is-closed-row" : "")
-          + (isOverdue2  ? " urgent-overdue" : "")
-          // ★ 상품명 없는 탭: 마감 제외 시 경고 배경색
-          + (!t.displayName && !isClosedTab ? " no-product-warn" : "");
-        row.dataset.tabkey = tabKey;
-        row.setAttribute('oncontextmenu', `_openAdminContextMenu(event,'${escHtml(tabKey)}')`);
-        // ★ 정렬용 data 속성 (일부는 아래 변수 선언 후 채움)
-        row.dataset.sortTabname  = (t.tab || "").toLowerCase();
-        row.dataset.sortProduct  = (t.displayName || "").toLowerCase();
-        row.dataset.sortTime     = (t.timeRange || "").toLowerCase();
-        row.dataset.sortReview   = (t.reviewType || "").toLowerCase();
-        row.dataset.sortManager  = (t.manager || "").toLowerCase();
-        row.dataset.sortBar      = tRate;
-        row.dataset.sortNums     = (t.submitted || 0);
-        row.dataset.sortPayment  = (t.paymentType || "").toLowerCase();
-        row.dataset.sortIncome   = (t.incomeType || "").toLowerCase();    // ★ v9.17: 진행방식 검색
-        row.dataset.sortDepositname = (t.depositName || "").toLowerCase(); // ★ v9.17: 입금명 검색
-        row.dataset.sortBank     = (t.transferBank || "").toLowerCase();  // ★ v9.17: 이체은행 검색
-        row.dataset.sortTaekhap  = t.taekhap ? "1" : "0";
-        row.dataset.sortEnddate  = (() => {
-          const ed = localStorage.getItem("rapp_enddate_" + tabKey) || t.endDate || "";
-          const dv = _calcDdayFromEndDate(ed);
-          return dv !== null ? dv : 9999;
-        })();
 
-        // ── 탭명 + overdue 박지 ──
+        // ── 공통 행 속성 세팅 헬퍼 ──
+        function _setupRow(el, tk, extra) {
+          el.className = "dash-tab-row " + campStripe
+            + (isTabDone ? " tab-done" : "")
+            + (isClosedTab ? " is-closed-row" : "")
+            + (extra || "");
+          el.dataset.tabkey = tk;
+          el.dataset.campname = campName.toLowerCase();
+          el.dataset.campSheetId = campSheetId;
+          el.dataset.sortCampaign = campName.toLowerCase();
+          el.dataset.sortTabname  = (t.tab || "").toLowerCase();
+          el.dataset.sortProduct  = (t.displayName || "").toLowerCase();
+          el.dataset.sortTime     = (t.timeRange || "").toLowerCase();
+          el.dataset.sortReview   = (t.reviewType || "").toLowerCase();
+          el.dataset.sortManager  = (t.manager || "").toLowerCase();
+          el.dataset.sortPayment  = (t.paymentType || "").toLowerCase();
+          el.dataset.sortIncome   = (t.incomeType || "").toLowerCase();
+          el.dataset.sortDepositname = (t.depositName || "").toLowerCase();
+          el.dataset.sortBank     = (t.transferBank || "").toLowerCase();
+          el.dataset.sortTaekhap  = t.taekhap ? "1" : "0";
+          if (isCampDone)  el.classList.add("camp-all-done");
+          if (hasClosed)   el.classList.add("camp-has-closed");
+          el.setAttribute('oncontextmenu', `_openAdminContextMenu(event,'${escHtml(tk)}')`);
+        }
+
+        const row = document.createElement("div");
+        _setupRow(row, tabKey,
+          (isOverdue2 ? " urgent-overdue" : "")
+          + (!t.displayName && !isClosedTab ? " no-product-warn" : ""));
+        row.dataset.sortBar = tRate;
+        row.dataset.sortNums = (t.submitted || 0);
+
         const _overdueBadge2 = isOverdue2
           ? `<span class="badge-overdue"><i class="fas fa-fire" style="font-size:.55rem"></i> D+${_ovDays2}</span>`
           : "";
@@ -2171,37 +2159,33 @@ async function loadAdminDashboard() {
           ? `<a class="dash-tab-link" href="${escHtml(_tabSheetUrl2)}" target="_blank">${escHtml(t.tab)} <i class="fas fa-external-link-alt dash-tab-ext"></i></a>${_overdueBadge2}`
           : `<span>${escHtml(t.tab)}</span>${_overdueBadge2}`;
 
-        // 시작일 배지 (수동 수정값 우선 적용)
         const _manualSD = _getManualStartDate(tabKey);
         const _effectiveSD = _manualSD || t.startDate || "";
-        row.dataset.sortDate = _effectiveSD || "9999"; // ★ _effectiveSD 선언 후 설정
+        row.dataset.sortDate = _effectiveSD || "9999";
         const startDateHtml = _effectiveSD
           ? `<span class="tab-start-date${_manualSD ? ' manual-date' : ''}" data-tabkey="${escHtml(tabKey)}" data-rawsd="${escHtml(t.startDate||'')}" onclick="event.stopPropagation();openStartDatePopup(event,this)" title="클릭하여 시작일 수정${_manualSD ? ' (수동 수정됨)' : ''}"><i class="fas fa-calendar-day"></i> ${escHtml(_effectiveSD)}</span>`
           : `<span class="tab-date-empty" data-tabkey="${escHtml(tabKey)}" data-rawsd="" onclick="event.stopPropagation();openStartDatePopup(event,this)" title="시작일 클릭하여 입력"><i class="fas fa-calendar-plus"></i> 날짜</span>`;
 
-        // ★ v9.9: 종료 예정일 D-Day 배지 (endDate 기반)
-        // - localStorage에 캐싱된 종료일 우선 → GAS 반환 endDate 사용
         const _cachedEndDate = localStorage.getItem("rapp_enddate_" + tabKey) || t.endDate || "";
         const endDateHtml = _buildEndDateHtml(tabKey, _cachedEndDate, isTabDone, isClosedTab);
-        const tuip    = t.tuip    || 0;
-        const chuihap = t.chuihap || 0;
+        row.dataset.sortEnddate = (() => {
+          const dv = _calcDdayFromEndDate(_cachedEndDate);
+          return dv !== null ? dv : 9999;
+        })();
 
-        // 상태 오버레이 HTML 생성 헬퍼
+        const tuip = t.tuip || 0, chuihap = t.chuihap || 0;
         const total = t.total || 0;
-        // 상태 셀: 마감 > 완료 > 투입중/취합중(동시가능) > 없음
         let stateHtml = "";
         if (isClosedTab) {
           stateHtml = `<span class="bar-lbl-center">⬛ 마감</span>`;
         } else if (isTabDone) {
           stateHtml = `<span class="bar-lbl-center">✓ 완료</span>`;
         } else if (tuip > 0 || chuihap > 0) {
-          const leftHtml  = tuip    > 0 ? `<span class="bar-lbl-left"><i class="fas fa-user-plus"></i> 투입중 ${tuip}/${total}</span>`       : `<span class="bar-lbl-left"></span>`;
+          const leftHtml  = tuip    > 0 ? `<span class="bar-lbl-left"><i class="fas fa-user-plus"></i> 투입중 ${tuip}/${total}</span>` : `<span class="bar-lbl-left"></span>`;
           const rightHtml = chuihap > 0 ? `<span class="bar-lbl-right"><i class="fas fa-layer-group"></i> 취합중 ${chuihap}/${total}</span>` : `<span class="bar-lbl-right"></span>`;
           stateHtml = leftHtml + rightHtml;
         }
 
-        // 탭설정 데이터 (data-tc 속성으로 전달 → onclick 이스케이프 문제 방지)
-        // ★ tcRound: 세부목록의 round 값 (차수별 행 렌더링 시 해당 차수로 덮어씀)
         const tcData = { sheetId: t.sheetId, sheetUrl: t.sheetUrl || "", tabName: t.tab,
           manager: t.manager||"", timeRange: t.timeRange||"",
           taekhap: t.taekhap||false, reviewType: t.reviewType||"",
@@ -2212,88 +2196,68 @@ async function loadAdminDashboard() {
           tcRound: t.tcRound || t.round || "",
           incomeType: t.incomeType||"",
           depositName: t.depositName||"", transferBank: t.transferBank||"",
-          // ★ 마감 플래그 (저장 시 상품명 예외 처리용)
-          _isClosed: isClosedTab,
-};
+          _isClosed: isClosedTab };
         const tcAttr = escHtml(JSON.stringify(tcData));
 
-        // ★ 차수 렌더링:
-        //   - roundList 1개 이상 → 각 차수마다 독립 행 (탭명 동일, 차수 배지만 다름)
-        //   - roundList 없음     → 단독 행 1개 ("단독" 배지)
         if (t.roundList && t.roundList.length >= 1) {
           t.roundList.forEach(rd => {
             const rdRow = document.createElement("div");
             const rdDone = (rd.total > 0 && rd.pending === 0);
-            // ★ 차수별 독립 tabKey: sheetId||탭명||차수 (수동 시작일이 차수간 공유되지 않도록)
             const rdTabKey2 = tabKey + "||" + (rd.round || "");
-            // ── 차수 행 긴급 경과 ──
             const rdStartDateRaw2 = rd.startDate || t.startDate || "";
-            // 수동값: 차수별 키 우선 → 없으면 탭 전체 키 확인 (하위호환)
             const _rdManualSD2 = _getManualStartDate(rdTabKey2) || _getManualStartDate(tabKey + "||" + (rd.round || "").replace(/.*/, ""));
             const _rdEffectiveSD2 = _rdManualSD2 || rdStartDateRaw2;
             const _rdOvDays2 = (!rdDone && !isClosedTab) ? _calcOverdueDays(_rdEffectiveSD2) : null;
             const rdIsOverdue2 = _rdOvDays2 !== null && _rdOvDays2 >= 25;
-            rdRow.className = "dash-tab-row" + (rdDone ? " tab-done" : "")  + (isClosedTab ? " is-closed-row" : "") + (rdIsOverdue2 ? " urgent-overdue" : "");
-            rdRow.dataset.tabkey = rdTabKey2;
-            // ★ 차수 행 정렬용 data 속성 (rdRate 선언 전 항목만 먼저 설정)
-            rdRow.dataset.sortTabname  = (t.tab || "").toLowerCase();
-            rdRow.dataset.sortProduct  = (t.displayName || "").toLowerCase();
-            rdRow.dataset.sortDate     = _rdEffectiveSD2 || "9999";
-            rdRow.dataset.sortTime     = (t.timeRange || "").toLowerCase();
-            rdRow.dataset.sortReview   = (t.reviewType || "").toLowerCase();
-            rdRow.dataset.sortManager  = (t.manager || "").toLowerCase();
-            rdRow.dataset.sortPayment  = (t.paymentType || "").toLowerCase();
-            rdRow.dataset.sortTaekhap  = t.taekhap ? "1" : "0";
-            rdRow.dataset.sortEnddate  = 9999;
+            _setupRow(rdRow, rdTabKey2, (rdDone ? " tab-done" : "") + (rdIsOverdue2 ? " urgent-overdue" : ""));
+            rdRow.dataset.sortDate = _rdEffectiveSD2 || "9999";
+            rdRow.dataset.sortTaekhap = t.taekhap ? "1" : "0";
+            rdRow.dataset.sortEnddate = 9999;
             const rdRate = rd.total > 0 ? Math.round(rd.submitted / rd.total * 100) : 0;
-            rdRow.dataset.sortBar      = rdRate;  // ★ rdRate 선언 후 설정
-            rdRow.dataset.sortNums     = (rd.submitted || 0);
-            // 차수별 시작일: 수동 수정값(차수별 키) > rd.startDate > 탭 전체 startDate
-            const rdStartDate = _rdEffectiveSD2;
-            const rdStartDateHtml = rdStartDate
-              ? `<span class="tab-start-date${_rdManualSD2 ? ' manual-date' : ''}" data-tabkey="${escHtml(rdTabKey2)}" data-rawsd="${escHtml(rdStartDateRaw2)}" onclick="event.stopPropagation();openStartDatePopup(event,this)" title="클릭하여 시작일 수정"><i class="fas fa-calendar-day"></i> ${escHtml(rdStartDate)}</span>`
+            rdRow.dataset.sortBar  = rdRate;
+            rdRow.dataset.sortNums = (rd.submitted || 0);
+            const rdStartDateHtml = _rdEffectiveSD2
+              ? `<span class="tab-start-date${_rdManualSD2 ? ' manual-date' : ''}" data-tabkey="${escHtml(rdTabKey2)}" data-rawsd="${escHtml(rdStartDateRaw2)}" onclick="event.stopPropagation();openStartDatePopup(event,this)" title="클릭하여 시작일 수정"><i class="fas fa-calendar-day"></i> ${escHtml(_rdEffectiveSD2)}</span>`
               : `<span class="tab-date-empty" data-tabkey="${escHtml(rdTabKey2)}" data-rawsd="" onclick="event.stopPropagation();openStartDatePopup(event,this)" title="시작일 입력"><i class="fas fa-calendar-plus"></i> 날짜</span>`;
-            // 차수 탭명 + overdue 백지
             const _rdOverdueBadge2 = rdIsOverdue2
-              ? `<span class="badge-overdue"><i class="fas fa-fire" style="font-size:.55rem"></i> D+${_rdOvDays2}</span>`
-              : "";
+              ? `<span class="badge-overdue"><i class="fas fa-fire" style="font-size:.55rem"></i> D+${_rdOvDays2}</span>` : "";
             const _rdTabSheetUrl2 = t.sheetUrl || (t.sheetId ? `https://docs.google.com/spreadsheets/d/${t.sheetId}/edit` : "");
             const rdTabNameHtml2 = _rdTabSheetUrl2
               ? `<a class="dash-tab-link" href="${escHtml(_rdTabSheetUrl2)}" target="_blank">${escHtml(t.tab)} <i class="fas fa-external-link-alt dash-tab-ext"></i></a>${_rdOverdueBadge2}`
               : `<span>${escHtml(t.tab)}</span>${_rdOverdueBadge2}`;
             let rdStateHtml = "";
-            if (isClosedTab) {
-              rdStateHtml = `<span class="bar-lbl-center">⬛ 마감</span>`;
-            } else if (rdDone) {
-              rdStateHtml = `<span class="bar-lbl-center">✓ 완료</span>`;
-            } else if ((rd.tuip||0) > 0 || (rd.chuihap||0) > 0) {
+            if (isClosedTab)      rdStateHtml = `<span class="bar-lbl-center">⬛ 마감</span>`;
+            else if (rdDone)      rdStateHtml = `<span class="bar-lbl-center">✓ 완료</span>`;
+            else if ((rd.tuip||0) > 0 || (rd.chuihap||0) > 0) {
               const rdTotal = rd.total || 0;
-              const rdLeftHtml  = (rd.tuip||0)    > 0 ? `<span class="bar-lbl-left"><i class="fas fa-user-plus"></i> 투입중 ${rd.tuip}/${rdTotal}</span>`          : `<span class="bar-lbl-left"></span>`;
+              const rdLeftHtml  = (rd.tuip||0) > 0 ? `<span class="bar-lbl-left"><i class="fas fa-user-plus"></i> 투입중 ${rd.tuip}/${rdTotal}</span>` : `<span class="bar-lbl-left"></span>`;
               const rdRightHtml = (rd.chuihap||0) > 0 ? `<span class="bar-lbl-right"><i class="fas fa-layer-group"></i> 취합중 ${rd.chuihap}/${rdTotal}</span>` : `<span class="bar-lbl-right"></span>`;
               rdStateHtml = rdLeftHtml + rdRightHtml;
             }
             const tRd = Object.assign({}, t, { submitted: rd.submitted, total: rd.total, pending: rd.pending, noRecipient: t.noRecipient, tuip: rd.tuip||0, chuihap: rd.chuihap||0 });
-            // ★ 차수별 tcAttr: 해당 행의 round를 tcRound에 주입 → openFormLink에서 URL rd 파라미터로 활용
             const rdTcData2 = Object.assign({}, JSON.parse(tcAttr.replace(/&quot;/g,'"').replace(/&amp;/g,'&').replace(/&#39;/g,"'").replace(/&lt;/g,'<').replace(/&gt;/g,'>')), { tcRound: rd.round || "" });
             const rdTcAttr2 = escHtml(JSON.stringify(rdTcData2));
             rdRow.dataset.state = _rowState(false, isClosedTab, rdDone, rd.tuip||0, rd.chuihap||0);
-            rdRow.innerHTML = _buildTabRowHtml(tRd, rdTabKey2, false, isClosedTab, rdTabNameHtml2, rdStartDateHtml, rdRate, rdStateHtml, rdTcAttr2, rd.round, null);
-            table.appendChild(rdRow);
+            rdRow.innerHTML = _buildTabRowHtml(tRd, rdTabKey2, false, isClosedTab, rdTabNameHtml2, rdStartDateHtml, rdRate, rdStateHtml, rdTcAttr2, rd.round, null, campName);
+            flatTable.appendChild(rdRow);
           });
         } else {
           row.dataset.state = _rowState(false, isClosedTab, isTabDone, tuip, chuihap);
-          row.innerHTML = _buildTabRowHtml(t, tabKey, false, isClosedTab, tabNameHtml, startDateHtml, tRate, stateHtml, tcAttr, null, endDateHtml);
-          table.appendChild(row);
+          row.innerHTML = _buildTabRowHtml(t, tabKey, false, isClosedTab, tabNameHtml, startDateHtml, tRate, stateHtml, tcAttr, null, endDateHtml, campName);
+          flatTable.appendChild(row);
         }
 
+        // 한달리뷰 행
         if (t.hasMonthly) {
           const tRate2     = t.total2 > 0 ? Math.round(t.submitted2 / t.total2 * 100) : 0;
           const isTab2Done = t.total2 > 0 && t.pending2 === 0;
           const row2       = document.createElement("div");
-          row2.className   = "dash-tab-row dash-tab-row-monthly" + (isTab2Done ? " tab-done" : "");
+          row2.className   = "dash-tab-row dash-tab-row-monthly " + campStripe + (isTab2Done ? " tab-done" : "");
           row2.innerHTML   = `
             <div class="closed-cb-wrap"></div>
+            <div class="dash-tab-campaign"></div>
             <div class="dash-tab-name dash-tab-name-monthly"><i class="fas fa-calendar-alt"></i> 한달리뷰</div>
+            <div></div>
             <div></div>
             <div></div>
             <div></div>
@@ -2302,10 +2266,9 @@ async function loadAdminDashboard() {
             <div></div>
             <div></div>
             <div></div>
-            <div></div>
             <div class="dash-tab-bar-col">
               ${(t.noRecipient || t.total2 === 0)
-                ? `<span class="bar-no-recipient" title="시트에 수취인 컬럼이 없거나 데이터가 없어 진행률을 계산할 수 없습니다"><i class="fas fa-exclamation-triangle"></i>수취인헤더없음</span>`
+                ? `<span class="bar-no-recipient"><i class="fas fa-exclamation-triangle"></i>수취인헤더없음</span>`
                 : (() => {
                     const barClass2 = tRate2 === 100 ? 'bar-full' : tRate2 >= 50 ? 'bar-half' : 'bar-low';
                     const stateHtml2 = isTab2Done ? `<span class="bar-lbl-center">✓ 완료</span>` : '';
@@ -2325,14 +2288,13 @@ async function loadAdminDashboard() {
             <div></div>
             <div></div>
             <div></div>
+            <div></div>
+            <div></div>
+            <div></div>
             <div></div>`;
-          table.appendChild(row2);
+          flatTable.appendChild(row2);
         }
       });
-
-      block.appendChild(header);
-      block.appendChild(table);
-      scrollInner1.appendChild(block);
     });
 
     if (hideDoneMode) wrap.classList.add("hide-done-mode");
@@ -2352,10 +2314,9 @@ async function loadAdminDashboard() {
         _btnHCC.classList.remove("active");
       }
     }
-    // 캠페인명 숨김 모드 재적용
+    // 캠페인명 숨김 모드: v11.0에서는 캠페인 컬럼 숨김으로 처리
     if (hideCampNameMode) {
       wrap.classList.add("hide-camp-name-mode");
-      wrap.querySelectorAll(".dash-tab-table").forEach(t => t.classList.remove("collapsed"));
     } else {
       wrap.classList.remove("hide-camp-name-mode");
     }
@@ -2363,11 +2324,7 @@ async function loadAdminDashboard() {
     // 마감 모드가 켜져 있었다면 유지
     if (_closedMode)    wrap.classList.add("closed-mode");
 
-    // ── allExpanded ON: 모든 탭 테이블 펼침 ──
-    if (allExpanded) {
-      wrap.querySelectorAll(".dash-tab-table").forEach(t => t.classList.remove("collapsed"));
-      wrap.querySelectorAll(".dash-toggle-icon").forEach(i => i.classList.add("rotated"));
-    }
+    // ── v11.0: 플랫 테이블이므로 allExpanded 불필요 (모든 행이 항상 표시됨) ──
 
     // 필터가 활성화된 경우 재적용
     if (activeFilters.size > 0) applyDashFilter();
@@ -2424,59 +2381,45 @@ function renderDashboard(data) {
   _buildColHeader(colHdr);
   wrap.appendChild(colHdr);
 
-  // ── 가로 스크롤 래퍼 (캠페인 블록만 포함) ──
+  // ── ★ v11.0: 엑셀형 플랫 테이블 ──
   const scrollOuter2 = document.createElement("div");
   scrollOuter2.id = "dashboardScrollOuter";
-  const scrollInner2 = document.createElement("div");
-  scrollInner2.id = "dashboardScrollInner";
-  scrollOuter2.appendChild(scrollInner2);
+  const flatTable2 = document.createElement("div");
+  flatTable2.id = "dashboardScrollInner";
+  flatTable2.className = "dash-flat-table";
+  scrollOuter2.appendChild(flatTable2);
   wrap.appendChild(scrollOuter2);
 
+  let _prevCamp2 = null;
+  let _campIdx2 = 0;
+
   stats.forEach((c, ci) => {
-    const cRate    = c.total > 0 ? Math.round(c.submitted / c.total * 100) : 0;
-    const tableId  = `dct-r-${ci}`;
-    const block    = document.createElement("div");
-    // camp-all-done 재계산
-    // ★ v9.13 fix: 마감(isClosed) 탭도 완료 조건에 포함
-    // ★ v9.13 fix2: closedOnly:true (마감 탭만인 캠페인) 항상 camp-all-done
-        const allDone      = c.closedOnly === true || c.tabs.every(t => {
+    const campName = c.campaign || "";
+    if (campName !== _prevCamp2) { _campIdx2++; _prevCamp2 = campName; }
+    const campStripe = _campIdx2 % 2 === 0 ? "camp-stripe-even" : "camp-stripe-odd";
+    const allDone = c.closedOnly === true || c.tabs.every(t => {
       const key = (t.sheetId||"")+"||"+(t.tab||"");
       return _closedSet.has(key) || (t.total > 0 && t.pending === 0);
     });
     const hasClosed = c.closedOnly === true || c.tabs.some(t => _closedSet.has((t.sheetId||"")+"||"+(t.tab||"")));
-    block.className = "dash-campaign-block" + (allDone ? " camp-all-done" : "") + (hasClosed ? " camp-has-closed" : "");
-    block.dataset.campname = (c.campaign || "").toLowerCase(); // ★ 검색용
-    const campSheetId2 = (c.tabs[0] && c.tabs[0].sheetId) ? c.tabs[0].sheetId : "";
-    const header = document.createElement("div");
-    header.className = "dash-campaign-header";
-    header.innerHTML = `
-      <div class="dash-campaign-left">
-        <i class="fas fa-chevron-down dash-toggle-icon"></i>
-        ${campSheetId2 ? `<button class="btn-camp-refresh" data-sheetid="${escHtml(campSheetId2)}" data-campname="${escHtml(c.campaign)}" onclick="event.stopPropagation();refreshCampaignIndex(this)" title="이 캠페인만 동기화"><i class="fas fa-sync-alt"></i> 동기화</button>` : ""}
-        ${campSheetId2 ? `<button class="btn-camp-viewer" data-sheetid="${escHtml(campSheetId2)}" onclick="event.stopPropagation();copyCampViewerLink(this)" title="광고주 URL 복사"><i class="fas fa-eye"></i> 광고주URL</button>` : ""}
-        <span class="dash-campaign-name">${escHtml(c.campaign)}</span>
-      </div>
-      <div style="display:flex;align-items:center;gap:6px;flex-shrink:0">
-        <span class="dash-campaign-total">${c.submitted}/${c.total} (${cRate}%)</span>
-      </div>`;
-    header.addEventListener("click", () => toggleDashTab(tableId, header));
-    const table = document.createElement("div");
-    table.id        = tableId;
-    table.className = "dash-tab-table collapsed";
+
     c.tabs.forEach(t => {
       const tRate      = t.total > 0 ? Math.round(t.submitted / t.total * 100) : 0;
       const tabKey     = (t.sheetId||"")+"||"+(t.tab||"");
-            const isClosedTab = _closedSet.has(tabKey);
+      const isClosedTab = _closedSet.has(tabKey);
       const isTabDone  = (t.total > 0 && t.pending === 0);
-      // ── 긴급 경과 판단 (수동 수정일 우선) ──
       const _mainManualSD = _getManualStartDate(tabKey);
       const _mainEffectiveSD = _mainManualSD || t.startDate || "";
       const _ovDays = (!isTabDone && !isClosedTab) ? _calcOverdueDays(_mainEffectiveSD) : null;
       const isOverdue = _ovDays !== null && _ovDays >= 25;
       const row        = document.createElement("div");
-      row.className    = "dash-tab-row"+(isTabDone?" tab-done":"")+(isClosedTab?" is-closed-row":"")+(isOverdue?" urgent-overdue":"")
+      row.className    = "dash-tab-row " + campStripe + (isTabDone?" tab-done":"")+(isClosedTab?" is-closed-row":"")+(isOverdue?" urgent-overdue":"")
         +(!t.displayName && !isClosedTab?" no-product-warn":"");
       row.dataset.tabkey = tabKey;
+      row.dataset.campname = campName.toLowerCase();
+      row.dataset.sortCampaign = campName.toLowerCase();
+      if (allDone)   row.classList.add("camp-all-done");
+      if (hasClosed) row.classList.add("camp-has-closed");
       row.setAttribute('oncontextmenu', `_openAdminContextMenu(event,'${escHtml(tabKey)}')`);
       const _overdueBadge = isOverdue
         ? `<span class="badge-overdue"><i class="fas fa-fire" style="font-size:.55rem"></i> D+${_ovDays}</span>`
@@ -2491,11 +2434,15 @@ function renderDashboard(data) {
         ? `<span class="tab-start-date${_manualSD2 ? ' manual-date' : ''}" data-tabkey="${escHtml(tabKey)}" data-rawsd="${escHtml(t.startDate||'')}" onclick="event.stopPropagation();openStartDatePopup(event,this)" title="클릭하여 시작일 수정${_manualSD2 ? ' (수동 수정됨)' : ''}"><i class="fas fa-calendar-day"></i> ${escHtml(_effectiveSD2)}</span>`
         : `<span class="tab-date-empty" data-tabkey="${escHtml(tabKey)}" data-rawsd="" onclick="event.stopPropagation();openStartDatePopup(event,this)" title="시작일 클릭하여 입력"><i class="fas fa-calendar-plus"></i> 날짜</span>`;
       const tuip = t.tuip||0, chuihap = t.chuihap||0;
+      const total = t.total || 0;
       let stateHtml = "";
-      if (isClosedTab)  stateHtml = `<span class="dash-pending-badge badge-done" style="background:#EEF2FF;color:#3730A3;border-color:#C7D2FE">⬛ 마감</span>`;
-      else if (isTabDone) stateHtml = `<span class="dash-pending-badge badge-done">✓ 완료</span>`;
-      else if (tuip>0) stateHtml = `<span class="work-badge badge-tuip"><i class="fas fa-user-plus"></i> 투입중 ${tuip}</span>`;
-      else if (chuihap>0) stateHtml = `<span class="work-badge badge-chuihap"><i class="fas fa-layer-group"></i> 취합중 ${chuihap}</span>`;
+      if (isClosedTab)  stateHtml = `<span class="bar-lbl-center">⬛ 마감</span>`;
+      else if (isTabDone) stateHtml = `<span class="bar-lbl-center">✓ 완료</span>`;
+      else if (tuip > 0 || chuihap > 0) {
+        const leftHtml  = tuip > 0 ? `<span class="bar-lbl-left"><i class="fas fa-user-plus"></i> 투입중 ${tuip}/${total}</span>` : `<span class="bar-lbl-left"></span>`;
+        const rightHtml = chuihap > 0 ? `<span class="bar-lbl-right"><i class="fas fa-layer-group"></i> 취합중 ${chuihap}/${total}</span>` : `<span class="bar-lbl-right"></span>`;
+        stateHtml = leftHtml + rightHtml;
+      }
       const tcData = { sheetId:t.sheetId, sheetUrl:t.sheetUrl||"", tabName:t.tab,
         manager:t.manager||"", timeRange:t.timeRange||"", taekhap:t.taekhap||false,
         reviewType:t.reviewType||"", paymentType:t.paymentType||"", displayName:t.displayName||"",
@@ -2503,69 +2450,61 @@ function renderDashboard(data) {
         captureFolderUrl:t.captureFolderUrl||"",
         isBulk:t.isBulk||false,
         tcRound: t.tcRound || t.round || "",
-        ncMode: !!(t.ncMode === true || t.ncMode === "true"),
         incomeType: t.incomeType||"",
         depositName: t.depositName||"", transferBank: t.transferBank||"",
-        // ★ 마감 플래그 (저장 시 상품명 예외 처리용)
         _isClosed: isClosedTab };
       const tcAttr = escHtml(JSON.stringify(tcData));
-      // ★ v9.9: 종료 예정일 D-Day 배지
       const _cachedED2 = localStorage.getItem("rapp_enddate_" + tabKey) || t.endDate || "";
       const endDateHtml2 = _buildEndDateHtml(tabKey, _cachedED2, isTabDone, isClosedTab);
+
       if (t.roundList && t.roundList.length >= 1) {
         t.roundList.forEach(rd => {
           const rdRow = document.createElement("div");
           const rdDone = (rd.total > 0 && rd.pending === 0);
-          // ★ 차수별 독립 tabKey: sheetId||탭명||차수 (수동 시작일이 차수간 공유되지 않도록)
           const rdTabKey = tabKey + "||" + (rd.round || "");
-          // ── 차수 행 긴급 경과 판단 ──
           const rdStartDateRaw = rd.startDate || t.startDate || "";
-          // 수동값: 차수별 키 우선
           const _rdManualSD = _getManualStartDate(rdTabKey);
           const _rdEffectiveSD = _rdManualSD || rdStartDateRaw;
           const _rdOvDays = (!rdDone && !isClosedTab) ? _calcOverdueDays(_rdEffectiveSD) : null;
           const rdIsOverdue = _rdOvDays !== null && _rdOvDays >= 25;
-          rdRow.className = "dash-tab-row"+(rdDone?" tab-done":"")+(isClosedTab?" is-closed-row":"")+(rdIsOverdue?" urgent-overdue":"");
+          rdRow.className = "dash-tab-row " + campStripe + (rdDone?" tab-done":"")+(isClosedTab?" is-closed-row":"")+(rdIsOverdue?" urgent-overdue":"");
           rdRow.dataset.tabkey = rdTabKey;
+          rdRow.dataset.campname = campName.toLowerCase();
+          rdRow.dataset.sortCampaign = campName.toLowerCase();
+          if (allDone) rdRow.classList.add("camp-all-done");
+          if (hasClosed) rdRow.classList.add("camp-has-closed");
           const rdRate = rd.total > 0 ? Math.round(rd.submitted / rd.total * 100) : 0;
-          const rdStartDate = _rdEffectiveSD;
-          const rdStartDateHtml = rdStartDate
-            ? `<span class="tab-start-date${_rdManualSD ? ' manual-date' : ''}" data-tabkey="${escHtml(rdTabKey)}" data-rawsd="${escHtml(rdStartDateRaw)}" onclick="event.stopPropagation();openStartDatePopup(event,this)" title="클릭하여 시작일 수정"><i class="fas fa-calendar-day"></i> ${escHtml(rdStartDate)}</span>`
+          const rdStartDateHtml = _rdEffectiveSD
+            ? `<span class="tab-start-date${_rdManualSD ? ' manual-date' : ''}" data-tabkey="${escHtml(rdTabKey)}" data-rawsd="${escHtml(rdStartDateRaw)}" onclick="event.stopPropagation();openStartDatePopup(event,this)" title="클릭하여 시작일 수정"><i class="fas fa-calendar-day"></i> ${escHtml(_rdEffectiveSD)}</span>`
             : `<span class="tab-date-empty" data-tabkey="${escHtml(rdTabKey)}" data-rawsd="" onclick="event.stopPropagation();openStartDatePopup(event,this)" title="시작일 입력"><i class="fas fa-calendar-plus"></i> 날짜</span>`;
-          // ── 차수 행 탭명 뱃지 ──
           const _rdOverdueBadge = rdIsOverdue
-            ? `<span class="badge-overdue"><i class="fas fa-fire" style="font-size:.55rem"></i> D+${_rdOvDays}</span>`
-            : "";
+            ? `<span class="badge-overdue"><i class="fas fa-fire" style="font-size:.55rem"></i> D+${_rdOvDays}</span>` : "";
           const _rdTabSheetUrl = t.sheetUrl || (t.sheetId ? `https://docs.google.com/spreadsheets/d/${t.sheetId}/edit` : "");
           const rdTabNameHtml = _rdTabSheetUrl
             ? `<a class="dash-tab-link" href="${escHtml(_rdTabSheetUrl)}" target="_blank">${escHtml(t.tab)} <i class="fas fa-external-link-alt dash-tab-ext"></i></a>${_rdOverdueBadge}`
             : `<span>${escHtml(t.tab)}</span>${_rdOverdueBadge}`;
           let rdStateHtml = "";
-          if (isClosedTab)      rdStateHtml = `<span class="bar-lbl-center">⬛ 마감</span>`;
-          else if (rdDone)      rdStateHtml = `<span class="bar-lbl-center">✓ 완료</span>`;
+          if (isClosedTab) rdStateHtml = `<span class="bar-lbl-center">⬛ 마감</span>`;
+          else if (rdDone) rdStateHtml = `<span class="bar-lbl-center">✓ 완료</span>`;
           else if ((rd.tuip||0) > 0 || (rd.chuihap||0) > 0) {
             const rdTotal2 = rd.total || 0;
-            const rdLeft  = (rd.tuip||0)    > 0 ? `<span class="bar-lbl-left"><i class="fas fa-user-plus"></i> 투입중 ${rd.tuip}/${rdTotal2}</span>`          : `<span class="bar-lbl-left"></span>`;
+            const rdLeft  = (rd.tuip||0) > 0 ? `<span class="bar-lbl-left"><i class="fas fa-user-plus"></i> 투입중 ${rd.tuip}/${rdTotal2}</span>` : `<span class="bar-lbl-left"></span>`;
             const rdRight = (rd.chuihap||0) > 0 ? `<span class="bar-lbl-right"><i class="fas fa-layer-group"></i> 취합중 ${rd.chuihap}/${rdTotal2}</span>` : `<span class="bar-lbl-right"></span>`;
             rdStateHtml = rdLeft + rdRight;
           }
           const tRd = Object.assign({}, t, { submitted: rd.submitted, total: rd.total, pending: rd.pending, tuip: rd.tuip||0, chuihap: rd.chuihap||0 });
-          // ★ 차수별 tcAttr: 해당 행의 round를 tcRound에 주입 → openFormLink에서 URL rd 파라미터로 활용
           const rdTcData = Object.assign({}, JSON.parse(tcAttr.replace(/&quot;/g,'"').replace(/&amp;/g,'&').replace(/&#39;/g,"'").replace(/&lt;/g,'<').replace(/&gt;/g,'>')), { tcRound: rd.round || "" });
           const rdTcAttr = escHtml(JSON.stringify(rdTcData));
           rdRow.dataset.state = _rowState(false, isClosedTab, rdDone, rd.tuip||0, rd.chuihap||0);
-          rdRow.innerHTML = _buildTabRowHtml(tRd, rdTabKey, false, isClosedTab, rdTabNameHtml, rdStartDateHtml, rdRate, rdStateHtml, rdTcAttr, rd.round, null);
-          table.appendChild(rdRow);
+          rdRow.innerHTML = _buildTabRowHtml(tRd, rdTabKey, false, isClosedTab, rdTabNameHtml, rdStartDateHtml, rdRate, rdStateHtml, rdTcAttr, rd.round, null, campName);
+          flatTable2.appendChild(rdRow);
         });
       } else {
         row.dataset.state = _rowState(false, isClosedTab, isTabDone, tuip, chuihap);
-        row.innerHTML = _buildTabRowHtml(t, tabKey, false, isClosedTab, tabNameHtml, startDateHtml, tRate, stateHtml, tcAttr, null, endDateHtml2);
-        table.appendChild(row);
+        row.innerHTML = _buildTabRowHtml(t, tabKey, false, isClosedTab, tabNameHtml, startDateHtml, tRate, stateHtml, tcAttr, null, endDateHtml2, campName);
+        flatTable2.appendChild(row);
       }
     });
-    block.appendChild(header);
-    block.appendChild(table);
-    scrollInner2.appendChild(block);
   });
   if (hideDoneMode) wrap.classList.add("hide-done-mode");
   else wrap.classList.remove("hide-done-mode");
@@ -2573,19 +2512,13 @@ function renderDashboard(data) {
   else                    wrap.classList.remove("hide-closed-camp-mode");
   if (hideClosedTabMode)  wrap.classList.add("hide-closed-tab-mode");
   else                    wrap.classList.remove("hide-closed-tab-mode");
-  // 캠페인명 숨김 모드 재적용
+  // 캠페인명 숨김 모드: v11.0에서는 캠페인 컬럼 열 숨김으로 처리
   if (hideCampNameMode) {
     wrap.classList.add("hide-camp-name-mode");
-    wrap.querySelectorAll(".dash-tab-table").forEach(t => t.classList.remove("collapsed"));
   } else {
     wrap.classList.remove("hide-camp-name-mode");
   }
   if (_closedMode)        wrap.classList.add("closed-mode");
-  // ── allExpanded ON: 모든 탭 테이블 펼침 ──
-  if (allExpanded) {
-    wrap.querySelectorAll(".dash-tab-table").forEach(t => t.classList.remove("collapsed"));
-    wrap.querySelectorAll(".dash-toggle-icon").forEach(i => i.classList.add("rotated"));
-  }
   if (activeFilters.size > 0) applyDashFilter();
   _fixStickyPositions();
   _bindScrollSync();
@@ -2790,7 +2723,7 @@ async function refreshTabEndDate(btnEl, tabKey) {
   }
 }
 // ─────────────────────────────────────────────────────────────
-function _buildTabRowHtml(t, tabKey, isSubRow, isClosedTab, tabNameHtml, startDateHtml, tRate, stateHtml, tcAttr, roundLabel, endDateHtml) {
+function _buildTabRowHtml(t, tabKey, isSubRow, isClosedTab, tabNameHtml, startDateHtml, tRate, stateHtml, tcAttr, roundLabel, endDateHtml, campaignName) {
   // 각 열 셀 값 (없으면 회색 dash)
   const empty = `<span style="color:#D1D5DB;font-size:.65rem">—</span>`;
 
@@ -2903,10 +2836,17 @@ function _buildTabRowHtml(t, tabKey, isSubRow, isClosedTab, tabNameHtml, startDa
     ? `<span style="display:flex;align-items:center;justify-content:center;flex-wrap:wrap;gap:3px">${badgePart}${ddayContent}</span>`
     : `<span style="color:#D1D5DB;font-size:.6rem">—</span>`;
 
+  // ★ v11.0: 캠페인명 셀 (엑셀형 플랫 UI)
+  const _campName = campaignName || "";
+  const campaignCell = _campName
+    ? `<span class="dash-cell-campaign" title="${escHtml(_campName)}">${escHtml(_campName)}</span>`
+    : empty;
+
   return `
     <div class="closed-cb-wrap">
       <input type="checkbox" class="closed-cb" data-tabkey="${escHtml(tabKey)}" ${isClosedTab ? "checked" : ""} onclick="event.stopPropagation()">
     </div>
+    <div class="dash-tab-campaign">${campaignCell}</div>
     <div class="dash-tab-name">${tabNameHtml}</div>
     ${qeWrap('상품명', !!t.displayName, nameCell)}
     <div style="display:flex;align-items:center;justify-content:center;overflow:hidden;min-width:0;padding:0 2px">${captureFolderCell}</div>
@@ -2995,7 +2935,8 @@ function _buildTabRowHtml(t, tabKey, isSubRow, isClosedTab, tabNameHtml, startDa
  */
 const DASH_COL_DEFS = [
   { key: 'closedcb',    varName: '--dc-closedcb',    label: '마감',       minPx: 20,  default: 0,   isCb: true },
-  { key: 'tabname',     varName: '--dc-tabname',     label: '탭명',       minPx: 60,  default: 280               },
+  { key: 'campaign',    varName: '--dc-campaign',    label: '캠페인',     minPx: 60,  default: 140               },  // ★ v11.0: 엑셀형 플랫 UI
+  { key: 'tabname',     varName: '--dc-tabname',     label: '탭명',       minPx: 60,  default: 200               },
   { key: 'product',     varName: '--dc-product',     label: '상품명',     minPx: 60,  default: 200               },
   { key: 'capture',     varName: '--dc-capture',     label: '캡처폴더',   minPx: 35,  default: 65                },
   { key: 'folder',      varName: '--dc-folder',      label: '리뷰폴더',   minPx: 35,  default: 65                },
@@ -3016,7 +2957,7 @@ const DASH_COL_DEFS = [
   { key: 'enddate',     varName: '--dc-enddate',     label: '부가정보',   minPx: 70,  default: 110               },
   { key: 'info',        varName: '--dc-info',        label: '⚙',         minPx: 82,  default: 90, noScale: true  }, // ★ 1fr로 남는 공간 차지
 ];
-const COL_WIDTH_LS_KEY = 'dashColWidths_v8'; // ★ v10.4: 입금명/이체은행 퀵에딧 추가, tcData incomeType 누락 수정
+const COL_WIDTH_LS_KEY = 'dashColWidths_v9'; // ★ v11.0: 캠페인 컬럼 추가 (엑셀형 플랫 UI)
 
 /** 컨테이너 content 너비 반환 (padding/border 제외, 실제 사용 가능한 너비) */
 function _getContainerWidth() {
@@ -3168,7 +3109,7 @@ function _syncTabnameWidth(availW) {
   ];
 
   // 유연 축소 대상: 숨기지 않은 상태에서 비율 조정
-  const FLEX_KEYS = ['tabname', 'product'];
+  const FLEX_KEYS = ['campaign', 'tabname', 'product'];
 
   // 현재 숨길 컬럼 결정
   const hiddenSet = new Set();
@@ -3583,29 +3524,29 @@ function _getSortVal(row, key) {
   return val;
 }
 
-/** 모든 캠페인 블록의 행 정렬 */
+/** 모든 행 정렬 (v11.0: 플랫 테이블) */
 function _sortAllDashRows() {
   const wrap = document.getElementById('dashboardWrap');
   if (!wrap) return;
-  wrap.querySelectorAll('.dash-tab-table').forEach(table => {
-    const rows = [...table.querySelectorAll('.dash-tab-row:not(.dash-tab-row-monthly)')];
-    if (rows.length < 2) return;
-    rows.sort((a, b) => {
-      const av = _getSortVal(a, _sortKey);
-      const bv = _getSortVal(b, _sortKey);
-      let cmp = 0;
-      if (typeof av === 'number' && typeof bv === 'number') {
-        cmp = av - bv;
-      } else {
-        cmp = String(av).localeCompare(String(bv), 'ko');
-      }
-      return _sortDir === 'asc' ? cmp : -cmp;
-    });
-    // 월간 행은 항상 맨 뒤
-    const monthlyRows = [...table.querySelectorAll('.dash-tab-row-monthly')];
-    rows.forEach(r => table.appendChild(r));
-    monthlyRows.forEach(r => table.appendChild(r));
+  // ★ v11.0: 플랫 테이블 컨테이너 사용
+  const table = wrap.querySelector('.dash-flat-table') || wrap.querySelector('#dashboardScrollInner');
+  if (!table) return;
+  const rows = [...table.querySelectorAll('.dash-tab-row:not(.dash-tab-row-monthly)')];
+  if (rows.length < 2) return;
+  rows.sort((a, b) => {
+    const av = _getSortVal(a, _sortKey);
+    const bv = _getSortVal(b, _sortKey);
+    let cmp = 0;
+    if (typeof av === 'number' && typeof bv === 'number') {
+      cmp = av - bv;
+    } else {
+      cmp = String(av).localeCompare(String(bv), 'ko');
+    }
+    return _sortDir === 'asc' ? cmp : -cmp;
   });
+  const monthlyRows = [...table.querySelectorAll('.dash-tab-row-monthly')];
+  rows.forEach(r => table.appendChild(r));
+  monthlyRows.forEach(r => table.appendChild(r));
 }
 
 /** 정렬 초기화 (새로고침 시 호출) */
@@ -3716,7 +3657,8 @@ function _buildColHeader(container) {
   // colIdx = DASH_COL_DEFS 인덱스와 1:1 대응
   const CELLS = [
     // isCb 컬럼: 평소 0px(숨김) → 모드 진입 시 28px
-    { colIdx: 1,  inner: '<i class="fas fa-archive"      style="font-size:.6rem;color:#7C3AED"></i>',  style: 'justify-content:center', title: '마감 선택',    cbClass: 'closed-cb-wrap' },
+    { colIdx: 0,  inner: '<i class="fas fa-archive"      style="font-size:.6rem;color:#7C3AED"></i>',  style: 'justify-content:center', title: '마감 선택',    cbClass: 'closed-cb-wrap' },
+    { colIdx: 1,  inner: '<i class="fas fa-building" style="font-size:.55rem;color:#059669"></i> 캠페인', style: '' },  // ★ v11.0: 엑셀형 플랫 UI
     { colIdx: 2,  inner: '<i class="fas fa-tag" style="font-size:.55rem"></i> 탭명',              style: '' },
     { colIdx: 3,  inner: '<i class="fas fa-box" style="font-size:.55rem"></i> 상품명',            style: '' },
     { colIdx: 4,  inner: '<i class="fas fa-camera" style="font-size:.55rem;color:#7C3AED"></i> 캡처폴더', style: 'justify-content:center', title: '주문캡처 저장 폴더' },
@@ -3730,9 +3672,9 @@ function _buildColHeader(container) {
     { colIdx: 12, inner: '<i class="fas fa-chart-bar" style="font-size:.55rem"></i> 진행률',      style: '' },
     { colIdx: 13, inner: '<i class="fas fa-check-double" style="font-size:.55rem"></i> 리뷰',     style: 'justify-content:flex-end' },
     { colIdx: 14, inner: '<i class="fas fa-won-sign" style="font-size:.55rem"></i> 입금',         style: 'justify-content:center' },
-    { colIdx: 15, inner: '<i class="fas fa-receipt" style="font-size:.55rem;color:#7C3AED"></i> 진행방식', style: 'justify-content:center', title: '진행방식 (현금/사업자현영/소득신고)' },  // ★ v9.14
-    { colIdx: 16, inner: '<i class="fas fa-signature" style="font-size:.55rem;color:#1D4ED8"></i> 입금명',  style: 'justify-content:center', title: '입금자명'  },  // ★ v9.14
-    { colIdx: 17, inner: '<i class="fas fa-university" style="font-size:.55rem;color:#92400E"></i> 이체은행', style: 'justify-content:center', title: '이체 은행' },  // ★ v9.14
+    { colIdx: 15, inner: '<i class="fas fa-receipt" style="font-size:.55rem;color:#7C3AED"></i> 진행방식', style: 'justify-content:center', title: '진행방식 (현금/사업자현영/소득신고)' },
+    { colIdx: 16, inner: '<i class="fas fa-signature" style="font-size:.55rem;color:#1D4ED8"></i> 입금명',  style: 'justify-content:center', title: '입금자명'  },
+    { colIdx: 17, inner: '<i class="fas fa-university" style="font-size:.55rem;color:#92400E"></i> 이체은행', style: 'justify-content:center', title: '이체 은행' },
     { colIdx: 18, inner: '<i class="fas fa-truck" style="font-size:.55rem"></i> 택대',            style: 'justify-content:center' },
     { colIdx: 19, inner: '<i class="fas fa-sticky-note" style="font-size:.55rem;color:#F59E0B"></i> 비고', style: '' },
     { colIdx: 20, inner: '<i class="fas fa-info-circle" style="font-size:.55rem;color:#6366F1"></i> 부가정보', style: 'justify-content:center', title: '대량건·배송타입·마감D-Day 등 부가 정보' },
@@ -3742,7 +3684,7 @@ function _buildColHeader(container) {
   container.innerHTML = '';
 
   // 정렬 가능한 열 키 목록
-  const SORTABLE_KEYS = new Set(['tabname','product','date','time','review','manager','bar','nums','payment','taekhap','enddate']);
+  const SORTABLE_KEYS = new Set(['campaign','tabname','product','date','time','review','manager','bar','nums','payment','taekhap','enddate']);
 
   CELLS.forEach(c => {
     const colDef = DASH_COL_DEFS[c.colIdx];
@@ -6355,62 +6297,46 @@ function applyDashFilter() {
   const wrap = document.getElementById("dashboardWrap");
   if (!wrap) return;
 
-  const blocks   = wrap.querySelectorAll(".dash-campaign-block");
   const noFilter = activeFilters.size === 0;
   const query    = _dashSearchQuery.toLowerCase();
   const hasQuery = query.length > 0;
 
-  let totalMatchCount = 0; // 검색 결과 총 행 수
+  let totalMatchCount = 0;
 
-  blocks.forEach(block => {
-    // 캠페인명 추출 — data-campname 속성 (렌더 시 저장)
-    const campName = block.dataset.campname || '';
+  // ★ v11.0: 플랫 테이블 — 모든 행을 직접 순회
+  const rows = wrap.querySelectorAll(".dash-tab-row");
+  rows.forEach(row => {
+    const campName = row.dataset.campname || '';
 
-    const rows = block.querySelectorAll(".dash-tab-row");
-    let visibleCount = 0;
-
-    rows.forEach(row => {
-      // ① 체크박스 필터 판단
-      let passFilter = noFilter;
-      if (!noFilter) {
-        const rowState = (row.dataset.state || "").split(" ");
-        if (!passFilter && activeFilters.has("tuip"))    { if (rowState.includes("tuip"))  passFilter = true; }
-        if (!passFilter && activeFilters.has("chuihap")) { if (rowState.includes("chuihap")) passFilter = true; }
-        if (!passFilter && activeFilters.has("monthly")) { if (row.classList.contains("dash-tab-row-monthly")) passFilter = true; }
-        if (!passFilter && activeFilters.has("taekhap")) { if (row.querySelector(".tc-taekhap-on")) passFilter = true; }
-        if (!passFilter && activeFilters.has("done"))    { if (row.classList.contains("tab-done")) passFilter = true; }
-        if (!passFilter && activeFilters.has("closed"))  { if (row.classList.contains("is-closed-row")) passFilter = true; }
-        for (const f of activeFilters) {
-          if (f.startsWith("review:")) {
-            if (row.querySelector(`.tc-review-${f.slice(7)}`)) { passFilter = true; break; }
-          }
-        }
-        for (const f of activeFilters) {
-          if (f.startsWith("manager:")) {
-            const cls = f.slice(8) === "만두" ? ".tc-mandu" : ".tc-mango";
-            if (row.querySelector(cls)) { passFilter = true; break; }
-          }
+    // ① 체크박스 필터 판단
+    let passFilter = noFilter;
+    if (!noFilter) {
+      const rowState = (row.dataset.state || "").split(" ");
+      if (!passFilter && activeFilters.has("tuip"))    { if (rowState.includes("tuip"))  passFilter = true; }
+      if (!passFilter && activeFilters.has("chuihap")) { if (rowState.includes("chuihap")) passFilter = true; }
+      if (!passFilter && activeFilters.has("monthly")) { if (row.classList.contains("dash-tab-row-monthly")) passFilter = true; }
+      if (!passFilter && activeFilters.has("taekhap")) { if (row.querySelector(".tc-taekhap-on")) passFilter = true; }
+      if (!passFilter && activeFilters.has("done"))    { if (row.classList.contains("tab-done")) passFilter = true; }
+      if (!passFilter && activeFilters.has("closed"))  { if (row.classList.contains("is-closed-row")) passFilter = true; }
+      for (const f of activeFilters) {
+        if (f.startsWith("review:")) {
+          if (row.querySelector(`.tc-review-${f.slice(7)}`)) { passFilter = true; break; }
         }
       }
-
-      // ② 검색어 필터 판단 (AND 조건)
-      const passSearch = !hasQuery || _rowMatchesSearch(row, query, campName);
-
-      const show = passFilter && passSearch;
-      row.style.display = show ? "" : "none";
-      if (show) { visibleCount++; totalMatchCount++; }
-    });
-
-    // 블록 표시 여부
-    block.style.display = visibleCount === 0 ? "none" : "";
-
-    // 매칭 행이 있으면 테이블 자동 펼침
-    if (visibleCount > 0 && (hasQuery || (!noFilter))) {
-      const table = block.querySelector(".dash-tab-table");
-      const icon  = block.querySelector(".dash-toggle-icon");
-      if (table) table.classList.remove("collapsed");
-      if (icon)  icon.classList.add("rotated");
+      for (const f of activeFilters) {
+        if (f.startsWith("manager:")) {
+          const cls = f.slice(8) === "만두" ? ".tc-mandu" : ".tc-mango";
+          if (row.querySelector(cls)) { passFilter = true; break; }
+        }
+      }
     }
+
+    // ② 검색어 필터 판단 (AND 조건)
+    const passSearch = !hasQuery || _rowMatchesSearch(row, query, campName);
+
+    const show = passFilter && passSearch;
+    row.style.display = show ? "" : "none";
+    if (show) totalMatchCount++;
   });
 
   // ③ 결과 카운트 업데이트
