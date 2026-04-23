@@ -851,9 +851,13 @@ function connectSSE() {
           if (evtType === 'dirty_detected' && typeof _renderDirtyBadges === 'function') {
             _renderDirtyBadges(data.dirtySheets || []);
           }
-          // ★ 스마트빌드 완료 시 상태 패널 갱신
-          if (evtType === 'smart_build_done' && typeof loadSmartBuildStatus === 'function') {
-            loadSmartBuildStatus();
+          // ★ 스마트빌드 완료 시 상태 패널 갱신 + 사이드바 버튼 복원
+          if (evtType === 'smart_build_done') {
+            if (typeof loadSmartBuildStatus === 'function') loadSmartBuildStatus();
+            var _sbBtn = document.getElementById("btnSmartBuildIndex");
+            if (_sbBtn && _sbBtn.disabled) _restoreSmartBuildBtn(_sbBtn, null);
+            // 대시보드 캠페인 탭 관리 자동 새로고침
+            if (typeof loadTabDashboard === 'function') setTimeout(loadTabDashboard, 500);
           }
         } catch (_) {}
       });
@@ -1416,6 +1420,7 @@ async function loadSmartBuildStatus() {
   }
 }
 
+// ★ 대시보드 패널에서의 스마트빌드 수동 실행 (confirm 포함)
 async function triggerSmartBuild() {
   if (!confirm("스마트 빌드를 수동으로 실행하시겠습니까?\n(Drive API로 변경 감지 → 변경 시트만 Sheets API로 갱신)")) return;
 
@@ -1430,9 +1435,7 @@ async function triggerSmartBuild() {
     const res = await gasPost({ action: "smartBuildRun" });
     if (res.ok) {
       showToast("스마트 빌드 시작됨 — 완료 시 알림됩니다", "info");
-      // 5초 후 상태 갱신
       setTimeout(loadSmartBuildStatus, 5000);
-      // 30초 후 다시 갱신 (빌드 완료 후)
       setTimeout(loadSmartBuildStatus, 30000);
     } else {
       showToast(res.error || "스마트 빌드 실행 실패", "error");
@@ -1441,6 +1444,62 @@ async function triggerSmartBuild() {
   } catch (err) {
     showToast("스마트 빌드 오류: " + err.message, "error");
     loadSmartBuildStatus();
+  }
+}
+
+// ★ 사이드바 버튼에서의 스마트빌드 실행 (confirm 없이 바로 실행 + 사이드바 진행 표시)
+async function triggerSmartBuildFromSidebar() {
+  const btn = document.getElementById("btnSmartBuildIndex");
+  const sidebarBadge = document.getElementById("smartBuildSidebarBadge");
+
+  // 버튼 비활성화 + 진행 표시
+  if (btn) {
+    btn.disabled = true;
+    btn._origHTML = btn.innerHTML;
+    btn.innerHTML = '<i class="fas fa-circle-notch fa-spin"></i> 스마트빌드 실행 중...';
+    btn.style.opacity = "0.8";
+  }
+
+  const startTime = Date.now();
+  let _timer = setInterval(function() {
+    var sec = Math.floor((Date.now() - startTime) / 1000);
+    if (btn) btn.innerHTML = '<i class="fas fa-circle-notch fa-spin"></i> 스마트빌드 실행 중... ' + sec + '초';
+  }, 1000);
+
+  try {
+    const res = await gasPost({ action: "smartBuildRun" });
+    if (res.ok) {
+      showToast("스마트 빌드 시작됨 — 완료 시 알림됩니다", "info");
+      // 진행 상태를 SSE로 받으므로, 5초/30초 후 상태 갱신
+      setTimeout(function() {
+        if (typeof loadSmartBuildStatus === 'function') loadSmartBuildStatus();
+      }, 5000);
+      setTimeout(function() {
+        _restoreSmartBuildBtn(btn, _timer);
+        if (typeof loadSmartBuildStatus === 'function') loadSmartBuildStatus();
+        if (typeof loadTabDashboard === 'function') loadTabDashboard();
+      }, 30000);
+    } else {
+      showToast(res.error || "스마트 빌드 실행 실패", "error");
+      _restoreSmartBuildBtn(btn, _timer);
+    }
+  } catch (err) {
+    showToast("스마트 빌드 오류: " + err.message, "error");
+    _restoreSmartBuildBtn(btn, _timer);
+  }
+
+  // SSE 이벤트(smart_build_done)로 복원할 수도 있지만, 타임아웃 기반 복원도 보장
+  if (typeof loadSmartBuildStatus === 'function') {
+    setTimeout(loadSmartBuildStatus, 3000);
+  }
+}
+
+function _restoreSmartBuildBtn(btn, timer) {
+  if (timer) clearInterval(timer);
+  if (btn) {
+    btn.disabled = false;
+    btn.innerHTML = btn._origHTML || '<i class="fas fa-bolt"></i> 스마트빌드 갱신';
+    btn.style.opacity = "";
   }
 }
 

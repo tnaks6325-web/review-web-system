@@ -310,27 +310,39 @@
           </div>
         </div>
         <!-- 동기화 버튼 -->
-        <div style="display:flex;gap:6px">
-          <button id="btnBuildIndexSmart" class="btn-index-build"
-            onclick="buildIndexSmart()"
-            style="flex:1.5;background:linear-gradient(135deg,#0ea5e9,#2563eb);font-size:.82rem"
-            title="변경된 탭만 빠르게 동기화 (평균 5~20초)">
-            <i class="fas fa-bolt"></i> 빠른 갱신 <span id="smartDirtyBadge" style="display:none;background:rgba(255,255,255,0.25);padding:1px 6px;border-radius:10px;font-size:.7rem;margin-left:3px"></span>
+        <div style="display:flex;flex-direction:column;gap:6px">
+          <!-- ★ 스마트빌드 갱신 (신규 — Drive API + Sheets batchGet) -->
+          <button id="btnSmartBuildIndex" class="btn-index-build"
+            onclick="triggerSmartBuildFromSidebar()"
+            style="width:100%;background:linear-gradient(135deg,#059669,#10B981);font-size:.84rem;padding:10px 12px;position:relative;overflow:hidden"
+            title="Drive API 변경감지 + Sheets batchGet — 변경된 시트/탭만 갱신 (5분 자동주기)">
+            <i class="fas fa-bolt"></i> 스마트빌드 갱신
+            <span id="smartBuildSidebarBadge" style="display:none;background:rgba(255,255,255,0.3);padding:1px 6px;border-radius:10px;font-size:.68rem;margin-left:4px"></span>
           </button>
-          <button id="btnBuildIndex" class="btn-index-build"
-            onclick="buildIndex()"
-            style="flex:1;background:linear-gradient(135deg,#6b7280,#374151);font-size:.82rem"
-            title="모든 캠페인을 처음부터 전체 동기화 (100~200초)">
-            <i class="fas fa-sync-alt"></i> 전체 갱신
-          </button>
+          <!-- 구형 버튼 -->
+          <div style="display:flex;gap:6px">
+            <button id="btnBuildIndexSmart" class="btn-index-build"
+              onclick="buildIndexSmart()"
+              style="flex:1.5;background:linear-gradient(135deg,#94a3b8,#64748b);font-size:.78rem;opacity:.85"
+              title="[구형] 변경된 탭만 빠르게 동기화 (평균 5~20초)">
+              <i class="fas fa-bolt"></i> 빠른 갱신 <span style="font-size:.62rem;opacity:.7">(구형)</span>
+              <span id="smartDirtyBadge" style="display:none;background:rgba(255,255,255,0.25);padding:1px 6px;border-radius:10px;font-size:.7rem;margin-left:3px"></span>
+            </button>
+            <button id="btnBuildIndex" class="btn-index-build"
+              onclick="buildIndex()"
+              style="flex:1;background:linear-gradient(135deg,#94a3b8,#64748b);font-size:.78rem;opacity:.85"
+              title="[구형] 모든 캠페인을 처음부터 전체 동기화 (100~200초)">
+              <i class="fas fa-sync-alt"></i> 전체 갱신 <span style="font-size:.62rem;opacity:.7">(구형)</span>
+            </button>
+          </div>
         </div>
         <div id="smartModeHint" style="font-size:.7rem;color:#2563eb;margin-top:4px;display:none">
           <i class="fas fa-info-circle"></i> <span id="smartModeHintText"></span>
         </div>
         <div style="font-size:.68rem;color:#9ca3af;margin-top:4px;line-height:1.55">
-          <i class="fas fa-bolt" style="color:#0ea5e9"></i> <b>빠른 갱신</b> — 변경된 탭만 (5~20초), 없으면 자동 스킵<br>
-          <i class="fas fa-sync-alt" style="color:#6b7280"></i> <b>전체 갱신</b> — 모든 캠페인 전체 재빌드 (100~200초)<br>
-          <i class="fas fa-clock" style="color:#059669"></i> <b>자동 갱신</b> — 매 정시(09~19시) CRON 자동 실행
+          <i class="fas fa-bolt" style="color:#059669"></i> <b>스마트빌드</b> — Drive API 변경감지 + batchGet (5분 자동, 수동 가능)<br>
+          <i class="fas fa-bolt" style="color:#94a3b8"></i> <b>빠른 갱신</b> <span style="color:#d1d5db">(구형)</span> — indexBuilder 기반 증분 (5~20초)<br>
+          <i class="fas fa-sync-alt" style="color:#94a3b8"></i> <b>전체 갱신</b> <span style="color:#d1d5db">(구형)</span> — 모든 캠페인 재빌드 (100~200초)
         </div>
       </div>
 
