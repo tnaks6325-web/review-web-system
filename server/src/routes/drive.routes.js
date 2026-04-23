@@ -27,8 +27,7 @@ router.post('/sync-capture', authMiddleware, async (req, res, next) => {
     const { rows: tabs } = await pool.query(
       `SELECT sheet_id, tab_name, campaign_name, capture_folder_url
        FROM tab_configs
-       WHERE (force_done = FALSE OR force_done IS NULL)
-         AND (is_closed = FALSE OR is_closed IS NULL)`
+       WHERE (is_closed = FALSE OR is_closed IS NULL)`
     );
 
     let synced = 0, created = 0, errors = 0;
@@ -86,8 +85,7 @@ router.post('/sync-review', authMiddleware, async (req, res, next) => {
     const { rows: tabs } = await pool.query(
       `SELECT sheet_id, tab_name, campaign_name, folder_url
        FROM tab_configs
-       WHERE (force_done = FALSE OR force_done IS NULL)
-         AND (is_closed = FALSE OR is_closed IS NULL)`
+       WHERE (is_closed = FALSE OR is_closed IS NULL)`
     );
 
     let synced = 0, created = 0, errors = 0;
@@ -166,8 +164,7 @@ router.post('/batch-create', authMiddleware, async (req, res, next) => {
     const { rows: tabs } = await pool.query(
       `SELECT sheet_id, tab_name, campaign_name, folder_url, capture_folder_url
        FROM tab_configs
-       WHERE (force_done = FALSE OR force_done IS NULL)
-         AND (is_closed = FALSE OR is_closed IS NULL)`
+       WHERE (is_closed = FALSE OR is_closed IS NULL)`
     );
 
     const startTime = Date.now();
@@ -410,7 +407,7 @@ router.get('/diag', authMiddleware, async (req, res, next) => {
       SELECT sheet_id AS "sheetId", tab_name AS "tabName",
              campaign_name AS "campaignName",
              folder_url AS "folderUrl", capture_folder_url AS "captureFolderUrl",
-             force_done AS "forceDone", is_closed AS "isClosed"
+             is_closed AS "isClosed"
       FROM tab_configs
       ORDER BY tab_name
     `);
@@ -437,8 +434,7 @@ async function syncCaptureFoldersInternal(force) {
   const { rows: tabs } = await pool.query(
     `SELECT sheet_id, tab_name, campaign_name, capture_folder_url
      FROM tab_configs
-     WHERE (force_done = FALSE OR force_done IS NULL)
-       AND (is_closed = FALSE OR is_closed IS NULL)`
+     WHERE (is_closed = FALSE OR is_closed IS NULL)`
   );
 
   let synced = 0, created = 0, errors = 0;
@@ -479,8 +475,7 @@ async function syncReviewFoldersInternal(force) {
   const { rows: tabs } = await pool.query(
     `SELECT sheet_id, tab_name, campaign_name, folder_url
      FROM tab_configs
-     WHERE (force_done = FALSE OR force_done IS NULL)
-       AND (is_closed = FALSE OR is_closed IS NULL)`
+     WHERE (is_closed = FALSE OR is_closed IS NULL)`
   );
 
   let synced = 0, created = 0, errors = 0;

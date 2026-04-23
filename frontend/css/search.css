@@ -2,7 +2,6 @@
 .hidden{display:none!important}
 :root{--p:#5046E4;--p-d:#3730A3;--p-l:#EEF2FF;--p-m:#A5B4FC;--ok:#10B981;--ok-l:#D1FAE5;--warn:#F59E0B;--warn-l:#FEF3C7;--err:#EF4444;--err-l:#FEE2E2;--bg:#F0F2FA;--card:#FFFFFF;--border:#E5E7EB;--bd:#E5E7EB;--border-d:#D1D5DB;--t1:#111827;--t2:#4B5563;--t3:#9CA3AF;--r:14px;--rs:8px;--rm:12px;--sh:0 2px 12px rgba(0,0,0,.07);--shm:0 6px 24px rgba(0,0,0,.11);--tr:all .2s ease;
   /* ── 대시보드 컬럼 너비 CSS 변수 (JS에서 동적 변경 가능) ── */
-  --dc-forcecb:0px;
   --dc-closedcb:0px;
   --dc-tabname:120px;
   --dc-capture:70px;
@@ -22,7 +21,7 @@
   --dc-memo:70px;
   --dc-info:70px;
   /* 조합된 그리드 문자열 (JS에서 통째로 교체) */
-  --dash-grid:var(--dc-forcecb) var(--dc-closedcb) var(--dc-tabname) var(--dc-capture) var(--dc-folder) var(--dc-round) var(--dc-date) var(--dc-product) var(--dc-time) var(--dc-review) var(--dc-formlink) var(--dc-manager) var(--dc-bar) var(--dc-nums) var(--dc-payment) var(--dc-taekhap) var(--dc-memo) var(--dc-info);
+  --dash-grid:var(--dc-closedcb) var(--dc-tabname) var(--dc-capture) var(--dc-folder) var(--dc-round) var(--dc-date) var(--dc-product) var(--dc-time) var(--dc-review) var(--dc-formlink) var(--dc-manager) var(--dc-bar) var(--dc-nums) var(--dc-payment) var(--dc-taekhap) var(--dc-memo) var(--dc-info);
 }
 *,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
 body{font-family:'Noto Sans KR','Pretendard',-apple-system,BlinkMacSystemFont,sans-serif;background:var(--bg);color:var(--t1);min-height:100vh;-webkit-font-smoothing:antialiased}
@@ -632,7 +631,7 @@ input,textarea,button{font-family:inherit}
 /* ── 차수 서브행 (v8.2) ── */
 .dash-tab-row-round{display:grid;grid-template-columns:var(--dash-grid);align-items:center;min-height:28px;padding:2px 8px 2px 14px;background:#F8FAFF;border-bottom:1px solid #EFF2FF;font-size:.72rem;gap:0;width:fit-content;min-width:100%}
 /* force/closed 모드 padding 보정 */
-.force-done-mode .dash-tab-row-round,.closed-mode .dash-tab-row-round{padding-left:6px}
+.closed-mode .dash-tab-row-round{padding-left:6px}
 .dash-tab-row-round:last-child{border-bottom:none}
 .dash-round-badge{display:inline-flex;align-items:center;gap:3px;font-size:.65rem;font-weight:700;padding:1px 6px;border-radius:10px;background:#EEF2FF;color:#4338CA;border:1px solid #C7D2FE;white-space:nowrap}
 .dash-round-badge.round-done{background:#F0FDF4;color:#166534;border-color:#BBF7D0}
@@ -640,10 +639,6 @@ input,textarea,button{font-family:inherit}
 .dash-round-col-badge{display:inline-flex;align-items:center;justify-content:center;font-size:.63rem;font-weight:700;padding:2px 6px;border-radius:8px;white-space:nowrap;line-height:1}
 .dash-round-col-badge.badge-solo{background:#F3F4F6;color:#6B7280;border:1px solid #D1D5DB} /* 단독 */
 .dash-round-col-badge.badge-nth{background:#EEF2FF;color:#4338CA;border:1px solid #C7D2FE}  /* N차 */
-/* ── 강제완료 ── */
-.btn-force-done{padding:5px 10px;border:1.5px solid #F87171;border-radius:20px;background:#fff;font-size:.75rem;font-weight:600;color:#DC2626;cursor:pointer;display:flex;align-items:center;gap:4px;transition:background .2s,border-color .2s,color .2s;white-space:nowrap}
-.btn-force-done:hover{background:#FEF2F2;border-color:#DC2626}
-.btn-force-done.active{background:#DC2626;border-color:#DC2626;color:#fff}
 .btn-force-exec{padding:5px 12px;border:none;border-radius:20px;background:#DC2626;font-size:.75rem;font-weight:700;color:#fff;cursor:pointer;display:flex;align-items:center;gap:4px;transition:opacity .15s;white-space:nowrap;animation:fadeInScale .18s ease}
 .btn-force-exec:hover{opacity:.85}
 /* ── 마감 버튼 ── */
@@ -675,14 +670,6 @@ input,textarea,button{font-family:inherit}
 .cfr-summary.warn{background:#FEF3C7;color:#92400E}
 .cfr-summary.running{background:#EDE9FE;color:#5B21B6}
 @keyframes fadeInScale{from{opacity:0;transform:scale(.85)}to{opacity:1;transform:scale(1)}}
-/* ── 강제완료 CB 래퍼: 그리드 셀로 동작 (display:none/flex 방식 폐기) ──
-   --dc-forcecb 가 0px이면 overflow:hidden으로 내용이 보이지 않음
-   --dc-forcecb 가 28px이면 셀 크기가 생겨 체크박스가 표시됨                */
-.force-cb-wrap{display:flex;align-items:center;justify-content:center;overflow:hidden;position:relative;min-width:0}
-.force-done-mode .force-cb-wrap{border-right:2px solid #FECACA}
-.force-cb{width:15px;height:15px;accent-color:#DC2626;cursor:pointer;flex-shrink:0}
-.dash-tab-row.force-completed{background:#FFF7F7!important}
-.dash-tab-row.force-completed .dash-tab-name a,.dash-tab-row.force-completed .dash-tab-name span{color:#DC2626!important;text-decoration:line-through;opacity:.7}
 /* ── 마감 CB 래퍼: 그리드 셀로 동작 (display:none/flex 방식 폐기) ──
    --dc-closedcb 가 0px이면 overflow:hidden으로 내용이 보이지 않음
    --dc-closedcb 가 28px이면 셀 크기가 생겨 체크박스가 표시됨              */
@@ -704,17 +691,7 @@ input,textarea,button{font-family:inherit}
 .closed-confirm-btns{display:flex;gap:8px;justify-content:flex-end}
 .closed-confirm-cancel{padding:8px 16px;border:1.5px solid var(--bd);border-radius:8px;background:#fff;font-size:.82rem;font-weight:600;color:var(--t2);cursor:pointer}
 .closed-confirm-ok{padding:8px 18px;border:none;border-radius:8px;background:#4F46E5;font-size:.82rem;font-weight:700;color:#fff;cursor:pointer}
-/* 강제완료 경고 팝업 */
-.force-confirm-overlay{position:fixed;inset:0;background:rgba(0,0,0,.45);z-index:3000;display:none;align-items:center;justify-content:center}
-.force-confirm-overlay.open{display:flex}
-.force-confirm-box{background:#fff;border-radius:14px;padding:24px 22px;max-width:340px;width:90%;box-shadow:0 12px 40px rgba(0,0,0,.18)}
-.force-confirm-title{font-size:.95rem;font-weight:700;color:#DC2626;margin-bottom:10px;display:flex;align-items:center;gap:6px}
-.force-confirm-msg{font-size:.82rem;color:var(--t2);line-height:1.6;margin-bottom:18px}
-.force-confirm-btns{display:flex;gap:8px;justify-content:flex-end}
-.force-confirm-cancel{padding:8px 16px;border:1.5px solid var(--bd);border-radius:8px;background:#fff;font-size:.82rem;font-weight:600;color:var(--t2);cursor:pointer}
-.force-confirm-ok{padding:8px 18px;border:none;border-radius:8px;background:#DC2626;font-size:.82rem;font-weight:700;color:#fff;cursor:pointer}
-.admin-loading,.admin-empty,.admin-error{padding:36px 20px;text-align:center;font-size:.85rem;color:var(--t3);display:flex;flex-direction:column;align-items:center;gap:10px}
-.admin-loading i{font-size:1.4rem;color:var(--p)}.admin-empty i{font-size:2rem;color:#D1D5DB}.admin-error i{font-size:1.4rem;color:var(--err)}.admin-error{color:var(--err)}
+
 /* ── 대시보드 요약/캠페인 ── */
 .dashboard-summary{display:grid;grid-template-columns:repeat(4,1fr);gap:8px;margin-bottom:16px}
 .summary-card{background:#fff;border:1.5px solid var(--bd);border-radius:var(--rm);padding:12px 8px;text-align:center;display:flex;flex-direction:column;gap:4px}
@@ -737,34 +714,18 @@ input,textarea,button{font-family:inherit}
 .dash-tab-table{overflow:hidden;max-height:2000px;transition:max-height .28s ease,opacity .2s ease;opacity:1;padding:4px 0}
 .dash-tab-table.collapsed{max-height:0;opacity:0;padding:0}
 /* ── 인덱스 컬럼 헤더 (고정) ── */
-/*
-  그리드 구조 (20열 = forcecb + closedcb + 18열):
-    그리드 구조 (19열 = forcecb + closedcb + 17열):
-  [forcecb] [closedcb] 탭명  캡처폴더 리뷰폴더 차수  시작일  상품명  주문시간대  리뷰타입  폼링크  담당자  진행률  리뷰   상태   입금  택대  비고  ⚙
-  평소: 0px    0px      120px  70px    70px    70px  70px   70px   70px       70px     70px   70px   70px   70px  70px  70px  70px  70px 70px
-  평소: 0px    0px      120px  70px    70px    70px  70px   70px   70px       70px     70px   70px   70px   70px  70px  70px  70px  70px     70px 70px
-  강완: 28px   0px      (조정) ...
-  마감: 0px    28px     (조정) ...
-  → --dc-forcecb / --dc-closedcb 를 JS에서 0px↔28px 전환
-*/
 .dash-col-header{display:grid;grid-template-columns:var(--dash-grid);align-items:center;gap:0;padding:0 14px;background:#F8F9FF;border:1.5px solid var(--bd);border-radius:8px;margin-bottom:0;min-height:28px;box-sizing:border-box;position:sticky;top:0;z-index:40;box-shadow:0 2px 6px rgba(0,0,0,.06);width:fit-content;min-width:100%;will-change:transform}
 /* force/closed 모드 padding 보정 */
-.force-done-mode .dash-col-header,.closed-mode .dash-col-header{padding-left:6px}
+.closed-mode .dash-col-header{padding-left:6px}
 .dash-col-header-cell{font-size:.65rem;font-weight:700;color:var(--t3);white-space:nowrap;overflow:visible;text-overflow:ellipsis;padding:0 4px;display:flex;align-items:center;gap:3px;position:relative;user-select:none;cursor:pointer;border-radius:4px;transition:background .15s,color .15s}
 .dash-col-header-cell:hover{background:rgba(80,70,228,.09);color:var(--p)}
 /* ── 컬럼 선택(활성) 상태 ── */
 .dash-col-header-cell.col-active{background:var(--p)!important;color:#fff!important}
-/* ── CB 컬럼 (헤더·데이터 공통): 그리드 셀로 동작, --dc-forcecb/closedcb 0px→숨김, 28px→표시 ── */
-.dash-col-header-cell.force-cb-wrap{overflow:hidden;padding:0;justify-content:center;border-right:2px solid transparent}
 .dash-col-header-cell.closed-cb-wrap{overflow:hidden;padding:0;justify-content:center;border-right:2px solid transparent}
-.force-done-mode .force-cb-wrap{border-right:2px solid #FECACA}
-.force-done-mode .dash-col-header-cell.force-cb-wrap{background:#FEF2F2}
 .closed-mode .closed-cb-wrap{border-right:2px solid #C7D2FE}
 .closed-mode .dash-col-header-cell.closed-cb-wrap{background:#EEF2FF}
-/* 강제완료/마감 모드: 탭명 셀 왼쪽 구분선 */
-.force-done-mode .dash-col-header-cell[data-col-key='tabname'],
 .closed-mode .dash-col-header-cell[data-col-key='tabname']{border-left:2px solid #E5E7EB;padding-left:6px}
-.force-done-mode .dash-tab-name,.closed-mode .dash-tab-name{border-left:2px solid #E5E7EB;padding-left:8px}
+.closed-mode .dash-tab-name{border-left:2px solid #E5E7EB;padding-left:8px}
 /* ── 컬럼 드래그 리사이즈 핸들 (엑셀 스타일) ── */
 /* 헤더 셀 우측 경계에 절대배치 - 호버 시 ↔ 커서 + 파란 세로선 표시 */
 .col-drag-handle{
@@ -819,11 +780,11 @@ body.col-resizing .col-drag-handle{pointer-events:auto!important}
 */
 .dash-tab-row{display:grid;grid-template-columns:var(--dash-grid);align-items:center;gap:0;padding:0 14px;border-bottom:1px solid #F3F4F6;min-height:34px;box-sizing:border-box;width:fit-content;min-width:100%}
 /* force/closed 모드 padding 보정 */
-.force-done-mode .dash-tab-row,.closed-mode .dash-tab-row{padding-left:6px}
+.closed-mode .dash-tab-row{padding-left:6px}
 .dash-tab-row:last-child{border-bottom:none}
 .dash-tab-name{font-size:.78rem;color:var(--t2);font-weight:500;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;padding:8px 6px 8px 6px;min-width:0}
-/* 강제완료/마감 모드: 탭명 왼쪽에 구분선 */
-.force-done-mode .dash-tab-name,.closed-mode .dash-tab-name{border-left:2px solid #E5E7EB;padding-left:8px}
+/* 마감 모드: 탭명 왼쪽에 구분선 */
+.closed-mode .dash-tab-name{border-left:2px solid #E5E7EB;padding-left:8px}
 .dash-tab-name>span{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 /* 날짜 열 – 별도 고정폭 */
 .dash-tab-date-col{display:flex;align-items:center;justify-content:flex-start;padding:0 2px;overflow:hidden;min-width:0}

@@ -57,7 +57,6 @@ const _ACTION_MAP = {
   'setTabConfig':     { method: 'POST', path: '/api/tab/config' },
   'getTabConfig':     { method: 'GET',  path: '/api/tab/config' },
   'listDetailSheet':  { method: 'GET',  path: '/api/tab/config' },
-  'setForceDone':     { method: 'POST', path: '/api/tab/force-done' },
   'setClosed':        { method: 'POST', path: '/api/tab/closed' },
   'getTabOptions':    { method: 'GET',  path: '/api/tab/options' },
   'getTabEndDate':    { method: 'GET',  path: '/api/tab/end-date' },

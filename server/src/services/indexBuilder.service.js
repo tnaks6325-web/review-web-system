@@ -197,7 +197,7 @@ async function buildIndexSmart(forceFullRebuild = false) {
     });
 
     const { rows: tcRows } = await pool.query(
-      'SELECT sheet_id, tab_name, force_done, is_closed FROM tab_configs'
+      'SELECT sheet_id, tab_name, is_closed FROM tab_configs'
     );
     const tcMap = {};
     tcRows.forEach(r => { tcMap[`${r.sheet_id}||${r.tab_name}`] = r; });
@@ -433,7 +433,7 @@ async function _processOneSheet(sheetId, opts) {
     return { rebuilt: 0, skipped: 0, errors: 0, elapsed: Date.now() - sheetStart };
   }
 
-  // force_done/is_closed/아카이브 탭 필터링
+  // is_closed/아카이브 탭 필터링
   const activeTabs = validTabs.filter(t => {
     const key = `${sheetId}||${t.properties.title}`;
     // 아카이브된 탭은 완전히 스킵
@@ -442,7 +442,7 @@ async function _processOneSheet(sheetId, opts) {
       return false;
     }
     const tc = tcMap[key];
-    if (tc && (tc.force_done || tc.is_closed)) {
+    if (tc && tc.is_closed) {
       skipped++;
       return false;
     }
@@ -1033,7 +1033,7 @@ async function buildOneSheet(sheetId) {
     });
 
     const { rows: tcRows } = await pool.query(
-      'SELECT sheet_id, tab_name, force_done, is_closed FROM tab_configs WHERE sheet_id = $1',
+      'SELECT sheet_id, tab_name, is_closed FROM tab_configs WHERE sheet_id = $1',
       [sheetId]
     );
     const tcMap = {};

@@ -35,10 +35,10 @@ async function migrate() {
         await pool.query(`
           INSERT INTO tab_configs (
             sheet_id, tab_name, sheet_url, manager, time_range, taekhap,
-            review_type, payment_type, display_name, force_done, folder_url,
+            review_type, payment_type, display_name, folder_url,
             is_bulk, capture_folder_url, is_closed, delivery_type, round,
             nc_mode, deposit_name, transfer_bank, income_type, campaign_name
-          ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21)
+          ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20)
           ON CONFLICT (sheet_id, tab_name) DO UPDATE SET
             manager = EXCLUDED.manager,
             time_range = EXCLUDED.time_range,
@@ -51,7 +51,6 @@ async function migrate() {
           getCol(row, header, 'review_type'),
           getCol(row, header, 'payment_type'),
           getCol(row, header, 'display_name'),
-          toBoolean(getCol(row, header, 'force_done')),
           getCol(row, header, 'folder_url'),
           toBoolean(getCol(row, header, 'is_bulk')),
           getCol(row, header, 'capture_folder_url'),

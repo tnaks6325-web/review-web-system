@@ -877,7 +877,7 @@
                 </label>
                 <label class="dash-filter-item" data-filter="done">
                   <input type="checkbox" value="done" onchange="onFilterChange(this)">
-                  <i class="fas fa-check-circle" style="color:#16A34A"></i> 완료 <span style="font-size:.65rem;color:var(--t3)">(강제완료 포함)</span>
+                  <i class="fas fa-check-circle" style="color:#16A34A"></i> 완료
                 </label>
                 <label class="dash-filter-item" data-filter="closed">
                   <input type="checkbox" value="closed" onchange="onFilterChange(this)">
@@ -923,13 +923,7 @@
             <button class="btn-blacklist-mgr" onclick="openNoticePanel()" title="공지 배너 설정" style="display:none;background:#FEF9C3;color:#92400E;border-color:#FDE68A">
               <i class="fas fa-bullhorn"></i> 공지설정
             </button>
-            <!-- ⚠ 강제완료/마감: 위험 액션이므로 섹션 헤더에 유지 -->
-            <button id="btnForceDone" class="btn-force-done" onclick="toggleForceDoneMode()">
-              <i class="fas fa-flag-checkered"></i> 강제완료
-            </button>
-            <button id="btnForceExec" class="btn-force-exec" onclick="execForceDone()" style="display:none">
-              <i class="fas fa-check"></i> 실행
-            </button>
+            <!-- ⚠ 마감: 위험 액션이므로 섹션 헤더에 유지 -->
             <button id="btnClosed" class="btn-closed" onclick="toggleClosedMode()">
               <i class="fas fa-archive"></i> 마감
             </button>
@@ -1277,7 +1271,7 @@
           <button class="payment-load-btn" id="payLoadBtn" onclick="loadPaymentTargets()">
             <i class="fas fa-search"></i> 대상 조회
           </button>
-          <span style="font-size:.7rem;color:var(--t3)">마감·강제완료 탭은 자동 제외됩니다</span>
+          <span style="font-size:.7rem;color:var(--t3)">마감 탭은 자동 제외됩니다</span>
         </div>
 
         <!-- 입금명 미설정 경고 -->
@@ -1437,7 +1431,6 @@
           <select id="tabDashStatusFilter" onchange="renderTabDashTable()" style="padding:5px 8px;border:1px solid #D1D5DB;border-radius:8px;font-size:.78rem">
             <option value="">전체 상태</option>
             <option value="active">활성</option>
-            <option value="forceDone">강제완료</option>
             <option value="closed">마감</option>
           </select>
           <select id="tabDashManagerFilter" onchange="renderTabDashTable()" style="padding:5px 8px;border:1px solid #D1D5DB;border-radius:8px;font-size:.78rem">
@@ -2348,20 +2341,7 @@
   </div>
 </div>
 
-<!-- ── 강제완료 경고 팝업 ── -->
-<div class="force-confirm-overlay" id="forceConfirmOverlay">
-  <div class="force-confirm-box">
-    <div class="force-confirm-title"><i class="fas fa-exclamation-triangle"></i> 강제완료 처리 확인</div>
-    <p class="force-confirm-msg" id="forceConfirmMsg">
-      강제마감 시, 상태가 강제로 <b>"완료"</b>로 변경됩니다.<br>
-      되돌리려면 다시 강제완료 체크를 <b>해제</b>하면 복구됩니다.
-    </p>
-    <div class="force-confirm-btns">
-      <button class="force-confirm-cancel" onclick="cancelForceDone()">취소</button>
-      <button class="force-confirm-ok" onclick="confirmForceDone()">확인</button>
-    </div>
-  </div>
-</div>
+
 
 <!-- ── v9.9 메모 공유 모달 ── -->
 <div class="memo-overlay" id="memoOverlay" onclick="if(event.target===this)closeMemoPanel()">

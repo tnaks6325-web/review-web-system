@@ -21,7 +21,7 @@ router.get('/debug-tab', authMiddleware, async (req, res, next) => {
     const { rows } = await pool.query(`
       SELECT sheet_id AS "sheetId", tab_name AS "tabName",
              manager, time_range AS "timeRange", review_type AS "reviewType",
-             force_done AS "forceDone", is_closed AS "isClosed",
+             is_closed AS "isClosed",
              campaign_name AS "campaignName",
              updated_at AS "updatedAt"
       FROM tab_configs
@@ -68,7 +68,7 @@ router.get('/debug-base', authMiddleware, async (req, res, next) => {
   try {
     const { rows } = await pool.query(
       `SELECT COUNT(*) AS total,
-              COUNT(*) FILTER (WHERE NOT is_closed AND NOT force_done) AS active,
+              COUNT(*) FILTER (WHERE NOT is_closed) AS active,
               COUNT(*) FILTER (WHERE is_closed) AS closed,
               COUNT(DISTINCT sheet_id) AS sheets
        FROM tab_configs`
@@ -123,7 +123,6 @@ router.get('/viewer-data', async (req, res, next) => {
         ri.campaign_name AS "campaignName",
         ri.row_json AS "rowJson",
         tc.display_name AS "displayName",
-        tc.force_done AS "forceDone",
         tc.is_closed AS "isClosed"
       FROM review_index ri
       LEFT JOIN tab_configs tc ON ri.sheet_id = tc.sheet_id AND ri.tab_name = tc.tab_name
@@ -299,7 +298,7 @@ router.get('/campaign-stats', async (req, res, next) => {
         im.row_count AS "totalCount", im.submitted_count AS "submittedCount",
         im.status, im.built_at AS "builtAt",
         tc.manager, tc.review_type AS "reviewType",
-        tc.force_done AS "forceDone", tc.is_closed AS "isClosed"
+        tc.is_closed AS "isClosed"
       FROM index_master im
       LEFT JOIN tab_configs tc ON im.sheet_id = tc.sheet_id AND im.tab_name = tc.tab_name
     `;
@@ -905,7 +904,6 @@ router.get('/stats/campaigns', authMiddleware, async (req, res, next) => {
         tc.manager,
         tc.review_type    AS "reviewType",
         tc.is_closed      AS "isClosed",
-        tc.force_done     AS "forceDone",
         COUNT(*)                              AS "totalCount",
         COUNT(*) FILTER (WHERE ri.is_submitted)  AS "submittedCount",
         COUNT(*) FILTER (WHERE NOT ri.is_submitted) AS "pendingCount",
@@ -915,7 +913,7 @@ router.get('/stats/campaigns', authMiddleware, async (req, res, next) => {
       FROM review_index ri
       LEFT JOIN tab_configs tc ON ri.sheet_id = tc.sheet_id AND ri.tab_name = tc.tab_name
       GROUP BY ri.campaign_name, ri.sheet_id, ri.tab_name,
-               tc.display_name, tc.manager, tc.review_type, tc.is_closed, tc.force_done
+               tc.display_name, tc.manager, tc.review_type, tc.is_closed
       ORDER BY "submitRate" DESC, "totalCount" DESC
     `);
 
@@ -1488,17 +1486,16 @@ router.get('/debug-parse', authMiddleware, async (req, res, next) => {
 
 // ═══════════════════════════════════════════════════════════
 // GET /api/diag/archive-detect-debug — 아카이브 감지 디버그
-// tab_configs(is_closed/force_done)와 index_master 매칭 확인
+// tab_configs(is_closed)와 index_master 매칭 확인
 // ═══════════════════════════════════════════════════════════
 router.get('/archive-detect-debug', authMiddleware, async (req, res, next) => {
   try {
-    // 1) tab_configs에서 is_closed/force_done 탭 수
+    // 1) tab_configs에서 is_closed 탭 수
     const { rows: tcStats } = await pool.query(`
       SELECT 
         count(*) AS total,
         count(*) FILTER (WHERE is_closed = TRUE) AS closed_count,
-        count(*) FILTER (WHERE force_done = TRUE) AS force_done_count,
-        count(*) FILTER (WHERE is_closed = TRUE OR force_done = TRUE) AS either_count
+        count(*) FILTER (WHERE is_closed = TRUE) AS either_count
       FROM tab_configs
     `);
 
@@ -1511,32 +1508,32 @@ router.get('/archive-detect-debug', authMiddleware, async (req, res, next) => {
       FROM index_master
     `);
 
-    // 3) tab_configs(closed/force_done)와 index_master의 교집합
+    // 3) tab_configs(closed)와 index_master의 교집합
     const { rows: joinStats } = await pool.query(`
       SELECT 
         count(*) AS matched_count
       FROM tab_configs tc
       INNER JOIN index_master im ON tc.sheet_id = im.sheet_id AND tc.tab_name = im.tab_name
-      WHERE (tc.is_closed = TRUE OR tc.force_done = TRUE)
+      WHERE tc.is_closed = TRUE
         AND im.status = 'active'
     `);
 
-    // 4) tab_configs(closed/force_done)인데 index_master에 없는 탭 (샘플 10개)
+    // 4) tab_configs(closed)인데 index_master에 없는 탭 (샘플 10개)
     const { rows: missingInIM } = await pool.query(`
-      SELECT tc.sheet_id, tc.tab_name, tc.is_closed, tc.force_done, tc.campaign_name
+      SELECT tc.sheet_id, tc.tab_name, tc.is_closed, tc.campaign_name
       FROM tab_configs tc
       LEFT JOIN index_master im ON tc.sheet_id = im.sheet_id AND tc.tab_name = im.tab_name
-      WHERE (tc.is_closed = TRUE OR tc.force_done = TRUE)
+      WHERE tc.is_closed = TRUE
         AND im.sheet_id IS NULL
       LIMIT 10
     `);
 
-    // 5) tab_configs(closed/force_done)인데 index_master status != 'active'
+    // 5) tab_configs(closed)인데 index_master status != 'active'
     const { rows: notActiveInIM } = await pool.query(`
-      SELECT im.sheet_id, im.tab_name, im.status, tc.is_closed, tc.force_done
+      SELECT im.sheet_id, im.tab_name, im.status, tc.is_closed
       FROM tab_configs tc
       INNER JOIN index_master im ON tc.sheet_id = im.sheet_id AND tc.tab_name = im.tab_name
-      WHERE (tc.is_closed = TRUE OR tc.force_done = TRUE)
+      WHERE tc.is_closed = TRUE
         AND im.status != 'active'
       LIMIT 10
     `);
@@ -1549,7 +1546,6 @@ router.get('/archive-detect-debug', authMiddleware, async (req, res, next) => {
       WHERE im.status = 'active'
         AND (
           tc.is_closed = TRUE
-          OR tc.force_done = TRUE
           OR (im.row_count > 0 AND im.submitted_count >= im.row_count)
         )
     `);

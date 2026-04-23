@@ -1225,7 +1225,6 @@ function _renderCampaignTable(campaigns, totals) {
     var rate = parseFloat(c.submitRate);
     var rateColor = rate >= 80 ? '#16A34A' : (rate >= 50 ? '#F59E0B' : '#EF4444');
     var statusBadge = c.isClosed ? '<span style="background:#EF4444;color:#fff;padding:1px 6px;border-radius:9px;font-size:.65rem">마감</span>'
-                    : c.forceDone ? '<span style="background:#F59E0B;color:#fff;padding:1px 6px;border-radius:9px;font-size:.65rem">완료</span>'
                     : '<span style="background:#16A34A;color:#fff;padding:1px 6px;border-radius:9px;font-size:.65rem">진행</span>';
     var bg = i % 2 === 0 ? '' : 'background:#F8FAFC';
 

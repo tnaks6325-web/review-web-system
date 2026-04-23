@@ -6,8 +6,8 @@ const { logger } = require('../utils/logger');
 
 // ═══════════════════════════════════════════════════════════
 // GET /api/archive/detect — 아카이브 대상 자동 감지 (반자동: 감지만)
-// 소스 1: index_master 기준 (submitted >= row_count OR closed/force_done OR (완) 접두사)
-// 소스 2: tab_configs 기준 (closed/force_done이지만 index_master에 없는 경우)
+// 소스 1: index_master 기준 (submitted >= row_count OR closed OR (완) 접두사)
+// 소스 2: tab_configs 기준 (closed이지만 index_master에 없는 경우)
 // ═══════════════════════════════════════════════════════════
 router.get('/detect', authMiddleware, async (req, res, next) => {
   try {
@@ -22,7 +22,6 @@ router.get('/detect', authMiddleware, async (req, res, next) => {
         im.built_at       AS "builtAt",
         CASE
           WHEN tc.is_closed = TRUE THEN 'closed'
-          WHEN tc.force_done = TRUE THEN 'force_done'
           WHEN im.row_count > 0 AND im.submitted_count >= im.row_count THEN 'completed'
           WHEN im.tab_name LIKE '(완)%' THEN 'name_completed'
           ELSE 'unknown'
@@ -33,14 +32,13 @@ router.get('/detect', authMiddleware, async (req, res, next) => {
       WHERE im.status = 'active'
         AND (
           tc.is_closed = TRUE
-          OR tc.force_done = TRUE
           OR (im.row_count > 0 AND im.submitted_count >= im.row_count)
           OR im.tab_name LIKE '(완)%'
         )
 
       UNION ALL
 
-      -- 소스 2: tab_configs에만 있는 마감/강제완료 탭 (index_master에 없음)
+      -- 소스 2: tab_configs에만 있는 마감 탭 (index_master에 없음)
       SELECT
         tc.sheet_id       AS "sheetId",
         tc.tab_name       AS "tabName",
@@ -50,13 +48,12 @@ router.get('/detect', authMiddleware, async (req, res, next) => {
         NULL              AS "builtAt",
         CASE
           WHEN tc.is_closed = TRUE THEN 'closed'
-          WHEN tc.force_done = TRUE THEN 'force_done'
           ELSE 'unknown'
         END AS "reason",
         FALSE AS "inIndex"
       FROM tab_configs tc
       LEFT JOIN index_master im ON tc.sheet_id = im.sheet_id AND tc.tab_name = im.tab_name
-      WHERE (tc.is_closed = TRUE OR tc.force_done = TRUE)
+      WHERE tc.is_closed = TRUE
         AND im.sheet_id IS NULL
 
       ORDER BY "campaignName", "tabName"
@@ -128,7 +125,7 @@ router.post('/tabs', authMiddleware, async (req, res, next) => {
 
         if (masterRows.length === 0) {
           // index_master에 없는 경우: tab_configs에서만 정리
-          // (마감/강제완료 상태인데 인덱스에 없는 탭 — 과거 데이터)
+          // (마감 상태인데 인덱스에 없는 탭 — 과거 데이터)
           const { rows: tcRows } = await client.query(
             'SELECT * FROM tab_configs WHERE sheet_id = $1 AND tab_name = $2',
             [sheetId, tabName]

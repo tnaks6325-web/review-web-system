@@ -94,7 +94,6 @@ router.get('/config', authMiddleware, async (req, res, next) => {
         reviewType: r.review_type,
         paymentType: r.payment_type,
         displayName: r.display_name,
-        forceDone: r.force_done,
         isClosed: r.is_closed,
         folderUrl: r.folder_url,
         captureFolderUrl: r.capture_folder_url,
@@ -111,27 +110,6 @@ router.get('/config', authMiddleware, async (req, res, next) => {
     });
 
     res.json({ ok: true, configs: rows, detailMap });
-  } catch (err) {
-    next(err);
-  }
-});
-
-// POST /api/tab/force-done — 강제완료 설정 (GAS: setForceDone)
-router.post('/force-done', authMiddleware, async (req, res, next) => {
-  try {
-    const { sheetId, tabs } = req.body;
-    if (!sheetId || !Array.isArray(tabs)) {
-      return res.json({ error: 'sheetId와 tabs 배열이 필요합니다.' });
-    }
-
-    for (const t of tabs) {
-      await pool.query(
-        'UPDATE tab_configs SET force_done = $1, updated_at = NOW() WHERE sheet_id = $2 AND tab_name = $3',
-        [Boolean(t.forceDone), sheetId, t.tabName]
-      );
-    }
-
-    res.json({ ok: true });
   } catch (err) {
     next(err);
   }
@@ -165,7 +143,7 @@ router.get('/options', async (req, res, next) => {
       SELECT DISTINCT sheet_id AS "sheetId", tab_name AS "tabName",
              campaign_name AS "campaignName", display_name AS "displayName"
       FROM tab_configs
-      WHERE is_closed = FALSE AND force_done = FALSE
+      WHERE is_closed = FALSE
       ORDER BY tab_name
     `);
     res.json({ ok: true, options: rows });
@@ -204,7 +182,6 @@ router.get('/stats', authMiddleware, async (req, res, next) => {
         im.status,
         tc.manager,
         tc.review_type AS "reviewType",
-        tc.force_done AS "forceDone",
         tc.is_closed AS "isClosed"
       FROM index_master im
       LEFT JOIN tab_configs tc ON im.sheet_id = tc.sheet_id AND im.tab_name = tc.tab_name
@@ -247,7 +224,7 @@ router.post('/sync-tab-names', authMiddleware, async (req, res, next) => {
     //    LEFT JOIN으로 index_master에 없는 탭도 포함
     const { rows: allTabs } = await pool.query(`
       SELECT tc.sheet_id, tc.tab_name, tc.sheet_url, tc.campaign_name,
-             tc.is_closed, tc.force_done,
+             tc.is_closed,
              im.tab_gid, im.tab_name AS index_tab_name
       FROM tab_configs tc
       LEFT JOIN index_master im ON tc.sheet_id = im.sheet_id AND tc.tab_name = im.tab_name
@@ -531,7 +508,7 @@ router.get('/dashboard', authMiddleware, async (req, res, next) => {
       SELECT
         tc.sheet_id, tc.tab_name, tc.sheet_url, tc.campaign_name,
         tc.manager, tc.time_range, tc.taekhap, tc.review_type,
-        tc.payment_type, tc.display_name, tc.force_done, tc.is_closed,
+        tc.payment_type, tc.display_name, tc.is_closed,
         tc.folder_url, tc.capture_folder_url, tc.is_bulk, tc.delivery_type,
         tc.round, tc.nc_mode, tc.deposit_name, tc.transfer_bank,
         tc.income_type, tc.updated_at,
@@ -545,8 +522,7 @@ router.get('/dashboard', authMiddleware, async (req, res, next) => {
     // 통계 계산
     const stats = {
       total: rows.length,
-      active: rows.filter(r => !r.force_done && !r.is_closed).length,
-      forceDone: rows.filter(r => r.force_done && !r.is_closed).length,
+      active: rows.filter(r => !r.is_closed).length,
       closed: rows.filter(r => r.is_closed).length,
       indexed: rows.filter(r => r.index_status === 'active').length,
       noManager: rows.filter(r => !r.manager).length,
@@ -560,10 +536,9 @@ router.get('/dashboard', authMiddleware, async (req, res, next) => {
     const campaigns = {};
     rows.forEach(r => {
       const camp = r.campaign_name || '(미지정)';
-      if (!campaigns[camp]) campaigns[camp] = { tabs: 0, active: 0, closed: 0, forceDone: 0 };
+      if (!campaigns[camp]) campaigns[camp] = { tabs: 0, active: 0, closed: 0 };
       campaigns[camp].tabs++;
       if (r.is_closed) campaigns[camp].closed++;
-      else if (r.force_done) campaigns[camp].forceDone++;
       else campaigns[camp].active++;
     });
 

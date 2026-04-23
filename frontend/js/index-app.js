@@ -1212,7 +1212,7 @@ function collectCurrentLayout() {
   
   // 컬럼 너비 수집
   const colWidthKeys = [
-    'forcecb', 'closedcb', 'tabname', 'capture', 'folder', 'round', 
+    'closedcb', 'tabname', 'capture', 'folder', 'round', 
     'date', 'product', 'time', 'review', 'formlink', 'manager', 
     'bar', 'nums', 'payment', 'income', 'depositname', 'bank', 
     'taekhap', 'memo', 'enddate', 'info'
@@ -2016,16 +2016,9 @@ async function loadAdminDashboard() {
     const stats = data.stats || [];
     const grand = data.grand || { total: 0, submitted: 0, pending: 0 };
 
-    // ★ 서버(베이스시트)의 forceDone 상태를 _forceDoneSet에 반영
-    // → 모든 관리자가 동일한 강제완료 상태를 공유
-    _forceDoneSet = new Set();
     _closedSet    = new Set();
     stats.forEach(c => {
       (c.tabs || []).forEach(t => {
-        if (t.forceDone) {
-          const key = (t.sheetId || "") + "||" + (t.tab || "");
-          _forceDoneSet.add(key);
-        }
         if (t.isClosed) {
           const key = (t.sheetId || "") + "||" + (t.tab || "");
           _closedSet.add(key);
@@ -2101,12 +2094,12 @@ async function loadAdminDashboard() {
       const cRate    = c.total > 0 ? Math.round(c.submitted / c.total * 100) : 0;
       const tableId  = `dct-${ci}`;
       const block    = document.createElement("div");
-      // 마감업체 조건: 모든 탭이 완료(pending===0) 또는 강제완료(forceDone) 또는 마감(isClosed)인 경우
+      // 마감업체 조건: 모든 탭이 완료(pending===0) 또는 마감(isClosed)인 경우
       // ★ v9.13 fix: 마감(isClosed) 탭은 인덱스에서 제외돼 total=0이므로 별도 조건 추가
       // ★ v9.13 fix2: GAS closedOnly:true (마감 탭만 있는 캠페인)는 항상 camp-all-done
       const isCampDone = c.closedOnly === true || (c.tabs.length > 0 && c.tabs.every(t => {
         const key = (t.sheetId||"")+"||"+(t.tab||"");
-        return _forceDoneSet.has(key) || _closedSet.has(key) || (t.total > 0 && t.pending === 0);
+        return _closedSet.has(key) || (t.total > 0 && t.pending === 0);
       }));
       // 마감 탭 포함 여부
       const hasClosed = c.closedOnly === true || c.tabs.some(t => _closedSet.has((t.sheetId||"")+"||"+(t.tab||"")));
@@ -2133,22 +2126,21 @@ async function loadAdminDashboard() {
 
       c.tabs.forEach(t => {
         const tRate     = t.total > 0 ? Math.round(t.submitted / t.total * 100) : 0;
-        // ★ 강제완료/마감 키: sheetId||tabName 조합
+        // ★ 마감 키: sheetId||tabName 조합
         const tabKey    = (t.sheetId || "") + "||" + (t.tab || "");
-        const isForceDone = _forceDoneSet.has(tabKey);
-        const isClosedTab = _closedSet.has(tabKey);
-        const isTabDone = isForceDone || (t.total > 0 && t.pending === 0);
+                const isClosedTab = _closedSet.has(tabKey);
+        const isTabDone = (t.total > 0 && t.pending === 0);
         // ── 긴급 경과 판단 ──
         const _ovDays2 = (!isTabDone && !isClosedTab) ? _calcOverdueDays(t.startDate) : null;
         const isOverdue2 = _ovDays2 !== null && _ovDays2 >= 25;
         const row       = document.createElement("div");
         row.className   = "dash-tab-row"
           + (isTabDone   ? " tab-done" : "")
-          + (isForceDone ? " force-completed" : "")
+          
           + (isClosedTab ? " is-closed-row" : "")
           + (isOverdue2  ? " urgent-overdue" : "")
-          // ★ 상품명 없는 탭: 마감/강제완료 제외 시 경고 배경색
-          + (!t.displayName && !isForceDone && !isClosedTab ? " no-product-warn" : "");
+          // ★ 상품명 없는 탭: 마감 제외 시 경고 배경색
+          + (!t.displayName && !isClosedTab ? " no-product-warn" : "");
         row.dataset.tabkey = tabKey;
         row.setAttribute('oncontextmenu', `_openAdminContextMenu(event,'${escHtml(tabKey)}')`);
         // ★ 정렬용 data 속성 (일부는 아래 변수 선언 후 채움)
@@ -2196,12 +2188,10 @@ async function loadAdminDashboard() {
 
         // 상태 오버레이 HTML 생성 헬퍼
         const total = t.total || 0;
-        // 상태 셀: 마감 > 강제완료 > 완료 > 투입중/취합중(동시가능) > 없음
+        // 상태 셀: 마감 > 완료 > 투입중/취합중(동시가능) > 없음
         let stateHtml = "";
         if (isClosedTab) {
           stateHtml = `<span class="bar-lbl-center">⬛ 마감</span>`;
-        } else if (isForceDone) {
-          stateHtml = `<span class="bar-lbl-center">⚑ 강제완료</span>`;
         } else if (isTabDone) {
           stateHtml = `<span class="bar-lbl-center">✓ 완료</span>`;
         } else if (tuip > 0 || chuihap > 0) {
@@ -2222,9 +2212,9 @@ async function loadAdminDashboard() {
           tcRound: t.tcRound || t.round || "",
           incomeType: t.incomeType||"",
           depositName: t.depositName||"", transferBank: t.transferBank||"",
-          // ★ 마감/강제완료 플래그 (저장 시 상품명 예외 처리용)
+          // ★ 마감 플래그 (저장 시 상품명 예외 처리용)
           _isClosed: isClosedTab,
-          _isForceDone: isForceDone };
+};
         const tcAttr = escHtml(JSON.stringify(tcData));
 
         // ★ 차수 렌더링:
@@ -2233,7 +2223,7 @@ async function loadAdminDashboard() {
         if (t.roundList && t.roundList.length >= 1) {
           t.roundList.forEach(rd => {
             const rdRow = document.createElement("div");
-            const rdDone = isForceDone || (rd.total > 0 && rd.pending === 0);
+            const rdDone = (rd.total > 0 && rd.pending === 0);
             // ★ 차수별 독립 tabKey: sheetId||탭명||차수 (수동 시작일이 차수간 공유되지 않도록)
             const rdTabKey2 = tabKey + "||" + (rd.round || "");
             // ── 차수 행 긴급 경과 ──
@@ -2243,7 +2233,7 @@ async function loadAdminDashboard() {
             const _rdEffectiveSD2 = _rdManualSD2 || rdStartDateRaw2;
             const _rdOvDays2 = (!rdDone && !isClosedTab) ? _calcOverdueDays(_rdEffectiveSD2) : null;
             const rdIsOverdue2 = _rdOvDays2 !== null && _rdOvDays2 >= 25;
-            rdRow.className = "dash-tab-row" + (rdDone ? " tab-done" : "") + (isForceDone ? " force-completed" : "") + (isClosedTab ? " is-closed-row" : "") + (rdIsOverdue2 ? " urgent-overdue" : "");
+            rdRow.className = "dash-tab-row" + (rdDone ? " tab-done" : "")  + (isClosedTab ? " is-closed-row" : "") + (rdIsOverdue2 ? " urgent-overdue" : "");
             rdRow.dataset.tabkey = rdTabKey2;
             // ★ 차수 행 정렬용 data 속성 (rdRate 선언 전 항목만 먼저 설정)
             rdRow.dataset.sortTabname  = (t.tab || "").toLowerCase();
@@ -2272,8 +2262,6 @@ async function loadAdminDashboard() {
               ? `<a class="dash-tab-link" href="${escHtml(_rdTabSheetUrl2)}" target="_blank">${escHtml(t.tab)} <i class="fas fa-external-link-alt dash-tab-ext"></i></a>${_rdOverdueBadge2}`
               : `<span>${escHtml(t.tab)}</span>${_rdOverdueBadge2}`;
             let rdStateHtml = "";
-            if (isForceDone) {
-              rdStateHtml = `<span class="bar-lbl-center">⚑ 강제완료</span>`;
             } else if (isClosedTab) {
               rdStateHtml = `<span class="bar-lbl-center">⬛ 마감</span>`;
             } else if (rdDone) {
@@ -2288,13 +2276,13 @@ async function loadAdminDashboard() {
             // ★ 차수별 tcAttr: 해당 행의 round를 tcRound에 주입 → openFormLink에서 URL rd 파라미터로 활용
             const rdTcData2 = Object.assign({}, JSON.parse(tcAttr.replace(/&quot;/g,'"').replace(/&amp;/g,'&').replace(/&#39;/g,"'").replace(/&lt;/g,'<').replace(/&gt;/g,'>')), { tcRound: rd.round || "" });
             const rdTcAttr2 = escHtml(JSON.stringify(rdTcData2));
-            rdRow.dataset.state = _rowState(isForceDone, isClosedTab, rdDone, rd.tuip||0, rd.chuihap||0);
-            rdRow.innerHTML = _buildTabRowHtml(tRd, rdTabKey2, isForceDone, isClosedTab, rdTabNameHtml2, rdStartDateHtml, rdRate, rdStateHtml, rdTcAttr2, rd.round, null);
+            rdRow.dataset.state = _rowState(false, isClosedTab, rdDone, rd.tuip||0, rd.chuihap||0);
+            rdRow.innerHTML = _buildTabRowHtml(tRd, rdTabKey2, false, isClosedTab, rdTabNameHtml2, rdStartDateHtml, rdRate, rdStateHtml, rdTcAttr2, rd.round, null);
             table.appendChild(rdRow);
           });
         } else {
-          row.dataset.state = _rowState(isForceDone, isClosedTab, isTabDone, tuip, chuihap);
-          row.innerHTML = _buildTabRowHtml(t, tabKey, isForceDone, isClosedTab, tabNameHtml, startDateHtml, tRate, stateHtml, tcAttr, null, endDateHtml);
+          row.dataset.state = _rowState(false, isClosedTab, isTabDone, tuip, chuihap);
+          row.innerHTML = _buildTabRowHtml(t, tabKey, false, isClosedTab, tabNameHtml, startDateHtml, tRate, stateHtml, tcAttr, null, endDateHtml);
           table.appendChild(row);
         }
 
@@ -2304,7 +2292,6 @@ async function loadAdminDashboard() {
           const row2       = document.createElement("div");
           row2.className   = "dash-tab-row dash-tab-row-monthly" + (isTab2Done ? " tab-done" : "");
           row2.innerHTML   = `
-            <div class="force-cb-wrap"></div>
             <div class="closed-cb-wrap"></div>
             <div class="dash-tab-name dash-tab-name-monthly"><i class="fas fa-calendar-alt"></i> 한달리뷰</div>
             <div></div>
@@ -2373,8 +2360,6 @@ async function loadAdminDashboard() {
       wrap.classList.remove("hide-camp-name-mode");
     }
 
-    // 강제완료 모드가 켜져 있었다면 유지
-    if (_forceDoneMode) wrap.classList.add("force-done-mode");
     // 마감 모드가 켜져 있었다면 유지
     if (_closedMode)    wrap.classList.add("closed-mode");
 
@@ -2451,13 +2436,12 @@ function renderDashboard(data) {
     const cRate    = c.total > 0 ? Math.round(c.submitted / c.total * 100) : 0;
     const tableId  = `dct-r-${ci}`;
     const block    = document.createElement("div");
-    // 강제완료된 탭이 있으면 camp-all-done 재계산
+    // camp-all-done 재계산
     // ★ v9.13 fix: 마감(isClosed) 탭도 완료 조건에 포함
     // ★ v9.13 fix2: closedOnly:true (마감 탭만인 캠페인) 항상 camp-all-done
-    const forcedInCamp = c.tabs.some(t => _forceDoneSet.has((t.sheetId||"")+"||"+(t.tab||"")));
-    const allDone      = c.closedOnly === true || c.tabs.every(t => {
+        const allDone      = c.closedOnly === true || c.tabs.every(t => {
       const key = (t.sheetId||"")+"||"+(t.tab||"");
-      return _forceDoneSet.has(key) || _closedSet.has(key) || (t.total > 0 && t.pending === 0);
+      return _closedSet.has(key) || (t.total > 0 && t.pending === 0);
     });
     const hasClosed = c.closedOnly === true || c.tabs.some(t => _closedSet.has((t.sheetId||"")+"||"+(t.tab||"")));
     block.className = "dash-campaign-block" + (allDone ? " camp-all-done" : "") + (hasClosed ? " camp-has-closed" : "");
@@ -2482,17 +2466,16 @@ function renderDashboard(data) {
     c.tabs.forEach(t => {
       const tRate      = t.total > 0 ? Math.round(t.submitted / t.total * 100) : 0;
       const tabKey     = (t.sheetId||"")+"||"+(t.tab||"");
-      const isForceDone = _forceDoneSet.has(tabKey);
-      const isClosedTab = _closedSet.has(tabKey);
-      const isTabDone  = isForceDone || (t.total > 0 && t.pending === 0);
+            const isClosedTab = _closedSet.has(tabKey);
+      const isTabDone  = (t.total > 0 && t.pending === 0);
       // ── 긴급 경과 판단 (수동 수정일 우선) ──
       const _mainManualSD = _getManualStartDate(tabKey);
       const _mainEffectiveSD = _mainManualSD || t.startDate || "";
       const _ovDays = (!isTabDone && !isClosedTab) ? _calcOverdueDays(_mainEffectiveSD) : null;
       const isOverdue = _ovDays !== null && _ovDays >= 25;
       const row        = document.createElement("div");
-      row.className    = "dash-tab-row"+(isTabDone?" tab-done":"")+(isForceDone?" force-completed":"")+(isClosedTab?" is-closed-row":"")+(isOverdue?" urgent-overdue":"")
-        +(!t.displayName && !isForceDone && !isClosedTab?" no-product-warn":"");
+      row.className    = "dash-tab-row"+(isTabDone?" tab-done":"")+(isClosedTab?" is-closed-row":"")+(isOverdue?" urgent-overdue":"")
+        +(!t.displayName && !isClosedTab?" no-product-warn":"");
       row.dataset.tabkey = tabKey;
       row.setAttribute('oncontextmenu', `_openAdminContextMenu(event,'${escHtml(tabKey)}')`);
       const _overdueBadge = isOverdue
@@ -2510,7 +2493,6 @@ function renderDashboard(data) {
       const tuip = t.tuip||0, chuihap = t.chuihap||0;
       let stateHtml = "";
       if (isClosedTab)  stateHtml = `<span class="dash-pending-badge badge-done" style="background:#EEF2FF;color:#3730A3;border-color:#C7D2FE">⬛ 마감</span>`;
-      else if (isForceDone) stateHtml = `<span class="dash-pending-badge badge-done" style="background:#FEE2E2;color:#991B1B;border-color:#FCA5A5">⚑ 강제완료</span>`;
       else if (isTabDone) stateHtml = `<span class="dash-pending-badge badge-done">✓ 완료</span>`;
       else if (tuip>0) stateHtml = `<span class="work-badge badge-tuip"><i class="fas fa-user-plus"></i> 투입중 ${tuip}</span>`;
       else if (chuihap>0) stateHtml = `<span class="work-badge badge-chuihap"><i class="fas fa-layer-group"></i> 취합중 ${chuihap}</span>`;
@@ -2524,9 +2506,8 @@ function renderDashboard(data) {
         ncMode: !!(t.ncMode === true || t.ncMode === "true"),
         incomeType: t.incomeType||"",
         depositName: t.depositName||"", transferBank: t.transferBank||"",
-        // ★ 마감/강제완료 플래그 (저장 시 상품명 예외 처리용)
-        _isClosed: isClosedTab,
-        _isForceDone: isForceDone };
+        // ★ 마감 플래그 (저장 시 상품명 예외 처리용)
+        _isClosed: isClosedTab };
       const tcAttr = escHtml(JSON.stringify(tcData));
       // ★ v9.9: 종료 예정일 D-Day 배지
       const _cachedED2 = localStorage.getItem("rapp_enddate_" + tabKey) || t.endDate || "";
@@ -2534,7 +2515,7 @@ function renderDashboard(data) {
       if (t.roundList && t.roundList.length >= 1) {
         t.roundList.forEach(rd => {
           const rdRow = document.createElement("div");
-          const rdDone = isForceDone || (rd.total > 0 && rd.pending === 0);
+          const rdDone = (rd.total > 0 && rd.pending === 0);
           // ★ 차수별 독립 tabKey: sheetId||탭명||차수 (수동 시작일이 차수간 공유되지 않도록)
           const rdTabKey = tabKey + "||" + (rd.round || "");
           // ── 차수 행 긴급 경과 판단 ──
@@ -2544,7 +2525,7 @@ function renderDashboard(data) {
           const _rdEffectiveSD = _rdManualSD || rdStartDateRaw;
           const _rdOvDays = (!rdDone && !isClosedTab) ? _calcOverdueDays(_rdEffectiveSD) : null;
           const rdIsOverdue = _rdOvDays !== null && _rdOvDays >= 25;
-          rdRow.className = "dash-tab-row"+(rdDone?" tab-done":"")+(isForceDone?" force-completed":"")+(isClosedTab?" is-closed-row":"")+(rdIsOverdue?" urgent-overdue":"");
+          rdRow.className = "dash-tab-row"+(rdDone?" tab-done":"")+(isClosedTab?" is-closed-row":"")+(rdIsOverdue?" urgent-overdue":"");
           rdRow.dataset.tabkey = rdTabKey;
           const rdRate = rd.total > 0 ? Math.round(rd.submitted / rd.total * 100) : 0;
           const rdStartDate = _rdEffectiveSD;
@@ -2561,7 +2542,6 @@ function renderDashboard(data) {
             : `<span>${escHtml(t.tab)}</span>${_rdOverdueBadge}`;
           let rdStateHtml = "";
           if (isClosedTab)      rdStateHtml = `<span class="bar-lbl-center">⬛ 마감</span>`;
-          else if (isForceDone) rdStateHtml = `<span class="bar-lbl-center">⚑ 강제완료</span>`;
           else if (rdDone)      rdStateHtml = `<span class="bar-lbl-center">✓ 완료</span>`;
           else if ((rd.tuip||0) > 0 || (rd.chuihap||0) > 0) {
             const rdTotal2 = rd.total || 0;
@@ -2573,13 +2553,13 @@ function renderDashboard(data) {
           // ★ 차수별 tcAttr: 해당 행의 round를 tcRound에 주입 → openFormLink에서 URL rd 파라미터로 활용
           const rdTcData = Object.assign({}, JSON.parse(tcAttr.replace(/&quot;/g,'"').replace(/&amp;/g,'&').replace(/&#39;/g,"'").replace(/&lt;/g,'<').replace(/&gt;/g,'>')), { tcRound: rd.round || "" });
           const rdTcAttr = escHtml(JSON.stringify(rdTcData));
-          rdRow.dataset.state = _rowState(isForceDone, isClosedTab, rdDone, rd.tuip||0, rd.chuihap||0);
-          rdRow.innerHTML = _buildTabRowHtml(tRd, rdTabKey, isForceDone, isClosedTab, rdTabNameHtml, rdStartDateHtml, rdRate, rdStateHtml, rdTcAttr, rd.round, null);
+          rdRow.dataset.state = _rowState(false, isClosedTab, rdDone, rd.tuip||0, rd.chuihap||0);
+          rdRow.innerHTML = _buildTabRowHtml(tRd, rdTabKey, false, isClosedTab, rdTabNameHtml, rdStartDateHtml, rdRate, rdStateHtml, rdTcAttr, rd.round, null);
           table.appendChild(rdRow);
         });
       } else {
-        row.dataset.state = _rowState(isForceDone, isClosedTab, isTabDone, tuip, chuihap);
-        row.innerHTML = _buildTabRowHtml(t, tabKey, isForceDone, isClosedTab, tabNameHtml, startDateHtml, tRate, stateHtml, tcAttr, null, endDateHtml2);
+        row.dataset.state = _rowState(false, isClosedTab, isTabDone, tuip, chuihap);
+        row.innerHTML = _buildTabRowHtml(t, tabKey, false, isClosedTab, tabNameHtml, startDateHtml, tRate, stateHtml, tcAttr, null, endDateHtml2);
         table.appendChild(row);
       }
     });
@@ -2600,7 +2580,6 @@ function renderDashboard(data) {
   } else {
     wrap.classList.remove("hide-camp-name-mode");
   }
-  if (_forceDoneMode)     wrap.classList.add("force-done-mode");
   if (_closedMode)        wrap.classList.add("closed-mode");
   // ── allExpanded ON: 모든 탭 테이블 펼침 ──
   if (allExpanded) {
@@ -2811,7 +2790,7 @@ async function refreshTabEndDate(btnEl, tabKey) {
   }
 }
 // ─────────────────────────────────────────────────────────────
-function _buildTabRowHtml(t, tabKey, isForceDone, isClosedTab, tabNameHtml, startDateHtml, tRate, stateHtml, tcAttr, roundLabel, endDateHtml) {
+function _buildTabRowHtml(t, tabKey, false, isClosedTab, tabNameHtml, startDateHtml, tRate, stateHtml, tcAttr, roundLabel, endDateHtml) {
   // 각 열 셀 값 (없으면 회색 dash)
   const empty = `<span style="color:#D1D5DB;font-size:.65rem">—</span>`;
 
@@ -2824,8 +2803,8 @@ function _buildTabRowHtml(t, tabKey, isForceDone, isClosedTab, tabNameHtml, star
   }
 
   // 상품명 열 (배송유형 배지 포함)
-  // ★ 상품명 없는 탭: 마감/강제완료 제외 시 경고 배지 표시
-  const _hasNoProduct = !t.displayName && !isForceDone && !isClosedTab;
+  // ★ 상품명 없는 탭: 마감 제외 시 경고 배지 표시
+  const _hasNoProduct = !t.displayName && !isClosedTab;
   // 배송타입 배지는 부가정보 열로 이동 (상품명 열에서 제거)
   const noProductBadge = _hasNoProduct
     ? `<span class="badge-no-product" title="⚙ 탭설정에서 상품명을 입력해주세요"><i class="fas fa-exclamation-triangle" style="font-size:.55rem"></i> 상품명없음</span>`
@@ -2925,9 +2904,6 @@ function _buildTabRowHtml(t, tabKey, isForceDone, isClosedTab, tabNameHtml, star
     : `<span style="color:#D1D5DB;font-size:.6rem">—</span>`;
 
   return `
-    <div class="force-cb-wrap">
-      <input type="checkbox" class="force-cb" data-tabkey="${escHtml(tabKey)}" ${isForceDone ? "checked" : ""} onclick="event.stopPropagation()">
-    </div>
     <div class="closed-cb-wrap">
       <input type="checkbox" class="closed-cb" data-tabkey="${escHtml(tabKey)}" ${isClosedTab ? "checked" : ""} onclick="event.stopPropagation()">
     </div>
@@ -3014,11 +2990,10 @@ function _buildTabRowHtml(t, tabKey, isForceDone, isClosedTab, tabNameHtml, star
 // 컬럼 리사이즈 시스템
 // ═══════════════════════════════════════════════════════
 
-/** 컬럼 정의 (index 0=강완CB, 1=마감CB, 2=탭명, ... 19=⚙)
- *  forcecb / closedcb: 기본 0px, 모드 진입 시 JS에서 28px로 전환
+/** 컬럼 정의 (index 0=마감CB, 1=탭명, ... 19=⚙)
+ *  closedcb: 기본 0px, 모드 진입 시 JS에서 28px로 전환
  */
 const DASH_COL_DEFS = [
-  { key: 'forcecb',     varName: '--dc-forcecb',     label: '강완',       minPx: 20,  default: 0,   isCb: true },
   { key: 'closedcb',    varName: '--dc-closedcb',    label: '마감',       minPx: 20,  default: 0,   isCb: true },
   { key: 'tabname',     varName: '--dc-tabname',     label: '탭명',       minPx: 60,  default: 280               },
   { key: 'product',     varName: '--dc-product',     label: '상품명',     minPx: 60,  default: 200               },
@@ -3157,7 +3132,7 @@ function _syncTabnameWidth(availW) {
     baseW[col.key] = (saved && Number.isFinite(saved) && saved >= col.minPx) ? saved : (col.default || 0);
   });
 
-  // CB 컬럼 현재 너비 (강완/마감 모드)
+  // CB 컬럼 현재 너비 (마감 모드)
   const cbW = DASH_COL_DEFS.filter(c => c.isCb).reduce((sum, c) => {
     const v = parseInt(getComputedStyle(root).getPropertyValue(c.varName)) || 0;
     return sum + v;
@@ -3319,7 +3294,7 @@ function resetColWidths() {
    ══════════════════════════════════════════════════════════ */
 const COL_VIS_LS_KEY        = 'dashColHidden_v1';
 const COL_VIS_SELECTED_KEY  = 'dashColSelected_v1'; // ★ 새: 숨김 대상 선택 저장
-// 숨길 수 있는 열 정의 (forcecb, closedcb, tabname, info 제외)
+// 숨길 수 있는 열 정의 (closedcb, tabname, info 제외)
 const COL_VIS_DEFS = [
   { key: 'product',  label: '상품명',     icon: 'fa-box'          },
   { key: 'capture',  label: '캡처폴더',   icon: 'fa-camera'       },
@@ -3734,14 +3709,13 @@ function _invalidateMemoCache(tabKey) {
 
 /**
  * 컬럼 헤더 요소 빌드
- * DASH_COL_DEFS 인덱스: 0=forcecb, 1=closedcb, 2=tabname, 3=product, ... 17=memo, 18(17)=enddate(신규), 19(18)=info(⚙)
- * 데이터 행 child 인덱스도 동일 (0=force-cb-wrap, 1=closed-cb-wrap, 2=탭명, ...)
+ * DASH_COL_DEFS 인덱스: 0=closedcb, 1=tabname, 2=product, ... 16=memo, 17=enddate, 18=info(⚙)
+ * 데이터 행 child 인덱스도 동일 (0=closed-cb-wrap, 1=탭명, ...)
  */
 function _buildColHeader(container) {
   // colIdx = DASH_COL_DEFS 인덱스와 1:1 대응
   const CELLS = [
     // isCb 컬럼: 평소 0px(숨김) → 모드 진입 시 28px
-    { colIdx: 0,  inner: '<i class="fas fa-check-square" style="font-size:.6rem;color:#DC2626"></i>',  style: 'justify-content:center', title: '강제완료 선택', cbClass: 'force-cb-wrap'  },
     { colIdx: 1,  inner: '<i class="fas fa-archive"      style="font-size:.6rem;color:#7C3AED"></i>',  style: 'justify-content:center', title: '마감 선택',    cbClass: 'closed-cb-wrap' },
     { colIdx: 2,  inner: '<i class="fas fa-tag" style="font-size:.55rem"></i> 탭명',              style: '' },
     { colIdx: 3,  inner: '<i class="fas fa-box" style="font-size:.55rem"></i> 상품명',            style: '' },
@@ -3803,8 +3777,7 @@ function _buildColHeader(container) {
       // 드래그 핸들 div (헤더 셀 우측 경계)
       const handle = document.createElement('div');
       handle.className = 'col-drag-handle';
-      handle.title = colDef.key === 'forcecb' ? '강제완료 체크박스 너비 조절' :
-                     colDef.key === 'closedcb' ? '마감 체크박스 너비 조절' : '';
+      handle.title =                      colDef.key === 'closedcb' ? '마감 체크박스 너비 조절' : '';
       handle.addEventListener('mousedown', _onColDragStart);
       handle.dataset.colKey = colDef.key;
       handle.dataset.colIdx = c.colIdx;
@@ -3882,7 +3855,7 @@ function _onColDragStart(e) {
 
   // CB 컬럼이 0px(비활성)이면 드래그 불가
   if (colDef.isCb && _getColWidth(colDef) === 0) {
-    showToast('강제완료 또는 마감 모드 진입 후 너비를 조절할 수 있습니다.');
+    showToast('마감 모드 진입 후 너비를 조절할 수 있습니다.');
     return;
   }
 
@@ -4081,133 +4054,12 @@ function toggleHideClosedTab() {
   }
 }
 
-// ═══════════════════════════════════════════════════════════
-// ★ 강제완료 처리
-// ═══════════════════════════════════════════════════════════
-// ★ 강제완료 처리 — 베이스시트 기반 (모든 관리자 공유)
-// ═══════════════════════════════════════════════════════════
 
-// 강제완료된 tabKey Set — dashboard API 응답의 forceDone 값으로 채워짐
-// localStorage 미사용: 항상 서버(베이스시트) 상태가 진실
-let _forceDoneSet = new Set();
-
-// 강제완료 모드 ON/OFF (체크박스+실행버튼 토글)
-let _forceDoneMode = false;
-function toggleForceDoneMode() {
-  _forceDoneMode = !_forceDoneMode;
-  const btn      = document.getElementById("btnForceDone");
-  const execBtn  = document.getElementById("btnForceExec");
-  const wrap     = document.getElementById("dashboardWrap");
-  if (_forceDoneMode) {
-    btn.classList.add("active");
-    btn.innerHTML = '<i class="fas fa-flag-checkered"></i> 강제완료 <span style="font-size:.68rem;opacity:.8">(선택 중)</span>';
-    execBtn.style.display = "flex";
-    wrap.classList.add("force-done-mode");
-    document.documentElement.style.setProperty('--dc-forcecb', '28px');
-    document.documentElement.style.setProperty('--dc-closedcb', '0px');
-  } else {
-    btn.classList.remove("active");
-    btn.innerHTML = '<i class="fas fa-flag-checkered"></i> 강제완료';
-    execBtn.style.display = "none";
-    wrap.classList.remove("force-done-mode");
-    document.documentElement.style.setProperty('--dc-forcecb', '0px');
-  }
-  _lastAppliedW = 0; // 강제 재계산
-  _syncTabnameWidth(); // 체크박스 열(28px) 추가/제거에 따라 컬럼 너비 재계산
-}
-
-// [실행] 버튼 → 변경 내역 확인 후 팝업
-function execForceDone() {
-  const cbs = document.querySelectorAll("#dashboardWrap .force-cb");
-  if (!cbs.length) { showToast("표시된 탭이 없습니다.", true); return; }
-
-  let toAdd = 0, toRemove = 0;
-  cbs.forEach(cb => {
-    const key = cb.dataset.tabkey || "";
-    if (cb.checked  && !_forceDoneSet.has(key)) toAdd++;
-    if (!cb.checked &&  _forceDoneSet.has(key)) toRemove++;
-  });
-
-  if (toAdd === 0 && toRemove === 0) {
-    showToast("변경된 항목이 없습니다."); return;
-  }
-
-  const parts = [];
-  if (toAdd    > 0) parts.push(`<b>${toAdd}건</b> 강제완료 처리`);
-  if (toRemove > 0) parts.push(`<b>${toRemove}건</b> 강제완료 해제`);
-  document.getElementById("forceConfirmMsg").innerHTML =
-    `강제마감 시, 상태가 강제로 <b>"완료"</b>로 변경됩니다.<br>` +
-    `대상: ${parts.join(" / ")}<br><br>` +
-    `되돌리려면 다시 강제완료 체크를 <b>해제</b>하면 복구됩니다.`;
-
-  document.getElementById("forceConfirmOverlay").classList.add("open");
-}
-
-// 팝업 취소
-function cancelForceDone() {
-  document.getElementById("forceConfirmOverlay").classList.remove("open");
-}
-
-// 팝업 확인 → GAS 베이스시트에 저장 (모든 관리자 공유)
-async function confirmForceDone() {
-  document.getElementById("forceConfirmOverlay").classList.remove("open");
-
-  const cbs = document.querySelectorAll("#dashboardWrap .force-cb");
-  const items = [];
-  cbs.forEach(cb => {
-    const key       = cb.dataset.tabkey || "";
-    if (!key) return;
-    const [sheetId, tabName] = key.split("||");
-    const wasForced  = _forceDoneSet.has(key);
-    const isChecked  = cb.checked;
-    if (isChecked === wasForced) return; // 변경 없음 → 전송 제외
-    items.push({ sheetId: sheetId || "", tabName: tabName || "", forceDone: isChecked });
-  });
-
-  if (!items.length) { _exitForceDoneMode(); return; }
-
-  // ① 즉시 로컬 Set 업데이트 → UI 즉시 반영 (낙관적 업데이트)
-  items.forEach(({ sheetId, tabName, forceDone }) => {
-    const key = (sheetId || "") + "||" + (tabName || "");
-    if (forceDone) _forceDoneSet.add(key);
-    else           _forceDoneSet.delete(key);
-  });
-
-  _exitForceDoneMode();
-  _reRenderDashboard(); // 즉시 화면 갱신
-
-  // ② GAS 베이스시트에 비동기 저장 (실패해도 토스트로 안내)
-  try {
-    const json = await gasPost({ action: "setForceDone", items });
-    if (!json.ok) {
-      showToast("⚠️ 서버 저장 실패: " + (json.error || "알 수 없는 오류"), true);
-      // 실패 시 서버 상태로 복원하기 위해 대시보드 새로고침
-      loadAdminDashboard();
-    } else {
-      showToast(`✅ 강제완료 변경이 저장되었습니다. (${items.length}건)`);
-    }
-  } catch (err) {
-    showToast("⚠️ 서버 연결 오류: " + err.message + " (새로고침 권장)", true);
-    loadAdminDashboard();
-  }
-}
-
-function _exitForceDoneMode() {
-  _forceDoneMode = false;
-  const btn     = document.getElementById("btnForceDone");
-  const execBtn = document.getElementById("btnForceExec");
-  const wrap    = document.getElementById("dashboardWrap");
-  btn.classList.remove("active");
-  btn.innerHTML = '<i class="fas fa-flag-checkered"></i> 강제완료';
-  execBtn.style.display = "none";
-  wrap.classList.remove("force-done-mode");
-  document.documentElement.style.setProperty('--dc-forcecb', '0px');
-}
 
 // ═══════════════════════════════════════════════════════════
 // ★ 마감 처리 — 베이스시트 is_closed 컬럼 기반
 //   마감된 탭은 동기화 시 완전히 제외 (검색 불가)
-//   강제완료와 다르게 인덱스에서 행 자체를 제외함
+//   마감된 탭은 인덱스에서 행 자체를 제외함
 // ═══════════════════════════════════════════════════════════
 
 // 마감된 tabKey Set — dashboard API 응답의 isClosed 값으로 채워짐
@@ -4216,9 +4068,6 @@ let _closedSet = new Set();
 // 마감 모드 ON/OFF
 let _closedMode = false;
 function toggleClosedMode() {
-  // 강제완료 모드 중이면 먼저 종료
-  if (_forceDoneMode) _exitForceDoneMode();
-
   _closedMode = !_closedMode;
   const btn     = document.getElementById("btnClosed");
   const execBtn = document.getElementById("btnClosedExec");
@@ -4229,7 +4078,6 @@ function toggleClosedMode() {
     execBtn.style.display = "flex";
     wrap.classList.add("closed-mode");
     document.documentElement.style.setProperty('--dc-closedcb', '28px');
-    document.documentElement.style.setProperty('--dc-forcecb', '0px');
   } else {
     btn.classList.remove("active");
     btn.innerHTML = '<i class="fas fa-archive"></i> 마감';
@@ -6430,9 +6278,8 @@ async function refreshCampaignIndex(btn) {
 
 // 행 상태값 결정 헬퍼 (data-state 속성에 저장 → 필터가 읽음)
 // 반환값: "closed" | "forcedone" | "done" | "tuip" | "chuihap" | "tuip chuihap" | ""
-function _rowState(isForceDone, isClosedTab, isDone, tuip, chuihap) {
+function _rowState(isClosedTab, isDone, tuip, chuihap) {
   if (isClosedTab)  return "closed";
-  if (isForceDone)  return "forcedone";
   if (isDone)       return "done";
   const parts = [];
   if (tuip    > 0) parts.push("tuip");
@@ -6531,7 +6378,7 @@ function applyDashFilter() {
         if (!passFilter && activeFilters.has("chuihap")) { if (rowState.includes("chuihap")) passFilter = true; }
         if (!passFilter && activeFilters.has("monthly")) { if (row.classList.contains("dash-tab-row-monthly")) passFilter = true; }
         if (!passFilter && activeFilters.has("taekhap")) { if (row.querySelector(".tc-taekhap-on")) passFilter = true; }
-        if (!passFilter && activeFilters.has("done"))    { if (row.classList.contains("tab-done") || row.classList.contains("force-completed")) passFilter = true; }
+        if (!passFilter && activeFilters.has("done"))    { if (row.classList.contains("tab-done")) passFilter = true; }
         if (!passFilter && activeFilters.has("closed"))  { if (row.classList.contains("is-closed-row")) passFilter = true; }
         for (const f of activeFilters) {
           if (f.startsWith("review:")) {
@@ -6987,8 +6834,8 @@ function requestTcSave() {
   _tcCurrent._pendingTransferBank = (document.querySelector("#tcOptTransferBank .tc-opt.sel") || {}).dataset?.val ?? "";
   _tcCurrent._pendingIncomeType   = (document.querySelector("#tcOptIncomeType .tc-opt.sel")   || {}).dataset?.val ?? "";  // ★ v9.14
 
-  // ★ 상품명 필수 검증 (마감/강제완료 탭은 예외)
-  const _isClosedOrDone = !!_tcCurrent._isClosed || !!_tcCurrent._isForceDone;
+  // ★ 상품명 필수 검증 (마감 탭은 예외)
+  const _isClosedOrDone = !!_tcCurrent._isClosed;
   if (!_tcCurrent._pendingDisplayName && !_isClosedOrDone) {
     // 입력란 강조 + 스크롤
     _checkTcDisplayRequired("");
@@ -7227,9 +7074,6 @@ function _openAdminContextMenu(e, tabKey, campIdx) {
   menu.innerHTML = `
     ${isTabRow ? `<div class="ctx-menu-title">⚡ 빠른 작업</div>` : ''}
     ${isTabRow ? `
-      <button class="ctx-menu-item danger" onclick="_ctxForceDone()">
-        <i class="fas fa-flag-checkered"></i> 강제완료 처리
-      </button>
       <button class="ctx-menu-item indigo" onclick="_ctxCloseCamp()">
         <i class="fas fa-archive"></i> 마감 처리
       </button>
@@ -7282,16 +7126,7 @@ function closeAdminContextMenu() {
   _ctxTargetCampIdx = null;
 }
 
-// 컨텍스트 메뉴에서 강제완료
-function _ctxForceDone() {
-  closeAdminContextMenu();
-  if (!_ctxTargetTabKey) return;
-  if (!_forceDoneMode) toggleForceDoneMode();
-  // 해당 탭의 checkbox 선택
-  const cb = document.querySelector(`.force-cb[data-tabkey="${_ctxTargetTabKey}"]`);
-  if (cb) { cb.checked = true; }
-  showToast(`'${_ctxTargetTabKey}' 강제완료 선택됨. [실행] 버튼으로 확정하세요.`, "info");
-}
+
 
 // 컨텍스트 메뉴에서 마감
 function _ctxCloseCamp() {
@@ -7867,7 +7702,7 @@ async function debugTabConfig() {
     if (dl.exists && dl.data && dl.data.length > 0) {
       const headers = dl.data[0].map(c => String(c || "").trim());
       const expectedCols = ["sheet_url","tab_name","manager","time_range","taekhap","review_type",
-        "payment_type","display_name","force_done","updated_at","folder_url","is_bulk",
+        "payment_type","display_name","updated_at","folder_url","is_bulk",
         "capture_folder_url","is_closed","delivery_type","round","nc_mode","deposit_name",
         "transfer_bank","income_type"];
       const missing = expectedCols.filter(c => !headers.includes(c));
@@ -7895,8 +7730,7 @@ async function debugTabConfig() {
           const tabNameIdx = headers.indexOf("tab_name");
           const mgrIdx     = headers.indexOf("manager");
           const timeIdx    = headers.indexOf("time_range");
-          const fdIdx      = headers.indexOf("force_done");
-          const closedIdx  = headers.indexOf("is_closed");
+                    const closedIdx  = headers.indexOf("is_closed");
           const urlIdx     = headers.indexOf("sheet_url");
           const tabName    = tabNameIdx >= 0 ? String(row[tabNameIdx] || "-") : "-";
           const mgr        = mgrIdx >= 0     ? String(row[mgrIdx]     || "-") : "-";
@@ -8045,7 +7879,7 @@ async function diagCaptureFolders() {
     const oauth     = data.oauthStatus || "unknown";
 
     // 활성/마감 분류
-    const active = details.filter(d => !d.forceDone && !d.isClosed);
+    const active = details.filter(d => !d.isClosed);
     const activeNoCapture = active.filter(d => !d.captureFolderUrl);
     const activeNoFolder  = active.filter(d => !d.folderUrl);
 
@@ -8101,9 +7935,9 @@ async function diagCaptureFolders() {
         <th style="padding:3px 5px;border:1px solid #E5E7EB;text-align:center">상태</th>
       </tr>
       ${details.map(d => {
-        const st = d.isClosed ? "마감" : d.forceDone ? "완료" : "활성";
-        const stColor = d.isClosed ? "#6B7280" : d.forceDone ? "#0369A1" : "#166534";
-        return `<tr style="background:${d.isClosed||d.forceDone?'#F9FAFB':'#fff'}">
+        const st = d.isClosed ? "마감" : "활성";
+        const stColor = d.isClosed ? "#6B7280" : "#166534";
+        return `<tr style="background:${d.isClosed?'#F9FAFB':'#fff'}">
           <td style="padding:2px 5px;border:1px solid #E5E7EB;font-family:monospace">${escHtml(d.tabName)}</td>
           <td style="padding:2px 5px;border:1px solid #E5E7EB">${escHtml(d.campaignName||"-")}</td>
           <td style="padding:2px 5px;border:1px solid #E5E7EB;text-align:center">${d.captureFolderUrl?"&check;":"&mdash;"}</td>
@@ -10837,7 +10671,7 @@ function filterDashRawTable() {
    ★ v9.9: 대시보드 완료 탭 감지 자동 폴링 + Push Notification
    ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
    · 5분마다 GAS dashboard를 조회해 이전 상태와 비교
-   · 탭 완료 조건: pending===0 && total>0 또는 forceDone===true
+   · 탭 완료 조건: pending===0 && total>0
    · 알림: 토스트 팝업 + 브라우저 Push Notification
    ══════════════════════════════════════════════════════════ */
 const _DASH_POLL_INTERVAL_MS = 5 * 60 * 1000; // 5분
@@ -10846,7 +10680,7 @@ let   _dashPollTabSnap = {}; // { "sheetId||tabName": { done: bool, total: int }
 
 /** 탭 완료 여부 판정 (대시보드 표시 기준과 동일) */
 function _isTabComplete(t) {
-  return t.isClosed || t.forceDone || (t.pending === 0 && t.total > 0);
+  return t.isClosed || (t.pending === 0 && t.total > 0);
 }
 
 /** 현재 stats에서 스냅샷 생성 */
@@ -11028,7 +10862,7 @@ async function loadArchiveList() {
             </tr></thead><tbody>`;
       camp.tabs.forEach(t => {
         const reasonLabel = t.archiveReason === 'closed' ? '마감' :
-                            t.archiveReason === 'force_done' ? '강제완료' :
+                            t.archiveReason === 'force_done' ? '(구)강제완료' :
                             t.archiveReason === 'completed' ? '100%완료' :
                             t.archiveReason === 'name_completed' ? '(완)탭명' :
                             t.archiveReason === 'auto_detect' ? '자동감지' : (t.archiveReason || '-');
@@ -11127,7 +10961,7 @@ async function archiveAutoDetect() {
         <div style="font-weight:600;font-size:.82rem;color:var(--t1);margin-bottom:4px">${escHtml(camp.campaignName)}</div>`;
       camp.tabs.forEach(t => {
         const reasonLabel = t.reason === 'closed' ? '마감' :
-                            t.reason === 'force_done' ? '강제완료' :
+                            t.reason === 'force_done' ? '(구)강제완료' :
                             t.reason === 'completed' ? '100%완료' :
                             t.reason === 'name_completed' ? '(완)탭명' : t.reason;
         const reasonColor = t.reason === 'closed' ? '#EF4444' :
@@ -11572,8 +11406,7 @@ function _filterTabDashData() {
   const searchQ = (document.getElementById("tabDashSearch")?.value || "").trim().toLowerCase();
 
   return tabs.filter(t => {
-    if (statusF === "active" && (t.force_done || t.is_closed)) return false;
-    if (statusF === "forceDone" && !t.force_done) return false;
+    if (statusF === "active" && t.is_closed) return false;
     if (statusF === "closed" && !t.is_closed) return false;
     if (mgrF && (t.manager || "(미지정)") !== mgrF) return false;
     if (campF && (t.campaign_name || "(미지정)") !== campF) return false;
@@ -11604,7 +11437,6 @@ async function loadTabDashboard() {
       kpiEl.innerHTML = [
         _kpiCard("전체 탭", s.total, "#1D4ED8", "fa-list"),
         _kpiCard("활성", s.active, "#059669", "fa-play-circle"),
-        _kpiCard("강제완료", s.forceDone, "#D97706", "fa-pause-circle"),
         _kpiCard("마감", s.closed, "#DC2626", "fa-stop-circle"),
         _kpiCard("인덱스", s.indexed, "#7C3AED", "fa-database"),
         _kpiCard("미지정", s.noManager, "#9CA3AF", "fa-user-slash"),
@@ -11686,9 +11518,8 @@ function _toggleDashCol(key, checked) {
 function _cellVal(t, col) {
   const k = col.key;
   if (k === "_status") {
-    const st = t.is_closed ? "closed" : t.force_done ? "forceDone" : "active";
+    const st = t.is_closed ? "closed" : "active";
     if (st === "closed") return '<span style="background:#FEE2E2;color:#DC2626;padding:2px 6px;border-radius:8px;font-size:.68rem;font-weight:600">마감</span>';
-    if (st === "forceDone") return '<span style="background:#FEF3C7;color:#D97706;padding:2px 6px;border-radius:8px;font-size:.68rem;font-weight:600">강제완료</span>';
     return '<span style="background:#D1FAE5;color:#059669;padding:2px 6px;border-radius:8px;font-size:.68rem;font-weight:600">활성</span>';
   }
   if (k === "_progress") {
@@ -11740,10 +11571,10 @@ function renderTabDashTable() {
 function _renderCardView(wrap, filtered) {
   let html = '<div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(320px,1fr));gap:10px;padding:8px">';
   filtered.forEach((t, idx) => {
-    const st = t.is_closed ? "closed" : t.force_done ? "forceDone" : "active";
-    const stClr = st === "closed" ? "#DC2626" : st === "forceDone" ? "#D97706" : "#059669";
-    const stLabel = st === "closed" ? "마감" : st === "forceDone" ? "강제완료" : "활성";
-    const stBg = st === "closed" ? "#FEF2F2" : st === "forceDone" ? "#FFFBEB" : "#F0FDF4";
+    const st = t.is_closed ? "closed" : "active";
+    const stClr = st === "closed" ? "#DC2626" : "#059669";
+    const stLabel = st === "closed" ? "마감" : "활성";
+    const stBg = st === "closed" ? "#FEF2F2" : "#F0FDF4";
     const rc = t.row_count || 0, sc = t.submitted_count || 0;
     const pct = rc > 0 ? Math.round(sc / rc * 100) : 0;
     const pctClr = pct >= 80 ? "#059669" : pct >= 50 ? "#D97706" : "#DC2626";
@@ -11807,8 +11638,8 @@ function _renderFullTableView(wrap, filtered) {
   html += `<th style="${thStyle};text-align:center">상세</th></tr></thead><tbody>`;
 
   filtered.forEach((t, idx) => {
-    const st = t.is_closed ? "closed" : t.force_done ? "forceDone" : "active";
-    const bg = st === "closed" ? "#FEF2F2" : st === "forceDone" ? "#FFFBEB" : "#fff";
+    const st = t.is_closed ? "closed" : "active";
+    const bg = st === "closed" ? "#FEF2F2" : "#fff";
     html += `<tr style="background:${bg};border-bottom:1px solid #F3F4F6" onmouseover="this.style.background='#EFF6FF'" onmouseout="this.style.background='${bg}'">`;
     visibleCols.forEach(c => {
       html += `<td style="padding:5px;text-align:${c.align};max-width:${c.key==='campaign_name'?'140px':c.key==='tab_name'?'180px':'120px'};overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="${escHtml(String(t[c.key]||''))}">${_cellVal(t, c)}</td>`;
@@ -11835,9 +11666,9 @@ function openTabDashDetail(idx) {
   const body = document.getElementById("tabDashDetailBody");
   if (title) title.innerHTML = `<i class="fas fa-info-circle" style="color:#1D4ED8;margin-right:6px"></i>${escHtml(t.display_name || t.tab_name)}`;
 
-  const st = t.is_closed ? "closed" : t.force_done ? "forceDone" : "active";
-  const stLabel = st === "closed" ? "마감" : st === "forceDone" ? "강제완료" : "활성";
-  const stClr = st === "closed" ? "#DC2626" : st === "forceDone" ? "#D97706" : "#059669";
+  const st = t.is_closed ? "closed" : "active";
+  const stLabel = st === "closed" ? "마감" : "활성";
+  const stClr = st === "closed" ? "#DC2626" : "#059669";
   const rc = t.row_count || 0, sc = t.submitted_count || 0;
   const pct = rc > 0 ? Math.round(sc / rc * 100) : 0;
 
@@ -11917,7 +11748,7 @@ function exportTabDashCSV() {
     "총인원","제출완료","택합","대량건","배송유형","NC모드","입금자명","이체은행","소득유형",
     "리뷰폴더","캡처폴더","시트URL","갱신일"];
   const rows = filtered.map(t => {
-    const st = t.is_closed ? "마감" : t.force_done ? "강제완료" : "활성";
+    const st = t.is_closed ? "마감" : "활성";
     return [st, t.campaign_name, t.tab_name, t.display_name, t.manager, t.review_type,
       t.payment_type, t.time_range, t.round, t.row_count||0, t.submitted_count||0,
       t.taekhap?"예":"", t.is_bulk?"예":"", t.delivery_type, t.nc_mode?"예":"",

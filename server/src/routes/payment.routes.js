@@ -24,7 +24,6 @@ router.get('/targets', authMiddleware, async (req, res, next) => {
       FROM review_index ri
       LEFT JOIN tab_configs tc ON ri.sheet_id = tc.sheet_id AND ri.tab_name = tc.tab_name
       WHERE ri.is_submitted = TRUE
-        AND (tc.force_done IS NULL OR tc.force_done = FALSE)
         AND (tc.is_closed IS NULL OR tc.is_closed = FALSE)
         AND (ri.is_submitted2 IS NULL OR ri.is_submitted2 = 'NONE')
       ORDER BY ri.tab_name, ri.reviewer_name

@@ -21,7 +21,7 @@ const MASTER_TAB_NAME = process.env.MASTER_TAB_NAME || 'tab_configs';
 const MASTER_HEADERS = [
   'sheet_url', 'campaign_name', 'tab_name', 'manager', 'time_range',
   'taekhap', 'review_type', 'payment_type', 'display_name', 'updated_at',
-  'force_done', 'folder_url', 'is_bulk', 'capture_folder_url', 'is_closed',
+  'folder_url', 'is_bulk', 'capture_folder_url', 'is_closed',
   'delivery_type', 'round', 'nc_mode', 'deposit_name', 'transfer_bank', 'income_type',
 ];
 
@@ -36,7 +36,6 @@ const COLUMN_MAP = {
   'review_type':         'review_type',
   'payment_type':        'payment_type',
   'display_name':        'display_name',
-  'force_done':          'force_done',
   'folder_url':          'folder_url',
   'is_bulk':             'is_bulk',
   'capture_folder_url':  'capture_folder_url',
@@ -49,7 +48,7 @@ const COLUMN_MAP = {
   'income_type':         'income_type',
 };
 
-const BOOLEAN_COLS = new Set(['taekhap', 'force_done', 'is_bulk', 'is_closed', 'nc_mode']);
+const BOOLEAN_COLS = new Set(['taekhap', 'is_bulk', 'is_closed', 'nc_mode']);
 
 // ── 인덱스 빌더에서 사용하는 시스템 탭 키워드 (스캔 시 제외) ──
 const SYSTEM_TAB_KEYWORDS = [
@@ -216,7 +215,6 @@ async function scanAndPopulateMaster(dryRun = true) {
           review_type:        existingConfig?.review_type || existingConfig?.preview_type || '',
           payment_type:       existingConfig?.payment_type || '',
           display_name:       existingConfig?.display_name || '',
-          force_done:         existingConfig?.force_done || '',
           folder_url:         existingConfig?.folder_url || '',
           is_bulk:            existingConfig?.is_bulk || '',
           capture_folder_url: existingConfig?.capture_folder_url || '',
