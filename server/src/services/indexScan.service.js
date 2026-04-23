@@ -449,6 +449,59 @@ async function syncTabListToDB({ dryRun = true, fromCache = false } = {}) {
     return { dryRun, elapsed: '0s', totalRows: 0, campaigns: 0, tabs: 0, indexEntries: 0, message: '동기화할 데이터 없음' };
   }
 
+  // ── 시트DB에서 누락된 campaigns 보충 ──
+  // 탭목록에는 메타데이터 조회 실패로 빠진 시트가 있을 수 있음
+  // 시트DB의 전체 시트 URL을 읽어서 rows에 없는 campaign을 추가
+  let supplemented = 0;
+  try {
+    if (MASTER_SHEET_ID) {
+      const sheetDbTabName = await _findTabName(MASTER_SHEET_ID, SHEET_DB_TAB_NAME);
+      const sheetDbValues = await throttledCall(() =>
+        readSheet(MASTER_SHEET_ID, `'${sheetDbTabName}'!A:B`)
+      );
+      if (sheetDbValues && sheetDbValues.length >= 2) {
+        const dbHeaders = sheetDbValues[0].map(h => String(h).trim().toLowerCase());
+        const sUrlIdx = dbHeaders.indexOf('sheet_url');
+        const sCampIdx = dbHeaders.indexOf('campaign_name');
+
+        if (sUrlIdx >= 0) {
+          // rows에 이미 있는 sheet_id 수집
+          const existingSheetIds = new Set();
+          for (const r of rows) {
+            const sid = extractSheetId(r.sheet_url);
+            if (sid) existingSheetIds.add(sid);
+          }
+
+          for (let i = 1; i < sheetDbValues.length; i++) {
+            const row = sheetDbValues[i];
+            if (!row || row.length === 0) continue;
+            const url = (row[sUrlIdx] || '').toString().trim();
+            const camp = sCampIdx >= 0 && row.length > sCampIdx ? (row[sCampIdx] || '').toString().trim() : '';
+            const sid = extractSheetId(url);
+            if (!sid || existingSheetIds.has(sid)) continue;
+            if (!camp) continue;
+
+            // 이 시트는 탭목록에 없지만 시트DB에 있음 → campaign으로만 추가
+            existingSheetIds.add(sid);
+            rows.push({
+              sheet_url: url.replace(/[?#].*$/, '').replace(/\/edit$/, '/edit'),
+              campaign_name: camp,
+              tab_url: '',
+              tab_name: '',
+              _supplemented: true,
+            });
+            supplemented++;
+          }
+          if (supplemented > 0) {
+            logger.info(`[syncTabListToDB] 시트DB에서 누락된 ${supplemented}개 campaign 보충`);
+          }
+        }
+      }
+    }
+  } catch (err) {
+    logger.warn(`[syncTabListToDB] 시트DB 보충 실패 (계속 진행): ${err.message}`);
+  }
+
   // ── 기존 DB 데이터 조회 ──
   const { rows: dbCampaigns } = await pool.query('SELECT sheet_id, campaign_name FROM campaigns');
   const { rows: dbTabs } = await pool.query('SELECT sheet_id, tab_name, tab_gid FROM tab_configs');
@@ -508,7 +561,7 @@ async function syncTabListToDB({ dryRun = true, fromCache = false } = {}) {
   const summary = {
     dryRun,
     totalRows: rows.length,
-    campaigns: { existing: dbCampaigns.length, toAdd: campaignsToAdd.length },
+    campaigns: { existing: dbCampaigns.length, toAdd: campaignsToAdd.length, supplemented },
     tabs: { existing: dbTabs.length, toAdd: tabsToAdd.length, toUpdate: tabsToUpdate.length },
     index: { existing: dbIndex.length, toAdd: indexToAdd.length },
   };
@@ -516,7 +569,7 @@ async function syncTabListToDB({ dryRun = true, fromCache = false } = {}) {
   // ── 미리보기면 여기서 종료 ──
   if (dryRun) {
     summary.elapsed = ((Date.now() - startTime) / 1000).toFixed(1) + 's';
-    summary.message = `미리보기: campaigns +${campaignsToAdd.length}, tabs +${tabsToAdd.length}/~${tabsToUpdate.length}, index +${indexToAdd.length}`;
+    summary.message = `미리보기: campaigns +${campaignsToAdd.length}${supplemented ? ` (시트DB 보충 ${supplemented})` : ''}, tabs +${tabsToAdd.length}/~${tabsToUpdate.length}, index +${indexToAdd.length}`;
     logger.info(`[syncTabListToDB] ${summary.message}`);
     return summary;
   }
