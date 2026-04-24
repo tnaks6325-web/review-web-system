@@ -34,6 +34,7 @@ router.post('/config', authMiddleware, async (req, res, next) => {
       round:        b.round        !== undefined ? b.round        : undefined,
       nc_mode:      b.ncMode       !== undefined ? Boolean(b.ncMode) : undefined,
       folder_url:   b.folderUrl    !== undefined ? b.folderUrl    : undefined,
+      capture_folder_url: b.captureFolderUrl !== undefined ? b.captureFolderUrl : undefined,
       deposit_name: b.depositName  !== undefined ? b.depositName  : undefined,
       transfer_bank:b.transferBank !== undefined ? b.transferBank : undefined,
       income_type:  b.incomeType   !== undefined ? b.incomeType   : undefined,
