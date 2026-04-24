@@ -11293,7 +11293,7 @@ async function deleteKeywordAction(id, keyword) {
    ── A: 시트→DB 동기화  B: 마감탭 인덱스 정리  C: CRON 자동화
    ══════════════════════════════════════════════════════════════ */
 let _tabDashData = null;
-let _tabDashView = "card";       // "card" | "table"
+let _tabDashView = "table";      // テーブル固定 (v11.8.3: カード削除)
 
 // ── 21컬럼 정의: key, 한국어 라벨, 카테고리, 기본표시여부 ──
 const _TAB_DASH_COLS = [
@@ -11337,14 +11337,11 @@ function _saveColPrefs() {
   localStorage.setItem("tabDash_colPrefs", JSON.stringify(prefs));
 }
 
+// [v11.8.3] 카드뷰 제거 — 테이블뷰 고정
 function setTabDashView(mode) {
-  _tabDashView = mode;
-  const btnCard = document.getElementById("tabDashViewCard");
-  const btnTable = document.getElementById("tabDashViewTable");
+  _tabDashView = "table";
   const colToggle = document.getElementById("tabDashColToggle");
-  if (btnCard) { btnCard.style.background = mode==="card" ? "#1D4ED8" : "#fff"; btnCard.style.color = mode==="card" ? "#fff" : "#374151"; }
-  if (btnTable) { btnTable.style.background = mode==="table" ? "#1D4ED8" : "#fff"; btnTable.style.color = mode==="table" ? "#fff" : "#374151"; }
-  if (colToggle) colToggle.style.display = mode==="table" ? "block" : "none";
+  if (colToggle) colToggle.style.display = "block";
   renderTabDashTable();
 }
 
@@ -11515,77 +11512,10 @@ function renderTabDashTable() {
     return;
   }
 
-  if (_tabDashView === "card") {
-    _renderCardView(wrap, filtered);
-  } else {
-    _renderFullTableView(wrap, filtered);
-  }
+  _renderFullTableView(wrap, filtered);
 }
 
-// ── 카드뷰: 한눈에 핵심 + 클릭시 상세 ──
-function _renderCardView(wrap, filtered) {
-  let html = '<div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(320px,1fr));gap:10px;padding:8px">';
-  filtered.forEach((t, idx) => {
-    const st = t.is_closed ? "closed" : "active";
-    const stClr = st === "closed" ? "#DC2626" : "#059669";
-    const stLabel = st === "closed" ? "마감" : "활성";
-    const stBg = st === "closed" ? "#FEF2F2" : "#F0FDF4";
-    const rc = t.row_count || 0, sc = t.submitted_count || 0;
-    const pct = rc > 0 ? Math.round(sc / rc * 100) : 0;
-    const pctClr = pct >= 80 ? "#059669" : pct >= 50 ? "#D97706" : "#DC2626";
-
-    const folders = [];
-    if (t.folder_url) folders.push(`<a href="${escHtml(t.folder_url)}" target="_blank" onclick="event.stopPropagation()" style="color:#059669" title="리뷰폴더"><i class="fas fa-folder"></i></a>`);
-    if (t.capture_folder_url) folders.push(`<a href="${escHtml(t.capture_folder_url)}" target="_blank" onclick="event.stopPropagation()" style="color:#1D4ED8" title="캡처폴더"><i class="fas fa-camera"></i></a>`);
-    // 시트 링크 (tab_gid 포함)
-    if (t.sheet_url) {
-      const sheetLink = t.tab_gid ? t.sheet_url.replace(/[#?].*$/, '') + '#gid=' + t.tab_gid : t.sheet_url;
-      folders.push(`<a href="${escHtml(sheetLink)}" target="_blank" onclick="event.stopPropagation()" style="color:#7C3AED" title="구글시트 탭 열기"><i class="fas fa-external-link-alt"></i></a>`);
-    }
-
-    // 하단 메타 태그들
-    const tags = [];
-    if (t.review_type) tags.push(`<span style="background:#EDE9FE;color:#7C3AED;padding:1px 6px;border-radius:6px">${escHtml(t.review_type)}</span>`);
-    if (t.payment_type) tags.push(`<span style="background:#FEF3C7;color:#B45309;padding:1px 6px;border-radius:6px">${escHtml(t.payment_type)}</span>`);
-    if (t.delivery_type) tags.push(`<span style="background:#E0E7FF;color:#3730A3;padding:1px 6px;border-radius:6px">${escHtml(t.delivery_type)}</span>`);
-    if (t.taekhap) tags.push(`<span style="background:#D1FAE5;color:#065F46;padding:1px 6px;border-radius:6px">택합</span>`);
-    if (t.is_bulk) tags.push(`<span style="background:#DBEAFE;color:#1E40AF;padding:1px 6px;border-radius:6px">대량</span>`);
-    if (t.nc_mode) tags.push(`<span style="background:#FED7AA;color:#9A3412;padding:1px 6px;border-radius:6px">NC</span>`);
-
-    html += `<div onclick="openTabDashDetail(${idx})" style="background:#fff;border-radius:10px;border:1px solid #E5E7EB;padding:12px 14px;cursor:pointer;transition:box-shadow .15s;position:relative;overflow:hidden" onmouseover="this.style.boxShadow='0 4px 16px rgba(0,0,0,.1)'" onmouseout="this.style.boxShadow='none'">
-      <div style="position:absolute;top:0;left:0;right:0;height:3px;background:${stClr}"></div>
-      <div style="display:flex;justify-content:space-between;align-items:start;margin-bottom:6px">
-        <div style="flex:1;min-width:0">
-          <div style="font-size:.7rem;color:var(--t3);white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${escHtml(t.campaign_name || "—")}</div>
-          <div style="font-size:.88rem;font-weight:700;color:var(--t1);white-space:nowrap;overflow:hidden;text-overflow:ellipsis" title="${escHtml(t.tab_name)}">${escHtml(t.display_name || t.tab_name)}</div>
-          <div style="font-size:.68rem;color:var(--t3)">${escHtml(t.tab_name !== (t.display_name||t.tab_name) ? t.tab_name : "")}</div>
-        </div>
-        <div style="display:flex;flex-direction:column;align-items:flex-end;gap:4px;flex-shrink:0;margin-left:8px">
-          <span style="background:${stBg};color:${stClr};padding:2px 8px;border-radius:8px;font-size:.68rem;font-weight:600">${stLabel}</span>
-          ${t.manager ? `<span style="font-size:.72rem;color:var(--t2)"><i class="fas fa-user" style="color:#6B7280;margin-right:2px"></i>${escHtml(t.manager)}</span>` : ""}
-        </div>
-      </div>
-      ${rc > 0 ? `<div style="margin:8px 0 6px">
-        <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:3px">
-          <span style="font-size:.72rem;color:var(--t2)">제출 현황</span>
-          <span style="font-size:.75rem;font-weight:600;color:${pctClr}">${sc}/${rc} (${pct}%)</span>
-        </div>
-        <div style="background:#E5E7EB;border-radius:4px;height:6px;overflow:hidden">
-          <div style="background:${pctClr};height:100%;width:${pct}%;border-radius:4px;transition:width .3s"></div>
-        </div>
-      </div>` : ""}
-      ${t.time_range ? `<div style="font-size:.68rem;color:var(--t3);margin-top:4px"><i class="fas fa-clock" style="margin-right:3px"></i>${escHtml(t.time_range)} ${t.round ? `· ${escHtml(t.round)}차` : ""}</div>` : ""}
-      <div style="display:flex;justify-content:space-between;align-items:center;margin-top:8px;padding-top:6px;border-top:1px solid #F3F4F6">
-        <div style="display:flex;gap:4px;flex-wrap:wrap;font-size:.65rem">${tags.length > 0 ? tags.join("") : '<span style="color:#D1D5DB">태그 없음</span>'}</div>
-        <div style="display:flex;gap:6px;font-size:.82rem">${folders.join(" ")||'<span style="color:#D1D5DB;font-size:.7rem">—</span>'}</div>
-      </div>
-    </div>`;
-  });
-  html += "</div>";
-  wrap.innerHTML = html;
-  wrap.style.maxHeight = "700px";
-  wrap.style.overflowY = "auto";
-}
+// [v11.8.3] 카드뷰 삭제 — _renderCardView 제거
 
 // ── 테이블뷰: 21컬럼 전체 ──
 function _renderFullTableView(wrap, filtered) {

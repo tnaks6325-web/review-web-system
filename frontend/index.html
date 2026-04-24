@@ -856,12 +856,8 @@
         <!-- KPI 카드 -->
         <div id="tabDashKPI" style="display:grid;grid-template-columns:repeat(auto-fit,minmax(110px,1fr));gap:8px;margin-bottom:14px"></div>
 
-        <!-- 뷰 모드 토글 + 필터 -->
+        <!-- 필터 -->
         <div style="display:flex;gap:8px;margin-bottom:10px;flex-wrap:wrap;align-items:center">
-          <div style="display:flex;border:1px solid #D1D5DB;border-radius:8px;overflow:hidden;font-size:.75rem">
-            <button id="tabDashViewCard" onclick="setTabDashView('card')" style="padding:5px 10px;border:none;cursor:pointer;background:#1D4ED8;color:#fff"><i class="fas fa-id-card"></i> 카드</button>
-            <button id="tabDashViewTable" onclick="setTabDashView('table')" style="padding:5px 10px;border:none;cursor:pointer;background:#fff;color:#374151"><i class="fas fa-table"></i> 테이블</button>
-          </div>
           <select id="tabDashStatusFilter" onchange="renderTabDashTable()" style="padding:5px 8px;border:1px solid #D1D5DB;border-radius:8px;font-size:.78rem">
             <option value="">전체 상태</option>
             <option value="active">활성</option>
@@ -880,13 +876,13 @@
           <span id="tabDashCount" style="font-size:.75rem;color:var(--t3);white-space:nowrap">0건</span>
         </div>
 
-        <!-- 컬럼 표시 토글 (테이블 모드용) -->
-        <div id="tabDashColToggle" style="display:none;margin-bottom:10px;padding:8px 10px;background:#F9FAFB;border-radius:8px;border:1px solid #E5E7EB">
+        <!-- 컬럼 표시 토글 -->
+        <div id="tabDashColToggle" style="margin-bottom:10px;padding:8px 10px;background:#F9FAFB;border-radius:8px;border:1px solid #E5E7EB">
           <div style="font-size:.72rem;font-weight:600;color:var(--t2);margin-bottom:6px"><i class="fas fa-columns"></i> 표시 컬럼 선택</div>
           <div id="tabDashColCheckboxes" style="display:flex;flex-wrap:wrap;gap:4px 10px;font-size:.72rem"></div>
         </div>
 
-        <!-- 테이블/카드 컨테이너 -->
+        <!-- 테이블 컨테이너 -->
         <div id="tabDashTableWrap" style="overflow-x:auto;font-size:.78rem;border-radius:8px;border:1px solid #E5E7EB">
           <div class="admin-loading">
             <i class="fas fa-circle-notch fa-spin"></i> 불러오는 중...
