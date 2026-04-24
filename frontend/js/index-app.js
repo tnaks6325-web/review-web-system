@@ -11297,6 +11297,7 @@ let _tabDashView = "table";      // テーブル固定 (v11.8.3: カード削除
 
 // ── 21컬럼 정의: key, 한국어 라벨, 카테고리, 기본표시여부 ──
 const _TAB_DASH_COLS = [
+  { key:"_form_link",       label:"양식",      cat:"link",  show:true,  align:"center", width:"50px" },
   { key:"_status",          label:"상태",      cat:"core",  show:true,  align:"center" },
   { key:"campaign_name",    label:"캠페인",    cat:"core",  show:true,  align:"left" },
   { key:"tab_name",         label:"탭명",      cat:"core",  show:true,  align:"left" },
@@ -11867,6 +11868,17 @@ async function _forceBankSelect(sheetId, tabName, incomeType, bank) {
 
 function _cellVal(t, col) {
   const k = col.key;
+  if (k === "_form_link") {
+    const sid = escHtml(t.sheet_id), tn = escHtml(t.tab_name);
+    const dn = escHtml(t.display_name || t.tab_name);
+    const gid = t.tab_gid || "";
+    const rd = escHtml(t.round || "");
+    const nc = t.nc_mode ? "1" : "";
+    const ic = escHtml(t.income_type || "");
+    const su = escHtml(t.sheet_url || "");
+    const tcJson = JSON.stringify({sheetId:t.sheet_id,sheetUrl:t.sheet_url||"",tabName:t.tab_name,displayName:t.display_name||t.tab_name,round:t.round||"",ncMode:!!t.nc_mode,incomeType:t.income_type||""}).replace(/"/g,'&quot;');
+    return `<button data-tc="${tcJson}" onclick="event.stopPropagation();copyShortLink(this)" style="background:none;border:none;cursor:pointer;color:#7C3AED;font-size:.82rem" title="구매양식 제출링크 복사"><i class="fas fa-link"></i></button>`;
+  }
   if (k === "_status") {
     const st = t.is_closed ? "closed" : "active";
     if (st === "closed") return '<span style="background:#FEE2E2;color:#DC2626;padding:2px 6px;border-radius:8px;font-size:.68rem;font-weight:600">마감</span>';
@@ -11942,7 +11954,7 @@ function _renderFullTableView(wrap, filtered) {
 
   let html = `<table style="width:100%;border-collapse:collapse;font-size:.75rem">
     <thead><tr>`;
-  visibleCols.forEach(c => { html += `<th style="${thStyle};text-align:${c.align}">${c.label}</th>`; });
+  visibleCols.forEach(c => { html += `<th style="${thStyle};text-align:${c.align}${c.width?';width:'+c.width:''}">${c.label}</th>`; });
   html += `<th style="${thStyle};text-align:center">상세</th></tr></thead><tbody>`;
 
   filtered.forEach((t, idx) => {
@@ -11950,7 +11962,8 @@ function _renderFullTableView(wrap, filtered) {
     const bg = st === "closed" ? "#FEF2F2" : "#fff";
     html += `<tr style="background:${bg};border-bottom:1px solid #F3F4F6" onmouseover="this.style.background='#EFF6FF'" onmouseout="this.style.background='${bg}'">`;
     visibleCols.forEach(c => {
-      html += `<td style="padding:5px;text-align:${c.align};max-width:${c.key==='campaign_name'?'140px':c.key==='tab_name'?'180px':'120px'};overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="${escHtml(String(t[c.key]||''))}">${_cellVal(t, c)}</td>`;
+      const mw = c.width ? c.width : c.key==='campaign_name'?'140px':c.key==='tab_name'?'180px':'120px';
+      html += `<td style="padding:5px;text-align:${c.align};max-width:${mw};${c.width?'width:'+c.width+';':''};overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="${escHtml(String(t[c.key]||''))}">${_cellVal(t, c)}</td>`;
     });
     html += `<td style="padding:5px;text-align:center"><button onclick="openTabDashDetail(${idx})" style="background:none;border:none;color:#1D4ED8;cursor:pointer;font-size:.78rem"><i class="fas fa-expand-alt"></i></button></td>`;
     html += `</tr>`;
