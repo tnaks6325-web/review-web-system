@@ -248,18 +248,48 @@ router.post('/sync-tab-names', authMiddleware, async (req, res, next) => {
     let renamed = 0, urlFixed = 0, gidFilled = 0, skipped = 0, errors = 0;
     const errorDetails = [];
 
-    // 3. 각 시트별로 실제 탭 메타 조회 (throttledMap 병렬 처리 — 속도 3배 향상)
-    await throttledMap(sheetIds, async (sheetId) => {
-      try {
-        const meta = await getSpreadsheetMeta(sheetId);
-        if (!meta || meta.length === 0) {
-          skipped++;
-          return;
+    // 3. 각 시트별로 실제 탭 메타 조회 (배치 병렬 처리 — quota 안전 + 속도 최적화)
+    //    Google API 읽기 quota: 분당 60 → 10개씩 병렬 요청, 배치 간 200ms 간격
+    const BATCH_SIZE = 10;
+    for (let i = 0; i < sheetIds.length; i += BATCH_SIZE) {
+      const batch = sheetIds.slice(i, i + BATCH_SIZE);
+      const batchResults = await Promise.allSettled(
+        batch.map(sheetId => getSpreadsheetMeta(sheetId).then(meta => ({ sheetId, meta })))
+      );
+
+      for (const result of batchResults) {
+        if (result.status === 'rejected') {
+          // 시트 접근 불가
+          const errSheetId = batch[batchResults.indexOf(result)];
+          const sheetErr = result.reason;
+          errors++;
+          const dbTabs = sheetMap[errSheetId] || [];
+          const campaigns = [...new Set(dbTabs.map(t => t.campaign_name).filter(Boolean))];
+          const tabNames = dbTabs.map(t => t.tab_name).slice(0, 5);
+          if (errorDetails.length < 10) {
+            errorDetails.push(`시트 ${errSheetId.substring(0, 15)}... (${campaigns.join(', ') || '미분류'}): ${sheetErr.message}`);
+          }
+          results.push({
+            sheetId: errSheetId.substring(0, 15) + '...',
+            status: 'sheet_error',
+            error: sheetErr.message,
+            campaign: campaigns.join(', ') || '미분류',
+            affectedTabs: tabNames,
+            affectedTabCount: dbTabs.length,
+            hint: sheetErr.message.includes('permission')
+              ? '서비스 계정에 시트 편집 권한을 공유해주세요.'
+              : sheetErr.message.includes('not found')
+                ? '시트가 삭제되었거나 ID가 잘못되었습니다.'
+                : undefined,
+          });
+          continue;
         }
 
-        // 실제 시트의 GID → 탭명 맵 & 탭명 → GID 맵
-        const realGidMap = {};  // gid(string) → { title, gid }
-        const realNameMap = {}; // title → { title, gid }
+        const { sheetId, meta } = result.value;
+        if (!meta || meta.length === 0) { skipped++; continue; }
+
+        const realGidMap = {};
+        const realNameMap = {};
         meta.forEach(s => {
           const gid = String(s.properties.sheetId);
           const title = s.properties.title;
@@ -402,31 +432,13 @@ router.post('/sync-tab-names', authMiddleware, async (req, res, next) => {
 
           results.push(entry);
         }
-      } catch (sheetErr) {
-        // 시트 접근 불가 (삭제됨, 권한 없음 등)
-        errors++;
-        const dbTabs = sheetMap[sheetId] || [];
-        const campaigns = [...new Set(dbTabs.map(t => t.campaign_name).filter(Boolean))];
-        const tabNames = dbTabs.map(t => t.tab_name).slice(0, 5);
-
-        if (errorDetails.length < 10) {
-          errorDetails.push(`시트 ${sheetId.substring(0, 15)}... (${campaigns.join(', ') || '미분류'}): ${sheetErr.message}`);
-        }
-        results.push({
-          sheetId: sheetId.substring(0, 15) + '...',
-          status: 'sheet_error',
-          error: sheetErr.message,
-          campaign: campaigns.join(', ') || '미분류',
-          affectedTabs: tabNames,
-          affectedTabCount: dbTabs.length,
-          hint: sheetErr.message.includes('permission')
-            ? '서비스 계정(tnaks6325@gmail.com)에 시트 편집 권한을 공유해주세요.'
-            : sheetErr.message.includes('not found')
-              ? '시트가 삭제되었거나 ID가 잘못되었습니다.'
-              : undefined,
-        });
       }
-    }, 5); // concurrency=5: 5개 시트 동시 처리 → 57시트 기준 약 15~25초
+
+      // 배치 간 200ms 대기 (quota 안전 마진)
+      if (i + BATCH_SIZE < sheetIds.length) {
+        await new Promise(r => setTimeout(r, 200));
+      }
+    }
 
     const elapsed = ((Date.now() - startTime) / 1000).toFixed(1);
     logger.info(`[sync-tab-names] 완료: renamed=${renamed}, urlFixed=${urlFixed}, gidFilled=${gidFilled}, skipped=${skipped}, errors=${errors}, ${elapsed}s`);
