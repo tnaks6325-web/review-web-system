@@ -4574,7 +4574,7 @@ async function copyShortLink(btnEl) {
   }
 
   const gidMatch = sheetUrl.match(/[?&]gid=(\d+)/);
-  const gid = gidMatch ? gidMatch[1] : "";
+  const gid = tc.tabGid || (gidMatch ? gidMatch[1] : "");  // ★ tabGid 우선
   const incomeType = tc.incomeType || "";  // ★ v9.14
 
   // 긴 URL (폴백용) — round + incomeType 포함
@@ -4592,7 +4592,7 @@ async function copyShortLink(btnEl) {
   let shortUrl = null;
   try {
     // ★ 서버 API 우선 사용 → GAS 폴백
-    const apiBase = getApiBaseUrl();
+    const apiBase = (typeof API_BASE_URL !== 'undefined' && API_BASE_URL) ? API_BASE_URL : null;
     if (apiBase) {
       const resp = await fetch(apiBase + '/api/short/create', {
         method: 'POST',
@@ -11245,7 +11245,7 @@ async function addKeywordAction() {
 // ── 키워드 활성/비활성 토글 ──
 async function toggleKeywordAction(id, active) {
   try {
-    const url = getApiBaseUrl() + '/api/admin/keywords/' + id;
+    const url = API_BASE_URL + '/api/admin/keywords/' + id;
     const res = await fetch(url, {
       method: 'PUT',
       headers: { 'Content-Type': 'application/json', ...(_getAuthHeaders ? _getAuthHeaders() : {}) },
@@ -11268,7 +11268,7 @@ async function deleteKeywordAction(id, keyword) {
   if (!confirm(`"${keyword}" 키워드를 삭제하시겠습니까?`)) return;
 
   try {
-    const url = getApiBaseUrl() + '/api/admin/keywords/' + id;
+    const url = API_BASE_URL + '/api/admin/keywords/' + id;
     const res = await fetch(url, {
       method: 'DELETE',
       headers: { ...(_getAuthHeaders ? _getAuthHeaders() : {}) },
@@ -11873,7 +11873,7 @@ function _cellVal(t, col) {
     const nc = t.nc_mode ? "1" : "";
     const ic = escHtml(t.income_type || "");
     const su = escHtml(t.sheet_url || "");
-    const tcJson = JSON.stringify({sheetId:t.sheet_id,sheetUrl:t.sheet_url||"",tabName:t.tab_name,displayName:t.display_name||t.tab_name,round:t.round||"",ncMode:!!t.nc_mode,incomeType:t.income_type||""}).replace(/"/g,'&quot;');
+    const tcJson = JSON.stringify({sheetId:t.sheet_id,sheetUrl:t.sheet_url||"",tabName:t.tab_name,displayName:t.display_name||t.tab_name,round:t.round||"",ncMode:!!t.nc_mode,incomeType:t.income_type||"",tabGid:t.tab_gid||""}).replace(/"/g,'&quot;');
     return `<button data-tc="${tcJson}" onclick="event.stopPropagation();copyShortLink(this)" style="background:none;border:none;cursor:pointer;color:#7C3AED;font-size:.82rem" title="구매양식 제출링크 복사"><i class="fas fa-link"></i></button>`;
   }
   if (k === "_status") {
