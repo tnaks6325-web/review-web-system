@@ -457,22 +457,38 @@ router.post('/sync-tab-names', authMiddleware, async (req, res, next) => {
       }
     }
 
-    // ── Quota 실패 시트 재시도 (10초 대기 후 1개씩 순차 처리) ──
+    // ── Quota 실패 시트 재시도 (3초 대기 후 1개씩 순차 처리, 50초 초과시 스킵) ──
     if (quotaFailedSheetIds.length > 0) {
-      logger.info(`[sync-tab-names] quota 실패 ${quotaFailedSheetIds.length}건 → 10초 후 재시도`);
-      await new Promise(r => setTimeout(r, 10000));
-      for (const retryId of quotaFailedSheetIds) {
-        const retryFailed = await processBatch([retryId]);
-        if (retryFailed.length > 0) {
-          // 재시도도 실패 → 에러로 기록
+      const elapsedSoFar = (Date.now() - startTime) / 1000;
+      if (elapsedSoFar < 45) {
+        logger.info(`[sync-tab-names] quota 실패 ${quotaFailedSheetIds.length}건 → 3초 후 재시도 (경과 ${elapsedSoFar.toFixed(1)}s)`);
+        await new Promise(r => setTimeout(r, 3000));
+        for (const retryId of quotaFailedSheetIds) {
+          if ((Date.now() - startTime) / 1000 > 55) {
+            logger.warn(`[sync-tab-names] 55초 초과 — 남은 재시도 스킵`);
+            break;
+          }
+          const retryFailed = await processBatch([retryId]);
+          if (retryFailed.length > 0) {
+            errors++;
+            const dbTabs = sheetMap[retryId] || [];
+            const campaigns = [...new Set(dbTabs.map(t => t.campaign_name).filter(Boolean))];
+            if (errorDetails.length < 10) {
+              errorDetails.push(`시트 ${retryId.substring(0, 15)}... (${campaigns.join(', ') || '미분류'}): Quota 재시도 실패`);
+            }
+          }
+          await new Promise(r => setTimeout(r, 1500));
+        }
+      } else {
+        logger.warn(`[sync-tab-names] 이미 ${elapsedSoFar.toFixed(1)}초 경과 — 재시도 스킵 (${quotaFailedSheetIds.length}건)`);
+        for (const retryId of quotaFailedSheetIds) {
           errors++;
           const dbTabs = sheetMap[retryId] || [];
           const campaigns = [...new Set(dbTabs.map(t => t.campaign_name).filter(Boolean))];
           if (errorDetails.length < 10) {
-            errorDetails.push(`시트 ${retryId.substring(0, 15)}... (${campaigns.join(', ') || '미분류'}): Quota 재시도 실패`);
+            errorDetails.push(`시트 ${retryId.substring(0, 15)}... (${campaigns.join(', ') || '미분류'}): Quota 초과 (시간 초과로 재시도 스킵)`);
           }
         }
-        await new Promise(r => setTimeout(r, 2000)); // 재시도 간 2초 대기
       }
     }
 
