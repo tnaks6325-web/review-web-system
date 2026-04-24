@@ -11536,26 +11536,68 @@ async function _onInlineTextSave(el, sheetId, tabName, apiKey) {
   else { el.value = el.dataset.orig||""; }
 }
 
-/** 링크 입력: 아이콘 + 클릭 시 입력 */
+/** 링크 간편입력: 아이콘 클릭 → 인라인 input 전환 */
 function _inlineLinkEdit(t, dbKey, apiKey, icon, color) {
   const url = t[dbKey] || "";
-  const id = `il_${dbKey}_${t.sheet_id}_${t.tab_name}`.replace(/[^a-zA-Z0-9_]/g,"_");
+  const sid = escHtml(t.sheet_id), tn = escHtml(t.tab_name);
+  const id = `il_${dbKey}_${sid}_${tn}`.replace(/[^a-zA-Z0-9_]/g,"_");
   if (url) {
-    return `<span style="display:inline-flex;align-items:center;gap:3px">
+    return `<span id="${id}_wrap" style="display:inline-flex;align-items:center;gap:3px">
       <a href="${escHtml(url)}" target="_blank" style="color:${color}" title="${escHtml(url)}"><i class="fas ${icon}"></i></a>
-      <button onclick="_promptLinkEdit('${escHtml(t.sheet_id)}','${escHtml(t.tab_name)}','${apiKey}','${dbKey}')" style="background:none;border:none;cursor:pointer;color:#9CA3AF;font-size:.65rem" title="링크 수정"><i class="fas fa-pen"></i></button>
-    </span>`;
+      <button onclick="_toggleLinkInput('${id}','${sid}','${tn}','${apiKey}','${dbKey}')" style="background:none;border:none;cursor:pointer;color:#9CA3AF;font-size:.65rem" title="링크 수정"><i class="fas fa-pen"></i></button>
+    </span>
+    <div id="${id}_edit" style="display:none">
+      <div style="display:flex;align-items:center;gap:2px">
+        <input id="${id}_inp" type="text" value="${escHtml(url)}" placeholder="URL 입력"
+          style="width:100%;min-width:80px;max-width:160px;padding:2px 5px;border:1px solid #3B82F6;border-radius:4px;font-size:.68rem;background:#fff;outline:none"
+          onkeydown="if(event.key==='Enter')_saveLinkInput('${id}','${sid}','${tn}','${apiKey}','${dbKey}');if(event.key==='Escape')_cancelLinkInput('${id}')"
+          data-orig="${escHtml(url)}">
+        <button onclick="_saveLinkInput('${id}','${sid}','${tn}','${apiKey}','${dbKey}')" style="background:none;border:none;cursor:pointer;color:#059669;font-size:.72rem" title="저장"><i class="fas fa-check"></i></button>
+        <button onclick="_cancelLinkInput('${id}')" style="background:none;border:none;cursor:pointer;color:#DC2626;font-size:.72rem" title="취소"><i class="fas fa-times"></i></button>
+      </div>
+    </div>`;
   }
-  return `<button onclick="_promptLinkEdit('${escHtml(t.sheet_id)}','${escHtml(t.tab_name)}','${apiKey}','${dbKey}')" style="background:none;border:none;cursor:pointer;color:#D1D5DB;font-size:.75rem" title="링크 입력"><i class="fas ${icon}"></i> <i class="fas fa-plus" style="font-size:.55rem"></i></button>`;
+  return `<span id="${id}_wrap">
+      <button onclick="_toggleLinkInput('${id}','${sid}','${tn}','${apiKey}','${dbKey}')" style="background:none;border:none;cursor:pointer;color:#D1D5DB;font-size:.75rem" title="링크 입력"><i class="fas ${icon}"></i> <i class="fas fa-plus" style="font-size:.55rem"></i></button>
+    </span>
+    <div id="${id}_edit" style="display:none">
+      <div style="display:flex;align-items:center;gap:2px">
+        <input id="${id}_inp" type="text" value="" placeholder="URL 입력"
+          style="width:100%;min-width:80px;max-width:160px;padding:2px 5px;border:1px solid #3B82F6;border-radius:4px;font-size:.68rem;background:#fff;outline:none"
+          onkeydown="if(event.key==='Enter')_saveLinkInput('${id}','${sid}','${tn}','${apiKey}','${dbKey}');if(event.key==='Escape')_cancelLinkInput('${id}')"
+          data-orig="">
+        <button onclick="_saveLinkInput('${id}','${sid}','${tn}','${apiKey}','${dbKey}')" style="background:none;border:none;cursor:pointer;color:#059669;font-size:.72rem" title="저장"><i class="fas fa-check"></i></button>
+        <button onclick="_cancelLinkInput('${id}')" style="background:none;border:none;cursor:pointer;color:#DC2626;font-size:.72rem" title="취소"><i class="fas fa-times"></i></button>
+      </div>
+    </div>`;
 }
-async function _promptLinkEdit(sheetId, tabName, apiKey, dbKey) {
+function _toggleLinkInput(id) {
+  const wrap = document.getElementById(id+"_wrap");
+  const edit = document.getElementById(id+"_edit");
+  if (!wrap || !edit) return;
+  wrap.style.display = "none";
+  edit.style.display = "block";
+  const inp = document.getElementById(id+"_inp");
+  if (inp) { inp.focus(); inp.select(); }
+}
+function _cancelLinkInput(id) {
+  const wrap = document.getElementById(id+"_wrap");
+  const edit = document.getElementById(id+"_edit");
+  const inp = document.getElementById(id+"_inp");
+  if (wrap) wrap.style.display = "inline-flex";
+  if (edit) edit.style.display = "none";
+  if (inp) inp.value = inp.dataset.orig || "";
+}
+async function _saveLinkInput(id, sheetId, tabName, apiKey, dbKey) {
+  const inp = document.getElementById(id+"_inp");
+  if (!inp) return;
+  const newVal = inp.value.trim();
+  if (newVal === (inp.dataset.orig||"")) { _cancelLinkInput(id); return; }
   const t = (_tabDashData?.tabs||[]).find(x => x.sheet_id===sheetId && x.tab_name===tabName);
   if (!t) return;
-  const cur = t[dbKey] || "";
-  const val = prompt("URL을 입력하세요:", cur);
-  if (val === null) return;
-  const ok = await _saveTabField(t, { [apiKey]: val.trim() });
+  const ok = await _saveTabField(t, { [apiKey]: newVal });
   if (ok) renderTabDashTable();
+  else { inp.value = inp.dataset.orig||""; _cancelLinkInput(id); }
 }
 
 /** 택일 팝업: 버튼 클릭 → 드롭다운 */
