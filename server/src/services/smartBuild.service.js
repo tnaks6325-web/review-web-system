@@ -482,13 +482,17 @@ async function runSmartBuild() {
             const rows = _parseTabRows(values, sheetId, tabName, tabGid, spreadsheetTitle);
 
             if (rows.length === 0) {
-              // 파싱 실패 탭 → index_master에 에러가 아닌 빈 상태로 업데이트
+              // ★ 인식 실패 탭 기록 (indexBuilder와 동일)
+              await _recordUnrecognizedTab(sheetId, tabName, tabGid, spreadsheetTitle, values);
               result.tabsSkipped++;
               continue;
             }
 
             const modifiedTime = _modifiedTimeCache[sheetId]?.modifiedTime || null;
             await _upsertTab(sheetId, tabName, tabGid, newChecksum, rows, modifiedTime, spreadsheetTitle);
+
+            // ★ 인식 성공 → unrecognized_tabs에서 resolve
+            await _resolveRecognizedTab(sheetId, tabName, tabGid);
 
             // 체크섬 캐시 갱신
             _checksumCache[key] = newChecksum;
@@ -613,6 +617,94 @@ function resetSmartBuildCache() {
   _lastRunResult = null;
   logger.info(`[SmartBuild] 캐시 리셋 완료 — modifiedTime: ${prev.modifiedTimeEntries}→0, checksum: ${prev.checksumEntries}→0`);
   return prev;
+}
+
+// ═══════════════════════════════════════════════════════════
+// ★ 인식 실패 탭 기록 (indexBuilder와 동일 로직)
+// parseTabRows가 빈 배열을 반환한 탭을 unrecognized_tabs에 기록
+// ═══════════════════════════════════════════════════════════
+
+async function _recordUnrecognizedTab(sheetId, tabName, tabGid, campaignName, values) {
+  try {
+    // 실패 원인 분석
+    let reason = 'unknown';
+    if (!values || values.length === 0) {
+      reason = 'empty';
+    } else if (values.length < 2) {
+      reason = 'few_rows';
+    } else {
+      let headerRowIdx = -1;
+      for (let i = 0; i < Math.min(values.length, 50); i++) {
+        const cells = values[i] ? values[i].map(c => String(c || '').trim()) : [];
+        if (_isDataTabRow(cells)) {
+          headerRowIdx = i;
+          break;
+        }
+      }
+      if (headerRowIdx < 0) {
+        reason = 'no_header';
+      } else {
+        const headers = values[headerRowIdx].map(h => String(h || '').trim());
+        const nameColIdx = headers.findIndex(h =>
+          NAME_KEYWORDS.some(k => h.includes(k))
+        );
+        if (nameColIdx < 0) {
+          reason = 'no_name_col';
+        } else {
+          const dataRows = values.slice(headerRowIdx + 1);
+          const hasAnyName = dataRows.some(row => {
+            const name = String((row && row[nameColIdx]) || '').trim();
+            return name.length > 0;
+          });
+          reason = hasAnyName ? 'no_name_col' : 'no_data';
+        }
+      }
+    }
+
+    // no_data: 헤더 정상, 데이터 미입력 → 인식 실패가 아니므로 기록 스킵
+    if (reason === 'no_data') {
+      await pool.query(
+        `UPDATE unrecognized_tabs SET status = 'resolved'
+         WHERE sheet_id = $1 AND (tab_name = $2 OR tab_gid = $3) AND status = 'pending'`,
+        [sheetId, tabName, tabGid]
+      );
+      return;
+    }
+
+    // 첫 55행 샘플
+    const sampleRows = (values || []).slice(0, 55).map(row =>
+      (row || []).map(c => String(c || '').trim()).slice(0, 15)
+    );
+
+    await pool.query(`
+      INSERT INTO unrecognized_tabs (sheet_id, tab_name, tab_gid, campaign_name, sample_rows, reason, status, detected_at)
+      VALUES ($1, $2, $3, $4, $5, $6, 'pending', NOW())
+      ON CONFLICT (sheet_id, tab_name) DO UPDATE SET
+        campaign_name = EXCLUDED.campaign_name,
+        sample_rows = EXCLUDED.sample_rows,
+        reason = EXCLUDED.reason,
+        status = CASE WHEN unrecognized_tabs.status = 'ignored' THEN 'ignored' ELSE 'pending' END,
+        detected_at = NOW()
+    `, [sheetId, tabName, tabGid, campaignName, JSON.stringify(sampleRows), reason]);
+  } catch (err) {
+    logger.warn(`[smartBuild] 인식 실패 탭 기록 오류 (${tabName}): ${err.message}`);
+  }
+}
+
+// 인식 성공한 탭은 unrecognized_tabs에서 resolve
+async function _resolveRecognizedTab(sheetId, tabName, tabGid) {
+  try {
+    await pool.query(
+      `UPDATE unrecognized_tabs SET status = 'resolved' WHERE sheet_id = $1 AND tab_name = $2 AND status = 'pending'`,
+      [sheetId, tabName]
+    );
+    if (tabGid) {
+      await pool.query(
+        `UPDATE unrecognized_tabs SET status = 'resolved' WHERE sheet_id = $1 AND tab_gid = $2 AND tab_name != $3 AND status = 'pending'`,
+        [sheetId, tabGid, tabName]
+      );
+    }
+  } catch (_) {}
 }
 
 // ═══════════════════════════════════════════════════════════
