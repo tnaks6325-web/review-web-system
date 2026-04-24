@@ -504,18 +504,33 @@ async function _processOneSheet(sheetId, opts) {
     const key = `${sheetId}||${tabName}`;
 
     // ★ 탭 이름 변경 감지: 같은 GID인데 DB에 다른 이름으로 저장된 경우
+    // v11.8.3: DELETE→재빌드 대신 UPDATE로 변경 — review_index 데이터 보존
     const gidKey = `${sheetId}||${tabGid}`;
     const oldTabName = gidToNameMap ? gidToNameMap[gidKey] : null;
     if (oldTabName && oldTabName !== tabName) {
-      // 구글 시트에서 탭 이름이 변경됨 → 기존 고아 레코드 정리
       logger.info(`[buildIndex] 탭 이름 변경 감지: "${oldTabName}" → "${tabName}" (gid=${tabGid}, sheet=${sheetId.substring(0, 15)})`);
       try {
-        // index_master에서 옛 이름 레코드 삭제
-        await pool.query('DELETE FROM index_master WHERE sheet_id = $1 AND tab_name = $2', [sheetId, oldTabName]);
-        // review_index에서 옛 이름 데이터 삭제
-        await pool.query('DELETE FROM review_index WHERE sheet_id = $1 AND tab_name = $2', [sheetId, oldTabName]);
-        // tab_configs에서 옛 이름 설정 → 새 이름으로 업데이트
-        await pool.query('UPDATE tab_configs SET tab_name = $1 WHERE sheet_id = $2 AND tab_name = $3', [tabName, sheetId, oldTabName]);
+        // ── review_index: 리뷰어 데이터 보존하면서 탭명만 UPDATE ──
+        const riResult = await pool.query(
+          'UPDATE review_index SET tab_name = $1 WHERE sheet_id = $2 AND tab_name = $3',
+          [tabName, sheetId, oldTabName]
+        );
+        // ── index_master: 탭명 + tab_gid UPDATE (행 보존) ──
+        const imResult = await pool.query(
+          'UPDATE index_master SET tab_name = $1, tab_gid = $2 WHERE sheet_id = $3 AND tab_name = $4',
+          [tabName, tabGid, sheetId, oldTabName]
+        );
+        // ── tab_configs: 탭명 UPDATE ──
+        await pool.query(
+          'UPDATE tab_configs SET tab_name = $1 WHERE sheet_id = $2 AND tab_name = $3',
+          [tabName, sheetId, oldTabName]
+        );
+        // ── URL 교정: 정규화된 시트 URL로 업데이트 ──
+        const correctUrl = `https://docs.google.com/spreadsheets/d/${sheetId}/edit`;
+        await pool.query(
+          'UPDATE tab_configs SET sheet_url = $1, updated_at = NOW() WHERE sheet_id = $2 AND tab_name = $3 AND (sheet_url IS NULL OR sheet_url != $1)',
+          [correctUrl, sheetId, tabName]
+        );
         // unrecognized_tabs에서 옛 이름 삭제
         await pool.query('DELETE FROM unrecognized_tabs WHERE sheet_id = $1 AND tab_name = $2', [sheetId, oldTabName]);
         // checksumMap도 갱신 (옛 이름 체크섬을 새 이름으로 이전)
@@ -526,7 +541,7 @@ async function _processOneSheet(sheetId, opts) {
         }
         // gidToNameMap 갱신
         if (gidToNameMap) gidToNameMap[gidKey] = tabName;
-        logger.info(`[buildIndex] 탭 이름 변경 적용 완료: "${oldTabName}" → "${tabName}"`);
+        logger.info(`[buildIndex] 탭 이름 변경 적용 완료: "${oldTabName}" → "${tabName}" (review_index ${riResult.rowCount}행, index_master ${imResult.rowCount}행 UPDATE)`);
       } catch (renameErr) {
         logger.warn(`[buildIndex] 탭 이름 변경 처리 실패 (${oldTabName} → ${tabName}): ${renameErr.message}`);
       }

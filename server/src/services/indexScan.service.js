@@ -588,17 +588,35 @@ async function syncTabListToDB({ dryRun = true, fromCache = false } = {}) {
   try {
     await client.query('BEGIN');
 
-    // ★ gid 기반 탭 이름 변경: 이전 tab_name 행 삭제
-    // 새 tab_name으로 다시 생성되므로 이전 이름 행만 제거
+    // ★ gid 기반 탭 이름 변경: DELETE 대신 UPDATE — review_index 데이터 보존 (v11.8.3)
     const renamedSet = new Set();
     for (const r of tabsToRename) {
       const renameKey = `${r.sheetId}||${r.oldTabName}`;
       if (renamedSet.has(renameKey)) continue;
       renamedSet.add(renameKey);
       logger.info(`[syncTabListToDB] 탭 이름 변경: "${r.oldTabName}" → "${r.newTabName}" (gid=${r.tabGid})`);
-      await client.query('DELETE FROM review_index WHERE sheet_id = $1 AND tab_name = $2', [r.sheetId, r.oldTabName]);
-      await client.query('DELETE FROM index_master WHERE sheet_id = $1 AND tab_name = $2', [r.sheetId, r.oldTabName]);
-      await client.query('DELETE FROM tab_configs WHERE sheet_id = $1 AND tab_name = $2', [r.sheetId, r.oldTabName]);
+      // review_index: 리뷰어 데이터 보존하면서 탭명만 UPDATE
+      const riResult = await client.query(
+        'UPDATE review_index SET tab_name = $1 WHERE sheet_id = $2 AND tab_name = $3',
+        [r.newTabName, r.sheetId, r.oldTabName]
+      );
+      // index_master: 탭명 UPDATE (행 보존)
+      const imResult = await client.query(
+        'UPDATE index_master SET tab_name = $1, tab_gid = $2 WHERE sheet_id = $3 AND tab_name = $4',
+        [r.newTabName, r.tabGid, r.sheetId, r.oldTabName]
+      );
+      // tab_configs: 탭명 UPDATE
+      await client.query(
+        'UPDATE tab_configs SET tab_name = $1, tab_gid = $2, updated_at = NOW() WHERE sheet_id = $3 AND tab_name = $4',
+        [r.newTabName, r.tabGid, r.sheetId, r.oldTabName]
+      );
+      // URL 교정
+      const correctUrl = `https://docs.google.com/spreadsheets/d/${r.sheetId}/edit`;
+      await client.query(
+        'UPDATE tab_configs SET sheet_url = $1 WHERE sheet_id = $2 AND tab_name = $3 AND (sheet_url IS NULL OR sheet_url != $1)',
+        [correctUrl, r.sheetId, r.newTabName]
+      );
+      logger.info(`[syncTabListToDB] 탭 이름 변경 완료: "${r.oldTabName}" → "${r.newTabName}" (review_index ${riResult.rowCount}행, index_master ${imResult.rowCount}행 UPDATE)`);
     }
 
     // campaigns UPSERT
