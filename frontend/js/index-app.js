@@ -11944,20 +11944,38 @@ function renderTabDashTable() {
 
 // [v11.8.3] 카드뷰 삭제 — _renderCardView 제거
 
-// ── 테이블뷰: 21컬럼 전체 ──
+// ── 테이블뷰: 21컬럼 전체 + 체크박스 선택 ──
+let _tabDashChecked = new Set(); // "sheetId||tabName" 형태
+
 function _renderFullTableView(wrap, filtered) {
   const visibleCols = _TAB_DASH_COLS.filter(c => c.show);
   const thStyle = "padding:7px 5px;font-weight:600;white-space:nowrap;border-bottom:2px solid #D1D5DB;font-size:.72rem;position:sticky;top:0;background:#F3F4F6;z-index:1";
 
-  let html = `<table style="width:100%;border-collapse:collapse;font-size:.75rem">
+  // 아카이브 액션바
+  const checkedCount = _tabDashChecked.size;
+  let html = `<div id="tabDashArchiveBar" style="display:${checkedCount>0?'flex':'none'};align-items:center;gap:10px;padding:8px 12px;margin-bottom:6px;background:#FEF3C7;border:1px solid #F59E0B;border-radius:8px">
+    <span style="font-size:.78rem;font-weight:600;color:#92400E"><i class="fas fa-check-square" style="margin-right:4px"></i>${checkedCount}건 선택됨</span>
+    <button onclick="_archiveCheckedTabs()" style="padding:4px 12px;background:#DC2626;color:#fff;border:none;border-radius:6px;font-size:.72rem;font-weight:600;cursor:pointer;display:flex;align-items:center;gap:4px"><i class="fas fa-archive"></i> 아카이브로 보내기</button>
+    <button onclick="_clearTabDashChecked()" style="padding:4px 10px;background:#6B7280;color:#fff;border:none;border-radius:6px;font-size:.72rem;cursor:pointer">선택 해제</button>
+  </div>`;
+
+  html += `<table style="width:100%;border-collapse:collapse;font-size:.75rem">
     <thead><tr>`;
+  // 전체선택 체크박스
+  const allChecked = filtered.length > 0 && filtered.every(t => _tabDashChecked.has(`${t.sheet_id}||${t.tab_name}`));
+  html += `<th style="${thStyle};text-align:center;width:30px"><input type="checkbox" ${allChecked?'checked':''} onchange="_toggleAllTabDashCheck(this.checked)" style="width:14px;height:14px;cursor:pointer" title="전체 선택/해제"></th>`;
   visibleCols.forEach(c => { html += `<th style="${thStyle};text-align:${c.align}${c.width?';width:'+c.width:''}">${c.label}</th>`; });
   html += `<th style="${thStyle};text-align:center">상세</th></tr></thead><tbody>`;
 
   filtered.forEach((t, idx) => {
     const st = t.is_closed ? "closed" : "active";
-    const bg = st === "closed" ? "#FEF2F2" : "#fff";
-    html += `<tr style="background:${bg};border-bottom:1px solid #F3F4F6" onmouseover="this.style.background='#EFF6FF'" onmouseout="this.style.background='${bg}'">`;
+    const key = `${t.sheet_id}||${t.tab_name}`;
+    const isChecked = _tabDashChecked.has(key);
+    const bg = isChecked ? "#FEF9C3" : (st === "closed" ? "#FEF2F2" : "#fff");
+    const hoverBg = isChecked ? "#FEF08A" : "#EFF6FF";
+    html += `<tr style="background:${bg};border-bottom:1px solid #F3F4F6" onmouseover="this.style.background='${hoverBg}'" onmouseout="this.style.background='${bg}'">`;
+    // 체크박스 열
+    html += `<td style="padding:5px;text-align:center;width:30px"><input type="checkbox" ${isChecked?'checked':''} onchange="_toggleTabDashCheck('${escHtml(t.sheet_id)}','${escHtml(t.tab_name)}',this.checked)" style="width:14px;height:14px;cursor:pointer"></td>`;
     visibleCols.forEach(c => {
       const mw = c.width ? c.width : c.key==='campaign_name'?'140px':c.key==='tab_name'?'180px':'120px';
       html += `<td style="padding:5px;text-align:${c.align};max-width:${mw};${c.width?'width:'+c.width+';':''};overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="${escHtml(String(t[c.key]||''))}">${_cellVal(t, c)}</td>`;
@@ -11970,6 +11988,79 @@ function _renderFullTableView(wrap, filtered) {
   wrap.innerHTML = html;
   wrap.style.maxHeight = "600px";
   wrap.style.overflowY = "auto";
+}
+
+// ── 체크박스 토글 ──
+function _toggleTabDashCheck(sheetId, tabName, checked) {
+  const key = `${sheetId}||${tabName}`;
+  if (checked) _tabDashChecked.add(key); else _tabDashChecked.delete(key);
+  _updateArchiveBar();
+}
+
+function _toggleAllTabDashCheck(checked) {
+  const filtered = _filterTabDashData();
+  filtered.forEach(t => {
+    const key = `${t.sheet_id}||${t.tab_name}`;
+    if (checked) _tabDashChecked.add(key); else _tabDashChecked.delete(key);
+  });
+  renderTabDashTable();
+}
+
+function _clearTabDashChecked() {
+  _tabDashChecked.clear();
+  renderTabDashTable();
+}
+
+function _updateArchiveBar() {
+  const bar = document.getElementById('tabDashArchiveBar');
+  if (!bar) { renderTabDashTable(); return; }
+  const n = _tabDashChecked.size;
+  bar.style.display = n > 0 ? 'flex' : 'none';
+  const span = bar.querySelector('span');
+  if (span) span.innerHTML = `<i class="fas fa-check-square" style="margin-right:4px"></i>${n}건 선택됨`;
+}
+
+// ── 아카이브 실행 ──
+async function _archiveCheckedTabs() {
+  if (_tabDashChecked.size === 0) { showToast('아카이브할 탭을 선택하세요.', 'info'); return; }
+
+  const tabs = [];
+  const names = [];
+  _tabDashChecked.forEach(key => {
+    const [sheetId, tabName] = key.split('||');
+    tabs.push({ sheetId, tabName });
+    // 표시용 이름 찾기
+    const t = (_tabDashData?.tabs||[]).find(x => x.sheet_id === sheetId && x.tab_name === tabName);
+    names.push(t ? `${t.campaign_name}/${t.tab_name}` : tabName);
+  });
+
+  const confirmed = confirm(`선택한 ${tabs.length}건을 아카이브로 보내시겠습니까?\n\n` +
+    `아카이브된 탭은:\n` +
+    `• 스마트빌드 갱신에서 스킵\n` +
+    `• 인덱스 스캔에서 스킵\n` +
+    `• DB 동기화에서 스킵\n` +
+    `• 탭명/URL 동기화에서 스킵\n\n` +
+    names.slice(0, 10).join('\n') + (names.length > 10 ? `\n... 외 ${names.length - 10}건` : ''));
+  if (!confirmed) return;
+
+  try {
+    showToast(`${tabs.length}건 아카이브 처리 중...`, 'info');
+    const res = await fetch(API_BASE_URL + '/api/archive/tabs', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', ..._getAuthHeaders() },
+      body: JSON.stringify({ tabs, reason: 'manual_dashboard' }),
+    }).then(r => r.json());
+
+    if (res.ok) {
+      showToast(`아카이브 완료: ${res.archivedTabs}탭, ${res.archivedRows}행`, 'success');
+      _tabDashChecked.clear();
+      await loadTabDashboard(); // 새로고침
+    } else {
+      showToast(res.error || '아카이브 실패', 'error');
+    }
+  } catch (err) {
+    showToast('아카이브 요청 실패: ' + err.message, 'error');
+  }
 }
 
 // ── 상세 모달 ──

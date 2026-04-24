@@ -141,6 +141,18 @@ async function runIndexScan(dryRun = true) {
 
   logger.info(`[indexScan] 시트DB에서 ${sheetEntries.length}개 고유 시트 URL 발견`);
 
+  // ★ 아카이브된 탭 목록 로드 — 탭목록에 기록하지 않음
+  let archivedScanSet = new Set();
+  try {
+    const { rows: archivedRows } = await pool.query('SELECT sheet_id, tab_name FROM index_master_archive');
+    archivedScanSet = new Set(archivedRows.map(r => `${r.sheet_id}||${r.tab_name}`));
+    if (archivedRows.length > 0) {
+      logger.info(`[indexScan] 아카이브된 탭 ${archivedRows.length}개 스킵 대상 로드`);
+    }
+  } catch (err) {
+    logger.warn(`[indexScan] 아카이브 탭 로드 실패 (계속 진행): ${err.message}`);
+  }
+
   // ──────────────────────────────────────────────
   // Step 2: 각 시트에 접속하여 탭 정보 파싱
   // ──────────────────────────────────────────────
@@ -187,6 +199,9 @@ async function runIndexScan(dryRun = true) {
 
         // 숨겨진 탭 제외
         if (sheet.properties.hidden) continue;
+
+        // ★ 아카이브된 탭 제외
+        if (archivedScanSet.has(`${entry.sheetId}||${tabName}`)) continue;
 
         const tabUrl = buildTabUrl(sheetUrl, tabGid);
 
@@ -485,6 +500,13 @@ async function syncTabListToDB({ dryRun = true, fromCache = false } = {}) {
   const { rows: dbTabs } = await pool.query('SELECT sheet_id, tab_name, tab_gid FROM tab_configs');
   const { rows: dbIndex } = await pool.query('SELECT sheet_id, tab_name, tab_gid FROM index_master');
 
+  // ★ 아카이브된 탭 목록 로드 — 아카이브된 탭은 DB에 다시 추가하지 않음
+  const { rows: archivedRows } = await pool.query('SELECT sheet_id, tab_name FROM index_master_archive');
+  const archivedSet = new Set(archivedRows.map(r => `${r.sheet_id}||${r.tab_name}`));
+  if (archivedRows.length > 0) {
+    logger.info(`[syncTabListToDB] 아카이브된 탭 ${archivedRows.length}개 스킵 대상 로드`);
+  }
+
   const dbCampSet = new Set(dbCampaigns.map(c => `${c.sheet_id}||${c.campaign_name}`));
   const dbTabMap = new Map(dbTabs.map(t => [`${t.sheet_id}||${t.tab_name}`, t]));
   const dbIndexSet = new Set(dbIndex.map(i => `${i.sheet_id}||${i.tab_name}`));
@@ -528,6 +550,9 @@ async function syncTabListToDB({ dryRun = true, fromCache = false } = {}) {
 
     // tabName이 없으면 tab_configs / index_master는 스킵
     if (!tabName) continue;
+
+    // ★ 아카이브된 탭은 tab_configs / index_master에 추가하지 않음
+    if (archivedSet.has(`${sheetId}||${tabName}`)) continue;
 
     // tab_url에서 gid 추출
     const gidMatch = (row.tab_url || '').match(/gid=(\d+)/);

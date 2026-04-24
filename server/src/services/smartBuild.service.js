@@ -362,6 +362,13 @@ async function runSmartBuild() {
     const { rows: closedRows } = await pool.query('SELECT sheet_id, tab_name FROM tab_configs WHERE is_closed = TRUE');
     const closedSet = new Set(closedRows.map(r => `${r.sheet_id}||${r.tab_name}`));
 
+    // ★ 아카이브된 탭 목록 로드 — 스마트빌드에서 완전히 제외
+    const { rows: archivedRows } = await pool.query('SELECT sheet_id, tab_name FROM index_master_archive');
+    const archivedSet = new Set(archivedRows.map(r => `${r.sheet_id}||${r.tab_name}`));
+    if (archivedRows.length > 0) {
+      logger.info(`[smartBuild] 아카이브된 탭 ${archivedRows.length}개 스킵 대상 로드`);
+    }
+
     // ── 2단계: Drive API로 변경 시트 감지 ──
     const changedSheetIds = [];
 
@@ -409,9 +416,10 @@ async function runSmartBuild() {
 
         if (validTabs.length === 0) continue;
 
-        // 활성 탭만 필터 (마감 탭 제외)
+        // 활성 탭만 필터 (마감 탭 + 아카이브 탭 제외)
         const activeTabs = validTabs.filter(t => {
           const key = `${sheetId}||${t.properties.title}`;
+          if (archivedSet.has(key)) return false;
           return !closedSet.has(key);
         });
 
