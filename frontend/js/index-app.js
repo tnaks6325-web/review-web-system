@@ -11320,20 +11320,30 @@ const _TAB_DASH_COLS = [
   { key:"updated_at",       label:"갱신일",    cat:"sys",   show:true,  align:"left" },
 ];
 
-// 로컬 저장된 컬럼 표시 설정 로드
+// 로컬 저장된 컬럼 표시/순서 설정 로드
 (function _loadColPrefs() {
   try {
     const saved = localStorage.getItem("tabDash_colPrefs");
     if (saved) {
       const prefs = JSON.parse(saved);
-      _TAB_DASH_COLS.forEach(c => { if (prefs[c.key] !== undefined) c.show = prefs[c.key]; });
+      // v11.8.3+ 형식: { key: { show, order } } 또는 레거시: { key: bool }
+      const isNew = Object.values(prefs).some(v => typeof v === 'object' && v !== null);
+      if (isNew) {
+        _TAB_DASH_COLS.forEach(c => {
+          if (prefs[c.key]) { c.show = prefs[c.key].show; c._order = prefs[c.key].order; }
+        });
+        _TAB_DASH_COLS.sort((a, b) => (a._order ?? 999) - (b._order ?? 999));
+        _TAB_DASH_COLS.forEach(c => delete c._order);
+      } else {
+        _TAB_DASH_COLS.forEach(c => { if (prefs[c.key] !== undefined) c.show = prefs[c.key]; });
+      }
     }
   } catch(_){}
 })();
 
 function _saveColPrefs() {
   const prefs = {};
-  _TAB_DASH_COLS.forEach(c => prefs[c.key] = c.show);
+  _TAB_DASH_COLS.forEach((c, i) => prefs[c.key] = { show: c.show, order: i });
   localStorage.setItem("tabDash_colPrefs", JSON.stringify(prefs));
 }
 
@@ -11444,19 +11454,39 @@ function _kpiCard(label, value, color, icon) {
   </div>`;
 }
 
+// ── 컬럼 토글 + 드래그 순서 변경 UI ──
+let _colDragIdx = null;
 function _buildColToggleUI() {
   const wrap = document.getElementById("tabDashColCheckboxes");
   if (!wrap) return;
   const cats = { core:"기본", meta:"메타", pay:"입금", link:"링크", index:"인덱스", sys:"시스템" };
   let html = "";
-  _TAB_DASH_COLS.forEach(c => {
-    html += `<label style="display:flex;align-items:center;gap:3px;cursor:pointer;white-space:nowrap;padding:2px 0">
-      <input type="checkbox" ${c.show?"checked":""} onchange="_toggleDashCol('${c.key}',this.checked)" style="width:13px;height:13px">
+  _TAB_DASH_COLS.forEach((c, i) => {
+    html += `<div draggable="true" data-col-idx="${i}" ondragstart="_colDragStart(event,${i})" ondragover="_colDragOver(event)" ondrop="_colDrop(event,${i})" ondragend="_colDragEnd(event)" style="display:inline-flex;align-items:center;gap:3px;cursor:grab;white-space:nowrap;padding:3px 6px;border-radius:6px;border:1px solid transparent;background:${c.show?'#EFF6FF':'#F9FAFB'};transition:all .15s;user-select:none" onmouseover="this.style.borderColor='#93C5FD'" onmouseout="this.style.borderColor='transparent'">
+      <i class="fas fa-grip-vertical" style="color:#CBD5E1;font-size:.65rem;cursor:grab"></i>
+      <input type="checkbox" ${c.show?"checked":""} onchange="_toggleDashCol('${c.key}',this.checked)" style="width:13px;height:13px;cursor:pointer">
       <span style="color:${c.show?'var(--t1)':'var(--t3)'}">${c.label}</span>
-      <span style="font-size:.6rem;color:#9CA3AF">${cats[c.cat]||""}</span>
-    </label>`;
+      <span style="font-size:.58rem;color:#9CA3AF">${cats[c.cat]||""}</span>
+    </div>`;
   });
   wrap.innerHTML = html;
+}
+function _colDragStart(e, idx) {
+  _colDragIdx = idx;
+  e.dataTransfer.effectAllowed = "move";
+  e.target.style.opacity = "0.5";
+}
+function _colDragOver(e) { e.preventDefault(); e.dataTransfer.dropEffect = "move"; }
+function _colDragEnd(e) { e.target.style.opacity = "1"; _colDragIdx = null; }
+function _colDrop(e, dropIdx) {
+  e.preventDefault();
+  if (_colDragIdx === null || _colDragIdx === dropIdx) return;
+  const moved = _TAB_DASH_COLS.splice(_colDragIdx, 1)[0];
+  _TAB_DASH_COLS.splice(dropIdx, 0, moved);
+  _colDragIdx = null;
+  _saveColPrefs();
+  _buildColToggleUI();
+  renderTabDashTable();
 }
 
 function _toggleDashCol(key, checked) {
