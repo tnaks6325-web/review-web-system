@@ -3193,7 +3193,7 @@ function openFormLink(btnEl) {
 function initOrderFormMode() {
   const params = new URLSearchParams(location.search);
 
-  // ★ 단축 URL 처리: ?r=CODE → GAS resolveShort → 파라미터 복원 후 폼 진입
+  // ★ 단축 URL 처리: ?r=CODE → 서버 API resolveShort → 파라미터 복원 후 폼 진입
   const shortCode = params.get("r") || "";
   if (shortCode) {
     // 즉시 모든 화면 숨기고 로딩 표시
@@ -3202,17 +3202,22 @@ function initOrderFormMode() {
     const loadingTxt = document.getElementById("loadingText");
     if (loadingEl) { if (loadingTxt) loadingTxt.textContent = "링크 확인 중..."; loadingEl.style.display = "flex"; }
 
-    const savedUrl  = (() => { try { return JSON.parse(localStorage.getItem("reviewAppConfig") || "{}").GAS_WEB_APP_URL || ""; } catch(_){ return ""; } })();
-    const gasUrl    = BOOTSTRAP_GAS_URL || savedUrl || "";
+    // ★ 서버 API 우선 → GAS JSONP 폴백
+    const apiBase = (typeof API_BASE_URL !== 'undefined' && API_BASE_URL) ? API_BASE_URL : null;
 
-    if (!gasUrl) {
-      if (loadingEl) loadingEl.style.display = "none";
-      alert("GAS URL이 설정되지 않아 링크를 복원할 수 없습니다.");
-      return false;
-    }
+    const resolveViaApi = async () => {
+      if (apiBase) {
+        const resp = await fetch(apiBase + '/api/short/resolve?code=' + encodeURIComponent(shortCode));
+        return await resp.json();
+      }
+      // GAS 폴백 (JSONP)
+      const savedUrl = (() => { try { return JSON.parse(localStorage.getItem("reviewAppConfig") || "{}").GAS_WEB_APP_URL || ""; } catch(_){ return ""; } })();
+      const gasUrl = BOOTSTRAP_GAS_URL || savedUrl || "";
+      if (!gasUrl) throw new Error("API URL이 설정되지 않았습니다.");
+      return await _jsonpGet(gasUrl + "?action=resolveShort&code=" + encodeURIComponent(shortCode), 10000);
+    };
 
-    // JSONP로 resolveShort 호출 후 파라미터 복원
-    _jsonpGet(gasUrl + "?action=resolveShort&code=" + encodeURIComponent(shortCode), 10000)
+    resolveViaApi()
       .then(data => {
         if (loadingEl) loadingEl.style.display = "none";
         if (!data || !data.success) {
