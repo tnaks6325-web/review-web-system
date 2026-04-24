@@ -249,20 +249,27 @@ router.post('/sync-tab-names', authMiddleware, async (req, res, next) => {
     const errorDetails = [];
 
     // 3. 각 시트별로 실제 탭 메타 조회 (배치 병렬 처리 — quota 안전 + 속도 최적화)
-    //    Google API 읽기 quota: 분당 60 → 10개씩 병렬 요청, 배치 간 200ms 간격
+    //    Google API 읽기 quota: 분당 60 → 5개씩 병렬 요청, 배치 간 2초 간격
     const BATCH_SIZE = 5;
-    for (let i = 0; i < sheetIds.length; i += BATCH_SIZE) {
-      const batch = sheetIds.slice(i, i + BATCH_SIZE);
+    const quotaFailedSheetIds = []; // quota 초과로 실패한 시트 → 나중에 재시도
+
+    async function processBatch(batchSheetIds) {
       const batchResults = await Promise.allSettled(
-        batch.map(sheetId => getSpreadsheetMeta(sheetId).then(meta => ({ sheetId, meta })))
+        batchSheetIds.map(sheetId => getSpreadsheetMeta(sheetId).then(meta => ({ sheetId, meta })))
       );
 
-      for (const result of batchResults) {
+      const retryIds = [];
+      for (let idx = 0; idx < batchResults.length; idx++) {
+        const result = batchResults[idx];
         if (result.status === 'rejected') {
-          // 시트 접근 불가
-          const errSheetId = batch[batchResults.indexOf(result)];
+          const errSheetId = batchSheetIds[idx];
           const sheetErr = result.reason;
-          errors++;
+          // quota 초과는 재시도 대상
+          if (sheetErr.message && /quota|rate limit/i.test(sheetErr.message)) {
+            retryIds.push(errSheetId);
+            continue;
+          }
+          // 기타 에러는 즉시 기록
           const dbTabs = sheetMap[errSheetId] || [];
           const campaigns = [...new Set(dbTabs.map(t => t.campaign_name).filter(Boolean))];
           const tabNames = dbTabs.map(t => t.tab_name).slice(0, 5);
@@ -282,6 +289,7 @@ router.post('/sync-tab-names', authMiddleware, async (req, res, next) => {
                 ? '시트가 삭제되었거나 ID가 잘못되었습니다.'
                 : undefined,
           });
+          errors++;
           continue;
         }
 
@@ -434,9 +442,37 @@ router.post('/sync-tab-names', authMiddleware, async (req, res, next) => {
         }
       }
 
+      return retryIds;
+    } // end processBatch
+
+    // ── 메인 배치 루프 ──
+    for (let i = 0; i < sheetIds.length; i += BATCH_SIZE) {
+      const batch = sheetIds.slice(i, i + BATCH_SIZE);
+      const retryIds = await processBatch(batch);
+      quotaFailedSheetIds.push(...retryIds);
+
       // 배치 간 2초 대기 (Google API quota: 분당 60 읽기 → 5개/2초 = ~25회/분, 다른 서비스와 quota 공유)
       if (i + BATCH_SIZE < sheetIds.length) {
         await new Promise(r => setTimeout(r, 2000));
+      }
+    }
+
+    // ── Quota 실패 시트 재시도 (10초 대기 후 1개씩 순차 처리) ──
+    if (quotaFailedSheetIds.length > 0) {
+      logger.info(`[sync-tab-names] quota 실패 ${quotaFailedSheetIds.length}건 → 10초 후 재시도`);
+      await new Promise(r => setTimeout(r, 10000));
+      for (const retryId of quotaFailedSheetIds) {
+        const retryFailed = await processBatch([retryId]);
+        if (retryFailed.length > 0) {
+          // 재시도도 실패 → 에러로 기록
+          errors++;
+          const dbTabs = sheetMap[retryId] || [];
+          const campaigns = [...new Set(dbTabs.map(t => t.campaign_name).filter(Boolean))];
+          if (errorDetails.length < 10) {
+            errorDetails.push(`시트 ${retryId.substring(0, 15)}... (${campaigns.join(', ') || '미분류'}): Quota 재시도 실패`);
+          }
+        }
+        await new Promise(r => setTimeout(r, 2000)); // 재시도 간 2초 대기
       }
     }
 
