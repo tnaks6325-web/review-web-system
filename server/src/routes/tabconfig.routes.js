@@ -250,7 +250,7 @@ router.post('/sync-tab-names', authMiddleware, async (req, res, next) => {
 
     // 3. 각 시트별로 실제 탭 메타 조회 (배치 병렬 처리 — quota 안전 + 속도 최적화)
     //    Google API 읽기 quota: 분당 60 → 10개씩 병렬 요청, 배치 간 200ms 간격
-    const BATCH_SIZE = 8;
+    const BATCH_SIZE = 5;
     for (let i = 0; i < sheetIds.length; i += BATCH_SIZE) {
       const batch = sheetIds.slice(i, i + BATCH_SIZE);
       const batchResults = await Promise.allSettled(
@@ -434,9 +434,9 @@ router.post('/sync-tab-names', authMiddleware, async (req, res, next) => {
         }
       }
 
-      // 배치 간 1.5초 대기 (Google API quota: 분당 60 읽기 → 8개/1.5초 = ~45회/분)
+      // 배치 간 2초 대기 (Google API quota: 분당 60 읽기 → 5개/2초 = ~25회/분, 다른 서비스와 quota 공유)
       if (i + BATCH_SIZE < sheetIds.length) {
-        await new Promise(r => setTimeout(r, 1500));
+        await new Promise(r => setTimeout(r, 2000));
       }
     }
 
