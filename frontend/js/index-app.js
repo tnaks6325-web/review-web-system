@@ -4591,30 +4591,27 @@ async function copyShortLink(btnEl) {
 
   let shortUrl = null;
   try {
-    if (APP_CONFIG.GAS_WEB_APP_URL) {
-      // ★ 1단계: 탭의 옵션 목록 조회 (결제금액 포함)
-      let optionList = [];
-      try {
-        const optData = await gasGet({ action: "getTabOptions", s: sheetId, g: gid, t: tabName });
-        if (optData && Array.isArray(optData.optionList)) {
-          optionList = optData.optionList; // [{ label, price }]
-        }
-      } catch (optErr) {
-        console.warn("[shortLink] 옵션 조회 실패 (무시):", optErr.message);
-      }
-
-      // ★ 2단계: 단축코드 생성 (optionList 포함)
-      const data = await gasGet({
-        action: "createShort",
-        s: sheetId, g: gid, t: tabName, d: displayName, ic: incomeType,
-        optionList: JSON.stringify(optionList)
+    // ★ 서버 API 우선 사용 → GAS 폴백
+    const apiBase = getApiBaseUrl();
+    if (apiBase) {
+      const resp = await fetch(apiBase + '/api/short/create', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', ...(_getAuthHeaders ? _getAuthHeaders() : {}) },
+        body: JSON.stringify({ s: sheetId, g: gid, t: tabName, d: displayName })
       });
+      const data = await resp.json();
+      if (data && data.success && data.code) {
+        shortUrl = base + "?r=" + data.code;
+      }
+    } else if (APP_CONFIG.GAS_WEB_APP_URL) {
+      // GAS 폴백
+      const data = await gasGet({ action: "createShort", s: sheetId, g: gid, t: tabName, d: displayName, ic: incomeType });
       if (data && data.success && data.code) {
         shortUrl = base + "?r=" + data.code;
       }
     }
   } catch (e) {
-    console.warn("[shortLink] GAS 오류, 긴 URL로 폴백:", e.message);
+    console.warn("[shortLink] 단축URL 생성 오류, 긴 URL로 폴백:", e.message);
   }
 
   btnEl.classList.remove("loading");
