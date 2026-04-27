@@ -663,7 +663,11 @@ function resetSmartBuildCache() {
   _modifiedTimeCache = {};
   _checksumCache = {};
   _lastRunResult = null;
-  logger.info(`[SmartBuild] 캐시 리셋 완료 — modifiedTime: ${prev.modifiedTimeEntries}→0, checksum: ${prev.checksumEntries}→0`);
+  // DB의 index_master.checksum도 NULL로 초기화 → 다음 빌드에서 전체 탭 강제 갱신
+  pool.query("UPDATE index_master SET checksum = NULL").catch(err => {
+    logger.error(`[SmartBuild] DB 체크섬 초기화 실패: ${err.message}`);
+  });
+  logger.info(`[SmartBuild] 캐시 리셋 완료 — modifiedTime: ${prev.modifiedTimeEntries}→0, checksum: ${prev.checksumEntries}→0, DB checksum→NULL`);
   return prev;
 }
 
