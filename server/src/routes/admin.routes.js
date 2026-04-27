@@ -778,40 +778,28 @@ router.delete('/campaign/:sheetId', authMiddleware, masterOnlyMiddleware, async 
       return res.status(400).json({ ok: false, error: 'sheetId가 유효하지 않습니다.' });
     }
 
-    const client = await pool.connect();
-    try {
-      await client.query('BEGIN');
+    const r1 = await pool.query('DELETE FROM review_index WHERE sheet_id = $1', [sheetId]);
+    const r2 = await pool.query('DELETE FROM index_master WHERE sheet_id = $1', [sheetId]);
+    const r3 = await pool.query('DELETE FROM tab_configs WHERE sheet_id = $1', [sheetId]);
+    const r4 = await pool.query('DELETE FROM campaigns WHERE sheet_id = $1', [sheetId]);
 
-      const r1 = await client.query('DELETE FROM review_index WHERE sheet_id = $1', [sheetId]);
-      const r2 = await client.query('DELETE FROM index_master WHERE sheet_id = $1', [sheetId]);
-      const r3 = await client.query('DELETE FROM tab_configs WHERE sheet_id = $1', [sheetId]);
-      const r4 = await client.query('DELETE FROM campaigns WHERE sheet_id = $1', [sheetId]);
+    const deleted = {
+      review_index: r1.rowCount,
+      index_master: r2.rowCount,
+      tab_configs: r3.rowCount,
+      campaigns: r4.rowCount,
+    };
+    const total = Object.values(deleted).reduce((a, b) => a + b, 0);
 
-      await client.query('COMMIT');
+    logger.info(`[campaign-delete] 시트 ${sheetId.substring(0, 15)}... 삭제 완료: ${JSON.stringify(deleted)}`);
 
-      const deleted = {
-        review_index: r1.rowCount,
-        index_master: r2.rowCount,
-        tab_configs: r3.rowCount,
-        campaigns: r4.rowCount,
-      };
-      const total = Object.values(deleted).reduce((a, b) => a + b, 0);
-
-      logger.info(`[campaign-delete] 시트 ${sheetId.substring(0, 15)}... 삭제 완료: ${JSON.stringify(deleted)}`);
-
-      res.json({
-        ok: true,
-        sheetId,
-        deleted,
-        totalDeleted: total,
-        message: `시트 데이터 ${total}건 삭제 완료`,
-      });
-    } catch (err) {
-      await client.query('ROLLBACK');
-      throw err;
-    } finally {
-      client.release();
-    }
+    res.json({
+      ok: true,
+      sheetId,
+      deleted,
+      totalDeleted: total,
+      message: `시트 데이터 ${total}건 삭제 완료`,
+    });
   } catch (err) {
     logger.error(`[campaign-delete] 오류: ${err.message}`);
     next(err);
