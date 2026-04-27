@@ -99,36 +99,68 @@ async function listFolderContents(folderId, mimeType = null) {
 }
 
 /**
- * 파일/폴더 이름 변경 (OAuth 우선 — 쓰기 작업)
+ * 파일/폴더 이름 변경 (OAuth 우선 → SA 폴백)
  */
 async function renameFile(fileId, newName) {
-  const d = _getUploadDrive();
-  if (!d) throw new Error('Google Drive API가 설정되지 않았습니다. (OAuth 또는 SA 필요)');
-  const res = await d.files.update({
+  const updateParams = {
     fileId,
     requestBody: { name: newName },
     fields: 'id, name',
     supportsAllDrives: true,
-  });
-  logger.info(`[Drive] 이름 변경: ${fileId} → "${newName}" (${oauthDrive ? 'OAuth' : 'SA'})`);
-  return res.data;
+  };
+
+  const oauth = _getOAuthDrive();
+  if (oauth) {
+    try {
+      const res = await oauth.files.update(updateParams);
+      logger.info(`[Drive] 이름 변경: ${fileId} → "${newName}" (OAuth)`);
+      return res.data;
+    } catch (oauthErr) {
+      logger.warn(`[Drive] OAuth 이름 변경 실패 (SA 재시도): ${oauthErr.message}`);
+    }
+  }
+
+  const sa = _getReadDrive();
+  if (sa) {
+    const res = await sa.files.update(updateParams);
+    logger.info(`[Drive] 이름 변경: ${fileId} → "${newName}" (SA)`);
+    return res.data;
+  }
+
+  throw new Error('Google Drive API가 설정되지 않았습니다. (OAuth 또는 SA 필요)');
 }
 
 /**
- * 파일/폴더 이동 (부모 변경) (OAuth 우선 — 쓰기 작업)
+ * 파일/폴더 이동 (부모 변경) (OAuth 우선 → SA 폴백)
  */
 async function moveFile(fileId, newParentId, oldParentId) {
-  const d = _getUploadDrive();
-  if (!d) throw new Error('Google Drive API가 설정되지 않았습니다. (OAuth 또는 SA 필요)');
-  const res = await d.files.update({
+  const updateParams = {
     fileId,
     addParents: newParentId,
     removeParents: oldParentId,
     fields: 'id, parents',
     supportsAllDrives: true,
-  });
-  logger.info(`[Drive] 파일 이동: ${fileId} → parent ${newParentId} (${oauthDrive ? 'OAuth' : 'SA'})`);
-  return res.data;
+  };
+
+  const oauth = _getOAuthDrive();
+  if (oauth) {
+    try {
+      const res = await oauth.files.update(updateParams);
+      logger.info(`[Drive] 파일 이동: ${fileId} → parent ${newParentId} (OAuth)`);
+      return res.data;
+    } catch (oauthErr) {
+      logger.warn(`[Drive] OAuth 파일 이동 실패 (SA 재시도): ${oauthErr.message}`);
+    }
+  }
+
+  const sa = _getReadDrive();
+  if (sa) {
+    const res = await sa.files.update(updateParams);
+    logger.info(`[Drive] 파일 이동: ${fileId} → parent ${newParentId} (SA)`);
+    return res.data;
+  }
+
+  throw new Error('Google Drive API가 설정되지 않았습니다. (OAuth 또는 SA 필요)');
 }
 
 /**
@@ -176,13 +208,10 @@ async function findFolderByName(name, parentFolderId) {
 // ═══════════════════════════════════════════════════════════
 
 /**
- * 폴더 생성 (OAuth 우선)
+ * 폴더 생성 (OAuth 우선 → 실패 시 SA 폴백)
  */
 async function createFolder(name, parentFolderId) {
-  const d = _getUploadDrive();
-  if (!d) throw new Error('Google Drive API가 설정되지 않았습니다. (OAuth 또는 SA 필요)');
-
-  const res = await d.files.create({
+  const createParams = {
     requestBody: {
       name,
       mimeType: 'application/vnd.google-apps.folder',
@@ -190,13 +219,33 @@ async function createFolder(name, parentFolderId) {
     },
     fields: 'id, name, webViewLink',
     supportsAllDrives: true,
-  });
-  logger.info(`[Drive] 폴더 생성 완료: "${name}" → ${res.data.id} (${oauthDrive ? 'OAuth' : 'SA'})`);
-  return res.data;
+  };
+
+  // OAuth 먼저 시도
+  const oauth = _getOAuthDrive();
+  if (oauth) {
+    try {
+      const res = await oauth.files.create(createParams);
+      logger.info(`[Drive] 폴더 생성 완료: "${name}" → ${res.data.id} (OAuth)`);
+      return res.data;
+    } catch (oauthErr) {
+      logger.warn(`[Drive] OAuth 폴더 생성 실패 (SA 재시도): ${oauthErr.message}`);
+    }
+  }
+
+  // SA 폴백
+  const sa = _getReadDrive();
+  if (sa) {
+    const res = await sa.files.create(createParams);
+    logger.info(`[Drive] 폴더 생성 완료: "${name}" → ${res.data.id} (SA)`);
+    return res.data;
+  }
+
+  throw new Error('Google Drive API가 설정되지 않았습니다. (OAuth 또는 SA 필요)');
 }
 
 /**
- * Base64 이미지를 Google Drive 폴더에 업로드 (OAuth 전용)
+ * Base64 이미지를 Google Drive 폴더에 업로드 (OAuth 우선 → SA 폴백)
  * @param {string} base64Data - Base64 인코딩된 이미지 데이터 (data URL prefix 포함 가능)
  * @param {string} fileName - 업로드할 파일명
  * @param {string} mimeType - MIME 타입 (예: image/jpeg)
@@ -204,23 +253,18 @@ async function createFolder(name, parentFolderId) {
  * @returns {{ id, name, webViewLink, webContentLink }}
  */
 async function uploadFileBase64(base64Data, fileName, mimeType, parentFolderId) {
-  const d = _getUploadDrive();
-  if (!d) {
-    throw new Error(
-      'Drive 업로드 클라이언트가 없습니다. ' +
-      'DRIVE_OAUTH_CLIENT_ID, DRIVE_OAUTH_CLIENT_SECRET, DRIVE_OAUTH_REFRESH_TOKEN 환경변수를 설정하세요.'
-    );
-  }
-
   // data URL prefix 제거
   const cleanBase64 = base64Data.replace(/^data:[^;]+;base64,/, '');
   const buffer = Buffer.from(cleanBase64, 'base64');
 
-  const stream = new Readable();
-  stream.push(buffer);
-  stream.push(null);
+  function _makeStream() {
+    const s = new Readable();
+    s.push(buffer);
+    s.push(null);
+    return s;
+  }
 
-  const createParams = {
+  const makeParams = (stream) => ({
     requestBody: {
       name: fileName,
       parents: [parentFolderId],
@@ -231,25 +275,50 @@ async function uploadFileBase64(base64Data, fileName, mimeType, parentFolderId) 
     },
     fields: 'id, name, webViewLink, webContentLink',
     supportsAllDrives: true,
-  };
+  });
 
-  logger.info(`[Drive] 업로드 시작: ${fileName} → ${parentFolderId} (${oauthDrive ? 'OAuth' : 'SA'})`);
-  const res = await d.files.create(createParams);
-  const data = res.data;
-  logger.info(`[Drive] 업로드 성공: ${data.id} (${oauthDrive ? 'OAuth' : 'SA'})`);
+  let data = null;
+  let usedClient = 'SA';
+
+  // OAuth 먼저 시도
+  const oauth = _getOAuthDrive();
+  if (oauth) {
+    try {
+      const res = await oauth.files.create(makeParams(_makeStream()));
+      data = res.data;
+      usedClient = 'OAuth';
+    } catch (oauthErr) {
+      logger.warn(`[Drive] OAuth 업로드 실패 (SA 재시도): ${oauthErr.message}`);
+    }
+  }
+
+  // SA 폴백
+  if (!data) {
+    const sa = _getReadDrive();
+    if (!sa) {
+      throw new Error(
+        'Drive 업로드 클라이언트가 없습니다. ' +
+        'DRIVE_OAUTH_CLIENT_ID/SECRET/REFRESH_TOKEN 또는 서비스 계정을 설정하세요.'
+      );
+    }
+    const res = await sa.files.create(makeParams(_makeStream()));
+    data = res.data;
+    usedClient = 'SA';
+  }
+
+  logger.info(`[Drive] 업로드 성공: ${data.id} (${usedClient})`);
 
   // 파일을 "링크가 있는 모든 사용자" 읽기 가능으로 설정
   try {
-    await d.permissions.create({
-      fileId: data.id,
-      requestBody: {
-        role: 'reader',
-        type: 'anyone',
-      },
-      supportsAllDrives: true,
-    });
+    const d = usedClient === 'OAuth' ? oauth : _getReadDrive();
+    if (d) {
+      await d.permissions.create({
+        fileId: data.id,
+        requestBody: { role: 'reader', type: 'anyone' },
+        supportsAllDrives: true,
+      });
+    }
   } catch (permErr) {
-    // 권한 설정 실패 시 무시 (업로드 자체는 성공)
     logger.warn(`[Drive] 권한 설정 실패 (무시): ${permErr.message}`);
   }
 
@@ -258,26 +327,44 @@ async function uploadFileBase64(base64Data, fileName, mimeType, parentFolderId) 
 
 /**
  * 파일 복사 (Google Drive files.copy) — 원본 유지, 새 폴더에 사본 생성
+ * OAuth 우선 → 실패 시 SA 폴백
  * @param {string} fileId - 복사할 원본 파일 ID
  * @param {string} newParentId - 사본을 넣을 대상 폴더 ID
  * @param {string} [newName] - 사본 파일명 (없으면 원본 이름 유지)
  * @returns {{ id, name, webViewLink }}
  */
 async function copyFile(fileId, newParentId, newName) {
-  const d = _getUploadDrive();
-  if (!d) throw new Error('Google Drive API가 설정되지 않았습니다. (OAuth 또는 SA 필요)');
-
   const requestBody = { parents: [newParentId] };
   if (newName) requestBody.name = newName;
 
-  const res = await d.files.copy({
+  const copyParams = {
     fileId,
     requestBody,
     fields: 'id, name, webViewLink',
     supportsAllDrives: true,
-  });
-  logger.info(`[Drive] 파일 복사: ${fileId} → ${newParentId}/${res.data.name} (${oauthDrive ? 'OAuth' : 'SA'})`);
-  return res.data;
+  };
+
+  // OAuth 먼저 시도
+  const oauth = _getOAuthDrive();
+  if (oauth) {
+    try {
+      const res = await oauth.files.copy(copyParams);
+      logger.info(`[Drive] 파일 복사: ${fileId} → ${newParentId}/${res.data.name} (OAuth)`);
+      return res.data;
+    } catch (oauthErr) {
+      logger.warn(`[Drive] OAuth 파일 복사 실패 (SA 재시도): ${oauthErr.message}`);
+    }
+  }
+
+  // SA 폴백
+  const sa = _getReadDrive();
+  if (sa) {
+    const res = await sa.files.copy(copyParams);
+    logger.info(`[Drive] 파일 복사: ${fileId} → ${newParentId}/${res.data.name} (SA)`);
+    return res.data;
+  }
+
+  throw new Error('Google Drive API가 설정되지 않았습니다. (OAuth 또는 SA 필요)');
 }
 
 /**
