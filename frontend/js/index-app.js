@@ -2,6 +2,24 @@
    app.js v4 [인라인]
 ══════════════════════════════════════════ */
 
+/* ── 에러 메시지 한글 번역 (프론트엔드 fallback) ── */
+function _translateErrorClient(msg) {
+  if (!msg) return '알 수 없는 오류';
+  if (/file not found/i.test(msg))                      return '파일을 찾을 수 없습니다 (삭제되었거나 ID가 잘못됨)';
+  if (/does not have permission/i.test(msg))             return '접근 권한이 없습니다 (서비스 계정에 공유 필요)';
+  if (/quota exceeded/i.test(msg))                       return 'API 할당량 초과 (잠시 후 자동 재시도)';
+  if (/rate limit/i.test(msg))                           return 'API 요청 속도 제한 초과';
+  if (/unable to parse range/i.test(msg))                return '시트 범위를 파싱할 수 없습니다 (탭 이름 오류)';
+  if (/requested entity was not found/i.test(msg))       return '요청한 항목을 찾을 수 없습니다';
+  if (/spreadsheet.*not found/i.test(msg))               return '스프레드시트를 찾을 수 없습니다';
+  if (/ECONNRESET|ETIMEDOUT|ENOTFOUND/i.test(msg))      return '네트워크 연결 오류 (일시적 장애)';
+  if (/socket hang up/i.test(msg))                       return '네트워크 연결이 끊어졌습니다';
+  if (/503|service unavailable/i.test(msg))              return 'Google API 서비스 일시 중단';
+  if (/500|internal server error/i.test(msg))            return 'Google API 내부 서버 오류';
+  if (/메타데이터 조회 실패/i.test(msg))                   return msg;
+  return msg;
+}
+
 /* ── 숨김/표시 헬퍼 ── */
 function hide(idOrEl) {
   const el = typeof idOrEl === "string" ? document.getElementById(idOrEl) : idOrEl;
@@ -12480,8 +12498,10 @@ function _showIndexScanPreview(res, resultEl) {
       ⚠ 오류 ${res.errors}건:
     </div>`;
     for (const err of res.errorDetails) {
-      html += `<div style="padding:1px 0 1px 12px;font-size:.64rem;color:#B91C1C">
+      const desc = err.desc || (typeof _translateErrorClient === 'function' ? _translateErrorClient(err.error) : err.error);
+      html += `<div style="padding:2px 0 2px 12px;font-size:.64rem;color:#B91C1C;line-height:1.5">
         ${err.sheetId || '?'} — ${err.error} (${err.errorCode || ''})
+        <span style="color:#DC2626;font-weight:600">→ ${desc}</span>
       </div>`;
     }
   }
@@ -12646,7 +12666,10 @@ function _showScanResult(res, dryRun) {
 
   const errHtml = (res.errorDetails || []).length > 0
     ? `<div style="margin-top:8px;padding:6px;background:#FEF2F2;border-radius:6px;font-size:.68rem;color:#DC2626">
-        <b>오류:</b> ${res.errorDetails.map(e => `${e.sheetId}: ${e.error}`).join('<br>')}</div>` : '';
+        <b>오류:</b><br>${res.errorDetails.map(function(e) {
+          var desc = e.desc || (typeof _translateErrorClient === 'function' ? _translateErrorClient(e.error) : e.error);
+          return '<span style="color:#6B7280">' + (e.sheetId||'?') + ': ' + e.error + '</span><br><span style="color:#DC2626;font-weight:600">→ ' + desc + '</span>';
+        }).join('<br>')}</div>` : '';
 
   const modal = document.createElement('div');
   modal.id = 'scanMasterResultModal';

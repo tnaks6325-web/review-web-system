@@ -27,6 +27,24 @@ const { logger } = require('../utils/logger');
 
 const SMART_BUILD_INTERVAL_MS = 5 * 60 * 1000; // 5분
 
+// ── 에러 메시지 한글 번역 헬퍼 ──
+function _translateError(msg) {
+  if (!msg) return '알 수 없는 오류';
+  if (/file not found/i.test(msg))                      return '파일을 찾을 수 없습니다 (삭제되었거나 ID가 잘못됨)';
+  if (/does not have permission/i.test(msg))             return '접근 권한이 없습니다 (서비스 계정에 공유 필요)';
+  if (/caller does not have permission/i.test(msg))      return '접근 권한이 없습니다 (서비스 계정에 공유 필요)';
+  if (/quota exceeded/i.test(msg))                       return 'API 할당량 초과 (잠시 후 자동 재시도)';
+  if (/rate limit/i.test(msg))                           return 'API 요청 속도 제한 초과';
+  if (/unable to parse range/i.test(msg))                return '시트 범위를 파싱할 수 없습니다 (탭 이름 오류)';
+  if (/requested entity was not found/i.test(msg))       return '요청한 항목을 찾을 수 없습니다';
+  if (/spreadsheet.*not found/i.test(msg))               return '스프레드시트를 찾을 수 없습니다';
+  if (/ECONNRESET|ETIMEDOUT|ENOTFOUND/i.test(msg))      return '네트워크 연결 오류 (일시적 장애)';
+  if (/socket hang up/i.test(msg))                       return '네트워크 연결이 끊어졌습니다';
+  if (/503|service unavailable/i.test(msg))              return 'Google API 서비스 일시 중단';
+  if (/500|internal server error/i.test(msg))            return 'Google API 내부 서버 오류';
+  return msg; // 매칭 안 되면 원문 반환
+}
+
 // 키워드 기본값 (DB 로드 실패 시 폴백)
 const DEFAULT_SUBMITTED_VALUES = ['TRUE', 'true', '1', '제출', 'O', 'o', '완료', 'Y', 'y'];
 const DEFAULT_NAME_KEYWORDS = ['수취인', '이름', '신청자', '참여자', '수취인명', '주문자', '성함', '예금주', '성명'];
@@ -432,7 +450,7 @@ async function runSmartBuild() {
       } catch (err) {
         // Drive API 실패 → 안전하게 변경된 것으로 간주
         changedSheetIds.push(sheetId);
-        result.errorDetails.push({ phase: 'drive', sheetId: sheetId.substring(0, 15), error: err.message });
+        result.errorDetails.push({ phase: 'drive', sheetId: sheetId.substring(0, 15), error: err.message, desc: _translateError(err.message) });
       }
     }
 
@@ -550,14 +568,14 @@ async function runSmartBuild() {
 
           } catch (tabErr) {
             result.errors++;
-            result.errorDetails.push({ phase: 'tab', sheetId: sheetId.substring(0, 15), tabName, error: tabErr.message });
+            result.errorDetails.push({ phase: 'tab', sheetId: sheetId.substring(0, 15), tabName, error: tabErr.message, desc: _translateError(tabErr.message) });
             logger.error(`[smartBuild] 탭 처리 오류 (${tabName}): ${tabErr.message}`);
           }
         }
 
       } catch (sheetErr) {
         result.errors++;
-        result.errorDetails.push({ phase: 'sheet', sheetId: sheetId.substring(0, 15), error: sheetErr.message });
+        result.errorDetails.push({ phase: 'sheet', sheetId: sheetId.substring(0, 15), error: sheetErr.message, desc: _translateError(sheetErr.message) });
         logger.error(`[smartBuild] 시트 처리 오류 (${sheetId.substring(0, 15)}): ${sheetErr.message}`);
       }
     }
@@ -580,7 +598,7 @@ async function runSmartBuild() {
   } catch (err) {
     result.ok = false;
     result.errors++;
-    result.errorDetails.push({ phase: 'global', error: err.message });
+    result.errorDetails.push({ phase: 'global', error: err.message, desc: _translateError(err.message) });
     logger.error(`[smartBuild] #${runNum} 전체 오류: ${err.message}`);
   } finally {
     result.elapsed = Date.now() - startTime;

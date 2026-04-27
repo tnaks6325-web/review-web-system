@@ -1413,8 +1413,11 @@ async function loadSmartBuildStatus() {
             <div style="margin-top:8px;font-size:.72rem">
               <div style="font-weight:600;color:#DC2626;margin-bottom:4px"><i class="fas fa-exclamation-triangle"></i> 오류 상세:</div>
               ${lastRun.errorDetails.slice(0, 5).map(function(e) {
-                return '<div style="background:#FEF2F2;padding:3px 6px;border-radius:4px;margin-bottom:2px">' +
-                  '<b>' + (e.phase || '-') + '</b>: ' + (e.error || '').substring(0, 80) +
+                var phaseLabel = {drive:'드라이브',sheet:'시트',tab:'탭',global:'전체'}[e.phase] || e.phase || '-';
+                var desc = e.desc || _translateErrorClient(e.error);
+                return '<div style="background:#FEF2F2;padding:4px 8px;border-radius:4px;margin-bottom:3px;line-height:1.5">' +
+                  '<div><b style="color:#B91C1C">' + phaseLabel + '</b>: <span style="color:#6B7280">' + (e.error || '').substring(0, 100) + '</span></div>' +
+                  '<div style="color:#DC2626;font-weight:600;margin-top:1px">\u2192 ' + desc + '</div>' +
                   '</div>';
               }).join('')}
             </div>
