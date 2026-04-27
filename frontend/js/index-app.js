@@ -9670,9 +9670,29 @@ async function previewAddCampaign() {
   try {
     const data = await gasGet({ action: "previewCampaign", url: raw });
     if (!data.ok) {
-      errEl.innerHTML = data.serviceAccount
-        ? `${data.error}<br><code style="font-size:11px;background:#f1f5f9;padding:2px 6px;border-radius:3px;user-select:all">${data.serviceAccount}</code>`
-        : (data.error || "시트 조회 실패");
+      if (data.serviceAccount) {
+        const sa = data.serviceAccount;
+        const sheetUrl = raw.trim();
+        errEl.innerHTML = `
+          <div style="color:#dc2626;font-size:12px;line-height:1.6;margin-bottom:6px;">
+            시트 접근 권한이 없습니다.<br>아래 서비스 계정을 추가하려는 시트에<br><b>액세스 권한을 편집자로 추가</b> 후 다시 시도해주세요.
+          </div>
+          <div style="display:flex;align-items:center;gap:6px;background:#f1f5f9;border:1px solid #e2e8f0;border-radius:6px;padding:6px 10px;margin-bottom:8px;">
+            <code style="font-size:11px;color:#334155;flex:1;word-break:break-all;user-select:all;">${sa}</code>
+          </div>
+          <div style="display:flex;gap:6px;">
+            <button onclick="navigator.clipboard.writeText('${sa}').then(()=>{this.innerHTML='<i class=\\'fas fa-check\\'></i> 복사됨';this.style.background='#10b981';setTimeout(()=>{this.innerHTML='<i class=\\'fas fa-copy\\'></i> 서비스계정 복사';this.style.background='#6366f1'},1500)})"
+              style="flex:1;padding:6px 10px;background:#6366f1;color:#fff;border:none;border-radius:6px;font-size:11px;font-weight:600;cursor:pointer;display:flex;align-items:center;justify-content:center;gap:4px;">
+              <i class="fas fa-copy"></i> 서비스계정 복사
+            </button>
+            <button onclick="window.open('${sheetUrl}','_blank')"
+              style="flex:1;padding:6px 10px;background:#0ea5e9;color:#fff;border:none;border-radius:6px;font-size:11px;font-weight:600;cursor:pointer;display:flex;align-items:center;justify-content:center;gap:4px;">
+              <i class="fas fa-external-link-alt"></i> 시트 이동
+            </button>
+          </div>`;
+      } else {
+        errEl.textContent = data.error || "시트 조회 실패";
+      }
       return;
     }
     // 시트 제목
