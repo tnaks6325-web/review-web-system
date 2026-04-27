@@ -2037,6 +2037,15 @@ async function loadAdminDashboard() {
     const stats = data.stats || [];
     const grand = data.grand || { total: 0, submitted: 0, pending: 0 };
 
+    // ★ 디버그: roundList 수신 현황 로깅
+    let _dbgRoundTabs = 0;
+    stats.forEach(c => (c.tabs||[]).forEach(t => {
+      if (t.roundList && t.roundList.length > 0) {
+        _dbgRoundTabs++;
+        console.log(`[DEBUG-ROUND] ${c.campaign}/${t.tab}: roundList=${JSON.stringify(t.roundList.map(r=>r.round))}, closedRounds="${t.closedRounds||''}"`);}
+    }));
+    console.log(`[DEBUG-ROUND] 총 ${stats.length}개 캠페인, roundList 보유 탭: ${_dbgRoundTabs}개`);
+
     _closedSet    = new Set();
     _closedRoundSet = new Set(); // ★ 차수 단위 마감 Set
     stats.forEach(c => {
