@@ -11731,7 +11731,10 @@ function _inlineSelect(t, dbKey, apiKey, options, colorMap) {
 }
 async function _showSelectPopup(e, sheetId, tabName, apiKey, dbKey, options) {
   e.stopPropagation();
-  // 기존 팝업 제거
+  // 토글: 같은 셀에서 열린 팝업이면 닫기만
+  const popupKey = `${sheetId}||${tabName}||${dbKey}`;
+  const existing = document.querySelector(".td-inline-popup");
+  if (existing && existing._popupKey === popupKey) { existing.remove(); return; }
   document.querySelectorAll(".td-inline-popup").forEach(el => el.remove());
   const t = (_tabDashData?.tabs||[]).find(x => x.sheet_id===sheetId && x.tab_name===tabName);
   if (!t) return;
@@ -11755,6 +11758,7 @@ async function _showSelectPopup(e, sheetId, tabName, apiKey, dbKey, options) {
     };
     popup.appendChild(btn);
   });
+  popup._popupKey = popupKey;
   document.body.appendChild(popup);
   // 바깥 클릭 시 닫기
   setTimeout(() => {
@@ -11778,6 +11782,9 @@ function _inlineTimeRange(t) {
 
 function _showTimeRangePopup(e, sheetId, tabName) {
   e.stopPropagation();
+  const popupKey = `${sheetId}||${tabName}||timeRange`;
+  const existing = document.querySelector(".td-inline-popup");
+  if (existing && existing._popupKey === popupKey) { existing.remove(); return; }
   document.querySelectorAll(".td-inline-popup").forEach(el => el.remove());
   const t = (_tabDashData?.tabs||[]).find(x => x.sheet_id===sheetId && x.tab_name===tabName);
   if (!t) return;
@@ -11833,6 +11840,7 @@ function _showTimeRangePopup(e, sheetId, tabName) {
   popup._trMode = mode;
   popup._trStart = { h: startH, m: startM };
   popup._trEnd = { h: endH, m: endM };
+  popup._popupKey = popupKey;
   document.body.appendChild(popup);
   setTimeout(() => {
     const closer = (ev) => { if (!popup.contains(ev.target)) { popup.remove(); document.removeEventListener("mousedown", closer); } };
@@ -11907,6 +11915,9 @@ function _inlineIncomeType(t) {
 
 function _showIncomePopup(e, sheetId, tabName) {
   e.stopPropagation();
+  const popupKey = `${sheetId}||${tabName}||incomeType`;
+  const existing = document.querySelector(".td-inline-popup");
+  if (existing && existing._popupKey === popupKey) { existing.remove(); return; }
   document.querySelectorAll(".td-inline-popup").forEach(el => el.remove());
   const t = (_tabDashData?.tabs||[]).find(x => x.sheet_id===sheetId && x.tab_name===tabName);
   if (!t) return;
@@ -11928,6 +11939,7 @@ function _showIncomePopup(e, sheetId, tabName) {
     html += `<div onclick="_incomeSelect(this,'${escHtml(sheetId)}','${escHtml(tabName)}','${opt}')" style="padding:7px 12px;cursor:pointer;border-radius:6px;margin-bottom:3px;background:${sel?'#EFF6FF':'#fff'};border:1px solid ${sel?'#3B82F6':'transparent'};font-weight:${sel?'600':'400'}" onmouseover="if(!this.style.borderColor.includes('3B82'))this.style.background='#F9FAFB'" onmouseout="if(!this.style.borderColor.includes('3B82'))this.style.background='#fff'">${opt}</div>`;
   });
   popup.innerHTML = html;
+  popup._popupKey = popupKey;
   document.body.appendChild(popup);
   setTimeout(() => {
     const closer = (ev) => { if (!popup.contains(ev.target)) { popup.remove(); document.removeEventListener("mousedown", closer); } };
