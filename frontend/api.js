@@ -91,19 +91,19 @@ const _ACTION_MAP = {
   'adminLoginV2':       { method: 'POST', path: '/api/admin/login' },
   'adminChangePw':      { method: 'POST', path: '/api/admin/change-pw' },
   'changeMasterPw':     { method: 'POST', path: '/api/admin/change-master-pw' },
-  'addAdminUser':       { method: 'POST', path: '/api/admin/users' },
-  'editAdminUser':      { method: 'POST', path: '/api/admin/users' },
-  'deleteAdminUser':    { method: 'POST', path: '/api/admin/users' },
-  'listAdminUsers':     { method: 'POST', path: '/api/admin/users' },
+  'addAdminUser':       { method: 'POST', path: '/api/admin/users', remap: 'add' },
+  'editAdminUser':      { method: 'POST', path: '/api/admin/users', remap: 'edit' },
+  'deleteAdminUser':    { method: 'POST', path: '/api/admin/users', remap: 'delete' },
+  'listAdminUsers':     { method: 'POST', path: '/api/admin/users', remap: 'list' },
   'dashboard':          { method: 'GET',  path: '/api/admin/dashboard' },
   'releaseBuildLock':   { method: 'POST', path: '/api/admin/release-lock' },
   
   // 영업담당자 (Staff)
   'staffLogin':         { method: 'POST', path: '/api/admin/staff-login' },
-  'addStaffUser':       { method: 'POST', path: '/api/admin/staff-users' },
-  'editStaffUser':      { method: 'POST', path: '/api/admin/staff-users' },
-  'deleteStaffUser':    { method: 'POST', path: '/api/admin/staff-users' },
-  'listStaffUsers':     { method: 'POST', path: '/api/admin/staff-users' },
+  'addStaffUser':       { method: 'POST', path: '/api/admin/staff-users', remap: 'add' },
+  'editStaffUser':      { method: 'POST', path: '/api/admin/staff-users', remap: 'edit' },
+  'deleteStaffUser':    { method: 'POST', path: '/api/admin/staff-users', remap: 'delete' },
+  'listStaffUsers':     { method: 'POST', path: '/api/admin/staff-users', remap: 'list' },
 
   // Drive 폴더 (Section 9)
   'syncCaptureFolders':     { method: 'POST', path: '/api/drive/sync-capture' },
@@ -294,6 +294,11 @@ async function gasPost(body, timeout) {
 
   // action 필드 제거 (서버에서는 라우트로 구분)
   const { action: _, ...payload } = body;
+
+  // ★ remap이 있으면 백엔드가 기대하는 action 필드를 복원 (멀티-액션 라우트용)
+  if (route.remap) {
+    payload.action = route.remap;
+  }
 
   const url = API_BASE_URL + route.path;
   const timeoutMs = timeout || 60000;
