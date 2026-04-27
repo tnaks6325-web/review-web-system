@@ -772,8 +772,10 @@ router.post('/db-rebuild', authMiddleware, masterOnlyMiddleware, async (req, res
 //   campaigns, tab_configs, index_master, review_index 4개 테이블에서 삭제
 // ═══════════════════════════════════════════════════════════
 router.post('/campaign-delete/:sheetId', authMiddleware, masterOnlyMiddleware, async (req, res, next) => {
+  const { logger } = require('../utils/logger');
   try {
     const { sheetId } = req.params;
+    logger.info(`[campaign-delete] 요청: ${sheetId}`);
     if (!sheetId || sheetId.length < 10) {
       return res.status(400).json({ ok: false, error: 'sheetId가 유효하지 않습니다.' });
     }
