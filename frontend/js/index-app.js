@@ -2244,12 +2244,12 @@ async function loadAdminDashboard() {
             const tRd = Object.assign({}, t, { submitted: rd.submitted, total: rd.total, pending: rd.pending, noRecipient: t.noRecipient, tuip: rd.tuip||0, chuihap: rd.chuihap||0 });
             const rdTcData2 = Object.assign({}, JSON.parse(tcAttr.replace(/&quot;/g,'"').replace(/&amp;/g,'&').replace(/&#39;/g,"'").replace(/&lt;/g,'<').replace(/&gt;/g,'>')), { tcRound: rd.round || "" });
             const rdTcAttr2 = escHtml(JSON.stringify(rdTcData2));
-            rdRow.dataset.state = _rowState(false, isClosedTab, rdDone, rd.tuip||0, rd.chuihap||0);
+            rdRow.dataset.state = _rowState(isClosedTab, rdDone, rd.tuip||0, rd.chuihap||0);
             rdRow.innerHTML = _buildTabRowHtml(tRd, rdTabKey2, false, isClosedTab, rdTabNameHtml2, rdStartDateHtml, rdRate, rdStateHtml, rdTcAttr2, rd.round, null, campName);
             flatTable.appendChild(rdRow);
           });
         } else {
-          row.dataset.state = _rowState(false, isClosedTab, isTabDone, tuip, chuihap);
+          row.dataset.state = _rowState(isClosedTab, isTabDone, tuip, chuihap);
           row.innerHTML = _buildTabRowHtml(t, tabKey, false, isClosedTab, tabNameHtml, startDateHtml, tRate, stateHtml, tcAttr, null, endDateHtml, campName);
           flatTable.appendChild(row);
         }
@@ -2504,12 +2504,12 @@ function renderDashboard(data) {
           const tRd = Object.assign({}, t, { submitted: rd.submitted, total: rd.total, pending: rd.pending, tuip: rd.tuip||0, chuihap: rd.chuihap||0 });
           const rdTcData = Object.assign({}, JSON.parse(tcAttr.replace(/&quot;/g,'"').replace(/&amp;/g,'&').replace(/&#39;/g,"'").replace(/&lt;/g,'<').replace(/&gt;/g,'>')), { tcRound: rd.round || "" });
           const rdTcAttr = escHtml(JSON.stringify(rdTcData));
-          rdRow.dataset.state = _rowState(false, isClosedTab, rdDone, rd.tuip||0, rd.chuihap||0);
+          rdRow.dataset.state = _rowState(isClosedTab, rdDone, rd.tuip||0, rd.chuihap||0);
           rdRow.innerHTML = _buildTabRowHtml(tRd, rdTabKey, false, isClosedTab, rdTabNameHtml, rdStartDateHtml, rdRate, rdStateHtml, rdTcAttr, rd.round, null, campName);
           flatTable2.appendChild(rdRow);
         });
       } else {
-        row.dataset.state = _rowState(false, isClosedTab, isTabDone, tuip, chuihap);
+        row.dataset.state = _rowState(isClosedTab, isTabDone, tuip, chuihap);
         row.innerHTML = _buildTabRowHtml(t, tabKey, false, isClosedTab, tabNameHtml, startDateHtml, tRate, stateHtml, tcAttr, null, endDateHtml2, campName);
         flatTable2.appendChild(row);
       }
