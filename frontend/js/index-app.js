@@ -11734,7 +11734,8 @@ async function _showSelectPopup(e, sheetId, tabName, apiKey, dbKey, options) {
   // 토글: 같은 셀에서 열린 팝업이면 닫기만
   const popupKey = `${sheetId}||${tabName}||${dbKey}`;
   const existing = document.querySelector(".td-inline-popup");
-  if (existing && existing._popupKey === popupKey) { existing.remove(); return; }
+  if (existing && existing._popupKey === popupKey) { _removePopupWithTrack(existing); return; }
+  if (_popupJustClosed(popupKey)) return;
   document.querySelectorAll(".td-inline-popup").forEach(el => el.remove());
   const t = (_tabDashData?.tabs||[]).find(x => x.sheet_id===sheetId && x.tab_name===tabName);
   if (!t) return;
@@ -11762,7 +11763,7 @@ async function _showSelectPopup(e, sheetId, tabName, apiKey, dbKey, options) {
   document.body.appendChild(popup);
   // 바깥 클릭 시 닫기
   setTimeout(() => {
-    const closer = (ev) => { if (!popup.contains(ev.target)) { popup.remove(); document.removeEventListener("mousedown", closer); } };
+    const closer = (ev) => { if (!popup.contains(ev.target)) { _removePopupWithTrack(popup); document.removeEventListener("mousedown", closer); } };
     document.addEventListener("mousedown", closer);
   }, 0);
 }
@@ -11784,7 +11785,8 @@ function _showTimeRangePopup(e, sheetId, tabName) {
   e.stopPropagation();
   const popupKey = `${sheetId}||${tabName}||timeRange`;
   const existing = document.querySelector(".td-inline-popup");
-  if (existing && existing._popupKey === popupKey) { existing.remove(); return; }
+  if (existing && existing._popupKey === popupKey) { _removePopupWithTrack(existing); return; }
+  if (_popupJustClosed(popupKey)) return;
   document.querySelectorAll(".td-inline-popup").forEach(el => el.remove());
   const t = (_tabDashData?.tabs||[]).find(x => x.sheet_id===sheetId && x.tab_name===tabName);
   if (!t) return;
@@ -11843,7 +11845,7 @@ function _showTimeRangePopup(e, sheetId, tabName) {
   popup._popupKey = popupKey;
   document.body.appendChild(popup);
   setTimeout(() => {
-    const closer = (ev) => { if (!popup.contains(ev.target)) { popup.remove(); document.removeEventListener("mousedown", closer); } };
+    const closer = (ev) => { if (!popup.contains(ev.target)) { _removePopupWithTrack(popup); document.removeEventListener("mousedown", closer); } };
     document.addEventListener("mousedown", closer);
   }, 0);
 }
@@ -11917,7 +11919,8 @@ function _showIncomePopup(e, sheetId, tabName) {
   e.stopPropagation();
   const popupKey = `${sheetId}||${tabName}||incomeType`;
   const existing = document.querySelector(".td-inline-popup");
-  if (existing && existing._popupKey === popupKey) { existing.remove(); return; }
+  if (existing && existing._popupKey === popupKey) { _removePopupWithTrack(existing); return; }
+  if (_popupJustClosed(popupKey)) return;
   document.querySelectorAll(".td-inline-popup").forEach(el => el.remove());
   const t = (_tabDashData?.tabs||[]).find(x => x.sheet_id===sheetId && x.tab_name===tabName);
   if (!t) return;
@@ -11942,7 +11945,7 @@ function _showIncomePopup(e, sheetId, tabName) {
   popup._popupKey = popupKey;
   document.body.appendChild(popup);
   setTimeout(() => {
-    const closer = (ev) => { if (!popup.contains(ev.target)) { popup.remove(); document.removeEventListener("mousedown", closer); } };
+    const closer = (ev) => { if (!popup.contains(ev.target)) { _removePopupWithTrack(popup); document.removeEventListener("mousedown", closer); } };
     document.addEventListener("mousedown", closer);
   }, 0);
 }
