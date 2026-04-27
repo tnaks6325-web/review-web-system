@@ -767,11 +767,11 @@ router.post('/db-rebuild', authMiddleware, masterOnlyMiddleware, async (req, res
 });
 
 // ═══════════════════════════════════════════════════════════
-// DELETE /api/admin/campaign/:sheetId — 오류 시트(캠페인) DB 일괄 삭제
+// POST /api/admin/campaign-delete/:sheetId — 오류 시트(캠페인) DB 일괄 삭제
 //   시스템 모니터링에서 접근 불가 시트를 관리자가 직접 정리할 때 사용
 //   campaigns, tab_configs, index_master, review_index 4개 테이블에서 삭제
 // ═══════════════════════════════════════════════════════════
-router.delete('/campaign/:sheetId', authMiddleware, masterOnlyMiddleware, async (req, res, next) => {
+router.post('/campaign-delete/:sheetId', authMiddleware, masterOnlyMiddleware, async (req, res, next) => {
   try {
     const { sheetId } = req.params;
     if (!sheetId || sheetId.length < 10) {

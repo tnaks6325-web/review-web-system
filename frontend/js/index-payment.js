@@ -1472,8 +1472,8 @@ async function deleteErrorSheet(sheetId) {
 
   try {
     const headers = { ..._getAuthHeaders() };
-    const res = await fetch(API_BASE_URL + '/api/admin/campaign/' + encodeURIComponent(fullId), {
-      method: 'DELETE',
+    const res = await fetch(API_BASE_URL + '/api/admin/campaign-delete/' + encodeURIComponent(fullId), {
+      method: 'POST',
       headers,
     });
     const data = await res.json();
