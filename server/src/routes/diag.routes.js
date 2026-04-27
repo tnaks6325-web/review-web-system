@@ -488,6 +488,65 @@ router.get('/dashboard-check', async (req, res, next) => {
 });
 
 // ═══════════════════════════════════════════════════════════
+// GET /api/diag/dashboard-roundlist — 대시보드에서 roundList가 어떻게 생성되는지 확인
+// ═══════════════════════════════════════════════════════════
+router.get('/dashboard-roundlist', async (req, res, next) => {
+  try {
+    const { sheetId } = req.query;
+    // 대시보드 API와 동일한 쿼리로 roundDataMap 구성
+    let reviewSql = `
+      SELECT ri.sheet_id AS "sheetId", ri.tab_name AS "tabName",
+             ri.is_submitted AS "isSubmitted", ri.round,
+             ri.start_date AS "startDate"
+      FROM review_index ri
+      INNER JOIN index_master im ON ri.sheet_id = im.sheet_id AND ri.tab_name = im.tab_name
+      WHERE im.status = 'active'
+    `;
+    const params = [];
+    if (sheetId) { params.push(sheetId); reviewSql += ` AND ri.sheet_id = $${params.length}`; }
+    const { rows: reviewRows } = await pool.query(reviewSql, params);
+
+    const roundDataMap = {};
+    for (const row of reviewRows) {
+      const tabKey = `${row.sheetId}||${row.tabName}`;
+      const roundVal = (row.round || '').trim();
+      if (roundVal) {
+        if (!roundDataMap[tabKey]) roundDataMap[tabKey] = {};
+        if (!roundDataMap[tabKey][roundVal]) {
+          roundDataMap[tabKey][roundVal] = { total: 0, submitted: 0, pending: 0, startDate: null };
+        }
+        const rd = roundDataMap[tabKey][roundVal];
+        rd.total++;
+        if (row.isSubmitted) rd.submitted++;
+        else rd.pending++;
+        if (row.startDate) {
+          if (!rd.startDate || row.startDate < rd.startDate) rd.startDate = row.startDate;
+        }
+      }
+    }
+
+    // roundList 생성 (대시보드와 동일 로직)
+    const result = {};
+    for (const [tabKey, rdMap] of Object.entries(roundDataMap)) {
+      const roundList = Object.entries(rdMap)
+        .map(([roundVal, rd]) => ({
+          round: roundVal, total: rd.total, submitted: rd.submitted, pending: rd.pending, startDate: rd.startDate || '',
+        }))
+        .sort((a, b) => {
+          const numA = parseInt(a.round.replace(/[^0-9]/g, '')) || 0;
+          const numB = parseInt(b.round.replace(/[^0-9]/g, '')) || 0;
+          return numA - numB;
+        });
+      result[tabKey] = roundList;
+    }
+
+    res.json({ ok: true, totalReviewRows: reviewRows.length, roundLists: result });
+  } catch (err) {
+    next(err);
+  }
+});
+
+// ═══════════════════════════════════════════════════════════
 // GET /api/diag/round-check — review_index의 round 데이터 진단
 // ═══════════════════════════════════════════════════════════
 router.get('/round-check', async (req, res, next) => {
