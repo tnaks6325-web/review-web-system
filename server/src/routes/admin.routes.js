@@ -621,7 +621,8 @@ router.post('/smart-build/run', authMiddleware, async (req, res, next) => {
     const force = req.body?.force === true || req.query?.force === 'true';
     if (force) {
       const cacheResult = resetSmartBuildCache();
-      logger.info(`[smartBuild] 강제 실행 — 캐시 리셋: ${JSON.stringify(cacheResult)}`);
+      const { logger: log } = require('../utils/logger');
+      log.info(`[smartBuild] 강제 실행 — 캐시 리셋: ${JSON.stringify(cacheResult)}`);
     }
 
     // 백그라운드 실행
