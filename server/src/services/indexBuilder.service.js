@@ -14,7 +14,7 @@ const DEFAULT_SUBMITTED_VALUES = ['TRUE', 'true', '1', '제출', 'O', 'o', '완�
 const DEFAULT_NAME_KEYWORDS = ['수취인', '이름', '신청자', '참여자', '수취인명', '주문자', '성함', '예금주', '성명'];
 const DEFAULT_SYSTEM_TABS = ['세부목록', '검색인덱스', '인덱스마스터', '인덱스데이터', '마감', '상세목록', '탭설정', '설정', 'detail', 'config'];
 const DEFAULT_DATA_TAB_KEYWORDS = ['번호', '주문자', '수취인', '수취인명', '성함', '이름', '성명', '신청자', '연락처', '전화번호'];
-const DEFAULT_SUBMIT_KEYWORDS = ['리뷰완료', '제출', '완료', 'submit', '제출완료', '리뷰제출'];
+const DEFAULT_SUBMIT_KEYWORDS = ['리뷰완료', '제출', '완료', 'submit', '제출완료', '리뷰제출', '리뷰'];
 
 // 빌드 시 DB에서 로드되는 동적 키워드
 let SUBMITTED_VALUES = [...DEFAULT_SUBMITTED_VALUES];
@@ -833,10 +833,33 @@ function parseTabRows(values, sheetId, tabName, tabGid, campaignTitle) {
     return [];
   }
 
-  const submitKeywords = SUBMIT_KEYWORDS;
-  const submitColIdx = headers.findIndex(h =>
-    submitKeywords.some(k => h.toLowerCase().includes(k.toLowerCase()))
-  );
+  // ── 제출열 탐색: 우선순위 기반 ("리뷰제출" > "리뷰완료" > 기타 "제출") ──
+  let submitColIdx = -1;
+  const SUBMIT_PRIORITY_PREFIXES = ['리뷰'];  // 이 접두사가 있는 열을 우선
+  const SUBMIT_EXCLUDE_PATTERNS = ['주문자', '수취인', '이름', '성함', '예금주'];  // 사람이름 열 제외
+
+  // 1단계: "리뷰" 접두사 + 키워드 매칭 (최우선)
+  for (let hi = 0; hi < headers.length && submitColIdx < 0; hi++) {
+    const hl = headers[hi].toLowerCase();
+    if (SUBMIT_PRIORITY_PREFIXES.some(p => hl.includes(p)) &&
+        SUBMIT_KEYWORDS.some(k => hl.includes(k.toLowerCase()))) {
+      submitColIdx = hi;
+    }
+  }
+  // 2단계: 일반 키워드 매칭 (사람이름 열 제외)
+  if (submitColIdx < 0) {
+    for (let hi = 0; hi < headers.length && submitColIdx < 0; hi++) {
+      const hl = headers[hi].toLowerCase();
+      if (SUBMIT_EXCLUDE_PATTERNS.some(p => hl.includes(p))) continue;
+      if (SUBMIT_KEYWORDS.some(k => hl.includes(k.toLowerCase()))) {
+        submitColIdx = hi;
+      }
+    }
+  }
+  // 3단계: 폴백 — 제외 패턴 무시하고 원래 로직 (호환성)
+  if (submitColIdx < 0) {
+    submitColIdx = headers.findIndex(h => SUBMIT_KEYWORDS.some(k => h.toLowerCase().includes(k.toLowerCase())));
+  }
 
   const productKeywords = ['상품명', '제품명', '상품', 'product'];
   const productColIdx = headers.findIndex(h =>
@@ -873,7 +896,7 @@ function parseTabRows(values, sheetId, tabName, tabGid, campaignTitle) {
       if (!name) return null;
 
       const submitVal = submitColIdx >= 0 ? String(row[submitColIdx] || '').trim() : '';
-      const isSubmitted = SUBMITTED_VALUES.includes(submitVal);
+      const isSubmitted = _isSubmittedValue(submitVal);
 
       let phone8 = null;
       if (phoneColIdx >= 0) {
@@ -900,6 +923,24 @@ function parseTabRows(values, sheetId, tabName, tabGid, campaignTitle) {
       };
     })
     .filter(Boolean);
+}
+
+/**
+ * 제출 여부 판단 로직 (강화된 3단계 — smartBuild와 동일)
+ * 1단계: SUBMITTED_VALUES에 직접 매칭 (기존 로직)
+ * 2단계: 날짜 패턴 인식 (MM/DD HH:MM, YYYY-MM-DD, M/D 등)
+ * 3단계: 비어있지 않은 값이면 제출로 간주 (빈 칸 = 미제출)
+ */
+function _isSubmittedValue(val) {
+  if (!val) return false;
+  // 1단계: 기존 SUBMITTED_VALUES 직접 매칭
+  if (SUBMITTED_VALUES.includes(val)) return true;
+  // 2단계: 날짜/시간 패턴 인식 (리뷰제출일 열에 "04/11 22:26" 같은 값)
+  if (/\d{1,2}\/\d{1,2}/.test(val)) return true;   // MM/DD 또는 M/D
+  if (/\d{4}[-/]\d{1,2}[-/]\d{1,2}/.test(val)) return true;  // YYYY-MM-DD
+  if (/\d{1,2}[-/.]\d{1,2}[-/.]\d{2,4}/.test(val)) return true;  // DD.MM.YYYY 등
+  // 3단계: 비어있지 않은 값이면 제출로 간주 (e.g. "리뷰등록", "작성완료" 등 커스텀 값)
+  return val.length > 0;
 }
 
 function _isDataTabRow(cells) {
