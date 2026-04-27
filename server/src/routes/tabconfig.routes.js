@@ -706,13 +706,54 @@ router.get('/dashboard', authMiddleware, async (req, res, next) => {
         tc.payment_type, tc.display_name, tc.is_closed,
         tc.folder_url, tc.capture_folder_url, tc.is_bulk, tc.delivery_type,
         tc.round, tc.nc_mode, tc.deposit_name, tc.transfer_bank,
-        tc.income_type, tc.updated_at,
+        tc.income_type, tc.updated_at, tc.closed_rounds,
         im.row_count, im.submitted_count, im.status AS index_status,
         im.built_at AS index_built_at, im.checksum
       FROM tab_configs tc
       LEFT JOIN index_master im ON tc.sheet_id = im.sheet_id AND tc.tab_name = im.tab_name
       ORDER BY tc.campaign_name NULLS LAST, tc.tab_name
     `);
+
+    // ★ 차수별 집계: review_index에서 round 값이 있는 행을 탭별로 그룹핑
+    const { rows: roundRows } = await pool.query(`
+      SELECT ri.sheet_id, ri.tab_name, ri.round,
+             COUNT(*) AS total,
+             COUNT(*) FILTER (WHERE ri.is_submitted) AS submitted
+      FROM review_index ri
+      INNER JOIN index_master im ON ri.sheet_id = im.sheet_id AND ri.tab_name = im.tab_name AND im.status = 'active'
+      WHERE ri.round IS NOT NULL AND ri.round != ''
+      GROUP BY ri.sheet_id, ri.tab_name, ri.round
+      ORDER BY ri.sheet_id, ri.tab_name, ri.round
+    `);
+
+    // 탭별 roundList 맵 구성
+    const roundMap = {}; // "sheet_id||tab_name" → [{ round, total, submitted }]
+    for (const rr of roundRows) {
+      const key = `${rr.sheet_id}||${rr.tab_name}`;
+      if (!roundMap[key]) roundMap[key] = [];
+      roundMap[key].push({
+        round: rr.round,
+        total: parseInt(rr.total) || 0,
+        submitted: parseInt(rr.submitted) || 0,
+      });
+    }
+    // roundList 숫자순 정렬
+    for (const key of Object.keys(roundMap)) {
+      roundMap[key].sort((a, b) => {
+        const numA = parseInt(a.round.replace(/[^0-9]/g, '')) || 0;
+        const numB = parseInt(b.round.replace(/[^0-9]/g, '')) || 0;
+        return numA - numB;
+      });
+    }
+
+    // 각 탭에 roundList 추가
+    const tabsWithRounds = rows.map(r => {
+      const key = `${r.sheet_id}||${r.tab_name}`;
+      return {
+        ...r,
+        roundList: roundMap[key] || [],
+      };
+    });
 
     // 통계 계산
     const stats = {
@@ -757,7 +798,7 @@ router.get('/dashboard', authMiddleware, async (req, res, next) => {
       campaigns,
       managers,
       lastSync,
-      tabs: rows,
+      tabs: tabsWithRounds,
     });
   } catch (err) {
     next(err);

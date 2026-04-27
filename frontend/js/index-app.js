@@ -11556,14 +11556,38 @@ function _filterTabDashData() {
   const rtF = document.getElementById("tabDashReviewTypeFilter")?.value || "";
   const searchQ = (document.getElementById("tabDashSearch")?.value || "").trim().toLowerCase();
 
-  return tabs.filter(t => {
+  // ★ 차수별 행 확장: roundList가 있는 탭은 차수별로 분리
+  // closedRounds에 포함된 차수(아카이브 완료)는 제외
+  const expanded = [];
+  tabs.forEach(t => {
+    const closedRoundsSet = new Set();
+    if (t.closed_rounds) {
+      t.closed_rounds.split(',').map(s => s.trim()).filter(Boolean).forEach(r => closedRoundsSet.add(r));
+    }
+    if (t.roundList && t.roundList.length > 0) {
+      // 차수별로 행 생성 (마감된 차수는 제외)
+      t.roundList.forEach(rd => {
+        if (closedRoundsSet.has(rd.round)) return; // 마감 차수 스킵
+        expanded.push(Object.assign({}, t, {
+          _roundLabel: rd.round,
+          _roundTotal: rd.total,
+          _roundSubmitted: rd.submitted,
+          _isRoundRow: true,
+        }));
+      });
+    } else {
+      expanded.push(t);
+    }
+  });
+
+  return expanded.filter(t => {
     if (statusF === "active" && t.is_closed) return false;
     if (statusF === "closed" && !t.is_closed) return false;
     if (mgrF && (t.manager || "(미지정)") !== mgrF) return false;
     if (campF && (t.campaign_name || "(미지정)") !== campF) return false;
     if (rtF && (t.review_type || "(미지정)") !== rtF) return false;
     if (searchQ) {
-      const h = `${t.tab_name} ${t.display_name||""} ${t.campaign_name||""} ${t.manager||""} ${t.review_type||""} ${t.deposit_name||""}`.toLowerCase();
+      const h = `${t.tab_name} ${t.display_name||""} ${t.campaign_name||""} ${t.manager||""} ${t.review_type||""} ${t.deposit_name||""} ${t._roundLabel||""}`.toLowerCase();
       if (!h.includes(searchQ)) return false;
     }
     return true;
@@ -12090,7 +12114,9 @@ function _cellVal(t, col) {
     return '<span style="background:#D1FAE5;color:#059669;padding:2px 6px;border-radius:8px;font-size:.68rem;font-weight:600">활성</span>';
   }
   if (k === "_progress") {
-    const rc = t.row_count || 0, sc = t.submitted_count || 0;
+    // ★ 차수별 행이면 해당 차수의 인원/제출 표시
+    const rc = t._isRoundRow ? (t._roundTotal || 0) : (t.row_count || 0);
+    const sc = t._isRoundRow ? (t._roundSubmitted || 0) : (t.submitted_count || 0);
     if (rc === 0) return '<span style="color:#D1D5DB">—</span>';
     const pct = Math.round(sc / rc * 100);
     const clr = pct >= 80 ? "#059669" : pct >= 50 ? "#D97706" : "#DC2626";
@@ -12137,6 +12163,12 @@ function _cellVal(t, col) {
   }
   if (k === "updated_at") {
     return t.updated_at ? new Date(t.updated_at).toLocaleDateString("ko-KR", { month:"short", day:"numeric", hour:"2-digit", minute:"2-digit" }) : "—";
+  }
+  // ★ 차수 컬럼: _roundLabel이 있으면 우선 표시
+  if (k === "round") {
+    const rv = t._roundLabel || t.round || "";
+    if (rv) return `<span style="background:#EEF2FF;color:#4338CA;padding:2px 7px;border-radius:8px;font-size:.68rem;font-weight:600">${escHtml(rv)}</span>`;
+    return '<span style="color:#D1D5DB">—</span>';
   }
   const v = t[k];
   return v != null && v !== "" ? escHtml(String(v)) : '<span style="color:#D1D5DB">—</span>';
