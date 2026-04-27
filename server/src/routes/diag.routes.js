@@ -225,7 +225,8 @@ router.get('/preview-campaign', authMiddleware, async (req, res, next) => {
     // 시트 메타데이터 조회
     const meta = await getSpreadsheetMeta(finalSheetId);
     if (!meta || meta.length === 0) {
-      return res.json({ ok: false, error: '시트에 접근할 수 없습니다. 서비스 계정에 공유되어 있는지 확인하세요.' });
+      const sa = process.env.GOOGLE_SERVICE_ACCOUNT_EMAIL || '(미설정)';
+      return res.json({ ok: false, error: `시트에 접근할 수 없습니다. 아래 서비스 계정에 공유해주세요.`, serviceAccount: sa });
     }
 
     const spreadsheetTitle = meta._spreadsheetTitle || finalSheetId;
@@ -258,7 +259,8 @@ router.get('/preview-campaign', authMiddleware, async (req, res, next) => {
       return res.json({ ok: false, error: '시트를 찾을 수 없습니다. URL을 확인하세요.' });
     }
     if (err.message && err.message.includes('permission')) {
-      return res.json({ ok: false, error: '시트 접근 권한이 없습니다. 서비스 계정에 공유해주세요.' });
+      const sa = process.env.GOOGLE_SERVICE_ACCOUNT_EMAIL || '(미설정)';
+      return res.json({ ok: false, error: `시트 접근 권한이 없습니다. 아래 서비스 계정에 공유해주세요.`, serviceAccount: sa });
     }
     next(err);
   }

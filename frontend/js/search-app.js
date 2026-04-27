@@ -7523,7 +7523,9 @@ async function previewAddCampaign() {
   try {
     const data = await gasGet({ action: "previewCampaign", url: raw });
     if (!data.ok) {
-      errEl.textContent = data.error || "시트 조회 실패";
+      errEl.innerHTML = data.serviceAccount
+        ? `${data.error}<br><code style="font-size:11px;background:#f1f5f9;padding:2px 6px;border-radius:3px;user-select:all">${data.serviceAccount}</code>`
+        : (data.error || "시트 조회 실패");
       return;
     }
     // 시트 제목
