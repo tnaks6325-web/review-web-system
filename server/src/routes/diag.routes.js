@@ -665,73 +665,123 @@ router.post('/image-extract', imageApiLimiter, async (req, res, next) => {
 });
 
 // ═══════════════════════════════════════════════════════════
-// POST /api/image/upload — 주문이미지 Drive 업로드 (Google Drive API)
-// 프론트엔드 페이로드: { imageBase64, mimeType, fileName, displayName, tabName, round, sheetId }
+// POST /api/image/upload — 주문캡처 이미지 Drive 업로드 (새 3단계 구조)
+//
+// 폴더 구조: AI_REVIEW_FOLDER → {시트제목} → {탭명} → [구매캡처]
+// 프론트엔드 페이로드:
+//   { imageBase64, mimeType, fileName, displayName, tabName, round, sheetId,
+//     savedCaptureFolderUrl }
+//
+// 폴더 접근 우선순위:
+//   1. savedCaptureFolderUrl (프론트엔드 전달)
+//   2. tab_configs.capture_folder_url (DB)
+//   3. 자동 생성 (ensureCaptureFolderPath)
 // ═══════════════════════════════════════════════════════════
 router.post('/image-upload', imageApiLimiter, async (req, res, next) => {
   try {
-    const { imageBase64, mimeType, fileName, displayName, tabName, round, sheetId } = req.body;
+    const { imageBase64, mimeType, fileName, displayName, tabName, round, sheetId, savedCaptureFolderUrl } = req.body;
     if (!imageBase64) return res.json({ ok: false, error: '이미지 데이터가 필요합니다.' });
 
-    const rootFolderId = process.env.DRIVE_ROOT_FOLDER_ID;
+    const rootFolderId = process.env.AI_REVIEW_FOLDER_ID || process.env.DRIVE_ROOT_FOLDER_ID;
     if (!rootFolderId) {
-      logger.warn('[image-upload] DRIVE_ROOT_FOLDER_ID 미설정');
-      return res.json({ ok: false, error: 'Drive 루트 폴더가 설정되지 않았습니다.' });
+      logger.warn('[image-upload] AI_REVIEW_FOLDER_ID 미설정');
+      return res.json({ ok: false, error: 'Drive 루트 폴더가 설정되지 않았습니다. (AI_REVIEW_FOLDER_ID)' });
     }
 
-    // 1. tab_configs에서 capture_folder_url 조회
+    // ── 1단계: 캡처 폴더 ID 확보 (3단계 폴백) ──
     let targetFolderId = null;
-    if (sheetId && tabName) {
+    let captureFolderUrl = null;
+
+    // STEP 1: savedCaptureFolderUrl (프론트엔드 전달)
+    if (savedCaptureFolderUrl) {
+      targetFolderId = driveService.extractFolderIdFromUrl(savedCaptureFolderUrl);
+      if (targetFolderId) {
+        captureFolderUrl = savedCaptureFolderUrl;
+        logger.info(`[image-upload] savedCaptureFolderUrl 사용: ${targetFolderId}`);
+      }
+    }
+
+    // STEP 2: tab_configs.capture_folder_url (DB)
+    if (!targetFolderId && sheetId && tabName) {
       const { rows } = await pool.query(
         'SELECT capture_folder_url FROM tab_configs WHERE sheet_id = $1 AND tab_name = $2 LIMIT 1',
         [sheetId, tabName]
       );
       if (rows[0]?.capture_folder_url) {
-        const m = rows[0].capture_folder_url.match(/\/folders\/([a-zA-Z0-9_-]+)/);
-        if (m) targetFolderId = m[1];
+        targetFolderId = driveService.extractFolderIdFromUrl(rows[0].capture_folder_url);
+        if (targetFolderId) {
+          captureFolderUrl = rows[0].capture_folder_url;
+          logger.info(`[image-upload] DB capture_folder_url 사용: ${targetFolderId}`);
+        }
       }
     }
 
-    // 2. capture_folder_url 없으면 → 캠페인 폴더 자동 생성
+    // STEP 3: 자동 생성 (3단계 구조: 시트제목 → 탭명 → [구매캡처])
     if (!targetFolderId) {
       try {
-        const folderName = `[캡처] ${displayName || tabName || '기타'}`;
-        logger.info(`[image-upload] 폴더 검색/생성: "${folderName}" in ${rootFolderId}`);
-        const folder = await driveService.findFolderByName(folderName, rootFolderId)
-                    || await driveService.createFolder(folderName, rootFolderId);
-        targetFolderId = folder.id;
-        logger.info(`[image-upload] 폴더 확보: ${targetFolderId}`);
+        // 시트 제목 조회
+        let sheetTitle = displayName || tabName || '기타';
+        if (sheetId) {
+          try {
+            // campaign_name에서 먼저 조회
+            const { rows: campRows } = await pool.query(
+              `SELECT DISTINCT campaign_name FROM tab_configs WHERE sheet_id = $1 AND campaign_name IS NOT NULL AND campaign_name <> '' LIMIT 1`,
+              [sheetId]
+            );
+            if (campRows[0]?.campaign_name) {
+              sheetTitle = campRows[0].campaign_name;
+            } else {
+              // Sheets API로 시트 제목 조회
+              const meta = await getSpreadsheetMeta(sheetId);
+              if (meta._spreadsheetTitle) sheetTitle = meta._spreadsheetTitle;
+            }
+          } catch (_) {}
+        }
+
+        const tabFolderName = tabName || '기타';
+        logger.info(`[image-upload] 폴더 자동 생성: ${sheetTitle} → ${tabFolderName} → [구매캡처]`);
+
+        const result = await driveService.ensureCaptureFolderPath(rootFolderId, sheetTitle, tabFolderName);
+        targetFolderId = result.id;
+        captureFolderUrl = result.url;
+
+        logger.info(`[image-upload] 캡처폴더 확보: ${targetFolderId} (${result.path.join(' → ')})`);
 
         // tab_configs에 캡처폴더 URL 저장
         if (sheetId && tabName) {
-          const folderUrl = `https://drive.google.com/drive/folders/${folder.id}`;
           await pool.query(
             'UPDATE tab_configs SET capture_folder_url = $1, updated_at = NOW() WHERE sheet_id = $2 AND tab_name = $3',
-            [folderUrl, sheetId, tabName]
+            [captureFolderUrl, sheetId, tabName]
           );
         }
       } catch (folderErr) {
         logger.error(`[image-upload] 폴더 생성 실패: ${folderErr.message}`);
-        // 폴더 생성 실패 시 루트 폴더에 직접 업로드 시도
         targetFolderId = rootFolderId;
       }
     }
 
-    // 3. 차수별 서브폴더 (round가 있으면)
+    // ── 2단계: 차수별 서브폴더 (round) ──
     if (round) {
       const sub = await driveService.getOrCreateSubFolder(targetFolderId, String(round));
       targetFolderId = sub.id;
     }
 
-    // 4. 파일 업로드
+    // ── 3단계: 중복 파일 처리 (동일 이름 → 휴지통 이동) ──
     const finalFileName = fileName || `캡처_${Date.now()}.jpg`;
+    try {
+      await driveService.trashDuplicateFile(targetFolderId, finalFileName);
+    } catch (trashErr) {
+      logger.warn(`[image-upload] 중복 파일 처리 실패 (무시): ${trashErr.message}`);
+    }
+
+    // ── 4단계: 파일 업로드 ──
     const uploaded = await driveService.uploadFileBase64(
       imageBase64, finalFileName, mimeType || 'image/jpeg', targetFolderId
     );
 
     logger.info(`[image-upload] 업로드 완료: ${uploaded.name} → ${uploaded.id}`);
 
-    // ── SSE 알림: 이미지 업로드 완료 ──
+    // ── SSE 알림 ──
     emitImageUpload({
       fileName: uploaded.name,
       fileId: uploaded.id,
@@ -745,10 +795,144 @@ router.post('/image-upload', imageApiLimiter, async (req, res, next) => {
       fileName: uploaded.name,
       webViewLink: uploaded.webViewLink || '',
       webContentLink: uploaded.webContentLink || '',
+      captureFolderUrl: captureFolderUrl || '',
     });
   } catch (err) {
     logger.error(`[image-upload] ${err.message}`);
     res.json({ ok: false, error: err.message || '이미지 업로드 중 오류가 발생했습니다.' });
+  }
+});
+
+// ═══════════════════════════════════════════════════════════
+// POST /api/image/review-upload — 리뷰 이미지 Drive 업로드 (새 4단계 구조)
+//
+// 폴더 구조: AI_REVIEW_FOLDER → {시트제목} → {탭명} → [리뷰] → [옵션(선택)]
+// 파일명 규칙: {reviewerName}_{index}_{yyyyMMdd_HHmmss}.{ext}
+//
+// 프론트엔드 페이로드:
+//   { sheetId, tabName, reviewerName, campaignName, optionFolderName,
+//     files: [{ data: base64, mimeType, name? }] }
+// ═══════════════════════════════════════════════════════════
+router.post('/review-upload', imageApiLimiter, async (req, res, next) => {
+  try {
+    const { sheetId, tabName, reviewerName, campaignName, optionFolderName, files, gid, rowIndex, submitCol, memo } = req.body;
+
+    if (!files || !Array.isArray(files) || files.length === 0) {
+      return res.json({ ok: false, error: '업로드할 파일이 필요합니다.' });
+    }
+    if (!sheetId || !tabName) {
+      return res.json({ ok: false, error: 'sheetId, tabName이 필요합니다.' });
+    }
+
+    const rootFolderId = process.env.AI_REVIEW_FOLDER_ID || process.env.DRIVE_ROOT_FOLDER_ID;
+    if (!rootFolderId) {
+      return res.json({ ok: false, error: 'AI_REVIEW_FOLDER_ID 미설정' });
+    }
+
+    // ── 1단계: 리뷰 폴더 ID 확보 ──
+    let targetFolderId = null;
+    let reviewFolderUrl = null;
+
+    // STEP 1: tab_configs.folder_url (DB)
+    const { rows: tabRows } = await pool.query(
+      'SELECT folder_url, campaign_name FROM tab_configs WHERE sheet_id = $1 AND tab_name = $2 LIMIT 1',
+      [sheetId, tabName]
+    );
+    if (tabRows[0]?.folder_url) {
+      targetFolderId = driveService.extractFolderIdFromUrl(tabRows[0].folder_url);
+      if (targetFolderId) {
+        reviewFolderUrl = tabRows[0].folder_url;
+        logger.info(`[review-upload] DB folder_url 사용: ${targetFolderId}`);
+      }
+    }
+
+    // STEP 2: 자동 생성 (3단계: 시트제목 → 탭명 → [리뷰])
+    if (!targetFolderId) {
+      let sheetTitle = campaignName || tabRows[0]?.campaign_name || tabName;
+      if (sheetId) {
+        try {
+          const { rows: campRows } = await pool.query(
+            `SELECT DISTINCT campaign_name FROM tab_configs WHERE sheet_id = $1 AND campaign_name IS NOT NULL AND campaign_name <> '' LIMIT 1`,
+            [sheetId]
+          );
+          if (campRows[0]?.campaign_name) {
+            sheetTitle = campRows[0].campaign_name;
+          } else {
+            const meta = await getSpreadsheetMeta(sheetId);
+            if (meta._spreadsheetTitle) sheetTitle = meta._spreadsheetTitle;
+          }
+        } catch (_) {}
+      }
+
+      logger.info(`[review-upload] 폴더 자동 생성: ${sheetTitle} → ${tabName} → [리뷰]`);
+      const result = await driveService.ensureReviewFolderPath(rootFolderId, sheetTitle, tabName);
+      targetFolderId = result.id;
+      reviewFolderUrl = result.url;
+
+      // tab_configs에 리뷰폴더 URL 저장
+      await pool.query(
+        'UPDATE tab_configs SET folder_url = $1, updated_at = NOW() WHERE sheet_id = $2 AND tab_name = $3',
+        [reviewFolderUrl, sheetId, tabName]
+      );
+    }
+
+    // ── 2단계: 옵션 서브폴더 (있으면) ──
+    if (optionFolderName) {
+      const optFolder = await driveService.getOrCreateSubFolder(targetFolderId, optionFolderName);
+      targetFolderId = optFolder.id;
+      logger.info(`[review-upload] 옵션 서브폴더: ${optionFolderName} → ${optFolder.id}`);
+    }
+
+    // ── 3단계: 파일 업로드 (복수 파일 루프) ──
+    const uploadResults = [];
+    for (let i = 0; i < files.length; i++) {
+      const file = files[i];
+      if (!file.data) continue;
+
+      // 파일명 생성: {reviewerName}_{index}_{yyyyMMdd_HHmmss}.{ext}
+      const reviewFileName = driveService.generateReviewFileName(
+        reviewerName || '익명',
+        i + 1,
+        file.mimeType || 'image/jpeg'
+      );
+
+      try {
+        const uploaded = await driveService.uploadFileBase64(
+          file.data,
+          reviewFileName,
+          file.mimeType || 'image/jpeg',
+          targetFolderId
+        );
+
+        uploadResults.push({
+          index: i + 1,
+          fileId: uploaded.id,
+          fileName: uploaded.name,
+          webViewLink: uploaded.webViewLink || '',
+        });
+
+        logger.info(`[review-upload] 파일 ${i + 1}/${files.length} 업로드: ${uploaded.name} → ${uploaded.id}`);
+      } catch (uploadErr) {
+        logger.error(`[review-upload] 파일 ${i + 1} 업로드 실패: ${uploadErr.message}`);
+        uploadResults.push({
+          index: i + 1,
+          error: uploadErr.message,
+        });
+      }
+    }
+
+    const successCount = uploadResults.filter(r => r.fileId).length;
+
+    res.json({
+      ok: successCount > 0,
+      uploaded: successCount,
+      total: files.length,
+      files: uploadResults,
+      reviewFolderUrl: reviewFolderUrl || '',
+    });
+  } catch (err) {
+    logger.error(`[review-upload] ${err.message}`);
+    res.json({ ok: false, error: err.message || '리뷰 이미지 업로드 중 오류가 발생했습니다.' });
   }
 });
 

@@ -2,6 +2,7 @@ const express = require('express');
 const router = express.Router();
 const { authMiddleware } = require('../middleware/auth.middleware');
 const driveService = require('../services/drive.service');
+const { getSpreadsheetMeta } = require('../services/sheets.service');
 const pool = require('../db/pool');
 const { logger } = require('../utils/logger');
 
@@ -14,16 +15,90 @@ function extractFolderId(url) {
   return m ? m[1] : null;
 }
 
+/**
+ * 헬퍼: AI_REVIEW_FOLDER_ID 환경변수 조회
+ * AI_REVIEW_FOLDER_ID → DRIVE_ROOT_FOLDER_ID 순서 폴백
+ */
+function getRootFolderId() {
+  return process.env.AI_REVIEW_FOLDER_ID || process.env.DRIVE_ROOT_FOLDER_ID || null;
+}
+
+/**
+ * 헬퍼: 탭의 시트 제목(캠페인명=업체명) 조회
+ * tab_configs.campaign_name → Google Sheets API 폴백
+ */
+async function getSheetTitle(sheetId, fallbackName) {
+  // 1. tab_configs.campaign_name에서 조회
+  try {
+    const { rows } = await pool.query(
+      `SELECT DISTINCT campaign_name FROM tab_configs WHERE sheet_id = $1 AND campaign_name IS NOT NULL AND campaign_name <> '' LIMIT 1`,
+      [sheetId]
+    );
+    if (rows[0]?.campaign_name) return rows[0].campaign_name;
+  } catch (_) {}
+
+  // 2. campaigns 테이블에서 조회
+  try {
+    const { rows } = await pool.query(
+      `SELECT campaign_name FROM campaigns WHERE sheet_id = $1 LIMIT 1`,
+      [sheetId]
+    );
+    if (rows[0]?.campaign_name) return rows[0].campaign_name;
+  } catch (_) {}
+
+  // 3. Google Sheets API로 시트 제목 조회
+  try {
+    const meta = await getSpreadsheetMeta(sheetId);
+    if (meta._spreadsheetTitle) return meta._spreadsheetTitle;
+  } catch (_) {}
+
+  return fallbackName || sheetId;
+}
+
 // ═══════════════════════════════════════════════════════════
-// POST /api/drive/sync-capture — 캡처폴더 동기화 (GAS: syncCaptureFolders)
+// POST /api/drive/init-root — AI_REVIEW_FOLDER 루트 폴더 초기화
+// 새 루트 폴더를 생성하고 AI_REVIEW_FOLDER_ID를 반환
+// ═══════════════════════════════════════════════════════════
+router.post('/init-root', authMiddleware, async (req, res, next) => {
+  try {
+    const { parentFolderId } = req.body;
+    // 이미 설정되어 있으면 그대로 사용
+    const existingRootId = getRootFolderId();
+    if (existingRootId) {
+      return res.json({
+        ok: true,
+        rootFolderId: existingRootId,
+        message: '루트 폴더가 이미 설정되어 있습니다.',
+        alreadyExists: true,
+      });
+    }
+
+    // 새 루트 폴더 생성
+    const targetParent = parentFolderId || 'root'; // My Drive root
+    const folder = await driveService.createFolder('AI_REVIEW_FOLDER', targetParent);
+
+    res.json({
+      ok: true,
+      rootFolderId: folder.id,
+      folderUrl: `https://drive.google.com/drive/folders/${folder.id}`,
+      message: `AI_REVIEW_FOLDER 생성 완료. Railway 환경변수에 AI_REVIEW_FOLDER_ID=${folder.id} 를 추가하세요.`,
+      alreadyExists: false,
+    });
+  } catch (err) {
+    next(err);
+  }
+});
+
+// ═══════════════════════════════════════════════════════════
+// POST /api/drive/sync-capture — 캡처폴더 동기화 (새 3단계 구조)
+// 구조: AI_REVIEW_FOLDER → {시트제목} → {탭명} → [구매캡처]
 // ═══════════════════════════════════════════════════════════
 router.post('/sync-capture', authMiddleware, async (req, res, next) => {
   try {
     const { force } = req.body;
-    const rootFolderId = process.env.DRIVE_ROOT_FOLDER_ID;
-    if (!rootFolderId) return res.json({ error: 'DRIVE_ROOT_FOLDER_ID 미설정' });
+    const rootFolderId = getRootFolderId();
+    if (!rootFolderId) return res.json({ error: 'AI_REVIEW_FOLDER_ID 미설정' });
 
-    // 활성 탭 목록 조회
     const { rows: tabs } = await pool.query(
       `SELECT sheet_id, tab_name, campaign_name, capture_folder_url
        FROM tab_configs
@@ -31,6 +106,10 @@ router.post('/sync-capture', authMiddleware, async (req, res, next) => {
     );
 
     let synced = 0, created = 0, errors = 0;
+    const details = [];
+
+    // sheet_id별로 그룹핑하여 시트 제목 조회 횟수 최소화
+    const sheetTitleCache = {};
 
     for (const tab of tabs) {
       try {
@@ -39,48 +118,45 @@ router.post('/sync-capture', authMiddleware, async (req, res, next) => {
           continue;
         }
 
-        // 캡처폴더 검색/생성
-        const folderName = `[캡처] ${tab.campaign_name || tab.tab_name}`;
-        let folder = null;
-
-        try {
-          folder = await driveService.findFolderByName(folderName, rootFolderId);
-        } catch (_) { /* 폴더 미발견 */ }
-
-        if (!folder) {
-          folder = await driveService.createFolder(folderName, rootFolderId);
-          created++;
+        // 시트 제목 조회 (캐시)
+        if (!sheetTitleCache[tab.sheet_id]) {
+          sheetTitleCache[tab.sheet_id] = await getSheetTitle(tab.sheet_id, tab.campaign_name);
         }
+        const sheetTitle = sheetTitleCache[tab.sheet_id];
+
+        // 3단계 폴더 생성: 시트제목 → 탭명 → [구매캡처]
+        const result = await driveService.ensureCaptureFolderPath(rootFolderId, sheetTitle, tab.tab_name);
 
         // tab_configs에 URL 저장
-        if (folder) {
-          const folderUrl = `https://drive.google.com/drive/folders/${folder.id}`;
-          await pool.query(
-            'UPDATE tab_configs SET capture_folder_url = $1, updated_at = NOW() WHERE sheet_id = $2 AND tab_name = $3',
-            [folderUrl, tab.sheet_id, tab.tab_name]
-          );
-        }
+        await pool.query(
+          'UPDATE tab_configs SET capture_folder_url = $1, updated_at = NOW() WHERE sheet_id = $2 AND tab_name = $3',
+          [result.url, tab.sheet_id, tab.tab_name]
+        );
+
+        if (!tab.capture_folder_url) created++;
         synced++;
+        details.push({ tabName: tab.tab_name, path: result.path.join(' → '), url: result.url });
       } catch (err) {
         logger.error(`[syncCapture] 오류 (${tab.tab_name}): ${err.message}`);
         errors++;
       }
     }
 
-    res.json({ ok: true, synced, created, errors, total: tabs.length });
+    res.json({ ok: true, synced, created, errors, total: tabs.length, details });
   } catch (err) {
     next(err);
   }
 });
 
 // ═══════════════════════════════════════════════════════════
-// POST /api/drive/sync-review — 리뷰폴더 동기화 (GAS: syncReviewFolders)
+// POST /api/drive/sync-review — 리뷰폴더 동기화 (새 3단계 구조)
+// 구조: AI_REVIEW_FOLDER → {시트제목} → {탭명} → [리뷰]
 // ═══════════════════════════════════════════════════════════
 router.post('/sync-review', authMiddleware, async (req, res, next) => {
   try {
     const { force } = req.body;
-    const rootFolderId = process.env.DRIVE_ROOT_FOLDER_ID;
-    if (!rootFolderId) return res.json({ error: 'DRIVE_ROOT_FOLDER_ID 미설정' });
+    const rootFolderId = getRootFolderId();
+    if (!rootFolderId) return res.json({ error: 'AI_REVIEW_FOLDER_ID 미설정' });
 
     const { rows: tabs } = await pool.query(
       `SELECT sheet_id, tab_name, campaign_name, folder_url
@@ -89,63 +165,114 @@ router.post('/sync-review', authMiddleware, async (req, res, next) => {
     );
 
     let synced = 0, created = 0, errors = 0;
+    const details = [];
+
+    const sheetTitleCache = {};
 
     for (const tab of tabs) {
       try {
         if (tab.folder_url && !force) { synced++; continue; }
 
-        const folderName = `[리뷰] ${tab.campaign_name || tab.tab_name}`;
-        let folder = await driveService.findFolderByName(folderName, rootFolderId).catch(() => null);
-
-        if (!folder) {
-          folder = await driveService.createFolder(folderName, rootFolderId);
-          created++;
+        if (!sheetTitleCache[tab.sheet_id]) {
+          sheetTitleCache[tab.sheet_id] = await getSheetTitle(tab.sheet_id, tab.campaign_name);
         }
+        const sheetTitle = sheetTitleCache[tab.sheet_id];
 
-        if (folder) {
-          const folderUrl = `https://drive.google.com/drive/folders/${folder.id}`;
-          await pool.query(
-            'UPDATE tab_configs SET folder_url = $1, updated_at = NOW() WHERE sheet_id = $2 AND tab_name = $3',
-            [folderUrl, tab.sheet_id, tab.tab_name]
-          );
-        }
+        // 3단계 폴더 생성: 시트제목 → 탭명 → [리뷰]
+        const result = await driveService.ensureReviewFolderPath(rootFolderId, sheetTitle, tab.tab_name);
+
+        await pool.query(
+          'UPDATE tab_configs SET folder_url = $1, updated_at = NOW() WHERE sheet_id = $2 AND tab_name = $3',
+          [result.url, tab.sheet_id, tab.tab_name]
+        );
+
+        if (!tab.folder_url) created++;
         synced++;
+        details.push({ tabName: tab.tab_name, path: result.path.join(' → '), url: result.url });
       } catch (err) {
         logger.error(`[syncReview] 오류 (${tab.tab_name}): ${err.message}`);
         errors++;
       }
     }
 
-    res.json({ ok: true, synced, created, errors, total: tabs.length });
+    res.json({ ok: true, synced, created, errors, total: tabs.length, details });
   } catch (err) {
     next(err);
   }
 });
 
 // ═══════════════════════════════════════════════════════════
-// POST /api/drive/sync-all — 전체 폴더 동기화 (GAS: syncAllFolders)
+// POST /api/drive/sync-all — 전체 폴더 동기화
 // ═══════════════════════════════════════════════════════════
 router.post('/sync-all', authMiddleware, async (req, res, next) => {
   try {
     const { force } = req.body;
+    const rootFolderId = getRootFolderId();
+    if (!rootFolderId) return res.json({ error: 'AI_REVIEW_FOLDER_ID 미설정' });
+
     const startTime = Date.now();
-    const captureResult = await syncCaptureFoldersInternal(force);
-    const reviewResult = await syncReviewFoldersInternal(force);
+
+    const { rows: tabs } = await pool.query(
+      `SELECT sheet_id, tab_name, campaign_name, folder_url, capture_folder_url
+       FROM tab_configs
+       WHERE (is_closed = FALSE OR is_closed IS NULL)`
+    );
+
+    const sheetTitleCache = {};
+    const capture = { synced: 0, created: 0, errors: 0 };
+    const review = { synced: 0, created: 0, errors: 0 };
+
+    for (const tab of tabs) {
+      // 시트 제목 캐시
+      if (!sheetTitleCache[tab.sheet_id]) {
+        sheetTitleCache[tab.sheet_id] = await getSheetTitle(tab.sheet_id, tab.campaign_name);
+      }
+      const sheetTitle = sheetTitleCache[tab.sheet_id];
+
+      // 캡처폴더
+      try {
+        if (tab.capture_folder_url && !force) {
+          capture.synced++;
+        } else {
+          const result = await driveService.ensureCaptureFolderPath(rootFolderId, sheetTitle, tab.tab_name);
+          await pool.query(
+            'UPDATE tab_configs SET capture_folder_url = $1, updated_at = NOW() WHERE sheet_id = $2 AND tab_name = $3',
+            [result.url, tab.sheet_id, tab.tab_name]
+          );
+          if (!tab.capture_folder_url) capture.created++;
+          capture.synced++;
+        }
+      } catch (err) {
+        logger.error(`[syncAll/capture] 오류 (${tab.tab_name}): ${err.message}`);
+        capture.errors++;
+      }
+
+      // 리뷰폴더
+      try {
+        if (tab.folder_url && !force) {
+          review.synced++;
+        } else {
+          const result = await driveService.ensureReviewFolderPath(rootFolderId, sheetTitle, tab.tab_name);
+          await pool.query(
+            'UPDATE tab_configs SET folder_url = $1, updated_at = NOW() WHERE sheet_id = $2 AND tab_name = $3',
+            [result.url, tab.sheet_id, tab.tab_name]
+          );
+          if (!tab.folder_url) review.created++;
+          review.synced++;
+        }
+      } catch (err) {
+        logger.error(`[syncAll/review] 오류 (${tab.tab_name}): ${err.message}`);
+        review.errors++;
+      }
+    }
+
     const elapsed = Math.round((Date.now() - startTime) / 1000);
     res.json({
       ok: true,
-      capture: {
-        updated: captureResult.created || 0,
-        skipped: captureResult.synced || 0,
-        errors: captureResult.errors || 0,
-      },
-      review: {
-        updated: reviewResult.created || 0,
-        skipped: reviewResult.synced || 0,
-        notFound: 0,
-        errors: reviewResult.errors || 0,
-      },
+      capture: { updated: capture.created, skipped: capture.synced - capture.created, errors: capture.errors },
+      review: { updated: review.created, skipped: review.synced - review.created, errors: review.errors },
       elapsed,
+      total: tabs.length,
     });
   } catch (err) {
     next(err);
@@ -153,13 +280,13 @@ router.post('/sync-all', authMiddleware, async (req, res, next) => {
 });
 
 // ═══════════════════════════════════════════════════════════
-// POST /api/drive/batch-create — 폴더 일괄 생성 (GAS: batchCreateFolders)
+// POST /api/drive/batch-create — 폴더 일괄 생성 (새 구조)
 // ═══════════════════════════════════════════════════════════
 router.post('/batch-create', authMiddleware, async (req, res, next) => {
   try {
     const { target } = req.body; // 'capture', 'review', 'both'
-    const rootFolderId = process.env.DRIVE_ROOT_FOLDER_ID;
-    if (!rootFolderId) return res.json({ error: 'DRIVE_ROOT_FOLDER_ID 미설정' });
+    const rootFolderId = getRootFolderId();
+    if (!rootFolderId) return res.json({ error: 'AI_REVIEW_FOLDER_ID 미설정' });
 
     const { rows: tabs } = await pool.query(
       `SELECT sheet_id, tab_name, campaign_name, folder_url, capture_folder_url
@@ -168,42 +295,44 @@ router.post('/batch-create', authMiddleware, async (req, res, next) => {
     );
 
     const startTime = Date.now();
-    const capture = { created: 0, exists: 0, skipped: 0 };
-    const review  = { created: 0, exists: 0, skipped: 0 };
+    const captureStats = { created: 0, exists: 0, skipped: 0 };
+    const reviewStats  = { created: 0, exists: 0, skipped: 0 };
     const errorList = [];
+
+    const sheetTitleCache = {};
 
     for (const tab of tabs) {
       try {
+        if (!sheetTitleCache[tab.sheet_id]) {
+          sheetTitleCache[tab.sheet_id] = await getSheetTitle(tab.sheet_id, tab.campaign_name);
+        }
+        const sheetTitle = sheetTitleCache[tab.sheet_id];
+
         // 캡처폴더
-        if ((!target || target === 'both' || target === 'capture')) {
+        if (!target || target === 'both' || target === 'capture') {
           if (tab.capture_folder_url) {
-            capture.exists++;
+            captureStats.exists++;
           } else {
-            const folderName = `[캡처] ${tab.campaign_name || tab.tab_name}`;
-            const folder = await driveService.createFolder(folderName, rootFolderId);
-            if (folder) {
-              await pool.query(
-                'UPDATE tab_configs SET capture_folder_url = $1, updated_at = NOW() WHERE sheet_id = $2 AND tab_name = $3',
-                [`https://drive.google.com/drive/folders/${folder.id}`, tab.sheet_id, tab.tab_name]
-              );
-              capture.created++;
-            }
+            const result = await driveService.ensureCaptureFolderPath(rootFolderId, sheetTitle, tab.tab_name);
+            await pool.query(
+              'UPDATE tab_configs SET capture_folder_url = $1, updated_at = NOW() WHERE sheet_id = $2 AND tab_name = $3',
+              [result.url, tab.sheet_id, tab.tab_name]
+            );
+            captureStats.created++;
           }
         }
+
         // 리뷰폴더
-        if ((!target || target === 'both' || target === 'review')) {
+        if (!target || target === 'both' || target === 'review') {
           if (tab.folder_url) {
-            review.exists++;
+            reviewStats.exists++;
           } else {
-            const folderName = `[리뷰] ${tab.campaign_name || tab.tab_name}`;
-            const folder = await driveService.createFolder(folderName, rootFolderId);
-            if (folder) {
-              await pool.query(
-                'UPDATE tab_configs SET folder_url = $1, updated_at = NOW() WHERE sheet_id = $2 AND tab_name = $3',
-                [`https://drive.google.com/drive/folders/${folder.id}`, tab.sheet_id, tab.tab_name]
-              );
-              review.created++;
-            }
+            const result = await driveService.ensureReviewFolderPath(rootFolderId, sheetTitle, tab.tab_name);
+            await pool.query(
+              'UPDATE tab_configs SET folder_url = $1, updated_at = NOW() WHERE sheet_id = $2 AND tab_name = $3',
+              [result.url, tab.sheet_id, tab.tab_name]
+            );
+            reviewStats.created++;
           }
         }
       } catch (err) {
@@ -213,14 +342,14 @@ router.post('/batch-create', authMiddleware, async (req, res, next) => {
     }
 
     const elapsed = Math.round((Date.now() - startTime) / 1000);
-    res.json({ ok: true, capture, review, errors: errorList, elapsed, total: tabs.length });
+    res.json({ ok: true, capture: captureStats, review: reviewStats, errors: errorList, elapsed, total: tabs.length });
   } catch (err) {
     next(err);
   }
 });
 
 // ═══════════════════════════════════════════════════════════
-// POST /api/drive/reset-folder-urls — 폴더 URL 재설정 (GAS: resetTabFolderUrls)
+// POST /api/drive/reset-folder-urls — 폴더 URL 재설정
 // ═══════════════════════════════════════════════════════════
 router.post('/reset-folder-urls', authMiddleware, async (req, res, next) => {
   try {
@@ -246,13 +375,13 @@ router.post('/reset-folder-urls', authMiddleware, async (req, res, next) => {
 });
 
 // ═══════════════════════════════════════════════════════════
-// POST /api/drive/migrate-names — 폴더명 마이그레이션 (GAS: migrateFolderNames)
+// POST /api/drive/migrate-names — 폴더명 마이그레이션 (새 구조 적용)
 // ═══════════════════════════════════════════════════════════
 router.post('/migrate-names', authMiddleware, async (req, res, next) => {
   try {
     const { target, dryRun } = req.body;
-    const rootFolderId = process.env.DRIVE_ROOT_FOLDER_ID;
-    if (!rootFolderId) return res.json({ error: 'DRIVE_ROOT_FOLDER_ID 미설정' });
+    const rootFolderId = getRootFolderId();
+    if (!rootFolderId) return res.json({ error: 'AI_REVIEW_FOLDER_ID 미설정' });
 
     const { rows: tabs } = await pool.query('SELECT * FROM tab_configs');
     let renamed = 0, errors = 0;
@@ -264,7 +393,7 @@ router.post('/migrate-names', authMiddleware, async (req, res, next) => {
         if ((!target || target === 'both' || target === 'review') && tab.folder_url) {
           const folderId = extractFolderId(tab.folder_url);
           if (folderId) {
-            const newName = `[리뷰] ${tab.campaign_name || tab.tab_name}`;
+            const newName = `[리뷰]`;
             if (!dryRun) {
               await driveService.renameFile(folderId, newName);
             }
@@ -276,7 +405,7 @@ router.post('/migrate-names', authMiddleware, async (req, res, next) => {
         if ((!target || target === 'both' || target === 'capture') && tab.capture_folder_url) {
           const folderId = extractFolderId(tab.capture_folder_url);
           if (folderId) {
-            const newName = `[캡처] ${tab.campaign_name || tab.tab_name}`;
+            const newName = `[구매캡처]`;
             if (!dryRun) {
               await driveService.renameFile(folderId, newName);
             }
@@ -296,26 +425,123 @@ router.post('/migrate-names', authMiddleware, async (req, res, next) => {
 });
 
 // ═══════════════════════════════════════════════════════════
-// POST /api/drive/organize-capture — 캡처폴더 재배치 (GAS: organizeCaptureFolders)
+// POST /api/drive/migrate-to-new-structure — 기존 파일을 새 폴더 구조로 이관
+// 기존: DRIVE_ROOT / [캡처] 캠페인명 → 새: AI_REVIEW / 시트제목 / 탭명 / [구매캡처]
+// 기존: DRIVE_ROOT / [리뷰] 캠페인명 → 새: AI_REVIEW / 시트제목 / 탭명 / [리뷰]
+// ═══════════════════════════════════════════════════════════
+router.post('/migrate-to-new-structure', authMiddleware, async (req, res, next) => {
+  try {
+    const { dryRun } = req.body;
+    const isDryRun = dryRun === true || dryRun === 'true';
+    const newRootId = getRootFolderId();
+    const oldRootId = process.env.DRIVE_ROOT_FOLDER_ID;
+
+    if (!newRootId) return res.json({ error: 'AI_REVIEW_FOLDER_ID 미설정' });
+
+    const { rows: tabs } = await pool.query(
+      `SELECT sheet_id, tab_name, campaign_name, folder_url, capture_folder_url
+       FROM tab_configs
+       WHERE (folder_url IS NOT NULL AND folder_url <> '')
+          OR (capture_folder_url IS NOT NULL AND capture_folder_url <> '')`
+    );
+
+    const startTime = Date.now();
+    const migrated = [], skipped = [], errorList = [];
+    const sheetTitleCache = {};
+
+    for (const tab of tabs) {
+      try {
+        if (!sheetTitleCache[tab.sheet_id]) {
+          sheetTitleCache[tab.sheet_id] = await getSheetTitle(tab.sheet_id, tab.campaign_name);
+        }
+        const sheetTitle = sheetTitleCache[tab.sheet_id];
+
+        // 캡처폴더 이관
+        if (tab.capture_folder_url) {
+          const oldFolderId = extractFolderId(tab.capture_folder_url);
+          if (oldFolderId) {
+            // 새 구조에서 [구매캡처] 폴더 확보
+            const newCapture = await driveService.ensureCaptureFolderPath(newRootId, sheetTitle, tab.tab_name);
+
+            // 기존 폴더 내 파일들을 새 폴더로 이동
+            if (!isDryRun) {
+              try {
+                const files = await driveService.listFolderContents(oldFolderId);
+                for (const file of files) {
+                  await driveService.moveFile(file.id, newCapture.id, oldFolderId);
+                }
+                // tab_configs 업데이트
+                await pool.query(
+                  'UPDATE tab_configs SET capture_folder_url = $1, updated_at = NOW() WHERE sheet_id = $2 AND tab_name = $3',
+                  [newCapture.url, tab.sheet_id, tab.tab_name]
+                );
+                migrated.push({ type: 'capture', tabName: tab.tab_name, fileCount: files.length, newPath: newCapture.path.join(' → ') });
+              } catch (moveErr) {
+                errorList.push({ type: 'capture', tabName: tab.tab_name, error: moveErr.message });
+              }
+            } else {
+              migrated.push({ type: 'capture', tabName: tab.tab_name, dryRun: true, newPath: newCapture.path.join(' → ') });
+            }
+          }
+        }
+
+        // 리뷰폴더 이관
+        if (tab.folder_url) {
+          const oldFolderId = extractFolderId(tab.folder_url);
+          if (oldFolderId) {
+            const newReview = await driveService.ensureReviewFolderPath(newRootId, sheetTitle, tab.tab_name);
+
+            if (!isDryRun) {
+              try {
+                const files = await driveService.listFolderContents(oldFolderId);
+                for (const file of files) {
+                  await driveService.moveFile(file.id, newReview.id, oldFolderId);
+                }
+                await pool.query(
+                  'UPDATE tab_configs SET folder_url = $1, updated_at = NOW() WHERE sheet_id = $2 AND tab_name = $3',
+                  [newReview.url, tab.sheet_id, tab.tab_name]
+                );
+                migrated.push({ type: 'review', tabName: tab.tab_name, fileCount: files.length, newPath: newReview.path.join(' → ') });
+              } catch (moveErr) {
+                errorList.push({ type: 'review', tabName: tab.tab_name, error: moveErr.message });
+              }
+            } else {
+              migrated.push({ type: 'review', tabName: tab.tab_name, dryRun: true, newPath: newReview.path.join(' → ') });
+            }
+          }
+        }
+      } catch (err) {
+        logger.error(`[migrate] 오류 (${tab.tab_name}): ${err.message}`);
+        errorList.push({ tabName: tab.tab_name, error: err.message });
+      }
+    }
+
+    const elapsed = Math.round((Date.now() - startTime) / 1000);
+    res.json({ ok: true, migrated, skipped, errors: errorList, dryRun: isDryRun, elapsed, totalTabs: tabs.length });
+  } catch (err) {
+    next(err);
+  }
+});
+
+// ═══════════════════════════════════════════════════════════
+// POST /api/drive/organize-capture — 캡처폴더 재배치 (레거시 호환)
 // ═══════════════════════════════════════════════════════════
 router.post('/organize-capture', authMiddleware, async (req, res, next) => {
   try {
     const { dryRun } = req.body;
     const isDryRun = dryRun === true || dryRun === 'true';
-    const rootFolderId = process.env.DRIVE_ROOT_FOLDER_ID;
-    if (!rootFolderId) return res.json({ error: 'DRIVE_ROOT_FOLDER_ID 미설정' });
+    const rootFolderId = getRootFolderId();
+    if (!rootFolderId) return res.json({ error: 'AI_REVIEW_FOLDER_ID 미설정' });
 
-    // DB에서 캡처폴더 URL이 있는 탭만 조회
     const { rows: tabs } = await pool.query(
       `SELECT sheet_id, tab_name, campaign_name, capture_folder_url
        FROM tab_configs
        WHERE capture_folder_url IS NOT NULL AND capture_folder_url <> ''`
     );
 
-    const moved = [], skipped = [], errors = [];
+    const moved = [], skippedList = [], errorList = [];
     const startTime = Date.now();
 
-    // 루트 폴더 내 폴더 목록 조회 (1회)
     let rootChildren = [];
     try {
       rootChildren = await driveService.listFolderContents(rootFolderId, 'application/vnd.google-apps.folder');
@@ -327,33 +553,32 @@ router.post('/organize-capture', authMiddleware, async (req, res, next) => {
     for (const tab of tabs) {
       try {
         const folderId = extractFolderId(tab.capture_folder_url);
-        if (!folderId) { skipped.push({ folder: tab.tab_name, reason: 'URL 파싱 실패' }); continue; }
+        if (!folderId) { skippedList.push({ folder: tab.tab_name, reason: 'URL 파싱 실패' }); continue; }
 
         if (rootChildIds.has(folderId)) {
-          skipped.push({ folder: tab.tab_name, reason: '이미 루트 폴더 내' });
+          skippedList.push({ folder: tab.tab_name, reason: '이미 루트 폴더 내' });
           continue;
         }
 
-        // 루트 폴더로 이동
         if (!isDryRun) {
           await driveService.moveFile(folderId, rootFolderId, null);
         }
         moved.push({ folder: tab.tab_name, folderId, campFolder: tab.campaign_name || tab.tab_name });
       } catch (err) {
         logger.error(`[organizeCapture] 오류 (${tab.tab_name}): ${err.message}`);
-        errors.push({ folder: tab.tab_name, message: err.message });
+        errorList.push({ folder: tab.tab_name, message: err.message });
       }
     }
 
     const elapsed = Math.round((Date.now() - startTime) / 1000);
-    res.json({ ok: true, moved, created: [], skipped, errors, dryRun: isDryRun, elapsed });
+    res.json({ ok: true, moved, created: [], skipped: skippedList, errors: errorList, dryRun: isDryRun, elapsed });
   } catch (err) {
     next(err);
   }
 });
 
 // ═══════════════════════════════════════════════════════════
-// POST /api/drive/save-capture — 캡처폴더 URL 저장 (GAS: saveCaptureFolder)
+// POST /api/drive/save-capture — 캡처폴더 URL 저장
 // ═══════════════════════════════════════════════════════════
 router.post('/save-capture', authMiddleware, async (req, res, next) => {
   try {
@@ -371,7 +596,7 @@ router.post('/save-capture', authMiddleware, async (req, res, next) => {
 });
 
 // ═══════════════════════════════════════════════════════════
-// POST /api/drive/update-urls — 폴더 URL 강제 수정 (GAS: updateFolderUrls)
+// POST /api/drive/update-urls — 폴더 URL 강제 수정
 // ═══════════════════════════════════════════════════════════
 router.post('/update-urls', authMiddleware, async (req, res, next) => {
   try {
@@ -399,7 +624,7 @@ router.post('/update-urls', authMiddleware, async (req, res, next) => {
 });
 
 // ═══════════════════════════════════════════════════════════
-// GET /api/drive/diag — 캡처폴더 현황 진단 (GAS: diagCaptureFolders)
+// GET /api/drive/diag — 폴더 현황 진단
 // ═══════════════════════════════════════════════════════════
 router.get('/diag', authMiddleware, async (req, res, next) => {
   try {
@@ -418,6 +643,7 @@ router.get('/diag', authMiddleware, async (req, res, next) => {
       total: rows.length,
       noFolderUrl: noFolder.length,
       noCaptureFolderUrl: noCapture.length,
+      rootFolderId: getRootFolderId() || '미설정',
       oauthStatus: driveService.getOAuthStatus(),
       details: rows,
     });
@@ -425,88 +651,5 @@ router.get('/diag', authMiddleware, async (req, res, next) => {
     next(err);
   }
 });
-
-// ── 내부 헬퍼 (sync-all 에서 재사용) — OAuth driveService 경유 ──
-async function syncCaptureFoldersInternal(force) {
-  const rootFolderId = process.env.DRIVE_ROOT_FOLDER_ID;
-  if (!rootFolderId) return { ok: false, error: 'DRIVE_ROOT_FOLDER_ID 미설정' };
-
-  const { rows: tabs } = await pool.query(
-    `SELECT sheet_id, tab_name, campaign_name, capture_folder_url
-     FROM tab_configs
-     WHERE (is_closed = FALSE OR is_closed IS NULL)`
-  );
-
-  let synced = 0, created = 0, errors = 0;
-
-  for (const tab of tabs) {
-    try {
-      if (tab.capture_folder_url && !force) { synced++; continue; }
-
-      const folderName = `[캡처] ${tab.campaign_name || tab.tab_name}`;
-      let folder = await driveService.findFolderByName(folderName, rootFolderId).catch(() => null);
-
-      if (!folder) {
-        folder = await driveService.createFolder(folderName, rootFolderId);
-        created++;
-      }
-
-      if (folder) {
-        const folderUrl = `https://drive.google.com/drive/folders/${folder.id}`;
-        await pool.query(
-          'UPDATE tab_configs SET capture_folder_url = $1, updated_at = NOW() WHERE sheet_id = $2 AND tab_name = $3',
-          [folderUrl, tab.sheet_id, tab.tab_name]
-        );
-      }
-      synced++;
-    } catch (err) {
-      logger.error(`[syncCapture:internal] 오류 (${tab.tab_name}): ${err.message}`);
-      errors++;
-    }
-  }
-
-  return { ok: true, synced, created, errors, total: tabs.length };
-}
-
-async function syncReviewFoldersInternal(force) {
-  const rootFolderId = process.env.DRIVE_ROOT_FOLDER_ID;
-  if (!rootFolderId) return { ok: false, error: 'DRIVE_ROOT_FOLDER_ID 미설정' };
-
-  const { rows: tabs } = await pool.query(
-    `SELECT sheet_id, tab_name, campaign_name, folder_url
-     FROM tab_configs
-     WHERE (is_closed = FALSE OR is_closed IS NULL)`
-  );
-
-  let synced = 0, created = 0, errors = 0;
-
-  for (const tab of tabs) {
-    try {
-      if (tab.folder_url && !force) { synced++; continue; }
-
-      const folderName = `[리뷰] ${tab.campaign_name || tab.tab_name}`;
-      let folder = await driveService.findFolderByName(folderName, rootFolderId).catch(() => null);
-
-      if (!folder) {
-        folder = await driveService.createFolder(folderName, rootFolderId);
-        created++;
-      }
-
-      if (folder) {
-        const folderUrl = `https://drive.google.com/drive/folders/${folder.id}`;
-        await pool.query(
-          'UPDATE tab_configs SET folder_url = $1, updated_at = NOW() WHERE sheet_id = $2 AND tab_name = $3',
-          [folderUrl, tab.sheet_id, tab.tab_name]
-        );
-      }
-      synced++;
-    } catch (err) {
-      logger.error(`[syncReview:internal] 오류 (${tab.tab_name}): ${err.message}`);
-      errors++;
-    }
-  }
-
-  return { ok: true, synced, created, errors, total: tabs.length };
-}
 
 module.exports = router;

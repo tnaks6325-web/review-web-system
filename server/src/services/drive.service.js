@@ -269,6 +269,164 @@ async function getOrCreateSubFolder(parentFolderId, subFolderName) {
   return await createFolder(subFolderName, parentFolderId);
 }
 
+// ═══════════════════════════════════════════════════════════
+// 통합 폴더 구조 헬퍼 함수 (AI_REVIEW_FOLDER 기반)
+//
+// 새 폴더 구조:
+//   AI_REVIEW_FOLDER (루트)
+//   └── {시트제목} (캠페인=업체)
+//       └── {탭명} (작업)
+//           ├── [구매캡처]
+//           └── [리뷰]
+//               └── {옵션폴더} (선택)
+// ═══════════════════════════════════════════════════════════
+
+/**
+ * 폴더 경로를 순서대로 탐색/생성하여 최종 폴더 ID를 반환
+ * @param {string} rootFolderId - 루트 폴더 ID (AI_REVIEW_FOLDER_ID)
+ * @param {string[]} folderNames - 생성할 폴더 경로 배열 (예: ['시트명', '탭명', '[구매캡처]'])
+ * @returns {{ id, name, webViewLink, path: string[] }}
+ */
+async function ensureFolderPath(rootFolderId, folderNames) {
+  let currentParentId = rootFolderId;
+  const resolvedPath = [];
+
+  for (const name of folderNames) {
+    if (!name) continue;
+    let folder = await findFolderByName(name, currentParentId);
+    if (!folder) {
+      folder = await createFolder(name, currentParentId);
+      logger.info(`[Drive] 폴더 생성: "${name}" in ${currentParentId}`);
+    }
+    currentParentId = folder.id;
+    resolvedPath.push(name);
+  }
+
+  return {
+    id: currentParentId,
+    path: resolvedPath,
+    url: `https://drive.google.com/drive/folders/${currentParentId}`,
+  };
+}
+
+/**
+ * 캡처 폴더 경로 확보 (3단계: 시트제목 → 탭명 → [구매캡처])
+ * @param {string} rootFolderId - AI_REVIEW_FOLDER_ID
+ * @param {string} sheetTitle - 구글 시트 제목 (캠페인/업체명)
+ * @param {string} tabName - 탭 이름
+ * @returns {{ id, url, path }}
+ */
+async function ensureCaptureFolderPath(rootFolderId, sheetTitle, tabName) {
+  return ensureFolderPath(rootFolderId, [sheetTitle, tabName, '[구매캡처]']);
+}
+
+/**
+ * 리뷰 폴더 경로 확보 (3~4단계: 시트제목 → 탭명 → [리뷰] → [옵션])
+ * @param {string} rootFolderId - AI_REVIEW_FOLDER_ID
+ * @param {string} sheetTitle - 구글 시트 제목 (캠페인/업체명)
+ * @param {string} tabName - 탭 이름
+ * @param {string} [optionFolderName] - 옵션 서브폴더 (선택)
+ * @returns {{ id, url, path }}
+ */
+async function ensureReviewFolderPath(rootFolderId, sheetTitle, tabName, optionFolderName) {
+  const pathParts = [sheetTitle, tabName, '[리뷰]'];
+  if (optionFolderName) pathParts.push(optionFolderName);
+  return ensureFolderPath(rootFolderId, pathParts);
+}
+
+/**
+ * 동일 이름 파일이 존재하면 휴지통으로 이동 후 true 반환
+ * @param {string} parentFolderId - 대상 폴더 ID
+ * @param {string} fileName - 파일명
+ * @returns {boolean} - 중복이 있어서 삭제했으면 true
+ */
+async function trashDuplicateFile(parentFolderId, fileName) {
+  const escapedName = fileName.replace(/'/g, "\\'");
+  const q = `name = '${escapedName}' and '${parentFolderId}' in parents and trashed = false`;
+  const params = {
+    q,
+    fields: 'files(id, name)',
+    pageSize: 10,
+    supportsAllDrives: true,
+    includeItemsFromAllDrives: true,
+  };
+
+  const d = _getUploadDrive();
+  if (!d) return false;
+
+  // SA → OAuth 순서로 검색
+  let files = [];
+  const sa = _getReadDrive();
+  if (sa) {
+    try {
+      const res = await sa.files.list(params);
+      files = res.data.files || [];
+    } catch (_) {}
+  }
+  if (files.length === 0) {
+    const oauth = _getOAuthDrive();
+    if (oauth && oauth !== sa) {
+      try {
+        const res = await oauth.files.list(params);
+        files = res.data.files || [];
+      } catch (_) {}
+    }
+  }
+
+  // 발견된 중복 파일들 휴지통 이동
+  for (const file of files) {
+    try {
+      await d.files.update({
+        fileId: file.id,
+        requestBody: { trashed: true },
+        supportsAllDrives: true,
+      });
+      logger.info(`[Drive] 중복 파일 휴지통 이동: "${file.name}" (${file.id})`);
+    } catch (trashErr) {
+      logger.warn(`[Drive] 중복 파일 삭제 실패 (${file.id}): ${trashErr.message}`);
+    }
+  }
+
+  return files.length > 0;
+}
+
+/**
+ * 리뷰 파일명 생성 규칙: {reviewerName}_{index}_{yyyyMMdd_HHmmss}.{ext}
+ * @param {string} reviewerName - 리뷰어 이름
+ * @param {number} index - 파일 순번 (1부터)
+ * @param {string} mimeType - MIME 타입
+ * @returns {string}
+ */
+function generateReviewFileName(reviewerName, index, mimeType) {
+  // mimeType → 확장자 매핑
+  const extMap = {
+    'image/jpeg': 'jpg',
+    'image/png': 'png',
+    'image/gif': 'gif',
+    'image/webp': 'webp',
+  };
+  const ext = extMap[mimeType] || 'jpg';
+
+  // KST 타임스탬프
+  const now = new Date();
+  const kst = new Date(now.getTime() + 9 * 60 * 60 * 1000);
+  const ts = kst.toISOString().replace(/[-:T]/g, '').slice(0, 15).replace(/^(\d{8})(\d{6}).*/, '$1_$2');
+
+  // 이름에서 특수문자 제거
+  const safeName = (reviewerName || '익명').replace(/[\/\\:*?"<>|]/g, '_');
+
+  return `${safeName}_${index}_${ts}.${ext}`;
+}
+
+/**
+ * Google Drive URL에서 폴더 ID 추출
+ */
+function extractFolderIdFromUrl(url) {
+  if (!url) return null;
+  const m = (url || '').match(/\/folders\/([a-zA-Z0-9_-]{10,})/);
+  return m ? m[1] : null;
+}
+
 /**
  * OAuth Drive 상태 진단
  */
@@ -299,4 +457,11 @@ module.exports = {
   uploadFileBase64,
   getOrCreateSubFolder,
   getOAuthStatus,
+  // 새 통합 폴더 구조 함수
+  ensureFolderPath,
+  ensureCaptureFolderPath,
+  ensureReviewFolderPath,
+  trashDuplicateFile,
+  generateReviewFileName,
+  extractFolderIdFromUrl,
 };

@@ -154,6 +154,16 @@ const _ACTION_MAP = {
   'extractOrderImage':   { method: 'POST', path: '/api/image/image-extract' },
   'uploadOrderImage':    { method: 'POST', path: '/api/image/image-upload' },
   'verifyAddressMatch':  { method: 'POST', path: '/api/image/verify-address' },
+  'uploadReviewImage':   { method: 'POST', path: '/api/image/review-upload' },
+
+  // Drive 폴더 관리
+  'initRootFolder':      { method: 'POST', path: '/api/drive/init-root' },
+  'syncCaptureFolders':  { method: 'POST', path: '/api/drive/sync-capture' },
+  'syncReviewFolders':   { method: 'POST', path: '/api/drive/sync-review' },
+  'syncAllFolders':      { method: 'POST', path: '/api/drive/sync-all' },
+  'batchCreateFolders':  { method: 'POST', path: '/api/drive/batch-create' },
+  'migrateToNewStructure': { method: 'POST', path: '/api/drive/migrate-to-new-structure' },
+  'driveDiag':           { method: 'GET',  path: '/api/drive/diag' },
 
   // 기타 GAS 전용 (호환성)
   'getAppUrl':      { method: 'GET',  path: '/api/diag/app-url' },
