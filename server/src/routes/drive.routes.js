@@ -425,16 +425,23 @@ router.post('/migrate-names', authMiddleware, async (req, res, next) => {
 });
 
 // ═══════════════════════════════════════════════════════════
-// POST /api/drive/migrate-to-new-structure — 기존 파일을 새 폴더 구조로 이관
-// 기존: DRIVE_ROOT / [캡처] 캠페인명 → 새: AI_REVIEW / 시트제목 / 탭명 / [구매캡처]
-// 기존: DRIVE_ROOT / [리뷰] 캠페인명 → 새: AI_REVIEW / 시트제목 / 탭명 / [리뷰]
+// POST /api/drive/migrate-to-new-structure — 기존 파일을 새 폴더 구조로 복사 이관
+//
+// ★ 복사(Copy) 방식: 기존 폴더의 파일을 그대로 유지하고, 새 구조에 사본을 생성
+//    → 기존 시스템에서 참조하는 링크/파일이 유실되지 않음
+//    → 스토리지는 2배 사용되지만 안전한 이관
+//
+// 기존: DRIVE_ROOT / [캡처] 캠페인명 / 파일 (원본 유지)
+// 새:   AI_REVIEW / 시트제목 / 탭명 / [구매캡처] / 파일 (사본)
+//
+// 기존: DRIVE_ROOT / [리뷰] 캠페인명 / 파일 (원본 유지)
+// 새:   AI_REVIEW / 시트제목 / 탭명 / [리뷰] / 파일 (사본)
 // ═══════════════════════════════════════════════════════════
 router.post('/migrate-to-new-structure', authMiddleware, async (req, res, next) => {
   try {
     const { dryRun } = req.body;
     const isDryRun = dryRun === true || dryRun === 'true';
     const newRootId = getRootFolderId();
-    const oldRootId = process.env.DRIVE_ROOT_FOLDER_ID;
 
     if (!newRootId) return res.json({ error: 'AI_REVIEW_FOLDER_ID 미설정' });
 
@@ -456,36 +463,58 @@ router.post('/migrate-to-new-structure', authMiddleware, async (req, res, next) 
         }
         const sheetTitle = sheetTitleCache[tab.sheet_id];
 
-        // 캡처폴더 이관
+        // ── 캡처폴더 이관 (복사) ──
         if (tab.capture_folder_url) {
           const oldFolderId = extractFolderId(tab.capture_folder_url);
           if (oldFolderId) {
-            // 새 구조에서 [구매캡처] 폴더 확보
             const newCapture = await driveService.ensureCaptureFolderPath(newRootId, sheetTitle, tab.tab_name);
 
-            // 기존 폴더 내 파일들을 새 폴더로 이동
             if (!isDryRun) {
               try {
                 const files = await driveService.listFolderContents(oldFolderId);
+                let copied = 0;
                 for (const file of files) {
-                  await driveService.moveFile(file.id, newCapture.id, oldFolderId);
+                  // 폴더는 재귀 복사 불가 → 건너뜀 (서브폴더는 별도 처리 필요)
+                  if (file.mimeType === 'application/vnd.google-apps.folder') {
+                    skipped.push({ type: 'capture', tabName: tab.tab_name, fileName: file.name, reason: '서브폴더 — 수동 이관 필요' });
+                    continue;
+                  }
+                  await driveService.copyFile(file.id, newCapture.id);
+                  copied++;
                 }
-                // tab_configs 업데이트
+                // tab_configs의 capture_folder_url을 새 경로로 업데이트
                 await pool.query(
                   'UPDATE tab_configs SET capture_folder_url = $1, updated_at = NOW() WHERE sheet_id = $2 AND tab_name = $3',
                   [newCapture.url, tab.sheet_id, tab.tab_name]
                 );
-                migrated.push({ type: 'capture', tabName: tab.tab_name, fileCount: files.length, newPath: newCapture.path.join(' → ') });
-              } catch (moveErr) {
-                errorList.push({ type: 'capture', tabName: tab.tab_name, error: moveErr.message });
+                migrated.push({
+                  type: 'capture', tabName: tab.tab_name,
+                  fileCount: copied, totalFiles: files.length,
+                  newPath: newCapture.path.join(' → '),
+                  oldUrl: tab.capture_folder_url,
+                  newUrl: newCapture.url,
+                });
+              } catch (copyErr) {
+                errorList.push({ type: 'capture', tabName: tab.tab_name, error: copyErr.message });
               }
             } else {
-              migrated.push({ type: 'capture', tabName: tab.tab_name, dryRun: true, newPath: newCapture.path.join(' → ') });
+              // dryRun: 파일 개수만 조회
+              try {
+                const files = await driveService.listFolderContents(oldFolderId);
+                migrated.push({
+                  type: 'capture', tabName: tab.tab_name, dryRun: true,
+                  fileCount: files.length,
+                  newPath: newCapture.path.join(' → '),
+                  oldUrl: tab.capture_folder_url,
+                });
+              } catch (_) {
+                migrated.push({ type: 'capture', tabName: tab.tab_name, dryRun: true, fileCount: '조회실패', newPath: newCapture.path.join(' → ') });
+              }
             }
           }
         }
 
-        // 리뷰폴더 이관
+        // ── 리뷰폴더 이관 (복사) ──
         if (tab.folder_url) {
           const oldFolderId = extractFolderId(tab.folder_url);
           if (oldFolderId) {
@@ -494,19 +523,41 @@ router.post('/migrate-to-new-structure', authMiddleware, async (req, res, next) 
             if (!isDryRun) {
               try {
                 const files = await driveService.listFolderContents(oldFolderId);
+                let copied = 0;
                 for (const file of files) {
-                  await driveService.moveFile(file.id, newReview.id, oldFolderId);
+                  if (file.mimeType === 'application/vnd.google-apps.folder') {
+                    skipped.push({ type: 'review', tabName: tab.tab_name, fileName: file.name, reason: '서브폴더 — 수동 이관 필요' });
+                    continue;
+                  }
+                  await driveService.copyFile(file.id, newReview.id);
+                  copied++;
                 }
                 await pool.query(
                   'UPDATE tab_configs SET folder_url = $1, updated_at = NOW() WHERE sheet_id = $2 AND tab_name = $3',
                   [newReview.url, tab.sheet_id, tab.tab_name]
                 );
-                migrated.push({ type: 'review', tabName: tab.tab_name, fileCount: files.length, newPath: newReview.path.join(' → ') });
-              } catch (moveErr) {
-                errorList.push({ type: 'review', tabName: tab.tab_name, error: moveErr.message });
+                migrated.push({
+                  type: 'review', tabName: tab.tab_name,
+                  fileCount: copied, totalFiles: files.length,
+                  newPath: newReview.path.join(' → '),
+                  oldUrl: tab.folder_url,
+                  newUrl: newReview.url,
+                });
+              } catch (copyErr) {
+                errorList.push({ type: 'review', tabName: tab.tab_name, error: copyErr.message });
               }
             } else {
-              migrated.push({ type: 'review', tabName: tab.tab_name, dryRun: true, newPath: newReview.path.join(' → ') });
+              try {
+                const files = await driveService.listFolderContents(oldFolderId);
+                migrated.push({
+                  type: 'review', tabName: tab.tab_name, dryRun: true,
+                  fileCount: files.length,
+                  newPath: newReview.path.join(' → '),
+                  oldUrl: tab.folder_url,
+                });
+              } catch (_) {
+                migrated.push({ type: 'review', tabName: tab.tab_name, dryRun: true, fileCount: '조회실패', newPath: newReview.path.join(' → ') });
+              }
             }
           }
         }
@@ -517,7 +568,13 @@ router.post('/migrate-to-new-structure', authMiddleware, async (req, res, next) 
     }
 
     const elapsed = Math.round((Date.now() - startTime) / 1000);
-    res.json({ ok: true, migrated, skipped, errors: errorList, dryRun: isDryRun, elapsed, totalTabs: tabs.length });
+    res.json({
+      ok: true,
+      method: 'copy',
+      note: '기존 폴더/파일은 그대로 유지됩니다. 새 구조에 사본이 생성됩니다.',
+      migrated, skipped, errors: errorList,
+      dryRun: isDryRun, elapsed, totalTabs: tabs.length,
+    });
   } catch (err) {
     next(err);
   }

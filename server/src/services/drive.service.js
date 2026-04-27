@@ -257,6 +257,30 @@ async function uploadFileBase64(base64Data, fileName, mimeType, parentFolderId) 
 }
 
 /**
+ * 파일 복사 (Google Drive files.copy) — 원본 유지, 새 폴더에 사본 생성
+ * @param {string} fileId - 복사할 원본 파일 ID
+ * @param {string} newParentId - 사본을 넣을 대상 폴더 ID
+ * @param {string} [newName] - 사본 파일명 (없으면 원본 이름 유지)
+ * @returns {{ id, name, webViewLink }}
+ */
+async function copyFile(fileId, newParentId, newName) {
+  const d = _getUploadDrive();
+  if (!d) throw new Error('Google Drive API가 설정되지 않았습니다. (OAuth 또는 SA 필요)');
+
+  const requestBody = { parents: [newParentId] };
+  if (newName) requestBody.name = newName;
+
+  const res = await d.files.copy({
+    fileId,
+    requestBody,
+    fields: 'id, name, webViewLink',
+    supportsAllDrives: true,
+  });
+  logger.info(`[Drive] 파일 복사: ${fileId} → ${newParentId}/${res.data.name} (${oauthDrive ? 'OAuth' : 'SA'})`);
+  return res.data;
+}
+
+/**
  * 캡처폴더 하위의 차수별 서브폴더 찾기/생성
  * 경로: DRIVE_ROOT / [캡처] 캠페인명 / 차수명(또는 탭명) /
  */
@@ -453,6 +477,7 @@ module.exports = {
   createFolder,
   renameFile,
   moveFile,
+  copyFile,
   findFolderByName,
   uploadFileBase64,
   getOrCreateSubFolder,
