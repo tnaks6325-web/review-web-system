@@ -132,8 +132,58 @@ router.post('/staff-users', authMiddleware, masterOnlyMiddleware, async (req, re
 // ═══════════════════════════════════════════════════════════
 // GET /api/admin/dashboard — 대시보드 데이터 (GAS 호환 stats/grand 형식)
 // 프론트엔드가 기대하는 형식:
-//   { stats: [{ campaign, total, submitted, tabs:[...] }], grand: { total, submitted, pending }, closedTabs, indexBuiltAt }
+//   { stats: [{ campaign, total, submitted, tabs:[{ ..., tuip, chuihap, roundList }] }],
+//     grand: { total, submitted, pending }, closedTabs, indexBuiltAt }
+//
+// ★ Phase 15: 투입중/취합중 + 차수별 집계 추가
+//   - 작업 컬럼 그룹(WORK_COL_GROUPS): row_json 키를 그룹 매칭하여 filledCount 계산
+//   - filledCount < 4 → 투입중(tuip), >= 4 → 취합중(chuihap)
+//   - is_submitted=true인 행은 투입/취합에서 제외 (이미 완료)
+//   - round별 그룹핑 → roundList 배열 생성
 // ═══════════════════════════════════════════════════════════
+
+// ── 작업 컬럼 그룹 정의 ──
+// 각 그룹의 키워드 중 하나라도 row_json 키에 매칭되면 해당 그룹은 "채워짐"으로 판정
+// 유사 컬럼명을 하나의 그룹으로 묶어 1개로 카운트
+// 구매일자, 입금, 담당자, 리뷰제출, 비고, 차수 등은 제외
+const WORK_COL_GROUPS = [
+  { name: 'recipient',  keywords: ['수취인', '주문자'] },
+  { name: 'phone',      keywords: ['연락처', '전화번호', '핸드폰', '휴대폰'] },
+  { name: 'address',    keywords: ['주소'] },
+  { name: 'bank',       keywords: ['은행'] },
+  { name: 'account',    keywords: ['계좌번호', '계좌'] },
+  { name: 'holder',     keywords: ['예금주'] },
+  { name: 'amount',     keywords: ['결제금액', '결제', '금액'] },
+  { name: 'orderNum',   keywords: ['주문번호'] },
+  { name: 'orderer',    keywords: ['주문자제출'] },
+  { name: 'userId',     keywords: ['쿠팡id', '네이버아이디', 'id', '네이버&쿠팡id'] },
+];
+const WORK_COL_THRESHOLD = 4; // filledCount >= 4 → 취합중
+
+/**
+ * row_json 객체에서 작업 컬럼 그룹 중 값이 채워진 그룹 수를 계산
+ * @param {object} rowJson - review_index.row_json
+ * @returns {number} filledCount (0 ~ WORK_COL_GROUPS.length)
+ */
+function _countFilledWorkGroups(rowJson) {
+  if (!rowJson || typeof rowJson !== 'object') return 0;
+  let filled = 0;
+  for (const group of WORK_COL_GROUPS) {
+    const isFilled = group.keywords.some(kw => {
+      // row_json 키에서 kw를 포함하는 키를 찾고, 그 값이 비어있지 않은지 확인
+      for (const key of Object.keys(rowJson)) {
+        if (key.toLowerCase().includes(kw.toLowerCase())) {
+          const val = String(rowJson[key] || '').trim();
+          if (val.length > 0) return true;
+        }
+      }
+      return false;
+    });
+    if (isFilled) filled++;
+  }
+  return filled;
+}
+
 router.get('/dashboard', authMiddleware, async (req, res, next) => {
   try {
     // 1. 탭 통계 (index_master + tab_configs JOIN + review_index에서 시작일/종료일 추출)
@@ -178,6 +228,74 @@ router.get('/dashboard', authMiddleware, async (req, res, next) => {
       ORDER BY im.built_at DESC NULLS LAST
     `);
 
+    // ★ Phase 15: 투입/취합 + 차수별 집계를 위해 review_index 행 데이터 로드
+    // 활성 탭의 미제출 행만 가져옴 (is_submitted=true는 투입/취합 대상 아님)
+    const activeSheetTabs = tabs.map(t => `${t.sheetId}||${t.tabName}`);
+    let workStatusMap = {}; // "sheetId||tabName" → { tuip, chuihap }
+    let roundDataMap = {};  // "sheetId||tabName" → { rounds: { "1차": { total, submitted, pending, tuip, chuihap, startDate }, ... } }
+
+    if (activeSheetTabs.length > 0) {
+      // 미제출 행의 row_json + round를 가져와서 JS에서 집계
+      // (활성 탭만 대상, is_submitted=false만 투입/취합 계산)
+      const { rows: reviewRows } = await pool.query(`
+        SELECT ri.sheet_id AS "sheetId", ri.tab_name AS "tabName",
+               ri.is_submitted AS "isSubmitted", ri.round,
+               ri.row_json AS "rowJson", ri.start_date AS "startDate"
+        FROM review_index ri
+        INNER JOIN index_master im ON ri.sheet_id = im.sheet_id AND ri.tab_name = im.tab_name
+        WHERE im.status = 'active'
+      `);
+
+      // 탭별 + 차수별 집계
+      for (const row of reviewRows) {
+        const tabKey = `${row.sheetId}||${row.tabName}`;
+        const roundVal = (row.round || '').trim();
+
+        // ── 탭 레벨 투입/취합 ──
+        if (!workStatusMap[tabKey]) {
+          workStatusMap[tabKey] = { tuip: 0, chuihap: 0 };
+        }
+        if (!row.isSubmitted) {
+          const filledCount = _countFilledWorkGroups(row.rowJson);
+          if (filledCount >= WORK_COL_THRESHOLD) {
+            workStatusMap[tabKey].chuihap++;
+          } else {
+            workStatusMap[tabKey].tuip++;
+          }
+        }
+
+        // ── 차수별 집계 ──
+        if (roundVal) {
+          if (!roundDataMap[tabKey]) roundDataMap[tabKey] = {};
+          if (!roundDataMap[tabKey][roundVal]) {
+            roundDataMap[tabKey][roundVal] = {
+              total: 0, submitted: 0, pending: 0,
+              tuip: 0, chuihap: 0, startDate: null,
+            };
+          }
+          const rd = roundDataMap[tabKey][roundVal];
+          rd.total++;
+          if (row.isSubmitted) {
+            rd.submitted++;
+          } else {
+            rd.pending++;
+            const filledCount = _countFilledWorkGroups(row.rowJson);
+            if (filledCount >= WORK_COL_THRESHOLD) {
+              rd.chuihap++;
+            } else {
+              rd.tuip++;
+            }
+          }
+          // 차수별 최소 시작일
+          if (row.startDate) {
+            if (!rd.startDate || row.startDate < rd.startDate) {
+              rd.startDate = row.startDate;
+            }
+          }
+        }
+      }
+    }
+
     // 2. 마감 탭 목록 (is_closed=true인 tab_configs — 인덱스에 없을 수 있음)
     const { rows: closedConfigs } = await pool.query(`
       SELECT sheet_id AS "sheetId", tab_name AS "tabName", campaign_name AS "campaignName"
@@ -221,6 +339,33 @@ router.get('/dashboard', authMiddleware, async (req, res, next) => {
       const startDate = t.startDate || '';
       const endDate   = t.endDate || '';
 
+      // ★ Phase 15: 투입/취합 + 차수별 roundList 추가
+      const tabKey = `${t.sheetId}||${t.tabName}`;
+      const ws = workStatusMap[tabKey] || { tuip: 0, chuihap: 0 };
+      const tcRound = t.round || '';
+
+      // roundList 구성: 차수 데이터가 있는 탭만
+      let roundList = [];
+      const rdMap = roundDataMap[tabKey];
+      if (rdMap && Object.keys(rdMap).length > 0) {
+        roundList = Object.entries(rdMap)
+          .map(([roundVal, rd]) => ({
+            round:     roundVal,
+            total:     rd.total,
+            submitted: rd.submitted,
+            pending:   rd.pending,
+            tuip:      rd.tuip,
+            chuihap:   rd.chuihap,
+            startDate: rd.startDate || '',
+          }))
+          .sort((a, b) => {
+            // 숫자 추출하여 정렬 (예: "1차" → 1, "2차" → 2)
+            const numA = parseInt(a.round.replace(/[^0-9]/g, '')) || 0;
+            const numB = parseInt(b.round.replace(/[^0-9]/g, '')) || 0;
+            return numA - numB;
+          });
+      }
+
       camp.tabs.push({
         sheetId:     t.sheetId,
         tab:         t.tabName,
@@ -228,6 +373,10 @@ router.get('/dashboard', authMiddleware, async (req, res, next) => {
         total,
         submitted,
         pending,
+        tuip:        ws.tuip,
+        chuihap:     ws.chuihap,
+        tcRound,
+        roundList,
         isClosed:    !!t.isClosed,
         displayName: t.displayName || '',
         manager:     t.manager || '',

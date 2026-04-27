@@ -95,7 +95,7 @@ app.get('/health', async (req, res) => {
     db: dbStatus,
     dbTime,
     google: googleStatus,
-    version: '2.14.0-keyword-db-management',
+    version: '2.15.0-dashboard-tuip-chuihap',
     uptime: Math.floor(process.uptime()),
     memory: Math.round(process.memoryUsage().heapUsed / 1024 / 1024) + 'MB',
     sentry: isSentryEnabled() ? 'active' : 'inactive',
