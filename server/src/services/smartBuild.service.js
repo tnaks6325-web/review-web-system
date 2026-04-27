@@ -90,6 +90,24 @@ function _isDataTabRow(cells) {
   return false;
 }
 
+/**
+ * 제출 여부 판단 로직 (강화된 3단계)
+ * 1단계: SUBMITTED_VALUES에 직접 매칭 (기존 로직)
+ * 2단계: 날짜 패턴 인식 (MM/DD HH:MM, YYYY-MM-DD, M/D 등)
+ * 3단계: 비어있지 않은 값이면 제출로 간주 (빈 칸 = 미제출)
+ */
+function _isSubmittedValue(val) {
+  if (!val) return false;
+  // 1단계: 기존 SUBMITTED_VALUES 직접 매칭
+  if (SUBMITTED_VALUES.includes(val)) return true;
+  // 2단계: 날짜/시간 패턴 인식 (리뷰제출일 열에 "04/11 22:26" 같은 값)
+  if (/\d{1,2}\/\d{1,2}/.test(val)) return true;   // MM/DD 또는 M/D
+  if (/\d{4}[-/]\d{1,2}[-/]\d{1,2}/.test(val)) return true;  // YYYY-MM-DD
+  if (/\d{1,2}[-/.]\d{1,2}[-/.]\d{2,4}/.test(val)) return true;  // DD.MM.YYYY 등
+  // 3단계: 비어있지 않은 값이면 제출로 간주 (e.g. "리뷰등록", "작성완료" 등 커스텀 값)
+  return val.length > 0;
+}
+
 function _formatDate(val) {
   if (!val) return null;
   const s = String(val).trim();
@@ -118,7 +136,36 @@ function _parseTabRows(values, sheetId, tabName, tabGid, campaignTitle) {
   const nameColIdx = headers.findIndex(h => NAME_KEYWORDS.some(k => h.includes(k)));
   if (nameColIdx < 0) return [];
 
-  const submitColIdx = headers.findIndex(h => SUBMIT_KEYWORDS.some(k => h.toLowerCase().includes(k.toLowerCase())));
+  // ── 제출열 탐색: 우선순위 기반 ("리뷰제출" > "리뷰완료" > 기타 "제출") ──
+  // 1단계: 정확한 키워드 일치 (= 헤더가 키워드와 동일)
+  // 2단계: "리뷰" 접두사 포함 매칭 우선 ("리뷰제출", "리뷰제출일", "리뷰완료")
+  // 3단계: 일반 부분 매칭 ("제출", "완료" 등) — 단, "주문자" 포함 헤더 제외
+  let submitColIdx = -1;
+  const SUBMIT_PRIORITY_PREFIXES = ['리뷰'];  // 이 접두사가 있는 열을 우선
+  const SUBMIT_EXCLUDE_PATTERNS = ['주문자', '수취인', '이름', '성함', '예금주'];  // 사람이름 열 제외
+
+  // 1단계: "리뷰" 접두사 + 키워드 매칭 (최우선)
+  for (let hi = 0; hi < headers.length && submitColIdx < 0; hi++) {
+    const hl = headers[hi].toLowerCase();
+    if (SUBMIT_PRIORITY_PREFIXES.some(p => hl.includes(p)) &&
+        SUBMIT_KEYWORDS.some(k => hl.includes(k.toLowerCase()))) {
+      submitColIdx = hi;
+    }
+  }
+  // 2단계: 일반 키워드 매칭 (사람이름 열 제외)
+  if (submitColIdx < 0) {
+    for (let hi = 0; hi < headers.length && submitColIdx < 0; hi++) {
+      const hl = headers[hi].toLowerCase();
+      if (SUBMIT_EXCLUDE_PATTERNS.some(p => hl.includes(p))) continue;
+      if (SUBMIT_KEYWORDS.some(k => hl.includes(k.toLowerCase()))) {
+        submitColIdx = hi;
+      }
+    }
+  }
+  // 3단계: 폴백 — 제외 패턴 무시하고 원래 로직 (호환성)
+  if (submitColIdx < 0) {
+    submitColIdx = headers.findIndex(h => SUBMIT_KEYWORDS.some(k => h.toLowerCase().includes(k.toLowerCase())));
+  }
 
   const productKeywords = ['상품명', '제품명', '상품', 'product'];
   const productColIdx = headers.findIndex(h => productKeywords.some(k => h.toLowerCase().includes(k.toLowerCase())));
@@ -143,7 +190,8 @@ function _parseTabRows(values, sheetId, tabName, tabGid, campaignTitle) {
       if (!name) return null;
 
       const submitVal = submitColIdx >= 0 ? String(row[submitColIdx] || '').trim() : '';
-      const isSubmitted = SUBMITTED_VALUES.includes(submitVal);
+      // 제출 판단: (1) SUBMITTED_VALUES 직접 매칭, (2) 날짜 패턴 인식, (3) 비어있지 않은 값
+      const isSubmitted = _isSubmittedValue(submitVal);
 
       let phone8 = null;
       if (phoneColIdx >= 0) {
