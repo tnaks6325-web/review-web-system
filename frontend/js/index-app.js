@@ -12010,6 +12010,15 @@ function _cellVal(t, col) {
     const clr = pct >= 80 ? "#059669" : pct >= 50 ? "#D97706" : "#DC2626";
     return `<span style="font-weight:600">${sc}/${rc}</span> <span style="color:${clr};font-size:.68rem">(${pct}%)</span>`;
   }
+  // 캠페인명 + 🔄 갱신 버튼
+  if (k === "campaign_name") {
+    const cn = t.campaign_name || "";
+    const sid = escHtml(t.sheet_id || "");
+    const rebuildBtn = sid
+      ? `<button class="btn-rebuild-sheet" data-sheetid="${sid}" data-camp="${escHtml(cn)}" onclick="event.stopPropagation();rebuildSheetIndex(this)" title="이 캠페인 인덱스 갱신"><i class="fas fa-sync-alt"></i></button>`
+      : "";
+    return cn ? `<span style="display:flex;align-items:center;gap:3px">${rebuildBtn}<span style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${escHtml(cn)}</span></span>` : '<span style="color:#D1D5DB">—</span>';
+  }
   // 텍스트 간편입력
   if (k === "display_name") return _inlineTextEdit(t, "display_name", "displayName", "상품명 입력");
   if (k === "deposit_name") return _inlineTextEdit(t, "deposit_name", "depositName", "입금자명");
