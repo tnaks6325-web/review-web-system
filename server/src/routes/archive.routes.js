@@ -8,6 +8,7 @@ const { logger } = require('../utils/logger');
 // GET /api/archive/detect — 아카이브 대상 자동 감지 (반자동: 감지만)
 // 소스 1: index_master 기준 (submitted >= row_count OR closed OR (완) 접두사)
 // 소스 2: tab_configs 기준 (closed이지만 index_master에 없는 경우)
+// ★ 소스 3: 차수별 마감된 차수 (closed_rounds) — 차수 단위 아카이브 대상
 // ═══════════════════════════════════════════════════════════
 router.get('/detect', authMiddleware, async (req, res, next) => {
   try {
@@ -26,7 +27,8 @@ router.get('/detect', authMiddleware, async (req, res, next) => {
           WHEN im.tab_name LIKE '(완)%' THEN 'name_completed'
           ELSE 'unknown'
         END AS "reason",
-        TRUE AS "inIndex"
+        TRUE AS "inIndex",
+        NULL AS "round"
       FROM index_master im
       LEFT JOIN tab_configs tc ON im.sheet_id = tc.sheet_id AND im.tab_name = tc.tab_name
       WHERE im.status = 'active'
@@ -50,13 +52,23 @@ router.get('/detect', authMiddleware, async (req, res, next) => {
           WHEN tc.is_closed = TRUE THEN 'closed'
           ELSE 'unknown'
         END AS "reason",
-        FALSE AS "inIndex"
+        FALSE AS "inIndex",
+        NULL AS "round"
       FROM tab_configs tc
       LEFT JOIN index_master im ON tc.sheet_id = im.sheet_id AND tc.tab_name = im.tab_name
       WHERE tc.is_closed = TRUE
         AND im.sheet_id IS NULL
 
       ORDER BY "campaignName", "tabName"
+    `);
+
+    // ★ 소스 3: 차수별 마감 감지 (closed_rounds에 값이 있는 탭)
+    const { rows: roundClosedRows } = await pool.query(`
+      SELECT tc.sheet_id AS "sheetId", tc.tab_name AS "tabName",
+             tc.campaign_name AS "campaignName", tc.closed_rounds AS "closedRounds"
+      FROM tab_configs tc
+      WHERE tc.closed_rounds IS NOT NULL AND tc.closed_rounds != ''
+        AND tc.is_closed = FALSE
     `);
 
     // 캠페인별 그룹핑 (프론트엔드 표시용)
@@ -76,8 +88,34 @@ router.get('/detect', authMiddleware, async (req, res, next) => {
         reason: r.reason,
         builtAt: r.builtAt,
         inIndex: r.inIndex,
+        round: r.round || null,
       });
     });
+
+    // ★ 차수별 마감 항목 추가 (탭이 아직 전체 마감이 아닌 경우)
+    for (const rc of roundClosedRows) {
+      const rounds = rc.closedRounds.split(',').map(s => s.trim()).filter(Boolean);
+      if (rounds.length === 0) continue;
+
+      if (!campMap.has(rc.sheetId)) {
+        campMap.set(rc.sheetId, {
+          sheetId: rc.sheetId,
+          campaignName: rc.campaignName || '미분류',
+          tabs: [],
+        });
+      }
+      rounds.forEach(round => {
+        campMap.get(rc.sheetId).tabs.push({
+          tabName: rc.tabName,
+          rowCount: 0,
+          submittedCount: 0,
+          reason: 'round_closed',
+          builtAt: null,
+          inIndex: true,
+          round,
+        });
+      });
+    }
 
     const campaigns = Array.from(campMap.values());
     res.json({
@@ -92,9 +130,10 @@ router.get('/detect', authMiddleware, async (req, res, next) => {
 });
 
 // ═══════════════════════════════════════════════════════════
-// POST /api/archive/tabs — 개별 탭 단위 아카이브 실행
-// body: { tabs: [{ sheetId, tabName }], reason? }
-// 관리자가 감지 결과 확인 후 선택적으로 실행
+// POST /api/archive/tabs — 개별 탭/차수 단위 아카이브 실행
+// body: { tabs: [{ sheetId, tabName, round? }], reason? }
+// ★ round가 있으면 해당 차수의 review_index 행만 아카이브
+// round가 없으면 기존처럼 탭 전체 아카이브
 // ═══════════════════════════════════════════════════════════
 router.post('/tabs', authMiddleware, async (req, res, next) => {
   const client = await pool.connect();
@@ -113,10 +152,105 @@ router.post('/tabs', authMiddleware, async (req, res, next) => {
     let archivedRows = 0;
     const results = [];
 
-    for (const { sheetId, tabName } of tabs) {
+    for (const { sheetId, tabName, round } of tabs) {
       if (!sheetId || !tabName) continue;
 
       try {
+        // ★ 차수 단위 아카이브: round가 지정된 경우 해당 차수의 review_index 행만 이동
+        if (round) {
+          // review_index에서 해당 차수 행만 아카이브
+          const { rowCount: reviewCount } = await client.query(`
+            INSERT INTO review_index_archive
+              (reviewer_name, sheet_id, tab_gid, tab_name, campaign_name,
+               row_index, is_submitted, is_submitted2, product_url, product_name,
+               submit_col, submit_col2, row_json, start_date, end_date,
+               round, phone8, built_at, archived_at)
+            SELECT
+              reviewer_name, sheet_id, tab_gid, tab_name, campaign_name,
+              row_index, is_submitted, is_submitted2, product_url, product_name,
+              submit_col, submit_col2, row_json, start_date, end_date,
+              round, phone8, built_at, NOW()
+            FROM review_index
+            WHERE sheet_id = $1 AND tab_name = $2 AND round = $3
+          `, [sheetId, tabName, round]);
+
+          // 원본에서 해당 차수 행 삭제
+          await client.query(
+            'DELETE FROM review_index WHERE sheet_id = $1 AND tab_name = $2 AND round = $3',
+            [sheetId, tabName, round]
+          );
+
+          // index_master의 row_count/submitted_count 갱신
+          const { rows: remaining } = await client.query(`
+            SELECT COUNT(*) AS total,
+                   SUM(CASE WHEN is_submitted THEN 1 ELSE 0 END) AS submitted
+            FROM review_index
+            WHERE sheet_id = $1 AND tab_name = $2
+          `, [sheetId, tabName]);
+
+          const newTotal = parseInt(remaining[0]?.total) || 0;
+          const newSubmitted = parseInt(remaining[0]?.submitted) || 0;
+
+          if (newTotal > 0) {
+            await client.query(
+              'UPDATE index_master SET row_count = $1, submitted_count = $2 WHERE sheet_id = $3 AND tab_name = $4',
+              [newTotal, newSubmitted, sheetId, tabName]
+            );
+          } else {
+            // 남은 행이 없으면 index_master도 아카이브
+            const { rows: masterRows } = await client.query(
+              'SELECT * FROM index_master WHERE sheet_id = $1 AND tab_name = $2',
+              [sheetId, tabName]
+            );
+            if (masterRows.length > 0) {
+              const mr = masterRows[0];
+              await client.query(`
+                INSERT INTO index_master_archive
+                  (sheet_id, tab_name, tab_gid, campaign_name, row_count, submitted_count,
+                   last_date, checksum, built_at, status, skip_reason, error_msg,
+                   sheet_modified_at, archived_by, archive_reason)
+                VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,'archived',$10,$11,$12,$13,$14)
+                ON CONFLICT (sheet_id, tab_name) DO UPDATE SET
+                  archived_at = NOW(), archived_by = EXCLUDED.archived_by,
+                  archive_reason = EXCLUDED.archive_reason
+              `, [
+                mr.sheet_id, mr.tab_name, mr.tab_gid, mr.campaign_name,
+                mr.row_count, mr.submitted_count, mr.last_date, mr.checksum,
+                mr.built_at, mr.skip_reason, mr.error_msg, mr.sheet_modified_at,
+                adminName, archiveReason,
+              ]);
+              await client.query(
+                'DELETE FROM index_master WHERE sheet_id = $1 AND tab_name = $2',
+                [sheetId, tabName]
+              );
+            }
+          }
+
+          // closed_rounds에서 해당 차수 제거
+          const { rows: tcRows } = await client.query(
+            'SELECT closed_rounds FROM tab_configs WHERE sheet_id = $1 AND tab_name = $2',
+            [sheetId, tabName]
+          );
+          if (tcRows.length > 0) {
+            const existing = (tcRows[0].closed_rounds || '').split(',').map(s => s.trim()).filter(Boolean);
+            const updated = existing.filter(r => r !== round).join(',');
+            await client.query(
+              'UPDATE tab_configs SET closed_rounds = $1, updated_at = NOW() WHERE sheet_id = $2 AND tab_name = $3',
+              [updated, sheetId, tabName]
+            );
+          }
+
+          archivedTabs++;
+          archivedRows += reviewCount;
+          results.push({
+            sheetId, tabName, round,
+            rowCount: reviewCount,
+            status: 'archived_round',
+          });
+          continue;
+        }
+
+        // ── 기존 탭 전체 아카이브 ──
         // 1. index_master에서 해당 탭 확인
         const { rows: masterRows } = await client.query(
           'SELECT * FROM index_master WHERE sheet_id = $1 AND tab_name = $2',

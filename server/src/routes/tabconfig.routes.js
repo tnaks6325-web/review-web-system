@@ -120,18 +120,52 @@ router.get('/config', authMiddleware, async (req, res, next) => {
 });
 
 // POST /api/tab/closed — 마감 설정 (GAS: setClosed)
+// ★ 차수 단위 마감 지원: items[].round 가 있으면 closed_rounds에 추가/제거
+// round가 없으면 기존처럼 탭 전체 is_closed 토글
 router.post('/closed', authMiddleware, async (req, res, next) => {
   try {
-    const { sheetId, tabs } = req.body;
-    if (!sheetId || !Array.isArray(tabs)) {
-      return res.json({ error: 'sheetId와 tabs 배열이 필요합니다.' });
+    // 두 가지 형태 지원: { sheetId, tabs } 또는 { items }
+    const items = req.body.items || req.body.tabs;
+    const topSheetId = req.body.sheetId;
+
+    if (!Array.isArray(items)) {
+      return res.json({ error: 'items(또는 tabs) 배열이 필요합니다.' });
     }
 
-    for (const t of tabs) {
-      await pool.query(
-        'UPDATE tab_configs SET is_closed = $1, updated_at = NOW() WHERE sheet_id = $2 AND tab_name = $3',
-        [Boolean(t.isClosed), sheetId, t.tabName]
-      );
+    for (const t of items) {
+      const sid = t.sheetId || topSheetId;
+      if (!sid || !t.tabName) continue;
+
+      if (t.round) {
+        // ── 차수 단위 마감/해제 ──
+        const { rows } = await pool.query(
+          'SELECT closed_rounds FROM tab_configs WHERE sheet_id = $1 AND tab_name = $2',
+          [sid, t.tabName]
+        );
+        if (rows.length === 0) continue;
+
+        const existing = (rows[0].closed_rounds || '').split(',').map(s => s.trim()).filter(Boolean);
+        const roundSet = new Set(existing);
+
+        if (t.isClosed) {
+          roundSet.add(t.round);
+        } else {
+          roundSet.delete(t.round);
+        }
+
+        const newClosedRounds = Array.from(roundSet).join(',');
+
+        await pool.query(
+          'UPDATE tab_configs SET closed_rounds = $1, updated_at = NOW() WHERE sheet_id = $2 AND tab_name = $3',
+          [newClosedRounds, sid, t.tabName]
+        );
+      } else {
+        // ── 기존 탭 전체 마감/해제 ──
+        await pool.query(
+          'UPDATE tab_configs SET is_closed = $1, updated_at = NOW() WHERE sheet_id = $2 AND tab_name = $3',
+          [Boolean(t.isClosed), sid, t.tabName]
+        );
+      }
     }
 
     res.json({ ok: true });

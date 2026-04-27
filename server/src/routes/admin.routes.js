@@ -214,6 +214,7 @@ router.get('/dashboard', authMiddleware, async (req, res, next) => {
         tc.taekhap,
         tc.sheet_url      AS "sheetUrl",
         tc.campaign_name  AS "tcCampaignName",
+        tc.closed_rounds  AS "closedRounds",
         sd.start_date     AS "startDate",
         sd.end_date       AS "endDate"
       FROM index_master im
@@ -378,6 +379,7 @@ router.get('/dashboard', authMiddleware, async (req, res, next) => {
         tcRound,
         roundList,
         isClosed:    !!t.isClosed,
+        closedRounds: t.closedRounds || '',
         displayName: t.displayName || '',
         manager:     t.manager || '',
         timeRange:   t.timeRange || '',

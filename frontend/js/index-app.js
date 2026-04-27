@@ -2038,11 +2038,19 @@ async function loadAdminDashboard() {
     const grand = data.grand || { total: 0, submitted: 0, pending: 0 };
 
     _closedSet    = new Set();
+    _closedRoundSet = new Set(); // ★ 차수 단위 마감 Set
     stats.forEach(c => {
       (c.tabs || []).forEach(t => {
         if (t.isClosed) {
           const key = (t.sheetId || "") + "||" + (t.tab || "");
           _closedSet.add(key);
+        }
+        // ★ 차수별 마감: closedRounds "1차,2차" → Set에 "sheetId||tabName||1차" 추가
+        if (t.closedRounds) {
+          const rounds = t.closedRounds.split(',').map(s => s.trim()).filter(Boolean);
+          rounds.forEach(rd => {
+            _closedRoundSet.add((t.sheetId || "") + "||" + (t.tab || "") + "||" + rd);
+          });
         }
       });
     });
@@ -2229,12 +2237,14 @@ async function loadAdminDashboard() {
             const rdRow = document.createElement("div");
             const rdDone = (rd.total > 0 && rd.pending === 0);
             const rdTabKey2 = tabKey + "||" + (rd.round || "");
+            // ★ 차수별 마감 판정: 탭 전체 마감 OR 해당 차수가 closedRoundSet에 있음
+            const isRoundClosed = isClosedTab || _closedRoundSet.has(rdTabKey2);
             const rdStartDateRaw2 = rd.startDate || t.startDate || "";
             const _rdManualSD2 = _getManualStartDate(rdTabKey2) || _getManualStartDate(tabKey + "||" + (rd.round || "").replace(/.*/, ""));
             const _rdEffectiveSD2 = _rdManualSD2 || rdStartDateRaw2;
-            const _rdOvDays2 = (!rdDone && !isClosedTab) ? _calcOverdueDays(_rdEffectiveSD2) : null;
+            const _rdOvDays2 = (!rdDone && !isRoundClosed) ? _calcOverdueDays(_rdEffectiveSD2) : null;
             const rdIsOverdue2 = _rdOvDays2 !== null && _rdOvDays2 >= 25;
-            _setupRow(rdRow, rdTabKey2, (rdDone ? " tab-done" : "") + (rdIsOverdue2 ? " urgent-overdue" : ""));
+            _setupRow(rdRow, rdTabKey2, (rdDone ? " tab-done" : "") + (isRoundClosed ? " is-closed-row" : "") + (rdIsOverdue2 ? " urgent-overdue" : ""));
             rdRow.dataset.sortDate = _rdEffectiveSD2 || "9999";
             rdRow.dataset.sortTaekhap = t.taekhap ? "1" : "0";
             rdRow.dataset.sortEnddate = 9999;
@@ -2251,7 +2261,7 @@ async function loadAdminDashboard() {
               ? `<a class="dash-tab-link" href="${escHtml(_rdTabSheetUrl2)}" target="_blank" title="${escHtml(_rdTabSheetUrl2)}">${escHtml(t.tab)} <i class="fas fa-external-link-alt dash-tab-ext"></i></a>${_rdOverdueBadge2}`
               : `<span>${escHtml(t.tab)}</span>${_rdOverdueBadge2}`;
             let rdStateHtml = "";
-            if (isClosedTab)      rdStateHtml = `<span class="bar-lbl-center">⬛ 마감</span>`;
+            if (isRoundClosed)    rdStateHtml = `<span class="bar-lbl-center">⬛ 마감</span>`;
             else if (rdDone)      rdStateHtml = `<span class="bar-lbl-center">✓ 완료</span>`;
             else if ((rd.tuip||0) > 0 || (rd.chuihap||0) > 0) {
               const rdTotal = rd.total || 0;
@@ -2262,8 +2272,8 @@ async function loadAdminDashboard() {
             const tRd = Object.assign({}, t, { submitted: rd.submitted, total: rd.total, pending: rd.pending, noRecipient: t.noRecipient, tuip: rd.tuip||0, chuihap: rd.chuihap||0 });
             const rdTcData2 = Object.assign({}, JSON.parse(tcAttr.replace(/&quot;/g,'"').replace(/&amp;/g,'&').replace(/&#39;/g,"'").replace(/&lt;/g,'<').replace(/&gt;/g,'>')), { tcRound: rd.round || "" });
             const rdTcAttr2 = escHtml(JSON.stringify(rdTcData2));
-            rdRow.dataset.state = _rowState(isClosedTab, rdDone, rd.tuip||0, rd.chuihap||0);
-            rdRow.innerHTML = _buildTabRowHtml(tRd, rdTabKey2, false, isClosedTab, rdTabNameHtml2, rdStartDateHtml, rdRate, rdStateHtml, rdTcAttr2, rd.round, null, campName);
+            rdRow.dataset.state = _rowState(isRoundClosed, rdDone, rd.tuip||0, rd.chuihap||0);
+            rdRow.innerHTML = _buildTabRowHtml(tRd, rdTabKey2, false, isRoundClosed, rdTabNameHtml2, rdStartDateHtml, rdRate, rdStateHtml, rdTcAttr2, rd.round, null, campName);
             flatTable.appendChild(rdRow);
           });
         } else {
@@ -2489,12 +2499,14 @@ function renderDashboard(data) {
           const rdRow = document.createElement("div");
           const rdDone = (rd.total > 0 && rd.pending === 0);
           const rdTabKey = tabKey + "||" + (rd.round || "");
+          // ★ 차수별 마감 판정
+          const isRoundClosed = isClosedTab || _closedRoundSet.has(rdTabKey);
           const rdStartDateRaw = rd.startDate || t.startDate || "";
           const _rdManualSD = _getManualStartDate(rdTabKey);
           const _rdEffectiveSD = _rdManualSD || rdStartDateRaw;
-          const _rdOvDays = (!rdDone && !isClosedTab) ? _calcOverdueDays(_rdEffectiveSD) : null;
+          const _rdOvDays = (!rdDone && !isRoundClosed) ? _calcOverdueDays(_rdEffectiveSD) : null;
           const rdIsOverdue = _rdOvDays !== null && _rdOvDays >= 25;
-          rdRow.className = "dash-tab-row " + campStripe + (rdDone?" tab-done":"")+(isClosedTab?" is-closed-row":"")+(rdIsOverdue?" urgent-overdue":"");
+          rdRow.className = "dash-tab-row " + campStripe + (rdDone?" tab-done":"")+(isRoundClosed?" is-closed-row":"")+(rdIsOverdue?" urgent-overdue":"");
           rdRow.dataset.tabkey = rdTabKey;
           rdRow.dataset.campname = campName.toLowerCase();
           rdRow.dataset.sortCampaign = campName.toLowerCase();
@@ -2511,7 +2523,7 @@ function renderDashboard(data) {
             ? `<a class="dash-tab-link" href="${escHtml(_rdTabSheetUrl)}" target="_blank" title="${escHtml(_rdTabSheetUrl)}">${escHtml(t.tab)} <i class="fas fa-external-link-alt dash-tab-ext"></i></a>${_rdOverdueBadge}`
             : `<span>${escHtml(t.tab)}</span>${_rdOverdueBadge}`;
           let rdStateHtml = "";
-          if (isClosedTab) rdStateHtml = `<span class="bar-lbl-center">⬛ 마감</span>`;
+          if (isRoundClosed) rdStateHtml = `<span class="bar-lbl-center">⬛ 마감</span>`;
           else if (rdDone) rdStateHtml = `<span class="bar-lbl-center">✓ 완료</span>`;
           else if ((rd.tuip||0) > 0 || (rd.chuihap||0) > 0) {
             const rdTotal2 = rd.total || 0;
@@ -2522,8 +2534,8 @@ function renderDashboard(data) {
           const tRd = Object.assign({}, t, { submitted: rd.submitted, total: rd.total, pending: rd.pending, tuip: rd.tuip||0, chuihap: rd.chuihap||0 });
           const rdTcData = Object.assign({}, JSON.parse(tcAttr.replace(/&quot;/g,'"').replace(/&amp;/g,'&').replace(/&#39;/g,"'").replace(/&lt;/g,'<').replace(/&gt;/g,'>')), { tcRound: rd.round || "" });
           const rdTcAttr = escHtml(JSON.stringify(rdTcData));
-          rdRow.dataset.state = _rowState(isClosedTab, rdDone, rd.tuip||0, rd.chuihap||0);
-          rdRow.innerHTML = _buildTabRowHtml(tRd, rdTabKey, false, isClosedTab, rdTabNameHtml, rdStartDateHtml, rdRate, rdStateHtml, rdTcAttr, rd.round, null, campName);
+          rdRow.dataset.state = _rowState(isRoundClosed, rdDone, rd.tuip||0, rd.chuihap||0);
+          rdRow.innerHTML = _buildTabRowHtml(tRd, rdTabKey, false, isRoundClosed, rdTabNameHtml, rdStartDateHtml, rdRate, rdStateHtml, rdTcAttr, rd.round, null, campName);
           flatTable2.appendChild(rdRow);
         });
       } else {
@@ -4054,6 +4066,7 @@ function toggleHideClosedTab() {
 
 // 마감된 tabKey Set — dashboard API 응답의 isClosed 값으로 채워짐
 let _closedSet = new Set();
+let _closedRoundSet = new Set(); // ★ 차수 단위 마감 Set: "sheetId||tabName||round"
 
 // 마감 모드 ON/OFF
 let _closedMode = false;
@@ -4080,6 +4093,7 @@ function toggleClosedMode() {
 }
 
 // [실행] 버튼 → 변경 내역 확인 후 팝업
+// ★ 차수별 마감 지원: tabKey가 "sheetId||tabName||round" 형태이면 차수 단위 마감
 function execClosed() {
   const cbs = document.querySelectorAll("#dashboardWrap .closed-cb");
   if (!cbs.length) { showToast("표시된 탭이 없습니다.", true); return; }
@@ -4087,9 +4101,19 @@ function execClosed() {
   let toClose = [], toOpen = [];
   cbs.forEach(cb => {
     const key = cb.dataset.tabkey || "";
-    const tabName = (key.split("||")[1] || "").trim();
-    if (cb.checked  && !_closedSet.has(key)) toClose.push({ key, tabName });
-    if (!cb.checked &&  _closedSet.has(key)) toOpen.push({ key, tabName });
+    const parts = key.split("||");
+    const tabName = (parts[1] || "").trim();
+    const round = (parts[2] || "").trim();
+    const displayLabel = round ? `${tabName} [${round}]` : tabName;
+
+    // ★ 차수가 있으면 _closedRoundSet으로 비교, 없으면 _closedSet으로 비교
+    if (round) {
+      if (cb.checked  && !_closedRoundSet.has(key)) toClose.push({ key, tabName: displayLabel, round });
+      if (!cb.checked &&  _closedRoundSet.has(key)) toOpen.push({ key, tabName: displayLabel, round });
+    } else {
+      if (cb.checked  && !_closedSet.has(key)) toClose.push({ key, tabName: displayLabel });
+      if (!cb.checked &&  _closedSet.has(key)) toOpen.push({ key, tabName: displayLabel });
+    }
   });
 
   if (!toClose.length && !toOpen.length) {
@@ -4128,7 +4152,7 @@ function cancelClosed() {
   document.getElementById("closedConfirmOverlay").classList.remove("open");
 }
 
-// 팝업 확인 → GAS 베이스시트에 저장
+// 팝업 확인 → 서버에 저장 (★ 차수 단위 마감 지원)
 async function confirmClosed() {
   document.getElementById("closedConfirmOverlay").classList.remove("open");
 
@@ -4137,20 +4161,40 @@ async function confirmClosed() {
   cbs.forEach(cb => {
     const key = cb.dataset.tabkey || "";
     if (!key) return;
-    const [sheetId, tabName] = key.split("||");
-    const wasClosed  = _closedSet.has(key);
-    const isChecked  = cb.checked;
-    if (isChecked === wasClosed) return;
-    items.push({ sheetId: sheetId || "", tabName: tabName || "", isClosed: isChecked });
+    const parts = key.split("||");
+    const sheetId = parts[0] || "";
+    const tabName = parts[1] || "";
+    const round   = parts[2] || "";  // ★ 차수 (있으면 차수 단위 마감)
+
+    if (round) {
+      // 차수 단위: _closedRoundSet으로 비교
+      const wasClosed = _closedRoundSet.has(key);
+      const isChecked = cb.checked;
+      if (isChecked === wasClosed) return;
+      items.push({ sheetId, tabName, round, isClosed: isChecked });
+    } else {
+      // 탭 전체: _closedSet으로 비교
+      const tabKey2 = sheetId + "||" + tabName;
+      const wasClosed = _closedSet.has(tabKey2);
+      const isChecked = cb.checked;
+      if (isChecked === wasClosed) return;
+      items.push({ sheetId, tabName, isClosed: isChecked });
+    }
   });
 
   if (!items.length) { _exitClosedMode(); return; }
 
   // 낙관적 업데이트
-  items.forEach(({ sheetId, tabName, isClosed }) => {
-    const key = (sheetId || "") + "||" + (tabName || "");
-    if (isClosed) _closedSet.add(key);
-    else          _closedSet.delete(key);
+  items.forEach(({ sheetId, tabName, round, isClosed }) => {
+    if (round) {
+      const roundKey = (sheetId || "") + "||" + (tabName || "") + "||" + round;
+      if (isClosed) _closedRoundSet.add(roundKey);
+      else          _closedRoundSet.delete(roundKey);
+    } else {
+      const key = (sheetId || "") + "||" + (tabName || "");
+      if (isClosed) _closedSet.add(key);
+      else          _closedSet.delete(key);
+    }
   });
 
   _exitClosedMode();
