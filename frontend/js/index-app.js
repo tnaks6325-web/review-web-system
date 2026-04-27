@@ -12812,10 +12812,10 @@ function _showSyncTabNamesResult(res, dryRun) {
   modal.addEventListener('click', (e) => { if (e.target === modal) modal.remove(); });
 }
 
-// ── 마감탭 인덱스 정리 ──
+// ── 마감탭 정리 (아카이브 이동) ──
 async function cleanClosedTabs() {
   const btn = document.getElementById("btnCleanClosed");
-  if (!confirm("마감(is_closed=TRUE) 상태의 탭에 연결된 인덱스 데이터를 삭제합니다.\n\n삭제 후 해당 탭은 검색 결과에서 완전히 제거됩니다.\n계속하시겠습니까?")) return;
+  if (!confirm("마감(is_closed=TRUE) 상태의 탭을 아카이브로 이동합니다.\n\n이동 후 해당 탭은 대시보드에서 사라지고,\n아카이브 탭에서 조회할 수 있습니다.\n계속하시겠습니까?")) return;
   if (btn) { btn.disabled = true; btn.innerHTML = '<i class="fas fa-spinner fa-spin"></i> 정리중...'; }
   try {
     const res = await gasPost({ action: "cleanClosedTabs" });
@@ -12823,7 +12823,7 @@ async function cleanClosedTabs() {
     if (res.closedTabs === 0) {
       showToast("정리할 마감탭이 없습니다.", "info");
     } else {
-      showToast(`마감탭 정리: ${res.closedTabs}개 탭, review_index ${res.reviewDeleted}행 삭제 (${res.elapsed})`, "success");
+      showToast(`마감탭 정리: ${res.closedTabs}개 탭, ${res.archivedRows || 0}행 아카이브 이동 (${res.elapsed})`, "success");
     }
     loadTabDashboard();
   } catch (err) {
