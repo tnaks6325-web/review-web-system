@@ -2863,10 +2863,13 @@ function _buildTabRowHtml(t, tabKey, isSubRow, isClosedTab, tabNameHtml, startDa
     ? `<span style="display:flex;align-items:center;justify-content:center;flex-wrap:wrap;gap:3px">${badgePart}${ddayContent}</span>`
     : `<span style="color:#D1D5DB;font-size:.6rem">—</span>`;
 
-  // ★ v11.0: 캠페인명 셀 (엑셀형 플랫 UI)
+  // ★ v11.0: 캠페인명 셀 (엑셀형 플랫 UI) + 🔄 갱신 버튼
   const _campName = campaignName || "";
+  const _rebuildBtn = t.sheetId
+    ? `<button class="btn-rebuild-sheet" data-sheetid="${escHtml(t.sheetId)}" data-camp="${escHtml(_campName)}" onclick="event.stopPropagation();rebuildSheetIndex(this)" title="이 캠페인 인덱스 갱신"><i class="fas fa-sync-alt"></i></button>`
+    : '';
   const campaignCell = _campName
-    ? `<span class="dash-cell-campaign" title="${escHtml(_campName)}">${escHtml(_campName)}</span>`
+    ? `<span class="dash-cell-campaign" title="${escHtml(_campName)}">${_rebuildBtn}${escHtml(_campName)}</span>`
     : empty;
 
   return `
@@ -6238,6 +6241,45 @@ async function refreshCampaignIndex(btn) {
     if (btn && btn.isConnected) {
       btn.classList.remove("loading");
       btn.innerHTML = '<i class="fas fa-sync-alt"></i> 동기화';
+    }
+  }
+}
+
+/* ══════════════════════════════════════════════════════════
+   🔄 대시보드 행 — 캠페인 인덱스 갱신 (캠페인명 왼쪽 버튼)
+══════════════════════════════════════════════════════════ */
+async function rebuildSheetIndex(btn) {
+  if (!btn) return;
+  const sheetId  = btn.dataset.sheetid || "";
+  const campName = btn.dataset.camp    || "캠페인";
+  if (!sheetId) { showToast("sheetId가 없습니다.", "error"); return; }
+
+  // 이미 로딩 중이면 무시
+  if (btn.classList.contains("spinning")) return;
+
+  // 스피너 표시
+  btn.classList.add("spinning");
+  const origHtml = btn.innerHTML;
+  btn.innerHTML = '<i class="fas fa-sync-alt fa-spin"></i>';
+  showToast(`🔄 "${campName}" 갱신 중...`, "info");
+
+  try {
+    const res = await gasGet({ action: "buildIndexByCampaign", sheetId });
+    if (res.error) {
+      showToast("갱신 실패: " + res.error, "error");
+    } else {
+      const rebuilt = res.rebuilt || 0;
+      const skipped = res.skipped || 0;
+      showToast(`✅ "${campName}" 갱신 완료 (${rebuilt}탭 갱신, ${skipped}탭 스킵)`, "success");
+      // 대시보드 새로고침
+      await loadAdminDashboard();
+    }
+  } catch (err) {
+    showToast("갱신 오류: " + err.message, "error");
+  } finally {
+    if (btn && btn.isConnected) {
+      btn.classList.remove("spinning");
+      btn.innerHTML = origHtml;
     }
   }
 }

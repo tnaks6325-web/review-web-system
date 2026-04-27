@@ -1097,7 +1097,18 @@ body.col-resizing .col-drag-handle{pointer-events:auto!important}
   padding:0 6px;min-width:0;display:flex;align-items:center;
   background:inherit;
 }
-.dash-cell-campaign{overflow:hidden;text-overflow:ellipsis;white-space:nowrap;min-width:0}
+.dash-cell-campaign{overflow:hidden;text-overflow:ellipsis;white-space:nowrap;min-width:0;display:flex;align-items:center;gap:4px}
+/* 🔄 캠페인 인덱스 갱신 버튼 */
+.btn-rebuild-sheet{
+  flex-shrink:0;width:18px;height:18px;padding:0;border:none;border-radius:4px;
+  background:transparent;color:#9CA3AF;cursor:pointer;font-size:.55rem;
+  display:inline-flex;align-items:center;justify-content:center;
+  transition:all .15s ease;
+}
+.btn-rebuild-sheet:hover{background:#ECFDF5;color:#059669;transform:scale(1.15)}
+.btn-rebuild-sheet.spinning{color:#059669;pointer-events:none}
+.btn-rebuild-sheet.spinning i{animation:spin .8s linear infinite}
+@keyframes spin{from{transform:rotate(0deg)}to{transform:rotate(360deg)}}
 /* ── 세로 구분선 ── */
 .dash-tab-row>*{border-right:1px solid #EEF2FF;display:flex;align-items:center;min-width:0;overflow:hidden}
 .dash-tab-row>*:last-child{border-right:none}
