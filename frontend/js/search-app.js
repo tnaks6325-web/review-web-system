@@ -7471,7 +7471,10 @@ function openAddCampaign() {
   document.getElementById("addCampUrl").value = "";
   document.getElementById("addCampPreview").textContent = "";
   document.getElementById("addCampError").textContent = "";
-  document.getElementById("addCampSubmitBtn").disabled = true;
+  document.getElementById("addCampPreviewBtn").disabled = true;
+  document.getElementById("addCampPreviewBtn").style.display = "";
+  document.getElementById("addCampSubmitBtn").style.display = "none";
+  document.getElementById("addCampPreviewArea").style.display = "none";
   document.getElementById("addCampUrl").classList.remove("has-val");
   document.getElementById("addCampOverlay").classList.add("open");
   setTimeout(() => document.getElementById("addCampUrl").focus(), 80);
@@ -7485,9 +7488,13 @@ function onAddCampInput() {
   const raw = document.getElementById("addCampUrl").value.trim();
   const errEl = document.getElementById("addCampError");
   const preEl = document.getElementById("addCampPreview");
-  const btn   = document.getElementById("addCampSubmitBtn");
+  const btn   = document.getElementById("addCampPreviewBtn");
   const inp   = document.getElementById("addCampUrl");
   errEl.textContent = "";
+  // URL 변경 시 미리보기 초기화
+  document.getElementById("addCampPreviewArea").style.display = "none";
+  document.getElementById("addCampSubmitBtn").style.display = "none";
+  btn.style.display = "";
   if (!raw) {
     preEl.textContent = ""; btn.disabled = true; inp.classList.remove("has-val"); return;
   }
@@ -7504,7 +7511,58 @@ function onAddCampInput() {
   inp.classList.add("has-val");
 }
 
-/** 등록 실행 */
+/** 1단계: 미리보기 — 시트 제목 + 탭 목록 확인 */
+async function previewAddCampaign() {
+  const raw = document.getElementById("addCampUrl").value.trim();
+  const errEl = document.getElementById("addCampError");
+  const btn   = document.getElementById("addCampPreviewBtn");
+  if (!raw) return;
+  errEl.textContent = "";
+  btn.disabled = true;
+  btn.innerHTML = '<i class="fas fa-spinner fa-spin"></i> 조회중...';
+  try {
+    const data = await gasGet({ action: "previewCampaign", url: raw });
+    if (!data.ok) {
+      errEl.textContent = data.error || "시트 조회 실패";
+      return;
+    }
+    // 시트 제목
+    document.getElementById("addCampSheetTitle").textContent = data.spreadsheetTitle;
+    // 이미 등록 여부
+    const badge = document.getElementById("addCampAlreadyBadge");
+    if (data.alreadyRegistered) {
+      badge.style.display = "block";
+      badge.textContent = "⚠ 이미 등록된 캠페인입니다 (" + data.existingName + "). 다시 등록하면 업데이트됩니다.";
+    } else {
+      badge.style.display = "none";
+    }
+    // 탭 목록
+    document.getElementById("addCampTabCount").textContent = data.tabCount;
+    const listEl = document.getElementById("addCampTabList");
+    listEl.innerHTML = "";
+    for (const tab of data.tabs) {
+      const el = document.createElement("div");
+      el.style.cssText = "padding:4px 8px; background:#fff; border:1px solid #e2e8f0; border-radius:4px; font-size:12px; color:#334155;";
+      el.textContent = tab.name;
+      listEl.appendChild(el);
+    }
+    if (data.tabs.length === 0) {
+      listEl.innerHTML = '<div style="color:#94a3b8; font-size:12px;">탭이 없습니다 (시스템 탭 제외)</div>';
+    }
+    // 미리보기 영역 표시, 확인 버튼 숨기고 등록 버튼 표시
+    document.getElementById("addCampPreviewArea").style.display = "block";
+    btn.style.display = "none";
+    document.getElementById("addCampSubmitBtn").style.display = "";
+    document.getElementById("addCampSubmitBtn").disabled = false;
+  } catch (err) {
+    errEl.textContent = err.message || "조회 실패";
+  } finally {
+    btn.disabled = false;
+    btn.innerHTML = '<i class="fas fa-search"></i> 확인';
+  }
+}
+
+/** 2단계: 등록 실행 */
 async function submitAddCampaign() {
   const raw = document.getElementById("addCampUrl").value.trim();
   const errEl = document.getElementById("addCampError");

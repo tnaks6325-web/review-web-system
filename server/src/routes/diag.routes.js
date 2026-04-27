@@ -211,6 +211,60 @@ router.post('/new-sheet', authMiddleware, async (req, res, next) => {
 });
 
 // ═══════════════════════════════════════════════════════════
+// GET /api/index/preview-campaign — 캠페인 추가 전 시트 미리보기
+// sheetId로 시트 제목과 탭 목록을 반환 (등록 전 확인용)
+// ═══════════════════════════════════════════════════════════
+router.get('/preview-campaign', authMiddleware, async (req, res, next) => {
+  try {
+    const { url, sheetId: rawSheetId } = req.query;
+    const finalSheetId = rawSheetId || extractSheetId(url);
+    if (!finalSheetId) {
+      return res.json({ ok: false, error: 'sheetId 또는 url이 필요합니다.' });
+    }
+
+    // 시트 메타데이터 조회
+    const meta = await getSpreadsheetMeta(finalSheetId);
+    if (!meta || meta.length === 0) {
+      return res.json({ ok: false, error: '시트에 접근할 수 없습니다. 서비스 계정에 공유되어 있는지 확인하세요.' });
+    }
+
+    const spreadsheetTitle = meta._spreadsheetTitle || finalSheetId;
+    const systemTabs = ['세부목록', '검색인덱스', '인덱스마스터', '인덱스데이터', '마감', '상세목록', '탭설정', '설정',
+                        '시트DB', '탭목록', 'tab_configs', '캠페인목록', '시트목록', '매크로', '서식', '요약', '대시보드', '템플릿', '양식'];
+    const tabs = meta
+      .filter(s => !systemTabs.includes(s.properties.title) && !s.properties.hidden)
+      .map(s => ({
+        name: s.properties.title,
+        gid: String(s.properties.sheetId),
+      }));
+
+    // 이미 등록된 캠페인인지 확인
+    const { rows: existingCamp } = await pool.query(
+      'SELECT campaign_name FROM campaigns WHERE sheet_id = $1 LIMIT 1',
+      [finalSheetId]
+    );
+
+    res.json({
+      ok: true,
+      sheetId: finalSheetId,
+      spreadsheetTitle,
+      tabs,
+      tabCount: tabs.length,
+      alreadyRegistered: existingCamp.length > 0,
+      existingName: existingCamp[0]?.campaign_name || null,
+    });
+  } catch (err) {
+    if (err.message && (err.message.includes('not found') || err.message.includes('404'))) {
+      return res.json({ ok: false, error: '시트를 찾을 수 없습니다. URL을 확인하세요.' });
+    }
+    if (err.message && err.message.includes('permission')) {
+      return res.json({ ok: false, error: '시트 접근 권한이 없습니다. 서비스 계정에 공유해주세요.' });
+    }
+    next(err);
+  }
+});
+
+// ═══════════════════════════════════════════════════════════
 // POST /api/index/add-campaign — 캠페인 추가 (GAS: addCampaign)
 // ═══════════════════════════════════════════════════════════
 router.post('/add-campaign', authMiddleware, async (req, res, next) => {

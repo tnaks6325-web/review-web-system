@@ -1172,13 +1172,30 @@
         type="text"
         placeholder="https://docs.google.com/spreadsheets/d/..."
         oninput="onAddCampInput()"
-        onkeydown="if(event.key==='Enter') submitAddCampaign()">
+        onkeydown="if(event.key==='Enter') previewAddCampaign()">
       <div class="addcamp-url-preview" id="addCampPreview"></div>
     </div>
     <div class="addcamp-error" id="addCampError"></div>
+
+    <!-- 미리보기 영역 (초기 숨김) -->
+    <div id="addCampPreviewArea" style="display:none; margin:12px 0 0; padding:12px; background:#f8fafc; border-radius:8px; border:1px solid #e2e8f0; max-height:280px; overflow-y:auto;">
+      <div style="margin-bottom:8px;">
+        <span style="font-size:11px; color:#94a3b8; font-weight:500;">시트 제목</span>
+        <div id="addCampSheetTitle" style="font-size:14px; font-weight:700; color:#1e293b; margin-top:2px;"></div>
+      </div>
+      <div id="addCampAlreadyBadge" style="display:none; margin-bottom:8px; padding:4px 8px; background:#fef3c7; color:#92400e; border-radius:4px; font-size:11px;">
+        ⚠ 이미 등록된 캠페인입니다. 다시 등록하면 업데이트됩니다.
+      </div>
+      <div style="font-size:11px; color:#94a3b8; font-weight:500; margin-bottom:4px;">탭 목록 (<span id="addCampTabCount">0</span>개)</div>
+      <div id="addCampTabList" style="display:flex; flex-direction:column; gap:3px;"></div>
+    </div>
+
     <div class="addcamp-btns">
       <button class="addcamp-btn-cancel" onclick="closeAddCampaign()">취소</button>
-      <button class="addcamp-btn-ok" id="addCampSubmitBtn" onclick="submitAddCampaign()" disabled>
+      <button class="addcamp-btn-ok" id="addCampPreviewBtn" onclick="previewAddCampaign()" disabled style="background:#6366f1;">
+        <i class="fas fa-search"></i> 확인
+      </button>
+      <button class="addcamp-btn-ok" id="addCampSubmitBtn" onclick="submitAddCampaign()" style="display:none;">
         <i class="fas fa-plus"></i> 등록
       </button>
     </div>

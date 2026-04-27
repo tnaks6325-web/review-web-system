@@ -140,6 +140,7 @@ const _ACTION_MAP = {
   'debugBaseSheet':     { method: 'GET',  path: '/api/diag/debug-base' },
   'debugDetailSheet':   { method: 'GET',  path: '/api/diag/debug-tab' },
   'campaignList':       { method: 'GET',  path: '/api/diag/campaign-list' },
+  'previewCampaign':    { method: 'GET',  path: '/api/index/preview-campaign' },
   'addCampaign':        { method: 'POST', path: '/api/diag/add-campaign' },
   'createBaseSheet':    { method: 'POST', path: '/api/diag/new-sheet' },
 
