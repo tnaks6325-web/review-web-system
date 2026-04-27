@@ -488,6 +488,44 @@ router.get('/dashboard-check', async (req, res, next) => {
 });
 
 // ═══════════════════════════════════════════════════════════
+// GET /api/diag/round-check — review_index의 round 데이터 진단
+// ═══════════════════════════════════════════════════════════
+router.get('/round-check', async (req, res, next) => {
+  try {
+    const { sheetId, tabName } = req.query;
+    let sql = `
+      SELECT ri.sheet_id AS "sheetId", ri.tab_name AS "tabName",
+             ri.round, COUNT(*) AS cnt,
+             COUNT(*) FILTER (WHERE ri.is_submitted) AS submitted,
+             COUNT(*) FILTER (WHERE NOT ri.is_submitted) AS pending
+      FROM review_index ri
+      INNER JOIN index_master im ON ri.sheet_id = im.sheet_id AND ri.tab_name = im.tab_name AND im.status = 'active'
+    `;
+    const params = [];
+    if (sheetId) { params.push(sheetId); sql += ` AND ri.sheet_id = $${params.length}`; }
+    if (tabName) { params.push(tabName); sql += ` AND ri.tab_name = $${params.length}`; }
+    sql += ` GROUP BY ri.sheet_id, ri.tab_name, ri.round ORDER BY ri.sheet_id, ri.tab_name, ri.round`;
+    const { rows } = await pool.query(sql, params);
+
+    // 탭별 요약
+    const summary = {};
+    for (const r of rows) {
+      const key = `${r.sheetId}||${r.tabName}`;
+      if (!summary[key]) summary[key] = { sheetId: r.sheetId, tabName: r.tabName, rounds: [] };
+      summary[key].rounds.push({
+        round: r.round || '(빈값)',
+        count: +r.cnt,
+        submitted: +r.submitted,
+        pending: +r.pending,
+      });
+    }
+    res.json({ ok: true, totalRows: rows.length, tabs: Object.values(summary) });
+  } catch (err) {
+    next(err);
+  }
+});
+
+// ═══════════════════════════════════════════════════════════
 // GET /api/diag/sheet-meta — 구글시트 API에서 실제 탭 메타데이터 조회 (gid 검증용)
 // ═══════════════════════════════════════════════════════════
 router.get('/sheet-meta', async (req, res, next) => {

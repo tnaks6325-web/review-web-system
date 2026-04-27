@@ -564,7 +564,14 @@ async function runSmartBuild() {
             _checksumCache[key] = newChecksum;
             result.tabsUpdated++;
 
-            logger.info(`[smartBuild] 갱신: ${spreadsheetTitle}/${tabName} — ${rows.length}행 (제출:${rows.filter(r => r.isSubmitted).length})`);
+            // ★ round 데이터 디버그 로깅
+            const roundCounts = {};
+            for (const r of rows) {
+              const rv = r.round || '(빈값)';
+              roundCounts[rv] = (roundCounts[rv] || 0) + 1;
+            }
+            const roundSummary = Object.entries(roundCounts).map(([k,v]) => `${k}:${v}`).join(', ');
+            logger.info(`[smartBuild] 갱신: ${spreadsheetTitle}/${tabName} — ${rows.length}행 (제출:${rows.filter(r => r.isSubmitted).length}) [차수: ${roundSummary}]`);
 
           } catch (tabErr) {
             result.errors++;
