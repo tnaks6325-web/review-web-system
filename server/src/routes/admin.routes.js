@@ -617,6 +617,13 @@ router.post('/smart-build/run', authMiddleware, async (req, res, next) => {
       return res.json({ ok: false, error: '이미 스마트 빌드가 실행 중입니다.' });
     }
 
+    // force=true 파라미터가 있으면 체크섬 캐시 초기화 후 실행 (강제 전체 갱신)
+    const force = req.body?.force === true || req.query?.force === 'true';
+    if (force) {
+      const cacheResult = resetSmartBuildCache();
+      logger.info(`[smartBuild] 강제 실행 — 캐시 리셋: ${JSON.stringify(cacheResult)}`);
+    }
+
     // 백그라운드 실행
     runSmartBuild().then(result => {
       const { broadcast } = require('../utils/sse');
