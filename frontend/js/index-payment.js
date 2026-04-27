@@ -1412,14 +1412,30 @@ async function loadSmartBuildStatus() {
           ${lastRun.errorDetails && lastRun.errorDetails.length > 0 ? `
             <div style="margin-top:8px;font-size:.72rem">
               <div style="font-weight:600;color:#DC2626;margin-bottom:4px"><i class="fas fa-exclamation-triangle"></i> 오류 상세:</div>
-              ${lastRun.errorDetails.slice(0, 5).map(function(e) {
-                var phaseLabel = {drive:'드라이브',sheet:'시트',tab:'탭',global:'전체'}[e.phase] || e.phase || '-';
-                var desc = e.desc || _translateErrorClient(e.error);
-                return '<div style="background:#FEF2F2;padding:4px 8px;border-radius:4px;margin-bottom:3px;line-height:1.5">' +
-                  '<div><b style="color:#B91C1C">' + phaseLabel + '</b>: <span style="color:#6B7280">' + (e.error || '').substring(0, 100) + '</span></div>' +
-                  '<div style="color:#DC2626;font-weight:600;margin-top:1px">\u2192 ' + desc + '</div>' +
-                  '</div>';
-              }).join('')}
+              ${(function() {
+                // sheetId 중복 제거하여 삭제 버튼을 한번만 표시
+                var seenSheets = {};
+                return lastRun.errorDetails.slice(0, 5).map(function(e) {
+                  var phaseLabel = {drive:'드라이브',sheet:'시트',tab:'탭',global:'전체'}[e.phase] || e.phase || '-';
+                  var desc = e.desc || _translateErrorClient(e.error);
+                  var canDelete = e.sheetId && (e.phase === 'drive' || e.phase === 'sheet') &&
+                    (/file not found|does not have permission|not found/i.test(e.error));
+                  var deleteBtn = '';
+                  if (canDelete && !seenSheets[e.sheetId]) {
+                    seenSheets[e.sheetId] = true;
+                    deleteBtn = '<button onclick="deleteErrorSheet(\'' + e.sheetId + '\')" ' +
+                      'style="margin-top:4px;padding:3px 10px;font-size:.68rem;background:#DC2626;color:#fff;border:none;border-radius:4px;cursor:pointer" ' +
+                      'title="이 시트의 캠페인·탭·인덱스 데이터를 DB에서 모두 삭제합니다">' +
+                      '<i class="fas fa-trash-alt"></i> 이 시트 DB에서 삭제' +
+                      '</button>';
+                  }
+                  return '<div style="background:#FEF2F2;padding:4px 8px;border-radius:4px;margin-bottom:3px;line-height:1.5">' +
+                    '<div><b style="color:#B91C1C">' + phaseLabel + '</b>: <span style="color:#6B7280">' + (e.error || '').substring(0, 100) + '</span></div>' +
+                    '<div style="color:#DC2626;font-weight:600;margin-top:1px">→ ' + desc + '</div>' +
+                    deleteBtn +
+                    '</div>';
+                }).join('');
+              })()}
             </div>
           ` : ''}
         </div>
@@ -1432,6 +1448,66 @@ async function loadSmartBuildStatus() {
   } catch (err) {
     el.innerHTML = `<span style="color:#EF4444"><i class="fas fa-exclamation-circle"></i> 로드 실패: ${err.message}</span>`;
   }
+}
+
+// ★ 오류 시트 DB 삭제 (시스템 모니터링 → 오류 상세 → 삭제 버튼)
+async function deleteErrorSheet(sheetId) {
+  if (!sheetId) return;
+  const fullId = await _resolveFullSheetId(sheetId);
+  if (!fullId) {
+    showToast("시트 ID를 찾을 수 없습니다: " + sheetId, "error");
+    return;
+  }
+
+  if (!confirm(
+    "이 시트의 모든 데이터를 DB에서 삭제하시겠습니까?\n\n" +
+    "시트 ID: " + fullId.substring(0, 30) + "...\n\n" +
+    "삭제 대상:\n" +
+    "  • campaigns (캠페인 등록)\n" +
+    "  • tab_configs (탭 설정)\n" +
+    "  • index_master (인덱스)\n" +
+    "  • review_index (리뷰 인덱스)\n\n" +
+    "⚠ 이 작업은 되돌릴 수 없습니다."
+  )) return;
+
+  try {
+    const headers = { ..._getAuthHeaders() };
+    const res = await fetch(API_BASE_URL + '/api/admin/campaign/' + encodeURIComponent(fullId), {
+      method: 'DELETE',
+      headers,
+    });
+    const data = await res.json();
+
+    if (data.ok) {
+      showToast(
+        "시트 삭제 완료: " + data.message +
+        "\n(campaigns: " + data.deleted.campaigns +
+        ", tabs: " + data.deleted.tab_configs +
+        ", index: " + data.deleted.index_master +
+        ", reviews: " + data.deleted.review_index + ")",
+        "success", 6000
+      );
+      // 모니터링 패널 새로고침
+      setTimeout(loadSmartBuildStatus, 1000);
+    } else {
+      showToast("삭제 실패: " + (data.error || "알 수 없는 오류"), "error");
+    }
+  } catch (err) {
+    showToast("삭제 요청 오류: " + err.message, "error");
+  }
+}
+
+// ★ sheetId 축약 → 전체 ID 복원 (campaigns 목록에서 매칭)
+async function _resolveFullSheetId(shortId) {
+  try {
+    const data = await gasGet({ action: 'campaignList' });
+    const campaigns = Array.isArray(data) ? data : (data.campaigns || data.data || []);
+    for (const c of campaigns) {
+      const sid = c.sheetId || c.sheet_id || '';
+      if (sid.startsWith(shortId)) return sid;
+    }
+  } catch (_) {}
+  return null;
 }
 
 // ★ 대시보드 패널에서의 스마트빌드 수동 실행 (confirm 포함)
