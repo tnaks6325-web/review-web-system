@@ -419,8 +419,8 @@ async function _doLoginWithLookup() {
       return;
     }
 
-    if (!data.registered || !data.verified) {
-      _showLoginErr("인증에 실패했습니다. 다시 시도해주세요.");
+    if (!data.ok) {
+      _showLoginErr(data.error || "인증에 실패했습니다. 다시 시도해주세요.");
       _resetLoginLookup();
       return;
     }
@@ -459,11 +459,8 @@ async function _doLogin() {
     if (data.status === "정지" || data.status === "탈퇴") {
       _showLoginBlocked("이 계정은 이용이 제한되었습니다."); return;
     }
-    if (!data.registered) {
-      _showLoginErr("등록된 리뷰어가 아닙니다."); return;
-    }
-    if (!data.verified) {
-      _showLoginErr("전화번호가 일치하지 않습니다."); return;
+    if (!data.ok) {
+      _showLoginErr(data.error || "인증에 실패했습니다. 다시 시도해주세요."); return;
     }
     _saveAuthSession(name, true, true, data.phone8 || phone8);
     _applyLoginUI(name);
