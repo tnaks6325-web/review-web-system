@@ -357,7 +357,7 @@ async function _doLookupPhone() {
   try {
     const data = await gasGet({ action: "lookupPhone", phone8 });
 
-    if (!data.found) {
+    if (!data.ok) {
       _showLoginErr("등록된 전화번호가 없습니다. 등록 탭에서 먼저 등록해주세요.");
       setTimeout(() => _switchAuthTab("register"), 900);
       return;
