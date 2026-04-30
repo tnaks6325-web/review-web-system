@@ -2,6 +2,20 @@ const pool = require('../db/pool');
 const { logger } = require('../utils/logger');
 
 /**
+ * rowJson (JSON 문자열 또는 객체) → row 객체로 파싱
+ * DB에 TEXT로 저장된 JSON 문자열을 안전하게 파싱
+ */
+function _parseRowJson(rowJson) {
+  if (!rowJson) return {};
+  if (typeof rowJson === 'object') return rowJson;
+  try {
+    return JSON.parse(rowJson);
+  } catch (_) {
+    return {};
+  }
+}
+
+/**
  * Phase 7: pg_trgm 기반 검색 최적화
  * 
  * 전략:
@@ -162,7 +176,7 @@ async function searchByName(query, phone8) {
       ncMode:      row.ncMode,
       folderUrl:   row.folderUrl,
       captureFolderUrl: row.captureFolderUrl,
-      rowJson:     row.rowJson,
+      row:         _parseRowJson(row.rowJson),
       submitCol:   row.submitCol,
       score:       row.score, // 유사도 점수 (1.0=정확매칭, <1.0=유사매칭)
     }));
@@ -266,7 +280,7 @@ async function searchByNameFallback(q, p8, SELECT_FIELDS) {
     ncMode:      row.ncMode,
     folderUrl:   row.folderUrl,
     captureFolderUrl: row.captureFolderUrl,
-    rowJson:     row.rowJson,
+    row:         _parseRowJson(row.rowJson),
     submitCol:   row.submitCol,
   }));
 
