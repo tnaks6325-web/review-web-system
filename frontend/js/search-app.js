@@ -1657,8 +1657,9 @@ async function submitReview() {
         const { options: rowOpts } = extractProductOption(item.row || {});
         const optionFolderName = rowOpts.map(o => o.value).filter(Boolean).join(" ").trim();
 
-        const result = await gasPost({
-          action:           "submitReview",
+        // ── Step 1: 이미지를 구글 드라이브에 업로드 ──
+        const uploadResult = await gasPost({
+          action:           "uploadReviewImage",
           sheetId:          item.sheetId,
           tabName:          item.tabName,
           gid:              item.gid,
@@ -1668,12 +1669,31 @@ async function submitReview() {
           campaignName:     item.campaignName,
           optionFolderName,
           memo,
-          // ★ files[fi].type, files[fi].b64 직접 사용 (File 참조 불필요)
           files: fileData.map((b64, fi) => ({
             name:     reviewerName + "_" + (fi + 1),
             mimeType: files[fi].type || "image/jpeg",
             data:     b64,
           }))
+        });
+
+        if (!uploadResult || (!uploadResult.ok && !uploadResult.success)) {
+          throw new Error(uploadResult?.error || "이미지 업로드 실패");
+        }
+
+        // ── Step 2: 시트에 제출 시점 기록 ──
+        const now = new Date();
+        const submitTimeValue = `${now.getMonth()+1}/${now.getDate()} ${String(now.getHours()).padStart(2,'0')}:${String(now.getMinutes()).padStart(2,'0')}`;
+
+        const result = await gasPost({
+          action:           "submitReview",
+          sheetId:          item.sheetId,
+          tabName:          item.tabName,
+          gid:              item.gid,
+          rowIndex:         item.rowIndex,
+          reviewerName,
+          submitCol:        item.submitCol,
+          value:            submitTimeValue,
+          campaignName:     item.campaignName,
         });
 
         hideLoading();
