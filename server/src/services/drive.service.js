@@ -322,6 +322,26 @@ async function uploadFileBase64(base64Data, fileName, mimeType, parentFolderId) 
     logger.warn(`[Drive] 권한 설정 실패 (무시): ${permErr.message}`);
   }
 
+  // ── 소유권 이전: Service Account → 실제 사용자 계정 ──
+  // Service Account는 스토리지 할당량이 없으므로 파일 소유권을 이전해야 함
+  const ownerEmail = process.env.DRIVE_OWNER_EMAIL || 'tnaks6325@gmail.com';
+  if (usedClient === 'SA') {
+    try {
+      const sa = _getReadDrive();
+      if (sa) {
+        await sa.permissions.create({
+          fileId: data.id,
+          transferOwnership: true,
+          requestBody: { role: 'owner', type: 'user', emailAddress: ownerEmail },
+          supportsAllDrives: true,
+        });
+        logger.info(`[Drive] 소유권 이전 완료: ${data.id} → ${ownerEmail}`);
+      }
+    } catch (ownerErr) {
+      logger.warn(`[Drive] 소유권 이전 실패 (무시): ${ownerErr.message}`);
+    }
+  }
+
   return data;
 }
 
