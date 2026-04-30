@@ -21,7 +21,8 @@ const corsOptions = {
     // 정확히 일치하는 origin
     if (allowedOrigins.includes(origin)) return callback(null, true);
     // Cloudflare Pages 서브도메인 허용 (배포별 URL: https://<hash>.review-web-system.pages.dev)
-    if (/^https:\/\/[a-z0-9]+\.review-web-system\.pages\.dev$/.test(origin)) {
+    // 해시값에 하이픈(-), 숫자, 소문자 포함 가능 (예: main, abc-123, 8f3a2b1)
+    if (/^https:\/\/[a-z0-9-]+\.review-web-system\.pages\.dev$/.test(origin)) {
       return callback(null, true);
     }
     // sandbox URL 개발용 허용 (프로덕션에서는 비활성)
