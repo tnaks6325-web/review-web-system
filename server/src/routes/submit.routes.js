@@ -177,6 +177,32 @@ router.post('/debug-sheet-data', async (req, res, next) => {
 });
 
 // ═══════════════════════════════════════════════════════════
+// GET /api/submit/slot-status — slot_locks 테이블 상태 확인 (진단용)
+// ═══════════════════════════════════════════════════════════
+router.get('/slot-status', async (req, res) => {
+  try {
+    const { rows: tableCheck } = await pool.query(`
+      SELECT EXISTS (
+        SELECT FROM information_schema.tables
+        WHERE table_name = 'slot_locks'
+      ) AS "exists"
+    `);
+    const tableExists = tableCheck[0]?.exists || false;
+    if (!tableExists) {
+      return res.json({ ok: true, tableExists: false });
+    }
+    const { rows: stats } = await pool.query(`
+      SELECT COUNT(*) AS total,
+             COUNT(*) FILTER (WHERE is_submitted = TRUE) AS submitted
+      FROM slot_locks
+    `);
+    res.json({ ok: true, tableExists: true, stats: stats[0] });
+  } catch (err) {
+    res.json({ ok: false, error: err.message });
+  }
+});
+
+// ═══════════════════════════════════════════════════════════
 // 슬롯 매칭 API — 구매양식 제출 시 자동 행 매칭
 //
 // 규칙:
