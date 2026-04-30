@@ -550,6 +550,262 @@ router.post('/sync-tab-names', authMiddleware, async (req, res, next) => {
 });
 
 // ═══════════════════════════════════════════════════════════
+// POST /api/tab/fix-campaign-tab-swap — 캠페인명/탭명 뒤바뀜 교정
+// 특정 시트(또는 전체)의 tab_configs를 구글시트 메타데이터와 비교하여
+// campaign_name ↔ tab_name이 뒤바뀐 행을 감지하고 교정
+// 동시에 tab_gid가 null인 행에 대해 gid를 보충
+// ═══════════════════════════════════════════════════════════
+router.post('/fix-campaign-tab-swap', authMiddleware, async (req, res, next) => {
+  try {
+    const { sheetId, dryRun = true } = req.body || {};
+    const startTime = Date.now();
+
+    // 1. 대상 탭 조회 (sheetId 지정 시 해당 시트만, 없으면 전체)
+    let query = `
+      SELECT tc.sheet_id, tc.tab_name, tc.campaign_name, tc.sheet_url, tc.tab_gid,
+             im.tab_gid AS im_tab_gid
+      FROM tab_configs tc
+      LEFT JOIN index_master im ON tc.sheet_id = im.sheet_id AND tc.tab_name = im.tab_name
+    `;
+    const params = [];
+    if (sheetId) {
+      query += ' WHERE tc.sheet_id = $1';
+      params.push(sheetId);
+    }
+    query += ' ORDER BY tc.sheet_id, tc.tab_name';
+
+    const { rows: allTabs } = await pool.query(query, params);
+
+    // 2. 시트별 그룹핑
+    const sheetMap = {};
+    allTabs.forEach(t => {
+      if (!sheetMap[t.sheet_id]) sheetMap[t.sheet_id] = [];
+      sheetMap[t.sheet_id].push(t);
+    });
+
+    const sheetIds = Object.keys(sheetMap);
+    logger.info(`[fix-swap] 대상: ${sheetIds.length}개 시트, ${allTabs.length}개 탭 (dryRun=${dryRun})`);
+
+    const fixes = [];
+    let fixed = 0, gidFilled = 0, skipped = 0, errors = 0;
+    const errorDetails = [];
+
+    // 3. 각 시트별 메타데이터 조회 및 교정
+    for (const sid of sheetIds) {
+      let meta;
+      try {
+        meta = await throttledCall(() => getSpreadsheetMeta(sid));
+      } catch (err) {
+        errors++;
+        if (errorDetails.length < 10) {
+          errorDetails.push(`시트 ${sid.substring(0, 15)}...: ${err.message}`);
+        }
+        continue;
+      }
+
+      if (!meta || meta.length === 0) { skipped++; continue; }
+
+      // 실제 시트 탭 정보
+      const realTabs = {};  // tabName → { gid, title }
+      const spreadsheetTitle = meta._spreadsheetTitle || '';
+      meta.forEach(s => {
+        const title = s.properties.title;
+        const gid = String(s.properties.sheetId);
+        realTabs[title] = { gid, title };
+      });
+
+      const dbTabs = sheetMap[sid];
+      const correctSheetUrl = `https://docs.google.com/spreadsheets/d/${sid}/edit`;
+
+      for (const dbTab of dbTabs) {
+        const dbTabName = dbTab.tab_name;
+        const dbCampaignName = dbTab.campaign_name || '';
+
+        // ─── 교정 로직 ───
+        // 상황: DB의 tab_name이 시트에 실제 탭으로 존재하지 않지만,
+        //       DB의 campaign_name이 시트에 실제 탭으로 존재하는 경우
+        //       → campaign_name과 tab_name이 뒤바뀐 것
+        const tabExistsInSheet = !!realTabs[dbTabName];
+        const campaignExistsAsTab = !!realTabs[dbCampaignName];
+
+        if (!tabExistsInSheet && campaignExistsAsTab) {
+          // ★ 뒤바뀜 감지: campaign_name이 실제 탭명이고, tab_name은 캠페인명
+          const realTab = realTabs[dbCampaignName];
+          const newTabName = dbCampaignName;  // 실제 탭명
+          const newCampaignName = spreadsheetTitle || dbTabName;  // 시트 제목 또는 기존 tab_name(=캠페인명)
+          const newGid = realTab.gid;
+
+          const fix = {
+            sheetId: sid.substring(0, 15) + '...',
+            fullSheetId: sid,
+            type: 'swap',
+            oldTabName: dbTabName,
+            oldCampaignName: dbCampaignName,
+            newTabName,
+            newCampaignName,
+            newGid,
+            spreadsheetTitle,
+          };
+
+          if (!dryRun) {
+            try {
+              // tab_configs: 기존 행 삭제 후 새 행 INSERT (PK가 sheet_id+tab_name이므로)
+              await pool.query(
+                'DELETE FROM tab_configs WHERE sheet_id = $1 AND tab_name = $2',
+                [sid, dbTabName]
+              );
+              await pool.query(
+                `INSERT INTO tab_configs (sheet_id, tab_name, campaign_name, sheet_url, tab_gid, updated_at)
+                 VALUES ($1, $2, $3, $4, $5, NOW())
+                 ON CONFLICT (sheet_id, tab_name) DO UPDATE SET
+                   campaign_name = $3, sheet_url = $4, tab_gid = $5, updated_at = NOW()`,
+                [sid, newTabName, newCampaignName, correctSheetUrl, newGid]
+              );
+              // index_master 교정
+              await pool.query(
+                'DELETE FROM index_master WHERE sheet_id = $1 AND tab_name = $2',
+                [sid, dbTabName]
+              );
+              await pool.query(
+                `INSERT INTO index_master (sheet_id, tab_name, tab_gid, campaign_name, row_count, submitted_count, status, built_at)
+                 VALUES ($1, $2, $3, $4, 0, 0, 'active', NOW())
+                 ON CONFLICT (sheet_id, tab_name) DO UPDATE SET
+                   tab_gid = $3, campaign_name = $4, status = 'active', built_at = NOW()`,
+                [sid, newTabName, newGid, newCampaignName]
+              );
+              // review_index 교정
+              await pool.query(
+                'UPDATE review_index SET tab_name = $1, tab_gid = $2 WHERE sheet_id = $3 AND tab_name = $4',
+                [newTabName, newGid, sid, dbTabName]
+              );
+              fix.status = 'fixed';
+              fixed++;
+              logger.info(`[fix-swap] 교정: "${dbTabName}" → tab="${newTabName}", campaign="${newCampaignName}", gid=${newGid}`);
+            } catch (updateErr) {
+              fix.status = 'error';
+              fix.error = updateErr.message;
+              errors++;
+            }
+          } else {
+            fix.status = 'dry_run';
+          }
+
+          fixes.push(fix);
+        } else if (tabExistsInSheet) {
+          // 탭명은 맞지만 tab_gid가 없는 경우 → GID만 보충
+          const currentGid = dbTab.tab_gid || dbTab.im_tab_gid;
+          const realGid = realTabs[dbTabName].gid;
+
+          if (!currentGid && realGid) {
+            const gidFix = {
+              sheetId: sid.substring(0, 15) + '...',
+              fullSheetId: sid,
+              type: 'gid_fill',
+              tabName: dbTabName,
+              gid: realGid,
+            };
+
+            if (!dryRun) {
+              try {
+                await pool.query(
+                  'UPDATE tab_configs SET tab_gid = $1, updated_at = NOW() WHERE sheet_id = $2 AND tab_name = $3',
+                  [realGid, sid, dbTabName]
+                );
+                await pool.query(
+                  'UPDATE index_master SET tab_gid = $1 WHERE sheet_id = $2 AND tab_name = $3 AND (tab_gid IS NULL OR tab_gid = \'\')',
+                  [realGid, sid, dbTabName]
+                );
+                gidFix.status = 'filled';
+                gidFilled++;
+              } catch (gErr) {
+                gidFix.status = 'error';
+                gidFix.error = gErr.message;
+                errors++;
+              }
+            } else {
+              gidFix.status = 'dry_run';
+            }
+
+            fixes.push(gidFix);
+          } else {
+            // campaign_name도 확인 - 시트 제목과 다르면 교정
+            if (spreadsheetTitle && dbCampaignName && dbCampaignName !== spreadsheetTitle) {
+              // campaign_name이 다른 탭명과 같으면 스왑 의심
+              const campIsAnotherTab = !!realTabs[dbCampaignName] && dbCampaignName !== dbTabName;
+              if (campIsAnotherTab) {
+                const campFix = {
+                  sheetId: sid.substring(0, 15) + '...',
+                  fullSheetId: sid,
+                  type: 'campaign_fix',
+                  tabName: dbTabName,
+                  oldCampaignName: dbCampaignName,
+                  newCampaignName: spreadsheetTitle,
+                  gid: realTabs[dbTabName].gid,
+                };
+
+                if (!dryRun) {
+                  try {
+                    const gid = realTabs[dbTabName].gid;
+                    await pool.query(
+                      'UPDATE tab_configs SET campaign_name = $1, tab_gid = COALESCE(NULLIF(tab_gid, \'\'), $2), updated_at = NOW() WHERE sheet_id = $3 AND tab_name = $4',
+                      [spreadsheetTitle, gid, sid, dbTabName]
+                    );
+                    await pool.query(
+                      'UPDATE index_master SET campaign_name = $1, tab_gid = COALESCE(NULLIF(tab_gid, \'\'), $2) WHERE sheet_id = $3 AND tab_name = $4',
+                      [spreadsheetTitle, gid, sid, dbTabName]
+                    );
+                    campFix.status = 'fixed';
+                    fixed++;
+                  } catch (cErr) {
+                    campFix.status = 'error';
+                    campFix.error = cErr.message;
+                    errors++;
+                  }
+                } else {
+                  campFix.status = 'dry_run';
+                }
+
+                fixes.push(campFix);
+              } else {
+                skipped++;
+              }
+            } else {
+              skipped++;
+            }
+          }
+        } else {
+          // tab_name이 시트에도 없고 campaign_name도 시트 탭이 아님
+          // → 시트에서 삭제되었거나 다른 문제
+          skipped++;
+        }
+      }
+
+      // API quota 보호: 배치 간 1초 대기
+      await new Promise(r => setTimeout(r, 1000));
+    }
+
+    const elapsed = ((Date.now() - startTime) / 1000).toFixed(1);
+    logger.info(`[fix-swap] 완료: fixed=${fixed}, gidFilled=${gidFilled}, skipped=${skipped}, errors=${errors}, ${elapsed}s`);
+
+    res.json({
+      ok: true,
+      dryRun: !!dryRun,
+      totalSheets: sheetIds.length,
+      totalTabs: allTabs.length,
+      fixed,
+      gidFilled,
+      skipped,
+      errors,
+      errorDetails: errorDetails.length > 0 ? errorDetails : undefined,
+      elapsed: `${elapsed}s`,
+      fixes: fixes.slice(0, 100),  // 최대 100개까지만 응답
+    });
+  } catch (err) {
+    next(err);
+  }
+});
+
+// ═══════════════════════════════════════════════════════════
 // POST /api/tab/clean-closed — 마감 탭 정리 (아카이브로 이동)
 // is_closed=TRUE인 탭의 review_index + index_master 데이터를
 // 아카이브 테이블로 이동한 뒤 원본에서 삭제, tab_configs도 삭제
