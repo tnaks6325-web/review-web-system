@@ -67,38 +67,20 @@ async function searchByName(query, phone8) {
   let sql;
 
   if (q && p8.length === 8) {
-    // ── 이름 + phone8 검색 (동명이인 구분) ──
-    // 1단계: ILIKE 정확 매칭 (pg_trgm GIN 인덱스 활용)
-    // 2단계: 유사도 검색 (오타 허용)으로 확장
+    // ── 이름 + phone8 검색 (정확 일치 + 동명이인 구분) ──
+    // 공백 제거 후 정확 일치 AND phone8 일치
     sql = `
-      WITH exact AS (
-        SELECT ${SELECT_FIELDS},
-               1.0::float AS score
-        FROM review_index ri
-        LEFT JOIN tab_configs tc ON ri.sheet_id = tc.sheet_id AND ri.tab_name = tc.tab_name
-        WHERE ri.is_submitted = FALSE
-          AND ri.reviewer_name ILIKE $${paramIdx++}
-          AND ri.phone8 = $${paramIdx++}
-      ),
-      fuzzy AS (
-        SELECT ${SELECT_FIELDS},
-               similarity(ri.reviewer_name, $${paramIdx++})::float AS score
-        FROM review_index ri
-        LEFT JOIN tab_configs tc ON ri.sheet_id = tc.sheet_id AND ri.tab_name = tc.tab_name
-        WHERE ri.is_submitted = FALSE
-          AND ri.reviewer_name % $${paramIdx++}
-          AND ri.phone8 = $${paramIdx++}
-          AND NOT EXISTS (
-            SELECT 1 FROM exact e WHERE e."sheetId" = ri.sheet_id AND e."tabName" = ri.tab_name AND e."rowIndex" = ri.row_index
-          )
-      )
-      SELECT * FROM exact
-      UNION ALL
-      SELECT * FROM fuzzy
-      ORDER BY score DESC, "startDate" DESC NULLS LAST
+      SELECT ${SELECT_FIELDS},
+             1.0::float AS score
+      FROM review_index ri
+      LEFT JOIN tab_configs tc ON ri.sheet_id = tc.sheet_id AND ri.tab_name = tc.tab_name
+      WHERE ri.is_submitted = FALSE
+        AND REPLACE(ri.reviewer_name, ' ', '') = $${paramIdx++}
+        AND ri.phone8 = $${paramIdx++}
+      ORDER BY ri.start_date DESC NULLS LAST
       LIMIT 200
     `;
-    params.push(`%${q}%`, p8, q, q, p8);
+    params.push(q, p8);
 
   } else if (p8.length === 8) {
     // ── phone8 단독 검색 (trigram 불필요) ──
@@ -114,36 +96,20 @@ async function searchByName(query, phone8) {
     params.push(p8);
 
   } else {
-    // ── 이름만 검색 ──
-    // 1단계: ILIKE 정확 매칭 (pg_trgm GIN 인덱스 가속)
-    // 2단계: 유사도 검색으로 오타/유사 이름 포착
+    // ── 이름만 검색 (정확 일치) ──
+    // reviewer_name이 검색어와 정확히 일치하는 경우만 반환
+    // 공백 제거 후 비교: "김 수 만" == "김수만"
     sql = `
-      WITH exact AS (
-        SELECT ${SELECT_FIELDS},
-               1.0::float AS score
-        FROM review_index ri
-        LEFT JOIN tab_configs tc ON ri.sheet_id = tc.sheet_id AND ri.tab_name = tc.tab_name
-        WHERE ri.is_submitted = FALSE
-          AND ri.reviewer_name ILIKE $${paramIdx++}
-      ),
-      fuzzy AS (
-        SELECT ${SELECT_FIELDS},
-               similarity(ri.reviewer_name, $${paramIdx++})::float AS score
-        FROM review_index ri
-        LEFT JOIN tab_configs tc ON ri.sheet_id = tc.sheet_id AND ri.tab_name = tc.tab_name
-        WHERE ri.is_submitted = FALSE
-          AND ri.reviewer_name % $${paramIdx++}
-          AND NOT EXISTS (
-            SELECT 1 FROM exact e WHERE e."sheetId" = ri.sheet_id AND e."tabName" = ri.tab_name AND e."rowIndex" = ri.row_index
-          )
-      )
-      SELECT * FROM exact
-      UNION ALL
-      SELECT * FROM fuzzy
-      ORDER BY score DESC, "startDate" DESC NULLS LAST
+      SELECT ${SELECT_FIELDS},
+             1.0::float AS score
+      FROM review_index ri
+      LEFT JOIN tab_configs tc ON ri.sheet_id = tc.sheet_id AND ri.tab_name = tc.tab_name
+      WHERE ri.is_submitted = FALSE
+        AND REPLACE(ri.reviewer_name, ' ', '') = $${paramIdx++}
+      ORDER BY ri.start_date DESC NULLS LAST
       LIMIT 200
     `;
-    params.push(`%${q}%`, q, q);
+    params.push(q);
   }
 
   const startMs = Date.now();
