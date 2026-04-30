@@ -20,9 +20,12 @@ router.get('/detect', authMiddleware, async (req, res, next) => {
         COALESCE(tc.campaign_name, im.campaign_name) AS "campaignName",
         im.row_count      AS "rowCount",
         im.submitted_count AS "submittedCount",
+        COALESCE(paid.paid_count, 0) AS "paidCount",
         im.built_at       AS "builtAt",
         CASE
           WHEN tc.is_closed = TRUE THEN 'closed'
+          WHEN im.row_count > 0 AND im.submitted_count >= im.row_count
+               AND COALESCE(paid.paid_count, 0) >= im.row_count THEN 'fully_completed'
           WHEN im.row_count > 0 AND im.submitted_count >= im.row_count THEN 'completed'
           WHEN im.tab_name LIKE '(완)%' THEN 'name_completed'
           ELSE 'unknown'
@@ -31,6 +34,11 @@ router.get('/detect', authMiddleware, async (req, res, next) => {
         NULL AS "round"
       FROM index_master im
       LEFT JOIN tab_configs tc ON im.sheet_id = tc.sheet_id AND im.tab_name = tc.tab_name
+      LEFT JOIN LATERAL (
+        SELECT COUNT(*) FILTER (WHERE ri.is_submitted2 = 'PAID') AS paid_count
+        FROM review_index ri
+        WHERE ri.sheet_id = im.sheet_id AND ri.tab_name = im.tab_name
+      ) paid ON true
       WHERE im.status = 'active'
         AND (
           tc.is_closed = TRUE
@@ -71,6 +79,31 @@ router.get('/detect', authMiddleware, async (req, res, next) => {
         AND tc.is_closed = FALSE
     `);
 
+    // ★ 소스 4: 자동 감지 — 차수별 리뷰완료 + 입금완료 모두 충족된 차수
+    // 조건: 해당 차수의 전체 행에서 is_submitted=TRUE AND is_submitted2='PAID'
+    // → 리뷰헤더 + 입금헤더 모두 데이터가 채워진 차수 = 아카이브 대상
+    const { rows: autoDetectRows } = await pool.query(`
+      SELECT
+        ri.sheet_id AS "sheetId",
+        ri.tab_name AS "tabName",
+        COALESCE(tc.campaign_name, ri.campaign_name) AS "campaignName",
+        ri.round,
+        COUNT(*) AS "totalCount",
+        COUNT(*) FILTER (WHERE ri.is_submitted = TRUE) AS "submittedCount",
+        COUNT(*) FILTER (WHERE ri.is_submitted2 = 'PAID') AS "paidCount"
+      FROM review_index ri
+      LEFT JOIN tab_configs tc ON ri.sheet_id = tc.sheet_id AND ri.tab_name = tc.tab_name
+      INNER JOIN index_master im ON ri.sheet_id = im.sheet_id AND ri.tab_name = im.tab_name
+      WHERE im.status = 'active'
+        AND (tc.is_closed IS NULL OR tc.is_closed = FALSE)
+        AND ri.round IS NOT NULL AND ri.round != ''
+      GROUP BY ri.sheet_id, ri.tab_name, COALESCE(tc.campaign_name, ri.campaign_name), ri.round
+      HAVING
+        COUNT(*) > 0
+        AND COUNT(*) = COUNT(*) FILTER (WHERE ri.is_submitted = TRUE)
+        AND COUNT(*) = COUNT(*) FILTER (WHERE ri.is_submitted2 = 'PAID')
+    `);
+
     // 캠페인별 그룹핑 (프론트엔드 표시용)
     const campMap = new Map();
     rows.forEach(r => {
@@ -85,6 +118,7 @@ router.get('/detect', authMiddleware, async (req, res, next) => {
         tabName: r.tabName,
         rowCount: parseInt(r.rowCount) || 0,
         submittedCount: parseInt(r.submittedCount) || 0,
+        paidCount: parseInt(r.paidCount) || 0,
         reason: r.reason,
         builtAt: r.builtAt,
         inIndex: r.inIndex,
@@ -115,6 +149,41 @@ router.get('/detect', authMiddleware, async (req, res, next) => {
           round,
         });
       });
+    }
+
+    // ★ 소스 4 결과 추가: 리뷰완료 + 입금완료 모두 충족된 차수 (자동 감지)
+    // 이미 closed_rounds에 포함된 차수나 이미 감지된 항목은 중복 제외
+    const existingKeys = new Set();
+    for (const [, camp] of campMap) {
+      for (const tab of camp.tabs) {
+        if (tab.round) {
+          existingKeys.add(`${camp.sheetId}||${tab.tabName}||${tab.round}`);
+        }
+      }
+    }
+
+    for (const ad of autoDetectRows) {
+      const key = `${ad.sheetId}||${ad.tabName}||${ad.round}`;
+      if (existingKeys.has(key)) continue; // 이미 감지된 항목 → 중복 방지
+
+      if (!campMap.has(ad.sheetId)) {
+        campMap.set(ad.sheetId, {
+          sheetId: ad.sheetId,
+          campaignName: ad.campaignName || '미분류',
+          tabs: [],
+        });
+      }
+      campMap.get(ad.sheetId).tabs.push({
+        tabName: ad.tabName,
+        rowCount: parseInt(ad.totalCount) || 0,
+        submittedCount: parseInt(ad.submittedCount) || 0,
+        paidCount: parseInt(ad.paidCount) || 0,
+        reason: 'auto_complete',  // 리뷰+입금 모두 완료 자동감지
+        builtAt: null,
+        inIndex: true,
+        round: ad.round,
+      });
+      existingKeys.add(key);
     }
 
     const campaigns = Array.from(campMap.values());
