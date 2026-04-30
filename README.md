@@ -1,4 +1,4 @@
-# Review Web System v2.16 (Phase 5: 슬롯 매칭 시스템)
+# Review Web System v2.16.1 (Phase 5: 슬롯 매칭 + 탭 데이터 교정)
 
 ## 프로젝트 개요
 GAS(Google Apps Script) 기반 리뷰 관리 시스템을 Node.js Express + PostgreSQL로 완전 이관한 프로젝트입니다.
@@ -9,7 +9,7 @@ v2.16에서 구매양식 제출 시 자동 슬롯 매칭 시스템(인애드명 
 | 서비스 | URL | 상태 |
 |---|---|---|
 | **프론트엔드** | https://review-web-system.pages.dev | Cloudflare Pages |
-| **API 서버** | https://sublime-magic-production-790b.up.railway.app | Railway (v2.15.0-dashboard-tuip-chuihap) |
+| **API 서버** | https://sublime-magic-production-790b.up.railway.app | Railway (v2.16.1) |
 | **GitHub** | https://github.com/tnaks6325-web/review-web-system | main 브랜치 |
 
 ## 기술 스택
@@ -20,6 +20,40 @@ v2.16에서 구매양식 제출 시 자동 슬롯 매칭 시스템(인애드명 
 - **DB**: Railway PostgreSQL (17+ 테이블, 40+ 인덱스)
 
 ## 최근 변경사항
+
+### ★ 탭 데이터 교정 시스템 (v2.16.1)
+
+`tab_configs` 테이블의 `campaign_name`과 `tab_gid` 필드가 잘못 저장된 문제를 진단하고 일괄 교정하는 관리자 API를 추가했습니다.
+
+**문제 원인:**
+- `시트DB` → `syncTabListToDB` 경로에서 `campaign_name`에 스프레드시트 파일 제목 대신 특정 탭명이 저장됨
+- `tab_gid`가 null로 저장되어 시트 링크에 `#gid=` 파라미터가 누락 → 잘못된 URL 생성
+
+**수정 내용:**
+1. **`POST /api/tab/fix-campaign-tab-swap`** 엔드포인트 추가
+   - Google Sheets API로 실제 메타데이터 조회
+   - `tab_name`/`campaign_name` 스왑 감지 및 교정 (type: `swap`)
+   - 누락된 `tab_gid` 보충 (type: `gid_fill`)
+   - `campaign_name`이 실제 탭명인 경우 스프레드시트 제목으로 교정 (type: `campaign_fix`, `gid_fill_and_campaign_fix`)
+   - `campaigns` 테이블 폴백: `_spreadsheetTitle` 누락 시 DB에서 올바른 캠페인명 조회
+   - `dryRun=true` (기본값) 미리보기 / `dryRun=false` 실제 교정
+2. **LEFT JOIN → DISTINCT 쿼리 수정**: `index_master` JOIN 시 중복 행 방지
+3. **교정 대상 테이블**: `tab_configs`, `index_master`, `review_index` 동시 업데이트
+
+**교정 결과 (2026-04-30):**
+- 대상: 1개 시트 (어니스트캄_업무시트), 294개 탭
+- 교정 완료: 264건 (`campaign_name` + `tab_gid` 동시 교정)
+- 이미 정상: 30건 (스킵)
+- 오류: 0건
+- 소요 시간: 2.4초
+
+| 필드 | Before | After |
+|---|---|---|
+| `campaign_name` | "5/4(쿠팡)메디슨벨_마시는샐러드 골드박스 100건" (탭명) | "어니스트캄_업무시트" (시트 파일 제목) |
+| `tab_gid` | NULL | 실제 GID (예: 1551859921) |
+| 시트 링크 | `…/edit` (탭 지정 없음) | `…/edit#gid=1551859921` (정확한 탭) |
+
+---
 
 ### ★ Phase 5: 슬롯 매칭 시스템 (v2.16.0)
 
@@ -234,6 +268,9 @@ CREATE TABLE slot_locks (
 | `/api/payment/*` | GET/POST | 입금처리 |
 | `/api/archive/*` | GET/POST | 아카이브 |
 | `/api/diag/*` | GET/POST | 진단/모니터링 |
+| `/api/tab/fix-campaign-tab-swap` | POST | campaign_name/tab_gid 일괄 교정 (인증 필요, dryRun 지원) |
+| `/api/tab/sync-tab-names` | POST | 탭명 동기화 + GID 보충 (인증 필요) |
+| `/api/tab/clean-closed` | POST | 마감 탭 아카이브 처리 (인증 필요) |
 
 ## 환경변수 (Railway)
 ```
@@ -321,6 +358,16 @@ server/
 ```
 
 ## 배포 이력
+- **2026-04-30**: 탭 데이터 교정 시스템 배포 (v2.16.1)
+  - `POST /api/tab/fix-campaign-tab-swap` 엔드포인트 추가
+  - campaign_name 오류 교정 (탭명→시트파일제목), tab_gid null 보충
+  - campaigns 테이블 폴백 로직, DISTINCT 쿼리 최적화
+  - 프로덕션 264건 일괄 교정 완료 (0 오류)
+- **2026-04-29**: Phase 5 슬롯 매칭 시스템 배포 (v2.16.0)
+  - find-slot 3순위 매칭 + slot_locks 테이블
+  - 구매양식 제출 슬롯 반영 + 캐시 무효화
+  - 다건 주문 시 매건 재매칭 호출
+  - CORS 하이픈 허용 수정
 - **2026-04-27**: Phase 15 대시보드 투입/취합 집계 배포 (v2.15.0-dashboard-tuip-chuihap)
   - WORK_COL_GROUPS 10그룹 정의 + filledCount 계산
   - 대시보드 API에 tuip/chuihap/roundList 필드 추가
