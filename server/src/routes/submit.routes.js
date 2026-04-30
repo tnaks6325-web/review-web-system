@@ -158,6 +158,25 @@ router.post('/debug-tabs', async (req, res, next) => {
 });
 
 // ═══════════════════════════════════════════════════════════
+// 진단: 시트 데이터 조회 (헤더 감지 디버그용)
+// ═══════════════════════════════════════════════════════════
+router.post('/debug-sheet-data', async (req, res, next) => {
+  try {
+    const { sheetId, tabName, rows = 10 } = req.body;
+    if (!sheetId || !tabName) return res.json({ ok: false, error: 'sheetId, tabName 필요' });
+    const allRows = await readSheet(sheetId, `'${tabName}'!A1:ZZ${rows}`);
+    // 각 행에 대해 _isHeaderRow 결과도 함께 반환
+    const analyzed = (allRows || []).map((row, i) => {
+      const cells = (row || []).map(c => String(c || '').trim());
+      return { rowIdx: i, isHeader: _isHeaderRow(cells), cells: cells.slice(0, 20) };
+    });
+    return res.json({ ok: true, rowCount: (allRows || []).length, analyzed });
+  } catch (err) {
+    return res.json({ ok: false, error: err.message });
+  }
+});
+
+// ═══════════════════════════════════════════════════════════
 // 슬롯 매칭 API — 구매양식 제출 시 자동 행 매칭
 //
 // 규칙:
