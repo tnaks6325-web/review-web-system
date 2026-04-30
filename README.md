@@ -1,8 +1,8 @@
-# Review Web System v2.15 (Phase 15: Dashboard 투입/취합 집계)
+# Review Web System v2.16 (Phase 5: 슬롯 매칭 시스템)
 
 ## 프로젝트 개요
 GAS(Google Apps Script) 기반 리뷰 관리 시스템을 Node.js Express + PostgreSQL로 완전 이관한 프로젝트입니다.
-v2.15에서 대시보드 투입중/취합중 실시간 집계, 차수별 roundList, 계정관리 버그 수정을 추가했습니다.
+v2.16에서 구매양식 제출 시 자동 슬롯 매칭 시스템(인애드명 기반 행 배정)을 추가했습니다.
 
 ## 배포 현황
 
@@ -20,6 +20,64 @@ v2.15에서 대시보드 투입중/취합중 실시간 집계, 차수별 roundLi
 - **DB**: Railway PostgreSQL (17+ 테이블, 40+ 인덱스)
 
 ## 최근 변경사항
+
+### ★ Phase 5: 슬롯 매칭 시스템 (v2.16.0)
+
+구매양식 제출 시 시트의 "인애드명" 컬럼을 기준으로 자동으로 적합한 행을 배정하는 시스템입니다.
+
+**API 엔드포인트:**
+
+| 엔드포인트 | 메서드 | 설명 |
+|---|---|---|
+| `/api/submit/find-slot` | POST | 슬롯 매칭 실행 (3순위 규칙 적용) |
+| `/api/submit/order` | POST | 구매양식 제출 (슬롯 매칭 결과 반영) |
+| `/api/submit/slot-status` | GET | slot_locks 테이블 상태 진단 |
+| `/api/diag/slot-locks` | GET | 슬롯 잠금 상세 진단 (인증 필요) |
+
+**슬롯 매칭 3순위 규칙:**
+
+| 순위 | 조건 | 동작 |
+|---|---|---|
+| 1순위 | 로그인 이름 == 인애드명 정확 일치 | 해당 행 중 위에서부터 빈 행 배정 |
+| 2순위 | 일치 없음 → 비실명(닉네임) 인애드명 | 비실명 행 중 위에서부터 빈 행 (선착순) |
+| 3순위 | 위 모두 없음 → 완전 빈 행 | 인애드명도 비어있는 행 중 첫 번째 (선착순) |
+| 폴백 | 슬롯 없음 | append 모드 (기존 방식) |
+
+**핵심 구현:**
+- **실명 판별**: 2~4글자 한글 + 알려진 성씨(200+) 매칭으로 실명/닉네임 구분
+- **slot_locks 테이블**: 제출된 행을 DB에 기록하여 이중 배정 방지
+- **기존값 보호**: 인애드명, 날짜, 번호 컬럼은 덮어쓰지 않고 보존
+- **캐시 무효화**: 제출 완료 후 탭 데이터 캐시를 즉시 무효화 → 다건 제출 시 최신 상태 반영
+- **다건 주문 지원**: 첫 주문은 사전 매칭, 2번째+ 주문은 매건 재매칭 호출
+
+**DB 테이블 (slot_locks):**
+```sql
+CREATE TABLE slot_locks (
+  id              UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  sheet_id        TEXT NOT NULL,
+  tab_name        TEXT NOT NULL,
+  row_number      INTEGER NOT NULL,       -- 시트 행 번호 (1-based)
+  inad_name       TEXT,                   -- 시트의 인애드명 값
+  locked_by_phone8 TEXT NOT NULL,         -- 잠근 리뷰어 phone8
+  locked_by_name  TEXT,                   -- 잠근 리뷰어 이름
+  profile_name    TEXT,                   -- 사용된 프로필 이름
+  is_submitted    BOOLEAN DEFAULT FALSE,  -- 제출 완료 여부
+  locked_at       TIMESTAMPTZ DEFAULT NOW(),
+  submitted_at    TIMESTAMPTZ,
+  UNIQUE(sheet_id, tab_name, row_number)
+);
+```
+
+**프론트엔드 연동 (search-app.js):**
+- `gasPost({ action: "findSlot", ... })` → `POST /api/submit/find-slot`
+- 응답의 `rowNumber`, `inadName`을 `submitOrderForm` payload에 포함
+- 다건 주문 시 루프 내에서 매건 `findSlot` 재호출
+
+**CORS 수정:**
+- Cloudflare Pages 서브도메인 regex에 하이픈(-) 허용 추가
+- `[a-z0-9]+` → `[a-z0-9-]+` (브랜치 배포 URL 지원)
+
+---
 
 ### ★ Phase 15: 대시보드 투입/취합 집계 (v2.15.0)
 
