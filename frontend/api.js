@@ -133,6 +133,7 @@ const _ACTION_MAP = {
   'submitOrderForm':    { method: 'POST', path: '/api/submit/order' },
   'checkReviewFiles':   { method: 'POST', path: '/api/submit/check-files' },
   'checkDuplicateOrder':{ method: 'POST', path: '/api/submit/check-duplicate' },
+  'findSlot':           { method: 'POST', path: '/api/submit/find-slot' },
 
   // 진단/기타
   'debugTabConfig':     { method: 'GET',  path: '/api/diag/debug-tab' },

@@ -430,6 +430,15 @@ async function _doLoginWithLookup() {
     _applyLoginUI(name);
     const ni = document.getElementById("nameInput");
     if (ni) ni.value = name;
+
+    // ★ Phase 5: 구매양식 대기 중이면 폼으로 복귀
+    if (window._pendingOrderForm) {
+      window._pendingOrderForm = false;
+      window._slotAuth = { name, phone8: data.phone8 || phone8 };
+      initOrderFormMode();
+      return;
+    }
+
     await doSearch();
 
   } catch (e) {
@@ -464,6 +473,15 @@ async function _doLogin() {
     }
     _saveAuthSession(name, true, true, data.phone8 || phone8);
     _applyLoginUI(name);
+
+    // ★ Phase 5: 구매양식 대기 중이면 폼으로 복귀
+    if (window._pendingOrderForm) {
+      window._pendingOrderForm = false;
+      window._slotAuth = { name, phone8: data.phone8 || phone8 };
+      initOrderFormMode();
+      return;
+    }
+
     await doSearch();
   } catch(e) { _showLoginErr("오류: " + e.message); }
 }
@@ -3293,6 +3311,19 @@ function initOrderFormMode() {
   window._ncMode = ncMode; // 전역 플래그
   window._incomeType = incomeType; // ★ v9.14: 진행방식 전역 플래그
 
+  // ★★★ Phase 5: 구매양식 제출 시 리뷰어 로그인 강제 ★★★
+  const authSession = _loadAuthSession();
+  if (!authSession || !authSession.name) {
+    // 로그인 안 된 상태 → 로그인 화면 표시 후 완료 시 폼으로 복귀
+    window._pendingOrderForm = true; // 로그인 완료 후 폼 진입 플래그
+    showScreen("screenSearch"); // 로그인 UI가 있는 검색 화면
+    _switchAuthTab("login");
+    showToast("구매양식 제출을 위해 먼저 로그인해주세요.", "info");
+    return true; // 일반 초기화 스킵
+  }
+  // 로그인 완료 상태 → 슬롯 매칭 정보 전역 저장
+  window._slotAuth = { name: authSession.name, phone8: authSession.phone8 || "" };
+
   // 헤더 제목 설정: "상품명의 구매양식 제출"
   const titleEl    = document.getElementById("orderFormTitle");
   const subtitleEl = document.getElementById("orderFormSubtitle");
@@ -5696,6 +5727,31 @@ async function submitOrderForm() {
 
   if (btn) btn.innerHTML = `<i class="fas fa-spinner fa-spin"></i> 제출 중... (0/${orders.length})`;
 
+  // ★★★ Phase 5: 슬롯 매칭 API 호출 (제출 전) ★★★
+  let slotInfo = null;
+  const slotAuth = window._slotAuth || {};
+  if (slotAuth.name && ctx.sheetId && ctx.tabName) {
+    try {
+      const slotPayload = {
+        action: "findSlot",
+        sheetId: ctx.sheetId,
+        tabName: ctx.tabName,
+        loginName: slotAuth.name,
+        phone8: slotAuth.phone8 || "",
+        profileName: orders[0]?.orderer || slotAuth.name
+      };
+      const slotRes = await gasPost(slotPayload);
+      if (slotRes?.ok && slotRes.mode === 'slot' && slotRes.rowNumber) {
+        slotInfo = slotRes;
+        console.log("[슬롯매칭] 성공:", slotRes.matchType, "→ 행", slotRes.rowNumber, "인애드명:", slotRes.inadName);
+      } else {
+        console.log("[슬롯매칭] append 모드:", slotRes?.reason || "no slot");
+      }
+    } catch(slotErr) {
+      console.warn("[슬롯매칭] API 오류 (append 모드로 진행):", slotErr.message);
+    }
+  }
+
   // ── 각 주문 순차 제출 ──
   let successCount = 0;
   let firstCaptureFolderUrl = "";
@@ -5703,6 +5759,26 @@ async function submitOrderForm() {
   for (let i = 0; i < orders.length; i++) {
     const o = orders[i];
     if (btn) btn.innerHTML = `<i class="fas fa-spinner fa-spin"></i> 제출 중... (${i+1}/${orders.length})`;
+
+    // ★ Phase 5: 다건 제출 시 2번째+ 주문도 슬롯 매칭 (이전 제출로 캐시 무효화됨)
+    let currentSlotInfo = (i === 0) ? slotInfo : null;
+    if (i > 0 && slotAuth.name && ctx.sheetId && ctx.tabName) {
+      try {
+        const slotPayload2 = {
+          action: "findSlot",
+          sheetId: ctx.sheetId,
+          tabName: ctx.tabName,
+          loginName: slotAuth.name,
+          phone8: slotAuth.phone8 || "",
+          profileName: o.orderer || slotAuth.name
+        };
+        const slotRes2 = await gasPost(slotPayload2);
+        if (slotRes2?.ok && slotRes2.mode === 'slot' && slotRes2.rowNumber) {
+          currentSlotInfo = slotRes2;
+          console.log(`[슬롯매칭 ${i+1}] 성공:`, slotRes2.matchType, "→ 행", slotRes2.rowNumber);
+        }
+      } catch(slotErr2) { console.warn(`[슬롯매칭 ${i+1}] 오류:`, slotErr2.message); }
+    }
 
     const payload = {
       action: "submitOrderForm",
@@ -5716,7 +5792,12 @@ async function submitOrderForm() {
       ncMode: o.ncMode ? "true" : "false",
       // ★ v9.14: 카드별 소득신고 정보 (소득신고 진행방식인 경우에만 값 존재)
       incomeName: o.incomeName || "",
-      jumin:      o.residentNo  || ""
+      jumin:      o.residentNo  || "",
+      // ★ Phase 5: 슬롯 매칭 정보 (각 주문마다 개별 슬롯 매칭)
+      slotRowNumber: currentSlotInfo ? currentSlotInfo.rowNumber : "",
+      slotInadName: currentSlotInfo ? currentSlotInfo.inadName : "",
+      loginPhone8: slotAuth.phone8 || "",
+      loginName: slotAuth.name || ""
     };
 
     try {

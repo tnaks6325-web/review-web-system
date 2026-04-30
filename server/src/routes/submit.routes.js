@@ -7,13 +7,49 @@ const { logger } = require('../utils/logger');
 const { emitReviewSubmit, emitOrderSubmit } = require('../utils/sse');
 
 // ═══════════════════════════════════════════════════════════
+// 한국 실명 판별 유틸리티
+// ═══════════════════════════════════════════════════════════
+const KOREAN_SURNAMES = new Set([
+  '김','이','박','최','정','강','조','윤','장','임','한','오','서','신','권','황','안','송','류','전',
+  '홍','고','문','양','손','배','백','허','유','남','노','하','곽','성','차','주','우','구','라','민',
+  '진','엄','채','원','천','방','공','탁','봉','석','선','설','마','길','연','위','표','도','사','변',
+  '추','염','기','반','피','왕','금','육','옥','현','제','맹','태','소','전','탁','국','어','경',
+  '복','예','편','팽','모','장','여','나','범','평','승','심','단','감','상','두','온','점','습',
+  '독고','남궁','사공','황보','제갈','선우'
+]);
+
+/**
+ * 한국 실명 여부 판별
+ * - 순수 한글 2~4글자
+ * - 첫 글자(또는 첫 2글자)가 한국 성씨
+ */
+function _isKoreanRealName(str) {
+  if (!str || typeof str !== 'string') return false;
+  const s = str.trim();
+  // 순수 한글만 허용 (2~4글자)
+  if (!/^[가-힣]{2,4}$/.test(s)) return false;
+  // 복성 체크 (2글자 성)
+  if (s.length >= 3 && KOREAN_SURNAMES.has(s.slice(0, 2))) return true;
+  // 단성 체크 (1글자 성)
+  if (KOREAN_SURNAMES.has(s[0])) return true;
+  return false;
+}
+
+// ═══════════════════════════════════════════════════════════
 // 헤더 캐시 — 같은 탭의 헤더를 5분간 캐시 (Phase 3 최적화)
 // ═══════════════════════════════════════════════════════════
 const headerCache = new Map();
 const HEADER_CACHE_TTL = 5 * 60 * 1000; // 5분
 
+// 탭 전체 데이터 캐시 (슬롯 매칭용, 1분)
+const tabDataCache = new Map();
+const TAB_DATA_CACHE_TTL = 60 * 1000; // 1분
+
 // 헤더 행 자동 감지용 키워드 (smartBuild _isDataTabRow와 동일 로직)
 const HEADER_DETECT_KEYWORDS = ['번호', '주문자', '수취인', '수취인명', '성함', '이름', '성명', '신청자', '연락처', '전화번호', '아이디', '주소'];
+
+// 인애드명 컬럼 감지 키워드
+const INAD_COL_KEYWORDS = ['인애드', '인애드명', '인애드제출', '카톡', '카카오', '닉네임'];
 
 function _isHeaderRow(cells) {
   let matchCount = 0;
@@ -65,6 +101,175 @@ async function getCachedHeaders(sheetId, tabName) {
   }
   return null;
 }
+
+/**
+ * 탭 전체 데이터 캐시 (헤더행 + 데이터행 포함)
+ * 슬롯 매칭에서 인애드명 컬럼 스캔용
+ */
+async function getCachedTabData(sheetId, tabName) {
+  const key = `${sheetId}||${tabName}`;
+  const cached = tabDataCache.get(key);
+  if (cached && Date.now() - cached.ts < TAB_DATA_CACHE_TTL) {
+    return cached;
+  }
+
+  // 전체 탭 데이터 읽기 (최대 500행)
+  const allRows = await readSheet(sheetId, `'${tabName}'!1:500`);
+  if (!allRows || allRows.length === 0) return null;
+
+  // 헤더 행 탐지
+  let headerRowIdx = -1;
+  let headers = null;
+  for (let i = 0; i < Math.min(allRows.length, 30); i++) {
+    const cells = (allRows[i] || []).map(c => String(c || '').trim());
+    if (_isHeaderRow(cells)) {
+      headerRowIdx = i;
+      headers = cells;
+      break;
+    }
+  }
+  if (headerRowIdx < 0) return null;
+
+  const dataRows = allRows.slice(headerRowIdx + 1);
+  const result = { headers, headerRowIdx, dataRows, ts: Date.now() };
+  tabDataCache.set(key, result);
+  return result;
+}
+
+// ═══════════════════════════════════════════════════════════
+// 슬롯 매칭 API — 구매양식 제출 시 자동 행 매칭
+//
+// 규칙:
+//   1순위: 로그인 이름 == 인애드명 정확 일치 → 위에서부터 빈 행
+//   2순위: 일치 없으면 → "실명이 아닌" 인애드명 행 중 위에서부터 빈 행 (선착순)
+// ═══════════════════════════════════════════════════════════
+router.post('/find-slot', async (req, res, next) => {
+  try {
+    const { sheetId, tabName, loginName, phone8, profileName } = req.body;
+    if (!sheetId || !tabName || !loginName) {
+      return res.json({ ok: false, error: 'sheetId, tabName, loginName 필요' });
+    }
+
+    const matchName = (profileName || loginName).trim();
+
+    // 탭 전체 데이터 로드
+    const tabData = await getCachedTabData(sheetId, tabName);
+    if (!tabData) {
+      return res.json({ ok: false, error: '시트 데이터를 읽을 수 없습니다.' });
+    }
+
+    const { headers, headerRowIdx, dataRows } = tabData;
+
+    // 인애드명 컬럼 찾기
+    const inadColIdx = headers.findIndex(h => {
+      const hl = h.toLowerCase();
+      return INAD_COL_KEYWORDS.some(k => hl.includes(k));
+    });
+    if (inadColIdx < 0) {
+      // 인애드명 컬럼이 없으면 기존 append 방식으로 폴백
+      return res.json({ ok: true, mode: 'append', reason: 'no_inad_col' });
+    }
+
+    // 수취인 컬럼 찾기 (빈 행 판별 기준)
+    const recipientKeywords = ['수취인', '수취인명', '이름', '성함', '성명'];
+    const recipientColIdx = headers.findIndex(h =>
+      recipientKeywords.some(k => h.includes(k))
+    );
+    // 연락처 컬럼도 빈 행 판별 보조
+    const phoneKeywords = ['연락처', '전화', '전화번호', 'phone'];
+    const phoneColIdx = headers.findIndex(h =>
+      phoneKeywords.some(k => h.toLowerCase().includes(k.toLowerCase()))
+    );
+
+    // 빈 행 판별: 수취인 컬럼이 비어있으면 빈 행
+    function _isEmptyRow(row) {
+      if (recipientColIdx >= 0) {
+        const val = String(row[recipientColIdx] || '').trim();
+        if (val) return false;
+      }
+      if (phoneColIdx >= 0) {
+        const val = String(row[phoneColIdx] || '').trim();
+        if (val) return false;
+      }
+      // 수취인/연락처 모두 없는 경우, ID 컬럼도 체크
+      const idKeywords = ['아이디', 'id', 'userid'];
+      const idColIdx = headers.findIndex(h => idKeywords.some(k => h.toLowerCase().includes(k)));
+      if (idColIdx >= 0) {
+        const val = String(row[idColIdx] || '').trim();
+        if (val) return false;
+      }
+      return true;
+    }
+
+    // DB에서 이미 잠긴 슬롯 조회
+    const { rows: lockedSlots } = await pool.query(
+      'SELECT row_number FROM slot_locks WHERE sheet_id = $1 AND tab_name = $2 AND is_submitted = TRUE',
+      [sheetId, tabName]
+    );
+    const lockedRowSet = new Set(lockedSlots.map(r => r.row_number));
+
+    // ── 1순위: 이름 정확 매칭 ──
+    let matchedRow = -1;
+    for (let i = 0; i < dataRows.length; i++) {
+      const row = dataRows[i] || [];
+      const inadValue = String(row[inadColIdx] || '').trim();
+      if (inadValue !== matchName) continue;
+
+      const sheetRowNumber = headerRowIdx + 1 + i + 1; // 1-based sheet row
+      if (lockedRowSet.has(sheetRowNumber)) continue; // 이미 제출된 행 스킵
+      if (!_isEmptyRow(row)) continue; // 데이터 이미 있는 행 스킵
+
+      matchedRow = sheetRowNumber;
+      break;
+    }
+
+    if (matchedRow > 0) {
+      return res.json({
+        ok: true,
+        mode: 'slot',
+        rowNumber: matchedRow,
+        inadName: matchName,
+        matchType: 'exact',
+        headerRowIdx: headerRowIdx + 1, // 1-based
+      });
+    }
+
+    // ── 2순위: 실명 아닌 인애드명 행 중 선착순 ──
+    for (let i = 0; i < dataRows.length; i++) {
+      const row = dataRows[i] || [];
+      const inadValue = String(row[inadColIdx] || '').trim();
+      if (!inadValue) continue; // 인애드명 자체가 비어있으면 스킵
+
+      // 실명이면 스킵 (다른 사람의 슬롯이므로)
+      if (_isKoreanRealName(inadValue)) continue;
+
+      const sheetRowNumber = headerRowIdx + 1 + i + 1;
+      if (lockedRowSet.has(sheetRowNumber)) continue;
+      if (!_isEmptyRow(row)) continue;
+
+      matchedRow = sheetRowNumber;
+      break;
+    }
+
+    if (matchedRow > 0) {
+      const inadValue = String(dataRows[matchedRow - headerRowIdx - 2][inadColIdx] || '').trim();
+      return res.json({
+        ok: true,
+        mode: 'slot',
+        rowNumber: matchedRow,
+        inadName: inadValue,
+        matchType: 'nickname_slot',
+        headerRowIdx: headerRowIdx + 1,
+      });
+    }
+
+    // ── 매칭 실패: append 모드로 폴백 ──
+    return res.json({ ok: true, mode: 'append', reason: 'no_available_slot' });
+  } catch (err) {
+    logger.error(`[submit/find-slot] 오류: ${err.message}`);
+    next(err);
+  }
+});
 
 // ═══════════════════════════════════════════════════════════
 // POST /api/submit/review — 리뷰 제출
@@ -167,9 +372,10 @@ router.post('/review', async (req, res, next) => {
 // ═══════════════════════════════════════════════════════════
 // POST /api/submit/order — 구매양식 제출
 //
-// Phase 3 개선:
+// Phase 5 개선: 슬롯 매칭 시스템
 //   1. DB 즉시 저장 (order_submissions)
-//   2. Sheets 동시 쓰기 (행 추가)
+//   2. 슬롯 매칭: rowNumber 있으면 writeSheet (기존 행 덮어쓰기)
+//      없으면 appendSheet (기존 동작 유지)
 //   3. Sheets 실패 시 → sync_queue에 등록
 //   4. 중복 검사 DB 전용 (Phase 4와 동일)
 // ═══════════════════════════════════════════════════════════
@@ -178,7 +384,9 @@ router.post('/order', async (req, res, next) => {
     const b = req.body;
     const { sheetId, gid, tabName, orderer, recipient, userId, phone,
             address, bank, account, depositor, price, dateStr, orderNum,
-            memo, selectedOptKey, isCoupang, ncMode } = b;
+            memo, selectedOptKey, isCoupang, ncMode,
+            // ★ 슬롯 매칭 파라미터 (find-slot에서 받은 값)
+            slotRowNumber, slotInadName, loginPhone8, loginName } = b;
 
     if (!sheetId || !tabName) {
       return res.json({ error: 'sheetId와 tabName이 필요합니다.' });
@@ -209,9 +417,8 @@ router.post('/order', async (req, res, next) => {
     }
 
     // ── Phase 1: index_master 카운트 즉시 반영 ──
-    // 구매양식 제출 = 새 행 추가 → row_count +1
-    // 다음 인덱스 빌드에서 시트 원본 기준 재계산되므로 누적 오차 없음
-    if (dbSaved) {
+    // 슬롯 매칭 시에는 기존 행 사용이므로 row_count 증가 불필요
+    if (dbSaved && !slotRowNumber) {
       try {
         await pool.query(
           `UPDATE index_master
@@ -222,16 +429,79 @@ router.post('/order', async (req, res, next) => {
       } catch (_) { /* 대시보드 카운트 보조 — 실패해도 무시 */ }
     }
 
-    // ── Step 3: Sheets 행 추가 시도 ──
+    // ── Step 3: Sheets 쓰기 ──
     const orderData = { orderer, recipient, userId, phone, address, bank, account, depositor, price, dateStr, orderNum, memo, selectedOptKey };
     let sheetsWritten = false;
+    let usedSlot = false;
 
     try {
       const headers = await getCachedHeaders(sheetId, tabName);
       if (headers) {
         const rowData = _mapOrderToRow(headers, orderData);
-        await appendSheet(sheetId, `'${tabName}'!A:A`, [rowData]);
-        sheetsWritten = true;
+
+        if (slotRowNumber && parseInt(slotRowNumber) > 0) {
+          // ★ 슬롯 매칭: 기존 행에 덮어쓰기 (인애드명 컬럼은 보존)
+          const rowNum = parseInt(slotRowNumber);
+          const inadColIdx = headers.findIndex(h => INAD_COL_KEYWORDS.some(k => h.toLowerCase().includes(k)));
+
+          // 인애드명 컬럼은 기존값 유지 (덮어쓰지 않음)
+          if (inadColIdx >= 0) {
+            rowData[inadColIdx] = null; // null = 기존값 유지 표시
+          }
+
+          // 날짜 컬럼도 기존값 유지 (이미 관리자가 세팅해둔 값)
+          const dateColIdx = headers.findIndex(h => {
+            const hl = h.toLowerCase();
+            return hl.includes('일자') || hl.includes('날짜') || hl.includes('구매일');
+          });
+          if (dateColIdx >= 0) {
+            rowData[dateColIdx] = null;
+          }
+
+          // 번호 컬럼도 기존값 유지
+          const numColIdx = headers.findIndex(h => h === '번호');
+          if (numColIdx >= 0) {
+            rowData[numColIdx] = null;
+          }
+
+          // null이 아닌 컬럼만 개별 셀 쓰기 (기존값 보호)
+          const writePairs = [];
+          for (let ci = 0; ci < rowData.length; ci++) {
+            if (rowData[ci] === null || rowData[ci] === '') continue;
+            writePairs.push({ col: ci, val: rowData[ci] });
+          }
+
+          // 배치로 한번에 쓰기 (범위 지정)
+          if (writePairs.length > 0) {
+            // 각 셀 개별 쓰기 (기존값 보호를 위해)
+            for (const pair of writePairs) {
+              const colLetter = getColLetter(pair.col);
+              const range = `'${tabName}'!${colLetter}${rowNum}`;
+              await writeSheet(sheetId, range, [[pair.val]]);
+            }
+            sheetsWritten = true;
+            usedSlot = true;
+          }
+
+          // 슬롯 잠금 기록
+          if (sheetsWritten) {
+            try {
+              await pool.query(
+                `INSERT INTO slot_locks (sheet_id, tab_name, row_number, inad_name, locked_by_phone8, locked_by_name, profile_name, is_submitted, submitted_at)
+                 VALUES ($1, $2, $3, $4, $5, $6, $7, TRUE, NOW())
+                 ON CONFLICT (sheet_id, tab_name, row_number) DO UPDATE
+                 SET is_submitted = TRUE, submitted_at = NOW(), locked_by_phone8 = $5, locked_by_name = $6`,
+                [sheetId, tabName, rowNum, slotInadName || '', loginPhone8 || '', loginName || '', loginName || '']
+              );
+            } catch (lockErr) {
+              logger.warn(`[submit/order] 슬롯 잠금 기록 실패: ${lockErr.message}`);
+            }
+          }
+        } else {
+          // ★ 기존 방식: appendSheet (인애드명 컬럼 없는 탭이거나 슬롯 없음)
+          await appendSheet(sheetId, `'${tabName}'!A:A`, [rowData]);
+          sheetsWritten = true;
+        }
       }
     } catch (sheetsErr) {
       logger.warn(`[submit/order] Sheets 쓰기 실패 → 큐 등록: ${sheetsErr.message}`);
@@ -242,10 +512,16 @@ router.post('/order', async (req, res, next) => {
           sheetId,
           tabName,
           orderData,
+          slotRowNumber: slotRowNumber || null,
         });
       } catch (queueErr) {
         logger.error(`[submit/order] 큐 등록도 실패: ${queueErr.message}`);
       }
+    }
+
+    // 탭 데이터 캐시 무효화 (슬롯 상태 변경됨)
+    if (sheetsWritten) {
+      tabDataCache.delete(`${sheetId}||${tabName}`);
     }
 
     // ── SSE 알림: 구매양식 제출 ──
@@ -256,6 +532,7 @@ router.post('/order', async (req, res, next) => {
       recipient: recipient || '',
       dbSaved,
       sheetsWritten,
+      usedSlot,
     });
 
     res.json({
@@ -263,6 +540,8 @@ router.post('/order', async (req, res, next) => {
       dbSaved,
       sheetsWritten,
       queued: !sheetsWritten,
+      usedSlot,
+      slotRowNumber: usedSlot ? parseInt(slotRowNumber) : null,
     });
   } catch (err) {
     next(err);
