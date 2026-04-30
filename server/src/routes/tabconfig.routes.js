@@ -987,6 +987,10 @@ router.get('/dashboard', authMiddleware, async (req, res, next) => {
         im.built_at AS index_built_at, im.checksum
       FROM tab_configs tc
       LEFT JOIN index_master im ON tc.sheet_id = im.sheet_id AND tc.tab_name = im.tab_name
+      WHERE NOT EXISTS (
+        SELECT 1 FROM index_master_archive ima
+        WHERE ima.sheet_id = tc.sheet_id AND ima.tab_name = tc.tab_name
+      )
       ORDER BY tc.campaign_name NULLS LAST, tc.tab_name
     `);
 
@@ -1253,6 +1257,59 @@ router.post('/reset-all', authMiddleware, async (req, res, next) => {
     }
   } catch (err) {
     logger.error(`[reset-all] 오류: ${err.message}`);
+    next(err);
+  }
+});
+
+// ══════════════════════════════════════════════════════════════
+// POST /api/tab/clean-archived-orphans — 아카이브 잔여 데이터 정리
+// index_master_archive에 존재하면서 tab_configs에도 남아있는 고아 행 삭제
+// ══════════════════════════════════════════════════════════════
+router.post('/clean-archived-orphans', authMiddleware, async (req, res, next) => {
+  try {
+    const { dryRun = true } = req.body || {};
+    const startTime = Date.now();
+
+    // 아카이브에 있으면서 tab_configs에도 남아있는 행 조회
+    const { rows: orphans } = await pool.query(`
+      SELECT tc.sheet_id, tc.tab_name, tc.campaign_name
+      FROM tab_configs tc
+      INNER JOIN index_master_archive ima ON tc.sheet_id = ima.sheet_id AND tc.tab_name = ima.tab_name
+    `);
+
+    if (orphans.length === 0) {
+      return res.json({ ok: true, message: '정리할 고아 행이 없습니다.', count: 0 });
+    }
+
+    if (dryRun) {
+      return res.json({
+        ok: true,
+        dryRun: true,
+        count: orphans.length,
+        message: `${orphans.length}개 고아 행 발견 (dryRun=false로 삭제 실행)`,
+        preview: orphans.slice(0, 50).map(o => ({ sheetId: o.sheet_id.substring(0, 12) + '…', tabName: o.tab_name, campaign: o.campaign_name })),
+      });
+    }
+
+    // 실제 삭제
+    const { rowCount } = await pool.query(`
+      DELETE FROM tab_configs tc
+      USING index_master_archive ima
+      WHERE tc.sheet_id = ima.sheet_id AND tc.tab_name = ima.tab_name
+    `);
+
+    const elapsed = ((Date.now() - startTime) / 1000).toFixed(1) + 's';
+    logger.info(`[clean-archived-orphans] ${rowCount}개 고아 행 삭제 완료 (${elapsed})`);
+
+    res.json({
+      ok: true,
+      dryRun: false,
+      deleted: rowCount,
+      elapsed,
+      message: `${rowCount}개 고아 tab_configs 행 삭제 완료`,
+    });
+  } catch (err) {
+    logger.error(`[clean-archived-orphans] 오류: ${err.message}`);
     next(err);
   }
 });
