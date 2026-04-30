@@ -314,6 +314,31 @@ router.post('/find-slot', async (req, res, next) => {
       });
     }
 
+    // ── 3순위: 인애드명이 비어있는 빈 행 중 선착순 (완전 빈 슬롯) ──
+    for (let i = 0; i < dataRows.length; i++) {
+      const row = dataRows[i] || [];
+      const inadValue = String(row[inadColIdx] || '').trim();
+      if (inadValue) continue; // 인애드명이 있는 행은 스킵 (1순위/2순위에서 처리됨)
+
+      const sheetRowNumber = headerRowIdx + 1 + i + 1;
+      if (lockedRowSet.has(sheetRowNumber)) continue;
+      if (!_isEmptyRow(row)) continue;
+
+      matchedRow = sheetRowNumber;
+      break;
+    }
+
+    if (matchedRow > 0) {
+      return res.json({
+        ok: true,
+        mode: 'slot',
+        rowNumber: matchedRow,
+        inadName: '',
+        matchType: 'empty_slot',
+        headerRowIdx: headerRowIdx + 1,
+      });
+    }
+
     // ── 매칭 실패: append 모드로 폴백 ──
     return res.json({ ok: true, mode: 'append', reason: 'no_available_slot' });
   } catch (err) {
