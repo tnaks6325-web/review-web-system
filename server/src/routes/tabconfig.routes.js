@@ -561,8 +561,10 @@ router.post('/fix-campaign-tab-swap', authMiddleware, async (req, res, next) => 
     const startTime = Date.now();
 
     // 1. 대상 탭 조회 (sheetId 지정 시 해당 시트만, 없으면 전체)
+    //    DISTINCT ON으로 LEFT JOIN 중복 방지
     let query = `
-      SELECT tc.sheet_id, tc.tab_name, tc.campaign_name, tc.sheet_url, tc.tab_gid,
+      SELECT DISTINCT ON (tc.sheet_id, tc.tab_name)
+             tc.sheet_id, tc.tab_name, tc.campaign_name, tc.sheet_url, tc.tab_gid,
              im.tab_gid AS im_tab_gid
       FROM tab_configs tc
       LEFT JOIN index_master im ON tc.sheet_id = im.sheet_id AND tc.tab_name = im.tab_name
@@ -575,6 +577,16 @@ router.post('/fix-campaign-tab-swap', authMiddleware, async (req, res, next) => 
     query += ' ORDER BY tc.sheet_id, tc.tab_name';
 
     const { rows: allTabs } = await pool.query(query, params);
+
+    // 1-b. campaigns 테이블에서 시트별 올바른 캠페인명 조회 (spreadsheetTitle 대체용)
+    const { rows: campaignRows } = await pool.query(
+      'SELECT sheet_id, campaign_name FROM campaigns'
+    );
+    const campaignBySheet = {};
+    for (const c of campaignRows) {
+      // 하나의 시트에 여러 캠페인이 있을 수 있으나, 보통 1개
+      if (!campaignBySheet[c.sheet_id]) campaignBySheet[c.sheet_id] = c.campaign_name;
+    }
 
     // 2. 시트별 그룹핑
     const sheetMap = {};
@@ -614,6 +626,9 @@ router.post('/fix-campaign-tab-swap', authMiddleware, async (req, res, next) => 
         realTabs[title] = { gid, title };
       });
 
+      // ★ 올바른 캠페인명 결정: spreadsheetTitle > campaigns 테이블 > 빈값
+      const correctCampaignName = spreadsheetTitle || campaignBySheet[sid] || '';
+
       const dbTabs = sheetMap[sid];
       const correctSheetUrl = `https://docs.google.com/spreadsheets/d/${sid}/edit`;
 
@@ -622,17 +637,14 @@ router.post('/fix-campaign-tab-swap', authMiddleware, async (req, res, next) => 
         const dbCampaignName = dbTab.campaign_name || '';
 
         // ─── 교정 로직 ───
-        // 상황: DB의 tab_name이 시트에 실제 탭으로 존재하지 않지만,
-        //       DB의 campaign_name이 시트에 실제 탭으로 존재하는 경우
-        //       → campaign_name과 tab_name이 뒤바뀐 것
         const tabExistsInSheet = !!realTabs[dbTabName];
         const campaignExistsAsTab = !!realTabs[dbCampaignName];
 
         if (!tabExistsInSheet && campaignExistsAsTab) {
-          // ★ 뒤바뀜 감지: campaign_name이 실제 탭명이고, tab_name은 캠페인명
+          // ★ 완전한 뒤바뀜: tab_name이 시트에 없고, campaign_name이 시트 탭명
           const realTab = realTabs[dbCampaignName];
           const newTabName = dbCampaignName;  // 실제 탭명
-          const newCampaignName = spreadsheetTitle || dbTabName;  // 시트 제목 또는 기존 tab_name(=캠페인명)
+          const newCampaignName = correctCampaignName || dbTabName;
           const newGid = realTab.gid;
 
           const fix = {
@@ -644,12 +656,11 @@ router.post('/fix-campaign-tab-swap', authMiddleware, async (req, res, next) => 
             newTabName,
             newCampaignName,
             newGid,
-            spreadsheetTitle,
+            spreadsheetTitle: correctCampaignName,
           };
 
           if (!dryRun) {
             try {
-              // tab_configs: 기존 행 삭제 후 새 행 INSERT (PK가 sheet_id+tab_name이므로)
               await pool.query(
                 'DELETE FROM tab_configs WHERE sheet_id = $1 AND tab_name = $2',
                 [sid, dbTabName]
@@ -661,7 +672,6 @@ router.post('/fix-campaign-tab-swap', authMiddleware, async (req, res, next) => 
                    campaign_name = $3, sheet_url = $4, tab_gid = $5, updated_at = NOW()`,
                 [sid, newTabName, newCampaignName, correctSheetUrl, newGid]
               );
-              // index_master 교정
               await pool.query(
                 'DELETE FROM index_master WHERE sheet_id = $1 AND tab_name = $2',
                 [sid, dbTabName]
@@ -673,7 +683,6 @@ router.post('/fix-campaign-tab-swap', authMiddleware, async (req, res, next) => 
                    tab_gid = $3, campaign_name = $4, status = 'active', built_at = NOW()`,
                 [sid, newTabName, newGid, newCampaignName]
               );
-              // review_index 교정
               await pool.query(
                 'UPDATE review_index SET tab_name = $1, tab_gid = $2 WHERE sheet_id = $3 AND tab_name = $4',
                 [newTabName, newGid, sid, dbTabName]
@@ -692,29 +701,50 @@ router.post('/fix-campaign-tab-swap', authMiddleware, async (req, res, next) => 
 
           fixes.push(fix);
         } else if (tabExistsInSheet) {
-          // 탭명은 맞지만 tab_gid가 없는 경우 → GID만 보충
           const currentGid = dbTab.tab_gid || dbTab.im_tab_gid;
           const realGid = realTabs[dbTabName].gid;
 
+          // ★ campaign_name이 잘못된 경우 감지:
+          //    campaign_name이 같은 시트의 다른 탭명과 일치하면 잘못된 값
+          const campIsAnotherTab = campaignExistsAsTab && dbCampaignName !== dbTabName;
+          const campNeedsFix = campIsAnotherTab && correctCampaignName && dbCampaignName !== correctCampaignName;
+
           if (!currentGid && realGid) {
+            // GID 보충 + campaign_name 교정 동시 처리
             const gidFix = {
               sheetId: sid.substring(0, 15) + '...',
               fullSheetId: sid,
-              type: 'gid_fill',
+              type: campNeedsFix ? 'gid_fill_and_campaign_fix' : 'gid_fill',
               tabName: dbTabName,
               gid: realGid,
             };
+            if (campNeedsFix) {
+              gidFix.oldCampaignName = dbCampaignName;
+              gidFix.newCampaignName = correctCampaignName;
+            }
 
             if (!dryRun) {
               try {
-                await pool.query(
-                  'UPDATE tab_configs SET tab_gid = $1, updated_at = NOW() WHERE sheet_id = $2 AND tab_name = $3',
-                  [realGid, sid, dbTabName]
-                );
-                await pool.query(
-                  'UPDATE index_master SET tab_gid = $1 WHERE sheet_id = $2 AND tab_name = $3 AND (tab_gid IS NULL OR tab_gid = \'\')',
-                  [realGid, sid, dbTabName]
-                );
+                if (campNeedsFix) {
+                  await pool.query(
+                    'UPDATE tab_configs SET tab_gid = $1, campaign_name = $2, updated_at = NOW() WHERE sheet_id = $3 AND tab_name = $4',
+                    [realGid, correctCampaignName, sid, dbTabName]
+                  );
+                  await pool.query(
+                    `UPDATE index_master SET tab_gid = $1, campaign_name = $2 WHERE sheet_id = $3 AND tab_name = $4`,
+                    [realGid, correctCampaignName, sid, dbTabName]
+                  );
+                  fixed++;
+                } else {
+                  await pool.query(
+                    'UPDATE tab_configs SET tab_gid = $1, updated_at = NOW() WHERE sheet_id = $2 AND tab_name = $3',
+                    [realGid, sid, dbTabName]
+                  );
+                  await pool.query(
+                    'UPDATE index_master SET tab_gid = $1 WHERE sheet_id = $2 AND tab_name = $3 AND (tab_gid IS NULL OR tab_gid = \'\')',
+                    [realGid, sid, dbTabName]
+                  );
+                }
                 gidFix.status = 'filled';
                 gidFilled++;
               } catch (gErr) {
@@ -727,55 +757,45 @@ router.post('/fix-campaign-tab-swap', authMiddleware, async (req, res, next) => 
             }
 
             fixes.push(gidFix);
-          } else {
-            // campaign_name도 확인 - 시트 제목과 다르면 교정
-            if (spreadsheetTitle && dbCampaignName && dbCampaignName !== spreadsheetTitle) {
-              // campaign_name이 다른 탭명과 같으면 스왑 의심
-              const campIsAnotherTab = !!realTabs[dbCampaignName] && dbCampaignName !== dbTabName;
-              if (campIsAnotherTab) {
-                const campFix = {
-                  sheetId: sid.substring(0, 15) + '...',
-                  fullSheetId: sid,
-                  type: 'campaign_fix',
-                  tabName: dbTabName,
-                  oldCampaignName: dbCampaignName,
-                  newCampaignName: spreadsheetTitle,
-                  gid: realTabs[dbTabName].gid,
-                };
+          } else if (campNeedsFix) {
+            // GID는 있지만 campaign_name이 잘못됨
+            const campFix = {
+              sheetId: sid.substring(0, 15) + '...',
+              fullSheetId: sid,
+              type: 'campaign_fix',
+              tabName: dbTabName,
+              oldCampaignName: dbCampaignName,
+              newCampaignName: correctCampaignName,
+              gid: realGid,
+            };
 
-                if (!dryRun) {
-                  try {
-                    const gid = realTabs[dbTabName].gid;
-                    await pool.query(
-                      'UPDATE tab_configs SET campaign_name = $1, tab_gid = COALESCE(NULLIF(tab_gid, \'\'), $2), updated_at = NOW() WHERE sheet_id = $3 AND tab_name = $4',
-                      [spreadsheetTitle, gid, sid, dbTabName]
-                    );
-                    await pool.query(
-                      'UPDATE index_master SET campaign_name = $1, tab_gid = COALESCE(NULLIF(tab_gid, \'\'), $2) WHERE sheet_id = $3 AND tab_name = $4',
-                      [spreadsheetTitle, gid, sid, dbTabName]
-                    );
-                    campFix.status = 'fixed';
-                    fixed++;
-                  } catch (cErr) {
-                    campFix.status = 'error';
-                    campFix.error = cErr.message;
-                    errors++;
-                  }
-                } else {
-                  campFix.status = 'dry_run';
-                }
-
-                fixes.push(campFix);
-              } else {
-                skipped++;
+            if (!dryRun) {
+              try {
+                await pool.query(
+                  'UPDATE tab_configs SET campaign_name = $1, tab_gid = COALESCE(NULLIF(tab_gid, \'\'), $2), updated_at = NOW() WHERE sheet_id = $3 AND tab_name = $4',
+                  [correctCampaignName, realGid, sid, dbTabName]
+                );
+                await pool.query(
+                  'UPDATE index_master SET campaign_name = $1, tab_gid = COALESCE(NULLIF(tab_gid, \'\'), $2) WHERE sheet_id = $3 AND tab_name = $4',
+                  [correctCampaignName, realGid, sid, dbTabName]
+                );
+                campFix.status = 'fixed';
+                fixed++;
+              } catch (cErr) {
+                campFix.status = 'error';
+                campFix.error = cErr.message;
+                errors++;
               }
             } else {
-              skipped++;
+              campFix.status = 'dry_run';
             }
+
+            fixes.push(campFix);
+          } else {
+            skipped++;
           }
         } else {
           // tab_name이 시트에도 없고 campaign_name도 시트 탭이 아님
-          // → 시트에서 삭제되었거나 다른 문제
           skipped++;
         }
       }
@@ -798,7 +818,7 @@ router.post('/fix-campaign-tab-swap', authMiddleware, async (req, res, next) => 
       errors,
       errorDetails: errorDetails.length > 0 ? errorDetails : undefined,
       elapsed: `${elapsed}s`,
-      fixes: fixes.slice(0, 100),  // 최대 100개까지만 응답
+      fixes: fixes.slice(0, 200),  // 최대 200개까지 응답
     });
   } catch (err) {
     next(err);
