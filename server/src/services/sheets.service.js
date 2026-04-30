@@ -39,9 +39,25 @@ try {
 
 /**
  * 시트 전체 데이터 읽기 (GAS: SpreadsheetApp.openById + getValues)
+ *
+ * ★ 탭 이름에 슬래시(/)가 포함되면 values.get의 path parameter가 깨지므로
+ *   batchGet (query parameter 방식)을 사용하여 우회합니다.
  */
 async function readSheet(spreadsheetId, range) {
   if (!sheets) throw new Error('Google Sheets API가 설정되지 않았습니다.');
+
+  // 슬래시가 range(탭 이름 부분)에 포함된 경우 batchGet 사용
+  // values.get은 range를 URL path에 넣어서 '/'가 경로 구분자로 해석됨
+  if (range && range.includes('/')) {
+    const res = await sheets.spreadsheets.values.batchGet({
+      spreadsheetId,
+      ranges: [range],
+      valueRenderOption: 'UNFORMATTED_VALUE',
+    });
+    const valueRanges = res.data.valueRanges || [];
+    return (valueRanges[0] && valueRanges[0].values) || [];
+  }
+
   const res = await sheets.spreadsheets.values.get({
     spreadsheetId,
     range,
@@ -52,9 +68,24 @@ async function readSheet(spreadsheetId, range) {
 
 /**
  * 시트 데이터 쓰기 (GAS: setValues)
+ *
+ * ★ 탭 이름에 슬래시(/)가 포함되면 values.update의 path parameter가 깨지므로
+ *   batchUpdate (query parameter 방식)를 사용하여 우회합니다.
  */
 async function writeSheet(spreadsheetId, range, values) {
   if (!sheets) throw new Error('Google Sheets API가 설정되지 않았습니다.');
+
+  if (range && range.includes('/')) {
+    await sheets.spreadsheets.values.batchUpdate({
+      spreadsheetId,
+      requestBody: {
+        valueInputOption: 'RAW',
+        data: [{ range, values }],
+      },
+    });
+    return;
+  }
+
   await sheets.spreadsheets.values.update({
     spreadsheetId,
     range,
@@ -65,9 +96,41 @@ async function writeSheet(spreadsheetId, range, values) {
 
 /**
  * 시트 단일 셀/행 추가 (GAS: appendRow)
+ *
+ * ★ 탭 이름에 슬래시(/)가 포함되면 values.append의 path parameter가 깨지므로
+ *   batchUpdate로 마지막 행 뒤에 쓰는 방식으로 우회합니다.
+ *   (append는 batchGet처럼 쿼리 파라미터를 지원하지 않으므로, 먼저 데이터를 읽고 다음 행에 write)
  */
 async function appendSheet(spreadsheetId, range, values) {
   if (!sheets) throw new Error('Google Sheets API가 설정되지 않았습니다.');
+
+  if (range && range.includes('/')) {
+    // range 형식: '탭이름'!A:Z 또는 '탭이름'!A1:ZZ500 등
+    // append 대신: batchGet으로 현재 데이터 길이 파악 후 해당 행에 write
+    // 간단한 방법: values.append도 실제로는 range를 request body에 넣지 않고
+    // URL path에 넣으므로, 직접 HTTP 요청을 구성하거나 batchUpdate 활용
+    // 
+    // 가장 안전한 방법: spreadsheets.values.append는 range가 path param이므로
+    // 우회책으로 시트 데이터를 읽고 다음 빈 행에 write
+    const tabMatch = range.match(/^'([^']*(?:''[^']*)*)'!/);
+    const tabName = tabMatch ? tabMatch[1].replace(/''/g, "'") : null;
+
+    if (tabName) {
+      // 현재 데이터 행 수 파악
+      const existing = await readSheet(spreadsheetId, `'${tabName}'!A:A`);
+      const nextRow = (existing ? existing.length : 0) + 1;
+      const writeRange = `'${tabName}'!A${nextRow}`;
+      await sheets.spreadsheets.values.batchUpdate({
+        spreadsheetId,
+        requestBody: {
+          valueInputOption: 'RAW',
+          data: [{ range: writeRange, values }],
+        },
+      });
+      return;
+    }
+  }
+
   await sheets.spreadsheets.values.append({
     spreadsheetId,
     range,
