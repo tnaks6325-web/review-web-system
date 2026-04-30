@@ -158,10 +158,10 @@ router.post('/find-slot', async (req, res, next) => {
       tabData = await getCachedTabData(sheetId, tabName);
     } catch (sheetErr) {
       logger.warn(`[find-slot] 시트 읽기 실패 → append 모드: ${sheetErr.message}`);
-      return res.json({ ok: true, mode: 'append', reason: 'sheet_read_error' });
+      return res.json({ ok: true, mode: 'append', reason: 'sheet_read_error', debug: sheetErr.message });
     }
     if (!tabData) {
-      return res.json({ ok: true, mode: 'append', reason: 'no_tab_data' });
+      return res.json({ ok: true, mode: 'append', reason: 'no_tab_data', debug: 'getCachedTabData returned null (no rows or no header found)' });
     }
 
     const { headers, headerRowIdx, dataRows } = tabData;
