@@ -139,6 +139,25 @@ async function getCachedTabData(sheetId, tabName) {
 }
 
 // ═══════════════════════════════════════════════════════════
+// 진단: 시트 탭 이름 목록 조회 (디버그용)
+// ═══════════════════════════════════════════════════════════
+router.post('/debug-tabs', async (req, res, next) => {
+  try {
+    const { sheetId } = req.body;
+    if (!sheetId) return res.json({ ok: false, error: 'sheetId 필요' });
+    const meta = await getSpreadsheetMeta(sheetId);
+    const tabs = (meta || []).map(s => ({
+      title: s.properties?.title,
+      gid: s.properties?.sheetId,
+      hidden: s.properties?.hidden || false,
+    }));
+    return res.json({ ok: true, tabs });
+  } catch (err) {
+    return res.json({ ok: false, error: err.message });
+  }
+});
+
+// ═══════════════════════════════════════════════════════════
 // 슬롯 매칭 API — 구매양식 제출 시 자동 행 매칭
 //
 // 규칙:
