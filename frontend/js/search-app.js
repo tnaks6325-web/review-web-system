@@ -1660,8 +1660,9 @@ async function submitReview() {
         const result = await gasPost({
           action:           "submitReview",
           sheetId:          item.sheetId,
+          tabName:          item.tabName,
           gid:              item.gid,
-          rowIndex:         item.row._rowIndex,
+          rowIndex:         item.rowIndex,
           reviewerName,
           submitCol:        item.submitCol,
           campaignName:     item.campaignName,
