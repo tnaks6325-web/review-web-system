@@ -16,7 +16,8 @@ if (process.env.NODE_ENV !== 'production') {
 const corsOptions = {
   origin: (origin, callback) => {
     // origin이 없는 경우 (Postman, 서버간 통신)
-    if (!origin) return callback(null, true);
+    // 또는 "null" 문자열 (file:// 프로토콜, sandbox iframe 등)
+    if (!origin || origin === 'null') return callback(null, true);
     // 정확히 일치하는 origin
     if (allowedOrigins.includes(origin)) return callback(null, true);
     // Cloudflare Pages 서브도메인 허용 (배포별 URL: https://<hash>.review-web-system.pages.dev)
