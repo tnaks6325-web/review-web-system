@@ -1,6 +1,6 @@
 const express = require('express');
 const router = express.Router();
-const { writeSheet, readSheet, appendSheet } = require('../services/sheets.service');
+const { writeSheet, readSheet, appendSheet, getSpreadsheetMeta, batchReadSheet } = require('../services/sheets.service');
 const { enqueue } = require('../services/syncQueue.service');
 const pool = require('../db/pool');
 const { logger } = require('../utils/logger');
