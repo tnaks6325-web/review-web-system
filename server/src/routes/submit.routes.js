@@ -119,10 +119,10 @@ async function getCachedTabData(sheetId, tabName) {
   const allRows = await readSheet(sheetId, `'${tabName}'!A1:ZZ500`);
   if (!allRows || allRows.length === 0) return null;
 
-  // 헤더 행 탐지
+  // 헤더 행 탐지 (상위 설정 영역이 30행 이상일 수 있으므로 50행까지 탐색)
   let headerRowIdx = -1;
   let headers = null;
-  for (let i = 0; i < Math.min(allRows.length, 30); i++) {
+  for (let i = 0; i < Math.min(allRows.length, 50); i++) {
     const cells = (allRows[i] || []).map(c => String(c || '').trim());
     if (_isHeaderRow(cells)) {
       headerRowIdx = i;
