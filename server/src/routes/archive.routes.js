@@ -55,6 +55,7 @@ router.get('/detect', authMiddleware, async (req, res, next) => {
         tc.campaign_name  AS "campaignName",
         0                 AS "rowCount",
         0                 AS "submittedCount",
+        0                 AS "paidCount",
         NULL              AS "builtAt",
         CASE
           WHEN tc.is_closed = TRUE THEN 'closed'
