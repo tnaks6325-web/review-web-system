@@ -2077,4 +2077,52 @@ router.get('/archive-detect-debug', authMiddleware, async (req, res, next) => {
   } catch (err) { next(err); }
 });
 
+// ═══════════════════════════════════════════════════════════
+// GET /api/diag/slot-locks — 슬롯 잠금 테이블 진단
+// ═══════════════════════════════════════════════════════════
+router.get('/slot-locks', authMiddleware, async (req, res, next) => {
+  try {
+    // 테이블 존재 확인
+    const { rows: tableCheck } = await pool.query(`
+      SELECT EXISTS (
+        SELECT FROM information_schema.tables
+        WHERE table_name = 'slot_locks'
+      ) AS "exists"
+    `);
+    const tableExists = tableCheck[0]?.exists || false;
+
+    if (!tableExists) {
+      return res.json({ ok: true, tableExists: false, message: 'slot_locks 테이블이 아직 생성되지 않았습니다.' });
+    }
+
+    // 최근 잠금 레코드 조회
+    const { rows: recentLocks } = await pool.query(`
+      SELECT sheet_id, tab_name, row_number, inad_name,
+             locked_by_phone8, locked_by_name, is_submitted,
+             locked_at, submitted_at
+      FROM slot_locks
+      ORDER BY locked_at DESC
+      LIMIT 20
+    `);
+
+    // 통계
+    const { rows: stats } = await pool.query(`
+      SELECT
+        COUNT(*) AS total,
+        COUNT(*) FILTER (WHERE is_submitted = TRUE) AS submitted,
+        COUNT(*) FILTER (WHERE is_submitted = FALSE) AS pending
+      FROM slot_locks
+    `);
+
+    res.json({
+      ok: true,
+      tableExists: true,
+      stats: stats[0] || { total: 0, submitted: 0, pending: 0 },
+      recentLocks,
+    });
+  } catch (err) {
+    next(err);
+  }
+});
+
 module.exports = router;
