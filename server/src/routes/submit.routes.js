@@ -177,6 +177,25 @@ router.post('/debug-sheet-data', async (req, res, next) => {
 });
 
 // ═══════════════════════════════════════════════════════════
+// GET /api/submit/diag-tabs — tab_configs 데이터 진단 (캠페인/탭명 확인용)
+// ═══════════════════════════════════════════════════════════
+router.get('/diag-tabs', async (req, res) => {
+  try {
+    const { sheetId } = req.query;
+    if (!sheetId) return res.json({ ok: false, error: 'sheetId 필요' });
+    const { rows } = await pool.query(
+      `SELECT sheet_id, tab_name, campaign_name, tab_gid, sheet_url, display_name
+       FROM tab_configs WHERE sheet_id = $1
+       ORDER BY tab_name LIMIT 30`,
+      [sheetId]
+    );
+    res.json({ ok: true, total: rows.length, tabs: rows });
+  } catch (err) {
+    res.json({ ok: false, error: err.message });
+  }
+});
+
+// ═══════════════════════════════════════════════════════════
 // GET /api/submit/slot-status — slot_locks 테이블 상태 확인 (진단용)
 // ═══════════════════════════════════════════════════════════
 router.get('/slot-status', async (req, res) => {
