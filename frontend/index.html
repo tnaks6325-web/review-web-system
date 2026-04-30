@@ -836,6 +836,10 @@
             <button id="btnSyncTabNames" class="btn-sm" onclick="syncTabNames(false)" style="font-size:.78rem;background:#7C3AED;color:#fff;border:none;border-radius:6px;padding:5px 12px;cursor:pointer" title="시트의 실제 탭명·URL을 DB와 동기화합니다">
               <i class="fas fa-exchange-alt"></i> 탭명 동기화
             </button>
+            <button id="btnArchiveDetect" class="btn-sm" onclick="dashboardArchiveDetect()" style="font-size:.78rem;background:#8B5CF6;color:#fff;border:none;border-radius:6px;padding:5px 12px;cursor:pointer" title="완료된 탭/차수를 자동 감지하고 아카이브 여부를 결정합니다">
+              <i class="fas fa-archive"></i> 완료감지
+              <span id="archiveDetectBadge" style="display:none;background:#fff;color:#8B5CF6;font-size:.65rem;padding:0 5px;border-radius:99px;margin-left:4px;font-weight:700">0</span>
+            </button>
             <button id="btnCleanClosed" class="btn-sm" onclick="cleanClosedTabs()" style="font-size:.78rem;background:#DC2626;color:#fff;border:none;border-radius:6px;padding:5px 12px;cursor:pointer">
               <i class="fas fa-broom"></i> 마감탭 정리
             </button>
@@ -852,6 +856,9 @@
         <div id="tabDashSyncInfo" style="font-size:.75rem;color:var(--t3);margin:6px 0 10px">
           데이터 원본: DB(tab_configs) &middot; 스마트빌드 5분 자동갱신 &middot; 로딩중...
         </div>
+
+        <!-- ★ 완료감지 결과 영역 (대시보드 내 인라인) -->
+        <div id="dashArchiveDetectWrap" style="display:none;margin-bottom:14px"></div>
 
         <!-- KPI 카드 -->
         <div id="tabDashKPI" style="display:grid;grid-template-columns:repeat(auto-fit,minmax(110px,1fr));gap:8px;margin-bottom:14px"></div>

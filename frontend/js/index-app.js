@@ -11211,7 +11211,6 @@ async function _updateArchiveBadge() {
   try {
     const data = await gasGet({ action: 'archiveDetect' });
     const badge = document.getElementById('archiveBadge');
-    if (!badge) return;
 
     // 전체 탭 수 계산 (campaigns 안의 tabs 합계)
     let totalDetected = 0;
@@ -11219,10 +11218,27 @@ async function _updateArchiveBadge() {
       data.campaigns.forEach(c => { totalDetected += (c.tabs || []).length; });
     }
 
-    if (totalDetected > 0) {
-      badge.textContent = totalDetected;
-      badge.style.display = 'inline';
+    // ★ 대시보드 완료감지 버튼 배지 업데이트
+    const detectBadge = document.getElementById('archiveDetectBadge');
+    if (detectBadge) {
+      if (totalDetected > 0) {
+        detectBadge.textContent = totalDetected;
+        detectBadge.style.display = 'inline';
+      } else {
+        detectBadge.style.display = 'none';
+      }
+    }
 
+    if (badge) {
+      if (totalDetected > 0) {
+        badge.textContent = totalDetected;
+        badge.style.display = 'inline';
+      } else {
+        badge.style.display = 'none';
+      }
+    }
+
+    if (totalDetected > 0) {
       // 대시보드에 알림 배너 표시 (이미 있으면 업데이트)
       let banner = document.getElementById('archiveAlertBanner');
       if (!banner) {
@@ -11231,7 +11247,7 @@ async function _updateArchiveBadge() {
         banner.style.cssText = 'background:#F5F3FF;border:1px solid #DDD6FE;border-radius:10px;padding:10px 16px;margin-bottom:12px;display:flex;align-items:center;gap:10px;cursor:pointer;transition:all .2s';
         banner.onmouseenter = () => { banner.style.background = '#EDE9FE'; };
         banner.onmouseleave = () => { banner.style.background = '#F5F3FF'; };
-        banner.onclick = () => { switchAdminTab('archive'); setTimeout(() => archiveAutoDetect(), 300); };
+        banner.onclick = () => { dashboardArchiveDetect(); };
         const wrap = document.getElementById('dashboardWrap');
         if (wrap && wrap.firstChild) {
           wrap.insertBefore(banner, wrap.firstChild);
@@ -11246,12 +11262,164 @@ async function _updateArchiveBadge() {
         <i class="fas fa-chevron-right" style="color:#8B5CF6;font-size:.8rem"></i>
       `;
     } else {
-      badge.style.display = 'none';
+      if (badge) badge.style.display = 'none';
       const banner = document.getElementById('archiveAlertBanner');
       if (banner) banner.remove();
     }
   } catch (err) {
     console.warn('[archiveBadge] 감지 실패:', err.message);
+  }
+}
+
+/* ══════════════════════════════════════════════════════════════
+   ★ 대시보드 내 완료감지 + 아카이브 결정 UI
+   ══════════════════════════════════════════════════════════════ */
+async function dashboardArchiveDetect() {
+  const detectWrap = document.getElementById('dashArchiveDetectWrap');
+  if (!detectWrap) return;
+
+  detectWrap.style.display = 'block';
+  detectWrap.innerHTML = '<div style="text-align:center;padding:16px;color:var(--t2)"><i class="fas fa-circle-notch fa-spin"></i> 완료건 감지 중...</div>';
+  detectWrap.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+
+  try {
+    const data = await gasGet({ action: 'archiveDetect' });
+
+    if (data.error) {
+      detectWrap.innerHTML = '<div style="padding:12px;background:#FEF2F2;border:1px solid #FECACA;border-radius:8px;color:#DC2626"><i class="fas fa-exclamation-circle"></i> ' + escHtml(data.error) + '</div>';
+      return;
+    }
+
+    if (!data.campaigns || data.totalTabs === 0) {
+      detectWrap.innerHTML = '<div style="padding:12px;background:#F0FDF4;border:1px solid #BBF7D0;border-radius:8px;color:#16A34A"><i class="fas fa-check-circle"></i> 아카이브 대상이 없습니다. 모든 인덱스가 진행중입니다.</div>';
+      return;
+    }
+
+    // 감지 결과 렌더링 + 전체선택/개별선택 체크박스
+    let html = `<div style="background:#F5F3FF;border:1px solid #DDD6FE;border-radius:10px;padding:14px">
+      <div style="display:flex;align-items:center;gap:8px;margin-bottom:12px;flex-wrap:wrap">
+        <span style="font-weight:700;color:#7C3AED;font-size:.9rem"><i class="fas fa-magic"></i> 감지 결과: ${data.totalTabs}개 탭 (${data.totalCampaigns}개 캠페인)</span>
+        <button onclick="_dashArchiveExecute()" style="margin-left:auto;background:#8B5CF6;color:#fff;border:none;padding:6px 16px;border-radius:6px;font-size:.8rem;cursor:pointer;font-weight:600">
+          <i class="fas fa-archive"></i> 선택 항목 아카이브
+        </button>
+        <button onclick="_dashArchiveSkip()" style="background:#F59E0B;color:#fff;border:none;padding:6px 14px;border-radius:6px;font-size:.8rem;cursor:pointer">
+          <i class="fas fa-forward"></i> 나중에
+        </button>
+        <button onclick="document.getElementById('dashArchiveDetectWrap').style.display='none'" style="background:#E5E7EB;border:none;padding:6px 12px;border-radius:6px;font-size:.8rem;cursor:pointer">
+          닫기
+        </button>
+      </div>
+      <div style="margin-bottom:8px;display:flex;align-items:center;gap:12px">
+        <label style="cursor:pointer;font-size:.78rem;color:#6B7280">
+          <input type="checkbox" id="dashArchiveSelectAll" onchange="_dashArchiveToggleAll(this.checked)" checked> 전체 선택
+        </label>
+        <span style="font-size:.7rem;color:#9CA3AF">체크 해제 = 아카이브하지 않음 (나중에 처리)</span>
+      </div>`;
+
+    data.campaigns.forEach(camp => {
+      html += `<div style="margin-bottom:8px;background:#fff;border-radius:8px;padding:10px 12px;border:1px solid #E5E7EB">
+        <div style="font-weight:600;font-size:.82rem;color:var(--t1);margin-bottom:6px"><i class="fas fa-folder" style="color:#6B7280;margin-right:4px"></i>${escHtml(camp.campaignName)}</div>`;
+      camp.tabs.forEach(t => {
+        const reasonLabel = t.reason === 'closed' ? '마감' :
+                            t.reason === 'force_done' ? '(구)강제완료' :
+                            t.reason === 'fully_completed' ? '리뷰+입금완료' :
+                            t.reason === 'auto_complete' ? '자동감지(리뷰+입금)' :
+                            t.reason === 'completed' ? '리뷰완료' :
+                            t.reason === 'round_closed' ? '차수마감' :
+                            t.reason === 'name_completed' ? '(완)탭명' : t.reason;
+        const reasonColor = t.reason === 'closed' ? '#EF4444' :
+                            t.reason === 'force_done' ? '#F59E0B' :
+                            t.reason === 'fully_completed' ? '#059669' :
+                            t.reason === 'auto_complete' ? '#059669' :
+                            t.reason === 'round_closed' ? '#7C3AED' :
+                            t.reason === 'name_completed' ? '#6366F1' : '#10B981';
+        const roundBadge = t.round
+          ? `<span style="background:#EDE9FE;color:#7C3AED;padding:1px 5px;border-radius:3px;font-size:.65rem;margin-left:2px">${escHtml(t.round)}</span>`
+          : '';
+        const indexBadge = t.inIndex === false
+          ? '<span style="background:#FEF3C7;color:#D97706;padding:1px 4px;border-radius:3px;font-size:.65rem;margin-left:2px">인덱스외</span>'
+          : '';
+        const paidInfo = t.paidCount !== undefined && t.rowCount
+          ? `<span style="font-size:.68rem;color:#6B7280;margin-left:6px">입금${t.paidCount}/${t.rowCount}</span>`
+          : '';
+        html += `<label style="display:flex;align-items:center;gap:6px;padding:4px 0;font-size:.78rem;cursor:pointer;border-bottom:1px solid #F3F4F6">
+          <input type="checkbox" class="dash-archive-cb" data-sheet="${escHtml(camp.sheetId)}" data-tab="${escHtml(t.tabName)}" data-round="${escHtml(t.round||'')}" checked>
+          <span style="flex:1;display:flex;align-items:center;gap:4px">${escHtml(t.tabName)}${roundBadge}${indexBadge}</span>
+          ${paidInfo}
+          <span style="font-size:.72rem;color:#9CA3AF">${(t.rowCount||0).toLocaleString()}행</span>
+          <span style="background:${reasonColor}15;color:${reasonColor};padding:2px 8px;border-radius:4px;font-size:.7rem;font-weight:500">${reasonLabel}</span>
+        </label>`;
+      });
+      html += '</div>';
+    });
+
+    html += '</div>';
+    detectWrap.innerHTML = html;
+  } catch (err) {
+    detectWrap.innerHTML = '<div style="padding:12px;background:#FEF2F2;border:1px solid #FECACA;border-radius:8px;color:#DC2626">감지 실패: ' + escHtml(err.message) + '</div>';
+  }
+}
+
+// ── 대시보드 아카이브: 전체 선택/해제 ──
+function _dashArchiveToggleAll(checked) {
+  document.querySelectorAll('.dash-archive-cb').forEach(cb => { cb.checked = checked; });
+}
+
+// ── 대시보드 아카이브: 나중에 (닫기) ──
+function _dashArchiveSkip() {
+  const wrap = document.getElementById('dashArchiveDetectWrap');
+  if (wrap) wrap.style.display = 'none';
+}
+
+// ── 대시보드 아카이브: 선택 항목 실행 ──
+async function _dashArchiveExecute() {
+  const checkboxes = document.querySelectorAll('.dash-archive-cb:checked');
+  if (checkboxes.length === 0) {
+    alert('아카이브할 항목을 선택해주세요.');
+    return;
+  }
+
+  const tabs = [];
+  checkboxes.forEach(cb => {
+    const item = { sheetId: cb.dataset.sheet, tabName: cb.dataset.tab };
+    if (cb.dataset.round) item.round = cb.dataset.round;
+    tabs.push(item);
+  });
+
+  const totalUnchecked = document.querySelectorAll('.dash-archive-cb:not(:checked)').length;
+  let confirmMsg = `${tabs.length}개 항목을 아카이브합니다.`;
+  if (totalUnchecked > 0) {
+    confirmMsg += `\n\n(${totalUnchecked}개 항목은 선택 해제되어 아카이브하지 않습니다)`;
+  }
+  confirmMsg += '\n\n아카이브하면 대시보드에서 제외되고 인덱스 빌드에서 스킵됩니다.\n계속하시겠습니까?';
+
+  if (!confirm(confirmMsg)) return;
+
+  const detectWrap = document.getElementById('dashArchiveDetectWrap');
+  if (detectWrap) {
+    detectWrap.innerHTML = '<div style="text-align:center;padding:16px;color:var(--t2)"><i class="fas fa-circle-notch fa-spin"></i> 아카이브 실행 중...</div>';
+  }
+
+  try {
+    const data = await gasPost({ action: 'archiveTabs', tabs: tabs, reason: 'dashboard_detect' });
+
+    if (data.error) {
+      alert('아카이브 실패: ' + data.error);
+      if (detectWrap) detectWrap.style.display = 'none';
+      return;
+    }
+
+    const msg = `아카이브 완료!\n\n• ${data.archivedTabs || 0}개 탭 처리\n• ${(data.archivedRows || 0).toLocaleString()}개 행 이동`;
+    alert(msg);
+
+    if (detectWrap) detectWrap.style.display = 'none';
+
+    // 배지 업데이트 + 대시보드 새로고침
+    _updateArchiveBadge();
+    if (typeof loadTabDashboard === 'function') loadTabDashboard();
+  } catch (err) {
+    alert('아카이브 실패: ' + err.message);
+    if (detectWrap) detectWrap.style.display = 'none';
   }
 }
 
