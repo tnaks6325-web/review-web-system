@@ -23,8 +23,8 @@ const corsOptions = {
     if (/^https:\/\/[a-z0-9]+\.review-web-system\.pages\.dev$/.test(origin)) {
       return callback(null, true);
     }
-    // sandbox URL 개발용 허용
-    if (origin.includes('.sandbox.novita.ai')) {
+    // sandbox URL 개발용 허용 (프로덕션에서는 비활성)
+    if (process.env.NODE_ENV !== 'production' && origin.includes('.sandbox.novita.ai')) {
       return callback(null, true);
     }
     callback(new Error(`CORS 차단: ${origin}`));

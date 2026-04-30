@@ -107,7 +107,7 @@ router.post('/check-duplicate', async (req, res, next) => {
 // ═══════════════════════════════════════════════════════════
 // GET /api/viewer/data — 뷰어 데이터 조회 (GAS: getViewerData)
 // ═══════════════════════════════════════════════════════════
-router.get('/viewer-data', async (req, res, next) => {
+router.get('/viewer-data', authMiddleware, async (req, res, next) => {
   try {
     const { sheetId, tabName } = req.query;
     if (!sheetId) return res.json({ error: 'sheetId 필요' });
@@ -359,7 +359,7 @@ router.post('/add-campaign', authMiddleware, async (req, res, next) => {
 // ═══════════════════════════════════════════════════════════
 // GET /api/diag/campaign-list — 캠페인 목록 조회 (GAS: campaignList)
 // ═══════════════════════════════════════════════════════════
-router.get('/campaign-list', async (req, res, next) => {
+router.get('/campaign-list', authMiddleware, async (req, res, next) => {
   try {
     const { rows } = await pool.query(`
       SELECT DISTINCT sheet_id AS "sheetId", campaign_name AS "campaignName", sheet_url AS "sheetUrl"
@@ -375,7 +375,7 @@ router.get('/campaign-list', async (req, res, next) => {
 // ═══════════════════════════════════════════════════════════
 // GET /api/diag/campaign-stats — 캠페인 통계 (GAS: getCampaignStats)
 // ═══════════════════════════════════════════════════════════
-router.get('/campaign-stats', async (req, res, next) => {
+router.get('/campaign-stats', authMiddleware, async (req, res, next) => {
   try {
     const { sheetId, tabName } = req.query;
 
@@ -410,7 +410,7 @@ router.get('/campaign-stats', async (req, res, next) => {
 // GET /api/diag/tab-gid-check — gid↔tab_name 매핑 검증 (임시 진단용)
 // 특정 sheetId의 모든 탭에 대해 DB와 구글시트 실제 매핑을 비교
 // ═══════════════════════════════════════════════════════════
-router.get('/tab-gid-check', async (req, res, next) => {
+router.get('/tab-gid-check', authMiddleware, async (req, res, next) => {
   try {
     const { sheetId, gid } = req.query;
     if (!sheetId) return res.status(400).json({ ok: false, error: 'sheetId required' });
@@ -455,7 +455,7 @@ router.get('/tab-gid-check', async (req, res, next) => {
 // ═══════════════════════════════════════════════════════════
 // GET /api/diag/dashboard-check — 대시보드 API와 동일 쿼리로 gid↔tab_name 검증
 // ═══════════════════════════════════════════════════════════
-router.get('/dashboard-check', async (req, res, next) => {
+router.get('/dashboard-check', authMiddleware, async (req, res, next) => {
   try {
     const { sheetId, gid, tabName } = req.query;
     
@@ -490,7 +490,7 @@ router.get('/dashboard-check', async (req, res, next) => {
 // ═══════════════════════════════════════════════════════════
 // GET /api/diag/dashboard-roundlist — 대시보드에서 roundList가 어떻게 생성되는지 확인
 // ═══════════════════════════════════════════════════════════
-router.get('/dashboard-roundlist', async (req, res, next) => {
+router.get('/dashboard-roundlist', authMiddleware, async (req, res, next) => {
   try {
     const { sheetId } = req.query;
     // 대시보드 API와 동일한 쿼리로 roundDataMap 구성
@@ -549,7 +549,7 @@ router.get('/dashboard-roundlist', async (req, res, next) => {
 // ═══════════════════════════════════════════════════════════
 // GET /api/diag/round-check — review_index의 round 데이터 진단
 // ═══════════════════════════════════════════════════════════
-router.get('/round-check', async (req, res, next) => {
+router.get('/round-check', authMiddleware, async (req, res, next) => {
   try {
     const { sheetId, tabName } = req.query;
     let sql = `
@@ -587,7 +587,7 @@ router.get('/round-check', async (req, res, next) => {
 // ═══════════════════════════════════════════════════════════
 // GET /api/diag/sheet-meta — 구글시트 API에서 실제 탭 메타데이터 조회 (gid 검증용)
 // ═══════════════════════════════════════════════════════════
-router.get('/sheet-meta', async (req, res, next) => {
+router.get('/sheet-meta', authMiddleware, async (req, res, next) => {
   try {
     const { sheetId } = req.query;
     if (!sheetId) return res.status(400).json({ error: 'sheetId 필수' });
@@ -650,7 +650,7 @@ router.get('/sheet-meta', async (req, res, next) => {
   }
 });
 
-router.get('/inaed-list', async (req, res, next) => {
+router.get('/inaed-list', authMiddleware, async (req, res, next) => {
   try {
     const { rows } = await pool.query(`
       SELECT name, phone, phone8, status, income_type AS "incomeType",
@@ -668,7 +668,7 @@ router.get('/inaed-list', async (req, res, next) => {
 // ═══════════════════════════════════════════════════════════
 // GET /api/image/drive-diag — Drive OAuth/SA 진단
 // ═══════════════════════════════════════════════════════════
-router.get('/drive-diag', async (req, res) => {
+router.get('/drive-diag', authMiddleware, async (req, res) => {
   const results = {
     rootFolderId: process.env.DRIVE_ROOT_FOLDER_ID || 'NOT SET',
     authStatus: driveService.getOAuthStatus(),
@@ -1316,7 +1316,7 @@ router.get('/build-history', authMiddleware, async (req, res, next) => {
 // ═══════════════════════════════════════════════════════════
 // GET /api/diag/app-url — 앱 URL 조회 (GAS: getAppUrl)
 // ═══════════════════════════════════════════════════════════
-router.get('/app-url', async (req, res, next) => {
+router.get('/app-url', authMiddleware, async (req, res, next) => {
   try {
     const { rows } = await pool.query(
       "SELECT value FROM app_settings WHERE key = 'APP_URL'"
@@ -1331,7 +1331,7 @@ router.get('/app-url', async (req, res, next) => {
 // ═══════════════════════════════════════════════════════════
 // POST /api/diag/app-url — 앱 URL 저장 (GAS: saveAppUrl)
 // ═══════════════════════════════════════════════════════════
-router.post('/app-url', async (req, res, next) => {
+router.post('/app-url', authMiddleware, async (req, res, next) => {
   try {
     const { url } = req.body;
     if (!url) return res.json({ ok: false, error: 'URL이 필요합니다.' });

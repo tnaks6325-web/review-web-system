@@ -666,8 +666,7 @@ function getAdminSessionRemaining() {
   return h > 0 ? `${h}시간 ${m}분 남음` : `${m}분 남음`;
 }
 
-/* ── GAS URL 설정 모달 (비밀번호 인증) ── */
-const GAS_URL_PW = "rhakdnjdy1!"; // 설정 접근 비밀번호
+/* ── GAS URL 설정 모달 (비밀번호 인증 → 서버 검증) ── */
 
 function openGasUrlModal() {
   // 항상 STEP1(비밀번호)부터 시작
@@ -683,7 +682,7 @@ function openGasUrlModal() {
 function closeGasUrlModal() {
   hide("gasUrlModal");
 }
-function verifyGasUrlPw() {
+async function verifyGasUrlPw() {
   const pw    = document.getElementById("gasUrlPwInput").value;
   const errEl = document.getElementById("gasUrlPwError");
   hide(errEl);
@@ -692,11 +691,19 @@ function verifyGasUrlPw() {
     show(errEl);
     return;
   }
-  if (pw !== GAS_URL_PW) {
-    errEl.textContent = "비밀번호가 틀렸습니다.";
+  // 서버에서 비밀번호 검증 (하드코딩 제거)
+  try {
+    const res = await gasPost({ action: 'adminLoginV2', name: getAdminName() || '설정', pw });
+    if (!res.success) {
+      errEl.textContent = "비밀번호가 틀렸습니다.";
+      show(errEl);
+      document.getElementById("gasUrlPwInput").value = "";
+      document.getElementById("gasUrlPwInput").focus();
+      return;
+    }
+  } catch (e) {
+    errEl.textContent = "서버 연결 실패: " + e.message;
     show(errEl);
-    document.getElementById("gasUrlPwInput").value = "";
-    document.getElementById("gasUrlPwInput").focus();
     return;
   }
   // 비밀번호 확인 성공 → STEP2로 전환
@@ -818,18 +825,14 @@ function _selectGasUrlHistory(idx) {
   }
 }
 
-/** GAS PropertiesService에 URL 저장 (백그라운드, 비동기) */
+/** 서버에 앱 URL 저장 (백그라운드, 비동기) */
 async function _saveAppUrlToGas(url) {
   try {
-    const pw = GAS_URL_PW; // 설정 비밀번호 (기존 상수 그대로 사용)
-    const res = await fetch(`${url}?action=saveAppUrl&url=${encodeURIComponent(url)}&pw=${encodeURIComponent(pw)}`, { redirect: "follow" });
-    if (res.ok) {
-      const json = await res.json();
-      if (json.ok) console.log("[GAS] URL PropertiesService 저장 완료");
-      else console.warn("[GAS] URL 저장 실패:", json.error);
-    }
+    const res = await gasPost({ action: 'saveAppUrl', url });
+    if (res && res.ok) console.log("[API] URL 저장 완료");
+    else console.warn("[API] URL 저장 실패:", res?.error);
   } catch (e) {
-    console.warn("[GAS] URL 저장 오류 (무시):", e.message);
+    console.warn("[API] URL 저장 오류 (무시):", e.message);
   }
 }
 

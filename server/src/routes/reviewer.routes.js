@@ -66,7 +66,7 @@ router.post('/delete', authMiddleware, async (req, res, next) => {
 });
 
 // POST /api/reviewer/profile — 프로필 관리 (GAS: getReviewerProfile/saveSubAccounts/saveIncomeInfo)
-router.post('/profile', async (req, res, next) => {
+router.post('/profile', authMiddleware, async (req, res, next) => {
   try {
     const result = await handleReviewerProfile(req.body);
     res.json(result);
