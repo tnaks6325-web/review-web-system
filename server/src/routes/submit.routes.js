@@ -12,17 +12,56 @@ const { emitReviewSubmit, emitOrderSubmit } = require('../utils/sse');
 const headerCache = new Map();
 const HEADER_CACHE_TTL = 5 * 60 * 1000; // 5분
 
+// 헤더 행 자동 감지용 키워드 (smartBuild _isDataTabRow와 동일 로직)
+const HEADER_DETECT_KEYWORDS = ['번호', '주문자', '수취인', '수취인명', '성함', '이름', '성명', '신청자', '연락처', '전화번호', '아이디', '주소'];
+
+function _isHeaderRow(cells) {
+  let matchCount = 0;
+  for (const kw of HEADER_DETECT_KEYWORDS) {
+    const found = kw === '번호'
+      ? cells.includes(kw)
+      : cells.some(c => c.includes(kw));
+    if (found) {
+      matchCount++;
+      if (matchCount >= 2) return true;
+    }
+  }
+  return false;
+}
+
 async function getCachedHeaders(sheetId, tabName) {
   const key = `${sheetId}||${tabName}`;
   const cached = headerCache.get(key);
   if (cached && Date.now() - cached.ts < HEADER_CACHE_TTL) {
     return cached.headers;
   }
-  const headerValues = await readSheet(sheetId, `'${tabName}'!1:1`);
-  if (headerValues && headerValues[0]) {
-    const headers = headerValues[0].map(h => String(h || '').trim());
-    headerCache.set(key, { headers, ts: Date.now() });
-    return headers;
+
+  // 상위 50행을 읽어서 실제 헤더 행을 동적으로 탐색
+  const allRows = await readSheet(sheetId, `'${tabName}'!1:50`);
+  if (!allRows || allRows.length === 0) return null;
+
+  let headerRow = null;
+  for (let i = 0; i < allRows.length; i++) {
+    const cells = (allRows[i] || []).map(c => String(c || '').trim());
+    if (_isHeaderRow(cells)) {
+      headerRow = cells;
+      logger.info(`[getCachedHeaders] 헤더 발견: ${tabName} → ${i + 1}행 (키워드 매칭)`);
+      break;
+    }
+  }
+
+  if (!headerRow) {
+    // fallback: 1행을 헤더로 사용 (기존 동작)
+    const firstRow = (allRows[0] || []).map(c => String(c || '').trim());
+    if (firstRow.length > 0 && firstRow.some(c => c)) {
+      headerRow = firstRow;
+      logger.warn(`[getCachedHeaders] 헤더 감지 실패 → fallback 1행 사용: ${tabName}`);
+    }
+  }
+
+  if (headerRow) {
+    headerCache.set(key, { headers: headerRow, ts: Date.now() });
+    return headerRow;
   }
   return null;
 }
