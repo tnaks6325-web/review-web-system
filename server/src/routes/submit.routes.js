@@ -152,10 +152,16 @@ router.post('/find-slot', async (req, res, next) => {
 
     const matchName = (profileName || loginName).trim();
 
-    // 탭 전체 데이터 로드
-    const tabData = await getCachedTabData(sheetId, tabName);
+    // 탭 전체 데이터 로드 (Sheets API 실패 시 append 모드로 폴백)
+    let tabData = null;
+    try {
+      tabData = await getCachedTabData(sheetId, tabName);
+    } catch (sheetErr) {
+      logger.warn(`[find-slot] 시트 읽기 실패 → append 모드: ${sheetErr.message}`);
+      return res.json({ ok: true, mode: 'append', reason: 'sheet_read_error' });
+    }
     if (!tabData) {
-      return res.json({ ok: false, error: '시트 데이터를 읽을 수 없습니다.' });
+      return res.json({ ok: true, mode: 'append', reason: 'no_tab_data' });
     }
 
     const { headers, headerRowIdx, dataRows } = tabData;
@@ -201,12 +207,17 @@ router.post('/find-slot', async (req, res, next) => {
       return true;
     }
 
-    // DB에서 이미 잠긴 슬롯 조회
-    const { rows: lockedSlots } = await pool.query(
-      'SELECT row_number FROM slot_locks WHERE sheet_id = $1 AND tab_name = $2 AND is_submitted = TRUE',
-      [sheetId, tabName]
-    );
-    const lockedRowSet = new Set(lockedSlots.map(r => r.row_number));
+    // DB에서 이미 잠긴 슬롯 조회 (테이블 미생성 시 빈 Set)
+    let lockedRowSet = new Set();
+    try {
+      const { rows: lockedSlots } = await pool.query(
+        'SELECT row_number FROM slot_locks WHERE sheet_id = $1 AND tab_name = $2 AND is_submitted = TRUE',
+        [sheetId, tabName]
+      );
+      lockedRowSet = new Set(lockedSlots.map(r => r.row_number));
+    } catch (dbErr) {
+      logger.warn(`[find-slot] slot_locks 조회 실패 (테이블 미생성?): ${dbErr.message}`);
+    }
 
     // ── 1순위: 이름 정확 매칭 ──
     let matchedRow = -1;
