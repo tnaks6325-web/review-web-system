@@ -1677,7 +1677,7 @@ async function submitReview() {
         });
 
         hideLoading();
-        if (result && result.success) {
+        if (result && (result.success || result.ok)) {
           successCount++;
           // 슬롯 상태 표시
           if (isMulti) {
