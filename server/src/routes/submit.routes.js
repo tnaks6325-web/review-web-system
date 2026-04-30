@@ -73,7 +73,8 @@ async function getCachedHeaders(sheetId, tabName) {
   }
 
   // 상위 50행을 읽어서 실제 헤더 행을 동적으로 탐색
-  const allRows = await readSheet(sheetId, `'${tabName}'!1:50`);
+  // ★ 탭 이름에 슬래시(/)가 포함되면 '행번호' 형식이 파싱 실패 → A1 표기법 사용
+  const allRows = await readSheet(sheetId, `'${tabName}'!A1:ZZ50`);
   if (!allRows || allRows.length === 0) return null;
 
   let headerRow = null;
@@ -114,7 +115,8 @@ async function getCachedTabData(sheetId, tabName) {
   }
 
   // 전체 탭 데이터 읽기 (최대 500행)
-  const allRows = await readSheet(sheetId, `'${tabName}'!1:500`);
+  // ★ 탭 이름에 슬래시(/)가 포함되면 '행번호' 형식이 파싱 실패 → A1 표기법 사용
+  const allRows = await readSheet(sheetId, `'${tabName}'!A1:ZZ500`);
   if (!allRows || allRows.length === 0) return null;
 
   // 헤더 행 탐지
