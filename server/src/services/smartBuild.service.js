@@ -20,6 +20,7 @@ const pool = require('../db/pool');
 const { readSheet, getSpreadsheetMeta, batchReadSheet, getSheetModifiedTime } = require('./sheets.service');
 const { computeChecksum } = require('../utils/checksum');
 const { logger } = require('../utils/logger');
+const { throttledCall } = require('../utils/sheetsThrottle');
 
 // ═══════════════════════════════════════════════════════════
 // 상수 및 상태
@@ -435,12 +436,12 @@ async function runSmartBuild() {
       logger.info(`[smartBuild] 아카이브된 탭 ${archivedRows.length}개 스킵 대상 로드`);
     }
 
-    // ── 2단계: Drive API로 변경 시트 감지 ──
+    // ── 2단계: Drive API로 변경 시트 감지 (throttle 적용) ──
     const changedSheetIds = [];
 
     for (const sheetId of sheetIds) {
       try {
-        const modifiedTime = await getSheetModifiedTime(sheetId);
+        const modifiedTime = await throttledCall(() => getSheetModifiedTime(sheetId));
         const cached = _modifiedTimeCache[sheetId];
 
         if (!cached || cached.modifiedTime !== modifiedTime) {
@@ -468,8 +469,8 @@ async function runSmartBuild() {
     // ── 3단계: 변경된 시트별 batchGet + 체크섬 비교 + DB 갱신 ──
     for (const sheetId of changedSheetIds) {
       try {
-        // 시트 메타 조회 (탭 목록)
-        const meta = await getSpreadsheetMeta(sheetId);
+        // 시트 메타 조회 (탭 목록) — throttle 적용
+        const meta = await throttledCall(() => getSpreadsheetMeta(sheetId));
         const spreadsheetTitle = meta._spreadsheetTitle || '';
         const validTabs = meta.filter(s => {
           const title = s.properties.title;
@@ -498,20 +499,21 @@ async function runSmartBuild() {
 
         try {
           if (ranges.length <= BATCH_CHUNK_SIZE) {
-            batchResults = await batchReadSheet(sheetId, ranges);
+            batchResults = await throttledCall(() => batchReadSheet(sheetId, ranges));
           } else {
             for (let i = 0; i < ranges.length; i += BATCH_CHUNK_SIZE) {
-              const chunk = await batchReadSheet(sheetId, ranges.slice(i, i + BATCH_CHUNK_SIZE));
+              const chunkRanges = ranges.slice(i, i + BATCH_CHUNK_SIZE);
+              const chunk = await throttledCall(() => batchReadSheet(sheetId, chunkRanges));
               batchResults.push(...chunk);
             }
           }
         } catch (batchErr) {
-          // batchGet 실패 → 개별 읽기 폴백
+          // batchGet 실패 → 개별 읽기 폴백 (throttle 적용)
           logger.warn(`[smartBuild] batchGet 실패 (${sheetId.substring(0, 15)}), 개별 읽기 폴백: ${batchErr.message}`);
           batchResults = [];
           for (const tab of activeTabs) {
             try {
-              const values = await readSheet(sheetId, `'${tab.properties.title}'!A:Z`);
+              const values = await throttledCall(() => readSheet(sheetId, `'${tab.properties.title}'!A:Z`));
               batchResults.push({ values: values || [] });
             } catch (readErr) {
               batchResults.push({ values: [], error: readErr.message });
