@@ -11785,6 +11785,21 @@ function _toggleDashCol(key, checked) {
 
 // ── 셀값 렌더 헬퍼 (v11.8.4: 인라인 편집 지원) ──
 
+/** 팝업 닫힘 추적 (토글 시 즉시 재열림 방지) */
+const _popupClosedMap = new Map();
+function _removePopupWithTrack(popup) {
+  const key = popup._popupKey;
+  if (key) _popupClosedMap.set(key, Date.now());
+  popup.remove();
+}
+function _popupJustClosed(popupKey) {
+  const t = _popupClosedMap.get(popupKey);
+  if (!t) return false;
+  if (Date.now() - t < 200) return true;
+  _popupClosedMap.delete(popupKey);
+  return false;
+}
+
 /** 인라인 저장 공통 */
 async function _saveTabField(t, fieldMap) {
   try {
