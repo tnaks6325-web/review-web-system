@@ -749,7 +749,11 @@ async function _upsertTabIndex(sheetId, tabName, tabGid, checksum, rows, modifie
             end_date = EXCLUDED.end_date,
             round = EXCLUDED.round,
             phone8 = EXCLUDED.phone8,
-            is_submitted2 = COALESCE(EXCLUDED.is_submitted2, review_index.is_submitted2),
+            is_submitted2 = CASE
+              WHEN EXCLUDED.is_submitted2 IS NOT NULL THEN EXCLUDED.is_submitted2
+              WHEN review_index.is_submitted2 = 'PAID' THEN 'PAID'
+              ELSE review_index.is_submitted2
+            END,
             submit_col2 = COALESCE(EXCLUDED.submit_col2, review_index.submit_col2),
             built_at = NOW()
         `, insertValues);
@@ -916,7 +920,11 @@ function parseTabRows(values, sheetId, tabName, tabGid, campaignTitle) {
 
       // 입금 상태 감지
       const paymentVal = paymentColIdx >= 0 ? String(row[paymentColIdx] || '').trim() : '';
-      const isSubmitted2 = paymentVal ? _isSubmittedValue(paymentVal) ? 'PAID' : null : null;
+      // 입금 상태 감지: 값이 있으면 PAID, 빈칸이면 NONE (미입금)
+      let isSubmitted2 = null;
+      if (paymentColIdx >= 0) {
+        isSubmitted2 = paymentVal && _isSubmittedValue(paymentVal) ? 'PAID' : 'NONE';
+      }
 
       let phone8 = null;
       if (phoneColIdx >= 0) {
