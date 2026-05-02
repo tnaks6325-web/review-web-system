@@ -1446,10 +1446,34 @@ router.get('/payment-check', async (req, res) => {
       LIMIT 10
     `);
 
+    // 5) is_submitted2 값 분포 (어떤 값이 들어있는지 확인)
+    const { rows: valueDist } = await pool.query(`
+      SELECT is_submitted2 AS "value", COUNT(*) AS "count"
+      FROM review_index
+      GROUP BY is_submitted2
+      ORDER BY "count" DESC
+      LIMIT 20
+    `);
+
+    // 6) 헤더에 '입금'이 포함된 탭 목록 (row_json 키 기준)
+    const { rows: tabsWithPaymentHeader } = await pool.query(`
+      SELECT DISTINCT ON (ri.sheet_id, ri.tab_name)
+        ri.tab_name AS "tabName",
+        ri.campaign_name AS "campaignName",
+        ri.submit_col2 AS "paymentHeader",
+        ri.is_submitted2 AS "isSubmitted2Sample"
+      FROM review_index ri
+      WHERE ri.row_json::text LIKE '%입금%'
+      ORDER BY ri.sheet_id, ri.tab_name, ri.row_index
+      LIMIT 20
+    `);
+
     res.json({
       ok: true,
       summary: summary[0],
+      is_submitted2_values: valueDist,
       paymentHeaderDistribution: colDist,
+      tabsWithPaymentInRowJson: tabsWithPaymentHeader,
       tabsWithPayment: byTab,
       recentBuildHeaders: headerSample,
       note: '인덱스 재빌드 후 이 데이터가 갱신됩니다'
