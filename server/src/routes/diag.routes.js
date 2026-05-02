@@ -1461,9 +1461,10 @@ router.get('/payment-check', async (req, res) => {
         ri.tab_name AS "tabName",
         ri.campaign_name AS "campaignName",
         ri.submit_col2 AS "paymentHeader",
-        ri.is_submitted2 AS "isSubmitted2Sample"
+        ri.is_submitted2 AS "isSubmitted2Sample",
+        ARRAY(SELECT jsonb_object_keys(ri.row_json::jsonb)) AS "allHeaders"
       FROM review_index ri
-      WHERE ri.row_json::text LIKE '%입금%'
+      WHERE ri.row_json::text LIKE '%입금%' OR ri.submit_col2 = '결제금액'
       ORDER BY ri.sheet_id, ri.tab_name, ri.row_index
       LIMIT 20
     `);
