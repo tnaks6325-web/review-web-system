@@ -3,6 +3,7 @@ const router = express.Router();
 const { authMiddleware } = require('../middleware/auth.middleware');
 const pool = require('../db/pool');
 const { logger } = require('../utils/logger');
+const { getSpreadsheetMeta } = require('../services/sheets.service');
 
 // ═══════════════════════════════════════════════════════════
 // GET /api/archive/detect — 아카이브 대상 자동 감지 (반자동: 감지만)
@@ -194,7 +195,41 @@ router.get('/detect', authMiddleware, async (req, res, next) => {
       existingKeys.add(key);
     }
 
+    // ★ Google Sheets API로 실시간 gid 조회 → DB의 stale gid 교체
     const campaigns = Array.from(campMap.values());
+    const uniqueSheetIds = [...new Set(campaigns.map(c => c.sheetId))];
+    
+    // 시트별 tabName→gid 실시간 맵 구축
+    const liveGidMap = {}; // { sheetId: { tabName: gid } }
+    await Promise.all(uniqueSheetIds.map(async (sheetId) => {
+      try {
+        const meta = await getSpreadsheetMeta(sheetId);
+        const map = {};
+        for (const s of (meta || [])) {
+          if (s.properties) {
+            map[s.properties.title] = String(s.properties.sheetId);
+          }
+        }
+        liveGidMap[sheetId] = map;
+      } catch (e) {
+        logger.warn(`[archive/detect] sheet meta 조회 실패: ${sheetId.substring(0,15)}... — ${e.message}`);
+        liveGidMap[sheetId] = null; // 실패 시 DB값 유지
+      }
+    }));
+
+    // 각 탭의 tabGid를 실시간 값으로 교체
+    for (const camp of campaigns) {
+      const map = liveGidMap[camp.sheetId];
+      if (!map) continue; // 조회 실패 시 DB값 유지
+      for (const tab of camp.tabs) {
+        const liveGid = map[tab.tabName];
+        if (liveGid) {
+          tab.tabGid = liveGid;
+        }
+        // liveGid가 없으면 (탭 삭제됨) DB값 유지 — 프론트에서 시트 첫 탭으로 이동
+      }
+    }
+
     res.json({
       ok: true,
       totalTabs: rows.length,
