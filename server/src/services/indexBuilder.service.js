@@ -751,10 +751,10 @@ async function _upsertTabIndex(sheetId, tabName, tabGid, checksum, rows, modifie
             phone8 = EXCLUDED.phone8,
             is_submitted2 = CASE
               WHEN EXCLUDED.is_submitted2 IS NOT NULL THEN EXCLUDED.is_submitted2
-              WHEN review_index.is_submitted2 = 'PAID' THEN 'PAID'
-              ELSE review_index.is_submitted2
+              WHEN EXCLUDED.submit_col2 IS NULL AND review_index.is_submitted2 = 'PAID' THEN 'PAID'
+              ELSE COALESCE(EXCLUDED.is_submitted2, 'NONE')
             END,
-            submit_col2 = COALESCE(EXCLUDED.submit_col2, review_index.submit_col2),
+            submit_col2 = EXCLUDED.submit_col2,
             built_at = NOW()
         `, insertValues);
       }
