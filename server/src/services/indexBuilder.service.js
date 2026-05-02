@@ -717,14 +717,15 @@ async function _upsertTabIndex(sheetId, tabName, tabGid, checksum, rows, modifie
         for (const row of batch) {
           newRowIndices.add(row.rowIndex);
           insertPlaceholders.push(
-            `($${paramIdx++},$${paramIdx++},$${paramIdx++},$${paramIdx++},$${paramIdx++},$${paramIdx++},$${paramIdx++},$${paramIdx++},$${paramIdx++},$${paramIdx++},$${paramIdx++},$${paramIdx++},$${paramIdx++},$${paramIdx++},$${paramIdx++})`
+            `($${paramIdx++},$${paramIdx++},$${paramIdx++},$${paramIdx++},$${paramIdx++},$${paramIdx++},$${paramIdx++},$${paramIdx++},$${paramIdx++},$${paramIdx++},$${paramIdx++},$${paramIdx++},$${paramIdx++},$${paramIdx++},$${paramIdx++},$${paramIdx++},$${paramIdx++})`
           );
           insertValues.push(
             row.name, sheetId, row.tabGid, tabName,
             row.campaignName, row.rowIndex, row.isSubmitted,
             row.productUrl, row.productName, row.submitCol,
             JSON.stringify(row.rowJson), row.startDate, row.endDate, row.round,
-            row.phone8 || null
+            row.phone8 || null,
+            row.isSubmitted2 || null, row.submitCol2 || null
           );
         }
 
@@ -732,7 +733,8 @@ async function _upsertTabIndex(sheetId, tabName, tabGid, checksum, rows, modifie
           INSERT INTO review_index
             (reviewer_name, sheet_id, tab_gid, tab_name, campaign_name,
              row_index, is_submitted, product_url, product_name,
-             submit_col, row_json, start_date, end_date, round, phone8)
+             submit_col, row_json, start_date, end_date, round, phone8,
+             is_submitted2, submit_col2)
           VALUES ${insertPlaceholders.join(', ')}
           ON CONFLICT (sheet_id, tab_name, row_index) DO UPDATE SET
             reviewer_name = EXCLUDED.reviewer_name,
@@ -747,6 +749,8 @@ async function _upsertTabIndex(sheetId, tabName, tabGid, checksum, rows, modifie
             end_date = EXCLUDED.end_date,
             round = EXCLUDED.round,
             phone8 = EXCLUDED.phone8,
+            is_submitted2 = COALESCE(EXCLUDED.is_submitted2, review_index.is_submitted2),
+            submit_col2 = COALESCE(EXCLUDED.submit_col2, review_index.submit_col2),
             built_at = NOW()
         `, insertValues);
       }
@@ -890,6 +894,18 @@ function parseTabRows(values, sheetId, tabName, tabGid, campaignTitle) {
     roundKeywords.some(k => h.toLowerCase().includes(k.toLowerCase()))
   );
 
+  // ── 입금열 탐색 (is_submitted2 / submit_col2) ──
+  const PAYMENT_KEYWORDS = ['입금', '입금완료', '입금확인', '입금여부', '결제확인', '결제', '결제완료'];
+  const PAYMENT_EXCLUDE = ['입금명', '입금자', '예금주', '입금자명'];  // 사람이름/입금자 열 제외
+  let paymentColIdx = -1;
+  for (let hi = 0; hi < headers.length && paymentColIdx < 0; hi++) {
+    const hl = headers[hi].toLowerCase();
+    if (PAYMENT_EXCLUDE.some(p => hl.includes(p))) continue;
+    if (PAYMENT_KEYWORDS.some(k => hl.includes(k.toLowerCase()))) {
+      paymentColIdx = hi;
+    }
+  }
+
   return dataRows
     .map((row, i) => {
       const name = String(row[nameColIdx] || '').trim();
@@ -897,6 +913,10 @@ function parseTabRows(values, sheetId, tabName, tabGid, campaignTitle) {
 
       const submitVal = submitColIdx >= 0 ? String(row[submitColIdx] || '').trim() : '';
       const isSubmitted = _isSubmittedValue(submitVal);
+
+      // 입금 상태 감지
+      const paymentVal = paymentColIdx >= 0 ? String(row[paymentColIdx] || '').trim() : '';
+      const isSubmitted2 = paymentVal ? _isSubmittedValue(paymentVal) ? 'PAID' : null : null;
 
       let phone8 = null;
       if (phoneColIdx >= 0) {
@@ -911,7 +931,9 @@ function parseTabRows(values, sheetId, tabName, tabGid, campaignTitle) {
         tabGid,
         rowIndex: headerRowIdx + 1 + i + 1,
         isSubmitted,
+        isSubmitted2,
         submitCol: submitColIdx >= 0 ? headers[submitColIdx] : '',
+        submitCol2: paymentColIdx >= 0 ? headers[paymentColIdx] : '',
         productName: productColIdx >= 0 ? String(row[productColIdx] || '').trim() : '',
         productUrl: urlColIdx >= 0 ? String(row[urlColIdx] || '').trim() : '',
         rowJson: Object.fromEntries(headers.map((h, j) => [h, row[j] !== undefined ? row[j] : ''])),
