@@ -1388,6 +1388,78 @@ router.post('/client-error', async (req, res) => {
 });
 
 // ═══════════════════════════════════════════════════════════
+// GET /api/diag/payment-check — 입금 헤더 감지 진단 (임시)
+// ═══════════════════════════════════════════════════════════
+router.get('/payment-check', async (req, res) => {
+  try {
+    // 1) is_submitted2 상태 요약
+    const { rows: summary } = await pool.query(`
+      SELECT 
+        COUNT(*) AS "total",
+        COUNT(*) FILTER (WHERE is_submitted2 = 'PAID') AS "paidCount",
+        COUNT(*) FILTER (WHERE is_submitted2 IS NOT NULL AND is_submitted2 != 'PAID') AS "otherCount",
+        COUNT(*) FILTER (WHERE is_submitted2 IS NULL) AS "nullCount",
+        COUNT(DISTINCT submit_col2) FILTER (WHERE submit_col2 IS NOT NULL AND submit_col2 != '') AS "uniquePaymentCols"
+      FROM review_index
+    `);
+
+    // 2) submit_col2 (입금 헤더명) 분포
+    const { rows: colDist } = await pool.query(`
+      SELECT submit_col2 AS "paymentHeader", COUNT(*) AS "rowCount"
+      FROM review_index
+      WHERE submit_col2 IS NOT NULL AND submit_col2 != ''
+      GROUP BY submit_col2
+      ORDER BY "rowCount" DESC
+      LIMIT 20
+    `);
+
+    // 3) 탭별 입금 현황 (상위 20개)
+    const { rows: byTab } = await pool.query(`
+      SELECT 
+        ri.tab_name AS "tabName",
+        COALESCE(tc.campaign_name, ri.campaign_name) AS "campaignName",
+        COUNT(*) AS "totalRows",
+        COUNT(*) FILTER (WHERE ri.is_submitted2 = 'PAID') AS "paidRows",
+        MAX(ri.submit_col2) AS "paymentHeader",
+        MAX(ri.built_at) AS "lastBuilt"
+      FROM review_index ri
+      LEFT JOIN tab_configs tc ON ri.sheet_id = tc.sheet_id AND ri.tab_name = tc.tab_name
+      GROUP BY ri.tab_name, ri.sheet_id, tc.campaign_name, ri.campaign_name
+      HAVING COUNT(*) FILTER (WHERE ri.is_submitted2 = 'PAID') > 0
+         OR MAX(ri.submit_col2) IS NOT NULL AND MAX(ri.submit_col2) != ''
+      ORDER BY "paidRows" DESC
+      LIMIT 20
+    `);
+
+    // 4) 최근 빌드된 탭의 헤더 샘플 (row_json에서 키 추출)
+    const { rows: headerSample } = await pool.query(`
+      SELECT DISTINCT ON (ri.sheet_id, ri.tab_name)
+        ri.tab_name AS "tabName",
+        COALESCE(tc.campaign_name, ri.campaign_name) AS "campaignName",
+        ri.submit_col AS "submitHeader",
+        ri.submit_col2 AS "paymentHeader",
+        ARRAY(SELECT jsonb_object_keys(ri.row_json::jsonb)) AS "allHeaders"
+      FROM review_index ri
+      LEFT JOIN tab_configs tc ON ri.sheet_id = tc.sheet_id AND ri.tab_name = tc.tab_name
+      WHERE ri.built_at >= NOW() - INTERVAL '1 hour'
+      ORDER BY ri.sheet_id, ri.tab_name, ri.row_index
+      LIMIT 10
+    `);
+
+    res.json({
+      ok: true,
+      summary: summary[0],
+      paymentHeaderDistribution: colDist,
+      tabsWithPayment: byTab,
+      recentBuildHeaders: headerSample,
+      note: '인덱스 재빌드 후 이 데이터가 갱신됩니다'
+    });
+  } catch (err) {
+    res.json({ ok: false, error: err.message });
+  }
+});
+
+// ═══════════════════════════════════════════════════════════
 // GET /api/diag/events — SSE 실시간 알림 스트림 (관리자 전용)
 // Phase 8: 새 제출/분석완료 알림을 대시보드에 실시간 전달
 // ═══════════════════════════════════════════════════════════
