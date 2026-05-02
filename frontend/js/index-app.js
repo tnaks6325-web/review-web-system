@@ -11131,9 +11131,13 @@ async function archiveAutoDetect() {
         const paidInfo = t.paidCount !== undefined
           ? `<span style="font-size:.68rem;color:#6B7280">입금${t.paidCount}/${t.rowCount||0}</span>`
           : '';
+        const sheetUrl = t.tabGid
+          ? `https://docs.google.com/spreadsheets/d/${camp.sheetId}/edit#gid=${t.tabGid}`
+          : `https://docs.google.com/spreadsheets/d/${camp.sheetId}/edit`;
+        const sheetLink = `<a href="${sheetUrl}" target="_blank" rel="noopener" onclick="event.stopPropagation()" title="시트 열기" style="color:#4285F4;font-size:.72rem;margin-left:2px;text-decoration:none"><i class="fas fa-external-link-alt"></i></a>`;
         html += `<label style="display:flex;align-items:center;gap:6px;padding:3px 0;font-size:.78rem;cursor:pointer">
           <input type="checkbox" class="archive-detect-cb" data-sheet="${escHtml(camp.sheetId)}" data-tab="${escHtml(t.tabName)}" data-round="${escHtml(t.round||'')}" data-in-index="${t.inIndex !== false}" checked>
-          <span style="flex:1">${escHtml(t.tabName)}${roundBadge}${indexBadge}</span>
+          <span style="flex:1">${escHtml(t.tabName)}${sheetLink}${roundBadge}${indexBadge}</span>
           ${paidInfo}
           <span style="font-size:.72rem;color:#9CA3AF">${(t.rowCount||0).toLocaleString()}행</span>
           <span style="background:${reasonColor}15;color:${reasonColor};padding:1px 6px;border-radius:4px;font-size:.68rem">${reasonLabel}</span>

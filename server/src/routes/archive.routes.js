@@ -21,6 +21,7 @@ router.get('/detect', authMiddleware, async (req, res, next) => {
         im.row_count      AS "rowCount",
         im.submitted_count AS "submittedCount",
         COALESCE(paid.paid_count, 0) AS "paidCount",
+        COALESCE(tc.tab_gid, im.tab_gid) AS "tabGid",
         im.built_at       AS "builtAt",
         CASE
           WHEN tc.is_closed = TRUE THEN 'closed'
@@ -56,6 +57,7 @@ router.get('/detect', authMiddleware, async (req, res, next) => {
         0                 AS "rowCount",
         0                 AS "submittedCount",
         0                 AS "paidCount",
+        tc.tab_gid        AS "tabGid",
         NULL              AS "builtAt",
         CASE
           WHEN tc.is_closed = TRUE THEN 'closed'
@@ -74,7 +76,8 @@ router.get('/detect', authMiddleware, async (req, res, next) => {
     // ★ 소스 3: 차수별 마감 감지 (closed_rounds에 값이 있는 탭)
     const { rows: roundClosedRows } = await pool.query(`
       SELECT tc.sheet_id AS "sheetId", tc.tab_name AS "tabName",
-             tc.campaign_name AS "campaignName", tc.closed_rounds AS "closedRounds"
+             tc.campaign_name AS "campaignName", tc.closed_rounds AS "closedRounds",
+             tc.tab_gid AS "tabGid"
       FROM tab_configs tc
       WHERE tc.closed_rounds IS NOT NULL AND tc.closed_rounds != ''
         AND tc.is_closed = FALSE
@@ -88,6 +91,7 @@ router.get('/detect', authMiddleware, async (req, res, next) => {
         ri.sheet_id AS "sheetId",
         ri.tab_name AS "tabName",
         COALESCE(tc.campaign_name, ri.campaign_name) AS "campaignName",
+        COALESCE(tc.tab_gid, im.tab_gid) AS "tabGid",
         ri.round,
         COUNT(*) AS "totalCount",
         COUNT(*) FILTER (WHERE ri.is_submitted = TRUE) AS "submittedCount",
@@ -98,7 +102,7 @@ router.get('/detect', authMiddleware, async (req, res, next) => {
       WHERE im.status = 'active'
         AND (tc.is_closed IS NULL OR tc.is_closed = FALSE)
         AND ri.round IS NOT NULL AND ri.round != ''
-      GROUP BY ri.sheet_id, ri.tab_name, COALESCE(tc.campaign_name, ri.campaign_name), ri.round
+      GROUP BY ri.sheet_id, ri.tab_name, COALESCE(tc.campaign_name, ri.campaign_name), COALESCE(tc.tab_gid, im.tab_gid), ri.round
       HAVING
         COUNT(*) > 0
         AND COUNT(*) = COUNT(*) FILTER (WHERE ri.is_submitted = TRUE)
@@ -120,6 +124,7 @@ router.get('/detect', authMiddleware, async (req, res, next) => {
         rowCount: parseInt(r.rowCount) || 0,
         submittedCount: parseInt(r.submittedCount) || 0,
         paidCount: parseInt(r.paidCount) || 0,
+        tabGid: r.tabGid || null,
         reason: r.reason,
         builtAt: r.builtAt,
         inIndex: r.inIndex,
@@ -144,6 +149,7 @@ router.get('/detect', authMiddleware, async (req, res, next) => {
           tabName: rc.tabName,
           rowCount: 0,
           submittedCount: 0,
+          tabGid: rc.tabGid || null,
           reason: 'round_closed',
           builtAt: null,
           inIndex: true,
@@ -179,6 +185,7 @@ router.get('/detect', authMiddleware, async (req, res, next) => {
         rowCount: parseInt(ad.totalCount) || 0,
         submittedCount: parseInt(ad.submittedCount) || 0,
         paidCount: parseInt(ad.paidCount) || 0,
+        tabGid: ad.tabGid || null,
         reason: 'auto_complete',  // 리뷰+입금 모두 완료 자동감지
         builtAt: null,
         inIndex: true,
