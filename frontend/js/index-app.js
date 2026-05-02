@@ -11134,10 +11134,18 @@ async function archiveAutoDetect() {
         const sheetUrl = t.tabGid
           ? `https://docs.google.com/spreadsheets/d/${camp.sheetId}/edit#gid=${t.tabGid}`
           : `https://docs.google.com/spreadsheets/d/${camp.sheetId}/edit`;
-        const sheetLink = `<a href="${sheetUrl}" target="_blank" rel="noopener" onclick="event.stopPropagation()" title="시트 열기" style="color:#4285F4;font-size:.72rem;margin-left:2px;text-decoration:none"><i class="fas fa-external-link-alt"></i></a>`;
+        const sheetLink = t.deleted
+          ? `<span title="탭 삭제됨" style="color:#9CA3AF;font-size:.72rem;margin-left:2px"><i class="fas fa-unlink"></i></span>`
+          : `<a href="${sheetUrl}" target="_blank" rel="noopener" onclick="event.stopPropagation()" title="${t.liveTabName ? '현재 탭명: '+t.liveTabName : '시트 열기'}" style="color:#4285F4;font-size:.72rem;margin-left:2px;text-decoration:none"><i class="fas fa-external-link-alt"></i></a>`;
+        const renamedBadge = t.liveTabName
+          ? `<span style="background:#DBEAFE;color:#1D4ED8;padding:1px 4px;border-radius:3px;font-size:.62rem;margin-left:2px" title="현재: ${escHtml(t.liveTabName)}">이름변경</span>`
+          : '';
+        const deletedBadge = t.deleted
+          ? `<span style="background:#FEE2E2;color:#DC2626;padding:1px 4px;border-radius:3px;font-size:.62rem;margin-left:2px">삭제됨</span>`
+          : '';
         html += `<label style="display:flex;align-items:center;gap:6px;padding:3px 0;font-size:.78rem;cursor:pointer">
           <input type="checkbox" class="archive-detect-cb" data-sheet="${escHtml(camp.sheetId)}" data-tab="${escHtml(t.tabName)}" data-round="${escHtml(t.round||'')}" data-in-index="${t.inIndex !== false}" checked>
-          <span style="flex:1">${escHtml(t.tabName)}${sheetLink}${roundBadge}${indexBadge}</span>
+          <span style="flex:1">${escHtml(t.tabName)}${sheetLink}${renamedBadge}${deletedBadge}${roundBadge}${indexBadge}</span>
           ${paidInfo}
           <span style="font-size:.72rem;color:#9CA3AF">${(t.rowCount||0).toLocaleString()}행</span>
           <span style="background:${reasonColor}15;color:${reasonColor};padding:1px 6px;border-radius:4px;font-size:.68rem">${reasonLabel}</span>
@@ -11349,10 +11357,18 @@ async function dashboardArchiveDetect() {
         const sheetUrl2 = t.tabGid
           ? `https://docs.google.com/spreadsheets/d/${camp.sheetId}/edit#gid=${t.tabGid}`
           : `https://docs.google.com/spreadsheets/d/${camp.sheetId}/edit`;
-        const sheetLink2 = `<a href="${sheetUrl2}" target="_blank" rel="noopener" onclick="event.stopPropagation()" title="시트 열기" style="color:#4285F4;font-size:.72rem;margin-left:2px;text-decoration:none"><i class="fas fa-external-link-alt"></i></a>`;
+        const sheetLink2 = t.deleted
+          ? `<span title="탭 삭제됨" style="color:#9CA3AF;font-size:.72rem;margin-left:2px"><i class="fas fa-unlink"></i></span>`
+          : `<a href="${sheetUrl2}" target="_blank" rel="noopener" onclick="event.stopPropagation()" title="${t.liveTabName ? '현재 탭명: '+t.liveTabName : '시트 열기'}" style="color:#4285F4;font-size:.72rem;margin-left:2px;text-decoration:none"><i class="fas fa-external-link-alt"></i></a>`;
+        const renamedBadge2 = t.liveTabName
+          ? `<span style="background:#DBEAFE;color:#1D4ED8;padding:1px 4px;border-radius:3px;font-size:.62rem;margin-left:2px" title="현재: ${escHtml(t.liveTabName)}">이름변경</span>`
+          : '';
+        const deletedBadge2 = t.deleted
+          ? `<span style="background:#FEE2E2;color:#DC2626;padding:1px 4px;border-radius:3px;font-size:.62rem;margin-left:2px">삭제됨</span>`
+          : '';
         html += `<label style="display:flex;align-items:center;gap:6px;padding:4px 0;font-size:.78rem;cursor:pointer;border-bottom:1px solid #F3F4F6">
           <input type="checkbox" class="dash-archive-cb" data-sheet="${escHtml(camp.sheetId)}" data-tab="${escHtml(t.tabName)}" data-round="${escHtml(t.round||'')}" checked>
-          <span style="flex:1;display:flex;align-items:center;gap:4px">${escHtml(t.tabName)}${sheetLink2}${roundBadge}${indexBadge}</span>
+          <span style="flex:1;display:flex;align-items:center;gap:4px">${escHtml(t.tabName)}${sheetLink2}${renamedBadge2}${deletedBadge2}${roundBadge}${indexBadge}</span>
           ${paidInfo}
           <span style="font-size:.72rem;color:#9CA3AF">${(t.rowCount||0).toLocaleString()}행</span>
           <span style="background:${reasonColor}15;color:${reasonColor};padding:2px 8px;border-radius:4px;font-size:.7rem;font-weight:500">${reasonLabel}</span>

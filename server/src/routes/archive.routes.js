@@ -218,15 +218,36 @@ router.get('/detect', authMiddleware, async (req, res, next) => {
     }));
 
     // 각 탭의 tabGid를 실시간 값으로 교체
+    // 전략: 1) tabName으로 매칭 → 2) DB gid가 시트에 존재하면 유지 → 3) 없으면 null
     for (const camp of campaigns) {
       const map = liveGidMap[camp.sheetId];
       if (!map) continue; // 조회 실패 시 DB값 유지
+
+      // gid→tabName 역방향 맵 구축 (이름 변경 대응)
+      const gidToName = {};
+      for (const [name, gid] of Object.entries(map)) {
+        gidToName[gid] = name;
+      }
+      // 유효한 gid 집합
+      const validGids = new Set(Object.values(map));
+
       for (const tab of camp.tabs) {
+        // 1) tabName 정확 매칭 → 최우선
         const liveGid = map[tab.tabName];
         if (liveGid) {
           tab.tabGid = liveGid;
+          continue;
         }
-        // liveGid가 없으면 (탭 삭제됨) DB값 유지 — 프론트에서 시트 첫 탭으로 이동
+        // 2) DB gid가 시트에 여전히 존재 → gid 유효, 탭 이름만 변경됨
+        const dbGidStr = tab.tabGid ? String(tab.tabGid) : null;
+        if (dbGidStr && validGids.has(dbGidStr)) {
+          // gid는 유효 — 실제 탭 이름을 표시용으로 추가
+          tab.liveTabName = gidToName[dbGidStr] || null;
+          continue;
+        }
+        // 3) 탭이 시트에서 완전히 삭제됨 → gid 무효화
+        tab.tabGid = null;
+        tab.deleted = true;
       }
     }
 
