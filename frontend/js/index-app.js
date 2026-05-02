@@ -2622,8 +2622,9 @@ function _parseStartDate(sd) {
 /**
  * ★ v11.2: 탭 URL 구성 헬퍼
  * sheetUrl(또는 sheetId)에 tabGid를 항상 반영하여 정확한 탭 URL을 반환한다.
- * 새 창에서 열 때 #gid=만으로는 무시될 수 있으므로 ?gid=도 함께 추가
- * 예: https://docs.google.com/spreadsheets/d/{sheetId}/edit?gid={tabGid}#gid={tabGid}
+ * Google Sheets는 edit 모드에서 마지막 본 탭으로 자동전환하므로
+ * &range=A1을 추가하여 해당 탭에 머물도록 강제한다.
+ * 예: https://docs.google.com/spreadsheets/d/{sheetId}/edit?gid={tabGid}&range=A1#gid={tabGid}
  */
 function _buildTabUrl(sheetUrl, sheetId, tabGid) {
   // 기본 시트 URL 구성
@@ -2631,9 +2632,9 @@ function _buildTabUrl(sheetUrl, sheetId, tabGid) {
     ? sheetUrl.split('#')[0].split('?')[0]   // 기존 fragment/query 제거
     : (sheetId ? `https://docs.google.com/spreadsheets/d/${sheetId}/edit` : '');
   if (!baseUrl) return '';
-  // tabGid가 있으면 ?gid= + #gid= 모두 추가 (새 창 열기 대응)
+  // tabGid가 있으면 ?gid=&range=A1#gid= 추가 (탭 자동전환 방지)
   if (tabGid) {
-    baseUrl += `?gid=${tabGid}#gid=${tabGid}`;
+    baseUrl += `?gid=${tabGid}&range=A1#gid=${tabGid}`;
   }
   return baseUrl;
 }
@@ -11133,7 +11134,7 @@ async function archiveAutoDetect() {
           ? `<span style="font-size:.68rem;color:#6B7280">입금${t.paidCount}/${t.rowCount||0}</span>`
           : '';
         const sheetUrl = t.tabGid
-          ? `https://docs.google.com/spreadsheets/d/${camp.sheetId}/edit?gid=${t.tabGid}#gid=${t.tabGid}`
+          ? `https://docs.google.com/spreadsheets/d/${camp.sheetId}/edit?gid=${t.tabGid}&range=A1#gid=${t.tabGid}`
           : `https://docs.google.com/spreadsheets/d/${camp.sheetId}/edit`;
         const sheetLink = t.deleted
           ? `<span title="탭 삭제됨" style="color:#9CA3AF;font-size:.72rem;margin-left:2px"><i class="fas fa-unlink"></i></span>`
@@ -11356,7 +11357,7 @@ async function dashboardArchiveDetect() {
           ? `<span style="font-size:.68rem;color:#6B7280;margin-left:6px">입금${t.paidCount}/${t.rowCount}</span>`
           : '';
         const sheetUrl2 = t.tabGid
-          ? `https://docs.google.com/spreadsheets/d/${camp.sheetId}/edit?gid=${t.tabGid}#gid=${t.tabGid}`
+          ? `https://docs.google.com/spreadsheets/d/${camp.sheetId}/edit?gid=${t.tabGid}&range=A1#gid=${t.tabGid}`
           : `https://docs.google.com/spreadsheets/d/${camp.sheetId}/edit`;
         const sheetLink2 = t.deleted
           ? `<span title="탭 삭제됨" style="color:#9CA3AF;font-size:.72rem;margin-left:2px"><i class="fas fa-unlink"></i></span>`
