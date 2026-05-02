@@ -2622,21 +2622,39 @@ function _parseStartDate(sd) {
 /**
  * ★ v11.2: 탭 URL 구성 헬퍼
  * sheetUrl(또는 sheetId)에 tabGid를 항상 반영하여 정확한 탭 URL을 반환한다.
- * Google Sheets는 edit 모드에서 마지막 본 탭으로 자동전환하므로
- * &range=A1을 추가하여 해당 탭에 머물도록 강제한다.
- * 예: https://docs.google.com/spreadsheets/d/{sheetId}/edit?gid={tabGid}&range=A1#gid={tabGid}
+ * ⚠️ Google Sheets /edit 모드는 서버 세션에서 마지막 본 탭을 강제 복원함
+ *    → ?gid= / #gid= / &range=A1 모두 우회 불가 (Google 서버 측 동작)
+ *    → 링크에는 gid를 포함하되, 클릭 시 탭 이름 클립보드 복사로 UX 보완
  */
 function _buildTabUrl(sheetUrl, sheetId, tabGid) {
-  // 기본 시트 URL 구성
   let baseUrl = sheetUrl
-    ? sheetUrl.split('#')[0].split('?')[0]   // 기존 fragment/query 제거
+    ? sheetUrl.split('#')[0].split('?')[0]
     : (sheetId ? `https://docs.google.com/spreadsheets/d/${sheetId}/edit` : '');
   if (!baseUrl) return '';
-  // tabGid가 있으면 ?gid=&range=A1#gid= 추가 (탭 자동전환 방지)
   if (tabGid) {
-    baseUrl += `?gid=${tabGid}&range=A1#gid=${tabGid}`;
+    baseUrl += `#gid=${tabGid}`;
   }
   return baseUrl;
+}
+
+/**
+ * ★ 시트 탭 열기 헬퍼 — 탭 이름 클립보드 복사 + 시트 열기 + 토스트 안내
+ * Google Sheets /edit 모드가 gid 무시하고 마지막 본 탭으로 전환하므로
+ * 사용자가 시트 하단에서 올바른 탭을 빠르게 찾을 수 있도록 탭 이름을 복사한다.
+ */
+function _openSheetTab(e, sheetUrl, tabName) {
+  e.preventDefault();
+  e.stopPropagation();
+  // 1) 탭 이름 클립보드 복사
+  if (navigator.clipboard && tabName) {
+    navigator.clipboard.writeText(tabName).catch(() => {});
+  }
+  // 2) 시트 열기
+  window.open(sheetUrl, '_blank', 'noopener');
+  // 3) 토스트 안내
+  if (typeof showToast === 'function') {
+    showToast(`📋 "${tabName}" 복사됨 — 시트 하단에서 탭을 찾아주세요`, 'info');
+  }
 }
 
 function _calcOverdueDays(sd) {
@@ -11134,11 +11152,11 @@ async function archiveAutoDetect() {
           ? `<span style="font-size:.68rem;color:#6B7280">입금${t.paidCount}/${t.rowCount||0}</span>`
           : '';
         const sheetUrl = t.tabGid
-          ? `https://docs.google.com/spreadsheets/d/${camp.sheetId}/edit?gid=${t.tabGid}&range=A1#gid=${t.tabGid}`
+          ? `https://docs.google.com/spreadsheets/d/${camp.sheetId}/edit#gid=${t.tabGid}`
           : `https://docs.google.com/spreadsheets/d/${camp.sheetId}/edit`;
         const sheetLink = t.deleted
           ? `<span title="탭 삭제됨" style="color:#9CA3AF;font-size:.72rem;margin-left:2px"><i class="fas fa-unlink"></i></span>`
-          : `<a href="${sheetUrl}" target="_blank" rel="noopener" onclick="event.stopPropagation()" title="${t.liveTabName ? '현재 탭명: '+t.liveTabName : '시트 열기'}" style="color:#4285F4;font-size:.72rem;margin-left:2px;text-decoration:none"><i class="fas fa-external-link-alt"></i></a>`;
+          : `<a href="${sheetUrl}" onclick="_openSheetTab(event,'${sheetUrl}','${escHtml(t.tabName).replace(/'/g,"\\'")}')" title="${t.liveTabName ? '현재: '+escHtml(t.liveTabName) : '시트 열기 (탭명 복사됨)'}" style="color:#4285F4;font-size:.72rem;margin-left:2px;text-decoration:none;cursor:pointer"><i class="fas fa-external-link-alt"></i></a>`;
         const renamedBadge = t.liveTabName
           ? `<span style="background:#DBEAFE;color:#1D4ED8;padding:1px 4px;border-radius:3px;font-size:.62rem;margin-left:2px" title="현재: ${escHtml(t.liveTabName)}">이름변경</span>`
           : '';
@@ -11357,11 +11375,11 @@ async function dashboardArchiveDetect() {
           ? `<span style="font-size:.68rem;color:#6B7280;margin-left:6px">입금${t.paidCount}/${t.rowCount}</span>`
           : '';
         const sheetUrl2 = t.tabGid
-          ? `https://docs.google.com/spreadsheets/d/${camp.sheetId}/edit?gid=${t.tabGid}&range=A1#gid=${t.tabGid}`
+          ? `https://docs.google.com/spreadsheets/d/${camp.sheetId}/edit#gid=${t.tabGid}`
           : `https://docs.google.com/spreadsheets/d/${camp.sheetId}/edit`;
         const sheetLink2 = t.deleted
           ? `<span title="탭 삭제됨" style="color:#9CA3AF;font-size:.72rem;margin-left:2px"><i class="fas fa-unlink"></i></span>`
-          : `<a href="${sheetUrl2}" target="_blank" rel="noopener" onclick="event.stopPropagation()" title="${t.liveTabName ? '현재 탭명: '+t.liveTabName : '시트 열기'}" style="color:#4285F4;font-size:.72rem;margin-left:2px;text-decoration:none"><i class="fas fa-external-link-alt"></i></a>`;
+          : `<a href="${sheetUrl2}" onclick="_openSheetTab(event,'${sheetUrl2}','${escHtml(t.tabName).replace(/'/g,"\\'")}')" title="${t.liveTabName ? '현재: '+escHtml(t.liveTabName) : '시트 열기 (탭명 복사됨)'}" style="color:#4285F4;font-size:.72rem;margin-left:2px;text-decoration:none;cursor:pointer"><i class="fas fa-external-link-alt"></i></a>`;
         const renamedBadge2 = t.liveTabName
           ? `<span style="background:#DBEAFE;color:#1D4ED8;padding:1px 4px;border-radius:3px;font-size:.62rem;margin-left:2px" title="현재: ${escHtml(t.liveTabName)}">이름변경</span>`
           : '';
