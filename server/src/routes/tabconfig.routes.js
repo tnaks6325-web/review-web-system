@@ -1314,4 +1314,43 @@ router.post('/clean-archived-orphans', authMiddleware, async (req, res, next) =>
   }
 });
 
+// ═══════════════════════════════════════════════════════════
+// GET /api/tab/col-prefs — 캠페인탭 관리 컬럼 표시/순서 설정 조회 (전역 공유)
+// ═══════════════════════════════════════════════════════════
+router.get('/col-prefs', authMiddleware, async (req, res, next) => {
+  try {
+    const { rows } = await pool.query(
+      "SELECT value FROM app_settings WHERE key = 'tabDash_colPrefs'"
+    );
+    const prefs = rows[0]?.value ? JSON.parse(rows[0].value) : null;
+    res.json({ ok: true, prefs });
+  } catch (err) {
+    next(err);
+  }
+});
+
+// ═══════════════════════════════════════════════════════════
+// POST /api/tab/col-prefs — 캠페인탭 관리 컬럼 표시/순서 설정 저장 (전역 공유)
+// body: { prefs: { key: { show: bool, order: number }, ... } }
+// ═══════════════════════════════════════════════════════════
+router.post('/col-prefs', authMiddleware, async (req, res, next) => {
+  try {
+    const { prefs } = req.body;
+    if (!prefs || typeof prefs !== 'object') {
+      return res.status(400).json({ error: '컬럼 설정(prefs)이 필요합니다.' });
+    }
+    const value = JSON.stringify(prefs);
+    await pool.query(
+      `INSERT INTO app_settings (key, value, updated_at)
+       VALUES ('tabDash_colPrefs', $1, NOW())
+       ON CONFLICT (key) DO UPDATE SET value = $1, updated_at = NOW()`,
+      [value]
+    );
+    logger.info(`[col-prefs] 컬럼 설정 저장 by ${req.admin?.name || 'unknown'}: ${Object.keys(prefs).length}개 컬럼`);
+    res.json({ ok: true });
+  } catch (err) {
+    next(err);
+  }
+});
+
 module.exports = router;

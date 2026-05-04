@@ -11844,31 +11844,55 @@ const _TAB_DASH_COLS = [
   { key:"updated_at",       label:"갱신일",    cat:"sys",   show:true,  align:"left" },
 ];
 
-// 로컬 저장된 컬럼 표시/순서 설정 로드
-(function _loadColPrefs() {
+// ★ 서버 기반 컬럼 표시/순서 설정 — 모든 관리자에게 동일하게 적용
+// 초기 로드: localStorage 캐시 → 서버에서 최신값 비동기 적용
+let _colPrefsLoaded = false;
+(function _loadColPrefsFromCache() {
+  // 빠른 렌더를 위해 localStorage 캐시를 먼저 적용
   try {
     const saved = localStorage.getItem("tabDash_colPrefs");
-    if (saved) {
-      const prefs = JSON.parse(saved);
-      // v11.8.3+ 형식: { key: { show, order } } 또는 레거시: { key: bool }
-      const isNew = Object.values(prefs).some(v => typeof v === 'object' && v !== null);
-      if (isNew) {
-        _TAB_DASH_COLS.forEach(c => {
-          if (prefs[c.key]) { c.show = prefs[c.key].show; c._order = prefs[c.key].order; }
-        });
-        _TAB_DASH_COLS.sort((a, b) => (a._order ?? 999) - (b._order ?? 999));
-        _TAB_DASH_COLS.forEach(c => delete c._order);
-      } else {
-        _TAB_DASH_COLS.forEach(c => { if (prefs[c.key] !== undefined) c.show = prefs[c.key]; });
-      }
-    }
+    if (saved) { _applyColPrefs(JSON.parse(saved)); }
   } catch(_){}
 })();
 
-function _saveColPrefs() {
+// 서버에서 컬럼 설정 비동기 로드 (loadTabDashboard에서 호출)
+async function _loadColPrefsFromServer() {
+  try {
+    const data = await gasGet({ action: 'getColPrefs' });
+    if (data.ok && data.prefs) {
+      _applyColPrefs(data.prefs);
+      // localStorage에 캐시 갱신
+      try { localStorage.setItem("tabDash_colPrefs", JSON.stringify(data.prefs)); } catch(_){}
+      _colPrefsLoaded = true;
+      return true; // 변경 있음 → 리렌더 필요
+    }
+  } catch(e) { console.warn('[colPrefs] 서버 로드 실패, 캐시 사용:', e.message); }
+  return false;
+}
+
+function _applyColPrefs(prefs) {
+  if (!prefs || typeof prefs !== 'object') return;
+  const isNew = Object.values(prefs).some(v => typeof v === 'object' && v !== null);
+  if (isNew) {
+    _TAB_DASH_COLS.forEach(c => {
+      if (prefs[c.key]) { c.show = prefs[c.key].show; c._order = prefs[c.key].order; }
+    });
+    _TAB_DASH_COLS.sort((a, b) => (a._order ?? 999) - (b._order ?? 999));
+    _TAB_DASH_COLS.forEach(c => delete c._order);
+  } else {
+    _TAB_DASH_COLS.forEach(c => { if (prefs[c.key] !== undefined) c.show = prefs[c.key]; });
+  }
+}
+
+async function _saveColPrefs() {
   const prefs = {};
   _TAB_DASH_COLS.forEach((c, i) => prefs[c.key] = { show: c.show, order: i });
-  localStorage.setItem("tabDash_colPrefs", JSON.stringify(prefs));
+  // localStorage 캐시도 갱신
+  try { localStorage.setItem("tabDash_colPrefs", JSON.stringify(prefs)); } catch(_){}
+  // 서버에 저장 (전역 공유)
+  try {
+    await gasPost({ action: 'saveColPrefs', prefs });
+  } catch(e) { console.warn('[colPrefs] 서버 저장 실패:', e.message); }
 }
 
 // [v11.8.3] 카드뷰 제거 — 테이블뷰 고정
@@ -11933,7 +11957,11 @@ async function loadTabDashboard() {
   if (wrap) wrap.innerHTML = '<div style="padding:12px;color:var(--t3)"><i class="fas fa-spinner fa-spin"></i> 로딩중...</div>';
 
   try {
-    const res = await gasGet({ action: "getTabDashboard" });
+    // ★ 서버 컬럼 설정 + 대시보드 데이터 병렬 로드
+    const [colChanged, res] = await Promise.all([
+      _loadColPrefsFromServer(),
+      gasGet({ action: "getTabDashboard" }),
+    ]);
     if (res.error) { showToast(res.error, "error"); return; }
     _tabDashData = res;
 
