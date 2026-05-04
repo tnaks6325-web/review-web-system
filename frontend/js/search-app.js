@@ -5857,7 +5857,7 @@ async function submitOrderForm() {
         } catch(upErr) { console.warn(`[이미지 업로드 ${i+1}] 오류 (제출은 완료):`, upErr.message); }
       }
     } catch(err) {
-      showToast(`❌ ${i+1}번째 주문 제출 실패: ${err.message}`, "error");
+      showCenterAlert(`❌ ${i+1}번째 주문 제출 실패: ${err.message}`);
       console.error(`[제출 ${i+1}] 오류:`, err);
     }
   }
@@ -8161,6 +8161,27 @@ function showToast(msg, type="info", duration=3500) {
   t.innerHTML = `<i class="fas ${icons[type]||"fa-circle-info"}"></i>${escHtml(msg)}`;
   c.appendChild(t);
   setTimeout(() => { t.style.transition="opacity .3s"; t.style.opacity="0"; setTimeout(()=>t.remove(),300); }, duration);
+}
+
+/** ★ 화면 중앙 팝업 알림 (에러/안내용) — 토스트 대신 화면 정중앙에 표시 */
+function showCenterAlert(msg, duration=4000) {
+  // 기존 팝업 제거
+  const old = document.getElementById("_centerAlertOverlay");
+  if (old) old.remove();
+
+  const overlay = document.createElement("div");
+  overlay.id = "_centerAlertOverlay";
+  overlay.style.cssText = "position:fixed;inset:0;z-index:99999;display:flex;align-items:center;justify-content:center;background:rgba(0,0,0,.35);padding:20px;animation:fadeIn .2s";
+  overlay.innerHTML = `<div style="background:#fff;border-radius:14px;padding:24px 28px;max-width:320px;width:100%;text-align:center;box-shadow:0 8px 32px rgba(0,0,0,.18)">
+    <div style="font-size:.95rem;font-weight:600;color:#DC2626;line-height:1.5;word-break:keep-all">${msg}</div>
+    <button onclick="this.closest('#_centerAlertOverlay').remove()" style="margin-top:18px;padding:10px 32px;border:none;border-radius:8px;background:#DC2626;color:#fff;font-size:.9rem;font-weight:600;cursor:pointer">확인</button>
+  </div>`;
+  document.body.appendChild(overlay);
+
+  // 자동 닫기
+  if (duration > 0) {
+    setTimeout(() => { if (overlay.parentNode) overlay.remove(); }, duration);
+  }
 }
 
 /* ══════════════════════════════════════════════
