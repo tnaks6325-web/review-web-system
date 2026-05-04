@@ -51,8 +51,14 @@ async function processQueue(batchSize = 10) {
 
     logger.info(`[syncQueue] ${items.length}건 처리 시작`);
 
-    for (const item of items) {
+    for (let i = 0; i < items.length; i++) {
+      const item = items[i];
       processed++;
+
+      // ★ Sheets API quota 초과 방지: 항목 간 2초 딜레이
+      if (i > 0) {
+        await new Promise(r => setTimeout(r, 2000));
+      }
 
       // processing 상태로 변경
       await pool.query(
@@ -73,7 +79,9 @@ async function processQueue(batchSize = 10) {
 
       } catch (err) {
         const newAttempts = (item.attempts || 0) + 1;
-        const newStatus = newAttempts >= item.max_retry ? 'failed' : 'pending';
+        const isQuotaError = err.message && err.message.includes('Quota exceeded');
+        // quota 에러 시 재시도 기회 보존 (max_retry를 초과하지 않도록)
+        const newStatus = (newAttempts >= item.max_retry && !isQuotaError) ? 'failed' : 'pending';
 
         await pool.query(
           `UPDATE sync_queue SET status = $1, error_msg = $2, processed_at = NOW() WHERE id = $3`,

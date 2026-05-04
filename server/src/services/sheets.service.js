@@ -195,6 +195,7 @@ async function writeSheet(spreadsheetId, range, values) {
 
 /**
  * GID 기반 시트 쓰기 (슬래시 포함 탭 이름 우회)
+ * ★ 행 수 부족 시 자동으로 행을 추가하여 GridCoordinate 오류 방지
  */
 async function _writeSheetByGridData(spreadsheetId, range, values) {
   const tabMatch = range.match(/^'([^']*(?:''[^']*)*)'!/);
@@ -204,16 +205,20 @@ async function _writeSheetByGridData(spreadsheetId, range, values) {
   const cellRange = range.replace(/^'[^']*(?:''[^']*)*'!/, '');
   const { startRow, startCol } = _parseA1Range(cellRange);
 
-  // 메타에서 GID 찾기
+  // 메타에서 GID + gridProperties 찾기
   const meta = await sheets.spreadsheets.get({
     spreadsheetId,
     includeGridData: false,
-    fields: 'sheets(properties(sheetId,title))',
+    fields: 'sheets(properties(sheetId,title,gridProperties))',
   });
   const targetSheet = (meta.data.sheets || []).find(s => s.properties.title === tabName);
   if (!targetSheet) throw new Error(`시트를 찾을 수 없습니다: ${tabName}`);
 
   const sheetId = targetSheet.properties.sheetId;
+  const currentRowCount = targetSheet.properties.gridProperties?.rowCount || 0;
+
+  // 필요한 최대 행 수 계산 (startRow + values 행 수)
+  const requiredRows = startRow + values.length - 1;
 
   // values를 CellData 형식으로 변환
   const rows = values.map(rowValues => ({
@@ -222,21 +227,34 @@ async function _writeSheetByGridData(spreadsheetId, range, values) {
     })),
   }));
 
+  // 요청 배열 구성: 행 부족 시 appendDimension으로 행 추가
+  const requests = [];
+  if (requiredRows > currentRowCount) {
+    const rowsToAdd = requiredRows - currentRowCount + 10; // 여유 10행 추가
+    requests.push({
+      appendDimension: {
+        sheetId,
+        dimension: 'ROWS',
+        length: rowsToAdd,
+      },
+    });
+  }
+
+  requests.push({
+    updateCells: {
+      rows,
+      fields: 'userEnteredValue',
+      start: {
+        sheetId,
+        rowIndex: startRow - 1,
+        columnIndex: startCol - 1,
+      },
+    },
+  });
+
   await sheets.spreadsheets.batchUpdate({
     spreadsheetId,
-    requestBody: {
-      requests: [{
-        updateCells: {
-          rows,
-          fields: 'userEnteredValue',
-          start: {
-            sheetId,
-            rowIndex: startRow - 1,
-            columnIndex: startCol - 1,
-          },
-        },
-      }],
-    },
+    requestBody: { requests },
   });
 }
 
@@ -275,16 +293,20 @@ async function appendSheet(spreadsheetId, range, values) {
       const existing = await _readSheetByGridData(spreadsheetId, `'${tabName}'!A1:A1000`);
       const nextRow = (existing ? existing.length : 0) + 1;
 
-      // 메타에서 GID 찾기
+      // 메타에서 GID + gridProperties 찾기
       const meta = await sheets.spreadsheets.get({
         spreadsheetId,
         includeGridData: false,
-        fields: 'sheets(properties(sheetId,title))',
+        fields: 'sheets(properties(sheetId,title,gridProperties))',
       });
       const targetSheet = (meta.data.sheets || []).find(s => s.properties.title === tabName);
       if (!targetSheet) throw new Error(`시트를 찾을 수 없습니다: ${tabName}`);
 
       const sheetId = targetSheet.properties.sheetId;
+      const currentRowCount = targetSheet.properties.gridProperties?.rowCount || 0;
+
+      // 필요한 최대 행 수 계산
+      const requiredRows = nextRow + values.length - 1;
 
       // values를 CellData 형식으로 변환
       const rows = values.map(rowValues => ({
@@ -293,21 +315,34 @@ async function appendSheet(spreadsheetId, range, values) {
         })),
       }));
 
+      // 요청 배열: 행 부족 시 appendDimension으로 자동 확장
+      const requests = [];
+      if (requiredRows > currentRowCount) {
+        const rowsToAdd = requiredRows - currentRowCount + 10; // 여유 10행
+        requests.push({
+          appendDimension: {
+            sheetId,
+            dimension: 'ROWS',
+            length: rowsToAdd,
+          },
+        });
+      }
+
+      requests.push({
+        updateCells: {
+          rows,
+          fields: 'userEnteredValue',
+          start: {
+            sheetId,
+            rowIndex: nextRow - 1,
+            columnIndex: 0,
+          },
+        },
+      });
+
       await sheets.spreadsheets.batchUpdate({
         spreadsheetId,
-        requestBody: {
-          requests: [{
-            updateCells: {
-              rows,
-              fields: 'userEnteredValue',
-              start: {
-                sheetId,
-                rowIndex: nextRow - 1,
-                columnIndex: 0,
-              },
-            },
-          }],
-        },
+        requestBody: { requests },
       });
       return;
     }
