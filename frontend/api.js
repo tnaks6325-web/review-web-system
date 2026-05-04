@@ -180,6 +180,11 @@ const _ACTION_MAP = {
   'syncQueuePurge':     { method: 'POST', path: '/api/diag/sync-queue/purge' },
   'buildHistory':       { method: 'GET',  path: '/api/diag/build-history' },
 
+  // Phase 12: 시트 권한 관리
+  'shareSheet':         { method: 'POST', path: '/api/diag/share-sheet' },
+  'shareAllSheets':     { method: 'POST', path: '/api/diag/share-all-sheets' },
+  'sheetPermissions':   { method: 'GET',  path: '/api/diag/sheet-permissions' },
+
   // Phase 10: Archive (탭 단위 아카이브)
   'archiveDetect':      { method: 'GET',  path: '/api/archive/detect' },
   'archiveTabs':        { method: 'POST', path: '/api/archive/tabs' },

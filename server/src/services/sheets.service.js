@@ -441,6 +441,150 @@ async function setSheetHidden(spreadsheetId, sheetId, hidden) {
   });
 }
 
+/**
+ * OAuth Drive 클라이언트 생성 (tnaks6325@gmail.com 계정)
+ * 시트 소유자가 아닌 경우에도 OAuth 사용자 권한으로 편집자 권한 부여 가능
+ */
+function _getOAuthDriveForSheets() {
+  const clientId     = process.env.DRIVE_OAUTH_CLIENT_ID;
+  const clientSecret = process.env.DRIVE_OAUTH_CLIENT_SECRET;
+  const refreshToken = process.env.DRIVE_OAUTH_REFRESH_TOKEN;
+
+  if (!clientId || !clientSecret || !refreshToken) {
+    return null;
+  }
+
+  try {
+    const oauth2Client = new google.auth.OAuth2(clientId, clientSecret);
+    oauth2Client.setCredentials({ refresh_token: refreshToken });
+    return google.drive({ version: 'v3', auth: oauth2Client });
+  } catch (err) {
+    return null;
+  }
+}
+
+/**
+ * 서비스 계정에 시트 편집자 권한 부여 (Drive API permissions.create)
+ * 
+ * 전략:
+ *   1차: SA(drive)로 permissions.list → 이미 편집자이면 skip
+ *   2차: SA(drive)로 permissions.create 시도
+ *   3차: SA 실패 시 OAuth(tnaks6325@gmail.com)로 permissions.create 시도
+ *
+ * @param {string} spreadsheetId - 스프레드시트 ID
+ * @returns {{ ok, alreadyShared, permissionId, method }}
+ */
+async function shareSheetWithServiceAccount(spreadsheetId) {
+  if (!drive) throw new Error('Google Drive API가 설정되지 않았습니다.');
+  const saEmail = process.env.GOOGLE_SERVICE_ACCOUNT_EMAIL;
+  if (!saEmail) throw new Error('GOOGLE_SERVICE_ACCOUNT_EMAIL 미설정');
+
+  // 1차: 현재 권한 확인 (SA로 시도)
+  try {
+    const permList = await drive.permissions.list({
+      fileId: spreadsheetId,
+      fields: 'permissions(id,emailAddress,role,type)',
+    });
+    const existing = (permList.data.permissions || []).find(
+      p => p.emailAddress && p.emailAddress.toLowerCase() === saEmail.toLowerCase()
+    );
+    if (existing && (existing.role === 'writer' || existing.role === 'owner')) {
+      return { ok: true, alreadyShared: true, role: existing.role, permissionId: existing.id, method: 'sa_check' };
+    }
+  } catch (listErr) {
+    // SA로 권한 목록 조회 실패 — OAuth로 확인 시도
+    const oauthDrv = _getOAuthDriveForSheets();
+    if (oauthDrv) {
+      try {
+        const permList = await oauthDrv.permissions.list({
+          fileId: spreadsheetId,
+          fields: 'permissions(id,emailAddress,role,type)',
+        });
+        const existing = (permList.data.permissions || []).find(
+          p => p.emailAddress && p.emailAddress.toLowerCase() === saEmail.toLowerCase()
+        );
+        if (existing && (existing.role === 'writer' || existing.role === 'owner')) {
+          return { ok: true, alreadyShared: true, role: existing.role, permissionId: existing.id, method: 'oauth_check' };
+        }
+      } catch (oauthListErr) {
+        // OAuth로도 조회 실패 — 계속 진행하여 권한 부여 시도
+      }
+    }
+  }
+
+  // 2차: SA로 편집자 권한 부여 시도
+  try {
+    const res = await drive.permissions.create({
+      fileId: spreadsheetId,
+      requestBody: {
+        type: 'user',
+        role: 'writer',
+        emailAddress: saEmail,
+      },
+      sendNotificationEmail: false,
+    });
+    return { ok: true, alreadyShared: false, role: 'writer', permissionId: res.data.id, method: 'sa' };
+  } catch (saErr) {
+    // SA로 권한 부여 실패 — OAuth로 폴백
+  }
+
+  // 3차: OAuth(tnaks6325@gmail.com)로 편집자 권한 부여 시도
+  const oauthDrv = _getOAuthDriveForSheets();
+  if (!oauthDrv) {
+    throw new Error('SA 권한 부여 실패 & OAuth 미설정 (DRIVE_OAUTH_CLIENT_ID/SECRET/REFRESH_TOKEN 필요)');
+  }
+
+  const res = await oauthDrv.permissions.create({
+    fileId: spreadsheetId,
+    requestBody: {
+      type: 'user',
+      role: 'writer',
+      emailAddress: saEmail,
+    },
+    sendNotificationEmail: false,
+  });
+
+  return { ok: true, alreadyShared: false, role: 'writer', permissionId: res.data.id, method: 'oauth' };
+}
+
+/**
+ * 시트에 서비스 계정의 쓰기 권한이 있는지 확인
+ * @param {string} spreadsheetId
+ * @returns {{ hasWriteAccess: boolean, role: string|null }}
+ */
+async function checkSheetWriteAccess(spreadsheetId) {
+  if (!sheets) throw new Error('Google Sheets API가 설정되지 않았습니다.');
+
+  try {
+    // 빈 범위에 대해 쓰기 시도 (실제 데이터 변경 없이 권한 확인)
+    // 방법: 메타데이터를 통해 확인 — permissions.list는 소유자만 가능
+    // 대신: 실제 빈 값 쓰기 시도로 확인
+    const meta = await sheets.spreadsheets.get({
+      spreadsheetId,
+      includeGridData: false,
+      fields: 'sheets(properties(sheetId,title,gridProperties))',
+    });
+    const firstSheet = meta.data.sheets?.[0];
+    if (!firstSheet) return { hasWriteAccess: false, role: null, error: 'no_sheets' };
+
+    // 마지막 행+1에 빈 값 쓰기 시도로 쓰기 권한 확인
+    const maxRow = firstSheet.properties.gridProperties?.rowCount || 1000;
+    const testRange = `'${firstSheet.properties.title}'!ZZ${maxRow}`;
+    await sheets.spreadsheets.values.update({
+      spreadsheetId,
+      range: testRange,
+      valueInputOption: 'RAW',
+      requestBody: { values: [['']] },
+    });
+    return { hasWriteAccess: true, role: 'writer' };
+  } catch (err) {
+    if (err.message && err.message.includes('permission')) {
+      return { hasWriteAccess: false, role: 'reader', error: 'no_write_permission' };
+    }
+    return { hasWriteAccess: false, role: null, error: err.message };
+  }
+}
+
 module.exports = {
   readSheet,
   writeSheet,
@@ -452,6 +596,8 @@ module.exports = {
   copySheetToSpreadsheet,
   renameSheet,
   setSheetHidden,
+  shareSheetWithServiceAccount,
+  checkSheetWriteAccess,
   sheets,
   drive,
   auth,

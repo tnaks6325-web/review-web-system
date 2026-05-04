@@ -2,7 +2,7 @@ const express = require('express');
 const router = express.Router();
 const { authMiddleware } = require('../middleware/auth.middleware');
 const pool = require('../db/pool');
-const { readSheet, getSpreadsheetMeta, writeSheet, appendSheet, copySpreadsheet, copySheetToSpreadsheet, renameSheet } = require('../services/sheets.service');
+const { readSheet, getSpreadsheetMeta, writeSheet, appendSheet, copySpreadsheet, copySheetToSpreadsheet, renameSheet, shareSheetWithServiceAccount, checkSheetWriteAccess } = require('../services/sheets.service');
 const { getQueueStats, retryItem, retryAllFailed, purgeCompleted } = require('../services/syncQueue.service');
 const { imageApiLimiter } = require('../middleware/rateLimit.middleware');
 const { extractOrderFromImage, verifyAddressMatch } = require('../services/gemini.service');
@@ -2216,6 +2216,130 @@ router.get('/slot-locks', authMiddleware, async (req, res, next) => {
       tableExists: true,
       stats: stats[0] || { total: 0, submitted: 0, pending: 0 },
       recentLocks,
+    });
+  } catch (err) {
+    next(err);
+  }
+});
+
+// ═══════════════════════════════════════════════════════════
+// POST /api/diag/share-sheet — 서비스 계정에 시트 편집자 권한 부여
+// ═══════════════════════════════════════════════════════════
+router.post('/share-sheet', authMiddleware, async (req, res, next) => {
+  try {
+    const { sheetId } = req.body;
+    if (!sheetId) return res.json({ ok: false, error: 'sheetId 필요' });
+
+    const result = await shareSheetWithServiceAccount(sheetId);
+    res.json(result);
+  } catch (err) {
+    // 권한 부여 실패 — 시트 소유자가 아닌 경우 등
+    const sa = process.env.GOOGLE_SERVICE_ACCOUNT_EMAIL || '(미설정)';
+    res.json({
+      ok: false,
+      error: err.message,
+      hint: `서비스 계정(${sa})에 시트 편집자 권한을 수동으로 부여해주세요.`,
+      serviceAccount: sa,
+    });
+  }
+});
+
+// ═══════════════════════════════════════════════════════════
+// POST /api/diag/share-all-sheets — 대시보드 전체 캠페인 시트에 편집자 권한 일괄 부여
+// ═══════════════════════════════════════════════════════════
+router.post('/share-all-sheets', authMiddleware, async (req, res, next) => {
+  try {
+    const sa = process.env.GOOGLE_SERVICE_ACCOUNT_EMAIL || '';
+    if (!sa) return res.json({ ok: false, error: 'GOOGLE_SERVICE_ACCOUNT_EMAIL 미설정' });
+
+    // 고유 시트 ID 목록 조회 (tab_configs에서 중복 제거)
+    const { rows: sheetRows } = await pool.query(
+      `SELECT DISTINCT sheet_id FROM tab_configs WHERE sheet_id IS NOT NULL AND sheet_id != ''`
+    );
+
+    const results = [];
+    let successCount = 0;
+    let alreadyCount = 0;
+    let failCount = 0;
+
+    for (const row of sheetRows) {
+      const sid = row.sheet_id;
+      try {
+        const r = await shareSheetWithServiceAccount(sid);
+        if (r.alreadyShared) {
+          alreadyCount++;
+          results.push({ sheetId: sid, status: 'already', role: r.role });
+        } else {
+          successCount++;
+          results.push({ sheetId: sid, status: 'shared', role: r.role });
+        }
+      } catch (err) {
+        failCount++;
+        results.push({ sheetId: sid, status: 'error', error: err.message });
+      }
+    }
+
+    res.json({
+      ok: true,
+      serviceAccount: sa,
+      total: sheetRows.length,
+      success: successCount,
+      already: alreadyCount,
+      failed: failCount,
+      details: results,
+    });
+  } catch (err) {
+    next(err);
+  }
+});
+
+// ═══════════════════════════════════════════════════════════
+// GET /api/diag/sheet-permissions — 대시보드 전체 시트의 쓰기 권한 상태 확인
+// ═══════════════════════════════════════════════════════════
+router.get('/sheet-permissions', authMiddleware, async (req, res, next) => {
+  try {
+    const sa = process.env.GOOGLE_SERVICE_ACCOUNT_EMAIL || '';
+
+    // 고유 시트 ID + 캠페인명 목록
+    const { rows: sheetRows } = await pool.query(
+      `SELECT DISTINCT ON (tc.sheet_id)
+              tc.sheet_id,
+              c.campaign_name
+       FROM tab_configs tc
+       LEFT JOIN campaigns c ON tc.sheet_id = c.sheet_id
+       WHERE tc.sheet_id IS NOT NULL AND tc.sheet_id != ''
+       ORDER BY tc.sheet_id, c.campaign_name`
+    );
+
+    const results = [];
+    for (const row of sheetRows) {
+      try {
+        const access = await checkSheetWriteAccess(row.sheet_id);
+        results.push({
+          sheetId: row.sheet_id,
+          campaignName: row.campaign_name || '(미등록)',
+          hasWriteAccess: access.hasWriteAccess,
+          role: access.role,
+        });
+      } catch (err) {
+        results.push({
+          sheetId: row.sheet_id,
+          campaignName: row.campaign_name || '(미등록)',
+          hasWriteAccess: false,
+          role: null,
+          error: err.message,
+        });
+      }
+    }
+
+    const noAccess = results.filter(r => !r.hasWriteAccess);
+    res.json({
+      ok: true,
+      serviceAccount: sa,
+      total: results.length,
+      writeOk: results.filter(r => r.hasWriteAccess).length,
+      noWrite: noAccess.length,
+      sheets: results,
     });
   } catch (err) {
     next(err);
