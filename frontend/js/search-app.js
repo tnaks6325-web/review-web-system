@@ -5809,7 +5809,9 @@ async function submitOrderForm() {
       slotRowNumber: currentSlotInfo ? currentSlotInfo.rowNumber : "",
       slotInadName: currentSlotInfo ? currentSlotInfo.inadName : "",
       loginPhone8: slotAuth.phone8 || "",
-      loginName: slotAuth.name || ""
+      loginName: slotAuth.name || "",
+      // ★ 재제출 허용 플래그 (이전 제출이 시트 미기록 에러 시 프론트에서 세팅)
+      forceResubmit: window._forceResubmit ? "true" : ""
     };
 
     try {
@@ -5891,8 +5893,15 @@ async function submitOrderForm() {
   window._submitOrderFormInProgress = false;
 
   if (successCount === 0) {
-    _resetBtn(); return;
+    // ★ 전체 실패 시: 재제출 안내 화면 표시 (입력값 보존)
+    _resetBtn('<i class="fas fa-redo"></i> 재제출');
+    window._forceResubmit = true;  // 다음 제출 시 중복 검사 건너뜀
+    showToast("제출에 실패했습니다. 정보를 확인 후 '재제출' 버튼을 눌러주세요.", "error");
+    return;
   }
+
+  // 성공 후 재제출 플래그 초기화
+  window._forceResubmit = false;
 
   // ── 완료 화면 표시 ──
   const wrapEl   = document.getElementById("ofOrderCardsWrap");
@@ -5931,6 +5940,29 @@ function _cancelDuplicate() {
   if (w) w.style.display = "none";
   window._dupIgnored = false;
   window._dupPayload = null;
+}
+
+/** ★ 제출 완료/실패 후 → 구매양식 입력 화면으로 복귀 */
+function resetOrderFormForReentry() {
+  // 완료 화면 숨기기
+  const doneEl   = document.getElementById("orderFormDone");
+  if (doneEl) doneEl.style.display = "none";
+
+  // 입력 UI 다시 표시
+  const wrapEl   = document.getElementById("ofOrderCardsWrap");
+  const addBtnEl = document.getElementById("btnAddOrderCard");
+  const guideEl  = document.getElementById("ofFinalGuide");
+  const subBtn   = document.getElementById("btnOrderFormSubmit");
+  if (wrapEl)   wrapEl.style.display   = "";
+  if (addBtnEl) addBtnEl.style.display = "";
+  if (guideEl)  guideEl.style.display  = "";
+  if (subBtn)   { subBtn.style.display = ""; subBtn.disabled = false; subBtn.innerHTML = '<i class="fas fa-paper-plane"></i> 제출'; }
+
+  // 재제출 플래그 초기화
+  window._forceResubmit = false;
+  window._dupIgnored = false;
+  window._dupPayload = null;
+  window._submitOrderFormInProgress = false;
 }
 
 async function quickEditCell(e, cell) {

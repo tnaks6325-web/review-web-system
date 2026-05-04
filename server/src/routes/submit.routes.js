@@ -507,21 +507,27 @@ router.post('/order', async (req, res, next) => {
             address, bank, account, depositor, price, dateStr, orderNum,
             memo, selectedOptKey, isCoupang, ncMode,
             // ★ 슬롯 매칭 파라미터 (find-slot에서 받은 값)
-            slotRowNumber, slotInadName, loginPhone8, loginName } = b;
+            slotRowNumber, slotInadName, loginPhone8, loginName,
+            // ★ 재제출 허용 파라미터 (에러로 시트 미기록 시 프론트에서 전달)
+            forceResubmit } = b;
 
     if (!sheetId || !tabName) {
       return res.json({ error: 'sheetId와 tabName이 필요합니다.' });
     }
 
-    // ── Step 1: DB 기반 중복 검사 (Sheets 읽기 제거) ──
-    const dupCheck = await pool.query(
-      `SELECT COUNT(*) FROM order_submissions
-       WHERE sheet_id = $1 AND tab_name = $2 AND user_id = $3 AND date_str = $4
-       AND submitted_at > NOW() - INTERVAL '1 hour'`,
-      [sheetId, tabName, userId || '', dateStr || '']
-    );
-    if (parseInt(dupCheck.rows[0].count) > 0) {
-      return res.json({ error: '최근 1시간 내 동일한 주문이 이미 제출되었습니다.', isDuplicate: true });
+    // ── Step 1: DB 기반 중복 검사 (forceResubmit 시 건너뜀) ──
+    if (!forceResubmit) {
+      const dupCheck = await pool.query(
+        `SELECT COUNT(*) FROM order_submissions
+         WHERE sheet_id = $1 AND tab_name = $2 AND user_id = $3 AND date_str = $4
+         AND submitted_at > NOW() - INTERVAL '1 hour'`,
+        [sheetId, tabName, userId || '', dateStr || '']
+      );
+      if (parseInt(dupCheck.rows[0].count) > 0) {
+        return res.json({ error: '최근 1시간 내 동일한 주문이 이미 제출되었습니다.', isDuplicate: true });
+      }
+    } else {
+      logger.info(`[submit/order] forceResubmit 활성 — 중복 검사 건너뜀 (sheet=${sheetId}, tab=${tabName}, user=${userId || 'N/A'})`);
     }
 
     // ── Step 2: DB 즉시 저장 ──
