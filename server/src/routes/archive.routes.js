@@ -3,7 +3,7 @@ const router = express.Router();
 const { authMiddleware } = require('../middleware/auth.middleware');
 const pool = require('../db/pool');
 const { logger } = require('../utils/logger');
-const { getSpreadsheetMeta } = require('../services/sheets.service');
+const { getSpreadsheetMeta, setSheetHidden } = require('../services/sheets.service');
 
 // ═══════════════════════════════════════════════════════════
 // GET /api/archive/detect — 아카이브 대상 자동 감지 (반자동: 감지만)
@@ -671,6 +671,26 @@ router.get('/history', authMiddleware, async (req, res, next) => {
     `, [limit]);
     res.json({ ok: true, history: rows });
   } catch (err) {
+    next(err);
+  }
+});
+
+// ═══════════════════════════════════════════════════════════
+// POST /api/archive/unhide-tab — 숨김 탭을 표시(unhide) 처리
+// body: { sheetId, tabGid }
+// Google Sheets API로 해당 탭의 hidden 속성을 false로 변경
+// ═══════════════════════════════════════════════════════════
+router.post('/unhide-tab', authMiddleware, async (req, res, next) => {
+  try {
+    const { sheetId, tabGid } = req.body;
+    if (!sheetId || !tabGid) {
+      return res.status(400).json({ error: 'sheetId와 tabGid가 필요합니다.' });
+    }
+    await setSheetHidden(sheetId, parseInt(tabGid), false);
+    logger.info(`[archive/unhide-tab] 탭 표시 처리 완료: sheet=${sheetId.substring(0,15)}... gid=${tabGid}`);
+    res.json({ ok: true, message: '탭이 표시(unhide) 처리되었습니다.' });
+  } catch (err) {
+    logger.error(`[archive/unhide-tab] 실패: ${err.message}`);
     next(err);
   }
 });

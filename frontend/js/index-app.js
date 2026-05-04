@@ -2637,6 +2637,30 @@ function _buildTabUrl(sheetUrl, sheetId, tabGid) {
   return baseUrl;
 }
 
+/**
+ * ★ 숨김 탭 표시(unhide) 처리 — Google Sheets API 호출
+ */
+async function _unhideTab(sheetId, tabGid, el) {
+  if (!confirm('이 탭의 숨김을 해제하시겠습니까?\n(Google Sheets에서 탭이 다시 표시됩니다)')) return;
+  try {
+    el.innerHTML = '<i class="fas fa-spinner fa-spin"></i>';
+    const data = await gasPost({ action: 'unhideTab', sheetId, tabGid });
+    if (data.error) throw new Error(data.error);
+    // 성공 → 아이콘을 정상 링크로 교체
+    const url = `https://docs.google.com/spreadsheets/d/${sheetId}/edit#gid=${tabGid}`;
+    el.outerHTML = `<a href="${url}" target="_blank" rel="noopener" onclick="event.stopPropagation()" title="${url}" style="color:#4285F4;font-size:.72rem;margin-left:2px;text-decoration:none"><i class="fas fa-external-link-alt"></i></a>`;
+    // 숨김탭 배지 제거
+    const parent = el.closest ? el.closest('label') || el.parentElement : el.parentElement;
+    if (parent) {
+      const badge = parent.querySelector('span');
+      parent.querySelectorAll('span').forEach(s => { if (s.textContent === '숨김탭') s.remove(); });
+    }
+    if (typeof showToast === 'function') showToast('탭 숨김 해제 완료 — 링크 클릭 가능', 'success');
+  } catch (err) {
+    el.innerHTML = '<i class="fas fa-eye-slash"></i>';
+    if (typeof showToast === 'function') showToast('숨김 해제 실패: ' + err.message, 'error');
+  }
+}
 
 function _calcOverdueDays(sd) {
   const d = _parseStartDate(sd);
@@ -11129,14 +11153,16 @@ async function archiveAutoDetect() {
         const roundBadge = t.round
           ? `<span style="background:#EDE9FE;color:#7C3AED;padding:1px 5px;border-radius:3px;font-size:.65rem;margin-left:2px">${escHtml(t.round)}</span>`
           : '';
-        const paidInfo = t.paidCount !== undefined
-          ? `<span style="font-size:.68rem;color:#6B7280">입금${t.paidCount}/${t.rowCount||0}</span>`
+        const paidInfo = (t.paidCount !== undefined && t.rowCount)
+          ? (t.paidCount >= t.rowCount
+            ? `<span style="font-size:.68rem;color:#059669;font-weight:600;background:#ECFDF5;padding:1px 5px;border-radius:3px">입금${t.paidCount}/${t.rowCount} ✓</span>`
+            : `<span style="font-size:.68rem;color:#DC2626;font-weight:500;background:#FEF2F2;padding:1px 5px;border-radius:3px">입금${t.paidCount}/${t.rowCount}</span>`)
           : '';
         const sheetUrl = _buildTabUrl(`https://docs.google.com/spreadsheets/d/${camp.sheetId}/edit`, camp.sheetId, t.tabGid);
         const sheetLink = t.deleted
           ? `<span title="탭 삭제됨" style="color:#9CA3AF;font-size:.72rem;margin-left:2px"><i class="fas fa-unlink"></i></span>`
           : t.hidden
-          ? `<span title="숨김 탭 (링크 접근 불가)" style="color:#9CA3AF;font-size:.72rem;margin-left:2px"><i class="fas fa-eye-slash"></i></span>`
+          ? `<span title="숨김 탭 (클릭하여 표시)" style="color:#9CA3AF;font-size:.72rem;margin-left:2px;cursor:pointer" onclick="event.stopPropagation();_unhideTab('${escHtml(camp.sheetId)}','${escHtml(t.tabGid)}',this)"><i class="fas fa-eye-slash"></i></span>`
           : (sheetUrl ? `<a href="${escHtml(sheetUrl)}" target="_blank" rel="noopener" onclick="event.stopPropagation()" title="${t.liveTabName ? '현재: '+escHtml(t.liveTabName) : escHtml(sheetUrl)}" style="color:#4285F4;font-size:.72rem;margin-left:2px;text-decoration:none"><i class="fas fa-external-link-alt"></i></a>` : '');
         const renamedBadge = t.liveTabName
           ? `<span style="background:#DBEAFE;color:#1D4ED8;padding:1px 4px;border-radius:3px;font-size:.62rem;margin-left:2px" title="현재: ${escHtml(t.liveTabName)}">이름변경</span>`
@@ -11355,14 +11381,16 @@ async function dashboardArchiveDetect() {
         const indexBadge = t.inIndex === false
           ? '<span style="background:#FEF3C7;color:#D97706;padding:1px 4px;border-radius:3px;font-size:.65rem;margin-left:2px">인덱스외</span>'
           : '';
-        const paidInfo = t.paidCount !== undefined && t.rowCount
-          ? `<span style="font-size:.68rem;color:#6B7280;margin-left:6px">입금${t.paidCount}/${t.rowCount}</span>`
+        const paidInfo = (t.paidCount !== undefined && t.rowCount)
+          ? (t.paidCount >= t.rowCount
+            ? `<span style="font-size:.68rem;color:#059669;font-weight:600;background:#ECFDF5;padding:1px 5px;border-radius:3px;margin-left:6px">입금${t.paidCount}/${t.rowCount} ✓</span>`
+            : `<span style="font-size:.68rem;color:#DC2626;font-weight:500;background:#FEF2F2;padding:1px 5px;border-radius:3px;margin-left:6px">입금${t.paidCount}/${t.rowCount}</span>`)
           : '';
         const sheetUrl2 = _buildTabUrl(`https://docs.google.com/spreadsheets/d/${camp.sheetId}/edit`, camp.sheetId, t.tabGid);
         const sheetLink2 = t.deleted
           ? `<span title="탭 삭제됨" style="color:#9CA3AF;font-size:.72rem;margin-left:2px"><i class="fas fa-unlink"></i></span>`
           : t.hidden
-          ? `<span title="숨김 탭 (링크 접근 불가)" style="color:#9CA3AF;font-size:.72rem;margin-left:2px"><i class="fas fa-eye-slash"></i></span>`
+          ? `<span title="숨김 탭 (클릭하여 표시)" style="color:#9CA3AF;font-size:.72rem;margin-left:2px;cursor:pointer" onclick="event.stopPropagation();_unhideTab('${escHtml(camp.sheetId)}','${escHtml(t.tabGid)}',this)"><i class="fas fa-eye-slash"></i></span>`
           : (sheetUrl2 ? `<a href="${escHtml(sheetUrl2)}" target="_blank" rel="noopener" onclick="event.stopPropagation()" title="${t.liveTabName ? '현재: '+escHtml(t.liveTabName) : escHtml(sheetUrl2)}" style="color:#4285F4;font-size:.72rem;margin-left:2px;text-decoration:none"><i class="fas fa-external-link-alt"></i></a>` : '');
         const renamedBadge2 = t.liveTabName
           ? `<span style="background:#DBEAFE;color:#1D4ED8;padding:1px 4px;border-radius:3px;font-size:.62rem;margin-left:2px" title="현재: ${escHtml(t.liveTabName)}">이름변경</span>`

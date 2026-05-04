@@ -420,6 +420,27 @@ async function renameSheet(spreadsheetId, sheetId, newTitle) {
   });
 }
 
+/**
+ * 시트(탭) 숨김/표시 토글
+ * @param {string} spreadsheetId - 스프레드시트 ID
+ * @param {number} sheetId - 탭의 GID (숫자)
+ * @param {boolean} hidden - true=숨김, false=표시
+ */
+async function setSheetHidden(spreadsheetId, sheetId, hidden) {
+  if (!sheets) throw new Error('Google Sheets API가 설정되지 않았습니다.');
+  await sheets.spreadsheets.batchUpdate({
+    spreadsheetId,
+    requestBody: {
+      requests: [{
+        updateSheetProperties: {
+          properties: { sheetId, hidden: !!hidden },
+          fields: 'hidden',
+        },
+      }],
+    },
+  });
+}
+
 module.exports = {
   readSheet,
   writeSheet,
@@ -430,6 +451,7 @@ module.exports = {
   copySpreadsheet,
   copySheetToSpreadsheet,
   renameSheet,
+  setSheetHidden,
   sheets,
   drive,
   auth,

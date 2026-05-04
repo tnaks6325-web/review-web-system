@@ -901,7 +901,7 @@ function parseTabRows(values, sheetId, tabName, tabGid, campaignTitle) {
   // ── 입금열 탐색 (is_submitted2 / submit_col2) ──
   // ★ 우선순위: 정확 매칭 '입금' > 접두사 매칭 '입금완료' 등 > '페이백입금일' 등
   // ★ '결제금액','결제일','결제금' 등 금액/날짜 컬럼은 제외 (값이 숫자라 오탐)
-  const PAYMENT_EXACT = ['입금', '입금완료', '입금확인', '입금여부'];  // 정확 매칭 (최우선)
+  const PAYMENT_EXACT = ['입금', '입금완료', '입금확인', '입금여부', '페이백'];  // 정확 매칭 (최우선)
   const PAYMENT_PARTIAL = ['페이백입금'];  // 부분 매칭 (차선)
   const PAYMENT_EXCLUDE = ['입금명', '입금자', '예금주', '입금자명', '결제금액', '결제금', '결제일', '결제수단'];
   let paymentColIdx = -1;
