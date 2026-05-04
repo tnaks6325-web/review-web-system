@@ -917,22 +917,7 @@ function enterAdminScreen() {
 
   showScreen("screenAdmin");
 
-  // ── 기본 상태: 전체 펼치기 ON + 완료건 숨김 ON ──
-  hideDoneMode = true;
-  allExpanded  = true;
-  // 버튼 UI 즉시 반영 (loadAdminDashboard 완료 전에도 정확한 라벨 표시)
-  const btnDone   = document.getElementById("btnHideDone");
-  const btnExpand = document.getElementById("btnExpandAll");
-  if (btnDone) {
-    btnDone.innerHTML = '<i class="fas fa-eye"></i> 완료건 표시';
-    btnDone.classList.add("active");
-  }
-  if (btnExpand) {
-    btnExpand.innerHTML = '<i class="fas fa-compress-alt"></i> 전체 접기';
-    btnExpand.classList.add("active");
-  }
-
-  // ★ 컨텍스트 툴바 초기화 (버튼 상태 반영 후 호출)
+  // ★ 컨텍스트 툴바 초기화
   _updateContextToolbar('dashboard');
 
   loadAdminDashboard();
@@ -1241,10 +1226,6 @@ const _CTX_TOOLBAR_DEFS = {
   dashboard: [
     { id:'ctx-filter',      label:'필터',     icon:'fa-filter',      style:'',           onclick:"document.getElementById('dashFilterBtn')?.click()", title:'캠페인 필터'},
     { id:'ctx-add',         label:'업체추가',  icon:'fa-plus',        style:'green',      onclick:"openAddCampaign()", title:'캠페인 추가'},
-    { sep: true },
-    { id:'ctx-expand',      label:'펼치기',    icon:'fa-expand-alt',  style:'',           onclick:"toggleAllCampaigns(); _updateContextToolbar('dashboard')", title:'전체 펼치기/접기', elId:'btnExpandAll'},
-    { id:'ctx-hide-done',   label:'완료숨김',  icon:'fa-eye-slash',   style:'',           onclick:"toggleHideDone(); _updateContextToolbar('dashboard')", title:'완료건 숨김/표시', elId:'btnHideDone'},
-    { id:'ctx-campname',    label:'캠페인명',  icon:'fa-tag',         style:'',           onclick:"toggleHideCampName(); _updateContextToolbar('dashboard')", title:'캠페인명 표시/숨김', elId:'btnHideCampName'},
     { sep: true },
     { id:'ctx-refresh',     label:'새로고침',  icon:'fa-sync-alt',    style:'',           onclick:"loadTabDashboard()", title:'대시보드 새로고침'},
     { id:'ctx-poll',        label:'완료알림',  icon:'fa-bell',        style:'orange',     onclick:"toggleDashPolling(); _updateContextToolbar('dashboard')", title:'탭 완료 알림 폴링', elId:'pollToggleBtn'},
@@ -1769,8 +1750,6 @@ async function loadAdminDashboard() {
       });
     });
 
-    if (hideDoneMode) wrap.classList.add("hide-done-mode");
-    else              wrap.classList.remove("hide-done-mode");
     if (hideClosedCampMode) wrap.classList.add("hide-closed-camp-mode");
     else                    wrap.classList.remove("hide-closed-camp-mode");
     if (hideClosedTabMode)  wrap.classList.add("hide-closed-tab-mode");
@@ -1786,17 +1765,9 @@ async function loadAdminDashboard() {
         _btnHCC.classList.remove("active");
       }
     }
-    // 캠페인명 숨김 모드: v11.0에서는 캠페인 컬럼 숨김으로 처리
-    if (hideCampNameMode) {
-      wrap.classList.add("hide-camp-name-mode");
-    } else {
-      wrap.classList.remove("hide-camp-name-mode");
-    }
 
     // 마감 모드가 켜져 있었다면 유지
     if (_closedMode)    wrap.classList.add("closed-mode");
-
-    // ── v11.0: 플랫 테이블이므로 allExpanded 불필요 (모든 행이 항상 표시됨) ──
 
     // 필터가 활성화된 경우 재적용
     if (activeFilters.size > 0) applyDashFilter();
@@ -1982,18 +1953,10 @@ function renderDashboard(data) {
       }
     });
   });
-  if (hideDoneMode) wrap.classList.add("hide-done-mode");
-  else wrap.classList.remove("hide-done-mode");
   if (hideClosedCampMode) wrap.classList.add("hide-closed-camp-mode");
   else                    wrap.classList.remove("hide-closed-camp-mode");
   if (hideClosedTabMode)  wrap.classList.add("hide-closed-tab-mode");
   else                    wrap.classList.remove("hide-closed-tab-mode");
-  // 캠페인명 숨김 모드: v11.0에서는 캠페인 컬럼 열 숨김으로 처리
-  if (hideCampNameMode) {
-    wrap.classList.add("hide-camp-name-mode");
-  } else {
-    wrap.classList.remove("hide-camp-name-mode");
-  }
   if (_closedMode)        wrap.classList.add("closed-mode");
   if (activeFilters.size > 0) applyDashFilter();
   _fixStickyPositions();
@@ -3442,47 +3405,6 @@ function toggleDashTab(tableId, header) {
   if (icon) icon.classList.toggle("rotated", isCollapsed);
 }
 
-let hideDoneMode = false;
-function toggleHideDone() {
-  hideDoneMode = !hideDoneMode;
-  const btn  = document.getElementById("btnHideDone");
-  const wrap = document.getElementById("dashboardWrap");
-  if (hideDoneMode) {
-    btn.innerHTML = '<i class="fas fa-eye"></i> 완료건 표시';
-    btn.classList.add("active");
-    wrap.classList.add("hide-done-mode");
-  } else {
-    btn.innerHTML = '<i class="fas fa-eye-slash"></i> 완료건 숨김';
-    btn.classList.remove("active");
-    wrap.classList.remove("hide-done-mode");
-  }
-}
-
-// ── 캠페인명 숨김: 캠페인 헤더(구분행)만 숨기고 하위 인덱스 행은 그대로 나열 ──
-let hideCampNameMode = false;
-function toggleHideCampName() {
-  hideCampNameMode = !hideCampNameMode;
-  const btn  = document.getElementById("btnHideCampName");
-  const wrap = document.getElementById("dashboardWrap");
-  if (hideCampNameMode) {
-    // 숨김 ON → 캠페인 헤더 숨기고, 탭 테이블 펼치기
-    btn.innerHTML = '<i class="fas fa-tag"></i> 캠페인명 숨김';
-    btn.classList.add("active");
-    wrap.classList.add("hide-camp-name-mode");
-    // 모든 탭 테이블 강제 펼침 (헤더 클릭 불가하므로)
-    wrap.querySelectorAll(".dash-tab-table").forEach(t => {
-      t.classList.remove("collapsed");
-      const icon = t.previousElementSibling && t.previousElementSibling.querySelector(".dash-toggle-icon");
-      if (icon) icon.classList.remove("rotated");
-    });
-  } else {
-    // 숨김 OFF → 캠페인 헤더 다시 표시
-    btn.innerHTML = '<i class="fas fa-tag"></i> 캠페인명 표시';
-    btn.classList.remove("active");
-    wrap.classList.remove("hide-camp-name-mode");
-  }
-}
-
 // ── 마감업체 숨김: 모든 탭이 완료인 캠페인 전체 숨김 ──
 // ★ v9.13 fix: 기본값 true (마감 캠페인 기본 숨김), localStorage에 상태 저장
 let hideClosedCampMode = localStorage.getItem("rapp_hide_closed_camp") !== "0"; // 기본 true
@@ -3955,8 +3877,6 @@ function _syncHorizontalScroll() {
   });
 }
 
-
-let allExpanded = false;
 
 // ═══════════════════════════════════════════════════════
 // ★ 빠른 인라인 편집 (빈 셀 클릭 시)
@@ -5649,40 +5569,6 @@ async function quickEditCell(e, cell) {
   });
 }
 
-function toggleAllCampaigns() {
-  const wrap   = document.getElementById("dashboardWrap");
-  if (!wrap) return;
-
-  const tables  = wrap.querySelectorAll(".dash-tab-table");
-  const headers = wrap.querySelectorAll(".dash-campaign-header");
-  const btn     = document.getElementById("btnExpandAll");
-  if (!tables.length) return;
-
-  // 현재 상태: 하나라도 펼쳐져 있으면 → 전체 접기, 모두 접혀 있으면 → 전체 펼치기
-  const anyOpen = Array.from(tables).some(t => !t.classList.contains("collapsed"));
-  allExpanded   = !anyOpen;
-
-  tables.forEach((table, i) => {
-    const header = headers[i];
-    const icon   = header ? header.querySelector(".dash-toggle-icon") : null;
-    if (allExpanded) {
-      table.classList.remove("collapsed");
-      if (icon) icon.classList.add("rotated");
-    } else {
-      table.classList.add("collapsed");
-      if (icon) icon.classList.remove("rotated");
-    }
-  });
-
-  if (allExpanded) {
-    btn.innerHTML = '<i class="fas fa-compress-alt"></i> 전체 접기';
-    btn.classList.add("active");
-  } else {
-    btn.innerHTML = '<i class="fas fa-expand-alt"></i> 전체 펼치기';
-    btn.classList.remove("active");
-  }
-}
-
 /* ── 대시보드 필터 드롭다운 ─────────────────────────────────
    activeFilters: Set (비어있으면 전체 표시)
    필터 종류: tuip / chuihap / monthly
@@ -6609,12 +6495,6 @@ function _openAdminContextMenu(e, tabKey, campIdx) {
     <div class="ctx-menu-title">📊 대시보드</div>
     <button class="ctx-menu-item" onclick="loadAdminDashboard(); closeAdminContextMenu()">
       <i class="fas fa-sync-alt"></i> 새로고침
-    </button>
-    <button class="ctx-menu-item" onclick="toggleHideDone(); closeAdminContextMenu()">
-      <i class="fas fa-eye-slash"></i> 완료건 숨김 토글
-    </button>
-    <button class="ctx-menu-item" onclick="toggleAllCampaigns(); closeAdminContextMenu()">
-      <i class="fas fa-expand-alt"></i> 전체 펼치기/접기
     </button>
   `;
 

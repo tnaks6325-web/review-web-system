@@ -519,10 +519,6 @@ input,textarea,button{font-family:inherit}
 #dashboardScrollInner{width:100%;min-width:0;box-sizing:border-box}
 .btn-sm-toggle{padding:6px 12px;border:1.5px solid var(--border);border-radius:8px;background:#fff;font-size:.75rem;font-weight:500;color:var(--t2);cursor:pointer;display:flex;align-items:center;gap:4px;transition:background .2s,border-color .2s,color .2s,transform .15s}
 .btn-sm-toggle:hover{border-color:var(--p);color:var(--p);transform:translateY(-1px)}.btn-sm-toggle.active{background:var(--p);border-color:var(--p);color:#fff}.btn-sm-toggle.active:hover{opacity:.85}
-.hide-done-mode .dash-campaign-block.camp-all-done{display:none}
-.hide-done-mode .dash-tab-row.tab-done{display:none}
-.hide-done-mode .dash-tab-row-monthly.tab-done{display:none}
-.hide-done-mode .dash-tab-row-round.tab-done{display:none}
 /* 마감업체 숨김: 모든 탭이 완료인 캠페인 행 숨김 (v11.0: 플랫 행 단위) */
 .hide-closed-camp-mode .dash-campaign-block.camp-all-done{display:none}
 .hide-closed-camp-mode .dash-tab-row.camp-all-done{display:none}
@@ -531,16 +527,6 @@ input,textarea,button{font-family:inherit}
 .hide-closed-tab-mode .dash-tab-row-round.is-closed-row{display:none}
 /* 마감 탭이 있는 캠페인 헤더 표시 */
 .dash-campaign-block.camp-has-closed .dash-campaign-name::after{content:" 📁";font-size:.7rem;opacity:.6}
-/* ── 캠페인명 숨김 모드: v11.0에서는 캠페인 컬럼만 숨김 ── */
-.hide-camp-name-mode .dash-tab-campaign{display:none!important}
-.hide-camp-name-mode .dash-col-header-cell:nth-child(2){display:none!important} /* 캠페인 헤더 셀 */
-/* 레거시 호환 */
-.hide-camp-name-mode .dash-campaign-header{display:none!important}
-.hide-camp-name-mode .dash-campaign-block{border:none!important;border-radius:0!important;margin-bottom:0!important;background:transparent!important}
-.hide-camp-name-mode .dash-tab-table{max-height:none!important;opacity:1!important;padding:0!important}
-/* 캠페인명 숨김 모드에서 가로 구분선 색상 일치 */
-.hide-camp-name-mode .dash-tab-row{border-bottom:1px solid #D1D5DB}
-.hide-camp-name-mode .dash-tab-row-round{border-bottom:1px solid #C7D2FE}
 
 /* ════════════════════════════════════════════
    반응형: 화면 크기별 자동 컬럼 숨김
