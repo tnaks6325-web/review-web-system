@@ -2637,25 +2637,6 @@ function _buildTabUrl(sheetUrl, sheetId, tabGid) {
   return baseUrl;
 }
 
-/**
- * ★ 시트 탭 열기 헬퍼 — 탭 이름 클립보드 복사 + 시트 열기 + 토스트 안내
- * Google Sheets /edit 모드가 gid 무시하고 마지막 본 탭으로 전환하므로
- * 사용자가 시트 하단에서 올바른 탭을 빠르게 찾을 수 있도록 탭 이름을 복사한다.
- */
-function _openSheetTab(e, sheetUrl, tabName) {
-  e.preventDefault();
-  e.stopPropagation();
-  // 1) 탭 이름 클립보드 복사
-  if (navigator.clipboard && tabName) {
-    navigator.clipboard.writeText(tabName).catch(() => {});
-  }
-  // 2) 시트 열기
-  window.open(sheetUrl, '_blank', 'noopener');
-  // 3) 토스트 안내
-  if (typeof showToast === 'function') {
-    showToast(`📋 "${tabName}" 복사됨 — 시트 하단에서 탭을 찾아주세요`, 'info');
-  }
-}
 
 function _calcOverdueDays(sd) {
   const d = _parseStartDate(sd);
@@ -11151,12 +11132,10 @@ async function archiveAutoDetect() {
         const paidInfo = t.paidCount !== undefined
           ? `<span style="font-size:.68rem;color:#6B7280">입금${t.paidCount}/${t.rowCount||0}</span>`
           : '';
-        const sheetUrl = t.tabGid
-          ? `https://docs.google.com/spreadsheets/d/${camp.sheetId}/edit#gid=${t.tabGid}`
-          : `https://docs.google.com/spreadsheets/d/${camp.sheetId}/edit`;
+        const sheetUrl = _buildTabUrl(`https://docs.google.com/spreadsheets/d/${camp.sheetId}/edit`, camp.sheetId, t.tabGid);
         const sheetLink = t.deleted
           ? `<span title="탭 삭제됨" style="color:#9CA3AF;font-size:.72rem;margin-left:2px"><i class="fas fa-unlink"></i></span>`
-          : `<a href="${sheetUrl}" onclick="_openSheetTab(event,'${sheetUrl}','${escHtml(t.tabName).replace(/'/g,"\\'")}')" title="${t.liveTabName ? '현재: '+escHtml(t.liveTabName) : '시트 열기 (탭명 복사됨)'}" style="color:#4285F4;font-size:.72rem;margin-left:2px;text-decoration:none;cursor:pointer"><i class="fas fa-external-link-alt"></i></a>`;
+          : (sheetUrl ? `<a href="${escHtml(sheetUrl)}" target="_blank" rel="noopener" onclick="event.stopPropagation()" title="${t.liveTabName ? '현재: '+escHtml(t.liveTabName) : escHtml(sheetUrl)}" style="color:#4285F4;font-size:.72rem;margin-left:2px;text-decoration:none"><i class="fas fa-external-link-alt"></i></a>` : '');
         const renamedBadge = t.liveTabName
           ? `<span style="background:#DBEAFE;color:#1D4ED8;padding:1px 4px;border-radius:3px;font-size:.62rem;margin-left:2px" title="현재: ${escHtml(t.liveTabName)}">이름변경</span>`
           : '';
@@ -11374,12 +11353,10 @@ async function dashboardArchiveDetect() {
         const paidInfo = t.paidCount !== undefined && t.rowCount
           ? `<span style="font-size:.68rem;color:#6B7280;margin-left:6px">입금${t.paidCount}/${t.rowCount}</span>`
           : '';
-        const sheetUrl2 = t.tabGid
-          ? `https://docs.google.com/spreadsheets/d/${camp.sheetId}/edit#gid=${t.tabGid}`
-          : `https://docs.google.com/spreadsheets/d/${camp.sheetId}/edit`;
+        const sheetUrl2 = _buildTabUrl(`https://docs.google.com/spreadsheets/d/${camp.sheetId}/edit`, camp.sheetId, t.tabGid);
         const sheetLink2 = t.deleted
           ? `<span title="탭 삭제됨" style="color:#9CA3AF;font-size:.72rem;margin-left:2px"><i class="fas fa-unlink"></i></span>`
-          : `<a href="${sheetUrl2}" onclick="_openSheetTab(event,'${sheetUrl2}','${escHtml(t.tabName).replace(/'/g,"\\'")}')" title="${t.liveTabName ? '현재: '+escHtml(t.liveTabName) : '시트 열기 (탭명 복사됨)'}" style="color:#4285F4;font-size:.72rem;margin-left:2px;text-decoration:none;cursor:pointer"><i class="fas fa-external-link-alt"></i></a>`;
+          : (sheetUrl2 ? `<a href="${escHtml(sheetUrl2)}" target="_blank" rel="noopener" onclick="event.stopPropagation()" title="${t.liveTabName ? '현재: '+escHtml(t.liveTabName) : escHtml(sheetUrl2)}" style="color:#4285F4;font-size:.72rem;margin-left:2px;text-decoration:none"><i class="fas fa-external-link-alt"></i></a>` : '');
         const renamedBadge2 = t.liveTabName
           ? `<span style="background:#DBEAFE;color:#1D4ED8;padding:1px 4px;border-radius:3px;font-size:.62rem;margin-left:2px" title="현재: ${escHtml(t.liveTabName)}">이름변경</span>`
           : '';
