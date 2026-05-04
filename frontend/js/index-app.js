@@ -11124,10 +11124,13 @@ async function archiveAutoDetect() {
           닫기
         </button>
       </div>
-      <div style="margin-bottom:8px">
+      <div style="margin-bottom:8px;display:flex;align-items:center;gap:12px;flex-wrap:wrap">
         <label style="cursor:pointer;font-size:.78rem;color:#6B7280">
           <input type="checkbox" id="archiveSelectAll" onchange="_archiveToggleAll(this.checked)" checked> 전체 선택
         </label>
+        <button onclick="_archiveUncheckUnpaid()" style="background:#FEF2F2;color:#DC2626;border:1px solid #FECACA;padding:3px 10px;border-radius:5px;font-size:.72rem;cursor:pointer">
+          <i class="fas fa-times-circle"></i> 입금 미완료 체크해제
+        </button>
       </div>`;
 
     data.campaigns.forEach(camp => {
@@ -11173,8 +11176,9 @@ async function archiveAutoDetect() {
         const hiddenBadge = t.hidden
           ? `<span style="background:#F3F4F6;color:#6B7280;padding:1px 4px;border-radius:3px;font-size:.62rem;margin-left:2px">숨김탭</span>`
           : '';
+        const paidComplete = (t.paidCount !== undefined && t.rowCount && t.paidCount >= t.rowCount) ? 'true' : 'false';
         html += `<label style="display:flex;align-items:center;gap:6px;padding:3px 0;font-size:.78rem;cursor:pointer">
-          <input type="checkbox" class="archive-detect-cb" data-sheet="${escHtml(camp.sheetId)}" data-tab="${escHtml(t.tabName)}" data-round="${escHtml(t.round||'')}" data-in-index="${t.inIndex !== false}" checked>
+          <input type="checkbox" class="archive-detect-cb" data-sheet="${escHtml(camp.sheetId)}" data-tab="${escHtml(t.tabName)}" data-round="${escHtml(t.round||'')}" data-in-index="${t.inIndex !== false}" data-paid-complete="${paidComplete}" checked>
           <span style="flex:1">${escHtml(t.tabName)}${sheetLink}${renamedBadge}${deletedBadge}${hiddenBadge}${roundBadge}${indexBadge}</span>
           ${paidInfo}
           <span style="font-size:.72rem;color:#9CA3AF">${(t.rowCount||0).toLocaleString()}행</span>
@@ -11194,6 +11198,18 @@ async function archiveAutoDetect() {
 // ── 전체 선택/해제 토글 ──
 function _archiveToggleAll(checked) {
   document.querySelectorAll('.archive-detect-cb').forEach(cb => { cb.checked = checked; });
+}
+
+// ── 입금 미완료 항목 체크 해제 ──
+function _archiveUncheckUnpaid() {
+  let count = 0;
+  document.querySelectorAll('.archive-detect-cb').forEach(cb => {
+    if (cb.dataset.paidComplete !== 'true') {
+      cb.checked = false;
+      count++;
+    }
+  });
+  if (typeof showToast === 'function') showToast(`입금 미완료 ${count}건 체크 해제됨`, 'info');
 }
 
 // ── 선택 항목 아카이브 실행 ──
@@ -11351,10 +11367,13 @@ async function dashboardArchiveDetect() {
           닫기
         </button>
       </div>
-      <div style="margin-bottom:8px;display:flex;align-items:center;gap:12px">
+      <div style="margin-bottom:8px;display:flex;align-items:center;gap:12px;flex-wrap:wrap">
         <label style="cursor:pointer;font-size:.78rem;color:#6B7280">
           <input type="checkbox" id="dashArchiveSelectAll" onchange="_dashArchiveToggleAll(this.checked)" checked> 전체 선택
         </label>
+        <button onclick="_dashArchiveUncheckUnpaid()" style="background:#FEF2F2;color:#DC2626;border:1px solid #FECACA;padding:3px 10px;border-radius:5px;font-size:.72rem;cursor:pointer">
+          <i class="fas fa-times-circle"></i> 입금 미완료 체크해제
+        </button>
         <span style="font-size:.7rem;color:#9CA3AF">체크 해제 = 아카이브하지 않음 (나중에 처리)</span>
       </div>`;
 
@@ -11401,8 +11420,9 @@ async function dashboardArchiveDetect() {
         const hiddenBadge2 = t.hidden
           ? `<span style="background:#F3F4F6;color:#6B7280;padding:1px 4px;border-radius:3px;font-size:.62rem;margin-left:2px">숨김탭</span>`
           : '';
+        const paidComplete2 = (t.paidCount !== undefined && t.rowCount && t.paidCount >= t.rowCount) ? 'true' : 'false';
         html += `<label style="display:flex;align-items:center;gap:6px;padding:4px 0;font-size:.78rem;cursor:pointer;border-bottom:1px solid #F3F4F6">
-          <input type="checkbox" class="dash-archive-cb" data-sheet="${escHtml(camp.sheetId)}" data-tab="${escHtml(t.tabName)}" data-round="${escHtml(t.round||'')}" checked>
+          <input type="checkbox" class="dash-archive-cb" data-sheet="${escHtml(camp.sheetId)}" data-tab="${escHtml(t.tabName)}" data-round="${escHtml(t.round||'')}" data-paid-complete="${paidComplete2}" checked>
           <span style="flex:1;display:flex;align-items:center;gap:4px">${escHtml(t.tabName)}${sheetLink2}${renamedBadge2}${deletedBadge2}${hiddenBadge2}${roundBadge}${indexBadge}</span>
           ${paidInfo}
           <span style="font-size:.72rem;color:#9CA3AF">${(t.rowCount||0).toLocaleString()}행</span>
@@ -11422,6 +11442,18 @@ async function dashboardArchiveDetect() {
 // ── 대시보드 아카이브: 전체 선택/해제 ──
 function _dashArchiveToggleAll(checked) {
   document.querySelectorAll('.dash-archive-cb').forEach(cb => { cb.checked = checked; });
+}
+
+// ── 대시보드 아카이브: 입금 미완료 항목 체크 해제 ──
+function _dashArchiveUncheckUnpaid() {
+  let count = 0;
+  document.querySelectorAll('.dash-archive-cb').forEach(cb => {
+    if (cb.dataset.paidComplete !== 'true') {
+      cb.checked = false;
+      count++;
+    }
+  });
+  if (typeof showToast === 'function') showToast(`입금 미완료 ${count}건 체크 해제됨`, 'info');
 }
 
 // ── 대시보드 아카이브: 나중에 (닫기) ──
