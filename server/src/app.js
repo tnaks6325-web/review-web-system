@@ -87,6 +87,7 @@ app.get('/health', async (req, res) => {
   }
 
   const googleStatus = process.env.GOOGLE_SERVICE_ACCOUNT_EMAIL ? 'configured' : 'not_configured';
+  const saEmail = process.env.GOOGLE_SERVICE_ACCOUNT_EMAIL || '(미설정)';
 
   res.json({
     ok: true,
@@ -95,6 +96,7 @@ app.get('/health', async (req, res) => {
     db: dbStatus,
     dbTime,
     google: googleStatus,
+    serviceAccount: saEmail,
     version: '2.15.0-dashboard-tuip-chuihap',
     uptime: Math.floor(process.uptime()),
     memory: Math.round(process.memoryUsage().heapUsed / 1024 / 1024) + 'MB',
