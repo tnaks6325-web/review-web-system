@@ -1151,27 +1151,38 @@ async function checkDirtySheets() {
     };
   });
 
+  // ★ 성능 개선: 순차 → 병렬 처리 (throttledMap, 동시 3개)
+  //   기존: 55시트 × 1.2초 간격 = ~66초+ (순차)
+  //   개선: 55시트 ÷ 3 동시 = ~22초 (병렬)
+  const results = await throttledMap(sheetIds, async (sheetId) => {
+    const remoteModified = await getSheetModifiedTime(sheetId);
+    return { sheetId, remoteModified };
+  }, 3);
+
   const dirtySheets = [];
 
-  for (const sheetId of sheetIds) {
-    try {
-      const remoteModified = await throttledCall(() => getSheetModifiedTime(sheetId));
-      if (!remoteModified) continue;
+  for (const r of results) {
+    if (r.status !== 'fulfilled') {
+      // throttledMap rejected 항목 — 개별 시트 실패 로깅
+      const sheetId = sheetIds[results.indexOf(r)];
+      logger.warn(`[dirtyCheck] 시트 ${(sheetId || '').substring(0, 15)} 확인 실패: ${r.reason?.message || 'unknown'}`);
+      continue;
+    }
 
-      const remoteMs = new Date(remoteModified).getTime();
-      const local = localModifiedMap[sheetId] || { lastModified: 0, lastModifiedRaw: null, campaignName: null };
+    const { sheetId, remoteModified } = r.value;
+    if (!remoteModified) continue;
 
-      if (remoteMs > local.lastModified) {
-        dirtySheets.push({
-          sheetId,
-          campaignName: local.campaignName || sheetId.substring(0, 15) + '...',
-          remoteModified,
-          localModified: local.lastModifiedRaw,
-          diffSec: Math.round((remoteMs - local.lastModified) / 1000),
-        });
-      }
-    } catch (err) {
-      logger.warn(`[dirtyCheck] 시트 ${sheetId.substring(0, 15)} 확인 실패: ${err.message}`);
+    const remoteMs = new Date(remoteModified).getTime();
+    const local = localModifiedMap[sheetId] || { lastModified: 0, lastModifiedRaw: null, campaignName: null };
+
+    if (remoteMs > local.lastModified) {
+      dirtySheets.push({
+        sheetId,
+        campaignName: local.campaignName || sheetId.substring(0, 15) + '...',
+        remoteModified,
+        localModified: local.lastModifiedRaw,
+        diffSec: Math.round((remoteMs - local.lastModified) / 1000),
+      });
     }
   }
 

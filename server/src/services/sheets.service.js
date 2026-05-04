@@ -620,10 +620,42 @@ async function checkSheetWriteAccess(spreadsheetId) {
   }
 }
 
+/**
+ * 여러 셀을 한번에 쓰기 (values.batchUpdate)
+ * 개별 writeSheet N회 호출 대신 1회 API 호출로 처리 → 성능 대폭 개선
+ *
+ * @param {string} spreadsheetId - 스프레드시트 ID
+ * @param {Array<{range: string, values: Array<Array<any>>}>} data - 쓸 데이터 배열
+ *   예: [{ range: "'탭명'!C5", values: [['값1']] }, { range: "'탭명'!E5", values: [['값2']] }]
+ * @param {string} valueInputOption - 'RAW' | 'USER_ENTERED' (기본: 'RAW')
+ */
+async function batchUpdateSheet(spreadsheetId, data, valueInputOption = 'RAW') {
+  if (!sheets) throw new Error('Google Sheets API가 설정되지 않았습니다.');
+  if (!data || data.length === 0) return;
+
+  // 슬래시 포함 탭이 하나라도 있으면 개별 writeSheet 폴백
+  const hasSlash = data.some(d => d.range && d.range.includes('/'));
+  if (hasSlash) {
+    for (const item of data) {
+      await writeSheet(spreadsheetId, item.range, item.values);
+    }
+    return;
+  }
+
+  await sheets.spreadsheets.values.batchUpdate({
+    spreadsheetId,
+    requestBody: {
+      valueInputOption,
+      data,
+    },
+  });
+}
+
 module.exports = {
   readSheet,
   writeSheet,
   appendSheet,
+  batchUpdateSheet,
   getSpreadsheetMeta,
   batchReadSheet,
   getSheetModifiedTime,

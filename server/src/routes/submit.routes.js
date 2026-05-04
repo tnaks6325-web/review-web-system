@@ -1,6 +1,6 @@
 const express = require('express');
 const router = express.Router();
-const { writeSheet, readSheet, appendSheet, getSpreadsheetMeta, batchReadSheet } = require('../services/sheets.service');
+const { writeSheet, readSheet, appendSheet, getSpreadsheetMeta, batchReadSheet, batchUpdateSheet } = require('../services/sheets.service');
 const { enqueue } = require('../services/syncQueue.service');
 const pool = require('../db/pool');
 const { logger } = require('../utils/logger');
@@ -592,16 +592,29 @@ router.post('/order', async (req, res, next) => {
             writePairs.push({ col: ci, val: rowData[ci] });
           }
 
-          // 배치로 한번에 쓰기 (범위 지정)
+          // ★ 성능 개선: batchUpdate로 1회 API 호출 (기존 N회 → 1회)
+          //   실패 시 기존 개별 쓰기로 폴백 (안전 보장)
           if (writePairs.length > 0) {
-            // 각 셀 개별 쓰기 (기존값 보호를 위해)
-            for (const pair of writePairs) {
-              const colLetter = getColLetter(pair.col);
-              const range = `'${tabName}'!${colLetter}${rowNum}`;
-              await writeSheet(sheetId, range, [[pair.val]]);
+            const batchData = writePairs.map(pair => ({
+              range: `'${tabName}'!${getColLetter(pair.col)}${rowNum}`,
+              values: [[pair.val]],
+            }));
+
+            try {
+              await batchUpdateSheet(sheetId, batchData);
+              sheetsWritten = true;
+              usedSlot = true;
+            } catch (batchErr) {
+              // batchUpdate 실패 → 기존 개별 쓰기로 폴백
+              logger.warn(`[submit/order] batchUpdate 실패, 개별 쓰기 폴백: ${batchErr.message}`);
+              for (const pair of writePairs) {
+                const colLetter = getColLetter(pair.col);
+                const range = `'${tabName}'!${colLetter}${rowNum}`;
+                await writeSheet(sheetId, range, [[pair.val]]);
+              }
+              sheetsWritten = true;
+              usedSlot = true;
             }
-            sheetsWritten = true;
-            usedSlot = true;
           }
 
           // 슬롯 잠금 기록
