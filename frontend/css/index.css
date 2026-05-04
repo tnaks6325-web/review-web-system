@@ -181,10 +181,7 @@
   box-shadow: 0 1px 3px rgba(0, 0, 0, 0.08);
   display: none;  /* 기본적으로 숨김 */
 }
-/* UI 편집 모드에서만 표시 */
-body.ui-edit-mode .dev-label {
-  display: block;
-}
+
 /* 어두운 배경용 */
 .dev-label.dark {
   color: #D1D5DB;
@@ -233,37 +230,7 @@ input,textarea,button{font-family:inherit}
 .gas-url-history-current .gas-url-ver-badge{background:#7C3AED}
 .gas-url-history-url{font-size:.68rem;color:var(--t2);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;min-width:0;flex:1}
 .gas-url-cur-tag{flex-shrink:0;font-size:.6rem;font-weight:700;color:#7C3AED;background:#EDE9FE;border-radius:20px;padding:1px 5px;white-space:nowrap}
-/* ── UI 편집 모드 ── */
-.ui-edit-overlay{position:absolute;inset:0;background:rgba(80,70,228,.08);border:2px dashed rgba(80,70,228,.4);border-radius:8px;cursor:pointer;z-index:9500;display:flex;align-items:center;justify-content:center;transition:all .2s ease;pointer-events:auto}
-.ui-edit-overlay:hover{background:rgba(80,70,228,.15);border-color:rgba(80,70,228,.7)}
-.ui-edit-label{background:var(--p);color:#fff;padding:4px 12px;border-radius:20px;font-size:.75rem;font-weight:600;pointer-events:none;box-shadow:0 2px 8px rgba(0,0,0,.15)}
-#uiPropertyPanel{position:fixed;top:80px;right:20px;width:360px;max-height:calc(100vh - 100px);background:#fff;border:1.5px solid var(--border);border-radius:16px;box-shadow:0 8px 24px rgba(0,0,0,.12);z-index:9600;display:flex;flex-direction:column;animation:slideInRight .25s ease}
-@keyframes slideInRight{from{opacity:0;transform:translateX(20px)}to{opacity:1;transform:translateX(0)}}
-.ui-prop-header{display:flex;align-items:center;justify-content:space-between;padding:16px 18px;border-bottom:1.5px solid var(--border);background:linear-gradient(135deg,#5046E4,#7C3AED)}
-.ui-prop-header h3{font-size:.95rem;font-weight:700;color:#fff;margin:0}
-.ui-prop-close{width:28px;height:28px;border:none;background:rgba(255,255,255,.2);color:#fff;border-radius:6px;cursor:pointer;display:flex;align-items:center;justify-content:center;transition:background .15s}
-.ui-prop-close:hover{background:rgba(255,255,255,.3)}
-.ui-prop-body{padding:16px;overflow-y:auto;flex:1;min-height:0}
-.ui-prop-empty{display:flex;flex-direction:column;align-items:center;justify-content:center;padding:40px 20px;color:var(--t3);text-align:center}
-.ui-prop-empty i{font-size:2rem;margin-bottom:12px;opacity:.5}
-.ui-prop-empty p{font-size:.85rem;margin:0}
-.ui-prop-section-title{display:flex;align-items:center;gap:8px;font-size:.82rem;font-weight:700;color:var(--t1);margin-bottom:12px;padding-bottom:8px;border-bottom:1.5px solid var(--border)}
-.ui-prop-section-title i{color:var(--p);font-size:.75rem}
-.ui-prop-category{display:flex;align-items:center;gap:6px;font-size:.75rem;font-weight:600;color:var(--t2);margin-top:16px;margin-bottom:10px;padding:6px 10px;background:#F9FAFB;border-radius:6px;border-left:3px solid var(--p)}
-.ui-prop-category i{color:var(--p);font-size:.7rem}
-.ui-prop-help{background:#F0F9FF;border:1px solid #BAE6FD;border-radius:6px;padding:8px 10px;margin-bottom:14px;font-size:.72rem;color:#0C4A6E;line-height:1.4}
-.ui-prop-help code{background:#E0F2FE;padding:1px 5px;border-radius:4px;font-family:monospace;font-size:.7rem;font-weight:600}
-.ui-prop-divider{height:1px;background:var(--border);margin:16px 0}
-.ui-prop-field{margin-bottom:14px}
-.ui-prop-label{display:block;font-size:.75rem;font-weight:600;color:var(--t2);margin-bottom:6px}
-.ui-prop-input{width:100%;padding:8px 11px;border:1.5px solid var(--border);border-radius:8px;font-size:.83rem;outline:none;transition:border-color .15s,box-shadow .15s}
-.ui-prop-input:focus{border-color:var(--p);box-shadow:0 0 0 3px rgba(80,70,228,.1)}
-.ui-prop-footer{display:flex;gap:8px;padding:14px 16px;border-top:1.5px solid var(--border);background:var(--bg)}
-.ui-prop-btn{flex:1;padding:10px 16px;border:none;border-radius:8px;font-size:.83rem;font-weight:600;cursor:pointer;display:flex;align-items:center;justify-content:center;gap:6px;transition:all .15s}
-.ui-prop-btn-cancel{background:#F3F4F6;color:var(--t2)}
-.ui-prop-btn-cancel:hover{background:#E5E7EB}
-.ui-prop-btn-apply{background:var(--p);color:#fff}
-.ui-prop-btn-apply:hover{background:#4338CA;box-shadow:0 4px 12px rgba(80,70,228,.3)}
+
 
 .gas-url-history-date{flex-shrink:0;font-size:.62rem;color:var(--t3);white-space:nowrap;margin-left:4px}
 .index-section{margin-top:18px;border-top:1px solid var(--bd);padding-top:16px}
