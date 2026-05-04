@@ -11845,28 +11845,30 @@ const _TAB_DASH_COLS = [
 ];
 
 // ★ 서버 기반 컬럼 표시/순서 설정 — 모든 관리자에게 동일하게 적용
-// 초기 로드: localStorage 캐시 → 서버에서 최신값 비동기 적용
+// v2: localStorage 캐시 완전 제거 — 서버 설정이 유일한 진실의 원천
 let _colPrefsLoaded = false;
-(function _loadColPrefsFromCache() {
-  // 빠른 렌더를 위해 localStorage 캐시를 먼저 적용
-  try {
-    const saved = localStorage.getItem("tabDash_colPrefs");
-    if (saved) { _applyColPrefs(JSON.parse(saved)); }
-  } catch(_){}
-})();
 
-// 서버에서 컬럼 설정 비동기 로드 (loadTabDashboard에서 호출)
+// ★ 기존 localStorage 캐시 강제 정리 (다른 사용자 브라우저에 남아있는 이전 설정 제거)
+try { localStorage.removeItem("tabDash_colPrefs"); } catch(_){}
+
+// 서버에서 컬럼 설정 로드 (loadTabDashboard에서 호출)
+// ★ 서버 값이 항상 최종 적용됨 — localStorage는 사용하지 않음
 async function _loadColPrefsFromServer() {
   try {
     const data = await gasGet({ action: 'getColPrefs' });
     if (data.ok && data.prefs) {
       _applyColPrefs(data.prefs);
-      // localStorage에 캐시 갱신
-      try { localStorage.setItem("tabDash_colPrefs", JSON.stringify(data.prefs)); } catch(_){}
       _colPrefsLoaded = true;
-      return true; // 변경 있음 → 리렌더 필요
+      return true; // 서버 설정 적용됨
     }
-  } catch(e) { console.warn('[colPrefs] 서버 로드 실패, 캐시 사용:', e.message); }
+    // ★ 서버에 설정이 없으면 현재 기본 설정을 서버에 자동 저장 (초기 세팅)
+    if (data.ok && !data.prefs) {
+      console.info('[colPrefs] 서버에 설정 없음 → 현재 기본값을 서버에 저장');
+      await _saveColPrefs();
+      _colPrefsLoaded = true;
+      return true;
+    }
+  } catch(e) { console.warn('[colPrefs] 서버 로드 실패, 기본값 사용:', e.message); }
   return false;
 }
 
@@ -11887,12 +11889,14 @@ function _applyColPrefs(prefs) {
 async function _saveColPrefs() {
   const prefs = {};
   _TAB_DASH_COLS.forEach((c, i) => prefs[c.key] = { show: c.show, order: i });
-  // localStorage 캐시도 갱신
-  try { localStorage.setItem("tabDash_colPrefs", JSON.stringify(prefs)); } catch(_){}
-  // 서버에 저장 (전역 공유)
+  // 서버에만 저장 (전역 공유 — 모든 관리자에게 동일 적용)
   try {
     await gasPost({ action: 'saveColPrefs', prefs });
-  } catch(e) { console.warn('[colPrefs] 서버 저장 실패:', e.message); }
+    showToast('컬럼 설정이 저장되었습니다 (모든 관리자에게 적용)', 'success');
+  } catch(e) { 
+    console.warn('[colPrefs] 서버 저장 실패:', e.message);
+    showToast('컬럼 설정 저장 실패: ' + e.message, 'error');
+  }
 }
 
 // [v11.8.3] 카드뷰 제거 — 테이블뷰 고정
