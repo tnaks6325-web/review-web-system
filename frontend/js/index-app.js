@@ -12509,11 +12509,11 @@ function _cellVal(t, col) {
     const rc = t._isRoundRow ? (t._roundTotal || 0) : (t.row_count || 0);
     const pc = t._isRoundRow ? (t._roundPaid || 0) : (t.paid_count || 0);
     if (rc === 0) return '<span style="color:#D1D5DB">—</span>';
-    if (pc === 0 && rc > 0) return `<span style="color:#D1D5DB">0/${rc}</span>`;
+    if (pc === 0 && rc > 0) return `<span style="font-weight:600">${pc}/${rc}</span>`;
     const pct = Math.round(pc / rc * 100);
     const clr = pct >= 100 ? "#059669" : pct >= 50 ? "#D97706" : "#DC2626";
     const icon = pct >= 100 ? ' <i class="fas fa-check" style="font-size:.6rem"></i>' : '';
-    return `<span style="font-weight:600;color:${clr}">${pc}/${rc}</span> <span style="color:${clr};font-size:.68rem">(${pct}%)${icon}</span>`;
+    return `<span style="font-weight:600">${pc}/${rc}</span> <span style="color:${clr};font-size:.68rem">(${pct}%)${icon}</span>`;
   }
   // 캠페인명 + 🔄 갱신 버튼
   if (k === "campaign_name") {
