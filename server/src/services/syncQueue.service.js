@@ -218,12 +218,23 @@ async function retryItem(id) {
 
 // ── 모든 실패 항목 재시도 ──
 async function retryAllFailed() {
+  // stuck된 processing 항목도 함께 리셋 (5분 이상 경과)
+  const { rowCount: unstuck } = await pool.query(
+    `UPDATE sync_queue
+     SET status = 'pending', error_msg = 'reset: stuck processing'
+     WHERE status = 'processing'
+       AND (processed_at IS NULL OR processed_at < NOW() - INTERVAL '5 minutes')`
+  );
+  if (unstuck > 0) {
+    logger.info(`[syncQueue] ${unstuck}건 stuck processing 항목 리셋`);
+  }
+
   const { rowCount } = await pool.query(
     `UPDATE sync_queue
      SET status = 'pending', attempts = 0, error_msg = NULL
      WHERE status = 'failed'`
   );
-  return { retried: rowCount };
+  return { retried: rowCount, unstuck };
 }
 
 // ── 완료된 항목 정리 (24시간 이상 경과) ──
