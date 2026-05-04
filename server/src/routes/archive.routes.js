@@ -199,29 +199,40 @@ router.get('/detect', authMiddleware, async (req, res, next) => {
     const campaigns = Array.from(campMap.values());
     const uniqueSheetIds = [...new Set(campaigns.map(c => c.sheetId))];
     
-    // 시트별 tabName→gid 실시간 맵 구축
+    // 시트별 tabName→gid 실시간 맵 구축 + hidden 상태 포함
     const liveGidMap = {}; // { sheetId: { tabName: gid } }
+    const hiddenGidMap = {}; // { sheetId: Set(gid) } — 숨김 탭 gid 집합
     await Promise.all(uniqueSheetIds.map(async (sheetId) => {
       try {
         const meta = await getSpreadsheetMeta(sheetId);
         const map = {};
+        const hiddenSet = new Set();
         for (const s of (meta || [])) {
           if (s.properties) {
-            map[s.properties.title] = String(s.properties.sheetId);
+            const gidStr = String(s.properties.sheetId);
+            map[s.properties.title] = gidStr;
+            // hidden 상태 감지: properties.hidden === true
+            if (s.properties.hidden) {
+              hiddenSet.add(gidStr);
+            }
           }
         }
         liveGidMap[sheetId] = map;
+        hiddenGidMap[sheetId] = hiddenSet;
       } catch (e) {
         logger.warn(`[archive/detect] sheet meta 조회 실패: ${sheetId.substring(0,15)}... — ${e.message}`);
         liveGidMap[sheetId] = null; // 실패 시 DB값 유지
+        hiddenGidMap[sheetId] = new Set();
       }
     }));
 
-    // 각 탭의 tabGid를 실시간 값으로 교체
+    // 각 탭의 tabGid를 실시간 값으로 교체 + hidden 상태 표시
     // 전략: 1) tabName으로 매칭 → 2) DB gid가 시트에 존재하면 유지 → 3) 없으면 null
     for (const camp of campaigns) {
       const map = liveGidMap[camp.sheetId];
       if (!map) continue; // 조회 실패 시 DB값 유지
+
+      const hiddenSet = hiddenGidMap[camp.sheetId] || new Set();
 
       // gid→tabName 역방향 맵 구축 (이름 변경 대응)
       const gidToName = {};
@@ -236,6 +247,10 @@ router.get('/detect', authMiddleware, async (req, res, next) => {
         const liveGid = map[tab.tabName];
         if (liveGid) {
           tab.tabGid = liveGid;
+          // ★ 숨김 탭 여부 표시
+          if (hiddenSet.has(liveGid)) {
+            tab.hidden = true;
+          }
           continue;
         }
         // 2) DB gid가 시트에 여전히 존재 → gid 유효, 탭 이름만 변경됨
@@ -243,6 +258,10 @@ router.get('/detect', authMiddleware, async (req, res, next) => {
         if (dbGidStr && validGids.has(dbGidStr)) {
           // gid는 유효 — 실제 탭 이름을 표시용으로 추가
           tab.liveTabName = gidToName[dbGidStr] || null;
+          // ★ 숨김 탭 여부 표시
+          if (hiddenSet.has(dbGidStr)) {
+            tab.hidden = true;
+          }
           continue;
         }
         // 3) 탭이 시트에서 완전히 삭제됨 → gid 무효화
