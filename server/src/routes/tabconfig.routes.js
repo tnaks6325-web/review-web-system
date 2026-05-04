@@ -973,7 +973,7 @@ router.post('/clean-closed', authMiddleware, async (req, res, next) => {
 // ═══════════════════════════════════════════════════════════
 router.get('/dashboard', authMiddleware, async (req, res, next) => {
   try {
-    // 탭설정 + 인덱스 통계 JOIN
+    // 탭설정 + 인덱스 통계 + 입금 집계 JOIN
     const { rows } = await pool.query(`
       SELECT
         tc.sheet_id, tc.tab_name, tc.sheet_url, tc.campaign_name,
@@ -984,9 +984,16 @@ router.get('/dashboard', authMiddleware, async (req, res, next) => {
         tc.round, tc.nc_mode, tc.deposit_name, tc.transfer_bank,
         tc.income_type, tc.updated_at, tc.closed_rounds,
         im.row_count, im.submitted_count, im.status AS index_status,
-        im.built_at AS index_built_at, im.checksum
+        im.built_at AS index_built_at, im.checksum,
+        COALESCE(paid.paid_count, 0) AS paid_count
       FROM tab_configs tc
       LEFT JOIN index_master im ON tc.sheet_id = im.sheet_id AND tc.tab_name = im.tab_name
+      LEFT JOIN (
+        SELECT sheet_id, tab_name,
+               COUNT(*) FILTER (WHERE is_submitted2 = 'PAID') AS paid_count
+        FROM review_index
+        GROUP BY sheet_id, tab_name
+      ) paid ON tc.sheet_id = paid.sheet_id AND tc.tab_name = paid.tab_name
       WHERE NOT EXISTS (
         SELECT 1 FROM index_master_archive ima
         WHERE ima.sheet_id = tc.sheet_id AND ima.tab_name = tc.tab_name
@@ -998,7 +1005,8 @@ router.get('/dashboard', authMiddleware, async (req, res, next) => {
     const { rows: roundRows } = await pool.query(`
       SELECT ri.sheet_id, ri.tab_name, ri.round,
              COUNT(*) AS total,
-             COUNT(*) FILTER (WHERE ri.is_submitted) AS submitted
+             COUNT(*) FILTER (WHERE ri.is_submitted) AS submitted,
+             COUNT(*) FILTER (WHERE ri.is_submitted2 = 'PAID') AS paid
       FROM review_index ri
       INNER JOIN index_master im ON ri.sheet_id = im.sheet_id AND ri.tab_name = im.tab_name AND im.status = 'active'
       WHERE ri.round IS NOT NULL AND ri.round != ''
@@ -1015,6 +1023,7 @@ router.get('/dashboard', authMiddleware, async (req, res, next) => {
         round: rr.round,
         total: parseInt(rr.total) || 0,
         submitted: parseInt(rr.submitted) || 0,
+        paid: parseInt(rr.paid) || 0,
       });
     }
     // roundList 숫자순 정렬

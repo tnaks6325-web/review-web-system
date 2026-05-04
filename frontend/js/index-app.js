@@ -11831,6 +11831,7 @@ const _TAB_DASH_COLS = [
   { key:"time_range",       label:"주문시간대", cat:"meta",  show:true,  align:"center" },
   { key:"round",            label:"차수",      cat:"meta",  show:true,  align:"center" },
   { key:"_progress",        label:"인원/제출",  cat:"index", show:true,  align:"right" },
+  { key:"_paid",             label:"입금",      cat:"index", show:true,  align:"right" },
 
   { key:"is_bulk",          label:"대량건",    cat:"meta",  show:false, align:"center" },
   { key:"delivery_type",    label:"배송유형",  cat:"meta",  show:false, align:"center" },
@@ -11933,6 +11934,7 @@ function _filterTabDashData() {
           _roundLabel: rd.round,
           _roundTotal: rd.total,
           _roundSubmitted: rd.submitted,
+          _roundPaid: rd.paid || 0,
           _isRoundRow: true,
         }));
       });
@@ -12501,6 +12503,17 @@ function _cellVal(t, col) {
     const pct = Math.round(sc / rc * 100);
     const clr = pct >= 80 ? "#059669" : pct >= 50 ? "#D97706" : "#DC2626";
     return `<span style="font-weight:600">${sc}/${rc}</span> <span style="color:${clr};font-size:.68rem">(${pct}%)</span>`;
+  }
+  if (k === "_paid") {
+    // ★ 입금 현황: paid_count / row_count
+    const rc = t._isRoundRow ? (t._roundTotal || 0) : (t.row_count || 0);
+    const pc = t._isRoundRow ? (t._roundPaid || 0) : (t.paid_count || 0);
+    if (rc === 0) return '<span style="color:#D1D5DB">—</span>';
+    if (pc === 0 && rc > 0) return `<span style="color:#D1D5DB">0/${rc}</span>`;
+    const pct = Math.round(pc / rc * 100);
+    const clr = pct >= 100 ? "#059669" : pct >= 50 ? "#D97706" : "#DC2626";
+    const icon = pct >= 100 ? ' <i class="fas fa-check" style="font-size:.6rem"></i>' : '';
+    return `<span style="font-weight:600;color:${clr}">${pc}/${rc}</span> <span style="color:${clr};font-size:.68rem">(${pct}%)${icon}</span>`;
   }
   // 캠페인명 + 🔄 갱신 버튼
   if (k === "campaign_name") {
