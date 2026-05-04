@@ -5942,8 +5942,9 @@ function _ignoreDuplicate() {
   // 경고 숨김
   const w = document.getElementById("ofDuplicateWarn");
   if (w) w.style.display = "none";
-  // 플래그 세우고 재제출 (이번엔 중복 검사 건너뜀)
+  // 플래그 세우고 재제출 (프론트 사전검사 + 서버 중복 검사 모두 건너뜀)
   window._dupIgnored = true;
+  window._forceResubmit = true;
   submitOrderForm();
 }
 
