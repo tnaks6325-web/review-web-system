@@ -5554,7 +5554,15 @@ async function submitOrderForm() {
 
   function _resetBtn(label) {
     window._submitOrderFormInProgress = false;
-    if (btn) { btn.disabled = false; btn.innerHTML = label || '<i class="fas fa-paper-plane"></i> 제출'; }
+    if (btn) {
+      btn.disabled = false;
+      btn.innerHTML = label || '<i class="fas fa-paper-plane"></i> 제출';
+      // 재제출 모드가 아니면 스타일 초기화
+      if (!label) {
+        btn.style.background = "";
+        btn.style.color = "";
+      }
+    }
   }
 
   const ctx = window._orderFormCtx || {};
@@ -5893,10 +5901,16 @@ async function submitOrderForm() {
   window._submitOrderFormInProgress = false;
 
   if (successCount === 0) {
-    // ★ 전체 실패 시: 재제출 안내 화면 표시 (입력값 보존)
-    _resetBtn('<i class="fas fa-redo"></i> 재제출');
+    // ★ 전체 실패 시: 재제출 안내 + 버튼 변경 + 스크롤
+    _resetBtn('<i class="fas fa-redo"></i> 재제출 (중복 검사 건너뜀)');
     window._forceResubmit = true;  // 다음 제출 시 중복 검사 건너뜀
-    showToast("제출에 실패했습니다. 정보를 확인 후 '재제출' 버튼을 눌러주세요.", "error");
+    // 제출 버튼을 눈에 띄게 강조 + 스크롤
+    const subBtn = document.getElementById("btnOrderFormSubmit");
+    if (subBtn) {
+      subBtn.style.background = "#DC2626";
+      subBtn.style.color = "#fff";
+      subBtn.scrollIntoView({ behavior: "smooth", block: "center" });
+    }
     return;
   }
 
