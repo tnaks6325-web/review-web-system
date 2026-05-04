@@ -3317,6 +3317,15 @@ function initOrderFormMode() {
     // 로그인 안 된 상태 → 로그인 화면 표시 후 완료 시 폼으로 복귀
     window._pendingOrderForm = true; // 로그인 완료 후 폼 진입 플래그
     showScreen("screenSearch"); // 로그인 UI가 있는 검색 화면
+
+    // ★ 구매양식 단축링크 진입 시 헤더 텍스트를 캠페인 정보로 교체
+    const _formLabel = displayName || tabName || "";
+    const _searchTitleEl = document.getElementById("searchTitle");
+    const _searchDescEl  = document.getElementById("searchHeaderDesc");
+    if (_searchTitleEl) _searchTitleEl.textContent = _formLabel || "구매양식 제출";
+    if (_searchDescEl)  _searchDescEl.textContent  = "로그인 한뒤에 구매양식폼을 입력/제출하세요";
+    document.title = _formLabel ? `${_formLabel} — 구매양식` : "구매양식 제출";
+
     _switchAuthTab("login");
     showToast("구매양식 제출을 위해 먼저 로그인해주세요.", "info");
     return true; // 일반 초기화 스킵
