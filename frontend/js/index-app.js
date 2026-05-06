@@ -13187,9 +13187,9 @@ function openDedupeSelector() {
         if (t.folderUrl) {
           tabsWithFolder.push({
             sheetId: t.sheetId,
-            tabName: t.tabName,
-            displayName: t.displayName || t.tabName,
-            campName: camp.campaignName || '',
+            tabName: t.tab,
+            displayName: t.displayName || t.tab,
+            campName: camp.campaignName || camp.name || '',
             folderUrl: t.folderUrl,
           });
         }
