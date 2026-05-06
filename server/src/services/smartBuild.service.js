@@ -251,7 +251,7 @@ async function _upsertTab(sheetId, tabName, tabGid, checksum, rows, modifiedTime
     // tab_name 매칭 + gid 매칭 (탭 이름 변경 대응)
     const { rows: archiveCheck } = await client.query(
       `SELECT 1 FROM index_master_archive
-       WHERE sheet_id = $1 AND (tab_name = $2 OR ($3 IS NOT NULL AND tab_gid = $3))
+       WHERE sheet_id = $1 AND (tab_name = $2 OR ($3::text IS NOT NULL AND tab_gid = $3::text))
        LIMIT 1`,
       [sheetId, tabName, tabGid || null]
     );
