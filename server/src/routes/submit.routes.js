@@ -480,8 +480,20 @@ router.post('/order', async (req, res, next) => {
           // 실제 시트 행 번호 계산 (1-based, 헤더행 = headerRowIdx+1, 데이터 시작 = headerRowIdx+2)
           const targetRow = headerRowIdx + 1 + emptyRowOffset + 1; // +1 for 1-based, +1 for header row itself
 
-          const range = `'${tabName}'!A${targetRow}`;
-          await writeSheet(sheetId, range, [rowData], sheetOpts);
+          // ★ null이 아닌 셀만 개별 쓰기 (번호, 구매일자 등 기존 값 보존)
+          const writePairs = [];
+          for (let ci = 0; ci < rowData.length; ci++) {
+            if (rowData[ci] === null) continue; // null = 기존 값 보존
+            writePairs.push({ col: ci, val: rowData[ci] });
+          }
+
+          if (writePairs.length > 0) {
+            const batchData = writePairs.map(pair => ({
+              range: `'${tabName}'!${getColLetter(pair.col)}${targetRow}`,
+              values: [[pair.val]],
+            }));
+            await batchUpdateSheet(sheetId, batchData, 'RAW', sheetOpts);
+          }
 
           // 성공 시 캐시 무효화
           tabDataCache.delete(`${sheetId}||${tabName}`);
@@ -650,7 +662,8 @@ function _mapOrderToRow(headers, orderData) {
     if (key.includes('주문번호') || key.includes('ordernum')) return orderData.orderNum || '';
     if (key.includes('비고') || key.includes('memo')) return orderData.memo || '';
     if (key.includes('옵션') || key.includes('option')) return orderData.selectedOptKey || '';
-    return '';
+    // ★ 매칭되지 않는 열(번호, 구매일자 등)은 null → 기존 값 보존
+    return null;
   });
 }
 

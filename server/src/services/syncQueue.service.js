@@ -12,7 +12,7 @@
  */
 
 const pool = require('../db/pool');
-const { writeSheet, appendSheet, readSheet } = require('./sheets.service');
+const { writeSheet, appendSheet, readSheet, batchUpdateSheet } = require('./sheets.service');
 const { logger } = require('../utils/logger');
 
 // ── 큐에 작업 추가 ──
@@ -214,7 +214,21 @@ async function _executeItem(item) {
 
       // 실제 시트 행 번호 (1-based)
       const targetRow = headerRowIdx + 1 + emptyRowOffset + 1;
-      await writeSheet(sheetId, `'${tabName}'!A${targetRow}`, [rowData]);
+
+      // ★ null이 아닌 셀만 개별 쓰기 (번호, 구매일자 등 기존 값 보존)
+      const writePairs = [];
+      for (let ci = 0; ci < rowData.length; ci++) {
+        if (rowData[ci] === null) continue;
+        writePairs.push({ col: ci, val: rowData[ci] });
+      }
+
+      if (writePairs.length > 0) {
+        const batchData = writePairs.map(pair => ({
+          range: `'${tabName}'!${_getColLetter(pair.col)}${targetRow}`,
+          values: [[pair.val]],
+        }));
+        await batchUpdateSheet(sheetId, batchData, 'RAW');
+      }
       break;
     }
 
