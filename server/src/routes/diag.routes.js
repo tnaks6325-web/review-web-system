@@ -279,6 +279,21 @@ router.post('/add-campaign', authMiddleware, async (req, res, next) => {
       return res.json({ error: 'sheetId 또는 url이 필요합니다.' });
     }
 
+    // ★ 중복 등록 방지: 이미 campaigns에 등록된 sheet_id인지 확인
+    const { rows: existingCampaigns } = await pool.query(
+      'SELECT campaign_name FROM campaigns WHERE sheet_id = $1 LIMIT 1',
+      [finalSheetId]
+    );
+    if (existingCampaigns.length > 0) {
+      const existingName = existingCampaigns[0].campaign_name;
+      return res.json({
+        error: `이미 등록된 캠페인입니다 (${existingName}).\n\n기존에 등록된 업체는 스마트빌드 갱신 시 새 탭이 자동으로 인식됩니다.\n별도로 다시 등록할 필요가 없습니다.`,
+        duplicate: true,
+        existingCampaignName: existingName,
+        sheetId: finalSheetId,
+      });
+    }
+
     // 시트 메타데이터에서 캠페인명 가져오기
     let resolvedName = finalCampaignName;
     if (!resolvedName) {
@@ -353,6 +368,57 @@ router.post('/add-campaign', authMiddleware, async (req, res, next) => {
     res.json({ ok: true, sheetId: finalSheetId, campaignName: resolvedName, addedToSheetDB });
   } catch (err) {
     next(err);
+  }
+});
+
+// ═══════════════════════════════════════════════════════════
+// DELETE /api/diag/delete-campaign — 캠페인 삭제 (잘못 등록된 캠페인 제거)
+// body: { sheetId, campaignName? }
+// campaigns, tab_configs, index_master, review_index에서 해당 sheet_id 데이터 삭제
+// ═══════════════════════════════════════════════════════════
+router.delete('/delete-campaign', authMiddleware, async (req, res, next) => {
+  const client = await pool.connect();
+  try {
+    const { sheetId, campaignName } = req.body;
+    if (!sheetId) {
+      return res.status(400).json({ error: 'sheetId가 필요합니다.' });
+    }
+
+    await client.query('BEGIN');
+
+    // 1. review_index 삭제
+    const { rowCount: reviewDeleted } = await client.query(
+      'DELETE FROM review_index WHERE sheet_id = $1', [sheetId]
+    );
+
+    // 2. index_master 삭제
+    const { rowCount: masterDeleted } = await client.query(
+      'DELETE FROM index_master WHERE sheet_id = $1', [sheetId]
+    );
+
+    // 3. tab_configs 삭제
+    const { rowCount: tabDeleted } = await client.query(
+      'DELETE FROM tab_configs WHERE sheet_id = $1', [sheetId]
+    );
+
+    // 4. campaigns 삭제
+    const { rowCount: campDeleted } = await client.query(
+      'DELETE FROM campaigns WHERE sheet_id = $1', [sheetId]
+    );
+
+    await client.query('COMMIT');
+
+    logger.info(`[delete-campaign] 캠페인 삭제 완료: sheetId=${sheetId.substring(0,15)}... campaign=${campDeleted}, tabs=${tabDeleted}, master=${masterDeleted}, reviews=${reviewDeleted}`);
+    res.json({
+      ok: true,
+      deleted: { campaigns: campDeleted, tabConfigs: tabDeleted, indexMaster: masterDeleted, reviewIndex: reviewDeleted },
+    });
+  } catch (err) {
+    await client.query('ROLLBACK');
+    logger.error(`[delete-campaign] 오류: ${err.message}`);
+    next(err);
+  } finally {
+    client.release();
   }
 });
 

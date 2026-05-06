@@ -9355,7 +9355,17 @@ async function previewAddCampaign() {
     const badge = document.getElementById("addCampAlreadyBadge");
     if (data.alreadyRegistered) {
       badge.style.display = "block";
-      badge.textContent = "⚠ 이미 등록된 캠페인입니다 (" + data.existingName + "). 다시 등록하면 업데이트됩니다.";
+      badge.innerHTML = `<div style="color:#DC2626;font-size:.78rem;line-height:1.6">
+        <i class="fas fa-ban" style="margin-right:4px"></i>
+        <b>등록 불가</b> — 이미 등록된 캠페인입니다 (${escHtml(data.existingName)}).<br>
+        기존에 등록된 업체는 <b>스마트빌드 갱신 시 새 탭이 자동으로 인식</b>됩니다.<br>
+        별도로 다시 등록할 필요가 없습니다.
+      </div>`;
+      // 등록 버튼 숨기기 (등록 차단)
+      document.getElementById("addCampPreviewArea").style.display = "block";
+      btn.style.display = "none";
+      document.getElementById("addCampSubmitBtn").style.display = "none";
+      return;
     } else {
       badge.style.display = "none";
     }
@@ -9396,6 +9406,14 @@ async function submitAddCampaign() {
   btn.innerHTML = '<i class="fas fa-spinner fa-spin"></i> 등록 중...';
   try {
     const data = await gasGet({ action: "addCampaign", url: raw });
+    // ★ 중복 등록 차단: 이미 등록된 캠페인이면 에러 표시
+    if (data.error || data.duplicate) {
+      errEl.innerHTML = `<div style="color:#DC2626;font-size:.78rem;line-height:1.6;padding:8px 12px;background:#FEF2F2;border:1px solid #FECACA;border-radius:8px">
+        <i class="fas fa-exclamation-triangle" style="margin-right:4px"></i>
+        ${escHtml(data.error || '등록 실패').replace(/\n/g, '<br>')}
+      </div>`;
+      return;
+    }
     closeAddCampaign();
     showToast(`✅ 등록 완료: ${data.campaignName} (${data.url})`);
     // ★ v10.2 P2-B: 세부목록 기본 행 자동 삽입 결과 안내

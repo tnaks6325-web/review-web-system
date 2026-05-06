@@ -145,6 +145,7 @@ const _ACTION_MAP = {
   'campaignList':       { method: 'GET',  path: '/api/diag/campaign-list' },
   'previewCampaign':    { method: 'GET',  path: '/api/diag/preview-campaign' },
   'addCampaign':        { method: 'POST', path: '/api/diag/add-campaign' },
+  'deleteCampaign':     { method: 'DELETE', path: '/api/diag/delete-campaign' },
   'createBaseSheet':    { method: 'POST', path: '/api/diag/new-sheet' },
 
   // 뷰어
@@ -249,11 +250,11 @@ async function gasGet(params, timeout) {
 
   let url, fetchOpts;
 
-  if (actualMethod === 'POST') {
-    // ★ POST 매핑된 action은 body로 전송 (buildIndex, buildIndexSmart 등)
+  if (actualMethod === 'POST' || actualMethod === 'DELETE' || actualMethod === 'PUT' || actualMethod === 'PATCH') {
+    // ★ POST/DELETE/PUT/PATCH 매핑된 action은 body로 전송
     url = API_BASE_URL + route.path;
     fetchOpts = {
-      method: 'POST',
+      method: actualMethod,
       headers: { 'Content-Type': 'application/json', ..._getAuthHeaders() },
       body: JSON.stringify(queryParams),
     };
