@@ -140,9 +140,18 @@ router.get('/og/:code', async (req, res, next) => {
 
     const row = rows[0];
 
-    // User-Agent로 크롤러 판별 (카카오톡, 페이스북, 트위터, 슬랙, 디스코드 등)
-    const ua = (req.headers['user-agent'] || '').toLowerCase();
-    const isCrawler = /kakaotalk|facebookexternalhit|twitterbot|slackbot|discordbot|linkedinbot|googlebot|yandex|bingbot|daumoa|naver|wget|curl|python|bot|crawler|spider|preview/i.test(ua);
+    // User-Agent로 크롤러 판별
+    // ★ 카카오톡 인앱 브라우저(KAKAOTALK + Safari/Chrome)는 크롤러가 아님!
+    //   - OG 크롤러: "facebookexternalhit", "Twitterbot", "kakaotalk-scrap" 등 (브라우저 엔진 없음)
+    //   - 인앱 브라우저: "KAKAOTALK 2610620" + "AppleWebKit" + "Safari" (실제 사용자)
+    const ua = (req.headers['user-agent'] || '');
+    const uaLower = ua.toLowerCase();
+    
+    // 카카오톡 인앱 브라우저 감지: KAKAOTALK이 포함되지만 Safari/Chrome도 포함
+    const isKakaoInApp = /kakaotalk/i.test(ua) && /safari|chrome|applewebkit/i.test(ua);
+    
+    // 순수 크롤러만 판별 (카카오톡 인앱 브라우저 제외)
+    const isCrawler = !isKakaoInApp && /facebookexternalhit|twitterbot|slackbot|discordbot|linkedinbot|googlebot|yandex|bingbot|daumoa|naver.*bot|wget|curl|python-requests|bot\/|crawler|spider|preview|kakaotalk-scrap/i.test(ua);
 
     if (!isCrawler) {
       // 일반 브라우저 → 프론트엔드로 리다이렉트
