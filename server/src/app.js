@@ -23,6 +23,7 @@ const paymentRoutes  = require('./routes/payment.routes');
 const submitRoutes   = require('./routes/submit.routes');
 const diagRoutes     = require('./routes/diag.routes');
 const archiveRoutes  = require('./routes/archive.routes');
+const dedupeRoutes   = require('./routes/dedupe.routes');
 
 const app = express();
 
@@ -69,6 +70,7 @@ app.use('/api/submit',    submitRoutes);
 // 진단/디버그/뷰어/블랙리스트/캠페인/이미지 (Section 12)
 app.use('/api/diag',      diagRoutes);
 app.use('/api/archive',   archiveRoutes);
+app.use('/api/dedupe',    dedupeRoutes);
 app.use('/api/viewer',    diagRoutes);
 app.use('/api/image',     diagRoutes);
 app.use('/api/blacklist', diagRoutes);

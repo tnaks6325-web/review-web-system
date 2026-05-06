@@ -579,6 +579,138 @@ function getOAuthStatus() {
   };
 }
 
+// ═══════════════════════════════════════════════════════════
+// 중복 파일 감지/정리 (md5Checksum 기반)
+// ═══════════════════════════════════════════════════════════
+
+/**
+ * 폴더 내 모든 파일의 md5Checksum 포함 메타데이터 조회
+ * 페이징 처리로 1000건 이상도 지원
+ * @param {string} folderId - Google Drive 폴더 ID
+ * @returns {Array<{id, name, md5Checksum, createdTime, mimeType}>}
+ */
+async function listFolderFilesWithHash(folderId) {
+  const q = `'${folderId}' in parents and trashed = false and mimeType != 'application/vnd.google-apps.folder'`;
+  const allFiles = [];
+  let pageToken = null;
+
+  const d = _getReadDrive();
+  if (!d) throw new Error('Google Drive API가 설정되지 않았습니다.');
+
+  do {
+    const params = {
+      q,
+      fields: 'nextPageToken, files(id, name, md5Checksum, createdTime, mimeType, size)',
+      pageSize: 1000,
+      pageToken: pageToken || undefined,
+      supportsAllDrives: true,
+      includeItemsFromAllDrives: true,
+      orderBy: 'createdTime asc',
+    };
+
+    const res = await d.files.list(params);
+    allFiles.push(...(res.data.files || []));
+    pageToken = res.data.nextPageToken;
+  } while (pageToken);
+
+  return allFiles;
+}
+
+/**
+ * 중복 파일 감지 (md5Checksum 기반)
+ * - 동일 해시 그룹에서 가장 오래된 파일 1개만 유지, 나머지는 중복으로 표시
+ * @param {string} folderId - Google Drive 폴더 ID
+ * @returns {{ duplicates: Array<{keep: object, remove: Array<object>}>, totalFiles: number, duplicateGroups: number }}
+ */
+async function detectDuplicates(folderId) {
+  const files = await listFolderFilesWithHash(folderId);
+  
+  // md5Checksum 기준 그룹핑
+  const hashGroups = new Map();
+  for (const file of files) {
+    if (!file.md5Checksum) continue; // Google Docs 등 해시 없는 파일 제외
+    if (!hashGroups.has(file.md5Checksum)) {
+      hashGroups.set(file.md5Checksum, []);
+    }
+    hashGroups.get(file.md5Checksum).push(file);
+  }
+
+  // 중복 그룹만 필터 (2개 이상)
+  const duplicates = [];
+  for (const [hash, group] of hashGroups) {
+    if (group.length < 2) continue;
+    // createdTime ASC 정렬 (가장 오래된 것 유지)
+    group.sort((a, b) => new Date(a.createdTime) - new Date(b.createdTime));
+    duplicates.push({
+      md5: hash,
+      keep: group[0],           // 유지할 파일 (가장 오래된 것)
+      remove: group.slice(1),   // 삭제 대상
+    });
+  }
+
+  return {
+    totalFiles: files.length,
+    duplicateGroups: duplicates.length,
+    duplicateFileCount: duplicates.reduce((sum, g) => sum + g.remove.length, 0),
+    duplicates,
+  };
+}
+
+/**
+ * 중복 파일 일괄 휴지통 이동
+ * @param {Array<{id: string, name: string}>} filesToTrash - 삭제 대상 파일 목록
+ * @returns {{ success: number, failed: number, errors: Array }}
+ */
+async function trashFiles(filesToTrash) {
+  const d = _getUploadDrive();
+  if (!d) throw new Error('Google Drive API가 설정되지 않았습니다.');
+
+  let success = 0;
+  let failed = 0;
+  const errors = [];
+
+  for (const file of filesToTrash) {
+    try {
+      await d.files.update({
+        fileId: file.id,
+        requestBody: { trashed: true },
+        supportsAllDrives: true,
+      });
+      success++;
+      logger.info(`[Drive-Dedupe] 휴지통 이동: "${file.name}" (${file.id})`);
+    } catch (err) {
+      failed++;
+      errors.push({ fileId: file.id, name: file.name, error: err.message });
+      logger.warn(`[Drive-Dedupe] 삭제 실패: "${file.name}" (${file.id}) - ${err.message}`);
+    }
+  }
+
+  return { success, failed, errors };
+}
+
+/**
+ * 파일명에서 리뷰어 이름 추출
+ * 패턴: {이름}_{순번}_{타임스탬프}.{확장자}
+ *   예: 김수만_1_20260504_143022.jpg → "김수만"
+ *       김수만_2.jpg → "김수만"
+ *       김수만.jpg → "김수만"
+ * @param {string} fileName
+ * @returns {string|null}
+ */
+function extractReviewerNameFromFile(fileName) {
+  if (!fileName) return null;
+  // 확장자 제거
+  const nameWithoutExt = fileName.replace(/\.[^.]+$/, '');
+  // 패턴1: 이름_순번_타임스탬프
+  const m1 = nameWithoutExt.match(/^(.+?)_\d+_\d{8}_\d{6}$/);
+  if (m1) return m1[1].trim();
+  // 패턴2: 이름_순번
+  const m2 = nameWithoutExt.match(/^(.+?)_\d+$/);
+  if (m2) return m2[1].trim();
+  // 패턴3: 이름만
+  return nameWithoutExt.trim();
+}
+
 module.exports = {
   listFolderContents,
   createFolder,
@@ -596,4 +728,9 @@ module.exports = {
   trashDuplicateFile,
   generateReviewFileName,
   extractFolderIdFromUrl,
+  // 중복 파일 정리
+  listFolderFilesWithHash,
+  detectDuplicates,
+  trashFiles,
+  extractReviewerNameFromFile,
 };

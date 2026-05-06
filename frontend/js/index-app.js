@@ -2505,7 +2505,7 @@ function _buildTabRowHtml(t, tabKey, isSubRow, isClosedTab, tabNameHtml, startDa
 
   // 리뷰폴더 열 (대량건 배지 제거 → 부가정보 열로 이동)
   const folderCell = t.folderUrl
-    ? `<a class="dash-folder-link" href="${escHtml(t.folderUrl)}" target="_blank" onclick="event.stopPropagation()"><i class="fas fa-folder-open"></i> 리뷰폴더</a>`
+    ? `<a class="dash-folder-link" href="${escHtml(t.folderUrl)}" target="_blank" onclick="event.stopPropagation()"><i class="fas fa-folder-open"></i> 리뷰폴더</a><button class="btn-dedupe" data-sheetid="${escHtml(t.sheetId)}" data-tabname="${escHtml(t.tabName)}" onclick="event.stopPropagation();openDedupePreview(this)" title="중복 파일 정리"><i class="fas fa-broom"></i></button>`
     : `<span style="color:#D1D5DB;font-size:.6rem">—</span>`;
 
   // 차수 열: 호출 시 전달된 roundLabel 사용 (없으면 "단독")
@@ -12980,5 +12980,189 @@ async function cleanClosedTabs() {
     showToast("정리 오류: " + err.message, "error");
   } finally {
     if (btn) { btn.disabled = false; btn.innerHTML = '<i class="fas fa-broom"></i> 마감탭 정리'; }
+  }
+}
+
+// ═══════════════════════════════════════════════════════════
+// 중복 파일 정리 (Dedupe) — 미리보기 → 확인 → 실행
+// ═══════════════════════════════════════════════════════════
+
+/**
+ * 미리보기 모달 열기
+ */
+async function openDedupePreview(btn) {
+  const sheetId = btn.dataset.sheetid;
+  const tabName = btn.dataset.tabname;
+  if (!sheetId || !tabName) return showToast("탭 정보 누락", "error");
+
+  btn.disabled = true;
+  btn.innerHTML = '<i class="fas fa-spinner fa-spin"></i>';
+
+  try {
+    const token = sessionStorage.getItem('admin_token') || localStorage.getItem('admin_token');
+    const resp = await fetch(API_BASE_URL + '/api/dedupe/preview', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'Authorization': token ? 'Bearer ' + token : '',
+      },
+      body: JSON.stringify({ sheetId, tabName }),
+    });
+    const data = await resp.json();
+
+    if (!resp.ok || data.error) {
+      showToast(data.error || '중복 검사 실패', 'error');
+      return;
+    }
+
+    if (data.duplicateGroups === 0) {
+      showToast(`중복 파일 없음 (총 ${data.totalFiles}개 파일 검사 완료)`, 'success');
+      return;
+    }
+
+    // 미리보기 모달 렌더
+    _renderDedupeModal(data, sheetId, tabName);
+  } catch (err) {
+    showToast('중복 검사 오류: ' + err.message, 'error');
+  } finally {
+    btn.disabled = false;
+    btn.innerHTML = '<i class="fas fa-broom"></i>';
+  }
+}
+
+/**
+ * 미리보기 모달 렌더링
+ */
+function _renderDedupeModal(data, sheetId, tabName) {
+  // 기존 모달 제거
+  const existing = document.getElementById('dedupeModal');
+  if (existing) existing.remove();
+
+  const groupRows = data.duplicateDetails.map((group, i) => {
+    const keepName = escHtml(group.keepFile.fileName);
+    const removeRows = group.removeFiles.map(f =>
+      `<div style="display:flex;align-items:center;gap:6px;padding:2px 0">
+        <i class="fas fa-trash-alt" style="color:#EF4444;font-size:.7rem"></i>
+        <span style="font-size:.75rem;color:#374151">${escHtml(f.fileName)}</span>
+        <span style="font-size:.65rem;color:#9CA3AF">(${escHtml(f.reviewerName || '이름불명')})</span>
+      </div>`
+    ).join('');
+
+    return `
+      <div style="border:1px solid #E5E7EB;border-radius:8px;padding:10px;margin-bottom:8px;background:#FAFAFA">
+        <div style="display:flex;align-items:center;gap:6px;margin-bottom:6px">
+          <span style="background:#DCFCE7;color:#166534;font-size:.65rem;font-weight:700;padding:2px 6px;border-radius:4px">유지</span>
+          <span style="font-size:.75rem;font-weight:500">${keepName}</span>
+          <span style="font-size:.65rem;color:#9CA3AF">(${escHtml(group.keepFile.reviewerName || '')})</span>
+        </div>
+        <div style="padding-left:12px;border-left:2px solid #FCA5A5">
+          <div style="font-size:.65rem;color:#DC2626;font-weight:600;margin-bottom:2px">삭제 대상 (${group.removeFiles.length}건):</div>
+          ${removeRows}
+        </div>
+      </div>`;
+  }).join('');
+
+  const affectedList = data.affectedReviewers.length > 0
+    ? `<div style="margin-top:10px;padding:8px 12px;background:#FEF3C7;border-radius:6px;font-size:.72rem">
+        <strong><i class="fas fa-pen"></i> 시트 "중복" 마킹 대상:</strong>
+        ${[...new Set(data.affectedReviewers.map(a => a.reviewerName))].map(n => `<span style="background:#FDE68A;padding:1px 5px;border-radius:3px;margin:0 2px">${escHtml(n)}</span>`).join('')}
+       </div>`
+    : '';
+
+  const modal = document.createElement('div');
+  modal.id = 'dedupeModal';
+  modal.className = 'modal-overlay';
+  modal.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,.45);z-index:9999;display:flex;align-items:center;justify-content:center;padding:20px';
+  modal.innerHTML = `
+    <div style="background:#fff;border-radius:12px;width:100%;max-width:560px;max-height:85vh;display:flex;flex-direction:column;box-shadow:0 20px 60px rgba(0,0,0,.2)">
+      <div style="padding:16px 20px;border-bottom:1px solid #E5E7EB;flex-shrink:0">
+        <h3 style="margin:0;font-size:1rem;font-weight:700;color:#111"><i class="fas fa-broom" style="color:#7C3AED"></i> 중복 파일 정리 미리보기</h3>
+        <div style="font-size:.72rem;color:#6B7280;margin-top:4px">${escHtml(data.displayName || tabName)}</div>
+      </div>
+      <div style="padding:16px 20px;overflow-y:auto;flex:1">
+        <div style="display:flex;gap:12px;margin-bottom:12px">
+          <div style="flex:1;background:#F3F4F6;border-radius:8px;padding:10px;text-align:center">
+            <div style="font-size:1.2rem;font-weight:700;color:#111">${data.totalFiles}</div>
+            <div style="font-size:.65rem;color:#6B7280">전체 파일</div>
+          </div>
+          <div style="flex:1;background:#FEF2F2;border-radius:8px;padding:10px;text-align:center">
+            <div style="font-size:1.2rem;font-weight:700;color:#DC2626">${data.duplicateFileCount}</div>
+            <div style="font-size:.65rem;color:#6B7280">중복 파일</div>
+          </div>
+          <div style="flex:1;background:#F0FDF4;border-radius:8px;padding:10px;text-align:center">
+            <div style="font-size:1.2rem;font-weight:700;color:#166534">${data.duplicateGroups}</div>
+            <div style="font-size:.65rem;color:#6B7280">중복 그룹</div>
+          </div>
+        </div>
+        ${groupRows}
+        ${affectedList}
+      </div>
+      <div style="padding:12px 20px;border-top:1px solid #E5E7EB;display:flex;gap:8px;justify-content:flex-end;flex-shrink:0">
+        <button onclick="this.closest('#dedupeModal').remove()" style="padding:8px 16px;background:#6B7280;color:#fff;border:none;border-radius:6px;font-size:.8rem;font-weight:600;cursor:pointer">취소</button>
+        <button id="btnDedupeExecute" onclick="executeDedupeFromModal()" style="padding:8px 16px;background:#DC2626;color:#fff;border:none;border-radius:6px;font-size:.8rem;font-weight:600;cursor:pointer"><i class="fas fa-trash-alt"></i> ${data.duplicateFileCount}건 정리 실행</button>
+      </div>
+    </div>`;
+
+  // 모달에 데이터 저장
+  modal.dataset.sheetid = sheetId;
+  modal.dataset.tabname = tabName;
+  modal.dataset.files = JSON.stringify(
+    data.duplicateDetails.flatMap(g => g.removeFiles.map(f => ({
+      fileId: f.fileId,
+      fileName: f.fileName,
+      reviewerName: f.reviewerName,
+    })))
+  );
+
+  document.body.appendChild(modal);
+  modal.addEventListener('click', (e) => { if (e.target === modal) modal.remove(); });
+}
+
+/**
+ * 중복정리 실행 (모달에서 호출)
+ */
+async function executeDedupeFromModal() {
+  const modal = document.getElementById('dedupeModal');
+  if (!modal) return;
+
+  const sheetId = modal.dataset.sheetid;
+  const tabName = modal.dataset.tabname;
+  const filesToRemove = JSON.parse(modal.dataset.files || '[]');
+
+  if (filesToRemove.length === 0) {
+    showToast('삭제할 파일이 없습니다.', 'info');
+    modal.remove();
+    return;
+  }
+
+  const btn = document.getElementById('btnDedupeExecute');
+  if (btn) { btn.disabled = true; btn.innerHTML = '<i class="fas fa-spinner fa-spin"></i> 처리중...'; }
+
+  try {
+    const token = sessionStorage.getItem('admin_token') || localStorage.getItem('admin_token');
+    const resp = await fetch(API_BASE_URL + '/api/dedupe/execute', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'Authorization': token ? 'Bearer ' + token : '',
+      },
+      body: JSON.stringify({ sheetId, tabName, filesToRemove }),
+    });
+    const data = await resp.json();
+
+    if (!resp.ok || data.error) {
+      showToast(data.error || '실행 실패', 'error');
+      return;
+    }
+
+    showToast(data.summary || `중복 정리 완료: ${data.trashResult.success}건 삭제`, 'success');
+    modal.remove();
+
+    // 대시보드 새로고침
+    if (typeof loadTabDashboard === 'function') loadTabDashboard();
+  } catch (err) {
+    showToast('실행 오류: ' + err.message, 'error');
+  } finally {
+    if (btn) { btn.disabled = false; btn.innerHTML = '<i class="fas fa-trash-alt"></i> 실행'; }
   }
 }

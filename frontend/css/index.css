@@ -1062,6 +1062,14 @@ body.col-resizing .col-drag-handle{pointer-events:auto!important}
 .btn-rebuild-sheet.spinning{color:#059669;pointer-events:none}
 .btn-rebuild-sheet.spinning i{animation:spin .8s linear infinite}
 @keyframes spin{from{transform:rotate(0deg)}to{transform:rotate(360deg)}}
+.btn-dedupe{
+  flex-shrink:0;width:18px;height:18px;padding:0;border:none;border-radius:4px;
+  background:transparent;color:#9CA3AF;cursor:pointer;font-size:.55rem;
+  display:inline-flex;align-items:center;justify-content:center;
+  transition:all .15s ease;margin-left:3px;
+}
+.btn-dedupe:hover{background:#FEF3C7;color:#D97706;transform:scale(1.15)}
+.btn-dedupe:disabled{opacity:.5;pointer-events:none}
 /* ── 세로 구분선 ── */
 .dash-tab-row>*{border-right:1px solid #EEF2FF;display:flex;align-items:center;min-width:0;overflow:hidden}
 .dash-tab-row>*:last-child{border-right:none}
