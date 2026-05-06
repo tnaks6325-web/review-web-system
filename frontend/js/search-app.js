@@ -1058,8 +1058,8 @@ function renderResults(results) {
         optionHtml = `<div class="result-option-row">${badges}</div>`;
       }
       const displayProduct = productLabel || product;
-      // 상품명 없으면 캠페인명(인덱스명)으로 대체 표시
-      const fallbackCamp = item.campaignName || item.tabName || "";
+      // ★ 표시명 최우선 → 탭명 → 캠페인명(시트제목) 순서
+      const fallbackCamp = item.tcDisplayName || item.tabName || item.campaignName || "";
       const productHtml = displayProduct
         ? `<div class="result-name result-product-name">${escHtml(name)}${roundBadge}</div>
            <div class="result-product-label">${escHtml(displayProduct)}</div>${optionHtml}`
@@ -1085,8 +1085,8 @@ function renderResults(results) {
       const groupCard = document.createElement("div");
       groupCard.className = "result-group-card";
 
-      // 캠페인명: tcDisplayName → campaignName → tabName 순 우선
-      const campLabel = items[0].tcDisplayName || items[0].campaignName || items[0].tabName || "";
+      // ★ 표시명 최우선 → 탭명 → 캠페인명(시트제목) 순서
+      const campLabel = items[0].tcDisplayName || items[0].tabName || items[0].campaignName || "";
 
       // 각 항목 라인 생성
       const itemLines = items.map((item) => {
