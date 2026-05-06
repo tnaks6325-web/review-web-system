@@ -2130,6 +2130,38 @@ async function _unhideTab(sheetId, tabGid, el) {
   }
 }
 
+// ── 탭 숨김 처리 (hide) ──
+async function _hideTab(sheetId, tabGid, el) {
+  if (!confirm('이 탭을 숨김 처리하시겠습니까?\n(Google Sheets에서 탭이 숨겨집니다)')) return;
+  try {
+    el.innerHTML = '<i class="fas fa-spinner fa-spin"></i>';
+    const data = await gasPost({ action: 'hideTab', sheetId, tabGid });
+    if (data.error) throw new Error(data.error);
+    // 성공 → 숨김해제 버튼으로 교체
+    el.outerHTML = `<button onclick="event.stopPropagation();_unhideTabBtn('${sheetId}','${tabGid}',this)" title="숨김 해제" style="background:#F3F4F6;border:1px solid #D1D5DB;padding:1px 5px;border-radius:4px;font-size:.68rem;cursor:pointer;color:#6B7280;margin-left:3px"><i class="fas fa-eye"></i> 표시</button>`;
+    if (typeof showToast === 'function') showToast('탭 숨김 처리 완료', 'success');
+  } catch (err) {
+    el.innerHTML = '<i class="fas fa-eye"></i> 숨김';
+    if (typeof showToast === 'function') showToast('숨김 처리 실패: ' + err.message, 'error');
+  }
+}
+
+// ── 숨김해제 버튼 (완료감지 목록 내 인라인) ──
+async function _unhideTabBtn(sheetId, tabGid, el) {
+  if (!confirm('이 탭의 숨김을 해제하시겠습니까?\n(Google Sheets에서 탭이 다시 표시됩니다)')) return;
+  try {
+    el.innerHTML = '<i class="fas fa-spinner fa-spin"></i>';
+    const data = await gasPost({ action: 'unhideTab', sheetId, tabGid });
+    if (data.error) throw new Error(data.error);
+    // 성공 → 숨김 버튼으로 교체
+    el.outerHTML = `<button onclick="event.stopPropagation();_hideTab('${sheetId}','${tabGid}',this)" title="탭 숨김" style="background:#FEF2F2;border:1px solid #FECACA;padding:1px 5px;border-radius:4px;font-size:.68rem;cursor:pointer;color:#DC2626;margin-left:3px"><i class="fas fa-eye-slash"></i> 숨김</button>`;
+    if (typeof showToast === 'function') showToast('탭 숨김 해제 완료', 'success');
+  } catch (err) {
+    el.innerHTML = '<i class="fas fa-eye"></i> 표시';
+    if (typeof showToast === 'function') showToast('숨김 해제 실패: ' + err.message, 'error');
+  }
+}
+
 function _calcOverdueDays(sd) {
   const d = _parseStartDate(sd);
   if (!d) return null;
@@ -10561,10 +10593,17 @@ async function archiveAutoDetect() {
         const hiddenBadge = t.hidden
           ? `<span style="background:#F3F4F6;color:#6B7280;padding:1px 4px;border-radius:3px;font-size:.62rem;margin-left:2px">숨김탭</span>`
           : '';
+        // ★ 숨김/숨김해제 토글 버튼 (tabGid가 있고 삭제되지 않은 탭만)
+        const hideToggleBtn = (!t.deleted && t.tabGid)
+          ? (t.hidden
+            ? `<button onclick="event.stopPropagation();_unhideTabBtn('${escHtml(camp.sheetId)}','${escHtml(t.tabGid)}',this)" title="숨김 해제" style="background:#ECFDF5;border:1px solid #A7F3D0;padding:1px 5px;border-radius:4px;font-size:.66rem;cursor:pointer;color:#059669;margin-left:3px;white-space:nowrap"><i class="fas fa-eye"></i> 표시</button>`
+            : `<button onclick="event.stopPropagation();_hideTab('${escHtml(camp.sheetId)}','${escHtml(t.tabGid)}',this)" title="탭 숨김" style="background:#FEF2F2;border:1px solid #FECACA;padding:1px 5px;border-radius:4px;font-size:.66rem;cursor:pointer;color:#DC2626;margin-left:3px;white-space:nowrap"><i class="fas fa-eye-slash"></i> 숨김</button>`)
+          : '';
         const paidComplete = (t.paidCount !== undefined && t.rowCount && t.paidCount >= t.rowCount) ? 'true' : 'false';
         html += `<label style="display:flex;align-items:center;gap:6px;padding:3px 0;font-size:.78rem;cursor:pointer">
           <input type="checkbox" class="archive-detect-cb" data-sheet="${escHtml(camp.sheetId)}" data-tab="${escHtml(t.tabName)}" data-round="${escHtml(t.round||'')}" data-in-index="${t.inIndex !== false}" data-paid-complete="${paidComplete}" checked>
           <span style="flex:1">${escHtml(t.tabName)}${sheetLink}${renamedBadge}${deletedBadge}${hiddenBadge}${roundBadge}${indexBadge}</span>
+          ${hideToggleBtn}
           ${paidInfo}
           <span style="font-size:.72rem;color:#9CA3AF">${(t.rowCount||0).toLocaleString()}행</span>
           <span style="background:${reasonColor}15;color:${reasonColor};padding:1px 6px;border-radius:4px;font-size:.68rem">${reasonLabel}</span>
@@ -10805,10 +10844,17 @@ async function dashboardArchiveDetect() {
         const hiddenBadge2 = t.hidden
           ? `<span style="background:#F3F4F6;color:#6B7280;padding:1px 4px;border-radius:3px;font-size:.62rem;margin-left:2px">숨김탭</span>`
           : '';
+        // ★ 숨김/숨김해제 토글 버튼 (대시보드 완료감지)
+        const hideToggleBtn2 = (!t.deleted && t.tabGid)
+          ? (t.hidden
+            ? `<button onclick="event.stopPropagation();_unhideTabBtn('${escHtml(camp.sheetId)}','${escHtml(t.tabGid)}',this)" title="숨김 해제" style="background:#ECFDF5;border:1px solid #A7F3D0;padding:1px 5px;border-radius:4px;font-size:.66rem;cursor:pointer;color:#059669;margin-left:3px;white-space:nowrap"><i class="fas fa-eye"></i> 표시</button>`
+            : `<button onclick="event.stopPropagation();_hideTab('${escHtml(camp.sheetId)}','${escHtml(t.tabGid)}',this)" title="탭 숨김" style="background:#FEF2F2;border:1px solid #FECACA;padding:1px 5px;border-radius:4px;font-size:.66rem;cursor:pointer;color:#DC2626;margin-left:3px;white-space:nowrap"><i class="fas fa-eye-slash"></i> 숨김</button>`)
+          : '';
         const paidComplete2 = (t.paidCount !== undefined && t.rowCount && t.paidCount >= t.rowCount) ? 'true' : 'false';
         html += `<label style="display:flex;align-items:center;gap:6px;padding:4px 0;font-size:.78rem;cursor:pointer;border-bottom:1px solid #F3F4F6">
           <input type="checkbox" class="dash-archive-cb" data-sheet="${escHtml(camp.sheetId)}" data-tab="${escHtml(t.tabName)}" data-round="${escHtml(t.round||'')}" data-paid-complete="${paidComplete2}" checked>
           <span style="flex:1;display:flex;align-items:center;gap:4px">${escHtml(t.tabName)}${sheetLink2}${renamedBadge2}${deletedBadge2}${hiddenBadge2}${roundBadge}${indexBadge}</span>
+          ${hideToggleBtn2}
           ${paidInfo}
           <span style="font-size:.72rem;color:#9CA3AF">${(t.rowCount||0).toLocaleString()}행</span>
           <span style="background:${reasonColor}15;color:${reasonColor};padding:2px 8px;border-radius:4px;font-size:.7rem;font-weight:500">${reasonLabel}</span>

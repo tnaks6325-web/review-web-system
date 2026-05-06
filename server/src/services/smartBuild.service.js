@@ -276,11 +276,35 @@ async function _upsertTab(sheetId, tabName, tabGid, checksum, rows, modifiedTime
       }
     }
 
+    // ★ 아카이브된 차수(round)의 행은 재삽입하지 않도록 필터링
+    // 탭 자체는 활성이지만 특정 차수만 아카이브된 경우, 해당 차수 행 제외
+    const { rows: tcArchivedRows } = await client.query(
+      'SELECT archived_rounds FROM tab_configs WHERE sheet_id = $1 AND tab_name = $2',
+      [sheetId, tabName]
+    );
+    const archivedRoundsStr = tcArchivedRows?.[0]?.archived_rounds || '';
+    const archivedRoundsSet = new Set(
+      archivedRoundsStr.split(',').map(s => s.trim()).filter(Boolean)
+    );
+
+    // 아카이브된 차수에 해당하는 행 제외
+    let filteredRows = rows;
+    if (archivedRoundsSet.size > 0) {
+      filteredRows = rows.filter(row => {
+        if (!row.round) return true; // 차수가 없는 행은 유지
+        return !archivedRoundsSet.has(row.round.trim());
+      });
+      const skippedCount = rows.length - filteredRows.length;
+      if (skippedCount > 0) {
+        logger.info(`[smartBuild] ${tabName}: 아카이브된 차수 행 ${skippedCount}건 스킵 (archived_rounds: ${archivedRoundsStr})`);
+      }
+    }
+
     const newRowIndices = new Set();
-    if (rows.length > 0) {
+    if (filteredRows.length > 0) {
       const BATCH_SIZE = 100;
-      for (let batchStart = 0; batchStart < rows.length; batchStart += BATCH_SIZE) {
-        const batch = rows.slice(batchStart, batchStart + BATCH_SIZE);
+      for (let batchStart = 0; batchStart < filteredRows.length; batchStart += BATCH_SIZE) {
+        const batch = filteredRows.slice(batchStart, batchStart + BATCH_SIZE);
         const insertValues = [];
         const insertPlaceholders = [];
         let paramIdx = 1;
@@ -323,17 +347,29 @@ async function _upsertTab(sheetId, tabName, tabGid, checksum, rows, modifiedTime
       }
     }
 
-    // 고아 행 삭제
+    // 고아 행 삭제 (아카이브된 차수 행도 삭제 대상에서 보호)
     if (newRowIndices.size > 0) {
-      await client.query(
-        `DELETE FROM review_index WHERE sheet_id = $1 AND tab_name = $2 AND row_index != ALL($3::int[])`,
-        [sheetId, tabName, [...newRowIndices]]
-      );
-    } else {
+      if (archivedRoundsSet.size > 0) {
+        // 아카이브된 차수의 행은 보존 — newRowIndices에 없더라도 삭제하지 않음
+        // 아카이브된 차수 행은 이미 위에서 INSERT 대상에서 제외됨
+        // 따라서 review_index에서 해당 차수 행만 별도 보존
+        await client.query(
+          `DELETE FROM review_index WHERE sheet_id = $1 AND tab_name = $2 AND row_index != ALL($3::int[])
+           AND (round IS NULL OR round NOT IN (${[...archivedRoundsSet].map((_, i) => `$${i + 4}`).join(',')}))`,
+          [sheetId, tabName, [...newRowIndices], ...archivedRoundsSet]
+        );
+      } else {
+        await client.query(
+          `DELETE FROM review_index WHERE sheet_id = $1 AND tab_name = $2 AND row_index != ALL($3::int[])`,
+          [sheetId, tabName, [...newRowIndices]]
+        );
+      }
+    } else if (archivedRoundsSet.size === 0) {
       await client.query('DELETE FROM review_index WHERE sheet_id = $1 AND tab_name = $2', [sheetId, tabName]);
     }
+    // else: filteredRows가 0이지만 아카이브된 차수가 있으면 → 기존 아카이브 차수 행 보존
 
-    // index_master 갱신
+    // index_master 갱신 (filteredRows 기준 카운트)
     await client.query(`
       INSERT INTO index_master (sheet_id, tab_name, tab_gid, campaign_name, checksum, built_at,
                                 row_count, submitted_count, status, sheet_modified_at)
@@ -350,7 +386,7 @@ async function _upsertTab(sheetId, tabName, tabGid, checksum, rows, modifiedTime
         sheet_modified_at = EXCLUDED.sheet_modified_at
     `, [
       sheetId, tabName, tabGid, campaignName || tabName,
-      checksum, rows.length, rows.filter(r => r.isSubmitted).length,
+      checksum, filteredRows.length, filteredRows.filter(r => r.isSubmitted).length,
       modifiedTime || null
     ]);
 

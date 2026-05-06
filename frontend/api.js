@@ -191,6 +191,7 @@ const _ACTION_MAP = {
   'archiveList':        { method: 'GET',  path: '/api/archive/list' },
   'archiveHistory':     { method: 'GET',  path: '/api/archive/history' },
   'unhideTab':          { method: 'POST', path: '/api/archive/unhide-tab' },
+  'hideTab':            { method: 'POST', path: '/api/archive/hide-tab' },
 
   // Phase 11: Campaign Name Fix
   'fixCampaignNames':   { method: 'POST', path: '/api/diag/fix-campaign-names' },

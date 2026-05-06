@@ -78,7 +78,8 @@ router.get('/detect', authMiddleware, async (req, res, next) => {
     const { rows: roundClosedRows } = await pool.query(`
       SELECT tc.sheet_id AS "sheetId", tc.tab_name AS "tabName",
              tc.campaign_name AS "campaignName", tc.closed_rounds AS "closedRounds",
-             tc.tab_gid AS "tabGid"
+             tc.tab_gid AS "tabGid",
+             tc.archived_rounds AS "archivedRounds"
       FROM tab_configs tc
       WHERE tc.closed_rounds IS NOT NULL AND tc.closed_rounds != ''
         AND tc.is_closed = FALSE
@@ -87,6 +88,7 @@ router.get('/detect', authMiddleware, async (req, res, next) => {
     // ★ 소스 4: 자동 감지 — 차수별 리뷰완료 + 입금완료 모두 충족된 차수
     // 조건: 해당 차수의 전체 행에서 is_submitted=TRUE AND is_submitted2='PAID'
     // → 리뷰헤더 + 입금헤더 모두 데이터가 채워진 차수 = 아카이브 대상
+    // ★ archived_rounds에 이미 포함된 차수는 제외
     const { rows: autoDetectRows } = await pool.query(`
       SELECT
         ri.sheet_id AS "sheetId",
@@ -94,6 +96,7 @@ router.get('/detect', authMiddleware, async (req, res, next) => {
         COALESCE(tc.campaign_name, ri.campaign_name) AS "campaignName",
         COALESCE(tc.tab_gid, im.tab_gid) AS "tabGid",
         ri.round,
+        tc.archived_rounds AS "archivedRounds",
         COUNT(*) AS "totalCount",
         COUNT(*) FILTER (WHERE ri.is_submitted = TRUE) AS "submittedCount",
         COUNT(*) FILTER (WHERE ri.is_submitted2 = 'PAID') AS "paidCount"
@@ -103,7 +106,7 @@ router.get('/detect', authMiddleware, async (req, res, next) => {
       WHERE im.status = 'active'
         AND (tc.is_closed IS NULL OR tc.is_closed = FALSE)
         AND ri.round IS NOT NULL AND ri.round != ''
-      GROUP BY ri.sheet_id, ri.tab_name, COALESCE(tc.campaign_name, ri.campaign_name), COALESCE(tc.tab_gid, im.tab_gid), ri.round
+      GROUP BY ri.sheet_id, ri.tab_name, COALESCE(tc.campaign_name, ri.campaign_name), COALESCE(tc.tab_gid, im.tab_gid), ri.round, tc.archived_rounds
       HAVING
         COUNT(*) > 0
         AND COUNT(*) = COUNT(*) FILTER (WHERE ri.is_submitted = TRUE)
@@ -134,9 +137,17 @@ router.get('/detect', authMiddleware, async (req, res, next) => {
     });
 
     // ★ 차수별 마감 항목 추가 (탭이 아직 전체 마감이 아닌 경우)
+    // ★ archived_rounds에 이미 포함된 차수는 제외 (아카이브 후 재표시 방지)
     for (const rc of roundClosedRows) {
       const rounds = rc.closedRounds.split(',').map(s => s.trim()).filter(Boolean);
       if (rounds.length === 0) continue;
+
+      // archived_rounds에 이미 포함된 차수 제외
+      const archivedSet = new Set(
+        (rc.archivedRounds || '').split(',').map(s => s.trim()).filter(Boolean)
+      );
+      const activeRounds = rounds.filter(r => !archivedSet.has(r));
+      if (activeRounds.length === 0) continue;
 
       if (!campMap.has(rc.sheetId)) {
         campMap.set(rc.sheetId, {
@@ -145,7 +156,7 @@ router.get('/detect', authMiddleware, async (req, res, next) => {
           tabs: [],
         });
       }
-      rounds.forEach(round => {
+      activeRounds.forEach(round => {
         campMap.get(rc.sheetId).tabs.push({
           tabName: rc.tabName,
           rowCount: 0,
@@ -173,6 +184,12 @@ router.get('/detect', authMiddleware, async (req, res, next) => {
     for (const ad of autoDetectRows) {
       const key = `${ad.sheetId}||${ad.tabName}||${ad.round}`;
       if (existingKeys.has(key)) continue; // 이미 감지된 항목 → 중복 방지
+
+      // ★ archived_rounds에 이미 포함된 차수는 제외 (아카이브 후 재표시 방지)
+      if (ad.archivedRounds) {
+        const archivedSet = new Set(ad.archivedRounds.split(',').map(s => s.trim()).filter(Boolean));
+        if (archivedSet.has(ad.round.trim())) continue;
+      }
 
       if (!campMap.has(ad.sheetId)) {
         campMap.set(ad.sheetId, {
@@ -378,17 +395,21 @@ router.post('/tabs', authMiddleware, async (req, res, next) => {
             }
           }
 
-          // closed_rounds에서 해당 차수 제거
+          // closed_rounds에서 해당 차수 제거 + archived_rounds에 추가
           const { rows: tcRows } = await client.query(
-            'SELECT closed_rounds FROM tab_configs WHERE sheet_id = $1 AND tab_name = $2',
+            'SELECT closed_rounds, archived_rounds FROM tab_configs WHERE sheet_id = $1 AND tab_name = $2',
             [sheetId, tabName]
           );
           if (tcRows.length > 0) {
             const existing = (tcRows[0].closed_rounds || '').split(',').map(s => s.trim()).filter(Boolean);
             const updated = existing.filter(r => r !== round).join(',');
+            // archived_rounds에 해당 차수 추가 (중복 방지)
+            const archivedExisting = (tcRows[0].archived_rounds || '').split(',').map(s => s.trim()).filter(Boolean);
+            if (!archivedExisting.includes(round)) archivedExisting.push(round);
+            const archivedUpdated = archivedExisting.join(',');
             await client.query(
-              'UPDATE tab_configs SET closed_rounds = $1, updated_at = NOW() WHERE sheet_id = $2 AND tab_name = $3',
-              [updated, sheetId, tabName]
+              'UPDATE tab_configs SET closed_rounds = $1, archived_rounds = $2, updated_at = NOW() WHERE sheet_id = $3 AND tab_name = $4',
+              [updated, archivedUpdated, sheetId, tabName]
             );
           }
 
@@ -691,6 +712,26 @@ router.post('/unhide-tab', authMiddleware, async (req, res, next) => {
     res.json({ ok: true, message: '탭이 표시(unhide) 처리되었습니다.' });
   } catch (err) {
     logger.error(`[archive/unhide-tab] 실패: ${err.message}`);
+    next(err);
+  }
+});
+
+// ═══════════════════════════════════════════════════════════
+// POST /api/archive/hide-tab — 탭을 숨김(hide) 처리
+// body: { sheetId, tabGid }
+// Google Sheets API로 해당 탭의 hidden 속성을 true로 변경
+// ═══════════════════════════════════════════════════════════
+router.post('/hide-tab', authMiddleware, async (req, res, next) => {
+  try {
+    const { sheetId, tabGid } = req.body;
+    if (!sheetId || !tabGid) {
+      return res.status(400).json({ error: 'sheetId와 tabGid가 필요합니다.' });
+    }
+    await setSheetHidden(sheetId, parseInt(tabGid), true);
+    logger.info(`[archive/hide-tab] 탭 숨김 처리 완료: sheet=${sheetId.substring(0,15)}... gid=${tabGid}`);
+    res.json({ ok: true, message: '탭이 숨김(hide) 처리되었습니다.' });
+  } catch (err) {
+    logger.error(`[archive/hide-tab] 실패: ${err.message}`);
     next(err);
   }
 });
