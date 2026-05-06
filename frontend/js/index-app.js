@@ -12503,19 +12503,56 @@ async function _deleteCheckedCampaigns() {
     sheetMap.get(sheetId).tabs.push(tabName);
   });
 
-  // 확인 다이얼로그
-  let msg = `⚠️ 캠페인 삭제 (복구 불가)\n\n삭제 대상 (${sheetMap.size}개 캠페인):\n`;
-  sheetMap.forEach((v, sheetId) => {
-    msg += `\n• ${v.campaignName} (탭 ${v.tabs.length}개)\n  ▸ ${v.tabs.slice(0, 5).join(', ')}${v.tabs.length > 5 ? ` 외 ${v.tabs.length - 5}건` : ''}`;
-  });
-  msg += `\n\n삭제 시:\n• campaigns 테이블에서 제거\n• tab_configs 전체 삭제\n• index_master / review_index 전체 삭제\n\n정말 삭제하시겠습니까?`;
+  // 1단계: dry-run으로 영향 범위 조회
+  showToast('삭제 영향 범위 조회 중...', 'info');
+  const impactResults = [];
+  for (const [sheetId, info] of sheetMap) {
+    try {
+      const res = await fetch(API_BASE_URL + '/api/diag/delete-campaign', {
+        method: 'DELETE',
+        headers: { 'Content-Type': 'application/json', ..._getAuthHeaders() },
+        body: JSON.stringify({ sheetId, confirm: false }),
+      }).then(r => r.json());
+
+      if (res.ok && res.dryRun) {
+        impactResults.push({ sheetId, info, impact: res.impact });
+      } else {
+        impactResults.push({ sheetId, info, impact: null, error: res.error });
+      }
+    } catch (err) {
+      impactResults.push({ sheetId, info, impact: null, error: err.message });
+    }
+  }
+
+  // 2단계: 영향 범위를 상세히 보여주는 확인 다이얼로그
+  let msg = `⚠️ 캠페인 삭제 — 영향 범위 확인 (복구 불가!)\n\n`;
+  msg += `선택한 탭: ${_tabDashChecked.size}건\n`;
+  msg += `영향받는 캠페인: ${impactResults.length}개\n`;
+  msg += `${'─'.repeat(40)}\n`;
+
+  for (const { info, impact } of impactResults) {
+    if (impact) {
+      msg += `\n📁 ${impact.campaignName}\n`;
+      msg += `   • 탭: ${impact.tabCount}개 전체 삭제\n`;
+      msg += `   • 인덱스 행: ${impact.totalRows.toLocaleString()}건\n`;
+      msg += `   • 리뷰 인덱스: ${impact.reviewIndexCount.toLocaleString()}건\n`;
+      if (impact.tabCount > info.tabs.length) {
+        msg += `   ⚠️ 주의: 선택한 탭 ${info.tabs.length}개 외에 같은 시트의\n      다른 탭 ${impact.tabCount - info.tabs.length}개도 함께 삭제됩니다!\n`;
+      }
+    } else {
+      msg += `\n📁 ${info.campaignName}: 조회 실패\n`;
+    }
+  }
+  msg += `\n${'─'.repeat(40)}\n정말 삭제하시겠습니까?`;
 
   if (!confirm(msg)) return;
 
-  // 2차 확인
-  if (!confirm(`최종 확인: ${sheetMap.size}개 캠페인의 모든 데이터가 영구 삭제됩니다.\n계속하시겠습니까?`)) return;
+  // 3단계: 최종 확인
+  const totalTabs = impactResults.reduce((s, r) => s + (r.impact?.tabCount || 0), 0);
+  const totalReviews = impactResults.reduce((s, r) => s + (r.impact?.reviewIndexCount || 0), 0);
+  if (!confirm(`🚨 최종 확인\n\n캠페인 ${impactResults.length}개 / 탭 ${totalTabs}개 / 리뷰 ${totalReviews.toLocaleString()}건\n\n이 모든 데이터가 영구 삭제됩니다.\n계속하시겠습니까?`)) return;
 
-  // API 호출 — sheetId별로 삭제
+  // 4단계: 실제 삭제 (confirm: true)
   let successCount = 0, failCount = 0;
   const errors = [];
   for (const [sheetId, info] of sheetMap) {
@@ -12523,10 +12560,10 @@ async function _deleteCheckedCampaigns() {
       const res = await fetch(API_BASE_URL + '/api/diag/delete-campaign', {
         method: 'DELETE',
         headers: { 'Content-Type': 'application/json', ..._getAuthHeaders() },
-        body: JSON.stringify({ sheetId }),
+        body: JSON.stringify({ sheetId, confirm: true }),
       }).then(r => r.json());
 
-      if (res.ok) {
+      if (res.ok && !res.dryRun) {
         successCount++;
       } else {
         failCount++;

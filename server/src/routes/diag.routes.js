@@ -373,17 +373,53 @@ router.post('/add-campaign', authMiddleware, async (req, res, next) => {
 
 // ═══════════════════════════════════════════════════════════
 // DELETE /api/diag/delete-campaign — 캠페인 삭제 (잘못 등록된 캠페인 제거)
-// body: { sheetId, campaignName? }
-// campaigns, tab_configs, index_master, review_index에서 해당 sheet_id 데이터 삭제
+// body: { sheetId, campaignName?, confirm?: boolean }
+// confirm=false(기본)이면 삭제 영향 범위만 조회하여 반환 (dry-run)
+// confirm=true이면 실제 삭제 수행
 // ═══════════════════════════════════════════════════════════
 router.delete('/delete-campaign', authMiddleware, async (req, res, next) => {
   const client = await pool.connect();
   try {
-    const { sheetId, campaignName } = req.body;
+    const { sheetId, campaignName, confirm } = req.body;
     if (!sheetId) {
       return res.status(400).json({ error: 'sheetId가 필요합니다.' });
     }
 
+    // 삭제 영향 범위 조회 (dry-run)
+    const { rows: campRows } = await client.query(
+      'SELECT campaign_name FROM campaigns WHERE sheet_id = $1', [sheetId]
+    );
+    const { rows: tabRows } = await client.query(
+      'SELECT tab_name FROM tab_configs WHERE sheet_id = $1', [sheetId]
+    );
+    const { rows: masterRows } = await client.query(
+      'SELECT tab_name, row_count, submitted_count FROM index_master WHERE sheet_id = $1', [sheetId]
+    );
+    const { rows: reviewCountRows } = await client.query(
+      'SELECT count(*) as cnt FROM review_index WHERE sheet_id = $1', [sheetId]
+    );
+
+    const impact = {
+      campaignName: campRows[0]?.campaign_name || '(알 수 없음)',
+      tabCount: tabRows.length,
+      tabs: tabRows.map(r => r.tab_name).slice(0, 20),
+      indexMasterCount: masterRows.length,
+      totalRows: masterRows.reduce((s, r) => s + (r.row_count || 0), 0),
+      totalSubmitted: masterRows.reduce((s, r) => s + (r.submitted_count || 0), 0),
+      reviewIndexCount: parseInt(reviewCountRows[0]?.cnt || '0', 10),
+    };
+
+    // confirm이 아니면 dry-run 결과만 반환
+    if (!confirm) {
+      return res.json({
+        ok: true,
+        dryRun: true,
+        impact,
+        message: `이 작업은 "${impact.campaignName}" 캠페인의 모든 데이터를 삭제합니다. (탭 ${impact.tabCount}개, 리뷰 인덱스 ${impact.reviewIndexCount}건) confirm:true로 재요청하면 실제 삭제됩니다.`,
+      });
+    }
+
+    // 실제 삭제 수행
     await client.query('BEGIN');
 
     // 1. review_index 삭제
