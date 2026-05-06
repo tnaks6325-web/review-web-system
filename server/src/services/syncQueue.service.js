@@ -190,13 +190,23 @@ async function _executeItem(item) {
       const headers = headerRow.map(h => String(h || '').trim());
       const rowData = _mapOrderToRow(headers, orderData);
 
-      // 헤더 다음 첫 번째 빈 행 찾기
+      // 헤더 다음 첫 번째 빈 행 찾기 (수취인+연락처 기준: 둘 다 비어있으면 빈 행)
       const dataRows = allRows.slice(headerRowIdx + 1);
+      const recipientColIdx = headers.findIndex(h => {
+        const hl = h.toLowerCase();
+        return hl.includes('수취인') || hl.includes('받는분') || hl === '성함' || hl === '이름';
+      });
+      const phoneColIdx = headers.findIndex(h => {
+        const hl = h.toLowerCase();
+        return hl.includes('연락처') || hl.includes('전화') || hl.includes('핸드폰') || hl.includes('휴대폰') || hl === 'phone';
+      });
+
       let emptyRowOffset = dataRows.length; // default: 데이터 끝 다음
       for (let i = 0; i < dataRows.length; i++) {
         const row = dataRows[i] || [];
-        const hasContent = row.some(cell => String(cell || '').trim() !== '');
-        if (!hasContent) {
+        const recipientVal = recipientColIdx >= 0 ? String(row[recipientColIdx] || '').trim() : '';
+        const phoneVal = phoneColIdx >= 0 ? String(row[phoneColIdx] || '').trim() : '';
+        if (!recipientVal && !phoneVal) {
           emptyRowOffset = i;
           break;
         }

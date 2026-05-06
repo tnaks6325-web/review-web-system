@@ -455,13 +455,23 @@ router.post('/order', async (req, res, next) => {
 
           const rowData = _mapOrderToRow(headers, orderData);
 
-          // 헤더 다음 첫 번째 빈 행 찾기 (A열 기준으로 빈 행 탐색)
+          // 헤더 다음 첫 번째 빈 행 찾기 (수취인+연락처 기준: 둘 다 비어있으면 빈 행)
+          const recipientColIdx = headers.findIndex(h => {
+            const hl = h.toLowerCase();
+            return hl.includes('수취인') || hl.includes('받는분') || hl === '성함' || hl === '이름';
+          });
+          const phoneColIdx = headers.findIndex(h => {
+            const hl = h.toLowerCase();
+            return hl.includes('연락처') || hl.includes('전화') || hl.includes('핸드폰') || hl.includes('휴대폰') || hl === 'phone';
+          });
+
           let emptyRowOffset = dataRows.length; // default: 데이터 끝 다음
           for (let i = 0; i < dataRows.length; i++) {
             const row = dataRows[i] || [];
-            // 모든 셀이 비어있거나, A열이 비어있으면 빈 행으로 간주
-            const hasContent = row.some(cell => String(cell || '').trim() !== '');
-            if (!hasContent) {
+            // 수취인과 연락처가 모두 비어있으면 빈 행으로 판정
+            const recipientVal = recipientColIdx >= 0 ? String(row[recipientColIdx] || '').trim() : '';
+            const phoneVal = phoneColIdx >= 0 ? String(row[phoneColIdx] || '').trim() : '';
+            if (!recipientVal && !phoneVal) {
               emptyRowOffset = i;
               break;
             }
