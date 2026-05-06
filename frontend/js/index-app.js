@@ -13179,9 +13179,26 @@ function openDedupeSelector() {
   const existing = document.getElementById('dedupeSelectorModal');
   if (existing) existing.remove();
 
-  // _lastDashData에서 리뷰폴더가 설정된 탭 필터링
+  // _tabDashData 또는 _lastDashData에서 리뷰폴더가 설정된 탭 필터링
   let tabsWithFolder = [];
-  if (_lastDashData && _lastDashData.stats) {
+
+  // 1차: _tabDashData (탭 관리 대시보드 데이터 — 현재 화면)
+  if (_tabDashData && _tabDashData.tabs) {
+    _tabDashData.tabs.forEach(t => {
+      if (t.folder_url) {
+        tabsWithFolder.push({
+          sheetId: t.sheet_id,
+          tabName: t.tab_name,
+          displayName: t.display_name || t.tab_name,
+          campName: t.campaign_name || '',
+          folderUrl: t.folder_url,
+        });
+      }
+    });
+  }
+
+  // 2차 fallback: _lastDashData (캠페인 대시보드 데이터)
+  if (tabsWithFolder.length === 0 && _lastDashData && _lastDashData.stats) {
     _lastDashData.stats.forEach(camp => {
       (camp.tabs || []).forEach(t => {
         if (t.folderUrl) {
@@ -13189,7 +13206,7 @@ function openDedupeSelector() {
             sheetId: t.sheetId,
             tabName: t.tab,
             displayName: t.displayName || t.tab,
-            campName: camp.campaignName || camp.name || '',
+            campName: camp.campaign || '',
             folderUrl: t.folderUrl,
           });
         }
