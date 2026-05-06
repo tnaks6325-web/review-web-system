@@ -12318,15 +12318,29 @@ function _updateArchiveBar() {
 async function _archiveCheckedTabs() {
   if (_tabDashChecked.size === 0) { showToast('아카이브할 탭을 선택하세요.', 'info'); return; }
 
-  const tabs = [];
-  const names = [];
+  // 선택된 탭 정보 수집 (roundList 포함)
+  const selectedTabs = [];
   _tabDashChecked.forEach(key => {
     const [sheetId, tabName] = key.split('||');
-    tabs.push({ sheetId, tabName });
-    // 표시용 이름 찾기
     const t = (_tabDashData?.tabs||[]).find(x => x.sheet_id === sheetId && x.tab_name === tabName);
-    names.push(t ? `${t.campaign_name}/${t.tab_name}` : tabName);
+    selectedTabs.push({
+      sheetId, tabName,
+      campaignName: t?.campaign_name || '',
+      roundList: t?.roundList || [],
+      displayName: t ? `${t.campaign_name}/${t.tab_name}` : tabName,
+    });
   });
+
+  // 차수가 있는 탭이 포함되어 있으면 차수 선택 모달 표시
+  const hasRounds = selectedTabs.some(t => t.roundList.length > 1);
+  if (hasRounds) {
+    _showArchiveRoundModal(selectedTabs);
+    return;
+  }
+
+  // 차수가 없는 탭은 기존 방식(탭 전체 아카이브)
+  const tabs = selectedTabs.map(t => ({ sheetId: t.sheetId, tabName: t.tabName }));
+  const names = selectedTabs.map(t => t.displayName);
 
   const confirmed = confirm(`선택한 ${tabs.length}건을 아카이브로 보내시겠습니까?\n\n` +
     `아카이브된 탭은:\n` +
@@ -12337,12 +12351,110 @@ async function _archiveCheckedTabs() {
     names.slice(0, 10).join('\n') + (names.length > 10 ? `\n... 외 ${names.length - 10}건` : ''));
   if (!confirmed) return;
 
+  await _executeArchive(tabs, 'manual_dashboard');
+}
+
+// ── 차수 선택 아카이브 모달 ──
+function _showArchiveRoundModal(selectedTabs) {
+  // 기존 모달 제거
+  let modal = document.getElementById('archiveRoundModal');
+  if (modal) modal.remove();
+
+  let html = `<div id="archiveRoundModal" style="position:fixed;inset:0;z-index:9999;display:flex;align-items:center;justify-content:center;background:rgba(0,0,0,.45)">
+    <div style="background:#fff;border-radius:14px;padding:24px;max-width:520px;width:90%;max-height:80vh;overflow-y:auto;box-shadow:0 20px 60px rgba(0,0,0,.3)">
+      <h3 style="margin:0 0 6px;font-size:1rem;color:#1F2937"><i class="fas fa-archive" style="color:#8B5CF6;margin-right:6px"></i>아카이브 차수 선택</h3>
+      <p style="margin:0 0 16px;font-size:.78rem;color:#6B7280">아카이브할 차수를 선택하세요. 선택하지 않은 차수는 대시보드에 유지됩니다.</p>`;
+
+  selectedTabs.forEach((tab, tabIdx) => {
+    html += `<div style="margin-bottom:14px;border:1px solid #E5E7EB;border-radius:10px;overflow:hidden">
+      <div style="background:#F9FAFB;padding:8px 12px;font-size:.82rem;font-weight:600;color:#374151">
+        <i class="fas fa-table" style="color:#7C3AED;margin-right:4px"></i>${escHtml(tab.displayName)}
+      </div>`;
+
+    if (tab.roundList.length > 1) {
+      html += `<div style="padding:8px 12px;display:flex;flex-wrap:wrap;gap:6px;align-items:center">
+        <label style="font-size:.72rem;color:#6B7280;margin-right:4px">
+          <input type="checkbox" class="archive-round-all" data-tab-idx="${tabIdx}" onchange="_toggleArchiveRoundAll(this,${tabIdx})" style="margin-right:3px">전체
+        </label>`;
+      tab.roundList.forEach((r, rIdx) => {
+        const pct = r.total > 0 ? Math.round(r.submitted / r.total * 100) : 0;
+        const pctColor = pct >= 100 ? '#059669' : pct >= 50 ? '#D97706' : '#6B7280';
+        html += `<label style="font-size:.75rem;display:inline-flex;align-items:center;gap:3px;padding:3px 8px;border:1px solid #D1D5DB;border-radius:6px;cursor:pointer;background:#FAFAFA">
+          <input type="checkbox" class="archive-round-cb" data-tab-idx="${tabIdx}" data-round="${escHtml(r.round)}" value="${escHtml(r.round)}" style="width:13px;height:13px">
+          <span>${escHtml(r.round)}</span>
+          <span style="color:${pctColor};font-size:.68rem">(${r.submitted}/${r.total})</span>
+        </label>`;
+      });
+      html += `</div>`;
+    } else {
+      // 차수가 1개 이하인 탭은 전체 아카이브
+      html += `<div style="padding:8px 12px;font-size:.75rem;color:#9CA3AF">
+        <label><input type="checkbox" class="archive-round-cb" data-tab-idx="${tabIdx}" data-round="__ALL__" value="__ALL__" checked style="margin-right:4px">탭 전체 아카이브</label>
+      </div>`;
+    }
+    html += `</div>`;
+  });
+
+  html += `<div style="display:flex;justify-content:flex-end;gap:8px;margin-top:16px">
+      <button onclick="document.getElementById('archiveRoundModal').remove()" style="padding:7px 16px;border:1px solid #D1D5DB;background:#fff;border-radius:8px;font-size:.8rem;cursor:pointer;color:#374151">취소</button>
+      <button onclick="_executeArchiveFromModal()" style="padding:7px 16px;background:#8B5CF6;color:#fff;border:none;border-radius:8px;font-size:.8rem;font-weight:600;cursor:pointer"><i class="fas fa-archive" style="margin-right:4px"></i>확인</button>
+    </div>
+    </div></div>`;
+
+  document.body.insertAdjacentHTML('beforeend', html);
+
+  // _selectedTabs를 글로벌에 임시 저장
+  window._archiveModalTabs = selectedTabs;
+}
+
+function _toggleArchiveRoundAll(checkbox, tabIdx) {
+  const cbs = document.querySelectorAll(`.archive-round-cb[data-tab-idx="${tabIdx}"]`);
+  cbs.forEach(cb => { cb.checked = checkbox.checked; });
+}
+
+async function _executeArchiveFromModal() {
+  const selectedTabs = window._archiveModalTabs || [];
+  const tabs = [];
+
+  selectedTabs.forEach((tab, tabIdx) => {
+    const cbs = document.querySelectorAll(`.archive-round-cb[data-tab-idx="${tabIdx}"]:checked`);
+    if (cbs.length === 0) return;
+
+    // "__ALL__" 이면 탭 전체 아카이브
+    const rounds = Array.from(cbs).map(cb => cb.value);
+    if (rounds.includes('__ALL__')) {
+      tabs.push({ sheetId: tab.sheetId, tabName: tab.tabName });
+    } else {
+      // 모든 차수가 선택된 경우도 탭 전체 아카이브로 처리
+      if (tab.roundList.length > 0 && rounds.length === tab.roundList.length) {
+        tabs.push({ sheetId: tab.sheetId, tabName: tab.tabName });
+      } else {
+        // 차수별 개별 아카이브
+        rounds.forEach(round => {
+          tabs.push({ sheetId: tab.sheetId, tabName: tab.tabName, round });
+        });
+      }
+    }
+  });
+
+  if (tabs.length === 0) {
+    showToast('아카이브할 차수를 선택하세요.', 'info');
+    return;
+  }
+
+  // 모달 닫기
+  document.getElementById('archiveRoundModal')?.remove();
+
+  await _executeArchive(tabs, 'manual_dashboard');
+}
+
+async function _executeArchive(tabs, reason) {
   try {
     showToast(`${tabs.length}건 아카이브 처리 중...`, 'info');
     const res = await fetch(API_BASE_URL + '/api/archive/tabs', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json', ..._getAuthHeaders() },
-      body: JSON.stringify({ tabs, reason: 'manual_dashboard' }),
+      body: JSON.stringify({ tabs, reason }),
     }).then(r => r.json());
 
     if (res.ok) {
