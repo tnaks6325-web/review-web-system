@@ -100,6 +100,13 @@ async function runMigrations() {
     // 스마트 빌드 스케줄러 정지
     const { stopSmartBuild } = require('./src/services/smartBuild.service');
     stopSmartBuild();
+
+    // ★ 빌드 잠금 해제 (재배포 시 좀비 잠금 방지)
+    const { releaseBuildLock } = require('./src/services/indexBuilder.service');
+    releaseBuildLock()
+      .then(() => logger.info('✅ 빌드 잠금 해제 완료'))
+      .catch(err => logger.warn(`⚠️ 빌드 잠금 해제 실패 (무시): ${err.message}`));
+
     server.close(() => {
       logger.info('✅ HTTP 서버 종료 완료');
       const pool = require('./src/db/pool');
