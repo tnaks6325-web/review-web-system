@@ -655,6 +655,9 @@ async function checkSheetWriteAccess(spreadsheetId) {
  * 여러 셀을 한번에 쓰기 (values.batchUpdate)
  * 개별 writeSheet N회 호출 대신 1회 API 호출로 처리 → 성능 대폭 개선
  *
+ * ★ GID 모드: spreadsheets.batchUpdate + 다중 updateCells 요청으로 1회 호출에 모든 셀 동시 쓰기
+ *   (기존: for 루프로 writeSheet N회 → 시트에서 순차 입력 현상 발생)
+ *
  * @param {string} spreadsheetId - 스프레드시트 ID
  * @param {Array<{range: string, values: Array<Array<any>>}>} data - 쓸 데이터 배열
  *   예: [{ range: "'탭명'!C5", values: [['값1']] }, { range: "'탭명'!E5", values: [['값2']] }]
@@ -664,12 +667,10 @@ async function batchUpdateSheet(spreadsheetId, data, valueInputOption = 'RAW', o
   if (!sheets) throw new Error('Google Sheets API가 설정되지 않았습니다.');
   if (!data || data.length === 0) return;
 
-  // GID가 전달되었거나 슬래시 포함 탭이 있으면 개별 writeSheet 폴백 (GID 전달)
+  // GID가 전달되었거나 슬래시 포함 탭이 있으면 GID 기반 batch 쓰기
   const hasSlash = data.some(d => d.range && d.range.includes('/'));
   if (hasSlash || (opts.gid !== undefined && opts.gid !== null && opts.gid !== '')) {
-    for (const item of data) {
-      await writeSheet(spreadsheetId, item.range, item.values, opts);
-    }
+    await _batchWriteByGrid(spreadsheetId, data, opts);
     return;
   }
 
@@ -680,6 +681,95 @@ async function batchUpdateSheet(spreadsheetId, data, valueInputOption = 'RAW', o
       data,
     },
   });
+}
+
+/**
+ * ★ GID 기반 다중 셀 동시 쓰기 (1회 API 호출)
+ *
+ * 기존: for 루프로 writeSheet를 N회 호출 (N개 API 요청 → 시트에서 순차 입력)
+ * 개선: spreadsheets.batchUpdate에 N개 updateCells 요청을 묶어 1회 호출 → 동시 입력
+ *
+ * 실패 시 기존 순차 방식으로 자동 폴백 (안전장치)
+ */
+async function _batchWriteByGrid(spreadsheetId, data, opts = {}) {
+  try {
+    // 1. 메타 조회 (GID → sheetId 확인, 행 수 확인)
+    const meta = await sheets.spreadsheets.get({
+      spreadsheetId,
+      includeGridData: false,
+      fields: 'sheets(properties(sheetId,title,gridProperties))',
+    });
+
+    // 첫 번째 data 항목에서 탭명 추출
+    const firstRange = data[0]?.range || '';
+    const tabMatch = firstRange.match(/^'([^']*(?:''[^']*)*)'!/);
+    const tabName = tabMatch ? tabMatch[1].replace(/''/g, "'") : null;
+
+    const targetSheet = _findSheetInMeta(meta.data.sheets || [], { gid: opts.gid, tabName });
+    if (!targetSheet) {
+      throw new Error(`시트를 찾을 수 없습니다: ${tabName || 'gid:' + opts.gid}`);
+    }
+
+    const sheetId = targetSheet.properties.sheetId;
+    const currentRowCount = targetSheet.properties.gridProperties?.rowCount || 0;
+
+    // 2. 각 data 항목을 updateCells 요청으로 변환
+    const requests = [];
+    let maxRequiredRow = 0;
+
+    for (const item of data) {
+      const cellRange = item.range.replace(/^'[^']*(?:''[^']*)*'!/, '');
+      const { startRow, startCol } = _parseA1Range(cellRange);
+
+      const rowsNeeded = startRow + (item.values?.length || 1) - 1;
+      if (rowsNeeded > maxRequiredRow) maxRequiredRow = rowsNeeded;
+
+      // values를 CellData 형식으로 변환
+      const rows = (item.values || [[]]).map(rowValues => ({
+        values: rowValues.map(val => ({
+          userEnteredValue: _toCellValue(val),
+        })),
+      }));
+
+      requests.push({
+        updateCells: {
+          rows,
+          fields: 'userEnteredValue',
+          start: {
+            sheetId,
+            rowIndex: startRow - 1,
+            columnIndex: startCol - 1,
+          },
+        },
+      });
+    }
+
+    // 3. 행 부족 시 자동 추가
+    if (maxRequiredRow > currentRowCount) {
+      const rowsToAdd = maxRequiredRow - currentRowCount + 10;
+      requests.unshift({
+        appendDimension: {
+          sheetId,
+          dimension: 'ROWS',
+          length: rowsToAdd,
+        },
+      });
+    }
+
+    // 4. 단 1회의 API 호출로 모든 셀 동시 쓰기
+    await sheets.spreadsheets.batchUpdate({
+      spreadsheetId,
+      requestBody: { requests },
+    });
+
+  } catch (batchErr) {
+    // ★ 안전 폴백: batch 실패 시 기존 순차 방식으로 재시도
+    const { logger } = require('../utils/logger');
+    logger.warn(`[batchUpdateSheet] GID batch 쓰기 실패 → 순차 폴백: ${batchErr.message}`);
+    for (const item of data) {
+      await writeSheet(spreadsheetId, item.range, item.values, opts);
+    }
+  }
 }
 
 module.exports = {
