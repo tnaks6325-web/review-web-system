@@ -12265,9 +12265,10 @@ function _renderFullTableView(wrap, filtered) {
 
   // 아카이브 액션바
   const checkedCount = _tabDashChecked.size;
-  let html = `<div id="tabDashArchiveBar" style="display:${checkedCount>0?'flex':'none'};align-items:center;gap:10px;padding:8px 12px;margin-bottom:6px;background:#FEF3C7;border:1px solid #F59E0B;border-radius:8px">
+  let html = `<div id="tabDashArchiveBar" style="display:${checkedCount>0?'flex':'none'};align-items:center;gap:10px;padding:8px 12px;margin-bottom:6px;background:#FEF3C7;border:1px solid #F59E0B;border-radius:8px;flex-wrap:wrap">
     <span style="font-size:.78rem;font-weight:600;color:#92400E"><i class="fas fa-check-square" style="margin-right:4px"></i>${checkedCount}건 선택됨</span>
     <button onclick="_archiveCheckedTabs()" style="padding:4px 12px;background:#DC2626;color:#fff;border:none;border-radius:6px;font-size:.72rem;font-weight:600;cursor:pointer;display:flex;align-items:center;gap:4px"><i class="fas fa-archive"></i> 아카이브로 보내기</button>
+    <button onclick="_deleteCheckedCampaigns()" style="padding:4px 12px;background:#991B1B;color:#fff;border:none;border-radius:6px;font-size:.72rem;font-weight:600;cursor:pointer;display:flex;align-items:center;gap:4px"><i class="fas fa-trash-alt"></i> 캠페인 삭제</button>
     <button onclick="_clearTabDashChecked()" style="padding:4px 10px;background:#6B7280;color:#fff;border:none;border-radius:6px;font-size:.72rem;cursor:pointer">선택 해제</button>
   </div>`;
 
@@ -12485,6 +12486,68 @@ async function _executeArchive(tabs, reason) {
   } catch (err) {
     showToast('아카이브 요청 실패: ' + err.message, 'error');
   }
+}
+
+// ── 캠페인 삭제 ──
+async function _deleteCheckedCampaigns() {
+  if (_tabDashChecked.size === 0) { showToast('삭제할 캠페인을 선택하세요.', 'info'); return; }
+
+  // 선택된 탭 정보 수집 — sheetId별로 그룹화
+  const sheetMap = new Map(); // sheetId → { campaignName, tabs[] }
+  _tabDashChecked.forEach(key => {
+    const [sheetId, tabName] = key.split('||');
+    const t = (_tabDashData?.tabs||[]).find(x => x.sheet_id === sheetId && x.tab_name === tabName);
+    if (!sheetMap.has(sheetId)) {
+      sheetMap.set(sheetId, { campaignName: t?.campaign_name || '(알 수 없음)', tabs: [] });
+    }
+    sheetMap.get(sheetId).tabs.push(tabName);
+  });
+
+  // 확인 다이얼로그
+  let msg = `⚠️ 캠페인 삭제 (복구 불가)\n\n삭제 대상 (${sheetMap.size}개 캠페인):\n`;
+  sheetMap.forEach((v, sheetId) => {
+    msg += `\n• ${v.campaignName} (탭 ${v.tabs.length}개)\n  ▸ ${v.tabs.slice(0, 5).join(', ')}${v.tabs.length > 5 ? ` 외 ${v.tabs.length - 5}건` : ''}`;
+  });
+  msg += `\n\n삭제 시:\n• campaigns 테이블에서 제거\n• tab_configs 전체 삭제\n• index_master / review_index 전체 삭제\n\n정말 삭제하시겠습니까?`;
+
+  if (!confirm(msg)) return;
+
+  // 2차 확인
+  if (!confirm(`최종 확인: ${sheetMap.size}개 캠페인의 모든 데이터가 영구 삭제됩니다.\n계속하시겠습니까?`)) return;
+
+  // API 호출 — sheetId별로 삭제
+  let successCount = 0, failCount = 0;
+  const errors = [];
+  for (const [sheetId, info] of sheetMap) {
+    try {
+      const res = await fetch(API_BASE_URL + '/api/diag/delete-campaign', {
+        method: 'DELETE',
+        headers: { 'Content-Type': 'application/json', ..._getAuthHeaders() },
+        body: JSON.stringify({ sheetId }),
+      }).then(r => r.json());
+
+      if (res.ok) {
+        successCount++;
+      } else {
+        failCount++;
+        errors.push(`${info.campaignName}: ${res.error || '실패'}`);
+      }
+    } catch (err) {
+      failCount++;
+      errors.push(`${info.campaignName}: ${err.message}`);
+    }
+  }
+
+  // 결과 표시
+  if (successCount > 0) {
+    showToast(`${successCount}개 캠페인 삭제 완료`, 'success');
+  }
+  if (failCount > 0) {
+    showToast(`${failCount}개 실패: ${errors.join('; ')}`, 'error');
+  }
+
+  _tabDashChecked.clear();
+  await loadTabDashboard(); // 대시보드 새로고침
 }
 
 // ── 상세 모달 ──
