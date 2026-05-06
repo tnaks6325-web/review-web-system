@@ -105,7 +105,7 @@ app.get('/health', async (req, res) => {
     dbTime,
     google: googleStatus,
     serviceAccount: saEmail,
-    version: '2.16.6-batch-write',
+    version: '2.16.7-dup-filter-at-write',
     uptime: Math.floor(process.uptime()),
     memory: Math.round(process.memoryUsage().heapUsed / 1024 / 1024) + 'MB',
     sentry: isSentryEnabled() ? 'active' : 'inactive',

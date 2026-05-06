@@ -5729,24 +5729,7 @@ async function submitOrderForm() {
     };
   });
 
-  // ── 중복 검사 (1번 주문만, 다건은 생략) ── ★ 타임아웃 10초 (DB 전용이므로 빠름)
-  if (!window._dupIgnored) {
-    const o0 = orders[0];
-    const dupWarn = document.getElementById("ofDuplicateWarn");
-    const dupMsg  = document.getElementById("ofDuplicateMsg");
-    if (dupWarn) dupWarn.style.display = "none";
-    try {
-      const dupPayload = { action:"checkDuplicateOrder", sheetId:ctx.sheetId, gid:ctx.gid||"", tabName:ctx.tabName, dateStr, selectedOptKey:o0.selectedOptKey, orderNum:o0.orderNum, userId:o0.userId, recipient:o0.recipient, phone:o0.phone, address:o0.address };
-      let dupRes = null;
-      try { dupRes = await gasPost(dupPayload, 10000); } catch(_){ try { dupRes = await gasGet(dupPayload, 10000); } catch(__){} }
-      if (dupRes?.ok && dupRes.isDuplicate) {
-        const fields = Array.isArray(dupRes.matchedFields) ? dupRes.matchedFields.join(", ") : "";
-        if (dupMsg) dupMsg.innerHTML = `같은 날짜·옵션에서 이미 제출된 정보와 <b>${fields}</b> 항목이 일치합니다.<br>중복 제출이 맞다면 "<b>그래도 제출</b>"을, 아니면 "<b>취소</b>"를 눌러 수정해주세요.`;
-        if (dupWarn) { dupWarn.style.display=""; dupWarn.scrollIntoView({behavior:"smooth",block:"center"}); }
-        _resetBtn(); return;
-      }
-    } catch(dupErr) { console.warn("[중복검사] 오류(허용):", dupErr.message); }
-  }
+  // ── 중복 검사 제거 (v2.16.7): 시트 기록 시점에서 서버가 자동 필터링 ──
   window._dupIgnored = false;
   window._dupPayload = null;
 
@@ -5824,9 +5807,7 @@ async function submitOrderForm() {
       slotRowNumber: currentSlotInfo ? currentSlotInfo.rowNumber : "",
       slotInadName: currentSlotInfo ? currentSlotInfo.inadName : "",
       loginPhone8: slotAuth.phone8 || "",
-      loginName: slotAuth.name || "",
-      // ★ 재제출 허용 플래그 (이전 제출이 시트 미기록 에러 시 프론트에서 세팅)
-      forceResubmit: window._forceResubmit ? "true" : ""
+      loginName: slotAuth.name || ""
     };
 
     try {
@@ -5905,8 +5886,7 @@ async function submitOrderForm() {
 
   if (successCount === 0) {
     // ★ 전체 실패 시: 재제출 안내 + 버튼 변경 + 스크롤
-    _resetBtn('<i class="fas fa-redo"></i> 재제출 (중복 검사 건너뜀)');
-    window._forceResubmit = true;  // 다음 제출 시 중복 검사 건너뜀
+    _resetBtn('<i class="fas fa-redo"></i> 재제출');
     // 제출 버튼을 눈에 띄게 강조 + 스크롤
     const subBtn = document.getElementById("btnOrderFormSubmit");
     if (subBtn) {
@@ -5917,7 +5897,7 @@ async function submitOrderForm() {
     return;
   }
 
-  // 성공 후 재제출 플래그 초기화
+  // 성공 후 플래그 초기화
   window._forceResubmit = false;
 
   // ── 완료 화면 표시 ──
@@ -5940,26 +5920,6 @@ async function submitOrderForm() {
   if (doneEl) doneEl.style.display = "";
 }
 
-/** ★ 중복 경고 배너 — "그래도 제출" 버튼 핸들러 */
-function _ignoreDuplicate() {
-  // 경고 숨김
-  const w = document.getElementById("ofDuplicateWarn");
-  if (w) w.style.display = "none";
-  // 플래그 세우고 재제출 (프론트 사전검사 + 서버 중복 검사 모두 건너뜀)
-  window._dupIgnored = true;
-  window._forceResubmit = true;
-  submitOrderForm();
-}
-
-/** ★ 중복 경고 배너 — "취소" 버튼 핸들러 */
-function _cancelDuplicate() {
-  // 경고 숨김만 (입력은 그대로 유지)
-  const w = document.getElementById("ofDuplicateWarn");
-  if (w) w.style.display = "none";
-  window._dupIgnored = false;
-  window._dupPayload = null;
-}
-
 /** ★ 제출 완료/실패 후 → 구매양식 입력 화면으로 복귀 */
 function resetOrderFormForReentry() {
   // 완료 화면 숨기기
@@ -5977,9 +5937,6 @@ function resetOrderFormForReentry() {
   if (subBtn)   { subBtn.style.display = ""; subBtn.disabled = false; subBtn.innerHTML = '<i class="fas fa-paper-plane"></i> 제출'; }
 
   // 재제출 플래그 초기화
-  window._forceResubmit = false;
-  window._dupIgnored = false;
-  window._dupPayload = null;
   window._submitOrderFormInProgress = false;
 }
 

@@ -526,30 +526,13 @@ router.post('/order', async (req, res, next) => {
             address, bank, account, depositor, price, dateStr, orderNum,
             memo, selectedOptKey, isCoupang, ncMode,
             // ★ 슬롯 매칭 파라미터 (find-slot에서 받은 값)
-            slotRowNumber, slotInadName, loginPhone8, loginName,
-            // ★ 재제출 허용 파라미터 (에러로 시트 미기록 시 프론트에서 전달)
-            forceResubmit } = b;
+            slotRowNumber, slotInadName, loginPhone8, loginName } = b;
 
     if (!sheetId || !tabName) {
       return res.json({ error: 'sheetId와 tabName이 필요합니다.' });
     }
 
-    // ── Step 1: DB 기반 중복 검사 (forceResubmit 시 건너뜀) ──
-    if (!forceResubmit) {
-      const dupCheck = await pool.query(
-        `SELECT COUNT(*) FROM order_submissions
-         WHERE sheet_id = $1 AND tab_name = $2 AND user_id = $3 AND date_str = $4
-         AND submitted_at > NOW() - INTERVAL '1 hour'`,
-        [sheetId, tabName, userId || '', dateStr || '']
-      );
-      if (parseInt(dupCheck.rows[0].count) > 0) {
-        return res.json({ error: '최근 1시간 내 동일한 주문이 이미 제출되었습니다.', isDuplicate: true });
-      }
-    } else {
-      logger.info(`[submit/order] forceResubmit 활성 — 중복 검사 건너뜀 (sheet=${sheetId}, tab=${tabName}, user=${userId || 'N/A'})`);
-    }
-
-    // ── Step 2: DB 즉시 저장 ──
+    // ── Step 1: DB 즉시 저장 ──
     let dbSaved = false;
     try {
       await pool.query(
@@ -597,12 +580,30 @@ router.post('/order', async (req, res, next) => {
       dbSaved, sheetsWritten: false, usedSlot: !!slotRowNumber,
     });
 
-    // ── ★ Step 4: 백그라운드 Sheets 쓰기 (응답 후 비동기 처리) ──
+    // ── ★ Step 3: 백그라운드 Sheets 쓰기 (응답 후 비동기 처리) ──
     // 15초 타임아웃으로 빠르게 시도, 실패 시 큐에 등록
+    // ★ 시트 기록 직전 중복 필터링: 같은 날 + 수취인+연락처+주소 일치 시 쓰기 생략
     const SHEETS_TIMEOUT_MS = 15000;
 
     setImmediate(async () => {
       try {
+        // ── 중복 필터링 (시트 기록 시점): 같은 날 + 수취인+연락처+주소 일치 시 쓰기 생략 ──
+        try {
+          const dupCount = await pool.query(
+            `SELECT COUNT(*) AS cnt FROM order_submissions
+             WHERE sheet_id = $1 AND tab_name = $2 AND date_str = $3
+             AND recipient = $4 AND phone = $5 AND address = $6`,
+            [sheetId, tabName, dateStr || '', recipient || '', phone || '', address || '']
+          );
+          if (parseInt(dupCount.rows[0].cnt) > 1) {
+            logger.warn(`[submit/order:bg] 중복 감지 → 시트 쓰기 생략 (sheet=${sheetId}, tab=${tabName}, recipient=${recipient}, phone=${phone})`);
+            return; // 시트에 쓰지 않음
+          }
+        } catch (dupErr) {
+          // 중복 검사 실패 시 그냥 통과 (시트에 쓰기 진행)
+          logger.warn(`[submit/order:bg] 중복 검사 오류 (무시): ${dupErr.message}`);
+        }
+
         const sheetsPromise = (async () => {
           const headers = await getCachedHeaders(sheetId, tabName, sheetOpts);
           if (!headers) throw new Error('헤더를 가져올 수 없음');
