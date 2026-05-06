@@ -10543,6 +10543,7 @@ async function loadArchiveList() {
               <th style="padding:6px 8px;text-align:right;color:#6B7280;width:60px">제출</th>
               <th style="padding:6px 8px;text-align:center;color:#6B7280;width:70px">사유</th>
               <th style="padding:6px 8px;text-align:right;color:#6B7280;width:110px">아카이브일</th>
+              <th style="padding:6px 8px;text-align:center;color:#6B7280;width:60px">복원</th>
             </tr></thead><tbody>`;
       camp.tabs.forEach(t => {
         const reasonLabel = t.archiveReason === 'closed' ? '마감' :
@@ -10560,6 +10561,9 @@ async function loadArchiveList() {
           <td style="padding:5px 8px;text-align:right">${(t.submittedCount||0).toLocaleString()}</td>
           <td style="padding:5px 8px;text-align:center"><span style="background:${reasonColor}15;color:${reasonColor};padding:2px 6px;border-radius:4px;font-size:.7rem">${reasonLabel}</span></td>
           <td style="padding:5px 8px;text-align:right;color:#9CA3AF">${dateStr}</td>
+          <td style="padding:5px 8px;text-align:center"><button onclick="restoreArchivedTab('${camp.sheetId}','${escHtml(t.tabName).replace(/'/g,"\\'")}')"
+            style="font-size:.7rem;padding:3px 8px;border:1px solid #3B82F6;color:#3B82F6;background:#EFF6FF;border-radius:5px;cursor:pointer;white-space:nowrap"
+            title="이 탭을 대시보드로 복원합니다"><i class="fas fa-undo"></i> 복원</button></td>
         </tr>`;
       });
       html += '</tbody></table></div></div>';
@@ -10569,6 +10573,30 @@ async function loadArchiveList() {
     _loadArchiveHistory();
   } catch (err) {
     wrap.innerHTML = '<span style="color:#EF4444">로드 실패: ' + escHtml(err.message) + '</span>';
+  }
+}
+
+// ── 아카이브 탭 복원 ──
+async function restoreArchivedTab(sheetId, tabName) {
+  if (!confirm(`"${tabName}" 탭을 대시보드로 복원하시겠습니까?\n\n복원하면 다시 스마트갱신 대상이 되며 대시보드에 표시됩니다.`)) return;
+
+  try {
+    showToast('<i class="fas fa-spinner fa-spin"></i> 복원 중...', 'info');
+    const data = await gasPost({ action: 'archiveRestore', tabs: [{ sheetId, tabName }] });
+    if (data.error) {
+      showToast('<i class="fas fa-exclamation-circle"></i> 복원 실패: ' + escHtml(data.error), 'error');
+      return;
+    }
+    const restored = data.results?.filter(r => r.status === 'restored') || [];
+    if (restored.length > 0) {
+      showToast(`<i class="fas fa-check-circle"></i> "${escHtml(tabName)}" 복원 완료 (${data.restoredRows || 0}행)`, 'success');
+      loadArchiveList(); // 목록 새로고침
+    } else {
+      const reason = data.results?.[0]?.reason || '알 수 없는 오류';
+      showToast('<i class="fas fa-exclamation-triangle"></i> 복원 실패: ' + escHtml(reason), 'error');
+    }
+  } catch (err) {
+    showToast('<i class="fas fa-times-circle"></i> 복원 오류: ' + escHtml(err.message), 'error');
   }
 }
 
