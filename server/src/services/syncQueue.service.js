@@ -170,23 +170,41 @@ async function _executeItem(item) {
 
     case 'order_append': {
       // ★ C1: 큐 재시도 시 항상 신선한 헤더를 읽음 (최대 50행에서 탐색)
+      // ★ FIX: appendSheet 대신 빈 행 탐색 후 writeSheet (중간 빈 행 건너뜀 방지)
       const { sheetId, tabName, orderData } = payload;
       if (!sheetId || !tabName) throw new Error('payload 누락');
 
-      const headerValues = await readSheet(sheetId, `'${tabName}'!1:50`);
-      if (headerValues && headerValues.length > 0) {
-        const HEADER_KEYWORDS = ['주문자', '수취인', '연락처', '주소', '은행', '계좌', '금액', '아이디', '인애드'];
-        let headerRow = headerValues[0];
-        for (const row of headerValues) {
-          const matchCount = row.filter(c => HEADER_KEYWORDS.some(k => String(c || '').includes(k))).length;
-          if (matchCount >= 2) { headerRow = row; break; }
-        }
-        const headers = headerRow.map(h => String(h || '').trim());
-        const rowData = _mapOrderToRow(headers, orderData);
-        await appendSheet(sheetId, `'${tabName}'!A:A`, [rowData]);
-      } else {
-        throw new Error('헤더 행을 읽을 수 없음');
+      // 전체 데이터 읽기 (최대 500행)
+      const allRows = await readSheet(sheetId, `'${tabName}'!A1:ZZ500`);
+      if (!allRows || allRows.length === 0) throw new Error('헤더 행을 읽을 수 없음');
+
+      // 헤더 행 탐색
+      const HEADER_KEYWORDS = ['주문자', '수취인', '연락처', '주소', '은행', '계좌', '금액', '아이디', '인애드'];
+      let headerRowIdx = 0;
+      let headerRow = allRows[0];
+      for (let i = 0; i < Math.min(allRows.length, 50); i++) {
+        const row = allRows[i] || [];
+        const matchCount = row.filter(c => HEADER_KEYWORDS.some(k => String(c || '').includes(k))).length;
+        if (matchCount >= 2) { headerRow = row; headerRowIdx = i; break; }
       }
+      const headers = headerRow.map(h => String(h || '').trim());
+      const rowData = _mapOrderToRow(headers, orderData);
+
+      // 헤더 다음 첫 번째 빈 행 찾기
+      const dataRows = allRows.slice(headerRowIdx + 1);
+      let emptyRowOffset = dataRows.length; // default: 데이터 끝 다음
+      for (let i = 0; i < dataRows.length; i++) {
+        const row = dataRows[i] || [];
+        const hasContent = row.some(cell => String(cell || '').trim() !== '');
+        if (!hasContent) {
+          emptyRowOffset = i;
+          break;
+        }
+      }
+
+      // 실제 시트 행 번호 (1-based)
+      const targetRow = headerRowIdx + 1 + emptyRowOffset + 1;
+      await writeSheet(sheetId, `'${tabName}'!A${targetRow}`, [rowData]);
       break;
     }
 

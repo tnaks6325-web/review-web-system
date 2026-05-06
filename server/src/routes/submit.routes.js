@@ -444,60 +444,38 @@ router.post('/order', async (req, res, next) => {
         }
 
         const sheetsPromise = (async () => {
-          const headers = await getCachedHeaders(sheetId, tabName, sheetOpts);
-          if (!headers) throw new Error('헤더를 가져올 수 없음');
+          // ★ 빈 행 탐색 후 writeSheet로 기입 (appendSheet는 마지막 데이터 행 다음에 추가하므로 중간 빈 행을 건너뜀)
+          // getCachedTabData로 전체 데이터를 읽어 헤더 다음 첫 번째 빈 행을 찾음
+          const tabData = await getCachedTabData(sheetId, tabName, sheetOpts);
+          if (!tabData || !tabData.headers) throw new Error('헤더를 가져올 수 없음');
+
+          const headers = tabData.headers;
+          const headerRowIdx = tabData.headerRowIdx; // 0-based index in sheet data
+          const dataRows = tabData.dataRows; // rows after header
 
           const rowData = _mapOrderToRow(headers, orderData);
 
-          if (slotRowNumber && parseInt(slotRowNumber) > 0) {
-            // ★ 슬롯 매칭: 기존 행에 덮어쓰기
-            const rowNum = parseInt(slotRowNumber);
-            const inadColIdx = headers.findIndex(h => INAD_COL_KEYWORDS.some(k => h.toLowerCase().includes(k)));
-            if (inadColIdx >= 0) rowData[inadColIdx] = null;
-
-            const dateColIdx = headers.findIndex(h => {
-              const hl = h.toLowerCase();
-              return hl.includes('일자') || hl.includes('날짜') || hl.includes('구매일');
-            });
-            if (dateColIdx >= 0) rowData[dateColIdx] = null;
-
-            const numColIdx = headers.findIndex(h => h === '번호');
-            if (numColIdx >= 0) rowData[numColIdx] = null;
-
-            const writePairs = [];
-            for (let ci = 0; ci < rowData.length; ci++) {
-              if (rowData[ci] === null || rowData[ci] === '') continue;
-              writePairs.push({ col: ci, val: rowData[ci] });
+          // 헤더 다음 첫 번째 빈 행 찾기 (A열 기준으로 빈 행 탐색)
+          let emptyRowOffset = dataRows.length; // default: 데이터 끝 다음
+          for (let i = 0; i < dataRows.length; i++) {
+            const row = dataRows[i] || [];
+            // 모든 셀이 비어있거나, A열이 비어있으면 빈 행으로 간주
+            const hasContent = row.some(cell => String(cell || '').trim() !== '');
+            if (!hasContent) {
+              emptyRowOffset = i;
+              break;
             }
-
-            if (writePairs.length > 0) {
-              const batchData = writePairs.map(pair => ({
-                range: `'${tabName}'!${getColLetter(pair.col)}${rowNum}`,
-                values: [[pair.val]],
-              }));
-              await batchUpdateSheet(sheetId, batchData, 'RAW', sheetOpts);
-            }
-
-            // 슬롯 잠금 기록
-            try {
-              await pool.query(
-                `INSERT INTO slot_locks (sheet_id, tab_name, row_number, inad_name, locked_by_phone8, locked_by_name, profile_name, is_submitted, submitted_at)
-                 VALUES ($1, $2, $3, $4, $5, $6, $7, TRUE, NOW())
-                 ON CONFLICT (sheet_id, tab_name, row_number) DO UPDATE
-                 SET is_submitted = TRUE, submitted_at = NOW(), locked_by_phone8 = $5, locked_by_name = $6`,
-                [sheetId, tabName, parseInt(slotRowNumber), slotInadName || '', loginPhone8 || '', loginName || '', loginName || '']
-              );
-            } catch (lockErr) {
-              logger.warn(`[submit/order:bg] 슬롯 잠금 기록 실패: ${lockErr.message}`);
-            }
-          } else {
-            // 기존 방식: appendSheet
-            await appendSheet(sheetId, `'${tabName}'!A:A`, [rowData], sheetOpts);
           }
+
+          // 실제 시트 행 번호 계산 (1-based, 헤더행 = headerRowIdx+1, 데이터 시작 = headerRowIdx+2)
+          const targetRow = headerRowIdx + 1 + emptyRowOffset + 1; // +1 for 1-based, +1 for header row itself
+
+          const range = `'${tabName}'!A${targetRow}`;
+          await writeSheet(sheetId, range, [rowData], sheetOpts);
 
           // 성공 시 캐시 무효화
           tabDataCache.delete(`${sheetId}||${tabName}`);
-          logger.info(`[submit/order:bg] Sheets 쓰기 성공 (sheet=${sheetId}, tab=${tabName})`);
+          logger.info(`[submit/order:bg] Sheets 쓰기 성공 (sheet=${sheetId}, tab=${tabName}, row=${targetRow})`);
         })();
 
         // 15초 타임아웃 적용
