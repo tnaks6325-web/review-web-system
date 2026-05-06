@@ -1363,3 +1363,64 @@ router.post('/col-prefs', authMiddleware, async (req, res, next) => {
 });
 
 module.exports = router;
+
+// ═══════════════════════════════════════════════════════════
+// POST /api/tab/fix-sheet-urls — 시트링크 수동보정 (gid 일괄 추가)
+// tab_gid가 있지만 sheet_url에 #gid=xxx가 없는 탭들을 일괄 수정
+// ═══════════════════════════════════════════════════════════
+router.post('/fix-sheet-urls', authMiddleware, async (req, res, next) => {
+  try {
+    const { sheetId, tabName, gid, sheetUrl } = req.body;
+
+    // Case 1: 단건 수동 보정 (sheetId + tabName + gid or sheetUrl)
+    if (sheetId && tabName && (gid || sheetUrl)) {
+      let newUrl = sheetUrl;
+      if (!newUrl && gid) {
+        newUrl = `https://docs.google.com/spreadsheets/d/${sheetId}/edit#gid=${gid}`;
+      }
+      // Update sheet_url and tab_gid
+      const updateFields = ['sheet_url = $3', 'updated_at = NOW()'];
+      const values = [sheetId, tabName, newUrl];
+      if (gid) {
+        updateFields.push(`tab_gid = $${values.length + 1}`);
+        values.push(String(gid));
+      }
+      await pool.query(
+        `UPDATE tab_configs SET ${updateFields.join(', ')} WHERE sheet_id = $1 AND tab_name = $2`,
+        values
+      );
+      return res.json({ ok: true, fixed: 1, tabName, newUrl });
+    }
+
+    // Case 2: 일괄 보정 — tab_gid가 있지만 sheet_url에 gid가 없는 모든 탭
+    const filterSheet = sheetId || null;
+    let sql = `
+      SELECT tc.sheet_id, tc.tab_name, tc.sheet_url, tc.tab_gid
+      FROM tab_configs tc
+      WHERE tc.tab_gid IS NOT NULL
+        AND (tc.sheet_url NOT LIKE '%#gid=%' OR tc.sheet_url IS NULL)
+    `;
+    const params = [];
+    if (filterSheet) {
+      params.push(filterSheet);
+      sql += ` AND tc.sheet_id = $${params.length}`;
+    }
+
+    const { rows } = await pool.query(sql, params);
+    let fixed = 0;
+
+    for (const row of rows) {
+      const baseUrl = (row.sheet_url || `https://docs.google.com/spreadsheets/d/${row.sheet_id}/edit`).split('#')[0];
+      const newUrl = `${baseUrl}#gid=${row.tab_gid}`;
+      await pool.query(
+        'UPDATE tab_configs SET sheet_url = $1, updated_at = NOW() WHERE sheet_id = $2 AND tab_name = $3',
+        [newUrl, row.sheet_id, row.tab_name]
+      );
+      fixed++;
+    }
+
+    res.json({ ok: true, fixed, total: rows.length, filterSheet });
+  } catch (err) {
+    next(err);
+  }
+});

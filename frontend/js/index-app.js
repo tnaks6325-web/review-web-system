@@ -12202,9 +12202,18 @@ function _cellVal(t, col) {
   if (k === "capture_folder_url") return _inlineLinkEdit(t, "capture_folder_url", "captureFolderUrl", "fa-camera", "#1D4ED8");
   if (k === "sheet_url") {
     const url = t.sheet_url;
-    if (!url) return '<span style="color:#D1D5DB">—</span>';
-    const finalUrl = t.tab_gid ? url.replace(/[#?].*$/, '') + '#gid=' + t.tab_gid : url;
-    return `<a href="${escHtml(finalUrl)}" target="_blank" style="color:#7C3AED" title="${escHtml(finalUrl)}"><i class="fas fa-external-link-alt"></i></a>`;
+    const hasGid = t.tab_gid;
+    const finalUrl = url ? (hasGid ? url.replace(/[#?].*$/, '') + '#gid=' + t.tab_gid : url) : '';
+    const linkIcon = finalUrl
+      ? `<a href="${escHtml(finalUrl)}" target="_blank" style="color:#7C3AED" title="${escHtml(finalUrl)}"><i class="fas fa-external-link-alt"></i></a>`
+      : '';
+    // 시트링크에 gid가 없으면 ⚠️ 보정 버튼 표시
+    const needsFix = !hasGid || (url && !url.includes('#gid='));
+    const fixBtn = needsFix
+      ? `<button onclick="event.stopPropagation();_fixSheetUrl('${escHtml(t.sheet_id)}','${escHtml(t.tab_name)}')" style="background:none;border:none;cursor:pointer;color:#D97706;font-size:.72rem;margin-left:2px" title="시트링크 수동보정 (gid 없음)"><i class="fas fa-exclamation-triangle"></i></button>`
+      : '';
+    if (!url && !fixBtn) return '<span style="color:#D1D5DB">—</span>';
+    return `<span style="display:inline-flex;align-items:center;gap:2px">${linkIcon}${fixBtn}</span>`;
   }
   // 택일
   if (k === "manager") return _inlineSelect(t, "manager", "manager", ["만두","망고"], {
@@ -12585,6 +12594,129 @@ async function _deleteCheckedCampaigns() {
 
   _tabDashChecked.clear();
   await loadTabDashboard(); // 대시보드 새로고침
+}
+
+// ── 시트링크 수동보정 ──
+async function _fixSheetUrl(sheetId, tabName) {
+  // 모달로 보정 옵션 제공
+  const tab = (_tabDashData?.tabs||[]).find(t => t.sheet_id === sheetId && t.tab_name === tabName);
+  const currentUrl = tab?.sheet_url || '';
+  const currentGid = tab?.tab_gid || '';
+
+  // 기존 모달 제거
+  document.getElementById('fixSheetUrlModal')?.remove();
+
+  const modal = document.createElement('div');
+  modal.id = 'fixSheetUrlModal';
+  modal.style.cssText = 'position:fixed;inset:0;z-index:10000;display:flex;align-items:center;justify-content:center;background:rgba(0,0,0,.5)';
+  modal.innerHTML = `
+    <div style="background:#fff;border-radius:12px;padding:24px;width:480px;max-width:90vw;box-shadow:0 20px 60px rgba(0,0,0,.3)">
+      <h3 style="margin:0 0 16px;font-size:1rem;color:#1F2937"><i class="fas fa-wrench" style="color:#D97706;margin-right:6px"></i>시트링크 수동보정</h3>
+      <div style="background:#FEF3C7;border:1px solid #F59E0B;border-radius:8px;padding:10px;margin-bottom:14px;font-size:.78rem;color:#92400E">
+        <strong>${escHtml(tabName)}</strong><br>
+        현재 URL에 gid가 없어 시트 탭으로 바로 이동할 수 없습니다.
+      </div>
+      <div style="margin-bottom:12px">
+        <label style="font-size:.75rem;font-weight:600;color:#374151;display:block;margin-bottom:4px">현재 시트 URL</label>
+        <input id="fixSheetUrlInput" type="text" value="${escHtml(currentUrl)}" 
+          style="width:100%;padding:8px 10px;border:1px solid #D1D5DB;border-radius:6px;font-size:.78rem;box-sizing:border-box" 
+          placeholder="https://docs.google.com/spreadsheets/d/.../edit#gid=123456">
+      </div>
+      <div style="margin-bottom:16px">
+        <label style="font-size:.75rem;font-weight:600;color:#374151;display:block;margin-bottom:4px">GID (탭 ID)</label>
+        <input id="fixSheetGidInput" type="text" value="${escHtml(String(currentGid || ''))}" 
+          style="width:100%;padding:8px 10px;border:1px solid #D1D5DB;border-radius:6px;font-size:.78rem;box-sizing:border-box" 
+          placeholder="예: 718097009">
+        <div style="font-size:.68rem;color:#6B7280;margin-top:4px">
+          💡 시트를 열고 URL에서 #gid= 뒤의 숫자를 복사하세요
+        </div>
+      </div>
+      <div style="display:flex;gap:8px;justify-content:space-between">
+        <button onclick="_fixSheetUrlAutoDetect('${escHtml(sheetId)}','${escHtml(tabName)}')" 
+          style="padding:8px 14px;background:#EEF2FF;color:#4338CA;border:1px solid #C7D2FE;border-radius:8px;font-size:.75rem;font-weight:600;cursor:pointer">
+          <i class="fas fa-magic"></i> 자동감지
+        </button>
+        <div style="display:flex;gap:8px">
+          <button onclick="document.getElementById('fixSheetUrlModal').remove()" 
+            style="padding:8px 16px;background:#F3F4F6;color:#374151;border:none;border-radius:8px;font-size:.75rem;cursor:pointer">취소</button>
+          <button onclick="_fixSheetUrlSave('${escHtml(sheetId)}','${escHtml(tabName)}')" 
+            style="padding:8px 16px;background:#7C3AED;color:#fff;border:none;border-radius:8px;font-size:.75rem;font-weight:600;cursor:pointer">
+            <i class="fas fa-save"></i> 저장</button>
+        </div>
+      </div>
+    </div>
+  `;
+  document.body.appendChild(modal);
+  modal.addEventListener('click', e => { if (e.target === modal) modal.remove(); });
+}
+
+// 시트링크 자동감지 — Google Sheets 메타에서 gid 가져오기
+async function _fixSheetUrlAutoDetect(sheetId, tabName) {
+  const btn = event.target.closest('button');
+  btn.disabled = true;
+  btn.innerHTML = '<i class="fas fa-spinner fa-spin"></i> 감지중...';
+  try {
+    const token = localStorage.getItem('admin_token') || sessionStorage.getItem('admin_token');
+    const url = `https://docs.google.com/spreadsheets/d/${sheetId}/edit`;
+    const resp = await fetch(`/api/diag/preview-campaign?url=${encodeURIComponent(url)}`, {
+      headers: { 'Authorization': `Bearer ${token}` }
+    });
+    const data = await resp.json();
+    if (!data.ok) throw new Error(data.error || '시트 메타 조회 실패');
+    
+    const tabs = data.tabs || [];
+    const matched = tabs.find(t => t.name === tabName);
+    if (matched && matched.gid) {
+      document.getElementById('fixSheetGidInput').value = matched.gid;
+      showToast(`GID 자동감지 완료: ${matched.gid}`, 'success');
+    } else {
+      // 부분 매칭 시도
+      const partial = tabs.find(t => t.name.includes(tabName) || tabName.includes(t.name));
+      if (partial && partial.gid) {
+        document.getElementById('fixSheetGidInput').value = partial.gid;
+        showToast(`GID 유사매칭: ${partial.name} → ${partial.gid}`, 'success');
+      } else {
+        showToast('탭 이름과 매칭되는 GID를 찾지 못했습니다. 수동으로 입력해주세요.', 'warn');
+      }
+    }
+  } catch (err) {
+    showToast(`자동감지 실패: ${err.message}`, 'error');
+  } finally {
+    btn.disabled = false;
+    btn.innerHTML = '<i class="fas fa-magic"></i> 자동감지';
+  }
+}
+
+// 시트링크 보정 저장
+async function _fixSheetUrlSave(sheetId, tabName) {
+  const urlInput = document.getElementById('fixSheetUrlInput').value.trim();
+  const gidInput = document.getElementById('fixSheetGidInput').value.trim();
+
+  if (!gidInput && !urlInput.includes('#gid=')) {
+    showToast('GID를 입력하거나 URL에 #gid=를 포함해주세요.', 'warn');
+    return;
+  }
+
+  try {
+    const token = localStorage.getItem('admin_token') || sessionStorage.getItem('admin_token');
+    const body = { sheetId, tabName };
+    if (gidInput) body.gid = gidInput;
+    if (urlInput) body.sheetUrl = urlInput.includes('#gid=') ? urlInput : (gidInput ? `${urlInput.split('#')[0]}#gid=${gidInput}` : urlInput);
+
+    const resp = await fetch('/api/tab/fix-sheet-urls', {
+      method: 'POST',
+      headers: { 'Authorization': `Bearer ${token}`, 'Content-Type': 'application/json' },
+      body: JSON.stringify(body)
+    });
+    const data = await resp.json();
+    if (!data.ok) throw new Error(data.error || '저장 실패');
+
+    showToast(`시트링크 보정 완료: ${tabName}`, 'success');
+    document.getElementById('fixSheetUrlModal')?.remove();
+    await loadTabDashboard();
+  } catch (err) {
+    showToast(`저장 실패: ${err.message}`, 'error');
+  }
 }
 
 // ── 상세 모달 ──
