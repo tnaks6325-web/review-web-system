@@ -214,9 +214,9 @@ async function getQueueStats() {
     stats.total += parseInt(r.count);
   });
 
-  // 최근 실패 항목
+  // 최근 실패 항목 (payload 포함 — 어떤 탭/시트에서 실패했는지 확인용)
   const { rows: recentFailed } = await pool.query(`
-    SELECT id, type, error_msg, attempts, max_retry, created_at, processed_at
+    SELECT id, type, error_msg, attempts, max_retry, created_at, processed_at, payload
     FROM sync_queue
     WHERE status = 'failed'
     ORDER BY processed_at DESC NULLS LAST
