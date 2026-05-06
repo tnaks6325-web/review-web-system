@@ -238,12 +238,19 @@ router.post('/find-slot', async (req, res, next) => {
     const matchName = (profileName || loginName).trim();
     const sheetOpts = gid ? { gid } : {};
 
-    // 탭 전체 데이터 로드 (Sheets API 실패 시 append 모드로 폴백)
+    // ★ 10초 타임아웃: Sheets API가 quota 초과로 hang되면 빠르게 append 모드로 전환
+    const FIND_SLOT_TIMEOUT_MS = 10000;
+
+    // 탭 전체 데이터 로드 (Sheets API 실패/타임아웃 시 append 모드로 폴백)
     let tabData = null;
     try {
-      tabData = await getCachedTabData(sheetId, tabName, sheetOpts);
+      const dataPromise = getCachedTabData(sheetId, tabName, sheetOpts);
+      const timeoutPromise = new Promise((_, reject) =>
+        setTimeout(() => reject(new Error('find-slot Sheets 읽기 타임아웃 (10초)')), FIND_SLOT_TIMEOUT_MS)
+      );
+      tabData = await Promise.race([dataPromise, timeoutPromise]);
     } catch (sheetErr) {
-      logger.warn(`[find-slot] 시트 읽기 실패 → append 모드: ${sheetErr.message}`);
+      logger.warn(`[find-slot] 시트 읽기 실패/타임아웃 → append 모드: ${sheetErr.message}`);
       return res.json({ ok: true, mode: 'append', reason: 'sheet_read_error', debug: sheetErr.message });
     }
     if (!tabData) {
@@ -427,7 +434,6 @@ router.post('/review', async (req, res, next) => {
     }
 
     // ── Phase 1: index_master 카운트 즉시 반영 ──
-    // 다음 인덱스 빌드에서 시트 원본 기준 재계산되므로 누적 오차 없음
     if (dbUpdated) {
       try {
         await pool.query(
@@ -440,53 +446,64 @@ router.post('/review', async (req, res, next) => {
       } catch (_) { /* 대시보드 카운트 보조 — 실패해도 무시 */ }
     }
 
-    // ── Step 2: Sheets 동시 쓰기 시도 ──
-    let sheetsWritten = false;
-    try {
-      const headers = await getCachedHeaders(sheetId, tabName, sheetOpts);
-      if (headers) {
-        const colIdx = headers.findIndex(h => h === submitCol);
-        if (colIdx >= 0) {
-          const colLetter = getColLetter(colIdx);
-          const range = `'${tabName}'!${colLetter}${rowIndex}`;
-          await writeSheet(sheetId, range, [[submitValue]], sheetOpts);
-          sheetsWritten = true;
-        }
-      }
-    } catch (sheetsErr) {
-      logger.warn(`[submit/review] Sheets 쓰기 실패 → 큐 등록: ${sheetsErr.message}`);
-
-      // ── Step 3: 실패 시 sync_queue에 등록 ──
-      try {
-        await enqueue('review_submit', {
-          sheetId,
-          tabName,
-          rowIndex,
-          submitCol,
-          value: submitValue,
-        });
-      } catch (queueErr) {
-        logger.error(`[submit/review] 큐 등록도 실패: ${queueErr.message}`);
-      }
-    }
-
-    // ── SSE 알림: 리뷰 제출 ──
+    // ── ★ Step 2: 즉시 응답 반환 (DB 저장 완료 = 제출 성공) ──
+    // Sheets 쓰기는 백그라운드에서 처리 → 사용자 대기 제거
     emitReviewSubmit({
       tabName,
       sheetId,
       reviewer: req.body.reviewerName || '',
       rowIndex,
       dbUpdated,
-      sheetsWritten,
+      sheetsWritten: false,
     });
 
     res.json({
       ok: true,
       submitted: submitValue,
       dbUpdated,
-      sheetsWritten,
-      queued: !sheetsWritten,
+      sheetsWritten: false,  // Sheets는 백그라운드에서 처리
+      queued: true,          // 항상 큐 처리 방식
     });
+
+    // ── ★ Step 3: 백그라운드 Sheets 쓰기 (응답 후 비동기 처리) ──
+    const SHEETS_TIMEOUT_MS = 15000;
+
+    setImmediate(async () => {
+      try {
+        const sheetsPromise = (async () => {
+          const headers = await getCachedHeaders(sheetId, tabName, sheetOpts);
+          if (!headers) throw new Error('헤더를 가져올 수 없음');
+
+          const colIdx = headers.findIndex(h => h === submitCol);
+          if (colIdx < 0) throw new Error(`submitCol '${submitCol}' 을 헤더에서 찾을 수 없음`);
+
+          const colLetter = getColLetter(colIdx);
+          const range = `'${tabName}'!${colLetter}${rowIndex}`;
+          await writeSheet(sheetId, range, [[submitValue]], sheetOpts);
+          logger.info(`[submit/review:bg] Sheets 쓰기 성공 (sheet=${sheetId}, tab=${tabName}, row=${rowIndex})`);
+        })();
+
+        const timeoutPromise = new Promise((_, reject) =>
+          setTimeout(() => reject(new Error('Sheets 쓰기 타임아웃 (15초)')), SHEETS_TIMEOUT_MS)
+        );
+
+        await Promise.race([sheetsPromise, timeoutPromise]);
+      } catch (bgErr) {
+        logger.warn(`[submit/review:bg] Sheets 쓰기 실패 → 큐 등록: ${bgErr.message}`);
+        try {
+          await enqueue('review_submit', {
+            sheetId,
+            tabName,
+            rowIndex,
+            submitCol,
+            value: submitValue,
+          });
+        } catch (queueErr) {
+          logger.error(`[submit/review:bg] 큐 등록도 실패: ${queueErr.message}`);
+        }
+      }
+    });
+
   } catch (err) {
     next(err);
   }
@@ -558,134 +575,111 @@ router.post('/order', async (req, res, next) => {
       } catch (_) { /* 대시보드 카운트 보조 — 실패해도 무시 */ }
     }
 
-    // ── Step 3: Sheets 쓰기 ──
+    // ── ★ Step 3: 즉시 응답 반환 (DB 저장 완료 = 제출 성공) ──
+    // Sheets 쓰기는 백그라운드에서 처리 → 사용자 대기 제거
     const orderData = { orderer, recipient, userId, phone, address, bank, account, depositor, price, dateStr, orderNum, memo, selectedOptKey };
-    let sheetsWritten = false;
-    let usedSlot = false;
     const sheetOpts = gid ? { gid } : {};
 
-    try {
-      const headers = await getCachedHeaders(sheetId, tabName, sheetOpts);
-      if (headers) {
-        const rowData = _mapOrderToRow(headers, orderData);
+    // 즉시 응답 (DB 저장 기준)
+    res.json({
+      ok: true,
+      dbSaved,
+      sheetsWritten: false,   // Sheets는 백그라운드에서 처리 (프론트가 기다리지 않음)
+      queued: true,           // 항상 큐 처리 방식
+      usedSlot: !!slotRowNumber,
+      slotRowNumber: slotRowNumber ? parseInt(slotRowNumber) : null,
+    });
 
-        if (slotRowNumber && parseInt(slotRowNumber) > 0) {
-          // ★ 슬롯 매칭: 기존 행에 덮어쓰기 (인애드명 컬럼은 보존)
-          const rowNum = parseInt(slotRowNumber);
-          const inadColIdx = headers.findIndex(h => INAD_COL_KEYWORDS.some(k => h.toLowerCase().includes(k)));
+    // ── SSE 알림: 구매양식 제출 ──
+    emitOrderSubmit({
+      tabName, sheetId,
+      orderer: orderer || '', recipient: recipient || '',
+      dbSaved, sheetsWritten: false, usedSlot: !!slotRowNumber,
+    });
 
-          // 인애드명 컬럼은 기존값 유지 (덮어쓰지 않음)
-          if (inadColIdx >= 0) {
-            rowData[inadColIdx] = null; // null = 기존값 유지 표시
-          }
+    // ── ★ Step 4: 백그라운드 Sheets 쓰기 (응답 후 비동기 처리) ──
+    // 15초 타임아웃으로 빠르게 시도, 실패 시 큐에 등록
+    const SHEETS_TIMEOUT_MS = 15000;
 
-          // 날짜 컬럼도 기존값 유지 (이미 관리자가 세팅해둔 값)
-          const dateColIdx = headers.findIndex(h => {
-            const hl = h.toLowerCase();
-            return hl.includes('일자') || hl.includes('날짜') || hl.includes('구매일');
-          });
-          if (dateColIdx >= 0) {
-            rowData[dateColIdx] = null;
-          }
+    setImmediate(async () => {
+      try {
+        const sheetsPromise = (async () => {
+          const headers = await getCachedHeaders(sheetId, tabName, sheetOpts);
+          if (!headers) throw new Error('헤더를 가져올 수 없음');
 
-          // 번호 컬럼도 기존값 유지
-          const numColIdx = headers.findIndex(h => h === '번호');
-          if (numColIdx >= 0) {
-            rowData[numColIdx] = null;
-          }
+          const rowData = _mapOrderToRow(headers, orderData);
 
-          // null이 아닌 컬럼만 개별 셀 쓰기 (기존값 보호)
-          const writePairs = [];
-          for (let ci = 0; ci < rowData.length; ci++) {
-            if (rowData[ci] === null || rowData[ci] === '') continue;
-            writePairs.push({ col: ci, val: rowData[ci] });
-          }
+          if (slotRowNumber && parseInt(slotRowNumber) > 0) {
+            // ★ 슬롯 매칭: 기존 행에 덮어쓰기
+            const rowNum = parseInt(slotRowNumber);
+            const inadColIdx = headers.findIndex(h => INAD_COL_KEYWORDS.some(k => h.toLowerCase().includes(k)));
+            if (inadColIdx >= 0) rowData[inadColIdx] = null;
 
-          // ★ 성능 개선: batchUpdate로 1회 API 호출 (기존 N회 → 1회)
-          //   실패 시 기존 개별 쓰기로 폴백 (안전 보장)
-          if (writePairs.length > 0) {
-            const batchData = writePairs.map(pair => ({
-              range: `'${tabName}'!${getColLetter(pair.col)}${rowNum}`,
-              values: [[pair.val]],
-            }));
+            const dateColIdx = headers.findIndex(h => {
+              const hl = h.toLowerCase();
+              return hl.includes('일자') || hl.includes('날짜') || hl.includes('구매일');
+            });
+            if (dateColIdx >= 0) rowData[dateColIdx] = null;
 
-            try {
-              await batchUpdateSheet(sheetId, batchData, 'RAW', sheetOpts);
-              sheetsWritten = true;
-              usedSlot = true;
-            } catch (batchErr) {
-              // batchUpdate 실패 → 기존 개별 쓰기로 폴백
-              logger.warn(`[submit/order] batchUpdate 실패, 개별 쓰기 폴백: ${batchErr.message}`);
-              for (const pair of writePairs) {
-                const colLetter = getColLetter(pair.col);
-                const range = `'${tabName}'!${colLetter}${rowNum}`;
-                await writeSheet(sheetId, range, [[pair.val]], sheetOpts);
-              }
-              sheetsWritten = true;
-              usedSlot = true;
+            const numColIdx = headers.findIndex(h => h === '번호');
+            if (numColIdx >= 0) rowData[numColIdx] = null;
+
+            const writePairs = [];
+            for (let ci = 0; ci < rowData.length; ci++) {
+              if (rowData[ci] === null || rowData[ci] === '') continue;
+              writePairs.push({ col: ci, val: rowData[ci] });
             }
-          }
 
-          // 슬롯 잠금 기록
-          if (sheetsWritten) {
+            if (writePairs.length > 0) {
+              const batchData = writePairs.map(pair => ({
+                range: `'${tabName}'!${getColLetter(pair.col)}${rowNum}`,
+                values: [[pair.val]],
+              }));
+              await batchUpdateSheet(sheetId, batchData, 'RAW', sheetOpts);
+            }
+
+            // 슬롯 잠금 기록
             try {
               await pool.query(
                 `INSERT INTO slot_locks (sheet_id, tab_name, row_number, inad_name, locked_by_phone8, locked_by_name, profile_name, is_submitted, submitted_at)
                  VALUES ($1, $2, $3, $4, $5, $6, $7, TRUE, NOW())
                  ON CONFLICT (sheet_id, tab_name, row_number) DO UPDATE
                  SET is_submitted = TRUE, submitted_at = NOW(), locked_by_phone8 = $5, locked_by_name = $6`,
-                [sheetId, tabName, rowNum, slotInadName || '', loginPhone8 || '', loginName || '', loginName || '']
+                [sheetId, tabName, parseInt(slotRowNumber), slotInadName || '', loginPhone8 || '', loginName || '', loginName || '']
               );
             } catch (lockErr) {
-              logger.warn(`[submit/order] 슬롯 잠금 기록 실패: ${lockErr.message}`);
+              logger.warn(`[submit/order:bg] 슬롯 잠금 기록 실패: ${lockErr.message}`);
             }
+          } else {
+            // 기존 방식: appendSheet
+            await appendSheet(sheetId, `'${tabName}'!A:A`, [rowData], sheetOpts);
           }
-        } else {
-          // ★ 기존 방식: appendSheet (인애드명 컬럼 없는 탭이거나 슬롯 없음)
-          await appendSheet(sheetId, `'${tabName}'!A:A`, [rowData], sheetOpts);
-          sheetsWritten = true;
+
+          // 성공 시 캐시 무효화
+          tabDataCache.delete(`${sheetId}||${tabName}`);
+          logger.info(`[submit/order:bg] Sheets 쓰기 성공 (sheet=${sheetId}, tab=${tabName})`);
+        })();
+
+        // 15초 타임아웃 적용
+        const timeoutPromise = new Promise((_, reject) =>
+          setTimeout(() => reject(new Error('Sheets 쓰기 타임아웃 (15초)')), SHEETS_TIMEOUT_MS)
+        );
+
+        await Promise.race([sheetsPromise, timeoutPromise]);
+      } catch (bgErr) {
+        // Sheets 쓰기 실패/타임아웃 → 큐에 등록 (자동 재시도)
+        logger.warn(`[submit/order:bg] Sheets 쓰기 실패 → 큐 등록: ${bgErr.message}`);
+        try {
+          await enqueue('order_append', {
+            sheetId, tabName, orderData,
+            slotRowNumber: slotRowNumber || null,
+          });
+        } catch (queueErr) {
+          logger.error(`[submit/order:bg] 큐 등록도 실패: ${queueErr.message}`);
         }
       }
-    } catch (sheetsErr) {
-      logger.warn(`[submit/order] Sheets 쓰기 실패 → 큐 등록: ${sheetsErr.message}`);
-
-      // ── Step 4: 실패 시 sync_queue에 등록 ──
-      try {
-        await enqueue('order_append', {
-          sheetId,
-          tabName,
-          orderData,
-          slotRowNumber: slotRowNumber || null,
-        });
-      } catch (queueErr) {
-        logger.error(`[submit/order] 큐 등록도 실패: ${queueErr.message}`);
-      }
-    }
-
-    // 탭 데이터 캐시 무효화 (슬롯 상태 변경됨)
-    if (sheetsWritten) {
-      tabDataCache.delete(`${sheetId}||${tabName}`);
-    }
-
-    // ── SSE 알림: 구매양식 제출 ──
-    emitOrderSubmit({
-      tabName,
-      sheetId,
-      orderer: orderer || '',
-      recipient: recipient || '',
-      dbSaved,
-      sheetsWritten,
-      usedSlot,
     });
 
-    res.json({
-      ok: true,
-      dbSaved,
-      sheetsWritten,
-      queued: !sheetsWritten,
-      usedSlot,
-      slotRowNumber: usedSlot ? parseInt(slotRowNumber) : null,
-    });
   } catch (err) {
     next(err);
   }

@@ -1719,7 +1719,7 @@ async function submitReview() {
           submitCol:        item.submitCol,
           value:            submitTimeValue,
           campaignName:     item.campaignName,
-        });
+        }, 30000);
 
         hideLoading();
         if (result && (result.success || result.ok)) {
@@ -5729,7 +5729,7 @@ async function submitOrderForm() {
     };
   });
 
-  // ── 중복 검사 (1번 주문만, 다건은 생략) ──
+  // ── 중복 검사 (1번 주문만, 다건은 생략) ── ★ 타임아웃 10초 (DB 전용이므로 빠름)
   if (!window._dupIgnored) {
     const o0 = orders[0];
     const dupWarn = document.getElementById("ofDuplicateWarn");
@@ -5738,7 +5738,7 @@ async function submitOrderForm() {
     try {
       const dupPayload = { action:"checkDuplicateOrder", sheetId:ctx.sheetId, gid:ctx.gid||"", tabName:ctx.tabName, dateStr, selectedOptKey:o0.selectedOptKey, orderNum:o0.orderNum, userId:o0.userId, recipient:o0.recipient, phone:o0.phone, address:o0.address };
       let dupRes = null;
-      try { dupRes = await gasPost(dupPayload); } catch(_){ try { dupRes = await gasGet(dupPayload); } catch(__){} }
+      try { dupRes = await gasPost(dupPayload, 10000); } catch(_){ try { dupRes = await gasGet(dupPayload, 10000); } catch(__){} }
       if (dupRes?.ok && dupRes.isDuplicate) {
         const fields = Array.isArray(dupRes.matchedFields) ? dupRes.matchedFields.join(", ") : "";
         if (dupMsg) dupMsg.innerHTML = `같은 날짜·옵션에서 이미 제출된 정보와 <b>${fields}</b> 항목이 일치합니다.<br>중복 제출이 맞다면 "<b>그래도 제출</b>"을, 아니면 "<b>취소</b>"를 눌러 수정해주세요.`;
@@ -5752,7 +5752,7 @@ async function submitOrderForm() {
 
   if (btn) btn.innerHTML = `<i class="fas fa-spinner fa-spin"></i> 제출 중... (0/${orders.length})`;
 
-  // ★★★ Phase 5: 슬롯 매칭 API 호출 (제출 전) ★★★
+  // ★★★ Phase 5: 슬롯 매칭 API 호출 (제출 전) — 15초 타임아웃 ★★★
   let slotInfo = null;
   const slotAuth = window._slotAuth || {};
   if (slotAuth.name && ctx.sheetId && ctx.tabName) {
@@ -5766,7 +5766,7 @@ async function submitOrderForm() {
         phone8: slotAuth.phone8 || "",
         profileName: orders[0]?.orderer || slotAuth.name
       };
-      const slotRes = await gasPost(slotPayload);
+      const slotRes = await gasPost(slotPayload, 15000);
       if (slotRes?.ok && slotRes.mode === 'slot' && slotRes.rowNumber) {
         slotInfo = slotRes;
         console.log("[슬롯매칭] 성공:", slotRes.matchType, "→ 행", slotRes.rowNumber, "인애드명:", slotRes.inadName);
@@ -5799,7 +5799,7 @@ async function submitOrderForm() {
           phone8: slotAuth.phone8 || "",
           profileName: o.orderer || slotAuth.name
         };
-        const slotRes2 = await gasPost(slotPayload2);
+        const slotRes2 = await gasPost(slotPayload2, 15000);
         if (slotRes2?.ok && slotRes2.mode === 'slot' && slotRes2.rowNumber) {
           currentSlotInfo = slotRes2;
           console.log(`[슬롯매칭 ${i+1}] 성공:`, slotRes2.matchType, "→ 행", slotRes2.rowNumber);
@@ -5831,11 +5831,11 @@ async function submitOrderForm() {
 
     try {
       let res;
-      try { res = await gasPost(payload); } catch(e1) {
+      try { res = await gasPost(payload, 30000); } catch(e1) {
         console.warn(`[제출 ${i+1}] gasPost 실패:`, e1.message);
-        // ★ [Node.js 이관] gasPost 재시도 (1회)
+        // ★ [Node.js 이관] gasPost 재시도 (1회, 30초 타임아웃)
         try {
-          res = await gasPost(payload);
+          res = await gasPost(payload, 30000);
         } catch(e2) { throw new Error("서버 연결 실패"); }
       }
       if (!res) throw new Error("서버 응답이 없습니다.");
@@ -5843,25 +5843,21 @@ async function submitOrderForm() {
 
       successCount++;
 
-      // 이미지 업로드 (백그라운드)
+      // ★ 이미지 업로드는 완전 비동기 (사용자 대기 없음)
       if (o.imgThumbSrc && o.imgThumbSrc.startsWith("data:")) {
-        try {
-          const base64  = o.imgThumbSrc.split(",")[1];
-          const mime    = o.mimeType || "image/jpeg";
-          const ext     = mime==="image/png"?"png":mime==="image/webp"?"webp":"jpg";
-          const namePart= [o.recipient||o.orderer, o.orderer!==o.recipient?o.orderer:""].filter(Boolean).join("_")||"주문캡처";
-          const upPayload = { action:"uploadOrderImage", imageBase64:base64, mimeType:mime, fileName:namePart+"."+ext, displayName:ctx.displayName||"", tabName:ctx.tabName, round:ctx.round||"", sheetId:ctx.sheetId||"" };
-          // ★ [Node.js 이관] gasPost()를 통해 API 서버로 전송
-          let upJson = null;
-          for (let at=1; at<=2; at++) {
-            try {
-              upJson = await gasPost(upPayload); break;
-            } catch(fe) { if(at<2){ await new Promise(r=>setTimeout(r,1500)); } }
-          }
-          if (upJson?.ok && upJson.captureFolderUrl && !firstCaptureFolderUrl) {
-            firstCaptureFolderUrl = upJson.captureFolderUrl;
-          }
-        } catch(upErr) { console.warn(`[이미지 업로드 ${i+1}] 오류 (제출은 완료):`, upErr.message); }
+        const _imgCtx = { base64: o.imgThumbSrc.split(",")[1], mime: o.mimeType || "image/jpeg", recipient: o.recipient, orderer: o.orderer };
+        // 비동기 처리 — await 없이 실행 (제출 성공 여부와 무관)
+        (async () => {
+          try {
+            const ext = _imgCtx.mime==="image/png"?"png":_imgCtx.mime==="image/webp"?"webp":"jpg";
+            const namePart = [_imgCtx.recipient||_imgCtx.orderer, _imgCtx.orderer!==_imgCtx.recipient?_imgCtx.orderer:""].filter(Boolean).join("_")||"주문캡처";
+            const upPayload = { action:"uploadOrderImage", imageBase64:_imgCtx.base64, mimeType:_imgCtx.mime, fileName:namePart+"."+ext, displayName:ctx.displayName||"", tabName:ctx.tabName, round:ctx.round||"", sheetId:ctx.sheetId||"" };
+            const upJson = await gasPost(upPayload, 180000);
+            if (upJson?.ok && upJson.captureFolderUrl && !firstCaptureFolderUrl) {
+              firstCaptureFolderUrl = upJson.captureFolderUrl;
+            }
+          } catch(upErr) { console.warn(`[이미지 업로드 ${i+1}] 백그라운드 오류:`, upErr.message); }
+        })();
       }
     } catch(err) {
       showCenterAlert(`❌ ${i+1}번째 주문 제출 실패: ${err.message}`);
