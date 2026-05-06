@@ -1045,29 +1045,27 @@ function renderResults(results) {
     const isSingle = items.length === 1;
 
     if (isSingle) {
-      // ── 단건: 기존 카드 스타일 유지 ──
+      // ── 단건: [날짜] [표시명/탭명] 옵션:옵션명 형식 ──
       const item = items[0];
-      const productLabel = item.tcDisplayName || "";
       const roundBadge = item.round
         ? `<span style="display:inline-block;font-size:.6rem;font-weight:700;padding:1px 6px;border-radius:10px;background:#EEF2FF;color:#4338CA;border:1px solid #C7D2FE;margin-left:4px;vertical-align:middle">${escHtml(item.round)}</span>`
         : "";
-      const { product, options } = extractProductOption(item.row || {});
-      let optionHtml = "";
-      if (options.length > 0) {
-        const badges = options.map(o => `<span class="result-option-badge">${escHtml(o.value)}</span>`).join("");
-        optionHtml = `<div class="result-option-row">${badges}</div>`;
-      }
-      const displayProduct = productLabel || product;
-      // ★ 표시명 최우선 → 탭명 → 캠페인명(시트제목) 순서
-      const fallbackCamp = item.tcDisplayName || item.tabName || item.campaignName || "";
-      const productHtml = displayProduct
+
+      // ★ 참여작업명: [날짜] [표시명(없으면 탭명)] [옵션:옵션명]
+      const taskDate = item.startDate || "";
+      const taskName = item.tcDisplayName || item.tabName || item.campaignName || "";
+      const optionName = item.productName || "";
+      const taskParts = [];
+      if (taskDate) taskParts.push(taskDate);
+      if (taskName) taskParts.push(taskName);
+      if (optionName) taskParts.push(`옵션:${optionName}`);
+      const taskLabel = taskParts.join(" ");
+
+      const productHtml = taskLabel
         ? `<div class="result-name result-product-name">${escHtml(name)}${roundBadge}</div>
-           <div class="result-product-label">${escHtml(displayProduct)}</div>${optionHtml}`
-        : fallbackCamp
-          ? `<div class="result-name result-product-name">${escHtml(name)}${roundBadge}</div>
-             <div class="result-product-label result-product-camp">${escHtml(fallbackCamp)}</div>${optionHtml}`
-          : `<div class="result-name result-product-name">${escHtml(name)}${roundBadge}</div>
-             <div class="result-product-label result-product-empty">상품명이 입력되지 않았습니다.</div>${optionHtml}`;
+           <div class="result-product-label">${escHtml(taskLabel)}</div>`
+        : `<div class="result-name result-product-name">${escHtml(name)}${roundBadge}</div>
+           <div class="result-product-label result-product-empty">참여 작업 정보 없음</div>`;
       const card = document.createElement("div");
       card.className = "result-card";
       card.innerHTML = `
@@ -1085,19 +1083,23 @@ function renderResults(results) {
       const groupCard = document.createElement("div");
       groupCard.className = "result-group-card";
 
-      // ★ 표시명 최우선 → 탭명 → 캠페인명(시트제목) 순서
+      // ★ 그룹 헤더: [표시명/탭명]
       const campLabel = items[0].tcDisplayName || items[0].tabName || items[0].campaignName || "";
 
-      // 각 항목 라인 생성
+      // 각 항목 라인: [날짜] [표시명/탭명] 옵션:옵션명
       const itemLines = items.map((item) => {
-        const productLabel = item.tcDisplayName || "";
-        const { product, options } = extractProductOption(item.row || {});
-        const displayProduct = productLabel || product || "상품명 없음";
+        const taskDate = item.startDate || "";
+        const taskName = item.tcDisplayName || item.tabName || item.campaignName || "";
+        const optionName = item.productName || "";
         const roundTxt = item.round ? ` · ${item.round}` : "";
-        const optTxt = options.length > 0 ? ` (${options.map(o=>o.value).filter(Boolean).join("/")})` : "";
+        const taskParts = [];
+        if (taskDate) taskParts.push(taskDate);
+        if (taskName) taskParts.push(taskName);
+        if (optionName) taskParts.push(`옵션:${optionName}`);
+        const taskLabel = taskParts.join(" ") || "작업 정보 없음";
         return `<div class="result-group-item">
           <i class="fas fa-box" style="color:var(--p);font-size:.72rem;flex-shrink:0"></i>
-          <span class="result-group-item-label">${escHtml(displayProduct)}${escHtml(optTxt)}${escHtml(roundTxt)}</span>
+          <span class="result-group-item-label">${escHtml(taskLabel)}${escHtml(roundTxt)}</span>
           <span class="result-group-item-badge">미제출</span>
         </div>`;
       }).join("");
@@ -1134,9 +1136,15 @@ function openSubmitMulti(items) {
   S.files        = [];
   S.step         = 1;
 
-  // 헤더 타이틀
+  // 헤더 타이틀 — [날짜] [표시명/탭명] 옵션:옵션명
+  const firstForTitle = items[0];
+  const subtitleParts = [];
+  if (firstForTitle.startDate) subtitleParts.push(firstForTitle.startDate);
+  const subtitleName = firstForTitle.tcDisplayName || firstForTitle.tabName || firstForTitle.campaignName || "";
+  if (subtitleName) subtitleParts.push(subtitleName);
+  if (firstForTitle.productName) subtitleParts.push(`옵션:${firstForTitle.productName}`);
   document.getElementById("submitTitle").textContent    = "리뷰 이미지 제출";
-  document.getElementById("submitSubtitle").textContent = "";
+  document.getElementById("submitSubtitle").textContent = subtitleParts.join(" ") || "";
 
   // 상품 URL (첫 번째 항목 기준)
   const firstItem = items[0];
