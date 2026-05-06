@@ -2505,7 +2505,7 @@ function _buildTabRowHtml(t, tabKey, isSubRow, isClosedTab, tabNameHtml, startDa
 
   // 리뷰폴더 열 (대량건 배지 제거 → 부가정보 열로 이동)
   const folderCell = t.folderUrl
-    ? `<a class="dash-folder-link" href="${escHtml(t.folderUrl)}" target="_blank" onclick="event.stopPropagation()"><i class="fas fa-folder-open"></i> 리뷰폴더</a><button class="btn-dedupe" data-sheetid="${escHtml(t.sheetId)}" data-tabname="${escHtml(t.tabName)}" onclick="event.stopPropagation();openDedupePreview(this)" title="중복 파일 정리"><i class="fas fa-broom"></i></button>`
+    ? `<a class="dash-folder-link" href="${escHtml(t.folderUrl)}" target="_blank" onclick="event.stopPropagation()"><i class="fas fa-folder-open"></i> 리뷰폴더</a>`
     : `<span style="color:#D1D5DB;font-size:.6rem">—</span>`;
 
   // 차수 열: 호출 시 전달된 roundLabel 사용 (없으면 "단독")
@@ -13164,5 +13164,127 @@ async function executeDedupeFromModal() {
     showToast('실행 오류: ' + err.message, 'error');
   } finally {
     if (btn) { btn.disabled = false; btn.innerHTML = '<i class="fas fa-trash-alt"></i> 실행'; }
+  }
+}
+
+// ═══════════════════════════════════════════════════════════
+// 중복 파일 정리 — 탭 선택 모달 (상단 툴바 버튼에서 호출)
+// ═══════════════════════════════════════════════════════════
+
+/**
+ * 상단 "중복정리" 버튼 클릭 → 리뷰폴더가 설정된 탭 목록 표시
+ */
+function openDedupeSelector() {
+  // 기존 모달 제거
+  const existing = document.getElementById('dedupeSelectorModal');
+  if (existing) existing.remove();
+
+  // _lastDashData에서 리뷰폴더가 설정된 탭 필터링
+  let tabsWithFolder = [];
+  if (_lastDashData && _lastDashData.stats) {
+    _lastDashData.stats.forEach(camp => {
+      (camp.tabs || []).forEach(t => {
+        if (t.folderUrl) {
+          tabsWithFolder.push({
+            sheetId: t.sheetId,
+            tabName: t.tabName,
+            displayName: t.displayName || t.tabName,
+            campName: camp.campaignName || '',
+            folderUrl: t.folderUrl,
+          });
+        }
+      });
+    });
+  }
+
+  if (tabsWithFolder.length === 0) {
+    showToast('리뷰폴더가 설정된 탭이 없습니다.', 'info');
+    return;
+  }
+
+  // 탭 목록 렌더링
+  const tabRows = tabsWithFolder.map((t, i) => `
+    <div class="dedupe-sel-row" style="display:flex;align-items:center;gap:10px;padding:10px 14px;border-radius:8px;cursor:pointer;transition:background .15s;border:1px solid #E5E7EB;margin-bottom:6px"
+         onmouseover="this.style.background='#FEF3C7'" onmouseout="this.style.background='#fff'"
+         onclick="selectDedupeTab(${i})">
+      <i class="fas fa-folder-open" style="color:#D97706;font-size:.9rem"></i>
+      <div style="flex:1;min-width:0">
+        <div style="font-size:.8rem;font-weight:600;color:#111;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${escHtml(t.displayName)}</div>
+        <div style="font-size:.65rem;color:#6B7280;margin-top:1px">${escHtml(t.campName)}</div>
+      </div>
+      <i class="fas fa-chevron-right" style="color:#9CA3AF;font-size:.7rem"></i>
+    </div>
+  `).join('');
+
+  const modal = document.createElement('div');
+  modal.id = 'dedupeSelectorModal';
+  modal.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,.45);z-index:9999;display:flex;align-items:center;justify-content:center;padding:20px';
+  modal.innerHTML = `
+    <div style="background:#fff;border-radius:12px;width:100%;max-width:480px;max-height:75vh;display:flex;flex-direction:column;box-shadow:0 20px 60px rgba(0,0,0,.2)">
+      <div style="padding:16px 20px;border-bottom:1px solid #E5E7EB;flex-shrink:0">
+        <h3 style="margin:0;font-size:1rem;font-weight:700;color:#111"><i class="fas fa-copy" style="color:#D97706"></i> 중복 파일 정리</h3>
+        <div style="font-size:.72rem;color:#6B7280;margin-top:4px">정리할 리뷰폴더를 선택하세요 (${tabsWithFolder.length}개 탭)</div>
+      </div>
+      <div style="padding:14px 20px;overflow-y:auto;flex:1">
+        ${tabRows}
+      </div>
+      <div style="padding:12px 20px;border-top:1px solid #E5E7EB;display:flex;justify-content:flex-end;flex-shrink:0">
+        <button onclick="this.closest('#dedupeSelectorModal').remove()" style="padding:8px 16px;background:#6B7280;color:#fff;border:none;border-radius:6px;font-size:.8rem;font-weight:600;cursor:pointer">닫기</button>
+      </div>
+    </div>`;
+
+  // 탭 데이터를 모달에 저장
+  modal._tabsWithFolder = tabsWithFolder;
+  document.body.appendChild(modal);
+  modal.addEventListener('click', (e) => { if (e.target === modal) modal.remove(); });
+}
+
+/**
+ * 탭 선택 후 해당 탭의 중복 미리보기 실행
+ */
+async function selectDedupeTab(idx) {
+  const modal = document.getElementById('dedupeSelectorModal');
+  if (!modal || !modal._tabsWithFolder) return;
+
+  const tab = modal._tabsWithFolder[idx];
+  if (!tab) return;
+
+  // 선택된 항목 로딩 표시
+  const rows = modal.querySelectorAll('.dedupe-sel-row');
+  if (rows[idx]) {
+    rows[idx].style.background = '#FEF3C7';
+    rows[idx].innerHTML = `<i class="fas fa-spinner fa-spin" style="color:#D97706"></i><span style="font-size:.8rem;color:#6B7280">중복 검사 중...</span>`;
+  }
+
+  try {
+    const token = sessionStorage.getItem('admin_token') || localStorage.getItem('admin_token');
+    const resp = await fetch(API_BASE_URL + '/api/dedupe/preview', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'Authorization': token ? 'Bearer ' + token : '',
+      },
+      body: JSON.stringify({ sheetId: tab.sheetId, tabName: tab.tabName }),
+    });
+    const data = await resp.json();
+
+    // 선택 모달 닫기
+    modal.remove();
+
+    if (!resp.ok || data.error) {
+      showToast(data.error || '중복 검사 실패', 'error');
+      return;
+    }
+
+    if (data.duplicateGroups === 0) {
+      showToast(`중복 파일 없음 (총 ${data.totalFiles}개 파일 검사 완료)`, 'success');
+      return;
+    }
+
+    // 미리보기 모달 표시
+    _renderDedupeModal(data, tab.sheetId, tab.tabName);
+  } catch (err) {
+    modal.remove();
+    showToast('중복 검사 오류: ' + err.message, 'error');
   }
 }
