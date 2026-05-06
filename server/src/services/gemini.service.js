@@ -7,35 +7,88 @@
  *   2. verifyAddressMatch()     — 네이버/쿠팡 주소 동일인 비교
  *
  * 필요 환경변수:
- *   GEMINI_API_KEY — Google AI Studio에서 발급한 API 키
+ *   GEMINI_API_KEY       — 기본 API 키 (필수)
+ *   GEMINI_API_KEYS      — 멀티 키 (쉼표 구분, 선택) — 라운드로빈 부하 분산
+ *
+ * v2.16.9 개선:
+ *   - 멀티 API 키 라운드로빈 (처리량 N배 확장)
+ *   - 결과 캐싱 (동일 이미지 재요청 시 0ms 응답)
  * ═══════════════════════════════════════════════════════════
  */
 
 const { GoogleGenerativeAI } = require('@google/generative-ai');
+const crypto = require('crypto');
 const { logger } = require('../utils/logger');
 
-// ── Gemini 클라이언트 초기화 ──
-let genAI = null;
-let model = null;
+// ── 멀티 키 라운드로빈 풀 ──
+const _modelPool = [];    // [{ genAI, model, key(마스킹) }]
+let _poolIndex = 0;
 
 function _initGemini() {
-  if (model) return true;
+  if (_modelPool.length > 0) return true;
 
-  const apiKey = process.env.GEMINI_API_KEY;
-  if (!apiKey) {
-    logger.warn('[Gemini] GEMINI_API_KEY 환경변수 미설정 — AI 기능 비활성화');
+  // 멀티 키: GEMINI_API_KEYS (쉼표 구분) 우선, 없으면 GEMINI_API_KEY 단일
+  const multiKeys = process.env.GEMINI_API_KEYS;
+  const singleKey = process.env.GEMINI_API_KEY;
+  const keys = multiKeys
+    ? multiKeys.split(',').map(k => k.trim()).filter(Boolean)
+    : (singleKey ? [singleKey] : []);
+
+  if (keys.length === 0) {
+    logger.warn('[Gemini] GEMINI_API_KEY(S) 환경변수 미설정 — AI 기능 비활성화');
     return false;
   }
 
   try {
-    genAI = new GoogleGenerativeAI(apiKey);
-    model = genAI.getGenerativeModel({ model: 'gemini-2.5-flash' });
-    logger.info('[Gemini] 초기화 완료 (gemini-2.5-flash)');
+    for (const key of keys) {
+      const genAI = new GoogleGenerativeAI(key);
+      const model = genAI.getGenerativeModel({ model: 'gemini-2.5-flash' });
+      _modelPool.push({ genAI, model, key: key.slice(0, 6) + '...' });
+    }
+    logger.info(`[Gemini] 초기화 완료 (gemini-2.5-flash × ${_modelPool.length}키 라운드로빈)`);
     return true;
   } catch (err) {
     logger.error(`[Gemini] 초기화 실패: ${err.message}`);
     return false;
   }
+}
+
+// 라운드로빈으로 모델 선택
+function _getModel() {
+  const entry = _modelPool[_poolIndex % _modelPool.length];
+  _poolIndex++;
+  return entry;
+}
+
+// ── 결과 캐시 (인메모리, LRU 방식) ──
+const _extractCache = new Map(); // key: imageHash → { result, ts }
+const CACHE_TTL = 10 * 60 * 1000; // 10분
+const CACHE_MAX_SIZE = 200;
+
+function _getCacheKey(base64Data) {
+  // 이미지 데이터의 MD5 해시 (빠르고 충분)
+  const clean = base64Data.replace(/^data:image\/[a-z]+;base64,/, '');
+  return crypto.createHash('md5').update(clean.slice(0, 50000)).digest('hex');
+  // 첫 50KB만 해시 — 대부분의 이미지를 구분하기 충분하며 해싱 비용 절약
+}
+
+function _getFromCache(hash) {
+  const entry = _extractCache.get(hash);
+  if (!entry) return null;
+  if (Date.now() - entry.ts > CACHE_TTL) {
+    _extractCache.delete(hash);
+    return null;
+  }
+  return entry.result;
+}
+
+function _putToCache(hash, result) {
+  // LRU: 최대 크기 초과 시 가장 오래된 항목 삭제
+  if (_extractCache.size >= CACHE_MAX_SIZE) {
+    const firstKey = _extractCache.keys().next().value;
+    _extractCache.delete(firstKey);
+  }
+  _extractCache.set(hash, { result, ts: Date.now() });
 }
 
 // ═══════════════════════════════════════════════════════════
@@ -72,6 +125,15 @@ async function extractOrderFromImage(base64Data, mimeType = 'image/jpeg') {
 
   const startTime = Date.now();
 
+  // ── 4번: 캐시 확인 ──
+  const cacheHash = _getCacheKey(base64Data);
+  const cached = _getFromCache(cacheHash);
+  if (cached) {
+    const elapsed = Date.now() - startTime;
+    logger.info(`[Gemini] 캐시 HIT: ${elapsed}ms (hash=${cacheHash.slice(0, 8)})`);
+    return { ...cached, elapsed, cached: true };
+  }
+
   try {
     // base64 데이터에서 data URL prefix 제거 (있는 경우)
     const cleanBase64 = base64Data.replace(/^data:image\/[a-z]+;base64,/, '');
@@ -83,7 +145,10 @@ async function extractOrderFromImage(base64Data, mimeType = 'image/jpeg') {
       },
     };
 
-    const result = await model.generateContent([EXTRACT_PROMPT, imagePart]);
+    // ── 1번: 라운드로빈 모델 선택 ──
+    const { model: selectedModel, key: usedKey } = _getModel();
+
+    const result = await selectedModel.generateContent([EXTRACT_PROMPT, imagePart]);
     const response = result.response;
     const text = response.text();
 
@@ -99,13 +164,14 @@ async function extractOrderFromImage(base64Data, mimeType = 'image/jpeg') {
     }
 
     const elapsed = Date.now() - startTime;
-    logger.info(`[Gemini] 이미지 분석 완료: ${elapsed}ms, 수취인=${extracted.recipient || '-'}, 주문번호=${extracted.orderNumber || '-'}`);
+    logger.info(`[Gemini] 이미지 분석 완료: ${elapsed}ms, key=${usedKey}, 수취인=${extracted.recipient || '-'}, 주문번호=${extracted.orderNumber || '-'}`);
 
-    return {
-      ok: true,
-      ...extracted,
-      elapsed,
-    };
+    const finalResult = { ok: true, ...extracted };
+
+    // ── 4번: 결과 캐시 저장 ──
+    _putToCache(cacheHash, finalResult);
+
+    return { ...finalResult, elapsed };
   } catch (err) {
     const elapsed = Date.now() - startTime;
     logger.error(`[Gemini] 이미지 분석 실패 (${elapsed}ms): ${err.message}`);
@@ -159,7 +225,10 @@ async function verifyAddressMatch(naverInfo, coupangInfo) {
       .replace('{coupangPhone}', coupangInfo.phone || '')
       .replace('{coupangAddress}', coupangInfo.address || '');
 
-    const result = await model.generateContent(prompt);
+    // ── 1번: 라운드로빈 모델 선택 ──
+    const { model: selectedModel, key: usedKey } = _getModel();
+
+    const result = await selectedModel.generateContent(prompt);
     const text = result.response.text();
 
     const jsonStr = text.replace(/```json\s*/g, '').replace(/```\s*/g, '').trim();
