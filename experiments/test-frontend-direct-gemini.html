@@ -1,0 +1,186 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>실험 2: 프론트엔드 직접 Gemini 호출 테스트</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <style>
+        .drop-zone { border: 2px dashed #94a3b8; transition: all 0.2s; }
+        .drop-zone.active { border-color: #3b82f6; background: #eff6ff; }
+    </style>
+</head>
+<body class="bg-gray-50 min-h-screen p-8">
+    <div class="max-w-2xl mx-auto">
+        <h1 class="text-2xl font-bold text-gray-800 mb-2">🧪 실험 2: 프론트엔드 직접 Gemini 호출</h1>
+        <p class="text-sm text-gray-500 mb-6">
+            서버 경유 없이 브라우저에서 Gemini API를 직접 호출하는 테스트입니다.<br>
+            <strong class="text-red-600">⚠️ 프로덕션에서는 API 키가 노출됩니다. 제한된 키 또는 별도 프록시 필요.</strong>
+        </p>
+
+        <!-- API 키 입력 -->
+        <div class="bg-white rounded-lg shadow p-4 mb-4">
+            <label class="block text-sm font-medium text-gray-700 mb-1">Gemini API Key</label>
+            <input type="password" id="apiKeyInput" 
+                   class="w-full border rounded px-3 py-2 text-sm"
+                   placeholder="AIza... (테스트용 키 입력)">
+        </div>
+
+        <!-- 이미지 업로드 -->
+        <div class="bg-white rounded-lg shadow p-4 mb-4">
+            <div id="dropZone" class="drop-zone rounded-lg p-8 text-center cursor-pointer">
+                <p class="text-gray-500">📷 이미지를 드래그하거나 클릭하여 선택</p>
+                <input type="file" id="fileInput" accept="image/*" class="hidden">
+            </div>
+            <img id="preview" class="mt-4 max-h-64 mx-auto rounded hidden">
+        </div>
+
+        <!-- 분석 버튼 -->
+        <button id="analyzeBtn" 
+                class="w-full bg-blue-600 text-white py-3 rounded-lg font-medium hover:bg-blue-700 disabled:opacity-50"
+                disabled>
+            🔍 이미지 분석 (프론트엔드 직접 호출)
+        </button>
+
+        <!-- 결과 -->
+        <div id="resultArea" class="mt-4 hidden">
+            <div class="bg-white rounded-lg shadow p-4">
+                <div class="flex justify-between items-center mb-2">
+                    <h3 class="font-bold text-gray-800">분석 결과</h3>
+                    <span id="elapsedBadge" class="text-xs bg-green-100 text-green-700 px-2 py-1 rounded"></span>
+                </div>
+                <pre id="resultJson" class="text-xs bg-gray-50 p-3 rounded overflow-auto max-h-64"></pre>
+            </div>
+        </div>
+
+        <!-- 비교 (서버 호출 vs 직접 호출) -->
+        <div class="mt-6 bg-yellow-50 border border-yellow-200 rounded-lg p-4">
+            <h3 class="font-bold text-yellow-800 mb-2">📊 성능 비교 메모</h3>
+            <table class="w-full text-sm">
+                <thead><tr class="text-left text-yellow-700">
+                    <th>항목</th><th>서버 경유</th><th>직접 호출</th>
+                </tr></thead>
+                <tbody class="text-yellow-900">
+                    <tr><td>평균 응답</td><td>~9.3초</td><td id="directAvg">측정 중...</td></tr>
+                    <tr><td>네트워크 홉</td><td>브라우저→서버→Gemini</td><td>브라우저→Gemini</td></tr>
+                    <tr><td>서버 부하</td><td>base64 수신+전달</td><td>0 (서버 미사용)</td></tr>
+                    <tr><td>보안</td><td>✅ 키 숨김</td><td>❌ 키 노출</td></tr>
+                </tbody>
+            </table>
+        </div>
+    </div>
+
+    <script type="importmap">
+    {
+        "imports": {
+            "@google/generative-ai": "https://esm.run/@google/generative-ai"
+        }
+    }
+    </script>
+    <script type="module">
+        import { GoogleGenerativeAI } from "@google/generative-ai";
+
+        const dropZone = document.getElementById('dropZone');
+        const fileInput = document.getElementById('fileInput');
+        const preview = document.getElementById('preview');
+        const analyzeBtn = document.getElementById('analyzeBtn');
+        const resultArea = document.getElementById('resultArea');
+        const resultJson = document.getElementById('resultJson');
+        const elapsedBadge = document.getElementById('elapsedBadge');
+        const directAvg = document.getElementById('directAvg');
+
+        let currentBase64 = null;
+        let currentMimeType = null;
+        const timings = [];
+
+        // 드래그 & 드롭
+        dropZone.addEventListener('click', () => fileInput.click());
+        dropZone.addEventListener('dragover', e => { e.preventDefault(); dropZone.classList.add('active'); });
+        dropZone.addEventListener('dragleave', () => dropZone.classList.remove('active'));
+        dropZone.addEventListener('drop', e => {
+            e.preventDefault();
+            dropZone.classList.remove('active');
+            handleFile(e.dataTransfer.files[0]);
+        });
+        fileInput.addEventListener('change', e => handleFile(e.target.files[0]));
+
+        function handleFile(file) {
+            if (!file) return;
+            currentMimeType = file.type || 'image/jpeg';
+            const reader = new FileReader();
+            reader.onload = (e) => {
+                preview.src = e.target.result;
+                preview.classList.remove('hidden');
+                currentBase64 = e.target.result.split(',')[1]; // strip data URL prefix
+                analyzeBtn.disabled = !document.getElementById('apiKeyInput').value;
+            };
+            reader.readAsDataURL(file);
+        }
+
+        document.getElementById('apiKeyInput').addEventListener('input', () => {
+            analyzeBtn.disabled = !currentBase64 || !document.getElementById('apiKeyInput').value;
+        });
+
+        // 분석 실행
+        analyzeBtn.addEventListener('click', async () => {
+            const apiKey = document.getElementById('apiKeyInput').value.trim();
+            if (!apiKey || !currentBase64) return;
+
+            analyzeBtn.disabled = true;
+            analyzeBtn.textContent = '⏳ Gemini 분석 중...';
+
+            const startTime = performance.now();
+
+            try {
+                const genAI = new GoogleGenerativeAI(apiKey);
+                const model = genAI.getGenerativeModel({ model: "gemini-2.5-flash" });
+
+                const prompt = `당신은 한국 온라인 쇼핑몰 주문 캡쳐 이미지를 분석하는 전문가입니다.
+이미지에서 다음 정보를 추출해주세요. 찾을 수 없는 항목은 빈 문자열("")로 반환하세요.
+반드시 아래 JSON 형식으로만 응답하세요 (다른 텍스트 없이):
+{
+  "orderNumber": "주문번호",
+  "recipient": "수취인/받는분 이름",
+  "phone": "연락처/전화번호",
+  "address": "배송지 주소",
+  "price": "결제금액/상품금액",
+  "orderer": "주문자 이름",
+  "productName": "상품명",
+  "orderDate": "주문일자",
+  "store": "쇼핑몰명"
+}`;
+
+                const result = await model.generateContent([
+                    prompt,
+                    { inlineData: { data: currentBase64, mimeType: currentMimeType } }
+                ]);
+
+                const elapsed = Math.round(performance.now() - startTime);
+                const text = result.response.text();
+                const jsonStr = text.replace(/```json\s*/g, '').replace(/```\s*/g, '').trim();
+
+                let parsed;
+                try { parsed = JSON.parse(jsonStr); } catch { parsed = { raw: text }; }
+
+                // 표시
+                resultArea.classList.remove('hidden');
+                elapsedBadge.textContent = `${elapsed}ms (직접)`;
+                resultJson.textContent = JSON.stringify(parsed, null, 2);
+
+                // 평균 계산
+                timings.push(elapsed);
+                const avg = Math.round(timings.reduce((a, b) => a + b, 0) / timings.length);
+                directAvg.textContent = `~${(avg / 1000).toFixed(1)}초 (${timings.length}회)`;
+
+            } catch (err) {
+                resultArea.classList.remove('hidden');
+                elapsedBadge.textContent = 'ERROR';
+                resultJson.textContent = `에러: ${err.message}`;
+            }
+
+            analyzeBtn.disabled = false;
+            analyzeBtn.textContent = '🔍 이미지 분석 (프론트엔드 직접 호출)';
+        });
+    </script>
+</body>
+</html>
