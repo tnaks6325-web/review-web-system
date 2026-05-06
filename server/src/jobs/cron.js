@@ -1,6 +1,6 @@
 const cron = require('node-cron');
 const { buildIndexSmart, checkDirtySheets, buildOneSheet } = require('../services/indexBuilder.service');
-const { processQueue, purgeCompleted } = require('../services/syncQueue.service');
+const { processQueue, purgeCompleted, retryAllFailed } = require('../services/syncQueue.service');
 // [DEPRECATED — v11.8.0] syncSettingsOnly 제거: DB가 설정 원본이므로 시트→DB 동기화 불필요
 // const { syncSettingsOnly } = require('../services/masterSheet.service');
 const { logger } = require('../utils/logger');
@@ -97,6 +97,7 @@ function startCronJobs() {
   }, { timezone: 'Asia/Seoul' });
 
   // ── Phase 2: Sync Queue 워커 — 30초마다 pending 작업 처리 ──
+  // ★ A2: stuck processing 자동 감지 포함
   cron.schedule('*/30 * * * * *', async () => {
     try {
       const result = await processQueue(10);
@@ -108,6 +109,18 @@ function startCronJobs() {
     }
   });
 
+  // ── ★ A2+C2: 매시간 stuck/failed 자동 복구 ──
+  cron.schedule('0 * * * *', async () => {
+    try {
+      const result = await retryAllFailed();
+      if (result.retried > 0 || result.unstuck > 0 || result.resetExhausted > 0) {
+        logger.info(`[CRON-Queue] 자동 복구: retried=${result.retried}, unstuck=${result.unstuck}, resetExhausted=${result.resetExhausted}`);
+      }
+    } catch (err) {
+      logger.error(`[CRON-Queue] 자동 복구 오류: ${err.message}`);
+    }
+  }, { timezone: 'Asia/Seoul' });
+
   // ── 완료된 큐 항목 정리: 매일 새벽 3시 (24시간 이상 경과) ──
   cron.schedule('0 3 * * *', async () => {
     try {
@@ -118,7 +131,7 @@ function startCronJobs() {
     }
   }, { timezone: 'Asia/Seoul' });
 
-  logger.info(`[CRON] 스케줄러 등록 완료: dirty+자동빌드=15분, 인덱스=${schedule}, 전체재빌드=매일04시, 큐워커=30초, 정리=매일03시 [설정동기화=제거(v11.8.0)]`);
+  logger.info(`[CRON] 스케줄러 등록 완료: dirty+자동빌드=15분, 인덱스=${schedule}, 전체재빌드=매일04시, 큐워커=30초, 자동복구=매시간, 정리=매일03시`);
 }
 
 module.exports = { startCronJobs };

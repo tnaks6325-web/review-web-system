@@ -55,9 +55,13 @@ async function processQueue(batchSize = 10) {
       const item = items[i];
       processed++;
 
-      // ★ Sheets API quota 초과 방지: 항목 간 2초 딜레이
-      if (i > 0) {
-        await new Promise(r => setTimeout(r, 2000));
+      // ★ A1: Exponential backoff — Quota 에러 이력이 있으면 대기 시간 증가
+      const baseDelay = 2000; // 기본 2초
+      const backoffDelay = item.attempts > 0
+        ? Math.min(baseDelay * Math.pow(2, item.attempts), 30000) // 최대 30초
+        : (i > 0 ? baseDelay : 0); // 첫 항목은 즉시, 이후 2초
+      if (backoffDelay > 0) {
+        await new Promise(r => setTimeout(r, backoffDelay));
       }
 
       // processing 상태로 변경
@@ -79,7 +83,7 @@ async function processQueue(batchSize = 10) {
 
       } catch (err) {
         const newAttempts = (item.attempts || 0) + 1;
-        const isQuotaError = err.message && err.message.includes('Quota exceeded');
+        const isQuotaError = err.message && (err.message.includes('Quota exceeded') || err.message.includes('429') || err.message.includes('RATE_LIMIT'));
         // quota 에러 시 재시도 기회 보존 (max_retry를 초과하지 않도록)
         const newStatus = (newAttempts >= item.max_retry && !isQuotaError) ? 'failed' : 'pending';
 
@@ -92,6 +96,11 @@ async function processQueue(batchSize = 10) {
           failed++;
           logger.error(`[syncQueue] ❌ id=${item.id} 최종 실패 (${newAttempts}회): ${err.message}`);
         } else {
+          // ★ Quota 에러 시 남은 항목 스킵 (backoff 대기 후 다음 CRON 사이클에서 처리)
+          if (isQuotaError) {
+            logger.warn(`[syncQueue] ⚠️ id=${item.id} Quota 에러 — 나머지 ${items.length - i - 1}건 다음 사이클로 연기`);
+            break;
+          }
           logger.warn(`[syncQueue] ⚠️ id=${item.id} 재시도 예정 (${newAttempts}/${item.max_retry}): ${err.message}`);
         }
       }
@@ -130,20 +139,28 @@ async function _executeItem(item) {
     }
 
     case 'review_submit': {
-      // 리뷰 제출: 헤더 읽기 → 컬럼 찾기 → 쓰기
+      // ★ C1: 큐 재시도 시 항상 신선한 헤더를 읽음 (캐시된 헤더 사용 안 함)
       const { sheetId, tabName, rowIndex, submitCol, value } = payload;
       if (!sheetId || !tabName || !rowIndex) throw new Error('payload 누락');
 
-      const headerValues = await readSheet(sheetId, `'${tabName}'!1:1`);
-      if (headerValues && headerValues[0]) {
-        const headers = headerValues[0].map(h => String(h || '').trim());
+      // 헤더 행을 최대 50행까지 읽어서 실제 헤더 위치 찾기
+      const headerValues = await readSheet(sheetId, `'${tabName}'!1:50`);
+      if (headerValues && headerValues.length > 0) {
+        // 실제 헤더 행 탐색 (키워드 2개 이상 포함된 행)
+        const HEADER_KEYWORDS = ['주문자', '수취인', '연락처', '주소', '은행', '계좌', '금액', '아이디', '인애드', '리뷰'];
+        let headerRow = headerValues[0];
+        for (const row of headerValues) {
+          const matchCount = row.filter(c => HEADER_KEYWORDS.some(k => String(c || '').includes(k))).length;
+          if (matchCount >= 2) { headerRow = row; break; }
+        }
+        const headers = headerRow.map(h => String(h || '').trim());
         const colIdx = headers.findIndex(h => h === submitCol);
         if (colIdx >= 0) {
           const colLetter = _getColLetter(colIdx);
           const range = `'${tabName}'!${colLetter}${rowIndex}`;
           await writeSheet(sheetId, range, [[value || '제출']]);
         } else {
-          throw new Error(`submitCol '${submitCol}' 을 헤더에서 찾을 수 없음`);
+          throw new Error(`submitCol '${submitCol}' 을 헤더에서 찾을 수 없음 (헤더: ${headers.slice(0, 10).join(',')})`);
         }
       } else {
         throw new Error('헤더 행을 읽을 수 없음');
@@ -152,13 +169,19 @@ async function _executeItem(item) {
     }
 
     case 'order_append': {
-      // 구매양식 행 추가: 헤더 읽기 → 매핑 → append
+      // ★ C1: 큐 재시도 시 항상 신선한 헤더를 읽음 (최대 50행에서 탐색)
       const { sheetId, tabName, orderData } = payload;
       if (!sheetId || !tabName) throw new Error('payload 누락');
 
-      const headerValues = await readSheet(sheetId, `'${tabName}'!1:1`);
-      if (headerValues && headerValues[0]) {
-        const headers = headerValues[0].map(h => String(h || '').trim());
+      const headerValues = await readSheet(sheetId, `'${tabName}'!1:50`);
+      if (headerValues && headerValues.length > 0) {
+        const HEADER_KEYWORDS = ['주문자', '수취인', '연락처', '주소', '은행', '계좌', '금액', '아이디', '인애드'];
+        let headerRow = headerValues[0];
+        for (const row of headerValues) {
+          const matchCount = row.filter(c => HEADER_KEYWORDS.some(k => String(c || '').includes(k))).length;
+          if (matchCount >= 2) { headerRow = row; break; }
+        }
+        const headers = headerRow.map(h => String(h || '').trim());
         const rowData = _mapOrderToRow(headers, orderData);
         await appendSheet(sheetId, `'${tabName}'!A:A`, [rowData]);
       } else {

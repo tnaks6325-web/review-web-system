@@ -41,9 +41,10 @@ function _isKoreanRealName(str) {
 const headerCache = new Map();
 const HEADER_CACHE_TTL = 5 * 60 * 1000; // 5분
 
-// 탭 전체 데이터 캐시 (슬롯 매칭용, 1분)
+// 탭 전체 데이터 캐시 (슬롯 매칭용, 3분)
+// ★ B1: 1분→3분 연장 (Sheets API 호출 감소, 슬롯 정보 3분 이내 변경 가능성 낮음)
 const tabDataCache = new Map();
-const TAB_DATA_CACHE_TTL = 60 * 1000; // 1분
+const TAB_DATA_CACHE_TTL = 3 * 60 * 1000; // 3분
 
 // 헤더 행 자동 감지용 키워드 (smartBuild _isDataTabRow와 동일 로직)
 const HEADER_DETECT_KEYWORDS = ['번호', '주문자', '수취인', '수취인명', '성함', '이름', '성명', '신청자', '연락처', '전화번호', '아이디', '주소'];
