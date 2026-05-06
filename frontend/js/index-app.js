@@ -13021,7 +13021,7 @@ async function openDedupePreview(btn) {
     }
 
     // 미리보기 모달 렌더
-    _renderDedupeModal(data, sheetId, tabName);
+    _renderDedupeModal(data, sheetId, tabName, btn.dataset.folderurl || '');
   } catch (err) {
     showToast('중복 검사 오류: ' + err.message, 'error');
   } finally {
@@ -13033,7 +13033,9 @@ async function openDedupePreview(btn) {
 /**
  * 미리보기 모달 렌더링
  */
-function _renderDedupeModal(data, sheetId, tabName) {
+function _renderDedupeModal(data, sheetId, tabName, folderUrl) {
+  // folderUrl이 data에 없으면 파라미터에서 가져옴
+  if (!data.folderUrl && folderUrl) data.folderUrl = folderUrl;
   // 기존 모달 제거
   const existing = document.getElementById('dedupeModal');
   if (existing) existing.remove();
@@ -13076,7 +13078,10 @@ function _renderDedupeModal(data, sheetId, tabName) {
   modal.innerHTML = `
     <div style="background:#fff;border-radius:12px;width:100%;max-width:560px;max-height:85vh;display:flex;flex-direction:column;box-shadow:0 20px 60px rgba(0,0,0,.2)">
       <div style="padding:16px 20px;border-bottom:1px solid #E5E7EB;flex-shrink:0">
-        <h3 style="margin:0;font-size:1rem;font-weight:700;color:#111"><i class="fas fa-broom" style="color:#7C3AED"></i> 중복 파일 정리 미리보기</h3>
+        <div style="display:flex;align-items:center;justify-content:space-between">
+          <h3 style="margin:0;font-size:1rem;font-weight:700;color:#111"><i class="fas fa-broom" style="color:#7C3AED"></i> 중복 파일 정리 미리보기</h3>
+          <a href="${escHtml(data.folderUrl || '')}" target="_blank" style="font-size:.72rem;color:#059669;text-decoration:none;font-weight:600;padding:4px 10px;background:#F0FDF4;border-radius:6px;border:1px solid #BBF7D0;display:${data.folderUrl ? 'inline-flex' : 'none'};align-items:center;gap:4px" title="리뷰폴더 열기"><i class="fas fa-external-link-alt"></i> 폴더 열기</a>
+        </div>
         <div style="font-size:.72rem;color:#6B7280;margin-top:4px">${escHtml(data.displayName || tabName)}</div>
       </div>
       <div style="padding:16px 20px;overflow-y:auto;flex:1">
@@ -13115,7 +13120,6 @@ function _renderDedupeModal(data, sheetId, tabName) {
   );
 
   document.body.appendChild(modal);
-  modal.addEventListener('click', (e) => { if (e.target === modal) modal.remove(); });
 }
 
 /**
@@ -13299,7 +13303,7 @@ async function selectDedupeTab(idx) {
     }
 
     // 미리보기 모달 표시
-    _renderDedupeModal(data, tab.sheetId, tab.tabName);
+    _renderDedupeModal(data, tab.sheetId, tab.tabName, tab.folderUrl);
   } catch (err) {
     modal.remove();
     showToast('중복 검사 오류: ' + err.message, 'error');
