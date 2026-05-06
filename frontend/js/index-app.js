@@ -1401,7 +1401,7 @@ const _CTX_TOOLBAR_DEFS = {
     { id:'ctx-filter',      label:'필터',     icon:'fa-filter',      style:'',           onclick:"document.getElementById('dashFilterBtn')?.click()", title:'캠페인 필터'},
     { id:'ctx-add',         label:'업체추가',  icon:'fa-plus',        style:'green',      onclick:"openAddCampaign()", title:'캠페인 추가'},
     { sep: true },
-    { id:'ctx-refresh',     label:'새로고침',  icon:'fa-sync-alt',    style:'',           onclick:"loadTabDashboard()", title:'대시보드 새로고침'},
+    { id:'ctx-refresh',     label:'새로고침',  icon:'fa-sync-alt',    style:'',           onclick:"_refreshDashboardAll()", title:'대시보드 새로고침'},
     { id:'ctx-poll',        label:'완료알림',  icon:'fa-bell',        style:'orange',     onclick:"toggleDashPolling(); _updateContextToolbar('dashboard')", title:'탭 완료 알림 폴링', elId:'pollToggleBtn'},
   ],
   reviewers: [
@@ -11477,6 +11477,19 @@ function _filterTabDashData() {
     }
     return true;
   });
+}
+
+// ── 대시보드 전체 새로고침 (새로고침 버튼 클릭 시) ──
+async function _refreshDashboardAll() {
+  // 대시보드 메인 데이터 + 완료감지 목록 + 배지 동시 새로고침
+  await loadTabDashboard();
+  // 완료감지 패널이 열려있으면 새로고침
+  const detectWrap = document.getElementById('archiveDetectWrap');
+  if (detectWrap && detectWrap.style.display !== 'none' && detectWrap.innerHTML.trim() !== '') {
+    archiveAutoDetect();
+  }
+  // 완료감지 배지 업데이트
+  if (typeof _updateArchiveBadge === 'function') _updateArchiveBadge();
 }
 
 // ── 메인 로드 ──
