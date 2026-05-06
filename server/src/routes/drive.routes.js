@@ -710,3 +710,20 @@ router.get('/diag', authMiddleware, async (req, res, next) => {
 });
 
 module.exports = router;
+
+// ═══════════════════════════════════════════════════════════
+// GET /api/drive/list-folder — 폴더 내용 조회 (복구용 임시 엔드포인트)
+// ═══════════════════════════════════════════════════════════
+router.get('/list-folder', authMiddleware, async (req, res, next) => {
+  try {
+    const { folderId, type } = req.query;
+    const targetId = folderId || getRootFolderId();
+    if (!targetId) return res.json({ error: 'folderId 또는 AI_REVIEW_FOLDER_ID 미설정' });
+
+    const mimeType = type === 'folder' ? 'application/vnd.google-apps.folder' : null;
+    const files = await driveService.listFolderContents(targetId, mimeType);
+    res.json({ ok: true, folderId: targetId, count: files.length, files });
+  } catch (err) {
+    next(err);
+  }
+});
