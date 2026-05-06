@@ -818,23 +818,17 @@
       <!-- 제출 현황 대시보드 -->
       <div id="tab-dashboard" class="admin-tab-pane active">
 
-        <!-- ★ 공지사항 (배포 변경 이력) -->
+        <!-- ★ 공지사항 (배포 변경 이력 — 누적 관리) -->
         <div id="noticeSection" style="display:none;margin-bottom:16px;border:1px solid #DBEAFE;border-radius:12px;background:linear-gradient(135deg,#EFF6FF,#F0F9FF);padding:16px 18px;position:relative">
           <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:10px">
             <span style="font-size:.88rem;font-weight:700;color:#1E40AF">
               <i class="fas fa-bullhorn" style="color:#3B82F6;margin-right:6px"></i>시스템 변경 공지
+              <span style="font-size:.65rem;font-weight:400;color:#6B7280;margin-left:6px">(누적 이력)</span>
             </span>
-            <div style="display:flex;gap:8px;align-items:center">
-              <button onclick="dismissNotice(false)" style="font-size:.7rem;color:#6B7280;background:none;border:1px solid #D1D5DB;border-radius:6px;padding:3px 10px;cursor:pointer" title="닫기">
-                <i class="fas fa-times"></i> 닫기
-              </button>
-              <button onclick="dismissNotice(true)" style="font-size:.7rem;color:#fff;background:#3B82F6;border:none;border-radius:6px;padding:3px 10px;cursor:pointer" title="이 버전의 공지를 다시 표시하지 않습니다">
-                <i class="fas fa-check"></i> 확인완료
-              </button>
+            <div id="noticeBtnArea" style="display:flex;gap:8px;align-items:center">
             </div>
           </div>
-          <div id="noticeContent" style="font-size:.8rem;color:#1F2937;line-height:1.7"></div>
-          <div id="noticeDate" style="font-size:.68rem;color:#9CA3AF;margin-top:8px;text-align:right"></div>
+          <div id="noticeContent" style="font-size:.8rem;color:#1F2937;line-height:1.7;max-height:400px;overflow-y:auto"></div>
         </div>
 
         <!-- ★ 캠페인 탭 관리 (대시보드 메인) -->

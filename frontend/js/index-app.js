@@ -5,8 +5,21 @@
 /* ══════════════════════════════════════════
    ★ 시스템 변경 공지사항 (배포 시 자동 표시)
    — 새로운 배포 시 이 배열 맨 위에 추가하세요
+   — 최신 공지가 위에, 오래된 공지가 아래로 누적 관리됩니다
+   — 오류 발생 시 어떤 버전으로 되돌릴 수 있을지 힌트 역할
 ══════════════════════════════════════════ */
 const SYSTEM_NOTICES = [
+  {
+    version: "2026-05-06-3",
+    date: "2026-05-06",
+    title: "완료감지 아카이브 재표시 방지 + 숨김탭 토글",
+    changes: [
+      { type: "fix", text: "아카이브 후에도 완료감지에 계속 표시되던 문제 해결 (트리아이나 등)" },
+      { type: "feat", text: "완료감지 목록에서 각 탭마다 숨김/숨김해제 버튼 제공" },
+      { type: "fix", text: "스마트빌드가 아카이브된 차수의 행을 재삽입하지 않도록 개선" },
+      { type: "feat", text: "공지사항을 누적 관리 방식으로 변경 (전체 이력 확인 가능)" },
+    ]
+  },
   {
     version: "2026-05-06-2",
     date: "2026-05-06",
@@ -30,12 +43,16 @@ const SYSTEM_NOTICES = [
   }
 ];
 
-function _renderNoticeHtml(notice) {
+function _renderNoticeHtml(notice, isNew) {
   const typeIcons = { feat: "🆕", fix: "🔧", perf: "⚡", warn: "⚠️" };
   const typeLabels = { feat: "추가", fix: "수정", perf: "성능", warn: "주의" };
   const typeColors = { feat: "#059669", fix: "#DC2626", perf: "#D97706", warn: "#9333EA" };
 
-  let html = `<div style="font-size:.82rem;font-weight:600;color:#1E40AF;margin-bottom:6px">📋 ${notice.title}</div>`;
+  const newBadge = isNew ? '<span style="background:#EF4444;color:#fff;font-size:.6rem;padding:1px 5px;border-radius:3px;margin-left:6px;font-weight:600">NEW</span>' : '';
+  let html = `<div style="font-size:.82rem;font-weight:600;color:#1E40AF;margin-bottom:6px">
+    📋 ${notice.title}${newBadge}
+    <span style="font-size:.65rem;color:#9CA3AF;font-weight:400;margin-left:8px">${notice.date} (v${notice.version})</span>
+  </div>`;
   html += `<ul style="margin:0;padding-left:18px;list-style:none">`;
   for (const c of notice.changes) {
     const icon = typeIcons[c.type] || "•";
@@ -51,35 +68,109 @@ function checkAndShowNotice() {
   if (!SYSTEM_NOTICES || SYSTEM_NOTICES.length === 0) return;
   const latest = SYSTEM_NOTICES[0];
   const dismissedVersion = localStorage.getItem("notice_dismissed_version");
-  if (dismissedVersion === latest.version) return;
+  const hasNew = dismissedVersion !== latest.version;
 
   const section = document.getElementById("noticeSection");
   const content = document.getElementById("noticeContent");
-  const dateEl = document.getElementById("noticeDate");
   if (!section || !content) return;
 
-  // 최신 공지 + 직전 공지 (최대 2개) 표시
-  let html = _renderNoticeHtml(latest);
-  if (SYSTEM_NOTICES.length > 1) {
-    const prev = SYSTEM_NOTICES[1];
-    if (prev.version !== dismissedVersion) {
-      html += `<div style="border-top:1px solid #BFDBFE;margin:10px 0 8px;padding-top:8px">`;
-      html += _renderNoticeHtml(prev);
-      html += `</div>`;
-    }
+  // 항상 섹션을 표시 (접힌 형태 또는 펼친 형태)
+  section.style.display = "block";
+
+  if (hasNew) {
+    // 새 공지가 있으면 → 자동으로 펼쳐서 표시
+    _renderNoticeList(content, dismissedVersion, false);
+    section.dataset.collapsed = "false";
+    content.style.display = "block";
+    // 버튼 영역 업데이트
+    _updateNoticeButtons(hasNew, false);
+  } else {
+    // 이미 확인완료 → 접힌 상태로 표시 (토글 가능)
+    section.dataset.collapsed = "true";
+    content.style.display = "none";
+    _updateNoticeButtons(false, true);
   }
+}
+
+function _renderNoticeList(content, dismissedVersion, collapsed) {
+  // 모든 공지를 누적 표시 (최신이 위)
+  let html = '';
+  const dismissedIdx = SYSTEM_NOTICES.findIndex(n => n.version === dismissedVersion);
+  
+  SYSTEM_NOTICES.forEach((notice, idx) => {
+    const isNew = dismissedIdx === -1 ? true : idx < dismissedIdx;
+    if (idx > 0) {
+      html += `<div style="border-top:1px solid #BFDBFE;margin:10px 0 8px;padding-top:8px"></div>`;
+    }
+    html += _renderNoticeHtml(notice, isNew);
+  });
 
   content.innerHTML = html;
-  if (dateEl) dateEl.textContent = `배포일: ${latest.date}`;
-  section.style.display = "block";
+}
+
+function _updateNoticeButtons(hasNew, collapsed) {
+  const btnArea = document.getElementById("noticeBtnArea");
+  if (!btnArea) return;
+
+  if (hasNew) {
+    btnArea.innerHTML = `
+      <button onclick="dismissNotice(false)" style="font-size:.7rem;color:#6B7280;background:none;border:1px solid #D1D5DB;border-radius:6px;padding:3px 10px;cursor:pointer" title="접기">
+        <i class="fas fa-chevron-up"></i> 접기
+      </button>
+      <button onclick="dismissNotice(true)" style="font-size:.7rem;color:#fff;background:#3B82F6;border:none;border-radius:6px;padding:3px 10px;cursor:pointer" title="이 버전까지 확인 완료 처리">
+        <i class="fas fa-check"></i> 확인완료
+      </button>
+    `;
+  } else if (collapsed) {
+    btnArea.innerHTML = `
+      <button onclick="_toggleNoticeList()" style="font-size:.7rem;color:#3B82F6;background:none;border:1px solid #BFDBFE;border-radius:6px;padding:3px 10px;cursor:pointer" title="변경 이력 펼치기">
+        <i class="fas fa-chevron-down"></i> 이력 보기
+      </button>
+    `;
+  } else {
+    btnArea.innerHTML = `
+      <button onclick="_toggleNoticeList()" style="font-size:.7rem;color:#6B7280;background:none;border:1px solid #D1D5DB;border-radius:6px;padding:3px 10px;cursor:pointer" title="접기">
+        <i class="fas fa-chevron-up"></i> 접기
+      </button>
+    `;
+  }
+}
+
+function _toggleNoticeList() {
+  const section = document.getElementById("noticeSection");
+  const content = document.getElementById("noticeContent");
+  if (!section || !content) return;
+
+  const isCollapsed = section.dataset.collapsed === "true";
+  if (isCollapsed) {
+    // 펼치기
+    const dismissedVersion = localStorage.getItem("notice_dismissed_version");
+    _renderNoticeList(content, dismissedVersion, false);
+    content.style.display = "block";
+    content.style.maxHeight = "400px";
+    content.style.overflowY = "auto";
+    section.dataset.collapsed = "false";
+    _updateNoticeButtons(false, false);
+  } else {
+    // 접기
+    content.style.display = "none";
+    section.dataset.collapsed = "true";
+    _updateNoticeButtons(false, true);
+  }
 }
 
 function dismissNotice(permanent) {
   const section = document.getElementById("noticeSection");
-  if (section) section.style.display = "none";
+  const content = document.getElementById("noticeContent");
+  if (!section || !content) return;
+
   if (permanent && SYSTEM_NOTICES.length > 0) {
     localStorage.setItem("notice_dismissed_version", SYSTEM_NOTICES[0].version);
   }
+  // 접힌 상태로 전환
+  content.style.display = "none";
+  section.dataset.collapsed = "true";
+  _updateNoticeButtons(false, true);
 }
 
 /* ── 에러 메시지 한글 번역 (프론트엔드 fallback) ── */
