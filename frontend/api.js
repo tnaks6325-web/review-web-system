@@ -45,10 +45,7 @@ const _ACTION_MAP = {
   // 검색/인덱스 (Section 5)
   'searchAll':              { method: 'GET',  path: '/api/search' },
   'searchAllDebug':         { method: 'GET',  path: '/api/search/debug' },
-  'buildIndex':             { method: 'POST', path: '/api/index/build' },
   'buildIndexSmart':        { method: 'POST', path: '/api/index/build' },
-  'buildIndexAsync':        { method: 'POST', path: '/api/index/build' },
-  'buildIndexWithChecksum': { method: 'POST', path: '/api/index/build' },
   'indexStatus':            { method: 'GET',  path: '/api/index/status' },
   'getIndexMasterStatus':   { method: 'GET',  path: '/api/index/status' },
   'buildIndexByCampaign':   { method: 'POST', path: '/api/index/build-sheet' },

@@ -6788,7 +6788,7 @@ function saveAdminSetting() { closeIndexModal(); }
 /* ── 인덱스 상태 / 갱신 ── */
 
 /**
- * ★ v9.12: dirty 탭 수를 조회하여 "빠른 갱신" 버튼 배지 업데이트
+ * ★ v9.12: dirty 탭 수를 조회하여 "스마트빌드 갱신" 버튼 배지 업데이트
  * dirty 탭이 있으면 변경된 캠페인 수를 배지로 표시
  */
 async function _updateSmartDirtyBadge() {
@@ -6805,7 +6805,7 @@ async function _updateSmartDirtyBadge() {
       badge.textContent = dirtyCnt + "개 변경";
       badge.style.cssText = "display:inline;background:#DC2626;color:#fff;padding:1px 7px;border-radius:10px;font-size:.7rem;font-weight:700;margin-left:5px;";
       if (hintEl && hintTxt) {
-        hintTxt.textContent = `🔴 변경된 캠페인 ${dirtyCnt}개 — 빠른 갱신 클릭 시 해당 캠페인만 재갱신합니다.`;
+        hintTxt.textContent = `🔴 변경된 캠페인 ${dirtyCnt}개 — 스마트빌드 갱신 클릭 시 해당 캠페인만 재갱신합니다.`;
         hintEl.style.display = "";
         hintEl.style.color = "#DC2626";
       }
@@ -7964,14 +7964,14 @@ async function resetTabFolder(target) {
 
 // ★ v9.12: 스마트 동기화 (증분 우선)
 // dirty 탭 있으면 해당 캠페인만 빠르게 갱신, 없으면 전체 갱신
-async function buildIndexSmart() {
+async function buildIndexSmart(forceFullRebuild) {
   const btnSmart = document.getElementById("btnBuildIndexSmart");
-  const btnFull  = document.getElementById("btnBuildIndex");
+  const btnFull  = document.getElementById("btnBuildIndex"); // may not exist (removed)
   const badge    = document.getElementById("indexStatusBadge");
 
-  btnSmart.disabled  = true;
-  btnFull.disabled   = true;
-  btnSmart.innerHTML = '<i class="fas fa-circle-notch fa-spin"></i> 증분 갱신 중...';
+  if (btnSmart) btnSmart.disabled = true;
+  if (btnFull) btnFull.disabled = true;
+  if (btnSmart) btnSmart.innerHTML = '<i class="fas fa-circle-notch fa-spin"></i> 갱신 중...';
   badge.className    = "index-badge index-badge-unknown";
   badge.textContent  = "갱신 중...";
 
@@ -8021,7 +8021,7 @@ async function buildIndexSmart() {
     // ★ v9.13: 병렬 fetchAll 적용으로 속도 개선 → 타임아웃 60초로 증가
     // (dirty 캠페인 수 × ~10s 순차 → 병렬 ~10s + 파싱 ~5s ≈ 15~25s)
     // ★ v9.19: 60초→90초 (dirty 캠페인이 많을 때 여유 확보)
-    const data = await gasGet({ action: "buildIndexSmart" }, 90 * 1000);
+    const data = await gasGet({ action: "buildIndexSmart", forceFullRebuild: !!forceFullRebuild }, 90 * 1000);
 
     if (data.locked) {
       // ★ v9.17: 잠금 감지 시 스마트 처리 (좀비 기준 3분으로 단축)
@@ -8043,8 +8043,8 @@ async function buildIndexSmart() {
         try { await gasGet({ action: "releaseBuildLock" }, 10000); } catch(_) {}
         await new Promise(r => setTimeout(r, 1000));
         btnSmart.disabled = false;
-        btnSmart.innerHTML = '<i class="fas fa-bolt"></i> 빠른 갱신 <span id="smartDirtyBadge" style="display:none;background:rgba(255,255,255,0.25);padding:1px 6px;border-radius:10px;font-size:.7rem;margin-left:3px"></span>';
-        btnFull.disabled = false;
+        btnSmart.innerHTML = '<i class="fas fa-bolt"></i> 스마트빌드 갱신 <span id="smartDirtyBadge" style="display:none;background:rgba(255,255,255,0.25);padding:1px 6px;border-radius:10px;font-size:.7rem;margin-left:3px"></span>';
+        if (btnFull) btnFull.disabled = false;
         setTimeout(() => buildIndexSmart(), 300);
         return;
       } else {
@@ -8059,9 +8059,9 @@ async function buildIndexSmart() {
           "info"
         );
         badge.textContent = "완료 대기 중...";
-        _smartPollingMode = true; // ★ v9.19: finally 버튼 복원 차단
-        // 2초 후 buildIndex(polling 모드 포함) 재시도 — 딜레이 단축
-        setTimeout(() => buildIndex(), 2000);
+        _smartPollingMode = true;
+        // 2초 후 스마트 갱신 재시도
+        setTimeout(() => buildIndexSmart(), 2000);
         return;
       }
     }
@@ -8129,8 +8129,8 @@ async function buildIndexSmart() {
             if (resultRow && resultEl) { resultEl.innerHTML = `<span style="color:#10B981;font-weight:700">✅ 갱신 완료</span>`; resultRow.style.display = ""; }
             // 버튼 복원
             btnSmart.disabled = false;
-            btnSmart.innerHTML = '<i class="fas fa-bolt"></i> 빠른 갱신 <span id="smartDirtyBadge" style="display:none;background:rgba(255,255,255,0.25);padding:1px 6px;border-radius:10px;font-size:.7rem;margin-left:3px"></span>';
-            btnFull.disabled = false;
+            btnSmart.innerHTML = '<i class="fas fa-bolt"></i> 스마트빌드 갱신 <span id="smartDirtyBadge" style="display:none;background:rgba(255,255,255,0.25);padding:1px 6px;border-radius:10px;font-size:.7rem;margin-left:3px"></span>';
+            if (btnFull) btnFull.disabled = false;
             _autoRefreshDashboardAfterBuild();
             _updateSmartDirtyBadge();
             return;
@@ -8146,27 +8146,27 @@ async function buildIndexSmart() {
           showToast("⏱ 갱신 대기 시간 초과 — 잠시 후 다시 확인하세요.", "warning");
           badge.className = "index-badge index-badge-expired"; badge.textContent = "확인 필요";
           btnSmart.disabled = false;
-          btnSmart.innerHTML = '<i class="fas fa-bolt"></i> 빠른 갱신 <span id="smartDirtyBadge" style="display:none;background:rgba(255,255,255,0.25);padding:1px 6px;border-radius:10px;font-size:.7rem;margin-left:3px"></span>';
-          btnFull.disabled = false;
+          btnSmart.innerHTML = '<i class="fas fa-bolt"></i> 스마트빌드 갱신 <span id="smartDirtyBadge" style="display:none;background:rgba(255,255,255,0.25);padding:1px 6px;border-radius:10px;font-size:.7rem;margin-left:3px"></span>';
+          if (btnFull) btnFull.disabled = false;
         }
       }, 5000);
       _smartPollingMode = true; // polling 모드이므로 finally에서 버튼 복원 안 함
       return;
     }
 
-    // ★ v9.12: 전체 갱신 필요 신호 → buildIndex(polling) 흐름으로 자동 전환
+    // ★ 전체 갱신 필요 신호 → forceFullRebuild=true로 스마트갱신 재호출
     if (data.needFullRebuild) {
       _stopSmartProgress();
       const reason = data.reason || "전체 갱신 필요";
       if (hintEl && hintTextEl) {
-        hintTextEl.textContent = `🔄 전체 갱신으로 전환 중... (${reason})`;
+        hintTextEl.textContent = `🔄 전체 갱신 중... (${reason})`;
         hintEl.style.display = "";
         hintEl.style.color = "#6b7280";
       }
       showToast(`🔄 ${reason} — 전체 갱신을 시작합니다.`, "info");
-      _smartPollingMode = true; // ★ v9.19: buildIndex가 버튼 관리 담당
-      // 약간 딜레이 후 전체 갱신 자동 실행
-      setTimeout(() => buildIndex(), 300);
+      _smartPollingMode = true;
+      // forceFullRebuild 플래그로 스마트갱신 재호출
+      setTimeout(() => buildIndexSmart(true), 300);
       return;
     }
 
@@ -8240,7 +8240,7 @@ async function buildIndexSmart() {
     if (msg === "요청 시간 초과") {
       // 타임아웃 = 증분이 예상보다 오래 걸림(60초 초과) → polling 전환
       // ★ v9.13: 병렬 fetchAll 적용 후에도 타임아웃 시 백그라운드 polling 유지
-      showToast("⏱ 빠른 갱신 진행 중 (백그라운드)... 완료 시 자동 감지합니다.", "info");
+      showToast("⏱ 스마트빌드 갱신 진행 중 (백그라운드)... 완료 시 자동 감지합니다.", "info");
       badge.textContent = "갱신중(백그라운드)";
       // prevBuiltAt 스냅샷 필요
       let prevBA = null;
@@ -8265,7 +8265,7 @@ async function buildIndexSmart() {
             await loadIndexStatus();
             _autoRefreshDashboardAfterBuild();
             const btnSmF = document.getElementById("btnBuildIndexSmart");
-            if (btnSmF) { btnSmF.disabled = false; btnSmF.innerHTML = '<i class="fas fa-bolt"></i> 빠른 갱신 <span id="smartDirtyBadge" style="display:none;background:rgba(255,255,255,0.25);padding:1px 6px;border-radius:10px;font-size:.7rem;margin-left:3px"></span>'; }
+            if (btnSmF) { btnSmF.disabled = false; btnSmF.innerHTML = '<i class="fas fa-bolt"></i> 스마트빌드 갱신 <span id="smartDirtyBadge" style="display:none;background:rgba(255,255,255,0.25);padding:1px 6px;border-radius:10px;font-size:.7rem;margin-left:3px"></span>'; }
             const btnFuF = document.getElementById("btnBuildIndex");
             if (btnFuF) btnFuF.disabled = false;
             // ★ v10.0: 버튼 복원 후 dirty 배지 즉시 재갱신
@@ -8277,11 +8277,11 @@ async function buildIndexSmart() {
           if (isLocked2 && lockElapsed2 !== null && lockElapsed2 >= 420 && !pAutoRetried) {
             clearInterval(pTimer);
             pAutoRetried = true;
-            showToast(`🔓 잠금 ${lockElapsed2}초 경과(TTL 만료) — 자동 해제 후 빠른갱신 재시도`, "info");
+            showToast(`🔓 잠금 ${lockElapsed2}초 경과(TTL 만료) — 자동 해제 후 스마트빌드 갱신 재시도`, "info");
             try { await gasGet({ action: "releaseBuildLock" }, 8000); } catch(_) {}
             await new Promise(r => setTimeout(r, 800));
             const btnSmR = document.getElementById("btnBuildIndexSmart");
-            if (btnSmR) { btnSmR.disabled = false; btnSmR.innerHTML = '<i class="fas fa-bolt"></i> 빠른 갱신 <span id="smartDirtyBadge" style="display:none;background:rgba(255,255,255,0.25);padding:1px 6px;border-radius:10px;font-size:.7rem;margin-left:3px"></span>'; }
+            if (btnSmR) { btnSmR.disabled = false; btnSmR.innerHTML = '<i class="fas fa-bolt"></i> 스마트빌드 갱신 <span id="smartDirtyBadge" style="display:none;background:rgba(255,255,255,0.25);padding:1px 6px;border-radius:10px;font-size:.7rem;margin-left:3px"></span>'; }
             const btnFuR = document.getElementById("btnBuildIndex");
             if (btnFuR) btnFuR.disabled = false;
             setTimeout(() => buildIndexSmart(), 300);
@@ -8291,9 +8291,9 @@ async function buildIndexSmart() {
           if (!isLocked2 && pCount >= 8 && !pAutoRetried) {
             clearInterval(pTimer);
             pAutoRetried = true;
-            showToast("🔄 빠른 갱신 재시도 중...", "info");
+            showToast("🔄 스마트빌드 갱신 재시도 중...", "info");
             const btnSmR2 = document.getElementById("btnBuildIndexSmart");
-            if (btnSmR2) { btnSmR2.disabled = false; btnSmR2.innerHTML = '<i class="fas fa-bolt"></i> 빠른 갱신 <span id="smartDirtyBadge" style="display:none;background:rgba(255,255,255,0.25);padding:1px 6px;border-radius:10px;font-size:.7rem;margin-left:3px"></span>'; }
+            if (btnSmR2) { btnSmR2.disabled = false; btnSmR2.innerHTML = '<i class="fas fa-bolt"></i> 스마트빌드 갱신 <span id="smartDirtyBadge" style="display:none;background:rgba(255,255,255,0.25);padding:1px 6px;border-radius:10px;font-size:.7rem;margin-left:3px"></span>'; }
             const btnFuR2 = document.getElementById("btnBuildIndex");
             if (btnFuR2) btnFuR2.disabled = false;
             try { await gasGet({ action: "releaseBuildLock" }, 5000); } catch(_) {}
@@ -8305,7 +8305,7 @@ async function buildIndexSmart() {
           clearInterval(pTimer);
           showToast("⏱ 대기 시간 초과 — 잠금 강제 해제 후 재시도하세요.", "warning");
           const btnSmE = document.getElementById("btnBuildIndexSmart");
-          if (btnSmE) { btnSmE.disabled = false; btnSmE.innerHTML = '<i class="fas fa-bolt"></i> 빠른 갱신 <span id="smartDirtyBadge" style="display:none;background:rgba(255,255,255,0.25);padding:1px 6px;border-radius:10px;font-size:.7rem;margin-left:3px"></span>'; }
+          if (btnSmE) { btnSmE.disabled = false; btnSmE.innerHTML = '<i class="fas fa-bolt"></i> 스마트빌드 갱신 <span id="smartDirtyBadge" style="display:none;background:rgba(255,255,255,0.25);padding:1px 6px;border-radius:10px;font-size:.7rem;margin-left:3px"></span>'; }
           const btnFuE = document.getElementById("btnBuildIndex");
           if (btnFuE) btnFuE.disabled = false;
         }
@@ -8319,432 +8319,8 @@ async function buildIndexSmart() {
   } finally {
     // ★ v9.19: polling 모드이면 버튼 복원 안 함 (polling이 완료 후 복원)
     if (!_smartPollingMode) {
-      btnSmart.disabled  = false;
-      btnSmart.innerHTML = '<i class="fas fa-bolt"></i> 빠른 갱신 <span id="smartDirtyBadge" style="display:none;background:rgba(255,255,255,0.25);padding:1px 6px;border-radius:10px;font-size:.7rem;margin-left:3px"></span>';
-      btnFull.disabled   = false;
-    }
-  }
-}
-
-async function buildIndex() {
-  const btn   = document.getElementById("btnBuildIndex");
-  const badge = document.getElementById("indexStatusBadge");
-  btn.disabled    = true;
-  btn.innerHTML   = '<i class="fas fa-circle-notch fa-spin"></i> 갱신 중...';
-  badge.className = "index-badge index-badge-unknown";
-  badge.textContent = "갱신 중...";
-
-  let _buildPollingMode = false; // ★ v9.19: polling 진입 시 finally 버튼 복원 차단
-
-  const elapsedRow = document.getElementById("indexElapsedRow");
-  const resultRow  = document.getElementById("indexResultRow");
-  const elapsedEl  = document.getElementById("indexElapsed");
-  const resultEl   = document.getElementById("indexResult");
-  if (elapsedRow) elapsedRow.style.display = "none";
-  if (resultRow)  resultRow.style.display  = "none";
-  const _buildStart = Date.now();
-
-  // 캠페인 수 가져오기
-  let campCount = 0;
-  try {
-    const campData = await gasGet({ action: "campaignList" }, 10000);
-    campCount = (campData.campaigns || []).length;
-  } catch (_) {}
-  startBuildProgress(campCount);
-
-  // 갱신 전 builtAt 스냅샷 (polling 완료 판단용)
-  let prevBuiltAt = null;
-  try {
-    const statusSnap = await gasGet({ action: "indexStatus" }, 8000);
-    prevBuiltAt = statusSnap.builtAt || null;
-  } catch (_) {}
-
-  // ★ 헬퍼: 갱신 성공 처리
-  const _onBuildSuccess = async (data) => {
-    stopBuildProgress();
-    const elapsedSec = Math.round((Date.now() - _buildStart) / 1000);
-    const skipInfo = (data.skipped > 0)
-      ? ` · 완료탭 ${data.skipped}개 스킵(${(data.reused||0).toLocaleString()}행 재사용)` : "";
-    // ★ v10.1: 타임아웃 시 재갱신 안내 메시지 강화
-    const timeoutInfo = data.timedOut ? ` ⏱ 부분갱신 — 빠른갱신 재실행 필요` : "";
-    if (data.warning) {
-      const isTimeout = data.timedOut || data.warning.includes("실행시간 초과");
-      showToast(`${isTimeout ? "⏱" : "✅"} 갱신 완료 (${(data.count||0).toLocaleString()}건)${skipInfo}${timeoutInfo} ⚠ 일부 시트 경고`, "warning");
-      const builtAtEl = document.getElementById("indexBuiltAt");
-      if (builtAtEl) builtAtEl.textContent = data.builtAtStr || "-";
-      const resEl = document.getElementById("debugBaseResult");
-      if (resEl) {
-        // warning 항목별 아이콘 분류
-        const warnLines = data.warning.split(" | ").filter(Boolean);
-        const lineHtml = warnLines.map(line => {
-          const isBandwidth = line.includes("대역폭") || line.includes("quota") || line.includes("Bandwidth") || line.includes("할당량");
-          const isPermission = line.includes("접근 권한") || line.includes("403") || line.includes("permission");
-          const isFallbackOk = line.includes("폴백 완료") || line.includes("FALLBACK");
-          const isTimeoutWarn = line.includes("실행시간 초과") || line.includes("⏱");
-          let icon, color;
-          if (isPermission)      { icon = "🔒"; color = "#B45309"; }
-          else if (isBandwidth)  { icon = "⚡"; color = "#7C3AED"; }
-          else if (isFallbackOk) { icon = "♻️"; color = "#059669"; }
-          else if (isTimeoutWarn){ icon = "⏱"; color = "#2563EB"; }
-          else                   { icon = "⚠";  color = "#D97706"; }
-          return `<span style="color:${color}">${icon} ${escHtml(line)}</span>`;
-        }).join("<br>");
-        resEl.innerHTML = `<b style="color:#D97706">⚠ 갱신 완료 (${(data.count||0).toLocaleString()}건) — 일부 시트 경고:</b><br><br>${lineHtml}`
-          + (data.timedOut ? `<br><br><b style="color:#2563EB">⏱ 실행시간 초과로 일부 시트는 기존 인덱스 유지 — 다시 갱신하면 완전히 업데이트됩니다.</b>` : "");
-        show(resEl);
-      }
-    } else {
-      showToast(`✅ 갱신 완료 (${(data.count||0).toLocaleString()}건)${skipInfo}${timeoutInfo}`, data.timedOut ? "warning" : "success");
-    }
-    await loadIndexStatus();
-    const countEl = document.getElementById("indexCount");
-    if (countEl) {
-      countEl.textContent = (data.count||0).toLocaleString() + "건"
-        + (data.skipped > 0 ? ` · 완료탭 ${data.skipped}개 스킵(${(data.reused||0).toLocaleString()}행 재사용)` : "");
-    }
-    if (elapsedRow && elapsedEl) { elapsedEl.textContent = elapsedSec + "초"; elapsedRow.style.display = ""; }
-    if (resultRow  && resultEl)  {
-      if (data.timedOut) {
-        // ★ v10.1: 타임아웃 시 재시도 버튼 표시
-        resultEl.innerHTML = `<span style="color:#2563EB;font-weight:700">⏱ 부분 갱신 완료 (시간 초과 — 미처리 탭 있음)</span>`
-          + ` <button onclick="buildIndexSmart()" style="margin-left:10px;padding:3px 12px;background:#2563EB;color:#fff;border:none;border-radius:6px;font-size:.82rem;cursor:pointer;font-weight:700">⚡ 재갱신</button>`;
-      } else if (data.warning) {
-        resultEl.innerHTML = `<span style="color:#D97706;font-weight:700">⚠ 일부 시트 스킵 (갱신 완료)</span>`;
-      } else {
-        resultEl.innerHTML = `<span style="color:#10B981;font-weight:700">✅ 갱신 완료</span>`;
-      }
-      resultRow.style.display = "";
-    }
-    // ★ 403 접근 권한 경고 배너 표시
-    const bannerEl = document.getElementById("gasErrorBanner");
-    if (data.warning && (data.warning.includes("403") || data.warning.includes("접근 권한 없음"))) {
-      // warning 문자열 파싱: "[캠페인명] 접근 권한 없음 ... 시트제목: "xxx" ... sheetId: yyy"
-      const entries = data.warning.split(" | ").filter(w => w.includes("접근 권한 없음"));
-      const rows = entries.map(entry => {
-        // 캠페인명 추출
-        const campMatch = entry.match(/^\[([^\]]+)\]/);
-        const camp = campMatch ? campMatch[1] : "?";
-        // 시트 제목 추출 (Drive API로 가져온 경우)
-        const titleMatch = entry.match(/시트제목:\s*"([^"]+)"/);
-        const title = titleMatch ? titleMatch[1] : null;
-        // sheetId 추출
-        const idMatch = entry.match(/sheetId:\s*([A-Za-z0-9_-]{20,})/);
-        const sid = idMatch ? idMatch[1] : null;
-        return { camp, title, sid };
-      });
-
-      const listHtml = rows.map(r => {
-        const label = r.title && r.title !== r.camp
-          ? `<b>${escHtml(r.title)}</b> <span style="color:#B45309">(캠페인명: ${escHtml(r.camp)})</span>`
-          : `<b>${escHtml(r.camp)}</b>`;
-        const sheetUrl = r.sid
-          ? `https://docs.google.com/spreadsheets/d/${r.sid}/edit`
-          : null;
-        const idHint = r.sid
-          ? `<br><span style="font-family:monospace;font-size:.72rem;color:#B45309;user-select:all">${r.sid}</span>`
-            + `<br><a href="${sheetUrl}" target="_blank" style="font-size:.73rem;color:#2563EB;text-decoration:underline;word-break:break-all">${sheetUrl}</a>`
-          : "";
-        return `• ${label}${idHint}`;
-      }).join("<br><br>");
-
-      if (bannerEl) {
-        bannerEl.innerHTML =
-          `<b><i class="fas fa-lock" style="color:#F59E0B"></i> 접근 권한 없는 시트 발견 — 스킵됨 (나머지는 정상 갱신)</b><br><br>` +
-          listHtml + `<br><br>` +
-          `<b>해결 방법:</b> 위 스프레드시트에 <b>tnaks6325@gmail.com</b> (리뷰웹 제작자)의 <b>편집 권한</b>이 추가되어야 동기화가 가능합니다.`;
-        bannerEl.style.background = "#FFFBEB";
-        bannerEl.style.borderColor = "#FCD34D";
-        bannerEl.style.color = "#78350F";
-        bannerEl.style.display = "block";
-      }
-    } else if (bannerEl) {
-      bannerEl.style.display = "none";
-    }
-    _autoRefreshDashboardAfterBuild();
-    // ★ v10.0: 전체 갱신 완료 후 dirty 배지 재갱신
-    _updateSmartDirtyBadge();
-
-    // ★ v10.1: 타임아웃으로 부분 갱신된 경우 → dirty 배지가 남아 있으면 10초 후 재갱신 안내 토스트
-    if (data.timedOut) {
-      setTimeout(async () => {
-        try {
-          const st = await gasGet({ action: "indexStatus" }, 5000);
-          const dc = (st && st.dirtyCount) ? st.dirtyCount : 0;
-          if (dc > 0) {
-            showToast(`⏱ ${dc}개 캠페인이 아직 미처리입니다. 빠른 갱신을 한 번 더 실행해주세요.`, "warning", 7000);
-          }
-        } catch(_) {}
-      }, 10000); // 10초 후 재확인
-    }
-  };
-
-  // ★ polling 모드: indexStatus를 주기적으로 확인해 builtAt 변경 감지
-  // ★ v9.19 개선: GAS 강제종료(6분 한계) 후 자동 재시도 + 상세 피드백
-  const _startPolling = (maxWaitMs = 12 * 60 * 1000) => {
-    const pollInterval  = 5000;  // 5초마다 확인
-    let   pollCount     = 0;
-    let   autoRetried   = false; // 자동 재시도 1회 플래그
-    const maxPolls      = Math.ceil(maxWaitMs / pollInterval);
-    const builtAtEl     = document.getElementById("indexBuiltAt");
-    const _updateMsg = (html) => { if (builtAtEl) builtAtEl.innerHTML = html; };
-    _updateMsg("⏳ GAS 실행 중... (백그라운드 완료 대기)");
-    badge.textContent = "갱신중(백그라운드)";
-
-    // 잠금 강제 해제 버튼 표시 (90초 이후)
-    let _forceReleaseShown = false;
-    const _showForceRelease = () => {
-      if (_forceReleaseShown) return;
-      _forceReleaseShown = true;
-      _updateMsg(
-        '⏳ GAS 실행 중 (장시간 소요) ' +
-        '<button onclick="_forceReleaseBuildLock()" style="margin-left:8px;padding:2px 8px;font-size:.72rem;background:#F59E0B;color:#fff;border:none;border-radius:4px;cursor:pointer">🔓 잠금 강제 해제</button>' +
-        '<br><span style="font-size:.75rem;color:#6B7280">GAS 실행 6분 한계로 자동 종료됐을 수 있습니다. 해제 후 재갱신하세요.</span>'
-      );
-    };
-
-    const _restoreBtn = () => {
-      btn.disabled  = false;
-      btn.innerHTML = '<i class="fas fa-sync-alt"></i> 전체 갱신';
-      const sm = document.getElementById("btnBuildIndexSmart");
-      if (sm) sm.disabled = false;
-    };
-
-    const pollTimer = setInterval(async () => {
-      pollCount++;
-      const elapsedSec = pollCount * 5;
-
-      // ★ 프로그레스바 실시간 업데이트 (15% → 90%, 지수 함수)
-      const POLL_EXPECTED = 120; // 예상 소요 시간 (초)
-      const _pBar   = document.getElementById("buildProgressBar");
-      const _pPct   = document.getElementById("buildProgressPct");
-      const _pLabel = document.getElementById("buildProgressLabel");
-      const _pTime  = document.getElementById("buildProgressTime");
-      const _pEta   = document.getElementById("buildProgressEta");
-      const asyncPct = Math.min(90, Math.round(15 + 75 * (1 - Math.exp(-elapsedSec / POLL_EXPECTED))));
-      if (_pBar)   _pBar.style.width = asyncPct + "%";
-      if (_pPct)   _pPct.textContent = asyncPct + "%";
-      if (_pLabel) _pLabel.textContent = "백그라운드 갱신 중...";
-      if (_pTime)  _pTime.textContent = elapsedSec + "초 경과";
-      if (_pEta)   _pEta.textContent = "서버에서 처리 중";
-
-      // 90초 경과 시 강제 해제 버튼 표시
-      if (elapsedSec >= 90 && !_forceReleaseShown) _showForceRelease();
-
-      try {
-        const status    = await gasGet({ action: "indexStatus" }, 8000);
-        const newBuiltAt = status.builtAt || null;
-        const isLocked   = status.buildLock ? status.buildLock.locked : true;
-        // ★ v9.15: indexStatus에서 잠금 경과 시간 수신
-        const lockElapsedFromStatus = (status.buildLock && typeof status.buildLock.elapsedSec === "number")
-          ? status.buildLock.elapsedSec : null;
-
-        // ① builtAt 변경 → 갱신 완료
-        if (newBuiltAt && newBuiltAt !== prevBuiltAt) {
-          clearInterval(pollTimer);
-          await _onBuildSuccess({ success:true, count: status.count || 0, skipped:0, reused:0 });
-          _restoreBtn();
-          return;
-        }
-
-        // ★ v9.20: 잠금 경과 7분(420초) 이상 → TTL 만료, 좀비 잠금, 자동 해제 후 재시도
-        // BUILD_LOCK_TTL_MS = 7분 → 7분 지나면 acquireBuildLock에서 자동 만료 처리
-        // (3분 기준은 실제 GAS가 실행 중일 수 있어 handleReleaseBuildLock이 거부함)
-        if (isLocked && lockElapsedFromStatus !== null && lockElapsedFromStatus >= 420) {
-          clearInterval(pollTimer);
-          stopBuildProgress();
-          if (!autoRetried) {
-            autoRetried = true;
-            _updateMsg(`🔓 잠금이 ${lockElapsedFromStatus}초 경과 (좀비). 자동 해제 후 재시도 중...`);
-            showToast(`🔓 잠금이 ${lockElapsedFromStatus}초 경과 — 자동 해제 후 재갱신합니다.`, "info");
-            badge.textContent = "잠금 해제 중...";
-            try { await gasGet({ action: "releaseBuildLock" }, 10000); } catch(_) {}
-            await new Promise(r => setTimeout(r, 1000));
-            setTimeout(() => { buildIndex(); }, 300);
-          } else {
-            showToast("⚠ 잠금 해제 후 재시도도 실패. GAS 실행 로그를 확인하세요.", "warning");
-            badge.className = "index-badge index-badge-expired"; badge.textContent = "확인 필요";
-            _restoreBtn();
-          }
-          return;
-        }
-
-        // ② 잠금 해제 + builtAt 동일 → GAS 강제종료로 인덱스 미업데이트
-        // ★ v9.20: 80초(16 polls) 이후로 조정
-        // 이유: GAS 빌드 20~40초 + 응답 전달 지연 → 50초는 너무 빠름
-        //       80초면 충분히 기다린 후 재시도, 6분 전체 갱신이 완료되기 전에는 실행 안 됨
-        if (!isLocked && newBuiltAt === prevBuiltAt && pollCount >= 16) { // 80초 이후
-          clearInterval(pollTimer);
-          stopBuildProgress();
-
-          if (!autoRetried) {
-            // ★ 자동 재시도 1회: GAS가 도중에 종료됐으면 다시 buildIndex 트리거
-            autoRetried = true;
-            _updateMsg('🔄 GAS 실행 종료 감지 — 인덱스 미완성. 자동 재시도 중...');
-            showToast("🔄 GAS 실행 종료 후 인덱스 미완성 — 자동 재갱신을 시작합니다.", "info");
-            badge.textContent = "재갱신 중...";
-            // 잠금 해제 후 재시도
-            try { await gasGet({ action: "releaseBuildLock" }, 5000); } catch(_){}
-            // 0.5초 후 buildIndex 재호출
-            setTimeout(() => { buildIndex(); }, 500);
-          } else {
-            // 2회 연속 실패 → 사용자에게 알림
-            showToast("⚠ 갱신 2회 시도 모두 실패. 서버 로그를 확인하세요.", "warning");
-            badge.className = "index-badge index-badge-expired"; badge.textContent = "확인 필요";
-            _updateMsg(
-              '❌ GAS 실행시간(6분) 초과로 2회 모두 실패.<br>' +
-              '<span style="font-size:.75rem;color:#6B7280">Google Apps Script 실행 로그를 확인하거나, ' +
-              '빠른 갱신(증분)을 반복 사용하세요.</span><br>' +
-              '<button onclick="_forceReleaseBuildLock()" style="margin-top:4px;padding:2px 8px;font-size:.72rem;background:#EF4444;color:#fff;border:none;border-radius:4px;cursor:pointer">🔓 잠금 해제</button>'
-            );
-            _restoreBtn();
-          }
-          return;
-        }
-
-        // 진행 중 메시지 업데이트 (미확정 상태)
-        if (!_forceReleaseShown) {
-          const dotCount = (pollCount % 3) + 1;
-          _updateMsg(`⏳ GAS 실행 중${'.'.repeat(dotCount)} (${elapsedSec}초 경과, 5초마다 완료 확인 중)`);
-        }
-
-      } catch (_) {}
-
-      // 최대 대기 초과
-      if (pollCount >= maxPolls) {
-        clearInterval(pollTimer);
-        stopBuildProgress();
-        showToast("⏱ 최대 대기 시간(12분) 초과. 잠금 강제 해제 후 재시도하세요.", "warning");
-        badge.className = "index-badge index-badge-expired"; badge.textContent = "확인 필요";
-        _restoreBtn();
-        _showForceRelease();
-      }
-    }, pollInterval);
-  };
-
-  try {
-    // ─── 1차 시도: JSONP buildIndex (최대 120초) ─────────────────────
-    // ★ v9.17: 타임아웃 90s→120s (GAS 빌드 20~40초 + 연결 지연 여유)
-    let data;
-    try {
-      data = await gasGet({ action: "buildIndex", forceFullRebuild: true }, 120 * 1000);
-    } catch (firstErr) {
-      const m1 = firstErr.message || "";
-      // 타임아웃 or 스크립트 로드 실패 → polling 모드로 전환
-      if (m1 === "요청 시간 초과" || m1.includes("스크립트 로드 실패")) {
-        showToast("⏳ GAS 빌드 중 (백그라운드)... 완료 시 자동 감지합니다.", "info");
-        _buildPollingMode = true; // ★ v9.19: finally 버튼 복원 차단
-        _startPolling(12 * 60 * 1000); // 12분 (GAS 6분 실행 + 재시도 여유)
-        return; // finally에서 버튼은 복원 안 함 (polling이 복원)
-      }
-      throw firstErr; // 다른 오류는 그대로 throw
-    }
-
-    // 잠금 상태 처리 — ★ v9.17: 좌비 감지 3분으로 단축
-    if (data.locked) {
-      const lockElapsed = typeof data.elapsedSec === "number"
-        ? data.elapsedSec
-        : (() => { const m = (data.error || "").match(/(\d+)초 전 시작/); return m ? parseInt(m[1], 10) : null; })();
-
-      // ★ v9.20: ZOMBIE_SEC = TTL(7분=420초)
-      const ZOMBIE_SEC = 420; // 7분 (= BUILD_LOCK_TTL_MS)
-
-      if (lockElapsed !== null && lockElapsed >= ZOMBIE_SEC) {
-        // ① 좀비 잠금 (7분 이상, TTL 만료) → 자동 해제 후 재시도
-        stopBuildProgress();
-        badge.textContent = "잠금 해제 중...";
-        showToast(`🔓 이전 갱신이 ${lockElapsed}초 전에 멈췄습니다. 자동으로 잠금 해제 후 재시도합니다.`, "info");
-        try { await gasGet({ action: "releaseBuildLock" }, 10000); } catch(_) {}
-        await new Promise(r => setTimeout(r, 1000));
-        badge.textContent = "재시도 중...";
-        setTimeout(() => buildIndex(), 300);
-        return;
-      } else {
-        // ② 진행 중 잠금 (3분 미만) → polling 모드로 자동 전환
-        // GAS가 실제로 완료되면 builtAt 변경으로 감지, 죽었으면 잠금 해제 후 자동 재시도
-        stopBuildProgress();
-        showToast(
-          lockElapsed !== null
-            ? `⏳ 갱신이 진행 중입니다 (${lockElapsed}초 경과). 완료를 자동으로 감지합니다...`
-            : `⏳ 다른 갱신이 진행 중입니다. 완료를 자동 감지합니다.`,
-          "info"
-        );
-        badge.textContent = "완료 감지 중...";
-        _buildPollingMode = true; // ★ v9.19: finally 버튼 복원 차단
-        // polling 모드 진입: GAS 완료(builtAt 변경) or 잠금 해제(자동 재시도) 감지
-        _startPolling((Math.max(ZOMBIE_SEC - (lockElapsed || 0), 30) + 60) * 1000);
-        return; // finally에서 버튼 복원 안 함 (polling이 복원)
-      }
-    }
-
-    // ★ [Node.js 이관] 비동기 빌드 응답 처리
-    if (data.ok && data.mode === "async") {
-      // ★ stopBuildProgress() 호출 안 함 — 즉시 100%로 점프하지 않도록
-      // 타이머만 정리하고 프로그레스바는 "진행 중" 상태로 유지
-      if (_buildTimer) { clearInterval(_buildTimer); _buildTimer = null; }
-      const _abWrap  = document.getElementById("buildProgressWrap");
-      const _abBar   = document.getElementById("buildProgressBar");
-      const _abPct   = document.getElementById("buildProgressPct");
-      const _abLabel = document.getElementById("buildProgressLabel");
-      const _abEta   = document.getElementById("buildProgressEta");
-      if (_abBar)   { _abBar.style.width = "15%"; _abBar.style.background = "linear-gradient(90deg,#0ea5e9,#7C3AED)"; }
-      if (_abPct)   _abPct.textContent = "15%";
-      if (_abLabel) _abLabel.textContent = "백그라운드 갱신 중...";
-      if (_abEta)   _abEta.textContent = "서버에서 처리 중";
-
-      showToast("🔄 갱신이 시작되었습니다. 완료 시 자동으로 업데이트됩니다.", "info");
-      badge.textContent = "갱신중(백그라운드)";
-      badge.className = "index-badge index-badge-unknown";
-      _buildPollingMode = true;
-      _startPolling(10 * 60 * 1000); // 10분 polling
-      return;
-    }
-
-    if (data.success) {
-      await _onBuildSuccess(data);
-    } else {
-      const errMsg = data.error || "알 수 없는 오류";
-      throw new Error(errMsg + (data.detail ? "\n" + data.detail.substring(0,200) : ""));
-    }
-
-  } catch (err) {
-    stopBuildProgress();
-    const msg = err.message || "";
-    const builtAtEl = document.getElementById("indexBuiltAt");
-    if (resultRow && resultEl) { resultEl.innerHTML = `<span style="color:#DC2626;font-weight:700">❌ 갱신 실패</span>`; resultRow.style.display = ""; }
-
-    if (msg === "요청 시간 초과") {
-      showToast("⏱ 요청 시간 초과 — GAS 실행은 계속 중일 수 있습니다. 잠시 후 상태를 확인하세요.", "warning");
-      if (builtAtEl) builtAtEl.textContent = "⏱ 타임아웃 (GAS 계속 실행 중일 수 있음)";
-    } else if (msg.includes("스크립트 로드 실패") || msg.includes("Script load failed")) {
-      showToast("❌ GAS 버전 불일치 — Code.gs를 최신 버전으로 재배포 후 다시 시도하세요.", "error");
-      if (builtAtEl) builtAtEl.textContent = "❌ GAS 재배포 필요 (JSONP 미지원 버전)";
-      const bannerEl2 = document.getElementById("gasErrorBanner");
-      if (bannerEl2) { bannerEl2.style.display = "block"; }
-    } else if (msg.includes("fetch") || msg.includes("Failed to fetch") || msg.includes("NetworkError") || msg.includes("network")) {
-      showToast("❌ 네트워크 오류 — GAS URL을 확인하거나 잠시 후 재시도하세요.", "error");
-      if (builtAtEl) builtAtEl.textContent = "❌ 네트워크 오류 (GAS URL 확인 필요)";
-    } else if (msg.includes("HTTP 4") || msg.includes("HTTP 5")) {
-      showToast("❌ GAS 서버 오류: " + msg + " — GAS 재배포 여부를 확인하세요.", "error");
-      if (builtAtEl) builtAtEl.textContent = "❌ " + msg;
-    } else if (msg.includes("베이스시트") || msg.includes("캠페인이 없")) {
-      showToast("❌ 베이스시트에 캠페인 URL이 없습니다. GAS 로그를 확인하세요.", "error");
-    } else {
-      showToast("❌ 갱신 실패: " + msg.substring(0, 120), "error");
-      if (builtAtEl) builtAtEl.textContent = "❌ " + msg.substring(0, 80);
-    }
-    badge.className = "index-badge index-badge-error"; badge.textContent = "오류";
-    const bannerEl = document.getElementById("gasErrorBanner");
-    if (bannerEl && !bannerEl.style.display || bannerEl.style.display === "none") {
-      const isNetErr = msg.includes("fetch") || msg.includes("NetworkError") || msg.includes("HTTP") || msg === "요청 시간 초과";
-      if (bannerEl) bannerEl.style.display = isNetErr ? "block" : "none";
-    }
-  } finally {
-    // ★ v9.19: polling 모드이면 버튼 복원 안 함 (polling이 완료 후 복원)
-    if (!_buildPollingMode) {
-      btn.disabled  = false;
-      btn.innerHTML = '<i class="fas fa-sync-alt"></i> 전체 갱신';
-      const btnSm = document.getElementById("btnBuildIndexSmart");
-      if (btnSm) btnSm.disabled = false;
+      if (btnSmart) { btnSmart.disabled = false; btnSmart.innerHTML = '<i class="fas fa-bolt"></i> 스마트빌드 갱신 <span id="smartDirtyBadge" style="display:none;background:rgba(255,255,255,0.25);padding:1px 6px;border-radius:10px;font-size:.7rem;margin-left:3px"></span>'; }
+      if (btnFull) btnFull.disabled = false;
     }
   }
 }
