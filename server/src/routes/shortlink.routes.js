@@ -113,4 +113,84 @@ router.get('/resolve', async (req, res, next) => {
   }
 });
 
+// ═══════════════════════════════════════════════════════════
+// GET /api/short/og/:code — 카카오톡/SNS 크롤러용 동적 OG 메타태그 HTML
+// 일반 브라우저 → 프론트엔드로 리다이렉트
+// ═══════════════════════════════════════════════════════════
+router.get('/og/:code', async (req, res, next) => {
+  try {
+    const { code } = req.params;
+    if (!code) return res.status(400).send('code 필요');
+
+    // DB에서 단축링크 정보 조회
+    const { rows } = await pool.query(
+      `SELECT sheet_id AS s, gid AS g, tab_name AS t, display_name AS d, option_list AS "optionList"
+       FROM short_links WHERE code = $1`,
+      [code]
+    );
+
+    // 프론트엔드 URL (Cloudflare Pages)
+    const FRONTEND_BASE = process.env.FRONTEND_URL || 'https://review-web-system.pages.dev';
+    const frontendUrl = `${FRONTEND_BASE}/search.html?r=${encodeURIComponent(code)}`;
+
+    if (rows.length === 0) {
+      // 유효하지 않은 코드 → 기본 OG로 리다이렉트
+      return res.redirect(302, frontendUrl);
+    }
+
+    const row = rows[0];
+
+    // User-Agent로 크롤러 판별 (카카오톡, 페이스북, 트위터, 슬랙, 디스코드 등)
+    const ua = (req.headers['user-agent'] || '').toLowerCase();
+    const isCrawler = /kakaotalk|facebookexternalhit|twitterbot|slackbot|discordbot|linkedinbot|googlebot|yandex|bingbot|daumoa|naver|wget|curl|python|bot|crawler|spider|preview/i.test(ua);
+
+    if (!isCrawler) {
+      // 일반 브라우저 → 프론트엔드로 리다이렉트
+      return res.redirect(302, frontendUrl);
+    }
+
+    // 크롤러 → 동적 OG 메타태그 HTML 반환
+    const displayName = row.d || row.t || '구매양식 제출';
+    const ogTitle = `${displayName}`;
+    const ogDescription = '아래 링크를 클릭하여 구매양식을 제출해주세요.';
+    const ogUrl = `${req.protocol}://${req.get('host')}/r/${code}`;
+
+    const html = `<!DOCTYPE html>
+<html lang="ko">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>${escapeHtml(ogTitle)}</title>
+  <meta property="og:title" content="${escapeHtml(ogTitle)}"/>
+  <meta property="og:description" content="${escapeHtml(ogDescription)}"/>
+  <meta property="og:type" content="website"/>
+  <meta property="og:url" content="${escapeHtml(ogUrl)}"/>
+  <meta name="twitter:card" content="summary"/>
+  <meta name="twitter:title" content="${escapeHtml(ogTitle)}"/>
+  <meta name="twitter:description" content="${escapeHtml(ogDescription)}"/>
+</head>
+<body>
+  <p>리다이렉트 중...</p>
+  <script>window.location.href="${frontendUrl.replace(/"/g, '\\"')}";</script>
+</body>
+</html>`;
+
+    res.set('Content-Type', 'text/html; charset=utf-8');
+    res.send(html);
+  } catch (err) {
+    next(err);
+  }
+});
+
+// HTML 이스케이프 헬퍼
+function escapeHtml(str) {
+  if (!str) return '';
+  return str
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#39;');
+}
+
 module.exports = router;

@@ -4202,7 +4202,7 @@ function openFormLink(btnEl) {
 /**
  * ★ 단축 URL 생성 후 클립보드 복사
  * - GAS createShort 호출 → 6자리 코드 획득
- * - search.html?r=CODE 형태로 복사
+ * - API서버/r/CODE 형태로 복사 (카카오톡 OG 미리보기 지원)
  * - GAS 미배포(구버전) 시 기존 긴 URL 복사로 폴백
  */
 async function copyShortLink(btnEl) {
@@ -4254,13 +4254,15 @@ async function copyShortLink(btnEl) {
       });
       const data = await resp.json();
       if (data && data.success && data.code) {
-        shortUrl = base + "?r=" + data.code;
+        // ★ 카카오톡 OG 미리보기 지원: 서버의 /r/:code 경로 사용
+        shortUrl = apiBase + "/r/" + data.code;
       }
     } else if (APP_CONFIG.GAS_WEB_APP_URL) {
       // GAS 폴백
       const data = await gasGet({ action: "createShort", s: sheetId, g: gid, t: tabName, d: displayName, ic: incomeType });
       if (data && data.success && data.code) {
-        shortUrl = base + "?r=" + data.code;
+        // ★ 카카오톡 OG 미리보기 지원: 서버의 /r/:code 경로 사용
+        shortUrl = (typeof API_BASE_URL !== 'undefined' && API_BASE_URL ? API_BASE_URL : base) + "/r/" + data.code;
       }
     }
   } catch (e) {
@@ -4301,7 +4303,7 @@ async function copyShortLink(btnEl) {
     await copyText(urlToCopy);
     markCopied(true);
     if (isShort) {
-      showToast(`📋 단축 URL 복사 완료! (search.html?r=${shortUrl.split("?r=")[1]})`, "success");
+      showToast(`📋 단축 URL 복사 완료! (/r/${shortUrl.split("/r/")[1]})`, "success");
     } else {
       showToast("📋 링크 복사 완료! (단축 URL 생성 실패 — 원본 URL)", "success");
     }

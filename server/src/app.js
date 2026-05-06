@@ -73,6 +73,14 @@ app.use('/api/viewer',    diagRoutes);
 app.use('/api/image',     diagRoutes);
 app.use('/api/blacklist', diagRoutes);
 
+// ── 단축링크 OG 프리뷰 (카카오톡/SNS 공유용) ──
+// /r/:code → 크롤러에게 동적 OG HTML, 일반 브라우저에게 프론트엔드 리다이렉트
+app.get('/r/:code', (req, res, next) => {
+  // shortRoutes의 /og/:code 핸들러로 포워딩
+  req.url = '/og/' + req.params.code;
+  shortRoutes(req, res, next);
+});
+
 // ── 헬스체크 ──
 app.get('/health', async (req, res) => {
   let dbStatus = 'disconnected';
