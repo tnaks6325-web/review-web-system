@@ -2,6 +2,86 @@
    app.js v4 [인라인]
 ══════════════════════════════════════════ */
 
+/* ══════════════════════════════════════════
+   ★ 시스템 변경 공지사항 (배포 시 자동 표시)
+   — 새로운 배포 시 이 배열 맨 위에 추가하세요
+══════════════════════════════════════════ */
+const SYSTEM_NOTICES = [
+  {
+    version: "2026-05-06-2",
+    date: "2026-05-06",
+    title: "GID 기반 탭 조회 적용",
+    changes: [
+      { type: "feat", text: "탭 이름이 변경되어도 구매양식/리뷰 제출 시 에러 없이 정상 동작 (GID 기반 조회)" },
+      { type: "feat", text: "탭을 찾지 못할 때 사용 가능한 탭 목록을 에러 메시지에 포함" },
+      { type: "fix", text: "구매양식 재제출 시 '그래도 제출' 클릭으로 서버 중복 검사 우회 가능" },
+    ]
+  },
+  {
+    version: "2026-05-06-1",
+    date: "2026-05-06",
+    title: "성능 개선 + 재제출 기능",
+    changes: [
+      { type: "perf", text: "GET /dirty 응답시간 125초 → ~25초 (병렬 처리)" },
+      { type: "perf", text: "POST /order 응답시간 9초 → ~1.5초 (batchUpdate 일괄 쓰기)" },
+      { type: "feat", text: "구매양식 제출 실패 시 재제출 버튼 + 이전 화면 복귀 버튼 추가" },
+      { type: "feat", text: "1시간 내 중복 제출 시에도 '재제출' 가능하도록 개선" },
+    ]
+  }
+];
+
+function _renderNoticeHtml(notice) {
+  const typeIcons = { feat: "🆕", fix: "🔧", perf: "⚡", warn: "⚠️" };
+  const typeLabels = { feat: "추가", fix: "수정", perf: "성능", warn: "주의" };
+  const typeColors = { feat: "#059669", fix: "#DC2626", perf: "#D97706", warn: "#9333EA" };
+
+  let html = `<div style="font-size:.82rem;font-weight:600;color:#1E40AF;margin-bottom:6px">📋 ${notice.title}</div>`;
+  html += `<ul style="margin:0;padding-left:18px;list-style:none">`;
+  for (const c of notice.changes) {
+    const icon = typeIcons[c.type] || "•";
+    const label = typeLabels[c.type] || "";
+    const color = typeColors[c.type] || "#374151";
+    html += `<li style="margin-bottom:4px">${icon} <span style="font-size:.7rem;font-weight:600;color:${color};background:${color}15;padding:1px 6px;border-radius:4px;margin-right:4px">${label}</span>${c.text}</li>`;
+  }
+  html += `</ul>`;
+  return html;
+}
+
+function checkAndShowNotice() {
+  if (!SYSTEM_NOTICES || SYSTEM_NOTICES.length === 0) return;
+  const latest = SYSTEM_NOTICES[0];
+  const dismissedVersion = localStorage.getItem("notice_dismissed_version");
+  if (dismissedVersion === latest.version) return;
+
+  const section = document.getElementById("noticeSection");
+  const content = document.getElementById("noticeContent");
+  const dateEl = document.getElementById("noticeDate");
+  if (!section || !content) return;
+
+  // 최신 공지 + 직전 공지 (최대 2개) 표시
+  let html = _renderNoticeHtml(latest);
+  if (SYSTEM_NOTICES.length > 1) {
+    const prev = SYSTEM_NOTICES[1];
+    if (prev.version !== dismissedVersion) {
+      html += `<div style="border-top:1px solid #BFDBFE;margin:10px 0 8px;padding-top:8px">`;
+      html += _renderNoticeHtml(prev);
+      html += `</div>`;
+    }
+  }
+
+  content.innerHTML = html;
+  if (dateEl) dateEl.textContent = `배포일: ${latest.date}`;
+  section.style.display = "block";
+}
+
+function dismissNotice(permanent) {
+  const section = document.getElementById("noticeSection");
+  if (section) section.style.display = "none";
+  if (permanent && SYSTEM_NOTICES.length > 0) {
+    localStorage.setItem("notice_dismissed_version", SYSTEM_NOTICES[0].version);
+  }
+}
+
 /* ── 에러 메시지 한글 번역 (프론트엔드 fallback) ── */
 function _translateErrorClient(msg) {
   if (!msg) return '알 수 없는 오류';
@@ -921,6 +1001,9 @@ function enterAdminScreen() {
   _updateContextToolbar('dashboard');
 
   loadAdminDashboard();
+
+  // ★ 공지사항 자동 표시 (배포 변경 이력)
+  checkAndShowNotice();
 
   // ── Phase 5/6: 시스템 모니터링 + API 메트릭 자동 로드 ──
   if (typeof loadSystemMonitor === 'function') {
