@@ -5755,6 +5755,7 @@ async function submitOrderForm() {
       const slotPayload = {
         action: "findSlot",
         sheetId: ctx.sheetId,
+        gid: ctx.gid || "",
         tabName: ctx.tabName,
         loginName: slotAuth.name,
         phone8: slotAuth.phone8 || "",
@@ -5787,6 +5788,7 @@ async function submitOrderForm() {
         const slotPayload2 = {
           action: "findSlot",
           sheetId: ctx.sheetId,
+          gid: ctx.gid || "",
           tabName: ctx.tabName,
           loginName: slotAuth.name,
           phone8: slotAuth.phone8 || "",

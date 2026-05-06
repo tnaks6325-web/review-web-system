@@ -65,16 +65,16 @@ function _isHeaderRow(cells) {
   return false;
 }
 
-async function getCachedHeaders(sheetId, tabName) {
-  const key = `${sheetId}||${tabName}`;
+async function getCachedHeaders(sheetId, tabName, opts = {}) {
+  const key = `${sheetId}||${opts.gid || tabName}`;
   const cached = headerCache.get(key);
   if (cached && Date.now() - cached.ts < HEADER_CACHE_TTL) {
     return cached.headers;
   }
 
   // 상위 50행을 읽어서 실제 헤더 행을 동적으로 탐색
-  // ★ 탭 이름에 슬래시(/)가 포함되면 '행번호' 형식이 파싱 실패 → A1 표기법 사용
-  const allRows = await readSheet(sheetId, `'${tabName}'!A1:ZZ50`);
+  // ★ opts.gid가 있으면 GID 기반 조회로 탭 이름 변경에도 안전
+  const allRows = await readSheet(sheetId, `'${tabName}'!A1:ZZ50`, opts);
   if (!allRows || allRows.length === 0) return null;
 
   let headerRow = null;
@@ -107,16 +107,16 @@ async function getCachedHeaders(sheetId, tabName) {
  * 탭 전체 데이터 캐시 (헤더행 + 데이터행 포함)
  * 슬롯 매칭에서 인애드명 컬럼 스캔용
  */
-async function getCachedTabData(sheetId, tabName) {
-  const key = `${sheetId}||${tabName}`;
+async function getCachedTabData(sheetId, tabName, opts = {}) {
+  const key = `${sheetId}||${opts.gid || tabName}`;
   const cached = tabDataCache.get(key);
   if (cached && Date.now() - cached.ts < TAB_DATA_CACHE_TTL) {
     return cached;
   }
 
   // 전체 탭 데이터 읽기 (최대 500행)
-  // ★ 탭 이름에 슬래시(/)가 포함되면 '행번호' 형식이 파싱 실패 → A1 표기법 사용
-  const allRows = await readSheet(sheetId, `'${tabName}'!A1:ZZ500`);
+  // ★ opts.gid가 있으면 GID 기반 조회로 탭 이름 변경에도 안전
+  const allRows = await readSheet(sheetId, `'${tabName}'!A1:ZZ500`, opts);
   if (!allRows || allRows.length === 0) return null;
 
   // 헤더 행 탐지 (상위 설정 영역이 30행 이상일 수 있으므로 50행까지 탐색)
@@ -230,17 +230,18 @@ router.get('/slot-status', async (req, res) => {
 // ═══════════════════════════════════════════════════════════
 router.post('/find-slot', async (req, res, next) => {
   try {
-    const { sheetId, tabName, loginName, phone8, profileName } = req.body;
+    const { sheetId, gid, tabName, loginName, phone8, profileName } = req.body;
     if (!sheetId || !tabName || !loginName) {
       return res.json({ ok: false, error: 'sheetId, tabName, loginName 필요' });
     }
 
     const matchName = (profileName || loginName).trim();
+    const sheetOpts = gid ? { gid } : {};
 
     // 탭 전체 데이터 로드 (Sheets API 실패 시 append 모드로 폴백)
     let tabData = null;
     try {
-      tabData = await getCachedTabData(sheetId, tabName);
+      tabData = await getCachedTabData(sheetId, tabName, sheetOpts);
     } catch (sheetErr) {
       logger.warn(`[find-slot] 시트 읽기 실패 → append 모드: ${sheetErr.message}`);
       return res.json({ ok: true, mode: 'append', reason: 'sheet_read_error', debug: sheetErr.message });
@@ -403,13 +404,14 @@ router.post('/find-slot', async (req, res, next) => {
 // ═══════════════════════════════════════════════════════════
 router.post('/review', async (req, res, next) => {
   try {
-    const { sheetId, tabName, rowIndex, submitCol, value, phone8 } = req.body;
+    const { sheetId, gid, tabName, rowIndex, submitCol, value, phone8 } = req.body;
 
     if (!sheetId || !tabName || !rowIndex) {
       return res.json({ error: '필수 파라미터 누락 (sheetId, tabName, rowIndex)' });
     }
 
     const submitValue = value || '제출';
+    const sheetOpts = gid ? { gid } : {};
 
     // ── Step 1: DB 즉시 업데이트 (가장 빠름) ──
     let dbUpdated = false;
@@ -441,13 +443,13 @@ router.post('/review', async (req, res, next) => {
     // ── Step 2: Sheets 동시 쓰기 시도 ──
     let sheetsWritten = false;
     try {
-      const headers = await getCachedHeaders(sheetId, tabName);
+      const headers = await getCachedHeaders(sheetId, tabName, sheetOpts);
       if (headers) {
         const colIdx = headers.findIndex(h => h === submitCol);
         if (colIdx >= 0) {
           const colLetter = getColLetter(colIdx);
           const range = `'${tabName}'!${colLetter}${rowIndex}`;
-          await writeSheet(sheetId, range, [[submitValue]]);
+          await writeSheet(sheetId, range, [[submitValue]], sheetOpts);
           sheetsWritten = true;
         }
       }
@@ -560,9 +562,10 @@ router.post('/order', async (req, res, next) => {
     const orderData = { orderer, recipient, userId, phone, address, bank, account, depositor, price, dateStr, orderNum, memo, selectedOptKey };
     let sheetsWritten = false;
     let usedSlot = false;
+    const sheetOpts = gid ? { gid } : {};
 
     try {
-      const headers = await getCachedHeaders(sheetId, tabName);
+      const headers = await getCachedHeaders(sheetId, tabName, sheetOpts);
       if (headers) {
         const rowData = _mapOrderToRow(headers, orderData);
 
@@ -607,7 +610,7 @@ router.post('/order', async (req, res, next) => {
             }));
 
             try {
-              await batchUpdateSheet(sheetId, batchData);
+              await batchUpdateSheet(sheetId, batchData, 'RAW', sheetOpts);
               sheetsWritten = true;
               usedSlot = true;
             } catch (batchErr) {
@@ -616,7 +619,7 @@ router.post('/order', async (req, res, next) => {
               for (const pair of writePairs) {
                 const colLetter = getColLetter(pair.col);
                 const range = `'${tabName}'!${colLetter}${rowNum}`;
-                await writeSheet(sheetId, range, [[pair.val]]);
+                await writeSheet(sheetId, range, [[pair.val]], sheetOpts);
               }
               sheetsWritten = true;
               usedSlot = true;
@@ -639,7 +642,7 @@ router.post('/order', async (req, res, next) => {
           }
         } else {
           // ★ 기존 방식: appendSheet (인애드명 컬럼 없는 탭이거나 슬롯 없음)
-          await appendSheet(sheetId, `'${tabName}'!A:A`, [rowData]);
+          await appendSheet(sheetId, `'${tabName}'!A:A`, [rowData], sheetOpts);
           sheetsWritten = true;
         }
       }

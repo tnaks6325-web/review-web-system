@@ -38,17 +38,40 @@ try {
 }
 
 /**
+ * 공통 헬퍼: 스프레드시트 메타에서 GID 또는 탭 이름으로 탭 검색
+ * GID가 있으면 GID 우선, 없거나 실패 시 tabName으로 폴백
+ * @param {Array} sheetsArr - spreadsheets.get 결과의 sheets 배열
+ * @param {object} opts - { gid, tabName }
+ * @returns {object|null} 찾은 시트 객체 또는 null
+ */
+function _findSheetInMeta(sheetsArr, { gid, tabName }) {
+  // 1순위: GID로 검색
+  if (gid !== undefined && gid !== null && gid !== '') {
+    const byGid = sheetsArr.find(s => s.properties.sheetId === parseInt(gid));
+    if (byGid) return byGid;
+  }
+  // 2순위: 탭 이름으로 검색
+  if (tabName) {
+    const byName = sheetsArr.find(s => s.properties.title === tabName);
+    if (byName) return byName;
+  }
+  return null;
+}
+
+/**
  * 시트 전체 데이터 읽기 (GAS: SpreadsheetApp.openById + getValues)
  *
  * ★ 탭 이름에 슬래시(/)가 포함되면 values.get / batchGet 모두 파싱 실패
  *   → spreadsheets.get + includeGridData 방식으로 GID 기반 조회 사용
+ *
+ * opts.gid: 탭의 GID (숫자) — 있으면 이름 변경에도 안전하게 탭 조회
  */
-async function readSheet(spreadsheetId, range) {
+async function readSheet(spreadsheetId, range, opts = {}) {
   if (!sheets) throw new Error('Google Sheets API가 설정되지 않았습니다.');
 
-  // 슬래시가 range(탭 이름 부분)에 포함된 경우: GID 기반 gridData 방식 사용
-  if (range && range.includes('/')) {
-    return await _readSheetByGridData(spreadsheetId, range);
+  // GID가 전달되었거나, 슬래시가 range에 포함된 경우: GID 기반 gridData 방식 사용
+  if ((opts.gid !== undefined && opts.gid !== null && opts.gid !== '') || (range && range.includes('/'))) {
+    return await _readSheetByGridData(spreadsheetId, range, opts);
   }
 
   const res = await sheets.spreadsheets.values.get({
@@ -64,11 +87,11 @@ async function readSheet(spreadsheetId, range) {
  * spreadsheets.getByDataFilter 사용 — range 파싱 문제를 완전히 회피
  * range 형식: '탭이름'!A1:ZZ500 또는 '탭이름'!A:A 등
  */
-async function _readSheetByGridData(spreadsheetId, range) {
+async function _readSheetByGridData(spreadsheetId, range, opts = {}) {
   // 탭 이름 추출
   const tabMatch = range.match(/^'([^']*(?:''[^']*)*)'!/);
   const tabName = tabMatch ? tabMatch[1].replace(/''/g, "'") : null;
-  if (!tabName) {
+  if (!tabName && !opts.gid) {
     throw new Error(`탭 이름을 추출할 수 없습니다: ${range}`);
   }
 
@@ -76,16 +99,17 @@ async function _readSheetByGridData(spreadsheetId, range) {
   const cellRange = range.replace(/^'[^']*(?:''[^']*)*'!/, '');
   const { startRow, endRow, startCol, endCol } = _parseA1Range(cellRange);
 
-  // 스프레드시트 메타에서 GID 찾기
+  // 스프레드시트 메타에서 GID 또는 탭 이름으로 검색
   const meta = await sheets.spreadsheets.get({
     spreadsheetId,
     includeGridData: false,
     fields: 'sheets(properties(sheetId,title,gridProperties))',
   });
 
-  const targetSheet = (meta.data.sheets || []).find(s => s.properties.title === tabName);
+  const targetSheet = _findSheetInMeta(meta.data.sheets || [], { gid: opts.gid, tabName });
   if (!targetSheet) {
-    throw new Error(`시트를 찾을 수 없습니다: ${tabName}`);
+    const available = (meta.data.sheets || []).map(s => `"${s.properties.title}"`).join(', ');
+    throw new Error(`시트를 찾을 수 없습니다: ${tabName || 'gid:' + opts.gid} (사용 가능: ${available})`);
   }
 
   const sheetId = targetSheet.properties.sheetId;
@@ -177,11 +201,12 @@ function _colToNum(col) {
  * ★ 탭 이름에 슬래시(/)가 포함되면 values.update의 path parameter가 깨지므로
  *   spreadsheets.batchUpdate + updateCells (GID 기반)로 우회합니다.
  */
-async function writeSheet(spreadsheetId, range, values) {
+async function writeSheet(spreadsheetId, range, values, opts = {}) {
   if (!sheets) throw new Error('Google Sheets API가 설정되지 않았습니다.');
 
-  if (range && range.includes('/')) {
-    await _writeSheetByGridData(spreadsheetId, range, values);
+  // GID가 전달되었거나, 슬래시 포함 시 GID 기반 쓰기
+  if ((opts.gid !== undefined && opts.gid !== null && opts.gid !== '') || (range && range.includes('/'))) {
+    await _writeSheetByGridData(spreadsheetId, range, values, opts);
     return;
   }
 
@@ -197,22 +222,25 @@ async function writeSheet(spreadsheetId, range, values) {
  * GID 기반 시트 쓰기 (슬래시 포함 탭 이름 우회)
  * ★ 행 수 부족 시 자동으로 행을 추가하여 GridCoordinate 오류 방지
  */
-async function _writeSheetByGridData(spreadsheetId, range, values) {
+async function _writeSheetByGridData(spreadsheetId, range, values, opts = {}) {
   const tabMatch = range.match(/^'([^']*(?:''[^']*)*)'!/);
   const tabName = tabMatch ? tabMatch[1].replace(/''/g, "'") : null;
-  if (!tabName) throw new Error(`탭 이름을 추출할 수 없습니다: ${range}`);
+  if (!tabName && !opts.gid) throw new Error(`탭 이름을 추출할 수 없습니다: ${range}`);
 
   const cellRange = range.replace(/^'[^']*(?:''[^']*)*'!/, '');
   const { startRow, startCol } = _parseA1Range(cellRange);
 
-  // 메타에서 GID + gridProperties 찾기
+  // 메타에서 GID 또는 탭 이름으로 검색
   const meta = await sheets.spreadsheets.get({
     spreadsheetId,
     includeGridData: false,
     fields: 'sheets(properties(sheetId,title,gridProperties))',
   });
-  const targetSheet = (meta.data.sheets || []).find(s => s.properties.title === tabName);
-  if (!targetSheet) throw new Error(`시트를 찾을 수 없습니다: ${tabName}`);
+  const targetSheet = _findSheetInMeta(meta.data.sheets || [], { gid: opts.gid, tabName });
+  if (!targetSheet) {
+    const available = (meta.data.sheets || []).map(s => `"${s.properties.title}"`).join(', ');
+    throw new Error(`시트를 찾을 수 없습니다: ${tabName || 'gid:' + opts.gid} (사용 가능: ${available})`);
+  }
 
   const sheetId = targetSheet.properties.sheetId;
   const currentRowCount = targetSheet.properties.gridProperties?.rowCount || 0;
@@ -281,26 +309,29 @@ function _toCellValue(val) {
  * ★ 탭 이름에 슬래시(/)가 포함되면 values.append의 path parameter가 깨지므로
  *   GID 기반으로 마지막 행을 찾아 updateCells로 우회합니다.
  */
-async function appendSheet(spreadsheetId, range, values) {
+async function appendSheet(spreadsheetId, range, values, opts = {}) {
   if (!sheets) throw new Error('Google Sheets API가 설정되지 않았습니다.');
 
-  if (range && range.includes('/')) {
+  if ((opts.gid !== undefined && opts.gid !== null && opts.gid !== '') || (range && range.includes('/'))) {
     const tabMatch = range.match(/^'([^']*(?:''[^']*)*)'!/);
     const tabName = tabMatch ? tabMatch[1].replace(/''/g, "'") : null;
 
-    if (tabName) {
+    if (tabName || opts.gid) {
       // GID 기반: 현재 데이터 행 수 파악 후 다음 행에 쓰기
-      const existing = await _readSheetByGridData(spreadsheetId, `'${tabName}'!A1:A1000`);
+      const existing = await _readSheetByGridData(spreadsheetId, `'${tabName || '_'}'!A1:A1000`, opts);
       const nextRow = (existing ? existing.length : 0) + 1;
 
-      // 메타에서 GID + gridProperties 찾기
+      // 메타에서 GID 또는 탭 이름으로 검색
       const meta = await sheets.spreadsheets.get({
         spreadsheetId,
         includeGridData: false,
         fields: 'sheets(properties(sheetId,title,gridProperties))',
       });
-      const targetSheet = (meta.data.sheets || []).find(s => s.properties.title === tabName);
-      if (!targetSheet) throw new Error(`시트를 찾을 수 없습니다: ${tabName}`);
+      const targetSheet = _findSheetInMeta(meta.data.sheets || [], { gid: opts.gid, tabName });
+      if (!targetSheet) {
+        const available = (meta.data.sheets || []).map(s => `"${s.properties.title}"`).join(', ');
+        throw new Error(`시트를 찾을 수 없습니다: ${tabName || 'gid:' + opts.gid} (사용 가능: ${available})`);
+      }
 
       const sheetId = targetSheet.properties.sheetId;
       const currentRowCount = targetSheet.properties.gridProperties?.rowCount || 0;
@@ -629,15 +660,15 @@ async function checkSheetWriteAccess(spreadsheetId) {
  *   예: [{ range: "'탭명'!C5", values: [['값1']] }, { range: "'탭명'!E5", values: [['값2']] }]
  * @param {string} valueInputOption - 'RAW' | 'USER_ENTERED' (기본: 'RAW')
  */
-async function batchUpdateSheet(spreadsheetId, data, valueInputOption = 'RAW') {
+async function batchUpdateSheet(spreadsheetId, data, valueInputOption = 'RAW', opts = {}) {
   if (!sheets) throw new Error('Google Sheets API가 설정되지 않았습니다.');
   if (!data || data.length === 0) return;
 
-  // 슬래시 포함 탭이 하나라도 있으면 개별 writeSheet 폴백
+  // GID가 전달되었거나 슬래시 포함 탭이 있으면 개별 writeSheet 폴백 (GID 전달)
   const hasSlash = data.some(d => d.range && d.range.includes('/'));
-  if (hasSlash) {
+  if (hasSlash || (opts.gid !== undefined && opts.gid !== null && opts.gid !== '')) {
     for (const item of data) {
-      await writeSheet(spreadsheetId, item.range, item.values);
+      await writeSheet(spreadsheetId, item.range, item.values, opts);
     }
     return;
   }
