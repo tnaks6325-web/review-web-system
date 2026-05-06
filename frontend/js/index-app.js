@@ -10539,6 +10539,7 @@ async function loadArchiveList() {
           <table style="width:100%;font-size:.78rem;border-collapse:collapse">
             <thead><tr style="background:#F3F4F6">
               <th style="padding:6px 10px;text-align:left;color:#6B7280">탭명</th>
+              <th style="padding:6px 8px;text-align:left;color:#6B7280;width:120px">차수</th>
               <th style="padding:6px 8px;text-align:right;color:#6B7280;width:60px">행</th>
               <th style="padding:6px 8px;text-align:right;color:#6B7280;width:60px">제출</th>
               <th style="padding:6px 8px;text-align:center;color:#6B7280;width:70px">사유</th>
@@ -10555,8 +10556,10 @@ async function loadArchiveList() {
                             t.archiveReason === 'force_done' ? '#F59E0B' :
                             t.archiveReason === 'name_completed' ? '#6366F1' : '#10B981';
         const dateStr = t.archivedAt ? new Date(t.archivedAt).toLocaleDateString('ko-KR') : '-';
+        const roundsStr = t.rounds ? escHtml(t.rounds) : '<span style="color:#D1D5DB">-</span>';
         html += `<tr style="border-top:1px solid #F3F4F6">
           <td style="padding:5px 10px">${escHtml(t.tabName)}</td>
+          <td style="padding:5px 8px;font-size:.73rem;color:#4B5563">${roundsStr}</td>
           <td style="padding:5px 8px;text-align:right">${(t.rowCount||0).toLocaleString()}</td>
           <td style="padding:5px 8px;text-align:right">${(t.submittedCount||0).toLocaleString()}</td>
           <td style="padding:5px 8px;text-align:center"><span style="background:${reasonColor}15;color:${reasonColor};padding:2px 6px;border-radius:4px;font-size:.7rem">${reasonLabel}</span></td>

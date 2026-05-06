@@ -615,7 +615,7 @@ router.get('/list', authMiddleware, async (req, res, next) => {
     );
     const totalCount = parseInt(countRows[0].total);
 
-    // 데이터 조회
+    // 데이터 조회 (차수 정보 포함)
     const { rows } = await pool.query(`
       SELECT
         ima.sheet_id        AS "sheetId",
@@ -626,7 +626,13 @@ router.get('/list', authMiddleware, async (req, res, next) => {
         ima.archived_at     AS "archivedAt",
         ima.archived_by     AS "archivedBy",
         ima.archive_reason  AS "archiveReason",
-        ima.built_at        AS "builtAt"
+        ima.built_at        AS "builtAt",
+        (
+          SELECT STRING_AGG(DISTINCT ria.round, ', ' ORDER BY ria.round)
+          FROM review_index_archive ria
+          WHERE ria.sheet_id = ima.sheet_id AND ria.tab_name = ima.tab_name
+            AND ria.round IS NOT NULL AND ria.round != ''
+        ) AS "rounds"
       FROM index_master_archive ima
       ${whereClause}
       ORDER BY ima.archived_at DESC
@@ -656,6 +662,7 @@ router.get('/list', authMiddleware, async (req, res, next) => {
         archivedAt: r.archivedAt,
         archivedBy: r.archivedBy,
         archiveReason: r.archiveReason,
+        rounds: r.rounds || null,
       });
       camp.totalRows += rowCount;
       camp.totalSubmitted += submittedCount;
