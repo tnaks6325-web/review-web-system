@@ -340,7 +340,11 @@ async function gasPost(body, timeout) {
     return json;
   } catch (err) {
     if (err.name === 'AbortError') {
-      return { error: '요청 시간이 초과되었습니다.' };
+      const isUpload = action.toLowerCase().includes('upload') || action.toLowerCase().includes('image');
+      const msg = isUpload
+        ? '이미지 업로드 시간이 초과되었습니다. 네트워크 상태를 확인하고 이미지 수를 줄여 다시 시도해주세요.'
+        : '요청 시간이 초과되었습니다.';
+      return { error: msg };
     }
     console.error('[gasPost] 오류:', action, err.message);
     return { error: err.message };

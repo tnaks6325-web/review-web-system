@@ -1305,7 +1305,9 @@ async function _mrAddFiles(idx, newFiles) {
     if (f.size > MAX) { showToast(`${f.name}: 10MB 초과`, "warning"); continue; }
     try {
       const b64 = await fileToBase64(f);
-      S.filesByIdx[idx].push({ file: f, b64, size: f.size, type: f.type, name: f.name });
+      // ★ 이미지 압축 시 JPEG로 변환되므로 type 업데이트
+      const actualType = (f.type.startsWith('image/') && f.size > 1024 * 1024) ? 'image/jpeg' : f.type;
+      S.filesByIdx[idx].push({ file: f, b64, size: f.size, type: actualType, name: f.name });
     } catch(e) {
       showToast(`${f.name}: 이미지 읽기 실패 (다시 선택해주세요)`, "error");
     }
@@ -1578,7 +1580,9 @@ async function addFiles(files) {
     if (f.size > APP_CONFIG.MAX_FILE_SIZE)          { showToast(`${f.name}: 10MB 초과`, "error");        continue; }
     try {
       const b64 = await fileToBase64(f);
-      S.files.push({ file: f, b64, size: f.size, type: f.type, name: f.name });
+      // ★ 이미지 압축 시 JPEG로 변환되므로 type을 image/jpeg로 설정
+      const actualType = (f.type.startsWith('image/') && f.size > 1024 * 1024) ? 'image/jpeg' : f.type;
+      S.files.push({ file: f, b64, size: f.size, type: actualType, name: f.name });
     } catch(e) {
       showToast(`${f.name}: 이미지 읽기 실패 (다시 선택해주세요)`, "error");
     }
@@ -1678,6 +1682,7 @@ async function submitReview() {
         const optionFolderName = rowOpts.map(o => o.value).filter(Boolean).join(" ").trim();
 
         // ── Step 1: 이미지를 구글 드라이브에 업로드 ──
+        // ★ 모바일 네트워크에서 Base64 이미지 업로드는 시간이 오래 걸림 → 타임아웃 180초
         const uploadResult = await gasPost({
           action:           "uploadReviewImage",
           sheetId:          item.sheetId,
@@ -1694,7 +1699,7 @@ async function submitReview() {
             mimeType: files[fi].type || "image/jpeg",
             data:     b64,
           }))
-        });
+        }, 180000);
 
         if (!uploadResult || (!uploadResult.ok && !uploadResult.success)) {
           throw new Error(uploadResult?.error || "이미지 업로드 실패");
@@ -8011,10 +8016,71 @@ function _jsonpGet(fullUrl, timeoutMs) {
 // }
 
 /* ── 유틸 ── */
-function fileToBase64(file) {
+
+/**
+ * ★ 이미지 압축/리사이즈 (모바일 최적화)
+ * - 최대 1920px으로 리사이즈
+ * - JPEG 품질 0.75로 압축
+ * - 원본 1MB 이하면 압축 스킵 (이미 작은 파일)
+ */
+function compressImage(file, maxWidth = 1920, quality = 0.75) {
+  return new Promise((resolve, reject) => {
+    // 1MB 이하이고 JPEG이면 압축 불필요
+    if (file.size <= 1024 * 1024 && file.type === 'image/jpeg') {
+      return fileToBase64Raw(file).then(resolve).catch(reject);
+    }
+
+    const img = new Image();
+    const url = URL.createObjectURL(file);
+
+    img.onload = () => {
+      URL.revokeObjectURL(url);
+
+      let { width, height } = img;
+
+      // 리사이즈 필요 여부 확인
+      if (width > maxWidth) {
+        height = Math.round(height * (maxWidth / width));
+        width = maxWidth;
+      }
+
+      const canvas = document.createElement('canvas');
+      canvas.width = width;
+      canvas.height = height;
+
+      const ctx = canvas.getContext('2d');
+      ctx.drawImage(img, 0, 0, width, height);
+
+      // JPEG로 압축 (품질 0.75)
+      const dataUrl = canvas.toDataURL('image/jpeg', quality);
+      const b64 = dataUrl.split(',')[1];
+      if (!b64) {
+        reject(new Error('이미지 압축 실패'));
+        return;
+      }
+
+      // 압축된 크기 계산
+      const compressedSize = Math.round(b64.length * 0.75); // base64 → binary 크기 추정
+      console.log(`[compress] ${file.name}: ${(file.size/1024).toFixed(0)}KB → ${(compressedSize/1024).toFixed(0)}KB (${width}x${height})`);
+
+      resolve(b64);
+    };
+
+    img.onerror = () => {
+      URL.revokeObjectURL(url);
+      // 이미지 로드 실패 시 원본 Base64로 폴백
+      fileToBase64Raw(file).then(resolve).catch(reject);
+    };
+
+    img.src = url;
+  });
+}
+
+/** 원본 Base64 변환 (압축 없이) */
+function fileToBase64Raw(file) {
   return new Promise((res, rej) => {
     const r = new FileReader();
-    r.onload  = () => {
+    r.onload = () => {
       const result = r.result;
       if (!result || !result.includes(",")) {
         rej(new Error("파일 읽기 결과가 비어있습니다"));
@@ -8026,6 +8092,14 @@ function fileToBase64(file) {
     r.onabort = () => rej(new Error("파일 읽기가 중단되었습니다"));
     r.readAsDataURL(file);
   });
+}
+
+/** ★ fileToBase64 — 이미지는 자동 압축, 그 외는 원본 변환 */
+function fileToBase64(file) {
+  if (file.type && file.type.startsWith('image/')) {
+    return compressImage(file);
+  }
+  return fileToBase64Raw(file);
 }
 function escHtml(s) {
   return String(s).replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;").replace(/"/g,"&quot;");

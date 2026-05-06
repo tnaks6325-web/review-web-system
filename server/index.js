@@ -71,6 +71,11 @@ async function runMigrations() {
   }
 
   const server = app.listen(PORT, '0.0.0.0', () => {
+    // ★ 서버 타임아웃 설정 — 이미지 업로드 등 대용량 요청 대응 (3분)
+    server.timeout = 180000;           // 요청 처리 최대 180초
+    server.keepAliveTimeout = 65000;   // keep-alive 65초 (ALB 기본 60초보다 길게)
+    server.headersTimeout = 70000;     // 헤더 수신 타임아웃
+
     logger.info(`✅ 리뷰웹시스템 API 서버 시작: http://0.0.0.0:${PORT}`);
     logger.info(`   환경: ${process.env.NODE_ENV || 'development'}`);
     logger.info(`   DB: ${process.env.DATABASE_URL ? '연결됨' : '❌ DATABASE_URL 미설정'}`);
