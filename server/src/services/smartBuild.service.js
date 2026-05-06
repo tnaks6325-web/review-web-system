@@ -241,7 +241,7 @@ function _parseTabRows(values, sheetId, tabName, tabGid, campaignTitle) {
 // DB Upsert (자체 구현 — indexBuilder와 독립)
 // ═══════════════════════════════════════════════════════════
 
-async function _upsertTab(sheetId, tabName, tabGid, checksum, rows, modifiedTime, campaignName) {
+async function _upsertTab(sheetId, tabName, tabGid, checksum, rows, modifiedTime, campaignName, archivedRoundsCache) {
   const client = await pool.connect();
   try {
     await client.query('BEGIN');
@@ -293,15 +293,9 @@ async function _upsertTab(sheetId, tabName, tabGid, checksum, rows, modifiedTime
     }
 
     // ★ 아카이브된 차수(round)의 행은 재삽입하지 않도록 필터링
-    // 탭 자체는 활성이지만 특정 차수만 아카이브된 경우, 해당 차수 행 제외
-    const { rows: tcArchivedRows } = await client.query(
-      'SELECT archived_rounds FROM tab_configs WHERE sheet_id = $1 AND tab_name = $2',
-      [sheetId, tabName]
-    );
-    const archivedRoundsStr = tcArchivedRows?.[0]?.archived_rounds || '';
-    const archivedRoundsSet = new Set(
-      archivedRoundsStr.split(',').map(s => s.trim()).filter(Boolean)
-    );
+    // 빌드 시작 시 일괄 로드한 캐시 사용 (DB 쿼리 0회)
+    const cacheKey = `${sheetId}||${tabName}`;
+    const archivedRoundsSet = archivedRoundsCache?.get(cacheKey) || new Set();
 
     // 아카이브된 차수에 해당하는 행 제외
     let filteredRows = rows;
@@ -312,7 +306,7 @@ async function _upsertTab(sheetId, tabName, tabGid, checksum, rows, modifiedTime
       });
       const skippedCount = rows.length - filteredRows.length;
       if (skippedCount > 0) {
-        logger.info(`[smartBuild] ${tabName}: 아카이브된 차수 행 ${skippedCount}건 스킵 (archived_rounds: ${archivedRoundsStr})`);
+        logger.info(`[smartBuild] ${tabName}: 아카이브된 차수 행 ${skippedCount}건 스킵 (archived_rounds: ${[...archivedRoundsSet].join(',')})`);
       }
     }
 
@@ -492,6 +486,22 @@ async function runSmartBuild() {
       logger.info(`[smartBuild] 아카이브된 탭 ${archivedRows.length}개 스킵 대상 로드 (gid매칭: ${archivedGidSet.size}개)`);
     }
 
+    // ★ 차수 단위 아카이브 캐시: 빌드 시작 시 1회 bulk 로드 (탭당 개별 쿼리 제거)
+    // Map<"sheetId||tabName", Set<round>>
+    const archivedRoundsCache = new Map();
+    const { rows: archivedRoundsRows } = await pool.query(
+      "SELECT sheet_id, tab_name, archived_rounds FROM tab_configs WHERE archived_rounds IS NOT NULL AND archived_rounds != ''"
+    );
+    for (const r of archivedRoundsRows) {
+      const rounds = r.archived_rounds.split(',').map(s => s.trim()).filter(Boolean);
+      if (rounds.length > 0) {
+        archivedRoundsCache.set(`${r.sheet_id}||${r.tab_name}`, new Set(rounds));
+      }
+    }
+    if (archivedRoundsCache.size > 0) {
+      logger.info(`[smartBuild] 차수 단위 아카이브 캐시 로드: ${archivedRoundsCache.size}개 탭, 총 ${archivedRoundsRows.reduce((sum, r) => sum + r.archived_rounds.split(',').filter(Boolean).length, 0)}개 차수`);
+    }
+
     // ── 2단계: Drive API로 변경 시트 감지 (throttle 적용) ──
     const changedSheetIds = [];
 
@@ -618,7 +628,7 @@ async function runSmartBuild() {
             }
 
             const modifiedTime = _modifiedTimeCache[sheetId]?.modifiedTime || null;
-            await _upsertTab(sheetId, tabName, tabGid, newChecksum, rows, modifiedTime, spreadsheetTitle);
+            await _upsertTab(sheetId, tabName, tabGid, newChecksum, rows, modifiedTime, spreadsheetTitle, archivedRoundsCache);
 
             // ★ 인식 성공 → unrecognized_tabs에서 resolve
             await _resolveRecognizedTab(sheetId, tabName, tabGid);

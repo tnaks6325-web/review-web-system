@@ -235,6 +235,18 @@ router.get('/dashboard', authMiddleware, async (req, res, next) => {
     let workStatusMap = {}; // "sheetId||tabName" → { tuip, chuihap }
     let roundDataMap = {};  // "sheetId||tabName" → { rounds: { "1차": { total, submitted, pending, tuip, chuihap, startDate }, ... } }
 
+    // ★ 차수 단위 아카이브 방어: 대시보드 차수별 집계에서 아카이브된 차수 제외
+    const archivedRoundsMap = {}; // "sheetId||tabName" → Set<round>
+    const { rows: arRoundsRows } = await pool.query(
+      "SELECT sheet_id, tab_name, archived_rounds FROM tab_configs WHERE archived_rounds IS NOT NULL AND archived_rounds != ''"
+    );
+    for (const r of arRoundsRows) {
+      const rounds = r.archived_rounds.split(',').map(s => s.trim()).filter(Boolean);
+      if (rounds.length > 0) {
+        archivedRoundsMap[`${r.sheet_id}||${r.tab_name}`] = new Set(rounds);
+      }
+    }
+
     if (activeSheetTabs.length > 0) {
       // 미제출 행의 row_json + round를 가져와서 JS에서 집계
       // (활성 탭만 대상, is_submitted=false만 투입/취합 계산)
@@ -251,6 +263,9 @@ router.get('/dashboard', authMiddleware, async (req, res, next) => {
       for (const row of reviewRows) {
         const tabKey = `${row.sheetId}||${row.tabName}`;
         const roundVal = (row.round || '').trim();
+
+        // ★ 아카이브된 차수의 행은 집계에서 제외 (방어적 필터)
+        if (roundVal && archivedRoundsMap[tabKey]?.has(roundVal)) continue;
 
         // ── 탭 레벨 투입/취합 ──
         if (!workStatusMap[tabKey]) {

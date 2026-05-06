@@ -579,6 +579,7 @@ router.post('/tabs', authMiddleware, async (req, res, next) => {
 // ═══════════════════════════════════════════════════════════
 // GET /api/archive/list — 아카이브된 탭 목록 (조회/검색/기간필터)
 // query: ?q=검색어&from=2026-01-01&to=2026-04-20&page=1&limit=50
+// ★ 차수 단위 아카이브도 포함 (review_index_archive에서 직접 조회)
 // ═══════════════════════════════════════════════════════════
 router.get('/list', authMiddleware, async (req, res, next) => {
   try {
@@ -670,12 +671,88 @@ router.get('/list', authMiddleware, async (req, res, next) => {
       totalSubmitted += submittedCount;
     });
 
+    // ★ 차수 단위 아카이브: index_master_archive에 없지만 review_index_archive에만 있는 항목
+    // (탭이 아직 활성이지만 특정 차수만 아카이브된 경우)
+    const roundOnlyParams = [];
+    const roundOnlyConditions = [];
+    let roParamIdx = 1;
+
+    if (q) {
+      roundOnlyConditions.push(`(ria.campaign_name ILIKE $${roParamIdx} OR ria.tab_name ILIKE $${roParamIdx})`);
+      roundOnlyParams.push(`%${q}%`);
+      roParamIdx++;
+    }
+    if (from) {
+      roundOnlyConditions.push(`ria.archived_at >= $${roParamIdx}`);
+      roundOnlyParams.push(from);
+      roParamIdx++;
+    }
+    if (to) {
+      roundOnlyConditions.push(`ria.archived_at <= $${roParamIdx}::date + interval '1 day'`);
+      roundOnlyParams.push(to);
+      roParamIdx++;
+    }
+
+    const roWhereClause = roundOnlyConditions.length > 0
+      ? 'AND ' + roundOnlyConditions.join(' AND ')
+      : '';
+
+    const { rows: roundOnlyRows } = await pool.query(`
+      SELECT
+        ria.sheet_id        AS "sheetId",
+        ria.campaign_name   AS "campaignName",
+        ria.tab_name        AS "tabName",
+        ria.round,
+        COUNT(*)            AS "rowCount",
+        COUNT(*) FILTER (WHERE ria.is_submitted = TRUE) AS "submittedCount",
+        MAX(ria.archived_at) AS "archivedAt"
+      FROM review_index_archive ria
+      WHERE ria.round IS NOT NULL AND ria.round != ''
+        AND NOT EXISTS (
+          SELECT 1 FROM index_master_archive ima
+          WHERE ima.sheet_id = ria.sheet_id AND ima.tab_name = ria.tab_name
+        )
+        ${roWhereClause}
+      GROUP BY ria.sheet_id, ria.campaign_name, ria.tab_name, ria.round
+      ORDER BY MAX(ria.archived_at) DESC
+    `, roundOnlyParams);
+
+    // 차수 단위 아카이브 항목을 campMap에 추가
+    for (const r of roundOnlyRows) {
+      if (!campMap.has(r.sheetId)) {
+        campMap.set(r.sheetId, {
+          sheetId: r.sheetId,
+          campaignName: r.campaignName || '미분류',
+          tabs: [],
+          totalRows: 0,
+          totalSubmitted: 0,
+        });
+      }
+      const camp = campMap.get(r.sheetId);
+      const rowCount = parseInt(r.rowCount) || 0;
+      const submittedCount = parseInt(r.submittedCount) || 0;
+      camp.tabs.push({
+        tabName: r.tabName,
+        rowCount,
+        submittedCount,
+        archivedAt: r.archivedAt,
+        archivedBy: 'system',
+        archiveReason: 'round_archive',
+        rounds: r.round,
+        roundOnly: true,  // ★ 프론트엔드에서 차수 단위임을 구분
+      });
+      camp.totalRows += rowCount;
+      camp.totalSubmitted += submittedCount;
+      totalRows += rowCount;
+      totalSubmitted += submittedCount;
+    }
+
     const campaigns = Array.from(campMap.values());
     res.json({
       ok: true,
       campaigns,
       totalCampaigns: campaigns.length,
-      totalTabs: totalCount,
+      totalTabs: totalCount + roundOnlyRows.length,
       totalRows,
       totalSubmitted,
       page: parseInt(page),
