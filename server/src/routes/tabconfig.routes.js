@@ -996,7 +996,7 @@ router.get('/dashboard', authMiddleware, async (req, res, next) => {
       ) paid ON tc.sheet_id = paid.sheet_id AND tc.tab_name = paid.tab_name
       WHERE NOT EXISTS (
         SELECT 1 FROM index_master_archive ima
-        WHERE ima.sheet_id = tc.sheet_id AND ima.tab_name = tc.tab_name
+        WHERE ima.sheet_id = tc.sheet_id AND (ima.tab_name = tc.tab_name OR (ima.tab_gid IS NOT NULL AND ima.tab_gid = COALESCE(tc.tab_gid, im.tab_gid)))
       )
       ORDER BY tc.campaign_name NULLS LAST, tc.tab_name
     `);

@@ -42,6 +42,10 @@ router.get('/detect', authMiddleware, async (req, res, next) => {
         WHERE ri.sheet_id = im.sheet_id AND ri.tab_name = im.tab_name
       ) paid ON true
       WHERE im.status = 'active'
+        AND NOT EXISTS (
+          SELECT 1 FROM index_master_archive ima
+          WHERE ima.sheet_id = im.sheet_id AND (ima.tab_name = im.tab_name OR ima.tab_gid = im.tab_gid)
+        )
         AND (
           tc.is_closed = TRUE
           OR (im.row_count > 0 AND im.submitted_count >= im.row_count)

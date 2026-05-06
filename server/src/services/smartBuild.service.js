@@ -246,6 +246,22 @@ async function _upsertTab(sheetId, tabName, tabGid, checksum, rows, modifiedTime
   try {
     await client.query('BEGIN');
 
+    // ★★★ 방어적 필터: 이미 아카이브된 탭이면 재삽입하지 않고 스킵
+    // (activeTabs 필터를 통과했더라도 아카이브 테이블에 있으면 스킵)
+    // tab_name 매칭 + gid 매칭 (탭 이름 변경 대응)
+    const { rows: archiveCheck } = await client.query(
+      `SELECT 1 FROM index_master_archive
+       WHERE sheet_id = $1 AND (tab_name = $2 OR ($3 IS NOT NULL AND tab_gid = $3))
+       LIMIT 1`,
+      [sheetId, tabName, tabGid || null]
+    );
+    if (archiveCheck.length > 0) {
+      await client.query('COMMIT');
+      client.release();
+      logger.info(`[smartBuild] _upsertTab 스킵: "${tabName}" (gid=${tabGid}) — index_master_archive에 존재 (아카이브됨)`);
+      return;
+    }
+
     // ★ gid 기반 탭 이름 변경 감지 — 동일 gid의 이전 tab_name 행 정리
     // 구글시트에서 탭 이름이 변경되면 gid는 유지되지만 tab_name이 달라짐
     // 이전 이름의 행을 삭제하지 않으면 대시보드에 두 개가 표시됨
@@ -466,10 +482,14 @@ async function runSmartBuild() {
     const closedSet = new Set(closedRows.map(r => `${r.sheet_id}||${r.tab_name}`));
 
     // ★ 아카이브된 탭 목록 로드 — 스마트빌드에서 완전히 제외
-    const { rows: archivedRows } = await pool.query('SELECT sheet_id, tab_name FROM index_master_archive');
+    const { rows: archivedRows } = await pool.query('SELECT sheet_id, tab_name, tab_gid FROM index_master_archive');
     const archivedSet = new Set(archivedRows.map(r => `${r.sheet_id}||${r.tab_name}`));
+    // ★ gid 기반 아카이브 Set (탭 이름 변경 후에도 감지)
+    const archivedGidSet = new Set(
+      archivedRows.filter(r => r.tab_gid).map(r => `${r.sheet_id}||gid:${r.tab_gid}`)
+    );
     if (archivedRows.length > 0) {
-      logger.info(`[smartBuild] 아카이브된 탭 ${archivedRows.length}개 스킵 대상 로드`);
+      logger.info(`[smartBuild] 아카이브된 탭 ${archivedRows.length}개 스킵 대상 로드 (gid매칭: ${archivedGidSet.size}개)`);
     }
 
     // ── 2단계: Drive API로 변경 시트 감지 (throttle 적용) ──
@@ -520,9 +540,14 @@ async function runSmartBuild() {
         if (validTabs.length === 0) continue;
 
         // 활성 탭만 필터 (마감 탭 + 아카이브 탭 제외)
+        // ★ tab_name 매칭 + gid 매칭 (탭 이름 변경 후에도 아카이브 상태 유지)
         const activeTabs = validTabs.filter(t => {
           const key = `${sheetId}||${t.properties.title}`;
           if (archivedSet.has(key)) return false;
+          // gid 기반 매칭 (탭 이름이 변경되어도 아카이브 감지)
+          const gidStr = String(t.properties.sheetId);
+          const gidKey = `${sheetId}||gid:${gidStr}`;
+          if (archivedGidSet && archivedGidSet.has(gidKey)) return false;
           return !closedSet.has(key);
         });
 
