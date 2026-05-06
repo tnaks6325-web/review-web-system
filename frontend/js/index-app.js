@@ -11483,7 +11483,12 @@ function _filterTabDashData() {
 async function _refreshDashboardAll() {
   // 대시보드 메인 데이터 + 완료감지 목록 + 배지 동시 새로고침
   await loadTabDashboard();
-  // 완료감지 패널이 열려있으면 새로고침
+  // 대시보드 내 완료감지 패널이 열려있으면 새로고침
+  const dashDetectWrap = document.getElementById('dashArchiveDetectWrap');
+  if (dashDetectWrap && dashDetectWrap.style.display !== 'none' && dashDetectWrap.innerHTML.trim() !== '') {
+    dashboardArchiveDetect();
+  }
+  // 아카이브 탭의 완료감지 패널이 열려있으면 새로고침
   const detectWrap = document.getElementById('archiveDetectWrap');
   if (detectWrap && detectWrap.style.display !== 'none' && detectWrap.innerHTML.trim() !== '') {
     archiveAutoDetect();
