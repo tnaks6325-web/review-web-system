@@ -871,9 +871,9 @@ async function doSearch() {
     stopProgress();
     const emsg = err.message || "";
     if (emsg === "요청 시간 초과" || emsg.includes("timeout") || emsg.includes("Timeout")) {
-      // ★ 타임아웃 = 인덱스 재빌드 중일 가능성 높음 → 안내 + 자동 재시도
-      _showNoResult(true);
-      showToast("⏱ 동기화 중입니다. 잠시 후 자동으로 다시 검색합니다.", "warning", 5000);
+      // ★ 타임아웃 → 서버 응답 지연 (동기화 중일 수 있음) → 짧은 자동 재시도
+      _showTimeoutRetry();
+      showToast("⏱ 서버 응답이 느립니다. 자동으로 다시 검색합니다.", "warning", 4000);
     } else if (emsg.includes("fetch") || emsg.includes("Failed to fetch") || emsg.includes("NetworkError")) {
       showToast("❌ 네트워크 오류 — GAS URL을 확인하거나 잠시 후 재시도하세요.", "error");
     } else {
@@ -886,6 +886,23 @@ async function doSearch() {
 /* ── 인덱스 만료 안내 & 자동 재시도 ── */
 let _autoRetryTimer = null;
 let _autoRetryCount = 0;
+
+/** ★ 타임아웃 시 전용 재시도 UI (인덱스 갱신 안내가 아닌 짧은 재시도) */
+function _showTimeoutRetry() {
+  const msgEl  = document.getElementById("noResultMsg");
+  const subEl  = document.getElementById("noResultSub");
+  const notice = document.getElementById("indexRebuildNotice");
+  const retry  = document.getElementById("autoRetryNotice");
+
+  cancelAutoRetry();
+
+  if (msgEl) msgEl.textContent  = "서버 응답 대기 중...";
+  if (subEl) subEl.textContent  = "서버가 잠시 바쁩니다. 곧 자동으로 다시 검색합니다.";
+  if (notice) notice.style.display = "none"; // 인덱스 갱신 안내는 숨김
+  if (retry)  retry.style.display  = "";
+  show("noResultView");
+  _startAutoRetry(5); // 5초 후 자동 재시도 (기존 20초→5초로 단축)
+}
 
 function _showNoResult(wasExpired) {
   // 기본 메시지 초기화
