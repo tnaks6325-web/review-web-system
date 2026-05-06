@@ -12192,7 +12192,7 @@ async function _fixSheetUrlSave(sheetId, tabName) {
     if (gidInput) body.gid = gidInput;
     if (urlInput) body.sheetUrl = urlInput.includes('#gid=') ? urlInput : (gidInput ? `${urlInput.split('#')[0]}#gid=${gidInput}` : urlInput);
 
-    const resp = await fetch('/api/tab/fix-sheet-urls', {
+    const resp = await fetch(API_BASE_URL + '/api/tab/fix-sheet-urls', {
       method: 'POST',
       headers: { 'Authorization': `Bearer ${token}`, 'Content-Type': 'application/json' },
       body: JSON.stringify(body)
