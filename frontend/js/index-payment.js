@@ -553,7 +553,7 @@ async function loadSyncQueueStats() {
           <div style="font-weight:600;color:#DC2626;margin-bottom:4px">최근 실패 항목:</div>
           ${data.recentFailed.map(f => `
             <div style="background:#FEF2F2;padding:4px 8px;border-radius:4px;margin-bottom:3px;display:flex;justify-content:space-between;align-items:center">
-              <span><b>#${f.id}</b> ${f.type} — ${(f.error_msg || '').substring(0, 50)}</span>
+              <span><b>#${f.id}</b> ${f.type} — ${(f.error_msg || '').substring(0, 50)}<br><span style="color:#991B1B;font-size:.68rem">${_translateSyncError(f.error_msg)}</span></span>
               <button onclick="retrySyncItem(${f.id})" style="font-size:.68rem;background:#3B82F6;color:#fff;border:none;padding:2px 8px;border-radius:4px;cursor:pointer">재시도</button>
             </div>
           `).join('')}
@@ -1691,4 +1691,24 @@ async function triggerDbRebuild() {
       badge.style.color = "#991B1B";
     }
   }
+}
+
+/** Sync Queue 에러 메시지를 한글로 해석 */
+function _translateSyncError(msg) {
+  if (!msg) return '';
+  const m = msg.toLowerCase();
+  if (m.includes('requested entity was not found')) return '→ 시트 또는 탭이 삭제/이름변경되어 찾을 수 없음';
+  if (m.includes('not found')) return '→ 대상을 찾을 수 없음 (삭제 또는 이름 변경됨)';
+  if (m.includes('permission')) return '→ 시트 접근 권한 없음 (공유 설정 확인 필요)';
+  if (m.includes('quota') || m.includes('rate limit')) return '→ Google API 할당량 초과 (잠시 후 재시도)';
+  if (m.includes('timeout') || m.includes('timed out')) return '→ 요청 시간 초과 (네트워크 또는 서버 지연)';
+  if (m.includes('헤더를 가져올 수 없음') || m.includes('헤더')) return '→ 시트에서 헤더 행을 찾을 수 없음';
+  if (m.includes('payload 누락')) return '→ 필수 데이터 누락 (sheetId/tabName)';
+  if (m.includes('unable to parse range')) return '→ 시트 범위 오류 (탭 이름에 특수문자 포함 가능)';
+  if (m.includes('socket hang up') || m.includes('econnreset')) return '→ 네트워크 연결 끊김 (재시도 권장)';
+  if (m.includes('invalid_grant') || m.includes('token')) return '→ 인증 토큰 만료 (서버 재시작 필요)';
+  if (m.includes('the caller does not have permission')) return '→ 서비스 계정에 시트 접근 권한 없음';
+  if (m.includes('sheet') && m.includes('not found')) return '→ 해당 시트를 찾을 수 없음';
+  if (m.includes('동시 제출 감지')) return '→ 같은 행에 동시 제출 발생 (자동 재시도됨)';
+  return '→ 오류 발생 (재시도 또는 관리자 확인 필요)';
 }
