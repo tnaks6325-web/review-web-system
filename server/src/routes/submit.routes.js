@@ -52,6 +52,17 @@ const HEADER_DETECT_KEYWORDS = ['번호', '주문자', '수취인', '수취인�
 // 인애드명 컬럼 감지 키워드
 const INAD_COL_KEYWORDS = ['인애드', '인애드명', '인애드제출', '카톡', '카카오', '닉네임'];
 
+// ★ FILLED_THRESHOLD: 이 수 이상 셀이 채워진 행은 절대 덮어쓰지 않음 (데이터 보호)
+const FILLED_THRESHOLD = 4;
+
+/** 행의 채워진 셀 수를 계산 (숫자 0은 빈 값으로 취급) */
+function _countFilledCells(row) {
+  return (row || []).filter(cell => {
+    const val = String(cell || '').trim();
+    return val !== '' && val !== '0';
+  }).length;
+}
+
 function _isHeaderRow(cells) {
   let matchCount = 0;
   for (const kw of HEADER_DETECT_KEYWORDS) {
@@ -468,6 +479,8 @@ router.post('/order', async (req, res, next) => {
           let emptyRowOffset = dataRows.length; // default: 데이터 끝 다음
           for (let i = 0; i < dataRows.length; i++) {
             const row = dataRows[i] || [];
+            // ★ FILLED_THRESHOLD 보호: 4개 이상 채워진 행은 절대 건드리지 않음
+            if (_countFilledCells(row) >= FILLED_THRESHOLD) continue;
             // 수취인과 연락처가 모두 비어있으면 빈 행으로 판정
             const recipientVal = recipientColIdx >= 0 ? String(row[recipientColIdx] || '').trim() : '';
             const phoneVal = phoneColIdx >= 0 ? String(row[phoneColIdx] || '').trim() : '';
@@ -480,10 +493,39 @@ router.post('/order', async (req, res, next) => {
           // 실제 시트 행 번호 계산 (1-based, 헤더행 = headerRowIdx+1, 데이터 시작 = headerRowIdx+2)
           const targetRow = headerRowIdx + 1 + emptyRowOffset + 1; // +1 for 1-based, +1 for header row itself
 
+          // ★ 동시 제출 방어: 쓰기 직전 타겟 행의 수취인 셀 재확인
+          try {
+            const checkRange = recipientColIdx >= 0
+              ? `'${tabName}'!${getColLetter(recipientColIdx)}${targetRow}`
+              : `'${tabName}'!A${targetRow}`;
+            const checkData = await readSheet(sheetId, checkRange, sheetOpts);
+            const existingVal = checkData && checkData[0] ? String(checkData[0][0] || '').trim() : '';
+            if (existingVal) {
+              // 이미 다른 제출이 들어간 경우 → 캐시 무효화 후 재탐색
+              logger.warn(`[submit/order:bg] 동시 제출 감지: row=${targetRow} 이미 수취인='${existingVal}' → 큐로 전환`);
+              tabDataCache.delete(`${sheetId}||${tabName}`);
+              throw new Error('동시 제출 감지 — 큐에서 재시도');
+            }
+          } catch (raceErr) {
+            if (raceErr.message.includes('동시 제출 감지')) throw raceErr;
+            // readSheet 실패는 무시하고 진행 (쓰기는 시도)
+            logger.warn(`[submit/order:bg] 동시제출 체크 실패 (무시): ${raceErr.message}`);
+          }
+
           // ★ null이 아닌 셀만 개별 쓰기 (번호, 구매일자 등 기존 값 보존)
+          // ★ 날짜 열: 기존 값이 있으면 덮어쓰지 않음
+          const targetRowData = dataRows[emptyRowOffset] || [];
           const writePairs = [];
           for (let ci = 0; ci < rowData.length; ci++) {
             if (rowData[ci] === null) continue; // null = 기존 값 보존
+            // 날짜 열 보존: 기존 값이 있으면 skip
+            const headerKey = (headers[ci] || '').toLowerCase();
+            if ((headerKey.includes('일자') || headerKey.includes('날짜') || headerKey.includes('date')) && !headerKey.includes('주문')) {
+              const existingDateVal = String(targetRowData[ci] || '').trim();
+              if (existingDateVal) {
+                continue; // 기존 날짜 보존
+              }
+            }
             writePairs.push({ col: ci, val: rowData[ci] });
           }
 

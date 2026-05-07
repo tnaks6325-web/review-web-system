@@ -201,9 +201,21 @@ async function _executeItem(item) {
         return hl.includes('연락처') || hl.includes('전화') || hl.includes('핸드폰') || hl.includes('휴대폰') || hl === 'phone';
       });
 
+      // ★ FILLED_THRESHOLD: 4개 이상 채워진 행은 절대 덮어쓰지 않음
+      const FILLED_THRESHOLD = 4;
+      function _countFilled(row) {
+        return (row || []).filter(cell => {
+          const val = String(cell || '').trim();
+          return val !== '' && val !== '0';
+        }).length;
+      }
+
       let emptyRowOffset = dataRows.length; // default: 데이터 끝 다음
       for (let i = 0; i < dataRows.length; i++) {
         const row = dataRows[i] || [];
+        // ★ FILLED_THRESHOLD 보호: 4개 이상 채워진 행은 절대 건드리지 않음
+        if (_countFilled(row) >= FILLED_THRESHOLD) continue;
+        // 수취인과 연락처가 모두 비어있으면 빈 행으로 판정
         const recipientVal = recipientColIdx >= 0 ? String(row[recipientColIdx] || '').trim() : '';
         const phoneVal = phoneColIdx >= 0 ? String(row[phoneColIdx] || '').trim() : '';
         if (!recipientVal && !phoneVal) {
@@ -216,9 +228,17 @@ async function _executeItem(item) {
       const targetRow = headerRowIdx + 1 + emptyRowOffset + 1;
 
       // ★ null이 아닌 셀만 개별 쓰기 (번호, 구매일자 등 기존 값 보존)
+      // ★ 날짜 열: 기존 값이 있으면 덮어쓰지 않음
+      const targetRowData = dataRows[emptyRowOffset] || [];
       const writePairs = [];
       for (let ci = 0; ci < rowData.length; ci++) {
         if (rowData[ci] === null) continue;
+        // 날짜 열 보존: 기존 값이 있으면 skip
+        const headerKey = (headers[ci] || '').toLowerCase();
+        if ((headerKey.includes('일자') || headerKey.includes('날짜') || headerKey.includes('date')) && !headerKey.includes('주문')) {
+          const existingDateVal = String(targetRowData[ci] || '').trim();
+          if (existingDateVal) continue; // 기존 날짜 보존
+        }
         writePairs.push({ col: ci, val: rowData[ci] });
       }
 
