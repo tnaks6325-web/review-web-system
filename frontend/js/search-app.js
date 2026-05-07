@@ -3675,7 +3675,7 @@ function _setOrdererDisabled(disabled) {
   if (wrap) wrap.classList.toggle("of-orderer-disabled", disabled);
   if (input) {
     input.disabled = disabled;
-    input.placeholder = disabled ? "위에서 옵션을 먼저 선택해주세요" : "주문자이름 (클릭시 선택도 가능)";
+    input.placeholder = disabled ? "위에서 옵션을 먼저 선택해주세요" : "자신외 선택금지, 없으면 직접입력";
   }
 }
 
@@ -4360,7 +4360,7 @@ function _buildOrderCardHtml(cid, idx, type) {
       <div class="of-field">
         <label class="of-label of-label-required" for="of_orderer">주문자</label>
         <div class="of-autocomplete-wrap">
-          <input id="of_orderer" class="of-input" type="text" placeholder="주문자이름 (클릭시 선택도 가능)" autocomplete="off"
+          <input id="of_orderer" class="of-input" type="text" placeholder="자신외 선택금지, 없으면 직접입력" autocomplete="off"
             oninput="onOrdererInput(this);_ofClearError('of_orderer')" onkeydown="onOrdererKeydown(event)" onfocus="onOrdererFocus()" onblur="onOrdererBlur()">
           <div id="of_orderer_list" class="of-autocomplete-list" role="listbox"></div>
         </div>
@@ -4442,7 +4442,7 @@ function _buildOrderCardHtml(cid, idx, type) {
     <!-- 비고 (모든 카드에 표시) -->
     <div class="of-field" id="${cid}_memo_wrap">
       <label class="of-label" id="${cid}_memo_label">비고</label>
-      <input id="${cid}_memo" class="of-input" type="text" placeholder="추가 메모 (선택)">
+      <input id="${cid}_memo" class="of-input" type="text" placeholder="포스팅URL 또는 기타메모 입력">
     </div>
 
     <div style="font-size:.7rem;color:var(--t3);padding:6px 8px;background:var(--bg);border-radius:6px;border:1px solid var(--border)">
