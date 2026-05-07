@@ -4603,10 +4603,10 @@ function _renderDynamicFields() {
   const orderNumWrap = document.getElementById("of_orderNum_wrap");
   if (orderNumWrap) orderNumWrap.style.display = "";
 
-  // 비고 입력란: 시트에 비고 헤더가 있을 때만 표시 + 라벨에 실제 헤더명 반영
+  // 비고 입력란: 항상 표시 (시트에 비고/특이사항 헤더가 있으면 해당 헤더명 반영)
   const memoWrap = document.getElementById("of_memo_wrap");
   const memoLabel = document.getElementById("of_memo_label");
-  if (memoWrap) memoWrap.style.display = _memoHeader ? "" : "none";
+  if (memoWrap) memoWrap.style.display = "";
   if (memoLabel && _memoHeader) memoLabel.textContent = _memoHeader;
 }
 
