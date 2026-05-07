@@ -551,12 +551,20 @@ async function loadSyncQueueStats() {
       ${data.recentFailed && data.recentFailed.length > 0 ? `
         <div style="margin-top:10px;font-size:.75rem">
           <div style="font-weight:600;color:#DC2626;margin-bottom:4px">최근 실패 항목:</div>
-          ${data.recentFailed.map(f => `
-            <div style="background:#FEF2F2;padding:4px 8px;border-radius:4px;margin-bottom:3px;display:flex;justify-content:space-between;align-items:center">
-              <span><b>#${f.id}</b> ${f.type} — ${(f.error_msg || '').substring(0, 50)}<br><span style="color:#991B1B;font-size:.68rem">${_translateSyncError(f.error_msg)}</span></span>
-              <button onclick="retrySyncItem(${f.id})" style="font-size:.68rem;background:#3B82F6;color:#fff;border:none;padding:2px 8px;border-radius:4px;cursor:pointer">재시도</button>
-            </div>
-          `).join('')}
+          ${data.recentFailed.map(f => {
+            const pl = _parseSyncPayload(f.payload);
+            const sheetLink = pl.sheetId ? `<a href="https://docs.google.com/spreadsheets/d/${pl.sheetId}" target="_blank" style="color:#2563EB;text-decoration:underline" title="${pl.sheetId}">${pl.sheetId.substring(0,8)}…</a>` : '';
+            const tabInfo = pl.tabName ? `<span style="color:#4B5563;font-weight:600">탭: ${pl.tabName}</span>` : '';
+            const targetInfo = (sheetLink || tabInfo) ? `<div style="margin-top:2px;font-size:.68rem;color:#374151">${sheetLink}${sheetLink && tabInfo ? ' / ' : ''}${tabInfo}${pl.rowIndex ? ' / 행:' + pl.rowIndex : ''}</div>` : '';
+            return `
+            <div style="background:#FEF2F2;padding:6px 8px;border-radius:6px;margin-bottom:4px">
+              <div style="display:flex;justify-content:space-between;align-items:center">
+                <span><b>#${f.id}</b> ${f.type} — ${(f.error_msg || '').substring(0, 50)}<br><span style="color:#991B1B;font-size:.68rem">${_translateSyncError(f.error_msg)}</span></span>
+                <button onclick="retrySyncItem(${f.id})" style="font-size:.68rem;background:#3B82F6;color:#fff;border:none;padding:2px 8px;border-radius:4px;cursor:pointer;flex-shrink:0;margin-left:6px">재시도</button>
+              </div>
+              ${targetInfo}
+            </div>`;
+          }).join('')}
         </div>
       ` : ''}
     `;
@@ -1691,6 +1699,19 @@ async function triggerDbRebuild() {
       badge.style.color = "#991B1B";
     }
   }
+}
+
+/** Sync Queue payload에서 시트/탭 정보 추출 */
+function _parseSyncPayload(payload) {
+  if (!payload) return {};
+  try {
+    const p = typeof payload === 'string' ? JSON.parse(payload) : payload;
+    return {
+      sheetId: p.sheetId || '',
+      tabName: p.tabName || '',
+      rowIndex: p.rowIndex || ''
+    };
+  } catch (e) { return {}; }
 }
 
 /** Sync Queue 에러 메시지를 한글로 해석 */
