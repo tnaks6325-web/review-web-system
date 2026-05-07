@@ -3503,11 +3503,10 @@ async function _loadInaedList(sheetId, gid, tabName) {
 
 /** 비고·주문번호 입력란을 동적으로 표시/숨김 */
 function _renderDynamicFields() {
-  // 비고 입력란: 시트에 비고 헤더가 있을 때만 표시 + 라벨에 실제 헤더명 반영 (1번 카드에만)
-  const memoWrap = document.getElementById("of_memo_wrap");
-  const memoLabel = document.getElementById("of_memo_label");
-  if (memoWrap) memoWrap.style.display = _memoHeader ? "" : "none";
-  if (memoLabel && _memoHeader) memoLabel.textContent = _memoHeader;
+  // 비고 입력란: 항상 표시 (카드별 ID로 변경됨, 시트에 비고 헤더 있으면 라벨명 반영)
+  // 1번 카드의 memo 라벨 업데이트
+  const firstCardMemoLabel = document.getElementById("ofc0_memo_label");
+  if (firstCardMemoLabel && _memoHeader) firstCardMemoLabel.textContent = _memoHeader;
 
   // 옵션 피커 렌더링
   _renderOptionPicker();
@@ -4440,12 +4439,11 @@ function _buildOrderCardHtml(cid, idx, type) {
         oninput="formatPriceInput(this);this.classList.remove('ai-filled');this.dataset.userEdited='1';" inputmode="numeric">
     </div>
 
-    <!-- 비고 (1번 카드에만 표시 - JS로 show/hide) -->
-    ${isFirst ? `
-    <div class="of-field" id="of_memo_wrap" style="display:none">
-      <label class="of-label" id="of_memo_label">비고</label>
-      <input id="of_memo" class="of-input" type="text" placeholder="추가 메모 (선택)">
-    </div>` : ""}
+    <!-- 비고 (모든 카드에 표시) -->
+    <div class="of-field" id="${cid}_memo_wrap">
+      <label class="of-label" id="${cid}_memo_label">비고</label>
+      <input id="${cid}_memo" class="of-input" type="text" placeholder="추가 메모 (선택)">
+    </div>
 
     <div style="font-size:.7rem;color:var(--t3);padding:6px 8px;background:var(--bg);border-radius:6px;border:1px solid var(--border)">
       <i class="fas fa-info-circle" style="color:#6B7280;margin-right:3px"></i>날짜는 제출 시점 기준으로 자동 입력됩니다.
@@ -5742,7 +5740,7 @@ async function submitOrderForm() {
       address,
       bank, account, depositor, price,
       orderNum:       gv(cid+"_orderNumber"),
-      memo:           isFirst ? gv("of_memo") : "",
+      memo:           gv(cid+"_memo"),
       selectedOptKey: isFirst ? (_selectedOptKey || "") : "",
       imgThumbSrc:    document.getElementById(cid+"_imgThumb")?.src || "",
       mimeType:       (() => { const s=document.getElementById(cid+"_imgThumb")?.src||""; return s.startsWith("data:")?s.split(";")[0].split(":")[1]:""; })(),
