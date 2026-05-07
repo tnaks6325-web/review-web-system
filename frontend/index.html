@@ -2359,9 +2359,12 @@
     <!-- 기존 캠페인 선택 -->
     <div class="cs-field" id="csExistingWrap" style="display:none">
       <label class="cs-label">기존 캠페인 선택 <span class="req">*</span></label>
-      <select class="cs-input" id="csExistingSelect" style="cursor:pointer" onchange="onCsExistingChange()">
-        <option value="">-- 캠페인을 선택하세요 --</option>
-      </select>
+      <div style="position:relative">
+        <input class="cs-input" id="csExistingInput" type="text" placeholder="캠페인명 검색 또는 선택" autocomplete="off"
+          oninput="_filterCsExisting(this.value)" onfocus="_filterCsExisting(this.value)" onblur="setTimeout(()=>_closeCsExistingList(),200)">
+        <input type="hidden" id="csExistingSelect" value="">
+        <div id="csExistingList" style="display:none;position:absolute;top:100%;left:0;right:0;max-height:220px;overflow-y:auto;background:#fff;border:1.5px solid #DDD6FE;border-radius:8px;box-shadow:0 4px 16px rgba(0,0,0,.12);z-index:999;margin-top:2px"></div>
+      </div>
       <p class="cs-hint">선택한 캠페인의 구글시트에 새 탭이 추가됩니다. 작업목록에는 새 행이 추가되지 않습니다.</p>
     </div>
 

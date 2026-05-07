@@ -9098,6 +9098,9 @@ async function openCreateSheetModal() {
   // 초기화
   document.getElementById("csFileTitle").value = "";
   document.getElementById("csCampName").value  = "";
+  document.getElementById("csExistingInput").value = "";
+  document.getElementById("csExistingSelect").value = "";
+  _closeCsExistingList();
   const _initTabSel = document.getElementById("csTmplTabSelect");
   _initTabSel.innerHTML = '<option value="">-- 위에서 캠페인을 먼저 선택하세요 --</option>';
   _initTabSel.disabled  = true;
@@ -9138,7 +9141,7 @@ function onCsModeChange() {
   onCsInput();
 }
 
-/** 기존 캠페인 SELECT 변경 시 템플릿 탭 목록 로드 */
+/** 기존 캠페인 선택 변경 시 템플릿 탭 목록 로드 */
 function onCsExistingChange() {
   onCsInput();
   const existSId = document.getElementById("csExistingSelect").value;
@@ -9206,39 +9209,67 @@ function onCsInput() {
   document.getElementById("csBtnOk").disabled = !ok;
 }
 
-/** 기존 캠페인 목록 SELECT 채우기 (_lastDashData 활용) */
+/** 기존 캠페인 자동완성 데이터 배열 */
+let _csExistingItems = []; // [{sheetId, label, campName}]
+
+/** 기존 캠페인 목록 데이터 채우기 (_lastDashData 활용) */
 async function _fillCsExistingSelect() {
-  const sel = document.getElementById("csExistingSelect");
-  sel.innerHTML = '<option value="">-- 캠페인을 선택하세요 --</option>';
+  _csExistingItems = [];
   const stats = (_lastDashData && _lastDashData.stats) ? _lastDashData.stats : [];
-  if (!stats.length) {
-    // 데이터 없으면 GAS에서 빠르게 조회
+  let source = stats;
+  if (!source.length) {
     try {
       const data = await gasGet({ action: "dashboard" }, 20000);
-      (data.stats || []).forEach(c => {
-        const firstTab = (c.tabs || [])[0];
-        if (!firstTab || !firstTab.sheetId) return;
-        const opt = document.createElement("option");
-        opt.value = firstTab.sheetId;
-        opt.textContent = c.campaign || firstTab.sheetId;
-        sel.appendChild(opt);
-      });
-    } catch(_) {}
-    return;
+      source = data.stats || [];
+    } catch(_) { return; }
   }
-  // 중복 sheetId 제거 (한 캠페인에 여러 시트 가능 → 대표 sheetId 1개만)
   const seen = new Set();
-  stats.forEach(c => {
+  source.forEach(c => {
     (c.tabs || []).forEach(t => {
       if (!t.sheetId || seen.has(t.sheetId)) return;
       seen.add(t.sheetId);
-      const opt = document.createElement("option");
-      opt.value       = t.sheetId;
-      opt.textContent = c.campaign || t.sheetId;
-      opt.dataset.campName = c.campaign || "";
-      sel.appendChild(opt);
+      _csExistingItems.push({
+        sheetId: t.sheetId,
+        label: c.campaign || t.sheetId,
+        campName: c.campaign || ""
+      });
     });
   });
+}
+
+/** 자동완성 필터링 및 드롭다운 렌더 */
+function _filterCsExisting(query) {
+  const listEl = document.getElementById("csExistingList");
+  const q = (query || "").trim().toLowerCase();
+  const filtered = q
+    ? _csExistingItems.filter(item => item.label.toLowerCase().includes(q))
+    : _csExistingItems;
+  if (!filtered.length) {
+    listEl.innerHTML = '<div style="padding:10px 14px;color:#9CA3AF;font-size:.85rem">일치하는 캠페인 없음</div>';
+    listEl.style.display = "block";
+    return;
+  }
+  listEl.innerHTML = filtered.map((item, idx) => {
+    const highlighted = q ? item.label.replace(new RegExp(`(${q.replace(/[.*+?^${}()|[\]\\]/g,'\\$&')})`, 'gi'), '<b style="color:#7C3AED">$1</b>') : item.label;
+    return `<div class="cs-ac-item" style="padding:9px 14px;cursor:pointer;border-bottom:1px solid #F3F4F6;font-size:.9rem;transition:background .15s" onmousedown="_selectCsExisting(${idx}, '${item.sheetId.replace(/'/g,"\\'")}')"
+      onmouseenter="this.style.background='#F5F3FF'" onmouseleave="this.style.background=''">${highlighted}</div>`;
+  }).join("");
+  listEl.style.display = "block";
+}
+
+/** 자동완성 항목 선택 */
+function _selectCsExisting(idx, sheetId) {
+  const item = _csExistingItems.find(i => i.sheetId === sheetId);
+  if (!item) return;
+  document.getElementById("csExistingInput").value = item.label;
+  document.getElementById("csExistingSelect").value = item.sheetId;
+  _closeCsExistingList();
+  onCsExistingChange();
+}
+
+/** 자동완성 드롭다운 닫기 */
+function _closeCsExistingList() {
+  document.getElementById("csExistingList").style.display = "none";
 }
 
 /** 시트 생성 실행 */
