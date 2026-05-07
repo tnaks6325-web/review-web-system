@@ -83,7 +83,7 @@ const _ACTION_MAP = {
   'getReviewerProfile': { method: 'POST', path: '/api/reviewer/profile' },
   'saveSubAccounts':    { method: 'POST', path: '/api/reviewer/profile' },
   'saveIncomeInfo':     { method: 'POST', path: '/api/reviewer/profile' },
-  'getInaedList':       { method: 'GET',  path: '/api/diag/inaed-list' },
+  'getInaedList':       { method: 'GET',  path: '/api/submit/get-inaed-list' },
 
   // 관리자 인증 (Section 8)
   'adminLogin':         { method: 'POST', path: '/api/admin/login' },

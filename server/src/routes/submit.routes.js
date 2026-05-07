@@ -234,6 +234,124 @@ router.get('/slot-status', async (req, res) => {
 });
 
 // ═══════════════════════════════════════════════════════════
+// GET /api/submit/get-inaed-list — 시트에서 인애드명단+옵션 목록 조회
+//
+// 구매양식 옵션 피커용: 시트 헤더에서 옵션 컬럼(최대 3개) 감지,
+// 인애드명 컬럼의 데이터행에서 이름+옵션 조합을 추출하여 반환
+// ═══════════════════════════════════════════════════════════
+const OPTION_COL_KEYWORDS = ['옵션', 'option'];
+const MAX_OPTION_COLS = 3;
+const MEMO_COL_KEYWORDS = ['비고', '메모', '특이사항', 'memo', 'note'];
+const ORDERNUM_COL_KEYWORDS = ['주문번호', 'ordernum', 'order_num', 'order number'];
+const DATE_COL_KEYWORDS = ['구매일자', '주문일자', '구매날짜', 'purchase_date'];
+
+router.get('/get-inaed-list', async (req, res, next) => {
+  try {
+    const { sheetId, gid, tabName } = req.query;
+    if (!sheetId || !tabName) {
+      return res.json({ ok: false, error: 'sheetId와 tabName이 필요합니다.' });
+    }
+
+    const sheetOpts = gid ? { gid } : {};
+
+    // 전체 탭 데이터 로드 (캐시 활용)
+    const tabData = await getCachedTabData(sheetId, tabName, sheetOpts);
+    if (!tabData || !tabData.headers) {
+      return res.json({ ok: true, names: [], optionHeaders: [], memoHeader: '', orderNumHeader: '' });
+    }
+
+    const headers = tabData.headers;
+    const dataRows = tabData.dataRows;
+
+    // ── 인애드명 컬럼 감지 ──
+    let inadColIdx = -1;
+    for (let i = 0; i < headers.length; i++) {
+      const h = headers[i].toLowerCase();
+      if (INAD_COL_KEYWORDS.some(kw => h.includes(kw))) {
+        inadColIdx = i;
+        break;
+      }
+    }
+
+    // ── 옵션 컬럼 감지 (최대 3개, 연속) ──
+    const optionColIndices = [];
+    const optionHeaders = [];
+    for (let i = 0; i < headers.length && optionColIndices.length < MAX_OPTION_COLS; i++) {
+      const h = headers[i].toLowerCase();
+      if (OPTION_COL_KEYWORDS.some(kw => h.includes(kw))) {
+        optionColIndices.push(i);
+        optionHeaders.push(headers[i]);
+      }
+    }
+
+    // ── 비고 컬럼 감지 ──
+    let memoHeader = '';
+    for (let i = 0; i < headers.length; i++) {
+      const h = headers[i].toLowerCase();
+      if (MEMO_COL_KEYWORDS.some(kw => h.includes(kw))) {
+        memoHeader = headers[i];
+        break;
+      }
+    }
+
+    // ── 주문번호 컬럼 감지 ──
+    let orderNumHeader = '';
+    for (let i = 0; i < headers.length; i++) {
+      const h = headers[i].toLowerCase();
+      if (ORDERNUM_COL_KEYWORDS.some(kw => h.includes(kw))) {
+        orderNumHeader = headers[i];
+        break;
+      }
+    }
+
+    // ── 날짜 컬럼 감지 ──
+    let dateColIdx = -1;
+    for (let i = 0; i < headers.length; i++) {
+      const h = headers[i].toLowerCase();
+      if (DATE_COL_KEYWORDS.some(kw => h.includes(kw))) {
+        dateColIdx = i;
+        break;
+      }
+    }
+
+    // ── 데이터행에서 인애드명+옵션 추출 ──
+    const names = [];
+    for (let ri = 0; ri < dataRows.length; ri++) {
+      const row = dataRows[ri] || [];
+
+      // 인애드명이 없으면 스킵
+      const name = inadColIdx >= 0 ? String(row[inadColIdx] || '').trim() : '';
+      if (!name) continue;
+
+      // 옵션 값 추출
+      const options = optionColIndices.map(ci => String(row[ci] || '').trim());
+
+      // 날짜 값
+      const date = dateColIdx >= 0 ? String(row[dateColIdx] || '').trim() : '';
+
+      // 실제 시트 행 번호 (1-based): headerRowIdx + 1(헤더행) + ri + 1(1-based)
+      const rowIndex = tabData.headerRowIdx + 1 + ri + 1;
+
+      names.push({ name, date, options, rowIndex });
+    }
+
+    logger.info(`[get-inaed-list] sheet=${sheetId}, tab=${tabName} → ${names.length}명, 옵션헤더: [${optionHeaders.join(',')}]`);
+
+    return res.json({
+      ok: true,
+      names,
+      optionHeaders,
+      memoHeader,
+      orderNumHeader,
+    });
+
+  } catch (err) {
+    logger.error(`[get-inaed-list] 오류: ${err.message}`);
+    next(err);
+  }
+});
+
+// ═══════════════════════════════════════════════════════════
 // 슬롯 매칭 API — 구매양식 제출 시 자동 행 매칭
 //
 // 규칙:
@@ -476,17 +594,79 @@ router.post('/order', async (req, res, next) => {
             return hl.includes('연락처') || hl.includes('전화') || hl.includes('핸드폰') || hl.includes('휴대폰') || hl === 'phone';
           });
 
+          // ★ 옵션 컬럼 인덱스 감지 (옵션 기반 행 매칭용)
+          const optColIndices = [];
+          for (let ci = 0; ci < headers.length && optColIndices.length < MAX_OPTION_COLS; ci++) {
+            const hl = headers[ci].toLowerCase();
+            if (OPTION_COL_KEYWORDS.some(kw => hl.includes(kw))) {
+              optColIndices.push(ci);
+            }
+          }
+
+          // ★ 옵션 키 매칭 로직: selectedOptKey가 있으면 해당 옵션 행의 빈 슬롯 우선 탐색
+          const submittedOptKey = (selectedOptKey || '').trim();
+          const optKeyParts = submittedOptKey ? submittedOptKey.split('|').map(v => v.trim()) : [];
+
           let emptyRowOffset = dataRows.length; // default: 데이터 끝 다음
-          for (let i = 0; i < dataRows.length; i++) {
-            const row = dataRows[i] || [];
-            // ★ FILLED_THRESHOLD 보호: 4개 이상 채워진 행은 절대 건드리지 않음
-            if (_countFilledCells(row) >= FILLED_THRESHOLD) continue;
-            // 수취인과 연락처가 모두 비어있으면 빈 행으로 판정
-            const recipientVal = recipientColIdx >= 0 ? String(row[recipientColIdx] || '').trim() : '';
-            const phoneVal = phoneColIdx >= 0 ? String(row[phoneColIdx] || '').trim() : '';
-            if (!recipientVal && !phoneVal) {
-              emptyRowOffset = i;
-              break;
+
+          if (submittedOptKey && optColIndices.length > 0) {
+            // ── 1단계: 옵션 키 일치 + 수취인/연락처 비어있는 행 찾기 ──
+            let optionMatched = false;
+            for (let i = 0; i < dataRows.length; i++) {
+              const row = dataRows[i] || [];
+              // FILLED_THRESHOLD 보호
+              if (_countFilledCells(row) >= FILLED_THRESHOLD) continue;
+
+              // 옵션 컬럼 값 비교 (순서대로 파이프 분리값과 비교)
+              let optMatch = true;
+              for (let oi = 0; oi < optColIndices.length; oi++) {
+                const cellVal = String(row[optColIndices[oi]] || '').trim();
+                const expectedVal = optKeyParts[oi] || '';
+                if (cellVal.toLowerCase() !== expectedVal.toLowerCase()) {
+                  optMatch = false;
+                  break;
+                }
+              }
+              if (!optMatch) continue;
+
+              // 옵션 일치 + 수취인/연락처가 비어있으면 → 이 행에 기입
+              const recipientVal = recipientColIdx >= 0 ? String(row[recipientColIdx] || '').trim() : '';
+              const phoneVal = phoneColIdx >= 0 ? String(row[phoneColIdx] || '').trim() : '';
+              if (!recipientVal && !phoneVal) {
+                emptyRowOffset = i;
+                optionMatched = true;
+                logger.info(`[submit/order:bg] 옵션 매칭 성공: optKey="${submittedOptKey}" → dataRow[${i}]`);
+                break;
+              }
+            }
+
+            // ── 2단계: 옵션 매칭 실패 시 → 단순 빈 행 탐색 (fallback) ──
+            if (!optionMatched) {
+              logger.info(`[submit/order:bg] 옵션 매칭 실패 → 빈 행 fallback (optKey="${submittedOptKey}")`);
+              for (let i = 0; i < dataRows.length; i++) {
+                const row = dataRows[i] || [];
+                if (_countFilledCells(row) >= FILLED_THRESHOLD) continue;
+                const recipientVal = recipientColIdx >= 0 ? String(row[recipientColIdx] || '').trim() : '';
+                const phoneVal = phoneColIdx >= 0 ? String(row[phoneColIdx] || '').trim() : '';
+                if (!recipientVal && !phoneVal) {
+                  emptyRowOffset = i;
+                  break;
+                }
+              }
+            }
+          } else {
+            // ── 옵션 없음: 기존 로직 (첫 번째 빈 행) ──
+            for (let i = 0; i < dataRows.length; i++) {
+              const row = dataRows[i] || [];
+              // ★ FILLED_THRESHOLD 보호: 4개 이상 채워진 행은 절대 건드리지 않음
+              if (_countFilledCells(row) >= FILLED_THRESHOLD) continue;
+              // 수취인과 연락처가 모두 비어있으면 빈 행으로 판정
+              const recipientVal = recipientColIdx >= 0 ? String(row[recipientColIdx] || '').trim() : '';
+              const phoneVal = phoneColIdx >= 0 ? String(row[phoneColIdx] || '').trim() : '';
+              if (!recipientVal && !phoneVal) {
+                emptyRowOffset = i;
+                break;
+              }
             }
           }
 
@@ -687,8 +867,16 @@ function extractFolderId(url) {
   return m ? m[1] : null;
 }
 
-/** 주문 데이터를 헤더에 맞게 매핑 */
+/** 주문 데이터를 헤더에 맞게 매핑
+ *  ★ 옵션 처리: selectedOptKey가 "블랙|유선|체리축" 형태이면
+ *  시트의 옵션 컬럼 순서대로 분리하여 각각 기입 (옵션1=블랙, 옵션2=유선, 옵션3=체리축)
+ */
 function _mapOrderToRow(headers, orderData) {
+  // 옵션 키를 파이프로 분리 (ex: "블랙|유선" → ["블랙","유선"])
+  const optParts = (orderData.selectedOptKey || '').split('|').map(v => v.trim());
+  // 옵션 컬럼 카운터 (순서대로 할당)
+  let optColCounter = 0;
+
   return headers.map(h => {
     const key = h.toLowerCase();
     if (key.includes('주문자') || key.includes('orderer')) return orderData.orderer || '';
@@ -703,7 +891,12 @@ function _mapOrderToRow(headers, orderData) {
     if (key.includes('일자') || key.includes('날짜') || key.includes('date')) return orderData.dateStr || '';
     if (key.includes('주문번호') || key.includes('ordernum')) return orderData.orderNum || '';
     if (key.includes('비고') || key.includes('특이사항') || key.includes('memo')) return orderData.memo || '';
-    if (key.includes('옵션') || key.includes('option')) return orderData.selectedOptKey || '';
+    // ★ 옵션 컬럼: selectedOptKey를 분리하여 순서대로 할당
+    if (key.includes('옵션') || key.includes('option')) {
+      const val = optParts[optColCounter] || '';
+      optColCounter++;
+      return val;
+    }
     // ★ 매칭되지 않는 열(번호, 구매일자 등)은 null → 기존 값 보존
     return null;
   });
