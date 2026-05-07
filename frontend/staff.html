@@ -336,12 +336,15 @@ body{font-family:var(--font);background:var(--bg);color:var(--t1);font-size:14px
       <p class="cs-hint2">베이스시트 작업목록에 등록될 캠페인 이름입니다.</p>
     </div>
 
-    <!-- 기존 캠페인 선택 -->
+    <!-- 기존 캠페인 선택 (자동완성) -->
     <div class="cs-field2" id="scsExistingWrap" style="display:none">
       <label class="cs-label2">기존 캠페인 선택 <span class="req">*</span></label>
-      <select class="cs-input2" id="scsExistingSelect" style="cursor:pointer" onchange="scsOnExistingChange()">
-        <option value="">-- 캠페인을 선택하세요 --</option>
-      </select>
+      <div style="position:relative">
+        <input class="cs-input2" id="scsExistingInput" type="text" placeholder="캠페인명 검색 또는 선택" autocomplete="off"
+          oninput="_scsFilterExisting(this.value)" onfocus="_scsFilterExisting(this.value)" onblur="setTimeout(()=>_scsCloseList(),200)">
+        <input type="hidden" id="scsExistingSelect" value="">
+        <div id="scsExistingList" style="display:none;position:absolute;top:100%;left:0;right:0;max-height:220px;overflow-y:auto;background:#fff;border:1.5px solid #DDD6FE;border-radius:8px;box-shadow:0 4px 16px rgba(0,0,0,.12);z-index:999;margin-top:2px"></div>
+      </div>
       <p class="cs-hint2">선택한 캠페인의 구글시트에 새 탭이 추가됩니다.</p>
     </div>
 
@@ -1263,6 +1266,9 @@ async function openStaffCreateSheet() {
   // 초기화
   document.getElementById("scsFileTitle").value = "";
   document.getElementById("scsCampName").value  = "";
+  document.getElementById("scsExistingInput").value = "";
+  document.getElementById("scsExistingSelect").value = "";
+  _scsCloseList();
   const tabSel = document.getElementById("scsTmplTabSelect");
   tabSel.innerHTML = '<option value="">-- 위에서 캠페인을 먼저 선택하세요 --</option>';
   tabSel.disabled  = true;
@@ -1367,38 +1373,66 @@ function scsOnInput() {
   document.getElementById("scsBtnOk").disabled = !ok;
 }
 
-/** 기존 캠페인 목록 SELECT 채우기 */
+/** 기존 캠페인 자동완성 데이터 배열 */
+let _scsExistingItems = []; // [{sheetId, label, campName}]
+
+/** 기존 캠페인 목록 데이터 채우기 */
 async function _scsFillExistingSelect() {
-  const sel = document.getElementById("scsExistingSelect");
-  sel.innerHTML = '<option value="">-- 캠페인을 선택하세요 --</option>';
+  _scsExistingItems = [];
   const stats = (_dashStats || []);
-  if (!stats.length) {
+  let source = stats;
+  if (!source.length) {
     try {
       const data = await gasGet({ action: "dashboard" });
-      (data.stats || []).forEach(c => {
-        const firstTab = (c.tabs || [])[0];
-        if (!firstTab || !firstTab.sheetId) return;
-        const opt = document.createElement("option");
-        opt.value = firstTab.sheetId;
-        opt.textContent = c.campaign || firstTab.sheetId;
-        opt.dataset.campName = c.campaign || "";
-        sel.appendChild(opt);
-      });
-    } catch(_) {}
-    return;
+      source = data.stats || [];
+    } catch(_) { return; }
   }
   const seen = new Set();
-  stats.forEach(c => {
+  source.forEach(c => {
     (c.tabs || []).forEach(t => {
       if (!t.sheetId || seen.has(t.sheetId)) return;
       seen.add(t.sheetId);
-      const opt = document.createElement("option");
-      opt.value = t.sheetId;
-      opt.textContent = c.campaign || t.sheetId;
-      opt.dataset.campName = c.campaign || "";
-      sel.appendChild(opt);
+      _scsExistingItems.push({
+        sheetId: t.sheetId,
+        label: c.campaign || t.sheetId,
+        campName: c.campaign || ""
+      });
     });
   });
+}
+
+/** 자동완성 필터링 및 드롭다운 렌더 */
+function _scsFilterExisting(query) {
+  const listEl = document.getElementById("scsExistingList");
+  const q = (query || "").trim().toLowerCase();
+  const filtered = q
+    ? _scsExistingItems.filter(item => item.label.toLowerCase().includes(q))
+    : _scsExistingItems;
+  if (!filtered.length) {
+    listEl.innerHTML = '<div style="padding:10px 14px;color:#9CA3AF;font-size:.85rem">일치하는 캠페인 없음</div>';
+    listEl.style.display = "block";
+    return;
+  }
+  listEl.innerHTML = filtered.map((item) => {
+    const highlighted = q ? item.label.replace(new RegExp(`(${q.replace(/[.*+?^${}()|[\]\\]/g,'\\$&')})`, 'gi'), '<b style="color:#7C3AED">$1</b>') : item.label;
+    return `<div style="padding:9px 14px;cursor:pointer;border-bottom:1px solid #F3F4F6;font-size:.9rem;transition:background .15s" onmousedown="_scsSelectItem('${item.sheetId.replace(/'/g,"\\\'")}')" onmouseenter="this.style.background='#F5F3FF'" onmouseleave="this.style.background=''">${highlighted}</div>`;
+  }).join("");
+  listEl.style.display = "block";
+}
+
+/** 자동완성 항목 선택 */
+function _scsSelectItem(sheetId) {
+  const item = _scsExistingItems.find(i => i.sheetId === sheetId);
+  if (!item) return;
+  document.getElementById("scsExistingInput").value = item.label;
+  document.getElementById("scsExistingSelect").value = item.sheetId;
+  _scsCloseList();
+  scsOnExistingChange();
+}
+
+/** 자동완성 드롭다운 닫기 */
+function _scsCloseList() {
+  document.getElementById("scsExistingList").style.display = "none";
 }
 
 /** 시트 생성 실행 */
