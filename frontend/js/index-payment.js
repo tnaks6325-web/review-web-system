@@ -560,7 +560,10 @@ async function loadSyncQueueStats() {
             <div style="background:#FEF2F2;padding:6px 8px;border-radius:6px;margin-bottom:4px">
               <div style="display:flex;justify-content:space-between;align-items:center">
                 <span><b>#${f.id}</b> ${f.type} — ${(f.error_msg || '').substring(0, 50)}<br><span style="color:#991B1B;font-size:.68rem">${_translateSyncError(f.error_msg)}</span></span>
-                <button onclick="retrySyncItem(${f.id})" style="font-size:.68rem;background:#3B82F6;color:#fff;border:none;padding:2px 8px;border-radius:4px;cursor:pointer;flex-shrink:0;margin-left:6px">재시도</button>
+                <div style="display:flex;gap:4px;flex-shrink:0;margin-left:6px">
+                  <button onclick="retrySyncItem(${f.id})" style="font-size:.68rem;background:#3B82F6;color:#fff;border:none;padding:2px 8px;border-radius:4px;cursor:pointer">재시도</button>
+                  <button onclick="deleteSyncItem(${f.id})" style="font-size:.68rem;background:#DC2626;color:#fff;border:none;padding:2px 8px;border-radius:4px;cursor:pointer" title="이 항목을 큐에서 삭제">삭제</button>
+                </div>
               </div>
               ${targetInfo}
             </div>`;
@@ -648,6 +651,28 @@ async function retrySyncAll() {
     setTimeout(() => loadSyncQueueStats(), 1000);
   } catch (err) {
     showToast("재시도 실패: " + err.message, "error");
+  }
+}
+
+async function deleteSyncItem(id) {
+  if (!confirm(`#${id} 항목을 큐에서 삭제합니까?\n(더 이상 재시도하지 않습니다)`)) return;
+  try {
+    await gasPost({ action: "syncQueueDelete", id: String(id) });
+    showToast("항목 삭제 완료", "success");
+    setTimeout(() => loadSyncQueueStats(), 500);
+  } catch (err) {
+    showToast("삭제 실패: " + err.message, "error");
+  }
+}
+
+async function deleteAllSyncFailed() {
+  if (!confirm("모든 실패 항목을 삭제합니까?\n(복구할 수 없습니다)")) return;
+  try {
+    await gasPost({ action: "syncQueueDelete", id: "all" });
+    showToast("전체 삭제 완료", "success");
+    setTimeout(() => loadSyncQueueStats(), 500);
+  } catch (err) {
+    showToast("삭제 실패: " + err.message, "error");
   }
 }
 

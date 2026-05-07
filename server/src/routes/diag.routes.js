@@ -3,7 +3,7 @@ const router = express.Router();
 const { authMiddleware } = require('../middleware/auth.middleware');
 const pool = require('../db/pool');
 const { readSheet, getSpreadsheetMeta, writeSheet, appendSheet, copySpreadsheet, copySheetToSpreadsheet, renameSheet, shareSheetWithServiceAccount, checkSheetWriteAccess } = require('../services/sheets.service');
-const { getQueueStats, retryItem, retryAllFailed, purgeCompleted } = require('../services/syncQueue.service');
+const { getQueueStats, retryItem, retryAllFailed, purgeCompleted, deleteItem, deleteAllFailed } = require('../services/syncQueue.service');
 const { imageApiLimiter } = require('../middleware/rateLimit.middleware');
 const { extractOrderFromImage, verifyAddressMatch } = require('../services/gemini.service');
 const driveService = require('../services/drive.service');
@@ -1392,6 +1392,22 @@ router.post('/sync-queue/purge', authMiddleware, async (req, res, next) => {
   try {
     const hours = parseInt(req.body.hours) || 24;
     const result = await purgeCompleted(hours);
+    res.json({ ok: true, ...result });
+  } catch (err) {
+    next(err);
+  }
+});
+
+// POST /api/diag/sync-queue/delete — 실패 항목 개별/일괄 삭제
+router.post('/sync-queue/delete', authMiddleware, async (req, res, next) => {
+  try {
+    const { id } = req.body;
+    if (id === 'all') {
+      const result = await deleteAllFailed();
+      return res.json({ ok: true, ...result });
+    }
+    if (!id) return res.json({ error: 'id 필요' });
+    const result = await deleteItem(parseInt(id));
     res.json({ ok: true, ...result });
   } catch (err) {
     next(err);

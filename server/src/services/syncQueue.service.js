@@ -376,6 +376,28 @@ function _mapOrderToRow(headers, orderData) {
   });
 }
 
+// ── 특정 항목 삭제 (failed 상태만) ──
+async function deleteItem(id) {
+  const { rows } = await pool.query(
+    `DELETE FROM sync_queue
+     WHERE id = $1 AND status = 'failed'
+     RETURNING id, type`,
+    [id]
+  );
+  if (rows.length === 0) throw new Error(`id=${id}인 실패 항목을 찾을 수 없거나 이미 삭제됨`);
+  logger.info(`[syncQueue] 🗑️ id=${id} type=${rows[0].type} 삭제 완료`);
+  return rows[0];
+}
+
+// ── 모든 실패 항목 삭제 ──
+async function deleteAllFailed() {
+  const { rowCount } = await pool.query(
+    `DELETE FROM sync_queue WHERE status = 'failed'`
+  );
+  logger.info(`[syncQueue] 🗑️ 실패 항목 ${rowCount}건 일괄 삭제`);
+  return { deleted: rowCount };
+}
+
 module.exports = {
   enqueue,
   processQueue,
@@ -383,4 +405,6 @@ module.exports = {
   retryItem,
   retryAllFailed,
   purgeCompleted,
+  deleteItem,
+  deleteAllFailed,
 };
