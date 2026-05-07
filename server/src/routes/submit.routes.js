@@ -702,7 +702,7 @@ function _mapOrderToRow(headers, orderData) {
     if (key.includes('금액') || key.includes('price')) return orderData.price || '';
     if (key.includes('일자') || key.includes('날짜') || key.includes('date')) return orderData.dateStr || '';
     if (key.includes('주문번호') || key.includes('ordernum')) return orderData.orderNum || '';
-    if (key.includes('비고') || key.includes('memo')) return orderData.memo || '';
+    if (key.includes('비고') || key.includes('특이사항') || key.includes('memo')) return orderData.memo || '';
     if (key.includes('옵션') || key.includes('option')) return orderData.selectedOptKey || '';
     // ★ 매칭되지 않는 열(번호, 구매일자 등)은 null → 기존 값 보존
     return null;
