@@ -584,14 +584,20 @@ router.post('/order', async (req, res, next) => {
 
           const rowData = _mapOrderToRow(headers, orderData);
 
-          // 헤더 다음 첫 번째 빈 행 찾기 (수취인+연락처 기준: 둘 다 비어있으면 빈 행)
-          const recipientColIdx = headers.findIndex(h => {
-            const hl = h.toLowerCase();
-            return hl.includes('수취인') || hl.includes('받는분') || hl === '성함' || hl === '이름';
-          });
+          // ★ 빈 행 판정 기준: "연락처 + 주소"가 비어있는 행
+          // 인애드명단(수취인) 컬럼은 이미 채워져 있을 수 있으므로 판정에서 제외
           const phoneColIdx = headers.findIndex(h => {
             const hl = h.toLowerCase();
             return hl.includes('연락처') || hl.includes('전화') || hl.includes('핸드폰') || hl.includes('휴대폰') || hl === 'phone';
+          });
+          const addressColIdx = headers.findIndex(h => {
+            const hl = h.toLowerCase();
+            return hl.includes('주소') || hl.includes('address');
+          });
+          // 수취인 컬럼 (동시 제출 감지 참고용으로만 보존)
+          const recipientColIdx = headers.findIndex(h => {
+            const hl = h.toLowerCase();
+            return hl.includes('수취인') || hl.includes('받는분') || hl === '성함' || hl === '이름';
           });
 
           // ★ 옵션 컬럼 인덱스 감지 (옵션 기반 행 매칭용)
@@ -603,19 +609,51 @@ router.post('/order', async (req, res, next) => {
             }
           }
 
+          // ★ FILLED_THRESHOLD 판정 시 제외할 컬럼 인덱스 (사전 기입 컬럼)
+          // 번호, 인애드명단, 구매일자, 상품, 옵션 → 관리자가 미리 채워놓는 컬럼
+          const excludeFromFilledCount = new Set();
+          headers.forEach((h, ci) => {
+            const hl = h.toLowerCase();
+            // 번호 컬럼 제외
+            if (hl === '번호' || hl === 'no' || hl === '#') excludeFromFilledCount.add(ci);
+            // 인애드명단 컬럼 제외
+            if (INAD_COL_KEYWORDS.some(kw => hl.includes(kw))) excludeFromFilledCount.add(ci);
+            // 구매일자/상품 컬럼 제외
+            if (hl.includes('구매일') || hl.includes('상품') || hl.includes('product')) excludeFromFilledCount.add(ci);
+            // 옵션 컬럼 제외
+            if (OPTION_COL_KEYWORDS.some(kw => hl.includes(kw))) excludeFromFilledCount.add(ci);
+          });
+
+          /** 사전 기입 컬럼을 제외한 채워진 셀 수 계산 */
+          function _countFilledExcluding(row) {
+            return (row || []).filter((cell, ci) => {
+              if (excludeFromFilledCount.has(ci)) return false;
+              const val = String(cell || '').trim();
+              return val !== '' && val !== '0';
+            }).length;
+          }
+
           // ★ 옵션 키 매칭 로직: selectedOptKey가 있으면 해당 옵션 행의 빈 슬롯 우선 탐색
           const submittedOptKey = (selectedOptKey || '').trim();
           const optKeyParts = submittedOptKey ? submittedOptKey.split('|').map(v => v.trim()) : [];
 
           let emptyRowOffset = dataRows.length; // default: 데이터 끝 다음
 
+          // ★ 빈 행 판정 헬퍼: 연락처+주소가 모두 비어있으면 "미기입 행"
+          // (인애드명단=수취인은 이미 채워져 있을 수 있으므로 판정에서 제외)
+          function _isUnfilledRow(row) {
+            const phoneVal = phoneColIdx >= 0 ? String(row[phoneColIdx] || '').trim() : '';
+            const addrVal = addressColIdx >= 0 ? String(row[addressColIdx] || '').trim() : '';
+            return !phoneVal && !addrVal;
+          }
+
           if (submittedOptKey && optColIndices.length > 0) {
-            // ── 1단계: 옵션 키 일치 + 수취인/연락처 비어있는 행 찾기 ──
+            // ── 1단계: 옵션 키 일치 + 연락처/주소 비어있는 행 찾기 ──
             let optionMatched = false;
             for (let i = 0; i < dataRows.length; i++) {
               const row = dataRows[i] || [];
-              // FILLED_THRESHOLD 보호
-              if (_countFilledCells(row) >= FILLED_THRESHOLD) continue;
+              // FILLED_THRESHOLD 보호 (번호/인애드명단/구매일자/상품/옵션 컬럼 제외하고 카운트)
+              if (_countFilledExcluding(row) >= FILLED_THRESHOLD) continue;
 
               // 옵션 컬럼 값 비교 (순서대로 파이프 분리값과 비교)
               let optMatch = true;
@@ -629,10 +667,8 @@ router.post('/order', async (req, res, next) => {
               }
               if (!optMatch) continue;
 
-              // 옵션 일치 + 수취인/연락처가 비어있으면 → 이 행에 기입
-              const recipientVal = recipientColIdx >= 0 ? String(row[recipientColIdx] || '').trim() : '';
-              const phoneVal = phoneColIdx >= 0 ? String(row[phoneColIdx] || '').trim() : '';
-              if (!recipientVal && !phoneVal) {
+              // 옵션 일치 + 연락처/주소가 비어있으면 → 이 행에 기입
+              if (_isUnfilledRow(row)) {
                 emptyRowOffset = i;
                 optionMatched = true;
                 logger.info(`[submit/order:bg] 옵션 매칭 성공: optKey="${submittedOptKey}" → dataRow[${i}]`);
@@ -645,25 +681,21 @@ router.post('/order', async (req, res, next) => {
               logger.info(`[submit/order:bg] 옵션 매칭 실패 → 빈 행 fallback (optKey="${submittedOptKey}")`);
               for (let i = 0; i < dataRows.length; i++) {
                 const row = dataRows[i] || [];
-                if (_countFilledCells(row) >= FILLED_THRESHOLD) continue;
-                const recipientVal = recipientColIdx >= 0 ? String(row[recipientColIdx] || '').trim() : '';
-                const phoneVal = phoneColIdx >= 0 ? String(row[phoneColIdx] || '').trim() : '';
-                if (!recipientVal && !phoneVal) {
+                if (_countFilledExcluding(row) >= FILLED_THRESHOLD) continue;
+                if (_isUnfilledRow(row)) {
                   emptyRowOffset = i;
                   break;
                 }
               }
             }
           } else {
-            // ── 옵션 없음: 기존 로직 (첫 번째 빈 행) ──
+            // ── 옵션 없음: 연락처+주소 기준 첫 번째 빈 행 ──
             for (let i = 0; i < dataRows.length; i++) {
               const row = dataRows[i] || [];
-              // ★ FILLED_THRESHOLD 보호: 4개 이상 채워진 행은 절대 건드리지 않음
-              if (_countFilledCells(row) >= FILLED_THRESHOLD) continue;
-              // 수취인과 연락처가 모두 비어있으면 빈 행으로 판정
-              const recipientVal = recipientColIdx >= 0 ? String(row[recipientColIdx] || '').trim() : '';
-              const phoneVal = phoneColIdx >= 0 ? String(row[phoneColIdx] || '').trim() : '';
-              if (!recipientVal && !phoneVal) {
+              // ★ FILLED_THRESHOLD 보호 (사전 기입 컬럼 제외하고 4개 이상 채워진 행은 건드리지 않음)
+              if (_countFilledExcluding(row) >= FILLED_THRESHOLD) continue;
+              // 연락처와 주소가 모두 비어있으면 미기입 행으로 판정
+              if (_isUnfilledRow(row)) {
                 emptyRowOffset = i;
                 break;
               }
@@ -673,16 +705,16 @@ router.post('/order', async (req, res, next) => {
           // 실제 시트 행 번호 계산 (1-based, 헤더행 = headerRowIdx+1, 데이터 시작 = headerRowIdx+2)
           const targetRow = headerRowIdx + 1 + emptyRowOffset + 1; // +1 for 1-based, +1 for header row itself
 
-          // ★ 동시 제출 방어: 쓰기 직전 타겟 행의 수취인 셀 재확인
+          // ★ 동시 제출 방어: 쓰기 직전 타겟 행의 연락처 셀 재확인
+          // (인애드명단이 이미 수취인에 있을 수 있으므로 연락처로 판정)
           try {
-            const checkRange = recipientColIdx >= 0
-              ? `'${tabName}'!${getColLetter(recipientColIdx)}${targetRow}`
-              : `'${tabName}'!A${targetRow}`;
+            const checkColIdx = phoneColIdx >= 0 ? phoneColIdx : (addressColIdx >= 0 ? addressColIdx : 0);
+            const checkRange = `'${tabName}'!${getColLetter(checkColIdx)}${targetRow}`;
             const checkData = await readSheet(sheetId, checkRange, sheetOpts);
             const existingVal = checkData && checkData[0] ? String(checkData[0][0] || '').trim() : '';
             if (existingVal) {
               // 이미 다른 제출이 들어간 경우 → 캐시 무효화 후 재탐색
-              logger.warn(`[submit/order:bg] 동시 제출 감지: row=${targetRow} 이미 수취인='${existingVal}' → 큐로 전환`);
+              logger.warn(`[submit/order:bg] 동시 제출 감지: row=${targetRow} 이미 연락처='${existingVal}' → 큐로 전환`);
               tabDataCache.delete(`${sheetId}||${tabName}`);
               throw new Error('동시 제출 감지 — 큐에서 재시도');
             }
@@ -692,20 +724,12 @@ router.post('/order', async (req, res, next) => {
             logger.warn(`[submit/order:bg] 동시제출 체크 실패 (무시): ${raceErr.message}`);
           }
 
-          // ★ null이 아닌 셀만 개별 쓰기 (번호, 구매일자 등 기존 값 보존)
-          // ★ 날짜 열: 기존 값이 있으면 덮어쓰지 않음
+          // ★ null이 아닌 셀만 개별 쓰기 (번호, 인애드명단 등 기존 값 보존)
+          // ★ 구매일자/옵션은 덮어쓰기 허용 (리뷰어가 제출 시 갱신)
           const targetRowData = dataRows[emptyRowOffset] || [];
           const writePairs = [];
           for (let ci = 0; ci < rowData.length; ci++) {
-            if (rowData[ci] === null) continue; // null = 기존 값 보존
-            // 날짜 열 보존: 기존 값이 있으면 skip
-            const headerKey = (headers[ci] || '').toLowerCase();
-            if ((headerKey.includes('일자') || headerKey.includes('날짜') || headerKey.includes('date')) && !headerKey.includes('주문')) {
-              const existingDateVal = String(targetRowData[ci] || '').trim();
-              if (existingDateVal) {
-                continue; // 기존 날짜 보존
-              }
-            }
+            if (rowData[ci] === null) continue; // null = 기존 값 보존 (번호, 인애드명단 등)
             writePairs.push({ col: ci, val: rowData[ci] });
           }
 
