@@ -11826,12 +11826,15 @@ function _cellVal(t, col) {
       ? `<a href="${escHtml(finalUrl)}" target="_blank" style="color:#7C3AED" title="${escHtml(finalUrl)}"><i class="fas fa-external-link-alt"></i></a>`
       : '';
     // 시트링크에 gid가 없으면 ⚠️ 보정 버튼 표시
-    const needsFix = !hasGid || (url && !url.includes('#gid='));
+    // ★ tab_gid가 DB에 저장되어 있으면 ⚠️ 숨김 (수동보정 완료 상태)
+    const needsFix = !hasGid;
     const fixBtn = needsFix
       ? `<button onclick="event.stopPropagation();_fixSheetUrl('${escHtml(t.sheet_id)}','${escHtml(t.tab_name)}')" style="background:none;border:none;cursor:pointer;color:#D97706;font-size:.72rem;margin-left:2px" title="시트링크 수동보정 (gid 없음)"><i class="fas fa-exclamation-triangle"></i></button>`
       : '';
     if (!url && !fixBtn) return '<span style="color:#D1D5DB">—</span>';
-    return `<span style="display:inline-flex;align-items:center;gap:2px">${linkIcon}${fixBtn}</span>`;
+    // ★ 시트링크 아이콘 더블클릭 시 수동보정 모달 재진입 가능
+    const dblClickHandler = `ondblclick="event.stopPropagation();event.preventDefault();_fixSheetUrl('${escHtml(t.sheet_id)}','${escHtml(t.tab_name)}')"`;
+    return `<span style="display:inline-flex;align-items:center;gap:2px" ${dblClickHandler} title="더블클릭: 시트링크 수동보정">${linkIcon}${fixBtn}</span>`;
   }
   // 택일
   if (k === "manager") return _inlineSelect(t, "manager", "manager", ["만두","망고"], {
