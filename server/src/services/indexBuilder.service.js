@@ -240,7 +240,7 @@ async function buildIndexSmart(forceFullRebuild = false) {
     });
 
     const { rows: tcRows } = await pool.query(
-      'SELECT sheet_id, tab_name, is_closed FROM tab_configs'
+      'SELECT sheet_id, tab_name, is_closed, closed_rounds, archived_rounds FROM tab_configs'
     );
     const tcMap = {};
     tcRows.forEach(r => { tcMap[`${r.sheet_id}||${r.tab_name}`] = r; });
@@ -625,7 +625,52 @@ async function _processOneSheet(sheetId, opts) {
         continue;
       }
 
-      await _upsertTabIndex(sheetId, tabName, tabGid, newChecksum, rows, currentModifiedTime, spreadsheetTitle);
+      // ★ 차수 마감 필터: closed_rounds + archived_rounds에 해당하는 행을 review_index_archive로 이동 후 제외
+      const tcConfig = tcMap[key];
+      const closedRounds = (tcConfig?.closed_rounds || '').split(',').map(s => s.trim()).filter(Boolean);
+      const archivedRounds = (tcConfig?.archived_rounds || '').split(',').map(s => s.trim()).filter(Boolean);
+      // 두 목록을 합쳐서 제외할 차수 집합 생성
+      const excludeRounds = [...new Set([...closedRounds, ...archivedRounds])];
+      let filteredRows = rows;
+      if (excludeRounds.length > 0) {
+        filteredRows = rows.filter(r => !excludeRounds.includes(r.round));
+        // 마감된 차수의 기존 review_index 행 → review_index_archive로 이동
+        for (const cr of excludeRounds) {
+          try {
+            // 이미 아카이브된 행은 제외 (NOT EXISTS)
+            const { rowCount: movedCount } = await pool.query(`
+              INSERT INTO review_index_archive
+                (reviewer_name, sheet_id, tab_gid, tab_name, campaign_name,
+                 row_index, is_submitted, is_submitted2, product_url, product_name,
+                 submit_col, submit_col2, row_json, start_date, end_date,
+                 round, phone8, built_at, archived_at)
+              SELECT
+                ri.reviewer_name, ri.sheet_id, ri.tab_gid, ri.tab_name, ri.campaign_name,
+                ri.row_index, ri.is_submitted, ri.is_submitted2, ri.product_url, ri.product_name,
+                ri.submit_col, ri.submit_col2, ri.row_json, ri.start_date, ri.end_date,
+                ri.round, ri.phone8, ri.built_at, NOW()
+              FROM review_index ri
+              WHERE ri.sheet_id = $1 AND ri.tab_name = $2 AND ri.round = $3
+                AND NOT EXISTS (
+                  SELECT 1 FROM review_index_archive ria
+                  WHERE ria.sheet_id = ri.sheet_id AND ria.tab_name = ri.tab_name AND ria.row_index = ri.row_index
+                )
+            `, [sheetId, tabName, cr]);
+            // 원본에서 삭제 (아카이브 여부 무관하게 review_index에서 제거)
+            const { rowCount: deletedCount } = await pool.query(
+              'DELETE FROM review_index WHERE sheet_id = $1 AND tab_name = $2 AND round = $3',
+              [sheetId, tabName, cr]
+            );
+            if (movedCount > 0 || deletedCount > 0) {
+              logger.info(`[buildIndex] 마감 차수 아카이브: ${tabName}/${cr} — ${movedCount}행 이동, ${deletedCount}행 삭제`);
+            }
+          } catch (archErr) {
+            logger.warn(`[buildIndex] 마감 차수 아카이브 실패 (${tabName}/${cr}): ${archErr.message}`);
+          }
+        }
+      }
+
+      await _upsertTabIndex(sheetId, tabName, tabGid, newChecksum, filteredRows, currentModifiedTime, spreadsheetTitle);
       await _resolveRecognizedTab(sheetId, tabName, tabGid);
       rebuilt++;
 

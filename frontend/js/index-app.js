@@ -3814,6 +3814,12 @@ async function confirmClosed() {
       if (openCount)  msg += `${openCount}건 마감 해제. `;
       msg += "동기화 후 적용됩니다.";
       showToast("✅ " + msg);
+
+      // ★ 차수 마감 시 아카이브 이동 확인 알람 표시
+      const closedRoundItems = items.filter(i => i.isClosed && i.round);
+      if (closedRoundItems.length > 0) {
+        _showArchiveRoundConfirm(closedRoundItems);
+      }
     }
   } catch (err) {
     showToast("⚠️ 서버 연결 오류: " + err.message + " (새로고침 권장)", true);
@@ -3831,6 +3837,90 @@ function _exitClosedMode() {
   execBtn.style.display = "none";
   wrap.classList.remove("closed-mode");
   document.documentElement.style.setProperty('--dc-closedcb', '0px');
+}
+
+// ★ 차수 마감 후 아카이브 확인 알람
+function _showArchiveRoundConfirm(closedRoundItems) {
+  // 기존 알람 제거
+  document.getElementById('archiveRoundConfirmBanner')?.remove();
+
+  const roundLabels = closedRoundItems.map(i => `${i.tabName} / ${i.round}`);
+  const summary = closedRoundItems.length <= 3
+    ? roundLabels.join(', ')
+    : `${roundLabels.slice(0, 2).join(', ')} 외 ${closedRoundItems.length - 2}건`;
+
+  const banner = document.createElement('div');
+  banner.id = 'archiveRoundConfirmBanner';
+  banner.style.cssText = 'position:fixed;bottom:24px;right:24px;z-index:9998;background:#FEF3C7;border:1px solid #F59E0B;border-radius:12px;padding:14px 18px;max-width:420px;box-shadow:0 8px 24px rgba(0,0,0,.15);animation:slideInR .3s ease';
+  banner.innerHTML = `
+    <div style="display:flex;align-items:flex-start;gap:10px">
+      <i class="fas fa-exclamation-triangle" style="color:#D97706;font-size:1.1rem;margin-top:2px"></i>
+      <div style="flex:1">
+        <div style="font-size:.82rem;font-weight:600;color:#92400E;margin-bottom:4px">마감 차수 아카이브 안내</div>
+        <div style="font-size:.75rem;color:#78350F;margin-bottom:10px">
+          <strong>${summary}</strong> 차수가 마감되었습니다.<br>
+          아카이브로 이동하시겠습니까? (다음 빌드 시 자동 제외됩니다)
+        </div>
+        <div style="display:flex;gap:8px">
+          <button onclick="_archiveClosedRoundsNow()" style="padding:5px 12px;background:#8B5CF6;color:#fff;border:none;border-radius:6px;font-size:.73rem;font-weight:600;cursor:pointer">
+            <i class="fas fa-archive" style="margin-right:3px"></i>아카이브 이동
+          </button>
+          <button onclick="_dismissArchiveConfirm()" style="padding:5px 12px;background:#fff;color:#6B7280;border:1px solid #D1D5DB;border-radius:6px;font-size:.73rem;cursor:pointer">
+            나중에
+          </button>
+        </div>
+      </div>
+      <button onclick="_dismissArchiveConfirm()" style="background:none;border:none;cursor:pointer;color:#9CA3AF;font-size:1rem;padding:0;line-height:1">&times;</button>
+    </div>
+  `;
+  document.body.appendChild(banner);
+
+  // 글로벌에 차수 정보 저장
+  window._pendingArchiveRoundItems = closedRoundItems;
+
+  // 30초 후 자동 닫기
+  window._archiveConfirmTimer = setTimeout(() => {
+    _dismissArchiveConfirm();
+  }, 30000);
+}
+
+function _dismissArchiveConfirm() {
+  clearTimeout(window._archiveConfirmTimer);
+  const banner = document.getElementById('archiveRoundConfirmBanner');
+  if (banner) {
+    banner.style.opacity = '0';
+    banner.style.transform = 'translateX(20px)';
+    banner.style.transition = 'opacity .2s, transform .2s';
+    setTimeout(() => banner.remove(), 200);
+  }
+  window._pendingArchiveRoundItems = null;
+}
+
+async function _archiveClosedRoundsNow() {
+  const items = window._pendingArchiveRoundItems || [];
+  _dismissArchiveConfirm();
+
+  if (items.length === 0) return;
+
+  const tabs = items.map(i => ({ sheetId: i.sheetId, tabName: i.tabName, round: i.round }));
+
+  try {
+    showToast(`${tabs.length}건 차수 아카이브 처리 중...`, 'info');
+    const res = await fetch(API_BASE_URL + '/api/archive/tabs', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', ..._getAuthHeaders() },
+      body: JSON.stringify({ tabs, reason: 'round_closed_manual' }),
+    }).then(r => r.json());
+
+    if (res.ok) {
+      showToast(`✅ 아카이브 완료: ${res.archivedTabs || tabs.length}건, ${res.archivedRows || 0}행 이동`, 'success');
+      await loadTabDashboard(); // 새로고침
+    } else {
+      showToast(res.error || '아카이브 실패', 'error');
+    }
+  } catch (err) {
+    showToast('아카이브 요청 실패: ' + err.message, 'error');
+  }
 }
 
 // ── 비고(메모) 관리 ──

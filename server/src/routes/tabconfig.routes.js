@@ -1002,6 +1002,7 @@ router.get('/dashboard', authMiddleware, async (req, res, next) => {
     `);
 
     // ★ 차수별 집계: review_index에서 round 값이 있는 행을 탭별로 그룹핑
+    // closed_rounds + archived_rounds에 포함된 차수는 제외
     const { rows: roundRows } = await pool.query(`
       SELECT ri.sheet_id, ri.tab_name, ri.round,
              COUNT(*) AS total,
@@ -1009,7 +1010,10 @@ router.get('/dashboard', authMiddleware, async (req, res, next) => {
              COUNT(*) FILTER (WHERE ri.is_submitted2 = 'PAID') AS paid
       FROM review_index ri
       INNER JOIN index_master im ON ri.sheet_id = im.sheet_id AND ri.tab_name = im.tab_name AND im.status = 'active'
+      INNER JOIN tab_configs tc ON ri.sheet_id = tc.sheet_id AND ri.tab_name = tc.tab_name
       WHERE ri.round IS NOT NULL AND ri.round != ''
+        AND (tc.closed_rounds IS NULL OR tc.closed_rounds = '' OR NOT (ri.round = ANY(string_to_array(tc.closed_rounds, ','))))
+        AND (tc.archived_rounds IS NULL OR tc.archived_rounds = '' OR NOT (ri.round = ANY(string_to_array(tc.archived_rounds, ','))))
       GROUP BY ri.sheet_id, ri.tab_name, ri.round
       ORDER BY ri.sheet_id, ri.tab_name, ri.round
     `);
