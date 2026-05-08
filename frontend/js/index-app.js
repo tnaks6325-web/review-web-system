@@ -12847,14 +12847,7 @@ async function syncTabNames(dryRun) {
   const btnRun = document.getElementById("btnSyncTabNamesRun");
   const btnSettings = document.getElementById("btnSyncTabNames");
   const activeBtn = dryRun ? (btnDry || btnSettings) : (btnRun || btnSettings);
-  const actionLabel = dryRun ? "미리보기" : "동기화";
-
-  if (!dryRun && !confirm(
-    "Google Sheets의 실제 탭명과 URL을 DB에 동기화합니다.\n\n" +
-    "• 시트에서 탭 이름이 변경된 경우 DB를 업데이트\n" +
-    "• 잘못된 시트 URL도 자동 교정\n\n" +
-    "계속하시겠습니까?"
-  )) return;
+  const actionLabel = dryRun ? "탐지" : "적용";
 
   // ★ 버튼 로딩 상태 + 즉시 피드백 토스트
   const _saveBtnHtml = activeBtn ? activeBtn.innerHTML : "";
@@ -12878,12 +12871,13 @@ async function syncTabNames(dryRun) {
     if (res.errors > 0) parts.push(`오류 ${res.errors}건`);
     if (parts.length === 0) parts.push("변경 없음 — 모든 탭명이 일치합니다");
 
-    const prefix = dryRun ? "[미리보기] " : "";
+    const prefix = dryRun ? "[1단계 탐지] " : "[2단계 적용] ";
     const sheetInfo = res.totalSheets ? `${res.totalSheets}개 시트, ` : "";
     showToast(`${prefix}${sheetInfo}${parts.join(", ")} (${res.elapsed})`, res.errors > 0 ? "warning" : "success");
 
-    // 변경 상세가 있으면 모달로 표시
-    if (res.results && res.results.length > 0) {
+    // ★ 미리보기(dryRun)에서는 항상 모달 표시 (변경 없어도 결과 확인 가능)
+    // 실행 모드에서는 변경 있을 때만 표시
+    if (dryRun || (res.results && res.results.length > 0)) {
       _showSyncTabNamesResult(res, dryRun);
     }
 
@@ -12928,7 +12922,12 @@ function _showSyncTabNamesResult(res, dryRun) {
     return s;
   };
 
-  let tableRows = res.results.map(r => {
+  const resultItems = res.results || [];
+  let tableRows = '';
+  if (resultItems.length === 0) {
+    tableRows = `<tr><td colspan="3" style="padding:20px;text-align:center;font-size:.82rem;color:#059669"><i class="fas fa-check-circle" style="margin-right:6px"></i>${dryRun ? '변경할 항목이 없습니다 — 모든 탭명이 시트와 일치합니다.' : '동기화 완료 — 모든 변경이 적용되었습니다.'}</td></tr>`;
+  } else {
+    tableRows = resultItems.map(r => {
     const badge = `<span style="display:inline-block;padding:1px 7px;border-radius:10px;font-size:.68rem;font-weight:600;color:#fff;background:${statusColor(r.status)}">${statusLabel(r.status)}</span>`;
     let detail = '';
     if (r.newName && r.newName !== r.oldName) {
@@ -12963,8 +12962,9 @@ function _showSyncTabNamesResult(res, dryRun) {
       <td style="padding:4px 6px;font-size:.72rem;border-bottom:1px solid #F3F4F6">${detail}</td>
     </tr>`;
   }).join('');
+  } // end if/else resultItems.length
 
-  const title = dryRun ? "탭명 동기화 미리보기" : "탭명 동기화 결과";
+  const title = dryRun ? "🔍 1단계: 탭명 동기화 미리보기 (탐지)" : "✅ 2단계: 탭명 동기화 완료 (적용)";
   const summary = `시트 ${res.totalSheets}개 · 탭 ${res.totalTabs}개 검사 → 변경 ${res.renamed}건, URL교정 ${res.urlFixed}건, GID보충 ${res.gidFilled || 0}건, 스킵 ${res.skipped}건, 오류 ${res.errors}건 (${res.elapsed})`;
 
   const modal = document.createElement('div');
@@ -12988,8 +12988,9 @@ function _showSyncTabNamesResult(res, dryRun) {
           <tbody>${tableRows}</tbody>
         </table>
       </div>
-      <div style="padding:10px 16px;border-top:1px solid #E5E7EB;display:flex;gap:8px;justify-content:flex-end">
-        ${dryRun ? `<button onclick="syncTabNames(false);this.closest('.modal-overlay').remove()" style="padding:6px 16px;background:#7C3AED;color:#fff;border:none;border-radius:6px;font-size:.8rem;font-weight:600;cursor:pointer"><i class="fas fa-play"></i> 실행하기</button>` : ''}
+      <div style="padding:10px 16px;border-top:1px solid #E5E7EB;display:flex;gap:8px;justify-content:flex-end;align-items:center">
+        ${dryRun ? `<span style="flex:1;font-size:.72rem;color:#6B7280">위 내용을 확인 후 [적용] 버튼을 클릭하세요</span>
+        <button onclick="syncTabNames(false);this.closest('.modal-overlay').remove()" style="padding:7px 20px;background:#059669;color:#fff;border:none;border-radius:6px;font-size:.82rem;font-weight:700;cursor:pointer;display:flex;align-items:center;gap:5px"><i class="fas fa-check-circle"></i> 2단계: 적용</button>` : ''}
         <button onclick="this.closest('.modal-overlay').remove()" style="padding:6px 16px;background:#6B7280;color:#fff;border:none;border-radius:6px;font-size:.8rem;font-weight:600;cursor:pointer">닫기</button>
       </div>
     </div>
