@@ -12947,10 +12947,12 @@ async function syncTabNames(dryRun) {
   if (btnRun && btnRun !== activeBtn) btnRun.disabled = true;
   if (btnSettings && btnSettings !== activeBtn) btnSettings.disabled = true;
 
-  showToast(`🔄 탭명 ${actionLabel} 진행중... (전체 시트 확인, 약 30~90초 소요)`, "info");
+  // ★ 고정 프로그레스 배너 표시 (진행 상태를 명확히 전달)
+  _showSyncProgressBanner(actionLabel);
 
   try {
     const res = await gasPost({ action: "syncTabNames", dryRun: !!dryRun }, 180000);
+    _hideSyncProgressBanner();
     if (res.error) { showToast(res.error, "error"); return; }
 
     // 결과 요약 토스트
@@ -12976,6 +12978,7 @@ async function syncTabNames(dryRun) {
       loadTabDashboard();
     }
   } catch (err) {
+    _hideSyncProgressBanner();
     showToast("탭명 동기화 오류: " + err.message, "error");
   } finally {
     // ★ 모든 관련 버튼 복원
@@ -12983,6 +12986,48 @@ async function syncTabNames(dryRun) {
     if (btnDry && btnDry !== activeBtn) { btnDry.disabled = false; }
     if (btnRun && btnRun !== activeBtn) { btnRun.disabled = false; }
     if (btnSettings && btnSettings !== activeBtn) { btnSettings.disabled = false; btnSettings.innerHTML = '<i class="fas fa-exchange-alt"></i> 탭명 동기화'; }
+  }
+}
+
+// ★ 탭명 동기화 진행 상태 고정 배너
+let _syncProgressInterval = null;
+function _showSyncProgressBanner(actionLabel) {
+  _hideSyncProgressBanner(); // 기존 배너 제거
+  const banner = document.createElement('div');
+  banner.id = 'syncProgressBanner';
+  banner.style.cssText = 'position:fixed;top:60px;left:50%;transform:translateX(-50%);z-index:9999;background:#1E40AF;color:#fff;border-radius:10px;padding:12px 24px;box-shadow:0 8px 24px rgba(0,0,0,.25);display:flex;align-items:center;gap:12px;font-size:.82rem;min-width:320px;animation:slideInR .3s ease';
+  const startTime = Date.now();
+  banner.innerHTML = `
+    <div style="display:flex;align-items:center;gap:8px;flex:1">
+      <div class="sync-spinner" style="width:18px;height:18px;border:2.5px solid rgba(255,255,255,.3);border-top-color:#fff;border-radius:50%;animation:spin 1s linear infinite"></div>
+      <div>
+        <div style="font-weight:600">탭명 동기화 ${actionLabel} 진행중</div>
+        <div style="font-size:.72rem;opacity:.8;margin-top:2px">
+          전체 시트 확인 중... <span id="syncProgressTimer">0초</span> 경과
+        </div>
+      </div>
+    </div>
+    <div style="font-size:.68rem;opacity:.7;text-align:right">약 30~90초 소요</div>
+  `;
+  document.body.appendChild(banner);
+
+  // 경과 시간 업데이트
+  _syncProgressInterval = setInterval(() => {
+    const elapsed = Math.round((Date.now() - startTime) / 1000);
+    const timerEl = document.getElementById('syncProgressTimer');
+    if (timerEl) timerEl.textContent = `${elapsed}초`;
+  }, 1000);
+}
+
+function _hideSyncProgressBanner() {
+  clearInterval(_syncProgressInterval);
+  _syncProgressInterval = null;
+  const banner = document.getElementById('syncProgressBanner');
+  if (banner) {
+    banner.style.opacity = '0';
+    banner.style.transform = 'translateX(-50%) translateY(-10px)';
+    banner.style.transition = 'opacity .3s, transform .3s';
+    setTimeout(() => banner.remove(), 300);
   }
 }
 
