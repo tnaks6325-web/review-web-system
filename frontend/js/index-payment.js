@@ -808,9 +808,11 @@ async function loadApiMetrics() {
             const avgColor = r.avgMs > 2000 ? '#DC2626' : r.avgMs > 800 ? '#D97706' : '#16A34A';
             const routeKo = _routeKoreanLabel(r.route);
             const routeDisplay = routeKo ? `${r.route} <span style="color:#6B7280;font-size:.65rem">${routeKo}</span>` : r.route;
+            const avgSec = (r.avgMs / 1000).toFixed(1) + '초';
+            const maxSec = (r.maxMs / 1000).toFixed(1) + '초';
             return `<div style="display:flex;justify-content:space-between;font-size:.72rem;padding:3px 0;border-bottom:1px solid #F1F5F9">
               <span style="color:var(--t2);max-width:55%;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="${r.route}">${routeDisplay}</span>
-              <span>avg <b style="color:${avgColor}">${r.avgMs}ms</b> · max ${r.maxMs}ms · <span style="color:#6B7280">${r.count}회</span></span>
+              <span>avg <b style="color:${avgColor}">${avgSec}</b> · max ${maxSec} · <span style="color:#6B7280">${r.count}회</span></span>
             </div>`;
           }).join('')}
         </div>
