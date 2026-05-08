@@ -295,12 +295,16 @@ router.post('/add-campaign', authMiddleware, async (req, res, next) => {
     }
 
     // 시트 메타데이터에서 캠페인명 가져오기
+    // ★ meta._spreadsheetTitle = 스프레드시트 전체 제목 (문서명)
+    // ★ meta[0].properties.title = 첫 번째 탭 이름 (잘못된 값이었음)
     let resolvedName = finalCampaignName;
     if (!resolvedName) {
       try {
         const meta = await getSpreadsheetMeta(finalSheetId);
-        if (meta && meta.length > 0) {
-          resolvedName = meta[0].properties.title || finalSheetId;
+        if (meta && meta._spreadsheetTitle) {
+          resolvedName = meta._spreadsheetTitle;
+        } else if (meta && meta.length > 0) {
+          resolvedName = finalSheetId; // fallback: sheetId 사용 (탭명 사용 안 함)
         }
       } catch (_) {
         resolvedName = finalSheetId;

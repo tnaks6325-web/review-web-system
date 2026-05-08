@@ -8992,7 +8992,9 @@ async function submitAddCampaign() {
   btn.disabled = true;
   btn.innerHTML = '<i class="fas fa-spinner fa-spin"></i> 등록 중...';
   try {
-    const data = await gasGet({ action: "addCampaign", url: raw });
+    // ★ 미리보기에서 감지한 시트 제목을 campaignName으로 전달
+    const sheetTitle = (document.getElementById("addCampSheetTitle")?.textContent || "").trim();
+    const data = await gasGet({ action: "addCampaign", url: raw, campaignName: sheetTitle });
     // ★ 중복 등록 차단: 이미 등록된 캠페인이면 에러 표시
     if (data.error || data.duplicate) {
       errEl.innerHTML = `<div style="color:#DC2626;font-size:.78rem;line-height:1.6;padding:8px 12px;background:#FEF2F2;border:1px solid #FECACA;border-radius:8px">
