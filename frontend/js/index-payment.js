@@ -754,6 +754,51 @@ async function loadApiMetrics() {
     if (!detailEl) return;
     let detailHtml = '';
 
+    // 라우트 한글 레이블 매핑
+    function _routeKoreanLabel(route) {
+      const map = {
+        'GET /dirty': '더티체크',
+        'POST /image-upload': '이미지 업로드',
+        'POST /review-upload': '리뷰 업로드',
+        'GET /get-inaed-list': '인애드명단 조회',
+        'GET /dashboard': '대시보드',
+        'POST /order': '구매양식 제출',
+        'POST /find-slot': '슬롯 매칭',
+        'GET /config': '탭 설정 조회',
+        'POST /config': '탭 설정 저장',
+        'POST /sync-tab-names': '탭명 동기화',
+        'POST /check-duplicate': '중복 검사',
+        'GET /campaign-list': '캠페인 목록',
+        'GET /campaign-stats': '캠페인 통계',
+        'POST /add-campaign': '캠페인 등록',
+        'GET /preview-campaign': '캠페인 미리보기',
+        'POST /smart-build': '스마트빌드',
+        'GET /index-scan': '인덱스 스캔',
+        'POST /review-submit': '리뷰 제출',
+        'GET /slot-status': '슬롯 상태',
+        'GET /search': '검색',
+        'POST /register': '리뷰어 등록',
+        'GET /stats': '통계',
+        'GET /archive': '아카이브',
+        'POST /share-sheet': '시트 공유',
+        'GET /diag-tabs': '탭 진단',
+        'POST /fix-campaign-tab-swap': '캠페인명 교정',
+        'POST /fix-campaign-names': '캠페인명 수정',
+        'GET /metrics': '메트릭 조회',
+        'POST /payment': '입금 처리',
+        'GET /memo': '메모 조회',
+        'POST /memo': '메모 저장',
+      };
+      // 정확 매칭 시도
+      if (map[route]) return map[route];
+      // METHOD + 경로 마지막 부분 매칭
+      for (const [key, label] of Object.entries(map)) {
+        const keyPath = key.split(' ')[1];
+        if (route.includes(keyPath)) return label;
+      }
+      return '';
+    }
+
     // 느린 라우트
     if (m.slowRoutes && m.slowRoutes.length > 0) {
       detailHtml += `
@@ -761,8 +806,10 @@ async function loadApiMetrics() {
         <div style="max-height:130px;overflow-y:auto;margin-bottom:10px">
           ${m.slowRoutes.slice(0, 5).map(r => {
             const avgColor = r.avgMs > 2000 ? '#DC2626' : r.avgMs > 800 ? '#D97706' : '#16A34A';
+            const routeKo = _routeKoreanLabel(r.route);
+            const routeDisplay = routeKo ? `${r.route} <span style="color:#6B7280;font-size:.65rem">${routeKo}</span>` : r.route;
             return `<div style="display:flex;justify-content:space-between;font-size:.72rem;padding:3px 0;border-bottom:1px solid #F1F5F9">
-              <span style="color:var(--t2);max-width:55%;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="${r.route}">${r.route}</span>
+              <span style="color:var(--t2);max-width:55%;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="${r.route}">${routeDisplay}</span>
               <span>avg <b style="color:${avgColor}">${r.avgMs}ms</b> · max ${r.maxMs}ms · <span style="color:#6B7280">${r.count}회</span></span>
             </div>`;
           }).join('')}
