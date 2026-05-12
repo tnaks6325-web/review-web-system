@@ -9095,14 +9095,27 @@ async function submitAddCampaign() {
     }
     closeAddCampaign();
     showToast(`✅ 등록 완료: ${data.campaignName} (${data.url})`);
+    // ★ 시트 권한 자동 부여 결과 토스트
+    if (data.shareResult) {
+      if (data.shareResult.ok !== false) {
+        setTimeout(() => showToast(
+          data.shareResult.alreadyShared
+            ? "🔑 시트 쓰기권한: 이미 부여됨"
+            : `🔑 시트 쓰기권한 자동 부여 완료 (${data.shareResult.method || 'SA'})`,
+          "success"), 800);
+      } else {
+        setTimeout(() => showToast(
+          `⚠️ 시트 쓰기권한 자동 부여 실패 — 수동으로 부여해주세요.`, "error"), 800);
+      }
+    }
     // ★ v10.2 P2-B: 세부목록 기본 행 자동 삽입 결과 안내
     if (data.autoInsertedTabs > 0) {
       setTimeout(() => showToast(
         `📋 세부목록에 ${data.autoInsertedTabs}개 탭 기본 행이 자동으로 추가됐습니다. 담당자/시간대를 설정해주세요.`,
-        "success"), 1200);
+        "success"), 1800);
     } else {
       // 등록 후 동기화 안내 토스트
-      setTimeout(() => showToast("💡 동기화 버튼을 눌러 대시보드에 반영하세요.", false), 2200);
+      setTimeout(() => showToast("💡 동기화 버튼을 눌러 대시보드에 반영하세요.", false), 2800);
     }
   } catch (err) {
     errEl.textContent = err.message || "등록 실패";
@@ -9416,7 +9429,20 @@ async function submitCreateSheet() {
       resultEl.style.display = "block";
       btn.innerHTML = '<i class="fas fa-check"></i> 완료';
       showToast("✅ 시트 생성 완료! 동기화 후 대시보드에 반영됩니다.", false, 5000);
-      setTimeout(() => showToast("💡 [지금 동기화] 버튼을 눌러 대시보드에 반영하세요.", false, 5000), 2500);
+      // ★ 시트 권한 자동 부여 결과 토스트
+      if (data.shareResult) {
+        if (data.shareResult.ok !== false) {
+          setTimeout(() => showToast(
+            data.shareResult.alreadyShared
+              ? "🔑 시트 쓰기권한: 이미 부여됨"
+              : `🔑 시트 쓰기권한 자동 부여 완료 (${data.shareResult.method || 'SA'})`,
+            "success", 4000), 1200);
+        } else {
+          setTimeout(() => showToast(
+            `⚠️ 시트 쓰기권한 자동 부여 실패 — 수동으로 부여해주세요.`, "error", 5000), 1200);
+        }
+      }
+      setTimeout(() => showToast("💡 [지금 동기화] 버튼을 눌러 대시보드에 반영하세요.", false, 5000), 3000);
     } else {
       throw new Error((data && data.error) ? data.error : "알 수 없는 오류");
     }

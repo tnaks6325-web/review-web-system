@@ -337,6 +337,20 @@ router.post('/add-campaign', authMiddleware, async (req, res, next) => {
       }
     } catch (_) { /* 메타 로드 실패 시 무시 */ }
 
+    // ★ 서비스 계정에 시트 편집자 권한 자동 부여 (비차단: 실패해도 등록은 유지)
+    let shareResult = null;
+    try {
+      shareResult = await shareSheetWithServiceAccount(finalSheetId);
+      if (shareResult.alreadyShared) {
+        logger.info(`[add-campaign] 시트 권한 이미 존재: ${finalSheetId} (${shareResult.method})`);
+      } else {
+        logger.info(`[add-campaign] 시트 권한 자동 부여 완료: ${finalSheetId} (${shareResult.method})`);
+      }
+    } catch (shareErr) {
+      logger.warn(`[add-campaign] 시트 권한 자동 부여 실패 (등록은 완료): ${finalSheetId} — ${shareErr.message}`);
+      shareResult = { ok: false, error: shareErr.message };
+    }
+
     // ★ 시트DB 탭에도 추가 (A열: sheet_url, B열: campaign_name)
     const finalUrl = sheetUrl || url || `https://docs.google.com/spreadsheets/d/${finalSheetId}/edit`;
     let addedToSheetDB = false;
@@ -369,7 +383,7 @@ router.post('/add-campaign', authMiddleware, async (req, res, next) => {
       logger.error(`[add-campaign] 시트DB 추가 실패 (DB 등록은 완료): ${sheetErr.message}`);
     }
 
-    res.json({ ok: true, sheetId: finalSheetId, campaignName: resolvedName, addedToSheetDB });
+    res.json({ ok: true, sheetId: finalSheetId, campaignName: resolvedName, addedToSheetDB, shareResult });
   } catch (err) {
     next(err);
   }
@@ -1283,6 +1297,20 @@ router.post('/create-campaign-sheet', authMiddleware, async (req, res, next) => 
         [copied.id, resolvedCampaignName, copied.url]
       );
 
+      // ★ 서비스 계정에 시트 편집자 권한 자동 부여 (복사된 시트)
+      let shareResult = null;
+      try {
+        shareResult = await shareSheetWithServiceAccount(copied.id);
+        if (shareResult.alreadyShared) {
+          logger.info(`[createSheet:new] 시트 권한 이미 존재: ${copied.id} (${shareResult.method})`);
+        } else {
+          logger.info(`[createSheet:new] 시트 권한 자동 부여 완료: ${copied.id} (${shareResult.method})`);
+        }
+      } catch (shareErr) {
+        logger.warn(`[createSheet:new] 시트 권한 자동 부여 실패 (등록은 완료): ${copied.id} — ${shareErr.message}`);
+        shareResult = { ok: false, error: shareErr.message };
+      }
+
       return res.json({
         ok: true,
         mode: 'new',
@@ -1290,6 +1318,7 @@ router.post('/create-campaign-sheet', authMiddleware, async (req, res, next) => 
         campaignName: resolvedCampaignName,
         sheetUrl: copied.url,
         sheetId: copied.id,
+        shareResult,
       });
     }
 
@@ -1343,6 +1372,20 @@ router.post('/create-campaign-sheet', authMiddleware, async (req, res, next) => 
         [existingSheetId, newTabName, resolvedCampaignName, sheetUrl]
       );
 
+      // ★ 서비스 계정에 시트 편집자 권한 자동 부여 (기존 시트)
+      let shareResult = null;
+      try {
+        shareResult = await shareSheetWithServiceAccount(existingSheetId);
+        if (shareResult.alreadyShared) {
+          logger.info(`[createSheet:existing] 시트 권한 이미 존재: ${existingSheetId} (${shareResult.method})`);
+        } else {
+          logger.info(`[createSheet:existing] 시트 권한 자동 부여 완료: ${existingSheetId} (${shareResult.method})`);
+        }
+      } catch (shareErr) {
+        logger.warn(`[createSheet:existing] 시트 권한 자동 부여 실패 (등록은 완료): ${existingSheetId} — ${shareErr.message}`);
+        shareResult = { ok: false, error: shareErr.message };
+      }
+
       return res.json({
         ok: true,
         mode: 'existing',
@@ -1351,6 +1394,7 @@ router.post('/create-campaign-sheet', authMiddleware, async (req, res, next) => 
         sheetUrl,
         tabUrl,
         sheetId: existingSheetId,
+        shareResult,
       });
     }
 
