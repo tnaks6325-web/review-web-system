@@ -2,6 +2,14 @@
    app.js v4 [인라인]
 ══════════════════════════════════════════ */
 
+/** ★ 백분율 계산 헬퍼: 100%는 분자===분모일 때만 표시 (반올림으로 인한 거짓 100% 방지) */
+function _pct(done, total) {
+  if (total <= 0) return 0;
+  if (done >= total) return 100;
+  const raw = Math.round(done / total * 100);
+  return raw >= 100 ? 99 : raw;
+}
+
 /* ══════════════════════════════════════════
    ★ 시스템 변경 공지사항 (배포 시 자동 표시)
    — 새로운 배포 시 이 배열 맨 위에 추가하세요
@@ -1673,7 +1681,7 @@ async function loadAdminDashboard() {
     // ★ Phase 5: 라이브 모드 토글 초기화
     _initLiveMode();
 
-    const rate = grand.total > 0 ? Math.round(grand.submitted / grand.total * 100) : 0;
+    const rate = _pct(grand.submitted, grand.total);
     document.getElementById("sumTotal").textContent   = grand.total.toLocaleString();
     document.getElementById("sumDone").textContent    = grand.submitted.toLocaleString();
     document.getElementById("sumPending").textContent = grand.pending.toLocaleString();
@@ -1746,7 +1754,7 @@ async function loadAdminDashboard() {
       const hasClosed = c.closedOnly === true || c.tabs.some(t => _closedSet.has((t.sheetId||"")+"||"+(t.tab||"")));
 
       c.tabs.forEach(t => {
-        const tRate     = t.total > 0 ? Math.round(t.submitted / t.total * 100) : 0;
+        const tRate     = _pct(t.submitted, t.total);
         const tabKey    = (t.sheetId || "") + "||" + (t.tab || "");
         const isClosedTab = _closedSet.has(tabKey);
         const isTabDone = (t.total > 0 && t.pending === 0);
@@ -1851,7 +1859,7 @@ async function loadAdminDashboard() {
             rdRow.dataset.sortDate = _rdEffectiveSD2 || "9999";
             rdRow.dataset.sortTaekhap = t.taekhap ? "1" : "0";
             rdRow.dataset.sortEnddate = 9999;
-            const rdRate = rd.total > 0 ? Math.round(rd.submitted / rd.total * 100) : 0;
+            const rdRate = _pct(rd.submitted, rd.total);
             rdRow.dataset.sortBar  = rdRate;
             rdRow.dataset.sortNums = (rd.submitted || 0);
             const rdStartDateHtml = _rdEffectiveSD2
@@ -1887,7 +1895,7 @@ async function loadAdminDashboard() {
 
         // 한달리뷰 행
         if (t.hasMonthly) {
-          const tRate2     = t.total2 > 0 ? Math.round(t.submitted2 / t.total2 * 100) : 0;
+          const tRate2     = _pct(t.submitted2, t.total2);
           const isTab2Done = t.total2 > 0 && t.pending2 === 0;
           const row2       = document.createElement("div");
           row2.className   = "dash-tab-row dash-tab-row-monthly " + campStripe + (isTab2Done ? " tab-done" : "");
@@ -1988,7 +1996,7 @@ function renderDashboard(data) {
   const wrap  = document.getElementById("dashboardWrap");
   const stats = data.stats || [];
   const grand = data.grand || { total: 0, submitted: 0, pending: 0 };
-  const rate  = grand.total > 0 ? Math.round(grand.submitted / grand.total * 100) : 0;
+  const rate  = _pct(grand.submitted, grand.total);
   document.getElementById("sumTotal").textContent   = grand.total.toLocaleString();
   document.getElementById("sumDone").textContent    = grand.submitted.toLocaleString();
   document.getElementById("sumPending").textContent = grand.pending.toLocaleString();
@@ -2033,7 +2041,7 @@ function renderDashboard(data) {
     const hasClosed = c.closedOnly === true || c.tabs.some(t => _closedSet.has((t.sheetId||"")+"||"+(t.tab||"")));
 
     c.tabs.forEach(t => {
-      const tRate      = t.total > 0 ? Math.round(t.submitted / t.total * 100) : 0;
+      const tRate      = _pct(t.submitted, t.total);
       const tabKey     = (t.sheetId||"")+"||"+(t.tab||"");
       const isClosedTab = _closedSet.has(tabKey);
       const isTabDone  = (t.total > 0 && t.pending === 0);
@@ -2105,7 +2113,7 @@ function renderDashboard(data) {
           rdRow.dataset.sortCampaign = campName.toLowerCase();
           if (allDone) rdRow.classList.add("camp-all-done");
           if (hasClosed) rdRow.classList.add("camp-has-closed");
-          const rdRate = rd.total > 0 ? Math.round(rd.submitted / rd.total * 100) : 0;
+          const rdRate = _pct(rd.submitted, rd.total);
           const rdStartDateHtml = _rdEffectiveSD
             ? `<span class="tab-start-date${_rdManualSD ? ' manual-date' : ''}" data-tabkey="${escHtml(rdTabKey)}" data-rawsd="${escHtml(rdStartDateRaw)}" onclick="event.stopPropagation();openStartDatePopup(event,this)" title="클릭하여 시작일 수정"><i class="fas fa-calendar-day"></i> ${escHtml(_rdEffectiveSD)}</span>`
             : `<span class="tab-date-empty" data-tabkey="${escHtml(rdTabKey)}" data-rawsd="" onclick="event.stopPropagation();openStartDatePopup(event,this)" title="시작일 입력"><i class="fas fa-calendar-plus"></i> 날짜</span>`;
@@ -2572,8 +2580,8 @@ function _buildTabRowHtml(t, tabKey, isSubRow, isClosedTab, tabNameHtml, startDa
             const total = t.total || 0;
             const tuip    = t.tuip    || 0;
             const chuihap = t.chuihap || 0;
-            const tuipRate    = (tuip    > 0 && total > 0) ? Math.min(100, Math.round(tuip    / total * 100)) : 0;
-            const chuihapRate = (chuihap > 0 && total > 0) ? Math.min(100, Math.round(chuihap / total * 100)) : 0;
+            const tuipRate    = _pct(tuip, total);
+            const chuihapRate = _pct(chuihap, total);
             const hasDual = tuipRate > 0 && chuihapRate > 0;
             const hasTuipOnly    = tuipRate > 0 && chuihapRate === 0;
             const hasChuihapOnly = chuihapRate > 0 && tuipRate === 0;
@@ -8808,7 +8816,7 @@ function _sseDashboardPartialUpdate(data) {
       if (barWrap) {
         const bar = barWrap.querySelector('.dash-tab-bar');
         if (bar && total > 0) {
-          const newRate = Math.round(newDone / total * 100);
+          const newRate = _pct(newDone, total);
           bar.style.width = newRate + '%';
           bar.className = 'dash-tab-bar ' + (newRate === 100 ? 'bar-full' : newRate >= 50 ? 'bar-half' : 'bar-low');
         }
@@ -8816,7 +8824,7 @@ function _sseDashboardPartialUpdate(data) {
 
       // 정렬용 데이터 속성 갱신
       row.dataset.sortNums = newDone;
-      if (total > 0) row.dataset.sortBar = Math.round(newDone / total * 100);
+      if (total > 0) row.dataset.sortBar = _pct(newDone, total);
 
       // 플래시 효과
       doneEl.style.transition = 'color 0.3s';
@@ -8869,7 +8877,7 @@ function _sseUpdateGrandTotals(submitDelta, totalDelta) {
   const newTotal = oldTotal + totalDelta;
   const newDone  = oldDone + submitDelta;
   const newPending = Math.max(0, newTotal - newDone);
-  const newRate    = newTotal > 0 ? Math.round(newDone / newTotal * 100) : 0;
+  const newRate    = _pct(newDone, newTotal);
 
   elTotal.textContent   = newTotal.toLocaleString();
   elDone.textContent    = newDone.toLocaleString();
@@ -8895,7 +8903,7 @@ function _sseUpdateCampaignTotal(tabKey, submitDelta, totalDelta) {
     if (!match) return;
     const newSubmitted = parseInt(match[1]) + submitDelta;
     const newTotal     = parseInt(match[2]) + totalDelta;
-    const newRate      = newTotal > 0 ? Math.round(newSubmitted / newTotal * 100) : 0;
+    const newRate      = _pct(newSubmitted, newTotal);
     totalSpan.textContent = `${newSubmitted}/${newTotal} (${newRate}%)`;
   });
 }
@@ -10050,7 +10058,7 @@ function _renderDashRawTable(data) {
   tbody.innerHTML = '';
   stats.forEach(c => {
     (c.tabs || []).forEach(t => {
-      const rate = t.total > 0 ? Math.round(t.submitted / t.total * 100) : 0;
+      const rate = _pct(t.submitted, t.total);
       // 차수 요약
       let roundSummary = '—';
       if (t.roundList && t.roundList.length) {
@@ -10282,7 +10290,7 @@ async function loadArchiveList() {
     // 캠페인별 목록 렌더링
     let html = '';
     campaigns.forEach(camp => {
-      const totalRate = camp.totalRows > 0 ? Math.round(camp.totalSubmitted / camp.totalRows * 100) : 0;
+      const totalRate = _pct(camp.totalSubmitted, camp.totalRows);
       html += `<div style="margin-bottom:12px;border:1px solid #E5E7EB;border-radius:10px;overflow:hidden">
         <div style="background:#F9FAFB;padding:10px 14px;display:flex;align-items:center;gap:8px;cursor:pointer" onclick="this.nextElementSibling.style.display=this.nextElementSibling.style.display==='none'?'block':'none'">
           <i class="fas fa-chevron-right" style="font-size:.7rem;color:#9CA3AF;transition:transform .2s"></i>
@@ -11302,7 +11310,7 @@ async function loadTabDashboard() {
     const s = res.stats || {};
     const kpiEl = document.getElementById("tabDashKPI");
     if (kpiEl) {
-      const rate = s.totalRows > 0 ? Math.round(s.totalSubmitted / s.totalRows * 100) : 0;
+      const rate = _pct(s.totalSubmitted, s.totalRows);
       kpiEl.innerHTML = [
         _kpiCard("전체 탭", s.total, "#1D4ED8", "fa-list"),
         _kpiCard("활성", s.active, "#059669", "fa-play-circle"),
@@ -11906,7 +11914,7 @@ function _cellVal(t, col) {
     const rc = t._isRoundRow ? (t._roundTotal || 0) : (t.row_count || 0);
     const sc = t._isRoundRow ? (t._roundSubmitted || 0) : (t.submitted_count || 0);
     if (rc === 0) return '<span style="color:#D1D5DB">—</span>';
-    const pct = Math.round(sc / rc * 100);
+    const pct = _pct(sc, rc);
     const clr = pct >= 80 ? "#059669" : pct >= 50 ? "#D97706" : "#DC2626";
     return `<span style="font-weight:600">${sc}/${rc}</span> <span style="color:${clr};font-size:.68rem">(${pct}%)</span>`;
   }
@@ -11916,7 +11924,7 @@ function _cellVal(t, col) {
     const pc = t._isRoundRow ? (t._roundPaid || 0) : (t.paid_count || 0);
     if (rc === 0) return '<span style="color:#D1D5DB">—</span>';
     if (pc === 0 && rc > 0) return `<span style="font-weight:600">${pc}/${rc}</span>`;
-    const pct = Math.round(pc / rc * 100);
+    const pct = _pct(pc, rc);
     const clr = pct >= 100 ? "#059669" : pct >= 50 ? "#D97706" : "#DC2626";
     const icon = pct >= 100 ? ' <i class="fas fa-check" style="font-size:.6rem"></i>' : '';
     return `<span style="font-weight:600">${pc}/${rc}</span> <span style="color:${clr};font-size:.68rem">(${pct}%)${icon}</span>`;
@@ -12143,7 +12151,7 @@ function _showArchiveRoundModal(selectedTabs) {
           <input type="checkbox" class="archive-round-all" data-tab-idx="${tabIdx}" onchange="_toggleArchiveRoundAll(this,${tabIdx})" style="margin-right:3px">전체
         </label>`;
       tab.roundList.forEach((r, rIdx) => {
-        const pct = r.total > 0 ? Math.round(r.submitted / r.total * 100) : 0;
+        const pct = _pct(r.submitted, r.total);
         const pctColor = pct >= 100 ? '#059669' : pct >= 50 ? '#D97706' : '#6B7280';
         html += `<label style="font-size:.75rem;display:inline-flex;align-items:center;gap:3px;padding:3px 8px;border:1px solid #D1D5DB;border-radius:6px;cursor:pointer;background:#FAFAFA">
           <input type="checkbox" class="archive-round-cb" data-tab-idx="${tabIdx}" data-round="${escHtml(r.round)}" value="${escHtml(r.round)}" style="width:13px;height:13px">
@@ -12376,7 +12384,7 @@ function openTabDashDetail(idx) {
   const stLabel = st === "closed" ? "마감" : "활성";
   const stClr = st === "closed" ? "#DC2626" : "#059669";
   const rc = t.row_count || 0, sc = t.submitted_count || 0;
-  const pct = rc > 0 ? Math.round(sc / rc * 100) : 0;
+  const pct = _pct(sc, rc);
 
   // 21컬럼 전체를 그룹별로 표시
   const groups = [
