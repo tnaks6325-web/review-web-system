@@ -11136,7 +11136,7 @@ let _tabDashData = null;
 let _tabDashView = "table";      // テーブル固定 (v11.8.3: カード削除)
 
 // ── 정렬 상태: { key: 'campaign_name'|'_progress', dir: 'asc'|'desc' } or null ──
-let _tabDashSort = null;
+let _tabDashSort = { key: '_progress', dir: 'desc' };
 
 /** 정렬 토글: 같은 컬럼 클릭 → asc→desc→해제, 다른 컬럼 클릭 → asc부터 */
 function _toggleTabDashSort(key) {
