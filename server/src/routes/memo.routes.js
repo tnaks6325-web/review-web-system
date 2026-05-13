@@ -4,7 +4,7 @@ const pool = require('../db/pool');
 const { authMiddleware } = require('../middleware/auth.middleware');
 
 // GET /api/memo — 메모 조회 (GAS: getMemo)
-router.get('/', async (req, res, next) => {
+router.get('/', authMiddleware, async (req, res, next) => {
   try {
     const { sheetId, tabName } = req.query;
     if (!sheetId || !tabName) return res.json({ ok: true, memo: null });
@@ -23,7 +23,7 @@ router.get('/', async (req, res, next) => {
 });
 
 // POST /api/memo — 메모 저장 (GAS: saveMemo)
-router.post('/', async (req, res, next) => {
+router.post('/', authMiddleware, async (req, res, next) => {
   try {
     const { sheetId, tabName, role, name, text } = req.body;
     if (!sheetId || !tabName) return res.json({ error: 'sheetId, tabName 필요' });

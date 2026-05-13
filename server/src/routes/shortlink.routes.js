@@ -1,6 +1,7 @@
 const express = require('express');
 const router = express.Router();
 const pool = require('../db/pool');
+const { authMiddleware } = require('../middleware/auth.middleware');
 
 // 혼동문자 제외 영숫자 (GAS 원본 동일)
 const SHORT_CHARS = 'abcdefghjkmnpqrstuvwxyz23456789';
@@ -18,7 +19,7 @@ function generateShortCode() {
 // POST /api/short/create — 단축URL 생성 (GAS: createShort)
 // GAS 호환: 동일 파라미터 조합이면 기존 코드 재사용
 // ═══════════════════════════════════════════════════════════
-router.post('/create', async (req, res, next) => {
+router.post('/create', authMiddleware, async (req, res, next) => {
   try {
     const { s, g, t, d, options, optionList } = req.body;
     if (!s || !t) return res.json({ error: 's(sheetId)와 t(tabName)은 필수입니다.' });

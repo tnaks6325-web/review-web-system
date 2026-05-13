@@ -87,7 +87,7 @@ router.get('/debug-base', authMiddleware, async (req, res, next) => {
 // ═══════════════════════════════════════════════════════════
 // POST /api/diag/check-duplicate — 구매양식 중복 검사 (GAS: checkDuplicateOrder)
 // ═══════════════════════════════════════════════════════════
-router.post('/check-duplicate', async (req, res, next) => {
+router.post('/check-duplicate', authMiddleware, async (req, res, next) => {
   try {
     const { sheetId, tabName, userId, orderNum } = req.body;
     if (!sheetId || !tabName) return res.json({ error: 'sheetId, tabName 필요' });
@@ -1565,7 +1565,7 @@ router.post('/metrics/reset', authMiddleware, async (req, res) => {
 // ═══════════════════════════════════════════════════════════
 // POST /api/diag/client-error — 프론트엔드 JS 에러 수집
 // ═══════════════════════════════════════════════════════════
-router.post('/client-error', async (req, res) => {
+router.post('/client-error', authMiddleware, async (req, res) => {
   try {
     const { message, source, lineno, colno, stack, page, userAgent } = req.body;
     logger.error({
@@ -1583,7 +1583,7 @@ router.post('/client-error', async (req, res) => {
 // ═══════════════════════════════════════════════════════════
 // GET /api/diag/payment-check — 입금 헤더 감지 진단 (임시)
 // ═══════════════════════════════════════════════════════════
-router.get('/payment-check', async (req, res) => {
+router.get('/payment-check', authMiddleware, async (req, res) => {
   try {
     // 1) is_submitted2 상태 요약
     const { rows: summary } = await pool.query(`

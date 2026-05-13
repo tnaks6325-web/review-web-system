@@ -5,6 +5,7 @@ const { enqueue } = require('../services/syncQueue.service');
 const pool = require('../db/pool');
 const { logger } = require('../utils/logger');
 const { emitReviewSubmit, emitOrderSubmit } = require('../utils/sse');
+const { authMiddleware } = require('../middleware/auth.middleware');
 
 // ═══════════════════════════════════════════════════════════
 // 한국 실명 판별 유틸리티
@@ -153,7 +154,7 @@ async function getCachedTabData(sheetId, tabName, opts = {}) {
 // ═══════════════════════════════════════════════════════════
 // 진단: 시트 탭 이름 목록 조회 (디버그용)
 // ═══════════════════════════════════════════════════════════
-router.post('/debug-tabs', async (req, res, next) => {
+router.post('/debug-tabs', authMiddleware, async (req, res, next) => {
   try {
     const { sheetId } = req.body;
     if (!sheetId) return res.json({ ok: false, error: 'sheetId 필요' });
@@ -172,7 +173,7 @@ router.post('/debug-tabs', async (req, res, next) => {
 // ═══════════════════════════════════════════════════════════
 // 진단: 시트 데이터 조회 (헤더 감지 디버그용)
 // ═══════════════════════════════════════════════════════════
-router.post('/debug-sheet-data', async (req, res, next) => {
+router.post('/debug-sheet-data', authMiddleware, async (req, res, next) => {
   try {
     const { sheetId, tabName, rows = 10 } = req.body;
     if (!sheetId || !tabName) return res.json({ ok: false, error: 'sheetId, tabName 필요' });
@@ -191,7 +192,7 @@ router.post('/debug-sheet-data', async (req, res, next) => {
 // ═══════════════════════════════════════════════════════════
 // GET /api/submit/diag-tabs — tab_configs 데이터 진단 (캠페인/탭명 확인용)
 // ═══════════════════════════════════════════════════════════
-router.get('/diag-tabs', async (req, res) => {
+router.get('/diag-tabs', authMiddleware, async (req, res) => {
   try {
     const { sheetId } = req.query;
     if (!sheetId) return res.json({ ok: false, error: 'sheetId 필요' });
@@ -210,7 +211,7 @@ router.get('/diag-tabs', async (req, res) => {
 // ═══════════════════════════════════════════════════════════
 // GET /api/submit/slot-status — slot_locks 테이블 상태 확인 (진단용)
 // ═══════════════════════════════════════════════════════════
-router.get('/slot-status', async (req, res) => {
+router.get('/slot-status', authMiddleware, async (req, res) => {
   try {
     const { rows: tableCheck } = await pool.query(`
       SELECT EXISTS (

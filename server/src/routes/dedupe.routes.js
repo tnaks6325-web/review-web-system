@@ -2,6 +2,7 @@ const express = require('express');
 const router = express.Router();
 const pool = require('../db/pool');
 const { logger } = require('../utils/logger');
+const { authMiddleware } = require('../middleware/auth.middleware');
 const {
   detectDuplicates,
   trashFiles,
@@ -20,7 +21,7 @@ const { readSheet, writeSheet, batchUpdateSheet } = require('../services/sheets.
  * 미리보기: 중복 파일 감지 결과 반환 (삭제하지 않음)
  * Body: { sheetId, tabName }
  */
-router.post('/preview', async (req, res, next) => {
+router.post('/preview', authMiddleware, async (req, res, next) => {
   try {
     const { sheetId, tabName } = req.body;
     if (!sheetId || !tabName) {
@@ -104,7 +105,7 @@ router.post('/preview', async (req, res, next) => {
  * 실행: 중복 파일 휴지통 이동 + 시트 "중복" 마킹
  * Body: { sheetId, tabName, filesToRemove: [{fileId, fileName, reviewerName}] }
  */
-router.post('/execute', async (req, res, next) => {
+router.post('/execute', authMiddleware, async (req, res, next) => {
   try {
     const { sheetId, tabName, filesToRemove } = req.body;
     if (!sheetId || !tabName || !filesToRemove || filesToRemove.length === 0) {

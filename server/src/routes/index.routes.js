@@ -23,7 +23,7 @@ router.get('/', async (req, res, next) => {
 // ═══════════════════════════════════════════════════════════
 // GET /api/search/debug — 디버그용 검색 (GAS: searchAllDebug)
 // ═══════════════════════════════════════════════════════════
-router.get('/debug', async (req, res, next) => {
+router.get('/debug', authMiddleware, async (req, res, next) => {
   try {
     const { query } = req.query;
     const result = await searchByNameDebug(query);
