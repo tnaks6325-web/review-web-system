@@ -800,7 +800,44 @@ router.post('/fix-campaign-tab-swap', authMiddleware, async (req, res, next) => 
           }
         } else {
           // tab_name이 시트에도 없고 campaign_name도 시트 탭이 아님
-          skipped++;
+          // ★ 그래도 campaign_name이 비어있으면 correctCampaignName으로 채움
+          const orphanCampEmpty = !dbCampaignName && correctCampaignName;
+          if (orphanCampEmpty) {
+            const orphanFix = {
+              sheetId: sid.substring(0, 15) + '...',
+              fullSheetId: sid,
+              type: 'orphan_campaign_fill',
+              tabName: dbTabName,
+              oldCampaignName: dbCampaignName || null,
+              newCampaignName: correctCampaignName,
+            };
+
+            if (!dryRun) {
+              try {
+                await pool.query(
+                  'UPDATE tab_configs SET campaign_name = $1, updated_at = NOW() WHERE sheet_id = $2 AND tab_name = $3',
+                  [correctCampaignName, sid, dbTabName]
+                );
+                await pool.query(
+                  'UPDATE index_master SET campaign_name = $1 WHERE sheet_id = $2 AND tab_name = $3',
+                  [correctCampaignName, sid, dbTabName]
+                );
+                orphanFix.status = 'fixed';
+                fixed++;
+                logger.info(`[fix-swap] 고아 탭 campaign 채움: "${dbTabName}" → campaign="${correctCampaignName}"`);
+              } catch (oErr) {
+                orphanFix.status = 'error';
+                orphanFix.error = oErr.message;
+                errors++;
+              }
+            } else {
+              orphanFix.status = 'dry_run';
+            }
+
+            fixes.push(orphanFix);
+          } else {
+            skipped++;
+          }
         }
       }
 
