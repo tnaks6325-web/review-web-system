@@ -707,9 +707,11 @@ router.post('/fix-campaign-tab-swap', authMiddleware, async (req, res, next) => 
           // ★ campaign_name이 잘못된 경우 감지:
           //    1) campaign_name이 같은 시트의 다른 탭명과 일치하면 잘못된 값
           //    2) campaign_name이 자기 자신의 탭명과 동일하면 잘못된 값 (시트 제목이어야 함)
+          //    3) campaign_name이 NULL/빈값이면 채워야 함
           const campIsAnotherTab = campaignExistsAsTab && dbCampaignName !== dbTabName;
           const campIsSelfTabName = dbCampaignName === dbTabName && correctCampaignName && correctCampaignName !== dbTabName;
-          const campNeedsFix = (campIsAnotherTab || campIsSelfTabName) && correctCampaignName && dbCampaignName !== correctCampaignName;
+          const campIsEmpty = !dbCampaignName && correctCampaignName;
+          const campNeedsFix = (campIsAnotherTab || campIsSelfTabName || campIsEmpty) && correctCampaignName && dbCampaignName !== correctCampaignName;
 
           if (!currentGid && realGid) {
             // GID 보충 + campaign_name 교정 동시 처리
