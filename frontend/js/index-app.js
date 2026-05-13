@@ -11135,6 +11135,21 @@ async function deleteKeywordAction(id, keyword) {
 let _tabDashData = null;
 let _tabDashView = "table";      // テーブル固定 (v11.8.3: カード削除)
 
+// ── 정렬 상태: { key: 'campaign_name'|'_progress', dir: 'asc'|'desc' } or null ──
+let _tabDashSort = null;
+
+/** 정렬 토글: 같은 컬럼 클릭 → asc→desc→해제, 다른 컬럼 클릭 → asc부터 */
+function _toggleTabDashSort(key) {
+  if (!_tabDashSort || _tabDashSort.key !== key) {
+    _tabDashSort = { key, dir: 'asc' };
+  } else if (_tabDashSort.dir === 'asc') {
+    _tabDashSort.dir = 'desc';
+  } else {
+    _tabDashSort = null; // 해제
+  }
+  renderTabDashTable();
+}
+
 // ── 21컬럼 정의: key, 한국어 라벨, 카테고리, 기본표시여부 ──
 const _TAB_DASH_COLS = [
   { key:"_form_link",       label:"양식",      cat:"link",  show:true,  align:"center", width:"50px" },
@@ -11260,7 +11275,7 @@ function _filterTabDashData() {
     }
   });
 
-  return expanded.filter(t => {
+  let result = expanded.filter(t => {
     if (statusF === "active" && t.is_closed) return false;
     if (statusF === "closed" && !t.is_closed) return false;
     if (mgrF && (t.manager || "(미지정)") !== mgrF) return false;
@@ -11272,6 +11287,37 @@ function _filterTabDashData() {
     }
     return true;
   });
+
+  // ── 정렬 적용 ──
+  if (_tabDashSort) {
+    const { key, dir } = _tabDashSort;
+    const mul = dir === 'asc' ? 1 : -1;
+
+    result.sort((a, b) => {
+      if (key === 'campaign_name') {
+        // ㄱㄴㄷ순 (한국어 로케일 정렬)
+        const va = (a.campaign_name || '').trim();
+        const vb = (b.campaign_name || '').trim();
+        if (!va && !vb) return 0;
+        if (!va) return 1;  // 빈값은 항상 뒤로
+        if (!vb) return -1;
+        return mul * va.localeCompare(vb, 'ko');
+      }
+      if (key === '_progress') {
+        // 진행률(submitted/row_count) 기준
+        const rcA = a._isRoundRow ? (a._roundTotal || 0) : (a.row_count || 0);
+        const scA = a._isRoundRow ? (a._roundSubmitted || 0) : (a.submitted_count || 0);
+        const rcB = b._isRoundRow ? (b._roundTotal || 0) : (b.row_count || 0);
+        const scB = b._isRoundRow ? (b._roundSubmitted || 0) : (b.submitted_count || 0);
+        const pctA = rcA > 0 ? scA / rcA : -1;  // 데이터 없으면 -1로 뒤로
+        const pctB = rcB > 0 ? scB / rcB : -1;
+        return mul * (pctA - pctB);
+      }
+      return 0;
+    });
+  }
+
+  return result;
 }
 
 // ── 대시보드 전체 새로고침 (새로고침 버튼 클릭 시) ──
@@ -12032,7 +12078,22 @@ function _renderFullTableView(wrap, filtered) {
   // 전체선택 체크박스
   const allChecked = filtered.length > 0 && filtered.every(t => _tabDashChecked.has(`${t.sheet_id}||${t.tab_name}`));
   html += `<th style="${thStyle};text-align:center;width:30px"><input type="checkbox" ${allChecked?'checked':''} onchange="_toggleAllTabDashCheck(this.checked)" style="width:14px;height:14px;cursor:pointer" title="전체 선택/해제"></th>`;
-  visibleCols.forEach(c => { html += `<th style="${thStyle};text-align:${c.align}${c.width?';width:'+c.width:''}">${c.label}</th>`; });
+  visibleCols.forEach(c => {
+    const sortable = (c.key === 'campaign_name' || c.key === '_progress');
+    let sortIcon = '';
+    let sortCursor = '';
+    if (sortable) {
+      sortCursor = 'cursor:pointer;user-select:none;';
+      if (_tabDashSort && _tabDashSort.key === c.key) {
+        const arrow = _tabDashSort.dir === 'asc' ? 'fa-sort-up' : 'fa-sort-down';
+        sortIcon = ` <i class="fas ${arrow}" style="color:#1D4ED8;font-size:.7rem"></i>`;
+      } else {
+        sortIcon = ' <i class="fas fa-sort" style="color:#CBD5E1;font-size:.65rem"></i>';
+      }
+    }
+    const onclick = sortable ? ` onclick="_toggleTabDashSort('${c.key}')"` : '';
+    html += `<th style="${thStyle};text-align:${c.align}${c.width?';width:'+c.width:''};${sortCursor}"${onclick}>${c.label}${sortIcon}</th>`;
+  });
   html += `<th style="${thStyle};text-align:center">상세</th></tr></thead><tbody>`;
 
   filtered.forEach((t, idx) => {
