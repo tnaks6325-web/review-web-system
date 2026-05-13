@@ -1407,6 +1407,88 @@ router.post('/col-prefs', authMiddleware, async (req, res, next) => {
   }
 });
 
+// ═══════════════════════════════════════════════════════════
+// POST /api/tab/delete-orphan — 고아 탭 삭제
+// tab_gid가 NULL이고 index_master/review_index에 데이터가 없는 탭을 삭제
+// body: { sheetId, tabName, dryRun? }
+// ═══════════════════════════════════════════════════════════
+router.post('/delete-orphan', authMiddleware, async (req, res, next) => {
+  try {
+    const { sheetId, tabName, dryRun = true } = req.body || {};
+    if (!sheetId || !tabName) {
+      return res.status(400).json({ error: 'sheetId와 tabName이 필요합니다.' });
+    }
+
+    // 1. 해당 탭 존재 여부 및 상태 확인
+    const { rows: tcRows } = await pool.query(
+      'SELECT sheet_id, tab_name, tab_gid, campaign_name FROM tab_configs WHERE sheet_id = $1 AND tab_name = $2',
+      [sheetId, tabName]
+    );
+    if (tcRows.length === 0) {
+      return res.json({ ok: false, error: '해당 탭이 tab_configs에 존재하지 않습니다.' });
+    }
+
+    const tab = tcRows[0];
+
+    // 2. 안전장치: review_index에 실제 데이터가 있으면 삭제 차단
+    const { rows: riRows } = await pool.query(
+      'SELECT COUNT(*) AS cnt FROM review_index WHERE sheet_id = $1 AND tab_name = $2',
+      [sheetId, tabName]
+    );
+    const reviewCount = parseInt(riRows[0]?.cnt || '0', 10);
+    if (reviewCount > 0) {
+      return res.json({
+        ok: false,
+        error: `review_index에 ${reviewCount}건의 데이터가 있어 삭제할 수 없습니다. 데이터가 있는 탭은 고아가 아닙니다.`,
+        tab,
+        reviewCount,
+      });
+    }
+
+    // 3. index_master 데이터 확인
+    const { rows: imRows } = await pool.query(
+      'SELECT COUNT(*) AS cnt FROM index_master WHERE sheet_id = $1 AND tab_name = $2',
+      [sheetId, tabName]
+    );
+    const indexCount = parseInt(imRows[0]?.cnt || '0', 10);
+
+    const result = {
+      tab,
+      reviewCount,
+      indexCount,
+      deleted: {},
+    };
+
+    if (dryRun) {
+      result.dryRun = true;
+      result.willDelete = ['tab_configs'];
+      if (indexCount > 0) result.willDelete.push('index_master');
+      logger.info(`[delete-orphan] DRY-RUN: "${tabName}" (review=${reviewCount}, index=${indexCount})`);
+    } else {
+      // 4. 실제 삭제
+      const r1 = await pool.query(
+        'DELETE FROM tab_configs WHERE sheet_id = $1 AND tab_name = $2',
+        [sheetId, tabName]
+      );
+      result.deleted.tab_configs = r1.rowCount;
+
+      if (indexCount > 0) {
+        const r2 = await pool.query(
+          'DELETE FROM index_master WHERE sheet_id = $1 AND tab_name = $2',
+          [sheetId, tabName]
+        );
+        result.deleted.index_master = r2.rowCount;
+      }
+
+      logger.warn(`[delete-orphan] ⚠ 고아 탭 삭제: "${tabName}" sheet=${sheetId.substring(0,15)}... by ${req.admin?.name || 'unknown'}`);
+    }
+
+    res.json({ ok: true, ...result });
+  } catch (err) {
+    next(err);
+  }
+});
+
 module.exports = router;
 
 // ═══════════════════════════════════════════════════════════
