@@ -83,14 +83,18 @@ async function searchByName(query, phone8) {
   if (q && p8.length === 8) {
     // ── 이름 + phone8 검색 (정확 일치 + 동명이인 구분) ──
     // 공백 제거 후 정확 일치 AND phone8 일치
+    // ★ reviewer_name OR recipient_name 매칭 (수취인 검색 지원)
+    const nameParam = paramIdx++;
+    const phoneParam = paramIdx++;
     sql = `
       SELECT ${SELECT_FIELDS},
              1.0::float AS score
       FROM review_index ri
       LEFT JOIN tab_configs tc ON ri.sheet_id = tc.sheet_id AND ri.tab_name = tc.tab_name
       WHERE ri.is_submitted = FALSE
-        AND REPLACE(ri.reviewer_name, ' ', '') = $${paramIdx++}
-        AND ri.phone8 = $${paramIdx++}
+        AND (REPLACE(ri.reviewer_name, ' ', '') = $${nameParam}
+             OR REPLACE(ri.recipient_name, ' ', '') = $${nameParam})
+        AND ri.phone8 = $${phoneParam}
       ORDER BY ri.start_date DESC NULLS LAST
       LIMIT 200
     `;
@@ -113,13 +117,16 @@ async function searchByName(query, phone8) {
     // ── 이름만 검색 (정확 일치) ──
     // reviewer_name이 검색어와 정확히 일치하는 경우만 반환
     // 공백 제거 후 비교: "김 수 만" == "김수만"
+    // ★ reviewer_name OR recipient_name 매칭 (수취인 검색 지원)
+    const nameParam = paramIdx++;
     sql = `
       SELECT ${SELECT_FIELDS},
              1.0::float AS score
       FROM review_index ri
       LEFT JOIN tab_configs tc ON ri.sheet_id = tc.sheet_id AND ri.tab_name = tc.tab_name
       WHERE ri.is_submitted = FALSE
-        AND REPLACE(ri.reviewer_name, ' ', '') = $${paramIdx++}
+        AND (REPLACE(ri.reviewer_name, ' ', '') = $${nameParam}
+             OR REPLACE(ri.recipient_name, ' ', '') = $${nameParam})
       ORDER BY ri.start_date DESC NULLS LAST
       LIMIT 200
     `;
@@ -209,13 +216,16 @@ async function searchByNameFallback(q, p8, SELECT_FIELDS) {
   let paramIdx = 1;
 
   if (q && p8.length === 8) {
+    const nameParam = paramIdx++;
+    const phoneParam = paramIdx++;
     sql = `
       SELECT ${SELECT_FIELDS}
       FROM review_index ri
       LEFT JOIN tab_configs tc ON ri.sheet_id = tc.sheet_id AND ri.tab_name = tc.tab_name
       WHERE ri.is_submitted = FALSE
-        AND ri.reviewer_name ILIKE $${paramIdx++}
-        AND ri.phone8 = $${paramIdx++}
+        AND (ri.reviewer_name ILIKE $${nameParam}
+             OR ri.recipient_name ILIKE $${nameParam})
+        AND ri.phone8 = $${phoneParam}
       ORDER BY ri.start_date DESC NULLS LAST
       LIMIT 200
     `;
@@ -232,12 +242,14 @@ async function searchByNameFallback(q, p8, SELECT_FIELDS) {
     `;
     params.push(p8);
   } else {
+    const nameParam = paramIdx++;
     sql = `
       SELECT ${SELECT_FIELDS}
       FROM review_index ri
       LEFT JOIN tab_configs tc ON ri.sheet_id = tc.sheet_id AND ri.tab_name = tc.tab_name
       WHERE ri.is_submitted = FALSE
-        AND ri.reviewer_name ILIKE $${paramIdx++}
+        AND (ri.reviewer_name ILIKE $${nameParam}
+             OR ri.recipient_name ILIKE $${nameParam})
       ORDER BY ri.start_date DESC NULLS LAST
       LIMIT 200
     `;
@@ -317,7 +329,7 @@ async function searchByNameDebug(query) {
         ri.is_submitted AS "isSubmitted", ri.campaign_name AS "campaignName",
         similarity(ri.reviewer_name, $1)::float AS score
       FROM review_index ri
-      WHERE ri.reviewer_name ILIKE $2 OR ri.reviewer_name % $1
+      WHERE (ri.reviewer_name ILIKE $2 OR ri.recipient_name ILIKE $2) OR ri.reviewer_name % $1
       ORDER BY score DESC, ri.built_at DESC NULLS LAST
       LIMIT 500
     `, [q, `%${q}%`]);
@@ -331,7 +343,7 @@ async function searchByNameDebug(query) {
         ri.sheet_id AS "sheetId", ri.row_index AS "rowIndex",
         ri.is_submitted AS "isSubmitted", ri.campaign_name AS "campaignName"
       FROM review_index ri
-      WHERE ri.reviewer_name ILIKE $1
+      WHERE (ri.reviewer_name ILIKE $1 OR ri.recipient_name ILIKE $1)
       ORDER BY ri.built_at DESC NULLS LAST
       LIMIT 500
     `, [`%${q}%`]);

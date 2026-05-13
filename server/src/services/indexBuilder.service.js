@@ -762,7 +762,7 @@ async function _upsertTabIndex(sheetId, tabName, tabGid, checksum, rows, modifie
         for (const row of batch) {
           newRowIndices.add(row.rowIndex);
           insertPlaceholders.push(
-            `($${paramIdx++},$${paramIdx++},$${paramIdx++},$${paramIdx++},$${paramIdx++},$${paramIdx++},$${paramIdx++},$${paramIdx++},$${paramIdx++},$${paramIdx++},$${paramIdx++},$${paramIdx++},$${paramIdx++},$${paramIdx++},$${paramIdx++},$${paramIdx++},$${paramIdx++})`
+            `($${paramIdx++},$${paramIdx++},$${paramIdx++},$${paramIdx++},$${paramIdx++},$${paramIdx++},$${paramIdx++},$${paramIdx++},$${paramIdx++},$${paramIdx++},$${paramIdx++},$${paramIdx++},$${paramIdx++},$${paramIdx++},$${paramIdx++},$${paramIdx++},$${paramIdx++},$${paramIdx++})`
           );
           insertValues.push(
             row.name, sheetId, row.tabGid, tabName,
@@ -770,7 +770,8 @@ async function _upsertTabIndex(sheetId, tabName, tabGid, checksum, rows, modifie
             row.productUrl, row.productName, row.submitCol,
             JSON.stringify(row.rowJson), row.startDate, row.endDate, row.round,
             row.phone8 || null,
-            row.isSubmitted2 || null, row.submitCol2 || null
+            row.isSubmitted2 || null, row.submitCol2 || null,
+            row.recipientName || null
           );
         }
 
@@ -779,7 +780,7 @@ async function _upsertTabIndex(sheetId, tabName, tabGid, checksum, rows, modifie
             (reviewer_name, sheet_id, tab_gid, tab_name, campaign_name,
              row_index, is_submitted, product_url, product_name,
              submit_col, row_json, start_date, end_date, round, phone8,
-             is_submitted2, submit_col2)
+             is_submitted2, submit_col2, recipient_name)
           VALUES ${insertPlaceholders.join(', ')}
           ON CONFLICT (sheet_id, tab_name, row_index) DO UPDATE SET
             reviewer_name = EXCLUDED.reviewer_name,
@@ -800,6 +801,7 @@ async function _upsertTabIndex(sheetId, tabName, tabGid, checksum, rows, modifie
               ELSE COALESCE(EXCLUDED.is_submitted2, 'NONE')
             END,
             submit_col2 = EXCLUDED.submit_col2,
+            recipient_name = EXCLUDED.recipient_name,
             built_at = NOW()
         `, insertValues);
       }
@@ -896,6 +898,32 @@ function parseTabRows(values, sheetId, tabName, tabGid, campaignTitle) {
   if (nameColIdx < 0) {
     logger.warn(`[parseTabRows] 이름 컬럼 미발견 — tab=${tabName} headerRow=${headerRowIdx} headers=${JSON.stringify(headers.slice(0, 20))} NAME_KEYWORDS=${JSON.stringify(NAME_KEYWORDS)}`);
     return [];
+  }
+
+  // ── ★ 수취인 컬럼 감지: reviewer_name과 별도로 수취인명 저장 (검색 매칭용) ──
+  // nameColIdx가 '주문자' 계열이면 별도로 '수취인' 컬럼을 찾아 recipientColIdx에 저장
+  const RECIPIENT_KEYWORDS = ['수취인', '수취인명', '받는분'];
+  let recipientColIdx = -1;
+  const nameHeader = headers[nameColIdx] || '';
+  // reviewer_name이 '주문자' 계열 헤더에서 왔으면 → 별도 수취인 컬럼 탐색
+  if (nameHeader.includes('주문자') || nameHeader.includes('예금주')) {
+    recipientColIdx = headers.findIndex((h, hi) => {
+      if (hi === nameColIdx) return false; // 자기 자신 제외
+      return RECIPIENT_KEYWORDS.some(k => h.includes(k));
+    });
+  }
+  // reviewer_name이 수취인 계열이면 → 별도로 주문자 컬럼 탐색 (역방향)
+  if (recipientColIdx < 0 && RECIPIENT_KEYWORDS.some(k => nameHeader.includes(k))) {
+    const ordererIdx = headers.findIndex((h, hi) => {
+      if (hi === nameColIdx) return false;
+      return h.includes('주문자');
+    });
+    // 주문자 컬럼이 있으면, 주문자=reviewer_name이고 수취인은 nameColIdx가 이미 수취인
+    // → 이 경우 recipientColIdx는 불필요 (reviewer_name 자체가 수취인)
+    // 하지만 주문자 컬럼이 따로 있고 값이 다를 수 있으므로, 주문자를 recipientColIdx로
+    if (ordererIdx >= 0) {
+      recipientColIdx = ordererIdx;
+    }
   }
 
   // ── 제출열 탐색: 우선순위 기반 ("리뷰제출" > "리뷰완료" > 기타 "제출") ──
@@ -1007,6 +1035,7 @@ function parseTabRows(values, sheetId, tabName, tabGid, campaignTitle) {
 
       return {
         name,
+        recipientName: recipientColIdx >= 0 ? String(row[recipientColIdx] || '').trim() : null,
         tabGid,
         rowIndex: headerRowIdx + 1 + i + 1,
         isSubmitted,
