@@ -400,15 +400,33 @@ async function _upsertTab(sheetId, tabName, tabGid, checksum, rows, modifiedTime
       modifiedTime || null
     ]);
 
-    // tab_configs도 현재 탭의 tab_gid 갱신
+    // tab_configs도 현재 탭의 tab_gid + campaign_name 갱신
+    // ★ campaign_name 교정: spreadsheetTitle(시트 제목)이 있으면 탭 이름과 동일한 잘못된 값을 덮어씀
     if (tabGid) {
-      await client.query(
-        `INSERT INTO tab_configs (sheet_id, tab_name, tab_gid, campaign_name, sheet_url, updated_at)
-         VALUES ($1, $2, $3, $4, $5, NOW())
-         ON CONFLICT (sheet_id, tab_name) DO UPDATE SET
-           tab_gid = $3, campaign_name = COALESCE(NULLIF($4, ''), tab_configs.campaign_name), updated_at = NOW()`,
-        [sheetId, tabName, tabGid, campaignName || '', `https://docs.google.com/spreadsheets/d/${sheetId}/edit`]
-      );
+      if (campaignName && campaignName !== tabName) {
+        // spreadsheetTitle이 유효 → tab_configs에 적극 교정
+        await client.query(
+          `INSERT INTO tab_configs (sheet_id, tab_name, tab_gid, campaign_name, sheet_url, updated_at)
+           VALUES ($1, $2, $3, $4, $5, NOW())
+           ON CONFLICT (sheet_id, tab_name) DO UPDATE SET
+             tab_gid = $3,
+             campaign_name = CASE
+               WHEN tab_configs.campaign_name IS NULL OR tab_configs.campaign_name = '' OR tab_configs.campaign_name = $2
+               THEN $4 ELSE COALESCE(NULLIF($4, ''), tab_configs.campaign_name)
+             END,
+             updated_at = NOW()`,
+          [sheetId, tabName, tabGid, campaignName, `https://docs.google.com/spreadsheets/d/${sheetId}/edit`]
+        );
+      } else {
+        // spreadsheetTitle 없음 → 기존 로직 유지 (기존 값 보존)
+        await client.query(
+          `INSERT INTO tab_configs (sheet_id, tab_name, tab_gid, campaign_name, sheet_url, updated_at)
+           VALUES ($1, $2, $3, $4, $5, NOW())
+           ON CONFLICT (sheet_id, tab_name) DO UPDATE SET
+             tab_gid = $3, campaign_name = COALESCE(NULLIF($4, ''), tab_configs.campaign_name), updated_at = NOW()`,
+          [sheetId, tabName, tabGid, campaignName || '', `https://docs.google.com/spreadsheets/d/${sheetId}/edit`]
+        );
+      }
     }
 
     await client.query('COMMIT');

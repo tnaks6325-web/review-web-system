@@ -1281,10 +1281,14 @@ router.post('/create-campaign-sheet', authMiddleware, async (req, res, next) => 
     }
 
     const mode = registerMode || 'new';
-    const resolvedCampaignName = campaignName || fileTitle;
+    // ★ mode=new: fileTitle = 새 파일명(=시트 제목) → 캠페인명으로 적절
+    // ★ mode=existing: fileTitle = 새 탭명 → 캠페인명으로 부적절! 시트 제목을 조회해야 함
+    let resolvedCampaignName = campaignName || '';
 
     // ── 모드 1: 새 스프레드시트 생성 (전체 복사) ──
     if (mode === 'new') {
+      // mode=new에서는 fileTitle이 곧 새 시트 제목이므로 캠페인명으로 사용 가능
+      if (!resolvedCampaignName) resolvedCampaignName = fileTitle;
       const copied = await copySpreadsheet(templateSheetId, fileTitle);
       logger.info(`[createSheet] 새 시트 생성: ${copied.name} (${copied.id})`);
 
@@ -1326,6 +1330,29 @@ router.post('/create-campaign-sheet', authMiddleware, async (req, res, next) => 
     if (mode === 'existing') {
       if (!existingSheetId) {
         return res.json({ ok: false, error: '기존 시트 ID가 필요합니다.' });
+      }
+
+      // ★ mode=existing: campaignName이 비었으면 기존 시트의 제목(spreadsheetTitle)을 조회
+      //    fileTitle은 새 탭 이름이므로 캠페인명으로 사용하면 안 됨
+      if (!resolvedCampaignName) {
+        try {
+          const existingMeta = await getSpreadsheetMeta(existingSheetId);
+          resolvedCampaignName = existingMeta._spreadsheetTitle || '';
+        } catch (_) {}
+        // 그래도 비어있으면 campaigns 테이블에서 조회
+        if (!resolvedCampaignName) {
+          try {
+            const { rows: campRows } = await pool.query(
+              'SELECT campaign_name FROM campaigns WHERE sheet_id = $1 LIMIT 1',
+              [existingSheetId]
+            );
+            if (campRows.length > 0 && campRows[0].campaign_name) {
+              resolvedCampaignName = campRows[0].campaign_name;
+            }
+          } catch (_) {}
+        }
+        // 최종 fallback: 빈 문자열 (탭 이름을 캠페인명으로 사용하지 않음)
+        if (!resolvedCampaignName) resolvedCampaignName = '';
       }
 
       // 템플릿에서 복사할 탭의 sheetId(gid) 찾기

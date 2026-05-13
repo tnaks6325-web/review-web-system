@@ -840,6 +840,18 @@ async function _upsertTabIndex(sheetId, tabName, tabGid, checksum, rows, modifie
       modifiedTime || null
     ]);
 
+    // ★ tab_configs.campaign_name 교정: spreadsheetTitle(시트 제목)이 전달된 경우
+    //    tab_configs에 탭 이름이 잘못 저장된 것을 시트 제목으로 덮어씀
+    //    campaignName이 tabName과 다를 때만 교정 (불필요한 UPDATE 방지)
+    if (campaignName && campaignName !== tabName) {
+      await client.query(
+        `UPDATE tab_configs SET campaign_name = $1, updated_at = NOW()
+         WHERE sheet_id = $2 AND tab_name = $3
+           AND (campaign_name IS NULL OR campaign_name = '' OR campaign_name = $3)`,
+        [campaignName, sheetId, tabName]
+      );
+    }
+
     await client.query('COMMIT');
   } catch (err) {
     await client.query('ROLLBACK');
@@ -1007,7 +1019,7 @@ function parseTabRows(values, sheetId, tabName, tabGid, campaignTitle) {
         startDate: startDateIdx >= 0 ? _formatDate(row[startDateIdx]) : null,
         endDate: endDateIdx >= 0 ? _formatDate(row[endDateIdx]) : null,
         round: roundIdx >= 0 ? String(row[roundIdx] || '').trim() : '',
-        campaignName: campaignTitle || tabName,
+        campaignName: campaignTitle || tabName,  // ★ campaignTitle = spreadsheetTitle (호출부에서 보장)
         phone8,
       };
     })
