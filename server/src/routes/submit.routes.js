@@ -647,57 +647,99 @@ router.post('/order', async (req, res, next) => {
             return !phoneVal && !addrVal;
           }
 
-          if (submittedOptKey && optColIndices.length > 0) {
-            // ── 1단계: 옵션 키 일치 + 연락처/주소 비어있는 행 찾기 ──
-            let optionMatched = false;
+          // ═══════════════════════════════════════════════════
+          // ★★★ 0순위: 인애드명단 ↔ 주문자 이름 매칭 (최우선)
+          // 인애드명단 컬럼에 기입된 이름과 주문자(orderer)가 일치하는
+          // 미기입 행을 찾아 해당 행에 데이터를 기입
+          // ═══════════════════════════════════════════════════
+          const inadColIdx = headers.findIndex(h => INAD_COL_KEYWORDS.some(kw => h.toLowerCase().includes(kw)));
+          const submittedOrderer = (orderer || '').trim();
+          let inadMatched = false;
+
+          if (inadColIdx >= 0 && submittedOrderer) {
             for (let i = 0; i < dataRows.length; i++) {
               const row = dataRows[i] || [];
-              // FILLED_THRESHOLD 보호 (번호/인애드명단/구매일자/상품/옵션 컬럼 제외하고 카운트)
               if (_countFilledExcluding(row) >= FILLED_THRESHOLD) continue;
 
-              // 옵션 컬럼 값 비교 (순서대로 파이프 분리값과 비교)
-              let optMatch = true;
-              for (let oi = 0; oi < optColIndices.length; oi++) {
-                const cellVal = String(row[optColIndices[oi]] || '').trim();
-                const expectedVal = optKeyParts[oi] || '';
-                if (cellVal.toLowerCase() !== expectedVal.toLowerCase()) {
-                  optMatch = false;
+              const inadVal = String(row[inadColIdx] || '').trim();
+              if (!inadVal) continue; // 인애드명단이 비어있으면 skip
+
+              // 인애드명단 == 주문자 이름 일치 확인
+              if (inadVal === submittedOrderer) {
+                // 일치하는 행이 미기입 상태인지 확인
+                if (_isUnfilledRow(row)) {
+                  emptyRowOffset = i;
+                  inadMatched = true;
+                  logger.info(`[submit/order:bg] ★ 인애드명단 매칭 성공: "${submittedOrderer}" == 인애드[${i}]="${inadVal}" → dataRow[${i}]`);
+                  break;
+                } else {
+                  logger.info(`[submit/order:bg] 인애드명단 일치하나 이미 기입됨: "${inadVal}" → dataRow[${i}] (skip)`);
+                }
+              }
+            }
+            if (inadMatched) {
+              logger.info(`[submit/order:bg] 인애드명단 매칭으로 행 결정 완료 → 옵션/빈행 탐색 생략`);
+            } else {
+              logger.info(`[submit/order:bg] 인애드명단 매칭 실패 (orderer="${submittedOrderer}") → 옵션/빈행 fallback`);
+            }
+          }
+
+          // ═══════════════════════════════════════════════════
+          // 1순위 이하: 인애드명단 매칭 실패 시에만 옵션/빈행 탐색
+          // ═══════════════════════════════════════════════════
+          if (!inadMatched) {
+            if (submittedOptKey && optColIndices.length > 0) {
+              // ── 1단계: 옵션 키 일치 + 연락처/주소 비어있는 행 찾기 ──
+              let optionMatched = false;
+              for (let i = 0; i < dataRows.length; i++) {
+                const row = dataRows[i] || [];
+                // FILLED_THRESHOLD 보호 (번호/인애드명단/구매일자/상품/옵션 컬럼 제외하고 카운트)
+                if (_countFilledExcluding(row) >= FILLED_THRESHOLD) continue;
+
+                // 옵션 컬럼 값 비교 (순서대로 파이프 분리값과 비교)
+                let optMatch = true;
+                for (let oi = 0; oi < optColIndices.length; oi++) {
+                  const cellVal = String(row[optColIndices[oi]] || '').trim();
+                  const expectedVal = optKeyParts[oi] || '';
+                  if (cellVal.toLowerCase() !== expectedVal.toLowerCase()) {
+                    optMatch = false;
+                    break;
+                  }
+                }
+                if (!optMatch) continue;
+
+                // 옵션 일치 + 연락처/주소가 비어있으면 → 이 행에 기입
+                if (_isUnfilledRow(row)) {
+                  emptyRowOffset = i;
+                  optionMatched = true;
+                  logger.info(`[submit/order:bg] 옵션 매칭 성공: optKey="${submittedOptKey}" → dataRow[${i}]`);
                   break;
                 }
               }
-              if (!optMatch) continue;
 
-              // 옵션 일치 + 연락처/주소가 비어있으면 → 이 행에 기입
-              if (_isUnfilledRow(row)) {
-                emptyRowOffset = i;
-                optionMatched = true;
-                logger.info(`[submit/order:bg] 옵션 매칭 성공: optKey="${submittedOptKey}" → dataRow[${i}]`);
-                break;
+              // ── 2단계: 옵션 매칭 실패 시 → 단순 빈 행 탐색 (fallback) ──
+              if (!optionMatched) {
+                logger.info(`[submit/order:bg] 옵션 매칭 실패 → 빈 행 fallback (optKey="${submittedOptKey}")`);
+                for (let i = 0; i < dataRows.length; i++) {
+                  const row = dataRows[i] || [];
+                  if (_countFilledExcluding(row) >= FILLED_THRESHOLD) continue;
+                  if (_isUnfilledRow(row)) {
+                    emptyRowOffset = i;
+                    break;
+                  }
+                }
               }
-            }
-
-            // ── 2단계: 옵션 매칭 실패 시 → 단순 빈 행 탐색 (fallback) ──
-            if (!optionMatched) {
-              logger.info(`[submit/order:bg] 옵션 매칭 실패 → 빈 행 fallback (optKey="${submittedOptKey}")`);
+            } else {
+              // ── 옵션 없음: 연락처+주소 기준 첫 번째 빈 행 ──
               for (let i = 0; i < dataRows.length; i++) {
                 const row = dataRows[i] || [];
+                // ★ FILLED_THRESHOLD 보호 (사전 기입 컬럼 제외하고 4개 이상 채워진 행은 건드리지 않음)
                 if (_countFilledExcluding(row) >= FILLED_THRESHOLD) continue;
+                // 연락처와 주소가 모두 비어있으면 미기입 행으로 판정
                 if (_isUnfilledRow(row)) {
                   emptyRowOffset = i;
                   break;
                 }
-              }
-            }
-          } else {
-            // ── 옵션 없음: 연락처+주소 기준 첫 번째 빈 행 ──
-            for (let i = 0; i < dataRows.length; i++) {
-              const row = dataRows[i] || [];
-              // ★ FILLED_THRESHOLD 보호 (사전 기입 컬럼 제외하고 4개 이상 채워진 행은 건드리지 않음)
-              if (_countFilledExcluding(row) >= FILLED_THRESHOLD) continue;
-              // 연락처와 주소가 모두 비어있으면 미기입 행으로 판정
-              if (_isUnfilledRow(row)) {
-                emptyRowOffset = i;
-                break;
               }
             }
           }

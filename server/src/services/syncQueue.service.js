@@ -200,6 +200,10 @@ async function _executeItem(item) {
         const hl = h.toLowerCase();
         return hl.includes('연락처') || hl.includes('전화') || hl.includes('핸드폰') || hl.includes('휴대폰') || hl === 'phone';
       });
+      const addressColIdx = headers.findIndex(h => {
+        const hl = h.toLowerCase();
+        return hl.includes('주소') || hl.includes('address');
+      });
 
       // ★ FILLED_THRESHOLD: 4개 이상 채워진 행은 절대 덮어쓰지 않음
       const FILLED_THRESHOLD = 4;
@@ -210,17 +214,54 @@ async function _executeItem(item) {
         }).length;
       }
 
+      // ★ 빈 행 판정 헬퍼: 연락처+주소가 모두 비어있으면 "미기입 행"
+      function _isUnfilledRow(row) {
+        const pVal = phoneColIdx >= 0 ? String(row[phoneColIdx] || '').trim() : '';
+        const aVal = addressColIdx >= 0 ? String(row[addressColIdx] || '').trim() : '';
+        return !pVal && !aVal;
+      }
+
       let emptyRowOffset = dataRows.length; // default: 데이터 끝 다음
-      for (let i = 0; i < dataRows.length; i++) {
-        const row = dataRows[i] || [];
-        // ★ FILLED_THRESHOLD 보호: 4개 이상 채워진 행은 절대 건드리지 않음
-        if (_countFilled(row) >= FILLED_THRESHOLD) continue;
-        // 수취인과 연락처가 모두 비어있으면 빈 행으로 판정
-        const recipientVal = recipientColIdx >= 0 ? String(row[recipientColIdx] || '').trim() : '';
-        const phoneVal = phoneColIdx >= 0 ? String(row[phoneColIdx] || '').trim() : '';
-        if (!recipientVal && !phoneVal) {
-          emptyRowOffset = i;
-          break;
+
+      // ═══════════════════════════════════════════════════
+      // ★★★ 0순위: 인애드명단 ↔ 주문자 이름 매칭 (최우선)
+      // ═══════════════════════════════════════════════════
+      const INAD_KEYWORDS = ['인애드', '인애드명', '인애드제출', '카톡', '카카오', '닉네임'];
+      const inadColIdx = headers.findIndex(h => INAD_KEYWORDS.some(kw => h.toLowerCase().includes(kw)));
+      const submittedOrderer = (orderData.orderer || '').trim();
+      let inadMatched = false;
+
+      if (inadColIdx >= 0 && submittedOrderer) {
+        for (let i = 0; i < dataRows.length; i++) {
+          const row = dataRows[i] || [];
+          if (_countFilled(row) >= FILLED_THRESHOLD) continue;
+
+          const inadVal = String(row[inadColIdx] || '').trim();
+          if (!inadVal) continue;
+
+          if (inadVal === submittedOrderer && _isUnfilledRow(row)) {
+            emptyRowOffset = i;
+            inadMatched = true;
+            logger.info(`[syncQueue:order_append] ★ 인애드명단 매칭: "${submittedOrderer}" → dataRow[${i}]`);
+            break;
+          }
+        }
+        if (!inadMatched) {
+          logger.info(`[syncQueue:order_append] 인애드명단 매칭 실패 (orderer="${submittedOrderer}") → 빈행 fallback`);
+        }
+      }
+
+      // ═══════════════════════════════════════════════════
+      // 인애드명단 매칭 실패 시에만 빈 행 탐색
+      // ═══════════════════════════════════════════════════
+      if (!inadMatched) {
+        for (let i = 0; i < dataRows.length; i++) {
+          const row = dataRows[i] || [];
+          if (_countFilled(row) >= FILLED_THRESHOLD) continue;
+          if (_isUnfilledRow(row)) {
+            emptyRowOffset = i;
+            break;
+          }
         }
       }
 
