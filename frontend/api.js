@@ -352,6 +352,148 @@ async function gasPost(body, timeout) {
 }
 
 // ═══════════════════════════════════════════════════════════
+// 업로드 진행률 UI + XHR 기반 업로드 (이미지 업로드 전용)
+// ═══════════════════════════════════════════════════════════
+
+/** 업로드 진행률 오버레이 (싱글톤) */
+const _uploadProgress = {
+  _el: null,
+  _bar: null,
+  _text: null,
+  _pct: null,
+
+  _ensure() {
+    if (this._el) return;
+    const overlay = document.createElement('div');
+    overlay.id = '_apiUploadProgress';
+    overlay.style.cssText = 'display:none;position:fixed;top:0;left:0;right:0;bottom:0;background:rgba(0,0,0,.45);z-index:99999;align-items:center;justify-content:center;';
+    overlay.innerHTML = `
+      <div style="background:#fff;border-radius:16px;padding:28px 32px;min-width:280px;max-width:340px;text-align:center;box-shadow:0 8px 32px rgba(0,0,0,.2)">
+        <div style="font-size:14px;font-weight:600;color:#334155;margin-bottom:14px" id="_upText">이미지 업로드 중...</div>
+        <div style="background:#e2e8f0;border-radius:8px;height:10px;overflow:hidden;margin-bottom:8px">
+          <div id="_upBar" style="height:100%;width:0%;background:linear-gradient(90deg,#6366f1,#8b5cf6);border-radius:8px;transition:width .3s ease"></div>
+        </div>
+        <div id="_upPct" style="font-size:12px;color:#64748b">0%</div>
+        <div style="font-size:11px;color:#94a3b8;margin-top:8px">네트워크 상태에 따라 시간이 걸릴 수 있습니다</div>
+      </div>`;
+    document.body.appendChild(overlay);
+    this._el = overlay;
+    this._bar = overlay.querySelector('#_upBar');
+    this._text = overlay.querySelector('#_upText');
+    this._pct = overlay.querySelector('#_upPct');
+  },
+
+  show(label) {
+    this._ensure();
+    this._bar.style.width = '0%';
+    this._pct.textContent = '0%';
+    this._text.textContent = label || '이미지 업로드 중...';
+    this._el.style.display = 'flex';
+  },
+
+  update(percent) {
+    if (!this._el) return;
+    const p = Math.min(100, Math.max(0, Math.round(percent)));
+    this._bar.style.width = p + '%';
+    this._pct.textContent = p + '%';
+    if (p >= 100) this._text.textContent = '서버 처리 중...';
+  },
+
+  hide() {
+    if (this._el) this._el.style.display = 'none';
+  }
+};
+
+/** 간단한 토스트 (api.js 자체 내장 — showToast가 없는 페이지 대비) */
+function _apiToast(msg, type, duration) {
+  // 기존 showToast가 있으면 우선 사용
+  if (typeof showToast === 'function') {
+    try { showToast(msg, type === 'error' ? true : type, duration); return; } catch(_) {}
+  }
+  const t = document.createElement('div');
+  const bg = type === 'error' ? '#dc2626' : type === 'warning' ? '#f59e0b' : '#10b981';
+  t.style.cssText = `position:fixed;top:20px;left:50%;transform:translateX(-50%);background:${bg};color:#fff;padding:10px 20px;border-radius:10px;font-size:13px;font-weight:500;z-index:999999;box-shadow:0 4px 16px rgba(0,0,0,.2);max-width:90vw;text-align:center;line-height:1.4;transition:opacity .3s`;
+  t.textContent = msg;
+  document.body.appendChild(t);
+  setTimeout(() => { t.style.opacity = '0'; setTimeout(() => t.remove(), 400); }, duration || 4000);
+}
+
+/** XHR 기반 POST — 업로드 진행률 지원 */
+function _xhrPost(url, jsonBody, timeoutMs, onProgress) {
+  return new Promise((resolve, reject) => {
+    const xhr = new XMLHttpRequest();
+    xhr.open('POST', url, true);
+    xhr.setRequestHeader('Content-Type', 'application/json');
+    // JWT 인증 헤더
+    const token = sessionStorage.getItem('admin_token');
+    if (token) xhr.setRequestHeader('Authorization', 'Bearer ' + token);
+    xhr.timeout = timeoutMs;
+
+    // 업로드 진행률
+    if (onProgress && xhr.upload) {
+      xhr.upload.onprogress = function(e) {
+        if (e.lengthComputable) onProgress(e.loaded / e.total * 100);
+      };
+    }
+
+    xhr.onload = function() {
+      try { resolve(JSON.parse(xhr.responseText)); }
+      catch(_) { resolve({ error: '서버 응답 파싱 실패 (HTTP ' + xhr.status + ')' }); }
+    };
+    xhr.onerror = function() { reject(new Error('네트워크 오류 — 인터넷 연결을 확인하세요.')); };
+    xhr.ontimeout = function() { reject(new Error('timeout')); };
+    xhr.onabort = function() { reject(new Error('aborted')); };
+
+    xhr.send(JSON.stringify(jsonBody));
+  });
+}
+
+/** 이미지 업로드 전용 gasPost — 진행률 표시 + 재시도 안내 */
+async function gasPostUpload(body, timeout) {
+  const action = body.action || '';
+  const route = _ACTION_MAP[action];
+  if (!route) return { error: '알 수 없는 action: ' + action };
+
+  const { action: _, ...payload } = body;
+  if (route.remap) payload.action = route.remap;
+
+  const url = API_BASE_URL + route.path;
+  const timeoutMs = timeout || 120000; // 업로드용 기본 2분
+
+  // 진행률 오버레이 표시
+  const actionLabels = {
+    uploadOrderImage: '주문 캡처 업로드 중...',
+    uploadReviewImage: '리뷰 이미지 업로드 중...',
+    extractOrderImage: 'AI 이미지 분석 중...',
+  };
+  _uploadProgress.show(actionLabels[action] || '업로드 중...');
+
+  try {
+    const json = await _xhrPost(url, payload, timeoutMs, (pct) => {
+      _uploadProgress.update(pct);
+    });
+    _uploadProgress.hide();
+    return json;
+  } catch (err) {
+    _uploadProgress.hide();
+    const isTimeout = err.message === 'timeout';
+    const isAborted = err.message === 'aborted';
+    const isNetwork = err.message.includes('네트워크');
+
+    if (isTimeout) {
+      _apiToast('⏱ 업로드 시간 초과 — 네트워크 상태를 확인하고 다시 시도해주세요.\n이미지 크기가 크면 자동 압축 후 재시도됩니다.', 'error', 6000);
+      return { error: '업로드 시간이 초과되었습니다. 이미지 크기를 줄이거나 네트워크를 확인하세요.' };
+    }
+    if (isAborted || isNetwork) {
+      _apiToast('📡 업로드가 중단되었습니다 — 네트워크 연결을 확인하고 다시 시도해주세요.', 'error', 6000);
+      return { error: '업로드가 중단되었습니다. 네트워크 연결을 확인하세요.' };
+    }
+    _apiToast('❌ 업로드 실패: ' + err.message, 'error', 5000);
+    return { error: err.message };
+  }
+}
+
+// ═══════════════════════════════════════════════════════════
 // 하위 호환성 유틸
 // ═══════════════════════════════════════════════════════════
 

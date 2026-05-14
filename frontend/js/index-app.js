@@ -4973,37 +4973,46 @@ function _resetImgUI() {
   });
 }
 
-/** 이미지 파일 처리: 미리보기 표시 → base64 변환 → GAS 호출 */
-function _processImgFile(file) {
+/** 이미지 파일 처리: 미리보기 표시 → ★압축 → base64 변환 → GAS 호출 */
+async function _processImgFile(file) {
   // 10MB 제한
   if (file.size > 10 * 1024 * 1024) {
     showToast("이미지 크기는 10MB 이하여야 합니다.", true);
     return;
   }
 
-  // 미리보기 표시
+  // 미리보기 표시 (원본으로)
   const reader = new FileReader();
-  reader.onload = async function(ev) {
-    const dataUrl = ev.target.result; // data:image/jpeg;base64,XXXX
-
-    // 미리보기 UI
-    document.getElementById("ofImgThumb").src = dataUrl;
+  reader.onload = function(ev) {
+    document.getElementById("ofImgThumb").src = ev.target.result;
     document.getElementById("ofImgPreview").style.display = "flex";
     document.getElementById("ofImgZone").style.display = "none";
     document.getElementById("ofAiResult").classList.remove("show");
     document.getElementById("ofAiError").style.display = "none";
-    // 파일명 표시
-    const lbl = document.getElementById("ofImgLabel");
-    if (lbl) lbl.textContent = file.name + "  ·  AI 분석 중…";
-
-    // base64 부분만 추출 (data:xxx;base64, 제거)
-    const base64 = dataUrl.split(",")[1];
-    const mimeType = file.type || "image/jpeg";
-
-    // GAS 호출
-    await _callExtractOrderImage(base64, mimeType);
   };
   reader.readAsDataURL(file);
+
+  // ★ 이미지 압축 후 AI 분석 호출
+  const lbl = document.getElementById("ofImgLabel");
+  if (lbl) lbl.textContent = file.name + "  ·  압축 중…";
+
+  try {
+    const base64 = await compressImageIdx(file, 1920, 0.8);
+    const mimeType = "image/jpeg"; // 압축 후 항상 JPEG
+    if (lbl) lbl.textContent = file.name + "  ·  AI 분석 중…";
+    await _callExtractOrderImage(base64, mimeType);
+  } catch (compErr) {
+    console.warn("[압축 실패] fallback to raw:", compErr.message);
+    // 압축 실패 시 원본으로 폴백
+    try {
+      const rawB64 = await fileToBase64Raw(file);
+      if (lbl) lbl.textContent = file.name + "  ·  AI 분석 중…";
+      await _callExtractOrderImage(rawB64, file.type || "image/jpeg");
+    } catch (rawErr) {
+      if (lbl) lbl.textContent = file.name;
+      _showAiError("이미지 읽기 실패: " + rawErr.message);
+    }
+  }
 }
 
 /** GAS extractOrderImage POST 호출 */
@@ -5019,10 +5028,10 @@ async function _callExtractOrderImage(base64, mimeType) {
   document.getElementById("ofAiError").style.display = "none";
 
   try {
-    // ★ [Node.js 이관] gasPost()를 통해 API 서버로 전송
+    // ★ [Node.js 이관] gasPostUpload()를 통해 API 서버로 전송 (업로드 진행률 표시)
     let json;
     try {
-      json = await gasPost({
+      json = await gasPostUpload({
         action:      "extractOrderImage",
         imageBase64: base64,
         mimeType:    mimeType
@@ -5447,11 +5456,11 @@ async function submitOrderForm() {
             sheetId:     ctx.sheetId     || ""   // ★ 탭명 변경 대응: ID로 세부목록 조회
           };
 
-          // ★ [Node.js 이관] gasPost()를 통해 API 서버로 전송 — 2회 재시도
+          // ★ [Node.js 이관] gasPostUpload()를 통해 API 서버로 전송 — 진행률 표시 + 2회 재시도
           let upJson = null;
           for (let attempt = 1; attempt <= 2; attempt++) {
             try {
-              upJson = await gasPost(uploadPayload);
+              upJson = await gasPostUpload(uploadPayload, 120000);
               break;
             } catch (fetchErr) {
               if (attempt < 2) {
@@ -9703,13 +9712,60 @@ function _jsonpGet(fullUrl, timeoutMs) {
 // }
 
 /* ── 유틸 ── */
-function fileToBase64(file) {
-  return new Promise((res, rej) => {
-    const r = new FileReader();
-    r.onload  = () => res(r.result.split(",")[1]);
-    r.onerror = rej;
+
+/** ★ 이미지 압축 — 업로드 전 클라이언트 측 리사이즈/JPEG 변환 */
+function compressImageIdx(file, maxWidth, quality) {
+  maxWidth = maxWidth || 1920;
+  quality  = quality  || 0.75;
+  return new Promise(function(resolve, reject) {
+    // 1MB 이하 JPEG는 압축 불필요
+    if (file.size <= 1024 * 1024 && file.type === 'image/jpeg') {
+      return fileToBase64Raw(file).then(resolve).catch(reject);
+    }
+    var img = new Image();
+    var url = URL.createObjectURL(file);
+    img.onload = function() {
+      URL.revokeObjectURL(url);
+      var w = img.width, h = img.height;
+      if (w > maxWidth) { h = Math.round(h * (maxWidth / w)); w = maxWidth; }
+      var canvas = document.createElement('canvas');
+      canvas.width = w; canvas.height = h;
+      canvas.getContext('2d').drawImage(img, 0, 0, w, h);
+      var dataUrl = canvas.toDataURL('image/jpeg', quality);
+      var b64 = dataUrl.split(',')[1];
+      if (!b64) { reject(new Error('이미지 압축 실패')); return; }
+      var compSz = Math.round(b64.length * 0.75);
+      console.log('[compress] ' + file.name + ': ' + (file.size/1024).toFixed(0) + 'KB → ' + (compSz/1024).toFixed(0) + 'KB (' + w + 'x' + h + ')');
+      resolve(b64);
+    };
+    img.onerror = function() {
+      URL.revokeObjectURL(url);
+      fileToBase64Raw(file).then(resolve).catch(reject);
+    };
+    img.src = url;
+  });
+}
+
+/** 원본 Base64 변환 (압축 없이) */
+function fileToBase64Raw(file) {
+  return new Promise(function(res, rej) {
+    var r = new FileReader();
+    r.onload  = function() {
+      var result = r.result;
+      if (!result || !result.includes(',')) { rej(new Error('파일 읽기 결과가 비어있습니다')); return; }
+      res(result.split(',')[1]);
+    };
+    r.onerror = function(ev) { rej(new Error('파일 읽기 오류')); };
     r.readAsDataURL(file);
   });
+}
+
+/** ★ fileToBase64 — 이미지는 자동 압축, 그 외는 원본 변환 */
+function fileToBase64(file) {
+  if (file.type && file.type.startsWith('image/')) {
+    return compressImageIdx(file);
+  }
+  return fileToBase64Raw(file);
 }
 function escHtml(s) {
   return String(s).replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;").replace(/"/g,"&quot;");

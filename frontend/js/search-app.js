@@ -1708,7 +1708,7 @@ async function submitReview() {
 
         // ── Step 1: 이미지를 구글 드라이브에 업로드 ──
         // ★ 모바일 네트워크에서 Base64 이미지 업로드는 시간이 오래 걸림 → 타임아웃 180초
-        const uploadResult = await gasPost({
+        const uploadResult = await gasPostUpload({
           action:           "uploadReviewImage",
           sheetId:          item.sheetId,
           tabName:          item.tabName,
@@ -5319,8 +5319,8 @@ async function _callCardExtractAi(cid, base64, mimeType) {
     const payload = { action: "extractOrderImage", imageBase64: base64, mimeType };
     let json;
     try {
-      // ★ [Node.js 이관] gasPost()를 통해 API 서버로 전송
-      json = await gasPost(payload);
+      // ★ [Node.js 이관] gasPostUpload()를 통해 API 서버로 전송 (업로드 진행률 표시)
+      json = await gasPostUpload(payload);
       clearTimeout(tid);
     } catch(fe) {
       clearTimeout(tid);
@@ -5856,7 +5856,7 @@ async function submitOrderForm() {
             const ext = _imgCtx.mime==="image/png"?"png":_imgCtx.mime==="image/webp"?"webp":"jpg";
             const namePart = [_imgCtx.recipient||_imgCtx.orderer, _imgCtx.orderer!==_imgCtx.recipient?_imgCtx.orderer:""].filter(Boolean).join("_")||"주문캡처";
             const upPayload = { action:"uploadOrderImage", imageBase64:_imgCtx.base64, mimeType:_imgCtx.mime, fileName:namePart+"."+ext, displayName:ctx.displayName||"", tabName:ctx.tabName, round:ctx.round||"", sheetId:ctx.sheetId||"" };
-            const upJson = await gasPost(upPayload, 180000);
+            const upJson = await gasPostUpload(upPayload, 180000);
             if (upJson?.ok && upJson.captureFolderUrl && !firstCaptureFolderUrl) {
               firstCaptureFolderUrl = upJson.captureFolderUrl;
             }
