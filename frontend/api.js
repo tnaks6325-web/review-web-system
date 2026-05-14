@@ -73,6 +73,8 @@ const _ACTION_MAP = {
   'getTabDashboard':  { method: 'GET',  path: '/api/tab/dashboard' },
   'getColPrefs':      { method: 'GET',  path: '/api/tab/col-prefs' },
   'saveColPrefs':     { method: 'POST', path: '/api/tab/col-prefs' },
+  'backfillGid':      { method: 'POST', path: '/api/tab/backfill-gid' },
+  'fixSheetUrls':     { method: 'POST', path: '/api/tab/fix-sheet-urls' },
 
   // 리뷰어 관리 (Section 7)
   'registerReviewer':   { method: 'POST', path: '/api/reviewer/register' },

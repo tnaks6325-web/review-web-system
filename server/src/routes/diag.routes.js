@@ -319,21 +319,27 @@ router.post('/add-campaign', authMiddleware, async (req, res, next) => {
       [finalSheetId, resolvedName, sheetUrl || url || `https://docs.google.com/spreadsheets/d/${finalSheetId}/edit`]
     );
 
-    // tab_configs에도 해당 시트의 탭 목록 동기화
+    // tab_configs에도 해당 시트의 탭 목록 동기화 (★ GID + sheet_url#gid= 포함)
+    let autoInsertedTabs = 0;
     try {
       const meta = await getSpreadsheetMeta(finalSheetId);
       const systemTabs = ['세부목록', '검색인덱스', '인덱스마스터', '인덱스데이터', '마감', '상세목록', '탭설정', '설정'];
       for (const sheet of meta) {
         const tabName = sheet.properties.title;
         if (systemTabs.includes(tabName)) continue;
+        const tabGid = String(sheet.properties.sheetId);
+        const tabSheetUrl = `https://docs.google.com/spreadsheets/d/${finalSheetId}/edit#gid=${tabGid}`;
         await pool.query(
-          `INSERT INTO tab_configs (sheet_id, tab_name, campaign_name, sheet_url)
-           VALUES ($1, $2, $3, $4)
+          `INSERT INTO tab_configs (sheet_id, tab_name, campaign_name, sheet_url, tab_gid)
+           VALUES ($1, $2, $3, $4, $5)
            ON CONFLICT (sheet_id, tab_name) DO UPDATE SET
              campaign_name = COALESCE(NULLIF(tab_configs.campaign_name,''), EXCLUDED.campaign_name),
+             sheet_url = EXCLUDED.sheet_url,
+             tab_gid = COALESCE(NULLIF(tab_configs.tab_gid,''), EXCLUDED.tab_gid),
              updated_at = NOW()`,
-          [finalSheetId, tabName, resolvedName, sheetUrl || url || '']
+          [finalSheetId, tabName, resolvedName, tabSheetUrl, tabGid]
         );
+        autoInsertedTabs++;
       }
     } catch (_) { /* 메타 로드 실패 시 무시 */ }
 
@@ -383,7 +389,7 @@ router.post('/add-campaign', authMiddleware, async (req, res, next) => {
       logger.error(`[add-campaign] 시트DB 추가 실패 (DB 등록은 완료): ${sheetErr.message}`);
     }
 
-    res.json({ ok: true, sheetId: finalSheetId, campaignName: resolvedName, addedToSheetDB, shareResult });
+    res.json({ ok: true, sheetId: finalSheetId, campaignName: resolvedName, addedToSheetDB, shareResult, autoInsertedTabs, url: `https://docs.google.com/spreadsheets/d/${finalSheetId}/edit` });
   } catch (err) {
     next(err);
   }

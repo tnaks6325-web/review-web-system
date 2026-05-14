@@ -22,7 +22,7 @@ router.post('/config', authMiddleware, async (req, res, next) => {
 
     // null 처리: undefined(미전송) = 기존값 보존, 빈문자열("") = 빈값 저장
     const fields = {
-      sheet_url:    b.sheetUrl  || (sheetId ? `https://docs.google.com/spreadsheets/d/${sheetId}/edit` : undefined),
+      sheet_url:    b.sheetUrl  || (sheetId ? `https://docs.google.com/spreadsheets/d/${sheetId}/edit${b.tabGid ? '#gid=' + b.tabGid : ''}` : undefined),
       manager:      b.manager      !== undefined ? b.manager      : undefined,
       time_range:   b.timeRange    !== undefined ? b.timeRange    : undefined,
       taekhap:      b.taekhap      !== undefined ? Boolean(b.taekhap) : undefined,
@@ -341,7 +341,7 @@ router.post('/sync-tab-names', authMiddleware, async (req, res, next) => {
         });
 
         const dbTabs = sheetMap[sheetId];
-        const correctSheetUrl = `https://docs.google.com/spreadsheets/d/${sheetId}/edit`;
+        const baseSheetUrl = `https://docs.google.com/spreadsheets/d/${sheetId}/edit`;
 
         for (const dbTab of dbTabs) {
           const oldName = dbTab.tab_name;
@@ -385,9 +385,15 @@ router.post('/sync-tab-names', authMiddleware, async (req, res, next) => {
             }
           }
 
-          // ── URL 불일치 확인 ──
-          const currentUrl = (dbTab.sheet_url || '').split('#')[0];
-          const urlMismatch = currentUrl && currentUrl !== correctSheetUrl;
+          // ★ 탭별 GID 포함 URL 생성 (GID가 있으면 #gid= 포함)
+          const effectiveGid = fillGidValue || dbGid;
+          const correctSheetUrl = effectiveGid
+            ? `${baseSheetUrl}#gid=${effectiveGid}`
+            : baseSheetUrl;
+
+          // ── URL 불일치 확인 (전체 URL 비교 — #gid= 포함) ──
+          const currentUrl = dbTab.sheet_url || '';
+          const urlMismatch = currentUrl !== correctSheetUrl;
 
           // 변경 없고 URL도 맞고 GID 보충도 불필요 → 스킵
           if (!newName && !urlMismatch && !shouldFillGid) {
@@ -440,8 +446,13 @@ router.post('/sync-tab-names', authMiddleware, async (req, res, next) => {
                 logger.info(`[sync-tab-names] 탭명 변경: "${oldName}" → "${newName}" (sheet=${sheetId.substring(0, 15)})`);
               }
 
-              // ── GID 보충 (index_master에 tab_gid 업데이트) ──
+              // ── GID 보충 (tab_configs + index_master + review_index) ──
               if (shouldFillGid && fillGidValue) {
+                // ★ tab_configs에도 tab_gid 보충
+                await pool.query(
+                  'UPDATE tab_configs SET tab_gid = $1, updated_at = NOW() WHERE sheet_id = $2 AND tab_name = $3 AND (tab_gid IS NULL OR tab_gid = \'\')',
+                  [fillGidValue, sheetId, newName || oldName]
+                );
                 const gidResult = await pool.query(
                   'UPDATE index_master SET tab_gid = $1 WHERE sheet_id = $2 AND tab_name = $3 AND (tab_gid IS NULL OR tab_gid = \'\')',
                   [fillGidValue, sheetId, newName || oldName]
@@ -457,7 +468,7 @@ router.post('/sync-tab-names', authMiddleware, async (req, res, next) => {
                 }
               }
 
-              // ── URL 교정 ──
+              // ── URL 교정 (★ #gid= 포함 URL로 업데이트) ──
               if (urlMismatch) {
                 await pool.query(
                   'UPDATE tab_configs SET sheet_url = $1, updated_at = NOW() WHERE sheet_id = $2 AND tab_name = $3',
@@ -630,7 +641,7 @@ router.post('/fix-campaign-tab-swap', authMiddleware, async (req, res, next) => 
       const correctCampaignName = spreadsheetTitle || campaignBySheet[sid] || '';
 
       const dbTabs = sheetMap[sid];
-      const correctSheetUrl = `https://docs.google.com/spreadsheets/d/${sid}/edit`;
+      const baseSheetUrl = `https://docs.google.com/spreadsheets/d/${sid}/edit`;
 
       for (const dbTab of dbTabs) {
         const dbTabName = dbTab.tab_name;
@@ -646,6 +657,7 @@ router.post('/fix-campaign-tab-swap', authMiddleware, async (req, res, next) => 
           const newTabName = dbCampaignName;  // 실제 탭명
           const newCampaignName = correctCampaignName || dbTabName;
           const newGid = realTab.gid;
+          const correctSheetUrl = `${baseSheetUrl}#gid=${newGid}`;
 
           const fix = {
             sheetId: sid.substring(0, 15) + '...',
@@ -729,10 +741,11 @@ router.post('/fix-campaign-tab-swap', authMiddleware, async (req, res, next) => 
 
             if (!dryRun) {
               try {
+                const gidSheetUrl = `${baseSheetUrl}#gid=${realGid}`;
                 if (campNeedsFix) {
                   await pool.query(
-                    'UPDATE tab_configs SET tab_gid = $1, campaign_name = $2, updated_at = NOW() WHERE sheet_id = $3 AND tab_name = $4',
-                    [realGid, correctCampaignName, sid, dbTabName]
+                    'UPDATE tab_configs SET tab_gid = $1, campaign_name = $2, sheet_url = $5, updated_at = NOW() WHERE sheet_id = $3 AND tab_name = $4',
+                    [realGid, correctCampaignName, sid, dbTabName, gidSheetUrl]
                   );
                   await pool.query(
                     `UPDATE index_master SET tab_gid = $1, campaign_name = $2 WHERE sheet_id = $3 AND tab_name = $4`,
@@ -741,8 +754,8 @@ router.post('/fix-campaign-tab-swap', authMiddleware, async (req, res, next) => 
                   fixed++;
                 } else {
                   await pool.query(
-                    'UPDATE tab_configs SET tab_gid = $1, updated_at = NOW() WHERE sheet_id = $2 AND tab_name = $3',
-                    [realGid, sid, dbTabName]
+                    'UPDATE tab_configs SET tab_gid = $1, sheet_url = $4, updated_at = NOW() WHERE sheet_id = $2 AND tab_name = $3',
+                    [realGid, sid, dbTabName, gidSheetUrl]
                   );
                   await pool.query(
                     'UPDATE index_master SET tab_gid = $1 WHERE sheet_id = $2 AND tab_name = $3 AND (tab_gid IS NULL OR tab_gid = \'\')',
@@ -775,9 +788,10 @@ router.post('/fix-campaign-tab-swap', authMiddleware, async (req, res, next) => 
 
             if (!dryRun) {
               try {
+                const campGidUrl = realGid ? `${baseSheetUrl}#gid=${realGid}` : baseSheetUrl;
                 await pool.query(
-                  'UPDATE tab_configs SET campaign_name = $1, tab_gid = COALESCE(NULLIF(tab_gid, \'\'), $2), updated_at = NOW() WHERE sheet_id = $3 AND tab_name = $4',
-                  [correctCampaignName, realGid, sid, dbTabName]
+                  'UPDATE tab_configs SET campaign_name = $1, tab_gid = COALESCE(NULLIF(tab_gid, \'\'), $2), sheet_url = $5, updated_at = NOW() WHERE sheet_id = $3 AND tab_name = $4',
+                  [correctCampaignName, realGid, sid, dbTabName, campGidUrl]
                 );
                 await pool.query(
                   'UPDATE index_master SET campaign_name = $1, tab_gid = COALESCE(NULLIF(tab_gid, \'\'), $2) WHERE sheet_id = $3 AND tab_name = $4',
@@ -1489,7 +1503,123 @@ router.post('/delete-orphan', authMiddleware, async (req, res, next) => {
   }
 });
 
-module.exports = router;
+// ═══════════════════════════════════════════════════════════
+// POST /api/tab/backfill-gid — tab_gid가 없는 탭들을 Google Sheets API로 보충
+// tab_configs에서 tab_gid가 NULL/빈값인 탭을 시트별로 그룹핑 후
+// Google Sheets API로 실제 GID를 조회하여 tab_gid + sheet_url#gid= 일괄 업데이트
+// ═══════════════════════════════════════════════════════════
+router.post('/backfill-gid', authMiddleware, async (req, res, next) => {
+  try {
+    const { sheetId: filterSheetId, dryRun } = req.body || {};
+
+    // 1. tab_gid가 없는 탭 조회
+    let sql = `
+      SELECT tc.sheet_id, tc.tab_name, tc.sheet_url, tc.tab_gid, tc.campaign_name
+      FROM tab_configs tc
+      WHERE (tc.tab_gid IS NULL OR tc.tab_gid = '')
+    `;
+    const params = [];
+    if (filterSheetId) {
+      params.push(filterSheetId);
+      sql += ` AND tc.sheet_id = $${params.length}`;
+    }
+    sql += ' ORDER BY tc.sheet_id, tc.tab_name';
+
+    const { rows: missingGidTabs } = await pool.query(sql, params);
+    if (missingGidTabs.length === 0) {
+      return res.json({ ok: true, message: 'GID가 누락된 탭이 없습니다.', filled: 0, total: 0 });
+    }
+
+    // 2. 시트별 그룹핑
+    const sheetMap = {};
+    missingGidTabs.forEach(t => {
+      if (!sheetMap[t.sheet_id]) sheetMap[t.sheet_id] = [];
+      sheetMap[t.sheet_id].push(t);
+    });
+
+    const sheetIds = Object.keys(sheetMap);
+    let filled = 0, urlFixed = 0, errors = 0;
+    const results = [];
+    const errorDetails = [];
+
+    // 3. 각 시트별로 메타데이터 조회 → 이름 매칭으로 GID 보충
+    for (const sid of sheetIds) {
+      let meta;
+      try {
+        meta = await throttledCall(() => getSpreadsheetMeta(sid));
+      } catch (err) {
+        errors++;
+        if (errorDetails.length < 10) {
+          errorDetails.push(`시트 ${sid.substring(0, 15)}...: ${err.message}`);
+        }
+        continue;
+      }
+      if (!meta || meta.length === 0) continue;
+
+      // 실제 탭명→GID 맵
+      const realNameMap = {};
+      meta.forEach(s => {
+        realNameMap[s.properties.title] = String(s.properties.sheetId);
+      });
+
+      const dbTabs = sheetMap[sid];
+      for (const dbTab of dbTabs) {
+        const tabName = dbTab.tab_name;
+        const gid = realNameMap[tabName];
+        if (!gid) {
+          results.push({ sheetId: sid.substring(0, 15) + '...', tabName, status: 'not_found', campaign: dbTab.campaign_name || '' });
+          continue;
+        }
+
+        const baseUrl = `https://docs.google.com/spreadsheets/d/${sid}/edit`;
+        const newUrl = `${baseUrl}#gid=${gid}`;
+
+        if (!dryRun) {
+          // tab_configs 업데이트
+          await pool.query(
+            'UPDATE tab_configs SET tab_gid = $1, sheet_url = $2, updated_at = NOW() WHERE sheet_id = $3 AND tab_name = $4',
+            [gid, newUrl, sid, tabName]
+          );
+          // index_master도 보충
+          await pool.query(
+            'UPDATE index_master SET tab_gid = $1 WHERE sheet_id = $2 AND tab_name = $3 AND (tab_gid IS NULL OR tab_gid = \'\')',
+            [gid, sid, tabName]
+          );
+          // review_index도 보충
+          await pool.query(
+            'UPDATE review_index SET tab_gid = $1 WHERE sheet_id = $2 AND tab_name = $3 AND (tab_gid IS NULL OR tab_gid = \'\')',
+            [gid, sid, tabName]
+          );
+        }
+
+        filled++;
+        urlFixed++;
+        results.push({
+          sheetId: sid.substring(0, 15) + '...',
+          tabName,
+          gid,
+          newUrl,
+          campaign: dbTab.campaign_name || '',
+          status: dryRun ? 'dry_run' : 'filled',
+        });
+      }
+    }
+
+    res.json({
+      ok: true,
+      dryRun: !!dryRun,
+      totalMissing: missingGidTabs.length,
+      sheetCount: sheetIds.length,
+      filled,
+      urlFixed,
+      errors,
+      errorDetails: errorDetails.length > 0 ? errorDetails : undefined,
+      results,
+    });
+  } catch (err) {
+    next(err);
+  }
+});
 
 // ═══════════════════════════════════════════════════════════
 // POST /api/tab/fix-sheet-urls — 시트링크 수동보정 (gid 일괄 추가)
@@ -1551,3 +1681,5 @@ router.post('/fix-sheet-urls', authMiddleware, async (req, res, next) => {
     next(err);
   }
 });
+
+module.exports = router;
