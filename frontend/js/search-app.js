@@ -3476,6 +3476,26 @@ let _optionHeaders   = [];   // 옵션 헤더명 목록 (최대 3개)
 let _memoHeader      = "";   // 비고 헤더명
 let _orderNumHeader  = "";   // 주문번호 헤더명 (없으면 "")
 let _selectedOptKey  = null; // 선택된 옵션 키 (null = 옵션 없음 or 미선택)
+let _reviewerSelectedOptions = null; // ★ reviewer-options API 기반 드롭다운 선택값 { "상품명": "값", ... }
+
+/** ★ 리뷰어 옵션 드롭다운 변경 핸들러 (window에 바인딩) */
+window._onReviewerOptChange = function(colName, value) {
+  if (_reviewerSelectedOptions) {
+    _reviewerSelectedOptions[colName] = value;
+    console.log('[옵션] 드롭다운 선택:', colName, '→', value, '| 전체:', JSON.stringify(_reviewerSelectedOptions));
+  }
+};
+
+/** ★ 드롭다운 선택값을 selectedOptKey 형태로 빌드
+ *  기존 시스템 호환: "값1|값2|..." (파이프 구분) — 옵션 피커와 동일 형식
+ *  1개 옵션이면: "인디아드 전문가용 ..." 
+ *  여러 옵션이면: "인디아드...|블랙" */
+function _buildReviewerOptKey() {
+  if (!_reviewerSelectedOptions) return '';
+  const vals = Object.values(_reviewerSelectedOptions).filter(v => v);
+  if (vals.length === 0) return '';
+  return vals.join('|');
+}
 
 /** 리뷰어 옵션 데이터 비동기 로드 (구매양식 화면)
  *  ★ 로그인 여부 무관하게 호출:
@@ -3510,7 +3530,42 @@ async function _loadReviewerOptionData(sheetId, tabName, gid, round) {
         infoEl.style.display = 'none';
         return;
       }
-      // 상태별 안내 메시지 분기
+
+      // ★★★ matched=0 + distinctValues 존재 → 드롭다운 선택 UI 렌더링
+      if (!data.headersOnly && data.distinctValues) {
+        _reviewerSelectedOptions = {};   // 초기화
+        let html = '';
+        for (const colName of colNames) {
+          const values = data.distinctValues[colName] || [];
+          if (values.length === 0) continue;
+          _reviewerSelectedOptions[colName] = '';  // 미선택 상태
+          html += '<div style="padding:4px 0">';
+          html += '<div style="font-size:.75rem;font-weight:700;color:#7C3AED;margin-bottom:3px">' + _safeText(colName) + '</div>';
+          html += '<select id="reviewerOpt_' + _safeText(colName) + '" '
+                + 'style="width:100%;padding:8px 10px;border:1.5px solid #C4B5FD;border-radius:8px;'
+                + 'font-size:.85rem;font-weight:600;color:#1F2937;background:#fff;'
+                + 'appearance:auto;cursor:pointer;outline:none;transition:border-color .2s" '
+                + 'onchange="window._onReviewerOptChange(\'' + _safeText(colName).replace(/'/g, "\\'") + '\', this.value)" '
+                + 'onfocus="this.style.borderColor=\'#7C3AED\'" '
+                + 'onblur="this.style.borderColor=\'#C4B5FD\'">';
+          html += '<option value="">— 선택해주세요 —</option>';
+          for (const v of values) {
+            html += '<option value="' + _safeText(v).replace(/"/g, '&quot;') + '">' + _safeText(v) + '</option>';
+          }
+          html += '</select>';
+          html += '</div>';
+        }
+        if (!html) {
+          infoEl.style.display = 'none';
+          return;
+        }
+        contentEl.innerHTML = html;
+        infoEl.style.display = 'block';
+        console.log('[옵션] ★ 드롭다운 선택 UI 렌더링 (matched:0, distinctValues):', colNames);
+        return;
+      }
+
+      // 일반 안내 메시지 (headersOnly 또는 distinctValues 없음)
       const hint = data.headersOnly
         ? '로그인 후 표시됩니다'                    // 비로그인 (headersOnly)
         : '배정된 옵션 정보가 아직 없습니다';       // 로그인했지만 매칭 0건
@@ -5683,6 +5738,17 @@ async function submitOrderForm() {
     _resetBtn(); return;
   }
 
+  // ── ★ 리뷰어 옵션 드롭다운 검사 (matched=0 시 드롭다운 선택 필수) ──
+  if (_reviewerSelectedOptions && !_selectedOptKey) {
+    const unselected = Object.entries(_reviewerSelectedOptions).filter(([,v]) => !v);
+    if (unselected.length > 0) {
+      showToast("옵션을 선택해주세요: " + unselected.map(([k]) => k).join(", "), "warning");
+      const infoEl = document.getElementById("orderFormOptionInfo");
+      if (infoEl) infoEl.scrollIntoView({ behavior: "smooth", block: "center" });
+      _resetBtn(); return;
+    }
+  }
+
   // ── 각 카드 입력값 수집 및 유효성 검사 ──
   const gv = id => (document.getElementById(id)?.value || "").trim();
 
@@ -5805,7 +5871,7 @@ async function submitOrderForm() {
       bank, account, depositor, price,
       orderNum:       gv(cid+"_orderNumber"),
       memo:           gv(cid+"_memo"),
-      selectedOptKey: isFirst ? (_selectedOptKey || "") : "",
+      selectedOptKey: isFirst ? (_selectedOptKey || _buildReviewerOptKey() || "") : "",
       imgThumbSrc:    document.getElementById(cid+"_imgThumb")?.src || "",
       mimeType:       (() => { const s=document.getElementById(cid+"_imgThumb")?.src||""; return s.startsWith("data:")?s.split(";")[0].split(":")[1]:""; })(),
       isCoupang:      isCoupangCard,  // GAS에서 쿠팡 컬럼 구분용

@@ -2209,12 +2209,28 @@ router.get('/reviewer-options', async (req, res, next) => {
       }).filter(Boolean).join(' / ');
     });
 
+    // ★ matched=0 → 각 옵션 컬럼의 고유값(distinct values)을 추출하여 반환
+    //   → 프론트엔드에서 드롭다운 선택지로 표시
+    let distinctValues = null;
+    if (matchedRows.length === 0) {
+      distinctValues = {};
+      for (const { name: colName, idx } of optColMap) {
+        const valSet = new Set();
+        for (const row of dataRows) {
+          const v = String(row[idx] !== undefined ? row[idx] : '').trim();
+          if (v) valSet.add(v);
+        }
+        distinctValues[colName] = [...valSet];
+      }
+    }
+
     res.json({
       ok: true,
       optionColumns: optColMap.map(c => c.name),
       matched: matchedRows.length,
       rows: matchedRows,
       optionLabels,  // 리뷰어 화면에 직접 표시할 문자열 배열
+      ...(distinctValues && { distinctValues }),  // matched=0일 때만 포함
     });
   } catch (err) {
     next(err);
