@@ -3535,24 +3535,40 @@ async function _loadReviewerOptionData(sheetId, tabName, gid, round) {
       if (!data.headersOnly && data.distinctValues) {
         _reviewerSelectedOptions = {};   // 초기화
         let html = '';
+        let allSingleValue = true;  // 모든 컬럼이 1개 값만 가지는지 체크
         for (const colName of colNames) {
           const values = data.distinctValues[colName] || [];
           if (values.length === 0) continue;
-          _reviewerSelectedOptions[colName] = '';  // 미선택 상태
+          if (values.length > 1) allSingleValue = false;
+
+          // ★ 값이 1개뿐이면 자동 선택
+          _reviewerSelectedOptions[colName] = values.length === 1 ? values[0] : '';
+
           html += '<div style="padding:4px 0">';
           html += '<div style="font-size:.75rem;font-weight:700;color:#7C3AED;margin-bottom:3px">' + _safeText(colName) + '</div>';
-          html += '<select id="reviewerOpt_' + _safeText(colName) + '" '
-                + 'style="width:100%;padding:8px 10px;border:1.5px solid #C4B5FD;border-radius:8px;'
-                + 'font-size:.85rem;font-weight:600;color:#1F2937;background:#fff;'
-                + 'appearance:auto;cursor:pointer;outline:none;transition:border-color .2s" '
-                + 'onchange="window._onReviewerOptChange(\'' + _safeText(colName).replace(/'/g, "\\'") + '\', this.value)" '
-                + 'onfocus="this.style.borderColor=\'#7C3AED\'" '
-                + 'onblur="this.style.borderColor=\'#C4B5FD\'">';
-          html += '<option value="">— 선택해주세요 —</option>';
-          for (const v of values) {
-            html += '<option value="' + _safeText(v).replace(/"/g, '&quot;') + '">' + _safeText(v) + '</option>';
+
+          if (values.length === 1) {
+            // ★ 1개 값: 드롭다운 대신 확정 표시 (자동 선택됨)
+            html += '<div style="padding:8px 10px;border:1.5px solid #A78BFA;border-radius:8px;'
+                  + 'font-size:.85rem;font-weight:600;color:#1F2937;background:#EDE9FE">'
+                  + '<i class="fas fa-check-circle" style="color:#7C3AED;margin-right:5px"></i>'
+                  + _safeText(values[0])
+                  + '</div>';
+          } else {
+            // ★ 2개 이상: 드롭다운 선택
+            html += '<select id="reviewerOpt_' + _safeText(colName) + '" '
+                  + 'style="width:100%;padding:8px 10px;border:1.5px solid #C4B5FD;border-radius:8px;'
+                  + 'font-size:.85rem;font-weight:600;color:#1F2937;background:#fff;'
+                  + 'appearance:auto;cursor:pointer;outline:none;transition:border-color .2s" '
+                  + 'onchange="window._onReviewerOptChange(\'' + _safeText(colName).replace(/'/g, "\\'") + '\', this.value)" '
+                  + 'onfocus="this.style.borderColor=\'#7C3AED\'" '
+                  + 'onblur="this.style.borderColor=\'#C4B5FD\'">';
+            html += '<option value="">— 선택해주세요 —</option>';
+            for (const v of values) {
+              html += '<option value="' + _safeText(v).replace(/"/g, '&quot;') + '">' + _safeText(v) + '</option>';
+            }
+            html += '</select>';
           }
-          html += '</select>';
           html += '</div>';
         }
         if (!html) {
@@ -3561,7 +3577,8 @@ async function _loadReviewerOptionData(sheetId, tabName, gid, round) {
         }
         contentEl.innerHTML = html;
         infoEl.style.display = 'block';
-        console.log('[옵션] ★ 드롭다운 선택 UI 렌더링 (matched:0, distinctValues):', colNames);
+        console.log('[옵션] ★ 드롭다운 선택 UI 렌더링 (matched:0, distinctValues):', colNames,
+          allSingleValue ? '(모두 자동선택)' : '(선택 필요)');
         return;
       }
 
