@@ -3486,6 +3486,32 @@ window._onReviewerOptChange = function(colName, value) {
   }
 };
 
+/** ★ 리뷰어 옵션 카드 선택 핸들러 */
+window._onReviewerOptCardSelect = function(colName, value, btnEl) {
+  if (!_reviewerSelectedOptions) return;
+  // 같은 컬럼의 모든 카드 버튼 초기화
+  const parent = btnEl.parentElement;
+  if (parent) {
+    parent.querySelectorAll('button').forEach(function(b) {
+      b.style.border = '1.5px solid #D8D0E8';
+      b.style.background = '#fff';
+      b.style.boxShadow = 'none';
+      // 내부 텍스트 색상 원복
+      var d = b.querySelector('div');
+      if (d) d.style.color = '#374151';
+    });
+  }
+  // 선택된 카드 강조
+  btnEl.style.border = '2px solid #7C3AED';
+  btnEl.style.background = '#F5F3FF';
+  btnEl.style.boxShadow = '0 0 0 3px rgba(124,58,237,.12)';
+  var innerDiv = btnEl.querySelector('div');
+  if (innerDiv) innerDiv.style.color = '#5B21B6';
+
+  _reviewerSelectedOptions[colName] = value;
+  console.log('[옵션] 카드 선택:', colName, '→', value, '| 전체:', JSON.stringify(_reviewerSelectedOptions));
+};
+
 /** ★ 드롭다운 선택값을 selectedOptKey 형태로 빌드
  *  기존 시스템 호환: "값1|값2|..." (파이프 구분) — 옵션 피커와 동일 형식
  *  1개 옵션이면: "인디아드 전문가용 ..." 
@@ -3555,19 +3581,22 @@ async function _loadReviewerOptionData(sheetId, tabName, gid, round) {
                   + _safeText(values[0])
                   + '</div>';
           } else {
-            // ★ 2개 이상: 드롭다운 선택
-            html += '<select id="reviewerOpt_' + _safeText(colName) + '" '
-                  + 'style="width:100%;padding:8px 10px;border:1.5px solid #C4B5FD;border-radius:8px;'
-                  + 'font-size:.85rem;font-weight:600;color:#1F2937;background:#fff;'
-                  + 'appearance:auto;cursor:pointer;outline:none;transition:border-color .2s" '
-                  + 'onchange="window._onReviewerOptChange(\'' + _safeText(colName).replace(/'/g, "\\'") + '\', this.value)" '
-                  + 'onfocus="this.style.borderColor=\'#7C3AED\'" '
-                  + 'onblur="this.style.borderColor=\'#C4B5FD\'">';
-            html += '<option value="">— 선택해주세요 —</option>';
-            for (const v of values) {
-              html += '<option value="' + _safeText(v).replace(/"/g, '&quot;') + '">' + _safeText(v) + '</option>';
+            // ★ 2개 이상: 카드 선택 방식 (직관적)
+            html += '<div style="display:flex;flex-wrap:wrap;gap:6px">';
+            for (let vi = 0; vi < values.length; vi++) {
+              const v = values[vi];
+              const safeCol = _safeText(colName).replace(/'/g, "\\'");
+              const safeVal = _safeText(v).replace(/'/g, "\\'");
+              html += '<button type="button" '
+                    + 'id="rOptCard_' + _safeText(colName) + '_' + vi + '" '
+                    + 'onclick="window._onReviewerOptCardSelect(\'' + safeCol + '\', \'' + safeVal + '\', this)" '
+                    + 'style="flex:1 1 calc(50% - 3px);min-width:0;padding:9px 10px;border:1.5px solid #D8D0E8;border-radius:10px;'
+                    + 'background:#fff;cursor:pointer;text-align:left;transition:all .15s;outline:none">'
+                    + '<div style="font-size:.82rem;font-weight:600;color:#374151;line-height:1.35;word-break:break-word">'
+                    + _safeText(v)
+                    + '</div></button>';
             }
-            html += '</select>';
+            html += '</div>';
           }
           html += '</div>';
         }
