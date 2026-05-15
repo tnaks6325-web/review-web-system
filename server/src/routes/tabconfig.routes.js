@@ -10,6 +10,20 @@ const { runIndexScan, applyCachedIndexScan, hasIndexScanCache, syncTabListToDB }
 const { logger } = require('../utils/logger');
 const { throttledCall, throttledMap } = require('../utils/sheetsThrottle');
 
+// ── Auto-migration: display_name_map JSONB 컬럼 추가 (차수별 표시명) ──
+(async () => {
+  try {
+    await pool.query(`
+      ALTER TABLE tab_configs
+      ADD COLUMN IF NOT EXISTS display_name_map JSONB DEFAULT '{}'::jsonb
+    `);
+    logger.info('[tabconfig] display_name_map 컬럼 확인/추가 완료');
+  } catch (err) {
+    // 이미 존재하거나 다른 이유로 실패 시 무시 (서버 시작 차단 방지)
+    logger.warn('[tabconfig] display_name_map 컬럼 추가 실패 (이미 존재할 수 있음):', err.message);
+  }
+})();
+
 // POST /api/tab/config — 탭 설정 저장/수정 (GAS: setTabConfig)
 router.post('/config', authMiddleware, async (req, res, next) => {
   try {
@@ -19,6 +33,39 @@ router.post('/config', authMiddleware, async (req, res, next) => {
 
     const sheetId = (b.sheetId || '').trim();
     if (!sheetId) return res.json({ error: 'sheetId가 필요합니다.' });
+
+    // ★ 차수별 표시명(display_name_map) 처리
+    // round가 제공된 경우 display_name_map JSONB에 { round: displayName } 저장
+    const roundKey = (b.round || '').trim();
+    if (roundKey && b.displayName !== undefined) {
+      const displayVal = (b.displayName || '').trim();
+      // display_name_map JSONB 업데이트: 해당 round 키만 변경
+      const mapSql = displayVal
+        ? `UPDATE tab_configs
+           SET display_name_map = COALESCE(display_name_map, '{}'::jsonb) || jsonb_build_object($3, $4::text),
+               updated_at = NOW()
+           WHERE sheet_id = $1 AND tab_name = $2`
+        : `UPDATE tab_configs
+           SET display_name_map = COALESCE(display_name_map, '{}'::jsonb) - $3,
+               updated_at = NOW()
+           WHERE sheet_id = $1 AND tab_name = $2`;
+      const mapParams = displayVal
+        ? [sheetId, tabName, roundKey, displayVal]
+        : [sheetId, tabName, roundKey];
+      const mapResult = await pool.query(mapSql, mapParams);
+      if (mapResult.rowCount === 0) {
+        // 레코드가 없으면 INSERT
+        await pool.query(
+          `INSERT INTO tab_configs (sheet_id, tab_name, display_name_map, updated_at)
+           VALUES ($1, $2, jsonb_build_object($3, $4::text), NOW())
+           ON CONFLICT (sheet_id, tab_name) DO UPDATE SET
+             display_name_map = COALESCE(tab_configs.display_name_map, '{}'::jsonb) || jsonb_build_object($3, $4::text),
+             updated_at = NOW()`,
+          [sheetId, tabName, roundKey, displayVal || '']
+        );
+      }
+      return res.json({ ok: true, tabName, sheetId, round: roundKey, displayName: displayVal });
+    }
 
     // null 처리: undefined(미전송) = 기존값 보존, 빈문자열("") = 빈값 저장
     const fields = {
@@ -1034,7 +1081,7 @@ router.get('/dashboard', authMiddleware, async (req, res, next) => {
         tc.sheet_id, tc.tab_name, tc.sheet_url, tc.campaign_name,
         COALESCE(tc.tab_gid, im.tab_gid) AS tab_gid,
         tc.manager, tc.time_range, tc.taekhap, tc.review_type,
-        tc.payment_type, tc.display_name, tc.is_closed,
+        tc.payment_type, tc.display_name, tc.display_name_map, tc.is_closed,
         tc.folder_url, tc.capture_folder_url, tc.is_bulk, tc.delivery_type,
         tc.round, tc.nc_mode, tc.deposit_name, tc.transfer_bank,
         tc.income_type, tc.updated_at, tc.closed_rounds,

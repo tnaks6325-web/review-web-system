@@ -11318,12 +11318,16 @@ function _filterTabDashData() {
       // 차수별로 행 생성 (마감된 차수는 제외)
       t.roundList.forEach(rd => {
         if (closedRoundsSet.has(rd.round)) return; // 마감 차수 스킵
+        // ★ display_name_map에서 차수별 표시명 오버라이드
+        const dnMap = t.display_name_map || {};
+        const roundDisplayName = dnMap[rd.round];
         expanded.push(Object.assign({}, t, {
           _roundLabel: rd.round,
           _roundTotal: rd.total,
           _roundSubmitted: rd.submitted,
           _roundPaid: rd.paid || 0,
           _isRoundRow: true,
+          display_name: roundDisplayName !== undefined ? roundDisplayName : (t.display_name || ""),
         }));
       });
     } else {
@@ -11610,18 +11614,30 @@ function _popupJustClosed(popupKey) {
 }
 
 /** 인라인 저장 공통 */
-async function _saveTabField(t, fieldMap) {
+async function _saveTabField(t, fieldMap, round) {
   try {
     const payload = { action:"setTabConfig", sheetId: t.sheet_id, tabName: t.tab_name, ...fieldMap };
+    // ★ 차수별 표시명: round가 있으면 서버에 round 전달 → display_name_map JSONB 업데이트
+    if (round) payload.round = round;
     const res = await gasPost(payload);
     if (res.error) { showToast(res.error, "error"); return false; }
     // 로컬 데이터 즉시 반영
-    for (const [apiKey, val] of Object.entries(fieldMap)) {
-      const dbKey = { displayName:"display_name", manager:"manager", reviewType:"review_type",
-        paymentType:"payment_type", timeRange:"time_range", depositName:"deposit_name",
-        incomeType:"income_type", transferBank:"transfer_bank", folderUrl:"folder_url",
-        captureFolderUrl:"capture_folder_url" }[apiKey] || apiKey;
-      t[dbKey] = val;
+    if (round && fieldMap.displayName !== undefined) {
+      // display_name_map 로컬 업데이트
+      const origTab = (_tabDashData?.tabs||[]).find(x => x.sheet_id===t.sheet_id && x.tab_name===t.tab_name);
+      if (origTab) {
+        if (!origTab.display_name_map) origTab.display_name_map = {};
+        origTab.display_name_map[round] = fieldMap.displayName;
+      }
+      t.display_name = fieldMap.displayName;
+    } else {
+      for (const [apiKey, val] of Object.entries(fieldMap)) {
+        const dbKey = { displayName:"display_name", manager:"manager", reviewType:"review_type",
+          paymentType:"payment_type", timeRange:"time_range", depositName:"deposit_name",
+          incomeType:"income_type", transferBank:"transfer_bank", folderUrl:"folder_url",
+          captureFolderUrl:"capture_folder_url" }[apiKey] || apiKey;
+        t[dbKey] = val;
+      }
     }
     showToast("저장 완료", "success");
     return true;
@@ -11629,22 +11645,34 @@ async function _saveTabField(t, fieldMap) {
 }
 
 /** 텍스트 간편입력 → blur/enter 시 저장 */
-function _inlineTextEdit(t, dbKey, apiKey, placeholder) {
+function _inlineTextEdit(t, dbKey, apiKey, placeholder, round) {
   const val = escHtml(t[dbKey] || "");
-  const id = `ie_${dbKey}_${t.sheet_id}_${t.tab_name}`.replace(/[^a-zA-Z0-9_]/g,"_");
+  // ★ round가 있으면 ID에 포함하여 차수별로 고유 input 생성
+  const idBase = round ? `ie_${dbKey}_${t.sheet_id}_${t.tab_name}_${round}` : `ie_${dbKey}_${t.sheet_id}_${t.tab_name}`;
+  const id = idBase.replace(/[^a-zA-Z0-9_]/g,"_");
+  const roundParam = round ? `,'${escHtml(round)}'` : ``;
   return `<input id="${id}" type="text" value="${val}" placeholder="${placeholder}"
     style="width:100%;min-width:60px;max-width:140px;padding:2px 5px;border:1px solid #E5E7EB;border-radius:4px;font-size:.73rem;background:#FAFAFA;outline:none"
     onfocus="this.style.borderColor='#3B82F6';this.style.background='#fff'"
-    onblur="this.style.borderColor='#E5E7EB';this.style.background='#FAFAFA';_onInlineTextSave(this,'${escHtml(t.sheet_id)}','${escHtml(t.tab_name)}','${apiKey}')"
+    onblur="this.style.borderColor='#E5E7EB';this.style.background='#FAFAFA';_onInlineTextSave(this,'${escHtml(t.sheet_id)}','${escHtml(t.tab_name)}','${apiKey}'${roundParam})"
     onkeydown="if(event.key==='Enter'){this.blur()}"
     data-orig="${val}">`;
 }
-async function _onInlineTextSave(el, sheetId, tabName, apiKey) {
+async function _onInlineTextSave(el, sheetId, tabName, apiKey, round) {
   const newVal = el.value.trim();
   if (newVal === (el.dataset.orig||"")) return;
-  const t = (_tabDashData?.tabs||[]).find(x => x.sheet_id===sheetId && x.tab_name===tabName);
+  // ★ round가 있으면 확장된 행에서 매칭, 없으면 원본 탭에서 매칭
+  let t;
+  if (round) {
+    // 확장된 필터 데이터에서 찾기 (같은 sheet_id + tab_name이면 어느 행이든 OK)
+    t = (_tabDashData?.tabs||[]).find(x => x.sheet_id===sheetId && x.tab_name===tabName);
+    // 확장 행용 임시 객체 구성
+    if (t) t = Object.assign({}, t, { _roundLabel: round, _isRoundRow: true });
+  } else {
+    t = (_tabDashData?.tabs||[]).find(x => x.sheet_id===sheetId && x.tab_name===tabName);
+  }
   if (!t) return;
-  const ok = await _saveTabField(t, { [apiKey]: newVal });
+  const ok = await _saveTabField(t, { [apiKey]: newVal }, round || null);
   if (ok) { el.dataset.orig = newVal; }
   else { el.value = el.dataset.orig||""; }
 }
@@ -12041,7 +12069,8 @@ function _cellVal(t, col) {
     return cn ? `<span style="display:flex;align-items:center;gap:3px">${rebuildBtn}<span style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${escHtml(cn)}</span></span>` : '<span style="color:#D1D5DB">—</span>';
   }
   // 텍스트 간편입력
-  if (k === "display_name") return _inlineTextEdit(t, "display_name", "displayName", "상품명 입력");
+  // ★ 차수 행이면 round 파라미터를 전달하여 차수별 독립 표시명 저장
+  if (k === "display_name") return _inlineTextEdit(t, "display_name", "displayName", "상품명 입력", t._isRoundRow ? t._roundLabel : null);
   if (k === "deposit_name") return _inlineTextEdit(t, "deposit_name", "depositName", "입금자명");
   // 링크 입력
   if (k === "folder_url") return _inlineLinkEdit(t, "folder_url", "folderUrl", "fa-folder", "#059669");
