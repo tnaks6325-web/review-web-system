@@ -2,7 +2,7 @@ const express = require('express');
 const router = express.Router();
 const pool = require('../db/pool');
 const { authMiddleware } = require('../middleware/auth.middleware');
-const { getSpreadsheetMeta } = require('../services/sheets.service');
+const { getSpreadsheetMeta, readSheet } = require('../services/sheets.service');
 // [DEPRECATED — v11.8.0] masterSheet.service.js 함수들은 2탭 통합으로 deprecated
 // import는 유지하되 라우트에서 deprecated 응답 반환
 const { syncMasterSheetToDB, scanAndPopulateMaster, applyCachedScanAndSync, hasScanCache, syncSettingsOnly } = require('../services/masterSheet.service');
@@ -23,6 +23,58 @@ const { throttledCall, throttledMap } = require('../utils/sheetsThrottle');
     logger.warn('[tabconfig] display_name_map 컬럼 추가 실패 (이미 존재할 수 있음):', err.message);
   }
 })();
+
+// ── Auto-migration: option_columns JSONB 컬럼 추가 (옵션 컬럼 선택) ──
+(async () => {
+  try {
+    await pool.query(`
+      ALTER TABLE tab_configs
+      ADD COLUMN IF NOT EXISTS option_columns JSONB DEFAULT '[]'::jsonb
+    `);
+    logger.info('[tabconfig] option_columns 컬럼 확인/추가 완료');
+  } catch (err) {
+    logger.warn('[tabconfig] option_columns 컬럼 추가 실패 (이미 존재할 수 있음):', err.message);
+  }
+})();
+
+// ═══════════════════════════════════════════════════════════
+// 옵션(Option) 기능용 시스템 헤더 키워드 목록
+// indexBuilder.service.js의 parseTabRows에서 사용하는 시스템 컬럼 키워드를 통합
+// 이 목록에 매칭되는 헤더는 "시스템 헤더"로 분류하여 옵션 후보에서 제외
+// ═══════════════════════════════════════════════════════════
+const SYSTEM_HEADER_KEYWORDS = [
+  // 이름/수취인 계열
+  '수취인', '이름', '신청자', '참여자', '수취인명', '주문자', '성함', '예금주', '성명', '받는분',
+  // 연락처 계열
+  '연락처', '전화번호', '핸드폰', '휴대폰', 'phone',
+  // 주소 계열
+  '주소', '우편번호', '배송지', '배송주소', '상세주소',
+  // 제출/리뷰 계열
+  '리뷰완료', '제출', '완료', 'submit', '제출완료', '리뷰제출', '리뷰',
+  // 상품 계열
+  '상품명', '제품명', '상품', 'product',
+  // URL 계열
+  '상품url', '제품url', '상품링크', 'url', '링크',
+  // 날짜 계열
+  '시작일', '구매일', '주문일', '배정일', '종료일', '마감일', '완료일', '제출마감', '날짜',
+  // 차수 계열
+  '회차', '차수', 'round',
+  // 입금 계열
+  '입금', '입금완료', '입금확인', '입금여부', '페이백', '입금명', '입금자', '입금자명',
+  '결제금액', '결제금', '결제일', '결제수단',
+  // 기타 시스템 계열
+  '비고', '메모', '주문번호', '송장번호', '운송장', '택배사', 'InAd',
+  '번호', '리뷰제출일',
+  // 데이터탭 판별 키워드
+  '수취인명',
+];
+
+// 시스템 헤더 판별 함수: 헤더가 시스템 키워드에 매칭되는지 확인
+function _isSystemHeader(header) {
+  const h = header.trim().toLowerCase();
+  if (!h) return true; // 빈 헤더는 시스템으로 취급
+  return SYSTEM_HEADER_KEYWORDS.some(k => h.includes(k.toLowerCase()));
+}
 
 // POST /api/tab/config — 탭 설정 저장/수정 (GAS: setTabConfig)
 router.post('/config', authMiddleware, async (req, res, next) => {
@@ -1086,7 +1138,7 @@ router.get('/dashboard', authMiddleware, async (req, res, next) => {
         tc.sheet_id, tc.tab_name, tc.sheet_url, tc.campaign_name,
         COALESCE(tc.tab_gid, im.tab_gid) AS tab_gid,
         tc.manager, tc.time_range, tc.taekhap, tc.review_type,
-        tc.payment_type, tc.display_name, tc.display_name_map, tc.is_closed,
+        tc.payment_type, tc.display_name, tc.display_name_map, tc.option_columns, tc.is_closed,
         tc.folder_url, tc.capture_folder_url, tc.is_bulk, tc.delivery_type,
         tc.round, tc.nc_mode, tc.deposit_name, tc.transfer_bank,
         tc.income_type, tc.updated_at, tc.closed_rounds,
@@ -1729,6 +1781,242 @@ router.post('/fix-sheet-urls', authMiddleware, async (req, res, next) => {
     }
 
     res.json({ ok: true, fixed, total: rows.length, filterSheet });
+  } catch (err) {
+    next(err);
+  }
+});
+
+// ═══════════════════════════════════════════════════════════
+// ★ 옵션(Option) 기능 — 시트 헤더 분석 + 옵션 컬럼 관리
+// ═══════════════════════════════════════════════════════════
+
+// GET /api/tab/option-headers — 시트 헤더 읽기 + 시스템/옵션 후보 분류
+// Query: sheetId, tabName, (optional) gid
+router.get('/option-headers', authMiddleware, async (req, res, next) => {
+  try {
+    const { sheetId, tabName, gid } = req.query;
+    if (!sheetId || !tabName) {
+      return res.json({ error: 'sheetId와 tabName이 필요합니다.' });
+    }
+
+    // 1) 시트에서 헤더 행 읽기 (첫 50행 스캔하여 데이터 탭 헤더 찾기)
+    const range = `'${tabName.replace(/'/g, "''")}'`;
+    const opts = gid ? { gid } : {};
+    let values;
+    try {
+      values = await throttledCall(() => readSheet(sheetId, range, opts));
+    } catch (sheetErr) {
+      logger.error('[option-headers] 시트 읽기 실패:', sheetErr.message);
+      return res.json({ error: '시트 읽기 실패: ' + sheetErr.message });
+    }
+
+    if (!values || values.length === 0) {
+      return res.json({ error: '시트에 데이터가 없습니다.' });
+    }
+
+    // 2) 헤더 행 탐색 (indexBuilder.parseTabRows와 동일한 로직)
+    //    DATA_TAB_KEYWORDS 중 하나라도 포함된 첫 행을 헤더로 인식
+    const DATA_TAB_KW = ['번호', '주문자', '수취인', '수취인명', '성함', '이름', '성명', '신청자', '연락처', '전화번호'];
+    const HEADER_SCAN_LIMIT = 50;
+    let headerRowIdx = -1;
+
+    for (let i = 0; i < Math.min(values.length, HEADER_SCAN_LIMIT); i++) {
+      const cells = values[i] ? values[i].map(c => String(c || '').trim()) : [];
+      const hasKeyword = cells.some(c => DATA_TAB_KW.some(k => c.includes(k)));
+      if (hasKeyword) {
+        headerRowIdx = i;
+        break;
+      }
+    }
+
+    if (headerRowIdx < 0) {
+      return res.json({ error: '데이터 헤더 행을 찾을 수 없습니다. (첫 50행 내 수취인/이름 등 키워드 미발견)' });
+    }
+
+    const headers = values[headerRowIdx].map(h => String(h || '').trim());
+
+    // 3) 시스템 vs 옵션 후보 분류
+    const systemHeaders = [];
+    const optionCandidates = [];
+
+    headers.forEach((h, colIdx) => {
+      if (!h) return; // 빈 헤더 무시
+      const entry = { name: h, colIndex: colIdx };
+      if (_isSystemHeader(h)) {
+        systemHeaders.push({ ...entry, reason: 'system' });
+      } else {
+        optionCandidates.push(entry);
+      }
+    });
+
+    // 4) 현재 저장된 option_columns 조회
+    const { rows: tcRows } = await pool.query(
+      'SELECT option_columns FROM tab_configs WHERE sheet_id = $1 AND tab_name = $2',
+      [sheetId, tabName]
+    );
+    const savedOptionColumns = tcRows[0]?.option_columns || [];
+
+    res.json({
+      ok: true,
+      headerRow: headerRowIdx + 1, // 1-based
+      totalHeaders: headers.length,
+      systemHeaders,
+      optionCandidates,
+      savedOptionColumns,
+    });
+  } catch (err) {
+    next(err);
+  }
+});
+
+// POST /api/tab/option-columns — 옵션 컬럼 선택 저장
+// Body: { sheetId, tabName, optionColumns: [{ name: "키워드", colIndex: 2 }, ...] }
+router.post('/option-columns', authMiddleware, async (req, res, next) => {
+  try {
+    const { sheetId, tabName, optionColumns } = req.body;
+    if (!sheetId || !tabName) {
+      return res.json({ error: 'sheetId와 tabName이 필요합니다.' });
+    }
+    if (!Array.isArray(optionColumns)) {
+      return res.json({ error: 'optionColumns는 배열이어야 합니다.' });
+    }
+
+    // UPSERT: option_columns JSONB 저장
+    const result = await pool.query(
+      `UPDATE tab_configs
+       SET option_columns = $3::jsonb, updated_at = NOW()
+       WHERE sheet_id = $1 AND tab_name = $2`,
+      [sheetId, tabName, JSON.stringify(optionColumns)]
+    );
+
+    if (result.rowCount === 0) {
+      // 레코드가 없으면 INSERT
+      await pool.query(
+        `INSERT INTO tab_configs (sheet_id, tab_name, option_columns, updated_at)
+         VALUES ($1, $2, $3::jsonb, NOW())
+         ON CONFLICT (sheet_id, tab_name) DO UPDATE SET
+           option_columns = $3::jsonb, updated_at = NOW()`,
+        [sheetId, tabName, JSON.stringify(optionColumns)]
+      );
+    }
+
+    logger.info(`[option-columns] 저장: sheetId=${sheetId} tab=${tabName} cols=${optionColumns.length}개`);
+    res.json({ ok: true, sheetId, tabName, optionColumns });
+  } catch (err) {
+    next(err);
+  }
+});
+
+// GET /api/tab/option-data — 선택된 옵션 컬럼의 행별 데이터 조회
+// Query: sheetId, tabName, (optional) gid, (optional) round
+// 반환: { rows: [{ rowIndex, reviewerName, options: { "키워드": "끈나시", "컬러": "노랑색" } }, ...] }
+router.get('/option-data', authMiddleware, async (req, res, next) => {
+  try {
+    const { sheetId, tabName, gid, round } = req.query;
+    if (!sheetId || !tabName) {
+      return res.json({ error: 'sheetId와 tabName이 필요합니다.' });
+    }
+
+    // 1) 저장된 옵션 컬럼 조회
+    const { rows: tcRows } = await pool.query(
+      'SELECT option_columns FROM tab_configs WHERE sheet_id = $1 AND tab_name = $2',
+      [sheetId, tabName]
+    );
+    const optionColumns = tcRows[0]?.option_columns || [];
+    if (optionColumns.length === 0) {
+      return res.json({ ok: true, rows: [], message: '설정된 옵션 컬럼이 없습니다.' });
+    }
+
+    // 2) 시트 전체 데이터 읽기
+    const range = `'${tabName.replace(/'/g, "''")}'`;
+    const opts = gid ? { gid } : {};
+    let values;
+    try {
+      values = await throttledCall(() => readSheet(sheetId, range, opts));
+    } catch (sheetErr) {
+      logger.error('[option-data] 시트 읽기 실패:', sheetErr.message);
+      return res.json({ error: '시트 읽기 실패: ' + sheetErr.message });
+    }
+
+    if (!values || values.length === 0) {
+      return res.json({ ok: true, rows: [] });
+    }
+
+    // 3) 헤더 행 찾기 (option-headers와 동일 로직)
+    const DATA_TAB_KW = ['번호', '주문자', '수취인', '수취인명', '성함', '이름', '성명', '신청자', '연락처', '전화번호'];
+    const NAME_KW = ['수취인', '이름', '신청자', '참여자', '수취인명', '주문자', '성함', '예금주', '성명'];
+    const ROUND_KW = ['회차', '차수', 'round'];
+    let headerRowIdx = -1;
+
+    for (let i = 0; i < Math.min(values.length, 50); i++) {
+      const cells = values[i] ? values[i].map(c => String(c || '').trim()) : [];
+      if (cells.some(c => DATA_TAB_KW.some(k => c.includes(k)))) {
+        headerRowIdx = i;
+        break;
+      }
+    }
+    if (headerRowIdx < 0) {
+      return res.json({ error: '데이터 헤더 행을 찾을 수 없습니다.' });
+    }
+
+    const headers = values[headerRowIdx].map(h => String(h || '').trim());
+    const dataRows = values.slice(headerRowIdx + 1);
+
+    // 4) 이름 컬럼 인덱스 찾기
+    const nameColIdx = headers.findIndex(h => NAME_KW.some(k => h.includes(k)));
+
+    // 5) 회차 컬럼 인덱스 찾기 (round 필터용)
+    const roundColIdx = headers.findIndex(h => ROUND_KW.some(k => h.toLowerCase().includes(k.toLowerCase())));
+
+    // 6) 옵션 컬럼 인덱스 매핑 (저장된 이름 → 실제 헤더 인덱스)
+    const optColMap = [];
+    for (const oc of optionColumns) {
+      // colIndex가 있으면 우선, 없으면 이름으로 검색
+      let idx = oc.colIndex;
+      if (idx === undefined || idx === null || headers[idx] !== oc.name) {
+        idx = headers.findIndex(h => h === oc.name);
+      }
+      if (idx >= 0) {
+        optColMap.push({ name: oc.name, idx });
+      }
+    }
+
+    if (optColMap.length === 0) {
+      return res.json({ ok: true, rows: [], message: '옵션 컬럼이 현재 시트 헤더와 매칭되지 않습니다.' });
+    }
+
+    // 7) 행별 옵션 데이터 추출
+    const result = [];
+    for (let i = 0; i < dataRows.length; i++) {
+      const row = dataRows[i];
+      const reviewerName = nameColIdx >= 0 ? String(row[nameColIdx] || '').trim() : '';
+      if (!reviewerName) continue; // 이름 없는 행 스킵
+
+      // round 필터
+      if (round && roundColIdx >= 0) {
+        const rowRound = String(row[roundColIdx] || '').trim();
+        if (rowRound !== round) continue;
+      }
+
+      const options = {};
+      for (const { name, idx } of optColMap) {
+        options[name] = String(row[idx] !== undefined ? row[idx] : '').trim();
+      }
+
+      result.push({
+        rowIndex: headerRowIdx + 1 + i + 1, // 1-based (시트 행 번호)
+        reviewerName,
+        round: roundColIdx >= 0 ? String(row[roundColIdx] || '').trim() : '',
+        options,
+      });
+    }
+
+    res.json({
+      ok: true,
+      optionColumns: optColMap.map(c => c.name),
+      rows: result,
+      totalRows: result.length,
+    });
   } catch (err) {
     next(err);
   }

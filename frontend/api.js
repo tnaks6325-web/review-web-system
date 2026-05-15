@@ -75,6 +75,10 @@ const _ACTION_MAP = {
   'saveColPrefs':     { method: 'POST', path: '/api/tab/col-prefs' },
   'backfillGid':      { method: 'POST', path: '/api/tab/backfill-gid' },
   'fixSheetUrls':     { method: 'POST', path: '/api/tab/fix-sheet-urls' },
+  // 옵션(Option) 기능
+  'getOptionHeaders': { method: 'GET',  path: '/api/tab/option-headers' },
+  'saveOptionColumns':{ method: 'POST', path: '/api/tab/option-columns' },
+  'getOptionData':    { method: 'GET',  path: '/api/tab/option-data' },
 
   // 리뷰어 관리 (Section 7)
   'registerReviewer':   { method: 'POST', path: '/api/reviewer/register' },

@@ -12179,6 +12179,7 @@ function _renderFullTableView(wrap, filtered) {
     const onclick = sortable ? ` onclick="_toggleTabDashSort('${c.key}')"` : '';
     html += `<th style="${thStyle};text-align:${c.align}${c.width?';width:'+c.width:''};${sortCursor}"${onclick}>${c.label}${sortIcon}</th>`;
   });
+  html += `<th style="${thStyle};text-align:center;width:40px">옵션</th>`;
   html += `<th style="${thStyle};text-align:center">상세</th></tr></thead><tbody>`;
 
   filtered.forEach((t, idx) => {
@@ -12194,6 +12195,11 @@ function _renderFullTableView(wrap, filtered) {
       const mw = c.width ? c.width : c.key==='campaign_name'?'140px':c.key==='tab_name'?'180px':'120px';
       html += `<td style="padding:5px;text-align:${c.align};max-width:${mw};${c.width?'width:'+c.width+';':''};overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="${escHtml(String(t[c.key]||''))}">${_cellVal(t, c)}</td>`;
     });
+    const optCount = (t.option_columns && t.option_columns.length) ? t.option_columns.length : 0;
+    const optColor = optCount > 0 ? '#7C3AED' : '#CBD5E1';
+    const optTitle = optCount > 0 ? `옵션 ${optCount}개 설정됨` : '옵션 찾기';
+    const optBadge = optCount > 0 ? `<span style="position:absolute;top:-4px;right:-6px;background:#7C3AED;color:#fff;font-size:.5rem;border-radius:50%;width:13px;height:13px;display:flex;align-items:center;justify-content:center;font-weight:700">${optCount}</span>` : '';
+    html += `<td style="padding:5px;text-align:center"><button onclick="event.stopPropagation();openOptionModal('${escHtml(t.sheet_id)}','${escHtml(t.tab_name)}','${escHtml(t.tab_gid||'')}')" style="background:none;border:none;color:${optColor};cursor:pointer;font-size:.78rem;position:relative" title="${optTitle}"><i class="fas fa-tags"></i>${optBadge}</button></td>`;
     html += `<td style="padding:5px;text-align:center"><button onclick="openTabDashDetail(${idx})" style="background:none;border:none;color:#1D4ED8;cursor:pointer;font-size:.78rem"><i class="fas fa-expand-alt"></i></button></td>`;
     html += `</tr>`;
   });
@@ -13659,5 +13665,104 @@ async function selectDedupeTab(idx) {
   } catch (err) {
     modal.remove();
     showToast('중복 검사 오류: ' + err.message, 'error');
+  }
+}
+
+// ═══════════════════════════════════════════════════════════
+// ★ 옵션(Option) 기능 — 시트 헤더 분석 + 옵션 컬럼 선택 모달
+// ═══════════════════════════════════════════════════════════
+
+async function openOptionModal(sheetId, tabName, gid) {
+  // 기존 모달 제거
+  document.getElementById('optionModal')?.remove();
+
+  const modal = document.createElement('div');
+  modal.id = 'optionModal';
+  modal.style.cssText = 'position:fixed;top:0;left:0;width:100vw;height:100vh;background:rgba(0,0,0,.45);display:flex;align-items:center;justify-content:center;z-index:9999';
+  modal.innerHTML = `<div style="background:#fff;border-radius:14px;width:520px;max-width:92vw;max-height:85vh;overflow-y:auto;box-shadow:0 20px 60px rgba(0,0,0,.2);padding:0">
+    <div style="padding:18px 22px;border-bottom:1px solid #E5E7EB;display:flex;align-items:center;justify-content:space-between">
+      <div style="font-size:.95rem;font-weight:700;color:#1F2937"><i class="fas fa-tags" style="color:#7C3AED;margin-right:8px"></i>옵션 컬럼 설정 — ${escHtml(tabName)}</div>
+      <button onclick="document.getElementById('optionModal')?.remove()" style="background:none;border:none;font-size:1.1rem;cursor:pointer;color:#6B7280">&times;</button>
+    </div>
+    <div id="optionModalBody" style="padding:18px 22px">
+      <div style="text-align:center;padding:30px"><i class="fas fa-spinner fa-spin" style="color:#7C3AED;font-size:1.5rem"></i><div style="margin-top:8px;font-size:.8rem;color:#6B7280">시트 헤더 분석 중...</div></div>
+    </div>
+  </div>`;
+  document.body.appendChild(modal);
+  modal.addEventListener('click', (e) => { if (e.target === modal) modal.remove(); });
+
+  try {
+    const params = { action:'getOptionHeaders', sheetId, tabName };
+    if (gid) params.gid = gid;
+    const data = await gasGet(params);
+    if (data.error) { _optionModalError(data.error); return; }
+
+    const body = document.getElementById('optionModalBody');
+    if (!body) return;
+
+    const candidates = data.optionCandidates || [];
+    const saved = (data.savedOptionColumns || []).map(c => c.name);
+
+    if (candidates.length === 0) {
+      body.innerHTML = `<div style="text-align:center;padding:20px;color:#6B7280"><i class="fas fa-info-circle" style="margin-right:6px"></i>옵션으로 사용할 수 있는 헤더가 없습니다.<br><span style="font-size:.72rem">(모든 헤더가 시스템 컬럼으로 분류됨)</span></div>`;
+      return;
+    }
+
+    let html = `<div style="font-size:.78rem;color:#6B7280;margin-bottom:12px"><i class="fas fa-info-circle" style="margin-right:4px"></i>헤더 행: ${data.headerRow}행 / 전체 ${data.totalHeaders}개 중 후보 ${candidates.length}개</div>`;
+    html += `<div style="margin-bottom:14px">`;
+    candidates.forEach((c, i) => {
+      const checked = saved.includes(c.name) ? 'checked' : '';
+      html += `<label style="display:flex;align-items:center;gap:8px;padding:7px 10px;border-radius:8px;cursor:pointer;margin-bottom:3px;transition:background .15s;border:1px solid ${checked?'#7C3AED':'#E5E7EB'};background:${checked?'#F5F3FF':'#fff'}" 
+        onmouseover="this.style.background='#F5F3FF'" onmouseout="this.style.background=this.querySelector('input').checked?'#F5F3FF':'#fff'">
+        <input type="checkbox" name="optCol" value="${i}" data-name="${escHtml(c.name)}" data-colidx="${c.colIndex}" ${checked} style="width:16px;height:16px;accent-color:#7C3AED;cursor:pointer"
+          onchange="this.parentElement.style.border=this.checked?'1px solid #7C3AED':'1px solid #E5E7EB';this.parentElement.style.background=this.checked?'#F5F3FF':'#fff'">
+        <span style="font-size:.82rem;font-weight:${checked?'600':'500'};color:#1F2937">${escHtml(c.name)}</span>
+        <span style="font-size:.65rem;color:#9CA3AF;margin-left:auto">col ${c.colIndex+1}</span>
+      </label>`;
+    });
+    html += `</div>`;
+
+    // 시스템 헤더 접기
+    const sysHeaders = data.systemHeaders || [];
+    if (sysHeaders.length > 0) {
+      html += `<details style="margin-bottom:14px"><summary style="font-size:.72rem;color:#9CA3AF;cursor:pointer;user-select:none"><i class="fas fa-eye-slash" style="margin-right:4px"></i>제외된 시스템 헤더 (${sysHeaders.length}개)</summary>
+        <div style="padding:8px;background:#F9FAFB;border-radius:8px;margin-top:6px;font-size:.7rem;color:#6B7280;line-height:1.6">${sysHeaders.map(s=>escHtml(s.name)).join(', ')}</div>
+      </details>`;
+    }
+
+    html += `<div style="display:flex;gap:8px;justify-content:flex-end;padding-top:10px;border-top:1px solid #E5E7EB">
+      <button onclick="document.getElementById('optionModal')?.remove()" style="padding:8px 16px;background:#F3F4F6;border:1px solid #D1D5DB;border-radius:8px;font-size:.8rem;cursor:pointer;color:#4B5563">취소</button>
+      <button onclick="_saveOptionColumns('${escHtml(sheetId)}','${escHtml(tabName)}')" style="padding:8px 20px;background:#7C3AED;color:#fff;border:none;border-radius:8px;font-size:.8rem;font-weight:600;cursor:pointer"><i class="fas fa-save" style="margin-right:4px"></i>저장</button>
+    </div>`;
+
+    body.innerHTML = html;
+  } catch (err) {
+    _optionModalError(err.message);
+  }
+}
+
+function _optionModalError(msg) {
+  const body = document.getElementById('optionModalBody');
+  if (body) body.innerHTML = `<div style="text-align:center;padding:20px;color:#DC2626"><i class="fas fa-exclamation-triangle" style="margin-right:6px"></i>${escHtml(msg)}</div>`;
+}
+
+async function _saveOptionColumns(sheetId, tabName) {
+  const checks = document.querySelectorAll('#optionModal input[name="optCol"]:checked');
+  const optionColumns = Array.from(checks).map(el => ({
+    name: el.dataset.name,
+    colIndex: parseInt(el.dataset.colidx)
+  }));
+
+  try {
+    const data = await gasPost({ action:'saveOptionColumns', sheetId, tabName, optionColumns });
+    if (data.error) { showToast(data.error, 'error'); return; }
+    showToast(`옵션 컬럼 ${optionColumns.length}개 저장 완료`, 'success');
+    document.getElementById('optionModal')?.remove();
+    // 로컬 데이터 업데이트
+    const origTab = (_tabDashData?.tabs||[]).find(x => x.sheet_id===sheetId && x.tab_name===tabName);
+    if (origTab) origTab.option_columns = optionColumns;
+    renderTabDashTable();
+  } catch (err) {
+    showToast('저장 실패: ' + err.message, 'error');
   }
 }
