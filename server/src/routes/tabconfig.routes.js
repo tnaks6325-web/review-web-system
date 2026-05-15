@@ -1911,20 +1911,28 @@ router.post('/option-columns', authMiddleware, async (req, res, next) => {
 
 // GET /api/tab/option-data — 선택된 옵션 컬럼의 행별 데이터 조회
 // Query: sheetId, tabName, (optional) gid, (optional) round
+// ★ columns: JSON 문자열로 전달 시 DB 저장 데이터 대신 해당 컬럼 기준으로 미리보기
 // 반환: { rows: [{ rowIndex, reviewerName, options: { "키워드": "끈나시", "컬러": "노랑색" } }, ...] }
 router.get('/option-data', authMiddleware, async (req, res, next) => {
   try {
-    const { sheetId, tabName, gid, round } = req.query;
+    const { sheetId, tabName, gid, round, columns } = req.query;
     if (!sheetId || !tabName) {
       return res.json({ error: 'sheetId와 tabName이 필요합니다.' });
     }
 
-    // 1) 저장된 옵션 컬럼 조회
-    const { rows: tcRows } = await pool.query(
-      'SELECT option_columns FROM tab_configs WHERE sheet_id = $1 AND tab_name = $2',
-      [sheetId, tabName]
-    );
-    const optionColumns = tcRows[0]?.option_columns || [];
+    // 1) columns 파라미터가 있으면 그것을 사용, 없으면 DB 저장값 조회
+    let optionColumns = [];
+    if (columns) {
+      try { optionColumns = JSON.parse(columns); } catch(e) {
+        return res.json({ error: 'columns 파라미터 파싱 실패' });
+      }
+    } else {
+      const { rows: tcRows } = await pool.query(
+        'SELECT option_columns FROM tab_configs WHERE sheet_id = $1 AND tab_name = $2',
+        [sheetId, tabName]
+      );
+      optionColumns = tcRows[0]?.option_columns || [];
+    }
     if (optionColumns.length === 0) {
       return res.json({ ok: true, rows: [], message: '설정된 옵션 컬럼이 없습니다.' });
     }

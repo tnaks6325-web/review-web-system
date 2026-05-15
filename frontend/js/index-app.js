@@ -13692,7 +13692,7 @@ async function openOptionModal(sheetId, tabName, gid) {
     </div>
   </div>`;
   document.body.appendChild(modal);
-  modal.addEventListener('click', (e) => { if (e.target === modal) modal.remove(); });
+  // ★ 바깥 클릭 시 모달 닫히지 않도록 — 이벤트 리스너 제거
 
   try {
     const params = { action:'getOptionHeaders', sheetId, tabName };
@@ -13718,7 +13718,7 @@ async function openOptionModal(sheetId, tabName, gid) {
       html += `<label style="display:flex;align-items:center;gap:8px;padding:7px 10px;border-radius:8px;cursor:pointer;margin-bottom:3px;transition:background .15s;border:1px solid ${checked?'#7C3AED':'#E5E7EB'};background:${checked?'#F5F3FF':'#fff'}" 
         onmouseover="this.style.background='#F5F3FF'" onmouseout="this.style.background=this.querySelector('input').checked?'#F5F3FF':'#fff'">
         <input type="checkbox" name="optCol" value="${i}" data-name="${escHtml(c.name)}" data-colidx="${c.colIndex}" ${checked} style="width:16px;height:16px;accent-color:#7C3AED;cursor:pointer"
-          onchange="this.parentElement.style.border=this.checked?'1px solid #7C3AED':'1px solid #E5E7EB';this.parentElement.style.background=this.checked?'#F5F3FF':'#fff'">
+          onchange="this.parentElement.style.border=this.checked?'1px solid #7C3AED':'1px solid #E5E7EB';this.parentElement.style.background=this.checked?'#F5F3FF':'#fff';_onOptionCheckChange()">
         <span style="font-size:.82rem;font-weight:${checked?'600':'500'};color:#1F2937">${escHtml(c.name)}</span>
         <span style="font-size:.65rem;color:#9CA3AF;margin-left:auto">col ${c.colIndex+1}</span>
       </label>`;
@@ -13733,19 +13733,28 @@ async function openOptionModal(sheetId, tabName, gid) {
       </details>`;
     }
 
-    // 미리보기 영역 (저장 후 또는 기존 설정이 있을 때)
+    // 미리보기 영역
     html += `<div id="optionPreviewArea" style="display:none;margin-bottom:14px"></div>`;
 
-    html += `<div style="display:flex;gap:8px;justify-content:flex-end;padding-top:10px;border-top:1px solid #E5E7EB">
-      <button onclick="_previewOptionData('${escHtml(sheetId)}','${escHtml(tabName)}','${escHtml(gid||'')}')" style="padding:8px 16px;background:#EDE9FE;border:1px solid #A78BFA;border-radius:8px;font-size:.8rem;cursor:pointer;color:#5B21B6;font-weight:500"><i class="fas fa-eye" style="margin-right:4px"></i>미리보기</button>
-      <button onclick="document.getElementById('optionModal')?.remove()" style="padding:8px 16px;background:#F3F4F6;border:1px solid #D1D5DB;border-radius:8px;font-size:.8rem;cursor:pointer;color:#4B5563">취소</button>
-      <button onclick="_saveOptionColumns('${escHtml(sheetId)}','${escHtml(tabName)}')" style="padding:8px 20px;background:#7C3AED;color:#fff;border:none;border-radius:8px;font-size:.8rem;font-weight:600;cursor:pointer"><i class="fas fa-save" style="margin-right:4px"></i>저장</button>
+    // ★ 버튼: 미리보기 + 닫기만 표시 / 저장 버튼은 미리보기 성공 후에만 나타남
+    html += `<div id="optionModalBtnArea" style="display:flex;gap:8px;justify-content:flex-end;padding-top:10px;border-top:1px solid #E5E7EB">
+      <button id="optionPreviewBtn" onclick="_previewOptionData('${escHtml(sheetId)}','${escHtml(tabName)}','${escHtml(gid||'')}')" style="padding:8px 16px;background:#EDE9FE;border:1px solid #A78BFA;border-radius:8px;font-size:.8rem;cursor:pointer;color:#5B21B6;font-weight:500"><i class="fas fa-eye" style="margin-right:4px"></i>미리보기</button>
+      <button onclick="document.getElementById('optionModal')?.remove()" style="padding:8px 16px;background:#F3F4F6;border:1px solid #D1D5DB;border-radius:8px;font-size:.8rem;cursor:pointer;color:#4B5563">닫기</button>
+      <button id="optionSaveBtn" onclick="_saveOptionColumns('${escHtml(sheetId)}','${escHtml(tabName)}')" style="display:none;padding:8px 20px;background:#7C3AED;color:#fff;border:none;border-radius:8px;font-size:.8rem;font-weight:600;cursor:pointer"><i class="fas fa-save" style="margin-right:4px"></i>저장</button>
     </div>`;
 
     body.innerHTML = html;
   } catch (err) {
     _optionModalError(err.message);
   }
+}
+
+// ★ 체크박스 변경 시 미리보기 초기화 + 저장 버튼 숨김 (다시 미리보기해야 저장 가능)
+function _onOptionCheckChange() {
+  const saveBtn = document.getElementById('optionSaveBtn');
+  if (saveBtn) saveBtn.style.display = 'none';
+  const area = document.getElementById('optionPreviewArea');
+  if (area) { area.style.display = 'none'; area.innerHTML = ''; }
 }
 
 function _optionModalError(msg) {
@@ -13764,24 +13773,37 @@ async function _saveOptionColumns(sheetId, tabName) {
     const data = await gasPost({ action:'saveOptionColumns', sheetId, tabName, optionColumns });
     if (data.error) { showToast(data.error, 'error'); return; }
     showToast(`옵션 컬럼 ${optionColumns.length}개 저장 완료`, 'success');
-    // 로컬 데이터 업데이트 (모달 닫지 않음 — 미리보기 가능하도록)
+    // 로컬 데이터 업데이트 + 모달 닫기
     const origTab = (_tabDashData?.tabs||[]).find(x => x.sheet_id===sheetId && x.tab_name===tabName);
     if (origTab) origTab.option_columns = optionColumns;
     renderTabDashTable();
+    document.getElementById('optionModal')?.remove();
   } catch (err) {
     showToast('저장 실패: ' + err.message, 'error');
   }
 }
 
 // ── 옵션 데이터 미리보기 (관리자 모달 내) ──
+// ★ 현재 체크된 체크박스 기준으로 서버에 columns 파라미터 전달 (DB 저장 없이 프리뷰)
 async function _previewOptionData(sheetId, tabName, gid) {
+  // 체크된 항목 수집
+  const checks = document.querySelectorAll('#optionModal input[name="optCol"]:checked');
+  if (checks.length === 0) {
+    showToast('미리볼 옵션 컬럼을 1개 이상 선택하세요.', 'info');
+    return;
+  }
+  const selectedCols = Array.from(checks).map(el => ({
+    name: el.dataset.name,
+    colIndex: parseInt(el.dataset.colidx)
+  }));
+
   const area = document.getElementById('optionPreviewArea');
   if (!area) return;
   area.style.display = 'block';
   area.innerHTML = `<div style="text-align:center;padding:16px"><i class="fas fa-spinner fa-spin" style="color:#7C3AED"></i> <span style="font-size:.78rem;color:#6B7280">옵션 데이터 로드 중...</span></div>`;
 
   try {
-    const params = { action:'getOptionData', sheetId, tabName };
+    const params = { action:'getOptionData', sheetId, tabName, columns: JSON.stringify(selectedCols) };
     if (gid) params.gid = gid;
     const data = await gasGet(params);
     if (data.error) { area.innerHTML = `<div style="color:#DC2626;font-size:.78rem;padding:10px"><i class="fas fa-exclamation-triangle" style="margin-right:4px"></i>${escHtml(data.error)}</div>`; return; }
@@ -13789,7 +13811,7 @@ async function _previewOptionData(sheetId, tabName, gid) {
     const rows = data.rows || [];
     const cols = data.optionColumns || [];
     if (rows.length === 0) {
-      area.innerHTML = `<div style="color:#6B7280;font-size:.78rem;padding:10px;text-align:center"><i class="fas fa-info-circle" style="margin-right:4px"></i>${data.message || '옵션 데이터가 없습니다. 먼저 저장 후 미리보기하세요.'}</div>`;
+      area.innerHTML = `<div style="color:#6B7280;font-size:.78rem;padding:10px;text-align:center"><i class="fas fa-info-circle" style="margin-right:4px"></i>${data.message || '옵션 데이터가 없습니다.'}</div>`;
       return;
     }
 
@@ -13813,6 +13835,10 @@ async function _previewOptionData(sheetId, tabName, gid) {
     });
     h += `</tbody></table></div>`;
     area.innerHTML = h;
+
+    // ★ 미리보기 성공 → 저장 버튼 표시
+    const saveBtn = document.getElementById('optionSaveBtn');
+    if (saveBtn) saveBtn.style.display = '';
   } catch (err) {
     area.innerHTML = `<div style="color:#DC2626;font-size:.78rem;padding:10px"><i class="fas fa-exclamation-triangle" style="margin-right:4px"></i>${escHtml(err.message)}</div>`;
   }
