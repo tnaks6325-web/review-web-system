@@ -43,11 +43,11 @@ router.post('/config', authMiddleware, async (req, res, next) => {
         // display_name_map JSONB 업데이트: 해당 round 키만 변경
         const mapSql = displayVal
           ? `UPDATE tab_configs
-             SET display_name_map = COALESCE(display_name_map, '{}'::jsonb) || jsonb_build_object($3, $4::text),
+             SET display_name_map = COALESCE(display_name_map, '{}'::jsonb) || jsonb_build_object($3::text, $4::text),
                  updated_at = NOW()
              WHERE sheet_id = $1 AND tab_name = $2`
           : `UPDATE tab_configs
-             SET display_name_map = COALESCE(display_name_map, '{}'::jsonb) - $3,
+             SET display_name_map = COALESCE(display_name_map, '{}'::jsonb) - $3::text,
                  updated_at = NOW()
              WHERE sheet_id = $1 AND tab_name = $2`;
         const mapParams = displayVal
@@ -58,9 +58,9 @@ router.post('/config', authMiddleware, async (req, res, next) => {
           // 레코드가 없으면 INSERT
           await pool.query(
             `INSERT INTO tab_configs (sheet_id, tab_name, display_name_map, updated_at)
-             VALUES ($1, $2, jsonb_build_object($3, $4::text), NOW())
+             VALUES ($1, $2, jsonb_build_object($3::text, $4::text), NOW())
              ON CONFLICT (sheet_id, tab_name) DO UPDATE SET
-               display_name_map = COALESCE(tab_configs.display_name_map, '{}'::jsonb) || jsonb_build_object($3, $4::text),
+               display_name_map = COALESCE(tab_configs.display_name_map, '{}'::jsonb) || jsonb_build_object($3::text, $4::text),
                updated_at = NOW()`,
             [sheetId, tabName, roundKey, displayVal || '']
           );
