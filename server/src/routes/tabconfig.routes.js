@@ -2022,4 +2022,120 @@ router.get('/option-data', authMiddleware, async (req, res, next) => {
   }
 });
 
+// GET /api/tab/reviewer-options — 리뷰어용 옵션 데이터 조회 (인증 불필요)
+// Query: sheetId, tabName, name (리뷰어 이름), (optional) gid, (optional) round
+// 반환: 해당 리뷰어 행의 옵션 데이터만 반환
+router.get('/reviewer-options', async (req, res, next) => {
+  try {
+    const { sheetId, tabName, name, gid, round } = req.query;
+    if (!sheetId || !tabName || !name) {
+      return res.json({ error: 'sheetId, tabName, name이 필요합니다.' });
+    }
+
+    // 1) 저장된 옵션 컬럼 조회
+    const { rows: tcRows } = await pool.query(
+      'SELECT option_columns FROM tab_configs WHERE sheet_id = $1 AND tab_name = $2',
+      [sheetId, tabName]
+    );
+    const optionColumns = tcRows[0]?.option_columns || [];
+    if (optionColumns.length === 0) {
+      return res.json({ ok: true, options: null, message: '설정된 옵션이 없습니다.' });
+    }
+
+    // 2) 시트 전체 데이터 읽기
+    const range = `'${tabName.replace(/'/g, "''")}'`;
+    const opts = gid ? { gid } : {};
+    let values;
+    try {
+      values = await throttledCall(() => readSheet(sheetId, range, opts));
+    } catch (sheetErr) {
+      logger.error('[reviewer-options] 시트 읽기 실패:', sheetErr.message);
+      return res.json({ error: '시트 읽기 실패: ' + sheetErr.message });
+    }
+
+    if (!values || values.length === 0) {
+      return res.json({ ok: true, options: null });
+    }
+
+    // 3) 헤더 행 찾기
+    const DATA_TAB_KW = ['번호', '주문자', '수취인', '수취인명', '성함', '이름', '성명', '신청자', '연락처', '전화번호'];
+    const NAME_KW = ['수취인', '이름', '신청자', '참여자', '수취인명', '주문자', '성함', '예금주', '성명'];
+    const ROUND_KW = ['회차', '차수', 'round'];
+    let headerRowIdx = -1;
+
+    for (let i = 0; i < Math.min(values.length, 50); i++) {
+      const cells = values[i] ? values[i].map(c => String(c || '').trim()) : [];
+      if (cells.some(c => DATA_TAB_KW.some(k => c.includes(k)))) {
+        headerRowIdx = i;
+        break;
+      }
+    }
+    if (headerRowIdx < 0) {
+      return res.json({ ok: true, options: null });
+    }
+
+    const headers = values[headerRowIdx].map(h => String(h || '').trim());
+    const dataRows = values.slice(headerRowIdx + 1);
+
+    const nameColIdx = headers.findIndex(h => NAME_KW.some(k => h.includes(k)));
+    const roundColIdx = headers.findIndex(h => ROUND_KW.some(k => h.toLowerCase().includes(k.toLowerCase())));
+
+    // 4) 옵션 컬럼 매핑
+    const optColMap = [];
+    for (const oc of optionColumns) {
+      let idx = oc.colIndex;
+      if (idx === undefined || idx === null || headers[idx] !== oc.name) {
+        idx = headers.findIndex(h => h === oc.name);
+      }
+      if (idx >= 0) optColMap.push({ name: oc.name, idx });
+    }
+    if (optColMap.length === 0) {
+      return res.json({ ok: true, options: null });
+    }
+
+    // 5) 해당 리뷰어 이름으로 행 찾기
+    const searchName = name.trim();
+    const matchedRows = [];
+    for (let i = 0; i < dataRows.length; i++) {
+      const row = dataRows[i];
+      const rowName = nameColIdx >= 0 ? String(row[nameColIdx] || '').trim() : '';
+      if (rowName !== searchName) continue;
+
+      // round 필터
+      if (round && roundColIdx >= 0) {
+        const rowRound = String(row[roundColIdx] || '').trim();
+        if (rowRound !== round) continue;
+      }
+
+      const options = {};
+      for (const { name: colName, idx } of optColMap) {
+        options[colName] = String(row[idx] !== undefined ? row[idx] : '').trim();
+      }
+      matchedRows.push({
+        rowIndex: headerRowIdx + 1 + i + 1,
+        round: roundColIdx >= 0 ? String(row[roundColIdx] || '').trim() : '',
+        options,
+      });
+    }
+
+    // 옵션 문자열 생성: "키워드: 끈나시 / 컬러: 노랑색"
+    const optionLabels = matchedRows.map(r => {
+      return optColMap.map(c => {
+        const v = r.options[c.name];
+        return v ? `${c.name}: ${v}` : '';
+      }).filter(Boolean).join(' / ');
+    });
+
+    res.json({
+      ok: true,
+      optionColumns: optColMap.map(c => c.name),
+      matched: matchedRows.length,
+      rows: matchedRows,
+      optionLabels,  // 리뷰어 화면에 직접 표시할 문자열 배열
+    });
+  } catch (err) {
+    next(err);
+  }
+});
+
 module.exports = router;

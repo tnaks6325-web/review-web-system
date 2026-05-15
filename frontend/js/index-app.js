@@ -13730,7 +13730,11 @@ async function openOptionModal(sheetId, tabName, gid) {
       </details>`;
     }
 
+    // 미리보기 영역 (저장 후 또는 기존 설정이 있을 때)
+    html += `<div id="optionPreviewArea" style="display:none;margin-bottom:14px"></div>`;
+
     html += `<div style="display:flex;gap:8px;justify-content:flex-end;padding-top:10px;border-top:1px solid #E5E7EB">
+      <button onclick="_previewOptionData('${escHtml(sheetId)}','${escHtml(tabName)}','${escHtml(gid||'')}')" style="padding:8px 16px;background:#EDE9FE;border:1px solid #A78BFA;border-radius:8px;font-size:.8rem;cursor:pointer;color:#5B21B6;font-weight:500"><i class="fas fa-eye" style="margin-right:4px"></i>미리보기</button>
       <button onclick="document.getElementById('optionModal')?.remove()" style="padding:8px 16px;background:#F3F4F6;border:1px solid #D1D5DB;border-radius:8px;font-size:.8rem;cursor:pointer;color:#4B5563">취소</button>
       <button onclick="_saveOptionColumns('${escHtml(sheetId)}','${escHtml(tabName)}')" style="padding:8px 20px;background:#7C3AED;color:#fff;border:none;border-radius:8px;font-size:.8rem;font-weight:600;cursor:pointer"><i class="fas fa-save" style="margin-right:4px"></i>저장</button>
     </div>`;
@@ -13757,12 +13761,56 @@ async function _saveOptionColumns(sheetId, tabName) {
     const data = await gasPost({ action:'saveOptionColumns', sheetId, tabName, optionColumns });
     if (data.error) { showToast(data.error, 'error'); return; }
     showToast(`옵션 컬럼 ${optionColumns.length}개 저장 완료`, 'success');
-    document.getElementById('optionModal')?.remove();
-    // 로컬 데이터 업데이트
+    // 로컬 데이터 업데이트 (모달 닫지 않음 — 미리보기 가능하도록)
     const origTab = (_tabDashData?.tabs||[]).find(x => x.sheet_id===sheetId && x.tab_name===tabName);
     if (origTab) origTab.option_columns = optionColumns;
     renderTabDashTable();
   } catch (err) {
     showToast('저장 실패: ' + err.message, 'error');
+  }
+}
+
+// ── 옵션 데이터 미리보기 (관리자 모달 내) ──
+async function _previewOptionData(sheetId, tabName, gid) {
+  const area = document.getElementById('optionPreviewArea');
+  if (!area) return;
+  area.style.display = 'block';
+  area.innerHTML = `<div style="text-align:center;padding:16px"><i class="fas fa-spinner fa-spin" style="color:#7C3AED"></i> <span style="font-size:.78rem;color:#6B7280">옵션 데이터 로드 중...</span></div>`;
+
+  try {
+    const params = { action:'getOptionData', sheetId, tabName };
+    if (gid) params.gid = gid;
+    const data = await gasGet(params);
+    if (data.error) { area.innerHTML = `<div style="color:#DC2626;font-size:.78rem;padding:10px"><i class="fas fa-exclamation-triangle" style="margin-right:4px"></i>${escHtml(data.error)}</div>`; return; }
+
+    const rows = data.rows || [];
+    const cols = data.optionColumns || [];
+    if (rows.length === 0) {
+      area.innerHTML = `<div style="color:#6B7280;font-size:.78rem;padding:10px;text-align:center"><i class="fas fa-info-circle" style="margin-right:4px"></i>${data.message || '옵션 데이터가 없습니다. 먼저 저장 후 미리보기하세요.'}</div>`;
+      return;
+    }
+
+    // 테이블 렌더링
+    let h = `<div style="font-size:.75rem;font-weight:600;color:#5B21B6;margin-bottom:6px"><i class="fas fa-table" style="margin-right:4px"></i>옵션 데이터 미리보기 (${rows.length}명)</div>`;
+    h += `<div style="max-height:250px;overflow-y:auto;border:1px solid #E5E7EB;border-radius:8px">`;
+    h += `<table style="width:100%;border-collapse:collapse;font-size:.72rem"><thead><tr>`;
+    h += `<th style="padding:6px 8px;background:#F5F3FF;border-bottom:1px solid #E5E7EB;text-align:left;font-weight:600;color:#5B21B6;position:sticky;top:0">이름</th>`;
+    if (cols.length > 0) {
+      cols.forEach(c => { h += `<th style="padding:6px 8px;background:#F5F3FF;border-bottom:1px solid #E5E7EB;text-align:left;font-weight:600;color:#5B21B6;position:sticky;top:0">${escHtml(c)}</th>`; });
+    }
+    h += `</tr></thead><tbody>`;
+    rows.forEach((r, i) => {
+      const bg = i % 2 === 0 ? '#fff' : '#FAFAFA';
+      h += `<tr style="background:${bg}"><td style="padding:5px 8px;border-bottom:1px solid #F3F4F6;font-weight:500">${escHtml(r.reviewerName)}</td>`;
+      cols.forEach(c => {
+        const v = r.options?.[c] || '';
+        h += `<td style="padding:5px 8px;border-bottom:1px solid #F3F4F6;color:${v?'#1F2937':'#D1D5DB'}">${v ? escHtml(v) : '—'}</td>`;
+      });
+      h += `</tr>`;
+    });
+    h += `</tbody></table></div>`;
+    area.innerHTML = h;
+  } catch (err) {
+    area.innerHTML = `<div style="color:#DC2626;font-size:.78rem;padding:10px"><i class="fas fa-exclamation-triangle" style="margin-right:4px"></i>${escHtml(err.message)}</div>`;
   }
 }

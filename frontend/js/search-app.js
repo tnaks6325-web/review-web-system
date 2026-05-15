@@ -3416,6 +3416,9 @@ function initOrderFormMode() {
   // ── 인애드명단 자동완성 목록 비동기 로드 (화면 표시와 병렬)
   _loadInaedList(sheetId, gid, tabName);
 
+  // ★ 옵션 데이터 비동기 로드 (화면 표시와 병렬)
+  _loadReviewerOptionData(sheetId, tabName, gid, round);
+
   // ★ v9.14: 소득신고 섹션 초기화 (비동기, 병렬 로드)
   if (incomeType === "소득신고") {
     _loadReviewerProfileForForm().catch(e => {
@@ -3473,6 +3476,43 @@ let _optionHeaders   = [];   // 옵션 헤더명 목록 (최대 3개)
 let _memoHeader      = "";   // 비고 헤더명
 let _orderNumHeader  = "";   // 주문번호 헤더명 (없으면 "")
 let _selectedOptKey  = null; // 선택된 옵션 키 (null = 옵션 없음 or 미선택)
+
+/** 리뷰어 옵션 데이터 비동기 로드 (구매양식 화면) */
+async function _loadReviewerOptionData(sheetId, tabName, gid, round) {
+  try {
+    const auth = _loadAuthSession();
+    if (!auth || !auth.name) return; // 로그인 안 된 상태면 스킵
+
+    const params = { action:'getReviewerOptions', sheetId, tabName, name: auth.name };
+    if (gid) params.gid = gid;
+    if (round) params.round = round;
+
+    const data = await gasGet(params);
+    const infoEl = document.getElementById('orderFormOptionInfo');
+    const contentEl = document.getElementById('orderFormOptionContent');
+    if (!infoEl || !contentEl) return;
+
+    if (!data || !data.ok || !data.optionLabels || data.optionLabels.length === 0) {
+      infoEl.style.display = 'none';
+      return;
+    }
+
+    // 옵션 라벨 표시
+    const labels = data.optionLabels.filter(l => l); // 빈 문자열 제거
+    if (labels.length === 0) {
+      infoEl.style.display = 'none';
+      return;
+    }
+
+    contentEl.innerHTML = labels.map(l => `<div style="padding:3px 0">${_safeText(l)}</div>`).join('');
+    infoEl.style.display = 'block';
+
+    console.log('[옵션] 리뷰어 옵션 로드:', labels);
+  } catch (err) {
+    console.warn('[옵션] 리뷰어 옵션 로드 실패:', err.message);
+    // 실패해도 화면 동작에 영향 없음
+  }
+}
 
 /** GAS에서 인애드명단 목록 로드 */
 async function _loadInaedList(sheetId, gid, tabName) {
