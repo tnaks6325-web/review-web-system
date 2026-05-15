@@ -11231,6 +11231,7 @@ const _TAB_DASH_COLS = [
   { key:"capture_folder_url",label:"캡처폴더", cat:"link",  show:false, align:"center" },
   { key:"sheet_url",        label:"시트링크",  cat:"link",  show:false, align:"center" },
   { key:"updated_at",       label:"갱신일",    cat:"sys",   show:true,  align:"left" },
+  { key:"_option",          label:"옵션",      cat:"meta",  show:true,  align:"center", width:"40px" },
 ];
 
 // ★ 서버 기반 컬럼 표시/순서 설정 — 모든 관리자에게 동일하게 적용
@@ -12120,6 +12121,14 @@ function _cellVal(t, col) {
     if (rv) return `<span style="background:#EEF2FF;color:#4338CA;padding:2px 7px;border-radius:8px;font-size:.68rem;font-weight:600">${escHtml(rv)}</span>`;
     return '<span style="color:#D1D5DB">—</span>';
   }
+  // ★ 옵션 컬럼: 태그 아이콘 + 배지
+  if (k === "_option") {
+    const optCount = (t.option_columns && t.option_columns.length) ? t.option_columns.length : 0;
+    const optColor = optCount > 0 ? '#7C3AED' : '#CBD5E1';
+    const optTitle = optCount > 0 ? `옵션 ${optCount}개 설정됨` : '옵션 찾기';
+    const optBadge = optCount > 0 ? `<span style="position:absolute;top:-4px;right:-6px;background:#7C3AED;color:#fff;font-size:.5rem;border-radius:50%;width:13px;height:13px;display:flex;align-items:center;justify-content:center;font-weight:700">${optCount}</span>` : '';
+    return `<button onclick="event.stopPropagation();openOptionModal('${escHtml(t.sheet_id)}','${escHtml(t.tab_name)}','${escHtml(t.tab_gid||'')}')" style="background:none;border:none;color:${optColor};cursor:pointer;font-size:.78rem;position:relative" title="${optTitle}"><i class="fas fa-tags"></i>${optBadge}</button>`;
+  }
   const v = t[k];
   return v != null && v !== "" ? escHtml(String(v)) : '<span style="color:#D1D5DB">—</span>';
 }
@@ -12179,7 +12188,6 @@ function _renderFullTableView(wrap, filtered) {
     const onclick = sortable ? ` onclick="_toggleTabDashSort('${c.key}')"` : '';
     html += `<th style="${thStyle};text-align:${c.align}${c.width?';width:'+c.width:''};${sortCursor}"${onclick}>${c.label}${sortIcon}</th>`;
   });
-  html += `<th style="${thStyle};text-align:center;width:40px">옵션</th>`;
   html += `<th style="${thStyle};text-align:center">상세</th></tr></thead><tbody>`;
 
   filtered.forEach((t, idx) => {
@@ -12195,11 +12203,6 @@ function _renderFullTableView(wrap, filtered) {
       const mw = c.width ? c.width : c.key==='campaign_name'?'140px':c.key==='tab_name'?'180px':'120px';
       html += `<td style="padding:5px;text-align:${c.align};max-width:${mw};${c.width?'width:'+c.width+';':''};overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="${escHtml(String(t[c.key]||''))}">${_cellVal(t, c)}</td>`;
     });
-    const optCount = (t.option_columns && t.option_columns.length) ? t.option_columns.length : 0;
-    const optColor = optCount > 0 ? '#7C3AED' : '#CBD5E1';
-    const optTitle = optCount > 0 ? `옵션 ${optCount}개 설정됨` : '옵션 찾기';
-    const optBadge = optCount > 0 ? `<span style="position:absolute;top:-4px;right:-6px;background:#7C3AED;color:#fff;font-size:.5rem;border-radius:50%;width:13px;height:13px;display:flex;align-items:center;justify-content:center;font-weight:700">${optCount}</span>` : '';
-    html += `<td style="padding:5px;text-align:center"><button onclick="event.stopPropagation();openOptionModal('${escHtml(t.sheet_id)}','${escHtml(t.tab_name)}','${escHtml(t.tab_gid||'')}')" style="background:none;border:none;color:${optColor};cursor:pointer;font-size:.78rem;position:relative" title="${optTitle}"><i class="fas fa-tags"></i>${optBadge}</button></td>`;
     html += `<td style="padding:5px;text-align:center"><button onclick="openTabDashDetail(${idx})" style="background:none;border:none;color:#1D4ED8;cursor:pointer;font-size:.78rem"><i class="fas fa-expand-alt"></i></button></td>`;
     html += `</tr>`;
   });
