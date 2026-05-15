@@ -3503,19 +3503,22 @@ async function _loadReviewerOptionData(sheetId, tabName, gid, round) {
       return;
     }
 
-    // ★ headersOnly 모드: 옵션 컬럼명만 표시 (로그인 전 / 매칭 0건)
+    // ★ headersOnly 모드 또는 매칭 0건: 옵션 컬럼명 표시
     if (data.headersOnly || !data.optionLabels || data.optionLabels.length === 0) {
       const colNames = data.optionColumns || [];
       if (colNames.length === 0) {
         infoEl.style.display = 'none';
         return;
       }
-      // 옵션 컬럼 헤더만 표시 (값 없이)
+      // 상태별 안내 메시지 분기
+      const hint = data.headersOnly
+        ? '로그인 후 표시됩니다'                    // 비로그인 (headersOnly)
+        : '배정된 옵션 정보가 아직 없습니다';       // 로그인했지만 매칭 0건
       contentEl.innerHTML = colNames.map(n =>
-        `<div style="padding:3px 0"><span style="color:#7C3AED;font-weight:700">${_safeText(n)}</span><span style="color:#9CA3AF;margin-left:4px">— 로그인 후 표시됩니다</span></div>`
+        `<div style="padding:3px 0"><span style="color:#7C3AED;font-weight:700">${_safeText(n)}</span><span style="color:#9CA3AF;margin-left:4px">— ${hint}</span></div>`
       ).join('');
       infoEl.style.display = 'block';
-      console.log('[옵션] 옵션 헤더만 표시 (headersOnly):', colNames);
+      console.log('[옵션] 옵션 헤더 표시:', colNames, data.headersOnly ? '(headersOnly)' : '(matched:0)');
       return;
     }
 
