@@ -37,6 +37,19 @@ const { throttledCall, throttledMap } = require('../utils/sheetsThrottle');
   }
 })();
 
+// ── Auto-migration: option_columns_map JSONB 컬럼 추가 (차수별 옵션 컬럼) ──
+(async () => {
+  try {
+    await pool.query(`
+      ALTER TABLE tab_configs
+      ADD COLUMN IF NOT EXISTS option_columns_map JSONB DEFAULT '{}'::jsonb
+    `);
+    logger.info('[tabconfig] option_columns_map 컬럼 확인/추가 완료');
+  } catch (err) {
+    logger.warn('[tabconfig] option_columns_map 컬럼 추가 실패 (이미 존재할 수 있음):', err.message);
+  }
+})();
+
 // ═══════════════════════════════════════════════════════════
 // 옵션(Option) 기능용 시스템 헤더 키워드 목록
 // indexBuilder.service.js의 parseTabRows에서 사용하는 시스템 컬럼 키워드를 통합
@@ -51,8 +64,6 @@ const SYSTEM_HEADER_KEYWORDS = [
   '주소', '우편번호', '배송지', '배송주소', '상세주소',
   // 제출/리뷰 계열
   '리뷰완료', '제출', '완료', 'submit', '제출완료', '리뷰제출', '리뷰',
-  // 상품 계열
-  '상품명', '제품명', '상품', 'product',
   // URL 계열
   '상품url', '제품url', '상품링크', 'url', '링크',
   // 날짜 계열
@@ -1140,7 +1151,7 @@ router.get('/dashboard', authMiddleware, async (req, res, next) => {
         tc.sheet_id, tc.tab_name, tc.sheet_url, tc.campaign_name,
         COALESCE(tc.tab_gid, im.tab_gid) AS tab_gid,
         tc.manager, tc.time_range, tc.taekhap, tc.review_type,
-        tc.payment_type, tc.display_name, tc.display_name_map, tc.option_columns, tc.is_closed,
+        tc.payment_type, tc.display_name, tc.display_name_map, tc.option_columns, tc.option_columns_map, tc.is_closed,
         tc.folder_url, tc.capture_folder_url, tc.is_bulk, tc.delivery_type,
         tc.round, tc.nc_mode, tc.deposit_name, tc.transfer_bank,
         tc.income_type, tc.updated_at, tc.closed_rounds,
@@ -1793,10 +1804,10 @@ router.post('/fix-sheet-urls', authMiddleware, async (req, res, next) => {
 // ═══════════════════════════════════════════════════════════
 
 // GET /api/tab/option-headers — 시트 헤더 읽기 + 시스템/옵션 후보 분류
-// Query: sheetId, tabName, (optional) gid
+// Query: sheetId, tabName, (optional) gid, (optional) round
 router.get('/option-headers', authMiddleware, async (req, res, next) => {
   try {
-    const { sheetId, tabName, gid } = req.query;
+    const { sheetId, tabName, gid, round } = req.query;
     if (!sheetId || !tabName) {
       return res.json({ error: 'sheetId와 tabName이 필요합니다.' });
     }
@@ -1851,12 +1862,17 @@ router.get('/option-headers', authMiddleware, async (req, res, next) => {
       }
     });
 
-    // 4) 현재 저장된 option_columns 조회
+    // 4) 현재 저장된 option_columns 조회 (★ round별 option_columns_map 우선)
     const { rows: tcRows } = await pool.query(
-      'SELECT option_columns FROM tab_configs WHERE sheet_id = $1 AND tab_name = $2',
+      'SELECT option_columns, option_columns_map FROM tab_configs WHERE sheet_id = $1 AND tab_name = $2',
       [sheetId, tabName]
     );
-    const savedOptionColumns = tcRows[0]?.option_columns || [];
+    let savedOptionColumns = [];
+    if (round && tcRows[0]?.option_columns_map && tcRows[0].option_columns_map[round]) {
+      savedOptionColumns = tcRows[0].option_columns_map[round];
+    } else if (!round) {
+      savedOptionColumns = tcRows[0]?.option_columns || [];
+    }
 
     res.json({
       ok: true,
@@ -1872,10 +1888,11 @@ router.get('/option-headers', authMiddleware, async (req, res, next) => {
 });
 
 // POST /api/tab/option-columns — 옵션 컬럼 선택 저장
-// Body: { sheetId, tabName, optionColumns: [{ name: "키워드", colIndex: 2 }, ...] }
+// Body: { sheetId, tabName, optionColumns: [...], round (optional) }
+// ★ round가 있으면 option_columns_map[round]에 저장, 없으면 option_columns에 저장
 router.post('/option-columns', authMiddleware, async (req, res, next) => {
   try {
-    const { sheetId, tabName, optionColumns } = req.body;
+    const { sheetId, tabName, optionColumns, round } = req.body;
     if (!sheetId || !tabName) {
       return res.json({ error: 'sheetId와 tabName이 필요합니다.' });
     }
@@ -1883,27 +1900,48 @@ router.post('/option-columns', authMiddleware, async (req, res, next) => {
       return res.json({ error: 'optionColumns는 배열이어야 합니다.' });
     }
 
-    // UPSERT: option_columns JSONB 저장
-    const result = await pool.query(
-      `UPDATE tab_configs
-       SET option_columns = $3::jsonb, updated_at = NOW()
-       WHERE sheet_id = $1 AND tab_name = $2`,
-      [sheetId, tabName, JSON.stringify(optionColumns)]
-    );
-
-    if (result.rowCount === 0) {
-      // 레코드가 없으면 INSERT
-      await pool.query(
-        `INSERT INTO tab_configs (sheet_id, tab_name, option_columns, updated_at)
-         VALUES ($1, $2, $3::jsonb, NOW())
-         ON CONFLICT (sheet_id, tab_name) DO UPDATE SET
-           option_columns = $3::jsonb, updated_at = NOW()`,
+    if (round) {
+      // ★ 차수별 저장: option_columns_map JSONB에 { round: optionColumns } 저장
+      const colsJson = JSON.stringify(optionColumns);
+      const result = await pool.query(
+        `UPDATE tab_configs
+         SET option_columns_map = COALESCE(option_columns_map, '{}'::jsonb) || jsonb_build_object($3::text, $4::jsonb),
+             updated_at = NOW()
+         WHERE sheet_id = $1 AND tab_name = $2`,
+        [sheetId, tabName, round, colsJson]
+      );
+      if (result.rowCount === 0) {
+        await pool.query(
+          `INSERT INTO tab_configs (sheet_id, tab_name, option_columns_map, updated_at)
+           VALUES ($1, $2, jsonb_build_object($3::text, $4::jsonb), NOW())
+           ON CONFLICT (sheet_id, tab_name) DO UPDATE SET
+             option_columns_map = COALESCE(tab_configs.option_columns_map, '{}'::jsonb) || jsonb_build_object($3::text, $4::jsonb),
+             updated_at = NOW()`,
+          [sheetId, tabName, round, colsJson]
+        );
+      }
+      logger.info(`[option-columns] 차수별 저장: sheetId=${sheetId} tab=${tabName} round=${round} cols=${optionColumns.length}개`);
+      res.json({ ok: true, sheetId, tabName, round, optionColumns });
+    } else {
+      // 기존 방식: option_columns에 저장 (하위 호환)
+      const result = await pool.query(
+        `UPDATE tab_configs
+         SET option_columns = $3::jsonb, updated_at = NOW()
+         WHERE sheet_id = $1 AND tab_name = $2`,
         [sheetId, tabName, JSON.stringify(optionColumns)]
       );
+      if (result.rowCount === 0) {
+        await pool.query(
+          `INSERT INTO tab_configs (sheet_id, tab_name, option_columns, updated_at)
+           VALUES ($1, $2, $3::jsonb, NOW())
+           ON CONFLICT (sheet_id, tab_name) DO UPDATE SET
+             option_columns = $3::jsonb, updated_at = NOW()`,
+          [sheetId, tabName, JSON.stringify(optionColumns)]
+        );
+      }
+      logger.info(`[option-columns] 저장: sheetId=${sheetId} tab=${tabName} cols=${optionColumns.length}개`);
+      res.json({ ok: true, sheetId, tabName, optionColumns });
     }
-
-    logger.info(`[option-columns] 저장: sheetId=${sheetId} tab=${tabName} cols=${optionColumns.length}개`);
-    res.json({ ok: true, sheetId, tabName, optionColumns });
   } catch (err) {
     next(err);
   }
@@ -1921,6 +1959,7 @@ router.get('/option-data', authMiddleware, async (req, res, next) => {
     }
 
     // 1) columns 파라미터가 있으면 그것을 사용, 없으면 DB 저장값 조회
+    // ★ round가 있으면 option_columns_map[round] 우선 조회
     let optionColumns = [];
     if (columns) {
       try { optionColumns = JSON.parse(columns); } catch(e) {
@@ -1928,10 +1967,14 @@ router.get('/option-data', authMiddleware, async (req, res, next) => {
       }
     } else {
       const { rows: tcRows } = await pool.query(
-        'SELECT option_columns FROM tab_configs WHERE sheet_id = $1 AND tab_name = $2',
+        'SELECT option_columns, option_columns_map FROM tab_configs WHERE sheet_id = $1 AND tab_name = $2',
         [sheetId, tabName]
       );
-      optionColumns = tcRows[0]?.option_columns || [];
+      if (round && tcRows[0]?.option_columns_map && tcRows[0].option_columns_map[round]) {
+        optionColumns = tcRows[0].option_columns_map[round];
+      } else {
+        optionColumns = tcRows[0]?.option_columns || [];
+      }
     }
     if (optionColumns.length === 0) {
       return res.json({ ok: true, rows: [], message: '설정된 옵션 컬럼이 없습니다.' });
@@ -2042,12 +2085,17 @@ router.get('/reviewer-options', async (req, res, next) => {
       return res.json({ error: 'sheetId, tabName, name이 필요합니다.' });
     }
 
-    // 1) 저장된 옵션 컬럼 조회
+    // 1) 저장된 옵션 컬럼 조회 (★ round별 option_columns_map 우선)
     const { rows: tcRows } = await pool.query(
-      'SELECT option_columns FROM tab_configs WHERE sheet_id = $1 AND tab_name = $2',
+      'SELECT option_columns, option_columns_map FROM tab_configs WHERE sheet_id = $1 AND tab_name = $2',
       [sheetId, tabName]
     );
-    const optionColumns = tcRows[0]?.option_columns || [];
+    let optionColumns = [];
+    if (round && tcRows[0]?.option_columns_map && tcRows[0].option_columns_map[round]) {
+      optionColumns = tcRows[0].option_columns_map[round];
+    } else {
+      optionColumns = tcRows[0]?.option_columns || [];
+    }
     if (optionColumns.length === 0) {
       return res.json({ ok: true, options: null, message: '설정된 옵션이 없습니다.' });
     }

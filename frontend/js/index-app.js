@@ -12121,13 +12121,18 @@ function _cellVal(t, col) {
     if (rv) return `<span style="background:#EEF2FF;color:#4338CA;padding:2px 7px;border-radius:8px;font-size:.68rem;font-weight:600">${escHtml(rv)}</span>`;
     return '<span style="color:#D1D5DB">—</span>';
   }
-  // ★ 옵션 컬럼: 태그 아이콘 + 배지
+  // ★ 옵션 컬럼: 태그 아이콘 + 배지 (차수별 option_columns_map 우선)
   if (k === "_option") {
-    const optCount = (t.option_columns && t.option_columns.length) ? t.option_columns.length : 0;
+    const rd = t._roundLabel || t.round || '';
+    const ocMap = t.option_columns_map || {};
+    const roundCols = rd && ocMap[rd] ? ocMap[rd] : null;
+    const fallbackCols = t.option_columns || [];
+    const activeCols = roundCols || fallbackCols;
+    const optCount = activeCols.length;
     const optColor = optCount > 0 ? '#7C3AED' : '#CBD5E1';
     const optTitle = optCount > 0 ? `옵션 ${optCount}개 설정됨` : '옵션 찾기';
     const optBadge = optCount > 0 ? `<span style="position:absolute;top:-4px;right:-6px;background:#7C3AED;color:#fff;font-size:.5rem;border-radius:50%;width:13px;height:13px;display:flex;align-items:center;justify-content:center;font-weight:700">${optCount}</span>` : '';
-    return `<button onclick="event.stopPropagation();openOptionModal('${escHtml(t.sheet_id)}','${escHtml(t.tab_name)}','${escHtml(t.tab_gid||'')}')" style="background:none;border:none;color:${optColor};cursor:pointer;font-size:.78rem;position:relative" title="${optTitle}"><i class="fas fa-tags"></i>${optBadge}</button>`;
+    return `<button onclick="event.stopPropagation();openOptionModal('${escHtml(t.sheet_id)}','${escHtml(t.tab_name)}','${escHtml(t.tab_gid||'')}','${escHtml(rd)}')" style="background:none;border:none;color:${optColor};cursor:pointer;font-size:.78rem;position:relative" title="${optTitle}"><i class="fas fa-tags"></i>${optBadge}</button>`;
   }
   const v = t[k];
   return v != null && v !== "" ? escHtml(String(v)) : '<span style="color:#D1D5DB">—</span>';
@@ -13675,16 +13680,17 @@ async function selectDedupeTab(idx) {
 // ★ 옵션(Option) 기능 — 시트 헤더 분석 + 옵션 컬럼 선택 모달
 // ═══════════════════════════════════════════════════════════
 
-async function openOptionModal(sheetId, tabName, gid) {
+async function openOptionModal(sheetId, tabName, gid, round) {
   // 기존 모달 제거
   document.getElementById('optionModal')?.remove();
 
+  const roundLabel = round ? ` [${round}]` : '';
   const modal = document.createElement('div');
   modal.id = 'optionModal';
   modal.style.cssText = 'position:fixed;top:0;left:0;width:100vw;height:100vh;background:rgba(0,0,0,.45);display:flex;align-items:center;justify-content:center;z-index:9999';
   modal.innerHTML = `<div style="background:#fff;border-radius:14px;width:520px;max-width:92vw;max-height:85vh;overflow-y:auto;box-shadow:0 20px 60px rgba(0,0,0,.2);padding:0">
     <div style="padding:18px 22px;border-bottom:1px solid #E5E7EB;display:flex;align-items:center;justify-content:space-between">
-      <div style="font-size:.95rem;font-weight:700;color:#1F2937"><i class="fas fa-tags" style="color:#7C3AED;margin-right:8px"></i>옵션 컬럼 설정 — ${escHtml(tabName)}</div>
+      <div style="font-size:.95rem;font-weight:700;color:#1F2937"><i class="fas fa-tags" style="color:#7C3AED;margin-right:8px"></i>옵션 컬럼 설정 — ${escHtml(tabName)}${roundLabel}</div>
       <button onclick="document.getElementById('optionModal')?.remove()" style="background:none;border:none;font-size:1.1rem;cursor:pointer;color:#6B7280">&times;</button>
     </div>
     <div id="optionModalBody" style="padding:18px 22px">
@@ -13697,6 +13703,7 @@ async function openOptionModal(sheetId, tabName, gid) {
   try {
     const params = { action:'getOptionHeaders', sheetId, tabName };
     if (gid) params.gid = gid;
+    if (round) params.round = round;
     const data = await gasGet(params);
     if (data.error) { _optionModalError(data.error); return; }
 
@@ -13738,9 +13745,9 @@ async function openOptionModal(sheetId, tabName, gid) {
 
     // ★ 버튼: 미리보기 + 닫기만 표시 / 저장 버튼은 미리보기 성공 후에만 나타남
     html += `<div id="optionModalBtnArea" style="display:flex;gap:8px;justify-content:flex-end;padding-top:10px;border-top:1px solid #E5E7EB">
-      <button id="optionPreviewBtn" onclick="_previewOptionData('${escHtml(sheetId)}','${escHtml(tabName)}','${escHtml(gid||'')}')" style="padding:8px 16px;background:#EDE9FE;border:1px solid #A78BFA;border-radius:8px;font-size:.8rem;cursor:pointer;color:#5B21B6;font-weight:500"><i class="fas fa-eye" style="margin-right:4px"></i>미리보기</button>
+      <button id="optionPreviewBtn" onclick="_previewOptionData('${escHtml(sheetId)}','${escHtml(tabName)}','${escHtml(gid||'')}','${escHtml(round||'')}')" style="padding:8px 16px;background:#EDE9FE;border:1px solid #A78BFA;border-radius:8px;font-size:.8rem;cursor:pointer;color:#5B21B6;font-weight:500"><i class="fas fa-eye" style="margin-right:4px"></i>미리보기</button>
       <button onclick="document.getElementById('optionModal')?.remove()" style="padding:8px 16px;background:#F3F4F6;border:1px solid #D1D5DB;border-radius:8px;font-size:.8rem;cursor:pointer;color:#4B5563">닫기</button>
-      <button id="optionSaveBtn" onclick="_saveOptionColumns('${escHtml(sheetId)}','${escHtml(tabName)}')" style="display:none;padding:8px 20px;background:#7C3AED;color:#fff;border:none;border-radius:8px;font-size:.8rem;font-weight:600;cursor:pointer"><i class="fas fa-save" style="margin-right:4px"></i>저장</button>
+      <button id="optionSaveBtn" onclick="_saveOptionColumns('${escHtml(sheetId)}','${escHtml(tabName)}','${escHtml(round||'')}')" style="display:none;padding:8px 20px;background:#7C3AED;color:#fff;border:none;border-radius:8px;font-size:.8rem;font-weight:600;cursor:pointer"><i class="fas fa-save" style="margin-right:4px"></i>저장</button>
     </div>`;
 
     body.innerHTML = html;
@@ -13762,7 +13769,7 @@ function _optionModalError(msg) {
   if (body) body.innerHTML = `<div style="text-align:center;padding:20px;color:#DC2626"><i class="fas fa-exclamation-triangle" style="margin-right:6px"></i>${escHtml(msg)}</div>`;
 }
 
-async function _saveOptionColumns(sheetId, tabName) {
+async function _saveOptionColumns(sheetId, tabName, round) {
   const checks = document.querySelectorAll('#optionModal input[name="optCol"]:checked');
   const optionColumns = Array.from(checks).map(el => ({
     name: el.dataset.name,
@@ -13770,12 +13777,22 @@ async function _saveOptionColumns(sheetId, tabName) {
   }));
 
   try {
-    const data = await gasPost({ action:'saveOptionColumns', sheetId, tabName, optionColumns });
+    const postBody = { action:'saveOptionColumns', sheetId, tabName, optionColumns };
+    if (round) postBody.round = round;
+    const data = await gasPost(postBody);
     if (data.error) { showToast(data.error, 'error'); return; }
-    showToast(`옵션 컬럼 ${optionColumns.length}개 저장 완료`, 'success');
+    showToast(`옵션 컬럼 ${optionColumns.length}개 저장 완료${round ? ' ('+round+')' : ''}`, 'success');
     // 로컬 데이터 업데이트 + 모달 닫기
     const origTab = (_tabDashData?.tabs||[]).find(x => x.sheet_id===sheetId && x.tab_name===tabName);
-    if (origTab) origTab.option_columns = optionColumns;
+    if (origTab) {
+      if (round) {
+        // ★ 차수별 저장: option_columns_map[round] 업데이트
+        if (!origTab.option_columns_map) origTab.option_columns_map = {};
+        origTab.option_columns_map[round] = optionColumns;
+      } else {
+        origTab.option_columns = optionColumns;
+      }
+    }
     renderTabDashTable();
     document.getElementById('optionModal')?.remove();
   } catch (err) {
@@ -13785,7 +13802,7 @@ async function _saveOptionColumns(sheetId, tabName) {
 
 // ── 옵션 데이터 미리보기 (관리자 모달 내) ──
 // ★ 현재 체크된 체크박스 기준으로 서버에 columns 파라미터 전달 (DB 저장 없이 프리뷰)
-async function _previewOptionData(sheetId, tabName, gid) {
+async function _previewOptionData(sheetId, tabName, gid, round) {
   // 체크된 항목 수집
   const checks = document.querySelectorAll('#optionModal input[name="optCol"]:checked');
   if (checks.length === 0) {
@@ -13805,6 +13822,7 @@ async function _previewOptionData(sheetId, tabName, gid) {
   try {
     const params = { action:'getOptionData', sheetId, tabName, columns: JSON.stringify(selectedCols) };
     if (gid) params.gid = gid;
+    if (round) params.round = round;
     const data = await gasGet(params);
     if (data.error) { area.innerHTML = `<div style="color:#DC2626;font-size:.78rem;padding:10px"><i class="fas fa-exclamation-triangle" style="margin-right:4px"></i>${escHtml(data.error)}</div>`; return; }
 
