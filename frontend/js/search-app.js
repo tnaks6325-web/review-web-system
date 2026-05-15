@@ -3483,7 +3483,7 @@ let _selectedOptKey  = null; // 선택된 옵션 키 (null = 옵션 없음 or �
  *    - 비로그인 상태 → name 없이 API 호출 → 옵션 컬럼 헤더만 표시 */
 async function _loadReviewerOptionData(sheetId, tabName, gid, round) {
   try {
-    // ★ 리뷰어 세션 OR 관리자 바이패스 이름 활용
+    // ★ 리뷰어 세션 활용 (이름으로 시트 행 매칭)
     const auth = _loadAuthSession();
     const reviewerName = (auth && auth.name) ? auth.name : '';
 
@@ -3535,7 +3535,6 @@ async function _loadReviewerOptionData(sheetId, tabName, gid, round) {
     console.log('[옵션] ★ 리뷰어 옵션 표시 완료:', labels);
   } catch (err) {
     console.warn('[옵션] 리뷰어 옵션 로드 실패:', err.message);
-    // 실패해도 화면 동작에 영향 없음
   }
 }
 
