@@ -3477,28 +3477,50 @@ let _memoHeader      = "";   // 비고 헤더명
 let _orderNumHeader  = "";   // 주문번호 헤더명 (없으면 "")
 let _selectedOptKey  = null; // 선택된 옵션 키 (null = 옵션 없음 or 미선택)
 
-/** 리뷰어 옵션 데이터 비동기 로드 (구매양식 화면) */
+/** 리뷰어 옵션 데이터 비동기 로드 (구매양식 화면)
+ *  ★ 로그인 여부 무관하게 호출:
+ *    - 로그인 상태 → name 포함 API 호출 → 실제 옵션 값 표시
+ *    - 비로그인 상태 → name 없이 API 호출 → 옵션 컬럼 헤더만 표시 */
 async function _loadReviewerOptionData(sheetId, tabName, gid, round) {
   try {
+    // ★ 리뷰어 세션 OR 관리자 바이패스 이름 활용
     const auth = _loadAuthSession();
-    if (!auth || !auth.name) return; // 로그인 안 된 상태면 스킵
+    const reviewerName = (auth && auth.name) ? auth.name : '';
 
-    const params = { action:'getReviewerOptions', sheetId, tabName, name: auth.name };
+    const params = { action:'getReviewerOptions', sheetId, tabName };
+    if (reviewerName) params.name = reviewerName;
     if (gid) params.gid = gid;
     if (round) params.round = round;
 
     const data = await gasGet(params);
+
     const infoEl = document.getElementById('orderFormOptionInfo');
     const contentEl = document.getElementById('orderFormOptionContent');
     if (!infoEl || !contentEl) return;
 
-    if (!data || !data.ok || !data.optionLabels || data.optionLabels.length === 0) {
+    if (!data || !data.ok) {
       infoEl.style.display = 'none';
       return;
     }
 
-    // 옵션 라벨 표시
-    const labels = data.optionLabels.filter(l => l); // 빈 문자열 제거
+    // ★ headersOnly 모드: 옵션 컬럼명만 표시 (로그인 전 / 매칭 0건)
+    if (data.headersOnly || !data.optionLabels || data.optionLabels.length === 0) {
+      const colNames = data.optionColumns || [];
+      if (colNames.length === 0) {
+        infoEl.style.display = 'none';
+        return;
+      }
+      // 옵션 컬럼 헤더만 표시 (값 없이)
+      contentEl.innerHTML = colNames.map(n =>
+        `<div style="padding:3px 0"><span style="color:#7C3AED;font-weight:700">${_safeText(n)}</span><span style="color:#9CA3AF;margin-left:4px">— 로그인 후 표시됩니다</span></div>`
+      ).join('');
+      infoEl.style.display = 'block';
+      console.log('[옵션] 옵션 헤더만 표시 (headersOnly):', colNames);
+      return;
+    }
+
+    // 옵션 라벨 표시 (리뷰어 이름 매칭 성공)
+    const labels = data.optionLabels.filter(l => l);
     if (labels.length === 0) {
       infoEl.style.display = 'none';
       return;
@@ -3507,7 +3529,7 @@ async function _loadReviewerOptionData(sheetId, tabName, gid, round) {
     contentEl.innerHTML = labels.map(l => `<div style="padding:3px 0">${_safeText(l)}</div>`).join('');
     infoEl.style.display = 'block';
 
-    console.log('[옵션] 리뷰어 옵션 로드:', labels);
+    console.log('[옵션] ★ 리뷰어 옵션 표시 완료:', labels);
   } catch (err) {
     console.warn('[옵션] 리뷰어 옵션 로드 실패:', err.message);
     // 실패해도 화면 동작에 영향 없음

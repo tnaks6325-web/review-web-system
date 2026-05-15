@@ -2076,13 +2076,14 @@ router.get('/option-data', authMiddleware, async (req, res, next) => {
 });
 
 // GET /api/tab/reviewer-options — 리뷰어용 옵션 데이터 조회 (인증 불필요)
-// Query: sheetId, tabName, name (리뷰어 이름), (optional) gid, (optional) round
-// 반환: 해당 리뷰어 행의 옵션 데이터만 반환
+// Query: sheetId, tabName, (optional) name, (optional) gid, (optional) round
+// ★ name 없이 호출 시 → 옵션 컬럼 헤더만 반환 (headersOnly 모드)
+// ★ name 있을 시 → 해당 리뷰어 행의 옵션 데이터 반환
 router.get('/reviewer-options', async (req, res, next) => {
   try {
     const { sheetId, tabName, name, gid, round } = req.query;
-    if (!sheetId || !tabName || !name) {
-      return res.json({ error: 'sheetId, tabName, name이 필요합니다.' });
+    if (!sheetId || !tabName) {
+      return res.json({ error: 'sheetId, tabName이 필요합니다.' });
     }
 
     // 1) 저장된 옵션 컬럼 조회 (★ round별 option_columns_map 우선)
@@ -2110,6 +2111,18 @@ router.get('/reviewer-options', async (req, res, next) => {
     }
     if (optionColumns.length === 0) {
       return res.json({ ok: true, options: null, message: '설정된 옵션이 없습니다.' });
+    }
+
+    // ★ name 없이 호출 → 옵션 컬럼 헤더만 반환 (headersOnly 모드)
+    if (!name) {
+      return res.json({
+        ok: true,
+        headersOnly: true,
+        optionColumns: optionColumns.map(c => c.name),
+        matched: 0,
+        rows: [],
+        optionLabels: [],
+      });
     }
 
     // 2) 시트 전체 데이터 읽기
