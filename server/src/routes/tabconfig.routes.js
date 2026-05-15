@@ -2091,9 +2091,21 @@ router.get('/reviewer-options', async (req, res, next) => {
       [sheetId, tabName]
     );
     let optionColumns = [];
-    if (round && tcRows[0]?.option_columns_map && tcRows[0].option_columns_map[round]) {
-      optionColumns = tcRows[0].option_columns_map[round];
+    const ocMap = tcRows[0]?.option_columns_map || {};
+    if (round && ocMap[round]) {
+      // ★ 특정 차수 지정 → 해당 차수의 옵션만 사용
+      optionColumns = ocMap[round];
+    } else if (!round && Object.keys(ocMap).length > 0) {
+      // ★ 차수 미지정 + option_columns_map에 데이터 존재 → 모든 차수 합집합(union)
+      const seen = new Set();
+      for (const cols of Object.values(ocMap)) {
+        for (const col of (cols || [])) {
+          const key = `${col.name}::${col.colIndex}`;
+          if (!seen.has(key)) { seen.add(key); optionColumns.push(col); }
+        }
+      }
     } else {
+      // ★ fallback: 기존 option_columns (하위 호환)
       optionColumns = tcRows[0]?.option_columns || [];
     }
     if (optionColumns.length === 0) {
