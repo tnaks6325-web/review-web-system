@@ -2211,12 +2211,18 @@ router.get('/reviewer-options', async (req, res, next) => {
 
     // ★ matched=0 → 각 옵션 컬럼의 고유값(distinct values)을 추출하여 반환
     //   → 프론트엔드에서 드롭다운 선택지로 표시
+    //   ★★★ round 필터 적용: 해당 차수의 행만 대상으로 고유값 추출
     let distinctValues = null;
     if (matchedRows.length === 0) {
       distinctValues = {};
       for (const { name: colName, idx } of optColMap) {
         const valSet = new Set();
         for (const row of dataRows) {
+          // round 필터: 차수가 지정되어 있으면 해당 차수의 행만 사용
+          if (round && roundColIdx >= 0) {
+            const rowRound = String(row[roundColIdx] || '').trim();
+            if (rowRound !== round) continue;
+          }
           const v = String(row[idx] !== undefined ? row[idx] : '').trim();
           if (v) valSet.add(v);
         }
