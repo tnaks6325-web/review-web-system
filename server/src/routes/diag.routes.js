@@ -287,7 +287,7 @@ router.post('/add-campaign', authMiddleware, async (req, res, next) => {
     if (existingCampaigns.length > 0) {
       const existingName = existingCampaigns[0].campaign_name;
       return res.json({
-        error: `이미 등록된 캠페인입니다 (${existingName}).\n\n기존에 등록된 업체는 스마트빌드 갱신 시 새 탭이 자동으로 인식됩니다.\n별도로 다시 등록할 필요가 없습니다.`,
+        error: `이미 등록된 캠페인입니다 (${existingName}).\n기존에 등록된 작업시트는 스마트빌드 갱신 시 새 탭이 자동으로 인식됩니다.\n별도로 다시 등록할 필요가 없습니다.`,
         duplicate: true,
         existingCampaignName: existingName,
         sheetId: finalSheetId,

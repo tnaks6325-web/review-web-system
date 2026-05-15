@@ -1418,7 +1418,7 @@ function switchAdminTab(tabName) {
 const _CTX_TOOLBAR_DEFS = {
   dashboard: [
     { id:'ctx-filter',      label:'필터',     icon:'fa-filter',      style:'',           onclick:"document.getElementById('dashFilterBtn')?.click()", title:'캠페인 필터'},
-    { id:'ctx-add',         label:'업체추가',  icon:'fa-plus',        style:'green',      onclick:"openAddCampaign()", title:'캠페인 추가'},
+    { id:'ctx-add',         label:'작업시트추가',  icon:'fa-plus',        style:'green',      onclick:"openAddCampaign()", title:'작업시트 추가'},
     { sep: true },
     { id:'ctx-refresh',     label:'새로고침',  icon:'fa-sync-alt',    style:'',           onclick:"_refreshDashboardAll()", title:'대시보드 새로고침'},
     { id:'ctx-poll',        label:'완료알림',  icon:'fa-bell',        style:'orange',     onclick:"toggleDashPolling(); _updateContextToolbar('dashboard')", title:'탭 완료 알림 폴링', elId:'pollToggleBtn'},
@@ -6809,7 +6809,7 @@ function _openAdminContextMenu(e, tabKey, campIdx) {
     ` : ''}
     <div class="ctx-menu-title">🔧 관리</div>
     <button class="ctx-menu-item" onclick="openAddCampaign(); closeAdminContextMenu()">
-      <i class="fas fa-plus"></i> 업체 추가
+      <i class="fas fa-plus"></i> 작업시트 추가
     </button>
     <button class="ctx-menu-item" onclick="openBlPanel(); closeAdminContextMenu()">
       <i class="fas fa-ban"></i> 블랙리스트 관리
@@ -7270,7 +7270,7 @@ async function debugSingleSheet(mode) {
     // ① 베이스시트 등록 여부
     html += `<b>① 베이스시트 등록</b>: `;
     if (data.registered === true)  html += ok("✅ 등록됨");
-    else if (data.registered === false) html += err("❌ 미등록 → [+업체추가]로 먼저 등록하세요");
+    else if (data.registered === false) html += err("❌ 미등록 → [+작업시트추가]로 먼저 등록하세요");
     else html += warn("⚠ 확인 불가");
     html += `<br>`;
 
@@ -7361,7 +7361,7 @@ async function debugSingleSheet(mode) {
     else if (data.verdict === "tab_not_found") html += err(`❌ gid:${diagGid} 탭을 찾을 수 없음 — URL의 gid 값을 확인하세요`);
     else if (data.verdict === "no_tab" || data.verdict === "no_valid_tab") html += err("❌ 유효 탭 없음 — 탭명 패턴 또는 헤더 확인 필요");
     else if (data.verdict === "no_access") html += err("❌ 접근 불가 — 시트 공유 설정 확인");
-    else if (data.verdict === "not_registered") html += err("❌ 미등록 — [+업체추가] 필요");
+    else if (data.verdict === "not_registered") html += err("❌ 미등록 — [+작업시트추가] 필요");
     else if (data.verdict)                 html += warn(escHtml(data.verdict));
     else if (data.error)                   html += err(escHtml(data.error));
 
@@ -8958,7 +8958,7 @@ async function _forceReleaseBuildLock() {
   }
 }
 
-/* ── 업체(캠페인) 추가 (2단계: 미리보기 → 등록) ── */
+/* ── 작업시트 추가 (2단계: 미리보기 → 등록) ── */
 function openAddCampaign() {
   if (!APP_CONFIG.GAS_WEB_APP_URL) {
     showToast("❌ GAS 웹앱 URL이 설정되지 않았습니다.", true); return;

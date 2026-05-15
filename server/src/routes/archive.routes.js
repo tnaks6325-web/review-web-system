@@ -938,8 +938,8 @@ router.post('/restore', authMiddleware, async (req, res, next) => {
       client.release();
     }
   } catch (err) {
-    logger.error(`[archive/restore] 오류: ${err.message}`);
-    next(err);
+    logger.error(`[archive/restore] 오류: ${err.message}`, err.stack);
+    res.status(500).json({ error: '아카이브 복원 중 오류가 발생했습니다.', detail: err.message });
   }
 });
 
