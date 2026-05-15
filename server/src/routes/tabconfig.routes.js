@@ -2075,24 +2075,6 @@ router.get('/option-data', authMiddleware, async (req, res, next) => {
   }
 });
 
-// GET /api/tab/debug-options — 옵션 설정이 있는 탭 조회 (디버그용, 나중에 삭제 가능)
-router.get('/debug-options', async (req, res, next) => {
-  try {
-    const { rows } = await pool.query(
-      `SELECT sheet_id, tab_name, option_columns, option_columns_map
-       FROM tab_configs
-       WHERE option_columns != '[]'::jsonb OR option_columns_map != '{}'::jsonb
-       ORDER BY updated_at DESC LIMIT 10`
-    );
-    res.json({ ok: true, count: rows.length, rows: rows.map(r => ({
-      sheetId: r.sheet_id,
-      tabName: r.tab_name,
-      optionColumns: r.option_columns,
-      optionColumnsMap: r.option_columns_map
-    }))});
-  } catch (err) { next(err); }
-});
-
 // GET /api/tab/reviewer-options — 리뷰어용 옵션 데이터 조회 (인증 불필요)
 // Query: sheetId, tabName, (optional) name, (optional) gid, (optional) round
 // ★ name 없이 호출 시 → 옵션 컬럼 헤더만 반환 (headersOnly 모드)
