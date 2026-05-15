@@ -847,19 +847,21 @@ router.post('/restore', authMiddleware, async (req, res, next) => {
         ]);
 
         // 3. review_index_archive → review_index 복원
+        // ★ DISTINCT ON으로 중복 row_index 제거 (ON CONFLICT 중복 에러 방지)
         const { rowCount: reviewCount } = await client.query(`
           INSERT INTO review_index
             (reviewer_name, sheet_id, tab_gid, tab_name, campaign_name,
              row_index, is_submitted, is_submitted2, product_url, product_name,
              submit_col, submit_col2, row_json, start_date, end_date,
              round, phone8, built_at)
-          SELECT
+          SELECT DISTINCT ON (sheet_id, tab_name, row_index)
             reviewer_name, sheet_id, tab_gid, tab_name, campaign_name,
             row_index, is_submitted, is_submitted2, product_url, product_name,
             submit_col, submit_col2, row_json, start_date, end_date,
             round, phone8, built_at
           FROM review_index_archive
           WHERE sheet_id = $1 AND tab_name = $2
+          ORDER BY sheet_id, tab_name, row_index, built_at DESC
           ON CONFLICT (sheet_id, tab_name, row_index) DO UPDATE SET
             reviewer_name = EXCLUDED.reviewer_name,
             is_submitted = EXCLUDED.is_submitted,
