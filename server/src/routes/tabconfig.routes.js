@@ -38,33 +38,38 @@ router.post('/config', authMiddleware, async (req, res, next) => {
     // round가 제공된 경우 display_name_map JSONB에 { round: displayName } 저장
     const roundKey = (b.round || '').trim();
     if (roundKey && b.displayName !== undefined) {
-      const displayVal = (b.displayName || '').trim();
-      // display_name_map JSONB 업데이트: 해당 round 키만 변경
-      const mapSql = displayVal
-        ? `UPDATE tab_configs
-           SET display_name_map = COALESCE(display_name_map, '{}'::jsonb) || jsonb_build_object($3, $4::text),
-               updated_at = NOW()
-           WHERE sheet_id = $1 AND tab_name = $2`
-        : `UPDATE tab_configs
-           SET display_name_map = COALESCE(display_name_map, '{}'::jsonb) - $3,
-               updated_at = NOW()
-           WHERE sheet_id = $1 AND tab_name = $2`;
-      const mapParams = displayVal
-        ? [sheetId, tabName, roundKey, displayVal]
-        : [sheetId, tabName, roundKey];
-      const mapResult = await pool.query(mapSql, mapParams);
-      if (mapResult.rowCount === 0) {
-        // 레코드가 없으면 INSERT
-        await pool.query(
-          `INSERT INTO tab_configs (sheet_id, tab_name, display_name_map, updated_at)
-           VALUES ($1, $2, jsonb_build_object($3, $4::text), NOW())
-           ON CONFLICT (sheet_id, tab_name) DO UPDATE SET
-             display_name_map = COALESCE(tab_configs.display_name_map, '{}'::jsonb) || jsonb_build_object($3, $4::text),
-             updated_at = NOW()`,
-          [sheetId, tabName, roundKey, displayVal || '']
-        );
+      try {
+        const displayVal = (b.displayName || '').trim();
+        // display_name_map JSONB 업데이트: 해당 round 키만 변경
+        const mapSql = displayVal
+          ? `UPDATE tab_configs
+             SET display_name_map = COALESCE(display_name_map, '{}'::jsonb) || jsonb_build_object($3, $4::text),
+                 updated_at = NOW()
+             WHERE sheet_id = $1 AND tab_name = $2`
+          : `UPDATE tab_configs
+             SET display_name_map = COALESCE(display_name_map, '{}'::jsonb) - $3,
+                 updated_at = NOW()
+             WHERE sheet_id = $1 AND tab_name = $2`;
+        const mapParams = displayVal
+          ? [sheetId, tabName, roundKey, displayVal]
+          : [sheetId, tabName, roundKey];
+        const mapResult = await pool.query(mapSql, mapParams);
+        if (mapResult.rowCount === 0) {
+          // 레코드가 없으면 INSERT
+          await pool.query(
+            `INSERT INTO tab_configs (sheet_id, tab_name, display_name_map, updated_at)
+             VALUES ($1, $2, jsonb_build_object($3, $4::text), NOW())
+             ON CONFLICT (sheet_id, tab_name) DO UPDATE SET
+               display_name_map = COALESCE(tab_configs.display_name_map, '{}'::jsonb) || jsonb_build_object($3, $4::text),
+               updated_at = NOW()`,
+            [sheetId, tabName, roundKey, displayVal || '']
+          );
+        }
+        return res.json({ ok: true, tabName, sheetId, round: roundKey, displayName: displayVal });
+      } catch (mapErr) {
+        logger.error('[tab/config] display_name_map 저장 오류:', mapErr.message, mapErr.stack);
+        return res.json({ error: '차수별 표시명 저장 오류: ' + mapErr.message });
       }
-      return res.json({ ok: true, tabName, sheetId, round: roundKey, displayName: displayVal });
     }
 
     // null 처리: undefined(미전송) = 기존값 보존, 빈문자열("") = 빈값 저장
