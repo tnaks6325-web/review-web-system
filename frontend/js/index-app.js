@@ -13743,10 +13743,9 @@ async function openOptionModal(sheetId, tabName, gid, round) {
     // 미리보기 영역
     html += `<div id="optionPreviewArea" style="display:none;margin-bottom:14px"></div>`;
 
-    // ★ 버튼: 초기화 + 미리보기 + 닫기 / 저장 버튼은 미리보기 성공 후에만 나타남
-    const hasSaved = saved.length > 0;
+    // ★ 버튼: 초기화(항상 표시) + 미리보기 + 닫기 / 저장 버튼은 미리보기 성공 후에만 나타남
     html += `<div id="optionModalBtnArea" style="display:flex;gap:8px;justify-content:flex-end;padding-top:10px;border-top:1px solid #E5E7EB">
-      ${hasSaved ? `<button id="optionClearBtn" onclick="_clearOptionColumns('${escHtml(sheetId)}','${escHtml(tabName)}','${escHtml(round||'')}')" style="padding:8px 14px;background:#FEF2F2;border:1px solid #FECACA;border-radius:8px;font-size:.8rem;cursor:pointer;color:#DC2626;font-weight:500;margin-right:auto" title="이 차수의 옵션 설정을 모두 제거합니다"><i class="fas fa-trash-alt" style="margin-right:4px"></i>옵션 초기화</button>` : ''}
+      <button id="optionClearBtn" onclick="_clearOptionColumns('${escHtml(sheetId)}','${escHtml(tabName)}','${escHtml(round||'')}')" style="padding:8px 14px;background:#FEF2F2;border:1px solid #FECACA;border-radius:8px;font-size:.8rem;cursor:pointer;color:#DC2626;font-weight:500;margin-right:auto" title="이 차수의 옵션 설정을 모두 제거합니다"><i class="fas fa-trash-alt" style="margin-right:4px"></i>옵션 초기화</button>
       <button id="optionPreviewBtn" onclick="_previewOptionData('${escHtml(sheetId)}','${escHtml(tabName)}','${escHtml(gid||'')}','${escHtml(round||'')}')" style="padding:8px 16px;background:#EDE9FE;border:1px solid #A78BFA;border-radius:8px;font-size:.8rem;cursor:pointer;color:#5B21B6;font-weight:500"><i class="fas fa-eye" style="margin-right:4px"></i>미리보기</button>
       <button onclick="document.getElementById('optionModal')?.remove()" style="padding:8px 16px;background:#F3F4F6;border:1px solid #D1D5DB;border-radius:8px;font-size:.8rem;cursor:pointer;color:#4B5563">닫기</button>
       <button id="optionSaveBtn" onclick="_saveOptionColumns('${escHtml(sheetId)}','${escHtml(tabName)}','${escHtml(round||'')}')" style="display:none;padding:8px 20px;background:#7C3AED;color:#fff;border:none;border-radius:8px;font-size:.8rem;font-weight:600;cursor:pointer"><i class="fas fa-save" style="margin-right:4px"></i>저장</button>
