@@ -81,21 +81,23 @@ async function searchByName(query, phone8) {
   let sql;
 
   if (q && p8.length === 8) {
-    // ── 이름 + phone8 검색 (정확 일치 + 동명이인 구분) ──
-    // 공백 제거 후 정확 일치 AND phone8 일치
+    // ── 이름 + phone8 검색 (이름 매칭 우선, phone8은 정렬 보조) ──
+    // ★ 변경: phone8을 AND 조건에서 제거 → 이름 매칭만으로 검색
+    //   - 이미지 분석 오류로 시트에 잘못된 전화번호가 기록되어도 조회 누락 방지
+    //   - phone8 일치 건을 상단 정렬하여 본인 건 우선 표시
+    //   - 동명이인은 캠페인명/날짜로 구분 가능
     // ★ reviewer_name OR recipient_name 매칭 (수취인 검색 지원)
     const nameParam = paramIdx++;
     const phoneParam = paramIdx++;
     sql = `
       SELECT ${SELECT_FIELDS},
-             1.0::float AS score
+             CASE WHEN ri.phone8 = $${phoneParam} THEN 1.0 ELSE 0.5 END::float AS score
       FROM review_index ri
       LEFT JOIN tab_configs tc ON ri.sheet_id = tc.sheet_id AND ri.tab_name = tc.tab_name
       WHERE ri.is_submitted = FALSE
         AND (REPLACE(ri.reviewer_name, ' ', '') = $${nameParam}
              OR REPLACE(ri.recipient_name, ' ', '') = $${nameParam})
-        AND ri.phone8 = $${phoneParam}
-      ORDER BY ri.start_date DESC NULLS LAST
+      ORDER BY (ri.phone8 = $${phoneParam}) DESC, ri.start_date DESC NULLS LAST
       LIMIT 200
     `;
     params.push(q, p8);
