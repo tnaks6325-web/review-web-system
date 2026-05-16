@@ -3313,7 +3313,6 @@ function initOrderFormMode() {
   const tabName     = params.get("t")  || params.get("tabName")     || "";
   const displayName = params.get("d")  || params.get("displayName") || "";
   const round       = params.get("rd") || params.get("round")       || "";
-  console.log('[initOrderFormMode] URL params - rd:', params.get("rd"), '| round:', params.get("round"), '| final round:', round, '| URL:', location.href);
   // ★ 네이버+쿠팡 동시작업 모드 플래그 (&nc=1)
   const ncMode      = params.get("nc") === "1";
   // ★ v9.14: 진행방식 파라미터 (&ic=현금|사업자현영|소득신고)
@@ -3539,9 +3538,7 @@ async function _loadReviewerOptionData(sheetId, tabName, gid, round) {
     if (gid) params.gid = gid;
     if (round) params.round = round;
 
-    console.log('[옵션로드] round:', round, '| params:', JSON.stringify(params));
     const data = await gasGet(params);
-    console.log('[옵션로드] 응답 distinctValues:', JSON.stringify(data?.distinctValues || null));
 
     const infoEl = document.getElementById('orderFormOptionInfo');
     const contentEl = document.getElementById('orderFormOptionContent');
