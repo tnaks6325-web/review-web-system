@@ -80,6 +80,7 @@ const _ACTION_MAP = {
   'saveOptionColumns':{ method: 'POST', path: '/api/tab/option-columns' },
   'getOptionData':    { method: 'GET',  path: '/api/tab/option-data' },
   'getReviewerOptions':{ method: 'GET', path: '/api/tab/reviewer-options' },
+  'refreshOptionCache':{ method: 'POST', path: '/api/tab/refresh-option-cache' },
 
   // 리뷰어 관리 (Section 7)
   'registerReviewer':   { method: 'POST', path: '/api/reviewer/register' },

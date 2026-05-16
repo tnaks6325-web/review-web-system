@@ -1921,6 +1921,13 @@ router.post('/option-columns', authMiddleware, async (req, res, next) => {
         );
       }
       logger.info(`[option-columns] 차수별 저장: sheetId=${sheetId} tab=${tabName} round=${round} cols=${optionColumns.length}개`);
+      // ★ 옵션 컬럼 변경 시 해당 차수의 distinctValues 캐시 무효화
+      pool.query(
+        `UPDATE tab_configs
+         SET distinct_values_cache = COALESCE(distinct_values_cache, '{}'::jsonb) - $3
+         WHERE sheet_id = $1 AND tab_name = $2`,
+        [sheetId, tabName, round]
+      ).catch(err => logger.warn('[option-columns] 캐시 무효화 실패:', err.message));
       res.json({ ok: true, sheetId, tabName, round, optionColumns });
     } else {
       // 기존 방식: option_columns에 저장 (하위 호환)
@@ -2089,7 +2096,7 @@ router.get('/reviewer-options', async (req, res, next) => {
 
     // 1) 저장된 옵션 컬럼 조회 (★ round별 option_columns_map 우선)
     const { rows: tcRows } = await pool.query(
-      'SELECT option_columns, option_columns_map, closed_rounds, archived_rounds FROM tab_configs WHERE sheet_id = $1 AND tab_name = $2',
+      'SELECT option_columns, option_columns_map, closed_rounds, archived_rounds, distinct_values_cache FROM tab_configs WHERE sheet_id = $1 AND tab_name = $2',
       [sheetId, tabName]
     );
     let optionColumns = [];
@@ -2148,7 +2155,24 @@ router.get('/reviewer-options', async (req, res, next) => {
       });
     }
 
-    // 2) 시트 전체 데이터 읽기
+    // ★★★ 캐시 우선 조회: distinct_values_cache에서 즉시 반환 (시트 읽기 없이 ~0.2초) ★★★
+    const dvCache = tcRows[0]?.distinct_values_cache || {};
+    const cachedDV = round ? dvCache[round] : null;
+    // ★ 캐시 히트: 해당 차수의 distinctValues가 캐시에 있으면 즉시 반환
+    //   (사용자 이름 매칭은 생략 — matched=0으로 처리. 대부분의 구매양식 접속 케이스)
+    if (cachedDV && Object.keys(cachedDV).length > 0) {
+      return res.json({
+        ok: true,
+        optionColumns: optionColumns.map(c => c.name),
+        matched: 0,
+        rows: [],
+        optionLabels: [],
+        distinctValues: cachedDV,
+        cached: true,
+      });
+    }
+
+    // 2) 시트 전체 데이터 읽기 (캐시 미스 시에만)
     const range = `'${tabName.replace(/'/g, "''")}'`;
     const opts = gid ? { gid } : {};
     let values;
@@ -2251,6 +2275,17 @@ router.get('/reviewer-options', async (req, res, next) => {
         }
         distinctValues[colName] = [...valSet];
       }
+
+      // ★★★ 캐시 갱신: 시트를 읽었으므로 결과를 DB에 캐시 (비동기, 응답 차단 안 함)
+      if (round && distinctValues) {
+        pool.query(
+          `UPDATE tab_configs
+           SET distinct_values_cache = COALESCE(distinct_values_cache, '{}'::jsonb) || jsonb_build_object($3::text, $4::jsonb),
+               updated_at = NOW()
+           WHERE sheet_id = $1 AND tab_name = $2`,
+          [sheetId, tabName, round, JSON.stringify(distinctValues)]
+        ).catch(err => logger.warn('[reviewer-options] 캐시 갱신 실패:', err.message));
+      }
     }
 
     res.json({
@@ -2261,6 +2296,108 @@ router.get('/reviewer-options', async (req, res, next) => {
       optionLabels,  // 리뷰어 화면에 직접 표시할 문자열 배열
       ...(distinctValues && { distinctValues }),  // matched=0일 때만 포함
     });
+  } catch (err) {
+    next(err);
+  }
+});
+
+// ═══════════════════════════════════════════════════════════
+// POST /api/tab/refresh-option-cache — 옵션 distinctValues 캐시 수동 갱신
+// Body: { sheetId, tabName, gid, round }
+// ★ 관리자가 옵션 설정 후 즉시 캐시를 워밍할 때 사용
+// ═══════════════════════════════════════════════════════════
+router.post('/refresh-option-cache', authMiddleware, async (req, res, next) => {
+  try {
+    const { sheetId, tabName, gid, round } = req.body;
+    if (!sheetId || !tabName) {
+      return res.json({ error: 'sheetId, tabName이 필요합니다.' });
+    }
+
+    // 1) option_columns_map에서 옵션 컬럼 조회
+    const { rows: tcRows } = await pool.query(
+      'SELECT option_columns, option_columns_map, closed_rounds, archived_rounds FROM tab_configs WHERE sheet_id = $1 AND tab_name = $2',
+      [sheetId, tabName]
+    );
+    const ocMap = tcRows[0]?.option_columns_map || {};
+
+    // round 결정 (미지정 시 최신 활성 차수)
+    let targetRound = round || '';
+    if (!targetRound && Object.keys(ocMap).length > 0) {
+      const closedRounds = (tcRows[0]?.closed_rounds || '').split(',').map(s => s.trim()).filter(Boolean);
+      const archivedRounds = (tcRows[0]?.archived_rounds || '').split(',').map(s => s.trim()).filter(Boolean);
+      const excludeSet = new Set([...closedRounds, ...archivedRounds]);
+      const activeRounds = Object.keys(ocMap)
+        .filter(r => !excludeSet.has(r))
+        .sort((a, b) => {
+          const numA = parseInt(a.replace(/[^0-9]/g, '')) || 0;
+          const numB = parseInt(b.replace(/[^0-9]/g, '')) || 0;
+          return numA - numB;
+        });
+      if (activeRounds.length > 0) targetRound = activeRounds[activeRounds.length - 1];
+    }
+
+    const optionColumns = targetRound && ocMap[targetRound] ? ocMap[targetRound] : (tcRows[0]?.option_columns || []);
+    if (optionColumns.length === 0) {
+      return res.json({ ok: true, message: '설정된 옵션 컬럼이 없습니다.' });
+    }
+
+    // 2) 시트 데이터 읽기
+    const range = `'${tabName.replace(/'/g, "''")}'`;
+    const opts = gid ? { gid } : {};
+    const values = await throttledCall(() => readSheet(sheetId, range, opts));
+    if (!values || values.length === 0) {
+      return res.json({ ok: true, message: '시트 데이터 없음' });
+    }
+
+    // 3) 헤더/데이터 파싱
+    const DATA_TAB_KW = ['번호', '주문자', '수취인', '수취인명', '성함', '이름', '성명', '신청자', '연락처', '전화번호'];
+    const ROUND_KW = ['회차', '차수', 'round'];
+    let headerRowIdx = -1;
+    for (let i = 0; i < Math.min(values.length, 50); i++) {
+      const cells = values[i] ? values[i].map(c => String(c || '').trim()) : [];
+      if (cells.some(c => DATA_TAB_KW.some(k => c.includes(k)))) { headerRowIdx = i; break; }
+    }
+    if (headerRowIdx < 0) return res.json({ ok: true, message: '헤더 행을 찾을 수 없습니다.' });
+
+    const headers = values[headerRowIdx].map(h => String(h || '').trim());
+    const dataRows = values.slice(headerRowIdx + 1);
+    const roundColIdx = headers.findIndex(h => ROUND_KW.some(k => h.toLowerCase().includes(k.toLowerCase())));
+
+    // 4) distinctValues 추출
+    const optColMap = [];
+    for (const oc of optionColumns) {
+      let idx = oc.colIndex;
+      if (idx === undefined || idx === null || headers[idx] !== oc.name) {
+        idx = headers.findIndex(h => h === oc.name);
+      }
+      if (idx >= 0) optColMap.push({ name: oc.name, idx });
+    }
+
+    const distinctValues = {};
+    for (const { name: colName, idx } of optColMap) {
+      const valSet = new Set();
+      for (const row of dataRows) {
+        if (targetRound && roundColIdx >= 0) {
+          const rowRound = String(row[roundColIdx] || '').trim();
+          if (rowRound !== targetRound) continue;
+        }
+        const v = String(row[idx] !== undefined ? row[idx] : '').trim();
+        if (v) valSet.add(v);
+      }
+      distinctValues[colName] = [...valSet];
+    }
+
+    // 5) DB 캐시 저장
+    await pool.query(
+      `UPDATE tab_configs
+       SET distinct_values_cache = COALESCE(distinct_values_cache, '{}'::jsonb) || jsonb_build_object($3::text, $4::jsonb),
+           updated_at = NOW()
+       WHERE sheet_id = $1 AND tab_name = $2`,
+      [sheetId, tabName, targetRound, JSON.stringify(distinctValues)]
+    );
+
+    logger.info(`[refresh-option-cache] 캐시 갱신 완료: tab=${tabName} round=${targetRound} cols=${Object.keys(distinctValues).length}`);
+    res.json({ ok: true, round: targetRound, distinctValues, message: '캐시 갱신 완료' });
   } catch (err) {
     next(err);
   }
