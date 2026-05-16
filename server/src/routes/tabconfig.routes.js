@@ -2081,18 +2081,41 @@ router.get('/option-data', authMiddleware, async (req, res, next) => {
 // ★ name 있을 시 → 해당 리뷰어 행의 옵션 데이터 반환
 router.get('/reviewer-options', async (req, res, next) => {
   try {
-    const { sheetId, tabName, name, gid, round } = req.query;
+    const { sheetId, tabName, name, gid } = req.query;
+    let round = req.query.round || '';
     if (!sheetId || !tabName) {
       return res.json({ error: 'sheetId, tabName이 필요합니다.' });
     }
 
     // 1) 저장된 옵션 컬럼 조회 (★ round별 option_columns_map 우선)
     const { rows: tcRows } = await pool.query(
-      'SELECT option_columns, option_columns_map FROM tab_configs WHERE sheet_id = $1 AND tab_name = $2',
+      'SELECT option_columns, option_columns_map, closed_rounds, archived_rounds FROM tab_configs WHERE sheet_id = $1 AND tab_name = $2',
       [sheetId, tabName]
     );
     let optionColumns = [];
     const ocMap = tcRows[0]?.option_columns_map || {};
+
+    // ★★★ round 미지정 시 최신 활성 차수 자동 감지 ★★★
+    if (!round && Object.keys(ocMap).length > 0) {
+      const closedRounds = (tcRows[0]?.closed_rounds || '').split(',').map(s => s.trim()).filter(Boolean);
+      const archivedRounds = (tcRows[0]?.archived_rounds || '').split(',').map(s => s.trim()).filter(Boolean);
+      const excludeSet = new Set([...closedRounds, ...archivedRounds]);
+      
+      // ocMap의 키(차수)들 중 마감/보관되지 않은 가장 마지막(최신) 차수 선택
+      const activeRounds = Object.keys(ocMap)
+        .filter(r => !excludeSet.has(r))
+        .sort((a, b) => {
+          // "1-4차" → 숫자 추출 후 비교
+          const numA = parseInt(a.replace(/[^0-9]/g, '')) || 0;
+          const numB = parseInt(b.replace(/[^0-9]/g, '')) || 0;
+          return numA - numB;
+        });
+      
+      if (activeRounds.length > 0) {
+        round = activeRounds[activeRounds.length - 1]; // 최신(마지막) 활성 차수
+      }
+    }
+
     if (round && ocMap[round]) {
       // ★ 특정 차수 지정 → 해당 차수의 옵션만 사용
       optionColumns = ocMap[round];
