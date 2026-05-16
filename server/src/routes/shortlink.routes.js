@@ -21,7 +21,8 @@ function generateShortCode() {
 // ═══════════════════════════════════════════════════════════
 router.post('/create', authMiddleware, async (req, res, next) => {
   try {
-    const { s, g, t, d, options, optionList } = req.body;
+    const { s, g, t, d, options, optionList, rd } = req.body;
+    const round = rd || req.body.round || '';  // 차수 (rd 또는 round)
     if (!s || !t) return res.json({ error: 's(sheetId)와 t(tabName)은 필수입니다.' });
 
     // 옵션 리스트 처리
@@ -30,8 +31,8 @@ router.post('/create', authMiddleware, async (req, res, next) => {
       try { finalOptions = JSON.parse(finalOptions); } catch (_) { finalOptions = []; }
     }
 
-    // composite key: 동일 파라미터 조합 재사용
-    const compositeKey = `${s}|${g || ''}|${t}|${d || ''}`;
+    // composite key: 동일 파라미터 조합 재사용 (round 포함)
+    const compositeKey = `${s}|${g || ''}|${t}|${d || ''}|${round}`;
 
     // 기존 코드 확인
     const { rows: existing } = await pool.query(
@@ -51,6 +52,13 @@ router.post('/create', authMiddleware, async (req, res, next) => {
           );
         }
       }
+      // round가 변경됐으면 업데이트
+      if (round) {
+        await pool.query(
+          'UPDATE short_links SET round = $1 WHERE code = $2',
+          [round, existCode]
+        );
+      }
       return res.json({ success: true, code: existCode, shortUrl: existCode, reused: true });
     }
 
@@ -60,9 +68,9 @@ router.post('/create', authMiddleware, async (req, res, next) => {
       code = generateShortCode();
       try {
         await pool.query(
-          `INSERT INTO short_links (code, sheet_id, gid, tab_name, display_name, option_list, composite_key)
-           VALUES ($1, $2, $3, $4, $5, $6, $7)`,
-          [code, s, g || '', t, d || '', finalOptions.length > 0 ? JSON.stringify(finalOptions) : null, compositeKey]
+          `INSERT INTO short_links (code, sheet_id, gid, tab_name, display_name, option_list, composite_key, round)
+           VALUES ($1, $2, $3, $4, $5, $6, $7, $8)`,
+          [code, s, g || '', t, d || '', finalOptions.length > 0 ? JSON.stringify(finalOptions) : null, compositeKey, round]
         );
         break;
       } catch (err) {
@@ -93,7 +101,7 @@ router.get('/resolve', async (req, res, next) => {
     if (!code) return res.json({ error: 'code가 없습니다.' });
 
     const { rows } = await pool.query(
-      `SELECT sheet_id AS s, gid AS g, tab_name AS t, display_name AS d, option_list AS "optionList"
+      `SELECT sheet_id AS s, gid AS g, tab_name AS t, display_name AS d, option_list AS "optionList", round AS rd
        FROM short_links WHERE code = $1`,
       [code]
     );
@@ -107,6 +115,7 @@ router.get('/resolve', async (req, res, next) => {
       g: row.g,
       t: row.t,
       d: row.d,
+      rd: row.rd || '',
       optionList: row.optionList || [],
     });
   } catch (err) {

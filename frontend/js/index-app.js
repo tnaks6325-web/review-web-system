@@ -4359,7 +4359,7 @@ async function copyShortLink(btnEl) {
       const resp = await fetch(apiBase + '/api/short/create', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', ...(_getAuthHeaders ? _getAuthHeaders() : {}) },
-        body: JSON.stringify({ s: sheetId, g: gid, t: tabName, d: displayName })
+        body: JSON.stringify({ s: sheetId, g: gid, t: tabName, d: displayName, rd: tcRound })
       });
       const data = await resp.json();
       if (data && data.success && data.code) {
