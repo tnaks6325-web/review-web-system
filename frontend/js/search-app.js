@@ -5057,13 +5057,28 @@ async function _loadInlineProfile() {
       const phoneEl = document.getElementById("inlineSelfPhone");
       if (phoneEl) phoneEl.textContent = p.phone || "-";
       const incomeEl = document.getElementById("inlineSelfIncomeName");
-      if (incomeEl) incomeEl.textContent = p.incomeType || "-";
+      if (incomeEl) {
+        const incVal = p.incomeType || "";
+        incomeEl.textContent = incVal || "미등록";
+        incomeEl.style.color = incVal ? "var(--t2)" : "#DC2626";
+        const btnInc = document.getElementById("btnAddIncomeInfo");
+        if (btnInc) btnInc.style.display = incVal ? "none" : "";
+      }
       const juminEl = document.getElementById("inlineSelfJumin");
       if (juminEl) {
         const jd = (p.residentNum || "").replace(/[^0-9]/g, "");
-        juminEl.textContent = jd.length === 13
-          ? jd.slice(0,6) + "-" + jd.slice(6,7) + "••••••"
-          : (jd ? "등록됨" : "-");
+        if (jd.length === 13) {
+          juminEl.textContent = jd.slice(0,6) + "-" + jd.slice(6,7) + "••••••";
+          juminEl.style.color = "var(--t2)";
+        } else if (jd) {
+          juminEl.textContent = "등록됨";
+          juminEl.style.color = "var(--t2)";
+        } else {
+          juminEl.textContent = "미등록";
+          juminEl.style.color = "#DC2626";
+        }
+        const btnJm = document.getElementById("btnAddJuminInfo");
+        if (btnJm) btnJm.style.display = jd ? "none" : "";
       }
       // 타계정 목록 (인라인 렌더러 사용)
       const subs = p.subAccounts || [];
@@ -5305,6 +5320,91 @@ function closeReviewerProfileModal() {
   const modal = document.getElementById("reviewerProfileModal");
   if (modal) modal.style.display = "none";
   cancelSubAccountForm();
+}
+
+/* ═══════════════════════════════════════════════════
+   인라인 소득명의/주민번호 등록 폼
+   ═══════════════════════════════════════════════════ */
+
+/** 소득명의/주민번호 입력폼 열기 */
+function openIncomeInfoForm() {
+  const form = document.getElementById("inlineIncomeForm");
+  if (!form) return;
+  // 기존 값 채우기
+  const profile = window._reviewerProfile || {};
+  document.getElementById("inlineIncomeNameInput").value = profile.incomeType || "";
+  const jd = (profile.residentNum || "").replace(/[^0-9]/g, "");
+  document.getElementById("inlineJuminInput").value = jd.length > 6 ? jd.slice(0,6)+"-"+jd.slice(6) : jd;
+  form.style.display = "";
+}
+
+/** 소득명의/주민번호 입력폼 취소 */
+function cancelIncomeInfoForm() {
+  const form = document.getElementById("inlineIncomeForm");
+  if (form) form.style.display = "none";
+}
+
+/** 소득명의/주민번호 저장 */
+async function saveIncomeInfoInline() {
+  const incomeName = (document.getElementById("inlineIncomeNameInput")?.value || "").trim();
+  const juminRaw = (document.getElementById("inlineJuminInput")?.value || "").replace(/[^0-9]/g, "");
+
+  if (!incomeName && !juminRaw) { showToast("소득명의 또는 주민번호를 입력해주세요.", "warning"); return; }
+  if (juminRaw && juminRaw.length !== 13) { showToast("주민번호는 13자리 숫자여야 합니다.", "warning"); return; }
+
+  const authRaw = localStorage.getItem("rapp_reviewer_auth");
+  let auth;
+  try { auth = JSON.parse(authRaw || "{}"); } catch(_) { auth = {}; }
+  const myName = auth.name || "";
+  const myPhone8 = auth.phone8 || "";
+  if (!myName || !myPhone8) { showToast("세션이 만료되었습니다.", "warning"); return; }
+
+  const btn = document.getElementById("btnSaveIncomeInfo");
+  if (btn) { btn.disabled = true; btn.textContent = "저장 중..."; }
+
+  try {
+    const res = await gasPost({
+      action: "saveIncomeInfo",
+      name: myName,
+      phone8: myPhone8,
+      incomeName: incomeName,
+      residentNum: juminRaw
+    });
+    if (res?.ok) {
+      showToast("소득명의/주민번호가 저장되었습니다.");
+      // 화면 업데이트
+      if (!window._reviewerProfile) window._reviewerProfile = {};
+      if (incomeName) window._reviewerProfile.incomeType = incomeName;
+      if (juminRaw) window._reviewerProfile.residentNum = juminRaw;
+
+      const incomeEl = document.getElementById("inlineSelfIncomeName");
+      if (incomeEl) {
+        incomeEl.textContent = incomeName || "미등록";
+        incomeEl.style.color = incomeName ? "var(--t2)" : "#DC2626";
+        const btnInc = document.getElementById("btnAddIncomeInfo");
+        if (btnInc) btnInc.style.display = incomeName ? "none" : "";
+      }
+      const juminEl = document.getElementById("inlineSelfJumin");
+      if (juminEl) {
+        if (juminRaw.length === 13) {
+          juminEl.textContent = juminRaw.slice(0,6) + "-" + juminRaw.slice(6,7) + "••••••";
+          juminEl.style.color = "var(--t2)";
+        } else {
+          juminEl.textContent = juminRaw ? "등록됨" : "미등록";
+          juminEl.style.color = juminRaw ? "var(--t2)" : "#DC2626";
+        }
+        const btnJm = document.getElementById("btnAddJuminInfo");
+        if (btnJm) btnJm.style.display = juminRaw ? "none" : "";
+      }
+      cancelIncomeInfoForm();
+    } else {
+      showToast("❌ " + (res?.error || "저장 실패"), "error");
+    }
+  } catch(e) {
+    showToast("❌ 오류: " + e.message, "error");
+  } finally {
+    if (btn) { btn.disabled = false; btn.textContent = "저장"; }
+  }
 }
 
 /* ═══════════════════════════════════════════════════
