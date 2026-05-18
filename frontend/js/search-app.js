@@ -5521,12 +5521,71 @@ async function saveInlineSubAccount() {
   if (phoneLast8.length !== 8) { showToast("전화번호 뒷번호 8자리를 입력해주세요.", "warning"); return; }
   if (juminDigits && juminDigits.length !== 13) { showToast("주민번호는 13자리 숫자여야 합니다.", "warning"); return; }
 
+  // ★ 확인 단계: 입력 정보를 보여주고 확인 요청
+  const phoneFormatted = phone.slice(0,3) + "-" + phone.slice(3,7) + "-" + phone.slice(7);
+  const juminFormatted = juminDigits ? (juminDigits.slice(0,6) + "-" + juminDigits.slice(6)) : "(미입력)";
+  const formArea = document.getElementById("inlineSubForm");
+  if (!formArea) return;
+
+  // 기존 확인창이 있으면 제거
+  const existingConfirm = document.getElementById("inlineSubConfirm");
+  if (existingConfirm) existingConfirm.remove();
+
+  const confirmHtml = `
+    <div id="inlineSubConfirm" style="margin-top:12px;border:2px solid #F59E0B;border-radius:10px;padding:14px;background:#FFFBEB">
+      <div style="font-size:.75rem;font-weight:700;color:#92400E;margin-bottom:10px;text-align:center">📋 입력 정보를 확인해주세요</div>
+      <div style="background:#fff;border-radius:8px;padding:10px 12px;margin-bottom:10px;border:1px solid #FDE68A">
+        <div style="display:flex;gap:6px;margin-bottom:5px">
+          <span style="font-size:.7rem;color:var(--t3);min-width:55px">이름</span>
+          <span style="font-size:.8rem;font-weight:700;color:var(--t1)">${escHtml(name)}</span>
+        </div>
+        <div style="display:flex;gap:6px;margin-bottom:5px">
+          <span style="font-size:.7rem;color:var(--t3);min-width:55px">전화번호</span>
+          <span style="font-size:.8rem;font-weight:700;color:#2563EB">${escHtml(phoneFormatted)}</span>
+        </div>
+        <div style="display:flex;gap:6px;margin-bottom:5px">
+          <span style="font-size:.7rem;color:var(--t3);min-width:55px">소득명의</span>
+          <span style="font-size:.8rem;color:var(--t2)">${escHtml(incomeName || '(미입력)')}</span>
+        </div>
+        <div style="display:flex;gap:6px">
+          <span style="font-size:.7rem;color:var(--t3);min-width:55px">주민번호</span>
+          <span style="font-size:.8rem;font-weight:700;color:#DC2626">${escHtml(juminFormatted)}</span>
+        </div>
+      </div>
+      <div style="font-size:.7rem;color:#B45309;text-align:center;margin-bottom:10px;line-height:1.5">
+        이 정보가 정확히 맞는지 확인해주세요<br>
+        <strong>*전화번호 오타, 주민번호 오타 확인 필수</strong>
+      </div>
+      <div style="display:flex;gap:8px">
+        <button onclick="document.getElementById('inlineSubConfirm').remove()" style="flex:1;padding:9px 0;background:#fff;color:var(--t2);border:1.5px solid #D1D5DB;border-radius:7px;font-size:.78rem;font-weight:600;cursor:pointer">수정하기</button>
+        <button onclick="confirmSaveInlineSubAccount()" style="flex:1;padding:9px 0;background:#DC2626;color:#fff;border:none;border-radius:7px;font-size:.78rem;font-weight:700;cursor:pointer">저장확정</button>
+      </div>
+    </div>
+  `;
+  formArea.insertAdjacentHTML("beforeend", confirmHtml);
+  // 확인창으로 스크롤
+  document.getElementById("inlineSubConfirm").scrollIntoView({ behavior: "smooth", block: "center" });
+}
+
+/** 타계정 저장 확정 (확인 단계 후 실행) */
+async function confirmSaveInlineSubAccount() {
+  const name = (document.getElementById("inlineSubName")?.value || "").trim();
+  const phoneLast8 = (document.getElementById("inlineSubPhone")?.value || "").replace(/[^0-9]/g, "");
+  const phone = "010" + phoneLast8;
+  const incomeName = (document.getElementById("inlineSubIncomeName")?.value || "").trim();
+  const juminDigits = (document.getElementById("inlineSubJumin")?.value || "").replace(/[^0-9]/g, "");
+  const editIdx = parseInt(document.getElementById("inlineSubEditIdx")?.value || "-1", 10);
+
   const authRaw = localStorage.getItem("rapp_reviewer_auth");
   let auth;
   try { auth = JSON.parse(authRaw || "{}"); } catch(_) { auth = {}; }
   const myName = auth.name || "";
   const myPhone8 = auth.phone8 || "";
   if (!myName || !myPhone8) { showToast("세션이 만료되었습니다.", "warning"); return; }
+
+  // 확인창 제거
+  const confirmEl = document.getElementById("inlineSubConfirm");
+  if (confirmEl) confirmEl.remove();
 
   const subs = JSON.parse(JSON.stringify(window._reviewerProfile?.subAccounts || []));
   const newSub = {
