@@ -12214,6 +12214,7 @@ function _renderFullTableView(wrap, filtered) {
   let html = `<div id="tabDashArchiveBar" style="display:${checkedCount>0?'flex':'none'};align-items:center;gap:10px;padding:8px 12px;margin-bottom:6px;background:#FEF3C7;border:1px solid #F59E0B;border-radius:8px;flex-wrap:wrap">
     <span style="font-size:.78rem;font-weight:600;color:#92400E"><i class="fas fa-check-square" style="margin-right:4px"></i>${checkedCount}건 선택됨</span>
     <button onclick="_archiveCheckedTabs()" style="padding:4px 12px;background:#DC2626;color:#fff;border:none;border-radius:6px;font-size:.72rem;font-weight:600;cursor:pointer;display:flex;align-items:center;gap:4px"><i class="fas fa-archive"></i> 아카이브로 보내기</button>
+    <button onclick="_checkDuplicateReviewFolders()" style="padding:4px 12px;background:#7C3AED;color:#fff;border:none;border-radius:6px;font-size:.72rem;font-weight:600;cursor:pointer;display:flex;align-items:center;gap:4px"><i class="fas fa-copy"></i> 리뷰폴더 중복검사</button>
     <button onclick="_clearTabDashChecked()" style="padding:4px 10px;background:#6B7280;color:#fff;border:none;border-radius:6px;font-size:.72rem;cursor:pointer">선택 해제</button>
   </div>`;
 
@@ -12291,6 +12292,187 @@ function _updateArchiveBar() {
   bar.style.display = n > 0 ? 'flex' : 'none';
   const span = bar.querySelector('span');
   if (span) span.innerHTML = `<i class="fas fa-check-square" style="margin-right:4px"></i>${n}건 선택됨`;
+}
+
+// ── 리뷰폴더 중복검사 ──
+async function _checkDuplicateReviewFolders() {
+  if (_tabDashChecked.size === 0) { showToast('중복검사할 탭을 선택하세요.', 'info'); return; }
+
+  // 선택된 탭의 folder_url 수집
+  const folderUrls = [];
+  const tabInfo = [];
+  _tabDashChecked.forEach(key => {
+    const [sheetId, tabName] = key.split('||');
+    const t = (_tabDashData?.tabs||[]).find(x => x.sheet_id === sheetId && x.tab_name === tabName);
+    if (t && t.folder_url) {
+      folderUrls.push(t.folder_url);
+      tabInfo.push({ campaign: t.campaign_name, tab: t.tab_name, url: t.folder_url });
+    }
+  });
+
+  if (folderUrls.length === 0) {
+    showToast('선택된 탭 중 리뷰폴더가 설정된 탭이 없습니다.', 'warning');
+    return;
+  }
+
+  // 로딩 모달 표시
+  _showDuplicateModal('loading', { tabInfo });
+
+  try {
+    const res = await gasPost({ action: 'checkDuplicates', folderUrls });
+    if (res.error) {
+      _showDuplicateModal('error', { message: res.error });
+      return;
+    }
+    _showDuplicateModal('results', { results: res.results, totalDuplicateFiles: res.totalDuplicateFiles, tabInfo });
+  } catch (err) {
+    _showDuplicateModal('error', { message: err.message || '중복검사 중 오류 발생' });
+  }
+}
+
+function _showDuplicateModal(state, data) {
+  let modal = document.getElementById('duplicateCheckModal');
+  if (!modal) {
+    modal = document.createElement('div');
+    modal.id = 'duplicateCheckModal';
+    document.body.appendChild(modal);
+  }
+
+  if (state === 'loading') {
+    modal.innerHTML = `
+      <div style="position:fixed;inset:0;background:rgba(0,0,0,.5);z-index:9999;display:flex;align-items:center;justify-content:center" onclick="if(event.target===this)this.remove()">
+        <div style="background:#fff;border-radius:12px;padding:24px;width:90%;max-width:600px;max-height:80vh;overflow-y:auto;box-shadow:0 20px 60px rgba(0,0,0,.3)">
+          <h3 style="margin:0 0 16px;font-size:1rem;color:#1F2937"><i class="fas fa-spinner fa-spin" style="margin-right:8px;color:#7C3AED"></i>리뷰폴더 중복검사 중...</h3>
+          <div style="font-size:.8rem;color:#6B7280">
+            <p>${(data.tabInfo||[]).length}개 폴더를 검사하고 있습니다. 잠시 기다려주세요...</p>
+            <ul style="margin-top:8px;padding-left:16px">${(data.tabInfo||[]).map(t => `<li>${escHtml(t.campaign)} / ${escHtml(t.tab)}</li>`).join('')}</ul>
+          </div>
+        </div>
+      </div>`;
+    return;
+  }
+
+  if (state === 'error') {
+    modal.innerHTML = `
+      <div style="position:fixed;inset:0;background:rgba(0,0,0,.5);z-index:9999;display:flex;align-items:center;justify-content:center" onclick="if(event.target===this)this.remove()">
+        <div style="background:#fff;border-radius:12px;padding:24px;width:90%;max-width:500px;box-shadow:0 20px 60px rgba(0,0,0,.3)">
+          <h3 style="margin:0 0 12px;font-size:1rem;color:#DC2626"><i class="fas fa-exclamation-circle" style="margin-right:8px"></i>오류</h3>
+          <p style="font-size:.82rem;color:#6B7280">${escHtml(data.message)}</p>
+          <div style="text-align:right;margin-top:16px">
+            <button onclick="document.getElementById('duplicateCheckModal').remove()" style="padding:6px 16px;background:#6B7280;color:#fff;border:none;border-radius:6px;cursor:pointer;font-size:.78rem">닫기</button>
+          </div>
+        </div>
+      </div>`;
+    return;
+  }
+
+  if (state === 'results') {
+    const { results, totalDuplicateFiles, tabInfo } = data;
+    let html = `
+      <div style="position:fixed;inset:0;background:rgba(0,0,0,.5);z-index:9999;display:flex;align-items:center;justify-content:center" onclick="if(event.target===this)this.remove()">
+        <div style="background:#fff;border-radius:12px;padding:24px;width:95%;max-width:750px;max-height:85vh;overflow-y:auto;box-shadow:0 20px 60px rgba(0,0,0,.3)">
+          <h3 style="margin:0 0 16px;font-size:1rem;color:#1F2937"><i class="fas fa-copy" style="margin-right:8px;color:#7C3AED"></i>리뷰폴더 중복검사 결과</h3>`;
+
+    if (totalDuplicateFiles === 0) {
+      html += `<div style="text-align:center;padding:24px;color:#059669;font-size:.88rem">
+        <i class="fas fa-check-circle" style="font-size:2rem;margin-bottom:8px;display:block"></i>
+        <b>중복 파일이 없습니다!</b><br><span style="font-size:.75rem;color:#6B7280">${tabInfo.length}개 폴더를 검사했습니다.</span>
+      </div>`;
+    } else {
+      html += `<div style="background:#FEF3C7;border:1px solid #F59E0B;border-radius:8px;padding:10px 14px;margin-bottom:12px;font-size:.78rem;color:#92400E">
+        <i class="fas fa-exclamation-triangle" style="margin-right:6px"></i>
+        <b>${totalDuplicateFiles}개 중복 파일</b>이 발견되었습니다. 아래 목록을 확인 후 [중복파일 제거] 버튼을 클릭하면 휴지통으로 이동됩니다.
+      </div>`;
+
+      // 폴더별 결과 표시
+      const allRemoveIds = [];
+      results.forEach((r, rIdx) => {
+        if (r.error) {
+          html += `<div style="margin-bottom:8px;padding:8px;background:#FEF2F2;border-radius:6px;font-size:.75rem;color:#DC2626">
+            <b>${escHtml(tabInfo[rIdx]?.campaign || '')} / ${escHtml(tabInfo[rIdx]?.tab || '')}</b> — 오류: ${escHtml(r.error)}
+          </div>`;
+          return;
+        }
+        if (!r.duplicates || r.duplicates.length === 0) return;
+
+        html += `<div style="margin-bottom:12px;border:1px solid #E5E7EB;border-radius:8px;overflow:hidden">
+          <div style="background:#F3F4F6;padding:8px 12px;font-size:.78rem;font-weight:600;color:#374151">
+            <i class="fas fa-folder-open" style="margin-right:4px;color:#7C3AED"></i>
+            ${escHtml(tabInfo[rIdx]?.campaign || '')} / ${escHtml(tabInfo[rIdx]?.tab || '')}
+            <span style="font-weight:400;color:#6B7280;margin-left:8px">전체 ${r.totalFiles}개 파일 중 ${r.duplicateFileCount}개 중복</span>
+          </div>
+          <div style="padding:8px 12px">`;
+
+        r.duplicates.forEach(g => {
+          html += `<div style="margin-bottom:6px;padding:6px;background:#FAFAFA;border-radius:4px;font-size:.72rem">
+            <div style="color:#059669;margin-bottom:3px"><i class="fas fa-check" style="margin-right:4px"></i><b>유지:</b> ${escHtml(g.keep.name)} <span style="color:#9CA3AF">(${_formatFileSize(g.keep.size)}, ${_formatDate(g.keep.createdTime)})</span></div>`;
+          g.remove.forEach(f => {
+            allRemoveIds.push(f.id);
+            html += `<div style="color:#DC2626;margin-left:14px"><i class="fas fa-trash-alt" style="margin-right:4px"></i><b>제거:</b> ${escHtml(f.name)} <span style="color:#9CA3AF">(${_formatFileSize(f.size)}, ${_formatDate(f.createdTime)})</span></div>`;
+          });
+          html += `</div>`;
+        });
+        html += `</div></div>`;
+      });
+
+      // 전역 data에 저장
+      window._duplicateRemoveIds = allRemoveIds;
+      html += `<div style="text-align:right;margin-top:16px;display:flex;gap:8px;justify-content:flex-end">
+        <button onclick="document.getElementById('duplicateCheckModal').remove()" style="padding:6px 16px;background:#6B7280;color:#fff;border:none;border-radius:6px;cursor:pointer;font-size:.78rem">닫기</button>
+        <button onclick="_executeDuplicateRemoval()" style="padding:6px 16px;background:#DC2626;color:#fff;border:none;border-radius:6px;cursor:pointer;font-size:.78rem;font-weight:600"><i class="fas fa-trash-alt" style="margin-right:4px"></i>중복파일 제거 (${allRemoveIds.length}개)</button>
+      </div>`;
+    }
+
+    if (totalDuplicateFiles === 0) {
+      html += `<div style="text-align:right;margin-top:16px">
+        <button onclick="document.getElementById('duplicateCheckModal').remove()" style="padding:6px 16px;background:#6B7280;color:#fff;border:none;border-radius:6px;cursor:pointer;font-size:.78rem">닫기</button>
+      </div>`;
+    }
+
+    html += `</div></div>`;
+    modal.innerHTML = html;
+  }
+}
+
+async function _executeDuplicateRemoval() {
+  const fileIds = window._duplicateRemoveIds;
+  if (!fileIds || fileIds.length === 0) { showToast('제거할 파일이 없습니다.', 'info'); return; }
+
+  if (!confirm(`${fileIds.length}개 중복 파일을 휴지통으로 이동하시겠습니까?\n\n(Google Drive 휴지통에서 30일 이내 복원 가능)`)) return;
+
+  // 로딩 상태
+  const modal = document.getElementById('duplicateCheckModal');
+  if (modal) {
+    const btn = modal.querySelector('button[onclick="_executeDuplicateRemoval()"]');
+    if (btn) { btn.disabled = true; btn.innerHTML = '<i class="fas fa-spinner fa-spin"></i> 제거 중...'; }
+  }
+
+  try {
+    const res = await gasPost({ action: 'removeDuplicates', fileIds });
+    if (res.error) {
+      showToast(res.error, 'error');
+      return;
+    }
+    showToast(`✅ ${res.success}개 중복 파일이 휴지통으로 이동되었습니다.${res.failed > 0 ? ` (${res.failed}개 실패)` : ''}`, 'success');
+    if (modal) modal.remove();
+    window._duplicateRemoveIds = null;
+  } catch (err) {
+    showToast('중복 제거 중 오류: ' + (err.message || '알 수 없는 오류'), 'error');
+  }
+}
+
+function _formatFileSize(bytes) {
+  if (!bytes) return '0B';
+  const n = parseInt(bytes, 10);
+  if (n < 1024) return n + 'B';
+  if (n < 1024*1024) return (n/1024).toFixed(1) + 'KB';
+  return (n/(1024*1024)).toFixed(1) + 'MB';
+}
+
+function _formatDate(isoStr) {
+  if (!isoStr) return '';
+  try { return new Date(isoStr).toLocaleDateString('ko-KR', { month:'short', day:'numeric', hour:'2-digit', minute:'2-digit' }); }
+  catch(_) { return isoStr; }
 }
 
 // ── 아카이브 실행 ──

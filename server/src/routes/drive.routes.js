@@ -709,8 +709,6 @@ router.get('/diag', authMiddleware, async (req, res, next) => {
   }
 });
 
-module.exports = router;
-
 // ═══════════════════════════════════════════════════════════
 // GET /api/drive/list-folder — 폴더 내용 조회 (복구용 임시 엔드포인트)
 // ═══════════════════════════════════════════════════════════
@@ -727,3 +725,79 @@ router.get('/list-folder', authMiddleware, async (req, res, next) => {
     next(err);
   }
 });
+
+// ═══════════════════════════════════════════════════════════
+// POST /api/drive/check-duplicates — 리뷰폴더 중복 파일 검사
+// body: { folderUrls: [ "https://drive.google.com/drive/folders/xxx", ... ] }
+// ═══════════════════════════════════════════════════════════
+router.post('/check-duplicates', authMiddleware, async (req, res, next) => {
+  try {
+    const { folderUrls } = req.body;
+    if (!folderUrls || !Array.isArray(folderUrls) || folderUrls.length === 0) {
+      return res.json({ error: '검사할 폴더 URL이 없습니다.' });
+    }
+
+    const results = [];
+    let totalDuplicateFiles = 0;
+
+    for (const url of folderUrls) {
+      const folderId = extractFolderId(url);
+      if (!folderId) {
+        results.push({ url, error: '폴더 ID 추출 실패' });
+        continue;
+      }
+
+      try {
+        const dupResult = await driveService.detectDuplicates(folderId);
+        totalDuplicateFiles += dupResult.duplicateFileCount;
+        results.push({
+          url,
+          folderId,
+          totalFiles: dupResult.totalFiles,
+          duplicateGroups: dupResult.duplicateGroups,
+          duplicateFileCount: dupResult.duplicateFileCount,
+          duplicates: dupResult.duplicates.map(g => ({
+            md5: g.md5,
+            keep: { id: g.keep.id, name: g.keep.name, size: g.keep.size, createdTime: g.keep.createdTime },
+            remove: g.remove.map(f => ({ id: f.id, name: f.name, size: f.size, createdTime: f.createdTime })),
+          })),
+        });
+      } catch (err) {
+        logger.error(`[checkDuplicates] 폴더 검사 실패 (${folderId}): ${err.message}`);
+        results.push({ url, folderId, error: err.message });
+      }
+    }
+
+    res.json({ ok: true, results, totalDuplicateFiles });
+  } catch (err) {
+    next(err);
+  }
+});
+
+// ═══════════════════════════════════════════════════════════
+// POST /api/drive/remove-duplicates — 중복 파일 제거 (휴지통 이동)
+// body: { fileIds: ["fileId1", "fileId2", ...] }
+// ═══════════════════════════════════════════════════════════
+router.post('/remove-duplicates', authMiddleware, async (req, res, next) => {
+  try {
+    const { fileIds } = req.body;
+    if (!fileIds || !Array.isArray(fileIds) || fileIds.length === 0) {
+      return res.json({ error: '삭제할 파일 ID가 없습니다.' });
+    }
+
+    const filesToTrash = fileIds.map(id => ({ id, name: id }));
+    const result = await driveService.trashFiles(filesToTrash);
+
+    res.json({
+      ok: true,
+      success: result.success,
+      failed: result.failed,
+      errors: result.errors,
+      message: `${result.success}개 중복 파일이 휴지통으로 이동되었습니다.`,
+    });
+  } catch (err) {
+    next(err);
+  }
+});
+
+module.exports = router;

@@ -173,6 +173,8 @@ const _ACTION_MAP = {
   'batchCreateFolders':  { method: 'POST', path: '/api/drive/batch-create' },
   'migrateToNewStructure': { method: 'POST', path: '/api/drive/migrate-to-new-structure' },
   'driveDiag':           { method: 'GET',  path: '/api/drive/diag' },
+  'checkDuplicates':     { method: 'POST', path: '/api/drive/check-duplicates' },
+  'removeDuplicates':    { method: 'POST', path: '/api/drive/remove-duplicates' },
 
   // 기타 GAS 전용 (호환성)
   'getAppUrl':      { method: 'GET',  path: '/api/diag/app-url' },
