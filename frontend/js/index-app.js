@@ -1646,6 +1646,35 @@ function _checkAllCompleteTabs(stats) {
   }
 }
 
+/* ── 제출+입금 100% 완료 탭 팝업 (탭관리 대시보드용) ── */
+function _checkAllCompleteTabsFromTabDash(tabs) {
+  const sessionKey = "rapp_allcomplete_alert_shown";
+  if (sessionStorage.getItem(sessionKey)) return;
+
+  const completeTabs = [];
+  (tabs || []).forEach(t => {
+    if (t.is_closed) return;
+    const rc = t.row_count || 0;
+    const sc = t.submitted_count || 0;
+    const pc = t.paid_count || 0;
+    if (rc > 0 && sc >= rc && pc >= rc) {
+      completeTabs.push({ campaign: t.campaign_name, tab: t.tab_name });
+    }
+  });
+
+  if (completeTabs.length > 0) {
+    sessionStorage.setItem(sessionKey, "1");
+    const tabList = completeTabs.map(x => `• ${x.campaign} / ${x.tab}`).join("\n");
+    setTimeout(() => {
+      alert(
+        "🎉 리뷰와 입금이 모두 완료된 탭이 존재합니다.\n" +
+        "마감자료를 확인하시어 전달하신 후 탭을 체크하여 아카이브로 넘겨주세요.\n\n" +
+        "━━━ 완료 탭 목록 ━━━\n" + tabList
+      );
+    }, 500);
+  }
+}
+
 /* ── 제출 현황 대시보드 ── */
 async function loadAdminDashboard() {
   // ★ v11.5: 캠페인 탭 관리 UI로 통합 — 대시보드 메인은 loadTabDashboard()가 담당
@@ -11458,6 +11487,9 @@ async function loadTabDashboard() {
     if (res.error) { showToast(res.error, "error"); return; }
     _tabDashData = res;
 
+    // ★ 제출+입금 모두 100% 완료 탭 팝업 알림
+    _checkAllCompleteTabsFromTabDash(res.tabs || []);
+
     // ── KPI ──
     const s = res.stats || {};
     const kpiEl = document.getElementById("tabDashKPI");
@@ -12245,9 +12277,15 @@ function _renderFullTableView(wrap, filtered) {
     const st = t.is_closed ? "closed" : "active";
     const key = `${t.sheet_id}||${t.tab_name}`;
     const isChecked = _tabDashChecked.has(key);
-    const bg = isChecked ? "#FEF9C3" : (st === "closed" ? "#FEF2F2" : "#fff");
-    const hoverBg = isChecked ? "#FEF08A" : "#EFF6FF";
-    html += `<tr style="background:${bg};border-bottom:1px solid #F3F4F6" onmouseover="this.style.background='${hoverBg}'" onmouseout="this.style.background='${bg}'">`;
+    // ★ 제출+입금 모두 100% 완료 판정
+    const _rc = t._isRoundRow ? (t._roundTotal || 0) : (t.row_count || 0);
+    const _sc = t._isRoundRow ? (t._roundSubmitted || 0) : (t.submitted_count || 0);
+    const _pc = t._isRoundRow ? (t._roundPaid || 0) : (t.paid_count || 0);
+    const _isAllComplete = !t.is_closed && _rc > 0 && _sc >= _rc && _pc >= _rc;
+    const bg = isChecked ? "#FEF9C3" : _isAllComplete ? "#FFF0F5" : (st === "closed" ? "#FEF2F2" : "#fff");
+    const hoverBg = isChecked ? "#FEF08A" : _isAllComplete ? "#FCE7F3" : "#EFF6FF";
+    const leftBorder = _isAllComplete ? "border-left:4px solid #EC4899;" : "";
+    html += `<tr style="background:${bg};${leftBorder}border-bottom:1px solid #F3F4F6" onmouseover="this.style.background='${hoverBg}'" onmouseout="this.style.background='${bg}'">`;
     // 체크박스 열
     html += `<td style="padding:5px;text-align:center;width:30px"><input type="checkbox" ${isChecked?'checked':''} onchange="_toggleTabDashCheck('${escHtml(t.sheet_id)}','${escHtml(t.tab_name)}',this.checked)" style="width:14px;height:14px;cursor:pointer"></td>`;
     visibleCols.forEach(c => {
