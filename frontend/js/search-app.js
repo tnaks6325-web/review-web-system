@@ -4993,7 +4993,7 @@ async function _loadReviewerProfileForForm() {
   if (!authRaw) return;
   let auth;
   try { auth = JSON.parse(authRaw); } catch(_) { return; }
-  if (!auth || Date.now() > (auth.exp || 0)) return;
+  if (!auth || Date.now() > (auth.expAt || 0)) return;
 
   const name   = auth.name   || "";
   const phone8 = auth.phone8 || "";
@@ -5035,7 +5035,7 @@ async function openReviewerProfileModal() {
   if (!authRaw) { showToast("로그인 후 이용하세요.", "warning"); return; }
   let auth;
   try { auth = JSON.parse(authRaw); } catch(_) { return; }
-  if (!auth || Date.now() > (auth.exp || 0)) { showToast("세션이 만료되었습니다. 다시 로그인해주세요.", "warning"); return; }
+  if (!auth || Date.now() > (auth.expAt || 0)) { showToast("세션이 만료되었습니다. 다시 로그인해주세요.", "warning"); return; }
 
   const name   = auth.name   || "";
   const phone8 = auth.phone8 || "";
