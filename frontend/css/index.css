@@ -599,6 +599,10 @@ input,textarea,button{font-family:inherit}
 .closed-cb{width:15px;height:15px;accent-color:#4F46E5;cursor:pointer;flex-shrink:0}
 .dash-tab-row.is-closed-row{background:#F5F3FF!important}
 .dash-tab-row.is-closed-row .dash-tab-name a,.dash-tab-row.is-closed-row .dash-tab-name span{color:#4F46E5!important;text-decoration:line-through;opacity:.65}
+/* ── 제출+입금 모두 100% 완료: 핑크 배경 ── */
+.dash-tab-row.all-complete-row{background:#FFF0F5!important;border-left:4px solid #EC4899!important;padding-left:10px!important}
+.dash-tab-row.all-complete-row .dash-tab-name a,
+.dash-tab-row.all-complete-row .dash-tab-name span{color:#BE185D!important;font-weight:700!important}
 /* ── 긴급 경고: startDate 기준 25일 이상 경과 + 미제출 잔여 ── */
 .dash-tab-row.urgent-overdue{
   background:#FFF5F5!important;

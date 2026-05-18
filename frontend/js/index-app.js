@@ -1613,6 +1613,39 @@ async function _deleteReviewer(name, phone) {
   }
 }
 
+/* ── 제출+입금 모두 100% 완료 탭 감지 → 팝업 알림 ── */
+function _checkAllCompleteTabs(stats) {
+  const sessionKey = "rapp_allcomplete_alert_shown";
+  // 이미 이번 세션에서 보여줬으면 스킵
+  if (sessionStorage.getItem(sessionKey)) return;
+
+  const completeTabs = [];
+  (stats || []).forEach(c => {
+    (c.tabs || []).forEach(t => {
+      const tabKey = (t.sheetId || "") + "||" + (t.tab || "");
+      const isClosed = _closedSet.has(tabKey);
+      if (isClosed) return; // 이미 마감된 탭은 제외
+      const isTabDone = (t.total > 0 && t.pending === 0);
+      const isPaidDone = (t.paidCount !== undefined && t.rowCount > 0 && t.paidCount >= t.rowCount);
+      if (isTabDone && isPaidDone) {
+        completeTabs.push({ campaign: c.campaign, tab: t.tab });
+      }
+    });
+  });
+
+  if (completeTabs.length > 0) {
+    sessionStorage.setItem(sessionKey, "1");
+    const tabList = completeTabs.map(x => `• ${x.campaign} / ${x.tab}`).join("\n");
+    setTimeout(() => {
+      alert(
+        "🎉 리뷰와 입금이 모두 완료된 탭이 존재합니다.\n" +
+        "마감자료를 확인하시어 전달하신 후 탭을 체크하여 아카이브로 넘겨주세요.\n\n" +
+        "━━━ 완료 탭 목록 ━━━\n" + tabList
+      );
+    }, 500);
+  }
+}
+
 /* ── 제출 현황 대시보드 ── */
 async function loadAdminDashboard() {
   // ★ v11.5: 캠페인 탭 관리 UI로 통합 — 대시보드 메인은 loadTabDashboard()가 담당
@@ -1694,6 +1727,9 @@ async function loadAdminDashboard() {
     // ★ Phase 12: 아카이브 대상 배지 업데이트 (대시보드에서 알림)
     _updateArchiveBadge();
 
+    // ★ Phase 15: 제출+입금 모두 100% 완료 탭 감지 → 팝업 알림
+    _checkAllCompleteTabs(stats);
+
     if (!stats.length) {
       wrap.innerHTML = '<div class="admin-empty"><i class="fas fa-inbox"></i><p>데이터가 없습니다</p></div>';
       return;
@@ -1758,6 +1794,8 @@ async function loadAdminDashboard() {
         const tabKey    = (t.sheetId || "") + "||" + (t.tab || "");
         const isClosedTab = _closedSet.has(tabKey);
         const isTabDone = (t.total > 0 && t.pending === 0);
+        const isPaidDone2 = (t.paidCount !== undefined && t.rowCount > 0 && t.paidCount >= t.rowCount);
+        const isAllComplete2 = isTabDone && isPaidDone2 && !isClosedTab;
         const _ovDays2 = (!isTabDone && !isClosedTab) ? _calcOverdueDays(t.startDate) : null;
         const isOverdue2 = _ovDays2 !== null && _ovDays2 >= 25;
 
@@ -1791,7 +1829,8 @@ async function loadAdminDashboard() {
         const row = document.createElement("div");
         _setupRow(row, tabKey,
           (isOverdue2 ? " urgent-overdue" : "")
-          + (!t.displayName && !isClosedTab ? " no-product-warn" : ""));
+          + (!t.displayName && !isClosedTab ? " no-product-warn" : "")
+          + (isAllComplete2 ? " all-complete-row" : ""));
         row.dataset.sortBar = tRate;
         row.dataset.sortNums = (t.submitted || 0);
 
@@ -1850,12 +1889,14 @@ async function loadAdminDashboard() {
             const rdTabKey2 = tabKey + "||" + (rd.round || "");
             // ★ 차수별 마감 판정: 탭 전체 마감 OR 해당 차수가 closedRoundSet에 있음
             const isRoundClosed = isClosedTab || _closedRoundSet.has(rdTabKey2);
+            const rdPaidDone2 = (rd.paidCount !== undefined && rd.total > 0 && rd.paidCount >= rd.total);
+            const rdAllComplete2 = rdDone && rdPaidDone2 && !isRoundClosed;
             const rdStartDateRaw2 = rd.startDate || t.startDate || "";
             const _rdManualSD2 = _getManualStartDate(rdTabKey2) || _getManualStartDate(tabKey + "||" + (rd.round || "").replace(/.*/, ""));
             const _rdEffectiveSD2 = _rdManualSD2 || rdStartDateRaw2;
             const _rdOvDays2 = (!rdDone && !isRoundClosed) ? _calcOverdueDays(_rdEffectiveSD2) : null;
             const rdIsOverdue2 = _rdOvDays2 !== null && _rdOvDays2 >= 25;
-            _setupRow(rdRow, rdTabKey2, (rdDone ? " tab-done" : "") + (isRoundClosed ? " is-closed-row" : "") + (rdIsOverdue2 ? " urgent-overdue" : ""));
+            _setupRow(rdRow, rdTabKey2, (rdDone ? " tab-done" : "") + (isRoundClosed ? " is-closed-row" : "") + (rdIsOverdue2 ? " urgent-overdue" : "") + (rdAllComplete2 ? " all-complete-row" : ""));
             rdRow.dataset.sortDate = _rdEffectiveSD2 || "9999";
             rdRow.dataset.sortTaekhap = t.taekhap ? "1" : "0";
             rdRow.dataset.sortEnddate = 9999;
@@ -2045,13 +2086,15 @@ function renderDashboard(data) {
       const tabKey     = (t.sheetId||"")+"||"+(t.tab||"");
       const isClosedTab = _closedSet.has(tabKey);
       const isTabDone  = (t.total > 0 && t.pending === 0);
+      const isPaidDone = (t.paidCount !== undefined && t.rowCount > 0 && t.paidCount >= t.rowCount);
+      const isAllComplete = isTabDone && isPaidDone && !isClosedTab;  // ★ 제출+입금 모두 100%
       const _mainManualSD = _getManualStartDate(tabKey);
       const _mainEffectiveSD = _mainManualSD || t.startDate || "";
       const _ovDays = (!isTabDone && !isClosedTab) ? _calcOverdueDays(_mainEffectiveSD) : null;
       const isOverdue = _ovDays !== null && _ovDays >= 25;
       const row        = document.createElement("div");
       row.className    = "dash-tab-row " + campStripe + (_isFirstOfCamp2?" camp-first-row":"") + (isTabDone?" tab-done":"")+(isClosedTab?" is-closed-row":"")+(isOverdue?" urgent-overdue":"")
-        +(!t.displayName && !isClosedTab?" no-product-warn":"");
+        +(!t.displayName && !isClosedTab?" no-product-warn":"")+(isAllComplete?" all-complete-row":"");
       _isFirstOfCamp2 = false;
       row.dataset.tabkey = tabKey;
       row.dataset.campname = campName.toLowerCase();
@@ -2099,15 +2142,17 @@ function renderDashboard(data) {
         t.roundList.forEach(rd => {
           const rdRow = document.createElement("div");
           const rdDone = (rd.total > 0 && rd.pending === 0);
+          const rdPaidDone = (rd.paidCount !== undefined && rd.total > 0 && rd.paidCount >= rd.total);
           const rdTabKey = tabKey + "||" + (rd.round || "");
           // ★ 차수별 마감 판정
           const isRoundClosed = isClosedTab || _closedRoundSet.has(rdTabKey);
+          const rdAllComplete = rdDone && rdPaidDone && !isRoundClosed;  // ★ 차수 제출+입금 모두 100%
           const rdStartDateRaw = rd.startDate || t.startDate || "";
           const _rdManualSD = _getManualStartDate(rdTabKey);
           const _rdEffectiveSD = _rdManualSD || rdStartDateRaw;
           const _rdOvDays = (!rdDone && !isRoundClosed) ? _calcOverdueDays(_rdEffectiveSD) : null;
           const rdIsOverdue = _rdOvDays !== null && _rdOvDays >= 25;
-          rdRow.className = "dash-tab-row " + campStripe + (rdDone?" tab-done":"")+(isRoundClosed?" is-closed-row":"")+(rdIsOverdue?" urgent-overdue":"");
+          rdRow.className = "dash-tab-row " + campStripe + (rdDone?" tab-done":"")+(isRoundClosed?" is-closed-row":"")+(rdIsOverdue?" urgent-overdue":"")+(rdAllComplete?" all-complete-row":"");
           rdRow.dataset.tabkey = rdTabKey;
           rdRow.dataset.campname = campName.toLowerCase();
           rdRow.dataset.sortCampaign = campName.toLowerCase();
