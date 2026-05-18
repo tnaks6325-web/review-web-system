@@ -75,7 +75,8 @@ async function searchByName(query, phone8) {
     tc.display_name      AS "displayName",
     tc.nc_mode           AS "ncMode",
     tc.folder_url        AS "folderUrl",
-    tc.capture_folder_url AS "captureFolderUrl"
+    tc.capture_folder_url AS "captureFolderUrl",
+    tc.archived_rounds   AS "archivedRounds"
   `;
 
   let sql;
@@ -95,6 +96,7 @@ async function searchByName(query, phone8) {
       FROM review_index ri
       LEFT JOIN tab_configs tc ON ri.sheet_id = tc.sheet_id AND ri.tab_name = tc.tab_name
       WHERE ri.is_submitted = FALSE
+        AND tc.sheet_id IS NOT NULL
         AND (REPLACE(ri.reviewer_name, ' ', '') = $${nameParam}
              OR REPLACE(ri.recipient_name, ' ', '') = $${nameParam})
       ORDER BY (ri.phone8 = $${phoneParam}) DESC, ri.start_date DESC NULLS LAST
@@ -109,6 +111,7 @@ async function searchByName(query, phone8) {
       FROM review_index ri
       LEFT JOIN tab_configs tc ON ri.sheet_id = tc.sheet_id AND ri.tab_name = tc.tab_name
       WHERE ri.is_submitted = FALSE
+        AND tc.sheet_id IS NOT NULL
         AND ri.phone8 = $${paramIdx++}
       ORDER BY ri.start_date DESC NULLS LAST
       LIMIT 200
@@ -127,6 +130,7 @@ async function searchByName(query, phone8) {
       FROM review_index ri
       LEFT JOIN tab_configs tc ON ri.sheet_id = tc.sheet_id AND ri.tab_name = tc.tab_name
       WHERE ri.is_submitted = FALSE
+        AND tc.sheet_id IS NOT NULL
         AND (REPLACE(ri.reviewer_name, ' ', '') = $${nameParam}
              OR REPLACE(ri.recipient_name, ' ', '') = $${nameParam})
       ORDER BY ri.start_date DESC NULLS LAST
@@ -157,8 +161,15 @@ async function searchByName(query, phone8) {
     );
     const meta = metaResult.rows[0] || {};
 
+    // ★ 아카이브된 차수 필터링: archived_rounds에 해당 행의 round가 포함되면 제외
+    const filteredRows = rows.filter(row => {
+      if (!row.archivedRounds || !row.round) return true;
+      const archivedSet = new Set(row.archivedRounds.split(',').map(s => s.trim()).filter(Boolean));
+      return !archivedSet.has(row.round);
+    });
+
     // GAS 호환 결과 변환
-    const results = rows.map(row => ({
+    const results = filteredRows.map(row => ({
       displayName: (row.idxName || '').split('/')[0],
       idxName:     row.idxName,
       campaignName: row.tcCampaignName || row.campaignName || '',
@@ -225,6 +236,7 @@ async function searchByNameFallback(q, p8, SELECT_FIELDS) {
       FROM review_index ri
       LEFT JOIN tab_configs tc ON ri.sheet_id = tc.sheet_id AND ri.tab_name = tc.tab_name
       WHERE ri.is_submitted = FALSE
+        AND tc.sheet_id IS NOT NULL
         AND (ri.reviewer_name ILIKE $${nameParam}
              OR ri.recipient_name ILIKE $${nameParam})
         AND ri.phone8 = $${phoneParam}
@@ -238,6 +250,7 @@ async function searchByNameFallback(q, p8, SELECT_FIELDS) {
       FROM review_index ri
       LEFT JOIN tab_configs tc ON ri.sheet_id = tc.sheet_id AND ri.tab_name = tc.tab_name
       WHERE ri.is_submitted = FALSE
+        AND tc.sheet_id IS NOT NULL
         AND ri.phone8 = $${paramIdx++}
       ORDER BY ri.start_date DESC NULLS LAST
       LIMIT 200
@@ -250,6 +263,7 @@ async function searchByNameFallback(q, p8, SELECT_FIELDS) {
       FROM review_index ri
       LEFT JOIN tab_configs tc ON ri.sheet_id = tc.sheet_id AND ri.tab_name = tc.tab_name
       WHERE ri.is_submitted = FALSE
+        AND tc.sheet_id IS NOT NULL
         AND (ri.reviewer_name ILIKE $${nameParam}
              OR ri.recipient_name ILIKE $${nameParam})
       ORDER BY ri.start_date DESC NULLS LAST
@@ -267,7 +281,14 @@ async function searchByNameFallback(q, p8, SELECT_FIELDS) {
   );
   const meta = metaResult.rows[0] || {};
 
-  const results = rows.map(row => ({
+  // ★ 아카이브된 차수 필터링
+  const filteredRows = rows.filter(row => {
+    if (!row.archivedRounds || !row.round) return true;
+    const archivedSet = new Set(row.archivedRounds.split(',').map(s => s.trim()).filter(Boolean));
+    return !archivedSet.has(row.round);
+  });
+
+  const results = filteredRows.map(row => ({
     displayName: (row.idxName || '').split('/')[0],
     idxName:     row.idxName,
     campaignName: row.tcCampaignName || row.campaignName || '',
