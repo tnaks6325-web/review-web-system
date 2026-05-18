@@ -1616,7 +1616,6 @@ async function _deleteReviewer(name, phone) {
 /* ── 제출+입금 모두 100% 완료 탭 감지 → 팝업 알림 ── */
 function _checkAllCompleteTabs(stats) {
   const sessionKey = "rapp_allcomplete_alert_shown";
-  // 이미 이번 세션에서 보여줬으면 스킵
   if (sessionStorage.getItem(sessionKey)) return;
 
   const completeTabs = [];
@@ -1624,7 +1623,7 @@ function _checkAllCompleteTabs(stats) {
     (c.tabs || []).forEach(t => {
       const tabKey = (t.sheetId || "") + "||" + (t.tab || "");
       const isClosed = _closedSet.has(tabKey);
-      if (isClosed) return; // 이미 마감된 탭은 제외
+      if (isClosed) return;
       const isTabDone = (t.total > 0 && t.pending === 0);
       const isPaidDone = (t.paidCount !== undefined && t.rowCount > 0 && t.paidCount >= t.rowCount);
       if (isTabDone && isPaidDone) {
@@ -1635,14 +1634,7 @@ function _checkAllCompleteTabs(stats) {
 
   if (completeTabs.length > 0) {
     sessionStorage.setItem(sessionKey, "1");
-    const tabList = completeTabs.map(x => `• ${x.campaign} / ${x.tab}`).join("\n");
-    setTimeout(() => {
-      alert(
-        "🎉 리뷰와 입금이 모두 완료된 탭이 존재합니다.\n" +
-        "마감자료를 확인하시어 전달하신 후 탭을 체크하여 아카이브로 넘겨주세요.\n\n" +
-        "━━━ 완료 탭 목록 ━━━\n" + tabList
-      );
-    }, 500);
+    setTimeout(() => _showAllCompleteModal(completeTabs), 500);
   }
 }
 
@@ -1664,15 +1656,56 @@ function _checkAllCompleteTabsFromTabDash(tabs) {
 
   if (completeTabs.length > 0) {
     sessionStorage.setItem(sessionKey, "1");
-    const tabList = completeTabs.map(x => `• ${x.campaign} / ${x.tab}`).join("\n");
-    setTimeout(() => {
-      alert(
-        "🎉 리뷰와 입금이 모두 완료된 탭이 존재합니다.\n" +
-        "마감자료를 확인하시어 전달하신 후 탭을 체크하여 아카이브로 넘겨주세요.\n\n" +
-        "━━━ 완료 탭 목록 ━━━\n" + tabList
-      );
-    }, 500);
+    setTimeout(() => _showAllCompleteModal(completeTabs), 500);
   }
+}
+
+function _showAllCompleteModal(completeTabs) {
+  let modal = document.getElementById('allCompleteAlertModal');
+  if (modal) modal.remove();
+  modal = document.createElement('div');
+  modal.id = 'allCompleteAlertModal';
+
+  const listHtml = completeTabs.map(x =>
+    `<div style="display:flex;align-items:center;gap:8px;padding:6px 10px;background:#FFF7ED;border-radius:6px;margin-bottom:4px">
+      <i class="fas fa-check-circle" style="color:#059669;font-size:.8rem"></i>
+      <span style="font-size:.78rem;color:#1F2937"><b>${escHtml(x.campaign)}</b> / ${escHtml(x.tab)}</span>
+    </div>`
+  ).join('');
+
+  modal.innerHTML = `
+    <div style="position:fixed;inset:0;background:rgba(0,0,0,.45);z-index:99999;display:flex;align-items:center;justify-content:center;animation:fadeIn .2s" onclick="if(event.target===this)this.remove()">
+      <div style="background:#fff;border-radius:16px;padding:28px 24px;width:92%;max-width:480px;max-height:80vh;overflow-y:auto;box-shadow:0 25px 60px rgba(0,0,0,.25);border-top:4px solid #EC4899">
+        <div style="text-align:center;margin-bottom:16px">
+          <div style="width:56px;height:56px;border-radius:50%;background:linear-gradient(135deg,#FDF2F8,#FCE7F3);display:inline-flex;align-items:center;justify-content:center;margin-bottom:10px">
+            <i class="fas fa-flag-checkered" style="font-size:1.5rem;color:#EC4899"></i>
+          </div>
+          <h3 style="margin:0;font-size:1.05rem;color:#1F2937;font-weight:700">리뷰 & 입금 완료 알림</h3>
+        </div>
+        <div style="background:#FFF0F5;border:1px solid #FBCFE8;border-radius:10px;padding:14px 16px;margin-bottom:16px">
+          <p style="margin:0 0 4px;font-size:.82rem;color:#9D174D;font-weight:600;line-height:1.5">
+            리뷰와 입금이 모두 완료된 탭이 존재합니다.
+          </p>
+          <p style="margin:0;font-size:.75rem;color:#6B7280;line-height:1.5">
+            마감자료를 확인하시어 전달하신 후<br>탭을 체크하여 <b>아카이브</b>로 넘겨주세요.
+          </p>
+        </div>
+        <div style="margin-bottom:16px">
+          <div style="font-size:.72rem;color:#6B7280;font-weight:600;margin-bottom:6px;text-transform:uppercase;letter-spacing:.5px">
+            <i class="fas fa-list-check" style="margin-right:4px"></i>완료 탭 목록 (${completeTabs.length}건)
+          </div>
+          <div style="max-height:200px;overflow-y:auto;padding-right:4px">
+            ${listHtml}
+          </div>
+        </div>
+        <div style="text-align:center">
+          <button onclick="document.getElementById('allCompleteAlertModal').remove()" style="padding:10px 32px;background:linear-gradient(135deg,#EC4899,#DB2777);color:#fff;border:none;border-radius:8px;font-size:.82rem;font-weight:600;cursor:pointer;box-shadow:0 4px 12px rgba(236,72,153,.3);transition:transform .1s" onmousedown="this.style.transform='scale(.96)'" onmouseup="this.style.transform='scale(1)'">
+            <i class="fas fa-check" style="margin-right:6px"></i>확인
+          </button>
+        </div>
+      </div>
+    </div>`;
+  document.body.appendChild(modal);
 }
 
 /* ── 제출 현황 대시보드 ── */
