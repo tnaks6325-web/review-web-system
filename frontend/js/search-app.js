@@ -5323,6 +5323,26 @@ function closeReviewerProfileModal() {
 }
 
 /* ═══════════════════════════════════════════════════
+   입력 포맷팅 유틸리티
+   ═══════════════════════════════════════════════════ */
+
+/** 전화번호 뒤 8자리 자동 포맷 (0000-0000) */
+function formatPhoneLast8(el) {
+  let v = el.value.replace(/[^0-9]/g, "");
+  if (v.length > 8) v = v.slice(0, 8);
+  if (v.length > 4) v = v.slice(0, 4) + "-" + v.slice(4);
+  el.value = v;
+}
+
+/** 주민번호 자동 포맷 (000000-0000000) */
+function formatJumin(el) {
+  let v = el.value.replace(/[^0-9]/g, "");
+  if (v.length > 13) v = v.slice(0, 13);
+  if (v.length > 6) v = v.slice(0, 6) + "-" + v.slice(6);
+  el.value = v;
+}
+
+/* ═══════════════════════════════════════════════════
    인라인 소득명의/주민번호 등록 폼
    ═══════════════════════════════════════════════════ */
 
@@ -5444,7 +5464,10 @@ function editInlineSubAccount(idx) {
   document.getElementById("inlineSubFormTitle").textContent = "타계정 수정 [" + (idx+1) + "]";
   document.getElementById("inlineSubEditIdx").value = String(idx);
   document.getElementById("inlineSubName").value = sub.name || "";
-  document.getElementById("inlineSubPhone").value = (sub.phone || "").replace(/[^0-9]/g, "");
+  // 전화번호: 010 제거 후 뒷8자리만 표시 (포맷 적용)
+  const rawPhone = (sub.phone || "").replace(/[^0-9]/g, "");
+  const last8 = rawPhone.startsWith("010") ? rawPhone.slice(3) : rawPhone.slice(-8);
+  document.getElementById("inlineSubPhone").value = last8.length > 4 ? last8.slice(0,4)+"-"+last8.slice(4) : last8;
   document.getElementById("inlineSubIncomeName").value = sub.incomeName || "";
   const jd = (sub.jumin || sub.residentNo || "").replace(/[^0-9]/g, "");
   document.getElementById("inlineSubJumin").value = jd.length > 6 ? jd.slice(0,6)+"-"+jd.slice(6) : jd;
@@ -5488,13 +5511,14 @@ async function deleteInlineSubAccount(idx) {
 /** 인라인 타계정 저장 (추가/수정) */
 async function saveInlineSubAccount() {
   const name = (document.getElementById("inlineSubName")?.value || "").trim();
-  const phone = (document.getElementById("inlineSubPhone")?.value || "").replace(/[^0-9]/g, "");
+  const phoneLast8 = (document.getElementById("inlineSubPhone")?.value || "").replace(/[^0-9]/g, "");
+  const phone = "010" + phoneLast8;
   const incomeName = (document.getElementById("inlineSubIncomeName")?.value || "").trim();
   const juminDigits = (document.getElementById("inlineSubJumin")?.value || "").replace(/[^0-9]/g, "");
   const editIdx = parseInt(document.getElementById("inlineSubEditIdx")?.value || "-1", 10);
 
   if (!name) { showToast("이름을 입력해주세요.", "warning"); return; }
-  if (phone.length !== 11) { showToast("전화번호는 11자리 숫자여야 합니다.", "warning"); return; }
+  if (phoneLast8.length !== 8) { showToast("전화번호 뒷번호 8자리를 입력해주세요.", "warning"); return; }
   if (juminDigits && juminDigits.length !== 13) { showToast("주민번호는 13자리 숫자여야 합니다.", "warning"); return; }
 
   const authRaw = localStorage.getItem("rapp_reviewer_auth");

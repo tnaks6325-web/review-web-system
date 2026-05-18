@@ -578,7 +578,7 @@
               </div>
               <div style="flex:1;min-width:140px">
                 <label style="font-size:.68rem;font-weight:600;color:var(--t2)">주민번호 <span style="color:var(--t3);font-weight:400">(13자리)</span></label>
-                <input id="inlineJuminInput" type="text" placeholder="000000-0000000" style="width:100%;margin-top:3px;padding:7px 9px;border:1.5px solid #D1D5DB;border-radius:7px;font-size:.8rem;outline:none;box-sizing:border-box" maxlength="14">
+                <input id="inlineJuminInput" type="text" placeholder="000000-0000000" oninput="formatJumin(this)" style="width:100%;margin-top:3px;padding:7px 9px;border:1.5px solid #D1D5DB;border-radius:7px;font-size:.8rem;outline:none;box-sizing:border-box" maxlength="14">
               </div>
             </div>
             <div style="display:flex;gap:8px">
@@ -607,7 +607,10 @@
               </div>
               <div style="margin-bottom:8px">
                 <label style="font-size:.7rem;font-weight:600;color:var(--t2)">전화번호 <span style="color:#DC2626">*</span></label>
-                <input id="inlineSubPhone" type="tel" placeholder="01012345678 (숫자만)" style="width:100%;margin-top:3px;padding:8px 10px;border:1.5px solid #D1D5DB;border-radius:7px;font-size:.82rem;outline:none;box-sizing:border-box" maxlength="11">
+                <div style="display:flex;align-items:center;gap:4px;margin-top:3px">
+                  <span style="font-size:.82rem;font-weight:600;color:var(--t1);white-space:nowrap">010-</span>
+                  <input id="inlineSubPhone" type="tel" placeholder="0000-0000" oninput="formatPhoneLast8(this)" style="flex:1;padding:8px 10px;border:1.5px solid #D1D5DB;border-radius:7px;font-size:.82rem;outline:none;box-sizing:border-box" maxlength="9">
+                </div>
               </div>
               <div style="margin-bottom:8px">
                 <label style="font-size:.7rem;font-weight:600;color:var(--t2)">소득명의 <span style="color:var(--t3);font-weight:400">(선택)</span></label>
@@ -615,7 +618,7 @@
               </div>
               <div style="margin-bottom:10px">
                 <label style="font-size:.7rem;font-weight:600;color:var(--t2)">주민번호 <span style="color:var(--t3);font-weight:400">(선택, 13자리)</span></label>
-                <input id="inlineSubJumin" type="text" placeholder="000000-0000000" style="width:100%;margin-top:3px;padding:8px 10px;border:1.5px solid #D1D5DB;border-radius:7px;font-size:.82rem;outline:none;box-sizing:border-box" maxlength="14">
+                <input id="inlineSubJumin" type="text" placeholder="000000-0000000" oninput="formatJumin(this)" style="width:100%;margin-top:3px;padding:8px 10px;border:1.5px solid #D1D5DB;border-radius:7px;font-size:.82rem;outline:none;box-sizing:border-box" maxlength="14">
               </div>
               <div style="display:flex;gap:8px">
                 <button onclick="cancelInlineSubForm()" style="flex:1;padding:9px 0;background:#fff;color:var(--t2);border:1.5px solid #D1D5DB;border-radius:7px;font-size:.78rem;font-weight:600;cursor:pointer">취소</button>
