@@ -88,9 +88,9 @@ const _ACTION_MAP = {
   'lookupPhone':        { method: 'GET',  path: '/api/reviewer/lookup' },
   'getReviewerList':    { method: 'GET',  path: '/api/reviewer/list' },
   'deleteReviewer':     { method: 'POST', path: '/api/reviewer/delete' },
-  'getReviewerProfile': { method: 'POST', path: '/api/reviewer/profile' },
-  'saveSubAccounts':    { method: 'POST', path: '/api/reviewer/profile' },
-  'saveIncomeInfo':     { method: 'POST', path: '/api/reviewer/profile' },
+  'getReviewerProfile': { method: 'POST', path: '/api/reviewer/profile', remap: 'get' },
+  'saveSubAccounts':    { method: 'POST', path: '/api/reviewer/profile', remap: 'saveSubAccounts' },
+  'saveIncomeInfo':     { method: 'POST', path: '/api/reviewer/profile', remap: 'saveIncomeInfo' },
   'getInaedList':       { method: 'GET',  path: '/api/submit/get-inaed-list' },
 
   // 관리자 인증 (Section 8)
@@ -258,6 +258,8 @@ async function gasGet(params, timeout) {
 
   if (actualMethod === 'POST' || actualMethod === 'DELETE' || actualMethod === 'PUT' || actualMethod === 'PATCH') {
     // ★ POST/DELETE/PUT/PATCH 매핑된 action은 body로 전송
+    // ★ remap이 있으면 백엔드가 기대하는 action 필드를 복원 (멀티-액션 라우트용)
+    if (route.remap) queryParams.action = route.remap;
     url = API_BASE_URL + route.path;
     fetchOpts = {
       method: actualMethod,

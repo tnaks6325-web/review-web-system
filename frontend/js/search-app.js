@@ -244,6 +244,9 @@ function _applyLoginUI(name) {
   if (card) card.style.display = "none";
   const inviteCard = document.getElementById("regInviteCard");
   if (inviteCard) inviteCard.style.display = "none";
+
+  // ★ 인라인 프로필 자동 로드 (비동기)
+  _loadInlineProfile();
 }
 
 /* ── STEP1: 이름 입력 변경 감지 (레거시 호환) ── */
@@ -5001,9 +5004,10 @@ async function _loadReviewerProfileForForm() {
 
   try {
     const res = await gasGet({ action: "getReviewerProfile", name, phone8 });
-    if (res?.ok && res.found) {
-      window._reviewerProfile = res;
-      _initIncomeSection(incomeType, res);
+    if (res?.ok && res.profile) {
+      const p = res.profile;
+      window._reviewerProfile = { ...res, ...p, found: true };
+      _initIncomeSection(incomeType, window._reviewerProfile);
     } else {
       // 프로필 없어도 섹션은 표시 (직접 입력)
       _initIncomeSection(incomeType, null);
@@ -5023,6 +5027,70 @@ function _formatSubAccJumin(input) {
   let v = input.value.replace(/[^0-9]/g, "").slice(0, 13);
   if (v.length > 6) v = v.slice(0, 6) + "-" + v.slice(6);
   input.value = v;
+}
+
+/** ★ 인라인 프로필 자동 로드 (로그인 후 메인 화면에 즉시 표시) */
+async function _loadInlineProfile() {
+  const section = document.getElementById("inlineProfileSection");
+  if (!section) return;
+
+  const authRaw = localStorage.getItem("rapp_reviewer_auth");
+  if (!authRaw) return;
+  let auth;
+  try { auth = JSON.parse(authRaw); } catch(_) { return; }
+  if (!auth || Date.now() > (auth.expAt || 0)) return;
+
+  const name   = auth.name   || "";
+  const phone8 = auth.phone8 || "";
+
+  // 즉시 이름 표시 (API 응답 전)
+  const nameEl = document.getElementById("inlineSelfName");
+  if (nameEl) nameEl.textContent = name || "-";
+  section.style.display = "";
+
+  try {
+    const res = await gasGet({ action: "getReviewerProfile", name, phone8 });
+    if (res?.ok && res.profile) {
+      const p = res.profile;
+      window._reviewerProfile = { ...res, ...p, found: true };
+      if (nameEl) nameEl.textContent = p.name || name || "-";
+      const phoneEl = document.getElementById("inlineSelfPhone");
+      if (phoneEl) phoneEl.textContent = p.phone || "-";
+      const incomeEl = document.getElementById("inlineSelfIncomeName");
+      if (incomeEl) incomeEl.textContent = p.incomeType || "-";
+      const juminEl = document.getElementById("inlineSelfJumin");
+      if (juminEl) {
+        const jd = (p.residentNum || "").replace(/[^0-9]/g, "");
+        juminEl.textContent = jd.length === 13
+          ? jd.slice(0,6) + "-" + jd.slice(6,7) + "••••••"
+          : (jd ? "등록됨" : "-");
+      }
+      // 타계정 목록
+      const subs = p.subAccounts || [];
+      const countEl = document.getElementById("inlineSubCount");
+      if (countEl) countEl.textContent = subs.length + "/10";
+      const listEl = document.getElementById("inlineSubList");
+      if (listEl) {
+        if (subs.length === 0) {
+          listEl.innerHTML = '<div style="text-align:center;padding:10px;color:var(--t3);font-size:.78rem">타계정이 없습니다</div>';
+        } else {
+          listEl.innerHTML = subs.map((sub, idx) => {
+            return '<div style="background:#F9FAFB;border:1px solid #E5E7EB;border-radius:7px;padding:8px 10px;display:flex;align-items:center;gap:8px">'
+              + '<div style="flex:1;min-width:0">'
+              + '<span style="font-size:.8rem;font-weight:700;color:var(--t1)">[' + (idx+1) + '] ' + escHtml(sub.name) + '</span>'
+              + ' <span style="font-size:.7rem;color:var(--t3)">' + escHtml(sub.phone || '') + '</span>'
+              + '</div></div>';
+          }).join("");
+        }
+      }
+    } else {
+      // 프로필 미등록 상태
+      const phoneEl = document.getElementById("inlineSelfPhone");
+      if (phoneEl) phoneEl.textContent = "-";
+    }
+  } catch(e) {
+    console.warn("[inlineProfile]", e.message);
+  }
 }
 
 /** 리뷰어 프로필 모달 열기 */
@@ -5048,12 +5116,13 @@ async function openReviewerProfileModal() {
 
   try {
     const res = await gasGet({ action: "getReviewerProfile", name, phone8 });
-    if (res?.ok && res.found) {
-      window._reviewerProfile = res;
-      _renderReviewerProfileModal(res);
+    if (res?.ok && res.profile) {
+      const p = res.profile;
+      window._reviewerProfile = { ...res, ...p, found: true };
+      _renderReviewerProfileModal(window._reviewerProfile);
     } else {
       document.getElementById("rpmSelfName").textContent = name || "미등록";
-      document.getElementById("rpmSelfPhone").textContent = "정보를 불러올 수 없습니다.";
+      document.getElementById("rpmSelfPhone").textContent = phone8 ? ("***-****-" + phone8.slice(-4)) : "-";
       document.getElementById("rpmSubList").innerHTML = '<div style="text-align:center;padding:16px;color:var(--t3);font-size:.8rem">등록 정보를 찾을 수 없습니다.</div>';
     }
   } catch(e) {
