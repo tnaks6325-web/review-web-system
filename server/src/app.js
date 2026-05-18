@@ -107,7 +107,7 @@ app.get('/health', async (req, res) => {
     dbTime,
     google: googleStatus,
     serviceAccount: saEmail,
-    version: '2.17.0-drive-dedupe',
+    version: '2.17.1-pending-debug',
     uptime: Math.floor(process.uptime()),
     memory: Math.round(process.memoryUsage().heapUsed / 1024 / 1024) + 'MB',
     sentry: isSentryEnabled() ? 'active' : 'inactive',

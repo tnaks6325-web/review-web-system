@@ -2553,8 +2553,18 @@ router.get('/pending-rows', authMiddleware, async (req, res, next) => {
     const { sheetId, tabName } = req.query;
     if (!sheetId || !tabName) return res.json({ error: 'sheetId, tabName 필요' });
 
+    // 먼저 테이블 컬럼 확인
+    const colCheck = await pool.query(
+      `SELECT column_name FROM information_schema.columns WHERE table_name = 'review_index' ORDER BY ordinal_position`
+    );
+    const columns = colCheck.rows.map(r => r.column_name);
+
+    // 존재하는 컬럼만 SELECT
+    const selectCols = ['row_index', 'reviewer_name', 'phone', 'submit_value', 'submit_col', 'round', 'built_at']
+      .filter(c => columns.includes(c));
+
     const { rows } = await pool.query(
-      `SELECT row_index, reviewer_name, phone, submit_value, submit_col, round, built_at
+      `SELECT ${selectCols.join(', ')}
        FROM review_index
        WHERE sheet_id = $1 AND tab_name = $2 AND is_submitted = false
        ORDER BY row_index`,
@@ -2569,9 +2579,9 @@ router.get('/pending-rows', authMiddleware, async (req, res, next) => {
       [sheetId, tabName]
     );
 
-    res.json({ ok: true, counts: countRes.rows[0], pendingRows: rows });
+    res.json({ ok: true, counts: countRes.rows[0], pendingRows: rows, availableColumns: columns });
   } catch (err) {
-    next(err);
+    res.status(500).json({ error: err.message, stack: err.stack?.split('\n').slice(0,5) });
   }
 });
 
