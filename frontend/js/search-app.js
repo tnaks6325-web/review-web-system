@@ -4798,7 +4798,7 @@ function _buildIncomePersonBtns(cid, profileData) {
   selfBtn.onclick = () => _selectCardIncomePerson(cid, selfBtn, profileData, -1);
   btnsWrap.appendChild(selfBtn);
 
-  const subs = profileData?.subAccounts || [];
+  const subs = _parseSubAccounts(profileData?.subAccounts);
   subs.forEach((sub, idx) => {
     const subBtn = document.createElement("button");
     subBtn.type = "button";
@@ -4834,7 +4834,7 @@ function _selectCardIncomePerson(cid, selectedBtn, profileData, personIdx) {
     incomeName = profileData?.incomeName || "";
     residentNo = profileData?.jumin || profileData?.residentNo || "";
   } else {
-    const sub = (profileData?.subAccounts || [])[personIdx];
+    const sub = _parseSubAccounts(profileData?.subAccounts)[personIdx];
     if (sub) {
       incomeName = sub.incomeName || "";
       residentNo = sub.jumin || sub.residentNo || "";
@@ -4942,7 +4942,7 @@ function _selectIncomePerson(selectedBtn, profileData, personIdx) {
     window._selectedIncomePersonIdx = -1;
   } else {
     // 타계정
-    const sub = (profileData?.subAccounts || [])[personIdx];
+    const sub = _parseSubAccounts(profileData?.subAccounts)[personIdx];
     if (sub) {
       incomeName = sub.incomeName || "";
       residentNo = sub.jumin || sub.residentNo || "";
@@ -5081,7 +5081,9 @@ async function _loadInlineProfile() {
         if (btnJm) btnJm.style.display = jd ? "none" : "";
       }
       // 타계정 목록 (인라인 렌더러 사용)
-      const subs = p.subAccounts || [];
+      let subs = p.subAccounts || [];
+      if (typeof subs === 'string') { try { subs = JSON.parse(subs); } catch(_) { subs = []; } }
+      if (!Array.isArray(subs)) subs = [];
       _renderInlineSubList(subs);
     } else {
       // 프로필 미등록 상태
@@ -5136,7 +5138,7 @@ function _renderReviewerProfileModal(profile) {
   const phone      = profile.phone || "";
   const incomeName = profile.incomeName || "";
   const jumin      = profile.jumin || profile.residentNo || "";
-  const subs       = profile.subAccounts || [];
+  const subs       = _parseSubAccounts(profile.subAccounts);
 
   document.getElementById("rpmSelfName").textContent       = name || "-";
   document.getElementById("rpmSelfPhone").textContent      = phone || "-";
@@ -5193,7 +5195,7 @@ function openAddSubAccountForm() {
 /** 타계정 수정 폼 열기 */
 function editSubAccount(idx) {
   const profile = window._reviewerProfile;
-  const subs = profile?.subAccounts || [];
+  const subs = _parseSubAccounts(profile?.subAccounts);
   if (idx < 0 || idx >= subs.length) return;
   const sub = subs[idx];
 
@@ -5237,7 +5239,7 @@ async function saveSubAccount() {
 
   // 현재 프로필 복사 후 수정
   const profile  = window._reviewerProfile;
-  const subs     = JSON.parse(JSON.stringify(profile?.subAccounts || []));
+  const subs     = JSON.parse(JSON.stringify(_parseSubAccounts(profile?.subAccounts)));
 
   const newSub = {
     name,
@@ -5292,7 +5294,7 @@ async function deleteSubAccount(idx) {
   if (!myName || !myPhone8) { showToast("세션이 만료되었습니다.", "warning"); return; }
 
   const profile = window._reviewerProfile;
-  const subs    = JSON.parse(JSON.stringify(profile?.subAccounts || []));
+  const subs    = JSON.parse(JSON.stringify(_parseSubAccounts(profile?.subAccounts)));
   if (idx < 0 || idx >= subs.length) return;
   subs.splice(idx, 1);
 
@@ -5325,6 +5327,14 @@ function closeReviewerProfileModal() {
 /* ═══════════════════════════════════════════════════
    입력 포맷팅 유틸리티
    ═══════════════════════════════════════════════════ */
+
+/** subAccounts 안전 파싱 (문자열/배열 모두 대응) */
+function _parseSubAccounts(val) {
+  if (!val) return [];
+  if (Array.isArray(val)) return val;
+  if (typeof val === 'string') { try { const arr = JSON.parse(val); return Array.isArray(arr) ? arr : []; } catch(_) { return []; } }
+  return [];
+}
 
 /** 전화번호 뒤 8자리 자동 포맷 (0000-0000) */
 function formatPhoneLast8(el) {
@@ -5440,7 +5450,7 @@ function toggleInlineSubForm() {
     return;
   }
   // 현재 개수 체크
-  const subs = window._reviewerProfile?.subAccounts || [];
+  const subs = _parseSubAccounts(window._reviewerProfile?.subAccounts);
   if (subs.length >= 10) { showToast("타계정은 최대 10개까지 등록 가능합니다.", "warning"); return; }
   // 추가 모드로 초기화
   document.getElementById("inlineSubFormTitle").textContent = "타계정 추가";
@@ -5455,7 +5465,7 @@ function toggleInlineSubForm() {
 
 /** 인라인 타계정 폼 수정 모드 열기 */
 function editInlineSubAccount(idx) {
-  const subs = window._reviewerProfile?.subAccounts || [];
+  const subs = _parseSubAccounts(window._reviewerProfile?.subAccounts);
   if (idx < 0 || idx >= subs.length) return;
   const sub = subs[idx];
   const form = document.getElementById("inlineSubForm");
@@ -5491,7 +5501,7 @@ async function deleteInlineSubAccount(idx) {
   const myPhone8 = auth.phone8 || "";
   if (!myName || !myPhone8) { showToast("세션이 만료되었습니다.", "warning"); return; }
 
-  const subs = JSON.parse(JSON.stringify(window._reviewerProfile?.subAccounts || []));
+  const subs = JSON.parse(JSON.stringify(_parseSubAccounts(window._reviewerProfile?.subAccounts)));
   if (idx < 0 || idx >= subs.length) return;
   subs.splice(idx, 1);
 
@@ -5587,7 +5597,7 @@ async function confirmSaveInlineSubAccount() {
   const confirmEl = document.getElementById("inlineSubConfirm");
   if (confirmEl) confirmEl.remove();
 
-  const subs = JSON.parse(JSON.stringify(window._reviewerProfile?.subAccounts || []));
+  const subs = JSON.parse(JSON.stringify(_parseSubAccounts(window._reviewerProfile?.subAccounts)));
   const newSub = {
     name,
     phone: phone.slice(0,3) + "-" + phone.slice(3,7) + "-" + phone.slice(7),

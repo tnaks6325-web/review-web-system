@@ -122,7 +122,13 @@ async function handleReviewerProfile({ action, phone8, name, subAccounts, income
        FROM reviewers WHERE phone8 = $1 LIMIT 1`, [p8]
     );
     if (rows.length === 0) return { ok: false, error: '등록된 회원 정보가 없습니다.' };
-    return { ok: true, profile: rows[0] };
+    // sub_accounts는 TEXT로 저장된 JSON — 배열로 파싱하여 반환
+    const profile = rows[0];
+    if (typeof profile.subAccounts === 'string') {
+      try { profile.subAccounts = JSON.parse(profile.subAccounts); } catch(_) { profile.subAccounts = []; }
+    }
+    if (!Array.isArray(profile.subAccounts)) profile.subAccounts = [];
+    return { ok: true, profile };
   }
 
   if (action === 'saveSubAccounts') {
