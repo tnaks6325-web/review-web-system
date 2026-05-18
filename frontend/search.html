@@ -566,12 +566,37 @@
           <div style="background:#fff;border:1.5px solid #E5E7EB;border-radius:10px;padding:12px 14px">
             <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:8px">
               <div style="font-size:.72rem;font-weight:700;color:var(--t2)">타계정 정보 <span id="inlineSubCount" style="font-size:.68rem;background:#E0E7FF;color:#4338CA;border-radius:10px;padding:1px 7px;margin-left:4px">0/10</span></div>
-              <button onclick="openReviewerProfileModal()" style="padding:4px 10px;background:#7C3AED;color:#fff;border:none;border-radius:7px;font-size:.72rem;font-weight:700;cursor:pointer">
-                <i class="fas fa-plus"></i> 타계정 추가/관리
+              <button id="btnInlineAddSub" onclick="toggleInlineSubForm()" style="padding:4px 10px;background:#7C3AED;color:#fff;border:none;border-radius:7px;font-size:.72rem;font-weight:700;cursor:pointer">
+                <i class="fas fa-plus"></i> 타계정 추가
               </button>
             </div>
             <div id="inlineSubList" style="display:flex;flex-direction:column;gap:5px">
               <div style="text-align:center;padding:10px;color:var(--t3);font-size:.78rem">타계정이 없습니다</div>
+            </div>
+            <!-- 인라인 타계정 추가/수정 폼 (팝업 없이 바로 노출) -->
+            <div id="inlineSubForm" style="display:none;margin-top:10px;border:1.5px solid #BFDBFE;border-radius:10px;padding:14px;background:#EFF6FF">
+              <div style="font-size:.75rem;font-weight:700;color:#1D4ED8;margin-bottom:10px" id="inlineSubFormTitle">타계정 추가</div>
+              <input type="hidden" id="inlineSubEditIdx" value="-1">
+              <div style="margin-bottom:8px">
+                <label style="font-size:.7rem;font-weight:600;color:var(--t2)">이름 <span style="color:#DC2626">*</span></label>
+                <input id="inlineSubName" type="text" placeholder="이름" style="width:100%;margin-top:3px;padding:8px 10px;border:1.5px solid #D1D5DB;border-radius:7px;font-size:.82rem;outline:none;box-sizing:border-box" maxlength="20">
+              </div>
+              <div style="margin-bottom:8px">
+                <label style="font-size:.7rem;font-weight:600;color:var(--t2)">전화번호 <span style="color:#DC2626">*</span></label>
+                <input id="inlineSubPhone" type="tel" placeholder="01012345678 (숫자만)" style="width:100%;margin-top:3px;padding:8px 10px;border:1.5px solid #D1D5DB;border-radius:7px;font-size:.82rem;outline:none;box-sizing:border-box" maxlength="11">
+              </div>
+              <div style="margin-bottom:8px">
+                <label style="font-size:.7rem;font-weight:600;color:var(--t2)">소득명의 <span style="color:var(--t3);font-weight:400">(선택)</span></label>
+                <input id="inlineSubIncomeName" type="text" placeholder="소득신고 명의자" style="width:100%;margin-top:3px;padding:8px 10px;border:1.5px solid #D1D5DB;border-radius:7px;font-size:.82rem;outline:none;box-sizing:border-box" maxlength="20">
+              </div>
+              <div style="margin-bottom:10px">
+                <label style="font-size:.7rem;font-weight:600;color:var(--t2)">주민번호 <span style="color:var(--t3);font-weight:400">(선택, 13자리)</span></label>
+                <input id="inlineSubJumin" type="text" placeholder="000000-0000000" style="width:100%;margin-top:3px;padding:8px 10px;border:1.5px solid #D1D5DB;border-radius:7px;font-size:.82rem;outline:none;box-sizing:border-box" maxlength="14">
+              </div>
+              <div style="display:flex;gap:8px">
+                <button onclick="cancelInlineSubForm()" style="flex:1;padding:9px 0;background:#fff;color:var(--t2);border:1.5px solid #D1D5DB;border-radius:7px;font-size:.78rem;font-weight:600;cursor:pointer">취소</button>
+                <button id="btnInlineSubSave" onclick="saveInlineSubAccount()" style="flex:1;padding:9px 0;background:#2563EB;color:#fff;border:none;border-radius:7px;font-size:.78rem;font-weight:700;cursor:pointer">저장</button>
+              </div>
             </div>
           </div>
         </div>

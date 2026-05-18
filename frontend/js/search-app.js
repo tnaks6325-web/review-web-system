@@ -5065,24 +5065,9 @@ async function _loadInlineProfile() {
           ? jd.slice(0,6) + "-" + jd.slice(6,7) + "••••••"
           : (jd ? "등록됨" : "-");
       }
-      // 타계정 목록
+      // 타계정 목록 (인라인 렌더러 사용)
       const subs = p.subAccounts || [];
-      const countEl = document.getElementById("inlineSubCount");
-      if (countEl) countEl.textContent = subs.length + "/10";
-      const listEl = document.getElementById("inlineSubList");
-      if (listEl) {
-        if (subs.length === 0) {
-          listEl.innerHTML = '<div style="text-align:center;padding:10px;color:var(--t3);font-size:.78rem">타계정이 없습니다</div>';
-        } else {
-          listEl.innerHTML = subs.map((sub, idx) => {
-            return '<div style="background:#F9FAFB;border:1px solid #E5E7EB;border-radius:7px;padding:8px 10px;display:flex;align-items:center;gap:8px">'
-              + '<div style="flex:1;min-width:0">'
-              + '<span style="font-size:.8rem;font-weight:700;color:var(--t1)">[' + (idx+1) + '] ' + escHtml(sub.name) + '</span>'
-              + ' <span style="font-size:.7rem;color:var(--t3)">' + escHtml(sub.phone || '') + '</span>'
-              + '</div></div>';
-          }).join("");
-        }
-      }
+      _renderInlineSubList(subs);
     } else {
       // 프로필 미등록 상태
       const phoneEl = document.getElementById("inlineSelfPhone");
@@ -5320,6 +5305,176 @@ function closeReviewerProfileModal() {
   const modal = document.getElementById("reviewerProfileModal");
   if (modal) modal.style.display = "none";
   cancelSubAccountForm();
+}
+
+/* ═══════════════════════════════════════════════════
+   인라인 타계정 추가/수정 (팝업 없이 직접 노출)
+   ═══════════════════════════════════════════════════ */
+
+/** 인라인 타계정 폼 토글 (추가 모드) */
+function toggleInlineSubForm() {
+  const form = document.getElementById("inlineSubForm");
+  if (!form) return;
+  if (form.style.display !== "none") {
+    form.style.display = "none";
+    return;
+  }
+  // 현재 개수 체크
+  const subs = window._reviewerProfile?.subAccounts || [];
+  if (subs.length >= 10) { showToast("타계정은 최대 10개까지 등록 가능합니다.", "warning"); return; }
+  // 추가 모드로 초기화
+  document.getElementById("inlineSubFormTitle").textContent = "타계정 추가";
+  document.getElementById("inlineSubEditIdx").value = "-1";
+  document.getElementById("inlineSubName").value = "";
+  document.getElementById("inlineSubPhone").value = "";
+  document.getElementById("inlineSubIncomeName").value = "";
+  document.getElementById("inlineSubJumin").value = "";
+  form.style.display = "";
+  document.getElementById("inlineSubName").focus();
+}
+
+/** 인라인 타계정 폼 수정 모드 열기 */
+function editInlineSubAccount(idx) {
+  const subs = window._reviewerProfile?.subAccounts || [];
+  if (idx < 0 || idx >= subs.length) return;
+  const sub = subs[idx];
+  const form = document.getElementById("inlineSubForm");
+  if (!form) return;
+
+  document.getElementById("inlineSubFormTitle").textContent = "타계정 수정 [" + (idx+1) + "]";
+  document.getElementById("inlineSubEditIdx").value = String(idx);
+  document.getElementById("inlineSubName").value = sub.name || "";
+  document.getElementById("inlineSubPhone").value = (sub.phone || "").replace(/[^0-9]/g, "");
+  document.getElementById("inlineSubIncomeName").value = sub.incomeName || "";
+  const jd = (sub.jumin || sub.residentNo || "").replace(/[^0-9]/g, "");
+  document.getElementById("inlineSubJumin").value = jd.length > 6 ? jd.slice(0,6)+"-"+jd.slice(6) : jd;
+  form.style.display = "";
+  document.getElementById("inlineSubName").focus();
+}
+
+/** 인라인 타계정 폼 취소 */
+function cancelInlineSubForm() {
+  const form = document.getElementById("inlineSubForm");
+  if (form) form.style.display = "none";
+}
+
+/** 인라인 타계정 삭제 */
+async function deleteInlineSubAccount(idx) {
+  if (!confirm((idx+1) + "번 타계정을 삭제하시겠습니까?")) return;
+  const authRaw = localStorage.getItem("rapp_reviewer_auth");
+  let auth;
+  try { auth = JSON.parse(authRaw || "{}"); } catch(_) { auth = {}; }
+  const myName = auth.name || "";
+  const myPhone8 = auth.phone8 || "";
+  if (!myName || !myPhone8) { showToast("세션이 만료되었습니다.", "warning"); return; }
+
+  const subs = JSON.parse(JSON.stringify(window._reviewerProfile?.subAccounts || []));
+  if (idx < 0 || idx >= subs.length) return;
+  subs.splice(idx, 1);
+
+  try {
+    const res = await gasPost({ action: "saveSubAccounts", name: myName, phone8: myPhone8, subAccounts: JSON.stringify(subs) });
+    if (res?.ok) {
+      showToast("타계정이 삭제되었습니다.");
+      if (window._reviewerProfile) window._reviewerProfile.subAccounts = subs;
+      _renderInlineSubList(subs);
+      cancelInlineSubForm();
+    } else {
+      showToast("❌ " + (res?.error || "삭제 실패"), "error");
+    }
+  } catch(e) { showToast("❌ 오류: " + e.message, "error"); }
+}
+
+/** 인라인 타계정 저장 (추가/수정) */
+async function saveInlineSubAccount() {
+  const name = (document.getElementById("inlineSubName")?.value || "").trim();
+  const phone = (document.getElementById("inlineSubPhone")?.value || "").replace(/[^0-9]/g, "");
+  const incomeName = (document.getElementById("inlineSubIncomeName")?.value || "").trim();
+  const juminDigits = (document.getElementById("inlineSubJumin")?.value || "").replace(/[^0-9]/g, "");
+  const editIdx = parseInt(document.getElementById("inlineSubEditIdx")?.value || "-1", 10);
+
+  if (!name) { showToast("이름을 입력해주세요.", "warning"); return; }
+  if (phone.length !== 11) { showToast("전화번호는 11자리 숫자여야 합니다.", "warning"); return; }
+  if (juminDigits && juminDigits.length !== 13) { showToast("주민번호는 13자리 숫자여야 합니다.", "warning"); return; }
+
+  const authRaw = localStorage.getItem("rapp_reviewer_auth");
+  let auth;
+  try { auth = JSON.parse(authRaw || "{}"); } catch(_) { auth = {}; }
+  const myName = auth.name || "";
+  const myPhone8 = auth.phone8 || "";
+  if (!myName || !myPhone8) { showToast("세션이 만료되었습니다.", "warning"); return; }
+
+  const subs = JSON.parse(JSON.stringify(window._reviewerProfile?.subAccounts || []));
+  const newSub = {
+    name,
+    phone: phone.slice(0,3) + "-" + phone.slice(3,7) + "-" + phone.slice(7),
+    incomeName,
+    jumin: juminDigits
+  };
+
+  if (editIdx >= 0 && editIdx < subs.length) {
+    subs[editIdx] = newSub;
+  } else {
+    if (subs.length >= 10) { showToast("타계정은 최대 10개까지 등록 가능합니다.", "warning"); return; }
+    subs.push(newSub);
+  }
+
+  const btn = document.getElementById("btnInlineSubSave");
+  if (btn) { btn.disabled = true; btn.textContent = "저장 중..."; }
+
+  try {
+    const res = await gasPost({ action: "saveSubAccounts", name: myName, phone8: myPhone8, subAccounts: JSON.stringify(subs) });
+    if (res?.ok) {
+      showToast(editIdx >= 0 ? "타계정이 수정되었습니다." : "타계정이 추가되었습니다.");
+      if (!window._reviewerProfile) window._reviewerProfile = {};
+      window._reviewerProfile.subAccounts = subs;
+      _renderInlineSubList(subs);
+      cancelInlineSubForm();
+      // 모달 쪽도 동기화 (열려있으면)
+      if (typeof _renderReviewerProfileModal === "function" && document.getElementById("reviewerProfileModal")?.style.display === "flex") {
+        _renderReviewerProfileModal(window._reviewerProfile);
+      }
+    } else {
+      showToast("❌ " + (res?.error || "저장에 실패했습니다."), "error");
+    }
+  } catch(e) {
+    showToast("❌ 오류: " + e.message, "error");
+  } finally {
+    if (btn) { btn.disabled = false; btn.textContent = "저장"; }
+  }
+}
+
+/** 인라인 타계정 목록 렌더링 */
+function _renderInlineSubList(subs) {
+  const countEl = document.getElementById("inlineSubCount");
+  if (countEl) countEl.textContent = subs.length + "/10";
+  const listEl = document.getElementById("inlineSubList");
+  if (!listEl) return;
+
+  if (subs.length === 0) {
+    listEl.innerHTML = '<div style="text-align:center;padding:10px;color:var(--t3);font-size:.78rem">타계정이 없습니다</div>';
+    return;
+  }
+  listEl.innerHTML = subs.map((sub, idx) => {
+    const subJd = (sub.jumin || sub.residentNo || "").replace(/[^0-9]/g, "");
+    const jDisplay = subJd.length === 13
+      ? subJd.slice(0,6) + "-" + subJd.slice(6,7) + "••••••"
+      : (subJd ? "등록됨" : "-");
+    return `<div style="background:#F9FAFB;border:1px solid #E5E7EB;border-radius:7px;padding:8px 10px;display:flex;align-items:center;gap:8px">
+      <div style="flex:1;min-width:0">
+        <div style="font-size:.8rem;font-weight:700;color:var(--t1);margin-bottom:2px">[${idx+1}] ${escHtml(sub.name)} <span style="font-weight:400;color:var(--t3);font-size:.7rem">${escHtml(sub.phone||'')}</span></div>
+        <div style="font-size:.68rem;color:var(--t3)">소득명의: <span style="color:var(--t2)">${escHtml(sub.incomeName||'-')}</span> | 주민번호: <span style="color:var(--t2)">${jDisplay}</span></div>
+      </div>
+      <div style="display:flex;gap:4px;flex-shrink:0">
+        <button onclick="editInlineSubAccount(${idx})" style="padding:3px 7px;background:#EFF6FF;color:#2563EB;border:1.5px solid #93C5FD;border-radius:6px;font-size:.65rem;font-weight:700;cursor:pointer">수정</button>
+        <button onclick="deleteInlineSubAccount(${idx})" style="padding:3px 7px;background:#FEF2F2;color:#DC2626;border:1.5px solid #FECACA;border-radius:6px;font-size:.65rem;font-weight:700;cursor:pointer">삭제</button>
+      </div>
+    </div>`;
+  }).join("");
+
+  // 10개 도달 시 추가 버튼 비활성화
+  const addBtn = document.getElementById("btnInlineAddSub");
+  if (addBtn) addBtn.disabled = subs.length >= 10;
 }
 
 /** ── 주문카드 추가 ── */
