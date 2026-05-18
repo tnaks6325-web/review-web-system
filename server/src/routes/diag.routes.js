@@ -2545,4 +2545,34 @@ router.get('/sheet-permissions', authMiddleware, async (req, res, next) => {
   }
 });
 
+// ═══════════════════════════════════════════════════════════
+// GET /api/diag/pending-rows — 특정 탭의 미제출 행 조회
+// ═══════════════════════════════════════════════════════════
+router.get('/pending-rows', authMiddleware, async (req, res, next) => {
+  try {
+    const { sheetId, tabName } = req.query;
+    if (!sheetId || !tabName) return res.json({ error: 'sheetId, tabName 필요' });
+
+    const { rows } = await pool.query(
+      `SELECT row_index, reviewer_name, phone, submit_value, submit_col, round, built_at
+       FROM review_index
+       WHERE sheet_id = $1 AND tab_name = $2 AND is_submitted = false
+       ORDER BY row_index`,
+      [sheetId, tabName]
+    );
+
+    const countRes = await pool.query(
+      `SELECT COUNT(*) as total,
+              COUNT(*) FILTER (WHERE is_submitted = true) as submitted,
+              COUNT(*) FILTER (WHERE is_submitted = false) as pending
+       FROM review_index WHERE sheet_id = $1 AND tab_name = $2`,
+      [sheetId, tabName]
+    );
+
+    res.json({ ok: true, counts: countRes.rows[0], pendingRows: rows });
+  } catch (err) {
+    next(err);
+  }
+});
+
 module.exports = router;
