@@ -175,6 +175,7 @@ const _ACTION_MAP = {
   'driveDiag':           { method: 'GET',  path: '/api/drive/diag' },
   'checkDuplicates':     { method: 'POST', path: '/api/drive/check-duplicates' },
   'removeDuplicates':    { method: 'POST', path: '/api/drive/remove-duplicates' },
+  'getPendingRows':      { method: 'GET',  path: '/api/diag/pending-rows' },
 
   // 기타 GAS 전용 (호환성)
   'getAppUrl':      { method: 'GET',  path: '/api/diag/app-url' },

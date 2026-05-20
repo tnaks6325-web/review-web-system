@@ -1708,6 +1708,84 @@ function _showAllCompleteModal(completeTabs) {
   document.body.appendChild(modal);
 }
 
+/* ── 미제출자 명단 팝업 ── */
+async function _showPendingReviewersPopup(sheetId, tabName, rc, sc) {
+  const pending = rc - sc;
+  // 모달 생성
+  const modalId = 'pendingReviewersModal';
+  let modal = document.getElementById(modalId);
+  if (modal) modal.remove();
+  modal = document.createElement('div');
+  modal.id = modalId;
+  modal.innerHTML = `
+    <div style="position:fixed;inset:0;background:rgba(0,0,0,.45);z-index:99999;display:flex;align-items:center;justify-content:center;animation:fadeIn .2s" onclick="if(event.target===this)this.remove()">
+      <div style="background:#fff;border-radius:16px;padding:28px 24px;width:92%;max-width:480px;max-height:80vh;overflow-y:auto;box-shadow:0 25px 60px rgba(0,0,0,.25);border-top:4px solid #F59E0B">
+        <div style="text-align:center;margin-bottom:16px">
+          <div style="width:56px;height:56px;border-radius:50%;background:linear-gradient(135deg,#FEF3C7,#FDE68A);display:inline-flex;align-items:center;justify-content:center;margin-bottom:10px">
+            <i class="fas fa-user-clock" style="font-size:1.5rem;color:#D97706"></i>
+          </div>
+          <h3 style="margin:0;font-size:1.05rem;color:#1F2937;font-weight:700">리뷰 미제출자 명단</h3>
+        </div>
+        <div style="background:#FFFBEB;border:1px solid #FDE68A;border-radius:10px;padding:14px 16px;margin-bottom:16px">
+          <p style="margin:0 0 4px;font-size:.82rem;color:#92400E;font-weight:600;line-height:1.5">
+            ${escHtml(tabName)}
+          </p>
+          <p style="margin:0;font-size:.75rem;color:#6B7280;line-height:1.5">
+            제출 현황: <b>${sc}/${rc}</b> (미제출 ${pending}명)
+          </p>
+        </div>
+        <div id="pendingReviewersList" style="margin-bottom:16px">
+          <div style="text-align:center;padding:20px;color:#9CA3AF">
+            <i class="fas fa-spinner fa-spin"></i> 미제출자 조회 중...
+          </div>
+        </div>
+        <div style="text-align:center">
+          <button onclick="document.getElementById('${modalId}').remove()" style="padding:10px 32px;background:linear-gradient(135deg,#F59E0B,#D97706);color:#fff;border:none;border-radius:8px;font-size:.82rem;font-weight:600;cursor:pointer;box-shadow:0 4px 12px rgba(245,158,11,.3)">
+            <i class="fas fa-check" style="margin-right:6px"></i>확인
+          </button>
+        </div>
+      </div>
+    </div>`;
+  document.body.appendChild(modal);
+
+  // API 호출
+  try {
+    const resp = await gasGet({ action: 'getPendingRows', sheetId, tabName });
+    const listEl = document.getElementById('pendingReviewersList');
+    if (!resp || !resp.ok) {
+      listEl.innerHTML = `<div style="text-align:center;padding:12px;color:#DC2626;font-size:.8rem"><i class="fas fa-exclamation-circle"></i> 조회 실패: ${escHtml((resp && resp.error) || '서버 오류')}</div>`;
+      return;
+    }
+    const rows = resp.pendingRows || [];
+    if (rows.length === 0) {
+      listEl.innerHTML = `<div style="text-align:center;padding:12px;color:#059669;font-size:.8rem"><i class="fas fa-check-circle"></i> 미제출자가 없습니다. (DB 동기화 지연일 수 있음)</div>`;
+      return;
+    }
+    const listHtml = rows.map((r, i) => `
+      <div style="display:flex;align-items:center;padding:10px 12px;background:${i%2===0?'#FFF':'#FEFCE8'};border-radius:8px;margin-bottom:4px;border:1px solid #FEF3C7">
+        <div style="width:28px;height:28px;border-radius:50%;background:#FDE68A;display:flex;align-items:center;justify-content:center;margin-right:10px;flex-shrink:0">
+          <span style="font-size:.7rem;font-weight:700;color:#92400E">${r.row_index}</span>
+        </div>
+        <div style="flex:1;min-width:0">
+          <div style="font-size:.82rem;font-weight:600;color:#1F2937">${escHtml(r.reviewer_name || '(이름없음)')}</div>
+          <div style="font-size:.68rem;color:#6B7280">${r.row_index}행 · ${escHtml(r.submit_col || '제출컬럼')} 미입력</div>
+        </div>
+        <div style="flex-shrink:0">
+          <span style="background:#FEF3C7;color:#92400E;padding:2px 8px;border-radius:6px;font-size:.65rem;font-weight:600">미제출</span>
+        </div>
+      </div>
+    `).join('');
+    listEl.innerHTML = `
+      <div style="font-size:.72rem;color:#6B7280;font-weight:600;margin-bottom:6px;letter-spacing:.5px">
+        <i class="fas fa-user-xmark" style="margin-right:4px"></i>미제출자 목록 (${rows.length}명)
+      </div>
+      <div style="max-height:240px;overflow-y:auto;padding-right:4px">${listHtml}</div>`;
+  } catch (e) {
+    const listEl = document.getElementById('pendingReviewersList');
+    if (listEl) listEl.innerHTML = `<div style="text-align:center;padding:12px;color:#DC2626;font-size:.8rem"><i class="fas fa-exclamation-circle"></i> ${escHtml(e.message || '네트워크 오류')}</div>`;
+  }
+}
+
 /* ── 제출 현황 대시보드 ── */
 async function loadAdminDashboard() {
   // ★ v11.5: 캠페인 탭 관리 UI로 통합 — 대시보드 메인은 loadTabDashboard()가 담당
@@ -2725,7 +2803,15 @@ function _buildTabRowHtml(t, tabKey, isSubRow, isClosedTab, tabNameHtml, startDa
     <div class="dash-tab-nums">
       ${(t.noRecipient || t.total === 0)
         ? `<span style="color:#D1D5DB;font-size:.65rem">—</span>`
-        : `<span class="dash-done">${t.submitted}</span><span class="dash-sep">/</span><span class="dash-total">${t.total}</span>`
+        : (() => {
+            const _pending = (t.total||0) - (t.submitted||0);
+            if (_pending > 0 && _pending < 10 && t.sheetId && (t.tab || t.tabName)) {
+              const _sid = escHtml(t.sheetId);
+              const _tn = escHtml(t.tab || t.tabName);
+              return `<span style="cursor:pointer;text-decoration:underline;text-decoration-style:dotted;text-underline-offset:3px" onclick="event.stopPropagation();_showPendingReviewersPopup('${_sid}','${_tn}',${t.total},${t.submitted})" title="클릭하여 미제출자 ${_pending}명 확인"><span class="dash-done">${t.submitted}</span><span class="dash-sep">/</span><span class="dash-total">${t.total}</span></span>`;
+            }
+            return `<span class="dash-done">${t.submitted}</span><span class="dash-sep">/</span><span class="dash-total">${t.total}</span>`;
+          })()
       }
     </div>
 
@@ -12157,6 +12243,13 @@ function _cellVal(t, col) {
     if (rc === 0) return '<span style="color:#D1D5DB">—</span>';
     const pct = _pct(sc, rc);
     const clr = pct >= 80 ? "#059669" : pct >= 50 ? "#D97706" : "#DC2626";
+    const pending = rc - sc;
+    // 미제출 10명 미만 & 1명 이상이면 클릭 가능
+    if (pending > 0 && pending < 10 && t.sheet_id && t.tab_name) {
+      const sid = escHtml(t.sheet_id);
+      const tn = escHtml(t.tab_name);
+      return `<span style="font-weight:600;cursor:pointer;text-decoration:underline;text-decoration-style:dotted;text-underline-offset:3px" onclick="event.stopPropagation();_showPendingReviewersPopup('${sid}','${tn}',${rc},${sc})" title="클릭하여 미제출자 ${pending}명 확인">${sc}/${rc}</span> <span style="color:${clr};font-size:.68rem">(${pct}%)</span>`;
+    }
     return `<span style="font-weight:600">${sc}/${rc}</span> <span style="color:${clr};font-size:.68rem">(${pct}%)</span>`;
   }
   if (k === "_paid") {
