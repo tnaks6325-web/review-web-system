@@ -11,7 +11,7 @@ const { getMetricsSummary, resetMetrics } = require('../middleware/metrics.middl
 const { isSentryEnabled } = require('../utils/sentry');
 const { addClient, getStatus: getSSEStatus, emitImageExtract, emitImageUpload } = require('../utils/sse');
 const { logger } = require('../utils/logger');
-const { parseTabRows } = require('../services/indexBuilder.service');
+const { parseTabRows, buildOneSheet } = require('../services/indexBuilder.service');
 
 // ═══════════════════════════════════════════════════════════
 // GET /api/diag/debug-tab — 세부목록 현재 상태 진단 (GAS: debugTabConfig)
@@ -390,6 +390,111 @@ router.post('/add-campaign', authMiddleware, async (req, res, next) => {
     }
 
     res.json({ ok: true, sheetId: finalSheetId, campaignName: resolvedName, addedToSheetDB, shareResult, autoInsertedTabs, url: `https://docs.google.com/spreadsheets/d/${finalSheetId}/edit` });
+  } catch (err) {
+    next(err);
+  }
+});
+
+// ═══════════════════════════════════════════════════════════
+// POST /api/index/add-tab — 탭 URL(gid 포함)로 즉시 등록 + 인덱스 빌드
+// body: { url } (예: https://docs.google.com/spreadsheets/d/xxx/edit#gid=123)
+// ═══════════════════════════════════════════════════════════
+router.post('/add-tab', authMiddleware, async (req, res, next) => {
+  try {
+    const { url } = req.body;
+    if (!url) return res.json({ error: 'url이 필요합니다.' });
+
+    // sheetId 추출
+    const sheetIdMatch = url.match(/\/spreadsheets\/d\/([a-zA-Z0-9_-]{20,})/);
+    if (!sheetIdMatch) return res.json({ error: '유효한 구글 스프레드시트 URL이 아닙니다.' });
+    const sheetId = sheetIdMatch[1];
+
+    // gid 추출
+    const gidMatch = url.match(/[#&]gid=(\d+)/);
+    const targetGid = gidMatch ? gidMatch[1] : null;
+
+    // 1. 시트 메타 조회 → 캠페인명 + 탭명 확인
+    let meta;
+    try {
+      meta = await getSpreadsheetMeta(sheetId);
+    } catch (metaErr) {
+      // 접근 권한 없음
+      const sa = process.env.GOOGLE_SERVICE_ACCOUNT_EMAIL || '';
+      return res.json({
+        error: '시트 접근 권한이 없습니다. 서비스 계정을 편집자로 추가해주세요.',
+        serviceAccount: sa,
+      });
+    }
+
+    const spreadsheetTitle = meta._spreadsheetTitle || sheetId;
+
+    // targetGid로 탭 찾기
+    let targetTab = null;
+    if (targetGid) {
+      targetTab = meta.find(s => String(s.properties.sheetId) === targetGid);
+    }
+    if (!targetTab && !targetGid) {
+      // gid 없으면 첫 번째 비시스템 탭 사용
+      const systemTabs = ['세부목록', '검색인덱스', '인덱스마스터', '인덱스데이터', '마감', '상세목록', '탭설정', '설정'];
+      targetTab = meta.find(s => !systemTabs.includes(s.properties.title));
+    }
+    if (!targetTab) {
+      return res.json({ error: `gid=${targetGid}에 해당하는 탭을 찾을 수 없습니다.` });
+    }
+
+    const tabName = targetTab.properties.title;
+    const tabGid = String(targetTab.properties.sheetId);
+    const tabSheetUrl = `https://docs.google.com/spreadsheets/d/${sheetId}/edit#gid=${tabGid}`;
+
+    // 2. campaigns 테이블에 시트 등록 (없으면 추가)
+    await pool.query(
+      `INSERT INTO campaigns (sheet_id, campaign_name, sheet_url)
+       VALUES ($1, $2, $3)
+       ON CONFLICT (sheet_id, campaign_name) DO UPDATE SET
+         sheet_url = EXCLUDED.sheet_url, updated_at = NOW()`,
+      [sheetId, spreadsheetTitle, `https://docs.google.com/spreadsheets/d/${sheetId}/edit`]
+    );
+
+    // 3. tab_configs에 해당 탭 UPSERT
+    await pool.query(
+      `INSERT INTO tab_configs (sheet_id, tab_name, campaign_name, sheet_url, tab_gid)
+       VALUES ($1, $2, $3, $4, $5)
+       ON CONFLICT (sheet_id, tab_name) DO UPDATE SET
+         campaign_name = COALESCE(NULLIF(tab_configs.campaign_name,''), EXCLUDED.campaign_name),
+         sheet_url = EXCLUDED.sheet_url,
+         tab_gid = COALESCE(NULLIF(tab_configs.tab_gid,''), EXCLUDED.tab_gid),
+         updated_at = NOW()`,
+      [sheetId, tabName, spreadsheetTitle, tabSheetUrl, tabGid]
+    );
+
+    // 4. 즉시 인덱스 빌드 (해당 시트 전체)
+    let buildResult = null;
+    try {
+      buildResult = await buildOneSheet(sheetId);
+    } catch (buildErr) {
+      logger.warn(`[add-tab] 인덱스 빌드 실패 (등록은 완료): ${buildErr.message}`);
+      buildResult = { ok: false, error: buildErr.message };
+    }
+
+    // 5. 빌드 후 해당 탭의 인덱스 데이터 확인
+    const { rows: indexCheck } = await pool.query(
+      'SELECT row_count, submitted_count FROM index_master WHERE sheet_id = $1 AND tab_name = $2',
+      [sheetId, tabName]
+    );
+    const indexData = indexCheck.length > 0 ? indexCheck[0] : null;
+
+    logger.info(`[add-tab] 등록 완료: ${spreadsheetTitle} / ${tabName} (gid=${tabGid}), build=${buildResult?.ok}, rows=${indexData?.row_count || 0}`);
+
+    res.json({
+      ok: true,
+      sheetId,
+      campaignName: spreadsheetTitle,
+      tabName,
+      tabGid,
+      tabUrl: tabSheetUrl,
+      buildResult: buildResult ? { ok: buildResult.ok, rebuilt: buildResult.rebuilt, elapsed: buildResult.elapsed } : null,
+      indexData: indexData ? { rowCount: indexData.row_count, submittedCount: indexData.submitted_count } : null,
+    });
   } catch (err) {
     next(err);
   }

@@ -9193,19 +9193,72 @@ function onAddCampInput() {
     errEl.textContent = "구글 스프레드시트 URL 형식이 아닙니다.";
     btn.disabled = true; inp.classList.remove("has-val"); return;
   }
-  const cleanUrl = "https://docs.google.com/spreadsheets/d/" + m[1] + "/edit";
-  preEl.textContent = "→ " + cleanUrl;
+  // gid 감지
+  const gidMatch = raw.match(/[#&]gid=(\d+)/);
+  const hasGid = !!gidMatch;
+  const cleanUrl = "https://docs.google.com/spreadsheets/d/" + m[1] + "/edit" + (hasGid ? "#gid=" + gidMatch[1] : "");
+  preEl.innerHTML = hasGid
+    ? `→ ${cleanUrl} <span style="background:#DBEAFE;color:#1D4ED8;padding:2px 6px;border-radius:4px;font-size:.68rem;font-weight:600;margin-left:6px">탭 즉시 등록 모드</span>`
+    : "→ " + cleanUrl;
   btn.disabled = false;
+  btn.innerHTML = hasGid
+    ? '<i class="fas fa-bolt"></i> 즉시 등록'
+    : '<i class="fas fa-search"></i> 확인';
   inp.classList.add("has-val");
+  // gid 모드 플래그 저장
+  inp.dataset.hasGid = hasGid ? "1" : "0";
 }
 
-/** 1단계: 미리보기 — 시트 제목 + 탭 목록 확인 */
+/** 1단계: 미리보기 — 시트 제목 + 탭 목록 확인 (또는 gid모드 즉시 등록) */
 async function previewAddCampaign() {
   const raw = document.getElementById("addCampUrl").value.trim();
   const errEl = document.getElementById("addCampError");
   const btn   = document.getElementById("addCampPreviewBtn");
+  const inp   = document.getElementById("addCampUrl");
   if (!raw) return;
   errEl.textContent = "";
+
+  // ★ gid 모드: 즉시 등록 + 빌드
+  if (inp.dataset.hasGid === "1") {
+    btn.disabled = true;
+    btn.innerHTML = '<i class="fas fa-spinner fa-spin"></i> 등록 + 빌드 중...';
+    try {
+      const data = await gasGet({ action: "addTab", url: raw }, 60000);
+      if (!data.ok) {
+        if (data.serviceAccount) {
+          const sa = data.serviceAccount;
+          errEl.innerHTML = `
+            <div style="color:#dc2626;font-size:12px;line-height:1.6;margin-bottom:6px;">
+              시트 접근 권한이 없습니다.<br>아래 서비스 계정을 편집자로 추가 후 다시 시도해주세요.
+            </div>
+            <div style="display:flex;align-items:center;gap:6px;background:#f1f5f9;border:1px solid #e2e8f0;border-radius:6px;padding:6px 10px;margin-bottom:8px;">
+              <code style="font-size:11px;color:#334155;flex:1;word-break:break-all;user-select:all;">${sa}</code>
+            </div>
+            <button onclick="navigator.clipboard.writeText('${sa}').then(()=>{this.innerHTML='<i class=\\'fas fa-check\\'></i> 복사됨';this.style.background='#10b981';setTimeout(()=>{this.innerHTML='<i class=\\'fas fa-copy\\'></i> 서비스계정 복사';this.style.background='#6366f1'},1500)})"
+              style="padding:6px 12px;background:#6366f1;color:#fff;border:none;border-radius:6px;font-size:11px;font-weight:600;cursor:pointer">
+              <i class="fas fa-copy"></i> 서비스계정 복사
+            </button>`;
+        } else {
+          errEl.textContent = data.error || "등록 실패";
+        }
+        return;
+      }
+      // 성공
+      closeAddCampaign();
+      const rowInfo = data.indexData ? ` (${data.indexData.submittedCount}/${data.indexData.rowCount})` : '';
+      showToast(`✅ 탭 즉시 등록 완료: ${data.campaignName} / ${data.tabName}${rowInfo}`);
+      // 대시보드 새로고침
+      setTimeout(() => { if (typeof loadTabDashboard === 'function') loadTabDashboard(); }, 500);
+    } catch (err) {
+      errEl.textContent = err.message || "등록 실패";
+    } finally {
+      btn.disabled = false;
+      btn.innerHTML = '<i class="fas fa-bolt"></i> 즉시 등록';
+    }
+    return;
+  }
+
+  // ★ 기존 로직: 시트 전체 미리보기
   btn.disabled = true;
   btn.innerHTML = '<i class="fas fa-spinner fa-spin"></i> 조회중...';
   try {
