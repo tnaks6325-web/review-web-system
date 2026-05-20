@@ -453,14 +453,18 @@ router.post('/review', async (req, res, next) => {
 
           // ── 비고/포스팅 컬럼 쓰기 ──
           if (memo && memo.trim()) {
-            const memoColIdx = headers.findIndex(h => /^(비고|포스팅|포스팅URL|포스팅url)$/i.test((h || '').trim()));
+            // 우선순위: "비고" 정확히 포함 > "포스팅" 포함
+            let memoColIdx = headers.findIndex(h => /비고/.test((h || '').trim()));
+            if (memoColIdx < 0) {
+              memoColIdx = headers.findIndex(h => /포스팅/.test((h || '').trim()));
+            }
             if (memoColIdx >= 0) {
               const memoColLetter = getColLetter(memoColIdx);
               const memoRange = `'${tabName}'!${memoColLetter}${rowIndex}`;
               await writeSheet(sheetId, memoRange, [[memo.trim()]], sheetOpts);
-              logger.info(`[submit/review:bg] 비고 컬럼 쓰기 성공 (col=${headers[memoColIdx]}, row=${rowIndex})`);
+              logger.info(`[submit/review:bg] 비고 컬럼 쓰기 성공 (col=${headers[memoColIdx]}, colIdx=${memoColIdx}, row=${rowIndex})`);
             } else {
-              logger.warn(`[submit/review:bg] 비고/포스팅 컬럼을 찾을 수 없음 (headers: ${headers.join(',')})`);
+              logger.warn(`[submit/review:bg] 비고/포스팅 컬럼을 찾을 수 없음 (headers: ${headers.slice(0, 30).join(',')})`);
             }
           }
         })();
@@ -489,6 +493,33 @@ router.post('/review', async (req, res, next) => {
 
   } catch (err) {
     next(err);
+  }
+});
+
+// ═══════════════════════════════════════════════════════════
+// GET /api/submit/debug-headers — 시트 헤더 확인 (디버그용)
+// ═══════════════════════════════════════════════════════════
+router.get('/debug-headers', async (req, res) => {
+  try {
+    const { sheetId, tabName, gid } = req.query;
+    if (!sheetId || !tabName) return res.json({ error: 'sheetId, tabName 필요' });
+    const sheetOpts = gid ? { gid } : {};
+    const headers = await getCachedHeaders(sheetId, tabName, sheetOpts);
+    if (!headers) return res.json({ ok: false, error: '헤더를 가져올 수 없음' });
+
+    // 비고/포스팅 컬럼 검색
+    let bigoIdx = headers.findIndex(h => /비고/.test((h || '').trim()));
+    let postingIdx = headers.findIndex(h => /포스팅/.test((h || '').trim()));
+
+    res.json({
+      ok: true,
+      headerCount: headers.length,
+      headers,
+      bigoCol: bigoIdx >= 0 ? { idx: bigoIdx, name: headers[bigoIdx], letter: getColLetter(bigoIdx) } : null,
+      postingCol: postingIdx >= 0 ? { idx: postingIdx, name: headers[postingIdx], letter: getColLetter(postingIdx) } : null,
+    });
+  } catch (err) {
+    res.json({ ok: false, error: err.message });
   }
 });
 
