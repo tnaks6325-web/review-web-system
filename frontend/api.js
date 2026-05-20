@@ -177,6 +177,7 @@ const _ACTION_MAP = {
   'removeDuplicates':    { method: 'POST', path: '/api/drive/remove-duplicates' },
   'getPendingRows':      { method: 'GET',  path: '/api/diag/pending-rows' },
   'addTab':              { method: 'POST', path: '/api/diag/add-tab' },
+  'previewTab':          { method: 'GET',  path: '/api/diag/preview-tab' },
 
   // 기타 GAS 전용 (호환성)
   'getAppUrl':      { method: 'GET',  path: '/api/diag/app-url' },
