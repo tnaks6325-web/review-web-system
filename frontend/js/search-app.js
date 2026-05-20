@@ -1300,7 +1300,7 @@ function _renderMultiImageSlots(items) {
         <div class="mr-slot-preview hidden" id="mrPreview_${idx}"></div>
       </div>
       <textarea class="mr-slot-memo" id="mrMemo_${idx}" rows="1"
-                placeholder="메모 (선택사항)" style="margin-top:8px"></textarea>`;
+                placeholder="비고 - 블로그체험단인 경우 포스팅URL (선택)" style="margin-top:8px"></textarea>`;
     slotsWrap.appendChild(slot);
   });
 
@@ -1747,6 +1747,7 @@ async function submitReview() {
           submitCol:        item.submitCol,
           value:            submitTimeValue,
           campaignName:     item.campaignName,
+          memo,
         }, 30000);
 
         hideLoading();

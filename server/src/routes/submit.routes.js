@@ -380,7 +380,7 @@ router.post('/find-slot', async (req, res, next) => {
 // ═══════════════════════════════════════════════════════════
 router.post('/review', async (req, res, next) => {
   try {
-    const { sheetId, gid, tabName, rowIndex, submitCol, value, phone8 } = req.body;
+    const { sheetId, gid, tabName, rowIndex, submitCol, value, phone8, memo } = req.body;
 
     if (!sheetId || !tabName || !rowIndex) {
       return res.json({ error: '필수 파라미터 누락 (sheetId, tabName, rowIndex)' });
@@ -450,6 +450,19 @@ router.post('/review', async (req, res, next) => {
           const range = `'${tabName}'!${colLetter}${rowIndex}`;
           await writeSheet(sheetId, range, [[submitValue]], sheetOpts);
           logger.info(`[submit/review:bg] Sheets 쓰기 성공 (sheet=${sheetId}, tab=${tabName}, row=${rowIndex})`);
+
+          // ── 비고/포스팅 컬럼 쓰기 ──
+          if (memo && memo.trim()) {
+            const memoColIdx = headers.findIndex(h => /^(비고|포스팅|포스팅URL|포스팅url)$/i.test((h || '').trim()));
+            if (memoColIdx >= 0) {
+              const memoColLetter = getColLetter(memoColIdx);
+              const memoRange = `'${tabName}'!${memoColLetter}${rowIndex}`;
+              await writeSheet(sheetId, memoRange, [[memo.trim()]], sheetOpts);
+              logger.info(`[submit/review:bg] 비고 컬럼 쓰기 성공 (col=${headers[memoColIdx]}, row=${rowIndex})`);
+            } else {
+              logger.warn(`[submit/review:bg] 비고/포스팅 컬럼을 찾을 수 없음 (headers: ${headers.join(',')})`);
+            }
+          }
         })();
 
         const timeoutPromise = new Promise((_, reject) =>
@@ -466,6 +479,7 @@ router.post('/review', async (req, res, next) => {
             rowIndex,
             submitCol,
             value: submitValue,
+            memo: memo || '',
           });
         } catch (queueErr) {
           logger.error(`[submit/review:bg] 큐 등록도 실패: ${queueErr.message}`);
