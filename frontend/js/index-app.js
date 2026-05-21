@@ -1104,6 +1104,8 @@ function enterAdminScreen() {
   // 마스터 전용 계정 관리 버튼 표시 제어
   const keyMenuAccounts = document.getElementById("keyMenuAccounts");
   if (keyMenuAccounts) keyMenuAccounts.style.display = role === "master" ? "" : "none";
+  const keyMenuNotices = document.getElementById("keyMenuNotices");
+  if (keyMenuNotices) keyMenuNotices.style.display = role === "master" ? "" : "none";
 
   showScreen("screenAdmin");
 
@@ -1114,6 +1116,9 @@ function enterAdminScreen() {
 
   // ★ 공지사항 자동 표시 (배포 변경 이력)
   checkAndShowNotice();
+
+  // ★ 관리자 공지 팝업 (DB 기반, 마스터가 작성한 공지)
+  setTimeout(_checkAdminNoticePopup, 400);
 
   // ── Phase 5/6: 시스템 모니터링 + API 메트릭 자동 로드 ──
   if (typeof loadSystemMonitor === 'function') {
@@ -13588,5 +13593,277 @@ async function _previewOptionData(sheetId, tabName, gid, round) {
     if (saveBtn) saveBtn.style.display = '';
   } catch (err) {
     area.innerHTML = `<div style="color:#DC2626;font-size:.78rem;padding:10px"><i class="fas fa-exclamation-triangle" style="margin-right:4px"></i>${escHtml(err.message)}</div>`;
+  }
+}
+
+/* ════════════════════════════════════════════════════════════
+   관리자 공지사항 시스템 (DB 기반)
+   - 마스터가 공지 작성 → 대상 관리자 로그인 시 팝업
+   - 표시 기간 설정 가능
+════════════════════════════════════════════════════════════ */
+
+// ── 로그인 시 미읽은 공지 팝업 ──
+async function _checkAdminNoticePopup() {
+  try {
+    const data = await gasGet({ action: 'getUnreadNotices' });
+    if (!data.success || !data.notices || data.notices.length === 0) return;
+    _showAdminNoticePopup(data.notices);
+  } catch (err) {
+    console.warn('[공지팝업] 조회 실패:', err.message);
+  }
+}
+
+function _showAdminNoticePopup(notices) {
+  // 기존 팝업 제거
+  const existing = document.getElementById('adminNoticePopup');
+  if (existing) existing.remove();
+
+  const overlay = document.createElement('div');
+  overlay.id = 'adminNoticePopup';
+  overlay.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,.5);z-index:9999;display:flex;align-items:center;justify-content:center;padding:16px';
+
+  let noticeHtml = '';
+  notices.forEach((n, idx) => {
+    const date = new Date(n.created_at).toLocaleDateString('ko-KR');
+    const expDate = new Date(n.expires_at).toLocaleDateString('ko-KR');
+    noticeHtml += `
+      <div style="background:#FFF;border:1px solid #E5E7EB;border-radius:10px;padding:14px 16px;margin-bottom:${idx < notices.length-1 ? '10px' : '0'}">
+        <div style="display:flex;align-items:center;gap:6px;margin-bottom:6px">
+          <span style="background:#DBEAFE;color:#1D4ED8;font-size:.65rem;font-weight:700;padding:2px 7px;border-radius:4px">공지</span>
+          <span style="font-weight:700;font-size:.85rem;color:#1F2937">${_escNotice(n.title)}</span>
+        </div>
+        <div style="font-size:.78rem;color:#374151;line-height:1.6;white-space:pre-wrap;margin-bottom:8px">${_escNotice(n.content)}</div>
+        <div style="font-size:.65rem;color:#9CA3AF;display:flex;gap:10px">
+          <span><i class="fas fa-user" style="margin-right:3px"></i>${_escNotice(n.created_by)}</span>
+          <span><i class="fas fa-calendar" style="margin-right:3px"></i>${date}</span>
+          <span><i class="fas fa-clock" style="margin-right:3px"></i>${expDate}까지</span>
+        </div>
+      </div>`;
+  });
+
+  const noticeIds = notices.map(n => n.id);
+  // 전역에 임시 저장 (onclick에서 안전하게 참조)
+  window._pendingNoticeIds = noticeIds;
+  overlay.innerHTML = `
+    <div style="background:#fff;border-radius:14px;box-shadow:0 20px 60px rgba(0,0,0,.2);max-width:480px;width:100%;max-height:80vh;display:flex;flex-direction:column;overflow:hidden">
+      <div style="padding:16px 20px;border-bottom:1px solid #E5E7EB;display:flex;align-items:center;gap:8px;background:#F8FAFC">
+        <i class="fas fa-bullhorn" style="color:#F59E0B;font-size:1rem"></i>
+        <span style="font-weight:700;font-size:.9rem;color:#1F2937">관리자 공지사항</span>
+        <span style="margin-left:auto;background:#FEF3C7;color:#92400E;font-size:.68rem;font-weight:600;padding:2px 8px;border-radius:10px">${notices.length}건</span>
+      </div>
+      <div style="padding:16px 20px;overflow-y:auto;flex:1">
+        ${noticeHtml}
+      </div>
+      <div style="padding:12px 20px;border-top:1px solid #E5E7EB;display:flex;justify-content:flex-end;gap:8px;background:#F8FAFC">
+        <button onclick="_dismissAdminNotices(window._pendingNoticeIds)" style="padding:6px 16px;background:#3B82F6;color:#fff;border:none;border-radius:8px;font-size:.78rem;font-weight:600;cursor:pointer">
+          <i class="fas fa-check" style="margin-right:4px"></i>확인
+        </button>
+      </div>
+    </div>`;
+
+  document.body.appendChild(overlay);
+}
+
+async function _dismissAdminNotices(noticeIds) {
+  const popup = document.getElementById('adminNoticePopup');
+  if (popup) popup.remove();
+  // 각 공지를 읽음 처리
+  for (const id of noticeIds) {
+    try {
+      await gasPost({ action: 'markNoticeRead', notice_id: id });
+    } catch (e) { /* ignore */ }
+  }
+}
+
+function _escNotice(str) {
+  if (!str) return '';
+  return String(str).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+}
+
+// ── 마스터 전용: 공지사항 관리 모달 ──
+async function openNoticeMgmt() {
+  if (!isMaster()) { showToast('마스터 권한이 필요합니다.', 'error'); return; }
+  let modal = document.getElementById('noticeMgmtModal');
+  if (!modal) {
+    modal = document.createElement('div');
+    modal.id = 'noticeMgmtModal';
+    modal.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,.45);z-index:9000;display:flex;align-items:center;justify-content:center;padding:16px';
+    modal.innerHTML = `
+      <div style="background:#fff;border-radius:14px;box-shadow:0 20px 60px rgba(0,0,0,.15);max-width:600px;width:100%;max-height:85vh;display:flex;flex-direction:column;overflow:hidden">
+        <div style="padding:14px 20px;border-bottom:1px solid #E5E7EB;display:flex;align-items:center;background:#F8FAFC">
+          <i class="fas fa-bullhorn" style="color:#F59E0B;margin-right:8px"></i>
+          <span style="font-weight:700;font-size:.9rem">공지사항 관리</span>
+          <button onclick="closeNoticeMgmt()" style="margin-left:auto;background:none;border:none;font-size:1.1rem;cursor:pointer;color:#6B7280">&times;</button>
+        </div>
+        <div style="padding:16px 20px;overflow-y:auto;flex:1" id="noticeMgmtBody">
+          <div style="text-align:center;color:#9CA3AF;padding:20px"><i class="fas fa-circle-notch fa-spin"></i> 로딩 중...</div>
+        </div>
+      </div>`;
+    document.body.appendChild(modal);
+  } else {
+    modal.style.display = 'flex';
+  }
+  await _loadNoticeMgmtList();
+}
+function closeNoticeMgmt() {
+  const m = document.getElementById('noticeMgmtModal');
+  if (m) m.style.display = 'none';
+}
+
+async function _loadNoticeMgmtList() {
+  const body = document.getElementById('noticeMgmtBody');
+  if (!body) return;
+  body.innerHTML = '<div style="text-align:center;color:#9CA3AF;padding:20px"><i class="fas fa-circle-notch fa-spin"></i> 로딩 중...</div>';
+  try {
+    const data = await gasGet({ action: 'getAllNotices' });
+    if (!data.success) throw new Error(data.error || '조회 실패');
+    const notices = data.notices || [];
+
+    let html = `
+      <button onclick="_openNoticeForm()" style="width:100%;padding:10px;background:#3B82F6;color:#fff;border:none;border-radius:8px;font-size:.8rem;font-weight:600;cursor:pointer;margin-bottom:14px">
+        <i class="fas fa-plus" style="margin-right:4px"></i>새 공지 작성
+      </button>`;
+
+    if (notices.length === 0) {
+      html += '<div style="text-align:center;color:#9CA3AF;padding:30px;font-size:.8rem">등록된 공지가 없습니다.</div>';
+    } else {
+      notices.forEach(n => {
+        const created = new Date(n.created_at).toLocaleDateString('ko-KR');
+        const expires = new Date(n.expires_at).toLocaleDateString('ko-KR');
+        const isExpired = new Date(n.expires_at) < new Date();
+        const statusBadge = isExpired
+          ? '<span style="background:#FEE2E2;color:#DC2626;font-size:.6rem;padding:1px 5px;border-radius:4px;font-weight:600">만료</span>'
+          : '<span style="background:#D1FAE5;color:#065F46;font-size:.6rem;padding:1px 5px;border-radius:4px;font-weight:600">활성</span>';
+        const targets = n.target_names && n.target_names.length > 0 ? n.target_names.join(', ') : '전체';
+        html += `
+          <div style="border:1px solid #E5E7EB;border-radius:8px;padding:12px;margin-bottom:8px;${isExpired ? 'opacity:.6' : ''}">
+            <div style="display:flex;align-items:center;gap:6px;margin-bottom:4px">
+              ${statusBadge}
+              <span style="font-weight:600;font-size:.82rem">${_escNotice(n.title)}</span>
+              <span style="margin-left:auto;font-size:.65rem;color:#9CA3AF">${n.display_days}일간</span>
+            </div>
+            <div style="font-size:.74rem;color:#4B5563;line-height:1.5;white-space:pre-wrap;margin-bottom:6px;max-height:60px;overflow:hidden">${_escNotice(n.content)}</div>
+            <div style="display:flex;align-items:center;gap:8px;font-size:.65rem;color:#9CA3AF">
+              <span>대상: ${_escNotice(targets)}</span>
+              <span>${created} ~ ${expires}</span>
+              <div style="margin-left:auto;display:flex;gap:4px">
+                <button onclick="_editNotice(${n.id})" style="padding:2px 8px;background:#EEF2FF;color:#4F46E5;border:none;border-radius:4px;font-size:.65rem;cursor:pointer">수정</button>
+                <button onclick="_deleteNotice(${n.id})" style="padding:2px 8px;background:#FEE2E2;color:#DC2626;border:none;border-radius:4px;font-size:.65rem;cursor:pointer">삭제</button>
+              </div>
+            </div>
+          </div>`;
+      });
+    }
+    body.innerHTML = html;
+  } catch (err) {
+    body.innerHTML = `<div style="color:#DC2626;font-size:.8rem;padding:16px">오류: ${_escNotice(err.message)}</div>`;
+  }
+}
+
+// 공지 작성/수정 폼
+function _openNoticeForm(editData) {
+  const body = document.getElementById('noticeMgmtBody');
+  if (!body) return;
+  const isEdit = !!editData;
+  const title = editData ? editData.title : '';
+  const content = editData ? editData.content : '';
+  const days = editData ? editData.display_days : 7;
+  const targets = editData && editData.target_names && editData.target_names.length > 0 ? editData.target_names.join(', ') : '';
+
+  body.innerHTML = `
+    <div style="margin-bottom:12px">
+      <button onclick="_loadNoticeMgmtList()" style="background:none;border:none;color:#6B7280;font-size:.78rem;cursor:pointer"><i class="fas fa-arrow-left" style="margin-right:4px"></i>목록으로</button>
+    </div>
+    <div style="margin-bottom:10px">
+      <label style="font-size:.72rem;font-weight:600;color:#374151;display:block;margin-bottom:3px">제목</label>
+      <input id="noticeFormTitle" type="text" value="${_escNotice(title)}" placeholder="공지 제목" style="width:100%;padding:8px 10px;border:1px solid #D1D5DB;border-radius:6px;font-size:.8rem;box-sizing:border-box">
+    </div>
+    <div style="margin-bottom:10px">
+      <label style="font-size:.72rem;font-weight:600;color:#374151;display:block;margin-bottom:3px">내용</label>
+      <textarea id="noticeFormContent" rows="5" placeholder="공지 내용을 입력하세요" style="width:100%;padding:8px 10px;border:1px solid #D1D5DB;border-radius:6px;font-size:.8rem;resize:vertical;box-sizing:border-box">${_escNotice(content)}</textarea>
+    </div>
+    <div style="display:flex;gap:10px;margin-bottom:10px">
+      <div style="flex:1">
+        <label style="font-size:.72rem;font-weight:600;color:#374151;display:block;margin-bottom:3px">표시 기간 (일)</label>
+        <input id="noticeFormDays" type="number" min="1" max="365" value="${days}" style="width:100%;padding:8px 10px;border:1px solid #D1D5DB;border-radius:6px;font-size:.8rem;box-sizing:border-box">
+      </div>
+      <div style="flex:2">
+        <label style="font-size:.72rem;font-weight:600;color:#374151;display:block;margin-bottom:3px">대상 (비워두면 전체, 쉼표 구분)</label>
+        <input id="noticeFormTargets" type="text" value="${_escNotice(targets)}" placeholder="예: 박은비, 박세희" style="width:100%;padding:8px 10px;border:1px solid #D1D5DB;border-radius:6px;font-size:.8rem;box-sizing:border-box">
+      </div>
+    </div>
+    <button onclick="_submitNoticeForm(${isEdit ? editData.id : 'null'})" style="width:100%;padding:10px;background:#3B82F6;color:#fff;border:none;border-radius:8px;font-size:.8rem;font-weight:600;cursor:pointer">
+      <i class="fas fa-${isEdit ? 'save' : 'paper-plane'}" style="margin-right:4px"></i>${isEdit ? '수정 저장' : '공지 등록'}
+    </button>`;
+}
+
+async function _submitNoticeForm(editId) {
+  const title = document.getElementById('noticeFormTitle').value.trim();
+  const content = document.getElementById('noticeFormContent').value.trim();
+  const display_days = parseInt(document.getElementById('noticeFormDays').value) || 7;
+  const targetsRaw = document.getElementById('noticeFormTargets').value.trim();
+  const target_names = targetsRaw ? targetsRaw.split(',').map(s => s.trim()).filter(Boolean) : [];
+
+  if (!title) { showToast('제목을 입력하세요.', 'warning'); return; }
+  if (!content) { showToast('내용을 입력하세요.', 'warning'); return; }
+
+  showLoading('저장 중...');
+  try {
+    if (editId) {
+      // PUT (직접 fetch — action map에 :id 미지원)
+      const token = sessionStorage.getItem('admin_token');
+      const headers = { 'Content-Type': 'application/json' };
+      if (token) headers['Authorization'] = 'Bearer ' + token;
+      const resp = await fetch(API_BASE_URL + '/api/admin/notices/' + editId, {
+        method: 'PUT', headers, body: JSON.stringify({ title, content, display_days, target_names })
+      });
+      const data = await resp.json();
+      if (!data.success) throw new Error(data.error || '수정 실패');
+    } else {
+      const data = await gasPost({ action: 'createNotice', title, content, display_days, target_names });
+      if (!data.success) throw new Error(data.error || '등록 실패');
+    }
+    hideLoading();
+    showToast(editId ? '공지가 수정되었습니다.' : '공지가 등록되었습니다.', 'success');
+    await _loadNoticeMgmtList();
+  } catch (err) {
+    hideLoading();
+    showToast('오류: ' + err.message, 'error');
+  }
+}
+
+async function _editNotice(id) {
+  showLoading('불러오는 중...');
+  try {
+    const data = await gasGet({ action: 'getAllNotices' });
+    hideLoading();
+    if (!data.success) throw new Error(data.error);
+    const notice = (data.notices || []).find(n => n.id === id);
+    if (!notice) { showToast('공지를 찾을 수 없습니다.', 'error'); return; }
+    _openNoticeForm(notice);
+  } catch (err) {
+    hideLoading();
+    showToast('오류: ' + err.message, 'error');
+  }
+}
+
+async function _deleteNotice(id) {
+  if (!confirm('이 공지를 삭제하시겠습니까?')) return;
+  showLoading('삭제 중...');
+  try {
+    const token = sessionStorage.getItem('admin_token');
+    const headers = { 'Content-Type': 'application/json' };
+    if (token) headers['Authorization'] = 'Bearer ' + token;
+    const resp = await fetch(API_BASE_URL + '/api/admin/notices/' + id, {
+      method: 'DELETE', headers
+    });
+    const data = await resp.json();
+    if (!data.success) throw new Error(data.error || '삭제 실패');
+    hideLoading();
+    showToast('공지가 삭제되었습니다.', 'success');
+    await _loadNoticeMgmtList();
+  } catch (err) {
+    hideLoading();
+    showToast('오류: ' + err.message, 'error');
   }
 }

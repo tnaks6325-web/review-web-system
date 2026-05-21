@@ -112,6 +112,13 @@ const _ACTION_MAP = {
   'deleteStaffUser':    { method: 'POST', path: '/api/admin/staff-users', remap: 'delete' },
   'listStaffUsers':     { method: 'POST', path: '/api/admin/staff-users', remap: 'list' },
 
+  // 관리자 공지사항
+  'getNotices':         { method: 'GET',  path: '/api/admin/notices' },
+  'getAllNotices':      { method: 'GET',  path: '/api/admin/notices/all' },
+  'createNotice':       { method: 'POST', path: '/api/admin/notices' },
+  'getUnreadNotices':   { method: 'GET',  path: '/api/admin/notices/unread' },
+  'markNoticeRead':     { method: 'POST', path: '/api/admin/notices/read' },
+
   // Drive 폴더 (Section 9)
   'syncCaptureFolders':     { method: 'POST', path: '/api/drive/sync-capture' },
   'syncReviewFolders':      { method: 'POST', path: '/api/drive/sync-review' },

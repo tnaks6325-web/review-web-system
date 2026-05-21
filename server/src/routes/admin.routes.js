@@ -825,4 +825,112 @@ router.post('/campaign-delete/:sheetId', authMiddleware, masterOnlyMiddleware, a
   }
 });
 
+// ═══════════════════════════════════════════════════════════
+// 관리자 공지사항 CRUD
+// ═══════════════════════════════════════════════════════════
+
+// GET /api/admin/notices — 활성 공지 목록 (관리자용, 만료되지 않은 것만)
+router.get('/notices', authMiddleware, async (req, res, next) => {
+  try {
+    const { rows } = await pool.query(`
+      SELECT id, title, content, display_days, target_names, created_by, created_at, expires_at, is_active
+      FROM admin_notices
+      WHERE is_active = true AND expires_at > NOW()
+      ORDER BY created_at DESC
+    `);
+    res.json({ success: true, notices: rows });
+  } catch (err) { next(err); }
+});
+
+// GET /api/admin/notices/all — 전체 공지 목록 (마스터 관리용, 만료 포함)
+router.get('/notices/all', authMiddleware, masterOnlyMiddleware, async (req, res, next) => {
+  try {
+    const { rows } = await pool.query(`
+      SELECT id, title, content, display_days, target_names, created_by, created_at, expires_at, is_active
+      FROM admin_notices
+      ORDER BY created_at DESC
+      LIMIT 50
+    `);
+    res.json({ success: true, notices: rows });
+  } catch (err) { next(err); }
+});
+
+// POST /api/admin/notices — 공지 작성 (마스터 전용)
+router.post('/notices', authMiddleware, masterOnlyMiddleware, async (req, res, next) => {
+  try {
+    const { title, content, display_days = 7, target_names = [] } = req.body;
+    if (!title || !content) return res.status(400).json({ success: false, error: '제목과 내용을 입력하세요.' });
+    const days = Math.max(1, Math.min(365, Number(display_days) || 7));
+    const { rows } = await pool.query(`
+      INSERT INTO admin_notices (title, content, display_days, target_names, created_by, expires_at)
+      VALUES ($1, $2, $3, $4, $5, NOW() + INTERVAL '1 day' * $3)
+      RETURNING *
+    `, [title, content, days, target_names, req.admin.name]);
+    res.json({ success: true, notice: rows[0] });
+  } catch (err) { next(err); }
+});
+
+// PUT /api/admin/notices/:id — 공지 수정 (마스터 전용)
+router.put('/notices/:id', authMiddleware, masterOnlyMiddleware, async (req, res, next) => {
+  try {
+    const { id } = req.params;
+    const { title, content, display_days, target_names } = req.body;
+    if (!title || !content) return res.status(400).json({ success: false, error: '제목과 내용을 입력하세요.' });
+    const days = Math.max(1, Math.min(365, Number(display_days) || 7));
+    const { rows } = await pool.query(`
+      UPDATE admin_notices
+      SET title = $1, content = $2, display_days = $3, target_names = $4,
+          expires_at = created_at + INTERVAL '1 day' * $3
+      WHERE id = $5
+      RETURNING *
+    `, [title, content, days, target_names || [], id]);
+    if (rows.length === 0) return res.status(404).json({ success: false, error: '공지를 찾을 수 없습니다.' });
+    res.json({ success: true, notice: rows[0] });
+  } catch (err) { next(err); }
+});
+
+// DELETE /api/admin/notices/:id — 공지 삭제 (마스터 전용)
+router.delete('/notices/:id', authMiddleware, masterOnlyMiddleware, async (req, res, next) => {
+  try {
+    const { id } = req.params;
+    await pool.query('DELETE FROM admin_notices WHERE id = $1', [id]);
+    res.json({ success: true });
+  } catch (err) { next(err); }
+});
+
+// GET /api/admin/notices/unread — 현재 로그인한 관리자의 미읽은 공지
+router.get('/notices/unread', authMiddleware, async (req, res, next) => {
+  try {
+    const adminName = req.admin.name;
+    const { rows } = await pool.query(`
+      SELECT n.id, n.title, n.content, n.display_days, n.created_by, n.created_at, n.expires_at
+      FROM admin_notices n
+      WHERE n.is_active = true
+        AND n.expires_at > NOW()
+        AND (n.target_names = '{}' OR $1 = ANY(n.target_names))
+        AND NOT EXISTS (
+          SELECT 1 FROM admin_notice_reads r
+          WHERE r.notice_id = n.id AND r.admin_name = $1
+        )
+      ORDER BY n.created_at DESC
+    `, [adminName]);
+    res.json({ success: true, notices: rows });
+  } catch (err) { next(err); }
+});
+
+// POST /api/admin/notices/read — 공지 읽음 처리
+router.post('/notices/read', authMiddleware, async (req, res, next) => {
+  try {
+    const { notice_id } = req.body;
+    const adminName = req.admin.name;
+    if (!notice_id) return res.status(400).json({ success: false, error: 'notice_id 필요' });
+    await pool.query(`
+      INSERT INTO admin_notice_reads (notice_id, admin_name)
+      VALUES ($1, $2)
+      ON CONFLICT (notice_id, admin_name) DO NOTHING
+    `, [notice_id, adminName]);
+    res.json({ success: true });
+  } catch (err) { next(err); }
+});
+
 module.exports = router;
