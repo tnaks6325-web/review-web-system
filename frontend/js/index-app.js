@@ -1420,7 +1420,7 @@ const _CTX_TOOLBAR_DEFS = {
     { id:'ctx-filter',      label:'필터',     icon:'fa-filter',      style:'',           onclick:"document.getElementById('dashFilterBtn')?.click()", title:'캠페인 필터'},
     { id:'ctx-add',         label:'작업시트추가',  icon:'fa-plus',        style:'green',      onclick:"openAddCampaign()", title:'작업시트 추가'},
     { sep: true },
-    { id:'ctx-refresh',     label:'새로고침',  icon:'fa-sync-alt',    style:'',           onclick:"_refreshDashboardAll()", title:'대시보드 새로고침'},
+    { id:'ctx-refresh',     label:'새로고침',  icon:'fa-sync-alt',    style:'',           onclick:"location.reload()", title:'페이지 새로고침 (최신 버전 로드)'},
     { id:'ctx-poll',        label:'완료알림',  icon:'fa-bell',        style:'orange',     onclick:"toggleDashPolling(); _updateContextToolbar('dashboard')", title:'탭 완료 알림 폴링', elId:'pollToggleBtn'},
   ],
   reviewers: [
