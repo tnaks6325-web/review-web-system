@@ -573,11 +573,7 @@
           <button onclick="openDashRawModal()" class="diag-btn diag-btn-purple" title="dashboard GAS 응답의 total/submitted 원본값을 확인합니다">
             <i class="fas fa-chart-bar"></i> 집계 진단
           </button>
-          <button id="btnTestJsonp" onclick="testGasJsonp()" class="diag-btn diag-btn-indigo">
-            <i class="fas fa-plug"></i> GAS 연결 테스트
-          </button>
         </div>
-        <div id="jsonpTestResult" style="display:none;margin-top:6px;padding:8px 10px;background:#F8FAFC;border:1px solid #E2E8F0;border-radius:6px;font-size:.75rem;color:var(--t2)"></div>
       </div>
 
       <!-- 섹션: 시트 진단 -->
@@ -590,32 +586,13 @@
           <button onclick="debugTabConfig()" class="diag-btn diag-btn-yellow">
             <i class="fas fa-table"></i> 세부목록 현황
           </button>
-          <button onclick="testTabConfigSave()" class="diag-btn diag-btn-green">
-            <i class="fas fa-vial"></i> 저장 동작 테스트
-          </button>
+
         </div>
         <div id="debugTabConfigResult" class="hidden" style="margin-top:8px;font-size:.75rem;background:#F1F5F9;border-radius:8px;padding:10px;color:var(--t2);word-break:break-all;max-height:200px;overflow-y:auto;white-space:pre-wrap"></div>
         <div id="debugBaseResult" class="hidden" style="margin-top:8px;font-size:.75rem;background:#F1F5F9;border-radius:8px;padding:10px;color:var(--t2);word-break:break-all;max-height:240px;overflow-y:auto"></div>
       </div>
 
-      <!-- 섹션: 인덱스 빌드 단계 진단 -->
-      <div class="diag-section">
-        <div class="diag-section-title"><i class="fas fa-search"></i> 인덱스 빌드 단계 진단</div>
-        <div style="display:grid;grid-template-columns:1fr 1fr;gap:6px;margin-top:8px">
-          <button onclick="debugBuildStep(2)" class="diag-btn diag-btn-gray">
-            <i class="fas fa-search"></i> Step2: 탭목록
-          </button>
-          <button onclick="debugBuildStep(3)" class="diag-btn diag-btn-gray">
-            <i class="fas fa-table"></i> Step3: 헤더스캔
-          </button>
-          <button onclick="debugBuildStep(4)" class="diag-btn diag-btn-gray">
-            <i class="fas fa-database"></i> Step4: 저장테스트
-          </button>
-          <button onclick="debugBuildStep('full')" class="diag-btn diag-btn-indigo" style="font-weight:700">
-            <i class="fas fa-play"></i> 전체진단
-          </button>
-        </div>
-      </div>
+
 
     </div>
     <div class="modal-actions">

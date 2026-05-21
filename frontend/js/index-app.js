@@ -4858,16 +4858,7 @@ function initOrderFormMode() {
     const loadingTxt = document.getElementById("loadingText");
     if (loadingEl) { if (loadingTxt) loadingTxt.textContent = "링크 확인 중..."; loadingEl.style.display = "flex"; }
 
-    const savedUrl = (() => { try { return JSON.parse(localStorage.getItem("reviewAppConfig")||"{}").GAS_WEB_APP_URL||""; } catch(_){return "";} })();
-    const gasUrl   = BOOTSTRAP_GAS_URL || savedUrl || "";
-
-    if (!gasUrl) {
-      if (loadingEl) loadingEl.style.display = "none";
-      alert("GAS URL이 설정되지 않아 링크를 복원할 수 없습니다.");
-      return false;
-    }
-
-    _jsonpGet(gasUrl + "?action=resolveShort&code=" + encodeURIComponent(shortCode), 10000)
+    gasGet({ action: "resolveShort", code: shortCode }, 10000)
       .then(data => {
         if (loadingEl) loadingEl.style.display = "none";
         if (!data || !data.success) {
@@ -7152,8 +7143,7 @@ function closeDiagModal() {
   if (baseRes) { baseRes.innerHTML = ""; baseRes.className = "hidden"; }
   const tabRes = document.getElementById("debugTabConfigResult");
   if (tabRes) { tabRes.textContent = ""; tabRes.className = "hidden"; }
-  const jsonpRes = document.getElementById("jsonpTestResult");
-  if (jsonpRes) jsonpRes.style.display = "none";
+
 }
 // 진단 모달 내 파일존재확인 (모달 열기)
 function openCheckFilesModalFromDiag() {
@@ -7434,38 +7424,6 @@ async function debugBaseSheet() {
   }
 }
 
-async function debugBuildStep(step) {
-  const resEl = document.getElementById("debugBaseResult");
-  show(resEl);
-  resEl.innerHTML = `<i class="fas fa-spinner fa-spin"></i> Step ${step} 진단 중...`;
-  try {
-    const data = await gasGet({ action: "debugBuildStep", step: String(step) }, 30000);
-    const logHtml = (data.log || []).map(l => {
-      if (l.includes("실패") || l.includes("오류") || l.includes("error")) return `<span style="color:#EF4444">${l}</span>`;
-      if (l.includes("성공") || l.includes("정상") || l.includes("완료")) return `<span style="color:#10B981">${l}</span>`;
-      return `<span style="color:#374151">${l}</span>`;
-    }).join("<br>");
-
-    let extra = "";
-    if (data.campaigns)  extra += `<br><b>캠페인:</b> ${data.campaigns.map(c=>`${c.name}`).join(", ")}`;
-    if (data.tabs)       extra += `<br><b>탭목록:</b> ${data.tabs.join(", ")} <i style="color:#6B7280">(방법: ${data.tabMethod})</i>`;
-    if (data.headerMethod) extra += `<br><b>헤더 읽기:</b> ${data.headerMethod}`;
-    if (data.preview)    extra += `<br><b>헤더 미리보기:</b><br>${data.preview.slice(0,3).map(r=>JSON.stringify(r)).join("<br>")}`;
-    if (data.elapsed)    extra += `<br><b>소요: ${data.elapsed}</b>`;
-
-    if (data.ok) {
-      resEl.innerHTML = `<b style="color:#10B981">✅ Step ${step} 정상</b><br>${logHtml}${extra}`;
-    } else {
-      resEl.innerHTML =
-        `<b style="color:#EF4444">❌ Step ${step} 실패</b><br>` +
-        `<b>오류: ${data.error || ""}</b><br>` +
-        logHtml + extra +
-        (data.stack ? `<br><small style="color:#9CA3AF">${data.stack.replace(/\n/g,"<br>")}</small>` : "");
-    }
-  } catch(e) {
-    resEl.innerHTML = `<b style="color:#EF4444">❌ 네트워크 오류: ${e.message}</b>`;
-  }
-}
 
 /** ─── 세부목록(탭설정) 진단 함수들 ─── */
 async function debugTabConfig() {
@@ -7540,32 +7498,6 @@ async function debugTabConfig() {
   }
 }
 
-async function testTabConfigSave() {
-  const resEl = document.getElementById("debugTabConfigResult");
-  show(resEl);
-  resEl.textContent = "⏳ 테스트 저장 중... (베이스시트 세부목록에 테스트 행 추가)";
-  try {
-    const data = await gasGet({ action: "testTabConfig" }, 15000);
-    if (data.ok) {
-      resEl.textContent =
-        `✅ 저장 테스트 성공!\n` +
-        `tabName: ${data.tabName || "테스트탭"}\n` +
-        `행 위치: ${data.row}행\n` +
-        `신규/업데이트: ${data.updated ? "업데이트" : "신규 추가"}\n\n` +
-        `→ 베이스시트의 "세부목록" 탭을 확인하세요.`;
-      showToast("✅ 테스트 저장 성공! 세부목록 탭을 확인하세요.");
-    } else {
-      resEl.textContent = `❌ 저장 실패: ${data.error || JSON.stringify(data)}\n\n(GAS 재배포 필요 여부 확인)`;
-    }
-  } catch(e) {
-    resEl.textContent =
-      `❌ 네트워크/GAS 오류: ${e.message}\n\n` +
-      `가능한 원인:\n` +
-      `1. GAS가 구버전으로 배포됨 → 새 버전으로 재배포 필요\n` +
-      `2. GAS URL이 잘못됨 → 설정에서 URL 확인\n` +
-      `3. 스프레드시트 권한 없음 → 시트 접근 권한 확인`;
-  }
-}
 
 // ── 탭 파싱 진단 ────────────────────────────────────────────────
 async function runSheetDiag() {
@@ -9734,165 +9666,6 @@ function togglePwVisible(inputId, btn) {
     icon.className = "fas fa-eye";
   }
 }
-
-/* ── GAS 통신 ──
-/**
- * ★ GAS JSONP 테스트 함수
- * indexStatus를 JSONP로 호출해 현재 배포된 GAS가 callback 파라미터를 처리하는지 확인
- */
-async function testGasJsonp() {
-  const btn    = document.getElementById("btnTestJsonp");
-  const resEl  = document.getElementById("jsonpTestResult");
-  const url    = APP_CONFIG.GAS_WEB_APP_URL;
-  if (!url) { showToast("GAS URL을 먼저 저장해주세요.", "warning"); return; }
-
-  btn.disabled = true;
-  btn.innerHTML = '<i class="fas fa-circle-notch fa-spin"></i> 테스트 중...';
-  resEl.style.display = "block";
-  resEl.innerHTML = '<i class="fas fa-spinner fa-spin"></i> JSONP 테스트 중...';
-
-  try {
-    const t0   = Date.now();
-    const data = await _jsonpGet(`${url}?action=indexStatus`, 10000);
-    const ms   = Date.now() - t0;
-    if (data && (data.exists !== undefined || data.count !== undefined)) {
-      const verBadge = data.codeVersion
-        ? `<br><span style="color:#7C3AED;font-weight:600">📌 Code.gs 버전: ${escHtml(data.codeVersion)}</span>`
-        : "";
-      resEl.innerHTML =
-        `<span style="color:#059669;font-weight:700">✅ JSONP 지원 확인됨</span> (${ms}ms)<br>` +
-        `GAS 버전이 정상입니다. 동기화을 진행할 수 있습니다.${verBadge}<br>` +
-        `<small style="color:#6B7280">응답: count=${data.count||0}, exists=${data.exists}</small>`;
-      // 코드 버전 행 갱신
-      const cvRow  = document.getElementById("codeVersionRow");
-      const cvText = document.getElementById("codeVersionText");
-      if (data.codeVersion && cvRow && cvText) { cvText.textContent = data.codeVersion; cvRow.style.display = ""; }
-      // 오류 배너 숨김
-      const b = document.getElementById("gasErrorBanner");
-      if (b) b.style.display = "none";
-    } else if (data && data.error) {
-      resEl.innerHTML =
-        `<span style="color:#D97706;font-weight:700">⚠ JSONP는 됐지만 GAS 오류:</span> ${escHtml(data.error)}`;
-    } else {
-      resEl.innerHTML =
-        `<span style="color:#D97706;font-weight:700">⚠ 응답 형식 이상:</span> ${JSON.stringify(data).substring(0,100)}`;
-    }
-  } catch (e) {
-    const m = e.message || "";
-    if (m.includes("스크립트 로드 실패") || m.includes("Script load failed")) {
-      resEl.innerHTML =
-        `<span style="color:#DC2626;font-weight:700">❌ JSONP 미지원</span><br>` +
-        `현재 배포된 GAS가 <b>구버전</b>입니다.<br>` +
-        `<b>Code.gs를 최신 버전으로 재배포</b>하면 해결됩니다.<br>` +
-        `<small style="color:#6B7280">▶ 배포 → 기존 배포 관리 → 수정(연필) → 새 버전 → 배포</small>`;
-      document.getElementById("gasErrorBanner").style.display = "block";
-    } else if (m.includes("시간 초과")) {
-      resEl.innerHTML = `<span style="color:#D97706;font-weight:700">⚠ 시간 초과</span> — GAS가 응답하지 않습니다.`;
-    } else {
-      resEl.innerHTML = `<span style="color:#DC2626;font-weight:700">❌ 오류:</span> ${escHtml(m)}`;
-    }
-  } finally {
-    btn.disabled = false;
-    btn.innerHTML = '<i class="fas fa-plug"></i> GAS 연결 테스트 (JSONP 지원 여부)';
-  }
-}
-
-/*
- * GAS 웹앱은 긴 요청 시 302 리다이렉트 발생 → CORS 헤더 유실 문제
- * 해결: <script> 태그 JSONP 방식으로 완전 우회 (preflight 없음, CORS 무관)
- */
-let _jsonpSeq = 0;
-function _jsonpGet(fullUrl, timeoutMs) {
-  return new Promise((resolve, reject) => {
-    const cbName = "__gasCb" + (++_jsonpSeq) + "_" + Date.now();
-    const script  = document.createElement("script");
-    let   settled = false;
-    const tid = setTimeout(() => {
-      if (settled) return;
-      settled = true;
-      script.remove();
-      delete window[cbName];
-      reject(new Error("요청 시간 초과"));
-    }, timeoutMs || 60000);
-
-    window[cbName] = function(data) {
-      if (settled) return;
-      settled = true;
-      clearTimeout(tid);
-      script.remove();
-      delete window[cbName];
-      resolve(data);
-    };
-
-    // GAS에 callback 파라미터 추가
-    const sep = fullUrl.includes("?") ? "&" : "?";
-    script.src = fullUrl + sep + "callback=" + cbName;
-    script.onerror = function() {
-      if (settled) return;
-      settled = true;
-      clearTimeout(tid);
-      script.remove();
-      delete window[cbName];
-      reject(new Error("스크립트 로드 실패 (GAS URL 확인)"));
-    };
-    document.head.appendChild(script);
-  });
-}
-
-// ★ [Node.js 이관] api.js로 대체됨 — 기존 GAS 함수 비활성화
-// // async function gasGet(params, timeoutMs) {
-//   const url = APP_CONFIG.GAS_WEB_APP_URL;
-//   if (!url) throw new Error("GAS URL 없음");
-//   const qs      = new URLSearchParams(params).toString();
-//   const fullUrl = `${url}?${qs}`;
-//   const json = await _jsonpGet(fullUrl, timeoutMs || 60000);
-//   if (json && json.error) throw new Error(json.error);
-//   return json;
-// }
-// async function gasPost(body, timeoutMs, opts) {
-//   const url = APP_CONFIG.GAS_WEB_APP_URL;
-//   if (!url) throw new Error("GAS URL 없음");
-// 
-//   // ★ 파일 데이터가 있거나 forcePost:true 이면 실제 fetch POST 사용
-//   // (오래 걸리는 작업은 JSONP 대신 POST로 타임아웃 없이 처리)
-//   const hasFiles  = body.files || body.fileBase64 || body.fileData;
-//   const forcePost = opts && opts.forcePost;
-//   if (hasFiles || forcePost) {
-//     const ctrl = new AbortController();
-//     const tid  = timeoutMs ? setTimeout(() => ctrl.abort(), timeoutMs) : null;
-//     try {
-//       const resp = await fetch(url, {
-//         method:  "POST",
-//         headers: { "Content-Type": "text/plain" },
-//         body:    JSON.stringify(body),
-//         signal:  ctrl.signal
-//       });
-//       if (!resp.ok) throw new Error("HTTP " + resp.status);
-//       const json = await resp.json();
-//       if (json && json.error) throw new Error(json.error);
-//       return json;
-//     } catch (e) {
-//       if (e.name === "AbortError") throw new Error("요청 시간 초과");
-//       throw e;
-//     } finally {
-//       if (tid) clearTimeout(tid);
-//     }
-//   }
-// 
-//   // ★ 단순 action 요청: JSONP(GET)로 CORS 우회
-//   const params = { ...body, _method: "POST" };
-//   const qs = new URLSearchParams(
-//     Object.fromEntries(
-//       Object.entries(params).map(([k,v]) =>
-//         [k, typeof v === "object" ? JSON.stringify(v) : String(v)]
-//       )
-//     )
-//   ).toString();
-//   const fullUrl = `${url}?${qs}`;
-//   const json = await _jsonpGet(fullUrl, timeoutMs || 30000);
-//   if (json && json.error) throw new Error(json.error);
-//   return json;
-// }
 
 /* ── 유틸 ── */
 
