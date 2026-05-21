@@ -1786,6 +1786,12 @@ async function _showPendingReviewersPopup(sheetId, tabName, rc, sc) {
 }
 
 /* ── 미입금자 명단 팝업 ── */
+function _goToSheetForPayment(sheetId, tabName) {
+  const t = (_tabDashData?.tabs||[]).find(x => x.sheet_id===sheetId && x.tab_name===tabName);
+  if (!t || !t.sheet_url) { showToast('시트링크가 등록되지 않았습니다.', 'error'); return; }
+  const url = t.tab_gid ? t.sheet_url.replace(/[#?].*$/, '') + '#gid=' + t.tab_gid : t.sheet_url;
+  window.open(url, '_blank');
+}
 async function _showUnpaidReviewersPopup(sheetId, tabName, rc, pc, round) {
   const unpaid = rc - pc;
   const modalId = 'unpaidReviewersModal';
@@ -1816,9 +1822,12 @@ async function _showUnpaidReviewersPopup(sheetId, tabName, rc, pc, round) {
             <i class="fas fa-spinner fa-spin"></i> 미입금자 조회 중...
           </div>
         </div>
-        <div style="text-align:center">
+        <div style="text-align:center;display:flex;gap:10px;justify-content:center">
           <button onclick="document.getElementById('${modalId}').remove()" style="padding:10px 32px;background:linear-gradient(135deg,#3B82F6,#1D4ED8);color:#fff;border:none;border-radius:8px;font-size:.82rem;font-weight:600;cursor:pointer;box-shadow:0 4px 12px rgba(59,130,246,.3)">
             <i class="fas fa-check" style="margin-right:6px"></i>확인
+          </button>
+          <button onclick="_goToSheetForPayment('${escHtml(sheetId)}','${escHtml(tabName)}')" style="padding:10px 20px;background:linear-gradient(135deg,#059669,#047857);color:#fff;border:none;border-radius:8px;font-size:.82rem;font-weight:600;cursor:pointer;box-shadow:0 4px 12px rgba(5,150,105,.3)">
+            <i class="fas fa-external-link-alt" style="margin-right:6px"></i>입금처리 하러가기
           </button>
         </div>
       </div>
