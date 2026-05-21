@@ -3,11 +3,11 @@ CREATE TABLE IF NOT EXISTS admin_notices (
   id SERIAL PRIMARY KEY,
   title VARCHAR(200) NOT NULL,
   content TEXT NOT NULL,
-  display_days INTEGER NOT NULL DEFAULT 7,     -- 표시 기간 (일)
-  target_names TEXT[] DEFAULT '{}',            -- 대상 관리자 이름 배열 (빈 배열 = 전체)
-  created_by VARCHAR(50) NOT NULL,             -- 작성자
+  display_days INTEGER NOT NULL DEFAULT 7,
+  target_names TEXT[] NOT NULL DEFAULT ARRAY[]::TEXT[],
+  created_by VARCHAR(50) NOT NULL,
   created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-  expires_at TIMESTAMPTZ NOT NULL,             -- 만료일시 (created_at + display_days)
+  expires_at TIMESTAMPTZ NOT NULL,
   is_active BOOLEAN NOT NULL DEFAULT TRUE
 );
 

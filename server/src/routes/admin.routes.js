@@ -861,11 +861,12 @@ router.post('/notices', authMiddleware, masterOnlyMiddleware, async (req, res, n
     const { title, content, display_days = 7, target_names = [] } = req.body;
     if (!title || !content) return res.status(400).json({ success: false, error: '제목과 내용을 입력하세요.' });
     const days = Math.max(1, Math.min(365, Number(display_days) || 7));
+    const targets = Array.isArray(target_names) ? target_names : [];
     const { rows } = await pool.query(`
       INSERT INTO admin_notices (title, content, display_days, target_names, created_by, expires_at)
-      VALUES ($1, $2, $3, $4, $5, NOW() + INTERVAL '1 day' * $3)
+      VALUES ($1, $2, $3, $4::text[], $5, NOW() + ($3::text || ' days')::interval)
       RETURNING *
-    `, [title, content, days, target_names, req.admin.name]);
+    `, [title, content, days, targets, req.admin.name]);
     res.json({ success: true, notice: rows[0] });
   } catch (err) { next(err); }
 });
@@ -877,13 +878,14 @@ router.put('/notices/:id', authMiddleware, masterOnlyMiddleware, async (req, res
     const { title, content, display_days, target_names } = req.body;
     if (!title || !content) return res.status(400).json({ success: false, error: '제목과 내용을 입력하세요.' });
     const days = Math.max(1, Math.min(365, Number(display_days) || 7));
+    const targets = Array.isArray(target_names) ? target_names : [];
     const { rows } = await pool.query(`
       UPDATE admin_notices
-      SET title = $1, content = $2, display_days = $3, target_names = $4,
-          expires_at = created_at + INTERVAL '1 day' * $3
+      SET title = $1, content = $2, display_days = $3, target_names = $4::text[],
+          expires_at = created_at + ($3::text || ' days')::interval
       WHERE id = $5
       RETURNING *
-    `, [title, content, days, target_names || [], id]);
+    `, [title, content, days, targets, id]);
     if (rows.length === 0) return res.status(404).json({ success: false, error: '공지를 찾을 수 없습니다.' });
     res.json({ success: true, notice: rows[0] });
   } catch (err) { next(err); }
