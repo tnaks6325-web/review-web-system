@@ -1417,7 +1417,6 @@ function switchAdminTab(tabName) {
 // 탭별 버튼 정의
 const _CTX_TOOLBAR_DEFS = {
   dashboard: [
-    { id:'ctx-filter',      label:'필터',     icon:'fa-filter',      style:'',           onclick:"document.getElementById('dashFilterBtn')?.click()", title:'캠페인 필터'},
     { id:'ctx-add',         label:'작업시트추가',  icon:'fa-plus',        style:'green',      onclick:"openAddCampaign()", title:'작업시트 추가'},
     { sep: true },
     { id:'ctx-refresh',     label:'새로고침',  icon:'fa-sync-alt',    style:'',           onclick:"location.reload()", title:'페이지 새로고침 (최신 버전 로드)'},
