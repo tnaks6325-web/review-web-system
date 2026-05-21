@@ -617,32 +617,6 @@
         </div>
       </div>
 
-      <!-- 섹션: 특정 시트 개별 진단 -->
-      <div class="diag-section">
-        <div class="diag-section-title"><i class="fas fa-search-plus"></i> 특정 시트 진단 <span style="font-size:.68rem;font-weight:400;color:var(--t3)">(등록됐는데 안 보일 때)</span></div>
-        <div style="display:flex;gap:4px;margin-top:8px">
-          <input id="debugSheetIdInput" type="text" placeholder="sheetId 또는 시트 URL 붙여넣기"
-            style="flex:1;padding:5px 8px;border:1.5px solid var(--bd);border-radius:6px;font-size:.7rem;outline:none;min-width:0"
-            onfocus="this.style.borderColor='var(--p)'" onblur="this.style.borderColor='var(--bd)'"
-            oninput="onDebugSheetInput()" onkeydown="if(event.key==='Enter') onDebugSheetDiagClick()"/>
-          <button onclick="onDebugSheetDiagClick()" style="flex-shrink:0;padding:5px 8px;background:#7C3AED;color:#fff;border:none;border-radius:6px;font-size:.7rem;font-weight:700;cursor:pointer;white-space:nowrap">
-            <i class="fas fa-microscope"></i> 진단
-          </button>
-        </div>
-        <div id="debugSheetChoiceWrap" style="display:none;margin-top:6px">
-          <p style="font-size:.68rem;color:#7C3AED;font-weight:700;margin:0 0 5px"><i class="fas fa-code-branch"></i> 탭시트(gid) 포함 URL입니다. 진단 방식을 선택하세요:</p>
-          <div style="display:flex;gap:5px">
-            <button onclick="debugSingleSheet('tab')" style="flex:1;padding:6px;background:#EDE9FE;border:1.5px solid #A78BFA;border-radius:7px;color:#5B21B6;font-size:.68rem;font-weight:700;cursor:pointer;line-height:1.4">
-              <i class="fas fa-table"></i><br>입력한 시트탭만 진단
-            </button>
-            <button onclick="debugSingleSheet('full')" style="flex:1;padding:6px;background:#EFF6FF;border:1.5px solid #93C5FD;border-radius:7px;color:#1D4ED8;font-size:.68rem;font-weight:700;cursor:pointer;line-height:1.4">
-              <i class="fas fa-layer-group"></i><br>시트 전체진단
-            </button>
-          </div>
-        </div>
-        <div id="debugSingleResult" class="hidden" style="margin-top:6px;font-size:.72rem;background:#FFF;border:1.5px solid var(--bd);border-radius:8px;padding:10px;color:var(--t2);word-break:break-all;max-height:320px;overflow-y:auto;line-height:1.6"></div>
-      </div>
-
     </div>
     <div class="modal-actions">
       <button class="btn-primary" onclick="closeDiagModal()"><i class="fas fa-times"></i> 닫기</button>
