@@ -839,7 +839,9 @@ router.get('/notices', authMiddleware, async (req, res, next) => {
       ORDER BY created_at DESC
     `);
     res.json({ success: true, notices: rows });
-  } catch (err) { next(err); }
+  } catch (err) {
+    res.status(500).json({ success: false, error: '[notices/list] ' + err.message });
+  }
 });
 
 // GET /api/admin/notices/all — 전체 공지 목록 (마스터 관리용, 만료 포함)
@@ -852,7 +854,9 @@ router.get('/notices/all', authMiddleware, masterOnlyMiddleware, async (req, res
       LIMIT 50
     `);
     res.json({ success: true, notices: rows });
-  } catch (err) { next(err); }
+  } catch (err) {
+    res.status(500).json({ success: false, error: '[notices/all] ' + err.message });
+  }
 });
 
 // POST /api/admin/notices — 공지 작성 (마스터 전용)
@@ -868,7 +872,9 @@ router.post('/notices', authMiddleware, masterOnlyMiddleware, async (req, res, n
       RETURNING *
     `, [title, content, days, targets, req.admin.name]);
     res.json({ success: true, notice: rows[0] });
-  } catch (err) { next(err); }
+  } catch (err) {
+    res.status(500).json({ success: false, error: '[notices/create] ' + err.message });
+  }
 });
 
 // PUT /api/admin/notices/:id — 공지 수정 (마스터 전용)
