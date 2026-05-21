@@ -2776,7 +2776,7 @@ router.get('/unpaid-rows', authMiddleware, async (req, res, next) => {
     const params = round ? [sheetId, tabName, round] : [sheetId, tabName];
 
     const { rows } = await pool.query(
-      `SELECT row_index, reviewer_name, phone, round
+      `SELECT row_index, reviewer_name, round
        FROM review_index
        WHERE sheet_id = $1 AND tab_name = $2
          AND is_submitted = true
