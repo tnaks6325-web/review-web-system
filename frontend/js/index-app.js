@@ -1785,6 +1785,86 @@ async function _showPendingReviewersPopup(sheetId, tabName, rc, sc) {
   }
 }
 
+/* ── 미입금자 명단 팝업 ── */
+async function _showUnpaidReviewersPopup(sheetId, tabName, rc, pc, round) {
+  const unpaid = rc - pc;
+  const modalId = 'unpaidReviewersModal';
+  let modal = document.getElementById(modalId);
+  if (modal) modal.remove();
+  modal = document.createElement('div');
+  modal.id = modalId;
+  const roundInfo = round ? ` (${escHtml(round)})` : '';
+  modal.innerHTML = `
+    <div style="position:fixed;inset:0;background:rgba(0,0,0,.45);z-index:99999;display:flex;align-items:center;justify-content:center;animation:fadeIn .2s" onclick="if(event.target===this)this.remove()">
+      <div style="background:#fff;border-radius:16px;padding:28px 24px;width:92%;max-width:480px;max-height:80vh;overflow-y:auto;box-shadow:0 25px 60px rgba(0,0,0,.25);border-top:4px solid #3B82F6">
+        <div style="text-align:center;margin-bottom:16px">
+          <div style="width:56px;height:56px;border-radius:50%;background:linear-gradient(135deg,#DBEAFE,#BFDBFE);display:inline-flex;align-items:center;justify-content:center;margin-bottom:10px">
+            <i class="fas fa-money-bill-wave" style="font-size:1.5rem;color:#1D4ED8"></i>
+          </div>
+          <h3 style="margin:0;font-size:1.05rem;color:#1F2937;font-weight:700">미입금자 명단</h3>
+        </div>
+        <div style="background:#EFF6FF;border:1px solid #BFDBFE;border-radius:10px;padding:14px 16px;margin-bottom:16px">
+          <p style="margin:0 0 4px;font-size:.82rem;color:#1E40AF;font-weight:600;line-height:1.5">
+            ${escHtml(tabName)}${roundInfo}
+          </p>
+          <p style="margin:0;font-size:.75rem;color:#6B7280;line-height:1.5">
+            입금 현황: <b>${pc}/${rc}</b> (미입금 ${unpaid}명)
+          </p>
+        </div>
+        <div id="unpaidReviewersList" style="margin-bottom:16px">
+          <div style="text-align:center;padding:20px;color:#9CA3AF">
+            <i class="fas fa-spinner fa-spin"></i> 미입금자 조회 중...
+          </div>
+        </div>
+        <div style="text-align:center">
+          <button onclick="document.getElementById('${modalId}').remove()" style="padding:10px 32px;background:linear-gradient(135deg,#3B82F6,#1D4ED8);color:#fff;border:none;border-radius:8px;font-size:.82rem;font-weight:600;cursor:pointer;box-shadow:0 4px 12px rgba(59,130,246,.3)">
+            <i class="fas fa-check" style="margin-right:6px"></i>확인
+          </button>
+        </div>
+      </div>
+    </div>`;
+  document.body.appendChild(modal);
+
+  // API 호출
+  try {
+    const params = { action: 'getUnpaidRows', sheetId, tabName };
+    if (round) params.round = round;
+    const resp = await gasGet(params);
+    const listEl = document.getElementById('unpaidReviewersList');
+    if (!resp || !resp.ok) {
+      listEl.innerHTML = `<div style="text-align:center;padding:12px;color:#DC2626;font-size:.8rem"><i class="fas fa-exclamation-circle"></i> 조회 실패: ${escHtml((resp && resp.error) || '서버 오류')}</div>`;
+      return;
+    }
+    const rows = resp.unpaidRows || [];
+    if (rows.length === 0) {
+      listEl.innerHTML = `<div style="text-align:center;padding:12px;color:#059669;font-size:.8rem"><i class="fas fa-check-circle"></i> 미입금자가 없습니다. (DB 동기화 지연일 수 있음)</div>`;
+      return;
+    }
+    const listHtml = rows.map((r, i) => `
+      <div style="display:flex;align-items:center;padding:10px 12px;background:${i%2===0?'#FFF':'#EFF6FF'};border-radius:8px;margin-bottom:4px;border:1px solid #DBEAFE">
+        <div style="width:28px;height:28px;border-radius:50%;background:#BFDBFE;display:flex;align-items:center;justify-content:center;margin-right:10px;flex-shrink:0">
+          <span style="font-size:.7rem;font-weight:700;color:#1E40AF">${r.row_index}</span>
+        </div>
+        <div style="flex:1;min-width:0">
+          <div style="font-size:.82rem;font-weight:600;color:#1F2937">${escHtml(r.reviewer_name || '(이름없음)')}</div>
+          <div style="font-size:.68rem;color:#6B7280">${r.row_index}행${r.round ? ' · ' + escHtml(r.round) : ''}</div>
+        </div>
+        <div style="flex-shrink:0">
+          <span style="background:#DBEAFE;color:#1E40AF;padding:2px 8px;border-radius:6px;font-size:.65rem;font-weight:600">미입금</span>
+        </div>
+      </div>
+    `).join('');
+    listEl.innerHTML = `
+      <div style="font-size:.72rem;color:#6B7280;font-weight:600;margin-bottom:6px;letter-spacing:.5px">
+        <i class="fas fa-money-bill-wave" style="margin-right:4px"></i>미입금자 목록 (${rows.length}명)
+      </div>
+      <div style="max-height:240px;overflow-y:auto;padding-right:4px">${listHtml}</div>`;
+  } catch (e) {
+    const listEl = document.getElementById('unpaidReviewersList');
+    if (listEl) listEl.innerHTML = `<div style="text-align:center;padding:12px;color:#DC2626;font-size:.8rem"><i class="fas fa-exclamation-circle"></i> ${escHtml(e.message || '네트워크 오류')}</div>`;
+  }
+}
+
 /* ── 제출 현황 대시보드 ── */
 async function loadAdminDashboard() {
   // ★ v11.5: 캠페인 탭 관리 UI로 통합 — 대시보드 메인은 loadTabDashboard()가 담당
@@ -12431,6 +12511,15 @@ function _cellVal(t, col) {
     const pct = _pct(pc, rc);
     const clr = pct >= 100 ? "#059669" : pct >= 50 ? "#D97706" : "#DC2626";
     const icon = pct >= 100 ? ' <i class="fas fa-check" style="font-size:.6rem"></i>' : '';
+    const unpaid = rc - pc;
+    // 미입금 10명 미만 & 1명 이상이면 클릭 가능
+    if (unpaid > 0 && unpaid < 10 && t.sheet_id && t.tab_name) {
+      const sid = escHtml(t.sheet_id);
+      const tn = escHtml(t.tab_name);
+      const rd = t._isRoundRow ? escHtml(t._roundLabel || '') : '';
+      const rdParam = rd ? `,'${rd}'` : '';
+      return `<span style="font-weight:600;cursor:pointer;text-decoration:underline;text-decoration-style:dotted;text-underline-offset:3px" onclick="event.stopPropagation();_showUnpaidReviewersPopup('${sid}','${tn}',${rc},${pc}${rdParam})" title="클릭하여 미입금자 ${unpaid}명 확인">${pc}/${rc}</span> <span style="color:${clr};font-size:.68rem">(${pct}%)${icon}</span>`;
+    }
     return `<span style="font-weight:600">${pc}/${rc}</span> <span style="color:${clr};font-size:.68rem">(${pct}%)${icon}</span>`;
   }
   // 캠페인명 + 🔄 갱신 버튼

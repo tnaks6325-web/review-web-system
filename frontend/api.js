@@ -176,6 +176,7 @@ const _ACTION_MAP = {
   'checkDuplicates':     { method: 'POST', path: '/api/drive/check-duplicates' },
   'removeDuplicates':    { method: 'POST', path: '/api/drive/remove-duplicates' },
   'getPendingRows':      { method: 'GET',  path: '/api/diag/pending-rows' },
+  'getUnpaidRows':       { method: 'GET',  path: '/api/diag/unpaid-rows' },
   'addTab':              { method: 'POST', path: '/api/diag/add-tab' },
   'previewTab':          { method: 'GET',  path: '/api/diag/preview-tab' },
 
