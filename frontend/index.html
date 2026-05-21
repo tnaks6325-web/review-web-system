@@ -551,55 +551,6 @@
   </div>
 </div>
 
-<!-- ────────── 각종 진단 모달 ────────── -->
-<div id="diagModal" class="modal-overlay hidden" style="display:none">
-  <div class="modal-box" style="max-width:500px">
-    <div class="modal-header">
-      <h3><i class="fas fa-stethoscope"></i> 각종 진단</h3>
-      <button class="btn-icon-sm" onclick="closeDiagModal()"><i class="fas fa-times"></i></button>
-    </div>
-    <div class="modal-body" style="max-height:75vh;overflow-y:auto">
-
-      <!-- 섹션: 데이터 진단 -->
-      <div class="diag-section">
-        <div class="diag-section-title"><i class="fas fa-database"></i> 데이터 진단</div>
-        <div style="display:grid;grid-template-columns:1fr 1fr;gap:6px;margin-top:8px">
-          <button onclick="openCheckFilesModalFromDiag()" class="diag-btn diag-btn-blue" title="리뷰 파일이 삭제된 경우 미제출 상태로 복원합니다">
-            <i class="fas fa-file-medical-alt"></i> 파일 존재 확인
-          </button>
-          <button onclick="openSearchDebugModal()" class="diag-btn diag-btn-orange" title="searchAll GAS 응답을 직접 조회해 isSubmitted 판단을 검증합니다">
-            <i class="fas fa-bug"></i> 검색 진단
-          </button>
-          <button onclick="openDashRawModal()" class="diag-btn diag-btn-purple" title="dashboard GAS 응답의 total/submitted 원본값을 확인합니다">
-            <i class="fas fa-chart-bar"></i> 집계 진단
-          </button>
-        </div>
-      </div>
-
-      <!-- 섹션: 시트 진단 -->
-      <div class="diag-section">
-        <div class="diag-section-title"><i class="fas fa-table"></i> 시트 진단</div>
-        <div style="display:grid;grid-template-columns:1fr 1fr;gap:6px;margin-top:8px">
-          <button id="btnDebugBase" onclick="debugBaseSheet()" class="diag-btn diag-btn-gray">
-            <i class="fas fa-bug"></i> 베이스시트 파싱
-          </button>
-          <button onclick="debugTabConfig()" class="diag-btn diag-btn-yellow">
-            <i class="fas fa-table"></i> 세부목록 현황
-          </button>
-
-        </div>
-        <div id="debugTabConfigResult" class="hidden" style="margin-top:8px;font-size:.75rem;background:#F1F5F9;border-radius:8px;padding:10px;color:var(--t2);word-break:break-all;max-height:200px;overflow-y:auto;white-space:pre-wrap"></div>
-        <div id="debugBaseResult" class="hidden" style="margin-top:8px;font-size:.75rem;background:#F1F5F9;border-radius:8px;padding:10px;color:var(--t2);word-break:break-all;max-height:240px;overflow-y:auto"></div>
-      </div>
-
-
-
-    </div>
-    <div class="modal-actions">
-      <button class="btn-primary" onclick="closeDiagModal()"><i class="fas fa-times"></i> 닫기</button>
-    </div>
-  </div>
-</div>
 
 
 <!-- ══════════════════════════════════════
@@ -659,10 +610,6 @@
           <!-- 동기화 -->
           <button class="btn-topbar" onclick="openIndexModal()" title="동기화">
             <i class="fas fa-sync-alt"></i> 동기화
-          </button>
-          <!-- 각종 진단 -->
-          <button class="btn-topbar sys" onclick="openDiagModal()" title="각종 진단">
-            <i class="fas fa-stethoscope"></i> 각종진단
           </button>
           <!-- 인애드 등록 -->
           <button class="btn-topbar warn" onclick="openRegisterModal()" title="인애드 등록">
@@ -2345,137 +2292,6 @@
 <script src="js/index-app.js"></script>
 
 <!-- ★ 파일 존재 확인 모달 -->
-<div id="checkFilesModal" role="dialog" aria-modal="true" aria-labelledby="checkFilesTitle">
-  <div class="check-files-box">
-    <h3 id="checkFilesTitle">
-      <i class="fas fa-file-medical-alt" style="color:#D97706"></i>
-      리뷰 파일 존재 확인
-    </h3>
-    <p style="font-size:.82rem;color:#4B5563;margin:0;line-height:1.6">
-      Drive에서 <b>삭제된 리뷰 파일</b>을 탐지하여 해당 항목을 <b>미제출 상태로 복원</b>합니다.<br>
-      전체 시트를 순회하므로 수십 초 소요될 수 있습니다.
-    </p>
-    <div class="check-files-pw-row">
-      <input type="password" id="checkFilesPwInput" placeholder="관리자 비밀번호 입력"
-        onkeydown="if(event.key==='Enter')runCheckReviewFiles()"
-        autocomplete="current-password">
-      <button onclick="runCheckReviewFiles()">
-        <i class="fas fa-search"></i> 확인 실행
-      </button>
-    </div>
-    <div id="checkFilesResult" style="display:none"></div>
-    <div style="display:flex;justify-content:flex-end">
-      <button onclick="closeCheckFilesModal()"
-        style="padding:6px 16px;border:1.5px solid #D1D5DB;border-radius:8px;background:#fff;font-size:.82rem;color:#6B7280;cursor:pointer">
-        닫기
-      </button>
-    </div>
-  </div>
-</div>
-
-<!-- ★ 집계 진단 모달 -->
-<div id="dashRawModal" style="display:none;position:fixed;inset:0;z-index:9100;background:rgba(0,0,0,.5);align-items:center;justify-content:center">
-  <div style="background:#fff;border-radius:14px;padding:22px 24px;width:min(740px,96vw);max-height:88vh;overflow-y:auto;box-shadow:0 8px 32px rgba(0,0,0,.2)">
-    <div style="display:flex;align-items:center;gap:8px;margin-bottom:6px">
-      <i class="fas fa-database" style="color:#7C3AED;font-size:1.1rem"></i>
-      <h3 style="margin:0;font-size:1rem;font-weight:700;color:#1F2937">dashboard 집계 진단</h3>
-      <button onclick="closeDashRawModal()" style="margin-left:auto;background:none;border:none;font-size:1.2rem;color:#9CA3AF;cursor:pointer">✕</button>
-    </div>
-    <p style="font-size:.78rem;color:#6B7280;margin:0 0 12px;line-height:1.6">
-      GAS <code>dashboard</code> 응답의 <b>total / submitted / pending</b> 원본값을 탭별로 표시합니다.<br>
-      탭명으로 검색해 특정 탭의 집계 상태를 빠르게 확인하세요.
-    </p>
-    <div style="display:flex;gap:8px;margin-bottom:12px">
-      <input id="dashRawFilter" type="text" placeholder="탭명 또는 캠페인명 검색..."
-        style="flex:1;padding:7px 12px;border:1.5px solid #D1D5DB;border-radius:8px;font-size:.83rem"
-        oninput="filterDashRawTable()">
-      <button onclick="reloadDashRaw()"
-        style="padding:7px 14px;background:#7C3AED;color:#fff;border:none;border-radius:8px;font-size:.82rem;font-weight:700;cursor:pointer;white-space:nowrap">
-        <i class="fas fa-sync-alt"></i> 재조회
-      </button>
-    </div>
-    <div id="dashRawLoading" style="text-align:center;padding:28px;color:#6B7280;font-size:.85rem">
-      <i class="fas fa-circle-notch fa-spin" style="margin-right:6px"></i> GAS 조회 중...
-    </div>
-    <div id="dashRawContent" style="display:none">
-      <div style="font-size:.75rem;color:#6B7280;margin-bottom:8px" id="dashRawMeta"></div>
-      <div style="overflow-x:auto">
-        <table id="dashRawTable" style="width:100%;border-collapse:collapse;font-size:.74rem">
-          <thead>
-            <tr style="background:#F3F4F6;position:sticky;top:0">
-              <th style="padding:6px 8px;border:1px solid #E5E7EB;white-space:nowrap;text-align:left">캠페인</th>
-              <th style="padding:6px 8px;border:1px solid #E5E7EB;white-space:nowrap;text-align:left">탭명</th>
-              <th style="padding:6px 8px;border:1px solid #E5E7EB;white-space:nowrap;text-align:center">total</th>
-              <th style="padding:6px 8px;border:1px solid #E5E7EB;white-space:nowrap;text-align:center">submitted</th>
-              <th style="padding:6px 8px;border:1px solid #E5E7EB;white-space:nowrap;text-align:center">pending</th>
-              <th style="padding:6px 8px;border:1px solid #E5E7EB;white-space:nowrap;text-align:center">진행률</th>
-              <th style="padding:6px 8px;border:1px solid #E5E7EB;white-space:nowrap;text-align:center">상태</th>
-              <th style="padding:6px 8px;border:1px solid #E5E7EB;white-space:nowrap;text-align:left">차수목록</th>
-              <th style="padding:6px 8px;border:1px solid #E5E7EB;white-space:nowrap;text-align:left">sheetId</th>
-            </tr>
-          </thead>
-          <tbody id="dashRawBody"></tbody>
-        </table>
-      </div>
-    </div>
-    <div id="dashRawError" style="display:none;padding:12px;background:#FEF2F2;border:1px solid #FECACA;border-radius:8px;color:#DC2626;font-size:.82rem;margin-top:8px"></div>
-  </div>
-</div>
-
-<!-- ★ 검색 진단 모달 -->
-<div id="searchDebugModal" style="display:none;position:fixed;inset:0;z-index:9100;background:rgba(0,0,0,.5);align-items:center;justify-content:center">
-  <div style="background:#fff;border-radius:14px;padding:22px 24px;width:min(680px,96vw);max-height:85vh;overflow-y:auto;box-shadow:0 8px 32px rgba(0,0,0,.2)">
-    <div style="display:flex;align-items:center;gap:8px;margin-bottom:14px">
-      <i class="fas fa-bug" style="color:#B45309;font-size:1.1rem"></i>
-      <h3 style="margin:0;font-size:1rem;font-weight:700;color:#1F2937">searchAll GAS 응답 진단</h3>
-      <button onclick="closeSearchDebugModal()" style="margin-left:auto;background:none;border:none;font-size:1.2rem;color:#9CA3AF;cursor:pointer">✕</button>
-    </div>
-    <p style="font-size:.8rem;color:#6B7280;margin:0 0 12px">
-      GAS가 실제로 반환하는 <code>isSubmitted</code> 값을 직접 조회합니다.<br>
-      검색창에서 안 보이는 이름은 <b>GAS가 이미 isSubmitted:true 로 반환</b>하거나 <b>결과 자체에 없는 것</b>입니다.
-    </p>
-    <div style="display:flex;gap:8px;margin-bottom:14px">
-      <input id="debugNameInput" type="text" placeholder="이름 입력 (예: 이재혁)"
-        style="flex:1;padding:8px 12px;border:1.5px solid #D1D5DB;border-radius:8px;font-size:.85rem"
-        onkeydown="if(event.key==='Enter')runSearchDebug()">
-      <button onclick="runSearchDebug()"
-        style="padding:8px 16px;background:#B45309;color:#fff;border:none;border-radius:8px;font-size:.85rem;font-weight:700;cursor:pointer">
-        <i class="fas fa-search"></i> 조회
-      </button>
-    </div>
-    <div id="debugResult" style="display:none">
-      <div style="display:flex;gap:8px;margin-bottom:10px;font-size:.78rem;font-weight:600;color:#374151">
-        <span id="debugSummary"></span>
-      </div>
-      <div style="overflow-x:auto">
-        <table id="debugTable" style="width:100%;border-collapse:collapse;font-size:.75rem">
-          <thead>
-            <tr style="background:#F3F4F6;text-align:left">
-              <th style="padding:6px 8px;border:1px solid #E5E7EB;white-space:nowrap">#</th>
-              <th style="padding:6px 8px;border:1px solid #E5E7EB;white-space:nowrap">표시이름</th>
-              <th style="padding:6px 8px;border:1px solid #E5E7EB;white-space:nowrap">캠페인/탭</th>
-              <th style="padding:6px 8px;border:1px solid #E5E7EB;white-space:nowrap">상품명</th>
-              <th style="padding:6px 8px;border:1px solid #E5E7EB;white-space:nowrap">isSubmitted</th>
-              <th style="padding:6px 8px;border:1px solid #E5E7EB;white-space:nowrap">reviewDone 원본값</th>
-              <th style="padding:6px 8px;border:1px solid #E5E7EB;white-space:nowrap">sheetId</th>
-              <th style="padding:6px 8px;border:1px solid #E5E7EB;white-space:nowrap">행번호</th>
-            </tr>
-          </thead>
-          <tbody id="debugTableBody"></tbody>
-        </table>
-      </div>
-    </div>
-    <div id="debugLoading" style="display:none;text-align:center;padding:24px;color:#6B7280;font-size:.85rem">
-      <i class="fas fa-circle-notch fa-spin" style="margin-right:6px"></i> GAS 조회 중...
-    </div>
-    <div id="debugEmpty" style="display:none;text-align:center;padding:24px;color:#9CA3AF;font-size:.85rem">
-      <i class="fas fa-inbox"></i> 결과 없음 (GAS가 빈 배열을 반환했습니다)
-    </div>
-    <div id="debugError" style="display:none;padding:12px;background:#FEF2F2;border:1px solid #FECACA;border-radius:8px;color:#DC2626;font-size:.82rem"></div>
-  </div>
-</div>
-
-<!-- ══════════════════════════════════════════════
      인애드 등록 모달 — 한 화면 통합
      ══════════════════════════════════════════════ -->
 <div id="registerModal" class="modal-overlay" style="display:none" onclick="if(event.target===this)closeRegisterModal()">
