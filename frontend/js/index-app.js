@@ -11780,11 +11780,15 @@ function _updateArchiveBar() {
   const n = _tabDashChecked.size;
   if (n > 0) {
     bar.style.cssText = "display:flex;align-items:center;gap:10px;padding:8px 12px;margin-bottom:6px;background:#FEF3C7;border:1px solid #F59E0B;border-radius:8px;flex-wrap:wrap;position:sticky;top:0;z-index:20;box-shadow:0 2px 8px rgba(245,158,11,.15)";
+    bar.innerHTML = `
+      <span style="font-size:.78rem;font-weight:600;color:#92400E"><i class="fas fa-check-square" style="margin-right:4px"></i>${n}건 선택됨</span>
+      <button onclick="_archiveCheckedTabs()" style="padding:4px 12px;background:#DC2626;color:#fff;border:none;border-radius:6px;font-size:.72rem;font-weight:600;cursor:pointer;display:flex;align-items:center;gap:4px"><i class="fas fa-archive"></i> 마감으로 보내기</button>
+      <button onclick="_checkDuplicateReviewFolders()" style="padding:4px 12px;background:#7C3AED;color:#fff;border:none;border-radius:6px;font-size:.72rem;font-weight:600;cursor:pointer;display:flex;align-items:center;gap:4px"><i class="fas fa-copy"></i> 리뷰폴더 중복검사</button>
+      <button onclick="_clearTabDashChecked()" style="padding:4px 10px;background:#6B7280;color:#fff;border:none;border-radius:6px;font-size:.72rem;cursor:pointer">선택 해제</button>`;
   } else {
     bar.style.display = "none";
+    bar.innerHTML = "";
   }
-  const span = bar.querySelector('span');
-  if (span) span.innerHTML = `<i class="fas fa-check-square" style="margin-right:4px"></i>${n}건 선택됨`;
 }
 
 // ── 리뷰폴더 중복검사 ──
