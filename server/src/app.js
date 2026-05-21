@@ -107,7 +107,7 @@ app.get('/health', async (req, res) => {
     dbTime,
     google: googleStatus,
     serviceAccount: saEmail,
-    version: '2.19.2-bigo-debug-row',
+    version: '2.20.0-remove-clean-closed',
     uptime: Math.floor(process.uptime()),
     memory: Math.round(process.memoryUsage().heapUsed / 1024 / 1024) + 'MB',
     sentry: isSentryEnabled() ? 'active' : 'inactive',
