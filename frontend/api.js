@@ -197,7 +197,7 @@ const _ACTION_MAP = {
   'shareAllSheets':     { method: 'POST', path: '/api/diag/share-all-sheets' },
   'sheetPermissions':   { method: 'GET',  path: '/api/diag/sheet-permissions' },
 
-  // Phase 10: Archive (탭 단위 아카이브)
+  // Phase 10: Archive (탭 단위 마감)
   'archiveDetect':      { method: 'GET',  path: '/api/archive/detect' },
   'archiveTabs':        { method: 'POST', path: '/api/archive/tabs' },
   'archiveList':        { method: 'GET',  path: '/api/archive/list' },

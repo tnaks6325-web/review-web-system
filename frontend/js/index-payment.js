@@ -779,7 +779,7 @@ async function loadApiMetrics() {
         'GET /search': '검색',
         'POST /register': '리뷰어 등록',
         'GET /stats': '통계',
-        'GET /archive': '아카이브',
+        'GET /archive': '마감',
         'POST /share-sheet': '시트 공유',
         'GET /diag-tabs': '탭 진단',
         'POST /fix-campaign-tab-swap': '캠페인명 교정',
@@ -1360,7 +1360,7 @@ function _renderCampaignTable(campaigns, totals) {
   el.innerHTML = html;
 }
 
-// Phase 10 아카이브 관련 함수 → index-app.js로 이전됨 (Phase 12)
+// Phase 10 마감 관련 함수 → index-app.js로 이전됨 (Phase 12)
 
 // ═══════════════════════════════════════════════════════════
 // ★ 스마트 빌드 상태 모니터링 UI

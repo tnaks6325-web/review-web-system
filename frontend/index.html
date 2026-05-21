@@ -463,7 +463,7 @@
               </label>
               <label style="display:flex;align-items:center;gap:6px;font-size:.7rem;cursor:pointer;padding:4px 8px;background:#FEF2F2;border:1px solid #FECACA;border-radius:5px">
                 <input type="checkbox" id="resetArchive" checked style="accent-color:#DC2626">
-                <span><b>아카이브</b> — index_master_archive, review_index_archive, archive_history</span>
+                <span><b>마감</b> — index_master_archive, review_index_archive, archive_history</span>
               </label>
               <label style="display:flex;align-items:center;gap:6px;font-size:.7rem;cursor:pointer;padding:4px 8px;background:#FEF2F2;border:1px solid #FECACA;border-radius:5px">
                 <input type="checkbox" id="resetUnrecognized" checked style="accent-color:#DC2626">
@@ -793,7 +793,7 @@
           <i class="fas fa-money-bill-wave"></i> 입금처리
         </button>
         <button class="admin-tab-btn" data-tab="archive" onclick="switchAdminTab('archive')">
-          <i class="fas fa-archive"></i> 아카이브 <span id="archiveBadge" style="display:none;background:#8B5CF6;color:#fff;font-size:.65rem;padding:1px 5px;border-radius:8px;margin-left:4px;font-weight:700">0</span>
+          <i class="fas fa-archive"></i> 마감 <span id="archiveBadge" style="display:none;background:#8B5CF6;color:#fff;font-size:.65rem;padding:1px 5px;border-radius:8px;margin-left:4px;font-weight:700">0</span>
         </button>
         <button class="admin-tab-btn" data-tab="settings" onclick="switchAdminTab('settings')">
           <i class="fas fa-cog"></i> 설정 <span id="unrecogBadge" style="display:none;background:#EF4444;color:#fff;font-size:.65rem;padding:1px 5px;border-radius:8px;margin-left:4px;font-weight:700">0</span>
@@ -832,7 +832,7 @@
             <button id="btnSyncTabNames" class="btn-sm" onclick="syncTabNames(true)" style="font-size:.78rem;background:#7C3AED;color:#fff;border:none;border-radius:6px;padding:5px 12px;cursor:pointer" title="시트의 실제 탭명·URL을 DB와 동기화합니다 (먼저 미리보기 실행)">
               <i class="fas fa-exchange-alt"></i> 탭명 동기화
             </button>
-            <button id="btnArchiveDetect" class="btn-sm" onclick="dashboardArchiveDetect()" style="font-size:.78rem;background:#8B5CF6;color:#fff;border:none;border-radius:6px;padding:5px 12px;cursor:pointer" title="완료된 탭/차수를 자동 감지하고 아카이브 여부를 결정합니다">
+            <button id="btnArchiveDetect" class="btn-sm" onclick="dashboardArchiveDetect()" style="font-size:.78rem;background:#8B5CF6;color:#fff;border:none;border-radius:6px;padding:5px 12px;cursor:pointer" title="완료된 탭/차수를 자동 감지하고 마감 여부를 결정합니다">
               <i class="fas fa-archive"></i> 완료감지
               <span id="archiveDetectBadge" style="display:none;background:#fff;color:#8B5CF6;font-size:.65rem;padding:0 5px;border-radius:99px;margin-left:4px;font-weight:700">0</span>
             </button>
@@ -1284,12 +1284,12 @@
       </div><!-- /tab-payment -->
 
       <!-- ═══════════════════════════════════════════════════════ -->
-      <!-- Phase 10: 아카이브 관리 탭 -->
+      <!-- Phase 10: 마감 관리 탭 -->
       <!-- ═══════════════════════════════════════════════════════ -->
       <div id="tab-archive" class="admin-tab-pane" style="padding:16px">
         <div class="admin-section-header">
           <span style="font-size:.95rem;font-weight:700;color:var(--t1)">
-            <i class="fas fa-archive" style="color:#8B5CF6;margin-right:6px"></i>완료 인덱스 아카이브
+            <i class="fas fa-archive" style="color:#8B5CF6;margin-right:6px"></i>완료 인덱스 마감
           </span>
           <div style="display:flex;gap:6px;margin-left:auto">
             <button class="btn-sm" onclick="archiveAutoDetect()" style="font-size:.78rem;background:#8B5CF6;color:#fff;border:none;padding:4px 12px;border-radius:6px;cursor:pointer">
@@ -1301,19 +1301,19 @@
           </div>
         </div>
 
-        <!-- 아카이브 요약 카드 -->
+        <!-- 마감 요약 카드 -->
         <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:12px;margin:16px 0">
           <div style="background:#F5F3FF;border-radius:12px;padding:14px;text-align:center;border:1px solid #DDD6FE">
             <div id="archiveCampCount" style="font-size:1.4rem;font-weight:700;color:#7C3AED">0</div>
-            <div style="font-size:.75rem;color:#6B7280">아카이브 캠페인</div>
+            <div style="font-size:.75rem;color:#6B7280">마감 캠페인</div>
           </div>
           <div style="background:#FEF3C7;border-radius:12px;padding:14px;text-align:center;border:1px solid #FDE68A">
             <div id="archiveTabCount" style="font-size:1.4rem;font-weight:700;color:#D97706">0</div>
-            <div style="font-size:.75rem;color:#6B7280">아카이브 탭</div>
+            <div style="font-size:.75rem;color:#6B7280">마감 탭</div>
           </div>
           <div style="background:#F0FDF4;border-radius:12px;padding:14px;text-align:center;border:1px solid #BBF7D0">
             <div id="archiveRowCount" style="font-size:1.4rem;font-weight:700;color:#16A34A">0</div>
-            <div style="font-size:.75rem;color:#6B7280">아카이브 행</div>
+            <div style="font-size:.75rem;color:#6B7280">마감 행</div>
           </div>
         </div>
 
@@ -1331,15 +1331,15 @@
         <div id="archiveDetectWrap" style="display:none;margin-bottom:16px">
         </div>
 
-        <!-- 아카이브 목록 -->
+        <!-- 마감 목록 -->
         <div id="archiveListWrap" style="font-size:.82rem;color:var(--t2)">
           <i class="fas fa-circle-notch fa-spin"></i> 불러오는 중...
         </div>
 
-        <!-- 아카이브 이력 -->
+        <!-- 마감 이력 -->
         <div class="admin-section-header" style="margin-top:24px">
           <span style="font-size:.88rem;font-weight:600;color:var(--t1)">
-            <i class="fas fa-history" style="color:#6366F1;margin-right:6px"></i>아카이브 이력
+            <i class="fas fa-history" style="color:#6366F1;margin-right:6px"></i>마감 이력
           </span>
         </div>
         <div id="archiveHistoryWrap" style="font-size:.82rem;color:var(--t2);margin-top:8px">

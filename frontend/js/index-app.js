@@ -31,11 +31,11 @@ const SYSTEM_NOTICES = [
   {
     version: "2026-05-06-3",
     date: "2026-05-06",
-    title: "완료감지 아카이브 재표시 방지 + 숨김탭 토글",
+    title: "완료감지 마감 재표시 방지 + 숨김탭 토글",
     changes: [
-      { type: "fix", text: "아카이브 후에도 완료감지에 계속 표시되던 문제 해결 (트리아이나 등)" },
+      { type: "fix", text: "마감 후에도 완료감지에 계속 표시되던 문제 해결 (트리아이나 등)" },
       { type: "feat", text: "완료감지 목록에서 각 탭마다 숨김/숨김해제 버튼 제공" },
-      { type: "fix", text: "스마트빌드가 아카이브된 차수의 행을 재삽입하지 않도록 개선" },
+      { type: "fix", text: "스마트빌드가 마감된 차수의 행을 재삽입하지 않도록 개선" },
       { type: "feat", text: "공지사항을 누적 관리 방식으로 변경 (전체 이력 확인 가능)" },
     ]
   },
@@ -1687,7 +1687,7 @@ function _showAllCompleteModal(completeTabs) {
             리뷰와 입금이 모두 완료된 탭이 존재합니다.
           </p>
           <p style="margin:0;font-size:.75rem;color:#6B7280;line-height:1.5">
-            마감자료를 확인하시어 전달하신 후<br>탭을 체크하여 <b>아카이브</b>로 넘겨주세요.
+            마감자료를 확인하시어 전달하신 후<br>탭을 체크하여 <b>마감</b>으로 넘겨주세요.
           </p>
         </div>
         <div style="margin-bottom:16px">
@@ -1864,7 +1864,7 @@ async function loadAdminDashboard() {
     // Phase 14: 인식 실패 탭 배지 업데이트
     _updateUnrecogBadge();
 
-    // ★ Phase 12: 아카이브 대상 배지 업데이트 (대시보드에서 알림)
+    // ★ Phase 12: 마감 대상 배지 업데이트 (대시보드에서 알림)
     _updateArchiveBadge();
 
     // ★ Phase 15: 제출+입금 모두 100% 완료 탭 감지 → 팝업 알림
@@ -4016,7 +4016,7 @@ async function confirmClosed() {
       msg += "동기화 후 적용됩니다.";
       showToast("✅ " + msg);
 
-      // ★ 차수 마감 시 아카이브 이동 확인 알람 표시
+      // ★ 차수 마감 시 마감 이동 확인 알람 표시
       const closedRoundItems = items.filter(i => i.isClosed && i.round);
       if (closedRoundItems.length > 0) {
         _showArchiveRoundConfirm(closedRoundItems);
@@ -4040,7 +4040,7 @@ function _exitClosedMode() {
   document.documentElement.style.setProperty('--dc-closedcb', '0px');
 }
 
-// ★ 차수 마감 후 아카이브 확인 알람
+// ★ 차수 마감 후 마감 확인 알람
 function _showArchiveRoundConfirm(closedRoundItems) {
   // 기존 알람 제거
   document.getElementById('archiveRoundConfirmBanner')?.remove();
@@ -4057,14 +4057,14 @@ function _showArchiveRoundConfirm(closedRoundItems) {
     <div style="display:flex;align-items:flex-start;gap:10px">
       <i class="fas fa-exclamation-triangle" style="color:#D97706;font-size:1.1rem;margin-top:2px"></i>
       <div style="flex:1">
-        <div style="font-size:.82rem;font-weight:600;color:#92400E;margin-bottom:4px">마감 차수 아카이브 안내</div>
+        <div style="font-size:.82rem;font-weight:600;color:#92400E;margin-bottom:4px">마감 차수 처리 안내</div>
         <div style="font-size:.75rem;color:#78350F;margin-bottom:10px">
           <strong>${summary}</strong> 차수가 마감되었습니다.<br>
-          아카이브로 이동하시겠습니까? (다음 빌드 시 자동 제외됩니다)
+          마감으로 이동하시겠습니까? (다음 빌드 시 자동 제외됩니다)
         </div>
         <div style="display:flex;gap:8px">
           <button onclick="_archiveClosedRoundsNow()" style="padding:5px 12px;background:#8B5CF6;color:#fff;border:none;border-radius:6px;font-size:.73rem;font-weight:600;cursor:pointer">
-            <i class="fas fa-archive" style="margin-right:3px"></i>아카이브 이동
+            <i class="fas fa-archive" style="margin-right:3px"></i>마감 이동
           </button>
           <button onclick="_dismissArchiveConfirm()" style="padding:5px 12px;background:#fff;color:#6B7280;border:1px solid #D1D5DB;border-radius:6px;font-size:.73rem;cursor:pointer">
             나중에
@@ -4106,7 +4106,7 @@ async function _archiveClosedRoundsNow() {
   const tabs = items.map(i => ({ sheetId: i.sheetId, tabName: i.tabName, round: i.round }));
 
   try {
-    showToast(`${tabs.length}건 차수 아카이브 처리 중...`, 'info');
+    showToast(`${tabs.length}건 차수 마감 처리 중...`, 'info');
     const res = await fetch(API_BASE_URL + '/api/archive/tabs', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json', ..._getAuthHeaders() },
@@ -4114,13 +4114,13 @@ async function _archiveClosedRoundsNow() {
     }).then(r => r.json());
 
     if (res.ok) {
-      showToast(`✅ 아카이브 완료: ${res.archivedTabs || tabs.length}건, ${res.archivedRows || 0}행 이동`, 'success');
+      showToast(`✅ 마감 완료: ${res.archivedTabs || tabs.length}건, ${res.archivedRows || 0}행 이동`, 'success');
       await loadTabDashboard(); // 새로고침
     } else {
-      showToast(res.error || '아카이브 실패', 'error');
+      showToast(res.error || '마감 실패', 'error');
     }
   } catch (err) {
-    showToast('아카이브 요청 실패: ' + err.message, 'error');
+    showToast('마감 요청 실패: ' + err.message, 'error');
   }
 }
 
@@ -10622,10 +10622,10 @@ function toggleDashPolling() {
 // 관리자 대시보드 로드 완료 후 스냅샷은 loadAdminDashboard 내부에서 직접 갱신됨
 
 /* ══════════════════════════════════════════════════════════════
-   ★ Phase 12: 아카이브 시스템 (탭 단위, 반자동)
+   ★ Phase 12: 마감 시스템 (탭 단위, 반자동)
    ══════════════════════════════════════════════════════════════ */
 
-// ── 아카이브 목록 로드 (검색/기간필터 지원) ──
+// ── 마감 목록 로드 (검색/기간필터 지원) ──
 async function loadArchiveList() {
   const wrap = document.getElementById('archiveListWrap');
   if (!wrap) return;
@@ -10657,7 +10657,7 @@ async function loadArchiveList() {
     if (el('archiveRowCount'))  el('archiveRowCount').textContent = (data.totalRows || 0).toLocaleString();
 
     if (campaigns.length === 0) {
-      wrap.innerHTML = '<div style="text-align:center;padding:32px;color:var(--t3)"><i class="fas fa-inbox" style="font-size:2rem;margin-bottom:8px;display:block"></i>아카이브된 데이터가 없습니다</div>';
+      wrap.innerHTML = '<div style="text-align:center;padding:32px;color:var(--t3)"><i class="fas fa-inbox" style="font-size:2rem;margin-bottom:8px;display:block"></i>마감된 데이터가 없습니다</div>';
       _loadArchiveHistory();
       return;
     }
@@ -10680,7 +10680,7 @@ async function loadArchiveList() {
               <th style="padding:6px 8px;text-align:right;color:#6B7280;width:60px">행</th>
               <th style="padding:6px 8px;text-align:right;color:#6B7280;width:60px">제출</th>
               <th style="padding:6px 8px;text-align:center;color:#6B7280;width:70px">사유</th>
-              <th style="padding:6px 8px;text-align:right;color:#6B7280;width:110px">아카이브일</th>
+              <th style="padding:6px 8px;text-align:right;color:#6B7280;width:110px">마감일</th>
               <th style="padding:6px 8px;text-align:center;color:#6B7280;width:60px">복원</th>
             </tr></thead><tbody>`;
       camp.tabs.forEach(t => {
@@ -10716,7 +10716,7 @@ async function loadArchiveList() {
   }
 }
 
-// ── 아카이브 탭 복원 ──
+// ── 마감 탭 복원 ──
 async function restoreArchivedTab(sheetId, tabName) {
   if (!confirm(`"${tabName}" 탭을 대시보드로 복원하시겠습니까?\n\n복원하면 다시 스마트갱신 대상이 되며 대시보드에 표시됩니다.`)) return;
 
@@ -10740,7 +10740,7 @@ async function restoreArchivedTab(sheetId, tabName) {
   }
 }
 
-// ── 아카이브 이력 로드 ──
+// ── 마감 이력 로드 ──
 async function _loadArchiveHistory() {
   const wrap = document.getElementById('archiveHistoryWrap');
   if (!wrap) return;
@@ -10787,7 +10787,7 @@ async function archiveAutoDetect() {
     }
 
     if (!data.campaigns || data.totalTabs === 0) {
-      detectWrap.innerHTML = '<div style="padding:12px;background:#F0FDF4;border:1px solid #BBF7D0;border-radius:8px;color:#16A34A"><i class="fas fa-check-circle"></i> 아카이브 대상이 없습니다. 모든 인덱스가 진행중입니다.</div>';
+      detectWrap.innerHTML = '<div style="padding:12px;background:#F0FDF4;border:1px solid #BBF7D0;border-radius:8px;color:#16A34A"><i class="fas fa-check-circle"></i> 마감 대상이 없습니다. 모든 인덱스가 진행중입니다.</div>';
       return;
     }
 
@@ -10796,7 +10796,7 @@ async function archiveAutoDetect() {
       <div style="display:flex;align-items:center;gap:8px;margin-bottom:12px">
         <span style="font-weight:700;color:#7C3AED;font-size:.9rem"><i class="fas fa-magic"></i> 감지 결과: ${data.totalTabs}개 탭 (${data.totalCampaigns}개 캠페인)</span>
         <button onclick="_archiveExecuteSelected()" style="margin-left:auto;background:#8B5CF6;color:#fff;border:none;padding:5px 14px;border-radius:6px;font-size:.78rem;cursor:pointer">
-          <i class="fas fa-archive"></i> 선택 항목 아카이브
+          <i class="fas fa-archive"></i> 선택 항목 마감
         </button>
         <button onclick="document.getElementById('archiveDetectWrap').style.display='none'" style="background:#E5E7EB;border:none;padding:5px 12px;border-radius:6px;font-size:.78rem;cursor:pointer">
           닫기
@@ -10897,11 +10897,11 @@ function _archiveUncheckUnpaid() {
   if (typeof showToast === 'function') showToast(`입금 미완료 ${count}건 체크 해제됨`, 'info');
 }
 
-// ── 선택 항목 아카이브 실행 ──
+// ── 선택 항목 마감 실행 ──
 async function _archiveExecuteSelected() {
   const checkboxes = document.querySelectorAll('.archive-detect-cb:checked');
   if (checkboxes.length === 0) {
-    alert('아카이브할 항목을 선택해주세요.');
+    alert('마감할 항목을 선택해주세요.');
     return;
   }
 
@@ -10912,44 +10912,44 @@ async function _archiveExecuteSelected() {
     tabs.push(item);
   });
 
-  if (!confirm(`${tabs.length}개 탭을 아카이브합니다.\n\n아카이브하면 대시보드에서 제외되고 인덱스 빌드에서 스킵됩니다.\n\n계속하시겠습니까?`)) {
+  if (!confirm(`${tabs.length}개 탭을 마감합니다.\n\n마감하면 대시보드에서 제외되고 인덱스 빌드에서 스킵됩니다.\n\n계속하시겠습니까?`)) {
     return;
   }
 
   const detectWrap = document.getElementById('archiveDetectWrap');
   if (detectWrap) {
-    detectWrap.innerHTML = '<div style="text-align:center;padding:16px;color:var(--t2)"><i class="fas fa-circle-notch fa-spin"></i> 아카이브 실행 중...</div>';
+    detectWrap.innerHTML = '<div style="text-align:center;padding:16px;color:var(--t2)"><i class="fas fa-circle-notch fa-spin"></i> 마감 실행 중...</div>';
   }
 
   try {
     const data = await gasGet({ action: 'archiveTabs', tabs: tabs, reason: 'auto_detect' });
 
     if (data.error) {
-      alert('아카이브 실패: ' + data.error);
+      alert('마감 실패: ' + data.error);
       if (detectWrap) detectWrap.style.display = 'none';
       return;
     }
 
-    const msg = `아카이브 완료!\n\n• ${data.archivedTabs || 0}개 탭 처리\n• ${(data.archivedRows || 0).toLocaleString()}개 행 이동`;
+    const msg = `마감 완료!\n\n• ${data.archivedTabs || 0}개 탭 처리\n• ${(data.archivedRows || 0).toLocaleString()}개 행 이동`;
     alert(msg);
 
     if (detectWrap) detectWrap.style.display = 'none';
 
-    // 아카이브 목록 새로고침
+    // 마감 목록 새로고침
     loadArchiveList();
-    // 대시보드 자동 새로고침 (아카이브된 탭 즉시 제거)
+    // 대시보드 자동 새로고침 (마감된 탭 즉시 제거)
     if (typeof loadAdminDashboard === 'function') loadAdminDashboard();
   } catch (err) {
-    alert('아카이브 실패: ' + err.message);
+    alert('마감 실패: ' + err.message);
     if (detectWrap) detectWrap.style.display = 'none';
   }
 }
 
 /* ══════════════════════════════════════════════════════════════
-   ★ Phase 12: 아카이브 대상 배지 업데이트 (대시보드에서 호출)
+   ★ Phase 12: 마감 대상 배지 업데이트 (대시보드에서 호출)
    ══════════════════════════════════════════════════════════════ */
 
-// ── 아카이브 대상 배지 + 대시보드 알림 배너 ──
+// ── 마감 대상 배지 + 대시보드 알림 배너 ──
 async function _updateArchiveBadge() {
   try {
     const data = await gasGet({ action: 'archiveDetect' });
@@ -10999,8 +10999,8 @@ async function _updateArchiveBadge() {
       banner.innerHTML = `
         <i class="fas fa-archive" style="color:#8B5CF6;font-size:1.1rem"></i>
         <div style="flex:1">
-          <div style="font-weight:600;font-size:.84rem;color:#7C3AED">아카이브 대상 ${totalDetected}건 감지됨</div>
-          <div style="font-size:.72rem;color:#6B7280;margin-top:2px">리뷰+입금 완료된 차수가 있습니다. 클릭하여 아카이브 처리하세요.</div>
+          <div style="font-weight:600;font-size:.84rem;color:#7C3AED">마감 대상 ${totalDetected}건 감지됨</div>
+          <div style="font-size:.72rem;color:#6B7280;margin-top:2px">리뷰+입금 완료된 차수가 있습니다. 클릭하여 마감 처리하세요.</div>
         </div>
         <i class="fas fa-chevron-right" style="color:#8B5CF6;font-size:.8rem"></i>
       `;
@@ -11015,7 +11015,7 @@ async function _updateArchiveBadge() {
 }
 
 /* ══════════════════════════════════════════════════════════════
-   ★ 대시보드 내 완료감지 + 아카이브 결정 UI
+   ★ 대시보드 내 완료감지 + 마감 결정 UI
    ══════════════════════════════════════════════════════════════ */
 async function dashboardArchiveDetect() {
   const detectWrap = document.getElementById('dashArchiveDetectWrap');
@@ -11034,7 +11034,7 @@ async function dashboardArchiveDetect() {
     }
 
     if (!data.campaigns || data.totalTabs === 0) {
-      detectWrap.innerHTML = '<div style="padding:12px;background:#F0FDF4;border:1px solid #BBF7D0;border-radius:8px;color:#16A34A"><i class="fas fa-check-circle"></i> 아카이브 대상이 없습니다. 모든 인덱스가 진행중입니다.</div>';
+      detectWrap.innerHTML = '<div style="padding:12px;background:#F0FDF4;border:1px solid #BBF7D0;border-radius:8px;color:#16A34A"><i class="fas fa-check-circle"></i> 마감 대상이 없습니다. 모든 인덱스가 진행중입니다.</div>';
       return;
     }
 
@@ -11043,7 +11043,7 @@ async function dashboardArchiveDetect() {
       <div style="display:flex;align-items:center;gap:8px;margin-bottom:12px;flex-wrap:wrap">
         <span style="font-weight:700;color:#7C3AED;font-size:.9rem"><i class="fas fa-magic"></i> 감지 결과: ${data.totalTabs}개 탭 (${data.totalCampaigns}개 캠페인)</span>
         <button onclick="_dashArchiveExecute()" style="margin-left:auto;background:#8B5CF6;color:#fff;border:none;padding:6px 16px;border-radius:6px;font-size:.8rem;cursor:pointer;font-weight:600">
-          <i class="fas fa-archive"></i> 선택 항목 아카이브
+          <i class="fas fa-archive"></i> 선택 항목 마감
         </button>
         <button onclick="_dashArchiveSkip()" style="background:#F59E0B;color:#fff;border:none;padding:6px 14px;border-radius:6px;font-size:.8rem;cursor:pointer">
           <i class="fas fa-forward"></i> 나중에
@@ -11059,7 +11059,7 @@ async function dashboardArchiveDetect() {
         <button onclick="_dashArchiveUncheckUnpaid()" style="background:#FEF2F2;color:#DC2626;border:1px solid #FECACA;padding:3px 10px;border-radius:5px;font-size:.72rem;cursor:pointer">
           <i class="fas fa-times-circle"></i> 입금 미완료 체크해제
         </button>
-        <span style="font-size:.7rem;color:#9CA3AF">체크 해제 = 아카이브하지 않음 (나중에 처리)</span>
+        <span style="font-size:.7rem;color:#9CA3AF">체크 해제 = 마감하지 않음 (나중에 처리)</span>
       </div>`;
 
     data.campaigns.forEach(camp => {
@@ -11131,12 +11131,12 @@ async function dashboardArchiveDetect() {
   }
 }
 
-// ── 대시보드 아카이브: 전체 선택/해제 ──
+// ── 대시보드 마감: 전체 선택/해제 ──
 function _dashArchiveToggleAll(checked) {
   document.querySelectorAll('.dash-archive-cb').forEach(cb => { cb.checked = checked; });
 }
 
-// ── 대시보드 아카이브: 입금 미완료 항목 체크 해제 ──
+// ── 대시보드 마감: 입금 미완료 항목 체크 해제 ──
 function _dashArchiveUncheckUnpaid() {
   let count = 0;
   document.querySelectorAll('.dash-archive-cb').forEach(cb => {
@@ -11148,17 +11148,17 @@ function _dashArchiveUncheckUnpaid() {
   if (typeof showToast === 'function') showToast(`입금 미완료 ${count}건 체크 해제됨`, 'info');
 }
 
-// ── 대시보드 아카이브: 나중에 (닫기) ──
+// ── 대시보드 마감: 나중에 (닫기) ──
 function _dashArchiveSkip() {
   const wrap = document.getElementById('dashArchiveDetectWrap');
   if (wrap) wrap.style.display = 'none';
 }
 
-// ── 대시보드 아카이브: 선택 항목 실행 ──
+// ── 대시보드 마감: 선택 항목 실행 ──
 async function _dashArchiveExecute() {
   const checkboxes = document.querySelectorAll('.dash-archive-cb:checked');
   if (checkboxes.length === 0) {
-    alert('아카이브할 항목을 선택해주세요.');
+    alert('마감할 항목을 선택해주세요.');
     return;
   }
 
@@ -11170,29 +11170,29 @@ async function _dashArchiveExecute() {
   });
 
   const totalUnchecked = document.querySelectorAll('.dash-archive-cb:not(:checked)').length;
-  let confirmMsg = `${tabs.length}개 항목을 아카이브합니다.`;
+  let confirmMsg = `${tabs.length}개 항목을 마감합니다.`;
   if (totalUnchecked > 0) {
-    confirmMsg += `\n\n(${totalUnchecked}개 항목은 선택 해제되어 아카이브하지 않습니다)`;
+    confirmMsg += `\n\n(${totalUnchecked}개 항목은 선택 해제되어 마감하지 않습니다)`;
   }
-  confirmMsg += '\n\n아카이브하면 대시보드에서 제외되고 인덱스 빌드에서 스킵됩니다.\n계속하시겠습니까?';
+  confirmMsg += '\n\n마감하면 대시보드에서 제외되고 인덱스 빌드에서 스킵됩니다.\n계속하시겠습니까?';
 
   if (!confirm(confirmMsg)) return;
 
   const detectWrap = document.getElementById('dashArchiveDetectWrap');
   if (detectWrap) {
-    detectWrap.innerHTML = '<div style="text-align:center;padding:16px;color:var(--t2)"><i class="fas fa-circle-notch fa-spin"></i> 아카이브 실행 중...</div>';
+    detectWrap.innerHTML = '<div style="text-align:center;padding:16px;color:var(--t2)"><i class="fas fa-circle-notch fa-spin"></i> 마감 실행 중...</div>';
   }
 
   try {
     const data = await gasPost({ action: 'archiveTabs', tabs: tabs, reason: 'dashboard_detect' });
 
     if (data.error) {
-      alert('아카이브 실패: ' + data.error);
+      alert('마감 실패: ' + data.error);
       if (detectWrap) detectWrap.style.display = 'none';
       return;
     }
 
-    const msg = `아카이브 완료!\n\n• ${data.archivedTabs || 0}개 탭 처리\n• ${(data.archivedRows || 0).toLocaleString()}개 행 이동`;
+    const msg = `마감 완료!\n\n• ${data.archivedTabs || 0}개 탭 처리\n• ${(data.archivedRows || 0).toLocaleString()}개 행 이동`;
     alert(msg);
 
     if (detectWrap) detectWrap.style.display = 'none';
@@ -11201,7 +11201,7 @@ async function _dashArchiveExecute() {
     _updateArchiveBadge();
     if (typeof loadTabDashboard === 'function') loadTabDashboard();
   } catch (err) {
-    alert('아카이브 실패: ' + err.message);
+    alert('마감 실패: ' + err.message);
     if (detectWrap) detectWrap.style.display = 'none';
   }
 }
@@ -11627,7 +11627,7 @@ function _filterTabDashData() {
   const searchQ = (document.getElementById("tabDashSearch")?.value || "").trim().toLowerCase();
 
   // ★ 차수별 행 확장: roundList가 있는 탭은 차수별로 분리
-  // closedRounds에 포함된 차수(아카이브 완료)는 제외
+  // closedRounds에 포함된 차수(마감 완료)는 제외
   const expanded = [];
   tabs.forEach(t => {
     const closedRoundsSet = new Set();
@@ -11709,7 +11709,7 @@ async function _refreshDashboardAll() {
   if (dashDetectWrap && dashDetectWrap.style.display !== 'none' && dashDetectWrap.innerHTML.trim() !== '') {
     dashboardArchiveDetect();
   }
-  // 아카이브 탭의 완료감지 패널이 열려있으면 새로고침
+  // 마감 탭의 완료감지 패널이 열려있으면 새로고침
   const detectWrap = document.getElementById('archiveDetectWrap');
   if (detectWrap && detectWrap.style.display !== 'none' && detectWrap.innerHTML.trim() !== '') {
     archiveAutoDetect();
@@ -12493,11 +12493,11 @@ function _renderFullTableView(wrap, filtered) {
   const visibleCols = _TAB_DASH_COLS.filter(c => c.show);
   const thStyle = "padding:7px 5px;font-weight:600;white-space:nowrap;border-bottom:2px solid #D1D5DB;font-size:.72rem;position:sticky;top:0;background:#F3F4F6;z-index:1";
 
-  // 아카이브 액션바
+  // 마감 액션바
   const checkedCount = _tabDashChecked.size;
   let html = `<div id="tabDashArchiveBar" style="display:${checkedCount>0?'flex':'none'};align-items:center;gap:10px;padding:8px 12px;margin-bottom:6px;background:#FEF3C7;border:1px solid #F59E0B;border-radius:8px;flex-wrap:wrap">
     <span style="font-size:.78rem;font-weight:600;color:#92400E"><i class="fas fa-check-square" style="margin-right:4px"></i>${checkedCount}건 선택됨</span>
-    <button onclick="_archiveCheckedTabs()" style="padding:4px 12px;background:#DC2626;color:#fff;border:none;border-radius:6px;font-size:.72rem;font-weight:600;cursor:pointer;display:flex;align-items:center;gap:4px"><i class="fas fa-archive"></i> 아카이브로 보내기</button>
+    <button onclick="_archiveCheckedTabs()" style="padding:4px 12px;background:#DC2626;color:#fff;border:none;border-radius:6px;font-size:.72rem;font-weight:600;cursor:pointer;display:flex;align-items:center;gap:4px"><i class="fas fa-archive"></i> 마감으로 보내기</button>
     <button onclick="_checkDuplicateReviewFolders()" style="padding:4px 12px;background:#7C3AED;color:#fff;border:none;border-radius:6px;font-size:.72rem;font-weight:600;cursor:pointer;display:flex;align-items:center;gap:4px"><i class="fas fa-copy"></i> 리뷰폴더 중복검사</button>
     <button onclick="_clearTabDashChecked()" style="padding:4px 10px;background:#6B7280;color:#fff;border:none;border-radius:6px;font-size:.72rem;cursor:pointer">선택 해제</button>
   </div>`;
@@ -12765,9 +12765,9 @@ function _formatDate(isoStr) {
   catch(_) { return isoStr; }
 }
 
-// ── 아카이브 실행 ──
+// ── 마감 실행 ──
 async function _archiveCheckedTabs() {
-  if (_tabDashChecked.size === 0) { showToast('아카이브할 탭을 선택하세요.', 'info'); return; }
+  if (_tabDashChecked.size === 0) { showToast('마감할 탭을 선택하세요.', 'info'); return; }
 
   // 선택된 탭 정보 수집 (roundList 포함)
   const selectedTabs = [];
@@ -12789,12 +12789,12 @@ async function _archiveCheckedTabs() {
     return;
   }
 
-  // 차수가 없는 탭은 기존 방식(탭 전체 아카이브)
+  // 차수가 없는 탭은 기존 방식(탭 전체 마감)
   const tabs = selectedTabs.map(t => ({ sheetId: t.sheetId, tabName: t.tabName }));
   const names = selectedTabs.map(t => t.displayName);
 
-  const confirmed = confirm(`선택한 ${tabs.length}건을 아카이브로 보내시겠습니까?\n\n` +
-    `아카이브된 탭은:\n` +
+  const confirmed = confirm(`선택한 ${tabs.length}건을 마감으로 보내시겠습니까?\n\n` +
+    `마감된 탭은:\n` +
     `• 스마트빌드 갱신에서 스킵\n` +
     `• 인덱스 스캔에서 스킵\n` +
     `• DB 동기화에서 스킵\n` +
@@ -12805,7 +12805,7 @@ async function _archiveCheckedTabs() {
   await _executeArchive(tabs, 'manual_dashboard');
 }
 
-// ── 차수 선택 아카이브 모달 ──
+// ── 차수 선택 마감 모달 ──
 function _showArchiveRoundModal(selectedTabs) {
   // 기존 모달 제거
   let modal = document.getElementById('archiveRoundModal');
@@ -12813,8 +12813,8 @@ function _showArchiveRoundModal(selectedTabs) {
 
   let html = `<div id="archiveRoundModal" style="position:fixed;inset:0;z-index:9999;display:flex;align-items:center;justify-content:center;background:rgba(0,0,0,.45)">
     <div style="background:#fff;border-radius:14px;padding:24px;max-width:520px;width:90%;max-height:80vh;overflow-y:auto;box-shadow:0 20px 60px rgba(0,0,0,.3)">
-      <h3 style="margin:0 0 6px;font-size:1rem;color:#1F2937"><i class="fas fa-archive" style="color:#8B5CF6;margin-right:6px"></i>아카이브 차수 선택</h3>
-      <p style="margin:0 0 16px;font-size:.78rem;color:#6B7280">아카이브할 차수를 선택하세요. 선택하지 않은 차수는 대시보드에 유지됩니다.</p>`;
+      <h3 style="margin:0 0 6px;font-size:1rem;color:#1F2937"><i class="fas fa-archive" style="color:#8B5CF6;margin-right:6px"></i>마감 차수 선택</h3>
+      <p style="margin:0 0 16px;font-size:.78rem;color:#6B7280">마감할 차수를 선택하세요. 선택하지 않은 차수는 대시보드에 유지됩니다.</p>`;
 
   selectedTabs.forEach((tab, tabIdx) => {
     html += `<div style="margin-bottom:14px;border:1px solid #E5E7EB;border-radius:10px;overflow:hidden">
@@ -12838,9 +12838,9 @@ function _showArchiveRoundModal(selectedTabs) {
       });
       html += `</div>`;
     } else {
-      // 차수가 1개 이하인 탭은 전체 아카이브
+      // 차수가 1개 이하인 탭은 전체 마감
       html += `<div style="padding:8px 12px;font-size:.75rem;color:#9CA3AF">
-        <label><input type="checkbox" class="archive-round-cb" data-tab-idx="${tabIdx}" data-round="__ALL__" value="__ALL__" checked style="margin-right:4px">탭 전체 아카이브</label>
+        <label><input type="checkbox" class="archive-round-cb" data-tab-idx="${tabIdx}" data-round="__ALL__" value="__ALL__" checked style="margin-right:4px">탭 전체 마감</label>
       </div>`;
     }
     html += `</div>`;
@@ -12871,16 +12871,16 @@ async function _executeArchiveFromModal() {
     const cbs = document.querySelectorAll(`.archive-round-cb[data-tab-idx="${tabIdx}"]:checked`);
     if (cbs.length === 0) return;
 
-    // "__ALL__" 이면 탭 전체 아카이브
+    // "__ALL__" 이면 탭 전체 마감
     const rounds = Array.from(cbs).map(cb => cb.value);
     if (rounds.includes('__ALL__')) {
       tabs.push({ sheetId: tab.sheetId, tabName: tab.tabName });
     } else {
-      // 모든 차수가 선택된 경우도 탭 전체 아카이브로 처리
+      // 모든 차수가 선택된 경우도 탭 전체 마감으로 처리
       if (tab.roundList.length > 0 && rounds.length === tab.roundList.length) {
         tabs.push({ sheetId: tab.sheetId, tabName: tab.tabName });
       } else {
-        // 차수별 개별 아카이브
+        // 차수별 개별 마감
         rounds.forEach(round => {
           tabs.push({ sheetId: tab.sheetId, tabName: tab.tabName, round });
         });
@@ -12889,7 +12889,7 @@ async function _executeArchiveFromModal() {
   });
 
   if (tabs.length === 0) {
-    showToast('아카이브할 차수를 선택하세요.', 'info');
+    showToast('마감할 차수를 선택하세요.', 'info');
     return;
   }
 
@@ -12901,7 +12901,7 @@ async function _executeArchiveFromModal() {
 
 async function _executeArchive(tabs, reason) {
   try {
-    showToast(`${tabs.length}건 아카이브 처리 중...`, 'info');
+    showToast(`${tabs.length}건 마감 처리 중...`, 'info');
     const res = await fetch(API_BASE_URL + '/api/archive/tabs', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json', ..._getAuthHeaders() },
@@ -12909,14 +12909,14 @@ async function _executeArchive(tabs, reason) {
     }).then(r => r.json());
 
     if (res.ok) {
-      showToast(`아카이브 완료: ${res.archivedTabs}탭, ${res.archivedRows}행`, 'success');
+      showToast(`마감 완료: ${res.archivedTabs}탭, ${res.archivedRows}행`, 'success');
       _tabDashChecked.clear();
       await loadTabDashboard(); // 새로고침
     } else {
-      showToast(res.error || '아카이브 실패', 'error');
+      showToast(res.error || '마감 실패', 'error');
     }
   } catch (err) {
-    showToast('아카이브 요청 실패: ' + err.message, 'error');
+    showToast('마감 요청 실패: ' + err.message, 'error');
   }
 }
 
@@ -13168,7 +13168,7 @@ async function resetAllData() {
   const targets = [];
   const labels = [];
   if (document.getElementById("resetDashboard")?.checked) { targets.push("dashboard"); labels.push("대시보드"); }
-  if (document.getElementById("resetArchive")?.checked) { targets.push("archive"); labels.push("아카이브"); }
+  if (document.getElementById("resetArchive")?.checked) { targets.push("archive"); labels.push("마감"); }
   if (document.getElementById("resetUnrecognized")?.checked) { targets.push("unrecognized"); labels.push("인식실패탭"); }
 
   if (targets.length === 0) { showToast("초기화할 항목을 1개 이상 선택하세요.", "warning"); return; }
