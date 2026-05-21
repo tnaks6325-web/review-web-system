@@ -11641,6 +11641,9 @@ function _filterTabDashData() {
         // ★ display_name_map에서 차수별 표시명 오버라이드
         const dnMap = t.display_name_map || {};
         const roundDisplayName = dnMap[rd.round];
+        // ★ round_meta에서 차수별 부가정보(담당자, 리뷰유형, 결제방식, 주문시간대) 오버라이드
+        const rmMap = t.round_meta || {};
+        const rmData = rmMap[rd.round] || {};
         expanded.push(Object.assign({}, t, {
           _roundLabel: rd.round,
           _roundTotal: rd.total,
@@ -11648,6 +11651,10 @@ function _filterTabDashData() {
           _roundPaid: rd.paid || 0,
           _isRoundRow: true,
           display_name: roundDisplayName !== undefined ? roundDisplayName : (t.display_name || ""),
+          manager: rmData.manager !== undefined ? rmData.manager : (t.manager || ""),
+          review_type: rmData.review_type !== undefined ? rmData.review_type : (t.review_type || ""),
+          payment_type: rmData.payment_type !== undefined ? rmData.payment_type : (t.payment_type || ""),
+          time_range: rmData.time_range !== undefined ? rmData.time_range : (t.time_range || ""),
         }));
       });
     } else {
@@ -11940,19 +11947,32 @@ function _popupJustClosed(popupKey) {
 async function _saveTabField(t, fieldMap, round) {
   try {
     const payload = { action:"setTabConfig", sheetId: t.sheet_id, tabName: t.tab_name, ...fieldMap };
-    // ★ 차수별 표시명: round가 있으면 서버에 round 전달 → display_name_map JSONB 업데이트
+    // ★ 차수별: round가 있으면 서버에 round 전달 → JSONB(display_name_map / round_meta) 업데이트
     if (round) payload.round = round;
     const res = await gasPost(payload);
     if (res.error) { showToast(res.error, "error"); return false; }
     // 로컬 데이터 즉시 반영
-    if (round && fieldMap.displayName !== undefined) {
-      // display_name_map 로컬 업데이트
-      const origTab = (_tabDashData?.tabs||[]).find(x => x.sheet_id===t.sheet_id && x.tab_name===t.tab_name);
-      if (origTab) {
-        if (!origTab.display_name_map) origTab.display_name_map = {};
-        origTab.display_name_map[round] = fieldMap.displayName;
+    const origTab = (_tabDashData?.tabs||[]).find(x => x.sheet_id===t.sheet_id && x.tab_name===t.tab_name);
+    if (round) {
+      // ★ 차수별 로컬 업데이트
+      if (fieldMap.displayName !== undefined) {
+        // display_name_map 로컬 업데이트
+        if (origTab) {
+          if (!origTab.display_name_map) origTab.display_name_map = {};
+          origTab.display_name_map[round] = fieldMap.displayName;
+        }
+        t.display_name = fieldMap.displayName;
       }
-      t.display_name = fieldMap.displayName;
+      // ★ round_meta 필드들 (manager, reviewType, paymentType, timeRange) 로컬 업데이트
+      const ROUND_META_API_KEYS = { manager: 'manager', reviewType: 'review_type', paymentType: 'payment_type', timeRange: 'time_range' };
+      for (const [apiKey, dbKey] of Object.entries(ROUND_META_API_KEYS)) {
+        if (fieldMap[apiKey] !== undefined && origTab) {
+          if (!origTab.round_meta) origTab.round_meta = {};
+          if (!origTab.round_meta[round]) origTab.round_meta[round] = {};
+          origTab.round_meta[round][dbKey] = fieldMap[apiKey];
+          t[dbKey] = fieldMap[apiKey];
+        }
+      }
     } else {
       for (const [apiKey, val] of Object.entries(fieldMap)) {
         const dbKey = { displayName:"display_name", manager:"manager", reviewType:"review_type",
@@ -11960,6 +11980,7 @@ async function _saveTabField(t, fieldMap, round) {
           incomeType:"income_type", transferBank:"transfer_bank", folderUrl:"folder_url",
           captureFolderUrl:"capture_folder_url" }[apiKey] || apiKey;
         t[dbKey] = val;
+        if (origTab) origTab[dbKey] = val;
       }
     }
     showToast("저장 완료", "success");
@@ -12065,24 +12086,36 @@ async function _saveLinkInput(id, sheetId, tabName, apiKey, dbKey) {
 }
 
 /** 택일 팝업: 버튼 클릭 → 드롭다운 */
-function _inlineSelect(t, dbKey, apiKey, options, colorMap) {
+function _inlineSelect(t, dbKey, apiKey, options, colorMap, round) {
   const cur = t[dbKey] || "";
   const display = cur || "—";
   const clr = (colorMap && colorMap[cur]) || "#6B7280";
   const bg = (colorMap && colorMap[cur+"_bg"]) || "#F3F4F6";
   const sid = escHtml(t.sheet_id), tn = escHtml(t.tab_name);
-  return `<span onclick="_showSelectPopup(event,'${sid}','${tn}','${apiKey}','${dbKey}',${JSON.stringify(options).replace(/"/g,'&quot;')})" style="cursor:pointer;background:${bg};color:${clr};padding:2px 7px;border-radius:6px;font-size:.7rem;font-weight:500;white-space:nowrap">${escHtml(display)} <i class="fas fa-caret-down" style="font-size:.6rem;opacity:.5"></i></span>`;
+  const roundParam = round ? `,'${escHtml(round)}'` : '';
+  return `<span onclick="_showSelectPopup(event,'${sid}','${tn}','${apiKey}','${dbKey}',${JSON.stringify(options).replace(/"/g,'&quot;')}${roundParam})" style="cursor:pointer;background:${bg};color:${clr};padding:2px 7px;border-radius:6px;font-size:.7rem;font-weight:500;white-space:nowrap">${escHtml(display)} <i class="fas fa-caret-down" style="font-size:.6rem;opacity:.5"></i></span>`;
 }
-async function _showSelectPopup(e, sheetId, tabName, apiKey, dbKey, options) {
+async function _showSelectPopup(e, sheetId, tabName, apiKey, dbKey, options, round) {
   e.stopPropagation();
   // 토글: 같은 셀에서 열린 팝업이면 닫기만
-  const popupKey = `${sheetId}||${tabName}||${dbKey}`;
+  const popupKey = round ? `${sheetId}||${tabName}||${dbKey}||${round}` : `${sheetId}||${tabName}||${dbKey}`;
   const existing = document.querySelector(".td-inline-popup");
   if (existing && existing._popupKey === popupKey) { _removePopupWithTrack(existing); return; }
   if (_popupJustClosed(popupKey)) return;
   document.querySelectorAll(".td-inline-popup").forEach(el => el.remove());
-  const t = (_tabDashData?.tabs||[]).find(x => x.sheet_id===sheetId && x.tab_name===tabName);
+  // ★ round가 있으면 확장 행용 임시 객체 구성
+  let t = (_tabDashData?.tabs||[]).find(x => x.sheet_id===sheetId && x.tab_name===tabName);
   if (!t) return;
+  if (round) {
+    const rmMap = t.round_meta || {};
+    const rmData = rmMap[round] || {};
+    t = Object.assign({}, t, { _roundLabel: round, _isRoundRow: true,
+      manager: rmData.manager !== undefined ? rmData.manager : (t.manager || ""),
+      review_type: rmData.review_type !== undefined ? rmData.review_type : (t.review_type || ""),
+      payment_type: rmData.payment_type !== undefined ? rmData.payment_type : (t.payment_type || ""),
+      time_range: rmData.time_range !== undefined ? rmData.time_range : (t.time_range || ""),
+    });
+  }
   const popup = document.createElement("div");
   popup.className = "td-inline-popup";
   popup.style.cssText = "position:fixed;z-index:10000;background:#fff;border:1px solid #D1D5DB;border-radius:8px;box-shadow:0 8px 24px rgba(0,0,0,.15);padding:4px;min-width:90px;font-size:.75rem";
@@ -12098,7 +12131,7 @@ async function _showSelectPopup(e, sheetId, tabName, apiKey, dbKey, options) {
     if (opt === (t[dbKey]||"")) btn.style.fontWeight = "700";
     btn.onclick = async () => {
       popup.remove();
-      await _saveTabField(t, { [apiKey]: opt });
+      await _saveTabField(t, { [apiKey]: opt }, round || null);
       renderTabDashTable();
     };
     popup.appendChild(btn);
@@ -12113,27 +12146,36 @@ async function _showSelectPopup(e, sheetId, tabName, apiKey, dbKey, options) {
 }
 
 /** 주문시간대: 자유/타임지정 + 30분 단위 범례 */
-function _inlineTimeRange(t) {
+function _inlineTimeRange(t, round) {
   const cur = t.time_range || "";
   const sid = escHtml(t.sheet_id), tn = escHtml(t.tab_name);
+  const roundParam = round ? `,'${escHtml(round)}'` : '';
   if (!cur) {
-    return `<span onclick="_showTimeRangePopup(event,'${sid}','${tn}')" style="cursor:pointer;color:#D1D5DB;font-size:.72rem">— <i class="fas fa-clock" style="font-size:.6rem"></i></span>`;
+    return `<span onclick="_showTimeRangePopup(event,'${sid}','${tn}'${roundParam})" style="cursor:pointer;color:#D1D5DB;font-size:.72rem">— <i class="fas fa-clock" style="font-size:.6rem"></i></span>`;
   }
   const display = cur === "자유" ? "자유" : cur;
   const bg = cur === "자유" ? "#F0FDF4" : "#EFF6FF";
   const clr = cur === "자유" ? "#059669" : "#1D4ED8";
-  return `<span onclick="_showTimeRangePopup(event,'${sid}','${tn}')" style="cursor:pointer;background:${bg};color:${clr};padding:2px 7px;border-radius:6px;font-size:.7rem;font-weight:500;white-space:nowrap">${escHtml(display)} <i class="fas fa-caret-down" style="font-size:.6rem;opacity:.5"></i></span>`;
+  return `<span onclick="_showTimeRangePopup(event,'${sid}','${tn}'${roundParam})" style="cursor:pointer;background:${bg};color:${clr};padding:2px 7px;border-radius:6px;font-size:.7rem;font-weight:500;white-space:nowrap">${escHtml(display)} <i class="fas fa-caret-down" style="font-size:.6rem;opacity:.5"></i></span>`;
 }
 
-function _showTimeRangePopup(e, sheetId, tabName) {
+function _showTimeRangePopup(e, sheetId, tabName, round) {
   e.stopPropagation();
-  const popupKey = `${sheetId}||${tabName}||timeRange`;
+  const popupKey = round ? `${sheetId}||${tabName}||timeRange||${round}` : `${sheetId}||${tabName}||timeRange`;
   const existing = document.querySelector(".td-inline-popup");
   if (existing && existing._popupKey === popupKey) { _removePopupWithTrack(existing); return; }
   if (_popupJustClosed(popupKey)) return;
   document.querySelectorAll(".td-inline-popup").forEach(el => el.remove());
-  const t = (_tabDashData?.tabs||[]).find(x => x.sheet_id===sheetId && x.tab_name===tabName);
+  // ★ round가 있으면 확장 행용 임시 객체 구성
+  let t = (_tabDashData?.tabs||[]).find(x => x.sheet_id===sheetId && x.tab_name===tabName);
   if (!t) return;
+  if (round) {
+    const rmMap = t.round_meta || {};
+    const rmData = rmMap[round] || {};
+    t = Object.assign({}, t, { _roundLabel: round, _isRoundRow: true,
+      time_range: rmData.time_range !== undefined ? rmData.time_range : (t.time_range || ""),
+    });
+  }
 
   const popup = document.createElement("div");
   popup.className = "td-inline-popup";
@@ -12181,7 +12223,7 @@ function _showTimeRangePopup(e, sheetId, tabName) {
       ${buildGrid("종료 시각", endH, endM, "end")}
       <div style="text-align:right;margin-top:4px"><button onclick="_trReset()" style="background:none;border:none;color:#9CA3AF;font-size:.68rem;cursor:pointer">시간 초기화</button></div>
     </div>
-    <button id="trApplyBtn" onclick="_trApply('${sheetId}','${tabName}')" style="margin-top:10px;width:100%;padding:7px;background:#3B82F6;color:#fff;border:none;border-radius:6px;font-size:.78rem;font-weight:600;cursor:pointer">✓ 적용</button>
+    <button id="trApplyBtn" onclick="_trApply('${sheetId}','${tabName}'${round ? `,'${escHtml(round)}'` : ''})" style="margin-top:10px;width:100%;padding:7px;background:#3B82F6;color:#fff;border:none;border-radius:6px;font-size:.78rem;font-weight:600;cursor:pointer">✓ 적용</button>
   `;
   popup._trMode = mode;
   popup._trStart = { h: startH, m: startM };
@@ -12229,11 +12271,14 @@ function _trReset() {
   const popup = document.querySelector(".td-inline-popup");
   if (popup) { popup._trStart = {h:11,m:30}; popup._trEnd = {h:14,m:30}; _trSetMode(popup.querySelector(".tr-mode-btn:nth-child(3)"), "타임지정"); }
 }
-async function _trApply(sheetId, tabName) {
+async function _trApply(sheetId, tabName, round) {
   const popup = document.querySelector(".td-inline-popup");
   if (!popup) return;
-  const t = (_tabDashData?.tabs||[]).find(x => x.sheet_id===sheetId && x.tab_name===tabName);
+  let t = (_tabDashData?.tabs||[]).find(x => x.sheet_id===sheetId && x.tab_name===tabName);
   if (!t) return;
+  if (round) {
+    t = Object.assign({}, t, { _roundLabel: round, _isRoundRow: true });
+  }
   let val = "";
   if (popup._trMode === "자유") val = "자유";
   else if (popup._trMode === "타임지정") {
@@ -12241,7 +12286,7 @@ async function _trApply(sheetId, tabName) {
     val = `${String(s.h).padStart(2,"0")}:${String(s.m).padStart(2,"0")} ~ ${String(e.h).padStart(2,"0")}:${String(e.m).padStart(2,"0")}`;
   }
   popup.remove();
-  await _saveTabField(t, { timeRange: val });
+  await _saveTabField(t, { timeRange: val }, round || null);
   renderTabDashTable();
 }
 
@@ -12426,15 +12471,15 @@ function _cellVal(t, col) {
   // 택일
   if (k === "manager") return _inlineSelect(t, "manager", "manager", ["만두","망고"], {
     "만두":"#1D4ED8","만두_bg":"#DBEAFE","망고":"#D97706","망고_bg":"#FEF3C7"
-  });
+  }, t._isRoundRow ? t._roundLabel : null);
   if (k === "review_type") return _inlineSelect(t, "review_type", "reviewType", ["실배송","빈박스","구매확정","믹스"], {
     "실배송":"#059669","실배송_bg":"#D1FAE5","빈박스":"#7C3AED","빈박스_bg":"#EDE9FE","구매확정":"#1D4ED8","구매확정_bg":"#DBEAFE","믹스":"#D97706","믹스_bg":"#FEF3C7"
-  });
+  }, t._isRoundRow ? t._roundLabel : null);
   if (k === "payment_type") return _inlineSelect(t, "payment_type", "paymentType", ["현금","현영","소득"], {
     "현금":"#059669","현금_bg":"#D1FAE5","현영":"#1D4ED8","현영_bg":"#DBEAFE","소득":"#7C3AED","소득_bg":"#EDE9FE"
-  });
+  }, t._isRoundRow ? t._roundLabel : null);
   // 주문시간대
-  if (k === "time_range") return _inlineTimeRange(t);
+  if (k === "time_range") return _inlineTimeRange(t, t._isRoundRow ? t._roundLabel : null);
   // 소득유형 + 이체은행 통합
   if (k === "income_type") return _inlineIncomeType(t);
   // 불리언

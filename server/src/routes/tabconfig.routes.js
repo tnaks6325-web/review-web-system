@@ -50,6 +50,19 @@ const { throttledCall, throttledMap } = require('../utils/sheetsThrottle');
   }
 })();
 
+// ── Auto-migration: round_meta JSONB 컬럼 추가 (차수별 부가정보: 담당자, 리뷰유형, 결제방식, 주문시간대 등) ──
+(async () => {
+  try {
+    await pool.query(`
+      ALTER TABLE tab_configs
+      ADD COLUMN IF NOT EXISTS round_meta JSONB DEFAULT '{}'::jsonb
+    `);
+    logger.info('[tabconfig] round_meta 컬럼 확인/추가 완료');
+  } catch (err) {
+    logger.warn('[tabconfig] round_meta 컬럼 추가 실패 (이미 존재할 수 있음):', err.message);
+  }
+})();
+
 // ═══════════════════════════════════════════════════════════
 // 옵션(Option) 기능용 시스템 헤더 키워드 목록
 // indexBuilder.service.js의 parseTabRows에서 사용하는 시스템 컬럼 키워드를 통합
@@ -134,6 +147,43 @@ router.post('/config', authMiddleware, async (req, res, next) => {
       } catch (mapErr) {
         logger.error('[tab/config] display_name_map 저장 오류:', mapErr.message, mapErr.stack);
         return res.json({ error: '차수별 표시명 저장 오류: ' + mapErr.message });
+      }
+    }
+
+    // ★ 차수별 부가정보(round_meta) 처리
+    // round가 제공되고 manager/reviewType/paymentType/timeRange 중 하나라도 있으면
+    // round_meta JSONB의 해당 차수 키에 저장: { "1차": { manager: "만두", review_type: "실배송", ... } }
+    const ROUND_META_FIELDS = { manager: 'manager', reviewType: 'review_type', paymentType: 'payment_type', timeRange: 'time_range' };
+    if (roundKey) {
+      const metaUpdate = {};
+      for (const [apiKey, dbKey] of Object.entries(ROUND_META_FIELDS)) {
+        if (b[apiKey] !== undefined) metaUpdate[dbKey] = b[apiKey];
+      }
+      if (Object.keys(metaUpdate).length > 0) {
+        try {
+          // round_meta[roundKey] 기존 값에 머지
+          const { rows: existing } = await pool.query(
+            'SELECT round_meta FROM tab_configs WHERE sheet_id = $1 AND tab_name = $2',
+            [sheetId, tabName]
+          );
+          const currentMeta = existing[0]?.round_meta || {};
+          const roundData = currentMeta[roundKey] || {};
+          Object.assign(roundData, metaUpdate);
+          currentMeta[roundKey] = roundData;
+
+          const upsertResult = await pool.query(
+            `INSERT INTO tab_configs (sheet_id, tab_name, round_meta, updated_at)
+             VALUES ($1, $2, $3::jsonb, NOW())
+             ON CONFLICT (sheet_id, tab_name) DO UPDATE SET
+               round_meta = $3::jsonb,
+               updated_at = NOW()`,
+            [sheetId, tabName, JSON.stringify(currentMeta)]
+          );
+          return res.json({ ok: true, tabName, sheetId, round: roundKey, roundMeta: roundData });
+        } catch (metaErr) {
+          logger.error('[tab/config] round_meta 저장 오류:', metaErr.message);
+          return res.json({ error: '차수별 부가정보 저장 오류: ' + metaErr.message });
+        }
       }
     }
 
@@ -1012,7 +1062,7 @@ router.get('/dashboard', authMiddleware, async (req, res, next) => {
         tc.payment_type, tc.display_name, tc.display_name_map, tc.option_columns, tc.option_columns_map, tc.is_closed,
         tc.folder_url, tc.capture_folder_url, tc.is_bulk, tc.delivery_type,
         tc.round, tc.nc_mode, tc.deposit_name, tc.transfer_bank,
-        tc.income_type, tc.updated_at, tc.closed_rounds,
+        tc.income_type, tc.updated_at, tc.closed_rounds, tc.round_meta,
         im.row_count, im.submitted_count, im.status AS index_status,
         im.built_at AS index_built_at, im.checksum,
         COALESCE(paid.paid_count, 0) AS paid_count
