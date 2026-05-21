@@ -856,184 +856,9 @@ function getAdminSessionRemaining() {
   return h > 0 ? `${h}시간 ${m}분 남음` : `${m}분 남음`;
 }
 
-/* ── GAS URL 설정 모달 (비밀번호 인증 → 서버 검증) ── */
-
-function openGasUrlModal() {
-  // 항상 STEP1(비밀번호)부터 시작
-  show("gasUrlStep1");
-  hide("gasUrlStep2");
-  const pwEl = document.getElementById("gasUrlPwInput");
-  pwEl.value = "";
-  hide("gasUrlPwError");
-  hide("gasUrlError");
-  show("gasUrlModal", "flex");
-  setTimeout(() => pwEl.focus(), 100);
-}
-function closeGasUrlModal() {
-  hide("gasUrlModal");
-}
-async function verifyGasUrlPw() {
-  const pw    = document.getElementById("gasUrlPwInput").value;
-  const errEl = document.getElementById("gasUrlPwError");
-  hide(errEl);
-  if (!pw) {
-    errEl.textContent = "비밀번호를 입력하세요.";
-    show(errEl);
-    return;
-  }
-  // 서버에서 비밀번호 검증 (하드코딩 제거)
-  try {
-    const res = await gasPost({ action: 'adminLoginV2', name: getAdminName() || '설정', pw });
-    if (!res.success) {
-      errEl.textContent = "비밀번호가 틀렸습니다.";
-      show(errEl);
-      document.getElementById("gasUrlPwInput").value = "";
-      document.getElementById("gasUrlPwInput").focus();
-      return;
-    }
-  } catch (e) {
-    errEl.textContent = "서버 연결 실패: " + e.message;
-    show(errEl);
-    return;
-  }
-  // 비밀번호 확인 성공 → STEP2로 전환
-  hide("gasUrlStep1");
-  const urlInput = document.getElementById("gasUrlInput");
-  urlInput.value = APP_CONFIG.GAS_WEB_APP_URL || "";
-  hide("gasUrlError");
-  show("gasUrlStep2");
-  _renderGasUrlHistory(); // ← 이력 목록 갱신
-  setTimeout(() => urlInput.focus(), 100);
-}
-function saveGasUrl() {
-  const url   = document.getElementById("gasUrlInput").value.trim();
-  const errEl = document.getElementById("gasUrlError");
-  hide(errEl);
-  if (!url) {
-    errEl.textContent = "URL을 입력해주세요.";
-    show(errEl);
-    return;
-  }
-  if (!url.includes("script.google.com/macros/s/")) {
-    errEl.textContent = "올바른 GAS 배포 URL 형식이 아닙니다. (/macros/s/.../exec)";
-    show(errEl);
-    return;
-  }
-  // ── 변경 이력 기록 ──
-  _addGasUrlHistory(url);
-  saveConfig({ GAS_WEB_APP_URL: url });
-  APP_CONFIG.GAS_WEB_APP_URL = url;
-  // ★ GAS PropertiesService에도 저장 → 다른 접속자에게 자동 반영
-  _saveAppUrlToGas(url);
-  closeGasUrlModal();
-  hide("gasNotSet");
-  showToast("GAS URL이 저장되었습니다. 다른 접속자에게도 자동 반영됩니다.", "success");
-}
-
-/* ── GAS URL 변경 이력 관리 ── */
-const GAS_URL_HISTORY_KEY = "rapp_url_history";
-const GAS_URL_HISTORY_MAX = 10; // 최대 보관 건수
-
-/** 이력 배열 반환 (최신순) */
-function _loadGasUrlHistory() {
-  try {
-    const raw = localStorage.getItem(GAS_URL_HISTORY_KEY);
-    return raw ? JSON.parse(raw) : [];
-  } catch (_) { return []; }
-}
-
-/** URL 저장 시 이력에 추가 */
-function _addGasUrlHistory(url) {
-  const list = _loadGasUrlHistory();
-  // 버전 번호: 현재 이력 중 같은 URL의 최대 버전 + 1, 없으면 전체 최대 버전 + 1
-  const allVersions = list.map(h => h.version || 0);
-  const nextVersion = (allVersions.length ? Math.max(...allVersions) : 0) + 1;
-
-  // 동일 URL이 최신 항목이면 중복 추가 안 함
-  if (list.length && list[0].url === url) return;
-
-  const entry = {
-    version:   nextVersion,
-    url:       url,
-    savedAt:   Date.now()  // ms timestamp
-  };
-  list.unshift(entry); // 최신을 앞에
-  if (list.length > GAS_URL_HISTORY_MAX) list.splice(GAS_URL_HISTORY_MAX);
-  try { localStorage.setItem(GAS_URL_HISTORY_KEY, JSON.stringify(list)); } catch (_) {}
-}
-
-/** 이력 전체 삭제 */
-function clearGasUrlHistory() {
-  if (!confirm("변경 이력을 모두 삭제하시겠습니까?")) return;
-  try { localStorage.removeItem(GAS_URL_HISTORY_KEY); } catch (_) {}
-  _renderGasUrlHistory();
-}
-
-/** 이력 목록을 모달에 렌더링 */
-function _renderGasUrlHistory() {
-  const wrap = document.getElementById("gasUrlHistoryWrap");
-  const list = document.getElementById("gasUrlHistoryList");
-  if (!wrap || !list) return;
-  const history = _loadGasUrlHistory();
-  if (!history.length) { wrap.style.display = "none"; return; }
-  wrap.style.display = "block";
-  list.innerHTML = history.map((h, i) => {
-    const dt  = new Date(h.savedAt);
-    const pad = n => String(n).padStart(2, "0");
-    const dateStr = `${dt.getFullYear()}.${pad(dt.getMonth()+1)}.${pad(dt.getDate())} ${pad(dt.getHours())}:${pad(dt.getMinutes())}`;
-    // URL 중간 생략 (앞 30자 + … + 끝 20자)
-    const short = h.url.length > 54
-      ? h.url.slice(0, 32) + "…" + h.url.slice(-20)
-      : h.url;
-    const isCurrent = (APP_CONFIG.GAS_WEB_APP_URL === h.url);
-    return `
-      <div class="gas-url-history-item${isCurrent ? ' gas-url-history-current' : ''}"
-           onclick="_selectGasUrlHistory('${i}')" title="${h.url}">
-        <div style="display:flex;align-items:center;gap:6px;min-width:0">
-          <span class="gas-url-ver-badge">v${h.version}</span>
-          <span class="gas-url-history-url">${short}</span>
-          ${isCurrent ? '<span class="gas-url-cur-tag">현재</span>' : ''}
-        </div>
-        <span class="gas-url-history-date">${dateStr}</span>
-      </div>`;
-  }).join('');
-}
-
-/** 이력 항목 클릭 → 입력칸에 자동 입력 */
-function _selectGasUrlHistory(idx) {
-  const history = _loadGasUrlHistory();
-  const entry   = history[Number(idx)];
-  if (!entry) return;
-  const input = document.getElementById("gasUrlInput");
-  if (input) {
-    input.value = entry.url;
-    input.focus();
-    // 선택 피드백
-    document.querySelectorAll(".gas-url-history-item").forEach((el, i) => {
-      el.classList.toggle("gas-url-history-selected", i === Number(idx));
-    });
-  }
-}
-
-/** 서버에 앱 URL 저장 (백그라운드, 비동기) */
-async function _saveAppUrlToGas(url) {
-  try {
-    const res = await gasPost({ action: 'saveAppUrl', url });
-    if (res && res.ok) console.log("[API] URL 저장 완료");
-    else console.warn("[API] URL 저장 실패:", res?.error);
-  } catch (e) {
-    console.warn("[API] URL 저장 오류 (무시):", e.message);
-  }
-}
-
 /* ── 관리자 로그인 모달 열기 ── */
 function openAdminLogin() {
   if (isAdminLoggedIn()) { enterAdminScreen(); return; }
-  if (!APP_CONFIG.GAS_WEB_APP_URL) {
-    openGasUrlModal();
-    showToast("먼저 GAS URL을 설정해주세요.", "warning");
-    return;
-  }
   document.getElementById("adminNameInput").value = "";
   document.getElementById("adminPwInput").value = "";
   hide("adminLoginError");
@@ -6892,11 +6717,10 @@ async function confirmTcSave() {
   _closeTcPopoverUiOnly(); // _tcCurrent는 유지한 채 팝오버 UI만 닫음
   if (!_tcCurrent) return;
 
-  // ① GAS URL 설정 여부 확인
+  // ① API 서버 URL 설정 여부 확인
   if (!APP_CONFIG.GAS_WEB_APP_URL) {
-    showToast("❌ GAS 웹앱 URL이 설정되지 않았습니다. 설정 화면에서 URL을 먼저 입력해주세요.", true);
+    showToast("❌ API 서버 URL이 설정되지 않았습니다.", true);
     _tcCurrent = null;
-    openGasUrlModal();
     return;
   }
 
@@ -9463,22 +9287,6 @@ async function submitCreateSheet() {
     btn.innerHTML = '<i class="fas fa-plus"></i> 시트 생성';
   }
 }
-
-/* ── 계정설정 모달 열릴 때 저장된 템플릿 ID 자동 표시 ── */
-const _origOpenGasUrlModal = window.openGasUrlModal;
-window.openGasUrlModal = function() {
-  if (_origOpenGasUrlModal) _origOpenGasUrlModal.apply(this, arguments);
-  // Step2가 표시된 후에 값 주입 (약간 딜레이)
-  setTimeout(() => {
-    const tmplId = _getTemplateSheetId();
-    const inp    = document.getElementById("templateSheetUrlInput");
-    const tEl    = document.getElementById("templateSheetTitle");
-    if (inp && tmplId) {
-      inp.value = "https://docs.google.com/spreadsheets/d/" + tmplId + "/edit";
-      if (tEl) tEl.textContent = "저장된 ID: " + tmplId;
-    }
-  }, 400);
-};
 
 /* ── 열쇠 드롭다운 메뉴 ── */
 function toggleKeyMenu(e) {
