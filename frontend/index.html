@@ -397,7 +397,26 @@ function showHome(user) {
   document.getElementById("viewLogin").style.display = "none";
   document.getElementById("viewHome").style.display = "";
   document.getElementById("greetingText").textContent = `안녕하세요, ${user.name}님!`;
+
+  // ★ /search 페이지 세션 동기화 (rapp_reviewer_auth 키)
+  // /search는 이 키를 읽어 자동 로그인 처리함
+  syncSearchSession(user);
+
   loadMyStatus(user);
+}
+
+/** /search 페이지와 세션 동기화 */
+function syncSearchSession(user) {
+  const REVIEWER_AUTH_KEY = "rapp_reviewer_auth";
+  const REVIEWER_AUTH_MS  = 12 * 60 * 60 * 1000;
+  const session = {
+    name: user.name,
+    verified: true,
+    registeredMember: true,
+    phone8: user.phone8 || "",
+    expAt: Date.now() + REVIEWER_AUTH_MS
+  };
+  localStorage.setItem(REVIEWER_AUTH_KEY, JSON.stringify(session));
 }
 
 async function doLogin() {
@@ -449,6 +468,7 @@ async function doLogin() {
 
 function doLogout() {
   localStorage.removeItem(USER_KEY);
+  localStorage.removeItem("rapp_reviewer_auth"); // /search 세션도 함께 제거
   location.reload();
 }
 
