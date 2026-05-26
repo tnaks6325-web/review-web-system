@@ -164,6 +164,33 @@
       background:#E2E8F0; color:var(--t4); cursor:not-allowed;
     }
 
+    /* ─── Inline Apply Form ─── */
+    .rc-inline-form {
+      margin-top:10px; padding:12px; background:#F8FAFC;
+      border:1px solid var(--border); border-radius:10px;
+      animation: rcFormIn .2s ease;
+    }
+    @keyframes rcFormIn { from { opacity:0; transform:translateY(-6px); } }
+    .rc-form-fields { display:flex; gap:8px; margin-bottom:8px; }
+    .rc-input {
+      flex:1; padding:10px 12px; border:1.5px solid var(--border); border-radius:8px;
+      font-size:.82rem; font-family:inherit; outline:none; transition:border-color .2s;
+    }
+    .rc-input:focus { border-color:var(--p); }
+    .rc-form-actions { display:flex; gap:8px; }
+    .rc-submit-btn {
+      flex:1; padding:10px; background:var(--ok); color:#fff; border:none;
+      border-radius:8px; font-size:.82rem; font-weight:700; cursor:pointer;
+      font-family:inherit; transition:background .2s;
+    }
+    .rc-submit-btn:hover { background:#059669; }
+    .rc-cancel-btn {
+      padding:10px 14px; background:#E2E8F0; color:var(--t2); border:none;
+      border-radius:8px; font-size:.82rem; font-weight:600; cursor:pointer;
+      font-family:inherit;
+    }
+    .rc-cancel-btn:hover { background:#CBD5E1; }
+
     /* ─── Footer ─── */
     .home-footer {
       text-align:center; padding:24px 16px; font-size:.72rem; color:var(--t4);
@@ -449,14 +476,14 @@ async function loadRecruitPreview() {
           const managerEmoji = c.manager === "만두" ? "🥟" : c.manager === "망고" ? "🥭" : "";
           const isFull = c.max_slots > 0 && (c.current_slots || 0) >= c.max_slots;
 
-          // 참여 버튼: chat_url이 있으면 카카오톡으로, 없으면 /recruit로
+          // 참여 버튼: chat_url이 있으면 카카오톡으로, 없으면 인라인 신청
           let actionBtn = "";
           if (isFull) {
             actionBtn = `<button class="rc-apply-btn rc-closed" disabled><i class="fas fa-ban"></i> 모집 마감</button>`;
           } else if (c.chat_url) {
             actionBtn = `<a href="${escHtml(c.chat_url)}" target="_blank" class="rc-apply-btn rc-kakao"><i class="fas fa-comment"></i> 참여 신청하기</a>`;
           } else {
-            actionBtn = `<a href="/recruit" class="rc-apply-btn rc-default"><i class="fas fa-hand-pointer"></i> 참여 신청하기</a>`;
+            actionBtn = `<button class="rc-apply-btn rc-default" onclick="openInlineApply(${c.id},'${escHtml(c.title).replace(/'/g,"\\'")}')"><i class="fas fa-hand-pointer"></i> 참여 신청하기</button>`;
           }
 
           return `
@@ -475,6 +502,16 @@ async function loadRecruitPreview() {
               </div>
               ${c.notes ? `<div class="rc-notes"><i class="fas fa-sticky-note"></i> ${escHtml(c.notes)}</div>` : ""}
               ${actionBtn}
+              <div class="rc-inline-form" id="rcForm${c.id}" style="display:none">
+                <div class="rc-form-fields">
+                  <input type="text" class="rc-input" id="rcName${c.id}" placeholder="이름">
+                  <input type="tel" class="rc-input" id="rcPhone${c.id}" placeholder="연락처 (010-XXXX-XXXX)">
+                </div>
+                <div class="rc-form-actions">
+                  <button class="rc-submit-btn" onclick="submitInlineApply(${c.id})"><i class="fas fa-check"></i> 신청 완료</button>
+                  <button class="rc-cancel-btn" onclick="closeInlineApply(${c.id})">취소</button>
+                </div>
+              </div>
             </div>`;
         }).join("");
 
@@ -488,6 +525,58 @@ async function loadRecruitPreview() {
     const el2 = document.getElementById("recruitPreviewList2");
     if (el1) el1.innerHTML = errHtml;
     if (el2) el2.innerHTML = errHtml;
+  }
+}
+
+/* ═══ 인라인 참여 신청 ═══ */
+function openInlineApply(campId, title) {
+  // 이미 열린 다른 폼 닫기
+  document.querySelectorAll('.rc-inline-form').forEach(el => el.style.display = 'none');
+  const form = document.getElementById('rcForm' + campId);
+  if (!form) return;
+  form.style.display = '';
+
+  // 로그인 상태면 자동 채우기
+  const user = getSavedUser();
+  if (user) {
+    const nameInput = document.getElementById('rcName' + campId);
+    const phoneInput = document.getElementById('rcPhone' + campId);
+    if (nameInput && user.name) nameInput.value = user.name;
+    if (phoneInput && user.phone) phoneInput.value = user.phone;
+    else if (phoneInput && user.phone8) phoneInput.value = user.phone8;
+  }
+}
+
+function closeInlineApply(campId) {
+  const form = document.getElementById('rcForm' + campId);
+  if (form) form.style.display = 'none';
+}
+
+async function submitInlineApply(campId) {
+  const nameInput = document.getElementById('rcName' + campId);
+  const phoneInput = document.getElementById('rcPhone' + campId);
+  const name = (nameInput ? nameInput.value : '').trim();
+  const phone = (phoneInput ? phoneInput.value : '').trim();
+
+  if (!name) { showToast('이름을 입력해주세요'); return; }
+  if (!phone) { showToast('연락처를 입력해주세요'); return; }
+
+  try {
+    const res = await fetch(API_BASE_URL + '/api/campaign/' + campId + '/apply', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ name, phone })
+    });
+    const json = await res.json();
+    if (json.ok) {
+      showToast('✅ 참여 신청이 완료되었습니다!');
+      closeInlineApply(campId);
+      loadRecruitPreview(); // 슬롯 업데이트
+    } else {
+      showToast(json.error || '신청 실패');
+    }
+  } catch(e) {
+    showToast('신청 오류: ' + e.message);
   }
 }
 </script>
