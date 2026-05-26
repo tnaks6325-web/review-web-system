@@ -394,15 +394,12 @@ function initPage() {
 }
 
 function showHome(user) {
-  document.getElementById("viewLogin").style.display = "none";
-  document.getElementById("viewHome").style.display = "";
-  document.getElementById("greetingText").textContent = `안녕하세요, ${user.name}님!`;
-
   // ★ /search 페이지 세션 동기화 (rapp_reviewer_auth 키)
-  // /search는 이 키를 읽어 자동 로그인 처리함
   syncSearchSession(user);
 
-  loadMyStatus(user);
+  // ★ 로그인 완료 → /search (참여한 캠페인 조회) 페이지로 즉시 이동
+  // /search는 등록정보, 타계정, 리뷰내역 전체를 보여줌
+  window.location.href = '/search';
 }
 
 /** /search 페이지와 세션 동기화 */
