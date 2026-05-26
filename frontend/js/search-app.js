@@ -207,7 +207,11 @@ function _logout() {
 /** 페이지 로드 시 세션 복원 → 자동 로그인 */
 async function _restoreReviewerSession() {
   const session = _loadAuthSession();
-  if (!session) return; // 세션 없음 → authScreen 표시 유지
+  if (!session) {
+    // 세션 없음 → 직접 제출 모드였어도 body 복원
+    _revealBodyIfHidden();
+    return;
+  }
 
   _authState = session;
 
@@ -217,35 +221,51 @@ async function _restoreReviewerSession() {
 
   _applyLoginUI(session.name);
 
-  // 바로 결과 조회
+  // ★ 직접 제출 모드: doSearch() 건너뛰고 바로 제출 화면 열기
+  const directItems = _consumeDirectSubmitItems();
+  if (directItems) {
+    console.log("[DirectSubmit] 직접 제출 모드 — 검색 생략, 즉시 제출 화면 표시:", directItems.length, "건");
+    openSubmitMulti(directItems);
+    _revealBodyIfHidden();
+    return;
+  }
+
+  // 일반 모드: 바로 결과 조회
   try {
     await doSearch();
   } catch(e) {
     console.warn("[restoreSession] 자동 검색 실패:", e.message);
   }
 
-  // ★ index.html에서 직접 제출 요청이 있으면 즉시 openSubmitMulti() 호출
-  _checkDirectSubmitItems();
+  _revealBodyIfHidden();
 }
 
 /**
- * ★ index.html에서 리뷰 카드 클릭 시 저장한 아이템을 감지하여
- *   바로 제출 화면(openSubmitMulti)을 여는 함수.
- *   sessionStorage의 'iad_direct_submit_items' 키를 사용한다.
+ * ★ index.html에서 리뷰 카드 클릭 시 저장한 아이템을 소비(consume)하는 함수.
+ *   sessionStorage의 'iad_direct_submit_items' 키를 읽고 즉시 삭제.
+ *   아이템 배열 반환 또는 null.
  */
-function _checkDirectSubmitItems() {
+function _consumeDirectSubmitItems() {
   try {
     const raw = sessionStorage.getItem("iad_direct_submit_items");
-    if (!raw) return;
-    // 한 번 사용 후 즉시 제거 (중복 방지)
+    if (!raw) return null;
     sessionStorage.removeItem("iad_direct_submit_items");
     const items = JSON.parse(raw);
-    if (Array.isArray(items) && items.length > 0) {
-      console.log("[DirectSubmit] index.html에서 전달받은 아이템으로 즉시 제출 화면 열기:", items.length, "건");
-      openSubmitMulti(items);
-    }
+    if (Array.isArray(items) && items.length > 0) return items;
+    return null;
   } catch(e) {
-    console.warn("[DirectSubmit] 직접 제출 아이템 처리 실패:", e.message);
+    console.warn("[DirectSubmit] 직접 제출 아이템 파싱 실패:", e.message);
+    return null;
+  }
+}
+
+/**
+ * ★ 직접 제출 모드에서 body를 숨겼을 경우 다시 보이게 복원
+ */
+function _revealBodyIfHidden() {
+  if (document.body.style.visibility === "hidden") {
+    document.body.style.visibility = "";
+    document.body.style.overflow = "";
   }
 }
 
