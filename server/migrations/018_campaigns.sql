@@ -4,7 +4,7 @@
 
 -- 캠페인(모집공고) 테이블
 CREATE TABLE IF NOT EXISTS campaigns (
-  id TEXT PRIMARY KEY DEFAULT ('camp_' || substr(md5(random()::text), 1, 12)),
+  id TEXT PRIMARY KEY,
   title TEXT NOT NULL,
   channel TEXT DEFAULT '',
   channel_custom TEXT DEFAULT '',

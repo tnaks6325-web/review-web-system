@@ -1,9 +1,73 @@
 const express = require('express');
 const router = express.Router();
+const crypto = require('crypto');
 const pool = require('../db/pool');
 const { authMiddleware } = require('../middleware/auth.middleware');
 const { appendSheet, readSheet } = require('../services/sheets.service');
 const { logger } = require('../utils/logger');
+
+// ID 생성 헬퍼
+function _genCampaignId() {
+  return 'camp_' + crypto.randomBytes(6).toString('hex');
+}
+
+// ═══════════════════════════════════════════════════════════
+// 테이블 자동 생성 (마이그레이션 실패 시 안전장치)
+// ═══════════════════════════════════════════════════════════
+let _tableChecked = false;
+async function _ensureTables() {
+  if (_tableChecked) return;
+  try {
+    await pool.query(`
+      CREATE TABLE IF NOT EXISTS campaigns (
+        id TEXT PRIMARY KEY,
+        title TEXT NOT NULL,
+        channel TEXT DEFAULT '',
+        channel_custom TEXT DEFAULT '',
+        manager TEXT DEFAULT '',
+        time_range TEXT DEFAULT '',
+        delivery_type TEXT DEFAULT '',
+        review_fee INTEGER DEFAULT 0,
+        badges JSONB DEFAULT '[]'::jsonb,
+        notes TEXT DEFAULT '',
+        chat_url TEXT DEFAULT '',
+        status TEXT DEFAULT 'draft',
+        sort_order INTEGER DEFAULT 0,
+        max_slots INTEGER DEFAULT 0,
+        current_slots INTEGER DEFAULT 0,
+        deadline TIMESTAMPTZ,
+        description TEXT DEFAULT '',
+        linked_sheet_id TEXT DEFAULT '',
+        linked_tab_name TEXT DEFAULT '',
+        linked_tab_gid TEXT DEFAULT '',
+        created_by TEXT DEFAULT '',
+        created_at TIMESTAMPTZ DEFAULT NOW(),
+        updated_at TIMESTAMPTZ DEFAULT NOW()
+      )
+    `);
+    await pool.query(`
+      CREATE TABLE IF NOT EXISTS campaign_applications (
+        id SERIAL PRIMARY KEY,
+        campaign_id TEXT NOT NULL REFERENCES campaigns(id) ON DELETE CASCADE,
+        applicant_name TEXT NOT NULL,
+        applicant_phone TEXT DEFAULT '',
+        applicant_inad TEXT DEFAULT '',
+        status TEXT DEFAULT 'confirmed',
+        sheet_row_added BOOLEAN DEFAULT FALSE,
+        applied_at TIMESTAMPTZ DEFAULT NOW(),
+        UNIQUE(campaign_id, applicant_name, applicant_phone)
+      )
+    `);
+    _tableChecked = true;
+  } catch (e) {
+    // 이미 존재하는 경우 무시
+    if (e.message.includes('already exists')) {
+      _tableChecked = true;
+    } else {
+      logger.error('[campaign] 테이블 생성 실패:', e.message);
+    }
+  }
+}
 
 // ═══════════════════════════════════════════════════════════
 // 공개 API (로그인 불필요)
@@ -12,6 +76,7 @@ const { logger } = require('../utils/logger');
 // GET /api/campaign/list — 공개 캠페인 목록 (active 우선, closed 하단)
 router.get('/list', async (req, res, next) => {
   try {
+    await _ensureTables();
     const { rows } = await pool.query(`
       SELECT id, title, channel, channel_custom, manager, time_range,
              delivery_type, review_fee, badges, notes, chat_url,
@@ -166,6 +231,7 @@ router.post('/:id/apply', async (req, res, next) => {
 // GET /api/campaign/admin/list — 관리자 전체 목록 (draft 포함)
 router.get('/admin/list', authMiddleware, async (req, res, next) => {
   try {
+    await _ensureTables();
     const { rows } = await pool.query(`
       SELECT * FROM campaigns
       ORDER BY 
@@ -195,13 +261,14 @@ router.post('/admin/create', authMiddleware, async (req, res, next) => {
 
     const { rows } = await pool.query(
       `INSERT INTO campaigns 
-       (title, channel, channel_custom, manager, time_range, delivery_type,
+       (id, title, channel, channel_custom, manager, time_range, delivery_type,
         review_fee, badges, notes, chat_url, status, sort_order,
         max_slots, deadline, description, linked_sheet_id, linked_tab_name, linked_tab_gid,
         created_by)
-       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20)
        RETURNING *`,
       [
+        _genCampaignId(),
         title.trim(),
         channel || '',
         channel_custom || '',

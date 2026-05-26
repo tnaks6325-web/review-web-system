@@ -45,8 +45,8 @@ function errorHandler(err, req, res, next) {
   }
 
   // 기본: GAS 호환 에러 응답 (HTTP 200, error 필드)
-  // ★ 관리자 API는 디버깅을 위해 실제 에러 메시지 포함
-  const isAdminApi = req.path && req.path.startsWith('/api/admin/');
+  // ★ 관리자 API 및 캠페인 API는 디버깅을 위해 실제 에러 메시지 포함
+  const isAdminApi = req.path && (req.path.startsWith('/api/admin/') || req.path.startsWith('/api/campaign/'));
   res.status(200).json({
     error: (process.env.NODE_ENV === 'production' && !isAdminApi)
       ? '서버 오류가 발생했습니다.'
