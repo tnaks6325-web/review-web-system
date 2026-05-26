@@ -82,7 +82,55 @@ function _buildRecruitCard(c) {
 ═══════════════════════════════════════ */
 async function loadRecruitTabOptions() {
   try {
-    /* 현재 대시보드에 로드된 탭 목록을 최대한 재활용 */
+    /* ── API에서 직접 탭 목록을 가져옴 (DOM 의존 제거) ── */
+    const token = sessionStorage.getItem("admin_token") || "";
+    const res = await fetch(API_BASE_URL + "/api/tab/dashboard", {
+      headers: { Authorization: "Bearer " + token }
+    });
+    if (!res.ok) throw new Error("dashboard API " + res.status);
+    const json = await res.json();
+    const rows = json.tabs || json.data || [];
+
+    const seen = new Set();
+    _recruitTabList = [];
+    rows.forEach(r => {
+      const sid = r.sheetId || r.sheet_id || "";
+      const tab = r.tabName || r.tab_name || "";
+      const key = sid + "||" + tab;
+      if (!sid || !tab || seen.has(key)) return;
+      seen.add(key);
+      const sheetName = r.campaignName || r.campaign_name || r.tcCampaignName || sid.slice(-6);
+      const display   = r.displayName  || r.display_name  || tab;
+      const tabGid    = r.tabGid || r.tab_gid || "";
+      _recruitTabList.push({ sheetId: sid, sheetName, tabName: tab, displayName: display, key, tabGid });
+    });
+
+    /* fallback: DOM에서 보완 (대시보드가 이미 렌더링됐으면 추가분 반영) */
+    document.querySelectorAll("[data-tabkey]").forEach(el => {
+      const key = el.dataset.tabkey || "";
+      if (!key || seen.has(key)) return;
+      seen.add(key);
+      const [sid, tab] = key.split("||");
+      const campBlock = el.closest(".dash-campaign-block");
+      let sheetName = "";
+      if (campBlock) {
+        const refreshBtn = campBlock.querySelector(".btn-camp-refresh[data-campname]");
+        if (refreshBtn) sheetName = refreshBtn.dataset.campname || "";
+        if (!sheetName) {
+          const nameEl = campBlock.querySelector(".dash-campaign-name");
+          if (nameEl) sheetName = nameEl.textContent.trim();
+        }
+      }
+      if (!sheetName) sheetName = sid ? sid.slice(-6) : "(알 수 없음)";
+      const nameEl = el.querySelector(".dash-tab-link, a, span");
+      const display = nameEl ? nameEl.textContent.trim() : tab;
+      _recruitTabList.push({ sheetId: sid, sheetName, tabName: tab, displayName: display, key });
+    });
+
+    _populateCampaignSelect();
+  } catch(e) {
+    console.warn("[recruit] 탭 옵션 로드 실패:", e);
+    /* API 실패 시 DOM fallback */
     const rows = document.querySelectorAll("[data-tabkey]");
     const seen = new Set();
     _recruitTabList = [];
@@ -91,30 +139,22 @@ async function loadRecruitTabOptions() {
       if (!key || seen.has(key)) return;
       seen.add(key);
       const [sid, tab] = key.split("||");
-
-      /* 캠페인명 추출: 상위 캠페인 블록의 헤더에서 */
       const campBlock = r.closest(".dash-campaign-block");
       let sheetName = "";
       if (campBlock) {
-        /* 갱신 버튼의 data-campname 활용 */
         const refreshBtn = campBlock.querySelector(".btn-camp-refresh[data-campname]");
         if (refreshBtn) sheetName = refreshBtn.dataset.campname || "";
         if (!sheetName) {
-          /* 캠페인명 span에서 추출 */
           const nameEl = campBlock.querySelector(".dash-campaign-name");
           if (nameEl) sheetName = nameEl.textContent.trim();
         }
       }
-      /* fallback: sheetId 마지막 6자리 */
       if (!sheetName) sheetName = sid ? sid.slice(-6) : "(알 수 없음)";
-
       const nameEl = r.querySelector(".dash-tab-link, a, span");
       const display = nameEl ? nameEl.textContent.trim() : tab;
       _recruitTabList.push({ sheetId: sid, sheetName, tabName: tab, displayName: display, key });
     });
     _populateCampaignSelect();
-  } catch(e) {
-    console.warn("[recruit] 탭 옵션 로드 실패:", e);
   }
 }
 
@@ -377,6 +417,7 @@ async function saveRecruitPost() {
 
   const tabKey      = document.getElementById("rf_linked_tab").value || "";
   const [sid, tab]  = tabKey ? tabKey.split("||") : ["", ""];
+  const tabMeta     = _recruitTabList.find(x => x.key === tabKey);
 
   const payload = {
     title,
@@ -391,6 +432,7 @@ async function saveRecruitPost() {
     chat_url:       chatUrl,
     linked_sheet_id: sid,
     linked_tab_name: tab,
+    linked_tab_gid:  (tabMeta && tabMeta.tabGid) || "",
     max_slots:      Number(document.getElementById("rf_max_slots").value) || 0,
     status:         document.getElementById("rf_status").value,
     sort_order:     Number(document.getElementById("rf_sort_order").value) || 0
