@@ -322,7 +322,7 @@
     <button class="tab-btn active" onclick="switchTab('all')">
       <i class="fas fa-th-large"></i> 전체
     </button>
-    <button class="tab-btn" onclick="switchTab('status')">
+    <button class="tab-btn" onclick="goToMyStatus()">
       <i class="fas fa-clipboard-list"></i> 내 참여현황
     </button>
     <button class="tab-btn" onclick="switchTab('recruit')">
@@ -532,7 +532,7 @@ function renderMyStatus(data) {
 
     // 제출 바로가기: 배정됨 상태에서만 표시
     const actionLink = r.stage === "assigned"
-      ? `<a href="/search" class="status-action"><i class="fas fa-upload"></i> 제출</a>`
+      ? `<a href="javascript:goToMyStatus()" class="status-action"><i class="fas fa-upload"></i> 제출</a>`
       : "";
 
     return `
@@ -649,6 +649,14 @@ document.addEventListener("DOMContentLoaded", () => {
 /* ═══ 탭 네비게이션 ═══ */
 let _currentTab = 'all';
 
+/** 내 참여현황 탭 → /search 페이지로 이동 (세션 동기화 완료 상태) */
+function goToMyStatus() {
+  // 세션 동기화 확인 (혹시 없으면 재동기화)
+  const user = getSavedUser();
+  if (user) syncSearchSession(user);
+  window.location.href = '/search';
+}
+
 function switchTab(tab) {
   _currentTab = tab;
   // 버튼 활성 상태
@@ -663,11 +671,6 @@ function switchTab(tab) {
 
   if (tab === 'all') {
     if (recruit) recruit.style.display = '';
-    if (status) status.style.display = '';
-    if (apps) apps.style.display = '';
-    if (payments) payments.style.display = '';
-  } else if (tab === 'status') {
-    if (recruit) recruit.style.display = 'none';
     if (status) status.style.display = '';
     if (apps) apps.style.display = '';
     if (payments) payments.style.display = '';
