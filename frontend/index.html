@@ -700,7 +700,7 @@ async function loadReviewList(user) {
             <span class="status-badge-pending">미제출</span>
             <i class="fas fa-chevron-right result-chevron"></i>
           </div>`;
-        card.addEventListener("click", () => goToSubmit());
+        card.addEventListener("click", () => goToSubmit(items));
         listEl.appendChild(card);
       } else {
         // 다건 그룹 카드
@@ -736,7 +736,7 @@ async function loadReviewList(user) {
             <i class="fas fa-chevron-right" style="color:var(--t3);font-size:.8rem;flex-shrink:0"></i>
           </div>
           <div class="result-group-items">${itemLines}</div>`;
-        groupCard.addEventListener("click", () => goToSubmit());
+        groupCard.addEventListener("click", () => goToSubmit(items));
         listEl.appendChild(groupCard);
       }
     });
@@ -745,10 +745,14 @@ async function loadReviewList(user) {
   }
 }
 
-/** 리뷰 제출 클릭 → /search 페이지로 이동 */
-function goToSubmit() {
+/** 리뷰 제출 클릭 → /search 페이지로 즉시 제출 화면 이동 */
+function goToSubmit(items) {
   const user = getSavedUser();
   if (user) syncSearchSession(user);
+  // 선택한 아이템을 sessionStorage에 저장 → /search에서 자동으로 openSubmitMulti() 호출
+  if (items && items.length > 0) {
+    sessionStorage.setItem("iad_direct_submit_items", JSON.stringify(items));
+  }
   window.location.href = '/search';
 }
 

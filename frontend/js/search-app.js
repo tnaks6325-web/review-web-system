@@ -223,6 +223,30 @@ async function _restoreReviewerSession() {
   } catch(e) {
     console.warn("[restoreSession] 자동 검색 실패:", e.message);
   }
+
+  // ★ index.html에서 직접 제출 요청이 있으면 즉시 openSubmitMulti() 호출
+  _checkDirectSubmitItems();
+}
+
+/**
+ * ★ index.html에서 리뷰 카드 클릭 시 저장한 아이템을 감지하여
+ *   바로 제출 화면(openSubmitMulti)을 여는 함수.
+ *   sessionStorage의 'iad_direct_submit_items' 키를 사용한다.
+ */
+function _checkDirectSubmitItems() {
+  try {
+    const raw = sessionStorage.getItem("iad_direct_submit_items");
+    if (!raw) return;
+    // 한 번 사용 후 즉시 제거 (중복 방지)
+    sessionStorage.removeItem("iad_direct_submit_items");
+    const items = JSON.parse(raw);
+    if (Array.isArray(items) && items.length > 0) {
+      console.log("[DirectSubmit] index.html에서 전달받은 아이템으로 즉시 제출 화면 열기:", items.length, "건");
+      openSubmitMulti(items);
+    }
+  } catch(e) {
+    console.warn("[DirectSubmit] 직접 제출 아이템 처리 실패:", e.message);
+  }
 }
 
 /** 로그인 상태 UI 적용 */
