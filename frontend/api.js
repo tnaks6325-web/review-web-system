@@ -239,6 +239,17 @@ const _ACTION_MAP = {
 
   // ★ DB 전체 재구축 (초기화 → 탭목록 재등록 → 스마트빌드)
   'dbRebuild':             { method: 'POST', path: '/api/admin/db-rebuild' },
+
+  // ★ 모집공고(캠페인) 시스템
+  'campaignList':          { method: 'GET',  path: '/api/campaign/list' },
+  'campaignDetail':        { method: 'GET',  path: '/api/campaign' },  // /:id 동적
+  'campaignApply':         { method: 'POST', path: '/api/campaign' },  // /:id/apply 동적
+  'campaignAdminList':     { method: 'GET',  path: '/api/campaign/admin/list' },
+  'campaignAdminCreate':   { method: 'POST', path: '/api/campaign/admin/create' },
+  'campaignAdminUpdate':   { method: 'PUT',  path: '/api/campaign/admin' },   // /:id 동적
+  'campaignAdminDelete':   { method: 'DELETE', path: '/api/campaign/admin' }, // /:id 동적
+  'campaignAdminStatus':   { method: 'PUT',  path: '/api/campaign/admin' },   // /:id/status 동적
+  'campaignApplications':  { method: 'GET',  path: '/api/campaign/admin' },   // /:id/applications 동적
 };
 
 // ═══════════════════════════════════════════════════════════

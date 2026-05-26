@@ -14,7 +14,9 @@ async function loadRecruitList() {
   const wrap = document.getElementById("recruitListWrap");
   wrap.innerHTML = `<div style="padding:40px;text-align:center;color:var(--t3)"><i class="fas fa-circle-notch fa-spin"></i> 불러오는 중...</div>`;
   try {
-    const res  = await fetch("tables/campaigns?limit=100&sort=sort_order");
+    const res  = await fetch(API_BASE_URL + "/api/campaign/admin/list", {
+      headers: _getAuthHeaders()
+    });
     const json = await res.json();
     const list = json.data || [];
     if (list.length === 0) {
@@ -42,6 +44,9 @@ function _buildRecruitCard(c) {
     : `<span style="color:var(--t4)"><i class="fas fa-unlink"></i> 탭 미연결</span>`;
 
   const managerEmoji = c.manager === "만두" ? "🥟" : c.manager === "망고" ? "🥭" : "";
+  const slotsInfo = c.max_slots > 0
+    ? `<span><i class="fas fa-users"></i> ${c.current_slots || 0}/${c.max_slots}명</span>`
+    : "";
 
   const div = document.createElement("div");
   div.className = `recruit-card status-${c.status || "draft"}`;
@@ -61,6 +66,7 @@ function _buildRecruitCard(c) {
       ${c.time_range   ? `<span><i class="fas fa-clock"></i> ${escHtml(c.time_range)}</span>` : ""}
       ${c.delivery_type ? `<span><i class="fas fa-truck"></i> ${escHtml(c.delivery_type)}</span>` : ""}
       ${fee            ? `<span><i class="fas fa-won-sign"></i> 리뷰비 ${fee}</span>` : ""}
+      ${slotsInfo}
       ${linkedInfo}
     </div>
     ${badges.length ? `<div class="recruit-card-badges">${badges.map(b=>`<span class="recruit-card-badge">${escHtml(b)}</span>`).join("")}</div>` : ""}
@@ -213,9 +219,9 @@ async function openRecruitModal(id) {
 
   /* 폼 초기화 */
   ["rf_title","rf_channel","rf_channel_custom","rf_time_range",
-   "rf_review_fee","rf_notes","rf_chat_url","rf_sort_order"].forEach(i => {
+   "rf_review_fee","rf_notes","rf_chat_url","rf_sort_order","rf_max_slots"].forEach(i => {
     const el = document.getElementById(i);
-    if (el) el.value = i === "rf_sort_order" ? "0" : "";
+    if (el) el.value = (i === "rf_sort_order" || i === "rf_max_slots") ? "0" : "";
   });
   document.getElementById("rf_delivery_type").value = "";
   document.getElementById("rf_status").value = "draft";
@@ -229,14 +235,18 @@ async function openRecruitModal(id) {
     titleEl.innerHTML = `<i class="fas fa-pen"></i> 모집공고 수정`;
     /* 기존 데이터 로드 */
     try {
-      const res  = await fetch(`tables/campaigns/${id}`);
-      const c    = await res.json();
+      const res  = await fetch(API_BASE_URL + `/api/campaign/${id}`, {
+        headers: _getAuthHeaders()
+      });
+      const json = await res.json();
+      const c = json.data || json;
       document.getElementById("rf_title").value        = c.title || "";
       document.getElementById("rf_time_range").value   = c.time_range || "";
       document.getElementById("rf_review_fee").value   = c.review_fee || "";
       document.getElementById("rf_notes").value        = c.notes || "";
       document.getElementById("rf_chat_url").value     = c.chat_url || "";
       document.getElementById("rf_sort_order").value   = c.sort_order ?? 0;
+      document.getElementById("rf_max_slots").value    = c.max_slots ?? 0;
       document.getElementById("rf_status").value       = c.status || "draft";
       document.getElementById("rf_delivery_type").value = c.delivery_type || "";
 
@@ -286,9 +296,6 @@ function closeRecruitModal() {
   _recruitEditId = null;
 }
 
-/* ═══════════════════════════════════════
-   채널 선택
-═══════════════════════════════════════ */
 /* ═══════════════════════════════════════
    채널/담당자 버튼 선택 (공통)
 ═══════════════════════════════════════ */
@@ -367,7 +374,6 @@ async function saveRecruitPost() {
   const chatUrl  = document.getElementById("rf_chat_url").value.trim();
   if (!title)   { showToast("공고 제목을 입력해주세요.", "error"); return; }
   if (!channel) { showToast("구매채널을 선택해주세요.", "error"); return; }
-  if (!chatUrl) { showToast("팀채팅방 URL을 입력해주세요.", "error"); return; }
 
   const tabKey      = document.getElementById("rf_linked_tab").value || "";
   const [sid, tab]  = tabKey ? tabKey.split("||") : ["", ""];
@@ -385,6 +391,7 @@ async function saveRecruitPost() {
     chat_url:       chatUrl,
     linked_sheet_id: sid,
     linked_tab_name: tab,
+    max_slots:      Number(document.getElementById("rf_max_slots").value) || 0,
     status:         document.getElementById("rf_status").value,
     sort_order:     Number(document.getElementById("rf_sort_order").value) || 0
   };
@@ -396,19 +403,22 @@ async function saveRecruitPost() {
   try {
     let res;
     if (_recruitEditId) {
-      res = await fetch(`tables/campaigns/${_recruitEditId}`, {
+      res = await fetch(API_BASE_URL + `/api/campaign/admin/${_recruitEditId}`, {
         method: "PUT",
-        headers: {"Content-Type":"application/json"},
+        headers: {"Content-Type":"application/json", ..._getAuthHeaders()},
         body: JSON.stringify(payload)
       });
     } else {
-      res = await fetch("tables/campaigns", {
+      res = await fetch(API_BASE_URL + "/api/campaign/admin/create", {
         method: "POST",
-        headers: {"Content-Type":"application/json"},
+        headers: {"Content-Type":"application/json", ..._getAuthHeaders()},
         body: JSON.stringify(payload)
       });
     }
-    if (!res.ok) throw new Error("저장 실패 (HTTP " + res.status + ")");
+    if (!res.ok) {
+      const errData = await res.json().catch(() => ({}));
+      throw new Error(errData.error || "저장 실패 (HTTP " + res.status + ")");
+    }
     showToast(_recruitEditId ? "공고가 수정되었습니다." : "공고가 등록되었습니다.", "success");
     closeRecruitModal();
     loadRecruitList();
@@ -426,7 +436,11 @@ async function saveRecruitPost() {
 async function deleteRecruitPost(id, title) {
   if (!confirm(`"${title}" 공고를 삭제할까요?`)) return;
   try {
-    await fetch(`tables/campaigns/${id}`, { method: "DELETE" });
+    const res = await fetch(API_BASE_URL + `/api/campaign/admin/${id}`, {
+      method: "DELETE",
+      headers: _getAuthHeaders()
+    });
+    if (!res.ok) throw new Error("삭제 실패");
     showToast("공고가 삭제되었습니다.", "success");
     loadRecruitList();
   } catch(e) {

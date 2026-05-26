@@ -24,6 +24,7 @@ const submitRoutes   = require('./routes/submit.routes');
 const diagRoutes     = require('./routes/diag.routes');
 const archiveRoutes  = require('./routes/archive.routes');
 const dedupeRoutes   = require('./routes/dedupe.routes');
+const campaignRoutes = require('./routes/campaign.routes');
 
 const app = express();
 
@@ -71,6 +72,7 @@ app.use('/api/submit',    submitRoutes);
 app.use('/api/diag',      diagRoutes);
 app.use('/api/archive',   archiveRoutes);
 app.use('/api/dedupe',    dedupeRoutes);
+app.use('/api/campaign',  campaignRoutes);
 app.use('/api/viewer',    diagRoutes);
 app.use('/api/image',     diagRoutes);
 app.use('/api/blacklist', diagRoutes);

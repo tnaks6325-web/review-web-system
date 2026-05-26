@@ -1528,7 +1528,7 @@
       <!-- 연결 인덱스 탭 (캠페인 먼저, 탭 다음) -->
       <div class="rform-group">
         <label class="rform-label">연결 인덱스 탭
-          <span style="font-size:.68rem;color:var(--t3);font-weight:400">— 참여하기 클릭 시 이동</span>
+          <span style="font-size:.68rem;color:var(--t3);font-weight:400">— 참여 신청 시 이 탭에 자동 행 추가</span>
         </label>
         <!-- 1단계: 캠페인(시트) 선택 -->
         <select id="rf_linked_campaign" class="rform-input" onchange="onLinkedCampaignChange(this)" style="margin-bottom:6px">
@@ -1543,8 +1543,12 @@
         </div>
       </div>
 
-      <!-- 노출 순서 / 상태 -->
-      <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px">
+      <!-- 모집인원 / 노출 순서 / 상태 -->
+      <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:10px">
+        <div class="rform-group">
+          <label class="rform-label">모집인원</label>
+          <input id="rf_max_slots" type="number" class="rform-input" placeholder="0=무제한" min="0" value="0">
+        </div>
         <div class="rform-group">
           <label class="rform-label">노출 순서</label>
           <select id="rf_sort_order" class="rform-input">

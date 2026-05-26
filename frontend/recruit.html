@@ -58,6 +58,7 @@ body{font-family:'Pretendard',sans-serif;background:var(--bg);color:var(--t1);mi
   box-shadow:var(--sh);
   margin-bottom:16px;
 }
+.rc-card.closed{opacity:.7}
 
 /* 카드 헤더 */
 .rc-card-head{
@@ -65,6 +66,7 @@ body{font-family:'Pretendard',sans-serif;background:var(--bg);color:var(--t1);mi
   padding:14px 16px;
   display:flex;align-items:flex-start;gap:10px
 }
+.rc-card.closed .rc-card-head{background:linear-gradient(135deg,#374151 0%,#4B5563 100%)}
 .rc-channel-badge{
   flex-shrink:0;
   background:#FDE68A;color:#78350F;
@@ -73,7 +75,7 @@ body{font-family:'Pretendard',sans-serif;background:var(--bg);color:var(--t1);mi
   margin-top:1px
 }
 .rc-card-title{
-  font-size:.92rem;font-weight:700;color:#fff;line-height:1.4
+  font-size:.92rem;font-weight:700;color:#fff;line-height:1.4;flex:1
 }
 
 /* 카드 본문 */
@@ -108,6 +110,14 @@ body{font-family:'Pretendard',sans-serif;background:var(--bg);color:var(--t1);mi
   font-size:.82rem;font-weight:700;color:var(--p)
 }
 
+/* 정원 표시 */
+.rc-slots{
+  display:inline-flex;align-items:center;gap:5px;
+  font-size:.76rem;font-weight:600;color:var(--ok);
+  background:var(--ok-l);padding:3px 10px;border-radius:12px
+}
+.rc-slots.full{color:var(--err);background:#FEE2E2}
+
 /* 특이사항 */
 .rc-notes-label{font-size:.68rem;font-weight:700;color:var(--t4);margin-bottom:4px;display:flex;align-items:center;gap:4px}
 .rc-notes-text{font-size:.8rem;color:var(--t2);white-space:pre-line;line-height:1.7}
@@ -119,18 +129,81 @@ body{font-family:'Pretendard',sans-serif;background:var(--bg);color:var(--t1);mi
 .rc-card-footer{padding:14px 16px}
 .rc-join-btn{
   display:block;width:100%;padding:14px;
-  background:#FFD700;color:#1a1a1a;
+  background:linear-gradient(135deg,#7C3AED 0%,#6D28D9 100%);color:#fff;
   border:none;border-radius:12px;
   font-size:.95rem;font-weight:800;
   text-align:center;text-decoration:none;
   cursor:pointer;
   transition:background .15s,transform .1s,box-shadow .15s;
-  box-shadow:0 4px 12px rgba(255,215,0,.35);
+  box-shadow:0 4px 12px rgba(124,58,237,.3);
   letter-spacing:.02em
 }
-.rc-join-btn:hover{background:#FACC15;transform:translateY(-1px);box-shadow:0 6px 18px rgba(255,215,0,.45)}
+.rc-join-btn:hover{transform:translateY(-1px);box-shadow:0 6px 18px rgba(124,58,237,.45)}
 .rc-join-btn:active{transform:translateY(0)}
+.rc-join-btn:disabled{background:#9CA3AF;cursor:not-allowed;box-shadow:none;transform:none}
 .rc-join-btn i{margin-right:6px}
+
+.rc-closed-badge{
+  display:block;width:100%;padding:14px;
+  background:#F3F4F6;color:var(--t3);
+  border:none;border-radius:12px;
+  font-size:.9rem;font-weight:700;
+  text-align:center;
+}
+
+/* ── 모달 ── */
+.rc-modal-overlay{
+  position:fixed;inset:0;background:rgba(0,0,0,.5);
+  display:flex;align-items:center;justify-content:center;
+  z-index:1000;padding:20px;
+  opacity:0;pointer-events:none;transition:opacity .2s
+}
+.rc-modal-overlay.show{opacity:1;pointer-events:auto}
+.rc-modal{
+  background:#fff;border-radius:20px;
+  width:100%;max-width:400px;
+  box-shadow:var(--shm);
+  overflow:hidden;transform:translateY(20px);transition:transform .2s
+}
+.rc-modal-overlay.show .rc-modal{transform:translateY(0)}
+.rc-modal-header{
+  background:linear-gradient(135deg,#4C1D95 0%,#7C3AED 100%);
+  padding:20px;color:#fff;text-align:center
+}
+.rc-modal-header h3{font-size:1.1rem;font-weight:700}
+.rc-modal-header p{font-size:.78rem;opacity:.8;margin-top:4px}
+.rc-modal-body{padding:20px;display:flex;flex-direction:column;gap:14px}
+.rc-form-group{display:flex;flex-direction:column;gap:5px}
+.rc-form-group label{font-size:.78rem;font-weight:600;color:var(--t2)}
+.rc-form-group input{
+  padding:12px 14px;border:1.5px solid var(--border);border-radius:10px;
+  font-size:.88rem;font-family:inherit;transition:border-color .15s
+}
+.rc-form-group input:focus{outline:none;border-color:var(--p)}
+.rc-modal-footer{padding:0 20px 20px;display:flex;gap:10px}
+.rc-modal-btn{
+  flex:1;padding:13px;border:none;border-radius:10px;
+  font-size:.88rem;font-weight:700;cursor:pointer;
+  transition:background .15s
+}
+.rc-modal-btn.primary{background:var(--p);color:#fff}
+.rc-modal-btn.primary:hover{background:#6D28D9}
+.rc-modal-btn.primary:disabled{background:#9CA3AF;cursor:not-allowed}
+.rc-modal-btn.secondary{background:#F3F4F6;color:var(--t2)}
+.rc-modal-btn.secondary:hover{background:#E5E7EB}
+
+/* ── Toast ── */
+.rc-toast{
+  position:fixed;top:20px;left:50%;transform:translateX(-50%);
+  padding:12px 24px;border-radius:12px;
+  font-size:.85rem;font-weight:600;
+  box-shadow:0 4px 20px rgba(0,0,0,.15);
+  z-index:2000;opacity:0;transition:opacity .3s,transform .3s;
+  transform:translateX(-50%) translateY(-10px)
+}
+.rc-toast.show{opacity:1;transform:translateX(-50%) translateY(0)}
+.rc-toast.success{background:#065F46;color:#fff}
+.rc-toast.error{background:#DC2626;color:#fff}
 
 /* ── 하단 고정 영역 ── */
 .rc-footer-fixed{
@@ -155,7 +228,6 @@ body{font-family:'Pretendard',sans-serif;background:var(--bg);color:var(--t1);mi
 .rc-kakao-btn:hover{background:#FDD835;box-shadow:0 4px 14px rgba(0,0,0,.15);transform:translateY(-1px)}
 .rc-kakao-btn:active{transform:translateY(0)}
 .rc-kakao-btn i{font-size:.9rem}
-/* 만두: 초록 계열 / 망고: 카카오 옐로 */
 #rcKakaoBtnMandu{background:#D1FAE5;color:#065F46}
 #rcKakaoBtnMandu:hover{background:#A7F3D0}
 #rcKakaoBtnMango{background:#FFE812;color:#3A1D1D}
@@ -190,7 +262,7 @@ body{font-family:'Pretendard',sans-serif;background:var(--bg);color:var(--t1);mi
 <!-- 안내 배너 -->
 <div class="rc-notice">
   <i class="fas fa-exclamation-circle"></i>
-  <span>원하는 캠페인의 채팅방 참여 후 담당자에게 연락하면 가이드를 받으실 수 있습니다 🎯</span>
+  <span>원하는 캠페인에 참여 신청하면 자동으로 등록됩니다. 정원 초과 시 자동 마감됩니다 🎯</span>
 </div>
 
 <!-- 본문 -->
@@ -207,6 +279,36 @@ body{font-family:'Pretendard',sans-serif;background:var(--bg);color:var(--t1);mi
   <div id="rcList"></div>
 </div>
 
+<!-- 참여 신청 모달 -->
+<div class="rc-modal-overlay" id="rcApplyModal">
+  <div class="rc-modal">
+    <div class="rc-modal-header">
+      <h3 id="rcApplyTitle">참여 신청</h3>
+      <p id="rcApplyCampName"></p>
+    </div>
+    <div class="rc-modal-body">
+      <div class="rc-form-group">
+        <label><i class="fas fa-user"></i> 이름 (수취인명)</label>
+        <input type="text" id="rcApplyName" placeholder="실명 입력" autocomplete="name">
+      </div>
+      <div class="rc-form-group">
+        <label><i class="fas fa-phone"></i> 연락처 (뒷자리 4~8자리)</label>
+        <input type="tel" id="rcApplyPhone" placeholder="예: 01012345678" autocomplete="tel">
+      </div>
+      <div class="rc-form-group">
+        <label><i class="fas fa-id-badge"></i> 인애드명 (선택)</label>
+        <input type="text" id="rcApplyInad" placeholder="인애드 닉네임 (없으면 비워두세요)">
+      </div>
+    </div>
+    <div class="rc-modal-footer">
+      <button class="rc-modal-btn secondary" onclick="closeApplyModal()">취소</button>
+      <button class="rc-modal-btn primary" id="rcApplySubmitBtn" onclick="submitApplication()">
+        <i class="fas fa-check"></i> 신청하기
+      </button>
+    </div>
+  </div>
+</div>
+
 <!-- 하단 고정 -->
 <div class="rc-footer-fixed" id="rcFooter" style="display:none">
   <div id="rcKakaoBtns" style="display:flex;gap:10px;flex-wrap:wrap;justify-content:center">
@@ -220,13 +322,20 @@ body{font-family:'Pretendard',sans-serif;background:var(--bg);color:var(--t1);mi
   <div class="rc-payment-info" id="rcPaymentInfo"></div>
 </div>
 
+<!-- Toast -->
+<div class="rc-toast" id="rcToast"></div>
+
 <script>
 /* ═══════════════════════════════════
-   설정값 로드
+   전역 상태
 ═══════════════════════════════════ */
+let _applyCampaignId = null;
 let _kakaoMandu = "";
 let _kakaoMango = "";
 
+/* ═══════════════════════════════════
+   설정값 로드
+═══════════════════════════════════ */
 async function loadSettings() {
   try {
     const res  = await fetch("tables/app_settings?limit=30");
@@ -238,7 +347,6 @@ async function loadSettings() {
     document.getElementById("rcPageTitle").textContent = pageTitle;
     document.title = pageTitle;
 
-    /* ── 담당자 카카오 아이디 (만두/망고 분리) ── */
     _kakaoMandu = get("kakao_id_mandu");
     _kakaoMango = get("kakao_id_mango");
 
@@ -263,7 +371,6 @@ async function loadSettings() {
       ).join("\n");
     }
 
-    /* 하단바: 아이디 하나라도 있거나 입금안내 있으면 표시 */
     if (_kakaoMandu || _kakaoMango || schedule) {
       document.getElementById("rcFooter").style.display = "";
     }
@@ -277,22 +384,31 @@ async function loadSettings() {
 ═══════════════════════════════════ */
 async function loadCampaigns() {
   try {
-    const res  = await fetch("tables/campaigns?limit=100&sort=sort_order");
+    const res  = await fetch(API_BASE_URL + "/api/campaign/list");
     const json = await res.json();
     const all  = json.data || [];
-    /* active 만 노출 */
-    const list = all.filter(c => c.status === "active");
 
     document.getElementById("rcLoading").style.display = "none";
 
-    if (list.length === 0) {
+    const activeList = all.filter(c => c.status === "active");
+    const closedList = all.filter(c => c.status === "closed");
+
+    if (all.length === 0) {
       document.getElementById("rcEmpty").style.display = "";
       return;
     }
 
-    document.getElementById("rcActiveCount").textContent = `진행중 ${list.length}건`;
+    document.getElementById("rcActiveCount").textContent = `진행중 ${activeList.length}건`;
     const container = document.getElementById("rcList");
-    list.forEach(c => container.appendChild(_buildCard(c)));
+
+    activeList.forEach(c => container.appendChild(_buildCard(c)));
+    if (closedList.length > 0) {
+      const sep = document.createElement("div");
+      sep.style.cssText = "text-align:center;padding:12px;font-size:.75rem;color:var(--t4);font-weight:600";
+      sep.textContent = `── 마감된 캠페인 (${closedList.length}건) ──`;
+      container.appendChild(sep);
+      closedList.forEach(c => container.appendChild(_buildCard(c)));
+    }
   } catch(e) {
     document.getElementById("rcLoading").innerHTML =
       `<i class="fas fa-exclamation-circle" style="color:#DC2626;font-size:2rem;display:block;margin-bottom:12px"></i>
@@ -308,32 +424,34 @@ function _buildCard(c) {
   const badges  = _parseBadges(c.badges);
   const fee     = c.review_fee ? Number(c.review_fee).toLocaleString() + "원" : "";
   const managerEmoji = c.manager === "만두" ? "🥟" : c.manager === "망고" ? "🥭" : "";
+  const isClosed = c.status === "closed";
+  const slotsHtml = c.max_slots > 0
+    ? `<span class="rc-slots ${c.current_slots >= c.max_slots ? 'full' : ''}"><i class="fas fa-users"></i> ${c.current_slots || 0}/${c.max_slots}명</span>`
+    : "";
 
-  /* 참여하기 버튼: 연결 탭 있으면 search.html?prefill=tabName, 없으면 chat_url */
-  let joinHref = c.chat_url || "#";
-  let joinTarget = "_blank";
-  let joinLabel = `<i class="fas fa-comment-dots"></i> 채팅방 참여하기`;
-  if (c.linked_sheet_id && c.linked_tab_name) {
-    joinHref   = `search.html?tab=${encodeURIComponent(c.linked_tab_name)}&s=${encodeURIComponent(c.linked_sheet_id)}`;
-    joinTarget = "_self";
-    joinLabel  = `<i class="fas fa-arrow-right"></i> 참여하기`;
+  let footerHtml = "";
+  if (isClosed) {
+    footerHtml = `<div class="rc-closed-badge"><i class="fas fa-lock"></i> 모집 마감</div>`;
+  } else {
+    footerHtml = `<button class="rc-join-btn" onclick="openApplyModal('${_esc(c.id)}', '${_esc(c.title)}')"><i class="fas fa-hand-point-up"></i> 참여 신청하기</button>`;
   }
 
   const div = document.createElement("div");
-  div.className = "rc-card";
+  div.className = `rc-card ${isClosed ? 'closed' : ''}`;
   div.innerHTML = `
     <div class="rc-card-head">
       ${channel ? `<span class="rc-channel-badge">${_esc(channel)}</span>` : ""}
       <span class="rc-card-title">${_esc(c.title || "(제목 없음)")}</span>
-      ${c.manager ? `<span style="font-size:.72rem;color:#166534;font-weight:600;flex-shrink:0;white-space:nowrap">${managerEmoji} ${_esc(c.manager)}</span>` : ""}
+      ${c.manager ? `<span style="font-size:.72rem;color:#A7F3D0;font-weight:600;flex-shrink:0;white-space:nowrap">${managerEmoji} ${_esc(c.manager)}</span>` : ""}
     </div>
     <div class="rc-card-body">
       ${badges.length ? `<div class="rc-badges">${badges.map((b,i)=>`<span class="rc-badge rc-badge-${i%6}">${_esc(b)}</span>`).join("")}</div>` : ""}
-      ${(c.time_range||c.delivery_type||fee) ? `
+      ${(c.time_range||c.delivery_type||fee||slotsHtml) ? `
       <div class="rc-meta">
         ${fee ? `<span class="rc-fee"><i class="fas fa-won-sign"></i> 리뷰비 ${_esc(fee)}</span>` : ""}
         ${c.delivery_type ? `<span class="rc-meta-item"><i class="fas fa-truck"></i>${_esc(c.delivery_type)}</span>` : ""}
         ${c.time_range    ? `<span class="rc-meta-item"><i class="fas fa-clock"></i>${_esc(c.time_range)}</span>` : ""}
+        ${slotsHtml}
       </div>` : ""}
       ${c.notes ? `<div>
         <div class="rc-notes-label"><i class="fas fa-clipboard-list"></i> 유의사항</div>
@@ -342,15 +460,77 @@ function _buildCard(c) {
     </div>
     <div class="rc-divider"></div>
     <div class="rc-card-footer">
-      <a class="rc-join-btn" href="${_esc(joinHref)}" target="${joinTarget}">${joinLabel}</a>
+      ${footerHtml}
     </div>
   `;
   return div;
 }
 
 /* ═══════════════════════════════════
+   참여 신청 모달
+═══════════════════════════════════ */
+function openApplyModal(campaignId, campTitle) {
+  _applyCampaignId = campaignId;
+  document.getElementById("rcApplyCampName").textContent = campTitle;
+  document.getElementById("rcApplyName").value = "";
+  document.getElementById("rcApplyPhone").value = "";
+  document.getElementById("rcApplyInad").value = "";
+  document.getElementById("rcApplySubmitBtn").disabled = false;
+  document.getElementById("rcApplyModal").classList.add("show");
+}
+
+function closeApplyModal() {
+  document.getElementById("rcApplyModal").classList.remove("show");
+  _applyCampaignId = null;
+}
+
+async function submitApplication() {
+  const name  = document.getElementById("rcApplyName").value.trim();
+  const phone = document.getElementById("rcApplyPhone").value.trim();
+  const inad  = document.getElementById("rcApplyInad").value.trim();
+
+  if (!name) { rcShowToast("이름을 입력해주세요.", "error"); return; }
+  if (!phone || phone.length < 4) { rcShowToast("연락처를 입력해주세요. (4자리 이상)", "error"); return; }
+
+  const btn = document.getElementById("rcApplySubmitBtn");
+  btn.disabled = true;
+  btn.innerHTML = '<i class="fas fa-circle-notch fa-spin"></i> 신청 중...';
+
+  try {
+    const res = await fetch(API_BASE_URL + `/api/campaign/${_applyCampaignId}/apply`, {
+      method: "POST",
+      headers: {"Content-Type":"application/json"},
+      body: JSON.stringify({ name, phone, inad })
+    });
+    const data = await res.json();
+    if (!res.ok || !data.ok) {
+      throw new Error(data.error || "신청에 실패했습니다.");
+    }
+    rcShowToast("🎉 " + (data.message || "참여 신청이 완료되었습니다!"), "success");
+    closeApplyModal();
+    // 목록 새로고침 (정원 업데이트)
+    document.getElementById("rcList").innerHTML = "";
+    loadCampaigns();
+  } catch(e) {
+    rcShowToast(e.message, "error");
+  } finally {
+    btn.disabled = false;
+    btn.innerHTML = '<i class="fas fa-check"></i> 신청하기';
+  }
+}
+
+/* ═══════════════════════════════════
+   Toast
+═══════════════════════════════════ */
+function rcShowToast(msg, type) {
+  const el = document.getElementById("rcToast");
+  el.textContent = msg;
+  el.className = `rc-toast ${type} show`;
+  setTimeout(() => el.classList.remove("show"), 3000);
+}
+
+/* ═══════════════════════════════════
    담당자 카톡 아이디 복사
-   who: 'mandu' | 'mango'
 ═══════════════════════════════════ */
 function copyKakaoId(who) {
   const idVal = who === "mandu" ? _kakaoMandu : _kakaoMango;
@@ -365,7 +545,6 @@ function copyKakaoId(who) {
     if (navigator.clipboard && navigator.clipboard.writeText) {
       return navigator.clipboard.writeText(idVal);
     }
-    /* fallback */
     const ta = document.createElement("textarea");
     ta.value = idVal;
     ta.style.cssText = "position:fixed;top:-9999px;opacity:0";
