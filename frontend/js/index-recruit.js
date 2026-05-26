@@ -327,6 +327,11 @@ async function openRecruitModal(id) {
 
   modal.classList.remove("hidden");
   modal.style.display = "";
+
+  /* 미리보기 항상 자동 렌더링 */
+  _previewOpen = true;
+  _renderPreview();
+  _attachPreviewListeners();
 }
 
 function closeRecruitModal() {
@@ -557,30 +562,11 @@ async function saveRecruitSettings() {
 /* ═══════════════════════════════════════
    실시간 미리보기 기능
 ═══════════════════════════════════════ */
-let _previewOpen = false;
+let _previewOpen = true;
 let _previewDebounce = null;
 
 function toggleRecruitPreview() {
-  _previewOpen = !_previewOpen;
-  const area    = document.getElementById("rf_preview_area");
-  const label   = document.getElementById("rf_preview_label");
-  const chevron = document.getElementById("rf_preview_chevron");
-  const icon    = document.getElementById("rf_preview_icon");
-
-  if (_previewOpen) {
-    area.style.display = "";
-    label.textContent = "미리보기 닫기";
-    chevron.style.transform = "rotate(180deg)";
-    icon.className = "fas fa-eye-slash";
-    _renderPreview();
-    _attachPreviewListeners();
-  } else {
-    area.style.display = "none";
-    label.textContent = "미리보기 열기";
-    chevron.style.transform = "";
-    icon.className = "fas fa-eye";
-    _detachPreviewListeners();
-  }
+  /* 미리보기 항상 열림 — 호환성을 위해 빈 함수 유지 */
 }
 
 /* 폼 값으로 미리보기 카드 렌더 */
