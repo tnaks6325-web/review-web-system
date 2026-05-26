@@ -143,10 +143,10 @@
 
   <div class="login-card">
     <h2><i class="fas fa-sign-in-alt" style="color:var(--p);margin-right:6px"></i>로그인</h2>
-    <p>등록된 이름과 전화번호 뒷자리로 로그인합니다</p>
+    <p>등록된 전화번호 뒤 8자리로 로그인합니다</p>
     <div class="login-input-group">
-      <input id="loginName" class="login-input" type="text" placeholder="이름" autocomplete="name">
-      <input id="loginPhone" class="login-input" type="tel" placeholder="전화번호 뒷 4자리" maxlength="4" inputmode="numeric">
+      <input id="loginName" class="login-input" type="text" placeholder="이름 (선택)" autocomplete="name">
+      <input id="loginPhone" class="login-input" type="tel" placeholder="전화번호 뒤 8자리 (예: 85926325)" maxlength="8" inputmode="numeric">
     </div>
     <button class="login-btn" onclick="doLogin()">
       <i class="fas fa-arrow-right"></i> 로그인
@@ -250,33 +250,42 @@ function showHome(user) {
 
 async function doLogin() {
   const name  = document.getElementById("loginName").value.trim();
-  const phone = document.getElementById("loginPhone").value.trim();
-  if (!name) { showToast("이름을 입력해주세요"); return; }
-  if (!phone || phone.length < 4) { showToast("전화번호 뒷 4자리를 입력해주세요"); return; }
+  const phone = document.getElementById("loginPhone").value.replace(/[^0-9]/g, "");
+  if (!phone || phone.length !== 8) { showToast("전화번호 뒤 8자리를 입력해주세요"); return; }
 
   const btn = document.querySelector(".login-btn");
   btn.disabled = true;
   btn.innerHTML = '<i class="fas fa-circle-notch fa-spin"></i> 확인 중...';
 
   try {
-    // 이름+전화번호로 리뷰어 존재 확인
-    const res = await fetch(API_BASE_URL + "/api/search?query=" + encodeURIComponent(name));
+    // 1차: 리뷰어 등록 DB에서 확인 (/api/reviewer/verify)
+    const verifyUrl = API_BASE_URL + "/api/reviewer/verify?phone8=" + encodeURIComponent(phone)
+      + (name ? "&name=" + encodeURIComponent(name) : "");
+    const res = await fetch(verifyUrl);
     const json = await res.json();
-    const results = json.data || json.results || [];
 
-    // 전화번호 뒷4자리 매칭 확인
-    const matched = results.some(r => {
-      const p = (r.phone || r.연락처 || r.전화번호 || "").replace(/[^0-9]/g, "");
-      return p.endsWith(phone);
-    });
-
-    if (results.length > 0) {
-      // 이름이 인덱스에 존재하면 로그인 허용
-      const user = { name, phone, loginAt: Date.now() };
+    if (json.ok) {
+      const user = { name: json.name, phone: json.phone, phone8: phone, loginAt: Date.now() };
       localStorage.setItem(USER_KEY, JSON.stringify(user));
       showHome(user);
     } else {
-      showToast("등록된 이름을 찾을 수 없습니다");
+      // 2차 fallback: review_index에서 이름 검색 (이름 입력한 경우)
+      if (name) {
+        const res2 = await fetch(API_BASE_URL + "/api/search?query=" + encodeURIComponent(name));
+        const json2 = await res2.json();
+        const results = json2.data || json2.results || [];
+        const matched = results.some(r => {
+          const p = (r.phone || r.연락처 || r.전화번호 || "").replace(/[^0-9]/g, "");
+          return p.endsWith(phone) || p.includes(phone);
+        });
+        if (matched || results.length > 0) {
+          const user = { name, phone8: phone, loginAt: Date.now() };
+          localStorage.setItem(USER_KEY, JSON.stringify(user));
+          showHome(user);
+          return;
+        }
+      }
+      showToast(json.error || "등록된 정보를 찾을 수 없습니다");
     }
   } catch(e) {
     showToast("로그인 실패: " + e.message);
