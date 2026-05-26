@@ -212,41 +212,56 @@
     }
     .tab-btn.active:hover { background:var(--p-dark); }
 
-    /* ─── Stats Summary ─── */
-    .stats-bar {
-      display:grid; grid-template-columns:repeat(4,1fr); gap:6px;
-      margin-bottom:12px; padding:0;
+    /* ─── Result Card (review list) ─── */
+    .result-card {
+      display:flex; align-items:center; gap:10px; padding:12px 14px;
+      background:#fff; border:1px solid var(--border); border-radius:12px;
+      margin-bottom:8px; cursor:pointer; transition:border-color .15s, box-shadow .15s;
     }
-    .stats-bar-item {
-      text-align:center; padding:10px 6px; border-radius:10px;
-      background:#F8FAFC; border:1px solid var(--border);
+    .result-card:hover { border-color:var(--p); box-shadow:0 2px 8px rgba(124,58,237,.08); }
+    .result-avatar {
+      width:36px; height:36px; border-radius:50%; flex-shrink:0;
+      background:linear-gradient(135deg,var(--p-light),#EDE9FE);
+      display:flex; align-items:center; justify-content:center;
     }
-    .stats-bar-num { font-size:1.1rem; font-weight:800; }
-    .stats-bar-label { font-size:.65rem; color:var(--t3); margin-top:2px; }
+    .result-body { flex:1; min-width:0; }
+    .result-name { font-size:.82rem; font-weight:700; color:var(--t1); white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+    .result-product-label { font-size:.7rem; color:var(--t3); margin-top:2px; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+    .result-product-empty { font-style:italic; }
+    .result-right { display:flex; align-items:center; gap:6px; flex-shrink:0; }
+    .result-chevron { color:var(--t4); font-size:.75rem; }
+    .status-badge-pending { font-size:.62rem; font-weight:700; padding:3px 8px; border-radius:6px; background:var(--warn-light); color:#92400E; }
+    .status-badge-submitted { font-size:.62rem; font-weight:700; padding:3px 8px; border-radius:6px; background:var(--ok-light); color:#065F46; }
 
-    /* ─── Stage Badge ─── */
-    .stage-badge { font-size:.62rem; font-weight:700; padding:2px 7px; border-radius:5px; white-space:nowrap; }
-    .stage-badge.assigned { background:#DBEAFE; color:#1E40AF; }
-    .stage-badge.submitted { background:var(--ok-light); color:#065F46; }
-    .stage-badge.paid { background:#EDE9FE; color:#5B21B6; }
-    .stage-badge.closed { background:var(--err-light); color:#DC2626; }
-
-    /* ─── Action link in status items ─── */
-    .status-action {
-      font-size:.68rem; color:var(--p); font-weight:600; text-decoration:none;
-      padding:3px 8px; border:1px solid var(--p); border-radius:6px;
-      white-space:nowrap; transition:background .2s;
+    /* ─── Result Group Card ─── */
+    .result-group-card {
+      background:#fff; border:1px solid var(--border); border-radius:12px;
+      margin-bottom:8px; cursor:pointer; overflow:hidden;
+      transition:border-color .15s, box-shadow .15s;
     }
-    .status-action:hover { background:var(--p-light); }
-
-    /* ─── Payment Summary ─── */
-    .pay-summary {
-      display:flex; align-items:center; gap:12px; padding:12px 16px;
-      background:linear-gradient(135deg,#EDE9FE,#F5F3FF);
-      border-radius:12px; margin-bottom:12px; border:1px solid #DDD6FE;
+    .result-group-card:hover { border-color:var(--p); box-shadow:0 2px 8px rgba(124,58,237,.08); }
+    .result-group-header {
+      display:flex; align-items:center; gap:10px; padding:12px 14px;
+      border-bottom:1px solid #F1F5F9;
     }
-    .pay-summary-amount { font-size:1.3rem; font-weight:800; color:var(--p-dark); }
-    .pay-summary-label { font-size:.72rem; color:var(--t3); }
+    .result-group-name { font-size:.82rem; font-weight:700; color:var(--t1); }
+    .result-group-badge {
+      font-size:.62rem; font-weight:700; padding:2px 8px; border-radius:6px;
+      background:var(--p-light); color:var(--p); white-space:nowrap;
+    }
+    .result-group-items { padding:8px 14px; }
+    .result-group-item {
+      display:flex; align-items:center; gap:6px; padding:5px 0;
+      border-bottom:1px solid #F8FAFC;
+    }
+    .result-group-item:last-child { border-bottom:none; }
+    .result-group-item-label { flex:1; font-size:.72rem; color:var(--t2); min-width:0; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+    .result-group-item-badge { font-size:.6rem; font-weight:700; padding:2px 6px; border-radius:5px; background:var(--warn-light); color:#92400E; }
+
+    /* ─── Results Section Header ─── */
+    .results-header { display:flex; align-items:center; gap:8px; margin-bottom:10px; }
+    .results-title { font-size:.85rem; font-weight:700; color:var(--t2); }
+    .results-badge { font-size:.68rem; font-weight:700; background:var(--p-light); color:var(--p); padding:2px 8px; border-radius:10px; }
 
     /* ─── Footer ─── */
     .home-footer {
@@ -318,16 +333,119 @@
   </div>
 
   <!-- 탭 네비게이션 -->
-  <div class="tab-nav">
-    <button class="tab-btn active" onclick="switchTab('all')">
+  <div class="tab-nav" style="margin:12px 16px 0">
+    <button class="tab-btn active" id="tabBtnAll" onclick="switchTab('all')">
       <i class="fas fa-th-large"></i> 전체
     </button>
-    <button class="tab-btn" onclick="goToMyStatus()">
+    <button class="tab-btn" id="tabBtnStatus" onclick="switchTab('status')">
       <i class="fas fa-clipboard-list"></i> 내 참여현황
     </button>
-    <button class="tab-btn" onclick="switchTab('recruit')">
+    <button class="tab-btn" id="tabBtnRecruit" onclick="switchTab('recruit')">
       <i class="fas fa-bullhorn"></i> 모집공고
     </button>
+  </div>
+
+  <!-- ★ 내 등록정보 섹션 (로그인 후 자동 표시) -->
+  <div id="sectionProfile" class="home-section" style="padding-top:12px">
+    <div id="inlineProfileSection" style="display:none">
+      <!-- 본인 정보 -->
+      <div style="background:#F9FAFB;border:1.5px solid #E5E7EB;border-radius:10px;padding:12px 14px;margin-bottom:10px">
+        <div style="font-size:.72rem;font-weight:700;color:var(--t3);margin-bottom:6px;letter-spacing:.04em">👤 내 등록정보</div>
+        <div style="display:flex;gap:8px;flex-wrap:wrap">
+          <div style="flex:1;min-width:100px">
+            <div style="font-size:.65rem;color:var(--t3);margin-bottom:2px">사용자명</div>
+            <div id="inlineSelfName" style="font-size:.85rem;font-weight:700;color:var(--t1)">-</div>
+          </div>
+          <div style="flex:1;min-width:100px">
+            <div style="font-size:.65rem;color:var(--t3);margin-bottom:2px">전화번호</div>
+            <div id="inlineSelfPhone" style="font-size:.82rem;color:var(--t2)">-</div>
+          </div>
+          <div style="flex:1;min-width:100px">
+            <div style="font-size:.65rem;color:var(--t3);margin-bottom:2px">소득명의</div>
+            <div style="display:flex;align-items:center;gap:4px">
+              <span id="inlineSelfIncomeName" style="font-size:.82rem;color:var(--t2)">미등록</span>
+              <button id="btnAddIncomeInfo" onclick="openIncomeInfoForm()" style="display:none;padding:1px 6px;background:#EFF6FF;color:#2563EB;border:1px solid #93C5FD;border-radius:5px;font-size:.62rem;font-weight:700;cursor:pointer">추가+</button>
+            </div>
+          </div>
+          <div style="flex:1;min-width:100px">
+            <div style="font-size:.65rem;color:var(--t3);margin-bottom:2px">주민번호</div>
+            <div style="display:flex;align-items:center;gap:4px">
+              <span id="inlineSelfJumin" style="font-size:.82rem;color:var(--t2);letter-spacing:.5px">미등록</span>
+              <button id="btnAddJuminInfo" onclick="openIncomeInfoForm()" style="display:none;padding:1px 6px;background:#EFF6FF;color:#2563EB;border:1px solid #93C5FD;border-radius:5px;font-size:.62rem;font-weight:700;cursor:pointer">추가+</button>
+            </div>
+          </div>
+        </div>
+      </div>
+      <!-- 소득명의/주민번호 인라인 입력폼 -->
+      <div id="inlineIncomeForm" style="display:none;background:#FFFBEB;border:1.5px solid #FDE68A;border-radius:10px;padding:12px 14px;margin-bottom:10px">
+        <div style="font-size:.73rem;font-weight:700;color:#92400E;margin-bottom:8px">📝 소득명의 / 주민번호 등록</div>
+        <div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:8px">
+          <div style="flex:1;min-width:120px">
+            <label style="font-size:.68rem;font-weight:600;color:var(--t2)">소득명의</label>
+            <input id="inlineIncomeNameInput" type="text" placeholder="소득신고 명의자" style="width:100%;margin-top:3px;padding:7px 9px;border:1.5px solid #D1D5DB;border-radius:7px;font-size:.8rem;outline:none;box-sizing:border-box" maxlength="20">
+          </div>
+          <div style="flex:1;min-width:140px">
+            <label style="font-size:.68rem;font-weight:600;color:var(--t2)">주민번호 <span style="color:var(--t3);font-weight:400">(13자리)</span></label>
+            <input id="inlineJuminInput" type="text" placeholder="000000-0000000" oninput="formatJumin(this)" style="width:100%;margin-top:3px;padding:7px 9px;border:1.5px solid #D1D5DB;border-radius:7px;font-size:.8rem;outline:none;box-sizing:border-box" maxlength="14">
+          </div>
+        </div>
+        <div style="display:flex;gap:8px">
+          <button onclick="cancelIncomeInfoForm()" style="flex:1;padding:7px 0;background:#fff;color:var(--t2);border:1.5px solid #D1D5DB;border-radius:7px;font-size:.75rem;font-weight:600;cursor:pointer">취소</button>
+          <button id="btnSaveIncomeInfo" onclick="saveIncomeInfoInline()" style="flex:1;padding:7px 0;background:#D97706;color:#fff;border:none;border-radius:7px;font-size:.75rem;font-weight:700;cursor:pointer">저장</button>
+        </div>
+      </div>
+      <!-- 타계정 목록 -->
+      <div style="background:#fff;border:1.5px solid #E5E7EB;border-radius:10px;padding:12px 14px">
+        <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:8px">
+          <div style="font-size:.72rem;font-weight:700;color:var(--t2)">타계정 정보 <span id="inlineSubCount" style="font-size:.68rem;background:#E0E7FF;color:#4338CA;border-radius:10px;padding:1px 7px;margin-left:4px">0/10</span></div>
+          <button id="btnInlineAddSub" onclick="toggleInlineSubForm()" style="padding:4px 10px;background:#7C3AED;color:#fff;border:none;border-radius:7px;font-size:.72rem;font-weight:700;cursor:pointer">
+            <i class="fas fa-plus"></i> 타계정 추가
+          </button>
+        </div>
+        <div id="inlineSubList" style="display:flex;flex-direction:column;gap:5px">
+          <div style="text-align:center;padding:10px;color:var(--t3);font-size:.78rem">타계정이 없습니다</div>
+        </div>
+        <!-- 인라인 타계정 추가/수정 폼 -->
+        <div id="inlineSubForm" style="display:none;margin-top:10px;border:1.5px solid #BFDBFE;border-radius:10px;padding:14px;background:#EFF6FF">
+          <div style="font-size:.75rem;font-weight:700;color:#1D4ED8;margin-bottom:10px" id="inlineSubFormTitle">타계정 추가</div>
+          <input type="hidden" id="inlineSubEditIdx" value="-1">
+          <div style="margin-bottom:8px">
+            <label style="font-size:.7rem;font-weight:600;color:var(--t2)">이름 <span style="color:#DC2626">*</span></label>
+            <input id="inlineSubName" type="text" placeholder="이름" style="width:100%;margin-top:3px;padding:8px 10px;border:1.5px solid #D1D5DB;border-radius:7px;font-size:.82rem;outline:none;box-sizing:border-box" maxlength="20">
+          </div>
+          <div style="margin-bottom:8px">
+            <label style="font-size:.7rem;font-weight:600;color:var(--t2)">전화번호 <span style="color:#DC2626">*</span></label>
+            <div style="display:flex;align-items:center;gap:4px;margin-top:3px">
+              <span style="font-size:.82rem;font-weight:600;color:var(--t1);white-space:nowrap">010-</span>
+              <input id="inlineSubPhone" type="tel" placeholder="0000-0000" oninput="formatPhoneLast8(this)" style="flex:1;padding:8px 10px;border:1.5px solid #D1D5DB;border-radius:7px;font-size:.82rem;outline:none;box-sizing:border-box" maxlength="9">
+            </div>
+          </div>
+          <div style="margin-bottom:8px">
+            <label style="font-size:.7rem;font-weight:600;color:var(--t2)">소득명의 <span style="color:var(--t3);font-weight:400">(선택)</span></label>
+            <input id="inlineSubIncomeName" type="text" placeholder="소득신고 명의자" style="width:100%;margin-top:3px;padding:8px 10px;border:1.5px solid #D1D5DB;border-radius:7px;font-size:.82rem;outline:none;box-sizing:border-box" maxlength="20">
+          </div>
+          <div style="margin-bottom:10px">
+            <label style="font-size:.7rem;font-weight:600;color:var(--t2)">주민번호 <span style="color:var(--t3);font-weight:400">(선택, 13자리)</span></label>
+            <input id="inlineSubJumin" type="text" placeholder="000000-0000000" oninput="formatJumin(this)" style="width:100%;margin-top:3px;padding:8px 10px;border:1.5px solid #D1D5DB;border-radius:7px;font-size:.82rem;outline:none;box-sizing:border-box" maxlength="14">
+          </div>
+          <div style="display:flex;gap:8px">
+            <button onclick="cancelInlineSubForm()" style="flex:1;padding:9px 0;background:#fff;color:var(--t2);border:1.5px solid #D1D5DB;border-radius:7px;font-size:.78rem;font-weight:600;cursor:pointer">취소</button>
+            <button id="btnInlineSubSave" onclick="saveInlineSubAccount()" style="flex:1;padding:9px 0;background:#2563EB;color:#fff;border:none;border-radius:7px;font-size:.78rem;font-weight:700;cursor:pointer">저장</button>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ★ 리뷰 내역 섹션 (참여한 캠페인 조회 결과) -->
+  <div class="home-section" id="sectionReviewList" style="padding-top:0">
+    <div class="results-header">
+      <span class="results-title"><i class="fas fa-clipboard-list" style="color:var(--p);margin-right:4px"></i>리뷰 내역</span>
+      <span id="reviewResultsCount" class="results-badge">0건</span>
+    </div>
+    <div id="reviewResultsList">
+      <div class="empty-state"><i class="fas fa-circle-notch fa-spin"></i> 불러오는 중...</div>
+    </div>
   </div>
 
   <!-- 모집공고 섹션 -->
@@ -336,33 +454,6 @@
       <i class="fas fa-bullhorn" style="color:var(--p)"></i> 모집공고
     </div>
     <div id="recruitPreviewList2">
-      <div class="empty-state"><i class="fas fa-circle-notch fa-spin"></i> 불러오는 중...</div>
-    </div>
-  </div>
-
-  <!-- 내 참여현황 (진행단계 포함) -->
-  <div class="home-section" id="sectionStatus">
-    <div class="home-section-title"><i class="fas fa-clipboard-list" style="color:var(--p)"></i> 내 참여현황</div>
-    <!-- 요약 통계 -->
-    <div id="statusStats" style="display:none"></div>
-    <div id="statusList" class="status-list">
-      <div class="empty-state"><i class="fas fa-circle-notch fa-spin"></i> 불러오는 중...</div>
-    </div>
-  </div>
-
-  <!-- 내 신청이력 -->
-  <div class="home-section" id="sectionApplications">
-    <div class="home-section-title"><i class="fas fa-paper-plane" style="color:#F59E0B"></i> 캠페인 신청이력</div>
-    <div id="applicationList" class="status-list">
-      <div class="empty-state"><i class="fas fa-circle-notch fa-spin"></i> 불러오는 중...</div>
-    </div>
-  </div>
-
-  <!-- 내 입금현황 -->
-  <div class="home-section" id="sectionPayments">
-    <div class="home-section-title"><i class="fas fa-wallet" style="color:var(--ok)"></i> 리뷰비 입금현황</div>
-    <div id="paymentSummary" style="display:none"></div>
-    <div id="paymentList" class="status-list">
       <div class="empty-state"><i class="fas fa-circle-notch fa-spin"></i> 불러오는 중...</div>
     </div>
   </div>
@@ -394,12 +485,16 @@ function initPage() {
 }
 
 function showHome(user) {
+  document.getElementById("viewLogin").style.display = "none";
+  document.getElementById("viewHome").style.display = "";
+  document.getElementById("greetingText").textContent = `안녕하세요, ${user.name}님!`;
+
   // ★ /search 페이지 세션 동기화 (rapp_reviewer_auth 키)
   syncSearchSession(user);
 
-  // ★ 로그인 완료 → /search (참여한 캠페인 조회) 페이지로 즉시 이동
-  // /search는 등록정보, 타계정, 리뷰내역 전체를 보여줌
-  window.location.href = '/search';
+  // 프로필 + 리뷰 내역 로드
+  loadInlineProfile(user);
+  loadReviewList(user);
 }
 
 /** /search 페이지와 세션 동기화 */
@@ -465,155 +560,490 @@ async function doLogin() {
 
 function doLogout() {
   localStorage.removeItem(USER_KEY);
-  localStorage.removeItem("rapp_reviewer_auth"); // /search 세션도 함께 제거
+  localStorage.removeItem("rapp_reviewer_auth");
+  window._reviewerProfile = null;
   location.reload();
 }
 
-async function loadMyStatus(user) {
-  const phone8 = user.phone8;
-  if (!phone8) return;
+/* ═══════════════════════════════════════
+   내 등록정보 (프로필) 로드
+═══════════════════════════════════════ */
+async function loadInlineProfile(user) {
+  const section = document.getElementById("inlineProfileSection");
+  if (!section) return;
 
-  // 병렬 호출: 참여현황 + 신청이력 + 입금현황
-  const [statusRes, appRes, payRes] = await Promise.allSettled([
-    fetch(API_BASE_URL + "/api/reviewer/my-status?phone8=" + phone8).then(r => r.json()),
-    fetch(API_BASE_URL + "/api/reviewer/my-applications?phone8=" + phone8).then(r => r.json()),
-    fetch(API_BASE_URL + "/api/reviewer/my-payments?phone8=" + phone8).then(r => r.json()),
-  ]);
+  const name = user.name || "";
+  const phone8 = user.phone8 || "";
 
-  // ─── 1. 내 참여현황 (진행단계) ───
-  renderMyStatus(statusRes.status === "fulfilled" ? statusRes.value : null);
+  // 즉시 이름 표시
+  const nameEl = document.getElementById("inlineSelfName");
+  if (nameEl) nameEl.textContent = name || "-";
+  section.style.display = "";
 
-  // ─── 2. 캠페인 신청이력 ───
-  renderMyApplications(appRes.status === "fulfilled" ? appRes.value : null);
-
-  // ─── 3. 입금현황 ───
-  renderMyPayments(payRes.status === "fulfilled" ? payRes.value : null);
+  try {
+    const res = await gasGet({ action: "getReviewerProfile", name, phone8 });
+    if (res && res.ok && res.profile) {
+      const p = res.profile;
+      window._reviewerProfile = { ...res, ...p, found: true };
+      if (nameEl) nameEl.textContent = p.name || name || "-";
+      
+      const phoneEl = document.getElementById("inlineSelfPhone");
+      if (phoneEl) phoneEl.textContent = p.phone || "-";
+      
+      const incomeEl = document.getElementById("inlineSelfIncomeName");
+      if (incomeEl) {
+        const incVal = p.incomeType || "";
+        incomeEl.textContent = incVal || "미등록";
+        incomeEl.style.color = incVal ? "var(--t2)" : "#DC2626";
+        const btnInc = document.getElementById("btnAddIncomeInfo");
+        if (btnInc) btnInc.style.display = incVal ? "none" : "";
+      }
+      
+      const juminEl = document.getElementById("inlineSelfJumin");
+      if (juminEl) {
+        const jd = (p.residentNum || "").replace(/[^0-9]/g, "");
+        if (jd.length === 13) {
+          juminEl.textContent = jd.slice(0,6) + "-" + jd.slice(6,7) + "••••••";
+          juminEl.style.color = "var(--t2)";
+        } else if (jd) {
+          juminEl.textContent = "등록됨";
+          juminEl.style.color = "var(--t2)";
+        } else {
+          juminEl.textContent = "미등록";
+          juminEl.style.color = "#DC2626";
+        }
+        const btnJm = document.getElementById("btnAddJuminInfo");
+        if (btnJm) btnJm.style.display = jd ? "none" : "";
+      }
+      
+      // 타계정 목록
+      let subs = p.subAccounts || [];
+      if (typeof subs === 'string') { try { subs = JSON.parse(subs); } catch(_) { subs = []; } }
+      if (!Array.isArray(subs)) subs = [];
+      renderInlineSubList(subs);
+    } else {
+      const phoneEl = document.getElementById("inlineSelfPhone");
+      if (phoneEl) phoneEl.textContent = "-";
+    }
+  } catch(e) {
+    console.warn("[inlineProfile]", e.message);
+  }
 }
 
-function renderMyStatus(data) {
-  const wrap = document.getElementById("statusList");
-  const statsEl = document.getElementById("statusStats");
-  if (!wrap) return;
+/* ═══════════════════════════════════════
+   리뷰 내역 로드 (searchAll API 사용)
+═══════════════════════════════════════ */
+async function loadReviewList(user) {
+  const listEl = document.getElementById("reviewResultsList");
+  const countEl = document.getElementById("reviewResultsCount");
+  if (!listEl) return;
 
-  if (!data || !data.ok || !data.items || data.items.length === 0) {
-    wrap.innerHTML = `<div class="empty-state"><i class="fas fa-inbox"></i>참여한 캠페인이 없습니다</div>`;
+  const name = user.name || "";
+  const phone8 = user.phone8 || "";
+
+  try {
+    const res = await gasGet({ action: "searchAll", query: name, phone8 });
+    const results = res.data || res.results || [];
+
+    // 미제출 건만 필터
+    const pending = results.filter(item => !item.isSubmitted);
+    if (countEl) countEl.textContent = pending.length + "건";
+
+    if (pending.length === 0) {
+      listEl.innerHTML = `<div class="empty-state"><i class="fas fa-clipboard-list"></i>아직 참여 내역이 없습니다<br><span style="font-size:.72rem;color:var(--t4)">신규 캠페인이 배정되면 이곳에 표시됩니다</span></div>`;
+      return;
+    }
+
+    // 그룹핑: 같은 이름 + 같은 인덱스(sheetId+tabName) 기준
+    const groups = new Map();
+    pending.forEach(item => {
+      const n = (item.displayName || "이름 없음").trim();
+      const sid = (item.sheetId || "").trim();
+      const tab = (item.tabName || "").trim();
+      const key = n + "\x00" + sid + "\x00" + tab;
+      if (!groups.has(key)) groups.set(key, []);
+      groups.get(key).push(item);
+    });
+
+    listEl.innerHTML = "";
+    groups.forEach((items, groupKey) => {
+      const itemName = groupKey.split("\x00")[0];
+      const isSingle = items.length === 1;
+
+      if (isSingle) {
+        const item = items[0];
+        const roundBadge = item.round
+          ? `<span style="display:inline-block;font-size:.6rem;font-weight:700;padding:1px 6px;border-radius:10px;background:#EEF2FF;color:#4338CA;border:1px solid #C7D2FE;margin-left:4px;vertical-align:middle">${escHtml(item.round)}</span>`
+          : "";
+
+        const taskDate = item.startDate || "";
+        const taskName = item.tcDisplayName || item.tabName || item.campaignName || "";
+        const optionName = item.productName || "";
+        const taskParts = [];
+        if (taskDate) taskParts.push(taskDate);
+        if (taskName) taskParts.push(taskName);
+        if (optionName) taskParts.push("옵션:" + optionName);
+        const taskLabel = taskParts.join(" ");
+
+        const productHtml = taskLabel
+          ? `<div class="result-name result-product-name">${escHtml(itemName)}${roundBadge}</div>
+             <div class="result-product-label">${escHtml(taskLabel)}</div>`
+          : `<div class="result-name result-product-name">${escHtml(itemName)}${roundBadge}</div>
+             <div class="result-product-label result-product-empty">참여 작업 정보 없음</div>`;
+
+        const card = document.createElement("div");
+        card.className = "result-card";
+        card.innerHTML = `
+          <div class="result-avatar"><i class="fas fa-user" style="font-size:.8rem;color:var(--p)"></i></div>
+          <div class="result-body">${productHtml}</div>
+          <div class="result-right">
+            <span class="status-badge-pending">미제출</span>
+            <i class="fas fa-chevron-right result-chevron"></i>
+          </div>`;
+        card.addEventListener("click", () => goToSubmit());
+        listEl.appendChild(card);
+      } else {
+        // 다건 그룹 카드
+        const groupCard = document.createElement("div");
+        groupCard.className = "result-group-card";
+        const campLabel = items[0].tcDisplayName || items[0].tabName || items[0].campaignName || "";
+
+        const itemLines = items.map(item => {
+          const taskDate = item.startDate || "";
+          const taskName = item.tcDisplayName || item.tabName || item.campaignName || "";
+          const optionName = item.productName || "";
+          const roundTxt = item.round ? ` · ${item.round}` : "";
+          const taskParts = [];
+          if (taskDate) taskParts.push(taskDate);
+          if (taskName) taskParts.push(taskName);
+          if (optionName) taskParts.push("옵션:" + optionName);
+          const taskLabel = taskParts.join(" ") || "작업 정보 없음";
+          return `<div class="result-group-item">
+            <i class="fas fa-box" style="color:var(--p);font-size:.72rem;flex-shrink:0"></i>
+            <span class="result-group-item-label">${escHtml(taskLabel)}${escHtml(roundTxt)}</span>
+            <span class="result-group-item-badge">미제출</span>
+          </div>`;
+        }).join("");
+
+        groupCard.innerHTML = `
+          <div class="result-group-header">
+            <i class="fas fa-user-circle" style="font-size:1.4rem;color:var(--p);flex-shrink:0"></i>
+            <div style="flex:1;min-width:0">
+              <div class="result-group-name">${escHtml(itemName)}</div>
+              ${campLabel ? `<div style="font-size:.68rem;color:var(--t3);margin-top:1px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${escHtml(campLabel)}</div>` : ""}
+            </div>
+            <span class="result-group-badge"><i class="fas fa-layer-group"></i> ${items.length}건</span>
+            <i class="fas fa-chevron-right" style="color:var(--t3);font-size:.8rem;flex-shrink:0"></i>
+          </div>
+          <div class="result-group-items">${itemLines}</div>`;
+        groupCard.addEventListener("click", () => goToSubmit());
+        listEl.appendChild(groupCard);
+      }
+    });
+  } catch(e) {
+    listEl.innerHTML = `<div class="empty-state"><i class="fas fa-exclamation-circle"></i>리뷰 내역 로드 실패<br><span style="font-size:.72rem;color:var(--t4)">${escHtml(e.message)}</span></div>`;
+  }
+}
+
+/** 리뷰 제출 클릭 → /search 페이지로 이동 */
+function goToSubmit() {
+  const user = getSavedUser();
+  if (user) syncSearchSession(user);
+  window.location.href = '/search';
+}
+
+/* ═══════════════════════════════════════
+   타계정 목록 렌더
+═══════════════════════════════════════ */
+function renderInlineSubList(subs) {
+  const countEl = document.getElementById("inlineSubCount");
+  if (countEl) countEl.textContent = subs.length + "/10";
+  const listEl = document.getElementById("inlineSubList");
+  if (!listEl) return;
+
+  if (subs.length === 0) {
+    listEl.innerHTML = '<div style="text-align:center;padding:10px;color:var(--t3);font-size:.78rem">타계정이 없습니다</div>';
     return;
   }
-
-  // 통계 바
-  const s = data.stats;
-  if (statsEl) {
-    statsEl.style.display = "";
-    statsEl.innerHTML = `
-      <div class="stats-bar">
-        <div class="stats-bar-item"><div class="stats-bar-num" style="color:#1E40AF">${s.assigned}</div><div class="stats-bar-label">배정됨</div></div>
-        <div class="stats-bar-item"><div class="stats-bar-num" style="color:var(--ok)">${s.submitted}</div><div class="stats-bar-label">제출완료</div></div>
-        <div class="stats-bar-item"><div class="stats-bar-num" style="color:var(--p)">${s.paid}</div><div class="stats-bar-label">입금완료</div></div>
-        <div class="stats-bar-item"><div class="stats-bar-num" style="color:var(--t4)">${s.closed}</div><div class="stats-bar-label">마감</div></div>
+  listEl.innerHTML = subs.map((sub, idx) => {
+    const subJd = (sub.jumin || sub.residentNo || "").replace(/[^0-9]/g, "");
+    const jDisplay = subJd.length === 13
+      ? subJd.slice(0,6) + "-" + subJd.slice(6,7) + "••••••"
+      : (subJd ? "등록됨" : "-");
+    return `<div style="background:#F9FAFB;border:1px solid #E5E7EB;border-radius:7px;padding:8px 10px;display:flex;align-items:center;gap:8px">
+      <div style="flex:1;min-width:0">
+        <div style="font-size:.8rem;font-weight:700;color:var(--t1);margin-bottom:2px">[${idx+1}] ${escHtml(sub.name)} <span style="font-weight:400;color:var(--t3);font-size:.7rem">${escHtml(sub.phone||'')}</span></div>
+        <div style="font-size:.68rem;color:var(--t3)">소득명의: <span style="color:var(--t2)">${escHtml(sub.incomeName||'-')}</span> | 주민번호: <span style="color:var(--t2)">${jDisplay}</span></div>
       </div>
-    `;
-  }
-
-  // 최근 20건만 표시
-  const items = data.items.slice(0, 20);
-  wrap.innerHTML = items.map(r => {
-    const stageMap = {
-      assigned: { cls:"assigned", text:"배정됨" },
-      submitted: { cls:"submitted", text:"제출완료" },
-      paid: { cls:"paid", text:"입금완료" },
-      closed: { cls:"closed", text:"마감" },
-    };
-    const st = stageMap[r.stage] || stageMap.assigned;
-    const campaign = r.displayName || r.campaignName || r.tabName || "";
-    const product = r.productName || "";
-
-    // 제출 바로가기: 배정됨 상태에서만 표시
-    const actionLink = r.stage === "assigned"
-      ? `<a href="javascript:goToMyStatus()" class="status-action"><i class="fas fa-upload"></i> 제출</a>`
-      : "";
-
-    return `
-      <div class="status-item">
-        <span class="stage-badge ${st.cls}">${st.text}</span>
-        <div class="status-info">
-          <div class="status-name">${escHtml(campaign)}${r.round ? ' (' + escHtml(r.round) + ')' : ''}</div>
-          <div class="status-meta">${product ? escHtml(product) : (r.manager ? '담당: ' + escHtml(r.manager) : '')}</div>
-        </div>
-        ${actionLink}
+      <div style="display:flex;gap:4px;flex-shrink:0">
+        <button onclick="editInlineSubAccount(${idx})" style="padding:3px 7px;background:#EFF6FF;color:#2563EB;border:1.5px solid #93C5FD;border-radius:6px;font-size:.65rem;font-weight:700;cursor:pointer">수정</button>
+        <button onclick="deleteInlineSubAccount(${idx})" style="padding:3px 7px;background:#FEF2F2;color:#DC2626;border:1.5px solid #FECACA;border-radius:6px;font-size:.65rem;font-weight:700;cursor:pointer">삭제</button>
       </div>
-    `;
+    </div>`;
   }).join("");
+
+  const addBtn = document.getElementById("btnInlineAddSub");
+  if (addBtn) addBtn.disabled = subs.length >= 10;
 }
 
-function renderMyApplications(data) {
-  const wrap = document.getElementById("applicationList");
-  if (!wrap) return;
-
-  if (!data || !data.ok || !data.applications || data.applications.length === 0) {
-    wrap.innerHTML = `<div class="empty-state"><i class="fas fa-paper-plane"></i>신청한 캠페인이 없습니다</div>`;
-    return;
-  }
-
-  wrap.innerHTML = data.applications.slice(0, 10).map(a => {
-    const statusCls = a.status === "confirmed" ? "done" : "rejected";
-    const statusText = a.status === "confirmed" ? "확정" : "취소";
-    const channel = a.channel === "직접입력" ? (a.channelCustom || "") : (a.channel || "");
-    const dateStr = a.appliedAt ? new Date(a.appliedAt).toLocaleDateString("ko-KR", { month:"short", day:"numeric" }) : "";
-
-    return `
-      <div class="status-item">
-        <div class="status-dot ${statusCls}"></div>
-        <div class="status-info">
-          <div class="status-name">${escHtml(a.campaignTitle || '캠페인')}</div>
-          <div class="status-meta">${channel ? escHtml(channel) + ' · ' : ''}${dateStr}${a.reviewFee ? ' · ' + Number(a.reviewFee).toLocaleString() + '원' : ''}</div>
-        </div>
-        <span class="status-badge ${statusCls}">${statusText}</span>
-      </div>
-    `;
-  }).join("");
+/* ═══════════════════════════════════════
+   소득명의/주민번호 폼
+═══════════════════════════════════════ */
+function openIncomeInfoForm() {
+  const form = document.getElementById("inlineIncomeForm");
+  if (!form) return;
+  const profile = window._reviewerProfile || {};
+  document.getElementById("inlineIncomeNameInput").value = profile.incomeType || "";
+  const jd = (profile.residentNum || "").replace(/[^0-9]/g, "");
+  document.getElementById("inlineJuminInput").value = jd.length > 6 ? jd.slice(0,6)+"-"+jd.slice(6) : jd;
+  form.style.display = "";
 }
 
-function renderMyPayments(data) {
-  const wrap = document.getElementById("paymentList");
-  const summaryEl = document.getElementById("paymentSummary");
-  if (!wrap) return;
-
-  if (!data || !data.ok || !data.payments || data.payments.length === 0) {
-    wrap.innerHTML = `<div class="empty-state"><i class="fas fa-wallet"></i>입금 내역이 없습니다</div>`;
-    return;
-  }
-
-  // 총액 요약
-  if (summaryEl && data.summary) {
-    summaryEl.style.display = "";
-    summaryEl.innerHTML = `
-      <div class="pay-summary">
-        <i class="fas fa-coins" style="font-size:1.4rem;color:var(--p)"></i>
-        <div>
-          <div class="pay-summary-amount">₩${data.summary.totalAmount.toLocaleString()}</div>
-          <div class="pay-summary-label">총 ${data.summary.total}건 입금완료</div>
-        </div>
-      </div>
-    `;
-  }
-
-  wrap.innerHTML = data.payments.slice(0, 15).map(p => {
-    const amt = p.amount ? Number(p.amount.replace(/[^0-9]/g, '')).toLocaleString() + "원" : "—";
-    const dateStr = p.paidAt ? new Date(p.paidAt).toLocaleDateString("ko-KR", { month:"short", day:"numeric" }) : "";
-    const campaign = p.displayName || p.campaignName || p.tabName || "";
-
-    return `
-      <div class="status-item">
-        <div class="status-dot done"></div>
-        <div class="status-info">
-          <div class="status-name">${escHtml(campaign)}</div>
-          <div class="status-meta">${dateStr}</div>
-        </div>
-        <span class="status-badge done">${amt}</span>
-      </div>
-    `;
-  }).join("");
+function cancelIncomeInfoForm() {
+  const form = document.getElementById("inlineIncomeForm");
+  if (form) form.style.display = "none";
 }
+
+async function saveIncomeInfoInline() {
+  const incomeName = (document.getElementById("inlineIncomeNameInput")?.value || "").trim();
+  const juminRaw = (document.getElementById("inlineJuminInput")?.value || "").replace(/[^0-9]/g, "");
+
+  if (!incomeName && !juminRaw) { showToast("소득명의 또는 주민번호를 입력해주세요"); return; }
+  if (juminRaw && juminRaw.length !== 13) { showToast("주민번호는 13자리 숫자여야 합니다"); return; }
+
+  const user = getSavedUser();
+  if (!user || !user.name || !user.phone8) { showToast("세션이 만료되었습니다"); return; }
+
+  const btn = document.getElementById("btnSaveIncomeInfo");
+  if (btn) { btn.disabled = true; btn.textContent = "저장 중..."; }
+
+  try {
+    const res = await gasPost({
+      action: "saveIncomeInfo",
+      name: user.name,
+      phone8: user.phone8,
+      incomeName: incomeName,
+      residentNum: juminRaw
+    });
+    if (res && res.ok) {
+      showToast("✅ 소득명의/주민번호가 저장되었습니다");
+      if (!window._reviewerProfile) window._reviewerProfile = {};
+      if (incomeName) window._reviewerProfile.incomeType = incomeName;
+      if (juminRaw) window._reviewerProfile.residentNum = juminRaw;
+
+      const incomeEl = document.getElementById("inlineSelfIncomeName");
+      if (incomeEl) {
+        incomeEl.textContent = incomeName || "미등록";
+        incomeEl.style.color = incomeName ? "var(--t2)" : "#DC2626";
+        const btnInc = document.getElementById("btnAddIncomeInfo");
+        if (btnInc) btnInc.style.display = incomeName ? "none" : "";
+      }
+      const juminEl = document.getElementById("inlineSelfJumin");
+      if (juminEl) {
+        if (juminRaw.length === 13) {
+          juminEl.textContent = juminRaw.slice(0,6) + "-" + juminRaw.slice(6,7) + "••••••";
+          juminEl.style.color = "var(--t2)";
+        } else {
+          juminEl.textContent = juminRaw ? "등록됨" : "미등록";
+          juminEl.style.color = juminRaw ? "var(--t2)" : "#DC2626";
+        }
+        const btnJm = document.getElementById("btnAddJuminInfo");
+        if (btnJm) btnJm.style.display = juminRaw ? "none" : "";
+      }
+      cancelIncomeInfoForm();
+    } else {
+      showToast("❌ " + (res?.error || "저장 실패"));
+    }
+  } catch(e) {
+    showToast("❌ 오류: " + e.message);
+  } finally {
+    if (btn) { btn.disabled = false; btn.textContent = "저장"; }
+  }
+}
+
+/* ═══════════════════════════════════════
+   타계정 추가/수정/삭제
+═══════════════════════════════════════ */
+function _parseSubAccounts(val) {
+  if (!val) return [];
+  if (Array.isArray(val)) return val;
+  if (typeof val === 'string') { try { const arr = JSON.parse(val); return Array.isArray(arr) ? arr : []; } catch(_) { return []; } }
+  return [];
+}
+
+function toggleInlineSubForm() {
+  const form = document.getElementById("inlineSubForm");
+  if (!form) return;
+  if (form.style.display !== "none") { form.style.display = "none"; return; }
+  const subs = _parseSubAccounts(window._reviewerProfile?.subAccounts);
+  if (subs.length >= 10) { showToast("타계정은 최대 10개까지 등록 가능합니다"); return; }
+  document.getElementById("inlineSubFormTitle").textContent = "타계정 추가";
+  document.getElementById("inlineSubEditIdx").value = "-1";
+  document.getElementById("inlineSubName").value = "";
+  document.getElementById("inlineSubPhone").value = "";
+  document.getElementById("inlineSubIncomeName").value = "";
+  document.getElementById("inlineSubJumin").value = "";
+  form.style.display = "";
+  document.getElementById("inlineSubName").focus();
+}
+
+function editInlineSubAccount(idx) {
+  const subs = _parseSubAccounts(window._reviewerProfile?.subAccounts);
+  if (idx < 0 || idx >= subs.length) return;
+  const sub = subs[idx];
+  const form = document.getElementById("inlineSubForm");
+  if (!form) return;
+
+  document.getElementById("inlineSubFormTitle").textContent = "타계정 수정 [" + (idx+1) + "]";
+  document.getElementById("inlineSubEditIdx").value = String(idx);
+  document.getElementById("inlineSubName").value = sub.name || "";
+  const rawPhone = (sub.phone || "").replace(/[^0-9]/g, "");
+  const last8 = rawPhone.startsWith("010") ? rawPhone.slice(3) : rawPhone.slice(-8);
+  document.getElementById("inlineSubPhone").value = last8.length > 4 ? last8.slice(0,4)+"-"+last8.slice(4) : last8;
+  document.getElementById("inlineSubIncomeName").value = sub.incomeName || "";
+  const jd = (sub.jumin || sub.residentNo || "").replace(/[^0-9]/g, "");
+  document.getElementById("inlineSubJumin").value = jd.length > 6 ? jd.slice(0,6)+"-"+jd.slice(6) : jd;
+  form.style.display = "";
+  document.getElementById("inlineSubName").focus();
+}
+
+function cancelInlineSubForm() {
+  const form = document.getElementById("inlineSubForm");
+  if (form) form.style.display = "none";
+  const confirmEl = document.getElementById("inlineSubConfirm");
+  if (confirmEl) confirmEl.remove();
+}
+
+async function deleteInlineSubAccount(idx) {
+  if (!confirm((idx+1) + "번 타계정을 삭제하시겠습니까?")) return;
+  const user = getSavedUser();
+  if (!user || !user.name || !user.phone8) { showToast("세션이 만료되었습니다"); return; }
+
+  const subs = JSON.parse(JSON.stringify(_parseSubAccounts(window._reviewerProfile?.subAccounts)));
+  if (idx < 0 || idx >= subs.length) return;
+  subs.splice(idx, 1);
+
+  try {
+    const res = await gasPost({ action: "saveSubAccounts", name: user.name, phone8: user.phone8, subAccounts: JSON.stringify(subs) });
+    if (res && res.ok) {
+      showToast("✅ 타계정이 삭제되었습니다");
+      if (window._reviewerProfile) window._reviewerProfile.subAccounts = subs;
+      renderInlineSubList(subs);
+      cancelInlineSubForm();
+    } else {
+      showToast("❌ " + (res?.error || "삭제 실패"));
+    }
+  } catch(e) { showToast("❌ 오류: " + e.message); }
+}
+
+async function saveInlineSubAccount() {
+  const name = (document.getElementById("inlineSubName")?.value || "").trim();
+  const phoneLast8 = (document.getElementById("inlineSubPhone")?.value || "").replace(/[^0-9]/g, "");
+  const phone = "010" + phoneLast8;
+  const incomeName = (document.getElementById("inlineSubIncomeName")?.value || "").trim();
+  const juminDigits = (document.getElementById("inlineSubJumin")?.value || "").replace(/[^0-9]/g, "");
+  const editIdx = parseInt(document.getElementById("inlineSubEditIdx")?.value || "-1", 10);
+
+  if (!name) { showToast("이름을 입력해주세요"); return; }
+  if (phoneLast8.length !== 8) { showToast("전화번호 뒷번호 8자리를 입력해주세요"); return; }
+  if (juminDigits && juminDigits.length !== 13) { showToast("주민번호는 13자리 숫자여야 합니다"); return; }
+
+  // 확인 단계
+  const phoneFormatted = phone.slice(0,3) + "-" + phone.slice(3,7) + "-" + phone.slice(7);
+  const juminFormatted = juminDigits ? (juminDigits.slice(0,6) + "-" + juminDigits.slice(6)) : "(미입력)";
+  const formArea = document.getElementById("inlineSubForm");
+  if (!formArea) return;
+
+  const existingConfirm = document.getElementById("inlineSubConfirm");
+  if (existingConfirm) existingConfirm.remove();
+
+  const confirmHtml = `
+    <div id="inlineSubConfirm" style="margin-top:12px;border:2px solid #F59E0B;border-radius:10px;padding:14px;background:#FFFBEB">
+      <div style="font-size:.75rem;font-weight:700;color:#92400E;margin-bottom:10px;text-align:center">📋 입력 정보를 확인해주세요</div>
+      <div style="background:#fff;border-radius:8px;padding:10px 12px;margin-bottom:10px;border:1px solid #FDE68A">
+        <div style="display:flex;gap:6px;margin-bottom:5px"><span style="font-size:.7rem;color:var(--t3);min-width:55px">이름</span><span style="font-size:.8rem;font-weight:700;color:var(--t1)">${escHtml(name)}</span></div>
+        <div style="display:flex;gap:6px;margin-bottom:5px"><span style="font-size:.7rem;color:var(--t3);min-width:55px">전화번호</span><span style="font-size:.8rem;font-weight:700;color:#2563EB">${escHtml(phoneFormatted)}</span></div>
+        <div style="display:flex;gap:6px;margin-bottom:5px"><span style="font-size:.7rem;color:var(--t3);min-width:55px">소득명의</span><span style="font-size:.8rem;color:var(--t2)">${escHtml(incomeName || '(미입력)')}</span></div>
+        <div style="display:flex;gap:6px"><span style="font-size:.7rem;color:var(--t3);min-width:55px">주민번호</span><span style="font-size:.8rem;font-weight:700;color:#DC2626">${escHtml(juminFormatted)}</span></div>
+      </div>
+      <div style="font-size:.7rem;color:#B45309;text-align:center;margin-bottom:10px;line-height:1.5">이 정보가 정확히 맞는지 확인해주세요<br><strong>*전화번호 오타, 주민번호 오타 확인 필수</strong></div>
+      <div style="display:flex;gap:8px">
+        <button onclick="document.getElementById('inlineSubConfirm').remove()" style="flex:1;padding:9px 0;background:#fff;color:var(--t2);border:1.5px solid #D1D5DB;border-radius:7px;font-size:.78rem;font-weight:600;cursor:pointer">수정하기</button>
+        <button onclick="confirmSaveInlineSubAccount()" style="flex:1;padding:9px 0;background:#DC2626;color:#fff;border:none;border-radius:7px;font-size:.78rem;font-weight:700;cursor:pointer">저장확정</button>
+      </div>
+    </div>`;
+  formArea.insertAdjacentHTML("beforeend", confirmHtml);
+  document.getElementById("inlineSubConfirm").scrollIntoView({ behavior: "smooth", block: "center" });
+}
+
+async function confirmSaveInlineSubAccount() {
+  const name = (document.getElementById("inlineSubName")?.value || "").trim();
+  const phoneLast8 = (document.getElementById("inlineSubPhone")?.value || "").replace(/[^0-9]/g, "");
+  const phone = "010" + phoneLast8;
+  const incomeName = (document.getElementById("inlineSubIncomeName")?.value || "").trim();
+  const juminDigits = (document.getElementById("inlineSubJumin")?.value || "").replace(/[^0-9]/g, "");
+  const editIdx = parseInt(document.getElementById("inlineSubEditIdx")?.value || "-1", 10);
+
+  const user = getSavedUser();
+  if (!user || !user.name || !user.phone8) { showToast("세션이 만료되었습니다"); return; }
+
+  const confirmEl = document.getElementById("inlineSubConfirm");
+  if (confirmEl) confirmEl.remove();
+
+  const subs = JSON.parse(JSON.stringify(_parseSubAccounts(window._reviewerProfile?.subAccounts)));
+  const newSub = {
+    name,
+    phone: phone.slice(0,3) + "-" + phone.slice(3,7) + "-" + phone.slice(7),
+    incomeName,
+    jumin: juminDigits
+  };
+
+  if (editIdx >= 0 && editIdx < subs.length) {
+    subs[editIdx] = newSub;
+  } else {
+    if (subs.length >= 10) { showToast("타계정은 최대 10개까지 등록 가능합니다"); return; }
+    subs.push(newSub);
+  }
+
+  const btn = document.getElementById("btnInlineSubSave");
+  if (btn) { btn.disabled = true; btn.textContent = "저장 중..."; }
+
+  try {
+    const res = await gasPost({ action: "saveSubAccounts", name: user.name, phone8: user.phone8, subAccounts: JSON.stringify(subs) });
+    if (res && res.ok) {
+      showToast(editIdx >= 0 ? "✅ 타계정이 수정되었습니다" : "✅ 타계정이 추가되었습니다");
+      if (!window._reviewerProfile) window._reviewerProfile = {};
+      window._reviewerProfile.subAccounts = subs;
+      renderInlineSubList(subs);
+      cancelInlineSubForm();
+    } else {
+      showToast("❌ " + (res?.error || "저장에 실패했습니다."));
+    }
+  } catch(e) {
+    showToast("❌ 오류: " + e.message);
+  } finally {
+    if (btn) { btn.disabled = false; btn.textContent = "저장"; }
+  }
+}
+
+/* ═══════════════════════════════════════
+   유틸 함수
+═══════════════════════════════════════ */
+function formatPhoneLast8(el) {
+  let v = el.value.replace(/[^0-9]/g, "");
+  if (v.length > 8) v = v.slice(0, 8);
+  if (v.length > 4) v = v.slice(0, 4) + "-" + v.slice(4);
+  el.value = v;
+}
+
+function formatJumin(el) {
+  let v = el.value.replace(/[^0-9]/g, "");
+  if (v.length > 13) v = v.slice(0, 13);
+  if (v.length > 6) v = v.slice(0, 6) + "-" + v.slice(6);
+  el.value = v;
+}
+
+
 
 function escHtml(s) {
   const d = document.createElement("div");
@@ -634,7 +1064,7 @@ function showToast(msg) {
 // Enter key support
 document.addEventListener("DOMContentLoaded", () => {
   initPage();
-  loadRecruitPreview();  // 모집공고 로드 (비로그인에서도 보임)
+  loadRecruitPreview();
   document.getElementById("loginPhone").addEventListener("keydown", e => {
     if (e.key === "Enter") doLogin();
   });
@@ -646,41 +1076,33 @@ document.addEventListener("DOMContentLoaded", () => {
 /* ═══ 탭 네비게이션 ═══ */
 let _currentTab = 'all';
 
-/** 내 참여현황 탭 → /search 페이지로 이동 (세션 동기화 완료 상태) */
-function goToMyStatus() {
-  // 세션 동기화 확인 (혹시 없으면 재동기화)
-  const user = getSavedUser();
-  if (user) syncSearchSession(user);
-  window.location.href = '/search';
-}
-
 function switchTab(tab) {
   _currentTab = tab;
-  // 버튼 활성 상태
   document.querySelectorAll('.tab-btn').forEach(btn => btn.classList.remove('active'));
-  event.currentTarget.classList.add('active');
+  const btnMap = { all: 'tabBtnAll', status: 'tabBtnStatus', recruit: 'tabBtnRecruit' };
+  const activeBtn = document.getElementById(btnMap[tab]);
+  if (activeBtn) activeBtn.classList.add('active');
 
-  // 섹션 제어
+  const profile = document.getElementById('sectionProfile');
+  const reviewList = document.getElementById('sectionReviewList');
   const recruit = document.getElementById('sectionRecruit');
-  const status = document.getElementById('sectionStatus');
-  const apps = document.getElementById('sectionApplications');
-  const payments = document.getElementById('sectionPayments');
 
   if (tab === 'all') {
+    if (profile) profile.style.display = '';
+    if (reviewList) reviewList.style.display = '';
     if (recruit) recruit.style.display = '';
-    if (status) status.style.display = '';
-    if (apps) apps.style.display = '';
-    if (payments) payments.style.display = '';
+  } else if (tab === 'status') {
+    if (profile) profile.style.display = '';
+    if (reviewList) reviewList.style.display = '';
+    if (recruit) recruit.style.display = 'none';
   } else if (tab === 'recruit') {
+    if (profile) profile.style.display = 'none';
+    if (reviewList) reviewList.style.display = 'none';
     if (recruit) recruit.style.display = '';
-    if (status) status.style.display = 'none';
-    if (apps) apps.style.display = 'none';
-    if (payments) payments.style.display = 'none';
   }
 }
 
 /* ═══ 모집공고 미리보기 (홈 인라인) ═══ */
-
 async function loadRecruitPreview() {
   try {
     const res = await fetch(API_BASE_URL + "/api/campaign/list");
@@ -697,7 +1119,6 @@ async function loadRecruitPreview() {
           const managerEmoji = c.manager === "만두" ? "🥟" : c.manager === "망고" ? "🥭" : "";
           const isFull = c.max_slots > 0 && (c.current_slots || 0) >= c.max_slots;
 
-          // 참여 버튼: chat_url이 있으면 카카오톡으로, 없으면 인라인 신청
           let actionBtn = "";
           if (isFull) {
             actionBtn = `<button class="rc-apply-btn rc-closed" disabled><i class="fas fa-ban"></i> 모집 마감</button>`;
@@ -752,34 +1173,21 @@ async function loadRecruitPreview() {
 /* ═══ 참여 신청 핸들러 ═══ */
 function handleApplyClick(chatUrl, campId) {
   const user = getSavedUser();
-
-  // 비로그인 상태: 로그인 안내
   if (!user) {
     showToast('로그인 후 참여하실 수 있습니다');
-    // 로그인 입력란으로 스크롤
     const loginInput = document.getElementById('loginPhone');
     if (loginInput) { loginInput.scrollIntoView({ behavior:'smooth', block:'center' }); loginInput.focus(); }
     return;
   }
-
-  // chat_url이 있으면 카카오톡으로 이동
-  if (chatUrl) {
-    window.open(chatUrl, '_blank');
-    return;
-  }
-
-  // chat_url 없으면 인라인 신청 폼 열기
+  if (chatUrl) { window.open(chatUrl, '_blank'); return; }
   if (campId) openInlineApply(campId);
 }
 
 function openInlineApply(campId) {
-  // 이미 열린 다른 폼 닫기
   document.querySelectorAll('.rc-inline-form').forEach(el => el.style.display = 'none');
   const form = document.getElementById('rcForm_' + campId);
   if (!form) return;
   form.style.display = '';
-
-  // 로그인 상태면 자동 채우기
   const user = getSavedUser();
   if (user) {
     const nameInput = document.getElementById('rcName_' + campId);
@@ -814,7 +1222,7 @@ async function submitInlineApply(campId) {
     if (json.ok) {
       showToast('✅ 참여 신청이 완료되었습니다!');
       closeInlineApply(campId);
-      loadRecruitPreview(); // 슬롯 업데이트
+      loadRecruitPreview();
     } else {
       showToast(json.error || '신청 실패');
     }
