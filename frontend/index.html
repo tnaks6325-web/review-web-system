@@ -102,7 +102,7 @@
     .empty-state { text-align:center; padding:30px 20px; color:var(--t4); font-size:.82rem; }
     .empty-state i { font-size:1.5rem; display:block; margin-bottom:8px; opacity:.5; }
 
-    /* ─── Recruit Preview ─── */
+    /* ─── Recruit Preview (legacy) ─── */
     .recruit-preview-item {
       display:block; background:var(--card); border:1px solid var(--border); border-radius:12px;
       padding:12px 16px; margin-bottom:8px; text-decoration:none; color:var(--t1);
@@ -111,6 +111,58 @@
     .recruit-preview-item:hover { border-color:var(--p); box-shadow:0 2px 8px rgba(124,58,237,.1); }
     .recruit-preview-title { font-size:.84rem; font-weight:700; margin-bottom:4px; }
     .recruit-preview-meta { display:flex; gap:10px; font-size:.72rem; color:var(--t3); flex-wrap:wrap; }
+
+    /* ─── Recruit Card (detailed inline) ─── */
+    .rc-card {
+      background:var(--card); border:1px solid var(--border); border-radius:14px;
+      padding:16px 18px; margin-bottom:12px;
+      box-shadow:0 2px 8px rgba(0,0,0,.04); transition:box-shadow .2s, border-color .2s;
+    }
+    .rc-card:hover { border-color:var(--p); box-shadow:0 4px 16px rgba(124,58,237,.1); }
+    .rc-card-top { display:flex; align-items:center; gap:8px; flex-wrap:wrap; margin-bottom:8px; }
+    .rc-channel {
+      background:var(--p); color:#fff; font-size:.65rem; font-weight:700;
+      padding:3px 8px; border-radius:6px;
+    }
+    .rc-title { font-size:.9rem; font-weight:700; color:var(--t1); flex:1; }
+    .rc-manager { font-size:.72rem; color:var(--t3); font-weight:500; margin-left:auto; }
+    .rc-badges { display:flex; flex-wrap:wrap; gap:5px; margin-bottom:8px; }
+    .rc-badge {
+      font-size:.65rem; font-weight:600; padding:2px 7px; border-radius:5px;
+      background:var(--warn-light); color:#92400E;
+    }
+    .rc-meta {
+      display:flex; flex-wrap:wrap; gap:10px; font-size:.74rem; color:var(--t2);
+      margin-bottom:8px; align-items:center;
+    }
+    .rc-meta i { color:var(--t4); margin-right:3px; }
+    .rc-slots {
+      font-size:.72rem; font-weight:700; color:var(--p); background:var(--p-light);
+      padding:2px 8px; border-radius:6px;
+    }
+    .rc-notes {
+      font-size:.75rem; color:var(--t3); background:#F8FAFC;
+      border-left:3px solid var(--p-light); padding:8px 12px; border-radius:6px;
+      margin-bottom:10px; line-height:1.5;
+    }
+    .rc-notes i { color:var(--warn); margin-right:4px; }
+    .rc-apply-btn {
+      display:block; width:100%; text-align:center; padding:12px; border-radius:10px;
+      font-size:.85rem; font-weight:700; text-decoration:none; border:none;
+      cursor:pointer; font-family:inherit; transition:background .2s, transform .1s;
+    }
+    .rc-apply-btn:active { transform:scale(.98); }
+    .rc-apply-btn.rc-kakao {
+      background:#FEE500; color:#3C1E1E;
+    }
+    .rc-apply-btn.rc-kakao:hover { background:#F5DC00; }
+    .rc-apply-btn.rc-default {
+      background:var(--p); color:#fff;
+    }
+    .rc-apply-btn.rc-default:hover { background:var(--p-dark); }
+    .rc-apply-btn.rc-closed {
+      background:#E2E8F0; color:var(--t4); cursor:not-allowed;
+    }
 
     /* ─── Footer ─── */
     .home-footer {
@@ -385,26 +437,47 @@ async function loadRecruitPreview() {
   try {
     const res = await fetch(API_BASE_URL + "/api/campaign/list");
     const json = await res.json();
-    const list = (json.data || []).filter(c => c.status === "active").slice(0, 5);
+    const list = (json.data || []).filter(c => c.status === "active");
 
     const html = list.length === 0
       ? `<div class="empty-state" style="padding:16px"><i class="fas fa-inbox"></i>현재 진행 중인 모집공고가 없습니다</div>`
       : list.map(c => {
           const channel = c.channel === "직접입력" ? (c.channel_custom || "") : (c.channel || "");
           const fee = c.review_fee ? Number(c.review_fee).toLocaleString() + "원" : "";
-          const slots = c.max_slots > 0 ? `${c.current_slots||0}/${c.max_slots}명` : "";
+          const slots = c.max_slots > 0 ? `<span class="rc-slots">${c.current_slots||0}/${c.max_slots}명</span>` : "";
+          const badges = Array.isArray(c.badges) ? c.badges : (c.badges ? JSON.parse(c.badges) : []);
+          const managerEmoji = c.manager === "만두" ? "🥟" : c.manager === "망고" ? "🥭" : "";
+          const isFull = c.max_slots > 0 && (c.current_slots || 0) >= c.max_slots;
+
+          // 참여 버튼: chat_url이 있으면 카카오톡으로, 없으면 /recruit로
+          let actionBtn = "";
+          if (isFull) {
+            actionBtn = `<button class="rc-apply-btn rc-closed" disabled><i class="fas fa-ban"></i> 모집 마감</button>`;
+          } else if (c.chat_url) {
+            actionBtn = `<a href="${escHtml(c.chat_url)}" target="_blank" class="rc-apply-btn rc-kakao"><i class="fas fa-comment"></i> 참여 신청하기</a>`;
+          } else {
+            actionBtn = `<a href="/recruit" class="rc-apply-btn rc-default"><i class="fas fa-hand-pointer"></i> 참여 신청하기</a>`;
+          }
+
           return `
-            <a href="/recruit" class="recruit-preview-item">
-              <div class="recruit-preview-title">${escHtml(c.title)}</div>
-              <div class="recruit-preview-meta">
-                ${channel ? `<span>${escHtml(channel)}</span>` : ""}
-                ${fee ? `<span>💰 ${fee}</span>` : ""}
-                ${slots ? `<span>👥 ${slots}</span>` : ""}
+            <div class="rc-card">
+              <div class="rc-card-top">
+                ${channel ? `<span class="rc-channel">${escHtml(channel)}</span>` : ""}
+                <span class="rc-title">${escHtml(c.title)}</span>
+                ${c.manager ? `<span class="rc-manager">${managerEmoji} ${escHtml(c.manager)}</span>` : ""}
               </div>
-            </a>`;
+              ${badges.length ? `<div class="rc-badges">${badges.map(b=>`<span class="rc-badge">${escHtml(b)}</span>`).join("")}</div>` : ""}
+              <div class="rc-meta">
+                ${fee ? `<span><i class="fas fa-won-sign"></i> 리뷰비 ${fee}</span>` : ""}
+                ${c.delivery_type ? `<span><i class="fas fa-truck"></i> ${escHtml(c.delivery_type)}</span>` : ""}
+                ${c.time_range ? `<span><i class="fas fa-clock"></i> ${escHtml(c.time_range)}</span>` : ""}
+                ${slots}
+              </div>
+              ${c.notes ? `<div class="rc-notes"><i class="fas fa-sticky-note"></i> ${escHtml(c.notes)}</div>` : ""}
+              ${actionBtn}
+            </div>`;
         }).join("");
 
-    // 양쪽 (비로그인 + 로그인) 모두에 적용
     const el1 = document.getElementById("recruitPreviewList");
     const el2 = document.getElementById("recruitPreviewList2");
     if (el1) el1.innerHTML = html;
