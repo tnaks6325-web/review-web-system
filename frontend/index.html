@@ -191,6 +191,27 @@
     }
     .rc-cancel-btn:hover { background:#CBD5E1; }
 
+    /* ─── Tab Navigation ─── */
+    .tab-nav {
+      display:flex; gap:0; margin-bottom:16px;
+      background:#fff; border-radius:12px; padding:4px;
+      box-shadow:0 1px 4px rgba(0,0,0,.06);
+      border:1px solid var(--border);
+    }
+    .tab-btn {
+      flex:1; padding:10px 8px; border:none; background:transparent;
+      border-radius:10px; font-size:.8rem; font-weight:600;
+      color:var(--t3); cursor:pointer; transition:all .2s;
+      font-family:inherit; display:flex; align-items:center;
+      justify-content:center; gap:5px;
+    }
+    .tab-btn:hover { background:#F1F5F9; color:var(--t1); }
+    .tab-btn.active {
+      background:var(--p); color:#fff;
+      box-shadow:0 2px 8px rgba(139,92,246,.3);
+    }
+    .tab-btn.active:hover { background:var(--p-dark); }
+
     /* ─── Stats Summary ─── */
     .stats-bar {
       display:grid; grid-template-columns:repeat(4,1fr); gap:6px;
@@ -271,11 +292,10 @@
     </div>
   </div>
 
-  <!-- 모집공고 섹션 (기본 펼침, 숨기기 가능) -->
+  <!-- 모집공고 섹션 (비로그인 - 항상 표시) -->
   <div class="home-section">
-    <div class="home-section-title" style="cursor:pointer" onclick="toggleRecruitSection()">
+    <div class="home-section-title">
       <i class="fas fa-bullhorn" style="color:var(--p)"></i> 모집공고
-      <span id="recruitToggleIcon" style="margin-left:auto;font-size:.7rem;color:var(--t4)"><i class="fas fa-chevron-up"></i> 숨기기</span>
     </div>
     <div id="recruitPreviewList">
       <div class="empty-state"><i class="fas fa-circle-notch fa-spin"></i> 불러오는 중...</div>
@@ -297,25 +317,23 @@
     <div class="home-greeting-sub" id="greetingSub">오늘도 좋은 하루 보내세요 ✨</div>
   </div>
 
-  <!-- 메뉴 그리드 -->
-  <div class="menu-grid">
-    <a href="/search" class="menu-card">
-      <div class="menu-card-icon" style="color:var(--p)">📸</div>
-      <div class="menu-card-label">리뷰 제출</div>
-      <div class="menu-card-desc">캠페인 참여 내역 확인 및 리뷰 이미지 제출</div>
-    </a>
-    <a href="/recruit" class="menu-card">
-      <div class="menu-card-icon" style="color:#F59E0B">📢</div>
-      <div class="menu-card-label">모집공고</div>
-      <div class="menu-card-desc">진행 중인 캠페인 확인 및 참여 신청</div>
-    </a>
+  <!-- 탭 네비게이션 -->
+  <div class="tab-nav">
+    <button class="tab-btn active" onclick="switchTab('all')">
+      <i class="fas fa-th-large"></i> 전체
+    </button>
+    <button class="tab-btn" onclick="switchTab('status')">
+      <i class="fas fa-clipboard-list"></i> 내 참여현황
+    </button>
+    <button class="tab-btn" onclick="switchTab('recruit')">
+      <i class="fas fa-bullhorn"></i> 모집공고
+    </button>
   </div>
 
-  <!-- 모집공고 섹션 (기본 펼침, 숨기기 가능) -->
-  <div class="home-section">
-    <div class="home-section-title" style="cursor:pointer" onclick="toggleRecruitSection()">
+  <!-- 모집공고 섹션 -->
+  <div class="home-section" id="sectionRecruit">
+    <div class="home-section-title">
       <i class="fas fa-bullhorn" style="color:var(--p)"></i> 모집공고
-      <span id="recruitToggleIcon2" style="margin-left:auto;font-size:.7rem;color:var(--t4)"><i class="fas fa-chevron-up"></i> 숨기기</span>
     </div>
     <div id="recruitPreviewList2">
       <div class="empty-state"><i class="fas fa-circle-notch fa-spin"></i> 불러오는 중...</div>
@@ -323,7 +341,7 @@
   </div>
 
   <!-- 내 참여현황 (진행단계 포함) -->
-  <div class="home-section">
+  <div class="home-section" id="sectionStatus">
     <div class="home-section-title"><i class="fas fa-clipboard-list" style="color:var(--p)"></i> 내 참여현황</div>
     <!-- 요약 통계 -->
     <div id="statusStats" style="display:none"></div>
@@ -333,7 +351,7 @@
   </div>
 
   <!-- 내 신청이력 -->
-  <div class="home-section">
+  <div class="home-section" id="sectionApplications">
     <div class="home-section-title"><i class="fas fa-paper-plane" style="color:#F59E0B"></i> 캠페인 신청이력</div>
     <div id="applicationList" class="status-list">
       <div class="empty-state"><i class="fas fa-circle-notch fa-spin"></i> 불러오는 중...</div>
@@ -341,7 +359,7 @@
   </div>
 
   <!-- 내 입금현황 -->
-  <div class="home-section">
+  <div class="home-section" id="sectionPayments">
     <div class="home-section-title"><i class="fas fa-wallet" style="color:var(--ok)"></i> 리뷰비 입금현황</div>
     <div id="paymentSummary" style="display:none"></div>
     <div id="paymentList" class="status-list">
@@ -608,20 +626,40 @@ document.addEventListener("DOMContentLoaded", () => {
   });
 });
 
-/* ═══ 모집공고 미리보기 (홈 인라인) ═══ */
-let _recruitVisible = true;
+/* ═══ 탭 네비게이션 ═══ */
+let _currentTab = 'all';
 
-function toggleRecruitSection() {
-  _recruitVisible = !_recruitVisible;
-  const lists = [document.getElementById("recruitPreviewList"), document.getElementById("recruitPreviewList2")];
-  const icons = [document.getElementById("recruitToggleIcon"), document.getElementById("recruitToggleIcon2")];
-  lists.forEach(el => { if (el) el.style.display = _recruitVisible ? "" : "none"; });
-  icons.forEach(el => {
-    if (el) el.innerHTML = _recruitVisible
-      ? '<i class="fas fa-chevron-up"></i> 숨기기'
-      : '<i class="fas fa-chevron-down"></i> 펼치기';
-  });
+function switchTab(tab) {
+  _currentTab = tab;
+  // 버튼 활성 상태
+  document.querySelectorAll('.tab-btn').forEach(btn => btn.classList.remove('active'));
+  event.currentTarget.classList.add('active');
+
+  // 섹션 제어
+  const recruit = document.getElementById('sectionRecruit');
+  const status = document.getElementById('sectionStatus');
+  const apps = document.getElementById('sectionApplications');
+  const payments = document.getElementById('sectionPayments');
+
+  if (tab === 'all') {
+    if (recruit) recruit.style.display = '';
+    if (status) status.style.display = '';
+    if (apps) apps.style.display = '';
+    if (payments) payments.style.display = '';
+  } else if (tab === 'status') {
+    if (recruit) recruit.style.display = 'none';
+    if (status) status.style.display = '';
+    if (apps) apps.style.display = '';
+    if (payments) payments.style.display = '';
+  } else if (tab === 'recruit') {
+    if (recruit) recruit.style.display = '';
+    if (status) status.style.display = 'none';
+    if (apps) apps.style.display = 'none';
+    if (payments) payments.style.display = 'none';
+  }
 }
+
+/* ═══ 모집공고 미리보기 (홈 인라인) ═══ */
 
 async function loadRecruitPreview() {
   try {
