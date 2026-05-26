@@ -1,9 +1,11 @@
 -- ═══════════════════════════════════════════════════════════
 -- 018: 모집공고(캠페인) 시스템 테이블
+-- ※ 기존 campaigns 테이블은 시트 관리용으로 사용 중이므로
+--   모집공고는 recruit_campaigns 테이블로 분리
 -- ═══════════════════════════════════════════════════════════
 
--- 캠페인(모집공고) 테이블
-CREATE TABLE IF NOT EXISTS campaigns (
+-- 모집공고 테이블
+CREATE TABLE IF NOT EXISTS recruit_campaigns (
   id TEXT PRIMARY KEY,
   title TEXT NOT NULL,
   channel TEXT DEFAULT '',
@@ -32,7 +34,7 @@ CREATE TABLE IF NOT EXISTS campaigns (
 -- 캠페인 참여 신청 테이블
 CREATE TABLE IF NOT EXISTS campaign_applications (
   id SERIAL PRIMARY KEY,
-  campaign_id TEXT NOT NULL REFERENCES campaigns(id) ON DELETE CASCADE,
+  campaign_id TEXT NOT NULL REFERENCES recruit_campaigns(id) ON DELETE CASCADE,
   applicant_name TEXT NOT NULL,
   applicant_phone TEXT DEFAULT '',
   applicant_inad TEXT DEFAULT '',
@@ -43,7 +45,7 @@ CREATE TABLE IF NOT EXISTS campaign_applications (
 );
 
 -- 인덱스
-CREATE INDEX IF NOT EXISTS idx_campaigns_status ON campaigns(status);
-CREATE INDEX IF NOT EXISTS idx_campaigns_sort ON campaigns(sort_order, created_at DESC);
+CREATE INDEX IF NOT EXISTS idx_recruit_campaigns_status ON recruit_campaigns(status);
+CREATE INDEX IF NOT EXISTS idx_recruit_campaigns_sort ON recruit_campaigns(sort_order, created_at DESC);
 CREATE INDEX IF NOT EXISTS idx_campaign_apps_campaign ON campaign_applications(campaign_id);
 CREATE INDEX IF NOT EXISTS idx_campaign_apps_name ON campaign_applications(applicant_name);

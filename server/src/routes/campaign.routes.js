@@ -19,7 +19,7 @@ async function _ensureTables() {
   if (_tableChecked) return;
   try {
     await pool.query(`
-      CREATE TABLE IF NOT EXISTS campaigns (
+      CREATE TABLE IF NOT EXISTS recruit_campaigns (
         id TEXT PRIMARY KEY,
         title TEXT NOT NULL,
         channel TEXT DEFAULT '',
@@ -48,7 +48,7 @@ async function _ensureTables() {
     await pool.query(`
       CREATE TABLE IF NOT EXISTS campaign_applications (
         id SERIAL PRIMARY KEY,
-        campaign_id TEXT NOT NULL REFERENCES campaigns(id) ON DELETE CASCADE,
+        campaign_id TEXT NOT NULL REFERENCES recruit_campaigns(id) ON DELETE CASCADE,
         applicant_name TEXT NOT NULL,
         applicant_phone TEXT DEFAULT '',
         applicant_inad TEXT DEFAULT '',
@@ -83,7 +83,7 @@ router.get('/list', async (req, res, next) => {
              status, sort_order, max_slots, current_slots, deadline,
              description, linked_sheet_id, linked_tab_name,
              created_at
-      FROM campaigns
+      FROM recruit_campaigns
       WHERE status IN ('active', 'closed')
       ORDER BY 
         CASE WHEN status = 'active' THEN 0 ELSE 1 END,
@@ -100,7 +100,7 @@ router.get('/list', async (req, res, next) => {
 router.get('/:id', async (req, res, next) => {
   try {
     const { id } = req.params;
-    const { rows } = await pool.query('SELECT * FROM campaigns WHERE id = $1', [id]);
+    const { rows } = await pool.query('SELECT * FROM recruit_campaigns WHERE id = $1', [id]);
     if (rows.length === 0) return res.status(404).json({ ok: false, error: '캠페인을 찾을 수 없습니다.' });
     res.json({ ok: true, data: rows[0] });
   } catch (err) {
@@ -143,7 +143,7 @@ router.post('/:id/apply', async (req, res, next) => {
 
     // 1. 캠페인 존재 + 상태 확인
     const { rows: campRows } = await pool.query(
-      'SELECT * FROM campaigns WHERE id = $1',
+      'SELECT * FROM recruit_campaigns WHERE id = $1',
       [id]
     );
     if (campRows.length === 0) {
@@ -158,7 +158,7 @@ router.post('/:id/apply', async (req, res, next) => {
     // 2. 정원 초과 확인
     if (camp.max_slots > 0 && camp.current_slots >= camp.max_slots) {
       // 자동 마감 처리
-      await pool.query("UPDATE campaigns SET status = 'closed', updated_at = NOW() WHERE id = $1", [id]);
+      await pool.query("UPDATE recruit_campaigns SET status = 'closed', updated_at = NOW() WHERE id = $1", [id]);
       return res.status(400).json({ ok: false, error: '정원이 초과되어 모집이 마감되었습니다.' });
     }
 
@@ -181,14 +181,14 @@ router.post('/:id/apply', async (req, res, next) => {
 
     // 5. current_slots 증가
     const { rows: updatedRows } = await pool.query(
-      `UPDATE campaigns SET current_slots = current_slots + 1, updated_at = NOW() WHERE id = $1 RETURNING current_slots, max_slots`,
+      `UPDATE recruit_campaigns SET current_slots = current_slots + 1, updated_at = NOW() WHERE id = $1 RETURNING current_slots, max_slots`,
       [id]
     );
     const updatedCamp = updatedRows[0];
 
     // 6. 정원 꽉 찬 경우 자동 마감
     if (updatedCamp.max_slots > 0 && updatedCamp.current_slots >= updatedCamp.max_slots) {
-      await pool.query("UPDATE campaigns SET status = 'closed', updated_at = NOW() WHERE id = $1", [id]);
+      await pool.query("UPDATE recruit_campaigns SET status = 'closed', updated_at = NOW() WHERE id = $1", [id]);
     }
 
     // 7. 스프레드시트에 행 자동 추가 (비동기 — 실패해도 참여 확정됨)
@@ -233,7 +233,7 @@ router.get('/admin/list', authMiddleware, async (req, res, next) => {
   try {
     await _ensureTables();
     const { rows } = await pool.query(`
-      SELECT * FROM campaigns
+      SELECT * FROM recruit_campaigns
       ORDER BY 
         CASE WHEN status = 'active' THEN 0 WHEN status = 'draft' THEN 1 ELSE 2 END,
         sort_order ASC,
@@ -260,7 +260,7 @@ router.post('/admin/create', authMiddleware, async (req, res, next) => {
     }
 
     const { rows } = await pool.query(
-      `INSERT INTO campaigns 
+      `INSERT INTO recruit_campaigns 
        (id, title, channel, channel_custom, manager, time_range, delivery_type,
         review_fee, badges, notes, chat_url, status, sort_order,
         max_slots, deadline, description, linked_sheet_id, linked_tab_name, linked_tab_gid,
@@ -308,7 +308,7 @@ router.put('/admin/:id', authMiddleware, async (req, res, next) => {
     } = req.body;
 
     const { rows } = await pool.query(
-      `UPDATE campaigns SET
+      `UPDATE recruit_campaigns SET
         title = COALESCE($2, title),
         channel = COALESCE($3, channel),
         channel_custom = COALESCE($4, channel_custom),
@@ -354,7 +354,7 @@ router.put('/admin/:id', authMiddleware, async (req, res, next) => {
 router.delete('/admin/:id', authMiddleware, async (req, res, next) => {
   try {
     const { id } = req.params;
-    const result = await pool.query('DELETE FROM campaigns WHERE id = $1', [id]);
+    const result = await pool.query('DELETE FROM recruit_campaigns WHERE id = $1', [id]);
     if (result.rowCount === 0) {
       return res.status(404).json({ ok: false, error: '캠페인을 찾을 수 없습니다.' });
     }
@@ -373,7 +373,7 @@ router.put('/admin/:id/status', authMiddleware, async (req, res, next) => {
       return res.status(400).json({ ok: false, error: '유효하지 않은 상태입니다.' });
     }
     const { rows } = await pool.query(
-      `UPDATE campaigns SET status = $2, updated_at = NOW() WHERE id = $1 RETURNING *`,
+      `UPDATE recruit_campaigns SET status = $2, updated_at = NOW() WHERE id = $1 RETURNING *`,
       [id, status]
     );
     if (rows.length === 0) {
