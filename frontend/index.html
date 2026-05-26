@@ -191,6 +191,42 @@
     }
     .rc-cancel-btn:hover { background:#CBD5E1; }
 
+    /* ─── Stats Summary ─── */
+    .stats-bar {
+      display:grid; grid-template-columns:repeat(4,1fr); gap:6px;
+      margin-bottom:12px; padding:0;
+    }
+    .stats-bar-item {
+      text-align:center; padding:10px 6px; border-radius:10px;
+      background:#F8FAFC; border:1px solid var(--border);
+    }
+    .stats-bar-num { font-size:1.1rem; font-weight:800; }
+    .stats-bar-label { font-size:.65rem; color:var(--t3); margin-top:2px; }
+
+    /* ─── Stage Badge ─── */
+    .stage-badge { font-size:.62rem; font-weight:700; padding:2px 7px; border-radius:5px; white-space:nowrap; }
+    .stage-badge.assigned { background:#DBEAFE; color:#1E40AF; }
+    .stage-badge.submitted { background:var(--ok-light); color:#065F46; }
+    .stage-badge.paid { background:#EDE9FE; color:#5B21B6; }
+    .stage-badge.closed { background:var(--err-light); color:#DC2626; }
+
+    /* ─── Action link in status items ─── */
+    .status-action {
+      font-size:.68rem; color:var(--p); font-weight:600; text-decoration:none;
+      padding:3px 8px; border:1px solid var(--p); border-radius:6px;
+      white-space:nowrap; transition:background .2s;
+    }
+    .status-action:hover { background:var(--p-light); }
+
+    /* ─── Payment Summary ─── */
+    .pay-summary {
+      display:flex; align-items:center; gap:12px; padding:12px 16px;
+      background:linear-gradient(135deg,#EDE9FE,#F5F3FF);
+      border-radius:12px; margin-bottom:12px; border:1px solid #DDD6FE;
+    }
+    .pay-summary-amount { font-size:1.3rem; font-weight:800; color:var(--p-dark); }
+    .pay-summary-label { font-size:.72rem; color:var(--t3); }
+
     /* ─── Footer ─── */
     .home-footer {
       text-align:center; padding:24px 16px; font-size:.72rem; color:var(--t4);
@@ -286,10 +322,29 @@
     </div>
   </div>
 
-  <!-- 내 참여현황 -->
+  <!-- 내 참여현황 (진행단계 포함) -->
   <div class="home-section">
     <div class="home-section-title"><i class="fas fa-clipboard-list" style="color:var(--p)"></i> 내 참여현황</div>
+    <!-- 요약 통계 -->
+    <div id="statusStats" style="display:none"></div>
     <div id="statusList" class="status-list">
+      <div class="empty-state"><i class="fas fa-circle-notch fa-spin"></i> 불러오는 중...</div>
+    </div>
+  </div>
+
+  <!-- 내 신청이력 -->
+  <div class="home-section">
+    <div class="home-section-title"><i class="fas fa-paper-plane" style="color:#F59E0B"></i> 캠페인 신청이력</div>
+    <div id="applicationList" class="status-list">
+      <div class="empty-state"><i class="fas fa-circle-notch fa-spin"></i> 불러오는 중...</div>
+    </div>
+  </div>
+
+  <!-- 내 입금현황 -->
+  <div class="home-section">
+    <div class="home-section-title"><i class="fas fa-wallet" style="color:var(--ok)"></i> 리뷰비 입금현황</div>
+    <div id="paymentSummary" style="display:none"></div>
+    <div id="paymentList" class="status-list">
       <div class="empty-state"><i class="fas fa-circle-notch fa-spin"></i> 불러오는 중...</div>
     </div>
   </div>
@@ -380,41 +435,149 @@ function doLogout() {
 }
 
 async function loadMyStatus(user) {
+  const phone8 = user.phone8;
+  if (!phone8) return;
+
+  // 병렬 호출: 참여현황 + 신청이력 + 입금현황
+  const [statusRes, appRes, payRes] = await Promise.allSettled([
+    fetch(API_BASE_URL + "/api/reviewer/my-status?phone8=" + phone8).then(r => r.json()),
+    fetch(API_BASE_URL + "/api/reviewer/my-applications?phone8=" + phone8).then(r => r.json()),
+    fetch(API_BASE_URL + "/api/reviewer/my-payments?phone8=" + phone8).then(r => r.json()),
+  ]);
+
+  // ─── 1. 내 참여현황 (진행단계) ───
+  renderMyStatus(statusRes.status === "fulfilled" ? statusRes.value : null);
+
+  // ─── 2. 캠페인 신청이력 ───
+  renderMyApplications(appRes.status === "fulfilled" ? appRes.value : null);
+
+  // ─── 3. 입금현황 ───
+  renderMyPayments(payRes.status === "fulfilled" ? payRes.value : null);
+}
+
+function renderMyStatus(data) {
   const wrap = document.getElementById("statusList");
-  try {
-    const res = await fetch(API_BASE_URL + "/api/search?query=" + encodeURIComponent(user.name));
-    const json = await res.json();
-    const results = json.data || json.results || [];
+  const statsEl = document.getElementById("statusStats");
+  if (!wrap) return;
 
-    if (results.length === 0) {
-      wrap.innerHTML = `<div class="empty-state"><i class="fas fa-inbox"></i>참여한 캠페인이 없습니다</div>`;
-      return;
-    }
-
-    // 최근 10건만 표시
-    const items = results.slice(0, 10);
-    wrap.innerHTML = items.map(r => {
-      const campaign = r.campaign_name || r.캠페인명 || r.tab_name || "";
-      const submitted = r.is_submitted || false;
-      const statusClass = submitted ? "done" : "pending";
-      const statusText = submitted ? "제출완료" : "제출대기";
-      const product = r.product || r.상품 || "";
-      const round = r.round || r.차수 || "";
-
-      return `
-        <div class="status-item">
-          <div class="status-dot ${statusClass}"></div>
-          <div class="status-info">
-            <div class="status-name">${escHtml(campaign)}${round ? ' (' + escHtml(round) + ')' : ''}</div>
-            <div class="status-meta">${product ? escHtml(product) : '정보 없음'}</div>
-          </div>
-          <span class="status-badge ${statusClass}">${statusText}</span>
-        </div>
-      `;
-    }).join("");
-  } catch(e) {
-    wrap.innerHTML = `<div class="empty-state"><i class="fas fa-exclamation-circle"></i>데이터 로드 실패</div>`;
+  if (!data || !data.ok || !data.items || data.items.length === 0) {
+    wrap.innerHTML = `<div class="empty-state"><i class="fas fa-inbox"></i>참여한 캠페인이 없습니다</div>`;
+    return;
   }
+
+  // 통계 바
+  const s = data.stats;
+  if (statsEl) {
+    statsEl.style.display = "";
+    statsEl.innerHTML = `
+      <div class="stats-bar">
+        <div class="stats-bar-item"><div class="stats-bar-num" style="color:#1E40AF">${s.assigned}</div><div class="stats-bar-label">배정됨</div></div>
+        <div class="stats-bar-item"><div class="stats-bar-num" style="color:var(--ok)">${s.submitted}</div><div class="stats-bar-label">제출완료</div></div>
+        <div class="stats-bar-item"><div class="stats-bar-num" style="color:var(--p)">${s.paid}</div><div class="stats-bar-label">입금완료</div></div>
+        <div class="stats-bar-item"><div class="stats-bar-num" style="color:var(--t4)">${s.closed}</div><div class="stats-bar-label">마감</div></div>
+      </div>
+    `;
+  }
+
+  // 최근 20건만 표시
+  const items = data.items.slice(0, 20);
+  wrap.innerHTML = items.map(r => {
+    const stageMap = {
+      assigned: { cls:"assigned", text:"배정됨" },
+      submitted: { cls:"submitted", text:"제출완료" },
+      paid: { cls:"paid", text:"입금완료" },
+      closed: { cls:"closed", text:"마감" },
+    };
+    const st = stageMap[r.stage] || stageMap.assigned;
+    const campaign = r.displayName || r.campaignName || r.tabName || "";
+    const product = r.productName || "";
+
+    // 제출 바로가기: 배정됨 상태에서만 표시
+    const actionLink = r.stage === "assigned"
+      ? `<a href="/search" class="status-action"><i class="fas fa-upload"></i> 제출</a>`
+      : "";
+
+    return `
+      <div class="status-item">
+        <span class="stage-badge ${st.cls}">${st.text}</span>
+        <div class="status-info">
+          <div class="status-name">${escHtml(campaign)}${r.round ? ' (' + escHtml(r.round) + ')' : ''}</div>
+          <div class="status-meta">${product ? escHtml(product) : (r.manager ? '담당: ' + escHtml(r.manager) : '')}</div>
+        </div>
+        ${actionLink}
+      </div>
+    `;
+  }).join("");
+}
+
+function renderMyApplications(data) {
+  const wrap = document.getElementById("applicationList");
+  if (!wrap) return;
+
+  if (!data || !data.ok || !data.applications || data.applications.length === 0) {
+    wrap.innerHTML = `<div class="empty-state"><i class="fas fa-paper-plane"></i>신청한 캠페인이 없습니다</div>`;
+    return;
+  }
+
+  wrap.innerHTML = data.applications.slice(0, 10).map(a => {
+    const statusCls = a.status === "confirmed" ? "done" : "rejected";
+    const statusText = a.status === "confirmed" ? "확정" : "취소";
+    const channel = a.channel === "직접입력" ? (a.channelCustom || "") : (a.channel || "");
+    const dateStr = a.appliedAt ? new Date(a.appliedAt).toLocaleDateString("ko-KR", { month:"short", day:"numeric" }) : "";
+
+    return `
+      <div class="status-item">
+        <div class="status-dot ${statusCls}"></div>
+        <div class="status-info">
+          <div class="status-name">${escHtml(a.campaignTitle || '캠페인')}</div>
+          <div class="status-meta">${channel ? escHtml(channel) + ' · ' : ''}${dateStr}${a.reviewFee ? ' · ' + Number(a.reviewFee).toLocaleString() + '원' : ''}</div>
+        </div>
+        <span class="status-badge ${statusCls}">${statusText}</span>
+      </div>
+    `;
+  }).join("");
+}
+
+function renderMyPayments(data) {
+  const wrap = document.getElementById("paymentList");
+  const summaryEl = document.getElementById("paymentSummary");
+  if (!wrap) return;
+
+  if (!data || !data.ok || !data.payments || data.payments.length === 0) {
+    wrap.innerHTML = `<div class="empty-state"><i class="fas fa-wallet"></i>입금 내역이 없습니다</div>`;
+    return;
+  }
+
+  // 총액 요약
+  if (summaryEl && data.summary) {
+    summaryEl.style.display = "";
+    summaryEl.innerHTML = `
+      <div class="pay-summary">
+        <i class="fas fa-coins" style="font-size:1.4rem;color:var(--p)"></i>
+        <div>
+          <div class="pay-summary-amount">₩${data.summary.totalAmount.toLocaleString()}</div>
+          <div class="pay-summary-label">총 ${data.summary.total}건 입금완료</div>
+        </div>
+      </div>
+    `;
+  }
+
+  wrap.innerHTML = data.payments.slice(0, 15).map(p => {
+    const amt = p.amount ? Number(p.amount.replace(/[^0-9]/g, '')).toLocaleString() + "원" : "—";
+    const dateStr = p.paidAt ? new Date(p.paidAt).toLocaleDateString("ko-KR", { month:"short", day:"numeric" }) : "";
+    const campaign = p.displayName || p.campaignName || p.tabName || "";
+
+    return `
+      <div class="status-item">
+        <div class="status-dot done"></div>
+        <div class="status-info">
+          <div class="status-name">${escHtml(campaign)}</div>
+          <div class="status-meta">${dateStr}</div>
+        </div>
+        <span class="status-badge done">${amt}</span>
+      </div>
+    `;
+  }).join("");
 }
 
 function escHtml(s) {
