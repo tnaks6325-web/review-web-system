@@ -52,17 +52,14 @@ function _buildRecruitCard(c) {
   div.className = `recruit-card status-${c.status || "draft"}`;
   div.innerHTML = `
     <div class="recruit-card-header">
-      ${channel ? `<span style="padding:2px 9px;background:#FEF3C7;color:#92400E;border-radius:6px;font-size:.68rem;font-weight:700;flex-shrink:0">${escHtml(channel)}</span>` : ""}
-      <span class="recruit-card-title">${escHtml(c.title || "(제목 없음)")}</span>
-      ${c.manager ? `<span style="padding:2px 8px;background:#F0FDF4;color:#166534;border-radius:6px;font-size:.68rem;font-weight:600;flex-shrink:0">${managerEmoji} ${escHtml(c.manager)}</span>` : ""}
-      <span class="recruit-status-badge ${c.status || "draft"}">${statusLabel}</span>
-      <div class="recruit-card-actions">
-        <button class="recruit-btn recruit-btn-edit" onclick="openRecruitModal('${escHtml(c.id)}')"><i class="fas fa-pen"></i> 수정</button>
-        <button class="recruit-btn recruit-btn-del"  onclick="deleteRecruitPost('${escHtml(c.id)}', \`${escHtml(c.title||'')}\`)"><i class="fas fa-trash"></i> 삭제</button>
+      <div style="display:flex;align-items:center;gap:6px;flex-wrap:wrap">
+        <span class="recruit-status-badge ${c.status || "draft"}">${statusLabel}</span>
+        ${channel ? `<span style="padding:2px 9px;background:#FEF3C7;color:#92400E;border-radius:6px;font-size:.68rem;font-weight:700">${escHtml(channel)}</span>` : ""}
+        ${c.manager ? `<span style="padding:2px 8px;background:#F0FDF4;color:#166534;border-radius:6px;font-size:.68rem;font-weight:600">${managerEmoji} ${escHtml(c.manager)}</span>` : ""}
       </div>
+      <span class="recruit-card-title">${escHtml(c.title || "(제목 없음)")}</span>
     </div>
     <div class="recruit-card-meta">
-      ${c.manager      ? `<span><i class="fas fa-user"></i> 담당: ${managerEmoji} ${escHtml(c.manager)}</span>` : ""}
       ${c.time_range   ? `<span><i class="fas fa-clock"></i> ${escHtml(c.time_range)}</span>` : ""}
       ${c.delivery_type ? `<span><i class="fas fa-truck"></i> ${escHtml(c.delivery_type)}</span>` : ""}
       ${fee            ? `<span><i class="fas fa-won-sign"></i> 리뷰비 ${fee}</span>` : ""}
@@ -70,7 +67,11 @@ function _buildRecruitCard(c) {
       ${linkedInfo}
     </div>
     ${badges.length ? `<div class="recruit-card-badges">${badges.map(b=>`<span class="recruit-card-badge">${escHtml(b)}</span>`).join("")}</div>` : ""}
-    ${c.notes ? `<div style="font-size:.73rem;color:var(--t3);white-space:pre-line;border-top:1px solid var(--border);padding-top:7px;margin-top:2px">${escHtml(c.notes)}</div>` : ""}
+    ${c.notes ? `<div style="font-size:.72rem;color:var(--t3);white-space:pre-line;overflow:hidden;display:-webkit-box;-webkit-line-clamp:3;-webkit-box-orient:vertical">${escHtml(c.notes)}</div>` : ""}
+    <div class="recruit-card-actions">
+      <button class="recruit-btn recruit-btn-edit" onclick="openRecruitModal('${escHtml(c.id)}')"><i class="fas fa-pen"></i> 수정</button>
+      <button class="recruit-btn recruit-btn-del"  onclick="deleteRecruitPost('${escHtml(c.id)}', \`${escHtml(c.title||'')}\`)"><i class="fas fa-trash"></i> 삭제</button>
+    </div>
   `;
   return div;
 }

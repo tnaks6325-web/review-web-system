@@ -1519,22 +1519,22 @@ textarea.rform-input{line-height:1.5}
 .rbadge-chip button:hover{opacity:1}
 
 /* 공고 카드 (관리자 목록) */
-.recruit-card{background:var(--card);border:1.5px solid var(--border);border-radius:12px;padding:14px 16px;display:flex;flex-direction:column;gap:8px;box-shadow:var(--sh);transition:box-shadow .15s}
-.recruit-card:hover{box-shadow:0 4px 16px rgba(124,58,237,.12)}
-.recruit-card.status-draft{border-left:4px solid var(--t4);opacity:.8}
-.recruit-card.status-active{border-left:4px solid var(--ok)}
-.recruit-card.status-closed{border-left:4px solid var(--err);opacity:.65}
-.recruit-card-header{display:flex;align-items:center;gap:8px;flex-wrap:wrap}
-.recruit-card-title{font-size:.9rem;font-weight:700;color:var(--t1);flex:1;min-width:0}
+.recruit-card{background:var(--card);border:1.5px solid var(--border);border-radius:14px;padding:16px;display:flex;flex-direction:column;gap:10px;box-shadow:var(--sh);transition:box-shadow .15s,transform .15s;min-height:160px}
+.recruit-card:hover{box-shadow:0 6px 20px rgba(124,58,237,.13);transform:translateY(-2px)}
+.recruit-card.status-draft{border-top:3.5px solid var(--t4);opacity:.8}
+.recruit-card.status-active{border-top:3.5px solid var(--ok)}
+.recruit-card.status-closed{border-top:3.5px solid var(--err);opacity:.65}
+.recruit-card-header{display:flex;flex-direction:column;gap:6px}
+.recruit-card-title{font-size:.88rem;font-weight:700;color:var(--t1);line-height:1.3;word-break:keep-all}
 .recruit-status-badge{display:inline-flex;align-items:center;padding:2px 9px;border-radius:20px;font-size:.65rem;font-weight:700;flex-shrink:0}
 .recruit-status-badge.draft{background:#F3F4F6;color:#6B7280}
 .recruit-status-badge.active{background:var(--ok-l);color:#065F46}
 .recruit-status-badge.closed{background:#FEF2F2;color:#DC2626}
-.recruit-card-meta{display:flex;gap:10px;flex-wrap:wrap;font-size:.72rem;color:var(--t3)}
+.recruit-card-meta{display:flex;flex-direction:column;gap:5px;font-size:.72rem;color:var(--t3)}
 .recruit-card-meta span{display:inline-flex;align-items:center;gap:3px}
 .recruit-card-badges{display:flex;flex-wrap:wrap;gap:5px}
 .recruit-card-badge{padding:2px 8px;background:#EDE9FE;color:#5B21B6;border-radius:20px;font-size:.68rem;font-weight:600}
-.recruit-card-actions{display:flex;gap:6px;margin-left:auto;flex-shrink:0}
+.recruit-card-actions{display:flex;gap:6px;margin-top:auto;padding-top:8px;border-top:1px solid var(--border)}
 .recruit-btn{display:inline-flex;align-items:center;gap:3px;padding:4px 11px;border-radius:7px;font-size:.72rem;font-weight:600;cursor:pointer;border:1.5px solid;transition:all .12s}
 .recruit-btn-edit{color:#5B21B6;border-color:#DDD6FE;background:#F5F3FF}
 .recruit-btn-edit:hover{background:#5B21B6;color:#fff;border-color:#5B21B6}
