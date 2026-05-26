@@ -11506,6 +11506,7 @@ function _renderFullTableView(wrap, filtered) {
       <span style="font-size:.78rem;font-weight:600;color:#92400E"><i class="fas fa-check-square" style="margin-right:4px"></i>${checkedCount}건 선택됨</span>
       <button onclick="_archiveCheckedTabs()" style="padding:4px 12px;background:#DC2626;color:#fff;border:none;border-radius:6px;font-size:.72rem;font-weight:600;cursor:pointer;display:flex;align-items:center;gap:4px"><i class="fas fa-archive"></i> 마감으로 보내기</button>
       <button onclick="_checkDuplicateReviewFolders()" style="padding:4px 12px;background:#7C3AED;color:#fff;border:none;border-radius:6px;font-size:.72rem;font-weight:600;cursor:pointer;display:flex;align-items:center;gap:4px"><i class="fas fa-copy"></i> 리뷰폴더 중복검사</button>
+      <button onclick="_checkSubmissionStatus()" style="padding:4px 12px;background:#0891B2;color:#fff;border:none;border-radius:6px;font-size:.72rem;font-weight:600;cursor:pointer;display:flex;align-items:center;gap:4px"><i class="fas fa-clipboard-check"></i> 제출현황 검사</button>
       <button onclick="_clearTabDashChecked()" style="padding:4px 10px;background:#6B7280;color:#fff;border:none;border-radius:6px;font-size:.72rem;cursor:pointer">선택 해제</button>`;
   } else {
     stickyBar.style.display = "none";
@@ -11597,6 +11598,7 @@ function _updateArchiveBar() {
       <span style="font-size:.78rem;font-weight:600;color:#92400E"><i class="fas fa-check-square" style="margin-right:4px"></i>${n}건 선택됨</span>
       <button onclick="_archiveCheckedTabs()" style="padding:4px 12px;background:#DC2626;color:#fff;border:none;border-radius:6px;font-size:.72rem;font-weight:600;cursor:pointer;display:flex;align-items:center;gap:4px"><i class="fas fa-archive"></i> 마감으로 보내기</button>
       <button onclick="_checkDuplicateReviewFolders()" style="padding:4px 12px;background:#7C3AED;color:#fff;border:none;border-radius:6px;font-size:.72rem;font-weight:600;cursor:pointer;display:flex;align-items:center;gap:4px"><i class="fas fa-copy"></i> 리뷰폴더 중복검사</button>
+      <button onclick="_checkSubmissionStatus()" style="padding:4px 12px;background:#0891B2;color:#fff;border:none;border-radius:6px;font-size:.72rem;font-weight:600;cursor:pointer;display:flex;align-items:center;gap:4px"><i class="fas fa-clipboard-check"></i> 제출현황 검사</button>
       <button onclick="_clearTabDashChecked()" style="padding:4px 10px;background:#6B7280;color:#fff;border:none;border-radius:6px;font-size:.72rem;cursor:pointer">선택 해제</button>`;
   } else {
     bar.style.display = "none";
@@ -11783,6 +11785,168 @@ function _formatDate(isoStr) {
   if (!isoStr) return '';
   try { return new Date(isoStr).toLocaleDateString('ko-KR', { month:'short', day:'numeric', hour:'2-digit', minute:'2-digit' }); }
   catch(_) { return isoStr; }
+}
+
+// ── 제출현황 검사 (마감검사 강화) ──
+async function _checkSubmissionStatus() {
+  if (_tabDashChecked.size === 0) { showToast('검사할 탭을 선택하세요.', 'info'); return; }
+
+  // 선택된 탭의 정보 수집
+  const tabs = [];
+  _tabDashChecked.forEach(key => {
+    const [sheetId, tabName] = key.split('||');
+    const t = (_tabDashData?.tabs||[]).find(x => x.sheet_id === sheetId && x.tab_name === tabName);
+    if (t && t.folder_url) {
+      tabs.push({ sheetId, tabName, folderUrl: t.folder_url, campaign: t.campaign_name });
+    }
+  });
+
+  if (tabs.length === 0) {
+    showToast('선택된 탭 중 리뷰폴더가 설정된 탭이 없습니다.', 'warning');
+    return;
+  }
+
+  // 로딩 모달 표시
+  _showSubmissionStatusModal('loading', { tabs });
+
+  try {
+    const res = await gasPost({ action: 'checkSubmissionStatus', tabs: tabs.map(t => ({ sheetId: t.sheetId, tabName: t.tabName, folderUrl: t.folderUrl })) });
+    if (res.error) {
+      _showSubmissionStatusModal('error', { message: res.error });
+      return;
+    }
+    _showSubmissionStatusModal('results', { results: res.results, tabs });
+  } catch (err) {
+    _showSubmissionStatusModal('error', { message: err.message || '제출현황 검사 중 오류 발생' });
+  }
+}
+
+function _showSubmissionStatusModal(state, data) {
+  let modal = document.getElementById('submissionStatusModal');
+  if (!modal) {
+    modal = document.createElement('div');
+    modal.id = 'submissionStatusModal';
+    document.body.appendChild(modal);
+  }
+
+  if (state === 'loading') {
+    modal.innerHTML = `
+      <div style="position:fixed;inset:0;background:rgba(0,0,0,.5);z-index:9999;display:flex;align-items:center;justify-content:center" onclick="if(event.target===this)this.remove()">
+        <div style="background:#fff;border-radius:12px;padding:24px;width:90%;max-width:600px;max-height:80vh;overflow-y:auto;box-shadow:0 20px 60px rgba(0,0,0,.3)">
+          <h3 style="margin:0 0 16px;font-size:1rem;color:#1F2937"><i class="fas fa-spinner fa-spin" style="margin-right:8px;color:#0891B2"></i>제출현황 검사 중...</h3>
+          <div style="font-size:.8rem;color:#6B7280">
+            <p>${(data.tabs||[]).length}개 탭을 검사하고 있습니다. 폴더 내 모든 파일을 확인합니다...</p>
+            <ul style="margin-top:8px;padding-left:16px">${(data.tabs||[]).map(t => `<li>${escHtml(t.campaign||'')} / ${escHtml(t.tabName)}</li>`).join('')}</ul>
+          </div>
+        </div>
+      </div>`;
+    return;
+  }
+
+  if (state === 'error') {
+    modal.innerHTML = `
+      <div style="position:fixed;inset:0;background:rgba(0,0,0,.5);z-index:9999;display:flex;align-items:center;justify-content:center" onclick="if(event.target===this)this.remove()">
+        <div style="background:#fff;border-radius:12px;padding:24px;width:90%;max-width:500px;box-shadow:0 20px 60px rgba(0,0,0,.3)">
+          <h3 style="margin:0 0 12px;font-size:1rem;color:#DC2626"><i class="fas fa-exclamation-circle" style="margin-right:8px"></i>오류</h3>
+          <p style="font-size:.82rem;color:#6B7280">${escHtml(data.message)}</p>
+          <div style="text-align:right;margin-top:16px">
+            <button onclick="document.getElementById('submissionStatusModal').remove()" style="padding:6px 16px;background:#6B7280;color:#fff;border:none;border-radius:6px;cursor:pointer;font-size:.78rem">닫기</button>
+          </div>
+        </div>
+      </div>`;
+    return;
+  }
+
+  if (state === 'results') {
+    const { results, tabs } = data;
+    let html = `
+      <div style="position:fixed;inset:0;background:rgba(0,0,0,.5);z-index:9999;display:flex;align-items:center;justify-content:center" onclick="if(event.target===this)this.remove()">
+        <div style="background:#fff;border-radius:12px;padding:24px;width:95%;max-width:800px;max-height:85vh;overflow-y:auto;box-shadow:0 20px 60px rgba(0,0,0,.3)">
+          <h3 style="margin:0 0 16px;font-size:1rem;color:#1F2937"><i class="fas fa-clipboard-check" style="margin-right:8px;color:#0891B2"></i>제출현황 검사 결과</h3>`;
+
+    let totalIssues = 0;
+    results.forEach((r, rIdx) => {
+      const tabLabel = `${escHtml(tabs[rIdx]?.campaign||'')} / ${escHtml(r.tabName||tabs[rIdx]?.tabName||'')}`;
+
+      if (r.error) {
+        html += `<div style="margin-bottom:8px;padding:8px;background:#FEF2F2;border-radius:6px;font-size:.75rem;color:#DC2626">
+          <b>${tabLabel}</b> — 오류: ${escHtml(r.error)}
+        </div>`;
+        return;
+      }
+
+      const { summary } = r;
+      const hasIssues = summary.duplicateCount + summary.missingCount + summary.orphanCount > 0;
+      totalIssues += summary.duplicateCount + summary.missingCount + summary.orphanCount;
+
+      html += `<div style="margin-bottom:12px;border:1px solid #E5E7EB;border-radius:8px;overflow:hidden">
+        <div style="background:#F3F4F6;padding:8px 12px;font-size:.78rem;font-weight:600;color:#374151;display:flex;align-items:center;justify-content:space-between">
+          <span><i class="fas fa-folder-open" style="margin-right:4px;color:#0891B2"></i>${tabLabel}</span>
+          <span style="font-weight:400;color:#6B7280;font-size:.72rem">수취인 ${r.totalRecipients}명 | 파일 ${r.totalFiles}개 | 제출자 ${r.totalFileNames}명</span>
+        </div>`;
+
+      if (!hasIssues) {
+        html += `<div style="padding:12px;text-align:center;color:#059669;font-size:.82rem">
+          <i class="fas fa-check-circle" style="margin-right:4px"></i> 이상 없음
+        </div>`;
+      } else {
+        html += `<div style="padding:8px 12px">`;
+
+        // (a) 중복 제출
+        if (summary.duplicateCount > 0) {
+          html += `<div style="margin-bottom:8px">
+            <div style="font-size:.75rem;font-weight:600;color:#DC2626;margin-bottom:4px"><i class="fas fa-clone" style="margin-right:4px"></i>중복 제출 (${summary.duplicateCount}명)</div>`;
+          r.duplicateSubmissions.forEach(d => {
+            html += `<div style="margin-left:12px;font-size:.72rem;color:#4B5563;padding:3px 0;border-bottom:1px solid #F3F4F6">
+              <b>${escHtml(d.name)}</b> — ${d.submissionCount}회 제출 (파일 ${d.totalFiles}개)
+              <span style="color:#9CA3AF;margin-left:4px">${d.submissions.map(s => s.timestamp.replace('_',' ')).join(', ')}</span>
+            </div>`;
+          });
+          html += `</div>`;
+        }
+
+        // (b) 미제출자
+        if (summary.missingCount > 0) {
+          html += `<div style="margin-bottom:8px">
+            <div style="font-size:.75rem;font-weight:600;color:#F59E0B;margin-bottom:4px"><i class="fas fa-user-slash" style="margin-right:4px"></i>미제출자 (${summary.missingCount}명)</div>`;
+          r.missingSubmissions.forEach(m => {
+            html += `<div style="margin-left:12px;font-size:.72rem;color:#4B5563;padding:2px 0">
+              <b>${escHtml(m.name)}</b> <span style="color:#9CA3AF">(${m.rowCount}건)</span>
+            </div>`;
+          });
+          html += `</div>`;
+        }
+
+        // (c) 고아 파일
+        if (summary.orphanCount > 0) {
+          html += `<div style="margin-bottom:8px">
+            <div style="font-size:.75rem;font-weight:600;color:#7C3AED;margin-bottom:4px"><i class="fas fa-ghost" style="margin-right:4px"></i>고아 파일 (${summary.orphanCount}명)</div>`;
+          r.orphanFiles.forEach(o => {
+            html += `<div style="margin-left:12px;font-size:.72rem;color:#4B5563;padding:2px 0">
+              <b>${escHtml(o.name)}</b> — ${o.files.length}개 파일
+              <span style="color:#9CA3AF">${o.files.map(f => escHtml(f.name)).slice(0,3).join(', ')}${o.files.length > 3 ? '...' : ''}</span>
+            </div>`;
+          });
+          html += `</div>`;
+        }
+
+        html += `</div>`;
+      }
+      html += `</div>`;
+    });
+
+    // 요약 배너
+    if (totalIssues === 0) {
+      html = html.replace('</h3>', '</h3><div style="background:#ECFDF5;border:1px solid #059669;border-radius:8px;padding:10px 14px;margin-bottom:12px;font-size:.82rem;color:#065F46;text-align:center"><i class="fas fa-check-circle" style="margin-right:6px"></i><b>모든 탭에서 이상이 발견되지 않았습니다.</b></div>');
+    } else {
+      html = html.replace('</h3>', `</h3><div style="background:#FEF3C7;border:1px solid #F59E0B;border-radius:8px;padding:10px 14px;margin-bottom:12px;font-size:.78rem;color:#92400E"><i class="fas fa-exclamation-triangle" style="margin-right:6px"></i><b>${totalIssues}건의 이슈</b>가 발견되었습니다.</div>`);
+    }
+
+    html += `<div style="text-align:right;margin-top:16px">
+      <button onclick="document.getElementById('submissionStatusModal').remove()" style="padding:6px 16px;background:#6B7280;color:#fff;border:none;border-radius:6px;cursor:pointer;font-size:.78rem">닫기</button>
+    </div></div></div>`;
+    modal.innerHTML = html;
+  }
 }
 
 // ── 마감 실행 ──

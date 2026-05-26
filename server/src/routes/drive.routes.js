@@ -800,4 +800,160 @@ router.post('/remove-duplicates', authMiddleware, async (req, res, next) => {
   }
 });
 
+// ═══════════════════════════════════════════════════════════
+// POST /api/drive/check-submission-status — 리뷰폴더 마감검사 (강화)
+//
+// 탭별 독립 검사:
+//   (a) 중복제출: 동일 수취인명 파일이 2개 이상
+//   (b) 미제출자: 탭에 수취인명 있으나 폴더에 파일 없음
+//   (c) 고아파일: 폴더에 파일 있으나 탭에 수취인명 없음
+//
+// body: { tabs: [ { sheetId, tabName, folderUrl } ] }
+// ═══════════════════════════════════════════════════════════
+router.post('/check-submission-status', authMiddleware, async (req, res, next) => {
+  try {
+    const { tabs } = req.body;
+    if (!tabs || !Array.isArray(tabs) || tabs.length === 0) {
+      return res.json({ error: '검사할 탭 정보가 없습니다.' });
+    }
+
+    const results = [];
+
+    for (const tab of tabs) {
+      const { sheetId, tabName, folderUrl } = tab;
+      if (!sheetId || !tabName || !folderUrl) {
+        results.push({ sheetId, tabName, error: '필수 정보 누락 (sheetId, tabName, folderUrl)' });
+        continue;
+      }
+
+      const folderId = extractFolderId(folderUrl);
+      if (!folderId) {
+        results.push({ sheetId, tabName, error: '폴더 ID 추출 실패' });
+        continue;
+      }
+
+      try {
+        // ── 1. DB에서 해당 탭의 수취인명 목록 조회 ──
+        const { rows: dbRows } = await pool.query(
+          `SELECT reviewer_name, recipient_name, row_index, is_submitted
+           FROM review_index
+           WHERE sheet_id = $1 AND tab_name = $2`,
+          [sheetId, tabName]
+        );
+
+        // 수취인명 Set (recipient_name 우선, 없으면 reviewer_name fallback)
+        const recipientSet = new Map(); // name → { rowIndex, isSubmitted }
+        for (const row of dbRows) {
+          const name = (row.recipient_name || row.reviewer_name || '').trim();
+          if (!name) continue;
+          // 동일 이름이 여러 행에 있을 수 있으므로 배열로 저장
+          if (!recipientSet.has(name)) {
+            recipientSet.set(name, []);
+          }
+          recipientSet.set(name, [...recipientSet.get(name), {
+            rowIndex: row.row_index,
+            isSubmitted: row.is_submitted
+          }]);
+        }
+
+        // ── 2. Drive에서 폴더 내 모든 파일 재귀적 조회 ──
+        const files = await driveService.listFolderFilesRecursive(folderId);
+
+        // 파일명에서 수취인명 추출 → 그룹핑
+        const filesByName = new Map(); // name → [ { file info } ]
+        for (const file of files) {
+          const extractedName = driveService.extractReviewerNameFromFile(file.name);
+          if (!extractedName) continue;
+          if (!filesByName.has(extractedName)) {
+            filesByName.set(extractedName, []);
+          }
+          filesByName.get(extractedName).push({
+            id: file.id,
+            name: file.name,
+            size: file.size,
+            createdTime: file.createdTime,
+            parentFolder: file.parentFolder,
+          });
+        }
+
+        // ── 3. 세 가지 검사 수행 ──
+        // (a) 중복제출: 동일 수취인명 파일이 2세트 이상 (동일인의 복수 이미지는 1세트)
+        // 세트 판정: 같은 이름_같은 타임스탬프를 1세트로 봄
+        const duplicateSubmissions = [];
+        for (const [name, fileList] of filesByName) {
+          // 타임스탬프별 그룹핑: 이름_순번_YYYYMMDD_HHMMSS → YYYYMMDD_HHMMSS 추출
+          const tsGroups = new Map();
+          for (const f of fileList) {
+            // 파일명에서 타임스탬프 추출: {이름}_{순번}_{YYYYMMDD}_{HHMMSS}.ext
+            const m = f.name.match(/_(\d{8}_\d{6})\.\w+$/);
+            const ts = m ? m[1] : 'unknown_' + f.createdTime;
+            if (!tsGroups.has(ts)) tsGroups.set(ts, []);
+            tsGroups.get(ts).push(f);
+          }
+          // 2세트 이상이면 중복제출
+          if (tsGroups.size >= 2) {
+            duplicateSubmissions.push({
+              name,
+              submissionCount: tsGroups.size,
+              totalFiles: fileList.length,
+              submissions: [...tsGroups.entries()].map(([ts, fls]) => ({
+                timestamp: ts,
+                files: fls,
+              })),
+            });
+          }
+        }
+
+        // (b) 미제출자: DB에 수취인명 있으나 폴더에 파일 없음
+        const missingSubmissions = [];
+        for (const [name, rows] of recipientSet) {
+          if (!filesByName.has(name)) {
+            missingSubmissions.push({
+              name,
+              rowCount: rows.length,
+              rows: rows.map(r => ({ rowIndex: r.rowIndex, isSubmitted: r.isSubmitted })),
+            });
+          }
+        }
+
+        // (c) 고아파일: 폴더에 파일 있으나 DB에 수취인명 없음
+        const orphanFiles = [];
+        for (const [name, fileList] of filesByName) {
+          if (!recipientSet.has(name)) {
+            orphanFiles.push({
+              name,
+              files: fileList,
+            });
+          }
+        }
+
+        results.push({
+          sheetId,
+          tabName,
+          totalRecipients: recipientSet.size,
+          totalFiles: files.length,
+          totalFileNames: filesByName.size,
+          duplicateSubmissions,
+          missingSubmissions,
+          orphanFiles,
+          summary: {
+            duplicateCount: duplicateSubmissions.length,
+            missingCount: missingSubmissions.length,
+            orphanCount: orphanFiles.length,
+          },
+        });
+
+        logger.info(`[check-submission-status] tab=${tabName}: recipients=${recipientSet.size}, files=${files.length}, dup=${duplicateSubmissions.length}, missing=${missingSubmissions.length}, orphan=${orphanFiles.length}`);
+      } catch (tabErr) {
+        logger.error(`[check-submission-status] tab=${tabName} 오류: ${tabErr.message}`);
+        results.push({ sheetId, tabName, error: tabErr.message });
+      }
+    }
+
+    res.json({ ok: true, results });
+  } catch (err) {
+    next(err);
+  }
+});
+
 module.exports = router;

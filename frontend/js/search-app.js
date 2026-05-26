@@ -1705,7 +1705,8 @@ async function submitReview() {
 
         showLoading(isMulti ? `(${idx+1}/${items.length}) 업로드 중...` : "업로드 중... (잠시 기다려주세요)");
 
-        const reviewerName = item.displayName || "이름없음";
+        // ★ 파일명에 사용할 이름: 수취인명 우선, 없으면 reviewer_name fallback
+        const reviewerName = item.recipientName || item.displayName || "이름없음";
         const { options: rowOpts } = extractProductOption(item.row || {});
         const optionFolderName = rowOpts.map(o => o.value).filter(Boolean).join(" ").trim();
 

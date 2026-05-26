@@ -689,6 +689,54 @@ async function trashFiles(filesToTrash) {
 }
 
 /**
+ * 재귀적 폴더 파일 목록 조회 (서브폴더 포함)
+ * - 루트 폴더 + 모든 하위 폴더의 파일을 평탄화하여 반환
+ * @param {string} folderId - Google Drive 폴더 ID
+ * @returns {Array<{id, name, md5Checksum, createdTime, mimeType, size, parentFolder}>}
+ */
+async function listFolderFilesRecursive(folderId) {
+  const d = _getReadDrive();
+  if (!d) throw new Error('Google Drive API가 설정되지 않았습니다.');
+
+  const allFiles = [];
+
+  async function _traverse(parentId, parentPath) {
+    // 파일 + 폴더 모두 조회
+    const q = `'${parentId}' in parents and trashed = false`;
+    let pageToken = null;
+
+    do {
+      const params = {
+        q,
+        fields: 'nextPageToken, files(id, name, md5Checksum, createdTime, mimeType, size)',
+        pageSize: 1000,
+        pageToken: pageToken || undefined,
+        supportsAllDrives: true,
+        includeItemsFromAllDrives: true,
+        orderBy: 'createdTime asc',
+      };
+
+      const res = await d.files.list(params);
+      const files = res.data.files || [];
+
+      for (const file of files) {
+        if (file.mimeType === 'application/vnd.google-apps.folder') {
+          // 서브폴더 재귀 탐색
+          await _traverse(file.id, parentPath ? `${parentPath}/${file.name}` : file.name);
+        } else {
+          allFiles.push({ ...file, parentFolder: parentPath || '(root)' });
+        }
+      }
+
+      pageToken = res.data.nextPageToken;
+    } while (pageToken);
+  }
+
+  await _traverse(folderId, '');
+  return allFiles;
+}
+
+/**
  * 파일명에서 리뷰어 이름 추출
  * 패턴: {이름}_{순번}_{타임스탬프}.{확장자}
  *   예: 김수만_1_20260504_143022.jpg → "김수만"
@@ -730,6 +778,7 @@ module.exports = {
   extractFolderIdFromUrl,
   // 중복 파일 정리
   listFolderFilesWithHash,
+  listFolderFilesRecursive,
   detectDuplicates,
   trashFiles,
   extractReviewerNameFromFile,

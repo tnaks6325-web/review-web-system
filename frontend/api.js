@@ -182,6 +182,7 @@ const _ACTION_MAP = {
   'driveDiag':           { method: 'GET',  path: '/api/drive/diag' },
   'checkDuplicates':     { method: 'POST', path: '/api/drive/check-duplicates' },
   'removeDuplicates':    { method: 'POST', path: '/api/drive/remove-duplicates' },
+  'checkSubmissionStatus': { method: 'POST', path: '/api/drive/check-submission-status' },
   'getPendingRows':      { method: 'GET',  path: '/api/diag/pending-rows' },
   'getUnpaidRows':       { method: 'GET',  path: '/api/diag/unpaid-rows' },
   'addTab':              { method: 'POST', path: '/api/diag/add-tab' },
