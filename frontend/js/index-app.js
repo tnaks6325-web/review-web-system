@@ -11505,8 +11505,7 @@ function _renderFullTableView(wrap, filtered) {
     stickyBar.innerHTML = `
       <span style="font-size:.78rem;font-weight:600;color:#92400E"><i class="fas fa-check-square" style="margin-right:4px"></i>${checkedCount}건 선택됨</span>
       <button onclick="_archiveCheckedTabs()" style="padding:4px 12px;background:#DC2626;color:#fff;border:none;border-radius:6px;font-size:.72rem;font-weight:600;cursor:pointer;display:flex;align-items:center;gap:4px"><i class="fas fa-archive"></i> 마감으로 보내기</button>
-      <button onclick="_checkDuplicateReviewFolders()" style="padding:4px 12px;background:#7C3AED;color:#fff;border:none;border-radius:6px;font-size:.72rem;font-weight:600;cursor:pointer;display:flex;align-items:center;gap:4px"><i class="fas fa-copy"></i> 리뷰폴더 중복검사</button>
-      <button onclick="_checkSubmissionStatus()" style="padding:4px 12px;background:#0891B2;color:#fff;border:none;border-radius:6px;font-size:.72rem;font-weight:600;cursor:pointer;display:flex;align-items:center;gap:4px"><i class="fas fa-clipboard-check"></i> 제출현황 검사</button>
+      <button onclick="_checkSubmissionStatus()" style="padding:4px 12px;background:#0891B2;color:#fff;border:none;border-radius:6px;font-size:.72rem;font-weight:600;cursor:pointer;display:flex;align-items:center;gap:4px"><i class="fas fa-clipboard-check"></i> 마감자료 검수</button>
       <button onclick="_clearTabDashChecked()" style="padding:4px 10px;background:#6B7280;color:#fff;border:none;border-radius:6px;font-size:.72rem;cursor:pointer">선택 해제</button>`;
   } else {
     stickyBar.style.display = "none";
@@ -11597,8 +11596,7 @@ function _updateArchiveBar() {
     bar.innerHTML = `
       <span style="font-size:.78rem;font-weight:600;color:#92400E"><i class="fas fa-check-square" style="margin-right:4px"></i>${n}건 선택됨</span>
       <button onclick="_archiveCheckedTabs()" style="padding:4px 12px;background:#DC2626;color:#fff;border:none;border-radius:6px;font-size:.72rem;font-weight:600;cursor:pointer;display:flex;align-items:center;gap:4px"><i class="fas fa-archive"></i> 마감으로 보내기</button>
-      <button onclick="_checkDuplicateReviewFolders()" style="padding:4px 12px;background:#7C3AED;color:#fff;border:none;border-radius:6px;font-size:.72rem;font-weight:600;cursor:pointer;display:flex;align-items:center;gap:4px"><i class="fas fa-copy"></i> 리뷰폴더 중복검사</button>
-      <button onclick="_checkSubmissionStatus()" style="padding:4px 12px;background:#0891B2;color:#fff;border:none;border-radius:6px;font-size:.72rem;font-weight:600;cursor:pointer;display:flex;align-items:center;gap:4px"><i class="fas fa-clipboard-check"></i> 제출현황 검사</button>
+      <button onclick="_checkSubmissionStatus()" style="padding:4px 12px;background:#0891B2;color:#fff;border:none;border-radius:6px;font-size:.72rem;font-weight:600;cursor:pointer;display:flex;align-items:center;gap:4px"><i class="fas fa-clipboard-check"></i> 마감자료 검수</button>
       <button onclick="_clearTabDashChecked()" style="padding:4px 10px;background:#6B7280;color:#fff;border:none;border-radius:6px;font-size:.72rem;cursor:pointer">선택 해제</button>`;
   } else {
     bar.style.display = "none";
@@ -11788,6 +11786,29 @@ function _formatDate(isoStr) {
 }
 
 // ── 제출현황 검사 (마감검사 강화) ──
+async function _executeSubmissionDuplicateRemoval() {
+  const fileIds = window._submissionRemoveIds;
+  if (!fileIds || fileIds.length === 0) { showToast('제거할 파일이 없습니다.', 'info'); return; }
+
+  if (!confirm(`${fileIds.length}개 중복 파일을 휴지통으로 이동하시겠습니까?\n\n(Google Drive 휴지통에서 30일 이내 복원 가능)`)) return;
+
+  const modal = document.getElementById('submissionStatusModal');
+  if (modal) {
+    const btn = modal.querySelector('button[onclick="_executeSubmissionDuplicateRemoval()"]');
+    if (btn) { btn.disabled = true; btn.innerHTML = '<i class="fas fa-spinner fa-spin"></i> 제거 중...'; }
+  }
+
+  try {
+    const res = await gasPost({ action: 'removeDuplicates', fileIds });
+    if (res.error) { showToast(res.error, 'error'); return; }
+    showToast(`${res.success}개 중복 파일이 휴지통으로 이동되었습니다.${res.failed > 0 ? ` (${res.failed}개 실패)` : ''}`, 'success');
+    if (modal) modal.remove();
+    window._submissionRemoveIds = null;
+  } catch (err) {
+    showToast('중복 제거 중 오류: ' + (err.message || '알 수 없는 오류'), 'error');
+  }
+}
+
 async function _checkSubmissionStatus() {
   if (_tabDashChecked.size === 0) { showToast('검사할 탭을 선택하세요.', 'info'); return; }
 
@@ -11862,9 +11883,11 @@ function _showSubmissionStatusModal(state, data) {
     let html = `
       <div style="position:fixed;inset:0;background:rgba(0,0,0,.5);z-index:9999;display:flex;align-items:center;justify-content:center" onclick="if(event.target===this)this.remove()">
         <div style="background:#fff;border-radius:12px;padding:24px;width:95%;max-width:800px;max-height:85vh;overflow-y:auto;box-shadow:0 20px 60px rgba(0,0,0,.3)">
-          <h3 style="margin:0 0 16px;font-size:1rem;color:#1F2937"><i class="fas fa-clipboard-check" style="margin-right:8px;color:#0891B2"></i>제출현황 검사 결과</h3>`;
+          <h3 style="margin:0 0 16px;font-size:1rem;color:#1F2937"><i class="fas fa-clipboard-check" style="margin-right:8px;color:#0891B2"></i>마감자료 검수 결과</h3>`;
 
     let totalIssues = 0;
+    const allRemoveIds = [];
+
     results.forEach((r, rIdx) => {
       const tabLabel = `${escHtml(tabs[rIdx]?.campaign||'')} / ${escHtml(r.tabName||tabs[rIdx]?.tabName||'')}`;
 
@@ -11876,8 +11899,8 @@ function _showSubmissionStatusModal(state, data) {
       }
 
       const { summary } = r;
-      const hasIssues = summary.duplicateCount + summary.missingCount + summary.orphanCount > 0;
-      totalIssues += summary.duplicateCount + summary.missingCount + summary.orphanCount;
+      const issueCount = (summary.fileDuplicateCount||0) + summary.duplicateCount + summary.missingCount + summary.orphanCount;
+      totalIssues += issueCount;
 
       html += `<div style="margin-bottom:12px;border:1px solid #E5E7EB;border-radius:8px;overflow:hidden">
         <div style="background:#F3F4F6;padding:8px 12px;font-size:.78rem;font-weight:600;color:#374151;display:flex;align-items:center;justify-content:space-between">
@@ -11885,17 +11908,33 @@ function _showSubmissionStatusModal(state, data) {
           <span style="font-weight:400;color:#6B7280;font-size:.72rem">수취인 ${r.totalRecipients}명 | 파일 ${r.totalFiles}개 | 제출자 ${r.totalFileNames}명</span>
         </div>`;
 
-      if (!hasIssues) {
+      if (issueCount === 0) {
         html += `<div style="padding:12px;text-align:center;color:#059669;font-size:.82rem">
           <i class="fas fa-check-circle" style="margin-right:4px"></i> 이상 없음
         </div>`;
       } else {
         html += `<div style="padding:8px 12px">`;
 
-        // (a) 중복 제출
+        // (a) 파일 중복 (md5)
+        if (summary.fileDuplicateCount > 0) {
+          html += `<div style="margin-bottom:8px">
+            <div style="font-size:.75rem;font-weight:600;color:#DC2626;margin-bottom:4px"><i class="fas fa-copy" style="margin-right:4px"></i>파일 중복 (${summary.fileDuplicateCount}그룹, ${summary.fileDuplicateFileCount}개 제거 가능)</div>`;
+          (r.fileDuplicates||[]).forEach(g => {
+            html += `<div style="margin-left:12px;font-size:.72rem;color:#4B5563;padding:3px 0;border-bottom:1px solid #F3F4F6">
+              <span style="color:#059669"><i class="fas fa-check" style="margin-right:2px"></i>유지:</span> ${escHtml(g.keep.name)} <span style="color:#9CA3AF">(${_formatFileSize(g.keep.size)})</span>`;
+            g.remove.forEach(f => {
+              allRemoveIds.push(f.id);
+              html += `<br><span style="color:#DC2626;margin-left:14px"><i class="fas fa-trash-alt" style="margin-right:2px"></i>제거:</span> ${escHtml(f.name)} <span style="color:#9CA3AF">(${_formatFileSize(f.size)})</span>`;
+            });
+            html += `</div>`;
+          });
+          html += `</div>`;
+        }
+
+        // (b) 중복 제출
         if (summary.duplicateCount > 0) {
           html += `<div style="margin-bottom:8px">
-            <div style="font-size:.75rem;font-weight:600;color:#DC2626;margin-bottom:4px"><i class="fas fa-clone" style="margin-right:4px"></i>중복 제출 (${summary.duplicateCount}명)</div>`;
+            <div style="font-size:.75rem;font-weight:600;color:#F97316;margin-bottom:4px"><i class="fas fa-clone" style="margin-right:4px"></i>중복 제출 (${summary.duplicateCount}명)</div>`;
           r.duplicateSubmissions.forEach(d => {
             html += `<div style="margin-left:12px;font-size:.72rem;color:#4B5563;padding:3px 0;border-bottom:1px solid #F3F4F6">
               <b>${escHtml(d.name)}</b> — ${d.submissionCount}회 제출 (파일 ${d.totalFiles}개)
@@ -11905,7 +11944,7 @@ function _showSubmissionStatusModal(state, data) {
           html += `</div>`;
         }
 
-        // (b) 미제출자
+        // (c) 미제출자
         if (summary.missingCount > 0) {
           html += `<div style="margin-bottom:8px">
             <div style="font-size:.75rem;font-weight:600;color:#F59E0B;margin-bottom:4px"><i class="fas fa-user-slash" style="margin-right:4px"></i>미제출자 (${summary.missingCount}명)</div>`;
@@ -11917,7 +11956,7 @@ function _showSubmissionStatusModal(state, data) {
           html += `</div>`;
         }
 
-        // (c) 고아 파일
+        // (d) 고아 파일
         if (summary.orphanCount > 0) {
           html += `<div style="margin-bottom:8px">
             <div style="font-size:.75rem;font-weight:600;color:#7C3AED;margin-bottom:4px"><i class="fas fa-ghost" style="margin-right:4px"></i>고아 파일 (${summary.orphanCount}명)</div>`;
@@ -11942,9 +11981,14 @@ function _showSubmissionStatusModal(state, data) {
       html = html.replace('</h3>', `</h3><div style="background:#FEF3C7;border:1px solid #F59E0B;border-radius:8px;padding:10px 14px;margin-bottom:12px;font-size:.78rem;color:#92400E"><i class="fas fa-exclamation-triangle" style="margin-right:6px"></i><b>${totalIssues}건의 이슈</b>가 발견되었습니다.</div>`);
     }
 
-    html += `<div style="text-align:right;margin-top:16px">
-      <button onclick="document.getElementById('submissionStatusModal').remove()" style="padding:6px 16px;background:#6B7280;color:#fff;border:none;border-radius:6px;cursor:pointer;font-size:.78rem">닫기</button>
-    </div></div></div>`;
+    // 하단 버튼: 중복 파일이 있으면 제거 버튼 표시
+    window._submissionRemoveIds = allRemoveIds;
+    html += `<div style="text-align:right;margin-top:16px;display:flex;gap:8px;justify-content:flex-end">
+      <button onclick="document.getElementById('submissionStatusModal').remove()" style="padding:6px 16px;background:#6B7280;color:#fff;border:none;border-radius:6px;cursor:pointer;font-size:.78rem">닫기</button>`;
+    if (allRemoveIds.length > 0) {
+      html += `<button onclick="_executeSubmissionDuplicateRemoval()" style="padding:6px 16px;background:#DC2626;color:#fff;border:none;border-radius:6px;cursor:pointer;font-size:.78rem;font-weight:600"><i class="fas fa-trash-alt" style="margin-right:4px"></i>중복파일 제거 (${allRemoveIds.length}개)</button>`;
+    }
+    html += `</div></div></div>`;
     modal.innerHTML = html;
   }
 }

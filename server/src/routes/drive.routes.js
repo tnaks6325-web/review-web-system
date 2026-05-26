@@ -876,8 +876,33 @@ router.post('/check-submission-status', authMiddleware, async (req, res, next) =
           });
         }
 
-        // ── 3. 세 가지 검사 수행 ──
-        // (a) 중복제출: 동일 수취인명 파일이 2세트 이상 (동일인의 복수 이미지는 1세트)
+        // ── 3. 네 가지 검사 수행 ──
+
+        // (a) 파일 중복 (md5 해시 동일 — 물리적 동일 파일)
+        const hashGroups = new Map();
+        for (const file of files) {
+          if (!file.md5Checksum) continue;
+          if (!hashGroups.has(file.md5Checksum)) hashGroups.set(file.md5Checksum, []);
+          hashGroups.get(file.md5Checksum).push({
+            id: file.id,
+            name: file.name,
+            size: file.size,
+            createdTime: file.createdTime,
+            parentFolder: file.parentFolder,
+          });
+        }
+        const fileDuplicates = [];
+        for (const [hash, group] of hashGroups) {
+          if (group.length < 2) continue;
+          group.sort((a, b) => new Date(a.createdTime) - new Date(b.createdTime));
+          fileDuplicates.push({
+            md5: hash,
+            keep: group[0],
+            remove: group.slice(1),
+          });
+        }
+
+        // (b) 중복제출: 동일 수취인명 파일이 2세트 이상 (동일인의 복수 이미지는 1세트)
         // 세트 판정: 같은 이름_같은 타임스탬프를 1세트로 봄
         const duplicateSubmissions = [];
         for (const [name, fileList] of filesByName) {
@@ -904,7 +929,7 @@ router.post('/check-submission-status', authMiddleware, async (req, res, next) =
           }
         }
 
-        // (b) 미제출자: DB에 수취인명 있으나 폴더에 파일 없음
+        // (c) 미제출자: DB에 수취인명 있으나 폴더에 파일 없음
         const missingSubmissions = [];
         for (const [name, rows] of recipientSet) {
           if (!filesByName.has(name)) {
@@ -916,7 +941,7 @@ router.post('/check-submission-status', authMiddleware, async (req, res, next) =
           }
         }
 
-        // (c) 고아파일: 폴더에 파일 있으나 DB에 수취인명 없음
+        // (d) 고아파일: 폴더에 파일 있으나 DB에 수취인명 없음
         const orphanFiles = [];
         for (const [name, fileList] of filesByName) {
           if (!recipientSet.has(name)) {
@@ -933,10 +958,13 @@ router.post('/check-submission-status', authMiddleware, async (req, res, next) =
           totalRecipients: recipientSet.size,
           totalFiles: files.length,
           totalFileNames: filesByName.size,
+          fileDuplicates,
           duplicateSubmissions,
           missingSubmissions,
           orphanFiles,
           summary: {
+            fileDuplicateCount: fileDuplicates.length,
+            fileDuplicateFileCount: fileDuplicates.reduce((s, g) => s + g.remove.length, 0),
             duplicateCount: duplicateSubmissions.length,
             missingCount: missingSubmissions.length,
             orphanCount: orphanFiles.length,
