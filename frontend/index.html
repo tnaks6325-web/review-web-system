@@ -481,9 +481,9 @@ async function loadRecruitPreview() {
           if (isFull) {
             actionBtn = `<button class="rc-apply-btn rc-closed" disabled><i class="fas fa-ban"></i> 모집 마감</button>`;
           } else if (c.chat_url) {
-            actionBtn = `<a href="${escHtml(c.chat_url)}" target="_blank" class="rc-apply-btn rc-kakao"><i class="fas fa-comment"></i> 참여 신청하기</a>`;
+            actionBtn = `<button class="rc-apply-btn rc-kakao" onclick="handleApplyClick('${escHtml(c.chat_url).replace(/'/g,"&apos;")}')"><i class="fas fa-comment"></i> 참여 신청하기</button>`;
           } else {
-            actionBtn = `<button class="rc-apply-btn rc-default" onclick="openInlineApply(${c.id},'${escHtml(c.title).replace(/'/g,"\\'")}')"><i class="fas fa-hand-pointer"></i> 참여 신청하기</button>`;
+            actionBtn = `<button class="rc-apply-btn rc-default" onclick="handleApplyClick(null,'${c.id}')"><i class="fas fa-hand-pointer"></i> 참여 신청하기</button>`;
           }
 
           return `
@@ -502,14 +502,14 @@ async function loadRecruitPreview() {
               </div>
               ${c.notes ? `<div class="rc-notes"><i class="fas fa-sticky-note"></i> ${escHtml(c.notes)}</div>` : ""}
               ${actionBtn}
-              <div class="rc-inline-form" id="rcForm${c.id}" style="display:none">
+              <div class="rc-inline-form" id="rcForm_${c.id}" style="display:none">
                 <div class="rc-form-fields">
-                  <input type="text" class="rc-input" id="rcName${c.id}" placeholder="이름">
-                  <input type="tel" class="rc-input" id="rcPhone${c.id}" placeholder="연락처 (010-XXXX-XXXX)">
+                  <input type="text" class="rc-input" id="rcName_${c.id}" placeholder="이름">
+                  <input type="tel" class="rc-input" id="rcPhone_${c.id}" placeholder="연락처 (010-XXXX-XXXX)">
                 </div>
                 <div class="rc-form-actions">
-                  <button class="rc-submit-btn" onclick="submitInlineApply(${c.id})"><i class="fas fa-check"></i> 신청 완료</button>
-                  <button class="rc-cancel-btn" onclick="closeInlineApply(${c.id})">취소</button>
+                  <button class="rc-submit-btn" onclick="submitInlineApply('${c.id}')"><i class="fas fa-check"></i> 신청 완료</button>
+                  <button class="rc-cancel-btn" onclick="closeInlineApply('${c.id}')">취소</button>
                 </div>
               </div>
             </div>`;
@@ -528,19 +528,41 @@ async function loadRecruitPreview() {
   }
 }
 
-/* ═══ 인라인 참여 신청 ═══ */
-function openInlineApply(campId, title) {
+/* ═══ 참여 신청 핸들러 ═══ */
+function handleApplyClick(chatUrl, campId) {
+  const user = getSavedUser();
+
+  // 비로그인 상태: 로그인 안내
+  if (!user) {
+    showToast('로그인 후 참여하실 수 있습니다');
+    // 로그인 입력란으로 스크롤
+    const loginInput = document.getElementById('loginPhone');
+    if (loginInput) { loginInput.scrollIntoView({ behavior:'smooth', block:'center' }); loginInput.focus(); }
+    return;
+  }
+
+  // chat_url이 있으면 카카오톡으로 이동
+  if (chatUrl) {
+    window.open(chatUrl, '_blank');
+    return;
+  }
+
+  // chat_url 없으면 인라인 신청 폼 열기
+  if (campId) openInlineApply(campId);
+}
+
+function openInlineApply(campId) {
   // 이미 열린 다른 폼 닫기
   document.querySelectorAll('.rc-inline-form').forEach(el => el.style.display = 'none');
-  const form = document.getElementById('rcForm' + campId);
+  const form = document.getElementById('rcForm_' + campId);
   if (!form) return;
   form.style.display = '';
 
   // 로그인 상태면 자동 채우기
   const user = getSavedUser();
   if (user) {
-    const nameInput = document.getElementById('rcName' + campId);
-    const phoneInput = document.getElementById('rcPhone' + campId);
+    const nameInput = document.getElementById('rcName_' + campId);
+    const phoneInput = document.getElementById('rcPhone_' + campId);
     if (nameInput && user.name) nameInput.value = user.name;
     if (phoneInput && user.phone) phoneInput.value = user.phone;
     else if (phoneInput && user.phone8) phoneInput.value = user.phone8;
@@ -548,13 +570,13 @@ function openInlineApply(campId, title) {
 }
 
 function closeInlineApply(campId) {
-  const form = document.getElementById('rcForm' + campId);
+  const form = document.getElementById('rcForm_' + campId);
   if (form) form.style.display = 'none';
 }
 
 async function submitInlineApply(campId) {
-  const nameInput = document.getElementById('rcName' + campId);
-  const phoneInput = document.getElementById('rcPhone' + campId);
+  const nameInput = document.getElementById('rcName_' + campId);
+  const phoneInput = document.getElementById('rcPhone_' + campId);
   const name = (nameInput ? nameInput.value : '').trim();
   const phone = (phoneInput ? phoneInput.value : '').trim();
 
