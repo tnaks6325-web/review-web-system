@@ -511,3 +511,135 @@ async function saveRecruitSettings() {
     showToast("설정 저장 실패: " + e.message, "error");
   }
 }
+
+/* ═══════════════════════════════════════
+   실시간 미리보기 기능
+═══════════════════════════════════════ */
+let _previewOpen = false;
+let _previewDebounce = null;
+
+function toggleRecruitPreview() {
+  _previewOpen = !_previewOpen;
+  const area    = document.getElementById("rf_preview_area");
+  const label   = document.getElementById("rf_preview_label");
+  const chevron = document.getElementById("rf_preview_chevron");
+  const icon    = document.getElementById("rf_preview_icon");
+
+  if (_previewOpen) {
+    area.style.display = "";
+    label.textContent = "미리보기 닫기";
+    chevron.style.transform = "rotate(180deg)";
+    icon.className = "fas fa-eye-slash";
+    _renderPreview();
+    _attachPreviewListeners();
+  } else {
+    area.style.display = "none";
+    label.textContent = "미리보기 열기";
+    chevron.style.transform = "";
+    icon.className = "fas fa-eye";
+    _detachPreviewListeners();
+  }
+}
+
+/* 폼 값으로 미리보기 카드 렌더 */
+function _renderPreview() {
+  const card = document.getElementById("rf_preview_card");
+  if (!card) return;
+
+  const title       = document.getElementById("rf_title").value.trim() || "(제목 없음)";
+  const channel     = document.getElementById("rf_channel").value.trim();
+  const channelCustom = document.getElementById("rf_channel_custom").value.trim();
+  const channelText = channel === "직접입력" ? (channelCustom || "직접입력") : channel;
+  const manager     = document.getElementById("rf_manager").value.trim();
+  const timeRange   = document.getElementById("rf_time_range").value.trim();
+  const deliveryType = document.getElementById("rf_delivery_type").value;
+  const reviewFee   = Number(document.getElementById("rf_review_fee").value) || 0;
+  const notes       = document.getElementById("rf_notes").value.trim();
+  const maxSlots    = Number(document.getElementById("rf_max_slots").value) || 0;
+  const badges      = _recruitBadges;
+
+  const managerEmoji = manager === "만두" ? "🥟" : manager === "망고" ? "🥭" : "";
+  const feeText = reviewFee > 0 ? reviewFee.toLocaleString() + "원" : "";
+  const slotsHtml = maxSlots > 0
+    ? `<span style="display:inline-flex;align-items:center;gap:4px;font-size:.73rem;font-weight:600;color:#059669;background:#D1FAE5;padding:2px 9px;border-radius:12px"><i class="fas fa-users" style="font-size:.65rem"></i> 0/${maxSlots}명</span>`
+    : "";
+
+  const badgeColors = [
+    {bg:'#D1FAE5',c:'#065F46'},{bg:'#DBEAFE',c:'#1E40AF'},{bg:'#FEF3C7',c:'#92400E'},
+    {bg:'#EDE9FE',c:'#4C1D95'},{bg:'#FCE7F3',c:'#831843'},{bg:'#ECFDF5',c:'#064E3B'}
+  ];
+
+  card.innerHTML = `
+    <div style="background:linear-gradient(135deg,#2D1B69 0%,#3B1FA8 100%);padding:12px 14px;border-radius:12px 12px 0 0;display:flex;align-items:flex-start;gap:8px">
+      ${channelText ? `<span style="flex-shrink:0;background:#FDE68A;color:#78350F;padding:2px 8px;border-radius:5px;font-size:.65rem;font-weight:800;margin-top:1px">${escHtml(channelText)}</span>` : ""}
+      <span style="font-size:.86rem;font-weight:700;color:#fff;line-height:1.4;flex:1">${escHtml(title)}</span>
+      ${manager ? `<span style="font-size:.68rem;color:#A7F3D0;font-weight:600;flex-shrink:0;white-space:nowrap">${managerEmoji} ${escHtml(manager)}</span>` : ""}
+    </div>
+    <div style="background:#fff;border-radius:0 0 12px 12px;padding:12px 14px;display:flex;flex-direction:column;gap:10px">
+      ${badges.length ? `<div style="display:flex;flex-wrap:wrap;gap:5px">${badges.map((b,i)=>{
+        const clr = badgeColors[i%6];
+        return `<span style="display:inline-flex;padding:3px 10px;border-radius:16px;font-size:.72rem;font-weight:600;background:${clr.bg};color:${clr.c}">${escHtml(b)}</span>`;
+      }).join("")}</div>` : ""}
+      ${(timeRange||deliveryType||feeText||slotsHtml) ? `
+      <div style="display:flex;flex-wrap:wrap;gap:8px;align-items:center">
+        ${feeText ? `<span style="display:inline-flex;align-items:center;gap:4px;font-size:.78rem;font-weight:700;color:#7C3AED"><i class="fas fa-won-sign" style="font-size:.65rem"></i> 리뷰비 ${feeText}</span>` : ""}
+        ${deliveryType ? `<span style="font-size:.73rem;color:#6B7280;display:inline-flex;align-items:center;gap:4px"><i class="fas fa-truck" style="font-size:.6rem;color:#9CA3AF"></i>${escHtml(deliveryType)}</span>` : ""}
+        ${timeRange ? `<span style="font-size:.73rem;color:#6B7280;display:inline-flex;align-items:center;gap:4px"><i class="fas fa-clock" style="font-size:.6rem;color:#9CA3AF"></i>${escHtml(timeRange)}</span>` : ""}
+        ${slotsHtml}
+      </div>` : ""}
+      ${notes ? `<div>
+        <div style="font-size:.65rem;font-weight:700;color:#9CA3AF;margin-bottom:3px;display:flex;align-items:center;gap:3px"><i class="fas fa-clipboard-list" style="font-size:.6rem"></i> 유의사항</div>
+        <div style="font-size:.76rem;color:#374151;white-space:pre-line;line-height:1.6">${escHtml(notes)}</div>
+      </div>` : ""}
+      <div style="height:1px;background:#E5E7EB;margin:2px 0"></div>
+      <button disabled style="display:block;width:100%;padding:12px;background:linear-gradient(135deg,#7C3AED,#6D28D9);color:#fff;border:none;border-radius:10px;font-size:.88rem;font-weight:800;text-align:center;opacity:.9;cursor:default">
+        <i class="fas fa-hand-point-up"></i> 참여 신청하기
+      </button>
+    </div>
+  `;
+}
+
+/* 입력 이벤트 리스너 (debounce) */
+const _PREVIEW_INPUTS = ["rf_title","rf_channel_custom","rf_time_range","rf_review_fee","rf_notes","rf_max_slots"];
+const _PREVIEW_SELECTS = ["rf_delivery_type","rf_status"];
+
+function _onPreviewInput() {
+  if (!_previewOpen) return;
+  clearTimeout(_previewDebounce);
+  _previewDebounce = setTimeout(_renderPreview, 120);
+}
+
+function _attachPreviewListeners() {
+  _PREVIEW_INPUTS.forEach(id => {
+    const el = document.getElementById(id);
+    if (el) el.addEventListener("input", _onPreviewInput);
+  });
+  _PREVIEW_SELECTS.forEach(id => {
+    const el = document.getElementById(id);
+    if (el) el.addEventListener("change", _onPreviewInput);
+  });
+}
+
+function _detachPreviewListeners() {
+  _PREVIEW_INPUTS.forEach(id => {
+    const el = document.getElementById(id);
+    if (el) el.removeEventListener("input", _onPreviewInput);
+  });
+  _PREVIEW_SELECTS.forEach(id => {
+    const el = document.getElementById(id);
+    if (el) el.removeEventListener("change", _onPreviewInput);
+  });
+}
+
+/* 배지/채널/담당자 변경 시에도 미리보기 갱신 */
+const _origSelectRfBtn = selectRfBtn;
+selectRfBtn = function(group, btn) {
+  _origSelectRfBtn(group, btn);
+  _onPreviewInput();
+};
+
+const _origRefreshBadgeWrap = _refreshBadgeWrap;
+_refreshBadgeWrap = function() {
+  _origRefreshBadgeWrap();
+  _onPreviewInput();
+};

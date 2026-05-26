@@ -1570,6 +1570,29 @@
       </div>
 
     </div>
+
+    <!-- ── 실시간 미리보기 패널 ── -->
+    <div id="rf_preview_section" style="border-top:2px dashed var(--border);margin:0 18px">
+      <button type="button" onclick="toggleRecruitPreview()" id="rf_preview_toggle"
+        style="width:100%;padding:10px 0;background:none;border:none;cursor:pointer;
+               display:flex;align-items:center;justify-content:center;gap:6px;
+               font-size:.8rem;font-weight:600;color:var(--p)">
+        <i class="fas fa-eye" id="rf_preview_icon"></i>
+        <span id="rf_preview_label">미리보기 열기</span>
+        <i class="fas fa-chevron-down" id="rf_preview_chevron" style="font-size:.65rem;transition:transform .2s"></i>
+      </button>
+      <div id="rf_preview_area" style="display:none;padding:0 0 14px;max-height:420px;overflow-y:auto">
+        <div style="font-size:.68rem;color:var(--t4);text-align:center;margin-bottom:8px">
+          <i class="fas fa-mobile-alt"></i> 리뷰어에게 보여지는 모습 (실시간)
+        </div>
+        <div id="rf_preview_card" style="
+          background:#F5F4FF;border-radius:16px;padding:14px;
+          max-width:380px;margin:0 auto;
+          box-shadow:inset 0 0 0 1px rgba(124,58,237,.12)
+        "></div>
+      </div>
+    </div>
+
     <div class="modal-footer" style="padding:12px 18px;display:flex;justify-content:flex-end;gap:8px;border-top:1px solid var(--border)">
       <button onclick="closeRecruitModal()"
         style="padding:8px 18px;border:1.5px solid var(--border);border-radius:8px;background:#fff;color:var(--t2);font-size:.82rem;cursor:pointer;font-weight:600">취소</button>
