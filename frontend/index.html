@@ -741,8 +741,8 @@ async function loadReviewList(user) {
         const taskLabel = taskParts.join(" ");
 
         const productHtml = taskLabel
-          ? `<div class="result-name result-product-name">${escHtml(itemName)}${roundBadge}</div>
-             <div class="result-product-label">${escHtml(taskLabel)}</div>`
+          ? `<div class="result-name result-product-name">${escHtml(taskLabel)}${roundBadge}</div>
+             <div class="result-product-label">${escHtml(itemName)}</div>`
           : `<div class="result-name result-product-name">${escHtml(itemName)}${roundBadge}</div>
              <div class="result-product-label result-product-empty">참여 작업 정보 없음</div>`;
 
@@ -784,8 +784,8 @@ async function loadReviewList(user) {
           <div class="result-group-header">
             <i class="fas fa-user-circle" style="font-size:1.4rem;color:var(--p);flex-shrink:0"></i>
             <div style="flex:1;min-width:0">
-              <div class="result-group-name">${escHtml(itemName)}</div>
-              ${campLabel ? `<div style="font-size:.68rem;color:var(--t3);margin-top:1px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${escHtml(campLabel)}</div>` : ""}
+              <div class="result-group-name">${escHtml(campLabel || itemName)}</div>
+              ${campLabel ? `<div style="font-size:.68rem;color:var(--t3);margin-top:1px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${escHtml(itemName)}</div>` : ""}
             </div>
             <span class="result-group-badge"><i class="fas fa-layer-group"></i> ${items.length}건</span>
             <i class="fas fa-chevron-right" style="color:var(--t3);font-size:.8rem;flex-shrink:0"></i>
