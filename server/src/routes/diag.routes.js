@@ -450,13 +450,23 @@ router.get('/preview-tab', authMiddleware, async (req, res, next) => {
       }
     }
 
-    // DB에서 해당 시트의 모든 등록된 탭 조회
+    // DB에서 해당 시트의 모든 등록된 탭 조회 (차수 마감 정보 포함)
     const { rows: registeredTabs } = await pool.query(
-      'SELECT tab_name, is_closed FROM tab_configs WHERE sheet_id = $1',
+      'SELECT tab_name, is_closed, closed_rounds, archived_rounds FROM tab_configs WHERE sheet_id = $1',
       [sheetId]
     );
     const registeredSet = new Set(registeredTabs.map(r => r.tab_name));
     const closedInConfigSet = new Set(registeredTabs.filter(r => r.is_closed).map(r => r.tab_name));
+
+    // 차수 마감/아카이브 정보 맵
+    const roundInfoMap = {};
+    for (const r of registeredTabs) {
+      const closed = (r.closed_rounds || '').split(',').map(s => s.trim()).filter(Boolean);
+      const archived = (r.archived_rounds || '').split(',').map(s => s.trim()).filter(Boolean);
+      if (closed.length > 0 || archived.length > 0) {
+        roundInfoMap[r.tab_name] = { closedRounds: closed, archivedRounds: archived };
+      }
+    }
 
     // ★ 마감/아카이브된 탭 조회 (index_master_archive)
     const { rows: archivedTabs } = await pool.query(
@@ -475,6 +485,66 @@ router.get('/preview-tab', authMiddleware, async (req, res, next) => {
       indexMap[ir.tab_name] = { rowCount: ir.row_count, submittedCount: ir.submitted_count };
     }
 
+    // ★ 각 탭의 차수별 현황 조회 (review_index에서 고유 round 값 + 건수)
+    const { rows: roundRows } = await pool.query(
+      `SELECT tab_name, round,
+              COUNT(*) AS total,
+              COUNT(*) FILTER (WHERE is_submitted = TRUE) AS submitted
+       FROM review_index
+       WHERE sheet_id = $1 AND round IS NOT NULL AND round != ''
+       GROUP BY tab_name, round
+       ORDER BY tab_name, round`,
+      [sheetId]
+    );
+    const roundDataMap = {}; // tabName → [{round, total, submitted, status}]
+    for (const rr of roundRows) {
+      if (!roundDataMap[rr.tab_name]) roundDataMap[rr.tab_name] = [];
+      const ri = roundInfoMap[rr.tab_name] || { closedRounds: [], archivedRounds: [] };
+      let roundStatus = 'active';
+      if (ri.archivedRounds.includes(rr.round)) roundStatus = 'archived';
+      else if (ri.closedRounds.includes(rr.round)) roundStatus = 'closed';
+      roundDataMap[rr.tab_name].push({
+        round: rr.round,
+        total: +rr.total,
+        submitted: +rr.submitted,
+        status: roundStatus,
+      });
+    }
+
+    // ★ 아카이브된 차수도 review_index_archive에서 조회 (이미 review_index에 없는 차수)
+    const { rows: archivedRoundRows } = await pool.query(
+      `SELECT tab_name, round,
+              COUNT(*) AS total,
+              COUNT(*) FILTER (WHERE is_submitted = TRUE) AS submitted
+       FROM review_index_archive
+       WHERE sheet_id = $1 AND round IS NOT NULL AND round != ''
+       GROUP BY tab_name, round
+       ORDER BY tab_name, round`,
+      [sheetId]
+    );
+    for (const ar of archivedRoundRows) {
+      if (!roundDataMap[ar.tab_name]) roundDataMap[ar.tab_name] = [];
+      // 이미 있는 차수는 스킵 (review_index에 남아있는 경우)
+      const existing = roundDataMap[ar.tab_name].find(x => x.round === ar.round);
+      if (!existing) {
+        roundDataMap[ar.tab_name].push({
+          round: ar.round,
+          total: +ar.total,
+          submitted: +ar.submitted,
+          status: 'archived',
+        });
+      }
+    }
+
+    // 차수 정렬 (숫자 기준)
+    for (const tabName of Object.keys(roundDataMap)) {
+      roundDataMap[tabName].sort((a, b) => {
+        const numA = parseInt(a.round) || 0;
+        const numB = parseInt(b.round) || 0;
+        return numA - numB;
+      });
+    }
+
     // 각 탭에 등록 상태 추가 (등록됨 / 마감됨 / 신규)
     const tabsWithStatus = allTabs.map(tab => {
       const isRegistered = registeredSet.has(tab.name);
@@ -489,6 +559,7 @@ router.get('/preview-tab', authMiddleware, async (req, res, next) => {
         registered: isRegistered || isArchived,
         status,
         indexData: indexMap[tab.name] || null,
+        rounds: roundDataMap[tab.name] || [],
       };
     });
 

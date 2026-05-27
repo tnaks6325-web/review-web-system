@@ -8764,6 +8764,22 @@ async function previewAddCampaign() {
       document.getElementById("addCampTabCount").textContent = data.totalTabCount;
       let listHtml = '';
 
+      // 차수 렌더링 헬퍼
+      function renderRounds(rounds) {
+        if (!rounds || rounds.length === 0) return '';
+        let html = '<div style="display:flex;flex-wrap:wrap;gap:3px;margin-top:4px">';
+        for (const r of rounds) {
+          let bg, color, border;
+          if (r.status === 'archived') { bg = '#FEF3C7'; color = '#92400E'; border = '#FDE68A'; }
+          else if (r.status === 'closed') { bg = '#FEE2E2'; color = '#991B1B'; border = '#FECACA'; }
+          else { bg = '#ECFDF5'; color = '#065F46'; border = '#A7F3D0'; }
+          const label = r.status === 'archived' ? '아카이브' : r.status === 'closed' ? '마감' : `${r.submitted}/${r.total}`;
+          html += `<span style="font-size:9px;padding:2px 5px;border-radius:3px;background:${bg};color:${color};border:1px solid ${border};white-space:nowrap" title="${r.round}: ${r.submitted}/${r.total}">${r.round} <span style="opacity:.7">${label}</span></span>`;
+        }
+        html += '</div>';
+        return html;
+      }
+
       // 신규 탭 먼저 (초록색)
       if (data.newTabs && data.newTabs.length > 0) {
         listHtml += `<div style="font-size:10px;font-weight:700;color:#065F46;margin:4px 0 2px;padding:2px 6px;background:#ECFDF5;border-radius:4px;display:inline-block">🆕 신규 (${data.newTabs.length}개) — 등록 대상</div>`;
@@ -8774,6 +8790,7 @@ async function previewAddCampaign() {
               <span><i class="fas fa-plus-circle" style="margin-right:4px;color:#22C55E"></i><b>${escHtml(tab.name)}</b></span>
               <span style="font-size:10px;color:#6B7280;background:#fff;padding:1px 6px;border-radius:3px">${idxInfo}</span>
             </div>
+            ${renderRounds(tab.rounds)}
           </div>`;
         }
       }
@@ -8788,11 +8805,12 @@ async function previewAddCampaign() {
               <span><i class="fas fa-check-circle" style="margin-right:4px;color:#9CA3AF"></i>${escHtml(tab.name)}</span>
               <span style="font-size:10px;color:#9CA3AF">${idxInfo}</span>
             </div>
+            ${renderRounds(tab.rounds)}
           </div>`;
         }
       }
 
-      // ★ 마감된 탭 (빨간/주황색 — 재등록 불가)
+      // ★ 마감된 탭 (노란색 — 등록 제외)
       if (data.closedTabs && data.closedTabs.length > 0) {
         listHtml += `<div style="font-size:10px;font-weight:700;color:#92400E;margin:8px 0 2px;padding:2px 6px;background:#FEF3C7;border-radius:4px;display:inline-block">🔒 마감 (${data.closedTabs.length}개) — 등록 제외</div>`;
         for (const tab of data.closedTabs) {
@@ -8801,6 +8819,7 @@ async function previewAddCampaign() {
               <span><i class="fas fa-lock" style="margin-right:4px;color:#D97706"></i>${escHtml(tab.name)}</span>
               <span style="font-size:10px;color:#B45309;background:#FEF3C7;padding:1px 6px;border-radius:3px">${tab.status === 'archived' ? '아카이브' : '마감'}</span>
             </div>
+            ${renderRounds(tab.rounds)}
           </div>`;
         }
       }
