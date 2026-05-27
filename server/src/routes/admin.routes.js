@@ -184,6 +184,26 @@ function _countFilledWorkGroups(rowJson) {
   return filled;
 }
 
+// ── 입금 컬럼 키워드 (row_json에서 입금 값 존재 여부 판별) ──
+const PAYMENT_COL_KEYWORDS = ['입금', '페이백', '입금완료', '입금확인', '입금여부'];
+
+/**
+ * row_json에서 입금 관련 컬럼에 값이 있는지 확인
+ * @param {object} rowJson - review_index.row_json
+ * @returns {boolean} 입금 값 존재 여부
+ */
+function _hasPaymentValue(rowJson) {
+  if (!rowJson || typeof rowJson !== 'object') return false;
+  for (const key of Object.keys(rowJson)) {
+    const lk = key.toLowerCase();
+    if (PAYMENT_COL_KEYWORDS.some(kw => lk.includes(kw.toLowerCase()))) {
+      const val = String(rowJson[key] || '').trim();
+      if (val.length > 0) return true;
+    }
+  }
+  return false;
+}
+
 router.get('/dashboard', authMiddleware, async (req, res, next) => {
   try {
     // 1. 탭 통계 (index_master + tab_configs JOIN + review_index에서 시작일/종료일 추출)
@@ -253,7 +273,8 @@ router.get('/dashboard', authMiddleware, async (req, res, next) => {
       const { rows: reviewRows } = await pool.query(`
         SELECT ri.sheet_id AS "sheetId", ri.tab_name AS "tabName",
                ri.is_submitted AS "isSubmitted", ri.round,
-               ri.row_json AS "rowJson", ri.start_date AS "startDate"
+               ri.row_json AS "rowJson", ri.start_date AS "startDate",
+               ri.is_submitted2 AS "isSubmitted2"
         FROM review_index ri
         INNER JOIN index_master im ON ri.sheet_id = im.sheet_id AND ri.tab_name = im.tab_name
         WHERE im.status = 'active'
@@ -286,7 +307,7 @@ router.get('/dashboard', authMiddleware, async (req, res, next) => {
           if (!roundDataMap[tabKey][roundVal]) {
             roundDataMap[tabKey][roundVal] = {
               total: 0, submitted: 0, pending: 0,
-              tuip: 0, chuihap: 0, startDate: null,
+              tuip: 0, chuihap: 0, paid: 0, startDate: null,
             };
           }
           const rd = roundDataMap[tabKey][roundVal];
@@ -301,6 +322,10 @@ router.get('/dashboard', authMiddleware, async (req, res, next) => {
             } else {
               rd.tuip++;
             }
+          }
+          // ★ 입금 완료 집계: is_submitted2='PAID' 또는 row_json에서 입금 키워드 컬럼 값 존재
+          if (row.isSubmitted2 === 'PAID' || _hasPaymentValue(row.rowJson)) {
+            rd.paid++;
           }
           // 차수별 최소 시작일
           if (row.startDate) {
@@ -372,6 +397,7 @@ router.get('/dashboard', authMiddleware, async (req, res, next) => {
             pending:   rd.pending,
             tuip:      rd.tuip,
             chuihap:   rd.chuihap,
+            paid:      rd.paid,
             startDate: rd.startDate || '',
           }))
           .sort((a, b) => {

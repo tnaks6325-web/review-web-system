@@ -12113,12 +12113,13 @@ function _showArchiveRoundModal(selectedTabs) {
           <input type="checkbox" class="archive-round-all" data-tab-idx="${tabIdx}" onchange="_toggleArchiveRoundAll(this,${tabIdx})" style="margin-right:3px">전체
         </label>`;
       tab.roundList.forEach((r, rIdx) => {
-        const pct = _pct(r.submitted, r.total);
+        const paid = r.paid || 0;
+        const pct = _pct(paid, r.total);
         const pctColor = pct >= 100 ? '#059669' : pct >= 50 ? '#D97706' : '#6B7280';
         html += `<label style="font-size:.75rem;display:inline-flex;align-items:center;gap:3px;padding:3px 8px;border:1px solid #D1D5DB;border-radius:6px;cursor:pointer;background:#FAFAFA">
           <input type="checkbox" class="archive-round-cb" data-tab-idx="${tabIdx}" data-round="${escHtml(r.round)}" value="${escHtml(r.round)}" style="width:13px;height:13px">
           <span>${escHtml(r.round)}</span>
-          <span style="color:${pctColor};font-size:.68rem">(${r.submitted}/${r.total})</span>
+          <span style="color:${pctColor};font-size:.68rem">(${paid}/${r.total})</span>
         </label>`;
       });
       html += `</div>`;
