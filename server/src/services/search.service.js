@@ -16,6 +16,44 @@ function _parseRowJson(rowJson) {
 }
 
 /**
+ * ★ 리뷰어 프로필에서 본인 + 타계정의 phone8 목록을 가져온다
+ * 반환: ['29979075', '62900585', ...] (본인 포함)
+ */
+async function _getReviewerPhoneList(phone8) {
+  if (!phone8 || phone8.length !== 8) return [phone8].filter(Boolean);
+  
+  try {
+    const { rows } = await pool.query(
+      `SELECT phone8, sub_accounts AS "subAccounts" FROM reviewers WHERE phone8 = $1 LIMIT 1`,
+      [phone8]
+    );
+    if (rows.length === 0) return [phone8];
+    
+    const phoneList = [phone8]; // 본인
+    
+    // 타계정 phone8 추출
+    let subs = rows[0].subAccounts;
+    if (typeof subs === 'string') {
+      try { subs = JSON.parse(subs); } catch(_) { subs = []; }
+    }
+    if (Array.isArray(subs)) {
+      subs.forEach(sub => {
+        const subPhone = (sub.phone || sub.전화번호 || '').replace(/[^0-9]/g, '');
+        if (subPhone.length >= 8) {
+          const sp8 = subPhone.slice(-8);
+          if (!phoneList.includes(sp8)) phoneList.push(sp8);
+        }
+      });
+    }
+    
+    return phoneList;
+  } catch(e) {
+    logger.warn('[Search] 프로필 phone8 목록 조회 실패:', e.message);
+    return [phone8];
+  }
+}
+
+/**
  * Phase 7: pg_trgm 기반 검색 최적화
  * 
  * 전략:
@@ -83,27 +121,49 @@ async function searchByName(query, phone8) {
   let sql;
 
   if (q && p8.length === 8) {
-    // ── 이름 + phone8 검색 (이름 매칭 우선, phone8은 정렬 보조) ──
-    // ★ 변경: phone8을 AND 조건에서 제거 → 이름 매칭만으로 검색
-    //   - 이미지 분석 오류로 시트에 잘못된 전화번호가 기록되어도 조회 누락 방지
-    //   - phone8 일치 건을 상단 정렬하여 본인 건 우선 표시
-    //   - 동명이인은 캠페인명/날짜로 구분 가능
-    // ★ reviewer_name OR recipient_name 매칭 (수취인 검색 지원)
+    // ── 이름 + phone8 하이브리드 검색 (동명이인 분리) ──
+    // ★ 방안3: phone8 기반 필터링 + 유사 매칭(오인식 구제)
+    //   1) 본인 + 타계정 phone8 정확 일치
+    //   2) phone8 앞4자리 또는 뒤4자리가 동일한 건 (1~2자리 오인식 구제)
+    //   3) phone8이 NULL인 건 (전화번호 없는 행도 포함)
+    const phoneList = await _getReviewerPhoneList(p8);
+    
     const nameParam = paramIdx++;
-    const phoneParam = paramIdx++;
+    // phoneList를 배열 파라미터로 전달
+    const phoneListParam = paramIdx++;
+    // 기준 phone8 (앞4/뒤4 비교용)
+    const phonePrefixParam = paramIdx++;
+    const phoneSuffixParam = paramIdx++;
+    
     sql = `
       SELECT ${SELECT_FIELDS},
-             CASE WHEN ri.phone8 = $${phoneParam} THEN 1.0 ELSE 0.5 END::float AS score
+             CASE 
+               WHEN ri.phone8 = ANY($${phoneListParam}) THEN 1.0
+               WHEN ri.phone8 IS NOT NULL AND (
+                 SUBSTRING(ri.phone8, 1, 4) = $${phonePrefixParam}
+                 OR SUBSTRING(ri.phone8, 5, 4) = $${phoneSuffixParam}
+               ) THEN 0.8
+               WHEN ri.phone8 IS NULL THEN 0.6
+               ELSE 0.0
+             END::float AS score
       FROM review_index ri
       LEFT JOIN tab_configs tc ON ri.sheet_id = tc.sheet_id AND ri.tab_name = tc.tab_name
       WHERE ri.is_submitted = FALSE
         AND tc.sheet_id IS NOT NULL
         AND (REPLACE(ri.reviewer_name, ' ', '') = $${nameParam}
              OR REPLACE(ri.recipient_name, ' ', '') = $${nameParam})
-      ORDER BY (ri.phone8 = $${phoneParam}) DESC, ri.start_date DESC NULLS LAST
+        AND (
+          ri.phone8 = ANY($${phoneListParam})
+          OR ri.phone8 IS NULL
+          OR (
+            SUBSTRING(ri.phone8, 1, 4) = $${phonePrefixParam}
+            OR SUBSTRING(ri.phone8, 5, 4) = $${phoneSuffixParam}
+          )
+        )
+      ORDER BY score DESC, ri.start_date DESC NULLS LAST
       LIMIT 200
     `;
-    params.push(q, p8);
+    params.push(q, phoneList, p8.substring(0, 4), p8.substring(4, 8));
 
   } else if (p8.length === 8) {
     // ── phone8 단독 검색 (trigram 불필요) ──
