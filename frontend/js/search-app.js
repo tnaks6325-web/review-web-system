@@ -3777,13 +3777,30 @@ function _renderOptionPicker() {
     optMap.get(key).count++;
   });
 
-  // 옵션이 1가지뿐이면 자동 선택하고 피커 숨김
+  // 옵션이 1가지뿐이면 자동 선택 + 확정 표시 (선택 UI 대신 확인 배지)
   if (optMap.size <= 1) {
-    pickerWrap.style.display = "none";
     if (optMap.size === 1) {
       _selectedOptKey = [...optMap.keys()][0];
-    } else if (!window._preSelectedOptKey) {
-      _selectedOptKey = null;
+      const { label, cols } = [...optMap.values()][0];
+      // ★ 옵션 확정 표시: 사용자가 어떤 옵션인지 확인 가능하도록
+      pickerWrap.style.display = "";
+      tabsEl.innerHTML = "";
+      const infoDiv = document.createElement("div");
+      infoDiv.style.cssText = "padding:10px 14px;border:1.5px solid #A78BFA;border-radius:10px;background:#EDE9FE;display:flex;align-items:center;gap:8px;flex-wrap:wrap";
+      const icon = document.createElement("i");
+      icon.className = "fas fa-check-circle";
+      icon.style.cssText = "color:#7C3AED;font-size:1.1rem";
+      infoDiv.appendChild(icon);
+      cols.forEach(({ header, value }) => {
+        const badge = document.createElement("span");
+        badge.style.cssText = "display:inline-flex;align-items:center;gap:4px;padding:3px 10px;border-radius:6px;background:#fff;border:1px solid #D8B4FE;font-size:.82rem";
+        badge.innerHTML = '<span style="color:#6B7280;font-weight:500">' + _safeText(header) + '</span><span style="color:#1F2937;font-weight:700">' + _safeText(value) + '</span>';
+        infoDiv.appendChild(badge);
+      });
+      tabsEl.appendChild(infoDiv);
+    } else {
+      pickerWrap.style.display = "none";
+      if (!window._preSelectedOptKey) _selectedOptKey = null;
     }
     _setOrdererDisabled(false);
     return;
