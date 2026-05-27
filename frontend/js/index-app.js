@@ -8744,21 +8744,22 @@ async function previewAddCampaign() {
       document.getElementById("addCampSheetTitle").textContent = data.campaignName;
 
       // ★ 신규 탭 존재 여부에 따라 배지 표시
+      const closedCount = data.closedTabCount || 0;
       if (data.newTabCount === 0) {
         alreadyBadge.style.display = "block";
         alreadyBadge.innerHTML = `<div style="color:#0369A1;font-size:.78rem;line-height:1.6">
           <i class="fas fa-info-circle" style="margin-right:4px"></i>
-          이미 등록된 탭입니다 (${data.existingTabCount}/${data.totalTabCount}). 재등록 시 인덱스가 갱신됩니다.
+          신규 탭 없음. 등록: ${data.existingTabCount}개${closedCount ? ` / 마감: ${closedCount}개` : ''} / 전체: ${data.totalTabCount}개
         </div>`;
       } else {
         alreadyBadge.style.display = "block";
         alreadyBadge.innerHTML = `<div style="color:#065F46;font-size:.78rem;line-height:1.6;background:#D1FAE5;padding:6px 10px;border-radius:6px;border:1px solid #6EE7B7">
           <i class="fas fa-plus-circle" style="margin-right:4px"></i>
-          <b>신규 ${data.newTabCount}개</b> 탭 발견! 기존 등록: ${data.existingTabCount}개 / 전체: ${data.totalTabCount}개
+          <b>신규 ${data.newTabCount}개</b> 탭 발견! 등록: ${data.existingTabCount}개${closedCount ? ` / 마감: ${closedCount}개` : ''} / 전체: ${data.totalTabCount}개
         </div>`;
       }
 
-      // ★ 탭 목록 표시 (기존 + 신규 구분)
+      // ★ 탭 목록 표시 (신규 + 기존 + 마감 구분)
       const listEl = document.getElementById("addCampTabList");
       document.getElementById("addCampTabCount").textContent = data.totalTabCount;
       let listHtml = '';
@@ -8786,6 +8787,19 @@ async function previewAddCampaign() {
             <div style="display:flex;align-items:center;justify-content:space-between">
               <span><i class="fas fa-check-circle" style="margin-right:4px;color:#9CA3AF"></i>${escHtml(tab.name)}</span>
               <span style="font-size:10px;color:#9CA3AF">${idxInfo}</span>
+            </div>
+          </div>`;
+        }
+      }
+
+      // ★ 마감된 탭 (빨간/주황색 — 재등록 불가)
+      if (data.closedTabs && data.closedTabs.length > 0) {
+        listHtml += `<div style="font-size:10px;font-weight:700;color:#92400E;margin:8px 0 2px;padding:2px 6px;background:#FEF3C7;border-radius:4px;display:inline-block">🔒 마감 (${data.closedTabs.length}개) — 등록 제외</div>`;
+        for (const tab of data.closedTabs) {
+          listHtml += `<div style="padding:5px 10px;background:#FFFBEB;border:1px solid #FDE68A;border-radius:6px;font-size:11px;color:#92400E;margin-bottom:2px">
+            <div style="display:flex;align-items:center;justify-content:space-between">
+              <span><i class="fas fa-lock" style="margin-right:4px;color:#D97706"></i>${escHtml(tab.name)}</span>
+              <span style="font-size:10px;color:#B45309;background:#FEF3C7;padding:1px 6px;border-radius:3px">${tab.status === 'archived' ? '아카이브' : '마감'}</span>
             </div>
           </div>`;
         }

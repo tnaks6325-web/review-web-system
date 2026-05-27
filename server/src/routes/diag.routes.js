@@ -452,10 +452,18 @@ router.get('/preview-tab', authMiddleware, async (req, res, next) => {
 
     // DB에서 해당 시트의 모든 등록된 탭 조회
     const { rows: registeredTabs } = await pool.query(
-      'SELECT tab_name FROM tab_configs WHERE sheet_id = $1',
+      'SELECT tab_name, is_closed FROM tab_configs WHERE sheet_id = $1',
       [sheetId]
     );
     const registeredSet = new Set(registeredTabs.map(r => r.tab_name));
+    const closedInConfigSet = new Set(registeredTabs.filter(r => r.is_closed).map(r => r.tab_name));
+
+    // ★ 마감/아카이브된 탭 조회 (index_master_archive)
+    const { rows: archivedTabs } = await pool.query(
+      'SELECT tab_name FROM index_master_archive WHERE sheet_id = $1',
+      [sheetId]
+    );
+    const archivedSet = new Set(archivedTabs.map(r => r.tab_name));
 
     // 해당 시트의 인덱스 데이터 조회
     const { rows: indexRows } = await pool.query(
@@ -467,15 +475,26 @@ router.get('/preview-tab', authMiddleware, async (req, res, next) => {
       indexMap[ir.tab_name] = { rowCount: ir.row_count, submittedCount: ir.submitted_count };
     }
 
-    // 각 탭에 등록 상태 추가
-    const tabsWithStatus = allTabs.map(tab => ({
-      ...tab,
-      registered: registeredSet.has(tab.name),
-      indexData: indexMap[tab.name] || null,
-    }));
+    // 각 탭에 등록 상태 추가 (등록됨 / 마감됨 / 신규)
+    const tabsWithStatus = allTabs.map(tab => {
+      const isRegistered = registeredSet.has(tab.name);
+      const isArchived = archivedSet.has(tab.name);
+      const isClosed = closedInConfigSet.has(tab.name);
+      let status = 'new'; // 기본: 신규
+      if (isRegistered && !isClosed) status = 'registered'; // 활성 등록
+      else if (isRegistered && isClosed) status = 'closed';  // 마감 (tab_configs에 남아있음)
+      else if (isArchived) status = 'archived'; // 아카이브됨 (tab_configs에서 삭제됨)
+      return {
+        ...tab,
+        registered: isRegistered || isArchived,
+        status,
+        indexData: indexMap[tab.name] || null,
+      };
+    });
 
-    const newTabs = tabsWithStatus.filter(t => !t.registered);
-    const existingTabs = tabsWithStatus.filter(t => t.registered);
+    const newTabs = tabsWithStatus.filter(t => t.status === 'new');
+    const existingTabs = tabsWithStatus.filter(t => t.status === 'registered');
+    const closedTabs = tabsWithStatus.filter(t => t.status === 'closed' || t.status === 'archived');
 
     res.json({
       ok: true,
@@ -491,9 +510,11 @@ router.get('/preview-tab', authMiddleware, async (req, res, next) => {
       allTabs: tabsWithStatus,
       newTabs,
       existingTabs,
+      closedTabs,
       totalTabCount: allTabs.length,
       newTabCount: newTabs.length,
       existingTabCount: existingTabs.length,
+      closedTabCount: closedTabs.length,
       // 기존 호환
       alreadyRegistered: newTabs.length === 0,
       indexData: indexMap[targetGid ? (allTabs.find(t => t.gid === targetGid)?.name) : allTabs[0].name] || null,
@@ -555,18 +576,26 @@ router.post('/add-tab', authMiddleware, async (req, res, next) => {
     );
     const registeredSet = new Set(registeredTabs.map(r => r.tab_name));
 
-    // 신규 탭만 필터링
-    const newTabs = allTabs.filter(t => !registeredSet.has(t.name));
+    // ★ 마감/아카이브된 탭도 조회 (재등록 방지)
+    const { rows: archivedTabs } = await pool.query(
+      'SELECT tab_name FROM index_master_archive WHERE sheet_id = $1',
+      [sheetId]
+    );
+    const archivedSet = new Set(archivedTabs.map(r => r.tab_name));
+
+    // 신규 탭만 필터링 (등록됨 + 마감됨 모두 제외)
+    const newTabs = allTabs.filter(t => !registeredSet.has(t.name) && !archivedSet.has(t.name));
 
     if (newTabs.length === 0) {
       return res.json({
         ok: true,
         sheetId,
         campaignName: spreadsheetTitle,
-        message: '모든 탭이 이미 등록되어 있습니다. 신규 탭이 없습니다.',
+        message: '모든 탭이 이미 등록 또는 마감되어 있습니다. 신규 탭이 없습니다.',
         newTabCount: 0,
         totalTabCount: allTabs.length,
         registeredTabCount: registeredSet.size,
+        archivedTabCount: archivedSet.size,
       });
     }
 
