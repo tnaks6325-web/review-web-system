@@ -1538,7 +1538,7 @@ function _showAllCompleteModal(completeTabs) {
 }
 
 /* ── 미제출자 명단 팝업 ── */
-async function _showPendingReviewersPopup(sheetId, tabName, rc, sc) {
+async function _showPendingReviewersPopup(sheetId, tabName, rc, sc, round) {
   const pending = rc - sc;
   // 모달 생성
   const modalId = 'pendingReviewersModal';
@@ -1557,7 +1557,7 @@ async function _showPendingReviewersPopup(sheetId, tabName, rc, sc) {
         </div>
         <div style="background:#FFFBEB;border:1px solid #FDE68A;border-radius:10px;padding:14px 16px;margin-bottom:16px">
           <p style="margin:0 0 4px;font-size:.82rem;color:#92400E;font-weight:600;line-height:1.5">
-            ${escHtml(tabName)}
+            ${escHtml(tabName)}${round ? ' <span style="background:#7C3AED;color:#fff;padding:1px 7px;border-radius:4px;font-size:.7rem;margin-left:6px">' + escHtml(round) + '</span>' : ''}
           </p>
           <p style="margin:0;font-size:.75rem;color:#6B7280;line-height:1.5">
             제출 현황: <b>${sc}/${rc}</b> (미제출 ${pending}명)
@@ -1579,7 +1579,9 @@ async function _showPendingReviewersPopup(sheetId, tabName, rc, sc) {
 
   // API 호출
   try {
-    const resp = await gasGet({ action: 'getPendingRows', sheetId, tabName });
+    const params = { action: 'getPendingRows', sheetId, tabName };
+    if (round) params.round = round;
+    const resp = await gasGet(params);
     const listEl = document.getElementById('pendingReviewersList');
     if (!resp || !resp.ok) {
       listEl.innerHTML = `<div style="text-align:center;padding:12px;color:#DC2626;font-size:.8rem"><i class="fas fa-exclamation-circle"></i> 조회 실패: ${escHtml((resp && resp.error) || '서버 오류')}</div>`;
@@ -11421,7 +11423,8 @@ function _cellVal(t, col) {
     if (pending > 0 && pending < 10 && t.sheet_id && t.tab_name) {
       const sid = escHtml(t.sheet_id);
       const tn = escHtml(t.tab_name);
-      return `<span style="font-weight:600;cursor:pointer;text-decoration:underline;text-decoration-style:dotted;text-underline-offset:3px" onclick="event.stopPropagation();_showPendingReviewersPopup('${sid}','${tn}',${rc},${sc})" title="클릭하여 미제출자 ${pending}명 확인">${sc}/${rc}</span> <span style="color:${clr};font-size:.68rem">(${pct}%)</span>`;
+      const rd = t._isRoundRow ? escHtml(t._roundLabel || '') : '';
+      return `<span style="font-weight:600;cursor:pointer;text-decoration:underline;text-decoration-style:dotted;text-underline-offset:3px" onclick="event.stopPropagation();_showPendingReviewersPopup('${sid}','${tn}',${rc},${sc},'${rd}')" title="클릭하여 미제출자 ${pending}명 확인">${sc}/${rc}</span> <span style="color:${clr};font-size:.68rem">(${pct}%)</span>`;
     }
     return `<span style="font-weight:600">${sc}/${rc}</span> <span style="color:${clr};font-size:.68rem">(${pct}%)</span>`;
   }

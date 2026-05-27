@@ -2895,7 +2895,7 @@ router.get('/sheet-permissions', authMiddleware, async (req, res, next) => {
 // ═══════════════════════════════════════════════════════════
 router.get('/pending-rows', authMiddleware, async (req, res, next) => {
   try {
-    const { sheetId, tabName } = req.query;
+    const { sheetId, tabName, round } = req.query;
     if (!sheetId || !tabName) return res.json({ error: 'sheetId, tabName 필요' });
 
     // 먼저 테이블 컬럼 확인
@@ -2908,23 +2908,27 @@ router.get('/pending-rows', authMiddleware, async (req, res, next) => {
     const selectCols = ['row_index', 'reviewer_name', 'phone', 'submit_value', 'submit_col', 'round', 'built_at']
       .filter(c => columns.includes(c));
 
+    // ★ round 필터링 적용
+    const roundCond = round ? ` AND round = $3` : '';
+    const params = round ? [sheetId, tabName, round] : [sheetId, tabName];
+
     const { rows } = await pool.query(
       `SELECT ${selectCols.join(', ')}
        FROM review_index
-       WHERE sheet_id = $1 AND tab_name = $2 AND is_submitted = false
+       WHERE sheet_id = $1 AND tab_name = $2 AND is_submitted = false${roundCond}
        ORDER BY row_index`,
-      [sheetId, tabName]
+      params
     );
 
     const countRes = await pool.query(
       `SELECT COUNT(*) as total,
               COUNT(*) FILTER (WHERE is_submitted = true) as submitted,
               COUNT(*) FILTER (WHERE is_submitted = false) as pending
-       FROM review_index WHERE sheet_id = $1 AND tab_name = $2`,
-      [sheetId, tabName]
+       FROM review_index WHERE sheet_id = $1 AND tab_name = $2${roundCond}`,
+      params
     );
 
-    res.json({ ok: true, counts: countRes.rows[0], pendingRows: rows, availableColumns: columns });
+    res.json({ ok: true, counts: countRes.rows[0], pendingRows: rows, availableColumns: columns, round: round || '' });
   } catch (err) {
     res.status(500).json({ error: err.message, stack: err.stack?.split('\n').slice(0,5) });
   }
