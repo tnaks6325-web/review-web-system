@@ -398,6 +398,7 @@ router.post('/add-campaign', authMiddleware, async (req, res, next) => {
 // ═══════════════════════════════════════════════════════════
 // GET /api/diag/preview-tab — 탭 URL(gid 포함) 미리보기 (등록 전 확인용)
 // query: { url }
+// ★ v10.5: 모든 비시스템 탭을 조회하여 등록/미등록 상태를 각각 반환
 // ═══════════════════════════════════════════════════════════
 router.get('/preview-tab', authMiddleware, async (req, res, next) => {
   try {
@@ -424,43 +425,78 @@ router.get('/preview-tab', authMiddleware, async (req, res, next) => {
 
     const spreadsheetTitle = meta._spreadsheetTitle || sheetId;
 
-    let targetTab = null;
+    // 시스템 탭 필터
+    const systemTabs = ['세부목록', '검색인덱스', '인덱스마스터', '인덱스데이터', '마감', '상세목록', '탭설정', '설정',
+                        '시트DB', '탭목록', 'tab_configs', '캠페인목록', '시트목록', '매크로', '서식', '요약', '대시보드', '템플릿', '양식'];
+
+    // 모든 비시스템, 비숨김 탭 추출
+    const allTabs = meta
+      .filter(s => !systemTabs.includes(s.properties.title) && !s.properties.hidden)
+      .map(s => ({
+        name: s.properties.title,
+        gid: String(s.properties.sheetId),
+        url: `https://docs.google.com/spreadsheets/d/${sheetId}/edit#gid=${s.properties.sheetId}`,
+      }));
+
+    if (allTabs.length === 0) {
+      return res.json({ error: '등록 가능한 탭이 없습니다 (시스템 탭 제외).' });
+    }
+
+    // targetGid가 있는 탭이 존재하는지 확인
     if (targetGid) {
-      targetTab = meta.find(s => String(s.properties.sheetId) === targetGid);
-    }
-    if (!targetTab && !targetGid) {
-      const systemTabs = ['세부목록', '검색인덱스', '인덱스마스터', '인덱스데이터', '마감', '상세목록', '탭설정', '설정'];
-      targetTab = meta.find(s => !systemTabs.includes(s.properties.title));
-    }
-    if (!targetTab) {
-      return res.json({ error: `gid=${targetGid}에 해당하는 탭을 찾을 수 없습니다.` });
+      const found = allTabs.find(t => t.gid === targetGid);
+      if (!found) {
+        return res.json({ error: `gid=${targetGid}에 해당하는 탭을 찾을 수 없습니다.` });
+      }
     }
 
-    const tabName = targetTab.properties.title;
-    const tabGid = String(targetTab.properties.sheetId);
-    const tabUrl = `https://docs.google.com/spreadsheets/d/${sheetId}/edit#gid=${tabGid}`;
-
-    const { rows: existing } = await pool.query(
-      'SELECT tab_name FROM tab_configs WHERE sheet_id = $1 AND tab_name = $2',
-      [sheetId, tabName]
+    // DB에서 해당 시트의 모든 등록된 탭 조회
+    const { rows: registeredTabs } = await pool.query(
+      'SELECT tab_name FROM tab_configs WHERE sheet_id = $1',
+      [sheetId]
     );
-    const alreadyRegistered = existing.length > 0;
+    const registeredSet = new Set(registeredTabs.map(r => r.tab_name));
 
-    const { rows: indexCheck } = await pool.query(
-      'SELECT row_count, submitted_count FROM index_master WHERE sheet_id = $1 AND tab_name = $2',
-      [sheetId, tabName]
+    // 해당 시트의 인덱스 데이터 조회
+    const { rows: indexRows } = await pool.query(
+      'SELECT tab_name, row_count, submitted_count FROM index_master WHERE sheet_id = $1',
+      [sheetId]
     );
-    const indexData = indexCheck.length > 0 ? indexCheck[0] : null;
+    const indexMap = {};
+    for (const ir of indexRows) {
+      indexMap[ir.tab_name] = { rowCount: ir.row_count, submittedCount: ir.submitted_count };
+    }
+
+    // 각 탭에 등록 상태 추가
+    const tabsWithStatus = allTabs.map(tab => ({
+      ...tab,
+      registered: registeredSet.has(tab.name),
+      indexData: indexMap[tab.name] || null,
+    }));
+
+    const newTabs = tabsWithStatus.filter(t => !t.registered);
+    const existingTabs = tabsWithStatus.filter(t => t.registered);
 
     res.json({
       ok: true,
       sheetId,
       campaignName: spreadsheetTitle,
-      tabName,
-      tabGid,
-      tabUrl,
-      alreadyRegistered,
-      indexData: indexData ? { rowCount: indexData.row_count, submittedCount: indexData.submitted_count } : null,
+      // 기존 단일 탭 호환 필드 (targetGid에 해당하는 탭)
+      tabName: targetGid ? (allTabs.find(t => t.gid === targetGid)?.name || allTabs[0].name) : allTabs[0].name,
+      tabGid: targetGid || allTabs[0].gid,
+      tabUrl: targetGid
+        ? `https://docs.google.com/spreadsheets/d/${sheetId}/edit#gid=${targetGid}`
+        : allTabs[0].url,
+      // ★ 신규: 전체 탭 목록 + 등록 상태
+      allTabs: tabsWithStatus,
+      newTabs,
+      existingTabs,
+      totalTabCount: allTabs.length,
+      newTabCount: newTabs.length,
+      existingTabCount: existingTabs.length,
+      // 기존 호환
+      alreadyRegistered: newTabs.length === 0,
+      indexData: indexMap[targetGid ? (allTabs.find(t => t.gid === targetGid)?.name) : allTabs[0].name] || null,
     });
   } catch (err) {
     next(err);
@@ -470,6 +506,7 @@ router.get('/preview-tab', authMiddleware, async (req, res, next) => {
 // ═══════════════════════════════════════════════════════════
 // POST /api/diag/add-tab — 탭 URL(gid 포함)로 즉시 등록 + 인덱스 빌드
 // body: { url } (예: https://docs.google.com/spreadsheets/d/xxx/edit#gid=123)
+// ★ v10.5: 신규 탭만 tab_configs에 추가, 이미 등록된 탭은 스킵
 // ═══════════════════════════════════════════════════════════
 router.post('/add-tab', authMiddleware, async (req, res, next) => {
   try {
@@ -481,16 +518,11 @@ router.post('/add-tab', authMiddleware, async (req, res, next) => {
     if (!sheetIdMatch) return res.json({ error: '유효한 구글 스프레드시트 URL이 아닙니다.' });
     const sheetId = sheetIdMatch[1];
 
-    // gid 추출
-    const gidMatch = url.match(/[#&]gid=(\d+)/);
-    const targetGid = gidMatch ? gidMatch[1] : null;
-
-    // 1. 시트 메타 조회 → 캠페인명 + 탭명 확인
+    // 1. 시트 메타 조회 → 캠페인명 + 전체 탭 확인
     let meta;
     try {
       meta = await getSpreadsheetMeta(sheetId);
     } catch (metaErr) {
-      // 접근 권한 없음
       const sa = process.env.GOOGLE_SERVICE_ACCOUNT_EMAIL || '';
       return res.json({
         error: '시트 접근 권한이 없습니다. 서비스 계정을 편집자로 추가해주세요.',
@@ -500,23 +532,43 @@ router.post('/add-tab', authMiddleware, async (req, res, next) => {
 
     const spreadsheetTitle = meta._spreadsheetTitle || sheetId;
 
-    // targetGid로 탭 찾기
-    let targetTab = null;
-    if (targetGid) {
-      targetTab = meta.find(s => String(s.properties.sheetId) === targetGid);
-    }
-    if (!targetTab && !targetGid) {
-      // gid 없으면 첫 번째 비시스템 탭 사용
-      const systemTabs = ['세부목록', '검색인덱스', '인덱스마스터', '인덱스데이터', '마감', '상세목록', '탭설정', '설정'];
-      targetTab = meta.find(s => !systemTabs.includes(s.properties.title));
-    }
-    if (!targetTab) {
-      return res.json({ error: `gid=${targetGid}에 해당하는 탭을 찾을 수 없습니다.` });
+    // 시스템 탭 필터
+    const systemTabs = ['세부목록', '검색인덱스', '인덱스마스터', '인덱스데이터', '마감', '상세목록', '탭설정', '설정',
+                        '시트DB', '탭목록', 'tab_configs', '캠페인목록', '시트목록', '매크로', '서식', '요약', '대시보드', '템플릿', '양식'];
+
+    // 모든 비시스템, 비숨김 탭 추출
+    const allTabs = meta
+      .filter(s => !systemTabs.includes(s.properties.title) && !s.properties.hidden)
+      .map(s => ({
+        name: s.properties.title,
+        gid: String(s.properties.sheetId),
+      }));
+
+    if (allTabs.length === 0) {
+      return res.json({ error: '등록 가능한 탭이 없습니다.' });
     }
 
-    const tabName = targetTab.properties.title;
-    const tabGid = String(targetTab.properties.sheetId);
-    const tabSheetUrl = `https://docs.google.com/spreadsheets/d/${sheetId}/edit#gid=${tabGid}`;
+    // DB에서 이미 등록된 탭 목록 조회
+    const { rows: registeredTabs } = await pool.query(
+      'SELECT tab_name FROM tab_configs WHERE sheet_id = $1',
+      [sheetId]
+    );
+    const registeredSet = new Set(registeredTabs.map(r => r.tab_name));
+
+    // 신규 탭만 필터링
+    const newTabs = allTabs.filter(t => !registeredSet.has(t.name));
+
+    if (newTabs.length === 0) {
+      return res.json({
+        ok: true,
+        sheetId,
+        campaignName: spreadsheetTitle,
+        message: '모든 탭이 이미 등록되어 있습니다. 신규 탭이 없습니다.',
+        newTabCount: 0,
+        totalTabCount: allTabs.length,
+        registeredTabCount: registeredSet.size,
+      });
+    }
 
     // 2. campaigns 테이블에 시트 등록 (없으면 추가)
     await pool.query(
@@ -527,17 +579,22 @@ router.post('/add-tab', authMiddleware, async (req, res, next) => {
       [sheetId, spreadsheetTitle, `https://docs.google.com/spreadsheets/d/${sheetId}/edit`]
     );
 
-    // 3. tab_configs에 해당 탭 UPSERT
-    await pool.query(
-      `INSERT INTO tab_configs (sheet_id, tab_name, campaign_name, sheet_url, tab_gid)
-       VALUES ($1, $2, $3, $4, $5)
-       ON CONFLICT (sheet_id, tab_name) DO UPDATE SET
-         campaign_name = COALESCE(NULLIF(tab_configs.campaign_name,''), EXCLUDED.campaign_name),
-         sheet_url = EXCLUDED.sheet_url,
-         tab_gid = COALESCE(NULLIF(tab_configs.tab_gid,''), EXCLUDED.tab_gid),
-         updated_at = NOW()`,
-      [sheetId, tabName, spreadsheetTitle, tabSheetUrl, tabGid]
-    );
+    // 3. 신규 탭만 tab_configs에 UPSERT
+    const addedTabs = [];
+    for (const tab of newTabs) {
+      const tabSheetUrl = `https://docs.google.com/spreadsheets/d/${sheetId}/edit#gid=${tab.gid}`;
+      await pool.query(
+        `INSERT INTO tab_configs (sheet_id, tab_name, campaign_name, sheet_url, tab_gid)
+         VALUES ($1, $2, $3, $4, $5)
+         ON CONFLICT (sheet_id, tab_name) DO UPDATE SET
+           campaign_name = COALESCE(NULLIF(tab_configs.campaign_name,''), EXCLUDED.campaign_name),
+           sheet_url = EXCLUDED.sheet_url,
+           tab_gid = COALESCE(NULLIF(tab_configs.tab_gid,''), EXCLUDED.tab_gid),
+           updated_at = NOW()`,
+        [sheetId, tab.name, spreadsheetTitle, tabSheetUrl, tab.gid]
+      );
+      addedTabs.push(tab.name);
+    }
 
     // 4. 즉시 인덱스 빌드 (해당 시트 전체)
     let buildResult = null;
@@ -548,24 +605,35 @@ router.post('/add-tab', authMiddleware, async (req, res, next) => {
       buildResult = { ok: false, error: buildErr.message };
     }
 
-    // 5. 빌드 후 해당 탭의 인덱스 데이터 확인
+    // 5. 빌드 후 신규 탭들의 인덱스 데이터 확인
     const { rows: indexCheck } = await pool.query(
-      'SELECT row_count, submitted_count FROM index_master WHERE sheet_id = $1 AND tab_name = $2',
-      [sheetId, tabName]
+      'SELECT tab_name, row_count, submitted_count FROM index_master WHERE sheet_id = $1 AND tab_name = ANY($2)',
+      [sheetId, addedTabs]
     );
-    const indexData = indexCheck.length > 0 ? indexCheck[0] : null;
+    const indexDataMap = {};
+    for (const row of indexCheck) {
+      indexDataMap[row.tab_name] = { rowCount: row.row_count, submittedCount: row.submitted_count };
+    }
 
-    logger.info(`[add-tab] 등록 완료: ${spreadsheetTitle} / ${tabName} (gid=${tabGid}), build=${buildResult?.ok}, rows=${indexData?.row_count || 0}`);
+    logger.info(`[add-tab] 신규 탭 등록 완료: ${spreadsheetTitle} / [${addedTabs.join(', ')}] (${addedTabs.length}개 신규, ${registeredSet.size}개 기존)`);
 
     res.json({
       ok: true,
       sheetId,
       campaignName: spreadsheetTitle,
-      tabName,
-      tabGid,
-      tabUrl: tabSheetUrl,
+      // 기존 호환 (첫 번째 신규 탭 정보)
+      tabName: addedTabs[0],
+      tabGid: newTabs[0].gid,
+      tabUrl: `https://docs.google.com/spreadsheets/d/${sheetId}/edit#gid=${newTabs[0].gid}`,
+      // ★ 신규: 추가된 탭 목록 정보
+      addedTabs,
+      addedTabCount: addedTabs.length,
+      totalTabCount: allTabs.length,
+      existingTabCount: registeredSet.size,
+      indexDataMap,
       buildResult: buildResult ? { ok: buildResult.ok, rebuilt: buildResult.rebuilt, elapsed: buildResult.elapsed } : null,
-      indexData: indexData ? { rowCount: indexData.row_count, submittedCount: indexData.submitted_count } : null,
+      // 기존 호환
+      indexData: indexDataMap[addedTabs[0]] || null,
     });
   } catch (err) {
     next(err);

@@ -8713,7 +8713,7 @@ async function previewAddCampaign() {
   if (!raw) return;
   errEl.textContent = "";
 
-  // ★ gid 모드: 미리보기 (캠페인명 + 탭명 + 링크 확인)
+  // ★ gid 모드: 미리보기 (캠페인명 + 전체 탭 목록 + 등록/신규 구분)
   if (inp.dataset.hasGid === "1") {
     btn.disabled = true;
     btn.innerHTML = '<i class="fas fa-spinner fa-spin"></i> 조회 중...';
@@ -8743,42 +8743,55 @@ async function previewAddCampaign() {
       const alreadyBadge = document.getElementById("addCampAlreadyBadge");
       document.getElementById("addCampSheetTitle").textContent = data.campaignName;
 
-      if (data.alreadyRegistered && data.indexData) {
+      // ★ 신규 탭 존재 여부에 따라 배지 표시
+      if (data.newTabCount === 0) {
         alreadyBadge.style.display = "block";
         alreadyBadge.innerHTML = `<div style="color:#0369A1;font-size:.78rem;line-height:1.6">
           <i class="fas fa-info-circle" style="margin-right:4px"></i>
-          이미 등록된 탭입니다 (${data.indexData.submittedCount}/${data.indexData.rowCount}). 재등록 시 인덱스가 갱신됩니다.
+          이미 등록된 탭입니다 (${data.existingTabCount}/${data.totalTabCount}). 재등록 시 인덱스가 갱신됩니다.
         </div>`;
       } else {
-        alreadyBadge.style.display = "none";
+        alreadyBadge.style.display = "block";
+        alreadyBadge.innerHTML = `<div style="color:#065F46;font-size:.78rem;line-height:1.6;background:#D1FAE5;padding:6px 10px;border-radius:6px;border:1px solid #6EE7B7">
+          <i class="fas fa-plus-circle" style="margin-right:4px"></i>
+          <b>신규 ${data.newTabCount}개</b> 탭 발견! 기존 등록: ${data.existingTabCount}개 / 전체: ${data.totalTabCount}개
+        </div>`;
       }
 
-      // 탭 정보를 탭 리스트 영역에 표시
+      // ★ 탭 목록 표시 (기존 + 신규 구분)
       const listEl = document.getElementById("addCampTabList");
-      document.getElementById("addCampTabCount").textContent = "1";
-      listEl.innerHTML = `
-        <div style="padding:10px 12px;background:#EFF6FF;border:1px solid #BFDBFE;border-radius:8px;font-size:12px;color:#1E40AF">
-          <div style="margin-bottom:6px;font-weight:700;font-size:13px">
-            <i class="fas fa-file-alt" style="margin-right:6px;color:#3B82F6"></i>${escHtml(data.tabName)}
-          </div>
-          <div style="display:grid;grid-template-columns:auto 1fr;gap:4px 10px;font-size:11px;color:#374151">
-            <span style="font-weight:600;color:#6B7280">캠페인:</span>
-            <span>${escHtml(data.campaignName)}</span>
-            <span style="font-weight:600;color:#6B7280">탭명:</span>
-            <span>${escHtml(data.tabName)}</span>
-            <span style="font-weight:600;color:#6B7280">GID:</span>
-            <span>${escHtml(data.tabGid)}</span>
-            <span style="font-weight:600;color:#6B7280">시트링크:</span>
-            <span><a href="${escHtml(data.tabUrl)}" target="_blank" style="color:#2563EB;text-decoration:underline">${escHtml(data.tabUrl)}</a></span>
-            ${data.indexData ? `
-              <span style="font-weight:600;color:#6B7280">현재 현황:</span>
-              <span>${data.indexData.submittedCount}/${data.indexData.rowCount}</span>
-            ` : `
-              <span style="font-weight:600;color:#6B7280">인덱스:</span>
-              <span style="color:#D97706">미빌드 (등록 시 즉시 빌드됩니다)</span>
-            `}
-          </div>
-        </div>`;
+      document.getElementById("addCampTabCount").textContent = data.totalTabCount;
+      let listHtml = '';
+
+      // 신규 탭 먼저 (초록색)
+      if (data.newTabs && data.newTabs.length > 0) {
+        listHtml += `<div style="font-size:10px;font-weight:700;color:#065F46;margin:4px 0 2px;padding:2px 6px;background:#ECFDF5;border-radius:4px;display:inline-block">🆕 신규 (${data.newTabs.length}개) — 등록 대상</div>`;
+        for (const tab of data.newTabs) {
+          const idxInfo = tab.indexData ? `${tab.indexData.submittedCount}/${tab.indexData.rowCount}` : '미빌드';
+          listHtml += `<div style="padding:6px 10px;background:#F0FDF4;border:1.5px solid #86EFAC;border-radius:6px;font-size:12px;color:#166534;margin-bottom:3px">
+            <div style="display:flex;align-items:center;justify-content:space-between">
+              <span><i class="fas fa-plus-circle" style="margin-right:4px;color:#22C55E"></i><b>${escHtml(tab.name)}</b></span>
+              <span style="font-size:10px;color:#6B7280;background:#fff;padding:1px 6px;border-radius:3px">${idxInfo}</span>
+            </div>
+          </div>`;
+        }
+      }
+
+      // 기존 등록된 탭 (회색)
+      if (data.existingTabs && data.existingTabs.length > 0) {
+        listHtml += `<div style="font-size:10px;font-weight:700;color:#6B7280;margin:8px 0 2px;padding:2px 6px;background:#F3F4F6;border-radius:4px;display:inline-block">✅ 기존 등록 (${data.existingTabs.length}개)</div>`;
+        for (const tab of data.existingTabs) {
+          const idxInfo = tab.indexData ? `${tab.indexData.submittedCount}/${tab.indexData.rowCount}` : '미빌드';
+          listHtml += `<div style="padding:5px 10px;background:#F9FAFB;border:1px solid #E5E7EB;border-radius:6px;font-size:11px;color:#6B7280;margin-bottom:2px">
+            <div style="display:flex;align-items:center;justify-content:space-between">
+              <span><i class="fas fa-check-circle" style="margin-right:4px;color:#9CA3AF"></i>${escHtml(tab.name)}</span>
+              <span style="font-size:10px;color:#9CA3AF">${idxInfo}</span>
+            </div>
+          </div>`;
+        }
+      }
+
+      listEl.innerHTML = listHtml;
 
       previewArea.style.display = "block";
       btn.style.display = "none";
@@ -8786,7 +8799,11 @@ async function previewAddCampaign() {
       const submitBtn = document.getElementById("addCampSubmitBtn");
       submitBtn.style.display = "";
       submitBtn.disabled = false;
-      submitBtn.innerHTML = '<i class="fas fa-bolt"></i> 즉시 등록';
+      if (data.newTabCount > 0) {
+        submitBtn.innerHTML = `<i class="fas fa-bolt"></i> 즉시 등록 (신규 ${data.newTabCount}개)`;
+      } else {
+        submitBtn.innerHTML = '<i class="fas fa-sync-alt"></i> 인덱스 갱신';
+      }
       submitBtn.onclick = function() { submitAddTab(); };
     } catch (err) {
       errEl.textContent = err.message || "조회 실패";
@@ -8874,7 +8891,7 @@ async function previewAddCampaign() {
   }
 }
 
-/** 2단계(탭 모드): 즉시 등록 + 인덱스 빌드 실행 */
+/** 2단계(탭 모드): 즉시 등록 + 인덱스 빌드 실행 (신규 탭만 추가) */
 async function submitAddTab() {
   const raw = document.getElementById("addCampUrl").value.trim();
   const errEl = document.getElementById("addCampError");
@@ -8893,8 +8910,15 @@ async function submitAddTab() {
       return;
     }
     closeAddCampaign();
-    const rowInfo = data.indexData ? ` (${data.indexData.submittedCount}/${data.indexData.rowCount})` : '';
-    showToast(`✅ 탭 즉시 등록 완료: ${data.campaignName} / ${data.tabName}${rowInfo}`);
+    // 결과 토스트 메시지
+    if (data.addedTabCount > 0) {
+      const tabNames = data.addedTabs ? data.addedTabs.join(', ') : data.tabName;
+      showToast(`✅ 신규 탭 ${data.addedTabCount}개 등록 완료: ${data.campaignName} / [${tabNames}]`);
+    } else if (data.message) {
+      showToast(`ℹ️ ${data.message}`);
+    } else {
+      showToast(`✅ 등록 완료: ${data.campaignName}`);
+    }
     // 대시보드 새로고침
     setTimeout(() => { if (typeof loadTabDashboard === 'function') loadTabDashboard(); }, 500);
   } catch (err) {
