@@ -251,7 +251,10 @@ function _consumeDirectSubmitItems() {
     if (!raw) return null;
     sessionStorage.removeItem("iad_direct_submit_items");
     const items = JSON.parse(raw);
-    if (Array.isArray(items) && items.length > 0) return items;
+    if (Array.isArray(items) && items.length > 0) {
+      window._enteredFromDirectSubmit = true; // ★ 플래그: backToSearch() 시 홈으로 이동
+      return items;
+    }
     return null;
   } catch(e) {
     console.warn("[DirectSubmit] 직접 제출 아이템 파싱 실패:", e.message);
@@ -809,6 +812,11 @@ function showScreen(id) {
 }
 
 function backToSearch() {
+  // ★ 직접 제출 모드(index.html에서 진입)인 경우 홈으로 돌아감
+  if (window._enteredFromDirectSubmit) {
+    window.location.href = '/';
+    return;
+  }
   S.selectedRow  = null;
   S.selectedRows = [];
   S.files        = [];

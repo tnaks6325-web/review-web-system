@@ -12,52 +12,65 @@
   <script src="api.js"></script>
   <style>
     :root {
-      --p: #7C3AED; --p-light: #EDE9FE; --p-dark: #5B21B6;
+      --p: #5046E4; --p-light: #EEF2FF; --p-dark: #3730A3; --p-m: #A5B4FC;
       --ok: #10B981; --ok-light: #D1FAE5;
       --warn: #F59E0B; --warn-light: #FEF3C7;
       --err: #EF4444; --err-light: #FEE2E2;
-      --t1: #1E293B; --t2: #334155; --t3: #64748B; --t4: #94A3B8;
-      --bg: #F8FAFC; --card: #FFFFFF;
-      --border: #E2E8F0; --shadow: 0 2px 12px rgba(0,0,0,.06);
-      --radius: 16px;
+      --t1: #111827; --t2: #4B5563; --t3: #9CA3AF; --t4: #94A3B8;
+      --bg: #F0F2FA; --card: #FFFFFF;
+      --border: #E5E7EB; --shadow: 0 2px 12px rgba(0,0,0,.07);
+      --radius: 14px;
     }
     * { margin:0; padding:0; box-sizing:border-box; }
-    body { font-family:'Noto Sans KR',sans-serif; background:var(--bg); color:var(--t1); min-height:100vh; }
-    .page-wrap { max-width:520px; margin:0 auto; }
+    body { font-family:'Noto Sans KR',sans-serif; background:var(--bg); color:var(--t1); min-height:100vh; -webkit-font-smoothing:antialiased; }
+    .page-wrap { max-width:600px; margin:0 auto; width:100%; }
 
-    /* ─── Header ─── */
+    /* ─── Header (search.css .app-header 동일) ─── */
     .home-header {
-      background:linear-gradient(135deg, var(--p), var(--p-dark));
-      padding:20px 20px 24px; color:#fff; border-radius:0 0 20px 20px;
+      background:linear-gradient(135deg, var(--p) 0%, #7C3AED 100%);
+      box-shadow:0 2px 16px #5046E430;
+      position:sticky; top:0; z-index:100;
     }
-    .home-header-top { display:flex; align-items:center; justify-content:space-between; margin-bottom:16px; }
-    .home-logo { font-size:1.1rem; font-weight:800; display:flex; align-items:center; gap:8px; }
-    .home-logo i { font-size:1.2rem; }
-    .home-header-actions { display:flex; gap:8px; }
-    .home-header-actions button {
-      background:rgba(255,255,255,.15); border:none; color:#fff; padding:6px 10px;
-      border-radius:8px; font-size:.75rem; font-weight:600; cursor:pointer;
+    .home-header-inner {
+      display:flex; align-items:center; gap:12px;
+      padding:16px 18px 20px; max-width:600px; margin:0 auto; width:100%;
     }
-    .home-header-actions button:hover { background:rgba(255,255,255,.25); }
-    .home-greeting { font-size:1.3rem; font-weight:700; }
-    .home-greeting-sub { font-size:.82rem; opacity:.8; margin-top:4px; }
+    .home-header-icon {
+      width:40px; height:40px; flex-shrink:0;
+      background:rgba(255,255,255,.2); border-radius:12px;
+      display:flex; align-items:center; justify-content:center;
+      font-size:1.2rem; color:#fff;
+    }
+    .home-header-text { flex:1; min-width:0; }
+    .home-header-text h1 {
+      font-size:1.15rem; font-weight:700; color:#fff;
+      white-space:nowrap; overflow:hidden; text-overflow:ellipsis;
+    }
+    .home-header-text p { font-size:.78rem; color:rgba(255,255,255,.75); margin-top:2px; }
+    .home-header-actions { display:flex; gap:8px; margin-left:auto; }
+    .home-header-actions button, .home-header-actions a {
+      background:rgba(255,255,255,.15); border:1px solid rgba(255,255,255,.3);
+      color:#fff; padding:6px 10px; text-decoration:none;
+      border-radius:8px; font-size:.72rem; font-weight:600; cursor:pointer;
+    }
+    .home-header-actions button:hover, .home-header-actions a:hover { background:rgba(255,255,255,.25); }
 
     /* ─── Login Card ─── */
     .login-card {
       background:var(--card); border-radius:var(--radius); margin:16px; padding:28px 24px;
-      box-shadow:var(--shadow); text-align:center;
+      box-shadow:var(--shadow); text-align:center; border:1px solid var(--border);
     }
-    .login-card h2 { font-size:1.1rem; font-weight:700; margin-bottom:6px; }
+    .login-card h2 { font-size:1rem; font-weight:700; margin-bottom:6px; }
     .login-card p { font-size:.82rem; color:var(--t3); margin-bottom:20px; }
     .login-input-group { display:flex; flex-direction:column; gap:10px; margin-bottom:16px; }
     .login-input {
-      width:100%; padding:12px 14px; border:1.5px solid var(--border); border-radius:10px;
-      font-size:.88rem; font-family:inherit; outline:none; transition:border-color .2s;
+      width:100%; padding:12px 14px; border:1.5px solid var(--border); border-radius:8px;
+      font-size:.88rem; font-family:inherit; outline:none; transition:border-color .15s, box-shadow .15s;
     }
-    .login-input:focus { border-color:var(--p); }
+    .login-input:focus { border-color:var(--p); box-shadow:0 0 0 3px #5046E420; }
     .login-btn {
       width:100%; padding:13px; background:var(--p); color:#fff; border:none;
-      border-radius:10px; font-size:.9rem; font-weight:700; cursor:pointer;
+      border-radius:8px; font-size:.9rem; font-weight:700; cursor:pointer;
       font-family:inherit; transition:background .2s;
     }
     .login-btn:hover { background:var(--p-dark); }
@@ -65,142 +78,35 @@
     .login-register { margin-top:14px; font-size:.78rem; color:var(--t3); }
     .login-register a { color:var(--p); text-decoration:none; font-weight:600; }
 
-    /* ─── Menu Grid ─── */
-    .menu-grid { display:grid; grid-template-columns:1fr 1fr; gap:12px; padding:0 16px; margin-top:-12px; }
-    .menu-card {
-      background:var(--card); border-radius:var(--radius); padding:20px 16px;
-      text-align:center; text-decoration:none; color:var(--t1);
-      box-shadow:var(--shadow); transition:transform .15s, box-shadow .15s;
-    }
-    .menu-card:hover { transform:translateY(-2px); box-shadow:0 6px 20px rgba(0,0,0,.1); }
-    .menu-card-icon { font-size:1.6rem; margin-bottom:10px; }
-    .menu-card-label { font-size:.85rem; font-weight:700; }
-    .menu-card-desc { font-size:.7rem; color:var(--t3); margin-top:4px; line-height:1.4; }
+    /* ─── Content Area ─── */
+    .content-area { padding:14px 16px; max-width:600px; margin:0 auto; }
 
-    /* ─── Section ─── */
-    .home-section { padding:20px 16px; }
-    .home-section-title { font-size:.85rem; font-weight:700; color:var(--t2); margin-bottom:12px; display:flex; align-items:center; gap:6px; }
-
-    /* ─── Status Cards ─── */
-    .status-list { display:flex; flex-direction:column; gap:8px; }
-    .status-item {
-      background:var(--card); border-radius:12px; padding:14px 16px;
-      display:flex; align-items:center; gap:12px; box-shadow:var(--shadow);
+    /* ─── Logged-in Name Bar (search 페이지와 동일 구조) ─── */
+    .login-state-bar {
+      display:flex; align-items:center; gap:8px; padding:12px 16px;
+      background:var(--card); border-radius:var(--radius); border:1px solid var(--border);
+      box-shadow:var(--shadow); margin-bottom:12px;
     }
-    .status-dot { width:8px; height:8px; border-radius:50%; flex-shrink:0; }
-    .status-dot.done { background:var(--ok); }
-    .status-dot.pending { background:var(--warn); }
-    .status-dot.rejected { background:var(--err); }
-    .status-info { flex:1; min-width:0; }
-    .status-name { font-size:.82rem; font-weight:600; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
-    .status-meta { font-size:.7rem; color:var(--t3); margin-top:2px; }
-    .status-badge { font-size:.65rem; font-weight:700; padding:3px 8px; border-radius:6px; flex-shrink:0; }
-    .status-badge.done { background:var(--ok-light); color:#065F46; }
-    .status-badge.pending { background:var(--warn-light); color:#92400E; }
-    .status-badge.rejected { background:var(--err-light); color:#DC2626; }
-
-    .empty-state { text-align:center; padding:30px 20px; color:var(--t4); font-size:.82rem; }
-    .empty-state i { font-size:1.5rem; display:block; margin-bottom:8px; opacity:.5; }
-
-    /* ─── Recruit Preview (legacy) ─── */
-    .recruit-preview-item {
-      display:block; background:var(--card); border:1px solid var(--border); border-radius:12px;
-      padding:12px 16px; margin-bottom:8px; text-decoration:none; color:var(--t1);
-      transition:border-color .15s, box-shadow .15s;
+    .login-state-bar .name-icon { color:var(--p); font-size:1rem; }
+    .login-state-bar .name-text { font-size:.9rem; font-weight:700; color:var(--p); }
+    .login-state-bar .name-suffix { font-size:.82rem; color:var(--t3); }
+    .login-state-bar .logout-btn {
+      margin-left:auto; padding:5px 12px; background:#fff; color:var(--t2);
+      border:1.5px solid var(--border); border-radius:8px; font-size:.72rem;
+      font-weight:600; cursor:pointer; display:flex; align-items:center; gap:4px;
     }
-    .recruit-preview-item:hover { border-color:var(--p); box-shadow:0 2px 8px rgba(124,58,237,.1); }
-    .recruit-preview-title { font-size:.84rem; font-weight:700; margin-bottom:4px; }
-    .recruit-preview-meta { display:flex; gap:10px; font-size:.72rem; color:var(--t3); flex-wrap:wrap; }
-
-    /* ─── Recruit Card (detailed inline) ─── */
-    .rc-card {
-      background:var(--card); border:1px solid var(--border); border-radius:14px;
-      padding:16px 18px; margin-bottom:12px;
-      box-shadow:0 2px 8px rgba(0,0,0,.04); transition:box-shadow .2s, border-color .2s;
-    }
-    .rc-card:hover { border-color:var(--p); box-shadow:0 4px 16px rgba(124,58,237,.1); }
-    .rc-card-top { display:flex; align-items:center; gap:8px; flex-wrap:wrap; margin-bottom:8px; }
-    .rc-channel {
-      background:var(--p); color:#fff; font-size:.65rem; font-weight:700;
-      padding:3px 8px; border-radius:6px;
-    }
-    .rc-title { font-size:.9rem; font-weight:700; color:var(--t1); flex:1; }
-    .rc-manager { font-size:.72rem; color:var(--t3); font-weight:500; margin-left:auto; }
-    .rc-badges { display:flex; flex-wrap:wrap; gap:5px; margin-bottom:8px; }
-    .rc-badge {
-      font-size:.65rem; font-weight:600; padding:2px 7px; border-radius:5px;
-      background:var(--warn-light); color:#92400E;
-    }
-    .rc-meta {
-      display:flex; flex-wrap:wrap; gap:10px; font-size:.74rem; color:var(--t2);
-      margin-bottom:8px; align-items:center;
-    }
-    .rc-meta i { color:var(--t4); margin-right:3px; }
-    .rc-slots {
-      font-size:.72rem; font-weight:700; color:var(--p); background:var(--p-light);
-      padding:2px 8px; border-radius:6px;
-    }
-    .rc-notes {
-      font-size:.75rem; color:var(--t3); background:#F8FAFC;
-      border-left:3px solid var(--p-light); padding:8px 12px; border-radius:6px;
-      margin-bottom:10px; line-height:1.5;
-    }
-    .rc-notes i { color:var(--warn); margin-right:4px; }
-    .rc-apply-btn {
-      display:block; width:100%; text-align:center; padding:12px; border-radius:10px;
-      font-size:.85rem; font-weight:700; text-decoration:none; border:none;
-      cursor:pointer; font-family:inherit; transition:background .2s, transform .1s;
-    }
-    .rc-apply-btn:active { transform:scale(.98); }
-    .rc-apply-btn.rc-kakao {
-      background:#FEE500; color:#3C1E1E;
-    }
-    .rc-apply-btn.rc-kakao:hover { background:#F5DC00; }
-    .rc-apply-btn.rc-default {
-      background:var(--p); color:#fff;
-    }
-    .rc-apply-btn.rc-default:hover { background:var(--p-dark); }
-    .rc-apply-btn.rc-closed {
-      background:#E2E8F0; color:var(--t4); cursor:not-allowed;
-    }
-
-    /* ─── Inline Apply Form ─── */
-    .rc-inline-form {
-      margin-top:10px; padding:12px; background:#F8FAFC;
-      border:1px solid var(--border); border-radius:10px;
-      animation: rcFormIn .2s ease;
-    }
-    @keyframes rcFormIn { from { opacity:0; transform:translateY(-6px); } }
-    .rc-form-fields { display:flex; gap:8px; margin-bottom:8px; }
-    .rc-input {
-      flex:1; padding:10px 12px; border:1.5px solid var(--border); border-radius:8px;
-      font-size:.82rem; font-family:inherit; outline:none; transition:border-color .2s;
-    }
-    .rc-input:focus { border-color:var(--p); }
-    .rc-form-actions { display:flex; gap:8px; }
-    .rc-submit-btn {
-      flex:1; padding:10px; background:var(--ok); color:#fff; border:none;
-      border-radius:8px; font-size:.82rem; font-weight:700; cursor:pointer;
-      font-family:inherit; transition:background .2s;
-    }
-    .rc-submit-btn:hover { background:#059669; }
-    .rc-cancel-btn {
-      padding:10px 14px; background:#E2E8F0; color:var(--t2); border:none;
-      border-radius:8px; font-size:.82rem; font-weight:600; cursor:pointer;
-      font-family:inherit;
-    }
-    .rc-cancel-btn:hover { background:#CBD5E1; }
+    .login-state-bar .logout-btn:hover { border-color:var(--p); color:var(--p); }
 
     /* ─── Tab Navigation ─── */
     .tab-nav {
-      display:flex; gap:0; margin-bottom:16px;
-      background:#fff; border-radius:12px; padding:4px;
+      display:flex; gap:0; margin-bottom:14px;
+      background:#fff; border-radius:10px; padding:3px;
       box-shadow:0 1px 4px rgba(0,0,0,.06);
       border:1px solid var(--border);
     }
     .tab-btn {
-      flex:1; padding:10px 8px; border:none; background:transparent;
-      border-radius:10px; font-size:.8rem; font-weight:600;
+      flex:1; padding:9px 8px; border:none; background:transparent;
+      border-radius:8px; font-size:.78rem; font-weight:600;
       color:var(--t3); cursor:pointer; transition:all .2s;
       font-family:inherit; display:flex; align-items:center;
       justify-content:center; gap:5px;
@@ -208,17 +114,56 @@
     .tab-btn:hover { background:#F1F5F9; color:var(--t1); }
     .tab-btn.active {
       background:var(--p); color:#fff;
-      box-shadow:0 2px 8px rgba(139,92,246,.3);
+      box-shadow:0 2px 8px rgba(80,70,228,.3);
     }
     .tab-btn.active:hover { background:var(--p-dark); }
+
+    /* ─── Profile Section ─── */
+    .profile-card {
+      background:var(--card); border:1px solid var(--border); border-radius:var(--radius);
+      padding:16px 18px; margin-bottom:12px; box-shadow:var(--shadow);
+    }
+    .profile-card-title {
+      font-size:.75rem; font-weight:700; color:var(--t3);
+      margin-bottom:8px; display:flex; align-items:center; gap:5px;
+    }
+    .profile-grid {
+      display:flex; gap:8px; flex-wrap:wrap;
+    }
+    .profile-grid-item { flex:1; min-width:100px; }
+    .profile-grid-item .label { font-size:.65rem; color:var(--t3); margin-bottom:2px; }
+    .profile-grid-item .value { font-size:.82rem; font-weight:700; color:var(--t1); }
+
+    /* ─── Sub Account Section ─── */
+    .sub-account-card {
+      background:var(--card); border:1px solid var(--border); border-radius:var(--radius);
+      padding:14px 18px; margin-bottom:12px; box-shadow:var(--shadow);
+    }
+    .sub-header {
+      display:flex; align-items:center; justify-content:space-between; margin-bottom:8px;
+    }
+    .sub-header-title {
+      font-size:.75rem; font-weight:700; color:var(--t2);
+      display:flex; align-items:center; gap:5px;
+    }
+    .sub-count-badge {
+      font-size:.68rem; background:#E0E7FF; color:#4338CA;
+      border-radius:10px; padding:1px 7px; font-weight:700;
+    }
+    .sub-add-btn {
+      padding:5px 12px; background:var(--p); color:#fff; border:none;
+      border-radius:8px; font-size:.72rem; font-weight:700; cursor:pointer;
+      display:flex; align-items:center; gap:4px;
+    }
+    .sub-add-btn:hover { background:var(--p-dark); }
 
     /* ─── Result Card (review list) ─── */
     .result-card {
       display:flex; align-items:center; gap:10px; padding:12px 14px;
-      background:#fff; border:1px solid var(--border); border-radius:12px;
+      background:#fff; border:1px solid var(--border); border-radius:var(--radius);
       margin-bottom:8px; cursor:pointer; transition:border-color .15s, box-shadow .15s;
     }
-    .result-card:hover { border-color:var(--p); box-shadow:0 2px 8px rgba(124,58,237,.08); }
+    .result-card:hover { border-color:var(--p); box-shadow:0 2px 8px rgba(80,70,228,.08); }
     .result-avatar {
       width:36px; height:36px; border-radius:50%; flex-shrink:0;
       background:linear-gradient(135deg,var(--p-light),#EDE9FE);
@@ -229,17 +174,17 @@
     .result-product-label { font-size:.7rem; color:var(--t3); margin-top:2px; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
     .result-product-empty { font-style:italic; }
     .result-right { display:flex; align-items:center; gap:6px; flex-shrink:0; }
-    .result-chevron { color:var(--t4); font-size:.75rem; }
+    .result-chevron { color:var(--t3); font-size:.75rem; }
     .status-badge-pending { font-size:.62rem; font-weight:700; padding:3px 8px; border-radius:6px; background:var(--warn-light); color:#92400E; }
     .status-badge-submitted { font-size:.62rem; font-weight:700; padding:3px 8px; border-radius:6px; background:var(--ok-light); color:#065F46; }
 
     /* ─── Result Group Card ─── */
     .result-group-card {
-      background:#fff; border:1px solid var(--border); border-radius:12px;
+      background:#fff; border:1px solid var(--border); border-radius:var(--radius);
       margin-bottom:8px; cursor:pointer; overflow:hidden;
       transition:border-color .15s, box-shadow .15s;
     }
-    .result-group-card:hover { border-color:var(--p); box-shadow:0 2px 8px rgba(124,58,237,.08); }
+    .result-group-card:hover { border-color:var(--p); box-shadow:0 2px 8px rgba(80,70,228,.08); }
     .result-group-header {
       display:flex; align-items:center; gap:10px; padding:12px 14px;
       border-bottom:1px solid #F1F5F9;
@@ -260,207 +205,315 @@
 
     /* ─── Results Section Header ─── */
     .results-header { display:flex; align-items:center; gap:8px; margin-bottom:10px; }
-    .results-title { font-size:.85rem; font-weight:700; color:var(--t2); }
+    .results-title { font-size:.82rem; font-weight:700; color:var(--t2); display:flex; align-items:center; gap:4px; }
     .results-badge { font-size:.68rem; font-weight:700; background:var(--p-light); color:var(--p); padding:2px 8px; border-radius:10px; }
+
+    /* ─── Section ─── */
+    .home-section { padding:0 0 12px; }
+    .home-section-title { font-size:.82rem; font-weight:700; color:var(--t2); margin-bottom:10px; display:flex; align-items:center; gap:6px; }
+
+    .empty-state { text-align:center; padding:28px 20px; color:var(--t3); font-size:.82rem; }
+    .empty-state i { font-size:1.4rem; display:block; margin-bottom:8px; opacity:.5; }
 
     /* ─── Footer ─── */
     .home-footer {
-      text-align:center; padding:24px 16px; font-size:.72rem; color:var(--t4);
-      border-top:1px solid var(--border); margin-top:20px;
+      text-align:center; padding:20px 16px; font-size:.72rem; color:var(--t3);
+      border-top:1px solid var(--border); margin-top:16px;
     }
     .home-footer a { color:var(--t3); text-decoration:none; }
     .home-footer a:hover { color:var(--p); }
 
     /* ─── Toast ─── */
     .toast { position:fixed; top:20px; left:50%; transform:translateX(-50%); z-index:9999;
-      background:#1E293B; color:#fff; padding:10px 20px; border-radius:10px;
-      font-size:.82rem; font-weight:600; box-shadow:0 4px 16px rgba(0,0,0,.15);
-      animation: toastIn .3s ease; }
-    @keyframes toastIn { from { opacity:0; transform:translateX(-50%) translateY(-10px); } }
+      background:var(--t1); color:#fff; padding:10px 20px; border-radius:8px;
+      font-size:.82rem; font-weight:600; box-shadow:0 6px 24px rgba(0,0,0,.11);
+      animation: toastIn .22s ease; }
+    @keyframes toastIn { from { opacity:0; transform:translateX(-50%) translateY(-8px); } }
+
+    /* ─── Recruit Card ─── */
+    .rc-card {
+      background:var(--card); border:1px solid var(--border); border-radius:var(--radius);
+      padding:16px 18px; margin-bottom:12px;
+      box-shadow:0 2px 8px rgba(0,0,0,.04); transition:box-shadow .2s, border-color .2s;
+    }
+    .rc-card:hover { border-color:var(--p); box-shadow:0 4px 16px rgba(80,70,228,.1); }
+    .rc-card-top { display:flex; align-items:center; gap:8px; flex-wrap:wrap; margin-bottom:8px; }
+    .rc-channel {
+      background:var(--p); color:#fff; font-size:.65rem; font-weight:700;
+      padding:3px 8px; border-radius:6px;
+    }
+    .rc-title { font-size:.9rem; font-weight:700; color:var(--t1); flex:1; }
+    .rc-manager { font-size:.72rem; color:var(--t3); font-weight:500; margin-left:auto; }
+    .rc-badges { display:flex; flex-wrap:wrap; gap:5px; margin-bottom:8px; }
+    .rc-badge {
+      font-size:.65rem; font-weight:600; padding:2px 7px; border-radius:5px;
+      background:var(--warn-light); color:#92400E;
+    }
+    .rc-meta {
+      display:flex; flex-wrap:wrap; gap:10px; font-size:.74rem; color:var(--t2);
+      margin-bottom:8px; align-items:center;
+    }
+    .rc-meta i { color:var(--t3); margin-right:3px; }
+    .rc-slots {
+      font-size:.72rem; font-weight:700; color:var(--p); background:var(--p-light);
+      padding:2px 8px; border-radius:6px;
+    }
+    .rc-notes {
+      font-size:.75rem; color:var(--t3); background:#F8FAFC;
+      border-left:3px solid var(--p-light); padding:8px 12px; border-radius:6px;
+      margin-bottom:10px; line-height:1.5;
+    }
+    .rc-notes i { color:var(--warn); margin-right:4px; }
+    .rc-apply-btn {
+      display:block; width:100%; text-align:center; padding:12px; border-radius:8px;
+      font-size:.85rem; font-weight:700; text-decoration:none; border:none;
+      cursor:pointer; font-family:inherit; transition:background .2s, transform .1s;
+    }
+    .rc-apply-btn:active { transform:scale(.98); }
+    .rc-apply-btn.rc-kakao { background:#FEE500; color:#3C1E1E; }
+    .rc-apply-btn.rc-kakao:hover { background:#F5DC00; }
+    .rc-apply-btn.rc-default { background:var(--p); color:#fff; }
+    .rc-apply-btn.rc-default:hover { background:var(--p-dark); }
+    .rc-apply-btn.rc-closed { background:#E2E8F0; color:var(--t3); cursor:not-allowed; }
+
+    /* ─── Inline Apply Form ─── */
+    .rc-inline-form {
+      margin-top:10px; padding:12px; background:#F8FAFC;
+      border:1px solid var(--border); border-radius:8px;
+      animation: rcFormIn .2s ease;
+    }
+    @keyframes rcFormIn { from { opacity:0; transform:translateY(-6px); } }
+    .rc-form-fields { display:flex; gap:8px; margin-bottom:8px; }
+    .rc-input {
+      flex:1; padding:10px 12px; border:1.5px solid var(--border); border-radius:8px;
+      font-size:.82rem; font-family:inherit; outline:none; transition:border-color .15s;
+    }
+    .rc-input:focus { border-color:var(--p); box-shadow:0 0 0 3px #5046E420; }
+    .rc-form-actions { display:flex; gap:8px; }
+    .rc-submit-btn {
+      flex:1; padding:10px; background:var(--ok); color:#fff; border:none;
+      border-radius:8px; font-size:.82rem; font-weight:700; cursor:pointer;
+      font-family:inherit; transition:background .2s;
+    }
+    .rc-submit-btn:hover { background:#059669; }
+    .rc-cancel-btn {
+      padding:10px 14px; background:#E2E8F0; color:var(--t2); border:none;
+      border-radius:8px; font-size:.82rem; font-weight:600; cursor:pointer;
+      font-family:inherit;
+    }
+    .rc-cancel-btn:hover { background:#CBD5E1; }
+
+    /* ─── Recruit Preview ─── */
+    .recruit-preview-item {
+      display:block; background:var(--card); border:1px solid var(--border); border-radius:var(--radius);
+      padding:12px 16px; margin-bottom:8px; text-decoration:none; color:var(--t1);
+      transition:border-color .15s, box-shadow .15s;
+    }
+    .recruit-preview-item:hover { border-color:var(--p); box-shadow:0 2px 8px rgba(80,70,228,.1); }
+    .recruit-preview-title { font-size:.84rem; font-weight:700; margin-bottom:4px; }
+    .recruit-preview-meta { display:flex; gap:10px; font-size:.72rem; color:var(--t3); flex-wrap:wrap; }
   </style>
 </head>
 <body>
 
 <!-- ═══ 비로그인 상태 ═══ -->
 <div id="viewLogin" class="page-wrap">
-  <div class="home-header">
-    <div class="home-header-top">
-      <div class="home-logo"><i class="fas fa-star-half-alt"></i> InAd 리뷰어</div>
-      <a href="/admin" style="font-size:.72rem;color:rgba(255,255,255,.7);text-decoration:none;padding:5px 10px;border:1px solid rgba(255,255,255,.3);border-radius:6px"><i class="fas fa-lock"></i> 관리자</a>
+  <header class="home-header">
+    <div class="home-header-inner">
+      <div class="home-header-icon"><i class="fas fa-star-half-alt"></i></div>
+      <div class="home-header-text">
+        <h1>InAd 리뷰어</h1>
+        <p>로그인하여 리뷰 내역을 확인하세요</p>
+      </div>
+      <div class="home-header-actions">
+        <a href="/admin"><i class="fas fa-lock"></i> 관리자</a>
+      </div>
     </div>
-    <div class="home-greeting">리뷰어 전용 페이지</div>
-    <div class="home-greeting-sub">로그인하여 캠페인 참여 현황을 확인하세요</div>
-  </div>
+  </header>
 
-  <div class="login-card">
-    <h2><i class="fas fa-sign-in-alt" style="color:var(--p);margin-right:6px"></i>로그인</h2>
-    <p>등록된 전화번호 뒤 8자리로 로그인합니다</p>
-    <div class="login-input-group">
-      <input id="loginName" class="login-input" type="text" placeholder="이름 (선택)" autocomplete="name">
-      <input id="loginPhone" class="login-input" type="tel" placeholder="전화번호 뒤 8자리 (예: 85926325)" maxlength="8" inputmode="numeric">
+  <div class="content-area">
+    <div class="login-card">
+      <h2><i class="fas fa-sign-in-alt" style="color:var(--p);margin-right:6px"></i>로그인</h2>
+      <p>등록된 전화번호 뒤 8자리로 로그인합니다</p>
+      <div class="login-input-group">
+        <input id="loginName" class="login-input" type="text" placeholder="이름 (선택)" autocomplete="name">
+        <input id="loginPhone" class="login-input" type="tel" placeholder="전화번호 뒤 8자리 (예: 85926325)" maxlength="8" inputmode="numeric">
+      </div>
+      <button class="login-btn" onclick="doLogin()">
+        <i class="fas fa-arrow-right"></i> 로그인
+      </button>
+      <div class="login-register">
+        처음이신가요? <a href="/search#register">인애드 등록하기 →</a>
+      </div>
     </div>
-    <button class="login-btn" onclick="doLogin()">
-      <i class="fas fa-arrow-right"></i> 로그인
-    </button>
-    <div class="login-register">
-      처음이신가요? <a href="/search#register">인애드 등록하기 →</a>
-    </div>
-  </div>
 
-  <!-- 모집공고 섹션 (비로그인 - 항상 표시) -->
-  <div class="home-section">
-    <div class="home-section-title">
-      <i class="fas fa-bullhorn" style="color:var(--p)"></i> 모집공고
-    </div>
-    <div id="recruitPreviewList">
-      <div class="empty-state"><i class="fas fa-circle-notch fa-spin"></i> 불러오는 중...</div>
+    <!-- 모집공고 섹션 (비로그인 - 항상 표시) -->
+    <div class="home-section">
+      <div class="home-section-title">
+        <i class="fas fa-bullhorn" style="color:var(--p)"></i> 모집공고
+      </div>
+      <div id="recruitPreviewList">
+        <div class="empty-state"><i class="fas fa-circle-notch fa-spin"></i> 불러오는 중...</div>
+      </div>
     </div>
   </div>
 </div>
 
 <!-- ═══ 로그인 상태 ═══ -->
 <div id="viewHome" style="display:none" class="page-wrap">
-  <div class="home-header">
-    <div class="home-header-top">
-      <div class="home-logo"><i class="fas fa-star-half-alt"></i> InAd 리뷰어</div>
+  <header class="home-header">
+    <div class="home-header-inner">
+      <div class="home-header-icon"><i class="fas fa-star-half-alt"></i></div>
+      <div class="home-header-text">
+        <h1 id="greetingText">InAd 리뷰어</h1>
+        <p id="greetingSub">로그인하여 리뷰 내역을 확인하세요</p>
+      </div>
       <div class="home-header-actions">
-        <a href="/admin" style="font-size:.72rem;color:rgba(255,255,255,.7);text-decoration:none;padding:5px 10px;border:1px solid rgba(255,255,255,.3);border-radius:6px"><i class="fas fa-lock"></i> 관리자</a>
+        <a href="/admin"><i class="fas fa-lock"></i> 관리자</a>
         <button onclick="doLogout()"><i class="fas fa-sign-out-alt"></i> 로그아웃</button>
       </div>
     </div>
-    <div class="home-greeting" id="greetingText">안녕하세요!</div>
-    <div class="home-greeting-sub" id="greetingSub">오늘도 좋은 하루 보내세요 ✨</div>
-  </div>
+  </header>
 
-  <!-- 탭 네비게이션 -->
-  <div class="tab-nav" style="margin:12px 16px 0">
-    <button class="tab-btn active" id="tabBtnAll" onclick="switchTab('all')">
-      <i class="fas fa-th-large"></i> 전체
-    </button>
-    <button class="tab-btn" id="tabBtnStatus" onclick="switchTab('status')">
-      <i class="fas fa-clipboard-list"></i> 내 참여현황
-    </button>
-    <button class="tab-btn" id="tabBtnRecruit" onclick="switchTab('recruit')">
-      <i class="fas fa-bullhorn"></i> 모집공고
-    </button>
-  </div>
+  <div class="content-area">
+    <!-- 로그인 상태 바 -->
+    <div class="login-state-bar">
+      <i class="fas fa-user-circle name-icon"></i>
+      <span class="name-text" id="loginBarName">-</span>
+      <span class="name-suffix">님</span>
+      <button class="logout-btn" onclick="doLogout()"><i class="fas fa-sign-out-alt"></i> 로그아웃</button>
+    </div>
 
-  <!-- ★ 내 등록정보 섹션 (로그인 후 자동 표시) -->
-  <div id="sectionProfile" class="home-section" style="padding-top:12px">
-    <div id="inlineProfileSection" style="display:none">
-      <!-- 본인 정보 -->
-      <div style="background:#F9FAFB;border:1.5px solid #E5E7EB;border-radius:10px;padding:12px 14px;margin-bottom:10px">
-        <div style="font-size:.72rem;font-weight:700;color:var(--t3);margin-bottom:6px;letter-spacing:.04em">👤 내 등록정보</div>
-        <div style="display:flex;gap:8px;flex-wrap:wrap">
-          <div style="flex:1;min-width:100px">
-            <div style="font-size:.65rem;color:var(--t3);margin-bottom:2px">사용자명</div>
-            <div id="inlineSelfName" style="font-size:.85rem;font-weight:700;color:var(--t1)">-</div>
-          </div>
-          <div style="flex:1;min-width:100px">
-            <div style="font-size:.65rem;color:var(--t3);margin-bottom:2px">전화번호</div>
-            <div id="inlineSelfPhone" style="font-size:.82rem;color:var(--t2)">-</div>
-          </div>
-          <div style="flex:1;min-width:100px">
-            <div style="font-size:.65rem;color:var(--t3);margin-bottom:2px">소득명의</div>
-            <div style="display:flex;align-items:center;gap:4px">
-              <span id="inlineSelfIncomeName" style="font-size:.82rem;color:var(--t2)">미등록</span>
-              <button id="btnAddIncomeInfo" onclick="openIncomeInfoForm()" style="display:none;padding:1px 6px;background:#EFF6FF;color:#2563EB;border:1px solid #93C5FD;border-radius:5px;font-size:.62rem;font-weight:700;cursor:pointer">추가+</button>
+    <!-- 탭 네비게이션 -->
+    <div class="tab-nav">
+      <button class="tab-btn active" id="tabBtnAll" onclick="switchTab('all')">
+        <i class="fas fa-th-large"></i> 전체
+      </button>
+      <button class="tab-btn" id="tabBtnStatus" onclick="switchTab('status')">
+        <i class="fas fa-clipboard-list"></i> 내 참여현황
+      </button>
+      <button class="tab-btn" id="tabBtnRecruit" onclick="switchTab('recruit')">
+        <i class="fas fa-bullhorn"></i> 모집공고
+      </button>
+    </div>
+
+    <!-- ★ 내 등록정보 섹션 -->
+    <div id="sectionProfile" class="home-section">
+      <div id="inlineProfileSection" style="display:none">
+        <!-- 본인 정보 -->
+        <div class="profile-card">
+          <div class="profile-card-title"><i class="fas fa-user"></i> 내 등록정보</div>
+          <div class="profile-grid">
+            <div class="profile-grid-item">
+              <div class="label">사용자명</div>
+              <div class="value" id="inlineSelfName">-</div>
+            </div>
+            <div class="profile-grid-item">
+              <div class="label">전화번호</div>
+              <div class="value" id="inlineSelfPhone" style="font-weight:500">-</div>
+            </div>
+            <div class="profile-grid-item">
+              <div class="label">소득명의</div>
+              <div style="display:flex;align-items:center;gap:4px">
+                <span class="value" id="inlineSelfIncomeName" style="font-weight:500">미등록</span>
+                <button id="btnAddIncomeInfo" onclick="openIncomeInfoForm()" style="display:none;padding:1px 6px;background:#EFF6FF;color:#2563EB;border:1px solid #93C5FD;border-radius:5px;font-size:.62rem;font-weight:700;cursor:pointer">추가+</button>
+              </div>
+            </div>
+            <div class="profile-grid-item">
+              <div class="label">주민번호</div>
+              <div style="display:flex;align-items:center;gap:4px">
+                <span class="value" id="inlineSelfJumin" style="font-weight:500;letter-spacing:.5px">미등록</span>
+                <button id="btnAddJuminInfo" onclick="openIncomeInfoForm()" style="display:none;padding:1px 6px;background:#EFF6FF;color:#2563EB;border:1px solid #93C5FD;border-radius:5px;font-size:.62rem;font-weight:700;cursor:pointer">추가+</button>
+              </div>
             </div>
           </div>
-          <div style="flex:1;min-width:100px">
-            <div style="font-size:.65rem;color:var(--t3);margin-bottom:2px">주민번호</div>
-            <div style="display:flex;align-items:center;gap:4px">
-              <span id="inlineSelfJumin" style="font-size:.82rem;color:var(--t2);letter-spacing:.5px">미등록</span>
-              <button id="btnAddJuminInfo" onclick="openIncomeInfoForm()" style="display:none;padding:1px 6px;background:#EFF6FF;color:#2563EB;border:1px solid #93C5FD;border-radius:5px;font-size:.62rem;font-weight:700;cursor:pointer">추가+</button>
+        </div>
+        <!-- 소득명의/주민번호 인라인 입력폼 -->
+        <div id="inlineIncomeForm" style="display:none;background:#FFFBEB;border:1.5px solid #FDE68A;border-radius:10px;padding:12px 14px;margin-bottom:12px">
+          <div style="font-size:.73rem;font-weight:700;color:#92400E;margin-bottom:8px">📝 소득명의 / 주민번호 등록</div>
+          <div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:8px">
+            <div style="flex:1;min-width:120px">
+              <label style="font-size:.68rem;font-weight:600;color:var(--t2)">소득명의</label>
+              <input id="inlineIncomeNameInput" type="text" placeholder="소득신고 명의자" style="width:100%;margin-top:3px;padding:7px 9px;border:1.5px solid #D1D5DB;border-radius:7px;font-size:.8rem;outline:none;box-sizing:border-box" maxlength="20">
             </div>
-          </div>
-        </div>
-      </div>
-      <!-- 소득명의/주민번호 인라인 입력폼 -->
-      <div id="inlineIncomeForm" style="display:none;background:#FFFBEB;border:1.5px solid #FDE68A;border-radius:10px;padding:12px 14px;margin-bottom:10px">
-        <div style="font-size:.73rem;font-weight:700;color:#92400E;margin-bottom:8px">📝 소득명의 / 주민번호 등록</div>
-        <div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:8px">
-          <div style="flex:1;min-width:120px">
-            <label style="font-size:.68rem;font-weight:600;color:var(--t2)">소득명의</label>
-            <input id="inlineIncomeNameInput" type="text" placeholder="소득신고 명의자" style="width:100%;margin-top:3px;padding:7px 9px;border:1.5px solid #D1D5DB;border-radius:7px;font-size:.8rem;outline:none;box-sizing:border-box" maxlength="20">
-          </div>
-          <div style="flex:1;min-width:140px">
-            <label style="font-size:.68rem;font-weight:600;color:var(--t2)">주민번호 <span style="color:var(--t3);font-weight:400">(13자리)</span></label>
-            <input id="inlineJuminInput" type="text" placeholder="000000-0000000" oninput="formatJumin(this)" style="width:100%;margin-top:3px;padding:7px 9px;border:1.5px solid #D1D5DB;border-radius:7px;font-size:.8rem;outline:none;box-sizing:border-box" maxlength="14">
-          </div>
-        </div>
-        <div style="display:flex;gap:8px">
-          <button onclick="cancelIncomeInfoForm()" style="flex:1;padding:7px 0;background:#fff;color:var(--t2);border:1.5px solid #D1D5DB;border-radius:7px;font-size:.75rem;font-weight:600;cursor:pointer">취소</button>
-          <button id="btnSaveIncomeInfo" onclick="saveIncomeInfoInline()" style="flex:1;padding:7px 0;background:#D97706;color:#fff;border:none;border-radius:7px;font-size:.75rem;font-weight:700;cursor:pointer">저장</button>
-        </div>
-      </div>
-      <!-- 타계정 목록 -->
-      <div style="background:#fff;border:1.5px solid #E5E7EB;border-radius:10px;padding:12px 14px">
-        <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:8px">
-          <div style="font-size:.72rem;font-weight:700;color:var(--t2)">타계정 정보 <span id="inlineSubCount" style="font-size:.68rem;background:#E0E7FF;color:#4338CA;border-radius:10px;padding:1px 7px;margin-left:4px">0/10</span></div>
-          <button id="btnInlineAddSub" onclick="toggleInlineSubForm()" style="padding:4px 10px;background:#7C3AED;color:#fff;border:none;border-radius:7px;font-size:.72rem;font-weight:700;cursor:pointer">
-            <i class="fas fa-plus"></i> 타계정 추가
-          </button>
-        </div>
-        <div id="inlineSubList" style="display:flex;flex-direction:column;gap:5px">
-          <div style="text-align:center;padding:10px;color:var(--t3);font-size:.78rem">타계정이 없습니다</div>
-        </div>
-        <!-- 인라인 타계정 추가/수정 폼 -->
-        <div id="inlineSubForm" style="display:none;margin-top:10px;border:1.5px solid #BFDBFE;border-radius:10px;padding:14px;background:#EFF6FF">
-          <div style="font-size:.75rem;font-weight:700;color:#1D4ED8;margin-bottom:10px" id="inlineSubFormTitle">타계정 추가</div>
-          <input type="hidden" id="inlineSubEditIdx" value="-1">
-          <div style="margin-bottom:8px">
-            <label style="font-size:.7rem;font-weight:600;color:var(--t2)">이름 <span style="color:#DC2626">*</span></label>
-            <input id="inlineSubName" type="text" placeholder="이름" style="width:100%;margin-top:3px;padding:8px 10px;border:1.5px solid #D1D5DB;border-radius:7px;font-size:.82rem;outline:none;box-sizing:border-box" maxlength="20">
-          </div>
-          <div style="margin-bottom:8px">
-            <label style="font-size:.7rem;font-weight:600;color:var(--t2)">전화번호 <span style="color:#DC2626">*</span></label>
-            <div style="display:flex;align-items:center;gap:4px;margin-top:3px">
-              <span style="font-size:.82rem;font-weight:600;color:var(--t1);white-space:nowrap">010-</span>
-              <input id="inlineSubPhone" type="tel" placeholder="0000-0000" oninput="formatPhoneLast8(this)" style="flex:1;padding:8px 10px;border:1.5px solid #D1D5DB;border-radius:7px;font-size:.82rem;outline:none;box-sizing:border-box" maxlength="9">
+            <div style="flex:1;min-width:140px">
+              <label style="font-size:.68rem;font-weight:600;color:var(--t2)">주민번호 <span style="color:var(--t3);font-weight:400">(13자리)</span></label>
+              <input id="inlineJuminInput" type="text" placeholder="000000-0000000" oninput="formatJumin(this)" style="width:100%;margin-top:3px;padding:7px 9px;border:1.5px solid #D1D5DB;border-radius:7px;font-size:.8rem;outline:none;box-sizing:border-box" maxlength="14">
             </div>
-          </div>
-          <div style="margin-bottom:8px">
-            <label style="font-size:.7rem;font-weight:600;color:var(--t2)">소득명의 <span style="color:var(--t3);font-weight:400">(선택)</span></label>
-            <input id="inlineSubIncomeName" type="text" placeholder="소득신고 명의자" style="width:100%;margin-top:3px;padding:8px 10px;border:1.5px solid #D1D5DB;border-radius:7px;font-size:.82rem;outline:none;box-sizing:border-box" maxlength="20">
-          </div>
-          <div style="margin-bottom:10px">
-            <label style="font-size:.7rem;font-weight:600;color:var(--t2)">주민번호 <span style="color:var(--t3);font-weight:400">(선택, 13자리)</span></label>
-            <input id="inlineSubJumin" type="text" placeholder="000000-0000000" oninput="formatJumin(this)" style="width:100%;margin-top:3px;padding:8px 10px;border:1.5px solid #D1D5DB;border-radius:7px;font-size:.82rem;outline:none;box-sizing:border-box" maxlength="14">
           </div>
           <div style="display:flex;gap:8px">
-            <button onclick="cancelInlineSubForm()" style="flex:1;padding:9px 0;background:#fff;color:var(--t2);border:1.5px solid #D1D5DB;border-radius:7px;font-size:.78rem;font-weight:600;cursor:pointer">취소</button>
-            <button id="btnInlineSubSave" onclick="saveInlineSubAccount()" style="flex:1;padding:9px 0;background:#2563EB;color:#fff;border:none;border-radius:7px;font-size:.78rem;font-weight:700;cursor:pointer">저장</button>
+            <button onclick="cancelIncomeInfoForm()" style="flex:1;padding:7px 0;background:#fff;color:var(--t2);border:1.5px solid #D1D5DB;border-radius:7px;font-size:.75rem;font-weight:600;cursor:pointer">취소</button>
+            <button id="btnSaveIncomeInfo" onclick="saveIncomeInfoInline()" style="flex:1;padding:7px 0;background:#D97706;color:#fff;border:none;border-radius:7px;font-size:.75rem;font-weight:700;cursor:pointer">저장</button>
+          </div>
+        </div>
+        <!-- 타계정 목록 -->
+        <div class="sub-account-card">
+          <div class="sub-header">
+            <div class="sub-header-title">타계정 정보 <span id="inlineSubCount" class="sub-count-badge">0/10</span></div>
+            <button id="btnInlineAddSub" onclick="toggleInlineSubForm()" class="sub-add-btn">
+              <i class="fas fa-plus"></i> 타계정 추가
+            </button>
+          </div>
+          <div id="inlineSubList" style="display:flex;flex-direction:column;gap:5px">
+            <div style="text-align:center;padding:10px;color:var(--t3);font-size:.78rem">타계정이 없습니다</div>
+          </div>
+          <!-- 인라인 타계정 추가/수정 폼 -->
+          <div id="inlineSubForm" style="display:none;margin-top:10px;border:1.5px solid #BFDBFE;border-radius:10px;padding:14px;background:#EFF6FF">
+            <div style="font-size:.75rem;font-weight:700;color:#1D4ED8;margin-bottom:10px" id="inlineSubFormTitle">타계정 추가</div>
+            <input type="hidden" id="inlineSubEditIdx" value="-1">
+            <div style="margin-bottom:8px">
+              <label style="font-size:.7rem;font-weight:600;color:var(--t2)">이름 <span style="color:#DC2626">*</span></label>
+              <input id="inlineSubName" type="text" placeholder="이름" style="width:100%;margin-top:3px;padding:8px 10px;border:1.5px solid #D1D5DB;border-radius:7px;font-size:.82rem;outline:none;box-sizing:border-box" maxlength="20">
+            </div>
+            <div style="margin-bottom:8px">
+              <label style="font-size:.7rem;font-weight:600;color:var(--t2)">전화번호 <span style="color:#DC2626">*</span></label>
+              <div style="display:flex;align-items:center;gap:4px;margin-top:3px">
+                <span style="font-size:.82rem;font-weight:600;color:var(--t1);white-space:nowrap">010-</span>
+                <input id="inlineSubPhone" type="tel" placeholder="0000-0000" oninput="formatPhoneLast8(this)" style="flex:1;padding:8px 10px;border:1.5px solid #D1D5DB;border-radius:7px;font-size:.82rem;outline:none;box-sizing:border-box" maxlength="9">
+              </div>
+            </div>
+            <div style="margin-bottom:8px">
+              <label style="font-size:.7rem;font-weight:600;color:var(--t2)">소득명의 <span style="color:var(--t3);font-weight:400">(선택)</span></label>
+              <input id="inlineSubIncomeName" type="text" placeholder="소득신고 명의자" style="width:100%;margin-top:3px;padding:8px 10px;border:1.5px solid #D1D5DB;border-radius:7px;font-size:.82rem;outline:none;box-sizing:border-box" maxlength="20">
+            </div>
+            <div style="margin-bottom:10px">
+              <label style="font-size:.7rem;font-weight:600;color:var(--t2)">주민번호 <span style="color:var(--t3);font-weight:400">(선택, 13자리)</span></label>
+              <input id="inlineSubJumin" type="text" placeholder="000000-0000000" oninput="formatJumin(this)" style="width:100%;margin-top:3px;padding:8px 10px;border:1.5px solid #D1D5DB;border-radius:7px;font-size:.82rem;outline:none;box-sizing:border-box" maxlength="14">
+            </div>
+            <div style="display:flex;gap:8px">
+              <button onclick="cancelInlineSubForm()" style="flex:1;padding:9px 0;background:#fff;color:var(--t2);border:1.5px solid #D1D5DB;border-radius:7px;font-size:.78rem;font-weight:600;cursor:pointer">취소</button>
+              <button id="btnInlineSubSave" onclick="saveInlineSubAccount()" style="flex:1;padding:9px 0;background:#2563EB;color:#fff;border:none;border-radius:7px;font-size:.78rem;font-weight:700;cursor:pointer">저장</button>
+            </div>
           </div>
         </div>
       </div>
     </div>
-  </div>
 
-  <!-- ★ 리뷰 내역 섹션 (참여한 캠페인 조회 결과) -->
-  <div class="home-section" id="sectionReviewList" style="padding-top:0">
-    <div class="results-header">
-      <span class="results-title"><i class="fas fa-clipboard-list" style="color:var(--p);margin-right:4px"></i>리뷰 내역</span>
-      <span id="reviewResultsCount" class="results-badge">0건</span>
+    <!-- ★ 리뷰 내역 섹션 -->
+    <div class="home-section" id="sectionReviewList">
+      <div class="results-header">
+        <span class="results-title"><i class="fas fa-clipboard-list" style="color:var(--p)"></i> 리뷰 내역</span>
+        <span id="reviewResultsCount" class="results-badge">0건</span>
+      </div>
+      <div id="reviewResultsList">
+        <div class="empty-state"><i class="fas fa-circle-notch fa-spin"></i> 불러오는 중...</div>
+      </div>
     </div>
-    <div id="reviewResultsList">
-      <div class="empty-state"><i class="fas fa-circle-notch fa-spin"></i> 불러오는 중...</div>
-    </div>
-  </div>
 
-  <!-- 모집공고 섹션 -->
-  <div class="home-section" id="sectionRecruit">
-    <div class="home-section-title">
-      <i class="fas fa-bullhorn" style="color:var(--p)"></i> 모집공고
+    <!-- 모집공고 섹션 -->
+    <div class="home-section" id="sectionRecruit">
+      <div class="home-section-title">
+        <i class="fas fa-bullhorn" style="color:var(--p)"></i> 모집공고
+      </div>
+      <div id="recruitPreviewList2">
+        <div class="empty-state"><i class="fas fa-circle-notch fa-spin"></i> 불러오는 중...</div>
+      </div>
     </div>
-    <div id="recruitPreviewList2">
-      <div class="empty-state"><i class="fas fa-circle-notch fa-spin"></i> 불러오는 중...</div>
-    </div>
-  </div>
 
-  <!-- Footer -->
-  <div class="home-footer">
-    <a href="/admin">관리자이신가요? 관리자 페이지 →</a>
+    <!-- Footer -->
+    <div class="home-footer">
+      <a href="/admin">관리자이신가요? 관리자 페이지 →</a>
+    </div>
   </div>
 </div>
 
@@ -487,7 +540,9 @@ function initPage() {
 function showHome(user) {
   document.getElementById("viewLogin").style.display = "none";
   document.getElementById("viewHome").style.display = "";
-  document.getElementById("greetingText").textContent = `안녕하세요, ${user.name}님!`;
+  document.getElementById("greetingText").textContent = `참여한 캠페인 조회`;
+  document.getElementById("greetingSub").textContent = `로그인하여 리뷰 내역을 확인하세요`;
+  document.getElementById("loginBarName").textContent = user.name || "-";
 
   // ★ /search 페이지 세션 동기화 (rapp_reviewer_auth 키)
   syncSearchSession(user);
