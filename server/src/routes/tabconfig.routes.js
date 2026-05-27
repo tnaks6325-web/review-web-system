@@ -2031,9 +2031,55 @@ router.get('/reviewer-options', async (req, res, next) => {
       }
     }
 
+    // ★★★ round 미지정 + ocMap 비어있는 경우: review_index에서 최신 활성 차수 조회 ★★★
+    if (!round && name) {
+      try {
+        const closedRounds = (tcRows[0]?.closed_rounds || '').split(',').map(s => s.trim()).filter(Boolean);
+        const archivedRounds = (tcRows[0]?.archived_rounds || '').split(',').map(s => s.trim()).filter(Boolean);
+        const excludeSet = new Set([...closedRounds, ...archivedRounds]);
+
+        const { rows: riRounds } = await pool.query(
+          `SELECT DISTINCT round FROM review_index 
+           WHERE sheet_id = $1 AND tab_name = $2 AND round IS NOT NULL AND round != ''
+           ORDER BY round`,
+          [sheetId, tabName]
+        );
+        const allRounds = riRounds.map(r => r.round);
+        const activeRiRounds = allRounds
+          .filter(r => !excludeSet.has(r))
+          .sort((a, b) => {
+            const numA = parseInt(a.replace(/[^0-9]/g, '')) || 0;
+            const numB = parseInt(b.replace(/[^0-9]/g, '')) || 0;
+            return numA - numB;
+          });
+        if (activeRiRounds.length > 0) {
+          round = activeRiRounds[activeRiRounds.length - 1];
+        }
+      } catch (_) { /* 무시 */ }
+    }
+
     if (round && ocMap[round]) {
       // ★ 특정 차수 지정 → 해당 차수의 옵션만 사용
       optionColumns = ocMap[round];
+    } else if (round && !ocMap[round] && Object.keys(ocMap).length > 0) {
+      // ★ round는 감지됐지만 해당 차수의 옵션 설정이 없는 경우 → 가장 가까운 활성 차수의 옵션 사용
+      // (round 변수는 유지하여 distinct values 필터링에 활용)
+      const roundNum = parseInt(round.replace(/[^0-9]/g, '')) || 0;
+      const closedRounds = (tcRows[0]?.closed_rounds || '').split(',').map(s => s.trim()).filter(Boolean);
+      const archivedRounds = (tcRows[0]?.archived_rounds || '').split(',').map(s => s.trim()).filter(Boolean);
+      const excludeSet = new Set([...closedRounds, ...archivedRounds]);
+      const sortedKeys = Object.keys(ocMap)
+        .filter(r => !excludeSet.has(r))
+        .sort((a, b) => {
+          const numA = parseInt(a.replace(/[^0-9]/g, '')) || 0;
+          const numB = parseInt(b.replace(/[^0-9]/g, '')) || 0;
+          return Math.abs(numA - roundNum) - Math.abs(numB - roundNum);
+        });
+      if (sortedKeys.length > 0) {
+        optionColumns = ocMap[sortedKeys[0]]; // 가장 가까운 차수의 옵션 설정 사용
+      } else {
+        optionColumns = tcRows[0]?.option_columns || [];
+      }
     } else if (!round && Object.keys(ocMap).length > 0) {
       // ★ 차수 미지정 + option_columns_map에 데이터 존재 → 모든 차수 합집합(union)
       const seen = new Set();
