@@ -4586,6 +4586,7 @@ function _buildOrderCardHtml(cid, idx, type) {
     ${isFirst ? `
     <div id="of_option_picker_wrap" style="display:none" class="of-option-picker">
       <div class="of-option-picker-title"><i class="fas fa-list-ul"></i> 본인의 옵션을 선택해주세요</div>
+      <div style="font-size:.73rem;color:#6B7280;margin:-2px 0 6px 0">*선택이 되지 않는다면 배정된 옵션이므로 주문한 옵션과 일치하는지 확인후 제출하세요.</div>
       <div id="of_option_tabs" class="of-option-tabs"></div>
     </div>` : ""}
 
