@@ -3471,7 +3471,7 @@ function initOrderFormMode() {
   if (_uidInput) _uidInput.disabled = false;
 
   // ── 인애드명단 자동완성 목록 비동기 로드 (화면 표시와 병렬)
-  _loadInaedList(sheetId, gid, tabName);
+  _loadInaedList(sheetId, gid, tabName, round);
 
   // ★ 옵션 데이터 비동기 로드 (화면 표시와 병렬)
   _loadReviewerOptionData(sheetId, tabName, gid, round);
@@ -3697,10 +3697,12 @@ async function _loadReviewerOptionData(sheetId, tabName, gid, round) {
 }
 
 /** GAS에서 인애드명단 목록 로드 */
-async function _loadInaedList(sheetId, gid, tabName) {
+async function _loadInaedList(sheetId, gid, tabName, round) {
   try {
     if (!APP_CONFIG.GAS_WEB_APP_URL) return;
-    const data = await gasGet({ action: "getInaedList", sheetId, gid, tabName });
+    const params = { action: "getInaedList", sheetId, gid, tabName };
+    if (round) params.round = round;
+    const data = await gasGet(params);
     if (data && Array.isArray(data.names)) {
       _inaedNames     = data.names;                     // [{ name, date, options, rowIndex }]
       _optionHeaders  = data.optionHeaders  || [];      // ["옵션1","옵션2",...]

@@ -249,6 +249,7 @@ const DATE_COL_KEYWORDS = ['구매일자', '주문일자', '구매날짜', 'purc
 router.get('/get-inaed-list', async (req, res, next) => {
   try {
     const { sheetId, gid, tabName } = req.query;
+    let round = req.query.round || '';
     if (!sheetId || !tabName) {
       return res.json({ ok: false, error: 'sheetId와 tabName이 필요합니다.' });
     }
@@ -271,6 +272,53 @@ router.get('/get-inaed-list', async (req, res, next) => {
       if (INAD_COL_KEYWORDS.some(kw => h.includes(kw))) {
         inadColIdx = i;
         break;
+      }
+    }
+
+    // ── 차수(round) 컬럼 감지 ──
+    const ROUND_COL_KEYWORDS = ['회차', '차수', 'round'];
+    let roundColIdx = -1;
+    for (let i = 0; i < headers.length; i++) {
+      const h = headers[i].toLowerCase();
+      if (ROUND_COL_KEYWORDS.some(kw => h.includes(kw))) {
+        roundColIdx = i;
+        break;
+      }
+    }
+
+    // ★★★ round 미지정 시 최신 활성 차수 자동 감지 ★★★
+    if (!round && roundColIdx >= 0) {
+      // 1) tab_configs에서 closed/archived 차수 목록 조회
+      let closedSet = new Set();
+      try {
+        const { rows: tcRows } = await pool.query(
+          'SELECT closed_rounds, archived_rounds FROM tab_configs WHERE sheet_id = $1 AND tab_name = $2',
+          [sheetId, tabName]
+        );
+        if (tcRows.length > 0) {
+          const closedRounds = (tcRows[0].closed_rounds || '').split(',').map(s => s.trim()).filter(Boolean);
+          const archivedRounds = (tcRows[0].archived_rounds || '').split(',').map(s => s.trim()).filter(Boolean);
+          closedSet = new Set([...closedRounds, ...archivedRounds]);
+        }
+      } catch (_) { /* 무시 */ }
+
+      // 2) 시트 데이터에서 모든 차수 추출
+      const allRoundsInSheet = new Set();
+      for (const row of dataRows) {
+        const rv = String(row[roundColIdx] || '').trim();
+        if (rv) allRoundsInSheet.add(rv);
+      }
+
+      // 3) 활성(미마감) 차수 중 가장 최신(숫자 큰) 것 선택
+      const activeRounds = [...allRoundsInSheet]
+        .filter(r => !closedSet.has(r))
+        .sort((a, b) => {
+          const numA = parseInt(a.replace(/[^0-9]/g, '')) || 0;
+          const numB = parseInt(b.replace(/[^0-9]/g, '')) || 0;
+          return numA - numB;
+        });
+      if (activeRounds.length > 0) {
+        round = activeRounds[activeRounds.length - 1]; // 최신 활성 차수
       }
     }
 
@@ -315,10 +363,16 @@ router.get('/get-inaed-list', async (req, res, next) => {
       }
     }
 
-    // ── 데이터행에서 인애드명+옵션 추출 ──
+    // ── 데이터행에서 인애드명+옵션 추출 (★ 차수 필터링 적용) ──
     const names = [];
     for (let ri = 0; ri < dataRows.length; ri++) {
       const row = dataRows[ri] || [];
+
+      // ★ 차수 필터: round가 지정되어 있고 차수 컬럼이 있으면 해당 차수만
+      if (round && roundColIdx >= 0) {
+        const rowRound = String(row[roundColIdx] || '').trim();
+        if (rowRound !== round) continue;
+      }
 
       // 인애드명이 없으면 스킵
       const name = inadColIdx >= 0 ? String(row[inadColIdx] || '').trim() : '';
@@ -336,7 +390,7 @@ router.get('/get-inaed-list', async (req, res, next) => {
       names.push({ name, date, options, rowIndex });
     }
 
-    logger.info(`[get-inaed-list] sheet=${sheetId}, tab=${tabName} → ${names.length}명, 옵션헤더: [${optionHeaders.join(',')}]`);
+    logger.info(`[get-inaed-list] sheet=${sheetId}, tab=${tabName}, round=${round || '(auto)'} → ${names.length}명, 옵션헤더: [${optionHeaders.join(',')}]`);
 
     return res.json({
       ok: true,
@@ -344,6 +398,7 @@ router.get('/get-inaed-list', async (req, res, next) => {
       optionHeaders,
       memoHeader,
       orderNumHeader,
+      detectedRound: round || '',  // 프론트엔드에 감지된 차수 알려줌
     });
 
   } catch (err) {
