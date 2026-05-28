@@ -4021,21 +4021,30 @@ function selectAcItem(name) {
 /** oninput 핸들러 */
 function onOrdererInput(el) {
   const q = el.value.trim();
-  const candidates = _filterInaed(q);
   if (_inaedNames.length === 0) {
     // 아직 목록 로딩 전이면 드롭다운 숨김
     _closeAcList();
     return;
   }
-  _renderAcList(candidates, q);
+  // ★ 빈 값이면 전체 목록 표시 (키보드 올라온 후이므로 OK)
+  const candidates = _filterInaed(q);
+  if (candidates.length > 0 || q) {
+    _renderAcList(candidates, q);
+  } else {
+    _closeAcList();
+  }
 }
 
-/** onfocus 핸들러 */
+/** onfocus 핸들러 — 모바일 키보드 우선 (드롭다운은 입력 시에만 표시) */
 function onOrdererFocus() {
   if (_acBlurTimer) { clearTimeout(_acBlurTimer); _acBlurTimer = null; }
+  // ★ 모바일 키보드가 먼저 올라오도록 포커스 시에는 드롭다운 열지 않음
+  // 이미 값이 있을 때만 필터링된 목록 표시
   const q = (document.getElementById("of_orderer")?.value || "").trim();
-  const candidates = _filterInaed(q);
-  if (candidates.length > 0 || q) _renderAcList(candidates, q);
+  if (q.length > 0) {
+    const candidates = _filterInaed(q);
+    if (candidates.length > 0) _renderAcList(candidates, q);
+  }
 }
 
 /** onblur 핸들러 — 클릭 이벤트보다 늦게 닫히도록 딜레이 */
