@@ -1065,8 +1065,15 @@ function _mapOrderToRow(headers, orderData) {
   // 옵션 컬럼 카운터 (순서대로 할당)
   let optColCounter = 0;
 
+  // ★ 관리자 전용 열: 절대 덮어쓰면 안 되는 키워드 목록
+  const ADMIN_ONLY_KEYWORDS = ['번호', 'no', '#', '인애드', '카톡', '닉네임', '상품', '상품명'];
+
   return headers.map(h => {
-    const key = h.toLowerCase();
+    const key = h.toLowerCase().trim();
+    // ★ 관리자 전용 열 보호: 정확히 일치하거나 특정 키워드만 포함된 열은 null 반환
+    if (ADMIN_ONLY_KEYWORDS.some(kw => key === kw)) return null;
+    // "인애드" 포함 열도 보호 (인애드명단, 인애드명, 인애드제출 등)
+    if (key.includes('인애드')) return null;
     if (key.includes('주문자') || key.includes('orderer')) return orderData.orderer || '';
     if (key.includes('수취인') || key.includes('이름') || key.includes('recipient')) return orderData.recipient || '';
     if (key.includes('아이디') || key.includes('userid') || key.includes('id')) return orderData.userId || '';
@@ -1085,7 +1092,7 @@ function _mapOrderToRow(headers, orderData) {
       optColCounter++;
       return val;
     }
-    // ★ 매칭되지 않는 열(번호, 구매일자 등)은 null → 기존 값 보존
+    // ★ 매칭되지 않는 열은 null → 기존 값 보존
     return null;
   });
 }

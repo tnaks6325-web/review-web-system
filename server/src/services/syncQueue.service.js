@@ -398,8 +398,17 @@ function _getColLetter(colIdx) {
 
 // ── 헬퍼: 주문 데이터를 헤더에 맞게 매핑 ──
 function _mapOrderToRow(headers, orderData) {
+  // ★ 관리자 전용 열: 절대 덮어쓰면 안 되는 키워드 목록
+  const ADMIN_ONLY_KEYWORDS = ['번호', 'no', '#', '인애드', '카톡', '닉네임', '상품', '상품명'];
+  // 옵션 키를 파이프로 분리
+  const optParts = (orderData.selectedOptKey || '').split('|').map(v => v.trim());
+  let optColCounter = 0;
+
   return headers.map(h => {
-    const key = h.toLowerCase();
+    const key = h.toLowerCase().trim();
+    // ★ 관리자 전용 열 보호
+    if (ADMIN_ONLY_KEYWORDS.some(kw => key === kw)) return null;
+    if (key.includes('인애드')) return null;
     if (key.includes('주문자') || key.includes('orderer')) return orderData.orderer || '';
     if (key.includes('수취인') || key.includes('이름') || key.includes('recipient')) return orderData.recipient || '';
     if (key.includes('아이디') || key.includes('userid') || key.includes('id')) return orderData.userId || '';
@@ -412,8 +421,13 @@ function _mapOrderToRow(headers, orderData) {
     if (key.includes('일자') || key.includes('날짜') || key.includes('date')) return orderData.dateStr || '';
     if (key.includes('주문번호') || key.includes('ordernum')) return orderData.orderNum || '';
     if (key.includes('비고') || key.includes('특이사항') || key.includes('memo')) return orderData.memo || '';
-    if (key.includes('옵션') || key.includes('option')) return orderData.selectedOptKey || '';
-    return '';
+    if (key.includes('옵션') || key.includes('option')) {
+      const val = optParts[optColCounter] || '';
+      optColCounter++;
+      return val;
+    }
+    // ★ 매칭되지 않는 열은 null → 기존 값 보존
+    return null;
   });
 }
 
