@@ -6083,12 +6083,27 @@ function applyCardAiResult(cid) {
       el.classList.add("ai-filled-asterisk");
       el.classList.remove("ai-filled", "ai-locked");
       el.readOnly = false;
+      // ★ 실시간 별표 감지 핸들러: 별표 제거 시 녹색 전환
+      el.addEventListener("input", function _asteriskWatch() {
+        const curVal = el.value;
+        const stillHas = curVal.includes("*");
+        const badge = el.parentElement?.querySelector(".ai-lock-badge");
+        if (stillHas) {
+          el.classList.add("ai-filled-asterisk");
+          el.classList.remove("ai-filled");
+          if (badge) { badge.style.cssText = "background:#FFF1F2;color:#BE123C;border:1px solid #FDA4AF;position:absolute;right:8px;top:50%;transform:translateY(-50%);font-size:.62rem;padding:2px 8px;border-radius:6px;white-space:nowrap"; badge.innerHTML = '<i class="fas fa-exclamation-triangle"></i> *수정필수'; }
+        } else {
+          el.classList.remove("ai-filled-asterisk");
+          el.classList.add("ai-filled");
+          if (badge) { badge.style.cssText = "background:#D1FAE5;color:#065F46;border:1px solid #6EE7B7;position:absolute;right:8px;top:50%;transform:translateY(-50%);font-size:.62rem;padding:2px 8px;border-radius:6px;white-space:nowrap"; badge.innerHTML = '<i class="fas fa-check-circle"></i> 수정완료'; }
+        }
+      });
       const parent = el.parentElement;
       if (parent && !parent.querySelector(".ai-lock-badge")) {
         el.style.paddingRight = "100px";
         const badge = document.createElement("span");
         badge.className = "ai-lock-badge";
-        badge.style.cssText = "background:#FFF1F2;color:#BE123C;border:1px solid #FDA4AF";
+        badge.style.cssText = "background:#FFF1F2;color:#BE123C;border:1px solid #FDA4AF;position:absolute;right:8px;top:50%;transform:translateY(-50%);font-size:.62rem;padding:2px 8px;border-radius:6px;white-space:nowrap";
         badge.innerHTML = '<i class="fas fa-exclamation-triangle"></i> *수정필수';
         parent.style.position = "relative";
         parent.appendChild(badge);
@@ -6132,6 +6147,21 @@ function applyCardAiResult(cid) {
         addrEl.classList.add("ai-filled");
         addrEl.classList.remove("ai-locked", "ai-filled-asterisk");
       }
+      // ★ 실시간 별표 감지 핸들러 (주소)
+      addrEl.addEventListener("input", function() {
+        const curVal = addrEl.value;
+        const stillHas = curVal.includes("*");
+        const badge = addrEl.parentElement?.querySelector(".ai-lock-badge");
+        if (stillHas) {
+          addrEl.classList.add("ai-filled-asterisk");
+          addrEl.classList.remove("ai-filled");
+          if (badge) { badge.style.cssText = "background:#FFF1F2;color:#BE123C;border:1px solid #FDA4AF;position:absolute;right:8px;top:50%;transform:translateY(-50%);font-size:.62rem;padding:2px 8px;border-radius:6px;white-space:nowrap"; badge.innerHTML = '<i class="fas fa-exclamation-triangle"></i> *수정필수'; }
+        } else {
+          addrEl.classList.remove("ai-filled-asterisk");
+          addrEl.classList.add("ai-filled");
+          if (badge) { badge.style.cssText = "background:#D1FAE5;color:#065F46;border:1px solid #6EE7B7;position:absolute;right:8px;top:50%;transform:translateY(-50%);font-size:.62rem;padding:2px 8px;border-radius:6px;white-space:nowrap"; badge.innerHTML = '<i class="fas fa-check-circle"></i> 수정완료'; }
+        }
+      });
       // 배지: 별표 여부에 따라 스타일 분기
       const addrParent = addrEl.parentElement;
       if (addrParent && !addrParent.querySelector(".ai-lock-badge")) {
@@ -6139,10 +6169,10 @@ function applyCardAiResult(cid) {
         const badge = document.createElement("span");
         badge.className = "ai-lock-badge";
         if (addrHasAsterisk) {
-          badge.style.cssText = "background:#FFF1F2;color:#BE123C;border:1px solid #FDA4AF";
+          badge.style.cssText = "background:#FFF1F2;color:#BE123C;border:1px solid #FDA4AF;position:absolute;right:8px;top:50%;transform:translateY(-50%);font-size:.62rem;padding:2px 8px;border-radius:6px;white-space:nowrap";
           badge.innerHTML = '<i class="fas fa-exclamation-triangle"></i> *수정필수';
         } else {
-          badge.style.cssText = "background:#D1FAE5;color:#065F46;border:1px solid #6EE7B7";
+          badge.style.cssText = "background:#D1FAE5;color:#065F46;border:1px solid #6EE7B7;position:absolute;right:8px;top:50%;transform:translateY(-50%);font-size:.62rem;padding:2px 8px;border-radius:6px;white-space:nowrap";
           badge.innerHTML = '<i class="fas fa-pencil-alt"></i> AI 자동입력';
         }
         addrParent.style.position = "relative";
