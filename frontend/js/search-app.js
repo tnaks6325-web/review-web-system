@@ -6196,17 +6196,18 @@ function applyCardAiResult(cid) {
       const dg = d.price.replace(/[^0-9]/g,"");
       if (dg) {
         el.value = Number(dg).toLocaleString("ko-KR");
-        el.classList.add("ai-filled", "ai-locked");
-        el.readOnly = true;
-        el.setAttribute("tabindex", "-1");
-        el.oninput = null;
-        el.setAttribute("oninput", "");
+        el.classList.add("ai-filled");
+        el.classList.remove("ai-locked");
+        el.readOnly = false;
+        // oninput 핸들러 유지 (수정 가능)
+        el.setAttribute("oninput", `formatPriceInput(this);this.classList.remove('ai-filled');this.dataset.userEdited='1';_ofClearError('${cid}_price')`);
         const parent = el.parentElement;
         if (parent && !parent.querySelector(".ai-lock-badge")) {
           el.style.paddingRight = "80px";
           const badge = document.createElement("span");
           badge.className = "ai-lock-badge";
-          badge.innerHTML = '<i class="fas fa-lock"></i> AI 적용됨';
+          badge.style.cssText = "background:#D1FAE5;color:#065F46;border:1px solid #6EE7B7";
+          badge.innerHTML = '<i class="fas fa-pencil-alt"></i> AI 적용됨';
           parent.style.position = "relative";
           parent.appendChild(badge);
         }
