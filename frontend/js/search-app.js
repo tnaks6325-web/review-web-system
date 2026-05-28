@@ -4266,7 +4266,7 @@ function _buildCoupangCardHtml(cid) {
         <div id="${cid}_asteriskWarn" style="display:none;margin:8px 0 6px;padding:9px 11px;background:#FEF2F2;border:1.5px solid #FCA5A5;border-radius:8px;font-size:.76rem;color:#991B1B;line-height:1.6">
           <i class="fas fa-exclamation-triangle" style="margin-right:5px;color:#EF4444"></i>
           <b>수취인·전화번호·주소에 별표(*)가 포함되어 있습니다.</b><br>
-          쿠팡 주문 캡처본은 개인정보가 *로 가려집니다. 정보를 직접 입력해주세요.
+          적용 후 핑크색 필드는 반드시 직접 수정해주세요.
         </div>
         <button class="of-ai-apply-btn" id="${cid}_aiApplyBtn" onclick="applyCardAiResult('${cid}')">
           <i class="fas fa-check-circle"></i> 위 정보를 입력칸에 적용하기
@@ -4562,7 +4562,7 @@ function _buildOrderCardHtml(cid, idx, type) {
         <div id="${cid}_asteriskWarn" style="display:none;margin:8px 0 6px;padding:9px 11px;background:#FEF2F2;border:1.5px solid #FCA5A5;border-radius:8px;font-size:.76rem;color:#991B1B;line-height:1.6">
           <i class="fas fa-exclamation-triangle" style="margin-right:5px;color:#EF4444"></i>
           <b>수취인·전화번호·주소에 별표(*)가 포함되어 있습니다.</b><br>
-          쿠팡 주문 캡처본은 개인정보가 *로 가려집니다. 정보를 직접 입력해주세요.
+          적용 후 핑크색 필드는 반드시 직접 수정해주세요.
         </div>
         <button class="of-ai-apply-btn" id="${cid}_aiApplyBtn" onclick="applyCardAiResult('${cid}')">
           <i class="fas fa-check-circle"></i> 위 정보를 입력칸에 적용하기
@@ -4580,7 +4580,7 @@ function _buildOrderCardHtml(cid, idx, type) {
     </div>
 
     <!-- 입력 폼 -->
-    <div style="font-size:.68rem;font-weight:700;color:var(--t3);margin-bottom:10px;letter-spacing:.04em">✏️ 아래 정보를 입력해주세요</div>
+    <div style="font-size:.68rem;font-weight:700;color:var(--t3);margin-bottom:10px;letter-spacing:.04em">✏️ 아래 정보를 입력해주세요<span style="color:#F43F5E;font-weight:600">(*별표포함시 직접수정 필수.)</span></div>
 
     <!-- 옵션 선택 (1번 카드에만 표시됨, JS로 동적 처리) -->
     ${isFirst ? `
@@ -6030,7 +6030,7 @@ function _showCardAiResult(cid, data) {
   document.getElementById(cid+"_aiResult").classList.add("show");
   document.getElementById(cid+"_aiError").style.display = "none";
 
-  // ★ 별표(*) 탐지: 수취인/전화번호/주소에 * 포함 시 경고 + 적용 버튼 비활성화
+  // ★ 별표(*) 탐지: 수취인/전화번호/주소에 * 포함 시 경고 표시 (적용은 허용)
   const hasAsterisk = [data.recipient, data.phone, data.address].some(v => v && v.includes("*"));
   const asteriskWarnEl = document.getElementById(cid+"_asteriskWarn");
   if (asteriskWarnEl) asteriskWarnEl.style.display = hasAsterisk ? "block" : "none";
@@ -6038,10 +6038,10 @@ function _showCardAiResult(cid, data) {
   const hasAny = data.orderNumber||data.recipient||data.phone||data.address;
   const applyBtn = document.getElementById(cid+"_aiApplyBtn");
   if (applyBtn) {
-    applyBtn.disabled = !hasAny || hasAsterisk;
+    applyBtn.disabled = !hasAny;
     if (hasAsterisk) {
-      applyBtn.innerHTML = '<i class="fas fa-ban"></i> 별표(*) 포함 — 직접 입력 필요';
-      applyBtn.style.background = "#9CA3AF";
+      applyBtn.innerHTML = '<i class="fas fa-exclamation-triangle"></i> 별표(*) 포함 — 적용 후 직접 수정 필요';
+      applyBtn.style.background = "#F59E0B";
     } else {
       applyBtn.innerHTML = '<i class="fas fa-check-circle"></i> 위 정보를 입력칸에 적용하기';
       applyBtn.style.background = "";
@@ -6067,39 +6067,51 @@ function applyCardAiResult(cid) {
   const st = _cardAiState[cid]; if (!st || !st.extracted) return;
   const d = st.extracted;
 
-  // ★ 별표(*) 재검증: 수취인/전화번호/주소에 * 있으면 적용 차단
+  // ★ 별표(*) 탐지: 포함된 필드는 핑크색 표시 (적용은 허용)
   const hasAsterisk = [d.recipient, d.phone, d.address].some(v => v && v.includes("*"));
-  if (hasAsterisk) {
-    showToast("⚠️ 수취인·전화번호·주소에 별표(*)가 포함되어 있어 적용할 수 없습니다.\n쿠팡 주문 캡처는 개인정보가 *로 가려지므로 직접 입력해주세요.", "error");
-    return;
-  }
 
   // ★ 잠금 적용 헬퍼: 값 채우기 + readonly + ai-locked + 자물쇠 배지
+  // 별표 포함 필드: 핑크색 + 수정 가능 (잠금 X)
   const lockF = (id, val) => {
     if (!val) return;
     const el = document.getElementById(id);
     if (!el) return;
     el.value = val;
-    el.classList.add("ai-filled", "ai-locked");
-    el.readOnly = true;
-    el.setAttribute("tabindex", "-1");
-    // oninput 핸들러 제거 (혹시라도 발화 방지)
-    el.oninput = null;
-    el.setAttribute("oninput", "");
-    // 부모 래퍼에 배지 삽입 (중복 방지)
-    const parent = el.parentElement;
-    if (parent && !parent.querySelector(".ai-lock-badge")) {
-      // 부모가 relative가 아니면 래퍼로 감싸기
-      if (!parent.classList.contains("ai-lock-wrap")) {
-        el.classList.add("ai-lock-input-padded"); // 오른쪽 여백 확보
-        el.style.paddingRight = "80px";
+    const valHasAsterisk = val.includes("*");
+    if (valHasAsterisk) {
+      // 별표 포함: 핑크색 표시 + 수정 가능
+      el.classList.add("ai-filled-asterisk");
+      el.classList.remove("ai-filled", "ai-locked");
+      el.readOnly = false;
+      const parent = el.parentElement;
+      if (parent && !parent.querySelector(".ai-lock-badge")) {
+        el.style.paddingRight = "100px";
+        const badge = document.createElement("span");
+        badge.className = "ai-lock-badge";
+        badge.style.cssText = "background:#FFF1F2;color:#BE123C;border:1px solid #FDA4AF";
+        badge.innerHTML = '<i class="fas fa-exclamation-triangle"></i> *수정필수';
+        parent.style.position = "relative";
+        parent.appendChild(badge);
       }
-      const badge = document.createElement("span");
-      badge.className = "ai-lock-badge";
-      badge.innerHTML = '<i class="fas fa-lock"></i> AI 적용됨';
-      // el의 position:relative 컨테이너에 넣기
-      parent.style.position = "relative";
-      parent.appendChild(badge);
+    } else {
+      // 별표 없음: 기존 잠금 로직
+      el.classList.add("ai-filled", "ai-locked");
+      el.readOnly = true;
+      el.setAttribute("tabindex", "-1");
+      el.oninput = null;
+      el.setAttribute("oninput", "");
+      const parent = el.parentElement;
+      if (parent && !parent.querySelector(".ai-lock-badge")) {
+        if (!parent.classList.contains("ai-lock-wrap")) {
+          el.classList.add("ai-lock-input-padded");
+          el.style.paddingRight = "80px";
+        }
+        const badge = document.createElement("span");
+        badge.className = "ai-lock-badge";
+        badge.innerHTML = '<i class="fas fa-lock"></i> AI 적용됨';
+        parent.style.position = "relative";
+        parent.appendChild(badge);
+      }
     }
   };
 
@@ -6112,16 +6124,27 @@ function applyCardAiResult(cid) {
     const addrEl = document.getElementById(cid+"_address");
     if (addrEl) {
       addrEl.value = d.address;
-      addrEl.classList.add("ai-filled");
-      addrEl.classList.remove("ai-locked");
-      // 배지: 자물쇠 아닌 연필 아이콘으로 수정 가능 표시
+      const addrHasAsterisk = d.address.includes("*");
+      if (addrHasAsterisk) {
+        addrEl.classList.add("ai-filled-asterisk");
+        addrEl.classList.remove("ai-filled", "ai-locked");
+      } else {
+        addrEl.classList.add("ai-filled");
+        addrEl.classList.remove("ai-locked", "ai-filled-asterisk");
+      }
+      // 배지: 별표 여부에 따라 스타일 분기
       const addrParent = addrEl.parentElement;
       if (addrParent && !addrParent.querySelector(".ai-lock-badge")) {
-        addrEl.style.paddingRight = "80px";
+        addrEl.style.paddingRight = "100px";
         const badge = document.createElement("span");
         badge.className = "ai-lock-badge";
-        badge.style.cssText = "background:#D1FAE5;color:#065F46;border:1px solid #6EE7B7";
-        badge.innerHTML = '<i class="fas fa-pencil-alt"></i> AI 자동입력';
+        if (addrHasAsterisk) {
+          badge.style.cssText = "background:#FFF1F2;color:#BE123C;border:1px solid #FDA4AF";
+          badge.innerHTML = '<i class="fas fa-exclamation-triangle"></i> *수정필수';
+        } else {
+          badge.style.cssText = "background:#D1FAE5;color:#065F46;border:1px solid #6EE7B7";
+          badge.innerHTML = '<i class="fas fa-pencil-alt"></i> AI 자동입력';
+        }
         addrParent.style.position = "relative";
         addrParent.appendChild(badge);
       }
@@ -6152,10 +6175,24 @@ function applyCardAiResult(cid) {
     }
   }
 
-  showToast("✅ AI 추출 정보가 적용되었습니다. 주소는 직접 수정할 수 있습니다." + (d.orderNumber ? " (주문번호: "+d.orderNumber+")" : ""), "success");
+  if (hasAsterisk) {
+    showToast("⚠️ AI 추출 정보가 적용되었습니다. 별표(*) 포함 필드는 직접 수정해주세요." + (d.orderNumber ? " (주문번호: "+d.orderNumber+")" : ""), "warn");
+  } else {
+    showToast("✅ AI 추출 정보가 적용되었습니다. 주소는 직접 수정할 수 있습니다." + (d.orderNumber ? " (주문번호: "+d.orderNumber+")" : ""), "success");
+  }
 
   const btn = document.getElementById(cid+"_aiApplyBtn");
-  if (btn) { btn.innerHTML='<i class="fas fa-lock"></i> 적용 완료 (잠금)'; btn.disabled=true; btn.style.background="#10B981"; }
+  if (btn) {
+    if (hasAsterisk) {
+      btn.innerHTML='<i class="fas fa-exclamation-triangle"></i> 적용 완료 — *필드 수정 필요';
+      btn.disabled=true;
+      btn.style.background="#F59E0B";
+    } else {
+      btn.innerHTML='<i class="fas fa-lock"></i> 적용 완료 (잠금)';
+      btn.disabled=true;
+      btn.style.background="#10B981";
+    }
+  }
 
   // 적용 후 AI 추출 결과 카드 숨김
   const resultBox = document.getElementById(cid+"_aiResult");

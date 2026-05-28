@@ -440,6 +440,7 @@ input,textarea,button{font-family:inherit}
 .of-ai-apply-btn:disabled{background:#A5B4FC;cursor:not-allowed}
 /* 자동입력 표시 */
 .of-input.ai-filled{border-color:#10B981;background:#F0FDF4}
+.of-input.ai-filled-asterisk{border-color:#F43F5E;background:#FFF1F2;color:#881337}
 /* 필수 입력 스타일 */
 .of-label-required::after{content:" *";color:#EF4444;font-weight:700}
 .of-input--error{border-color:#EF4444!important;background:#FFF5F5!important;box-shadow:0 0 0 3px rgba(239,68,68,.12)!important}
