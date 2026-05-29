@@ -6420,6 +6420,32 @@ async function submitOrderForm() {
     _resetBtn(); return;
   }
 
+  // ★ 별표(*) 포함 검사: 수취인/연락처/주소에 *가 남아있으면 제출 차단
+  {
+    let asteriskFound = false;
+    let asteriskField = null;
+    for (const cid of _orderCardIds) {
+      const fieldsToCheck = [
+        { id: cid + "_recipient", label: "수취인" },
+        { id: cid + "_phone", label: "연락처" },
+        { id: cid + "_address", label: "배송주소" },
+      ];
+      for (const f of fieldsToCheck) {
+        const el = document.getElementById(f.id);
+        if (el && el.value.includes("*")) {
+          asteriskFound = true;
+          if (!asteriskField) asteriskField = el;
+          el.classList.add("of-input--error");
+        }
+      }
+    }
+    if (asteriskFound) {
+      if (asteriskField) asteriskField.scrollIntoView({ behavior: "smooth", block: "center" });
+      showToast("⚠️ 양식에 *표시가 포함된 경우 제출이 불가합니다.\n별표(*)를 제거한 뒤 정확한 정보를 입력해주세요.", "error");
+      _resetBtn(); return;
+    }
+  }
+
   // ★ v9.14: 소득신고 유효성 검사 (카드별)
   if (window._incomeType === "소득신고") {
     for (let i = 0; i < _orderCardIds.length; i++) {
