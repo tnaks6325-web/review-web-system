@@ -421,8 +421,17 @@ if (sessionStorage.getItem("iad_direct_submit_items")) {
 
         <!-- 로그인 패널 -->
         <div id="loginPanel" class="auth-panel">
-          <!-- STEP 1: 전화번호 뒤 8자리 입력 -->
+          <!-- 이름 + 전화번호 동시 입력 -->
           <div id="loginStep1">
+            <div class="auth-field-wrap">
+              <label class="auth-label"><i class="fas fa-user"></i> 이름</label>
+              <input id="loginNameInput" type="text" class="auth-input"
+                placeholder="이름 입력 (예: 홍길동)"
+                autocomplete="name" maxlength="20"
+                oninput="_clearLoginErr()"
+                onkeydown="if(event.key==='Enter')document.getElementById('loginPhoneInput').focus()"
+              />
+            </div>
             <div class="auth-field-wrap">
               <label class="auth-label"><i class="fas fa-phone"></i> 전화번호 뒤 8자리</label>
               <div class="auth-phone-row">
@@ -430,33 +439,9 @@ if (sessionStorage.getItem("iad_direct_submit_items")) {
                 <input id="loginPhoneInput" type="tel" class="auth-input auth-phone-input"
                   placeholder="12345678"
                   maxlength="8" inputmode="numeric"
-                  oninput="this.value=this.value.replace(/[^0-9]/g,'');_clearLoginErr();_resetLoginLookup()"
-                  onkeydown="if(event.key==='Enter')_doLookupPhone()"
+                  oninput="this.value=this.value.replace(/[^0-9]/g,'');_clearLoginErr()"
+                  onkeydown="if(event.key==='Enter')_doLoginDirect()"
                 />
-              </div>
-            </div>
-            <!-- 조회 결과 패널 -->
-            <div id="phoneLookupResult" class="phone-lookup-result">
-              <div class="phone-lookup-name">
-                <div class="rc-info-icon" style="width:32px;height:32px;background:#EDE9FE;color:#7C3AED;border-radius:8px;display:flex;align-items:center;justify-content:center;font-size:.85rem;flex-shrink:0">
-                  <i class="fas fa-user"></i>
-                </div>
-                <div>
-                  <div class="plr-label">등록된 이름</div>
-                  <div id="phoneLookupName" class="plr-value">—</div>
-                </div>
-              </div>
-              <p class="phone-lookup-hint">
-                <i class="fas fa-info-circle" style="color:#7C3AED;margin-right:4px"></i>
-                본인의 이름이 맞으면 <strong>로그인</strong>을 눌러주세요.
-              </p>
-              <div class="phone-lookup-btns">
-                <button class="plb-confirm" onclick="_doLoginWithLookup()">
-                  <i class="fas fa-check-circle"></i> 맞아요, 로그인
-                </button>
-                <button class="plb-retry" onclick="_resetLoginLookup();document.getElementById('loginPhoneInput').focus()">
-                  <i class="fas fa-redo"></i> 다시 입력
-                </button>
               </div>
             </div>
             <!-- 정지 계정 안내 -->
@@ -467,8 +452,8 @@ if (sessionStorage.getItem("iad_direct_submit_items")) {
             <div id="loginErr" class="auth-err" style="display:none">
               <i class="fas fa-exclamation-circle"></i><span id="loginErrMsg"></span>
             </div>
-            <button id="btnLoginLookup" class="auth-submit-btn" onclick="_doLookupPhone()">
-              <i class="fas fa-search"></i> 이름 조회하기
+            <button id="btnLoginLookup" class="auth-submit-btn" onclick="_doLoginDirect()">
+              <i class="fas fa-sign-in-alt"></i> 로그인
             </button>
           </div>
           <!-- 레거시: 이름 입력 (숨김 — 세션 복원 등 내부 호환용) -->

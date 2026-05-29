@@ -48,23 +48,20 @@ async function registerReviewer({ name, phone, consent, sheetId }) {
  * 리뷰어 인증 (GAS: verifyReviewer)
  */
 async function verifyReviewer(name, phone8) {
+  const n = (name || '').trim();
   const p8 = (phone8 || '').replace(/[^0-9]/g, '');
+  if (!n) return { ok: false, error: '이름을 입력하세요.' };
   if (p8.length !== 8) return { ok: false, error: '전화번호 뒤 8자리를 입력하세요.' };
 
   const { rows } = await pool.query(
-    'SELECT name, phone FROM reviewers WHERE phone8 = $1 LIMIT 1', [p8]
+    'SELECT name, phone FROM reviewers WHERE phone8 = $1 AND name = $2 LIMIT 1', [p8, n]
   );
 
   if (rows.length === 0) {
-    return { ok: false, error: '등록된 회원 정보가 없습니다.' };
+    return { ok: false, error: '이름 또는 전화번호가 일치하지 않습니다.' };
   }
 
-  const reviewer = rows[0];
-  if (name && name.trim() !== reviewer.name) {
-    return { ok: false, error: '이름이 일치하지 않습니다.' };
-  }
-
-  return { ok: true, name: reviewer.name, phone: reviewer.phone };
+  return { ok: true, name: rows[0].name, phone: rows[0].phone };
 }
 
 /**

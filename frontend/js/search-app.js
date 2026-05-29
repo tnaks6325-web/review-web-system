@@ -439,6 +439,73 @@ async function _doLookupPhone() {
   }
 }
 
+/** ★ 이름+전화번호 동시 입력 → 바로 로그인 */
+async function _doLoginDirect() {
+  const name   = (document.getElementById("loginNameInput") || {}).value?.trim() || "";
+  const phone8 = (document.getElementById("loginPhoneInput").value || "").replace(/[^0-9]/g, "");
+
+  if (!name) {
+    _showLoginErr("이름을 입력하세요.");
+    document.getElementById("loginNameInput").focus();
+    return;
+  }
+  if (phone8.length !== 8) {
+    _showLoginErr("전화번호 뒤 8자리를 정확히 입력하세요.");
+    document.getElementById("loginPhoneInput").focus();
+    return;
+  }
+  if (!APP_CONFIG.GAS_WEB_APP_URL) {
+    _showLoginErr("서버 URL이 설정되지 않았습니다.");
+    return;
+  }
+
+  const btn = document.getElementById("btnLoginLookup");
+  btn.disabled = true;
+  btn.innerHTML = '<i class="fas fa-circle-notch fa-spin"></i> 로그인 중...';
+  _clearLoginErr();
+  _hideLoginBlocked();
+
+  try {
+    const data = await gasGet({ action: "verifyReviewer", name, phone8 });
+
+    if (data.status === "정지" || data.status === "탈퇴") {
+      _showLoginBlocked(
+        data.status === "탈퇴"
+          ? "탈퇴된 계정입니다. 재가입이 필요한 경우 관리자에게 문의해주세요."
+          : "이 계정은 현재 이용이 제한되었습니다. 관리자에게 문의해주세요."
+      );
+      return;
+    }
+
+    if (!data.ok) {
+      _showLoginErr(data.error || "이름 또는 전화번호가 일치하지 않습니다.");
+      return;
+    }
+
+    // 성공
+    _saveAuthSession(data.name || name, true, true, data.phone8 || phone8);
+    _applyLoginUI(data.name || name);
+    const ni = document.getElementById("nameInput");
+    if (ni) ni.value = data.name || name;
+
+    // ★ Phase 5: 구매양식 대기 중이면 폼으로 복귀
+    if (window._pendingOrderForm) {
+      window._pendingOrderForm = false;
+      window._slotAuth = { name: data.name || name, phone8: data.phone8 || phone8 };
+      initOrderFormMode();
+      return;
+    }
+
+    await doSearch();
+
+  } catch (e) {
+    _showLoginErr("오류: " + e.message);
+  } finally {
+    btn.disabled = false;
+    btn.innerHTML = '<i class="fas fa-sign-in-alt"></i> 로그인';
+  }
+}
+
 /** "맞아요, 로그인" 버튼 클릭 핸들러 */
 async function _doLoginWithLookup() {
   if (!_lookedUpName) return;
@@ -503,12 +570,11 @@ async function _doLoginWithLookup() {
 
 /** 기존 _doLogin() 호환 래퍼 (세션 복원 등 내부 호출용) */
 async function _doLogin() {
-  const name   = (document.getElementById("nameInput").value || "").trim();
+  const name   = (document.getElementById("nameInput").value || "").trim()
+              || (document.getElementById("loginNameInput") || {}).value?.trim() || "";
   const phone8 = (document.getElementById("loginPhoneInput").value || "").replace(/[^0-9]/g, "");
   if (!name || !phone8 || phone8.length !== 8) {
-    // 이름 없으면 phone8 단독 조회 시도
-    if (phone8.length === 8) return _doLookupPhone();
-    _showLoginErr("전화번호 뒤 8자리를 입력하세요.");
+    _showLoginErr("이름과 전화번호 뒤 8자리를 모두 입력하세요.");
     return;
   }
   // 이름이 있으면 바로 검증
@@ -686,16 +752,17 @@ async function _submitRegister(name, phone, p1, p2) {
       await doSearch();
     } else if (data && data.isDuplicate) {
       // 중복 전화번호 → 로그인 탭으로 자동 전환 + 전화번호 pre-fill
-      _showRegErr("이미 등록된 전화번호입니다. 로그인 탭에서 조회해주세요.");
+      _showRegErr("이미 등록된 전화번호입니다. 로그인 탭에서 로그인해주세요.");
       setTimeout(() => {
         _switchAuthTab("login");
         // 전화번호 8자리 pre-fill
         const loginPhoneEl = document.getElementById("loginPhoneInput");
         if (loginPhoneEl) {
           loginPhoneEl.value = p1 + p2;
-          // 자동으로 이름 조회 시작
-          setTimeout(() => _doLookupPhone(), 300);
         }
+        // 이름 입력 필드에 포커스
+        const loginNameEl = document.getElementById("loginNameInput");
+        if (loginNameEl) loginNameEl.focus();
       }, 900);
     } else {
       _showRegErr((data && data.message) || "등록 중 오류가 발생했습니다.");
