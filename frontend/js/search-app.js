@@ -798,15 +798,22 @@ document.addEventListener("DOMContentLoaded", () => {
   if (initOrderFormMode()) return; // 구매양식 모드이면 이후 일반 초기화 스킵
 
   // ★ 로그인 세션/관리자 세션 없으면 메인(/)으로 리다이렉트 (중복 로그인 화면 방지)
+  // 단, #register 해시로 진입한 경우(리뷰어 등록)는 허용
   const _hasReviewerSession = (() => { try { const r = localStorage.getItem(REVIEWER_AUTH_KEY); if (!r) return false; const o = JSON.parse(r); return o && Date.now() <= o.expAt; } catch(_){return false;} })();
   const _hasAdminSession = (() => { try { const exp = Number(sessionStorage.getItem(ADMIN_BYPASS_KEY) || 0); return Date.now() < exp; } catch(_){return false;} })();
-  if (!_hasReviewerSession && !_hasAdminSession) {
+  const _isRegisterMode = location.hash === "#register";
+  if (!_hasReviewerSession && !_hasAdminSession && !_isRegisterMode) {
     window.location.replace("/");
     return;
   }
 
   // 일반 모드: 검색 화면 활성화
   showScreen("screenSearch");
+
+  // ★ #register 해시로 진입 시 등록 탭 자동 활성화
+  if (_isRegisterMode) {
+    _switchAuthTab("register");
+  }
   // ★ GAS URL 자동 부트스트랩
   // BOOTSTRAP_GAS_URL이 없으면 localStorage → GAS PropertiesService 순서로 조회
   bootstrapGasUrl();
