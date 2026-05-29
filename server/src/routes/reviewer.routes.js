@@ -66,7 +66,8 @@ router.post('/delete', authMiddleware, async (req, res, next) => {
 });
 
 // POST /api/reviewer/profile — 프로필 관리 (GAS: getReviewerProfile/saveSubAccounts/saveIncomeInfo)
-router.post('/profile', authMiddleware, async (req, res, next) => {
+// 리뷰어 본인이 phone8을 통해 접근 (인증 불필요 — phone8이 사실상 인증 토큰 역할)
+router.post('/profile', async (req, res, next) => {
   try {
     const result = await handleReviewerProfile(req.body);
     res.json(result);
@@ -81,6 +82,7 @@ router.get('/inaed-list', authMiddleware, async (req, res, next) => {
     const { rows } = await pool.query(`
       SELECT name, phone, phone8, registered_at AS "registeredAt",
              consent, status, income_type AS "incomeType",
+             resident_num AS "residentNum",
              sub_accounts AS "subAccounts"
       FROM reviewers
       ORDER BY registered_at DESC
