@@ -9698,6 +9698,14 @@ async function loadArchiveList() {
                             t.archiveReason === 'name_completed' ? '#6366F1' : '#10B981';
         const dateStr = t.archivedAt ? new Date(t.archivedAt).toLocaleDateString('ko-KR') : '-';
         const roundsStr = t.rounds ? escHtml(t.rounds) : '<span style="color:#D1D5DB">-</span>';
+        // ★ roundOnly 항목은 차수 단위 복원, 일반은 탭 전체 복원
+        const restoreBtn = t.roundOnly
+          ? `<button onclick="restoreArchivedRound('${camp.sheetId}','${escHtml(t.tabName).replace(/'/g,"\\'")}','${escHtml(t.rounds).replace(/'/g,"\\'")}')"
+              style="font-size:.7rem;padding:3px 8px;border:1px solid #8B5CF6;color:#8B5CF6;background:#F5F3FF;border-radius:5px;cursor:pointer;white-space:nowrap"
+              title="이 차수를 대시보드로 복원합니다"><i class="fas fa-undo"></i> ${t.rounds}차 복원</button>`
+          : `<button onclick="restoreArchivedTab('${camp.sheetId}','${escHtml(t.tabName).replace(/'/g,"\\'")}')"
+              style="font-size:.7rem;padding:3px 8px;border:1px solid #3B82F6;color:#3B82F6;background:#EFF6FF;border-radius:5px;cursor:pointer;white-space:nowrap"
+              title="이 탭을 대시보드로 복원합니다"><i class="fas fa-undo"></i> 복원</button>`;
         html += `<tr style="border-top:1px solid #F3F4F6">
           <td style="padding:5px 10px">${escHtml(t.tabName)}</td>
           <td style="padding:5px 8px;font-size:.73rem;color:#4B5563">${roundsStr}</td>
@@ -9705,9 +9713,7 @@ async function loadArchiveList() {
           <td style="padding:5px 8px;text-align:right">${(t.submittedCount||0).toLocaleString()}</td>
           <td style="padding:5px 8px;text-align:center"><span style="background:${reasonColor}15;color:${reasonColor};padding:2px 6px;border-radius:4px;font-size:.7rem">${reasonLabel}</span></td>
           <td style="padding:5px 8px;text-align:right;color:#9CA3AF">${dateStr}</td>
-          <td style="padding:5px 8px;text-align:center"><button onclick="restoreArchivedTab('${camp.sheetId}','${escHtml(t.tabName).replace(/'/g,"\\'")}')"
-            style="font-size:.7rem;padding:3px 8px;border:1px solid #3B82F6;color:#3B82F6;background:#EFF6FF;border-radius:5px;cursor:pointer;white-space:nowrap"
-            title="이 탭을 대시보드로 복원합니다"><i class="fas fa-undo"></i> 복원</button></td>
+          <td style="padding:5px 8px;text-align:center">${restoreBtn}</td>
         </tr>`;
       });
       html += '</tbody></table></div></div>';
@@ -9738,6 +9744,28 @@ async function restoreArchivedTab(sheetId, tabName) {
     } else {
       const reason = data.results?.[0]?.reason || '알 수 없는 오류';
       showToast('<i class="fas fa-exclamation-triangle"></i> 복원 실패: ' + escHtml(reason), 'error');
+    }
+  } catch (err) {
+    showToast('<i class="fas fa-times-circle"></i> 복원 오류: ' + escHtml(err.message), 'error');
+  }
+}
+
+// ── 차수 단위 복원 ──
+async function restoreArchivedRound(sheetId, tabName, round) {
+  if (!confirm(`"${tabName}" 의 ${round}차를 복원하시겠습니까?\n\n복원하면 해당 차수가 대시보드에 다시 표시됩니다.`)) return;
+
+  try {
+    showToast('<i class="fas fa-spinner fa-spin"></i> 차수 복원 중...', 'info');
+    const data = await gasPost({ action: 'archiveRestoreRound', sheetId, tabName, round });
+    if (data.error) {
+      showToast('<i class="fas fa-exclamation-circle"></i> 복원 실패: ' + escHtml(data.error), 'error');
+      return;
+    }
+    if (data.restored) {
+      showToast(`<i class="fas fa-check-circle"></i> "${escHtml(tabName)}" ${round}차 복원 완료 (${data.reviewCount || 0}행)`, 'success');
+      loadArchiveList(); // 목록 새로고침
+    } else {
+      showToast('<i class="fas fa-exclamation-triangle"></i> 복원 실패', 'error');
     }
   } catch (err) {
     showToast('<i class="fas fa-times-circle"></i> 복원 오류: ' + escHtml(err.message), 'error');

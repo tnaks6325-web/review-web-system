@@ -946,6 +946,102 @@ router.post('/restore', authMiddleware, async (req, res, next) => {
 });
 
 // ═══════════════════════════════════════════════════════════
+// POST /api/archive/restore-round — 차수 단위 아카이브 복원
+// body: { sheetId, tabName, round }
+// ★ tab_configs.archived_rounds에서 해당 차수 제거
+// ★ review_index_archive → review_index 복원 (해당 차수만)
+// ═══════════════════════════════════════════════════════════
+router.post('/restore-round', authMiddleware, async (req, res, next) => {
+  try {
+    const { sheetId, tabName, round } = req.body;
+    if (!sheetId || !tabName || !round) {
+      return res.status(400).json({ error: 'sheetId, tabName, round 모두 필요합니다.' });
+    }
+
+    const adminName = req.adminName || 'admin';
+    const client = await pool.connect();
+
+    try {
+      await client.query('BEGIN');
+
+      // 1. tab_configs에서 archived_rounds 업데이트 (해당 차수 제거)
+      const { rows: tcRows } = await client.query(
+        'SELECT archived_rounds, closed_rounds FROM tab_configs WHERE sheet_id = $1 AND tab_name = $2',
+        [sheetId, tabName]
+      );
+
+      if (tcRows.length > 0) {
+        const archivedRounds = (tcRows[0].archived_rounds || '').split(',').map(s => s.trim()).filter(Boolean);
+        const newArchived = archivedRounds.filter(r => r !== String(round));
+        // closed_rounds에서도 제거 (복원하면 다시 활성 차수)
+        const closedRounds = (tcRows[0].closed_rounds || '').split(',').map(s => s.trim()).filter(Boolean);
+        const newClosed = closedRounds.filter(r => r !== String(round));
+
+        await client.query(
+          'UPDATE tab_configs SET archived_rounds = $1, closed_rounds = $2, updated_at = NOW() WHERE sheet_id = $3 AND tab_name = $4',
+          [newArchived.join(','), newClosed.join(','), sheetId, tabName]
+        );
+      }
+
+      // 2. review_index_archive → review_index 복원 (해당 차수만)
+      const { rowCount: reviewCount } = await client.query(`
+        INSERT INTO review_index
+          (reviewer_name, sheet_id, tab_gid, tab_name, campaign_name,
+           row_index, is_submitted, is_submitted2, product_url, product_name,
+           submit_col, submit_col2, row_json, start_date, end_date,
+           round, phone8, built_at)
+        SELECT DISTINCT ON (sheet_id, tab_name, row_index)
+          reviewer_name, sheet_id, tab_gid, tab_name, campaign_name,
+          row_index, is_submitted, is_submitted2, product_url, product_name,
+          submit_col, submit_col2, row_json, start_date, end_date,
+          round, phone8, built_at
+        FROM review_index_archive
+        WHERE sheet_id = $1 AND tab_name = $2 AND round = $3
+        ORDER BY sheet_id, tab_name, row_index, built_at DESC
+        ON CONFLICT (sheet_id, tab_name, row_index) DO UPDATE SET
+          reviewer_name = EXCLUDED.reviewer_name,
+          is_submitted = EXCLUDED.is_submitted,
+          is_submitted2 = EXCLUDED.is_submitted2,
+          round = EXCLUDED.round,
+          built_at = EXCLUDED.built_at
+      `, [sheetId, tabName, String(round)]);
+
+      // 3. review_index_archive에서 해당 차수 삭제
+      await client.query(
+        'DELETE FROM review_index_archive WHERE sheet_id = $1 AND tab_name = $2 AND round = $3',
+        [sheetId, tabName, String(round)]
+      );
+
+      // 4. 아카이브 이력 기록
+      await client.query(`
+        INSERT INTO archive_history (action, admin_name, tab_count, row_count, note)
+        VALUES ('restore_round', $1, 1, $2, $3)
+      `, [adminName, reviewCount, `차수 복원: ${tabName} ${round}차`]);
+
+      await client.query('COMMIT');
+
+      logger.info(`[archive/restore-round] ${adminName}: ${tabName} ${round}차 복원 (${reviewCount}행)`);
+      res.json({
+        ok: true,
+        restored: true,
+        tabName,
+        round,
+        reviewCount,
+      });
+
+    } catch (err) {
+      await client.query('ROLLBACK');
+      throw err;
+    } finally {
+      client.release();
+    }
+  } catch (err) {
+    logger.error(`[archive/restore-round] 오류: ${err.message}`, err.stack);
+    res.status(500).json({ error: '차수 복원 중 오류가 발생했습니다.', detail: err.message });
+  }
+});
+
+// ═══════════════════════════════════════════════════════════
 // POST /api/archive/unhide-tab — 숨김 탭을 표시(unhide) 처리
 // body: { sheetId, tabGid }
 // Google Sheets API로 해당 탭의 hidden 속성을 false로 변경
