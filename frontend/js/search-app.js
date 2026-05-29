@@ -864,7 +864,7 @@ function bindEnter() {
 /* ── 스크린 전환 ── */
 // 화면별 타이틀 정의
 const SCREEN_TITLES = {
-  screenSearch:       "참여한 캠페인 조회",
+  screenSearch:       "리뷰 시스템 (리뷰어용)",
   screenSubmit:       "리뷰제출",
   screenOrderForm:    "구매양식"
 };
