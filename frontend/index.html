@@ -63,6 +63,11 @@
     .login-card h2 { font-size:1rem; font-weight:700; margin-bottom:6px; }
     .login-card p { font-size:.82rem; color:var(--t3); margin-bottom:20px; }
     .login-input-group { display:flex; flex-direction:column; gap:10px; margin-bottom:16px; }
+    .login-phone-row { display:flex; align-items:center; border:1.5px solid var(--border); border-radius:8px; overflow:hidden; transition:border-color .15s, box-shadow .15s; }
+    .login-phone-row:focus-within { border-color:var(--p); box-shadow:0 0 0 3px #5046E420; }
+    .login-phone-prefix { padding:12px 12px 12px 14px; font-size:.88rem; font-weight:700; color:var(--p); background:#F5F3FF; border-right:1.5px solid var(--border); white-space:nowrap; user-select:none; }
+    .login-phone-row .login-input { border:none; border-radius:0; outline:none; box-shadow:none; }
+    .login-phone-row .login-input:focus { border:none; box-shadow:none; }
     .login-input {
       width:100%; padding:12px 14px; border:1.5px solid var(--border); border-radius:8px;
       font-size:.88rem; font-family:inherit; outline:none; transition:border-color .15s, box-shadow .15s;
@@ -337,7 +342,10 @@
       <p>등록된 이름과 전화번호 뒤 8자리로 로그인합니다</p>
       <div class="login-input-group">
         <input id="loginName" class="login-input" type="text" placeholder="이름" autocomplete="name">
-        <input id="loginPhone" class="login-input" type="tel" placeholder="전화번호 뒤 8자리 (예: 85926325)" maxlength="8" inputmode="numeric">
+        <div class="login-phone-row">
+          <span class="login-phone-prefix">010</span>
+          <input id="loginPhone" class="login-input" type="tel" placeholder="-없이 8자리 입력 (예: 12345678)" maxlength="8" inputmode="numeric" oninput="this.value=this.value.replace(/[^0-9]/g,'')">
+        </div>
       </div>
       <button class="login-btn" onclick="doLogin()">
         <i class="fas fa-arrow-right"></i> 로그인
