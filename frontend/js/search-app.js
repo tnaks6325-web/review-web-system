@@ -5321,7 +5321,7 @@ function _renderReviewerProfileModal(profile) {
   document.getElementById("rpmSubCount").textContent = subs.length + "/10";
 
   if (subs.length === 0) {
-    subList.innerHTML = '<div style="text-align:center;padding:16px;color:var(--t3);font-size:.8rem">타계정이 없습니다.<br><span style="font-size:.72rem">우측 상단 "타계정 추가" 버튼으로 추가하세요.</span></div>';
+    subList.innerHTML = '<div style="text-align:center;padding:16px;color:var(--t3);font-size:.8rem">타계정이 있다면 타계정정보를 반드시 추가하세요..<br><span style="font-size:.72rem">우측 상단 "타계정 추가" 버튼으로 추가하세요.</span></div>';
     return;
   }
 
@@ -5812,7 +5812,7 @@ function _renderInlineSubList(subs) {
   if (!listEl) return;
 
   if (subs.length === 0) {
-    listEl.innerHTML = '<div style="text-align:center;padding:10px;color:var(--t3);font-size:.78rem">타계정이 없습니다</div>';
+    listEl.innerHTML = '<div style="text-align:center;padding:10px;color:var(--t3);font-size:.78rem">타계정이 있다면 타계정정보를 반드시 추가하세요.</div>';
     return;
   }
   listEl.innerHTML = subs.map((sub, idx) => {

@@ -463,7 +463,7 @@
             </button>
           </div>
           <div id="inlineSubList" style="display:flex;flex-direction:column;gap:5px">
-            <div style="text-align:center;padding:10px;color:var(--t3);font-size:.78rem">타계정이 없습니다</div>
+            <div style="text-align:center;padding:10px;color:var(--t3);font-size:.78rem">타계정이 있다면 타계정정보를 반드시 추가하세요.</div>
           </div>
           <!-- 인라인 타계정 추가/수정 폼 -->
           <div id="inlineSubForm" style="display:none;margin-top:10px;border:1.5px solid #BFDBFE;border-radius:10px;padding:14px;background:#EFF6FF">
@@ -814,7 +814,7 @@ function renderInlineSubList(subs) {
   if (!listEl) return;
 
   if (subs.length === 0) {
-    listEl.innerHTML = '<div style="text-align:center;padding:10px;color:var(--t3);font-size:.78rem">타계정이 없습니다</div>';
+    listEl.innerHTML = '<div style="text-align:center;padding:10px;color:var(--t3);font-size:.78rem">타계정이 있다면 타계정정보를 반드시 추가하세요.</div>';
     return;
   }
   listEl.innerHTML = subs.map((sub, idx) => {

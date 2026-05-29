@@ -46,6 +46,8 @@ async function registerReviewer({ name, phone, consent, sheetId }) {
 
 /**
  * 리뷰어 인증 (GAS: verifyReviewer)
+ * 1) 직접 매칭: phone8 + name
+ * 2) 타계정 매칭: sub_accounts JSON 내에서 name + phone 뒤8자리가 일치하면 메인 계정으로 로그인
  */
 async function verifyReviewer(name, phone8) {
   const n = (name || '').trim();
@@ -53,15 +55,40 @@ async function verifyReviewer(name, phone8) {
   if (!n) return { ok: false, error: '이름을 입력하세요.' };
   if (p8.length !== 8) return { ok: false, error: '전화번호 뒤 8자리를 입력하세요.' };
 
+  // 1) 직접 매칭
   const { rows } = await pool.query(
     'SELECT name, phone FROM reviewers WHERE phone8 = $1 AND name = $2 LIMIT 1', [p8, n]
   );
 
-  if (rows.length === 0) {
-    return { ok: false, error: '이름 또는 전화번호가 일치하지 않습니다.' };
+  if (rows.length > 0) {
+    return { ok: true, name: rows[0].name, phone: rows[0].phone };
   }
 
-  return { ok: true, name: rows[0].name, phone: rows[0].phone };
+  // 2) 타계정(sub_accounts) 매칭 — 메인 계정으로 자동 로그인
+  const { rows: subRows } = await pool.query(
+    "SELECT name, phone FROM reviewers WHERE sub_accounts IS NOT NULL AND sub_accounts != '' AND sub_accounts != '[]'"
+  );
+
+  for (const row of subRows) {
+    try {
+      const subs = JSON.parse(row.sub_accounts);
+      if (!Array.isArray(subs)) continue;
+      for (const sub of subs) {
+        const subName = (sub.name || '').trim();
+        const subPhone = (sub.phone || '').replace(/[^0-9]/g, '');
+        const subPhone8 = subPhone.length >= 8 ? subPhone.slice(-8) : subPhone;
+        if (subName === n && subPhone8 === p8) {
+          // 타계정 매칭 → 메인 계정 정보 반환
+          return { ok: true, name: row.name, phone: row.phone, subAccountLogin: true };
+        }
+      }
+    } catch (_) {
+      // sub_accounts JSON 파싱 실패 시 무시
+      continue;
+    }
+  }
+
+  return { ok: false, error: '이름 또는 전화번호가 일치하지 않습니다.' };
 }
 
 /**
