@@ -822,10 +822,11 @@ document.addEventListener("DOMContentLoaded", () => {
   _loadNoticeBanner();
 
   // ★ 관리자 세션 감지 → 바이패스 모드 (먼저 체크)
-  const isAdminMode = _checkAdminBypass();
+  // 단, #register 모드일 때는 등록 화면을 보여줘야 하므로 바이패스 스킵
+  const isAdminMode = _isRegisterMode ? false : _checkAdminBypass();
 
-  // ★ 리뷰어 로그인 세션 복원 (관리자 모드가 아닐 때만)
-  if (!isAdminMode) _restoreReviewerSession();
+  // ★ 리뷰어 로그인 세션 복원 (관리자 모드가 아닐 때만, #register 모드도 스킵)
+  if (!isAdminMode && !_isRegisterMode) _restoreReviewerSession();
 
   // ── 창 크기 변경 시 sticky 위치 재보정 ──
   window.addEventListener("resize", () => _fixStickyPositions());
