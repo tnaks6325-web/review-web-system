@@ -67,12 +67,13 @@ async function verifyReviewer(name, phone8) {
 
   // 2) 타계정(sub_accounts) 매칭 — 메인 계정으로 자동 로그인
   const { rows: subRows } = await pool.query(
-    "SELECT name, phone, sub_accounts FROM reviewers WHERE sub_accounts IS NOT NULL AND sub_accounts != '' AND sub_accounts != '[]'"
+    "SELECT name, phone, sub_accounts FROM reviewers WHERE sub_accounts IS NOT NULL AND jsonb_array_length(sub_accounts) > 0"
   );
 
   for (const row of subRows) {
     try {
-      const subs = JSON.parse(row.sub_accounts);
+      // JSONB: pg 드라이버가 자동 파싱하므로 이미 배열일 수 있음
+      const subs = typeof row.sub_accounts === 'string' ? JSON.parse(row.sub_accounts) : row.sub_accounts;
       if (!Array.isArray(subs)) continue;
       for (const sub of subs) {
         const subName = (sub.name || '').trim();
@@ -84,7 +85,7 @@ async function verifyReviewer(name, phone8) {
         }
       }
     } catch (_) {
-      // sub_accounts JSON 파싱 실패 시 무시
+      // sub_accounts 파싱 실패 시 무시
       continue;
     }
   }
@@ -93,7 +94,7 @@ async function verifyReviewer(name, phone8) {
   // 입력한 번호가 이미 다른 사람의 타계정으로 등록되어 있는지 확인
   for (const row of subRows) {
     try {
-      const subs = JSON.parse(row.sub_accounts);
+      const subs = typeof row.sub_accounts === 'string' ? JSON.parse(row.sub_accounts) : row.sub_accounts;
       if (!Array.isArray(subs)) continue;
       for (const sub of subs) {
         const subPhone = (sub.phone || '').replace(/[^0-9]/g, '');
