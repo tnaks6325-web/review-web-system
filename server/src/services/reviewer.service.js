@@ -66,8 +66,15 @@ async function verifyReviewer(name, phone8) {
   }
 
   // 2) 타계정(sub_accounts) 매칭 — 메인 계정으로 자동 로그인
+  // ★ sub_accounts 가 배열이 아닌 스칼라(잘못 저장된 데이터)인 경우
+  //   jsonb_array_length 가 "cannot get array length of a scalar" 에러를 던지므로
+  //   jsonb_typeof 로 배열일 때만 길이를 평가 (CASE 는 평가 순서 보장)
   const { rows: subRows } = await pool.query(
-    "SELECT name, phone, sub_accounts FROM reviewers WHERE sub_accounts IS NOT NULL AND jsonb_array_length(sub_accounts) > 0"
+    `SELECT name, phone, sub_accounts FROM reviewers
+     WHERE sub_accounts IS NOT NULL
+       AND CASE WHEN jsonb_typeof(sub_accounts) = 'array'
+                THEN jsonb_array_length(sub_accounts)
+                ELSE 0 END > 0`
   );
 
   for (const row of subRows) {
