@@ -29,7 +29,8 @@ router.get('/verify', async (req, res, next) => {
     const result = await verifyReviewer(name, phone8);
     res.json(result);
   } catch (err) {
-    next(err);
+    console.error('[verify] Error:', err.message, err.stack);
+    res.status(500).json({ ok: false, error: '로그인 처리 중 오류: ' + err.message });
   }
 });
 
