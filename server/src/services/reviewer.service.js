@@ -48,6 +48,7 @@ async function registerReviewer({ name, phone, consent, sheetId }) {
  * 리뷰어 인증 (GAS: verifyReviewer)
  * 1) 직접 매칭: phone8 + name
  * 2) 타계정 매칭: sub_accounts JSON 내에서 name + phone 뒤8자리가 일치하면 메인 계정으로 로그인
+ * 3) 실패 시 원인별 세부 에러 메시지 반환
  */
 async function verifyReviewer(name, phone8) {
   const n = (name || '').trim();
@@ -66,7 +67,7 @@ async function verifyReviewer(name, phone8) {
 
   // 2) 타계정(sub_accounts) 매칭 — 메인 계정으로 자동 로그인
   const { rows: subRows } = await pool.query(
-    "SELECT name, phone FROM reviewers WHERE sub_accounts IS NOT NULL AND sub_accounts != '' AND sub_accounts != '[]'"
+    "SELECT name, phone, sub_accounts FROM reviewers WHERE sub_accounts IS NOT NULL AND sub_accounts != '' AND sub_accounts != '[]'"
   );
 
   for (const row of subRows) {
@@ -88,7 +89,41 @@ async function verifyReviewer(name, phone8) {
     }
   }
 
-  return { ok: false, error: '이름 또는 전화번호가 일치하지 않습니다.' };
+  // 3) 매칭 실패 — 원인별 세부 에러 메시지
+  // 입력한 번호가 이미 다른 사람의 타계정으로 등록되어 있는지 확인
+  for (const row of subRows) {
+    try {
+      const subs = JSON.parse(row.sub_accounts);
+      if (!Array.isArray(subs)) continue;
+      for (const sub of subs) {
+        const subPhone = (sub.phone || '').replace(/[^0-9]/g, '');
+        const subPhone8 = subPhone.length >= 8 ? subPhone.slice(-8) : subPhone;
+        if (subPhone8 === p8) {
+          // 번호는 타계정에 존재하지만 이름이 다름
+          return { ok: false, error: '중복된 번호입니다. 타계정과 본계정 번호를 다르게 참여해주세요. (관리자에게 양식수정요청)' };
+        }
+      }
+    } catch (_) { continue; }
+  }
+
+  // 번호가 DB에 존재하는지 확인 (이름만 다른 경우)
+  const { rows: phoneRows } = await pool.query(
+    'SELECT name FROM reviewers WHERE phone8 = $1 LIMIT 1', [p8]
+  );
+  if (phoneRows.length > 0) {
+    return { ok: false, error: '이름 또는 전화번호가 일치하지 않습니다. 등록된 정보를 다시 확인해주세요.' };
+  }
+
+  // 이름이 DB에 존재하는지 확인 (번호만 다른 경우)
+  const { rows: nameRows } = await pool.query(
+    'SELECT phone FROM reviewers WHERE name = $1 LIMIT 1', [n]
+  );
+  if (nameRows.length > 0) {
+    return { ok: false, error: '이름 또는 전화번호가 일치하지 않습니다. 등록된 정보를 다시 확인해주세요.' };
+  }
+
+  // 이름도 번호도 DB에 없음 → 미가입
+  return { ok: false, error: '가입되지 않은 정보입니다. 회원가입 후 리뷰등록 해주세요.' };
 }
 
 /**
