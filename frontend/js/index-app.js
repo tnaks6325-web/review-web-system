@@ -1380,6 +1380,19 @@ function _renderReviewerList(list) {
       if (jd.length === 13) return jd.slice(0,6) + "-" + jd.slice(6,7) + "••••••";
       return "등록됨";
     })() : "";
+    // 타계정 정보 파싱
+    let subAccountsHtml = '<span style="opacity:.4;font-size:.72rem">없음</span>';
+    try {
+      const subs = typeof r.subAccounts === 'string' ? JSON.parse(r.subAccounts || '[]') : (r.subAccounts || []);
+      if (Array.isArray(subs) && subs.length > 0) {
+        subAccountsHtml = subs.map(s => {
+          const sName = escHtml(s.name || '?');
+          const sPhone = (s.phone || '').replace(/[^0-9]/g,'');
+          const sPhoneFmt = sPhone.length === 11 ? sPhone.slice(0,3)+'-'+sPhone.slice(3,7)+'-'+sPhone.slice(7) : sPhone;
+          return `<div style="margin-bottom:2px"><span style="font-weight:600">${sName}</span> <span style="color:var(--t3);font-family:monospace;font-size:.72rem">${escHtml(sPhoneFmt)}</span></div>`;
+        }).join('');
+      }
+    } catch(_){}
     const memo    = escHtml(r.memo || "");
     const rowBg   = i % 2 === 0 ? "#fff" : "#F9FAFB";
     const nameSafe  = (r.name  || "").replace(/'/g, "\\'");
@@ -1392,6 +1405,7 @@ function _renderReviewerList(list) {
       <td style="padding:9px 12px;font-size:.8rem;text-align:center">${consent}</td>
       <td style="padding:9px 12px;font-size:.78rem;color:${incomeName ? 'var(--t2)' : '#DC2626'}">${incomeName || '<span style="opacity:.5">미등록</span>'}</td>
       <td style="padding:9px 12px;font-size:.78rem;color:${residentNum ? 'var(--t2)' : '#DC2626'};font-family:monospace">${residentNum || '<span style="opacity:.5">미등록</span>'}</td>
+      <td style="padding:9px 8px;font-size:.75rem;color:var(--t2);min-width:120px">${subAccountsHtml}</td>
       <td style="padding:9px 12px;font-size:.78rem;color:var(--t3)">${memo}</td>
       <td style="padding:9px 12px;text-align:center">
         <button onclick="_deleteReviewer('${nameSafe}','${phoneSafe}')"
@@ -1414,6 +1428,7 @@ function _renderReviewerList(list) {
             <th style="padding:10px 12px;font-size:.75rem;color:#5B21B6;font-weight:700;text-align:center;white-space:nowrap">동의</th>
             <th style="padding:10px 12px;font-size:.75rem;color:#5B21B6;font-weight:700;text-align:left;white-space:nowrap">소득명의</th>
             <th style="padding:10px 12px;font-size:.75rem;color:#5B21B6;font-weight:700;text-align:left;white-space:nowrap">주민번호</th>
+            <th style="padding:10px 12px;font-size:.75rem;color:#5B21B6;font-weight:700;text-align:left;white-space:nowrap">타계정</th>
             <th style="padding:10px 12px;font-size:.75rem;color:#5B21B6;font-weight:700;text-align:left;white-space:nowrap">비고</th>
             <th style="padding:10px 12px;font-size:.75rem;color:#5B21B6;font-weight:700;text-align:center;white-space:nowrap">관리</th>
           </tr>
