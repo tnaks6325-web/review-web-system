@@ -73,6 +73,10 @@
       font-size:.88rem; font-family:inherit; outline:none; transition:border-color .15s, box-shadow .15s;
     }
     .login-input:focus { border-color:var(--p); box-shadow:0 0 0 3px #5046E420; }
+    /* 로그인 실패 시 틀린 입력칸 강조 (이름 input 또는 전화번호 행) */
+    .login-input.login-input-err,
+    .login-phone-row.login-input-err { border-color:#DC2626 !important; box-shadow:0 0 0 3px #DC262620 !important; animation:loginErrShake .28s; }
+    @keyframes loginErrShake { 0%,100%{transform:translateX(0)} 25%{transform:translateX(-4px)} 75%{transform:translateX(4px)} }
     .login-btn {
       width:100%; padding:13px; background:var(--p); color:#fff; border:none;
       border-radius:8px; font-size:.9rem; font-weight:700; cursor:pointer;
@@ -597,13 +601,38 @@ async function doLogin() {
       showHome(user);
     } else {
       showToast(json.error || "이름 또는 전화번호가 일치하지 않습니다");
+      // ★ 어느 항목이 틀렸는지 안내 — 해당 입력칸 강조 + 포커스
+      _highlightLoginField(json.field);
     }
   } catch(e) {
-    showToast("로그인 실패: " + e.message);
+    // 실제 서버/네트워크 오류는 입력 실수와 구분해 안내
+    showToast("일시적인 오류로 로그인하지 못했습니다. 잠시 후 다시 시도해주세요.");
   } finally {
     btn.disabled = false;
     btn.innerHTML = '<i class="fas fa-arrow-right"></i> 로그인';
   }
+}
+
+/** 로그인 실패 시 틀린 입력칸을 강조하고 포커스 (field: 'name' | 'phone') */
+function _highlightLoginField(field) {
+  const nameEl  = document.getElementById("loginName");
+  const phoneEl = document.getElementById("loginPhone");
+  const phoneRow = phoneEl ? phoneEl.closest(".login-phone-row") : null;
+  // 기존 강조 모두 해제
+  [nameEl, phoneRow].forEach(el => { if (el) el.classList.remove("login-input-err"); });
+  if (field !== "name" && field !== "phone") return;
+
+  // 전화번호는 테두리가 부모 행(.login-phone-row)에 있으므로 행을 강조
+  const input  = field === "phone" ? phoneEl : nameEl;
+  const marker = field === "phone" ? (phoneRow || phoneEl) : nameEl;
+  if (!input || !marker) return;
+
+  marker.classList.add("login-input-err");
+  input.focus();
+  if (field === "name") input.select?.();
+  // 입력을 수정하기 시작하면 강조 해제
+  const clear = () => { marker.classList.remove("login-input-err"); input.removeEventListener("input", clear); };
+  input.addEventListener("input", clear);
 }
 
 function doLogout() {
