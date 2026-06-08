@@ -959,10 +959,14 @@ function enterAdminScreen() {
   if (typeof connectSSE === 'function') {
     setTimeout(connectSSE, 500);
   }
+
+  // ── 신규 작업 오더 배지/알림 폴링 시작 ──
+  if (typeof startWorkOrderBadgePoll === 'function') startWorkOrderBadgePoll();
 }
 function exitAdmin() {
   clearAdminSession();
   if (typeof disconnectSSE === 'function') disconnectSSE();
+  if (typeof stopWorkOrderBadgePoll === 'function') stopWorkOrderBadgePoll();
   showScreen("screenGate");
 }
 
@@ -1255,6 +1259,9 @@ const WO_COLORS = {
   done:['#D1FAE5','#065F46'], rejected:['#FEE2E2','#991B1B'], revision:['#FFEDD5','#9A3412'],
 };
 let _woCache = [];   // 인박스 목록 캐시 (카드 버튼 핸들러에서 조회)
+let _woBadgeTimer = null;     // 신규 오더 배지/알림 폴러
+let _woLastNewCount = null;   // 직전 신규(제출됨) 오더 수
+const _WO_BADGE_POLL_MS = 2 * 60 * 1000; // 2분
 const WO_TRANSITIONS = {
   submitted:      ['reviewing', 'rejected', 'revision'],
   reviewing:      ['await_chatroom', 'rejected', 'revision'],
@@ -1413,6 +1420,32 @@ async function woViewCampaign(campId) {
   // _restoreLinkedTab 이 _recruitTabList 에 의존하므로 옵션 로드를 await
   try { if (typeof loadRecruitTabOptions === "function") await loadRecruitTabOptions(); } catch(_) {}
   try { await openRecruitModal(campId); } catch(e) { showToast("모달 열기 실패: " + e.message, "error"); }
+}
+
+// ── 신규 작업 오더 알림 (탭 배지 + 증가 시 토스트/푸시) ──
+async function _refreshWorkOrderBadge(notify) {
+  if (!isAdminLoggedIn()) return;
+  try {
+    const r = await gasGet({ action: "orderNewCount" });
+    if (!r || r.error || typeof r.count !== "number") return;
+    const badge = document.getElementById("workOrderBadge");
+    if (badge) { badge.textContent = r.count; badge.style.display = r.count > 0 ? "" : "none"; }
+    if (notify && _woLastNewCount !== null && r.count > _woLastNewCount) {
+      const inc = r.count - _woLastNewCount;
+      showToast(`📥 새 작업 오더 ${inc}건이 도착했습니다.`, "info", 6000);
+      if (typeof _sendPushNotif === "function") _sendPushNotif("새 작업 오더", `신규 작업 오더 ${inc}건이 인박스에 도착했습니다.`, "wo-new");
+    }
+    _woLastNewCount = r.count;
+  } catch(_) {}
+}
+function startWorkOrderBadgePoll() {
+  if (_woBadgeTimer) return;
+  _refreshWorkOrderBadge(false);   // 즉시 1회 시드 (알림 없음)
+  _woBadgeTimer = setInterval(() => _refreshWorkOrderBadge(true), _WO_BADGE_POLL_MS);
+}
+function stopWorkOrderBadgePoll() {
+  if (_woBadgeTimer) { clearInterval(_woBadgeTimer); _woBadgeTimer = null; }
+  _woLastNewCount = null;
 }
 
 /* ══════════════════════════════════════════════════════════════

@@ -1256,6 +1256,29 @@ document.addEventListener("DOMContentLoaded", () => {
 const _STAFF_POLL_MS = 5 * 60 * 1000; // 5분
 let   _staffPollTimer  = null;
 let   _staffTabSnap    = {};
+let   _staffOrderSnap  = {};   // 내 작업오더 id→status 스냅샷 (발행 감지용)
+
+function _buildStaffOrderSnap(list) {
+  const m = {};
+  (list || []).forEach(o => { if (o && o.id) m[o.id] = o.status; });
+  return m;
+}
+// 내 작업오더 폴링 — 새로 '모집공고발행(published)'된 건 알림
+async function _pollStaffOrdersOnce() {
+  try {
+    const r = await gasGet({ action: "orderMyList" });
+    if (!r || r.error || !Array.isArray(r.data)) return;
+    r.data.forEach(o => {
+      const prev = _staffOrderSnap[o.id];
+      if (prev === undefined) return;  // 첫 스냅샷에는 알림 없음
+      if (prev !== "published" && o.status === "published") {
+        showToast(`📢 [${o.title}] 모집공고가 발행되었습니다!`, "success", 6000);
+        _sendStaffPushNotif("모집공고 발행 완료", `[${o.title}] 작업 오더가 모집공고로 발행되었습니다.`, "wo-pub-" + o.id);
+      }
+    });
+    _staffOrderSnap = _buildStaffOrderSnap(r.data);
+  } catch(_) {}
+}
 
 function _isTabDoneStaff(t) {
   return t.isClosed || (t.pending === 0 && t.total > 0);
@@ -1286,6 +1309,7 @@ function _sendStaffPushNotif(title, body, tag) {
 async function _pollStaffDashOnce() {
   const sess = getSession();
   if (!sess) return;
+  _pollStaffOrdersOnce();   // 내 작업오더 발행 감지 (병행)
   try {
     const data = await gasGet({ action: "dashboard" }, 25000);
     if (!data || data.error || !data.stats) return;
@@ -1315,6 +1339,8 @@ async function startStaffPolling() {
   if (_staffPollTimer) return;
   await _requestStaffNotifPerm();
   _staffTabSnap = _buildStaffTabSnap(_dashStats);
+  // 작업오더 발행 알림 기준 스냅샷 시드 (알림 없이)
+  try { const _od = await gasGet({ action: "orderMyList" }); if (_od && _od.ok && Array.isArray(_od.data)) _staffOrderSnap = _buildStaffOrderSnap(_od.data); } catch(_) {}
   _staffPollTimer = setInterval(_pollStaffDashOnce, _STAFF_POLL_MS);
   showToast("🔔 탭 완료 자동 알림이 활성화되었습니다. (5분 간격)", "info", 4000);
   const btn = document.getElementById("staffPollToggleBtn");

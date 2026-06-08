@@ -216,6 +216,19 @@ router.put('/my/update', authMiddleware, async (req, res, next) => {
 // staff 차단: adminOrMasterMiddleware
 // ═══════════════════════════════════════════════════════════
 
+// GET /api/order/admin/new-count — 신규(제출됨) 오더 수 (배지/알림 폴링용)
+router.get('/admin/new-count', authMiddleware, adminOrMasterMiddleware, async (req, res, next) => {
+  try {
+    await _ensureTables();
+    const { rows } = await pool.query(
+      `SELECT COUNT(*)::int AS count FROM work_orders WHERE status = 'submitted'`
+    );
+    res.json({ ok: true, count: rows[0] ? rows[0].count : 0 });
+  } catch (err) {
+    next(err);
+  }
+});
+
 // GET /api/order/admin/list — 인박스 (status 필터 선택)
 router.get('/admin/list', authMiddleware, adminOrMasterMiddleware, async (req, res, next) => {
   try {
