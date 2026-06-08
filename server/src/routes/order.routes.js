@@ -194,6 +194,10 @@ router.put('/my/update', authMiddleware, async (req, res, next) => {
     if (b.work_sheet_url !== undefined && !String(b.work_sheet_url).trim()) {
       return res.status(400).json({ ok: false, error: '작업시트탭URL은 비울 수 없습니다.' });
     }
+    // ★ 보완요청(revision) 상태에서 AE가 수정하면 재제출(submitted)으로 자동 복귀
+    if (cur[0].status === 'revision') {
+      sets.push(`status = 'submitted'`);
+    }
     sets.push(`updated_at = NOW()`);
     vals.push(b.id);
 
@@ -263,12 +267,14 @@ router.put('/admin/status', authMiddleware, adminOrMasterMiddleware, async (req,
       }
     }
 
+    // ※ NULLIF($n,'') : 빈 문자열은 "변경 없음"으로 처리해 기존 값 유실 방지
+    //    (프론트가 입력칸 값을 항상 전송하므로 COALESCE 만으로는 빈값이 기존값을 덮어씀)
     const { rows } = await pool.query(
       `UPDATE work_orders SET
          status = $2,
-         admin_memo = COALESCE($3, admin_memo),
-         chat_room_url = COALESCE($4, chat_room_url),
-         linked_campaign_id = COALESCE($5, linked_campaign_id),
+         admin_memo = COALESCE(NULLIF($3, ''), admin_memo),
+         chat_room_url = COALESCE(NULLIF($4, ''), chat_room_url),
+         linked_campaign_id = COALESCE(NULLIF($5, ''), linked_campaign_id),
          processed_by = $6,
          updated_at = NOW()
        WHERE id = $1
@@ -296,11 +302,12 @@ router.put('/admin/update', authMiddleware, adminOrMasterMiddleware, async (req,
     const b = req.body || {};
     if (!b.id) return res.status(400).json({ ok: false, error: 'id가 필요합니다.' });
 
+    // ※ NULLIF($n,'') : 빈 문자열은 "변경 없음" (기존 값 유실 방지)
     const { rows } = await pool.query(
       `UPDATE work_orders SET
-         chat_room_url = COALESCE($2, chat_room_url),
-         admin_memo = COALESCE($3, admin_memo),
-         linked_campaign_id = COALESCE($4, linked_campaign_id),
+         chat_room_url = COALESCE(NULLIF($2, ''), chat_room_url),
+         admin_memo = COALESCE(NULLIF($3, ''), admin_memo),
+         linked_campaign_id = COALESCE(NULLIF($4, ''), linked_campaign_id),
          updated_at = NOW()
        WHERE id = $1
        RETURNING *`,

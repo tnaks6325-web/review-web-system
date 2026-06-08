@@ -1290,8 +1290,10 @@ async function loadWorkOrders() {
 
 function _woField(label, val, isLink) {
   if (!val) return "";
-  const v = isLink
-    ? `<a href="${escHtml(val)}" target="_blank" style="color:#4F46E5;word-break:break-all">${escHtml(val)}</a>`
+  // http(s) 스킴만 링크화 (javascript: 등 차단), 그 외엔 평문
+  const safeLink = isLink && /^https?:\/\//i.test(String(val).trim());
+  const v = safeLink
+    ? `<a href="${escHtml(val)}" target="_blank" rel="noopener noreferrer" style="color:#4F46E5;word-break:break-all">${escHtml(val)}</a>`
     : escHtml(String(val));
   return `<div style="font-size:.76rem;color:#374151;margin:2px 0"><b style="color:#6B7280">${label}:</b> ${v}</div>`;
 }
