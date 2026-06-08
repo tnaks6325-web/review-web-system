@@ -45,7 +45,8 @@
   "pay_amount": 23900,
   "daily_count": 10,
   "purchase_time": "10시~14시",
-  "inflow_keyword": "비건 선크림",
+  "inflow_type": "guide",          // 'guide'(유입가이드) | 'link'(링크유입)
+  "inflow_guide": "<div>키워드 검색 후 구매</div><img src=\"https://drive.google.com/thumbnail?id=...\">",  // inflow_type='guide'일 때만, 이미지 포함 HTML
   "delivery_type": "실배송",
   "courier_proxy": false,
   "review_type": "전체포토",
@@ -91,6 +92,19 @@
 }
 ```
 
+### 1-C. 유입가이드 이미지 업로드 — `POST /api/order/guide-image`
+
+유입가이드 본문에 넣을 **이미지를 Google Drive에 업로드**하고 표시용 URL을 받습니다.
+(인트라넷 폼에서 붙여넣기/드래그/첨부한 이미지를 업로드 → 받은 URL을 `inflow_guide` HTML의 `<img src>`로 삽입)
+
+- 인증: 헤더 `X-Intake-Key`(인트라넷) 또는 JWT(내부). intake 키 그대로 사용 가능.
+- 요청(JSON): `{ "imageBase64": "data:image/jpeg;base64,...", "mimeType": "image/jpeg", "fileName": "guide.jpg" }`
+- 응답: `{ "ok": true, "id": "<driveId>", "url": "https://drive.google.com/thumbnail?id=...&sz=w1600", "viewUrl": "<webViewLink>" }`
+  - `url` 을 `<img src>` 로 쓰면 화면에 렌더됩니다(파일은 anyone-reader 자동 설정).
+- 권장: 업로드 전 클라이언트에서 **리사이즈/JPEG 압축**(최대 1600px) — 제공된 키트(`inadd-order-kit.html`)에 구현돼 있음.
+
+> 흐름: 이미지 첨부 → `guide-image`로 업로드 → 받은 `url`을 가이드 HTML에 `<img>`로 삽입 → 오더 제출 시 `inflow_guide`(HTML)로 전송 → 리뷰웹 관리자 화면에 이미지 그대로 표시.
+
 ---
 
 ## 2. 필드 스키마 (work_orders)
@@ -105,7 +119,8 @@
 | pay_amount | number | | 결제금액(숫자) |
 | daily_count | number | | 일일 진행 건수 |
 | purchase_time | string | | 구매 시간대 |
-| inflow_keyword | string | | 유입 키워드 |
+| inflow_type | string | | 유입방식: `guide`(유입가이드) / `link`(링크유입) |
+| inflow_guide | string(HTML) | | 유입가이드 본문 — 텍스트 + 이미지(`<img src=Drive URL>`). `inflow_type='guide'`일 때만 |
 | delivery_type | string | | 배송유형(실배송/빈박스 등) |
 | courier_proxy | boolean | | 빈박스 택배대행 여부 |
 | review_type | string | | 리뷰유형 |
