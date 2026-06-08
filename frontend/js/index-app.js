@@ -1369,7 +1369,7 @@ function _renderWorkOrderCard(o) {
       ${_woField("상품확인용URL", o.product_url, true)}
       ${_woField("총 상품구입비", o.pay_amount ? Number(o.pay_amount).toLocaleString()+"원" : "")}
       ${_woField("모집인원", o.recruit_count ? Number(o.recruit_count).toLocaleString()+"명" : "")}
-      ${_woField("일일진행", o.daily_count)}
+      ${_woField("일일진행", o.daily_count_text || o.daily_count)}
       ${_woField("구매시간대", o.purchase_time)}
       ${_woField("유입방식", _INFLOW_LABEL[o.inflow_type] || o.inflow_keyword || "")}
       ${_woField("배송유형", o.delivery_type)}

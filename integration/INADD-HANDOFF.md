@@ -41,7 +41,9 @@
   "title": "A브랜드 선크림 실배송",   // 필수
   "work_sheet_url": "https://docs.google.com/.../edit#gid=123",  // 필수
   "start_date": "2026-06-10",
-  "product_option": "50ml 1+1 / 23,900원",
+  "product_option": "• 티셔츠  https://shop/ts\n   - 블랙/라지: 10,000원 × 20건 = 200,000원\n   소계: 20명 / 200,000원",
+  "product_options_json": "[{\"name\":\"티셔츠\",\"url\":\"https://shop/ts\",\"options\":[{\"label\":\"블랙/라지\",\"pay\":10000,\"count\":20}],\"subtotal\":{\"count\":20,\"pay\":200000}}]",
+  "daily_count_text": "3~7",
   "pay_amount": 23900,
   "daily_count": 10,
   "purchase_time": "10시~14시",
@@ -127,6 +129,22 @@
 
 ---
 
+## 1-E. 정밀 매핑 주의 (인트라넷이 맞춰야 할 4가지)
+
+리뷰웹이 모든 항목을 정확한 칸으로 받으려면 인트라넷 전송 페이로드를 아래로 맞춰주세요.
+
+1. **유입방식 필드명**: `inflow_keyword`(구) ❌ → **`inflow_type`**(`guide`/`link`) + **`inflow_guide`** ✅
+   - (호환) 리뷰웹은 `inflow_keyword`가 와도 값 자체는 보존·표시하지만, `유입가이드/링크유입` 구분은 `inflow_type`이 있어야 정확.
+2. **유입가이드 이미지**: `review_guide`에 base64 텍스트로 넣기 ❌ → **`inflow_guide`** 에 넣기 ✅
+   - 권장: `POST /api/order/guide-image`로 업로드 후 받은 URL을 `<img src>`로 삽입(1-C).
+   - (호환) base64 `<img src="data:...">`를 `inflow_guide`에 직접 넣어도 리뷰웹이 이미지로 렌더함(단 DB·전송 무거움 → URL 권장).
+3. **일일건수 범위**: 범위(예 `3~7`)는 `daily_count`(정수)에 최소값만 들어가 손실 → **`daily_count_text`** 에 원문 전송 ✅ (리뷰웹이 화면에 우선 표시)
+4. **상품/옵션 구조화**: `product_option`(요약 문자열)은 그대로 두고, 통계/필터가 필요하면 **`product_options_json`**(문자열화 JSON)도 함께 전송 ✅
+
+> 위 4개 필드(`inflow_type`,`inflow_guide`,`daily_count_text`,`product_options_json`)는 리뷰웹 intake가 이미 수신·저장하도록 배포됨. 리뷰웹 제공 키트(`inadd-order-kit.html`)는 이 규약대로 전송하도록 구현되어 있어 참고용으로 사용 가능.
+
+---
+
 ## 2. 필드 스키마 (work_orders)
 
 | 필드 | 타입 | 필수 | 설명 |
@@ -135,9 +153,11 @@
 | work_sheet_url | string | ✅ | 작업시트 탭 URL |
 | requester_name | string | (권장) | 요청자(AE) 이름 → `created_by` 저장. 없으면 "인트라넷" |
 | start_date | string(YYYY-MM-DD) | | 시작일 |
-| product_option | string | | 상품옵션 및 결제금액(자유문구) |
+| product_option | string | | 상품/옵션 요약(여러 줄 텍스트) — 사람이 보도록 표시 |
+| product_options_json | string(JSON) | | (선택) 상품/옵션 구조화 데이터 — 표/필터/통계용. 문자열화한 JSON |
 | pay_amount | number | | 결제금액(숫자) |
-| daily_count | number | | 일일 진행 건수 |
+| daily_count | number | | 일일 진행 건수(정수). 범위면 최소/대표값 |
+| daily_count_text | string | | (선택) 일일 진행건수 원문(예: `"3~7"`) — 범위 보존용. 있으면 화면에 우선 표시 |
 | purchase_time | string | | 구매 시간대 |
 | inflow_type | string | | 유입방식: `guide`(유입가이드) / `link`(링크유입) |
 | inflow_guide | string(HTML) | | 유입가이드 본문 — 텍스트 + 이미지(`<img src=Drive URL>`). `inflow_type='guide'`일 때만 |

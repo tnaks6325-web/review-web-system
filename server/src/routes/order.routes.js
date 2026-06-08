@@ -28,7 +28,7 @@ const ORDER_TRANSITIONS = {
 
 // AE 가 입력/수정 가능한 필드 (status/created_by/processed_by/admin_memo 등은 제외)
 const AE_FIELDS = [
-  'title', 'start_date', 'product_option', 'pay_amount', 'daily_count',
+  'title', 'start_date', 'product_option', 'product_options_json', 'pay_amount', 'daily_count', 'daily_count_text',
   'purchase_time', 'inflow_type', 'inflow_guide', 'delivery_type', 'courier_proxy',
   'review_type', 'recruit_count', 'review_guide', 'special_notes',
   'product_url', 'work_sheet_url', 'goods_cost_type',
@@ -51,6 +51,8 @@ async function _ensureTables() {
         inflow_keyword  TEXT DEFAULT '',
         inflow_type     TEXT DEFAULT '',
         inflow_guide    TEXT DEFAULT '',
+        daily_count_text     TEXT DEFAULT '',
+        product_options_json TEXT DEFAULT '',
         delivery_type   TEXT DEFAULT '',
         courier_proxy   BOOLEAN DEFAULT FALSE,
         review_type     TEXT DEFAULT '',
@@ -71,9 +73,11 @@ async function _ensureTables() {
         updated_at      TIMESTAMPTZ DEFAULT NOW()
       )
     `);
-    // 기존 테이블에 신규 컬럼 보강 (유입방식/유입가이드)
-    await pool.query(`ALTER TABLE work_orders ADD COLUMN IF NOT EXISTS inflow_type  TEXT DEFAULT ''`);
-    await pool.query(`ALTER TABLE work_orders ADD COLUMN IF NOT EXISTS inflow_guide TEXT DEFAULT ''`);
+    // 기존 테이블에 신규 컬럼 보강 (유입방식/유입가이드/일일건수 범위/옵션 JSON)
+    await pool.query(`ALTER TABLE work_orders ADD COLUMN IF NOT EXISTS inflow_type          TEXT DEFAULT ''`);
+    await pool.query(`ALTER TABLE work_orders ADD COLUMN IF NOT EXISTS inflow_guide         TEXT DEFAULT ''`);
+    await pool.query(`ALTER TABLE work_orders ADD COLUMN IF NOT EXISTS daily_count_text     TEXT DEFAULT ''`);
+    await pool.query(`ALTER TABLE work_orders ADD COLUMN IF NOT EXISTS product_options_json TEXT DEFAULT ''`);
     await pool.query(`CREATE INDEX IF NOT EXISTS idx_work_orders_status     ON work_orders(status)`);
     await pool.query(`CREATE INDEX IF NOT EXISTS idx_work_orders_created_by ON work_orders(created_by)`);
     await pool.query(`CREATE INDEX IF NOT EXISTS idx_work_orders_created_at ON work_orders(created_at DESC)`);
@@ -94,21 +98,26 @@ function _dateOrNull(v) {
 
 // 작업 오더 INSERT 공통 (intake/submit 공유, created_by 만 호출부에서 주입)
 async function _insertWorkOrder(b, createdBy) {
+  const optionsJson = (typeof b.product_options_json === 'string')
+    ? b.product_options_json
+    : (b.product_options_json ? JSON.stringify(b.product_options_json) : '');
   const { rows } = await pool.query(
     `INSERT INTO work_orders
-      (id, title, start_date, product_option, pay_amount, daily_count,
+      (id, title, start_date, product_option, product_options_json, pay_amount, daily_count, daily_count_text,
        purchase_time, inflow_keyword, inflow_type, inflow_guide, delivery_type, courier_proxy,
        review_type, recruit_count, review_guide, special_notes,
        product_url, work_sheet_url, goods_cost_type, status, created_by)
-     VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,'submitted',$20)
+     VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21,'submitted',$22)
      RETURNING *`,
     [
       _genOrderId(),
       String(b.title).trim(),
       _dateOrNull(b.start_date),
       b.product_option || '',
+      optionsJson,
       b.pay_amount || 0,
       b.daily_count || 0,
+      b.daily_count_text || '',
       b.purchase_time || '',
       b.inflow_keyword || '',
       b.inflow_type || '',
