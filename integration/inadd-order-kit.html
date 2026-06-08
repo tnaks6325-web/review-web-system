@@ -2,19 +2,13 @@
   ════════════════════════════════════════════════════════════════
   inadd 인트라넷 → 리뷰웹시스템 "작업 오더" 제출 키트  (복붙용)
   ════════════════════════════════════════════════════════════════
-  · 이 파일은 inadd-webapp(인트라넷)에 붙여넣어 쓰는 독립 컴포넌트입니다.
-  · AE가 리뷰작업요청을 작성 → 리뷰웹시스템 백엔드로 직접 POST → 관리자 인박스에 팝업/누적.
-  · "복사" 버튼으로 카톡 리마인드용 요약을 클립보드에 담습니다.
+  · inadd-webapp(인트라넷)에 붙여넣어 쓰는 독립 컴포넌트.
+  · 상품/옵션 빌더 + 합계 자동계산 + 유입가이드 이미지 첨부 포함.
 
-  ── 적용 전 설정 (아래 CONFIG 3개) ──
+  ── 적용 전 설정 (아래 CONFIG) ──
   1) API_BASE       : 리뷰웹시스템 백엔드 URL (Railway)
   2) INTAKE_KEY     : 리뷰웹 백엔드 env(ORDER_INTAKE_KEY)와 "똑같은" 시크릿
-  3) getRequester() : 인트라넷 로그인 사용자(AE) 이름을 반환하도록 연결
-                      (세션/전역변수가 있으면 그걸 반환. 없으면 입력칸 사용)
-
-  ── 리뷰웹 백엔드 준비 (관리자/배포 담당) ──
-  · Railway 환경변수 ORDER_INTAKE_KEY = <위 INTAKE_KEY와 동일> 설정
-  · CORS는 inadd-system.pages.dev 이미 허용됨 (review-web 배포 후)
+  3) getRequester() : 인트라넷 로그인 사용자(AE) 이름 반환 (없으면 입력칸 사용)
   ════════════════════════════════════════════════════════════════
 -->
 <div id="reviewOrderKit">
@@ -32,11 +26,24 @@
     #reviewOrderKit .rk-chk{display:flex;align-items:center;gap:7px;padding-top:22px}
     #reviewOrderKit .rk-chk input{width:16px;height:16px}
     #reviewOrderKit .rk-btns{display:flex;gap:8px;margin-top:14px}
-    #reviewOrderKit button{flex:1;padding:11px;border:none;border-radius:9px;font-weight:700;font-size:.88rem;cursor:pointer}
+    #reviewOrderKit button{padding:11px;border:none;border-radius:9px;font-weight:700;font-size:.88rem;cursor:pointer}
+    #reviewOrderKit .rk-btns button{flex:1}
     #reviewOrderKit .rk-submit{background:#6366f1;color:#fff}
     #reviewOrderKit .rk-copy{background:#eef2ff;color:#3730a3;border:1.5px solid #c7d2fe}
     #reviewOrderKit .rk-msg{margin-top:10px;font-size:.82rem;min-height:18px}
     #reviewOrderKit .rk-ok{color:#065f46}#reviewOrderKit .rk-err{color:#991b1b}
+    /* 상품/옵션 빌더 */
+    #reviewOrderKit .rkp{border:1.5px solid #e5e7eb;border-radius:10px;padding:11px;margin-bottom:9px;background:#fafafe}
+    #reviewOrderKit .rkp-head{display:flex;gap:7px;align-items:center;margin-bottom:7px}
+    #reviewOrderKit .rkp-head input{font-weight:700}
+    #reviewOrderKit .rkp-base{display:grid;grid-template-columns:1fr 1fr;gap:7px;margin-top:7px}
+    #reviewOrderKit .rkp-base.dim{opacity:.4}
+    #reviewOrderKit .rko{display:grid;grid-template-columns:1fr 92px 78px 26px;gap:6px;align-items:center;margin-top:6px}
+    #reviewOrderKit .rk-iconbtn{flex:none;background:#fef2f2;color:#b91c1c;border:1px solid #fecaca;border-radius:7px;padding:7px 9px;font-weight:700;line-height:1}
+    #reviewOrderKit .rk-addbtn{background:#ecfdf5;color:#065f46;border:1px solid #a7f3d0;border-radius:8px;padding:7px 11px;font-size:.78rem;font-weight:700;margin-top:4px}
+    #reviewOrderKit .rk-addprod{background:#eff6ff;color:#1d4ed8;border:1px solid #bfdbfe;border-radius:8px;padding:9px 11px;font-size:.82rem;font-weight:700;width:100%;margin-top:2px}
+    #reviewOrderKit .rk-totals{margin-top:8px;background:#111827;color:#fff;border-radius:9px;padding:10px 12px;font-size:.84rem;display:flex;justify-content:space-between;font-weight:700}
+    #reviewOrderKit .rkp-note{font-size:.7rem;color:#9ca3af;margin-top:3px}
   </style>
 
   <h2>📋 리뷰 작업 요청</h2>
@@ -46,15 +53,21 @@
     <input id="rk_title" type="text" placeholder="예: A브랜드 선크림 실배송"></div>
   <div class="rk-grid2">
     <div class="rk-row"><label>시작일</label><input id="rk_start" type="date"></div>
-    <div class="rk-row"><label>일일진행건수</label><input id="rk_daily" type="number" min="0" placeholder="예: 10"></div>
+    <div class="rk-row"><label>구매시간대</label><input id="rk_time" type="text" placeholder="예: 10시~14시"></div>
   </div>
-  <div class="rk-row"><label>상품옵션 및 결제금액</label>
-    <input id="rk_option" type="text" placeholder="예: 50ml 1+1 / 23,900원"></div>
   <div class="rk-grid2">
-    <div class="rk-row"><label>결제금액(숫자)</label><input id="rk_pay" type="number" min="0" placeholder="예: 23900"></div>
-    <div class="rk-row"><label>모집인원</label><input id="rk_recruit" type="number" min="0" placeholder="예: 30"></div>
+    <div class="rk-row"><label>일일진행건수</label><input id="rk_daily" type="number" min="0" placeholder="예: 10"></div>
+    <div class="rk-row"><label>리뷰유형</label><input id="rk_reviewtype" type="text" placeholder="예: 전체포토"></div>
   </div>
-  <div class="rk-row"><label>구매시간대</label><input id="rk_time" type="text" placeholder="예: 10시~14시"></div>
+
+  <!-- ── 상품 / 옵션 빌더 ── -->
+  <div class="rk-row" style="margin-top:4px">
+    <label>상품 · 옵션 <span style="font-weight:400;color:#9ca3af">— 옵션이 있으면 옵션별 금액/건수만 계산됩니다</span></label>
+    <div id="rk_products"></div>
+    <button type="button" class="rk-addprod" onclick="rkAddProduct()">+ 상품추가</button>
+    <div class="rk-totals"><span>모집인원 <b id="rk_sumCount">0</b>명</span><span>총 상품구입비 <b id="rk_sumPay">0</b>원</span></div>
+  </div>
+
   <div class="rk-row">
     <label>유입방식</label>
     <div style="display:flex;gap:16px;margin:2px 0 6px">
@@ -71,6 +84,7 @@
       </div>
     </div>
   </div>
+
   <div class="rk-grid2">
     <div class="rk-row"><label>배송유형</label>
       <select id="rk_delivery"><option value="">선택</option><option>실배송</option><option>빈박스</option></select></div>
@@ -78,16 +92,13 @@
       <select id="rk_goods"><option value="">선택</option><option>현금</option><option>계산서</option></select></div>
   </div>
   <div class="rk-grid2">
-    <div class="rk-row"><label>리뷰유형</label>
-      <input id="rk_reviewtype" type="text" placeholder="예: 전체포토 / 텍스트20·포토80"></div>
     <div class="rk-chk"><input id="rk_courier" type="checkbox"><label for="rk_courier" style="margin:0;cursor:pointer">빈박스 택배대행</label></div>
+    <div></div>
   </div>
-  <div class="rk-row"><label>상품확인용URL</label><input id="rk_producturl" type="text" placeholder="https://..."></div>
   <div class="rk-row"><label>작업시트탭URL <span class="req">*</span></label>
     <input id="rk_sheeturl" type="text" placeholder="작업시트 탭 URL (필수)"></div>
   <div class="rk-row"><label>리뷰등록가이드</label><textarea id="rk_guide" rows="2" placeholder="리뷰 작성/등록 가이드"></textarea></div>
   <div class="rk-row"><label>특이사항</label><textarea id="rk_notes" rows="2" placeholder="기타 특이사항"></textarea></div>
-  <!-- 요청자(AE) 이름: getRequester()로 자동 채우되, 없으면 직접 입력 -->
   <div class="rk-row"><label>요청자(AE)</label><input id="rk_requester" type="text" placeholder="이름"></div>
 
   <div class="rk-btns">
@@ -98,26 +109,136 @@
 </div>
 
 <script>
-/* ===================== CONFIG (3개만 맞추면 됨) ===================== */
+/* ===================== CONFIG (맞춰야 함) ===================== */
 const RK_CONFIG = {
   API_BASE:   "https://sublime-magic-production-790b.up.railway.app", // 리뷰웹 백엔드
   INTAKE_KEY: "여기에_공유시크릿_입력",                                 // = Railway ORDER_INTAKE_KEY
 };
-// 인트라넷 로그인 사용자(AE) 이름 반환하도록 연결하세요. 세션이 없으면 입력칸(rk_requester) 사용.
+// 인트라넷 로그인 AE 이름 반환하도록 연결. 세션 없으면 입력칸(rk_requester) 사용.
 function getRequester() {
   // 예: return window.currentUser?.name || "";
   return "";
 }
-/* ================================================================= */
+/* ============================================================= */
 
 (function(){ const el=document.getElementById("rk_requester"); const n=getRequester(); if(n){el.value=n; el.readOnly=true;} })();
 
 function rkVal(id){ return (document.getElementById(id).value || "").trim(); }
 function rkMsg(text, ok){ const m=document.getElementById("rk_msg"); m.textContent=text; m.className="rk-msg "+(ok?"rk-ok":"rk-err"); }
+function rkNum(v){ return parseInt(String(v).replace(/[^\d]/g,""),10) || 0; }
+function rkWon(n){ return n.toLocaleString("ko-KR"); }
 
-// ── 유입가이드 에디터 (이미지 붙여넣기/드래그/첨부 → Drive 업로드) ──
+/* ───────────── 상품 / 옵션 빌더 ───────────── */
+function rkAddProduct(){
+  const wrap = document.getElementById("rk_products");
+  const div = document.createElement("div");
+  div.className = "rkp";
+  div.innerHTML = `
+    <div class="rkp-head">
+      <input class="rkp-name" type="text" placeholder="상품명 (예: 선크림)">
+      <button type="button" class="rk-iconbtn" onclick="rkDelProduct(this)" title="상품 삭제">×</button>
+    </div>
+    <input class="rkp-url" type="text" placeholder="상품 URL">
+    <div class="rkp-base">
+      <input class="rkp-pay" type="number" min="0" placeholder="결제금액(기본)">
+      <input class="rkp-cnt" type="number" min="0" placeholder="건수(기본)">
+    </div>
+    <div class="rkp-note" style="display:none">옵션이 있어 기본 결제금액/건수는 계산에서 제외됩니다.</div>
+    <div class="rkp-opts"></div>
+    <button type="button" class="rk-addbtn" onclick="rkAddOption(this)">+ 옵션추가</button>`;
+  wrap.appendChild(div);
+  rkRecompute();
+}
+function rkDelProduct(btn){ btn.closest(".rkp").remove(); rkRecompute(); }
+
+function rkAddOption(btn){
+  const prod = btn.closest(".rkp");
+  const opts = prod.querySelector(".rkp-opts");
+  const row = document.createElement("div");
+  row.className = "rko";
+  row.innerHTML = `
+    <input class="rko-label" type="text" placeholder="옵션 (예: 블랙 / 라지)">
+    <input class="rko-pay" type="number" min="0" placeholder="결제금액">
+    <input class="rko-cnt" type="number" min="0" placeholder="건수">
+    <button type="button" class="rk-iconbtn" onclick="rkDelOption(this)" title="옵션 삭제">×</button>`;
+  opts.appendChild(row);
+  rkRecompute();
+}
+function rkDelOption(btn){ const p=btn.closest(".rkp"); btn.closest(".rko").remove(); rkRecompute(); }
+
+// 상품 1개의 합계 {count, pay, hasOpt}
+function _rkProductTotals(prod){
+  const optRows = [...prod.querySelectorAll(".rko")];
+  if (optRows.length > 0){
+    let count=0, pay=0;
+    optRows.forEach(r=>{
+      const c=rkNum(r.querySelector(".rko-cnt").value);
+      const p=rkNum(r.querySelector(".rko-pay").value);
+      count+=c; pay+=p*c;
+    });
+    return { count, pay, hasOpt:true };
+  }
+  const c=rkNum(prod.querySelector(".rkp-cnt").value);
+  const p=rkNum(prod.querySelector(".rkp-pay").value);
+  return { count:c, pay:p*c, hasOpt:false };
+}
+
+function rkRecompute(){
+  let totCount=0, totPay=0;
+  document.querySelectorAll("#rk_products .rkp").forEach(prod=>{
+    const t=_rkProductTotals(prod);
+    totCount+=t.count; totPay+=t.pay;
+    // 옵션 있으면 기본 입력 흐리게 + 안내
+    const base=prod.querySelector(".rkp-base");
+    const note=prod.querySelector(".rkp-note");
+    if(t.hasOpt){ base.classList.add("dim"); note.style.display="block"; }
+    else { base.classList.remove("dim"); note.style.display="none"; }
+  });
+  document.getElementById("rk_sumCount").textContent = rkWon(totCount);
+  document.getElementById("rk_sumPay").textContent   = rkWon(totPay);
+  return { totCount, totPay };
+}
+// 입력 변화 실시간 반영
+document.getElementById("rk_products").addEventListener("input", rkRecompute);
+
+// 상품/옵션 → 사람이 읽는 요약(product_option) 문자열
+function rkProductsSummary(){
+  const lines=[];
+  let gCount=0, gPay=0;
+  document.querySelectorAll("#rk_products .rkp").forEach((prod,idx)=>{
+    const name=(prod.querySelector(".rkp-name").value||"").trim() || ("상품"+(idx+1));
+    const url=(prod.querySelector(".rkp-url").value||"").trim();
+    const optRows=[...prod.querySelectorAll(".rko")];
+    lines.push("• "+name+(url?("  "+url):""));
+    if(optRows.length>0){
+      let sc=0, sp=0;
+      optRows.forEach(r=>{
+        const label=(r.querySelector(".rko-label").value||"").trim()||"옵션";
+        const p=rkNum(r.querySelector(".rko-pay").value);
+        const c=rkNum(r.querySelector(".rko-cnt").value);
+        sc+=c; sp+=p*c;
+        lines.push("   - "+label+": "+rkWon(p)+"원 × "+c+"건 = "+rkWon(p*c)+"원");
+      });
+      lines.push("   소계: "+sc+"명 / "+rkWon(sp)+"원");
+      gCount+=sc; gPay+=sp;
+    } else {
+      const p=rkNum(prod.querySelector(".rkp-pay").value);
+      const c=rkNum(prod.querySelector(".rkp-cnt").value);
+      lines.push("   "+rkWon(p)+"원 × "+c+"건 = "+rkWon(p*c)+"원");
+      gCount+=c; gPay+=p*c;
+    }
+  });
+  lines.push("──────────");
+  lines.push("합계: 모집인원 "+gCount+"명 / 총 상품구입비 "+rkWon(gPay)+"원");
+  return lines.join("\n");
+}
+function rkFirstProductUrl(){
+  const first=document.querySelector("#rk_products .rkp .rkp-url");
+  return first ? (first.value||"").trim() : "";
+}
+
+/* ───────────── 유입가이드 에디터 (이미지 첨부 → Drive) ───────────── */
 function rkInflowType(){ return (document.querySelector('input[name=rk_inflow]:checked')||{}).value || 'link'; }
-
 function _rkCompress(file){
   return new Promise((resolve)=>{
     const r=new FileReader();
@@ -136,7 +257,6 @@ function _rkCompress(file){
     r.readAsDataURL(file);
   });
 }
-
 async function _rkUploadGuideImage(file){
   const st=document.getElementById('rk_guide_status'); st.textContent='이미지 업로드 중...';
   try{
@@ -152,13 +272,11 @@ async function _rkUploadGuideImage(file){
   }catch(e){ st.textContent='업로드 오류: '+e.message; }
   setTimeout(()=>{ st.textContent=''; }, 2500);
 }
-
 function _rkInsertImage(url){
   const ed=document.getElementById('rk_guide_editor'); ed.focus();
   const html='<img src="'+url+'" style="max-width:100%;border-radius:8px;margin:4px 0"><br>';
   if(!document.execCommand('insertHTML', false, html)){ ed.insertAdjacentHTML('beforeend', html); }
 }
-
 (function _rkInitGuide(){
   const radios=document.querySelectorAll('input[name=rk_inflow]');
   if(!radios.length) return;
@@ -185,13 +303,20 @@ function _rkInsertImage(url){
   });
 })();
 
+// 시작 시 상품 1개 자동 추가
+rkAddProduct();
+
+/* ───────────── 수집 / 제출 ───────────── */
 function rkCollect(){
+  const t = rkRecompute();
   return {
     requester_name: getRequester() || rkVal("rk_requester"),
     title:          rkVal("rk_title"),
     start_date:     rkVal("rk_start"),
-    product_option: rkVal("rk_option"),
-    pay_amount:     Number(rkVal("rk_pay")) || 0,
+    product_option: rkProductsSummary(),   // 상품/옵션 요약(여러 줄)
+    pay_amount:     t.totPay,              // 총 상품구입비 합계
+    recruit_count:  t.totCount,            // 최종 모집인원 합계
+    product_url:    rkFirstProductUrl(),   // 첫 상품 URL
     daily_count:    Number(rkVal("rk_daily")) || 0,
     purchase_time:  rkVal("rk_time"),
     inflow_type:    rkInflowType(),
@@ -199,32 +324,28 @@ function rkCollect(){
     delivery_type:  rkVal("rk_delivery"),
     courier_proxy:  document.getElementById("rk_courier").checked,
     review_type:    rkVal("rk_reviewtype"),
-    recruit_count:  Number(rkVal("rk_recruit")) || 0,
     review_guide:   rkVal("rk_guide"),
     special_notes:  rkVal("rk_notes"),
-    product_url:    rkVal("rk_producturl"),
-    work_sheet_url: rkVal("rk_sheeturl"),
     goods_cost_type:rkVal("rk_goods"),
   };
 }
 
-// 카톡 리마인드용 간결 요약 텍스트
+// 카톡 리마인드용 요약
 function rkBuildSummary(d){
   const yn = d.courier_proxy ? " (택배대행)" : "";
-  const pay = d.pay_amount ? d.pay_amount.toLocaleString()+"원" : "";
   return [
     "▶작업명: " + (d.title||"-") + (d.start_date ? "  / 시작 "+d.start_date : ""),
-    "▶상품옵션·결제금액: " + (d.product_option||"-") + (pay ? " / "+pay : ""),
+    "▶상품·옵션:\n" + (d.product_option||"-"),
+    "▶모집인원: " + (d.recruit_count||0) + "명",
+    "▶총 상품구입비: " + rkWon(d.pay_amount||0) + "원",
     "▶일일진행건수: " + (d.daily_count||"-"),
     "▶구매시간대: " + (d.purchase_time||"-"),
     "▶유입방식: " + (d.inflow_type==="guide" ? "유입가이드(첨부)" : "링크유입"),
     "▶배송: " + (d.delivery_type||"-") + yn,
-    "▶모집인원: " + (d.recruit_count||"-") + "명",
     "▶리뷰유형: " + (d.review_type||"-"),
-    "▶특이사항: " + (d.special_notes||"-"),
-    "▶상품확인용URL: " + (d.product_url||"-"),
-    "▶작업시트URL: " + (d.work_sheet_url||"-"),
     "▶물건비: " + (d.goods_cost_type||"-"),
+    "▶특이사항: " + (d.special_notes||"-"),
+    "▶작업시트URL: " + (d.work_sheet_url||rkVal("rk_sheeturl")||"-"),
   ].join("\n");
 }
 
@@ -235,7 +356,6 @@ async function rkCopySummary(){
     await navigator.clipboard.writeText(text);
     rkMsg("요약을 복사했습니다. 카톡방에 붙여넣어 리마인드하세요.", true);
   } catch(_) {
-    // clipboard API 차단 시 폴백
     const ta=document.createElement("textarea"); ta.value=text; document.body.appendChild(ta); ta.select();
     try{ document.execCommand("copy"); rkMsg("요약을 복사했습니다.", true);}catch(e){ rkMsg("복사 실패 — 수동 복사하세요.", false);}
     ta.remove();
@@ -244,9 +364,11 @@ async function rkCopySummary(){
 
 async function rkSubmitOrder(){
   const d = rkCollect();
+  d.work_sheet_url = rkVal("rk_sheeturl");
   if (!d.title)          { rkMsg("작업명을 입력하세요.", false); return; }
   if (!d.work_sheet_url) { rkMsg("작업시트탭URL은 필수입니다.", false); return; }
   if (!d.requester_name) { rkMsg("요청자(AE) 이름을 입력하세요.", false); return; }
+  if (!d.recruit_count)  { rkMsg("상품/옵션의 건수를 입력하세요. (모집인원 0)", false); return; }
   rkMsg("전송 중...", true);
   try {
     const res = await fetch(RK_CONFIG.API_BASE + "/api/order/intake", {
@@ -257,7 +379,6 @@ async function rkSubmitOrder(){
     const json = await res.json().catch(()=>({}));
     if (res.ok && json.ok) {
       rkMsg("✅ 작업 요청이 전송되었습니다. 관리자 인박스에서 확인됩니다.", true);
-      // 전송 후 요약을 자동 복사해 바로 카톡 리마인드 가능하게
       try { await navigator.clipboard.writeText(rkBuildSummary(d)); } catch(_){}
     } else {
       rkMsg("전송 실패: " + (json.error || ("HTTP " + res.status)), false);
