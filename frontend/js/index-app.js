@@ -1333,8 +1333,12 @@ function _woTextToHtml(text) {
   for (let i = 0; i < parts.length; i++) {
     if (i % 2 === 1) {
       const url = parts[i];
+      const isProxy = /\/api\/order\/guide-image\/[-\w]{20,}/.test(url);
       const id = _driveId(url);
-      if (id) {
+      if (isProxy) {
+        // 리뷰웹 프록시(비공개 Drive 파일) — 그대로 이미지 src
+        html += `<a href="${escHtml(url)}" target="_blank" rel="noopener noreferrer"><img src="${escHtml(url)}" style="max-width:100%;border-radius:8px;margin:4px 0" loading="lazy" onerror="this.style.display='none';this.insertAdjacentHTML('afterend','<a href=&quot;${escHtml(url)}&quot; target=_blank style=color:#4F46E5>📎 첨부 이미지 열기</a>')"></a>`;
+      } else if (id) {
         const thumb = `https://drive.google.com/thumbnail?id=${id}&sz=w1600`;
         html += `<a href="${escHtml(url)}" target="_blank" rel="noopener noreferrer"><img src="${thumb}" style="max-width:100%;border-radius:8px;margin:4px 0" loading="lazy" onerror="this.style.display='none';this.insertAdjacentHTML('afterend','<a href=&quot;${escHtml(url)}&quot; target=_blank style=color:#4F46E5>📎 첨부 이미지 열기</a>')"></a>`;
       } else {

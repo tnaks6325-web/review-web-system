@@ -252,7 +252,7 @@ async function createFolder(name, parentFolderId) {
  * @param {string} parentFolderId - 업로드 대상 폴더 ID
  * @returns {{ id, name, webViewLink, webContentLink }}
  */
-async function uploadFileBase64(base64Data, fileName, mimeType, parentFolderId) {
+async function uploadFileBase64(base64Data, fileName, mimeType, parentFolderId, opts = {}) {
   // data URL prefix 제거
   const cleanBase64 = base64Data.replace(/^data:[^;]+;base64,/, '');
   const buffer = Buffer.from(cleanBase64, 'base64');
@@ -309,17 +309,20 @@ async function uploadFileBase64(base64Data, fileName, mimeType, parentFolderId) 
   logger.info(`[Drive] 업로드 성공: ${data.id} (${usedClient})`);
 
   // 파일을 "링크가 있는 모든 사용자" 읽기 가능으로 설정
-  try {
-    const d = usedClient === 'OAuth' ? oauth : _getReadDrive();
-    if (d) {
-      await d.permissions.create({
-        fileId: data.id,
-        requestBody: { role: 'reader', type: 'anyone' },
-        supportsAllDrives: true,
-      });
+  // opts.shareAnyone === false 면 공개하지 않음(비공개 유지 — 예: 유입가이드 이미지는 서버 프록시로만 노출)
+  if (opts.shareAnyone !== false) {
+    try {
+      const d = usedClient === 'OAuth' ? oauth : _getReadDrive();
+      if (d) {
+        await d.permissions.create({
+          fileId: data.id,
+          requestBody: { role: 'reader', type: 'anyone' },
+          supportsAllDrives: true,
+        });
+      }
+    } catch (permErr) {
+      logger.warn(`[Drive] 권한 설정 실패 (무시): ${permErr.message}`);
     }
-  } catch (permErr) {
-    logger.warn(`[Drive] 권한 설정 실패 (무시): ${permErr.message}`);
   }
 
   // ── 소유권 이전: Service Account → 실제 사용자 계정 ──
@@ -759,8 +762,37 @@ function extractReviewerNameFromFile(fileName) {
   return nameWithoutExt.trim();
 }
 
+/**
+ * Drive 파일 내용을 서버에서 다운로드 (비공개 파일 프록시 스트리밍용)
+ * @param {string} fileId
+ * @returns {{ buffer: Buffer, mimeType: string, name: string }}
+ */
+async function downloadFile(fileId) {
+  const clients = [_getOAuthDrive(), _getReadDrive()].filter(Boolean);
+  if (clients.length === 0) throw new Error('Drive 읽기 클라이언트가 없습니다.');
+  let lastErr = null;
+  for (const d of clients) {
+    try {
+      const meta = await d.files.get({ fileId, fields: 'mimeType, name', supportsAllDrives: true });
+      const res = await d.files.get(
+        { fileId, alt: 'media', supportsAllDrives: true },
+        { responseType: 'arraybuffer' }
+      );
+      return {
+        buffer: Buffer.from(res.data),
+        mimeType: (meta.data && meta.data.mimeType) || 'application/octet-stream',
+        name: (meta.data && meta.data.name) || fileId,
+      };
+    } catch (e) {
+      lastErr = e;
+    }
+  }
+  throw lastErr || new Error('Drive 다운로드 실패');
+}
+
 module.exports = {
   listFolderContents,
+  downloadFile,
   createFolder,
   renameFile,
   moveFile,

@@ -96,16 +96,18 @@
 
 ### 1-C. 유입가이드 이미지 업로드 — `POST /api/order/guide-image`
 
-유입가이드 본문에 넣을 **이미지를 Google Drive에 업로드**하고 표시용 URL을 받습니다.
-(인트라넷 폼에서 붙여넣기/드래그/첨부한 이미지를 업로드 → 받은 URL을 `inflow_guide` HTML의 `<img src>`로 삽입)
+유입가이드 이미지를 **인트라넷·리뷰웹 공용 전용 Drive 폴더에 "비공개"로 저장**하고, **리뷰웹 프록시 URL**을 받습니다. Drive 파일은 공개되지 않고(anyone 링크 X), 리뷰웹 서버가 자기 자격증명으로 꺼내 스트리밍합니다.
 
 - 인증: 헤더 `X-Intake-Key`(인트라넷) 또는 JWT(내부). intake 키 그대로 사용 가능.
 - 요청(JSON): `{ "imageBase64": "data:image/jpeg;base64,...", "mimeType": "image/jpeg", "fileName": "guide.jpg" }`
-- 응답: `{ "ok": true, "id": "<driveId>", "url": "https://drive.google.com/thumbnail?id=...&sz=w1600", "viewUrl": "<webViewLink>" }`
-  - `url` 을 `<img src>` 로 쓰면 화면에 렌더됩니다(파일은 anyone-reader 자동 설정).
-- 권장: 업로드 전 클라이언트에서 **리사이즈/JPEG 압축**(최대 1600px) — 제공된 키트(`inadd-order-kit.html`)에 구현돼 있음.
+- 응답: `{ "ok": true, "id": "<driveFileId>", "url": "https://<리뷰웹>/api/order/guide-image/<id>", "viewUrl": "<동일 프록시>" }`
+  - **반환된 `url` 을 그대로** `inflow_guide`에 넣으세요(`<img src>` 또는 본문 텍스트 어디든). 리뷰웹이 이미지로 렌더합니다.
+- 저장 위치: env `GUIDE_FOLDER_ID`(지정 시 그 폴더) 또는 `AI_REVIEW_FOLDER` 하위 `[유입가이드]` 자동. → **하나의 전용 공용 폴더**에 누적.
+- 권장: 업로드 전 클라이언트에서 **리사이즈/JPEG 압축**(최대 1600px) — 제공 키트에 구현됨.
 
-> 흐름: 이미지 첨부 → `guide-image`로 업로드 → 받은 `url`을 가이드 HTML에 `<img>`로 삽입 → 오더 제출 시 `inflow_guide`(HTML)로 전송 → 리뷰웹 관리자 화면에 이미지 그대로 표시.
+> 흐름: 이미지 첨부 → `guide-image`로 업로드(비공개 저장) → **프록시 URL** 수신 → `inflow_guide`에 그 URL 포함 → 오더 제출 → 리뷰웹 관리자 화면이 서버에서 꺼내 이미지로 표시.
+> 보안: Drive 원본은 비공개. 표시는 리뷰웹 프록시(`/api/order/guide-image/:id`)를 통해서만. (프록시 URL의 `id`는 추측 불가한 Drive fileId)
+> 참고: 리뷰웹은 인트라넷이 보내는 **평문 + URL** 형태의 `inflow_guide`도 URL을 자동으로 이미지/링크로 렌더합니다(과거 Drive 공개 URL도 호환).
 
 ---
 
