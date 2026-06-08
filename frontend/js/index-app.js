@@ -1393,6 +1393,7 @@ function _renderWorkOrderCard(o) {
 
   return `<div style="border:1.5px solid #E5E7EB;border-radius:12px;padding:14px 16px;margin-bottom:12px;background:#fff">
     <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap">
+      <button onclick="woToggleDetail('${o.id}',this)" style="font-size:.72rem;font-weight:700;background:#EEF2FF;color:#3730A3;border:1px solid #C7D2FE;border-radius:7px;padding:3px 9px;cursor:pointer;white-space:nowrap"><i class="fas fa-chevron-down"></i> 펼쳐보기</button>
       <span style="font-size:.7rem;font-weight:700;padding:2px 9px;border-radius:20px;background:${bg};color:${fg}">${WO_LABELS[st]||st}</span>
       <b style="font-size:.92rem;color:#111827">${escHtml(o.title||"")}</b>
       <span style="font-size:.72rem;color:#9CA3AF;margin-left:auto"><i class="fas fa-user"></i> ${escHtml(o.created_by||"-")} · ${date}</span>
@@ -1436,7 +1437,6 @@ function _renderWorkOrderCard(o) {
           ? `<button onclick="woViewCampaign('${escHtml(o.linked_campaign_id)}')" style="font-size:.74rem;font-weight:700;background:#D1FAE5;color:#065F46;border:1px solid #6EE7B7;border-radius:7px;padding:5px 10px;cursor:pointer"><i class="fas fa-link"></i> 연결된 공고 보기</button>`
           : `<button onclick="woCreateCampaign('${o.id}')" style="font-size:.74rem;font-weight:700;background:#EDE9FE;color:#5B21B6;border:1px solid #C4B5FD;border-radius:7px;padding:5px 10px;cursor:pointer"><i class="fas fa-bullhorn"></i> 모집공고 만들기</button>`}
         ${btns || '<span style="font-size:.74rem;color:#9CA3AF">종료된 오더</span>'}
-        <button onclick="woToggleDetail('${o.id}',this)" style="margin-left:auto;font-size:.74rem;background:#EEF2FF;color:#3730A3;border:1px solid #C7D2FE;border-radius:7px;padding:5px 10px;cursor:pointer;white-space:nowrap"><i class="fas fa-chevron-down"></i> 펼쳐보기</button>
       </div>
     </div>
   </div>`;
