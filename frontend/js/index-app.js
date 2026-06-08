@@ -1233,12 +1233,149 @@ function switchAdminTab(tabName) {
   // 탭별 자동 로드
   if (tabName === "reviewers") loadReviewerList();
   if (tabName === "recruit")   { loadRecruitList(); loadRecruitTabOptions(); }
+  if (tabName === "work-orders") { try { loadWorkOrders(); } catch(_){} }
   if (tabName === "payment")   initPaymentPanel();
   if (tabName === "dashboard") { try { loadTabDashboard(); } catch(_){} try { loadSystemMonitor(); } catch(_){} try { loadStatsOverview(); } catch(_){} }
   if (tabName === "archive")   { try { loadArchiveList(); } catch(_){} try { _loadArchiveHistory(); } catch(_){} }
   if (tabName === "settings")  { try { loadUnrecognizedTabs(); } catch(_){} try { loadKeywordList(); } catch(_){} }
   // ★ 컨텍스트 툴바 업데이트
   _updateContextToolbar(tabName);
+}
+
+/* ══════════════════════════════════════════════════════════════
+   ★ 작업 오더(work_orders) 인박스 — 관리자
+   ══════════════════════════════════════════════════════════════ */
+const WO_LABELS = {
+  submitted:'제출됨', reviewing:'검토중', await_chatroom:'카톡방생성대기',
+  published:'모집공고발행', done:'완료', rejected:'반려', revision:'보완요청',
+};
+const WO_COLORS = {
+  submitted:['#E0E7FF','#3730A3'], reviewing:['#DBEAFE','#1E40AF'],
+  await_chatroom:['#FEF3C7','#92400E'], published:['#EDE9FE','#5B21B6'],
+  done:['#D1FAE5','#065F46'], rejected:['#FEE2E2','#991B1B'], revision:['#FFEDD5','#9A3412'],
+};
+const WO_TRANSITIONS = {
+  submitted:      ['reviewing', 'rejected', 'revision'],
+  reviewing:      ['await_chatroom', 'rejected', 'revision'],
+  await_chatroom: ['published', 'reviewing', 'rejected'],
+  published:      ['done'],
+  done:           [],
+  rejected:       ['reviewing'],
+  revision:       ['reviewing'],
+};
+
+async function loadWorkOrders() {
+  const wrap = document.getElementById("woListWrap");
+  if (!wrap) return;
+  wrap.innerHTML = '<div style="text-align:center;color:#9CA3AF;padding:30px;font-size:.85rem">불러오는 중...</div>';
+  const status = (document.getElementById("woStatusFilter") || {}).value || "";
+  try {
+    const r = await gasGet(status ? { action:"orderAdminList", status } : { action:"orderAdminList" });
+    const list = (r && r.ok && r.data) ? r.data : [];
+    // 신규(제출됨) 배지
+    const badge = document.getElementById("workOrderBadge");
+    if (badge) {
+      const n = list.filter(o => o.status === "submitted").length;
+      badge.textContent = n; badge.style.display = n > 0 ? "" : "none";
+    }
+    if (list.length === 0) {
+      wrap.innerHTML = '<div style="text-align:center;color:#9CA3AF;padding:30px;font-size:.85rem">오더가 없습니다.</div>';
+      return;
+    }
+    wrap.innerHTML = list.map(_renderWorkOrderCard).join("");
+  } catch(e) {
+    wrap.innerHTML = '<div style="text-align:center;color:#DC2626;padding:30px;font-size:.85rem">불러오기 실패: ' + escHtml(e.message) + '</div>';
+  }
+}
+
+function _woField(label, val, isLink) {
+  if (!val) return "";
+  const v = isLink
+    ? `<a href="${escHtml(val)}" target="_blank" style="color:#4F46E5;word-break:break-all">${escHtml(val)}</a>`
+    : escHtml(String(val));
+  return `<div style="font-size:.76rem;color:#374151;margin:2px 0"><b style="color:#6B7280">${label}:</b> ${v}</div>`;
+}
+
+function _renderWorkOrderCard(o) {
+  const st = o.status || "submitted";
+  const [bg, fg] = WO_COLORS[st] || ["#F3F4F6","#374151"];
+  const date = (o.created_at || "").replace("T"," ").substring(0,16);
+  const nexts = WO_TRANSITIONS[st] || [];
+  const btns = nexts.map(ns => {
+    const [nbg, nfg] = WO_COLORS[ns] || ["#EEF2FF","#3730A3"];
+    return `<button onclick="woTransition('${o.id}','${ns}')"
+      style="font-size:.74rem;font-weight:700;background:${nbg};color:${nfg};border:1px solid ${nfg}33;border-radius:7px;padding:5px 10px;cursor:pointer">→ ${WO_LABELS[ns]}</button>`;
+  }).join("");
+
+  const memo = o.admin_memo
+    ? `<div style="margin-top:4px;font-size:.74rem;color:#991B1B"><b>메모:</b> ${escHtml(o.admin_memo)}</div>` : "";
+
+  return `<div style="border:1.5px solid #E5E7EB;border-radius:12px;padding:14px 16px;margin-bottom:12px;background:#fff">
+    <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap">
+      <span style="font-size:.7rem;font-weight:700;padding:2px 9px;border-radius:20px;background:${bg};color:${fg}">${WO_LABELS[st]||st}</span>
+      <b style="font-size:.92rem;color:#111827">${escHtml(o.title||"")}</b>
+      <span style="font-size:.72rem;color:#9CA3AF;margin-left:auto"><i class="fas fa-user"></i> ${escHtml(o.created_by||"-")} · ${date}</span>
+    </div>
+    <div style="margin-top:10px;display:grid;grid-template-columns:1fr 1fr;gap:2px 18px">
+      ${_woField("작업시트탭URL", o.work_sheet_url, true)}
+      ${_woField("상품확인용URL", o.product_url, true)}
+      ${_woField("상품옵션·결제", o.product_option)}
+      ${_woField("결제금액", o.pay_amount ? Number(o.pay_amount).toLocaleString()+"원" : "")}
+      ${_woField("일일진행", o.daily_count)}
+      ${_woField("모집인원", o.recruit_count)}
+      ${_woField("구매시간대", o.purchase_time)}
+      ${_woField("유입키워드", o.inflow_keyword)}
+      ${_woField("배송유형", o.delivery_type)}
+      ${_woField("택배대행", o.courier_proxy ? "예" : "")}
+      ${_woField("리뷰유형", o.review_type)}
+      ${_woField("물건비", o.goods_cost_type)}
+    </div>
+    ${o.review_guide ? `<div style="margin-top:4px;font-size:.76rem;color:#374151"><b style="color:#6B7280">리뷰가이드:</b> ${escHtml(o.review_guide)}</div>`:""}
+    ${o.special_notes ? `<div style="margin-top:2px;font-size:.76rem;color:#374151"><b style="color:#6B7280">특이사항:</b> ${escHtml(o.special_notes)}</div>`:""}
+    ${memo}
+    <div style="margin-top:10px;border-top:1px dashed #E5E7EB;padding-top:10px">
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-bottom:8px">
+        <input id="woChat_${o.id}" type="text" value="${escHtml(o.chat_room_url||"")}" placeholder="카톡 팀채팅방URL (발행 시 필수)"
+          style="padding:7px 10px;border:1.5px solid #E5E7EB;border-radius:7px;font-size:.78rem">
+        <input id="woMemo_${o.id}" type="text" value="${escHtml(o.admin_memo||"")}" placeholder="처리 메모 (반려/보완 사유 등)"
+          style="padding:7px 10px;border:1.5px solid #E5E7EB;border-radius:7px;font-size:.78rem">
+      </div>
+      <div style="display:flex;gap:6px;flex-wrap:wrap;align-items:center">
+        <button onclick="woSaveFields('${o.id}')" style="font-size:.74rem;background:#F3F4F6;color:#374151;border:1px solid #D1D5DB;border-radius:7px;padding:5px 10px;cursor:pointer"><i class="fas fa-save"></i> 메모·카톡URL 저장</button>
+        ${btns || '<span style="font-size:.74rem;color:#9CA3AF">종료된 오더</span>'}
+      </div>
+    </div>
+  </div>`;
+}
+
+// 카톡URL/메모만 저장 (상태 전이 없이)
+async function woSaveFields(id) {
+  const chat = (document.getElementById("woChat_"+id)||{}).value || "";
+  const memo = (document.getElementById("woMemo_"+id)||{}).value || "";
+  try {
+    const r = await gasGet({ action:"orderAdminUpdate", id, chat_room_url: chat, admin_memo: memo });
+    if (r && r.ok) showToast("저장되었습니다.", "success");
+    else showToast((r && r.error) || "저장 실패", "error");
+  } catch(e) { showToast("오류: " + e.message, "error"); }
+}
+
+// 상태 전이 (카톡URL/메모를 함께 반영)
+async function woTransition(id, toStatus) {
+  const chat = (document.getElementById("woChat_"+id)||{}).value || "";
+  const memo = (document.getElementById("woMemo_"+id)||{}).value || "";
+  if (toStatus === "published" && !chat.trim()) {
+    showToast("카톡 팀채팅방URL을 입력해야 모집공고발행이 가능합니다.", "error");
+    document.getElementById("woChat_"+id)?.focus();
+    return;
+  }
+  if ((toStatus === "rejected" || toStatus === "revision") && !memo.trim()) {
+    if (!confirm((toStatus==="rejected"?"반려":"보완요청") + " 사유(메모) 없이 진행할까요?")) return;
+  }
+  try {
+    const r = await gasGet({ action:"orderAdminStatus", id, status: toStatus, chat_room_url: chat, admin_memo: memo });
+    if (r && r.ok) { showToast(WO_LABELS[toStatus] + "(으)로 변경되었습니다.", "success"); loadWorkOrders(); }
+    else showToast((r && r.error) || "상태 변경 실패", "error");
+  } catch(e) { showToast("오류: " + e.message, "error"); }
 }
 
 /* ══════════════════════════════════════════════════════════════
