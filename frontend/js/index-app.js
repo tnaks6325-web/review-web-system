@@ -1280,12 +1280,8 @@ async function loadWorkOrders() {
   try {
     const r = await gasGet(status ? { action:"orderAdminList", status } : { action:"orderAdminList" });
     const list = (r && r.ok && r.data) ? r.data : [];
-    // 신규(제출됨) 배지
-    const badge = document.getElementById("workOrderBadge");
-    if (badge) {
-      const n = list.filter(o => o.status === "submitted").length;
-      badge.textContent = n; badge.style.display = n > 0 ? "" : "none";
-    }
+    // 배지는 필터와 무관한 전체 제출됨 수(new-count)로 통일 — _refreshWorkOrderBadge 가 단일 소스
+    try { _refreshWorkOrderBadge(false); } catch(_) {}
     _woCache = list;
     if (list.length === 0) {
       wrap.innerHTML = '<div style="text-align:center;color:#9CA3AF;padding:30px;font-size:.85rem">오더가 없습니다.</div>';
@@ -1440,6 +1436,8 @@ async function _refreshWorkOrderBadge(notify) {
 }
 function startWorkOrderBadgePoll() {
   if (_woBadgeTimer) return;
+  // 브라우저 푸시 권한 best-effort 요청 (실패해도 토스트는 동작)
+  if (typeof _requestNotifPermission === "function") { try { _requestNotifPermission(); } catch(_) {} }
   _refreshWorkOrderBadge(false);   // 즉시 1회 시드 (알림 없음)
   _woBadgeTimer = setInterval(() => _refreshWorkOrderBadge(true), _WO_BADGE_POLL_MS);
 }
