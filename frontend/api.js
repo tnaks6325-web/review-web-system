@@ -254,6 +254,7 @@ const _ACTION_MAP = {
 
   // ★ 작업 오더(work_orders) 시스템 — 동적 /:id 미지원이라 전부 평면경로 + body/query id
   'orderSubmit':           { method: 'POST', path: '/api/order/submit' },
+  'orderGuideImage':       { method: 'POST', path: '/api/order/guide-image' },
   'orderMyList':           { method: 'GET',  path: '/api/order/my' },
   'orderMyUpdate':         { method: 'PUT',  path: '/api/order/my/update' },
   'orderAdminList':        { method: 'GET',  path: '/api/order/admin/list' },

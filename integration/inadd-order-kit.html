@@ -54,9 +54,22 @@
     <div class="rk-row"><label>결제금액(숫자)</label><input id="rk_pay" type="number" min="0" placeholder="예: 23900"></div>
     <div class="rk-row"><label>모집인원</label><input id="rk_recruit" type="number" min="0" placeholder="예: 30"></div>
   </div>
-  <div class="rk-grid2">
-    <div class="rk-row"><label>구매시간대</label><input id="rk_time" type="text" placeholder="예: 10시~14시"></div>
-    <div class="rk-row"><label>유입키워드</label><input id="rk_keyword" type="text" placeholder="예: 비건 선크림"></div>
+  <div class="rk-row"><label>구매시간대</label><input id="rk_time" type="text" placeholder="예: 10시~14시"></div>
+  <div class="rk-row">
+    <label>유입방식</label>
+    <div style="display:flex;gap:16px;margin:2px 0 6px">
+      <label style="display:flex;align-items:center;gap:5px;font-weight:400;cursor:pointer"><input type="radio" name="rk_inflow" value="link" checked> 링크유입</label>
+      <label style="display:flex;align-items:center;gap:5px;font-weight:400;cursor:pointer"><input type="radio" name="rk_inflow" value="guide"> 유입가이드</label>
+    </div>
+    <div id="rk_guidebox" style="display:none">
+      <div id="rk_guide_editor" contenteditable="true" data-ph="가이드 텍스트 입력 · 이미지는 붙여넣기/드래그/첨부 버튼으로 추가"
+           style="min-height:90px;border:1.5px solid #e5e7eb;border-radius:7px;padding:9px 11px;font-size:.84rem;line-height:1.5;outline:none;background:#fff"></div>
+      <div style="display:flex;align-items:center;gap:8px;margin-top:6px">
+        <button type="button" class="rk-copy" style="flex:none;padding:5px 10px;font-size:.76rem" onclick="document.getElementById('rk_guide_file').click()">📎 이미지 첨부</button>
+        <input type="file" id="rk_guide_file" accept="image/*" multiple hidden>
+        <span id="rk_guide_status" style="font-size:.74rem;color:#6b7280"></span>
+      </div>
+    </div>
   </div>
   <div class="rk-grid2">
     <div class="rk-row"><label>배송유형</label>
@@ -102,6 +115,76 @@ function getRequester() {
 function rkVal(id){ return (document.getElementById(id).value || "").trim(); }
 function rkMsg(text, ok){ const m=document.getElementById("rk_msg"); m.textContent=text; m.className="rk-msg "+(ok?"rk-ok":"rk-err"); }
 
+// ── 유입가이드 에디터 (이미지 붙여넣기/드래그/첨부 → Drive 업로드) ──
+function rkInflowType(){ return (document.querySelector('input[name=rk_inflow]:checked')||{}).value || 'link'; }
+
+function _rkCompress(file){
+  return new Promise((resolve)=>{
+    const r=new FileReader();
+    r.onload=()=>{
+      const img=new Image();
+      img.onload=()=>{
+        const max=1600; let w=img.width, h=img.height;
+        if(w>max||h>max){ const s=Math.min(max/w,max/h); w=Math.round(w*s); h=Math.round(h*s); }
+        const c=document.createElement('canvas'); c.width=w; c.height=h;
+        c.getContext('2d').drawImage(img,0,0,w,h);
+        resolve({ base64:c.toDataURL('image/jpeg',0.85), mime:'image/jpeg' });
+      };
+      img.onerror=()=>resolve({ base64:r.result, mime:file.type||'image/png' });
+      img.src=r.result;
+    };
+    r.readAsDataURL(file);
+  });
+}
+
+async function _rkUploadGuideImage(file){
+  const st=document.getElementById('rk_guide_status'); st.textContent='이미지 업로드 중...';
+  try{
+    const { base64, mime }=await _rkCompress(file);
+    const res=await fetch(RK_CONFIG.API_BASE + '/api/order/guide-image', {
+      method:'POST',
+      headers:{ 'Content-Type':'application/json', 'X-Intake-Key': RK_CONFIG.INTAKE_KEY },
+      body: JSON.stringify({ imageBase64:base64, mimeType:mime, fileName:file.name||'guide.jpg' }),
+    });
+    const json=await res.json().catch(()=>({}));
+    if(res.ok && json.ok && json.url){ _rkInsertImage(json.url); st.textContent='첨부 완료'; }
+    else { st.textContent='업로드 실패: '+(json.error||('HTTP '+res.status)); }
+  }catch(e){ st.textContent='업로드 오류: '+e.message; }
+  setTimeout(()=>{ st.textContent=''; }, 2500);
+}
+
+function _rkInsertImage(url){
+  const ed=document.getElementById('rk_guide_editor'); ed.focus();
+  const html='<img src="'+url+'" style="max-width:100%;border-radius:8px;margin:4px 0"><br>';
+  if(!document.execCommand('insertHTML', false, html)){ ed.insertAdjacentHTML('beforeend', html); }
+}
+
+(function _rkInitGuide(){
+  const radios=document.querySelectorAll('input[name=rk_inflow]');
+  if(!radios.length) return;
+  if(!document.getElementById('rk_guide_ph')){
+    const s=document.createElement('style'); s.id='rk_guide_ph';
+    s.textContent='#rk_guide_editor:empty:before{content:attr(data-ph);color:#9ca3af}';
+    document.head.appendChild(s);
+  }
+  radios.forEach(r=>r.addEventListener('change',()=>{
+    document.getElementById('rk_guidebox').style.display = rkInflowType()==='guide' ? 'block':'none';
+  }));
+  const ed=document.getElementById('rk_guide_editor');
+  const file=document.getElementById('rk_guide_file');
+  file.addEventListener('change',e=>{ [...e.target.files].forEach(f=>f.type.startsWith('image/')&&_rkUploadGuideImage(f)); file.value=''; });
+  ed.addEventListener('paste',e=>{
+    const items=(e.clipboardData||{}).items||[]; let had=false;
+    for(const it of items){ if(it.type&&it.type.startsWith('image/')){ const f=it.getAsFile(); if(f){ had=true; _rkUploadGuideImage(f); } } }
+    if(had) e.preventDefault();
+  });
+  ed.addEventListener('dragover',e=>{ e.preventDefault(); });
+  ed.addEventListener('drop',e=>{
+    const imgs=[...(((e.dataTransfer||{}).files)||[])].filter(f=>f.type.startsWith('image/'));
+    if(imgs.length){ e.preventDefault(); imgs.forEach(_rkUploadGuideImage); }
+  });
+})();
+
 function rkCollect(){
   return {
     requester_name: getRequester() || rkVal("rk_requester"),
@@ -111,7 +194,8 @@ function rkCollect(){
     pay_amount:     Number(rkVal("rk_pay")) || 0,
     daily_count:    Number(rkVal("rk_daily")) || 0,
     purchase_time:  rkVal("rk_time"),
-    inflow_keyword: rkVal("rk_keyword"),
+    inflow_type:    rkInflowType(),
+    inflow_guide:   rkInflowType() === "guide" ? document.getElementById("rk_guide_editor").innerHTML : "",
     delivery_type:  rkVal("rk_delivery"),
     courier_proxy:  document.getElementById("rk_courier").checked,
     review_type:    rkVal("rk_reviewtype"),
@@ -133,7 +217,7 @@ function rkBuildSummary(d){
     "▶상품옵션·결제금액: " + (d.product_option||"-") + (pay ? " / "+pay : ""),
     "▶일일진행건수: " + (d.daily_count||"-"),
     "▶구매시간대: " + (d.purchase_time||"-"),
-    "▶유입키워드: " + (d.inflow_keyword||"-"),
+    "▶유입방식: " + (d.inflow_type==="guide" ? "유입가이드(첨부)" : "링크유입"),
     "▶배송: " + (d.delivery_type||"-") + yn,
     "▶모집인원: " + (d.recruit_count||"-") + "명",
     "▶리뷰유형: " + (d.review_type||"-"),

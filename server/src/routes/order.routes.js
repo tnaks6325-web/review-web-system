@@ -1,8 +1,10 @@
 const express = require('express');
 const router = express.Router();
 const crypto = require('crypto');
+const jwt = require('jsonwebtoken');
 const pool = require('../db/pool');
 const { authMiddleware, adminOrMasterMiddleware } = require('../middleware/auth.middleware');
+const drive = require('../services/drive.service');
 const { logger } = require('../utils/logger');
 
 // ═══════════════════════════════════════════════════════════
@@ -27,7 +29,7 @@ const ORDER_TRANSITIONS = {
 // AE 가 입력/수정 가능한 필드 (status/created_by/processed_by/admin_memo 등은 제외)
 const AE_FIELDS = [
   'title', 'start_date', 'product_option', 'pay_amount', 'daily_count',
-  'purchase_time', 'inflow_keyword', 'delivery_type', 'courier_proxy',
+  'purchase_time', 'inflow_type', 'inflow_guide', 'delivery_type', 'courier_proxy',
   'review_type', 'recruit_count', 'review_guide', 'special_notes',
   'product_url', 'work_sheet_url', 'goods_cost_type',
 ];
@@ -47,6 +49,8 @@ async function _ensureTables() {
         daily_count     INTEGER DEFAULT 0,
         purchase_time   TEXT DEFAULT '',
         inflow_keyword  TEXT DEFAULT '',
+        inflow_type     TEXT DEFAULT '',
+        inflow_guide    TEXT DEFAULT '',
         delivery_type   TEXT DEFAULT '',
         courier_proxy   BOOLEAN DEFAULT FALSE,
         review_type     TEXT DEFAULT '',
@@ -67,6 +71,9 @@ async function _ensureTables() {
         updated_at      TIMESTAMPTZ DEFAULT NOW()
       )
     `);
+    // 기존 테이블에 신규 컬럼 보강 (유입방식/유입가이드)
+    await pool.query(`ALTER TABLE work_orders ADD COLUMN IF NOT EXISTS inflow_type  TEXT DEFAULT ''`);
+    await pool.query(`ALTER TABLE work_orders ADD COLUMN IF NOT EXISTS inflow_guide TEXT DEFAULT ''`);
     await pool.query(`CREATE INDEX IF NOT EXISTS idx_work_orders_status     ON work_orders(status)`);
     await pool.query(`CREATE INDEX IF NOT EXISTS idx_work_orders_created_by ON work_orders(created_by)`);
     await pool.query(`CREATE INDEX IF NOT EXISTS idx_work_orders_created_at ON work_orders(created_at DESC)`);
@@ -83,6 +90,42 @@ async function _ensureTables() {
 // 빈 문자열/undefined → null (DATE 캐스팅 에러 방지)
 function _dateOrNull(v) {
   return (v && String(v).trim()) ? v : null;
+}
+
+// 작업 오더 INSERT 공통 (intake/submit 공유, created_by 만 호출부에서 주입)
+async function _insertWorkOrder(b, createdBy) {
+  const { rows } = await pool.query(
+    `INSERT INTO work_orders
+      (id, title, start_date, product_option, pay_amount, daily_count,
+       purchase_time, inflow_keyword, inflow_type, inflow_guide, delivery_type, courier_proxy,
+       review_type, recruit_count, review_guide, special_notes,
+       product_url, work_sheet_url, goods_cost_type, status, created_by)
+     VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,'submitted',$20)
+     RETURNING *`,
+    [
+      _genOrderId(),
+      String(b.title).trim(),
+      _dateOrNull(b.start_date),
+      b.product_option || '',
+      b.pay_amount || 0,
+      b.daily_count || 0,
+      b.purchase_time || '',
+      b.inflow_keyword || '',
+      b.inflow_type || '',
+      b.inflow_guide || '',
+      b.delivery_type || '',
+      b.courier_proxy === true || b.courier_proxy === 'true',
+      b.review_type || '',
+      b.recruit_count || 0,
+      b.review_guide || '',
+      b.special_notes || '',
+      b.product_url || '',
+      String(b.work_sheet_url).trim(),
+      b.goods_cost_type || '',
+      createdBy,
+    ]
+  );
+  return rows[0];
 }
 
 // ═══════════════════════════════════════════════════════════
@@ -109,37 +152,8 @@ router.post('/intake', async (req, res, next) => {
       return res.status(400).json({ ok: false, error: '작업시트탭URL은 필수입니다.' });
     }
     const requester = (b.requester_name || b.created_by || '').toString().trim() || '인트라넷';
-
-    const { rows } = await pool.query(
-      `INSERT INTO work_orders
-        (id, title, start_date, product_option, pay_amount, daily_count,
-         purchase_time, inflow_keyword, delivery_type, courier_proxy,
-         review_type, recruit_count, review_guide, special_notes,
-         product_url, work_sheet_url, goods_cost_type, status, created_by)
-       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,'submitted',$18)
-       RETURNING *`,
-      [
-        _genOrderId(),
-        String(b.title).trim(),
-        _dateOrNull(b.start_date),
-        b.product_option || '',
-        b.pay_amount || 0,
-        b.daily_count || 0,
-        b.purchase_time || '',
-        b.inflow_keyword || '',
-        b.delivery_type || '',
-        b.courier_proxy === true || b.courier_proxy === 'true',
-        b.review_type || '',
-        b.recruit_count || 0,
-        b.review_guide || '',
-        b.special_notes || '',
-        b.product_url || '',
-        String(b.work_sheet_url).trim(),
-        b.goods_cost_type || '',
-        requester,
-      ]
-    );
-    res.json({ ok: true, data: rows[0] });
+    const data = await _insertWorkOrder(b, requester);
+    res.json({ ok: true, data });
   } catch (err) {
     next(err);
   }
@@ -170,13 +184,57 @@ router.get('/intake/list', async (req, res, next) => {
     }
     const { rows } = await pool.query(
       `SELECT id, title, status, created_by, recruit_count, start_date,
-              work_sheet_url, linked_campaign_id, chat_room_url, created_at, updated_at
+              inflow_type, work_sheet_url, linked_campaign_id, chat_room_url, created_at, updated_at
          FROM work_orders ${where}
         ORDER BY created_at DESC
         LIMIT 200`,
       params
     );
     res.json({ ok: true, data: rows });
+  } catch (err) {
+    next(err);
+  }
+});
+
+// ═══════════════════════════════════════════════════════════
+// 유입가이드 이미지 업로드 — Google Drive 저장 후 표시용 URL 반환
+// 인증: X-Intake-Key(인트라넷) 또는 JWT(내부 staff/admin) 둘 중 하나
+// body: { imageBase64, mimeType, fileName? }  → { ok, id, url, viewUrl }
+// ═══════════════════════════════════════════════════════════
+router.post('/guide-image', async (req, res, next) => {
+  try {
+    const b = req.body || {};
+    // ── 인증: intake 키 또는 JWT ──
+    const intakeKey = b.intakeKey || req.headers['x-intake-key'];
+    const keyOk = !!process.env.ORDER_INTAKE_KEY && intakeKey === process.env.ORDER_INTAKE_KEY;
+    let jwtOk = false;
+    if (!keyOk) {
+      try {
+        const tok = (req.headers.authorization || '').split(' ')[1];
+        if (tok) { jwt.verify(tok, process.env.JWT_SECRET); jwtOk = true; }
+      } catch (_) { /* invalid token → 아래에서 401 */ }
+    }
+    if (!keyOk && !jwtOk) {
+      return res.status(401).json({ ok: false, error: '인증에 실패했습니다.' });
+    }
+
+    if (!b.imageBase64 || !String(b.imageBase64).trim()) {
+      return res.status(400).json({ ok: false, error: '이미지 데이터가 없습니다.' });
+    }
+    const root = process.env.AI_REVIEW_FOLDER_ID || process.env.DRIVE_ROOT_FOLDER_ID;
+    if (!root) {
+      return res.status(503).json({ ok: false, error: 'Drive 루트 폴더가 설정되지 않았습니다.' });
+    }
+
+    const folder = await drive.ensureFolderPath(root, ['[유입가이드]']);
+    const ext = ((b.mimeType || 'image/png').split('/')[1] || 'png').split('+')[0];
+    let name = (b.fileName || ('guide_' + Date.now())).toString();
+    if (!/\.[a-z0-9]+$/i.test(name)) name += '.' + ext;
+    const up = await drive.uploadFileBase64(b.imageBase64, name, b.mimeType || 'image/png', folder.id);
+
+    // <img src> 렌더용: thumbnail 엔드포인트가 anyone-reader 파일에 안정적으로 동작
+    const url = `https://drive.google.com/thumbnail?id=${up.id}&sz=w1600`;
+    res.json({ ok: true, id: up.id, url, viewUrl: up.webViewLink });
   } catch (err) {
     next(err);
   }
@@ -201,36 +259,8 @@ router.post('/submit', authMiddleware, async (req, res, next) => {
       return res.status(400).json({ ok: false, error: '작업시트탭URL은 필수입니다.' });
     }
 
-    const { rows } = await pool.query(
-      `INSERT INTO work_orders
-        (id, title, start_date, product_option, pay_amount, daily_count,
-         purchase_time, inflow_keyword, delivery_type, courier_proxy,
-         review_type, recruit_count, review_guide, special_notes,
-         product_url, work_sheet_url, goods_cost_type, status, created_by)
-       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,'submitted',$18)
-       RETURNING *`,
-      [
-        _genOrderId(),
-        String(b.title).trim(),
-        _dateOrNull(b.start_date),
-        b.product_option || '',
-        b.pay_amount || 0,
-        b.daily_count || 0,
-        b.purchase_time || '',
-        b.inflow_keyword || '',
-        b.delivery_type || '',
-        b.courier_proxy === true || b.courier_proxy === 'true',
-        b.review_type || '',
-        b.recruit_count || 0,
-        b.review_guide || '',
-        b.special_notes || '',
-        b.product_url || '',
-        String(b.work_sheet_url).trim(),
-        b.goods_cost_type || '',
-        req.admin?.name || '',
-      ]
-    );
-    res.json({ ok: true, data: rows[0] });
+    const data = await _insertWorkOrder(b, req.admin?.name || '');
+    res.json({ ok: true, data });
   } catch (err) {
     next(err);
   }

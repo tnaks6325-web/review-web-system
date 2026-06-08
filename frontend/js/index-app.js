@@ -1303,6 +1303,30 @@ function _woField(label, val, isLink) {
   return `<div style="font-size:.76rem;color:#374151;margin:2px 0"><b style="color:#6B7280">${label}:</b> ${v}</div>`;
 }
 
+// 유입가이드 본문(HTML+이미지) 안전 렌더 — script/이벤트핸들러/javascript: 제거, 이미지 보정
+function _woGuideHtml(raw) {
+  if (!raw) return "";
+  const tmp = document.createElement("div");
+  tmp.innerHTML = raw;
+  tmp.querySelectorAll("script,style,iframe,object,embed,link").forEach(n => n.remove());
+  tmp.querySelectorAll("*").forEach(el => {
+    [...el.attributes].forEach(a => {
+      const n = a.name.toLowerCase();
+      if (n.startsWith("on")) el.removeAttribute(a.name);
+      if ((n === "href" || n === "src") && /^\s*javascript:/i.test(a.value)) el.removeAttribute(a.name);
+    });
+  });
+  tmp.querySelectorAll("img").forEach(img => {
+    img.style.maxWidth = "100%";
+    img.style.borderRadius = "8px";
+    img.style.margin = "4px 0";
+    img.loading = "lazy";
+  });
+  return tmp.innerHTML;
+}
+
+const _INFLOW_LABEL = { guide: "유입가이드", link: "링크유입" };
+
 function _renderWorkOrderCard(o) {
   const st = o.status || "submitted";
   const [bg, fg] = WO_COLORS[st] || ["#F3F4F6","#374151"];
@@ -1331,12 +1355,13 @@ function _renderWorkOrderCard(o) {
       ${_woField("일일진행", o.daily_count)}
       ${_woField("모집인원", o.recruit_count)}
       ${_woField("구매시간대", o.purchase_time)}
-      ${_woField("유입키워드", o.inflow_keyword)}
+      ${_woField("유입방식", _INFLOW_LABEL[o.inflow_type] || o.inflow_keyword || "")}
       ${_woField("배송유형", o.delivery_type)}
       ${_woField("택배대행", o.courier_proxy ? "예" : "")}
       ${_woField("리뷰유형", o.review_type)}
       ${_woField("물건비", o.goods_cost_type)}
     </div>
+    ${(o.inflow_type === "guide" && o.inflow_guide) ? `<div style="margin-top:6px;font-size:.76rem;color:#374151"><b style="color:#6B7280">유입가이드:</b><div style="margin-top:4px;border:1px solid #E5E7EB;border-radius:8px;padding:8px;background:#F9FAFB">${_woGuideHtml(o.inflow_guide)}</div></div>`:""}
     ${o.review_guide ? `<div style="margin-top:4px;font-size:.76rem;color:#374151"><b style="color:#6B7280">리뷰가이드:</b> ${escHtml(o.review_guide)}</div>`:""}
     ${o.special_notes ? `<div style="margin-top:2px;font-size:.76rem;color:#374151"><b style="color:#6B7280">특이사항:</b> ${escHtml(o.special_notes)}</div>`:""}
     ${memo}
@@ -1401,7 +1426,7 @@ async function woCreateCampaign(id) {
     max_slots:     o.recruit_count || 0,
     chat_url:      o.chat_room_url || "",
     delivery_type: WO_DELIVERY_MAP[o.delivery_type] || "",
-    notes:         [o.inflow_keyword ? ("유입키워드: " + o.inflow_keyword) : "", o.review_guide || ""].filter(Boolean).join("\n"),
+    notes:         [_INFLOW_LABEL[o.inflow_type] ? ("유입방식: " + _INFLOW_LABEL[o.inflow_type]) : (o.inflow_keyword ? ("유입키워드: " + o.inflow_keyword) : ""), o.review_guide || ""].filter(Boolean).join("\n"),
   };
   switchAdminTab("recruit");
   // recruit 탭의 연결 탭 옵션 로드를 보장한 뒤 모달 오픈 (setTimeout race 제거)

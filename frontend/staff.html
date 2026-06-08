@@ -416,9 +416,22 @@ body{font-family:var(--font);background:var(--bg);color:var(--t1);font-size:14px
         <div class="so-row"><label class="so-lb">결제금액(숫자)</label><input class="so-in" id="soPay" type="number" min="0" placeholder="예: 23900"></div>
         <div class="so-row"><label class="so-lb">모집인원</label><input class="so-in" id="soRecruit" type="number" min="0" placeholder="예: 30"></div>
       </div>
-      <div class="so-grid2">
-        <div class="so-row"><label class="so-lb">구매시간대</label><input class="so-in" id="soTime" type="text" placeholder="예: 10시~14시"></div>
-        <div class="so-row"><label class="so-lb">유입키워드</label><input class="so-in" id="soKeyword" type="text" placeholder="예: 비건 선크림"></div>
+      <div class="so-row"><label class="so-lb">구매시간대</label><input class="so-in" id="soTime" type="text" placeholder="예: 10시~14시"></div>
+      <div class="so-row">
+        <label class="so-lb">유입방식</label>
+        <div style="display:flex;gap:16px;margin:2px 0 6px">
+          <label style="display:flex;align-items:center;gap:5px;font-size:.84rem;cursor:pointer"><input type="radio" name="soInflowType" value="link" checked> 링크유입</label>
+          <label style="display:flex;align-items:center;gap:5px;font-size:.84rem;cursor:pointer"><input type="radio" name="soInflowType" value="guide"> 유입가이드</label>
+        </div>
+        <div id="soGuideBox" style="display:none">
+          <div id="soGuideEditor" contenteditable="true" data-ph="가이드 텍스트 입력 · 이미지는 붙여넣기/드래그/첨부 버튼으로 추가"
+               style="min-height:90px;border:1.5px solid #E5E7EB;border-radius:8px;padding:9px 11px;font-size:.84rem;line-height:1.5;outline:none;background:#fff"></div>
+          <div style="display:flex;align-items:center;gap:8px;margin-top:6px">
+            <button type="button" onclick="document.getElementById('soGuideFile').click()" style="font-size:.76rem;background:#EEF2FF;color:#3730A3;border:1px solid #C7D2FE;border-radius:7px;padding:5px 10px;cursor:pointer">📎 이미지 첨부</button>
+            <input type="file" id="soGuideFile" accept="image/*" multiple hidden>
+            <span id="soGuideStatus" style="font-size:.74rem;color:#6B7280"></span>
+          </div>
+        </div>
       </div>
       <div class="so-grid2">
         <div class="so-row"><label class="so-lb">배송유형</label>
@@ -1429,6 +1442,74 @@ function soSwitchTab(tab) {
   if (!isNew) loadMyOrders();
 }
 
+// ── 유입가이드 에디터 (이미지 붙여넣기/드래그/첨부 → Drive 업로드) ──
+function soInflowType(){ return (document.querySelector('input[name=soInflowType]:checked')||{}).value || 'link'; }
+
+function _soCompress(file){
+  return new Promise((resolve)=>{
+    const r=new FileReader();
+    r.onload=()=>{
+      const img=new Image();
+      img.onload=()=>{
+        const max=1600; let w=img.width, h=img.height;
+        if(w>max||h>max){ const s=Math.min(max/w,max/h); w=Math.round(w*s); h=Math.round(h*s); }
+        const c=document.createElement('canvas'); c.width=w; c.height=h;
+        c.getContext('2d').drawImage(img,0,0,w,h);
+        resolve({ base64:c.toDataURL('image/jpeg',0.85), mime:'image/jpeg' });
+      };
+      img.onerror=()=>resolve({ base64:r.result, mime:file.type||'image/png' });
+      img.src=r.result;
+    };
+    r.readAsDataURL(file);
+  });
+}
+
+async function _soUploadGuideImage(file){
+  const st=document.getElementById('soGuideStatus'); st.textContent='이미지 업로드 중...';
+  try{
+    const { base64, mime }=await _soCompress(file);
+    const r=await gasPost({ action:'orderGuideImage', imageBase64:base64, mimeType:mime, fileName:file.name||'guide.jpg' });
+    if(r&&r.ok&&r.url){ _soInsertImage(r.url); st.textContent='첨부 완료'; }
+    else { st.textContent='업로드 실패: '+((r&&r.error)||'알 수 없음'); }
+  }catch(e){ st.textContent='업로드 오류: '+e.message; }
+  setTimeout(()=>{ st.textContent=''; }, 2500);
+}
+
+function _soInsertImage(url){
+  const ed=document.getElementById('soGuideEditor'); ed.focus();
+  const html=`<img src="${url}" style="max-width:100%;border-radius:8px;margin:4px 0"><br>`;
+  if(!document.execCommand('insertHTML', false, html)){ ed.insertAdjacentHTML('beforeend', html); }
+}
+
+(function _soInitGuideEditor(){
+  function bind(){
+    const radios=document.querySelectorAll('input[name=soInflowType]');
+    if(!radios.length){ return setTimeout(bind,300); }
+    if(!document.getElementById('soGuidePhStyle')){
+      const s=document.createElement('style'); s.id='soGuidePhStyle';
+      s.textContent='#soGuideEditor:empty:before{content:attr(data-ph);color:#9CA3AF}';
+      document.head.appendChild(s);
+    }
+    radios.forEach(r=>r.addEventListener('change',()=>{
+      document.getElementById('soGuideBox').style.display = soInflowType()==='guide' ? 'block':'none';
+    }));
+    const ed=document.getElementById('soGuideEditor');
+    const file=document.getElementById('soGuideFile');
+    file.addEventListener('change',e=>{ [...e.target.files].forEach(f=>f.type.startsWith('image/')&&_soUploadGuideImage(f)); file.value=''; });
+    ed.addEventListener('paste',e=>{
+      const items=(e.clipboardData||{}).items||[]; let had=false;
+      for(const it of items){ if(it.type&&it.type.startsWith('image/')){ const f=it.getAsFile(); if(f){ had=true; _soUploadGuideImage(f); } } }
+      if(had) e.preventDefault();
+    });
+    ed.addEventListener('dragover',e=>{ e.preventDefault(); });
+    ed.addEventListener('drop',e=>{
+      const imgs=[...(((e.dataTransfer||{}).files)||[])].filter(f=>f.type.startsWith('image/'));
+      if(imgs.length){ e.preventDefault(); imgs.forEach(_soUploadGuideImage); }
+    });
+  }
+  if(document.readyState==='loading') document.addEventListener('DOMContentLoaded',bind); else bind();
+})();
+
 async function submitStaffOrder() {
   const v = id => (document.getElementById(id).value || "").trim();
   const title    = v("soTitle");
@@ -1444,7 +1525,8 @@ async function submitStaffOrder() {
     pay_amount:     Number(v("soPay")) || 0,
     daily_count:    Number(v("soDaily")) || 0,
     purchase_time:  v("soTime"),
-    inflow_keyword: v("soKeyword"),
+    inflow_type:    soInflowType(),
+    inflow_guide:   soInflowType() === "guide" ? document.getElementById("soGuideEditor").innerHTML : "",
     delivery_type:  v("soDelivery"),
     courier_proxy:  document.getElementById("soCourier").checked,
     review_type:    v("soReviewType"),
@@ -1462,9 +1544,12 @@ async function submitStaffOrder() {
     const r = await gasPost(payload);
     if (r && r.ok) {
       showToast("작업 오더가 제출되었습니다.", "success");
-      ["soTitle","soStart","soProductOption","soPay","soDaily","soTime","soKeyword",
+      ["soTitle","soStart","soProductOption","soPay","soDaily","soTime",
        "soReviewType","soRecruit","soProductUrl","soSheetUrl","soGuide","soNotes"].forEach(i=>{document.getElementById(i).value="";});
       document.getElementById("soCourier").checked = false;
+      document.getElementById("soGuideEditor").innerHTML = "";
+      const _lk = document.querySelector('input[name=soInflowType][value=link]'); if (_lk) _lk.checked = true;
+      document.getElementById("soGuideBox").style.display = "none";
       soSwitchTab("mine");
     } else {
       showToast((r && r.error) || "제출에 실패했습니다.", "error");
