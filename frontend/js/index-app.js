@@ -1388,7 +1388,7 @@ async function woTransition(id, toStatus) {
 // 작업오더 → 모집공고 등록폼 프리필로 열기 (저장 시 자동 역연결)
 // work_order 값과 recruit 폼 옵션이 다른 항목은 일치할 때만 채움 (의미 다른 review_fee/채널/담당자는 비움)
 const WO_DELIVERY_MAP = { '실배송':'실배송', '빈박스':'빈택배' };
-function woCreateCampaign(id) {
+async function woCreateCampaign(id) {
   const o = (_woCache || []).find(x => x.id === id);
   if (!o) { showToast("오더 정보를 찾을 수 없습니다. 새로고침 후 다시 시도하세요.", "error"); return; }
   if (typeof openRecruitModal !== "function") { showToast("모집공고 모듈을 불러오지 못했습니다.", "error"); return; }
@@ -1401,15 +1401,18 @@ function woCreateCampaign(id) {
     notes:         [o.inflow_keyword ? ("유입키워드: " + o.inflow_keyword) : "", o.review_guide || ""].filter(Boolean).join("\n"),
   };
   switchAdminTab("recruit");
-  // recruit 탭 로드(드롭다운 등) 후 모달 오픈
-  setTimeout(() => { try { openRecruitModal(null, prefill, id); } catch(e) { showToast("모달 열기 실패: " + e.message, "error"); } }, 60);
+  // recruit 탭의 연결 탭 옵션 로드를 보장한 뒤 모달 오픈 (setTimeout race 제거)
+  try { if (typeof loadRecruitTabOptions === "function") await loadRecruitTabOptions(); } catch(_) {}
+  try { await openRecruitModal(null, prefill, id); } catch(e) { showToast("모달 열기 실패: " + e.message, "error"); }
 }
 
 // 이미 연결된 공고를 수정 모드로 열기
-function woViewCampaign(campId) {
+async function woViewCampaign(campId) {
   if (typeof openRecruitModal !== "function") { showToast("모집공고 모듈을 불러오지 못했습니다.", "error"); return; }
   switchAdminTab("recruit");
-  setTimeout(() => { try { openRecruitModal(campId); } catch(e) { showToast("모달 열기 실패: " + e.message, "error"); } }, 60);
+  // _restoreLinkedTab 이 _recruitTabList 에 의존하므로 옵션 로드를 await
+  try { if (typeof loadRecruitTabOptions === "function") await loadRecruitTabOptions(); } catch(_) {}
+  try { await openRecruitModal(campId); } catch(e) { showToast("모달 열기 실패: " + e.message, "error"); }
 }
 
 /* ══════════════════════════════════════════════════════════════

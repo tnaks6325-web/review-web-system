@@ -483,7 +483,15 @@ async function saveRecruitPost() {
     const newCampId = saved && saved.data && saved.data.id;
     /* ★ 작업오더에서 프리필로 만든 신규 공고면 → 그 오더에 linked_campaign_id 역연결 */
     if (!_recruitEditId && _woPrefillOrderId && newCampId) {
-      try { await gasGet({ action: "orderAdminUpdate", id: _woPrefillOrderId, linked_campaign_id: newCampId }); } catch(_) {}
+      // gasGet 은 실패 시 throw 하지 않고 {error} 를 반환하므로 결과를 명시적으로 검사
+      try {
+        const linkRes = await gasGet({ action: "orderAdminUpdate", id: _woPrefillOrderId, linked_campaign_id: newCampId });
+        if (linkRes && linkRes.error) {
+          showToast("공고는 등록됐으나 작업오더 연결에 실패했습니다. 인박스에서 다시 연결해주세요.", "error");
+        }
+      } catch(_) {
+        showToast("공고는 등록됐으나 작업오더 연결 중 오류가 발생했습니다.", "error");
+      }
       try { if (typeof loadWorkOrders === "function") loadWorkOrders(); } catch(_) {}
     }
     _woPrefillOrderId = null;
