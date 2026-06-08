@@ -146,6 +146,43 @@ router.post('/intake', async (req, res, next) => {
 });
 
 // ═══════════════════════════════════════════════════════════
+// 외부(인트라넷) 보낸 오더 조회 — 공유 시크릿 인증 (JWT 불필요)
+// GET /api/order/intake/list?requester=이름  → 보낸 오더 + 현재 상태
+// 키: X-Intake-Key 헤더 또는 ?intakeKey=  (requester 생략 시 전체)
+// ═══════════════════════════════════════════════════════════
+router.get('/intake/list', async (req, res, next) => {
+  try {
+    await _ensureTables();
+    const expected = process.env.ORDER_INTAKE_KEY;
+    if (!expected) {
+      return res.status(503).json({ ok: false, error: 'intake 키가 서버에 설정되지 않았습니다. (ORDER_INTAKE_KEY)' });
+    }
+    const key = req.headers['x-intake-key'] || req.query.intakeKey;
+    if (!key || key !== expected) {
+      return res.status(401).json({ ok: false, error: '인증에 실패했습니다.' });
+    }
+    const requester = (req.query.requester || '').toString().trim();
+    const params = [];
+    let where = '';
+    if (requester) {
+      params.push(requester);
+      where = 'WHERE created_by = $1';
+    }
+    const { rows } = await pool.query(
+      `SELECT id, title, status, created_by, recruit_count, start_date,
+              work_sheet_url, linked_campaign_id, chat_room_url, created_at, updated_at
+         FROM work_orders ${where}
+        ORDER BY created_at DESC
+        LIMIT 200`,
+      params
+    );
+    res.json({ ok: true, data: rows });
+  } catch (err) {
+    next(err);
+  }
+});
+
+// ═══════════════════════════════════════════════════════════
 // AE(영업담당자) — 제출 / 본인 조회 / 본인 수정
 // created_by 는 항상 JWT name 으로 강제 (클라이언트 입력 무시)
 // ═══════════════════════════════════════════════════════════
