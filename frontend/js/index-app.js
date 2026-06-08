@@ -1319,9 +1319,39 @@ function _woProductBlock(raw) {
   </div>`;
 }
 
-// 유입가이드 본문(HTML+이미지) 안전 렌더 — script/이벤트핸들러/javascript: 제거, 이미지 보정
+// Drive URL에서 fileId 추출 (/file/d/ID, ?id=ID, /d/ID)
+function _driveId(url) {
+  const s = String(url);
+  const m = s.match(/\/file\/d\/([-\w]{20,})/) || s.match(/[?&]id=([-\w]{20,})/) || s.match(/\/d\/([-\w]{20,})/);
+  return m ? m[1] : null;
+}
+
+// 평문 → 안전 HTML: 줄바꿈 보존, URL 링크화, Drive 파일 URL은 이미지로 자동 임베드
+function _woTextToHtml(text) {
+  const parts = String(text == null ? "" : text).split(/(https?:\/\/[^\s<]+)/g);
+  let html = "";
+  for (let i = 0; i < parts.length; i++) {
+    if (i % 2 === 1) {
+      const url = parts[i];
+      const id = _driveId(url);
+      if (id) {
+        const thumb = `https://drive.google.com/thumbnail?id=${id}&sz=w1600`;
+        html += `<a href="${escHtml(url)}" target="_blank" rel="noopener noreferrer"><img src="${thumb}" style="max-width:100%;border-radius:8px;margin:4px 0" loading="lazy" onerror="this.style.display='none';this.insertAdjacentHTML('afterend','<a href=&quot;${escHtml(url)}&quot; target=_blank style=color:#4F46E5>📎 첨부 이미지 열기</a>')"></a>`;
+      } else {
+        html += `<a href="${escHtml(url)}" target="_blank" rel="noopener noreferrer" style="color:#4F46E5;word-break:break-all">${escHtml(url)}</a>`;
+      }
+    } else {
+      html += escHtml(parts[i]).replace(/\n/g, "<br>");
+    }
+  }
+  return html;
+}
+
+// 유입가이드 본문 안전 렌더 — 평문(Drive URL 자동 임베드) / HTML(<img>) 양쪽 처리
 function _woGuideHtml(raw) {
   if (!raw) return "";
+  // HTML 태그가 없으면 평문으로 보고 Drive URL을 이미지로 임베드
+  if (!/<[a-z][\s\S]*?>/i.test(raw)) return _woTextToHtml(raw);
   const tmp = document.createElement("div");
   tmp.innerHTML = raw;
   tmp.querySelectorAll("script,style,iframe,object,embed,link").forEach(n => n.remove());
@@ -1377,8 +1407,8 @@ function _renderWorkOrderCard(o) {
       ${_woField("리뷰유형", o.review_type)}
       ${_woField("물건비", o.goods_cost_type)}
     </div>
-    ${(o.inflow_type === "guide" && o.inflow_guide) ? `<div style="margin-top:6px;font-size:.76rem;color:#374151"><b style="color:#6B7280">유입가이드:</b><div style="margin-top:4px;border:1px solid #E5E7EB;border-radius:8px;padding:8px;background:#F9FAFB">${_woGuideHtml(o.inflow_guide)}</div></div>`:""}
-    ${o.review_guide ? `<div style="margin-top:4px;font-size:.76rem;color:#374151"><b style="color:#6B7280">리뷰가이드:</b> ${escHtml(o.review_guide)}</div>`:""}
+    ${(o.inflow_guide && String(o.inflow_guide).trim()) ? `<div style="margin-top:6px;font-size:.76rem;color:#374151"><b style="color:#6B7280">${o.inflow_type === "link" ? "유입 링크/상세" : "유입가이드"}:</b><div style="margin-top:4px;border:1px solid #E5E7EB;border-radius:8px;padding:8px;background:#F9FAFB">${_woGuideHtml(o.inflow_guide)}</div></div>`:""}
+    ${o.review_guide ? `<div style="margin-top:4px;font-size:.76rem;color:#374151"><b style="color:#6B7280">리뷰가이드:</b><div style="white-space:pre-wrap;word-break:break-word;margin-top:2px;line-height:1.5">${_woLinkify(o.review_guide)}</div></div>`:""}
     ${o.special_notes ? `<div style="margin-top:4px;font-size:.76rem;color:#374151"><b style="color:#6B7280">특이사항:</b><div style="white-space:pre-wrap;word-break:break-word;margin-top:2px;line-height:1.5">${_woLinkify(o.special_notes)}</div></div>`:""}
     ${memo}
     <div style="margin-top:10px;border-top:1px dashed #E5E7EB;padding-top:10px">
