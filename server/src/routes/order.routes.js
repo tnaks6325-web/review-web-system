@@ -206,46 +206,73 @@ router.get('/intake/list', async (req, res, next) => {
 });
 
 // ═══════════════════════════════════════════════════════════
-// 유입가이드 이미지 업로드 — Google Drive 저장 후 표시용 URL 반환
-// 인증: X-Intake-Key(인트라넷) 또는 JWT(내부 staff/admin) 둘 중 하나
-// body: { imageBase64, mimeType, fileName? }  → { ok, id, url, viewUrl }
+// 유입가이드 이미지 — 인트라넷·리뷰웹 공용 전용 Drive 폴더에 "비공개" 저장
+// 인증: X-Intake-Key(인트라넷) 또는 JWT(내부 staff/admin)
+// body: { imageBase64, mimeType, fileName? }
+//   → { ok, id, url, viewUrl }  (url/viewUrl = 리뷰웹 프록시 — Drive 파일은 비공개)
+// 전용 폴더: env GUIDE_FOLDER_ID 우선, 없으면 AI_REVIEW_FOLDER 하위 [유입가이드] 자동
 // ═══════════════════════════════════════════════════════════
+function _guideImageAuthed(req) {
+  const intakeKey = (req.body && req.body.intakeKey) || req.headers['x-intake-key'];
+  if (process.env.ORDER_INTAKE_KEY && intakeKey === process.env.ORDER_INTAKE_KEY) return true;
+  try {
+    const tok = (req.headers.authorization || '').split(' ')[1];
+    if (tok) { jwt.verify(tok, process.env.JWT_SECRET); return true; }
+  } catch (_) { /* fallthrough */ }
+  return false;
+}
+function _publicApiBase(req) {
+  return (process.env.PUBLIC_API_URL || ('https://' + req.get('host'))).replace(/\/+$/, '');
+}
+
 router.post('/guide-image', async (req, res, next) => {
   try {
     const b = req.body || {};
-    // ── 인증: intake 키 또는 JWT ──
-    const intakeKey = b.intakeKey || req.headers['x-intake-key'];
-    const keyOk = !!process.env.ORDER_INTAKE_KEY && intakeKey === process.env.ORDER_INTAKE_KEY;
-    let jwtOk = false;
-    if (!keyOk) {
-      try {
-        const tok = (req.headers.authorization || '').split(' ')[1];
-        if (tok) { jwt.verify(tok, process.env.JWT_SECRET); jwtOk = true; }
-      } catch (_) { /* invalid token → 아래에서 401 */ }
-    }
-    if (!keyOk && !jwtOk) {
+    if (!_guideImageAuthed(req)) {
       return res.status(401).json({ ok: false, error: '인증에 실패했습니다.' });
     }
-
     if (!b.imageBase64 || !String(b.imageBase64).trim()) {
       return res.status(400).json({ ok: false, error: '이미지 데이터가 없습니다.' });
     }
-    const root = process.env.AI_REVIEW_FOLDER_ID || process.env.DRIVE_ROOT_FOLDER_ID;
-    if (!root) {
-      return res.status(503).json({ ok: false, error: 'Drive 루트 폴더가 설정되지 않았습니다.' });
+
+    // 전용 폴더 결정
+    let folderId = process.env.GUIDE_FOLDER_ID;
+    if (!folderId) {
+      const root = process.env.AI_REVIEW_FOLDER_ID || process.env.DRIVE_ROOT_FOLDER_ID;
+      if (!root) {
+        return res.status(503).json({ ok: false, error: 'Drive 폴더가 설정되지 않았습니다. (GUIDE_FOLDER_ID 또는 AI_REVIEW_FOLDER_ID)' });
+      }
+      const folder = await drive.ensureFolderPath(root, ['[유입가이드]']);
+      folderId = folder.id;
     }
 
-    const folder = await drive.ensureFolderPath(root, ['[유입가이드]']);
     const ext = ((b.mimeType || 'image/png').split('/')[1] || 'png').split('+')[0];
     let name = (b.fileName || ('guide_' + Date.now())).toString();
     if (!/\.[a-z0-9]+$/i.test(name)) name += '.' + ext;
-    const up = await drive.uploadFileBase64(b.imageBase64, name, b.mimeType || 'image/png', folder.id);
 
-    // <img src> 렌더용: thumbnail 엔드포인트가 anyone-reader 파일에 안정적으로 동작
-    const url = `https://drive.google.com/thumbnail?id=${up.id}&sz=w1600`;
-    res.json({ ok: true, id: up.id, url, viewUrl: up.webViewLink });
+    // ★ 비공개 업로드(shareAnyone:false) — 공개 링크 만들지 않음
+    const up = await drive.uploadFileBase64(b.imageBase64, name, b.mimeType || 'image/png', folderId, { shareAnyone: false });
+
+    // 리뷰웹 프록시 URL — Drive 파일은 비공개, 서버가 꺼내 스트리밍
+    const proxy = `${_publicApiBase(req)}/api/order/guide-image/${up.id}`;
+    res.json({ ok: true, id: up.id, url: proxy, viewUrl: proxy });
   } catch (err) {
     next(err);
+  }
+});
+
+// GET /api/order/guide-image/:id — 비공개 Drive 파일을 서버가 받아 스트리밍 (이미지 표시용)
+// <img src>가 헤더 인증을 못 보내므로 토큰 없이 동작. id는 추측 불가한 Drive fileId.
+router.get('/guide-image/:id', async (req, res, next) => {
+  try {
+    const id = String(req.params.id || '');
+    if (!/^[-\w]{20,}$/.test(id)) return res.status(400).send('bad id');
+    const f = await drive.downloadFile(id);
+    res.set('Content-Type', f.mimeType || 'application/octet-stream');
+    res.set('Cache-Control', 'private, max-age=3600');
+    res.send(f.buffer);
+  } catch (err) {
+    res.status(404).send('not found');
   }
 });
 
