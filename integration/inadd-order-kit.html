@@ -56,7 +56,7 @@
     <div class="rk-row"><label>구매시간대</label><input id="rk_time" type="text" placeholder="예: 10시~14시"></div>
   </div>
   <div class="rk-grid2">
-    <div class="rk-row"><label>일일진행건수</label><input id="rk_daily" type="number" min="0" placeholder="예: 10"></div>
+    <div class="rk-row"><label>일일진행건수</label><input id="rk_daily" type="text" placeholder="예: 10 또는 3~7"></div>
     <div class="rk-row"><label>리뷰유형</label><input id="rk_reviewtype" type="text" placeholder="예: 전체포토"></div>
   </div>
 
@@ -236,6 +236,25 @@ function rkFirstProductUrl(){
   const first=document.querySelector("#rk_products .rkp .rkp-url");
   return first ? (first.value||"").trim() : "";
 }
+// 상품/옵션 구조화 데이터(JSON) — 표/필터/통계용
+function rkProductsJson(){
+  return [...document.querySelectorAll("#rk_products .rkp")].map(prod=>{
+    const optRows=[...prod.querySelectorAll(".rko")];
+    const options=optRows.map(r=>({
+      label:(r.querySelector(".rko-label").value||"").trim(),
+      pay:rkNum(r.querySelector(".rko-pay").value),
+      count:rkNum(r.querySelector(".rko-cnt").value),
+    }));
+    const t=_rkProductTotals(prod);
+    return {
+      name:(prod.querySelector(".rkp-name").value||"").trim(),
+      url:(prod.querySelector(".rkp-url").value||"").trim(),
+      base:{ pay:rkNum(prod.querySelector(".rkp-pay").value), count:rkNum(prod.querySelector(".rkp-cnt").value) },
+      options,
+      subtotal:{ count:t.count, pay:t.pay },
+    };
+  });
+}
 
 /* ───────────── 유입가이드 에디터 (이미지 첨부 → Drive) ───────────── */
 function rkInflowType(){ return (document.querySelector('input[name=rk_inflow]:checked')||{}).value || 'link'; }
@@ -309,15 +328,19 @@ rkAddProduct();
 /* ───────────── 수집 / 제출 ───────────── */
 function rkCollect(){
   const t = rkRecompute();
+  const dailyRaw = rkVal("rk_daily");
+  const dailyMin = parseInt((dailyRaw.match(/\d+/) || [0])[0], 10) || 0;
   return {
     requester_name: getRequester() || rkVal("rk_requester"),
     title:          rkVal("rk_title"),
     start_date:     rkVal("rk_start"),
-    product_option: rkProductsSummary(),   // 상품/옵션 요약(여러 줄)
+    product_option:       rkProductsSummary(),   // 상품/옵션 요약(여러 줄)
+    product_options_json: JSON.stringify(rkProductsJson()), // 구조화 데이터
     pay_amount:     t.totPay,              // 총 상품구입비 합계
     recruit_count:  t.totCount,            // 최종 모집인원 합계
     product_url:    rkFirstProductUrl(),   // 첫 상품 URL
-    daily_count:    Number(rkVal("rk_daily")) || 0,
+    daily_count:      dailyMin,            // 정수(범위면 최소값)
+    daily_count_text: dailyRaw,            // 원문(예: "3~7")
     purchase_time:  rkVal("rk_time"),
     inflow_type:    rkInflowType(),
     inflow_guide:   rkInflowType() === "guide" ? document.getElementById("rk_guide_editor").innerHTML : "",
