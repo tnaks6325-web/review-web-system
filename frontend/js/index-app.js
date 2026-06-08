@@ -1397,24 +1397,33 @@ function _renderWorkOrderCard(o) {
       <b style="font-size:.92rem;color:#111827">${escHtml(o.title||"")}</b>
       <span style="font-size:.72rem;color:#9CA3AF;margin-left:auto"><i class="fas fa-user"></i> ${escHtml(o.created_by||"-")} · ${date}</span>
     </div>
-    ${_woProductBlock(o.product_option)}
-    <div style="margin-top:10px;display:grid;grid-template-columns:1fr 1fr;gap:2px 18px">
-      ${_woField("작업시트탭URL", o.work_sheet_url, true)}
-      ${_woField("상품확인용URL", o.product_url, true)}
-      ${_woField("총 상품구입비", o.pay_amount ? Number(o.pay_amount).toLocaleString()+"원" : "")}
-      ${_woField("모집인원", o.recruit_count ? Number(o.recruit_count).toLocaleString()+"명" : "")}
-      ${_woField("일일진행", o.daily_count_text || o.daily_count)}
-      ${_woField("구매시간대", o.purchase_time)}
-      ${_woField("유입방식", _INFLOW_LABEL[o.inflow_type] || o.inflow_keyword || "")}
-      ${_woField("배송유형", o.delivery_type)}
-      ${_woField("택배대행", o.courier_proxy ? "예" : "")}
-      ${_woField("리뷰유형", o.review_type)}
-      ${_woField("물건비", o.goods_cost_type)}
+    <div style="margin-top:8px;display:flex;flex-wrap:wrap;gap:6px 14px;align-items:center;font-size:.78rem;color:#374151">
+      ${o.recruit_count ? `<span><b style="color:#6B7280">모집</b> ${Number(o.recruit_count).toLocaleString()}명</span>`:""}
+      ${o.delivery_type ? `<span><b style="color:#6B7280">배송</b> ${escHtml(o.delivery_type)}${o.courier_proxy?"·택배대행":""}</span>`:""}
+      ${o.pay_amount ? `<span><b style="color:#6B7280">구입비</b> ${Number(o.pay_amount).toLocaleString()}원</span>`:""}
+      ${o.start_date ? `<span><b style="color:#6B7280">시작</b> ${escHtml(String(o.start_date).substring(0,10))}</span>`:""}
+      <button onclick="woToggleDetail('${o.id}',this)" style="margin-left:auto;font-size:.74rem;background:#EEF2FF;color:#3730A3;border:1px solid #C7D2FE;border-radius:7px;padding:4px 10px;cursor:pointer;white-space:nowrap"><i class="fas fa-chevron-down"></i> 펼쳐보기</button>
     </div>
-    ${(o.inflow_guide && String(o.inflow_guide).trim()) ? `<div style="margin-top:6px;font-size:.76rem;color:#374151"><b style="color:#6B7280">${o.inflow_type === "link" ? "유입 링크/상세" : "유입가이드"}:</b><div style="margin-top:4px;border:1px solid #E5E7EB;border-radius:8px;padding:8px;background:#F9FAFB">${_woGuideHtml(o.inflow_guide)}</div></div>`:""}
-    ${o.review_guide ? `<div style="margin-top:4px;font-size:.76rem;color:#374151"><b style="color:#6B7280">리뷰가이드:</b><div style="white-space:pre-wrap;word-break:break-word;margin-top:2px;line-height:1.5">${_woLinkify(o.review_guide)}</div></div>`:""}
-    ${o.special_notes ? `<div style="margin-top:4px;font-size:.76rem;color:#374151"><b style="color:#6B7280">특이사항:</b><div style="white-space:pre-wrap;word-break:break-word;margin-top:2px;line-height:1.5">${_woLinkify(o.special_notes)}</div></div>`:""}
-    ${memo}
+    <div id="woDetail_${o.id}" style="display:none">
+      ${_woProductBlock(o.product_option)}
+      <div style="margin-top:10px;display:grid;grid-template-columns:1fr 1fr;gap:2px 18px">
+        ${_woField("작업시트탭URL", o.work_sheet_url, true)}
+        ${_woField("상품확인용URL", o.product_url, true)}
+        ${_woField("총 상품구입비", o.pay_amount ? Number(o.pay_amount).toLocaleString()+"원" : "")}
+        ${_woField("모집인원", o.recruit_count ? Number(o.recruit_count).toLocaleString()+"명" : "")}
+        ${_woField("일일진행", o.daily_count_text || o.daily_count)}
+        ${_woField("구매시간대", o.purchase_time)}
+        ${_woField("유입방식", _INFLOW_LABEL[o.inflow_type] || o.inflow_keyword || "")}
+        ${_woField("배송유형", o.delivery_type)}
+        ${_woField("택배대행", o.courier_proxy ? "예" : "")}
+        ${_woField("리뷰유형", o.review_type)}
+        ${_woField("물건비", o.goods_cost_type)}
+      </div>
+      ${(o.inflow_guide && String(o.inflow_guide).trim()) ? `<div style="margin-top:6px;font-size:.76rem;color:#374151"><b style="color:#6B7280">${o.inflow_type === "link" ? "유입 링크/상세" : "유입가이드"}:</b><div style="margin-top:4px;border:1px solid #E5E7EB;border-radius:8px;padding:8px;background:#F9FAFB">${_woGuideHtml(o.inflow_guide)}</div></div>`:""}
+      ${o.review_guide ? `<div style="margin-top:4px;font-size:.76rem;color:#374151"><b style="color:#6B7280">리뷰가이드:</b><div style="white-space:pre-wrap;word-break:break-word;margin-top:2px;line-height:1.5">${_woLinkify(o.review_guide)}</div></div>`:""}
+      ${o.special_notes ? `<div style="margin-top:4px;font-size:.76rem;color:#374151"><b style="color:#6B7280">특이사항:</b><div style="white-space:pre-wrap;word-break:break-word;margin-top:2px;line-height:1.5">${_woLinkify(o.special_notes)}</div></div>`:""}
+      ${memo}
+    </div>
     <div style="margin-top:10px;border-top:1px dashed #E5E7EB;padding-top:10px">
       <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-bottom:8px">
         <input id="woChat_${o.id}" type="text" value="${escHtml(o.chat_room_url||"")}" placeholder="카톡 팀채팅방URL (발행 시 필수)"
@@ -1431,6 +1440,17 @@ function _renderWorkOrderCard(o) {
       </div>
     </div>
   </div>`;
+}
+
+// 작업오더 카드 상세 펼치기/접기
+function woToggleDetail(id, btn) {
+  const d = document.getElementById("woDetail_" + id);
+  if (!d) return;
+  const open = d.style.display === "none";
+  d.style.display = open ? "block" : "none";
+  btn.innerHTML = open
+    ? '<i class="fas fa-chevron-up"></i> 간략히보기'
+    : '<i class="fas fa-chevron-down"></i> 펼쳐보기';
 }
 
 // 카톡URL/메모만 저장 (상태 전이 없이)
