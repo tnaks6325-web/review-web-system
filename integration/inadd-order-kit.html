@@ -1,0 +1,185 @@
+<!--
+  ════════════════════════════════════════════════════════════════
+  inadd 인트라넷 → 리뷰웹시스템 "작업 오더" 제출 키트  (복붙용)
+  ════════════════════════════════════════════════════════════════
+  · 이 파일은 inadd-webapp(인트라넷)에 붙여넣어 쓰는 독립 컴포넌트입니다.
+  · AE가 리뷰작업요청을 작성 → 리뷰웹시스템 백엔드로 직접 POST → 관리자 인박스에 팝업/누적.
+  · "복사" 버튼으로 카톡 리마인드용 요약을 클립보드에 담습니다.
+
+  ── 적용 전 설정 (아래 CONFIG 3개) ──
+  1) API_BASE       : 리뷰웹시스템 백엔드 URL (Railway)
+  2) INTAKE_KEY     : 리뷰웹 백엔드 env(ORDER_INTAKE_KEY)와 "똑같은" 시크릿
+  3) getRequester() : 인트라넷 로그인 사용자(AE) 이름을 반환하도록 연결
+                      (세션/전역변수가 있으면 그걸 반환. 없으면 입력칸 사용)
+
+  ── 리뷰웹 백엔드 준비 (관리자/배포 담당) ──
+  · Railway 환경변수 ORDER_INTAKE_KEY = <위 INTAKE_KEY와 동일> 설정
+  · CORS는 inadd-system.pages.dev 이미 허용됨 (review-web 배포 후)
+  ════════════════════════════════════════════════════════════════
+-->
+<div id="reviewOrderKit">
+  <style>
+    #reviewOrderKit{max-width:560px;margin:0 auto;font-family:-apple-system,'Malgun Gothic',sans-serif;color:#1f2937}
+    #reviewOrderKit h2{font-size:1.1rem;font-weight:800;margin:0 0 4px}
+    #reviewOrderKit .rk-sub{font-size:.8rem;color:#6b7280;margin-bottom:14px}
+    #reviewOrderKit .rk-row{margin-bottom:9px}
+    #reviewOrderKit .rk-grid2{display:grid;grid-template-columns:1fr 1fr;gap:9px}
+    #reviewOrderKit label{display:block;font-size:.76rem;font-weight:700;color:#374151;margin-bottom:3px}
+    #reviewOrderKit label .req{color:#dc2626}
+    #reviewOrderKit input,#reviewOrderKit select,#reviewOrderKit textarea{
+      width:100%;padding:8px 10px;border:1.5px solid #e5e7eb;border-radius:7px;font-size:.84rem;font-family:inherit;box-sizing:border-box}
+    #reviewOrderKit input:focus,#reviewOrderKit select:focus,#reviewOrderKit textarea:focus{outline:none;border-color:#6366f1;box-shadow:0 0 0 3px rgba(99,102,241,.12)}
+    #reviewOrderKit .rk-chk{display:flex;align-items:center;gap:7px;padding-top:22px}
+    #reviewOrderKit .rk-chk input{width:16px;height:16px}
+    #reviewOrderKit .rk-btns{display:flex;gap:8px;margin-top:14px}
+    #reviewOrderKit button{flex:1;padding:11px;border:none;border-radius:9px;font-weight:700;font-size:.88rem;cursor:pointer}
+    #reviewOrderKit .rk-submit{background:#6366f1;color:#fff}
+    #reviewOrderKit .rk-copy{background:#eef2ff;color:#3730a3;border:1.5px solid #c7d2fe}
+    #reviewOrderKit .rk-msg{margin-top:10px;font-size:.82rem;min-height:18px}
+    #reviewOrderKit .rk-ok{color:#065f46}#reviewOrderKit .rk-err{color:#991b1b}
+  </style>
+
+  <h2>📋 리뷰 작업 요청</h2>
+  <div class="rk-sub">작성 후 <b>요청 보내기</b>를 누르면 리뷰웹 관리자 인박스로 전송됩니다.</div>
+
+  <div class="rk-row"><label>작업명 <span class="req">*</span></label>
+    <input id="rk_title" type="text" placeholder="예: A브랜드 선크림 실배송"></div>
+  <div class="rk-grid2">
+    <div class="rk-row"><label>시작일</label><input id="rk_start" type="date"></div>
+    <div class="rk-row"><label>일일진행건수</label><input id="rk_daily" type="number" min="0" placeholder="예: 10"></div>
+  </div>
+  <div class="rk-row"><label>상품옵션 및 결제금액</label>
+    <input id="rk_option" type="text" placeholder="예: 50ml 1+1 / 23,900원"></div>
+  <div class="rk-grid2">
+    <div class="rk-row"><label>결제금액(숫자)</label><input id="rk_pay" type="number" min="0" placeholder="예: 23900"></div>
+    <div class="rk-row"><label>모집인원</label><input id="rk_recruit" type="number" min="0" placeholder="예: 30"></div>
+  </div>
+  <div class="rk-grid2">
+    <div class="rk-row"><label>구매시간대</label><input id="rk_time" type="text" placeholder="예: 10시~14시"></div>
+    <div class="rk-row"><label>유입키워드</label><input id="rk_keyword" type="text" placeholder="예: 비건 선크림"></div>
+  </div>
+  <div class="rk-grid2">
+    <div class="rk-row"><label>배송유형</label>
+      <select id="rk_delivery"><option value="">선택</option><option>실배송</option><option>빈박스</option></select></div>
+    <div class="rk-row"><label>물건비</label>
+      <select id="rk_goods"><option value="">선택</option><option>현금</option><option>계산서</option></select></div>
+  </div>
+  <div class="rk-grid2">
+    <div class="rk-row"><label>리뷰유형</label>
+      <input id="rk_reviewtype" type="text" placeholder="예: 전체포토 / 텍스트20·포토80"></div>
+    <div class="rk-chk"><input id="rk_courier" type="checkbox"><label for="rk_courier" style="margin:0;cursor:pointer">빈박스 택배대행</label></div>
+  </div>
+  <div class="rk-row"><label>상품확인용URL</label><input id="rk_producturl" type="text" placeholder="https://..."></div>
+  <div class="rk-row"><label>작업시트탭URL <span class="req">*</span></label>
+    <input id="rk_sheeturl" type="text" placeholder="작업시트 탭 URL (필수)"></div>
+  <div class="rk-row"><label>리뷰등록가이드</label><textarea id="rk_guide" rows="2" placeholder="리뷰 작성/등록 가이드"></textarea></div>
+  <div class="rk-row"><label>특이사항</label><textarea id="rk_notes" rows="2" placeholder="기타 특이사항"></textarea></div>
+  <!-- 요청자(AE) 이름: getRequester()로 자동 채우되, 없으면 직접 입력 -->
+  <div class="rk-row"><label>요청자(AE)</label><input id="rk_requester" type="text" placeholder="이름"></div>
+
+  <div class="rk-btns">
+    <button class="rk-copy" type="button" onclick="rkCopySummary()">📋 요약 복사</button>
+    <button class="rk-submit" type="button" onclick="rkSubmitOrder()">📨 요청 보내기</button>
+  </div>
+  <div id="rk_msg" class="rk-msg"></div>
+</div>
+
+<script>
+/* ===================== CONFIG (3개만 맞추면 됨) ===================== */
+const RK_CONFIG = {
+  API_BASE:   "https://sublime-magic-production-790b.up.railway.app", // 리뷰웹 백엔드
+  INTAKE_KEY: "여기에_공유시크릿_입력",                                 // = Railway ORDER_INTAKE_KEY
+};
+// 인트라넷 로그인 사용자(AE) 이름 반환하도록 연결하세요. 세션이 없으면 입력칸(rk_requester) 사용.
+function getRequester() {
+  // 예: return window.currentUser?.name || "";
+  return "";
+}
+/* ================================================================= */
+
+(function(){ const el=document.getElementById("rk_requester"); const n=getRequester(); if(n){el.value=n; el.readOnly=true;} })();
+
+function rkVal(id){ return (document.getElementById(id).value || "").trim(); }
+function rkMsg(text, ok){ const m=document.getElementById("rk_msg"); m.textContent=text; m.className="rk-msg "+(ok?"rk-ok":"rk-err"); }
+
+function rkCollect(){
+  return {
+    requester_name: getRequester() || rkVal("rk_requester"),
+    title:          rkVal("rk_title"),
+    start_date:     rkVal("rk_start"),
+    product_option: rkVal("rk_option"),
+    pay_amount:     Number(rkVal("rk_pay")) || 0,
+    daily_count:    Number(rkVal("rk_daily")) || 0,
+    purchase_time:  rkVal("rk_time"),
+    inflow_keyword: rkVal("rk_keyword"),
+    delivery_type:  rkVal("rk_delivery"),
+    courier_proxy:  document.getElementById("rk_courier").checked,
+    review_type:    rkVal("rk_reviewtype"),
+    recruit_count:  Number(rkVal("rk_recruit")) || 0,
+    review_guide:   rkVal("rk_guide"),
+    special_notes:  rkVal("rk_notes"),
+    product_url:    rkVal("rk_producturl"),
+    work_sheet_url: rkVal("rk_sheeturl"),
+    goods_cost_type:rkVal("rk_goods"),
+  };
+}
+
+// 카톡 리마인드용 간결 요약 텍스트
+function rkBuildSummary(d){
+  const yn = d.courier_proxy ? " (택배대행)" : "";
+  const pay = d.pay_amount ? d.pay_amount.toLocaleString()+"원" : "";
+  return [
+    "▶작업명: " + (d.title||"-") + (d.start_date ? "  / 시작 "+d.start_date : ""),
+    "▶상품옵션·결제금액: " + (d.product_option||"-") + (pay ? " / "+pay : ""),
+    "▶일일진행건수: " + (d.daily_count||"-"),
+    "▶구매시간대: " + (d.purchase_time||"-"),
+    "▶유입키워드: " + (d.inflow_keyword||"-"),
+    "▶배송: " + (d.delivery_type||"-") + yn,
+    "▶모집인원: " + (d.recruit_count||"-") + "명",
+    "▶리뷰유형: " + (d.review_type||"-"),
+    "▶특이사항: " + (d.special_notes||"-"),
+    "▶상품확인용URL: " + (d.product_url||"-"),
+    "▶작업시트URL: " + (d.work_sheet_url||"-"),
+    "▶물건비: " + (d.goods_cost_type||"-"),
+  ].join("\n");
+}
+
+async function rkCopySummary(){
+  const d = rkCollect();
+  const text = rkBuildSummary(d);
+  try {
+    await navigator.clipboard.writeText(text);
+    rkMsg("요약을 복사했습니다. 카톡방에 붙여넣어 리마인드하세요.", true);
+  } catch(_) {
+    // clipboard API 차단 시 폴백
+    const ta=document.createElement("textarea"); ta.value=text; document.body.appendChild(ta); ta.select();
+    try{ document.execCommand("copy"); rkMsg("요약을 복사했습니다.", true);}catch(e){ rkMsg("복사 실패 — 수동 복사하세요.", false);}
+    ta.remove();
+  }
+}
+
+async function rkSubmitOrder(){
+  const d = rkCollect();
+  if (!d.title)          { rkMsg("작업명을 입력하세요.", false); return; }
+  if (!d.work_sheet_url) { rkMsg("작업시트탭URL은 필수입니다.", false); return; }
+  if (!d.requester_name) { rkMsg("요청자(AE) 이름을 입력하세요.", false); return; }
+  rkMsg("전송 중...", true);
+  try {
+    const res = await fetch(RK_CONFIG.API_BASE + "/api/order/intake", {
+      method: "POST",
+      headers: { "Content-Type": "application/json", "X-Intake-Key": RK_CONFIG.INTAKE_KEY },
+      body: JSON.stringify(d),
+    });
+    const json = await res.json().catch(()=>({}));
+    if (res.ok && json.ok) {
+      rkMsg("✅ 작업 요청이 전송되었습니다. 관리자 인박스에서 확인됩니다.", true);
+      // 전송 후 요약을 자동 복사해 바로 카톡 리마인드 가능하게
+      try { await navigator.clipboard.writeText(rkBuildSummary(d)); } catch(_){}
+    } else {
+      rkMsg("전송 실패: " + (json.error || ("HTTP " + res.status)), false);
+    }
+  } catch(e) {
+    rkMsg("네트워크 오류: " + e.message, false);
+  }
+}
+</script>
