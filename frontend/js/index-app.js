@@ -1254,6 +1254,7 @@ const WO_COLORS = {
   await_chatroom:['#FEF3C7','#92400E'], published:['#EDE9FE','#5B21B6'],
   done:['#D1FAE5','#065F46'], rejected:['#FEE2E2','#991B1B'], revision:['#FFEDD5','#9A3412'],
 };
+let _woCache = [];   // 인박스 목록 캐시 (카드 버튼 핸들러에서 조회)
 const WO_TRANSITIONS = {
   submitted:      ['reviewing', 'rejected', 'revision'],
   reviewing:      ['await_chatroom', 'rejected', 'revision'],
@@ -1278,6 +1279,7 @@ async function loadWorkOrders() {
       const n = list.filter(o => o.status === "submitted").length;
       badge.textContent = n; badge.style.display = n > 0 ? "" : "none";
     }
+    _woCache = list;
     if (list.length === 0) {
       wrap.innerHTML = '<div style="text-align:center;color:#9CA3AF;padding:30px;font-size:.85rem">오더가 없습니다.</div>';
       return;
@@ -1344,6 +1346,9 @@ function _renderWorkOrderCard(o) {
       </div>
       <div style="display:flex;gap:6px;flex-wrap:wrap;align-items:center">
         <button onclick="woSaveFields('${o.id}')" style="font-size:.74rem;background:#F3F4F6;color:#374151;border:1px solid #D1D5DB;border-radius:7px;padding:5px 10px;cursor:pointer"><i class="fas fa-save"></i> 메모·카톡URL 저장</button>
+        ${o.linked_campaign_id
+          ? `<button onclick="woViewCampaign('${escHtml(o.linked_campaign_id)}')" style="font-size:.74rem;font-weight:700;background:#D1FAE5;color:#065F46;border:1px solid #6EE7B7;border-radius:7px;padding:5px 10px;cursor:pointer"><i class="fas fa-link"></i> 연결된 공고 보기</button>`
+          : `<button onclick="woCreateCampaign('${o.id}')" style="font-size:.74rem;font-weight:700;background:#EDE9FE;color:#5B21B6;border:1px solid #C4B5FD;border-radius:7px;padding:5px 10px;cursor:pointer"><i class="fas fa-bullhorn"></i> 모집공고 만들기</button>`}
         ${btns || '<span style="font-size:.74rem;color:#9CA3AF">종료된 오더</span>'}
       </div>
     </div>
@@ -1378,6 +1383,33 @@ async function woTransition(id, toStatus) {
     if (r && r.ok) { showToast(WO_LABELS[toStatus] + "(으)로 변경되었습니다.", "success"); loadWorkOrders(); }
     else showToast((r && r.error) || "상태 변경 실패", "error");
   } catch(e) { showToast("오류: " + e.message, "error"); }
+}
+
+// 작업오더 → 모집공고 등록폼 프리필로 열기 (저장 시 자동 역연결)
+// work_order 값과 recruit 폼 옵션이 다른 항목은 일치할 때만 채움 (의미 다른 review_fee/채널/담당자는 비움)
+const WO_DELIVERY_MAP = { '실배송':'실배송', '빈박스':'빈택배' };
+function woCreateCampaign(id) {
+  const o = (_woCache || []).find(x => x.id === id);
+  if (!o) { showToast("오더 정보를 찾을 수 없습니다. 새로고침 후 다시 시도하세요.", "error"); return; }
+  if (typeof openRecruitModal !== "function") { showToast("모집공고 모듈을 불러오지 못했습니다.", "error"); return; }
+  const prefill = {
+    title:         o.title || "",
+    time_range:    o.purchase_time || "",
+    max_slots:     o.recruit_count || 0,
+    chat_url:      o.chat_room_url || "",
+    delivery_type: WO_DELIVERY_MAP[o.delivery_type] || "",
+    notes:         [o.inflow_keyword ? ("유입키워드: " + o.inflow_keyword) : "", o.review_guide || ""].filter(Boolean).join("\n"),
+  };
+  switchAdminTab("recruit");
+  // recruit 탭 로드(드롭다운 등) 후 모달 오픈
+  setTimeout(() => { try { openRecruitModal(null, prefill, id); } catch(e) { showToast("모달 열기 실패: " + e.message, "error"); } }, 60);
+}
+
+// 이미 연결된 공고를 수정 모드로 열기
+function woViewCampaign(campId) {
+  if (typeof openRecruitModal !== "function") { showToast("모집공고 모듈을 불러오지 못했습니다.", "error"); return; }
+  switchAdminTab("recruit");
+  setTimeout(() => { try { openRecruitModal(campId); } catch(e) { showToast("모달 열기 실패: " + e.message, "error"); } }, 60);
 }
 
 /* ══════════════════════════════════════════════════════════════
