@@ -37,4 +37,12 @@ function masterOnlyMiddleware(req, res, next) {
   next();
 }
 
-module.exports = { authMiddleware, masterOnlyMiddleware };
+/** 관리자(admin) 또는 마스터(master) 전용 — staff(영업담당자) 차단 */
+function adminOrMasterMiddleware(req, res, next) {
+  if (!req.admin || !['admin', 'master'].includes(req.admin.role)) {
+    return res.status(403).json({ error: '관리자 권한이 필요합니다.' });
+  }
+  next();
+}
+
+module.exports = { authMiddleware, masterOnlyMiddleware, adminOrMasterMiddleware };

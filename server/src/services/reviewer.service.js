@@ -53,8 +53,8 @@ async function registerReviewer({ name, phone, consent, sheetId }) {
 async function verifyReviewer(name, phone8) {
   const n = (name || '').trim();
   const p8 = (phone8 || '').replace(/[^0-9]/g, '');
-  if (!n) return { ok: false, error: '이름을 입력하세요.' };
-  if (p8.length !== 8) return { ok: false, error: '전화번호 뒤 8자리를 입력하세요.' };
+  if (!n) return { ok: false, error: '이름을 입력하세요.', field: 'name' };
+  if (p8.length !== 8) return { ok: false, error: '전화번호 뒤 8자리를 정확히 입력하세요.', field: 'phone' };
 
   // 1) 직접 매칭
   const { rows } = await pool.query(
@@ -66,8 +66,15 @@ async function verifyReviewer(name, phone8) {
   }
 
   // 2) 타계정(sub_accounts) 매칭 — 메인 계정으로 자동 로그인
+  // ★ sub_accounts 가 배열이 아닌 스칼라(잘못 저장된 데이터)인 경우
+  //   jsonb_array_length 가 "cannot get array length of a scalar" 에러를 던지므로
+  //   jsonb_typeof 로 배열일 때만 길이를 평가 (CASE 는 평가 순서 보장)
   const { rows: subRows } = await pool.query(
-    "SELECT name, phone, sub_accounts FROM reviewers WHERE sub_accounts IS NOT NULL AND jsonb_array_length(sub_accounts) > 0"
+    `SELECT name, phone, sub_accounts FROM reviewers
+     WHERE sub_accounts IS NOT NULL
+       AND CASE WHEN jsonb_typeof(sub_accounts) = 'array'
+                THEN jsonb_array_length(sub_accounts)
+                ELSE 0 END > 0`
   );
 
   for (const row of subRows) {
@@ -101,30 +108,32 @@ async function verifyReviewer(name, phone8) {
         const subPhone8 = subPhone.length >= 8 ? subPhone.slice(-8) : subPhone;
         if (subPhone8 === p8) {
           // 번호는 타계정에 존재하지만 이름이 다름
-          return { ok: false, error: '중복된 번호입니다. 타계정과 본계정 번호를 다르게 참여해주세요. (관리자에게 양식수정요청)' };
+          return { ok: false, error: '중복된 번호입니다. 타계정과 본계정 번호를 다르게 참여해주세요. (관리자에게 양식수정요청)', field: 'phone' };
         }
       }
     } catch (_) { continue; }
   }
 
-  // 번호가 DB에 존재하는지 확인 (이름만 다른 경우)
+  // 번호가 DB에 존재하는지 확인 (번호는 맞으나 이름이 다른 경우)
   const { rows: phoneRows } = await pool.query(
     'SELECT name FROM reviewers WHERE phone8 = $1 LIMIT 1', [p8]
   );
   if (phoneRows.length > 0) {
-    return { ok: false, error: '이름 또는 전화번호가 일치하지 않습니다. 등록된 정보를 다시 확인해주세요.' };
+    // 전화번호로 등록된 계정은 있으나 이름이 일치하지 않음 → 이름 확인 유도
+    return { ok: false, error: '입력하신 전화번호로 등록된 계정이 있으나 이름이 일치하지 않습니다. 이름을 다시 확인해주세요.', field: 'name' };
   }
 
-  // 이름이 DB에 존재하는지 확인 (번호만 다른 경우)
+  // 이름이 DB에 존재하는지 확인 (이름은 맞으나 번호가 다른 경우)
   const { rows: nameRows } = await pool.query(
     'SELECT phone FROM reviewers WHERE name = $1 LIMIT 1', [n]
   );
   if (nameRows.length > 0) {
-    return { ok: false, error: '이름 또는 전화번호가 일치하지 않습니다. 등록된 정보를 다시 확인해주세요.' };
+    // 이름으로 등록된 계정은 있으나 전화번호가 일치하지 않음 → 번호 확인 유도
+    return { ok: false, error: '입력하신 이름으로 등록된 계정이 있으나 전화번호 뒤 8자리가 일치하지 않습니다. 번호를 다시 확인해주세요.', field: 'phone' };
   }
 
   // 이름도 번호도 DB에 없음 → 미가입
-  return { ok: false, error: '가입되지 않은 정보입니다. 회원가입 후 리뷰등록 해주세요.' };
+  return { ok: false, error: '가입되지 않은 정보입니다. 이름과 전화번호를 확인하시거나, 먼저 회원가입을 해주세요.', field: 'name' };
 }
 
 /**

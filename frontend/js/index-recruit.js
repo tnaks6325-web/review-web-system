@@ -2,6 +2,7 @@
    모집공고 관리 — 전역 상태
 ═══════════════════════════════════════ */
 let _recruitEditId   = null;   // 수정 중인 공고 ID (null = 신규)
+let _woPrefillOrderId = null;  // 작업오더에서 프리필로 열렸을 때 그 오더 id (저장 후 역연결용)
 let _recruitBadges   = [];     // 현재 편집 중인 배지 목록
 let _recruitTabList  = [];     // 인덱스 탭 목록 캐시 [{sheetId, tabName, displayName}]
 
@@ -251,8 +252,9 @@ function _restoreLinkedTab(linkedSheetId, linkedTabName) {
 /* ═══════════════════════════════════════
    모달 열기/닫기
 ═══════════════════════════════════════ */
-async function openRecruitModal(id) {
+async function openRecruitModal(id, prefill, woOrderId) {
   _recruitEditId = id || null;
+  _woPrefillOrderId = (!id && woOrderId) ? woOrderId : null;
   _recruitBadges = [];
 
   const modal    = document.getElementById("recruitModal");
@@ -324,6 +326,15 @@ async function openRecruitModal(id) {
     }
   } else {
     titleEl.innerHTML = `<i class="fas fa-bullhorn"></i> 모집공고 등록`;
+    /* ★ 작업오더 프리필 — 매핑 가능한 필드만 채움 (channel/manager/리뷰비는 관리자가 직접) */
+    if (prefill) {
+      if (prefill.title)        document.getElementById("rf_title").value = prefill.title;
+      if (prefill.time_range)   document.getElementById("rf_time_range").value = prefill.time_range;
+      if (prefill.max_slots)    document.getElementById("rf_max_slots").value = prefill.max_slots;
+      if (prefill.chat_url)     document.getElementById("rf_chat_url").value = prefill.chat_url;
+      if (prefill.notes)        document.getElementById("rf_notes").value = prefill.notes;
+      if (prefill.delivery_type) document.getElementById("rf_delivery_type").value = prefill.delivery_type;
+    }
   }
 
   modal.classList.remove("hidden");
@@ -340,6 +351,7 @@ function closeRecruitModal() {
   modal.classList.add("hidden");
   modal.style.display = "none";
   _recruitEditId = null;
+  _woPrefillOrderId = null;
 }
 
 /* ═══════════════════════════════════════
@@ -467,6 +479,22 @@ async function saveRecruitPost() {
       const errData = await res.json().catch(() => ({}));
       throw new Error(errData.error || "저장 실패 (HTTP " + res.status + ")");
     }
+    const saved = await res.json().catch(() => ({}));
+    const newCampId = saved && saved.data && saved.data.id;
+    /* ★ 작업오더에서 프리필로 만든 신규 공고면 → 그 오더에 linked_campaign_id 역연결 */
+    if (!_recruitEditId && _woPrefillOrderId && newCampId) {
+      // gasGet 은 실패 시 throw 하지 않고 {error} 를 반환하므로 결과를 명시적으로 검사
+      try {
+        const linkRes = await gasGet({ action: "orderAdminUpdate", id: _woPrefillOrderId, linked_campaign_id: newCampId });
+        if (linkRes && linkRes.error) {
+          showToast("공고는 등록됐으나 작업오더 연결에 실패했습니다. 인박스에서 다시 연결해주세요.", "error");
+        }
+      } catch(_) {
+        showToast("공고는 등록됐으나 작업오더 연결 중 오류가 발생했습니다.", "error");
+      }
+      try { if (typeof loadWorkOrders === "function") loadWorkOrders(); } catch(_) {}
+    }
+    _woPrefillOrderId = null;
     showToast(_recruitEditId ? "공고가 수정되었습니다." : "공고가 등록되었습니다.", "success");
     closeRecruitModal();
     loadRecruitList();

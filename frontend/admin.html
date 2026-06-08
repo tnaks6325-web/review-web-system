@@ -579,6 +579,9 @@
         <button class="admin-tab-btn" data-tab="recruit" onclick="switchAdminTab('recruit')">
           <i class="fas fa-bullhorn"></i> 모집공고
         </button>
+        <button class="admin-tab-btn" data-tab="work-orders" onclick="switchAdminTab('work-orders')">
+          <i class="fas fa-clipboard-list"></i> 작업 오더 <span id="workOrderBadge" style="display:none;background:#6366F1;color:#fff;font-size:.65rem;padding:1px 5px;border-radius:8px;margin-left:4px;font-weight:700">0</span>
+        </button>
         <button class="admin-tab-btn" data-tab="payment" onclick="switchAdminTab('payment')">
           <i class="fas fa-money-bill-wave"></i> 입금처리
         </button>
@@ -980,6 +983,33 @@
         </div>
 
       </div><!-- /tab-recruit -->
+
+      <!-- ★ 작업 오더 탭 (AE 제출 인박스) -->
+      <div id="tab-work-orders" class="admin-tab-pane" style="padding:16px">
+        <div style="display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:10px;margin-bottom:14px">
+          <span style="font-size:.95rem;font-weight:700;color:var(--t1)">
+            <i class="fas fa-clipboard-list" style="color:var(--p);margin-right:6px"></i>작업 오더 인박스
+          </span>
+          <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">
+            <select id="woStatusFilter" onchange="loadWorkOrders()"
+              style="padding:6px 10px;border:1.5px solid var(--bd,#E5E7EB);border-radius:8px;font-size:.8rem">
+              <option value="">전체 상태</option>
+              <option value="submitted">제출됨</option>
+              <option value="reviewing">검토중</option>
+              <option value="await_chatroom">카톡방생성대기</option>
+              <option value="published">모집공고발행</option>
+              <option value="done">완료</option>
+              <option value="rejected">반려</option>
+              <option value="revision">보완요청</option>
+            </select>
+            <button onclick="loadWorkOrders()"
+              style="display:inline-flex;align-items:center;gap:5px;padding:6px 13px;background:#EEF2FF;color:#3730A3;border:1.5px solid #C7D2FE;border-radius:8px;font-size:.78rem;font-weight:600;cursor:pointer">
+              <i class="fas fa-sync-alt"></i> 새로고침
+            </button>
+          </div>
+        </div>
+        <div id="woListWrap"><div style="text-align:center;color:#9CA3AF;padding:30px;font-size:.85rem">불러오는 중...</div></div>
+      </div><!-- /tab-work-orders -->
 
       <!-- ★ 입금처리 탭 -->
       <div id="tab-payment" class="admin-tab-pane payment-panel">

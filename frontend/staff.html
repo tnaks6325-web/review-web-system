@@ -368,6 +368,93 @@ body{font-family:var(--font);background:var(--bg);color:var(--t1);font-size:14px
   </div>
 </div>
 
+<style>
+  .so-tab{flex:1;padding:8px;border:1.5px solid #E5E7EB;background:#F9FAFB;border-radius:8px;font-size:.84rem;font-weight:700;color:#6B7280;cursor:pointer}
+  .so-tab-on{background:#EEF2FF;border-color:#A5B4FC;color:#3730A3}
+  .so-row{margin-bottom:9px}
+  .so-grid2{display:grid;grid-template-columns:1fr 1fr;gap:9px}
+  .so-lb{display:block;font-size:.76rem;font-weight:700;color:#374151;margin-bottom:3px}
+  .so-lb .req{color:#DC2626}
+  .so-in{width:100%;padding:8px 10px;border:1.5px solid #E5E7EB;border-radius:7px;font-size:.84rem;font-family:inherit;box-sizing:border-box}
+  .so-in:focus{outline:none;border-color:#6366F1;box-shadow:0 0 0 3px rgba(99,102,241,.12)}
+  .so-hint{font-size:.7rem;color:#9CA3AF;margin:3px 0 0}
+  .so-card{border:1.5px solid #E5E7EB;border-radius:10px;padding:10px 12px;margin-bottom:8px}
+  .so-badge{display:inline-block;font-size:.68rem;font-weight:700;padding:2px 8px;border-radius:20px}
+  .so-st-submitted{background:#E0E7FF;color:#3730A3}
+  .so-st-reviewing{background:#DBEAFE;color:#1E40AF}
+  .so-st-await_chatroom{background:#FEF3C7;color:#92400E}
+  .so-st-published{background:#EDE9FE;color:#5B21B6}
+  .so-st-done{background:#D1FAE5;color:#065F46}
+  .so-st-rejected{background:#FEE2E2;color:#991B1B}
+  .so-st-revision{background:#FFEDD5;color:#9A3412}
+</style>
+<!-- ── 작업 오더 모달 (AE 제출·조회) ── -->
+<div class="cs-overlay" id="staffOrderOverlay" onclick="if(event.target===this)closeStaffOrder()">
+  <div class="cs-box" style="max-width:560px;max-height:88vh;overflow-y:auto">
+    <div class="cs-header">
+      <span class="cs-title"><i class="fas fa-clipboard-list"></i> 작업 오더</span>
+      <button class="cs-close" onclick="closeStaffOrder()"><i class="fas fa-times"></i></button>
+    </div>
+
+    <!-- 탭: 작성 / 내 오더 -->
+    <div style="display:flex;gap:6px;margin-bottom:12px">
+      <button id="soTabNew"  class="so-tab so-tab-on"  onclick="soSwitchTab('new')">작성</button>
+      <button id="soTabMine" class="so-tab" onclick="soSwitchTab('mine')">내 오더</button>
+    </div>
+
+    <!-- 작성 폼 -->
+    <div id="soPaneNew">
+      <div class="so-row"><label class="so-lb">작업명 <span class="req">*</span></label>
+        <input class="so-in" id="soTitle" type="text" placeholder="예: A브랜드 선크림 실배송"></div>
+      <div class="so-grid2">
+        <div class="so-row"><label class="so-lb">시작일</label><input class="so-in" id="soStart" type="date"></div>
+        <div class="so-row"><label class="so-lb">일일진행건수</label><input class="so-in" id="soDaily" type="number" min="0" placeholder="예: 10"></div>
+      </div>
+      <div class="so-row"><label class="so-lb">상품옵션 및 결제금액</label>
+        <input class="so-in" id="soProductOption" type="text" placeholder="예: 50ml 1+1 / 23,900원"></div>
+      <div class="so-grid2">
+        <div class="so-row"><label class="so-lb">결제금액(숫자)</label><input class="so-in" id="soPay" type="number" min="0" placeholder="예: 23900"></div>
+        <div class="so-row"><label class="so-lb">모집인원</label><input class="so-in" id="soRecruit" type="number" min="0" placeholder="예: 30"></div>
+      </div>
+      <div class="so-grid2">
+        <div class="so-row"><label class="so-lb">구매시간대</label><input class="so-in" id="soTime" type="text" placeholder="예: 10시~14시"></div>
+        <div class="so-row"><label class="so-lb">유입키워드</label><input class="so-in" id="soKeyword" type="text" placeholder="예: 비건 선크림"></div>
+      </div>
+      <div class="so-grid2">
+        <div class="so-row"><label class="so-lb">배송유형</label>
+          <select class="so-in" id="soDelivery"><option value="">선택</option><option>실배송</option><option>빈박스</option></select></div>
+        <div class="so-row"><label class="so-lb">물건비</label>
+          <select class="so-in" id="soGoodsCost"><option value="">선택</option><option>현금</option><option>계산서</option></select></div>
+      </div>
+      <div class="so-grid2">
+        <div class="so-row"><label class="so-lb">리뷰유형</label>
+          <input class="so-in" id="soReviewType" type="text" placeholder="예: 전체포토 / 텍스트20·포토80"></div>
+        <div class="so-row" style="display:flex;align-items:center;gap:8px;padding-top:22px">
+          <input type="checkbox" id="soCourier" style="width:16px;height:16px"><label for="soCourier" style="font-size:.82rem;color:#374151;cursor:pointer">택배대행</label></div>
+      </div>
+      <div class="so-row"><label class="so-lb">상품확인용URL</label>
+        <input class="so-in" id="soProductUrl" type="text" placeholder="https://..."></div>
+      <div class="so-row"><label class="so-lb">작업시트탭URL <span class="req">*</span></label>
+        <input class="so-in" id="soSheetUrl" type="text" placeholder="AE가 생성한 작업시트 탭 URL (필수)">
+        <p class="so-hint">시트탭을 먼저 생성한 뒤 그 URL을 넣어주세요. (필수)</p></div>
+      <div class="so-row"><label class="so-lb">리뷰등록가이드</label>
+        <textarea class="so-in" id="soGuide" rows="2" placeholder="리뷰 작성/등록 가이드"></textarea></div>
+      <div class="so-row"><label class="so-lb">특이사항</label>
+        <textarea class="so-in" id="soNotes" rows="2" placeholder="기타 특이사항"></textarea></div>
+
+      <div class="cs-btns2" style="margin-top:8px">
+        <button class="cs-btn-cancel2" onclick="closeStaffOrder()">취소</button>
+        <button class="cs-btn-ok2" id="soBtnSubmit" onclick="submitStaffOrder()"><i class="fas fa-paper-plane"></i> 오더 제출</button>
+      </div>
+    </div>
+
+    <!-- 내 오더 목록 -->
+    <div id="soPaneMine" style="display:none">
+      <div id="soMineList"><div class="memo-empty">불러오는 중...</div></div>
+    </div>
+  </div>
+</div>
+
 <!-- ── 로그인 화면 ── -->
 <div id="screenLogin" class="screen active">
   <div class="login-card">
@@ -455,6 +542,9 @@ body{font-family:var(--font);background:var(--bg);color:var(--t1);font-size:14px
       </button>
       <button id="staffPollToggleBtn" class="btn-refresh" onclick="toggleStaffPolling()" title="탭 완료 시 브라우저 알림 (5분 간격)" style="background:#FFF7ED;border-color:#FED7AA;color:#C2410C;font-size:.75rem">
         <i class="fas fa-bell"></i> 완료알림 켜기
+      </button>
+      <button class="btn-create-sheet-staff" onclick="openStaffOrder()" title="작업 오더 작성·조회" style="background:rgba(99,102,241,.16);border-color:#A5B4FC;color:#3730A3">
+        <i class="fas fa-clipboard-list"></i> 작업 오더
       </button>
       <button class="btn-create-sheet-staff" onclick="openStaffCreateSheet()" title="캠페인 시트 생성">
         <i class="fas fa-table"></i> 새 시트생성
@@ -1166,6 +1256,29 @@ document.addEventListener("DOMContentLoaded", () => {
 const _STAFF_POLL_MS = 5 * 60 * 1000; // 5분
 let   _staffPollTimer  = null;
 let   _staffTabSnap    = {};
+let   _staffOrderSnap  = {};   // 내 작업오더 id→status 스냅샷 (발행 감지용)
+
+function _buildStaffOrderSnap(list) {
+  const m = {};
+  (list || []).forEach(o => { if (o && o.id) m[o.id] = o.status; });
+  return m;
+}
+// 내 작업오더 폴링 — 새로 '모집공고발행(published)'된 건 알림
+async function _pollStaffOrdersOnce() {
+  try {
+    const r = await gasGet({ action: "orderMyList" });
+    if (!r || r.error || !Array.isArray(r.data)) return;
+    r.data.forEach(o => {
+      const prev = _staffOrderSnap[o.id];
+      if (prev === undefined) return;  // 첫 스냅샷에는 알림 없음
+      if (prev !== "published" && o.status === "published") {
+        showToast(`📢 [${o.title}] 모집공고가 발행되었습니다!`, "success", 6000);
+        _sendStaffPushNotif("모집공고 발행 완료", `[${o.title}] 작업 오더가 모집공고로 발행되었습니다.`, "wo-pub-" + o.id);
+      }
+    });
+    _staffOrderSnap = _buildStaffOrderSnap(r.data);
+  } catch(_) {}
+}
 
 function _isTabDoneStaff(t) {
   return t.isClosed || (t.pending === 0 && t.total > 0);
@@ -1196,6 +1309,7 @@ function _sendStaffPushNotif(title, body, tag) {
 async function _pollStaffDashOnce() {
   const sess = getSession();
   if (!sess) return;
+  _pollStaffOrdersOnce();   // 내 작업오더 발행 감지 (병행)
   try {
     const data = await gasGet({ action: "dashboard" }, 25000);
     if (!data || data.error || !data.stats) return;
@@ -1225,6 +1339,8 @@ async function startStaffPolling() {
   if (_staffPollTimer) return;
   await _requestStaffNotifPerm();
   _staffTabSnap = _buildStaffTabSnap(_dashStats);
+  // 작업오더 발행 알림 기준 스냅샷 시드 (알림 없이)
+  try { const _od = await gasGet({ action: "orderMyList" }); if (_od && _od.ok && Array.isArray(_od.data)) _staffOrderSnap = _buildStaffOrderSnap(_od.data); } catch(_) {}
   _staffPollTimer = setInterval(_pollStaffDashOnce, _STAFF_POLL_MS);
   showToast("🔔 탭 완료 자동 알림이 활성화되었습니다. (5분 간격)", "info", 4000);
   const btn = document.getElementById("staffPollToggleBtn");
@@ -1289,6 +1405,121 @@ async function openStaffCreateSheet() {
 
 function closeStaffCreateSheet() {
   document.getElementById("staffCreateSheetOverlay").classList.remove("open");
+}
+
+/* ══ 작업 오더(work_orders) — AE 제출·조회 ════════════════ */
+const ORDER_LABELS = {
+  submitted:'제출됨', reviewing:'검토중', await_chatroom:'카톡방생성대기',
+  published:'모집공고발행', done:'완료', rejected:'반려', revision:'보완요청',
+};
+
+function openStaffOrder() {
+  document.getElementById("staffOrderOverlay").classList.add("open");
+  soSwitchTab("new");
+}
+function closeStaffOrder() {
+  document.getElementById("staffOrderOverlay").classList.remove("open");
+}
+function soSwitchTab(tab) {
+  const isNew = tab === "new";
+  document.getElementById("soPaneNew").style.display  = isNew ? "" : "none";
+  document.getElementById("soPaneMine").style.display = isNew ? "none" : "";
+  document.getElementById("soTabNew").classList.toggle("so-tab-on", isNew);
+  document.getElementById("soTabMine").classList.toggle("so-tab-on", !isNew);
+  if (!isNew) loadMyOrders();
+}
+
+async function submitStaffOrder() {
+  const v = id => (document.getElementById(id).value || "").trim();
+  const title    = v("soTitle");
+  const sheetUrl = v("soSheetUrl");
+  if (!title)    { showToast("작업명을 입력해주세요.", "error"); document.getElementById("soTitle").focus(); return; }
+  if (!sheetUrl) { showToast("작업시트탭URL은 필수입니다.", "error"); document.getElementById("soSheetUrl").focus(); return; }
+
+  const payload = {
+    action: "orderSubmit",
+    title,
+    start_date:     v("soStart"),
+    product_option: v("soProductOption"),
+    pay_amount:     Number(v("soPay")) || 0,
+    daily_count:    Number(v("soDaily")) || 0,
+    purchase_time:  v("soTime"),
+    inflow_keyword: v("soKeyword"),
+    delivery_type:  v("soDelivery"),
+    courier_proxy:  document.getElementById("soCourier").checked,
+    review_type:    v("soReviewType"),
+    recruit_count:  Number(v("soRecruit")) || 0,
+    review_guide:   v("soGuide"),
+    special_notes:  v("soNotes"),
+    product_url:    v("soProductUrl"),
+    work_sheet_url: sheetUrl,
+    goods_cost_type:v("soGoodsCost"),
+  };
+
+  const btn = document.getElementById("soBtnSubmit");
+  btn.disabled = true; btn.innerHTML = '<i class="fas fa-circle-notch fa-spin"></i> 제출 중...';
+  try {
+    const r = await gasPost(payload);
+    if (r && r.ok) {
+      showToast("작업 오더가 제출되었습니다.", "success");
+      ["soTitle","soStart","soProductOption","soPay","soDaily","soTime","soKeyword",
+       "soReviewType","soRecruit","soProductUrl","soSheetUrl","soGuide","soNotes"].forEach(i=>{document.getElementById(i).value="";});
+      document.getElementById("soCourier").checked = false;
+      soSwitchTab("mine");
+    } else {
+      showToast((r && r.error) || "제출에 실패했습니다.", "error");
+    }
+  } catch(e) {
+    showToast("제출 오류: " + e.message, "error");
+  } finally {
+    btn.disabled = false; btn.innerHTML = '<i class="fas fa-paper-plane"></i> 오더 제출';
+  }
+}
+
+async function loadMyOrders() {
+  const wrap = document.getElementById("soMineList");
+  wrap.innerHTML = '<div class="memo-empty">불러오는 중...</div>';
+  try {
+    const r = await gasGet({ action: "orderMyList" });
+    const list = (r && r.ok && r.data) ? r.data : [];
+    if (list.length === 0) { wrap.innerHTML = '<div class="memo-empty">제출한 오더가 없습니다.</div>'; return; }
+    wrap.innerHTML = list.map(_renderMyOrderCard).join("");
+  } catch(e) {
+    wrap.innerHTML = '<div class="memo-empty">불러오기 실패: ' + escHtml(e.message) + '</div>';
+  }
+}
+
+function _renderMyOrderCard(o) {
+  const st = o.status || "submitted";
+  const editable = (st === "submitted" || st === "revision");
+  const date = (o.created_at || "").substring(0,10);
+  const memo = (st === "rejected" || st === "revision") && o.admin_memo
+    ? `<div style="margin-top:6px;font-size:.76rem;color:#991B1B;background:#FEF2F2;border-radius:6px;padding:6px 8px"><b>${st==="rejected"?"반려":"보완"} 사유:</b> ${escHtml(o.admin_memo)}</div>` : "";
+  const editBtn = editable
+    ? `<button onclick="editMyOrderSheet('${o.id}')" style="margin-left:auto;font-size:.7rem;background:#EEF2FF;border:1px solid #C7D2FE;color:#3730A3;border-radius:6px;padding:3px 8px;cursor:pointer">시트URL 수정</button>` : "";
+  return `<div class="so-card">
+    <div style="display:flex;align-items:center;gap:8px">
+      <span class="so-badge so-st-${st}">${ORDER_LABELS[st]||st}</span>
+      <b style="font-size:.86rem;color:#1F2937">${escHtml(o.title||"")}</b>
+      <span style="font-size:.7rem;color:#9CA3AF;margin-left:auto">${date}</span>
+    </div>
+    <div style="margin-top:5px;font-size:.74rem;color:#6B7280;word-break:break-all">
+      <i class="fas fa-link" style="color:#A5B4FC"></i> ${escHtml(o.work_sheet_url||"-")}
+    </div>
+    ${editBtn ? `<div style="display:flex;margin-top:6px">${editBtn}</div>` : ""}
+    ${memo}
+  </div>`;
+}
+
+async function editMyOrderSheet(id) {
+  const url = prompt("새 작업시트탭URL을 입력하세요 (비울 수 없음)");
+  if (url === null) return;
+  if (!url.trim()) { showToast("URL은 비울 수 없습니다.", "error"); return; }
+  try {
+    const r = await gasGet({ action: "orderMyUpdate", id, work_sheet_url: url.trim() });
+    if (r && r.ok) { showToast("수정되었습니다.", "success"); loadMyOrders(); }
+    else showToast((r && r.error) || "수정 실패", "error");
+  } catch(e) { showToast("오류: " + e.message, "error"); }
 }
 
 /** 등록 방식 라디오 변경 */

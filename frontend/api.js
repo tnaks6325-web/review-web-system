@@ -251,6 +251,15 @@ const _ACTION_MAP = {
   'campaignAdminDelete':   { method: 'DELETE', path: '/api/campaign/admin' }, // /:id 동적
   'campaignAdminStatus':   { method: 'PUT',  path: '/api/campaign/admin' },   // /:id/status 동적
   'campaignApplications':  { method: 'GET',  path: '/api/campaign/admin' },   // /:id/applications 동적
+
+  // ★ 작업 오더(work_orders) 시스템 — 동적 /:id 미지원이라 전부 평면경로 + body/query id
+  'orderSubmit':           { method: 'POST', path: '/api/order/submit' },
+  'orderMyList':           { method: 'GET',  path: '/api/order/my' },
+  'orderMyUpdate':         { method: 'PUT',  path: '/api/order/my/update' },
+  'orderAdminList':        { method: 'GET',  path: '/api/order/admin/list' },
+  'orderNewCount':         { method: 'GET',  path: '/api/order/admin/new-count' },
+  'orderAdminStatus':      { method: 'PUT',  path: '/api/order/admin/status' },
+  'orderAdminUpdate':      { method: 'PUT',  path: '/api/order/admin/update' },
 };
 
 // ═══════════════════════════════════════════════════════════
