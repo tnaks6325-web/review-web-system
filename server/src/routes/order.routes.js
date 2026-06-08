@@ -86,6 +86,66 @@ function _dateOrNull(v) {
 }
 
 // ═══════════════════════════════════════════════════════════
+// 외부(인트라넷) 작업오더 제출 — 공유 시크릿 인증 (JWT 불필요)
+// 인트라넷(inadd-system)에서 직접 POST. created_by 는 페이로드의 requester_name.
+// 필요 env: ORDER_INTAKE_KEY
+// ═══════════════════════════════════════════════════════════
+router.post('/intake', async (req, res, next) => {
+  try {
+    await _ensureTables();
+    const b = req.body || {};
+    const expected = process.env.ORDER_INTAKE_KEY;
+    if (!expected) {
+      return res.status(503).json({ ok: false, error: 'intake 키가 서버에 설정되지 않았습니다. (ORDER_INTAKE_KEY)' });
+    }
+    const key = b.intakeKey || req.headers['x-intake-key'];
+    if (!key || key !== expected) {
+      return res.status(401).json({ ok: false, error: '인증에 실패했습니다.' });
+    }
+    if (!b.title || !String(b.title).trim()) {
+      return res.status(400).json({ ok: false, error: '작업명을 입력해주세요.' });
+    }
+    if (!b.work_sheet_url || !String(b.work_sheet_url).trim()) {
+      return res.status(400).json({ ok: false, error: '작업시트탭URL은 필수입니다.' });
+    }
+    const requester = (b.requester_name || b.created_by || '').toString().trim() || '인트라넷';
+
+    const { rows } = await pool.query(
+      `INSERT INTO work_orders
+        (id, title, start_date, product_option, pay_amount, daily_count,
+         purchase_time, inflow_keyword, delivery_type, courier_proxy,
+         review_type, recruit_count, review_guide, special_notes,
+         product_url, work_sheet_url, goods_cost_type, status, created_by)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,'submitted',$18)
+       RETURNING *`,
+      [
+        _genOrderId(),
+        String(b.title).trim(),
+        _dateOrNull(b.start_date),
+        b.product_option || '',
+        b.pay_amount || 0,
+        b.daily_count || 0,
+        b.purchase_time || '',
+        b.inflow_keyword || '',
+        b.delivery_type || '',
+        b.courier_proxy === true || b.courier_proxy === 'true',
+        b.review_type || '',
+        b.recruit_count || 0,
+        b.review_guide || '',
+        b.special_notes || '',
+        b.product_url || '',
+        String(b.work_sheet_url).trim(),
+        b.goods_cost_type || '',
+        requester,
+      ]
+    );
+    res.json({ ok: true, data: rows[0] });
+  } catch (err) {
+    next(err);
+  }
+});
+
+// ═══════════════════════════════════════════════════════════
 // AE(영업담당자) — 제출 / 본인 조회 / 본인 수정
 // created_by 는 항상 JWT name 으로 강제 (클라이언트 입력 무시)
 // ═══════════════════════════════════════════════════════════

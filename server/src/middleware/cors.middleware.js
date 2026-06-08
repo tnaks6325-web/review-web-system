@@ -25,6 +25,10 @@ const corsOptions = {
     if (/^https:\/\/[a-z0-9-]+\.review-web-system\.pages\.dev$/.test(origin)) {
       return callback(null, true);
     }
+    // ★ 인트라넷(inadd-system) 허용 — 작업오더 intake 제출용 (apex + 브랜치 프리뷰)
+    if (/^https:\/\/([a-z0-9-]+\.)?inadd-system\.pages\.dev$/.test(origin)) {
+      return callback(null, true);
+    }
     // sandbox URL 개발용 허용 (프로덕션에서는 비활성)
     if (process.env.NODE_ENV !== 'production' && origin.includes('.sandbox.novita.ai')) {
       return callback(null, true);
@@ -32,7 +36,7 @@ const corsOptions = {
     callback(new Error(`CORS 차단: ${origin}`));
   },
   methods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],
-  allowedHeaders: ['Content-Type', 'Authorization'],
+  allowedHeaders: ['Content-Type', 'Authorization', 'X-Intake-Key'],
   credentials: true,
   maxAge: 86400,
 };

@@ -1428,11 +1428,53 @@ async function _refreshWorkOrderBadge(notify) {
     if (badge) { badge.textContent = r.count; badge.style.display = r.count > 0 ? "" : "none"; }
     if (notify && _woLastNewCount !== null && r.count > _woLastNewCount) {
       const inc = r.count - _woLastNewCount;
-      showToast(`📥 새 작업 오더 ${inc}건이 도착했습니다.`, "info", 6000);
       if (typeof _sendPushNotif === "function") _sendPushNotif("새 작업 오더", `신규 작업 오더 ${inc}건이 인박스에 도착했습니다.`, "wo-new");
+      _showNewOrderPopup(inc);   // ★ 신규요청 팝업
     }
     _woLastNewCount = r.count;
   } catch(_) {}
+}
+
+// 신규 작업 오더 도착 팝업 (최신 제출됨 오더 미리보기 + 바로가기)
+async function _showNewOrderPopup(count) {
+  let items = [];
+  try {
+    const r = await gasGet({ action: "orderAdminList", status: "submitted" });
+    if (r && r.ok && Array.isArray(r.data)) items = r.data.slice(0, 5);
+  } catch(_) {}
+  const old = document.getElementById("woNewOrderPopup");
+  if (old) old.remove();
+  const rows = items.map(o => `
+    <div style="padding:9px 11px;border:1px solid #E5E7EB;border-radius:9px;margin-bottom:7px;background:#F9FAFB">
+      <div style="font-size:.86rem;font-weight:700;color:#111827">${escHtml(o.title || "(제목없음)")}</div>
+      <div style="font-size:.72rem;color:#6B7280;margin-top:2px"><i class="fas fa-user"></i> ${escHtml(o.created_by || "-")}
+        ${o.purchase_time ? " · " + escHtml(o.purchase_time) : ""}${o.recruit_count ? " · 모집 " + escHtml(String(o.recruit_count)) + "명" : ""}</div>
+    </div>`).join("");
+  const el = document.createElement("div");
+  el.id = "woNewOrderPopup";
+  el.style.cssText = "position:fixed;inset:0;z-index:99999;background:rgba(0,0,0,.45);display:flex;align-items:center;justify-content:center;padding:16px";
+  el.innerHTML = `
+    <div style="background:#fff;border-radius:16px;max-width:460px;width:100%;padding:22px;box-shadow:0 12px 40px rgba(0,0,0,.25);animation:woPopIn .18s ease">
+      <div style="display:flex;align-items:center;gap:8px;margin-bottom:14px">
+        <span style="font-size:1.4rem">📥</span>
+        <span style="font-size:1.05rem;font-weight:800;color:#3730A3">새 작업 오더 ${count}건 도착</span>
+      </div>
+      <div style="max-height:46vh;overflow-y:auto">${rows || '<div style="color:#9CA3AF;font-size:.85rem">미리보기를 불러오지 못했습니다.</div>'}</div>
+      <div style="display:flex;gap:8px;justify-content:flex-end;margin-top:16px">
+        <button onclick="document.getElementById('woNewOrderPopup').remove()"
+          style="padding:9px 16px;border:1.5px solid #D1D5DB;background:#fff;color:#374151;border-radius:9px;font-weight:600;font-size:.85rem;cursor:pointer">닫기</button>
+        <button onclick="document.getElementById('woNewOrderPopup').remove();switchAdminTab('work-orders')"
+          style="padding:9px 16px;border:none;background:#6366F1;color:#fff;border-radius:9px;font-weight:700;font-size:.85rem;cursor:pointer"><i class="fas fa-clipboard-list"></i> 작업오더 보기</button>
+      </div>
+    </div>`;
+  el.addEventListener("click", e => { if (e.target === el) el.remove(); });
+  if (!document.getElementById("woPopInKeyframes")) {
+    const st = document.createElement("style");
+    st.id = "woPopInKeyframes";
+    st.textContent = "@keyframes woPopIn{from{transform:scale(.94);opacity:0}to{transform:scale(1);opacity:1}}";
+    document.head.appendChild(st);
+  }
+  document.body.appendChild(el);
 }
 function startWorkOrderBadgePoll() {
   if (_woBadgeTimer) return;
