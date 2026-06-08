@@ -1402,7 +1402,6 @@ function _renderWorkOrderCard(o) {
       ${o.delivery_type ? `<span><b style="color:#6B7280">배송</b> ${escHtml(o.delivery_type)}${o.courier_proxy?"·택배대행":""}</span>`:""}
       ${o.pay_amount ? `<span><b style="color:#6B7280">구입비</b> ${Number(o.pay_amount).toLocaleString()}원</span>`:""}
       ${o.start_date ? `<span><b style="color:#6B7280">시작</b> ${escHtml(String(o.start_date).substring(0,10))}</span>`:""}
-      <button onclick="woToggleDetail('${o.id}',this)" style="margin-left:auto;font-size:.74rem;background:#EEF2FF;color:#3730A3;border:1px solid #C7D2FE;border-radius:7px;padding:4px 10px;cursor:pointer;white-space:nowrap"><i class="fas fa-chevron-down"></i> 펼쳐보기</button>
     </div>
     <div id="woDetail_${o.id}" style="display:none">
       ${_woProductBlock(o.product_option)}
@@ -1437,6 +1436,7 @@ function _renderWorkOrderCard(o) {
           ? `<button onclick="woViewCampaign('${escHtml(o.linked_campaign_id)}')" style="font-size:.74rem;font-weight:700;background:#D1FAE5;color:#065F46;border:1px solid #6EE7B7;border-radius:7px;padding:5px 10px;cursor:pointer"><i class="fas fa-link"></i> 연결된 공고 보기</button>`
           : `<button onclick="woCreateCampaign('${o.id}')" style="font-size:.74rem;font-weight:700;background:#EDE9FE;color:#5B21B6;border:1px solid #C4B5FD;border-radius:7px;padding:5px 10px;cursor:pointer"><i class="fas fa-bullhorn"></i> 모집공고 만들기</button>`}
         ${btns || '<span style="font-size:.74rem;color:#9CA3AF">종료된 오더</span>'}
+        <button onclick="woToggleDetail('${o.id}',this)" style="margin-left:auto;font-size:.74rem;background:#EEF2FF;color:#3730A3;border:1px solid #C7D2FE;border-radius:7px;padding:5px 10px;cursor:pointer;white-space:nowrap"><i class="fas fa-chevron-down"></i> 펼쳐보기</button>
       </div>
     </div>
   </div>`;
