@@ -1303,6 +1303,22 @@ function _woField(label, val, isLink) {
   return `<div style="font-size:.76rem;color:#374151;margin:2px 0"><b style="color:#6B7280">${label}:</b> ${v}</div>`;
 }
 
+// 텍스트 escape 후 http(s) URL만 링크화 (javascript: 등 차단)
+function _woLinkify(text) {
+  return escHtml(String(text == null ? "" : text))
+    .replace(/(https?:\/\/[^\s<]+)/g,
+      '<a href="$1" target="_blank" rel="noopener noreferrer" style="color:#4F46E5;word-break:break-all">$1</a>');
+}
+
+// 상품·옵션 요약 블록 — 여러 줄(상품/옵션/소계) 그대로 보존 + URL 링크화
+function _woProductBlock(raw) {
+  if (!raw || !String(raw).trim()) return "";
+  return `<div style="margin-top:10px;border:1px solid #E5E7EB;border-radius:8px;padding:9px 11px;background:#F9FAFB">
+    <b style="font-size:.74rem;color:#6B7280">상품·옵션</b>
+    <div style="margin-top:4px;font-size:.78rem;color:#374151;white-space:pre-wrap;word-break:break-word;line-height:1.55">${_woLinkify(raw)}</div>
+  </div>`;
+}
+
 // 유입가이드 본문(HTML+이미지) 안전 렌더 — script/이벤트핸들러/javascript: 제거, 이미지 보정
 function _woGuideHtml(raw) {
   if (!raw) return "";
@@ -1347,13 +1363,13 @@ function _renderWorkOrderCard(o) {
       <b style="font-size:.92rem;color:#111827">${escHtml(o.title||"")}</b>
       <span style="font-size:.72rem;color:#9CA3AF;margin-left:auto"><i class="fas fa-user"></i> ${escHtml(o.created_by||"-")} · ${date}</span>
     </div>
+    ${_woProductBlock(o.product_option)}
     <div style="margin-top:10px;display:grid;grid-template-columns:1fr 1fr;gap:2px 18px">
       ${_woField("작업시트탭URL", o.work_sheet_url, true)}
       ${_woField("상품확인용URL", o.product_url, true)}
-      ${_woField("상품옵션·결제", o.product_option)}
-      ${_woField("결제금액", o.pay_amount ? Number(o.pay_amount).toLocaleString()+"원" : "")}
+      ${_woField("총 상품구입비", o.pay_amount ? Number(o.pay_amount).toLocaleString()+"원" : "")}
+      ${_woField("모집인원", o.recruit_count ? Number(o.recruit_count).toLocaleString()+"명" : "")}
       ${_woField("일일진행", o.daily_count)}
-      ${_woField("모집인원", o.recruit_count)}
       ${_woField("구매시간대", o.purchase_time)}
       ${_woField("유입방식", _INFLOW_LABEL[o.inflow_type] || o.inflow_keyword || "")}
       ${_woField("배송유형", o.delivery_type)}
@@ -1363,7 +1379,7 @@ function _renderWorkOrderCard(o) {
     </div>
     ${(o.inflow_type === "guide" && o.inflow_guide) ? `<div style="margin-top:6px;font-size:.76rem;color:#374151"><b style="color:#6B7280">유입가이드:</b><div style="margin-top:4px;border:1px solid #E5E7EB;border-radius:8px;padding:8px;background:#F9FAFB">${_woGuideHtml(o.inflow_guide)}</div></div>`:""}
     ${o.review_guide ? `<div style="margin-top:4px;font-size:.76rem;color:#374151"><b style="color:#6B7280">리뷰가이드:</b> ${escHtml(o.review_guide)}</div>`:""}
-    ${o.special_notes ? `<div style="margin-top:2px;font-size:.76rem;color:#374151"><b style="color:#6B7280">특이사항:</b> ${escHtml(o.special_notes)}</div>`:""}
+    ${o.special_notes ? `<div style="margin-top:4px;font-size:.76rem;color:#374151"><b style="color:#6B7280">특이사항:</b><div style="white-space:pre-wrap;word-break:break-word;margin-top:2px;line-height:1.5">${_woLinkify(o.special_notes)}</div></div>`:""}
     ${memo}
     <div style="margin-top:10px;border-top:1px dashed #E5E7EB;padding-top:10px">
       <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-bottom:8px">
