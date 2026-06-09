@@ -516,4 +516,60 @@ router.put('/admin/update', authMiddleware, adminOrMasterMiddleware, async (req,
   }
 });
 
+// PUT /api/order/admin/send-memo — 처리메모 저장 + 인트라넷으로 즉시 push(webhook)
+// body: { id, memo }
+// 필요 env: INTRANET_MEMO_WEBHOOK_URL (인트라넷 수신 URL), INTRANET_WEBHOOK_KEY (공유 시크릿)
+router.put('/admin/send-memo', authMiddleware, adminOrMasterMiddleware, async (req, res, next) => {
+  try {
+    await _ensureTables();
+    const b = req.body || {};
+    if (!b.id) return res.status(400).json({ ok: false, error: 'id가 필요합니다.' });
+    const memo = (b.memo || b.admin_memo || '').toString();
+    if (!memo.trim()) return res.status(400).json({ ok: false, error: '메모 내용이 비어 있습니다.' });
+
+    // 1) 저장
+    const { rows } = await pool.query(
+      `UPDATE work_orders SET admin_memo = $2, updated_at = NOW() WHERE id = $1 RETURNING *`,
+      [b.id, memo]
+    );
+    if (rows.length === 0) return res.status(404).json({ ok: false, error: '오더를 찾을 수 없습니다.' });
+    const o = rows[0];
+
+    // 2) 인트라넷 webhook push (설정돼 있으면)
+    let delivered = false, deliverError = null;
+    const hook = process.env.INTRANET_MEMO_WEBHOOK_URL;
+    if (hook) {
+      try {
+        const ctrl = new AbortController();
+        const timer = setTimeout(() => ctrl.abort(), 8000);
+        const resp = await fetch(hook, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json', 'X-Review-Key': process.env.INTRANET_WEBHOOK_KEY || '' },
+          body: JSON.stringify({
+            order_id: o.id,
+            title: o.title,
+            requester_name: o.created_by,   // 인트라넷 전송자(담당 AE)
+            status: o.status,
+            memo,
+            sent_by: req.admin?.name || '',
+            sent_at: new Date().toISOString(),
+          }),
+          signal: ctrl.signal,
+        });
+        clearTimeout(timer);
+        delivered = resp.ok;
+        if (!resp.ok) deliverError = 'HTTP ' + resp.status;
+      } catch (e) {
+        deliverError = e.message;
+        logger.warn(`[order] 인트라넷 메모 webhook 실패: ${e.message}`);
+      }
+    } else {
+      deliverError = 'webhook 미설정';
+    }
+    res.json({ ok: true, data: o, delivered, deliverError });
+  } catch (err) {
+    next(err);
+  }
+});
+
 module.exports = router;

@@ -261,6 +261,7 @@ const _ACTION_MAP = {
   'orderNewCount':         { method: 'GET',  path: '/api/order/admin/new-count' },
   'orderAdminStatus':      { method: 'PUT',  path: '/api/order/admin/status' },
   'orderAdminUpdate':      { method: 'PUT',  path: '/api/order/admin/update' },
+  'orderSendMemo':         { method: 'PUT',  path: '/api/order/admin/send-memo' },
 };
 
 // ═══════════════════════════════════════════════════════════

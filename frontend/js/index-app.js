@@ -1542,6 +1542,7 @@ function _renderWorkOrderCard(o) {
     </div>
     <div id="woDetail_${o.id}" style="display:none">
       <div style="margin-top:10px">
+        ${_woField("담당AE", o.created_by)}
         ${_woMultiField("상품·옵션", _woCleanProductOption(o.product_option, o.product_url))}
         ${_woField("작업시트탭URL", o.work_sheet_url, true)}
         ${_woField("상품확인용URL", o.product_url, true)}
@@ -1633,37 +1634,38 @@ async function woToggleChat(id) {
   };
   if (btn.dataset.reg === "1") { setEdit(); return; }   // 링크수정 → 편집
   const url = (inp.value || "").trim();
-  if (!url) { showToast("카톡 팀채팅방URL을 입력하세요.", "error"); inp.focus(); return; }
+  if (!url) { showToast("카톡 팀채팅방URL을 입력하세요.", true); inp.focus(); return; }
   try {
     const r = await gasGet({ action: "orderAdminUpdate", id, chat_room_url: url });
     if (r && r.ok) {
       setReg();
       const o = (_woCache || []).find(x => x.id === id); if (o) o.chat_room_url = url;
-      showToast("카톡 URL이 등록되었습니다.", "success");
-    } else showToast((r && r.error) || "등록 실패", "error");
-  } catch (e) { showToast("오류: " + e.message, "error"); }
+      showToast("카톡 URL이 등록되었습니다.");
+    } else showToast((r && r.error) || "등록 실패", true);
+  } catch (e) { showToast("오류: " + e.message, true); }
 }
 
-// 처리 메모 → 인트라넷 전송
+// 처리 메모 → 인트라넷 전송 (webhook push)
 async function woSendMemo(id) {
   const memo = ((document.getElementById("woMemo_" + id) || {}).value || "").trim();
   if (!memo) { showToast("전송할 메모를 입력하세요.", "error"); return; }
   try {
-    const r = await gasGet({ action: "orderAdminUpdate", id, admin_memo: memo });
+    const r = await gasGet({ action: "orderSendMemo", id, memo });
     if (r && r.ok) {
       const o = (_woCache || []).find(x => x.id === id); if (o) o.admin_memo = memo;
-      showToast("인트라넷으로 전송되었습니다.", "success");
-    } else showToast((r && r.error) || "전송 실패", "error");
-  } catch (e) { showToast("오류: " + e.message, "error"); }
+      if (r.delivered) showToast("인트라넷으로 전송되었습니다.");
+      else showToast("저장됨 · 인트라넷 미전송(" + (r.deliverError || "webhook 미설정") + ")", true);
+    } else showToast((r && r.error) || "전송 실패", true);
+  } catch (e) { showToast("오류: " + e.message, true); }
 }
 
 // 접수하기 (제출됨 → 접수됨)
 async function woAccept(id) {
   try {
     const r = await gasGet({ action: "orderAdminStatus", id, status: "reviewing" });
-    if (r && r.ok) { showToast("접수되었습니다.", "success"); loadWorkOrders(); }
-    else showToast((r && r.error) || "접수 처리 실패", "error");
-  } catch (e) { showToast("오류: " + e.message, "error"); }
+    if (r && r.ok) { showToast("접수되었습니다."); loadWorkOrders(); }
+    else showToast((r && r.error) || "접수 처리 실패", true);
+  } catch (e) { showToast("오류: " + e.message, true); }
 }
 
 // 모집공고생성 — 카톡 URL 등록 확인 후 진행
