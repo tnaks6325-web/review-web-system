@@ -274,6 +274,15 @@ router.get('/guide-image/:id', async (req, res) => {
     return res.send(f.buffer);
   } catch (err) {
     logger.warn(`[order] guide-image 스트리밍 실패(${id}): ${err.message} → thumbnail 폴백`);
+    if (req.query.debug) {
+      return res.status(500).json({
+        ok: false, id,
+        error: err.message,
+        oauth: !!(process.env.DRIVE_OAUTH_CLIENT_ID && process.env.DRIVE_OAUTH_REFRESH_TOKEN),
+        sa: !!(process.env.GOOGLE_SERVICE_ACCOUNT_EMAIL || process.env.GOOGLE_PRIVATE_KEY),
+        stack: String(err.stack || '').split('\n').slice(0, 4),
+      });
+    }
     return res.redirect(302, `https://drive.google.com/thumbnail?id=${id}&sz=w2000`);
   }
 });
