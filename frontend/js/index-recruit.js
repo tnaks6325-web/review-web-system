@@ -268,6 +268,9 @@ async function openRecruitModal(id, prefill, woOrderId) {
   });
   document.getElementById("rf_delivery_type").value = "";
   document.getElementById("rf_status").value = "draft";
+  // 상품정보 가져오기 초기화
+  ["rf_product_url","rf_thumbnail","rf_product_name","rf_price"].forEach(i => { const el = document.getElementById(i); if (el) el.value = ""; });
+  const _pp = document.getElementById("rf_product_preview"); if (_pp) _pp.style.display = "none";
   document.getElementById("rf_channel_custom").style.display = "none";
   document.querySelectorAll(".rchan-btn").forEach(b => b.classList.remove("active"));
   _refreshBadgeWrap();
@@ -334,6 +337,7 @@ async function openRecruitModal(id, prefill, woOrderId) {
       if (prefill.chat_url)     document.getElementById("rf_chat_url").value = prefill.chat_url;
       if (prefill.notes)        document.getElementById("rf_notes").value = prefill.notes;
       if (prefill.delivery_type) document.getElementById("rf_delivery_type").value = prefill.delivery_type;
+      if (prefill.product_url)  document.getElementById("rf_product_url").value = prefill.product_url;
     }
   }
 
@@ -344,6 +348,35 @@ async function openRecruitModal(id, prefill, woOrderId) {
   _previewOpen = true;
   _renderPreview();
   _attachPreviewListeners();
+}
+
+// 상품확인용 URL에서 썸네일/상품명/가격 가져오기 (OG/JSON-LD)
+async function fetchProductInfo() {
+  const url = (document.getElementById("rf_product_url").value || "").trim();
+  if (!url) { showToast("상품 URL을 입력하세요.", true); return; }
+  if (!/^https?:\/\//i.test(url)) { showToast("http(s):// 로 시작하는 URL을 입력하세요.", true); return; }
+  showToast("상품 정보 가져오는 중...");
+  try {
+    const r = await gasPost({ action: "productPreview", url });
+    const has = r && (r.thumbnail || r.name || r.price);
+    if (has) {
+      const img = document.getElementById("rf_pp_img");
+      if (r.thumbnail) { img.src = r.thumbnail; img.style.display = ""; } else { img.style.display = "none"; }
+      document.getElementById("rf_pp_name").textContent = r.name || "(상품명 없음)";
+      document.getElementById("rf_pp_price").textContent = r.price || "(가격 미확인)";
+      document.getElementById("rf_product_preview").style.display = "flex";
+      document.getElementById("rf_thumbnail").value = r.thumbnail || "";
+      document.getElementById("rf_product_name").value = r.name || "";
+      document.getElementById("rf_price").value = r.price || "";
+      // 공고 제목이 비어 있으면 상품명으로 채움
+      const t = document.getElementById("rf_title");
+      if (t && !t.value.trim() && r.name) { t.value = r.name; _renderPreview && _renderPreview(); }
+      showToast((r.mall || "") + " 상품정보를 가져왔습니다.");
+    } else {
+      document.getElementById("rf_product_preview").style.display = "none";
+      showToast((r && r.hint) || "상품 정보를 가져오지 못했습니다. 수동 입력하세요.", true);
+    }
+  } catch (e) { showToast("오류: " + e.message, true); }
 }
 
 function closeRecruitModal() {

@@ -1748,6 +1748,7 @@ async function woCreateCampaign(id) {
     max_slots:     o.recruit_count || 0,
     chat_url:      o.chat_room_url || "",
     delivery_type: WO_DELIVERY_MAP[o.delivery_type] || "",
+    product_url:   o.product_url || "",
     notes:         [_INFLOW_LABEL[o.inflow_type] ? ("유입방식: " + _INFLOW_LABEL[o.inflow_type]) : (o.inflow_keyword ? ("유입키워드: " + o.inflow_keyword) : ""), o.review_guide || ""].filter(Boolean).join("\n"),
   };
   switchAdminTab("recruit");
