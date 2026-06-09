@@ -1331,6 +1331,44 @@ function _driveId(url) {
   return m ? m[1] : null;
 }
 
+// 이미지 라이트박스(화면 내 팝업) — 새 탭 대신 오버레이로 표시
+function woImageModal(url) {
+  let ov = document.getElementById("woImgModal");
+  if (!ov) {
+    ov = document.createElement("div");
+    ov.id = "woImgModal";
+    ov.style.cssText = "position:fixed;inset:0;z-index:99999;background:rgba(0,0,0,.82);display:none;align-items:center;justify-content:center;padding:24px;cursor:zoom-out";
+    ov.innerHTML = '<span style="position:absolute;top:12px;right:22px;color:#fff;font-size:32px;line-height:1;cursor:pointer">&times;</span>'
+      + '<img id="woImgModalImg" style="max-width:96vw;max-height:92vh;border-radius:8px;box-shadow:0 12px 48px rgba(0,0,0,.5)">'
+      + '<div id="woImgModalErr" style="display:none;color:#fff;font-size:14px">이미지를 불러올 수 없습니다.</div>';
+    document.body.appendChild(ov);
+    ov.addEventListener("click", () => { ov.style.display = "none"; });
+    const im = ov.querySelector("#woImgModalImg");
+    im.addEventListener("click", e => e.stopPropagation());
+    im.addEventListener("error", () => { im.style.display = "none"; ov.querySelector("#woImgModalErr").style.display = "block"; });
+    im.addEventListener("load", () => { im.style.display = "block"; ov.querySelector("#woImgModalErr").style.display = "none"; });
+    document.addEventListener("keydown", e => { if (e.key === "Escape") ov.style.display = "none"; });
+  }
+  ov.querySelector("#woImgModalErr").style.display = "none";
+  const im = ov.querySelector("#woImgModalImg");
+  im.style.display = "block";
+  im.src = url;
+  ov.style.display = "flex";
+}
+// 이미지 로드 실패 시 → 팝업으로 여는 링크로 대체
+function _woImgError(img) {
+  const a = document.createElement("a");
+  a.href = "#"; a.textContent = "📎 첨부 이미지 보기";
+  a.style.cssText = "color:#4F46E5;cursor:pointer";
+  const u = img.dataset.openurl || img.src;
+  a.addEventListener("click", e => { e.preventDefault(); woImageModal(u); });
+  img.replaceWith(a);
+}
+// 팝업으로 열리는 이미지 태그
+function _woImgTag(src, openUrl) {
+  return `<img src="${escHtml(src)}" data-openurl="${escHtml(openUrl || src)}" style="max-width:100%;border-radius:8px;margin:4px 0;cursor:zoom-in" loading="lazy" onclick="woImageModal(this.src)" onerror="_woImgError(this)">`;
+}
+
 // 평문 → 안전 HTML: 줄바꿈 보존, URL 링크화, Drive 파일 URL은 이미지로 자동 임베드
 function _woTextToHtml(text) {
   const parts = String(text == null ? "" : text).split(/(https?:\/\/[^\s<]+)/g);
@@ -1341,11 +1379,9 @@ function _woTextToHtml(text) {
       const isProxy = /\/api\/order\/guide-image\/[-\w]{20,}/.test(url);
       const id = _driveId(url);
       if (isProxy) {
-        // 리뷰웹 프록시(비공개 Drive 파일) — 그대로 이미지 src
-        html += `<a href="${escHtml(url)}" target="_blank" rel="noopener noreferrer"><img src="${escHtml(url)}" style="max-width:100%;border-radius:8px;margin:4px 0" loading="lazy" onerror="this.style.display='none';this.insertAdjacentHTML('afterend','<a href=&quot;${escHtml(url)}&quot; target=_blank style=color:#4F46E5>📎 첨부 이미지 열기</a>')"></a>`;
+        html += _woImgTag(url, url);
       } else if (id) {
-        const thumb = `https://drive.google.com/thumbnail?id=${id}&sz=w1600`;
-        html += `<a href="${escHtml(url)}" target="_blank" rel="noopener noreferrer"><img src="${thumb}" style="max-width:100%;border-radius:8px;margin:4px 0" loading="lazy" onerror="this.style.display='none';this.insertAdjacentHTML('afterend','<a href=&quot;${escHtml(url)}&quot; target=_blank style=color:#4F46E5>📎 첨부 이미지 열기</a>')"></a>`;
+        html += _woImgTag(`https://drive.google.com/thumbnail?id=${id}&sz=w1600`, url);
       } else {
         html += `<a href="${escHtml(url)}" target="_blank" rel="noopener noreferrer" style="color:#4F46E5;word-break:break-all">${escHtml(url)}</a>`;
       }
@@ -1375,7 +1411,12 @@ function _woGuideHtml(raw) {
     img.style.maxWidth = "100%";
     img.style.borderRadius = "8px";
     img.style.margin = "4px 0";
+    img.style.cursor = "zoom-in";
     img.loading = "lazy";
+    // 새 탭 대신 팝업으로 열기 (부모 <a> 링크는 무력화)
+    img.setAttribute("onclick", "woImageModal(this.src);return false;");
+    const a = img.closest("a");
+    if (a) { a.removeAttribute("target"); a.setAttribute("href", "javascript:void(0)"); }
   });
   return tmp.innerHTML;
 }
