@@ -1294,13 +1294,18 @@ async function loadWorkOrders() {
 }
 
 function _woField(label, val, isLink) {
-  if (!val) return "";
+  if (!val && val !== 0) return "";
   // http(s) 스킴만 링크화 (javascript: 등 차단), 그 외엔 평문
   const safeLink = isLink && /^https?:\/\//i.test(String(val).trim());
   const v = safeLink
     ? `<a href="${escHtml(val)}" target="_blank" rel="noopener noreferrer" style="color:#4F46E5;word-break:break-all">${escHtml(val)}</a>`
     : escHtml(String(val));
-  return `<div style="font-size:.76rem;color:#374151;margin:2px 0"><b style="color:#6B7280">${label}:</b> ${v}</div>`;
+  // 항목명 폭 고정 + 자간 양끝맞춤(text-align-last:justify)으로 콜론/값 정렬
+  return `<div style="display:flex;align-items:baseline;font-size:.78rem;color:#374151;margin:3px 0;line-height:1.55">
+    <span style="flex:0 0 102px;color:#6B7280;font-weight:600;text-align:justify;text-align-last:justify">${label}</span>
+    <span style="flex:0 0 12px;text-align:center;color:#9CA3AF">:</span>
+    <span style="flex:1 1 auto;min-width:0;word-break:break-all">${v}</span>
+  </div>`;
 }
 
 // 텍스트 escape 후 http(s) URL만 링크화 (javascript: 등 차단)
@@ -1406,7 +1411,7 @@ function _renderWorkOrderCard(o) {
     </div>
     <div id="woDetail_${o.id}" style="display:none">
       ${_woProductBlock(o.product_option)}
-      <div style="margin-top:10px;display:grid;grid-template-columns:1fr 1fr;gap:2px 18px">
+      <div style="margin-top:10px">
         ${_woField("작업시트탭URL", o.work_sheet_url, true)}
         ${_woField("상품확인용URL", o.product_url, true)}
         ${_woField("총 상품구입비", o.pay_amount ? Number(o.pay_amount).toLocaleString()+"원" : "")}
