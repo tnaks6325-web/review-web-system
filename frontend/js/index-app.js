@@ -1340,15 +1340,25 @@ function woImageModal(url) {
     ov.style.cssText = "position:fixed;inset:0;z-index:99999;background:rgba(0,0,0,.82);display:none;align-items:center;justify-content:center;padding:24px;cursor:zoom-out";
     ov.innerHTML = '<span style="position:absolute;top:12px;right:22px;color:#fff;font-size:32px;line-height:1;cursor:pointer">&times;</span>'
       + '<img id="woImgModalImg" style="max-width:96vw;max-height:92vh;border-radius:8px;box-shadow:0 12px 48px rgba(0,0,0,.5)">'
-      + '<div id="woImgModalErr" style="display:none;color:#fff;font-size:14px">이미지를 불러올 수 없습니다.</div>';
+      + '<div id="woImgModalErr" style="display:none;color:#fff;font-size:14px;text-align:center;max-width:90vw;word-break:break-all"></div>';
     document.body.appendChild(ov);
     ov.addEventListener("click", () => { ov.style.display = "none"; });
     const im = ov.querySelector("#woImgModalImg");
+    const er = ov.querySelector("#woImgModalErr");
     im.addEventListener("click", e => e.stopPropagation());
-    im.addEventListener("error", () => { im.style.display = "none"; ov.querySelector("#woImgModalErr").style.display = "block"; });
-    im.addEventListener("load", () => { im.style.display = "block"; ov.querySelector("#woImgModalErr").style.display = "none"; });
+    er.addEventListener("click", e => e.stopPropagation());
+    im.addEventListener("error", () => {
+      im.style.display = "none";
+      const u = ov._lastUrl || im.src;
+      const dbg = u + (u.indexOf("?") >= 0 ? "&" : "?") + "debug=1";
+      er.innerHTML = "이미지를 불러올 수 없습니다.<br><span style='font-size:12px;opacity:.7'>" + u + "</span><br>"
+        + "<a href='" + dbg + "' target='_blank' rel='noopener' style='color:#93c5fd'>🔧 진단 정보 보기</a>";
+      er.style.display = "block";
+    });
+    im.addEventListener("load", () => { im.style.display = "block"; er.style.display = "none"; });
     document.addEventListener("keydown", e => { if (e.key === "Escape") ov.style.display = "none"; });
   }
+  ov._lastUrl = url;
   ov.querySelector("#woImgModalErr").style.display = "none";
   const im = ov.querySelector("#woImgModalImg");
   im.style.display = "block";
