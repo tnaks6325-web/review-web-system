@@ -270,6 +270,8 @@ router.get('/guide-image/:id', async (req, res) => {
   try {
     const f = await drive.downloadFile(id);
     res.set('Content-Type', f.mimeType || 'application/octet-stream');
+    // 크로스도메인 <img> 임베드 허용 (helmet 기본 same-origin 이면 pages.dev에서 못 박힘)
+    res.set('Cross-Origin-Resource-Policy', 'cross-origin');
     res.set('Cache-Control', 'public, max-age=3600');
     return res.send(f.buffer);
   } catch (err) {
