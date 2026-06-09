@@ -1326,6 +1326,7 @@ function _woCleanProductOption(raw, productUrl) {
   for (let ln of String(raw).split(/\r?\n/)) {
     const t = ln.trim();
     if (/^\[?\s*합계/.test(t)) continue;            // [합계]/합계 라인 제거
+    if (/^\[\s*상품/.test(t)) continue;              // [상품/옵션/건수] 헤더 제거(상위 라벨과 중복)
     if (/^[─—\-]{3,}$/.test(t)) continue;            // 구분선 제거
     ln = ln.replace(/\(\s*https?:\/\/[^)]*\)/g, "");  // (http URL) 제거
     if (pu) ln = ln.replace(new RegExp("\\(\\s*" + esc(pu) + "\\s*\\)", "g"), ""); // (상품URL) 제거
@@ -1336,13 +1337,13 @@ function _woCleanProductOption(raw, productUrl) {
   return out.join("\n").replace(/\n{3,}/g, "\n\n").trim();
 }
 
-// 상품·옵션 요약 블록 — 여러 줄(상품/옵션/소계) 그대로 보존 + URL 링크화 (중복 데이터 제거)
-function _woProductBlock(raw, productUrl) {
-  const cleaned = _woCleanProductOption(raw, productUrl);
-  if (!cleaned) return "";
-  return `<div style="margin-top:10px;border:1px solid #E5E7EB;border-radius:8px;padding:9px 11px;background:#F9FAFB">
-    <b style="font-size:.74rem;color:#6B7280">상품·옵션</b>
-    <div style="margin-top:4px;font-size:.78rem;color:#374151;white-space:pre-wrap;word-break:break-word;line-height:1.55">${_woLinkify(cleaned)}</div>
+// 항목명 정렬 + 여러 줄 값 (상품·옵션처럼 멀티라인 값을 같은 목록에 통합)
+function _woMultiField(label, val) {
+  if (!val || !String(val).trim()) return "";
+  return `<div style="display:flex;align-items:flex-start;font-size:.78rem;color:#374151;margin:3px 0;line-height:1.55">
+    <span style="flex:0 0 102px;color:#6B7280;font-weight:600;text-align:justify;text-align-last:justify">${label}</span>
+    <span style="flex:0 0 12px;text-align:center;color:#9CA3AF">:</span>
+    <span style="flex:1 1 auto;min-width:0;white-space:pre-wrap;word-break:break-word">${_woLinkify(val)}</span>
   </div>`;
 }
 
@@ -1532,8 +1533,8 @@ function _renderWorkOrderCard(o) {
       ${o.start_date ? `<span><b style="color:#6B7280">시작</b> ${escHtml(String(o.start_date).substring(0,10))}</span>`:""}
     </div>
     <div id="woDetail_${o.id}" style="display:none">
-      ${_woProductBlock(o.product_option, o.product_url)}
       <div style="margin-top:10px">
+        ${_woMultiField("상품·옵션", _woCleanProductOption(o.product_option, o.product_url))}
         ${_woField("작업시트탭URL", o.work_sheet_url, true)}
         ${_woField("상품확인용URL", o.product_url, true)}
         ${_woField("총 상품구입비", o.pay_amount ? Number(o.pay_amount).toLocaleString()+"원" : "")}
