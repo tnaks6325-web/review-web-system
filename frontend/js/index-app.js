@@ -1564,14 +1564,14 @@ function _renderWorkOrderCard(o) {
       <!-- 카톡 팀채팅방URL 등록 -->
       <div style="display:flex;gap:8px;align-items:center;margin-bottom:8px">
         <input id="woChat_${o.id}" type="text" value="${escHtml(o.chat_room_url||"")}" placeholder="카톡 팀채팅방URL (발행 시 필수)" ${woChatReg ? "readonly" : ""}
-          style="flex:1;padding:8px 10px;border:1.5px solid ${woChatReg?'#6EE7B7':'#E5E7EB'};border-radius:7px;font-size:.78rem;${woChatReg?'background:#ECFDF5;color:#065F46;font-weight:600':''}">
+          style="width:300px;max-width:100%;padding:8px 10px;border:1.5px solid ${woChatReg?'#6EE7B7':'#E5E7EB'};border-radius:7px;font-size:.78rem;${woChatReg?'background:#ECFDF5;color:#065F46;font-weight:600':''}">
         <button id="woChatBtn_${o.id}" data-reg="${woChatReg?1:0}" onclick="woToggleChat('${o.id}')"
           style="flex:none;font-size:.74rem;font-weight:700;border-radius:7px;padding:7px 13px;cursor:pointer;white-space:nowrap;border:1px solid ${woChatReg?'#FCD34D':'#6366F1'};background:${woChatReg?'#FEF9C3':'#6366F1'};color:${woChatReg?'#92400E':'#fff'}">${woChatReg?'링크수정':'등록'}</button>
       </div>
       <!-- 처리 메모 → 인트라넷 전송 -->
       <div style="display:flex;gap:8px;align-items:center;margin-bottom:10px">
         <input id="woMemo_${o.id}" type="text" value="${escHtml(o.admin_memo||"")}" placeholder="처리 메모 / 보완 사유 (인트라넷으로 전송)"
-          style="flex:1;padding:8px 10px;border:1.5px solid #E5E7EB;border-radius:7px;font-size:.78rem">
+          style="width:300px;max-width:100%;padding:8px 10px;border:1.5px solid #E5E7EB;border-radius:7px;font-size:.78rem">
         <button onclick="woSendMemo('${o.id}')" style="flex:none;font-size:.74rem;font-weight:700;border-radius:7px;padding:7px 13px;cursor:pointer;white-space:nowrap;border:1px solid #C7D2FE;background:#EEF2FF;color:#3730A3"><i class="fas fa-paper-plane"></i> 전송</button>
       </div>
       <!-- 액션 -->
