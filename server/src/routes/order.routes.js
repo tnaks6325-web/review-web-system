@@ -67,6 +67,7 @@ async function _ensureTables() {
                         CHECK (status IN ('submitted','reviewing','await_chatroom','published','done','rejected','revision')),
         created_by      TEXT NOT NULL DEFAULT '',
         admin_memo      TEXT DEFAULT '',
+        memo_log        TEXT DEFAULT '',
         processed_by    TEXT DEFAULT '',
         linked_campaign_id TEXT DEFAULT '',
         created_at      TIMESTAMPTZ DEFAULT NOW(),
@@ -78,6 +79,7 @@ async function _ensureTables() {
     await pool.query(`ALTER TABLE work_orders ADD COLUMN IF NOT EXISTS inflow_guide         TEXT DEFAULT ''`);
     await pool.query(`ALTER TABLE work_orders ADD COLUMN IF NOT EXISTS daily_count_text     TEXT DEFAULT ''`);
     await pool.query(`ALTER TABLE work_orders ADD COLUMN IF NOT EXISTS product_options_json TEXT DEFAULT ''`);
+    await pool.query(`ALTER TABLE work_orders ADD COLUMN IF NOT EXISTS memo_log             TEXT DEFAULT ''`);
     await pool.query(`CREATE INDEX IF NOT EXISTS idx_work_orders_status     ON work_orders(status)`);
     await pool.query(`CREATE INDEX IF NOT EXISTS idx_work_orders_created_by ON work_orders(created_by)`);
     await pool.query(`CREATE INDEX IF NOT EXISTS idx_work_orders_created_at ON work_orders(created_at DESC)`);
@@ -527,15 +529,19 @@ router.put('/admin/send-memo', authMiddleware, adminOrMasterMiddleware, async (r
     const memo = (b.memo || b.admin_memo || '').toString();
     if (!memo.trim()) return res.status(400).json({ ok: false, error: '메모 내용이 비어 있습니다.' });
 
-    // 1) 저장
-    const { rows } = await pool.query(
-      `UPDATE work_orders SET admin_memo = $2, updated_at = NOW() WHERE id = $1 RETURNING *`,
-      [b.id, memo]
+    // 현재 오더 + 기존 로그 조회
+    const { rows: cur } = await pool.query(
+      `SELECT id, title, status, created_by, memo_log FROM work_orders WHERE id = $1 LIMIT 1`, [b.id]
     );
-    if (rows.length === 0) return res.status(404).json({ ok: false, error: '오더를 찾을 수 없습니다.' });
-    const o = rows[0];
+    if (cur.length === 0) return res.status(404).json({ ok: false, error: '오더를 찾을 수 없습니다.' });
+    const o = cur[0];
+    let log = [];
+    try { const p = JSON.parse(o.memo_log || '[]'); if (Array.isArray(p)) log = p; } catch (_) {}
 
-    // 2) 인트라넷 webhook push (설정돼 있으면)
+    const sentBy = req.admin?.name || '';
+    const sentAt = new Date().toISOString();
+
+    // 인트라넷 webhook push
     let delivered = false, deliverError = null;
     const hook = process.env.INTRANET_MEMO_WEBHOOK_URL;
     if (hook) {
@@ -546,13 +552,8 @@ router.put('/admin/send-memo', authMiddleware, adminOrMasterMiddleware, async (r
           method: 'POST',
           headers: { 'Content-Type': 'application/json', 'X-Review-Key': process.env.INTRANET_WEBHOOK_KEY || '' },
           body: JSON.stringify({
-            order_id: o.id,
-            title: o.title,
-            requester_name: o.created_by,   // 인트라넷 전송자(담당 AE)
-            status: o.status,
-            memo,
-            sent_by: req.admin?.name || '',
-            sent_at: new Date().toISOString(),
+            order_id: o.id, title: o.title, requester_name: o.created_by, status: o.status,
+            memo, sent_by: sentBy, sent_at: sentAt,
           }),
           signal: ctrl.signal,
         });
@@ -566,7 +567,16 @@ router.put('/admin/send-memo', authMiddleware, adminOrMasterMiddleware, async (r
     } else {
       deliverError = 'webhook 미설정';
     }
-    res.json({ ok: true, data: o, delivered, deliverError });
+
+    // 로그 누적 (최근 100건 유지)
+    log.push({ memo, by: sentBy, at: sentAt, delivered, error: deliverError });
+    if (log.length > 100) log = log.slice(-100);
+
+    const { rows } = await pool.query(
+      `UPDATE work_orders SET admin_memo = $2, memo_log = $3, updated_at = NOW() WHERE id = $1 RETURNING *`,
+      [b.id, memo, JSON.stringify(log)]
+    );
+    res.json({ ok: true, data: rows[0], delivered, deliverError });
   } catch (err) {
     next(err);
   }

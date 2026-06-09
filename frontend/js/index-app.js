@@ -1485,6 +1485,29 @@ function _woGuideHtml(raw) {
 
 const _INFLOW_LABEL = { guide: "유입가이드", link: "링크유입" };
 
+// 처리메모 누적 로그 렌더 (전송됨/미전송 + 전송시점, 최신순)
+function _woMemoLogInner(o) {
+  let log = [];
+  try { const p = JSON.parse(o.memo_log || "[]"); if (Array.isArray(p)) log = p; } catch (_) {}
+  if (!log.length) {
+    return o.admin_memo
+      ? `<b style="color:#6B7280;font-size:.74rem">처리메모</b><div style="margin-top:3px;font-size:.76rem;color:#374151">${escHtml(o.admin_memo)}</div>`
+      : "";
+  }
+  const rows = log.slice().reverse().map(e => {
+    const t = String(e.at || "").replace("T", " ").substring(0, 16);
+    const ok = !!e.delivered;
+    const badge = ok
+      ? '<span style="flex:none;font-size:.66rem;font-weight:700;color:#065F46;background:#D1FAE5;border-radius:5px;padding:1px 6px">전송됨</span>'
+      : '<span style="flex:none;font-size:.66rem;font-weight:700;color:#92400E;background:#FEF3C7;border-radius:5px;padding:1px 6px" title="' + escHtml(e.error || "") + '">미전송</span>';
+    return `<div style="display:flex;gap:8px;align-items:flex-start;justify-content:space-between;padding:5px 0;border-top:1px solid #F3F4F6">
+      <div style="display:flex;gap:6px;align-items:flex-start;min-width:0">${badge}<span style="word-break:break-word;color:#374151">${escHtml(e.memo || "")}${e.by ? ` <span style="color:#9CA3AF">· ${escHtml(e.by)}</span>` : ""}</span></div>
+      <div style="flex:none;color:#9CA3AF;white-space:nowrap;font-size:.72rem">${t}</div>
+    </div>`;
+  }).join("");
+  return `<b style="color:#6B7280;font-size:.74rem">처리메모 로그 (${log.length})</b><div style="margin-top:2px;font-size:.76rem">${rows}</div>`;
+}
+
 // 인트라넷이 review_guide/special_notes에 [헤더] 섹션으로 모든 항목을 중복 포함시켜 보내므로,
 // 개별 필드로 이미 표시되는 섹션은 버리고 지정한 라벨의 섹션 내용만 추출한다.
 // 섹션 헤더가 전혀 없으면(우리 키트/스태프의 평문) 원문 그대로 반환.
@@ -1559,7 +1582,7 @@ function _renderWorkOrderCard(o) {
       ${(o.inflow_guide && String(o.inflow_guide).trim()) ? `<div style="margin-top:6px;font-size:.76rem;color:#374151"><b style="color:#6B7280">${o.inflow_type === "link" ? "유입 링크/상세" : "유입가이드"}:</b><div style="margin-top:4px;border:1px solid #E5E7EB;border-radius:8px;padding:8px;background:#F9FAFB">${_woGuideHtml(o.inflow_guide)}</div></div>`:""}
       ${(() => { const t = _woPickSections(o.review_guide, ["리뷰등록 가이드", "리뷰가이드", "리뷰 가이드"]); return t ? `<div style="margin-top:4px;font-size:.76rem;color:#374151"><b style="color:#6B7280">리뷰가이드:</b><div style="white-space:pre-wrap;word-break:break-word;margin-top:2px;line-height:1.5">${_woLinkify(t)}</div></div>` : ""; })()}
       ${(() => { const t = _woPickSections(o.special_notes, ["특이사항"]); return t ? `<div style="margin-top:4px;font-size:.76rem;color:#374151"><b style="color:#6B7280">특이사항:</b><div style="white-space:pre-wrap;word-break:break-word;margin-top:2px;line-height:1.5">${_woLinkify(t)}</div></div>` : ""; })()}
-      ${memo}
+      <div id="woMemoLog_${o.id}" style="margin-top:6px">${_woMemoLogInner(o)}</div>
     </div>
     <div style="margin-top:10px;border-top:1px dashed #E5E7EB;padding-top:10px">
       <!-- 카톡 팀채팅방URL 등록 -->
@@ -1652,7 +1675,12 @@ async function woSendMemo(id) {
   try {
     const r = await gasGet({ action: "orderSendMemo", id, memo });
     if (r && r.ok) {
-      const o = (_woCache || []).find(x => x.id === id); if (o) o.admin_memo = memo;
+      // 캐시 갱신 + 로그 즉시 반영 + 입력칸 비우기
+      const idx = (_woCache || []).findIndex(x => x.id === id);
+      if (idx >= 0 && r.data) _woCache[idx] = r.data;
+      const box = document.getElementById("woMemoLog_" + id);
+      if (box && r.data) box.innerHTML = _woMemoLogInner(r.data);
+      const inp = document.getElementById("woMemo_" + id); if (inp) inp.value = "";
       if (r.delivered) showToast("인트라넷으로 전송되었습니다.");
       else showToast("저장됨 · 인트라넷 미전송(" + (r.deliverError || "webhook 미설정") + ")", true);
     } else showToast((r && r.error) || "전송 실패", true);
