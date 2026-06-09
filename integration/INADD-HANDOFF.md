@@ -87,6 +87,7 @@
       "work_sheet_url": "...",
       "linked_campaign_id": "",   // 모집공고로 발행되면 연결된 캠페인 id
       "chat_room_url": "",        // 채팅방 URL(있으면)
+      "admin_memo": "",           // 관리자가 [전송]한 처리 메모/보완 사유 (인트라넷에 표시용)
       "created_at": "2026-06-08T13:10:56.489Z",
       "updated_at": "2026-06-08T13:10:56.489Z"
     }

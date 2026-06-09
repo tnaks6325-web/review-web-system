@@ -193,7 +193,7 @@ router.get('/intake/list', async (req, res, next) => {
     }
     const { rows } = await pool.query(
       `SELECT id, title, status, created_by, recruit_count, start_date,
-              inflow_type, work_sheet_url, linked_campaign_id, chat_room_url, created_at, updated_at
+              inflow_type, work_sheet_url, linked_campaign_id, chat_room_url, admin_memo, created_at, updated_at
          FROM work_orders ${where}
         ORDER BY created_at DESC
         LIMIT 200`,
