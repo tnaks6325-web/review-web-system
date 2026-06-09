@@ -1457,6 +1457,27 @@
         <input id="rf_title" type="text" class="rform-input" placeholder="예) 쿠팡 립밤 리뷰 모집" maxlength="100">
       </div>
 
+      <!-- 상품 정보 가져오기 -->
+      <div class="rform-group">
+        <label class="rform-label">상품 정보 가져오기
+          <span style="font-weight:400;color:var(--t3);font-size:.68rem">— 네이버·올리브영·카카오메이커스 (쿠팡 제한적)</span>
+        </label>
+        <div style="display:flex;gap:6px">
+          <input id="rf_product_url" type="url" class="rform-input" placeholder="상품확인용 URL" style="flex:1">
+          <button type="button" class="rchan-btn" onclick="fetchProductInfo()" style="white-space:nowrap"><i class="fas fa-cloud-download-alt"></i> 가져오기</button>
+        </div>
+        <div id="rf_product_preview" style="display:none;margin-top:8px;align-items:center;gap:10px;border:1px solid var(--border);border-radius:8px;padding:8px;background:var(--bg2,#fafafa)">
+          <img id="rf_pp_img" alt="" style="width:60px;height:60px;object-fit:cover;border-radius:6px;border:1px solid var(--border);background:#fff">
+          <div style="min-width:0;flex:1">
+            <div id="rf_pp_name" style="font-weight:700;font-size:.82rem;word-break:break-word"></div>
+            <div id="rf_pp_price" style="font-size:.82rem;color:var(--p,#6366F1);font-weight:700;margin-top:2px"></div>
+          </div>
+        </div>
+        <input id="rf_thumbnail" type="hidden">
+        <input id="rf_product_name" type="hidden">
+        <input id="rf_price" type="hidden">
+      </div>
+
       <!-- 담당자 -->
       <div class="rform-group">
         <label class="rform-label">담당자 <span class="rform-req">*</span></label>
