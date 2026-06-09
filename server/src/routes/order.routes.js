@@ -250,8 +250,8 @@ router.post('/guide-image', async (req, res, next) => {
     let name = (b.fileName || ('guide_' + Date.now())).toString();
     if (!/\.[a-z0-9]+$/i.test(name)) name += '.' + ext;
 
-    // ★ 비공개 업로드(shareAnyone:false) — 공개 링크 만들지 않음
-    const up = await drive.uploadFileBase64(b.imageBase64, name, b.mimeType || 'image/png', folderId, { shareAnyone: false });
+    // 표시(프록시/썸네일)를 위해 링크 읽기 가능으로 저장. UI에는 프록시 URL만 노출.
+    const up = await drive.uploadFileBase64(b.imageBase64, name, b.mimeType || 'image/png', folderId, { shareAnyone: true });
 
     // 리뷰웹 프록시 URL — Drive 파일은 비공개, 서버가 꺼내 스트리밍
     const proxy = `${_publicApiBase(req)}/api/order/guide-image/${up.id}`;
@@ -261,18 +261,20 @@ router.post('/guide-image', async (req, res, next) => {
   }
 });
 
-// GET /api/order/guide-image/:id — 비공개 Drive 파일을 서버가 받아 스트리밍 (이미지 표시용)
+// GET /api/order/guide-image/:id — Drive 파일을 서버가 받아 스트리밍 (이미지 표시용)
 // <img src>가 헤더 인증을 못 보내므로 토큰 없이 동작. id는 추측 불가한 Drive fileId.
-router.get('/guide-image/:id', async (req, res, next) => {
+// 스트리밍 실패 시(권한/네트워크) Drive thumbnail로 302 폴백.
+router.get('/guide-image/:id', async (req, res) => {
+  const id = String(req.params.id || '');
+  if (!/^[-\w]{20,}$/.test(id)) return res.status(400).send('bad id');
   try {
-    const id = String(req.params.id || '');
-    if (!/^[-\w]{20,}$/.test(id)) return res.status(400).send('bad id');
     const f = await drive.downloadFile(id);
     res.set('Content-Type', f.mimeType || 'application/octet-stream');
-    res.set('Cache-Control', 'private, max-age=3600');
-    res.send(f.buffer);
+    res.set('Cache-Control', 'public, max-age=3600');
+    return res.send(f.buffer);
   } catch (err) {
-    res.status(404).send('not found');
+    logger.warn(`[order] guide-image 스트리밍 실패(${id}): ${err.message} → thumbnail 폴백`);
+    return res.redirect(302, `https://drive.google.com/thumbnail?id=${id}&sz=w2000`);
   }
 });
 
