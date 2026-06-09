@@ -148,6 +148,36 @@
 
 ---
 
+## 1-F. 처리메모 Webhook (리뷰웹 → 인트라넷 push)  ★ 인트라넷 구현 요청
+
+관리자가 작업오더에서 **처리메모/보완사유를 [전송]** 하면, 리뷰웹이 **인트라넷 수신 URL로 즉시 POST** 합니다.
+인트라넷은 아래 규격의 수신 엔드포인트를 만들어 URL을 알려주세요.
+
+- **인트라넷이 만들 것**: `POST <인트라넷>/api/review-memo` (경로 자유)
+- **인증**: 헤더 `X-Review-Key: <공유시크릿>` 검증 (리뷰웹이 보냄). 값은 양측이 합의해 공유.
+- **요청 body(JSON)** — 리뷰웹이 보내는 형식:
+  ```json
+  {
+    "order_id": "wo_xxxx",
+    "title": "오더 제목",
+    "requester_name": "한가람",     // 이 오더를 보낸 AE (created_by)
+    "status": "reviewing",
+    "memo": "사진 더 필요합니다(보완요청)",
+    "sent_by": "관리자김",          // 메모 보낸 리뷰웹 관리자
+    "sent_at": "2026-06-09T05:00:00.000Z"
+  }
+  ```
+- **응답**: `200`(+아무 body)면 전송 성공으로 간주. 그 외 상태코드는 실패 처리.
+- **타임아웃**: 8초.
+
+리뷰웹 Railway env 2개 설정 필요(인트라넷 URL/키 수령 후):
+- `INTRANET_MEMO_WEBHOOK_URL = https://<인트라넷>/api/review-memo`
+- `INTRANET_WEBHOOK_KEY = <공유시크릿>`
+
+> webhook 미설정/실패 시에도 메모는 리뷰웹에 저장되고 `intake/list`의 `admin_memo`로 폴링 조회는 가능(폴백).
+
+---
+
 ## 2. 필드 스키마 (work_orders)
 
 | 필드 | 타입 | 필수 | 설명 |
