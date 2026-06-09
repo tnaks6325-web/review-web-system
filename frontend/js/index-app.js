@@ -1382,6 +1382,33 @@ function _woGuideHtml(raw) {
 
 const _INFLOW_LABEL = { guide: "유입가이드", link: "링크유입" };
 
+// 인트라넷이 review_guide/special_notes에 [헤더] 섹션으로 모든 항목을 중복 포함시켜 보내므로,
+// 개별 필드로 이미 표시되는 섹션은 버리고 지정한 라벨의 섹션 내용만 추출한다.
+// 섹션 헤더가 전혀 없으면(우리 키트/스태프의 평문) 원문 그대로 반환.
+function _woPickSections(raw, keepLabels) {
+  const text = String(raw == null ? "" : raw);
+  if (!text.trim()) return "";
+  if (!/\[[^\]]+\]/.test(text)) return text.trim();
+  const norm = s => s.replace(/\s/g, "");
+  const keep = keepLabels.map(norm);
+  const lines = text.split(/\r?\n/);
+  const out = [];
+  let take = false, buf = [];
+  const flush = () => { const c = buf.join("\n").trim(); if (take && c) out.push(c); buf = []; };
+  for (const ln of lines) {
+    const m = ln.match(/^\s*\[([^\]]+)\]\s*(.*)$/);
+    if (m) {
+      flush();
+      take = keep.some(k => norm(m[1]).includes(k));
+      buf = m[2] ? [m[2]] : [];
+    } else {
+      buf.push(ln);
+    }
+  }
+  flush();
+  return out.join("\n\n").trim();
+}
+
 function _renderWorkOrderCard(o) {
   const st = o.status || "submitted";
   const [bg, fg] = WO_COLORS[st] || ["#F3F4F6","#374151"];
@@ -1425,8 +1452,8 @@ function _renderWorkOrderCard(o) {
         ${_woField("물건비", o.goods_cost_type)}
       </div>
       ${(o.inflow_guide && String(o.inflow_guide).trim()) ? `<div style="margin-top:6px;font-size:.76rem;color:#374151"><b style="color:#6B7280">${o.inflow_type === "link" ? "유입 링크/상세" : "유입가이드"}:</b><div style="margin-top:4px;border:1px solid #E5E7EB;border-radius:8px;padding:8px;background:#F9FAFB">${_woGuideHtml(o.inflow_guide)}</div></div>`:""}
-      ${o.review_guide ? `<div style="margin-top:4px;font-size:.76rem;color:#374151"><b style="color:#6B7280">리뷰가이드:</b><div style="white-space:pre-wrap;word-break:break-word;margin-top:2px;line-height:1.5">${_woLinkify(o.review_guide)}</div></div>`:""}
-      ${o.special_notes ? `<div style="margin-top:4px;font-size:.76rem;color:#374151"><b style="color:#6B7280">특이사항:</b><div style="white-space:pre-wrap;word-break:break-word;margin-top:2px;line-height:1.5">${_woLinkify(o.special_notes)}</div></div>`:""}
+      ${(() => { const t = _woPickSections(o.review_guide, ["리뷰등록 가이드", "리뷰가이드", "리뷰 가이드"]); return t ? `<div style="margin-top:4px;font-size:.76rem;color:#374151"><b style="color:#6B7280">리뷰가이드:</b><div style="white-space:pre-wrap;word-break:break-word;margin-top:2px;line-height:1.5">${_woLinkify(t)}</div></div>` : ""; })()}
+      ${(() => { const t = _woPickSections(o.special_notes, ["특이사항"]); return t ? `<div style="margin-top:4px;font-size:.76rem;color:#374151"><b style="color:#6B7280">특이사항:</b><div style="white-space:pre-wrap;word-break:break-word;margin-top:2px;line-height:1.5">${_woLinkify(t)}</div></div>` : ""; })()}
       ${memo}
     </div>
     <div style="margin-top:10px;border-top:1px dashed #E5E7EB;padding-top:10px">
