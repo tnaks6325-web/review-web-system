@@ -1315,12 +1315,34 @@ function _woLinkify(text) {
       '<a href="$1" target="_blank" rel="noopener noreferrer" style="color:#4F46E5;word-break:break-all">$1</a>');
 }
 
-// 상품·옵션 요약 블록 — 여러 줄(상품/옵션/소계) 그대로 보존 + URL 링크화
-function _woProductBlock(raw) {
+// 상품·옵션 요약에서 아래 개별 필드와 중복되는 값 제거:
+//  - [합계]/합계 라인(모집인원·총구입비), 구분선
+//  - 상품 URL(= 상품확인용URL 필드와 중복) 및 바레 URL
+function _woCleanProductOption(raw, productUrl) {
   if (!raw || !String(raw).trim()) return "";
+  const pu = (productUrl || "").trim();
+  const esc = s => s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  const out = [];
+  for (let ln of String(raw).split(/\r?\n/)) {
+    const t = ln.trim();
+    if (/^\[?\s*합계/.test(t)) continue;            // [합계]/합계 라인 제거
+    if (/^[─—\-]{3,}$/.test(t)) continue;            // 구분선 제거
+    ln = ln.replace(/\(\s*https?:\/\/[^)]*\)/g, "");  // (http URL) 제거
+    if (pu) ln = ln.replace(new RegExp("\\(\\s*" + esc(pu) + "\\s*\\)", "g"), ""); // (상품URL) 제거
+    ln = ln.replace(/\s*https?:\/\/\S+/g, "");        // 바레 URL 제거
+    ln = ln.replace(/\(\s*\)/g, "").replace(/[ \t]{2,}/g, " ").replace(/[ \t]+$/, "");
+    out.push(ln);
+  }
+  return out.join("\n").replace(/\n{3,}/g, "\n\n").trim();
+}
+
+// 상품·옵션 요약 블록 — 여러 줄(상품/옵션/소계) 그대로 보존 + URL 링크화 (중복 데이터 제거)
+function _woProductBlock(raw, productUrl) {
+  const cleaned = _woCleanProductOption(raw, productUrl);
+  if (!cleaned) return "";
   return `<div style="margin-top:10px;border:1px solid #E5E7EB;border-radius:8px;padding:9px 11px;background:#F9FAFB">
     <b style="font-size:.74rem;color:#6B7280">상품·옵션</b>
-    <div style="margin-top:4px;font-size:.78rem;color:#374151;white-space:pre-wrap;word-break:break-word;line-height:1.55">${_woLinkify(raw)}</div>
+    <div style="margin-top:4px;font-size:.78rem;color:#374151;white-space:pre-wrap;word-break:break-word;line-height:1.55">${_woLinkify(cleaned)}</div>
   </div>`;
 }
 
@@ -1510,7 +1532,7 @@ function _renderWorkOrderCard(o) {
       ${o.start_date ? `<span><b style="color:#6B7280">시작</b> ${escHtml(String(o.start_date).substring(0,10))}</span>`:""}
     </div>
     <div id="woDetail_${o.id}" style="display:none">
-      ${_woProductBlock(o.product_option)}
+      ${_woProductBlock(o.product_option, o.product_url)}
       <div style="margin-top:10px">
         ${_woField("작업시트탭URL", o.work_sheet_url, true)}
         ${_woField("상품확인용URL", o.product_url, true)}
