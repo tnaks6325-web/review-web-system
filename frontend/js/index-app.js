@@ -1331,36 +1331,53 @@ function _driveId(url) {
   return m ? m[1] : null;
 }
 
-// 이미지 라이트박스(화면 내 팝업) — 새 탭 대신 오버레이로 표시
+// 이미지 라이트박스(화면 내 팝업) — 화면맞춤으로 열고 [원본크기보기] 토글 제공
 function woImageModal(url) {
   let ov = document.getElementById("woImgModal");
   if (!ov) {
     ov = document.createElement("div");
     ov.id = "woImgModal";
-    ov.style.cssText = "position:fixed;inset:0;z-index:99999;background:rgba(0,0,0,.82);display:none;align-items:center;justify-content:center;padding:24px;cursor:zoom-out";
-    ov.innerHTML = '<span style="position:absolute;top:12px;right:22px;color:#fff;font-size:32px;line-height:1;cursor:pointer">&times;</span>'
-      + '<img id="woImgModalImg" style="max-width:96vw;max-height:92vh;border-radius:8px;box-shadow:0 12px 48px rgba(0,0,0,.5)">'
+    ov.style.cssText = "position:fixed;inset:0;z-index:99999;background:rgba(0,0,0,.82);display:none;align-items:center;justify-content:center;padding:24px;cursor:zoom-out;overflow:auto";
+    ov.innerHTML =
+      '<button id="woImgOrig" style="position:fixed;top:14px;right:60px;z-index:2;background:rgba(255,255,255,.16);color:#fff;border:1px solid rgba(255,255,255,.35);border-radius:8px;padding:6px 12px;font-size:13px;font-weight:600;cursor:pointer;backdrop-filter:blur(4px);-webkit-backdrop-filter:blur(4px)">원본크기보기</button>'
+      + '<span id="woImgClose" style="position:fixed;top:9px;right:18px;z-index:2;color:#fff;font-size:32px;line-height:1;cursor:pointer">&times;</span>'
+      + '<img id="woImgModalImg" style="border-radius:8px;box-shadow:0 12px 48px rgba(0,0,0,.5);display:block;margin:auto">'
       + '<div id="woImgModalErr" style="display:none;color:#fff;font-size:14px;text-align:center;max-width:90vw;word-break:break-all"></div>';
     document.body.appendChild(ov);
-    ov.addEventListener("click", () => { ov.style.display = "none"; });
     const im = ov.querySelector("#woImgModalImg");
     const er = ov.querySelector("#woImgModalErr");
-    im.addEventListener("click", e => e.stopPropagation());
+    const btn = ov.querySelector("#woImgOrig");
+    const fit = () => {
+      im.style.maxWidth = "92vw"; im.style.maxHeight = "88vh"; im.style.width = "auto"; im.style.height = "auto"; im.style.cursor = "zoom-in";
+      ov.style.alignItems = "center"; ov.style.justifyContent = "center"; ov.scrollTop = 0;
+      btn.textContent = "원본크기보기"; ov._orig = false;
+    };
+    const orig = () => {
+      im.style.maxWidth = "none"; im.style.maxHeight = "none"; im.style.cursor = "zoom-out";
+      ov.style.alignItems = "flex-start"; ov.style.justifyContent = "flex-start";
+      btn.textContent = "화면맞춤"; ov._orig = true;
+    };
+    ov._fit = fit; ov._toggle = () => { ov._orig ? fit() : orig(); };
+    ov.addEventListener("click", () => { ov.style.display = "none"; });
+    btn.addEventListener("click", e => { e.stopPropagation(); ov._toggle(); });
+    ov.querySelector("#woImgClose").addEventListener("click", e => { e.stopPropagation(); ov.style.display = "none"; });
+    im.addEventListener("click", e => { e.stopPropagation(); ov._toggle(); });
     er.addEventListener("click", e => e.stopPropagation());
     im.addEventListener("error", () => {
-      im.style.display = "none";
+      im.style.display = "none"; btn.style.display = "none";
       const u = ov._lastUrl || im.src;
       const dbg = u + (u.indexOf("?") >= 0 ? "&" : "?") + "debug=1";
       er.innerHTML = "이미지를 불러올 수 없습니다.<br><span style='font-size:12px;opacity:.7'>" + u + "</span><br>"
         + "<a href='" + dbg + "' target='_blank' rel='noopener' style='color:#93c5fd'>🔧 진단 정보 보기</a>";
       er.style.display = "block";
     });
-    im.addEventListener("load", () => { im.style.display = "block"; er.style.display = "none"; });
+    im.addEventListener("load", () => { im.style.display = "block"; btn.style.display = "block"; er.style.display = "none"; });
     document.addEventListener("keydown", e => { if (e.key === "Escape") ov.style.display = "none"; });
   }
   ov._lastUrl = url;
   ov.querySelector("#woImgModalErr").style.display = "none";
   const im = ov.querySelector("#woImgModalImg");
+  ov._fit();                       // 항상 화면맞춤으로 시작
   im.style.display = "block";
   im.src = url;
   ov.style.display = "flex";
@@ -1374,9 +1391,9 @@ function _woImgError(img) {
   a.addEventListener("click", e => { e.preventDefault(); woImageModal(u); });
   img.replaceWith(a);
 }
-// 팝업으로 열리는 이미지 태그
+// 팝업으로 열리는 이미지 태그 (카드 내 미리보기 크기 제한)
 function _woImgTag(src, openUrl) {
-  return `<img src="${escHtml(src)}" data-openurl="${escHtml(openUrl || src)}" style="max-width:100%;border-radius:8px;margin:4px 0;cursor:zoom-in" loading="lazy" onclick="woImageModal(this.src)" onerror="_woImgError(this)">`;
+  return `<img src="${escHtml(src)}" data-openurl="${escHtml(openUrl || src)}" style="max-width:min(100%,360px);max-height:240px;width:auto;height:auto;border-radius:8px;margin:4px 0;cursor:zoom-in;border:1px solid #E5E7EB" loading="lazy" title="클릭하면 크게 보기" onclick="woImageModal(this.dataset.openurl||this.src)" onerror="_woImgError(this)">`;
 }
 
 // 평문 → 안전 HTML: 줄바꿈 보존, URL 링크화, Drive 파일 URL은 이미지로 자동 임베드
@@ -1418,11 +1435,16 @@ function _woGuideHtml(raw) {
     });
   });
   tmp.querySelectorAll("img").forEach(img => {
-    img.style.maxWidth = "100%";
+    img.style.maxWidth = "min(100%,360px)";
+    img.style.maxHeight = "240px";
+    img.style.width = "auto";
+    img.style.height = "auto";
     img.style.borderRadius = "8px";
     img.style.margin = "4px 0";
+    img.style.border = "1px solid #E5E7EB";
     img.style.cursor = "zoom-in";
     img.loading = "lazy";
+    img.title = "클릭하면 크게 보기";
     // 새 탭 대신 팝업으로 열기 (부모 <a> 링크는 무력화)
     img.setAttribute("onclick", "woImageModal(this.src);return false;");
     const a = img.closest("a");
