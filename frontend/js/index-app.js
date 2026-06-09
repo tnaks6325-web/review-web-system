@@ -1250,7 +1250,7 @@ function switchAdminTab(tabName) {
    ★ 작업 오더(work_orders) 인박스 — 관리자
    ══════════════════════════════════════════════════════════════ */
 const WO_LABELS = {
-  submitted:'제출됨', reviewing:'검토중', await_chatroom:'카톡방생성대기',
+  submitted:'제출됨', reviewing:'접수됨', await_chatroom:'카톡방생성대기',
   published:'모집공고발행', done:'완료', rejected:'반려', revision:'보완요청',
 };
 const WO_COLORS = {
@@ -1525,6 +1525,7 @@ function _renderWorkOrderCard(o) {
 
   const memo = o.admin_memo
     ? `<div style="margin-top:4px;font-size:.74rem;color:#991B1B"><b>메모:</b> ${escHtml(o.admin_memo)}</div>` : "";
+  const woChatReg = !!(o.chat_room_url && String(o.chat_room_url).trim());
 
   return `<div style="border:1.5px solid #E5E7EB;border-radius:12px;padding:14px 16px;margin-bottom:12px;background:#fff">
     <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap">
@@ -1560,18 +1561,25 @@ function _renderWorkOrderCard(o) {
       ${memo}
     </div>
     <div style="margin-top:10px;border-top:1px dashed #E5E7EB;padding-top:10px">
-      <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-bottom:8px">
-        <input id="woChat_${o.id}" type="text" value="${escHtml(o.chat_room_url||"")}" placeholder="카톡 팀채팅방URL (발행 시 필수)"
-          style="padding:7px 10px;border:1.5px solid #E5E7EB;border-radius:7px;font-size:.78rem">
-        <input id="woMemo_${o.id}" type="text" value="${escHtml(o.admin_memo||"")}" placeholder="처리 메모 (반려/보완 사유 등)"
-          style="padding:7px 10px;border:1.5px solid #E5E7EB;border-radius:7px;font-size:.78rem">
+      <!-- 카톡 팀채팅방URL 등록 -->
+      <div style="display:flex;gap:8px;align-items:center;margin-bottom:8px">
+        <input id="woChat_${o.id}" type="text" value="${escHtml(o.chat_room_url||"")}" placeholder="카톡 팀채팅방URL (발행 시 필수)" ${woChatReg ? "readonly" : ""}
+          style="flex:1;padding:8px 10px;border:1.5px solid ${woChatReg?'#6EE7B7':'#E5E7EB'};border-radius:7px;font-size:.78rem;${woChatReg?'background:#ECFDF5;color:#065F46;font-weight:600':''}">
+        <button id="woChatBtn_${o.id}" data-reg="${woChatReg?1:0}" onclick="woToggleChat('${o.id}')"
+          style="flex:none;font-size:.74rem;font-weight:700;border-radius:7px;padding:7px 13px;cursor:pointer;white-space:nowrap;border:1px solid ${woChatReg?'#FCD34D':'#6366F1'};background:${woChatReg?'#FEF9C3':'#6366F1'};color:${woChatReg?'#92400E':'#fff'}">${woChatReg?'링크수정':'등록'}</button>
       </div>
-      <div style="display:flex;gap:6px;flex-wrap:wrap;align-items:center">
-        <button onclick="woSaveFields('${o.id}')" style="font-size:.74rem;background:#F3F4F6;color:#374151;border:1px solid #D1D5DB;border-radius:7px;padding:5px 10px;cursor:pointer"><i class="fas fa-save"></i> 메모·카톡URL 저장</button>
+      <!-- 처리 메모 → 인트라넷 전송 -->
+      <div style="display:flex;gap:8px;align-items:center;margin-bottom:10px">
+        <input id="woMemo_${o.id}" type="text" value="${escHtml(o.admin_memo||"")}" placeholder="처리 메모 / 보완 사유 (인트라넷으로 전송)"
+          style="flex:1;padding:8px 10px;border:1.5px solid #E5E7EB;border-radius:7px;font-size:.78rem">
+        <button onclick="woSendMemo('${o.id}')" style="flex:none;font-size:.74rem;font-weight:700;border-radius:7px;padding:7px 13px;cursor:pointer;white-space:nowrap;border:1px solid #C7D2FE;background:#EEF2FF;color:#3730A3"><i class="fas fa-paper-plane"></i> 전송</button>
+      </div>
+      <!-- 액션 -->
+      <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center">
+        <button onclick="woAccept('${o.id}')" style="font-size:.8rem;font-weight:700;border-radius:8px;padding:8px 16px;cursor:pointer;border:1px solid #93C5FD;background:#DBEAFE;color:#1E40AF"><i class="fas fa-inbox"></i> 접수하기</button>
         ${o.linked_campaign_id
-          ? `<button onclick="woViewCampaign('${escHtml(o.linked_campaign_id)}')" style="font-size:.74rem;font-weight:700;background:#D1FAE5;color:#065F46;border:1px solid #6EE7B7;border-radius:7px;padding:5px 10px;cursor:pointer"><i class="fas fa-link"></i> 연결된 공고 보기</button>`
-          : `<button onclick="woCreateCampaign('${o.id}')" style="font-size:.74rem;font-weight:700;background:#EDE9FE;color:#5B21B6;border:1px solid #C4B5FD;border-radius:7px;padding:5px 10px;cursor:pointer"><i class="fas fa-bullhorn"></i> 모집공고 만들기</button>`}
-        ${btns || '<span style="font-size:.74rem;color:#9CA3AF">종료된 오더</span>'}
+          ? `<button onclick="woViewCampaign('${escHtml(o.linked_campaign_id)}')" style="font-size:.8rem;font-weight:700;background:#D1FAE5;color:#065F46;border:1px solid #6EE7B7;border-radius:8px;padding:8px 16px;cursor:pointer"><i class="fas fa-link"></i> 연결된 공고 보기</button>`
+          : `<button onclick="woCreateCampaignGuarded('${o.id}')" style="font-size:.8rem;font-weight:700;background:#EDE9FE;color:#5B21B6;border:1px solid #C4B5FD;border-radius:8px;padding:8px 16px;cursor:pointer"><i class="fas fa-bullhorn"></i> 모집공고생성</button>`}
       </div>
     </div>
   </div>`;
@@ -1586,6 +1594,85 @@ function woToggleDetail(id, btn) {
   btn.innerHTML = open
     ? '<i class="fas fa-chevron-up"></i> 간략히보기'
     : '<i class="fas fa-chevron-down"></i> 펼쳐보기';
+}
+
+// 간단 안내 팝업
+function woNotice(msg) {
+  let m = document.getElementById("woNoticeModal");
+  if (!m) {
+    m = document.createElement("div");
+    m.id = "woNoticeModal";
+    m.style.cssText = "position:fixed;inset:0;z-index:100000;background:rgba(0,0,0,.45);display:none;align-items:center;justify-content:center;padding:20px";
+    m.innerHTML = '<div style="background:#fff;border-radius:14px;max-width:340px;width:100%;padding:22px 20px;text-align:center;box-shadow:0 16px 48px rgba(0,0,0,.25)">'
+      + '<div id="woNoticeMsg" style="font-size:.92rem;color:#111827;line-height:1.55;margin-bottom:16px;white-space:pre-wrap"></div>'
+      + '<button id="woNoticeOk" style="background:#6366F1;color:#fff;border:none;border-radius:9px;padding:9px 24px;font-weight:700;font-size:.88rem;cursor:pointer">확인</button></div>';
+    document.body.appendChild(m);
+    m.addEventListener("click", e => { if (e.target === m) m.style.display = "none"; });
+    m.querySelector("#woNoticeOk").addEventListener("click", () => { m.style.display = "none"; });
+    document.addEventListener("keydown", e => { if (e.key === "Escape") m.style.display = "none"; });
+  }
+  m.querySelector("#woNoticeMsg").textContent = msg;
+  m.style.display = "flex";
+}
+
+// 카톡 팀채팅방URL 등록 / 링크수정 토글
+async function woToggleChat(id) {
+  const inp = document.getElementById("woChat_" + id);
+  const btn = document.getElementById("woChatBtn_" + id);
+  if (!inp || !btn) return;
+  const setEdit = () => {
+    inp.readOnly = false; inp.style.background = ""; inp.style.color = ""; inp.style.fontWeight = ""; inp.style.borderColor = "#E5E7EB";
+    btn.dataset.reg = "0"; btn.textContent = "등록";
+    btn.style.border = "1px solid #6366F1"; btn.style.background = "#6366F1"; btn.style.color = "#fff";
+    inp.focus();
+  };
+  const setReg = () => {
+    inp.readOnly = true; inp.style.background = "#ECFDF5"; inp.style.color = "#065F46"; inp.style.fontWeight = "600"; inp.style.borderColor = "#6EE7B7";
+    btn.dataset.reg = "1"; btn.textContent = "링크수정";
+    btn.style.border = "1px solid #FCD34D"; btn.style.background = "#FEF9C3"; btn.style.color = "#92400E";
+  };
+  if (btn.dataset.reg === "1") { setEdit(); return; }   // 링크수정 → 편집
+  const url = (inp.value || "").trim();
+  if (!url) { showToast("카톡 팀채팅방URL을 입력하세요.", "error"); inp.focus(); return; }
+  try {
+    const r = await gasGet({ action: "orderAdminUpdate", id, chat_room_url: url });
+    if (r && r.ok) {
+      setReg();
+      const o = (_woCache || []).find(x => x.id === id); if (o) o.chat_room_url = url;
+      showToast("카톡 URL이 등록되었습니다.", "success");
+    } else showToast((r && r.error) || "등록 실패", "error");
+  } catch (e) { showToast("오류: " + e.message, "error"); }
+}
+
+// 처리 메모 → 인트라넷 전송
+async function woSendMemo(id) {
+  const memo = ((document.getElementById("woMemo_" + id) || {}).value || "").trim();
+  if (!memo) { showToast("전송할 메모를 입력하세요.", "error"); return; }
+  try {
+    const r = await gasGet({ action: "orderAdminUpdate", id, admin_memo: memo });
+    if (r && r.ok) {
+      const o = (_woCache || []).find(x => x.id === id); if (o) o.admin_memo = memo;
+      showToast("인트라넷으로 전송되었습니다.", "success");
+    } else showToast((r && r.error) || "전송 실패", "error");
+  } catch (e) { showToast("오류: " + e.message, "error"); }
+}
+
+// 접수하기 (제출됨 → 접수됨)
+async function woAccept(id) {
+  try {
+    const r = await gasGet({ action: "orderAdminStatus", id, status: "reviewing" });
+    if (r && r.ok) { showToast("접수되었습니다.", "success"); loadWorkOrders(); }
+    else showToast((r && r.error) || "접수 처리 실패", "error");
+  } catch (e) { showToast("오류: " + e.message, "error"); }
+}
+
+// 모집공고생성 — 카톡 URL 등록 확인 후 진행
+function woCreateCampaignGuarded(id) {
+  const inp = document.getElementById("woChat_" + id);
+  const o = (_woCache || []).find(x => x.id === id);
+  const url = (((inp && inp.value) || (o && o.chat_room_url) || "")).trim();
+  if (!url) { woNotice("카카오톡 팀채팅방 URL를 등록하고 재시도 해주세요."); return; }
+  woCreateCampaign(id);
 }
 
 // 카톡URL/메모만 저장 (상태 전이 없이)
