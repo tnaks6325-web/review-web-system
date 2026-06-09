@@ -1326,11 +1326,18 @@ function _woCleanProductOption(raw, productUrl) {
   for (let ln of String(raw).split(/\r?\n/)) {
     const t = ln.trim();
     if (/^\[?\s*합계/.test(t)) continue;            // [합계]/합계 라인 제거
+    if (/^소계\s*[:：]/.test(t)) continue;           // 독립 '소계:' 라인 제거(키트 형식)
     if (/^\[\s*상품/.test(t)) continue;              // [상품/옵션/건수] 헤더 제거(상위 라벨과 중복)
     if (/^[─—\-]{3,}$/.test(t)) continue;            // 구분선 제거
     ln = ln.replace(/\(\s*https?:\/\/[^)]*\)/g, "");  // (http URL) 제거
     if (pu) ln = ln.replace(new RegExp("\\(\\s*" + esc(pu) + "\\s*\\)", "g"), ""); // (상품URL) 제거
     ln = ln.replace(/\s*https?:\/\/\S+/g, "");        // 바레 URL 제거
+    // 건수(N명/N건)·소계·라인합계 제거 — 옵션명+결제금액만 남김 (모집인원/총구입비는 아래 필드와 중복)
+    ln = ln.replace(/\s*\/\s*소계\s*[\d,]+\s*원/g, "")
+           .replace(/\s*\/\s*\d[\d,]*\s*[명건]/g, "")
+           .replace(/\s*[×x]\s*\d[\d,]*\s*[명건]/g, "")
+           .replace(/\s*=\s*[\d,]+\s*원/g, "")
+           .replace(/\s*\/\s*$/, "");
     ln = ln.replace(/\(\s*\)/g, "").replace(/[ \t]{2,}/g, " ").replace(/[ \t]+$/, "");
     out.push(ln);
   }
