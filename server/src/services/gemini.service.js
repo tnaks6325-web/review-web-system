@@ -24,6 +24,44 @@ const { logger } = require('../utils/logger');
 const _modelPool = [];    // [{ genAI, model, key(마스킹) }]
 let _poolIndex = 0;
 
+// 모델/생성 설정 — 기본을 thinking 없는 빠른 모델로(2.0-flash). 필요시 GEMINI_MODEL로 override.
+const MODEL_NAME = process.env.GEMINI_MODEL || 'gemini-2.0-flash';
+const GEN_CONFIG = {
+  temperature: 0,                       // 결정적 출력(추출 안정)
+  maxOutputTokens: 800,
+  responseMimeType: 'application/json',  // JSON 강제 → 파싱 신뢰 + 응답 단축
+};
+const GEMINI_TIMEOUT_MS = parseInt(process.env.GEMINI_TIMEOUT_MS || '9000', 10);
+
+const _sleep = ms => new Promise(r => setTimeout(r, ms));
+function _withTimeout(promise, ms, label) {
+  let t;
+  const timeout = new Promise((_, rej) => { t = setTimeout(() => rej(new Error(`${label} timeout ${ms}ms`)), ms); });
+  return Promise.race([promise, timeout]).finally(() => clearTimeout(t));
+}
+
+// 라운드로빈 + 일시오류 시 키회전 재시도 + 호출 타임아웃
+async function _runModel(parts, label) {
+  if (!_initGemini()) throw new Error('Gemini API가 설정되지 않았습니다. GEMINI_API_KEY(S)를 확인하세요.');
+  const attempts = Math.max(2, Math.min(_modelPool.length, 3));
+  let lastErr;
+  for (let i = 0; i < attempts; i++) {
+    const { model, key } = _getModel();
+    try {
+      const res = await _withTimeout(model.generateContent(parts), GEMINI_TIMEOUT_MS, `[Gemini ${label}]`);
+      return { text: res.response.text(), key };
+    } catch (e) {
+      lastErr = e;
+      const msg = e.message || '';
+      const transient = /429|quota|rate|exhaust|deadline|timeout|unavailable|50[023]|ECONN|ETIMEDOUT|fetch failed|socket hang/i.test(msg);
+      logger.warn(`[Gemini] ${label} 시도 ${i + 1}/${attempts} 실패(key=${key}): ${msg}`);
+      if (i < attempts - 1 && transient) { await _sleep(250 * (i + 1)); continue; }
+      break;
+    }
+  }
+  throw lastErr;
+}
+
 function _initGemini() {
   if (_modelPool.length > 0) return true;
 
@@ -42,10 +80,10 @@ function _initGemini() {
   try {
     for (const key of keys) {
       const genAI = new GoogleGenerativeAI(key);
-      const model = genAI.getGenerativeModel({ model: 'gemini-2.5-flash' });
+      const model = genAI.getGenerativeModel({ model: MODEL_NAME, generationConfig: GEN_CONFIG });
       _modelPool.push({ genAI, model, key: key.slice(0, 6) + '...' });
     }
-    logger.info(`[Gemini] 초기화 완료 (gemini-2.5-flash × ${_modelPool.length}키 라운드로빈)`);
+    logger.info(`[Gemini] 초기화 완료 (${MODEL_NAME} × ${_modelPool.length}키 라운드로빈, JSON모드, timeout ${GEMINI_TIMEOUT_MS}ms)`);
     return true;
   } catch (err) {
     logger.error(`[Gemini] 초기화 실패: ${err.message}`);
@@ -145,12 +183,8 @@ async function extractOrderFromImage(base64Data, mimeType = 'image/jpeg') {
       },
     };
 
-    // ── 1번: 라운드로빈 모델 선택 ──
-    const { model: selectedModel, key: usedKey } = _getModel();
-
-    const result = await selectedModel.generateContent([EXTRACT_PROMPT, imagePart]);
-    const response = result.response;
-    const text = response.text();
+    // ── 라운드로빈 + 재시도 + 타임아웃 ──
+    const { text, key: usedKey } = await _runModel([EXTRACT_PROMPT, imagePart], 'extract');
 
     // JSON 파싱 (마크다운 코드블록 제거)
     const jsonStr = text.replace(/```json\s*/g, '').replace(/```\s*/g, '').trim();
@@ -225,11 +259,8 @@ async function verifyAddressMatch(naverInfo, coupangInfo) {
       .replace('{coupangPhone}', coupangInfo.phone || '')
       .replace('{coupangAddress}', coupangInfo.address || '');
 
-    // ── 1번: 라운드로빈 모델 선택 ──
-    const { model: selectedModel, key: usedKey } = _getModel();
-
-    const result = await selectedModel.generateContent(prompt);
-    const text = result.response.text();
+    // ── 라운드로빈 + 재시도 + 타임아웃 ──
+    const { text } = await _runModel(prompt, 'verify');
 
     const jsonStr = text.replace(/```json\s*/g, '').replace(/```\s*/g, '').trim();
     let parsed;
