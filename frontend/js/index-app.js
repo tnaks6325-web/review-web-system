@@ -1239,7 +1239,7 @@ function switchAdminTab(tabName) {
   if (tabName === "recruit")   { loadRecruitList(); loadRecruitTabOptions(); }
   if (tabName === "work-orders") { try { loadWorkOrders(); } catch(_){} }
   if (tabName === "payment")   initPaymentPanel();
-  if (tabName === "dashboard") { try { loadTabDashboard(); } catch(_){} try { loadSystemMonitor(); } catch(_){} try { loadStatsOverview(); } catch(_){} }
+  if (tabName === "dashboard") { try { loadTabDashboard(); } catch(_){} try { loadSystemMonitor(); } catch(_){} try { loadStatsOverview(); } catch(_){} try { loadDashWorkOrders(); } catch(_){} }
   if (tabName === "archive")   { try { loadArchiveList(); } catch(_){} try { _loadArchiveHistory(); } catch(_){} }
   if (tabName === "settings")  { try { loadUnrecognizedTabs(); } catch(_){} try { loadKeywordList(); } catch(_){} }
   // ★ 컨텍스트 툴바 업데이트
@@ -1290,6 +1290,75 @@ async function loadWorkOrders() {
     wrap.innerHTML = list.map(_renderWorkOrderCard).join("");
   } catch(e) {
     wrap.innerHTML = '<div style="text-align:center;color:#DC2626;padding:30px;font-size:.85rem">불러오기 실패: ' + escHtml(e.message) + '</div>';
+  }
+}
+
+// ── 대시보드: 작업오더 간편보기 (최신 4건, 카드별 펼쳐보기) ──
+let _dashWoCache = [];
+async function loadDashWorkOrders() {
+  const wrap = document.getElementById("dashWoList");
+  if (!wrap) return;
+  wrap.innerHTML = '<div style="text-align:center;color:#9CA3AF;padding:16px;font-size:.82rem">불러오는 중...</div>';
+  try {
+    const r = await gasGet({ action: "orderAdminList" });
+    const list = ((r && r.ok && r.data) ? r.data : []).slice(0, 4);
+    _dashWoCache = list;
+    wrap.style.maxHeight = "134px";
+    if (!list.length) { wrap.innerHTML = '<div style="text-align:center;color:#9CA3AF;padding:16px;font-size:.82rem">작업오더가 없습니다.</div>'; return; }
+    wrap.innerHTML = list.map(_renderDashOrderCard).join("");
+  } catch (e) {
+    wrap.innerHTML = '<div style="text-align:center;color:#DC2626;padding:16px;font-size:.82rem">불러오기 실패: ' + escHtml(e.message) + '</div>';
+  }
+}
+
+function _renderDashOrderCard(o) {
+  const st = o.status || "submitted";
+  const [bg, fg] = WO_COLORS[st] || ["#F3F4F6", "#374151"];
+  const date = (o.created_at || "").replace("T", " ").substring(0, 16);
+  return `<div style="border:1px solid #E5E7EB;border-radius:10px;padding:10px 12px;margin-bottom:8px;background:#fff">
+    <div style="display:flex;align-items:center;gap:7px;flex-wrap:wrap">
+      <button onclick="woDashToggleDetail('${o.id}',this)" style="font-size:.7rem;font-weight:700;background:#EEF2FF;color:#3730A3;border:1px solid #C7D2FE;border-radius:6px;padding:2px 8px;cursor:pointer;white-space:nowrap"><i class="fas fa-chevron-down"></i> 펼쳐보기</button>
+      <span style="font-size:.66rem;font-weight:700;padding:2px 8px;border-radius:20px;background:${bg};color:${fg}">${WO_LABELS[st] || st}</span>
+      <b style="font-size:.85rem;color:#111827">${escHtml(o.title || "")}</b>
+      <span style="font-size:.7rem;color:#9CA3AF;margin-left:auto"><i class="fas fa-user"></i> ${escHtml(o.created_by || "-")} · ${date}</span>
+    </div>
+    <div style="margin-top:6px;display:flex;flex-wrap:wrap;gap:5px 12px;font-size:.74rem;color:#374151">
+      ${o.recruit_count ? `<span><b style="color:#6B7280">모집</b> ${Number(o.recruit_count).toLocaleString()}명</span>` : ""}
+      ${o.delivery_type ? `<span><b style="color:#6B7280">배송</b> ${escHtml(o.delivery_type)}</span>` : ""}
+      ${o.pay_amount ? `<span><b style="color:#6B7280">구입비</b> ${Number(o.pay_amount).toLocaleString()}원</span>` : ""}
+      ${o.start_date ? `<span><b style="color:#6B7280">시작</b> ${escHtml(String(o.start_date).substring(0, 10))}</span>` : ""}
+    </div>
+    <div id="dashDetail_${o.id}" style="display:none;margin-top:8px;border-top:1px dashed #E5E7EB;padding-top:8px">
+      ${_woField("담당AE", o.created_by)}
+      ${_woMultiField("상품·옵션", _woCleanProductOption(o.product_option, o.product_url))}
+      ${_woField("작업시트탭URL", o.work_sheet_url, true)}
+      ${_woField("상품확인용URL", o.product_url, true)}
+      ${_woField("총 상품구입비", o.pay_amount ? Number(o.pay_amount).toLocaleString() + "원" : "")}
+      ${_woField("모집인원", o.recruit_count ? Number(o.recruit_count).toLocaleString() + "명" : "")}
+      ${_woField("일일진행", o.daily_count_text || o.daily_count)}
+      ${_woField("구매시간대", o.purchase_time)}
+      ${_woField("유입방식", _INFLOW_LABEL[o.inflow_type] || o.inflow_keyword || "")}
+      ${_woField("배송유형", o.delivery_type)}
+      ${_woField("리뷰유형", o.review_type)}
+      ${_woField("물건비", o.goods_cost_type)}
+      ${(o.inflow_guide && String(o.inflow_guide).trim()) ? `<div style="margin-top:6px;font-size:.76rem;color:#374151"><b style="color:#6B7280">${o.inflow_type === "link" ? "유입 링크/상세" : "유입가이드"}:</b><div style="margin-top:4px;border:1px solid #E5E7EB;border-radius:8px;padding:8px;background:#F9FAFB">${_woGuideHtml(o.inflow_guide)}</div></div>` : ""}
+      ${(() => { const t = _woPickSections(o.review_guide, ["리뷰등록 가이드", "리뷰가이드", "리뷰 가이드"]); return t ? `<div style="margin-top:4px;font-size:.76rem;color:#374151"><b style="color:#6B7280">리뷰가이드:</b><div style="white-space:pre-wrap;word-break:break-word;margin-top:2px;line-height:1.5">${_woLinkify(t)}</div></div>` : ""; })()}
+      ${(() => { const t = _woPickSections(o.special_notes, ["특이사항"]); return t ? `<div style="margin-top:4px;font-size:.76rem;color:#374151"><b style="color:#6B7280">특이사항:</b><div style="white-space:pre-wrap;word-break:break-word;margin-top:2px;line-height:1.5">${_woLinkify(t)}</div></div>` : ""; })()}
+    </div>
+  </div>`;
+}
+
+// 간편보기 카드 펼치기/접기 + 블록 높이 자동 조정
+function woDashToggleDetail(id, btn) {
+  const d = document.getElementById("dashDetail_" + id);
+  if (!d) return;
+  const open = d.style.display === "none";
+  d.style.display = open ? "block" : "none";
+  btn.innerHTML = open ? '<i class="fas fa-chevron-up"></i> 간략히보기' : '<i class="fas fa-chevron-down"></i> 펼쳐보기';
+  const list = document.getElementById("dashWoList");
+  if (list) {
+    const anyOpen = [...list.querySelectorAll('[id^="dashDetail_"]')].some(e => e.style.display !== "none");
+    list.style.maxHeight = anyOpen ? "none" : "134px";
   }
 }
 
@@ -2330,7 +2399,8 @@ async function _showUnpaidReviewersPopup(sheetId, tabName, rc, pc, round) {
 async function loadAdminDashboard() {
   // ★ v11.5: 캠페인 탭 관리 UI로 통합 — 대시보드 메인은 loadTabDashboard()가 담당
   try { await loadTabDashboard(); } catch(_){}
-  
+  try { loadDashWorkOrders(); } catch(_){}
+
   if (!isAdminLoggedIn()) { showToast("세션이 만료되었습니다. 다시 로그인하세요.", "warning"); exitAdmin(); return; }
   
   // ── section-header sticky 위치를 데이터 로드 전 즉시 보정 ──
