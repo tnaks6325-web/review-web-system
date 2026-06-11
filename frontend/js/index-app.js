@@ -11592,6 +11592,7 @@ async function loadTabDashboard() {
 
     // ── 담당자 필터 ──
     _populateFilter("tabDashManagerFilter", "전체 담당자", res.managers);
+    _renderTabDashManagerTabs();
     // ── 캠페인 필터 ──
     _populateFilterObj("tabDashCampaignFilter", "전체 캠페인", res.campaigns);
     // ── 리뷰유형 필터 ──
@@ -11616,6 +11617,25 @@ function _populateFilter(elId, defaultLabel, map) {
   Object.keys(map).sort().forEach(k => { el.innerHTML += `<option value="${escHtml(k)}">${escHtml(k)} (${map[k]})</option>`; });
   el.value = cur;
 }
+// 담당자 필터를 좌우 탭 버튼으로 렌더 ([전체보기][만두][망고]...)
+function _renderTabDashManagerTabs() {
+  const cont = document.getElementById("tabDashManagerTabs");
+  const sel = document.getElementById("tabDashManagerFilter");
+  if (!cont || !sel) return;
+  const cur = sel.value || "";
+  const opts = [...sel.options].map(o => ({ value: o.value, label: o.value === "" ? "전체보기" : o.textContent }));
+  cont.innerHTML = opts.map(o => {
+    const active = (o.value === cur);
+    return `<button onclick="_selectTabDashManager('${escHtml(o.value).replace(/'/g, "\\'")}')" style="font-size:.75rem;font-weight:700;border-radius:7px;padding:5px 13px;cursor:pointer;white-space:nowrap;border:1px solid ${active ? '#6366F1' : '#D1D5DB'};background:${active ? '#6366F1' : '#fff'};color:${active ? '#fff' : '#374151'}">${escHtml(o.label)}</button>`;
+  }).join("");
+}
+function _selectTabDashManager(val) {
+  const sel = document.getElementById("tabDashManagerFilter");
+  if (sel) sel.value = val;
+  _renderTabDashManagerTabs();
+  renderTabDashTable();
+}
+
 function _populateFilterObj(elId, defaultLabel, map) {
   const el = document.getElementById(elId);
   if (!el || !map) return;
@@ -12367,9 +12387,22 @@ function renderTabDashTable() {
 
 // ── 테이블뷰: 21컬럼 전체 + 체크박스 선택 ──
 let _tabDashChecked = new Set(); // "sheetId||tabName" 형태
+let _tabDashSimple = false;      // 간단히보기(true) / 펼쳐보기(false)
+// 간단히보기 시 숨길 컬럼
+const _TAB_DASH_SIMPLE_HIDE = new Set(["_status", "_option", "deposit_name", "capture_folder_url", "folder_url", "updated_at"]);
+
+function _toggleTabDashSimple() {
+  _tabDashSimple = !_tabDashSimple;
+  const btn = document.getElementById("tabDashViewToggle");
+  if (btn) btn.innerHTML = _tabDashSimple
+    ? '<i class="fas fa-expand-alt"></i> 펼쳐보기'
+    : '<i class="fas fa-compress-alt"></i> 간단히보기';
+  renderTabDashTable();
+}
 
 function _renderFullTableView(wrap, filtered) {
-  const visibleCols = _TAB_DASH_COLS.filter(c => c.show);
+  let visibleCols = _TAB_DASH_COLS.filter(c => c.show);
+  if (_tabDashSimple) visibleCols = visibleCols.filter(c => !_TAB_DASH_SIMPLE_HIDE.has(c.key));
   const thStyle = "padding:7px 5px;font-weight:600;white-space:nowrap;border-bottom:2px solid #D1D5DB;font-size:.72rem;position:sticky;top:0;background:#F3F4F6;z-index:1";
 
   // 마감 액션바 — wrap 바깥에 sticky로 고정
@@ -12415,7 +12448,7 @@ function _renderFullTableView(wrap, filtered) {
     const onclick = sortable ? ` onclick="_toggleTabDashSort('${c.key}')"` : '';
     html += `<th style="${thStyle};text-align:${c.align}${c.width?';width:'+c.width:''};${sortCursor}"${onclick}>${c.label}${sortIcon}</th>`;
   });
-  html += `<th style="${thStyle};text-align:center">상세</th></tr></thead><tbody>`;
+  html += (_tabDashSimple ? "" : `<th style="${thStyle};text-align:center">상세</th>`) + `</tr></thead><tbody>`;
 
   filtered.forEach((t, idx) => {
     const st = t.is_closed ? "closed" : "active";
@@ -12436,7 +12469,7 @@ function _renderFullTableView(wrap, filtered) {
       const mw = c.width ? c.width : c.key==='campaign_name'?'140px':c.key==='tab_name'?'180px':'120px';
       html += `<td style="padding:5px;text-align:${c.align};max-width:${mw};${c.width?'width:'+c.width+';':''};overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="${escHtml(String(t[c.key]||''))}">${_cellVal(t, c)}</td>`;
     });
-    html += `<td style="padding:5px;text-align:center"><button onclick="openTabDashDetail(${idx})" style="background:none;border:none;color:#1D4ED8;cursor:pointer;font-size:.78rem"><i class="fas fa-expand-alt"></i></button></td>`;
+    if (!_tabDashSimple) html += `<td style="padding:5px;text-align:center"><button onclick="openTabDashDetail(${idx})" style="background:none;border:none;color:#1D4ED8;cursor:pointer;font-size:.78rem"><i class="fas fa-expand-alt"></i></button></td>`;
     html += `</tr>`;
   });
 
