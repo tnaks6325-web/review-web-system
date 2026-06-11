@@ -1674,8 +1674,23 @@ function _woProductLines(o) {
   }
   const clean = lines.filter(Boolean);
   if (!clean.length) return "";
-  if (clean.length === 1) return clean[0];               // 1개 → 인라인
-  return clean.map((l, i) => `${i + 1}.${l}`).join("\n"); // 2개+ → 번호+줄바꿈
+  // 링크유입이면 상품 순서대로 유입링크를 같은 줄에 붙임
+  let withUrl = clean;
+  if (o.inflow_type === "link") {
+    const urls = _woGuideUrls(o.inflow_guide);
+    withUrl = clean.map((l, i) => urls[i] ? `${l} ${urls[i]}` : l);
+  }
+  if (withUrl.length === 1) return withUrl[0];               // 1개 → 인라인
+  return withUrl.map((l, i) => `${i + 1}.${l}`).join("\n");  // 2개+ → 번호+줄바꿈
+}
+
+// inflow_guide 등에서 http(s) URL을 순서대로 추출
+function _woGuideUrls(raw) {
+  const urls = [];
+  const re = /https?:\/\/[^\s<]+/g;
+  let m;
+  while ((m = re.exec(String(raw == null ? "" : raw)))) urls.push(m[0]);
+  return urls;
 }
 
 // 작업오더 상세 본문 (카드/간편보기 공용) — 카톡 ▶형식
@@ -1702,7 +1717,9 @@ function _woDetailHtml(o) {
     _woSection("작업시트탭URL", o.work_sheet_url, urlR),
     rg ? _woSection("리뷰가이드", rg, txtR) : "",
     sn ? _woSection("특이사항", sn, txtR) : "",
-    guide ? _woSection(o.inflow_type === "link" ? "유입 링크/상세" : "유입가이드", guide, guideR) : "",
+    o.inflow_type === "link"
+      ? _woKv("유입방법", "링크유입")
+      : (guide ? _woSection("유입가이드", guide, guideR) : ""),
   ].join("");
 }
 
