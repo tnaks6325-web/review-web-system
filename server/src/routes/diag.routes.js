@@ -324,10 +324,19 @@ router.post('/add-campaign', authMiddleware, async (req, res, next) => {
     try {
       const meta = await getSpreadsheetMeta(finalSheetId);
       const systemTabs = ['세부목록', '검색인덱스', '인덱스마스터', '인덱스데이터', '마감', '상세목록', '탭설정', '설정'];
+      // ★ 아카이브된 탭은 재등록하지 않음 (이름 + gid 양쪽 매칭)
+      const { rows: archivedTabs } = await pool.query(
+        'SELECT tab_name, tab_gid FROM index_master_archive WHERE sheet_id = $1',
+        [finalSheetId]
+      );
+      const archivedSet = new Set(archivedTabs.map(r => r.tab_name));
+      const archivedGidSet = new Set(archivedTabs.filter(r => r.tab_gid).map(r => String(r.tab_gid)));
       for (const sheet of meta) {
         const tabName = sheet.properties.title;
         if (systemTabs.includes(tabName)) continue;
         const tabGid = String(sheet.properties.sheetId);
+        // 아카이브된(마감 후 정리된) 탭이면 스킵 — 대시보드 재등장 방지
+        if (archivedSet.has(tabName) || archivedGidSet.has(tabGid)) continue;
         const tabSheetUrl = `https://docs.google.com/spreadsheets/d/${finalSheetId}/edit#gid=${tabGid}`;
         await pool.query(
           `INSERT INTO tab_configs (sheet_id, tab_name, campaign_name, sheet_url, tab_gid)
@@ -451,12 +460,16 @@ router.get('/preview-tab', authMiddleware, async (req, res, next) => {
     }
 
     // DB에서 해당 시트의 모든 등록된 탭 조회 (차수 마감 정보 포함)
+    // ★ tab_gid 포함 — 탭 이름이 변경돼도 gid로 동일 탭을 인식
     const { rows: registeredTabs } = await pool.query(
-      'SELECT tab_name, is_closed, closed_rounds, archived_rounds FROM tab_configs WHERE sheet_id = $1',
+      'SELECT tab_name, tab_gid, is_closed, closed_rounds, archived_rounds FROM tab_configs WHERE sheet_id = $1',
       [sheetId]
     );
     const registeredSet = new Set(registeredTabs.map(r => r.tab_name));
     const closedInConfigSet = new Set(registeredTabs.filter(r => r.is_closed).map(r => r.tab_name));
+    // ★ gid 기반 매핑 (탭 이름 변경 대응)
+    const tcByName = new Map(registeredTabs.map(r => [r.tab_name, r]));
+    const tcByGid = new Map(registeredTabs.filter(r => r.tab_gid).map(r => [String(r.tab_gid), r]));
 
     // 차수 마감/아카이브 정보 맵
     const roundInfoMap = {};
@@ -468,12 +481,13 @@ router.get('/preview-tab', authMiddleware, async (req, res, next) => {
       }
     }
 
-    // ★ 마감/아카이브된 탭 조회 (index_master_archive)
+    // ★ 마감/아카이브된 탭 조회 (index_master_archive) — 이름 + gid 양쪽 매칭
     const { rows: archivedTabs } = await pool.query(
-      'SELECT tab_name FROM index_master_archive WHERE sheet_id = $1',
+      'SELECT tab_name, tab_gid FROM index_master_archive WHERE sheet_id = $1',
       [sheetId]
     );
     const archivedSet = new Set(archivedTabs.map(r => r.tab_name));
+    const archivedGidSet = new Set(archivedTabs.filter(r => r.tab_gid).map(r => String(r.tab_gid)));
 
     // 해당 시트의 인덱스 데이터 조회
     const { rows: indexRows } = await pool.query(
@@ -546,10 +560,14 @@ router.get('/preview-tab', authMiddleware, async (req, res, next) => {
     }
 
     // 각 탭에 등록 상태 추가 (등록됨 / 마감됨 / 신규)
+    // ★ 이름 우선, 없으면 gid로 매칭 (구글시트에서 탭 이름이 변경된 경우 대응)
     const tabsWithStatus = allTabs.map(tab => {
-      const isRegistered = registeredSet.has(tab.name);
-      const isArchived = archivedSet.has(tab.name);
-      const isClosed = closedInConfigSet.has(tab.name);
+      const tc = tcByName.get(tab.name) || tcByGid.get(String(tab.gid)) || null;
+      const isRegistered = !!tc;
+      const isClosed = !!(tc && tc.is_closed);
+      const isArchived = archivedSet.has(tab.name) || archivedGidSet.has(String(tab.gid));
+      // DB에 저장된 탭명 (이름이 바뀐 경우 인덱스/차수 조회는 DB 이름 기준)
+      const dbName = tc ? tc.tab_name : tab.name;
       let status = 'new'; // 기본: 신규
       if (isRegistered && !isClosed) status = 'registered'; // 활성 등록
       else if (isRegistered && isClosed) status = 'closed';  // 마감 (tab_configs에 남아있음)
@@ -558,8 +576,8 @@ router.get('/preview-tab', authMiddleware, async (req, res, next) => {
         ...tab,
         registered: isRegistered || isArchived,
         status,
-        indexData: indexMap[tab.name] || null,
-        rounds: roundDataMap[tab.name] || [],
+        indexData: indexMap[dbName] || indexMap[tab.name] || null,
+        rounds: roundDataMap[dbName] || roundDataMap[tab.name] || [],
       };
     });
 
@@ -640,22 +658,29 @@ router.post('/add-tab', authMiddleware, async (req, res, next) => {
       return res.json({ error: '등록 가능한 탭이 없습니다.' });
     }
 
-    // DB에서 이미 등록된 탭 목록 조회
+    // DB에서 이미 등록된 탭 목록 조회 (★ tab_gid 포함 — 탭 이름 변경 대응)
     const { rows: registeredTabs } = await pool.query(
-      'SELECT tab_name FROM tab_configs WHERE sheet_id = $1',
+      'SELECT tab_name, tab_gid FROM tab_configs WHERE sheet_id = $1',
       [sheetId]
     );
     const registeredSet = new Set(registeredTabs.map(r => r.tab_name));
+    const registeredGidSet = new Set(registeredTabs.filter(r => r.tab_gid).map(r => String(r.tab_gid)));
 
     // ★ 마감/아카이브된 탭도 조회 (재등록 방지)
     const { rows: archivedTabs } = await pool.query(
-      'SELECT tab_name FROM index_master_archive WHERE sheet_id = $1',
+      'SELECT tab_name, tab_gid FROM index_master_archive WHERE sheet_id = $1',
       [sheetId]
     );
     const archivedSet = new Set(archivedTabs.map(r => r.tab_name));
+    const archivedGidSet = new Set(archivedTabs.filter(r => r.tab_gid).map(r => String(r.tab_gid)));
 
     // 신규 탭만 필터링 (등록됨 + 마감됨 모두 제외)
-    const newTabs = allTabs.filter(t => !registeredSet.has(t.name) && !archivedSet.has(t.name));
+    // ★ 탭 이름(tab_name) + GID(tab_gid) 양쪽으로 매칭 — 구글시트에서 탭 이름이 변경돼도
+    //   gid는 유지되므로, 마감/아카이브된 탭이 "신규"로 오인되어 재등록되는 것을 방지
+    const newTabs = allTabs.filter(t =>
+      !registeredSet.has(t.name) && !registeredGidSet.has(String(t.gid)) &&
+      !archivedSet.has(t.name)   && !archivedGidSet.has(String(t.gid))
+    );
 
     if (newTabs.length === 0) {
       return res.json({

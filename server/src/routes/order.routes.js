@@ -80,6 +80,9 @@ async function _ensureTables() {
     await pool.query(`ALTER TABLE work_orders ADD COLUMN IF NOT EXISTS daily_count_text     TEXT DEFAULT ''`);
     await pool.query(`ALTER TABLE work_orders ADD COLUMN IF NOT EXISTS product_options_json TEXT DEFAULT ''`);
     await pool.query(`ALTER TABLE work_orders ADD COLUMN IF NOT EXISTS memo_log             TEXT DEFAULT ''`);
+    await pool.query(`ALTER TABLE work_orders ADD COLUMN IF NOT EXISTS deleted_at           TIMESTAMPTZ`);
+    await pool.query(`ALTER TABLE work_orders ADD COLUMN IF NOT EXISTS deleted_by           TEXT DEFAULT ''`);
+    await pool.query(`ALTER TABLE work_orders ADD COLUMN IF NOT EXISTS deleted_by_name      TEXT DEFAULT ''`);
     await pool.query(`CREATE INDEX IF NOT EXISTS idx_work_orders_status     ON work_orders(status)`);
     await pool.query(`CREATE INDEX IF NOT EXISTS idx_work_orders_created_by ON work_orders(created_by)`);
     await pool.query(`CREATE INDEX IF NOT EXISTS idx_work_orders_created_at ON work_orders(created_at DESC)`);
@@ -188,10 +191,10 @@ router.get('/intake/list', async (req, res, next) => {
     }
     const requester = (req.query.requester || '').toString().trim();
     const params = [];
-    let where = '';
+    let where = 'WHERE deleted_at IS NULL';
     if (requester) {
       params.push(requester);
-      where = 'WHERE created_by = $1';
+      where += ' AND created_by = $1';
     }
     const { rows } = await pool.query(
       `SELECT id, title, status, created_by, recruit_count, start_date,
@@ -202,6 +205,56 @@ router.get('/intake/list', async (req, res, next) => {
       params
     );
     res.json({ ok: true, data: rows });
+  } catch (err) {
+    next(err);
+  }
+});
+
+// ═══════════════════════════════════════════════════════════
+// 외부(인트라넷) 보낸 오더 삭제 — 공유 시크릿 인증 (JWT 불필요)
+// DELETE /api/order/intake/:id
+// 키: X-Intake-Key 헤더 또는 body.intakeKey / ?intakeKey=
+// body(선택): { deleted_by, deleted_by_name }
+// 권한(관리자/등록자 본인) 검증은 인트라넷 측에서 선행.
+// soft delete: 행은 보존(처리 이력·memo_log 유지), deleted_at 으로 목록 제외.
+// ═══════════════════════════════════════════════════════════
+router.delete('/intake/:id', async (req, res, next) => {
+  try {
+    await _ensureTables();
+    const expected = process.env.ORDER_INTAKE_KEY;
+    if (!expected) {
+      return res.status(503).json({ ok: false, error: 'intake 키가 서버에 설정되지 않았습니다. (ORDER_INTAKE_KEY)' });
+    }
+    const b = req.body || {};
+    const key = req.headers['x-intake-key'] || b.intakeKey || req.query.intakeKey;
+    if (!key || key !== expected) {
+      return res.status(401).json({ ok: false, error: '인증에 실패했습니다.' });
+    }
+    const id = String(req.params.id || '').trim();
+    if (!id) return res.status(400).json({ ok: false, error: 'id가 필요합니다.' });
+
+    const { rows: cur } = await pool.query(
+      `SELECT id, deleted_at FROM work_orders WHERE id = $1 LIMIT 1`, [id]
+    );
+    if (cur.length === 0) {
+      return res.status(404).json({ ok: false, error: '오더를 찾을 수 없습니다.' });
+    }
+    // 이미 삭제됨 → 멱등 처리 (재시도 안전)
+    if (cur[0].deleted_at) {
+      return res.json({ ok: true, id, alreadyDeleted: true });
+    }
+
+    await pool.query(
+      `UPDATE work_orders SET
+         deleted_at = NOW(),
+         deleted_by = $2,
+         deleted_by_name = $3,
+         updated_at = NOW()
+       WHERE id = $1`,
+      [id, (b.deleted_by || '').toString().trim(), (b.deleted_by_name || '').toString().trim()]
+    );
+    logger.info(`[order] 인트라넷 작업오더 삭제: ${id} (by ${b.deleted_by || '?'})`);
+    res.json({ ok: true, id });
   } catch (err) {
     next(err);
   }
@@ -322,7 +375,7 @@ router.get('/my', authMiddleware, async (req, res, next) => {
   try {
     await _ensureTables();
     const { rows } = await pool.query(
-      `SELECT * FROM work_orders WHERE created_by = $1 ORDER BY created_at DESC`,
+      `SELECT * FROM work_orders WHERE created_by = $1 AND deleted_at IS NULL ORDER BY created_at DESC`,
       [req.admin?.name || '']
     );
     res.json({ ok: true, data: rows });
@@ -340,7 +393,7 @@ router.put('/my/update', authMiddleware, async (req, res, next) => {
     if (!b.id) return res.status(400).json({ ok: false, error: 'id가 필요합니다.' });
 
     const { rows: cur } = await pool.query(
-      `SELECT created_by, status FROM work_orders WHERE id = $1 LIMIT 1`, [b.id]
+      `SELECT created_by, status FROM work_orders WHERE id = $1 AND deleted_at IS NULL LIMIT 1`, [b.id]
     );
     if (cur.length === 0) {
       return res.status(404).json({ ok: false, error: '오더를 찾을 수 없습니다.' });
@@ -399,7 +452,7 @@ router.get('/admin/new-count', authMiddleware, adminOrMasterMiddleware, async (r
   try {
     await _ensureTables();
     const { rows } = await pool.query(
-      `SELECT COUNT(*)::int AS count FROM work_orders WHERE status = 'submitted'`
+      `SELECT COUNT(*)::int AS count FROM work_orders WHERE status = 'submitted' AND deleted_at IS NULL`
     );
     res.json({ ok: true, count: rows[0] ? rows[0].count : 0 });
   } catch (err) {
@@ -412,9 +465,9 @@ router.get('/admin/list', authMiddleware, adminOrMasterMiddleware, async (req, r
   try {
     await _ensureTables();
     const { status } = req.query;
-    let q = `SELECT * FROM work_orders`;
+    let q = `SELECT * FROM work_orders WHERE deleted_at IS NULL`;
     const vals = [];
-    if (status) { q += ` WHERE status = $1`; vals.push(status); }
+    if (status) { q += ` AND status = $1`; vals.push(status); }
     q += ` ORDER BY created_at DESC`;
     const { rows } = await pool.query(q, vals);
     res.json({ ok: true, data: rows });
@@ -434,7 +487,7 @@ router.put('/admin/status', authMiddleware, adminOrMasterMiddleware, async (req,
     }
 
     const { rows: cur } = await pool.query(
-      `SELECT status, chat_room_url FROM work_orders WHERE id = $1 LIMIT 1`, [b.id]
+      `SELECT status, chat_room_url FROM work_orders WHERE id = $1 AND deleted_at IS NULL LIMIT 1`, [b.id]
     );
     if (cur.length === 0) {
       return res.status(404).json({ ok: false, error: '오더를 찾을 수 없습니다.' });
@@ -500,7 +553,7 @@ router.put('/admin/update', authMiddleware, adminOrMasterMiddleware, async (req,
          admin_memo = COALESCE(NULLIF($3, ''), admin_memo),
          linked_campaign_id = COALESCE(NULLIF($4, ''), linked_campaign_id),
          updated_at = NOW()
-       WHERE id = $1
+       WHERE id = $1 AND deleted_at IS NULL
        RETURNING *`,
       [
         b.id,
@@ -531,7 +584,7 @@ router.put('/admin/send-memo', authMiddleware, adminOrMasterMiddleware, async (r
 
     // 현재 오더 + 기존 로그 조회
     const { rows: cur } = await pool.query(
-      `SELECT id, title, status, created_by, memo_log FROM work_orders WHERE id = $1 LIMIT 1`, [b.id]
+      `SELECT id, title, status, created_by, memo_log FROM work_orders WHERE id = $1 AND deleted_at IS NULL LIMIT 1`, [b.id]
     );
     if (cur.length === 0) return res.status(404).json({ ok: false, error: '오더를 찾을 수 없습니다.' });
     const o = cur[0];
