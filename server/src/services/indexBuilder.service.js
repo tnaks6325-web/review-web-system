@@ -166,6 +166,32 @@ async function buildIndexSmart(forceFullRebuild = false) {
               'system-build', 'auto-clean-closed',
             ]);
             archivedMaster++;
+          } else {
+            // ★ index_master 행이 없는 경우에도 아카이브 마커를 반드시 남긴다.
+            //   (마커 없이 tab_configs만 삭제되면 마감 상태가 유실되어
+            //    [+작업시트추가] 시 마감 탭이 "신규"로 재등록되는 고질적 버그 발생)
+            const { rows: cntRows } = await pool.query(
+              `SELECT COUNT(*)::int AS total,
+                      COUNT(*) FILTER (WHERE is_submitted = TRUE)::int AS submitted
+                 FROM review_index WHERE sheet_id = $1 AND tab_name = $2`,
+              [t.sheet_id, t.tab_name]
+            );
+            await pool.query(`
+              INSERT INTO index_master_archive
+                (sheet_id, tab_name, tab_gid, campaign_name, row_count, submitted_count,
+                 built_at, status, archived_by, archive_reason)
+              VALUES ($1,$2,$3,$4,$5,$6,NOW(),'archived',$7,$8)
+              ON CONFLICT (sheet_id, tab_name) DO UPDATE SET
+                tab_gid = COALESCE(index_master_archive.tab_gid, EXCLUDED.tab_gid),
+                row_count = EXCLUDED.row_count, submitted_count = EXCLUDED.submitted_count,
+                archived_at = NOW(), archived_by = EXCLUDED.archived_by,
+                archive_reason = EXCLUDED.archive_reason
+            `, [
+              t.sheet_id, t.tab_name, t.tab_gid, t.campaign_name,
+              cntRows[0]?.total || 0, cntRows[0]?.submitted || 0,
+              'system-build', 'auto-clean-closed-nomaster',
+            ]);
+            archivedMaster++;
           }
           // review_index → review_index_archive
           const { rowCount: reviewCount } = await pool.query(`
