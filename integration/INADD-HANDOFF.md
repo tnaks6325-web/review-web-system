@@ -178,6 +178,52 @@
 
 ---
 
+## 1-G. 작업오더 삭제 (양방향 동기화)
+
+삭제는 어느 쪽에서 시작해도 양쪽 모두 사라지도록 동기화한다. (soft delete — 리뷰웹은 행을 보존하고 목록/조회에서만 제외)
+
+### ① 인트라넷 → 리뷰웹  (인트라넷에서 "보낸 오더" 삭제 시)
+
+- **호출**: `DELETE <리뷰웹>/api/order/intake/:id`
+- **인증**: 헤더 `X-Intake-Key: <ORDER_INTAKE_KEY>` (등록/조회와 동일 키)
+- **body(선택)**: `{ "deleted_by": "username", "deleted_by_name": "표시명" }`
+- **응답**: `{ "ok": true, "id": "wo_xxxx" }` · 이미 삭제됨 → `{ "ok": true, "id": "...", "alreadyDeleted": true }`(멱등) · 없는 id → `404`
+- 권한(관리자/등록자 본인) 확인은 **인트라넷 측에서 선행**.
+
+```bash
+curl -i -X DELETE "https://sublime-magic-production-790b.up.railway.app/api/order/intake/wo_xxxx" \
+  -H "X-Intake-Key: <키>" -H "Content-Type: application/json" \
+  -d '{"deleted_by":"aekim","deleted_by_name":"김AE"}'
+```
+
+### ② 리뷰웹 → 인트라넷  (리뷰웹 인박스에서 삭제 시)  ★ 인트라넷 구현 요청
+
+리뷰웹 관리자가 인박스에서 삭제하면, 리뷰웹이 인트라넷으로 삭제 이벤트를 push 한다.
+
+- **인트라넷이 만들 것**: `POST <인트라넷>/api/review-order-deleted` (경로 자유)
+- **인증**: 헤더 `X-Review-Key: <공유시크릿>` 검증 (메모 webhook과 동일 키)
+- **요청 body(JSON)** — 리뷰웹이 보내는 형식:
+  ```json
+  {
+    "event": "order_deleted",
+    "order_id": "wo_xxxx",
+    "title": "오더 제목",
+    "requester_name": "한가람",
+    "deleted_by": "관리자김",
+    "deleted_at": "2026-06-11T05:00:00.000Z"
+  }
+  ```
+  → 인트라넷은 `order_id`로 해당 "보낸 오더"를 삭제 처리.
+- **응답**: `200`이면 전송 성공으로 간주. 타임아웃 8초.
+
+리뷰웹 Railway env 1개 추가 필요(인트라넷 URL 수령 후, 키는 메모와 공유):
+- `INTRANET_ORDER_DELETE_WEBHOOK_URL = https://<인트라넷>/api/review-order-deleted`
+- `INTRANET_WEBHOOK_KEY = <공유시크릿>`  (1-F 메모 webhook과 동일)
+
+> webhook 미설정/실패 시에도 리뷰웹 쪽 삭제는 적용됨(인트라넷 전파만 누락). 이 경우 인트라넷은 `intake/list`로 폴링하면 해당 오더가 빠진 것을 확인 가능(폴백).
+
+---
+
 ## 2. 필드 스키마 (work_orders)
 
 | 필드 | 타입 | 필수 | 설명 |
@@ -303,12 +349,16 @@ curl -i "https://sublime-magic-production-790b.up.railway.app/api/order/intake/l
 - [ ] "보낸 오더" 목록 화면 — `intake/list` 조회 + `STATUS_LABEL` 뱃지
 - [ ] 인트라넷 메뉴에 진입 링크 추가
 - [ ] 배포 후 실제 제출 → 리뷰웹 관리자 인박스에 뜨는지 확인
+- [ ] "보낸 오더" 삭제 → `DELETE /api/order/intake/:id` 호출 (1-G ①)
+- [ ] 리뷰웹발 삭제 수신 엔드포인트 구현 — `POST /api/review-order-deleted` (1-G ②)
 
 ---
 
 ## 7. 참고: 리뷰웹 쪽 상태 (이미 완료)
 - `POST /api/order/intake`, `GET /api/order/intake/list` 배포·검증 완료
+- `DELETE /api/order/intake/:id`(인트라넷→리뷰웹 삭제) + `DELETE /api/order/admin/delete`(리뷰웹→인트라넷 삭제 push) 배포·검증 완료
+- 리뷰웹 인박스 [접수하기] → 작업시트탭(gid) 자동 등록 + 캠페인 탭 관리 즉시 반영
 - CORS에 `inadd-system.pages.dev` 허용 완료
 - Railway `ORDER_INTAKE_KEY` 설정 완료
 - 관리자 신규요청 팝업 배포 완료
-- 즉, **인트라넷 쪽 구현만 하면 연동 끝**입니다.
+- 즉, **인트라넷 쪽 구현만 하면 연동 끝**입니다. (리뷰웹발 삭제 전파를 쓰려면 `INTRANET_ORDER_DELETE_WEBHOOK_URL` 설정)
