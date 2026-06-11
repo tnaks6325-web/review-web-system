@@ -1604,20 +1604,43 @@ function _woKv(label, val) {
   return `<div style="font-size:.8rem;color:#1F2937;margin:2px 0;line-height:1.65;word-break:break-word"><span style="color:#6366F1;font-weight:700">▶</span> <b>${escHtml(label)}</b> : ${escHtml(String(val))}</div>`;
 }
 // 멀티라인 섹션:  ▶ 라벨 ◀  (다음 줄에 내용)
-function _woSection(label, contentHtml) {
-  if (!contentHtml) return "";
-  return `<div style="margin-top:6px"><div style="font-size:.8rem;color:#1F2937;font-weight:700;line-height:1.6"><span style="color:#6366F1">▶</span> ${escHtml(label)} <span style="color:#6366F1">◀</span></div><div style="font-size:.79rem;color:#374151;margin-top:2px;line-height:1.6">${contentHtml}</div></div>`;
+// 멀티라인/단일라인 자동: 1줄이면 '▶ 라벨 : 값', 2줄+면 '▶ 라벨 :' 후 줄바꿈
+function _woSection(label, rawText, renderFn) {
+  const txt = (rawText == null ? "" : String(rawText)).replace(/\s+$/, "");
+  if (!txt.trim()) return "";
+  const multi = /\n/.test(txt.trim());
+  const inner = renderFn(txt);
+  const lab = `<span style="color:#6366F1;font-weight:700">▶</span> <b>${escHtml(label)}</b> :`;
+  if (!multi) {
+    return `<div style="font-size:.8rem;color:#1F2937;margin:2px 0;line-height:1.65;word-break:break-word">${lab} ${inner}</div>`;
+  }
+  return `<div style="margin-top:4px"><div style="font-size:.8rem;color:#1F2937;line-height:1.6">${lab}</div><div style="font-size:.79rem;color:#374151;margin-top:1px;line-height:1.6;word-break:break-word">${inner}</div></div>`;
 }
+
+// 유입가이드 본문 정리: "[유입가이드 첨부 이미지]" 헤더, "1. xxx.png (..저장됨)" 파일정보 라인 제거
+function _woCleanGuide(raw) {
+  if (!raw || !String(raw).trim()) return "";
+  return String(raw).split(/\r?\n/)
+    .filter(ln => !/^\s*\[유입가이드\s*첨부\s*이미지\]\s*$/.test(ln))
+    .filter(ln => !/^\s*\d+\.\s.*\(.*저장됨\)\s*$/.test(ln))
+    .join("\n")
+    .replace(/\n{2,}/g, "\n")
+    .replace(/^\n+|\n+$/g, "")
+    .trim();
+}
+
 // 작업오더 상세 본문 (카드/간편보기 공용) — 카톡 ▶형식
 function _woDetailHtml(o) {
   const cleaned = _woCleanProductOption(o.product_option, o.product_url);
+  const guide = _woCleanGuide(o.inflow_guide);
   const rg = _woPickSections(o.review_guide, ["리뷰등록 가이드", "리뷰가이드", "리뷰 가이드"]);
   const sn = _woPickSections(o.special_notes, ["특이사항"]);
-  const wrap = t => `<div style="white-space:pre-wrap;word-break:break-word">${_woLinkify(t)}</div>`;
+  const txtR = t => _woLinkify(t).replace(/\n/g, "<br>");   // 텍스트(줄바꿈 보존)
+  const urlR = t => _woLinkHtml(t);                          // 단일 URL
+  const guideR = t => _woGuideHtml(t);                       // 가이드(이미지 임베드)
   return [
     _woKv("담당AE", o.created_by),
-    _woSection("상품·옵션", cleaned ? wrap(cleaned) : ""),
-    _woKv("총 상품구입비", o.pay_amount ? Number(o.pay_amount).toLocaleString() + "원" : ""),
+    _woSection("상품·옵션", cleaned, txtR),
     _woKv("모집인원", o.recruit_count ? Number(o.recruit_count).toLocaleString() + "명" : ""),
     _woKv("일일진행건수", o.daily_count_text || o.daily_count),
     _woKv("구매시간대", o.purchase_time),
@@ -1626,12 +1649,11 @@ function _woDetailHtml(o) {
     _woKv("택배대행", o.courier_proxy ? "예" : ""),
     _woKv("리뷰유형", o.review_type),
     _woKv("물건비", o.goods_cost_type),
-    _woSection("상품확인용URL", _woLinkHtml(o.product_url)),
-    _woSection("작업시트탭URL", _woLinkHtml(o.work_sheet_url)),
-    (o.inflow_guide && String(o.inflow_guide).trim())
-      ? _woSection(o.inflow_type === "link" ? "유입 링크/상세" : "유입가이드", _woGuideHtml(o.inflow_guide)) : "",
-    rg ? _woSection("리뷰가이드", wrap(rg)) : "",
-    sn ? _woSection("특이사항", wrap(sn)) : "",
+    _woSection("상품확인용URL", o.product_url, urlR),
+    _woSection("작업시트탭URL", o.work_sheet_url, urlR),
+    rg ? _woSection("리뷰가이드", rg, txtR) : "",
+    sn ? _woSection("특이사항", sn, txtR) : "",
+    guide ? _woSection(o.inflow_type === "link" ? "유입 링크/상세" : "유입가이드", guide, guideR) : "",
   ].join("");
 }
 
