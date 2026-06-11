@@ -160,7 +160,7 @@ async function buildIndexSmart(forceFullRebuild = false) {
                 archived_at = NOW(), archived_by = EXCLUDED.archived_by,
                 archive_reason = EXCLUDED.archive_reason
             `, [
-              mr.sheet_id, mr.tab_name, mr.tab_gid, mr.campaign_name,
+              mr.sheet_id, mr.tab_name, mr.tab_gid || t.tab_gid, mr.campaign_name,
               mr.row_count, mr.submitted_count, mr.last_date, mr.checksum,
               mr.built_at, mr.skip_reason, mr.error_msg, mr.sheet_modified_at,
               'system-build', 'auto-clean-closed',
