@@ -1629,9 +1629,58 @@ function _woCleanGuide(raw) {
     .trim();
 }
 
+// 상품·옵션을 "상품명 - 결제금액" (옵션 있으면 옵션별) 한 줄로 압축
+//  1개 상품·옵션 → 인라인,  2개 이상 → 번호 매겨 줄바꿈
+function _woProductLines(o) {
+  const lines = [];
+  // 1) 구조화 JSON 우선
+  let arr = null;
+  try { const p = JSON.parse(o.product_options_json || "[]"); if (Array.isArray(p) && p.length) arr = p; } catch (_) {}
+  if (arr) {
+    for (const prod of arr) {
+      const name = (prod.name || "").trim();
+      const opts = Array.isArray(prod.options) ? prod.options : [];
+      if (opts.length) {
+        for (const op of opts) {
+          const lab = (op.label || "").trim();
+          const pay = Number(op.pay) || 0;
+          lines.push(`${name}${lab ? " " + lab : ""}${pay ? " - 결제금액 " + pay.toLocaleString() + "원" : ""}`.trim());
+        }
+      } else {
+        const pay = Number(prod.base && prod.base.pay) || 0;
+        lines.push(`${name}${pay ? " - 결제금액 " + pay.toLocaleString() + "원" : ""}`.trim());
+      }
+    }
+  } else {
+    // 2) product_option 텍스트 파싱: "1. 상품명" + "- [옵션] / 결제금액 N원"
+    const cleaned = _woCleanProductOption(o.product_option, o.product_url);
+    if (!cleaned) return "";
+    let curName = "", curHadOpt = false;
+    const flushNameOnly = () => { if (curName && !curHadOpt) lines.push(curName); };
+    for (const raw of cleaned.split(/\r?\n/)) {
+      const t = raw.trim();
+      if (!t) continue;
+      const mName = t.match(/^\d+\.\s*(.+)$/);            // "1. 멀티비타민"
+      if (mName) { flushNameOnly(); curName = mName[1].trim(); curHadOpt = false; continue; }
+      const opt = t.replace(/^[-•]\s*/, "");              // "옵션 없음 / 결제금액 26,900원"
+      const payM = opt.match(/결제금액\s*([\d,]+)\s*원/);
+      const pay = payM ? payM[1] : "";
+      let optLabel = opt.split("/")[0].trim();
+      if (/^옵션\s*없음$/.test(optLabel)) optLabel = "";   // "옵션 없음" 생략
+      lines.push(`${curName}${optLabel ? " " + optLabel : ""}${pay ? " - 결제금액 " + pay + "원" : ""}`.trim());
+      curHadOpt = true;
+    }
+    flushNameOnly();
+  }
+  const clean = lines.filter(Boolean);
+  if (!clean.length) return "";
+  if (clean.length === 1) return clean[0];               // 1개 → 인라인
+  return clean.map((l, i) => `${i + 1}.${l}`).join("\n"); // 2개+ → 번호+줄바꿈
+}
+
 // 작업오더 상세 본문 (카드/간편보기 공용) — 카톡 ▶형식
 function _woDetailHtml(o) {
-  const cleaned = _woCleanProductOption(o.product_option, o.product_url);
+  const prodText = _woProductLines(o);
   const guide = _woCleanGuide(o.inflow_guide);
   const rg = _woPickSections(o.review_guide, ["리뷰등록 가이드", "리뷰가이드", "리뷰 가이드"]);
   const sn = _woPickSections(o.special_notes, ["특이사항"]);
@@ -1640,7 +1689,7 @@ function _woDetailHtml(o) {
   const guideR = t => _woGuideHtml(t);                       // 가이드(이미지 임베드)
   return [
     _woKv("담당AE", o.created_by),
-    _woSection("상품·옵션", cleaned, txtR),
+    _woSection("상품·옵션", prodText, txtR),
     _woKv("모집인원", o.recruit_count ? Number(o.recruit_count).toLocaleString() + "명" : ""),
     _woKv("일일진행건수", o.daily_count_text || o.daily_count),
     _woKv("구매시간대", o.purchase_time),
