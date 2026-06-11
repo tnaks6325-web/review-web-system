@@ -95,6 +95,25 @@
 }
 ```
 
+> 목록은 **요약 필드만** 내려줍니다(상품/리뷰/유입가이드 등 상세 제외). 과거 오더의 상세 복원이 필요하면 아래 1-B' 단건 상세 조회를 사용하세요.
+
+### 1-B'. 보낸 오더 단건 상세 — `GET /api/order/intake/:id`
+
+- 경로: `GET /api/order/intake/{order_id}`  (예: `/api/order/intake/wo_390629c0cc5e`)
+- 인증: 헤더 `X-Intake-Key` 또는 `?intakeKey=<KEY>`
+- 반환: 해당 오더의 **전체 필드**(2번 스키마 전체 + `memo_log`, `deleted_at` 등). 상품/옵션·리뷰가이드·유입가이드·특이사항까지 복원 가능.
+- 삭제(soft delete)된 오더도 **복원 목적상 반환**하며 `deleted_at` 으로 상태 식별. 없는 id → `404`.
+
+```bash
+curl -i "https://sublime-magic-production-790b.up.railway.app/api/order/intake/wo_xxxx" \
+  -H "X-Intake-Key: <키>"
+```
+```json
+{ "ok": true, "data": { "id":"wo_xxxx", "title":"...", "product_option":"...", "product_options_json":"...",
+  "review_guide":"...", "inflow_type":"guide", "inflow_guide":"...<img ...>", "special_notes":"...",
+  "pay_amount":9900, "recruit_count":15, "status":"reviewing", "deleted_at":null, "...": "전체 필드" } }
+```
+
 ### 1-C. 유입가이드 이미지 업로드 — `POST /api/order/guide-image`
 
 유입가이드 이미지를 **인트라넷·리뷰웹 공용 전용 Drive 폴더에 "비공개"로 저장**하고, **리뷰웹 프록시 URL**을 받습니다. Drive 파일은 공개되지 않고(anyone 링크 X), 리뷰웹 서버가 자기 자격증명으로 꺼내 스트리밍합니다.

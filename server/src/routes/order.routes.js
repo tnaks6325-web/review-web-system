@@ -211,6 +211,38 @@ router.get('/intake/list', async (req, res, next) => {
 });
 
 // ═══════════════════════════════════════════════════════════
+// 외부(인트라넷) 보낸 오더 상세 조회 — 공유 시크릿 인증 (JWT 불필요)
+// GET /api/order/intake/:id  → 단건 전체 필드 반환 (상세 복원용)
+// 키: X-Intake-Key 헤더 또는 ?intakeKey=
+// ※ list 는 일부 필드만 내려주므로, 상품/리뷰/유입가이드 등 전체 상세는 이 경로로 조회.
+//   삭제된(soft delete) 오더도 복원 목적상 반환하며 deleted_at 으로 상태 식별 가능.
+// ※ 라우트 순서: '/intake/list' 가 위에서 먼저 매칭되므로 'list' 와 충돌 없음 (id는 wo_*).
+// ═══════════════════════════════════════════════════════════
+router.get('/intake/:id', async (req, res, next) => {
+  try {
+    await _ensureTables();
+    const expected = process.env.ORDER_INTAKE_KEY;
+    if (!expected) {
+      return res.status(503).json({ ok: false, error: 'intake 키가 서버에 설정되지 않았습니다. (ORDER_INTAKE_KEY)' });
+    }
+    const key = req.headers['x-intake-key'] || req.query.intakeKey;
+    if (!key || key !== expected) {
+      return res.status(401).json({ ok: false, error: '인증에 실패했습니다.' });
+    }
+    const id = String(req.params.id || '').trim();
+    if (!id) return res.status(400).json({ ok: false, error: 'id가 필요합니다.' });
+
+    const { rows } = await pool.query('SELECT * FROM work_orders WHERE id = $1 LIMIT 1', [id]);
+    if (rows.length === 0) {
+      return res.status(404).json({ ok: false, error: '오더를 찾을 수 없습니다.' });
+    }
+    res.json({ ok: true, data: rows[0] });
+  } catch (err) {
+    next(err);
+  }
+});
+
+// ═══════════════════════════════════════════════════════════
 // 외부(인트라넷) 보낸 오더 삭제 — 공유 시크릿 인증 (JWT 불필요)
 // DELETE /api/order/intake/:id
 // 키: X-Intake-Key 헤더 또는 body.intakeKey / ?intakeKey=
