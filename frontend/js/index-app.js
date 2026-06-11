@@ -1329,21 +1329,7 @@ function _renderDashOrderCard(o) {
       ${o.start_date ? `<span><b style="color:#6B7280">시작</b> ${escHtml(String(o.start_date).substring(0, 10))}</span>` : ""}
     </div>
     <div id="dashDetail_${o.id}" style="display:none;margin-top:8px;border-top:1px dashed #E5E7EB;padding-top:8px">
-      ${_woField("담당AE", o.created_by)}
-      ${_woMultiField("상품·옵션", _woCleanProductOption(o.product_option, o.product_url))}
-      ${_woField("작업시트탭URL", o.work_sheet_url, true)}
-      ${_woField("상품확인용URL", o.product_url, true)}
-      ${_woField("총 상품구입비", o.pay_amount ? Number(o.pay_amount).toLocaleString() + "원" : "")}
-      ${_woField("모집인원", o.recruit_count ? Number(o.recruit_count).toLocaleString() + "명" : "")}
-      ${_woField("일일진행", o.daily_count_text || o.daily_count)}
-      ${_woField("구매시간대", o.purchase_time)}
-      ${_woField("유입방식", _INFLOW_LABEL[o.inflow_type] || o.inflow_keyword || "")}
-      ${_woField("배송유형", o.delivery_type)}
-      ${_woField("리뷰유형", o.review_type)}
-      ${_woField("물건비", o.goods_cost_type)}
-      ${(o.inflow_guide && String(o.inflow_guide).trim()) ? `<div style="margin-top:6px;font-size:.76rem;color:#374151"><b style="color:#6B7280">${o.inflow_type === "link" ? "유입 링크/상세" : "유입가이드"}:</b><div style="margin-top:4px;border:1px solid #E5E7EB;border-radius:8px;padding:8px;background:#F9FAFB">${_woGuideHtml(o.inflow_guide)}</div></div>` : ""}
-      ${(() => { const t = _woPickSections(o.review_guide, ["리뷰등록 가이드", "리뷰가이드", "리뷰 가이드"]); return t ? `<div style="margin-top:4px;font-size:.76rem;color:#374151"><b style="color:#6B7280">리뷰가이드:</b><div style="white-space:pre-wrap;word-break:break-word;margin-top:2px;line-height:1.5">${_woLinkify(t)}</div></div>` : ""; })()}
-      ${(() => { const t = _woPickSections(o.special_notes, ["특이사항"]); return t ? `<div style="margin-top:4px;font-size:.76rem;color:#374151"><b style="color:#6B7280">특이사항:</b><div style="white-space:pre-wrap;word-break:break-word;margin-top:2px;line-height:1.5">${_woLinkify(t)}</div></div>` : ""; })()}
+      ${_woDetailHtml(o)}
     </div>
   </div>`;
 }
@@ -1604,6 +1590,51 @@ function _woPickSections(raw, keepLabels) {
   return out.join("\n\n").trim();
 }
 
+// ── 카톡 ▶형식 렌더 (팀채팅방 게시 가독성) ──
+function _woLinkHtml(url) {
+  const u = (url == null) ? "" : String(url).trim();
+  if (!u) return "";
+  return /^https?:\/\//i.test(u)
+    ? `<a href="${escHtml(u)}" target="_blank" rel="noopener noreferrer" style="color:#4F46E5;word-break:break-all">${escHtml(u)}</a>`
+    : escHtml(u);
+}
+// 한 줄 항목:  ▶ 라벨 : 값
+function _woKv(label, val) {
+  if (val == null || val === "") return "";
+  return `<div style="font-size:.8rem;color:#1F2937;margin:2px 0;line-height:1.65;word-break:break-word"><span style="color:#6366F1;font-weight:700">▶</span> <b>${escHtml(label)}</b> : ${escHtml(String(val))}</div>`;
+}
+// 멀티라인 섹션:  ▶ 라벨 ◀  (다음 줄에 내용)
+function _woSection(label, contentHtml) {
+  if (!contentHtml) return "";
+  return `<div style="margin-top:6px"><div style="font-size:.8rem;color:#1F2937;font-weight:700;line-height:1.6"><span style="color:#6366F1">▶</span> ${escHtml(label)} <span style="color:#6366F1">◀</span></div><div style="font-size:.79rem;color:#374151;margin-top:2px;line-height:1.6">${contentHtml}</div></div>`;
+}
+// 작업오더 상세 본문 (카드/간편보기 공용) — 카톡 ▶형식
+function _woDetailHtml(o) {
+  const cleaned = _woCleanProductOption(o.product_option, o.product_url);
+  const rg = _woPickSections(o.review_guide, ["리뷰등록 가이드", "리뷰가이드", "리뷰 가이드"]);
+  const sn = _woPickSections(o.special_notes, ["특이사항"]);
+  const wrap = t => `<div style="white-space:pre-wrap;word-break:break-word">${_woLinkify(t)}</div>`;
+  return [
+    _woKv("담당AE", o.created_by),
+    _woSection("상품·옵션", cleaned ? wrap(cleaned) : ""),
+    _woKv("총 상품구입비", o.pay_amount ? Number(o.pay_amount).toLocaleString() + "원" : ""),
+    _woKv("모집인원", o.recruit_count ? Number(o.recruit_count).toLocaleString() + "명" : ""),
+    _woKv("일일진행건수", o.daily_count_text || o.daily_count),
+    _woKv("구매시간대", o.purchase_time),
+    _woKv("유입방식", _INFLOW_LABEL[o.inflow_type] || o.inflow_keyword || ""),
+    _woKv("배송유형", o.delivery_type),
+    _woKv("택배대행", o.courier_proxy ? "예" : ""),
+    _woKv("리뷰유형", o.review_type),
+    _woKv("물건비", o.goods_cost_type),
+    _woSection("상품확인용URL", _woLinkHtml(o.product_url)),
+    _woSection("작업시트탭URL", _woLinkHtml(o.work_sheet_url)),
+    (o.inflow_guide && String(o.inflow_guide).trim())
+      ? _woSection(o.inflow_type === "link" ? "유입 링크/상세" : "유입가이드", _woGuideHtml(o.inflow_guide)) : "",
+    rg ? _woSection("리뷰가이드", wrap(rg)) : "",
+    sn ? _woSection("특이사항", wrap(sn)) : "",
+  ].join("");
+}
+
 function _renderWorkOrderCard(o) {
   const st = o.status || "submitted";
   const [bg, fg] = WO_COLORS[st] || ["#F3F4F6","#374151"];
@@ -1633,24 +1664,7 @@ function _renderWorkOrderCard(o) {
       ${o.start_date ? `<span><b style="color:#6B7280">시작</b> ${escHtml(String(o.start_date).substring(0,10))}</span>`:""}
     </div>
     <div id="woDetail_${o.id}" style="display:none">
-      <div style="margin-top:10px">
-        ${_woField("담당AE", o.created_by)}
-        ${_woMultiField("상품·옵션", _woCleanProductOption(o.product_option, o.product_url))}
-        ${_woField("작업시트탭URL", o.work_sheet_url, true)}
-        ${_woField("상품확인용URL", o.product_url, true)}
-        ${_woField("총 상품구입비", o.pay_amount ? Number(o.pay_amount).toLocaleString()+"원" : "")}
-        ${_woField("모집인원", o.recruit_count ? Number(o.recruit_count).toLocaleString()+"명" : "")}
-        ${_woField("일일진행", o.daily_count_text || o.daily_count)}
-        ${_woField("구매시간대", o.purchase_time)}
-        ${_woField("유입방식", _INFLOW_LABEL[o.inflow_type] || o.inflow_keyword || "")}
-        ${_woField("배송유형", o.delivery_type)}
-        ${_woField("택배대행", o.courier_proxy ? "예" : "")}
-        ${_woField("리뷰유형", o.review_type)}
-        ${_woField("물건비", o.goods_cost_type)}
-      </div>
-      ${(o.inflow_guide && String(o.inflow_guide).trim()) ? `<div style="margin-top:6px;font-size:.76rem;color:#374151"><b style="color:#6B7280">${o.inflow_type === "link" ? "유입 링크/상세" : "유입가이드"}:</b><div style="margin-top:4px;border:1px solid #E5E7EB;border-radius:8px;padding:8px;background:#F9FAFB">${_woGuideHtml(o.inflow_guide)}</div></div>`:""}
-      ${(() => { const t = _woPickSections(o.review_guide, ["리뷰등록 가이드", "리뷰가이드", "리뷰 가이드"]); return t ? `<div style="margin-top:4px;font-size:.76rem;color:#374151"><b style="color:#6B7280">리뷰가이드:</b><div style="white-space:pre-wrap;word-break:break-word;margin-top:2px;line-height:1.5">${_woLinkify(t)}</div></div>` : ""; })()}
-      ${(() => { const t = _woPickSections(o.special_notes, ["특이사항"]); return t ? `<div style="margin-top:4px;font-size:.76rem;color:#374151"><b style="color:#6B7280">특이사항:</b><div style="white-space:pre-wrap;word-break:break-word;margin-top:2px;line-height:1.5">${_woLinkify(t)}</div></div>` : ""; })()}
+      <div style="margin-top:10px">${_woDetailHtml(o)}</div>
       <div id="woMemoLog_${o.id}" style="margin-top:6px">${_woMemoLogInner(o)}</div>
     </div>
     <div style="margin-top:10px;border-top:1px dashed #E5E7EB;padding-top:10px">
