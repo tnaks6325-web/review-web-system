@@ -1771,10 +1771,13 @@ function _renderWorkOrderCard(o) {
       </div>
       <!-- 액션 -->
       <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center">
-        <button onclick="woAccept('${o.id}')" style="font-size:.8rem;font-weight:700;border-radius:8px;padding:8px 16px;cursor:pointer;border:1px solid #93C5FD;background:#DBEAFE;color:#1E40AF"><i class="fas fa-inbox"></i> 접수하기</button>
+        ${['reviewing','await_chatroom','published','done'].includes(st)
+          ? `<button disabled style="font-size:.8rem;font-weight:700;border-radius:8px;padding:8px 16px;cursor:default;border:1px solid #6EE7B7;background:#ECFDF5;color:#065F46"><i class="fas fa-check-circle"></i> 접수됨</button>`
+          : `<button id="woAcceptBtn_${o.id}" onclick="woAccept('${o.id}')" style="font-size:.8rem;font-weight:700;border-radius:8px;padding:8px 16px;cursor:pointer;border:1px solid #93C5FD;background:#DBEAFE;color:#1E40AF"><i class="fas fa-inbox"></i> 접수하기</button>`}
         ${o.linked_campaign_id
           ? `<button onclick="woViewCampaign('${escHtml(o.linked_campaign_id)}')" style="font-size:.8rem;font-weight:700;background:#D1FAE5;color:#065F46;border:1px solid #6EE7B7;border-radius:8px;padding:8px 16px;cursor:pointer"><i class="fas fa-link"></i> 연결된 공고 보기</button>`
           : `<button onclick="woCreateCampaignGuarded('${o.id}')" style="font-size:.8rem;font-weight:700;background:#EDE9FE;color:#5B21B6;border:1px solid #C4B5FD;border-radius:8px;padding:8px 16px;cursor:pointer"><i class="fas fa-bullhorn"></i> 모집공고생성</button>`}
+        <button onclick="woDelete('${o.id}')" title="작업오더 삭제 (인트라넷에서도 삭제됨)" style="font-size:.8rem;font-weight:700;background:#FEF2F2;color:#B91C1C;border:1px solid #FECACA;border-radius:8px;padding:8px 16px;cursor:pointer;margin-left:auto"><i class="fas fa-trash-alt"></i> 삭제</button>
       </div>
     </div>
   </div>`;
@@ -1859,11 +1862,75 @@ async function woSendMemo(id) {
 }
 
 // 접수하기 (제출됨 → 접수됨)
+// ★ 업무 연계: 작업시트탭URL(gid 필수)을 [+작업시트추가]로 자동 등록 →
+//   캠페인 탭 관리에 활성 탭으로 즉시 반영 → 상태를 '접수됨'으로 전이
 async function woAccept(id) {
+  const o = (_woCache || []).find(x => x.id === id);
+  const url = ((o && o.work_sheet_url) || "").trim();
+
+  // 1) 작업시트탭URL + gid 검증 (gid 없으면 특정 탭을 지정할 수 없어 자동 등록 불가)
+  if (!url) {
+    woNotice("작업시트탭URL이 없습니다.\nAE에게 gid가 포함된 탭 주소를 요청한 뒤 다시 접수해주세요.");
+    return;
+  }
+  if (!/[#?&]gid=\d+/.test(url)) {
+    woNotice("작업시트탭URL에 gid가 없습니다.\n특정 탭 주소(…/edit#gid=숫자)로 등록되어야 캠페인 탭 관리에 자동 반영됩니다.\n\n현재 URL:\n" + url);
+    return;
+  }
+
+  const btn = document.getElementById("woAcceptBtn_" + id);
+  if (btn) { btn.disabled = true; btn.innerHTML = '<i class="fas fa-spinner fa-spin"></i> 접수 처리중...'; }
   try {
+    // 2) 작업시트 탭 자동 등록 + 인덱스 빌드 (gid 모드 add-tab)
+    const reg = await gasGet({ action: "addTab", url }, 60000);
+    if (!reg || !reg.ok) {
+      showToast("탭 등록 실패: " + ((reg && reg.error) || "알 수 없는 오류"), true);
+      if (btn) { btn.disabled = false; btn.innerHTML = '<i class="fas fa-inbox"></i> 접수하기'; }
+      return;
+    }
+
+    // 3) 상태 전이: 접수됨(reviewing)
     const r = await gasGet({ action: "orderAdminStatus", id, status: "reviewing" });
-    if (r && r.ok) { showToast("접수되었습니다."); loadWorkOrders(); }
-    else showToast((r && r.error) || "접수 처리 실패", true);
+    if (!(r && r.ok)) {
+      showToast((r && r.error) || "접수 상태 변경 실패 (탭은 등록됨)", true);
+      if (btn) { btn.disabled = false; btn.innerHTML = '<i class="fas fa-inbox"></i> 접수하기'; }
+      return;
+    }
+
+    // 4) 결과 안내 (등록된 탭 수에 따라)
+    if (reg.addedTabCount > 0) {
+      const names = reg.addedTabs ? reg.addedTabs.join(", ") : (reg.tabName || "");
+      showToast(`✅ 접수 완료 — 캠페인 탭 관리에 추가됨: ${names}`);
+    } else if (reg.message) {
+      showToast(`✅ 접수 완료 — ${reg.message}`);
+    } else {
+      showToast("✅ 접수 완료 — 캠페인 탭 관리에 반영되었습니다.");
+    }
+
+    // 5) 인박스 + 캠페인 탭 관리 대시보드 동시 갱신 (업무 연계성)
+    loadWorkOrders();
+    try { if (typeof loadTabDashboard === "function") loadTabDashboard(); } catch (_) {}
+  } catch (e) {
+    showToast("오류: " + e.message, true);
+    if (btn) { btn.disabled = false; btn.innerHTML = '<i class="fas fa-inbox"></i> 접수하기'; }
+  }
+}
+
+// 작업오더 삭제 (리뷰웹 인박스 → 인트라넷에서도 삭제)
+async function woDelete(id) {
+  const o = (_woCache || []).find(x => x.id === id);
+  const title = (o && o.title) || id;
+  if (!confirm(`작업오더 "${title}" 을(를) 삭제할까요?\n\n인트라넷의 '보낸 오더'에서도 함께 삭제됩니다. (되돌릴 수 없음)`)) return;
+  try {
+    const r = await gasGet({ action: "orderAdminDelete", id });
+    if (r && r.ok) {
+      if (r.intranetDeleted) showToast("삭제되었습니다. (인트라넷에도 반영됨)");
+      else showToast("삭제됨 · 인트라넷 미전파(" + (r.deliverError || "webhook 미설정") + ")", true);
+      loadWorkOrders();
+      try { _refreshWorkOrderBadge(false); } catch (_) {}
+    } else {
+      showToast((r && r.error) || "삭제 실패", true);
+    }
   } catch (e) { showToast("오류: " + e.message, true); }
 }
 

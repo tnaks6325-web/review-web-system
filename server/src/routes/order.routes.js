@@ -635,4 +635,65 @@ router.put('/admin/send-memo', authMiddleware, adminOrMasterMiddleware, async (r
   }
 });
 
+// DELETE /api/order/admin/delete — 관리자 작업오더 삭제 (soft) + 인트라넷 동기 삭제 push
+// body: { id }
+// 리뷰웹 인박스에서 삭제 → soft delete(이력 보존) → 인트라넷으로 삭제 이벤트 전파(best-effort)
+// 필요 env: INTRANET_ORDER_DELETE_WEBHOOK_URL (인트라넷 수신 URL), INTRANET_WEBHOOK_KEY (공유 시크릿)
+router.delete('/admin/delete', authMiddleware, adminOrMasterMiddleware, async (req, res, next) => {
+  try {
+    await _ensureTables();
+    const b = req.body || {};
+    const id = String(b.id || '').trim();
+    if (!id) return res.status(400).json({ ok: false, error: 'id가 필요합니다.' });
+
+    const { rows: cur } = await pool.query(
+      `SELECT id, title, created_by, deleted_at FROM work_orders WHERE id = $1 LIMIT 1`, [id]
+    );
+    if (cur.length === 0) return res.status(404).json({ ok: false, error: '오더를 찾을 수 없습니다.' });
+    const o = cur[0];
+    const deletedBy = req.admin?.name || '';
+
+    // soft delete (이미 삭제된 경우 멱등)
+    if (!o.deleted_at) {
+      await pool.query(
+        `UPDATE work_orders SET deleted_at = NOW(), deleted_by = $2, deleted_by_name = $2, updated_at = NOW() WHERE id = $1`,
+        [id, deletedBy]
+      );
+    }
+
+    // 인트라넷으로 삭제 전파 (비차단: 실패해도 리뷰웹 삭제는 유지)
+    let delivered = false, deliverError = null;
+    const hook = process.env.INTRANET_ORDER_DELETE_WEBHOOK_URL;
+    if (hook) {
+      try {
+        const ctrl = new AbortController();
+        const timer = setTimeout(() => ctrl.abort(), 8000);
+        const resp = await fetch(hook, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json', 'X-Review-Key': process.env.INTRANET_WEBHOOK_KEY || '' },
+          body: JSON.stringify({
+            event: 'order_deleted',
+            order_id: o.id, title: o.title, requester_name: o.created_by,
+            deleted_by: deletedBy, deleted_at: new Date().toISOString(),
+          }),
+          signal: ctrl.signal,
+        });
+        clearTimeout(timer);
+        delivered = resp.ok;
+        if (!resp.ok) deliverError = 'HTTP ' + resp.status;
+      } catch (e) {
+        deliverError = e.message;
+        logger.warn(`[order] 인트라넷 삭제 webhook 실패: ${e.message}`);
+      }
+    } else {
+      deliverError = 'webhook 미설정';
+    }
+
+    logger.info(`[order] 관리자 작업오더 삭제: ${id} (by ${deletedBy}), 인트라넷 전파=${delivered}`);
+    res.json({ ok: true, id, intranetDeleted: delivered, deliverError });
+  } catch (err) {
+    next(err);
+  }
+});
+
 module.exports = router;
