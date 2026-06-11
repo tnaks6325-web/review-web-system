@@ -669,7 +669,7 @@
             <option value="active">활성</option>
             <option value="closed">마감</option>
           </select>
-          <select id="tabDashManagerFilter" onchange="renderTabDashTable()" style="padding:5px 8px;border:1px solid #D1D5DB;border-radius:8px;font-size:.78rem">
+          <select id="tabDashManagerFilter" onchange="renderTabDashTable()" style="display:none">
             <option value="">전체 담당자</option>
           </select>
           <select id="tabDashCampaignFilter" onchange="renderTabDashTable()" style="padding:5px 8px;border:1px solid #D1D5DB;border-radius:8px;font-size:.78rem;max-width:250px">
@@ -691,6 +691,12 @@
           <div id="tabDashColBody" style="display:none;margin-top:6px;padding:8px 10px;background:#F9FAFB;border-radius:8px;border:1px solid #E5E7EB">
             <div id="tabDashColCheckboxes" style="display:flex;flex-wrap:wrap;gap:4px 10px;font-size:.72rem"></div>
           </div>
+        </div>
+
+        <!-- 담당자 탭 + 간단/펼쳐 보기 토글 (표 헤더 상단) -->
+        <div style="display:flex;align-items:center;justify-content:space-between;gap:10px;margin-bottom:8px;flex-wrap:wrap">
+          <div id="tabDashManagerTabs" style="display:flex;gap:6px;flex-wrap:wrap"></div>
+          <button id="tabDashViewToggle" onclick="_toggleTabDashSimple()" style="font-size:.74rem;font-weight:700;background:#EEF2FF;color:#3730A3;border:1px solid #C7D2FE;border-radius:7px;padding:5px 12px;cursor:pointer;white-space:nowrap"><i class="fas fa-compress-alt"></i> 간단히보기</button>
         </div>
 
         <!-- 테이블 컨테이너 -->
