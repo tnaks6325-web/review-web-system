@@ -1167,6 +1167,23 @@ function renderResults(results) {
     return;
   }
 
+  // ★ C안: 같은 번호로 여러 이름(본계정+타계정)의 참여가 함께 조회되는 경우 안내
+  //   (예: 같은 폰번호로 김정곤/정영민 2개 계정 → 두 이름 참여가 한 번에 표시됨)
+  const _distinctNames = [...new Set(
+    pending.map(i => (i.displayName || "").trim()).filter(Boolean)
+  )];
+  if (_distinctNames.length > 1) {
+    const banner = document.createElement("div");
+    banner.className = "result-multiname-notice";
+    banner.style.cssText = "display:flex;align-items:flex-start;gap:8px;margin:0 0 10px;padding:10px 12px;background:#EFF6FF;border:1px solid #BFDBFE;border-radius:10px;font-size:.8rem;color:#1E40AF;line-height:1.5";
+    banner.innerHTML =
+      '<i class="fas fa-users" style="margin-top:2px;flex-shrink:0"></i>' +
+      '<div>같은 전화번호로 <b>' + _distinctNames.length + '개 이름</b>의 참여가 함께 조회됩니다 — ' +
+      _distinctNames.map(n => '<b>' + escHtml(n) + '</b>').join(", ") +
+      '<br><span style="color:#3B82F6">본인 이름의 작업을 확인 후 제출하세요.</span></div>';
+    list.appendChild(banner);
+  }
+
   // ★ 다건 그룹핑: 【같은 이름 + 같은 인덱스(sheetId+tabName)】 기준으로만 묶기
   //   → 서로 다른 캠페인(탭)에 같은 이름이 있어도 절대 합치지 않음
   const groups = new Map(); // key: "displayName|sheetId|tabName" → items[]

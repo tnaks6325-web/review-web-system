@@ -25,17 +25,34 @@ async function registerReviewer({ name, phone, consent, sheetId }) {
     `, [name.trim(), cleanPhone, true]);
 
     if (result.rowCount === 0) {
-      // 중복 전화번호
+      // 번호 중복 — 기존 레코드 조회
       const { rows } = await pool.query(
-        'SELECT name FROM reviewers WHERE phone = $1', [cleanPhone]
+        'SELECT name, sub_accounts FROM reviewers WHERE phone = $1', [cleanPhone]
       );
-      const existingName = rows[0]?.name || '';
-      return {
-        ok: false,
-        isDuplicate: true,
-        existingName,
-        error: `이미 등록된 전화번호입니다. 기존 이름: ${existingName}`,
-      };
+      const existing = rows[0] || {};
+      const existingName = (existing.name || '').trim();
+      const newName = name.trim();
+
+      // 같은 이름으로 재등록 → 진짜 중복 (이미 등록된 본인)
+      if (existingName === newName) {
+        return { ok: true, name: newName, phone: cleanPhone, alreadyRegistered: true };
+      }
+
+      // ★ A안: 같은 번호 + 다른 이름 → 타계정(sub_account)으로 추가하고 등록 허용
+      //   (각 이름이 자기 이름으로 로그인 + 같은 번호 참여 조회 가능)
+      let subs = existing.sub_accounts;
+      if (typeof subs === 'string') { try { subs = JSON.parse(subs); } catch (_) { subs = []; } }
+      if (!Array.isArray(subs)) subs = [];
+      const p8 = cleanPhone.slice(-8);
+      const already = subs.some(s =>
+        (s.name || '').trim() === newName &&
+        (s.phone || '').replace(/[^0-9]/g, '').slice(-8) === p8
+      );
+      if (!already) {
+        subs.push({ name: newName, phone: cleanPhone });
+        await pool.query('UPDATE reviewers SET sub_accounts = $1 WHERE phone = $2', [JSON.stringify(subs), cleanPhone]);
+      }
+      return { ok: true, name: newName, phone: cleanPhone, addedAsSubAccount: true, mainName: existingName };
     }
 
     return { ok: true, name: name.trim(), phone: cleanPhone };
@@ -87,8 +104,9 @@ async function verifyReviewer(name, phone8) {
         const subPhone = (sub.phone || '').replace(/[^0-9]/g, '');
         const subPhone8 = subPhone.length >= 8 ? subPhone.slice(-8) : subPhone;
         if (subName === n && subPhone8 === p8) {
-          // 타계정 매칭 → 메인 계정 정보 반환
-          return { ok: true, name: row.name, phone: row.phone, subAccountLogin: true };
+          // ★ A안: 같은 번호·다른 이름 — 입력한 이름(타계정)을 그대로 신원으로 유지
+          //   (기존: 주계정 이름으로 접혀 "정영민"→"김정곤"이 되던 문제 해결)
+          return { ok: true, name: subName, phone: sub.phone || row.phone, mainName: row.name, subAccountLogin: true };
         }
       }
     } catch (_) {
@@ -107,8 +125,8 @@ async function verifyReviewer(name, phone8) {
         const subPhone = (sub.phone || '').replace(/[^0-9]/g, '');
         const subPhone8 = subPhone.length >= 8 ? subPhone.slice(-8) : subPhone;
         if (subPhone8 === p8) {
-          // 번호는 타계정에 존재하지만 이름이 다름
-          return { ok: false, error: '중복된 번호입니다. 타계정과 본계정 번호를 다르게 참여해주세요. (관리자에게 양식수정요청)', field: 'phone' };
+          // ★ A안: 같은 번호 자체는 허용. 다만 입력 이름이 등록된 이름이 아니면 가입/타계정추가 유도
+          return { ok: false, error: '이 번호로 등록된 이름이 아닙니다. 이름을 확인하시거나, 등록 탭에서 같은 번호로 추가 등록해주세요.', field: 'name' };
         }
       }
     } catch (_) { continue; }
