@@ -66,15 +66,14 @@ async function verifyReviewer(name, phone8) {
   }
 
   // 2) 타계정(sub_accounts) 매칭 — 메인 계정으로 자동 로그인
-  // ★ sub_accounts 가 배열이 아닌 스칼라(잘못 저장된 데이터)인 경우
-  //   jsonb_array_length 가 "cannot get array length of a scalar" 에러를 던지므로
-  //   jsonb_typeof 로 배열일 때만 길이를 평가 (CASE 는 평가 순서 보장)
+  // ★ sub_accounts 가 배열이 아닌 문자열 스칼라(이중 인코딩으로 잘못 저장된 데이터)인
+  //   행도 매칭 대상에 포함한다 — 아래 JS 루프가 문자열이면 JSON.parse로 복구한다.
+  //   (jsonb_array_length 는 스칼라에서 에러를 던지므로 jsonb_typeof 로 분기)
   const { rows: subRows } = await pool.query(
     `SELECT name, phone, sub_accounts FROM reviewers
      WHERE sub_accounts IS NOT NULL
-       AND CASE WHEN jsonb_typeof(sub_accounts) = 'array'
-                THEN jsonb_array_length(sub_accounts)
-                ELSE 0 END > 0`
+       AND ( (jsonb_typeof(sub_accounts) = 'array' AND jsonb_array_length(sub_accounts) > 0)
+             OR jsonb_typeof(sub_accounts) = 'string' )`
   );
 
   for (const row of subRows) {
@@ -201,9 +200,19 @@ async function handleReviewerProfile({ action, phone8, name, subAccounts, income
   }
 
   if (action === 'saveSubAccounts') {
+    // ★ 프론트는 subAccounts를 JSON.stringify한 "문자열"로 보낸다.
+    //   문자열을 그대로 다시 stringify하면 JSONB에 배열이 아닌 문자열 스칼라로
+    //   저장돼 verifyReviewer의 타계정 매칭(jsonb_typeof='array' 필터)이 깨진다.
+    //   → 문자열이면 파싱하고, 배열만 허용해 정확히 한 번만 인코딩한다.
+    let subs = subAccounts;
+    if (typeof subs === 'string') {
+      try { subs = JSON.parse(subs); }
+      catch (_) { return { ok: false, error: '타계정 데이터 형식이 올바르지 않습니다.' }; }
+    }
+    if (!Array.isArray(subs)) subs = [];
     await pool.query(
-      'UPDATE reviewers SET sub_accounts = $1 WHERE phone8 = $2',
-      [JSON.stringify(subAccounts || []), p8]
+      'UPDATE reviewers SET sub_accounts = $1::jsonb WHERE phone8 = $2',
+      [JSON.stringify(subs), p8]
     );
     return { ok: true };
   }
