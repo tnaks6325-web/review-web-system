@@ -1,0 +1,104 @@
+# ─────────────────────────────────────────────────────────────
+# DB 외부 독립 백업: Railway Postgres → pg_dump → Cloudflare R2
+#
+# 목적: 백업을 Railway(AWS) 바깥에 보관하여, Railway 계정/인프라
+#       장애 시에도 복구 가능하게 함. (BACKUP_RESTORE_GUIDE.md 참고)
+#
+# 필요한 GitHub Secrets:
+#   BACKUP_DATABASE_URL  Railway Postgres "Public Networking" 접속 URL
+#                        (*.proxy.rlwy.net — internal 주소는 러너에서 접근 불가)
+#   R2_ACCOUNT_ID        Cloudflare 계정 ID
+#   R2_ACCESS_KEY_ID     R2 API 토큰 Access Key
+#   R2_SECRET_ACCESS_KEY R2 API 토큰 Secret Key
+#   R2_BUCKET            R2 버킷 이름
+# ─────────────────────────────────────────────────────────────
+name: DB Backup (pg_dump → R2)
+
+on:
+  schedule:
+    # 매일 03:00 KST (18:00 UTC) — 04:00 KST 전체 재빌드 CRON 이전 시점
+    - cron: '0 18 * * *'
+  workflow_dispatch:
+
+concurrency:
+  group: db-backup
+  cancel-in-progress: false
+
+env:
+  R2_ENDPOINT: https://${{ secrets.R2_ACCOUNT_ID }}.r2.cloudflarestorage.com
+  R2_PREFIX: db
+  RETENTION_DAYS: '30'
+  # aws-cli 신규 체크섬 기본값이 R2와 충돌하는 사례 방지
+  AWS_REQUEST_CHECKSUM_CALCULATION: when_required
+  AWS_RESPONSE_CHECKSUM_VALIDATION: when_required
+
+jobs:
+  backup:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - name: Install PostgreSQL 17 client
+        run: |
+          sudo install -d /usr/share/postgresql-common/pgdg
+          sudo curl -fsSL -o /usr/share/postgresql-common/pgdg/apt.postgresql.org.asc \
+            https://www.postgresql.org/media/keys/ACCC4CF8.asc
+          echo "deb [signed-by=/usr/share/postgresql-common/pgdg/apt.postgresql.org.asc] https://apt.postgresql.org/pub/repos/apt $(lsb_release -cs)-pgdg main" \
+            | sudo tee /etc/apt/sources.list.d/pgdg.list
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq postgresql-client-17
+
+      - name: pg_dump
+        env:
+          DATABASE_URL: ${{ secrets.BACKUP_DATABASE_URL }}
+        run: |
+          if [ -z "$DATABASE_URL" ]; then
+            echo "::error::BACKUP_DATABASE_URL secret이 설정되지 않았습니다"; exit 1
+          fi
+          STAMP=$(TZ=Asia/Seoul date +%Y%m%d-%H%M%S)
+          FILE="review-system-${STAMP}.dump"
+          echo "FILE=$FILE" >> "$GITHUB_ENV"
+          pg_dump "$DATABASE_URL" \
+            --format=custom \
+            --compress=zstd \
+            --no-owner \
+            --no-privileges \
+            --file="$FILE"
+
+      - name: Verify dump integrity
+        run: |
+          # 아카이브 목차가 읽히는지 + 최소 크기 확인 (빈/깨진 덤프 차단)
+          pg_restore --list "$FILE" > /dev/null
+          SIZE=$(stat -c%s "$FILE")
+          echo "dump: $FILE (${SIZE} bytes)"
+          if [ "$SIZE" -lt 10240 ]; then
+            echo "::error::덤프 크기가 비정상적으로 작습니다 (${SIZE}B)"; exit 1
+          fi
+
+      - name: Upload to R2
+        env:
+          AWS_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
+          AWS_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
+          AWS_DEFAULT_REGION: auto
+        run: |
+          aws s3 cp "$FILE" "s3://${{ secrets.R2_BUCKET }}/${R2_PREFIX}/${FILE}" \
+            --endpoint-url "$R2_ENDPOINT"
+          echo "uploaded: ${R2_PREFIX}/${FILE}"
+
+      - name: Prune backups older than ${{ env.RETENTION_DAYS }} days
+        env:
+          AWS_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
+          AWS_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
+          AWS_DEFAULT_REGION: auto
+        run: |
+          CUTOFF=$(date -u -d "${RETENTION_DAYS} days ago" +%Y-%m-%dT%H:%M:%S)
+          aws s3api list-objects-v2 \
+            --bucket "${{ secrets.R2_BUCKET }}" \
+            --prefix "${R2_PREFIX}/" \
+            --endpoint-url "$R2_ENDPOINT" \
+            --query "Contents[?LastModified<'${CUTOFF}'].Key" \
+            --output text | tr '\t' '\n' | while read -r KEY; do
+              if [ -n "$KEY" ] && [ "$KEY" != "None" ]; then
+                aws s3 rm "s3://${{ secrets.R2_BUCKET }}/${KEY}" --endpoint-url "$R2_ENDPOINT"
+                echo "pruned: $KEY"
+              fi
+          done

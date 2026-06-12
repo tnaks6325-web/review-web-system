@@ -1,0 +1,101 @@
+# ─────────────────────────────────────────────────────────────
+# DB 복구 리허설: R2의 최신 백업 → 임시 Postgres에 실제 복원 → 검증
+#
+# 목적: "검증 안 된 백업은 백업이 아니다" — 백업 파일이 실제로
+#       복구되는지 매월 자동으로 확인. (BACKUP_RESTORE_GUIDE.md 참고)
+#
+# 필요한 GitHub Secrets: db-backup.yml과 동일한 R2_* 4개
+# (BACKUP_DATABASE_URL은 불필요 — 운영 DB에는 일절 접속하지 않음)
+# ─────────────────────────────────────────────────────────────
+name: DB Restore Rehearsal (R2 → 임시 Postgres)
+
+on:
+  schedule:
+    # 매월 1일 04:00 KST (전월 백업이 복구 가능한지 검증)
+    - cron: '0 19 1 * *'
+  workflow_dispatch:
+
+env:
+  R2_ENDPOINT: https://${{ secrets.R2_ACCOUNT_ID }}.r2.cloudflarestorage.com
+  R2_PREFIX: db
+  AWS_REQUEST_CHECKSUM_CALCULATION: when_required
+  AWS_RESPONSE_CHECKSUM_VALIDATION: when_required
+
+jobs:
+  restore-test:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    services:
+      postgres:
+        image: postgres:17
+        env:
+          POSTGRES_USER: restore_test
+          POSTGRES_PASSWORD: restore_test
+          POSTGRES_DB: restore_test
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U restore_test"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+    steps:
+      - name: Install PostgreSQL 17 client
+        run: |
+          sudo install -d /usr/share/postgresql-common/pgdg
+          sudo curl -fsSL -o /usr/share/postgresql-common/pgdg/apt.postgresql.org.asc \
+            https://www.postgresql.org/media/keys/ACCC4CF8.asc
+          echo "deb [signed-by=/usr/share/postgresql-common/pgdg/apt.postgresql.org.asc] https://apt.postgresql.org/pub/repos/apt $(lsb_release -cs)-pgdg main" \
+            | sudo tee /etc/apt/sources.list.d/pgdg.list
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq postgresql-client-17
+
+      - name: Download latest backup from R2
+        env:
+          AWS_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
+          AWS_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
+          AWS_DEFAULT_REGION: auto
+        run: |
+          KEY=$(aws s3api list-objects-v2 \
+            --bucket "${{ secrets.R2_BUCKET }}" \
+            --prefix "${R2_PREFIX}/" \
+            --endpoint-url "$R2_ENDPOINT" \
+            --query 'sort_by(Contents, &LastModified)[-1].Key' \
+            --output text)
+          if [ -z "$KEY" ] || [ "$KEY" = "None" ]; then
+            echo "::error::R2에 백업 파일이 없습니다 (prefix: ${R2_PREFIX}/)"; exit 1
+          fi
+          echo "restoring from: $KEY"
+          aws s3 cp "s3://${{ secrets.R2_BUCKET }}/${KEY}" latest.dump \
+            --endpoint-url "$R2_ENDPOINT"
+
+      - name: Restore into temporary Postgres
+        env:
+          PGPASSWORD: restore_test
+        run: |
+          pg_restore \
+            --host localhost --port 5432 \
+            --username restore_test --dbname restore_test \
+            --no-owner --no-privileges \
+            --exit-on-error \
+            latest.dump
+
+      - name: Sanity check (핵심 테이블 존재 + 행 수)
+        env:
+          PGPASSWORD: restore_test
+        run: |
+          PSQL="psql -h localhost -p 5432 -U restore_test -d restore_test -tA"
+          TABLE_COUNT=$($PSQL -c "SELECT count(*) FROM information_schema.tables WHERE table_schema='public'")
+          echo "public 스키마 테이블 수: $TABLE_COUNT"
+          if [ "$TABLE_COUNT" -lt 10 ]; then
+            echo "::error::복원된 테이블이 너무 적습니다 ($TABLE_COUNT개)"; exit 1
+          fi
+          FAIL=0
+          for T in admin_users reviewers review_index tab_configs campaigns work_orders payment_records; do
+            if COUNT=$($PSQL -c "SELECT count(*) FROM $T" 2>/dev/null); then
+              echo "  $T: ${COUNT} rows"
+            else
+              echo "::error::핵심 테이블 누락: $T"; FAIL=1
+            fi
+          done
+          exit $FAIL
