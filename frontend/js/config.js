@@ -33,7 +33,7 @@ const DEFAULT_CONFIG = {
   SUBMITTED_VALUES: ["TRUE", "true", "1", "제출", "O", "o", "완료", "Y", "y"],
   MAX_FILE_SIZE: 10 * 1024 * 1024,
   ALLOWED_MIME: ["image/jpeg", "image/png", "image/gif", "image/webp"],
-  VERSION: "2.0.0"
+  VERSION: "2.22.0-participation-match"
 };
 
 const APP_CONFIG = (() => {
