@@ -121,43 +121,50 @@ async function searchByName(query, phone8) {
   let sql;
 
   if (q && p8.length === 8) {
-    // ── 이름 + phone8 하이브리드 검색 (동명이인 분리) ──
-    // ★ 방안3: phone8 기반 필터링 + 유사 매칭(오인식 구제)
-    //   1) 본인 + 타계정 phone8 정확 일치
-    //   2) phone8 앞4자리 또는 뒤4자리가 동일한 건 (1~2자리 오인식 구제)
-    //   3) phone8이 NULL인 건 (전화번호 없는 행도 포함)
+    // ── 이름 + phone8 하이브리드 검색 ──
+    // ★ P0: phone8(본인+타계정)이 일치하면 이름 불일치여도 "내 참여"로 통과시킨다.
+    //   (인애드명≠실명, 성 누락 "재관"↔"송재관", 수취인 플레이스홀더 등 이름칸이 지저분해도
+    //    전화번호가 맞으면 본인 건이므로 누락하지 않음. 이름은 점수 가산용으로만 사용)
+    // ★ P5: participation_links(제출 시점 확정 신원)도 단독 통과 키로 사용.
+    //   기존 동작(이름 일치 + 전화 근접/NULL)도 그대로 유지(하위 호환).
     const phoneList = await _getReviewerPhoneList(p8);
-    
+
     const nameParam = paramIdx++;
-    // phoneList를 배열 파라미터로 전달
-    const phoneListParam = paramIdx++;
-    // 기준 phone8 (앞4/뒤4 비교용)
-    const phonePrefixParam = paramIdx++;
-    const phoneSuffixParam = paramIdx++;
-    
+    const phoneListParam = paramIdx++;       // 본인+타계정 phone8 배열
+    const phonePrefixParam = paramIdx++;     // 앞4자리 (오인식 구제)
+    const phoneSuffixParam = paramIdx++;     // 뒤4자리 (오인식 구제)
+
     sql = `
       SELECT ${SELECT_FIELDS},
-             CASE 
-               WHEN ri.phone8 = ANY($${phoneListParam}) THEN 1.0
-               WHEN ri.phone8 IS NOT NULL AND (
-                 SUBSTRING(ri.phone8, 1, 4) = $${phonePrefixParam}
-                 OR SUBSTRING(ri.phone8, 5, 4) = $${phoneSuffixParam}
-               ) THEN 0.8
-               WHEN ri.phone8 IS NULL THEN 0.6
-               ELSE 0.0
+             CASE
+               WHEN ri.phone8 = ANY($${phoneListParam}) OR pl.phone8 = ANY($${phoneListParam}) THEN 1.0
+               WHEN (REPLACE(ri.reviewer_name, ' ', '') = $${nameParam}
+                     OR REPLACE(ri.recipient_name, ' ', '') = $${nameParam})
+                    AND ri.phone8 IS NOT NULL AND (
+                      SUBSTRING(ri.phone8, 1, 4) = $${phonePrefixParam}
+                      OR SUBSTRING(ri.phone8, 5, 4) = $${phoneSuffixParam}
+                    ) THEN 0.8
+               WHEN (REPLACE(ri.reviewer_name, ' ', '') = $${nameParam}
+                     OR REPLACE(ri.recipient_name, ' ', '') = $${nameParam}) THEN 0.6
+               ELSE 0.5
              END::float AS score
       FROM review_index ri
       LEFT JOIN tab_configs tc ON ri.sheet_id = tc.sheet_id AND ri.tab_name = tc.tab_name
+      LEFT JOIN participation_links pl
+        ON pl.sheet_id = ri.sheet_id AND pl.tab_name = ri.tab_name AND pl.row_index = ri.row_index
       WHERE ri.is_submitted = FALSE
         AND tc.sheet_id IS NOT NULL
-        AND (REPLACE(ri.reviewer_name, ' ', '') = $${nameParam}
-             OR REPLACE(ri.recipient_name, ' ', '') = $${nameParam})
         AND (
-          ri.phone8 = ANY($${phoneListParam})
-          OR ri.phone8 IS NULL
+          ri.phone8 = ANY($${phoneListParam})          -- P0: 연락처 phone8 단독 통과
+          OR pl.phone8 = ANY($${phoneListParam})        -- P5: 확정 신원 단독 통과
           OR (
-            SUBSTRING(ri.phone8, 1, 4) = $${phonePrefixParam}
-            OR SUBSTRING(ri.phone8, 5, 4) = $${phoneSuffixParam}
+            (REPLACE(ri.reviewer_name, ' ', '') = $${nameParam}
+             OR REPLACE(ri.recipient_name, ' ', '') = $${nameParam})
+            AND (
+              ri.phone8 IS NULL
+              OR SUBSTRING(ri.phone8, 1, 4) = $${phonePrefixParam}
+              OR SUBSTRING(ri.phone8, 5, 4) = $${phoneSuffixParam}
+            )
           )
         )
       ORDER BY score DESC, ri.start_date DESC NULLS LAST
@@ -166,18 +173,23 @@ async function searchByName(query, phone8) {
     params.push(q, phoneList, p8.substring(0, 4), p8.substring(4, 8));
 
   } else if (p8.length === 8) {
-    // ── phone8 단독 검색 (trigram 불필요) ──
+    // ── phone8 단독 검색 (이름 미입력) ──
+    // ★ P0/P5: 본인+타계정 phone8 또는 확정 신원(participation_links)으로 매칭
+    const phoneList = await _getReviewerPhoneList(p8);
+    const phoneListParam = paramIdx++;
     sql = `
       SELECT ${SELECT_FIELDS}
       FROM review_index ri
       LEFT JOIN tab_configs tc ON ri.sheet_id = tc.sheet_id AND ri.tab_name = tc.tab_name
+      LEFT JOIN participation_links pl
+        ON pl.sheet_id = ri.sheet_id AND pl.tab_name = ri.tab_name AND pl.row_index = ri.row_index
       WHERE ri.is_submitted = FALSE
         AND tc.sheet_id IS NOT NULL
-        AND ri.phone8 = $${paramIdx++}
+        AND (ri.phone8 = ANY($${phoneListParam}) OR pl.phone8 = ANY($${phoneListParam}))
       ORDER BY ri.start_date DESC NULLS LAST
       LIMIT 200
     `;
-    params.push(p8);
+    params.push(phoneList);
 
   } else {
     // ── 이름만 검색 (정확 일치) ──
@@ -291,29 +303,38 @@ async function searchByNameFallback(q, p8, SELECT_FIELDS) {
   let paramIdx = 1;
 
   if (q && p8.length === 8) {
+    // ★ P0/P5: phone8(연락처) 또는 확정 신원(pl) 일치 시 이름 불일치여도 통과
     const nameParam = paramIdx++;
     const phoneParam = paramIdx++;
     sql = `
       SELECT ${SELECT_FIELDS}
       FROM review_index ri
       LEFT JOIN tab_configs tc ON ri.sheet_id = tc.sheet_id AND ri.tab_name = tc.tab_name
+      LEFT JOIN participation_links pl
+        ON pl.sheet_id = ri.sheet_id AND pl.tab_name = ri.tab_name AND pl.row_index = ri.row_index
       WHERE ri.is_submitted = FALSE
         AND tc.sheet_id IS NOT NULL
-        AND (ri.reviewer_name ILIKE $${nameParam}
-             OR ri.recipient_name ILIKE $${nameParam})
-        AND ri.phone8 = $${phoneParam}
+        AND (
+          ri.phone8 = $${phoneParam}
+          OR pl.phone8 = $${phoneParam}
+          OR ri.reviewer_name ILIKE $${nameParam}
+          OR ri.recipient_name ILIKE $${nameParam}
+        )
       ORDER BY ri.start_date DESC NULLS LAST
       LIMIT 200
     `;
     params.push(`%${q}%`, p8);
   } else if (p8.length === 8) {
+    const phoneParam = paramIdx++;
     sql = `
       SELECT ${SELECT_FIELDS}
       FROM review_index ri
       LEFT JOIN tab_configs tc ON ri.sheet_id = tc.sheet_id AND ri.tab_name = tc.tab_name
+      LEFT JOIN participation_links pl
+        ON pl.sheet_id = ri.sheet_id AND pl.tab_name = ri.tab_name AND pl.row_index = ri.row_index
       WHERE ri.is_submitted = FALSE
         AND tc.sheet_id IS NOT NULL
-        AND ri.phone8 = $${paramIdx++}
+        AND (ri.phone8 = $${phoneParam} OR pl.phone8 = $${phoneParam})
       ORDER BY ri.start_date DESC NULLS LAST
       LIMIT 200
     `;
