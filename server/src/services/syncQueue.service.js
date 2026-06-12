@@ -13,6 +13,7 @@
 
 const pool = require('../db/pool');
 const { writeSheet, appendSheet, readSheet, batchUpdateSheet } = require('./sheets.service');
+const { recordParticipationLink } = require('./participation.service');
 const { logger } = require('../utils/logger');
 
 // ── 큐에 작업 추가 ──
@@ -171,7 +172,7 @@ async function _executeItem(item) {
     case 'order_append': {
       // ★ C1: 큐 재시도 시 항상 신선한 헤더를 읽음 (최대 50행에서 탐색)
       // ★ FIX: appendSheet 대신 빈 행 탐색 후 writeSheet (중간 빈 행 건너뜀 방지)
-      const { sheetId, tabName, orderData } = payload;
+      const { sheetId, tabName, orderData, loginPhone8, loginName } = payload;
       if (!sheetId || !tabName) throw new Error('payload 누락');
 
       // 전체 데이터 읽기 (최대 500행)
@@ -290,6 +291,14 @@ async function _executeItem(item) {
         }));
         await batchUpdateSheet(sheetId, batchData, 'RAW');
       }
+
+      // ★ P5: 큐 재시도 경로에서도 제출 리뷰어 신원을 확정 행에 기록
+      await recordParticipationLink({
+        sheetId, tabName, rowIndex: targetRow,
+        phone8: loginPhone8, phone: orderData && orderData.phone,
+        name: loginName || (orderData && orderData.orderer),
+        source: 'order_submit_queue',
+      });
       break;
     }
 

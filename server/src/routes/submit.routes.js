@@ -2,6 +2,7 @@ const express = require('express');
 const router = express.Router();
 const { writeSheet, readSheet, appendSheet, getSpreadsheetMeta, batchReadSheet, batchUpdateSheet } = require('../services/sheets.service');
 const { enqueue } = require('../services/syncQueue.service');
+const { recordParticipationLink } = require('../services/participation.service');
 const pool = require('../db/pool');
 const { logger } = require('../utils/logger');
 const { emitReviewSubmit, emitOrderSubmit } = require('../utils/sse');
@@ -908,6 +909,13 @@ router.post('/order', async (req, res, next) => {
           // 성공 시 캐시 무효화
           tabDataCache.delete(`${sheetId}||${tabName}`);
           logger.info(`[submit/order:bg] Sheets 쓰기 성공 (sheet=${sheetId}, tab=${tabName}, row=${targetRow})`);
+
+          // ★ P5: 제출 시점 리뷰어 신원을 확정 행에 못 박는다 (검증 phone8 우선)
+          await recordParticipationLink({
+            sheetId, tabName, rowIndex: targetRow,
+            phone8: loginPhone8, phone, name: loginName || orderer,
+            source: 'order_submit',
+          });
         })();
 
         // 15초 타임아웃 적용
@@ -923,6 +931,8 @@ router.post('/order', async (req, res, next) => {
           await enqueue('order_append', {
             sheetId, tabName, orderData,
             slotRowNumber: slotRowNumber || null,
+            // ★ P5: 큐 재시도 경로에서도 신원을 기록할 수 있도록 전달
+            loginPhone8: loginPhone8 || '', loginName: loginName || '',
           });
         } catch (queueErr) {
           logger.error(`[submit/order:bg] 큐 등록도 실패: ${queueErr.message}`);
