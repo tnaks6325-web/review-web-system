@@ -102,12 +102,62 @@ ALTER DEFAULT PRIVILEGES IN SCHEMA public GRANT SELECT ON SEQUENCES TO backup_re
 
 ---
 
-## 3. 한계와 후속 과제
+## 3. 업로드 파일 백업 (Google Drive → R2)
+
+사용자 업로드 이미지(구매캡처/리뷰)는 DB가 아니라 **Google Drive**에 저장된다
+(`drive.service.js`, OAuth refresh token으로 사용자 계정 스토리지 사용).
+Drive 폴더 실수 삭제·OAuth 토큰/계정 사고 시 유실되므로, DB와 동일하게
+**같은 R2 버킷의 `drive/` prefix**로 매일 독립 복사한다.
+
+| 워크플로우 | 파일 | 주기 | 방식 |
+|---|---|---|---|
+| Drive Files Backup | `.github/workflows/drive-backup.yml` | 매일 03:30 KST | rclone `copy`(additive) — Drive 삭제분도 R2엔 보존 |
+
+### 3-1. 추가 설정 (1회) — GitHub Secrets 4개
+
+DB 백업용 R2 시크릿(`R2_*`)은 그대로 재사용하고, Drive 접근용으로 아래를 추가한다.
+세 OAuth 값은 **Railway 환경변수에 이미 있는 동일 값**을 그대로 복사:
+
+| Secret | 값 |
+|---|---|
+| `DRIVE_OAUTH_CLIENT_ID` | Railway의 `DRIVE_OAUTH_CLIENT_ID` |
+| `DRIVE_OAUTH_CLIENT_SECRET` | Railway의 `DRIVE_OAUTH_CLIENT_SECRET` |
+| `DRIVE_OAUTH_REFRESH_TOKEN` | Railway의 `DRIVE_OAUTH_REFRESH_TOKEN` |
+| `DRIVE_BACKUP_FOLDER_ID` | 백업할 루트 폴더 ID (아래 참고) |
+
+**`DRIVE_BACKUP_FOLDER_ID` 정하는 법**: 운영에서 `AI_REVIEW_FOLDER_ID`가 설정돼
+있으면 그 값을, 비어 있으면 `DRIVE_ROOT_FOLDER_ID`(`1afBtCDYs-A-LenIKhsiKJWvkuFmUYV8d`)를
+쓴다. Google Drive에서 그 루트 폴더를 열었을 때 URL의 `/folders/` 뒤 문자열이 폴더 ID다.
+(두 루트가 모두 쓰이고 있다면 둘을 모두 포함하는 공통 상위 폴더 ID를 지정.)
+
+### 3-2. 동작 확인
+
+Actions → **Drive Files Backup** → Run workflow → 성공 시 R2 버킷 `drive/` 아래에
+Drive와 동일한 폴더 구조로 파일이 복사된다. Summary 탭에 총 용량/파일 수가 찍힌다.
+
+### 3-3. 복구 방법
+
+특정 파일/폴더를 되돌릴 때 (rclone 설정은 워크플로우 env와 동일하게 구성):
+
+```bash
+# R2 → Drive 전체 복원
+rclone copy "r2:<버킷>/drive" gdrive:
+# 또는 로컬로 내려받기
+rclone copy "r2:<버킷>/drive" ./drive-restore
+```
+
+> 참고: DB 덤프와 달리 이미지 파일은 구조 검증이 불필요해 별도 복구 리허설
+> 워크플로우는 두지 않았다. 무결성은 rclone의 size/해시 비교로 충분.
+
+---
+
+## 4. 한계와 후속 과제
 
 - **RPO 최대 24시간**: 일일 백업이므로 마지막 덤프 이후 데이터는 유실된다.
   → Railway **PITR(Pro, 옵트인)** 을 함께 켤 것. 일상 사고(테이블 실수 삭제)는 PITR이 1차 수단,
   이 외부 백업은 Railway 자체가 무너졌을 때의 최후 수단. 보완재 관계.
-- **Google Drive 업로드 파일 미포함**: 사용자 업로드 파일은 Drive(OAuth 계정)에 있고
-  이 백업 범위 밖이다. 후속: rclone 등으로 Drive 폴더 → 같은 R2 버킷(`drive/` prefix) 주기 복사.
 - **복구 리허설은 자동화되어 있지만**, 실제 장애 대응(런북 2번)을 사람 손으로
   처음부터 끝까지 1회 수행해보는 것을 권장 — 소요 시간을 측정해 둘 것.
+- **Drive 백업은 단방향 additive**: 같은 경로 파일이 *수정*되면 R2 사본도 덮어쓴다
+  (리뷰 이미지는 write-once라 실무상 문제 없음). 버전 이력이 필요해지면
+  rclone `--backup-dir`로 세대 보관을 추가할 수 있다.

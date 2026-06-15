@@ -1,0 +1,100 @@
+# ─────────────────────────────────────────────────────────────
+# 업로드 파일 외부 백업: Google Drive → Cloudflare R2 (rclone)
+#
+# 목적: 사용자 업로드 이미지(구매캡처/리뷰)는 Google Drive에만 존재한다.
+#       Drive 폴더 실수 삭제·OAuth/계정 사고 시 유실되므로, DB와 동일하게
+#       Railway 바깥(R2)에 독립 사본을 둔다. (BACKUP_RESTORE_GUIDE.md 참고)
+#
+# 방식: rclone copy(additive) — Drive에서 지워진 파일도 R2 백업본은 보존.
+#       증분 복사라 2회차부터는 새/변경 파일만 전송.
+#
+# 필요한 GitHub Secrets:
+#   DRIVE_OAUTH_CLIENT_ID       Railway의 DRIVE_OAUTH_CLIENT_ID 와 동일
+#   DRIVE_OAUTH_CLIENT_SECRET   Railway의 DRIVE_OAUTH_CLIENT_SECRET 와 동일
+#   DRIVE_OAUTH_REFRESH_TOKEN   Railway의 DRIVE_OAUTH_REFRESH_TOKEN 와 동일
+#   DRIVE_BACKUP_FOLDER_ID      백업할 루트 폴더 ID
+#                               (운영에서 쓰는 AI_REVIEW_FOLDER_ID, 없으면
+#                                DRIVE_ROOT_FOLDER_ID = 1afBtCDYs-A-LenIKhsiKJWvkuFmUYV8d)
+#   R2_ACCOUNT_ID / R2_ACCESS_KEY_ID / R2_SECRET_ACCESS_KEY / R2_BUCKET
+#                               (DB 백업과 동일한 R2 시크릿 재사용)
+# ─────────────────────────────────────────────────────────────
+name: Drive Files Backup (Google Drive → R2)
+
+on:
+  schedule:
+    # 매일 03:30 KST (18:30 UTC) — DB 백업(03:00) 직후
+    - cron: '30 18 * * *'
+  workflow_dispatch:
+
+concurrency:
+  group: drive-backup
+  cancel-in-progress: false
+
+env:
+  # ── Google Drive remote (읽기 전용 백업) ──
+  RCLONE_CONFIG_GDRIVE_TYPE: drive
+  RCLONE_CONFIG_GDRIVE_CLIENT_ID: ${{ secrets.DRIVE_OAUTH_CLIENT_ID }}
+  RCLONE_CONFIG_GDRIVE_CLIENT_SECRET: ${{ secrets.DRIVE_OAUTH_CLIENT_SECRET }}
+  RCLONE_CONFIG_GDRIVE_SCOPE: drive
+  RCLONE_CONFIG_GDRIVE_ROOT_FOLDER_ID: ${{ secrets.DRIVE_BACKUP_FOLDER_ID }}
+  # ── Cloudflare R2 remote (S3 호환) ──
+  RCLONE_CONFIG_R2_TYPE: s3
+  RCLONE_CONFIG_R2_PROVIDER: Cloudflare
+  RCLONE_CONFIG_R2_REGION: auto
+  RCLONE_CONFIG_R2_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
+  RCLONE_CONFIG_R2_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
+  RCLONE_CONFIG_R2_ENDPOINT: https://${{ secrets.R2_ACCOUNT_ID }}.r2.cloudflarestorage.com
+  RCLONE_CONFIG_R2_NO_CHECK_BUCKET: 'true'
+  RCLONE_CONFIG_R2_ACL: private
+
+jobs:
+  backup:
+    runs-on: ubuntu-latest
+    timeout-minutes: 120
+    steps:
+      - name: Install rclone
+        run: |
+          curl -fsSL https://rclone.org/install.sh | sudo bash
+          rclone version
+
+      - name: Build Drive OAuth token
+        env:
+          REFRESH_TOKEN: ${{ secrets.DRIVE_OAUTH_REFRESH_TOKEN }}
+        run: |
+          if [ -z "$REFRESH_TOKEN" ]; then
+            echo "::error::DRIVE_OAUTH_REFRESH_TOKEN secret이 설정되지 않았습니다"; exit 1
+          fi
+          # 만료시각을 과거로 둬서 rclone이 첫 호출에 refresh_token으로 즉시 갱신하게 함
+          TOKEN=$(printf '{"access_token":"","token_type":"Bearer","refresh_token":"%s","expiry":"2000-01-01T00:00:00Z"}' "$REFRESH_TOKEN")
+          echo "::add-mask::$TOKEN"
+          echo "RCLONE_CONFIG_GDRIVE_TOKEN=$TOKEN" >> "$GITHUB_ENV"
+
+      - name: Preflight (폴더 ID + Drive 접속 확인)
+        run: |
+          if [ -z "${RCLONE_CONFIG_GDRIVE_ROOT_FOLDER_ID}" ]; then
+            echo "::error::DRIVE_BACKUP_FOLDER_ID secret이 설정되지 않았습니다"; exit 1
+          fi
+          echo "── 백업 대상 Drive 폴더 현황 ──"
+          rclone size gdrive: --fast-list
+
+      - name: Copy Drive → R2 (additive)
+        run: |
+          rclone copy gdrive: "r2:${{ secrets.R2_BUCKET }}/drive" \
+            --fast-list \
+            --drive-skip-gdocs \
+            --transfers=8 \
+            --checkers=16 \
+            --retries=3 \
+            --low-level-retries=10 \
+            --stats=30s \
+            --stats-one-line
+
+      - name: Summary (R2에 보관 중인 총량)
+        if: always()
+        run: |
+          {
+            echo "### Drive 백업 결과 (R2: drive/)"
+            echo '```'
+            rclone size "r2:${{ secrets.R2_BUCKET }}/drive" 2>&1 || echo "size 조회 실패"
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
