@@ -11,6 +11,7 @@ const { getMetricsSummary, resetMetrics } = require('../middleware/metrics.middl
 const { isSentryEnabled } = require('../utils/sentry');
 const { addClient, getStatus: getSSEStatus, emitImageExtract, emitImageUpload } = require('../utils/sse');
 const { logger } = require('../utils/logger');
+const { logAbnormal } = require('../services/errorLog.service');
 const { parseTabRows, buildOneSheet } = require('../services/indexBuilder.service');
 
 // ═══════════════════════════════════════════════════════════
@@ -1249,6 +1250,10 @@ router.post('/image-extract', imageApiLimiter, async (req, res, next) => {
     res.json(result);
   } catch (err) {
     logger.error(`[image-extract] ${err.message}`);
+    logAbnormal({
+      flow: 'image_extract', step: 'gemini_call', source: 'external_api', error: err,
+      context: { path: req.path, method: 'POST' },
+    });
     res.json({
       ok: false,
       error: err.message || '이미지 분석 중 오류가 발생했습니다.',
@@ -1392,6 +1397,10 @@ router.post('/image-upload', imageApiLimiter, async (req, res, next) => {
     });
   } catch (err) {
     logger.error(`[image-upload] ${err.message}`);
+    logAbnormal({
+      flow: 'order_submit', step: 'image_upload', source: 'external_api', error: err,
+      context: { path: req.path, method: 'POST', tabName: req.body?.tabName, round: req.body?.round, sheetId: req.body?.sheetId },
+    });
     res.json({ ok: false, error: err.message || '이미지 업로드 중 오류가 발생했습니다.' });
   }
 });
@@ -1949,6 +1958,11 @@ router.post('/client-error', authMiddleware, async (req, res) => {
       source, lineno, colno, page,
       stack: (stack || '').substring(0, 500),
       ip: req.ip,
+    });
+    logAbnormal({
+      flow: 'client', source: 'client', severity: 'warn',
+      error: { message: message || 'client error', stack },
+      context: { page, source, lineno, colno, ip: req.ip, userAgent: (userAgent || req.headers['user-agent'] || '').substring(0, 120) },
     });
     res.json({ ok: true });
   } catch (err) {

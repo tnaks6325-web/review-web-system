@@ -591,6 +591,9 @@
         <button class="admin-tab-btn" data-tab="settings" onclick="switchAdminTab('settings')">
           <i class="fas fa-cog"></i> 설정 <span id="unrecogBadge" style="display:none;background:#EF4444;color:#fff;font-size:.65rem;padding:1px 5px;border-radius:8px;margin-left:4px;font-weight:700">0</span>
         </button>
+        <button class="admin-tab-btn" data-tab="errorlogs" onclick="switchAdminTab('errorlogs')">
+          <i class="fas fa-bug"></i> 이상로그 <span id="errorLogBadge" style="display:none;background:#EF4444;color:#fff;font-size:.65rem;padding:1px 5px;border-radius:8px;margin-left:4px;font-weight:700">0</span>
+        </button>
       </nav>
 
       <!-- 제출 현황 대시보드 -->
@@ -1258,6 +1261,47 @@
           <span style="color:var(--t3)">탭 전환 시 자동 로드</span>
         </div>
       </div><!-- /tab-settings -->
+
+      <!-- 이상로그(비정상 로그) 탭 -->
+      <div id="tab-errorlogs" class="admin-tab-pane" style="padding:16px">
+        <div class="admin-section-header">
+          <span style="font-size:.95rem;font-weight:700;color:var(--t1)">
+            <i class="fas fa-bug" style="color:#EF4444;margin-right:6px"></i>이상로그 (비정상 발생 내역)
+          </span>
+          <div style="display:flex;gap:6px;margin-left:auto">
+            <button class="btn-sm" onclick="loadErrorLogs()" style="font-size:.78rem">
+              <i class="fas fa-sync-alt"></i> 새로고침
+            </button>
+          </div>
+        </div>
+        <p style="font-size:.78rem;color:var(--t3);margin:8px 0 12px">
+          정상이 아닌 상황(에러·이상징후)만 모아 "어떤 기능 / 어떤 단계 / 어떤 종류 / 어디서" 발생했는지 한국어로 풀이합니다. 같은 유형은 발생 횟수로 묶입니다.
+        </p>
+        <div style="display:flex;gap:8px;margin-bottom:12px;align-items:center;flex-wrap:wrap">
+          <select id="errLogResolvedFilter" onchange="loadErrorLogs()" style="padding:5px 8px;border:1px solid #D1D5DB;border-radius:8px;font-size:.78rem">
+            <option value="false" selected>미해결</option>
+            <option value="true">해결됨</option>
+            <option value="all">전체</option>
+          </select>
+          <select id="errLogCategoryFilter" onchange="loadErrorLogs()" style="padding:5px 8px;border:1px solid #D1D5DB;border-radius:8px;font-size:.78rem">
+            <option value="">전체 종류</option>
+            <option value="timeout">로딩시간 초과</option>
+            <option value="quota">호출한도 초과</option>
+            <option value="network">네트워크</option>
+            <option value="auth">인증</option>
+            <option value="permission">권한</option>
+            <option value="validation">입력검증</option>
+            <option value="db">DB</option>
+            <option value="external_api">외부 API</option>
+            <option value="not_found">대상 없음</option>
+            <option value="unknown">알 수 없음</option>
+          </select>
+          <span id="errLogSummary" style="font-size:.76rem;color:var(--t3)"></span>
+        </div>
+        <div id="errorLogListWrap" style="font-size:.82rem;color:var(--t2)">
+          <span style="color:var(--t3)">탭 전환 시 자동 로드</span>
+        </div>
+      </div><!-- /tab-errorlogs -->
 
     </main>
   </div><!-- /screenAdmin -->

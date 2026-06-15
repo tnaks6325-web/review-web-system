@@ -2,6 +2,7 @@ const express = require('express');
 const router = express.Router();
 const { writeSheet, readSheet, appendSheet, getSpreadsheetMeta, batchReadSheet, batchUpdateSheet } = require('../services/sheets.service');
 const { enqueue } = require('../services/syncQueue.service');
+const { logAbnormal } = require('../services/errorLog.service');
 const { recordParticipationLink } = require('../services/participation.service');
 const pool = require('../db/pool');
 const { logger } = require('../utils/logger');
@@ -532,6 +533,10 @@ router.post('/review', async (req, res, next) => {
         await Promise.race([sheetsPromise, timeoutPromise]);
       } catch (bgErr) {
         logger.warn(`[submit/review:bg] Sheets 쓰기 실패 → 큐 등록: ${bgErr.message}`);
+        logAbnormal({
+          flow: 'review_submit', step: 'sheet_write', severity: 'warn', error: bgErr,
+          context: { sheetId, tabName, rowIndex, queued: true },
+        });
         try {
           await enqueue('review_submit', {
             sheetId,
@@ -543,6 +548,10 @@ router.post('/review', async (req, res, next) => {
           });
         } catch (queueErr) {
           logger.error(`[submit/review:bg] 큐 등록도 실패: ${queueErr.message}`);
+          logAbnormal({
+            flow: 'sync_queue', step: 'enqueue', severity: 'critical', error: queueErr,
+            context: { sheetId, tabName, type: 'review_submit' },
+          });
         }
       }
     });
@@ -927,6 +936,10 @@ router.post('/order', async (req, res, next) => {
       } catch (bgErr) {
         // Sheets 쓰기 실패/타임아웃 → 큐에 등록 (자동 재시도)
         logger.warn(`[submit/order:bg] Sheets 쓰기 실패 → 큐 등록: ${bgErr.message}`);
+        logAbnormal({
+          flow: 'order_submit', step: 'sheet_write', severity: 'warn', error: bgErr,
+          context: { sheetId, tabName, slotRowNumber: slotRowNumber || null, queued: true },
+        });
         try {
           await enqueue('order_append', {
             sheetId, tabName, orderData,
@@ -936,6 +949,10 @@ router.post('/order', async (req, res, next) => {
           });
         } catch (queueErr) {
           logger.error(`[submit/order:bg] 큐 등록도 실패: ${queueErr.message}`);
+          logAbnormal({
+            flow: 'sync_queue', step: 'enqueue', severity: 'critical', error: queueErr,
+            context: { sheetId, tabName, type: 'order_append' },
+          });
         }
       }
     });

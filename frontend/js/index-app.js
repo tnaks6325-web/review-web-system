@@ -1242,6 +1242,7 @@ function switchAdminTab(tabName) {
   if (tabName === "dashboard") { try { loadTabDashboard(); } catch(_){} try { loadSystemMonitor(); } catch(_){} try { loadStatsOverview(); } catch(_){} try { loadDashWorkOrders(); } catch(_){} }
   if (tabName === "archive")   { try { loadArchiveList(); } catch(_){} try { _loadArchiveHistory(); } catch(_){} }
   if (tabName === "settings")  { try { loadUnrecognizedTabs(); } catch(_){} try { loadKeywordList(); } catch(_){} }
+  if (tabName === "errorlogs") { try { loadErrorLogs(); } catch(_){} }
   // ★ 컨텍스트 툴바 업데이트
   _updateContextToolbar(tabName);
 }
@@ -2642,6 +2643,9 @@ async function loadAdminDashboard() {
 
     // Phase 14: 인식 실패 탭 배지 업데이트
     _updateUnrecogBadge();
+
+    // 이상로그 미해결 배지 업데이트
+    try { _updateErrorLogBadge(); } catch (_) {}
 
     // ★ Phase 12: 마감 대상 배지 업데이트 (대시보드에서 알림)
     _updateArchiveBadge();
@@ -11204,6 +11208,118 @@ async function loadUnrecognizedTabs() {
     _updateUnrecogBadge();
   } catch (err) {
     wrap.innerHTML = `<div style="padding:12px;color:#EF4444"><i class="fas fa-exclamation-circle"></i> ${escHtml(err.message)}</div>`;
+  }
+}
+
+/* ══════════════════════════════════════════════════════════════
+   이상로그(비정상 로그) — error_logs (마이그레이션 026)
+   ══════════════════════════════════════════════════════════════ */
+const ERRLOG_CAT_LABELS = {
+  timeout: '로딩시간 초과', quota: '호출한도 초과', network: '네트워크', auth: '인증',
+  permission: '권한', validation: '입력검증', db: 'DB', external_api: '외부 API',
+  not_found: '대상 없음', unknown: '알 수 없음',
+};
+const ERRLOG_CAT_COLORS = {
+  timeout: '#F59E0B', quota: '#EF4444', network: '#3B82F6', auth: '#8B5CF6',
+  permission: '#8B5CF6', validation: '#6B7280', db: '#DC2626', external_api: '#0EA5E9',
+  not_found: '#6B7280', unknown: '#6B7280',
+};
+const ERRLOG_SEV_LABELS = { warn: '경고', error: '에러', critical: '치명' };
+const ERRLOG_SEV_COLORS = { warn: '#F59E0B', error: '#EF4444', critical: '#7F1D1D' };
+
+function _errLogRelTime(iso) {
+  if (!iso) return '';
+  const diff = Date.now() - new Date(iso).getTime();
+  const m = Math.floor(diff / 60000);
+  if (m < 1) return '방금';
+  if (m < 60) return `${m}분 전`;
+  const h = Math.floor(m / 60);
+  if (h < 24) return `${h}시간 전`;
+  const d = Math.floor(h / 24);
+  if (d < 7) return `${d}일 전`;
+  return new Date(iso).toLocaleDateString('ko-KR', { timeZone: 'Asia/Seoul' });
+}
+
+function _setErrorLogBadge(count) {
+  const badge = document.getElementById('errorLogBadge');
+  if (!badge) return;
+  if (count > 0) { badge.textContent = count > 99 ? '99+' : count; badge.style.display = 'inline'; }
+  else { badge.style.display = 'none'; }
+}
+
+async function _updateErrorLogBadge() {
+  try {
+    const data = await gasGet({ action: 'getErrorLogs', resolved: 'false', limit: 1 });
+    _setErrorLogBadge((data && data.summary && data.summary.openCount) || 0);
+  } catch (_) {}
+}
+
+// ── 이상로그 목록 로드 ──
+async function loadErrorLogs() {
+  const wrap = document.getElementById('errorLogListWrap');
+  if (!wrap) return;
+  wrap.innerHTML = '<div style="text-align:center;padding:12px;color:var(--t3)"><i class="fas fa-circle-notch fa-spin"></i> 불러오는 중...</div>';
+
+  const resolved = document.getElementById('errLogResolvedFilter')?.value || 'false';
+  const category = document.getElementById('errLogCategoryFilter')?.value || '';
+  try {
+    const data = await gasGet({ action: 'getErrorLogs', resolved, category });
+    if (data.error) {
+      wrap.innerHTML = `<div style="padding:12px;color:#EF4444"><i class="fas fa-exclamation-circle"></i> ${escHtml(data.error)}</div>`;
+      return;
+    }
+
+    const logs = data.logs || [];
+    const sum = data.summary || {};
+    _setErrorLogBadge(sum.openCount || 0);
+    const sumEl = document.getElementById('errLogSummary');
+    if (sumEl) sumEl.textContent = `미해결 ${sum.openCount || 0}건`;
+
+    if (logs.length === 0) {
+      wrap.innerHTML = '<div style="text-align:center;padding:20px;color:var(--t3)"><i class="fas fa-check-circle" style="color:#10B981"></i> 표시할 이상로그가 없습니다.</div>';
+      return;
+    }
+
+    let html = `<div style="font-size:.75rem;color:var(--t3);margin-bottom:8px">총 ${data.total}건</div>`;
+    logs.forEach(l => {
+      const cl = ERRLOG_CAT_LABELS[l.category] || l.category;
+      const cc = ERRLOG_CAT_COLORS[l.category] || '#6B7280';
+      const sl = ERRLOG_SEV_LABELS[l.severity] || l.severity;
+      const sc = ERRLOG_SEV_COLORS[l.severity] || '#6B7280';
+      const occ = l.occurrence_count > 1 ? `<span style="font-size:.7rem;background:#FEE2E2;color:#B91C1C;padding:1px 6px;border-radius:5px;font-weight:700;flex-shrink:0">×${l.occurrence_count}</span>` : '';
+      const rel = _errLogRelTime(l.last_seen_at);
+      const raw = l.message_raw ? `<details style="margin-top:4px"><summary style="font-size:.7rem;color:#8B5CF6;cursor:pointer;display:inline">원본 메시지 보기</summary><div style="margin-top:4px;font-size:.7rem;background:#F9FAFB;border-radius:6px;padding:8px;color:var(--t2);word-break:break-all">${escHtml(l.message_raw)}${l.error_code ? `<div style="margin-top:4px;color:var(--t3)">코드: ${escHtml(l.error_code)}</div>` : ''}</div></details>` : '';
+
+      html += `<div style="border:1px solid #E5E7EB;border-radius:8px;padding:10px 12px;margin-bottom:6px;background:#fff${l.resolved ? ';opacity:.6' : ''}">
+        <div style="display:flex;align-items:center;gap:6px;flex-wrap:wrap">
+          <span style="font-size:.68rem;background:${sc}22;color:${sc};padding:1px 6px;border-radius:5px;font-weight:700;flex-shrink:0">${sl}</span>
+          <span style="font-size:.68rem;background:${cc}22;color:${cc};padding:1px 6px;border-radius:5px;font-weight:600;flex-shrink:0">${cl}</span>
+          ${occ}
+          <span style="font-size:.72rem;color:var(--t3);margin-left:auto;flex-shrink:0">${rel}</span>
+        </div>
+        <div style="font-size:.9rem;font-weight:600;color:var(--t1);margin-top:6px;line-height:1.45">${escHtml(l.message_ko)}</div>
+        ${raw}
+        ${l.resolved
+          ? `<div style="font-size:.7rem;color:#10B981;margin-top:6px"><i class="fas fa-check"></i> 해결됨${l.resolved_by ? ' · ' + escHtml(l.resolved_by) : ''}</div>`
+          : `<div style="margin-top:8px"><button onclick="resolveErrorLog(${l.id})" style="font-size:.72rem;background:#10B981;color:#fff;border:none;border-radius:6px;padding:4px 12px;cursor:pointer"><i class="fas fa-check"></i> 해결 처리</button></div>`}
+      </div>`;
+    });
+
+    wrap.innerHTML = html;
+  } catch (err) {
+    wrap.innerHTML = `<div style="padding:12px;color:#EF4444"><i class="fas fa-exclamation-circle"></i> ${escHtml(err.message)}</div>`;
+  }
+}
+
+// ── 이상로그 해결 처리 ──
+async function resolveErrorLog(id) {
+  if (!confirm('이 이상로그를 해결 처리할까요?\n(같은 유형이 다시 발생하면 새 항목으로 기록됩니다)')) return;
+  try {
+    const data = await gasPost({ action: 'resolveErrorLog', id });
+    if (data.error) { alert(data.error); return; }
+    loadErrorLogs();
+  } catch (err) {
+    alert('해결 처리 실패: ' + err.message);
   }
 }
 

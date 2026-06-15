@@ -1,6 +1,6 @@
 const express = require('express');
 const router = express.Router();
-const { authMiddleware, masterOnlyMiddleware } = require('../middleware/auth.middleware');
+const { authMiddleware, masterOnlyMiddleware, adminOrMasterMiddleware } = require('../middleware/auth.middleware');
 const {
   loginAdmin, loginStaff,
   addAdminUser, editAdminUser, deleteAdminUser, listAdminUsers,
@@ -964,6 +964,81 @@ router.post('/notices/read', authMiddleware, async (req, res, next) => {
       ON CONFLICT (notice_id, admin_name) DO NOTHING
     `, [notice_id, adminName]);
     res.json({ success: true });
+  } catch (err) { next(err); }
+});
+
+// ═══════════════════════════════════════════════════════════
+// 이상로그(비정상 로그) 조회/해결 — error_logs (마이그레이션 026)
+// staff 차단(adminOrMasterMiddleware): 시스템 운영 정보
+// ═══════════════════════════════════════════════════════════
+
+// GET /api/admin/error-logs — 비정상 로그 목록 (필터·페이징·요약)
+// 쿼리: category, severity, flow, resolved(true/false/all), page, limit
+router.get('/error-logs', authMiddleware, adminOrMasterMiddleware, async (req, res, next) => {
+  try {
+    const { category, severity, flow } = req.query;
+    const resolvedParam = (req.query.resolved || 'false').toLowerCase(); // 기본: 미해결만
+    const page = Math.max(1, parseInt(req.query.page, 10) || 1);
+    const limit = Math.min(200, Math.max(1, parseInt(req.query.limit, 10) || 50));
+    const offset = (page - 1) * limit;
+
+    const where = [];
+    const params = [];
+    if (resolvedParam === 'true') where.push('resolved = TRUE');
+    else if (resolvedParam !== 'all') where.push('resolved = FALSE');
+    if (category) { params.push(category); where.push(`category = $${params.length}`); }
+    if (severity) { params.push(severity); where.push(`severity = $${params.length}`); }
+    if (flow)     { params.push(flow);     where.push(`flow = $${params.length}`); }
+    const whereSql = where.length ? 'WHERE ' + where.join(' AND ') : '';
+
+    const listParams = params.slice();
+    listParams.push(limit); const limIdx = listParams.length;
+    listParams.push(offset); const offIdx = listParams.length;
+
+    const { rows: logs } = await pool.query(
+      `SELECT id, created_at, severity, flow, flow_ko, step, step_ko, category, source,
+              message_ko, message_raw, error_code, occurrence_count,
+              first_seen_at, last_seen_at, resolved, resolved_at, resolved_by, context
+       FROM error_logs
+       ${whereSql}
+       ORDER BY last_seen_at DESC, occurrence_count DESC
+       LIMIT $${limIdx} OFFSET $${offIdx}`,
+      listParams
+    );
+
+    const { rows: cntRows } = await pool.query(
+      `SELECT COUNT(*)::int AS total FROM error_logs ${whereSql}`, params);
+    const total = cntRows[0]?.total || 0;
+
+    // 요약: 미해결 기준 카테고리/심각도 분포 + 미해결 총건수
+    const { rows: sumRows } = await pool.query(
+      `SELECT category, severity, COUNT(*)::int AS cnt, SUM(occurrence_count)::int AS occ
+       FROM error_logs WHERE resolved = FALSE GROUP BY category, severity`);
+    const summary = { openCount: 0, byCategory: {}, bySeverity: {} };
+    for (const r of sumRows) {
+      summary.openCount += r.cnt;
+      summary.byCategory[r.category] = (summary.byCategory[r.category] || 0) + r.cnt;
+      summary.bySeverity[r.severity] = (summary.bySeverity[r.severity] || 0) + r.cnt;
+    }
+
+    res.json({ ok: true, logs, total, page, limit, summary });
+  } catch (err) { next(err); }
+});
+
+// POST /api/admin/error-logs/resolve — 비정상 로그 해결 처리 ({ id, note })
+// 동적 /:id 미지원 → 평면경로 + body id (work_orders 패턴과 동일)
+router.post('/error-logs/resolve', authMiddleware, adminOrMasterMiddleware, async (req, res, next) => {
+  try {
+    const { id, note } = req.body;
+    if (!id) return res.json({ error: 'id 필요' });
+    const { rowCount } = await pool.query(
+      `UPDATE error_logs
+       SET resolved = TRUE, resolved_at = NOW(), resolved_by = $1, resolve_note = $2
+       WHERE id = $3 AND resolved = FALSE`,
+      [req.admin?.name || 'admin', (note || '').slice(0, 500), id]
+    );
+    if (rowCount === 0) return res.json({ error: '대상을 찾을 수 없거나 이미 해결된 항목입니다.' });
+    res.json({ ok: true });
   } catch (err) { next(err); }
 });
 

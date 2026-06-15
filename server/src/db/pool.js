@@ -21,6 +21,13 @@ const pool = new Pool(poolConfig);
 
 pool.on('error', (err) => {
   logger.error('PostgreSQL pool error:', err.message);
+  // 지연 require로 순환참조 회피 (errorLog.service → pool)
+  try {
+    require('../services/errorLog.service').logAbnormal({
+      flow: 'db', category: 'db', source: 'db', severity: 'critical', error: err,
+      context: { origin: 'pool.on(error)' },
+    });
+  } catch (_) { /* noop */ }
 });
 
 pool.on('connect', () => {
