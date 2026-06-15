@@ -80,7 +80,7 @@ ALTER DEFAULT PRIVILEGES IN SCHEMA public GRANT SELECT ON SEQUENCES TO backup_re
 > Railway 네이티브 백업/PITR이 더 빠르므로 그쪽을 먼저 시도.
 
 1. **새 Postgres 준비** — Railway 새 프로젝트(또는 다른 프로바이더)에 Postgres 생성.
-   현재 운영 버전과 같거나 높은 메이저 버전 사용.
+   현재 운영 DB는 **PostgreSQL 18** — 복구 대상도 18 이상 사용.
 2. **최신 덤프 다운로드** — Cloudflare R2 대시보드에서 `db/` 아래 최신
    `review-system-*.dump` 다운로드 (또는 `aws s3 cp --endpoint-url https://<계정ID>.r2.cloudflarestorage.com ...`)
 3. **복원**:

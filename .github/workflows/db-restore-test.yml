@@ -27,7 +27,7 @@ jobs:
     timeout-minutes: 30
     services:
       postgres:
-        image: postgres:17
+        image: postgres:18
         env:
           POSTGRES_USER: restore_test
           POSTGRES_PASSWORD: restore_test
@@ -40,7 +40,7 @@ jobs:
           --health-timeout 5s
           --health-retries 10
     steps:
-      - name: Install PostgreSQL 17 client
+      - name: Install PostgreSQL 18 client
         run: |
           sudo install -d /usr/share/postgresql-common/pgdg
           sudo curl -fsSL -o /usr/share/postgresql-common/pgdg/apt.postgresql.org.asc \
@@ -48,7 +48,9 @@ jobs:
           echo "deb [signed-by=/usr/share/postgresql-common/pgdg/apt.postgresql.org.asc] https://apt.postgresql.org/pub/repos/apt $(lsb_release -cs)-pgdg main" \
             | sudo tee /etc/apt/sources.list.d/pgdg.list
           sudo apt-get update -qq
-          sudo apt-get install -y -qq postgresql-client-17
+          # 백업이 PG 18 서버에서 생성되므로 client/임시서버 모두 18로 통일
+          sudo apt-get install -y -qq postgresql-client-18
+          echo "/usr/lib/postgresql/18/bin" >> "$GITHUB_PATH"
 
       - name: Download latest backup from R2
         env:

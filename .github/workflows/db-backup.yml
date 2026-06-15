@@ -37,7 +37,7 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 30
     steps:
-      - name: Install PostgreSQL 17 client
+      - name: Install PostgreSQL 18 client
         run: |
           sudo install -d /usr/share/postgresql-common/pgdg
           sudo curl -fsSL -o /usr/share/postgresql-common/pgdg/apt.postgresql.org.asc \
@@ -45,7 +45,11 @@ jobs:
           echo "deb [signed-by=/usr/share/postgresql-common/pgdg/apt.postgresql.org.asc] https://apt.postgresql.org/pub/repos/apt $(lsb_release -cs)-pgdg main" \
             | sudo tee /etc/apt/sources.list.d/pgdg.list
           sudo apt-get update -qq
-          sudo apt-get install -y -qq postgresql-client-17
+          # 서버(Railway)가 PG 18이므로 client 18 설치. pg_dump >= 서버버전 필요.
+          sudo apt-get install -y -qq postgresql-client-18
+          # 러너에 선설치된 구버전(pg_dump 16)이 PATH 우선되는 문제 회피:
+          # 새로 깐 18 바이너리 경로를 PATH 맨 앞에 둠 (다음 step부터 적용)
+          echo "/usr/lib/postgresql/18/bin" >> "$GITHUB_PATH"
 
       - name: pg_dump
         env:
