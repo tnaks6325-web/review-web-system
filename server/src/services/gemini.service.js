@@ -318,7 +318,39 @@ function _fallbackParse(text) {
   return result;
 }
 
+// ═══════════════════════════════════════════════════════════
+// 3. 이상로그 자연어 보강 — 에러를 관리자용 한 문장(한국어)으로 풀이
+//    (errorLog.service 의 ERRORLOG_AI_ENRICH 토글에서 호출)
+//    실패/미설정 시 null 반환 → 호출부는 템플릿 문장을 그대로 유지
+// ═══════════════════════════════════════════════════════════
+async function explainErrorKo({ flow, step, message, code } = {}) {
+  try {
+    if (!_initGemini()) return null;
+    const prompt = `너는 웹 서비스 운영 담당자에게 장애 원인을 알려주는 한국어 도우미다.
+아래 서버 에러를 비개발자 관리자도 이해할 수 있도록 "무엇이 / 어디서 / 왜" 가 드러나는 한 문장으로 풀이하라.
+- 한국어 1문장, 80자 이내, 추측은 단정하지 말고 "~로 보입니다" 식으로.
+- 기능: ${flow || '미상'} / 단계: ${step || '미상'} / 코드: ${code || '없음'}
+- 원본 에러: ${String(message || '').slice(0, 400)}
+반드시 JSON 으로만 답하라: {"explanation": "..."}`;
+
+    const { text } = await _runModel([{ text: prompt }], '[ErrorExplain]');
+    let obj;
+    try {
+      obj = JSON.parse(text);
+    } catch (_) {
+      const m = text && text.match(/"explanation"\s*:\s*"([^"]+)"/);
+      obj = m ? { explanation: m[1] } : null;
+    }
+    const out = obj && typeof obj.explanation === 'string' ? obj.explanation.trim() : '';
+    return out ? out.slice(0, 200) : null;
+  } catch (err) {
+    logger.warn(`[Gemini] 이상로그 보강 실패(무시): ${err.message}`);
+    return null;
+  }
+}
+
 module.exports = {
   extractOrderFromImage,
   verifyAddressMatch,
+  explainErrorKo,
 };

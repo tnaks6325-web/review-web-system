@@ -21,6 +21,7 @@ const { logger } = require('../utils/logger');
 const { captureException } = require('../utils/sentry');
 
 const ENABLED = process.env.ERRORLOG_ENABLED !== 'false'; // 기본 ON
+const AI_ENRICH = process.env.ERRORLOG_AI_ENRICH === 'true'; // 기본 OFF — 미분류 건만 Gemini 보강
 
 // ── 한국어 사전 (자연어 문장 합성용) ──
 // flow: 어떤 기능/플로우에서
@@ -137,6 +138,24 @@ function fingerprint({ flow, step, category, source, message_raw }) {
 }
 
 /**
+ * AI 자연어 보강 (best-effort) — 미분류 건의 message_ko 를 Gemini 한 문장으로 교체.
+ * 지연 require 로 순환참조 회피. 실패 시 아무것도 안 함(템플릿 문장 유지).
+ */
+async function _enrichWithAI(rowId, { flow, step, message_raw, error_code }) {
+  try {
+    const { explainErrorKo } = require('./gemini.service');
+    const sentence = await explainErrorKo({ flow, step, message: message_raw, code: error_code });
+    if (!sentence) return;
+    // 보강 사이에 해결됐을 수 있으므로 미해결 행에만 반영
+    await pool.query(
+      `UPDATE error_logs SET message_ko = $1 WHERE id = $2 AND resolved = FALSE`,
+      [sentence, rowId]
+    );
+    logger.info(`[이상로그] AI 보강 적용 #${rowId}: ${sentence}`);
+  } catch (_) { /* noop — 템플릿 문장 유지 */ }
+}
+
+/**
  * 비정상 이벤트 1건 기록 (fail-safe, fire-and-forget 가능)
  *
  * @param {object}  p
@@ -176,7 +195,9 @@ async function logAbnormal(p = {}) {
     }
 
     // ── dedup UPSERT (미해결 동일 fingerprint 는 카운트만 증가) ──
-    await pool.query(
+    // ※ message_ko 는 DO UPDATE 에서 제외 — 같은 fingerprint 면 템플릿 문장은 동일하므로
+    //   불필요하고, AI 보강(아래)으로 다듬은 문장이 재발 때마다 덮어쓰이는 것을 방지.
+    const { rows: upserted } = await pool.query(
       `INSERT INTO error_logs
          (severity, flow, flow_ko, step, step_ko, category, source,
           message_ko, message_raw, error_code, stack, context, fingerprint)
@@ -185,7 +206,6 @@ async function logAbnormal(p = {}) {
        DO UPDATE SET
          occurrence_count = error_logs.occurrence_count + 1,
          last_seen_at     = NOW(),
-         message_ko       = EXCLUDED.message_ko,
          message_raw      = EXCLUDED.message_raw,
          error_code       = EXCLUDED.error_code,
          stack            = EXCLUDED.stack,
@@ -194,10 +214,17 @@ async function logAbnormal(p = {}) {
            WHEN error_logs.severity = 'critical' OR EXCLUDED.severity = 'critical' THEN 'critical'
            WHEN error_logs.severity = 'error'    OR EXCLUDED.severity = 'error'    THEN 'error'
            ELSE 'warn'
-         END`,
+         END
+       RETURNING id, occurrence_count`,
       [severity, flow, flowKo, step, stepKo, category, source,
        message_ko, message_raw, error_code, stack, JSON.stringify(context), fp]
     );
+
+    // ── 선택: AI 자연어 보강 (ERRORLOG_AI_ENRICH=true, 미분류 건 최초 1회만) ──
+    // 템플릿 문장은 이미 저장됨 → 보강은 best-effort 비동기, 실패해도 템플릿 유지.
+    if (AI_ENRICH && category === 'unknown' && upserted[0] && upserted[0].occurrence_count === 1) {
+      _enrichWithAI(upserted[0].id, { flow, step, message_raw, error_code });
+    }
   } catch (logErr) {
     // ★ 로깅 실패는 절대 호출부로 전파하지 않는다.
     try { logger.warn(`[이상로그] 기록 실패(무시): ${logErr.message}`); } catch (_) { /* noop */ }
