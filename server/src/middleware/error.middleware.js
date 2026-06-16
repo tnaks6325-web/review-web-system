@@ -1,5 +1,29 @@
 const { logger } = require('../utils/logger');
 const { captureException, isSentryEnabled } = require('../utils/sentry');
+const { logAbnormal } = require('../services/errorLog.service');
+
+/**
+ * 요청 경로 → 비정상 로그 flow/step 매핑
+ * (미처리 라우트 에러가 어떤 기능에서 났는지 자연어 설명에 반영)
+ */
+const PATH_FLOW_MAP = [
+  [/^\/api\/submit\/order/,        { flow: 'order_submit',  step: '' }],
+  [/^\/api\/submit\/review/,       { flow: 'review_submit', step: '' }],
+  [/^\/api\/image\/image-upload/,  { flow: 'order_submit',  step: 'image_upload' }],
+  [/^\/api\/image\/image-extract/, { flow: 'image_extract', step: 'gemini_call' }],
+  [/^\/api\/reviewer/,             { flow: 'reviewer',      step: '' }],
+  [/^\/api\/admin/,                { flow: 'admin',         step: '' }],
+  [/^\/api\/campaign/,             { flow: 'campaign',      step: '' }],
+  [/^\/api\/drive/,                { flow: 'drive',         step: '' }],
+  [/^\/api\/(index|search)/,       { flow: 'index_build',   step: '' }],
+];
+
+function flowFromPath(p) {
+  for (const [re, v] of PATH_FLOW_MAP) {
+    if (re.test(p || '')) return v;
+  }
+  return { flow: 'unknown', step: '' };
+}
 
 /**
  * Express 글로벌 에러 핸들러
@@ -32,6 +56,23 @@ function errorHandler(err, req, res, next) {
     query: req.query,
     ip: req.ip,
     statusCode: errorContext.statusCode,
+  });
+
+  // ── 비정상 로그(이상로그) 영구 기록 — fire-and-forget, 절대 throw 안 함 ──
+  const { flow, step } = flowFromPath(req.path);
+  logAbnormal({
+    flow,
+    step,
+    severity: errorContext.statusCode >= 500 ? 'error' : 'warn',
+    error: err,
+    context: {
+      path: req.path,
+      method: req.method,
+      ip: req.ip,
+      userAgent: errorContext.userAgent,
+      statusCode: errorContext.statusCode,
+      userId: (req.admin && req.admin.name) || undefined,
+    },
   });
 
   // CORS 오류

@@ -5,7 +5,9 @@ const { processQueue, purgeCompleted, retryAllFailed } = require('../services/sy
 // const { syncSettingsOnly } = require('../services/masterSheet.service');
 const { logger } = require('../utils/logger');
 const { emitIndexBuild, broadcast } = require('../utils/sse');
-// [REMOVED] readSheet, pool — 세부목록→DB 자동동기화 CRON 제거됨 (DB가 원본)
+const { logAbnormal } = require('../services/errorLog.service');
+const pool = require('../db/pool');
+// [REMOVED] readSheet — 세부목록→DB 자동동기화 CRON 제거됨 (DB가 원본)
 
 /**
  * ★ CRON 최적화 (v11.8.0 — 2탭 통합):
@@ -79,6 +81,7 @@ function startCronJobs() {
       emitIndexBuild({ rebuilt: result.rebuilt || 0, skipped: result.skipped || 0, errors: result.errors || 0, elapsed: result.elapsed || '', trigger: 'cron' });
     } catch (err) {
       logger.error(`[CRON] 인덱스 빌드 오류: ${err.message}`);
+      logAbnormal({ flow: 'cron', step: 'index_build', error: err, context: { job: '인덱스 빌드' } });
     }
   }, {
     timezone: 'Asia/Seoul',
@@ -93,6 +96,7 @@ function startCronJobs() {
       emitIndexBuild({ trigger: 'cron_full' });
     } catch (err) {
       logger.error(`[CRON] 전체 재빌드 오류: ${err.message}`);
+      logAbnormal({ flow: 'cron', step: 'index_build', error: err, context: { job: '전체 재빌드' } });
     }
   }, { timezone: 'Asia/Seoul' });
 
@@ -106,6 +110,7 @@ function startCronJobs() {
       }
     } catch (err) {
       logger.error(`[CRON-Queue] 큐 처리 오류: ${err.message}`);
+      logAbnormal({ flow: 'sync_queue', step: 'process_queue', error: err, context: { job: '큐 워커' } });
     }
   });
 
@@ -131,7 +136,24 @@ function startCronJobs() {
     }
   }, { timezone: 'Asia/Seoul' });
 
-  logger.info(`[CRON] 스케줄러 등록 완료: dirty+자동빌드=15분, 인덱스=${schedule}, 전체재빌드=매일04시, 큐워커=30초, 자동복구=매시간, 정리=매일03시`);
+  // ── 이상로그(error_logs) 보존 정리: 매일 새벽 3시 30분 ──
+  // 해결건은 RETENTION_DAYS(기본 30일) 후, 미해결건은 3배 기간 후 삭제(안전망)
+  cron.schedule('30 3 * * *', async () => {
+    try {
+      const days = parseInt(process.env.ERRORLOG_RETENTION_DAYS || '30', 10);
+      const { rowCount } = await pool.query(
+        `DELETE FROM error_logs
+         WHERE (resolved = TRUE AND resolved_at < NOW() - ($1 || ' days')::interval)
+            OR (created_at < NOW() - (($1 * 3) || ' days')::interval)`,
+        [days]
+      );
+      if (rowCount) logger.info(`[CRON-ErrorLog] 정리: ${rowCount}건 삭제 (보존 ${days}일)`);
+    } catch (err) {
+      logger.error(`[CRON-ErrorLog] 정리 오류: ${err.message}`);
+    }
+  }, { timezone: 'Asia/Seoul' });
+
+  logger.info(`[CRON] 스케줄러 등록 완료: dirty+자동빌드=15분, 인덱스=${schedule}, 전체재빌드=매일04시, 큐워커=30초, 자동복구=매시간, 정리=매일03시, 이상로그정리=매일03시30분`);
 }
 
 module.exports = { startCronJobs };

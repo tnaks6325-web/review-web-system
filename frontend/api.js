@@ -232,6 +232,10 @@ const _ACTION_MAP = {
   'ignoreUnrecognized':    { method: 'POST',   path: '/api/admin/unrecognized/ignore' },
   'resolveUnrecognized':   { method: 'POST',   path: '/api/admin/unrecognized/resolve' },
 
+  // 이상로그(비정상 로그) — error_logs
+  'getErrorLogs':          { method: 'GET',    path: '/api/admin/error-logs' },
+  'resolveErrorLog':       { method: 'POST',   path: '/api/admin/error-logs/resolve' },
+
   // ★ 스마트 빌드 (Drive API + Sheets batchGet 기반)
   'smartBuildStatus':      { method: 'GET',  path: '/api/admin/smart-build/status' },
   'smartBuildRun':         { method: 'POST', path: '/api/admin/smart-build/run' },
