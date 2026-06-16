@@ -1,0 +1,605 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>업무포털 — 광고주 작업 관리</title>
+<script src="api.js"></script>
+<style>
+  :root{
+    --bg:#f4f6f9; --card:#fff; --line:#e3e8ef; --ink:#1f2937; --muted:#6b7280;
+    --pri:#2563eb; --pri-d:#1d4ed8; --ok:#059669; --warn:#d97706; --danger:#dc2626;
+  }
+  *{box-sizing:border-box}
+  body{margin:0;font-family:-apple-system,BlinkMacSystemFont,"Malgun Gothic","Apple SD Gothic Neo",sans-serif;background:var(--bg);color:var(--ink);font-size:14px}
+  header{background:#fff;border-bottom:1px solid var(--line);padding:10px 18px;display:flex;align-items:center;gap:14px;position:sticky;top:0;z-index:20}
+  header h1{font-size:16px;margin:0;font-weight:700}
+  header .who{margin-left:auto;color:var(--muted);font-size:13px}
+  button{cursor:pointer;border:1px solid var(--line);background:#fff;border-radius:7px;padding:7px 12px;font-size:13px}
+  button.pri{background:var(--pri);color:#fff;border-color:var(--pri)}
+  button.pri:hover{background:var(--pri-d)}
+  button.danger{color:var(--danger);border-color:#f3c2c2}
+  button.sm{padding:4px 8px;font-size:12px}
+  .wrap{max-width:1280px;margin:0 auto;padding:18px}
+  .tabs{display:flex;gap:6px;margin-bottom:14px}
+  .tabs button{border-radius:20px}
+  .tabs button.active{background:var(--ink);color:#fff;border-color:var(--ink)}
+  .card{background:var(--card);border:1px solid var(--line);border-radius:10px;padding:16px;margin-bottom:16px}
+  .row{display:flex;gap:10px;flex-wrap:wrap;align-items:center}
+  .grow{flex:1}
+  input,select,textarea{font:inherit;padding:7px 9px;border:1px solid var(--line);border-radius:7px;width:100%;background:#fff}
+  label{display:block;font-size:12px;color:var(--muted);margin:0 0 3px}
+  table{width:100%;border-collapse:collapse;font-size:13px}
+  th,td{padding:8px 9px;border-bottom:1px solid var(--line);text-align:left;white-space:nowrap}
+  th{color:var(--muted);font-weight:600;background:#fafbfc;position:sticky;top:0}
+  .tbl-scroll{overflow:auto;max-height:64vh;border:1px solid var(--line);border-radius:10px}
+  .pill{display:inline-block;padding:2px 8px;border-radius:20px;font-size:12px;background:#eef2ff;color:#3730a3}
+  .pill.ok{background:#dcfce7;color:#166534}.pill.warn{background:#fef3c7;color:#92400e}
+  .pill.muted{background:#f3f4f6;color:#6b7280}.pill.danger{background:#fee2e2;color:#991b1b}
+  .num{text-align:right;font-variant-numeric:tabular-nums}
+  .miss{color:var(--danger);font-weight:600}
+  .ok-mark{color:var(--ok)}
+  .muted{color:var(--muted)}
+  .grand{display:flex;gap:22px;flex-wrap:wrap;margin-top:10px;font-size:14px}
+  .grand b{font-size:18px}
+  /* modal */
+  .ov{position:fixed;inset:0;background:rgba(15,23,42,.45);display:none;align-items:flex-start;justify-content:center;z-index:50;overflow:auto;padding:30px 14px}
+  .ov.show{display:flex}
+  .modal{background:#fff;border-radius:12px;width:100%;max-width:760px;padding:20px}
+  .modal h3{margin:0 0 14px}
+  .form-grid{display:grid;grid-template-columns:repeat(3,1fr);gap:12px}
+  .form-grid .full{grid-column:1/-1}
+  .modal-foot{display:flex;justify-content:flex-end;gap:8px;margin-top:18px}
+  .login-box{max-width:380px;margin:8vh auto;background:#fff;border:1px solid var(--line);border-radius:14px;padding:26px}
+  .login-box h2{margin:0 0 6px}.login-box p{margin:0 0 18px;color:var(--muted);font-size:13px}
+  .seg{display:flex;border:1px solid var(--line);border-radius:8px;overflow:hidden;margin-bottom:14px}
+  .seg button{flex:1;border:0;border-radius:0;background:#fff}
+  .seg button.active{background:var(--pri);color:#fff}
+  .err{color:var(--danger);font-size:13px;min-height:18px;margin-top:6px}
+  .cmt{border-bottom:1px solid var(--line);padding:9px 0}
+  .cmt .meta{font-size:12px;color:var(--muted);margin-bottom:3px}
+  .cmt.client{background:#f0f9ff;margin:0 -8px;padding:9px 8px;border-radius:6px}
+  .hidden{display:none!important}
+  .hint{font-size:12px;color:var(--muted);margin-top:4px}
+</style>
+</head>
+<body>
+
+<!-- ─── 로그인 ─── -->
+<div id="loginView">
+  <div class="login-box">
+    <h2>업무포털</h2>
+    <p>광고주 작업(캠페인) 관리</p>
+    <div class="seg">
+      <button id="segInternal" class="active" onclick="setLoginMode('internal')">내부 담당자</button>
+      <button id="segAdvertiser" onclick="setLoginMode('advertiser')">광고주</button>
+    </div>
+    <div style="margin-bottom:10px"><label>아이디</label><input id="loginName" autocomplete="username"></div>
+    <div><label>비밀번호</label><input id="loginPw" type="password" autocomplete="current-password"
+         onkeydown="if(event.key==='Enter')doLogin()"></div>
+    <div class="err" id="loginErr"></div>
+    <button class="pri" style="width:100%;margin-top:8px" onclick="doLogin()">로그인</button>
+  </div>
+</div>
+
+<!-- ─── 앱 ─── -->
+<div id="appView" class="hidden">
+  <header>
+    <h1>📋 업무포털</h1>
+    <div class="tabs" id="navTabs">
+      <button id="tabOverview" class="active" onclick="showView('overview')">거래처 전체현황</button>
+      <button id="tabWorks" onclick="showView('works')">거래처별 관리</button>
+    </div>
+    <div class="who"><span id="whoLabel"></span> <button class="sm" onclick="logout()">로그아웃</button></div>
+  </header>
+
+  <div class="wrap">
+    <!-- 전체현황 -->
+    <section id="overviewView">
+      <div class="card">
+        <div class="row">
+          <strong class="grow">거래처 전체현황</strong>
+          <button id="btnAddAdv" class="pri sm" onclick="openAdvModal()">+ 거래처 추가</button>
+          <button id="btnAccts" class="sm" onclick="openAcctModal()">광고주 계정</button>
+        </div>
+        <div class="grand" id="grandBox"></div>
+      </div>
+      <div class="tbl-scroll">
+        <table>
+          <thead><tr>
+            <th>거래처</th><th>상태</th><th>담당</th><th class="num">작업수</th>
+            <th class="num">미마감</th><th class="num">미견적</th><th class="num">미계산</th>
+            <th class="num">미입금</th><th class="num">미입금액</th><th></th>
+          </tr></thead>
+          <tbody id="overviewBody"></tbody>
+        </table>
+      </div>
+    </section>
+
+    <!-- 거래처별 관리 -->
+    <section id="worksView" class="hidden">
+      <div class="card">
+        <div class="row">
+          <div id="advPickWrap" style="min-width:220px">
+            <label>거래처 선택</label>
+            <select id="advPick" onchange="loadWorks()"></select>
+          </div>
+          <div style="min-width:150px">
+            <label>진행현황</label>
+            <select id="statusFilter" onchange="loadWorks()">
+              <option value="">전체</option>
+              <option value="planned">예정</option>
+              <option value="in_progress">진행중</option>
+              <option value="done">완료</option>
+              <option value="hold">보류</option>
+              <option value="canceled">취소</option>
+            </select>
+          </div>
+          <div class="grow"><label>검색(상품/브랜드/채널)</label>
+            <input id="qFilter" onkeydown="if(event.key==='Enter')loadWorks()" placeholder="키워드 후 Enter"></div>
+          <div style="align-self:flex-end">
+            <button id="btnAddWork" class="pri" onclick="openWorkModal()">+ 작업 추가</button>
+          </div>
+        </div>
+      </div>
+      <div class="tbl-scroll">
+        <table>
+          <thead><tr>
+            <th>#</th><th>브랜드</th><th>작업구분</th><th>상품</th><th>채널</th><th>차수</th>
+            <th class="num">건수</th><th>진행현황</th><th>시트</th>
+            <th>마감자료</th><th>견적서</th><th>세금계산서</th><th>입금일</th>
+            <th class="num">총비용</th><th>비고</th><th></th>
+          </tr></thead>
+          <tbody id="worksBody"></tbody>
+        </table>
+      </div>
+    </section>
+  </div>
+</div>
+
+<!-- ─── 작업 모달 ─── -->
+<div class="ov" id="workOv"><div class="modal">
+  <h3 id="workModalTitle">작업 추가</h3>
+  <div class="form-grid">
+    <div><label>브랜드</label><input id="f_brand"></div>
+    <div><label>작업구분</label><input id="f_work_type" list="workTypes"></div>
+    <div><label>차수</label><input id="f_round" placeholder="1차 / 2차 / -"></div>
+    <div class="full"><label>상품</label><input id="f_product"></div>
+    <div><label>채널</label><input id="f_channel" list="channels"></div>
+    <div><label>건수</label><input id="f_qty" type="number"></div>
+    <div><label>진행일</label><input id="f_progress_date" type="date"></div>
+    <div><label>진행현황</label><select id="f_progress_status">
+      <option value="planned">예정</option><option value="in_progress" selected>진행중</option>
+      <option value="done">완료</option><option value="hold">보류</option><option value="canceled">취소</option>
+    </select></div>
+    <div><label>인애드 담당</label><input id="f_inad_manager"></div>
+    <div class="full"><label>작업시트링크</label><input id="f_work_sheet_url" placeholder="https://docs.google.com/..."></div>
+    <div><label>마감자료완료일</label><input id="f_closing_date" type="date"></div>
+    <div><label>견적서완료일</label><input id="f_quote_date" type="date"></div>
+    <div><label>세금계산서 발급일</label><input id="f_invoice_date" type="date"></div>
+    <div><label>입금일</label><input id="f_payment_date" type="date"></div>
+    <div><label>총비용(원)</label><input id="f_total_cost" inputmode="numeric"></div>
+    <div><label>선금(원)</label><input id="f_deposit" inputmode="numeric"></div>
+    <div class="full"><label>비고(인애드)</label><textarea id="f_note_inad" rows="2"></textarea></div>
+    <div class="full"><label>비고(광고주)</label><textarea id="f_note_client" rows="2"></textarea></div>
+  </div>
+  <div class="err" id="workErr"></div>
+  <div class="modal-foot">
+    <button onclick="closeOv('workOv')">취소</button>
+    <button class="pri" onclick="saveWork()">저장</button>
+  </div>
+</div></div>
+
+<!-- ─── 거래처 모달 ─── -->
+<div class="ov" id="advOv"><div class="modal" style="max-width:460px">
+  <h3 id="advModalTitle">거래처 추가</h3>
+  <div style="display:grid;gap:12px">
+    <div><label>거래처(광고주)명</label><input id="a_name"></div>
+    <div><label>상태</label><select id="a_status">
+      <option value="active">대행중</option><option value="ended">종료</option><option value="pending">확인중</option>
+    </select></div>
+    <div><label>인애드 담당</label><input id="a_inad_pm"></div>
+    <div><label>메모</label><input id="a_memo"></div>
+  </div>
+  <div class="err" id="advErr"></div>
+  <div class="modal-foot">
+    <button onclick="closeOv('advOv')">취소</button>
+    <button class="pri" onclick="saveAdv()">저장</button>
+  </div>
+</div></div>
+
+<!-- ─── 광고주 계정 모달 ─── -->
+<div class="ov" id="acctOv"><div class="modal" style="max-width:520px">
+  <h3>광고주 계정 관리</h3>
+  <div class="row" style="align-items:flex-end">
+    <div class="grow"><label>아이디</label><input id="ac_name"></div>
+    <div class="grow"><label>비밀번호</label><input id="ac_pw"></div>
+  </div>
+  <div style="margin-top:10px"><label>거래처</label><select id="ac_adv"></select></div>
+  <div class="err" id="acctErr"></div>
+  <div class="modal-foot"><button class="pri" onclick="addAcct()">계정 추가</button></div>
+  <div class="tbl-scroll" style="max-height:240px">
+    <table><thead><tr><th>아이디</th><th>거래처</th><th>상태</th><th></th></tr></thead>
+    <tbody id="acctBody"></tbody></table>
+  </div>
+</div></div>
+
+<!-- ─── 코멘트 모달 ─── -->
+<div class="ov" id="cmtOv"><div class="modal" style="max-width:560px">
+  <h3>코멘트 — <span id="cmtWorkTitle" class="muted"></span></h3>
+  <div class="tbl-scroll" style="max-height:300px;padding:4px 10px;border:1px solid var(--line)">
+    <div id="cmtList"></div>
+  </div>
+  <div style="margin-top:12px"><textarea id="cmtInput" rows="2" placeholder="코멘트를 입력하세요"></textarea></div>
+  <div class="err" id="cmtErr"></div>
+  <div class="modal-foot">
+    <button onclick="closeOv('cmtOv')">닫기</button>
+    <button class="pri" onclick="postComment()">등록</button>
+  </div>
+</div></div>
+
+<datalist id="workTypes"><option value="유가리뷰"><option value="바이럴"><option value="트래픽"></datalist>
+<datalist id="channels"><option value="쿠팡"><option value="메이커스"><option value="네이버"><option value="블로그"><option value="카페/커뮤"><option value="톡스토어"><option value="컬리"></datalist>
+
+<script>
+// ═══════════════════════════════════════════════════════════
+// 공통
+// ═══════════════════════════════════════════════════════════
+const API = (typeof API_BASE_URL !== "undefined" && API_BASE_URL)
+  ? API_BASE_URL
+  : (location.hostname === "localhost" ? "http://localhost:3000" : "");
+const TOKEN_KEY = "portal_token";
+let SESSION = JSON.parse(sessionStorage.getItem("portal_session") || "null"); // {name,role,advertiserId,advertiserName}
+let loginMode = "internal";
+let WORK_FIELD_IDS = ["brand","work_type","round","product","channel","qty","progress_date",
+  "progress_status","inad_manager","work_sheet_url","closing_date","quote_date","invoice_date",
+  "payment_date","total_cost","deposit","note_inad","note_client"];
+let editingWorkId = null;
+let editingAdvId = null;
+let cmtWorkId = null;
+let advCache = [];
+
+const $ = id => document.getElementById(id);
+function isInternal(){ return SESSION && ["master","admin","staff"].includes(SESSION.role); }
+function isAdmin(){ return SESSION && ["master","admin"].includes(SESSION.role); }
+function token(){ return sessionStorage.getItem(TOKEN_KEY) || ""; }
+function num(v){ return (v===null||v===undefined||v==="") ? 0 : Number(v); }
+function won(v){ const n = num(v); return n ? n.toLocaleString("ko-KR") : "-"; }
+function esc(s){ return (s==null?"":String(s)).replace(/[&<>"]/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[c])); }
+function ymd(v){ return v ? String(v).slice(0,10) : ""; }
+
+async function api(method, path, body){
+  const opt = { method, headers: { "Authorization": "Bearer " + token() } };
+  if (body !== undefined){ opt.headers["Content-Type"]="application/json"; opt.body=JSON.stringify(body); }
+  const r = await fetch(API + path, opt);
+  let j = {}; try{ j = await r.json(); }catch(e){}
+  if (r.status === 401){ logout(); throw new Error("세션이 만료되었습니다. 다시 로그인하세요."); }
+  if (!r.ok || j.ok === false || j.success === false || j.error){
+    throw new Error(j.error || ("요청 실패 (" + r.status + ")"));
+  }
+  return j;
+}
+
+// ═══════════════════════════════════════════════════════════
+// 로그인
+// ═══════════════════════════════════════════════════════════
+function setLoginMode(m){
+  loginMode = m;
+  $("segInternal").classList.toggle("active", m==="internal");
+  $("segAdvertiser").classList.toggle("active", m==="advertiser");
+}
+async function doLogin(){
+  $("loginErr").textContent = "";
+  const name = $("loginName").value.trim(), pw = $("loginPw").value;
+  if (!name || !pw){ $("loginErr").textContent = "아이디와 비밀번호를 입력하세요."; return; }
+  try{
+    let res;
+    if (loginMode === "advertiser"){
+      res = await postLogin("/api/admin/advertiser-login", name, pw);
+    } else {
+      // 내부: admin/master 먼저, 실패 시 staff 로그인 시도
+      res = await postLogin("/api/admin/login", name, pw);
+      if (!res || !res.success) res = await postLogin("/api/admin/staff-login", name, pw);
+    }
+    if (!res || !res.success || !res.token){
+      $("loginErr").textContent = (res && res.error) || "로그인에 실패했습니다."; return;
+    }
+    sessionStorage.setItem(TOKEN_KEY, res.token);
+    SESSION = { name: res.name, role: res.role, advertiserId: res.advertiserId||null, advertiserName: res.advertiserName||null };
+    sessionStorage.setItem("portal_session", JSON.stringify(SESSION));
+    enterApp();
+  }catch(e){ $("loginErr").textContent = e.message; }
+}
+async function postLogin(path, name, pw){
+  const r = await fetch(API + path, { method:"POST", headers:{"Content-Type":"application/json"}, body:JSON.stringify({name,pw}) });
+  try{ return await r.json(); }catch(e){ return null; }
+}
+function logout(){
+  sessionStorage.removeItem(TOKEN_KEY); sessionStorage.removeItem("portal_session"); SESSION = null;
+  $("appView").classList.add("hidden"); $("loginView").classList.remove("hidden");
+}
+
+// ═══════════════════════════════════════════════════════════
+// 앱 진입 / 뷰 전환
+// ═══════════════════════════════════════════════════════════
+function enterApp(){
+  $("loginView").classList.add("hidden"); $("appView").classList.remove("hidden");
+  $("whoLabel").textContent = SESSION.name + " (" + roleLabel(SESSION.role)
+    + (SESSION.advertiserName ? " · " + SESSION.advertiserName : "") + ")";
+  const internal = isInternal();
+  $("tabOverview").classList.toggle("hidden", !internal);
+  $("btnAddAdv").classList.toggle("hidden", !isAdmin());
+  $("btnAccts").classList.toggle("hidden", !isAdmin());
+  $("btnAddWork").classList.toggle("hidden", !internal);
+  $("advPickWrap").classList.toggle("hidden", !internal);
+  if (internal){ showView("overview"); }
+  else { $("navTabs").classList.add("hidden"); showView("works"); }
+}
+function roleLabel(r){ return {master:"마스터",admin:"관리자",staff:"담당자",advertiser:"광고주"}[r]||r; }
+
+function showView(v){
+  const internal = isInternal();
+  $("overviewView").classList.toggle("hidden", v!=="overview");
+  $("worksView").classList.toggle("hidden", v!=="works");
+  $("tabOverview").classList.toggle("active", v==="overview");
+  $("tabWorks").classList.toggle("active", v==="works");
+  if (v==="overview") loadOverview();
+  if (v==="works"){ if (internal) loadAdvPickThenWorks(); else loadWorks(); }
+}
+
+// ═══════════════════════════════════════════════════════════
+// 전체현황
+// ═══════════════════════════════════════════════════════════
+async function loadOverview(){
+  try{
+    const j = await api("GET","/api/portal/advertisers/overview");
+    const g = j.grand || {work_count:0,unpaid_count:0,unpaid_amount:0};
+    $("grandBox").innerHTML =
+      `<div>총 작업 <b>${g.work_count}</b>건</div>`+
+      `<div>미입금 <b>${g.unpaid_count}</b>건</div>`+
+      `<div>미입금 합계 <b>${won(g.unpaid_amount)}</b>원</div>`;
+    $("overviewBody").innerHTML = (j.data||[]).map(r=>{
+      return `<tr>
+        <td><a href="#" onclick="goAdv('${r.id}');return false">${esc(r.name)}</a></td>
+        <td>${statusPill(r.status)}</td>
+        <td>${esc(r.inad_pm)||"-"}</td>
+        <td class="num">${r.work_count}</td>
+        <td class="num ${num(r.pending_closing)?'miss':''}">${r.pending_closing}</td>
+        <td class="num ${num(r.pending_quote)?'miss':''}">${r.pending_quote}</td>
+        <td class="num ${num(r.pending_invoice)?'miss':''}">${r.pending_invoice}</td>
+        <td class="num ${num(r.unpaid_count)?'miss':''}">${r.unpaid_count}</td>
+        <td class="num">${won(r.unpaid_amount)}</td>
+        <td>${isAdmin()?`<button class="sm" onclick="openAdvModal('${r.id}')">수정</button>`:""}</td>
+      </tr>`;
+    }).join("") || `<tr><td colspan="10" class="muted">거래처가 없습니다.</td></tr>`;
+  }catch(e){ alert(e.message); }
+}
+function statusPill(s){
+  const m = {active:["대행중","ok"],ended:["종료","muted"],pending:["확인중","warn"]}[s]||[s,""];
+  return `<span class="pill ${m[1]}">${m[0]}</span>`;
+}
+function goAdv(id){ showView("works"); setTimeout(()=>{ $("advPick").value=id; loadWorks(); },50); }
+
+// ═══════════════════════════════════════════════════════════
+// 거래처 선택 + 작업 목록
+// ═══════════════════════════════════════════════════════════
+async function loadAdvList(){
+  const j = await api("GET","/api/portal/advertisers");
+  advCache = j.data || [];
+  return advCache;
+}
+async function loadAdvPickThenWorks(){
+  try{
+    await loadAdvList();
+    const cur = $("advPick").value;
+    $("advPick").innerHTML = `<option value="">— 거래처 선택 —</option>` +
+      advCache.map(a=>`<option value="${a.id}">${esc(a.name)}</option>`).join("");
+    if (cur) $("advPick").value = cur;
+    loadWorks();
+  }catch(e){ alert(e.message); }
+}
+async function loadWorks(){
+  try{
+    const params = new URLSearchParams();
+    if (isInternal()){ const a=$("advPick").value; if(a) params.set("advertiser_id",a); }
+    if ($("statusFilter").value) params.set("status",$("statusFilter").value);
+    if ($("qFilter").value.trim()) params.set("q",$("qFilter").value.trim());
+    const j = await api("GET","/api/portal/works?"+params.toString());
+    const adv = isAdvertiser();
+    $("worksBody").innerHTML = (j.data||[]).map(w=>{
+      return `<tr>
+        <td>${w.seq}</td>
+        <td>${esc(w.brand)||"-"}</td>
+        <td>${esc(w.work_type)||"-"}</td>
+        <td>${esc(w.product)||"-"}</td>
+        <td>${esc(w.channel)||"-"}</td>
+        <td>${esc(w.round)||"-"}</td>
+        <td class="num">${w.qty||0}</td>
+        <td>${progressPill(w.progress_status)}</td>
+        <td>${w.work_sheet_url?`<a href="${esc(w.work_sheet_url)}" target="_blank">열기</a>`:"-"}</td>
+        <td>${dateCell(w.closing_date)}</td>
+        <td>${dateCell(w.quote_date)}</td>
+        <td>${dateCell(w.invoice_date)}</td>
+        <td>${dateCell(w.payment_date)}</td>
+        <td class="num">${won(w.total_cost)}</td>
+        <td title="${esc(w.note_inad)} ${esc(w.note_client)}">${esc((w.note_inad||w.note_client||"").slice(0,12))}</td>
+        <td>
+          <button class="sm" onclick='openWorkModal(${JSON.stringify(w.id)})'>${adv?"보기":"수정"}</button>
+          <button class="sm" onclick='openComments(${JSON.stringify(w.id)},${JSON.stringify(w.product||"")})'>💬</button>
+          ${isInternal()?`<button class="sm danger" onclick='delWork(${JSON.stringify(w.id)})'>삭제</button>`:""}
+        </td>
+      </tr>`;
+    }).join("") || `<tr><td colspan="16" class="muted">작업이 없습니다.</td></tr>`;
+  }catch(e){ alert(e.message); }
+}
+function isAdvertiser(){ return SESSION && SESSION.role==="advertiser"; }
+function progressPill(s){
+  const m={planned:["예정","muted"],in_progress:["진행중",""],done:["완료","ok"],hold:["보류","warn"],canceled:["취소","danger"]}[s]||[s,""];
+  return `<span class="pill ${m[1]}">${m[0]}</span>`;
+}
+function dateCell(v){ return v ? `<span class="ok-mark">${ymd(v)}</span>` : `<span class="miss">미완료</span>`; }
+
+// ═══════════════════════════════════════════════════════════
+// 작업 생성/수정 모달
+// ═══════════════════════════════════════════════════════════
+async function openWorkModal(id){
+  editingWorkId = id || null;
+  $("workErr").textContent="";
+  const adv = isAdvertiser();
+  // 광고주는 note_client 외 전부 readonly
+  WORK_FIELD_IDS.forEach(f=>{
+    const el = $("f_"+f); if(!el) return;
+    const ro = adv && f!=="note_client";
+    if (el.tagName==="SELECT") el.disabled = ro; else el.readOnly = ro;
+    el.style.background = ro ? "#f3f4f6" : "#fff";
+  });
+  if (id){
+    $("workModalTitle").textContent = adv ? "작업 상세" : "작업 수정";
+    try{
+      const j = await api("GET","/api/portal/works/"+id);
+      const w = j.data;
+      WORK_FIELD_IDS.forEach(f=>{ const el=$("f_"+f); if(!el) return;
+        el.value = (f.endsWith("_date")||f==="progress_date") ? ymd(w[f]) : (w[f]==null?"":w[f]); });
+    }catch(e){ $("workErr").textContent=e.message; }
+  } else {
+    $("workModalTitle").textContent = "작업 추가";
+    WORK_FIELD_IDS.forEach(f=>{ const el=$("f_"+f); if(el) el.value=""; });
+    $("f_progress_status").value="in_progress";
+  }
+  openOv("workOv");
+}
+async function saveWork(){
+  $("workErr").textContent="";
+  const adv = isAdvertiser();
+  const body = {};
+  if (adv){
+    body.note_client = $("f_note_client").value;
+  } else {
+    WORK_FIELD_IDS.forEach(f=>{ const el=$("f_"+f); if(el) body[f]=el.value; });
+  }
+  try{
+    if (editingWorkId){
+      await api("PATCH","/api/portal/works/"+editingWorkId, body);
+    } else {
+      const advId = $("advPick").value;
+      if (!advId){ $("workErr").textContent="먼저 상단에서 거래처를 선택하세요."; return; }
+      body.advertiser_id = advId;
+      await api("POST","/api/portal/works", body);
+    }
+    closeOv("workOv"); loadWorks();
+  }catch(e){ $("workErr").textContent=e.message; }
+}
+async function delWork(id){
+  if (!confirm("이 작업을 삭제할까요?")) return;
+  try{ await api("DELETE","/api/portal/works/"+id); loadWorks(); }catch(e){ alert(e.message); }
+}
+
+// ═══════════════════════════════════════════════════════════
+// 거래처 생성/수정
+// ═══════════════════════════════════════════════════════════
+async function openAdvModal(id){
+  editingAdvId = id || null;
+  $("advErr").textContent="";
+  if (id){
+    if (!advCacheById(id)) { try{ await loadAdvList(); }catch(e){} }
+    const a = advCacheById(id) || {};
+    $("advModalTitle").textContent="거래처 수정";
+    $("a_name").value=a.name||""; $("a_status").value=a.status||"active";
+    $("a_inad_pm").value=a.inad_pm||""; $("a_memo").value=a.memo||"";
+  } else {
+    $("advModalTitle").textContent="거래처 추가";
+    $("a_name").value=""; $("a_status").value="active"; $("a_inad_pm").value=""; $("a_memo").value="";
+  }
+  openOv("advOv");
+}
+function advCacheById(id){ return advCache.find(a=>a.id===id); }
+async function saveAdv(){
+  $("advErr").textContent="";
+  const body={ name:$("a_name").value.trim(), status:$("a_status").value,
+               inad_pm:$("a_inad_pm").value, memo:$("a_memo").value };
+  if (!body.name){ $("advErr").textContent="거래처명을 입력하세요."; return; }
+  try{
+    if (editingAdvId) await api("PATCH","/api/portal/advertisers/"+editingAdvId, body);
+    else await api("POST","/api/portal/advertisers", body);
+    closeOv("advOv");
+    await loadAdvList();
+    loadOverview();
+  }catch(e){ $("advErr").textContent=e.message; }
+}
+
+// ═══════════════════════════════════════════════════════════
+// 광고주 계정 관리
+// ═══════════════════════════════════════════════════════════
+async function openAcctModal(){
+  $("acctErr").textContent=""; $("ac_name").value=""; $("ac_pw").value="";
+  await loadAdvList();
+  $("ac_adv").innerHTML = advCache.map(a=>`<option value="${a.id}">${esc(a.name)}</option>`).join("");
+  refreshAccts();
+  openOv("acctOv");
+}
+async function refreshAccts(){
+  try{
+    const j = await api("POST","/api/admin/advertiser-users",{action:"list"});
+    $("acctBody").innerHTML = (j.users||[]).map(u=>`<tr>
+      <td>${esc(u.name)}</td><td>${esc(u.advertiserName||"")}</td>
+      <td>${u.active?'<span class="pill ok">활성</span>':'<span class="pill muted">비활성</span>'}</td>
+      <td><button class="sm danger" onclick='delAcct(${JSON.stringify(u.name)})'>삭제</button></td>
+    </tr>`).join("") || `<tr><td colspan="4" class="muted">계정이 없습니다.</td></tr>`;
+  }catch(e){ $("acctErr").textContent=e.message; }
+}
+async function addAcct(){
+  $("acctErr").textContent="";
+  const name=$("ac_name").value.trim(), pw=$("ac_pw").value, advertiserId=$("ac_adv").value;
+  if (!name||!pw||!advertiserId){ $("acctErr").textContent="아이디·비밀번호·거래처를 모두 입력하세요."; return; }
+  try{
+    const j = await api("POST","/api/admin/advertiser-users",{action:"add",name,pw,advertiserId});
+    if (j.error){ $("acctErr").textContent=j.error; return; }
+    $("ac_name").value=""; $("ac_pw").value=""; refreshAccts();
+  }catch(e){ $("acctErr").textContent=e.message; }
+}
+async function delAcct(name){
+  if(!confirm(name+" 계정을 삭제할까요?")) return;
+  try{ await api("POST","/api/admin/advertiser-users",{action:"delete",name}); refreshAccts(); }catch(e){ alert(e.message); }
+}
+
+// ═══════════════════════════════════════════════════════════
+// 코멘트
+// ═══════════════════════════════════════════════════════════
+async function openComments(workId, title){
+  cmtWorkId = workId; $("cmtErr").textContent=""; $("cmtInput").value="";
+  $("cmtWorkTitle").textContent = title||"";
+  await refreshComments(); openOv("cmtOv");
+}
+async function refreshComments(){
+  try{
+    const j = await api("GET","/api/portal/works/"+cmtWorkId+"/comments");
+    $("cmtList").innerHTML = (j.data||[]).map(c=>`
+      <div class="cmt ${c.side==='client'?'client':''}">
+        <div class="meta">${c.side==='client'?'🧑 광고주':'🏢 인애드'} · ${esc(c.author)} · ${ymd(c.created_at)} ${(c.created_at||'').slice(11,16)}</div>
+        <div>${esc(c.content)}</div>
+      </div>`).join("") || `<div class="muted" style="padding:8px">코멘트가 없습니다.</div>`;
+  }catch(e){ $("cmtErr").textContent=e.message; }
+}
+async function postComment(){
+  const content = $("cmtInput").value.trim();
+  if (!content){ return; }
+  try{
+    await api("POST","/api/portal/works/"+cmtWorkId+"/comments",{content});
+    $("cmtInput").value=""; refreshComments();
+  }catch(e){ $("cmtErr").textContent=e.message; }
+}
+
+// ═══════════════════════════════════════════════════════════
+// 모달 유틸 / 부팅
+// ═══════════════════════════════════════════════════════════
+function openOv(id){ $(id).classList.add("show"); }
+function closeOv(id){ $(id).classList.remove("show"); }
+document.querySelectorAll(".ov").forEach(ov=>ov.addEventListener("click",e=>{ if(e.target===ov) ov.classList.remove("show"); }));
+
+(function boot(){
+  if (SESSION && token()){ enterApp(); }
+  else { logout(); }
+})();
+</script>
+</body>
+</html>
