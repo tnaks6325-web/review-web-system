@@ -45,4 +45,12 @@ function adminOrMasterMiddleware(req, res, next) {
   next();
 }
 
-module.exports = { authMiddleware, masterOnlyMiddleware, adminOrMasterMiddleware };
+/** 인애드 내부 담당자 전용 — master/admin/staff 허용, advertiser(광고주) 차단 */
+function internalOnlyMiddleware(req, res, next) {
+  if (!req.admin || !['master', 'admin', 'staff'].includes(req.admin.role)) {
+    return res.status(403).json({ error: '내부 담당자 권한이 필요합니다.' });
+  }
+  next();
+}
+
+module.exports = { authMiddleware, masterOnlyMiddleware, adminOrMasterMiddleware, internalOnlyMiddleware };

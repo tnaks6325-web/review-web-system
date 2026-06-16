@@ -27,6 +27,7 @@ const dedupeRoutes   = require('./routes/dedupe.routes');
 const campaignRoutes = require('./routes/campaign.routes');
 const orderRoutes    = require('./routes/order.routes');
 const productRoutes  = require('./routes/product.routes');
+const portalRoutes   = require('./routes/portal.routes');
 
 const app = express();
 
@@ -77,6 +78,9 @@ app.use('/api/dedupe',    dedupeRoutes);
 app.use('/api/campaign',  campaignRoutes);
 app.use('/api/order',     orderRoutes);
 app.use('/api/product',   productRoutes);
+
+// 업무포털 — 거래처(광고주)별 작업 관리 (Section 13)
+app.use('/api/portal',    portalRoutes);
 app.use('/api/viewer',    diagRoutes);
 app.use('/api/image',     diagRoutes);
 app.use('/api/blacklist', diagRoutes);

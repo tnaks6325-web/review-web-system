@@ -76,6 +76,122 @@ async function loginStaff(name, pw) {
 }
 
 // ═══════════════════════════════════════════════════════════
+// 광고주(Advertiser) 로그인 — 업무포털 거래처 계정
+// staff 로그인 패턴과 동일하되, JWT 에 advertiser_id 를 포함해
+// API 가 "본인 거래처만" 으로 강제 스코핑할 수 있게 한다.
+// ═══════════════════════════════════════════════════════════
+async function loginAdvertiser(name, pw) {
+  if (!name || !pw) {
+    return { success: false, error: '이름과 비밀번호를 입력하세요.' };
+  }
+
+  const { rows } = await pool.query(
+    `SELECT au.*, a.name AS advertiser_name, a.status AS advertiser_status
+       FROM advertiser_users au
+       JOIN advertisers a ON a.id = au.advertiser_id
+      WHERE au.username = $1 AND au.active = TRUE
+      LIMIT 1`,
+    [name]
+  );
+  if (rows.length === 0) {
+    return { success: false, error: '이름 또는 비밀번호가 올바르지 않습니다.' };
+  }
+
+  const user = rows[0];
+  const isMatch = await bcrypt.compare(pw, user.pw_hash);
+  if (!isMatch) {
+    return { success: false, error: '이름 또는 비밀번호가 올바르지 않습니다.' };
+  }
+
+  const token = jwt.sign(
+    { name: user.username, role: 'advertiser', advertiser_id: user.advertiser_id },
+    process.env.JWT_SECRET,
+    { expiresIn: process.env.JWT_EXPIRES_IN || '8h' }
+  );
+  return {
+    success: true,
+    name: user.username,
+    role: 'advertiser',
+    advertiserId: user.advertiser_id,
+    advertiserName: user.advertiser_name,
+    token,
+  };
+}
+
+// ═══════════════════════════════════════════════════════════
+// 광고주(Advertiser) 계정 CRUD — staff CRUD 패턴 미러 + 거래처 연결
+// ═══════════════════════════════════════════════════════════
+async function addAdvertiserUser(name, pw, advertiserId) {
+  if (!name || !pw) throw new Error('이름과 비밀번호를 입력하세요.');
+  if (!advertiserId) throw new Error('거래처(광고주)를 선택하세요.');
+
+  const adv = await pool.query('SELECT 1 FROM advertisers WHERE id = $1', [advertiserId]);
+  if (adv.rows.length === 0) throw new Error('존재하지 않는 거래처입니다.');
+
+  const existing = await pool.query('SELECT 1 FROM advertiser_users WHERE username = $1', [name]);
+  if (existing.rows.length > 0) throw new Error('이미 존재하는 이름입니다.');
+
+  const pw_hash = await bcrypt.hash(pw, 10);
+  await pool.query(
+    'INSERT INTO advertiser_users (advertiser_id, username, pw_hash) VALUES ($1, $2, $3)',
+    [advertiserId, name, pw_hash]
+  );
+  const users = await listAdvertiserUsers();
+  return { success: true, users };
+}
+
+async function editAdvertiserUser(name, newPw, active) {
+  const updates = [];
+  const values = [];
+  let idx = 1;
+
+  if (newPw !== undefined && newPw.length >= 4) {
+    const pw_hash = await bcrypt.hash(newPw, 10);
+    updates.push(`pw_hash = $${idx++}`);
+    values.push(pw_hash);
+  }
+  if (active !== undefined) {
+    updates.push(`active = $${idx++}`);
+    values.push(active);
+  }
+
+  if (updates.length === 0) throw new Error('변경할 항목이 없습니다.');
+
+  values.push(name);
+  const result = await pool.query(
+    `UPDATE advertiser_users SET ${updates.join(', ')} WHERE username = $${idx}`,
+    values
+  );
+  if (result.rowCount === 0) throw new Error('존재하지 않는 광고주 계정입니다.');
+
+  const users = await listAdvertiserUsers();
+  return { success: true, users };
+}
+
+async function deleteAdvertiserUser(name) {
+  const result = await pool.query('DELETE FROM advertiser_users WHERE username = $1', [name]);
+  if (result.rowCount === 0) throw new Error('존재하지 않는 광고주 계정입니다.');
+  const users = await listAdvertiserUsers();
+  return { success: true, users };
+}
+
+async function listAdvertiserUsers() {
+  const { rows } = await pool.query(
+    `SELECT au.username AS name, au.active, au.advertiser_id,
+            a.name AS advertiser_name, au.created_at AS "createdAt"
+       FROM advertiser_users au
+       LEFT JOIN advertisers a ON a.id = au.advertiser_id
+      ORDER BY au.created_at`
+  );
+  return rows.map(r => ({
+    name: r.name,
+    active: r.active !== false,
+    advertiserId: r.advertiser_id,
+    advertiserName: r.advertiser_name,
+  }));
+}
+
+// ═══════════════════════════════════════════════════════════
 // 관리자 계정 CRUD
 // ═══════════════════════════════════════════════════════════
 async function addAdminUser(name, pw) {
@@ -254,6 +370,11 @@ async function changeMasterPw(currentMasterPw, newPw) {
 module.exports = {
   loginAdmin,
   loginStaff,
+  loginAdvertiser,
+  addAdvertiserUser,
+  editAdvertiserUser,
+  deleteAdvertiserUser,
+  listAdvertiserUsers,
   addAdminUser,
   editAdminUser,
   deleteAdminUser,
