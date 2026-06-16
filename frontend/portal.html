@@ -20,7 +20,7 @@
   button.pri:hover{background:var(--pri-d)}
   button.danger{color:var(--danger);border-color:#f3c2c2}
   button.sm{padding:4px 8px;font-size:12px}
-  .wrap{max-width:1280px;margin:0 auto;padding:18px}
+  .wrap{max-width:none;margin:0 auto;padding:14px 20px}
   .tabs{display:flex;gap:6px;margin-bottom:14px}
   .tabs button{border-radius:20px}
   .tabs button.active{background:var(--ink);color:#fff;border-color:var(--ink)}
@@ -32,7 +32,11 @@
   table{width:100%;border-collapse:collapse;font-size:13px}
   th,td{padding:8px 9px;border-bottom:1px solid var(--line);text-align:left;white-space:nowrap}
   th{color:var(--muted);font-weight:600;background:#fafbfc;position:sticky;top:0}
-  .tbl-scroll{overflow:auto;max-height:64vh;border:1px solid var(--line);border-radius:10px}
+  .tbl-scroll{overflow:auto;max-height:68vh;border:1px solid var(--line);border-radius:10px}
+  /* 작업 표: 고정 레이아웃으로 화면 폭에 맞춤(좌우 스크롤 제거), 셀 줄바꿈 */
+  .wtable{table-layout:fixed;width:100%}
+  .wtable th,.wtable td{white-space:normal;word-break:break-word;overflow:hidden;padding:6px 7px}
+  .wtable td a{word-break:break-all}
   .pill{display:inline-block;padding:2px 8px;border-radius:20px;font-size:12px;background:#eef2ff;color:#3730a3}
   .pill.ok{background:#dcfce7;color:#166534}.pill.warn{background:#fef3c7;color:#92400e}
   .pill.muted{background:#f3f4f6;color:#6b7280}.pill.danger{background:#fee2e2;color:#991b1b}
@@ -63,10 +67,8 @@
   .hint{font-size:12px;color:var(--muted);margin-top:4px}
   /* 인라인 작업 추가 행 */
   tbody#newRowBody td{background:#f8fbff;border-bottom:2px solid var(--line);vertical-align:middle}
-  .cellinput{width:auto;min-width:84px;padding:5px 6px;font-size:12px;border-radius:6px}
-  .cellinput.date{min-width:128px}
-  .cellinput.url{min-width:150px}
-  .cellinput.sm{min-width:56px}
+  .cellinput{width:100%;min-width:0;padding:4px 5px;font-size:12px;border-radius:6px}
+  .cellinput.date,.cellinput.url,.cellinput.sm{min-width:0;width:100%}
   tbody#newRowBody .tag{font-size:11px;color:var(--pri);font-weight:700}
 </style>
 </head>
@@ -151,7 +153,13 @@
         <div class="hint" id="addHint">표 상단 입력행에 값을 넣고 <b>추가</b>를 누르면 즉시 등록됩니다. (거래처 선택 필요)</div>
       </div>
       <div class="tbl-scroll">
-        <table>
+        <table class="wtable">
+          <colgroup>
+            <col style="width:3%"><col style="width:8%"><col style="width:6%"><col style="width:8%">
+            <col style="width:6%"><col style="width:4%"><col style="width:4%"><col style="width:6%">
+            <col style="width:6%"><col style="width:7%"><col style="width:7%"><col style="width:7%">
+            <col style="width:7%"><col style="width:5%"><col style="width:6%"><col style="width:10%">
+          </colgroup>
           <thead><tr>
             <th>#</th><th>브랜드</th><th>작업구분</th><th>상품</th><th>채널</th><th>차수</th>
             <th class="num">건수</th><th>진행현황</th><th>시트</th>
