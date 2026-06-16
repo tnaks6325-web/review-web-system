@@ -61,6 +61,13 @@
   .cmt.client{background:#f0f9ff;margin:0 -8px;padding:9px 8px;border-radius:6px}
   .hidden{display:none!important}
   .hint{font-size:12px;color:var(--muted);margin-top:4px}
+  /* 인라인 작업 추가 행 */
+  tbody#newRowBody td{background:#f8fbff;border-bottom:2px solid var(--line);vertical-align:middle}
+  .cellinput{width:auto;min-width:84px;padding:5px 6px;font-size:12px;border-radius:6px}
+  .cellinput.date{min-width:128px}
+  .cellinput.url{min-width:150px}
+  .cellinput.sm{min-width:56px}
+  tbody#newRowBody .tag{font-size:11px;color:var(--pri);font-weight:700}
 </style>
 </head>
 <body>
@@ -138,9 +145,10 @@
           <div class="grow"><label>검색(상품/브랜드/채널)</label>
             <input id="qFilter" onkeydown="if(event.key==='Enter')loadWorks()" placeholder="키워드 후 Enter"></div>
           <div style="align-self:flex-end">
-            <button id="btnAddWork" class="pri" onclick="openWorkModal()">+ 작업 추가</button>
+            <button id="btnAddWork" class="pri" onclick="focusNewWork()">+ 작업 추가</button>
           </div>
         </div>
+        <div class="hint" id="addHint">표 상단 입력행에 값을 넣고 <b>추가</b>를 누르면 즉시 등록됩니다. (거래처 선택 필요)</div>
       </div>
       <div class="tbl-scroll">
         <table>
@@ -150,6 +158,30 @@
             <th>마감자료</th><th>견적서</th><th>세금계산서</th><th>입금일</th>
             <th class="num">총비용</th><th>비고</th><th></th>
           </tr></thead>
+          <tbody id="newRowBody"><tr>
+            <td><span class="tag">신규</span></td>
+            <td><input id="n_brand" class="cellinput" onkeydown="newRowKey(event)"></td>
+            <td><input id="n_work_type" class="cellinput" list="workTypes" onkeydown="newRowKey(event)"></td>
+            <td><input id="n_product" class="cellinput" onkeydown="newRowKey(event)"></td>
+            <td><input id="n_channel" class="cellinput" list="channels" onkeydown="newRowKey(event)"></td>
+            <td><input id="n_round" class="cellinput sm" placeholder="1차" onkeydown="newRowKey(event)"></td>
+            <td><input id="n_qty" class="cellinput sm" type="number" onkeydown="newRowKey(event)"></td>
+            <td><select id="n_progress_status" class="cellinput">
+              <option value="planned">예정</option><option value="in_progress" selected>진행중</option>
+              <option value="done">완료</option><option value="hold">보류</option><option value="canceled">취소</option>
+            </select></td>
+            <td><input id="n_work_sheet_url" class="cellinput url" placeholder="시트 URL" onkeydown="newRowKey(event)"></td>
+            <td><input id="n_closing_date" class="cellinput date" type="date"></td>
+            <td><input id="n_quote_date" class="cellinput date" type="date"></td>
+            <td><input id="n_invoice_date" class="cellinput date" type="date"></td>
+            <td><input id="n_payment_date" class="cellinput date" type="date"></td>
+            <td><input id="n_total_cost" class="cellinput" inputmode="numeric" placeholder="원" onkeydown="newRowKey(event)"></td>
+            <td><input id="n_note_inad" class="cellinput" onkeydown="newRowKey(event)"></td>
+            <td style="white-space:nowrap">
+              <button class="pri sm" onclick="addInlineWork()">추가</button>
+              <button class="sm" onclick="clearNewWork()">지우기</button>
+            </td>
+          </tr></tbody>
           <tbody id="worksBody"></tbody>
         </table>
       </div>
@@ -331,6 +363,8 @@ function enterApp(){
   $("btnAddAdv").classList.toggle("hidden", !isAdmin());
   $("btnAccts").classList.toggle("hidden", !isAdmin());
   $("btnAddWork").classList.toggle("hidden", !internal);
+  $("newRowBody").classList.toggle("hidden", !internal);
+  $("addHint").classList.toggle("hidden", !internal);
   $("advPickWrap").classList.toggle("hidden", !internal);
   if (internal){ showView("overview"); }
   else { $("navTabs").classList.add("hidden"); showView("works"); }
@@ -492,6 +526,29 @@ async function saveWork(){
 async function delWork(id){
   if (!confirm("이 작업을 삭제할까요?")) return;
   try{ await api("DELETE","/api/portal/works/"+id); loadWorks(); }catch(e){ alert(e.message); }
+}
+
+// ── 인라인 작업 추가 (표 상단 입력행) ──
+const NEW_ROW_FIELDS = ["brand","work_type","product","channel","round","qty","progress_status",
+  "work_sheet_url","closing_date","quote_date","invoice_date","payment_date","total_cost","note_inad"];
+function focusNewWork(){ const el=$("n_brand"); if(el){ el.scrollIntoView({block:"center"}); el.focus(); } }
+function clearNewWork(){
+  NEW_ROW_FIELDS.forEach(f=>{ const el=$("n_"+f); if(el){ if(el.tagName==="SELECT") el.value="in_progress"; else el.value=""; } });
+}
+function newRowKey(e){ if(e.key==="Enter") addInlineWork(); }
+async function addInlineWork(){
+  const advId = $("advPick").value;
+  if (!advId){ alert("먼저 상단에서 거래처를 선택하세요."); $("advPick").focus(); return; }
+  const body = { advertiser_id: advId };
+  NEW_ROW_FIELDS.forEach(f=>{ const el=$("n_"+f); if(el) body[f]=el.value; });
+  if (!String(body.product||"").trim() && !String(body.brand||"").trim()){
+    alert("브랜드 또는 상품 중 하나는 입력하세요."); $("n_brand").focus(); return;
+  }
+  try{
+    await api("POST","/api/portal/works", body);
+    clearNewWork(); $("n_brand").focus();
+    loadWorks();
+  }catch(e){ alert(e.message); }
 }
 
 // ═══════════════════════════════════════════════════════════
