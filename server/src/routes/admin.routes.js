@@ -2,9 +2,10 @@ const express = require('express');
 const router = express.Router();
 const { authMiddleware, masterOnlyMiddleware, adminOrMasterMiddleware } = require('../middleware/auth.middleware');
 const {
-  loginAdmin, loginStaff,
+  loginAdmin, loginStaff, loginAdvertiser,
   addAdminUser, editAdminUser, deleteAdminUser, listAdminUsers,
   addStaffUser, editStaffUser, deleteStaffUser, listStaffUsers,
+  addAdvertiserUser, editAdvertiserUser, deleteAdvertiserUser, listAdvertiserUsers,
   changePw, changeMasterPw,
 } = require('../services/auth.service');
 const pool = require('../db/pool');
@@ -32,6 +33,47 @@ router.post('/staff-login', async (req, res, next) => {
     res.json(result);
   } catch (err) {
     next(err);
+  }
+});
+
+// ═══════════════════════════════════════════════════════════
+// POST /api/admin/advertiser-login — 광고주(거래처) 로그인 (업무포털)
+// ═══════════════════════════════════════════════════════════
+router.post('/advertiser-login', async (req, res, next) => {
+  try {
+    const { name, pw } = req.body;
+    const result = await loginAdvertiser(name, pw);
+    res.json(result);
+  } catch (err) {
+    next(err);
+  }
+});
+
+// ═══════════════════════════════════════════════════════════
+// POST /api/admin/advertiser-users — 광고주 계정 CRUD (master/admin 전용)
+// body: { action: 'add'|'edit'|'delete'|'list', name, pw, newPw, active, advertiserId }
+// ═══════════════════════════════════════════════════════════
+router.post('/advertiser-users', authMiddleware, adminOrMasterMiddleware, async (req, res, next) => {
+  try {
+    const { action, name, pw, newPw, active, advertiserId } = req.body;
+
+    switch (action) {
+      case 'add':
+        if (!name || !pw) return res.json({ error: '이름과 비밀번호를 입력하세요.' });
+        return res.json(await addAdvertiserUser(name, pw, advertiserId));
+      case 'edit':
+        if (!name) return res.json({ error: '이름이 필요합니다.' });
+        return res.json(await editAdvertiserUser(name, newPw || pw, active));
+      case 'delete':
+        if (!name) return res.json({ error: '삭제할 이름이 필요합니다.' });
+        return res.json(await deleteAdvertiserUser(name));
+      case 'list':
+        return res.json({ success: true, users: await listAdvertiserUsers() });
+      default:
+        return res.json({ error: '알 수 없는 action: ' + action });
+    }
+  } catch (err) {
+    res.json({ error: err.message });
   }
 });
 
