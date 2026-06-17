@@ -661,6 +661,20 @@ function openOv(id){ $(id).classList.add("show"); }
 function closeOv(id){ $(id).classList.remove("show"); }
 document.querySelectorAll(".ov").forEach(ov=>ov.addEventListener("click",e=>{ if(e.target===ov) ov.classList.remove("show"); }));
 
+// ─── 관리자 대시보드에서 넘어온 SSO 핸드오프 처리 ───
+// admin.html이 localStorage("portal_sso")로 토큰/세션을 넘겨주면 자동 로그인한다.
+(function consumeSSO(){
+  let raw; try{ raw = localStorage.getItem("portal_sso"); }catch(e){ return; }
+  if (!raw) return;
+  try{ localStorage.removeItem("portal_sso"); }catch(e){}   // 1회용: 읽는 즉시 삭제
+  let h; try{ h = JSON.parse(raw); }catch(e){ return; }
+  if (!h || !h.token || !h.ts) return;
+  if (Date.now() - h.ts > 60000) return;                    // 60초 이내 핸드오프만 인정
+  sessionStorage.setItem(TOKEN_KEY, h.token);
+  SESSION = { name: h.name || "관리자", role: h.role || "admin", advertiserId: null, advertiserName: null };
+  sessionStorage.setItem("portal_session", JSON.stringify(SESSION));
+})();
+
 (function boot(){
   if (SESSION && token()){ enterApp(); }
   else { logout(); }
