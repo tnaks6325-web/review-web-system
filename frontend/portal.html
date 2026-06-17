@@ -69,6 +69,10 @@
   tbody#newRowBody td{background:#f8fbff;border-bottom:2px solid var(--line);vertical-align:middle}
   .cellinput{width:100%;min-width:0;padding:4px 5px;font-size:12px;border-radius:6px}
   .cellinput.date,.cellinput.url,.cellinput.sm{min-width:0;width:100%}
+  /* 스마트 날짜 입력: 직접 타이핑(0617/6.17/오늘/+7) + ↑↓ 하루 가감 */
+  .smartdate{font-variant-numeric:tabular-nums}
+  .smartdate.bad{border-color:var(--danger)!important;background:#fff5f5}
+  input.smartdate::placeholder{color:#c0c7d0}
   tbody#newRowBody .tag{font-size:11px;color:var(--pri);font-weight:700}
 </style>
 </head>
@@ -150,7 +154,7 @@
             <button id="btnAddWork" class="pri" onclick="focusNewWork()">+ 작업 추가</button>
           </div>
         </div>
-        <div class="hint" id="addHint">표 상단 입력행에 값을 넣고 <b>추가</b>를 누르면 즉시 등록됩니다. (거래처 선택 필요)</div>
+        <div class="hint" id="addHint">표 상단 입력행에 값을 넣고 <b>추가</b>를 누르면 즉시 등록됩니다. (거래처 선택 필요) · 날짜칸은 <b>0617</b>·<b>6.17</b>·<b>오늘</b>·<b>+7</b> 입력, <b>↑↓</b>로 하루씩 조정</div>
       </div>
       <div class="tbl-scroll">
         <table class="wtable">
@@ -179,10 +183,10 @@
               <option value="done">완료</option><option value="hold">보류</option><option value="canceled">취소</option>
             </select></td>
             <td><input id="n_work_sheet_url" class="cellinput url" placeholder="시트 URL" onkeydown="newRowKey(event)"></td>
-            <td><input id="n_closing_date" class="cellinput date" type="date"></td>
-            <td><input id="n_quote_date" class="cellinput date" type="date"></td>
-            <td><input id="n_invoice_date" class="cellinput date" type="date"></td>
-            <td><input id="n_payment_date" class="cellinput date" type="date"></td>
+            <td><input id="n_closing_date" class="cellinput date smartdate" type="text" inputmode="numeric" autocomplete="off" placeholder="0617" title="숫자만: 0617=올해 6/17 · 6.17 · 2026-06-17 · 오늘/내일 · +7/-3 · ↑↓ 하루씩(Shift=7일)" onkeydown="newRowKey(event)"></td>
+            <td><input id="n_quote_date" class="cellinput date smartdate" type="text" inputmode="numeric" autocomplete="off" placeholder="0617" title="숫자만: 0617=올해 6/17 · 6.17 · 2026-06-17 · 오늘/내일 · +7/-3 · ↑↓ 하루씩(Shift=7일)" onkeydown="newRowKey(event)"></td>
+            <td><input id="n_invoice_date" class="cellinput date smartdate" type="text" inputmode="numeric" autocomplete="off" placeholder="0617" title="숫자만: 0617=올해 6/17 · 6.17 · 2026-06-17 · 오늘/내일 · +7/-3 · ↑↓ 하루씩(Shift=7일)" onkeydown="newRowKey(event)"></td>
+            <td><input id="n_payment_date" class="cellinput date smartdate" type="text" inputmode="numeric" autocomplete="off" placeholder="0617" title="숫자만: 0617=올해 6/17 · 6.17 · 2026-06-17 · 오늘/내일 · +7/-3 · ↑↓ 하루씩(Shift=7일)" onkeydown="newRowKey(event)"></td>
             <td><input id="n_total_cost" class="cellinput" inputmode="numeric" placeholder="원" onkeydown="newRowKey(event)"></td>
             <td><input id="n_note_inad" class="cellinput" onkeydown="newRowKey(event)"></td>
             <td style="white-space:nowrap">
@@ -207,17 +211,17 @@
     <div class="full"><label>상품</label><input id="f_product"></div>
     <div><label>채널</label><input id="f_channel" list="channels"></div>
     <div><label>건수</label><input id="f_qty" type="number"></div>
-    <div><label>진행일</label><input id="f_progress_date" type="date"></div>
+    <div><label>진행일</label><input id="f_progress_date" class="smartdate" type="text" inputmode="numeric" autocomplete="off" placeholder="0617" title="숫자만: 0617=올해 6/17 · 6.17 · 2026-06-17 · 오늘/내일 · +7/-3 · ↑↓ 하루씩(Shift=7일)"></div>
     <div><label>진행현황</label><select id="f_progress_status">
       <option value="planned">예정</option><option value="in_progress" selected>진행중</option>
       <option value="done">완료</option><option value="hold">보류</option><option value="canceled">취소</option>
     </select></div>
     <div><label>인애드 담당</label><input id="f_inad_manager"></div>
     <div class="full"><label>작업시트링크</label><input id="f_work_sheet_url" placeholder="https://docs.google.com/..."></div>
-    <div><label>마감자료완료일</label><input id="f_closing_date" type="date"></div>
-    <div><label>견적서완료일</label><input id="f_quote_date" type="date"></div>
-    <div><label>세금계산서 발급일</label><input id="f_invoice_date" type="date"></div>
-    <div><label>입금일</label><input id="f_payment_date" type="date"></div>
+    <div><label>마감자료완료일</label><input id="f_closing_date" class="smartdate" type="text" inputmode="numeric" autocomplete="off" placeholder="0617" title="숫자만: 0617=올해 6/17 · 6.17 · 2026-06-17 · 오늘/내일 · +7/-3 · ↑↓ 하루씩(Shift=7일)"></div>
+    <div><label>견적서완료일</label><input id="f_quote_date" class="smartdate" type="text" inputmode="numeric" autocomplete="off" placeholder="0617" title="숫자만: 0617=올해 6/17 · 6.17 · 2026-06-17 · 오늘/내일 · +7/-3 · ↑↓ 하루씩(Shift=7일)"></div>
+    <div><label>세금계산서 발급일</label><input id="f_invoice_date" class="smartdate" type="text" inputmode="numeric" autocomplete="off" placeholder="0617" title="숫자만: 0617=올해 6/17 · 6.17 · 2026-06-17 · 오늘/내일 · +7/-3 · ↑↓ 하루씩(Shift=7일)"></div>
+    <div><label>입금일</label><input id="f_payment_date" class="smartdate" type="text" inputmode="numeric" autocomplete="off" placeholder="0617" title="숫자만: 0617=올해 6/17 · 6.17 · 2026-06-17 · 오늘/내일 · +7/-3 · ↑↓ 하루씩(Shift=7일)"></div>
     <div><label>총비용(원)</label><input id="f_total_cost" inputmode="numeric"></div>
     <div><label>선금(원)</label><input id="f_deposit" inputmode="numeric"></div>
     <div class="full"><label>비고(인애드)</label><textarea id="f_note_inad" rows="2"></textarea></div>
@@ -307,6 +311,59 @@ function num(v){ return (v===null||v===undefined||v==="") ? 0 : Number(v); }
 function won(v){ const n = num(v); return n ? n.toLocaleString("ko-KR") : "-"; }
 function esc(s){ return (s==null?"":String(s)).replace(/[&<>"]/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[c])); }
 function ymd(v){ return v ? String(v).slice(0,10) : ""; }
+
+// ═══════════════════════════════════════════════════════════
+// 스마트 날짜 입력 — 직접 타이핑 + ↑↓ 하루 가감 (네이티브 달력 대체)
+//   0617 → 올해 6/17 · 6.17 · 2026-06-17 · 오늘/내일/어제 · +7/-3
+// 값은 항상 YYYY-MM-DD 로 정규화하여 기존 저장 로직과 호환.
+// ═══════════════════════════════════════════════════════════
+function fmtDate(d){ if(!d||isNaN(d)) return ""; const y=d.getFullYear(),m=String(d.getMonth()+1).padStart(2,"0"),dd=String(d.getDate()).padStart(2,"0"); return y+"-"+m+"-"+dd; }
+function _mkDate(y,mo,d){ const dt=new Date(y,mo-1,d); return (dt.getFullYear()===y&&dt.getMonth()===mo-1&&dt.getDate()===d)?dt:null; }
+function parseSmartDate(raw){
+  const s=(raw||"").trim().toLowerCase(); if(!s) return null; let m;
+  if(/^(오늘|today|t)$/.test(s)) return new Date();
+  if(/^(내일|tomorrow)$/.test(s)){ const d=new Date(); d.setDate(d.getDate()+1); return d; }
+  if(/^(어제|yesterday|y)$/.test(s)){ const d=new Date(); d.setDate(d.getDate()-1); return d; }
+  if(m=s.match(/^([+-])\s*(\d+)$/)){ const d=new Date(); d.setHours(0,0,0,0); d.setDate(d.getDate()+(m[1]==="-"?-1:1)*(+m[2])); return d; }
+  if(m=s.match(/^(\d{4})[-.\/](\d{1,2})[-.\/](\d{1,2})$/)) return _mkDate(+m[1],+m[2],+m[3]);
+  if(m=s.match(/^(\d{1,2})[-.\/](\d{1,2})$/)) return _mkDate(new Date().getFullYear(),+m[1],+m[2]);
+  if(/^\d{8}$/.test(s)) return _mkDate(+s.slice(0,4),+s.slice(4,6),+s.slice(6,8));
+  if(/^\d{6}$/.test(s)) return _mkDate(2000+ +s.slice(0,2),+s.slice(2,4),+s.slice(4,6));
+  if(/^\d{4}$/.test(s)) return _mkDate(new Date().getFullYear(),+s.slice(0,2),+s.slice(2,4)); // MMDD
+  return null;
+}
+function _normalizeSmart(el){
+  const v=(el.value||"").trim();
+  if(v===""){ el.classList.remove("bad"); el.value=""; return; }
+  const d=parseSmartDate(v);
+  if(d){ el.value=fmtDate(d); el.classList.remove("bad"); }
+  else { el.classList.add("bad"); }
+}
+// 저장 시 입력값 읽기 — 스마트 날짜칸은 YYYY-MM-DD(또는 빈값)으로 정규화
+function readVal(el){
+  if(!el) return "";
+  if(el.classList && el.classList.contains("smartdate")){ const d=parseSmartDate(el.value); return d?fmtDate(d):""; }
+  return el.value;
+}
+// 이벤트 위임: 모든 .smartdate 입력에 일괄 적용
+document.addEventListener("input", e=>{
+  const el=e.target; if(!el.classList||!el.classList.contains("smartdate")) return;
+  const v=(el.value||"").trim();
+  el.classList.toggle("bad", v!=="" && !parseSmartDate(v));
+});
+document.addEventListener("blur", e=>{
+  const el=e.target; if(el && el.classList && el.classList.contains("smartdate")) _normalizeSmart(el);
+}, true);
+document.addEventListener("keydown", e=>{
+  const el=e.target; if(!el.classList||!el.classList.contains("smartdate")) return;
+  if(e.key==="ArrowUp"||e.key==="ArrowDown"){
+    e.preventDefault();
+    const base=parseSmartDate(el.value)||new Date(); base.setHours(0,0,0,0);
+    const step=e.shiftKey?7:1;
+    base.setDate(base.getDate()+(e.key==="ArrowUp"?step:-step));
+    el.value=fmtDate(base); el.classList.remove("bad");
+  }
+});
 
 async function api(method, path, body){
   const opt = { method, headers: { "Authorization": "Bearer " + token() } };
@@ -501,11 +558,12 @@ async function openWorkModal(id){
       const j = await api("GET","/api/portal/works/"+id);
       const w = j.data;
       WORK_FIELD_IDS.forEach(f=>{ const el=$("f_"+f); if(!el) return;
-        el.value = (f.endsWith("_date")||f==="progress_date") ? ymd(w[f]) : (w[f]==null?"":w[f]); });
+        el.value = (f.endsWith("_date")||f==="progress_date") ? ymd(w[f]) : (w[f]==null?"":w[f]);
+        el.classList && el.classList.remove("bad"); });
     }catch(e){ $("workErr").textContent=e.message; }
   } else {
     $("workModalTitle").textContent = "작업 추가";
-    WORK_FIELD_IDS.forEach(f=>{ const el=$("f_"+f); if(el) el.value=""; });
+    WORK_FIELD_IDS.forEach(f=>{ const el=$("f_"+f); if(el){ el.value=""; el.classList && el.classList.remove("bad"); } });
     $("f_progress_status").value="in_progress";
   }
   openOv("workOv");
@@ -517,7 +575,7 @@ async function saveWork(){
   if (adv){
     body.note_client = $("f_note_client").value;
   } else {
-    WORK_FIELD_IDS.forEach(f=>{ const el=$("f_"+f); if(el) body[f]=el.value; });
+    WORK_FIELD_IDS.forEach(f=>{ const el=$("f_"+f); if(el) body[f]=readVal(el); });
   }
   try{
     if (editingWorkId){
@@ -541,14 +599,14 @@ const NEW_ROW_FIELDS = ["brand","work_type","product","channel","round","qty","p
   "work_sheet_url","closing_date","quote_date","invoice_date","payment_date","total_cost","note_inad"];
 function focusNewWork(){ const el=$("n_brand"); if(el){ el.scrollIntoView({block:"center"}); el.focus(); } }
 function clearNewWork(){
-  NEW_ROW_FIELDS.forEach(f=>{ const el=$("n_"+f); if(el){ if(el.tagName==="SELECT") el.value="in_progress"; else el.value=""; } });
+  NEW_ROW_FIELDS.forEach(f=>{ const el=$("n_"+f); if(el){ if(el.tagName==="SELECT") el.value="in_progress"; else { el.value=""; el.classList && el.classList.remove("bad"); } } });
 }
 function newRowKey(e){ if(e.key==="Enter") addInlineWork(); }
 async function addInlineWork(){
   const advId = $("advPick").value;
   if (!advId){ alert("먼저 상단에서 거래처를 선택하세요."); $("advPick").focus(); return; }
   const body = { advertiser_id: advId };
-  NEW_ROW_FIELDS.forEach(f=>{ const el=$("n_"+f); if(el) body[f]=el.value; });
+  NEW_ROW_FIELDS.forEach(f=>{ const el=$("n_"+f); if(el) body[f]=readVal(el); });
   if (!String(body.product||"").trim() && !String(body.brand||"").trim()){
     alert("브랜드 또는 상품 중 하나는 입력하세요."); $("n_brand").focus(); return;
   }
