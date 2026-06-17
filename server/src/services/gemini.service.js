@@ -24,8 +24,10 @@ const { logger } = require('../utils/logger');
 const _modelPool = [];    // [{ genAI, model, key(마스킹) }]
 let _poolIndex = 0;
 
-// 모델/생성 설정 — 기본을 thinking 없는 빠른 모델로(2.0-flash). 필요시 GEMINI_MODEL로 override.
-const MODEL_NAME = process.env.GEMINI_MODEL || 'gemini-2.0-flash';
+// 모델/생성 설정 — 기본을 thinking 없는 빠른 모델로. 필요시 GEMINI_MODEL로 override.
+// ※ gemini-2.0-flash 는 구글에서 단종(404)되어 현행 모델로 기본값 변경.
+//   배포 환경에서는 GEMINI_MODEL 환경변수로 명시 지정 권장(AI Studio 모델 목록 확인).
+const MODEL_NAME = process.env.GEMINI_MODEL || 'gemini-2.5-flash';
 const GEN_CONFIG = {
   temperature: 0,                       // 결정적 출력(추출 안정)
   maxOutputTokens: 800,
