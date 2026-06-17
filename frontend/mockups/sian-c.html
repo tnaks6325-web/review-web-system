@@ -1,0 +1,317 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="UTF-8"/>
+<meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+<title>시안 C · 미니멀 토스풍 — InAd 리뷰어</title>
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@fortawesome/fontawesome-free@6.4.0/css/all.min.css"/>
+<link href="https://fonts.googleapis.com/css2?family=Noto+Sans+KR:wght@300;400;500;600;700;800&display=swap" rel="stylesheet"/>
+<style>
+:root{
+  --p:#5046E4;--p-d:#3730A3;--p-l:#F2F1FE;
+  --ok:#1FB471;--ok-l:#E7F8F0;--warn:#F59E0B;--err:#EF4444;
+  --bg:#FBFBFD;--card:#fff;--bd:#EFEFF3;--bd2:#E6E6EC;
+  --t1:#191F28;--t2:#6B7280;--t3:#ADB3BE;--r:16px;--rs:12px;
+}
+*{box-sizing:border-box;margin:0;padding:0;-webkit-tap-highlight-color:transparent}
+body{font-family:'Noto Sans KR',sans-serif;background:#EDEEF2;color:var(--t1);letter-spacing:-.01em}
+.phone{max-width:440px;margin:0 auto;min-height:100vh;background:var(--bg);position:relative;box-shadow:0 0 40px rgba(0,0,0,.1);overflow:hidden}
+.screen{display:none;padding-bottom:80px}.screen.on{display:block;animation:fade .22s ease}
+@keyframes fade{from{opacity:0}to{opacity:1}}
+.tag{position:fixed;top:8px;left:8px;z-index:300;font-size:.8rem;font-weight:700;color:var(--t1);background:#fff;padding:4px 11px;border-radius:8px;border:1px solid var(--bd2);box-shadow:0 2px 8px rgba(0,0,0,.06)}
+
+/* 상단바 - 미니멀 */
+.topbar{background:var(--bg);padding:16px 20px 8px;position:sticky;top:0;z-index:50}
+.tbrow{display:flex;align-items:center}
+.tbrow .nm{font-size:1.5rem;font-weight:800;letter-spacing:-.03em}
+.tbrow .ico{margin-left:auto;display:flex;gap:6px}
+.tbrow .ico button{width:38px;height:38px;border-radius:11px;border:none;background:#fff;color:var(--t2);font-size:1rem;box-shadow:0 1px 4px rgba(0,0,0,.04)}
+.tbsub{font-size:.85rem;color:var(--t3);margin-top:3px;font-weight:500}
+
+/* 검색 */
+.search{margin:12px 20px 0;background:#F1F2F6;border-radius:13px;display:flex;align-items:center;gap:9px;padding:12px 15px}
+.search i{color:var(--t3)}.search input{border:none;background:none;outline:none;flex:1;font-size:.9rem;font-family:inherit}
+
+/* 칩 */
+.chips{display:flex;gap:7px;padding:14px 20px 4px;overflow-x:auto}
+.chip{flex:0 0 auto;font-size:.83rem;font-weight:600;color:var(--t2);background:#fff;border:1px solid var(--bd2);padding:7px 14px;border-radius:10px}
+.chip.on{background:var(--t1);color:#fff;border-color:var(--t1)}
+
+.sec{padding:20px 20px 6px;font-size:1.05rem;font-weight:800}
+.sec .cnt{color:var(--t3);font-weight:600;margin-left:5px;font-size:.92rem}
+
+/* 캠페인 리스트 - 평면 리스트형 (밀도↑) */
+.clist{background:#fff;margin:8px 16px;border-radius:var(--r);overflow:hidden;box-shadow:0 1px 6px rgba(0,0,0,.03)}
+.ci{display:flex;gap:14px;padding:15px 16px;cursor:pointer;border-bottom:1px solid var(--bd)}
+.ci:last-child{border:none}.ci:active{background:#FAFAFC}
+.cthumb{flex:0 0 66px;width:66px;height:66px;border-radius:14px;background:#F1F2F6;display:grid;place-items:center;font-size:1.8rem;position:relative}
+.cinfo{flex:1;min-width:0}
+.cline1{display:flex;align-items:center;gap:6px;margin-bottom:5px}
+.cbg{font-size:.66rem;font-weight:700;color:var(--t2);background:#F1F2F6;padding:2px 7px;border-radius:6px}
+.clive{font-size:.66rem;font-weight:700;color:var(--ok);display:inline-flex;align-items:center;gap:3px}
+.clive::before{content:"";width:5px;height:5px;border-radius:50%;background:var(--ok)}
+.ci h4{font-size:.92rem;font-weight:600;line-height:1.35;overflow:hidden;display:-webkit-box;-webkit-line-clamp:1;-webkit-box-orient:vertical;margin-bottom:6px}
+.cline2{display:flex;align-items:baseline;gap:8px}
+.cprice{font-size:1.02rem;font-weight:800}.cprice small{font-size:.7rem;color:var(--t3);font-weight:500}
+.creward{font-size:.74rem;font-weight:700;color:var(--p);background:var(--p-l);padding:2px 8px;border-radius:7px}
+.cright{flex-shrink:0;text-align:right;display:flex;flex-direction:column;justify-content:center;gap:3px}
+.cnum{font-size:.7rem;color:var(--t3);font-weight:600}.cnum b{color:var(--t1);font-weight:700}
+.cmall{font-size:.66rem;color:var(--t3);font-weight:600;margin-top:2px}
+
+/* 로그인 - 미니멀 */
+#login{position:absolute;inset:0;z-index:200;background:#fff;display:flex;flex-direction:column;padding:0 24px}
+.lwrap{margin-top:auto;margin-bottom:auto;width:100%}
+.llogo{width:52px;height:52px;border-radius:16px;background:var(--p);color:#fff;display:grid;place-items:center;font-size:1.4rem;margin-bottom:22px}
+#login h1{font-size:1.6rem;font-weight:800;line-height:1.35;letter-spacing:-.03em}
+#login h1 span{color:var(--p)}
+#login .d{font-size:.9rem;color:var(--t2);margin:10px 0 30px;font-weight:500}
+.field{margin-bottom:12px}
+.flab{font-size:.78rem;color:var(--t2);font-weight:600;margin-bottom:7px;display:block}
+.inp{width:100%;padding:15px 16px;border:none;border-radius:13px;background:#F1F2F6;font-size:.95rem;outline:none;font-family:inherit;transition:.15s}
+.inp:focus{background:#fff;box-shadow:inset 0 0 0 1.5px var(--p)}
+.phonerow{display:flex;align-items:center;background:#F1F2F6;border-radius:13px;overflow:hidden}
+.phonerow span{padding:0 14px;font-weight:700;color:var(--t2)}
+.phonerow input{border:none;background:none;flex:1;padding:15px 6px 15px 0;outline:none;font-size:.95rem;font-family:inherit}
+.btn{width:100%;padding:16px;border:none;border-radius:14px;background:var(--p);color:#fff;font-size:1rem;font-weight:700;cursor:pointer;margin-top:16px}
+.btn:active{background:var(--p-d)}
+.lsw{text-align:center;font-size:.85rem;color:var(--t2);margin-top:20px}.lsw a{color:var(--p);font-weight:700;text-decoration:none}
+.lbottom{margin-top:auto;padding:20px 0 28px}
+.notice{background:#F1F2F6;border-radius:13px;padding:14px 16px;display:flex;gap:11px;align-items:center}
+.notice .ic{width:38px;height:38px;border-radius:11px;background:#fff;color:var(--warn);display:grid;place-items:center;flex-shrink:0}
+.notice b{font-size:.84rem;font-weight:700}.notice p{font-size:.74rem;color:var(--t2);margin-top:2px}
+
+/* 탭바 */
+.tabbar{position:fixed;bottom:0;left:50%;transform:translateX(-50%);width:100%;max-width:440px;background:rgba(255,255,255,.94);backdrop-filter:blur(10px);display:flex;padding:8px 0 max(8px,env(safe-area-inset-bottom));z-index:60;border-top:1px solid var(--bd)}
+.tab{flex:1;background:none;border:none;display:flex;flex-direction:column;align-items:center;gap:3px;font-size:.65rem;color:var(--t3);font-weight:600;cursor:pointer}
+.tab i{font-size:1.1rem}.tab.on{color:var(--t1)}
+
+/* 상세 */
+.dtop{padding:12px 16px;position:sticky;top:0;background:var(--bg);z-index:40;display:flex;align-items:center}
+.back{width:38px;height:38px;border-radius:11px;border:none;background:#fff;color:var(--t1);font-size:1rem;box-shadow:0 1px 4px rgba(0,0,0,.05);cursor:pointer}
+.dhero{margin:4px 16px 0;border-radius:18px;aspect-ratio:1/.74;background:#F1F2F6;display:grid;place-items:center;font-size:4rem}
+.dtitle{padding:18px 20px 6px}
+.dbg{display:flex;gap:6px;margin-bottom:10px}
+.bdg{font-size:.7rem;font-weight:700;padding:3px 9px;border-radius:8px;background:#F1F2F6;color:var(--t2)}
+.bdg.ok{background:var(--ok-l);color:#0E7A4B}
+.dtitle h2{font-size:1.4rem;font-weight:800;letter-spacing:-.02em}
+.dremain{margin-top:10px;background:#fff;border-radius:13px;padding:13px 16px;display:flex;justify-content:space-around;box-shadow:0 1px 6px rgba(0,0,0,.03)}
+.dremain div{text-align:center}.dremain .l{font-size:.72rem;color:var(--t3);font-weight:600}.dremain .v{font-size:1.05rem;font-weight:800;margin-top:3px}.dremain .v b{color:var(--p)}
+.card{margin:14px 16px;background:#fff;border-radius:var(--r);padding:4px 18px;box-shadow:0 1px 6px rgba(0,0,0,.03)}
+.cardt{font-size:.82rem;font-weight:800;color:var(--t2);padding:15px 0 4px}
+.trow{display:flex;justify-content:space-between;align-items:center;padding:12px 0;font-size:.88rem;border-bottom:1px solid var(--bd)}
+.trow:last-child{border:none}.trow .k{color:var(--t3);font-weight:500}.trow .v{font-weight:700;text-align:right}
+.trow .v.pay{color:var(--p)}.trow .v.lock{color:var(--t3);font-weight:500}
+.guidecard{margin:14px 16px;background:#FFFCF4;border:1px solid #FCEFC7;border-radius:var(--r);padding:16px 18px}
+.guidecard h4{font-size:.86rem;font-weight:800;color:#946200;margin-bottom:10px}.guidecard p{font-size:.84rem;color:#7A5500;line-height:1.7}
+.dcta{position:fixed;bottom:80px;left:50%;transform:translateX(-50%);width:100%;max-width:440px;padding:12px 16px;background:linear-gradient(180deg,transparent,var(--bg) 35%)}
+.dcta button{width:100%;padding:16px;border:none;border-radius:14px;background:var(--p);color:#fff;font-size:1rem;font-weight:700;cursor:pointer}
+
+/* 내 캠페인 */
+.statseg{margin:8px 16px 0;background:#fff;border-radius:var(--r);padding:6px;box-shadow:0 1px 6px rgba(0,0,0,.03);display:grid;grid-template-columns:1fr 1fr;gap:2px}
+.seg{padding:16px 14px;border-radius:12px;cursor:pointer}
+.seg:active{background:#F7F7FA}
+.seg .n{font-size:1.5rem;font-weight:800}.seg .l{font-size:.78rem;color:var(--t2);margin-top:4px;font-weight:600}
+.seg .n.acc{color:var(--p)}
+.miniseg{display:grid;grid-template-columns:1fr 1fr 1fr;gap:2px;margin:2px 16px 0;background:#fff;border-radius:var(--r);padding:6px;box-shadow:0 1px 6px rgba(0,0,0,.03)}
+.mseg{padding:13px 6px;text-align:center;border-radius:10px}
+.mseg .n{font-size:1.15rem;font-weight:800}.mseg .l{font-size:.68rem;color:var(--t3);margin-top:4px;font-weight:600}
+.subtabs{display:flex;gap:18px;padding:14px 20px 0;overflow-x:auto}
+.subtab{font-size:.88rem;font-weight:600;color:var(--t3);white-space:nowrap;padding-bottom:9px;border-bottom:2px solid transparent;cursor:pointer}
+.subtab.on{color:var(--t1);border-color:var(--t1);font-weight:800}
+.empty{text-align:center;padding:54px 24px;color:var(--t3)}
+.empty i{font-size:2rem;color:#D6D8E0;display:block;margin-bottom:14px}
+.empty p{font-size:.92rem;font-weight:600;color:var(--t2)}
+.empty a{display:inline-block;margin-top:14px;color:var(--p);font-weight:700;font-size:.85rem;text-decoration:none}
+
+/* 내 정보 */
+.list{background:#fff;margin:8px 16px;border-radius:var(--r);overflow:hidden;box-shadow:0 1px 6px rgba(0,0,0,.03)}
+.li{display:flex;align-items:center;gap:13px;padding:16px 18px;border-bottom:1px solid var(--bd)}
+.li:last-child{border:none}
+.li .k{color:var(--t2);font-size:.88rem;font-weight:500}.li .v{margin-left:auto;font-weight:700;font-size:.9rem}
+.liico{width:36px;height:36px;border-radius:11px;background:#F1F2F6;color:var(--t2);display:grid;place-items:center;font-size:.95rem}
+.li.tap{cursor:pointer}.li.tap .v{color:var(--t3)}.li.tap::after{content:"›";color:var(--t3);font-size:1.2rem;margin-left:6px}
+.profcard{margin:8px 16px;background:#fff;border-radius:var(--r);padding:20px;box-shadow:0 1px 6px rgba(0,0,0,.03);display:flex;align-items:center;gap:15px}
+.profav{width:56px;height:56px;border-radius:18px;background:var(--p);color:#fff;display:grid;place-items:center;font-size:1.4rem;font-weight:800}
+.profcard h3{font-size:1.2rem;font-weight:800}.profcard p{font-size:.8rem;color:var(--t3);margin-top:3px}
+.sectit{padding:18px 20px 6px;font-size:.82rem;font-weight:800;color:var(--t2)}
+.empty-acct{padding:18px;text-align:center;color:var(--t3);font-size:.85rem}
+.addbtn{display:block;width:calc(100% - 32px);margin:6px 16px;padding:15px;border:none;background:var(--p-l);color:var(--p);border-radius:13px;font-weight:700;font-size:.9rem;cursor:pointer}
+
+/* 온보딩 */
+.ovl{position:fixed;inset:0;background:rgba(25,31,40,.45);z-index:400;display:none;align-items:flex-end;justify-content:center}
+.ovl.on{display:flex}
+.obx{background:#fff;border-radius:24px 24px 0 0;width:100%;max-width:440px;padding:8px 24px 26px;animation:slide .3s cubic-bezier(.2,.8,.2,1)}
+@keyframes slide{from{transform:translateY(100%)}to{transform:none}}
+.ohandle{width:40px;height:4px;border-radius:4px;background:var(--bd2);margin:8px auto 18px}
+.oic{width:60px;height:60px;border-radius:20px;background:var(--p-l);color:var(--p);display:grid;place-items:center;font-size:1.6rem;margin-bottom:16px}
+.obx h3{font-size:1.35rem;font-weight:800;letter-spacing:-.02em}
+.obx .od{font-size:.88rem;color:var(--t2);margin:8px 0 20px;line-height:1.6}
+.ostep{display:flex;gap:13px;align-items:center;padding:11px 0;border-top:1px solid var(--bd)}
+.ostep .num{flex:0 0 32px;width:32px;height:32px;border-radius:11px;background:#F1F2F6;color:var(--t1);font-weight:800;display:grid;place-items:center;font-size:.85rem}
+.ostep .tx b{font-size:.9rem;font-weight:700}.ostep .tx p{font-size:.78rem;color:var(--t3);margin-top:2px}
+.ofoot{margin-top:20px}
+.ofoot .start{width:100%;padding:16px;border:none;border-radius:14px;background:var(--p);color:#fff;font-weight:700;font-size:1rem;cursor:pointer}
+.ofoot .skip{display:block;width:100%;text-align:center;margin-top:12px;color:var(--t3);font-size:.82rem;font-weight:600;background:none;border:none;cursor:pointer}
+</style>
+</head>
+<body>
+<span class="tag">시안 C · 미니멀 토스풍</span>
+<div class="phone">
+
+  <!-- 로그인 -->
+  <div id="login">
+    <div class="lwrap">
+      <div class="llogo"><i class="fas fa-star-half-alt"></i></div>
+      <h1>리뷰하고 페이백 받는<br><span>InAd 리뷰어</span></h1>
+      <p class="d">등록된 이름과 전화번호 뒤 8자리로 로그인하세요</p>
+      <div class="field"><span class="flab">이름</span><input class="inp" placeholder="이름을 입력하세요"/></div>
+      <div class="field"><span class="flab">전화번호 뒤 8자리</span><div class="phonerow"><span>010</span><input placeholder="12345678"/></div></div>
+      <button class="btn" onclick="enterApp()">로그인</button>
+      <p class="lsw">처음이신가요? <a href="#">인애드 등록하기 →</a></p>
+    </div>
+    <div class="lbottom">
+      <div class="notice"><div class="ic"><i class="fas fa-bullhorn"></i></div><div><b>N여성부계 고액 매입모집</b><p>리뷰비 120,000원 · 82~04년생 · 0/10명</p></div></div>
+    </div>
+  </div>
+
+  <!-- 캠페인 목록 -->
+  <div id="s-camp" class="screen on">
+    <div class="topbar">
+      <div class="tbrow"><div class="nm">캠페인</div><div class="ico"><button><i class="fas fa-bell"></i></button><button><i class="far fa-bookmark"></i></button></div></div>
+      <div class="tbsub">마음에 드는 캠페인에 신청하세요 · 총 48개</div>
+    </div>
+    <div class="search"><i class="fas fa-search"></i><input placeholder="상품·브랜드 검색"/></div>
+    <div class="chips"><span class="chip on">전체</span><span class="chip">진행중</span><span class="chip">실배송</span><span class="chip">기타배송</span><span class="chip">고액</span></div>
+    <div class="sec">모집중 <span class="cnt">8</span></div>
+    <div class="clist" id="clist"></div>
+  </div>
+
+  <!-- 상세 -->
+  <div id="s-detail" class="screen">
+    <div class="dtop"><button class="back" onclick="go('s-camp')"><i class="fas fa-arrow-left"></i></button></div>
+    <div class="dhero">💊</div>
+    <div class="dtitle">
+      <div class="dbg"><span class="bdg">기타배송(박스)</span><span class="bdg ok">모집중</span></div>
+      <h2>키성장영양제</h2>
+      <div class="dremain">
+        <div><div class="l">오늘 남은 참여</div><div class="v"><b>9</b>/10</div></div>
+        <div><div class="l">전체 남은 참여</div><div class="v"><b>9</b>/30</div></div>
+        <div><div class="l">리뷰비</div><div class="v" style="color:var(--p)">1,500원</div></div>
+      </div>
+    </div>
+    <div class="card">
+      <div class="cardt">결제 정보</div>
+      <div class="trow"><span class="k">타입</span><span class="v">상품리뷰</span></div>
+      <div class="trow"><span class="k">상품옵션</span><span class="v">옵션1 · 1개 (9/30)</span></div>
+      <div class="trow"><span class="k">제품비</span><span class="v">35,900 원</span></div>
+      <div class="trow"><span class="k">배송비</span><span class="v">0 원</span></div>
+      <div class="trow"><span class="k">총 결제금액</span><span class="v">35,900 원</span></div>
+      <div class="trow"><span class="k">리뷰비</span><span class="v pay">1,500 원</span></div>
+      <div class="trow"><span class="k">페이백 입금명</span><span class="v">ㄱㄷㅎ키성장영양제</span></div>
+    </div>
+    <div class="guidecard"><h4>캠페인 가이드</h4><p>· 링크구매로 해주세요~<br>· 할인쿠폰 꼭 사용해서 구매해주셔야 합니다</p></div>
+    <div class="card">
+      <div class="cardt">쇼핑몰 정보</div>
+      <div class="trow"><span class="k">쇼핑몰</span><span class="v" style="color:var(--ok)">G마켓 바로이동 ›</span></div>
+      <div class="trow"><span class="k">판매자명</span><span class="v lock"><i class="fas fa-lock"></i> 신청 후 공개</span></div>
+      <div class="trow"><span class="k">상품명</span><span class="v lock"><i class="fas fa-lock"></i> 신청 후 공개</span></div>
+      <div class="trow"><span class="k">상품코드</span><span class="v">4776**5595</span></div>
+      <div class="trow"><span class="k">상품 URL</span><span class="v lock"><i class="fas fa-lock"></i> 신청 후 공개</span></div>
+      <div class="trow"><span class="k">재참여 가능</span><span class="v">구매완료 후 7일</span></div>
+      <div class="trow"><span class="k">일 구매 시간</span><span class="v">매일 15:00~21:00</span></div>
+    </div>
+    <div style="text-align:center;font-size:.78rem;color:var(--t3);padding:0 16px 110px">문의 : 카카오톡 fnhyun · [G마켓] 계정 전용</div>
+    <div class="dcta"><button>G마켓 계정 등록하기</button></div>
+  </div>
+
+  <!-- 내 캠페인 -->
+  <div id="s-mine" class="screen">
+    <div class="topbar"><div class="tbrow"><div class="nm">내 캠페인</div></div><div class="tbsub">신청한 캠페인의 진행 상태를 확인하세요</div></div>
+    <div class="search"><i class="fas fa-search"></i><input placeholder="캠페인·제품명 검색"/></div>
+    <div class="statseg">
+      <div class="seg"><div class="n acc">0</div><div class="l">진행중</div></div>
+      <div class="seg"><div class="n">0</div><div class="l">완료</div></div>
+    </div>
+    <div class="miniseg">
+      <div class="mseg"><div class="n">0</div><div class="l">수정필요</div></div>
+      <div class="mseg"><div class="n">0</div><div class="l">리뷰대기</div></div>
+      <div class="mseg"><div class="n">0</div><div class="l">페이백</div></div>
+      <div class="mseg"><div class="n">0</div><div class="l">한달리뷰</div></div>
+      <div class="mseg"><div class="n">0</div><div class="l">취소·반려</div></div>
+      <div class="mseg"><div class="n">48</div><div class="l">참여가능</div></div>
+    </div>
+    <div class="subtabs"><span class="subtab on">진행중 0</span><span class="subtab">한달리뷰 0</span><span class="subtab">수정필요 0</span><span class="subtab">리뷰대기 0</span><span class="subtab">페이백 0</span></div>
+    <div class="empty"><i class="fas fa-clipboard-list"></i><p>진행중인 캠페인이 없습니다</p><a href="#" onclick="go('s-camp')">캠페인 둘러보기 →</a></div>
+  </div>
+
+  <!-- 내 정보 -->
+  <div id="s-info" class="screen">
+    <div class="topbar"><div class="tbrow"><div class="nm">내정보</div></div></div>
+    <div class="profcard"><div class="profav">김</div><div><h3>김수만</h3><p>010-8592-6325 · 2026.06.17 가입</p></div></div>
+    <div class="sectit">기본 정보</div>
+    <div class="list">
+      <div class="li"><div class="liico"><i class="fas fa-user"></i></div><span class="k">이름</span><span class="v">김수만</span></div>
+      <div class="li"><div class="liico"><i class="fas fa-phone"></i></div><span class="k">휴대폰</span><span class="v">010-8592-6325</span></div>
+      <div class="li"><div class="liico"><i class="fas fa-calendar"></i></div><span class="k">첫 접속일</span><span class="v">2026.06.17</span></div>
+    </div>
+    <div class="sectit">계좌 관리</div>
+    <div class="list"><div class="empty-acct">등록된 계좌가 없습니다</div></div>
+    <button class="addbtn"><i class="fas fa-plus"></i> 계좌 추가</button>
+    <div class="sectit">관리</div>
+    <div class="list">
+      <div class="li tap"><div class="liico"><i class="fas fa-truck"></i></div><span class="k">배송지 관리</span></div>
+      <div class="li tap"><div class="liico"><i class="fas fa-store"></i></div><span class="k">스토어 계정 관리</span></div>
+      <div class="li tap"><div class="liico"><i class="fas fa-right-from-bracket"></i></div><span class="k">로그아웃</span></div>
+    </div>
+    <div style="height:24px"></div>
+  </div>
+
+  <div class="tabbar">
+    <button class="tab on" data-s="s-camp" onclick="tab(this)"><i class="fas fa-bullhorn"></i>캠페인</button>
+    <button class="tab" data-s="s-mine" onclick="tab(this)"><i class="fas fa-clipboard-list"></i>내 캠페인</button>
+    <button class="tab" data-s="s-info" onclick="tab(this)"><i class="fas fa-user"></i>내정보</button>
+    <button class="tab" onclick="openOnboard()"><i class="fas fa-book-open"></i>가이드</button>
+  </div>
+
+  <div class="ovl" id="onboard">
+    <div class="obx">
+      <div class="ohandle"></div>
+      <div class="oic"><i class="fas fa-hand-sparkles"></i></div>
+      <h3>InAd 리뷰어 시작하기</h3>
+      <p class="od">처음이시군요! 3단계만 알면 바로 참여할 수 있어요.</p>
+      <div class="ostep"><div class="num">1</div><div class="tx"><b>캠페인 찾기</b><p>모집중인 캠페인에서 마음에 드는 상품을 골라요.</p></div></div>
+      <div class="ostep"><div class="num">2</div><div class="tx"><b>신청 &amp; 구매</b><p>계정 등록 후 안내대로 구매하고 리뷰를 남겨요.</p></div></div>
+      <div class="ostep"><div class="num">3</div><div class="tx"><b>페이백 받기</b><p>리뷰 완료 후 매주 화/금 등록 계좌로 정산돼요.</p></div></div>
+      <div class="ofoot"><button class="start" onclick="closeOnboard()">시작하기</button><button class="skip" onclick="closeOnboard()">다음에 볼게요</button></div>
+    </div>
+  </div>
+</div>
+
+<script>
+const camps=[
+ {ic:'💊',bg:'기타배송',rw:'+1,500',title:'키성장영양제 1개 초유단백 우유칼슘',price:'35,900',today:'1/10',all:'21/30',mall:'G마켓'},
+ {ic:'🖼️',bg:'기타배송',rw:'+1,500',title:'소소꼬모 명태 그림 풍수 인테리어 액자',price:'9,500',today:'2/5',all:'7/20',mall:'스마트스토어'},
+ {ic:'🧴',bg:'실배송',rw:'+1,500',title:'코리아나 로댕 쏘 맨즈 프레쉬 올인원',price:'16,900',today:'2/10',all:'17/30',mall:'쿠팡'},
+ {ic:'🐟',bg:'기타배송',rw:'+1,500',title:'명태 그림 액자 복 들어오는 풍수 액자',price:'9,900',today:'1/5',all:'26/30',mall:'스마트스토어'},
+ {ic:'☕',bg:'실배송',rw:'+1,200',title:'프리미엄 핸드드립 원두 200g 다크로스팅',price:'12,800',today:'0/8',all:'14/25',mall:'쿠팡'},
+];
+document.getElementById('clist').innerHTML=camps.map(c=>`
+ <div class="ci" onclick="go('s-detail')">
+   <div class="cthumb">${c.ic}</div>
+   <div class="cinfo">
+     <div class="cline1"><span class="cbg">${c.bg}</span><span class="clive">진행중</span></div>
+     <h4>${c.title}</h4>
+     <div class="cline2"><span class="cprice">${c.price}<small>원</small></span><span class="creward">리뷰비 ${c.rw}</span></div>
+   </div>
+   <div class="cright"><div class="cnum">오늘 <b>${c.today}</b></div><div class="cnum">전체 <b>${c.all}</b></div><div class="cmall">${c.mall}</div></div>
+ </div>`).join('');
+
+function go(id){document.querySelectorAll('.screen').forEach(s=>s.classList.remove('on'));document.getElementById(id).classList.add('on');window.scrollTo(0,0);
+  const map={'s-camp':0,'s-mine':1,'s-info':2};const tabs=document.querySelectorAll('.tab');tabs.forEach(t=>t.classList.remove('on'));if(map[id]!=null)tabs[map[id]].classList.add('on');}
+function tab(el){go(el.dataset.s);}
+function enterApp(){document.getElementById('login').style.display='none';setTimeout(openOnboard,400);}
+function openOnboard(){document.getElementById('onboard').classList.add('on');}
+function closeOnboard(){document.getElementById('onboard').classList.remove('on');}
+</script>
+</body>
+</html>
