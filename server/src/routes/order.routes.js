@@ -34,6 +34,17 @@ const AE_FIELDS = [
   'product_url', 'work_sheet_url', 'goods_cost_type',
 ];
 
+// 인트라넷 intake 수정 가능 필드 (status/created_by/processed_by/admin_memo 등 내부 상태는 제외)
+// updated_by / updated_by_name 은 감사용으로 별도 처리(컨텐츠 수정으로 카운트하지 않음).
+const INTAKE_EDITABLE_FIELDS = [
+  'title', 'start_date', 'manager_name', 'product_option', 'product_options_json',
+  'pay_amount', 'daily_count', 'daily_count_text', 'purchase_time',
+  'inflow_keyword', 'inflow_type', 'inflow_guide',
+  'delivery_type', 'courier_proxy', 'review_type', 'recruit_count',
+  'review_guide', 'special_notes', 'product_url', 'work_sheet_url', 'goods_cost_type',
+];
+const INTAKE_INT_FIELDS = new Set(['pay_amount', 'daily_count', 'recruit_count']);
+
 // ── 테이블 자동 생성 (마이그레이션 실패 시 안전장치) ──
 let _tableChecked = false;
 async function _ensureTables() {
@@ -83,6 +94,9 @@ async function _ensureTables() {
     await pool.query(`ALTER TABLE work_orders ADD COLUMN IF NOT EXISTS deleted_at           TIMESTAMPTZ`);
     await pool.query(`ALTER TABLE work_orders ADD COLUMN IF NOT EXISTS deleted_by           TEXT DEFAULT ''`);
     await pool.query(`ALTER TABLE work_orders ADD COLUMN IF NOT EXISTS deleted_by_name      TEXT DEFAULT ''`);
+    await pool.query(`ALTER TABLE work_orders ADD COLUMN IF NOT EXISTS manager_name         TEXT DEFAULT ''`);
+    await pool.query(`ALTER TABLE work_orders ADD COLUMN IF NOT EXISTS updated_by           TEXT DEFAULT ''`);
+    await pool.query(`ALTER TABLE work_orders ADD COLUMN IF NOT EXISTS updated_by_name      TEXT DEFAULT ''`);
     await pool.query(`CREATE INDEX IF NOT EXISTS idx_work_orders_status     ON work_orders(status)`);
     await pool.query(`CREATE INDEX IF NOT EXISTS idx_work_orders_created_by ON work_orders(created_by)`);
     await pool.query(`CREATE INDEX IF NOT EXISTS idx_work_orders_created_at ON work_orders(created_at DESC)`);
@@ -101,6 +115,12 @@ function _dateOrNull(v) {
   return (v && String(v).trim()) ? v : null;
 }
 
+// INTEGER 컬럼용: 숫자/숫자문자열 → 정수, 파싱 실패 시 0 ("20" → 20, "3~7" → 3, "" → 0)
+function _intOrZero(v) {
+  const n = parseInt(v, 10);
+  return Number.isFinite(n) ? n : 0;
+}
+
 // 작업 오더 INSERT 공통 (intake/submit 공유, created_by 만 호출부에서 주입)
 async function _insertWorkOrder(b, createdBy) {
   const optionsJson = (typeof b.product_options_json === 'string')
@@ -111,8 +131,8 @@ async function _insertWorkOrder(b, createdBy) {
       (id, title, start_date, product_option, product_options_json, pay_amount, daily_count, daily_count_text,
        purchase_time, inflow_keyword, inflow_type, inflow_guide, delivery_type, courier_proxy,
        review_type, recruit_count, review_guide, special_notes,
-       product_url, work_sheet_url, goods_cost_type, status, created_by)
-     VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21,'submitted',$22)
+       product_url, work_sheet_url, goods_cost_type, manager_name, status, created_by)
+     VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21,$22,'submitted',$23)
      RETURNING *`,
     [
       _genOrderId(),
@@ -136,6 +156,7 @@ async function _insertWorkOrder(b, createdBy) {
       b.product_url || '',
       String(b.work_sheet_url).trim(),
       b.goods_cost_type || '',
+      b.manager_name || '',
       createdBy,
     ]
   );
@@ -291,6 +312,96 @@ router.delete('/intake/:id', async (req, res, next) => {
     next(err);
   }
 });
+
+// ═══════════════════════════════════════════════════════════
+// 외부(인트라넷) 보낸 오더 수정 — 공유 시크릿 인증 (JWT 불필요)
+// PATCH /api/order/intake/:id  (= PUT /api/order/intake/:id = POST /api/order/intake/:id/update)
+// 인트라넷 "리뷰 오더"에서 기존 작업오더 수정 시 리뷰웹 인박스 원본도 함께 갱신.
+// 키: X-Intake-Key 헤더 또는 body.intakeKey / ?intakeKey=  (생성 API와 동일)
+// body: { ...INTAKE_EDITABLE_FIELDS, updated_by?, updated_by_name? }
+//   - 전달된 필드만 부분 수정(PATCH 의미). title/work_sheet_url 은 빈값으로 지우기 금지.
+//   - 응답: { ok: true, id, data: {...updatedOrder} }
+//   - 없는 id → 404 / 삭제·완료 등 수정 불가 상태 → 409 / 인증 실패 → 401
+// ═══════════════════════════════════════════════════════════
+async function _intakeUpdateHandler(req, res, next) {
+  try {
+    await _ensureTables();
+    const expected = process.env.ORDER_INTAKE_KEY;
+    if (!expected) {
+      return res.status(503).json({ ok: false, error: 'intake 키가 서버에 설정되지 않았습니다. (ORDER_INTAKE_KEY)' });
+    }
+    const b = req.body || {};
+    const key = req.headers['x-intake-key'] || b.intakeKey || req.query.intakeKey;
+    if (!key || key !== expected) {
+      return res.status(401).json({ ok: false, error: '인증에 실패했습니다.' });
+    }
+    const id = String(req.params.id || '').trim();
+    if (!id || id === 'list') return res.status(400).json({ ok: false, error: 'id가 필요합니다.' });
+
+    // 현재 상태 확인 (존재/삭제/완료 여부)
+    const { rows: cur } = await pool.query(
+      `SELECT id, status, deleted_at FROM work_orders WHERE id = $1 LIMIT 1`, [id]
+    );
+    if (cur.length === 0) {
+      return res.status(404).json({ ok: false, error: '오더를 찾을 수 없습니다.' });
+    }
+    if (cur[0].deleted_at) {
+      return res.status(409).json({ ok: false, error: '삭제된 작업오더는 수정할 수 없습니다.' });
+    }
+    if (cur[0].status === 'done') {
+      return res.status(409).json({ ok: false, error: '완료된 작업오더는 수정할 수 없습니다.' });
+    }
+
+    // 동적 SET (전달된 수정 가능 필드만 — 부분 수정)
+    const sets = [];
+    const vals = [];
+    let i = 1;
+    let touched = 0;
+    for (const f of INTAKE_EDITABLE_FIELDS) {
+      if (b[f] === undefined) continue;
+      // 필수 필드는 빈값으로 지우기 금지 (기존 값 보호)
+      if (f === 'title' && !String(b[f]).trim()) {
+        return res.status(400).json({ ok: false, error: '작업명은 비울 수 없습니다.' });
+      }
+      if (f === 'work_sheet_url' && !String(b[f]).trim()) {
+        return res.status(400).json({ ok: false, error: '작업시트탭URL은 비울 수 없습니다.' });
+      }
+      sets.push(`${f} = $${i++}`);
+      if (f === 'start_date') vals.push(_dateOrNull(b[f]));
+      else if (f === 'courier_proxy') vals.push(b[f] === true || b[f] === 'true');
+      else if (INTAKE_INT_FIELDS.has(f)) vals.push(_intOrZero(b[f]));
+      else vals.push(b[f]);
+      touched++;
+    }
+    if (touched === 0) {
+      return res.status(400).json({ ok: false, error: '수정할 항목이 없습니다.' });
+    }
+    // 감사 필드(누가 수정했는지) — 전달된 경우에만 기록
+    if (b.updated_by !== undefined) {
+      sets.push(`updated_by = $${i++}`);
+      vals.push((b.updated_by || '').toString().trim());
+    }
+    if (b.updated_by_name !== undefined) {
+      sets.push(`updated_by_name = $${i++}`);
+      vals.push((b.updated_by_name || '').toString().trim());
+    }
+    sets.push('updated_at = NOW()');
+    vals.push(id);
+
+    const { rows } = await pool.query(
+      `UPDATE work_orders SET ${sets.join(', ')} WHERE id = $${i} RETURNING *`,
+      vals
+    );
+    logger.info(`[order] 인트라넷 작업오더 수정: ${id} (by ${b.updated_by || '?'}, fields=${touched})`);
+    res.json({ ok: true, id, data: rows[0] });
+  } catch (err) {
+    next(err);
+  }
+}
+
+// 인트라넷이 시도하는 후보 method/URL 을 모두 동일 핸들러로 처리 (PATCH/PUT/POST .../update)
+router.route('/intake/:id').put(_intakeUpdateHandler).patch(_intakeUpdateHandler);
+router.post('/intake/:id/update', _intakeUpdateHandler);
 
 // ═══════════════════════════════════════════════════════════
 // 유입가이드 이미지 — 인트라넷·리뷰웹 공용 전용 Drive 폴더에 "비공개" 저장
