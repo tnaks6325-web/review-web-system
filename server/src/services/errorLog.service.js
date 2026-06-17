@@ -106,7 +106,8 @@ function classify(error) {
   if (status === 401 || /unauthor|invalid token|토큰|인증\s?(실패|만료)|SessionExpired/i.test(hay)) return 'auth';
   if (status === 403 || /forbidden|permission|권한|CORS/i.test(hay)) return 'permission';
   if (status === 404 || /not.?found|찾을 수 없|존재하지 않/i.test(hay)) return 'not_found';
-  if (/ECONNREFUSED|ECONNRESET|ENOTFOUND|EHOSTUNREACH|socket hang|fetch failed|network|네트워크/i.test(hay)) return 'network';
+  // ECONNABORTED/aborted: 연결 중단(클라이언트 끊김 등). timeout 메시지는 위에서 먼저 잡힘.
+  if (/ECONNREFUSED|ECONNRESET|ECONNABORTED|ENOTFOUND|EHOSTUNREACH|socket hang|request aborted|aborted|fetch failed|network|네트워크/i.test(hay)) return 'network';
   // Postgres SQLSTATE (23xxx 무결성, 08xxx 연결, 57xxx 운영, 53xxx 자원) 또는 pg 키워드
   if (/^(08|23|53|57)/.test(String(code)) || /\bpool\b|relation .* does not exist|duplicate key|deadlock|postgres|database|데이터베이스/i.test(hay)) return 'db';
   if (/googleapis|google api|drive|sheets|gemini|외부 ?api/i.test(hay)) return 'external_api';
