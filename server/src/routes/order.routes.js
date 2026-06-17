@@ -5,6 +5,7 @@ const jwt = require('jsonwebtoken');
 const pool = require('../db/pool');
 const { authMiddleware, adminOrMasterMiddleware } = require('../middleware/auth.middleware');
 const drive = require('../services/drive.service');
+const sse = require('../utils/sse');
 const { logger } = require('../utils/logger');
 
 // ═══════════════════════════════════════════════════════════
@@ -392,8 +393,25 @@ async function _intakeUpdateHandler(req, res, next) {
       `UPDATE work_orders SET ${sets.join(', ')} WHERE id = $${i} RETURNING *`,
       vals
     );
+    const updated = rows[0];
     logger.info(`[order] 인트라넷 작업오더 수정: ${id} (by ${b.updated_by || '?'}, fields=${touched})`);
-    res.json({ ok: true, id, data: rows[0] });
+
+    // ★ 관리자 대시보드에 실시간 시스템알림 (SSE) — 인박스 원본이 인트라넷에서 수정됨
+    const who = (b.updated_by_name || b.updated_by || '').toString().trim() || '인트라넷';
+    try {
+      sse.emitOrderUpdate({
+        id: updated.id,
+        title: updated.title,
+        status: updated.status,
+        updated_by: b.updated_by || '',
+        updated_by_name: b.updated_by_name || '',
+        message: `"${updated.title}" · 수정자 ${who} (인트라넷)`,
+      });
+    } catch (e) {
+      logger.warn(`[order] order_update SSE 알림 실패: ${e.message}`);
+    }
+
+    res.json({ ok: true, id, data: updated });
   } catch (err) {
     next(err);
   }

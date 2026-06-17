@@ -5,6 +5,7 @@
  * 이벤트 유형:
  *   - review_submit:   리뷰 제출 완료
  *   - order_submit:    구매양식 제출 완료
+ *   - order_update:    작업오더 인박스 수정 (인트라넷 동기화)
  *   - image_extract:   AI 이미지 분석 완료
  *   - image_upload:    이미지 Drive 업로드 완료
  *   - index_build:     인덱스 빌드 완료
@@ -155,6 +156,13 @@ function emitOrderSubmit(data) {
   });
 }
 
+function emitOrderUpdate(data) {
+  broadcast('order_update', {
+    message: `작업오더 수정: ${data.title || ''}`,
+    ...data,
+  });
+}
+
 function emitImageExtract(data) {
   broadcast('image_extract', {
     message: `AI 분석 완료: ${data.fileName || '이미지'}`,
@@ -186,6 +194,7 @@ module.exports = {
   getStatus,
   emitReviewSubmit,
   emitOrderSubmit,
+  emitOrderUpdate,
   emitImageExtract,
   emitImageUpload,
   emitIndexBuild,
