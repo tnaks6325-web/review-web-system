@@ -1,0 +1,333 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="UTF-8"/>
+<meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+<title>시안 B · 브랜드 그라데이션 — InAd 리뷰어</title>
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@fortawesome/fontawesome-free@6.4.0/css/all.min.css"/>
+<link href="https://fonts.googleapis.com/css2?family=Noto+Sans+KR:wght@300;400;500;600;700;800;900&display=swap" rel="stylesheet"/>
+<style>
+:root{
+  --p:#5046E4;--p-d:#3730A3;--p-l:#EEF2FF;--grad:linear-gradient(135deg,#5B21B6 0%,#5046E4 50%,#7C3AED 100%);
+  --ok:#10B981;--warn:#F59E0B;--err:#EF4444;
+  --bg:#F4F4FB;--card:#fff;--bd:#EAEBF3;--t1:#15132B;--t2:#54526B;--t3:#9D9CB5;
+  --r:20px;--rs:14px;
+}
+*{box-sizing:border-box;margin:0;padding:0;-webkit-tap-highlight-color:transparent}
+body{font-family:'Noto Sans KR',sans-serif;background:#1c1733;color:var(--t1)}
+.phone{max-width:440px;margin:0 auto;min-height:100vh;background:var(--bg);position:relative;box-shadow:0 0 50px rgba(0,0,0,.3);overflow:hidden}
+.screen{display:none;padding-bottom:90px}
+.screen.on{display:block;animation:fade .3s ease}
+@keyframes fade{from{opacity:0}to{opacity:1}}
+.tag{position:fixed;top:8px;left:8px;z-index:300;font-size:.82rem;font-weight:800;color:#fff;background:var(--grad);padding:4px 11px;border-radius:20px;box-shadow:0 4px 12px rgba(0,0,0,.25)}
+
+/* 그라데이션 헤더 */
+.ghead{background:var(--grad);color:#fff;padding:18px 20px 64px;position:relative;overflow:hidden}
+.ghead::after{content:"";position:absolute;right:-40px;top:-40px;width:160px;height:160px;background:rgba(255,255,255,.08);border-radius:50%}
+.ghead::before{content:"";position:absolute;left:-30px;bottom:-50px;width:130px;height:130px;background:rgba(255,255,255,.06);border-radius:50%}
+.gtop{display:flex;align-items:center;gap:10px;position:relative;z-index:1}
+.glogo{width:36px;height:36px;border-radius:12px;background:rgba(255,255,255,.2);display:grid;place-items:center;font-size:1rem;backdrop-filter:blur(6px)}
+.gtop b{font-size:1.05rem;font-weight:900;letter-spacing:-.01em}
+.gtop .me{margin-left:auto;font-size:.74rem;background:rgba(255,255,255,.18);padding:6px 12px;border-radius:20px;font-weight:700;backdrop-filter:blur(6px)}
+.ghead h1{font-size:1.5rem;font-weight:900;margin-top:18px;position:relative;z-index:1;letter-spacing:-.02em}
+.ghead .sub{opacity:.85;font-size:.85rem;margin-top:6px;position:relative;z-index:1}
+.gsearch{margin-top:16px;background:rgba(255,255,255,.96);border-radius:14px;display:flex;align-items:center;gap:9px;padding:12px 15px;position:relative;z-index:1}
+.gsearch i{color:var(--p)}.gsearch input{border:none;outline:none;flex:1;font-size:.9rem;background:none;font-family:inherit}
+
+/* 칩 */
+.chips{display:flex;gap:8px;padding:14px 16px 2px;overflow-x:auto;margin-top:-44px;position:relative;z-index:5}
+.chip{flex:0 0 auto;font-size:.82rem;font-weight:700;color:var(--t2);background:#fff;border:none;padding:9px 16px;border-radius:20px;box-shadow:0 4px 14px rgba(80,70,228,.08)}
+.chip.on{background:var(--grad);color:#fff;box-shadow:0 6px 16px rgba(124,58,237,.35)}
+
+.sec{display:flex;align-items:center;padding:18px 20px 10px;font-size:1.08rem;font-weight:900}
+.sec .cnt{margin-left:8px;font-size:.74rem;color:var(--p);background:var(--p-l);border-radius:20px;padding:2px 10px}
+.sec .more{margin-left:auto;font-size:.78rem;color:var(--t3);font-weight:600}
+
+/* 캠페인 카드 - 큰 단일 컬럼 + 가로형 혼합 */
+.feature{margin:0 16px 14px;background:#fff;border-radius:var(--r);overflow:hidden;box-shadow:0 8px 26px rgba(80,70,228,.1);cursor:pointer}
+.fthumb{position:relative;aspect-ratio:16/9;background:linear-gradient(135deg,#5046E4,#7C3AED);display:grid;place-items:center;font-size:4rem}
+.fbadges{position:absolute;top:12px;left:12px;display:flex;gap:6px}
+.fbg{font-size:.68rem;font-weight:800;padding:5px 10px;border-radius:9px;background:rgba(255,255,255,.95);color:var(--p)}
+.freward{position:absolute;top:12px;right:12px;font-size:.74rem;font-weight:900;background:var(--warn);color:#fff;padding:6px 11px;border-radius:10px;box-shadow:0 4px 10px rgba(245,158,11,.5)}
+.flive{position:absolute;bottom:12px;left:12px;font-size:.68rem;font-weight:800;background:rgba(16,185,129,.95);color:#fff;padding:4px 10px;border-radius:20px}
+.fbody{padding:14px 16px 16px}
+.fbody h3{font-size:1.05rem;font-weight:800;line-height:1.4}
+.fmeta{display:flex;align-items:center;gap:8px;margin-top:10px}
+.fprice{font-size:1.25rem;font-weight:900}.fprice small{font-size:.72rem;color:var(--t3);font-weight:600}
+.fmall{margin-left:auto;font-size:.74rem;font-weight:800;color:var(--t2);display:flex;align-items:center;gap:5px}
+.mallico{width:16px;height:16px;border-radius:6px;display:inline-grid;place-items:center;color:#fff;font-size:.55rem;font-weight:900}
+.fbars{display:flex;gap:10px;margin-top:13px}
+.fbar{flex:1}
+.fbar .lab{display:flex;justify-content:space-between;font-size:.68rem;color:var(--t3);font-weight:700;margin-bottom:5px}
+.fbar .lab b{color:var(--p)}
+.track{height:7px;background:#EEF0F8;border-radius:20px;overflow:hidden}
+.fill{height:100%;background:var(--grad);border-radius:20px}
+
+/* 작은 가로 카드 리스트 */
+.row{display:flex;gap:12px;margin:0 16px 12px;background:#fff;border-radius:var(--rs);padding:12px;box-shadow:0 4px 16px rgba(80,70,228,.06);cursor:pointer}
+.rthumb{flex:0 0 78px;width:78px;height:78px;border-radius:13px;background:linear-gradient(135deg,#EEF2FF,#E0E7FF);display:grid;place-items:center;font-size:2rem;position:relative}
+.rrw{position:absolute;top:-6px;right:-6px;font-size:.6rem;font-weight:900;background:var(--warn);color:#fff;padding:2px 6px;border-radius:8px}
+.rinfo{flex:1;min-width:0}
+.rinfo .rbg{font-size:.64rem;font-weight:800;color:var(--p);background:var(--p-l);padding:2px 7px;border-radius:6px}
+.rinfo h4{font-size:.9rem;font-weight:700;margin:7px 0;line-height:1.35;overflow:hidden;display:-webkit-box;-webkit-line-clamp:1;-webkit-box-orient:vertical}
+.rinfo .rb{display:flex;align-items:center;gap:8px;font-size:.74rem;color:var(--t3)}
+.rinfo .rb b{font-size:.95rem;font-weight:900;color:var(--t1)}
+.rinfo .rb .rn{margin-left:auto;font-weight:700;color:var(--t2)}
+
+/* 로그인 */
+#login{position:absolute;inset:0;z-index:200;background:var(--bg);display:flex;flex-direction:column;overflow-y:auto}
+.lhero{background:var(--grad);color:#fff;padding:46px 26px 80px;position:relative;overflow:hidden}
+.lhero::after{content:"";position:absolute;right:-50px;top:30px;width:180px;height:180px;background:rgba(255,255,255,.08);border-radius:50%}
+.lhero .glogo{width:56px;height:56px;border-radius:18px;font-size:1.5rem}
+.lhero h1{font-size:1.7rem;font-weight:900;margin-top:20px;position:relative}
+.lhero p{opacity:.9;margin-top:8px;position:relative}
+.lcard{margin:-54px 20px 0;background:#fff;border-radius:22px;padding:26px 22px;box-shadow:0 16px 40px rgba(80,70,228,.18);position:relative}
+.lcard h3{font-size:1.1rem;font-weight:900;text-align:center}
+.lcard .d{text-align:center;font-size:.8rem;color:var(--t3);margin:7px 0 20px}
+.field{margin-bottom:12px}
+.inp{width:100%;padding:15px;border:1.5px solid var(--bd);border-radius:14px;font-size:.95rem;outline:none;background:#FAFAFE}
+.inp:focus{border-color:var(--p);background:#fff;box-shadow:0 0 0 3px #5046E418}
+.phonerow{display:flex;align-items:center;border:1.5px solid var(--bd);border-radius:14px;overflow:hidden;background:#FAFAFE}
+.phonerow span{padding:0 14px;font-weight:800;color:var(--p);align-self:stretch;display:grid;place-items:center;border-right:1.5px solid var(--bd)}
+.phonerow input{border:none;flex:1;padding:15px 12px;outline:none;background:none;font-size:.95rem;font-family:inherit}
+.btn{width:100%;padding:16px;border:none;border-radius:14px;background:var(--grad);color:#fff;font-size:1.02rem;font-weight:900;cursor:pointer;box-shadow:0 8px 22px rgba(80,70,228,.4);margin-top:6px}
+.btn:active{transform:translateY(1px)}
+.lsw{text-align:center;font-size:.83rem;color:var(--t2);margin-top:18px}.lsw a{color:var(--p);font-weight:800;text-decoration:none}
+.promo{margin:24px 20px;background:#fff;border-radius:18px;padding:16px;box-shadow:0 6px 20px rgba(80,70,228,.08);display:flex;gap:13px;align-items:center}
+.promo .ic{width:46px;height:46px;border-radius:14px;background:#FEF3C7;color:var(--warn);display:grid;place-items:center;font-size:1.3rem;flex-shrink:0}
+.promo b{font-size:.9rem;font-weight:800}.promo p{font-size:.76rem;color:var(--t2);margin-top:3px}
+
+/* 탭바 */
+.tabbar{position:fixed;bottom:0;left:50%;transform:translateX(-50%);width:100%;max-width:440px;background:#fff;display:flex;padding:9px 0 max(9px,env(safe-area-inset-bottom));z-index:60;box-shadow:0 -6px 24px rgba(80,70,228,.1)}
+.tab{flex:1;background:none;border:none;display:flex;flex-direction:column;align-items:center;gap:4px;font-size:.66rem;color:var(--t3);font-weight:700;cursor:pointer}
+.tab i{font-size:1.15rem}.tab.on{color:var(--p)}
+.tab.on i{transform:translateY(-1px)}
+
+/* 상세 */
+.dhead{background:var(--grad);color:#fff;padding:14px 18px 30px;position:relative}
+.back{display:inline-flex;align-items:center;gap:6px;font-size:.85rem;color:#fff;font-weight:700;background:rgba(255,255,255,.16);border:none;cursor:pointer;padding:7px 13px;border-radius:20px}
+.dhead h2{font-size:1.5rem;font-weight:900;margin-top:16px}
+.dbadges{display:flex;gap:6px;margin:10px 0}.bdg{font-size:.7rem;font-weight:800;padding:4px 11px;border-radius:20px;background:rgba(255,255,255,.2)}
+.dremain{font-size:.85rem;opacity:.92;font-weight:600}.dremain b{font-weight:900}
+.dhero{margin:-18px 16px 0;border-radius:var(--r);aspect-ratio:16/10;background:linear-gradient(135deg,#5046E4,#7C3AED);display:grid;place-items:center;font-size:4.5rem;box-shadow:0 10px 30px rgba(80,70,228,.25);position:relative;z-index:2}
+.tblcard{margin:16px;background:#fff;border-radius:var(--r);padding:6px 18px;box-shadow:0 6px 20px rgba(80,70,228,.06)}
+.tblcard .th{font-size:.8rem;font-weight:900;color:var(--p);padding:14px 0 6px}
+.trow{display:flex;justify-content:space-between;align-items:center;padding:13px 0;border-bottom:1px solid #F4F5FA;font-size:.86rem}
+.trow:last-child{border:none}.trow .k{color:var(--t3);font-weight:600}.trow .v{font-weight:800;text-align:right}
+.trow .v.pay{color:var(--p);font-size:.95rem}.trow .v.lock{color:var(--t3);font-weight:600}
+.guidecard{margin:16px;background:linear-gradient(135deg,#FFFBEB,#FEF3C7);border:1.5px solid #FDE68A;border-radius:var(--r);padding:18px}
+.guidecard h4{font-size:.95rem;font-weight:900;color:#92400E;margin-bottom:11px}.guidecard p{font-size:.85rem;color:#78350F;line-height:1.75}
+.dcta{position:fixed;bottom:90px;left:50%;transform:translateX(-50%);width:100%;max-width:440px;padding:14px 16px;background:linear-gradient(180deg,transparent,var(--bg) 40%)}
+.dcta button{width:100%;padding:17px;border:none;border-radius:16px;background:var(--grad);color:#fff;font-size:1.05rem;font-weight:900;box-shadow:0 10px 28px rgba(80,70,228,.45);cursor:pointer}
+
+/* 내 캠페인 */
+.statwrap{padding:16px}
+.statbig{background:var(--grad);color:#fff;border-radius:var(--r);padding:22px;margin-bottom:12px;position:relative;overflow:hidden}
+.statbig::after{content:"";position:absolute;right:-30px;top:-30px;width:120px;height:120px;background:rgba(255,255,255,.1);border-radius:50%}
+.statbig .n{font-size:2.6rem;font-weight:900;line-height:1}.statbig .l{opacity:.9;margin-top:6px;font-weight:700}
+.statgrid{display:grid;grid-template-columns:1fr 1fr 1fr;gap:10px}
+.stat{background:#fff;border-radius:16px;padding:15px 8px;text-align:center;box-shadow:0 4px 14px rgba(80,70,228,.06)}
+.stat .n{font-size:1.4rem;font-weight:900}.stat .l{font-size:.7rem;color:var(--t3);margin-top:5px;font-weight:700}
+.subtabs{display:flex;gap:18px;padding:6px 20px 0;overflow-x:auto}
+.subtab{font-size:.86rem;font-weight:700;color:var(--t3);white-space:nowrap;padding:10px 0;border-bottom:2.5px solid transparent;cursor:pointer}
+.subtab.on{color:var(--p);border-color:var(--p);font-weight:900}
+.empty{text-align:center;padding:60px 24px;color:var(--t3)}
+.empty .eic{width:72px;height:72px;border-radius:24px;background:#fff;box-shadow:0 6px 20px rgba(80,70,228,.08);display:grid;place-items:center;font-size:2rem;color:#C7CAE6;margin:0 auto 18px}
+.empty p{font-size:.95rem;font-weight:700;color:var(--t2)}
+.empty a{display:inline-block;margin-top:16px;background:var(--grad);color:#fff;padding:11px 22px;border-radius:14px;font-weight:800;font-size:.85rem;text-decoration:none}
+
+/* 내 정보 */
+.profhead{background:var(--grad);color:#fff;padding:24px 20px 30px;text-align:center}
+.profav{width:72px;height:72px;border-radius:24px;background:rgba(255,255,255,.2);display:grid;place-items:center;font-size:1.8rem;font-weight:900;margin:0 auto 12px;backdrop-filter:blur(6px)}
+.profhead h3{font-size:1.3rem;font-weight:900}.profhead p{opacity:.85;font-size:.8rem;margin-top:5px}
+.infocard{margin:-14px 16px 14px;background:#fff;border-radius:var(--r);padding:18px;box-shadow:0 8px 24px rgba(80,70,228,.1);position:relative;z-index:2}
+.infocard+.infocard{margin-top:0}
+.infocard h4{font-size:1rem;font-weight:900;margin-bottom:3px}.infocard .hint{font-size:.76rem;color:var(--t3);margin-bottom:12px}
+.empty-acct{border:1.5px dashed var(--bd);border-radius:14px;padding:24px;text-align:center;color:var(--t3);font-size:.84rem}
+.addbtn{width:100%;margin-top:11px;padding:14px;border:none;background:var(--grad);color:#fff;border-radius:14px;font-weight:800;font-size:.9rem;cursor:pointer;box-shadow:0 6px 16px rgba(80,70,228,.3)}
+
+/* 온보딩 */
+.ovl{position:fixed;inset:0;background:rgba(21,19,43,.6);backdrop-filter:blur(4px);z-index:400;display:none;align-items:flex-end;justify-content:center}
+.ovl.on{display:flex}
+.obx{background:#fff;border-radius:28px 28px 0 0;width:100%;max-width:440px;overflow:hidden;animation:slide .35s cubic-bezier(.2,.8,.2,1)}
+@keyframes slide{from{transform:translateY(100%)}to{transform:none}}
+.ohero{background:var(--grad);padding:34px 24px 30px;text-align:center;color:#fff;position:relative;overflow:hidden}
+.ohero::after{content:"";position:absolute;right:-40px;top:-40px;width:150px;height:150px;background:rgba(255,255,255,.1);border-radius:50%}
+.ohero .ic{width:70px;height:70px;border-radius:22px;background:rgba(255,255,255,.2);display:grid;place-items:center;font-size:1.9rem;margin:0 auto 16px;position:relative}
+.ohero h3{font-size:1.35rem;font-weight:900;position:relative}.ohero p{opacity:.9;font-size:.86rem;margin-top:9px;position:relative;line-height:1.6}
+.osteps{padding:22px 24px 6px}
+.ostep{display:flex;gap:14px;align-items:center;padding:11px 0}
+.ostep .num{flex:0 0 40px;width:40px;height:40px;border-radius:14px;background:var(--grad);color:#fff;font-weight:900;display:grid;place-items:center;font-size:1rem;box-shadow:0 4px 12px rgba(80,70,228,.3)}
+.ostep .tx b{font-size:.95rem;font-weight:800}.ostep .tx p{font-size:.78rem;color:var(--t3);margin-top:2px}
+.ofoot{padding:14px 24px 26px}
+.ofoot .start{width:100%;padding:16px;border:none;border-radius:16px;background:var(--grad);color:#fff;font-weight:900;font-size:1rem;cursor:pointer;box-shadow:0 8px 22px rgba(80,70,228,.4)}
+.ofoot .skip{display:block;width:100%;text-align:center;margin-top:12px;color:var(--t3);font-size:.82rem;font-weight:700;background:none;border:none;cursor:pointer}
+</style>
+</head>
+<body>
+<span class="tag">시안 B · 브랜드 그라데이션</span>
+<div class="phone">
+
+  <!-- 로그인 -->
+  <div id="login">
+    <div class="lhero">
+      <div class="glogo"><i class="fas fa-star-half-alt"></i></div>
+      <h1>InAd 리뷰어</h1>
+      <p>지금 로그인하고 캠페인에 참여하세요</p>
+    </div>
+    <div class="lcard">
+      <h3>로그인</h3>
+      <p class="d">등록된 이름과 전화번호 뒤 8자리로 로그인합니다</p>
+      <div class="field"><input class="inp" placeholder="이름"/></div>
+      <div class="field"><div class="phonerow"><span>010</span><input placeholder="뒤 8자리 (예: 12345678)"/></div></div>
+      <button class="btn" onclick="enterApp()">로그인하기</button>
+      <p class="lsw">처음이신가요? <a href="#">인애드 등록하기 →</a></p>
+    </div>
+    <div class="promo">
+      <div class="ic"><i class="fas fa-fire"></i></div>
+      <div><b>N여성부계 고액 매입모집 (82~04년생)</b><p>리뷰비 120,000원 · 0/10명 모집중 — 지금 신청하세요</p></div>
+    </div>
+  </div>
+
+  <!-- 캠페인 목록 -->
+  <div id="s-camp" class="screen on">
+    <div class="ghead">
+      <div class="gtop"><div class="glogo"><i class="fas fa-star-half-alt"></i></div><b>InAd 리뷰어</b><span class="me">🔥 김수만님</span></div>
+      <h1>모집중인 캠페인</h1>
+      <div class="sub">마음에 드는 캠페인에 신청하세요 · 총 48개</div>
+      <div class="gsearch"><i class="fas fa-search"></i><input placeholder="상품·브랜드 검색"/></div>
+    </div>
+    <div class="chips"><span class="chip on">전체</span><span class="chip">고액리뷰</span><span class="chip">실배송</span><span class="chip">기타배송</span><span class="chip">신규</span></div>
+
+    <div class="sec">오늘의 추천 <span class="cnt">HOT</span></div>
+    <div class="feature" onclick="go('s-detail')">
+      <div class="fthumb">💊<div class="fbadges"><span class="fbg">기타배송(박스)</span></div><span class="freward">+1,500</span><span class="flive"><i class="fas fa-circle" style="font-size:.5rem"></i> 진행중</span></div>
+      <div class="fbody">
+        <h3>키성장영양제 1개 초유단백 우유칼슘</h3>
+        <div class="fmeta"><span class="fprice">35,900<small>원</small></span><span class="fmall"><span class="mallico" style="background:#1BA641">G</span>G마켓</span></div>
+        <div class="fbars">
+          <div class="fbar"><div class="lab">오늘 참여 <b>1/10</b></div><div class="track"><div class="fill" style="width:10%"></div></div></div>
+          <div class="fbar"><div class="lab">전체 참여 <b>21/30</b></div><div class="track"><div class="fill" style="width:70%"></div></div></div>
+        </div>
+      </div>
+    </div>
+
+    <div class="sec">모집중 <span class="cnt">8</span><span class="more">전체보기 ›</span></div>
+    <div id="rows"></div>
+  </div>
+
+  <!-- 캠페인 상세 -->
+  <div id="s-detail" class="screen">
+    <div class="dhead">
+      <button class="back" onclick="go('s-camp')"><i class="fas fa-arrow-left"></i> 캠페인 목록</button>
+      <h2>키성장영양제</h2>
+      <div class="dbadges"><span class="bdg">기타배송(박스)</span><span class="bdg">모집중</span></div>
+      <div class="dremain">오늘 남은 참여수 <b>9/10</b> · 전체 남은 참여수 <b>9/30</b></div>
+    </div>
+    <div class="dhero">💊</div>
+    <div class="tblcard">
+      <div class="th">결제 정보</div>
+      <div class="trow"><span class="k">타입</span><span class="v">상품리뷰</span></div>
+      <div class="trow"><span class="k">상품옵션</span><span class="v">옵션1 · 1개 (9/30)</span></div>
+      <div class="trow"><span class="k">제품비</span><span class="v">35,900 원</span></div>
+      <div class="trow"><span class="k">배송비</span><span class="v">0 원</span></div>
+      <div class="trow"><span class="k">총 결제금액</span><span class="v">35,900 원</span></div>
+      <div class="trow"><span class="k">리뷰비</span><span class="v pay">1,500 원</span></div>
+      <div class="trow"><span class="k">페이백 입금명</span><span class="v">ㄱㄷㅎ키성장영양제</span></div>
+    </div>
+    <div class="guidecard"><h4>📘 캠페인 가이드</h4><p>· 링크구매로 해주세요~<br>· 할인쿠폰 꼭 사용해서 구매해주셔야 합니다</p></div>
+    <div class="tblcard">
+      <div class="th">쇼핑몰 정보</div>
+      <div class="trow"><span class="k">쇼핑몰</span><span class="v" style="color:#1BA641">G마켓 바로이동 ›</span></div>
+      <div class="trow"><span class="k">판매자명</span><span class="v lock"><i class="fas fa-lock"></i> 신청 후 공개</span></div>
+      <div class="trow"><span class="k">상품명</span><span class="v lock"><i class="fas fa-lock"></i> 신청 후 공개</span></div>
+      <div class="trow"><span class="k">상품코드</span><span class="v">4776**5595</span></div>
+      <div class="trow"><span class="k">상품 URL</span><span class="v lock"><i class="fas fa-lock"></i> 신청 후 공개</span></div>
+      <div class="trow"><span class="k">재참여 가능</span><span class="v">구매완료 후 7일</span></div>
+      <div class="trow"><span class="k">일 구매 시간</span><span class="v">매일 15:00~21:00</span></div>
+    </div>
+    <div style="text-align:center;font-size:.78rem;color:var(--t3);padding:0 16px 120px">문의 : 카카오톡 fnhyun · [G마켓] 계정 전용</div>
+    <div class="dcta"><button>G마켓 계정 등록하기</button></div>
+  </div>
+
+  <!-- 내 캠페인 -->
+  <div id="s-mine" class="screen">
+    <div class="ghead" style="padding-bottom:24px"><div class="gtop"><b>내 캠페인</b></div><h1 style="font-size:1.3rem;margin-top:12px">진행 상태 한눈에</h1><div class="sub">신청한 캠페인의 진행 상태를 확인하세요</div></div>
+    <div class="statwrap">
+      <div class="statbig"><div class="n">0</div><div class="l">진행중인 캠페인</div></div>
+      <div class="statgrid">
+        <div class="stat"><div class="n">0</div><div class="l">수정필요</div></div>
+        <div class="stat"><div class="n">0</div><div class="l">리뷰대기</div></div>
+        <div class="stat"><div class="n">0</div><div class="l">페이백 대기</div></div>
+        <div class="stat"><div class="n">0</div><div class="l">한달리뷰</div></div>
+        <div class="stat"><div class="n">0</div><div class="l">완료</div></div>
+        <div class="stat"><div class="n">0</div><div class="l">취소·반려</div></div>
+      </div>
+    </div>
+    <div class="subtabs"><span class="subtab on">진행중 0</span><span class="subtab">한달리뷰 0</span><span class="subtab">수정필요 0</span><span class="subtab">리뷰대기 0</span><span class="subtab">페이백 0</span></div>
+    <div class="empty"><div class="eic"><i class="fas fa-clipboard-list"></i></div><p>진행중인 캠페인이 없습니다</p><a href="#" onclick="go('s-camp')">캠페인 둘러보기 →</a></div>
+  </div>
+
+  <!-- 내 정보 -->
+  <div id="s-info" class="screen">
+    <div class="profhead"><div class="profav">김</div><h3>김수만</h3><p>2026.06.17 첫 접속 · InAd 리뷰어</p></div>
+    <div class="infocard">
+      <h4>기본 정보</h4><div class="hint">이메일·이름·휴대폰은 변경할 수 없습니다</div>
+      <div class="trow"><span class="k">이름</span><span class="v">김수만</span></div>
+      <div class="trow"><span class="k">휴대폰</span><span class="v">010-8592-6325</span></div>
+      <div class="trow"><span class="k">첫 접속일</span><span class="v">2026.06.17</span></div>
+    </div>
+    <div class="infocard">
+      <h4>계좌 관리</h4><div class="hint">정산받을 계좌를 등록·수정할 수 있습니다</div>
+      <div class="empty-acct">등록된 계좌가 없습니다</div>
+      <button class="addbtn"><i class="fas fa-plus"></i> 계좌 추가</button>
+    </div>
+    <div style="height:30px"></div>
+  </div>
+
+  <div class="tabbar">
+    <button class="tab on" data-s="s-camp" onclick="tab(this)"><i class="fas fa-bullhorn"></i>캠페인</button>
+    <button class="tab" data-s="s-mine" onclick="tab(this)"><i class="fas fa-clipboard-list"></i>내 캠페인</button>
+    <button class="tab" data-s="s-info" onclick="tab(this)"><i class="fas fa-user"></i>내정보</button>
+    <button class="tab" onclick="openOnboard()"><i class="fas fa-book-open"></i>가이드</button>
+  </div>
+
+  <div class="ovl" id="onboard">
+    <div class="obx">
+      <div class="ohero"><div class="ic"><i class="fas fa-hand-sparkles"></i></div><h3>환영합니다, 리뷰어님!</h3><p>3단계만 알면 바로 시작할 수 있어요.</p></div>
+      <div class="osteps">
+        <div class="ostep"><div class="num">1</div><div class="tx"><b>캠페인 찾기</b><p>모집중인 캠페인에서 마음에 드는 상품을 골라요.</p></div></div>
+        <div class="ostep"><div class="num">2</div><div class="tx"><b>신청 &amp; 구매</b><p>계정 등록 후 안내대로 구매하고 리뷰를 남겨요.</p></div></div>
+        <div class="ostep"><div class="num">3</div><div class="tx"><b>페이백 받기</b><p>리뷰 완료 후 매주 화/금 등록 계좌로 정산돼요.</p></div></div>
+      </div>
+      <div class="ofoot"><button class="start" onclick="closeOnboard()">지금 시작하기</button><button class="skip" onclick="closeOnboard()">다음에 볼게요</button></div>
+    </div>
+  </div>
+</div>
+
+<script>
+const rows=[
+ {ic:'🖼️',bg:'기타배송',rw:'+1,500',title:'소소꼬모 명태 그림 풍수 인테리어 액자',price:'9,500',nums:'전체 7/20',mall:'스마트스토어',mc:'#03C75A'},
+ {ic:'🧴',bg:'실배송',rw:'+1,500',title:'코리아나 로댕 쏘 맨즈 프레쉬 올인원 200ml',price:'16,900',nums:'전체 17/30',mall:'쿠팡',mc:'#E5392B'},
+ {ic:'🐟',bg:'기타배송',rw:'+1,500',title:'명태 그림 액자 복 들어오는 풍수 액자',price:'9,900',nums:'전체 26/30',mall:'스마트스토어',mc:'#03C75A'},
+ {ic:'☕',bg:'실배송',rw:'+1,200',title:'프리미엄 핸드드립 원두 200g 다크로스팅',price:'12,800',nums:'전체 14/25',mall:'쿠팡',mc:'#E5392B'},
+];
+document.getElementById('rows').innerHTML=rows.map(r=>`
+ <div class="row" onclick="go('s-detail')">
+   <div class="rthumb">${r.ic}<span class="rrw">${r.rw}</span></div>
+   <div class="rinfo">
+     <span class="rbg">${r.bg}</span>
+     <h4>${r.title}</h4>
+     <div class="rb"><b>${r.price}원</b><span class="rn"><span class="mallico" style="background:${r.mc}">${r.mall[0]}</span> ${r.nums}</span></div>
+   </div>
+ </div>`).join('');
+
+function go(id){document.querySelectorAll('.screen').forEach(s=>s.classList.remove('on'));document.getElementById(id).classList.add('on');window.scrollTo(0,0);
+  const map={'s-camp':0,'s-mine':1,'s-info':2};const tabs=document.querySelectorAll('.tab');tabs.forEach(t=>t.classList.remove('on'));if(map[id]!=null)tabs[map[id]].classList.add('on');}
+function tab(el){go(el.dataset.s);}
+function enterApp(){document.getElementById('login').style.display='none';setTimeout(openOnboard,400);}
+function openOnboard(){document.getElementById('onboard').classList.add('on');}
+function closeOnboard(){document.getElementById('onboard').classList.remove('on');}
+</script>
+</body>
+</html>
