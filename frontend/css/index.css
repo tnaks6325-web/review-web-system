@@ -268,6 +268,8 @@ input,textarea,button{font-family:inherit}
 .btn-header-review{background:rgba(16,185,129,.18)!important;border-color:rgba(16,185,129,.55)!important;color:#6EE7B7!important}
 .btn-header-review:hover{background:rgba(16,185,129,.32)!important;border-color:#6EE7B7!important;color:#fff!important}
 .btn-header-staff{background:rgba(99,102,241,.22)!important;border-color:rgba(99,102,241,.55)!important;color:#A5B4FC!important}
+.btn-header-portal{background:rgba(245,158,11,.20)!important;border-color:rgba(245,158,11,.55)!important;color:#FCD34D!important}
+.btn-header-portal:hover{background:rgba(245,158,11,.34)!important;border-color:#FCD34D!important;color:#fff!important}
 
 /* ══ 컨텍스트 툴바 (탭별 버튼 표시) ══ */
 .admin-context-toolbar{display:flex;align-items:center;gap:6px;flex-wrap:wrap;row-gap:4px}

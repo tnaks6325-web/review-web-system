@@ -856,6 +856,27 @@ function getAdminSessionRemaining() {
   return h > 0 ? `${h}시간 ${m}분 남음` : `${m}분 남음`;
 }
 
+/* ── 업무포털 새창 열기 (로그인 세션 이어주기) ──
+   portal.html은 새 탭이라 sessionStorage(admin_token)를 공유하지 않으므로,
+   동일 출처 localStorage로 토큰/이름/역할을 잠시 넘겨준다(포털이 읽는 즉시 삭제).
+   admin·portal 모두 /api/admin/login 토큰을 쓰므로 같은 JWT로 자동 로그인된다. */
+function openWorkPortal() {
+  const token = sessionStorage.getItem("admin_token") || "";
+  if (!token || !isAdminLoggedIn()) {
+    showToast("관리자 로그인이 필요합니다.", "warning");
+    return;
+  }
+  try {
+    localStorage.setItem("portal_sso", JSON.stringify({
+      token,
+      name: getAdminName(),
+      role: getAdminRole(),
+      ts: Date.now()
+    }));
+  } catch (e) { /* localStorage 불가 시에도 포털 자체 로그인으로 폴백 */ }
+  window.open("portal.html", "_blank");
+}
+
 /* ── 관리자 로그인 모달 열기 ── */
 function openAdminLogin() {
   if (isAdminLoggedIn()) { enterAdminScreen(); return; }
