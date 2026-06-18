@@ -71,9 +71,18 @@ const THEME = `
   .rc-list.rc-view-card .rc-apply-btn{ padding:9px; font-size:.78rem; border-radius:10px; margin-top:8px; }
   .rc-list.rc-view-card .rc-form-fields{ flex-direction:column; }
   @media(max-width:380px){ .rc-list.rc-view-card{ grid-template-columns:1fr; } }
+  /* 프리뷰 식별 배지 (이게 보이면 새 빌드가 로드된 것) */
+  .cpv-ribbon{ position:fixed; right:10px; bottom:10px; z-index:99999; background:#5046E4; color:#fff; font-size:.72rem; font-weight:800; padding:7px 12px; border-radius:20px; box-shadow:0 4px 14px rgba(80,70,228,.45); }
   </style>
 </head>`;
 replaceOne('  </style>\n</head>', THEME, '테마 오버레이 삽입');
+
+/* ── 1-b) 프리뷰 식별 배지 마크업 삽입 (캐시 확인용) ── */
+replaceOne(
+  '<body>\n\n<!-- ═══ 비로그인 상태 ═══ -->',
+  '<body>\n<div class="cpv-ribbon">시안 C 프리뷰 v2</div>\n\n<!-- ═══ 비로그인 상태 ═══ -->',
+  '프리뷰 배지 삽입'
+);
 
 /* ── 2) 모집공고 섹션 타이틀에 카드/행 전환 토글 추가 (2곳) ── */
 const TITLE_FROM = `      <div class="home-section-title">
