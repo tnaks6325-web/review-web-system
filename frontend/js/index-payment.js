@@ -539,8 +539,8 @@ async function loadSyncQueueStats() {
           <div style="font-size:1.2rem;font-weight:700;color:#D97706">${s.pending || 0}</div>
           <div style="font-size:.7rem;color:#6B7280">대기중</div>
         </div>
-        <div style="background:#EDE9FE;border-radius:8px;padding:8px">
-          <div style="font-size:1.2rem;font-weight:700;color:#7C3AED">${s.processing || 0}</div>
+        <div style="background:#e8f1fe;border-radius:8px;padding:8px">
+          <div style="font-size:1.2rem;font-weight:700;color:#3182f6">${s.processing || 0}</div>
           <div style="font-size:.7rem;color:#6B7280">처리중</div>
         </div>
         <div style="background:${hasFailed ? '#FEE2E2' : '#F3F4F6'};border-radius:8px;padding:8px">
@@ -714,7 +714,7 @@ async function loadApiMetrics() {
     const uptimeH = Math.floor((m.uptime || 0) / 3600);
     const uptimeM = Math.floor(((m.uptime || 0) % 3600) / 60);
     const sentryBadge = m.sentry === 'active'
-      ? '<span style="background:#10B981;color:#fff;font-size:.65rem;padding:1px 6px;border-radius:4px">Sentry ON</span>'
+      ? '<span style="background:#12b886;color:#fff;font-size:.65rem;padding:1px 6px;border-radius:4px">Sentry ON</span>'
       : '<span style="background:#9CA3AF;color:#fff;font-size:.65rem;padding:1px 6px;border-radius:4px">Sentry OFF</span>';
 
     const errRate = m.errorRate || '0%';
@@ -886,12 +886,12 @@ const _SSE_ICONS = {
   review_submit: { icon: 'fa-check-circle', color: '#16A34A', label: '리뷰 제출' },
   order_submit:  { icon: 'fa-shopping-cart', color: '#2563EB', label: '구매양식' },
   order_update:  { icon: 'fa-pen-to-square', color: '#EA580C', label: '작업오더 수정' },
-  image_extract: { icon: 'fa-magic', color: '#7C3AED', label: 'AI 분석' },
+  image_extract: { icon: 'fa-magic', color: '#3182f6', label: 'AI 분석' },
   image_upload:  { icon: 'fa-cloud-upload-alt', color: '#06B6D4', label: '업로드' },
   index_build:   { icon: 'fa-database', color: '#F59E0B', label: '인덱스' },
   system:        { icon: 'fa-info-circle', color: '#6B7280', label: '시스템' },
   dirty_detected:{ icon: 'fa-bolt', color: '#D97706', label: '변경 감지' },
-  connected:     { icon: 'fa-plug', color: '#10B981', label: '연결됨' },
+  connected:     { icon: 'fa-plug', color: '#12b886', label: '연결됨' },
 };
 
 function connectSSE() {
@@ -992,7 +992,7 @@ function _updateSSEStatus(state, text) {
   var btn = document.getElementById('sseToggleBtn');
   if (!el) return;
 
-  var colors = { connected: '#10B981', connecting: '#F59E0B', disconnected: '#9CA3AF', error: '#EF4444' };
+  var colors = { connected: '#12b886', connecting: '#F59E0B', disconnected: '#9CA3AF', error: '#EF4444' };
   el.innerHTML = '<span style="color:' + (colors[state] || '#9CA3AF') + '">● ' + text + '</span>';
 
   if (btn) {
@@ -1278,8 +1278,8 @@ async function loadStatsOverview() {
               label: '금액 (원)',
               data: pd.map(function(d) { return parseFloat(d.totalAmount); }),
               type: 'line',
-              borderColor: '#7C3AED',
-              backgroundColor: 'rgba(124,58,237,0.1)',
+              borderColor: '#3182f6',
+              backgroundColor: 'rgba(49,130,246,0.1)',
               fill: true,
               tension: 0.3,
               pointRadius: 2,
@@ -1406,7 +1406,7 @@ async function loadSmartBuildStatus() {
     if (schedBtn) {
       if (data.schedulerActive) {
         schedBtn.innerHTML = '<i class="fas fa-clock"></i> 스케줄러: ON';
-        schedBtn.style.background = "#059669";
+        schedBtn.style.background = "#0ca678";
       } else {
         schedBtn.innerHTML = '<i class="fas fa-clock"></i> 스케줄러: OFF';
         schedBtn.style.background = "#6B7280";
@@ -1442,8 +1442,8 @@ async function loadSmartBuildStatus() {
           <div style="font-size:1.1rem;font-weight:700;color:#16A34A">${data.cachedSheets || 0}</div>
           <div style="font-size:.7rem;color:#6B7280">캐시 시트</div>
         </div>
-        <div style="background:#FDF4FF;border-radius:8px;padding:8px">
-          <div style="font-size:1.1rem;font-weight:700;color:#7C3AED">${data.cachedChecksums || 0}</div>
+        <div style="background:#f5f9ff;border-radius:8px;padding:8px">
+          <div style="font-size:1.1rem;font-weight:700;color:#3182f6">${data.cachedChecksums || 0}</div>
           <div style="font-size:.7rem;color:#6B7280">캐시 체크섬</div>
         </div>
         <div style="background:#FFF7ED;border-radius:8px;padding:8px">
@@ -1451,7 +1451,7 @@ async function loadSmartBuildStatus() {
           <div style="font-size:.7rem;color:#6B7280">주기</div>
         </div>
         <div style="background:#ECFDF5;border-radius:8px;padding:8px">
-          <div style="font-size:1.1rem;font-weight:700;color:#059669">${nextRunText}</div>
+          <div style="font-size:1.1rem;font-weight:700;color:#0ca678">${nextRunText}</div>
           <div style="font-size:.7rem;color:#6B7280">다음 실행</div>
         </div>
         <div style="background:#F8FAFC;border-radius:8px;padding:8px">
@@ -1470,7 +1470,7 @@ async function loadSmartBuildStatus() {
       html += `
         <div style="background:#F8FAFC;border-radius:8px;padding:10px;border:1px solid var(--border)">
           <div style="font-weight:600;font-size:.78rem;color:var(--t1);margin-bottom:8px">
-            <i class="fas fa-clock" style="color:#6366F1;margin-right:4px"></i>최근 실행 결과
+            <i class="fas fa-clock" style="color:#3182f6;margin-right:4px"></i>최근 실행 결과
             <span style="font-size:.7rem;color:var(--t3);margin-left:8px">${ts}</span>
             <span style="font-size:.7rem;color:var(--t3);margin-left:4px">(${elapsed})</span>
             ${lastRun.isFirstRun ? '<span style="font-size:.65rem;background:#DBEAFE;color:#1E40AF;padding:1px 6px;border-radius:4px;margin-left:6px">초기 실행</span>' : ''}
@@ -1485,7 +1485,7 @@ async function loadSmartBuildStatus() {
               <div style="font-size:.65rem;color:#6B7280">변경 시트</div>
             </div>
             <div>
-              <div style="font-weight:700;color:#7C3AED">${lastRun.tabsScanned || 0}</div>
+              <div style="font-weight:700;color:#3182f6">${lastRun.tabsScanned || 0}</div>
               <div style="font-size:.65rem;color:#6B7280">탭 스캔</div>
             </div>
             <div>
