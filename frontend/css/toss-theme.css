@@ -1,0 +1,70 @@
+/* ============================================================
+   토스(Toss) 미니멀 핀테크 폴리시 레이어
+   - 정보·배치·기능은 그대로, 룩만 통일하는 공통 스킨
+   - 각 페이지의 인라인 스타일 "뒤"에 로드되어 마지막에 적용됨
+   - 강조색 단일: 토스 블루 #3182F6 (딥 #1B64DA / 라이트 #E8F1FE), 성공·금액 민트 #12B886
+   ============================================================ */
+@import url('https://cdn.jsdelivr.net/gh/orioncactus/pretendard@latest/dist/web/variable/pretendardvariable-dynamic-subset.min.css');
+
+:root{
+  --toss-blue:#3182F6;
+  --toss-blue-deep:#1B64DA;
+  --toss-blue-light:#E8F1FE;
+  --toss-mint:#12B886;
+  --toss-ring:0 0 0 3px rgba(49,130,246,.32);
+}
+
+/* ── 타이포: Pretendard · 자간 -0.02em · 숫자 tabular ── */
+body{
+  font-family:'Pretendard Variable','Pretendard',-apple-system,BlinkMacSystemFont,
+    'Apple SD Gothic Neo','Noto Sans KR',system-ui,sans-serif !important;
+  letter-spacing:-.02em;
+  font-variant-numeric:tabular-nums;
+  -webkit-font-smoothing:antialiased;
+  -moz-osx-font-smoothing:grayscale;
+  text-rendering:optimizeLegibility;
+}
+h1,h2,h3,
+.modal-header h2,.modal-header h3,.modal-header .modal-title{
+  font-weight:800;
+  letter-spacing:-.02em;
+}
+/* 금액·통계·표 숫자는 폭이 흔들리지 않게 고정폭 숫자 */
+table,.num,.amount,.money,.stat,.stat-value,
+[class*="amount"],[class*="num"],[class*="count"],[class*="total"],[class*="price"]{
+  font-variant-numeric:tabular-nums;
+  font-feature-settings:"tnum" 1;
+}
+
+/* ── 포커스: 토스 블루 링 (하드 보더 대신 옅은 링) ── */
+a:focus-visible,button:focus-visible,input:focus-visible,select:focus-visible,
+textarea:focus-visible,[tabindex]:focus-visible,[role="button"]:focus-visible{
+  outline:none !important;
+  box-shadow:var(--toss-ring) !important;
+}
+
+/* ── 마이크로 인터랙션: 누름 scale ── */
+button:active,.btn:active,.btn-primary:active,.pri:active,[role="button"]:active{
+  transform:scale(.98);
+}
+
+/* ── fade-up 유틸 (필요 시 클래스로 사용) ── */
+@keyframes tossFadeUp{
+  from{opacity:0;transform:translateY(8px)}
+  to{opacity:1;transform:translateY(0)}
+}
+.toss-fade-up{animation:tossFadeUp .26s cubic-bezier(.16,1,.3,1) both;}
+
+/* ── 게이지 채움(있다면) 부드럽게 ── */
+.gauge>span,.progress>span,[class*="bar-fill"]{transition:width .5s cubic-bezier(.16,1,.3,1);}
+
+/* ── 모션 최소화 존중 ── */
+@media (prefers-reduced-motion: reduce){
+  *,*::before,*::after{
+    animation-duration:.001ms !important;
+    animation-iteration-count:1 !important;
+    transition-duration:.001ms !important;
+    scroll-behavior:auto !important;
+  }
+  button:active,.btn:active,[role="button"]:active{transform:none !important;}
+}
