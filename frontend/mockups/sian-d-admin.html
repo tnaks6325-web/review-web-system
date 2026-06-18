@@ -1,0 +1,551 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="UTF-8"/>
+<meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+<title>시안 D · 관리자 — 아이에이리뷰</title>
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/gh/orioncactus/pretendard@v1.3.9/dist/web/static/pretendard.css"/>
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@fortawesome/fontawesome-free@6.4.0/css/all.min.css"/>
+<style>
+:root{
+  --indigo:#5046E4; --indigo-d:#2E2796; --indigo-l:#EEF0FE; --indigo-l2:#F5F6FE;
+  --paper:#FBFBFD; --bg:#EEF0F4; --ink:#191F28; --t2:#4A5160; --mist:#8A93A6;
+  --mint:#12B886; --mint-l:#E7F7F1; --mint-d:#0A7A59;
+  --amber:#F0883E; --amber-l:#FEF3E7; --red:#EF5B5B; --red-l:#FDECEC;
+  --bd:#ECEDF2; --bd2:#E2E4ED; --card:#fff; --r:16px;
+  --sh:0 1px 3px rgba(25,31,40,.05), 0 6px 18px rgba(25,31,40,.04);
+}
+*{box-sizing:border-box;margin:0;padding:0;-webkit-tap-highlight-color:transparent}
+body{font-family:'Pretendard',-apple-system,BlinkMacSystemFont,sans-serif;background:var(--bg);color:var(--ink);letter-spacing:-.02em;font-size:14px}
+.tag{position:fixed;top:10px;left:10px;z-index:500;font-size:.72rem;font-weight:700;color:#fff;background:var(--indigo);padding:4px 11px;border-radius:20px;box-shadow:0 4px 12px rgba(80,70,228,.4)}
+.tabular{font-variant-numeric:tabular-nums}
+
+/* 상단 앱바 */
+.appbar{background:#fff;border-bottom:1px solid var(--bd);position:sticky;top:0;z-index:80}
+.appbar-in{max-width:1240px;margin:0 auto;display:flex;align-items:center;gap:14px;padding:13px 24px}
+.brand{display:flex;align-items:center;gap:11px}
+.blogo{width:38px;height:38px;border-radius:12px;background:linear-gradient(135deg,var(--indigo),#7B72F2);color:#fff;display:grid;place-items:center;font-size:1.05rem;box-shadow:0 4px 12px rgba(80,70,228,.3)}
+.brand h1{font-size:1.12rem;font-weight:800;letter-spacing:-.03em}
+.brand .role{font-size:.7rem;font-weight:700;color:var(--indigo);background:var(--indigo-l);padding:2px 8px;border-radius:7px;margin-left:2px}
+.ab-actions{margin-left:auto;display:flex;gap:7px;align-items:center}
+.ablink{display:inline-flex;align-items:center;gap:6px;padding:8px 13px;border-radius:11px;font-size:.8rem;font-weight:700;cursor:pointer;border:1px solid var(--bd2);background:#fff;color:var(--t2);transition:.15s}
+.ablink:hover{border-color:var(--indigo);color:var(--indigo)}
+.ablink.portal{background:var(--indigo);color:#fff;border-color:var(--indigo)}
+.ablink.portal:hover{background:var(--indigo-d);color:#fff}
+.ab-user{display:flex;align-items:center;gap:9px;padding-left:8px;margin-left:4px;border-left:1px solid var(--bd)}
+.uav{width:34px;height:34px;border-radius:11px;background:var(--ink);color:#fff;display:grid;place-items:center;font-weight:800;font-size:.82rem}
+
+/* 탭 네비 */
+.tabnav{background:#fff;border-bottom:1px solid var(--bd);position:sticky;top:65px;z-index:70}
+.tabnav-in{max-width:1240px;margin:0 auto;display:flex;gap:2px;padding:0 18px;overflow-x:auto;scrollbar-width:none}
+.tabnav-in::-webkit-scrollbar{display:none}
+.tbtn{flex:0 0 auto;display:inline-flex;align-items:center;gap:7px;padding:14px 15px;border:none;background:none;font-size:.86rem;font-weight:700;color:var(--mist);cursor:pointer;border-bottom:2.5px solid transparent;transition:.15s;font-family:inherit;white-space:nowrap}
+.tbtn:hover{color:var(--t2)}
+.tbtn.on{color:var(--indigo);border-bottom-color:var(--indigo)}
+.tbtn .bdg{font-size:.62rem;font-weight:800;color:#fff;background:var(--indigo);padding:1px 6px;border-radius:9px;min-width:17px;text-align:center}
+.tbtn .bdg.red{background:var(--red)}
+
+.wrap{max-width:1240px;margin:0 auto;padding:22px 24px 60px}
+.pane{display:none;animation:fade .25s ease}.pane.on{display:block}
+@keyframes fade{from{opacity:0;transform:translateY(6px)}to{opacity:1;transform:none}}
+
+.sec-head{display:flex;align-items:center;gap:10px;margin-bottom:14px;flex-wrap:wrap}
+.sec-head .st{font-size:1.08rem;font-weight:800}
+.sec-head .desc{font-size:.8rem;color:var(--mist);font-weight:500}
+.sec-head .right{margin-left:auto;display:flex;gap:7px;align-items:center;flex-wrap:wrap}
+
+.btn{display:inline-flex;align-items:center;gap:6px;padding:8px 14px;border-radius:11px;font-size:.8rem;font-weight:700;cursor:pointer;border:none;font-family:inherit;transition:.15s}
+.btn-p{background:var(--indigo);color:#fff}.btn-p:hover{background:var(--indigo-d)}
+.btn-g{background:#fff;color:var(--t2);border:1px solid var(--bd2)}.btn-g:hover{border-color:var(--indigo);color:var(--indigo)}
+.btn-mint{background:var(--mint);color:#fff}.btn-mint:hover{background:var(--mint-d)}
+.btn-soft{background:var(--indigo-l);color:var(--indigo-d)}.btn-soft:hover{background:#E2E5FD}
+.input,.sel{padding:8px 12px;border:1px solid var(--bd2);border-radius:11px;font-size:.82rem;font-family:inherit;background:#fff;outline:none;transition:.15s}
+.input:focus,.sel:focus{border-color:var(--indigo);box-shadow:0 0 0 3px var(--indigo-l)}
+
+/* 카드 */
+.card{background:var(--card);border-radius:var(--r);box-shadow:var(--sh);border:1px solid var(--bd)}
+.card.pad{padding:18px}
+
+/* 공지 */
+.notice{background:linear-gradient(135deg,var(--indigo-l2),#fff);border:1px solid var(--bd2);border-radius:var(--r);padding:15px 18px;margin-bottom:16px;display:flex;gap:13px}
+.notice .ni{flex:0 0 38px;width:38px;height:38px;border-radius:12px;background:var(--indigo-l);color:var(--indigo);display:grid;place-items:center}
+.notice b{font-size:.88rem;font-weight:800}.notice p{font-size:.8rem;color:var(--t2);margin-top:4px;line-height:1.55}
+.notice .dt{font-size:.7rem;color:var(--mist);margin-top:6px;font-weight:600}
+
+/* 작업오더 간편 */
+.mini{display:grid;grid-template-columns:repeat(auto-fill,minmax(250px,1fr));gap:10px;margin-bottom:18px}
+.mini-card{background:#fff;border:1px solid var(--bd);border-radius:13px;padding:13px 14px;display:flex;gap:11px;align-items:center;box-shadow:var(--sh)}
+.mini-card .mi{flex:0 0 36px;width:36px;height:36px;border-radius:11px;display:grid;place-items:center;font-size:.9rem}
+.mini-card .t{font-size:.84rem;font-weight:700;line-height:1.3;display:-webkit-box;-webkit-line-clamp:1;-webkit-box-orient:vertical;overflow:hidden}
+.mini-card .s{font-size:.72rem;color:var(--mist);margin-top:3px}
+
+/* KPI */
+.kpi{display:grid;grid-template-columns:repeat(6,1fr);gap:11px;margin-bottom:18px}
+@media(max-width:900px){.kpi{grid-template-columns:repeat(3,1fr)}}
+.kpi-c{background:#fff;border:1px solid var(--bd);border-radius:14px;padding:15px 16px;box-shadow:var(--sh);position:relative;overflow:hidden}
+.kpi-c .kl{font-size:.74rem;color:var(--mist);font-weight:700}
+.kpi-c .kn{font-size:1.5rem;font-weight:800;margin-top:6px;letter-spacing:-.04em}
+.kpi-c .kn.indigo{color:var(--indigo)}.kpi-c .kn.mint{color:var(--mint-d)}.kpi-c .kn.amber{color:var(--amber)}.kpi-c .kn.red{color:var(--red)}
+.kpi-c .kd{font-size:.68rem;font-weight:700;margin-top:3px}
+.kpi-c .kd.up{color:var(--mint-d)}.kpi-c .kd.dn{color:var(--red)}
+
+/* 필터바 */
+.filterbar{display:flex;gap:8px;flex-wrap:wrap;align-items:center;margin-bottom:12px}
+.filterbar .cnt{font-size:.76rem;color:var(--mist);font-weight:700;margin-left:auto}
+.mgr-tabs{display:flex;gap:6px;flex-wrap:wrap;margin-bottom:12px}
+.mgr-tab{font-size:.78rem;font-weight:700;color:var(--mist);background:#fff;border:1px solid var(--bd2);padding:7px 14px;border-radius:11px;cursor:pointer;transition:.15s}
+.mgr-tab.on{background:var(--ink);color:#fff;border-color:var(--ink)}
+
+/* 테이블 */
+.tbl-wrap{background:#fff;border:1px solid var(--bd);border-radius:var(--r);overflow:hidden;box-shadow:var(--sh)}
+table{width:100%;border-collapse:collapse;font-size:.82rem}
+thead th{background:#F7F8FB;color:var(--mist);font-weight:700;font-size:.74rem;text-align:left;padding:12px 14px;border-bottom:1px solid var(--bd);white-space:nowrap}
+tbody td{padding:13px 14px;border-bottom:1px solid var(--bd);vertical-align:middle}
+tbody tr{transition:.12s;cursor:pointer}
+tbody tr:hover{background:var(--indigo-l2)}
+tbody tr:last-child td{border-bottom:none}
+.cell-title{font-weight:700}
+.cell-sub{font-size:.72rem;color:var(--mist);margin-top:2px}
+.chip{display:inline-flex;align-items:center;gap:4px;font-size:.7rem;font-weight:800;padding:3px 9px;border-radius:8px;white-space:nowrap}
+.chip.ch{color:#fff}
+.chip.active{background:var(--mint-l);color:var(--mint-d)}
+.chip.closed{background:#F1F2F6;color:var(--mist)}
+.chip.indigo{background:var(--indigo-l);color:var(--indigo-d)}
+.chip.amber{background:var(--amber-l);color:#B45309}
+.chip.red{background:var(--red-l);color:#C0392B}
+.money{font-weight:800;color:var(--mint-d);font-variant-numeric:tabular-nums}
+/* 진행 미니바 */
+.pbar{display:flex;align-items:center;gap:8px}
+.pbar .track{flex:1;min-width:64px;height:6px;background:#EEF0F5;border-radius:20px;overflow:hidden}
+.pbar .fill{height:100%;background:linear-gradient(90deg,var(--indigo),#6E63F0);border-radius:20px;transition:width .9s cubic-bezier(.2,.7,.2,1);width:0}
+.pbar .fill.hot{background:linear-gradient(90deg,var(--amber),var(--red))}
+.pbar .fill.done{background:var(--mist)}
+.pbar b{font-size:.74rem;font-variant-numeric:tabular-nums;min-width:40px;text-align:right}
+
+/* 모집공고 카드 */
+.recruit-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(290px,1fr));gap:14px}
+.rcard{background:#fff;border:1px solid var(--bd);border-radius:var(--r);box-shadow:var(--sh);overflow:hidden;transition:transform .14s,box-shadow .2s}
+.rcard:hover{transform:translateY(-2px);box-shadow:0 8px 24px rgba(25,31,40,.08)}
+.rcard .rtop{padding:15px 16px;display:flex;gap:12px}
+.rcard .rth{flex:0 0 52px;width:52px;height:52px;border-radius:14px;display:grid;place-items:center;font-size:1.5rem}
+.rcard .rt{font-size:.92rem;font-weight:700;line-height:1.35;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden}
+.rcard .rmeta{display:flex;gap:5px;margin-top:7px;flex-wrap:wrap}
+.rcard .rfoot{display:flex;align-items:center;gap:10px;padding:13px 16px;border-top:1px dashed var(--bd2)}
+.rcard .rfee{font-size:1.05rem;font-weight:800;color:var(--mint-d);font-variant-numeric:tabular-nums}
+.rcard .ract{margin-left:auto;display:flex;gap:6px}
+.iconbtn{width:32px;height:32px;border-radius:9px;border:1px solid var(--bd2);background:#fff;color:var(--mist);cursor:pointer;display:grid;place-items:center;transition:.15s}
+.iconbtn:hover{border-color:var(--indigo);color:var(--indigo)}
+
+/* 입금처리 */
+.bank-sel{display:flex;gap:8px;margin-bottom:16px}
+.bank-btn{display:inline-flex;align-items:center;gap:8px;padding:12px 18px;border-radius:13px;border:1.5px solid var(--bd2);background:#fff;font-size:.85rem;font-weight:700;color:var(--t2);cursor:pointer;transition:.15s}
+.bank-btn.on{border-color:var(--indigo);background:var(--indigo-l);color:var(--indigo-d)}
+.pay-actionbar{display:flex;align-items:center;gap:10px;margin-top:14px;padding:14px 16px;background:var(--indigo-l2);border:1px solid var(--bd2);border-radius:var(--r)}
+.pay-actionbar .sc{font-weight:800;color:var(--indigo-d);font-size:.86rem}
+
+/* 마감 요약 */
+.sum3{display:grid;grid-template-columns:repeat(3,1fr);gap:12px;margin-bottom:18px}
+.sum-c{border-radius:14px;padding:18px;text-align:center;border:1px solid var(--bd)}
+.sum-c .n{font-size:1.7rem;font-weight:800;letter-spacing:-.04em}.sum-c .l{font-size:.76rem;color:var(--t2);margin-top:4px;font-weight:600}
+.sum-c.i{background:var(--indigo-l2)}.sum-c.i .n{color:var(--indigo)}
+.sum-c.a{background:var(--amber-l)}.sum-c.a .n{color:var(--amber)}
+.sum-c.m{background:var(--mint-l)}.sum-c.m .n{color:var(--mint-d)}
+
+/* 설정 */
+.set-grid{display:grid;grid-template-columns:1fr 1fr;gap:14px}
+@media(max-width:760px){.set-grid{grid-template-columns:1fr}.kpi{grid-template-columns:repeat(2,1fr)}.set-row{flex-wrap:wrap}}
+.set-card{background:#fff;border:1px solid var(--bd);border-radius:var(--r);padding:18px;box-shadow:var(--sh)}
+.set-card h3{font-size:.92rem;font-weight:800;margin-bottom:4px}
+.set-card .sd{font-size:.76rem;color:var(--mist);margin-bottom:14px}
+.set-row{display:flex;align-items:center;gap:12px;padding:12px 0;border-top:1px solid var(--bd)}
+.set-row .k{font-size:.84rem;font-weight:600}.set-row .kd{font-size:.72rem;color:var(--mist);margin-top:2px}.set-row .r{margin-left:auto}
+.toggle{width:44px;height:26px;border-radius:20px;background:#D7DAE3;position:relative;cursor:pointer;transition:.2s;border:none;flex:0 0 44px}
+.toggle::after{content:"";position:absolute;top:3px;left:3px;width:20px;height:20px;border-radius:50%;background:#fff;transition:.2s;box-shadow:0 1px 3px rgba(0,0,0,.2)}
+.toggle.on{background:var(--indigo)}.toggle.on::after{left:21px}
+
+/* 이상로그 */
+.log-row{display:flex;gap:12px;align-items:flex-start;padding:13px 16px;border-bottom:1px solid var(--bd);font-size:.82rem}
+.log-row:last-child{border:none}
+.log-lv{flex:0 0 auto;font-size:.66rem;font-weight:800;padding:3px 9px;border-radius:7px}
+.log-lv.err{background:var(--red-l);color:#C0392B}.log-lv.warn{background:var(--amber-l);color:#B45309}.log-lv.info{background:var(--indigo-l);color:var(--indigo-d)}
+.log-row .lm{flex:1}.log-row .lt{font-family:ui-monospace,monospace;color:var(--mist);font-size:.72rem;white-space:nowrap}
+
+/* 리뷰어 요약배지 */
+.badges{display:flex;gap:8px;margin-bottom:12px;flex-wrap:wrap}
+.bdg-pill{font-size:.78rem;font-weight:700;padding:5px 13px;border-radius:20px}
+.bdg-pill.i{background:var(--indigo-l);color:var(--indigo-d)}.bdg-pill.m{background:var(--mint-l);color:var(--mint-d)}
+
+/* 모달 */
+.modal{display:none;position:fixed;inset:0;z-index:300;background:rgba(25,31,40,.45);align-items:center;justify-content:center;padding:20px}
+.modal.on{display:flex;animation:fade .2s}
+.mbox{background:#fff;border-radius:20px;width:100%;max-width:460px;box-shadow:0 24px 60px rgba(0,0,0,.25);animation:pop .25s cubic-bezier(.2,.8,.2,1)}
+@keyframes pop{from{transform:scale(.96);opacity:.6}to{transform:none;opacity:1}}
+.mhead{display:flex;align-items:center;padding:18px 20px;border-bottom:1px solid var(--bd)}
+.mhead h3{font-size:1.02rem;font-weight:800}.mhead .x{margin-left:auto;width:34px;height:34px;border-radius:10px;border:none;background:#F1F2F6;color:var(--mist);cursor:pointer;font-size:1rem}
+.mbody{padding:18px 20px}
+.mrow{display:flex;justify-content:space-between;padding:11px 0;border-bottom:1px solid var(--bd);font-size:.85rem}
+.mrow:last-child{border:none}.mrow .k{color:var(--mist);font-weight:500}.mrow .v{font-weight:700}
+
+@media (prefers-reduced-motion: reduce){*{animation:none!important;transition:none!important}.pbar .fill{transition:none!important}}
+</style>
+</head>
+<body>
+<span class="tag">시안 D · 관리자</span>
+
+<!-- 앱바 -->
+<header class="appbar">
+  <div class="appbar-in">
+    <div class="brand">
+      <div class="blogo"><i class="fas fa-star-half-alt"></i></div>
+      <h1>아이에이리뷰</h1><span class="role">관리자</span>
+    </div>
+    <div class="ab-actions">
+      <button class="ablink portal"><i class="fas fa-briefcase"></i> 업무포털</button>
+      <button class="ablink"><i class="fas fa-user-tie"></i> AE담당자</button>
+      <button class="ablink"><i class="fas fa-external-link-alt"></i> 리뷰제출</button>
+      <div class="ab-user"><div class="uav">관</div></div>
+    </div>
+  </div>
+</header>
+
+<!-- 탭 네비 -->
+<nav class="tabnav"><div class="tabnav-in" id="tabnav">
+  <button class="tbtn on" data-p="dashboard"><i class="fas fa-chart-bar"></i> 대시보드</button>
+  <button class="tbtn" data-p="orders"><i class="fas fa-clipboard-list"></i> 작업 오더 <span class="bdg">3</span></button>
+  <button class="tbtn" data-p="recruit"><i class="fas fa-bullhorn"></i> 모집공고</button>
+  <button class="tbtn" data-p="payment"><i class="fas fa-money-bill-wave"></i> 입금처리</button>
+  <button class="tbtn" data-p="archive"><i class="fas fa-archive"></i> 마감 <span class="bdg">2</span></button>
+  <button class="tbtn" data-p="reviewers"><i class="fas fa-users"></i> 리뷰어</button>
+  <button class="tbtn" data-p="settings"><i class="fas fa-cog"></i> 설정</button>
+  <button class="tbtn" data-p="logs"><i class="fas fa-bug"></i> 이상로그 <span class="bdg red">1</span></button>
+</div></nav>
+
+<div class="wrap">
+
+  <!-- ===== 대시보드 ===== -->
+  <div class="pane on" id="p-dashboard">
+    <div class="notice">
+      <div class="ni"><i class="fas fa-bullhorn"></i></div>
+      <div><b>시스템 변경 공지</b><p>입금처리 탭에 케이뱅크 이체파일 포맷을 추가했습니다. 마감 자동감지 주기는 5분으로 단축되었습니다.</p><div class="dt">2026.06.17 · 누적 이력</div></div>
+    </div>
+
+    <div class="sec-head"><span class="st"><i class="fas fa-clipboard-list" style="color:var(--indigo);margin-right:6px"></i>작업오더 간편보기</span><span class="desc">최신 4건</span><div class="right"><button class="btn btn-soft" onclick="go('orders')"><i class="fas fa-list"></i> 전체 보기</button></div></div>
+    <div class="mini" id="miniWo"></div>
+
+    <div class="sec-head"><span class="st"><i class="fas fa-th-list" style="color:var(--indigo);margin-right:6px"></i>캠페인 탭 관리</span>
+      <div class="right">
+        <span class="desc">DB(tab_configs) · 5분 자동갱신 · 방금 동기화됨</span>
+        <button class="btn btn-p"><i class="fas fa-exchange-alt"></i> 탭명 동기화</button>
+        <button class="btn btn-g"><i class="fas fa-archive"></i> 완료감지</button>
+        <button class="btn btn-mint"><i class="fas fa-file-csv"></i> CSV 내보내기</button>
+      </div>
+    </div>
+
+    <div class="kpi" id="kpi"></div>
+
+    <div class="filterbar">
+      <select class="sel"><option>전체 상태</option><option>활성</option><option>마감</option></select>
+      <select class="sel"><option>전체 캠페인</option></select>
+      <select class="sel"><option>전체 리뷰유형</option><option>실배송</option><option>계정매입</option></select>
+      <input class="input" placeholder="탭명/상품명/캠페인/담당자 검색..." style="flex:1;min-width:160px" oninput="renderRows(this.value)"/>
+      <span class="cnt" id="rowCnt">0건</span>
+    </div>
+
+    <div class="mgr-tabs" id="mgrTabs"></div>
+
+    <div class="tbl-wrap">
+      <table>
+        <thead><tr><th>탭 / 상품</th><th>채널</th><th>담당자</th><th>리뷰유형</th><th>리뷰비</th><th style="min-width:140px">모집현황</th><th>상태</th></tr></thead>
+        <tbody id="rows"></tbody>
+      </table>
+    </div>
+  </div>
+
+  <!-- ===== 작업 오더 ===== -->
+  <div class="pane" id="p-orders">
+    <div class="sec-head"><span class="st">작업 오더 인박스</span><span class="desc">AE가 제출한 구매양식을 검토·발행합니다</span>
+      <div class="right"><select class="sel"><option>전체 상태</option><option>제출됨</option><option>검토중</option><option>모집공고발행</option><option>완료</option></select><button class="btn btn-soft"><i class="fas fa-sync-alt"></i> 새로고침</button></div>
+    </div>
+    <div class="tbl-wrap">
+      <table>
+        <thead><tr><th>상품 / 캠페인</th><th>AE 담당자</th><th>채널</th><th>요청 리뷰수</th><th>제출시각</th><th>상태</th><th></th></tr></thead>
+        <tbody id="woRows"></tbody>
+      </table>
+    </div>
+  </div>
+
+  <!-- ===== 모집공고 ===== -->
+  <div class="pane" id="p-recruit">
+    <div class="sec-head"><span class="st">모집공고 관리</span>
+      <div class="right">
+        <button class="btn btn-g"><i class="fas fa-external-link-alt"></i> 공고 페이지 미리보기</button>
+        <button class="btn btn-g"><i class="fas fa-cog"></i> 공통 설정</button>
+        <button class="btn btn-p"><i class="fas fa-plus"></i> 공고 등록</button>
+      </div>
+    </div>
+    <div class="recruit-grid" id="recruitGrid"></div>
+  </div>
+
+  <!-- ===== 입금처리 ===== -->
+  <div class="pane" id="p-payment">
+    <div class="sec-head"><span class="st"><i class="fas fa-money-bill-wave" style="color:var(--mint-d);margin-right:6px"></i>입금처리</span><span class="desc">리뷰 완료 + 입금 미완료 대상자를 조회하여 이체파일을 생성합니다</span></div>
+    <div style="font-size:.74rem;font-weight:700;color:var(--t2);margin-bottom:8px">이체 은행 선택</div>
+    <div class="bank-sel">
+      <button class="bank-btn on" onclick="selBank(this)"><i class="fas fa-university"></i> 하나은행 (KEB하나)</button>
+      <button class="bank-btn" onclick="selBank(this)"><i class="fas fa-mobile-alt"></i> 케이뱅크</button>
+    </div>
+    <div class="filterbar">
+      <label style="font-size:.78rem;font-weight:700;color:var(--t2)">캠페인 필터</label>
+      <select class="sel" style="min-width:200px"><option>전체 캠페인</option></select>
+      <button class="btn btn-p"><i class="fas fa-search"></i> 대상 조회</button>
+      <span class="desc">마감 탭은 자동 제외됩니다</span>
+    </div>
+    <div class="tbl-wrap">
+      <table>
+        <thead><tr><th style="width:36px"><input type="checkbox" checked/></th><th>은행</th><th>계좌번호</th><th>예금주</th><th style="text-align:right">결제금액</th><th>입금명</th><th>탭</th><th>캠페인</th></tr></thead>
+        <tbody id="payRows"></tbody>
+      </table>
+    </div>
+    <div class="pay-actionbar">
+      <span class="sc">5건 선택 · 합계 <span class="money">₩126,700</span></span>
+      <div style="margin-left:auto;display:flex;gap:8px">
+        <button class="btn btn-g"><i class="fas fa-file-excel"></i> 이체파일 다운로드</button>
+        <button class="btn btn-mint"><i class="fas fa-check-circle"></i> 이체 완료 처리</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- ===== 마감 ===== -->
+  <div class="pane" id="p-archive">
+    <div class="sec-head"><span class="st"><i class="fas fa-archive" style="color:var(--indigo);margin-right:6px"></i>완료 인덱스 마감</span>
+      <div class="right"><button class="btn btn-p"><i class="fas fa-magic"></i> 완료건 자동감지</button><button class="btn btn-g"><i class="fas fa-sync-alt"></i> 새로고침</button></div>
+    </div>
+    <div class="sum3">
+      <div class="sum-c i"><div class="n tabular">6</div><div class="l">마감 캠페인</div></div>
+      <div class="sum-c a"><div class="n tabular">3</div><div class="l">검토 대기</div></div>
+      <div class="sum-c m"><div class="n tabular">2</div><div class="l">이번주 마감</div></div>
+    </div>
+    <div class="tbl-wrap">
+      <table>
+        <thead><tr><th>탭 / 상품</th><th>담당자</th><th>완료 리뷰</th><th>마감 사유</th><th>감지일</th><th>상태</th></tr></thead>
+        <tbody id="archiveRows"></tbody>
+      </table>
+    </div>
+  </div>
+
+  <!-- ===== 리뷰어 ===== -->
+  <div class="pane" id="p-reviewers">
+    <div class="sec-head"><span class="st"><i class="fas fa-users" style="color:var(--indigo);margin-right:6px"></i>등록 리뷰어 목록</span>
+      <div class="right"><input class="input" placeholder="이름 검색..." style="width:150px"/><button class="btn btn-p"><i class="fas fa-sync-alt"></i> 새로고침</button></div>
+    </div>
+    <div class="badges"><span class="bdg-pill i">전체 리뷰어 1,284명</span><span class="bdg-pill m">최근 7일 신규 37명</span></div>
+    <div class="tbl-wrap">
+      <table>
+        <thead><tr><th>이름</th><th>연락처</th><th>가입일</th><th>참여 캠페인</th><th>누적 페이백</th><th>등록정보</th></tr></thead>
+        <tbody id="reviewerRows"></tbody>
+      </table>
+    </div>
+  </div>
+
+  <!-- ===== 설정 ===== -->
+  <div class="pane" id="p-settings">
+    <div class="sec-head"><span class="st"><i class="fas fa-cog" style="color:var(--indigo);margin-right:6px"></i>시스템 설정</span></div>
+    <div class="set-grid">
+      <div class="set-card">
+        <h3>자동화</h3><div class="sd">동기화·감지 주기 및 자동 실행 옵션</div>
+        <div class="set-row"><div><div class="k">탭명 자동 동기화</div><div class="kd">5분마다 시트 ↔ DB 동기화</div></div><div class="r"><button class="toggle on" onclick="this.classList.toggle('on')"></button></div></div>
+        <div class="set-row"><div><div class="k">완료 자동감지</div><div class="kd">완료된 차수를 자동으로 마감 후보로</div></div><div class="r"><button class="toggle on" onclick="this.classList.toggle('on')"></button></div></div>
+        <div class="set-row"><div><div class="k">스마트 인덱스 빌드</div><div class="kd">대시보드 진입 시 백그라운드 갱신</div></div><div class="r"><button class="toggle" onclick="this.classList.toggle('on')"></button></div></div>
+      </div>
+      <div class="set-card">
+        <h3>입금 / 정산</h3><div class="sd">이체파일 생성 기본값</div>
+        <div class="set-row"><div><div class="k">기본 이체 은행</div><div class="kd">대상 조회 시 기본 선택</div></div><div class="r"><select class="sel"><option>하나은행</option><option>케이뱅크</option></select></div></div>
+        <div class="set-row"><div><div class="k">입금명 기본 접두어</div><div class="kd">예: 아이에이</div></div><div class="r"><input class="input" value="아이에이" style="width:120px"/></div></div>
+        <div class="set-row"><div><div class="k">미설정 입금명 경고</div><div class="kd">조회 시 누락 건 강조</div></div><div class="r"><button class="toggle on" onclick="this.classList.toggle('on')"></button></div></div>
+      </div>
+      <div class="set-card">
+        <h3>알림</h3><div class="sd">관리자 알림 채널</div>
+        <div class="set-row"><div><div class="k">신규 작업오더 알림</div><div class="kd">AE 제출 시 배지 표시</div></div><div class="r"><button class="toggle on" onclick="this.classList.toggle('on')"></button></div></div>
+        <div class="set-row"><div><div class="k">이상로그 알림</div><div class="kd">에러 발생 시 빨간 배지</div></div><div class="r"><button class="toggle on" onclick="this.classList.toggle('on')"></button></div></div>
+      </div>
+      <div class="set-card">
+        <h3>표시</h3><div class="sd">대시보드 표시 옵션</div>
+        <div class="set-row"><div><div class="k">기본 보기</div><div class="kd">간단히 / 펼쳐보기</div></div><div class="r"><select class="sel"><option>간단히보기</option><option>펼쳐보기</option></select></div></div>
+        <div class="set-row"><div><div class="k">담당자 탭 표시</div><div class="kd">대시보드 상단 담당자 필터</div></div><div class="r"><button class="toggle on" onclick="this.classList.toggle('on')"></button></div></div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ===== 이상로그 ===== -->
+  <div class="pane" id="p-logs">
+    <div class="sec-head"><span class="st"><i class="fas fa-bug" style="color:var(--red);margin-right:6px"></i>이상로그</span><span class="desc">최근 시스템 경고 및 오류</span>
+      <div class="right"><select class="sel"><option>전체 레벨</option><option>ERROR</option><option>WARN</option><option>INFO</option></select><button class="btn btn-g"><i class="fas fa-sync-alt"></i> 새로고침</button></div>
+    </div>
+    <div class="tbl-wrap" id="logWrap"></div>
+  </div>
+
+</div>
+
+<!-- 상세 모달 -->
+<div class="modal" id="detailModal" onclick="if(event.target===this)closeModal()">
+  <div class="mbox">
+    <div class="mhead"><h3 id="mTitle">탭 상세 정보</h3><button class="x" onclick="closeModal()"><i class="fas fa-times"></i></button></div>
+    <div class="mbody" id="mBody"></div>
+  </div>
+</div>
+
+<script>
+const CH={네이버:{c:'#03C75A',e:'📗'},쿠팡:{c:'#E5392B',e:'📦'},G마켓:{c:'#1BA641',e:'🛒'},스마트스토어:{c:'#03C75A',e:'🟢'},'11번가':{c:'#FF0038',e:'🅰️'}};
+const won=n=>'₩'+n.toLocaleString('ko-KR');
+const C=[
+ {tab:'네이버-A1',ch:'네이버',title:'N여성부계 매입모집 (82~04년)',mgr:'궁둥회',type:'계정매입',fee:120000,cur:0,max:10,st:'active'},
+ {tab:'G마켓-키성장-1',ch:'G마켓',title:'키성장영양제 초유단백 우유칼슘',mgr:'망고',type:'실배송',fee:1500,cur:21,max:30,st:'active'},
+ {tab:'쿠팡-로댕-2',ch:'쿠팡',title:'코리아나 로댕 쏘 맨즈 올인원',mgr:'만두',type:'실배송',fee:1500,cur:17,max:30,st:'active'},
+ {tab:'스토어-액자-1',ch:'스마트스토어',title:'소소꼬모 명태 그림 인테리어 액자',mgr:'망고',type:'박스배송',fee:1500,cur:7,max:20,st:'active'},
+ {tab:'쿠팡-원두-3',ch:'쿠팡',title:'프리미엄 핸드드립 원두 200g',mgr:'만두',type:'실배송',fee:1200,cur:25,max:25,st:'closed'},
+ {tab:'11번가-칫솔-1',ch:'11번가',title:'미세모 칫솔 10P 세트',mgr:'궁둥회',type:'실배송',fee:1300,cur:12,max:20,st:'active'},
+];
+const MGRS=['전체','궁둥회','망고','만두'];
+let curMgr='전체';
+
+/* KPI */
+function renderKPI(){
+  const k=[
+    {l:'전체 탭',n:'24',c:''},{l:'활성',n:'18',c:'indigo'},{l:'마감',n:'6',c:''},
+    {l:'오늘 제출',n:'37',c:'mint',d:'▲ 12',dc:'up'},{l:'미입금',n:'12',c:'amber'},
+    {l:'누적 페이백',n:'₩4.82M',c:'mint'}
+  ];
+  document.getElementById('kpi').innerHTML=k.map(x=>`<div class="kpi-c"><div class="kl">${x.l}</div><div class="kn ${x.c}">${x.n}</div>${x.d?`<div class="kd ${x.dc}">${x.d} 어제 대비</div>`:''}</div>`).join('');
+}
+/* 담당자 탭 */
+function renderMgr(){
+  document.getElementById('mgrTabs').innerHTML=MGRS.map(m=>`<span class="mgr-tab ${m===curMgr?'on':''}" onclick="curMgr='${m}';renderMgr();renderRows()">${m}${m!=='전체'?` <span style="opacity:.6">${C.filter(c=>c.mgr===m).length}</span>`:''}</span>`).join('');
+}
+/* 대시보드 행 */
+function renderRows(q){
+  q=(q||'').trim();
+  let list=C.filter(c=>curMgr==='전체'||c.mgr===curMgr);
+  if(q)list=list.filter(c=>(c.title+c.tab+c.mgr+c.ch).includes(q));
+  const tb=document.getElementById('rows');
+  tb.innerHTML=list.map(c=>{
+    const ch=CH[c.ch]||{c:'#5046E4'};const pct=Math.round(c.cur/c.max*100);const cls=c.st==='closed'?'done':(pct>=80?'hot':'');
+    return `<tr onclick='openDetail(${JSON.stringify(c).replace(/'/g,"&#39;")})'>
+      <td><div class="cell-title">${c.title}</div><div class="cell-sub">${c.tab}</div></td>
+      <td><span class="chip ch" style="background:${ch.c}">${c.ch}</span></td>
+      <td>${c.mgr}</td>
+      <td><span class="chip indigo">${c.type}</span></td>
+      <td><span class="money">${won(c.fee)}</span></td>
+      <td><div class="pbar"><div class="track"><div class="fill ${cls}" data-pct="${pct}"></div></div><b>${c.cur}/${c.max}</b></div></td>
+      <td><span class="chip ${c.st}">${c.st==='active'?'활성':'마감'}</span></td>
+    </tr>`;
+  }).join('');
+  document.getElementById('rowCnt').textContent=list.length+'건';
+  fillBars();
+}
+function fillBars(){document.querySelectorAll('.pbar .fill').forEach(f=>requestAnimationFrame(()=>f.style.width=(f.dataset.pct||0)+'%'));}
+
+/* 작업오더 간편 */
+const WO=[
+ {title:'코리아나 로댕 올인원',ae:'김AE',ch:'쿠팡',n:30,t:'12분 전',st:'submitted'},
+ {title:'키성장영양제 우유칼슘',ae:'박AE',ch:'G마켓',n:30,t:'48분 전',st:'reviewing'},
+ {title:'미세모 칫솔 10P',ae:'이AE',ch:'11번가',n:20,t:'2시간 전',st:'published'},
+ {title:'핸드드립 원두 200g',ae:'김AE',ch:'쿠팡',n:25,t:'어제',st:'done'},
+];
+const WOST={submitted:{l:'제출됨',c:'indigo'},reviewing:{l:'검토중',c:'amber'},await_chatroom:{l:'카톡방대기',c:'amber'},published:{l:'발행',c:'active'},done:{l:'완료',c:'closed'},rejected:{l:'반려',c:'red'}};
+function renderWo(){
+  document.getElementById('miniWo').innerHTML=WO.map(w=>{const ch=CH[w.ch]||{c:'#5046E4',e:'📦'};const s=WOST[w.st];
+    return `<div class="mini-card"><div class="mi" style="background:${ch.c}1A">${ch.e}</div><div style="flex:1;min-width:0"><div class="t">${w.title}</div><div class="s">${w.ae} · ${w.t}</div></div><span class="chip ${s.c}">${s.l}</span></div>`;}).join('');
+  // 작업오더 인박스 테이블
+  document.getElementById('woRows').innerHTML=WO.map(w=>{const ch=CH[w.ch]||{c:'#5046E4'};const s=WOST[w.st];
+    return `<tr><td class="cell-title">${w.title}</td><td>${w.ae}</td><td><span class="chip ch" style="background:${ch.c}">${w.ch}</span></td><td class="tabular">${w.n}건</td><td style="color:var(--mist)">${w.t}</td><td><span class="chip ${s.c}">${s.l}</span></td><td><button class="btn btn-soft" style="padding:5px 10px">검토 →</button></td></tr>`;}).join('');
+}
+
+/* 모집공고 카드 */
+function renderRecruit(){
+  document.getElementById('recruitGrid').innerHTML=C.map(c=>{const ch=CH[c.ch]||{c:'#5046E4',e:'📦'};
+    return `<div class="rcard">
+      <div class="rtop"><div class="rth" style="background:${ch.c}1A">${ch.e}</div><div style="flex:1;min-width:0"><div class="rt">${c.title}</div><div class="rmeta"><span class="chip ch" style="background:${ch.c}">${c.ch}</span><span class="chip indigo">${c.type}</span><span class="chip ${c.st}">${c.st==='active'?'모집중':'마감'}</span></div></div></div>
+      <div class="rfoot"><div><div style="font-size:.66rem;color:var(--mist);font-weight:700">리뷰비</div><div class="rfee">${won(c.fee)}</div></div>
+        <div style="font-size:.74rem;color:var(--mist);font-weight:700" class="tabular">${c.cur}/${c.max}명</div>
+        <div class="ract"><button class="iconbtn"><i class="fas fa-pen"></i></button><button class="iconbtn"><i class="fas fa-eye"></i></button></div></div>
+    </div>`;}).join('');
+}
+
+/* 입금처리 */
+const PAY=[
+ {bank:'국민',acc:'1234-01-567890',name:'김수만',amt:1500,dn:'아이에이김수만',tab:'쿠팡-로댕-2',camp:'로댕 올인원'},
+ {bank:'카카오',acc:'3333-12-3456789',name:'이영희',amt:1500,dn:'아이에이이영희',tab:'G마켓-키성장-1',camp:'키성장영양제'},
+ {bank:'신한',acc:'110-234-567890',name:'박철수',amt:1200,dn:'아이에이박철수',tab:'쿠팡-원두-3',camp:'핸드드립 원두'},
+ {bank:'토스',acc:'1000-1234-5678',name:'최민지',amt:1300,dn:'아이에이최민지',tab:'11번가-칫솔-1',camp:'미세모 칫솔'},
+ {bank:'농협',acc:'302-1234-5678-91',name:'정다은',amt:1500,dn:'아이에이정다은',tab:'스토어-액자-1',camp:'명태 액자'},
+];
+function renderPay(){
+  document.getElementById('payRows').innerHTML=PAY.map(p=>`<tr><td><input type="checkbox" checked/></td><td>${p.bank}</td><td class="tabular" style="font-family:ui-monospace,monospace;font-size:.78rem">${p.acc}</td><td class="cell-title">${p.name}</td><td style="text-align:right"><span class="money">${won(p.amt)}</span></td><td>${p.dn}</td><td style="color:var(--mist)">${p.tab}</td><td>${p.camp}</td></tr>`).join('');
+}
+function selBank(el){document.querySelectorAll('.bank-btn').forEach(b=>b.classList.remove('on'));el.classList.add('on');}
+
+/* 마감 */
+const ARCH=[
+ {tab:'쿠팡-원두-3',title:'프리미엄 핸드드립 원두 200g',mgr:'만두',done:'25/25',reason:'목표 달성',date:'2026.06.16',st:'closed'},
+ {tab:'네이버-가방-2',title:'데일리 크로스백 캔버스',mgr:'궁둥회',done:'30/30',reason:'목표 달성',date:'2026.06.15',st:'closed'},
+ {tab:'G마켓-텀블러-1',title:'보온 스테인리스 텀블러 500ml',mgr:'망고',done:'18/20',reason:'기간 종료',date:'2026.06.14',st:'review'},
+];
+function renderArchive(){
+  document.getElementById('archiveRows').innerHTML=ARCH.map(a=>`<tr><td><div class="cell-title">${a.title}</div><div class="cell-sub">${a.tab}</div></td><td>${a.mgr}</td><td class="tabular">${a.done}</td><td>${a.reason}</td><td style="color:var(--mist)">${a.date}</td><td><span class="chip ${a.st==='closed'?'closed':'amber'}">${a.st==='closed'?'마감완료':'검토대기'}</span></td></tr>`).join('');
+}
+
+/* 리뷰어 */
+const REV=[
+ {name:'김수만',phone:'010-8592-6325',join:'2026.06.17',camps:3,total:4500,reg:'미완료'},
+ {name:'이영희',phone:'010-2345-6789',join:'2026.05.30',camps:11,total:18200,reg:'완료'},
+ {name:'박철수',phone:'010-3456-7890',join:'2026.05.12',camps:7,total:9600,reg:'완료'},
+ {name:'최민지',phone:'010-4567-8901',join:'2026.04.28',camps:22,total:41300,reg:'완료'},
+ {name:'정다은',phone:'010-5678-9012',join:'2026.06.10',camps:5,total:7100,reg:'미완료'},
+];
+function renderReviewers(){
+  document.getElementById('reviewerRows').innerHTML=REV.map(r=>`<tr><td class="cell-title">${r.name}</td><td class="tabular" style="color:var(--t2)">${r.phone}</td><td style="color:var(--mist)">${r.join}</td><td class="tabular">${r.camps}건</td><td><span class="money">${won(r.total)}</span></td><td><span class="chip ${r.reg==='완료'?'active':'red'}">${r.reg}</span></td></tr>`).join('');
+}
+
+/* 이상로그 */
+const LOGS=[
+ {lv:'err',m:'Google Drive 업로드 실패 — quota 초과 (캠페인: 로댕 올인원)',t:'06-18 09:14:22'},
+ {lv:'warn',m:'탭명 동기화 중 매칭 실패 1건 (시트: G마켓-키성장-1)',t:'06-18 08:55:01'},
+ {lv:'warn',m:'입금명 미설정 대상 2건 발견 (입금처리)',t:'06-17 17:40:13'},
+ {lv:'info',m:'스마트 인덱스 빌드 완료 — 24개 탭, 0.8s',t:'06-17 17:35:00'},
+ {lv:'info',m:'완료 자동감지: 마감 후보 3건 추가',t:'06-17 12:00:00'},
+];
+function renderLogs(){
+  document.getElementById('logWrap').innerHTML=LOGS.map(l=>`<div class="log-row"><span class="log-lv ${l.lv}">${l.lv.toUpperCase()}</span><span class="lm">${l.m}</span><span class="lt">${l.t}</span></div>`).join('');
+}
+
+/* 상세 모달 */
+function openDetail(c){
+  const pct=Math.round(c.cur/c.max*100);
+  document.getElementById('mTitle').textContent=c.title;
+  document.getElementById('mBody').innerHTML=`
+    <div class="mrow"><span class="k">탭명</span><span class="v">${c.tab}</span></div>
+    <div class="mrow"><span class="k">채널</span><span class="v">${c.ch}</span></div>
+    <div class="mrow"><span class="k">담당자</span><span class="v">${c.mgr}</span></div>
+    <div class="mrow"><span class="k">리뷰유형</span><span class="v">${c.type}</span></div>
+    <div class="mrow"><span class="k">리뷰비</span><span class="v money">${won(c.fee)}</span></div>
+    <div class="mrow"><span class="k">모집현황</span><span class="v">${c.cur}/${c.max}명 (${pct}%)</span></div>
+    <div class="mrow"><span class="k">상태</span><span class="v">${c.st==='active'?'활성':'마감'}</span></div>
+    <div style="display:flex;gap:8px;margin-top:16px"><button class="btn btn-g" style="flex:1;justify-content:center" onclick="closeModal()">닫기</button><button class="btn btn-p" style="flex:1;justify-content:center"><i class="fas fa-pen"></i> 편집</button></div>`;
+  document.getElementById('detailModal').classList.add('on');
+}
+function closeModal(){document.getElementById('detailModal').classList.remove('on');}
+
+/* 탭 전환 */
+function go(p){
+  document.querySelectorAll('.tbtn').forEach(b=>b.classList.toggle('on',b.dataset.p===p));
+  document.querySelectorAll('.pane').forEach(x=>x.classList.remove('on'));
+  document.getElementById('p-'+p).classList.add('on');
+  window.scrollTo({top:0,behavior:'smooth'});
+  if(p==='dashboard')fillBars();
+}
+document.getElementById('tabnav').addEventListener('click',e=>{const b=e.target.closest('.tbtn');if(b)go(b.dataset.p);});
+
+renderKPI();renderMgr();renderRows();renderWo();renderRecruit();renderPay();renderArchive();renderReviewers();renderLogs();
+</script>
+</body>
+</html>
