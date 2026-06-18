@@ -1,17 +1,20 @@
 /* ============================================================
-   토스(Toss) 미니멀 핀테크 폴리시 레이어
-   - 정보·배치·기능은 그대로, 룩만 통일하는 공통 스킨
-   - 각 페이지의 인라인 스타일 "뒤"에 로드되어 마지막에 적용됨
-   - 강조색 단일: 토스 블루 #3182F6 (딥 #1B64DA / 라이트 #E8F1FE), 성공·금액 민트 #12B886
+   토스(Toss) 미니멀 핀테크 스킨 — 공통 레이어
+   정보·배치·기능은 그대로, "룩"만 토스풍으로 끌어올림.
+   각 페이지 인라인 스타일 "뒤"에 로드되어 마지막에 적용됨.
+   강조색 단일: 토스 블루 #3182F6 (딥 #1B64DA / 라이트 #E8F1FE)
+   성공·금액: 민트 #12B886 · 중립 그레이: 토스 팔레트
    ============================================================ */
 @import url('https://cdn.jsdelivr.net/gh/orioncactus/pretendard@latest/dist/web/variable/pretendardvariable-dynamic-subset.min.css');
 
 :root{
-  --toss-blue:#3182F6;
-  --toss-blue-deep:#1B64DA;
-  --toss-blue-light:#E8F1FE;
+  --toss-blue:#3182F6; --toss-blue-deep:#1B64DA; --toss-blue-light:#E8F1FE;
   --toss-mint:#12B886;
-  --toss-ring:0 0 0 3px rgba(49,130,246,.32);
+  --toss-ink:#191F28; --toss-sub:#4E5968; --toss-mute:#8B95A1;
+  --toss-line:#F2F4F6; --toss-fill:#F2F4F6; --toss-fill-2:#F7F8FA;
+  --toss-ring:0 0 0 3px rgba(49,130,246,.18);
+  --toss-shadow:0 1px 2px rgba(17,24,40,.04), 0 6px 20px rgba(17,24,40,.05);
+  --toss-shadow-lg:0 20px 60px rgba(17,24,40,.18);
 }
 
 /* ── 타이포: Pretendard · 자간 -0.02em · 숫자 tabular ── */
@@ -20,51 +23,135 @@ body{
     'Apple SD Gothic Neo','Noto Sans KR',system-ui,sans-serif !important;
   letter-spacing:-.02em;
   font-variant-numeric:tabular-nums;
-  -webkit-font-smoothing:antialiased;
-  -moz-osx-font-smoothing:grayscale;
+  color:var(--toss-ink);
+  -webkit-font-smoothing:antialiased; -moz-osx-font-smoothing:grayscale;
   text-rendering:optimizeLegibility;
 }
-h1,h2,h3,
-.modal-header h2,.modal-header h3,.modal-header .modal-title{
-  font-weight:800;
-  letter-spacing:-.02em;
-}
-/* 금액·통계·표 숫자는 폭이 흔들리지 않게 고정폭 숫자 */
-table,.num,.amount,.money,.stat,.stat-value,
+h1,h2,h3,.modal-header h2,.modal-header h3,.modal-header .modal-title,
+.login-box h2,.login-card h2,.gate-title{ font-weight:800; letter-spacing:-.025em; }
+table,.num,.amount,.money,.stat,.stat-value,.grand b,
 [class*="amount"],[class*="num"],[class*="count"],[class*="total"],[class*="price"]{
-  font-variant-numeric:tabular-nums;
-  font-feature-settings:"tnum" 1;
+  font-variant-numeric:tabular-nums; font-feature-settings:"tnum" 1;
 }
 
 /* ── 포커스: 토스 블루 링 (하드 보더 대신 옅은 링) ── */
-a:focus-visible,button:focus-visible,input:focus-visible,select:focus-visible,
-textarea:focus-visible,[tabindex]:focus-visible,[role="button"]:focus-visible{
-  outline:none !important;
+a:focus-visible,button:focus-visible,[tabindex]:focus-visible,[role="button"]:focus-visible{
+  outline:none !important; box-shadow:var(--toss-ring) !important;
+}
+
+/* ── 인풋: 그레이 필 + 둥근 + 포커스 시 흰 배경 + 블루 링 ── */
+input:not([type=checkbox]):not([type=radio]):not([type=range]):not([type=color]):not([type=file]),
+select, textarea{
+  border-radius:12px !important;
+  border:1.5px solid transparent !important;
+  background:var(--toss-fill);
+  transition:background .15s, border-color .15s, box-shadow .15s;
+}
+input:not([type=checkbox]):not([type=radio]):not([type=range]):focus,
+select:focus, textarea:focus{
+  background:#fff !important;
+  border-color:var(--toss-blue) !important;
   box-shadow:var(--toss-ring) !important;
+  outline:none !important;
+}
+::placeholder{ color:#B0B8C1 !important; }
+
+/* ── 버튼: 둥근 + 굵게 + 누름 scale ── */
+button,.btn{
+  border-radius:12px !important; font-weight:700; letter-spacing:-.01em;
+  transition:transform .12s ease, background .15s, box-shadow .15s, filter .15s, color .15s;
+}
+button:active,.btn:active,[role="button"]:active{ transform:scale(.97); }
+/* 주요 CTA → 솔리드 토스 블루 */
+.btn-primary,.btn-submit,.pri,button.pri,.btn-index-build,.ostart,
+.sdp-btn-apply,.seg button.active,.btn-camp-refresh.primary{
+  background:var(--toss-blue) !important; color:#fff !important; border:none !important;
+  box-shadow:0 6px 16px rgba(49,130,246,.22) !important;
+}
+.btn-primary:hover,.btn-submit:hover,.pri:hover,button.pri:hover,
+.btn-index-build:hover,.ostart:hover{ background:var(--toss-blue-deep) !important; }
+/* 보조 → 라이트 그레이 필 (하드 보더 제거) */
+.btn-ghost,.btn-secondary,.btn-sm,.btn-topbar{
+  background:var(--toss-fill) !important; color:#333D4B !important;
+  border:1px solid transparent !important;
+}
+.btn-ghost:hover,.btn-secondary:hover,.btn-sm:hover{ background:#E5E8EB !important; }
+
+/* ── 카드/패널/모달: 큰 라운드 + 소프트 섀도우 (하드 보더 제거) ── */
+.card,.summary-card,.stats-card,.pane-card,.dash-campaign-block,.so-card,.sum-card,
+.login-box,.login-card,.tbl-scroll,.pane,.panel,.index-status-card{
+  border-radius:20px !important;
+  border:1px solid var(--toss-line) !important;
+  box-shadow:var(--toss-shadow) !important;
+}
+.modal,.modal-box{
+  border-radius:24px !important; border:none !important;
+  box-shadow:var(--toss-shadow-lg) !important;
+}
+.modal-header{ border-bottom:1px solid var(--toss-line) !important; background:#fff !important; }
+.modal-actions{ border-top:1px solid var(--toss-line); }
+
+/* ── 상태 칩/배지: 완전 둥근 pill + 소프트 톤 ── */
+.pill,.chip,.badge,.tag,.index-badge,.status,.status-pill,
+[class*="badge"],[class*="-pill"],[class*="chip"]{
+  border-radius:999px !important; font-weight:700 !important; border:none !important;
+  letter-spacing:-.01em;
 }
 
-/* ── 마이크로 인터랙션: 누름 scale ── */
-button:active,.btn:active,.btn-primary:active,.pri:active,[role="button"]:active{
-  transform:scale(.98);
+/* ── 탭: 흰 배경 + 활성 블루 언더라인 ── */
+.admin-tab-nav,.tab-nav{ background:#fff !important; border-bottom:1px solid var(--toss-line) !important; }
+.admin-tab-btn.active,.tab-btn.active,.tab.active{
+  color:var(--toss-blue) !important; font-weight:800 !important;
+  border-bottom-color:var(--toss-blue) !important;
 }
 
-/* ── fade-up 유틸 (필요 시 클래스로 사용) ── */
-@keyframes tossFadeUp{
-  from{opacity:0;transform:translateY(8px)}
-  to{opacity:1;transform:translateY(0)}
-}
-.toss-fade-up{animation:tossFadeUp .26s cubic-bezier(.16,1,.3,1) both;}
+/* ── 표: 세로줄 제거 · 옅은 가로 구분 · 행 호버 ── */
+table{ border-collapse:separate; border-spacing:0; }
+th{ background:var(--toss-fill-2) !important; color:var(--toss-mute) !important;
+    font-weight:700 !important; border:none !important; border-bottom:1px solid var(--toss-line) !important; }
+td{ border-left:none !important; border-right:none !important; border-bottom:1px solid var(--toss-line) !important; }
+tbody tr{ transition:background .12s; }
+tbody tr:hover td{ background:#F8FBFF; }
 
-/* ── 게이지 채움(있다면) 부드럽게 ── */
-.gauge>span,.progress>span,[class*="bar-fill"]{transition:width .5s cubic-bezier(.16,1,.3,1);}
+/* ── 관리자 헤더: 네이비 → 흰색 헤더 + 라이트 버튼 (admin 전용 스코프) ── */
+.admin-header{
+  background:#fff !important;
+  box-shadow:0 1px 0 var(--toss-line), 0 2px 14px rgba(17,24,40,.05) !important;
+}
+.admin-header .header-text h1{ color:var(--toss-ink) !important; }
+.admin-header .header-text p,
+.admin-header .header-text span{ color:var(--toss-mute) !important; }
+.admin-header-topbar{ background:var(--toss-fill-2) !important; border-bottom:1px solid var(--toss-line) !important; }
+.admin-header-topbar *{ color:var(--toss-sub) !important; }
+.admin-header-mainrow{ color:var(--toss-ink) !important; }
+.admin-header .btn-icon-sm{ color:var(--toss-sub) !important; background:var(--toss-fill) !important; }
+.admin-header .btn-icon-sm:hover{ color:var(--toss-ink) !important; background:#E5E8EB !important; }
+.admin-header .btn-header-sq{
+  background:var(--toss-fill) !important; border:1px solid transparent !important; color:var(--toss-sub) !important;
+}
+.admin-header .btn-header-sq:hover{ background:#E5E8EB !important; color:var(--toss-ink) !important; }
+.admin-header .header-icon{ background:var(--toss-blue) !important; color:#fff !important; }
+.admin-header .topbar-badge{ background:var(--toss-blue-light) !important; color:var(--toss-blue-deep) !important; border:none !important; }
+
+/* ── 스크롤바: 얇고 둥근 그레이 ── */
+*::-webkit-scrollbar{ width:10px; height:10px; }
+*::-webkit-scrollbar-thumb{ background:#D7DBE0; border-radius:999px; border:3px solid transparent; background-clip:padding-box; }
+*::-webkit-scrollbar-thumb:hover{ background:#C2C8CF; }
+*::-webkit-scrollbar-track{ background:transparent; }
+
+/* ── 구분선 ── */
+hr{ border:none; border-top:1px solid var(--toss-line); }
+
+/* ── 마이크로 인터랙션 ── */
+@keyframes tossFadeUp{ from{opacity:0; transform:translateY(8px)} to{opacity:1; transform:translateY(0)} }
+.toss-fade-up{ animation:tossFadeUp .26s cubic-bezier(.16,1,.3,1) both; }
+.gauge>span,.progress>span,[class*="bar-fill"]{ transition:width .5s cubic-bezier(.16,1,.3,1); }
 
 /* ── 모션 최소화 존중 ── */
 @media (prefers-reduced-motion: reduce){
   *,*::before,*::after{
-    animation-duration:.001ms !important;
-    animation-iteration-count:1 !important;
-    transition-duration:.001ms !important;
-    scroll-behavior:auto !important;
+    animation-duration:.001ms !important; animation-iteration-count:1 !important;
+    transition-duration:.001ms !important; scroll-behavior:auto !important;
   }
-  button:active,.btn:active,[role="button"]:active{transform:none !important;}
+  button:active,.btn:active,[role="button"]:active{ transform:none !important; }
 }
