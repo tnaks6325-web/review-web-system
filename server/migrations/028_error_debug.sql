@@ -36,6 +36,11 @@ ALTER TABLE error_logs ADD COLUMN IF NOT EXISTS status_updated_by TEXT NOT NULL 
 --    new/investigating/ignored 는 fingerprint 당 1행으로 롤업(occurrence_count 증가),
 --    resolved 과거행은 별도 보존 → 같은 signature 가 다시 들어오면 신규 'new' 행 생성(=재오픈).
 --    ※ 백필 결과 status='new' 행 집합 == 기존 resolved=FALSE 행 집합 → 유니크 충돌 없음(안전).
+--    ※★ FORWARD-ONLY: 이 마이그레이션은 구버전 인덱스 uq_error_logs_fp_open 을 영구 삭제한다.
+--       028 적용 이후에는 구버전 서버 빌드를 재배포하지 말 것. 구버전 logAbnormal 의
+--       UPSERT 는 `ON CONFLICT ... WHERE resolved = FALSE` 를 사용하는데, 그 인덱스가 없으면
+--       매 적재마다 "no unique or exclusion constraint matching ON CONFLICT" 에러로 dedup 이
+--       조용히 깨진다(로깅 try/catch 로 흡수되어 표면화되지 않음).
 DROP INDEX IF EXISTS uq_error_logs_fp_open;
 CREATE UNIQUE INDEX IF NOT EXISTS uq_error_logs_fp_active
   ON error_logs(fingerprint) WHERE status <> 'resolved';
