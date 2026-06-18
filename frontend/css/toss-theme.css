@@ -132,6 +132,40 @@ tbody tr:hover td{ background:#F8FBFF; }
 .admin-header .btn-header-sq:hover{ background:#E5E8EB !important; color:var(--toss-ink) !important; }
 .admin-header .header-icon{ background:var(--toss-blue) !important; color:#fff !important; }
 .admin-header .topbar-badge{ background:var(--toss-blue-light) !important; color:var(--toss-blue-deep) !important; border:none !important; }
+.admin-header #adminSessionInfo{ color:var(--toss-mute) !important; }
+
+/* 우상단 버튼: 흰 헤더 대비 또렷하게 (다크 헤더용 반투명 스타일 덮어쓰기) */
+.admin-header .btn-topbar{
+  background:var(--toss-fill) !important; border:1px solid #E5E8EB !important; color:#4E5968 !important;
+}
+.admin-header .btn-topbar i{ opacity:1 !important; }
+.admin-header .btn-topbar:hover{ background:#E5E8EB !important; border-color:#D7DBE0 !important; color:var(--toss-ink) !important; }
+.admin-header .btn-topbar.warn{ background:#FFF6DE !important; border-color:#FBDD96 !important; color:#B7791F !important; }
+.admin-header .btn-topbar.warn:hover{ background:#FBEFC4 !important; color:#92600F !important; }
+.admin-header .btn-topbar.sys{ background:var(--toss-blue-light) !important; border-color:#CCE0FB !important; color:var(--toss-blue-deep) !important; }
+
+/* 업무포털 / AE담당자 / 리뷰제출 (다크용 색상이 !important 였음 → 라이트로 통일) */
+.admin-header .btn-header-sq,
+.admin-header .btn-header-portal,
+.admin-header .btn-header-staff,
+.admin-header .btn-header-review{
+  background:var(--toss-fill) !important; border:1px solid #E5E8EB !important; color:#333D4B !important;
+}
+.admin-header .btn-header-sq i{ color:var(--toss-blue) !important; opacity:1 !important; }
+.admin-header .btn-header-sq:hover,
+.admin-header .btn-header-portal:hover,
+.admin-header .btn-header-staff:hover,
+.admin-header .btn-header-review:hover{
+  background:#E5E8EB !important; border-color:#D7DBE0 !important; color:var(--toss-ink) !important;
+}
+.admin-header .btn-header-sq.active-mode{
+  background:var(--toss-blue-light) !important; border-color:var(--toss-blue) !important; color:var(--toss-blue-deep) !important;
+}
+.admin-header .btn-header-sq.active-mode i{ color:var(--toss-blue-deep) !important; }
+/* 뒤로가기 등 아이콘 버튼 */
+.admin-header .admin-header-mainrow .btn-icon-sm{ color:var(--toss-sub) !important; background:var(--toss-fill) !important; }
+/* 개발용 라벨이 흰 헤더에서 안 보이지 않도록 */
+.admin-header .dev-label,.admin-tab-nav .dev-label{ color:var(--toss-mute) !important; }
 
 /* ── 스크롤바: 얇고 둥근 그레이 ── */
 *::-webkit-scrollbar{ width:10px; height:10px; }

@@ -65,7 +65,7 @@ const SYSTEM_NOTICES = [
 function _renderNoticeHtml(notice, isNew) {
   const typeIcons = { feat: "🆕", fix: "🔧", perf: "⚡", warn: "⚠️" };
   const typeLabels = { feat: "추가", fix: "수정", perf: "성능", warn: "주의" };
-  const typeColors = { feat: "#059669", fix: "#DC2626", perf: "#D97706", warn: "#9333EA" };
+  const typeColors = { feat: "#0ca678", fix: "#DC2626", perf: "#D97706", warn: "#3182f6" };
 
   const newBadge = isNew ? '<span style="background:#EF4444;color:#fff;font-size:.6rem;padding:1px 5px;border-radius:3px;margin-left:6px;font-weight:600">NEW</span>' : '';
   let html = `<div style="font-size:.82rem;font-weight:600;color:#1E40AF;margin-bottom:6px">
@@ -429,7 +429,7 @@ function renderResults(results) {
     const productLabel = item.tcDisplayName || "";
     // ★ v8.2: 차수 배지
     const roundBadge = item.round
-      ? `<span style="display:inline-block;font-size:.6rem;font-weight:700;padding:1px 6px;border-radius:10px;background:#EEF2FF;color:#4338CA;border:1px solid #C7D2FE;margin-left:4px;vertical-align:middle">${escHtml(item.round)}</span>`
+      ? `<span style="display:inline-block;font-size:.6rem;font-weight:700;padding:1px 6px;border-radius:10px;background:#e8f1fe;color:#1b64da;border:1px solid #cce0fb;margin-left:4px;vertical-align:middle">${escHtml(item.round)}</span>`
       : "";
 
     // ★ 상품/옵션 추출 (시트 row 기반)
@@ -1024,7 +1024,7 @@ async function loadAdminList() {
           ${u.active ? '<i class="fas fa-ban"></i> 비활성화' : '<i class="fas fa-check"></i> 활성화'}
         </button>
         <button onclick="openEditAdminPw('${escHtml(u.name)}')"
-          style="font-size:.7rem;padding:3px 8px;border:none;border-radius:5px;cursor:pointer;font-weight:600;background:#EEF2FF;color:var(--p)">
+          style="font-size:.7rem;padding:3px 8px;border:none;border-radius:5px;cursor:pointer;font-weight:600;background:#e8f1fe;color:var(--p)">
           <i class="fas fa-key"></i> 비번변경
         </button>
         <button onclick="deleteAdminUser('${escHtml(u.name)}')"
@@ -1135,8 +1135,8 @@ function switchAcctTab(tab) {
     btnAdmin.style.borderBottom = isAdmin ? '2px solid var(--p)' : '2px solid transparent';
   }
   if (btnStaff) {
-    btnStaff.style.color        = !isAdmin ? '#059669' : 'var(--t3)';
-    btnStaff.style.borderBottom = !isAdmin ? '2px solid #059669' : '2px solid transparent';
+    btnStaff.style.color        = !isAdmin ? '#0ca678' : 'var(--t3)';
+    btnStaff.style.borderBottom = !isAdmin ? '2px solid #0ca678' : '2px solid transparent';
   }
   // 패널 표시/숨김
   const panelAdmin = document.getElementById('acctPanelAdmin');
@@ -1169,7 +1169,7 @@ async function loadStaffList() {
     wrap.innerHTML = users.map(u => `
       <div style="display:flex;align-items:center;gap:8px;padding:9px 12px;border-bottom:1px solid #F3F4F6;background:${u.active !== false ? '#fff' : '#F9FAFB'}">
         <span style="flex:1;font-size:.83rem;font-weight:600;color:${u.active !== false ? 'var(--t1)' : 'var(--t3)'}">
-          <i class="fas fa-user-tie" style="color:#059669;margin-right:4px;font-size:.75rem"></i>${escHtml(u.name)}
+          <i class="fas fa-user-tie" style="color:#0ca678;margin-right:4px;font-size:.75rem"></i>${escHtml(u.name)}
           ${u.active !== false ? '' : '<span style="font-size:.68rem;background:#F3F4F6;color:var(--t3);padding:1px 5px;border-radius:5px;margin-left:4px">비활성</span>'}
         </span>
         <button onclick="toggleStaffActive('${escHtml(u.name)}', ${u.active === false})"
@@ -1178,7 +1178,7 @@ async function loadStaffList() {
           ${u.active !== false ? '<i class="fas fa-ban"></i> 비활성화' : '<i class="fas fa-check"></i> 활성화'}
         </button>
         <button onclick="openEditStaffPw('${escHtml(u.name)}')"
-          style="font-size:.7rem;padding:3px 8px;border:none;border-radius:5px;cursor:pointer;font-weight:600;background:#ECFDF5;color:#059669">
+          style="font-size:.7rem;padding:3px 8px;border:none;border-radius:5px;cursor:pointer;font-weight:600;background:#ECFDF5;color:#0ca678">
           <i class="fas fa-key"></i> 비번변경
         </button>
         <button onclick="deleteStaffUser('${escHtml(u.name)}')"
@@ -1276,8 +1276,8 @@ const WO_LABELS = {
   published:'모집공고발행', done:'완료', rejected:'반려', revision:'보완요청',
 };
 const WO_COLORS = {
-  submitted:['#E0E7FF','#3730A3'], reviewing:['#DBEAFE','#1E40AF'],
-  await_chatroom:['#FEF3C7','#92400E'], published:['#EDE9FE','#5B21B6'],
+  submitted:['#e8f1fe','#1b64da'], reviewing:['#DBEAFE','#1E40AF'],
+  await_chatroom:['#FEF3C7','#92400E'], published:['#e8f1fe','#1b64da'],
   done:['#D1FAE5','#065F46'], rejected:['#FEE2E2','#991B1B'], revision:['#FFEDD5','#9A3412'],
 };
 let _woCache = [];   // 인박스 목록 캐시 (카드 버튼 핸들러에서 조회)
@@ -1339,7 +1339,7 @@ function _renderDashOrderCard(o) {
   const date = (o.created_at || "").replace("T", " ").substring(0, 16);
   return `<div style="border:1px solid #E5E7EB;border-radius:10px;padding:10px 12px;margin-bottom:8px;background:#fff">
     <div style="display:flex;align-items:center;gap:7px;flex-wrap:wrap">
-      <button onclick="woDashToggleDetail('${o.id}',this)" style="font-size:.7rem;font-weight:700;background:#EEF2FF;color:#3730A3;border:1px solid #C7D2FE;border-radius:6px;padding:2px 8px;cursor:pointer;white-space:nowrap"><i class="fas fa-chevron-down"></i> 펼쳐보기</button>
+      <button onclick="woDashToggleDetail('${o.id}',this)" style="font-size:.7rem;font-weight:700;background:#e8f1fe;color:#1b64da;border:1px solid #cce0fb;border-radius:6px;padding:2px 8px;cursor:pointer;white-space:nowrap"><i class="fas fa-chevron-down"></i> 펼쳐보기</button>
       <span style="font-size:.66rem;font-weight:700;padding:2px 8px;border-radius:20px;background:${bg};color:${fg}">${WO_LABELS[st] || st}</span>
       <b style="font-size:.85rem;color:#111827">${escHtml(o.title || "")}</b>
       <span style="font-size:.7rem;color:#9CA3AF;margin-left:auto"><i class="fas fa-user"></i> ${escHtml(o.created_by || "-")} · ${date}</span>
@@ -1375,7 +1375,7 @@ function _woField(label, val, isLink) {
   // http(s) 스킴만 링크화 (javascript: 등 차단), 그 외엔 평문
   const safeLink = isLink && /^https?:\/\//i.test(String(val).trim());
   const v = safeLink
-    ? `<a href="${escHtml(val)}" target="_blank" rel="noopener noreferrer" style="color:#4F46E5;word-break:break-all">${escHtml(val)}</a>`
+    ? `<a href="${escHtml(val)}" target="_blank" rel="noopener noreferrer" style="color:#1b64da;word-break:break-all">${escHtml(val)}</a>`
     : escHtml(String(val));
   // 항목명 폭 고정 + 자간 양끝맞춤(text-align-last:justify)으로 콜론/값 정렬
   return `<div style="display:flex;align-items:baseline;font-size:.78rem;color:#374151;margin:3px 0;line-height:1.55">
@@ -1389,7 +1389,7 @@ function _woField(label, val, isLink) {
 function _woLinkify(text) {
   return escHtml(String(text == null ? "" : text))
     .replace(/(https?:\/\/[^\s<]+)/g,
-      '<a href="$1" target="_blank" rel="noopener noreferrer" style="color:#4F46E5;word-break:break-all">$1</a>');
+      '<a href="$1" target="_blank" rel="noopener noreferrer" style="color:#1b64da;word-break:break-all">$1</a>');
 }
 
 // 상품·옵션 요약에서 아래 개별 필드와 중복되는 값 제거:
@@ -1493,7 +1493,7 @@ function woImageModal(url) {
 function _woImgError(img) {
   const a = document.createElement("a");
   a.href = "#"; a.textContent = "📎 첨부 이미지 보기";
-  a.style.cssText = "color:#4F46E5;cursor:pointer";
+  a.style.cssText = "color:#1b64da;cursor:pointer";
   const u = img.dataset.openurl || img.src;
   a.addEventListener("click", e => { e.preventDefault(); woImageModal(u); });
   img.replaceWith(a);
@@ -1517,7 +1517,7 @@ function _woTextToHtml(text) {
       } else if (id) {
         html += _woImgTag(`https://drive.google.com/thumbnail?id=${id}&sz=w1600`, url);
       } else {
-        html += `<a href="${escHtml(url)}" target="_blank" rel="noopener noreferrer" style="color:#4F46E5;word-break:break-all">${escHtml(url)}</a>`;
+        html += `<a href="${escHtml(url)}" target="_blank" rel="noopener noreferrer" style="color:#1b64da;word-break:break-all">${escHtml(url)}</a>`;
       }
     } else {
       html += escHtml(parts[i]).replace(/\n/g, "<br>");
@@ -1617,13 +1617,13 @@ function _woLinkHtml(url) {
   const u = (url == null) ? "" : String(url).trim();
   if (!u) return "";
   return /^https?:\/\//i.test(u)
-    ? `<a href="${escHtml(u)}" target="_blank" rel="noopener noreferrer" style="color:#4F46E5;word-break:break-all">${escHtml(u)}</a>`
+    ? `<a href="${escHtml(u)}" target="_blank" rel="noopener noreferrer" style="color:#1b64da;word-break:break-all">${escHtml(u)}</a>`
     : escHtml(u);
 }
 // 한 줄 항목:  ▶ 라벨 : 값
 function _woKv(label, val) {
   if (val == null || val === "") return "";
-  return `<div style="font-size:.8rem;color:#1F2937;margin:2px 0;line-height:1.65;word-break:break-word"><span style="color:#6366F1;font-weight:700">▶</span> <b>${escHtml(label)}</b> : ${escHtml(String(val))}</div>`;
+  return `<div style="font-size:.8rem;color:#1F2937;margin:2px 0;line-height:1.65;word-break:break-word"><span style="color:#3182f6;font-weight:700">▶</span> <b>${escHtml(label)}</b> : ${escHtml(String(val))}</div>`;
 }
 // 멀티라인 섹션:  ▶ 라벨 ◀  (다음 줄에 내용)
 // 멀티라인/단일라인 자동: 1줄이면 '▶ 라벨 : 값', 2줄+면 '▶ 라벨 :' 후 줄바꿈
@@ -1632,7 +1632,7 @@ function _woSection(label, rawText, renderFn) {
   if (!txt.trim()) return "";
   const multi = /\n/.test(txt.trim());
   const inner = renderFn(txt);
-  const lab = `<span style="color:#6366F1;font-weight:700">▶</span> <b>${escHtml(label)}</b> :`;
+  const lab = `<span style="color:#3182f6;font-weight:700">▶</span> <b>${escHtml(label)}</b> :`;
   if (!multi) {
     return `<div style="font-size:.8rem;color:#1F2937;margin:2px 0;line-height:1.65;word-break:break-word">${lab} ${inner}</div>`;
   }
@@ -1751,7 +1751,7 @@ function _renderWorkOrderCard(o) {
   const date = (o.created_at || "").replace("T"," ").substring(0,16);
   const nexts = WO_TRANSITIONS[st] || [];
   const btns = nexts.map(ns => {
-    const [nbg, nfg] = WO_COLORS[ns] || ["#EEF2FF","#3730A3"];
+    const [nbg, nfg] = WO_COLORS[ns] || ["#e8f1fe","#1b64da"];
     return `<button onclick="woTransition('${o.id}','${ns}')"
       style="font-size:.74rem;font-weight:700;background:${nbg};color:${nfg};border:1px solid ${nfg}33;border-radius:7px;padding:5px 10px;cursor:pointer">→ ${WO_LABELS[ns]}</button>`;
   }).join("");
@@ -1762,7 +1762,7 @@ function _renderWorkOrderCard(o) {
 
   return `<div style="border:1.5px solid #E5E7EB;border-radius:12px;padding:14px 16px;margin-bottom:12px;background:#fff">
     <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap">
-      <button onclick="woToggleDetail('${o.id}',this)" style="font-size:.72rem;font-weight:700;background:#EEF2FF;color:#3730A3;border:1px solid #C7D2FE;border-radius:7px;padding:3px 9px;cursor:pointer;white-space:nowrap"><i class="fas fa-chevron-down"></i> 펼쳐보기</button>
+      <button onclick="woToggleDetail('${o.id}',this)" style="font-size:.72rem;font-weight:700;background:#e8f1fe;color:#1b64da;border:1px solid #cce0fb;border-radius:7px;padding:3px 9px;cursor:pointer;white-space:nowrap"><i class="fas fa-chevron-down"></i> 펼쳐보기</button>
       <span style="font-size:.7rem;font-weight:700;padding:2px 9px;border-radius:20px;background:${bg};color:${fg}">${WO_LABELS[st]||st}</span>
       <b style="font-size:.92rem;color:#111827">${escHtml(o.title||"")}</b>
       <span style="font-size:.72rem;color:#9CA3AF;margin-left:auto"><i class="fas fa-user"></i> ${escHtml(o.created_by||"-")} · ${date}</span>
@@ -1783,13 +1783,13 @@ function _renderWorkOrderCard(o) {
         <input id="woChat_${o.id}" type="text" value="${escHtml(o.chat_room_url||"")}" placeholder="카톡 팀채팅방URL (발행 시 필수)" ${woChatReg ? "readonly" : ""}
           style="width:300px;max-width:100%;padding:8px 10px;border:1.5px solid ${woChatReg?'#6EE7B7':'#E5E7EB'};border-radius:7px;font-size:.78rem;${woChatReg?'background:#ECFDF5;color:#065F46;font-weight:600':''}">
         <button id="woChatBtn_${o.id}" data-reg="${woChatReg?1:0}" onclick="woToggleChat('${o.id}')"
-          style="flex:none;font-size:.74rem;font-weight:700;border-radius:7px;padding:7px 13px;cursor:pointer;white-space:nowrap;border:1px solid ${woChatReg?'#FCD34D':'#6366F1'};background:${woChatReg?'#FEF9C3':'#6366F1'};color:${woChatReg?'#92400E':'#fff'}">${woChatReg?'링크수정':'등록'}</button>
+          style="flex:none;font-size:.74rem;font-weight:700;border-radius:7px;padding:7px 13px;cursor:pointer;white-space:nowrap;border:1px solid ${woChatReg?'#FCD34D':'#3182f6'};background:${woChatReg?'#FEF9C3':'#3182f6'};color:${woChatReg?'#92400E':'#fff'}">${woChatReg?'링크수정':'등록'}</button>
       </div>
       <!-- 처리 메모 → 인트라넷 전송 -->
       <div style="display:flex;gap:8px;align-items:center;margin-bottom:10px">
         <input id="woMemo_${o.id}" type="text" value="${escHtml(o.admin_memo||"")}" placeholder="처리 메모 / 보완 사유 (인트라넷으로 전송)"
           style="width:300px;max-width:100%;padding:8px 10px;border:1.5px solid #E5E7EB;border-radius:7px;font-size:.78rem">
-        <button onclick="woSendMemo('${o.id}')" style="flex:none;font-size:.74rem;font-weight:700;border-radius:7px;padding:7px 13px;cursor:pointer;white-space:nowrap;border:1px solid #C7D2FE;background:#EEF2FF;color:#3730A3"><i class="fas fa-paper-plane"></i> 전송</button>
+        <button onclick="woSendMemo('${o.id}')" style="flex:none;font-size:.74rem;font-weight:700;border-radius:7px;padding:7px 13px;cursor:pointer;white-space:nowrap;border:1px solid #cce0fb;background:#e8f1fe;color:#1b64da"><i class="fas fa-paper-plane"></i> 전송</button>
       </div>
       <!-- 액션 -->
       <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center">
@@ -1798,7 +1798,7 @@ function _renderWorkOrderCard(o) {
           : `<button id="woAcceptBtn_${o.id}" onclick="woAccept('${o.id}')" style="font-size:.8rem;font-weight:700;border-radius:8px;padding:8px 16px;cursor:pointer;border:1px solid #93C5FD;background:#DBEAFE;color:#1E40AF"><i class="fas fa-inbox"></i> 접수하기</button>`}
         ${o.linked_campaign_id
           ? `<button onclick="woViewCampaign('${escHtml(o.linked_campaign_id)}')" style="font-size:.8rem;font-weight:700;background:#D1FAE5;color:#065F46;border:1px solid #6EE7B7;border-radius:8px;padding:8px 16px;cursor:pointer"><i class="fas fa-link"></i> 연결된 공고 보기</button>`
-          : `<button onclick="woCreateCampaignGuarded('${o.id}')" style="font-size:.8rem;font-weight:700;background:#EDE9FE;color:#5B21B6;border:1px solid #C4B5FD;border-radius:8px;padding:8px 16px;cursor:pointer"><i class="fas fa-bullhorn"></i> 모집공고생성</button>`}
+          : `<button onclick="woCreateCampaignGuarded('${o.id}')" style="font-size:.8rem;font-weight:700;background:#e8f1fe;color:#1b64da;border:1px solid #a6c8fb;border-radius:8px;padding:8px 16px;cursor:pointer"><i class="fas fa-bullhorn"></i> 모집공고생성</button>`}
         <button onclick="woDelete('${o.id}')" title="작업오더 삭제 (인트라넷에서도 삭제됨)" style="font-size:.8rem;font-weight:700;background:#FEF2F2;color:#B91C1C;border:1px solid #FECACA;border-radius:8px;padding:8px 16px;cursor:pointer;margin-left:auto"><i class="fas fa-trash-alt"></i> 삭제</button>
       </div>
     </div>
@@ -1825,7 +1825,7 @@ function woNotice(msg) {
     m.style.cssText = "position:fixed;inset:0;z-index:100000;background:rgba(0,0,0,.45);display:none;align-items:center;justify-content:center;padding:20px";
     m.innerHTML = '<div style="background:#fff;border-radius:14px;max-width:340px;width:100%;padding:22px 20px;text-align:center;box-shadow:0 16px 48px rgba(0,0,0,.25)">'
       + '<div id="woNoticeMsg" style="font-size:.92rem;color:#111827;line-height:1.55;margin-bottom:16px;white-space:pre-wrap"></div>'
-      + '<button id="woNoticeOk" style="background:#6366F1;color:#fff;border:none;border-radius:9px;padding:9px 24px;font-weight:700;font-size:.88rem;cursor:pointer">확인</button></div>';
+      + '<button id="woNoticeOk" style="background:#3182f6;color:#fff;border:none;border-radius:9px;padding:9px 24px;font-weight:700;font-size:.88rem;cursor:pointer">확인</button></div>';
     document.body.appendChild(m);
     m.addEventListener("click", e => { if (e.target === m) m.style.display = "none"; });
     m.querySelector("#woNoticeOk").addEventListener("click", () => { m.style.display = "none"; });
@@ -1843,7 +1843,7 @@ async function woToggleChat(id) {
   const setEdit = () => {
     inp.readOnly = false; inp.style.background = ""; inp.style.color = ""; inp.style.fontWeight = ""; inp.style.borderColor = "#E5E7EB";
     btn.dataset.reg = "0"; btn.textContent = "등록";
-    btn.style.border = "1px solid #6366F1"; btn.style.background = "#6366F1"; btn.style.color = "#fff";
+    btn.style.border = "1px solid #3182f6"; btn.style.background = "#3182f6"; btn.style.color = "#fff";
     inp.focus();
   };
   const setReg = () => {
@@ -2065,14 +2065,14 @@ async function _showNewOrderPopup(count) {
     <div style="background:#fff;border-radius:16px;max-width:460px;width:100%;padding:22px;box-shadow:0 12px 40px rgba(0,0,0,.25);animation:woPopIn .18s ease">
       <div style="display:flex;align-items:center;gap:8px;margin-bottom:14px">
         <span style="font-size:1.4rem">📥</span>
-        <span style="font-size:1.05rem;font-weight:800;color:#3730A3">새 작업 오더 ${count}건 도착</span>
+        <span style="font-size:1.05rem;font-weight:800;color:#1b64da">새 작업 오더 ${count}건 도착</span>
       </div>
       <div style="max-height:46vh;overflow-y:auto">${rows || '<div style="color:#9CA3AF;font-size:.85rem">미리보기를 불러오지 못했습니다.</div>'}</div>
       <div style="display:flex;gap:8px;justify-content:flex-end;margin-top:16px">
         <button onclick="document.getElementById('woNewOrderPopup').remove()"
           style="padding:9px 16px;border:1.5px solid #D1D5DB;background:#fff;color:#374151;border-radius:9px;font-weight:600;font-size:.85rem;cursor:pointer">닫기</button>
         <button onclick="document.getElementById('woNewOrderPopup').remove();switchAdminTab('work-orders')"
-          style="padding:9px 16px;border:none;background:#6366F1;color:#fff;border-radius:9px;font-weight:700;font-size:.85rem;cursor:pointer"><i class="fas fa-clipboard-list"></i> 작업오더 보기</button>
+          style="padding:9px 16px;border:none;background:#3182f6;color:#fff;border-radius:9px;font-weight:700;font-size:.85rem;cursor:pointer"><i class="fas fa-clipboard-list"></i> 작업오더 보기</button>
       </div>
     </div>`;
   el.addEventListener("click", e => { if (e.target === el) el.remove(); });
@@ -2122,12 +2122,12 @@ const _CTX_TOOLBAR_DEFS = {
 };
 
 const _CTX_STYLE_MAP = {
-  '':       'background:rgba(255,255,255,.09);border-color:rgba(255,255,255,.22);color:rgba(255,255,255,.85)',
-  'green':  'background:rgba(16,185,129,.2);border-color:rgba(16,185,129,.5);color:#6EE7B7',
-  'red':    'background:rgba(239,68,68,.15);border-color:rgba(239,68,68,.45);color:#FCA5A5',
-  'yellow': 'background:rgba(251,191,36,.18);border-color:rgba(251,191,36,.5);color:#FCD34D',
-  'orange': 'background:rgba(249,115,22,.15);border-color:rgba(249,115,22,.45);color:#FDBA74',
-  'colvis': 'background:rgba(99,102,241,.18);border-color:rgba(99,102,241,.5);color:#A5B4FC',
+  '':       'background:#F2F4F6;border-color:#E5E8EB;color:#333D4B',
+  'green':  'background:#E6F8F1;border-color:#A6E6CF;color:#0CA678',
+  'red':    'background:#FEECEC;border-color:#FAC5C5;color:#E03131',
+  'yellow': 'background:#FFF6DE;border-color:#FBDD96;color:#B7791F',
+  'orange': 'background:#FFF0E6;border-color:#FFCFAD;color:#E8590C',
+  'colvis': 'background:#E8F1FE;border-color:#CCE0FB;color:#1B64DA',
 };
 
 function _updateContextToolbar(tabName) {
@@ -2156,8 +2156,8 @@ function _updateContextToolbar(tabName) {
     if (d.elId) {
       const orig = document.getElementById(d.elId);
       if (orig && orig.classList.contains('active')) {
-        btn.style.filter = 'brightness(1.4)';
-        btn.style.boxShadow = '0 0 0 2px rgba(255,255,255,.25)';
+        btn.style.boxShadow = '0 0 0 2px #3182f6';
+        btn.style.borderColor = '#3182f6';
       }
     }
 
@@ -2170,11 +2170,11 @@ function _syncCtxBtnActive(ctxId, isActive) {
   const btn = document.getElementById(ctxId);
   if (!btn) return;
   if (isActive) {
-    btn.style.filter = 'brightness(1.4)';
-    btn.style.boxShadow = '0 0 0 2px rgba(255,255,255,.3)';
+    btn.style.boxShadow = '0 0 0 2px #3182f6';
+    btn.style.borderColor = '#3182f6';
   } else {
-    btn.style.filter = '';
     btn.style.boxShadow = '';
+    btn.style.borderColor = '';
   }
 }
 
@@ -2228,7 +2228,7 @@ function _renderReviewerList(list) {
     const name    = escHtml(r.name || "-");
     const phone   = escHtml(r.phone || "-");
     const regAt   = escHtml(r.registeredAt || "-");
-    const consent = r.consent ? '<span style="color:#059669;font-weight:700">동의</span>' : '<span style="color:#9CA3AF">-</span>';
+    const consent = r.consent ? '<span style="color:#0ca678;font-weight:700">동의</span>' : '<span style="color:#9CA3AF">-</span>';
     const incomeName = escHtml(r.incomeType || "");
     const residentNum = r.residentNum ? (() => {
       const jd = (r.residentNum || "").replace(/[^0-9]/g, "");
@@ -2275,17 +2275,17 @@ function _renderReviewerList(list) {
     <div style="overflow-x:auto">
       <table style="width:100%;border-collapse:collapse">
         <thead>
-          <tr style="background:#F5F3FF;border-bottom:2px solid #DDD6FE">
-            <th style="padding:10px 12px;font-size:.75rem;color:#5B21B6;font-weight:700;text-align:center;white-space:nowrap">#</th>
-            <th style="padding:10px 12px;font-size:.75rem;color:#5B21B6;font-weight:700;text-align:left;white-space:nowrap">이름</th>
-            <th style="padding:10px 12px;font-size:.75rem;color:#5B21B6;font-weight:700;text-align:left;white-space:nowrap">전화번호</th>
-            <th style="padding:10px 12px;font-size:.75rem;color:#5B21B6;font-weight:700;text-align:left;white-space:nowrap">등록일시</th>
-            <th style="padding:10px 12px;font-size:.75rem;color:#5B21B6;font-weight:700;text-align:center;white-space:nowrap">동의</th>
-            <th style="padding:10px 12px;font-size:.75rem;color:#5B21B6;font-weight:700;text-align:left;white-space:nowrap">소득명의</th>
-            <th style="padding:10px 12px;font-size:.75rem;color:#5B21B6;font-weight:700;text-align:left;white-space:nowrap">주민번호</th>
-            <th style="padding:10px 12px;font-size:.75rem;color:#5B21B6;font-weight:700;text-align:left;white-space:nowrap">타계정</th>
-            <th style="padding:10px 12px;font-size:.75rem;color:#5B21B6;font-weight:700;text-align:left;white-space:nowrap">비고</th>
-            <th style="padding:10px 12px;font-size:.75rem;color:#5B21B6;font-weight:700;text-align:center;white-space:nowrap">관리</th>
+          <tr style="background:#f2f7ff;border-bottom:2px solid #cce0fb">
+            <th style="padding:10px 12px;font-size:.75rem;color:#1b64da;font-weight:700;text-align:center;white-space:nowrap">#</th>
+            <th style="padding:10px 12px;font-size:.75rem;color:#1b64da;font-weight:700;text-align:left;white-space:nowrap">이름</th>
+            <th style="padding:10px 12px;font-size:.75rem;color:#1b64da;font-weight:700;text-align:left;white-space:nowrap">전화번호</th>
+            <th style="padding:10px 12px;font-size:.75rem;color:#1b64da;font-weight:700;text-align:left;white-space:nowrap">등록일시</th>
+            <th style="padding:10px 12px;font-size:.75rem;color:#1b64da;font-weight:700;text-align:center;white-space:nowrap">동의</th>
+            <th style="padding:10px 12px;font-size:.75rem;color:#1b64da;font-weight:700;text-align:left;white-space:nowrap">소득명의</th>
+            <th style="padding:10px 12px;font-size:.75rem;color:#1b64da;font-weight:700;text-align:left;white-space:nowrap">주민번호</th>
+            <th style="padding:10px 12px;font-size:.75rem;color:#1b64da;font-weight:700;text-align:left;white-space:nowrap">타계정</th>
+            <th style="padding:10px 12px;font-size:.75rem;color:#1b64da;font-weight:700;text-align:left;white-space:nowrap">비고</th>
+            <th style="padding:10px 12px;font-size:.75rem;color:#1b64da;font-weight:700;text-align:center;white-space:nowrap">관리</th>
           </tr>
         </thead>
         <tbody>${rows}</tbody>
@@ -2377,7 +2377,7 @@ function _showAllCompleteModal(completeTabs) {
 
   const listHtml = completeTabs.map(x =>
     `<div style="display:flex;align-items:center;gap:8px;padding:6px 10px;background:#FFF7ED;border-radius:6px;margin-bottom:4px">
-      <i class="fas fa-check-circle" style="color:#059669;font-size:.8rem"></i>
+      <i class="fas fa-check-circle" style="color:#0ca678;font-size:.8rem"></i>
       <span style="font-size:.78rem;color:#1F2937"><b>${escHtml(x.campaign)}</b> / ${escHtml(x.tab)}</span>
     </div>`
   ).join('');
@@ -2437,7 +2437,7 @@ async function _showPendingReviewersPopup(sheetId, tabName, rc, sc, round) {
         </div>
         <div style="background:#FFFBEB;border:1px solid #FDE68A;border-radius:10px;padding:14px 16px;margin-bottom:16px">
           <p style="margin:0 0 4px;font-size:.82rem;color:#92400E;font-weight:600;line-height:1.5">
-            ${escHtml(tabName)}${round ? ' <span style="background:#7C3AED;color:#fff;padding:1px 7px;border-radius:4px;font-size:.7rem;margin-left:6px">' + escHtml(round) + '</span>' : ''}
+            ${escHtml(tabName)}${round ? ' <span style="background:#3182f6;color:#fff;padding:1px 7px;border-radius:4px;font-size:.7rem;margin-left:6px">' + escHtml(round) + '</span>' : ''}
           </p>
           <p style="margin:0;font-size:.75rem;color:#6B7280;line-height:1.5">
             제출 현황: <b>${sc}/${rc}</b> (미제출 ${pending}명)
@@ -2469,7 +2469,7 @@ async function _showPendingReviewersPopup(sheetId, tabName, rc, sc, round) {
     }
     const rows = resp.pendingRows || [];
     if (rows.length === 0) {
-      listEl.innerHTML = `<div style="text-align:center;padding:12px;color:#059669;font-size:.8rem"><i class="fas fa-check-circle"></i> 미제출자가 없습니다. (DB 동기화 지연일 수 있음)</div>`;
+      listEl.innerHTML = `<div style="text-align:center;padding:12px;color:#0ca678;font-size:.8rem"><i class="fas fa-check-circle"></i> 미제출자가 없습니다. (DB 동기화 지연일 수 있음)</div>`;
       return;
     }
     const listHtml = rows.map((r, i) => `
@@ -2538,7 +2538,7 @@ async function _showUnpaidReviewersPopup(sheetId, tabName, rc, pc, round) {
           <button onclick="document.getElementById('${modalId}').remove()" style="padding:10px 32px;background:linear-gradient(135deg,#3B82F6,#1D4ED8);color:#fff;border:none;border-radius:8px;font-size:.82rem;font-weight:600;cursor:pointer;box-shadow:0 4px 12px rgba(59,130,246,.3)">
             <i class="fas fa-check" style="margin-right:6px"></i>확인
           </button>
-          <button onclick="_goToSheetForPayment('${escHtml(sheetId)}','${escHtml(tabName)}')" style="padding:10px 20px;background:linear-gradient(135deg,#059669,#047857);color:#fff;border:none;border-radius:8px;font-size:.82rem;font-weight:600;cursor:pointer;box-shadow:0 4px 12px rgba(5,150,105,.3)">
+          <button onclick="_goToSheetForPayment('${escHtml(sheetId)}','${escHtml(tabName)}')" style="padding:10px 20px;background:linear-gradient(135deg,#0ca678,#047857);color:#fff;border:none;border-radius:8px;font-size:.82rem;font-weight:600;cursor:pointer;box-shadow:0 4px 12px rgba(5,150,105,.3)">
             <i class="fas fa-external-link-alt" style="margin-right:6px"></i>입금처리 하러가기
           </button>
         </div>
@@ -2558,7 +2558,7 @@ async function _showUnpaidReviewersPopup(sheetId, tabName, rc, pc, round) {
     }
     const rows = resp.unpaidRows || [];
     if (rows.length === 0) {
-      listEl.innerHTML = `<div style="text-align:center;padding:12px;color:#059669;font-size:.8rem"><i class="fas fa-check-circle"></i> 미입금자가 없습니다. (DB 동기화 지연일 수 있음)</div>`;
+      listEl.innerHTML = `<div style="text-align:center;padding:12px;color:#0ca678;font-size:.8rem"><i class="fas fa-check-circle"></i> 미입금자가 없습니다. (DB 동기화 지연일 수 있음)</div>`;
       return;
     }
     const listHtml = rows.map((r, i) => `
@@ -3471,7 +3471,7 @@ function _buildTabRowHtml(t, tabKey, isSubRow, isClosedTab, tabNameHtml, startDa
     : empty;
 
   // ★ v9.14: 진행방식 셀 (현금/사업자현영/소득신고)
-  const incomeTypeClass = t.incomeType === '소득신고' ? 'style="background:#EDE9FE;color:#5B21B6;border-color:#A78BFA"'
+  const incomeTypeClass = t.incomeType === '소득신고' ? 'style="background:#e8f1fe;color:#1b64da;border-color:#6fa6f5"'
     : t.incomeType === '사업자현영' ? 'style="background:#FEF3C7;color:#92400E;border-color:#FCD34D"'
     : t.incomeType === '현금' ? 'style="background:#D1FAE5;color:#065F46;border-color:#6EE7B7"' : '';
   const incomeTypeCell = t.incomeType
@@ -3497,7 +3497,7 @@ function _buildTabRowHtml(t, tabKey, isSubRow, isClosedTab, tabNameHtml, startDa
 
   // 캡처폴더 열
   const captureFolderCell = t.captureFolderUrl
-    ? `<a class="dash-folder-link" style="color:#7C3AED;background:#F5F3FF;border-color:#DDD6FE" href="${escHtml(t.captureFolderUrl)}" target="_blank" onclick="event.stopPropagation()"><i class="fas fa-camera"></i> 캡처폴더</a>`
+    ? `<a class="dash-folder-link" style="color:#3182f6;background:#f2f7ff;border-color:#cce0fb" href="${escHtml(t.captureFolderUrl)}" target="_blank" onclick="event.stopPropagation()"><i class="fas fa-camera"></i> 캡처폴더</a>`
     : `<span style="color:#D1D5DB;font-size:.6rem">—</span>`;
 
   // 리뷰폴더 열 (대량건 배지 제거 → 부가정보 열로 이동)
@@ -4088,7 +4088,7 @@ function _buildColVisDropdown() {
     const selClass = _selectedHideCols.has(def.key) ? 'col-vis-item is-selected' : 'col-vis-item';
     html += `<label class="${selClass}" id="colVisItem_${def.key}">
       <input type="checkbox" ${checked} onchange="onColVisSelect('${def.key}', this.checked)">
-      <i class="fas ${def.icon}" style="width:13px;color:#6366F1;font-size:.72rem"></i>
+      <i class="fas ${def.icon}" style="width:13px;color:#3182f6;font-size:.72rem"></i>
       ${def.label}
     </label>`;
   });
@@ -4364,27 +4364,27 @@ function _buildColHeader(container) {
   // colIdx = DASH_COL_DEFS 인덱스와 1:1 대응
   const CELLS = [
     // isCb 컬럼: 평소 0px(숨김) → 모드 진입 시 28px
-    { colIdx: 0,  inner: '<i class="fas fa-archive"      style="font-size:.6rem;color:#7C3AED"></i>',  style: 'justify-content:center', title: '마감 선택',    cbClass: 'closed-cb-wrap' },
-    { colIdx: 1,  inner: '<i class="fas fa-building" style="font-size:.55rem;color:#059669"></i> 캠페인', style: '' },  // ★ v11.0: 엑셀형 플랫 UI
+    { colIdx: 0,  inner: '<i class="fas fa-archive"      style="font-size:.6rem;color:#3182f6"></i>',  style: 'justify-content:center', title: '마감 선택',    cbClass: 'closed-cb-wrap' },
+    { colIdx: 1,  inner: '<i class="fas fa-building" style="font-size:.55rem;color:#0ca678"></i> 캠페인', style: '' },  // ★ v11.0: 엑셀형 플랫 UI
     { colIdx: 2,  inner: '<i class="fas fa-tag" style="font-size:.55rem"></i> 탭명',              style: '' },
     { colIdx: 3,  inner: '<i class="fas fa-box" style="font-size:.55rem"></i> 상품명',            style: '' },
-    { colIdx: 4,  inner: '<i class="fas fa-camera" style="font-size:.55rem;color:#7C3AED"></i> 캡처폴더', style: 'justify-content:center', title: '주문캡처 저장 폴더' },
+    { colIdx: 4,  inner: '<i class="fas fa-camera" style="font-size:.55rem;color:#3182f6"></i> 캡처폴더', style: 'justify-content:center', title: '주문캡처 저장 폴더' },
     { colIdx: 5,  inner: '<i class="fas fa-folder" style="font-size:.55rem;color:#F59E0B"></i> 리뷰폴더',  style: 'justify-content:center', title: '리뷰 저장 폴더'    },
-    { colIdx: 6,  inner: '<i class="fas fa-layer-group" style="font-size:.55rem;color:#4338CA"></i> 차수',  style: 'justify-content:center', title: '진행 차수'         },
+    { colIdx: 6,  inner: '<i class="fas fa-layer-group" style="font-size:.55rem;color:#1b64da"></i> 차수',  style: 'justify-content:center', title: '진행 차수'         },
     { colIdx: 7,  inner: '<i class="fas fa-calendar-day" style="font-size:.55rem"></i> 시작일',   style: '' },
     { colIdx: 8,  inner: '<i class="fas fa-clock" style="font-size:.55rem"></i> 주문시간대',      style: '' },
     { colIdx: 9,  inner: '<i class="fas fa-star" style="font-size:.55rem"></i> 리뷰타입',         style: '' },
-    { colIdx: 10, inner: '<i class="fas fa-link" style="font-size:.55rem;color:#7C3AED"></i>',    style: 'justify-content:center', title: '구매양식 제출링크 생성' },
+    { colIdx: 10, inner: '<i class="fas fa-link" style="font-size:.55rem;color:#3182f6"></i>',    style: 'justify-content:center', title: '구매양식 제출링크 생성' },
     { colIdx: 11, inner: '<i class="fas fa-user" style="font-size:.55rem"></i> 담당',             style: 'justify-content:center' },
     { colIdx: 12, inner: '<i class="fas fa-chart-bar" style="font-size:.55rem"></i> 진행률',      style: '' },
     { colIdx: 13, inner: '<i class="fas fa-check-double" style="font-size:.55rem"></i> 리뷰',     style: 'justify-content:flex-end' },
     { colIdx: 14, inner: '<i class="fas fa-won-sign" style="font-size:.55rem"></i> 입금',         style: 'justify-content:center' },
-    { colIdx: 15, inner: '<i class="fas fa-receipt" style="font-size:.55rem;color:#7C3AED"></i> 진행방식', style: 'justify-content:center', title: '진행방식 (현금/사업자현영/소득신고)' },
+    { colIdx: 15, inner: '<i class="fas fa-receipt" style="font-size:.55rem;color:#3182f6"></i> 진행방식', style: 'justify-content:center', title: '진행방식 (현금/사업자현영/소득신고)' },
     { colIdx: 16, inner: '<i class="fas fa-signature" style="font-size:.55rem;color:#1D4ED8"></i> 입금명',  style: 'justify-content:center', title: '입금자명'  },
     { colIdx: 17, inner: '<i class="fas fa-university" style="font-size:.55rem;color:#92400E"></i> 이체은행', style: 'justify-content:center', title: '이체 은행' },
     { colIdx: 18, inner: '<i class="fas fa-truck" style="font-size:.55rem"></i> 택대',            style: 'justify-content:center' },
     { colIdx: 19, inner: '<i class="fas fa-sticky-note" style="font-size:.55rem;color:#F59E0B"></i> 비고', style: '' },
-    { colIdx: 20, inner: '<i class="fas fa-info-circle" style="font-size:.55rem;color:#6366F1"></i> 부가정보', style: 'justify-content:center', title: '대량건·배송타입·마감D-Day 등 부가 정보' },
+    { colIdx: 20, inner: '<i class="fas fa-info-circle" style="font-size:.55rem;color:#3182f6"></i> 부가정보', style: 'justify-content:center', title: '대량건·배송타입·마감D-Day 등 부가 정보' },
     { colIdx: 21, inner: '<i class="fas fa-cog" style="font-size:.55rem"></i>', style: 'justify-content:center' },  // ⚙ 마지막
   ];
 
@@ -4732,7 +4732,7 @@ function execClosed() {
   toClose.forEach(({ tabName }) => {
     const el = document.createElement("div");
     el.className = "closed-confirm-list-item";
-    el.innerHTML = `<i class="fas fa-archive" style="color:#4F46E5;font-size:.75rem"></i> ${tabName} → <b>마감</b>`;
+    el.innerHTML = `<i class="fas fa-archive" style="color:#1b64da;font-size:.75rem"></i> ${tabName} → <b>마감</b>`;
     listEl.appendChild(el);
   });
   toOpen.forEach(({ tabName }) => {
@@ -4867,7 +4867,7 @@ function _showArchiveRoundConfirm(closedRoundItems) {
           마감으로 이동하시겠습니까? (다음 빌드 시 자동 제외됩니다)
         </div>
         <div style="display:flex;gap:8px">
-          <button onclick="_archiveClosedRoundsNow()" style="padding:5px 12px;background:#8B5CF6;color:#fff;border:none;border-radius:6px;font-size:.73rem;font-weight:600;cursor:pointer">
+          <button onclick="_archiveClosedRoundsNow()" style="padding:5px 12px;background:#4593fc;color:#fff;border:none;border-radius:6px;font-size:.73rem;font-weight:600;cursor:pointer">
             <i class="fas fa-archive" style="margin-right:3px"></i>마감 이동
           </button>
           <button onclick="_dismissArchiveConfirm()" style="padding:5px 12px;background:#fff;color:#6B7280;border:1px solid #D1D5DB;border-radius:6px;font-size:.73rem;cursor:pointer">
@@ -6192,7 +6192,7 @@ function applyAiResult() {
   if (btn) {
     btn.innerHTML = '<i class="fas fa-check"></i> 적용 완료';
     btn.disabled = true;
-    btn.style.background = "#10B981";
+    btn.style.background = "#12b886";
   }
 
   // 주문자 칸이 비어있으면 포커스
@@ -6248,13 +6248,13 @@ function _formatResidentNo(input) {
     const digits = v.replace(/[^0-9]/g, "");
     if (digits.length === 13) {
       hint.textContent = "✅ 13자리 입력 완료";
-      hint.style.color = "#10B981";
+      hint.style.color = "#12b886";
     } else {
       hint.textContent = "숫자 13자리 자동 형식화 (000000-0000000)";
       hint.style.color = "#9CA3AF";
     }
     // 테두리 색 복원
-    input.style.borderColor = digits.length === 13 ? "#10B981" : "#A78BFA";
+    input.style.borderColor = digits.length === 13 ? "#12b886" : "#6fa6f5";
   }
 }
 
@@ -7736,14 +7736,14 @@ function showToast(msg, isErr) {
     t.id = "_toast";
     Object.assign(t.style, {
       position:"fixed", bottom:"24px", left:"50%", transform:"translateX(-50%)",
-      background: isErr ? "#EF4444" : "#10B981",
+      background: isErr ? "#EF4444" : "#12b886",
       color:"#fff", padding:"8px 20px", borderRadius:"20px",
       fontSize:".82rem", fontWeight:"600", zIndex:"9999",
       boxShadow:"0 4px 14px rgba(0,0,0,.2)", transition:"opacity .3s"
     });
     document.body.appendChild(t);
   }
-  t.style.background = isErr ? "#EF4444" : "#10B981";
+  t.style.background = isErr ? "#EF4444" : "#12b886";
   t.textContent = msg;
   t.style.opacity = "1";
   clearTimeout(t._tid);
@@ -8077,11 +8077,11 @@ function stopBuildProgress() {
   pct.textContent   = "100%";
   eta.textContent   = "완료!";
   label.textContent = "갱신 완료 ✓";
-  bar.style.background = "linear-gradient(90deg,#10B981,#059669)";
+  bar.style.background = "linear-gradient(90deg,#12b886,#0ca678)";
   setTimeout(() => {
     hide(wrap);
     // 바 색상 원복
-    bar.style.background = "linear-gradient(90deg,var(--p),#7C3AED)";
+    bar.style.background = "linear-gradient(90deg,var(--p),#3182f6)";
   }, 2500);
 }
 
@@ -8102,7 +8102,7 @@ async function runSheetDiag() {
   const gid     = gidMatch ? gidMatch[1] : "";
 
   resultEl.style.display = "block";
-  resultEl.innerHTML = '<span style="color:#6366F1"><i class="fas fa-circle-notch fa-spin"></i> 진단 중...</span>';
+  resultEl.innerHTML = '<span style="color:#3182f6"><i class="fas fa-circle-notch fa-spin"></i> 진단 중...</span>';
 
   try {
     const data = await gasGet({ action: "debugSheet", sheetId, gid }, 30000);
@@ -8406,7 +8406,7 @@ async function migrateFolderNames(dryRun) {
       let rows = "";
       renamed.forEach(r => {
         const badge = r.action === "이름변경"
-          ? `<span style="color:#059669;background:#D1FAE5;padding:1px 5px;border-radius:3px;font-size:.65rem">${r.action}</span>`
+          ? `<span style="color:#0ca678;background:#D1FAE5;padding:1px 5px;border-radius:3px;font-size:.65rem">${r.action}</span>`
           : `<span style="color:#D97706;background:#FEF3C7;padding:1px 5px;border-radius:3px;font-size:.65rem">${r.action}</span>`;
         rows += `<tr style="border-bottom:1px solid #F3F4F6">
           <td style="padding:3px 5px">${escHtml(r.type)}</td>
@@ -8693,7 +8693,7 @@ async function buildIndexSmart(forceFullRebuild) {
   };
   const _stopSmartProgress = () => {
     if (_progressTimerSmart) clearInterval(_progressTimerSmart);
-    if (progressBar)  { progressBar.style.width = "100%"; progressBar.style.background = "linear-gradient(90deg,#10b981,#059669)"; }
+    if (progressBar)  { progressBar.style.width = "100%"; progressBar.style.background = "linear-gradient(90deg,#12b886,#0ca678)"; }
     if (progressPct)  progressPct.textContent = "100%";
     setTimeout(() => { if (progressWrap) { progressWrap.style.display = "none"; progressWrap.classList.add("hidden"); } }, 1800);
   };
@@ -8759,7 +8759,7 @@ async function buildIndexSmart(forceFullRebuild) {
       // ★ 프로그레스바를 "진행 중"으로 유지 (100%로 점프하지 않음)
       // _stopSmartProgress() 호출하지 않음 — 타이머는 중지하되 바는 유지
       if (_progressTimerSmart) clearInterval(_progressTimerSmart);
-      if (progressBar) { progressBar.style.width = "15%"; progressBar.style.background = "linear-gradient(90deg,#0ea5e9,#7C3AED)"; }
+      if (progressBar) { progressBar.style.width = "15%"; progressBar.style.background = "linear-gradient(90deg,#0ea5e9,#3182f6)"; }
       if (progressLabel) progressLabel.textContent = "백그라운드 갱신 중...";
       if (progressPct)  progressPct.textContent = "15%";
 
@@ -8799,7 +8799,7 @@ async function buildIndexSmart(forceFullRebuild) {
           if (newBA && newBA !== prevBA) {
             clearInterval(pTimer);
             // ★ 완료 시에만 100%로 점프 + 초록색
-            if (progressBar)  { progressBar.style.width = "100%"; progressBar.style.background = "linear-gradient(90deg,#10b981,#059669)"; }
+            if (progressBar)  { progressBar.style.width = "100%"; progressBar.style.background = "linear-gradient(90deg,#12b886,#0ca678)"; }
             if (progressPct)  progressPct.textContent = "100%";
             if (progressLabel) progressLabel.textContent = "갱신 완료 ✓";
             setTimeout(() => { if (progressWrap) { progressWrap.style.display = "none"; progressWrap.classList.add("hidden"); } }, 2500);
@@ -8809,7 +8809,7 @@ async function buildIndexSmart(forceFullRebuild) {
             badge.textContent = "정상";
             await loadIndexStatus();
             if (elapsedRow && elapsedEl) { elapsedEl.textContent = elapsedSec + "초 (비동기)"; elapsedRow.style.display = ""; }
-            if (resultRow && resultEl) { resultEl.innerHTML = `<span style="color:#10B981;font-weight:700">✅ 갱신 완료</span>`; resultRow.style.display = ""; }
+            if (resultRow && resultEl) { resultEl.innerHTML = `<span style="color:#12b886;font-weight:700">✅ 갱신 완료</span>`; resultRow.style.display = ""; }
             // 버튼 복원
             btnSmart.disabled = false;
             btnSmart.innerHTML = '<i class="fas fa-bolt"></i> 스마트빌드 갱신 <span id="smartDirtyBadge" style="display:none;background:rgba(255,255,255,0.25);padding:1px 6px;border-radius:10px;font-size:.7rem;margin-left:3px"></span>';
@@ -8860,13 +8860,13 @@ async function buildIndexSmart(forceFullRebuild) {
       if (hintEl && hintTextEl) {
         hintTextEl.textContent = `✅ 인덱스가 최신 상태입니다 (변경된 탭 없음, ${elapsedSec}초)`;
         hintEl.style.display = "";
-        hintEl.style.color = "#059669";
+        hintEl.style.color = "#0ca678";
       }
       showToast(`✅ 인덱스 최신 상태 — 변경된 탭이 없어 갱신을 건너뜁니다. (${(data.count||0).toLocaleString()}건)`, "success");
       badge.className = "index-badge index-badge-ok"; badge.textContent = "최신";
       await loadIndexStatus();
       if (elapsedRow && elapsedEl) { elapsedEl.textContent = elapsedSec + "초 (스킵)"; elapsedRow.style.display = ""; }
-      if (resultRow && resultEl) { resultEl.innerHTML = `<span style="color:#059669;font-weight:700">✅ 최신 상태 (갱신 불필요)</span>`; resultRow.style.display = ""; }
+      if (resultRow && resultEl) { resultEl.innerHTML = `<span style="color:#0ca678;font-weight:700">✅ 최신 상태 (갱신 불필요)</span>`; resultRow.style.display = ""; }
       return;
     }
 
@@ -8908,7 +8908,7 @@ async function buildIndexSmart(forceFullRebuild) {
     if (resultRow && resultEl) {
       resultEl.innerHTML = isIncremental
         ? `<span style="color:#2563EB;font-weight:700">⚡ 증분 갱신 완료 (${data.updatedCampaigns||0}개 캠페인)</span>`
-        : `<span style="color:#10B981;font-weight:700">✅ 전체 갱신 완료</span>`;
+        : `<span style="color:#12b886;font-weight:700">✅ 전체 갱신 완료</span>`;
       resultRow.style.display = "";
     }
     // ★ v10.0: dirty 배지 — 단순 숨김 대신 실제 최신 dirtyCount 반영
@@ -9615,8 +9615,8 @@ async function previewAddCampaign() {
             <div style="display:flex;align-items:center;gap:6px;background:#f1f5f9;border:1px solid #e2e8f0;border-radius:6px;padding:6px 10px;margin-bottom:8px;">
               <code style="font-size:11px;color:#334155;flex:1;word-break:break-all;user-select:all;">${sa}</code>
             </div>
-            <button onclick="navigator.clipboard.writeText('${sa}').then(()=>{this.innerHTML='<i class=\\'fas fa-check\\'></i> 복사됨';this.style.background='#10b981';setTimeout(()=>{this.innerHTML='<i class=\\'fas fa-copy\\'></i> 서비스계정 복사';this.style.background='#6366f1'},1500)})"
-              style="padding:6px 12px;background:#6366f1;color:#fff;border:none;border-radius:6px;font-size:11px;font-weight:600;cursor:pointer">
+            <button onclick="navigator.clipboard.writeText('${sa}').then(()=>{this.innerHTML='<i class=\\'fas fa-check\\'></i> 복사됨';this.style.background='#12b886';setTimeout(()=>{this.innerHTML='<i class=\\'fas fa-copy\\'></i> 서비스계정 복사';this.style.background='#3182f6'},1500)})"
+              style="padding:6px 12px;background:#3182f6;color:#fff;border:none;border-radius:6px;font-size:11px;font-weight:600;cursor:pointer">
               <i class="fas fa-copy"></i> 서비스계정 복사
             </button>`;
         } else {
@@ -9750,8 +9750,8 @@ async function previewAddCampaign() {
             <code style="font-size:11px;color:#334155;flex:1;word-break:break-all;user-select:all;">${sa}</code>
           </div>
           <div style="display:flex;gap:6px;">
-            <button onclick="navigator.clipboard.writeText('${sa}').then(()=>{this.innerHTML='<i class=\\'fas fa-check\\'></i> 복사됨';this.style.background='#10b981';setTimeout(()=>{this.innerHTML='<i class=\\'fas fa-copy\\'></i> 서비스계정 복사';this.style.background='#6366f1'},1500)})"
-              style="flex:1;padding:6px 10px;background:#6366f1;color:#fff;border:none;border-radius:6px;font-size:11px;font-weight:600;cursor:pointer;display:flex;align-items:center;justify-content:center;gap:4px;">
+            <button onclick="navigator.clipboard.writeText('${sa}').then(()=>{this.innerHTML='<i class=\\'fas fa-check\\'></i> 복사됨';this.style.background='#12b886';setTimeout(()=>{this.innerHTML='<i class=\\'fas fa-copy\\'></i> 서비스계정 복사';this.style.background='#3182f6'},1500)})"
+              style="flex:1;padding:6px 10px;background:#3182f6;color:#fff;border:none;border-radius:6px;font-size:11px;font-weight:600;cursor:pointer;display:flex;align-items:center;justify-content:center;gap:4px;">
               <i class="fas fa-copy"></i> 서비스계정 복사
             </button>
             <button onclick="window.open('${sheetUrl}','_blank')"
@@ -10131,9 +10131,9 @@ function _filterCsExisting(query) {
     return;
   }
   listEl.innerHTML = filtered.map((item, idx) => {
-    const highlighted = q ? item.label.replace(new RegExp(`(${q.replace(/[.*+?^${}()|[\]\\]/g,'\\$&')})`, 'gi'), '<b style="color:#7C3AED">$1</b>') : item.label;
+    const highlighted = q ? item.label.replace(new RegExp(`(${q.replace(/[.*+?^${}()|[\]\\]/g,'\\$&')})`, 'gi'), '<b style="color:#3182f6">$1</b>') : item.label;
     return `<div class="cs-ac-item" style="padding:9px 14px;cursor:pointer;border-bottom:1px solid #F3F4F6;font-size:.9rem;transition:background .15s" onmousedown="_selectCsExisting(${idx}, '${item.sheetId.replace(/'/g,"\\'")}')"
-      onmouseenter="this.style.background='#F5F3FF'" onmouseleave="this.style.background=''">${highlighted}</div>`;
+      onmouseenter="this.style.background='#f2f7ff'" onmouseleave="this.style.background=''">${highlighted}</div>`;
   }).join("");
   listEl.style.display = "block";
 }
@@ -10200,8 +10200,8 @@ async function submitCreateSheet() {
           : `📄 파일명: <b>${escHtml(data.fileTitle)}</b><br>`) +
         `🏷 캠페인: <b>${escHtml(data.campaignName)}</b><br>` +
         (isExisting
-          ? `🔗 <a href="${escHtml(data.tabUrl || data.sheetUrl)}" target="_blank" style="color:#059669;font-weight:700">해당 탭 바로가기 →</a>`
-          : `🔗 <a href="${escHtml(data.sheetUrl)}" target="_blank" style="color:#059669;font-weight:700">구글시트 바로가기 →</a>`);
+          ? `🔗 <a href="${escHtml(data.tabUrl || data.sheetUrl)}" target="_blank" style="color:#0ca678;font-weight:700">해당 탭 바로가기 →</a>`
+          : `🔗 <a href="${escHtml(data.sheetUrl)}" target="_blank" style="color:#0ca678;font-weight:700">구글시트 바로가기 →</a>`);
       resultEl.style.display = "block";
       btn.innerHTML = '<i class="fas fa-check"></i> 완료';
       showToast("✅ 시트 생성 완료! 동기화 후 대시보드에 반영됩니다.", false, 5000);
@@ -10579,13 +10579,13 @@ async function loadArchiveList() {
                             t.archiveReason === 'auto_detect' ? '자동감지' : (t.archiveReason || '-');
         const reasonColor = t.archiveReason === 'closed' ? '#EF4444' :
                             t.archiveReason === 'force_done' ? '#F59E0B' :
-                            t.archiveReason === 'name_completed' ? '#6366F1' : '#10B981';
+                            t.archiveReason === 'name_completed' ? '#3182f6' : '#12b886';
         const dateStr = t.archivedAt ? new Date(t.archivedAt).toLocaleDateString('ko-KR') : '-';
         const roundsStr = t.rounds ? escHtml(t.rounds) : '<span style="color:#D1D5DB">-</span>';
         // ★ roundOnly 항목은 차수 단위 복원, 일반은 탭 전체 복원
         const restoreBtn = t.roundOnly
           ? `<button onclick="restoreArchivedRound('${camp.sheetId}','${escHtml(t.tabName).replace(/'/g,"\\'")}','${escHtml(t.rounds).replace(/'/g,"\\'")}')"
-              style="font-size:.7rem;padding:3px 8px;border:1px solid #8B5CF6;color:#8B5CF6;background:#F5F3FF;border-radius:5px;cursor:pointer;white-space:nowrap"
+              style="font-size:.7rem;padding:3px 8px;border:1px solid #4593fc;color:#4593fc;background:#f2f7ff;border-radius:5px;cursor:pointer;white-space:nowrap"
               title="이 차수를 대시보드로 복원합니다"><i class="fas fa-undo"></i> ${t.rounds}차 복원</button>`
           : `<button onclick="restoreArchivedTab('${camp.sheetId}','${escHtml(t.tabName).replace(/'/g,"\\'")}')"
               style="font-size:.7rem;padding:3px 8px;border:1px solid #3B82F6;color:#3B82F6;background:#EFF6FF;border-radius:5px;cursor:pointer;white-space:nowrap"
@@ -10671,7 +10671,7 @@ async function _loadArchiveHistory() {
     let html = '<div style="display:flex;flex-direction:column;gap:6px">';
     data.history.forEach(h => {
       const icon = h.action === 'archive' ? 'fa-box' : 'fa-undo';
-      const color = h.action === 'archive' ? '#8B5CF6' : '#3B82F6';
+      const color = h.action === 'archive' ? '#4593fc' : '#3B82F6';
       const dateStr = h.performedAt ? new Date(h.performedAt).toLocaleString('ko-KR', { timeZone: 'Asia/Seoul' }) : '';
       html += `<div style="display:flex;align-items:center;gap:8px;padding:6px 0;border-bottom:1px solid #F3F4F6">
         <i class="fas ${icon}" style="color:${color};width:16px;text-align:center"></i>
@@ -10708,10 +10708,10 @@ async function archiveAutoDetect() {
     }
 
     // 감지 결과 렌더링 + 전체선택/개별선택 체크박스
-    let html = `<div style="background:#F5F3FF;border:1px solid #DDD6FE;border-radius:10px;padding:14px">
+    let html = `<div style="background:#f2f7ff;border:1px solid #cce0fb;border-radius:10px;padding:14px">
       <div style="display:flex;align-items:center;gap:8px;margin-bottom:12px">
-        <span style="font-weight:700;color:#7C3AED;font-size:.9rem"><i class="fas fa-magic"></i> 감지 결과: ${data.totalTabs}개 탭 (${data.totalCampaigns}개 캠페인)</span>
-        <button onclick="_archiveExecuteSelected()" style="margin-left:auto;background:#8B5CF6;color:#fff;border:none;padding:5px 14px;border-radius:6px;font-size:.78rem;cursor:pointer">
+        <span style="font-weight:700;color:#3182f6;font-size:.9rem"><i class="fas fa-magic"></i> 감지 결과: ${data.totalTabs}개 탭 (${data.totalCampaigns}개 캠페인)</span>
+        <button onclick="_archiveExecuteSelected()" style="margin-left:auto;background:#4593fc;color:#fff;border:none;padding:5px 14px;border-radius:6px;font-size:.78rem;cursor:pointer">
           <i class="fas fa-archive"></i> 선택 항목 마감
         </button>
         <button onclick="document.getElementById('archiveDetectWrap').style.display='none'" style="background:#E5E7EB;border:none;padding:5px 12px;border-radius:6px;font-size:.78rem;cursor:pointer">
@@ -10740,19 +10740,19 @@ async function archiveAutoDetect() {
                             t.reason === 'name_completed' ? '(완)탭명' : t.reason;
         const reasonColor = t.reason === 'closed' ? '#EF4444' :
                             t.reason === 'force_done' ? '#F59E0B' :
-                            t.reason === 'fully_completed' ? '#059669' :
-                            t.reason === 'auto_complete' ? '#059669' :
-                            t.reason === 'round_closed' ? '#7C3AED' :
-                            t.reason === 'name_completed' ? '#6366F1' : '#10B981';
+                            t.reason === 'fully_completed' ? '#0ca678' :
+                            t.reason === 'auto_complete' ? '#0ca678' :
+                            t.reason === 'round_closed' ? '#3182f6' :
+                            t.reason === 'name_completed' ? '#3182f6' : '#12b886';
         const indexBadge = t.inIndex === false
           ? '<span style="background:#FEF3C7;color:#D97706;padding:1px 4px;border-radius:3px;font-size:.65rem;margin-left:2px">인덱스외</span>'
           : '';
         const roundBadge = t.round
-          ? `<span style="background:#EDE9FE;color:#7C3AED;padding:1px 5px;border-radius:3px;font-size:.65rem;margin-left:2px">${escHtml(t.round)}</span>`
+          ? `<span style="background:#e8f1fe;color:#3182f6;padding:1px 5px;border-radius:3px;font-size:.65rem;margin-left:2px">${escHtml(t.round)}</span>`
           : '';
         const paidInfo = (t.paidCount !== undefined && t.rowCount)
           ? (t.paidCount >= t.rowCount
-            ? `<span style="font-size:.68rem;color:#059669;font-weight:600;background:#ECFDF5;padding:1px 5px;border-radius:3px">입금${t.paidCount}/${t.rowCount} ✓</span>`
+            ? `<span style="font-size:.68rem;color:#0ca678;font-weight:600;background:#ECFDF5;padding:1px 5px;border-radius:3px">입금${t.paidCount}/${t.rowCount} ✓</span>`
             : `<span style="font-size:.68rem;color:#DC2626;font-weight:500;background:#FEF2F2;padding:1px 5px;border-radius:3px">입금${t.paidCount}/${t.rowCount}</span>`)
           : '';
         const sheetUrl = _buildTabUrl(`https://docs.google.com/spreadsheets/d/${camp.sheetId}/edit`, camp.sheetId, t.tabGid);
@@ -10773,7 +10773,7 @@ async function archiveAutoDetect() {
         // ★ 숨김/숨김해제 토글 버튼 (tabGid가 있고 삭제되지 않은 탭만)
         const hideToggleBtn = (!t.deleted && t.tabGid)
           ? (t.hidden
-            ? `<button onclick="event.stopPropagation();_unhideTabBtn('${escHtml(camp.sheetId)}','${escHtml(t.tabGid)}',this)" title="숨김 해제" style="background:#ECFDF5;border:1px solid #A7F3D0;padding:1px 5px;border-radius:4px;font-size:.66rem;cursor:pointer;color:#059669;margin-left:3px;white-space:nowrap"><i class="fas fa-eye"></i> 표시</button>`
+            ? `<button onclick="event.stopPropagation();_unhideTabBtn('${escHtml(camp.sheetId)}','${escHtml(t.tabGid)}',this)" title="숨김 해제" style="background:#ECFDF5;border:1px solid #A7F3D0;padding:1px 5px;border-radius:4px;font-size:.66rem;cursor:pointer;color:#0ca678;margin-left:3px;white-space:nowrap"><i class="fas fa-eye"></i> 표시</button>`
             : `<button onclick="event.stopPropagation();_hideTab('${escHtml(camp.sheetId)}','${escHtml(t.tabGid)}',this)" title="탭 숨김" style="background:#FEF2F2;border:1px solid #FECACA;padding:1px 5px;border-radius:4px;font-size:.66rem;cursor:pointer;color:#DC2626;margin-left:3px;white-space:nowrap"><i class="fas fa-eye-slash"></i> 숨김</button>`)
           : '';
         const paidComplete = (t.paidCount !== undefined && t.rowCount && t.paidCount >= t.rowCount) ? 'true' : 'false';
@@ -10903,9 +10903,9 @@ async function _updateArchiveBadge() {
       if (!banner) {
         banner = document.createElement('div');
         banner.id = 'archiveAlertBanner';
-        banner.style.cssText = 'background:#F5F3FF;border:1px solid #DDD6FE;border-radius:10px;padding:10px 16px;margin-bottom:12px;display:flex;align-items:center;gap:10px;cursor:pointer;transition:all .2s';
-        banner.onmouseenter = () => { banner.style.background = '#EDE9FE'; };
-        banner.onmouseleave = () => { banner.style.background = '#F5F3FF'; };
+        banner.style.cssText = 'background:#f2f7ff;border:1px solid #cce0fb;border-radius:10px;padding:10px 16px;margin-bottom:12px;display:flex;align-items:center;gap:10px;cursor:pointer;transition:all .2s';
+        banner.onmouseenter = () => { banner.style.background = '#e8f1fe'; };
+        banner.onmouseleave = () => { banner.style.background = '#f2f7ff'; };
         banner.onclick = () => { dashboardArchiveDetect(); };
         const wrap = document.getElementById('dashboardWrap');
         if (wrap && wrap.firstChild) {
@@ -10913,12 +10913,12 @@ async function _updateArchiveBadge() {
         }
       }
       banner.innerHTML = `
-        <i class="fas fa-archive" style="color:#8B5CF6;font-size:1.1rem"></i>
+        <i class="fas fa-archive" style="color:#4593fc;font-size:1.1rem"></i>
         <div style="flex:1">
-          <div style="font-weight:600;font-size:.84rem;color:#7C3AED">마감 대상 ${totalDetected}건 감지됨</div>
+          <div style="font-weight:600;font-size:.84rem;color:#3182f6">마감 대상 ${totalDetected}건 감지됨</div>
           <div style="font-size:.72rem;color:#6B7280;margin-top:2px">리뷰+입금 완료된 차수가 있습니다. 클릭하여 마감 처리하세요.</div>
         </div>
-        <i class="fas fa-chevron-right" style="color:#8B5CF6;font-size:.8rem"></i>
+        <i class="fas fa-chevron-right" style="color:#4593fc;font-size:.8rem"></i>
       `;
     } else {
       if (badge) badge.style.display = 'none';
@@ -10955,10 +10955,10 @@ async function dashboardArchiveDetect() {
     }
 
     // 감지 결과 렌더링 + 전체선택/개별선택 체크박스
-    let html = `<div style="background:#F5F3FF;border:1px solid #DDD6FE;border-radius:10px;padding:14px">
+    let html = `<div style="background:#f2f7ff;border:1px solid #cce0fb;border-radius:10px;padding:14px">
       <div style="display:flex;align-items:center;gap:8px;margin-bottom:12px;flex-wrap:wrap">
-        <span style="font-weight:700;color:#7C3AED;font-size:.9rem"><i class="fas fa-magic"></i> 감지 결과: ${data.totalTabs}개 탭 (${data.totalCampaigns}개 캠페인)</span>
-        <button onclick="_dashArchiveExecute()" style="margin-left:auto;background:#8B5CF6;color:#fff;border:none;padding:6px 16px;border-radius:6px;font-size:.8rem;cursor:pointer;font-weight:600">
+        <span style="font-weight:700;color:#3182f6;font-size:.9rem"><i class="fas fa-magic"></i> 감지 결과: ${data.totalTabs}개 탭 (${data.totalCampaigns}개 캠페인)</span>
+        <button onclick="_dashArchiveExecute()" style="margin-left:auto;background:#4593fc;color:#fff;border:none;padding:6px 16px;border-radius:6px;font-size:.8rem;cursor:pointer;font-weight:600">
           <i class="fas fa-archive"></i> 선택 항목 마감
         </button>
         <button onclick="_dashArchiveSkip()" style="background:#F59E0B;color:#fff;border:none;padding:6px 14px;border-radius:6px;font-size:.8rem;cursor:pointer">
@@ -10991,19 +10991,19 @@ async function dashboardArchiveDetect() {
                             t.reason === 'name_completed' ? '(완)탭명' : t.reason;
         const reasonColor = t.reason === 'closed' ? '#EF4444' :
                             t.reason === 'force_done' ? '#F59E0B' :
-                            t.reason === 'fully_completed' ? '#059669' :
-                            t.reason === 'auto_complete' ? '#059669' :
-                            t.reason === 'round_closed' ? '#7C3AED' :
-                            t.reason === 'name_completed' ? '#6366F1' : '#10B981';
+                            t.reason === 'fully_completed' ? '#0ca678' :
+                            t.reason === 'auto_complete' ? '#0ca678' :
+                            t.reason === 'round_closed' ? '#3182f6' :
+                            t.reason === 'name_completed' ? '#3182f6' : '#12b886';
         const roundBadge = t.round
-          ? `<span style="background:#EDE9FE;color:#7C3AED;padding:1px 5px;border-radius:3px;font-size:.65rem;margin-left:2px">${escHtml(t.round)}</span>`
+          ? `<span style="background:#e8f1fe;color:#3182f6;padding:1px 5px;border-radius:3px;font-size:.65rem;margin-left:2px">${escHtml(t.round)}</span>`
           : '';
         const indexBadge = t.inIndex === false
           ? '<span style="background:#FEF3C7;color:#D97706;padding:1px 4px;border-radius:3px;font-size:.65rem;margin-left:2px">인덱스외</span>'
           : '';
         const paidInfo = (t.paidCount !== undefined && t.rowCount)
           ? (t.paidCount >= t.rowCount
-            ? `<span style="font-size:.68rem;color:#059669;font-weight:600;background:#ECFDF5;padding:1px 5px;border-radius:3px;margin-left:6px">입금${t.paidCount}/${t.rowCount} ✓</span>`
+            ? `<span style="font-size:.68rem;color:#0ca678;font-weight:600;background:#ECFDF5;padding:1px 5px;border-radius:3px;margin-left:6px">입금${t.paidCount}/${t.rowCount} ✓</span>`
             : `<span style="font-size:.68rem;color:#DC2626;font-weight:500;background:#FEF2F2;padding:1px 5px;border-radius:3px;margin-left:6px">입금${t.paidCount}/${t.rowCount}</span>`)
           : '';
         const sheetUrl2 = _buildTabUrl(`https://docs.google.com/spreadsheets/d/${camp.sheetId}/edit`, camp.sheetId, t.tabGid);
@@ -11024,7 +11024,7 @@ async function dashboardArchiveDetect() {
         // ★ 숨김/숨김해제 토글 버튼 (대시보드 완료감지)
         const hideToggleBtn2 = (!t.deleted && t.tabGid)
           ? (t.hidden
-            ? `<button onclick="event.stopPropagation();_unhideTabBtn('${escHtml(camp.sheetId)}','${escHtml(t.tabGid)}',this)" title="숨김 해제" style="background:#ECFDF5;border:1px solid #A7F3D0;padding:1px 5px;border-radius:4px;font-size:.66rem;cursor:pointer;color:#059669;margin-left:3px;white-space:nowrap"><i class="fas fa-eye"></i> 표시</button>`
+            ? `<button onclick="event.stopPropagation();_unhideTabBtn('${escHtml(camp.sheetId)}','${escHtml(t.tabGid)}',this)" title="숨김 해제" style="background:#ECFDF5;border:1px solid #A7F3D0;padding:1px 5px;border-radius:4px;font-size:.66rem;cursor:pointer;color:#0ca678;margin-left:3px;white-space:nowrap"><i class="fas fa-eye"></i> 표시</button>`
             : `<button onclick="event.stopPropagation();_hideTab('${escHtml(camp.sheetId)}','${escHtml(t.tabGid)}',this)" title="탭 숨김" style="background:#FEF2F2;border:1px solid #FECACA;padding:1px 5px;border-radius:4px;font-size:.66rem;cursor:pointer;color:#DC2626;margin-left:3px;white-space:nowrap"><i class="fas fa-eye-slash"></i> 숨김</button>`)
           : '';
         const paidComplete2 = (t.paidCount !== undefined && t.rowCount && t.paidCount >= t.rowCount) ? 'true' : 'false';
@@ -11160,7 +11160,7 @@ async function loadUnrecognizedTabs() {
     const btnIgnore = document.getElementById('btnIgnoreSelected');
 
     if (tabs.length === 0) {
-      wrap.innerHTML = '<div style="text-align:center;padding:20px;color:var(--t3)"><i class="fas fa-check-circle" style="color:#10B981"></i> 인식 실패 탭이 없습니다.</div>';
+      wrap.innerHTML = '<div style="text-align:center;padding:20px;color:var(--t3)"><i class="fas fa-check-circle" style="color:#12b886"></i> 인식 실패 탭이 없습니다.</div>';
       if (btnIgnore) btnIgnore.style.display = 'none';
       return;
     }
@@ -11183,7 +11183,7 @@ async function loadUnrecognizedTabs() {
     const reasonColors = {
       'no_header': '#F59E0B',
       'no_name_col': '#EF4444',
-      'no_data': '#8B5CF6',
+      'no_data': '#4593fc',
       'empty': '#6B7280',
       'few_rows': '#6B7280',
       'unknown': '#6B7280',
@@ -11196,7 +11196,7 @@ async function loadUnrecognizedTabs() {
     const statusColors = {
       'pending': '#F59E0B',
       'ignored': '#6B7280',
-      'resolved': '#10B981',
+      'resolved': '#12b886',
     };
 
     let html = `<div style="font-size:.75rem;color:var(--t3);margin-bottom:8px">총 ${tabs.length}건</div>`;
@@ -11218,7 +11218,7 @@ async function loadUnrecognizedTabs() {
         <div style="display:flex;align-items:center;gap:8px;margin-top:3px;padding-left:${t.status === 'pending' ? '23px' : '0'}">
           <span style="font-size:.72rem;color:var(--t3)"><i class="fas fa-file-alt" style="margin-right:3px"></i>${escHtml(t.campaign_name || '미분류')}</span>
           ${t.sheet_id ? `<a href="https://docs.google.com/spreadsheets/d/${t.sheet_id}/edit${t.tab_gid ? '#gid=' + t.tab_gid : ''}" target="_blank" rel="noopener" style="font-size:.7rem;color:#3B82F6;text-decoration:none;flex-shrink:0" title="구글시트에서 열기"><i class="fas fa-external-link-alt"></i> 시트</a>` : ''}
-          ${t.sample_rows ? `<details style="display:inline"><summary style="font-size:.7rem;color:#8B5CF6;cursor:pointer;display:inline">샘플 데이터 보기</summary><div style="max-height:200px;overflow:auto;margin-top:6px;font-size:.68rem;background:#F9FAFB;border-radius:6px;padding:8px"><table style="border-collapse:collapse;width:100%">${_buildUnrecogSampleTable(t.sample_rows)}</table></div></details>` : ''}
+          ${t.sample_rows ? `<details style="display:inline"><summary style="font-size:.7rem;color:#4593fc;cursor:pointer;display:inline">샘플 데이터 보기</summary><div style="max-height:200px;overflow:auto;margin-top:6px;font-size:.68rem;background:#F9FAFB;border-radius:6px;padding:8px"><table style="border-collapse:collapse;width:100%">${_buildUnrecogSampleTable(t.sample_rows)}</table></div></details>` : ''}
         </div>
       </div>`;
     });
@@ -11242,8 +11242,8 @@ const ERRLOG_CAT_LABELS = {
   not_found: '대상 없음', unknown: '알 수 없음',
 };
 const ERRLOG_CAT_COLORS = {
-  timeout: '#F59E0B', quota: '#EF4444', network: '#3B82F6', auth: '#8B5CF6',
-  permission: '#8B5CF6', validation: '#6B7280', db: '#DC2626', external_api: '#0EA5E9',
+  timeout: '#F59E0B', quota: '#EF4444', network: '#3B82F6', auth: '#4593fc',
+  permission: '#4593fc', validation: '#6B7280', db: '#DC2626', external_api: '#0EA5E9',
   not_found: '#6B7280', unknown: '#6B7280',
 };
 const ERRLOG_SEV_LABELS = { warn: '경고', error: '에러', critical: '치명' };
@@ -11317,7 +11317,7 @@ async function loadErrorLogs() {
     }
 
     if (logs.length === 0) {
-      wrap.innerHTML = '<div style="text-align:center;padding:20px;color:var(--t3)"><i class="fas fa-check-circle" style="color:#10B981"></i> 표시할 오류가 없습니다.</div>';
+      wrap.innerHTML = '<div style="text-align:center;padding:20px;color:var(--t3)"><i class="fas fa-check-circle" style="color:#12b886"></i> 표시할 오류가 없습니다.</div>';
       return;
     }
 
@@ -11333,7 +11333,7 @@ async function loadErrorLogs() {
       const occ = l.occurrence_count > 1 ? `<span style="font-size:.7rem;background:#FEE2E2;color:#B91C1C;padding:1px 6px;border-radius:5px;font-weight:700;flex-shrink:0">×${l.occurrence_count}</span>` : '';
       const rel = _errLogRelTime(l.last_seen_at);
       const analyzed = l.has_analysis
-        ? `<span style="font-size:.66rem;background:#EDE9FE;color:#6D28D9;padding:1px 6px;border-radius:5px;font-weight:600;flex-shrink:0"><i class="fas fa-robot"></i> 분석됨${l.decider_verdict ? ' · ' + (ERRLOG_DECIDER_LABELS[l.decider_verdict] || l.decider_verdict) : ''}</span>`
+        ? `<span style="font-size:.66rem;background:#E8F1FE;color:#1B64DA;padding:1px 6px;border-radius:5px;font-weight:600;flex-shrink:0"><i class="fas fa-robot"></i> 분석됨${l.decider_verdict ? ' · ' + (ERRLOG_DECIDER_LABELS[l.decider_verdict] || l.decider_verdict) : ''}</span>`
         : '';
       const closed = (st === 'resolved' || st === 'ignored');
 
@@ -11443,7 +11443,7 @@ function _renderErrDetail() {
     ${_errRow('결정자 판정', ERRLOG_DECIDER_LABELS[l.decider_verdict] || l.decider_verdict)}
   </div>`;
 
-  const raw = l.message_raw ? `<details style="margin-top:8px"><summary style="font-size:.74rem;color:#8B5CF6;cursor:pointer">원본 메시지 / stack 보기</summary>
+  const raw = l.message_raw ? `<details style="margin-top:8px"><summary style="font-size:.74rem;color:#4593fc;cursor:pointer">원본 메시지 / stack 보기</summary>
     <div style="margin-top:4px;font-size:.72rem;background:#F9FAFB;border-radius:6px;padding:8px;color:var(--t2);word-break:break-all;white-space:pre-wrap">${escHtml(l.message_raw)}${l.stack ? '\n\n' + escHtml(l.stack) : ''}</div></details>` : '';
 
   // ── 액션 버튼 ──
@@ -11452,7 +11452,7 @@ function _renderErrDetail() {
       style="font-size:.74rem;border:none;border-radius:7px;padding:6px 12px;cursor:${disabled ? 'not-allowed' : 'pointer'};font-weight:600;color:#fff;background:${disabled ? '#9CA3AF' : color}">${label}</button>`;
 
   const actions = `<div style="display:flex;gap:6px;flex-wrap:wrap;margin-top:12px">
-    ${btn('<i class="fas fa-robot"></i> 오류검증 및 분석', `analyzeError(${l.id})`, '#6D28D9', false, '비파괴 검증 + 다중 에이전트 분석(실제 수정 안 함)')}
+    ${btn('<i class="fas fa-robot"></i> 오류검증 및 분석', `analyzeError(${l.id})`, '#1b64da', false, '비파괴 검증 + 다중 에이전트 분석(실제 수정 안 함)')}
     ${btn('<i class="fas fa-copy"></i> 오류내용 복사', `copyErrorContent(${l.id})`, '#2563EB', false, '공유용 진단 정보 복사(상태 변경 없음)')}
     ${btn('<i class="fas fa-paper-plane"></i> 이행 요청 복사', `copyTransferRequest(${l.id})`, '#0EA5E9', !allowed, allowed ? '실제 수정 요청문 복사' : '게이트 미통과: ' + (blockers || []).join(' / '))}
   </div>`;
@@ -11477,7 +11477,7 @@ function _renderErrDetail() {
   if (a) {
     const pg = a.prevention_guard || {};
     analysisHtml = `<div style="margin-top:14px;padding-top:12px;border-top:1px solid #EEF0F3">
-      <div style="font-weight:800;color:var(--t1);font-size:.86rem"><i class="fas fa-layer-group"></i> 다중 에이전트 분석 ${a.generated_by === 'fallback' ? '<span style="font-size:.68rem;color:#92400E;background:#FEF3C7;padding:1px 6px;border-radius:5px">규칙기반</span>' : '<span style="font-size:.68rem;color:#5B21B6;background:#EDE9FE;padding:1px 6px;border-radius:5px">AI</span>'}</div>
+      <div style="font-weight:800;color:var(--t1);font-size:.86rem"><i class="fas fa-layer-group"></i> 다중 에이전트 분석 ${a.generated_by === 'fallback' ? '<span style="font-size:.68rem;color:#92400E;background:#FEF3C7;padding:1px 6px;border-radius:5px">규칙기반</span>' : '<span style="font-size:.68rem;color:#1b64da;background:#e8f1fe;padding:1px 6px;border-radius:5px">AI</span>'}</div>
       ${a.summary_ko ? `<div style="margin-top:6px;font-size:.82rem;color:var(--t1)">${escHtml(a.summary_ko)}</div>` : ''}
       ${_errCard('① 오류검증', { '판정': ERRLOG_VERIFY_LABELS[(a.verify || {}).verdict] || (a.verify || {}).verdict, '근거': (a.verify || {}).evidence, '다음 처리': (a.verify || {}).next_action })}
       ${_errCard('② 레드팀(공격적 해석)', { '발생 조건': (a.red_team || {}).conditions, '사용자 피해': (a.red_team || {}).user_impact, '데이터/상태 위험': (a.red_team || {}).data_risk, '재발 조건': (a.red_team || {}).recurrence })}
@@ -11500,7 +11500,7 @@ function _renderErrDetail() {
 // ── 오류검증 및 분석 (비파괴) ──
 async function analyzeError(id) {
   const body = document.getElementById('errDetailBody');
-  if (body) body.insertAdjacentHTML('afterbegin', '<div id="errAnalyzing" style="background:#EDE9FE;color:#5B21B6;padding:8px 12px;border-radius:8px;margin-bottom:8px;font-size:.78rem"><i class="fas fa-circle-notch fa-spin"></i> 검증 및 다중 에이전트 분석 중... (실제 코드/운영을 변경하지 않습니다)</div>');
+  if (body) body.insertAdjacentHTML('afterbegin', '<div id="errAnalyzing" style="background:#e8f1fe;color:#1b64da;padding:8px 12px;border-radius:8px;margin-bottom:8px;font-size:.78rem"><i class="fas fa-circle-notch fa-spin"></i> 검증 및 다중 에이전트 분석 중... (실제 코드/운영을 변경하지 않습니다)</div>');
   try {
     const data = await gasPost({ action: 'errorLogAnalyze', id }, 30000);
     if (data.error) { alert('분석 실패: ' + data.error); document.getElementById('errAnalyzing')?.remove(); return; }
@@ -11675,12 +11675,12 @@ async function loadKeywordList() {
     };
     const categoryColors = {
       'data_tab': '#3B82F6',
-      'name': '#10B981',
+      'name': '#12b886',
       'submit': '#F59E0B',
       'system_tab': '#EF4444',
-      'product': '#8B5CF6',
+      'product': '#4593fc',
       'url': '#EC4899',
-      'phone': '#6366F1',
+      'phone': '#3182f6',
       'start_date': '#14B8A6',
       'end_date': '#F97316',
       'round': '#06B6D4',
@@ -11709,7 +11709,7 @@ async function loadKeywordList() {
           const opacity = kw.active ? '1' : '0.4';
           html += `<span style="display:inline-flex;align-items:center;gap:4px;padding:3px 10px;border-radius:16px;font-size:.75rem;font-weight:500;background:${color}15;color:${color};border:1px solid ${color}40;opacity:${opacity}" data-kw-id="${kw.id}">
             ${escHtml(kw.keyword)}
-            <button onclick="toggleKeywordAction('${kw.id}', ${!kw.active})" style="background:none;border:none;cursor:pointer;padding:0;font-size:.7rem;color:${kw.active ? '#F59E0B' : '#10B981'}" title="${kw.active ? '비활성화' : '활성화'}">
+            <button onclick="toggleKeywordAction('${kw.id}', ${!kw.active})" style="background:none;border:none;cursor:pointer;padding:0;font-size:.7rem;color:${kw.active ? '#F59E0B' : '#12b886'}" title="${kw.active ? '비활성화' : '활성화'}">
               <i class="fas ${kw.active ? 'fa-toggle-on' : 'fa-toggle-off'}"></i>
             </button>
             <button onclick="deleteKeywordAction('${kw.id}','${escHtml(kw.keyword)}')" style="background:none;border:none;cursor:pointer;padding:0;font-size:.7rem;color:#EF4444" title="삭제">
@@ -12040,12 +12040,12 @@ async function loadTabDashboard() {
       const rate = _pct(s.totalSubmitted, s.totalRows);
       kpiEl.innerHTML = [
         _kpiCard("전체 탭", s.total, "#1D4ED8", "fa-list"),
-        _kpiCard("활성", s.active, "#059669", "fa-play-circle"),
+        _kpiCard("활성", s.active, "#0ca678", "fa-play-circle"),
         _kpiCard("마감", s.closed, "#DC2626", "fa-stop-circle"),
-        _kpiCard("인덱스", s.indexed, "#7C3AED", "fa-database"),
+        _kpiCard("인덱스", s.indexed, "#3182f6", "fa-database"),
         _kpiCard("미지정", s.noManager, "#9CA3AF", "fa-user-slash"),
         _kpiCard("총 인원", (s.totalRows||0).toLocaleString(), "#0891B2", "fa-users"),
-        _kpiCard("제출률", `${rate}%`, rate>=80?"#059669":rate>=50?"#D97706":"#DC2626", "fa-chart-pie"),
+        _kpiCard("제출률", `${rate}%`, rate>=80?"#0ca678":rate>=50?"#D97706":"#DC2626", "fa-chart-pie"),
       ].join("");
     }
 
@@ -12053,8 +12053,8 @@ async function loadTabDashboard() {
     const syncEl = document.getElementById("tabDashSyncInfo");
     if (syncEl) {
       const t = res.lastSync ? new Date(res.lastSync).toLocaleString("ko-KR") : "없음";
-      syncEl.innerHTML = `<i class="fas fa-database" style="margin-right:4px"></i>데이터 원본: <b>DB(tab_configs)</b> &middot; <span style="color:#059669">인덱스 빌드: 매 정시 자동 실행</span>`
-        + ` &middot; <button onclick="shareAllSheetsPermission()" style="background:none;border:none;color:#7C3AED;cursor:pointer;font-size:.72rem;font-weight:600;text-decoration:underline;padding:0"><i class="fas fa-shield-alt" style="margin-right:2px"></i>시트 쓰기권한 일괄부여</button>`;
+      syncEl.innerHTML = `<i class="fas fa-database" style="margin-right:4px"></i>데이터 원본: <b>DB(tab_configs)</b> &middot; <span style="color:#0ca678">인덱스 빌드: 매 정시 자동 실행</span>`
+        + ` &middot; <button onclick="shareAllSheetsPermission()" style="background:none;border:none;color:#3182f6;cursor:pointer;font-size:.72rem;font-weight:600;text-decoration:underline;padding:0"><i class="fas fa-shield-alt" style="margin-right:2px"></i>시트 쓰기권한 일괄부여</button>`;
     }
 
     // ── 담당자 필터 ──
@@ -12093,7 +12093,7 @@ function _renderTabDashManagerTabs() {
   const opts = [...sel.options].map(o => ({ value: o.value, label: o.value === "" ? "전체보기" : o.textContent }));
   cont.innerHTML = opts.map(o => {
     const active = (o.value === cur);
-    return `<button onclick="_selectTabDashManager('${escHtml(o.value).replace(/'/g, "\\'")}')" style="font-size:.75rem;font-weight:700;border-radius:7px;padding:5px 13px;cursor:pointer;white-space:nowrap;border:1px solid ${active ? '#6366F1' : '#D1D5DB'};background:${active ? '#6366F1' : '#fff'};color:${active ? '#fff' : '#374151'}">${escHtml(o.label)}</button>`;
+    return `<button onclick="_selectTabDashManager('${escHtml(o.value).replace(/'/g, "\\'")}')" style="font-size:.75rem;font-weight:700;border-radius:7px;padding:5px 13px;cursor:pointer;white-space:nowrap;border:1px solid ${active ? '#3182f6' : '#D1D5DB'};background:${active ? '#3182f6' : '#fff'};color:${active ? '#fff' : '#374151'}">${escHtml(o.label)}</button>`;
   }).join("");
 }
 function _selectTabDashManager(val) {
@@ -12134,10 +12134,10 @@ async function shareAllSheetsPermission() {
     const errors = details.filter(d => d.status === "error");
 
     let html = `<div style="padding:16px">
-      <h3 style="margin:0 0 12px;font-size:1rem"><i class="fas fa-shield-alt" style="color:#7C3AED;margin-right:6px"></i>시트 권한 부여 결과</h3>
+      <h3 style="margin:0 0 12px;font-size:1rem"><i class="fas fa-shield-alt" style="color:#3182f6;margin-right:6px"></i>시트 권한 부여 결과</h3>
       <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:8px;margin-bottom:14px">
         <div style="background:#F0FDF4;border:1px solid #BBF7D0;border-radius:8px;padding:10px;text-align:center">
-          <div style="font-size:1.3rem;font-weight:700;color:#059669">${res.success || 0}</div>
+          <div style="font-size:1.3rem;font-weight:700;color:#0ca678">${res.success || 0}</div>
           <div style="font-size:.72rem;color:#166534">새로 부여</div>
         </div>
         <div style="background:#EFF6FF;border:1px solid #BFDBFE;border-radius:8px;padding:10px;text-align:center">
@@ -12164,7 +12164,7 @@ async function shareAllSheetsPermission() {
     }
 
     if (shared.length > 0) {
-      html += `<details style="margin-top:6px"><summary style="font-size:.78rem;color:#059669;cursor:pointer;font-weight:600">✅ 새로 부여 목록 (${shared.length}건)</summary>
+      html += `<details style="margin-top:6px"><summary style="font-size:.78rem;color:#0ca678;cursor:pointer;font-weight:600">✅ 새로 부여 목록 (${shared.length}건)</summary>
         <div style="max-height:200px;overflow-y:auto;margin-top:6px;font-size:.72rem;background:#F0FDF4;padding:8px;border-radius:6px">`;
       shared.forEach(s => {
         html += `<div style="margin-bottom:2px">${escHtml(s.sheetId?.substring(0, 20) || "")}...</div>`;
@@ -12180,7 +12180,7 @@ async function shareAllSheetsPermission() {
     overlay.onclick = e => { if (e.target === overlay) overlay.remove(); };
     const modal = document.createElement("div");
     modal.style.cssText = "background:#fff;border-radius:12px;max-width:420px;width:90%;max-height:80vh;overflow-y:auto;box-shadow:0 20px 60px rgba(0,0,0,.3)";
-    modal.innerHTML = html + `<div style="padding:0 16px 16px;text-align:right"><button onclick="this.closest('[style*=fixed]').remove()" style="padding:8px 20px;background:#7C3AED;color:#fff;border:none;border-radius:8px;font-weight:600;cursor:pointer">확인</button></div>`;
+    modal.innerHTML = html + `<div style="padding:0 16px 16px;text-align:right"><button onclick="this.closest('[style*=fixed]').remove()" style="padding:8px 20px;background:#3182f6;color:#fff;border:none;border-radius:8px;font-weight:600;cursor:pointer">확인</button></div>`;
     overlay.appendChild(modal);
     document.body.appendChild(overlay);
 
@@ -12348,7 +12348,7 @@ function _inlineLinkEdit(t, dbKey, apiKey, icon, color) {
           style="width:100%;min-width:80px;max-width:160px;padding:2px 5px;border:1px solid #3B82F6;border-radius:4px;font-size:.68rem;background:#fff;outline:none"
           onkeydown="if(event.key==='Enter')_saveLinkInput('${id}','${sid}','${tn}','${apiKey}','${dbKey}');if(event.key==='Escape')_cancelLinkInput('${id}')"
           data-orig="${escHtml(url)}">
-        <button onclick="_saveLinkInput('${id}','${sid}','${tn}','${apiKey}','${dbKey}')" style="background:none;border:none;cursor:pointer;color:#059669;font-size:.72rem" title="저장"><i class="fas fa-check"></i></button>
+        <button onclick="_saveLinkInput('${id}','${sid}','${tn}','${apiKey}','${dbKey}')" style="background:none;border:none;cursor:pointer;color:#0ca678;font-size:.72rem" title="저장"><i class="fas fa-check"></i></button>
         <button onclick="_cancelLinkInput('${id}')" style="background:none;border:none;cursor:pointer;color:#DC2626;font-size:.72rem" title="취소"><i class="fas fa-times"></i></button>
       </div>
     </div>`;
@@ -12362,7 +12362,7 @@ function _inlineLinkEdit(t, dbKey, apiKey, icon, color) {
           style="width:100%;min-width:80px;max-width:160px;padding:2px 5px;border:1px solid #3B82F6;border-radius:4px;font-size:.68rem;background:#fff;outline:none"
           onkeydown="if(event.key==='Enter')_saveLinkInput('${id}','${sid}','${tn}','${apiKey}','${dbKey}');if(event.key==='Escape')_cancelLinkInput('${id}')"
           data-orig="">
-        <button onclick="_saveLinkInput('${id}','${sid}','${tn}','${apiKey}','${dbKey}')" style="background:none;border:none;cursor:pointer;color:#059669;font-size:.72rem" title="저장"><i class="fas fa-check"></i></button>
+        <button onclick="_saveLinkInput('${id}','${sid}','${tn}','${apiKey}','${dbKey}')" style="background:none;border:none;cursor:pointer;color:#0ca678;font-size:.72rem" title="저장"><i class="fas fa-check"></i></button>
         <button onclick="_cancelLinkInput('${id}')" style="background:none;border:none;cursor:pointer;color:#DC2626;font-size:.72rem" title="취소"><i class="fas fa-times"></i></button>
       </div>
     </div>`;
@@ -12466,7 +12466,7 @@ function _inlineTimeRange(t, round) {
   }
   const display = cur === "자유" ? "자유" : cur;
   const bg = cur === "자유" ? "#F0FDF4" : "#EFF6FF";
-  const clr = cur === "자유" ? "#059669" : "#1D4ED8";
+  const clr = cur === "자유" ? "#0ca678" : "#1D4ED8";
   return `<span onclick="_showTimeRangePopup(event,'${sid}','${tn}'${roundParam})" style="cursor:pointer;background:${bg};color:${clr};padding:2px 7px;border-radius:6px;font-size:.7rem;font-weight:500;white-space:nowrap">${escHtml(display)} <i class="fas fa-caret-down" style="font-size:.6rem;opacity:.5"></i></span>`;
 }
 
@@ -12608,8 +12608,8 @@ function _inlineIncomeType(t) {
   const sid = escHtml(t.sheet_id), tn = escHtml(t.tab_name);
   let display = cur || "—";
   if (cur && bank) display += ` (${bank})`;
-  const clrMap = {"현금":"#059669","사업자현영":"#B45309","소득신고":"#7C3AED"};
-  const bgMap = {"현금":"#D1FAE5","사업자현영":"#FEF3C7","소득신고":"#EDE9FE"};
+  const clrMap = {"현금":"#0ca678","사업자현영":"#B45309","소득신고":"#3182f6"};
+  const bgMap = {"현금":"#D1FAE5","사업자현영":"#FEF3C7","소득신고":"#e8f1fe"};
   const clr = clrMap[cur] || "#6B7280";
   const bg = bgMap[cur] || "#F3F4F6";
   return `<span onclick="_showIncomePopup(event,'${sid}','${tn}')" style="cursor:pointer;background:${bg};color:${clr};padding:2px 7px;border-radius:6px;font-size:.7rem;font-weight:500;white-space:nowrap">${escHtml(display)} <i class="fas fa-caret-down" style="font-size:.6rem;opacity:.5"></i></span>`;
@@ -12636,7 +12636,7 @@ function _showIncomePopup(e, sheetId, tabName) {
   const cur = t.income_type || "";
   const curBank = t.transfer_bank || "";
 
-  let html = `<div style="font-size:.8rem;font-weight:600;margin-bottom:8px"><i class="fas fa-receipt" style="color:#7C3AED;margin-right:4px"></i> 소득유형 선택</div>`;
+  let html = `<div style="font-size:.8rem;font-weight:600;margin-bottom:8px"><i class="fas fa-receipt" style="color:#3182f6;margin-right:4px"></i> 소득유형 선택</div>`;
   options.forEach(opt => {
     const sel = opt === cur;
     html += `<div onclick="_incomeSelect(this,'${escHtml(sheetId)}','${escHtml(tabName)}','${opt}')" style="padding:7px 12px;cursor:pointer;border-radius:6px;margin-bottom:3px;background:${sel?'#EFF6FF':'#fff'};border:1px solid ${sel?'#3B82F6':'transparent'};font-weight:${sel?'600':'400'}" onmouseover="if(!this.style.borderColor.includes('3B82'))this.style.background='#F9FAFB'" onmouseout="if(!this.style.borderColor.includes('3B82'))this.style.background='#fff'">${opt}</div>`;
@@ -12711,12 +12711,12 @@ function _cellVal(t, col) {
     const ic = escHtml(t.income_type || "");
     const su = escHtml(t.sheet_url || "");
     const tcJson = JSON.stringify({sheetId:t.sheet_id,sheetUrl:t.sheet_url||"",tabName:t.tab_name,displayName:t.display_name||t.tab_name,round:t.round||"",ncMode:!!t.nc_mode,incomeType:t.income_type||"",tabGid:t.tab_gid||""}).replace(/"/g,'&quot;');
-    return `<button data-tc="${tcJson}" onclick="event.stopPropagation();copyShortLink(this)" style="background:none;border:none;cursor:pointer;color:#7C3AED;font-size:.82rem" title="구매양식 제출링크 복사"><i class="fas fa-link"></i></button>`;
+    return `<button data-tc="${tcJson}" onclick="event.stopPropagation();copyShortLink(this)" style="background:none;border:none;cursor:pointer;color:#3182f6;font-size:.82rem" title="구매양식 제출링크 복사"><i class="fas fa-link"></i></button>`;
   }
   if (k === "_status") {
     const st = t.is_closed ? "closed" : "active";
     if (st === "closed") return '<span style="background:#FEE2E2;color:#DC2626;padding:2px 6px;border-radius:8px;font-size:.68rem;font-weight:600">마감</span>';
-    return '<span style="background:#D1FAE5;color:#059669;padding:2px 6px;border-radius:8px;font-size:.68rem;font-weight:600">활성</span>';
+    return '<span style="background:#D1FAE5;color:#0ca678;padding:2px 6px;border-radius:8px;font-size:.68rem;font-weight:600">활성</span>';
   }
   if (k === "_progress") {
     // ★ 차수별 행이면 해당 차수의 인원/제출 표시
@@ -12724,7 +12724,7 @@ function _cellVal(t, col) {
     const sc = t._isRoundRow ? (t._roundSubmitted || 0) : (t.submitted_count || 0);
     if (rc === 0) return '<span style="color:#D1D5DB">—</span>';
     const pct = _pct(sc, rc);
-    const clr = pct >= 80 ? "#059669" : pct >= 50 ? "#D97706" : "#DC2626";
+    const clr = pct >= 80 ? "#0ca678" : pct >= 50 ? "#D97706" : "#DC2626";
     const pending = rc - sc;
     // 미제출 10명 미만 & 1명 이상이면 클릭 가능
     if (pending > 0 && pending < 10 && t.sheet_id && t.tab_name) {
@@ -12742,7 +12742,7 @@ function _cellVal(t, col) {
     if (rc === 0) return '<span style="color:#D1D5DB">—</span>';
     if (pc === 0 && rc > 0) return `<span style="font-weight:600">${pc}/${rc}</span>`;
     const pct = _pct(pc, rc);
-    const clr = pct >= 100 ? "#059669" : pct >= 50 ? "#D97706" : "#DC2626";
+    const clr = pct >= 100 ? "#0ca678" : pct >= 50 ? "#D97706" : "#DC2626";
     const icon = pct >= 100 ? ' <i class="fas fa-check" style="font-size:.6rem"></i>' : '';
     const unpaid = rc - pc;
     // 미입금 10명 미만 & 1명 이상이면 클릭 가능
@@ -12769,14 +12769,14 @@ function _cellVal(t, col) {
   if (k === "display_name") return _inlineTextEdit(t, "display_name", "displayName", "상품명 입력", t._isRoundRow ? t._roundLabel : null);
   if (k === "deposit_name") return _inlineTextEdit(t, "deposit_name", "depositName", "입금자명");
   // 링크 입력
-  if (k === "folder_url") return _inlineLinkEdit(t, "folder_url", "folderUrl", "fa-folder", "#059669");
+  if (k === "folder_url") return _inlineLinkEdit(t, "folder_url", "folderUrl", "fa-folder", "#0ca678");
   if (k === "capture_folder_url") return _inlineLinkEdit(t, "capture_folder_url", "captureFolderUrl", "fa-camera", "#1D4ED8");
   if (k === "sheet_url") {
     const url = t.sheet_url;
     const hasGid = t.tab_gid;
     const finalUrl = url ? (hasGid ? url.replace(/[#?].*$/, '') + '#gid=' + t.tab_gid : url) : '';
     const linkIcon = finalUrl
-      ? `<a href="${escHtml(finalUrl)}" target="_blank" style="color:#7C3AED" title="${escHtml(finalUrl)}"><i class="fas fa-external-link-alt"></i></a>`
+      ? `<a href="${escHtml(finalUrl)}" target="_blank" style="color:#3182f6" title="${escHtml(finalUrl)}"><i class="fas fa-external-link-alt"></i></a>`
       : '';
     // 시트링크에 gid가 없으면 ⚠️ 보정 버튼 표시
     // ★ tab_gid가 DB에 저장되어 있으면 ⚠️ 숨김 (수동보정 완료 상태)
@@ -12794,10 +12794,10 @@ function _cellVal(t, col) {
     "만두":"#1D4ED8","만두_bg":"#DBEAFE","망고":"#D97706","망고_bg":"#FEF3C7"
   }, t._isRoundRow ? t._roundLabel : null);
   if (k === "review_type") return _inlineSelect(t, "review_type", "reviewType", ["실배송","빈박스","구매확정","믹스"], {
-    "실배송":"#059669","실배송_bg":"#D1FAE5","빈박스":"#7C3AED","빈박스_bg":"#EDE9FE","구매확정":"#1D4ED8","구매확정_bg":"#DBEAFE","믹스":"#D97706","믹스_bg":"#FEF3C7"
+    "실배송":"#0ca678","실배송_bg":"#D1FAE5","빈박스":"#3182f6","빈박스_bg":"#e8f1fe","구매확정":"#1D4ED8","구매확정_bg":"#DBEAFE","믹스":"#D97706","믹스_bg":"#FEF3C7"
   }, t._isRoundRow ? t._roundLabel : null);
   if (k === "payment_type") return _inlineSelect(t, "payment_type", "paymentType", ["현금","현영","소득"], {
-    "현금":"#059669","현금_bg":"#D1FAE5","현영":"#1D4ED8","현영_bg":"#DBEAFE","소득":"#7C3AED","소득_bg":"#EDE9FE"
+    "현금":"#0ca678","현금_bg":"#D1FAE5","현영":"#1D4ED8","현영_bg":"#DBEAFE","소득":"#3182f6","소득_bg":"#e8f1fe"
   }, t._isRoundRow ? t._roundLabel : null);
   // 주문시간대
   if (k === "time_range") return _inlineTimeRange(t, t._isRoundRow ? t._roundLabel : null);
@@ -12805,7 +12805,7 @@ function _cellVal(t, col) {
   if (k === "income_type") return _inlineIncomeType(t);
   // 불리언
   if (k === "is_bulk" || k === "nc_mode") {
-    return t[k] ? '<i class="fas fa-check-circle" style="color:#059669"></i>' : '<span style="color:#D1D5DB">—</span>';
+    return t[k] ? '<i class="fas fa-check-circle" style="color:#0ca678"></i>' : '<span style="color:#D1D5DB">—</span>';
   }
   if (k === "updated_at") {
     return t.updated_at ? new Date(t.updated_at).toLocaleDateString("ko-KR", { month:"short", day:"numeric", hour:"2-digit", minute:"2-digit" }) : "—";
@@ -12813,7 +12813,7 @@ function _cellVal(t, col) {
   // ★ 차수 컬럼: _roundLabel이 있으면 우선 표시
   if (k === "round") {
     const rv = t._roundLabel || t.round || "";
-    if (rv) return `<span style="background:#EEF2FF;color:#4338CA;padding:2px 7px;border-radius:8px;font-size:.68rem;font-weight:600">${escHtml(rv)}</span>`;
+    if (rv) return `<span style="background:#e8f1fe;color:#1b64da;padding:2px 7px;border-radius:8px;font-size:.68rem;font-weight:600">${escHtml(rv)}</span>`;
     return '<span style="color:#D1D5DB">—</span>';
   }
   // ★ 옵션 컬럼: 태그 아이콘 + 배지 (차수별 option_columns_map 우선)
@@ -12824,9 +12824,9 @@ function _cellVal(t, col) {
     const fallbackCols = t.option_columns || [];
     const activeCols = roundCols || fallbackCols;
     const optCount = activeCols.length;
-    const optColor = optCount > 0 ? '#7C3AED' : '#CBD5E1';
+    const optColor = optCount > 0 ? '#3182f6' : '#CBD5E1';
     const optTitle = optCount > 0 ? `옵션 ${optCount}개 설정됨` : '옵션 찾기';
-    const optBadge = optCount > 0 ? `<span style="position:absolute;top:-4px;right:-6px;background:#7C3AED;color:#fff;font-size:.5rem;border-radius:50%;width:13px;height:13px;display:flex;align-items:center;justify-content:center;font-weight:700">${optCount}</span>` : '';
+    const optBadge = optCount > 0 ? `<span style="position:absolute;top:-4px;right:-6px;background:#3182f6;color:#fff;font-size:.5rem;border-radius:50%;width:13px;height:13px;display:flex;align-items:center;justify-content:center;font-weight:700">${optCount}</span>` : '';
     return `<button onclick="event.stopPropagation();openOptionModal('${escHtml(t.sheet_id)}','${escHtml(t.tab_name)}','${escHtml(t.tab_gid||'')}','${escHtml(rd)}')" style="background:none;border:none;color:${optColor};cursor:pointer;font-size:.78rem;position:relative" title="${optTitle}"><i class="fas fa-tags"></i>${optBadge}</button>`;
   }
   const v = t[k];
@@ -13032,7 +13032,7 @@ function _showDuplicateModal(state, data) {
     modal.innerHTML = `
       <div style="position:fixed;inset:0;background:rgba(0,0,0,.5);z-index:9999;display:flex;align-items:center;justify-content:center" onclick="if(event.target===this)this.remove()">
         <div style="background:#fff;border-radius:12px;padding:24px;width:90%;max-width:600px;max-height:80vh;overflow-y:auto;box-shadow:0 20px 60px rgba(0,0,0,.3)">
-          <h3 style="margin:0 0 16px;font-size:1rem;color:#1F2937"><i class="fas fa-spinner fa-spin" style="margin-right:8px;color:#7C3AED"></i>리뷰폴더 중복검사 중...</h3>
+          <h3 style="margin:0 0 16px;font-size:1rem;color:#1F2937"><i class="fas fa-spinner fa-spin" style="margin-right:8px;color:#3182f6"></i>리뷰폴더 중복검사 중...</h3>
           <div style="font-size:.8rem;color:#6B7280">
             <p>${(data.tabInfo||[]).length}개 폴더를 검사하고 있습니다. 잠시 기다려주세요...</p>
             <ul style="margin-top:8px;padding-left:16px">${(data.tabInfo||[]).map(t => `<li>${escHtml(t.campaign)} / ${escHtml(t.tab)}</li>`).join('')}</ul>
@@ -13061,10 +13061,10 @@ function _showDuplicateModal(state, data) {
     let html = `
       <div style="position:fixed;inset:0;background:rgba(0,0,0,.5);z-index:9999;display:flex;align-items:center;justify-content:center" onclick="if(event.target===this)this.remove()">
         <div style="background:#fff;border-radius:12px;padding:24px;width:95%;max-width:750px;max-height:85vh;overflow-y:auto;box-shadow:0 20px 60px rgba(0,0,0,.3)">
-          <h3 style="margin:0 0 16px;font-size:1rem;color:#1F2937"><i class="fas fa-copy" style="margin-right:8px;color:#7C3AED"></i>리뷰폴더 중복검사 결과</h3>`;
+          <h3 style="margin:0 0 16px;font-size:1rem;color:#1F2937"><i class="fas fa-copy" style="margin-right:8px;color:#3182f6"></i>리뷰폴더 중복검사 결과</h3>`;
 
     if (totalDuplicateFiles === 0) {
-      html += `<div style="text-align:center;padding:24px;color:#059669;font-size:.88rem">
+      html += `<div style="text-align:center;padding:24px;color:#0ca678;font-size:.88rem">
         <i class="fas fa-check-circle" style="font-size:2rem;margin-bottom:8px;display:block"></i>
         <b>중복 파일이 없습니다!</b><br><span style="font-size:.75rem;color:#6B7280">${tabInfo.length}개 폴더를 검사했습니다.</span>
       </div>`;
@@ -13087,7 +13087,7 @@ function _showDuplicateModal(state, data) {
 
         html += `<div style="margin-bottom:12px;border:1px solid #E5E7EB;border-radius:8px;overflow:hidden">
           <div style="background:#F3F4F6;padding:8px 12px;font-size:.78rem;font-weight:600;color:#374151">
-            <i class="fas fa-folder-open" style="margin-right:4px;color:#7C3AED"></i>
+            <i class="fas fa-folder-open" style="margin-right:4px;color:#3182f6"></i>
             ${escHtml(tabInfo[rIdx]?.campaign || '')} / ${escHtml(tabInfo[rIdx]?.tab || '')}
             <span style="font-weight:400;color:#6B7280;margin-left:8px">전체 ${r.totalFiles}개 파일 중 ${r.duplicateFileCount}개 중복</span>
           </div>
@@ -13095,7 +13095,7 @@ function _showDuplicateModal(state, data) {
 
         r.duplicates.forEach(g => {
           html += `<div style="margin-bottom:6px;padding:6px;background:#FAFAFA;border-radius:4px;font-size:.72rem">
-            <div style="color:#059669;margin-bottom:3px"><i class="fas fa-check" style="margin-right:4px"></i><b>유지:</b> ${escHtml(g.keep.name)} <span style="color:#9CA3AF">(${_formatFileSize(g.keep.size)}, ${_formatDate(g.keep.createdTime)})</span></div>`;
+            <div style="color:#0ca678;margin-bottom:3px"><i class="fas fa-check" style="margin-right:4px"></i><b>유지:</b> ${escHtml(g.keep.name)} <span style="color:#9CA3AF">(${_formatFileSize(g.keep.size)}, ${_formatDate(g.keep.createdTime)})</span></div>`;
           g.remove.forEach(f => {
             allRemoveIds.push(f.id);
             html += `<div style="color:#DC2626;margin-left:14px"><i class="fas fa-trash-alt" style="margin-right:4px"></i><b>제거:</b> ${escHtml(f.name)} <span style="color:#9CA3AF">(${_formatFileSize(f.size)}, ${_formatDate(f.createdTime)})</span></div>`;
@@ -13289,7 +13289,7 @@ function _showSubmissionStatusModal(state, data) {
         </div>`;
 
       if (issueCount === 0) {
-        html += `<div style="padding:12px;text-align:center;color:#059669;font-size:.82rem">
+        html += `<div style="padding:12px;text-align:center;color:#0ca678;font-size:.82rem">
           <i class="fas fa-check-circle" style="margin-right:4px"></i> 이상 없음
         </div>`;
       } else {
@@ -13301,7 +13301,7 @@ function _showSubmissionStatusModal(state, data) {
             <div style="font-size:.75rem;font-weight:600;color:#DC2626;margin-bottom:4px"><i class="fas fa-copy" style="margin-right:4px"></i>파일 중복 (${summary.fileDuplicateCount}그룹, ${summary.fileDuplicateFileCount}개 제거 가능)</div>`;
           (r.fileDuplicates||[]).forEach(g => {
             html += `<div style="margin-left:12px;font-size:.72rem;color:#4B5563;padding:3px 0;border-bottom:1px solid #F3F4F6">
-              <span style="color:#059669"><i class="fas fa-check" style="margin-right:2px"></i>유지:</span> ${escHtml(g.keep.name)} <span style="color:#9CA3AF">(${_formatFileSize(g.keep.size)})</span>`;
+              <span style="color:#0ca678"><i class="fas fa-check" style="margin-right:2px"></i>유지:</span> ${escHtml(g.keep.name)} <span style="color:#9CA3AF">(${_formatFileSize(g.keep.size)})</span>`;
             g.remove.forEach(f => {
               allRemoveIds.push(f.id);
               html += `<br><span style="color:#DC2626;margin-left:14px"><i class="fas fa-trash-alt" style="margin-right:2px"></i>제거:</span> ${escHtml(f.name)} <span style="color:#9CA3AF">(${_formatFileSize(f.size)})</span>`;
@@ -13339,7 +13339,7 @@ function _showSubmissionStatusModal(state, data) {
         // (d) 고아 파일
         if (summary.orphanCount > 0) {
           html += `<div style="margin-bottom:8px">
-            <div style="font-size:.75rem;font-weight:600;color:#7C3AED;margin-bottom:4px"><i class="fas fa-ghost" style="margin-right:4px"></i>고아 파일 (${summary.orphanCount}명)</div>`;
+            <div style="font-size:.75rem;font-weight:600;color:#3182f6;margin-bottom:4px"><i class="fas fa-ghost" style="margin-right:4px"></i>고아 파일 (${summary.orphanCount}명)</div>`;
           r.orphanFiles.forEach(o => {
             html += `<div style="margin-left:12px;font-size:.72rem;color:#4B5563;padding:2px 0">
               <b>${escHtml(o.name)}</b> — ${o.files.length}개 파일
@@ -13356,7 +13356,7 @@ function _showSubmissionStatusModal(state, data) {
 
     // 요약 배너
     if (totalIssues === 0) {
-      html = html.replace('</h3>', '</h3><div style="background:#ECFDF5;border:1px solid #059669;border-radius:8px;padding:10px 14px;margin-bottom:12px;font-size:.82rem;color:#065F46;text-align:center"><i class="fas fa-check-circle" style="margin-right:6px"></i><b>모든 탭에서 이상이 발견되지 않았습니다.</b></div>');
+      html = html.replace('</h3>', '</h3><div style="background:#ECFDF5;border:1px solid #0ca678;border-radius:8px;padding:10px 14px;margin-bottom:12px;font-size:.82rem;color:#065F46;text-align:center"><i class="fas fa-check-circle" style="margin-right:6px"></i><b>모든 탭에서 이상이 발견되지 않았습니다.</b></div>');
     } else {
       html = html.replace('</h3>', `</h3><div style="background:#FEF3C7;border:1px solid #F59E0B;border-radius:8px;padding:10px 14px;margin-bottom:12px;font-size:.78rem;color:#92400E"><i class="fas fa-exclamation-triangle" style="margin-right:6px"></i><b>${totalIssues}건의 이슈</b>가 발견되었습니다.</div>`);
     }
@@ -13421,13 +13421,13 @@ function _showArchiveRoundModal(selectedTabs) {
 
   let html = `<div id="archiveRoundModal" style="position:fixed;inset:0;z-index:9999;display:flex;align-items:center;justify-content:center;background:rgba(0,0,0,.45)">
     <div style="background:#fff;border-radius:14px;padding:24px;max-width:520px;width:90%;max-height:80vh;overflow-y:auto;box-shadow:0 20px 60px rgba(0,0,0,.3)">
-      <h3 style="margin:0 0 6px;font-size:1rem;color:#1F2937"><i class="fas fa-archive" style="color:#8B5CF6;margin-right:6px"></i>마감 차수 선택</h3>
+      <h3 style="margin:0 0 6px;font-size:1rem;color:#1F2937"><i class="fas fa-archive" style="color:#4593fc;margin-right:6px"></i>마감 차수 선택</h3>
       <p style="margin:0 0 16px;font-size:.78rem;color:#6B7280">마감할 차수를 선택하세요. 선택하지 않은 차수는 대시보드에 유지됩니다.</p>`;
 
   selectedTabs.forEach((tab, tabIdx) => {
     html += `<div style="margin-bottom:14px;border:1px solid #E5E7EB;border-radius:10px;overflow:hidden">
       <div style="background:#F9FAFB;padding:8px 12px;font-size:.82rem;font-weight:600;color:#374151">
-        <i class="fas fa-table" style="color:#7C3AED;margin-right:4px"></i>${escHtml(tab.displayName)}
+        <i class="fas fa-table" style="color:#3182f6;margin-right:4px"></i>${escHtml(tab.displayName)}
       </div>`;
 
     if (tab.roundList.length > 1) {
@@ -13438,7 +13438,7 @@ function _showArchiveRoundModal(selectedTabs) {
       tab.roundList.forEach((r, rIdx) => {
         const paid = r.paid || 0;
         const pct = _pct(paid, r.total);
-        const pctColor = pct >= 100 ? '#059669' : pct >= 50 ? '#D97706' : '#6B7280';
+        const pctColor = pct >= 100 ? '#0ca678' : pct >= 50 ? '#D97706' : '#6B7280';
         html += `<label style="font-size:.75rem;display:inline-flex;align-items:center;gap:3px;padding:3px 8px;border:1px solid #D1D5DB;border-radius:6px;cursor:pointer;background:#FAFAFA">
           <input type="checkbox" class="archive-round-cb" data-tab-idx="${tabIdx}" data-round="${escHtml(r.round)}" value="${escHtml(r.round)}" style="width:13px;height:13px">
           <span>${escHtml(r.round)}</span>
@@ -13457,7 +13457,7 @@ function _showArchiveRoundModal(selectedTabs) {
 
   html += `<div style="display:flex;justify-content:flex-end;gap:8px;margin-top:16px">
       <button onclick="document.getElementById('archiveRoundModal').remove()" style="padding:7px 16px;border:1px solid #D1D5DB;background:#fff;border-radius:8px;font-size:.8rem;cursor:pointer;color:#374151">취소</button>
-      <button onclick="_executeArchiveFromModal()" style="padding:7px 16px;background:#8B5CF6;color:#fff;border:none;border-radius:8px;font-size:.8rem;font-weight:600;cursor:pointer"><i class="fas fa-archive" style="margin-right:4px"></i>확인</button>
+      <button onclick="_executeArchiveFromModal()" style="padding:7px 16px;background:#4593fc;color:#fff;border:none;border-radius:8px;font-size:.8rem;font-weight:600;cursor:pointer"><i class="fas fa-archive" style="margin-right:4px"></i>확인</button>
     </div>
     </div></div>`;
 
@@ -13568,14 +13568,14 @@ async function _fixSheetUrl(sheetId, tabName) {
       </div>
       <div style="display:flex;gap:8px;justify-content:space-between">
         <button onclick="_fixSheetUrlAutoDetect('${escHtml(sheetId)}','${escHtml(tabName)}')" 
-          style="padding:8px 14px;background:#EEF2FF;color:#4338CA;border:1px solid #C7D2FE;border-radius:8px;font-size:.75rem;font-weight:600;cursor:pointer">
+          style="padding:8px 14px;background:#e8f1fe;color:#1b64da;border:1px solid #cce0fb;border-radius:8px;font-size:.75rem;font-weight:600;cursor:pointer">
           <i class="fas fa-magic"></i> 자동감지
         </button>
         <div style="display:flex;gap:8px">
           <button onclick="document.getElementById('fixSheetUrlModal').remove()" 
             style="padding:8px 16px;background:#F3F4F6;color:#374151;border:none;border-radius:8px;font-size:.75rem;cursor:pointer">취소</button>
           <button onclick="_fixSheetUrlSave('${escHtml(sheetId)}','${escHtml(tabName)}')" 
-            style="padding:8px 16px;background:#7C3AED;color:#fff;border:none;border-radius:8px;font-size:.75rem;font-weight:600;cursor:pointer">
+            style="padding:8px 16px;background:#3182f6;color:#fff;border:none;border-radius:8px;font-size:.75rem;font-weight:600;cursor:pointer">
             <i class="fas fa-save"></i> 저장</button>
         </div>
       </div>
@@ -13668,7 +13668,7 @@ function openTabDashDetail(idx) {
 
   const st = t.is_closed ? "closed" : "active";
   const stLabel = st === "closed" ? "마감" : "활성";
-  const stClr = st === "closed" ? "#DC2626" : "#059669";
+  const stClr = st === "closed" ? "#DC2626" : "#0ca678";
   const rc = t.row_count || 0, sc = t.submitted_count || 0;
   const pct = _pct(sc, rc);
 
@@ -13681,7 +13681,7 @@ function openTabDashDetail(idx) {
       ["담당자", t.manager],
       ["상태", `<span style="color:${stClr};font-weight:600">${stLabel}</span>`],
     ]},
-    { title:"운영 설정", icon:"fa-cogs", color:"#7C3AED", items:[
+    { title:"운영 설정", icon:"fa-cogs", color:"#3182f6", items:[
       ["리뷰유형", t.review_type],
       ["주문시간대", t.time_range],
       ["차수", t.round],
@@ -13690,7 +13690,7 @@ function openTabDashDetail(idx) {
       ["배송유형", t.delivery_type],
       ["NC모드", t.nc_mode ? "활성" : "비활성"],
     ]},
-    { title:"입금 정보", icon:"fa-money-bill-wave", color:"#059669", items:[
+    { title:"입금 정보", icon:"fa-money-bill-wave", color:"#0ca678", items:[
       ["결제방식", t.payment_type],
       ["입금자명", t.deposit_name],
       ["이체은행", t.transfer_bank],
@@ -13703,9 +13703,9 @@ function openTabDashDetail(idx) {
       ["빌드 시각", t.index_built_at ? new Date(t.index_built_at).toLocaleString("ko-KR") : "—"],
     ]},
     { title:"링크", icon:"fa-link", color:"#D97706", items:[
-      ["리뷰폴더", t.folder_url ? `<a href="${escHtml(t.folder_url)}" target="_blank" style="color:#059669;word-break:break-all">${escHtml(t.folder_url)}</a>` : "—"],
+      ["리뷰폴더", t.folder_url ? `<a href="${escHtml(t.folder_url)}" target="_blank" style="color:#0ca678;word-break:break-all">${escHtml(t.folder_url)}</a>` : "—"],
       ["캡처폴더", t.capture_folder_url ? `<a href="${escHtml(t.capture_folder_url)}" target="_blank" style="color:#1D4ED8;word-break:break-all">${escHtml(t.capture_folder_url)}</a>` : "—"],
-      ["시트 URL", t.sheet_url ? `<a href="${escHtml(t.tab_gid ? t.sheet_url.replace(/[#?].*$/, '') + '#gid=' + t.tab_gid : t.sheet_url)}" target="_blank" style="color:#7C3AED;word-break:break-all">${escHtml(t.tab_gid ? t.sheet_url.replace(/[#?].*$/, '') + '#gid=' + t.tab_gid : t.sheet_url)}</a>` : "—"],
+      ["시트 URL", t.sheet_url ? `<a href="${escHtml(t.tab_gid ? t.sheet_url.replace(/[#?].*$/, '') + '#gid=' + t.tab_gid : t.sheet_url)}" target="_blank" style="color:#3182f6;word-break:break-all">${escHtml(t.tab_gid ? t.sheet_url.replace(/[#?].*$/, '') + '#gid=' + t.tab_gid : t.sheet_url)}</a>` : "—"],
     ]},
     { title:"시스템", icon:"fa-server", color:"#6B7280", items:[
       ["갱신일", t.updated_at ? new Date(t.updated_at).toLocaleString("ko-KR") : "—"],
@@ -14187,7 +14187,7 @@ function _showMasterSyncResult(res, dryRun) {
   if (old) old.remove();
 
   const actionColor = (action) => {
-    if (action.includes('add')) return '#059669';
+    if (action.includes('add')) return '#0ca678';
     if (action.includes('update')) return '#0369A1';
     if (action.includes('remove')) return '#DC2626';
     return '#6B7280';
@@ -14231,7 +14231,7 @@ function _showMasterSyncResult(res, dryRun) {
   modal.innerHTML = `
     <div class="modal-box" style="max-width:700px;max-height:80vh;overflow:auto">
       <div class="modal-header">
-        <h3><i class="fas fa-cloud-download-alt" style="color:#059669"></i>
+        <h3><i class="fas fa-cloud-download-alt" style="color:#0ca678"></i>
           마스터 시트 동기화 ${dryRun ? '미리보기' : '결과'}</h3>
         <button class="btn-icon-sm" onclick="document.getElementById('masterSyncResultModal').remove()">
           <i class="fas fa-times"></i>
@@ -14357,10 +14357,10 @@ function _showSyncTabNamesResult(res, dryRun) {
   if (old) old.remove();
 
   const statusColor = (s) => {
-    if (s === 'renamed') return '#059669';
+    if (s === 'renamed') return '#0ca678';
     if (s === 'url_fixed') return '#0369A1';
     if (s === 'gid_filled') return '#0891B2';
-    if (s === 'dry_run' || s === 'dry_run_url' || s === 'dry_run_gid') return '#7C3AED';
+    if (s === 'dry_run' || s === 'dry_run_url' || s === 'dry_run_gid') return '#3182f6';
     if (s === 'error' || s === 'sheet_error') return '#DC2626';
     if (s === 'no_gid' || s === 'no_gid_missing') return '#D97706';
     return '#6B7280';
@@ -14380,13 +14380,13 @@ function _showSyncTabNamesResult(res, dryRun) {
   const resultItems = res.results || [];
   let tableRows = '';
   if (resultItems.length === 0) {
-    tableRows = `<tr><td colspan="3" style="padding:20px;text-align:center;font-size:.82rem;color:#059669"><i class="fas fa-check-circle" style="margin-right:6px"></i>${dryRun ? '변경할 항목이 없습니다 — 모든 탭명이 시트와 일치합니다.' : '동기화 완료 — 모든 변경이 적용되었습니다.'}</td></tr>`;
+    tableRows = `<tr><td colspan="3" style="padding:20px;text-align:center;font-size:.82rem;color:#0ca678"><i class="fas fa-check-circle" style="margin-right:6px"></i>${dryRun ? '변경할 항목이 없습니다 — 모든 탭명이 시트와 일치합니다.' : '동기화 완료 — 모든 변경이 적용되었습니다.'}</td></tr>`;
   } else {
     tableRows = resultItems.map(r => {
     const badge = `<span style="display:inline-block;padding:1px 7px;border-radius:10px;font-size:.68rem;font-weight:600;color:#fff;background:${statusColor(r.status)}">${statusLabel(r.status)}</span>`;
     let detail = '';
     if (r.newName && r.newName !== r.oldName) {
-      detail += `<span style="color:#DC2626;text-decoration:line-through">${escHtml(r.oldName)}</span> → <b style="color:#059669">${escHtml(r.newName)}</b>`;
+      detail += `<span style="color:#DC2626;text-decoration:line-through">${escHtml(r.oldName)}</span> → <b style="color:#0ca678">${escHtml(r.newName)}</b>`;
     } else {
       detail += escHtml(r.oldName || '');
     }
@@ -14403,7 +14403,7 @@ function _showSyncTabNamesResult(res, dryRun) {
       detail += `<br><span style="font-size:.65rem;color:#D97706">${escHtml(r.message)}</span>`;
     }
     if (r.hint) {
-      detail += `<br><span style="font-size:.63rem;color:#6366F1"><i class="fas fa-lightbulb"></i> ${escHtml(r.hint)}</span>`;
+      detail += `<br><span style="font-size:.63rem;color:#3182f6"><i class="fas fa-lightbulb"></i> ${escHtml(r.hint)}</span>`;
     }
     if (r.affectedTabs && r.affectedTabs.length > 0) {
       detail += `<br><span style="font-size:.63rem;color:#6B7280">영향 탭(${r.affectedTabCount}개): ${r.affectedTabs.map(t => escHtml(t)).join(', ')}${r.affectedTabCount > 5 ? '...' : ''}</span>`;
@@ -14429,7 +14429,7 @@ function _showSyncTabNamesResult(res, dryRun) {
   modal.innerHTML = `
     <div style="background:#fff;border-radius:12px;max-width:600px;width:95%;max-height:80vh;display:flex;flex-direction:column;box-shadow:0 20px 40px rgba(0,0,0,.15)">
       <div style="padding:12px 16px;border-bottom:1px solid #E5E7EB;display:flex;align-items:center;justify-content:space-between">
-        <h3 style="margin:0;font-size:.95rem;color:#1E293B"><i class="fas fa-exchange-alt" style="color:#7C3AED;margin-right:6px"></i>${title}</h3>
+        <h3 style="margin:0;font-size:.95rem;color:#1E293B"><i class="fas fa-exchange-alt" style="color:#3182f6;margin-right:6px"></i>${title}</h3>
         <button onclick="this.closest('.modal-overlay').remove()" style="background:none;border:none;cursor:pointer;font-size:1rem;color:#6B7280;padding:4px"><i class="fas fa-times"></i></button>
       </div>
       <div style="padding:10px 16px;font-size:.73rem;color:#6B7280;background:#F8FAFC;border-bottom:1px solid #E5E7EB">${summary}</div>
@@ -14445,7 +14445,7 @@ function _showSyncTabNamesResult(res, dryRun) {
       </div>
       <div style="padding:10px 16px;border-top:1px solid #E5E7EB;display:flex;gap:8px;justify-content:flex-end;align-items:center">
         ${dryRun ? `<span style="flex:1;font-size:.72rem;color:#6B7280">위 내용을 확인 후 [적용] 버튼을 클릭하세요</span>
-        <button onclick="syncTabNames(false);this.closest('.modal-overlay').remove()" style="padding:7px 20px;background:#059669;color:#fff;border:none;border-radius:6px;font-size:.82rem;font-weight:700;cursor:pointer;display:flex;align-items:center;gap:5px"><i class="fas fa-check-circle"></i> 2단계: 적용</button>` : ''}
+        <button onclick="syncTabNames(false);this.closest('.modal-overlay').remove()" style="padding:7px 20px;background:#0ca678;color:#fff;border:none;border-radius:6px;font-size:.82rem;font-weight:700;cursor:pointer;display:flex;align-items:center;gap:5px"><i class="fas fa-check-circle"></i> 2단계: 적용</button>` : ''}
         <button onclick="this.closest('.modal-overlay').remove()" style="padding:6px 16px;background:#6B7280;color:#fff;border:none;border-radius:6px;font-size:.8rem;font-weight:600;cursor:pointer">닫기</button>
       </div>
     </div>
@@ -14550,8 +14550,8 @@ function _renderDedupeModal(data, sheetId, tabName, folderUrl) {
     <div style="background:#fff;border-radius:12px;width:100%;max-width:560px;max-height:85vh;display:flex;flex-direction:column;box-shadow:0 20px 60px rgba(0,0,0,.2)">
       <div style="padding:16px 20px;border-bottom:1px solid #E5E7EB;flex-shrink:0">
         <div style="display:flex;align-items:center;justify-content:space-between">
-          <h3 style="margin:0;font-size:1rem;font-weight:700;color:#111"><i class="fas fa-broom" style="color:#7C3AED"></i> 중복 파일 정리 미리보기</h3>
-          <a href="${escHtml(data.folderUrl || '')}" target="_blank" style="font-size:.72rem;color:#059669;text-decoration:none;font-weight:600;padding:4px 10px;background:#F0FDF4;border-radius:6px;border:1px solid #BBF7D0;display:${data.folderUrl ? 'inline-flex' : 'none'};align-items:center;gap:4px" title="리뷰폴더 열기"><i class="fas fa-external-link-alt"></i> 폴더 열기</a>
+          <h3 style="margin:0;font-size:1rem;font-weight:700;color:#111"><i class="fas fa-broom" style="color:#3182f6"></i> 중복 파일 정리 미리보기</h3>
+          <a href="${escHtml(data.folderUrl || '')}" target="_blank" style="font-size:.72rem;color:#0ca678;text-decoration:none;font-weight:600;padding:4px 10px;background:#F0FDF4;border-radius:6px;border:1px solid #BBF7D0;display:${data.folderUrl ? 'inline-flex' : 'none'};align-items:center;gap:4px" title="리뷰폴더 열기"><i class="fas fa-external-link-alt"></i> 폴더 열기</a>
         </div>
         <div style="font-size:.72rem;color:#6B7280;margin-top:4px">${escHtml(data.displayName || tabName)}</div>
       </div>
@@ -14795,11 +14795,11 @@ async function openOptionModal(sheetId, tabName, gid, round) {
   modal.style.cssText = 'position:fixed;top:0;left:0;width:100vw;height:100vh;background:rgba(0,0,0,.45);display:flex;align-items:center;justify-content:center;z-index:9999';
   modal.innerHTML = `<div style="background:#fff;border-radius:14px;width:520px;max-width:92vw;max-height:85vh;overflow-y:auto;box-shadow:0 20px 60px rgba(0,0,0,.2);padding:0">
     <div style="padding:18px 22px;border-bottom:1px solid #E5E7EB;display:flex;align-items:center;justify-content:space-between">
-      <div style="font-size:.95rem;font-weight:700;color:#1F2937"><i class="fas fa-tags" style="color:#7C3AED;margin-right:8px"></i>옵션 컬럼 설정 — ${escHtml(tabName)}${roundLabel}</div>
+      <div style="font-size:.95rem;font-weight:700;color:#1F2937"><i class="fas fa-tags" style="color:#3182f6;margin-right:8px"></i>옵션 컬럼 설정 — ${escHtml(tabName)}${roundLabel}</div>
       <button onclick="document.getElementById('optionModal')?.remove()" style="background:none;border:none;font-size:1.1rem;cursor:pointer;color:#6B7280">&times;</button>
     </div>
     <div id="optionModalBody" style="padding:18px 22px">
-      <div style="text-align:center;padding:30px"><i class="fas fa-spinner fa-spin" style="color:#7C3AED;font-size:1.5rem"></i><div style="margin-top:8px;font-size:.8rem;color:#6B7280">시트 헤더 분석 중...</div></div>
+      <div style="text-align:center;padding:30px"><i class="fas fa-spinner fa-spin" style="color:#3182f6;font-size:1.5rem"></i><div style="margin-top:8px;font-size:.8rem;color:#6B7280">시트 헤더 분석 중...</div></div>
     </div>
   </div>`;
   document.body.appendChild(modal);
@@ -14827,10 +14827,10 @@ async function openOptionModal(sheetId, tabName, gid, round) {
     html += `<div style="margin-bottom:14px">`;
     candidates.forEach((c, i) => {
       const checked = saved.includes(c.name) ? 'checked' : '';
-      html += `<label style="display:flex;align-items:center;gap:8px;padding:7px 10px;border-radius:8px;cursor:pointer;margin-bottom:3px;transition:background .15s;border:1px solid ${checked?'#7C3AED':'#E5E7EB'};background:${checked?'#F5F3FF':'#fff'}" 
-        onmouseover="this.style.background='#F5F3FF'" onmouseout="this.style.background=this.querySelector('input').checked?'#F5F3FF':'#fff'">
-        <input type="checkbox" name="optCol" value="${i}" data-name="${escHtml(c.name)}" data-colidx="${c.colIndex}" ${checked} style="width:16px;height:16px;accent-color:#7C3AED;cursor:pointer"
-          onchange="this.parentElement.style.border=this.checked?'1px solid #7C3AED':'1px solid #E5E7EB';this.parentElement.style.background=this.checked?'#F5F3FF':'#fff';_onOptionCheckChange()">
+      html += `<label style="display:flex;align-items:center;gap:8px;padding:7px 10px;border-radius:8px;cursor:pointer;margin-bottom:3px;transition:background .15s;border:1px solid ${checked?'#3182f6':'#E5E7EB'};background:${checked?'#f2f7ff':'#fff'}" 
+        onmouseover="this.style.background='#f2f7ff'" onmouseout="this.style.background=this.querySelector('input').checked?'#f2f7ff':'#fff'">
+        <input type="checkbox" name="optCol" value="${i}" data-name="${escHtml(c.name)}" data-colidx="${c.colIndex}" ${checked} style="width:16px;height:16px;accent-color:#3182f6;cursor:pointer"
+          onchange="this.parentElement.style.border=this.checked?'1px solid #3182f6':'1px solid #E5E7EB';this.parentElement.style.background=this.checked?'#f2f7ff':'#fff';_onOptionCheckChange()">
         <span style="font-size:.82rem;font-weight:${checked?'600':'500'};color:#1F2937">${escHtml(c.name)}</span>
         <span style="font-size:.65rem;color:#9CA3AF;margin-left:auto">col ${c.colIndex+1}</span>
       </label>`;
@@ -14851,9 +14851,9 @@ async function openOptionModal(sheetId, tabName, gid, round) {
     // ★ 버튼: 초기화(항상 표시) + 미리보기 + 닫기 / 저장 버튼은 미리보기 성공 후에만 나타남
     html += `<div id="optionModalBtnArea" style="display:flex;gap:8px;justify-content:flex-end;padding-top:10px;border-top:1px solid #E5E7EB">
       <button id="optionClearBtn" onclick="_clearOptionColumns('${escHtml(sheetId)}','${escHtml(tabName)}','${escHtml(round||'')}')" style="padding:8px 14px;background:#FEF2F2;border:1px solid #FECACA;border-radius:8px;font-size:.8rem;cursor:pointer;color:#DC2626;font-weight:500;margin-right:auto" title="이 차수의 옵션 설정을 모두 제거합니다"><i class="fas fa-trash-alt" style="margin-right:4px"></i>옵션 초기화</button>
-      <button id="optionPreviewBtn" onclick="_previewOptionData('${escHtml(sheetId)}','${escHtml(tabName)}','${escHtml(gid||'')}','${escHtml(round||'')}')" style="padding:8px 16px;background:#EDE9FE;border:1px solid #A78BFA;border-radius:8px;font-size:.8rem;cursor:pointer;color:#5B21B6;font-weight:500"><i class="fas fa-eye" style="margin-right:4px"></i>미리보기</button>
+      <button id="optionPreviewBtn" onclick="_previewOptionData('${escHtml(sheetId)}','${escHtml(tabName)}','${escHtml(gid||'')}','${escHtml(round||'')}')" style="padding:8px 16px;background:#e8f1fe;border:1px solid #6fa6f5;border-radius:8px;font-size:.8rem;cursor:pointer;color:#1b64da;font-weight:500"><i class="fas fa-eye" style="margin-right:4px"></i>미리보기</button>
       <button onclick="document.getElementById('optionModal')?.remove()" style="padding:8px 16px;background:#F3F4F6;border:1px solid #D1D5DB;border-radius:8px;font-size:.8rem;cursor:pointer;color:#4B5563">닫기</button>
-      <button id="optionSaveBtn" onclick="_saveOptionColumns('${escHtml(sheetId)}','${escHtml(tabName)}','${escHtml(round||'')}')" style="display:none;padding:8px 20px;background:#7C3AED;color:#fff;border:none;border-radius:8px;font-size:.8rem;font-weight:600;cursor:pointer"><i class="fas fa-save" style="margin-right:4px"></i>저장</button>
+      <button id="optionSaveBtn" onclick="_saveOptionColumns('${escHtml(sheetId)}','${escHtml(tabName)}','${escHtml(round||'')}')" style="display:none;padding:8px 20px;background:#3182f6;color:#fff;border:none;border-radius:8px;font-size:.8rem;font-weight:600;cursor:pointer"><i class="fas fa-save" style="margin-right:4px"></i>저장</button>
     </div>`;
 
     body.innerHTML = html;
@@ -14948,7 +14948,7 @@ async function _previewOptionData(sheetId, tabName, gid, round) {
   const area = document.getElementById('optionPreviewArea');
   if (!area) return;
   area.style.display = 'block';
-  area.innerHTML = `<div style="text-align:center;padding:16px"><i class="fas fa-spinner fa-spin" style="color:#7C3AED"></i> <span style="font-size:.78rem;color:#6B7280">옵션 데이터 로드 중...</span></div>`;
+  area.innerHTML = `<div style="text-align:center;padding:16px"><i class="fas fa-spinner fa-spin" style="color:#3182f6"></i> <span style="font-size:.78rem;color:#6B7280">옵션 데이터 로드 중...</span></div>`;
 
   try {
     const params = { action:'getOptionData', sheetId, tabName, columns: JSON.stringify(selectedCols) };
@@ -14965,12 +14965,12 @@ async function _previewOptionData(sheetId, tabName, gid, round) {
     }
 
     // 테이블 렌더링
-    let h = `<div style="font-size:.75rem;font-weight:600;color:#5B21B6;margin-bottom:6px"><i class="fas fa-table" style="margin-right:4px"></i>옵션 데이터 미리보기 (${rows.length}명)</div>`;
+    let h = `<div style="font-size:.75rem;font-weight:600;color:#1b64da;margin-bottom:6px"><i class="fas fa-table" style="margin-right:4px"></i>옵션 데이터 미리보기 (${rows.length}명)</div>`;
     h += `<div style="max-height:250px;overflow-y:auto;border:1px solid #E5E7EB;border-radius:8px">`;
     h += `<table style="width:100%;border-collapse:collapse;font-size:.72rem"><thead><tr>`;
-    h += `<th style="padding:6px 8px;background:#F5F3FF;border-bottom:1px solid #E5E7EB;text-align:left;font-weight:600;color:#5B21B6;position:sticky;top:0">이름</th>`;
+    h += `<th style="padding:6px 8px;background:#f2f7ff;border-bottom:1px solid #E5E7EB;text-align:left;font-weight:600;color:#1b64da;position:sticky;top:0">이름</th>`;
     if (cols.length > 0) {
-      cols.forEach(c => { h += `<th style="padding:6px 8px;background:#F5F3FF;border-bottom:1px solid #E5E7EB;text-align:left;font-weight:600;color:#5B21B6;position:sticky;top:0">${escHtml(c)}</th>`; });
+      cols.forEach(c => { h += `<th style="padding:6px 8px;background:#f2f7ff;border-bottom:1px solid #E5E7EB;text-align:left;font-weight:600;color:#1b64da;position:sticky;top:0">${escHtml(c)}</th>`; });
     }
     h += `</tr></thead><tbody>`;
     rows.forEach((r, i) => {
@@ -15144,7 +15144,7 @@ async function _loadNoticeMgmtList() {
               <span>대상: ${_escNotice(targets)}</span>
               <span>${created} ~ ${expires}</span>
               <div style="margin-left:auto;display:flex;gap:4px">
-                <button onclick="_editNotice(${n.id})" style="padding:2px 8px;background:#EEF2FF;color:#4F46E5;border:none;border-radius:4px;font-size:.65rem;cursor:pointer">수정</button>
+                <button onclick="_editNotice(${n.id})" style="padding:2px 8px;background:#e8f1fe;color:#1b64da;border:none;border-radius:4px;font-size:.65rem;cursor:pointer">수정</button>
                 <button onclick="_deleteNotice(${n.id})" style="padding:2px 8px;background:#FEE2E2;color:#DC2626;border:none;border-radius:4px;font-size:.65rem;cursor:pointer">삭제</button>
               </div>
             </div>
