@@ -11443,7 +11443,7 @@ function _renderErrDetail() {
     ${_errRow('결정자 판정', ERRLOG_DECIDER_LABELS[l.decider_verdict] || l.decider_verdict)}
   </div>`;
 
-  const raw = l.message_raw ? `<details style="margin-top:8px"><summary style="font-size:.74rem;color:#8B5CF6;cursor:pointer">원본 메시지 / stack 보기</summary>
+  const raw = l.message_raw ? `<details style="margin-top:8px"><summary style="font-size:.74rem;color:#4593fc;cursor:pointer">원본 메시지 / stack 보기</summary>
     <div style="margin-top:4px;font-size:.72rem;background:#F9FAFB;border-radius:6px;padding:8px;color:var(--t2);word-break:break-all;white-space:pre-wrap">${escHtml(l.message_raw)}${l.stack ? '\n\n' + escHtml(l.stack) : ''}</div></details>` : '';
 
   // ── 액션 버튼 ──
@@ -11452,7 +11452,7 @@ function _renderErrDetail() {
       style="font-size:.74rem;border:none;border-radius:7px;padding:6px 12px;cursor:${disabled ? 'not-allowed' : 'pointer'};font-weight:600;color:#fff;background:${disabled ? '#9CA3AF' : color}">${label}</button>`;
 
   const actions = `<div style="display:flex;gap:6px;flex-wrap:wrap;margin-top:12px">
-    ${btn('<i class="fas fa-robot"></i> 오류검증 및 분석', `analyzeError(${l.id})`, '#6D28D9', false, '비파괴 검증 + 다중 에이전트 분석(실제 수정 안 함)')}
+    ${btn('<i class="fas fa-robot"></i> 오류검증 및 분석', `analyzeError(${l.id})`, '#1b64da', false, '비파괴 검증 + 다중 에이전트 분석(실제 수정 안 함)')}
     ${btn('<i class="fas fa-copy"></i> 오류내용 복사', `copyErrorContent(${l.id})`, '#2563EB', false, '공유용 진단 정보 복사(상태 변경 없음)')}
     ${btn('<i class="fas fa-paper-plane"></i> 이행 요청 복사', `copyTransferRequest(${l.id})`, '#0EA5E9', !allowed, allowed ? '실제 수정 요청문 복사' : '게이트 미통과: ' + (blockers || []).join(' / '))}
   </div>`;
@@ -11477,7 +11477,7 @@ function _renderErrDetail() {
   if (a) {
     const pg = a.prevention_guard || {};
     analysisHtml = `<div style="margin-top:14px;padding-top:12px;border-top:1px solid #EEF0F3">
-      <div style="font-weight:800;color:var(--t1);font-size:.86rem"><i class="fas fa-layer-group"></i> 다중 에이전트 분석 ${a.generated_by === 'fallback' ? '<span style="font-size:.68rem;color:#92400E;background:#FEF3C7;padding:1px 6px;border-radius:5px">규칙기반</span>' : '<span style="font-size:.68rem;color:#5B21B6;background:#EDE9FE;padding:1px 6px;border-radius:5px">AI</span>'}</div>
+      <div style="font-weight:800;color:var(--t1);font-size:.86rem"><i class="fas fa-layer-group"></i> 다중 에이전트 분석 ${a.generated_by === 'fallback' ? '<span style="font-size:.68rem;color:#92400E;background:#FEF3C7;padding:1px 6px;border-radius:5px">규칙기반</span>' : '<span style="font-size:.68rem;color:#1b64da;background:#e8f1fe;padding:1px 6px;border-radius:5px">AI</span>'}</div>
       ${a.summary_ko ? `<div style="margin-top:6px;font-size:.82rem;color:var(--t1)">${escHtml(a.summary_ko)}</div>` : ''}
       ${_errCard('① 오류검증', { '판정': ERRLOG_VERIFY_LABELS[(a.verify || {}).verdict] || (a.verify || {}).verdict, '근거': (a.verify || {}).evidence, '다음 처리': (a.verify || {}).next_action })}
       ${_errCard('② 레드팀(공격적 해석)', { '발생 조건': (a.red_team || {}).conditions, '사용자 피해': (a.red_team || {}).user_impact, '데이터/상태 위험': (a.red_team || {}).data_risk, '재발 조건': (a.red_team || {}).recurrence })}
@@ -11500,7 +11500,7 @@ function _renderErrDetail() {
 // ── 오류검증 및 분석 (비파괴) ──
 async function analyzeError(id) {
   const body = document.getElementById('errDetailBody');
-  if (body) body.insertAdjacentHTML('afterbegin', '<div id="errAnalyzing" style="background:#EDE9FE;color:#5B21B6;padding:8px 12px;border-radius:8px;margin-bottom:8px;font-size:.78rem"><i class="fas fa-circle-notch fa-spin"></i> 검증 및 다중 에이전트 분석 중... (실제 코드/운영을 변경하지 않습니다)</div>');
+  if (body) body.insertAdjacentHTML('afterbegin', '<div id="errAnalyzing" style="background:#e8f1fe;color:#1b64da;padding:8px 12px;border-radius:8px;margin-bottom:8px;font-size:.78rem"><i class="fas fa-circle-notch fa-spin"></i> 검증 및 다중 에이전트 분석 중... (실제 코드/운영을 변경하지 않습니다)</div>');
   try {
     const data = await gasPost({ action: 'errorLogAnalyze', id }, 30000);
     if (data.error) { alert('분석 실패: ' + data.error); document.getElementById('errAnalyzing')?.remove(); return; }
