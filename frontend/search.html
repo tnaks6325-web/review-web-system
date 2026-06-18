@@ -3,13 +3,13 @@
 <head>
   <meta charset="UTF-8"/>
   <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
-  <title>리뷰 시스템 (리뷰어용)</title>
+  <title>아이에이리뷰</title>
   <!-- OG/SNS 공유 미리보기 -->
-  <meta property="og:title" content="리뷰 시스템 (리뷰어용)"/>
+  <meta property="og:title" content="아이에이리뷰"/>
   <meta property="og:description" content="본인 이름으로 참여 내역을 확인하세요."/>
   <meta property="og:type" content="website"/>
   <meta name="twitter:card" content="summary"/>
-  <meta name="twitter:title" content="리뷰 시스템 (리뷰어용)"/>
+  <meta name="twitter:title" content="아이에이리뷰"/>
   <meta name="twitter:description" content="구매 정보를 입력하고 제출해주세요."/>
   <!-- Font Awesome (jsDelivr CDN) -->
   <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@fortawesome/fontawesome-free@6.4.0/css/all.min.css"/>
@@ -17,6 +17,33 @@
   <link href="https://fonts.googleapis.com/css2?family=Noto+Sans+KR:wght@300;400;500;600;700&display=swap" rel="stylesheet"/>
   <link rel="stylesheet" href="css/search.css"/>
 <script src="api.js"></script>
+<style id="sianC">
+/* ===== 시안 C 테마 오버레이 (search.html — 톤 통일) ===== */
+body{ background:#F4F5F8 !important; letter-spacing:-.01em; }
+/* 앱바: 그라데이션 → 화이트 미니멀 */
+.app-header{ background:#fff !important; box-shadow:none !important; border-bottom:1px solid #EFEFF3 !important; }
+.app-header .header-text h1, #searchTitle{ color:#191F28 !important; font-weight:800; }
+.app-header .header-text p, #searchHeaderDesc{ color:#A8AEBA !important; }
+.header-icon{ background:linear-gradient(135deg,#5046E4,#7C3AED) !important; color:#fff !important; }
+.app-header .btn-icon-sm{ color:#191F28 !important; background:#F1F2F6 !important; border:none !important; }
+/* 인증 탭 → 세그먼트 컨트롤 */
+.auth-tab-wrap{ background:#ECEDF2 !important; border:none !important; box-shadow:none !important; border-radius:13px; padding:4px; }
+.auth-tab-btn{ color:#5B6472 !important; font-weight:700; border-radius:9px !important; }
+.auth-tab-btn.active{ background:#fff !important; color:#5046E4 !important; box-shadow:0 1px 5px rgba(17,24,40,.12) !important; }
+/* 입력 */
+.auth-input,.auth-phone-input{ background:#F1F2F6 !important; border:1px solid transparent !important; border-radius:12px !important; }
+.auth-input:focus,.auth-phone-input:focus{ background:#fff !important; box-shadow:0 0 0 2px #5046E4 inset !important; }
+.auth-phone-row{ background:#F1F2F6 !important; border:none !important; border-radius:12px !important; }
+.auth-phone-prefix{ background:transparent !important; color:#6B7280 !important; }
+/* 버튼 */
+.auth-submit-btn,.btn-primary,.btn-submit,.btn-register{ background:#5046E4 !important; box-shadow:none !important; border-radius:13px !important; font-weight:800 !important; }
+/* 카드/패널 플랫 */
+.result-card,.result-group-card,.pane-card,.modal-box,.notice-card,.login-state-bar,.reg-invite-card{ border:1px solid #EFEFF3 !important; box-shadow:0 1px 6px rgba(17,24,40,.04) !important; border-radius:16px !important; }
+.results-badge{ background:#F2F1FE !important; color:#5046E4 !important; }
+.results-title{ color:#191F28 !important; font-weight:800; }
+/* 콘텐츠 폭(모바일 앱 느낌) */
+.screen-body{ max-width:480px; margin-left:auto; margin-right:auto; }
+</style>
 </head>
 <body>
 <!-- ★ 직접 제출 모드: index.html에서 리뷰 카드 클릭 시 중간 화면을 보이지 않게 처리 -->
@@ -359,7 +386,7 @@ if (sessionStorage.getItem("iad_direct_submit_items")) {
       <div class="header-inner">
         <div class="header-icon"><i class="fas fa-star-half-alt"></i></div>
         <div class="header-text">
-          <h1 id="searchTitle">리뷰 시스템 (리뷰어용)</h1>
+          <h1 id="searchTitle">아이에이리뷰</h1>
           <p id="searchHeaderDesc">로그인하여 리뷰 내역을 확인하세요</p>
         </div>
       </div>
