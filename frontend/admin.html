@@ -38,6 +38,42 @@ body{ letter-spacing:-.01em; }
 /* 게이트/로그인: 미드 블루 */
 #screenGate{ background:linear-gradient(150deg,#1E4BAF 0%,#285CCC 58%,#5B86E0 100%) !important; }
 #adminLoginModal.modal-overlay{ background:linear-gradient(150deg,#1E4BAF 0%,#285CCC 58%,#5B86E0 100%) !important; }
+
+/* ===== 토스 스타일 폴리시 + 반응형 (관리자) ===== */
+.summary-card,.stats-card,.pane-card,.dash-campaign-block,.card,.modal-box,.modal{ border-radius:16px !important; }
+.summary-card,.pane-card,.dash-campaign-block{ transition:box-shadow .18s, transform .18s; }
+.btn-topbar,.btn-header-sq,.btn-sm,.btn-submit,.dash-filter-btn,.btn-camp-refresh{ border-radius:10px !important; transition:transform .12s ease, background .18s, box-shadow .18s; }
+.btn-topbar:active,.btn-header-sq:active,.btn-sm:active,.btn-submit:active,.dash-filter-btn:active{ transform:scale(.97); }
+.admin-tab-btn.active{ font-weight:800; }
+
+/* ── 반응형: 태블릿 이하 (≤900px) ── */
+@media (max-width: 900px){
+  #screenAdmin .app-header .admin-header-topbar{ max-width:100% !important; }
+  .admin-header-topbar{ flex-wrap:wrap; gap:6px; padding:7px 12px 6px; }
+  .admin-header-mainrow{ flex-wrap:wrap; gap:8px; padding:9px 12px 10px; }
+  .admin-header-actions{ flex-wrap:wrap; }
+  .admin-tab-nav{ overflow-x:auto; flex-wrap:nowrap; -webkit-overflow-scrolling:touch; scrollbar-width:none; }
+  .admin-tab-nav::-webkit-scrollbar{ display:none; }
+  .admin-tab-btn{ flex:0 0 auto !important; white-space:nowrap; padding:13px 14px; }
+  .dashboard-summary{ grid-template-columns:repeat(3,1fr) !important; }
+  .dash-filter-wrap,.payment-filter-bar{ flex-wrap:wrap !important; gap:6px; }
+  .dash-search-wrap,.dash-search-bar{ width:100% !important; }
+  .tbl-scroll{ overflow-x:auto !important; -webkit-overflow-scrolling:touch; }
+  .screen-body.admin-body,.admin-body{ padding:12px !important; }
+}
+
+/* ── 반응형: 모바일 (≤480px) ── */
+@media (max-width: 480px){
+  .admin-header-mainrow .header-text h1{ font-size:1.05rem; }
+  .btn-header-sq span{ display:none; }
+  .btn-header-sq{ padding:8px 10px; }
+  .btn-topbar{ font-size:.66rem; padding:5px 8px; }
+  .dashboard-summary,.stats-summary-grid{ grid-template-columns:repeat(2,1fr) !important; }
+  .admin-tab-btn{ font-size:.78rem; padding:12px 12px; }
+  .modal-box,.modal{ max-width:calc(100vw - 20px) !important; width:calc(100vw - 20px) !important; margin:10px auto !important; }
+  .modal-body{ max-height:80vh; overflow-y:auto; }
+  .dash-filter-btn{ min-height:40px; }
+}
 </style>
 </head>
 <body>
