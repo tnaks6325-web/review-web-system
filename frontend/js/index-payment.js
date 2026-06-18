@@ -885,6 +885,7 @@ let _sseUnread = 0;
 const _SSE_ICONS = {
   review_submit: { icon: 'fa-check-circle', color: '#16A34A', label: '리뷰 제출' },
   order_submit:  { icon: 'fa-shopping-cart', color: '#2563EB', label: '구매양식' },
+  order_update:  { icon: 'fa-pen-to-square', color: '#EA580C', label: '작업오더 수정' },
   image_extract: { icon: 'fa-magic', color: '#7C3AED', label: 'AI 분석' },
   image_upload:  { icon: 'fa-cloud-upload-alt', color: '#06B6D4', label: '업로드' },
   index_build:   { icon: 'fa-database', color: '#F59E0B', label: '인덱스' },
@@ -924,11 +925,16 @@ function connectSSE() {
     };
 
     // 이벤트별 핸들러
-    ['review_submit', 'order_submit', 'image_extract', 'image_upload', 'index_build', 'system', 'dirty_detected', 'smart_build_done', 'dirty_auto_built', 'db_rebuild_progress', 'db_rebuild_done'].forEach(function(evtType) {
+    ['review_submit', 'order_submit', 'order_update', 'image_extract', 'image_upload', 'index_build', 'system', 'dirty_detected', 'smart_build_done', 'dirty_auto_built', 'db_rebuild_progress', 'db_rebuild_done'].forEach(function(evtType) {
       _sseSource.addEventListener(evtType, function(event) {
         try {
           const data = JSON.parse(event.data);
           _addNotification(data);
+          // ★ 인트라넷에서 작업오더 인박스 원본이 수정됨 → 목록/간편보기 즉시 갱신
+          if (evtType === 'order_update') {
+            if (typeof loadWorkOrders === 'function') { try { loadWorkOrders(); } catch(_) {} }
+            if (typeof loadDashWorkOrders === 'function') { try { loadDashWorkOrders(); } catch(_) {} }
+          }
           // ★ Phase 4: dirty_detected 수신 시 대시보드 dirty 배지 갱신
           if (evtType === 'dirty_detected' && typeof _renderDirtyBadges === 'function') {
             _renderDirtyBadges(data.dirtySheets || []);
