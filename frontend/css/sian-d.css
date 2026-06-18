@@ -1,0 +1,138 @@
+/* =========================================================================
+   sian-d.css  —  관리자(admin.html) 시안 D 재스킨 레이어
+   ※ 원본 마크업/정보/배치는 그대로. 기존 클래스 위에 룩만 덮어씌움.
+   ※ index.css 이후(또는 head 끝)에서 로드되어 우선 적용됨.
+   팔레트: Indigo #5046E4 / Mint(페이백) #12B886 / Pretendard
+   ========================================================================= */
+
+:root{
+  --siand-mint:#12B886; --siand-mint-d:#0A7A59; --siand-mint-l:#E7F7F1;
+  --siand-soft:0 1px 3px rgba(25,31,40,.05), 0 6px 18px rgba(25,31,40,.04);
+}
+
+/* ───────────── 전역 ───────────── */
+body{ background:var(--bg) !important; letter-spacing:-.02em; }
+.screen-body.admin-body, .admin-body{ background:var(--bg) !important; }
+
+/* ───────────── 헤더: 흰색 + 라이트 버튼 (시안 D 시그니처) ───────────── */
+.admin-header, .app-header{
+  background:#fff !important;
+  color:var(--t1) !important;
+  box-shadow:0 1px 0 var(--border), 0 6px 20px rgba(25,31,40,.06) !important;
+}
+.admin-header-topbar{
+  background:#FAFBFE !important;
+  border-bottom:1px solid var(--border) !important;
+}
+.header-text h1, #adminHeaderName{ color:var(--t1) !important; font-weight:800 !important; }
+.header-text p{ color:var(--t3) !important; }
+#adminSessionInfo{ color:var(--t3) !important; }   /* 흰 헤더 가독성 */
+
+/* 상단 미니 배지/버튼 → 라이트 */
+.topbar-badge{ background:#EEF0FE !important; color:var(--p-d) !important; border-color:#E2E4FD !important; }
+.btn-topbar{ background:#fff !important; border:1px solid var(--border-d) !important; color:var(--t2) !important; }
+.btn-topbar i{ opacity:.9; }
+.btn-topbar:hover{ background:var(--p-l) !important; border-color:var(--p-m) !important; color:var(--p-d) !important; }
+.btn-topbar.warn{ background:#FEF6E7 !important; border-color:#F6D58A !important; color:#B45309 !important; }
+.btn-topbar.warn:hover{ background:#FCEBC8 !important; border-color:#E8B964 !important; color:#92400E !important; }
+.btn-topbar.sys{ background:var(--p-l) !important; border-color:var(--p-m) !important; color:var(--p-d) !important; }
+.btn-topbar.sys:hover{ background:#E2E5FD !important; color:var(--p-d) !important; }
+
+/* 뒤로가기/원형 아이콘 버튼 */
+.admin-header .btn-icon-sm{ background:#F1F2F6 !important; color:var(--t2) !important; }
+.admin-header .btn-icon-sm:hover{ background:var(--border) !important; color:var(--t1) !important; }
+
+/* 사각 액션 버튼(업무포털/AE담당자/리뷰제출 등) */
+.btn-header-sq{ background:#fff !important; border:1px solid var(--border-d) !important; color:var(--t2) !important; border-radius:12px !important; }
+.btn-header-sq i{ opacity:1; }
+.btn-header-sq:hover{ background:var(--p-l) !important; border-color:var(--p-m) !important; color:var(--p-d) !important; transform:translateY(-1px); }
+.btn-header-sq.active-mode{ background:var(--p-l) !important; border-color:var(--p-m) !important; color:var(--p-d) !important; }
+/* 업무포털 = 인디고 채움 강조 (시안 D primary) */
+.btn-header-portal{ background:var(--p) !important; border-color:var(--p) !important; color:#fff !important; }
+.btn-header-portal:hover{ background:var(--p-d) !important; border-color:var(--p-d) !important; color:#fff !important; }
+.btn-header-staff{ background:#fff !important; border-color:var(--border-d) !important; color:var(--t2) !important; }
+.btn-header-staff:hover{ background:var(--p-l) !important; border-color:var(--p-m) !important; color:var(--p-d) !important; }
+.btn-header-review{ background:#fff !important; border-color:var(--border-d) !important; color:var(--t2) !important; }
+.btn-header-review:hover{ background:var(--siand-mint-l) !important; border-color:#9FE3C9 !important; color:var(--siand-mint-d) !important; }
+
+/* ───────────── 탭 네비: 흰색 + 인디고 언더라인 ───────────── */
+.admin-tab-nav{ background:#fff !important; border-bottom:1px solid var(--border) !important; box-shadow:none !important; }
+.admin-tab-btn{ font-weight:700 !important; color:var(--t3) !important; padding:14px 10px !important; }
+.admin-tab-btn.active{ background:transparent !important; color:var(--p) !important; border-bottom:2.5px solid var(--p) !important; font-weight:800 !important; }
+.admin-tab-btn:hover:not(.active){ background:#F6F7FF !important; color:var(--t2) !important; }
+
+/* ───────────── KPI 카드 (대시보드 요약) ───────────── */
+#tabDashKPI{ gap:11px !important; }
+#tabDashKPI > div{
+  border-radius:16px !important;
+  padding:15px 16px !important;
+  border:1px solid var(--border) !important;
+  border-left-width:3px !important;
+  box-shadow:var(--siand-soft) !important;
+  transition:transform .18s, box-shadow .18s;
+}
+#tabDashKPI > div:hover{ transform:translateY(-2px); box-shadow:0 8px 24px rgba(25,31,40,.08) !important; }
+#tabDashKPI > div > div:first-child{ gap:8px !important; }
+#tabDashKPI > div > div:first-child span{ font-size:1.6rem !important; font-weight:800 !important; letter-spacing:-.04em; font-variant-numeric:tabular-nums; }
+#tabDashKPI > div > div:last-child{ font-size:.74rem !important; font-weight:700 !important; color:var(--t3) !important; margin-top:5px !important; }
+
+/* ───────────── 카드/블록: 라운드 + 소프트 섀도우 ───────────── */
+.summary-card, .stats-card, .pane-card, .dash-campaign-block, .card, .modal-box{
+  border-radius:16px !important;
+}
+.summary-card{ box-shadow:var(--siand-soft) !important; padding:15px 12px !important; }
+.summary-card:hover, .dash-campaign-block:hover{ box-shadow:0 8px 24px rgba(25,31,40,.08) !important; }
+.dash-campaign-block{ border-radius:16px !important; }
+.dash-campaign-header{
+  background:linear-gradient(135deg,#F5F6FE,#EEF0FE) !important;
+  border-bottom:1px solid #E2E4FD !important;
+}
+.dash-campaign-header:hover{ background:linear-gradient(135deg,#EEF0FE,#E6E8FD) !important; }
+
+/* 시스템 변경 공지 / 작업오더 간편보기 등 둥근 패널 */
+#noticeSection, #dashWoSection{ border-radius:16px !important; box-shadow:var(--siand-soft) !important; }
+#noticeSection{ background:linear-gradient(135deg,#F5F6FE,#fff) !important; border-color:#E2E4FD !important; }
+
+/* ───────────── 대시보드 메인 테이블 (인라인 스타일 위 덮기) ───────────── */
+#tabDashTableWrap{
+  border:1px solid var(--border) !important;
+  border-radius:16px !important;
+  box-shadow:var(--siand-soft) !important;
+}
+#tabDashTableWrap thead th{
+  background:#F7F8FB !important;
+  color:var(--t3) !important;
+  border-bottom:1px solid var(--border) !important;
+  padding:11px 8px !important;
+  font-size:.72rem !important;
+  font-weight:700 !important;
+}
+#tabDashTableWrap tbody td{
+  padding:9px 8px !important;
+  border-bottom:1px solid var(--border) !important;
+}
+
+/* 기타 관리자 테이블 컨테이너 (리뷰어/입금/작업오더 등) */
+.tbl-wrap, #reviewerListWrap, .payment-preview-wrap, #woListWrap > div, #recruitListWrap{
+  border-radius:16px !important;
+}
+.payment-preview-table thead th{ background:#F7F8FB !important; color:var(--t3) !important; }
+
+/* ───────────── 칩/뱃지 ───────────── */
+.tc-badge{ border-radius:8px !important; font-weight:700 !important; }
+.dday-badge, .badge-overdue, .badge-nth, .dash-round-col-badge{ border-radius:8px !important; }
+
+/* ───────────── 버튼/필터/인풋 라운드 ───────────── */
+.btn-sm, .btn-sm-refresh, .btn-sm-toggle, .dash-filter-btn, .btn-camp-refresh{ border-radius:11px !important; }
+.btn-submit{ border-radius:12px !important; }
+.dash-filter-btn.has-filter{ background:var(--p-l) !important; border-color:var(--p-m) !important; color:var(--p-d) !important; }
+.btn-sm-toggle.active{ background:var(--p) !important; border-color:var(--p) !important; }
+select, input[type=text], input[type=search], input[type=number], textarea{ border-radius:11px !important; }
+input[type=text]:focus, select:focus, textarea:focus{ outline:none; border-color:var(--p) !important; box-shadow:0 0 0 3px var(--p-l) !important; }
+
+/* ───────────── 통계/리포트 (stats-card) ───────────── */
+.stats-card{ border-radius:14px !important; background:#fff !important; box-shadow:var(--siand-soft) !important; border:1px solid var(--border) !important; }
+.stats-card-val{ letter-spacing:-.04em; font-variant-numeric:tabular-nums; }
+
+/* ───────────── 페이백/금액 민트 강조 (안전 범위) ───────────── */
+/* 입금/정산 관련 머니 강조는 정보 다듬기 단계에서 클래스 지정 후 적용 예정 */
