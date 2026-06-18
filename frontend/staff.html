@@ -279,6 +279,19 @@ body{font-family:var(--font);background:var(--bg);color:var(--t1);font-size:14px
 }
 body{ letter-spacing:-.01em; }
 #screenLogin{ background:linear-gradient(135deg,#5046E4 0%,#7C3AED 100%) !important; }
+/* ── 반응형 ── */
+@media (max-width:820px){
+  header, header.app-header{ height:auto !important; flex-wrap:wrap; gap:8px; padding:8px 14px !important; }
+  .header-right{ flex-wrap:wrap; }
+  .so-grid2{ grid-template-columns:1fr !important; }
+  .campaign-header{ flex-wrap:wrap; }
+  .tab-table{ display:block; overflow-x:auto; -webkit-overflow-scrolling:touch; white-space:nowrap; }
+}
+@media (max-width:480px){
+  .login-card{ padding:30px 22px !important; }
+  .memo-modal{ width:calc(100vw - 24px) !important; }
+  .sum-card{ padding:13px 14px !important; }
+}
 </style>
 <script src="api.js"></script>
 </head>
