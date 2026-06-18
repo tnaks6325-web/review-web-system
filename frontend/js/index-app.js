@@ -11233,7 +11233,8 @@ async function loadUnrecognizedTabs() {
 }
 
 /* ══════════════════════════════════════════════════════════════
-   이상로그(비정상 로그) — error_logs (마이그레이션 026)
+   오류디버깅(Error Debugging) — error_logs (마이그레이션 026/028)
+   수집 → 오류검증 → 다중에이전트 분석 → 결정자 → 이행요청 → 수정 → 재검증
    ══════════════════════════════════════════════════════════════ */
 const ERRLOG_CAT_LABELS = {
   timeout: '로딩시간 초과', quota: '호출한도 초과', network: '네트워크', auth: '인증',
@@ -11247,6 +11248,20 @@ const ERRLOG_CAT_COLORS = {
 };
 const ERRLOG_SEV_LABELS = { warn: '경고', error: '에러', critical: '치명' };
 const ERRLOG_SEV_COLORS = { warn: '#F59E0B', error: '#EF4444', critical: '#7F1D1D' };
+
+// 오류 상태(문서 5장)
+const ERRLOG_STATUS_LABELS = { new: '신규', investigating: '확인중', resolved: '해결', ignored: '무시' };
+const ERRLOG_STATUS_COLORS = { new: '#EF4444', investigating: '#F59E0B', resolved: '#10B981', ignored: '#6B7280' };
+// 오류검증 판정값(문서 8장)
+const ERRLOG_VERIFY_LABELS = {
+  not_checked: '검증 미확정', likely_reproducible: '재현 가능성 높음', reproduced: '재현됨',
+  not_reproduced_static: '정적 미재현', likely_resolved_by_other_change: '타 변경으로 해결 후보', blocked: '자동재현 차단',
+};
+// 결정자 판정값(문서 9.6장)
+const ERRLOG_DECIDER_LABELS = {
+  implement: '바로 수정 가능', implement_after_preflight: '사전 확인 후 수정', needs_more_context: '추가 정보 필요', ignore: '수정 불필요',
+};
+let _errDetailCache = null; // 현재 상세 모달에 로드된 { log, analysis, transfer_blockers, transfer_allowed }
 
 function _errLogRelTime(iso) {
   if (!iso) return '';
@@ -11270,7 +11285,7 @@ function _setErrorLogBadge(count) {
 
 async function _updateErrorLogBadge() {
   try {
-    const data = await gasGet({ action: 'getErrorLogs', resolved: 'false', limit: 1 });
+    const data = await gasGet({ action: 'getErrorLogs', status: 'open', limit: 1 });
     _setErrorLogBadge((data && data.summary && data.summary.openCount) || 0);
   } catch (_) {}
 }
@@ -11281,10 +11296,12 @@ async function loadErrorLogs() {
   if (!wrap) return;
   wrap.innerHTML = '<div style="text-align:center;padding:12px;color:var(--t3)"><i class="fas fa-circle-notch fa-spin"></i> 불러오는 중...</div>';
 
-  const resolved = document.getElementById('errLogResolvedFilter')?.value || 'false';
+  // 상태 필터(신규/확인중/해결/무시/전체). 구버전 DOM(errLogResolvedFilter)도 폴백 지원.
+  const status = document.getElementById('errLogStatusFilter')?.value
+    || document.getElementById('errLogResolvedFilter')?.value || 'open';
   const category = document.getElementById('errLogCategoryFilter')?.value || '';
   try {
-    const data = await gasGet({ action: 'getErrorLogs', resolved, category });
+    const data = await gasGet({ action: 'getErrorLogs', status, category });
     if (data.error) {
       wrap.innerHTML = `<div style="padding:12px;color:#EF4444"><i class="fas fa-exclamation-circle"></i> ${escHtml(data.error)}</div>`;
       return;
@@ -11294,10 +11311,13 @@ async function loadErrorLogs() {
     const sum = data.summary || {};
     _setErrorLogBadge(sum.openCount || 0);
     const sumEl = document.getElementById('errLogSummary');
-    if (sumEl) sumEl.textContent = `미해결 ${sum.openCount || 0}건`;
+    if (sumEl) {
+      const bs = sum.byStatus || {};
+      sumEl.textContent = `미해결 ${sum.openCount || 0}건 (신규 ${bs.new || 0} · 확인중 ${bs.investigating || 0})`;
+    }
 
     if (logs.length === 0) {
-      wrap.innerHTML = '<div style="text-align:center;padding:20px;color:var(--t3)"><i class="fas fa-check-circle" style="color:#10B981"></i> 표시할 이상로그가 없습니다.</div>';
+      wrap.innerHTML = '<div style="text-align:center;padding:20px;color:var(--t3)"><i class="fas fa-check-circle" style="color:#10B981"></i> 표시할 오류가 없습니다.</div>';
       return;
     }
 
@@ -11307,22 +11327,26 @@ async function loadErrorLogs() {
       const cc = ERRLOG_CAT_COLORS[l.category] || '#6B7280';
       const sl = ERRLOG_SEV_LABELS[l.severity] || l.severity;
       const sc = ERRLOG_SEV_COLORS[l.severity] || '#6B7280';
+      const st = l.status || (l.resolved ? 'resolved' : 'new');
+      const stl = ERRLOG_STATUS_LABELS[st] || st;
+      const stc = ERRLOG_STATUS_COLORS[st] || '#6B7280';
       const occ = l.occurrence_count > 1 ? `<span style="font-size:.7rem;background:#FEE2E2;color:#B91C1C;padding:1px 6px;border-radius:5px;font-weight:700;flex-shrink:0">×${l.occurrence_count}</span>` : '';
       const rel = _errLogRelTime(l.last_seen_at);
-      const raw = l.message_raw ? `<details style="margin-top:4px"><summary style="font-size:.7rem;color:#8B5CF6;cursor:pointer;display:inline">원본 메시지 보기</summary><div style="margin-top:4px;font-size:.7rem;background:#F9FAFB;border-radius:6px;padding:8px;color:var(--t2);word-break:break-all">${escHtml(l.message_raw)}${l.error_code ? `<div style="margin-top:4px;color:var(--t3)">코드: ${escHtml(l.error_code)}</div>` : ''}</div></details>` : '';
+      const analyzed = l.has_analysis
+        ? `<span style="font-size:.66rem;background:#EDE9FE;color:#6D28D9;padding:1px 6px;border-radius:5px;font-weight:600;flex-shrink:0"><i class="fas fa-robot"></i> 분석됨${l.decider_verdict ? ' · ' + (ERRLOG_DECIDER_LABELS[l.decider_verdict] || l.decider_verdict) : ''}</span>`
+        : '';
+      const closed = (st === 'resolved' || st === 'ignored');
 
-      html += `<div style="border:1px solid #E5E7EB;border-radius:8px;padding:10px 12px;margin-bottom:6px;background:#fff${l.resolved ? ';opacity:.6' : ''}">
+      html += `<div onclick="openErrDetail(${l.id})" style="border:1px solid #E5E7EB;border-radius:8px;padding:10px 12px;margin-bottom:6px;background:#fff;cursor:pointer${closed ? ';opacity:.65' : ''}">
         <div style="display:flex;align-items:center;gap:6px;flex-wrap:wrap">
+          <span style="font-size:.68rem;background:${stc};color:#fff;padding:1px 7px;border-radius:5px;font-weight:700;flex-shrink:0">${stl}</span>
           <span style="font-size:.68rem;background:${sc}22;color:${sc};padding:1px 6px;border-radius:5px;font-weight:700;flex-shrink:0">${sl}</span>
           <span style="font-size:.68rem;background:${cc}22;color:${cc};padding:1px 6px;border-radius:5px;font-weight:600;flex-shrink:0">${cl}</span>
-          ${occ}
+          ${occ}${analyzed}
           <span style="font-size:.72rem;color:var(--t3);margin-left:auto;flex-shrink:0">${rel}</span>
         </div>
         <div style="font-size:.9rem;font-weight:600;color:var(--t1);margin-top:6px;line-height:1.45">${escHtml(l.message_ko)}</div>
-        ${raw}
-        ${l.resolved
-          ? `<div style="font-size:.7rem;color:#10B981;margin-top:6px"><i class="fas fa-check"></i> 해결됨${l.resolved_by ? ' · ' + escHtml(l.resolved_by) : ''}</div>`
-          : `<div style="margin-top:8px"><button onclick="resolveErrorLog(${l.id})" style="font-size:.72rem;background:#10B981;color:#fff;border:none;border-radius:6px;padding:4px 12px;cursor:pointer"><i class="fas fa-check"></i> 해결 처리</button></div>`}
+        <div style="margin-top:8px;font-size:.72rem;color:#1D4ED8"><i class="fas fa-search-plus"></i> 상세 · 오류검증 및 분석</div>
       </div>`;
     });
 
@@ -11332,15 +11356,254 @@ async function loadErrorLogs() {
   }
 }
 
-// ── 이상로그 해결 처리 ──
+// ── 구버전 호환: 빠른 해결 처리 ──
 async function resolveErrorLog(id) {
-  if (!confirm('이 이상로그를 해결 처리할까요?\n(같은 유형이 다시 발생하면 새 항목으로 기록됩니다)')) return;
+  if (!confirm('이 오류를 해결 처리할까요?\n(같은 유형이 다시 발생하면 새 항목으로 기록됩니다)')) return;
   try {
-    const data = await gasPost({ action: 'resolveErrorLog', id });
+    const data = await gasPost({ action: 'errorLogStatus', id, status: 'resolved' });
     if (data.error) { alert(data.error); return; }
     loadErrorLogs();
   } catch (err) {
     alert('해결 처리 실패: ' + err.message);
+  }
+}
+
+// ══════════════════════════════════════════════════════════════
+// 오류 상세 모달 — 디버깅(검증/분석/이행요청/상태관리)
+// ══════════════════════════════════════════════════════════════
+function closeErrDetail() {
+  const m = document.getElementById('errDetailModal');
+  if (m) m.style.display = 'none';
+  _errDetailCache = null;
+}
+
+async function openErrDetail(id) {
+  const modal = document.getElementById('errDetailModal');
+  const body = document.getElementById('errDetailBody');
+  if (!modal || !body) return;
+  modal.style.display = 'block';
+  body.innerHTML = '<div style="text-align:center;padding:24px;color:var(--t3)"><i class="fas fa-circle-notch fa-spin"></i> 불러오는 중...</div>';
+  try {
+    const data = await gasGet({ action: 'errorLogDetail', id });
+    if (data.error) { body.innerHTML = `<div style="padding:12px;color:#EF4444">${escHtml(data.error)}</div>`; return; }
+    _errDetailCache = data;
+    _renderErrDetail();
+  } catch (err) {
+    body.innerHTML = `<div style="padding:12px;color:#EF4444">${escHtml(err.message)}</div>`;
+  }
+}
+
+function _errChip(text, bg, fg, solid) {
+  return `<span style="font-size:.68rem;background:${solid ? bg : bg + '22'};color:${solid ? '#fff' : fg};padding:2px 8px;border-radius:6px;font-weight:700">${escHtml(text)}</span>`;
+}
+function _errRow(k, v) {
+  if (v == null || v === '') return '';
+  return `<div style="display:flex;gap:8px;padding:3px 0"><div style="min-width:96px;color:var(--t3);flex-shrink:0">${escHtml(k)}</div><div style="color:var(--t1);word-break:break-all">${escHtml(String(v))}</div></div>`;
+}
+function _errCard(title, rows) {
+  const inner = Object.entries(rows).filter(([, v]) => v != null && String(v).trim() !== '')
+    .map(([k, v]) => `<div style="padding:2px 0"><b style="color:var(--t2)">${escHtml(k)}</b>: <span style="color:var(--t1)">${escHtml(String(v))}</span></div>`).join('');
+  if (!inner) return '';
+  return `<div style="border:1px solid #EEF0F3;border-radius:10px;padding:10px 12px;margin-top:8px;background:#FBFCFE">
+    <div style="font-weight:700;color:var(--t1);margin-bottom:4px;font-size:.8rem">${escHtml(title)}</div>${inner}</div>`;
+}
+function _errList(title, arr, color) {
+  if (!Array.isArray(arr) || arr.length === 0) return '';
+  const items = arr.map(x => `<li style="margin:2px 0">${escHtml(String(x))}</li>`).join('');
+  return `<div style="margin-top:6px"><b style="color:${color || 'var(--t2)'};font-size:.78rem">${escHtml(title)}</b><ul style="margin:2px 0 0;padding-left:18px;color:var(--t1)">${items}</ul></div>`;
+}
+
+function _renderErrDetail() {
+  const body = document.getElementById('errDetailBody');
+  if (!body || !_errDetailCache) return;
+  const { log: l, analysis: a, transfer_blockers: blockers, transfer_allowed: allowed } = _errDetailCache;
+  const ctx = l.context || {};
+  const st = l.status || (l.resolved ? 'resolved' : 'new');
+
+  const head = `<div style="display:flex;align-items:center;gap:6px;flex-wrap:wrap;margin-bottom:10px">
+    ${_errChip(ERRLOG_STATUS_LABELS[st] || st, ERRLOG_STATUS_COLORS[st] || '#6B7280', '#fff', true)}
+    ${_errChip(ERRLOG_SEV_LABELS[l.severity] || l.severity, ERRLOG_SEV_COLORS[l.severity] || '#6B7280', ERRLOG_SEV_COLORS[l.severity] || '#6B7280')}
+    ${_errChip(ERRLOG_CAT_LABELS[l.category] || l.category, ERRLOG_CAT_COLORS[l.category] || '#6B7280', ERRLOG_CAT_COLORS[l.category] || '#6B7280')}
+    ${l.occurrence_count > 1 ? _errChip('×' + l.occurrence_count, '#B91C1C', '#B91C1C') : ''}
+    <span style="margin-left:auto;font-size:.7rem;color:var(--t3)">#${l.id}</span>
+  </div>`;
+
+  const summary = `<div style="font-size:.95rem;font-weight:700;color:var(--t1);line-height:1.5;margin-bottom:8px">${escHtml(l.message_ko)}</div>`;
+
+  const meta = `<div style="border:1px solid #EEF0F3;border-radius:10px;padding:10px 12px;background:#fff;font-size:.78rem">
+    ${_errRow('수집원', l.source)}
+    ${_errRow('발생 화면', l.flow_ko + (l.step_ko ? ' · ' + l.step_ko : ''))}
+    ${_errRow('HTTP', [ctx.method, ctx.path, ctx.statusCode].filter(Boolean).join(' '))}
+    ${_errRow('발생 위치', ctx.screen || ctx.page || '')}
+    ${_errRow('첫 발생', _errLogRelTime(l.first_seen_at))}
+    ${_errRow('마지막 발생', _errLogRelTime(l.last_seen_at))}
+    ${_errRow('발생 횟수', l.occurrence_count)}
+    ${_errRow('오류 코드', l.error_code)}
+    ${_errRow('오류검증', ERRLOG_VERIFY_LABELS[l.verify_verdict] || l.verify_verdict)}
+    ${_errRow('결정자 판정', ERRLOG_DECIDER_LABELS[l.decider_verdict] || l.decider_verdict)}
+  </div>`;
+
+  const raw = l.message_raw ? `<details style="margin-top:8px"><summary style="font-size:.74rem;color:#8B5CF6;cursor:pointer">원본 메시지 / stack 보기</summary>
+    <div style="margin-top:4px;font-size:.72rem;background:#F9FAFB;border-radius:6px;padding:8px;color:var(--t2);word-break:break-all;white-space:pre-wrap">${escHtml(l.message_raw)}${l.stack ? '\n\n' + escHtml(l.stack) : ''}</div></details>` : '';
+
+  // ── 액션 버튼 ──
+  const btn = (label, onclick, color, disabled, title) =>
+    `<button onclick="${onclick}" ${disabled ? 'disabled' : ''} title="${escHtml(title || '')}"
+      style="font-size:.74rem;border:none;border-radius:7px;padding:6px 12px;cursor:${disabled ? 'not-allowed' : 'pointer'};font-weight:600;color:#fff;background:${disabled ? '#9CA3AF' : color}">${label}</button>`;
+
+  const actions = `<div style="display:flex;gap:6px;flex-wrap:wrap;margin-top:12px">
+    ${btn('<i class="fas fa-robot"></i> 오류검증 및 분석', `analyzeError(${l.id})`, '#6D28D9', false, '비파괴 검증 + 다중 에이전트 분석(실제 수정 안 함)')}
+    ${btn('<i class="fas fa-copy"></i> 오류내용 복사', `copyErrorContent(${l.id})`, '#2563EB', false, '공유용 진단 정보 복사(상태 변경 없음)')}
+    ${btn('<i class="fas fa-paper-plane"></i> 이행 요청 복사', `copyTransferRequest(${l.id})`, '#0EA5E9', !allowed, allowed ? '실제 수정 요청문 복사' : '게이트 미통과: ' + (blockers || []).join(' / '))}
+  </div>`;
+
+  const statusActions = `<div style="display:flex;gap:6px;flex-wrap:wrap;margin-top:8px;padding-top:8px;border-top:1px dashed #E5E7EB">
+    <span style="font-size:.72rem;color:var(--t3);align-self:center">상태:</span>
+    ${st !== 'investigating' ? btn('확인중', `changeErrStatus(${l.id},'investigating')`, '#F59E0B') : ''}
+    ${st !== 'resolved' ? btn('해결', `changeErrStatus(${l.id},'resolved')`, '#10B981') : ''}
+    ${st !== 'ignored' ? btn('무시', `changeErrStatus(${l.id},'ignored')`, '#6B7280') : ''}
+    ${st !== 'new' ? btn('신규로', `changeErrStatus(${l.id},'new')`, '#EF4444') : ''}
+  </div>`;
+
+  // ── 이행요청 게이트 안내 ──
+  const gate = (blockers && blockers.length)
+    ? `<div style="margin-top:10px;border:1px solid #FCD34D;background:#FFFBEB;border-radius:8px;padding:8px 10px;font-size:.74rem;color:#92400E">
+        <b><i class="fas fa-lock"></i> 이행 요청 복사 차단 사유</b>
+        <ul style="margin:4px 0 0;padding-left:18px">${blockers.map(b => `<li>${escHtml(b)}</li>`).join('')}</ul></div>`
+    : (a ? `<div style="margin-top:10px;font-size:.74rem;color:#047857"><i class="fas fa-unlock"></i> 이행 요청 복사 가능 (모든 게이트 통과)</div>` : '');
+
+  // ── AI 다중 에이전트 분석 ──
+  let analysisHtml = '';
+  if (a) {
+    const pg = a.prevention_guard || {};
+    analysisHtml = `<div style="margin-top:14px;padding-top:12px;border-top:1px solid #EEF0F3">
+      <div style="font-weight:800;color:var(--t1);font-size:.86rem"><i class="fas fa-layer-group"></i> 다중 에이전트 분석 ${a.generated_by === 'fallback' ? '<span style="font-size:.68rem;color:#92400E;background:#FEF3C7;padding:1px 6px;border-radius:5px">규칙기반</span>' : '<span style="font-size:.68rem;color:#5B21B6;background:#EDE9FE;padding:1px 6px;border-radius:5px">AI</span>'}</div>
+      ${a.summary_ko ? `<div style="margin-top:6px;font-size:.82rem;color:var(--t1)">${escHtml(a.summary_ko)}</div>` : ''}
+      ${_errCard('① 오류검증', { '판정': ERRLOG_VERIFY_LABELS[(a.verify || {}).verdict] || (a.verify || {}).verdict, '근거': (a.verify || {}).evidence, '다음 처리': (a.verify || {}).next_action })}
+      ${_errCard('② 레드팀(공격적 해석)', { '발생 조건': (a.red_team || {}).conditions, '사용자 피해': (a.red_team || {}).user_impact, '데이터/상태 위험': (a.red_team || {}).data_risk, '재발 조건': (a.red_team || {}).recurrence })}
+      ${_errCard('③ 블루팀(방어 해결안)', { '입력검증': (a.blue_team || {}).input_validation, '예외처리': (a.blue_team || {}).exception_handling, '상태전이 방어': (a.blue_team || {}).state_guard, '중복실행 방지': (a.blue_team || {}).idempotency, '외부 API 실패': (a.blue_team || {}).external_api, '회귀 테스트': (a.blue_team || {}).regression_tests })}
+      ${_errCard('④ 감독관(검토)', { '원인분석 과한지': (a.supervisor || {}).overreach, '수정범위': (a.supervisor || {}).scope, '증상 vs 원인': (a.supervisor || {}).symptom_vs_cause, '정상흐름 영향': (a.supervisor || {}).side_effects, '가장 좁은 해결책': (a.supervisor || {}).narrowest_fix })}
+      ${_errCard('⑤ 예방가드(회귀 점검)', { '영향 화면': pg.affected_screens, '영향 API': pg.affected_apis, '데이터 흐름': pg.data_flows, '외부 연동 영향': pg.external_impact, '새 위험': pg.new_risks, '안전 구현 가능': pg.safe_to_implement === false ? '아니오' : '예' })}
+      ${_errList('구현 전 차단 조건(blockers)', pg.blockers, '#B91C1C')}
+      ${_errList('필수 검증 항목', pg.must_verify, '#047857')}
+      ${_errCard('⑥ 결정자(최종 판단)', { '판정': ERRLOG_DECIDER_LABELS[(a.decider || {}).verdict] || (a.decider || {}).verdict, '근거': (a.decider || {}).reason })}
+      ${_errList('사전 확인 항목(preflight)', a.preflight, '#92400E')}
+      ${_errCard('이행 준비', { '진행/중단 기준': a.go_no_go, '수정 범위': a.fix_scope, '테스트 계획': a.test_plan, '잔여 위험': a.residual_risk })}
+    </div>`;
+  } else {
+    analysisHtml = `<div style="margin-top:14px;font-size:.78rem;color:var(--t3);text-align:center;padding:10px;background:#F9FAFB;border-radius:8px"><i class="fas fa-robot"></i> 아직 분석 전입니다. <b>"오류검증 및 분석"</b>을 실행하세요. (비파괴 — 실제 수정/재현 안 함)</div>`;
+  }
+
+  body.innerHTML = head + summary + meta + raw + actions + statusActions + gate + analysisHtml;
+}
+
+// ── 오류검증 및 분석 (비파괴) ──
+async function analyzeError(id) {
+  const body = document.getElementById('errDetailBody');
+  if (body) body.insertAdjacentHTML('afterbegin', '<div id="errAnalyzing" style="background:#EDE9FE;color:#5B21B6;padding:8px 12px;border-radius:8px;margin-bottom:8px;font-size:.78rem"><i class="fas fa-circle-notch fa-spin"></i> 검증 및 다중 에이전트 분석 중... (실제 코드/운영을 변경하지 않습니다)</div>');
+  try {
+    const data = await gasPost({ action: 'errorLogAnalyze', id }, 30000);
+    if (data.error) { alert('분석 실패: ' + data.error); document.getElementById('errAnalyzing')?.remove(); return; }
+    await openErrDetail(id); // 최신 분석 결과로 상세 갱신
+    loadErrorLogs();
+  } catch (err) {
+    document.getElementById('errAnalyzing')?.remove();
+    alert('분석 실패: ' + err.message);
+  }
+}
+
+// ── 상태 변경 ──
+async function changeErrStatus(id, status) {
+  try {
+    const data = await gasPost({ action: 'errorLogStatus', id, status });
+    if (data.error) { alert(data.error); return; }
+    await openErrDetail(id);
+    loadErrorLogs();
+  } catch (err) {
+    alert('상태 변경 실패: ' + err.message);
+  }
+}
+
+// ── 클립보드 복사 헬퍼 ──
+async function _errCopy(text) {
+  try {
+    if (navigator.clipboard && navigator.clipboard.writeText) { await navigator.clipboard.writeText(text); return true; }
+  } catch (_) {}
+  try {
+    const ta = document.createElement('textarea');
+    ta.value = text; ta.style.position = 'fixed'; ta.style.opacity = '0';
+    document.body.appendChild(ta); ta.select(); document.execCommand('copy'); document.body.removeChild(ta);
+    return true;
+  } catch (_) { return false; }
+}
+
+// ── 오류내용 복사(문서 11장) — 공유용 진단 정보, 상태 변경 없음 ──
+async function copyErrorContent(id) {
+  const c = _errDetailCache; if (!c || c.log.id !== id) return;
+  const l = c.log, a = c.analysis, ctx = l.context || {};
+  const A = (o, k) => (o && o[k]) ? o[k] : '';
+  const lines = [
+    `[오류내용 #${l.id}]`,
+    `상태: ${ERRLOG_STATUS_LABELS[l.status] || l.status}`,
+    `수집원: ${l.source} / 범주: ${ERRLOG_CAT_LABELS[l.category] || l.category} / 심각도: ${ERRLOG_SEV_LABELS[l.severity] || l.severity}`,
+    `발생 횟수: ${l.occurrence_count}`,
+    `첫 발생: ${l.first_seen_at} / 마지막 발생: ${l.last_seen_at}`,
+    `요약: ${l.message_ko}`,
+    `원문: ${l.message_raw || '-'}${l.error_code ? ' (코드: ' + l.error_code + ')' : ''}`,
+    `화면/API: ${l.flow_ko}${l.step_ko ? ' · ' + l.step_ko : ''} | HTTP ${[ctx.method, ctx.path, ctx.statusCode].filter(Boolean).join(' ') || '-'}`,
+    `stack: ${l.stack || '-'}`,
+  ];
+  if (a) {
+    lines.push('', '[AI 다중 에이전트 분석]', `요약: ${a.summary_ko || '-'}`);
+    lines.push(`오류검증: ${ERRLOG_VERIFY_LABELS[A(a.verify, 'verdict')] || A(a.verify, 'verdict')} — ${A(a.verify, 'evidence')}`);
+    lines.push(`레드팀: 조건=${A(a.red_team, 'conditions')} / 피해=${A(a.red_team, 'user_impact')} / 위험=${A(a.red_team, 'data_risk')} / 재발=${A(a.red_team, 'recurrence')}`);
+    lines.push(`블루팀: 입력검증=${A(a.blue_team, 'input_validation')} / 예외=${A(a.blue_team, 'exception_handling')} / 상태방어=${A(a.blue_team, 'state_guard')} / 중복방지=${A(a.blue_team, 'idempotency')} / 외부API=${A(a.blue_team, 'external_api')} / 회귀=${A(a.blue_team, 'regression_tests')}`);
+    lines.push(`감독관: 범위=${A(a.supervisor, 'scope')} / 증상vs원인=${A(a.supervisor, 'symptom_vs_cause')} / 가장좁은해결=${A(a.supervisor, 'narrowest_fix')}`);
+    const pg = a.prevention_guard || {};
+    lines.push(`예방가드: 안전구현=${pg.safe_to_implement === false ? '불가' : '가능'} / 차단조건=[${(pg.blockers || []).join('; ')}] / 필수검증=[${(pg.must_verify || []).join('; ')}]`);
+    lines.push(`결정자: ${ERRLOG_DECIDER_LABELS[A(a.decider, 'verdict')] || A(a.decider, 'verdict')} — ${A(a.decider, 'reason')}`);
+  }
+  const ok = await _errCopy(lines.join('\n'));
+  alert(ok ? '오류내용을 복사했습니다.' : '복사 실패 — 수동으로 선택해 주세요.');
+}
+
+// ── 이행 요청 복사(문서 10장) — 게이트 통과 시에만 ──
+async function copyTransferRequest(id) {
+  const c = _errDetailCache; if (!c || c.log.id !== id) return;
+  if (!c.transfer_allowed) {
+    alert('이행 요청 복사가 차단되었습니다.\n\n사유:\n- ' + (c.transfer_blockers || []).join('\n- ') + '\n\n먼저 "오류검증 및 분석"을 실행하고 게이트를 통과시키세요.');
+    return;
+  }
+  const l = c.log, a = c.analysis || {}, ctx = l.context || {}, pg = a.prevention_guard || {};
+  const lines = [
+    `[이행 요청 — 오류 #${l.id}]`,
+    `오류 범주: ${ERRLOG_CAT_LABELS[l.category] || l.category}`,
+    `한글 요약: ${l.message_ko}`,
+    `오류 원문: ${l.message_raw || '-'}${l.error_code ? ' (코드: ' + l.error_code + ')' : ''}`,
+    `발생 화면/API: ${l.flow_ko}${l.step_ko ? ' · ' + l.step_ko : ''} | HTTP ${[ctx.method, ctx.path, ctx.statusCode].filter(Boolean).join(' ') || '-'}`,
+    `발생 위치: ${ctx.screen || ctx.page || l.stack || '-'}`,
+    `오류검증 결과: ${ERRLOG_VERIFY_LABELS[(a.verify || {}).verdict] || (a.verify || {}).verdict}`,
+    `결정자 판정: ${ERRLOG_DECIDER_LABELS[(a.decider || {}).verdict] || (a.decider || {}).verdict} — ${(a.decider || {}).reason || ''}`,
+    `사전 확인 항목: ${(a.preflight || []).length ? '\n  - ' + a.preflight.join('\n  - ') : '없음(바로 수정 가능)'}`,
+    `진행/중단 기준: ${a.go_no_go || '없음'}`,
+    `수정 범위: ${a.fix_scope || '-'}`,
+    `테스트 계획: ${a.test_plan || '-'}`,
+    `예방가드 결과: 영향화면=${pg.affected_screens || '-'} / 영향API=${pg.affected_apis || '-'} / 외부영향=${pg.external_impact || '-'} / 새위험=${pg.new_risks || '-'}`,
+    `필수 검증: ${(pg.must_verify || []).length ? '\n  - ' + pg.must_verify.join('\n  - ') : '-'}`,
+    `잔여 위험: ${a.residual_risk || '-'}`,
+    '',
+    '[실제 수정 시 요구사항]',
+    '- 원인(증상 아님)을 수정하고 수정 범위를 위 항목으로 좁게 유지할 것',
+    '- 운영 데이터/외부 연동/결제·주문·계정 상태를 변경하지 말 것',
+    '- 수정 후 재검증: 동일 signature 재수집 여부 + 성공/실패 케이스 + 로그에 secret/개인정보 노출 여부 확인',
+  ];
+  const ok = await _errCopy(lines.join('\n'));
+  if (ok) {
+    if (confirm('이행 요청을 복사했습니다.\n이 오류 상태를 "확인중(investigating)"으로 변경할까요?')) {
+      changeErrStatus(id, 'investigating');
+    }
+  } else {
+    alert('복사 실패 — 수동으로 선택해 주세요.');
   }
 }
 

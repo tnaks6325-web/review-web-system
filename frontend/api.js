@@ -232,9 +232,12 @@ const _ACTION_MAP = {
   'ignoreUnrecognized':    { method: 'POST',   path: '/api/admin/unrecognized/ignore' },
   'resolveUnrecognized':   { method: 'POST',   path: '/api/admin/unrecognized/resolve' },
 
-  // 이상로그(비정상 로그) — error_logs
+  // 오류디버깅(Error Debugging) — error_logs
   'getErrorLogs':          { method: 'GET',    path: '/api/admin/error-logs' },
-  'resolveErrorLog':       { method: 'POST',   path: '/api/admin/error-logs/resolve' },
+  'errorLogDetail':        { method: 'GET',    path: '/api/admin/error-logs/detail' },
+  'errorLogAnalyze':       { method: 'POST',   path: '/api/admin/error-logs/analyze' },
+  'errorLogStatus':        { method: 'POST',   path: '/api/admin/error-logs/status' },
+  'resolveErrorLog':       { method: 'POST',   path: '/api/admin/error-logs/resolve' }, // 구버전 호환
 
   // ★ 스마트 빌드 (Drive API + Sheets batchGet 기반)
   'smartBuildStatus':      { method: 'GET',  path: '/api/admin/smart-build/status' },

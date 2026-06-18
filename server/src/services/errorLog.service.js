@@ -149,7 +149,7 @@ async function _enrichWithAI(rowId, { flow, step, message_raw, error_code }) {
     if (!sentence) return;
     // 보강 사이에 해결됐을 수 있으므로 미해결 행에만 반영
     await pool.query(
-      `UPDATE error_logs SET message_ko = $1 WHERE id = $2 AND resolved = FALSE`,
+      `UPDATE error_logs SET message_ko = $1 WHERE id = $2 AND status <> 'resolved'`,
       [sentence, rowId]
     );
     logger.info(`[이상로그] AI 보강 적용 #${rowId}: ${sentence}`);
@@ -195,7 +195,10 @@ async function logAbnormal(p = {}) {
       try { captureException(error, { flow, step, category, source, ...context }); } catch (_) { /* noop */ }
     }
 
-    // ── dedup UPSERT (미해결 동일 fingerprint 는 카운트만 증가) ──
+    // ── dedup UPSERT (활성 동일 fingerprint 는 카운트만 증가) ──
+    // 활성행 = status IN (new|investigating|ignored). resolved 과거행과는 충돌하지 않으므로
+    // 같은 signature 가 해결 후 다시 들어오면 새 'new' 행이 생성된다(=프로토콜 4장 "재오픈").
+    // 'ignored' 활성행에 다시 들어오면 카운트만 올라가고 ignored 상태가 유지된다(억제 유지).
     // ※ message_ko 는 DO UPDATE 에서 제외 — 같은 fingerprint 면 템플릿 문장은 동일하므로
     //   불필요하고, AI 보강(아래)으로 다듬은 문장이 재발 때마다 덮어쓰이는 것을 방지.
     const { rows: upserted } = await pool.query(
@@ -203,7 +206,7 @@ async function logAbnormal(p = {}) {
          (severity, flow, flow_ko, step, step_ko, category, source,
           message_ko, message_raw, error_code, stack, context, fingerprint)
        VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12::jsonb,$13)
-       ON CONFLICT (fingerprint) WHERE resolved = FALSE
+       ON CONFLICT (fingerprint) WHERE status <> 'resolved'
        DO UPDATE SET
          occurrence_count = error_logs.occurrence_count + 1,
          last_seen_at     = NOW(),

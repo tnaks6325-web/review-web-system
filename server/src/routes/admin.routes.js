@@ -1010,24 +1010,41 @@ router.post('/notices/read', authMiddleware, async (req, res, next) => {
 });
 
 // ═══════════════════════════════════════════════════════════
-// 이상로그(비정상 로그) 조회/해결 — error_logs (마이그레이션 026)
+// 오류디버깅(Error Debugging) — error_logs (마이그레이션 026/028)
+// 프로토콜: 수집 → 오류검증 → 다중에이전트 분석 → 결정자 → 이행요청 → 수정 → 재검증
 // staff 차단(adminOrMasterMiddleware): 시스템 운영 정보
 // ═══════════════════════════════════════════════════════════
+const errorDebug = require('../services/errorDebug.service');
 
-// GET /api/admin/error-logs — 비정상 로그 목록 (필터·페이징·요약)
-// 쿼리: category, severity, flow, resolved(true/false/all), page, limit
+// status 동기화 헬퍼: status 와 backward-compat 한 resolved 불리언을 함께 갱신
+const VALID_STATUSES = ['new', 'investigating', 'resolved', 'ignored'];
+
+// GET /api/admin/error-logs — 오류 목록 (필터·페이징·요약)
+// 쿼리: category, severity, flow, status(new/investigating/resolved/ignored/open/all)
+//       resolved(true/false/all) — 구버전 호환, page, limit
 router.get('/error-logs', authMiddleware, adminOrMasterMiddleware, async (req, res, next) => {
   try {
     const { category, severity, flow } = req.query;
-    const resolvedParam = (req.query.resolved || 'false').toLowerCase(); // 기본: 미해결만
+    const statusParam = (req.query.status || '').toLowerCase();
+    const resolvedParam = (req.query.resolved || '').toLowerCase();
     const page = Math.max(1, parseInt(req.query.page, 10) || 1);
     const limit = Math.min(200, Math.max(1, parseInt(req.query.limit, 10) || 50));
     const offset = (page - 1) * limit;
 
     const where = [];
     const params = [];
-    if (resolvedParam === 'true') where.push('resolved = TRUE');
-    else if (resolvedParam !== 'all') where.push('resolved = FALSE');
+    // 상태 필터: status 우선, 없으면 구버전 resolved 파라미터 해석(기본=미해결)
+    if (VALID_STATUSES.includes(statusParam)) {
+      params.push(statusParam); where.push(`status = $${params.length}`);
+    } else if (statusParam === 'open') {
+      where.push(`status IN ('new','investigating')`);
+    } else if (statusParam === 'all' || resolvedParam === 'all') {
+      // 전체 — 필터 없음
+    } else if (resolvedParam === 'true') {
+      where.push(`status = 'resolved'`);
+    } else {
+      where.push(`status IN ('new','investigating')`); // 기본: 미해결(신규+확인중)
+    }
     if (category) { params.push(category); where.push(`category = $${params.length}`); }
     if (severity) { params.push(severity); where.push(`severity = $${params.length}`); }
     if (flow)     { params.push(flow);     where.push(`flow = $${params.length}`); }
@@ -1040,7 +1057,9 @@ router.get('/error-logs', authMiddleware, adminOrMasterMiddleware, async (req, r
     const { rows: logs } = await pool.query(
       `SELECT id, created_at, severity, flow, flow_ko, step, step_ko, category, source,
               message_ko, message_raw, error_code, occurrence_count,
-              first_seen_at, last_seen_at, resolved, resolved_at, resolved_by, context
+              first_seen_at, last_seen_at, status, verify_verdict, decider_verdict,
+              analyzed_at, (analysis ? 'summary_ko') AS has_analysis,
+              resolved, resolved_at, resolved_by, context
        FROM error_logs
        ${whereSql}
        ORDER BY last_seen_at DESC, occurrence_count DESC
@@ -1052,13 +1071,17 @@ router.get('/error-logs', authMiddleware, adminOrMasterMiddleware, async (req, r
       `SELECT COUNT(*)::int AS total FROM error_logs ${whereSql}`, params);
     const total = cntRows[0]?.total || 0;
 
-    // 요약: 미해결 기준 카테고리/심각도 분포 + 미해결 총건수
+    // 요약: 상태별 분포 + 미해결(신규+확인중) 카테고리/심각도 분포
+    const { rows: stRows } = await pool.query(
+      `SELECT status, COUNT(*)::int AS cnt FROM error_logs GROUP BY status`);
+    const byStatus = { new: 0, investigating: 0, resolved: 0, ignored: 0 };
+    for (const r of stRows) byStatus[r.status] = r.cnt;
+
     const { rows: sumRows } = await pool.query(
       `SELECT category, severity, COUNT(*)::int AS cnt, SUM(occurrence_count)::int AS occ
-       FROM error_logs WHERE resolved = FALSE GROUP BY category, severity`);
-    const summary = { openCount: 0, byCategory: {}, bySeverity: {} };
+       FROM error_logs WHERE status IN ('new','investigating') GROUP BY category, severity`);
+    const summary = { openCount: byStatus.new + byStatus.investigating, byStatus, byCategory: {}, bySeverity: {} };
     for (const r of sumRows) {
-      summary.openCount += r.cnt;
       summary.byCategory[r.category] = (summary.byCategory[r.category] || 0) + r.cnt;
       summary.bySeverity[r.severity] = (summary.bySeverity[r.severity] || 0) + r.cnt;
     }
@@ -1067,16 +1090,93 @@ router.get('/error-logs', authMiddleware, adminOrMasterMiddleware, async (req, r
   } catch (err) { next(err); }
 });
 
-// POST /api/admin/error-logs/resolve — 비정상 로그 해결 처리 ({ id, note })
-// 동적 /:id 미지원 → 평면경로 + body id (work_orders 패턴과 동일)
+// GET /api/admin/error-logs/detail?id= — 오류 상세 (분석 결과 포함, 비파괴)
+router.get('/error-logs/detail', authMiddleware, adminOrMasterMiddleware, async (req, res, next) => {
+  try {
+    const id = parseInt(req.query.id, 10);
+    if (!id) return res.json({ error: 'id 필요' });
+    const { rows } = await pool.query(`SELECT * FROM error_logs WHERE id = $1`, [id]);
+    if (!rows.length) return res.json({ error: '대상을 찾을 수 없습니다.' });
+    const log = rows[0];
+    const analysis = log.analysis && Object.keys(log.analysis).length ? log.analysis : null;
+    // 이행요청 게이트(문서 10장) 재계산 — 항상 최신 규칙 반영
+    let transfer_blockers = ['아직 오류검증 및 분석을 실행하지 않음'];
+    if (analysis) transfer_blockers = errorDebug.transferGate(analysis, log.verify_verdict, log.decider_verdict);
+    res.json({ ok: true, log, analysis, transfer_blockers, transfer_allowed: transfer_blockers.length === 0 });
+  } catch (err) { next(err); }
+});
+
+// POST /api/admin/error-logs/analyze — 오류검증 및 분석 (비파괴: 실제 수정/재현 안 함)
+// body: { id }
+router.post('/error-logs/analyze', authMiddleware, adminOrMasterMiddleware, async (req, res, next) => {
+  try {
+    const id = parseInt(req.body.id, 10);
+    if (!id) return res.json({ error: 'id 필요' });
+    const { rows } = await pool.query(`SELECT * FROM error_logs WHERE id = $1`, [id]);
+    if (!rows.length) return res.json({ error: '대상을 찾을 수 없습니다.' });
+
+    const result = await errorDebug.runAnalysis(rows[0]);
+
+    await pool.query(
+      `UPDATE error_logs
+       SET analysis = $1::jsonb, verify_verdict = $2, decider_verdict = $3,
+           analyzed_at = NOW(), analyzed_by = $4
+       WHERE id = $5`,
+      [JSON.stringify(result.analysis), result.verify_verdict, result.decider_verdict,
+       req.admin?.name || 'admin', id]
+    );
+
+    res.json({
+      ok: true,
+      analysis: result.analysis,
+      verify_verdict: result.verify_verdict,
+      decider_verdict: result.decider_verdict,
+      transfer_blockers: result.transfer_blockers,
+      transfer_allowed: result.transfer_blockers.length === 0,
+    });
+  } catch (err) { next(err); }
+});
+
+// POST /api/admin/error-logs/status — 상태 변경 ({ id, status, note })
+// status: new | investigating | resolved | ignored
+router.post('/error-logs/status', authMiddleware, adminOrMasterMiddleware, async (req, res, next) => {
+  try {
+    const id = parseInt(req.body.id, 10);
+    const status = String(req.body.status || '').toLowerCase();
+    const note = String(req.body.note || '').slice(0, 500);
+    if (!id) return res.json({ error: 'id 필요' });
+    if (!VALID_STATUSES.includes(status)) return res.json({ error: '유효하지 않은 상태값' });
+
+    const who = req.admin?.name || 'admin';
+    // resolved 불리언/시각은 backward-compat(크론 보존정리·구버전 조회)용으로 동기화
+    const resolved = status === 'resolved';
+    const { rows } = await pool.query(
+      `UPDATE error_logs SET
+         status = $1,
+         status_updated_at = NOW(), status_updated_by = $2,
+         resolved   = $3,
+         resolved_at = CASE WHEN $3 THEN NOW() ELSE NULL END,
+         resolved_by = CASE WHEN $3 THEN $2 ELSE '' END,
+         resolve_note = CASE WHEN $4 <> '' THEN $4 ELSE resolve_note END
+       WHERE id = $5
+       RETURNING id, status`,
+      [status, who, resolved, note, id]
+    );
+    if (!rows.length) return res.json({ error: '대상을 찾을 수 없습니다.' });
+    res.json({ ok: true, status: rows[0].status });
+  } catch (err) { next(err); }
+});
+
+// POST /api/admin/error-logs/resolve — (구버전 호환) 해결 처리 ({ id, note }) → status='resolved'
 router.post('/error-logs/resolve', authMiddleware, adminOrMasterMiddleware, async (req, res, next) => {
   try {
     const { id, note } = req.body;
     if (!id) return res.json({ error: 'id 필요' });
     const { rowCount } = await pool.query(
       `UPDATE error_logs
-       SET resolved = TRUE, resolved_at = NOW(), resolved_by = $1, resolve_note = $2
-       WHERE id = $3 AND resolved = FALSE`,
+       SET status = 'resolved', status_updated_at = NOW(), status_updated_by = $1,
+           resolved = TRUE, resolved_at = NOW(), resolved_by = $1, resolve_note = $2
+       WHERE id = $3 AND status <> 'resolved'`,
       [req.admin?.name || 'admin', (note || '').slice(0, 500), id]
     );
     if (rowCount === 0) return res.json({ error: '대상을 찾을 수 없거나 이미 해결된 항목입니다.' });
