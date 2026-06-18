@@ -1,0 +1,336 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="UTF-8"/>
+<meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+<title>시안 D · frontend-design — 아이에이리뷰</title>
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/gh/orioncactus/pretendard@v1.3.9/dist/web/static/pretendard.css"/>
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@fortawesome/fontawesome-free@6.4.0/css/all.min.css"/>
+<style>
+:root{
+  --indigo:#5046E4; --indigo-d:#2E2796; --indigo-l:#EEF0FE;
+  --paper:#FBFBFD; --ink:#191F28; --mist:#8A93A6; --mint:#12B886; --mint-l:#E7F7F1;
+  --bd:#ECEDF2; --bd2:#E2E4ED; --card:#fff; --r:18px;
+  --shadow:0 1px 3px rgba(25,31,40,.05), 0 6px 20px rgba(25,31,40,.04);
+}
+*{box-sizing:border-box;margin:0;padding:0;-webkit-tap-highlight-color:transparent}
+body{font-family:'Pretendard',-apple-system,BlinkMacSystemFont,sans-serif;background:#E7E9F1;color:var(--ink);letter-spacing:-.02em}
+.phone{max-width:440px;margin:0 auto;min-height:100vh;background:var(--paper);position:relative;box-shadow:0 0 50px rgba(0,0,0,.1);overflow:hidden}
+.screen{display:none;padding-bottom:86px}
+.screen.on{display:block;animation:scrIn .3s ease}
+@keyframes scrIn{from{opacity:0}to{opacity:1}}
+.tag{position:fixed;top:8px;left:8px;z-index:300;font-size:.72rem;font-weight:700;color:#fff;background:var(--indigo);padding:4px 11px;border-radius:20px;box-shadow:0 4px 12px rgba(80,70,228,.4)}
+
+/* 앱바 */
+.appbar{padding:18px 20px 6px;position:sticky;top:0;background:var(--paper);z-index:50}
+.appbar h1{font-size:1.55rem;font-weight:800;letter-spacing:-.04em}
+.appbar .sub{font-size:.82rem;color:var(--mist);margin-top:4px;font-weight:500}
+.appbar .bell{position:absolute;right:18px;top:18px;width:40px;height:40px;border:none;border-radius:13px;background:#fff;color:var(--mist);box-shadow:var(--shadow);font-size:1rem}
+
+/* 검색 + 칩 */
+.search{margin:12px 20px 0;background:#F1F2F6;border-radius:14px;display:flex;align-items:center;gap:10px;padding:13px 15px}
+.search i{color:var(--mist)}.search input{border:none;background:none;outline:none;flex:1;font-size:.92rem;font-family:inherit}
+.chips{display:flex;gap:7px;padding:14px 20px 2px;overflow-x:auto;scrollbar-width:none}.chips::-webkit-scrollbar{display:none}
+.chip{flex:0 0 auto;font-size:.83rem;font-weight:600;color:var(--mist);background:#fff;border:1px solid var(--bd2);padding:8px 15px;border-radius:11px;cursor:pointer;transition:.15s}
+.chip.on{background:var(--ink);color:#fff;border-color:var(--ink)}
+
+.sec{display:flex;align-items:center;padding:18px 20px 10px}
+.sec .t{font-size:1.05rem;font-weight:800}
+.sec .cnt{margin-left:7px;font-size:.82rem;color:var(--indigo);font-weight:700}
+.viewtoggle{margin-left:auto;display:inline-flex;background:#ECEDF2;border-radius:11px;padding:3px;gap:2px}
+.viewtoggle button{width:36px;height:30px;border:none;background:none;border-radius:9px;color:var(--mist);font-size:.9rem;cursor:pointer;display:grid;place-items:center;transition:.15s}
+.viewtoggle button.on{background:#fff;color:var(--indigo);box-shadow:0 1px 4px rgba(25,31,40,.12)}
+
+/* ===== 시그니처: 티켓형 캠페인 카드 ===== */
+.tickets{padding:4px 16px}
+.ticket{background:var(--card);border-radius:var(--r);box-shadow:var(--shadow);margin-bottom:14px;cursor:pointer;position:relative;transition:transform .14s ease, box-shadow .2s;
+  opacity:0;transform:translateY(10px);animation:cardUp .5s cubic-bezier(.2,.7,.2,1) forwards}
+@keyframes cardUp{to{opacity:1;transform:none}}
+.ticket:active{transform:scale(.985)}
+.t-top{display:flex;gap:13px;padding:15px 16px 13px}
+.t-thumb{flex:0 0 60px;width:60px;height:60px;border-radius:15px;display:grid;place-items:center;font-size:1.7rem;position:relative}
+.t-thumb .ch{position:absolute;left:-5px;top:-5px;font-size:.56rem;font-weight:800;color:#fff;padding:2px 7px;border-radius:8px;white-space:nowrap;letter-spacing:0}
+.t-info{flex:1;min-width:0}
+.t-line1{display:flex;align-items:center;gap:6px;margin-bottom:6px}
+.t-status{font-size:.64rem;font-weight:800;padding:2px 8px;border-radius:7px;background:var(--mint-l);color:#0C8C66;letter-spacing:0}
+.t-status.full{background:#F1F2F6;color:var(--mist)}
+.t-mgr{margin-left:auto;font-size:.7rem;color:var(--mist);font-weight:600}
+.t-title{font-size:.98rem;font-weight:700;line-height:1.35;letter-spacing:-.02em}
+.t-tags{display:flex;gap:6px;margin-top:8px}
+.t-tag{font-size:.66rem;font-weight:600;color:var(--mist);background:#F4F5F8;padding:2px 8px;border-radius:7px}
+/* 점선 절취선 + 양옆 노치 */
+.t-perf{position:relative;height:0;border-top:2px dashed var(--bd2);margin:0 14px}
+.t-perf::before,.t-perf::after{content:"";position:absolute;top:-11px;width:20px;height:20px;border-radius:50%;background:var(--paper)}
+.t-perf::before{left:-25px}.t-perf::after{right:-25px}
+.t-bottom{display:flex;align-items:center;gap:12px;padding:14px 16px 16px}
+.t-fee{flex:1;min-width:0}
+.t-fee .lbl{font-size:.64rem;color:var(--mist);font-weight:700;letter-spacing:0}
+.t-fee .amt{font-size:1.3rem;font-weight:800;color:var(--mint);font-variant-numeric:tabular-nums;line-height:1.1;letter-spacing:-.03em}
+.t-fee .amt small{font-size:.72rem;font-weight:700}
+.t-slot{flex:0 0 116px}
+.t-slot .row{display:flex;justify-content:space-between;font-size:.66rem;font-weight:700;color:var(--mist);margin-bottom:5px}
+.t-slot .row b{color:var(--ink);font-variant-numeric:tabular-nums}
+.t-track{height:6px;background:#EEF0F5;border-radius:20px;overflow:hidden}
+.t-fill{height:100%;width:0;background:linear-gradient(90deg,var(--indigo),#6E63F0);border-radius:20px;transition:width 1s cubic-bezier(.2,.7,.2,1)}
+.t-fill.hot{background:linear-gradient(90deg,#F0883E,#EF5B5B)}
+
+/* 카드(2단) 뷰 */
+.tickets.view-card{display:grid;grid-template-columns:1fr 1fr;gap:12px}
+.tickets.view-card .ticket{margin-bottom:0}
+.tickets.view-card .t-top{flex-direction:column;gap:9px;padding:12px 12px 10px}
+.tickets.view-card .t-thumb{width:100%;height:78px;border-radius:12px}
+.tickets.view-card .t-title{font-size:.86rem;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden}
+.tickets.view-card .t-tags,.tickets.view-card .t-mgr{display:none}
+.tickets.view-card .t-perf{margin:0 12px}.tickets.view-card .t-perf::before{left:-22px}.tickets.view-card .t-perf::after{right:-22px}
+.tickets.view-card .t-bottom{flex-direction:column;align-items:stretch;gap:9px;padding:12px}
+.tickets.view-card .t-slot{flex:none}
+
+/* 로그인 히어로 */
+#login{position:absolute;inset:0;z-index:200;background:var(--paper);display:flex;flex-direction:column;padding:0 24px;overflow-y:auto}
+.hero{padding:46px 0 8px}
+.hlogo{width:54px;height:54px;border-radius:17px;background:linear-gradient(135deg,var(--indigo),#7B72F2);color:#fff;display:grid;place-items:center;font-size:1.45rem;box-shadow:0 8px 22px rgba(80,70,228,.35);margin-bottom:22px}
+.hero h1{font-size:1.85rem;font-weight:800;line-height:1.3;letter-spacing:-.045em}
+.hero h1 .pt{color:var(--indigo)}
+.hero .lead{font-size:.95rem;color:var(--mist);margin:12px 0 26px;font-weight:500;line-height:1.5}
+.field{margin-bottom:11px}
+.flab{font-size:.76rem;color:var(--mist);font-weight:700;margin-bottom:7px;display:block}
+.inp{width:100%;padding:15px 16px;border:none;border-radius:14px;background:#F1F2F6;font-size:.95rem;outline:none;font-family:inherit;transition:.15s}
+.inp:focus{background:#fff;box-shadow:inset 0 0 0 2px var(--indigo)}
+.phonerow{display:flex;align-items:center;background:#F1F2F6;border-radius:14px;overflow:hidden;transition:.15s}
+.phonerow:focus-within{background:#fff;box-shadow:inset 0 0 0 2px var(--indigo)}
+.phonerow span{padding:0 14px;font-weight:800;color:var(--ink)}
+.phonerow input{border:none;background:none;flex:1;padding:15px 8px 15px 0;outline:none;font-size:.95rem;font-family:inherit}
+.btn{width:100%;padding:16px;border:none;border-radius:15px;background:var(--indigo);color:#fff;font-size:1.02rem;font-weight:800;cursor:pointer;margin-top:8px;transition:transform .12s, background .18s;letter-spacing:-.02em}
+.btn:active{transform:scale(.98);background:var(--indigo-d)}
+.lsw{text-align:center;font-size:.85rem;color:var(--mist);margin-top:18px}.lsw a{color:var(--indigo);font-weight:700;text-decoration:none}
+/* 로그인 하단 '지금 뜬 캠페인' (시그니처 노출) */
+.live-head{display:flex;align-items:center;gap:7px;margin:26px 0 10px;font-size:.84rem;font-weight:800}
+.live-dot{width:7px;height:7px;border-radius:50%;background:var(--mint);box-shadow:0 0 0 4px var(--mint-l);animation:pulse 1.6s ease infinite}
+@keyframes pulse{0%,100%{box-shadow:0 0 0 3px var(--mint-l)}50%{box-shadow:0 0 0 6px rgba(18,184,134,.12)}}
+
+/* 하단 탭바 */
+.tabbar{position:fixed;bottom:0;left:50%;transform:translateX(-50%);width:100%;max-width:440px;background:rgba(255,255,255,.94);backdrop-filter:blur(12px);display:flex;border-top:1px solid var(--bd);padding:9px 0 max(9px,env(safe-area-inset-bottom));z-index:60}
+.tabbar button{flex:1;background:none;border:none;display:flex;flex-direction:column;align-items:center;gap:3px;font-size:.65rem;color:var(--mist);font-weight:600;cursor:pointer}
+.tabbar button i{font-size:1.12rem}
+.tabbar button.on{color:var(--indigo)}
+
+/* 상세 */
+.dtop{padding:12px 16px;position:sticky;top:0;background:var(--paper);z-index:40}
+.back{width:40px;height:40px;border-radius:13px;border:none;background:#fff;color:var(--ink);box-shadow:var(--shadow);font-size:1rem;cursor:pointer}
+.dhero{margin:6px 16px 0;border-radius:20px;aspect-ratio:1/.62;display:grid;place-items:center;font-size:4.4rem;position:relative;overflow:hidden}
+.dbody{padding:18px 20px 4px}
+.dchips{display:flex;gap:6px;margin-bottom:11px}
+.dbadge{font-size:.7rem;font-weight:800;padding:4px 10px;border-radius:20px;color:#fff}
+.dbadge.ghost{background:#F1F2F6;color:var(--mist)}
+.dbody h2{font-size:1.4rem;font-weight:800;letter-spacing:-.03em}
+.payback{margin:14px 16px;background:linear-gradient(135deg,#0E2A22,#10463399);background:var(--mint-l);border-radius:18px;padding:16px 18px;display:flex;align-items:center;gap:14px}
+.payback .pi{width:46px;height:46px;border-radius:14px;background:var(--mint);color:#fff;display:grid;place-items:center;font-size:1.2rem}
+.payback .lbl{font-size:.72rem;color:#0C8C66;font-weight:700}
+.payback .amt{font-size:1.5rem;font-weight:800;color:#0A7A59;font-variant-numeric:tabular-nums;letter-spacing:-.03em}
+.card2{margin:14px 16px;background:#fff;border-radius:var(--r);padding:4px 18px;box-shadow:var(--shadow)}
+.trow{display:flex;justify-content:space-between;align-items:center;padding:13px 0;font-size:.88rem;border-bottom:1px solid var(--bd)}
+.trow:last-child{border:none}.trow .k{color:var(--mist);font-weight:500}.trow .v{font-weight:700}
+.dcta{position:fixed;bottom:86px;left:50%;transform:translateX(-50%);width:100%;max-width:440px;padding:12px 16px;background:linear-gradient(180deg,transparent,var(--paper) 35%)}
+.dcta button{width:100%;padding:16px;border:none;border-radius:15px;background:var(--indigo);color:#fff;font-size:1.02rem;font-weight:800;cursor:pointer;transition:transform .12s}
+.dcta button:active{transform:scale(.98)}
+
+/* 내 참여현황 / 내정보 (간략) */
+.statseg{margin:10px 16px 0;background:#fff;border-radius:var(--r);padding:6px;box-shadow:var(--shadow);display:grid;grid-template-columns:1fr 1fr;gap:2px}
+.seg{padding:16px 14px;border-radius:13px}.seg .n{font-size:1.5rem;font-weight:800}.seg .n.acc{color:var(--indigo)}.seg .l{font-size:.78rem;color:var(--mist);margin-top:3px;font-weight:600}
+.empty{text-align:center;padding:54px 24px;color:var(--mist)}
+.empty .ic{width:64px;height:64px;border-radius:20px;background:#fff;box-shadow:var(--shadow);display:grid;place-items:center;font-size:1.7rem;color:#C7CCDA;margin:0 auto 16px}
+.empty p{font-size:.94rem;font-weight:700;color:var(--ink)}.empty span{font-size:.82rem}
+.empty a{display:inline-block;margin-top:16px;background:var(--indigo);color:#fff;padding:11px 22px;border-radius:13px;font-weight:700;font-size:.85rem;text-decoration:none;cursor:pointer}
+.profcard{margin:10px 16px;background:#fff;border-radius:var(--r);padding:20px;box-shadow:var(--shadow);display:flex;align-items:center;gap:15px}
+.pav{width:58px;height:58px;border-radius:19px;background:linear-gradient(135deg,var(--indigo),#7B72F2);color:#fff;display:grid;place-items:center;font-size:1.4rem;font-weight:800}
+.profcard h3{font-size:1.2rem;font-weight:800}.profcard p{font-size:.8rem;color:var(--mist);margin-top:3px}
+.list{margin:10px 16px;background:#fff;border-radius:var(--r);overflow:hidden;box-shadow:var(--shadow)}
+.li{display:flex;align-items:center;gap:13px;padding:16px 18px;border-bottom:1px solid var(--bd)}.li:last-child{border:none}
+.li .lic{width:36px;height:36px;border-radius:11px;background:#F1F2F6;color:var(--mist);display:grid;place-items:center}
+.li .k{font-size:.88rem;font-weight:500;color:var(--mist)}.li .v{margin-left:auto;font-weight:700;font-size:.9rem}.li .v.miss{color:#EF5B5B}
+
+/* 온보딩 바텀시트 */
+.ovl{position:fixed;inset:0;background:rgba(25,31,40,.45);z-index:400;display:none;align-items:flex-end;justify-content:center}
+.ovl.on{display:flex}
+.obx{background:#fff;border-radius:26px 26px 0 0;width:100%;max-width:440px;padding:8px 24px 26px;animation:up .32s cubic-bezier(.2,.8,.2,1)}
+@keyframes up{from{transform:translateY(100%)}to{transform:none}}
+.ohandle{width:42px;height:4px;border-radius:4px;background:var(--bd2);margin:8px auto 18px}
+.oic{width:62px;height:62px;border-radius:20px;background:var(--indigo-l);color:var(--indigo);display:grid;place-items:center;font-size:1.6rem;margin-bottom:16px}
+.obx h3{font-size:1.35rem;font-weight:800;letter-spacing:-.03em}.obx .od{font-size:.88rem;color:var(--mist);margin:8px 0 18px;line-height:1.6}
+.ostep{display:flex;gap:13px;align-items:center;padding:11px 0;border-top:1px solid var(--bd)}
+.ostep .num{flex:0 0 32px;width:32px;height:32px;border-radius:11px;background:var(--indigo-l);color:var(--indigo);font-weight:800;display:grid;place-items:center;font-size:.85rem}
+.ostep b{font-size:.9rem;font-weight:700}.ostep p{font-size:.78rem;color:var(--mist);margin-top:2px}
+.ostart{width:100%;margin-top:18px;padding:16px;border:none;border-radius:15px;background:var(--indigo);color:#fff;font-weight:800;font-size:1rem;cursor:pointer}
+.oskip{width:100%;text-align:center;margin-top:12px;color:var(--mist);font-size:.82rem;font-weight:600;background:none;border:none;cursor:pointer}
+
+@media (prefers-reduced-motion: reduce){*{animation:none!important;transition:none!important}.t-fill{transition:none!important}}
+</style>
+</head>
+<body>
+<span class="tag">시안 D · frontend-design</span>
+<div class="phone">
+
+  <!-- 로그인 히어로 -->
+  <div id="login">
+    <div class="hero">
+      <div class="hlogo"><i class="fas fa-star-half-alt"></i></div>
+      <h1>사서 리뷰 쓰고<br><span class="pt">페이백</span> 받기</h1>
+      <p class="lead">마음에 드는 캠페인을 고르고, 구매 후 리뷰를 남기면<br>리뷰비를 페이백으로 돌려받아요.</p>
+      <div class="field"><span class="flab">이름</span><input class="inp" placeholder="이름을 입력하세요"/></div>
+      <div class="field"><span class="flab">전화번호 뒤 8자리</span><div class="phonerow"><span>010</span><input class="inp" placeholder="12345678" inputmode="numeric" style="background:none;box-shadow:none"/></div></div>
+      <button class="btn" onclick="enterApp()">로그인</button>
+      <p class="lsw">처음이신가요? <a onclick="alert('아이에이리뷰 등록')">아이에이리뷰 등록하기 →</a></p>
+    </div>
+    <!-- 시그니처: 지금 뜬 캠페인 (티켓 미리보기) -->
+    <div class="live-head"><span class="live-dot"></span> 지금 뜬 캠페인</div>
+    <div class="tickets" style="padding:0 0 30px" id="loginTicket"></div>
+  </div>
+
+  <!-- 모집공고 -->
+  <div id="s-camp" class="screen on">
+    <div class="appbar">
+      <h1>모집공고</h1>
+      <div class="sub">마음에 드는 캠페인을 골라 시작하세요</div>
+      <button class="bell"><i class="far fa-bell"></i></button>
+    </div>
+    <div class="search"><i class="fas fa-search"></i><input placeholder="상품·브랜드 검색"/></div>
+    <div class="chips" id="chips"></div>
+    <div class="sec"><span class="t">모집중</span><span class="cnt" id="cnt">0</span>
+      <span class="viewtoggle"><button id="vtList" class="on" onclick="setView('list')"><i class="fas fa-list"></i></button><button id="vtCard" onclick="setView('card')"><i class="fas fa-table-cells-large"></i></button></span>
+    </div>
+    <div class="tickets view-list" id="list"></div>
+  </div>
+
+  <!-- 상세 -->
+  <div id="s-detail" class="screen">
+    <div class="dtop"><button class="back" onclick="go('s-camp')"><i class="fas fa-arrow-left"></i></button></div>
+    <div class="dhero" id="dHero">📦</div>
+    <div class="dbody">
+      <div class="dchips" id="dChips"></div>
+      <h2 id="dTitle">캠페인</h2>
+    </div>
+    <div class="payback"><div class="pi"><i class="fas fa-won-sign"></i></div><div><div class="lbl">리뷰 완료 시 페이백</div><div class="amt" id="dFee">0원</div></div></div>
+    <div class="card2">
+      <div class="trow"><span class="k">채널</span><span class="v" id="dCh">-</span></div>
+      <div class="trow"><span class="k">배송유형</span><span class="v" id="dDel">-</span></div>
+      <div class="trow"><span class="k">진행시간</span><span class="v" id="dTime">-</span></div>
+      <div class="trow"><span class="k">모집현황</span><span class="v" id="dSlot">-</span></div>
+      <div class="trow"><span class="k">담당</span><span class="v" id="dMgr">-</span></div>
+      <div class="trow"><span class="k">문의</span><span class="v">카카오톡 fnhyun</span></div>
+    </div>
+    <div style="text-align:center;font-size:.78rem;color:var(--mist);padding:0 16px 120px" id="dNote"></div>
+    <div class="dcta"><button onclick="alert('참여 신청 완료!')">참여 신청하기</button></div>
+  </div>
+
+  <!-- 내 참여현황 -->
+  <div id="s-mine" class="screen">
+    <div class="appbar"><h1>내 참여현황</h1><div class="sub">신청한 캠페인의 진행 상태를 확인하세요</div></div>
+    <div class="statseg"><div class="seg"><div class="n acc">0</div><div class="l">진행중</div></div><div class="seg"><div class="n">0</div><div class="l">완료</div></div></div>
+    <div class="empty"><div class="ic"><i class="fas fa-ticket"></i></div><p>아직 참여한 캠페인이 없어요</p><span>모집중에서 골라 시작하세요</span><br><a onclick="go('s-camp')">캠페인 둘러보기 →</a></div>
+  </div>
+
+  <!-- 내정보 -->
+  <div id="s-info" class="screen">
+    <div class="appbar"><h1>내정보</h1></div>
+    <div class="profcard"><div class="pav">김</div><div><h3>김수만</h3><p>010-8592-6325 · 2026.06.17 가입</p></div></div>
+    <div style="padding:18px 20px 6px;font-size:.82rem;font-weight:800;color:var(--mist)">내 등록정보</div>
+    <div class="list">
+      <div class="li"><div class="lic"><i class="fas fa-id-badge"></i></div><span class="k">소득명의</span><span class="v miss">미등록</span></div>
+      <div class="li"><div class="lic"><i class="fas fa-id-card"></i></div><span class="k">주민번호</span><span class="v miss">미등록</span></div>
+      <div class="li"><div class="lic"><i class="fas fa-wallet"></i></div><span class="k">정산 계좌</span><span class="v miss">미등록</span></div>
+    </div>
+    <div style="padding:18px 20px 6px;font-size:.82rem;font-weight:800;color:var(--mist)">타계정 정보 <span style="color:var(--mist);font-weight:600">2/10</span></div>
+    <div class="list">
+      <div class="li"><div class="lic"><i class="fas fa-user"></i></div><span class="k">김수만업무폰</span><span class="v">010-9186-9944</span></div>
+      <div class="li"><div class="lic"><i class="fas fa-user"></i></div><span class="k">김수만타계테스트</span><span class="v">010-8592-6325</span></div>
+    </div>
+    <div style="height:24px"></div>
+  </div>
+
+  <div class="tabbar">
+    <button class="on" data-s="s-camp" onclick="tab(this)"><i class="fas fa-bullhorn"></i>모집공고</button>
+    <button data-s="s-mine" onclick="tab(this)"><i class="fas fa-ticket"></i>내 참여현황</button>
+    <button data-s="s-info" onclick="tab(this)"><i class="fas fa-user"></i>내정보</button>
+    <button onclick="openOnboard()"><i class="fas fa-book-open"></i>가이드</button>
+  </div>
+
+  <div class="ovl" id="onboard">
+    <div class="obx">
+      <div class="ohandle"></div>
+      <div class="oic"><i class="fas fa-hand-sparkles"></i></div>
+      <h3>아이에이리뷰 시작하기</h3>
+      <p class="od">3단계만 알면 바로 페이백을 받을 수 있어요.</p>
+      <div class="ostep"><div class="num">1</div><div><b>캠페인 고르기</b><p>모집중에서 마음에 드는 캠페인을 골라요.</p></div></div>
+      <div class="ostep"><div class="num">2</div><div><b>구매 &amp; 리뷰</b><p>안내대로 구매하고 리뷰를 남겨요.</p></div></div>
+      <div class="ostep"><div class="num">3</div><div><b>페이백 받기</b><p>리뷰 완료 후 매주 화/금 계좌로 정산돼요.</p></div></div>
+      <button class="ostart" onclick="closeOnboard()">시작하기</button>
+      <button class="oskip" onclick="closeOnboard()">다음에 볼게요</button>
+    </div>
+  </div>
+</div>
+
+<script>
+const CH={네이버:{c:'#03C75A',e:'📗'},쿠팡:{c:'#E5392B',e:'📦'},G마켓:{c:'#1BA641',e:'🛒'},스마트스토어:{c:'#03C75A',e:'🟢'}};
+const C=[
+ {id:1,ch:'네이버',title:'N여성부계 매입모집 (대상: 82~04년)',fee:120000,cur:0,max:10,mgr:'궁둥회',del:'계정매입',time:'상시',tags:['고액','계정매입'],note:'2년 이상 운영 계정 매입. 네이버 카페·구매평·블로그 마케팅에 사용됩니다.'},
+ {id:2,ch:'G마켓',title:'키성장영양제 초유단백 우유칼슘',fee:1500,cur:21,max:30,mgr:'망고',del:'기타배송(박스)',time:'15:00~21:00',tags:['실배송'],note:'링크구매 + 할인쿠폰 필수.'},
+ {id:3,ch:'쿠팡',title:'코리아나 로댕 쏘 맨즈 프레쉬 올인원',fee:1500,cur:17,max:30,mgr:'만두',del:'실배송',time:'자유',tags:['실배송'],note:'정품 구매 후 솔직 리뷰.'},
+ {id:4,ch:'스마트스토어',title:'소소꼬모 명태 그림 풍수 인테리어 액자',fee:1500,cur:7,max:20,mgr:'망고',del:'기타배송(박스)',time:'자유',tags:[],note:''},
+ {id:5,ch:'쿠팡',title:'프리미엄 핸드드립 원두 200g 다크로스팅',fee:1200,cur:23,max:25,mgr:'만두',del:'실배송',time:'자유',tags:['마감임박'],note:''},
+];
+const won=n=>n.toLocaleString('ko-KR');
+function ticketHTML(c,i){
+  const ch=CH[c.ch]||{c:'#5046E4',e:'📦'}; const pct=Math.round(c.cur/c.max*100); const hot=pct>=80; const full=c.cur>=c.max;
+  const tint=ch.c+'1A';
+  return `<div class="ticket" style="animation-delay:${i*70}ms" onclick="openDetail(${c.id})">
+    <div class="t-top">
+      <div class="t-thumb" style="background:${tint}"><span class="ch" style="background:${ch.c}">${c.ch}</span>${ch.e}</div>
+      <div class="t-info">
+        <div class="t-line1"><span class="t-status ${full?'full':''}">${full?'모집마감':'모집중'}</span><span class="t-mgr">담당 ${c.mgr}</span></div>
+        <div class="t-title">${c.title}</div>
+        <div class="t-tags"><span class="t-tag">${c.del}</span>${c.tags.map(t=>`<span class="t-tag">${t}</span>`).join('')}</div>
+      </div>
+    </div>
+    <div class="t-perf"></div>
+    <div class="t-bottom">
+      <div class="t-fee"><div class="lbl">리뷰비 (페이백)</div><div class="amt">₩${won(c.fee)}</div></div>
+      <div class="t-slot"><div class="row"><span>모집현황</span><b>${c.cur}/${c.max}</b></div><div class="t-track"><div class="t-fill ${hot?'hot':''}" data-pct="${pct}"></div></div></div>
+    </div>
+  </div>`;
+}
+function renderChips(){
+  const chs=['전체',...new Set(C.map(c=>c.ch))];
+  document.getElementById('chips').innerHTML=chs.map((c,i)=>`<span class="chip${i===0?' on':''}">${c}</span>`).join('');
+}
+function fillBars(scope){ (scope||document).querySelectorAll('.t-fill').forEach(el=>{ requestAnimationFrame(()=>{ el.style.width=(el.dataset.pct||0)+'%'; }); }); }
+function render(){
+  document.getElementById('cnt').textContent=C.length;
+  document.getElementById('list').innerHTML=C.map((c,i)=>ticketHTML(c,i)).join('');
+  document.getElementById('loginTicket').innerHTML=ticketHTML(C[0],0);
+  setTimeout(()=>fillBars(),120);
+}
+let VIEW=localStorage.getItem('iad_d_view')||'list';
+function setView(v){VIEW=v;localStorage.setItem('iad_d_view',v);
+  const l=document.getElementById('list');l.classList.toggle('view-card',v==='card');l.classList.toggle('view-list',v!=='card');
+  document.getElementById('vtCard').classList.toggle('on',v==='card');document.getElementById('vtList').classList.toggle('on',v!=='card');}
+function openDetail(id){const c=C.find(x=>x.id===id);if(!c)return;const ch=CH[c.ch]||{c:'#5046E4',e:'📦'};
+  document.getElementById('dHero').textContent=ch.e;document.getElementById('dHero').style.background=ch.c+'1A';
+  document.getElementById('dTitle').textContent=c.title;
+  document.getElementById('dChips').innerHTML=`<span class="dbadge" style="background:${ch.c}">${c.ch}</span><span class="dbadge ghost">${c.del}</span>`+(c.cur>=c.max?'<span class="dbadge ghost">마감</span>':'<span class="dbadge" style="background:var(--mint)">모집중</span>');
+  document.getElementById('dFee').textContent='₩'+won(c.fee);
+  document.getElementById('dCh').textContent=c.ch;document.getElementById('dDel').textContent=c.del;document.getElementById('dTime').textContent=c.time;
+  document.getElementById('dSlot').textContent=c.cur+'/'+c.max+'명';document.getElementById('dMgr').textContent=c.mgr;
+  document.getElementById('dNote').textContent=c.note?('※ '+c.note):'';
+  go('s-detail');}
+function go(id){document.querySelectorAll('.screen').forEach(s=>s.classList.remove('on'));document.getElementById(id).classList.add('on');window.scrollTo(0,0);
+  const m={'s-camp':0,'s-mine':1,'s-info':2},t=document.querySelectorAll('.tabbar button');t.forEach(b=>b.classList.remove('on'));if(m[id]!=null)t[m[id]].classList.add('on');
+  if(id==='s-camp')setTimeout(()=>fillBars(),100);}
+function tab(el){go(el.dataset.s);}
+function enterApp(){document.getElementById('login').style.display='none';if(!localStorage.getItem('iad_d_ob'))setTimeout(openOnboard,450);}
+function openOnboard(){document.getElementById('onboard').classList.add('on');}
+function closeOnboard(){document.getElementById('onboard').classList.remove('on');localStorage.setItem('iad_d_ob','1');}
+renderChips();render();setView(VIEW);
+setTimeout(()=>fillBars(document.getElementById('login')),300);
+</script>
+</body>
+</html>
