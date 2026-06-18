@@ -21,23 +21,23 @@
   <link rel="stylesheet" href="css/index.css"/>
 <script src="api.js"></script>
 <style id="sianC">
-/* ===== 관리자 컬러: Buttermilk #FFF2BD + Mid Blue #285CCC ===== */
+/* ===== 관리자 컬러: 토스 블루 #3182F6 (딥 #1B64DA / 라이트 #E8F1FE) ===== */
 :root{
-  --p:#285CCC !important; --p-d:#1E4BAF !important; --p-l:#FFF2BD !important; --p-m:#9DB8F0 !important;
+  --p:#3182f6 !important; --p-d:#1b64da !important; --p-l:#e8f1fe !important; --p-m:#a6c8fb !important;
   --bg:#F6F8FD !important; --border:#E6EAF3 !important; --bd:#E6EAF3 !important; --border-d:#D6DCEC !important;
   --t1:#15213A !important; --t2:#46506B !important; --t3:#97A0B5 !important;
-  --nav-from:#285CCC !important; --nav-to:#1E4BAF !important;
+  --nav-from:#3182f6 !important; --nav-to:#1b64da !important;
 }
 body{ letter-spacing:-.01em; }
-.admin-header,.app-header{ box-shadow:0 2px 16px rgba(40,92,204,.28) !important; }
-.btn-submit{ background:linear-gradient(135deg,#285CCC,#1E4BAF) !important; box-shadow:0 4px 14px rgba(40,92,204,.3) !important; }
+.admin-header,.app-header{ box-shadow:0 2px 16px rgba(49,130,246,.28) !important; }
+.btn-submit{ background:linear-gradient(135deg,#3182f6,#1b64da) !important; box-shadow:0 4px 14px rgba(49,130,246,.3) !important; }
 /* 버터밀크 강조 (밝은 면 + 파란 글자) */
-.topbar-badge{ background:#FFF2BD !important; color:#1E4BAF !important; border-color:#FFF2BD !important; }
-.modal-header{ background:linear-gradient(135deg,#FFFBEA,#FFF4C6) !important; }
-.dash-campaign-header{ background:#FFF6CC !important; border-bottom:1px solid #F1E4A3 !important; }
+.topbar-badge{ background:#e8f1fe !important; color:#1b64da !important; border-color:#e8f1fe !important; }
+.modal-header{ background:linear-gradient(135deg,#f5f9ff,#e8f1fe) !important; }
+.dash-campaign-header{ background:#eef5ff !important; border-bottom:1px solid #cfe2fb !important; }
 /* 게이트/로그인: 미드 블루 */
-#screenGate{ background:linear-gradient(150deg,#1E4BAF 0%,#285CCC 58%,#5B86E0 100%) !important; }
-#adminLoginModal.modal-overlay{ background:linear-gradient(150deg,#1E4BAF 0%,#285CCC 58%,#5B86E0 100%) !important; }
+#screenGate{ background:linear-gradient(150deg,#1b64da 0%,#3182f6 58%,#6fa6f5 100%) !important; }
+#adminLoginModal.modal-overlay{ background:linear-gradient(150deg,#1b64da 0%,#3182f6 58%,#6fa6f5 100%) !important; }
 
 /* ===== 토스 스타일 폴리시 + 반응형 (관리자) ===== */
 .summary-card,.stats-card,.pane-card,.dash-campaign-block,.card,.modal-box,.modal{ border-radius:16px !important; }
@@ -82,6 +82,7 @@ body{ letter-spacing:-.01em; }
 .modal-actions button{ border-radius:10px !important; min-height:40px; font-weight:700; transition:transform .12s ease; }
 .modal-actions button:active{ transform:scale(.97); }
 </style>
+<link rel="stylesheet" href="css/toss-theme.css"/>
 </head>
 <body>
 
@@ -214,7 +215,7 @@ body{ letter-spacing:-.01em; }
           </div>
           <div class="index-status-row" id="codeVersionRow" style="display:none">
             <span class="index-status-label" style="white-space:nowrap" title="서버가 이 요청에 응답한 시각 (KST)">서버 응답시각</span>
-            <span id="codeVersionText" class="index-meta" style="color:#285CCC;font-weight:600">-</span>
+            <span id="codeVersionText" class="index-meta" style="color:#3182f6;font-weight:600">-</span>
           </div>
           <div class="index-status-row">
             <span class="index-status-label">마지막 갱신</span>
@@ -272,7 +273,7 @@ body{ letter-spacing:-.01em; }
             <span id="buildProgressTime" style="font-size:.75rem;color:var(--t3)">0초 경과</span>
           </div>
           <div style="height:6px;background:#E5E7EB;border-radius:99px;overflow:hidden">
-            <div id="buildProgressBar" style="height:100%;background:linear-gradient(90deg,var(--p),#285CCC);border-radius:99px;width:0%;transition:width .5s ease"></div>
+            <div id="buildProgressBar" style="height:100%;background:linear-gradient(90deg,var(--p),#3182f6);border-radius:99px;width:0%;transition:width .5s ease"></div>
           </div>
           <div style="display:flex;justify-content:space-between;margin-top:4px">
             <span id="buildProgressPct" style="font-size:.72rem;color:var(--t3)">0%</span>
@@ -284,7 +285,7 @@ body{ letter-spacing:-.01em; }
           <!-- ★ 스마트빌드 갱신 (Drive API + Sheets batchGet) -->
           <button id="btnSmartBuildIndex" class="btn-index-build"
             onclick="triggerSmartBuildFromSidebar()"
-            style="width:100%;background:linear-gradient(135deg,#059669,#10B981);font-size:.84rem;padding:10px 12px;position:relative;overflow:hidden"
+            style="width:100%;background:linear-gradient(135deg,#0ca678,#12b886);font-size:.84rem;padding:10px 12px;position:relative;overflow:hidden"
             title="Drive API 변경감지 + Sheets batchGet — 변경된 시트/탭만 갱신 (5분 자동주기)">
             <i class="fas fa-bolt"></i> 스마트빌드 갱신
             <span id="smartBuildSidebarBadge" style="display:none;background:rgba(255,255,255,0.3);padding:1px 6px;border-radius:10px;font-size:.68rem;margin-left:4px"></span>
@@ -297,7 +298,7 @@ body{ letter-spacing:-.01em; }
           <i class="fas fa-info-circle"></i> <span id="smartModeHintText"></span>
         </div>
         <div style="font-size:.68rem;color:#9ca3af;margin-top:4px;line-height:1.55">
-          <i class="fas fa-bolt" style="color:#059669"></i> <b>스마트빌드</b> — Drive API 변경감지 + batchGet (5분 자동, 수동 가능)
+          <i class="fas fa-bolt" style="color:#0ca678"></i> <b>스마트빌드</b> — Drive API 변경감지 + batchGet (5분 자동, 수동 가능)
         </div>
       </div>
 
@@ -305,13 +306,13 @@ body{ letter-spacing:-.01em; }
       <div style="border-top:1px solid #E5E7EB">
         <button onclick="this.nextElementSibling.style.display=this.nextElementSibling.style.display==='none'?'block':'none'; this.querySelector('.idx-chevron').classList.toggle('fa-chevron-down'); this.querySelector('.idx-chevron').classList.toggle('fa-chevron-right')"
           style="width:100%;padding:10px 16px;background:#F8FAFC;border:none;cursor:pointer;display:flex;align-items:center;gap:6px;font-size:.8rem;font-weight:700;color:#1E293B;text-align:left">
-          <i class="fas fa-folder-open" style="color:#059669"></i> 폴더 관리
+          <i class="fas fa-folder-open" style="color:#0ca678"></i> 폴더 관리
           <i class="fas fa-chevron-right idx-chevron" style="margin-left:auto;font-size:.65rem;color:#9CA3AF;transition:transform .2s"></i>
         </button>
         <div style="display:none;padding:8px 16px 12px">
           <!-- 폴더 일괄 생성 -->
           <div style="font-size:.75rem;font-weight:600;color:#374151;margin-bottom:5px">
-            <i class="fas fa-folder-plus" style="color:#059669"></i> 일괄 생성 <span style="font-size:.66rem;font-weight:400;color:#6B7280">(완료·마감 탭 제외)</span>
+            <i class="fas fa-folder-plus" style="color:#0ca678"></i> 일괄 생성 <span style="font-size:.66rem;font-weight:400;color:#6B7280">(완료·마감 탭 제외)</span>
           </div>
           <div style="display:flex;gap:4px">
             <button id="btnBatchCapture" onclick="batchCreateFolders('capture')"
@@ -323,7 +324,7 @@ body{ letter-spacing:-.01em; }
               <i class="fas fa-folder-open"></i> 리뷰폴더
             </button>
             <button id="btnBatchBoth" onclick="batchCreateFolders('both')"
-              style="flex:1;padding:7px 4px;background:#F1F6FF;color:#1E4BAF;border:1px solid #C9D8F4;border-radius:6px;font-size:.73rem;font-weight:600;cursor:pointer;display:flex;align-items:center;justify-content:center;gap:4px">
+              style="flex:1;padding:7px 4px;background:#F1F6FF;color:#1b64da;border:1px solid #C9D8F4;border-radius:6px;font-size:.73rem;font-weight:600;cursor:pointer;display:flex;align-items:center;justify-content:center;gap:4px">
               <i class="fas fa-layer-group"></i> 전체
             </button>
           </div>
@@ -374,15 +375,15 @@ body{ letter-spacing:-.01em; }
             <div id="indexScanResult" style="display:none;font-size:.71rem;margin-top:4px;max-height:200px;overflow-y:auto;border:1px solid #E5E7EB;border-radius:6px;padding:6px;background:#F9FAFB"></div>
             <div style="margin-top:6px;border-top:1px dashed #E5E7EB;padding-top:6px">
               <div style="font-size:.66rem;color:#6B7280;margin-bottom:4px">
-                <i class="fas fa-database" style="color:#285CCC"></i> <b>DB 동기화</b> — 스캔 결과를 DB에 직접 반영 (대시보드에 표시)
+                <i class="fas fa-database" style="color:#3182f6"></i> <b>DB 동기화</b> — 스캔 결과를 DB에 직접 반영 (대시보드에 표시)
               </div>
               <div style="display:flex;gap:4px">
                 <button id="btnIndexSyncDry" onclick="indexScanSync(true)"
-                  style="flex:1;padding:6px;background:#F1F6FF;color:#1E4BAF;border:1px solid #C9D8F4;border-radius:6px;font-size:.7rem;font-weight:600;cursor:pointer;display:flex;align-items:center;justify-content:center;gap:4px">
+                  style="flex:1;padding:6px;background:#F1F6FF;color:#1b64da;border:1px solid #C9D8F4;border-radius:6px;font-size:.7rem;font-weight:600;cursor:pointer;display:flex;align-items:center;justify-content:center;gap:4px">
                   <i class="fas fa-search"></i> DB 미리보기
                 </button>
                 <button id="btnIndexSyncRun" onclick="indexScanSync(false)"
-                  style="flex:1;padding:6px;background:#285CCC;color:#fff;border:1px solid #285CCC;border-radius:6px;font-size:.7rem;font-weight:600;cursor:pointer;display:flex;align-items:center;justify-content:center;gap:4px">
+                  style="flex:1;padding:6px;background:#3182f6;color:#fff;border:1px solid #3182f6;border-radius:6px;font-size:.7rem;font-weight:600;cursor:pointer;display:flex;align-items:center;justify-content:center;gap:4px">
                   <i class="fas fa-database"></i> DB 반영
                 </button>
               </div>
@@ -397,7 +398,7 @@ body{ letter-spacing:-.01em; }
           <!-- 탭명·URL 동기화 -->
           <div style="margin-bottom:8px">
             <div style="font-size:.75rem;font-weight:600;color:#374151;margin-bottom:4px">
-              <i class="fas fa-exchange-alt" style="color:#285CCC"></i> 탭명·URL 동기화
+              <i class="fas fa-exchange-alt" style="color:#3182f6"></i> 탭명·URL 동기화
               <span style="font-size:.64rem;font-weight:400;color:#6B7280">(시트 실제 탭명 ↔ DB)</span>
             </div>
             <div style="font-size:.66rem;color:#6B7280;line-height:1.45;margin-bottom:4px">
@@ -405,11 +406,11 @@ body{ letter-spacing:-.01em; }
             </div>
             <div style="display:flex;gap:4px">
               <button id="btnSyncTabNamesDry" onclick="syncTabNames(true)"
-                style="flex:1;padding:7px;background:#F1F6FF;color:#1E4BAF;border:1px solid #C9D8F4;border-radius:6px;font-size:.73rem;font-weight:600;cursor:pointer;display:flex;align-items:center;justify-content:center;gap:4px">
+                style="flex:1;padding:7px;background:#F1F6FF;color:#1b64da;border:1px solid #C9D8F4;border-radius:6px;font-size:.73rem;font-weight:600;cursor:pointer;display:flex;align-items:center;justify-content:center;gap:4px">
                 <i class="fas fa-search"></i> 미리보기
               </button>
               <button id="btnSyncTabNamesRun" onclick="syncTabNames(false)"
-                style="flex:1;padding:7px;background:#285CCC;color:#fff;border:1px solid #285CCC;border-radius:6px;font-size:.73rem;font-weight:600;cursor:pointer;display:flex;align-items:center;justify-content:center;gap:4px">
+                style="flex:1;padding:7px;background:#3182f6;color:#fff;border:1px solid #3182f6;border-radius:6px;font-size:.73rem;font-weight:600;cursor:pointer;display:flex;align-items:center;justify-content:center;gap:4px">
                 <i class="fas fa-play"></i> 실행
               </button>
             </div>
@@ -449,7 +450,7 @@ body{ letter-spacing:-.01em; }
           <!-- 캡처폴더 구조 재편성 -->
           <div style="margin-bottom:8px;border-top:1px solid #F3F4F6;padding-top:8px">
             <div style="font-size:.75rem;font-weight:600;color:#374151;margin-bottom:4px">
-              <i class="fas fa-sitemap" style="color:#285CCC"></i> 캡처폴더 구조 재편성
+              <i class="fas fa-sitemap" style="color:#3182f6"></i> 캡처폴더 구조 재편성
               <span style="font-size:.64rem;font-weight:400;color:#6B7280">(단층 → 캠페인폴더 하위)</span>
             </div>
             <div style="font-size:.66rem;color:#6B7280;line-height:1.45;margin-bottom:4px">
@@ -498,14 +499,14 @@ body{ letter-spacing:-.01em; }
           <!-- 탭 파싱 진단 -->
           <div style="border-top:1px solid #F3F4F6;padding-top:8px">
             <div style="font-size:.75rem;font-weight:600;color:#374151;margin-bottom:4px">
-              <i class="fas fa-stethoscope" style="color:#6366F1"></i> 탭 파싱 진단
+              <i class="fas fa-stethoscope" style="color:#3182f6"></i> 탭 파싱 진단
               <span style="font-size:.64rem;font-weight:400;color:#6B7280">(조회 안 되는 탭 원인 확인)</span>
             </div>
             <div style="display:flex;gap:4px;align-items:center">
               <input id="diagSheetUrl" type="url" placeholder="시트 URL (gid 포함) 붙여넣기"
                 style="flex:1;padding:6px 8px;border:1px solid #D1D5DB;border-radius:6px;font-size:.72rem">
               <button onclick="runSheetDiag()"
-                style="padding:6px 10px;background:#6366F1;color:#fff;border:none;border-radius:6px;font-size:.72rem;font-weight:600;cursor:pointer;white-space:nowrap">
+                style="padding:6px 10px;background:#3182f6;color:#fff;border:none;border-radius:6px;font-size:.72rem;font-weight:600;cursor:pointer;white-space:nowrap">
                 <i class="fas fa-stethoscope"></i> 진단
               </button>
             </div>
@@ -640,7 +641,7 @@ body{ letter-spacing:-.01em; }
           <i class="fas fa-chart-bar"></i> 대시보드
         </button>
         <button class="admin-tab-btn" data-tab="work-orders" onclick="switchAdminTab('work-orders')">
-          <i class="fas fa-clipboard-list"></i> 작업 오더 <span id="workOrderBadge" style="display:none;background:#6366F1;color:#fff;font-size:.65rem;padding:1px 5px;border-radius:8px;margin-left:4px;font-weight:700">0</span>
+          <i class="fas fa-clipboard-list"></i> 작업 오더 <span id="workOrderBadge" style="display:none;background:#3182f6;color:#fff;font-size:.65rem;padding:1px 5px;border-radius:8px;margin-left:4px;font-weight:700">0</span>
         </button>
         <button class="admin-tab-btn" data-tab="recruit" onclick="switchAdminTab('recruit')">
           <i class="fas fa-bullhorn"></i> 모집공고
@@ -682,10 +683,10 @@ body{ letter-spacing:-.01em; }
         <div id="dashWoSection" style="margin-bottom:16px;border:1px solid #E5E7EB;border-radius:12px;background:#fff;padding:14px 16px">
           <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:8px">
             <span style="font-size:.88rem;font-weight:700;color:#111827">
-              <i class="fas fa-clipboard-list" style="color:#6366F1;margin-right:6px"></i>작업오더 간편보기
+              <i class="fas fa-clipboard-list" style="color:#3182f6;margin-right:6px"></i>작업오더 간편보기
               <span style="font-size:.65rem;font-weight:400;color:#6B7280;margin-left:6px">(최신 4건)</span>
             </span>
-            <button onclick="switchAdminTab('work-orders')" style="font-size:.72rem;background:#EEF2FF;color:#3730A3;border:1px solid #C7D2FE;border-radius:7px;padding:4px 10px;cursor:pointer"><i class="fas fa-list"></i> 전체 보기</button>
+            <button onclick="switchAdminTab('work-orders')" style="font-size:.72rem;background:#e8f1fe;color:#1b64da;border:1px solid #cce0fb;border-radius:7px;padding:4px 10px;cursor:pointer"><i class="fas fa-list"></i> 전체 보기</button>
           </div>
           <div id="dashWoList" style="max-height:134px;overflow-y:auto;transition:max-height .2s ease"></div>
         </div>
@@ -703,7 +704,7 @@ body{ letter-spacing:-.01em; }
             </span>
             <span id="cronCountdownBadge" class="cron-countdown-badge" style="display:none"></span>
             <span id="dashboardIndexInfo" class="section-index-info" style="font-size:.72rem;color:var(--t3)"></span>
-            <button id="btnSyncTabNames" class="btn-sm" onclick="syncTabNames(true)" style="font-size:.78rem;background:#285CCC;color:#fff;border:none;border-radius:6px;padding:5px 12px;cursor:pointer" title="시트의 실제 탭명·URL을 DB와 동기화합니다 (먼저 미리보기 실행)">
+            <button id="btnSyncTabNames" class="btn-sm" onclick="syncTabNames(true)" style="font-size:.78rem;background:#3182f6;color:#fff;border:none;border-radius:6px;padding:5px 12px;cursor:pointer" title="시트의 실제 탭명·URL을 DB와 동기화합니다 (먼저 미리보기 실행)">
               <i class="fas fa-exchange-alt"></i> 탭명 동기화
             </button>
             <button id="btnArchiveDetect" class="btn-sm" onclick="dashboardArchiveDetect()" style="font-size:.78rem;background:#4F84E0;color:#fff;border:none;border-radius:6px;padding:5px 12px;cursor:pointer" title="완료된 탭/차수를 자동 감지하고 마감 여부를 결정합니다">
@@ -714,7 +715,7 @@ body{ letter-spacing:-.01em; }
             <button class="btn-sm" onclick="openDedupeSelector()" style="font-size:.78rem;background:#D97706;color:#fff;border:none;border-radius:6px;padding:5px 12px;cursor:pointer" title="리뷰폴더 중복 파일 정리">
               <i class="fas fa-copy"></i> 리뷰폴더 중복정리
             </button>
-            <button class="btn-sm" onclick="exportTabDashCSV()" style="font-size:.78rem;background:#059669;color:#fff;border:none;border-radius:6px;padding:5px 12px;cursor:pointer">
+            <button class="btn-sm" onclick="exportTabDashCSV()" style="font-size:.78rem;background:#0ca678;color:#fff;border:none;border-radius:6px;padding:5px 12px;cursor:pointer">
               <i class="fas fa-file-csv"></i> CSV 내보내기
             </button>
           </div>
@@ -765,7 +766,7 @@ body{ letter-spacing:-.01em; }
         <!-- 담당자 탭 + 간단/펼쳐 보기 토글 (표 헤더 상단) -->
         <div style="display:flex;align-items:center;justify-content:space-between;gap:10px;margin-bottom:8px;flex-wrap:wrap">
           <div id="tabDashManagerTabs" style="display:flex;gap:6px;flex-wrap:wrap"></div>
-          <button id="tabDashViewToggle" onclick="_toggleTabDashSimple()" style="font-size:.74rem;font-weight:700;background:#EEF2FF;color:#3730A3;border:1px solid #C7D2FE;border-radius:7px;padding:5px 12px;cursor:pointer;white-space:nowrap"><i class="fas fa-compress-alt"></i> 간단히보기</button>
+          <button id="tabDashViewToggle" onclick="_toggleTabDashSimple()" style="font-size:.74rem;font-weight:700;background:#e8f1fe;color:#1b64da;border:1px solid #cce0fb;border-radius:7px;padding:5px 12px;cursor:pointer;white-space:nowrap"><i class="fas fa-compress-alt"></i> 간단히보기</button>
         </div>
 
         <!-- 테이블 컨테이너 -->
@@ -829,7 +830,7 @@ body{ letter-spacing:-.01em; }
         <!-- ═══════════════════════════════════════════════════════ -->
         <div class="admin-section-header" style="margin-top:24px">
           <span style="font-size:.95rem;font-weight:700;color:var(--t1)">
-            <i class="fas fa-tasks" style="color:#6366F1;margin-right:6px"></i>시스템 모니터링
+            <i class="fas fa-tasks" style="color:#3182f6;margin-right:6px"></i>시스템 모니터링
           </span>
           <button class="btn-sm" onclick="loadSystemMonitor()" style="margin-left:auto;font-size:.78rem">
             <i class="fas fa-sync-alt"></i> 새로고침
@@ -848,7 +849,7 @@ body{ letter-spacing:-.01em; }
                 <button onclick="triggerSmartBuild()" class="btn-sm" style="font-size:.72rem;background:#1D4ED8;color:#fff;border:none;padding:4px 10px;border-radius:6px;cursor:pointer" title="스마트 빌드 1회 수동 실행">
                   <i class="fas fa-play"></i> 수동 실행
                 </button>
-                <button id="btnSmartBuildScheduler" onclick="toggleSmartBuildScheduler()" class="btn-sm" style="font-size:.72rem;background:#059669;color:#fff;border:none;padding:4px 10px;border-radius:6px;cursor:pointer" title="5분 주기 자동 실행 토글">
+                <button id="btnSmartBuildScheduler" onclick="toggleSmartBuildScheduler()" class="btn-sm" style="font-size:.72rem;background:#0ca678;color:#fff;border:none;padding:4px 10px;border-radius:6px;cursor:pointer" title="5분 주기 자동 실행 토글">
                   <i class="fas fa-clock"></i> 스케줄러: ON
                 </button>
                 <button onclick="triggerDbRebuild()" class="btn-sm" style="font-size:.72rem;background:#DC2626;color:#fff;border:none;padding:4px 10px;border-radius:6px;cursor:pointer" title="DB 전체 초기화 → 탭목록 재등록 → 스마트빌드">
@@ -867,7 +868,7 @@ body{ letter-spacing:-.01em; }
           <!-- Sync Queue 현황 -->
           <div style="background:#fff;border-radius:12px;padding:16px;box-shadow:0 1px 4px rgba(0,0,0,.06);border:1px solid var(--border)">
             <h4 style="margin:0 0 12px;font-size:.88rem;color:var(--t1)">
-              <i class="fas fa-stream" style="color:#6366F1"></i> Sync Queue
+              <i class="fas fa-stream" style="color:#3182f6"></i> Sync Queue
             </h4>
             <div id="syncQueueStats" style="font-size:.82rem;color:var(--t2)">
               <i class="fas fa-circle-notch fa-spin"></i> 불러오는 중...
@@ -958,8 +959,8 @@ body{ letter-spacing:-.01em; }
               <div style="font-size:1.4rem;font-weight:800;color:#2563EB" id="statSubmitRate">-</div>
               <div style="font-size:.7rem;color:#6B7280;margin-top:2px">제출률</div>
             </div>
-            <div style="text-align:center;padding:12px 8px;background:#FDF4FF;border-radius:10px">
-              <div style="font-size:1.4rem;font-weight:800;color:#285CCC" id="statCampaigns">-</div>
+            <div style="text-align:center;padding:12px 8px;background:#f5f9ff;border-radius:10px">
+              <div style="font-size:1.4rem;font-weight:800;color:#3182f6" id="statCampaigns">-</div>
               <div style="font-size:.7rem;color:#6B7280;margin-top:2px">활성 캠페인</div>
             </div>
             <div style="text-align:center;padding:12px 8px;background:#FFF7ED;border-radius:10px">
@@ -1026,7 +1027,7 @@ body{ letter-spacing:-.01em; }
 
         <!-- 요약 배지 -->
         <div id="reviewerSummaryBar" style="display:none;margin-bottom:10px;display:flex;gap:8px;flex-wrap:wrap">
-          <span id="reviewerTotalBadge" style="padding:4px 12px;background:#E3ECFF;color:#1E4BAF;border-radius:20px;font-size:.78rem;font-weight:700"></span>
+          <span id="reviewerTotalBadge" style="padding:4px 12px;background:#E3ECFF;color:#1b64da;border-radius:20px;font-size:.78rem;font-weight:700"></span>
           <span id="reviewerRecentBadge" style="padding:4px 12px;background:#D1FAE5;color:#065F46;border-radius:20px;font-size:.78rem;font-weight:700"></span>
         </div>
 
@@ -1052,7 +1053,7 @@ body{ letter-spacing:-.01em; }
               <i class="fas fa-external-link-alt"></i> 공고 페이지 미리보기
             </a>
             <button onclick="openRecruitSettingsModal()"
-               style="display:inline-flex;align-items:center;gap:5px;padding:6px 13px;background:#F1F6FF;color:#1E4BAF;border:1.5px solid #C9D8F4;border-radius:8px;font-size:.78rem;font-weight:600;cursor:pointer">
+               style="display:inline-flex;align-items:center;gap:5px;padding:6px 13px;background:#F1F6FF;color:#1b64da;border:1.5px solid #C9D8F4;border-radius:8px;font-size:.78rem;font-weight:600;cursor:pointer">
               <i class="fas fa-cog"></i> 공통 설정
             </button>
             <button onclick="openRecruitModal(null)"
@@ -1090,7 +1091,7 @@ body{ letter-spacing:-.01em; }
               <option value="revision">보완요청</option>
             </select>
             <button onclick="loadWorkOrders()"
-              style="display:inline-flex;align-items:center;gap:5px;padding:6px 13px;background:#EEF2FF;color:#3730A3;border:1.5px solid #C7D2FE;border-radius:8px;font-size:.78rem;font-weight:600;cursor:pointer">
+              style="display:inline-flex;align-items:center;gap:5px;padding:6px 13px;background:#e8f1fe;color:#1b64da;border:1.5px solid #cce0fb;border-radius:8px;font-size:.78rem;font-weight:600;cursor:pointer">
               <i class="fas fa-sync-alt"></i> 새로고침
             </button>
           </div>
@@ -1206,7 +1207,7 @@ body{ letter-spacing:-.01em; }
         <!-- 마감 요약 카드 -->
         <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:12px;margin:16px 0">
           <div style="background:#F1F6FF;border-radius:12px;padding:14px;text-align:center;border:1px solid #C9D8F4">
-            <div id="archiveCampCount" style="font-size:1.4rem;font-weight:700;color:#285CCC">0</div>
+            <div id="archiveCampCount" style="font-size:1.4rem;font-weight:700;color:#3182f6">0</div>
             <div style="font-size:.75rem;color:#6B7280">마감 캠페인</div>
           </div>
           <div style="background:#FEF3C7;border-radius:12px;padding:14px;text-align:center;border:1px solid #FDE68A">
@@ -1241,7 +1242,7 @@ body{ letter-spacing:-.01em; }
         <!-- 마감 이력 -->
         <div class="admin-section-header" style="margin-top:24px">
           <span style="font-size:.88rem;font-weight:600;color:var(--t1)">
-            <i class="fas fa-history" style="color:#6366F1;margin-right:6px"></i>마감 이력
+            <i class="fas fa-history" style="color:#3182f6;margin-right:6px"></i>마감 이력
           </span>
         </div>
         <div id="archiveHistoryWrap" style="font-size:.82rem;color:var(--t2);margin-top:8px">
@@ -1534,32 +1535,32 @@ body{ letter-spacing:-.01em; }
     </div>
 
     <!-- ★ 소득신고 정보 입력란 (진행방식=소득신고일 때 표시) -->
-    <div id="ofIncomeSection" style="display:none;margin-bottom:16px;padding:16px;background:#F1F6FF;border:2px solid #285CCC;border-radius:12px">
-      <div style="font-size:.8rem;font-weight:700;color:#1E4BAF;margin-bottom:12px;display:flex;align-items:center;gap:6px">
+    <div id="ofIncomeSection" style="display:none;margin-bottom:16px;padding:16px;background:#F1F6FF;border:2px solid #3182f6;border-radius:12px">
+      <div style="font-size:.8rem;font-weight:700;color:#1b64da;margin-bottom:12px;display:flex;align-items:center;gap:6px">
         <i class="fas fa-id-card"></i> 소득신고 정보 입력
-        <span style="font-size:.68rem;font-weight:400;color:#285CCC">(진행방식: 소득신고)</span>
+        <span style="font-size:.68rem;font-weight:400;color:#3182f6">(진행방식: 소득신고)</span>
       </div>
       <div style="display:flex;flex-direction:column;gap:10px">
         <div>
-          <label style="font-size:.75rem;font-weight:700;color:#1E4BAF;display:block;margin-bottom:4px">
+          <label style="font-size:.75rem;font-weight:700;color:#1b64da;display:block;margin-bottom:4px">
             소득신고 명의 <span style="color:#EF4444">*</span>
           </label>
           <input id="ofIncomeName" type="text" placeholder="소득신고 명의자 이름"
-            style="width:100%;padding:9px 12px;border:1.5px solid #9DB8F0;border-radius:8px;font-size:.85rem;outline:none;font-family:inherit;box-sizing:border-box"
-            onfocus="this.style.borderColor='#285CCC'" onblur="this.style.borderColor='#9DB8F0'">
+            style="width:100%;padding:9px 12px;border:1.5px solid #a6c8fb;border-radius:8px;font-size:.85rem;outline:none;font-family:inherit;box-sizing:border-box"
+            onfocus="this.style.borderColor='#3182f6'" onblur="this.style.borderColor='#a6c8fb'">
         </div>
         <div>
-          <label style="font-size:.75rem;font-weight:700;color:#1E4BAF;display:block;margin-bottom:4px">
+          <label style="font-size:.75rem;font-weight:700;color:#1b64da;display:block;margin-bottom:4px">
             주민등록번호 <span style="color:#EF4444">*</span>
             <span style="font-weight:400;color:#9CA3AF">13자리</span>
           </label>
           <input id="ofResidentNo" type="text" placeholder="000000-0000000" maxlength="14"
-            style="width:100%;padding:9px 12px;border:1.5px solid #9DB8F0;border-radius:8px;font-size:.85rem;outline:none;font-family:inherit;box-sizing:border-box;letter-spacing:1px"
-            onfocus="this.style.borderColor='#285CCC'" onblur="this.style.borderColor='#9DB8F0'"
+            style="width:100%;padding:9px 12px;border:1.5px solid #a6c8fb;border-radius:8px;font-size:.85rem;outline:none;font-family:inherit;box-sizing:border-box;letter-spacing:1px"
+            onfocus="this.style.borderColor='#3182f6'" onblur="this.style.borderColor='#a6c8fb'"
             oninput="_formatResidentNo(this)">
           <div id="ofResidentNoHint" style="font-size:.68rem;color:#9CA3AF;margin-top:3px">숫자 13자리 자동 형식화 (000000-0000000)</div>
         </div>
-        <div style="background:#E3ECFF;border-radius:8px;padding:8px 10px;font-size:.7rem;color:#1E4BAF;line-height:1.5">
+        <div style="background:#E3ECFF;border-radius:8px;padding:8px 10px;font-size:.7rem;color:#1b64da;line-height:1.5">
           <i class="fas fa-shield-alt" style="margin-right:4px"></i>
           소득신고 정보는 소득세 신고 목적으로만 사용되며, 안전하게 저장됩니다.
         </div>
@@ -1614,7 +1615,7 @@ body{ letter-spacing:-.01em; }
           <img id="rf_pp_img" alt="" style="width:60px;height:60px;object-fit:cover;border-radius:6px;border:1px solid var(--border);background:#fff">
           <div style="min-width:0;flex:1">
             <div id="rf_pp_name" style="font-weight:700;font-size:.82rem;word-break:break-word"></div>
-            <div id="rf_pp_price" style="font-size:.82rem;color:var(--p,#6366F1);font-weight:700;margin-top:2px"></div>
+            <div id="rf_pp_price" style="font-size:.82rem;color:var(--p,#3182f6);font-weight:700;margin-top:2px"></div>
           </div>
         </div>
         <input id="rf_thumbnail" type="hidden">
@@ -1766,9 +1767,9 @@ body{ letter-spacing:-.01em; }
           <i class="fas fa-mobile-alt"></i> 리뷰어에게 보여지는 모습 (실시간)
         </div>
         <div id="rf_preview_card" style="
-          background:#F5F4FF;border-radius:16px;padding:14px;
+          background:#f4f8ff;border-radius:16px;padding:14px;
           max-width:380px;margin:0 auto;
-          box-shadow:inset 0 0 0 1px rgba(124,58,237,.12)
+          box-shadow:inset 0 0 0 1px rgba(49,130,246,.12)
         "></div>
       </div>
     </div>
@@ -1928,7 +1929,7 @@ body{ letter-spacing:-.01em; }
       <div style="margin-bottom:14px">
         <div style="font-size:.8rem;font-weight:700;color:var(--t2);margin-bottom:8px;display:flex;align-items:center;gap:6px">
           <i class="fas fa-list"></i> 등록된 영업담당자 목록
-          <button onclick="loadStaffList()" style="margin-left:auto;font-size:.72rem;padding:2px 8px;background:#ECFDF5;color:#059669;border:none;border-radius:5px;cursor:pointer;font-weight:600">
+          <button onclick="loadStaffList()" style="margin-left:auto;font-size:.72rem;padding:2px 8px;background:#ECFDF5;color:#0ca678;border:none;border-radius:5px;cursor:pointer;font-weight:600">
             <i class="fas fa-sync-alt"></i> 새로고침
           </button>
         </div>
@@ -1943,7 +1944,7 @@ body{ letter-spacing:-.01em; }
 
       <!-- 영업담당자 추가 -->
       <div>
-        <div style="font-size:.8rem;font-weight:700;color:var(--t2);margin-bottom:8px"><i class="fas fa-user-plus" style="color:#059669"></i> 새 영업담당자 추가</div>
+        <div style="font-size:.8rem;font-weight:700;color:var(--t2);margin-bottom:8px"><i class="fas fa-user-plus" style="color:#0ca678"></i> 새 영업담당자 추가</div>
         <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-bottom:8px">
           <div class="field-group" style="margin:0">
             <label style="font-size:.75rem">이름</label>
@@ -1958,7 +1959,7 @@ body{ letter-spacing:-.01em; }
           </div>
         </div>
         <p id="addStaffError" class="login-error hidden" style="margin-bottom:8px"></p>
-        <button class="btn-primary" onclick="addStaffUser()" style="width:100%;padding:9px;background:#059669;border-color:#059669">
+        <button class="btn-primary" onclick="addStaffUser()" style="width:100%;padding:9px;background:#0ca678;border-color:#0ca678">
           <i class="fas fa-plus"></i> 추가
         </button>
       </div>
@@ -2049,7 +2050,7 @@ body{ letter-spacing:-.01em; }
       <button class="tc-opt" data-val="">미지정</button>
       <button class="tc-opt" data-val="현금">현금</button>
       <button class="tc-opt" data-val="사업자현영">사업자현영</button>
-      <button class="tc-opt" data-val="소득신고" style="color:#285CCC;border-color:#285CCC">소득신고</button>
+      <button class="tc-opt" data-val="소득신고" style="color:#3182f6;border-color:#3182f6">소득신고</button>
     </div>
   </div>
   <!-- ★ 입금처리 설정 -->
@@ -2238,7 +2239,7 @@ body{ letter-spacing:-.01em; }
 <div class="memo-overlay" id="memoOverlay" onclick="if(event.target===this)closeMemoPanel()">
   <div class="memo-modal">
     <div class="memo-modal-head">
-      <i class="fas fa-comment-dots" style="color:#6366F1;font-size:.95rem"></i>
+      <i class="fas fa-comment-dots" style="color:#3182f6;font-size:.95rem"></i>
       <span class="memo-modal-title" id="memoModalTitle">메모</span>
       <button onclick="closeMemoPanel()" style="background:none;border:none;cursor:pointer;color:#9CA3AF;font-size:1rem;padding:2px 4px"><i class="fas fa-times"></i></button>
     </div>
@@ -2302,7 +2303,7 @@ body{ letter-spacing:-.01em; }
 
     <div class="addcamp-btns">
       <button class="addcamp-btn-cancel" onclick="closeAddCampaign()">취소</button>
-      <button class="addcamp-btn-ok" id="addCampPreviewBtn" onclick="previewAddCampaign()" disabled style="background:#6366f1;">
+      <button class="addcamp-btn-ok" id="addCampPreviewBtn" onclick="previewAddCampaign()" disabled style="background:#3182f6;">
         <i class="fas fa-search"></i> 확인
       </button>
       <button class="addcamp-btn-ok" id="addCampSubmitBtn" onclick="submitAddCampaign()" style="display:none;">

@@ -9,23 +9,23 @@
 <style>
 *,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
 :root{
-  --p:#7C3AED;--p-l:#EDE9FE;
-  --ok:#059669;--ok-l:#D1FAE5;
+  --p:#3182f6;--p-l:#e8f1fe;
+  --ok:#0ca678;--ok-l:#D1FAE5;
   --warn:#D97706;--warn-l:#FEF3C7;
   --err:#DC2626;
-  --bg:#F5F4FF;
+  --bg:#f4f8ff;
   --card:#fff;
   --t1:#111827;--t2:#374151;--t3:#6B7280;--t4:#9CA3AF;
   --border:#E5E7EB;
   --r:16px;--rs:10px;
   --sh:0 2px 12px rgba(0,0,0,.07);
-  --shm:0 8px 32px rgba(124,58,237,.14);
+  --shm:0 8px 32px rgba(49,130,246,.14);
 }
 body{font-family:'Pretendard',sans-serif;background:var(--bg);color:var(--t1);min-height:100vh;padding-bottom:120px}
 
 /* ── 헤더 ── */
 .rc-header{
-  background:linear-gradient(135deg,#4C1D95 0%,#7C3AED 55%,#A78BFA 100%);
+  background:linear-gradient(135deg,#144a9e 0%,#3182f6 55%,#6fa6f5 100%);
   padding:24px 20px 20px;text-align:center;color:#fff;
   position:relative;overflow:hidden
 }
@@ -62,7 +62,7 @@ body{font-family:'Pretendard',sans-serif;background:var(--bg);color:var(--t1);mi
 
 /* 카드 헤더 */
 .rc-card-head{
-  background:linear-gradient(135deg,#2D1B69 0%,#3B1FA8 100%);
+  background:linear-gradient(135deg,#0f2a5e 0%,#1b64da 100%);
   padding:14px 16px;
   display:flex;align-items:flex-start;gap:10px
 }
@@ -92,7 +92,7 @@ body{font-family:'Pretendard',sans-serif;background:var(--bg);color:var(--t1);mi
 .rc-badge-0{background:#D1FAE5;color:#065F46}
 .rc-badge-1{background:#DBEAFE;color:#1E40AF}
 .rc-badge-2{background:#FEF3C7;color:#92400E}
-.rc-badge-3{background:#EDE9FE;color:#4C1D95}
+.rc-badge-3{background:#e8f1fe;color:#144a9e}
 .rc-badge-4{background:#FCE7F3;color:#831843}
 .rc-badge-5{background:#ECFDF5;color:#064E3B}
 
@@ -129,16 +129,16 @@ body{font-family:'Pretendard',sans-serif;background:var(--bg);color:var(--t1);mi
 .rc-card-footer{padding:14px 16px}
 .rc-join-btn{
   display:block;width:100%;padding:14px;
-  background:linear-gradient(135deg,#7C3AED 0%,#6D28D9 100%);color:#fff;
+  background:linear-gradient(135deg,#3182f6 0%,#1b64da 100%);color:#fff;
   border:none;border-radius:12px;
   font-size:.95rem;font-weight:800;
   text-align:center;text-decoration:none;
   cursor:pointer;
   transition:background .15s,transform .1s,box-shadow .15s;
-  box-shadow:0 4px 12px rgba(124,58,237,.3);
+  box-shadow:0 4px 12px rgba(49,130,246,.3);
   letter-spacing:.02em
 }
-.rc-join-btn:hover{transform:translateY(-1px);box-shadow:0 6px 18px rgba(124,58,237,.45)}
+.rc-join-btn:hover{transform:translateY(-1px);box-shadow:0 6px 18px rgba(49,130,246,.45)}
 .rc-join-btn:active{transform:translateY(0)}
 .rc-join-btn:disabled{background:#9CA3AF;cursor:not-allowed;box-shadow:none;transform:none}
 .rc-join-btn i{margin-right:6px}
@@ -167,7 +167,7 @@ body{font-family:'Pretendard',sans-serif;background:var(--bg);color:var(--t1);mi
 }
 .rc-modal-overlay.show .rc-modal{transform:translateY(0)}
 .rc-modal-header{
-  background:linear-gradient(135deg,#4C1D95 0%,#7C3AED 100%);
+  background:linear-gradient(135deg,#144a9e 0%,#3182f6 100%);
   padding:20px;color:#fff;text-align:center
 }
 .rc-modal-header h3{font-size:1.1rem;font-weight:700}
@@ -187,7 +187,7 @@ body{font-family:'Pretendard',sans-serif;background:var(--bg);color:var(--t1);mi
   transition:background .15s
 }
 .rc-modal-btn.primary{background:var(--p);color:#fff}
-.rc-modal-btn.primary:hover{background:#6D28D9}
+.rc-modal-btn.primary:hover{background:#1b64da}
 .rc-modal-btn.primary:disabled{background:#9CA3AF;cursor:not-allowed}
 .rc-modal-btn.secondary{background:#F3F4F6;color:var(--t2)}
 .rc-modal-btn.secondary:hover{background:#E5E7EB}
@@ -250,7 +250,7 @@ body{font-family:'Pretendard',sans-serif;background:var(--bg);color:var(--t1);mi
 </style>
 <style id="sianC">
 /* ===== 시안 C 톤 오버레이 ===== */
-:root{ --p:#5046E4; --p-l:#F2F1FE; --bg:#F4F5F8; --t1:#191F28; --t2:#5B6472; --t3:#A8AEBA; --t4:#A8AEBA; --border:#EFEFF3; }
+:root{ --p:#3182f6; --p-l:#e8f1fe; --bg:#F4F5F8; --t1:#191F28; --t2:#5B6472; --t3:#A8AEBA; --t4:#A8AEBA; --border:#EFEFF3; }
 body{ background:#F4F5F8 !important; letter-spacing:-.01em; }
 .rc-header{ background:#fff !important; color:#191F28 !important; border-bottom:1px solid #EFEFF3 !important; }
 .rc-header::before{ display:none !important; }
@@ -260,6 +260,7 @@ body{ background:#F4F5F8 !important; letter-spacing:-.01em; }
 .rc-footer-fixed{ background:#fff !important; border-top:1px solid #EFEFF3 !important; }
 </style>
 <script src="api.js"></script>
+<link rel="stylesheet" href="css/toss-theme.css"/>
 </head>
 <body>
 
