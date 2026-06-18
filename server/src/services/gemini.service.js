@@ -43,14 +43,19 @@ function _withTimeout(promise, ms, label) {
 }
 
 // 라운드로빈 + 일시오류 시 키회전 재시도 + 호출 타임아웃
-async function _runModel(parts, label) {
+// genConfigOverride: 호출별 generationConfig 덮어쓰기(예: maxOutputTokens 확대)
+async function _runModel(parts, label, genConfigOverride) {
   if (!_initGemini()) throw new Error('Gemini API가 설정되지 않았습니다. GEMINI_API_KEY(S)를 확인하세요.');
   const attempts = Math.max(2, Math.min(_modelPool.length, 3));
   let lastErr;
   for (let i = 0; i < attempts; i++) {
     const { model, key } = _getModel();
     try {
-      const res = await _withTimeout(model.generateContent(parts), GEMINI_TIMEOUT_MS, `[Gemini ${label}]`);
+      const req = genConfigOverride
+        ? { contents: [{ role: 'user', parts: Array.isArray(parts) ? parts : [parts] }],
+            generationConfig: { ...GEN_CONFIG, ...genConfigOverride } }
+        : parts;
+      const res = await _withTimeout(model.generateContent(req), GEMINI_TIMEOUT_MS, `[Gemini ${label}]`);
       return { text: res.response.text(), key };
     } catch (e) {
       lastErr = e;
@@ -351,8 +356,70 @@ async function explainErrorKo({ flow, step, message, code } = {}) {
   }
 }
 
+// ═══════════════════════════════════════════════════════════
+// 4. 오류디버깅 다중 에이전트 분석 — 레드팀/블루팀/감독관/예방가드/결정자
+//    (errorDebug.service 의 "오류검증 및 분석"에서 호출)
+//    ★ 실제 코드를 수정하거나 운영 작업을 재현하지 않는다(정적 분석 + 추론만).
+//    실패/미설정 시 null 반환 → 호출부가 규칙기반 fallback 으로 대체.
+// ═══════════════════════════════════════════════════════════
+async function analyzeErrorAgents(p = {}) {
+  try {
+    if (!_initGemini()) return null;
+    const safe = (v, n) => String(v == null ? '' : v).slice(0, n);
+    const prompt = `너는 리뷰웹시스템의 "오류 디버깅 다중 에이전트"다.
+아래 수집된 오류 1건을 즉시 수정하지 말고, 역할을 분리해 분석하라.
+규칙:
+- 실제 코드 수정이나 운영 작업(저장/삭제/발송/결제/상태변경/외부 API 실행)을 재현하지 않는다. 정적 추론만.
+- mutating(쓰기) 요청이거나 보호대상(리뷰주문/결제/계정/외부API/대량작업)이면 자동 재현은 차단(blocked)으로 본다.
+- 추측은 단정하지 말고 한국어로 간결히. 모든 텍스트는 한국어.
+
+[오류 입력]
+- 오류범주(category): ${safe(p.category, 40)}
+- 심각도(severity): ${safe(p.severity, 20)}
+- 기능/단계: ${safe(p.flow_ko, 40)} / ${safe(p.step_ko, 40)}
+- 발생화면/위치(source): ${safe(p.source, 40)}
+- HTTP: ${safe(p.method, 10)} ${safe(p.path, 120)} ${safe(p.statusCode, 8)}
+- 한글요약(message_ko): ${safe(p.message_ko, 200)}
+- 원본오류(message_raw): ${safe(p.message_raw, 400)}
+- 오류코드: ${safe(p.error_code, 60)}
+- 발생횟수: ${safe(p.occurrence_count, 12)}
+- 쓰기요청 여부(mutating): ${p.mutating ? '예' : '아니오'}
+- 보호대상 관련(protected): ${p.protected ? '예' : '아니오'}
+- 자동재현 안전(repro_safe): ${p.repro_safe ? '예' : '아니오'}
+
+반드시 아래 JSON 스키마로만 답하라(키 누락 금지):
+{
+  "verify": {"verdict":"likely_reproducible|not_reproduced_static|likely_resolved_by_other_change|blocked","evidence":"근거 1~2문장","next_action":"다음 처리 방향"},
+  "red_team": {"conditions":"발생 조건","user_impact":"사용자 피해","data_risk":"방치 시 데이터/상태 문제","recurrence":"재발 조건"},
+  "blue_team": {"input_validation":"입력검증 방어","exception_handling":"예외처리","state_guard":"상태전이 방어","idempotency":"중복실행 방지","external_api":"외부 API 실패 처리","regression_tests":"회귀 테스트"},
+  "supervisor": {"overreach":"원인분석 과한지","scope":"수정범위 적정성","symptom_vs_cause":"증상만 막는지","side_effects":"정상흐름 영향","narrowest_fix":"가장 좁고 안전한 해결책"},
+  "prevention_guard": {"affected_screens":"영향 화면","affected_apis":"영향 API","data_flows":"영향 데이터 흐름","external_impact":"외부 연동 영향","new_risks":"새로 생길 오류","blockers":["구현 전 차단 조건(없으면 빈 배열)"],"must_verify":["필수 검증 항목(최소 1개)"],"safe_to_implement":true},
+  "decider": {"verdict":"implement|implement_after_preflight|needs_more_context|ignore","reason":"판정 근거"},
+  "preflight": ["implement_after_preflight 시 사전 확인 항목(아니면 빈 배열)"],
+  "go_no_go": "진행/중단 기준(implement_after_preflight 시 필수)",
+  "fix_scope": "수정 범위",
+  "test_plan": "테스트 계획",
+  "residual_risk": "잔여 위험",
+  "summary_ko": "한 줄 요약"
+}`;
+
+    const { text } = await _runModel([{ text: prompt }], '[ErrorAgents]', { maxOutputTokens: 2048 });
+    let obj = null;
+    try { obj = JSON.parse(text); }
+    catch (_) {
+      const m = text && text.match(/\{[\s\S]*\}/);
+      if (m) { try { obj = JSON.parse(m[0]); } catch (_) { obj = null; } }
+    }
+    return obj && typeof obj === 'object' ? obj : null;
+  } catch (err) {
+    logger.warn(`[Gemini] 오류 에이전트 분석 실패(무시): ${err.message}`);
+    return null;
+  }
+}
+
 module.exports = {
   extractOrderFromImage,
   verifyAddressMatch,
   explainErrorKo,
+  analyzeErrorAgents,
 };
