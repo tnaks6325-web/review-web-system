@@ -344,6 +344,15 @@ body{ background:#F4F5F8 !important; letter-spacing:-.01em; }
 .v-header-title{ color:#191F28 !important; }
 .v-header-badge{ background:#F2F1FE !important; border:none !important; color:#5046E4 !important; }
 .v-stat-card{ border:1px solid #EFEFF3 !important; box-shadow:0 1px 6px rgba(17,24,40,.05) !important; }
+/* ── 반응형 ── */
+@media (max-width:768px){
+  .v-header{ flex-wrap:wrap; gap:6px 10px; padding:12px 16px !important; }
+  .v-header-updated{ margin-left:0 !important; }
+  .v-body{ padding:12px 14px 50px !important; }
+}
+@media (max-width:480px){
+  .v-summary{ grid-template-columns:1fr !important; }
+}
 </style>
 <script src="api.js"></script>
 </head>
