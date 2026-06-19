@@ -1024,7 +1024,7 @@ const VALID_STATUSES = ['new', 'investigating', 'resolved', 'ignored'];
 //       resolved(true/false/all) — 구버전 호환, page, limit
 router.get('/error-logs', authMiddleware, adminOrMasterMiddleware, async (req, res, next) => {
   try {
-    const { category, severity, flow } = req.query;
+    const { category, severity, flow, source } = req.query;
     const statusParam = (req.query.status || '').toLowerCase();
     const resolvedParam = (req.query.resolved || '').toLowerCase();
     const page = Math.max(1, parseInt(req.query.page, 10) || 1);
@@ -1048,6 +1048,7 @@ router.get('/error-logs', authMiddleware, adminOrMasterMiddleware, async (req, r
     if (category) { params.push(category); where.push(`category = $${params.length}`); }
     if (severity) { params.push(severity); where.push(`severity = $${params.length}`); }
     if (flow)     { params.push(flow);     where.push(`flow = $${params.length}`); }
+    if (source)   { params.push(source);   where.push(`source = $${params.length}`); }
     const whereSql = where.length ? 'WHERE ' + where.join(' AND ') : '';
 
     const listParams = params.slice();

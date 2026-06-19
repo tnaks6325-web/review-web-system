@@ -1329,62 +1329,67 @@ body{ letter-spacing:-.01em; }
         </div>
       </div><!-- /tab-settings -->
 
-      <!-- 오류디버깅(Error Debugging) 탭 -->
+      <!-- 오류디버깅(Error Debugging) 탭 — 좌측 목록 + 우측 상세 패널(모달 아님) -->
       <div id="tab-errorlogs" class="admin-tab-pane" style="padding:16px">
         <div class="admin-section-header">
           <span style="font-size:.95rem;font-weight:700;color:var(--t1)">
             <i class="fas fa-bug" style="color:#EF4444;margin-right:6px"></i>오류디버깅
           </span>
-          <div style="display:flex;gap:6px;margin-left:auto">
-            <button class="btn-sm" onclick="loadErrorLogs()" style="font-size:.78rem">
-              <i class="fas fa-sync-alt"></i> 새로고침
-            </button>
+          <div style="display:flex;gap:6px;margin-left:auto;align-items:center;flex-wrap:wrap">
+            <select id="errLogStatusFilter" onchange="loadErrorLogs()" style="padding:5px 8px;border:1px solid #D1D5DB;border-radius:8px;font-size:.78rem">
+              <option value="open" selected>미해결(신규+확인중)</option>
+              <option value="new">신규</option>
+              <option value="investigating">확인중</option>
+              <option value="resolved">해결됨</option>
+              <option value="ignored">무시</option>
+              <option value="all">전체 상태</option>
+            </select>
+            <select id="errLogSourceFilter" onchange="loadErrorLogs()" style="padding:5px 8px;border:1px solid #D1D5DB;border-radius:8px;font-size:.78rem">
+              <option value="">전체 수집원</option>
+              <option value="server">서버</option>
+              <option value="external_api">외부 API</option>
+              <option value="db">DB</option>
+              <option value="client">브라우저</option>
+            </select>
+            <select id="errLogCategoryFilter" onchange="loadErrorLogs()" style="padding:5px 8px;border:1px solid #D1D5DB;border-radius:8px;font-size:.78rem">
+              <option value="">전체 범주</option>
+              <option value="timeout">로딩시간 초과</option>
+              <option value="quota">호출한도 초과</option>
+              <option value="network">네트워크</option>
+              <option value="auth">인증</option>
+              <option value="permission">권한</option>
+              <option value="validation">입력검증</option>
+              <option value="db">DB</option>
+              <option value="external_api">외부 API</option>
+              <option value="not_found">대상 없음</option>
+              <option value="unknown">알 수 없음</option>
+            </select>
+            <button class="btn-sm" onclick="loadErrorLogs()" style="font-size:.78rem"><i class="fas fa-sync-alt"></i> 새로고침</button>
           </div>
         </div>
-        <p style="font-size:.78rem;color:var(--t3);margin:8px 0 12px">
-          오류를 즉시 수정하지 않고 <b>수집 → 오류검증 → 레드/블루/감독관/예방가드/결정자 분석 → 이행요청</b> 순서로 안전하게 관리합니다.
-          같은 유형은 발생 횟수로 묶이며, 해결된 오류가 다시 발생하면 신규로 재오픈됩니다.
-        </p>
-        <div style="display:flex;gap:8px;margin-bottom:12px;align-items:center;flex-wrap:wrap">
-          <select id="errLogStatusFilter" onchange="loadErrorLogs()" style="padding:5px 8px;border:1px solid #D1D5DB;border-radius:8px;font-size:.78rem">
-            <option value="open" selected>미해결(신규+확인중)</option>
-            <option value="new">신규</option>
-            <option value="investigating">확인중</option>
-            <option value="resolved">해결됨</option>
-            <option value="ignored">무시</option>
-            <option value="all">전체</option>
-          </select>
-          <select id="errLogCategoryFilter" onchange="loadErrorLogs()" style="padding:5px 8px;border:1px solid #D1D5DB;border-radius:8px;font-size:.78rem">
-            <option value="">전체 종류</option>
-            <option value="timeout">로딩시간 초과</option>
-            <option value="quota">호출한도 초과</option>
-            <option value="network">네트워크</option>
-            <option value="auth">인증</option>
-            <option value="permission">권한</option>
-            <option value="validation">입력검증</option>
-            <option value="db">DB</option>
-            <option value="external_api">외부 API</option>
-            <option value="not_found">대상 없음</option>
-            <option value="unknown">알 수 없음</option>
-          </select>
-          <span id="errLogSummary" style="font-size:.76rem;color:var(--t3)"></span>
-        </div>
-        <div id="errorLogListWrap" style="font-size:.82rem;color:var(--t2)">
-          <span style="color:var(--t3)">탭 전환 시 자동 로드</span>
+        <div style="margin:6px 0 10px"><span id="errLogSummary" style="font-size:.76rem;color:var(--t3)"></span></div>
+        <div style="display:flex;gap:14px;align-items:flex-start;flex-wrap:wrap">
+          <!-- 좌: 오류 목록 -->
+          <div id="errorLogListWrap" style="flex:1 1 540px;min-width:300px;max-height:calc(100vh - 230px);overflow:auto;font-size:.82rem;color:var(--t2)">
+            <span style="color:var(--t3)">탭 전환 시 자동 로드</span>
+          </div>
+          <!-- 우: 상세 · 디버깅 패널 -->
+          <div style="flex:1 1 400px;min-width:300px;position:sticky;top:8px">
+            <div style="border:1px solid #E5E7EB;border-radius:14px;background:#fff;overflow:hidden">
+              <div style="display:flex;align-items:center;gap:8px;padding:12px 16px;border-bottom:1px solid #EEF0F3">
+                <i class="fas fa-bug" style="color:#EF4444"></i>
+                <b style="font-size:.92rem;color:var(--t1)">오류 상세 · 디버깅</b>
+              </div>
+              <div id="errDetailBody" style="padding:16px;font-size:.82rem;color:var(--t2);max-height:calc(100vh - 300px);overflow:auto">
+                <div style="display:flex;flex-direction:column;align-items:center;justify-content:center;min-height:240px;color:var(--t3);text-align:center;padding:24px">
+                  <i class="fas fa-clipboard-list" style="font-size:1.8rem;margin-bottom:10px;color:#CBD5E1"></i>
+                  <div style="font-size:.82rem">왼쪽 목록에서 오류를 선택하면<br>여기에 <b>상세 · 디버깅</b>이 표시됩니다.</div>
+                </div>
+              </div>
+            </div>
+          </div>
         </div>
       </div><!-- /tab-errorlogs -->
-
-      <!-- 오류 상세 모달 (오류디버깅) -->
-      <div id="errDetailModal" style="display:none;position:fixed;inset:0;background:rgba(17,24,39,.55);z-index:1000;padding:16px;overflow:auto">
-        <div style="max-width:760px;margin:24px auto;background:#fff;border-radius:14px;box-shadow:0 20px 50px rgba(0,0,0,.25);overflow:hidden">
-          <div style="display:flex;align-items:center;gap:8px;padding:14px 18px;border-bottom:1px solid #EEF0F3;position:sticky;top:0;background:#fff;z-index:1">
-            <i class="fas fa-bug" style="color:#EF4444"></i>
-            <b style="font-size:.95rem;color:var(--t1)">오류 상세 · 디버깅</b>
-            <button onclick="closeErrDetail()" style="margin-left:auto;background:none;border:none;font-size:1.1rem;color:var(--t3);cursor:pointer"><i class="fas fa-times"></i></button>
-          </div>
-          <div id="errDetailBody" style="padding:18px;font-size:.82rem;color:var(--t2);max-height:calc(100vh - 120px);overflow:auto"></div>
-        </div>
-      </div>
 
     </main>
   </div><!-- /screenAdmin -->
