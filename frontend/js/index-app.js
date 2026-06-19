@@ -11456,16 +11456,22 @@ function _errList(title, arr, color) {
 
 // ── 에이전트 진행도 스테퍼 ──
 // mode: 'done'(전부 완료) | 'analyzing'(active 단계 진행중) | 'pending'(분석 전)
-function _errAgentStepper(mode, activeStep) {
-  const total = ERR_AGENTS.length;
-  const headBadge = mode === 'done'
-    ? '<span style="font-size:.66rem;color:#fff;background:#10B981;padding:2px 8px;border-radius:6px;font-weight:700">분석 완료</span>'
-    : mode === 'analyzing'
-      ? '<span style="font-size:.66rem;color:#fff;background:#F59E0B;padding:2px 8px;border-radius:6px;font-weight:700"><i class="fas fa-circle-notch fa-spin"></i> 분석 중</span>'
-      : '<span style="font-size:.66rem;color:#6B7280;background:#F3F4F6;padding:2px 8px;border-radius:6px;font-weight:700">분석 전</span>';
-  const doneN = mode === 'done' ? total : (mode === 'analyzing' ? Math.min(activeStep, total) : 0);
+// 진행도 애니메이션용 스타일(1회 주입): 가로바 줄무늬 모션 + 활성 원 펄스
+function _ensureErrStyles() {
+  if (document.getElementById('errDbgStyles')) return;
+  const s = document.createElement('style');
+  s.id = 'errDbgStyles';
+  s.textContent =
+    '@keyframes errBarStripes{from{background-position:0 0}to{background-position:34px 0}}' +
+    '.errbar-fill{background-color:#7C3AED;background-image:linear-gradient(135deg,rgba(255,255,255,.35) 25%,transparent 25%,transparent 50%,rgba(255,255,255,.35) 50%,rgba(255,255,255,.35) 75%,transparent 75%,transparent);background-size:34px 34px;animation:errBarStripes .7s linear infinite;transition:width .55s ease}' +
+    '@keyframes errPulse{0%,100%{box-shadow:0 0 0 3px #FDE68A}50%{box-shadow:0 0 0 6px #FCD34D}}' +
+    '.errcircle-active{animation:errPulse 1s ease-in-out infinite}';
+  document.head.appendChild(s);
+}
 
-  const circles = ERR_AGENTS.map((ag, i) => {
+// 6단계 원형(스테퍼) — 부분 갱신에도 재사용 (카드 래퍼 없이 원형 row 만 반환)
+function _errStepperCircles(mode, activeStep) {
+  return ERR_AGENTS.map((ag, i) => {
     const n = i + 1;
     let state;
     if (mode === 'done' || (mode === 'analyzing' && n < activeStep)) state = 'done';
@@ -11479,12 +11485,22 @@ function _errAgentStepper(mode, activeStep) {
     const stTxt = state === 'done' ? '완료' : state === 'active' ? '분석중' : '대기';
     const stCol = state === 'done' ? '#059669' : state === 'active' ? '#D97706' : 'var(--t3)';
     return `<div style="flex:1;text-align:center;min-width:0">
-      <div style="width:30px;height:30px;border-radius:50%;background:${bg};color:${fg};display:inline-flex;align-items:center;justify-content:center;font-size:.72rem;box-shadow:${state==='active'?'0 0 0 3px #FDE68A':'none'}">${ic}</div>
+      <div class="${state === 'active' ? 'errcircle-active' : ''}" style="width:30px;height:30px;border-radius:50%;background:${bg};color:${fg};display:inline-flex;align-items:center;justify-content:center;font-size:.72rem">${ic}</div>
       <div style="font-size:.62rem;font-weight:700;color:var(--t1);margin-top:3px">${ag.name}</div>
       <div style="font-size:.58rem;color:${stCol};font-weight:600">${stTxt}</div>
       <div style="font-size:.54rem;color:var(--t3);line-height:1.2">${ag.desc}</div>
     </div>`;
   }).join('<div style="align-self:flex-start;margin-top:11px;color:#D1D5DB;flex:0 0 auto"><i class="fas fa-chevron-right" style="font-size:.55rem"></i></div>');
+}
+
+function _errAgentStepper(mode, activeStep) {
+  const total = ERR_AGENTS.length;
+  const headBadge = mode === 'done'
+    ? '<span style="font-size:.66rem;color:#fff;background:#10B981;padding:2px 8px;border-radius:6px;font-weight:700">분석 완료</span>'
+    : mode === 'analyzing'
+      ? '<span style="font-size:.66rem;color:#fff;background:#F59E0B;padding:2px 8px;border-radius:6px;font-weight:700"><i class="fas fa-circle-notch fa-spin"></i> 분석 중</span>'
+      : '<span style="font-size:.66rem;color:#6B7280;background:#F3F4F6;padding:2px 8px;border-radius:6px;font-weight:700">분석 전</span>';
+  const doneN = mode === 'done' ? total : (mode === 'analyzing' ? Math.min(activeStep, total) : 0);
 
   return `<div style="border:1px solid #EEF0F3;border-radius:12px;padding:12px;background:#FBFCFE;margin-top:10px">
     <div style="display:flex;align-items:center;gap:7px;margin-bottom:9px">
@@ -11492,7 +11508,7 @@ function _errAgentStepper(mode, activeStep) {
       ${headBadge}
       <span style="margin-left:auto;font-size:.7rem;color:var(--t3)">${doneN}/${total} 단계</span>
     </div>
-    <div style="display:flex;align-items:flex-start;gap:1px">${circles}</div>
+    <div style="display:flex;align-items:flex-start;gap:1px">${_errStepperCircles(mode, activeStep)}</div>
   </div>`;
 }
 
@@ -11654,28 +11670,59 @@ function _renderErrDetail() {
 // 순차 점등(낙관적 진행)하고 응답 도착 시 실제 결과로 교체한다.
 function _stopErrAnim() { if (_errAnimTimer) { clearTimeout(_errAnimTimer); _errAnimTimer = null; } }
 
-function _renderAnalyzingPanel(id, step) {
+// 분석중 패널을 "한 번만" 렌더(가로 진행바 + 스테퍼). 이후엔 부분 갱신만 해서 깜빡임을 없앤다.
+function _renderAnalyzingPanel(id) {
   const body = document.getElementById('errDetailBody');
   if (!body || !_errDetailCache || _errDetailCache.log.id !== id) return;
+  _ensureErrStyles();
   const l = _errDetailCache.log;
   const st = l.status || (l.resolved ? 'resolved' : 'new');
+  const total = ERR_AGENTS.length;
   body.innerHTML = _errDetailHead(l, st, { analyzing: true })
-    + `<div style="margin-top:10px;background:#EDE9FE;color:#5B21B6;padding:8px 12px;border-radius:8px;font-size:.76rem"><i class="fas fa-circle-notch fa-spin"></i> 비파괴 검증 + 다중 에이전트 분석 중... (실제 코드/운영을 변경하지 않습니다)</div>`
-    + _errAgentStepper('analyzing', step)
+    + `<div style="margin-top:10px;border:1px solid #EEF0F3;border-radius:12px;padding:12px;background:#FBFCFE">
+        <div style="display:flex;align-items:center;gap:7px;margin-bottom:8px">
+          <b style="font-size:.82rem;color:var(--t1)"><i class="fas fa-diagram-project"></i> 에이전트 진행도</b>
+          <span style="font-size:.66rem;color:#fff;background:#F59E0B;padding:2px 8px;border-radius:6px;font-weight:700"><i class="fas fa-circle-notch fa-spin"></i> 분석 중</span>
+          <span id="errProgStep" style="margin-left:auto;font-size:.7rem;color:var(--t3)">0/${total} 단계</span>
+        </div>
+        <!-- ★ 가로 진행 바 (줄무늬가 계속 흘러 동작중임을 명확히 표시) -->
+        <div style="background:#EDE9FE;border-radius:999px;height:14px;overflow:hidden">
+          <div id="errProgFill" class="errbar-fill" style="width:4%;height:100%;border-radius:999px"></div>
+        </div>
+        <div id="errProgLabel" style="font-size:.74rem;color:#6D28D9;margin-top:6px;font-weight:600"><i class="fas fa-circle-notch fa-spin"></i> 분석 준비 중...</div>
+        <div id="errStepperRow" style="display:flex;align-items:flex-start;gap:1px;margin-top:11px">${_errStepperCircles('analyzing', 1)}</div>
+        <div style="font-size:.7rem;color:var(--t3);margin-top:8px">비파괴 검증 + 다중 에이전트 분석 중 (실제 코드/운영을 변경하지 않습니다)</div>
+      </div>`
     + _errMetaBlock(l);
+  _updateErrAnim(1);
+}
+
+// 진행바 너비 / 라벨 / 스테퍼 원형만 제자리 갱신 (패널 전체를 다시 그리지 않음 → 깜빡임 없음)
+function _updateErrAnim(step) {
+  const total = ERR_AGENTS.length;
+  const ag = ERR_AGENTS[Math.min(step, total) - 1] || ERR_AGENTS[0];
+  const pct = Math.min(94, Math.round((step / total) * 100)); // 완료(100%)는 결과 도착 시에만
+  const fill = document.getElementById('errProgFill');
+  if (fill) fill.style.width = pct + '%';
+  const lbl = document.getElementById('errProgLabel');
+  if (lbl) lbl.innerHTML = `<i class="fas fa-circle-notch fa-spin"></i> 분석 중 · <b>${ag.name}</b> — ${ag.desc} (${Math.min(step, total)}/${total})`;
+  const stp = document.getElementById('errProgStep');
+  if (stp) stp.textContent = `${Math.min(step, total)}/${total} 단계`;
+  const row = document.getElementById('errStepperRow');
+  if (row) row.innerHTML = _errStepperCircles('analyzing', step);
 }
 
 function _startErrAnim(id) {
   _stopErrAnim();
+  _renderAnalyzingPanel(id);   // 1회 렌더
   let step = 1;
-  _renderAnalyzingPanel(id, step);
   const tick = () => {
     step++;
-    const capped = Math.min(step, ERR_AGENTS.length); // 마지막 단계에서 응답 올 때까지 대기(스피너 유지)
-    _renderAnalyzingPanel(id, capped);
-    if (step <= ERR_AGENTS.length) _errAnimTimer = setTimeout(tick, 1200 + Math.random() * 1000);
+    _updateErrAnim(Math.min(step, ERR_AGENTS.length)); // 부분 갱신만
+    // 마지막 단계는 응답 도착까지 유지(줄무늬 바가 계속 흐름)
+    if (step < ERR_AGENTS.length) _errAnimTimer = setTimeout(tick, 1100 + Math.random() * 700);
   };
-  _errAnimTimer = setTimeout(tick, 1200);
+  _errAnimTimer = setTimeout(tick, 900);
 }
 
 // ── 오류검증 및 분석 (비파괴) ──
