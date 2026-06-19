@@ -4,6 +4,14 @@
   <meta charset="UTF-8"/>
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no"/>
   <title>아이에이리뷰</title>
+  <!-- PWA -->
+  <link rel="manifest" href="/manifest.webmanifest"/>
+  <meta name="theme-color" content="#3182f6"/>
+  <link rel="apple-touch-icon" href="/icons/apple-touch-icon-180.png"/>
+  <meta name="apple-mobile-web-app-capable" content="yes"/>
+  <meta name="mobile-web-app-capable" content="yes"/>
+  <meta name="apple-mobile-web-app-status-bar-style" content="default"/>
+  <meta name="apple-mobile-web-app-title" content="iA리뷰"/>
   <meta property="og:title" content="아이에이리뷰"/>
   <meta property="og:description" content="리뷰 캠페인 참여 및 제출"/>
   <meta property="og:type" content="website"/>
@@ -1493,5 +1501,6 @@ function applyRecruitView(){
 function openOnboard(){ const o=document.getElementById('onboard'); if(o) o.classList.add('on'); }
 function closeOnboard(){ const o=document.getElementById('onboard'); if(o) o.classList.remove('on'); localStorage.setItem('inad_onboarded','1'); }
 </script>
+<script src="js/pwa.js"></script>
 </body>
 </html>
