@@ -681,6 +681,113 @@ router.post('/update-urls', authMiddleware, async (req, res, next) => {
 });
 
 // ═══════════════════════════════════════════════════════════
+// POST /api/drive/find-candidates — 탭(gid)으로 Drive 폴더 후보 검색
+//   캡처/리뷰 폴더가 "사라진" 경우 탭명으로 실제 폴더를 찾아 재연결을 돕는다.
+//   - 자동 폴더(시트제목/탭명/[구매캡처]·[리뷰])와 수동 브랜드 폴더를 모두 후보로 반환
+//   - 각 후보의 파일수·리뷰형식 파일수·상위폴더·소유자 + 추천(guess) 제공
+//   - 현재 연결과 비교해 위치 불일치(drift) 경고
+// ═══════════════════════════════════════════════════════════
+router.post('/find-candidates', authMiddleware, async (req, res, next) => {
+  try {
+    const { sheetId, tabName, query } = req.body;
+    if (!tabName) return res.json({ ok: false, error: 'tabName 필요' });
+
+    // 현재 연결 상태 (컨텍스트)
+    let current = { folderUrl: '', captureFolderUrl: '' };
+    if (sheetId) {
+      const { rows } = await pool.query(
+        'SELECT folder_url, capture_folder_url FROM tab_configs WHERE sheet_id = $1 AND tab_name = $2 LIMIT 1',
+        [sheetId, tabName]
+      );
+      if (rows[0]) current = { folderUrl: rows[0].folder_url || '', captureFolderUrl: rows[0].capture_folder_url || '' };
+    }
+
+    // 검색어: 직접 지정 우선, 없으면 탭명에서 자동 추출
+    const terms = (query && String(query).trim())
+      ? [String(query).trim()]
+      : driveService.deriveFolderSearchTerms(tabName);
+
+    // 검색 & 병합
+    const byId = new Map();
+    for (const term of terms) {
+      const found = await driveService.searchFolders(term, { limit: 30 });
+      for (const f of found) if (!byId.has(f.id)) byId.set(f.id, f);
+    }
+    const folders = [...byId.values()].slice(0, 15); // 심층조회 상한
+
+    const nameCache = new Map();
+    const parentName = async (id) => {
+      if (!id) return '';
+      if (nameCache.has(id)) return nameCache.get(id);
+      const meta = await driveService.getFolderMeta(id);
+      const n = meta ? meta.name : '';
+      nameCache.set(id, n);
+      return n;
+    };
+
+    const candidates = [];
+    const seen = new Set();
+    const pushCand = (c) => { if (!seen.has(c.id)) { seen.add(c.id); candidates.push(c); } };
+
+    for (const f of folders) {
+      const insp = await driveService.inspectFolder(f.id);
+      const pName = await parentName((f.parents || [])[0]);
+
+      // 하위 [구매캡처]/[리뷰] 폴더를 직접 후보로 노출
+      for (const sub of insp.subfolders) {
+        if (sub.name === '[구매캡처]' || sub.name === '[리뷰]') {
+          const sInsp = await driveService.inspectFolder(sub.id);
+          pushCand({
+            id: sub.id, name: sub.name,
+            url: `https://drive.google.com/drive/folders/${sub.id}`,
+            parentName: f.name, owner: f.owner, createdTime: f.createdTime,
+            fileCount: sInsp.fileCount, reviewLikeCount: sInsp.reviewLikeCount,
+            subfolders: [], guess: sub.name === '[구매캡처]' ? 'capture' : 'review',
+          });
+        }
+      }
+
+      // 매칭된 폴더 자체
+      let guess = 'unknown';
+      if (f.name === '[구매캡처]') guess = 'capture';
+      else if (f.name === '[리뷰]') guess = 'review';
+      else if (insp.subfolders.some(s => s.name === '[구매캡처]' || s.name === '[리뷰]')) guess = 'container';
+      else if (insp.reviewLikeCount > 0) guess = 'review';
+      else if (insp.fileCount > 0) guess = 'capture';
+      pushCand({
+        id: f.id, name: f.name,
+        url: f.webViewLink || `https://drive.google.com/drive/folders/${f.id}`,
+        parentName: pName, owner: f.owner, createdTime: f.createdTime,
+        fileCount: insp.fileCount, reviewLikeCount: insp.reviewLikeCount,
+        subfolders: insp.subfolders.map(s => s.name), guess,
+      });
+    }
+
+    // 위치 불일치(drift) 경고
+    const warnings = [];
+    const curReviewId = extractFolderId(current.folderUrl);
+    if (curReviewId) {
+      const curInsp = await driveService.inspectFolder(curReviewId);
+      const hasReviewElsewhere = candidates.some(c => c.id !== curReviewId && c.reviewLikeCount > 0);
+      if (curInsp.fileCount === 0 && hasReviewElsewhere) {
+        warnings.push('현재 연결된 리뷰폴더가 비어 있고, 리뷰 이미지가 다른 폴더에 있습니다. 위치 불일치(drift)로 보입니다.');
+      }
+    } else {
+      warnings.push('현재 리뷰폴더(folder_url)가 연결되어 있지 않습니다.');
+    }
+    if (!current.captureFolderUrl) warnings.push('현재 캡처폴더(capture_folder_url)가 연결되어 있지 않습니다.');
+
+    // 정렬: 추천(capture/review) 우선, 파일 많은 순
+    const order = { capture: 0, review: 0, container: 1, unknown: 2 };
+    candidates.sort((a, b) => ((order[a.guess] ?? 3) - (order[b.guess] ?? 3)) || (b.fileCount - a.fileCount));
+
+    res.json({ ok: true, sheetId: sheetId || '', tabName, searchTerms: terms, current, warnings, candidates });
+  } catch (err) {
+    next(err);
+  }
+});
+
+// ═══════════════════════════════════════════════════════════
 // GET /api/drive/diag — 폴더 현황 진단
 // ═══════════════════════════════════════════════════════════
 router.get('/diag', authMiddleware, async (req, res, next) => {

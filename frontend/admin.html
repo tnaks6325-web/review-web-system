@@ -341,6 +341,21 @@ body{ letter-spacing:-.01em; }
             <input type="checkbox" id="chkForceSync" style="width:13px;height:13px;accent-color:#EA580C;cursor:pointer">
             <span><b>강제 재설정</b> — 기존 URL도 덮어쓰기</span>
           </label>
+
+          <!-- 폴더 찾기 & 재연결 -->
+          <div style="margin-top:10px;border-top:1px dashed #E5E7EB;padding-top:8px">
+            <div style="font-size:.75rem;font-weight:600;color:#374151;margin-bottom:4px">
+              <i class="fas fa-link" style="color:#7C3AED"></i> 폴더 찾기 &amp; 재연결
+              <span style="font-size:.66rem;font-weight:400;color:#6B7280">(사라진 폴더를 탭명으로 검색 → 확인 → 재연결)</span>
+            </div>
+            <div style="font-size:.66rem;color:#6B7280;line-height:1.45;margin-bottom:5px">
+              캡처/리뷰 폴더 링크가 비었거나 위치가 바뀐 탭을, Drive에서 실제 폴더를 찾아 다시 연결합니다.
+            </div>
+            <button id="btnFolderRelink" onclick="openFolderRelink()"
+              style="width:100%;padding:8px;background:#F5F3FF;color:#6D28D9;border:1px solid #DDD6FE;border-radius:6px;font-size:.78rem;font-weight:600;cursor:pointer;display:flex;align-items:center;justify-content:center;gap:6px">
+              <i class="fas fa-magnifying-glass-location"></i> 폴더 찾기 / 재연결 열기
+            </button>
+          </div>
         </div>
       </div>
 
