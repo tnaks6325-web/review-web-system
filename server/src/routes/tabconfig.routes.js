@@ -1139,6 +1139,7 @@ router.get('/dashboard', authMiddleware, async (req, res, next) => {
       noCaptureFolder: rows.filter(r => !r.capture_folder_url).length,
       totalRows: rows.reduce((s, r) => s + (r.row_count || 0), 0),
       totalSubmitted: rows.reduce((s, r) => s + (r.submitted_count || 0), 0),
+      totalPaid: rows.reduce((s, r) => s + (parseInt(r.paid_count, 10) || 0), 0),
     };
 
     // 캠페인별 그룹핑
