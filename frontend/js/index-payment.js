@@ -164,22 +164,32 @@ function _renderPayPreview(targets) {
 
   targets.forEach((r, i) => {
     const tr = document.createElement("tr");
-    const bankCode = getBankCode(r.bank);
-    const bankDisplay = r.bank + (bankCode ? ` (${bankCode})` : "");
-    const amountFmt = r.amount ? Number(r.amount.replace(/[^0-9.]/g,'')).toLocaleString() + "원" : "—";
-    const missingDepName = !r.depositName;
+    const amountNum = Number(String(r.amount || "").replace(/[^0-9.]/g, ''));
+    const amountFmt = amountNum ? amountNum.toLocaleString() + "원" : "—";
+    const tabLabel = r.displayName || r.tabName || "";
+    const acctMissing = !r.account;
+    const acctCell = acctMissing
+      ? '<span style="color:#EF4444;font-size:.68rem">⚠ 미등록</span>'
+      : escHtml(r.account);
     tr.innerHTML = `
       <td class="col-check"><input type="checkbox" class="pay-row-check" data-idx="${i}" checked></td>
-      <td class="col-bank" title="${escHtml(r.bank)}">${escHtml(r.bank)}<br><span style="font-size:.62rem;color:#9CA3AF">${bankCode || '?'}</span></td>
-      <td class="col-account" title="${escHtml(r.account)}">${escHtml(r.account)}</td>
-      <td>${escHtml(r.holder)}</td>
+      <td>${escHtml(r.paymentType || "")}</td>
+      <td>${escHtml(r.transferBank || "")}</td>
+      <td class="col-tab" title="${escHtml(tabLabel)}">${escHtml(tabLabel)}</td>
+      <td title="${escHtml(r.productName || "")}">${escHtml(r.productName || "")}</td>
+      <td>${escHtml(r.reviewerName || "")}</td>
+      <td>${escHtml(r.bank || "")}</td>
+      <td class="col-account${acctMissing ? ' pay-cell-missing' : ''}" title="${escHtml(r.account || "")}">${acctCell}</td>
+      <td>${escHtml(r.holder || "")}</td>
       <td class="col-amount">${amountFmt}</td>
-      <td>${missingDepName ? '<span style="color:#EF4444;font-size:.68rem">⚠ 미설정</span>' : escHtml(r.depositName)}</td>
-      <td class="col-tab" title="${escHtml(r.tabName)}">${escHtml(r.tabName)}</td>
-      <td title="${escHtml(r.campaignName)}">${escHtml(r.campaignName)}</td>
+      <td>${escHtml(r.incomeName || "")}</td>
+      <td>${escHtml(_fmtJumin(r.residentNum))}</td>
     `;
     tbody.appendChild(tr);
   });
+
+  // 정리 요약 갱신 (총건수 / 이체은행별 건수·금액 / 총금액)
+  _buildPaymentSummary(targets);
 
   // 전체 선택 체크박스 상태 동기화
   const allCheck = document.getElementById("paySelectAll");
@@ -195,6 +205,79 @@ function _renderPayPreview(targets) {
 
   if (previewWrap) previewWrap.style.display = "block";
   if (actionBar)   actionBar.style.display   = "flex";
+}
+
+/* 주민등록번호 표기 (전체 표시, 13자리면 하이픈) */
+function _fmtJumin(s) {
+  const d = String(s || "").replace(/[^0-9]/g, "");
+  if (d.length === 13) return d.slice(0, 6) + "-" + d.slice(6);
+  return s || "";
+}
+
+/* 정리 요약: 총건수 / 이체은행별 건수·금액 / 총금액 */
+function _buildPaymentSummary(targets) {
+  const el = document.getElementById("paySummary");
+  if (!el) return;
+  if (!targets || !targets.length) { el.style.display = "none"; el.innerHTML = ""; return; }
+
+  const byBank = {};
+  let totalAmt = 0;
+  targets.forEach(r => {
+    const bank = (r.transferBank || "").trim() || "미지정";
+    const amt = Number(String(r.amount || "").replace(/[^0-9]/g, '')) || 0;
+    if (!byBank[bank]) byBank[bank] = { count: 0, amount: 0 };
+    byBank[bank].count++;
+    byBank[bank].amount += amt;
+    totalAmt += amt;
+  });
+
+  const chips = Object.entries(byBank).map(([b, v]) =>
+    `<span class="pay-sum-chip"><b>${escHtml(b)}</b> ${v.count}건 · ${v.amount.toLocaleString()}원</span>`
+  ).join("");
+
+  el.innerHTML = `
+    <div class="pay-sum-total">
+      <i class="fas fa-calculator" style="margin-right:5px;color:#065F46"></i>
+      총 <b>${targets.length}</b>건 · 총금액 <b>${totalAmt.toLocaleString()}</b>원
+    </div>
+    <div class="pay-sum-banks">${chips}</div>
+  `;
+  el.style.display = "block";
+}
+
+/* 전체내역(11컬럼) 엑셀 다운로드 — 화면에 표시된 정리 정보 그대로 */
+function downloadPaymentOverviewExcel() {
+  const selected = _getSelectedTargets();
+  const rows = selected.length ? selected : _payFiltered;
+  if (!rows.length) { showToast("내보낼 항목이 없습니다.", "warning"); return; }
+
+  const wb = typeof XLSX !== "undefined" ? XLSX.utils.book_new() : null;
+  if (!wb) { showToast("엑셀 라이브러리를 불러오지 못했습니다. 페이지를 새로고침해주세요.", "error"); return; }
+
+  const header = ["결제방식", "이체은행", "탭명", "상품명", "입금자명", "은행", "계좌번호", "예금주", "결제금액", "소득명의", "주민등록번호"];
+  const data = rows.map(r => [
+    r.paymentType || "",
+    r.transferBank || "",
+    r.displayName || r.tabName || "",
+    r.productName || "",
+    r.reviewerName || "",
+    r.bank || "",
+    "'" + (r.account || ""),                                   // 계좌번호 앞 0 보존
+    r.holder || "",
+    r.amount ? Number(String(r.amount).replace(/[^0-9]/g, '')) : "",
+    r.incomeName || "",
+    "'" + _fmtJumin(r.residentNum),                            // 주민번호 텍스트 보존
+  ]);
+
+  const ws = XLSX.utils.aoa_to_sheet([header, ...data]);
+  _setColFormat(ws, data.length + 1, 6, "@");   // 계좌번호 열
+  _setColFormat(ws, data.length + 1, 10, "@");  // 주민등록번호 열
+  XLSX.utils.book_append_sheet(wb, ws, "입금처리내역");
+
+  const today = _getTodayStr().replace(/\./g, "");
+  const filename = `입금처리내역_${today}.xlsx`;
+  XLSX.writeFile(wb, filename);
+  showToast(`✅ ${filename} 다운로드 완료 (${rows.length}건)`, "success");
 }
 
 /* 전체 선택/해제 */
@@ -330,7 +413,7 @@ function openPaymentConfirm() {
   const msgEl = document.getElementById("paymentConfirmMsg");
   if (msgEl) msgEl.innerHTML = `선택한 <strong>${selected.length}건</strong>을 이체 완료 처리하시겠습니까?<br>
     <small style="color:var(--t3)">${tabSummary}</small><br>
-    각 시트의 입금 컬럼에 <strong>${_getTodayStr()}</strong>이 기록됩니다.`;
+    각 시트의 입금 컬럼에 <strong>이체완료 날짜·시각</strong>이 기록됩니다.`;
 
   const pwEl = document.getElementById("payConfirmPw");
   if (pwEl) pwEl.value = "";
@@ -349,11 +432,13 @@ async function confirmPaymentDone() {
   if (!selected.length) { closePaymentConfirm(); return; }
 
   const dateStr = _getTodayStr();
-  const rows = selected.map(r => ({
-    sheetId:      r.sheetId,
-    gid:          r.gid || "",
-    tabName:      r.tabName,
-    rowNum:       r.rowNum,
+  const items = selected.map(r => ({
+    sheetId:       r.sheetId,
+    gid:           r.gid || "",
+    tabName:       r.tabName,
+    rowIndex:      r.rowIndex,
+    reviewerName:  r.reviewerName || "",
+    amount:        r.amount || "",
     depositColKey: r.depositColKey || ""
   }));
 
@@ -363,7 +448,7 @@ async function confirmPaymentDone() {
   if (btn) { btn.disabled = true; btn.innerHTML = '<i class="fas fa-circle-notch fa-spin"></i> 처리 중...'; }
 
   try {
-    const payload = { action: "markPaymentDone", rows, dateStr, adminPw: pw };
+    const payload = { action: "markPaymentDone", items, dateStr, adminPw: pw };
     let json;
     try { json = await gasPost(payload); } catch(e) { json = await gasGet(payload); }
 

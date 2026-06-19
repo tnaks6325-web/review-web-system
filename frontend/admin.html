@@ -1158,6 +1158,9 @@ body{ letter-spacing:-.01em; }
           </button>
         </div>
 
+        <!-- 정리 요약 (총건수 / 이체은행별 건수·금액 / 총금액) -->
+        <div id="paySummary" class="payment-summary" style="display:none"></div>
+
         <!-- 미리보기 테이블 -->
         <div class="payment-preview-wrap" id="payPreviewWrap" style="display:none">
           <div class="payment-preview-header">
@@ -1169,13 +1172,17 @@ body{ letter-spacing:-.01em; }
               <thead>
                 <tr>
                   <th class="col-check"><input type="checkbox" id="paySelectAll" onchange="togglePaySelectAll(this)" title="전체 선택/해제"></th>
+                  <th>결제방식</th>
+                  <th>이체은행</th>
+                  <th class="col-tab">탭명</th>
+                  <th>상품명</th>
+                  <th>입금자명</th>
                   <th>은행</th>
-                  <th>계좌번호</th>
+                  <th class="col-account">계좌번호</th>
                   <th>예금주</th>
                   <th class="col-amount">결제금액</th>
-                  <th>입금명</th>
-                  <th class="col-tab">탭</th>
-                  <th>캠페인</th>
+                  <th>소득명의</th>
+                  <th>주민등록번호</th>
                 </tr>
               </thead>
               <tbody id="payPreviewBody"></tbody>
@@ -1188,6 +1195,9 @@ body{ letter-spacing:-.01em; }
           <span class="payment-sel-count" id="paySelCount">0건 선택</span>
           <button class="payment-dl-btn" id="payDlBtn" onclick="downloadPaymentExcel()">
             <i class="fas fa-file-excel"></i> 이체파일 다운로드
+          </button>
+          <button class="payment-dl-btn" id="payDlOverviewBtn" onclick="downloadPaymentOverviewExcel()" style="background:#475569">
+            <i class="fas fa-table"></i> 전체내역 다운로드
           </button>
           <button class="payment-done-btn" id="payDoneBtn" onclick="openPaymentConfirm()">
             <i class="fas fa-check-circle"></i> 이체 완료 처리
