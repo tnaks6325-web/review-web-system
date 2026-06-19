@@ -129,6 +129,7 @@ const _ACTION_MAP = {
   'organizeCaptureFolders': { method: 'POST', path: '/api/drive/organize-capture' },
   'saveCaptureFolder':      { method: 'POST', path: '/api/drive/save-capture' },
   'updateFolderUrls':       { method: 'POST', path: '/api/drive/update-urls' },
+  'findFolderCandidates':   { method: 'POST', path: '/api/drive/find-candidates' },
   'diagCaptureFolders':     { method: 'GET',  path: '/api/drive/diag' },
 
   // 단축URL / 메모 (Section 10)

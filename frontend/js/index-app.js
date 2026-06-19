@@ -14891,6 +14891,191 @@ function openDedupeSelector() {
   modal.addEventListener('click', (e) => { if (e.target === modal) modal.remove(); });
 }
 
+/* ═══════════════════════════════════════════════════════════
+   폴더 찾기 & 재연결 — 사라진 캡처/리뷰 폴더를 탭명으로 검색하여 재연결
+   ═══════════════════════════════════════════════════════════ */
+
+/** 모달 열기 (presetSheetId/presetTabName 지정 시 해당 탭 자동 선택) */
+function openFolderRelink(presetSheetId, presetTabName) {
+  const existing = document.getElementById('folderRelinkModal');
+  if (existing) existing.remove();
+
+  let tabs = [];
+  if (_tabDashData && _tabDashData.tabs) {
+    tabs = _tabDashData.tabs.map(t => ({
+      sheetId: t.sheet_id, tabName: t.tab_name,
+      displayName: t.display_name || t.tab_name,
+      campName: t.campaign_name || '',
+      folderUrl: t.folder_url || '', captureUrl: t.capture_folder_url || '',
+    }));
+  }
+  if (tabs.length === 0) { showToast('먼저 탭 대시보드를 로드하세요.', 'info'); return; }
+
+  const options = tabs.map((t, i) =>
+    `<option value="${i}">${escHtml(t.displayName)}${t.campName ? ' — ' + escHtml(t.campName) : ''}</option>`
+  ).join('');
+
+  const modal = document.createElement('div');
+  modal.id = 'folderRelinkModal';
+  modal.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,.45);z-index:9999;display:flex;align-items:center;justify-content:center;padding:20px';
+  modal.innerHTML = `
+    <div style="background:#fff;border-radius:12px;width:100%;max-width:640px;max-height:86vh;display:flex;flex-direction:column;box-shadow:0 20px 60px rgba(0,0,0,.2)">
+      <div style="padding:16px 20px;border-bottom:1px solid #E5E7EB;flex-shrink:0">
+        <h3 style="margin:0;font-size:1rem;font-weight:700;color:#111"><i class="fas fa-link" style="color:#7C3AED"></i> 폴더 찾기 &amp; 재연결</h3>
+        <div style="font-size:.72rem;color:#6B7280;margin-top:4px">탭 선택 후 [폴더 찾기] → Drive에서 실제 폴더 후보 표시 → 맞는 폴더를 캡처/리뷰로 지정 → [재연결 저장].</div>
+      </div>
+      <div style="padding:14px 20px;overflow-y:auto;flex:1">
+        <div style="display:flex;gap:8px;align-items:flex-end;flex-wrap:wrap;margin-bottom:10px">
+          <label style="flex:2;min-width:220px;font-size:.72rem;color:#374151">탭 선택
+            <select id="frlTabSel" style="width:100%;margin-top:3px;padding:7px;border:1px solid #D1D5DB;border-radius:6px;font-size:.8rem">${options}</select>
+          </label>
+          <label style="flex:1;min-width:150px;font-size:.72rem;color:#374151">검색어(선택)
+            <input id="frlQuery" type="text" placeholder="비우면 탭명에서 자동" style="width:100%;margin-top:3px;padding:7px;border:1px solid #D1D5DB;border-radius:6px;font-size:.8rem">
+          </label>
+          <button id="frlSearchBtn" onclick="findFolderCandidatesUI()" style="padding:8px 14px;background:#7C3AED;color:#fff;border:none;border-radius:6px;font-size:.8rem;font-weight:600;cursor:pointer"><i class="fas fa-search"></i> 폴더 찾기</button>
+        </div>
+        <div id="frlPick" style="display:none;font-size:.75rem;background:#F5F3FF;border:1px solid #DDD6FE;border-radius:8px;padding:10px;margin-bottom:10px"></div>
+        <div id="frlResult" style="font-size:.75rem"></div>
+      </div>
+      <div style="padding:12px 20px;border-top:1px solid #E5E7EB;display:flex;justify-content:space-between;gap:8px;flex-shrink:0">
+        <button onclick="this.closest('#folderRelinkModal').remove()" style="padding:8px 16px;background:#6B7280;color:#fff;border:none;border-radius:6px;font-size:.8rem;font-weight:600;cursor:pointer">닫기</button>
+        <button id="frlSaveBtn" onclick="saveFolderRelink()" disabled style="padding:8px 16px;background:#0ca678;color:#fff;border:none;border-radius:6px;font-size:.8rem;font-weight:700;cursor:pointer;opacity:.5"><i class="fas fa-save"></i> 재연결 저장</button>
+      </div>
+    </div>`;
+  modal._tabs = tabs;
+  modal._pick = { captureUrl: '', captureName: '', reviewUrl: '', reviewName: '' };
+  document.body.appendChild(modal);
+  modal.addEventListener('click', (e) => { if (e.target === modal) modal.remove(); });
+
+  if (presetSheetId && presetTabName) {
+    const idx = tabs.findIndex(t => t.sheetId === presetSheetId && t.tabName === presetTabName);
+    if (idx >= 0) document.getElementById('frlTabSel').value = String(idx);
+  }
+}
+
+/** 선택한 탭으로 Drive 폴더 후보 검색 */
+async function findFolderCandidatesUI() {
+  const modal = document.getElementById('folderRelinkModal');
+  if (!modal) return;
+  const tab = modal._tabs[parseInt(document.getElementById('frlTabSel').value, 10)];
+  if (!tab) return;
+  const query = (document.getElementById('frlQuery').value || '').trim();
+  const resultEl = document.getElementById('frlResult');
+  resultEl.innerHTML = '<div style="padding:12px;color:#6B7280"><i class="fas fa-spinner fa-spin"></i> Drive에서 폴더 검색 중...</div>';
+
+  let data;
+  try {
+    data = await gasPost({ action: 'findFolderCandidates', sheetId: tab.sheetId, tabName: tab.tabName, query }, 60000);
+  } catch (e) { resultEl.innerHTML = `<div style="color:#DC2626">검색 실패: ${escHtml(e.message || '')}</div>`; return; }
+  if (!data || data.error) { resultEl.innerHTML = `<div style="color:#DC2626">${escHtml((data && data.error) || '검색 실패')}</div>`; return; }
+
+  modal._candidates = data.candidates || [];
+
+  const warn = (data.warnings || []).map(w => `<div style="color:#B45309;font-size:.72rem"><i class="fas fa-triangle-exclamation"></i> ${escHtml(w)}</div>`).join('');
+  const curC = data.current && data.current.captureFolderUrl ? `<a href="${data.current.captureFolderUrl}" target="_blank">현재 캡처</a>` : '<span style="color:#9CA3AF">캡처 미연결</span>';
+  const curR = data.current && data.current.folderUrl ? `<a href="${data.current.folderUrl}" target="_blank">현재 리뷰</a>` : '<span style="color:#9CA3AF">리뷰 미연결</span>';
+  const curLine = `현재 연결: ${curC} · ${curR}`;
+
+  const badge = (g) => {
+    if (g === 'capture') return '<span style="background:#DBEAFE;color:#1D4ED8;padding:1px 6px;border-radius:4px;font-size:.66rem;font-weight:700">캡처후보</span>';
+    if (g === 'review') return '<span style="background:#DCFCE7;color:#166534;padding:1px 6px;border-radius:4px;font-size:.66rem;font-weight:700">리뷰후보</span>';
+    if (g === 'container') return '<span style="background:#F3E8FF;color:#7C3AED;padding:1px 6px;border-radius:4px;font-size:.66rem;font-weight:700">상위폴더</span>';
+    return '<span style="background:#F3F4F6;color:#6B7280;padding:1px 6px;border-radius:4px;font-size:.66rem">기타</span>';
+  };
+
+  if (modal._candidates.length === 0) {
+    resultEl.innerHTML = `${warn ? `<div style="background:#FFFBEB;border:1px solid #FDE68A;border-radius:8px;padding:8px;margin-bottom:8px">${warn}</div>` : ''}<div style="padding:12px;color:#6B7280">검색 결과가 없습니다. 검색어를 바꿔 다시 시도하세요.<br><span style="color:#9CA3AF;font-size:.68rem">시도한 검색어: ${escHtml((data.searchTerms || []).join(' / '))}</span></div>`;
+    return;
+  }
+
+  const rows = modal._candidates.map((c, i) => `
+    <div style="border:1px solid #E5E7EB;border-radius:8px;padding:10px;margin-bottom:7px">
+      <div style="display:flex;align-items:center;gap:6px;margin-bottom:3px">
+        ${badge(c.guess)}
+        <span style="font-weight:600;color:#111;font-size:.78rem;word-break:break-all">${escHtml(c.name)}</span>
+        <a href="${c.url}" target="_blank" style="margin-left:auto;color:#3182f6;font-size:.7rem;white-space:nowrap"><i class="fas fa-up-right-from-square"></i> 열기</a>
+      </div>
+      <div style="font-size:.68rem;color:#6B7280;margin-bottom:5px">
+        상위: ${escHtml(c.parentName || '-')} · 파일 ${c.fileCount}개${c.reviewLikeCount ? ` (리뷰형식 ${c.reviewLikeCount})` : ''}${c.owner ? ' · ' + escHtml(c.owner) : ''}
+      </div>
+      <div style="display:flex;gap:6px">
+        <button onclick="pickFolderCandidate('capture',${i})" style="flex:1;padding:5px;background:#EFF6FF;color:#1D4ED8;border:1px solid #BFDBFE;border-radius:5px;font-size:.7rem;font-weight:600;cursor:pointer">📸 캡처로 지정</button>
+        <button onclick="pickFolderCandidate('review',${i})" style="flex:1;padding:5px;background:#F0FDF4;color:#166534;border:1px solid #BBF7D0;border-radius:5px;font-size:.7rem;font-weight:600;cursor:pointer">📝 리뷰로 지정</button>
+      </div>
+    </div>`).join('');
+
+  resultEl.innerHTML = `${warn
+    ? `<div style="background:#FFFBEB;border:1px solid #FDE68A;border-radius:8px;padding:8px;margin-bottom:8px">${warn}<div style="font-size:.68rem;color:#92400E;margin-top:2px">${curLine}</div></div>`
+    : `<div style="font-size:.7rem;color:#6B7280;margin-bottom:8px">${curLine}</div>`}${rows}`;
+  _renderFolderPick();
+}
+
+/** 후보를 캡처/리뷰 대상으로 지정 */
+function pickFolderCandidate(kind, idx) {
+  const modal = document.getElementById('folderRelinkModal');
+  if (!modal || !modal._candidates) return;
+  const c = modal._candidates[idx];
+  if (!c) return;
+  const label = c.name + (c.parentName ? ' (' + c.parentName + ')' : '');
+  if (kind === 'capture') { modal._pick.captureUrl = c.url; modal._pick.captureName = label; }
+  else { modal._pick.reviewUrl = c.url; modal._pick.reviewName = label; }
+  _renderFolderPick();
+}
+
+/** 지정 현황 + 저장버튼 상태 갱신 */
+function _renderFolderPick() {
+  const modal = document.getElementById('folderRelinkModal');
+  if (!modal) return;
+  const p = modal._pick;
+  const box = document.getElementById('frlPick');
+  const saveBtn = document.getElementById('frlSaveBtn');
+  const hasAny = !!(p.captureUrl || p.reviewUrl);
+  if (box) {
+    box.style.display = hasAny ? 'block' : 'none';
+    if (hasAny) {
+      box.innerHTML =
+        `<div style="font-weight:700;color:#6D28D9;margin-bottom:4px"><i class="fas fa-link"></i> 재연결 대상</div>` +
+        `<div>📸 캡처폴더: ${p.captureUrl ? escHtml(p.captureName) : '<span style="color:#9CA3AF">미지정(변경 안 함)</span>'}</div>` +
+        `<div>📝 리뷰폴더: ${p.reviewUrl ? escHtml(p.reviewName) : '<span style="color:#9CA3AF">미지정(변경 안 함)</span>'}</div>`;
+    }
+  }
+  if (saveBtn) { saveBtn.disabled = !hasAny; saveBtn.style.opacity = hasAny ? '1' : '.5'; }
+}
+
+/** 지정한 폴더 URL을 tab_configs에 저장(재연결) */
+async function saveFolderRelink() {
+  const modal = document.getElementById('folderRelinkModal');
+  if (!modal) return;
+  const tab = modal._tabs[parseInt(document.getElementById('frlTabSel').value, 10)];
+  const p = modal._pick;
+  if (!tab || (!p.captureUrl && !p.reviewUrl)) { showToast('지정된 폴더가 없습니다.', 'info'); return; }
+
+  const urls = {};
+  if (p.captureUrl) urls.captureFolderUrl = p.captureUrl;
+  if (p.reviewUrl) urls.folderUrl = p.reviewUrl;
+
+  const saveBtn = document.getElementById('frlSaveBtn');
+  if (saveBtn) { saveBtn.disabled = true; saveBtn.innerHTML = '<i class="fas fa-spinner fa-spin"></i> 저장 중...'; }
+
+  let data;
+  try {
+    data = await gasPost({ action: 'updateFolderUrls', sheetId: tab.sheetId, tabName: tab.tabName, urls });
+  } catch (e) {
+    showToast('저장 실패: ' + (e.message || ''), 'error');
+    if (saveBtn) { saveBtn.disabled = false; saveBtn.innerHTML = '<i class="fas fa-save"></i> 재연결 저장'; }
+    return;
+  }
+  if (!data || data.error) {
+    showToast((data && data.error) || '저장 실패', 'error');
+    if (saveBtn) { saveBtn.disabled = false; saveBtn.innerHTML = '<i class="fas fa-save"></i> 재연결 저장'; }
+    return;
+  }
+
+  showToast('폴더 링크가 재연결되었습니다.', 'info');
+  modal.remove();
+  try { loadTabDashboard(); } catch (_) {}
+}
+
 /**
  * 탭 선택 후 해당 탭의 중복 미리보기 실행
  */

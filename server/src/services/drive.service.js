@@ -762,6 +762,135 @@ function extractReviewerNameFromFile(fileName) {
   return nameWithoutExt.trim();
 }
 
+// ═══════════════════════════════════════════════════════════
+// 폴더 후보 검색 (gid/탭명 → Drive 폴더 찾기 & 재연결 지원)
+// ═══════════════════════════════════════════════════════════
+
+/**
+ * 탭명으로부터 Drive 검색어 후보를 생성
+ * 예) "6/1(쿠팡)엘라비에_기미쿠션 골드박스 90건"
+ *   → ["6/1(쿠팡)엘라비에_기미쿠션 골드박스 90건", "엘라비에_기미쿠션 골드박스", "기미쿠션 골드박스"]
+ * 건수(90↔100)가 바뀌어도 매칭되도록 후미 "N건/N차"와 선두 "날짜(채널)"를 떼어낸 변형을 함께 반환
+ */
+function deriveFolderSearchTerms(tabName) {
+  const name = String(tabName || '').trim();
+  const terms = [];
+  const add = (t) => { const v = (t || '').trim(); if (v && v.length >= 2 && !terms.includes(v)) terms.push(v); };
+
+  add(name);
+  // 선두 날짜+채널 제거: "6/1(쿠팡)" / "6 / 1 (쿠팡)"
+  let core = name.replace(/^\s*\d{1,2}\s*\/\s*\d{1,2}\s*(\([^)]*\))?\s*/, '');
+  // 후미 건수/차수 제거: " 90건", " 2차"
+  core = core.replace(/\s*\d+\s*건\s*$/, '').replace(/\s*\d+\s*차\s*$/, '').trim();
+  add(core);
+  // 첫 언더스코어 이후(상품 핵심부) — "엘라비에_기미쿠션 골드박스" → "기미쿠션 골드박스"
+  const base = core || name;
+  if (base.includes('_')) {
+    add(base.split('_').slice(1).join('_').replace(/\s*\d+\s*건\s*$/, '').trim());
+  }
+  return terms;
+}
+
+/**
+ * 폴더명 부분일치 전역 검색 — SA + OAuth 결과를 병합 (소유자가 달라도 누락 방지)
+ * @returns {Promise<Array<{id,name,webViewLink,parents,owner,createdTime}>>}
+ */
+async function searchFolders(nameContains, opts = {}) {
+  const limit = opts.limit || 30;
+  const safe = String(nameContains || '').replace(/\\/g, '\\\\').replace(/'/g, "\\'").trim();
+  if (!safe) return [];
+  const params = {
+    q: `name contains '${safe}' and mimeType = 'application/vnd.google-apps.folder' and trashed = false`,
+    fields: 'files(id, name, webViewLink, parents, owners(emailAddress), createdTime)',
+    pageSize: Math.min(limit, 100),
+    supportsAllDrives: true,
+    includeItemsFromAllDrives: true,
+    orderBy: 'createdTime desc',
+  };
+
+  const byId = new Map();
+  const sa = _getReadDrive();
+  const oauth = _getOAuthDrive();
+  for (const [client, label] of [[sa, 'SA'], [oauth, 'OAuth']]) {
+    if (!client) continue;
+    if (label === 'OAuth' && client === sa) continue;
+    try {
+      const res = await client.files.list(params);
+      for (const f of (res.data.files || [])) {
+        if (byId.has(f.id)) continue;
+        byId.set(f.id, {
+          id: f.id,
+          name: f.name,
+          webViewLink: f.webViewLink || `https://drive.google.com/drive/folders/${f.id}`,
+          parents: f.parents || [],
+          owner: (f.owners && f.owners[0] && f.owners[0].emailAddress) || '',
+          createdTime: f.createdTime || '',
+        });
+      }
+    } catch (e) {
+      logger.warn(`[Drive] ${label} searchFolders 실패: ${e.message}`);
+    }
+  }
+  return [...byId.values()];
+}
+
+/**
+ * 폴더 하위 항목을 SA+OAuth 병합 조회 (소유자가 다른 폴더도 누락 없이)
+ */
+async function _listChildrenMerged(folderId) {
+  const params = {
+    q: `'${folderId}' in parents and trashed = false`,
+    fields: 'files(id, name, mimeType)',
+    pageSize: 1000,
+    supportsAllDrives: true,
+    includeItemsFromAllDrives: true,
+  };
+  const byId = new Map();
+  const sa = _getReadDrive();
+  const oauth = _getOAuthDrive();
+  for (const [client, label] of [[sa, 'SA'], [oauth, 'OAuth']]) {
+    if (!client) continue;
+    if (label === 'OAuth' && client === sa) continue;
+    try {
+      const res = await client.files.list(params);
+      for (const f of (res.data.files || [])) if (!byId.has(f.id)) byId.set(f.id, f);
+    } catch (e) {
+      logger.warn(`[Drive] ${label} _listChildrenMerged 실패: ${e.message}`);
+    }
+  }
+  return [...byId.values()];
+}
+
+/**
+ * 폴더 내부 진단: 파일수, 리뷰형식 파일수, 하위폴더 목록
+ * 리뷰 업로드 파일명 패턴: {이름}_{순번}[_{yyyyMMdd_HHmmss}].{ext}
+ */
+async function inspectFolder(folderId) {
+  const children = await _listChildrenMerged(folderId);
+  const FOLDER = 'application/vnd.google-apps.folder';
+  const files = children.filter(c => c.mimeType !== FOLDER);
+  const subfolders = children.filter(c => c.mimeType === FOLDER).map(s => ({ id: s.id, name: s.name }));
+  const reviewLikeCount = files.filter(f => /_\d+(?:_\d{8}_\d{6})?\.[a-zA-Z0-9]+$/.test(f.name || '')).length;
+  return { fileCount: files.length, reviewLikeCount, subfolders };
+}
+
+/**
+ * 폴더 메타(이름) 조회 — 부모 폴더명 표시용 (SA → OAuth 폴백)
+ */
+async function getFolderMeta(folderId) {
+  if (!folderId) return null;
+  const sa = _getReadDrive();
+  const oauth = _getOAuthDrive();
+  for (const client of [sa, oauth]) {
+    if (!client) continue;
+    try {
+      const res = await client.files.get({ fileId: folderId, fields: 'id, name', supportsAllDrives: true });
+      if (res.data) return { id: res.data.id, name: res.data.name };
+    } catch (_) {}
+  }
+  return null;
+}
+
 /**
  * Drive 파일 내용을 서버에서 다운로드 (비공개 파일 프록시 스트리밍용)
  * @param {string} fileId
@@ -808,6 +937,11 @@ module.exports = {
   trashDuplicateFile,
   generateReviewFileName,
   extractFolderIdFromUrl,
+  // 폴더 후보 검색 (찾기 & 재연결)
+  deriveFolderSearchTerms,
+  searchFolders,
+  inspectFolder,
+  getFolderMeta,
   // 중복 파일 정리
   listFolderFilesWithHash,
   listFolderFilesRecursive,
