@@ -197,13 +197,20 @@ async function deleteReviewer(name, phone) {
 /**
  * 리뷰어 프로필 조회/저장 (GAS: getReviewerProfile / saveSubAccounts / saveIncomeInfo)
  */
-async function handleReviewerProfile({ action, phone8, name, subAccounts, incomeInfo }) {
+async function handleReviewerProfile(body = {}) {
+  const {
+    action, phone8, name, subAccounts, incomeInfo,
+    incomeName, residentNum, jumin,            // saveIncomeInfo (프론트는 top-level로 전송)
+    bankName, bankAccount, accountHolder,      // saveBankInfo
+  } = body;
   const p8 = (phone8 || '').replace(/[^0-9]/g, '');
   if (p8.length !== 8) return { ok: false, error: '전화번호 뒤 8자리 필요' };
 
   if (action === 'get') {
     const { rows } = await pool.query(
       `SELECT name, phone, income_type AS "incomeType", resident_num AS "residentNum",
+              bank_name AS "bankName", bank_account AS "bankAccount",
+              account_holder AS "accountHolder",
               sub_accounts AS "subAccounts", status
        FROM reviewers WHERE phone8 = $1 LIMIT 1`, [p8]
     );
@@ -236,10 +243,33 @@ async function handleReviewerProfile({ action, phone8, name, subAccounts, income
   }
 
   if (action === 'saveIncomeInfo') {
+    // ★ 프론트는 incomeName / (residentNum|jumin) 을 top-level로 전송한다.
+    //   (구버전 incomeInfo 객체도 호환). 빈 값은 기존 값을 보존(COALESCE).
     const info = incomeInfo || {};
+    const incType = (incomeName || info.incomeType || info.incomeName || '').trim();
+    const resNum  = (residentNum || jumin || info.residentNum || info.jumin || '').replace(/[^0-9]/g, '');
     await pool.query(
-      'UPDATE reviewers SET income_type = $1, resident_num = $2 WHERE phone8 = $3',
-      [info.incomeType || '', info.residentNum || '', p8]
+      `UPDATE reviewers SET
+         income_type  = COALESCE(NULLIF($1, ''), income_type),
+         resident_num = COALESCE(NULLIF($2, ''), resident_num)
+       WHERE phone8 = $3`,
+      [incType, resNum, p8]
+    );
+    return { ok: true };
+  }
+
+  if (action === 'saveBankInfo') {
+    // 입금받을 계좌정보 저장 (빈 값은 기존 값 보존)
+    const bn = (bankName || '').trim();
+    const ba = (bankAccount || '').trim();
+    const ah = (accountHolder || '').trim();
+    await pool.query(
+      `UPDATE reviewers SET
+         bank_name      = COALESCE(NULLIF($1, ''), bank_name),
+         bank_account   = COALESCE(NULLIF($2, ''), bank_account),
+         account_holder = COALESCE(NULLIF($3, ''), account_holder)
+       WHERE phone8 = $4`,
+      [bn, ba, ah, p8]
     );
     return { ok: true };
   }
