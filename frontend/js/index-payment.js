@@ -413,7 +413,7 @@ function openPaymentConfirm() {
   const msgEl = document.getElementById("paymentConfirmMsg");
   if (msgEl) msgEl.innerHTML = `선택한 <strong>${selected.length}건</strong>을 이체 완료 처리하시겠습니까?<br>
     <small style="color:var(--t3)">${tabSummary}</small><br>
-    각 시트의 입금 컬럼에 <strong>${_getTodayStr()}</strong>이 기록됩니다.`;
+    각 시트의 입금 컬럼에 <strong>이체완료 날짜·시각</strong>이 기록됩니다.`;
 
   const pwEl = document.getElementById("payConfirmPw");
   if (pwEl) pwEl.value = "";

@@ -1,6 +1,6 @@
 const express = require('express');
 const router = express.Router();
-const { adminOrMasterMiddleware } = require('../middleware/auth.middleware');
+const { authMiddleware, adminOrMasterMiddleware } = require('../middleware/auth.middleware');
 const { writeSheet, readSheet } = require('../services/sheets.service');
 const { enqueue } = require('../services/syncQueue.service');
 const { logger } = require('../utils/logger');
@@ -47,13 +47,14 @@ function _extractAmount(rowJson) {
   if (!rowJson || typeof rowJson !== 'object') return '';
   const entries = Object.entries(rowJson);
   const norm = k => String(k || '').replace(/\s/g, '');
+  const hasVal = v => v != null && String(v).trim() !== '';
   const exact = ['결제금액', '결제금', '금액', '결제'];
   for (const c of exact) {
     const hit = entries.find(([k]) => norm(k) === c);
-    if (hit && String(hit[1] || '').trim()) return String(hit[1]).trim();
+    if (hit && hasVal(hit[1])) return String(hit[1]).trim();
   }
   const partial = entries.find(([k]) => norm(k).includes('금액'));
-  if (partial && String(partial[1] || '').trim()) return String(partial[1]).trim();
+  if (partial && hasVal(partial[1])) return String(partial[1]).trim();
   return '';
 }
 
@@ -62,7 +63,7 @@ function _extractAmount(rowJson) {
 //   리뷰 완료(is_submitted) + 입금 미처리(is_submitted2 != PAID) + 미마감 탭
 //   리뷰어 마스터(reviewers)에서 계좌/소득명의/주민번호를 결합한다.
 // ═══════════════════════════════════════════════════════════
-router.get('/targets', adminOrMasterMiddleware, async (req, res, next) => {
+router.get('/targets', authMiddleware, adminOrMasterMiddleware, async (req, res, next) => {
   try {
     const { rows } = await pool.query(`
       SELECT
@@ -111,7 +112,7 @@ router.get('/targets', adminOrMasterMiddleware, async (req, res, next) => {
 //   2) 백그라운드: 구글시트 입금칸(submit_col2)에 이체완료시각 기록
 //      (실패 시 sync_queue 'deposit_mark' 로 재시도)
 // ═══════════════════════════════════════════════════════════
-router.post('/mark-done', adminOrMasterMiddleware, async (req, res, next) => {
+router.post('/mark-done', authMiddleware, adminOrMasterMiddleware, async (req, res, next) => {
   try {
     const items = Array.isArray(req.body.items) ? req.body.items
                 : Array.isArray(req.body.rows)  ? req.body.rows
@@ -198,7 +199,7 @@ router.post('/mark-done', adminOrMasterMiddleware, async (req, res, next) => {
 // ═══════════════════════════════════════════════════════════
 // GET /api/payment/history — 입금 이력 조회
 // ═══════════════════════════════════════════════════════════
-router.get('/history', adminOrMasterMiddleware, async (req, res, next) => {
+router.get('/history', authMiddleware, adminOrMasterMiddleware, async (req, res, next) => {
   try {
     const { sheetId, tabName, limit } = req.query;
     let sql = `
