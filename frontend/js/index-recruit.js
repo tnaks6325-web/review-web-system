@@ -651,16 +651,16 @@ function _renderPreview() {
   const managerEmoji = manager === "만두" ? "🥟" : manager === "망고" ? "🥭" : "";
   const feeText = reviewFee > 0 ? reviewFee.toLocaleString() + "원" : "";
   const slotsHtml = maxSlots > 0
-    ? `<span style="display:inline-flex;align-items:center;gap:4px;font-size:.73rem;font-weight:600;color:#059669;background:#D1FAE5;padding:2px 9px;border-radius:12px"><i class="fas fa-users" style="font-size:.65rem"></i> 0/${maxSlots}명</span>`
+    ? `<span style="display:inline-flex;align-items:center;gap:4px;font-size:.73rem;font-weight:600;color:#0ca678;background:#D1FAE5;padding:2px 9px;border-radius:12px"><i class="fas fa-users" style="font-size:.65rem"></i> 0/${maxSlots}명</span>`
     : "";
 
   const badgeColors = [
     {bg:'#D1FAE5',c:'#065F46'},{bg:'#DBEAFE',c:'#1E40AF'},{bg:'#FEF3C7',c:'#92400E'},
-    {bg:'#EDE9FE',c:'#4C1D95'},{bg:'#FCE7F3',c:'#831843'},{bg:'#ECFDF5',c:'#064E3B'}
+    {bg:'#e8f1fe',c:'#144a9e'},{bg:'#FCE7F3',c:'#831843'},{bg:'#ECFDF5',c:'#064E3B'}
   ];
 
   card.innerHTML = `
-    <div style="background:linear-gradient(135deg,#2D1B69 0%,#3B1FA8 100%);padding:12px 14px;border-radius:12px 12px 0 0;display:flex;align-items:flex-start;gap:8px">
+    <div style="background:linear-gradient(135deg,#0f2a5e 0%,#1b64da 100%);padding:12px 14px;border-radius:12px 12px 0 0;display:flex;align-items:flex-start;gap:8px">
       ${channelText ? `<span style="flex-shrink:0;background:#FDE68A;color:#78350F;padding:2px 8px;border-radius:5px;font-size:.65rem;font-weight:800;margin-top:1px">${escHtml(channelText)}</span>` : ""}
       <span style="font-size:.86rem;font-weight:700;color:#fff;line-height:1.4;flex:1">${escHtml(title)}</span>
       ${manager ? `<span style="font-size:.68rem;color:#A7F3D0;font-weight:600;flex-shrink:0;white-space:nowrap">${managerEmoji} ${escHtml(manager)}</span>` : ""}
@@ -672,7 +672,7 @@ function _renderPreview() {
       }).join("")}</div>` : ""}
       ${(timeRange||deliveryType||feeText||slotsHtml) ? `
       <div style="display:flex;flex-wrap:wrap;gap:8px;align-items:center">
-        ${feeText ? `<span style="display:inline-flex;align-items:center;gap:4px;font-size:.78rem;font-weight:700;color:#7C3AED"><i class="fas fa-won-sign" style="font-size:.65rem"></i> 리뷰비 ${feeText}</span>` : ""}
+        ${feeText ? `<span style="display:inline-flex;align-items:center;gap:4px;font-size:.78rem;font-weight:700;color:#3182f6"><i class="fas fa-won-sign" style="font-size:.65rem"></i> 리뷰비 ${feeText}</span>` : ""}
         ${deliveryType ? `<span style="font-size:.73rem;color:#6B7280;display:inline-flex;align-items:center;gap:4px"><i class="fas fa-truck" style="font-size:.6rem;color:#9CA3AF"></i>${escHtml(deliveryType)}</span>` : ""}
         ${timeRange ? `<span style="font-size:.73rem;color:#6B7280;display:inline-flex;align-items:center;gap:4px"><i class="fas fa-clock" style="font-size:.6rem;color:#9CA3AF"></i>${escHtml(timeRange)}</span>` : ""}
         ${slotsHtml}
@@ -682,7 +682,7 @@ function _renderPreview() {
         <div style="font-size:.76rem;color:#374151;white-space:pre-line;line-height:1.6">${escHtml(notes)}</div>
       </div>` : ""}
       <div style="height:1px;background:#E5E7EB;margin:2px 0"></div>
-      <button disabled style="display:block;width:100%;padding:12px;background:linear-gradient(135deg,#7C3AED,#6D28D9);color:#fff;border:none;border-radius:10px;font-size:.88rem;font-weight:800;text-align:center;opacity:.9;cursor:default">
+      <button disabled style="display:block;width:100%;padding:12px;background:linear-gradient(135deg,#3182f6,#1b64da);color:#fff;border:none;border-radius:10px;font-size:.88rem;font-weight:800;text-align:center;opacity:.9;cursor:default">
         <i class="fas fa-hand-point-up"></i> 참여 신청하기
       </button>
     </div>

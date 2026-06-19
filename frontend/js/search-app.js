@@ -1204,7 +1204,7 @@ function renderResults(results) {
       // ── 단건: [날짜] [표시명/탭명] 옵션:옵션명 형식 ──
       const item = items[0];
       const roundBadge = item.round
-        ? `<span style="display:inline-block;font-size:.6rem;font-weight:700;padding:1px 6px;border-radius:10px;background:#EEF2FF;color:#4338CA;border:1px solid #C7D2FE;margin-left:4px;vertical-align:middle">${escHtml(item.round)}</span>`
+        ? `<span style="display:inline-block;font-size:.6rem;font-weight:700;padding:1px 6px;border-radius:10px;background:#e8f1fe;color:#1b64da;border:1px solid #cce0fb;margin-left:4px;vertical-align:middle">${escHtml(item.round)}</span>`
         : "";
 
       // ★ 참여작업명: [날짜] [표시명(없으면 탭명)] [옵션:옵션명]
@@ -2520,7 +2520,7 @@ function renderDashboard(data) {
         ? `<span class="tab-start-date"><i class="fas fa-calendar-day"></i> ${escHtml(t.startDate)}</span>` : "";
       const tuip = t.tuip||0, chuihap = t.chuihap||0;
       let stateHtml = "";
-      if (isClosedTab)  stateHtml = `<span class="dash-pending-badge badge-done" style="background:#EEF2FF;color:#3730A3;border-color:#C7D2FE">⬛ 마감</span>`;
+      if (isClosedTab)  stateHtml = `<span class="dash-pending-badge badge-done" style="background:#e8f1fe;color:#1b64da;border-color:#cce0fb">⬛ 마감</span>`;
       else if (isTabDone) stateHtml = `<span class="dash-pending-badge badge-done">✓ 완료</span>`;
       else if (tuip>0) stateHtml = `<span class="work-badge badge-tuip"><i class="fas fa-user-plus"></i> 투입중 ${tuip}</span>`;
       else if (chuihap>0) stateHtml = `<span class="work-badge badge-chuihap"><i class="fas fa-layer-group"></i> 취합중 ${chuihap}</span>`;
@@ -2639,7 +2639,7 @@ function _buildTabRowHtml(t, tabKey, isClosedTab, tabNameHtml, startDateHtml, tR
 
   // 캡처폴더 열
   const captureFolderCell = t.captureFolderUrl
-    ? `<a class="dash-folder-link" style="color:#7C3AED;background:#F5F3FF;border-color:#DDD6FE" href="${escHtml(t.captureFolderUrl)}" target="_blank" onclick="event.stopPropagation()"><i class="fas fa-camera"></i> 캡처폴더</a>`
+    ? `<a class="dash-folder-link" style="color:#3182f6;background:#f2f7ff;border-color:#cce0fb" href="${escHtml(t.captureFolderUrl)}" target="_blank" onclick="event.stopPropagation()"><i class="fas fa-camera"></i> 캡처폴더</a>`
     : `<span style="color:#D1D5DB;font-size:.6rem">—</span>`;
 
   // 리뷰폴더 열 (대량건 뱃지 포함)
@@ -2843,16 +2843,16 @@ function _buildColHeader(container) {
   // colIdx = DASH_COL_DEFS 인덱스와 1:1 대응
   const CELLS = [
     // isCb 컬럼: 평소 0px(숨김) → 모드 진입 시 28px
-    { colIdx: 0,  inner: '<i class="fas fa-archive"      style="font-size:.6rem;color:#7C3AED"></i>',  style: 'justify-content:center', title: '마감 선택',    cbClass: 'closed-cb-wrap' },
+    { colIdx: 0,  inner: '<i class="fas fa-archive"      style="font-size:.6rem;color:#3182f6"></i>',  style: 'justify-content:center', title: '마감 선택',    cbClass: 'closed-cb-wrap' },
     { colIdx: 1,  inner: '<i class="fas fa-tag" style="font-size:.55rem"></i> 탭명',              style: '' },
-    { colIdx: 2,  inner: '<i class="fas fa-camera" style="font-size:.55rem;color:#7C3AED"></i> 캡처폴더', style: 'justify-content:center', title: '주문캡처 저장 폴더' },
+    { colIdx: 2,  inner: '<i class="fas fa-camera" style="font-size:.55rem;color:#3182f6"></i> 캡처폴더', style: 'justify-content:center', title: '주문캡처 저장 폴더' },
     { colIdx: 3,  inner: '<i class="fas fa-folder" style="font-size:.55rem;color:#F59E0B"></i> 리뷰폴더',  style: 'justify-content:center', title: '리뷰 저장 폴더'    },
-    { colIdx: 4,  inner: '<i class="fas fa-layer-group" style="font-size:.55rem;color:#4338CA"></i> 차수',  style: 'justify-content:center', title: '진행 차수'         },
+    { colIdx: 4,  inner: '<i class="fas fa-layer-group" style="font-size:.55rem;color:#1b64da"></i> 차수',  style: 'justify-content:center', title: '진행 차수'         },
     { colIdx: 5,  inner: '<i class="fas fa-calendar-day" style="font-size:.55rem"></i> 시작일',   style: '' },
     { colIdx: 6,  inner: '<i class="fas fa-box" style="font-size:.55rem"></i> 상품명',            style: '' },
     { colIdx: 7,  inner: '<i class="fas fa-clock" style="font-size:.55rem"></i> 주문시간대',      style: '' },
     { colIdx: 8,  inner: '<i class="fas fa-star" style="font-size:.55rem"></i> 리뷰타입',         style: '' },
-    { colIdx: 9, inner: '<i class="fas fa-link" style="font-size:.55rem;color:#7C3AED"></i>',    style: 'justify-content:center', title: '구매양식 제출링크 생성' },
+    { colIdx: 9, inner: '<i class="fas fa-link" style="font-size:.55rem;color:#3182f6"></i>',    style: 'justify-content:center', title: '구매양식 제출링크 생성' },
     { colIdx: 10, inner: '<i class="fas fa-user" style="font-size:.55rem"></i> 담당',             style: 'justify-content:center' },
     { colIdx: 11, inner: '<i class="fas fa-chart-bar" style="font-size:.55rem"></i> 진행률',      style: '' },
     { colIdx: 12, inner: '<i class="fas fa-check-double" style="font-size:.55rem"></i> 리뷰',     style: 'justify-content:flex-end' },
@@ -3151,7 +3151,7 @@ function execClosed() {
   toClose.forEach(({ tabName }) => {
     const el = document.createElement("div");
     el.className = "closed-confirm-list-item";
-    el.innerHTML = `<i class="fas fa-archive" style="color:#4F46E5;font-size:.75rem"></i> ${tabName} → <b>마감</b>`;
+    el.innerHTML = `<i class="fas fa-archive" style="color:#1b64da;font-size:.75rem"></i> ${tabName} → <b>마감</b>`;
     listEl.appendChild(el);
   });
   toOpen.forEach(({ tabName }) => {
@@ -3651,7 +3651,7 @@ window._onReviewerOptCardSelect = function(colName, value, btnEl) {
   const parent = btnEl.parentElement;
   if (parent) {
     parent.querySelectorAll('button').forEach(function(b) {
-      b.style.border = '1.5px solid #D8D0E8';
+      b.style.border = '1.5px solid #DCE0E8';
       b.style.background = '#fff';
       b.style.boxShadow = 'none';
       // 내부 텍스트 색상 원복
@@ -3660,11 +3660,11 @@ window._onReviewerOptCardSelect = function(colName, value, btnEl) {
     });
   }
   // 선택된 카드 강조
-  btnEl.style.border = '2px solid #7C3AED';
-  btnEl.style.background = '#F5F3FF';
-  btnEl.style.boxShadow = '0 0 0 3px rgba(124,58,237,.12)';
+  btnEl.style.border = '2px solid #3182f6';
+  btnEl.style.background = '#f2f7ff';
+  btnEl.style.boxShadow = '0 0 0 3px rgba(49,130,246,.12)';
   var innerDiv = btnEl.querySelector('div');
-  if (innerDiv) innerDiv.style.color = '#5B21B6';
+  if (innerDiv) innerDiv.style.color = '#1b64da';
 
   _reviewerSelectedOptions[colName] = value;
   console.log('[옵션] 카드 선택:', colName, '→', value, '| 전체:', JSON.stringify(_reviewerSelectedOptions));
@@ -3729,13 +3729,13 @@ async function _loadReviewerOptionData(sheetId, tabName, gid, round) {
           _reviewerSelectedOptions[colName] = values.length === 1 ? values[0] : '';
 
           html += '<div style="padding:4px 0">';
-          html += '<div style="font-size:.75rem;font-weight:700;color:#7C3AED;margin-bottom:3px">' + _safeText(colName) + '</div>';
+          html += '<div style="font-size:.75rem;font-weight:700;color:#3182f6;margin-bottom:3px">' + _safeText(colName) + '</div>';
 
           if (values.length === 1) {
             // ★ 1개 값: 드롭다운 대신 확정 표시 (자동 선택됨)
-            html += '<div style="padding:8px 10px;border:1.5px solid #A78BFA;border-radius:8px;'
-                  + 'font-size:.85rem;font-weight:600;color:#1F2937;background:#EDE9FE">'
-                  + '<i class="fas fa-check-circle" style="color:#7C3AED;margin-right:5px"></i>'
+            html += '<div style="padding:8px 10px;border:1.5px solid #6fa6f5;border-radius:8px;'
+                  + 'font-size:.85rem;font-weight:600;color:#1F2937;background:#e8f1fe">'
+                  + '<i class="fas fa-check-circle" style="color:#3182f6;margin-right:5px"></i>'
                   + _safeText(values[0])
                   + '</div>';
           } else {
@@ -3748,7 +3748,7 @@ async function _loadReviewerOptionData(sheetId, tabName, gid, round) {
               html += '<button type="button" '
                     + 'id="rOptCard_' + _safeText(colName) + '_' + vi + '" '
                     + 'onclick="window._onReviewerOptCardSelect(\'' + safeCol + '\', \'' + safeVal + '\', this)" '
-                    + 'style="flex:1 1 calc(50% - 3px);min-width:0;padding:9px 10px;border:1.5px solid #D8D0E8;border-radius:10px;'
+                    + 'style="flex:1 1 calc(50% - 3px);min-width:0;padding:9px 10px;border:1.5px solid #DCE0E8;border-radius:10px;'
                     + 'background:#fff;cursor:pointer;text-align:left;transition:all .15s;outline:none">'
                     + '<div style="font-size:.82rem;font-weight:600;color:#374151;line-height:1.35;word-break:break-word">'
                     + _safeText(v)
@@ -3774,7 +3774,7 @@ async function _loadReviewerOptionData(sheetId, tabName, gid, round) {
         ? '로그인 후 표시됩니다'                    // 비로그인 (headersOnly)
         : '배정된 옵션 정보가 아직 없습니다';       // 로그인했지만 매칭 0건
       contentEl.innerHTML = colNames.map(n =>
-        `<div style="padding:3px 0"><span style="color:#7C3AED;font-weight:700">${_safeText(n)}</span><span style="color:#9CA3AF;margin-left:4px">— ${hint}</span></div>`
+        `<div style="padding:3px 0"><span style="color:#3182f6;font-weight:700">${_safeText(n)}</span><span style="color:#9CA3AF;margin-left:4px">— ${hint}</span></div>`
       ).join('');
       infoEl.style.display = 'block';
       console.log('[옵션] 옵션 헤더 표시:', colNames, data.headersOnly ? '(headersOnly)' : '(matched:0)');
@@ -3887,14 +3887,14 @@ function _renderOptionPicker() {
       pickerWrap.style.display = "";
       tabsEl.innerHTML = "";
       const infoDiv = document.createElement("div");
-      infoDiv.style.cssText = "padding:10px 14px;border:1.5px solid #A78BFA;border-radius:10px;background:#EDE9FE;display:flex;align-items:center;gap:8px;flex-wrap:wrap";
+      infoDiv.style.cssText = "padding:10px 14px;border:1.5px solid #6fa6f5;border-radius:10px;background:#e8f1fe;display:flex;align-items:center;gap:8px;flex-wrap:wrap";
       const icon = document.createElement("i");
       icon.className = "fas fa-check-circle";
-      icon.style.cssText = "color:#7C3AED;font-size:1.1rem";
+      icon.style.cssText = "color:#3182f6;font-size:1.1rem";
       infoDiv.appendChild(icon);
       cols.forEach(({ header, value }) => {
         const badge = document.createElement("span");
-        badge.style.cssText = "display:inline-flex;align-items:center;gap:4px;padding:3px 10px;border-radius:6px;background:#fff;border:1px solid #D8B4FE;font-size:.82rem";
+        badge.style.cssText = "display:inline-flex;align-items:center;gap:4px;padding:3px 10px;border-radius:6px;background:#fff;border:1px solid #a6c8fb;font-size:.82rem";
         badge.innerHTML = '<span style="color:#6B7280;font-weight:500">' + _safeText(header) + '</span><span style="color:#1F2937;font-weight:700">' + _safeText(value) + '</span>';
         infoDiv.appendChild(badge);
       });
@@ -4336,7 +4336,7 @@ function _buildCoupangCardHtml(cid) {
 
     <!-- AI 캡처 추출 섹션 -->
     <div class="ofc-ai-section">
-      <div class="ofc-ai-section-title">📸 쿠팡 주문 캡처 자동추출 <span style="font-weight:400;color:#A5B4FC;font-size:.65rem">(업로드 시 동일인 자동 검증)</span></div>
+      <div class="ofc-ai-section-title">📸 쿠팡 주문 캡처 자동추출 <span style="font-weight:400;color:#a6c8fb;font-size:.65rem">(업로드 시 동일인 자동 검증)</span></div>
       <div class="of-img-zone" id="${cid}_imgZone"
            ondragover="event.preventDefault();this.classList.add('drag-over')"
            ondragleave="this.classList.remove('drag-over')"
@@ -4358,10 +4358,10 @@ function _buildCoupangCardHtml(cid) {
         <div style="flex:1;min-width:0">
           <div style="display:flex;align-items:center;justify-content:space-between;gap:6px">
             <span>AI가 쿠팡 주문 정보를 분석하고 있습니다…</span>
-            <span id="${cid}_aiCountdown" style="font-size:.9rem;font-weight:800;color:#7C3AED;flex-shrink:0;min-width:18px;text-align:right"></span>
+            <span id="${cid}_aiCountdown" style="font-size:.9rem;font-weight:800;color:#3182f6;flex-shrink:0;min-width:18px;text-align:right"></span>
           </div>
-          <div style="margin-top:5px;background:#DDD6FE;border-radius:99px;height:3px;overflow:hidden">
-            <div id="${cid}_aiBar" style="height:100%;background:#7C3AED;width:100%;transition:width 1s linear;border-radius:99px"></div>
+          <div style="margin-top:5px;background:#cce0fb;border-radius:99px;height:3px;overflow:hidden">
+            <div id="${cid}_aiBar" style="height:100%;background:#3182f6;width:100%;transition:width 1s linear;border-radius:99px"></div>
           </div>
         </div>
       </div>
@@ -4632,7 +4632,7 @@ function _buildOrderCardHtml(cid, idx, type) {
 
     <!-- AI 캡처 추출 섹션 -->
     <div class="ofc-ai-section">
-      <div class="ofc-ai-section-title">📸 주문 캡처 자동추출 <span style="font-weight:400;color:#A5B4FC;font-size:.65rem">(선택)</span></div>
+      <div class="ofc-ai-section-title">📸 주문 캡처 자동추출 <span style="font-weight:400;color:#a6c8fb;font-size:.65rem">(선택)</span></div>
       <div class="of-img-zone" id="${cid}_imgZone"
            ondragover="event.preventDefault();this.classList.add('drag-over')"
            ondragleave="this.classList.remove('drag-over')"
@@ -4644,7 +4644,7 @@ function _buildOrderCardHtml(cid, idx, type) {
       </div>
       <div class="of-img-preview" id="${cid}_imgPreview" style="display:none;align-items:center;gap:10px;margin-bottom:8px">
         <div style="position:relative;flex-shrink:0">
-          <img id="${cid}_imgThumb" src="" alt="주문캡처" style="width:72px;height:72px;object-fit:cover;border-radius:8px;border:1.5px solid #DDD6FE">
+          <img id="${cid}_imgThumb" src="" alt="주문캡처" style="width:72px;height:72px;object-fit:cover;border-radius:8px;border:1.5px solid #cce0fb">
           <button class="oip-remove" onclick="removeCardImg('${cid}')" title="이미지 제거"><i class="fas fa-times"></i></button>
         </div>
         <span id="${cid}_imgLabel" style="font-size:.75rem;color:#6B7280">이미지 첨부됨</span>
@@ -4654,10 +4654,10 @@ function _buildOrderCardHtml(cid, idx, type) {
         <div style="flex:1;min-width:0">
           <div style="display:flex;align-items:center;justify-content:space-between;gap:6px">
             <span>AI가 주문 정보를 분석하고 있습니다…</span>
-            <span id="${cid}_aiCountdown" style="font-size:.9rem;font-weight:800;color:#7C3AED;flex-shrink:0;min-width:18px;text-align:right"></span>
+            <span id="${cid}_aiCountdown" style="font-size:.9rem;font-weight:800;color:#3182f6;flex-shrink:0;min-width:18px;text-align:right"></span>
           </div>
-          <div style="margin-top:5px;background:#DDD6FE;border-radius:99px;height:3px;overflow:hidden">
-            <div id="${cid}_aiBar" style="height:100%;background:#7C3AED;width:100%;transition:width 1s linear;border-radius:99px"></div>
+          <div style="margin-top:5px;background:#cce0fb;border-radius:99px;height:3px;overflow:hidden">
+            <div id="${cid}_aiBar" style="height:100%;background:#3182f6;width:100%;transition:width 1s linear;border-radius:99px"></div>
           </div>
         </div>
       </div>
@@ -4718,8 +4718,8 @@ function _buildOrderCardHtml(cid, idx, type) {
         </div>
       </div>
       <div class="of-error-msg" id="of_orderer_err"><i class="fas fa-exclamation-circle"></i> 주문자는 필수 입력 항목입니다.</div>
-      <div id="of_options_wrap" style="display:none;margin-bottom:12px;padding:10px 14px;background:#F5F3FF;border:1.5px solid #DDD6FE;border-radius:10px">
-        <div style="font-size:.68rem;font-weight:700;color:#7C3AED;margin-bottom:8px;letter-spacing:.03em"><i class="fas fa-box-open" style="margin-right:4px"></i>주문 옵션 내역 (변경 불가)</div>
+      <div id="of_options_wrap" style="display:none;margin-bottom:12px;padding:10px 14px;background:#f2f7ff;border:1.5px solid #cce0fb;border-radius:10px">
+        <div style="font-size:.68rem;font-weight:700;color:#3182f6;margin-bottom:8px;letter-spacing:.03em"><i class="fas fa-box-open" style="margin-right:4px"></i>주문 옵션 내역 (변경 불가)</div>
         <div id="of_options_body"></div>
       </div>` : `
       <div class="of-field">
@@ -4810,10 +4810,10 @@ function _buildOrderCardHtml(cid, idx, type) {
     </label>` : ""}
 
     <!-- ★ v9.14: 소득신고 입력 (소득신고 모드일 때만 표시) -->
-    <div id="${cid}_incomeBlock" style="display:none;margin-top:10px;padding:12px 14px;background:#F5F3FF;border:1.5px solid #A78BFA;border-radius:10px">
-      <div style="font-size:.73rem;font-weight:700;color:#5B21B6;margin-bottom:8px;display:flex;align-items:center;justify-content:space-between">
+    <div id="${cid}_incomeBlock" style="display:none;margin-top:10px;padding:12px 14px;background:#f2f7ff;border:1.5px solid #6fa6f5;border-radius:10px">
+      <div style="font-size:.73rem;font-weight:700;color:#1b64da;margin-bottom:8px;display:flex;align-items:center;justify-content:space-between">
         <span><i class="fas fa-id-card" style="margin-right:4px"></i>소득신고 정보</span>
-        ${!isFirst ? `<label style="font-size:.68rem;font-weight:600;color:#6D28D9;display:flex;align-items:center;gap:4px;cursor:pointer">
+        ${!isFirst ? `<label style="font-size:.68rem;font-weight:600;color:#1b64da;display:flex;align-items:center;gap:4px;cursor:pointer">
           <input type="checkbox" id="${cid}_incomeSameChk" checked onchange="_toggleIncomeSame('${cid}')">
           1번 주문과 동일
         </label>` : ""}
@@ -4823,16 +4823,16 @@ function _buildOrderCardHtml(cid, idx, type) {
       <div id="${cid}_incomePersonBtns" style="display:flex;flex-wrap:wrap;gap:5px;margin-bottom:8px"></div>` : ""}
       <div id="${cid}_incomeInputs" style="display:${isFirst ? "" : "none"};flex-direction:column;gap:6px">
         <div>
-          <label style="font-size:.7rem;font-weight:700;color:#5B21B6;display:block;margin-bottom:2px">소득신고명의 <span style="color:#EF4444">*</span></label>
+          <label style="font-size:.7rem;font-weight:700;color:#1b64da;display:block;margin-bottom:2px">소득신고명의 <span style="color:#EF4444">*</span></label>
           <input id="${cid}_incomeName" type="text" placeholder="소득신고 명의자 이름"
-            style="width:100%;padding:7px 10px;border:1.5px solid #A78BFA;border-radius:7px;font-size:.82rem;outline:none;font-family:inherit;box-sizing:border-box"
-            onfocus="this.style.borderColor='#7C3AED'" onblur="this.style.borderColor='#A78BFA'">
+            style="width:100%;padding:7px 10px;border:1.5px solid #6fa6f5;border-radius:7px;font-size:.82rem;outline:none;font-family:inherit;box-sizing:border-box"
+            onfocus="this.style.borderColor='#3182f6'" onblur="this.style.borderColor='#6fa6f5'">
         </div>
         <div>
-          <label style="font-size:.7rem;font-weight:700;color:#5B21B6;display:block;margin-bottom:2px">주민등록번호 <span style="color:#EF4444">*</span> <span style="font-weight:400;color:#9CA3AF">13자리</span></label>
+          <label style="font-size:.7rem;font-weight:700;color:#1b64da;display:block;margin-bottom:2px">주민등록번호 <span style="color:#EF4444">*</span> <span style="font-weight:400;color:#9CA3AF">13자리</span></label>
           <input id="${cid}_residentNo" type="text" placeholder="000000-0000000" maxlength="14"
-            style="width:100%;padding:7px 10px;border:1.5px solid #A78BFA;border-radius:7px;font-size:.82rem;outline:none;font-family:inherit;box-sizing:border-box;letter-spacing:1px"
-            onfocus="this.style.borderColor='#7C3AED'" onblur="this.style.borderColor='#A78BFA'"
+            style="width:100%;padding:7px 10px;border:1.5px solid #6fa6f5;border-radius:7px;font-size:.82rem;outline:none;font-family:inherit;box-sizing:border-box;letter-spacing:1px"
+            onfocus="this.style.borderColor='#3182f6'" onblur="this.style.borderColor='#6fa6f5'"
             oninput="_formatCardResidentNo(this)">
           <div id="${cid}_residentNoHint" style="font-size:.66rem;color:#9CA3AF;margin-top:2px">숫자 13자리 자동 형식화</div>
         </div>
@@ -4864,7 +4864,7 @@ function _formatResidentNo(input) {
   if (hint) {
     if (digits.length === 13) {
       hint.textContent = "✅ 형식 올바름";
-      hint.style.color = "#059669";
+      hint.style.color = "#0ca678";
     } else if (digits.length > 0) {
       hint.textContent = `${digits.length}/13자리 입력됨`;
       hint.style.color = "#9CA3AF";
@@ -4887,7 +4887,7 @@ function _formatCardResidentNo(input) {
   if (hint) {
     if (digits.length === 13) {
       hint.textContent = "✅ 형식 올바름";
-      hint.style.color = "#059669";
+      hint.style.color = "#0ca678";
     } else if (digits.length > 0) {
       hint.textContent = `${digits.length}/13자리 입력됨`;
       hint.style.color = "#9CA3AF";
@@ -4978,7 +4978,7 @@ function _buildIncomePersonBtns(cid, profileData) {
   const selfBtn = document.createElement("button");
   selfBtn.type = "button";
   selfBtn.textContent = "본인" + (selfName ? ` (${selfName})` : "");
-  selfBtn.style.cssText = "padding:5px 10px;border:1.5px solid #A78BFA;border-radius:16px;background:#EDE9FE;color:#5B21B6;font-size:.72rem;font-weight:700;cursor:pointer";
+  selfBtn.style.cssText = "padding:5px 10px;border:1.5px solid #6fa6f5;border-radius:16px;background:#e8f1fe;color:#1b64da;font-size:.72rem;font-weight:700;cursor:pointer";
   selfBtn.onclick = () => _selectCardIncomePerson(cid, selfBtn, profileData, -1);
   btnsWrap.appendChild(selfBtn);
 
@@ -5005,9 +5005,9 @@ function _selectCardIncomePerson(cid, selectedBtn, profileData, personIdx) {
       b.style.color        = "#374151";
     });
     if (selectedBtn) {
-      selectedBtn.style.background  = "#EDE9FE";
-      selectedBtn.style.borderColor = "#7C3AED";
-      selectedBtn.style.color       = "#5B21B6";
+      selectedBtn.style.background  = "#e8f1fe";
+      selectedBtn.style.borderColor = "#3182f6";
+      selectedBtn.style.color       = "#1b64da";
     }
   }
 
@@ -5107,9 +5107,9 @@ function _selectIncomePerson(selectedBtn, profileData, personIdx) {
       b.style.color = "#374151";
     });
     if (selectedBtn) {
-      selectedBtn.style.background = "#EDE9FE";
-      selectedBtn.style.borderColor = "#7C3AED";
-      selectedBtn.style.color = "#5B21B6";
+      selectedBtn.style.background = "#e8f1fe";
+      selectedBtn.style.borderColor = "#3182f6";
+      selectedBtn.style.color = "#1b64da";
     }
   }
 
@@ -6069,7 +6069,7 @@ async function _callCardExtractAi(cid, base64, mimeType) {
   const countEl = document.getElementById(cid+"_aiCountdown");
   const barEl   = document.getElementById(cid+"_aiBar");
   const tick = () => {
-    if (countEl) { countEl.textContent = remaining; countEl.style.color = remaining<=3?"#DC2626":"#7C3AED"; }
+    if (countEl) { countEl.textContent = remaining; countEl.style.color = remaining<=3?"#DC2626":"#3182f6"; }
     if (barEl)   barEl.style.width = (remaining/15*100)+"%";
     remaining--;
   };
@@ -6125,7 +6125,7 @@ function _stopCardCountdown(cid) {
   if (st.countdownId) { clearInterval(st.countdownId); st.countdownId = null; }
   const countEl = document.getElementById(cid+"_aiCountdown");
   const barEl   = document.getElementById(cid+"_aiBar");
-  if (countEl) { countEl.textContent=""; countEl.style.color="#7C3AED"; }
+  if (countEl) { countEl.textContent=""; countEl.style.color="#3182f6"; }
   if (barEl)   barEl.style.width = "100%";
 }
 
@@ -6331,7 +6331,7 @@ function applyCardAiResult(cid) {
     } else {
       btn.innerHTML='<i class="fas fa-lock"></i> 적용 완료 (잠금)';
       btn.disabled=true;
-      btn.style.background="#10B981";
+      btn.style.background="#12b886";
     }
   }
 
@@ -7649,14 +7649,14 @@ function showToast(msg, isErr) {
     t.id = "_toast";
     Object.assign(t.style, {
       position:"fixed", bottom:"24px", left:"50%", transform:"translateX(-50%)",
-      background: isErr ? "#EF4444" : "#10B981",
+      background: isErr ? "#EF4444" : "#12b886",
       color:"#fff", padding:"8px 20px", borderRadius:"20px",
       fontSize:".82rem", fontWeight:"600", zIndex:"9999",
       boxShadow:"0 4px 14px rgba(0,0,0,.2)", transition:"opacity .3s"
     });
     document.body.appendChild(t);
   }
-  t.style.background = isErr ? "#EF4444" : "#10B981";
+  t.style.background = isErr ? "#EF4444" : "#12b886";
   t.textContent = msg;
   t.style.opacity = "1";
   clearTimeout(t._tid);
@@ -7838,11 +7838,11 @@ function stopBuildProgress() {
   pct.textContent   = "100%";
   eta.textContent   = "완료!";
   label.textContent = "갱신 완료 ✓";
-  bar.style.background = "linear-gradient(90deg,#10B981,#059669)";
+  bar.style.background = "linear-gradient(90deg,#12b886,#0ca678)";
   setTimeout(() => {
     hide(wrap);
     // 바 색상 원복
-    bar.style.background = "linear-gradient(90deg,var(--p),#7C3AED)";
+    bar.style.background = "linear-gradient(90deg,var(--p),#3182f6)";
   }, 2500);
 }
 
@@ -7892,7 +7892,7 @@ async function debugBuildStep(step) {
     const data = await gasGet({ action: "debugBuildStep", step: String(step) }, 30000);
     const logHtml = (data.log || []).map(l => {
       if (l.includes("실패") || l.includes("오류") || l.includes("error")) return `<span style="color:#EF4444">${l}</span>`;
-      if (l.includes("성공") || l.includes("정상") || l.includes("완료")) return `<span style="color:#10B981">${l}</span>`;
+      if (l.includes("성공") || l.includes("정상") || l.includes("완료")) return `<span style="color:#12b886">${l}</span>`;
       return `<span style="color:#374151">${l}</span>`;
     }).join("<br>");
 
@@ -7904,7 +7904,7 @@ async function debugBuildStep(step) {
     if (data.elapsed)    extra += `<br><b>소요: ${data.elapsed}</b>`;
 
     if (data.ok) {
-      resEl.innerHTML = `<b style="color:#10B981">✅ Step ${step} 정상</b><br>${logHtml}${extra}`;
+      resEl.innerHTML = `<b style="color:#12b886">✅ Step ${step} 정상</b><br>${logHtml}${extra}`;
     } else {
       resEl.innerHTML =
         `<b style="color:#EF4444">❌ Step ${step} 실패</b><br>` +
@@ -7973,7 +7973,7 @@ async function debugSingleSheet(mode) {
   show(resEl);
   resEl.style.display = "";
   const modeLabel = diagMode === "tab" ? `gid:${diagGid} (단일탭)` : "전체진단";
-  resEl.innerHTML = `<i class="fas fa-spinner fa-spin"></i> <b>${sheetId.substring(0,16)}…</b> 진단 중 <span style="color:#7C3AED">[${modeLabel}]</span>...`;
+  resEl.innerHTML = `<i class="fas fa-spinner fa-spin"></i> <b>${sheetId.substring(0,16)}…</b> 진단 중 <span style="color:#3182f6">[${modeLabel}]</span>...`;
 
   try {
     const params = { action: "debugSingleSheet", sheetId };
@@ -7981,7 +7981,7 @@ async function debugSingleSheet(mode) {
     const data = await gasGet(params, 40000);
 
     // 결과 렌더링 헬퍼
-    const ok    = s => `<span style="color:#10B981;font-weight:700">${s}</span>`;
+    const ok    = s => `<span style="color:#12b886;font-weight:700">${s}</span>`;
     const err   = s => `<span style="color:#EF4444;font-weight:700">${s}</span>`;
     const warn  = s => `<span style="color:#D97706;font-weight:700">${s}</span>`;
     const gray  = s => `<span style="color:#6B7280">${s}</span>`;
@@ -8316,8 +8316,8 @@ async function previewAddCampaign() {
             <code style="font-size:11px;color:#334155;flex:1;word-break:break-all;user-select:all;">${sa}</code>
           </div>
           <div style="display:flex;gap:6px;">
-            <button onclick="navigator.clipboard.writeText('${sa}').then(()=>{this.innerHTML='<i class=\\'fas fa-check\\'></i> 복사됨';this.style.background='#10b981';setTimeout(()=>{this.innerHTML='<i class=\\'fas fa-copy\\'></i> 서비스계정 복사';this.style.background='#6366f1'},1500)})"
-              style="flex:1;padding:6px 10px;background:#6366f1;color:#fff;border:none;border-radius:6px;font-size:11px;font-weight:600;cursor:pointer;display:flex;align-items:center;justify-content:center;gap:4px;">
+            <button onclick="navigator.clipboard.writeText('${sa}').then(()=>{this.innerHTML='<i class=\\'fas fa-check\\'></i> 복사됨';this.style.background='#12b886';setTimeout(()=>{this.innerHTML='<i class=\\'fas fa-copy\\'></i> 서비스계정 복사';this.style.background='#3182f6'},1500)})"
+              style="flex:1;padding:6px 10px;background:#3182f6;color:#fff;border:none;border-radius:6px;font-size:11px;font-weight:600;cursor:pointer;display:flex;align-items:center;justify-content:center;gap:4px;">
               <i class="fas fa-copy"></i> 서비스계정 복사
             </button>
             <button onclick="window.open('${sheetUrl}','_blank')"
@@ -8482,10 +8482,10 @@ async function testGasJsonp() {
     const ms   = Date.now() - t0;
     if (data && (data.exists !== undefined || data.count !== undefined)) {
       const verBadge = data.codeVersion
-        ? `<br><span style="color:#7C3AED;font-weight:600">📌 Code.gs 버전: ${escHtml(data.codeVersion)}</span>`
+        ? `<br><span style="color:#3182f6;font-weight:600">📌 Code.gs 버전: ${escHtml(data.codeVersion)}</span>`
         : "";
       resEl.innerHTML =
-        `<span style="color:#059669;font-weight:700">✅ JSONP 지원 확인됨</span> (${ms}ms)<br>` +
+        `<span style="color:#0ca678;font-weight:700">✅ JSONP 지원 확인됨</span> (${ms}ms)<br>` +
         `GAS 버전이 정상입니다. 동기화을 진행할 수 있습니다.${verBadge}<br>` +
         `<small style="color:#6B7280">응답: count=${data.count||0}, exists=${data.exists}</small>`;
       // 코드 버전 행 갱신
@@ -8811,7 +8811,7 @@ async function runCheckReviewFiles() {
     results.forEach(item => {
       html += `<div class="cfr-item restored">
         <b>${escHtml(item.name)}</b>
-        <span style="color:#059669;margin-left:6px">${escHtml(item.tabName)}</span>
+        <span style="color:#0ca678;margin-left:6px">${escHtml(item.tabName)}</span>
         <span style="font-size:.75rem;color:#6B7280;margin-left:4px">행${item.rowIndex}</span><br>
         <span style="font-size:.75rem">${escHtml(item.reason)}</span>
       </div>`;
@@ -8923,7 +8923,7 @@ async function runSearchDebug() {
     document.getElementById('debugSummary').innerHTML =
       `전체 <b>${total}건</b> | ` +
       `<span style="color:#DC2626">isSubmitted=true: <b>${submitted}건</b></span> | ` +
-      `<span style="color:#059669">isSubmitted=false(검색 노출): <b>${pending}건</b></span>`;
+      `<span style="color:#0ca678">isSubmitted=false(검색 노출): <b>${pending}건</b></span>`;
 
     // 테이블 렌더
     const tbody = document.getElementById('debugTableBody');
@@ -8949,7 +8949,7 @@ async function runSearchDebug() {
         <td style="padding:5px 8px;border:1px solid #E5E7EB;font-weight:600">${escHtml(r.displayName||'')}</td>
         <td style="padding:5px 8px;border:1px solid #E5E7EB;font-size:.7rem;color:#4B5563">${escHtml((r.campaignName||'')+(r.tabName?(' / '+r.tabName):''))}</td>
         <td style="padding:5px 8px;border:1px solid #E5E7EB;font-size:.7rem">${escHtml(r.productName||r.tcDisplayName||'')}</td>
-        <td style="padding:5px 8px;border:1px solid #E5E7EB;text-align:center;font-weight:700;color:${isS?'#DC2626':'#059669'}">${isS?'✅ true':'⬜ false'}</td>
+        <td style="padding:5px 8px;border:1px solid #E5E7EB;text-align:center;font-weight:700;color:${isS?'#DC2626':'#0ca678'}">${isS?'✅ true':'⬜ false'}</td>
         <td style="padding:5px 8px;border:1px solid #E5E7EB;font-family:monospace;font-size:.7rem;color:${isS?'#DC2626':'#4B5563'}">${escHtml(causeHint||String(rdRaw??''))}</td>
         <td style="padding:5px 8px;border:1px solid #E5E7EB;font-family:monospace;font-size:.65rem;color:#9CA3AF">${escHtml(r.sheetId||'')}</td>
         <td style="padding:5px 8px;border:1px solid #E5E7EB;text-align:center;color:#6B7280">${escHtml(String(r.row?._rowIndex??r.rowIndex??''))}</td>`;
@@ -8996,7 +8996,7 @@ async function _runSearchDebugFallback(q) {
       `<span style="color:#B45309">⚠ GAS가 searchAllDebug 미지원 → searchAll 응답 표시 (isSubmitted=true인 행이 반환 목록에 포함되지 않을 수 있음)</span><br>` +
       `반환된 전체 <b>${total}건</b> | ` +
       `<span style="color:#DC2626">isSubmitted=true: <b>${submitted}건</b></span> | ` +
-      `<span style="color:#059669">isSubmitted=false(검색 노출): <b>${pending}건</b></span>`;
+      `<span style="color:#0ca678">isSubmitted=false(검색 노출): <b>${pending}건</b></span>`;
 
     const tbody = document.getElementById('debugTableBody');
     tbody.innerHTML = '';
@@ -9010,7 +9010,7 @@ async function _runSearchDebugFallback(q) {
         <td style="padding:5px 8px;border:1px solid #E5E7EB;font-weight:600">${escHtml(r.displayName||'')}</td>
         <td style="padding:5px 8px;border:1px solid #E5E7EB;font-size:.7rem;color:#4B5563">${escHtml((r.campaignName||'')+(r.tabName?(' / '+r.tabName):''))}</td>
         <td style="padding:5px 8px;border:1px solid #E5E7EB;font-size:.7rem">${escHtml(r.productName||r.tcDisplayName||'')}</td>
-        <td style="padding:5px 8px;border:1px solid #E5E7EB;text-align:center;font-weight:700;color:${isS?'#DC2626':'#059669'}">${isS?'✅ true':'⬜ false'}</td>
+        <td style="padding:5px 8px;border:1px solid #E5E7EB;text-align:center;font-weight:700;color:${isS?'#DC2626':'#0ca678'}">${isS?'✅ true':'⬜ false'}</td>
         <td style="padding:5px 8px;border:1px solid #E5E7EB;font-family:monospace;font-size:.72rem;color:#92400E">${escHtml(String(rdRaw??''))}</td>
         <td style="padding:5px 8px;border:1px solid #E5E7EB;font-family:monospace;font-size:.65rem;color:#9CA3AF">${escHtml(r.sheetId||'')}</td>
         <td style="padding:5px 8px;border:1px solid #E5E7EB;text-align:center;color:#6B7280">${escHtml(String(r.row?._rowIndex??r.rowIndex??''))}</td>`;
@@ -9119,12 +9119,12 @@ function _renderDashRawTable(data) {
         <td style="padding:5px 8px;border:1px solid #E5E7EB;color:#374151;white-space:nowrap">${escHtml(c.campaign||'')}</td>
         <td style="padding:5px 8px;border:1px solid #E5E7EB;font-weight:600;white-space:nowrap">${escHtml(t.tab||'')}</td>
         <td style="padding:5px 8px;border:1px solid #E5E7EB;text-align:center;font-weight:700;color:${isEmpty?'#9CA3AF':'#1F2937'}">${t.total ?? '—'}</td>
-        <td style="padding:5px 8px;border:1px solid #E5E7EB;text-align:center;font-weight:700;color:${t.submitted>0?'#059669':isAnomal?'#D97706':'#9CA3AF'}">${t.submitted ?? '—'}</td>
+        <td style="padding:5px 8px;border:1px solid #E5E7EB;text-align:center;font-weight:700;color:${t.submitted>0?'#0ca678':isAnomal?'#D97706':'#9CA3AF'}">${t.submitted ?? '—'}</td>
         <td style="padding:5px 8px;border:1px solid #E5E7EB;text-align:center;color:${t.pending>0?'#DC2626':'#6B7280'}">${t.pending ?? '—'}</td>
         <td style="padding:5px 8px;border:1px solid #E5E7EB;text-align:center">
           ${isEmpty
             ? `<span style="color:#9CA3AF;font-size:.68rem">수취인없음</span>`
-            : `<span style="color:${rate===100?'#059669':rate>=50?'#7C3AED':'#D97706'};font-weight:700">${rate}%</span>`
+            : `<span style="color:${rate===100?'#0ca678':rate>=50?'#3182f6':'#D97706'};font-weight:700">${rate}%</span>`
           }
         </td>
         <td style="padding:5px 8px;border:1px solid #E5E7EB;text-align:center;font-size:.7rem">
@@ -9132,7 +9132,7 @@ function _renderDashRawTable(data) {
             ? `<span style="color:#D97706;font-weight:700">⚠ 제출0</span>`
             : isEmpty
               ? `<span style="color:#9CA3AF">빈탭</span>`
-              : `<span style="color:#059669">정상</span>`
+              : `<span style="color:#0ca678">정상</span>`
           }
         </td>
         <td style="padding:5px 8px;border:1px solid #E5E7EB;font-size:.7rem;color:#4B5563">${roundSummary}</td>
