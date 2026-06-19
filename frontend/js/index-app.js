@@ -12286,7 +12286,7 @@ async function loadTabDashboard() {
     if (syncEl) {
       const t = res.lastSync ? new Date(res.lastSync).toLocaleString("ko-KR") : "없음";
       syncEl.innerHTML = `<i class="fas fa-database" style="margin-right:4px"></i>데이터 원본: <b>DB(tab_configs)</b> &middot; <span style="color:#0ca678">인덱스 빌드: 매 정시 자동 실행</span>`
-        + ` &middot; <button onclick="shareAllSheetsPermission()" style="background:none;border:none;color:#3182f6;cursor:pointer;font-size:.72rem;font-weight:600;text-decoration:underline;padding:0"><i class="fas fa-shield-alt" style="margin-right:2px"></i>시트 쓰기권한 일괄부여</button>`;
+        + ` &middot; <span style="color:#0ca678"><i class="fas fa-shield-alt" style="margin-right:2px"></i>시트 쓰기권한: 빌드 시 자동 부여</span>`;
     }
 
     // ── 담당자 필터 ──
@@ -12345,82 +12345,10 @@ function _populateFilterObj(elId, defaultLabel, map) {
 }
 
 // ═══════════════════════════════════════════════════════════
-// 시트 쓰기 권한 일괄 부여
+// (제거됨) "시트 쓰기권한 일괄부여" 수동 기능
+//   → 인덱스 빌드 시 자동 부여로 대체됨
+//     (server/src/services/smartBuild.service.js _ensureSheetsShared)
 // ═══════════════════════════════════════════════════════════
-async function shareAllSheetsPermission() {
-  if (!confirm("대시보드에 등록된 모든 캠페인 시트에\n서비스 계정 편집자 권한을 일괄 부여합니다.\n\n진행하시겠습니까?")) return;
-
-  showToast("⏳ 시트 권한 일괄 부여 중... (시트 수에 따라 1~2분 소요)", "info");
-
-  try {
-    const res = await gasPost({ action: "shareAllSheets" });
-    if (!res || !res.ok) {
-      showToast("❌ 권한 부여 실패: " + (res?.error || "알 수 없는 오류"), "error");
-      return;
-    }
-
-    // 결과 모달 표시
-    const details = res.details || [];
-    const shared = details.filter(d => d.status === "shared");
-    const already = details.filter(d => d.status === "already");
-    const errors = details.filter(d => d.status === "error");
-
-    let html = `<div style="padding:16px">
-      <h3 style="margin:0 0 12px;font-size:1rem"><i class="fas fa-shield-alt" style="color:#3182f6;margin-right:6px"></i>시트 권한 부여 결과</h3>
-      <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:8px;margin-bottom:14px">
-        <div style="background:#F0FDF4;border:1px solid #BBF7D0;border-radius:8px;padding:10px;text-align:center">
-          <div style="font-size:1.3rem;font-weight:700;color:#0ca678">${res.success || 0}</div>
-          <div style="font-size:.72rem;color:#166534">새로 부여</div>
-        </div>
-        <div style="background:#EFF6FF;border:1px solid #BFDBFE;border-radius:8px;padding:10px;text-align:center">
-          <div style="font-size:1.3rem;font-weight:700;color:#2563EB">${res.already || 0}</div>
-          <div style="font-size:.72rem;color:#1E40AF">이미 부여됨</div>
-        </div>
-        <div style="background:#FEF2F2;border:1px solid #FECACA;border-radius:8px;padding:10px;text-align:center">
-          <div style="font-size:1.3rem;font-weight:700;color:#DC2626">${res.failed || 0}</div>
-          <div style="font-size:.72rem;color:#991B1B">실패</div>
-        </div>
-      </div>
-      <div style="font-size:.75rem;color:var(--t3);margin-bottom:8px">서비스 계정: <b>${escHtml(res.serviceAccount || "")}</b></div>`;
-
-    if (errors.length > 0) {
-      html += `<details style="margin-top:8px"><summary style="font-size:.78rem;color:#DC2626;cursor:pointer;font-weight:600">❌ 실패 목록 (${errors.length}건)</summary>
-        <div style="max-height:200px;overflow-y:auto;margin-top:6px;font-size:.72rem;background:#FEF2F2;padding:8px;border-radius:6px">`;
-      errors.forEach(e => {
-        html += `<div style="margin-bottom:4px;padding:3px 0;border-bottom:1px solid #FECACA">
-          <span style="color:#991B1B">${escHtml(e.sheetId?.substring(0, 12) || "")}...</span>
-          <span style="color:#DC2626;margin-left:4px">${escHtml(e.error || "")}</span>
-        </div>`;
-      });
-      html += `</div></details>`;
-    }
-
-    if (shared.length > 0) {
-      html += `<details style="margin-top:6px"><summary style="font-size:.78rem;color:#0ca678;cursor:pointer;font-weight:600">✅ 새로 부여 목록 (${shared.length}건)</summary>
-        <div style="max-height:200px;overflow-y:auto;margin-top:6px;font-size:.72rem;background:#F0FDF4;padding:8px;border-radius:6px">`;
-      shared.forEach(s => {
-        html += `<div style="margin-bottom:2px">${escHtml(s.sheetId?.substring(0, 20) || "")}...</div>`;
-      });
-      html += `</div></details>`;
-    }
-
-    html += `</div>`;
-
-    // 간단한 모달 표시
-    const overlay = document.createElement("div");
-    overlay.style.cssText = "position:fixed;inset:0;background:rgba(0,0,0,.4);z-index:9999;display:flex;align-items:center;justify-content:center";
-    overlay.onclick = e => { if (e.target === overlay) overlay.remove(); };
-    const modal = document.createElement("div");
-    modal.style.cssText = "background:#fff;border-radius:12px;max-width:420px;width:90%;max-height:80vh;overflow-y:auto;box-shadow:0 20px 60px rgba(0,0,0,.3)";
-    modal.innerHTML = html + `<div style="padding:0 16px 16px;text-align:right"><button onclick="this.closest('[style*=fixed]').remove()" style="padding:8px 20px;background:#3182f6;color:#fff;border:none;border-radius:8px;font-weight:600;cursor:pointer">확인</button></div>`;
-    overlay.appendChild(modal);
-    document.body.appendChild(overlay);
-
-    showToast(`✅ 권한 부여 완료: 신규 ${res.success || 0}건, 기존 ${res.already || 0}건, 실패 ${res.failed || 0}건`, "success");
-  } catch (err) {
-    showToast("❌ 권한 부여 오류: " + err.message, "error");
-  }
-}
 
 function _kpiCard(label, value, color, icon) {
   return `<div style="background:#fff;border-radius:8px;padding:8px 12px;border-left:3px solid ${color};box-shadow:0 1px 3px rgba(0,0,0,.06)">

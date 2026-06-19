@@ -17,7 +17,7 @@
  */
 
 const pool = require('../db/pool');
-const { readSheet, getSpreadsheetMeta, batchReadSheet, getSheetModifiedTime } = require('./sheets.service');
+const { readSheet, getSpreadsheetMeta, batchReadSheet, getSheetModifiedTime, shareSheetWithServiceAccount } = require('./sheets.service');
 const { computeChecksum } = require('../utils/checksum');
 const { logger } = require('../utils/logger');
 const { throttledCall } = require('../utils/sheetsThrottle');
@@ -442,6 +442,34 @@ async function _upsertTab(sheetId, tabName, tabGid, checksum, rows, modifiedTime
 // 메인: 스마트 빌드 1회 실행
 // ═══════════════════════════════════════════════════════════
 
+// ═══════════════════════════════════════════════════════════
+// 서비스계정 시트 쓰기권한 자동 보장
+// — 인덱스 빌드 대상 시트마다 SA 편집자(writer) 권한을 자동 부여/검증.
+//   이미 부여된 시트는 permissions.list 1회로 단락되며, 권한이 사라진
+//   경우 자동으로 재부여(자가치유)된다. 기존 수동 "시트 쓰기권한 일괄부여"
+//   버튼을 대체한다.
+// ═══════════════════════════════════════════════════════════
+async function _ensureSheetsShared(sheetIds, result) {
+  if (!process.env.GOOGLE_SERVICE_ACCOUNT_EMAIL) return;
+  if (!sheetIds || sheetIds.length === 0) return;
+
+  let granted = 0, alreadyOk = 0, failed = 0;
+  for (const sheetId of sheetIds) {
+    try {
+      const r = await throttledCall(() => shareSheetWithServiceAccount(sheetId));
+      if (r.alreadyShared) alreadyOk++;
+      else granted++;
+    } catch (err) {
+      failed++;
+      result.errorDetails.push({ phase: 'share', sheetId: sheetId.substring(0, 15), error: err.message, desc: _translateError(err.message) });
+    }
+  }
+  result.sheetsShared = granted;
+  if (granted > 0 || failed > 0) {
+    logger.info(`[smartBuild] 시트 쓰기권한 자동부여: 신규 ${granted}, 기존 ${alreadyOk}, 실패 ${failed}`);
+  }
+}
+
 async function runSmartBuild() {
   if (_isRunning) {
     logger.warn('[smartBuild] 이미 실행 중 — 스킵');
@@ -460,6 +488,7 @@ async function runSmartBuild() {
     isFirstRun,
     sheetsChecked: 0,
     sheetsChanged: 0,
+    sheetsShared: 0,
     tabsScanned: 0,
     tabsUpdated: 0,
     tabsSkipped: 0,
@@ -549,6 +578,10 @@ async function runSmartBuild() {
     }
 
     logger.info(`[smartBuild] #${runNum} 변경 감지: ${changedSheetIds.length}/${sheetIds.length}개 시트`);
+
+    // ── 2.5단계: 빌드 대상 시트에 서비스계정 쓰기권한 자동 보장 ──
+    // (인덱스 빌드 시마다 자동 적용 — 기존 수동 "시트 쓰기권한 일괄부여" 버튼 대체)
+    await _ensureSheetsShared(changedSheetIds, result);
 
     // ── 3단계: 변경된 시트별 batchGet + 체크섬 비교 + DB 갱신 ──
     for (const sheetId of changedSheetIds) {
