@@ -655,6 +655,9 @@ body{ letter-spacing:-.01em; }
         <button class="admin-tab-btn" data-tab="reviewers" onclick="switchAdminTab('reviewers')">
           <i class="fas fa-users"></i> 리뷰어
         </button>
+        <button class="admin-tab-btn" data-tab="cs-inquiry" onclick="switchAdminTab('cs-inquiry')">
+          <i class="fas fa-comments"></i> C/S문의 <span id="csInquiryBadge" style="display:none;background:#EF4444;color:#fff;font-size:.65rem;padding:1px 5px;border-radius:8px;margin-left:4px;font-weight:700">0</span>
+        </button>
         <button class="admin-tab-btn" data-tab="settings" onclick="switchAdminTab('settings')">
           <i class="fas fa-cog"></i> 설정 <span id="unrecogBadge" style="display:none;background:#EF4444;color:#fff;font-size:.65rem;padding:1px 5px;border-radius:8px;margin-left:4px;font-weight:700">0</span>
         </button>
@@ -1038,6 +1041,32 @@ body{ letter-spacing:-.01em; }
           </div>
         </div>
       </div><!-- /tab-reviewers -->
+
+      <!-- ★ C/S 문의창구 탭 -->
+      <div id="tab-cs-inquiry" class="admin-tab-pane" style="padding:16px">
+        <div class="admin-section-header" style="margin-bottom:12px">
+          <span style="font-size:.95rem;font-weight:700;color:var(--t1)"><i class="fas fa-comments" style="color:var(--p);margin-right:6px"></i>리뷰어 C/S 문의</span>
+          <div style="display:flex;gap:6px;margin-left:auto;align-items:center">
+            <input id="csSearchInput" type="text" placeholder="리뷰어/캠페인 검색..."
+              style="padding:6px 10px;border:1.5px solid var(--border);border-radius:8px;font-size:.82rem;outline:none;width:150px"
+              oninput="csFilterRooms(this.value)">
+            <select id="csStatusFilter" onchange="loadCsRooms()"
+              style="padding:6px 10px;border:1.5px solid var(--border);border-radius:8px;font-size:.82rem;outline:none">
+              <option value="all">전체</option>
+              <option value="open" selected>진행중</option>
+              <option value="closed">종료</option>
+            </select>
+            <button onclick="loadCsRooms()" style="padding:6px 12px;background:var(--p);color:#fff;border:none;border-radius:8px;font-size:.8rem;font-weight:600;cursor:pointer;display:flex;align-items:center;gap:5px">
+              <i class="fas fa-sync-alt"></i> 새로고침
+            </button>
+          </div>
+        </div>
+        <div id="csRoomListWrap" style="background:var(--card);border-radius:var(--r);border:1px solid var(--border);overflow:hidden;box-shadow:var(--sh)">
+          <div style="padding:30px;text-align:center;color:var(--t3)">
+            <i class="fas fa-circle-notch fa-spin"></i> 불러오는 중...
+          </div>
+        </div>
+      </div><!-- /tab-cs-inquiry -->
 
       <!-- ★ 모집공고 관리 탭 -->
       <div id="tab-recruit" class="admin-tab-pane" style="padding:16px">

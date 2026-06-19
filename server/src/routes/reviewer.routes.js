@@ -11,6 +11,8 @@ const {
   handleReviewerProfile,
 } = require('../services/reviewer.service');
 const pool = require('../db/pool');
+const { logger } = require('../utils/logger');
+const { addClient, emitCsInquiry } = require('../utils/sse');
 
 // POST /api/reviewer/register — 리뷰어 등록 (GAS: registerReviewer)
 router.post('/register', registerLimiter, async (req, res, next) => {
@@ -260,6 +262,232 @@ router.get('/my-payments', async (req, res, next) => {
   } catch (err) {
     next(err);
   }
+});
+
+// ═══════════════════════════════════════════════════════════
+// C/S 문의창구 — 리뷰어용 (토큰 없음, phone8이 사실상 인증 토큰)
+// 보안: 모든 조회/전송은 항상 reviewer_phone8 = 본인 phone8 으로만 스코프.
+//        admin_memo 등 관리자 전용 데이터는 절대 반환하지 않는다.
+// ═══════════════════════════════════════════════════════════
+
+function _normPhone8(v) {
+  return (v || '').toString().replace(/[^0-9]/g, '');
+}
+
+// GET /api/reviewer/cs/campaigns?phone8= — 문의 가능 캠페인 목록(참여 캠페인 + 일반문의)
+router.get('/cs/campaigns', async (req, res, next) => {
+  try {
+    const phone8 = _normPhone8(req.query.phone8);
+    if (phone8.length !== 8) return res.status(400).json({ ok: false, error: 'phone8 필수 (8자리)' });
+
+    const { rows: rev } = await pool.query(`SELECT name FROM reviewers WHERE phone8 = $1 LIMIT 1`, [phone8]);
+    const reviewerName = rev[0] ? rev[0].name : '';
+
+    const map = new Map(); // campaignKey → { campaignKey, campaignLabel, campaignSource }
+
+    // 1) 모집공고 신청(campaign_applications → recruit_campaigns)
+    const { rows: apps } = await pool.query(`
+      SELECT ca.campaign_id AS "campaignKey", rc.title AS "label"
+      FROM campaign_applications ca
+      LEFT JOIN recruit_campaigns rc ON ca.campaign_id = rc.id
+      WHERE ($1 <> '' AND ca.applicant_name = $1) OR ca.applicant_phone LIKE $2
+      ORDER BY ca.applied_at DESC
+      LIMIT 50
+    `, [reviewerName, '%' + phone8]);
+    apps.forEach(a => {
+      const key = (a.campaignKey || '').toString();
+      if (!key || map.has('recruit:' + key)) return;
+      map.set('recruit:' + key, { campaignKey: key, campaignLabel: a.label || '모집공고', campaignSource: 'recruit' });
+    });
+
+    // 2) 시트 배정(review_index → tab_configs)
+    const { rows: idx } = await pool.query(`
+      SELECT ri.sheet_id AS "sheetId", ri.tab_name AS "tabName",
+             COALESCE(NULLIF(tc.display_name,''), NULLIF(ri.campaign_name,''), ri.tab_name) AS "label"
+      FROM review_index ri
+      LEFT JOIN tab_configs tc ON ri.sheet_id = tc.sheet_id AND ri.tab_name = tc.tab_name
+      WHERE ri.phone8 = $1
+      ORDER BY ri.built_at DESC
+      LIMIT 100
+    `, [phone8]);
+    idx.forEach(r => {
+      const key = `${r.sheetId}||${r.tabName}`;
+      if (map.has('ri:' + key)) return;
+      map.set('ri:' + key, { campaignKey: key, campaignLabel: r.label || r.tabName, campaignSource: 'review_index' });
+    });
+
+    const campaigns = [...map.values()];
+
+    // 기존 스레드 정보 병합(이미 문의한 캠페인 표시 + 미확인 수)
+    const { rows: threads } = await pool.query(
+      `SELECT campaign_key AS "campaignKey", id AS "threadId", status,
+              reviewer_unread_count AS "reviewerUnread", last_message_at AS "lastMessageAt"
+       FROM cs_threads WHERE reviewer_phone8 = $1`, [phone8]
+    );
+    const tmap = new Map(threads.map(t => [t.campaignKey, t]));
+    campaigns.forEach(c => {
+      const t = tmap.get(c.campaignKey);
+      if (t) { c.threadId = t.threadId; c.status = t.status; c.reviewerUnread = t.reviewerUnread; c.lastMessageAt = t.lastMessageAt; }
+    });
+
+    // 일반 문의(캠페인 무관) — 항상 선택 가능
+    const generalThread = tmap.get('');
+    const general = {
+      campaignKey: '', campaignLabel: '일반 문의', campaignSource: 'general',
+      threadId: generalThread ? generalThread.threadId : undefined,
+      status: generalThread ? generalThread.status : undefined,
+      reviewerUnread: generalThread ? generalThread.reviewerUnread : 0,
+      lastMessageAt: generalThread ? generalThread.lastMessageAt : undefined,
+    };
+
+    res.json({ ok: true, campaigns, general, reviewerName });
+  } catch (err) {
+    next(err);
+  }
+});
+
+// GET /api/reviewer/cs/threads?phone8= — 내 문의방 목록
+router.get('/cs/threads', async (req, res, next) => {
+  try {
+    const phone8 = _normPhone8(req.query.phone8);
+    if (phone8.length !== 8) return res.status(400).json({ ok: false, error: 'phone8 필수 (8자리)' });
+    const { rows } = await pool.query(`
+      SELECT id AS "threadId", campaign_key AS "campaignKey", campaign_label AS "campaignLabel",
+             campaign_source AS "campaignSource", status,
+             last_message_at AS "lastMessageAt", last_message_preview AS "lastMessagePreview",
+             reviewer_unread_count AS "reviewerUnread"
+      FROM cs_threads
+      WHERE reviewer_phone8 = $1
+      ORDER BY COALESCE(last_message_at, created_at) DESC
+      LIMIT 100
+    `, [phone8]);
+    res.json({ ok: true, threads: rows });
+  } catch (err) {
+    next(err);
+  }
+});
+
+// GET /api/reviewer/cs/messages?phone8=&campaignKey= — 특정 캠페인 대화 메시지(열람 시 미확인 리셋)
+router.get('/cs/messages', async (req, res, next) => {
+  try {
+    const phone8 = _normPhone8(req.query.phone8);
+    if (phone8.length !== 8) return res.status(400).json({ ok: false, error: 'phone8 필수 (8자리)' });
+    const campaignKey = (req.query.campaignKey || '').toString();
+
+    const { rows: tRows } = await pool.query(
+      `SELECT id, campaign_label AS "campaignLabel", status FROM cs_threads
+       WHERE reviewer_phone8 = $1 AND campaign_key = $2 LIMIT 1`, [phone8, campaignKey]
+    );
+    if (tRows.length === 0) return res.json({ ok: true, threadId: null, messages: [] });
+    const thread = tRows[0];
+
+    const { rows: messages } = await pool.query(
+      `SELECT id, sender_role AS "senderRole", sender_name AS "senderName", content, created_at AS "createdAt"
+       FROM cs_messages WHERE thread_id = $1 ORDER BY created_at ASC LIMIT 1000`, [thread.id]
+    );
+    await pool.query(`UPDATE cs_threads SET reviewer_unread_count = 0, updated_at = NOW() WHERE id = $1`, [thread.id]);
+
+    res.json({ ok: true, threadId: thread.id, campaignLabel: thread.campaignLabel, status: thread.status, messages });
+  } catch (err) {
+    next(err);
+  }
+});
+
+// POST /api/reviewer/cs/message — 문의 메시지 전송(스레드 upsert + 관리자 알림 + 웹훅)
+// body: { phone8, name, campaignKey, campaignLabel, campaignSource, content }
+router.post('/cs/message', async (req, res, next) => {
+  try {
+    const b = req.body || {};
+    const phone8 = _normPhone8(b.phone8);
+    if (phone8.length !== 8) return res.status(400).json({ ok: false, error: 'phone8 필수 (8자리)' });
+    const content = (b.content || '').toString().trim();
+    if (!content) return res.status(400).json({ ok: false, error: '메시지 내용을 입력해주세요.' });
+    if (content.length > 4000) return res.status(400).json({ ok: false, error: '메시지가 너무 깁니다.' });
+
+    let source = (b.campaignSource || 'general').toString();
+    if (!['recruit', 'review_index', 'general'].includes(source)) source = 'general';
+    let campaignKey = (b.campaignKey || '').toString();
+    let campaignLabel = (b.campaignLabel || '').toString().trim().slice(0, 200);
+    if (source === 'general' || !campaignKey) { source = 'general'; campaignKey = ''; campaignLabel = campaignLabel || '일반 문의'; }
+    if (!campaignLabel) campaignLabel = '문의';
+
+    // 리뷰어 이름 확정(reviewers 우선, 없으면 body)
+    const { rows: rev } = await pool.query(`SELECT name FROM reviewers WHERE phone8 = $1 LIMIT 1`, [phone8]);
+    const reviewerName = (rev[0] && rev[0].name) || (b.name || '').toString().trim() || '리뷰어';
+
+    // 스레드 upsert (xmax=0 → 신규 insert)
+    const { rows: tRows } = await pool.query(`
+      INSERT INTO cs_threads
+        (reviewer_phone8, reviewer_name, campaign_key, campaign_label, campaign_source,
+         status, last_message_at, last_message_preview, admin_unread_count)
+      VALUES ($1,$2,$3,$4,$5,'open',NOW(),$6,1)
+      ON CONFLICT (reviewer_phone8, campaign_key) DO UPDATE SET
+        reviewer_name = EXCLUDED.reviewer_name,
+        campaign_label = EXCLUDED.campaign_label,
+        campaign_source = EXCLUDED.campaign_source,
+        status = 'open',
+        last_message_at = NOW(),
+        last_message_preview = EXCLUDED.last_message_preview,
+        admin_unread_count = cs_threads.admin_unread_count + 1,
+        updated_at = NOW()
+      RETURNING id, (xmax = 0) AS "isNew"
+    `, [phone8, reviewerName, campaignKey, campaignLabel, source, content.slice(0, 120)]);
+    const threadId = tRows[0].id;
+    const isNew = tRows[0].isNew;
+
+    const { rows: mRows } = await pool.query(
+      `INSERT INTO cs_messages (thread_id, sender_role, sender_name, content)
+       VALUES ($1, 'reviewer', $2, $3) RETURNING id, created_at AS "createdAt"`,
+      [threadId, reviewerName, content]
+    );
+    const message = {
+      id: mRows[0].id, threadId, senderRole: 'reviewer', senderName: reviewerName,
+      content, createdAt: mRows[0].createdAt,
+    };
+
+    // 관리자 실시간 알림 (대시보드 뱃지/토스트/목록 갱신)
+    try {
+      emitCsInquiry({
+        isNew, threadId, reviewerName, reviewerPhone8: phone8,
+        campaignLabel, preview: content.slice(0, 120),
+      });
+    } catch (_) {}
+
+    // 외부 웹훅 푸시 (카톡/슬랙 릴레이) — best-effort, 미설정 시 skip
+    const hook = process.env.CS_INQUIRY_WEBHOOK_URL;
+    if (hook) {
+      try {
+        const ctrl = new AbortController();
+        const timer = setTimeout(() => ctrl.abort(), 8000);
+        const resp = await fetch(hook, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json', 'X-Review-Key': process.env.INTRANET_WEBHOOK_KEY || '' },
+          body: JSON.stringify({
+            event: 'cs_inquiry',
+            thread_id: threadId, is_new: isNew,
+            reviewer_name: reviewerName, reviewer_phone8: phone8,
+            campaign_label: campaignLabel, content, at: new Date().toISOString(),
+          }),
+          signal: ctrl.signal,
+        });
+        clearTimeout(timer);
+        if (!resp.ok) logger.warn(`[cs] 웹훅 HTTP ${resp.status}`);
+      } catch (e) {
+        logger.warn(`[cs] 문의 웹훅 실패: ${e.message}`);
+      }
+    }
+
+    res.json({ ok: true, threadId, message });
+  } catch (err) {
+    next(err);
+  }
+});
+
+// GET /api/reviewer/cs/events?phone8= — 리뷰어 SSE(관리자 답장 실시간 수신)
+router.get('/cs/events', (req, res) => {
+  const phone8 = _normPhone8(req.query.phone8);
+  if (phone8.length !== 8) { res.status(400).json({ ok: false, error: 'phone8 필수' }); return; }
+  addClient(req, res, { role: 'reviewer', phone8 });
 });
 
 module.exports = router;

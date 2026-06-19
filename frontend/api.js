@@ -271,6 +271,20 @@ const _ACTION_MAP = {
   'orderSendMemo':         { method: 'PUT',  path: '/api/order/admin/send-memo' },
   'orderAdminDelete':      { method: 'DELETE', path: '/api/order/admin/delete' },
   'productPreview':        { method: 'POST', path: '/api/product/preview' },
+
+  // ★ C/S 문의창구 — 리뷰어 (토큰 없음, phone8 기반)
+  'csReviewerCampaigns':   { method: 'GET',  path: '/api/reviewer/cs/campaigns' },
+  'csReviewerThreads':     { method: 'GET',  path: '/api/reviewer/cs/threads' },
+  'csReviewerMessages':    { method: 'GET',  path: '/api/reviewer/cs/messages' },
+  'csReviewerSend':        { method: 'POST', path: '/api/reviewer/cs/message' },
+
+  // ★ C/S 문의창구 — 관리자 (JWT + admin/master)
+  'csAdminThreads':        { method: 'GET',  path: '/api/cs/threads' },
+  'csAdminUnread':         { method: 'GET',  path: '/api/cs/unread-count' },
+  'csAdminMessages':       { method: 'GET',  path: '/api/cs/messages' },
+  'csAdminReply':          { method: 'POST', path: '/api/cs/reply' },
+  'csAdminStatus':         { method: 'POST', path: '/api/cs/status' },
+  'csAdminSaveMemo':       { method: 'POST', path: '/api/cs/memo' },
 };
 
 // ═══════════════════════════════════════════════════════════
