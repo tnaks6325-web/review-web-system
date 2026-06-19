@@ -4,6 +4,14 @@
   <meta charset="UTF-8"/>
   <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
   <title>아이에이리뷰</title>
+  <!-- PWA -->
+  <link rel="manifest" href="/manifest.webmanifest"/>
+  <meta name="theme-color" content="#3182f6"/>
+  <link rel="apple-touch-icon" href="/icons/apple-touch-icon-180.png"/>
+  <meta name="apple-mobile-web-app-capable" content="yes"/>
+  <meta name="mobile-web-app-capable" content="yes"/>
+  <meta name="apple-mobile-web-app-status-bar-style" content="default"/>
+  <meta name="apple-mobile-web-app-title" content="iA리뷰"/>
   <!-- OG/SNS 공유 미리보기 -->
   <meta property="og:title" content="아이에이리뷰"/>
   <meta property="og:description" content="본인 이름으로 참여 내역을 확인하세요."/>
@@ -1567,5 +1575,6 @@ if (sessionStorage.getItem("iad_direct_submit_items")) {
   </div>
 </div>
 
+<script src="js/pwa.js"></script>
 </body>
 </html>
