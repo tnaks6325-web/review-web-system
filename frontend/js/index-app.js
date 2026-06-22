@@ -15778,3 +15778,141 @@ async function _deleteNotice(id) {
     showToast('오류: ' + err.message, 'error');
   }
 }
+
+// ═══════════════════════════════════════════════════════════
+// 리뷰 캡처 정리 — 내 드라이브 루트 등에 흩어진 리뷰 캡처를
+//   선택한 탭의 [리뷰] 폴더로 모아 이동 (미리보기 → 실제 이동)
+//   POST /api/drive/relocate-orphan-reviews (relocateOrphanReviews)
+// ═══════════════════════════════════════════════════════════
+let _relocateTabs = [];
+
+function _relocateCollectTabs() {
+  const out = [];
+  if (typeof _tabDashData !== 'undefined' && _tabDashData && _tabDashData.tabs) {
+    _tabDashData.tabs.forEach(t => {
+      if (t.folder_url) out.push({ sheetId: t.sheet_id, tabName: t.tab_name, displayName: t.display_name || t.tab_name, campName: t.campaign_name || '', folderUrl: t.folder_url });
+    });
+  }
+  if (out.length === 0 && typeof _lastDashData !== 'undefined' && _lastDashData && _lastDashData.stats) {
+    _lastDashData.stats.forEach(camp => (camp.tabs || []).forEach(t => {
+      if (t.folderUrl) out.push({ sheetId: t.sheetId, tabName: t.tab, displayName: t.displayName || t.tab, campName: camp.campaign || '', folderUrl: t.folderUrl });
+    }));
+  }
+  return out;
+}
+
+// 탭명에서 OCR 검색에 쓸 브랜드/상품 키워드 후보 추출
+//   "5/28(쿠팡)서일농원_명인콩물두유 170건" → ["서일농원", "명인콩물두유"]
+function _relocateDeriveKeywords(tabName) {
+  const out = [];
+  const push = v => { v = (v || '').trim(); if (v && v.length >= 2 && !out.includes(v)) out.push(v); };
+  let core = String(tabName || '').replace(/^\s*\d{1,2}\s*\/\s*\d{1,2}\s*(\([^)]*\))?\s*/, '');
+  core = core.replace(/\s*\d+\s*건\s*$/, '').replace(/\s*\d+\s*차\s*$/, '').trim();
+  core.split(/[_,/]+/).forEach(seg => { const s = seg.trim(); if (s && !/^\d+$/.test(s)) push(s); });
+  return out;
+}
+
+function openReviewRelocate() {
+  const existing = document.getElementById('reviewRelocateModal');
+  if (existing) existing.remove();
+
+  _relocateTabs = _relocateCollectTabs();
+  if (_relocateTabs.length === 0) {
+    showToast('리뷰폴더가 설정된 탭이 없습니다. 먼저 "리뷰폴더 동기화"를 실행하세요.', 'info');
+    return;
+  }
+
+  const opts = _relocateTabs.map((t, i) =>
+    `<option value="${i}">${escHtml(t.displayName)}${t.campName ? ' — ' + escHtml(t.campName) : ''}</option>`).join('');
+
+  const modal = document.createElement('div');
+  modal.id = 'reviewRelocateModal';
+  modal.classList.add('toss-overlay');
+  modal.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,.45);z-index:9999;display:flex;align-items:center;justify-content:center;padding:20px';
+  modal.innerHTML = `
+    <div style="background:#fff;border-radius:12px;width:100%;max-width:560px;max-height:82vh;display:flex;flex-direction:column;box-shadow:0 20px 60px rgba(0,0,0,.2)">
+      <div style="padding:16px 20px;border-bottom:1px solid #E5E7EB;flex-shrink:0">
+        <h3 style="margin:0;font-size:1rem;font-weight:700;color:#111"><i class="fas fa-folder-tree" style="color:#7C3AED"></i> 리뷰 캡처 정리</h3>
+        <div style="font-size:.72rem;color:#6B7280;margin-top:4px">내 드라이브 루트 등에 흩어진 리뷰 캡처를 선택한 탭의 <b>[리뷰]</b> 폴더로 이동합니다.</div>
+      </div>
+      <div style="padding:14px 20px;overflow-y:auto;flex:1">
+        <label style="font-size:.74rem;font-weight:600;color:#374151">대상 탭</label>
+        <select id="rlcTab" onchange="_relocateFillFromTab()" style="width:100%;padding:7px 9px;border:1px solid #D1D5DB;border-radius:8px;font-size:.8rem;margin:4px 0 12px">${opts}</select>
+
+        <label style="font-size:.74rem;font-weight:600;color:#374151">[리뷰] 폴더 링크</label>
+        <input id="rlcFolderUrl" type="text" style="width:100%;padding:7px 9px;border:1px solid #D1D5DB;border-radius:8px;font-size:.72rem;margin:4px 0 12px;font-family:monospace">
+
+        <label style="font-size:.74rem;font-weight:600;color:#374151">브랜드/상품 키워드 <span style="color:#9CA3AF;font-weight:400">(쉼표 구분 — 캡처에 보이는 단어)</span></label>
+        <input id="rlcKeywords" type="text" placeholder="예: 서일농원, 콩물" style="width:100%;padding:7px 9px;border:1px solid #D1D5DB;border-radius:8px;font-size:.8rem;margin:4px 0 12px">
+
+        <label style="font-size:.74rem;font-weight:600;color:#374151">시작일 <span style="color:#9CA3AF;font-weight:400">(이 날짜 이후 업로드만 — 비우면 전체)</span></label>
+        <input id="rlcSince" type="date" style="width:100%;padding:7px 9px;border:1px solid #D1D5DB;border-radius:8px;font-size:.8rem;margin:4px 0 4px">
+
+        <div style="display:flex;gap:8px;margin-top:14px">
+          <button onclick="_relocateRun(false)" style="flex:1;padding:9px;background:#7C3AED;color:#fff;border:none;border-radius:8px;font-size:.82rem;font-weight:700;cursor:pointer"><i class="fas fa-search"></i> 미리보기(이동 없음)</button>
+          <button onclick="document.getElementById('reviewRelocateModal').remove()" style="padding:9px 14px;background:#F3F4F6;color:#374151;border:none;border-radius:8px;font-size:.82rem;font-weight:600;cursor:pointer">닫기</button>
+        </div>
+        <div id="rlcResult" style="margin-top:14px"></div>
+      </div>
+    </div>`;
+  document.body.appendChild(modal);
+  _relocateFillFromTab();
+}
+
+function _relocateFillFromTab() {
+  const sel = document.getElementById('rlcTab');
+  if (!sel) return;
+  const t = _relocateTabs[parseInt(sel.value, 10)];
+  if (!t) return;
+  document.getElementById('rlcFolderUrl').value = t.folderUrl || '';
+  document.getElementById('rlcKeywords').value = _relocateDeriveKeywords(t.tabName).join(', ');
+  document.getElementById('rlcResult').innerHTML = '';
+}
+
+async function _relocateRun(apply) {
+  const t = _relocateTabs[parseInt(document.getElementById('rlcTab').value, 10)];
+  if (!t) return;
+  const reviewFolderUrl = (document.getElementById('rlcFolderUrl').value || '').trim();
+  const brandKeywords = (document.getElementById('rlcKeywords').value || '').split(',').map(s => s.trim()).filter(Boolean);
+  const sinceRaw = (document.getElementById('rlcSince').value || '').trim();
+  const sinceDate = sinceRaw ? (sinceRaw + 'T00:00:00Z') : undefined;
+
+  if (!reviewFolderUrl) { showToast('[리뷰] 폴더 링크가 필요합니다.', 'error'); return; }
+  if (brandKeywords.length === 0) { showToast('브랜드/상품 키워드를 1개 이상 입력하세요.', 'error'); return; }
+  if (apply && !confirm(`선택한 캡처들을 [리뷰] 폴더로 이동합니다. 진행할까요?`)) return;
+
+  const resultEl = document.getElementById('rlcResult');
+  resultEl.innerHTML = `<div style="font-size:.78rem;color:#6B7280"><i class="fas fa-spinner fa-spin"></i> ${apply ? '이동 중' : '검색 중'}...</div>`;
+
+  try {
+    const res = await gasPost({
+      action: 'relocateOrphanReviews',
+      sheetId: t.sheetId, tabName: t.tabName,
+      reviewFolderUrl, brandKeywords, sinceDate,
+      dryRun: !apply,
+    });
+    if (!res || res.ok === false) {
+      resultEl.innerHTML = `<div style="font-size:.78rem;color:#DC2626">오류: ${escHtml((res && res.error) || '실패')}</div>`;
+      return;
+    }
+    if (apply) {
+      resultEl.innerHTML = `<div style="font-size:.84rem;color:#065F46;font-weight:700"><i class="fas fa-check-circle"></i> ${res.movedCount}건 이동 완료${res.failedCount ? ` · ${res.failedCount}건 실패` : ''}</div>
+        <div style="font-size:.72rem;color:#6B7280;margin-top:4px">[리뷰] 폴더를 새로고침해 확인하세요. (이미 폴더에 있던 파일은 건너뜀)</div>`;
+      showToast(`${res.movedCount}건 이동 완료`, 'success');
+      return;
+    }
+    const list = (res.candidates || []).slice(0, 12)
+      .map(c => `<li style="font-size:.7rem;color:#374151;font-family:monospace;word-break:break-all">${escHtml(c.name)}</li>`).join('');
+    const more = res.candidateCount > 12 ? `<div style="font-size:.7rem;color:#9CA3AF;margin-top:2px">… 외 ${res.candidateCount - 12}건</div>` : '';
+    resultEl.innerHTML = `
+      <div style="background:#F5F3FF;border:1px solid #DDD6FE;border-radius:8px;padding:12px">
+        <div style="font-size:.84rem;font-weight:700;color:#5B21B6">이동 대상: ${res.candidateCount}건</div>
+        ${res.candidateCount
+          ? `<ul style="margin:8px 0 0;padding-left:18px">${list}</ul>${more}
+             <button onclick="_relocateRun(true)" style="margin-top:12px;width:100%;padding:9px;background:#059669;color:#fff;border:none;border-radius:8px;font-size:.82rem;font-weight:700;cursor:pointer"><i class="fas fa-arrow-right-to-bracket"></i> ${res.candidateCount}건 [리뷰] 폴더로 이동 실행</button>`
+          : `<div style="font-size:.72rem;color:#6B7280;margin-top:6px">대상이 없습니다. 키워드/시작일을 조정해 보세요. (OCR 색인이 안 된 캡처는 검색에 안 걸릴 수 있습니다.)</div>`}
+      </div>`;
+  } catch (err) {
+    resultEl.innerHTML = `<div style="font-size:.78rem;color:#DC2626">오류: ${escHtml(err.message)}</div>`;
+  }
+}
