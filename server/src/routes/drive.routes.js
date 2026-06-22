@@ -1486,4 +1486,25 @@ router.get('/review-submissions', authMiddleware, async (req, res, next) => {
   }
 });
 
+// ═══════════════════════════════════════════════════════════
+// GET /api/drive/image/:id — Drive 이미지 스트리밍 프록시 (모달 인라인 미리보기)
+//   <img src>가 헤더 인증을 못 보내므로 무인증. id는 추측 불가한 Drive fileId(20+).
+//   서버 OAuth(소유자 계정)로 받아 스트리밍 → 비공개/링크공유 섞여도 표시.
+//   실패 시 Drive thumbnail로 302 폴백.
+// ═══════════════════════════════════════════════════════════
+router.get('/image/:id', async (req, res) => {
+  const id = String(req.params.id || '');
+  if (!/^[-\w]{20,}$/.test(id)) return res.status(400).send('bad id');
+  try {
+    const f = await driveService.downloadFile(id);
+    res.set('Content-Type', f.mimeType || 'application/octet-stream');
+    res.set('Cross-Origin-Resource-Policy', 'cross-origin');
+    res.set('Cache-Control', 'private, max-age=600');
+    return res.send(f.buffer);
+  } catch (err) {
+    logger.warn(`[drive] image 프록시 실패(${id}): ${err.message} → thumbnail 폴백`);
+    return res.redirect(302, `https://drive.google.com/thumbnail?id=${id}&sz=w1600`);
+  }
+});
+
 module.exports = router;
