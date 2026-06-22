@@ -15787,6 +15787,7 @@ async function _deleteNotice(id) {
 let _relocateTabs = [];
 let _relocateSelIdx = -1; // 콤보박스에서 선택된 탭 인덱스
 let _relocateScanStop = false; // 전체 탭 스캔 중지 플래그
+let _relocateScanResults = {}; // 탭별 스캔 결과 (localStorage 임시저장)
 
 function _relocateCollectTabs() {
   // folder_url이 비어 있어도(=리뷰폴더 미연결) 선택 가능하도록 모든 탭을 포함.
@@ -15805,15 +15806,35 @@ function _relocateCollectTabs() {
   return out;
 }
 
-// 탭명에서 OCR 검색에 쓸 브랜드/상품 키워드 후보 추출
+// 플랫폼/채널/일반어 — 키워드에서 제외(이게 들어가면 다른 캠페인까지 과대매칭됨)
+const _RELOCATE_STOPWORDS = new Set([
+  '네이버','쿠팡','쿠팡파트너스','파트너스','메이커스','카카오','카카오메이커스','11번가','지마켓','g마켓',
+  '옥션','위메프','티몬','자사몰','스마트스토어','스토어','인스타','인스타그램','블로그','카페','체험단',
+  '바이럴','리뷰','리뷰체험단','세트','박스','골드박스','시트','업무시트','견적서','실','현영'
+]);
+
+// 탭명에서 OCR 검색에 쓸 브랜드/상품 키워드 후보 추출 (플랫폼/일반어 제외)
 //   "5/28(쿠팡)서일농원_명인콩물두유 170건" → ["서일농원", "명인콩물두유"]
+//   "6/11퓨비아표백제_네이버15건" → ["퓨비아표백제"]  (네이버 제외)
 function _relocateDeriveKeywords(tabName) {
   const out = [];
-  const push = v => { v = (v || '').trim(); if (v && v.length >= 2 && !out.includes(v)) out.push(v); };
-  let core = String(tabName || '').replace(/^\s*\d{1,2}\s*\/\s*\d{1,2}\s*(\([^)]*\))?\s*/, '');
+  const push = v => {
+    v = (v || '').trim().replace(/\d+건?$/, '').trim();
+    if (v && v.length >= 2 && !/^\d+$/.test(v) && !_RELOCATE_STOPWORDS.has(v) && !out.includes(v)) out.push(v);
+  };
+  let core = String(tabName || '');
+  // 선두 날짜/채널 제거: "6/11", "6.17", "0618", "0528" + optional "(쿠팡)"
+  core = core.replace(/^\s*(\d{1,2}\s*[\/.]\s*\d{1,2}|\d{3,4})\s*(\([^)]*\))?\s*/, '');
+  // 후미 건수/차수 제거
   core = core.replace(/\s*\d+\s*건\s*$/, '').replace(/\s*\d+\s*차\s*$/, '').trim();
-  core.split(/[_,/]+/).forEach(seg => { const s = seg.trim(); if (s && !/^\d+$/.test(s)) push(s); });
+  core.split(/[_,/\s]+/).forEach(seg => push(seg));
   return out;
+}
+
+// 탭명에서 "작업건수"(N건) 추출 — 과대매칭 판정 기준
+function _relocateParseCount(tabName) {
+  const m = String(tabName || '').match(/(\d+)\s*건/);
+  return m ? parseInt(m[1], 10) : 0;
 }
 
 function openReviewRelocate() {
@@ -15871,6 +15892,11 @@ function openReviewRelocate() {
   document.body.appendChild(modal);
   const sb = document.getElementById('rlcTabSearch');
   if (sb) sb.focus();
+
+  // 임시저장된 전체 스캔 결과가 있으면 자동 복원
+  _relocateScanStop = false;
+  _relocateScanResults = _relocateLoadScan().byTab || {};
+  if (Object.keys(_relocateScanResults).length) _relocateRenderScan();
 }
 
 // 검색어로 탭 목록 필터링 → 자동완성 리스트 렌더
@@ -15981,88 +16007,126 @@ async function _relocateRun(apply) {
   }
 }
 
-// 전체 탭 자동 스캔 — 모든 탭을 하나씩 dryRun 조회 → 탭별 대상 건수 + [이동] 버튼
-async function _relocateScanAll() {
-  _relocateScanStop = false;
-  const sinceRaw = (document.getElementById('rlcSince').value || '').trim();
-  const sinceDate = sinceRaw ? (sinceRaw + 'T00:00:00Z') : undefined;
-  const resultEl = document.getElementById('rlcResult');
+// ── 전체 탭 스캔: 임시저장(localStorage) ──
+function _relocateTabKey(t) { return (t.sheetId || '') + '||' + (t.tabName || ''); }
+function _relocateLoadScan() {
+  try { const o = JSON.parse(localStorage.getItem('rlcScanResults_v1') || '{}'); return (o && o.byTab) ? o : { ts: 0, byTab: {} }; }
+  catch (_) { return { ts: 0, byTab: {} }; }
+}
+function _relocateSaveScan() {
+  try { localStorage.setItem('rlcScanResults_v1', JSON.stringify({ ts: Date.now(), byTab: _relocateScanResults })); } catch (_) {}
+}
 
-  const rowsHtml = _relocateTabs.map((t, i) => `
-    <div id="rlcScanRow_${i}" style="display:flex;align-items:center;gap:8px;padding:6px 10px;border-bottom:1px solid #F3F4F6">
+// 결과 1건 → 상태/액션 셀 HTML
+function _relocateScanRowInner(i, t, r) {
+  if (!t.folderUrl) return { status: `<span style="color:#D97706">폴더 미설정</span>`, action: '' };
+  if (!r) return { status: `<span style="color:#9CA3AF">대기</span>`, action: '' };
+  if (r.status === 'scanning') return { status: `<i class="fas fa-spinner fa-spin"></i> 스캔중`, action: '' };
+  if (r.status === 'error') return { status: `<span style="color:#DC2626" title="${escHtml(r.error || '')}">오류</span>`, action: '' };
+  if (r.status === 'moved') return { status: `<span style="color:#065F46;font-weight:700">✅ ${r.movedCount}건 이동</span>${r.linked ? ` <span style="color:#4338CA">링크 ${r.linked}</span>` : ''}`, action: '' };
+  const n = r.candidateCount || 0;
+  if (n === 0) return { status: `<span style="color:#9CA3AF">대상 0</span>`, action: '' };
+  if (r.over) return {
+    status: `<span style="color:#DC2626;font-weight:700" title="작업건수(${r.expected || '?'})보다 대상이 많음 — 단일 탭 모드에서 정확한 키워드로 확인하세요">⚠ 과다 ${n}/${r.expected || '?'}</span>`,
+    action: `<button onclick="_relocateSelectTab(${i});showToast('단일 탭 모드에서 정확한 키워드로 확인 후 이동하세요','info')" style="font-size:.68rem;background:#FEF3C7;color:#92400E;border:none;border-radius:6px;padding:4px 9px;cursor:pointer">검토</button>`,
+  };
+  return {
+    status: `<b style="color:#5B21B6">대상 ${n}건</b>${r.expected ? `<span style="color:#9CA3AF">/${r.expected}</span>` : ''}${r.ambiguous ? ` <span style="color:#9CA3AF">모호 ${r.ambiguous}</span>` : ''}`,
+    action: `<button id="rlcScanBtn_${i}" onclick="_relocateApplyTab(${i})" style="font-size:.72rem;background:#059669;color:#fff;border:none;border-radius:6px;padding:4px 11px;cursor:pointer">이동</button>`,
+  };
+}
+
+function _relocateUpdateRow(i) {
+  const t = _relocateTabs[i];
+  const inner = _relocateScanRowInner(i, t, _relocateScanResults[_relocateTabKey(t)]);
+  const s = document.getElementById('rlcScanStatus_' + i);
+  const a = document.getElementById('rlcScanAction_' + i);
+  if (s) s.innerHTML = inner.status;
+  if (a) a.innerHTML = inner.action;
+}
+
+// 저장된(또는 현재) 결과로 전체 목록 렌더
+function _relocateRenderScan() {
+  const resultEl = document.getElementById('rlcResult');
+  if (!resultEl) return;
+  const rows = _relocateTabs.map((t, i) => {
+    const inner = _relocateScanRowInner(i, t, _relocateScanResults[_relocateTabKey(t)]);
+    return `<div style="display:flex;align-items:center;gap:8px;padding:6px 10px;border-bottom:1px solid #F3F4F6">
       <div style="flex:1;min-width:0">
         <div style="font-size:.74rem;color:#111;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${escHtml(t.displayName)}</div>
         ${t.campName ? `<div style="font-size:.62rem;color:#9CA3AF;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${escHtml(t.campName)}</div>` : ''}
       </div>
-      <div id="rlcScanStatus_${i}" style="font-size:.7rem;color:#9CA3AF;white-space:nowrap">대기</div>
-      <div id="rlcScanAction_${i}" style="min-width:54px;text-align:right"></div>
-    </div>`).join('');
-
+      <div id="rlcScanStatus_${i}" style="font-size:.7rem;white-space:nowrap">${inner.status}</div>
+      <div id="rlcScanAction_${i}" style="min-width:54px;text-align:right">${inner.action}</div>
+    </div>`;
+  }).join('');
+  const saved = _relocateLoadScan();
+  const tsTxt = saved.ts ? new Date(saved.ts).toLocaleString() : '';
   resultEl.innerHTML = `
-    <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:6px">
-      <div id="rlcScanProgress" style="font-size:.76rem;font-weight:700;color:#3730A3">스캔 준비…</div>
-      <button onclick="_relocateScanStop=true" style="font-size:.7rem;background:#FEE2E2;color:#991B1B;border:none;border-radius:6px;padding:4px 10px;cursor:pointer"><i class="fas fa-stop"></i> 중지</button>
+    <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:6px;gap:8px">
+      <div id="rlcScanProgress" style="font-size:.72rem;font-weight:700;color:#3730A3;min-width:0;overflow:hidden;text-overflow:ellipsis">${tsTxt ? '임시저장 ' + escHtml(tsTxt) : '스캔 준비됨'}</div>
+      <div style="display:flex;gap:6px;flex-shrink:0">
+        <button onclick="_relocateScanAll()" style="font-size:.7rem;background:#4338CA;color:#fff;border:none;border-radius:6px;padding:4px 10px;cursor:pointer">다시 스캔</button>
+        <button onclick="_relocateScanStop=true" style="font-size:.7rem;background:#FEE2E2;color:#991B1B;border:none;border-radius:6px;padding:4px 10px;cursor:pointer">중지</button>
+      </div>
     </div>
-    <div style="max-height:360px;overflow-y:auto;border:1px solid #E5E7EB;border-radius:8px">${rowsHtml}</div>`;
+    <div style="max-height:360px;overflow-y:auto;border:1px solid #E5E7EB;border-radius:8px">${rows}</div>`;
+}
 
-  const setProgress = (scanned, withT) => {
-    const p = document.getElementById('rlcScanProgress');
-    if (p) p.textContent = `스캔 ${scanned}/${_relocateTabs.length} · 대상 있는 탭 ${withT}`;
-  };
+// 전체 탭 자동 스캔 — 모든 탭 순차 dryRun. requireRoster로 참여자 명단 제약 + 과대매칭 차단.
+async function _relocateScanAll() {
+  _relocateScanStop = false;
+  const sinceRaw = (document.getElementById('rlcSince').value || '').trim();
+  const sinceDate = sinceRaw ? (sinceRaw + 'T00:00:00Z') : undefined;
+  _relocateRenderScan();
+  const setProg = (txt) => { const p = document.getElementById('rlcScanProgress'); if (p) p.textContent = txt; };
 
   let scanned = 0, withTargets = 0;
   for (let i = 0; i < _relocateTabs.length; i++) {
-    if (_relocateScanStop) {
-      const p = document.getElementById('rlcScanProgress');
-      if (p) p.textContent = `중지됨 (${scanned}/${_relocateTabs.length} · 대상 ${withTargets})`;
-      return;
-    }
+    if (_relocateScanStop) { setProg(`중지됨 (${scanned}/${_relocateTabs.length})`); _relocateSaveScan(); return; }
     const t = _relocateTabs[i];
-    const statusEl = document.getElementById('rlcScanStatus_' + i);
-    const actionEl = document.getElementById('rlcScanAction_' + i);
-    if (!statusEl) continue;
+    const key = _relocateTabKey(t);
+    if (_relocateScanResults[key] && _relocateScanResults[key].status === 'moved') { scanned++; continue; } // 이미 이동 → 건너뜀
 
-    if (!t.folderUrl) {
-      statusEl.innerHTML = `<span style="color:#D97706">폴더 미설정</span>`;
-      scanned++; setProgress(scanned, withTargets); continue;
-    }
-    statusEl.innerHTML = `<i class="fas fa-spinner fa-spin"></i> 스캔중`;
+    if (!t.folderUrl) { _relocateScanResults[key] = { displayName: t.displayName, status: 'nofolder' }; _relocateUpdateRow(i); scanned++; continue; }
+    _relocateScanResults[key] = { displayName: t.displayName, status: 'scanning' }; _relocateUpdateRow(i);
     try {
       const res = await gasPost({
         action: 'relocateOrphanReviews',
         sheetId: t.sheetId, tabName: t.tabName,
         reviewFolderUrl: t.folderUrl,
         brandKeywords: _relocateDeriveKeywords(t.tabName),
-        sinceDate, dryRun: true,
+        requireRoster: true, sinceDate, dryRun: true,
       });
       if (!res || res.ok === false) {
-        statusEl.innerHTML = `<span style="color:#DC2626" title="${escHtml((res && res.error) || '')}">오류</span>`;
+        _relocateScanResults[key] = { displayName: t.displayName, status: 'error', error: (res && res.error) || '' };
       } else {
         const n = res.candidateCount || 0;
-        const lk = res.link || {};
-        if (n > 0) {
-          withTargets++;
-          statusEl.innerHTML = `<b style="color:#5B21B6">대상 ${n}건</b>${lk.ambiguous ? ` <span style="color:#9CA3AF">모호 ${lk.ambiguous}</span>` : ''}`;
-          if (actionEl) actionEl.innerHTML = `<button id="rlcScanBtn_${i}" onclick="_relocateApplyTab(${i})" style="font-size:.72rem;background:#059669;color:#fff;border:none;border-radius:6px;padding:4px 11px;cursor:pointer">이동</button>`;
-        } else {
-          statusEl.innerHTML = `<span style="color:#9CA3AF">대상 0</span>`;
-        }
+        const expected = (res.indexRowCount && res.indexRowCount > 0) ? res.indexRowCount : _relocateParseCount(t.tabName);
+        const over = expected > 0 ? (n > expected * 2 + 5) : (n > 50);
+        if (n > 0) withTargets++;
+        _relocateScanResults[key] = { displayName: t.displayName, status: 'ok', candidateCount: n, expected, over, ambiguous: (res.link && res.link.ambiguous) || 0 };
       }
     } catch (e) {
-      statusEl.innerHTML = `<span style="color:#DC2626">오류</span>`;
+      _relocateScanResults[key] = { displayName: t.displayName, status: 'error', error: e.message };
     }
-    scanned++; setProgress(scanned, withTargets);
+    _relocateUpdateRow(i);
+    scanned++;
+    setProg(`스캔 ${scanned}/${_relocateTabs.length} · 대상 있는 탭 ${withTargets}`);
+    _relocateSaveScan();
   }
-  const p = document.getElementById('rlcScanProgress');
-  if (p) p.textContent = `스캔 완료 ${scanned}/${_relocateTabs.length} · 대상 있는 탭 ${withTargets}`;
+  setProg(`스캔 완료 ${scanned}/${_relocateTabs.length} · 대상 있는 탭 ${withTargets}`);
+  _relocateSaveScan();
 }
 
-// 스캔 목록에서 한 탭만 실제 이동(apply)
+// 스캔 목록에서 한 탭만 실제 이동(apply) — 과대매칭(over)은 차단
 async function _relocateApplyTab(i) {
   const t = _relocateTabs[i];
   if (!t || !t.folderUrl) return;
+  const key = _relocateTabKey(t);
+  const prev = _relocateScanResults[key];
+  if (prev && prev.over) { showToast('과대매칭 의심 — 단일 탭 모드에서 정확한 키워드로 확인 후 이동하세요', 'error'); return; }
   const btn = document.getElementById('rlcScanBtn_' + i);
-  const statusEl = document.getElementById('rlcScanStatus_' + i);
   if (btn) { btn.disabled = true; btn.textContent = '이동중'; }
   const sinceRaw = (document.getElementById('rlcSince').value || '').trim();
   const sinceDate = sinceRaw ? (sinceRaw + 'T00:00:00Z') : undefined;
@@ -16072,19 +16136,18 @@ async function _relocateApplyTab(i) {
       sheetId: t.sheetId, tabName: t.tabName,
       reviewFolderUrl: t.folderUrl,
       brandKeywords: _relocateDeriveKeywords(t.tabName),
-      sinceDate, dryRun: false,
+      requireRoster: true, sinceDate, dryRun: false,
     });
     if (!res || res.ok === false) {
-      if (statusEl) statusEl.innerHTML = `<span style="color:#DC2626">오류</span>`;
-      if (btn) { btn.disabled = false; btn.textContent = '재시도'; }
-      return;
+      _relocateScanResults[key] = Object.assign({}, prev, { status: 'error', error: (res && res.error) || '' });
+      _relocateUpdateRow(i); _relocateSaveScan(); return;
     }
     const lk = res.link || {};
-    if (statusEl) statusEl.innerHTML = `<span style="color:#065F46;font-weight:700">✅ ${res.movedCount}건 이동</span>${lk.linked ? ` <span style="color:#4338CA">링크 ${lk.linked}</span>` : ''}`;
-    if (btn) btn.remove();
+    _relocateScanResults[key] = { displayName: t.displayName, status: 'moved', movedCount: res.movedCount, linked: lk.linked || 0 };
+    _relocateUpdateRow(i); _relocateSaveScan();
     showToast(`${t.displayName}: ${res.movedCount}건 이동`, 'success');
   } catch (e) {
-    if (statusEl) statusEl.innerHTML = `<span style="color:#DC2626">오류</span>`;
-    if (btn) { btn.disabled = false; btn.textContent = '재시도'; }
+    _relocateScanResults[key] = Object.assign({}, prev, { status: 'error', error: e.message });
+    _relocateUpdateRow(i); _relocateSaveScan();
   }
 }

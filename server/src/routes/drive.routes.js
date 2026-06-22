@@ -1430,6 +1430,7 @@ router.post('/relocate-orphan-reviews', authMiddleware, async (req, res, next) =
       targetFolderId: targetId,
       targetFolderUrl: `https://drive.google.com/drive/folders/${targetId}`,
       keywords: kws,
+      indexRowCount: indexRows.length, // 탭의 작업건수(인덱스 행 수) — 과대매칭 판정 기준
       candidateCount: toMove.length,
       candidates: toMove.map(f => ({
         id: f.id, name: f.name,
