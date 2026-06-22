@@ -15897,21 +15897,30 @@ async function _relocateRun(apply) {
       resultEl.innerHTML = `<div style="font-size:.78rem;color:#DC2626">오류: ${escHtml((res && res.error) || '실패')}</div>`;
       return;
     }
+    // 인덱스 결정적 링크(B) 요약 — 모든 결과에 공통 표기
+    const lk = res.link || {};
+    const linkLine = (lk.linked || lk.ambiguous || lk.unmatched || lk.already)
+      ? `<div style="font-size:.72rem;color:#4338CA;margin-top:6px"><i class="fas fa-link"></i> 인덱스 링크: 연결 ${lk.linked || 0}${lk.already ? ` · 기존 ${lk.already}` : ''}${lk.ambiguous ? ` · 모호 ${lk.ambiguous}` : ''}${lk.unmatched ? ` · 명단없음 ${lk.unmatched}` : ''}</div>`
+      : '';
+
     if (apply) {
       resultEl.innerHTML = `<div style="font-size:.84rem;color:#065F46;font-weight:700"><i class="fas fa-check-circle"></i> ${res.movedCount}건 이동 완료${res.failedCount ? ` · ${res.failedCount}건 실패` : ''}</div>
+        ${linkLine}
         <div style="font-size:.72rem;color:#6B7280;margin-top:4px">[리뷰] 폴더를 새로고침해 확인하세요. (이미 폴더에 있던 파일은 건너뜀)</div>`;
-      showToast(`${res.movedCount}건 이동 완료`, 'success');
+      showToast(`${res.movedCount}건 이동${lk.linked ? ` · 인덱스 ${lk.linked}건 연결` : ''}`, 'success');
       return;
     }
     const list = (res.candidates || []).slice(0, 12)
       .map(c => `<li style="font-size:.7rem;color:#374151;font-family:monospace;word-break:break-all">${escHtml(c.name)}</li>`).join('');
     const more = res.candidateCount > 12 ? `<div style="font-size:.7rem;color:#9CA3AF;margin-top:2px">… 외 ${res.candidateCount - 12}건</div>` : '';
+    const inTargetLine = res.alreadyInTarget ? `<div style="font-size:.7rem;color:#6B7280;margin-top:4px">이미 [리뷰] 폴더에 있는 ${res.alreadyInTarget}건도 인덱스 링크 대상에 포함됩니다.</div>` : '';
     resultEl.innerHTML = `
       <div style="background:#F5F3FF;border:1px solid #DDD6FE;border-radius:8px;padding:12px">
         <div style="font-size:.84rem;font-weight:700;color:#5B21B6">이동 대상: ${res.candidateCount}건</div>
-        ${res.candidateCount
+        ${linkLine}${inTargetLine}
+        ${(res.candidateCount || res.alreadyInTarget)
           ? `<ul style="margin:8px 0 0;padding-left:18px">${list}</ul>${more}
-             <button onclick="_relocateRun(true)" style="margin-top:12px;width:100%;padding:9px;background:#059669;color:#fff;border:none;border-radius:8px;font-size:.82rem;font-weight:700;cursor:pointer"><i class="fas fa-arrow-right-to-bracket"></i> ${res.candidateCount}건 [리뷰] 폴더로 이동 실행</button>`
+             <button onclick="_relocateRun(true)" style="margin-top:12px;width:100%;padding:9px;background:#059669;color:#fff;border:none;border-radius:8px;font-size:.82rem;font-weight:700;cursor:pointer"><i class="fas fa-arrow-right-to-bracket"></i> 실행 (이동 ${res.candidateCount}건 + 인덱스 링크)</button>`
           : `<div style="font-size:.72rem;color:#6B7280;margin-top:6px">대상이 없습니다. 키워드/시작일을 조정해 보세요. (OCR 색인이 안 된 캡처는 검색에 안 걸릴 수 있습니다.)</div>`}
       </div>`;
   } catch (err) {
