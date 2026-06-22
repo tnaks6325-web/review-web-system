@@ -15787,15 +15787,17 @@ async function _deleteNotice(id) {
 let _relocateTabs = [];
 
 function _relocateCollectTabs() {
+  // folder_url이 비어 있어도(=리뷰폴더 미연결) 선택 가능하도록 모든 탭을 포함.
+  // (리뷰 캡처가 루트로 샌 탭은 folder_url이 비어 있을 수 있으므로)
   const out = [];
   if (typeof _tabDashData !== 'undefined' && _tabDashData && _tabDashData.tabs) {
     _tabDashData.tabs.forEach(t => {
-      if (t.folder_url) out.push({ sheetId: t.sheet_id, tabName: t.tab_name, displayName: t.display_name || t.tab_name, campName: t.campaign_name || '', folderUrl: t.folder_url });
+      out.push({ sheetId: t.sheet_id, tabName: t.tab_name, displayName: t.display_name || t.tab_name, campName: t.campaign_name || '', folderUrl: t.folder_url || '' });
     });
   }
   if (out.length === 0 && typeof _lastDashData !== 'undefined' && _lastDashData && _lastDashData.stats) {
     _lastDashData.stats.forEach(camp => (camp.tabs || []).forEach(t => {
-      if (t.folderUrl) out.push({ sheetId: t.sheetId, tabName: t.tab, displayName: t.displayName || t.tab, campName: camp.campaign || '', folderUrl: t.folderUrl });
+      out.push({ sheetId: t.sheetId, tabName: t.tab, displayName: t.displayName || t.tab, campName: camp.campaign || '', folderUrl: t.folderUrl || '' });
     }));
   }
   return out;
@@ -15818,7 +15820,7 @@ function openReviewRelocate() {
 
   _relocateTabs = _relocateCollectTabs();
   if (_relocateTabs.length === 0) {
-    showToast('리뷰폴더가 설정된 탭이 없습니다. 먼저 "리뷰폴더 동기화"를 실행하세요.', 'info');
+    showToast('탭 목록을 불러오지 못했습니다. 탭 관리 대시보드를 먼저 여세요.', 'info');
     return;
   }
 
@@ -15839,8 +15841,8 @@ function openReviewRelocate() {
         <label style="font-size:.74rem;font-weight:600;color:#374151">대상 탭</label>
         <select id="rlcTab" onchange="_relocateFillFromTab()" style="width:100%;padding:7px 9px;border:1px solid #D1D5DB;border-radius:8px;font-size:.8rem;margin:4px 0 12px">${opts}</select>
 
-        <label style="font-size:.74rem;font-weight:600;color:#374151">[리뷰] 폴더 링크</label>
-        <input id="rlcFolderUrl" type="text" style="width:100%;padding:7px 9px;border:1px solid #D1D5DB;border-radius:8px;font-size:.72rem;margin:4px 0 12px;font-family:monospace">
+        <label style="font-size:.74rem;font-weight:600;color:#374151">[리뷰] 폴더 링크 <span style="color:#9CA3AF;font-weight:400">(비어 있으면 대상 [리뷰] 폴더 링크를 붙여넣으세요)</span></label>
+        <input id="rlcFolderUrl" type="text" placeholder="https://drive.google.com/drive/folders/..." style="width:100%;padding:7px 9px;border:1px solid #D1D5DB;border-radius:8px;font-size:.72rem;margin:4px 0 12px;font-family:monospace">
 
         <label style="font-size:.74rem;font-weight:600;color:#374151">브랜드/상품 키워드 <span style="color:#9CA3AF;font-weight:400">(쉼표 구분 — 캡처에 보이는 단어)</span></label>
         <input id="rlcKeywords" type="text" placeholder="예: 서일농원, 콩물" style="width:100%;padding:7px 9px;border:1px solid #D1D5DB;border-radius:8px;font-size:.8rem;margin:4px 0 12px">
