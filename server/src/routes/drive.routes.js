@@ -1206,4 +1206,160 @@ router.post('/transfer-ownership', authMiddleware, async (req, res, next) => {
   }
 });
 
+// ═══════════════════════════════════════════════════════════
+// POST /api/drive/relocate-orphan-reviews — 루트(또는 엉뚱한 위치)에 흩어진
+//   리뷰 캡처를 해당 탭의 [리뷰] 폴더로 모아 이동(move)한다.
+//
+// 배경: 과거 일부 캠페인의 리뷰 업로드가 [리뷰] 폴더 ID를 확보하지 못한 채
+//   실행되어, 파일이 "내 드라이브 최상위(루트)"에 흩어졌다. ([리뷰]는 0개)
+//   이 엔드포인트는 OCR 전문검색(fullText=브랜드 키워드)으로 해당 캠페인의
+//   리뷰형식 파일을 찾아 [리뷰] 폴더로 addParents/removeParents 이동한다.
+//
+// body: {
+//   sheetId?, tabName?,            // tab_configs.folder_url 자동 조회용
+//   reviewFolderUrl?,             // 대상 [리뷰] 폴더(미지정 시 tab_configs.folder_url)
+//   brandKeywords: string|string[], // ★필수 — fullText 필터 (예: ["서일농원","명인 콩물"])
+//   sinceDate?, untilDate?,       // createdTime 범위 (ISO, 예: 2026-06-01T00:00:00Z)
+//   requireRoster?: bool,         // review_index 명단과 파일명 이름 일치 강제
+//   excludeFolderUrls?: string[], // 절대 건드리지 않을 폴더(예: [구매캡처])
+//   dryRun?: bool                 // 기본 true — 계획만, 실제 이동 없음
+// }
+//
+// 안전장치:
+//   - 리뷰형식 파일명(`{이름}_{순번}_{YYYYMMDD}_{HHMMSS}.ext`)만 대상 → 구매캡처(`{이름}.jpg`) 제외
+//   - 대상 [리뷰] 폴더 / 제외 폴더 / 구매캡처 폴더에 이미 있는 파일은 건너뜀
+//   - brandKeywords 필수 → 다른 캠페인 파일 오이동 방지
+//   - dryRun 기본값 true
+// ═══════════════════════════════════════════════════════════
+router.post('/relocate-orphan-reviews', authMiddleware, async (req, res, next) => {
+  try {
+    const {
+      sheetId, tabName, reviewFolderUrl,
+      brandKeywords, sinceDate, untilDate,
+      requireRoster, excludeFolderUrls, dryRun,
+    } = req.body || {};
+
+    const isDryRun = dryRun !== false; // 기본 true
+
+    // ── 1) 대상 [리뷰] 폴더 확보 ──
+    let targetUrl = reviewFolderUrl || '';
+    let captureUrl = '';
+    if (!targetUrl && sheetId && tabName) {
+      const { rows } = await pool.query(
+        'SELECT folder_url, capture_folder_url FROM tab_configs WHERE sheet_id = $1 AND tab_name = $2 LIMIT 1',
+        [sheetId, tabName]
+      );
+      targetUrl = rows[0]?.folder_url || '';
+      captureUrl = rows[0]?.capture_folder_url || '';
+    }
+    const targetId = extractFolderId(targetUrl);
+    if (!targetId) {
+      return res.json({ ok: false, error: '대상 [리뷰] 폴더를 확인할 수 없습니다. reviewFolderUrl 또는 tab_configs.folder_url 가 필요합니다.' });
+    }
+
+    // ── 2) 브랜드 키워드 (필수) ──
+    const kws = (Array.isArray(brandKeywords) ? brandKeywords : [brandKeywords])
+      .map(s => String(s || '').trim()).filter(Boolean);
+    if (kws.length === 0) {
+      return res.json({ ok: false, error: 'brandKeywords가 필요합니다. (예: ["서일농원","명인 콩물"])' });
+    }
+
+    // ── 3) 제외 폴더 집합 (대상/구매캡처/사용자지정) ──
+    const excludeIds = new Set([targetId]);
+    const capId = extractFolderId(captureUrl);
+    if (capId) excludeIds.add(capId);
+    for (const u of (excludeFolderUrls || [])) {
+      const id = extractFolderId(u);
+      if (id) excludeIds.add(id);
+    }
+
+    // ── 4) 명단(선택) ──
+    let roster = null;
+    if (requireRoster && sheetId && tabName) {
+      roster = new Set();
+      const { rows } = await pool.query(
+        'SELECT reviewer_name, recipient_name FROM review_index WHERE sheet_id = $1 AND tab_name = $2',
+        [sheetId, tabName]
+      );
+      for (const r of rows) {
+        const a = (r.recipient_name || '').trim(); if (a) roster.add(a);
+        const b = (r.reviewer_name || '').trim(); if (b) roster.add(b);
+      }
+    }
+
+    // ── 5) 후보 검색 (fullText=브랜드 키워드) ──
+    const byId = new Map();
+    for (const kw of kws) {
+      const safe = kw.replace(/\\/g, '\\\\').replace(/'/g, "\\'");
+      let q = `mimeType contains 'image/' and trashed = false and fullText contains '${safe}'`;
+      if (sinceDate) q += ` and createdTime >= '${sinceDate}'`;
+      if (untilDate) q += ` and createdTime <= '${untilDate}'`;
+      const files = await driveService.searchFiles(q, { limit: 1000 });
+      for (const f of files) if (!byId.has(f.id)) byId.set(f.id, f);
+    }
+
+    // ── 6) 이동 대상 필터링 ──
+    //   리뷰형식 파일명만: {이름}_{순번}_{YYYYMMDD}_{HHMMSS}.ext
+    const reviewPattern = /_\d+_\d{8}_\d{6}\.[A-Za-z0-9]+$/;
+    const toMove = [];
+    const skipped = [];
+    for (const f of byId.values()) {
+      if (!reviewPattern.test(f.name)) {
+        continue; // 구매캡처/기타 형식 → 대상 아님 (조용히 제외)
+      }
+      const parents = f.parents || [];
+      if (parents.some(p => excludeIds.has(p))) {
+        skipped.push({ id: f.id, name: f.name, reason: '이미 대상/제외 폴더 내' });
+        continue;
+      }
+      if (roster) {
+        const nm = driveService.extractReviewerNameFromFile(f.name);
+        if (!nm || !roster.has(nm)) {
+          skipped.push({ id: f.id, name: f.name, reason: '명단 불일치' });
+          continue;
+        }
+      }
+      toMove.push(f);
+    }
+
+    // ── 7) 이동 실행 (dryRun이면 계획만) ──
+    const moved = [];
+    const failed = [];
+    if (!isDryRun) {
+      for (const f of toMove) {
+        try {
+          const oldParents = (f.parents || []).join(',') || undefined;
+          await driveService.moveFile(f.id, targetId, oldParents);
+          moved.push({ id: f.id, name: f.name });
+        } catch (e) {
+          logger.error(`[relocate-orphan-reviews] 이동 실패 (${f.name}): ${e.message}`);
+          failed.push({ id: f.id, name: f.name, error: e.message });
+        }
+      }
+    }
+
+    res.json({
+      ok: true,
+      dryRun: isDryRun,
+      targetFolderId: targetId,
+      targetFolderUrl: `https://drive.google.com/drive/folders/${targetId}`,
+      keywords: kws,
+      candidateCount: toMove.length,
+      candidates: toMove.map(f => ({
+        id: f.id, name: f.name,
+        currentParents: f.parents || [],
+        createdTime: f.createdTime, owner: f.owner,
+      })),
+      movedCount: moved.length,
+      moved,
+      failedCount: failed.length,
+      failed,
+      skippedCount: skipped.length,
+      skipped: skipped.slice(0, 100),
+    });
+  } catch (err) {
+    next(err);
+  }
+});
+
 module.exports = router;

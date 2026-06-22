@@ -1485,6 +1485,13 @@ router.post('/review-upload', imageApiLimiter, async (req, res, next) => {
       );
     }
 
+    // ★ 루트 업로드 방지 가드: 위 STEP1/STEP2에서 리뷰 폴더를 확보하지 못했으면
+    //   업로드를 중단한다. (parentFolderId가 비면 파일이 내 드라이브 루트에 흩어짐)
+    if (!targetFolderId) {
+      logger.error('[review-upload] 리뷰 폴더 확보 실패 — 루트 업로드 방지를 위해 업로드 중단');
+      return res.json({ ok: false, error: '리뷰 폴더를 확보하지 못했습니다. 잠시 후 다시 시도해주세요.' });
+    }
+
     // ── 2단계: 옵션 서브폴더 (있으면) ──
     if (optionFolderName) {
       const optFolder = await driveService.getOrCreateSubFolder(targetFolderId, optionFolderName);
