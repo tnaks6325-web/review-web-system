@@ -1823,6 +1823,7 @@ function woNotice(msg) {
     m = document.createElement("div");
     m.id = "woNoticeModal";
     m.style.cssText = "position:fixed;inset:0;z-index:100000;background:rgba(0,0,0,.45);display:none;align-items:center;justify-content:center;padding:20px";
+    m.classList.add("toss-overlay");
     m.innerHTML = '<div style="background:#fff;border-radius:14px;max-width:340px;width:100%;padding:22px 20px;text-align:center;box-shadow:0 16px 48px rgba(0,0,0,.25)">'
       + '<div id="woNoticeMsg" style="font-size:.92rem;color:#111827;line-height:1.55;margin-bottom:16px;white-space:pre-wrap"></div>'
       + '<button id="woNoticeOk" style="background:#3182f6;color:#fff;border:none;border-radius:9px;padding:9px 24px;font-weight:700;font-size:.88rem;cursor:pointer">확인</button></div>';
@@ -2061,6 +2062,7 @@ async function _showNewOrderPopup(count) {
   const el = document.createElement("div");
   el.id = "woNewOrderPopup";
   el.style.cssText = "position:fixed;inset:0;z-index:99999;background:rgba(0,0,0,.45);display:flex;align-items:center;justify-content:center;padding:16px";
+  el.classList.add("toss-overlay");
   el.innerHTML = `
     <div style="background:#fff;border-radius:16px;max-width:460px;width:100%;padding:22px;box-shadow:0 12px 40px rgba(0,0,0,.25);animation:woPopIn .18s ease">
       <div style="display:flex;align-items:center;gap:8px;margin-bottom:14px">
@@ -2383,7 +2385,7 @@ function _showAllCompleteModal(completeTabs) {
   ).join('');
 
   modal.innerHTML = `
-    <div style="position:fixed;inset:0;background:rgba(0,0,0,.45);z-index:99999;display:flex;align-items:center;justify-content:center;animation:fadeIn .2s" onclick="if(event.target===this)this.remove()">
+    <div class="toss-overlay" style="position:fixed;inset:0;background:rgba(0,0,0,.45);z-index:99999;display:flex;align-items:center;justify-content:center;animation:fadeIn .2s" onclick="if(event.target===this)this.remove()">
       <div style="background:#fff;border-radius:16px;padding:28px 24px;width:92%;max-width:480px;max-height:80vh;overflow-y:auto;box-shadow:0 25px 60px rgba(0,0,0,.25);border-top:4px solid #EC4899">
         <div style="text-align:center;margin-bottom:16px">
           <div style="width:56px;height:56px;border-radius:50%;background:linear-gradient(135deg,#FDF2F8,#FCE7F3);display:inline-flex;align-items:center;justify-content:center;margin-bottom:10px">
@@ -2427,7 +2429,7 @@ async function _showPendingReviewersPopup(sheetId, tabName, rc, sc, round) {
   modal = document.createElement('div');
   modal.id = modalId;
   modal.innerHTML = `
-    <div style="position:fixed;inset:0;background:rgba(0,0,0,.45);z-index:99999;display:flex;align-items:center;justify-content:center;animation:fadeIn .2s" onclick="if(event.target===this)this.remove()">
+    <div class="toss-overlay" style="position:fixed;inset:0;background:rgba(0,0,0,.45);z-index:99999;display:flex;align-items:center;justify-content:center;animation:fadeIn .2s" onclick="if(event.target===this)this.remove()">
       <div style="background:#fff;border-radius:16px;padding:28px 24px;width:92%;max-width:480px;max-height:80vh;overflow-y:auto;box-shadow:0 25px 60px rgba(0,0,0,.25);border-top:4px solid #F59E0B">
         <div style="text-align:center;margin-bottom:16px">
           <div style="width:56px;height:56px;border-radius:50%;background:linear-gradient(135deg,#FEF3C7,#FDE68A);display:inline-flex;align-items:center;justify-content:center;margin-bottom:10px">
@@ -2513,7 +2515,7 @@ async function _showUnpaidReviewersPopup(sheetId, tabName, rc, pc, round) {
   modal.id = modalId;
   const roundInfo = round ? ` (${escHtml(round)})` : '';
   modal.innerHTML = `
-    <div style="position:fixed;inset:0;background:rgba(0,0,0,.45);z-index:99999;display:flex;align-items:center;justify-content:center;animation:fadeIn .2s" onclick="if(event.target===this)this.remove()">
+    <div class="toss-overlay" style="position:fixed;inset:0;background:rgba(0,0,0,.45);z-index:99999;display:flex;align-items:center;justify-content:center;animation:fadeIn .2s" onclick="if(event.target===this)this.remove()">
       <div style="background:#fff;border-radius:16px;padding:28px 24px;width:92%;max-width:480px;max-height:80vh;overflow-y:auto;box-shadow:0 25px 60px rgba(0,0,0,.25);border-top:4px solid #3B82F6">
         <div style="text-align:center;margin-bottom:16px">
           <div style="width:56px;height:56px;border-radius:50%;background:linear-gradient(135deg,#DBEAFE,#BFDBFE);display:inline-flex;align-items:center;justify-content:center;margin-bottom:10px">
@@ -12834,6 +12836,7 @@ function _showForceBankPopup(sheetId, tabName, incomeType) {
   const overlay = document.createElement("div");
   overlay.className = "td-force-bank-overlay";
   overlay.style.cssText = "position:fixed;inset:0;z-index:99999;background:rgba(0,0,0,.55);display:flex;justify-content:center;align-items:center";
+  overlay.classList.add("toss-overlay");
   // 바깥 클릭 차단 (닫히지 않음)
 
   const box = document.createElement("div");
@@ -13190,7 +13193,7 @@ function _showDuplicateModal(state, data) {
 
   if (state === 'loading') {
     modal.innerHTML = `
-      <div style="position:fixed;inset:0;background:rgba(0,0,0,.5);z-index:9999;display:flex;align-items:center;justify-content:center" onclick="if(event.target===this)this.remove()">
+      <div class="toss-overlay" style="position:fixed;inset:0;background:rgba(0,0,0,.5);z-index:9999;display:flex;align-items:center;justify-content:center" onclick="if(event.target===this)this.remove()">
         <div style="background:#fff;border-radius:12px;padding:24px;width:90%;max-width:600px;max-height:80vh;overflow-y:auto;box-shadow:0 20px 60px rgba(0,0,0,.3)">
           <h3 style="margin:0 0 16px;font-size:1rem;color:#1F2937"><i class="fas fa-spinner fa-spin" style="margin-right:8px;color:#3182f6"></i>리뷰폴더 중복검사 중...</h3>
           <div style="font-size:.8rem;color:#6B7280">
@@ -13204,7 +13207,7 @@ function _showDuplicateModal(state, data) {
 
   if (state === 'error') {
     modal.innerHTML = `
-      <div style="position:fixed;inset:0;background:rgba(0,0,0,.5);z-index:9999;display:flex;align-items:center;justify-content:center" onclick="if(event.target===this)this.remove()">
+      <div class="toss-overlay" style="position:fixed;inset:0;background:rgba(0,0,0,.5);z-index:9999;display:flex;align-items:center;justify-content:center" onclick="if(event.target===this)this.remove()">
         <div style="background:#fff;border-radius:12px;padding:24px;width:90%;max-width:500px;box-shadow:0 20px 60px rgba(0,0,0,.3)">
           <h3 style="margin:0 0 12px;font-size:1rem;color:#DC2626"><i class="fas fa-exclamation-circle" style="margin-right:8px"></i>오류</h3>
           <p style="font-size:.82rem;color:#6B7280">${escHtml(data.message)}</p>
@@ -13219,7 +13222,7 @@ function _showDuplicateModal(state, data) {
   if (state === 'results') {
     const { results, totalDuplicateFiles, tabInfo } = data;
     let html = `
-      <div style="position:fixed;inset:0;background:rgba(0,0,0,.5);z-index:9999;display:flex;align-items:center;justify-content:center" onclick="if(event.target===this)this.remove()">
+      <div class="toss-overlay" style="position:fixed;inset:0;background:rgba(0,0,0,.5);z-index:9999;display:flex;align-items:center;justify-content:center" onclick="if(event.target===this)this.remove()">
         <div style="background:#fff;border-radius:12px;padding:24px;width:95%;max-width:750px;max-height:85vh;overflow-y:auto;box-shadow:0 20px 60px rgba(0,0,0,.3)">
           <h3 style="margin:0 0 16px;font-size:1rem;color:#1F2937"><i class="fas fa-copy" style="margin-right:8px;color:#3182f6"></i>리뷰폴더 중복검사 결과</h3>`;
 
@@ -13392,7 +13395,7 @@ function _showSubmissionStatusModal(state, data) {
 
   if (state === 'loading') {
     modal.innerHTML = `
-      <div style="position:fixed;inset:0;background:rgba(0,0,0,.5);z-index:9999;display:flex;align-items:center;justify-content:center" onclick="if(event.target===this)this.remove()">
+      <div class="toss-overlay" style="position:fixed;inset:0;background:rgba(0,0,0,.5);z-index:9999;display:flex;align-items:center;justify-content:center" onclick="if(event.target===this)this.remove()">
         <div style="background:#fff;border-radius:12px;padding:24px;width:90%;max-width:600px;max-height:80vh;overflow-y:auto;box-shadow:0 20px 60px rgba(0,0,0,.3)">
           <h3 style="margin:0 0 16px;font-size:1rem;color:#1F2937"><i class="fas fa-spinner fa-spin" style="margin-right:8px;color:#0891B2"></i>제출현황 검사 중...</h3>
           <div style="font-size:.8rem;color:#6B7280">
@@ -13406,7 +13409,7 @@ function _showSubmissionStatusModal(state, data) {
 
   if (state === 'error') {
     modal.innerHTML = `
-      <div style="position:fixed;inset:0;background:rgba(0,0,0,.5);z-index:9999;display:flex;align-items:center;justify-content:center" onclick="if(event.target===this)this.remove()">
+      <div class="toss-overlay" style="position:fixed;inset:0;background:rgba(0,0,0,.5);z-index:9999;display:flex;align-items:center;justify-content:center" onclick="if(event.target===this)this.remove()">
         <div style="background:#fff;border-radius:12px;padding:24px;width:90%;max-width:500px;box-shadow:0 20px 60px rgba(0,0,0,.3)">
           <h3 style="margin:0 0 12px;font-size:1rem;color:#DC2626"><i class="fas fa-exclamation-circle" style="margin-right:8px"></i>오류</h3>
           <p style="font-size:.82rem;color:#6B7280">${escHtml(data.message)}</p>
@@ -13421,7 +13424,7 @@ function _showSubmissionStatusModal(state, data) {
   if (state === 'results') {
     const { results, tabs } = data;
     let html = `
-      <div style="position:fixed;inset:0;background:rgba(0,0,0,.5);z-index:9999;display:flex;align-items:center;justify-content:center" onclick="if(event.target===this)this.remove()">
+      <div class="toss-overlay" style="position:fixed;inset:0;background:rgba(0,0,0,.5);z-index:9999;display:flex;align-items:center;justify-content:center" onclick="if(event.target===this)this.remove()">
         <div style="background:#fff;border-radius:12px;padding:24px;width:95%;max-width:800px;max-height:85vh;overflow-y:auto;box-shadow:0 20px 60px rgba(0,0,0,.3)">
           <h3 style="margin:0 0 16px;font-size:1rem;color:#1F2937"><i class="fas fa-clipboard-check" style="margin-right:8px;color:#0891B2"></i>마감자료 검수 결과</h3>`;
 
@@ -13582,7 +13585,7 @@ function openDriveOwnershipModal() {
   const old = document.getElementById('driveOwnModal');
   if (old) old.remove();
   const html = `
-  <div id="driveOwnModal" style="position:fixed;inset:0;z-index:10000;display:flex;align-items:flex-start;justify-content:center;background:rgba(0,0,0,.5);padding:24px 12px;overflow-y:auto">
+  <div id="driveOwnModal" class="toss-overlay" style="position:fixed;inset:0;z-index:10000;display:flex;align-items:flex-start;justify-content:center;background:rgba(0,0,0,.5);padding:24px 12px;overflow-y:auto">
     <div style="background:#fff;border-radius:16px;max-width:720px;width:100%;box-shadow:0 24px 70px rgba(0,0,0,.35);overflow:hidden">
       <div style="background:linear-gradient(135deg,#FACC15,#F59E0B);padding:16px 22px;display:flex;align-items:center;justify-content:space-between">
         <h3 style="margin:0;font-size:1.05rem;font-weight:800;color:#7C2D12;display:flex;align-items:center;gap:8px">
@@ -13740,7 +13743,7 @@ function _showArchiveRoundModal(selectedTabs) {
   let modal = document.getElementById('archiveRoundModal');
   if (modal) modal.remove();
 
-  let html = `<div id="archiveRoundModal" style="position:fixed;inset:0;z-index:9999;display:flex;align-items:center;justify-content:center;background:rgba(0,0,0,.45)">
+  let html = `<div id="archiveRoundModal" class="toss-overlay" style="position:fixed;inset:0;z-index:9999;display:flex;align-items:center;justify-content:center;background:rgba(0,0,0,.45)">
     <div style="background:#fff;border-radius:14px;padding:24px;max-width:520px;width:90%;max-height:80vh;overflow-y:auto;box-shadow:0 20px 60px rgba(0,0,0,.3)">
       <h3 style="margin:0 0 6px;font-size:1rem;color:#1F2937"><i class="fas fa-archive" style="color:#4593fc;margin-right:6px"></i>마감 차수 선택</h3>
       <p style="margin:0 0 16px;font-size:.78rem;color:#6B7280">마감할 차수를 선택하세요. 선택하지 않은 차수는 대시보드에 유지됩니다.</p>`;
@@ -13865,6 +13868,7 @@ async function _fixSheetUrl(sheetId, tabName) {
   const modal = document.createElement('div');
   modal.id = 'fixSheetUrlModal';
   modal.style.cssText = 'position:fixed;inset:0;z-index:10000;display:flex;align-items:center;justify-content:center;background:rgba(0,0,0,.5)';
+  modal.classList.add('toss-overlay');
   modal.innerHTML = `
     <div style="background:#fff;border-radius:12px;padding:24px;width:480px;max-width:90vw;box-shadow:0 20px 60px rgba(0,0,0,.3)">
       <h3 style="margin:0 0 16px;font-size:1rem;color:#1F2937"><i class="fas fa-wrench" style="color:#D97706;margin-right:6px"></i>시트링크 수동보정</h3>
@@ -15032,6 +15036,7 @@ function openDedupeSelector() {
   const modal = document.createElement('div');
   modal.id = 'dedupeSelectorModal';
   modal.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,.45);z-index:9999;display:flex;align-items:center;justify-content:center;padding:20px';
+  modal.classList.add('toss-overlay');
   modal.innerHTML = `
     <div style="background:#fff;border-radius:12px;width:100%;max-width:480px;max-height:75vh;display:flex;flex-direction:column;box-shadow:0 20px 60px rgba(0,0,0,.2)">
       <div style="padding:16px 20px;border-bottom:1px solid #E5E7EB;flex-shrink:0">
@@ -15079,6 +15084,7 @@ function openFolderRelink(presetSheetId, presetTabName) {
   const modal = document.createElement('div');
   modal.id = 'folderRelinkModal';
   modal.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,.45);z-index:9999;display:flex;align-items:center;justify-content:center;padding:20px';
+  modal.classList.add('toss-overlay');
   modal.innerHTML = `
     <div style="background:#fff;border-radius:12px;width:100%;max-width:640px;max-height:86vh;display:flex;flex-direction:column;box-shadow:0 20px 60px rgba(0,0,0,.2)">
       <div style="padding:16px 20px;border-bottom:1px solid #E5E7EB;flex-shrink:0">
@@ -15524,6 +15530,7 @@ function _showAdminNoticePopup(notices) {
   const overlay = document.createElement('div');
   overlay.id = 'adminNoticePopup';
   overlay.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,.5);z-index:9999;display:flex;align-items:center;justify-content:center;padding:16px';
+  overlay.classList.add('toss-overlay');
 
   let noticeHtml = '';
   notices.forEach((n, idx) => {
@@ -15591,6 +15598,7 @@ async function openNoticeMgmt() {
     modal = document.createElement('div');
     modal.id = 'noticeMgmtModal';
     modal.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,.45);z-index:9000;display:flex;align-items:center;justify-content:center;padding:16px';
+    modal.classList.add('toss-overlay');
     modal.innerHTML = `
       <div style="background:#fff;border-radius:14px;box-shadow:0 20px 60px rgba(0,0,0,.15);max-width:600px;width:100%;max-height:85vh;display:flex;flex-direction:column;overflow:hidden">
         <div style="padding:14px 20px;border-bottom:1px solid #E5E7EB;display:flex;align-items:center;background:#F8FAFC">
