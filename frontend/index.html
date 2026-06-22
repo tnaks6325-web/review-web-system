@@ -12,8 +12,8 @@
   <meta name="mobile-web-app-capable" content="yes"/>
   <meta name="apple-mobile-web-app-status-bar-style" content="default"/>
   <meta name="apple-mobile-web-app-title" content="iA리뷰"/>
-  <meta property="og:title" content="아이에이리뷰"/>
-  <meta property="og:description" content="리뷰 캠페인 참여 및 제출"/>
+  <meta property="og:title" content="아이에이크루"/>
+  <meta property="og:description" content="쉽고 편한 리뷰체험단"/>
   <meta property="og:type" content="website"/>
   <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@fortawesome/fontawesome-free@6.4.0/css/all.min.css"/>
   <link href="https://fonts.googleapis.com/css2?family=Noto+Sans+KR:wght@300;400;500;600;700;800&display=swap" rel="stylesheet"/>
@@ -434,11 +434,36 @@
   .login-hero .sub{ font-size:.9rem; color:var(--t2); margin:10px 0 26px; font-weight:500; }
   .login-hero .field{ margin-bottom:12px; }
   .login-hero .flab{ font-size:.78rem; color:var(--t2); font-weight:600; margin-bottom:7px; display:block; }
-  .login-hero .login-input{ background:#F1F2F6 !important; border:none !important; border-radius:13px !important; padding:15px 16px !important; }
-  .login-hero .login-phone-row{ border:none !important; background:#F1F2F6; border-radius:13px; }
-  .login-hero .login-phone-row:focus-within{ box-shadow:0 0 0 2px #3182f6 inset; }
-  .login-hero .login-phone-prefix{ background:transparent; border:none; color:var(--t2); }
-  .login-hero .login-btn{ border-radius:14px; padding:16px; font-size:1rem; margin-top:6px; }
+  /* 입력칸: 흰색 + 또렷한 테두리 (회색→흰색 변경) */
+  .login-hero .login-input{
+    background:#fff !important; border:1.5px solid var(--border) !important;
+    border-radius:13px !important; padding:15px 16px !important;
+    transition:border-color .18s ease, box-shadow .18s ease, background .18s ease;
+  }
+  .login-hero .login-input::placeholder{ color:#AEB4C0; }
+  .login-hero .login-input:hover{ border-color:#CBD2DC !important; }
+  .login-hero .login-input:focus{ border-color:#3182f6 !important; box-shadow:0 0 0 4px rgba(49,130,246,.14) !important; }
+  .login-hero .login-phone-row{
+    background:#fff !important; border:1.5px solid var(--border) !important;
+    border-radius:13px; overflow:hidden;
+    transition:border-color .18s ease, box-shadow .18s ease;
+  }
+  .login-hero .login-phone-row:hover{ border-color:#CBD2DC !important; }
+  .login-hero .login-phone-row:focus-within{ border-color:#3182f6 !important; box-shadow:0 0 0 4px rgba(49,130,246,.14); }
+  /* 전화번호 행 내부 input은 테두리/배경 제거(행이 담당) */
+  .login-hero .login-phone-row .login-input{ background:transparent !important; border:none !important; box-shadow:none !important; }
+  .login-hero .login-phone-prefix{ background:#F7F9FC; border:none; border-right:1.5px solid var(--border); color:var(--t2); font-weight:700; }
+  /* 포커스 시 라벨 강조 (마이크로인터랙션) */
+  .login-hero .flab{ transition:color .18s ease; }
+  .login-hero .field:focus-within .flab{ color:#3182f6; }
+  /* 로그인 버튼 프레스/호버 인터랙션 */
+  .login-hero .login-btn{
+    border-radius:14px; padding:16px; font-size:1rem; margin-top:6px;
+    box-shadow:0 6px 16px rgba(49,130,246,.26);
+    transition:background .2s ease, transform .09s ease, box-shadow .2s ease;
+  }
+  .login-hero .login-btn:hover{ box-shadow:0 8px 20px rgba(49,130,246,.34); }
+  .login-hero .login-btn:active{ transform:scale(.985); box-shadow:0 3px 10px rgba(49,130,246,.24); }
   .login-hero .login-register{ text-align:center; margin-top:18px; }
   #viewLogin .home-section{ padding:18px 4px 30px; }
   /* ===== 온보딩 바텀시트 ===== */
