@@ -13574,6 +13574,167 @@ async function _archiveCheckedTabs() {
 }
 
 // ── 차수 선택 마감 모달 ──
+// ▼▼▼ [임시] 드라이브 소유권(용량) 이관 도구 — 전부 tnaks6325 이관 완료 후 이 블록 삭제 ▼▼▼
+// 관련: admin.html #btnDriveOwnership 버튼 / api.js driveAccountInfo·driveOwnershipAudit·driveTransferOwnership
+const DRIVE_OWN_TARGET = 'tnaks6325@gmail.com';
+
+function openDriveOwnershipModal() {
+  const old = document.getElementById('driveOwnModal');
+  if (old) old.remove();
+  const html = `
+  <div id="driveOwnModal" style="position:fixed;inset:0;z-index:10000;display:flex;align-items:flex-start;justify-content:center;background:rgba(0,0,0,.5);padding:24px 12px;overflow-y:auto">
+    <div style="background:#fff;border-radius:16px;max-width:720px;width:100%;box-shadow:0 24px 70px rgba(0,0,0,.35);overflow:hidden">
+      <div style="background:linear-gradient(135deg,#FACC15,#F59E0B);padding:16px 22px;display:flex;align-items:center;justify-content:space-between">
+        <h3 style="margin:0;font-size:1.05rem;font-weight:800;color:#7C2D12;display:flex;align-items:center;gap:8px">
+          <i class="fas fa-hdd"></i> 드라이브 용량 이관 <span style="background:#7C2D12;color:#FDE68A;font-size:.62rem;padding:2px 7px;border-radius:7px">임시 도구</span>
+        </h3>
+        <button onclick="closeDriveOwnershipModal()" style="background:none;border:none;cursor:pointer;font-size:1.2rem;color:#7C2D12"><i class="fas fa-times"></i></button>
+      </div>
+      <div style="padding:18px 22px;max-height:calc(90vh - 60px);overflow-y:auto">
+        <!-- 도움말 / 진행방법 -->
+        <div style="background:#FEFCE8;border:1px solid #FDE68A;border-radius:12px;padding:14px 16px;margin-bottom:16px">
+          <div style="font-weight:800;color:#92400E;font-size:.85rem;margin-bottom:8px"><i class="fas fa-circle-info"></i> 진행방법 (도움말)</div>
+          <p style="margin:0 0 10px;font-size:.76rem;color:#78350F;line-height:1.55">
+            구글드라이브 용량은 <b>파일 소유자 계정</b>에 귀속됩니다. 구매캡처·리뷰 업로드가
+            관리자(박세희·박은비) 계정 용량을 차지하는 문제를 점검·이관하는 임시 도구입니다.
+            <b>아래 ①~④ 순서대로</b> 진행하세요.
+          </p>
+          <ol style="margin:0;padding-left:18px;font-size:.76rem;color:#78350F;line-height:1.7">
+            <li><b>① 계정 확인</b> — 업로드 용량이 어느 구글계정에 잡히는지 확인.
+                <span style="color:#B45309">tnaks6325가 아니면</span> Railway 환경변수
+                <code style="background:#FEF3C7;padding:1px 4px;border-radius:4px">DRIVE_OAUTH_REFRESH_TOKEN</code>을
+                tnaks6325 계정 토큰으로 교체하면 <b>이후 업로드는 영구 해결</b>됩니다.</li>
+            <li><b>② 용량 점검</b> — 캡처·리뷰 폴더를 스캔해 <b>소유자별 파일수·용량</b>을 집계합니다.</li>
+            <li><b>③ 이관 미리보기</b> — 실제 변경 없이(dry-run) 이관 대상 파일을 먼저 확인합니다.</li>
+            <li><b>④ 이관 실행</b> — tnaks6325로 소유권 이관(데이터 삭제 없음, 되돌릴 수 있음).
+                <span style="color:#B45309">단, 관리자 소유 파일은 관리자 본인 자격이 필요</span>해
+                실패할 수 있으며, 그 경우 관리자가 직접 이관하거나 관리자 토큰이 필요합니다.</li>
+          </ol>
+          <p style="margin:10px 0 0;font-size:.72rem;color:#A16207">※ 이 버튼은 모든 소유권이 tnaks6325로 이관되면 삭제될 예정입니다.</p>
+        </div>
+        <!-- 액션 버튼 -->
+        <div style="display:grid;grid-template-columns:repeat(2,1fr);gap:8px;margin-bottom:14px">
+          <button onclick="driveOwnAccountCheck()" style="padding:11px;background:#FEF9C3;border:1.5px solid #EAB308;border-radius:10px;font-size:.82rem;font-weight:700;color:#854D0E;cursor:pointer"><i class="fas fa-id-card"></i> ① 계정 확인</button>
+          <button onclick="driveOwnAudit()" style="padding:11px;background:#FEF9C3;border:1.5px solid #EAB308;border-radius:10px;font-size:.82rem;font-weight:700;color:#854D0E;cursor:pointer"><i class="fas fa-chart-pie"></i> ② 용량 점검</button>
+          <button onclick="driveOwnTransfer(false)" style="padding:11px;background:#FEF9C3;border:1.5px solid #EAB308;border-radius:10px;font-size:.82rem;font-weight:700;color:#854D0E;cursor:pointer"><i class="fas fa-eye"></i> ③ 이관 미리보기</button>
+          <button onclick="driveOwnTransfer(true)" style="padding:11px;background:linear-gradient(135deg,#F59E0B,#D97706);border:1.5px solid #B45309;border-radius:10px;font-size:.82rem;font-weight:800;color:#fff;cursor:pointer"><i class="fas fa-right-left"></i> ④ 이관 실행</button>
+        </div>
+        <div id="driveOwnResult" style="min-height:60px;font-size:.78rem;color:#374151"></div>
+      </div>
+    </div>
+  </div>`;
+  document.body.insertAdjacentHTML('beforeend', html);
+}
+
+function closeDriveOwnershipModal() {
+  document.getElementById('driveOwnModal')?.remove();
+}
+
+function _driveOwnSetResult(html) {
+  const el = document.getElementById('driveOwnResult');
+  if (el) el.innerHTML = html;
+}
+
+function _driveOwnLoading(msg) {
+  _driveOwnSetResult(`<div style="padding:14px;text-align:center;color:#92400E"><i class="fas fa-spinner fa-spin"></i> ${escHtml(msg || '처리 중...')}</div>`);
+}
+
+async function driveOwnAccountCheck() {
+  _driveOwnLoading('현재 OAuth 계정/용량 조회 중...');
+  const r = await gasGet({ action: 'driveAccountInfo' }, 30000);
+  if (!r || r.ok === false || r.error) { _driveOwnSetResult(`<div style="color:#DC2626">조회 실패: ${escHtml((r && r.error) || '알수없음')}</div>`); return; }
+  const o = r.oauth || {};
+  const target = r.expectedOwnerEmail || DRIVE_OWN_TARGET;
+  let body = '';
+  if (!o.configured) {
+    body = `<div style="color:#DC2626;font-weight:700">❌ OAuth 미설정 (DRIVE_OAUTH_CLIENT_ID/SECRET/REFRESH_TOKEN)</div>`;
+  } else if (o.error) {
+    body = `<div style="color:#DC2626">❌ 계정 조회 실패: ${escHtml(o.error)}</div>`;
+  } else {
+    const match = o.matchesExpectedOwner;
+    const badge = match === true
+      ? `<span style="color:#059669;font-weight:800">✅ 일치 (정상)</span>`
+      : `<span style="color:#DC2626;font-weight:800">❌ 불일치 — 이 계정에 용량이 잡힙니다</span>`;
+    const q = o.quota || {};
+    body = `
+      <div style="line-height:1.8">
+        <div>현재 업로드 계정: <b>${escHtml(o.email || '-')}</b> ${o.displayName ? `(${escHtml(o.displayName)})` : ''}</div>
+        <div>기대 계정: <b>${escHtml(target)}</b></div>
+        <div>일치 여부: ${badge}</div>
+        ${q.limit != null ? `<div>저장용량: <b>${escHtml(q.usageHuman || '?')}</b> / ${escHtml(q.limitHuman || '?')}${q.usedPercent != null ? ` (${q.usedPercent}%)` : ''}</div>` : ''}
+      </div>
+      ${match === false ? `<div style="margin-top:10px;background:#FEF2F2;border:1px solid #FECACA;border-radius:8px;padding:10px;color:#991B1B;font-size:.74rem">
+        ⚠️ Railway 환경변수 <code>DRIVE_OAUTH_REFRESH_TOKEN</code>을 <b>${escHtml(target)}</b> 계정 토큰으로 교체하면
+        이후 업로드 용량은 정상 귀속됩니다. (기존 파일은 ②~④로 이관)
+      </div>` : ''}`;
+  }
+  _driveOwnSetResult(body);
+}
+
+async function driveOwnAudit() {
+  _driveOwnLoading('폴더 스캔 및 소유자별 용량 집계 중... (파일이 많으면 시간이 걸립니다)');
+  const r = await gasPost({ action: 'driveOwnershipAudit' }, 180000);
+  if (!r || r.ok === false || r.error) { _driveOwnSetResult(`<div style="color:#DC2626">집계 실패: ${escHtml((r && r.error) || '알수없음')}</div>`); return; }
+  const owners = r.owners || [];
+  let rows = owners.map(o => {
+    const isTarget = (o.email || '').toLowerCase() === DRIVE_OWN_TARGET.toLowerCase();
+    const color = isTarget ? '#059669' : '#DC2626';
+    return `<tr>
+      <td style="padding:6px 8px;border-bottom:1px solid #F3F4F6;color:${color};font-weight:${isTarget ? 700 : 600}">${escHtml(o.email)}${o.displayName ? ` <span style="color:#9CA3AF;font-weight:400">(${escHtml(o.displayName)})</span>` : ''}${isTarget ? ' ✅' : ''}</td>
+      <td style="padding:6px 8px;border-bottom:1px solid #F3F4F6;text-align:right">${o.fileCount}</td>
+      <td style="padding:6px 8px;border-bottom:1px solid #F3F4F6;text-align:right;font-weight:700">${escHtml(o.totalHuman || '-')}</td>
+    </tr>`;
+  }).join('');
+  if (!rows) rows = `<tr><td colspan="3" style="padding:10px;color:#9CA3AF;text-align:center">파일이 없습니다.</td></tr>`;
+  _driveOwnSetResult(`
+    <div style="margin-bottom:6px">스캔 폴더 ${r.scannedFolders}개 · 총 ${r.totalFiles}개 파일 · 합계 <b>${escHtml(r.totalHuman || '-')}</b>${r.elapsed != null ? ` · ${r.elapsed}초` : ''}</div>
+    <table style="width:100%;border-collapse:collapse;font-size:.76rem">
+      <thead><tr style="background:#FEF9C3;color:#854D0E">
+        <th style="padding:6px 8px;text-align:left">소유자</th><th style="padding:6px 8px;text-align:right">파일수</th><th style="padding:6px 8px;text-align:right">용량</th>
+      </tr></thead>
+      <tbody>${rows}</tbody>
+    </table>
+    ${(r.errors && r.errors.length) ? `<div style="margin-top:8px;color:#B45309;font-size:.72rem">⚠️ 스캔 실패 폴더 ${r.errors.length}개</div>` : ''}
+    <div style="margin-top:8px;color:#6B7280;font-size:.72rem">빨간색 = tnaks6325가 아닌 계정(이관 대상) · 초록색 = 정상 귀속</div>
+  `);
+}
+
+async function driveOwnTransfer(apply) {
+  if (apply) {
+    if (!confirm('비-tnaks6325 소유 파일의 소유권을 tnaks6325로 이관합니다.\n(데이터 삭제 없음 · 되돌릴 수 있음)\n\n진행할까요?')) return;
+  }
+  _driveOwnLoading(apply ? '소유권 이관 실행 중... (시간이 걸릴 수 있습니다)' : '이관 대상 미리보기 중...');
+  const r = await gasPost({ action: 'driveTransferOwnership', dryRun: !apply }, 180000);
+  if (!r || r.ok === false || r.error) { _driveOwnSetResult(`<div style="color:#DC2626">실패: ${escHtml((r && r.error) || '알수없음')}</div>`); return; }
+  const s = r.summary || {};
+  const head = apply
+    ? `<div style="font-weight:700;color:#92400E">이관 실행 결과 ${r.elapsed != null ? `(${r.elapsed}초)` : ''}</div>
+       <div style="line-height:1.8;margin-top:4px">스캔 ${s.scanned} · 이미 정상 ${s.alreadyOwned} · ✅ 이관성공 <b style="color:#059669">${s.transferred}</b> · ❌ 실패 <b style="color:#DC2626">${s.failed}</b></div>`
+    : `<div style="font-weight:700;color:#92400E">이관 미리보기 (dry-run) ${r.elapsed != null ? `(${r.elapsed}초)` : ''}</div>
+       <div style="line-height:1.8;margin-top:4px">스캔 ${s.scanned} · 이미 정상 ${s.alreadyOwned} · 이관대상 <b style="color:#B45309">${s.toTransfer}</b></div>`;
+  let list = '';
+  const acts = r.actions || [];
+  if (!apply && acts.length) {
+    list = `<div style="margin-top:8px;max-height:180px;overflow-y:auto;border:1px solid #F3F4F6;border-radius:8px">`
+      + acts.slice(0, 50).map(a => `<div style="padding:4px 8px;border-bottom:1px solid #F9FAFB;font-size:.72rem"><span style="color:#6B7280">[${escHtml(a.currentOwner || '?')}]</span> ${escHtml(a.name || a.fileId)}</div>`).join('')
+      + (acts.length > 50 ? `<div style="padding:4px 8px;color:#9CA3AF;font-size:.72rem">... 외 ${acts.length - 50}개</div>` : '')
+      + `</div>`;
+  }
+  let fail = '';
+  const fails = r.failures || [];
+  if (fails.length) {
+    fail = `<div style="margin-top:10px;background:#FEF2F2;border:1px solid #FECACA;border-radius:8px;padding:10px;color:#991B1B;font-size:.72rem">
+      ⚠️ 실패/주의 ${fails.length}건 (상위 8):<br>`
+      + fails.slice(0, 8).map(f => `· ${escHtml(f.name || f.folderId || '')} <span style="color:#B91C1C">(${escHtml(f.error || '')})</span>`).join('<br>')
+      + `<div style="margin-top:6px;color:#7F1D1D">관리자 소유 파일은 관리자 본인 자격(토큰)이 있어야 이관됩니다. 관리자가 직접 이관하거나, Railway에서 관리자 토큰으로 CLI 실행이 필요합니다.</div>
+      </div>`;
+  }
+  let next = '';
+  if (!apply && s.toTransfer > 0) next = `<div style="margin-top:8px;color:#B45309;font-size:.74rem">→ 실제 이관하려면 <b>④ 이관 실행</b> 버튼을 누르세요.</div>`;
+  _driveOwnSetResult(head + list + fail + next);
+}
+// ▲▲▲ [임시] 드라이브 소유권(용량) 이관 도구 끝 ▲▲▲
+
 function _showArchiveRoundModal(selectedTabs) {
   // 기존 모달 제거
   let modal = document.getElementById('archiveRoundModal');
