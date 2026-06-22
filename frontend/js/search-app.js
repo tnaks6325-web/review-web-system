@@ -8923,6 +8923,7 @@ function showCenterAlert(msg, duration=4000) {
   const overlay = document.createElement("div");
   overlay.id = "_centerAlertOverlay";
   overlay.style.cssText = "position:fixed;inset:0;z-index:99999;display:flex;align-items:center;justify-content:center;background:rgba(0,0,0,.35);padding:20px;animation:fadeIn .2s";
+  overlay.classList.add("toss-overlay");
   overlay.innerHTML = `<div style="background:#fff;border-radius:14px;padding:24px 28px;max-width:320px;width:100%;text-align:center;box-shadow:0 8px 32px rgba(0,0,0,.18)">
     <div style="font-size:.95rem;font-weight:600;color:#DC2626;line-height:1.5;word-break:keep-all">${msg}</div>
     <button onclick="this.closest('#_centerAlertOverlay').remove()" style="margin-top:18px;padding:10px 32px;border:none;border-radius:8px;background:#DC2626;color:#fff;font-size:.9rem;font-weight:600;cursor:pointer">확인</button>
