@@ -192,9 +192,10 @@ hr{ border:none; border-top:1px solid var(--toss-line); }
 
 /* ============================================================
    토스 풀 리디자인: 팝업 모달 = 바텀시트 + 마이크로 인터랙션
-   ★ 관리자 대시보드 전용 — body.toss-admin 스코프로 한정
-     (toss-theme.css는 여러 페이지 공용이므로, 고객용 페이지(리뷰제출 등)에는
-      영향 가지 않도록 .toss-admin 아래에서만 적용. 추후 다른 페이지로 확장.)
+   ★ body.toss-ui 스코프로 한정 — 페이지 단위로 단계 적용(opt-in).
+     (toss-theme.css는 여러 페이지 공용이므로, <body class="toss-ui"> 를 붙인
+      페이지에서만 적용된다. 현재: admin(관리자) · search(리뷰제출).
+      나머지 페이지는 body에 클래스만 추가하면 동일하게 확장됨.)
    · 정적 모달(.modal-overlay/.modal-box) + 동적 모달(.toss-overlay) 공용
    · 동적 모달은 오버레이 div에 class="toss-overlay" 만 붙이면 적용
      (카드는 오버레이의 직계 자식 → .toss-overlay>div 로 자동 재구성)
@@ -203,14 +204,14 @@ hr{ border:none; border-top:1px solid var(--toss-line); }
 @keyframes tossSheetUp{ from{transform:translateY(100%)} to{transform:translateY(0)} }
 
 /* 백드롭: 짙은 잉크 + 블러 (정적·동적 공용) */
-.toss-admin .modal-overlay, .toss-admin .toss-overlay{
+.toss-ui .modal-overlay, .toss-ui .toss-overlay{
   background:rgba(17,24,40,.48) !important;
   -webkit-backdrop-filter:blur(6px) !important; backdrop-filter:blur(6px) !important;
 }
 
 /* 카드: 큰 라운드 + 소프트 섀도우 + 팝 인 (데스크톱 기본) */
-.toss-admin .modal-box,
-.toss-admin .toss-overlay > div{
+.toss-ui .modal-box,
+.toss-ui .toss-overlay > div{
   border-radius:22px !important; border:none !important;
   box-shadow:var(--toss-shadow-lg) !important;
   animation:tossPop .26s cubic-bezier(.16,1,.3,1) both;
@@ -218,60 +219,60 @@ hr{ border:none; border-top:1px solid var(--toss-line); }
 
 /* ── 모바일 ≤640px: 하단 도킹 바텀시트 (슬라이드업 + 그랩 핸들 + 풀폭 CTA) ── */
 @media (max-width:640px){
-  .toss-admin .modal-overlay, .toss-admin .toss-overlay{
+  .toss-ui .modal-overlay, .toss-ui .toss-overlay{
     align-items:flex-end !important; justify-content:center !important; padding:0 !important;
   }
-  .toss-admin .modal-box,
-  .toss-admin .toss-overlay > div{
+  .toss-ui .modal-box,
+  .toss-ui .toss-overlay > div{
     width:100% !important; max-width:100% !important;
     border-radius:22px 22px 0 0 !important;
     max-height:92vh !important; overflow-y:auto !important;
     animation:tossSheetUp .3s cubic-bezier(.16,1,.3,1) both;
   }
   /* 상단 그랩 핸들 */
-  .toss-admin .modal-box::before,
-  .toss-admin .toss-overlay > div::before{
+  .toss-ui .modal-box::before,
+  .toss-ui .toss-overlay > div::before{
     content:''; display:block; flex:0 0 auto;
     width:38px; height:4px; border-radius:999px; background:#D7DBE0;
     margin:9px auto 1px; position:sticky; top:0; z-index:2;
   }
   /* 모달 하단 액션 → 풀폭 세로 스택 (주 CTA가 아래=엄지 영역) */
-  .toss-admin .modal-actions{ flex-direction:column !important; align-items:stretch !important; gap:8px !important; }
-  .toss-admin .modal-actions button{ width:100% !important; min-height:48px; }
+  .toss-ui .modal-actions{ flex-direction:column !important; align-items:stretch !important; gap:8px !important; }
+  .toss-ui .modal-actions button{ width:100% !important; min-height:48px; }
 }
 
 /* ============================================================
    마이크로 인터랙션 (과하지 않게 — hover 살짝 떠오름 + 눌림) · 관리자 전용
    ============================================================ */
 /* 부드러운 트랜지션 (관리자 영역 + 모달 버튼) */
-.toss-admin .admin-body button, .toss-admin .admin-header button, .toss-admin .modal-actions button,
-.toss-admin .btn, .toss-admin .btn-primary, .toss-admin .btn-submit, .toss-admin .btn-ghost,
-.toss-admin .btn-sm, .toss-admin .btn-topbar, .toss-admin .btn-header-sq,
-.toss-admin .dash-filter-btn, .toss-admin .admin-tab-btn{
+.toss-ui .admin-body button, .toss-ui .admin-header button, .toss-ui .modal-actions button,
+.toss-ui .btn, .toss-ui .btn-primary, .toss-ui .btn-submit, .toss-ui .btn-ghost,
+.toss-ui .btn-sm, .toss-ui .btn-topbar, .toss-ui .btn-header-sq,
+.toss-ui .dash-filter-btn, .toss-ui .admin-tab-btn{
   transition:transform .14s cubic-bezier(.16,1,.3,1), background .15s, box-shadow .15s, color .15s, filter .15s !important;
 }
 /* 솔리드 CTA: hover 시 1px 떠오름 + 그림자 강조 */
-.toss-admin .btn-primary:hover, .toss-admin .btn-submit:hover, .toss-admin button.pri:hover,
-.toss-admin .sdp-btn-apply:hover, .toss-admin .btn-index-build:hover{
+.toss-ui .btn-primary:hover, .toss-ui .btn-submit:hover, .toss-ui button.pri:hover,
+.toss-ui .sdp-btn-apply:hover, .toss-ui .btn-index-build:hover{
   transform:translateY(-1px) !important;
   box-shadow:0 8px 20px rgba(49,130,246,.28) !important;
 }
 /* 보조/아이콘/탭 버튼: hover 시 미세 상승 */
-.toss-admin .btn-ghost:hover, .toss-admin .btn-sm:hover, .toss-admin .btn-topbar:hover,
-.toss-admin .admin-header .btn-header-sq:hover, .toss-admin .admin-header .btn-icon-sm:hover{
+.toss-ui .btn-ghost:hover, .toss-ui .btn-sm:hover, .toss-ui .btn-topbar:hover,
+.toss-ui .admin-header .btn-header-sq:hover, .toss-ui .admin-header .btn-icon-sm:hover{
   transform:translateY(-1px) !important;
 }
 /* 누름: 살짝 가라앉음 (기존 scale 보다 자연스럽게) */
-.toss-admin .btn-primary:active, .toss-admin .btn-submit:active, .toss-admin button.pri:active,
-.toss-admin .btn-ghost:active, .toss-admin .btn-sm:active, .toss-admin .btn-topbar:active,
-.toss-admin .btn-header-sq:active, .toss-admin .dash-filter-btn:active, .toss-admin .modal-actions button:active{
+.toss-ui .btn-primary:active, .toss-ui .btn-submit:active, .toss-ui button.pri:active,
+.toss-ui .btn-ghost:active, .toss-ui .btn-sm:active, .toss-ui .btn-topbar:active,
+.toss-ui .btn-header-sq:active, .toss-ui .dash-filter-btn:active, .toss-ui .modal-actions button:active{
   transform:translateY(0) scale(.975) !important;
 }
 /* 미선택 탭 hover */
-.toss-admin .admin-tab-btn:not(.active):hover{ color:var(--toss-sub) !important; background:var(--toss-fill-2) !important; }
+.toss-ui .admin-tab-btn:not(.active):hover{ color:var(--toss-sub) !important; background:var(--toss-fill-2) !important; }
 /* 카드: hover 시 아주 살짝 떠오름 (요약/통계 카드) */
-.toss-admin .summary-card, .toss-admin .pane-card, .toss-admin .dash-campaign-block, .toss-admin .stats-card{
+.toss-ui .summary-card, .toss-ui .pane-card, .toss-ui .dash-campaign-block, .toss-ui .stats-card{
   transition:transform .16s cubic-bezier(.16,1,.3,1), box-shadow .16s !important;
 }
-.toss-admin .summary-card:hover, .toss-admin .stats-card:hover{ transform:translateY(-2px) !important; box-shadow:var(--toss-shadow-lg) !important; }
+.toss-ui .summary-card:hover, .toss-ui .stats-card:hover{ transform:translateY(-2px) !important; box-shadow:var(--toss-shadow-lg) !important; }
 
