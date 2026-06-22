@@ -621,6 +621,14 @@ body{ letter-spacing:-.01em; }
 
         <!-- 외부 링크 그룹 (항상 표시) -->
         <div class="admin-header-actions" style="gap:5px">
+          <!-- ▼▼▼ [임시] 드라이브 용량 이관 버튼 — 전부 tnaks6325 이관 완료 후 이 블록 삭제 ▼▼▼ -->
+          <style>@keyframes driveOwnPulse{0%,100%{box-shadow:0 3px 10px rgba(245,158,11,.45)}50%{box-shadow:0 3px 18px rgba(245,158,11,.85)}}</style>
+          <button id="btnDriveOwnership" onclick="openDriveOwnershipModal()" title="구글드라이브 용량 귀속 점검·이관 (임시)"
+            style="padding:11px 20px;background:linear-gradient(135deg,#FACC15,#F59E0B);color:#7C2D12;border:2px solid #D97706;border-radius:12px;font-size:.9rem;font-weight:800;cursor:pointer;display:inline-flex;align-items:center;gap:7px;animation:driveOwnPulse 2s ease-in-out infinite;margin-right:4px">
+            <i class="fas fa-hdd"></i> 드라이브 용량 이관
+            <span style="background:#7C2D12;color:#FDE68A;font-size:.62rem;padding:2px 6px;border-radius:7px;font-weight:700">임시</span>
+          </button>
+          <!-- ▲▲▲ [임시] 드라이브 용량 이관 버튼 끝 ▲▲▲ -->
           <button class="btn-header-sq btn-header-portal" onclick="openWorkPortal()" title="업무포털 새창 열기 (자동 로그인)">
             <i class="fas fa-briefcase"></i>
             <span>업무포털</span>
