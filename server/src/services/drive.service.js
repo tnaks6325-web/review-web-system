@@ -863,11 +863,13 @@ async function searchFiles(q, opts = {}) {
   const byId = new Map();
   const sa = _getReadDrive();
   const oauth = _getOAuthDrive();
+  const stats = opts.stats || null; // 진단용: { sa, oauth, saError, oauthError }
 
   for (const [client, label] of [[sa, 'SA'], [oauth, 'OAuth']]) {
-    if (!client) continue;
-    if (label === 'OAuth' && client === sa) continue;
+    const key = label === 'SA' ? 'sa' : 'oauth';
+    if (!client || (label === 'OAuth' && client === sa)) { if (stats) stats[key] = null; continue; }
     let pageToken = null;
+    let clientCount = 0;
     try {
       do {
         const res = await client.files.list({
@@ -879,7 +881,9 @@ async function searchFiles(q, opts = {}) {
           includeItemsFromAllDrives: true,
           orderBy: 'createdTime desc',
         });
-        for (const f of (res.data.files || [])) {
+        const fl = res.data.files || [];
+        clientCount += fl.length;
+        for (const f of fl) {
           if (byId.has(f.id)) continue;
           byId.set(f.id, {
             id: f.id,
@@ -892,7 +896,9 @@ async function searchFiles(q, opts = {}) {
         }
         pageToken = res.data.nextPageToken;
       } while (pageToken && byId.size < limit);
+      if (stats) stats[key] = clientCount;
     } catch (e) {
+      if (stats) { stats[key] = clientCount; stats[key + 'Error'] = e.message; }
       logger.warn(`[Drive] ${label} searchFiles 실패: ${e.message}`);
     }
   }
