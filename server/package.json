@@ -13,6 +13,9 @@
     "migrate:detail": "node scripts/migrate-detail.js",
     "migrate:reviewers": "node scripts/migrate-reviewers.js",
     "migrate:all": "bash scripts/run-migration.sh",
+    "drive:account": "node scripts/drive-ownership.js account",
+    "drive:audit": "node scripts/drive-ownership.js audit",
+    "drive:transfer": "node scripts/drive-ownership.js transfer",
     "health": "curl -s http://localhost:${PORT:-3000}/health | node -e \"process.stdin.on('data',d=>{const j=JSON.parse(d);console.log(j);process.exit(j.ok?0:1)})\""
   },
   "dependencies": {

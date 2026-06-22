@@ -802,6 +802,15 @@ router.get('/diag', authMiddleware, async (req, res, next) => {
     `);
     const noFolder = rows.filter(r => !r.folderUrl);
     const noCapture = rows.filter(r => !r.captureFolderUrl);
+
+    // 실제 OAuth 계정/쿼터 — "용량이 어느 계정에 귀속되는지" 확인용
+    let accountDiagnostics = null;
+    try {
+      accountDiagnostics = await driveService.getAccountDiagnostics();
+    } catch (e) {
+      accountDiagnostics = { error: e.message };
+    }
+
     res.json({
       ok: true,
       total: rows.length,
@@ -809,6 +818,7 @@ router.get('/diag', authMiddleware, async (req, res, next) => {
       noCaptureFolderUrl: noCapture.length,
       rootFolderId: getRootFolderId() || '미설정',
       oauthStatus: driveService.getOAuthStatus(),
+      accountDiagnostics,
       details: rows,
     });
   } catch (err) {
@@ -1086,6 +1096,111 @@ router.post('/check-submission-status', authMiddleware, async (req, res, next) =
     }
 
     res.json({ ok: true, results });
+  } catch (err) {
+    next(err);
+  }
+});
+
+// ═══════════════════════════════════════════════════════════
+// 구글드라이브 용량 귀속 점검·이전 (구매캡처/리뷰 폴더)
+//
+// 용량은 "파일 소유자" 계정에 귀속된다. 업로드는 OAuth(tnaks6325) 소유로
+// 생성되도록 구현돼 있으나, (a) 토큰이 다른 계정이거나 (b) 과거 GAS가
+// 만든 파일이 관리자 소유로 남아 있으면 관리자 용량이 차감된다.
+// 아래 엔드포인트로 (1) 현재 귀속 계정 확인 (2) 소유자별 용량 집계
+// (3) tnaks6325로 소유권 이전을 수행한다.
+// ═══════════════════════════════════════════════════════════
+
+/**
+ * 헬퍼: 감사/이전 대상 폴더 ID 수집
+ * - body.folderUrls 가 있으면 그것을, 없으면 tab_configs의 캡처+리뷰 폴더를 사용
+ */
+async function collectAuditFolderIds(body = {}) {
+  const ids = [];
+  if (Array.isArray(body.folderUrls) && body.folderUrls.length) {
+    for (const u of body.folderUrls) {
+      const id = extractFolderId(u);
+      if (id) ids.push(id);
+    }
+    return [...new Set(ids)];
+  }
+  const includeClosed = body.includeClosed === true;
+  const where = includeClosed ? '' : 'WHERE (is_closed = FALSE OR is_closed IS NULL)';
+  const { rows } = await pool.query(`SELECT folder_url, capture_folder_url FROM tab_configs ${where}`);
+  for (const r of rows) {
+    const cap = extractFolderId(r.capture_folder_url);
+    const rev = extractFolderId(r.folder_url);
+    if (cap) ids.push(cap);
+    if (rev) ids.push(rev);
+  }
+  return [...new Set(ids)];
+}
+
+// ───────────────────────────────────────────────────────────
+// GET /api/drive/account-info — 현재 Drive OAuth 계정/쿼터 진단
+//   "구매캡처/리뷰 업로드 용량이 어느 구글계정에 귀속되는지" 를 즉시 확인
+//   (테스트 업로드 없이 about.get 만 호출 — 가벼움)
+// ───────────────────────────────────────────────────────────
+router.get('/account-info', authMiddleware, async (req, res, next) => {
+  try {
+    const info = await driveService.getAccountDiagnostics();
+    res.json({ ok: true, ...info });
+  } catch (err) {
+    next(err);
+  }
+});
+
+// ───────────────────────────────────────────────────────────
+// POST /api/drive/ownership-audit — 폴더 내 파일을 소유자별로 집계 (읽기전용)
+//   body: { folderUrls?: [], includeClosed?: bool }
+//   - folderUrls 미지정 시 tab_configs의 모든 캡처+리뷰 폴더를 재귀 스캔
+//   - 응답: 소유자별 파일수/용량 → 관리자(박세희/박은비) 용량을 수치로 확인
+// ───────────────────────────────────────────────────────────
+router.post('/ownership-audit', authMiddleware, async (req, res, next) => {
+  try {
+    const folderIds = await collectAuditFolderIds(req.body || {});
+    if (folderIds.length === 0) return res.json({ ok: false, error: '감사할 폴더가 없습니다.' });
+
+    const startTime = Date.now();
+    const result = await driveService.auditOwnership(folderIds);
+    const elapsed = Math.round((Date.now() - startTime) / 1000);
+
+    res.json({ ok: true, scannedFolders: folderIds.length, elapsed, ...result });
+  } catch (err) {
+    next(err);
+  }
+});
+
+// ───────────────────────────────────────────────────────────
+// POST /api/drive/transfer-ownership — 비-tnaks 소유 파일을 tnaks6325로 이전
+//   body: {
+//     folderUrls?: [], includeClosed?: bool,
+//     dryRun?: bool (기본 true — 계획만, 실제 변경 없음),
+//     fromOwners?: ["관리자이메일", ...] (지정 시 해당 소유자 파일만),
+//     sourceRefreshToken?: "관리자 계정 refresh token" (실제 이전에 필요할 수 있음),
+//     targetOwnerEmail?: "tnaks6325@gmail.com" (기본 DRIVE_OWNER_EMAIL)
+//   }
+//
+//   ⚠️ 소유권 이전은 "현재 소유자" 자격으로만 가능 (구글 제약).
+//      관리자 소유 파일은 sourceRefreshToken(관리자 토큰) 없이는 403 실패하며
+//      failures 에 기록된다(비파괴 — 데이터 삭제/복사 없음, 소유권만 변경).
+// ───────────────────────────────────────────────────────────
+router.post('/transfer-ownership', authMiddleware, async (req, res, next) => {
+  try {
+    const body = req.body || {};
+    const folderIds = await collectAuditFolderIds(body);
+    if (folderIds.length === 0) return res.json({ ok: false, error: '대상 폴더가 없습니다.' });
+
+    const startTime = Date.now();
+    const result = await driveService.transferOwnershipInFolders(folderIds, {
+      targetOwnerEmail: body.targetOwnerEmail,
+      dryRun: body.dryRun !== false,
+      fromOwners: body.fromOwners,
+      sourceRefreshToken: body.sourceRefreshToken,
+    });
+    const elapsed = Math.round((Date.now() - startTime) / 1000);
+
+    res.json({ ok: true, scannedFolders: folderIds.length, elapsed, ...result });
   } catch (err) {
     next(err);
   }
