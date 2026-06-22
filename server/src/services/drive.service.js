@@ -865,42 +865,45 @@ async function searchFiles(q, opts = {}) {
   const oauth = _getOAuthDrive();
   const stats = opts.stats || null; // 진단용: { sa, oauth, saError, oauthError }
 
+  // 페이지네이션 수집 (주어진 params로 끝까지)
+  const collect = async (client, params) => {
+    let pageToken = null, count = 0;
+    do {
+      const res = await client.files.list({ ...params, pageToken: pageToken || undefined });
+      const fl = res.data.files || [];
+      count += fl.length;
+      for (const f of fl) {
+        if (byId.has(f.id)) continue;
+        byId.set(f.id, {
+          id: f.id,
+          name: f.name,
+          parents: f.parents || [],
+          createdTime: f.createdTime || '',
+          mimeType: f.mimeType || '',
+          owner: (f.owners && f.owners[0] && f.owners[0].emailAddress) || '',
+        });
+      }
+      pageToken = res.data.nextPageToken;
+    } while (pageToken && byId.size < limit);
+    return count;
+  };
+
+  // 풀 파라미터 → 실패 시 최소 파라미터로 재시도 (orderBy/allDrives 호환성 회피)
+  const base = {
+    q: query, fields: fieldStr, pageSize: Math.min(limit, 1000),
+    supportsAllDrives: true, includeItemsFromAllDrives: true, orderBy: 'createdTime desc',
+  };
+  const minimal = { q: query, fields: fieldStr, pageSize: Math.min(limit, 1000) };
+
   for (const [client, label] of [[sa, 'SA'], [oauth, 'OAuth']]) {
     const key = label === 'SA' ? 'sa' : 'oauth';
     if (!client || (label === 'OAuth' && client === sa)) { if (stats) stats[key] = null; continue; }
-    let pageToken = null;
-    let clientCount = 0;
-    try {
-      do {
-        const res = await client.files.list({
-          q: query,
-          fields: fieldStr,
-          pageSize: Math.min(limit, 1000),
-          pageToken: pageToken || undefined,
-          supportsAllDrives: true,
-          includeItemsFromAllDrives: true,
-          orderBy: 'createdTime desc',
-        });
-        const fl = res.data.files || [];
-        clientCount += fl.length;
-        for (const f of fl) {
-          if (byId.has(f.id)) continue;
-          byId.set(f.id, {
-            id: f.id,
-            name: f.name,
-            parents: f.parents || [],
-            createdTime: f.createdTime || '',
-            mimeType: f.mimeType || '',
-            owner: (f.owners && f.owners[0] && f.owners[0].emailAddress) || '',
-          });
-        }
-        pageToken = res.data.nextPageToken;
-      } while (pageToken && byId.size < limit);
-      if (stats) stats[key] = clientCount;
-    } catch (e) {
-      if (stats) { stats[key] = clientCount; stats[key + 'Error'] = e.message; }
-      logger.warn(`[Drive] ${label} searchFiles 실패: ${e.message}`);
+    let count = 0, lastErr = null;
+    for (const params of [base, minimal]) {
+      try { count = await collect(client, params); lastErr = null; break; }
+      catch (e) { lastErr = e.message; logger.warn(`[Drive] ${label} searchFiles 실패: ${e.message}`); }
     }
+    if (stats) { stats[key] = count; if (lastErr) stats[key + 'Error'] = lastErr; }
   }
   return [...byId.values()];
 }

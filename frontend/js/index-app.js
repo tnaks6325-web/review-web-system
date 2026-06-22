@@ -15947,7 +15947,9 @@ async function _relocateRun(apply) {
     // 진단: 서버 검색이 실제로 몇 건을 반환했는지 (0이면 계정/스코프/가시성 문제)
     const dg = res.diag || {};
     const ss = (dg.searchStats || []).map(s => `${escHtml(s.kw)}[SA:${s.sa == null ? '-' : s.sa}/OAuth:${s.oauth == null ? '-' : s.oauth}${s.oauthError ? '⚠' : ''}]`).join(' ');
-    const diagLine = `<div style="font-size:.68rem;color:#9CA3AF;margin-top:6px;font-family:monospace">🔎 서버검색 ${dg.searchFound ?? '-'}건(리뷰형식 ${dg.reviewFormatCount ?? '-'}) ${ss}</div>`;
+    const errMsg = (dg.searchStats || []).map(s => s.oauthError || s.saError).find(Boolean);
+    const errLine = errMsg ? `<div style="font-size:.66rem;color:#DC2626;margin-top:3px;font-family:monospace;word-break:break-all">⚠ ${escHtml(String(errMsg).slice(0, 300))}</div>` : '';
+    const diagLine = `<div style="font-size:.68rem;color:#9CA3AF;margin-top:6px;font-family:monospace">🔎 서버검색 ${dg.searchFound ?? '-'}건(리뷰형식 ${dg.reviewFormatCount ?? '-'}) ${ss}</div>${errLine}`;
 
     if (apply) {
       resultEl.innerHTML = `<div style="font-size:.84rem;color:#065F46;font-weight:700"><i class="fas fa-check-circle"></i> ${res.movedCount}건 이동 완료${res.failedCount ? ` · ${res.failedCount}건 실패` : ''}</div>
