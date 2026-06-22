@@ -38,17 +38,11 @@ async function plain(size, out) {
   console.log('✓', out);
 }
 
-// maskable: 안전영역(80%) 확보 — 로고를 중앙 80%에 흰 배경으로 패딩
+// maskable: 원본(iacrew-source.png)이 이미 자체 여백(safe-zone)을 포함한 완성형
+// 아이콘 디자인이므로 풀블리드로 리사이즈한다. (정사각→정사각이라 cover로도 크롭 없음)
 async function maskable(size, out) {
-  const inner = Math.round(size * 0.8);
-  const pad = Math.round((size - inner) / 2);
-  const logo = await sharp(SRC, { density: 384 })
-    .resize(inner, inner, { fit: 'contain', background: WHITE })
-    .flatten({ background: WHITE })
-    .png()
-    .toBuffer();
-  await sharp({ create: { width: size, height: size, channels: 4, background: WHITE } })
-    .composite([{ input: logo, top: pad, left: pad }])
+  await sharp(SRC, { density: 384 })
+    .resize(size, size, { fit: 'cover' })
     .png()
     .toFile(path.join(ICON_DIR, out));
   console.log('✓', out);
