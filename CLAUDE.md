@@ -15,6 +15,12 @@ GAS(Google Apps Script) 기반 리뷰 관리 시스템을 **Node.js Express + Po
 - `server/migrations/` — DB 마이그레이션
 - `.github/workflows/` — DB/Drive 백업·복구 리허설 (앱 빌드/배포 워크플로 아님)
 
+### 리뷰 이미지 ↔ 인덱스 연결 (데이터 모델)
+- 리뷰 캡처는 `AI_REVIEW_FOLDER → {시트제목} → {탭명} → [리뷰]` 폴더에 저장(`drive.service.js`의 `ensureReviewFolderPath`). 업로드 시 폴더ID를 못 잡으면 루트로 새므로 `uploadFileBase64`가 빈 `parentFolderId`를 차단한다.
+- `review_index.review_file_*`(031, A-1): 제출 행당 대표 리뷰 이미지 1장(파일ID/URL/이름/개수/시각). `review-upload`가 업로드 즉시 기록.
+- `review_submissions`(032, A-2): 리뷰 이미지 파일 단위 원장(탭/행/리뷰어/파일ID/제출시각/출처). `file_id` 유니크 업서트로 재실행 안전.
+- 과거에 루트로 샌 캡처는 관리자 "리뷰 캡처 정리"(`POST /api/drive/relocate-orphan-reviews`)로 `[리뷰]` 폴더 이동 + 파일명 이름↔행 결정적 링크 백필(모호하면 링크 안 함).
+
 ## 배포 (자동)
 - `main` 브랜치에 머지되면 **Cloudflare Pages(프론트)와 Railway(백엔드)가 GitHub 연동으로 자동 배포**합니다.
 - 별도의 빌드/배포 GitHub Action은 없습니다. `main` 머지 = 배포.

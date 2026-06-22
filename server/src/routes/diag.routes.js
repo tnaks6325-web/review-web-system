@@ -1539,11 +1539,24 @@ router.post('/review-upload', imageApiLimiter, async (req, res, next) => {
 
     const successCount = uploadResults.filter(r => r.fileId).length;
 
-    // ── A-1: 제출된 인덱스 행에 리뷰 파일 결정적 연결 ──
-    //   업로드 시점에 rowIndex/sheetId/tabName이 오므로, 대표 파일(첫 성공분)을
-    //   review_index 해당 행(sheet_id+tab_name+row_index)에 기록한다. (비파괴, 실패 무시)
+    // ── A-1/A-2: 제출된 인덱스 행에 리뷰 파일 연결 + 제출 원장 기록 ──
+    //   업로드 시점에 rowIndex/sheetId/tabName이 오므로, 대표 파일은 review_index
+    //   해당 행에 기록(A-1), 모든 파일은 review_submissions 원장에 적재(A-2). (비파괴)
     const primary = uploadResults.find(r => r.fileId);
     if (primary && rowIndex && sheetId && tabName) {
+      const rowIdx = parseInt(rowIndex, 10);
+
+      // 인덱스 행 id 조회 (A-2 review_index_id 연결용)
+      let reviewIndexId = null;
+      try {
+        const { rows } = await pool.query(
+          'SELECT id FROM review_index WHERE sheet_id = $1 AND tab_name = $2 AND row_index = $3 LIMIT 1',
+          [sheetId, tabName, rowIdx]
+        );
+        reviewIndexId = rows[0]?.id || null;
+      } catch (_) {}
+
+      // A-1: 대표 파일을 review_index 행에 기록
       try {
         const fileUrl = primary.webViewLink || `https://drive.google.com/file/d/${primary.fileId}/view`;
         await pool.query(
@@ -1551,10 +1564,32 @@ router.post('/review-upload', imageApiLimiter, async (req, res, next) => {
               SET review_file_id = $1, review_file_url = $2, review_file_name = $3,
                   review_file_count = $4, review_file_at = NOW()
             WHERE sheet_id = $5 AND tab_name = $6 AND row_index = $7`,
-          [primary.fileId, fileUrl, primary.fileName, successCount, sheetId, tabName, parseInt(rowIndex, 10)]
+          [primary.fileId, fileUrl, primary.fileName, successCount, sheetId, tabName, rowIdx]
         );
       } catch (linkErr) {
         logger.warn(`[review-upload] 인덱스 파일링크 저장 실패 (무시): ${linkErr.message}`);
+      }
+
+      // A-2: 업로드된 모든 파일을 review_submissions 원장에 적재 (file_id 업서트)
+      for (const r of uploadResults) {
+        if (!r.fileId) continue;
+        try {
+          const fUrl = r.webViewLink || `https://drive.google.com/file/d/${r.fileId}/view`;
+          await pool.query(
+            `INSERT INTO review_submissions
+               (sheet_id, tab_name, tab_gid, row_index, reviewer_name, review_index_id,
+                file_id, file_url, file_name, source, uploaded_at)
+             VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,'upload',NOW())
+             ON CONFLICT (file_id) DO UPDATE
+               SET file_url = EXCLUDED.file_url, file_name = EXCLUDED.file_name,
+                   row_index = EXCLUDED.row_index, review_index_id = EXCLUDED.review_index_id,
+                   reviewer_name = EXCLUDED.reviewer_name`,
+            [sheetId, tabName, gid || null, rowIdx, reviewerName || null, reviewIndexId,
+             r.fileId, fUrl, r.fileName]
+          );
+        } catch (subErr) {
+          logger.warn(`[review-upload] 제출원장 기록 실패 (무시): ${subErr.message}`);
+        }
       }
     }
 

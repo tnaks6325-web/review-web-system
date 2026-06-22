@@ -1350,44 +1350,71 @@ router.post('/relocate-orphan-reviews', authMiddleware, async (req, res, next) =
       }
     }
 
-    // ── 8) 결정적 링크 백필 (B) — 파일명 이름 ↔ 인덱스 행 ──
-    //   대상: 이동분 + 이미 [리뷰] 폴더에 있던 분. 모호하면 링크하지 않고 리포트.
-    const linkResult = { linked: 0, ambiguous: 0, unmatched: 0, already: 0, samples: { ambiguous: [], unmatched: [] } };
+    // ── 8) 결정적 링크 백필(B/A-1) + 제출 원장 적재(A-2) ──
+    //   대상: 이동분 + 이미 [리뷰] 폴더에 있던 분. 모호하면 링크하지 않고 리포트하되
+    //   파일 자체는 review_submissions 원장에 전수 기록(A-2).
+    const linkResult = { linked: 0, ambiguous: 0, unmatched: 0, already: 0, recorded: 0, samples: { ambiguous: [], unmatched: [] } };
     if (doLink) {
       for (const f of [...toMove, ...linkOnly]) {
         const nm = (driveService.extractReviewerNameFromFile(f.name) || '').trim();
         const matchRows = rowsByName.get(nm) || [];
+        const fileUrl = `https://drive.google.com/file/d/${f.id}/view`;
+        let assocRow = null; // A-2 연결 인덱스 행 (확정 가능할 때만)
+
         if (matchRows.length === 0) {
           linkResult.unmatched++;
           if (linkResult.samples.unmatched.length < 30) linkResult.samples.unmatched.push(f.name);
-          continue;
-        }
-        const unlinked = matchRows.filter(r => !r.review_file_id);
-        if (unlinked.length === 0) { linkResult.already++; continue; }
-        if (unlinked.length > 1) {
-          linkResult.ambiguous++;
-          if (linkResult.samples.ambiguous.length < 30) linkResult.samples.ambiguous.push(f.name);
-          continue;
-        }
-        // 결정적 매칭 1건 → 링크
-        const row = unlinked[0];
-        if (!isDryRun) {
-          const fileUrl = `https://drive.google.com/file/d/${f.id}/view`;
-          try {
-            await pool.query(
-              `UPDATE review_index
-                  SET review_file_id = $1, review_file_url = $2, review_file_name = $3,
-                      review_file_count = GREATEST(COALESCE(review_file_count, 0), 1),
-                      review_file_at = COALESCE($4::timestamptz, NOW())
-                WHERE id = $5`,
-              [f.id, fileUrl, f.name, f.createdTime || null, row.id]
-            );
-          } catch (e) {
-            logger.warn(`[relocate-orphan-reviews] 링크 저장 실패 (${f.name}): ${e.message}`);
+        } else {
+          const unlinked = matchRows.filter(r => !r.review_file_id);
+          if (unlinked.length === 1) {
+            // A-1: 결정적 매칭 1건 → review_index 링크
+            assocRow = unlinked[0];
+            if (!isDryRun) {
+              try {
+                await pool.query(
+                  `UPDATE review_index
+                      SET review_file_id = $1, review_file_url = $2, review_file_name = $3,
+                          review_file_count = GREATEST(COALESCE(review_file_count, 0), 1),
+                          review_file_at = COALESCE($4::timestamptz, NOW())
+                    WHERE id = $5`,
+                  [f.id, fileUrl, f.name, f.createdTime || null, assocRow.id]
+                );
+              } catch (e) {
+                logger.warn(`[relocate-orphan-reviews] 링크 저장 실패 (${f.name}): ${e.message}`);
+              }
+            }
+            assocRow.review_file_id = f.id; // 메모리 표시 → 같은 이름 추가 파일은 already
+            linkResult.linked++;
+          } else if (unlinked.length === 0) {
+            linkResult.already++;
+            if (matchRows.length === 1) assocRow = matchRows[0]; // 원장 연결은 가능
+          } else {
+            linkResult.ambiguous++;
+            if (linkResult.samples.ambiguous.length < 30) linkResult.samples.ambiguous.push(f.name);
           }
         }
-        row.review_file_id = f.id; // 메모리 표시 → 같은 이름 추가 파일은 already 처리
-        linkResult.linked++;
+
+        // A-2: 제출 원장 적재 (전 후보 파일, file_id 업서트)
+        if (!isDryRun) {
+          try {
+            await pool.query(
+              `INSERT INTO review_submissions
+                 (sheet_id, tab_name, tab_gid, row_index, reviewer_name, review_index_id,
+                  file_id, file_url, file_name, source, uploaded_at)
+               VALUES ($1,$2,NULL,$3,$4,$5,$6,$7,$8,'backfill',$9::timestamptz)
+               ON CONFLICT (file_id) DO UPDATE
+                 SET file_url = EXCLUDED.file_url, file_name = EXCLUDED.file_name,
+                     row_index = COALESCE(EXCLUDED.row_index, review_submissions.row_index),
+                     review_index_id = COALESCE(EXCLUDED.review_index_id, review_submissions.review_index_id),
+                     reviewer_name = EXCLUDED.reviewer_name`,
+              [sheetId, tabName, assocRow ? assocRow.row_index : null, nm || null,
+               assocRow ? assocRow.id : null, f.id, fileUrl, f.name, f.createdTime || null]
+            );
+            linkResult.recorded++;
+          } catch (e) {
+            logger.warn(`[relocate-orphan-reviews] 제출원장 기록 실패 (${f.name}): ${e.message}`);
+          }
+        }
       }
     }
 
@@ -1411,6 +1438,39 @@ router.post('/relocate-orphan-reviews', authMiddleware, async (req, res, next) =
       link: linkResult, // 인덱스 결정적 링크 결과 (B)
       skippedCount: skipped.length,
       skipped: skipped.slice(0, 100),
+    });
+  } catch (err) {
+    next(err);
+  }
+});
+
+// ═══════════════════════════════════════════════════════════
+// GET /api/drive/review-submissions — 탭별 리뷰 제출 원장 조회 (A-2)
+//   query: { sheetId, tabName, limit? }
+//   응답: 파일 단위 제출 목록 + 인덱스 연결 요약
+// ═══════════════════════════════════════════════════════════
+router.get('/review-submissions', authMiddleware, async (req, res, next) => {
+  try {
+    const { sheetId, tabName } = req.query;
+    if (!sheetId || !tabName) return res.json({ ok: false, error: 'sheetId, tabName 필요' });
+    const lim = Math.min(parseInt(req.query.limit || '1000', 10) || 1000, 5000);
+
+    const { rows } = await pool.query(
+      `SELECT id, row_index, reviewer_name, review_index_id,
+              file_id, file_url, file_name, source, uploaded_at, created_at
+         FROM review_submissions
+        WHERE sheet_id = $1 AND tab_name = $2
+        ORDER BY uploaded_at DESC NULLS LAST, created_at DESC
+        LIMIT $3`,
+      [sheetId, tabName, lim]
+    );
+    const linkedToIndex = rows.filter(r => r.review_index_id).length;
+    res.json({
+      ok: true,
+      total: rows.length,
+      linkedToIndex,
+      unlinked: rows.length - linkedToIndex,
+      submissions: rows,
     });
   } catch (err) {
     next(err);
