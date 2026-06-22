@@ -15837,6 +15837,27 @@ function _relocateParseCount(tabName) {
   return m ? parseInt(m[1], 10) : 0;
 }
 
+// 후보 파일명 클릭 → 모달 내에서 이미지 인라인 펼침/접기 (서버 프록시로 비공개 파일도 표시)
+function _relocateToggleImg(headerEl, id) {
+  const box = headerEl.parentElement;
+  const wrap = box && box.querySelector('.rlc-img');
+  const chev = headerEl.querySelector('.fa-chevron-right');
+  if (!wrap) return;
+  if (wrap.style.display === 'none' || !wrap.style.display) {
+    if (!wrap.dataset.loaded) {
+      const proxy = `${API_BASE_URL}/api/drive/image/${encodeURIComponent(id)}`;
+      const thumb = `https://drive.google.com/thumbnail?id=${encodeURIComponent(id)}&sz=w1600`;
+      wrap.innerHTML = `<div style="padding:4px 0 8px"><img src="${proxy}" loading="lazy" style="max-width:100%;max-height:440px;border-radius:8px;border:1px solid #E5E7EB;display:block" onerror="this.onerror=null;this.src='${thumb}'"></div>`;
+      wrap.dataset.loaded = '1';
+    }
+    wrap.style.display = 'block';
+    if (chev) chev.style.transform = 'rotate(90deg)';
+  } else {
+    wrap.style.display = 'none';
+    if (chev) chev.style.transform = '';
+  }
+}
+
 function openReviewRelocate() {
   const existing = document.getElementById('reviewRelocateModal');
   if (existing) existing.remove();
@@ -15989,16 +16010,25 @@ async function _relocateRun(apply) {
       showToast(`${res.movedCount}건 이동${lk.linked ? ` · 인덱스 ${lk.linked}건 연결` : ''}`, 'success');
       return;
     }
-    const list = (res.candidates || []).slice(0, 12)
-      .map(c => `<li style="font-size:.7rem;color:#374151;font-family:monospace;word-break:break-all">${escHtml(c.name)}</li>`).join('');
-    const more = res.candidateCount > 12 ? `<div style="font-size:.7rem;color:#9CA3AF;margin-top:2px">… 외 ${res.candidateCount - 12}건</div>` : '';
+    // 후보 목록 — 파일명 클릭 시 모달 내에서 이미지 인라인 펼침(아코디언)
+    const showN = 50;
+    const list = (res.candidates || []).slice(0, showN).map(c => `
+      <div style="border-bottom:1px solid #ECECF5">
+        <div onclick="_relocateToggleImg(this,'${escHtml(c.id)}')" style="cursor:pointer;font-size:.7rem;color:#374151;font-family:monospace;word-break:break-all;padding:5px 2px;display:flex;align-items:flex-start;gap:6px" title="클릭하면 이미지 미리보기">
+          <i class="fas fa-chevron-right" style="font-size:.6rem;color:#9CA3AF;margin-top:3px;transition:transform .15s"></i>
+          <span style="flex:1">${escHtml(c.name)}</span>
+        </div>
+        <div class="rlc-img" style="display:none"></div>
+      </div>`).join('');
+    const more = res.candidateCount > showN ? `<div style="font-size:.7rem;color:#9CA3AF;margin-top:4px">… 외 ${res.candidateCount - showN}건</div>` : '';
     const inTargetLine = res.alreadyInTarget ? `<div style="font-size:.7rem;color:#6B7280;margin-top:4px">이미 [리뷰] 폴더에 있는 ${res.alreadyInTarget}건도 인덱스 링크 대상에 포함됩니다.</div>` : '';
     resultEl.innerHTML = `
       <div style="background:#F5F3FF;border:1px solid #DDD6FE;border-radius:8px;padding:12px">
         <div style="font-size:.84rem;font-weight:700;color:#5B21B6">이동 대상: ${res.candidateCount}건</div>
         ${linkLine}${inTargetLine}${diagLine}
         ${(res.candidateCount || res.alreadyInTarget)
-          ? `<ul style="margin:8px 0 0;padding-left:18px">${list}</ul>${more}
+          ? `<div style="margin:8px 0 0">${list}</div>${more}
+             <div style="font-size:.64rem;color:#9CA3AF;margin-top:4px">※ 파일명을 누르면 이 화면에서 바로 이미지를 펼쳐 볼 수 있습니다.</div>
              <button onclick="_relocateRun(true)" style="margin-top:12px;width:100%;padding:9px;background:#059669;color:#fff;border:none;border-radius:8px;font-size:.82rem;font-weight:700;cursor:pointer"><i class="fas fa-arrow-right-to-bracket"></i> 실행 (이동 ${res.candidateCount}건 + 인덱스 링크)</button>`
           : `<div style="font-size:.72rem;color:#6B7280;margin-top:6px">대상이 없습니다. 키워드/시작일을 조정해 보세요. (OCR 색인이 안 된 캡처는 검색에 안 걸릴 수 있습니다.)</div>`}
       </div>`;
