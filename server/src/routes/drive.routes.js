@@ -1242,14 +1242,16 @@ router.post('/relocate-orphan-reviews', authMiddleware, async (req, res, next) =
     const isDryRun = dryRun !== false; // 기본 true
 
     // ── 1) 대상 [리뷰] 폴더 확보 ──
+    //   reviewFolderUrl(직접 지정) 우선, 없으면 tab_configs.folder_url.
+    //   capture_folder_url은 sheetId/tabName이 있으면 항상 조회해 제외 폴더로 사용.
     let targetUrl = reviewFolderUrl || '';
     let captureUrl = '';
-    if (!targetUrl && sheetId && tabName) {
+    if (sheetId && tabName) {
       const { rows } = await pool.query(
         'SELECT folder_url, capture_folder_url FROM tab_configs WHERE sheet_id = $1 AND tab_name = $2 LIMIT 1',
         [sheetId, tabName]
       );
-      targetUrl = rows[0]?.folder_url || '';
+      if (!targetUrl) targetUrl = rows[0]?.folder_url || '';
       captureUrl = rows[0]?.capture_folder_url || '';
     }
     const targetId = extractFolderId(targetUrl);
