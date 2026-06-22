@@ -15785,6 +15785,7 @@ async function _deleteNotice(id) {
 //   POST /api/drive/relocate-orphan-reviews (relocateOrphanReviews)
 // ═══════════════════════════════════════════════════════════
 let _relocateTabs = [];
+let _relocateSelIdx = -1; // 콤보박스에서 선택된 탭 인덱스
 
 function _relocateCollectTabs() {
   // folder_url이 비어 있어도(=리뷰폴더 미연결) 선택 가능하도록 모든 탭을 포함.
@@ -15819,13 +15820,11 @@ function openReviewRelocate() {
   if (existing) existing.remove();
 
   _relocateTabs = _relocateCollectTabs();
+  _relocateSelIdx = -1;
   if (_relocateTabs.length === 0) {
     showToast('탭 목록을 불러오지 못했습니다. 탭 관리 대시보드를 먼저 여세요.', 'info');
     return;
   }
-
-  const opts = _relocateTabs.map((t, i) =>
-    `<option value="${i}">${escHtml(t.displayName)}${t.campName ? ' — ' + escHtml(t.campName) : ''}</option>`).join('');
 
   const modal = document.createElement('div');
   modal.id = 'reviewRelocateModal';
@@ -15838,8 +15837,15 @@ function openReviewRelocate() {
         <div style="font-size:.72rem;color:#6B7280;margin-top:4px">내 드라이브 루트 등에 흩어진 리뷰 캡처를 선택한 탭의 <b>[리뷰]</b> 폴더로 이동합니다.</div>
       </div>
       <div style="padding:14px 20px;overflow-y:auto;flex:1">
-        <label style="font-size:.74rem;font-weight:600;color:#374151">대상 탭</label>
-        <select id="rlcTab" onchange="_relocateFillFromTab()" style="width:100%;padding:7px 9px;border:1px solid #D1D5DB;border-radius:8px;font-size:.8rem;margin:4px 0 12px">${opts}</select>
+        <label style="font-size:.74rem;font-weight:600;color:#374151">대상 탭 <span style="color:#9CA3AF;font-weight:400">(검색해서 선택)</span></label>
+        <div style="position:relative;margin:4px 0 12px">
+          <input id="rlcTabSearch" type="text" autocomplete="off" placeholder="탭·상품·캠페인 검색…"
+            oninput="_relocateFilterTabs()" onfocus="_relocateFilterTabs()"
+            onblur="setTimeout(function(){var l=document.getElementById('rlcTabList');if(l)l.style.display='none'},150)"
+            style="width:100%;padding:7px 9px;border:1px solid #D1D5DB;border-radius:8px;font-size:.8rem">
+          <div id="rlcTabList" style="display:none;position:absolute;left:0;right:0;top:100%;margin-top:2px;background:#fff;border:1px solid #E5E7EB;border-radius:8px;box-shadow:0 8px 24px rgba(0,0,0,.12);max-height:240px;overflow-y:auto;z-index:5"></div>
+          <div id="rlcTabSelected" style="font-size:.7rem;color:#6B7280;margin-top:4px"></div>
+        </div>
 
         <label style="font-size:.74rem;font-weight:600;color:#374151">[리뷰] 폴더 링크 <span style="color:#9CA3AF;font-weight:400">(비어 있으면 대상 [리뷰] 폴더 링크를 붙여넣으세요)</span></label>
         <input id="rlcFolderUrl" type="text" placeholder="https://drive.google.com/drive/folders/..." style="width:100%;padding:7px 9px;border:1px solid #D1D5DB;border-radius:8px;font-size:.72rem;margin:4px 0 12px;font-family:monospace">
@@ -15858,22 +15864,57 @@ function openReviewRelocate() {
       </div>
     </div>`;
   document.body.appendChild(modal);
-  _relocateFillFromTab();
+  const sb = document.getElementById('rlcTabSearch');
+  if (sb) sb.focus();
 }
 
-function _relocateFillFromTab() {
-  const sel = document.getElementById('rlcTab');
-  if (!sel) return;
-  const t = _relocateTabs[parseInt(sel.value, 10)];
+// 검색어로 탭 목록 필터링 → 자동완성 리스트 렌더
+function _relocateFilterTabs() {
+  const inp = document.getElementById('rlcTabSearch');
+  const listEl = document.getElementById('rlcTabList');
+  if (!inp || !listEl) return;
+  const q = (inp.value || '').trim().toLowerCase();
+  const matches = [];
+  for (let i = 0; i < _relocateTabs.length && matches.length < 50; i++) {
+    const t = _relocateTabs[i];
+    const hay = `${t.displayName} ${t.campName} ${t.tabName}`.toLowerCase();
+    if (!q || hay.includes(q)) matches.push(i);
+  }
+  if (matches.length === 0) {
+    listEl.innerHTML = `<div style="padding:10px 12px;font-size:.74rem;color:#9CA3AF">검색 결과 없음</div>`;
+    listEl.style.display = 'block';
+    return;
+  }
+  listEl.innerHTML = matches.map(i => {
+    const t = _relocateTabs[i];
+    return `<div onmousedown="_relocateSelectTab(${i})" style="padding:8px 12px;cursor:pointer;border-bottom:1px solid #F3F4F6"
+        onmouseover="this.style.background='#F5F3FF'" onmouseout="this.style.background='#fff'">
+        <div style="font-size:.78rem;color:#111;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${escHtml(t.displayName)}</div>
+        ${t.campName ? `<div style="font-size:.66rem;color:#9CA3AF">${escHtml(t.campName)}</div>` : ''}
+      </div>`;
+  }).join('');
+  listEl.style.display = 'block';
+}
+
+// 자동완성 항목 선택 → 폴더링크·키워드 자동 채움
+function _relocateSelectTab(i) {
+  const t = _relocateTabs[i];
   if (!t) return;
+  _relocateSelIdx = i;
+  const sb = document.getElementById('rlcTabSearch');
+  if (sb) sb.value = t.displayName;
+  const listEl = document.getElementById('rlcTabList');
+  if (listEl) listEl.style.display = 'none';
+  const selEl = document.getElementById('rlcTabSelected');
+  if (selEl) selEl.innerHTML = `선택됨: <b>${escHtml(t.displayName)}</b>${t.campName ? ' — ' + escHtml(t.campName) : ''}`;
   document.getElementById('rlcFolderUrl').value = t.folderUrl || '';
   document.getElementById('rlcKeywords').value = _relocateDeriveKeywords(t.tabName).join(', ');
   document.getElementById('rlcResult').innerHTML = '';
 }
 
 async function _relocateRun(apply) {
-  const t = _relocateTabs[parseInt(document.getElementById('rlcTab').value, 10)];
-  if (!t) return;
+  const t = _relocateTabs[_relocateSelIdx];
+  if (!t) { showToast('대상 탭을 검색해서 선택하세요.', 'error'); return; }
   const reviewFolderUrl = (document.getElementById('rlcFolderUrl').value || '').trim();
   const brandKeywords = (document.getElementById('rlcKeywords').value || '').split(',').map(s => s.trim()).filter(Boolean);
   const sinceRaw = (document.getElementById('rlcSince').value || '').trim();
