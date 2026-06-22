@@ -15944,9 +15944,14 @@ async function _relocateRun(apply) {
       ? `<div style="font-size:.72rem;color:#4338CA;margin-top:6px"><i class="fas fa-link"></i> 인덱스 링크: 연결 ${lk.linked || 0}${lk.already ? ` · 기존 ${lk.already}` : ''}${lk.ambiguous ? ` · 모호 ${lk.ambiguous}` : ''}${lk.unmatched ? ` · 명단없음 ${lk.unmatched}` : ''}</div>`
       : '';
 
+    // 진단: 서버 검색이 실제로 몇 건을 반환했는지 (0이면 계정/스코프/가시성 문제)
+    const dg = res.diag || {};
+    const ss = (dg.searchStats || []).map(s => `${escHtml(s.kw)}[SA:${s.sa == null ? '-' : s.sa}/OAuth:${s.oauth == null ? '-' : s.oauth}${s.oauthError ? '⚠' : ''}]`).join(' ');
+    const diagLine = `<div style="font-size:.68rem;color:#9CA3AF;margin-top:6px;font-family:monospace">🔎 서버검색 ${dg.searchFound ?? '-'}건(리뷰형식 ${dg.reviewFormatCount ?? '-'}) ${ss}</div>`;
+
     if (apply) {
       resultEl.innerHTML = `<div style="font-size:.84rem;color:#065F46;font-weight:700"><i class="fas fa-check-circle"></i> ${res.movedCount}건 이동 완료${res.failedCount ? ` · ${res.failedCount}건 실패` : ''}</div>
-        ${linkLine}
+        ${linkLine}${diagLine}
         <div style="font-size:.72rem;color:#6B7280;margin-top:4px">[리뷰] 폴더를 새로고침해 확인하세요. (이미 폴더에 있던 파일은 건너뜀)</div>`;
       showToast(`${res.movedCount}건 이동${lk.linked ? ` · 인덱스 ${lk.linked}건 연결` : ''}`, 'success');
       return;
@@ -15958,7 +15963,7 @@ async function _relocateRun(apply) {
     resultEl.innerHTML = `
       <div style="background:#F5F3FF;border:1px solid #DDD6FE;border-radius:8px;padding:12px">
         <div style="font-size:.84rem;font-weight:700;color:#5B21B6">이동 대상: ${res.candidateCount}건</div>
-        ${linkLine}${inTargetLine}
+        ${linkLine}${inTargetLine}${diagLine}
         ${(res.candidateCount || res.alreadyInTarget)
           ? `<ul style="margin:8px 0 0;padding-left:18px">${list}</ul>${more}
              <button onclick="_relocateRun(true)" style="margin-top:12px;width:100%;padding:9px;background:#059669;color:#fff;border:none;border-radius:8px;font-size:.82rem;font-weight:700;cursor:pointer"><i class="fas fa-arrow-right-to-bracket"></i> 실행 (이동 ${res.candidateCount}건 + 인덱스 링크)</button>`

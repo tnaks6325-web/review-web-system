@@ -1307,23 +1307,29 @@ router.post('/relocate-orphan-reviews', authMiddleware, async (req, res, next) =
 
     // ── 5) 후보 검색 (fullText=브랜드 키워드) ──
     const byId = new Map();
+    const searchStats = []; // 진단: 키워드별 SA/OAuth 검색 반환 수
     for (const kw of kws) {
       const safe = kw.replace(/\\/g, '\\\\').replace(/'/g, "\\'");
       let q = `mimeType contains 'image/' and trashed = false and fullText contains '${safe}'`;
       if (sinceDate) q += ` and createdTime >= '${sinceDate}'`;
       if (untilDate) q += ` and createdTime <= '${untilDate}'`;
-      const files = await driveService.searchFiles(q, { limit: 1000 });
+      const st = {};
+      const files = await driveService.searchFiles(q, { limit: 1000, stats: st });
+      searchStats.push({ kw, sa: st.sa, oauth: st.oauth, saError: st.saError, oauthError: st.oauthError });
       for (const f of files) if (!byId.has(f.id)) byId.set(f.id, f);
     }
+    const searchFound = byId.size; // 검색이 반환한 전체(중복 제거) 이미지 수
 
     // ── 6) 분류: 이동대상(toMove) / 대상폴더내(linkOnly) / 제외 ──
     //   리뷰형식 파일명만: {이름}_{순번}_{YYYYMMDD}_{HHMMSS}.ext
     const reviewPattern = /_\d+_\d{8}_\d{6}\.[A-Za-z0-9]+$/;
+    let reviewFormatCount = 0;
     const toMove = [];
     const linkOnly = []; // 이미 [리뷰] 폴더에 있음 → 이동 불필요, 링크만
     const skipped = [];
     for (const f of byId.values()) {
       if (!reviewPattern.test(f.name)) continue; // 구매캡처/기타 → 제외
+      reviewFormatCount++;
       const parents = f.parents || [];
       if (roster) {
         const nm = driveService.extractReviewerNameFromFile(f.name);
@@ -1438,6 +1444,8 @@ router.post('/relocate-orphan-reviews', authMiddleware, async (req, res, next) =
       link: linkResult, // 인덱스 결정적 링크 결과 (B)
       skippedCount: skipped.length,
       skipped: skipped.slice(0, 100),
+      // 진단: 서버 검색이 실제로 몇 건을 반환했는지 (0이면 계정/스코프/가시성 문제)
+      diag: { searchFound, reviewFormatCount, searchStats },
     });
   } catch (err) {
     next(err);
