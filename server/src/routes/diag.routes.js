@@ -1171,6 +1171,13 @@ router.get('/drive-diag', authMiddleware, async (req, res) => {
     authStatus: driveService.getOAuthStatus(),
   };
 
+  // 실제 OAuth 계정/쿼터 — 업로드 용량이 어느 계정에 귀속되는지
+  try {
+    results.accountDiagnostics = await driveService.getAccountDiagnostics();
+  } catch (e) {
+    results.accountDiagnostics = { error: e.message };
+  }
+
   try {
     // 1. OAuth 업로드 테스트 (1x1 PNG)
     try {

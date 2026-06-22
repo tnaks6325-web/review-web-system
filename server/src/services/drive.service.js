@@ -695,11 +695,16 @@ async function trashFiles(filesToTrash) {
  * 재귀적 폴더 파일 목록 조회 (서브폴더 포함)
  * - 루트 폴더 + 모든 하위 폴더의 파일을 평탄화하여 반환
  * @param {string} folderId - Google Drive 폴더 ID
- * @returns {Array<{id, name, md5Checksum, createdTime, mimeType, size, parentFolder}>}
+ * @param {{ withOwners?: boolean }} [opts] - withOwners=true 면 소유자 정보 포함
+ * @returns {Array<{id, name, md5Checksum, createdTime, mimeType, size, parentFolder, owners?}>}
  */
-async function listFolderFilesRecursive(folderId) {
+async function listFolderFilesRecursive(folderId, opts = {}) {
   const d = _getReadDrive();
   if (!d) throw new Error('Google Drive API가 설정되지 않았습니다.');
+
+  const fileFields = ['id', 'name', 'md5Checksum', 'createdTime', 'mimeType', 'size'];
+  if (opts.withOwners) fileFields.push('owners(emailAddress,displayName)');
+  const filesFieldStr = `nextPageToken, files(${fileFields.join(', ')})`;
 
   const allFiles = [];
 
@@ -711,7 +716,7 @@ async function listFolderFilesRecursive(folderId) {
     do {
       const params = {
         q,
-        fields: 'nextPageToken, files(id, name, md5Checksum, createdTime, mimeType, size)',
+        fields: filesFieldStr,
         pageSize: 1000,
         pageToken: pageToken || undefined,
         supportsAllDrives: true,
@@ -919,6 +924,231 @@ async function downloadFile(fileId) {
   throw lastErr || new Error('Drive 다운로드 실패');
 }
 
+// ═══════════════════════════════════════════════════════════
+// 계정/쿼터 진단 + 소유권 점검·이전 (구글드라이브 용량 귀속 확인용)
+//
+// 구글드라이브 저장용량은 "파일 소유자(owner)" 계정에 귀속된다.
+// - 업로드는 OAuth(DRIVE_OAUTH_REFRESH_TOKEN) 계정 소유로 생성되므로,
+//   그 토큰이 어느 계정인지가 곧 "용량이 잡히는 계정"이다.
+// - 아래 함수들은 (1) 현재 OAuth 계정/쿼터를 노출하고,
+//   (2) 캡처/리뷰 폴더 내 파일을 소유자별로 집계하며,
+//   (3) tnaks6325(=DRIVE_OWNER_EMAIL)로 소유권 이전을 시도한다.
+// ═══════════════════════════════════════════════════════════
+
+/**
+ * 바이트를 사람이 읽기 쉬운 단위로 변환
+ */
+function _humanBytes(n) {
+  if (n == null || isNaN(n)) return null;
+  const units = ['B', 'KB', 'MB', 'GB', 'TB', 'PB'];
+  let v = Number(n);
+  let i = 0;
+  while (v >= 1024 && i < units.length - 1) { v /= 1024; i++; }
+  return `${i === 0 ? v : v.toFixed(v >= 10 ? 0 : 1)}${units[i]}`;
+}
+
+/**
+ * 임의의 refresh token으로 OAuth Drive 클라이언트 생성
+ * (소유권 이전 시 "현재 소유자(관리자)" 자격으로 행동해야 할 때 사용)
+ */
+function _buildOAuthDriveFromToken(refreshToken) {
+  const clientId     = process.env.DRIVE_OAUTH_CLIENT_ID;
+  const clientSecret = process.env.DRIVE_OAUTH_CLIENT_SECRET;
+  if (!clientId || !clientSecret || !refreshToken) return null;
+  try {
+    const oauth2Client = new google.auth.OAuth2(clientId, clientSecret);
+    oauth2Client.setCredentials({ refresh_token: refreshToken });
+    return google.drive({ version: 'v3', auth: oauth2Client });
+  } catch (err) {
+    logger.warn(`[Drive] 소스 토큰 OAuth 생성 실패: ${err.message}`);
+    return null;
+  }
+}
+
+/**
+ * 현재 Drive 자격증명의 실제 계정/쿼터 진단
+ * - OAuth 토큰이 실제로 어느 구글계정인지(emailAddress) + 저장용량 사용량을 반환
+ * - 이 이메일이 곧 "구매캡처/리뷰 업로드 용량이 귀속되는 계정"
+ * @returns {Promise<object>}
+ */
+async function getAccountDiagnostics() {
+  const expectedOwnerEmail = process.env.DRIVE_OWNER_EMAIL || 'tnaks6325@gmail.com';
+  const out = {
+    expectedOwnerEmail,
+    oauth: {
+      configured: getOAuthStatus().oauthConfigured,
+      email: null,
+      displayName: null,
+      matchesExpectedOwner: null,
+      quota: null,
+      error: null,
+    },
+    serviceAccount: {
+      email: process.env.GOOGLE_SERVICE_ACCOUNT_EMAIL || null,
+    },
+  };
+
+  const oauth = _getOAuthDrive();
+  if (oauth) {
+    try {
+      const res = await oauth.about.get({ fields: 'user(displayName,emailAddress),storageQuota' });
+      const u = (res.data && res.data.user) || {};
+      const q = (res.data && res.data.storageQuota) || {};
+      out.oauth.email = u.emailAddress || null;
+      out.oauth.displayName = u.displayName || null;
+      out.oauth.matchesExpectedOwner = out.oauth.email
+        ? (out.oauth.email.toLowerCase() === expectedOwnerEmail.toLowerCase())
+        : null;
+      const limit = q.limit != null ? Number(q.limit) : null;
+      const usage = q.usage != null ? Number(q.usage) : null;
+      const usageInDrive = q.usageInDrive != null ? Number(q.usageInDrive) : null;
+      out.oauth.quota = {
+        limit, usage, usageInDrive,
+        limitHuman: limit != null ? _humanBytes(limit) : '무제한/알수없음',
+        usageHuman: usage != null ? _humanBytes(usage) : null,
+        usageInDriveHuman: usageInDrive != null ? _humanBytes(usageInDrive) : null,
+        usedPercent: (limit && usage != null) ? Math.round((usage / limit) * 1000) / 10 : null,
+      };
+    } catch (e) {
+      out.oauth.error = e.message;
+    }
+  }
+
+  return out;
+}
+
+/**
+ * 폴더(들) 내 파일을 소유자별로 집계 (읽기 전용 — 안전)
+ * @param {string[]} folderIds - 재귀 스캔할 폴더 ID 배열
+ * @returns {Promise<{ totalFiles, totalBytes, totalHuman, owners, perFolder, errors }>}
+ */
+async function auditOwnership(folderIds) {
+  const byOwner = new Map(); // email -> { fileCount, totalBytes, displayName }
+  const perFolder = [];
+  const errors = [];
+  let totalFiles = 0;
+  let totalBytes = 0;
+
+  for (const folderId of folderIds) {
+    if (!folderId) continue;
+    let files = [];
+    try {
+      files = await listFolderFilesRecursive(folderId, { withOwners: true });
+    } catch (e) {
+      errors.push({ folderId, error: e.message });
+      continue;
+    }
+
+    let folderBytes = 0;
+    for (const f of files) {
+      const size = f.size ? Number(f.size) : 0;
+      const owner = (f.owners && f.owners[0] && f.owners[0].emailAddress) || '(unknown)';
+      const displayName = (f.owners && f.owners[0] && f.owners[0].displayName) || '';
+      if (!byOwner.has(owner)) byOwner.set(owner, { fileCount: 0, totalBytes: 0, displayName });
+      const o = byOwner.get(owner);
+      o.fileCount++;
+      o.totalBytes += size;
+      totalFiles++;
+      totalBytes += size;
+      folderBytes += size;
+    }
+    perFolder.push({ folderId, fileCount: files.length, totalBytes: folderBytes, totalHuman: _humanBytes(folderBytes) });
+  }
+
+  const owners = [...byOwner.entries()]
+    .map(([email, v]) => ({
+      email,
+      displayName: v.displayName,
+      fileCount: v.fileCount,
+      totalBytes: v.totalBytes,
+      totalHuman: _humanBytes(v.totalBytes),
+    }))
+    .sort((a, b) => b.totalBytes - a.totalBytes);
+
+  return { totalFiles, totalBytes, totalHuman: _humanBytes(totalBytes), owners, perFolder, errors };
+}
+
+/**
+ * 폴더(들) 내 "대상 소유자가 아닌" 파일의 소유권을 대상 계정으로 이전
+ *
+ * ⚠️ 구글 제약: 소유권 이전(permissions.create transferOwnership)은
+ *    "현재 소유자" 자격으로만 가능하다.
+ *    - 기본(default) 자격: OAuth(tnaks6325) → tnaks 소유 파일만 처리 가능,
+ *      관리자(박세희/박은비) 소유 파일은 403으로 실패하며 failures에 기록된다.
+ *    - opts.sourceRefreshToken(관리자 계정 토큰)을 주면 그 계정 소유 파일을
+ *      tnaks6325로 실제 이전할 수 있다.
+ *    - 소비자(Gmail) 계정 간 이전은 수신자 수락이 필요할 수 있다(에러로 표면화).
+ *
+ * 비파괴: 파일을 삭제/복사하지 않으며, 소유권만 변경(역이전 가능)한다.
+ *
+ * @param {string[]} folderIds
+ * @param {{ targetOwnerEmail?, dryRun?, fromOwners?, sourceRefreshToken? }} opts
+ *   - dryRun: 기본 true (계획만, 실제 변경 없음). false 여야 실제 이전.
+ *   - fromOwners: 지정 시 해당 이메일 소유 파일만 대상(소문자 비교)
+ */
+async function transferOwnershipInFolders(folderIds, opts = {}) {
+  const targetOwnerEmail = opts.targetOwnerEmail || process.env.DRIVE_OWNER_EMAIL || 'tnaks6325@gmail.com';
+  const dryRun = opts.dryRun !== false; // 기본 true
+  const fromOwners = (opts.fromOwners || []).map(s => String(s).toLowerCase()).filter(Boolean);
+
+  const sourceClient = opts.sourceRefreshToken ? _buildOAuthDriveFromToken(opts.sourceRefreshToken) : null;
+  const actClient = sourceClient || _getOAuthDrive() || _getReadDrive();
+  if (!actClient) throw new Error('Drive 자격증명이 없습니다. (OAuth 또는 SA 필요)');
+
+  const summary = { scanned: 0, alreadyOwned: 0, toTransfer: 0, transferred: 0, failed: 0, skipped: 0 };
+  const actions = [];
+  const failures = [];
+
+  for (const folderId of folderIds) {
+    if (!folderId) continue;
+    let files = [];
+    try {
+      files = await listFolderFilesRecursive(folderId, { withOwners: true });
+    } catch (e) {
+      failures.push({ folderId, error: e.message });
+      continue;
+    }
+
+    for (const f of files) {
+      summary.scanned++;
+      const ownerEmail = (f.owners && f.owners[0] && f.owners[0].emailAddress) || '';
+
+      if (ownerEmail && ownerEmail.toLowerCase() === targetOwnerEmail.toLowerCase()) {
+        summary.alreadyOwned++;
+        continue;
+      }
+      if (fromOwners.length && !fromOwners.includes((ownerEmail || '').toLowerCase())) {
+        summary.skipped++;
+        continue;
+      }
+
+      summary.toTransfer++;
+      if (dryRun) {
+        actions.push({ fileId: f.id, name: f.name, currentOwner: ownerEmail || '(unknown)', size: f.size || '0', planned: true });
+        continue;
+      }
+
+      try {
+        await actClient.permissions.create({
+          fileId: f.id,
+          transferOwnership: true,
+          requestBody: { role: 'owner', type: 'user', emailAddress: targetOwnerEmail },
+          supportsAllDrives: true,
+        });
+        summary.transferred++;
+        actions.push({ fileId: f.id, name: f.name, from: ownerEmail || '(unknown)', to: targetOwnerEmail, ok: true });
+        logger.info(`[Drive-Owner] 소유권 이전: ${f.id} "${f.name}" ${ownerEmail || '(unknown)'} → ${targetOwnerEmail}`);
+      } catch (e) {
+        summary.failed++;
+        failures.push({ fileId: f.id, name: f.name, currentOwner: ownerEmail || '(unknown)', error: e.message });
+        logger.warn(`[Drive-Owner] 소유권 이전 실패: ${f.id} "${f.name}" (소유자=${ownerEmail || '?'}): ${e.message}`);
+      }
+    }
+  }
+
+  return { dryRun, targetOwnerEmail, usedSourceToken: !!sourceClient, summary, actions, failures };
+}
+
 module.exports = {
   listFolderContents,
   downloadFile,
@@ -930,6 +1160,10 @@ module.exports = {
   uploadFileBase64,
   getOrCreateSubFolder,
   getOAuthStatus,
+  // 계정/쿼터 진단 + 소유권 점검·이전 (용량 귀속 확인)
+  getAccountDiagnostics,
+  auditOwnership,
+  transferOwnershipInFolders,
   // 새 통합 폴더 구조 함수
   ensureFolderPath,
   ensureCaptureFolderPath,
