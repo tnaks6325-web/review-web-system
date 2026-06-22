@@ -15786,6 +15786,7 @@ async function _deleteNotice(id) {
 // ═══════════════════════════════════════════════════════════
 let _relocateTabs = [];
 let _relocateSelIdx = -1; // 콤보박스에서 선택된 탭 인덱스
+let _relocateScanStop = false; // 전체 탭 스캔 중지 플래그
 
 function _relocateCollectTabs() {
   // folder_url이 비어 있어도(=리뷰폴더 미연결) 선택 가능하도록 모든 탭을 포함.
@@ -15857,8 +15858,12 @@ function openReviewRelocate() {
         <input id="rlcSince" type="date" style="width:100%;padding:7px 9px;border:1px solid #D1D5DB;border-radius:8px;font-size:.8rem;margin:4px 0 4px">
 
         <div style="display:flex;gap:8px;margin-top:14px">
-          <button onclick="_relocateRun(false)" style="flex:1;padding:9px;background:#7C3AED;color:#fff;border:none;border-radius:8px;font-size:.82rem;font-weight:700;cursor:pointer"><i class="fas fa-search"></i> 미리보기(이동 없음)</button>
-          <button onclick="document.getElementById('reviewRelocateModal').remove()" style="padding:9px 14px;background:#F3F4F6;color:#374151;border:none;border-radius:8px;font-size:.82rem;font-weight:600;cursor:pointer">닫기</button>
+          <button onclick="_relocateRun(false)" style="flex:1;padding:9px;background:#7C3AED;color:#fff;border:none;border-radius:8px;font-size:.82rem;font-weight:700;cursor:pointer"><i class="fas fa-search"></i> 선택 탭 미리보기</button>
+          <button onclick="_relocateScanAll()" style="flex:1;padding:9px;background:#4338CA;color:#fff;border:none;border-radius:8px;font-size:.82rem;font-weight:700;cursor:pointer"><i class="fas fa-layer-group"></i> 전체 탭 자동 스캔</button>
+        </div>
+        <div style="font-size:.66rem;color:#9CA3AF;margin-top:6px">※ 전체 스캔은 모든 탭을 하나씩 조회해 탭별 대상 건수를 보여줍니다. 폴더 링크·키워드 칸은 무시하고 탭마다 자동 적용합니다.</div>
+        <div style="margin-top:8px;text-align:right">
+          <button onclick="document.getElementById('reviewRelocateModal').remove()" style="padding:7px 16px;background:#F3F4F6;color:#374151;border:none;border-radius:8px;font-size:.8rem;font-weight:600;cursor:pointer">닫기</button>
         </div>
         <div id="rlcResult" style="margin-top:14px"></div>
       </div>
@@ -15973,5 +15978,113 @@ async function _relocateRun(apply) {
       </div>`;
   } catch (err) {
     resultEl.innerHTML = `<div style="font-size:.78rem;color:#DC2626">오류: ${escHtml(err.message)}</div>`;
+  }
+}
+
+// 전체 탭 자동 스캔 — 모든 탭을 하나씩 dryRun 조회 → 탭별 대상 건수 + [이동] 버튼
+async function _relocateScanAll() {
+  _relocateScanStop = false;
+  const sinceRaw = (document.getElementById('rlcSince').value || '').trim();
+  const sinceDate = sinceRaw ? (sinceRaw + 'T00:00:00Z') : undefined;
+  const resultEl = document.getElementById('rlcResult');
+
+  const rowsHtml = _relocateTabs.map((t, i) => `
+    <div id="rlcScanRow_${i}" style="display:flex;align-items:center;gap:8px;padding:6px 10px;border-bottom:1px solid #F3F4F6">
+      <div style="flex:1;min-width:0">
+        <div style="font-size:.74rem;color:#111;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${escHtml(t.displayName)}</div>
+        ${t.campName ? `<div style="font-size:.62rem;color:#9CA3AF;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${escHtml(t.campName)}</div>` : ''}
+      </div>
+      <div id="rlcScanStatus_${i}" style="font-size:.7rem;color:#9CA3AF;white-space:nowrap">대기</div>
+      <div id="rlcScanAction_${i}" style="min-width:54px;text-align:right"></div>
+    </div>`).join('');
+
+  resultEl.innerHTML = `
+    <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:6px">
+      <div id="rlcScanProgress" style="font-size:.76rem;font-weight:700;color:#3730A3">스캔 준비…</div>
+      <button onclick="_relocateScanStop=true" style="font-size:.7rem;background:#FEE2E2;color:#991B1B;border:none;border-radius:6px;padding:4px 10px;cursor:pointer"><i class="fas fa-stop"></i> 중지</button>
+    </div>
+    <div style="max-height:360px;overflow-y:auto;border:1px solid #E5E7EB;border-radius:8px">${rowsHtml}</div>`;
+
+  const setProgress = (scanned, withT) => {
+    const p = document.getElementById('rlcScanProgress');
+    if (p) p.textContent = `스캔 ${scanned}/${_relocateTabs.length} · 대상 있는 탭 ${withT}`;
+  };
+
+  let scanned = 0, withTargets = 0;
+  for (let i = 0; i < _relocateTabs.length; i++) {
+    if (_relocateScanStop) {
+      const p = document.getElementById('rlcScanProgress');
+      if (p) p.textContent = `중지됨 (${scanned}/${_relocateTabs.length} · 대상 ${withTargets})`;
+      return;
+    }
+    const t = _relocateTabs[i];
+    const statusEl = document.getElementById('rlcScanStatus_' + i);
+    const actionEl = document.getElementById('rlcScanAction_' + i);
+    if (!statusEl) continue;
+
+    if (!t.folderUrl) {
+      statusEl.innerHTML = `<span style="color:#D97706">폴더 미설정</span>`;
+      scanned++; setProgress(scanned, withTargets); continue;
+    }
+    statusEl.innerHTML = `<i class="fas fa-spinner fa-spin"></i> 스캔중`;
+    try {
+      const res = await gasPost({
+        action: 'relocateOrphanReviews',
+        sheetId: t.sheetId, tabName: t.tabName,
+        reviewFolderUrl: t.folderUrl,
+        brandKeywords: _relocateDeriveKeywords(t.tabName),
+        sinceDate, dryRun: true,
+      });
+      if (!res || res.ok === false) {
+        statusEl.innerHTML = `<span style="color:#DC2626" title="${escHtml((res && res.error) || '')}">오류</span>`;
+      } else {
+        const n = res.candidateCount || 0;
+        const lk = res.link || {};
+        if (n > 0) {
+          withTargets++;
+          statusEl.innerHTML = `<b style="color:#5B21B6">대상 ${n}건</b>${lk.ambiguous ? ` <span style="color:#9CA3AF">모호 ${lk.ambiguous}</span>` : ''}`;
+          if (actionEl) actionEl.innerHTML = `<button id="rlcScanBtn_${i}" onclick="_relocateApplyTab(${i})" style="font-size:.72rem;background:#059669;color:#fff;border:none;border-radius:6px;padding:4px 11px;cursor:pointer">이동</button>`;
+        } else {
+          statusEl.innerHTML = `<span style="color:#9CA3AF">대상 0</span>`;
+        }
+      }
+    } catch (e) {
+      statusEl.innerHTML = `<span style="color:#DC2626">오류</span>`;
+    }
+    scanned++; setProgress(scanned, withTargets);
+  }
+  const p = document.getElementById('rlcScanProgress');
+  if (p) p.textContent = `스캔 완료 ${scanned}/${_relocateTabs.length} · 대상 있는 탭 ${withTargets}`;
+}
+
+// 스캔 목록에서 한 탭만 실제 이동(apply)
+async function _relocateApplyTab(i) {
+  const t = _relocateTabs[i];
+  if (!t || !t.folderUrl) return;
+  const btn = document.getElementById('rlcScanBtn_' + i);
+  const statusEl = document.getElementById('rlcScanStatus_' + i);
+  if (btn) { btn.disabled = true; btn.textContent = '이동중'; }
+  const sinceRaw = (document.getElementById('rlcSince').value || '').trim();
+  const sinceDate = sinceRaw ? (sinceRaw + 'T00:00:00Z') : undefined;
+  try {
+    const res = await gasPost({
+      action: 'relocateOrphanReviews',
+      sheetId: t.sheetId, tabName: t.tabName,
+      reviewFolderUrl: t.folderUrl,
+      brandKeywords: _relocateDeriveKeywords(t.tabName),
+      sinceDate, dryRun: false,
+    });
+    if (!res || res.ok === false) {
+      if (statusEl) statusEl.innerHTML = `<span style="color:#DC2626">오류</span>`;
+      if (btn) { btn.disabled = false; btn.textContent = '재시도'; }
+      return;
+    }
+    const lk = res.link || {};
+    if (statusEl) statusEl.innerHTML = `<span style="color:#065F46;font-weight:700">✅ ${res.movedCount}건 이동</span>${lk.linked ? ` <span style="color:#4338CA">링크 ${lk.linked}</span>` : ''}`;
+    if (btn) btn.remove();
+    showToast(`${t.displayName}: ${res.movedCount}건 이동`, 'success');
+  } catch (e) {
+    if (statusEl) statusEl.innerHTML = `<span style="color:#DC2626">오류</span>`;
+    if (btn) { btn.disabled = false; btn.textContent = '재시도'; }
   }
 }
