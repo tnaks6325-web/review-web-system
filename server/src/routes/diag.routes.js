@@ -1539,6 +1539,25 @@ router.post('/review-upload', imageApiLimiter, async (req, res, next) => {
 
     const successCount = uploadResults.filter(r => r.fileId).length;
 
+    // ── A-1: 제출된 인덱스 행에 리뷰 파일 결정적 연결 ──
+    //   업로드 시점에 rowIndex/sheetId/tabName이 오므로, 대표 파일(첫 성공분)을
+    //   review_index 해당 행(sheet_id+tab_name+row_index)에 기록한다. (비파괴, 실패 무시)
+    const primary = uploadResults.find(r => r.fileId);
+    if (primary && rowIndex && sheetId && tabName) {
+      try {
+        const fileUrl = primary.webViewLink || `https://drive.google.com/file/d/${primary.fileId}/view`;
+        await pool.query(
+          `UPDATE review_index
+              SET review_file_id = $1, review_file_url = $2, review_file_name = $3,
+                  review_file_count = $4, review_file_at = NOW()
+            WHERE sheet_id = $5 AND tab_name = $6 AND row_index = $7`,
+          [primary.fileId, fileUrl, primary.fileName, successCount, sheetId, tabName, parseInt(rowIndex, 10)]
+        );
+      } catch (linkErr) {
+        logger.warn(`[review-upload] 인덱스 파일링크 저장 실패 (무시): ${linkErr.message}`);
+      }
+    }
+
     res.json({
       ok: successCount > 0,
       uploaded: successCount,

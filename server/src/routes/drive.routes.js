@@ -1275,19 +1275,35 @@ router.post('/relocate-orphan-reviews', authMiddleware, async (req, res, next) =
       if (id) excludeIds.add(id);
     }
 
-    // ── 4) 명단(선택) ──
+    // ── 4) 인덱스 행(review_index) 로드 — 명단 필터 + 결정적 링크(B 백필) ──
+    //   sheetId/tabName이 있으면 해당 탭 인덱스 행을 불러와
+    //   (a) requireRoster 시 명단 필터, (b) 파일명 이름 ↔ 행 매칭으로 링크 백필.
+    let indexRows = [];
     let roster = null;
-    if (requireRoster && sheetId && tabName) {
-      roster = new Set();
+    const doLink = !!(sheetId && tabName);
+    if (doLink) {
       const { rows } = await pool.query(
-        'SELECT reviewer_name, recipient_name FROM review_index WHERE sheet_id = $1 AND tab_name = $2',
+        `SELECT id, row_index, reviewer_name, recipient_name, review_file_id
+           FROM review_index WHERE sheet_id = $1 AND tab_name = $2`,
         [sheetId, tabName]
       );
-      for (const r of rows) {
+      indexRows = rows;
+    }
+    if (requireRoster && indexRows.length) {
+      roster = new Set();
+      for (const r of indexRows) {
         const a = (r.recipient_name || '').trim(); if (a) roster.add(a);
         const b = (r.reviewer_name || '').trim(); if (b) roster.add(b);
       }
     }
+    // 이름 → 인덱스 행(들) 매핑 (reviewer_name/recipient_name 모두 키)
+    const rowsByName = new Map();
+    const addRow = (nm, r) => {
+      const k = (nm || '').trim(); if (!k) return;
+      if (!rowsByName.has(k)) rowsByName.set(k, []);
+      const arr = rowsByName.get(k); if (!arr.includes(r)) arr.push(r);
+    };
+    for (const r of indexRows) { addRow(r.reviewer_name, r); addRow(r.recipient_name, r); }
 
     // ── 5) 후보 검색 (fullText=브랜드 키워드) ──
     const byId = new Map();
@@ -1300,27 +1316,21 @@ router.post('/relocate-orphan-reviews', authMiddleware, async (req, res, next) =
       for (const f of files) if (!byId.has(f.id)) byId.set(f.id, f);
     }
 
-    // ── 6) 이동 대상 필터링 ──
+    // ── 6) 분류: 이동대상(toMove) / 대상폴더내(linkOnly) / 제외 ──
     //   리뷰형식 파일명만: {이름}_{순번}_{YYYYMMDD}_{HHMMSS}.ext
     const reviewPattern = /_\d+_\d{8}_\d{6}\.[A-Za-z0-9]+$/;
     const toMove = [];
+    const linkOnly = []; // 이미 [리뷰] 폴더에 있음 → 이동 불필요, 링크만
     const skipped = [];
     for (const f of byId.values()) {
-      if (!reviewPattern.test(f.name)) {
-        continue; // 구매캡처/기타 형식 → 대상 아님 (조용히 제외)
-      }
+      if (!reviewPattern.test(f.name)) continue; // 구매캡처/기타 → 제외
       const parents = f.parents || [];
-      if (parents.some(p => excludeIds.has(p))) {
-        skipped.push({ id: f.id, name: f.name, reason: '이미 대상/제외 폴더 내' });
-        continue;
-      }
       if (roster) {
         const nm = driveService.extractReviewerNameFromFile(f.name);
-        if (!nm || !roster.has(nm)) {
-          skipped.push({ id: f.id, name: f.name, reason: '명단 불일치' });
-          continue;
-        }
+        if (!nm || !roster.has(nm)) { skipped.push({ id: f.id, name: f.name, reason: '명단 불일치' }); continue; }
       }
+      if (parents.includes(targetId)) { linkOnly.push(f); continue; }
+      if (parents.some(p => excludeIds.has(p))) { skipped.push({ id: f.id, name: f.name, reason: '구매캡처/제외 폴더 내' }); continue; }
       toMove.push(f);
     }
 
@@ -1340,6 +1350,47 @@ router.post('/relocate-orphan-reviews', authMiddleware, async (req, res, next) =
       }
     }
 
+    // ── 8) 결정적 링크 백필 (B) — 파일명 이름 ↔ 인덱스 행 ──
+    //   대상: 이동분 + 이미 [리뷰] 폴더에 있던 분. 모호하면 링크하지 않고 리포트.
+    const linkResult = { linked: 0, ambiguous: 0, unmatched: 0, already: 0, samples: { ambiguous: [], unmatched: [] } };
+    if (doLink) {
+      for (const f of [...toMove, ...linkOnly]) {
+        const nm = (driveService.extractReviewerNameFromFile(f.name) || '').trim();
+        const matchRows = rowsByName.get(nm) || [];
+        if (matchRows.length === 0) {
+          linkResult.unmatched++;
+          if (linkResult.samples.unmatched.length < 30) linkResult.samples.unmatched.push(f.name);
+          continue;
+        }
+        const unlinked = matchRows.filter(r => !r.review_file_id);
+        if (unlinked.length === 0) { linkResult.already++; continue; }
+        if (unlinked.length > 1) {
+          linkResult.ambiguous++;
+          if (linkResult.samples.ambiguous.length < 30) linkResult.samples.ambiguous.push(f.name);
+          continue;
+        }
+        // 결정적 매칭 1건 → 링크
+        const row = unlinked[0];
+        if (!isDryRun) {
+          const fileUrl = `https://drive.google.com/file/d/${f.id}/view`;
+          try {
+            await pool.query(
+              `UPDATE review_index
+                  SET review_file_id = $1, review_file_url = $2, review_file_name = $3,
+                      review_file_count = GREATEST(COALESCE(review_file_count, 0), 1),
+                      review_file_at = COALESCE($4::timestamptz, NOW())
+                WHERE id = $5`,
+              [f.id, fileUrl, f.name, f.createdTime || null, row.id]
+            );
+          } catch (e) {
+            logger.warn(`[relocate-orphan-reviews] 링크 저장 실패 (${f.name}): ${e.message}`);
+          }
+        }
+        row.review_file_id = f.id; // 메모리 표시 → 같은 이름 추가 파일은 already 처리
+        linkResult.linked++;
+      }
+    }
+
     res.json({
       ok: true,
       dryRun: isDryRun,
@@ -1356,6 +1407,8 @@ router.post('/relocate-orphan-reviews', authMiddleware, async (req, res, next) =
       moved,
       failedCount: failed.length,
       failed,
+      alreadyInTarget: linkOnly.length,
+      link: linkResult, // 인덱스 결정적 링크 결과 (B)
       skippedCount: skipped.length,
       skipped: skipped.slice(0, 100),
     });
