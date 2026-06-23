@@ -191,7 +191,7 @@ const _ACTION_MAP = {
   'relocateOrphanReviews': { method: 'POST', path: '/api/drive/relocate-orphan-reviews' },
   'reviewSubmissions':     { method: 'GET',  path: '/api/drive/review-submissions' },
   'moveFolderContents':    { method: 'POST', path: '/api/drive/move-folder-contents' },
-  'folderAudit':           { method: 'GET',  path: '/api/drive/folder-audit' },
+  'folderAudit':           { method: 'POST', path: '/api/drive/folder-audit' },
   'getPendingRows':      { method: 'GET',  path: '/api/diag/pending-rows' },
   'getUnpaidRows':       { method: 'GET',  path: '/api/diag/unpaid-rows' },
   'addTab':              { method: 'POST', path: '/api/diag/add-tab' },

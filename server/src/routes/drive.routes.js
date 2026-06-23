@@ -1533,61 +1533,74 @@ router.post('/move-folder-contents', authMiddleware, async (req, res, next) => {
 });
 
 // ═══════════════════════════════════════════════════════════
-// GET /api/drive/folder-audit — 활성 탭의 리뷰폴더 현황 점검
-//   ① 리뷰폴더 연결된 활성 탭 수, ② 파일이 있는(정상) 폴더 수,
-//   ③ 비어있는 폴더 수, + 폴더 미연결/오류. 각 폴더 파일수는 2단계까지 집계.
+// POST /api/drive/folder-audit — 활성 탭(프론트 제공) 리뷰폴더 현황 점검
+//   body: { tabs:[{sheetId,tabName,displayName,folderUrl}], excludeName, sinceDate }
+//   - 활성 탭은 대시보드(_tabDashData)에서 받아 한정(마감 탭 제외)
+//   - excludeName 포함 탭 제외(예: '리뷰폼')
+//   - 각 폴더 파일수 + "가장 이른 이미지 날짜" → sinceDate(예 26-03-01) 이전 파일 유무 판정
+//     (이미지가 모두 sinceDate 이후 = 26.3+ 캠페인 → 이관/정리 대상)
 // ═══════════════════════════════════════════════════════════
-router.get('/folder-audit', authMiddleware, async (req, res, next) => {
+router.post('/folder-audit', authMiddleware, async (req, res, next) => {
   try {
-    const { rows } = await pool.query(
-      `SELECT sheet_id, tab_name, campaign_name, folder_url
-         FROM tab_configs
-        WHERE (is_closed = FALSE OR is_closed IS NULL)
-        ORDER BY tab_name`
-    );
+    const { tabs, excludeName, sinceDate } = req.body || {};
+    if (!Array.isArray(tabs)) return res.json({ ok: false, error: 'tabs 배열이 필요합니다.' });
+    const excl = (excludeName || '').trim();
+    const sinceTs = sinceDate ? new Date(sinceDate).getTime() : null;
 
-    // 폴더 내 파일 수 집계 (옵션 서브폴더까지 2단계)
-    const countDeep = async (folderId, depth) => {
-      const items = await driveService.searchFiles(`'${folderId}' in parents and trashed = false`, { limit: 1000 });
-      let n = items.filter(f => f.mimeType !== 'application/vnd.google-apps.folder').length;
-      if (depth > 1) {
-        for (const s of items.filter(f => f.mimeType === 'application/vnd.google-apps.folder')) {
-          n += await countDeep(s.id, depth - 1);
+    // 폴더 파일수 + 가장 이른 이미지 생성일 (옵션 서브폴더까지 2단계)
+    const scanFolder = async (folderId) => {
+      let count = 0, earliest = null;
+      const walk = async (fid, depth) => {
+        const items = await driveService.searchFiles(`'${fid}' in parents and trashed = false`, { limit: 1000 });
+        for (const f of items) {
+          if (f.mimeType === 'application/vnd.google-apps.folder') { if (depth > 1) await walk(f.id, depth - 1); continue; }
+          count++;
+          if (f.mimeType && f.mimeType.indexOf('image/') === 0 && f.createdTime) {
+            const ts = new Date(f.createdTime).getTime();
+            if (earliest === null || ts < earliest) earliest = ts;
+          }
         }
-      }
-      return n;
+      };
+      await walk(folderId, 2);
+      return { count, earliest };
     };
 
-    let withFolderUrl = 0, noFolderUrl = 0, nonEmpty = 0, empty = 0, errors = 0;
-    const distinct = new Set();
+    let connected = 0, nonEmpty = 0, empty = 0, noFolder = 0, excluded = 0, preMarch = 0, errors = 0;
     const details = [];
-    for (const t of rows) {
-      const folderId = extractFolderId(t.folder_url);
-      if (!folderId) {
-        noFolderUrl++;
-        details.push({ tab: t.tab_name, camp: t.campaign_name || '', status: 'no-folder', count: 0 });
-        continue;
-      }
-      withFolderUrl++; distinct.add(folderId);
+    for (const t of tabs) {
+      const name = t.tabName || t.displayName || '';
+      if (excl && name.indexOf(excl) >= 0) { excluded++; continue; } // 리뷰폼 등 제외
+      const folderId = extractFolderId(t.folderUrl);
+      if (!folderId) { noFolder++; details.push({ tab: name, status: 'no-folder' }); continue; }
+      connected++;
       try {
-        const count = await countDeep(folderId, 2);
-        if (count > 0) { nonEmpty++; details.push({ tab: t.tab_name, camp: t.campaign_name || '', status: 'has-files', count, folderUrl: t.folder_url }); }
-        else { empty++; details.push({ tab: t.tab_name, camp: t.campaign_name || '', status: 'empty', count: 0, folderUrl: t.folder_url }); }
+        const { count, earliest } = await scanFolder(folderId);
+        const earliestIso = earliest ? new Date(earliest).toISOString().slice(0, 10) : null;
+        const hasPre = (sinceTs !== null && earliest !== null && earliest < sinceTs);
+        if (count > 0) {
+          nonEmpty++;
+          if (hasPre) preMarch++;
+          details.push({ tab: name, status: 'has-files', count, earliest: earliestIso, preMarch: hasPre });
+        } else {
+          empty++;
+          details.push({ tab: name, status: 'empty', count: 0 });
+        }
       } catch (e) {
-        errors++;
-        details.push({ tab: t.tab_name, camp: t.campaign_name || '', status: 'error', count: 0, error: e.message });
+        errors++; details.push({ tab: name, status: 'error', error: e.message });
       }
     }
 
     res.json({
       ok: true,
-      activeTabs: rows.length,
-      withFolderUrl,            // ① 리뷰폴더 연결된 활성 탭 수
-      distinctFolders: distinct.size,
-      noFolderUrl,
-      nonEmpty,                 // ② 파일이 있는(정상 제출) 폴더 수
+      totalTabs: tabs.length,
+      excluded,                 // 리뷰폼 등 제외된 탭 수
+      connected,                // ① 리뷰폴더 연결된 탭 수
+      nonEmpty,                 // ② 파일 있는(정상) 폴더 수
+      preMarch,                 //   그중 26.3 이전 파일이 있어 대상에서 빠지는 수
       empty,                    // ③ 비어있는 폴더 수
+      noFolder,                 // 폴더 미연결(비-리뷰폼) 수
       errors,
+      sinceDate: sinceDate || null,
       details,
     });
   } catch (err) {
