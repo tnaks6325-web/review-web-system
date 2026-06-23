@@ -15858,35 +15858,42 @@ function _relocateToggleImg(headerEl, id) {
   }
 }
 
-// 활성 탭 리뷰폴더 현황 점검 — ① 연결 수 ② 정상(파일 있음) ③ 비어있음
+// 활성 탭 리뷰폴더 현황 점검 — 대시보드 활성탭 한정 + '리뷰폼' 제외 + 26.3+ 판정
 async function _relocateFolderAudit() {
   const resultEl = document.getElementById('rlcResult');
-  resultEl.innerHTML = `<div style="font-size:.78rem;color:#6B7280"><i class="fas fa-spinner fa-spin"></i> 활성 탭 리뷰폴더 점검 중… (수십 개 폴더 조회, 1~2분 소요)</div>`;
+  if (!_relocateTabs.length) _relocateTabs = _relocateCollectTabs();
+  const tabs = _relocateTabs.map(t => ({ sheetId: t.sheetId, tabName: t.tabName, displayName: t.displayName, folderUrl: t.folderUrl }));
+  resultEl.innerHTML = `<div style="font-size:.78rem;color:#6B7280"><i class="fas fa-spinner fa-spin"></i> 활성 탭 ${tabs.length}개 리뷰폴더 점검 중… (1~2분 소요)</div>`;
   try {
-    const res = await gasGet({ action: 'folderAudit' }, 240000);
+    const res = await gasPost({ action: 'folderAudit', tabs, excludeName: '리뷰폼', sinceDate: '2026-03-01T00:00:00Z' }, 240000);
     if (!res || res.ok === false) { resultEl.innerHTML = `<div style="font-size:.78rem;color:#DC2626">오류: ${escHtml((res && res.error) || '실패')}</div>`; return; }
     const d = res.details || [];
     const empties = d.filter(x => x.status === 'empty');
-    const haves = d.filter(x => x.status === 'has-files').sort((a, b) => b.count - a.count);
     const nofolder = d.filter(x => x.status === 'no-folder');
+    const haves = d.filter(x => x.status === 'has-files').sort((a, b) => b.count - a.count);
+    const pre = haves.filter(x => x.preMarch);
+    const target = haves.filter(x => !x.preMarch); // 26.3+ 정상 폴더
     const errs = d.filter(x => x.status === 'error');
-    const li = arr => arr.map(x => `<li style="font-size:.7rem;color:#374151;word-break:break-all">${escHtml(x.tab)}${x.count ? ` <span style="color:#9CA3AF">— ${x.count}건</span>` : ''}${x.camp ? ` <span style="color:#CBD5E1">(${escHtml(x.camp)})</span>` : ''}</li>`).join('');
+    const liH = arr => arr.map(x => `<li style="font-size:.7rem;color:#374151;word-break:break-all">${escHtml(x.tab)}${x.count ? ` <span style="color:#9CA3AF">— ${x.count}건${x.earliest ? `, 최초 ${x.earliest}` : ''}</span>` : ''}</li>`).join('');
+    const li = arr => arr.map(x => `<li style="font-size:.7rem;color:#374151;word-break:break-all">${escHtml(x.tab)}</li>`).join('');
     resultEl.innerHTML = `
       <div style="background:#F8FAFC;border:1px solid #E2E8F0;border-radius:8px;padding:12px">
-        <div style="font-size:.82rem;font-weight:800;color:#0F172A;margin-bottom:8px">활성 탭 리뷰폴더 현황 (활성 ${res.activeTabs}개)</div>
+        <div style="font-size:.82rem;font-weight:800;color:#0F172A;margin-bottom:6px">활성 탭 리뷰폴더 현황</div>
+        <div style="font-size:.68rem;color:#9CA3AF;margin-bottom:8px">활성 ${res.totalTabs}개 중 '리뷰폼' ${res.excluded}개 제외 · 26.3+ 기준</div>
         <div style="display:grid;grid-template-columns:1fr 1fr;gap:6px;font-size:.74rem">
-          <div style="background:#EEF2FF;border-radius:6px;padding:8px"><b>① 리뷰폴더 연결</b><br><span style="font-size:.92rem;font-weight:800;color:#4338CA">${res.withFolderUrl}개</span> <span style="color:#9CA3AF">(폴더 ${res.distinctFolders}종)</span></div>
-          <div style="background:#ECFDF5;border-radius:6px;padding:8px"><b>② 정상(파일 있음)</b><br><span style="font-size:.92rem;font-weight:800;color:#059669">${res.nonEmpty}개</span></div>
+          <div style="background:#EEF2FF;border-radius:6px;padding:8px"><b>① 리뷰폴더 연결</b><br><span style="font-size:.92rem;font-weight:800;color:#4338CA">${res.connected}개</span></div>
+          <div style="background:#ECFDF5;border-radius:6px;padding:8px"><b>② 정상(파일 있음)</b><br><span style="font-size:.92rem;font-weight:800;color:#059669">${res.nonEmpty}개</span><br><span style="font-size:.64rem;color:#6B7280">26.3+ ${target.length} · 26.3이전 ${res.preMarch}</span></div>
           <div style="background:#FEF2F2;border-radius:6px;padding:8px"><b>③ 비어있음</b><br><span style="font-size:.92rem;font-weight:800;color:#DC2626">${res.empty}개</span></div>
-          <div style="background:#FFFBEB;border-radius:6px;padding:8px"><b>폴더 미연결</b><br><span style="font-size:.92rem;font-weight:800;color:#B45309">${res.noFolderUrl}개</span>${res.errors ? ` · 오류 ${res.errors}` : ''}</div>
+          <div style="background:#FFFBEB;border-radius:6px;padding:8px"><b>폴더 미연결</b><br><span style="font-size:.92rem;font-weight:800;color:#B45309">${res.noFolder}개</span>${res.errors ? ` · 오류 ${res.errors}` : ''}</div>
         </div>
-        ${empties.length ? `<div style="margin-top:10px"><div style="font-size:.74rem;font-weight:700;color:#DC2626">③ 비어있는 리뷰폴더 (${empties.length})</div><ul style="margin:4px 0 0;padding-left:18px;max-height:160px;overflow:auto">${li(empties)}</ul></div>` : ''}
-        ${nofolder.length ? `<div style="margin-top:8px"><div style="font-size:.74rem;font-weight:700;color:#B45309">폴더 미연결 (${nofolder.length})</div><ul style="margin:4px 0 0;padding-left:18px;max-height:120px;overflow:auto">${li(nofolder)}</ul></div>` : ''}
-        ${errs.length ? `<div style="margin-top:8px"><div style="font-size:.74rem;font-weight:700;color:#9CA3AF">오류 (${errs.length})</div><ul style="margin:4px 0 0;padding-left:18px;max-height:100px;overflow:auto">${li(errs)}</ul></div>` : ''}
-        ${haves.length ? `<details style="margin-top:8px"><summary style="font-size:.74rem;font-weight:700;color:#059669;cursor:pointer">② 파일 있는 폴더 (${haves.length}) 펼쳐보기</summary><ul style="margin:4px 0 0;padding-left:18px;max-height:220px;overflow:auto">${li(haves)}</ul></details>` : ''}
+        ${empties.length ? `<div style="margin-top:10px"><div style="font-size:.74rem;font-weight:700;color:#DC2626">③ 비어있는 리뷰폴더 (${empties.length}) — 정리 필요</div><ul style="margin:4px 0 0;padding-left:18px;max-height:140px;overflow:auto">${li(empties)}</ul></div>` : ''}
+        ${nofolder.length ? `<div style="margin-top:8px"><div style="font-size:.74rem;font-weight:700;color:#B45309">폴더 미연결 (${nofolder.length})</div><ul style="margin:4px 0 0;padding-left:18px;max-height:140px;overflow:auto">${li(nofolder)}</ul></div>` : ''}
+        ${pre.length ? `<details style="margin-top:8px"><summary style="font-size:.72rem;font-weight:700;color:#9CA3AF;cursor:pointer">26.3 이전 파일 포함(대상 제외) (${pre.length})</summary><ul style="margin:4px 0 0;padding-left:18px;max-height:160px;overflow:auto">${liH(pre)}</ul></details>` : ''}
+        ${target.length ? `<details style="margin-top:8px" open><summary style="font-size:.74rem;font-weight:700;color:#059669;cursor:pointer">② 26.3+ 정상 폴더 (${target.length})</summary><ul style="margin:4px 0 0;padding-left:18px;max-height:220px;overflow:auto">${liH(target)}</ul></details>` : ''}
+        ${errs.length ? `<div style="margin-top:8px;font-size:.68rem;color:#9CA3AF">오류 ${errs.length}건</div>` : ''}
       </div>`;
   } catch (e) {
-    resultEl.innerHTML = `<div style="font-size:.78rem;color:#DC2626">오류: ${escHtml(e.message)} (시간이 오래 걸리면 탭 수가 많아 타임아웃일 수 있습니다)</div>`;
+    resultEl.innerHTML = `<div style="font-size:.78rem;color:#DC2626">오류: ${escHtml(e.message)} (탭이 많아 타임아웃일 수 있습니다)</div>`;
   }
 }
 
