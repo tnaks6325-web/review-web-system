@@ -1206,4 +1206,305 @@ router.post('/transfer-ownership', authMiddleware, async (req, res, next) => {
   }
 });
 
+// ═══════════════════════════════════════════════════════════
+// POST /api/drive/relocate-orphan-reviews — 루트(또는 엉뚱한 위치)에 흩어진
+//   리뷰 캡처를 해당 탭의 [리뷰] 폴더로 모아 이동(move)한다.
+//
+// 배경: 과거 일부 캠페인의 리뷰 업로드가 [리뷰] 폴더 ID를 확보하지 못한 채
+//   실행되어, 파일이 "내 드라이브 최상위(루트)"에 흩어졌다. ([리뷰]는 0개)
+//   이 엔드포인트는 OCR 전문검색(fullText=브랜드 키워드)으로 해당 캠페인의
+//   리뷰형식 파일을 찾아 [리뷰] 폴더로 addParents/removeParents 이동한다.
+//
+// body: {
+//   sheetId?, tabName?,            // tab_configs.folder_url 자동 조회용
+//   reviewFolderUrl?,             // 대상 [리뷰] 폴더(미지정 시 tab_configs.folder_url)
+//   brandKeywords: string|string[], // ★필수 — fullText 필터 (예: ["서일농원","명인 콩물"])
+//   sinceDate?, untilDate?,       // createdTime 범위 (ISO, 예: 2026-06-01T00:00:00Z)
+//   requireRoster?: bool,         // review_index 명단과 파일명 이름 일치 강제
+//   excludeFolderUrls?: string[], // 절대 건드리지 않을 폴더(예: [구매캡처])
+//   dryRun?: bool                 // 기본 true — 계획만, 실제 이동 없음
+// }
+//
+// 안전장치:
+//   - 리뷰형식 파일명(`{이름}_{순번}_{YYYYMMDD}_{HHMMSS}.ext`)만 대상 → 구매캡처(`{이름}.jpg`) 제외
+//   - 대상 [리뷰] 폴더 / 제외 폴더 / 구매캡처 폴더에 이미 있는 파일은 건너뜀
+//   - brandKeywords 필수 → 다른 캠페인 파일 오이동 방지
+//   - dryRun 기본값 true
+// ═══════════════════════════════════════════════════════════
+router.post('/relocate-orphan-reviews', authMiddleware, async (req, res, next) => {
+  try {
+    const {
+      sheetId, tabName, reviewFolderUrl,
+      brandKeywords, sinceDate, untilDate,
+      requireRoster, excludeFolderUrls, dryRun,
+    } = req.body || {};
+
+    const isDryRun = dryRun !== false; // 기본 true
+
+    // ── 1) 대상 [리뷰] 폴더 확보 ──
+    //   reviewFolderUrl(직접 지정) 우선, 없으면 tab_configs.folder_url.
+    //   capture_folder_url은 sheetId/tabName이 있으면 항상 조회해 제외 폴더로 사용.
+    let targetUrl = reviewFolderUrl || '';
+    let captureUrl = '';
+    if (sheetId && tabName) {
+      const { rows } = await pool.query(
+        'SELECT folder_url, capture_folder_url FROM tab_configs WHERE sheet_id = $1 AND tab_name = $2 LIMIT 1',
+        [sheetId, tabName]
+      );
+      if (!targetUrl) targetUrl = rows[0]?.folder_url || '';
+      captureUrl = rows[0]?.capture_folder_url || '';
+    }
+    const targetId = extractFolderId(targetUrl);
+    if (!targetId) {
+      return res.json({ ok: false, error: '대상 [리뷰] 폴더를 확인할 수 없습니다. reviewFolderUrl 또는 tab_configs.folder_url 가 필요합니다.' });
+    }
+
+    // ── 2) 브랜드 키워드 (필수) ──
+    const kws = (Array.isArray(brandKeywords) ? brandKeywords : [brandKeywords])
+      .map(s => String(s || '').trim()).filter(Boolean);
+    if (kws.length === 0) {
+      return res.json({ ok: false, error: 'brandKeywords가 필요합니다. (예: ["서일농원","명인 콩물"])' });
+    }
+
+    // ── 3) 제외 폴더 집합 (대상/구매캡처/사용자지정) ──
+    const excludeIds = new Set([targetId]);
+    const capId = extractFolderId(captureUrl);
+    if (capId) excludeIds.add(capId);
+    for (const u of (excludeFolderUrls || [])) {
+      const id = extractFolderId(u);
+      if (id) excludeIds.add(id);
+    }
+
+    // ── 4) 인덱스 행(review_index) 로드 — 명단 필터 + 결정적 링크(B 백필) ──
+    //   sheetId/tabName이 있으면 해당 탭 인덱스 행을 불러와
+    //   (a) requireRoster 시 명단 필터, (b) 파일명 이름 ↔ 행 매칭으로 링크 백필.
+    let indexRows = [];
+    let roster = null;
+    const doLink = !!(sheetId && tabName);
+    if (doLink) {
+      const { rows } = await pool.query(
+        `SELECT id, row_index, reviewer_name, recipient_name, review_file_id
+           FROM review_index WHERE sheet_id = $1 AND tab_name = $2`,
+        [sheetId, tabName]
+      );
+      indexRows = rows;
+    }
+    if (requireRoster && indexRows.length) {
+      roster = new Set();
+      for (const r of indexRows) {
+        const a = (r.recipient_name || '').trim(); if (a) roster.add(a);
+        const b = (r.reviewer_name || '').trim(); if (b) roster.add(b);
+      }
+    }
+    // 이름 → 인덱스 행(들) 매핑 (reviewer_name/recipient_name 모두 키)
+    const rowsByName = new Map();
+    const addRow = (nm, r) => {
+      const k = (nm || '').trim(); if (!k) return;
+      if (!rowsByName.has(k)) rowsByName.set(k, []);
+      const arr = rowsByName.get(k); if (!arr.includes(r)) arr.push(r);
+    };
+    for (const r of indexRows) { addRow(r.reviewer_name, r); addRow(r.recipient_name, r); }
+
+    // ── 5) 후보 검색 (fullText=브랜드 키워드) ──
+    const byId = new Map();
+    const searchStats = []; // 진단: 키워드별 SA/OAuth 검색 반환 수
+    for (const kw of kws) {
+      const safe = kw.replace(/\\/g, '\\\\').replace(/'/g, "\\'");
+      let q = `mimeType contains 'image/' and trashed = false and fullText contains '${safe}'`;
+      if (sinceDate) q += ` and createdTime >= '${sinceDate}'`;
+      if (untilDate) q += ` and createdTime <= '${untilDate}'`;
+      const st = {};
+      const files = await driveService.searchFiles(q, { limit: 1000, stats: st });
+      searchStats.push({ kw, sa: st.sa, oauth: st.oauth, saError: st.saError, oauthError: st.oauthError });
+      for (const f of files) if (!byId.has(f.id)) byId.set(f.id, f);
+    }
+    const searchFound = byId.size; // 검색이 반환한 전체(중복 제거) 이미지 수
+
+    // ── 6) 분류: 이동대상(toMove) / 대상폴더내(linkOnly) / 제외 ──
+    //   리뷰형식 파일명만: {이름}_{순번}_{YYYYMMDD}_{HHMMSS}.ext
+    const reviewPattern = /_\d+_\d{8}_\d{6}\.[A-Za-z0-9]+$/;
+    let reviewFormatCount = 0;
+    const toMove = [];
+    const linkOnly = []; // 이미 [리뷰] 폴더에 있음 → 이동 불필요, 링크만
+    const skipped = [];
+    for (const f of byId.values()) {
+      if (!reviewPattern.test(f.name)) continue; // 구매캡처/기타 → 제외
+      reviewFormatCount++;
+      const parents = f.parents || [];
+      if (roster) {
+        const nm = driveService.extractReviewerNameFromFile(f.name);
+        if (!nm || !roster.has(nm)) { skipped.push({ id: f.id, name: f.name, reason: '명단 불일치' }); continue; }
+      }
+      if (parents.includes(targetId)) { linkOnly.push(f); continue; }
+      if (parents.some(p => excludeIds.has(p))) { skipped.push({ id: f.id, name: f.name, reason: '구매캡처/제외 폴더 내' }); continue; }
+      toMove.push(f);
+    }
+
+    // ── 7) 이동 실행 (dryRun이면 계획만) ──
+    const moved = [];
+    const failed = [];
+    if (!isDryRun) {
+      for (const f of toMove) {
+        try {
+          const oldParents = (f.parents || []).join(',') || undefined;
+          await driveService.moveFile(f.id, targetId, oldParents);
+          moved.push({ id: f.id, name: f.name });
+        } catch (e) {
+          logger.error(`[relocate-orphan-reviews] 이동 실패 (${f.name}): ${e.message}`);
+          failed.push({ id: f.id, name: f.name, error: e.message });
+        }
+      }
+    }
+
+    // ── 8) 결정적 링크 백필(B/A-1) + 제출 원장 적재(A-2) ──
+    //   대상: 이동분 + 이미 [리뷰] 폴더에 있던 분. 모호하면 링크하지 않고 리포트하되
+    //   파일 자체는 review_submissions 원장에 전수 기록(A-2).
+    const linkResult = { linked: 0, ambiguous: 0, unmatched: 0, already: 0, recorded: 0, samples: { ambiguous: [], unmatched: [] } };
+    if (doLink) {
+      for (const f of [...toMove, ...linkOnly]) {
+        const nm = (driveService.extractReviewerNameFromFile(f.name) || '').trim();
+        const matchRows = rowsByName.get(nm) || [];
+        const fileUrl = `https://drive.google.com/file/d/${f.id}/view`;
+        let assocRow = null; // A-2 연결 인덱스 행 (확정 가능할 때만)
+
+        if (matchRows.length === 0) {
+          linkResult.unmatched++;
+          if (linkResult.samples.unmatched.length < 30) linkResult.samples.unmatched.push(f.name);
+        } else {
+          const unlinked = matchRows.filter(r => !r.review_file_id);
+          if (unlinked.length === 1) {
+            // A-1: 결정적 매칭 1건 → review_index 링크
+            assocRow = unlinked[0];
+            if (!isDryRun) {
+              try {
+                await pool.query(
+                  `UPDATE review_index
+                      SET review_file_id = $1, review_file_url = $2, review_file_name = $3,
+                          review_file_count = GREATEST(COALESCE(review_file_count, 0), 1),
+                          review_file_at = COALESCE($4::timestamptz, NOW())
+                    WHERE id = $5`,
+                  [f.id, fileUrl, f.name, f.createdTime || null, assocRow.id]
+                );
+              } catch (e) {
+                logger.warn(`[relocate-orphan-reviews] 링크 저장 실패 (${f.name}): ${e.message}`);
+              }
+            }
+            assocRow.review_file_id = f.id; // 메모리 표시 → 같은 이름 추가 파일은 already
+            linkResult.linked++;
+          } else if (unlinked.length === 0) {
+            linkResult.already++;
+            if (matchRows.length === 1) assocRow = matchRows[0]; // 원장 연결은 가능
+          } else {
+            linkResult.ambiguous++;
+            if (linkResult.samples.ambiguous.length < 30) linkResult.samples.ambiguous.push(f.name);
+          }
+        }
+
+        // A-2: 제출 원장 적재 (전 후보 파일, file_id 업서트)
+        if (!isDryRun) {
+          try {
+            await pool.query(
+              `INSERT INTO review_submissions
+                 (sheet_id, tab_name, tab_gid, row_index, reviewer_name, review_index_id,
+                  file_id, file_url, file_name, source, uploaded_at)
+               VALUES ($1,$2,NULL,$3,$4,$5,$6,$7,$8,'backfill',$9::timestamptz)
+               ON CONFLICT (file_id) DO UPDATE
+                 SET file_url = EXCLUDED.file_url, file_name = EXCLUDED.file_name,
+                     row_index = COALESCE(EXCLUDED.row_index, review_submissions.row_index),
+                     review_index_id = COALESCE(EXCLUDED.review_index_id, review_submissions.review_index_id),
+                     reviewer_name = EXCLUDED.reviewer_name`,
+              [sheetId, tabName, assocRow ? assocRow.row_index : null, nm || null,
+               assocRow ? assocRow.id : null, f.id, fileUrl, f.name, f.createdTime || null]
+            );
+            linkResult.recorded++;
+          } catch (e) {
+            logger.warn(`[relocate-orphan-reviews] 제출원장 기록 실패 (${f.name}): ${e.message}`);
+          }
+        }
+      }
+    }
+
+    res.json({
+      ok: true,
+      dryRun: isDryRun,
+      targetFolderId: targetId,
+      targetFolderUrl: `https://drive.google.com/drive/folders/${targetId}`,
+      keywords: kws,
+      indexRowCount: indexRows.length, // 탭의 작업건수(인덱스 행 수) — 과대매칭 판정 기준
+      candidateCount: toMove.length,
+      candidates: toMove.map(f => ({
+        id: f.id, name: f.name,
+        currentParents: f.parents || [],
+        createdTime: f.createdTime, owner: f.owner,
+      })),
+      movedCount: moved.length,
+      moved,
+      failedCount: failed.length,
+      failed,
+      alreadyInTarget: linkOnly.length,
+      link: linkResult, // 인덱스 결정적 링크 결과 (B)
+      skippedCount: skipped.length,
+      skipped: skipped.slice(0, 100),
+      // 진단: 서버 검색이 실제로 몇 건을 반환했는지 (0이면 계정/스코프/가시성 문제)
+      diag: { searchFound, reviewFormatCount, searchStats },
+    });
+  } catch (err) {
+    next(err);
+  }
+});
+
+// ═══════════════════════════════════════════════════════════
+// GET /api/drive/review-submissions — 탭별 리뷰 제출 원장 조회 (A-2)
+//   query: { sheetId, tabName, limit? }
+//   응답: 파일 단위 제출 목록 + 인덱스 연결 요약
+// ═══════════════════════════════════════════════════════════
+router.get('/review-submissions', authMiddleware, async (req, res, next) => {
+  try {
+    const { sheetId, tabName } = req.query;
+    if (!sheetId || !tabName) return res.json({ ok: false, error: 'sheetId, tabName 필요' });
+    const lim = Math.min(parseInt(req.query.limit || '1000', 10) || 1000, 5000);
+
+    const { rows } = await pool.query(
+      `SELECT id, row_index, reviewer_name, review_index_id,
+              file_id, file_url, file_name, source, uploaded_at, created_at
+         FROM review_submissions
+        WHERE sheet_id = $1 AND tab_name = $2
+        ORDER BY uploaded_at DESC NULLS LAST, created_at DESC
+        LIMIT $3`,
+      [sheetId, tabName, lim]
+    );
+    const linkedToIndex = rows.filter(r => r.review_index_id).length;
+    res.json({
+      ok: true,
+      total: rows.length,
+      linkedToIndex,
+      unlinked: rows.length - linkedToIndex,
+      submissions: rows,
+    });
+  } catch (err) {
+    next(err);
+  }
+});
+
+// ═══════════════════════════════════════════════════════════
+// GET /api/drive/image/:id — Drive 이미지 스트리밍 프록시 (모달 인라인 미리보기)
+//   <img src>가 헤더 인증을 못 보내므로 무인증. id는 추측 불가한 Drive fileId(20+).
+//   서버 OAuth(소유자 계정)로 받아 스트리밍 → 비공개/링크공유 섞여도 표시.
+//   실패 시 Drive thumbnail로 302 폴백.
+// ═══════════════════════════════════════════════════════════
+router.get('/image/:id', async (req, res) => {
+  const id = String(req.params.id || '');
+  if (!/^[-\w]{20,}$/.test(id)) return res.status(400).send('bad id');
+  try {
+    const f = await driveService.downloadFile(id);
+    res.set('Content-Type', f.mimeType || 'application/octet-stream');
+    res.set('Cross-Origin-Resource-Policy', 'cross-origin');
+    res.set('Cache-Control', 'private, max-age=600');
+    return res.send(f.buffer);
+  } catch (err) {
+    logger.warn(`[drive] image 프록시 실패(${id}): ${err.message} → thumbnail 폴백`);
+    return res.redirect(302, `https://drive.google.com/thumbnail?id=${id}&sz=w1600`);
+  }
+});
+
 module.exports = router;

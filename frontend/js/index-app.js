@@ -15778,3 +15778,406 @@ async function _deleteNotice(id) {
     showToast('오류: ' + err.message, 'error');
   }
 }
+
+// ═══════════════════════════════════════════════════════════
+// 리뷰 캡처 정리 — 내 드라이브 루트 등에 흩어진 리뷰 캡처를
+//   선택한 탭의 [리뷰] 폴더로 모아 이동 (미리보기 → 실제 이동)
+//   POST /api/drive/relocate-orphan-reviews (relocateOrphanReviews)
+// ═══════════════════════════════════════════════════════════
+let _relocateTabs = [];
+let _relocateSelIdx = -1; // 콤보박스에서 선택된 탭 인덱스
+let _relocateScanStop = false; // 전체 탭 스캔 중지 플래그
+let _relocateScanResults = {}; // 탭별 스캔 결과 (localStorage 임시저장)
+
+function _relocateCollectTabs() {
+  // folder_url이 비어 있어도(=리뷰폴더 미연결) 선택 가능하도록 모든 탭을 포함.
+  // (리뷰 캡처가 루트로 샌 탭은 folder_url이 비어 있을 수 있으므로)
+  const out = [];
+  if (typeof _tabDashData !== 'undefined' && _tabDashData && _tabDashData.tabs) {
+    _tabDashData.tabs.forEach(t => {
+      out.push({ sheetId: t.sheet_id, tabName: t.tab_name, displayName: t.display_name || t.tab_name, campName: t.campaign_name || '', folderUrl: t.folder_url || '' });
+    });
+  }
+  if (out.length === 0 && typeof _lastDashData !== 'undefined' && _lastDashData && _lastDashData.stats) {
+    _lastDashData.stats.forEach(camp => (camp.tabs || []).forEach(t => {
+      out.push({ sheetId: t.sheetId, tabName: t.tab, displayName: t.displayName || t.tab, campName: camp.campaign || '', folderUrl: t.folderUrl || '' });
+    }));
+  }
+  return out;
+}
+
+// 플랫폼/채널/일반어 — 키워드에서 제외(이게 들어가면 다른 캠페인까지 과대매칭됨)
+const _RELOCATE_STOPWORDS = new Set([
+  '네이버','쿠팡','쿠팡파트너스','파트너스','메이커스','카카오','카카오메이커스','11번가','지마켓','g마켓',
+  '옥션','위메프','티몬','자사몰','스마트스토어','스토어','인스타','인스타그램','블로그','카페','체험단',
+  '바이럴','리뷰','리뷰체험단','세트','박스','골드박스','시트','업무시트','견적서','실','현영'
+]);
+
+// 탭명에서 OCR 검색에 쓸 브랜드/상품 키워드 후보 추출 (플랫폼/일반어 제외)
+//   "5/28(쿠팡)서일농원_명인콩물두유 170건" → ["서일농원", "명인콩물두유"]
+//   "6/11퓨비아표백제_네이버15건" → ["퓨비아표백제"]  (네이버 제외)
+function _relocateDeriveKeywords(tabName) {
+  const out = [];
+  const push = v => {
+    v = (v || '').trim().replace(/\d+건?$/, '').trim();
+    if (v && v.length >= 2 && !/^\d+$/.test(v) && !_RELOCATE_STOPWORDS.has(v) && !out.includes(v)) out.push(v);
+  };
+  let core = String(tabName || '');
+  // 선두 날짜/채널 제거: "6/11", "6.17", "0618", "0528" + optional "(쿠팡)"
+  core = core.replace(/^\s*(\d{1,2}\s*[\/.]\s*\d{1,2}|\d{3,4})\s*(\([^)]*\))?\s*/, '');
+  // 후미 건수/차수 제거
+  core = core.replace(/\s*\d+\s*건\s*$/, '').replace(/\s*\d+\s*차\s*$/, '').trim();
+  core.split(/[_,/\s]+/).forEach(seg => push(seg));
+  return out;
+}
+
+// 탭명에서 "작업건수"(N건) 추출 — 과대매칭 판정 기준
+function _relocateParseCount(tabName) {
+  const m = String(tabName || '').match(/(\d+)\s*건/);
+  return m ? parseInt(m[1], 10) : 0;
+}
+
+// 후보 파일명 클릭 → 모달 내에서 이미지 인라인 펼침/접기 (서버 프록시로 비공개 파일도 표시)
+function _relocateToggleImg(headerEl, id) {
+  const box = headerEl.parentElement;
+  const wrap = box && box.querySelector('.rlc-img');
+  const chev = headerEl.querySelector('.fa-chevron-right');
+  if (!wrap) return;
+  if (wrap.style.display === 'none' || !wrap.style.display) {
+    if (!wrap.dataset.loaded) {
+      const proxy = `${API_BASE_URL}/api/drive/image/${encodeURIComponent(id)}`;
+      const thumb = `https://drive.google.com/thumbnail?id=${encodeURIComponent(id)}&sz=w1600`;
+      wrap.innerHTML = `<div style="padding:4px 0 8px"><img src="${proxy}" loading="lazy" style="max-width:100%;max-height:440px;border-radius:8px;border:1px solid #E5E7EB;display:block" onerror="this.onerror=null;this.src='${thumb}'"></div>`;
+      wrap.dataset.loaded = '1';
+    }
+    wrap.style.display = 'block';
+    if (chev) chev.style.transform = 'rotate(90deg)';
+  } else {
+    wrap.style.display = 'none';
+    if (chev) chev.style.transform = '';
+  }
+}
+
+function openReviewRelocate() {
+  const existing = document.getElementById('reviewRelocateModal');
+  if (existing) existing.remove();
+
+  _relocateTabs = _relocateCollectTabs();
+  _relocateSelIdx = -1;
+  if (_relocateTabs.length === 0) {
+    showToast('탭 목록을 불러오지 못했습니다. 탭 관리 대시보드를 먼저 여세요.', 'info');
+    return;
+  }
+
+  const modal = document.createElement('div');
+  modal.id = 'reviewRelocateModal';
+  modal.classList.add('toss-overlay');
+  modal.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,.45);z-index:9999;display:flex;align-items:center;justify-content:center;padding:20px';
+  modal.innerHTML = `
+    <div style="background:#fff;border-radius:12px;width:100%;max-width:560px;max-height:82vh;display:flex;flex-direction:column;box-shadow:0 20px 60px rgba(0,0,0,.2)">
+      <div style="padding:16px 20px;border-bottom:1px solid #E5E7EB;flex-shrink:0">
+        <h3 style="margin:0;font-size:1rem;font-weight:700;color:#111"><i class="fas fa-folder-tree" style="color:#7C3AED"></i> 리뷰 캡처 정리</h3>
+        <div style="font-size:.72rem;color:#6B7280;margin-top:4px">내 드라이브 루트 등에 흩어진 리뷰 캡처를 선택한 탭의 <b>[리뷰]</b> 폴더로 이동합니다.</div>
+      </div>
+      <div style="padding:14px 20px;overflow-y:auto;flex:1">
+        <label style="font-size:.74rem;font-weight:600;color:#374151">대상 탭 <span style="color:#9CA3AF;font-weight:400">(검색해서 선택)</span></label>
+        <div style="position:relative;margin:4px 0 12px">
+          <input id="rlcTabSearch" type="text" autocomplete="off" placeholder="탭·상품·캠페인 검색…"
+            oninput="_relocateFilterTabs()" onfocus="_relocateFilterTabs()"
+            onblur="setTimeout(function(){var l=document.getElementById('rlcTabList');if(l)l.style.display='none'},150)"
+            style="width:100%;padding:7px 9px;border:1px solid #D1D5DB;border-radius:8px;font-size:.8rem">
+          <div id="rlcTabList" style="display:none;position:absolute;left:0;right:0;top:100%;margin-top:2px;background:#fff;border:1px solid #E5E7EB;border-radius:8px;box-shadow:0 8px 24px rgba(0,0,0,.12);max-height:240px;overflow-y:auto;z-index:5"></div>
+          <div id="rlcTabSelected" style="font-size:.7rem;color:#6B7280;margin-top:4px"></div>
+        </div>
+
+        <label style="font-size:.74rem;font-weight:600;color:#374151">[리뷰] 폴더 링크 <span style="color:#9CA3AF;font-weight:400">(비어 있으면 대상 [리뷰] 폴더 링크를 붙여넣으세요)</span></label>
+        <input id="rlcFolderUrl" type="text" placeholder="https://drive.google.com/drive/folders/..." style="width:100%;padding:7px 9px;border:1px solid #D1D5DB;border-radius:8px;font-size:.72rem;margin:4px 0 12px;font-family:monospace">
+
+        <label style="font-size:.74rem;font-weight:600;color:#374151">브랜드/상품 키워드 <span style="color:#9CA3AF;font-weight:400">(쉼표 구분 — 캡처에 보이는 단어)</span></label>
+        <input id="rlcKeywords" type="text" placeholder="예: 서일농원, 콩물" style="width:100%;padding:7px 9px;border:1px solid #D1D5DB;border-radius:8px;font-size:.8rem;margin:4px 0 12px">
+
+        <label style="font-size:.74rem;font-weight:600;color:#374151">시작일 <span style="color:#9CA3AF;font-weight:400">(이 날짜 이후 업로드만 — 비우면 전체)</span></label>
+        <input id="rlcSince" type="date" style="width:100%;padding:7px 9px;border:1px solid #D1D5DB;border-radius:8px;font-size:.8rem;margin:4px 0 4px">
+
+        <div style="display:flex;gap:8px;margin-top:14px">
+          <button onclick="_relocateRun(false)" style="flex:1;padding:9px;background:#7C3AED;color:#fff;border:none;border-radius:8px;font-size:.82rem;font-weight:700;cursor:pointer"><i class="fas fa-search"></i> 선택 탭 미리보기</button>
+          <button onclick="_relocateScanAll()" style="flex:1;padding:9px;background:#4338CA;color:#fff;border:none;border-radius:8px;font-size:.82rem;font-weight:700;cursor:pointer"><i class="fas fa-layer-group"></i> 전체 탭 자동 스캔</button>
+        </div>
+        <div style="font-size:.66rem;color:#9CA3AF;margin-top:6px">※ 전체 스캔은 모든 탭을 하나씩 조회해 탭별 대상 건수를 보여줍니다. 폴더 링크·키워드 칸은 무시하고 탭마다 자동 적용합니다.</div>
+        <div style="margin-top:8px;text-align:right">
+          <button onclick="document.getElementById('reviewRelocateModal').remove()" style="padding:7px 16px;background:#F3F4F6;color:#374151;border:none;border-radius:8px;font-size:.8rem;font-weight:600;cursor:pointer">닫기</button>
+        </div>
+        <div id="rlcResult" style="margin-top:14px"></div>
+      </div>
+    </div>`;
+  document.body.appendChild(modal);
+  const sb = document.getElementById('rlcTabSearch');
+  if (sb) sb.focus();
+
+  // 임시저장된 전체 스캔 결과가 있으면 자동 복원
+  _relocateScanStop = false;
+  _relocateScanResults = _relocateLoadScan().byTab || {};
+  if (Object.keys(_relocateScanResults).length) _relocateRenderScan();
+}
+
+// 검색어로 탭 목록 필터링 → 자동완성 리스트 렌더
+function _relocateFilterTabs() {
+  const inp = document.getElementById('rlcTabSearch');
+  const listEl = document.getElementById('rlcTabList');
+  if (!inp || !listEl) return;
+  const q = (inp.value || '').trim().toLowerCase();
+  const matches = [];
+  for (let i = 0; i < _relocateTabs.length && matches.length < 50; i++) {
+    const t = _relocateTabs[i];
+    const hay = `${t.displayName} ${t.campName} ${t.tabName}`.toLowerCase();
+    if (!q || hay.includes(q)) matches.push(i);
+  }
+  if (matches.length === 0) {
+    listEl.innerHTML = `<div style="padding:10px 12px;font-size:.74rem;color:#9CA3AF">검색 결과 없음</div>`;
+    listEl.style.display = 'block';
+    return;
+  }
+  listEl.innerHTML = matches.map(i => {
+    const t = _relocateTabs[i];
+    return `<div onmousedown="_relocateSelectTab(${i})" style="padding:8px 12px;cursor:pointer;border-bottom:1px solid #F3F4F6"
+        onmouseover="this.style.background='#F5F3FF'" onmouseout="this.style.background='#fff'">
+        <div style="font-size:.78rem;color:#111;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${escHtml(t.displayName)}</div>
+        ${t.campName ? `<div style="font-size:.66rem;color:#9CA3AF">${escHtml(t.campName)}</div>` : ''}
+      </div>`;
+  }).join('');
+  listEl.style.display = 'block';
+}
+
+// 자동완성 항목 선택 → 폴더링크·키워드 자동 채움
+function _relocateSelectTab(i) {
+  const t = _relocateTabs[i];
+  if (!t) return;
+  _relocateSelIdx = i;
+  const sb = document.getElementById('rlcTabSearch');
+  if (sb) sb.value = t.displayName;
+  const listEl = document.getElementById('rlcTabList');
+  if (listEl) listEl.style.display = 'none';
+  const selEl = document.getElementById('rlcTabSelected');
+  if (selEl) selEl.innerHTML = `선택됨: <b>${escHtml(t.displayName)}</b>${t.campName ? ' — ' + escHtml(t.campName) : ''}`;
+  document.getElementById('rlcFolderUrl').value = t.folderUrl || '';
+  document.getElementById('rlcKeywords').value = _relocateDeriveKeywords(t.tabName).join(', ');
+  document.getElementById('rlcResult').innerHTML = '';
+}
+
+async function _relocateRun(apply) {
+  const t = _relocateTabs[_relocateSelIdx];
+  if (!t) { showToast('대상 탭을 검색해서 선택하세요.', 'error'); return; }
+  const reviewFolderUrl = (document.getElementById('rlcFolderUrl').value || '').trim();
+  const brandKeywords = (document.getElementById('rlcKeywords').value || '').split(',').map(s => s.trim()).filter(Boolean);
+  const sinceRaw = (document.getElementById('rlcSince').value || '').trim();
+  const sinceDate = sinceRaw ? (sinceRaw + 'T00:00:00Z') : undefined;
+
+  if (!reviewFolderUrl) { showToast('[리뷰] 폴더 링크가 필요합니다.', 'error'); return; }
+  if (brandKeywords.length === 0) { showToast('브랜드/상품 키워드를 1개 이상 입력하세요.', 'error'); return; }
+  if (apply && !confirm(`선택한 캡처들을 [리뷰] 폴더로 이동합니다. 진행할까요?`)) return;
+
+  const resultEl = document.getElementById('rlcResult');
+  resultEl.innerHTML = `<div style="font-size:.78rem;color:#6B7280"><i class="fas fa-spinner fa-spin"></i> ${apply ? '이동 중' : '검색 중'}...</div>`;
+
+  try {
+    const res = await gasPost({
+      action: 'relocateOrphanReviews',
+      sheetId: t.sheetId, tabName: t.tabName,
+      reviewFolderUrl, brandKeywords, sinceDate,
+      dryRun: !apply,
+    });
+    if (!res || res.ok === false) {
+      resultEl.innerHTML = `<div style="font-size:.78rem;color:#DC2626">오류: ${escHtml((res && res.error) || '실패')}</div>`;
+      return;
+    }
+    // 인덱스 결정적 링크(B) 요약 — 모든 결과에 공통 표기
+    const lk = res.link || {};
+    const linkLine = (lk.linked || lk.ambiguous || lk.unmatched || lk.already)
+      ? `<div style="font-size:.72rem;color:#4338CA;margin-top:6px"><i class="fas fa-link"></i> 인덱스 링크: 연결 ${lk.linked || 0}${lk.already ? ` · 기존 ${lk.already}` : ''}${lk.ambiguous ? ` · 모호 ${lk.ambiguous}` : ''}${lk.unmatched ? ` · 명단없음 ${lk.unmatched}` : ''}</div>`
+      : '';
+
+    // 진단: 서버 검색이 실제로 몇 건을 반환했는지 (0이면 계정/스코프/가시성 문제)
+    const dg = res.diag || {};
+    const ss = (dg.searchStats || []).map(s => `${escHtml(s.kw)}[SA:${s.sa == null ? '-' : s.sa}/OAuth:${s.oauth == null ? '-' : s.oauth}${s.oauthError ? '⚠' : ''}]`).join(' ');
+    const errMsg = (dg.searchStats || []).map(s => s.oauthError || s.saError).find(Boolean);
+    const errLine = errMsg ? `<div style="font-size:.66rem;color:#DC2626;margin-top:3px;font-family:monospace;word-break:break-all">⚠ ${escHtml(String(errMsg).slice(0, 300))}</div>` : '';
+    const diagLine = `<div style="font-size:.68rem;color:#9CA3AF;margin-top:6px;font-family:monospace">🔎 서버검색 ${dg.searchFound ?? '-'}건(리뷰형식 ${dg.reviewFormatCount ?? '-'}) ${ss}</div>${errLine}`;
+
+    if (apply) {
+      resultEl.innerHTML = `<div style="font-size:.84rem;color:#065F46;font-weight:700"><i class="fas fa-check-circle"></i> ${res.movedCount}건 이동 완료${res.failedCount ? ` · ${res.failedCount}건 실패` : ''}</div>
+        ${linkLine}${diagLine}
+        <div style="font-size:.72rem;color:#6B7280;margin-top:4px">[리뷰] 폴더를 새로고침해 확인하세요. (이미 폴더에 있던 파일은 건너뜀)</div>`;
+      showToast(`${res.movedCount}건 이동${lk.linked ? ` · 인덱스 ${lk.linked}건 연결` : ''}`, 'success');
+      return;
+    }
+    // 후보 목록 — 파일명 클릭 시 모달 내에서 이미지 인라인 펼침(아코디언)
+    const showN = 50;
+    const list = (res.candidates || []).slice(0, showN).map(c => `
+      <div style="border-bottom:1px solid #ECECF5">
+        <div onclick="_relocateToggleImg(this,'${escHtml(c.id)}')" style="cursor:pointer;font-size:.7rem;color:#374151;font-family:monospace;word-break:break-all;padding:5px 2px;display:flex;align-items:flex-start;gap:6px" title="클릭하면 이미지 미리보기">
+          <i class="fas fa-chevron-right" style="font-size:.6rem;color:#9CA3AF;margin-top:3px;transition:transform .15s"></i>
+          <span style="flex:1">${escHtml(c.name)}</span>
+        </div>
+        <div class="rlc-img" style="display:none"></div>
+      </div>`).join('');
+    const more = res.candidateCount > showN ? `<div style="font-size:.7rem;color:#9CA3AF;margin-top:4px">… 외 ${res.candidateCount - showN}건</div>` : '';
+    const inTargetLine = res.alreadyInTarget ? `<div style="font-size:.7rem;color:#6B7280;margin-top:4px">이미 [리뷰] 폴더에 있는 ${res.alreadyInTarget}건도 인덱스 링크 대상에 포함됩니다.</div>` : '';
+    resultEl.innerHTML = `
+      <div style="background:#F5F3FF;border:1px solid #DDD6FE;border-radius:8px;padding:12px">
+        <div style="font-size:.84rem;font-weight:700;color:#5B21B6">이동 대상: ${res.candidateCount}건</div>
+        ${linkLine}${inTargetLine}${diagLine}
+        ${(res.candidateCount || res.alreadyInTarget)
+          ? `<div style="margin:8px 0 0">${list}</div>${more}
+             <div style="font-size:.64rem;color:#9CA3AF;margin-top:4px">※ 파일명을 누르면 이 화면에서 바로 이미지를 펼쳐 볼 수 있습니다.</div>
+             <button onclick="_relocateRun(true)" style="margin-top:12px;width:100%;padding:9px;background:#059669;color:#fff;border:none;border-radius:8px;font-size:.82rem;font-weight:700;cursor:pointer"><i class="fas fa-arrow-right-to-bracket"></i> 실행 (이동 ${res.candidateCount}건 + 인덱스 링크)</button>`
+          : `<div style="font-size:.72rem;color:#6B7280;margin-top:6px">대상이 없습니다. 키워드/시작일을 조정해 보세요. (OCR 색인이 안 된 캡처는 검색에 안 걸릴 수 있습니다.)</div>`}
+      </div>`;
+  } catch (err) {
+    resultEl.innerHTML = `<div style="font-size:.78rem;color:#DC2626">오류: ${escHtml(err.message)}</div>`;
+  }
+}
+
+// ── 전체 탭 스캔: 임시저장(localStorage) ──
+function _relocateTabKey(t) { return (t.sheetId || '') + '||' + (t.tabName || ''); }
+function _relocateLoadScan() {
+  try { const o = JSON.parse(localStorage.getItem('rlcScanResults_v1') || '{}'); return (o && o.byTab) ? o : { ts: 0, byTab: {} }; }
+  catch (_) { return { ts: 0, byTab: {} }; }
+}
+function _relocateSaveScan() {
+  try { localStorage.setItem('rlcScanResults_v1', JSON.stringify({ ts: Date.now(), byTab: _relocateScanResults })); } catch (_) {}
+}
+
+// 결과 1건 → 상태/액션 셀 HTML
+function _relocateScanRowInner(i, t, r) {
+  if (!t.folderUrl) return { status: `<span style="color:#D97706">폴더 미설정</span>`, action: '' };
+  if (!r) return { status: `<span style="color:#9CA3AF">대기</span>`, action: '' };
+  if (r.status === 'scanning') return { status: `<i class="fas fa-spinner fa-spin"></i> 스캔중`, action: '' };
+  if (r.status === 'error') return { status: `<span style="color:#DC2626" title="${escHtml(r.error || '')}">오류</span>`, action: '' };
+  if (r.status === 'moved') return { status: `<span style="color:#065F46;font-weight:700">✅ ${r.movedCount}건 이동</span>${r.linked ? ` <span style="color:#4338CA">링크 ${r.linked}</span>` : ''}`, action: '' };
+  const n = r.candidateCount || 0;
+  if (n === 0) return { status: `<span style="color:#9CA3AF">대상 0</span>`, action: '' };
+  if (r.over) return {
+    status: `<span style="color:#DC2626;font-weight:700" title="작업건수(${r.expected || '?'})보다 대상이 많음 — 단일 탭 모드에서 정확한 키워드로 확인하세요">⚠ 과다 ${n}/${r.expected || '?'}</span>`,
+    action: `<button onclick="_relocateSelectTab(${i});showToast('단일 탭 모드에서 정확한 키워드로 확인 후 이동하세요','info')" style="font-size:.68rem;background:#FEF3C7;color:#92400E;border:none;border-radius:6px;padding:4px 9px;cursor:pointer">검토</button>`,
+  };
+  return {
+    status: `<b style="color:#5B21B6">대상 ${n}건</b>${r.expected ? `<span style="color:#9CA3AF">/${r.expected}</span>` : ''}${r.ambiguous ? ` <span style="color:#9CA3AF">모호 ${r.ambiguous}</span>` : ''}`,
+    action: `<button id="rlcScanBtn_${i}" onclick="_relocateApplyTab(${i})" style="font-size:.72rem;background:#059669;color:#fff;border:none;border-radius:6px;padding:4px 11px;cursor:pointer">이동</button>`,
+  };
+}
+
+function _relocateUpdateRow(i) {
+  const t = _relocateTabs[i];
+  const inner = _relocateScanRowInner(i, t, _relocateScanResults[_relocateTabKey(t)]);
+  const s = document.getElementById('rlcScanStatus_' + i);
+  const a = document.getElementById('rlcScanAction_' + i);
+  if (s) s.innerHTML = inner.status;
+  if (a) a.innerHTML = inner.action;
+}
+
+// 저장된(또는 현재) 결과로 전체 목록 렌더
+function _relocateRenderScan() {
+  const resultEl = document.getElementById('rlcResult');
+  if (!resultEl) return;
+  const rows = _relocateTabs.map((t, i) => {
+    const inner = _relocateScanRowInner(i, t, _relocateScanResults[_relocateTabKey(t)]);
+    return `<div style="display:flex;align-items:center;gap:8px;padding:6px 10px;border-bottom:1px solid #F3F4F6">
+      <div style="flex:1;min-width:0">
+        <div style="font-size:.74rem;color:#111;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${escHtml(t.displayName)}</div>
+        ${t.campName ? `<div style="font-size:.62rem;color:#9CA3AF;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${escHtml(t.campName)}</div>` : ''}
+      </div>
+      <div id="rlcScanStatus_${i}" style="font-size:.7rem;white-space:nowrap">${inner.status}</div>
+      <div id="rlcScanAction_${i}" style="min-width:54px;text-align:right">${inner.action}</div>
+    </div>`;
+  }).join('');
+  const saved = _relocateLoadScan();
+  const tsTxt = saved.ts ? new Date(saved.ts).toLocaleString() : '';
+  resultEl.innerHTML = `
+    <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:6px;gap:8px">
+      <div id="rlcScanProgress" style="font-size:.72rem;font-weight:700;color:#3730A3;min-width:0;overflow:hidden;text-overflow:ellipsis">${tsTxt ? '임시저장 ' + escHtml(tsTxt) : '스캔 준비됨'}</div>
+      <div style="display:flex;gap:6px;flex-shrink:0">
+        <button onclick="_relocateScanAll()" style="font-size:.7rem;background:#4338CA;color:#fff;border:none;border-radius:6px;padding:4px 10px;cursor:pointer">다시 스캔</button>
+        <button onclick="_relocateScanStop=true" style="font-size:.7rem;background:#FEE2E2;color:#991B1B;border:none;border-radius:6px;padding:4px 10px;cursor:pointer">중지</button>
+      </div>
+    </div>
+    <div style="max-height:360px;overflow-y:auto;border:1px solid #E5E7EB;border-radius:8px">${rows}</div>`;
+}
+
+// 전체 탭 자동 스캔 — 모든 탭 순차 dryRun. requireRoster로 참여자 명단 제약 + 과대매칭 차단.
+async function _relocateScanAll() {
+  _relocateScanStop = false;
+  const sinceRaw = (document.getElementById('rlcSince').value || '').trim();
+  const sinceDate = sinceRaw ? (sinceRaw + 'T00:00:00Z') : undefined;
+  _relocateRenderScan();
+  const setProg = (txt) => { const p = document.getElementById('rlcScanProgress'); if (p) p.textContent = txt; };
+
+  let scanned = 0, withTargets = 0;
+  for (let i = 0; i < _relocateTabs.length; i++) {
+    if (_relocateScanStop) { setProg(`중지됨 (${scanned}/${_relocateTabs.length})`); _relocateSaveScan(); return; }
+    const t = _relocateTabs[i];
+    const key = _relocateTabKey(t);
+    if (_relocateScanResults[key] && _relocateScanResults[key].status === 'moved') { scanned++; continue; } // 이미 이동 → 건너뜀
+
+    if (!t.folderUrl) { _relocateScanResults[key] = { displayName: t.displayName, status: 'nofolder' }; _relocateUpdateRow(i); scanned++; continue; }
+    _relocateScanResults[key] = { displayName: t.displayName, status: 'scanning' }; _relocateUpdateRow(i);
+    try {
+      const res = await gasPost({
+        action: 'relocateOrphanReviews',
+        sheetId: t.sheetId, tabName: t.tabName,
+        reviewFolderUrl: t.folderUrl,
+        brandKeywords: _relocateDeriveKeywords(t.tabName),
+        requireRoster: true, sinceDate, dryRun: true,
+      });
+      if (!res || res.ok === false) {
+        _relocateScanResults[key] = { displayName: t.displayName, status: 'error', error: (res && res.error) || '' };
+      } else {
+        const n = res.candidateCount || 0;
+        const expected = (res.indexRowCount && res.indexRowCount > 0) ? res.indexRowCount : _relocateParseCount(t.tabName);
+        const over = expected > 0 ? (n > expected * 2 + 5) : (n > 50);
+        if (n > 0) withTargets++;
+        _relocateScanResults[key] = { displayName: t.displayName, status: 'ok', candidateCount: n, expected, over, ambiguous: (res.link && res.link.ambiguous) || 0 };
+      }
+    } catch (e) {
+      _relocateScanResults[key] = { displayName: t.displayName, status: 'error', error: e.message };
+    }
+    _relocateUpdateRow(i);
+    scanned++;
+    setProg(`스캔 ${scanned}/${_relocateTabs.length} · 대상 있는 탭 ${withTargets}`);
+    _relocateSaveScan();
+  }
+  setProg(`스캔 완료 ${scanned}/${_relocateTabs.length} · 대상 있는 탭 ${withTargets}`);
+  _relocateSaveScan();
+}
+
+// 스캔 목록에서 한 탭만 실제 이동(apply) — 과대매칭(over)은 차단
+async function _relocateApplyTab(i) {
+  const t = _relocateTabs[i];
+  if (!t || !t.folderUrl) return;
+  const key = _relocateTabKey(t);
+  const prev = _relocateScanResults[key];
+  if (prev && prev.over) { showToast('과대매칭 의심 — 단일 탭 모드에서 정확한 키워드로 확인 후 이동하세요', 'error'); return; }
+  const btn = document.getElementById('rlcScanBtn_' + i);
+  if (btn) { btn.disabled = true; btn.textContent = '이동중'; }
+  const sinceRaw = (document.getElementById('rlcSince').value || '').trim();
+  const sinceDate = sinceRaw ? (sinceRaw + 'T00:00:00Z') : undefined;
+  try {
+    const res = await gasPost({
+      action: 'relocateOrphanReviews',
+      sheetId: t.sheetId, tabName: t.tabName,
+      reviewFolderUrl: t.folderUrl,
+      brandKeywords: _relocateDeriveKeywords(t.tabName),
+      requireRoster: true, sinceDate, dryRun: false,
+    });
+    if (!res || res.ok === false) {
+      _relocateScanResults[key] = Object.assign({}, prev, { status: 'error', error: (res && res.error) || '' });
+      _relocateUpdateRow(i); _relocateSaveScan(); return;
+    }
+    const lk = res.link || {};
+    _relocateScanResults[key] = { displayName: t.displayName, status: 'moved', movedCount: res.movedCount, linked: lk.linked || 0 };
+    _relocateUpdateRow(i); _relocateSaveScan();
+    showToast(`${t.displayName}: ${res.movedCount}건 이동`, 'success');
+  } catch (e) {
+    _relocateScanResults[key] = Object.assign({}, prev, { status: 'error', error: e.message });
+    _relocateUpdateRow(i); _relocateSaveScan();
+  }
+}

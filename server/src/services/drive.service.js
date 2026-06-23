@@ -253,6 +253,13 @@ async function createFolder(name, parentFolderId) {
  * @returns {{ id, name, webViewLink, webContentLink }}
  */
 async function uploadFileBase64(base64Data, fileName, mimeType, parentFolderId, opts = {}) {
+  // ★ 루트 업로드 방지 가드: parentFolderId가 비어 있으면 Google Drive가
+  //   파일을 "내 드라이브 최상위(루트)"에 떨궈버린다. (과거 리뷰 캡처가
+  //   [리뷰] 폴더가 아니라 루트에 흩어진 원인) → 명시적으로 차단한다.
+  if (!parentFolderId) {
+    throw new Error('업로드 대상 폴더(parentFolderId)가 지정되지 않았습니다 — 루트 업로드를 방지합니다.');
+  }
+
   // data URL prefix 제거
   const cleanBase64 = base64Data.replace(/^data:[^;]+;base64,/, '');
   const buffer = Buffer.from(cleanBase64, 'base64');
@@ -840,6 +847,68 @@ async function searchFolders(nameContains, opts = {}) {
 }
 
 /**
+ * 임의의 Drive 쿼리로 파일을 검색 — SA + OAuth 결과를 병합(소유자가 달라도 누락 방지)하고
+ * limit 도달 시까지 페이지네이션한다. (예: fullText/이름/생성일 조건으로 고아 리뷰 캡처 탐색)
+ * @param {string} q - Drive v3 files.list q 쿼리
+ * @param {{limit?:number, fields?:string}} [opts]
+ * @returns {Promise<Array<{id,name,parents,createdTime,owner,mimeType}>>}
+ */
+async function searchFiles(q, opts = {}) {
+  const query = String(q || '').trim();
+  if (!query) return [];
+  const limit = opts.limit || 500;
+  const fields = opts.fields || 'files(id, name, parents, createdTime, mimeType, owners(emailAddress))';
+  const fieldStr = `nextPageToken, ${fields}`;
+
+  const byId = new Map();
+  const sa = _getReadDrive();
+  const oauth = _getOAuthDrive();
+  const stats = opts.stats || null; // 진단용: { sa, oauth, saError, oauthError }
+
+  // 페이지네이션 수집 (주어진 params로 끝까지)
+  const collect = async (client, params) => {
+    let pageToken = null, count = 0;
+    do {
+      const res = await client.files.list({ ...params, pageToken: pageToken || undefined });
+      const fl = res.data.files || [];
+      count += fl.length;
+      for (const f of fl) {
+        if (byId.has(f.id)) continue;
+        byId.set(f.id, {
+          id: f.id,
+          name: f.name,
+          parents: f.parents || [],
+          createdTime: f.createdTime || '',
+          mimeType: f.mimeType || '',
+          owner: (f.owners && f.owners[0] && f.owners[0].emailAddress) || '',
+        });
+      }
+      pageToken = res.data.nextPageToken;
+    } while (pageToken && byId.size < limit);
+    return count;
+  };
+
+  // 풀 파라미터 → 실패 시 최소 파라미터로 재시도 (orderBy/allDrives 호환성 회피)
+  const base = {
+    q: query, fields: fieldStr, pageSize: Math.min(limit, 1000),
+    supportsAllDrives: true, includeItemsFromAllDrives: true, orderBy: 'createdTime desc',
+  };
+  const minimal = { q: query, fields: fieldStr, pageSize: Math.min(limit, 1000) };
+
+  for (const [client, label] of [[sa, 'SA'], [oauth, 'OAuth']]) {
+    const key = label === 'SA' ? 'sa' : 'oauth';
+    if (!client || (label === 'OAuth' && client === sa)) { if (stats) stats[key] = null; continue; }
+    let count = 0, lastErr = null;
+    for (const params of [base, minimal]) {
+      try { count = await collect(client, params); lastErr = null; break; }
+      catch (e) { lastErr = e.message; logger.warn(`[Drive] ${label} searchFiles 실패: ${e.message}`); }
+    }
+    if (stats) { stats[key] = count; if (lastErr) stats[key + 'Error'] = lastErr; }
+  }
+  return [...byId.values()];
+}
+
+/**
  * 폴더 하위 항목을 SA+OAuth 병합 조회 (소유자가 다른 폴더도 누락 없이)
  */
 async function _listChildrenMerged(folderId) {
@@ -1174,6 +1243,7 @@ module.exports = {
   // 폴더 후보 검색 (찾기 & 재연결)
   deriveFolderSearchTerms,
   searchFolders,
+  searchFiles,
   inspectFolder,
   getFolderMeta,
   // 중복 파일 정리
