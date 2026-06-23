@@ -15870,7 +15870,7 @@ async function _relocateFolderAudit() {
   }
   // 긴 단일요청 대신 여러 탭씩 나눠 호출 + 진행률 (타임아웃/멈춤 방지)
   resultEl.innerHTML = `<div style="font-size:.8rem;color:#3730A3;font-weight:700"><i class="fas fa-spinner fa-spin"></i> <span id="rlcAuditProg">리뷰폴더 점검 0/${all.length}…</span></div>`;
-  const agg = { totalTabs: all.length, excluded: 0, connected: 0, nonEmpty: 0, empty: 0, noFolder: 0, preMarch: 0, errors: 0, details: [] };
+  const agg = { totalTabs: all.length, excluded: 0, connected: 0, nonEmpty: 0, empty: 0, noFolder: 0, preMarch: 0, errors: 0, ownerTally: {}, details: [] };
   const CHUNK = 8;
   for (let i = 0; i < all.length; i += CHUNK) {
     const chunk = all.slice(i, i + CHUNK);
@@ -15879,6 +15879,7 @@ async function _relocateFolderAudit() {
       if (res && res.ok !== false) {
         agg.excluded += res.excluded || 0; agg.connected += res.connected || 0; agg.nonEmpty += res.nonEmpty || 0;
         agg.empty += res.empty || 0; agg.noFolder += res.noFolder || 0; agg.preMarch += res.preMarch || 0; agg.errors += res.errors || 0;
+        if (res.ownerTally) for (const k in res.ownerTally) agg.ownerTally[k] = (agg.ownerTally[k] || 0) + res.ownerTally[k];
         if (Array.isArray(res.details)) agg.details.push(...res.details);
       } else {
         agg.errors += chunk.length;
@@ -15899,8 +15900,24 @@ function _renderFolderAudit(resultEl, res) {
   const haves = d.filter(x => x.status === 'has-files').sort((a, b) => b.count - a.count);
   const pre = haves.filter(x => x.preMarch);
   const target = haves.filter(x => !x.preMarch); // 26.3+ 정상 폴더
-  const liH = arr => arr.map(x => `<li style="font-size:.7rem;color:#374151;word-break:break-all">${escHtml(x.tab)}${x.count ? ` <span style="color:#9CA3AF">— ${x.count}건${x.earliest ? `, 최초 ${x.earliest}` : ''}</span>` : ''}</li>`).join('');
-  const li = arr => arr.map(x => `<li style="font-size:.7rem;color:#374151;word-break:break-all">${escHtml(x.tab)}</li>`).join('');
+  // 소유자 라벨 → 배지 (tnaks 외 소유자는 이관 대상이므로 강조)
+  const ownBadge = (lbl) => {
+    if (!lbl || lbl === 'tnaks6325') return '';
+    const color = (lbl === '박세희' || lbl === '박은비') ? '#DC2626' : (lbl === 'service-account' ? '#6B7280' : '#B45309');
+    return ` <span style="font-size:.62rem;font-weight:700;color:${color};background:${color}1A;border-radius:4px;padding:0 4px">${escHtml(lbl)}</span>`;
+  };
+  const liH = arr => arr.map(x => `<li style="font-size:.7rem;color:#374151;word-break:break-all">${escHtml(x.tab)}${ownBadge(x.ownerLabel)}${x.count ? ` <span style="color:#9CA3AF">— ${x.count}건${x.earliest ? `, 최초 ${x.earliest}` : ''}</span>` : ''}</li>`).join('');
+  const li = arr => arr.map(x => `<li style="font-size:.7rem;color:#374151;word-break:break-all">${escHtml(x.tab)}${ownBadge(x.ownerLabel)}</li>`).join('');
+  // 소유자 집계 + 이관 대상(tnaks 외) 강조
+  const ot = res.ownerTally || {};
+  const otOrder = ['tnaks6325', '박세희', '박은비', 'service-account', '기타', 'unknown'];
+  const otKeys = otOrder.filter(k => ot[k]).concat(Object.keys(ot).filter(k => otOrder.indexOf(k) < 0));
+  const nonTnaks = Object.keys(ot).reduce((s, k) => s + (k === 'tnaks6325' ? 0 : (ot[k] || 0)), 0);
+  const ownerChips = otKeys.map(k => {
+    const isMine = k === 'tnaks6325';
+    const c = isMine ? '#059669' : (k === '박세희' || k === '박은비') ? '#DC2626' : '#B45309';
+    return `<span style="font-size:.68rem;font-weight:700;color:${c};background:${c}14;border-radius:6px;padding:2px 7px">${escHtml(k)} ${ot[k]}</span>`;
+  }).join(' ');
   resultEl.innerHTML = `
     <div style="background:#F8FAFC;border:1px solid #E2E8F0;border-radius:8px;padding:12px">
       <div style="font-size:.82rem;font-weight:800;color:#0F172A;margin-bottom:6px">활성 탭 리뷰폴더 현황</div>
@@ -15911,6 +15928,11 @@ function _renderFolderAudit(resultEl, res) {
         <div style="background:#FEF2F2;border-radius:6px;padding:8px"><b>③ 비어있음</b><br><span style="font-size:.92rem;font-weight:800;color:#DC2626">${res.empty}개</span></div>
         <div style="background:#FFFBEB;border-radius:6px;padding:8px"><b>폴더 미연결</b><br><span style="font-size:.92rem;font-weight:800;color:#B45309">${res.noFolder}개</span>${res.errors ? ` · 오류 ${res.errors}` : ''}</div>
       </div>
+      ${ownerChips ? `<div style="margin-top:10px;background:#fff;border:1px solid #E2E8F0;border-radius:6px;padding:8px">
+        <div style="font-size:.72rem;font-weight:700;color:#0F172A;margin-bottom:5px">연결 폴더 소유자 <span style="font-weight:400;color:#9CA3AF">(이관 범위 판정)</span></div>
+        <div style="display:flex;flex-wrap:wrap;gap:5px">${ownerChips}</div>
+        ${nonTnaks ? `<div style="font-size:.66rem;color:#DC2626;margin-top:6px">※ tnaks6325 외 소유 <b>${nonTnaks}개</b> = 소유권 이관 대상 (아래 목록에 빨간 배지 표시)</div>` : `<div style="font-size:.66rem;color:#059669;margin-top:6px">※ 모든 연결 폴더가 tnaks6325 소유 — 이관 불필요</div>`}
+      </div>` : ''}
       ${empties.length ? `<div style="margin-top:10px"><div style="font-size:.74rem;font-weight:700;color:#DC2626">③ 비어있는 리뷰폴더 (${empties.length}) — 정리 필요</div><ul style="margin:4px 0 0;padding-left:18px;max-height:140px;overflow:auto">${li(empties)}</ul></div>` : ''}
       ${nofolder.length ? `<div style="margin-top:8px"><div style="font-size:.74rem;font-weight:700;color:#B45309">폴더 미연결 (${nofolder.length})</div><ul style="margin:4px 0 0;padding-left:18px;max-height:140px;overflow:auto">${li(nofolder)}</ul></div>` : ''}
       ${pre.length ? `<details style="margin-top:8px"><summary style="font-size:.72rem;font-weight:700;color:#9CA3AF;cursor:pointer">26.3 이전 파일 포함(대상 제외) (${pre.length})</summary><ul style="margin:4px 0 0;padding-left:18px;max-height:160px;overflow:auto">${liH(pre)}</ul></details>` : ''}
