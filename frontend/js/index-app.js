@@ -15858,6 +15858,38 @@ function _relocateToggleImg(headerEl, id) {
   }
 }
 
+// 활성 탭 리뷰폴더 현황 점검 — ① 연결 수 ② 정상(파일 있음) ③ 비어있음
+async function _relocateFolderAudit() {
+  const resultEl = document.getElementById('rlcResult');
+  resultEl.innerHTML = `<div style="font-size:.78rem;color:#6B7280"><i class="fas fa-spinner fa-spin"></i> 활성 탭 리뷰폴더 점검 중… (수십 개 폴더 조회, 1~2분 소요)</div>`;
+  try {
+    const res = await gasGet({ action: 'folderAudit' }, 240000);
+    if (!res || res.ok === false) { resultEl.innerHTML = `<div style="font-size:.78rem;color:#DC2626">오류: ${escHtml((res && res.error) || '실패')}</div>`; return; }
+    const d = res.details || [];
+    const empties = d.filter(x => x.status === 'empty');
+    const haves = d.filter(x => x.status === 'has-files').sort((a, b) => b.count - a.count);
+    const nofolder = d.filter(x => x.status === 'no-folder');
+    const errs = d.filter(x => x.status === 'error');
+    const li = arr => arr.map(x => `<li style="font-size:.7rem;color:#374151;word-break:break-all">${escHtml(x.tab)}${x.count ? ` <span style="color:#9CA3AF">— ${x.count}건</span>` : ''}${x.camp ? ` <span style="color:#CBD5E1">(${escHtml(x.camp)})</span>` : ''}</li>`).join('');
+    resultEl.innerHTML = `
+      <div style="background:#F8FAFC;border:1px solid #E2E8F0;border-radius:8px;padding:12px">
+        <div style="font-size:.82rem;font-weight:800;color:#0F172A;margin-bottom:8px">활성 탭 리뷰폴더 현황 (활성 ${res.activeTabs}개)</div>
+        <div style="display:grid;grid-template-columns:1fr 1fr;gap:6px;font-size:.74rem">
+          <div style="background:#EEF2FF;border-radius:6px;padding:8px"><b>① 리뷰폴더 연결</b><br><span style="font-size:.92rem;font-weight:800;color:#4338CA">${res.withFolderUrl}개</span> <span style="color:#9CA3AF">(폴더 ${res.distinctFolders}종)</span></div>
+          <div style="background:#ECFDF5;border-radius:6px;padding:8px"><b>② 정상(파일 있음)</b><br><span style="font-size:.92rem;font-weight:800;color:#059669">${res.nonEmpty}개</span></div>
+          <div style="background:#FEF2F2;border-radius:6px;padding:8px"><b>③ 비어있음</b><br><span style="font-size:.92rem;font-weight:800;color:#DC2626">${res.empty}개</span></div>
+          <div style="background:#FFFBEB;border-radius:6px;padding:8px"><b>폴더 미연결</b><br><span style="font-size:.92rem;font-weight:800;color:#B45309">${res.noFolderUrl}개</span>${res.errors ? ` · 오류 ${res.errors}` : ''}</div>
+        </div>
+        ${empties.length ? `<div style="margin-top:10px"><div style="font-size:.74rem;font-weight:700;color:#DC2626">③ 비어있는 리뷰폴더 (${empties.length})</div><ul style="margin:4px 0 0;padding-left:18px;max-height:160px;overflow:auto">${li(empties)}</ul></div>` : ''}
+        ${nofolder.length ? `<div style="margin-top:8px"><div style="font-size:.74rem;font-weight:700;color:#B45309">폴더 미연결 (${nofolder.length})</div><ul style="margin:4px 0 0;padding-left:18px;max-height:120px;overflow:auto">${li(nofolder)}</ul></div>` : ''}
+        ${errs.length ? `<div style="margin-top:8px"><div style="font-size:.74rem;font-weight:700;color:#9CA3AF">오류 (${errs.length})</div><ul style="margin:4px 0 0;padding-left:18px;max-height:100px;overflow:auto">${li(errs)}</ul></div>` : ''}
+        ${haves.length ? `<details style="margin-top:8px"><summary style="font-size:.74rem;font-weight:700;color:#059669;cursor:pointer">② 파일 있는 폴더 (${haves.length}) 펼쳐보기</summary><ul style="margin:4px 0 0;padding-left:18px;max-height:220px;overflow:auto">${li(haves)}</ul></details>` : ''}
+      </div>`;
+  } catch (e) {
+    resultEl.innerHTML = `<div style="font-size:.78rem;color:#DC2626">오류: ${escHtml(e.message)} (시간이 오래 걸리면 탭 수가 많아 타임아웃일 수 있습니다)</div>`;
+  }
+}
+
 // 원본 폴더 비우기 — 원본 폴더의 모든 파일을 선택 탭의 [리뷰] 폴더로 이동
 async function _relocateMoveFolder(apply) {
   const fromUrl = (document.getElementById('rlcMoveFrom').value || '').trim();
@@ -15958,6 +15990,7 @@ function openReviewRelocate() {
           <button onclick="_relocateRun(false)" style="flex:1;padding:9px;background:#7C3AED;color:#fff;border:none;border-radius:8px;font-size:.82rem;font-weight:700;cursor:pointer"><i class="fas fa-search"></i> 선택 탭 미리보기</button>
           <button onclick="_relocateScanAll()" style="flex:1;padding:9px;background:#4338CA;color:#fff;border:none;border-radius:8px;font-size:.82rem;font-weight:700;cursor:pointer"><i class="fas fa-layer-group"></i> 전체 탭 자동 스캔</button>
         </div>
+        <button onclick="_relocateFolderAudit()" style="width:100%;margin-top:8px;padding:9px;background:#0F172A;color:#fff;border:none;border-radius:8px;font-size:.82rem;font-weight:700;cursor:pointer"><i class="fas fa-clipboard-list"></i> 리뷰폴더 현황 점검 (활성 탭 전체)</button>
         <div style="font-size:.66rem;color:#9CA3AF;margin-top:6px">※ 전체 스캔은 모든 탭을 하나씩 조회해 탭별 대상 건수를 보여줍니다. 폴더 링크·키워드 칸은 무시하고 탭마다 자동 적용합니다.</div>
         <div style="margin-top:8px;text-align:right">
           <button onclick="document.getElementById('reviewRelocateModal').remove()" style="padding:7px 16px;background:#F3F4F6;color:#374151;border:none;border-radius:8px;font-size:.8rem;font-weight:600;cursor:pointer">닫기</button>

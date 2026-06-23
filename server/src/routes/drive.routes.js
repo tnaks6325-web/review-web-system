@@ -1533,6 +1533,69 @@ router.post('/move-folder-contents', authMiddleware, async (req, res, next) => {
 });
 
 // ═══════════════════════════════════════════════════════════
+// GET /api/drive/folder-audit — 활성 탭의 리뷰폴더 현황 점검
+//   ① 리뷰폴더 연결된 활성 탭 수, ② 파일이 있는(정상) 폴더 수,
+//   ③ 비어있는 폴더 수, + 폴더 미연결/오류. 각 폴더 파일수는 2단계까지 집계.
+// ═══════════════════════════════════════════════════════════
+router.get('/folder-audit', authMiddleware, async (req, res, next) => {
+  try {
+    const { rows } = await pool.query(
+      `SELECT sheet_id, tab_name, campaign_name, folder_url
+         FROM tab_configs
+        WHERE (is_closed = FALSE OR is_closed IS NULL)
+        ORDER BY tab_name`
+    );
+
+    // 폴더 내 파일 수 집계 (옵션 서브폴더까지 2단계)
+    const countDeep = async (folderId, depth) => {
+      const items = await driveService.searchFiles(`'${folderId}' in parents and trashed = false`, { limit: 1000 });
+      let n = items.filter(f => f.mimeType !== 'application/vnd.google-apps.folder').length;
+      if (depth > 1) {
+        for (const s of items.filter(f => f.mimeType === 'application/vnd.google-apps.folder')) {
+          n += await countDeep(s.id, depth - 1);
+        }
+      }
+      return n;
+    };
+
+    let withFolderUrl = 0, noFolderUrl = 0, nonEmpty = 0, empty = 0, errors = 0;
+    const distinct = new Set();
+    const details = [];
+    for (const t of rows) {
+      const folderId = extractFolderId(t.folder_url);
+      if (!folderId) {
+        noFolderUrl++;
+        details.push({ tab: t.tab_name, camp: t.campaign_name || '', status: 'no-folder', count: 0 });
+        continue;
+      }
+      withFolderUrl++; distinct.add(folderId);
+      try {
+        const count = await countDeep(folderId, 2);
+        if (count > 0) { nonEmpty++; details.push({ tab: t.tab_name, camp: t.campaign_name || '', status: 'has-files', count, folderUrl: t.folder_url }); }
+        else { empty++; details.push({ tab: t.tab_name, camp: t.campaign_name || '', status: 'empty', count: 0, folderUrl: t.folder_url }); }
+      } catch (e) {
+        errors++;
+        details.push({ tab: t.tab_name, camp: t.campaign_name || '', status: 'error', count: 0, error: e.message });
+      }
+    }
+
+    res.json({
+      ok: true,
+      activeTabs: rows.length,
+      withFolderUrl,            // ① 리뷰폴더 연결된 활성 탭 수
+      distinctFolders: distinct.size,
+      noFolderUrl,
+      nonEmpty,                 // ② 파일이 있는(정상 제출) 폴더 수
+      empty,                    // ③ 비어있는 폴더 수
+      errors,
+      details,
+    });
+  } catch (err) {
+    next(err);
+  }
+});
+
+// ═══════════════════════════════════════════════════════════
 // GET /api/drive/image/:id — Drive 이미지 스트리밍 프록시 (모달 인라인 미리보기)
 //   <img src>가 헤더 인증을 못 보내므로 무인증. id는 추측 불가한 Drive fileId(20+).
 //   서버 OAuth(소유자 계정)로 받아 스트리밍 → 비공개/링크공유 섞여도 표시.
