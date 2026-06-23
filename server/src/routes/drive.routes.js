@@ -1487,6 +1487,52 @@ router.get('/review-submissions', authMiddleware, async (req, res, next) => {
 });
 
 // ═══════════════════════════════════════════════════════════
+// POST /api/drive/move-folder-contents — 원본 폴더의 모든 파일을 대상 폴더로 이동
+//   레거시/잘못된 위치(예: 관리자 소유 폴더)에 남은 파일을 [리뷰] 폴더로 비우기.
+//   파일명 패턴 무관 전체 이동(서브폴더는 제외·리포트). dryRun 기본 true.
+//   body: { fromFolderUrl, toFolderUrl, dryRun }
+// ═══════════════════════════════════════════════════════════
+router.post('/move-folder-contents', authMiddleware, async (req, res, next) => {
+  try {
+    const { fromFolderUrl, toFolderUrl, dryRun } = req.body || {};
+    const fromId = extractFolderId(fromFolderUrl);
+    const toId = extractFolderId(toFolderUrl);
+    if (!fromId || !toId) return res.json({ ok: false, error: 'fromFolderUrl, toFolderUrl (둘 다 폴더 링크) 가 필요합니다.' });
+    if (fromId === toId) return res.json({ ok: false, error: '원본과 대상 폴더가 같습니다.' });
+    const isDryRun = dryRun !== false;
+
+    // SA+OAuth 병합 조회 (원본이 tnaks6325에만 공유된 폴더여도 누락 없이)
+    const items = await driveService.searchFiles(`'${fromId}' in parents and trashed = false`, { limit: 1000 });
+    const folders = items.filter(f => f.mimeType === 'application/vnd.google-apps.folder');
+    const files = items.filter(f => f.mimeType !== 'application/vnd.google-apps.folder');
+
+    const moved = [], failed = [];
+    if (!isDryRun) {
+      for (const f of files) {
+        try {
+          await driveService.moveFile(f.id, toId, fromId);
+          moved.push({ id: f.id, name: f.name });
+        } catch (e) {
+          logger.error(`[move-folder-contents] 이동 실패 (${f.name}): ${e.message}`);
+          failed.push({ id: f.id, name: f.name, error: e.message });
+        }
+      }
+    }
+
+    res.json({
+      ok: true, dryRun: isDryRun, fromId, toId,
+      total: files.length,
+      files: files.map(f => ({ id: f.id, name: f.name })),
+      subfolders: folders.map(f => f.name),
+      movedCount: moved.length, moved,
+      failedCount: failed.length, failed,
+    });
+  } catch (err) {
+    next(err);
+  }
+});
+
+// ═══════════════════════════════════════════════════════════
 // GET /api/drive/image/:id — Drive 이미지 스트리밍 프록시 (모달 인라인 미리보기)
 //   <img src>가 헤더 인증을 못 보내므로 무인증. id는 추측 불가한 Drive fileId(20+).
 //   서버 OAuth(소유자 계정)로 받아 스트리밍 → 비공개/링크공유 섞여도 표시.

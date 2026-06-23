@@ -58,6 +58,51 @@ function _getReadDrive() {
   return drive;
 }
 
+// OAuth 계정 이메일 캐시 (소유권 보정 판단용 — about.get 1회만)
+let _oauthEmailCache;
+async function _getOAuthEmail() {
+  if (_oauthEmailCache !== undefined) return _oauthEmailCache;
+  _oauthEmailCache = null;
+  try {
+    const d = _getOAuthDrive();
+    if (d) {
+      const r = await d.about.get({ fields: 'user(emailAddress)' });
+      _oauthEmailCache = (r.data && r.data.user && r.data.user.emailAddress) || null;
+    }
+  } catch (e) { logger.warn(`[Drive] OAuth 이메일 조회 실패: ${e.message}`); }
+  return _oauthEmailCache;
+}
+
+/**
+ * 생성/업로드 직후 소유권을 DRIVE_OWNER_EMAIL(tnaks6325)로 보정한다 (파일·폴더 공통).
+ *  - SA로 만든 것: 항상 이전(SA는 쿼터/소유 부적합)
+ *  - OAuth로 만든 것: 그 계정이 소유주가 아닐 때만 이전(이미 소유주면 생략)
+ * 과거 OAuth 계정이 tnaks6325가 아니어서 폴더가 관리자(박세희) 소유로 남던 문제 방지.
+ */
+async function _normalizeOwner(usedClient, oauthClient, fileId) {
+  const ownerEmail = process.env.DRIVE_OWNER_EMAIL || 'tnaks6325@gmail.com';
+  let actClient = null;
+  if (usedClient === 'OAuth') {
+    const email = await _getOAuthEmail();
+    if (email && email.toLowerCase() === ownerEmail.toLowerCase()) return; // 이미 소유주 → 생략
+    actClient = oauthClient || _getOAuthDrive();
+  } else {
+    actClient = _getReadDrive();
+  }
+  if (!actClient) return;
+  try {
+    await actClient.permissions.create({
+      fileId,
+      transferOwnership: true,
+      requestBody: { role: 'owner', type: 'user', emailAddress: ownerEmail },
+      supportsAllDrives: true,
+    });
+    logger.info(`[Drive] 소유권 이전 완료: ${fileId} → ${ownerEmail}`);
+  } catch (e) {
+    logger.warn(`[Drive] 소유권 이전 실패 (무시): ${fileId} — ${e.message}`);
+  }
+}
+
 // ═══════════════════════════════════════════════════════════
 // 읽기 전용 함수 (Service Account 사용)
 // ═══════════════════════════════════════════════════════════
@@ -227,6 +272,7 @@ async function createFolder(name, parentFolderId) {
     try {
       const res = await oauth.files.create(createParams);
       logger.info(`[Drive] 폴더 생성 완료: "${name}" → ${res.data.id} (OAuth)`);
+      await _normalizeOwner('OAuth', oauth, res.data.id); // ① 폴더 소유권 보정
       return res.data;
     } catch (oauthErr) {
       logger.warn(`[Drive] OAuth 폴더 생성 실패 (SA 재시도): ${oauthErr.message}`);
@@ -238,6 +284,7 @@ async function createFolder(name, parentFolderId) {
   if (sa) {
     const res = await sa.files.create(createParams);
     logger.info(`[Drive] 폴더 생성 완료: "${name}" → ${res.data.id} (SA)`);
+    await _normalizeOwner('SA', oauth, res.data.id); // ① 폴더 소유권 보정 (SA→tnaks6325)
     return res.data;
   }
 
@@ -332,25 +379,10 @@ async function uploadFileBase64(base64Data, fileName, mimeType, parentFolderId, 
     }
   }
 
-  // ── 소유권 이전: Service Account → 실제 사용자 계정 ──
-  // Service Account는 스토리지 할당량이 없으므로 파일 소유권을 이전해야 함
-  const ownerEmail = process.env.DRIVE_OWNER_EMAIL || 'tnaks6325@gmail.com';
-  if (usedClient === 'SA') {
-    try {
-      const sa = _getReadDrive();
-      if (sa) {
-        await sa.permissions.create({
-          fileId: data.id,
-          transferOwnership: true,
-          requestBody: { role: 'owner', type: 'user', emailAddress: ownerEmail },
-          supportsAllDrives: true,
-        });
-        logger.info(`[Drive] 소유권 이전 완료: ${data.id} → ${ownerEmail}`);
-      }
-    } catch (ownerErr) {
-      logger.warn(`[Drive] 소유권 이전 실패 (무시): ${ownerErr.message}`);
-    }
-  }
+  // ── ② 소유권 보정: DRIVE_OWNER_EMAIL(tnaks6325)로 이전 ──
+  //   기존엔 SA 경로만 이전했으나, OAuth 계정이 tnaks6325가 아니면 OAuth 업로드도
+  //   잘못된 계정 소유로 남는다 → SA는 항상, OAuth는 계정 불일치 시 이전.
+  await _normalizeOwner(usedClient, oauth, data.id);
 
   return data;
 }

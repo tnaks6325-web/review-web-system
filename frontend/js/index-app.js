@@ -15858,6 +15858,52 @@ function _relocateToggleImg(headerEl, id) {
   }
 }
 
+// 원본 폴더 비우기 — 원본 폴더의 모든 파일을 선택 탭의 [리뷰] 폴더로 이동
+async function _relocateMoveFolder(apply) {
+  const fromUrl = (document.getElementById('rlcMoveFrom').value || '').trim();
+  const toUrl = (document.getElementById('rlcFolderUrl').value || '').trim();
+  if (!fromUrl) { showToast('비울 원본 폴더 링크를 입력하세요.', 'error'); return; }
+  if (!toUrl) { showToast('대상 [리뷰] 폴더 링크가 필요합니다 (탭을 선택하세요).', 'error'); return; }
+  if (apply && !confirm('원본 폴더의 모든 파일을 [리뷰] 폴더로 이동합니다. 진행할까요?')) return;
+  const resultEl = document.getElementById('rlcResult');
+  resultEl.innerHTML = `<div style="font-size:.78rem;color:#6B7280"><i class="fas fa-spinner fa-spin"></i> ${apply ? '이동 중' : '조회 중'}...</div>`;
+  try {
+    const res = await gasPost({ action: 'moveFolderContents', fromFolderUrl: fromUrl, toFolderUrl: toUrl, dryRun: !apply });
+    if (!res || res.ok === false) {
+      resultEl.innerHTML = `<div style="font-size:.78rem;color:#DC2626">오류: ${escHtml((res && res.error) || '실패')}</div>`;
+      return;
+    }
+    if (apply) {
+      const failHtml = (res.failed || []).map(f => `<li style="font-size:.66rem;color:#DC2626;word-break:break-all">${escHtml(f.name)} — ${escHtml(f.error || '')}</li>`).join('');
+      resultEl.innerHTML = `<div style="font-size:.84rem;color:#065F46;font-weight:700"><i class="fas fa-check-circle"></i> ${res.movedCount}건 이동 완료${res.failedCount ? ` · ${res.failedCount}건 실패` : ''}</div>
+        ${res.failedCount ? `<ul style="margin:6px 0 0;padding-left:18px">${failHtml}</ul><div style="font-size:.66rem;color:#9CA3AF;margin-top:2px">실패 건은 보통 그 파일 소유자(예: 박세희) 권한이 필요합니다 — 소유자 측에서 옮기거나 사본 처리해야 합니다.</div>` : ''}`;
+      showToast(`${res.movedCount}건 이동`, 'success');
+      return;
+    }
+    const list = (res.files || []).slice(0, 50).map(c => `
+      <div style="border-bottom:1px solid #E0F2FE">
+        <div onclick="_relocateToggleImg(this,'${escHtml(c.id)}')" style="cursor:pointer;font-size:.7rem;color:#374151;font-family:monospace;word-break:break-all;padding:5px 2px;display:flex;align-items:flex-start;gap:6px" title="클릭하면 이미지 미리보기">
+          <i class="fas fa-chevron-right" style="font-size:.6rem;color:#9CA3AF;margin-top:3px;transition:transform .15s"></i>
+          <span style="flex:1">${escHtml(c.name)}</span>
+        </div>
+        <div class="rlc-img" style="display:none"></div>
+      </div>`).join('');
+    const sub = (res.subfolders || []).length ? `<div style="font-size:.66rem;color:#D97706;margin-top:4px">※ 서브폴더 ${res.subfolders.length}개는 이동 대상에서 제외됩니다.</div>` : '';
+    resultEl.innerHTML = `
+      <div style="background:#ECFEFF;border:1px solid #A5F3FC;border-radius:8px;padding:12px">
+        <div style="font-size:.84rem;font-weight:700;color:#155E75">원본 폴더 파일: ${res.total}건 → [리뷰]로 이동 예정</div>
+        ${sub}
+        ${res.total
+          ? `<div style="margin:8px 0 0">${list}</div>
+             <div style="font-size:.64rem;color:#9CA3AF;margin-top:4px">※ 파일명을 누르면 이미지를 펼쳐 볼 수 있습니다.</div>
+             <button onclick="_relocateMoveFolder(true)" style="margin-top:12px;width:100%;padding:9px;background:#0891B2;color:#fff;border:none;border-radius:8px;font-size:.82rem;font-weight:700;cursor:pointer"><i class="fas fa-arrow-right-to-bracket"></i> ${res.total}건 전체 이동 실행</button>`
+          : `<div style="font-size:.72rem;color:#6B7280;margin-top:6px">원본 폴더에 이동할 파일이 없습니다.</div>`}
+      </div>`;
+  } catch (err) {
+    resultEl.innerHTML = `<div style="font-size:.78rem;color:#DC2626">오류: ${escHtml(err.message)}</div>`;
+  }
+}
+
 function openReviewRelocate() {
   const existing = document.getElementById('reviewRelocateModal');
   if (existing) existing.remove();
@@ -15898,6 +15944,15 @@ function openReviewRelocate() {
 
         <label style="font-size:.74rem;font-weight:600;color:#374151">시작일 <span style="color:#9CA3AF;font-weight:400">(이 날짜 이후 업로드만 — 비우면 전체)</span></label>
         <input id="rlcSince" type="date" style="width:100%;padding:7px 9px;border:1px solid #D1D5DB;border-radius:8px;font-size:.8rem;margin:4px 0 4px">
+
+        <details style="margin-top:10px;border:1px dashed #CBD5E1;border-radius:8px;padding:8px 10px">
+          <summary style="cursor:pointer;font-size:.74rem;font-weight:700;color:#155E75">원본 폴더 비우기 (레거시/잘못된 폴더 → 위 [리뷰]로 전체 이동)</summary>
+          <div style="margin-top:8px">
+            <input id="rlcMoveFrom" type="text" placeholder="비울 원본 폴더 링크 (예: 박세희 소유 폴더)" style="width:100%;padding:7px 9px;border:1px solid #D1D5DB;border-radius:8px;font-size:.72rem;font-family:monospace">
+            <div style="font-size:.64rem;color:#9CA3AF;margin:5px 0">위 <b>[리뷰] 폴더 링크</b>가 이동 대상입니다(탭 선택 필요). 파일명 무관 <b>전체 이동</b>, 서브폴더는 제외.</div>
+            <button onclick="_relocateMoveFolder(false)" style="width:100%;padding:8px;background:#0891B2;color:#fff;border:none;border-radius:8px;font-size:.78rem;font-weight:700;cursor:pointer"><i class="fas fa-folder-open"></i> 원본 폴더 미리보기</button>
+          </div>
+        </details>
 
         <div style="display:flex;gap:8px;margin-top:14px">
           <button onclick="_relocateRun(false)" style="flex:1;padding:9px;background:#7C3AED;color:#fff;border:none;border-radius:8px;font-size:.82rem;font-weight:700;cursor:pointer"><i class="fas fa-search"></i> 선택 탭 미리보기</button>
