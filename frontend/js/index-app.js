@@ -15934,10 +15934,34 @@ function _renderFolderAudit(resultEl, res) {
         ${nonTnaks ? `<div style="font-size:.66rem;color:#DC2626;margin-top:6px">※ tnaks6325 외 소유 <b>${nonTnaks}개</b> = 소유권 이관 대상 (아래 목록에 빨간 배지 표시)</div>` : `<div style="font-size:.66rem;color:#059669;margin-top:6px">※ 모든 연결 폴더가 tnaks6325 소유 — 이관 불필요</div>`}
       </div>` : ''}
       ${empties.length ? `<div style="margin-top:10px"><div style="font-size:.74rem;font-weight:700;color:#DC2626">③ 비어있는 리뷰폴더 (${empties.length}) — 정리 필요</div><ul style="margin:4px 0 0;padding-left:18px;max-height:140px;overflow:auto">${li(empties)}</ul></div>` : ''}
-      ${nofolder.length ? `<div style="margin-top:8px"><div style="font-size:.74rem;font-weight:700;color:#B45309">폴더 미연결 (${nofolder.length})</div><ul style="margin:4px 0 0;padding-left:18px;max-height:140px;overflow:auto">${li(nofolder)}</ul></div>` : ''}
+      ${nofolder.length ? `<div style="margin-top:8px"><div style="font-size:.74rem;font-weight:700;color:#B45309">폴더 미연결 (${nofolder.length})</div><ul style="margin:4px 0 0;padding-left:18px;max-height:140px;overflow:auto">${li(nofolder)}</ul>
+        <button id="rlcConnectBtn" onclick="_relocateConnectUnlinked()" style="margin-top:8px;width:100%;padding:8px;background:#B45309;color:#fff;border:none;border-radius:8px;font-size:.78rem;font-weight:700;cursor:pointer"><i class="fas fa-link"></i> 미연결 탭 [리뷰] 폴더 생성·연결 (tnaks6325 소유)</button>
+        <div style="font-size:.64rem;color:#9CA3AF;margin-top:3px">※ 비마감 탭 중 폴더가 없는 탭에 빈 [리뷰] 폴더를 만들어 연결합니다(이미 연결된 탭은 건너뜀). 흩어진 캡처가 있으면 생성 후 위 '리뷰 캡처 정리'로 모으세요.</div>
+      </div>` : ''}
       ${pre.length ? `<details style="margin-top:8px"><summary style="font-size:.72rem;font-weight:700;color:#9CA3AF;cursor:pointer">26.3 이전 파일 포함(대상 제외) (${pre.length})</summary><ul style="margin:4px 0 0;padding-left:18px;max-height:160px;overflow:auto">${liH(pre)}</ul></details>` : ''}
       ${target.length ? `<details style="margin-top:8px" open><summary style="font-size:.74rem;font-weight:700;color:#059669;cursor:pointer">② 26.3+ 정상 폴더 (${target.length})</summary><ul style="margin:4px 0 0;padding-left:18px;max-height:220px;overflow:auto">${liH(target)}</ul></details>` : ''}
     </div>`;
+}
+
+// 미연결 활성 탭에 [리뷰] 폴더 생성·연결 (OAuth=tnaks6325 소유로 생성, 비파괴/idempotent)
+//   sync-review: 비마감 탭 중 folder_url 없는 탭만 새 [리뷰] 폴더 생성 후 tab_configs 저장
+async function _relocateConnectUnlinked() {
+  if (!confirm('미연결 활성 탭에 빈 [리뷰] 폴더를 생성하고 연결합니다.\n· tnaks6325 소유로 생성 · 이미 연결된 탭은 건너뜀 · 파일 변경 없음\n\n진행할까요?')) return;
+  const btnEl = document.getElementById('rlcConnectBtn');
+  if (btnEl) { btnEl.disabled = true; btnEl.innerHTML = '<i class="fas fa-spinner fa-spin"></i> 생성·연결 중...'; }
+  try {
+    const res = await gasPost({ action: 'syncReviewFolders' }, 180000);
+    if (!res || res.ok === false || res.error) {
+      showToast('실패: ' + ((res && res.error) || '알수없음'), 'error');
+      if (btnEl) { btnEl.disabled = false; btnEl.innerHTML = '<i class="fas fa-link"></i> 미연결 탭 [리뷰] 폴더 생성·연결 (tnaks6325 소유)'; }
+      return;
+    }
+    showToast(`[리뷰] 폴더 ${res.created || 0}개 신규 생성 · 연결 확인 ${res.synced || 0}${res.errors ? ` · 오류 ${res.errors}` : ''}`, 'success');
+    _relocateFolderAudit(); // 현황 자동 재점검
+  } catch (e) {
+    showToast('오류: ' + e.message, 'error');
+    if (btnEl) { btnEl.disabled = false; btnEl.innerHTML = '<i class="fas fa-link"></i> 미연결 탭 [리뷰] 폴더 생성·연결 (tnaks6325 소유)'; }
+  }
 }
 
 // 원본 폴더 비우기 — 원본 폴더의 모든 파일을 선택 탭의 [리뷰] 폴더로 이동
