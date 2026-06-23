@@ -990,8 +990,11 @@ async function getFolderMeta(folderId) {
   for (const client of [sa, oauth]) {
     if (!client) continue;
     try {
-      const res = await client.files.get({ fileId: folderId, fields: 'id, name', supportsAllDrives: true });
-      if (res.data) return { id: res.data.id, name: res.data.name };
+      const res = await client.files.get({ fileId: folderId, fields: 'id, name, owners(emailAddress)', supportsAllDrives: true });
+      if (res.data) {
+        const owner = (res.data.owners && res.data.owners[0] && res.data.owners[0].emailAddress) || '';
+        return { id: res.data.id, name: res.data.name, owner };
+      }
     } catch (_) {}
   }
   return null;

@@ -1565,7 +1565,19 @@ router.post('/folder-audit', authMiddleware, async (req, res, next) => {
       return { count, earliest };
     };
 
+    // 소유자 이메일 → 라벨(이관 범위 판정용). 알려진 관리자/서비스계정만 구분, 나머지는 '기타'
+    const ownerLabel = (email) => {
+      const e = (email || '').toLowerCase();
+      if (!e) return 'unknown';
+      if (e === 'tnaks6325@gmail.com') return 'tnaks6325';
+      if (e === 'paksehui94@gmail.com') return '박세희';
+      if (e === 'ebbbb97@gmail.com') return '박은비';
+      if (e.indexOf('iam.gserviceaccount.com') >= 0) return 'service-account';
+      return '기타';
+    };
+
     let connected = 0, nonEmpty = 0, empty = 0, noFolder = 0, excluded = 0, preMarch = 0, errors = 0;
+    const ownerTally = {}; // 연결된 폴더의 소유자 집계
     const details = [];
     for (const t of tabs) {
       const name = t.tabName || t.displayName || '';
@@ -1573,6 +1585,14 @@ router.post('/folder-audit', authMiddleware, async (req, res, next) => {
       const folderId = extractFolderId(t.folderUrl);
       if (!folderId) { noFolder++; details.push({ tab: name, status: 'no-folder' }); continue; }
       connected++;
+      // 폴더 소유자 조회(이관 범위 판정) — 실패해도 스캔은 진행
+      let owner = '', ownerLbl = 'unknown';
+      try {
+        const meta = await driveService.getFolderMeta(folderId);
+        owner = (meta && meta.owner) || '';
+        ownerLbl = ownerLabel(owner);
+      } catch (_) {}
+      ownerTally[ownerLbl] = (ownerTally[ownerLbl] || 0) + 1;
       try {
         const { count, earliest } = await scanFolder(folderId);
         const earliestIso = earliest ? new Date(earliest).toISOString().slice(0, 10) : null;
@@ -1580,13 +1600,13 @@ router.post('/folder-audit', authMiddleware, async (req, res, next) => {
         if (count > 0) {
           nonEmpty++;
           if (hasPre) preMarch++;
-          details.push({ tab: name, status: 'has-files', count, earliest: earliestIso, preMarch: hasPre });
+          details.push({ tab: name, status: 'has-files', count, earliest: earliestIso, preMarch: hasPre, owner, ownerLabel: ownerLbl });
         } else {
           empty++;
-          details.push({ tab: name, status: 'empty', count: 0 });
+          details.push({ tab: name, status: 'empty', count: 0, owner, ownerLabel: ownerLbl });
         }
       } catch (e) {
-        errors++; details.push({ tab: name, status: 'error', error: e.message });
+        errors++; details.push({ tab: name, status: 'error', error: e.message, owner, ownerLabel: ownerLbl });
       }
     }
 
@@ -1600,6 +1620,7 @@ router.post('/folder-audit', authMiddleware, async (req, res, next) => {
       empty,                    // ③ 비어있는 폴더 수
       noFolder,                 // 폴더 미연결(비-리뷰폼) 수
       errors,
+      ownerTally,               // 연결된 폴더의 소유자별 수 (이관 범위 판정)
       sinceDate: sinceDate || null,
       details,
     });
