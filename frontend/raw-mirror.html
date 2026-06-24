@@ -111,7 +111,10 @@
       <div class="card">
         <div class="viewer-head">
           <div class="viewer-title" id="viewerTitle">탭을 선택하세요</div>
-          <div id="pagerTop"></div>
+          <div style="display:flex;align-items:center;gap:8px">
+            <div id="pagerTop"></div>
+            <button id="btnMapping" class="btn btn-ghost btn-sm" onclick="openMapping()" style="display:none"><i class="fas fa-sliders"></i> 컬럼 매핑</button>
+          </div>
         </div>
         <div id="viewerBody"><div class="empty"><i class="fas fa-table" style="font-size:28px;opacity:.4"></i><br/><br/>왼쪽에서 시트의 탭을 선택하면<br/>해당 탭의 원본 데이터가 표로 표시됩니다.</div></div>
       </div>
@@ -248,6 +251,7 @@
     _page.offset = 0;
     document.querySelectorAll('.tab-item').forEach(n=>n.classList.remove('active'));
     if (el) el.classList.add('active');
+    document.getElementById('btnMapping').style.display = 'inline-flex';
     await loadRows();
   }
 
@@ -317,9 +321,120 @@
   }
   function changeLimit(v){ _page.limit = parseInt(v)||200; _page.offset=0; loadRows(); }
 
+  // ════════════════ 컬럼 매핑 에디터 ════════════════
+  let _fields = [];          // 표준필드 레지스트리
+  let _mapCols = [];         // 현재 편집 중 컬럼 매핑
+
+  const OWNER_OPTS = [
+    { v:'db',     t:'DB권위',  c:'#1b64da', bg:'#e8f1fe' },
+    { v:'sheet',  t:'시트권위', c:'#92400e', bg:'#fef3c7' },
+    { v:'shared', t:'공용',    c:'#047857', bg:'#ecfdf5' },
+  ];
+
+  async function loadFields(){
+    if (noToken()) return;
+    const r = await gasGet({ action:'mappingFields' });
+    if (r && r.ok) _fields = r.fields || [];
+  }
+
+  async function openMapping(){
+    if (!_sel){ showToast('탭을 먼저 선택하세요.','warning'); return; }
+    if (!_fields.length) await loadFields();
+    document.getElementById('viewerBody').innerHTML = '<div class="empty"><i class="fas fa-spinner fa-spin"></i> 매핑 불러오는 중…</div>';
+    const r = await gasGet({ action:'mappingGet', sheetId:_sel.sheetId, gid:_sel.gid });
+    if (!r || r.ok===false || r.error){
+      document.getElementById('viewerBody').innerHTML = '<div class="empty" style="color:var(--err)">매핑 조회 실패: '+esc((r&&(r.error||r.message))||'')+'</div>';
+      return;
+    }
+    if (!r.hasHeaders){
+      document.getElementById('viewerBody').innerHTML = '<div class="empty">이 탭은 아직 미러링되지 않아 헤더 정보가 없습니다.<br/>먼저 [전체 미러링 실행]으로 데이터를 가져온 뒤 매핑하세요.</div>';
+      return;
+    }
+    _mapCols = (r.columns||[]).map(c => ({...c}));
+    renderMappingEditor();
+  }
+
+  function fieldOptions(sel){
+    let html = `<option value="">(매핑 없음)</option>`;
+    for (const f of _fields){
+      html += `<option value="${esc(f.key)}" ${sel===f.key?'selected':''}>${esc(f.label)} (${esc(f.key)})</option>`;
+    }
+    return html;
+  }
+  function ownerOptions(sel){
+    return OWNER_OPTS.map(o=>`<option value="${o.v}" ${sel===o.v?'selected':''}>${o.t}</option>`).join('');
+  }
+
+  function renderMappingEditor(){
+    const mappedCount = _mapCols.filter(c=>c.dbField).length;
+    let rows = '';
+    _mapCols.forEach((c, i)=>{
+      const guessTxt = c.autoGuess ? `<span style="font-size:11px;color:var(--t3)">추측: ${esc(c.autoGuess)}</span>` : '';
+      const driftTag = c.drift ? `<span class="badge" style="background:#fee2e2;color:#b91c1c">헤더변경</span>` : '';
+      rows += `<tr>
+        <td class="gutter">${colLabel(c.colIndex)}</td>
+        <td style="font-weight:600">${esc(c.header)||'<span style=\"color:var(--t3)\">(빈 헤더)</span>'} ${driftTag}</td>
+        <td><select onchange="mapSet(${i},'dbField',this.value)" style="padding:5px;border:1px solid var(--border-d);border-radius:7px;font-family:inherit;font-size:12px;max-width:200px">${fieldOptions(c.dbField)}</select><br/>${guessTxt}</td>
+        <td><select onchange="mapSet(${i},'owner',this.value)" style="padding:5px;border:1px solid var(--border-d);border-radius:7px;font-family:inherit;font-size:12px">${ownerOptions(c.owner)}</select></td>
+      </tr>`;
+    });
+
+    document.getElementById('viewerTitle').innerHTML =
+      `🔧 컬럼 매핑 <small>· ${esc(_sel.tabName)} · ${_mapCols.length}열 중 ${mappedCount}개 매핑됨</small>`;
+    document.getElementById('pagerTop').innerHTML = '';
+
+    document.getElementById('viewerBody').innerHTML = `
+      <div style="display:flex;gap:8px;margin-bottom:10px;flex-wrap:wrap">
+        <button class="btn btn-ghost btn-sm" onclick="applyAllGuess()"><i class="fas fa-wand-magic-sparkles"></i> 자동추측 적용</button>
+        <button class="btn btn-primary btn-sm" onclick="saveMapping()"><i class="fas fa-floppy-disk"></i> 저장</button>
+        <button class="btn btn-ghost btn-sm" onclick="backToData()"><i class="fas fa-table"></i> 데이터 보기</button>
+        <span class="hint" style="margin:0;align-self:center">소유권: <b style="color:#1b64da">DB권위</b>=DB가 원본 · <b style="color:#92400e">시트권위</b>=시트가 원본 · <b style="color:#047857">공용</b>=양방향</span>
+      </div>
+      <div class="table-scroll">
+        <table class="grid" style="white-space:normal">
+          <thead><tr><th class="gutter">열</th><th>시트 헤더</th><th>DB 표준필드</th><th>소유권</th></tr></thead>
+          <tbody>${rows}</tbody>
+        </table>
+      </div>`;
+  }
+
+  function mapSet(i, key, val){
+    if (!_mapCols[i]) return;
+    _mapCols[i][key] = val || null;
+    // dbField 변경 시 소유권을 해당 필드 기본값으로 자동 제안(기존에 사용자가 안 건드린 경우)
+    if (key==='dbField' && val){
+      const f = _fields.find(x=>x.key===val);
+      if (f && f.defaultOwner){
+        _mapCols[i].owner = f.defaultOwner;
+        renderMappingEditor();
+      }
+    }
+  }
+  function applyAllGuess(){
+    _mapCols.forEach(c=>{
+      c.dbField = c.autoGuess || null;
+      const f = c.autoGuess ? _fields.find(x=>x.key===c.autoGuess) : null;
+      c.owner = f && f.defaultOwner ? f.defaultOwner : 'sheet';
+    });
+    renderMappingEditor();
+    showToast('자동추측을 적용했습니다. 확인 후 [저장]하세요.','success');
+  }
+  async function saveMapping(){
+    if (noToken()){ showToast('관리자 로그인이 필요합니다.','warning'); return; }
+    const columns = _mapCols.map(c=>({ colIndex:c.colIndex, header:c.header, dbField:c.dbField||null, owner:c.owner||'sheet' }));
+    const r = await gasPost({ action:'mappingSave', sheetId:_sel.sheetId, gid:_sel.gid, tabName:_sel.tabName, columns });
+    if (!r || r.ok===false || r.error){ showToast('저장 실패: '+esc((r&&(r.error||r.message))||''),'error'); return; }
+    showToast(`매핑 저장됨 (${r.mapped||0}개 필드 매핑)`,'success');
+  }
+  function backToData(){
+    document.getElementById('pagerTop').innerHTML = '';
+    loadRows();
+  }
+
   // ════════════════ 시작 ════════════════
   loadStatus();
   loadTabs();
-  </script>
+  loadFields();
+</script>
 </body>
 </html>

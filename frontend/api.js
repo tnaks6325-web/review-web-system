@@ -286,6 +286,11 @@ const _ACTION_MAP = {
   'rawStatus':  { method: 'GET',  path: '/api/raw/status' },
   'rawTabs':    { method: 'GET',  path: '/api/raw/tabs' },
   'rawRows':    { method: 'GET',  path: '/api/raw/rows' },
+
+  // ★ 명시적 컬럼 매핑 (Section 15)
+  'mappingFields': { method: 'GET',  path: '/api/mapping/fields' },
+  'mappingGet':    { method: 'GET',  path: '/api/mapping' },
+  'mappingSave':   { method: 'POST', path: '/api/mapping' },
 };
 
 // ═══════════════════════════════════════════════════════════
