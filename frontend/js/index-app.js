@@ -877,6 +877,24 @@ function openWorkPortal() {
   window.open("portal.html", "_blank");
 }
 
+/* ── 구글시트 RAW 미러 페이지 열기 (자동 로그인 핸드오프) ── */
+function openRawMirror() {
+  const token = sessionStorage.getItem("admin_token") || "";
+  if (!token || !isAdminLoggedIn()) {
+    showToast("관리자 로그인이 필요합니다.", "warning");
+    return;
+  }
+  try {
+    localStorage.setItem("raw_sso", JSON.stringify({
+      token,
+      name: getAdminName(),
+      role: getAdminRole(),
+      ts: Date.now()
+    }));
+  } catch (e) { /* localStorage 불가 시에도 페이지 자체 처리로 폴백 */ }
+  window.open("raw-mirror.html", "_blank");
+}
+
 /* ── 관리자 로그인 모달 열기 ── */
 function openAdminLogin() {
   if (isAdminLoggedIn()) { enterAdminScreen(); return; }

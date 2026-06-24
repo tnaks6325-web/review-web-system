@@ -271,6 +271,12 @@ const _ACTION_MAP = {
   'orderSendMemo':         { method: 'PUT',  path: '/api/order/admin/send-memo' },
   'orderAdminDelete':      { method: 'DELETE', path: '/api/order/admin/delete' },
   'productPreview':        { method: 'POST', path: '/api/product/preview' },
+
+  // ★ 구글시트 전체 RAW 미러링 (Section 14)
+  'rawMirror':  { method: 'POST', path: '/api/raw/mirror' },
+  'rawStatus':  { method: 'GET',  path: '/api/raw/status' },
+  'rawTabs':    { method: 'GET',  path: '/api/raw/tabs' },
+  'rawRows':    { method: 'GET',  path: '/api/raw/rows' },
 };
 
 // ═══════════════════════════════════════════════════════════
