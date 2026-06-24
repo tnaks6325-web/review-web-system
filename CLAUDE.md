@@ -21,6 +21,11 @@ GAS(Google Apps Script) 기반 리뷰 관리 시스템을 **Node.js Express + Po
 - `review_submissions`(032, A-2): 리뷰 이미지 파일 단위 원장(탭/행/리뷰어/파일ID/제출시각/출처). `file_id` 유니크 업서트로 재실행 안전.
 - 과거에 루트로 샌 캡처는 관리자 "리뷰 캡처 정리"(`POST /api/drive/relocate-orphan-reviews`)로 `[리뷰]` 폴더 이동 + 파일명 이름↔행 결정적 링크 백필(모호하면 링크 안 함).
 
+### 폴더 소유권 & 자동 생성 (예방)
+- 폴더/파일은 **OAuth(`DRIVE_OAUTH_REFRESH_TOKEN` = tnaks6325) 우선 → 실패 시 SA 폴백**으로 생성된다(`createFolder`/`uploadFileBase64`). `_normalizeOwner`가 생성 직후 소유자를 `DRIVE_OWNER_EMAIL`로 보정한다(SA→tnaks 이전은 구글이 막아 무시될 수 있음 — 그래서 OAuth 우선이 핵심).
+- 폴더는 ① 첫 업로드 시 on-demand(`review-upload`), ② 배치(`POST /api/drive/sync-review`·`sync-capture`), ③ **스마트빌드 주기마다 자동**(`reviewFolders.service.js`의 `ensureReviewFoldersForActiveTabs`, `smartBuild` 말미 best-effort)로 생성된다. ③ 덕분에 **신규 활성 탭은 제출 0건이어도 tnaks 소유 `[리뷰]`/`[구매캡처]` 폴더가 미리 생성·연결**된다(비파괴·idempotent, `리뷰폼` 탭 제외, 1주기 최대 30탭).
+- 관리자 점검: "리뷰폴더 현황 점검"(`POST /api/drive/folder-audit`)이 연결/정상/빈/미연결 + **폴더 소유자 집계**(tnaks/박세희/박은비/SA)를 보여주고, 미연결 탭은 현황 화면의 버튼으로 일괄 생성·연결한다. 파일 단위 소유자·용량은 "소유권"(`ownership-audit`/`transfer-ownership`)에서 확인·이관한다.
+
 ## 배포 (자동)
 - `main` 브랜치에 머지되면 **Cloudflare Pages(프론트)와 Railway(백엔드)가 GitHub 연동으로 자동 배포**합니다.
 - 별도의 빌드/배포 GitHub Action은 없습니다. `main` 머지 = 배포.

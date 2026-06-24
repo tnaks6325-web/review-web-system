@@ -213,7 +213,10 @@ async function moveFile(fileId, newParentId, oldParentId) {
  * SA로 검색 시도 → 실패 시 OAuth로 재시도
  */
 async function findFolderByName(name, parentFolderId) {
-  const q = `name = '${name}' and '${parentFolderId}' in parents and mimeType = 'application/vnd.google-apps.folder' and trashed = false`;
+  // Drive q 문자열에 작은따옴표/역슬래시가 들어가면 쿼리가 깨진다(예: 상품명 "JJ's").
+  //   역슬래시 → 작은따옴표 순으로 이스케이프한다.
+  const escName = String(name).replace(/\\/g, '\\\\').replace(/'/g, "\\'");
+  const q = `name = '${escName}' and '${parentFolderId}' in parents and mimeType = 'application/vnd.google-apps.folder' and trashed = false`;
   const params = {
     q,
     fields: 'files(id, name, webViewLink)',
