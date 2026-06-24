@@ -29,6 +29,7 @@ const orderRoutes    = require('./routes/order.routes');
 const productRoutes  = require('./routes/product.routes');
 const portalRoutes   = require('./routes/portal.routes');
 const rawRoutes      = require('./routes/raw.routes');
+const mappingRoutes  = require('./routes/mapping.routes');
 
 const app = express();
 
@@ -85,6 +86,9 @@ app.use('/api/portal',    portalRoutes);
 
 // 구글시트 전체 RAW 미러링 (Section 14)
 app.use('/api/raw',       rawRoutes);
+
+// 명시적 컬럼 매핑 (Section 15) — 구글시트 점진 대체 keystone
+app.use('/api/mapping',   mappingRoutes);
 app.use('/api/viewer',    diagRoutes);
 app.use('/api/image',     diagRoutes);
 app.use('/api/blacklist', diagRoutes);
