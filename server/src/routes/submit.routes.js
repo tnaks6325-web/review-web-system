@@ -943,6 +943,7 @@ router.post('/order', async (req, res, next) => {
           await enqueue('order_append', {
             sheetId, tabName, orderData,
             slotRowNumber: slotRowNumber || null,
+            gid: sheetOpts.gid || '',
             // ★ P5: 큐 재시도 경로에서도 신원을 기록할 수 있도록 전달
             loginPhone8: loginPhone8 || '', loginName: loginName || '',
           });

@@ -197,7 +197,7 @@ async function _executeItem(item) {
     case 'order_append': {
       // ★ C1: 큐 재시도 시 항상 신선한 헤더를 읽음 (최대 50행에서 탐색)
       // ★ FIX: appendSheet 대신 빈 행 탐색 후 writeSheet (중간 빈 행 건너뜀 방지)
-      const { sheetId, tabName, orderData, loginPhone8, loginName } = payload;
+      const { sheetId, tabName, orderData, loginPhone8, loginName, gid } = payload;
       if (!sheetId || !tabName) throw new Error('payload 누락');
 
       // 전체 데이터 읽기 (최대 500행)
@@ -326,7 +326,7 @@ async function _executeItem(item) {
 
       // ★ ⓒ 이름 즉시표시: 큐 경로에서도 신원을 점유 행에 기록 (쓰기 성공 전에)
       await recordReviewIdentity({
-        sheetId, tabName, rowIndex: targetRow,
+        sheetId, tabName, tabGid: gid, rowIndex: targetRow,
         phone8: loginPhone8, phone: orderData && orderData.phone,
         name: loginName || (orderData && orderData.orderer),
         recipient: orderData && orderData.recipient,
