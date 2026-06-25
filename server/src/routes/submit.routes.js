@@ -4,6 +4,7 @@ const { writeSheet, readSheet, appendSheet, getSpreadsheetMeta, batchReadSheet, 
 const { enqueue } = require('../services/syncQueue.service');
 const { logAbnormal } = require('../services/errorLog.service');
 const { recordParticipationLink } = require('../services/participation.service');
+const { computeDedupKey, claimRow, recordReviewIdentity } = require('../services/sheetRowClaim.service');
 const pool = require('../db/pool');
 const { logger } = require('../utils/logger');
 const { emitReviewSubmit, emitOrderSubmit } = require('../utils/sse');
@@ -687,22 +688,9 @@ router.post('/order', async (req, res, next) => {
 
     setImmediate(async () => {
       try {
-        // ── 중복 필터링 (시트 기록 시점): 같은 날 + 수취인+연락처+주소 일치 시 쓰기 생략 ──
-        try {
-          const dupCount = await pool.query(
-            `SELECT COUNT(*) AS cnt FROM order_submissions
-             WHERE sheet_id = $1 AND tab_name = $2 AND date_str = $3
-             AND recipient = $4 AND phone = $5 AND address = $6`,
-            [sheetId, tabName, dateStr || '', recipient || '', phone || '', address || '']
-          );
-          if (parseInt(dupCount.rows[0].cnt) > 1) {
-            logger.warn(`[submit/order:bg] 중복 감지 → 시트 쓰기 생략 (sheet=${sheetId}, tab=${tabName}, recipient=${recipient}, phone=${phone})`);
-            return; // 시트에 쓰지 않음
-          }
-        } catch (dupErr) {
-          // 중복 검사 실패 시 그냥 통과 (시트에 쓰기 진행)
-          logger.warn(`[submit/order:bg] 중복 검사 오류 (무시): ${dupErr.message}`);
-        }
+        // ── 중복/경합 방지는 시트 쓰기 직전 sheet_row_claims 원자적 행 점유로 처리한다 ──
+        //   (이전의 order_submissions COUNT>1 기반 "쓰기 생략"은 동시 제출 시 양쪽이
+        //    모두 생략되어 0행이 되는 허점이 있어 제거. 033 행 점유가 멱등 보장.)
 
         const sheetsPromise = (async () => {
           // ★ 빈 행 탐색 후 writeSheet로 기입 (appendSheet는 마지막 데이터 행 다음에 추가하므로 중간 빈 행을 건너뜀)
@@ -876,31 +864,49 @@ router.post('/order', async (req, res, next) => {
             }
           }
 
-          // 실제 시트 행 번호 계산 (1-based, 헤더행 = headerRowIdx+1, 데이터 시작 = headerRowIdx+2)
-          const targetRow = headerRowIdx + 1 + emptyRowOffset + 1; // +1 for 1-based, +1 for header row itself
-
-          // ★ 동시 제출 방어: 쓰기 직전 타겟 행의 연락처 셀 재확인
-          // (인애드명단이 이미 수취인에 있을 수 있으므로 연락처로 판정)
-          try {
-            const checkColIdx = phoneColIdx >= 0 ? phoneColIdx : (addressColIdx >= 0 ? addressColIdx : 0);
-            const checkRange = `'${tabName}'!${getColLetter(checkColIdx)}${targetRow}`;
-            const checkData = await readSheet(sheetId, checkRange, sheetOpts);
-            const existingVal = checkData && checkData[0] ? String(checkData[0][0] || '').trim() : '';
-            if (existingVal) {
-              // 이미 다른 제출이 들어간 경우 → 캐시 무효화 후 재탐색
-              logger.warn(`[submit/order:bg] 동시 제출 감지: row=${targetRow} 이미 연락처='${existingVal}' → 큐로 전환`);
-              tabDataCache.delete(`${sheetId}||${tabName}`);
-              throw new Error('동시 제출 감지 — 큐에서 재시도');
-            }
-          } catch (raceErr) {
-            if (raceErr.message.includes('동시 제출 감지')) throw raceErr;
-            // readSheet 실패는 무시하고 진행 (쓰기는 시도)
-            logger.warn(`[submit/order:bg] 동시제출 체크 실패 (무시): ${raceErr.message}`);
+          // ═══════════════════════════════════════════════════
+          // ★★★ 행 점유 (033): 빈 행 후보를 우선순위대로 모아 원자적으로 점유
+          //   - 선호 행(인애드/옵션/첫 빈행) → 나머지 빈 행 → 끝에 append 여유(20행)
+          //   - claimRow가 같은 dedup_key엔 한 행만 내주므로 중복 증식/덮어쓰기 불가
+          // ═══════════════════════════════════════════════════
+          const _offToRow = (off) => headerRowIdx + 1 + off + 1; // 1-based 시트 행
+          const candidateOffsets = [];
+          const _seenOff = new Set();
+          const _pushOff = (o) => { if (o != null && o >= 0 && !_seenOff.has(o)) { _seenOff.add(o); candidateOffsets.push(o); } };
+          _pushOff(emptyRowOffset); // 선호 행 (인애드/옵션/첫 빈행 결과)
+          for (let i = 0; i < dataRows.length; i++) {
+            const row = dataRows[i] || [];
+            if (_countFilledExcluding(row) >= FILLED_THRESHOLD) continue;
+            if (_isUnfilledRow(row)) _pushOff(i);
           }
+          for (let k = 0; k < 20; k++) _pushOff(dataRows.length + k); // 끝에 append 여유
+          const candidateRows = candidateOffsets.map(_offToRow);
+
+          const dedupKey = computeDedupKey({ orderNum, recipient, phone, dateStr });
+          const claim = await claimRow({
+            sheetId, tabName, dedupKey, candidateRows,
+            meta: { name: loginName || orderer, phone8: loginPhone8, phone, source: 'order_submit' },
+          });
+          if (!claim.row) {
+            logger.warn(`[submit/order:bg] 행 점유 실패(후보 소진) → 큐로 전환 (tab=${tabName})`);
+            throw new Error('행 점유 실패 — 큐에서 재시도');
+          }
+          const targetRow = claim.row;
+
+          // ★ ⓒ 이름 즉시표시: 시트 쓰기 성공 여부와 무관하게 신원을 먼저 못 박는다.
+          //   (쿼터 타임아웃으로 시트 쓰기가 큐로 밀려도 리뷰제출 폼 검색엔 바로 뜸)
+          await recordParticipationLink({
+            sheetId, tabName, rowIndex: targetRow,
+            phone8: loginPhone8, phone, name: loginName || orderer,
+            source: 'order_submit',
+          });
+          await recordReviewIdentity({
+            sheetId, tabName, tabGid: sheetOpts.gid, rowIndex: targetRow,
+            phone8: loginPhone8, phone, name: loginName || orderer, recipient,
+          });
 
           // ★ null이 아닌 셀만 개별 쓰기 (번호, 인애드명단 등 기존 값 보존)
           // ★ 구매일자/옵션은 덮어쓰기 허용 (리뷰어가 제출 시 갱신)
-          const targetRowData = dataRows[emptyRowOffset] || [];
           const writePairs = [];
           for (let ci = 0; ci < rowData.length; ci++) {
             if (rowData[ci] === null) continue; // null = 기존 값 보존 (번호, 인애드명단 등)
@@ -917,14 +923,7 @@ router.post('/order', async (req, res, next) => {
 
           // 성공 시 캐시 무효화
           tabDataCache.delete(`${sheetId}||${tabName}`);
-          logger.info(`[submit/order:bg] Sheets 쓰기 성공 (sheet=${sheetId}, tab=${tabName}, row=${targetRow})`);
-
-          // ★ P5: 제출 시점 리뷰어 신원을 확정 행에 못 박는다 (검증 phone8 우선)
-          await recordParticipationLink({
-            sheetId, tabName, rowIndex: targetRow,
-            phone8: loginPhone8, phone, name: loginName || orderer,
-            source: 'order_submit',
-          });
+          logger.info(`[submit/order:bg] Sheets 쓰기 성공 (sheet=${sheetId}, tab=${tabName}, row=${targetRow}, claim=${claim.isNew ? 'new' : 'reuse'})`);
         })();
 
         // 15초 타임아웃 적용

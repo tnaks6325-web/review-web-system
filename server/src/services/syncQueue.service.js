@@ -14,6 +14,7 @@
 const pool = require('../db/pool');
 const { writeSheet, appendSheet, readSheet, batchUpdateSheet } = require('./sheets.service');
 const { recordParticipationLink } = require('./participation.service');
+const { computeDedupKey, claimRow, recordReviewIdentity } = require('./sheetRowClaim.service');
 const { logger } = require('../utils/logger');
 
 // ── 큐에 작업 추가 ──
@@ -290,12 +291,50 @@ async function _executeItem(item) {
         }
       }
 
-      // 실제 시트 행 번호 (1-based)
-      const targetRow = headerRowIdx + 1 + emptyRowOffset + 1;
+      // ═══════════════════════════════════════════════════
+      // ★★★ 행 점유 (033): 큐 재시도도 같은 dedup_key로 같은 행만 사용 → 중복 증식 차단
+      //   (이 큐 경로엔 원래 중복 차단이 전무했고, 6/25 중복 증식의 핵심 원인이었다)
+      // ═══════════════════════════════════════════════════
+      const _offToRowQ = (off) => headerRowIdx + 1 + off + 1;
+      const candidateOffsetsQ = [];
+      const _seenOffQ = new Set();
+      const _pushOffQ = (o) => { if (o != null && o >= 0 && !_seenOffQ.has(o)) { _seenOffQ.add(o); candidateOffsetsQ.push(o); } };
+      _pushOffQ(emptyRowOffset);
+      for (let i = 0; i < dataRows.length; i++) {
+        const row = dataRows[i] || [];
+        if (_countFilled(row) >= FILLED_THRESHOLD) continue;
+        if (_isUnfilledRow(row)) _pushOffQ(i);
+      }
+      for (let k = 0; k < 20; k++) _pushOffQ(dataRows.length + k);
+      const candidateRowsQ = candidateOffsetsQ.map(_offToRowQ);
+
+      const dedupKeyQ = computeDedupKey({
+        orderNum: orderData && orderData.orderNum,
+        recipient: orderData && orderData.recipient,
+        phone: orderData && orderData.phone,
+        dateStr: orderData && orderData.dateStr,
+      });
+      const claimQ = await claimRow({
+        sheetId, tabName, dedupKey: dedupKeyQ, candidateRows: candidateRowsQ,
+        meta: { name: loginName || (orderData && orderData.orderer), phone8: loginPhone8, phone: orderData && orderData.phone, source: 'order_submit_queue' },
+      });
+      if (!claimQ.row) throw new Error('행 점유 실패(후보 소진) — 다음 사이클 재시도');
+
+      // 실제 시트 행 번호 (1-based) — 점유한 행
+      const targetRow = claimQ.row;
+      const claimedOffset = targetRow - (headerRowIdx + 2);
+
+      // ★ ⓒ 이름 즉시표시: 큐 경로에서도 신원을 점유 행에 기록 (쓰기 성공 전에)
+      await recordReviewIdentity({
+        sheetId, tabName, rowIndex: targetRow,
+        phone8: loginPhone8, phone: orderData && orderData.phone,
+        name: loginName || (orderData && orderData.orderer),
+        recipient: orderData && orderData.recipient,
+      });
 
       // ★ null이 아닌 셀만 개별 쓰기 (번호, 구매일자 등 기존 값 보존)
       // ★ 날짜 열: 기존 값이 있으면 덮어쓰지 않음
-      const targetRowData = dataRows[emptyRowOffset] || [];
+      const targetRowData = dataRows[claimedOffset] || [];
       const writePairs = [];
       for (let ci = 0; ci < rowData.length; ci++) {
         if (rowData[ci] === null) continue;
