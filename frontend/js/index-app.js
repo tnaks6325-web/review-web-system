@@ -1903,13 +1903,15 @@ async function woSendMemo(id) {
 }
 
 // 접수하기 (제출됨 → 접수됨)
-// ★ 업무 연계: 작업시트탭URL(gid 필수)을 [+작업시트추가]로 자동 등록 →
-//   캠페인 탭 관리에 활성 탭으로 즉시 반영 → 상태를 '접수됨'으로 전이
+// ★ 업무 연계: 작업시트탭URL(gid 필수)이 가리키는 "그 탭"을 캠페인 탭 관리에 등록하고,
+//   작업오더 기본정보(담당자·시간대·리뷰유형·배송·택배대행)를 탭 메타에 자동 입력 → 상태 '접수됨' 전이.
+//   동일 탭 재접수(2차 등)는 별도 탭을 만들지 않고 기존 한 줄을 유지(차수는 시트 차수컬럼 집계가 담당).
+//   서버 단일 엔드포인트(orderAdminAccept)가 등록+메타매핑+인덱스빌드+상태전이를 원자적으로 처리.
 async function woAccept(id) {
   const o = (_woCache || []).find(x => x.id === id);
   const url = ((o && o.work_sheet_url) || "").trim();
 
-  // 1) 작업시트탭URL + gid 검증 (gid 없으면 특정 탭을 지정할 수 없어 자동 등록 불가)
+  // 1) 빠른 클라이언트 사전검증 (서버도 동일하게 재검증) — 즉시 안내 UX 유지
   if (!url) {
     woNotice("작업시트탭URL이 없습니다.\nAE에게 gid가 포함된 탭 주소를 요청한 뒤 다시 접수해주세요.");
     return;
@@ -1922,33 +1924,26 @@ async function woAccept(id) {
   const btn = document.getElementById("woAcceptBtn_" + id);
   if (btn) { btn.disabled = true; btn.innerHTML = '<i class="fas fa-spinner fa-spin"></i> 접수 처리중...'; }
   try {
-    // 2) 작업시트 탭 자동 등록 + 인덱스 빌드 (gid 모드 add-tab)
-    const reg = await gasGet({ action: "addTab", url }, 60000);
-    if (!reg || !reg.ok) {
-      showToast("탭 등록 실패: " + ((reg && reg.error) || "알 수 없는 오류"), true);
-      if (btn) { btn.disabled = false; btn.innerHTML = '<i class="fas fa-inbox"></i> 접수하기'; }
-      return;
-    }
-
-    // 3) 상태 전이: 접수됨(reviewing)
-    const r = await gasGet({ action: "orderAdminStatus", id, status: "reviewing" });
+    // 2) 접수 단일 처리 (탭 등록 + 작업오더 기본정보 메타 매핑 + 인덱스 빌드 + 상태 reviewing)
+    const r = await gasGet({ action: "orderAdminAccept", id }, 60000);
     if (!(r && r.ok)) {
-      showToast((r && r.error) || "접수 상태 변경 실패 (탭은 등록됨)", true);
+      showToast((r && r.error) || "접수 실패", true);
       if (btn) { btn.disabled = false; btn.innerHTML = '<i class="fas fa-inbox"></i> 접수하기'; }
       return;
     }
 
-    // 4) 결과 안내 (등록된 탭 수에 따라)
-    if (reg.addedTabCount > 0) {
-      const names = reg.addedTabs ? reg.addedTabs.join(", ") : (reg.tabName || "");
-      showToast(`✅ 접수 완료 — 캠페인 탭 관리에 추가됨: ${names}`);
-    } else if (reg.message) {
-      showToast(`✅ 접수 완료 — ${reg.message}`);
+    // 3) 결과 안내 (신규 등록 vs 기존 탭 연결 = 차수 추가)
+    const tabName = r.tabName || "";
+    if (r.alreadyRegistered) {
+      showToast(`✅ 접수 완료 — 기존 탭에 연결됨: ${tabName} (차수 구분은 시트 기준 자동)`);
     } else {
-      showToast("✅ 접수 완료 — 캠페인 탭 관리에 반영되었습니다.");
+      showToast(`✅ 접수 완료 — 캠페인 탭 관리에 추가됨: ${tabName}`);
+    }
+    if (r.indexBuilt === false) {
+      showToast("탭은 등록됐지만 인덱스 빌드는 실패했습니다. 잠시 후 자동 갱신됩니다.", true);
     }
 
-    // 5) 인박스 + 캠페인 탭 관리 대시보드 동시 갱신 (업무 연계성)
+    // 4) 인박스 + 캠페인 탭 관리 대시보드 동시 갱신 (업무 연계성)
     loadWorkOrders();
     try { if (typeof loadTabDashboard === "function") loadTabDashboard(); } catch (_) {}
   } catch (e) {
