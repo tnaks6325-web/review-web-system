@@ -5,6 +5,8 @@ const jwt = require('jsonwebtoken');
 const pool = require('../db/pool');
 const { authMiddleware, adminOrMasterMiddleware } = require('../middleware/auth.middleware');
 const drive = require('../services/drive.service');
+const { getSpreadsheetMeta } = require('../services/sheets.service');
+const { buildOneSheet } = require('../services/indexBuilder.service');
 const sse = require('../utils/sse');
 const { logger } = require('../utils/logger');
 
@@ -98,6 +100,10 @@ async function _ensureTables() {
     await pool.query(`ALTER TABLE work_orders ADD COLUMN IF NOT EXISTS manager_name         TEXT DEFAULT ''`);
     await pool.query(`ALTER TABLE work_orders ADD COLUMN IF NOT EXISTS updated_by           TEXT DEFAULT ''`);
     await pool.query(`ALTER TABLE work_orders ADD COLUMN IF NOT EXISTS updated_by_name      TEXT DEFAULT ''`);
+    // 033: 접수 시 등록된 캠페인 탭 연결(역추적·멱등)
+    await pool.query(`ALTER TABLE work_orders ADD COLUMN IF NOT EXISTS linked_tab_sheet_id  TEXT DEFAULT ''`);
+    await pool.query(`ALTER TABLE work_orders ADD COLUMN IF NOT EXISTS linked_tab_name      TEXT DEFAULT ''`);
+    await pool.query(`ALTER TABLE work_orders ADD COLUMN IF NOT EXISTS linked_tab_gid       TEXT DEFAULT ''`);
     await pool.query(`CREATE INDEX IF NOT EXISTS idx_work_orders_status     ON work_orders(status)`);
     await pool.query(`CREATE INDEX IF NOT EXISTS idx_work_orders_created_by ON work_orders(created_by)`);
     await pool.query(`CREATE INDEX IF NOT EXISTS idx_work_orders_created_at ON work_orders(created_at DESC)`);
@@ -694,6 +700,185 @@ router.put('/admin/status', authMiddleware, adminOrMasterMiddleware, async (req,
       ]
     );
     res.json({ ok: true, data: rows[0] });
+  } catch (err) {
+    next(err);
+  }
+});
+
+// POST /api/order/admin/accept — 접수: work_sheet_url(gid)의 그 탭을 캠페인 탭 관리에 등록 +
+//   작업오더 기본정보를 탭 메타에 자동 입력 + 상태 reviewing 전이 (단일 원자 처리)
+// body: { id }
+// ★ 동일 탭 재접수(2차 등)는 별도 탭을 만들지 않고 기존 한 줄을 유지한다.
+//   차수(1차/2차) 구분은 시트의 '차수' 컬럼 → review_index.round 집계가 담당.
+// ★ 중복 방지: tab_name 을 gid가 가리키는 "실제 탭 현재 제목"으로 등록 →
+//   인덱스 자동갱신(smartBuild)의 (sheet_id, tab_name) 충돌과 정렬되어 중복 줄이 생기지 않는다.
+//   (smartBuild 는 manager/time_range 등 메타 컬럼을 건드리지 않으므로 작업오더 메타는 보존됨)
+router.post('/admin/accept', authMiddleware, adminOrMasterMiddleware, async (req, res, next) => {
+  try {
+    await _ensureTables();
+    const id = String((req.body || {}).id || '').trim();
+    if (!id) return res.status(400).json({ ok: false, error: 'id가 필요합니다.' });
+
+    // 1) 작업오더 로드
+    const { rows: cur } = await pool.query(
+      `SELECT * FROM work_orders WHERE id = $1 AND deleted_at IS NULL LIMIT 1`, [id]
+    );
+    if (cur.length === 0) return res.status(404).json({ ok: false, error: '오더를 찾을 수 없습니다.' });
+    const o = cur[0];
+
+    // 접수 대상 상태(접수 버튼이 노출되는 상태)가 아니고 이미 탭에 연결돼 있으면 →
+    // 부수효과(탭 보강·인덱스 빌드) 없이 멱등 반환 (진행중 오더의 중복 호출/재클릭 방어).
+    const ACCEPT_ELIGIBLE = ['submitted', 'revision', 'rejected'];
+    if (!ACCEPT_ELIGIBLE.includes(o.status) && o.linked_tab_gid) {
+      return res.json({
+        ok: true, data: o, tabName: o.linked_tab_name || '',
+        alreadyRegistered: true, idempotent: true, indexBuilt: true, skipped: true,
+      });
+    }
+
+    // 2) work_sheet_url 검증 (URL + gid 필수) — 현재 UX 유지
+    const url = (o.work_sheet_url || '').trim();
+    if (!url) {
+      return res.status(400).json({ ok: false, error: '작업시트탭URL이 없습니다. AE에게 gid가 포함된 탭 주소를 요청한 뒤 다시 접수해주세요.' });
+    }
+    const sheetIdMatch = url.match(/\/spreadsheets\/d\/([a-zA-Z0-9_-]{20,})/);
+    if (!sheetIdMatch) {
+      return res.status(400).json({ ok: false, error: '유효한 구글 스프레드시트 URL이 아닙니다.' });
+    }
+    const gidMatch = url.match(/[#?&]gid=(\d+)/);
+    if (!gidMatch) {
+      return res.status(400).json({ ok: false, error: '작업시트탭URL에 gid가 없습니다. 특정 탭 주소(…/edit#gid=숫자)로 등록되어야 캠페인 탭 관리에 자동 반영됩니다.' });
+    }
+    const sheetId = sheetIdMatch[1];
+    const gid = gidMatch[1];
+
+    // 멱등 표시: 같은 작업오더가 이미 같은 탭에 연결됨 (재클릭 안전 — 아래 업서트는 모두 idempotent)
+    const idempotent = (String(o.linked_tab_gid || '') === gid && o.linked_tab_sheet_id === sheetId);
+
+    // 3) gid → 실제 탭 현재 제목 해석
+    let meta;
+    try {
+      meta = await getSpreadsheetMeta(sheetId);
+    } catch (metaErr) {
+      const sa = process.env.GOOGLE_SERVICE_ACCOUNT_EMAIL || '';
+      return res.status(502).json({ ok: false, error: '시트 접근 권한이 없습니다. 서비스 계정을 편집자로 추가해주세요.', serviceAccount: sa });
+    }
+    const spreadsheetTitle = meta._spreadsheetTitle || sheetId;
+    const targetSheet = meta.find(s => String(s.properties.sheetId) === gid);
+    if (!targetSheet) {
+      return res.status(404).json({ ok: false, error: `gid=${gid} 에 해당하는 탭을 시트에서 찾을 수 없습니다. (탭이 삭제되었거나 URL이 잘못됨)` });
+    }
+    const tabName = targetSheet.properties.title;
+    const tabSheetUrl = `https://docs.google.com/spreadsheets/d/${sheetId}/edit#gid=${gid}`;
+
+    // 4) 기등록 판정 — gid 우선 매칭, 매칭된 행의 "실제 tab_name"까지 받아 키 정합 유지.
+    //    (같은 gid가 다른 탭명으로 등록돼 있으면 아래 rename 동기화로 현재 제목에 맞춘다)
+    const { rows: existingRows } = await pool.query(
+      `SELECT tab_name FROM tab_configs
+         WHERE sheet_id = $1 AND (tab_gid = $2 OR tab_name = $3)
+         ORDER BY (tab_gid = $2) DESC
+         LIMIT 1`,
+      [sheetId, gid, tabName]
+    );
+    const wasRegistered = existingRows.length > 0;
+    const existingTabName = wasRegistered ? existingRows[0].tab_name : null;
+
+    // 4-1) rename 동기화 — 같은 gid가 "다른 이름"으로 등록돼 있으면 현재 시트 제목으로 맞춘다.
+    //   이렇게 해야 (sheet_id, tab_name) 키가 정렬되어 ① 아래 업서트가 기존 행을 갱신하고
+    //   ② 인덱스 자동갱신(smartBuild)이 새 줄을 만들지 않아 "동일 탭 한 줄 수렴"이 유지된다.
+    //   현재 제목으로 이미 다른 행이 있으면(희박) rename은 생략(유니크 충돌 방지)하고 그 행을 그대로 쓴다.
+    if (wasRegistered && existingTabName !== tabName) {
+      const { rows: clash } = await pool.query(
+        `SELECT 1 FROM tab_configs WHERE sheet_id = $1 AND tab_name = $2 LIMIT 1`,
+        [sheetId, tabName]
+      );
+      if (clash.length === 0) {
+        await pool.query(
+          `UPDATE tab_configs SET tab_name = $3, updated_at = NOW()
+             WHERE sheet_id = $1 AND tab_name = $2`,
+          [sheetId, existingTabName, tabName]
+        );
+      } else {
+        logger.warn(`[order/accept] 탭명 동기화 충돌 — "${existingTabName}"→"${tabName}" 생략(현재 제목 행이 이미 존재)`);
+      }
+    }
+
+    // 5) campaigns 등록(없으면 추가)
+    await pool.query(
+      `INSERT INTO campaigns (sheet_id, campaign_name, sheet_url)
+       VALUES ($1, $2, $3)
+       ON CONFLICT (sheet_id, campaign_name) DO UPDATE SET
+         sheet_url = EXCLUDED.sheet_url, updated_at = NOW()`,
+      [sheetId, spreadsheetTitle, `https://docs.google.com/spreadsheets/d/${sheetId}/edit`]
+    );
+
+    // 6) tab_configs 등록/갱신 — (sheet_id, 현재 탭 제목) 키로 단일 업서트.
+    //   메타(manager/time_range/review_type/delivery_type/display_name/campaign_name)는
+    //   "비어 있을 때만" 작업오더 값으로 채운다(COALESCE-fill):
+    //     · 신규 탭 / 빈 메타로 선등록된 탭 → 작업오더 기본정보로 채움
+    //     · 기존 탭(차수 추가 접수, admin이 이미 설정한 메타) → 보존(2차의 다른 값으로 덮지 않음)
+    //   taekhap(BOOLEAN)은 빈 값 구분이 불가하므로 신규 INSERT 때만 반영(기존 행은 보존).
+    const courierProxy = (o.courier_proxy === true || o.courier_proxy === 'true');
+    await pool.query(
+      `INSERT INTO tab_configs
+         (sheet_id, tab_name, tab_gid, sheet_url, campaign_name, display_name,
+          manager, time_range, review_type, delivery_type, taekhap, updated_at)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11, NOW())
+       ON CONFLICT (sheet_id, tab_name) DO UPDATE SET
+         tab_gid       = COALESCE(NULLIF(tab_configs.tab_gid,''),       EXCLUDED.tab_gid),
+         sheet_url     = COALESCE(NULLIF(tab_configs.sheet_url,''),     EXCLUDED.sheet_url),
+         campaign_name = COALESCE(NULLIF(tab_configs.campaign_name,''), EXCLUDED.campaign_name),
+         display_name  = COALESCE(NULLIF(tab_configs.display_name,''),  EXCLUDED.display_name),
+         manager       = COALESCE(NULLIF(tab_configs.manager,''),       EXCLUDED.manager),
+         time_range    = COALESCE(NULLIF(tab_configs.time_range,''),    EXCLUDED.time_range),
+         review_type   = COALESCE(NULLIF(tab_configs.review_type,''),   EXCLUDED.review_type),
+         delivery_type = COALESCE(NULLIF(tab_configs.delivery_type,''), EXCLUDED.delivery_type),
+         updated_at    = NOW()`,
+      [
+        sheetId, tabName, gid, tabSheetUrl, spreadsheetTitle,
+        (o.title || ''), (o.manager_name || ''), (o.purchase_time || ''),
+        (o.review_type || ''), (o.delivery_type || ''), courierProxy,
+      ]
+    );
+
+    // 7) 인덱스 빌드 (best-effort — 실패해도 등록·상태전이는 유지)
+    let indexBuilt = true;
+    try {
+      await buildOneSheet(sheetId);
+    } catch (buildErr) {
+      indexBuilt = false;
+      logger.warn(`[order/accept] 인덱스 빌드 실패 (등록은 완료): ${buildErr.message}`);
+    }
+
+    // 8) 상태 전이 reviewing + 링크 기록
+    //   접수하기 버튼이 노출되는 상태(submitted/revision/rejected)는 reviewing 으로 전이(모두 허용 전이),
+    //   그 외(이미 reviewing 이후)는 상태 유지 — 동일 탭 재접수/재클릭 안전.
+    //   processed_by 는 /admin/status 와 동일하게 항상 처리자(req.admin.name)로 기록.
+    const nextStatus = ACCEPT_ELIGIBLE.includes(o.status) ? 'reviewing' : o.status;
+    const { rows: upd } = await pool.query(
+      `UPDATE work_orders SET
+         status = $2,
+         linked_tab_sheet_id = $3,
+         linked_tab_name = $4,
+         linked_tab_gid = $5,
+         processed_by = $6,
+         updated_at = NOW()
+       WHERE id = $1
+       RETURNING *`,
+      [id, nextStatus, sheetId, tabName, gid, (req.admin?.name || '')]
+    );
+
+    logger.info(`[order/accept] ${id} → 탭 "${tabName}" (${wasRegistered ? '기존탭 연결' : '신규 등록'}), 캠페인=${spreadsheetTitle}, 빌드=${indexBuilt}`);
+
+    res.json({
+      ok: true,
+      data: upd[0],
+      tabName,
+      campaignName: spreadsheetTitle,
+      alreadyRegistered: wasRegistered,
+      idempotent,
+      indexBuilt,
+    });
   } catch (err) {
     next(err);
   }
