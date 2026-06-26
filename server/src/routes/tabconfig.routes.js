@@ -1959,7 +1959,10 @@ router.get('/option-data', authMiddleware, async (req, res, next) => {
     for (let i = 0; i < dataRows.length; i++) {
       const row = dataRows[i];
       const reviewerName = nameColIdx >= 0 ? String(row[nameColIdx] || '').trim() : '';
-      if (!reviewerName) continue; // 이름 없는 행 스킵
+      // ★ 옵션값이 하나라도 있으면 이름(수취인)이 비어 있어도 포함한다.
+      //   (수취인 미배정 양식: 옵션만 채워둔 행도 미리보기에 보여줘야 저장 가능)
+      const hasAnyOption = optColMap.some(({ idx }) => String(row[idx] !== undefined ? row[idx] : '').trim() !== '');
+      if (!reviewerName && !hasAnyOption) continue; // 이름·옵션 모두 비면 스킵
 
       // round 필터
       if (round && roundColIdx >= 0) {
