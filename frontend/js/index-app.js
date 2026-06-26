@@ -15857,11 +15857,17 @@ function _renderCsRooms(list) {
   for (const [key, rooms] of groups) {
     const [name, phone8] = key.split("|");
     const unread = rooms.reduce((s, r) => s + (r.adminUnread || 0), 0);
-    html += `<div style="padding:10px 14px;background:#f7faff;border-bottom:1px solid #eef2f7;display:flex;align-items:center;gap:8px">
-      <i class="fas fa-user-circle" style="color:#94a3b8"></i>
-      <span style="font-weight:700;color:var(--t1);font-size:.86rem">${escHtml(name)}</span>
-      <span style="color:#94a3b8;font-size:.74rem;font-family:monospace">${escHtml(phone8)}</span>
-      ${unread > 0 ? `<span style="margin-left:auto;background:#EF4444;color:#fff;font-size:.66rem;font-weight:700;padding:1px 7px;border-radius:10px">미확인 ${unread}</span>` : ''}
+    const memo = (rooms.find(r => r.adminMemo) || {}).adminMemo || "";
+    html += `<div style="padding:10px 14px;background:#f7faff;border-bottom:1px solid #eef2f7">
+      <div style="display:flex;align-items:center;gap:8px">
+        <i class="fas fa-user-circle" style="color:#94a3b8"></i>
+        <span style="font-weight:700;color:var(--t1);font-size:.86rem">${escHtml(name)}</span>
+        <span style="color:#94a3b8;font-size:.74rem;font-family:monospace">${escHtml(phone8)}</span>
+        ${unread > 0 ? `<span style="margin-left:auto;background:#EF4444;color:#fff;font-size:.66rem;font-weight:700;padding:1px 7px;border-radius:10px">미확인 ${unread}</span>` : ''}
+      </div>
+      ${memo ? `<div title="관리자 메모(리뷰어 비공개)" style="margin-top:5px;font-size:.72rem;color:#92400E;background:#FFFBEB;border:1px solid #FDE68A;border-radius:6px;padding:3px 8px;display:flex;gap:5px;align-items:flex-start">
+        <i class="fas fa-lock" style="font-size:.62rem;margin-top:3px;opacity:.7;flex-shrink:0"></i>
+        <span style="white-space:pre-wrap;word-break:break-word">${escHtml(memo)}</span></div>` : ''}
     </div>`;
     rooms.forEach(r => {
       const nameSafe = (r.reviewerName || "").replace(/'/g, "\\'");
@@ -15869,9 +15875,8 @@ function _renderCsRooms(list) {
       const statusChip = r.status === 'closed'
         ? '<span style="background:#F3F4F6;color:#6B7280;font-size:.66rem;padding:1px 7px;border-radius:8px">종료</span>'
         : '<span style="background:#D1FAE5;color:#065F46;font-size:.66rem;padding:1px 7px;border-radius:8px">진행중</span>';
-      html += `<div onclick="csOpenConversation('${r.id}','${nameSafe}','${phoneSafe}')"
-        style="padding:11px 16px 11px 30px;border-bottom:1px solid #f3f4f6;cursor:pointer;display:flex;align-items:center;gap:10px"
-        onmouseover="this.style.background='#f9fafb'" onmouseout="this.style.background='#fff'">
+      html += `<div class="cs-room-row" data-tid="${r.id}" onclick="csOpenConversation('${r.id}','${nameSafe}','${phoneSafe}')"
+        style="padding:11px 16px 11px 30px;border-bottom:1px solid #f3f4f6;display:flex;align-items:center;gap:10px">
         <div style="flex:1;min-width:0">
           <div style="display:flex;align-items:center;gap:6px;margin-bottom:2px">
             <i class="fas fa-tag" style="color:#cbd5e1;font-size:.7rem"></i>
@@ -15888,20 +15893,23 @@ function _renderCsRooms(list) {
     });
   }
   wrap.innerHTML = html;
+  // 현재 열린 대화방 강조 유지
+  if (_csActiveThreadId) {
+    const el = wrap.querySelector(`.cs-room-row[data-tid="${_csActiveThreadId}"]`);
+    if (el) el.classList.add('cs-room-active');
+  }
 }
 
 async function csOpenConversation(threadId, reviewerName, reviewerPhone8) {
   _csActiveThreadId = threadId;
-  let ov = document.getElementById("csConvOverlay");
-  if (!ov) {
-    ov = document.createElement("div");
-    ov.id = "csConvOverlay";
-    ov.style.cssText = "position:fixed;inset:0;background:rgba(15,23,42,.45);z-index:10000;display:flex;align-items:center;justify-content:center;padding:16px";
-    ov.addEventListener("click", e => { if (e.target === ov) csCloseConversation(); });
-    document.body.appendChild(ov);
-  }
-  ov.style.display = "flex";
-  ov.innerHTML = `<div style="background:#fff;border-radius:16px;width:560px;max-width:96vw;height:78vh;display:flex;flex-direction:column;overflow:hidden;box-shadow:0 12px 40px rgba(0,0,0,.25)">
+  // 좌측 목록에서 선택 강조
+  document.querySelectorAll('.cs-room-row').forEach(el => el.classList.remove('cs-room-active'));
+  const selEl = document.querySelector(`.cs-room-row[data-tid="${threadId}"]`);
+  if (selEl) selEl.classList.add('cs-room-active');
+
+  const pane = document.getElementById("csConvPane");
+  if (!pane) return;
+  pane.innerHTML = `
     <div style="padding:13px 16px;border-bottom:1px solid #eef2f7;display:flex;align-items:center;gap:8px">
       <i class="fas fa-comments" style="color:var(--p)"></i>
       <div style="flex:1;min-width:0">
@@ -15909,15 +15917,14 @@ async function csOpenConversation(threadId, reviewerName, reviewerPhone8) {
         <div id="csConvCampaign" style="font-size:.74rem;color:var(--t3)">불러오는 중...</div>
       </div>
       <button id="csConvStatusBtn" onclick="csToggleStatus()" style="padding:5px 10px;background:#F3F4F6;color:#374151;border:none;border-radius:8px;font-size:.74rem;font-weight:600;cursor:pointer">—</button>
-      <button onclick="csCloseConversation()" style="width:30px;height:30px;background:#F3F4F6;border:none;border-radius:8px;cursor:pointer;color:#6B7280"><i class="fas fa-times"></i></button>
     </div>
     <div style="display:flex;flex:1;min-height:0">
       <div id="csConvThread" style="flex:1;overflow-y:auto;padding:14px;background:#f9fafb;display:flex;flex-direction:column;gap:8px">
         <div style="text-align:center;color:#9CA3AF;font-size:.82rem"><i class="fas fa-circle-notch fa-spin"></i></div>
       </div>
-      <div style="width:190px;border-left:1px solid #eef2f7;padding:12px;display:flex;flex-direction:column;background:#fffdf5">
+      <div style="width:210px;flex-shrink:0;border-left:1px solid #eef2f7;padding:12px;display:flex;flex-direction:column;background:#fffdf5">
         <div style="font-size:.74rem;font-weight:700;color:#92400E;margin-bottom:6px"><i class="fas fa-lock"></i> 관리자 메모<div style="font-weight:400;font-size:.66rem;color:#b45309">리뷰어 비공개·영구저장</div></div>
-        <textarea id="csMemoText" placeholder="이 리뷰어에 대한 메모..." style="flex:1;resize:none;border:1px solid #FDE68A;border-radius:8px;padding:8px;font-size:.78rem;font-family:inherit;outline:none;background:#fff"></textarea>
+        <textarea id="csMemoText" placeholder="이 리뷰어에 대한 메모..." style="flex:1;min-height:140px;resize:none;border:1px solid #FDE68A;border-radius:8px;padding:8px;font-size:.78rem;font-family:inherit;outline:none;background:#fff"></textarea>
         <button onclick="csSaveMemo('${(reviewerPhone8||'').replace(/'/g,"\\'")}')" style="margin-top:8px;padding:6px;background:#F59E0B;color:#fff;border:none;border-radius:8px;font-size:.76rem;font-weight:700;cursor:pointer">메모 저장</button>
       </div>
     </div>
@@ -15925,8 +15932,7 @@ async function csOpenConversation(threadId, reviewerName, reviewerPhone8) {
       <textarea id="csReplyText" rows="2" placeholder="답장 입력... (Shift+Enter 줄바꿈)" style="flex:1;resize:none;border:1px solid #e5e7eb;border-radius:10px;padding:9px;font-size:.82rem;font-family:inherit;outline:none"
         onkeydown="if(event.key==='Enter'&&!event.shiftKey){event.preventDefault();csSendReply('${threadId}');}"></textarea>
       <button onclick="csSendReply('${threadId}')" style="padding:10px 16px;background:#3182f6;color:#fff;border:none;border-radius:10px;font-weight:700;font-size:.82rem;cursor:pointer;white-space:nowrap"><i class="fas fa-paper-plane"></i></button>
-    </div>
-  </div>`;
+    </div>`;
   await csReloadConversation(threadId);
 }
 
@@ -15999,6 +16005,7 @@ async function csSaveMemo(phone8) {
     const data = await gasPost({ action: "csAdminSaveMemo", phone8, memo });
     if (!data || data.ok === false) throw new Error((data && data.error) || "저장 실패");
     showToast("메모가 저장되었습니다.");
+    loadCsRooms(); // 좌측 목록의 메모 표시 갱신
   } catch (err) {
     showToast("메모 저장 오류: " + err.message, true);
   }
@@ -16021,8 +16028,9 @@ async function csToggleStatus() {
 
 function csCloseConversation() {
   _csActiveThreadId = null;
-  const ov = document.getElementById("csConvOverlay");
-  if (ov) ov.style.display = "none";
+  document.querySelectorAll('.cs-room-row').forEach(el => el.classList.remove('cs-room-active'));
+  const pane = document.getElementById("csConvPane");
+  if (pane) pane.innerHTML = '<div style="margin:auto;text-align:center;color:var(--t3);padding:40px"><i class="fas fa-comments" style="font-size:2rem;display:block;margin-bottom:10px;opacity:.4"></i>왼쪽에서 문의방을 선택하세요</div>';
 }
 
 function csUpdateBadge(count) {
