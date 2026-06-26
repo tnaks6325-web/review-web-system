@@ -94,12 +94,15 @@ async function getMapping(sheetId, tabGid) {
 
   // 현재 헤더 — raw 미러에서 가져옴 (미러링돼 있어야 함)
   const { rows: tabRows } = await pool.query(
-    `SELECT tab_name, spreadsheet_title, headers, col_count
+    `SELECT tab_name, spreadsheet_title, headers, detected_headers,
+            header_row_index, data_start_row, col_count
        FROM raw_sheet_tabs WHERE sheet_id = $1 AND tab_gid = $2`,
     [sheetId, gid]
   );
   const tab = tabRows[0] || null;
-  const headers = tab && Array.isArray(tab.headers) ? tab.headers : [];
+  const headers = tab && Array.isArray(tab.detected_headers)
+    ? tab.detected_headers
+    : (tab && Array.isArray(tab.headers) ? tab.headers : []);
 
   // 저장된 매핑
   const { rows: stored } = await pool.query(
@@ -133,7 +136,14 @@ async function getMapping(sheetId, tabGid) {
 
   return {
     hasHeaders: headers.length > 0,
-    tab: tab ? { tabName: tab.tab_name, spreadsheetTitle: tab.spreadsheet_title, colCount: tab.col_count } : null,
+    tab: tab ? {
+      tabName: tab.tab_name,
+      spreadsheetTitle: tab.spreadsheet_title,
+      colCount: tab.col_count,
+      headerRowIndex: tab.header_row_index || null,
+      dataStartRow: tab.data_start_row || null,
+      detected: Array.isArray(tab.detected_headers),
+    } : null,
     columns,
   };
 }
