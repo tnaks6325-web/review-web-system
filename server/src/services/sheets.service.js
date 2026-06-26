@@ -112,7 +112,9 @@ async function readSheet(spreadsheetId, range, opts = {}) {
   const res = await sheets.spreadsheets.values.get({
     spreadsheetId,
     range,
-    valueRenderOption: 'UNFORMATTED_VALUE',
+    // 기본은 UNFORMATTED_VALUE(핫패스 빈행탐지·비교용). 미러 등은 opts로 FORMATTED_VALUE 지정 가능
+    //  → 날짜가 시트 표기(예: 11/23) 그대로, 직렬숫자(45463)가 아니라 문자열로 반환됨
+    valueRenderOption: opts.valueRenderOption || 'UNFORMATTED_VALUE',
   });
   return res.data.values || [];
 }
@@ -178,13 +180,18 @@ async function _readSheetByGridData(spreadsheetId, range, opts = {}) {
   const rowData = sheetsData[0]?.data?.[0]?.rowData || [];
 
   // rowData를 2D 배열로 변환 (readSheet 반환 형식과 동일)
+  // ★ FORMATTED_VALUE 요청 시: 시트에 표기된 문자열(formattedValue) 그대로 반환
+  //   (날짜 11/23 등을 직렬숫자가 아닌 표기 형식으로 보존 — 미러 전용)
+  const wantFormatted = opts.valueRenderOption === 'FORMATTED_VALUE';
   const result = [];
   for (const row of rowData) {
     const cells = [];
     const values = row?.values || [];
     for (let c = 0; c < actualEndCol - (startCol - 1); c++) {
       const cell = values[c];
-      if (!cell || !cell.effectiveValue) {
+      if (wantFormatted) {
+        cells.push(cell && cell.formattedValue !== undefined ? cell.formattedValue : '');
+      } else if (!cell || !cell.effectiveValue) {
         cells.push('');
       } else if (cell.effectiveValue.numberValue !== undefined) {
         cells.push(cell.effectiveValue.numberValue);
@@ -446,12 +453,13 @@ async function getSpreadsheetMeta(spreadsheetId) {
 /**
  * 배치 읽기 — 여러 범위 한 번에 읽기
  */
-async function batchReadSheet(spreadsheetId, ranges) {
+async function batchReadSheet(spreadsheetId, ranges, valueRenderOption = 'UNFORMATTED_VALUE') {
   if (!sheets) throw new Error('Google Sheets API가 설정되지 않았습니다.');
   const res = await sheets.spreadsheets.values.batchGet({
     spreadsheetId,
     ranges,
-    valueRenderOption: 'UNFORMATTED_VALUE',
+    // 기본 UNFORMATTED_VALUE. 미러는 'FORMATTED_VALUE'로 시트 표기(날짜 11/23 등) 그대로 보존
+    valueRenderOption,
   });
   return res.data.valueRanges || [];
 }
