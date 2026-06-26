@@ -95,14 +95,12 @@
     el.innerHTML = items.map(c => {
       const isGeneral = c.campaignSource === 'general';
       const labelSafe = (c.campaignLabel || '').replace(/'/g, "\\'");
-      const companySafe = (c.companyLabel || '').replace(/'/g, "\\'");
       const unread = c.reviewerUnread > 0;
-      // 부제: 업체(시트)명 → 이전문의/상태
-      const showCompany = c.companyLabel && c.companyLabel !== c.campaignLabel;
-      const sub = (showCompany ? esc(c.companyLabel) + ' · ' : '') + (c.threadId ? '이전 문의 있음' : '새 문의') + (c.status === 'closed' ? ' · 종료됨' : '');
-      return `<div onclick="ReviewerCS.openChat('${(c.campaignKey || '').replace(/'/g,"\\'")}','${labelSafe}','${c.campaignSource || 'general'}','${companySafe}')"
+      // 부제는 상태만 (시트제목 등 업체정보는 리뷰어에게 노출하지 않음)
+      const sub = (c.threadId ? '이전 문의 있음' : '새 문의') + (c.status === 'closed' ? ' · 종료됨' : '');
+      return `<div onclick="ReviewerCS.openChat('${(c.campaignKey || '').replace(/'/g,"\\'")}','${labelSafe}','${c.campaignSource || 'general'}')"
         style="padding:13px 16px;border-bottom:1px solid #f3f4f6;cursor:pointer;display:flex;align-items:center;gap:10px" onmouseover="this.style.background='#f9fafb'" onmouseout="this.style.background='#fff'">
-        <div style="width:38px;height:38px;border-radius:10px;background:${isGeneral ? '#EDE9FE' : '#E0EDFF'};color:${isGeneral ? '#7C3AED' : '#3182f6'};display:flex;align-items:center;justify-content:center;flex-shrink:0"><i class="fas ${isGeneral ? 'fa-comment-dots' : 'fa-layer-group'}"></i></div>
+        <div style="width:38px;height:38px;border-radius:10px;background:${isGeneral ? '#EDE9FE' : '#E0EDFF'};color:${isGeneral ? '#7C3AED' : '#3182f6'};display:flex;align-items:center;justify-content:center;flex-shrink:0"><i class="fas ${isGeneral ? 'fa-comment-dots' : 'fa-box-open'}"></i></div>
         <div style="flex:1;min-width:0">
           <div style="font-weight:600;font-size:.88rem;color:#111827;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${esc(c.campaignLabel)}</div>
           <div style="font-size:.72rem;color:#9CA3AF;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${sub}</div>
@@ -114,11 +112,11 @@
   }
 
   // ── 대화창 ──
-  async function openChat(campaignKey, campaignLabel, campaignSource, companyLabel) {
+  async function openChat(campaignKey, campaignLabel, campaignSource) {
     const user = getUser();
     if (!user || !user.phone8) { toast("로그인이 필요합니다"); return; }
-    _open = { campaignKey: campaignKey || "", campaignLabel: campaignLabel || "문의", campaignSource: campaignSource || "general", companyLabel: companyLabel || "", threadId: null };
-    const headerSub = _open.companyLabel ? esc(_open.companyLabel) : "관리자에게 문의를 남겨주세요";
+    _open = { campaignKey: campaignKey || "", campaignLabel: campaignLabel || "문의", campaignSource: campaignSource || "general", threadId: null };
+    const headerSub = "관리자에게 문의를 남겨주세요";
     const ov = overlay();
     ov.innerHTML = `<div style="${SHEET}">
       <div style="padding:12px 14px;border-bottom:1px solid #eef2f7;display:flex;align-items:center;gap:8px">
