@@ -590,6 +590,23 @@
               </div>
             </div>
           </div>
+          <!-- 주소 (본인) -->
+          <div style="margin-top:8px;border-top:1px dashed #E5E7EB;padding-top:8px">
+            <div style="display:flex;align-items:flex-start;justify-content:space-between;gap:8px">
+              <div style="min-width:0;flex:1">
+                <div class="label">주소</div>
+                <div class="value" id="inlineSelfAddress" style="font-weight:500;font-size:.82rem;white-space:normal;word-break:break-all;color:#DC2626">미등록</div>
+              </div>
+              <button id="btnAddAddress" onclick="openAddressForm()" style="flex-shrink:0;margin-top:2px;padding:2px 8px;background:#EFF6FF;color:#2563EB;border:1px solid #93C5FD;border-radius:5px;font-size:.62rem;font-weight:700;cursor:pointer">추가+</button>
+            </div>
+            <div id="inlineAddressForm" style="display:none;margin-top:8px">
+              <input id="inlineAddressInput" type="text" placeholder="배송받을 주소 (도로명/지번 + 상세주소)" maxlength="200" style="width:100%;padding:8px 10px;border:1.5px solid #D1D5DB;border-radius:7px;font-size:.8rem;outline:none;box-sizing:border-box">
+              <div style="display:flex;gap:8px;margin-top:6px">
+                <button onclick="cancelAddressForm()" style="flex:1;padding:7px 0;background:#fff;color:var(--t2);border:1.5px solid #D1D5DB;border-radius:7px;font-size:.75rem;font-weight:600;cursor:pointer">취소</button>
+                <button id="btnSaveAddress" onclick="saveAddressInline()" style="flex:1;padding:7px 0;background:#2563EB;color:#fff;border:none;border-radius:7px;font-size:.75rem;font-weight:700;cursor:pointer">저장</button>
+              </div>
+            </div>
+          </div>
         </div>
         <!-- 소득명의/주민번호 인라인 입력폼 -->
         <div id="inlineIncomeForm" style="display:none;background:#FFFBEB;border:1.5px solid #FDE68A;border-radius:10px;padding:12px 14px;margin-bottom:12px">
@@ -642,6 +659,10 @@
             <div style="margin-bottom:10px">
               <label style="font-size:.7rem;font-weight:600;color:var(--t2)">주민번호 <span style="color:var(--t3);font-weight:400">(선택, 13자리)</span></label>
               <input id="inlineSubJumin" type="text" placeholder="000000-0000000" oninput="formatJumin(this)" style="width:100%;margin-top:3px;padding:8px 10px;border:1.5px solid #D1D5DB;border-radius:7px;font-size:.82rem;outline:none;box-sizing:border-box" maxlength="14">
+            </div>
+            <div style="margin-bottom:10px">
+              <label style="font-size:.7rem;font-weight:600;color:var(--t2)">주소 <span style="color:var(--t3);font-weight:400">(선택)</span></label>
+              <input id="inlineSubAddr" type="text" placeholder="배송받을 주소" maxlength="200" style="width:100%;margin-top:3px;padding:8px 10px;border:1.5px solid #D1D5DB;border-radius:7px;font-size:.82rem;outline:none;box-sizing:border-box">
             </div>
             <div style="display:flex;gap:8px">
               <button onclick="cancelInlineSubForm()" style="flex:1;padding:9px 0;background:#fff;color:var(--t2);border:1.5px solid #D1D5DB;border-radius:7px;font-size:.78rem;font-weight:600;cursor:pointer">취소</button>
@@ -917,6 +938,9 @@ async function loadInlineProfile(user) {
         if (btnJm) btnJm.style.display = jd ? "none" : "";
       }
       
+      // 주소(본인)
+      renderSelfAddress(p.address);
+
       // 계좌 정보
       renderBankInfo(p.bankName, p.bankAccount, p.accountHolder);
 
@@ -1082,6 +1106,7 @@ function renderInlineSubList(subs) {
       <div style="flex:1;min-width:0">
         <div style="font-size:.8rem;font-weight:700;color:var(--t1);margin-bottom:2px">[${idx+1}] ${escHtml(sub.name)} <span style="font-weight:400;color:var(--t3);font-size:.7rem">${escHtml(sub.phone||'')}</span></div>
         <div style="font-size:.68rem;color:var(--t3)">소득명의: <span style="color:var(--t2)">${escHtml(sub.incomeName||'-')}</span> | 주민번호: <span style="color:var(--t2)">${jDisplay}</span></div>
+        ${sub.address ? `<div style="font-size:.68rem;color:var(--t3);margin-top:1px">주소: <span style="color:var(--t2)">${escHtml(sub.address)}</span></div>` : ''}
       </div>
       <div style="display:flex;gap:4px;flex-shrink:0">
         <button onclick="editInlineSubAccount(${idx})" style="padding:3px 7px;background:#EFF6FF;color:#2563EB;border:1.5px solid #93C5FD;border-radius:6px;font-size:.65rem;font-weight:700;cursor:pointer">수정</button>
@@ -1097,6 +1122,50 @@ function renderInlineSubList(subs) {
 /* ═══════════════════════════════════════
    소득명의/주민번호 폼
 ═══════════════════════════════════════ */
+/* ═══ 주소(본인) ═══ */
+function renderSelfAddress(address) {
+  const el = document.getElementById("inlineSelfAddress");
+  const btn = document.getElementById("btnAddAddress");
+  const v = (address || "").trim();
+  if (el) { el.textContent = v || "미등록"; el.style.color = v ? "var(--t2)" : "#DC2626"; }
+  if (btn) btn.textContent = v ? "수정" : "추가+";
+}
+function openAddressForm() {
+  const form = document.getElementById("inlineAddressForm");
+  if (!form) return;
+  document.getElementById("inlineAddressInput").value = (window._reviewerProfile?.address || "");
+  form.style.display = "";
+  document.getElementById("inlineAddressInput").focus();
+}
+function cancelAddressForm() {
+  const form = document.getElementById("inlineAddressForm");
+  if (form) form.style.display = "none";
+}
+async function saveAddressInline() {
+  const address = (document.getElementById("inlineAddressInput")?.value || "").trim();
+  if (!address) { showToast("주소를 입력해주세요"); return; }
+  const user = getSavedUser();
+  if (!user || !user.name || !user.phone8) { showToast("세션이 만료되었습니다"); return; }
+  const btn = document.getElementById("btnSaveAddress");
+  if (btn) { btn.disabled = true; btn.textContent = "저장 중..."; }
+  try {
+    const res = await gasPost({ action: "saveAddress", name: user.name, phone8: user.phone8, address });
+    if (res && res.ok) {
+      showToast("✅ 주소가 저장되었습니다");
+      if (!window._reviewerProfile) window._reviewerProfile = {};
+      window._reviewerProfile.address = address;
+      renderSelfAddress(address);
+      cancelAddressForm();
+    } else {
+      showToast((res && res.error) || "저장에 실패했습니다");
+    }
+  } catch (e) {
+    showToast("저장 중 오류: " + e.message);
+  } finally {
+    if (btn) { btn.disabled = false; btn.textContent = "저장"; }
+  }
+}
+
 /* ═══ 계좌 관리 (입금받을 계좌) ═══ */
 function _maskAccount(acc) {
   const d = (acc || "").replace(/[^0-9]/g, "");
@@ -1116,7 +1185,7 @@ function renderBankInfo(bankName, bankAccount, accountHolder) {
     const ac = document.getElementById("bankInfoAccount");
     if (bn) bn.textContent = bankName || "-";
     if (hd) hd.textContent = accountHolder || "-";
-    if (ac) ac.textContent = _maskAccount(bankAccount);
+    if (ac) ac.textContent = bankAccount || "-";
     if (btn) btn.innerHTML = '<i class="fas fa-pen"></i> 계좌 수정';
   } else {
     if (empty) empty.style.display = "";
@@ -1272,6 +1341,7 @@ function toggleInlineSubForm() {
   document.getElementById("inlineSubPhone").value = "";
   document.getElementById("inlineSubIncomeName").value = "";
   document.getElementById("inlineSubJumin").value = "";
+  document.getElementById("inlineSubAddr").value = "";
   form.style.display = "";
   document.getElementById("inlineSubName").focus();
 }
@@ -1292,6 +1362,7 @@ function editInlineSubAccount(idx) {
   document.getElementById("inlineSubIncomeName").value = sub.incomeName || "";
   const jd = (sub.jumin || sub.residentNo || "").replace(/[^0-9]/g, "");
   document.getElementById("inlineSubJumin").value = jd.length > 6 ? jd.slice(0,6)+"-"+jd.slice(6) : jd;
+  document.getElementById("inlineSubAddr").value = sub.address || "";
   form.style.display = "";
   document.getElementById("inlineSubName").focus();
 }
@@ -1353,7 +1424,8 @@ async function saveInlineSubAccount() {
         <div style="display:flex;gap:6px;margin-bottom:5px"><span style="font-size:.7rem;color:var(--t3);min-width:55px">이름</span><span style="font-size:.8rem;font-weight:700;color:var(--t1)">${escHtml(name)}</span></div>
         <div style="display:flex;gap:6px;margin-bottom:5px"><span style="font-size:.7rem;color:var(--t3);min-width:55px">전화번호</span><span style="font-size:.8rem;font-weight:700;color:#2563EB">${escHtml(phoneFormatted)}</span></div>
         <div style="display:flex;gap:6px;margin-bottom:5px"><span style="font-size:.7rem;color:var(--t3);min-width:55px">소득명의</span><span style="font-size:.8rem;color:var(--t2)">${escHtml(incomeName || '(미입력)')}</span></div>
-        <div style="display:flex;gap:6px"><span style="font-size:.7rem;color:var(--t3);min-width:55px">주민번호</span><span style="font-size:.8rem;font-weight:700;color:#DC2626">${escHtml(juminFormatted)}</span></div>
+        <div style="display:flex;gap:6px;margin-bottom:5px"><span style="font-size:.7rem;color:var(--t3);min-width:55px">주민번호</span><span style="font-size:.8rem;font-weight:700;color:#DC2626">${escHtml(juminFormatted)}</span></div>
+        <div style="display:flex;gap:6px"><span style="font-size:.7rem;color:var(--t3);min-width:55px">주소</span><span style="font-size:.8rem;color:var(--t2)">${escHtml((document.getElementById('inlineSubAddr')?.value||'').trim() || '(미입력)')}</span></div>
       </div>
       <div style="font-size:.7rem;color:#B45309;text-align:center;margin-bottom:10px;line-height:1.5">이 정보가 정확히 맞는지 확인해주세요<br><strong>*전화번호 오타, 주민번호 오타 확인 필수</strong></div>
       <div style="display:flex;gap:8px">
@@ -1384,7 +1456,8 @@ async function confirmSaveInlineSubAccount() {
     name,
     phone: phone.slice(0,3) + "-" + phone.slice(3,7) + "-" + phone.slice(7),
     incomeName,
-    jumin: juminDigits
+    jumin: juminDigits,
+    address: (document.getElementById("inlineSubAddr")?.value || "").trim()
   };
 
   if (editIdx >= 0 && editIdx < subs.length) {

@@ -203,6 +203,7 @@ async function handleReviewerProfile(body = {}) {
     action, phone8, name, subAccounts, incomeInfo,
     incomeName, residentNum, jumin,            // saveIncomeInfo (프론트는 top-level로 전송)
     bankName, bankAccount, accountHolder,      // saveBankInfo
+    address,                                   // saveAddress
   } = body;
   const p8 = (phone8 || '').replace(/[^0-9]/g, '');
   if (p8.length !== 8) return { ok: false, error: '전화번호 뒤 8자리 필요' };
@@ -211,7 +212,7 @@ async function handleReviewerProfile(body = {}) {
     const { rows } = await pool.query(
       `SELECT name, phone, income_type AS "incomeType", resident_num AS "residentNum",
               bank_name AS "bankName", bank_account AS "bankAccount",
-              account_holder AS "accountHolder",
+              account_holder AS "accountHolder", address,
               sub_accounts AS "subAccounts", status
        FROM reviewers WHERE phone8 = $1 LIMIT 1`, [p8]
     );
@@ -272,6 +273,13 @@ async function handleReviewerProfile(body = {}) {
        WHERE phone8 = $4`,
       [bn, ba, ah, p8]
     );
+    return { ok: true };
+  }
+
+  if (action === 'saveAddress') {
+    // 본인 주소 저장(빈 문자열이면 초기화 허용)
+    const addr = (address == null ? '' : address).toString().trim();
+    await pool.query(`UPDATE reviewers SET address = $1 WHERE phone8 = $2`, [addr, p8]);
     return { ok: true };
   }
 
