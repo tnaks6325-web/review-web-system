@@ -36,8 +36,9 @@
     fab = document.createElement("button");
     fab.id = "rcsFab";
     fab.title = "1:1 문의";
-    fab.innerHTML = '<i class="fas fa-headset"></i><span id="rcsFabDot" style="display:none;position:absolute;top:-2px;right:-2px;width:12px;height:12px;background:#EF4444;border-radius:50%;border:2px solid #fff"></span>';
-    fab.style.cssText = "position:fixed;right:18px;bottom:18px;z-index:9000;width:56px;height:56px;border-radius:50%;background:#3182f6;color:#fff;border:none;box-shadow:0 6px 18px rgba(49,130,246,.45);font-size:1.25rem;cursor:pointer;display:flex;align-items:center;justify-content:center";
+    // 라벨 있는 알약형 버튼 — 하단 탭바 위에 띄워 눈에 잘 띄게(탭바와 겹치지 않도록)
+    fab.innerHTML = '<i class="fas fa-headset" style="font-size:1.02rem"></i><span style="white-space:nowrap">1:1 문의</span><span id="rcsFabDot" style="display:none;position:absolute;top:-4px;right:-4px;width:13px;height:13px;background:#EF4444;border-radius:50%;border:2px solid #fff"></span>';
+    fab.style.cssText = "position:fixed;right:14px;bottom:calc(76px + env(safe-area-inset-bottom));z-index:350;display:flex;align-items:center;gap:7px;padding:11px 16px;border-radius:26px;background:#3182f6;color:#fff;border:none;box-shadow:0 6px 20px rgba(49,130,246,.5);font-size:.86rem;font-weight:700;cursor:pointer";
     fab.onclick = openPicker;
     document.body.appendChild(fab);
   }
