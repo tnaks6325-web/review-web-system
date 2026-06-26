@@ -21,6 +21,7 @@ const { getSpreadsheetMeta, batchReadSheet, readSheet, getSheetModifiedTime } = 
 const { computeChecksum } = require('../utils/checksum');
 const { throttledCall, throttledMap, getThrottleStatus } = require('../utils/sheetsThrottle');
 const { logger } = require('../utils/logger');
+const { detectSheetHeader } = require('../utils/sheetHeader');
 
 // 시스템 탭 키워드 — 제외하지 않고 is_system_tab 플래그만 부여
 const SYSTEM_TAB_KEYWORDS = [
@@ -282,13 +283,16 @@ async function _upsertTabMeta({ sheetId, sheetUrl, spreadsheetTitle, tabGid, tab
     ? values.reduce((m, r) => Math.max(m, Array.isArray(r) ? r.length : 0), 0)
     : 0;
   const headers = values && values.length > 0 && Array.isArray(values[0]) ? values[0] : [];
+  const detected = detectSheetHeader(values || []);
+  const detectedHeaders = detected.headers || null;
 
   await pool.query(
     `INSERT INTO raw_sheet_tabs
        (sheet_id, sheet_url, spreadsheet_title, tab_gid, tab_name,
         row_count, col_count, headers, is_system_tab, is_hidden,
-        checksum, sheet_modified_at, mirrored_at)
-     VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,NOW())
+        checksum, sheet_modified_at, mirrored_at,
+        header_row_index, detected_headers, data_start_row)
+     VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,NOW(),$13,$14::jsonb,$15)
      ON CONFLICT (sheet_id, tab_gid) DO UPDATE SET
        sheet_url = EXCLUDED.sheet_url,
        spreadsheet_title = EXCLUDED.spreadsheet_title,
@@ -300,11 +304,17 @@ async function _upsertTabMeta({ sheetId, sheetUrl, spreadsheetTitle, tabGid, tab
        is_hidden = EXCLUDED.is_hidden,
        checksum = EXCLUDED.checksum,
        sheet_modified_at = EXCLUDED.sheet_modified_at,
+       header_row_index = EXCLUDED.header_row_index,
+       detected_headers = EXCLUDED.detected_headers,
+       data_start_row = EXCLUDED.data_start_row,
        mirrored_at = NOW()`,
     [
       sheetId, sheetUrl, spreadsheetTitle, tabGid, tabName,
       rowCount, colCount, JSON.stringify(headers), _isSystemTab(tabName), isHidden,
       checksum, modifiedTime || null,
+      detected.headerRowIndex,
+      detectedHeaders ? JSON.stringify(detectedHeaders) : null,
+      detected.dataStartRow,
     ]
   );
 }

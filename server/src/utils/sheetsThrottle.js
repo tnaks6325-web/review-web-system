@@ -15,7 +15,7 @@ const { logger } = require('./logger');
 // 설정
 // ═══════════════════════════════════════════════════════════
 
-const REQUESTS_PER_MINUTE = 50;  // 안전 마진 (실제 한도 60)
+const REQUESTS_PER_MINUTE = parseInt(process.env.SHEETS_REQUESTS_PER_MINUTE || '45', 10);  // 안전 마진 (실제 한도 60)
 const MIN_INTERVAL_MS = Math.ceil(60000 / REQUESTS_PER_MINUTE); // ≈ 1200ms
 const DEFAULT_CONCURRENCY = 3;   // 동시 처리 수 (3개씩 → 간격 유지)
 

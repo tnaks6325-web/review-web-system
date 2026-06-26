@@ -15,7 +15,15 @@ const pool = require('../db/pool');
 const { writeSheet, appendSheet, readSheet, batchUpdateSheet } = require('./sheets.service');
 const { throttledCall } = require('../utils/sheetsThrottle');
 const { recordParticipationLink } = require('./participation.service');
-const { selectOrderTargetRow } = require('./orderRowMatcher.service');
+const {
+  loadRawTabContext,
+  buildBatchUpdateData,
+  buildMirrorGuardRange,
+  guardBlocksWrite,
+  markOrderWritten,
+  markOrderMirrorFailed,
+  recordReviewIdentity,
+} = require('./orderLedger.service');
 const { logger } = require('../utils/logger');
 
 // ── 큐에 작업 추가 ──
@@ -196,70 +204,66 @@ async function _executeItem(item) {
     }
 
     case 'order_append': {
-      // ★ C1: 큐 재시도 시 항상 신선한 헤더를 읽음 (최대 50행에서 탐색)
-      // ★ FIX: appendSheet 대신 빈 행 탐색 후 writeSheet (중간 빈 행 건너뜀 방지)
-      const { sheetId, tabName, orderData, loginPhone8, loginName } = payload;
+      const { sheetId, tabName, orderData, loginPhone8, loginName, gid, sheetRow, orderSubmissionId } = payload;
       if (!sheetId || !tabName) throw new Error('payload 누락');
+      if (!sheetRow) throw new Error('payload 누락: sheetRow');
 
-      // 전체 데이터 읽기 (최대 500행)
-      const allRows = await throttledCall(() => readSheet(sheetId, `'${tabName}'!A1:ZZ500`));
-      if (!allRows || allRows.length === 0) throw new Error('헤더 행을 읽을 수 없음');
-
-      // 헤더 행 탐색
-      const HEADER_KEYWORDS = ['주문자', '수취인', '연락처', '주소', '은행', '계좌', '금액', '아이디', '인애드'];
-      let headerRowIdx = 0;
-      let headerRow = allRows[0];
-      for (let i = 0; i < Math.min(allRows.length, 50); i++) {
-        const row = allRows[i] || [];
-        const matchCount = row.filter(c => HEADER_KEYWORDS.some(k => String(c || '').includes(k))).length;
-        if (matchCount >= 2) { headerRow = row; headerRowIdx = i; break; }
-      }
-      const headers = headerRow.map(h => String(h || '').trim());
-      const rowData = _mapOrderToRow(headers, orderData);
-
-      const dataRows = allRows.slice(headerRowIdx + 1);
-      const rowMatch = selectOrderTargetRow({
-        headers,
-        dataRows,
-        orderer: orderData && orderData.orderer,
-        selectedOptKey: orderData && orderData.selectedOptKey,
-      });
-      const emptyRowOffset = rowMatch.emptyRowOffset;
-      logger.info(`[syncQueue:order_append] 행 선택: ${rowMatch.matchType} → dataRow[${emptyRowOffset}]`);
-
-      // 실제 시트 행 번호 (1-based)
-      const targetRow = headerRowIdx + 1 + emptyRowOffset + 1;
-
-      // ★ null이 아닌 셀만 개별 쓰기 (번호, 구매일자 등 기존 값 보존)
-      // ★ 날짜 열: 기존 값이 있으면 덮어쓰지 않음
-      const targetRowData = dataRows[emptyRowOffset] || [];
-      const writePairs = [];
-      for (let ci = 0; ci < rowData.length; ci++) {
-        if (rowData[ci] === null) continue;
-        // 날짜 열 보존: 기존 값이 있으면 skip
-        const headerKey = (headers[ci] || '').toLowerCase();
-        if ((headerKey.includes('일자') || headerKey.includes('날짜') || headerKey.includes('date')) && !headerKey.includes('주문')) {
-          const existingDateVal = String(targetRowData[ci] || '').trim();
-          if (existingDateVal) continue; // 기존 날짜 보존
+      try {
+        const tabContext = await loadRawTabContext(sheetId, gid, tabName);
+        if (!tabContext || !tabContext.headers || tabContext.headers.length === 0) {
+          throw new Error('RAW 미러 헤더 메타를 찾을 수 없음');
         }
-        writePairs.push({ col: ci, val: rowData[ci] });
-      }
+        const guard = buildMirrorGuardRange({
+          tabName: tabContext.tabName || tabName,
+          headers: tabContext.headers,
+          targetRow: parseInt(sheetRow, 10),
+          orderData,
+        });
+        if (guard) {
+          const guardValues = await throttledCall(() =>
+            readSheet(sheetId, guard.range, tabContext.tabGid ? { gid: tabContext.tabGid } : (gid ? { gid } : {}))
+          );
+          const existingVal = guardValues && guardValues[0]
+            ? String(guardValues[0][0] || '').trim()
+            : '';
+          // 내가 쓴 값이면(재시도 멱등) 통과, 외부/타 주문 값이면 덮어쓰기 차단
+          if (guardBlocksWrite(existingVal, guard)) {
+            throw new Error(`target row already filled before mirror write: ${guard.header || guard.range}`);
+          }
+        }
+        const batchData = buildBatchUpdateData({
+          tabName: tabContext.tabName || tabName,
+          headers: tabContext.headers,
+          targetRow: parseInt(sheetRow, 10),
+          orderData,
+        });
+        if (batchData.length > 0) {
+          await throttledCall(() => batchUpdateSheet(
+            sheetId,
+            batchData,
+            'RAW',
+            tabContext.tabGid ? { gid: tabContext.tabGid } : (gid ? { gid } : {})
+          ));
+        }
 
-      if (writePairs.length > 0) {
-        const batchData = writePairs.map(pair => ({
-          range: `'${tabName}'!${_getColLetter(pair.col)}${targetRow}`,
-          values: [[pair.val]],
-        }));
-        await throttledCall(() => batchUpdateSheet(sheetId, batchData, 'RAW'));
+        await recordParticipationLink({
+          sheetId, tabName: tabContext.tabName || tabName, rowIndex: sheetRow,
+          phone8: loginPhone8, phone: orderData && orderData.phone,
+          name: loginName || (orderData && orderData.orderer),
+          source: 'order_submit_queue',
+        });
+        await recordReviewIdentity({
+          sheetId, tabName: tabContext.tabName || tabName, tabGid: tabContext.tabGid || gid,
+          rowIndex: sheetRow,
+          phone8: loginPhone8, phone: orderData && orderData.phone,
+          name: loginName || (orderData && orderData.orderer),
+          recipient: orderData && orderData.recipient,
+        });
+        await markOrderWritten(orderSubmissionId, sheetRow);
+      } catch (err) {
+        await markOrderMirrorFailed(orderSubmissionId, err);
+        throw err;
       }
-
-      // ★ P5: 큐 재시도 경로에서도 제출 리뷰어 신원을 확정 행에 기록
-      await recordParticipationLink({
-        sheetId, tabName, rowIndex: targetRow,
-        phone8: loginPhone8, phone: orderData && orderData.phone,
-        name: loginName || (orderData && orderData.orderer),
-        source: 'order_submit_queue',
-      });
       break;
     }
 

@@ -1,12 +1,15 @@
 const cron = require('node-cron');
 const { buildIndexSmart, checkDirtySheets, buildOneSheet } = require('../services/indexBuilder.service');
 const { processQueue, purgeCompleted, retryAllFailed } = require('../services/syncQueue.service');
+const { mirrorAllSheets } = require('../services/rawMirror.service');
+const { getThrottleStatus } = require('../utils/sheetsThrottle');
 // [DEPRECATED — v11.8.0] syncSettingsOnly 제거: DB가 설정 원본이므로 시트→DB 동기화 불필요
 // const { syncSettingsOnly } = require('../services/masterSheet.service');
 const { logger } = require('../utils/logger');
 const { emitIndexBuild, broadcast } = require('../utils/sse');
 const { logAbnormal } = require('../services/errorLog.service');
 const pool = require('../db/pool');
+let rawMirrorRunning = false;
 // [REMOVED] readSheet — 세부목록→DB 자동동기화 CRON 제거됨 (DB가 원본)
 
 /**
@@ -72,6 +75,35 @@ function startCronJobs() {
   }, { timezone: 'Asia/Seoul' });
 
   // ── 인덱스 전체 빌드: 하루 2회 (09시, 15시) ──
+  // RAW mirror dirty check: keep DB source data close to manually edited Sheets.
+  if (process.env.RAW_MIRROR_CRON_ENABLED !== 'false') {
+    const rawMirrorSchedule = process.env.RAW_MIRROR_CRON_SCHEDULE || '*/5 * * * *';
+    cron.schedule(rawMirrorSchedule, async () => {
+      if (rawMirrorRunning) {
+        logger.debug('[CRON-RawMirror] previous run still active, skip');
+        return;
+      }
+      const throttle = getThrottleStatus();
+      const busyThreshold = parseInt(process.env.RAW_MIRROR_BUSY_THRESHOLD || '10', 10);
+      if (throttle.requestsInLastMinute > busyThreshold) {
+        logger.debug(`[CRON-RawMirror] throttle busy (${throttle.requestsInLastMinute}/${throttle.limit}), skip`);
+        return;
+      }
+      rawMirrorRunning = true;
+      try {
+        const result = await mirrorAllSheets({ force: false, includeHidden: true });
+        if ((result.tabsMirrored || 0) > 0 || (result.errors || 0) > 0) {
+          logger.info(`[CRON-RawMirror] tabs=${result.tabsMirrored}, rows=${result.rowsWritten}, skipped=${result.sheetsSkipped}, errors=${result.errors}, elapsed=${result.elapsed}`);
+        }
+      } catch (err) {
+        logger.error(`[CRON-RawMirror] error: ${err.message}`);
+        logAbnormal({ flow: 'cron', step: 'raw_mirror', error: err, context: { job: 'raw_mirror' } });
+      } finally {
+        rawMirrorRunning = false;
+      }
+    }, { timezone: 'Asia/Seoul' });
+  }
+
   const schedule = process.env.INDEX_CRON_SCHEDULE || '0 9,15 * * 1-6';
   cron.schedule(schedule, async () => {
     logger.info(`[CRON] 인덱스 빌드 시작: ${new Date().toISOString()}`);

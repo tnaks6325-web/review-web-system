@@ -5,7 +5,12 @@ const { throttledCall } = require('../utils/sheetsThrottle');
 const { enqueue } = require('../services/syncQueue.service');
 const { logAbnormal } = require('../services/errorLog.service');
 const { recordParticipationLink } = require('../services/participation.service');
-const { selectOrderTargetRow } = require('../services/orderRowMatcher.service');
+const {
+  createOrderLedgerEntry,
+  markOrderQueued,
+  markOrderMirrorFailed,
+  recordReviewIdentity,
+} = require('../services/orderLedger.service');
 const pool = require('../db/pool');
 const { logger } = require('../utils/logger');
 const { emitReviewSubmit, emitOrderSubmit } = require('../utils/sse');
@@ -716,177 +721,77 @@ router.post('/order', async (req, res, next) => {
       return res.json({ error: 'sheetId와 tabName이 필요합니다.' });
     }
 
-    // ── Step 1: DB 즉시 저장 ──
-    let dbSaved = false;
-    try {
-      await pool.query(
-        `INSERT INTO order_submissions (sheet_id, tab_name, gid, orderer, recipient, user_id, phone, address, order_num, date_str, selected_opt_key)
-         VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11)`,
-        [sheetId, tabName, gid || '', orderer || '', recipient || '', userId || '', phone || '', address || '', orderNum || '', dateStr || '', selectedOptKey || '']
-      );
-      dbSaved = true;
-    } catch (dbErr) {
-      logger.warn(`[submit/order] DB 저장 실패: ${dbErr.message}`);
-    }
-
-    // ── Phase 1: index_master 카운트 즉시 반영 ──
-    // 슬롯 매칭 시에는 기존 행 사용이므로 row_count 증가 불필요
-    if (dbSaved && !slotRowNumber) {
-      try {
-        await pool.query(
-          `UPDATE index_master
-           SET row_count = row_count + 1
-           WHERE sheet_id = $1 AND tab_name = $2`,
-          [sheetId, tabName]
-        );
-      } catch (_) { /* 대시보드 카운트 보조 — 실패해도 무시 */ }
-    }
-
-    // ── ★ Step 3: 즉시 응답 반환 (DB 저장 완료 = 제출 성공) ──
-    // Sheets 쓰기는 백그라운드에서 처리 → 사용자 대기 제거
     const orderData = { orderer, recipient, userId, phone, address, bank, account, depositor, price, dateStr, orderNum, memo, selectedOptKey };
-    const sheetOpts = gid ? { gid } : {};
-
-    // 즉시 응답 (DB 저장 기준)
-    res.json({
-      ok: true,
-      dbSaved,
-      sheetsWritten: false,   // Sheets는 백그라운드에서 처리 (프론트가 기다리지 않음)
-      queued: true,           // 항상 큐 처리 방식
-      usedSlot: !!slotRowNumber,
-      slotRowNumber: slotRowNumber ? parseInt(slotRowNumber) : null,
+    const ledger = await createOrderLedgerEntry({
+      sheetId, tabName, gid,
+      orderData,
+      slotRowNumber: slotRowNumber || null,
+      loginPhone8: loginPhone8 || '',
+      loginName: loginName || '',
     });
 
-    // ── SSE 알림: 구매양식 제출 ──
+    if (ledger.sheetRow) {
+      await recordParticipationLink({
+        sheetId, tabName, rowIndex: ledger.sheetRow,
+        phone8: loginPhone8, phone, name: loginName || orderer,
+        source: 'order_submit',
+      });
+      await recordReviewIdentity({
+        sheetId, tabName, tabGid: ledger.tabGid, rowIndex: ledger.sheetRow,
+        phone8: loginPhone8, phone, name: loginName || orderer, recipient,
+      });
+    }
+
+    let queued = false;
+    if (ledger.sheetRow) {
+      try {
+        await enqueue('order_append', {
+          sheetId,
+          tabName,
+          gid: ledger.tabGid || gid || '',
+          orderData,
+          orderSubmissionId: ledger.orderSubmissionId,
+          sheetRow: ledger.sheetRow,
+          dedupKey: ledger.dedupKey,
+          loginPhone8: loginPhone8 || '',
+          loginName: loginName || '',
+        });
+        await markOrderQueued(ledger.orderSubmissionId);
+        queued = true;
+      } catch (queueErr) {
+        logger.error(`[submit/order] 큐 등록 실패: ${queueErr.message}`);
+        await markOrderMirrorFailed(ledger.orderSubmissionId, queueErr);
+        logAbnormal({
+          flow: 'sync_queue', step: 'enqueue', severity: 'critical', error: queueErr,
+          context: { sheetId, tabName, type: 'order_append', orderSubmissionId: ledger.orderSubmissionId },
+        });
+      }
+    } else {
+      logger.warn(`[submit/order] RAW 행 배정 실패: sheet=${sheetId}, tab=${tabName}, orderSubmissionId=${ledger.orderSubmissionId}`);
+      logAbnormal({
+        flow: 'order_submit', step: 'row_claim', severity: 'warn',
+        error: new Error('RAW 미러 기반 행 배정 실패'),
+        context: { sheetId, tabName, orderSubmissionId: ledger.orderSubmissionId },
+      });
+    }
+
+    res.json({
+      ok: true,
+      dbSaved: true,
+      sheetsWritten: false,
+      queued,
+      usedSlot: !!slotRowNumber,
+      slotRowNumber: slotRowNumber ? parseInt(slotRowNumber) : null,
+      sheetRow: ledger.sheetRow,
+      orderSubmissionId: ledger.orderSubmissionId,
+      mirrorStatus: queued ? 'queued' : (ledger.sheetRow ? 'failed' : 'pending_no_row'),
+    });
+
     emitOrderSubmit({
       tabName, sheetId,
       orderer: orderer || '', recipient: recipient || '',
-      dbSaved, sheetsWritten: false, usedSlot: !!slotRowNumber,
-    });
-
-    // ── ★ Step 3: 백그라운드 Sheets 쓰기 (응답 후 비동기 처리) ──
-    // 탭 단위 직렬화 + 글로벌 throttle로 처리(타임아웃 race 없음), 실패 시 큐에 등록
-    // ★ 시트 기록 직전 중복 필터링: 같은 날 + 수취인+연락처+주소 일치 시 쓰기 생략
-    setImmediate(async () => {
-      try {
-        // ── 중복 필터링 (시트 기록 시점): 같은 날 + 수취인+연락처+주소 일치 시 쓰기 생략 ──
-        try {
-          const dupCount = await pool.query(
-            `SELECT COUNT(*) AS cnt FROM order_submissions
-             WHERE sheet_id = $1 AND tab_name = $2 AND date_str = $3
-             AND recipient = $4 AND phone = $5 AND address = $6`,
-            [sheetId, tabName, dateStr || '', recipient || '', phone || '', address || '']
-          );
-          if (parseInt(dupCount.rows[0].cnt) > 1) {
-            logger.warn(`[submit/order:bg] 중복 감지 → 시트 쓰기 생략 (sheet=${sheetId}, tab=${tabName}, recipient=${recipient}, phone=${phone})`);
-            return; // 시트에 쓰지 않음
-          }
-        } catch (dupErr) {
-          // 중복 검사 실패 시 그냥 통과 (시트에 쓰기 진행)
-          logger.warn(`[submit/order:bg] 중복 검사 오류 (무시): ${dupErr.message}`);
-        }
-
-        // ★ 탭 단위 직렬화: 같은 탭 동시 제출의 시트 읽기/쓰기 폭주·행경합 방지
-        await withTabLock(`${sheetId}||${tabName}`, async () => {
-        const sheetsPromise = (async () => {
-          // ★ 빈 행 탐색 후 writeSheet로 기입 (appendSheet는 마지막 데이터 행 다음에 추가하므로 중간 빈 행을 건너뜀)
-          // getCachedTabData로 전체 데이터를 읽어 헤더 다음 첫 번째 빈 행을 찾음
-          const tabData = await getCachedTabData(sheetId, tabName, sheetOpts);
-          if (!tabData || !tabData.headers) throw new Error('헤더를 가져올 수 없음');
-
-          const headers = tabData.headers;
-          const headerRowIdx = tabData.headerRowIdx; // 0-based index in sheet data
-          const dataRows = tabData.dataRows; // rows after header
-
-          const rowData = _mapOrderToRow(headers, orderData);
-          const rowMatch = selectOrderTargetRow({ headers, dataRows, orderer, selectedOptKey });
-          const emptyRowOffset = rowMatch.emptyRowOffset;
-          const phoneColIdx = rowMatch.columns.phoneColIdx;
-          const addressColIdx = rowMatch.columns.addressColIdx;
-          logger.info(`[submit/order:bg] 행 선택: ${rowMatch.matchType} → dataRow[${emptyRowOffset}]`);
-
-          // 실제 시트 행 번호 계산 (1-based, 헤더행 = headerRowIdx+1, 데이터 시작 = headerRowIdx+2)
-          const targetRow = headerRowIdx + 1 + emptyRowOffset + 1; // +1 for 1-based, +1 for header row itself
-
-          // ★ 동시 제출 방어: 쓰기 직전 타겟 행의 연락처 셀 재확인
-          // (인애드명단이 이미 수취인에 있을 수 있으므로 연락처로 판정)
-          try {
-            const checkColIdx = phoneColIdx >= 0 ? phoneColIdx : (addressColIdx >= 0 ? addressColIdx : 0);
-            const checkRange = `'${tabName}'!${getColLetter(checkColIdx)}${targetRow}`;
-            const checkData = await throttledCall(() => readSheet(sheetId, checkRange, sheetOpts));
-            const existingVal = checkData && checkData[0] ? String(checkData[0][0] || '').trim() : '';
-            if (existingVal) {
-              // 이미 다른 제출이 들어간 경우 → 캐시 무효화 후 재탐색
-              logger.warn(`[submit/order:bg] 동시 제출 감지: row=${targetRow} 이미 연락처='${existingVal}' → 큐로 전환`);
-              tabDataCache.delete(`${sheetId}||${tabName}`);
-              throw new Error('동시 제출 감지 — 큐에서 재시도');
-            }
-          } catch (raceErr) {
-            if (raceErr.message.includes('동시 제출 감지')) throw raceErr;
-            // readSheet 실패는 무시하고 진행 (쓰기는 시도)
-            logger.warn(`[submit/order:bg] 동시제출 체크 실패 (무시): ${raceErr.message}`);
-          }
-
-          // ★ null이 아닌 셀만 개별 쓰기 (번호, 인애드명단 등 기존 값 보존)
-          // ★ 구매일자/옵션은 덮어쓰기 허용 (리뷰어가 제출 시 갱신)
-          const targetRowData = dataRows[emptyRowOffset] || [];
-          const writePairs = [];
-          for (let ci = 0; ci < rowData.length; ci++) {
-            if (rowData[ci] === null) continue; // null = 기존 값 보존 (번호, 인애드명단 등)
-            writePairs.push({ col: ci, val: rowData[ci] });
-          }
-
-          if (writePairs.length > 0) {
-            const batchData = writePairs.map(pair => ({
-              range: `'${tabName}'!${getColLetter(pair.col)}${targetRow}`,
-              values: [[pair.val]],
-            }));
-            // ★ 글로벌 throttle: 다중 탭 동시 제출의 쓰기까지 단일 50/분 윈도우 공유
-            //   (탭락은 같은 탭만 직렬화하므로, 서로 다른 탭의 쓰기는 throttle이 캡)
-            await throttledCall(() => batchUpdateSheet(sheetId, batchData, 'RAW', sheetOpts));
-          }
-
-          // 성공 시 캐시 무효화
-          tabDataCache.delete(`${sheetId}||${tabName}`);
-          logger.info(`[submit/order:bg] Sheets 쓰기 성공 (sheet=${sheetId}, tab=${tabName}, row=${targetRow})`);
-
-          // ★ P5: 제출 시점 리뷰어 신원을 확정 행에 못 박는다 (검증 phone8 우선)
-          await recordParticipationLink({
-            sheetId, tabName, rowIndex: targetRow,
-            phone8: loginPhone8, phone, name: loginName || orderer,
-            source: 'order_submit',
-          });
-        })();
-
-        // ★ 구매양식은 타임아웃 race를 두지 않는다(직렬화+throttle로 처리).
-        //   15초 race를 두면 throttle 백프레셔(대기)가 타임아웃을 유발해 큐로 넘기고,
-        //   그 사이 detached 쓰기가 뒤늦게 성공하면 같은 주문이 다음 빈행에 한 번 더
-        //   기록돼 "중복 행"이 생긴다(이번 사고의 증상). 따라서 throttled 쓰기를
-        //   그대로 await: 성공이면 단일 기록, 실패면 throw → 아래 catch에서 큐 등록.
-        await sheetsPromise;
-        }); // ── withTabLock 끝 (탭 직렬화) ──
-      } catch (bgErr) {
-        // Sheets 쓰기 실패 → 큐에 등록 (자동 재시도)
-        logger.warn(`[submit/order:bg] Sheets 쓰기 실패 → 큐 등록: ${bgErr.message}`);
-        logAbnormal({
-          flow: 'order_submit', step: 'sheet_write', severity: 'warn', error: bgErr,
-          context: { sheetId, tabName, slotRowNumber: slotRowNumber || null, queued: true },
-        });
-        try {
-          await enqueue('order_append', {
-            sheetId, tabName, orderData,
-            slotRowNumber: slotRowNumber || null,
-            // ★ P5: 큐 재시도 경로에서도 신원을 기록할 수 있도록 전달
-            loginPhone8: loginPhone8 || '', loginName: loginName || '',
-          });
-        } catch (queueErr) {
-          logger.error(`[submit/order:bg] 큐 등록도 실패: ${queueErr.message}`);
-          logAbnormal({
-            flow: 'sync_queue', step: 'enqueue', severity: 'critical', error: queueErr,
-            context: { sheetId, tabName, type: 'order_append' },
-          });
-        }
-      }
+      dbSaved: true, sheetsWritten: false, queued, usedSlot: !!slotRowNumber,
+      sheetRow: ledger.sheetRow,
     });
 
   } catch (err) {
