@@ -693,7 +693,7 @@
   <div class="tabbar">
     <button class="tab-rec on" onclick="switchTab('recruit')"><i class="fas fa-bullhorn"></i>모집공고</button>
     <button class="tab-sts" onclick="switchTab('status')"><i class="fas fa-clipboard-list"></i>내 참여현황</button>
-    <button id="tabBtnCs" onclick="if(window.ReviewerCS){ReviewerCS.open();}else{try{showToast('잠시 후 다시 시도해주세요');}catch(e){}}" style="position:relative"><i class="fas fa-headset"></i>1:1문의<span id="rcsTabDot" style="display:none;position:absolute;top:1px;left:50%;margin-left:6px;width:8px;height:8px;background:#EF4444;border-radius:50%"></span></button>
+    <button id="tabBtnCs" onclick="if(window.ReviewerCS){ReviewerCS.open();}else{try{showToast('잠시 후 다시 시도해주세요');}catch(e){}}" style="position:relative"><i class="fas fa-headset"></i>1:1문의<span id="rcsTabDot" style="display:none;position:absolute;top:0;right:8px;min-width:16px;height:16px;padding:0 4px;background:#EF4444;color:#fff;font-size:.6rem;font-weight:800;line-height:16px;text-align:center;border-radius:8px;box-sizing:border-box"></span></button>
     <button class="tab-inf" onclick="switchTab('info')"><i class="fas fa-user"></i>내정보</button>
     <button onclick="openOnboard()"><i class="fas fa-book-open"></i>가이드</button>
   </div>
