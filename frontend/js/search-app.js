@@ -7285,6 +7285,33 @@ function resetOrderFormForReentry() {
   window._submitOrderFormInProgress = false;
 }
 
+/** ★ 제출 완료 화면 → 리뷰어 메인화면(아이에이리뷰)으로 이동 */
+function goToReviewerMain() {
+  // 완료 화면/구매양식 입력 상태 정리 (다음 진입 시 깨끗하도록)
+  resetOrderFormForReentry();
+
+  // 구매양식 단축링크 진입 플래그 해제 + 검색 화면 헤더 기본값 복원
+  window._pendingOrderForm = false;
+  const titleEl = document.getElementById("searchTitle");
+  const descEl  = document.getElementById("searchHeaderDesc");
+  if (titleEl) titleEl.textContent = "아이에이리뷰";
+  if (descEl)  descEl.textContent  = "로그인하여 리뷰 내역을 확인하세요";
+
+  // 메인(검색) 화면 표시
+  showScreen("screenSearch");
+
+  // 로그인 상태면 로그인 UI 적용 + 리뷰 내역 조회, 아니면 로그인 화면
+  const session = _loadAuthSession();
+  if (session && session.name) {
+    const nameEl = document.getElementById("nameInput");
+    if (nameEl) nameEl.value = session.name;
+    _applyLoginUI(session.name);
+    doSearch().catch(() => {});
+  } else {
+    _switchAuthTab("login");
+  }
+}
+
 async function quickEditCell(e, cell) {
   e.stopPropagation();
   _closeQePopup();
