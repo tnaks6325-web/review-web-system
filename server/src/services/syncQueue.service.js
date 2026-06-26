@@ -18,6 +18,7 @@ const { recordParticipationLink } = require('./participation.service');
 const {
   loadRawTabContext,
   buildBatchUpdateData,
+  buildMirrorGuardRange,
   markOrderWritten,
   markOrderMirrorFailed,
   recordReviewIdentity,
@@ -210,6 +211,23 @@ async function _executeItem(item) {
         const tabContext = await loadRawTabContext(sheetId, gid, tabName);
         if (!tabContext || !tabContext.headers || tabContext.headers.length === 0) {
           throw new Error('RAW 미러 헤더 메타를 찾을 수 없음');
+        }
+        const guard = buildMirrorGuardRange({
+          tabName: tabContext.tabName || tabName,
+          headers: tabContext.headers,
+          targetRow: parseInt(sheetRow, 10),
+          orderData,
+        });
+        if (guard) {
+          const guardValues = await throttledCall(() =>
+            readSheet(sheetId, guard.range, tabContext.tabGid ? { gid: tabContext.tabGid } : (gid ? { gid } : {}))
+          );
+          const existingVal = guardValues && guardValues[0]
+            ? String(guardValues[0][0] || '').trim()
+            : '';
+          if (existingVal) {
+            throw new Error(`target row already filled before mirror write: ${guard.header || guard.range}`);
+          }
         }
         const batchData = buildBatchUpdateData({
           tabName: tabContext.tabName || tabName,

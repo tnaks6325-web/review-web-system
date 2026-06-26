@@ -11,6 +11,10 @@ function getPool() {
   return _pool;
 }
 
+function __setPoolForTest(pool) {
+  _pool = pool || null;
+}
+
 function toPhone8(v) {
   const d = String(v == null ? '' : v).replace(/[^0-9]/g, '');
   return d.length >= 8 ? d.slice(-8) : '';
@@ -176,6 +180,24 @@ function buildBatchUpdateData({ tabName, headers, targetRow, orderData }) {
       range: `'${tabName}'!${getColLetter(pair.col)}${targetRow}`,
       values: [[pair.val]],
     }));
+}
+
+function buildMirrorGuardRange({ tabName, headers, targetRow, orderData = {} }) {
+  const preferredCol = findColumn(headers, ['연락처', '전화', '핸드폰', '휴대폰'], ['phone']);
+  const addressCol = findColumn(headers, ['주소', 'address']);
+  let col = preferredCol >= 0 ? preferredCol : addressCol;
+
+  if (col < 0) {
+    const rowData = mapOrderToSheetRow(headers, orderData);
+    col = rowData.findIndex(v => v !== null && String(v == null ? '' : v).trim() !== '');
+  }
+  if (col < 0) return null;
+
+  return {
+    range: `'${tabName}'!${getColLetter(col)}${targetRow}`,
+    col,
+    header: headers[col] || '',
+  };
 }
 
 function escapeSheetName(name) {
@@ -438,52 +460,61 @@ async function createOrderLedgerEntry(input) {
     sheetId, tabName, gid, orderData,
     slotRowNumber, loginPhone8, loginName,
   } = input;
-  const tabContext = await loadRawTabContext(sheetId, gid, tabName);
   const dedupKey = computeDedupKey(orderData);
-  const candidateRows = slotRowNumber
-    ? [parseInt(slotRowNumber, 10)]
-    : (tabContext ? buildCandidateRows({
-        headers: tabContext.headers,
-        dataRows: tabContext.dataRows,
-        headerRowIndex: tabContext.headerRowIndex,
-        orderData,
-      }) : []);
 
-  const client = await db.connect();
+  const insert = await db.query(
+    `INSERT INTO order_submissions
+      (sheet_id, tab_name, gid, tab_gid, orderer, recipient, user_id, phone, address,
+       order_num, date_str, selected_opt_key, bank, account, depositor, price, memo,
+       dedup_key, mirror_status)
+     VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,'pending')
+     RETURNING id`,
+    [
+      sheetId,
+      tabName,
+      gid || '',
+      gid || '',
+      orderData.orderer || '',
+      orderData.recipient || '',
+      orderData.userId || '',
+      orderData.phone || '',
+      orderData.address || '',
+      orderData.orderNum || '',
+      orderData.dateStr || '',
+      orderData.selectedOptKey || '',
+      orderData.bank || '',
+      orderData.account || '',
+      orderData.depositor || '',
+      orderData.price || '',
+      orderData.memo || '',
+      dedupKey,
+    ]
+  );
+  const orderSubmissionId = insert.rows[0].id;
+
+  let tabContext = null;
+  let claim = { row: null, error: 'not_attempted' };
+  let candidateRows = [];
+  let claimError = null;
+
   try {
-    await client.query('BEGIN');
-    const insert = await client.query(
-      `INSERT INTO order_submissions
-        (sheet_id, tab_name, gid, tab_gid, orderer, recipient, user_id, phone, address,
-         order_num, date_str, selected_opt_key, bank, account, depositor, price, memo,
-         dedup_key, mirror_status)
-       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,'pending')
-       RETURNING id`,
-      [
-        sheetId,
-        tabName,
-        gid || '',
-        (tabContext && tabContext.tabGid) || gid || '',
-        orderData.orderer || '',
-        orderData.recipient || '',
-        orderData.userId || '',
-        orderData.phone || '',
-        orderData.address || '',
-        orderData.orderNum || '',
-        orderData.dateStr || '',
-        orderData.selectedOptKey || '',
-        orderData.bank || '',
-        orderData.account || '',
-        orderData.depositor || '',
-        orderData.price || '',
-        orderData.memo || '',
-        dedupKey,
-      ]
-    );
-    const orderSubmissionId = insert.rows[0].id;
+    tabContext = await loadRawTabContext(sheetId, gid, tabName);
+    candidateRows = slotRowNumber
+      ? [parseInt(slotRowNumber, 10)]
+      : (tabContext ? buildCandidateRows({
+          headers: tabContext.headers,
+          dataRows: tabContext.dataRows,
+          headerRowIndex: tabContext.headerRowIndex,
+          orderData,
+        }) : []);
 
-    const claim = candidateRows.length
-      ? await claimRow({
+    if (!candidateRows.length) {
+      claim = { row: null, error: 'no candidates' };
+    } else {
+      const client = await db.connect();
+      try {
+        await client.query('BEGIN');
+        claim = await claimRow({
           client,
           sheetId,
           tabGid: (tabContext && tabContext.tabGid) || gid || '',
@@ -497,33 +528,63 @@ async function createOrderLedgerEntry(input) {
             phone: orderData.phone,
             source: 'order_submit',
           },
-        })
-      : { row: null, error: 'no candidates' };
-
-    await client.query(
-      `UPDATE order_submissions
-          SET sheet_row = $2,
-              mirror_status = CASE WHEN $2 IS NULL THEN 'pending_no_row' ELSE 'pending' END
-        WHERE id = $1`,
-      [orderSubmissionId, claim.row || null]
-    );
-    await client.query('COMMIT');
-
-    return {
-      orderSubmissionId,
-      dedupKey,
-      sheetRow: claim.row || null,
-      claim,
-      tabContext,
-      tabGid: (tabContext && tabContext.tabGid) || gid || '',
-      headers: tabContext ? tabContext.headers : [],
-    };
+        });
+        await client.query(
+          `UPDATE order_submissions
+              SET sheet_row = $2,
+                  tab_gid = COALESCE(NULLIF($3, ''), tab_gid),
+                  mirror_status = CASE WHEN $2 IS NULL THEN 'pending_no_row' ELSE 'pending' END,
+                  sheet_error = CASE WHEN $2 IS NULL THEN $4 ELSE NULL END
+            WHERE id = $1`,
+          [
+            orderSubmissionId,
+            claim.row || null,
+            (tabContext && tabContext.tabGid) || gid || '',
+            claim.error || (claim.exhausted ? 'row claim exhausted' : 'row claim failed'),
+          ]
+        );
+        await client.query('COMMIT');
+      } catch (err) {
+        await client.query('ROLLBACK');
+        claimError = err;
+        claim = { row: null, error: 'claim_failed', message: err.message };
+      } finally {
+        client.release();
+      }
+    }
   } catch (err) {
-    await client.query('ROLLBACK');
-    throw err;
-  } finally {
-    client.release();
+    claimError = err;
+    claim = { row: null, error: 'row_assignment_failed', message: err.message };
   }
+
+  if (!claim.row) {
+    try {
+      await db.query(
+        `UPDATE order_submissions
+            SET mirror_status = 'pending_no_row',
+                tab_gid = COALESCE(NULLIF($3, ''), tab_gid),
+                sheet_error = $2
+          WHERE id = $1`,
+        [
+          orderSubmissionId,
+          String((claimError && claimError.message) || claim.message || claim.error || 'row assignment failed').slice(0, 500),
+          (tabContext && tabContext.tabGid) || gid || '',
+        ]
+      );
+    } catch (err) {
+      claim.statusUpdateError = err.message;
+    }
+  }
+
+  return {
+    orderSubmissionId,
+    dedupKey,
+    sheetRow: claim.row || null,
+    claim,
+    tabContext,
+    tabGid: (tabContext && tabContext.tabGid) || gid || '',
+    headers: tabContext ? tabContext.headers : [],
+  };
 }
 
 async function markOrderQueued(orderSubmissionId) {
@@ -582,6 +643,7 @@ module.exports = {
   buildCandidateRows,
   mapOrderToSheetRow,
   buildBatchUpdateData,
+  buildMirrorGuardRange,
   loadRawTabContext,
   claimRow,
   createOrderLedgerEntry,
@@ -590,4 +652,5 @@ module.exports = {
   markOrderMirrorFailed,
   recordReviewIdentity,
   getColLetter,
+  __setPoolForTest,
 };
