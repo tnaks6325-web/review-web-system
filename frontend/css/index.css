@@ -1545,12 +1545,26 @@ textarea.rform-input{line-height:1.5}
 .recruit-card-meta span{display:inline-flex;align-items:center;gap:3px}
 .recruit-card-badges{display:flex;flex-wrap:wrap;gap:5px}
 .recruit-card-badge{padding:2px 8px;background:#e8f1fe;color:#1b64da;border-radius:20px;font-size:.68rem;font-weight:600}
-.recruit-card-actions{display:flex;gap:6px;margin-top:auto;padding-top:8px;border-top:1px solid var(--border)}
+.recruit-card-actions{display:flex;gap:6px;margin-top:auto;padding-top:8px;border-top:1px solid var(--border);justify-content:space-between;align-items:center}
+.recruit-actions-left{display:flex;gap:6px}
 .recruit-btn{display:inline-flex;align-items:center;gap:3px;padding:4px 11px;border-radius:7px;font-size:.72rem;font-weight:600;cursor:pointer;border:1.5px solid;transition:all .12s}
 .recruit-btn-edit{color:#1b64da;border-color:#cce0fb;background:#f2f7ff}
 .recruit-btn-edit:hover{background:#1b64da;color:#fff;border-color:#1b64da}
 .recruit-btn-del{color:#DC2626;border-color:#FECACA;background:#FEF2F2}
 .recruit-btn-del:hover{background:#DC2626;color:#fff;border-color:#DC2626}
+
+/* 공고 게시/중단 토글 스위치 (카드 우측하단) */
+.recruit-toggle{display:inline-flex;align-items:center;gap:6px;cursor:pointer;user-select:none}
+.recruit-toggle-label{font-size:.68rem;font-weight:700;white-space:nowrap;transition:color .15s}
+.recruit-toggle-label.on{color:#059669}
+.recruit-toggle-label.off{color:#9CA3AF}
+.recruit-toggle input{position:absolute;opacity:0;width:0;height:0}
+.recruit-toggle-slider{position:relative;display:inline-block;width:38px;height:21px;background:#CBD5E1;border-radius:20px;transition:background .18s;flex-shrink:0}
+.recruit-toggle-slider::before{content:"";position:absolute;top:2.5px;left:2.5px;width:16px;height:16px;background:#fff;border-radius:50%;box-shadow:0 1px 3px rgba(0,0,0,.25);transition:transform .18s}
+.recruit-toggle input:checked + .recruit-toggle-slider{background:#10B981}
+.recruit-toggle input:checked + .recruit-toggle-slider::before{transform:translateX(17px)}
+.recruit-toggle input:disabled + .recruit-toggle-slider{opacity:.5;cursor:wait}
+.recruit-toggle input:focus-visible + .recruit-toggle-slider{box-shadow:0 0 0 3px rgba(16,185,129,.3)}
 
 /* 추천 배지 프리셋 버튼 */
 .rbadge-preset{
