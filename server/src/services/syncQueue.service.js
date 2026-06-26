@@ -15,6 +15,7 @@ const pool = require('../db/pool');
 const { writeSheet, appendSheet, readSheet, batchUpdateSheet } = require('./sheets.service');
 const { throttledCall } = require('../utils/sheetsThrottle');
 const { recordParticipationLink } = require('./participation.service');
+const { selectOrderTargetRow } = require('./orderRowMatcher.service');
 const { logger } = require('../utils/logger');
 
 // ── 큐에 작업 추가 ──
@@ -216,80 +217,15 @@ async function _executeItem(item) {
       const headers = headerRow.map(h => String(h || '').trim());
       const rowData = _mapOrderToRow(headers, orderData);
 
-      // 헤더 다음 첫 번째 빈 행 찾기 (수취인+연락처 기준: 둘 다 비어있으면 빈 행)
       const dataRows = allRows.slice(headerRowIdx + 1);
-      const recipientColIdx = headers.findIndex(h => {
-        const hl = h.toLowerCase();
-        return hl.includes('수취인') || hl.includes('받는분') || hl === '성함' || hl === '이름';
+      const rowMatch = selectOrderTargetRow({
+        headers,
+        dataRows,
+        orderer: orderData && orderData.orderer,
+        selectedOptKey: orderData && orderData.selectedOptKey,
       });
-      const phoneColIdx = headers.findIndex(h => {
-        const hl = h.toLowerCase();
-        return hl.includes('연락처') || hl.includes('전화') || hl.includes('핸드폰') || hl.includes('휴대폰') || hl === 'phone';
-      });
-      const addressColIdx = headers.findIndex(h => {
-        const hl = h.toLowerCase();
-        return hl.includes('주소') || hl.includes('address');
-      });
-
-      // ★ FILLED_THRESHOLD: 4개 이상 채워진 행은 절대 덮어쓰지 않음
-      const FILLED_THRESHOLD = 4;
-      function _countFilled(row) {
-        return (row || []).filter(cell => {
-          const val = String(cell || '').trim();
-          return val !== '' && val !== '0';
-        }).length;
-      }
-
-      // ★ 빈 행 판정 헬퍼: 연락처+주소가 모두 비어있으면 "미기입 행"
-      function _isUnfilledRow(row) {
-        const pVal = phoneColIdx >= 0 ? String(row[phoneColIdx] || '').trim() : '';
-        const aVal = addressColIdx >= 0 ? String(row[addressColIdx] || '').trim() : '';
-        return !pVal && !aVal;
-      }
-
-      let emptyRowOffset = dataRows.length; // default: 데이터 끝 다음
-
-      // ═══════════════════════════════════════════════════
-      // ★★★ 0순위: 인애드명단 ↔ 주문자 이름 매칭 (최우선)
-      // ═══════════════════════════════════════════════════
-      const INAD_KEYWORDS = ['인애드', '인애드명', '인애드제출', '카톡', '카카오', '닉네임'];
-      const inadColIdx = headers.findIndex(h => INAD_KEYWORDS.some(kw => h.toLowerCase().includes(kw)));
-      const submittedOrderer = (orderData.orderer || '').trim();
-      let inadMatched = false;
-
-      if (inadColIdx >= 0 && submittedOrderer) {
-        for (let i = 0; i < dataRows.length; i++) {
-          const row = dataRows[i] || [];
-          if (_countFilled(row) >= FILLED_THRESHOLD) continue;
-
-          const inadVal = String(row[inadColIdx] || '').trim();
-          if (!inadVal) continue;
-
-          if (inadVal === submittedOrderer && _isUnfilledRow(row)) {
-            emptyRowOffset = i;
-            inadMatched = true;
-            logger.info(`[syncQueue:order_append] ★ 인애드명단 매칭: "${submittedOrderer}" → dataRow[${i}]`);
-            break;
-          }
-        }
-        if (!inadMatched) {
-          logger.info(`[syncQueue:order_append] 인애드명단 매칭 실패 (orderer="${submittedOrderer}") → 빈행 fallback`);
-        }
-      }
-
-      // ═══════════════════════════════════════════════════
-      // 인애드명단 매칭 실패 시에만 빈 행 탐색
-      // ═══════════════════════════════════════════════════
-      if (!inadMatched) {
-        for (let i = 0; i < dataRows.length; i++) {
-          const row = dataRows[i] || [];
-          if (_countFilled(row) >= FILLED_THRESHOLD) continue;
-          if (_isUnfilledRow(row)) {
-            emptyRowOffset = i;
-            break;
-          }
-        }
-      }
+      const emptyRowOffset = rowMatch.emptyRowOffset;
+      logger.info(`[syncQueue:order_append] 행 선택: ${rowMatch.matchType} → dataRow[${emptyRowOffset}]`);
 
       // 실제 시트 행 번호 (1-based)
       const targetRow = headerRowIdx + 1 + emptyRowOffset + 1;

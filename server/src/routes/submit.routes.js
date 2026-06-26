@@ -5,6 +5,7 @@ const { throttledCall } = require('../utils/sheetsThrottle');
 const { enqueue } = require('../services/syncQueue.service');
 const { logAbnormal } = require('../services/errorLog.service');
 const { recordParticipationLink } = require('../services/participation.service');
+const { selectOrderTargetRow } = require('../services/orderRowMatcher.service');
 const pool = require('../db/pool');
 const { logger } = require('../utils/logger');
 const { emitReviewSubmit, emitOrderSubmit } = require('../utils/sse');
@@ -743,166 +744,11 @@ router.post('/order', async (req, res, next) => {
           const dataRows = tabData.dataRows; // rows after header
 
           const rowData = _mapOrderToRow(headers, orderData);
-
-          // ★ 빈 행 판정 기준: "연락처 + 주소"가 비어있는 행
-          // 인애드명단(수취인) 컬럼은 이미 채워져 있을 수 있으므로 판정에서 제외
-          const phoneColIdx = headers.findIndex(h => {
-            const hl = h.toLowerCase();
-            return hl.includes('연락처') || hl.includes('전화') || hl.includes('핸드폰') || hl.includes('휴대폰') || hl === 'phone';
-          });
-          const addressColIdx = headers.findIndex(h => {
-            const hl = h.toLowerCase();
-            return hl.includes('주소') || hl.includes('address');
-          });
-          // 수취인 컬럼 (동시 제출 감지 참고용으로만 보존)
-          const recipientColIdx = headers.findIndex(h => {
-            const hl = h.toLowerCase();
-            return hl.includes('수취인') || hl.includes('받는분') || hl === '성함' || hl === '이름';
-          });
-
-          // ★ 옵션 컬럼 인덱스 감지 (옵션 기반 행 매칭용)
-          const optColIndices = [];
-          for (let ci = 0; ci < headers.length && optColIndices.length < MAX_OPTION_COLS; ci++) {
-            const hl = headers[ci].toLowerCase();
-            if (OPTION_COL_KEYWORDS.some(kw => hl.includes(kw))) {
-              optColIndices.push(ci);
-            }
-          }
-
-          // ★ FILLED_THRESHOLD 판정 시 제외할 컬럼 인덱스 (사전 기입 컬럼)
-          // 번호, 인애드명단, 구매일자, 상품, 옵션 → 관리자가 미리 채워놓는 컬럼
-          const excludeFromFilledCount = new Set();
-          headers.forEach((h, ci) => {
-            const hl = h.toLowerCase();
-            // 번호 컬럼 제외
-            if (hl === '번호' || hl === 'no' || hl === '#') excludeFromFilledCount.add(ci);
-            // 인애드명단 컬럼 제외
-            if (INAD_COL_KEYWORDS.some(kw => hl.includes(kw))) excludeFromFilledCount.add(ci);
-            // 구매일자/상품 컬럼 제외
-            if (hl.includes('구매일') || hl.includes('상품') || hl.includes('product')) excludeFromFilledCount.add(ci);
-            // 옵션 컬럼 제외
-            if (OPTION_COL_KEYWORDS.some(kw => hl.includes(kw))) excludeFromFilledCount.add(ci);
-          });
-
-          /** 사전 기입 컬럼을 제외한 채워진 셀 수 계산 */
-          function _countFilledExcluding(row) {
-            return (row || []).filter((cell, ci) => {
-              if (excludeFromFilledCount.has(ci)) return false;
-              const val = String(cell || '').trim();
-              return val !== '' && val !== '0';
-            }).length;
-          }
-
-          // ★ 옵션 키 매칭 로직: selectedOptKey가 있으면 해당 옵션 행의 빈 슬롯 우선 탐색
-          const submittedOptKey = (selectedOptKey || '').trim();
-          const optKeyParts = submittedOptKey ? submittedOptKey.split('|').map(v => v.trim()) : [];
-
-          let emptyRowOffset = dataRows.length; // default: 데이터 끝 다음
-
-          // ★ 빈 행 판정 헬퍼: 연락처+주소가 모두 비어있으면 "미기입 행"
-          // (인애드명단=수취인은 이미 채워져 있을 수 있으므로 판정에서 제외)
-          function _isUnfilledRow(row) {
-            const phoneVal = phoneColIdx >= 0 ? String(row[phoneColIdx] || '').trim() : '';
-            const addrVal = addressColIdx >= 0 ? String(row[addressColIdx] || '').trim() : '';
-            return !phoneVal && !addrVal;
-          }
-
-          // ═══════════════════════════════════════════════════
-          // ★★★ 0순위: 인애드명단 ↔ 주문자 이름 매칭 (최우선)
-          // 인애드명단 컬럼에 기입된 이름과 주문자(orderer)가 일치하는
-          // 미기입 행을 찾아 해당 행에 데이터를 기입
-          // ═══════════════════════════════════════════════════
-          const inadColIdx = headers.findIndex(h => INAD_COL_KEYWORDS.some(kw => h.toLowerCase().includes(kw)));
-          const submittedOrderer = (orderer || '').trim();
-          let inadMatched = false;
-
-          if (inadColIdx >= 0 && submittedOrderer) {
-            for (let i = 0; i < dataRows.length; i++) {
-              const row = dataRows[i] || [];
-              if (_countFilledExcluding(row) >= FILLED_THRESHOLD) continue;
-
-              const inadVal = String(row[inadColIdx] || '').trim();
-              if (!inadVal) continue; // 인애드명단이 비어있으면 skip
-
-              // 인애드명단 == 주문자 이름 일치 확인
-              if (inadVal === submittedOrderer) {
-                // 일치하는 행이 미기입 상태인지 확인
-                if (_isUnfilledRow(row)) {
-                  emptyRowOffset = i;
-                  inadMatched = true;
-                  logger.info(`[submit/order:bg] ★ 인애드명단 매칭 성공: "${submittedOrderer}" == 인애드[${i}]="${inadVal}" → dataRow[${i}]`);
-                  break;
-                } else {
-                  logger.info(`[submit/order:bg] 인애드명단 일치하나 이미 기입됨: "${inadVal}" → dataRow[${i}] (skip)`);
-                }
-              }
-            }
-            if (inadMatched) {
-              logger.info(`[submit/order:bg] 인애드명단 매칭으로 행 결정 완료 → 옵션/빈행 탐색 생략`);
-            } else {
-              logger.info(`[submit/order:bg] 인애드명단 매칭 실패 (orderer="${submittedOrderer}") → 옵션/빈행 fallback`);
-            }
-          }
-
-          // ═══════════════════════════════════════════════════
-          // 1순위 이하: 인애드명단 매칭 실패 시에만 옵션/빈행 탐색
-          // ═══════════════════════════════════════════════════
-          if (!inadMatched) {
-            if (submittedOptKey && optColIndices.length > 0) {
-              // ── 1단계: 옵션 키 일치 + 연락처/주소 비어있는 행 찾기 ──
-              let optionMatched = false;
-              for (let i = 0; i < dataRows.length; i++) {
-                const row = dataRows[i] || [];
-                // FILLED_THRESHOLD 보호 (번호/인애드명단/구매일자/상품/옵션 컬럼 제외하고 카운트)
-                if (_countFilledExcluding(row) >= FILLED_THRESHOLD) continue;
-
-                // 옵션 컬럼 값 비교 (순서대로 파이프 분리값과 비교)
-                let optMatch = true;
-                for (let oi = 0; oi < optColIndices.length; oi++) {
-                  const cellVal = String(row[optColIndices[oi]] || '').trim();
-                  const expectedVal = optKeyParts[oi] || '';
-                  if (cellVal.toLowerCase() !== expectedVal.toLowerCase()) {
-                    optMatch = false;
-                    break;
-                  }
-                }
-                if (!optMatch) continue;
-
-                // 옵션 일치 + 연락처/주소가 비어있으면 → 이 행에 기입
-                if (_isUnfilledRow(row)) {
-                  emptyRowOffset = i;
-                  optionMatched = true;
-                  logger.info(`[submit/order:bg] 옵션 매칭 성공: optKey="${submittedOptKey}" → dataRow[${i}]`);
-                  break;
-                }
-              }
-
-              // ── 2단계: 옵션 매칭 실패 시 → 단순 빈 행 탐색 (fallback) ──
-              if (!optionMatched) {
-                logger.info(`[submit/order:bg] 옵션 매칭 실패 → 빈 행 fallback (optKey="${submittedOptKey}")`);
-                for (let i = 0; i < dataRows.length; i++) {
-                  const row = dataRows[i] || [];
-                  if (_countFilledExcluding(row) >= FILLED_THRESHOLD) continue;
-                  if (_isUnfilledRow(row)) {
-                    emptyRowOffset = i;
-                    break;
-                  }
-                }
-              }
-            } else {
-              // ── 옵션 없음: 연락처+주소 기준 첫 번째 빈 행 ──
-              for (let i = 0; i < dataRows.length; i++) {
-                const row = dataRows[i] || [];
-                // ★ FILLED_THRESHOLD 보호 (사전 기입 컬럼 제외하고 4개 이상 채워진 행은 건드리지 않음)
-                if (_countFilledExcluding(row) >= FILLED_THRESHOLD) continue;
-                // 연락처와 주소가 모두 비어있으면 미기입 행으로 판정
-                if (_isUnfilledRow(row)) {
-                  emptyRowOffset = i;
-                  break;
-                }
-              }
-            }
-          }
+          const rowMatch = selectOrderTargetRow({ headers, dataRows, orderer, selectedOptKey });
+          const emptyRowOffset = rowMatch.emptyRowOffset;
+          const phoneColIdx = rowMatch.columns.phoneColIdx;
+          const addressColIdx = rowMatch.columns.addressColIdx;
+          logger.info(`[submit/order:bg] 행 선택: ${rowMatch.matchType} → dataRow[${emptyRowOffset}]`);
 
           // 실제 시트 행 번호 계산 (1-based, 헤더행 = headerRowIdx+1, 데이터 시작 = headerRowIdx+2)
           const targetRow = headerRowIdx + 1 + emptyRowOffset + 1; // +1 for 1-based, +1 for header row itself
