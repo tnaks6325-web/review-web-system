@@ -61,6 +61,29 @@ function _saveAuthSession(name, verified, registeredMember, phone8) {
   _authState = obj;
 }
 
+/** ★ 구매양식 최상단에 현재 로그인된 리뷰어 정보 표시
+ *  세션(name/phone8/registeredMember)만 사용 — 연락처는 뒤 4자리만 노출 */
+function _renderOrderFormReviewerInfo(auth) {
+  const box = document.getElementById("orderFormReviewerInfo");
+  if (!box) return;
+  if (!auth || !auth.name) { box.style.display = "none"; return; }
+
+  const nameEl  = document.getElementById("ofReviewerName");
+  const phoneEl = document.getElementById("ofReviewerPhone");
+  const badgeEl = document.getElementById("ofReviewerBadge");
+
+  if (nameEl) nameEl.textContent = auth.name;
+
+  const p8 = String(auth.phone8 || "").replace(/[^0-9]/g, "");
+  if (phoneEl) {
+    if (p8) { phoneEl.textContent = "연락처 ····-" + p8.slice(-4); phoneEl.style.display = ""; }
+    else    { phoneEl.style.display = "none"; }
+  }
+  if (badgeEl) badgeEl.style.display = auth.registeredMember ? "" : "none";
+
+  box.style.display = "";
+}
+
 /* ══════════════════════════════════════════════════════════════
    ★ 관리자 바이패스 모드
    ────────────────────────────────────────────────────────────
@@ -3812,6 +3835,9 @@ function initOrderFormMode() {
   if (titleEl)    titleEl.textContent    = titleText;
   if (subtitleEl) subtitleEl.textContent = tabName || "";
   if (productEl)  productEl.textContent  = displayName || "상품명 정보 없음";
+
+  // ★ 로그인된 리뷰어 정보 배너 표시 (최상단)
+  _renderOrderFormReviewerInfo(authSession);
 
   // 페이지 title도 변경
   document.title = titleText;
