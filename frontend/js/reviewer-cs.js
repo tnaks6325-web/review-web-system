@@ -33,10 +33,22 @@
     const user = getUser();
     if (user && user.name && !_sse) connectSSE();
   }
-  function setFabDot(on) {
-    _unread = on;
+  // 하단 탭바 "1:1문의" 뱃지에 총 미확인 수(숫자) 표기
+  function setTabBadge(count) {
+    _unread = count > 0;
     const dot = document.getElementById("rcsTabDot");
-    if (dot) dot.style.display = on ? "block" : "none";
+    if (!dot) return;
+    if (count > 0) { dot.textContent = count > 99 ? "99+" : String(count); dot.style.display = "inline-block"; }
+    else { dot.textContent = ""; dot.style.display = "none"; }
+  }
+  // 서버에서 총 미확인 수를 조회해 탭 뱃지 갱신
+  async function refreshUnread() {
+    const user = getUser();
+    if (!user || !user.phone8) { setTabBadge(0); return; }
+    try {
+      const d = await gasGet({ action: "csReviewerUnread", phone8: user.phone8 });
+      if (d && d.ok !== false) setTabBadge(d.totalUnread || 0);
+    } catch (_) {}
   }
 
   // ── 공통 오버레이 ──
@@ -64,7 +76,6 @@
   async function openPicker() {
     const user = getUser();
     if (!user || !user.phone8) { toast("로그인이 필요합니다"); return; }
-    setFabDot(false);
     const ov = overlay();
     ov.innerHTML = `<div style="${SHEET}">
       <div style="padding:14px 16px;border-bottom:1px solid #eef2f7;display:flex;align-items:center;gap:8px">
@@ -95,7 +106,7 @@
     el.innerHTML = items.map(c => {
       const isGeneral = c.campaignSource === 'general';
       const labelSafe = (c.campaignLabel || '').replace(/'/g, "\\'");
-      const unread = c.reviewerUnread > 0;
+      const n = c.reviewerUnread || 0;
       // 부제는 상태만 (시트제목 등 업체정보는 리뷰어에게 노출하지 않음)
       const sub = (c.threadId ? '이전 문의 있음' : '새 문의') + (c.status === 'closed' ? ' · 종료됨' : '');
       return `<div onclick="ReviewerCS.openChat('${(c.campaignKey || '').replace(/'/g,"\\'")}','${labelSafe}','${c.campaignSource || 'general'}')"
@@ -105,7 +116,7 @@
           <div style="font-weight:600;font-size:.88rem;color:#111827;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${esc(c.campaignLabel)}</div>
           <div style="font-size:.72rem;color:#9CA3AF;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${sub}</div>
         </div>
-        ${unread ? '<span style="width:9px;height:9px;background:#EF4444;border-radius:50%;flex-shrink:0"></span>' : ''}
+        ${n > 0 ? `<span style="min-width:19px;height:19px;padding:0 5px;background:#EF4444;color:#fff;font-size:.68rem;font-weight:800;line-height:19px;text-align:center;border-radius:10px;flex-shrink:0;box-sizing:border-box">${n > 99 ? '99+' : n}</span>` : ''}
         <i class="fas fa-chevron-right" style="color:#cbd5e1;font-size:.8rem"></i>
       </div>`;
     }).join("");
@@ -148,6 +159,8 @@
       if (!data || data.ok === false) throw new Error((data && data.error) || "불러오기 실패");
       _open.threadId = data.threadId || _open.threadId;
       renderMessages(data.messages || []);
+      // 이 방을 열람하면 서버에서 해당 방 미확인이 리셋됨 → 탭 총 뱃지 갱신
+      refreshUnread();
     } catch (err) {
       const box = document.getElementById("rcsThread");
       if (box) box.innerHTML = `<div style="text-align:center;color:#EF4444;font-size:.82rem">오류: ${esc(err.message)}</div>`;
@@ -204,10 +217,15 @@
       _sse = new EventSource(API_BASE_URL + "/api/reviewer/cs/events?phone8=" + encodeURIComponent(user.phone8));
       _sse.addEventListener("cs_message", function (event) {
         let data = {}; try { data = JSON.parse(event.data); } catch (_) {}
+        // 총 미확인 수 뱃지 갱신(카톡식 숫자)
+        refreshUnread();
         if (_open && _open.threadId && data.threadId === _open.threadId) {
+          // 지금 보고 있는 방 → 새 메시지 즉시 표시(열람 처리됨)
           reloadChat();
+        } else if (document.getElementById("rcsPickerList")) {
+          // 문의 목록(피커)이 열려 있으면 방별 미확인 숫자 갱신 위해 목록 새로고침
+          openPicker();
         } else {
-          setFabDot(true);
           toast("관리자 답변이 도착했습니다");
         }
       });
@@ -217,8 +235,11 @@
   // ── 초기화 ──
   function init() {
     ensureConnected();
+    refreshUnread();
     // 로그인/로그아웃 후 상태 변화 대응(가벼운 폴링) — SSE 연결 보장
     setInterval(ensureConnected, 3000);
+    // SSE 누락 대비 안전망: 주기적 총 미확인 수 갱신
+    setInterval(refreshUnread, 20000);
   }
   if (document.readyState === "loading") document.addEventListener("DOMContentLoaded", init);
   else init();
