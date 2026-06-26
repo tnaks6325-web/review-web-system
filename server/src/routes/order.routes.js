@@ -7,6 +7,7 @@ const { authMiddleware, adminOrMasterMiddleware } = require('../middleware/auth.
 const drive = require('../services/drive.service');
 const { getSpreadsheetMeta } = require('../services/sheets.service');
 const { buildOneSheet } = require('../services/indexBuilder.service');
+const { mirrorOneSheet } = require('../services/rawMirror.service');
 const sse = require('../utils/sse');
 const { logger } = require('../utils/logger');
 
@@ -849,6 +850,14 @@ router.post('/admin/accept', authMiddleware, adminOrMasterMiddleware, async (req
       indexBuilt = false;
       logger.warn(`[order/accept] 인덱스 빌드 실패 (등록은 완료): ${buildErr.message}`);
     }
+
+    // 7b) RAW 미러 즉시 반영 (best-effort, 비차단 — 등록과 동시에 RAW 미러에 채워짐)
+    //     단일 시트만 미러(전체 미러 대기 없음), throttle 경유라 쿼터 안전. 실패해도 등록은 유지.
+    setImmediate(() => {
+      mirrorOneSheet(sheetId).catch(mirrorErr =>
+        logger.warn(`[order/accept] RAW 미러 즉시반영 실패 (등록은 완료): ${mirrorErr.message}`)
+      );
+    });
 
     // 8) 상태 전이 reviewing + 링크 기록
     //   접수하기 버튼이 노출되는 상태(submitted/revision/rejected)는 reviewing 으로 전이(모두 허용 전이),
