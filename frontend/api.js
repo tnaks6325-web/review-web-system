@@ -92,6 +92,7 @@ const _ACTION_MAP = {
   'saveSubAccounts':    { method: 'POST', path: '/api/reviewer/profile', remap: 'saveSubAccounts' },
   'saveIncomeInfo':     { method: 'POST', path: '/api/reviewer/profile', remap: 'saveIncomeInfo' },
   'saveBankInfo':       { method: 'POST', path: '/api/reviewer/profile', remap: 'saveBankInfo' },
+  'saveAddress':        { method: 'POST', path: '/api/reviewer/profile', remap: 'saveAddress' },
   'getInaedList':       { method: 'GET',  path: '/api/submit/get-inaed-list' },
 
   // 관리자 인증 (Section 8)
