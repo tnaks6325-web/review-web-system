@@ -63,6 +63,21 @@ const { throttledCall, throttledMap } = require('../utils/sheetsThrottle');
   }
 })();
 
+// ── Auto-migration: capture_slots JSONB 컬럼 추가 (탭별 다중 리뷰 캡처 슬롯) ──
+// 형식: [{"key":"review","label":"리뷰"},{"key":"receipt","label":"현금영수증"}]
+// NULL/[] = 단일 암묵 'review' 슬롯 (기존 동작 그대로)
+(async () => {
+  try {
+    await pool.query(`
+      ALTER TABLE tab_configs
+      ADD COLUMN IF NOT EXISTS capture_slots JSONB DEFAULT NULL
+    `);
+    logger.info('[tabconfig] capture_slots 컬럼 확인/추가 완료');
+  } catch (err) {
+    logger.warn('[tabconfig] capture_slots 컬럼 추가 실패 (이미 존재할 수 있음):', err.message);
+  }
+})();
+
 // ═══════════════════════════════════════════════════════════
 // 옵션(Option) 기능용 시스템 헤더 키워드 목록
 // indexBuilder.service.js의 parseTabRows에서 사용하는 시스템 컬럼 키워드를 통합
@@ -187,6 +202,33 @@ router.post('/config', authMiddleware, async (req, res, next) => {
       }
     }
 
+    // ★ 캡처 슬롯(capture_slots) 처리 — 전용 분기 (JSONB 타입 안전, 키는 위치 기준 자동 부여)
+    //   요청은 라벨 목록만 보내면 됨(문자열 배열 또는 {label} 배열).
+    //   key는 서버가 위치로 부여: 0번=review(기존 단일 슬롯/원장과 호환), 그 외=slot2,slot3...
+    //   슬롯이 1개 이하이면 NULL 저장(= 단일 기본 'review' 슬롯, 기존 동작 그대로).
+    if (b.captureSlots !== undefined) {
+      try {
+        const raw = Array.isArray(b.captureSlots) ? b.captureSlots : [];
+        const labels = raw
+          .map(s => (typeof s === 'string' ? s : (s && s.label)) || '')
+          .map(l => String(l).trim())
+          .filter(Boolean);
+        const slotsArr = labels.map((label, i) => ({ key: i === 0 ? 'review' : `slot${i + 1}`, label }));
+        const slotsJson = slotsArr.length > 1 ? JSON.stringify(slotsArr) : null;
+        await pool.query(
+          `INSERT INTO tab_configs (sheet_id, tab_name, capture_slots, updated_at)
+           VALUES ($1, $2, $3::jsonb, NOW())
+           ON CONFLICT (sheet_id, tab_name) DO UPDATE SET
+             capture_slots = $3::jsonb, updated_at = NOW()`,
+          [sheetId, tabName, slotsJson]
+        );
+        return res.json({ ok: true, tabName, sheetId, captureSlots: slotsArr });
+      } catch (csErr) {
+        logger.error('[tab/config] capture_slots 저장 오류:', csErr.message);
+        return res.json({ error: '캡처 슬롯 저장 오류: ' + csErr.message });
+      }
+    }
+
     // null 처리: undefined(미전송) = 기존값 보존, 빈문자열("") = 빈값 저장
     const fields = {
       sheet_url:    b.sheetUrl  || (sheetId ? `https://docs.google.com/spreadsheets/d/${sheetId}/edit${b.tabGid ? '#gid=' + b.tabGid : ''}` : undefined),
@@ -277,6 +319,7 @@ router.get('/config', authMiddleware, async (req, res, next) => {
         incomeType: r.income_type,
         campaignName: r.campaign_name,
         sheetUrl: r.sheet_url,
+        captureSlots: Array.isArray(r.capture_slots) && r.capture_slots.length ? r.capture_slots : null,
       };
     });
 
@@ -1063,6 +1106,7 @@ router.get('/dashboard', authMiddleware, async (req, res, next) => {
         tc.folder_url, tc.capture_folder_url, tc.is_bulk, tc.delivery_type,
         tc.round, tc.nc_mode, tc.deposit_name, tc.transfer_bank,
         tc.income_type, tc.updated_at, tc.closed_rounds, tc.round_meta,
+        tc.capture_slots,
         im.row_count, im.submitted_count, im.status AS index_status,
         im.built_at AS index_built_at, im.checksum,
         COALESCE(paid.paid_count, 0) AS paid_count

@@ -115,6 +115,7 @@ async function searchByName(query, phone8) {
     tc.nc_mode           AS "ncMode",
     tc.folder_url        AS "folderUrl",
     tc.capture_folder_url AS "captureFolderUrl",
+    tc.capture_slots     AS "captureSlots",
     tc.archived_rounds   AS "archivedRounds"
   `;
 
@@ -270,10 +271,42 @@ async function searchByName(query, phone8) {
       ncMode:      row.ncMode,
       folderUrl:   row.folderUrl,
       captureFolderUrl: row.captureFolderUrl,
+      captureSlots: Array.isArray(row.captureSlots) && row.captureSlots.length ? row.captureSlots : null,
+      submittedSlots: [],   // 아래에서 다중 슬롯 행에 한해 채움
       row:         _parseRowJson(row.rowJson),
       submitCol:   row.submitCol,
       score:       row.score, // 유사도 점수 (1.0=정확매칭, <1.0=유사매칭)
     }));
+
+    // ── 다중 캡처 슬롯 행: 이미 제출된 슬롯(submittedSlots) 일괄 조회 ──
+    //   captureSlots가 있는 행이 하나라도 있을 때만 1회 배치 쿼리 (단일 슬롯 검색은 비용 0)
+    const multiSlotItems = results.filter(r => r.captureSlots);
+    if (multiSlotItems.length > 0) {
+      try {
+        const keyOf = (sheetId, tabName, rowIndex) => `${sheetId} ${tabName} ${rowIndex}`;
+        const sheetIds = [...new Set(multiSlotItems.map(r => r.sheetId))];
+        const tabNames = [...new Set(multiSlotItems.map(r => r.tabName))];
+        const rowIdxs  = [...new Set(multiSlotItems.map(r => r.rowIndex))];
+        const { rows: subRows } = await pool.query(
+          `SELECT sheet_id, tab_name, row_index, slot_key
+             FROM review_submissions
+            WHERE sheet_id = ANY($1) AND tab_name = ANY($2) AND row_index = ANY($3)`,
+          [sheetIds, tabNames, rowIdxs]
+        );
+        const coverMap = new Map();
+        for (const sr of subRows) {
+          const k = keyOf(sr.sheet_id, sr.tab_name, sr.row_index);
+          if (!coverMap.has(k)) coverMap.set(k, new Set());
+          coverMap.get(k).add(sr.slot_key);
+        }
+        for (const item of multiSlotItems) {
+          const covered = coverMap.get(keyOf(item.sheetId, item.tabName, item.rowIndex));
+          item.submittedSlots = covered ? [...covered] : [];
+        }
+      } catch (slotErr) {
+        logger.warn('[Search] submittedSlots 조회 실패 (무시): ' + slotErr.message);
+      }
+    }
 
     return {
       results,
@@ -378,6 +411,8 @@ async function searchByNameFallback(q, p8, SELECT_FIELDS) {
     campaignName: row.tcCampaignName || row.campaignName || '',
     folderUrl:   row.folderUrl,
     captureFolderUrl: row.captureFolderUrl,
+    captureSlots: Array.isArray(row.captureSlots) && row.captureSlots.length ? row.captureSlots : null,
+    submittedSlots: [],
     row:         _parseRowJson(row.rowJson),
     submitCol:   row.submitCol,
   }));

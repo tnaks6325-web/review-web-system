@@ -14,6 +14,24 @@ const { logger } = require('../utils/logger');
 const { logAbnormal } = require('../services/errorLog.service');
 const { parseTabRows, buildOneSheet } = require('../services/indexBuilder.service');
 
+// ── Auto-migration: review_submissions.slot_key 컬럼 추가 (제출 파일이 어느 캡처 슬롯인지) ──
+// 기존 행은 DEFAULT 'review'로 채워짐. NULL 없음. (migration 034 와 동일)
+(async () => {
+  try {
+    await pool.query(`
+      ALTER TABLE review_submissions
+      ADD COLUMN IF NOT EXISTS slot_key TEXT NOT NULL DEFAULT 'review'
+    `);
+    await pool.query(`
+      CREATE INDEX IF NOT EXISTS idx_review_sub_slot
+        ON review_submissions(sheet_id, tab_name, row_index, slot_key)
+    `);
+    logger.info('[diag] review_submissions.slot_key 컬럼 확인/추가 완료');
+  } catch (err) {
+    logger.warn('[diag] slot_key 컬럼 추가 실패 (이미 존재할 수 있음):', err.message);
+  }
+})();
+
 // ═══════════════════════════════════════════════════════════
 // GET /api/diag/debug-tab — 세부목록 현재 상태 진단 (GAS: debugTabConfig)
 // ═══════════════════════════════════════════════════════════
@@ -1424,7 +1442,8 @@ router.post('/image-upload', imageApiLimiter, async (req, res, next) => {
 // ═══════════════════════════════════════════════════════════
 router.post('/review-upload', imageApiLimiter, async (req, res, next) => {
   try {
-    const { sheetId, tabName, reviewerName, campaignName, optionFolderName, files, gid, rowIndex, submitCol, memo } = req.body;
+    const { sheetId, tabName, reviewerName, campaignName, optionFolderName, files, gid, rowIndex, submitCol, memo, slotKey } = req.body;
+    const slot = (slotKey || 'review').toString().trim() || 'review';
 
     if (!files || !Array.isArray(files) || files.length === 0) {
       return res.json({ ok: false, error: '업로드할 파일이 필요합니다.' });
@@ -1444,9 +1463,18 @@ router.post('/review-upload', imageApiLimiter, async (req, res, next) => {
 
     // STEP 1: tab_configs.folder_url (DB)
     const { rows: tabRows } = await pool.query(
-      'SELECT folder_url, campaign_name FROM tab_configs WHERE sheet_id = $1 AND tab_name = $2 LIMIT 1',
+      'SELECT folder_url, campaign_name, capture_slots FROM tab_configs WHERE sheet_id = $1 AND tab_name = $2 LIMIT 1',
       [sheetId, tabName]
     );
+
+    // 슬롯 라벨 해석: capture_slots에서 slot.key에 매칭되는 label을 찾는다.
+    //   기본 'review' 슬롯은 하위폴더를 만들지 않아 기존 레이아웃을 그대로 유지한다.
+    let slotLabel = null;
+    if (slot !== 'review') {
+      const slotsCfg = Array.isArray(tabRows[0]?.capture_slots) ? tabRows[0].capture_slots : [];
+      const matched = slotsCfg.find(s => s && s.key === slot);
+      slotLabel = (matched?.label || slot).toString().trim() || null;
+    }
     if (tabRows[0]?.folder_url) {
       targetFolderId = driveService.extractFolderIdFromUrl(tabRows[0].folder_url);
       if (targetFolderId) {
@@ -1490,6 +1518,15 @@ router.post('/review-upload', imageApiLimiter, async (req, res, next) => {
     if (!targetFolderId) {
       logger.error('[review-upload] 리뷰 폴더 확보 실패 — 루트 업로드 방지를 위해 업로드 중단');
       return res.json({ ok: false, error: '리뷰 폴더를 확보하지 못했습니다. 잠시 후 다시 시도해주세요.' });
+    }
+
+    // ── 1.5단계: 슬롯 서브폴더 ([리뷰] → {슬롯라벨}) ──
+    // 'review'(기본) 슬롯은 하위폴더 없이 [리뷰] 바로 아래 — 기존 동작/정리로직 보존.
+    // 그 외 슬롯(예: 현금영수증)은 라벨 서브폴더로 분리한다.
+    if (slotLabel) {
+      const slotFolder = await driveService.getOrCreateSubFolder(targetFolderId, slotLabel);
+      targetFolderId = slotFolder.id;
+      logger.info(`[review-upload] 슬롯 서브폴더: ${slotLabel} → ${slotFolder.id}`);
     }
 
     // ── 2단계: 옵션 서브폴더 (있으면) ──
@@ -1578,14 +1615,14 @@ router.post('/review-upload', imageApiLimiter, async (req, res, next) => {
           await pool.query(
             `INSERT INTO review_submissions
                (sheet_id, tab_name, tab_gid, row_index, reviewer_name, review_index_id,
-                file_id, file_url, file_name, source, uploaded_at)
-             VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,'upload',NOW())
+                file_id, file_url, file_name, source, slot_key, uploaded_at)
+             VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,'upload',$10,NOW())
              ON CONFLICT (file_id) DO UPDATE
                SET file_url = EXCLUDED.file_url, file_name = EXCLUDED.file_name,
                    row_index = EXCLUDED.row_index, review_index_id = EXCLUDED.review_index_id,
-                   reviewer_name = EXCLUDED.reviewer_name`,
+                   reviewer_name = EXCLUDED.reviewer_name, slot_key = EXCLUDED.slot_key`,
             [sheetId, tabName, gid || null, rowIdx, reviewerName || null, reviewIndexId,
-             r.fileId, fUrl, r.fileName]
+             r.fileId, fUrl, r.fileName, slot]
           );
         } catch (subErr) {
           logger.warn(`[review-upload] 제출원장 기록 실패 (무시): ${subErr.message}`);
