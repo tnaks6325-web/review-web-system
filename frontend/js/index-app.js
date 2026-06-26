@@ -7533,18 +7533,22 @@ async function saveCaptureSlots() {
 
   // 라벨 중복 방지
   const dup = labels.find((l, i) => labels.indexOf(l) !== i);
-  if (dup) { showToast(`슬롯 라벨이 중복됩니다: "${dup}"`, true); return; }
+  if (dup) { showToast(`슬롯 라벨이 중복됩니다: "${dup}"`, "error"); return; }
 
   try {
     const json = await gasPost({ action: "setTabConfig", sheetId, tabName, captureSlots: labels });
     if (json && json.ok) {
       const n = (json.captureSlots || []).length;
-      showToast(n > 1 ? `✅ 다중 캡처 슬롯 저장됨 (${n}종)` : "✅ 캡처 슬롯: 단일 기본(리뷰 1장)으로 저장됨");
+      if (n > 1) {
+        showToast(`다중 캡처 슬롯 저장됨 (${n}종) · 이후 제출분부터 적용 (기존 완료건은 재오픈 안 됨)`, "warning");
+      } else {
+        showToast("캡처 슬롯: 단일 기본(리뷰 1장)으로 저장됨", "success");
+      }
     } else {
-      showToast("캡처 슬롯 저장 실패: " + (json?.error || "알 수 없는 오류"), true);
+      showToast("캡처 슬롯 저장 실패: " + (json?.error || "알 수 없는 오류"), "error");
     }
   } catch (e) {
-    showToast("캡처 슬롯 저장 오류: " + (e.message || ""), true);
+    showToast("캡처 슬롯 저장 오류: " + (e.message || ""), "error");
   }
 }
 

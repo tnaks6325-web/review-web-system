@@ -1594,17 +1594,21 @@ router.post('/review-upload', imageApiLimiter, async (req, res, next) => {
       } catch (_) {}
 
       // A-1: 대표 파일을 review_index 행에 기록
-      try {
-        const fileUrl = primary.webViewLink || `https://drive.google.com/file/d/${primary.fileId}/view`;
-        await pool.query(
-          `UPDATE review_index
-              SET review_file_id = $1, review_file_url = $2, review_file_name = $3,
-                  review_file_count = $4, review_file_at = NOW()
-            WHERE sheet_id = $5 AND tab_name = $6 AND row_index = $7`,
-          [primary.fileId, fileUrl, primary.fileName, successCount, sheetId, tabName, rowIdx]
-        );
-      } catch (linkErr) {
-        logger.warn(`[review-upload] 인덱스 파일링크 저장 실패 (무시): ${linkErr.message}`);
+      //   ★ 대표 이미지는 기본 'review' 슬롯만 기록한다. 현금영수증 등 다른 슬롯이
+      //     대표 리뷰 이미지를 덮어쓰지 않도록 가드(슬롯별 진실은 A-2 원장에 있음).
+      if (slot === 'review') {
+        try {
+          const fileUrl = primary.webViewLink || `https://drive.google.com/file/d/${primary.fileId}/view`;
+          await pool.query(
+            `UPDATE review_index
+                SET review_file_id = $1, review_file_url = $2, review_file_name = $3,
+                    review_file_count = $4, review_file_at = NOW()
+              WHERE sheet_id = $5 AND tab_name = $6 AND row_index = $7`,
+            [primary.fileId, fileUrl, primary.fileName, successCount, sheetId, tabName, rowIdx]
+          );
+        } catch (linkErr) {
+          logger.warn(`[review-upload] 인덱스 파일링크 저장 실패 (무시): ${linkErr.message}`);
+        }
       }
 
       // A-2: 업로드된 모든 파일을 review_submissions 원장에 적재 (file_id 업서트)
