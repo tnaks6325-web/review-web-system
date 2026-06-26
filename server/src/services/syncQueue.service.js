@@ -19,6 +19,7 @@ const {
   loadRawTabContext,
   buildBatchUpdateData,
   buildMirrorGuardRange,
+  guardBlocksWrite,
   markOrderWritten,
   markOrderMirrorFailed,
   recordReviewIdentity,
@@ -225,7 +226,8 @@ async function _executeItem(item) {
           const existingVal = guardValues && guardValues[0]
             ? String(guardValues[0][0] || '').trim()
             : '';
-          if (existingVal) {
+          // 내가 쓴 값이면(재시도 멱등) 통과, 외부/타 주문 값이면 덮어쓰기 차단
+          if (guardBlocksWrite(existingVal, guard)) {
             throw new Error(`target row already filled before mirror write: ${guard.header || guard.range}`);
           }
         }

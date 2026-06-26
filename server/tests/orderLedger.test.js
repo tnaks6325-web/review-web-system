@@ -5,6 +5,7 @@ const {
   buildCandidateRows,
   mapOrderToSheetRow,
   buildMirrorGuardRange,
+  guardBlocksWrite,
   createOrderLedgerEntry,
   __setPoolForTest,
 } = require('../src/services/orderLedger.service');
@@ -95,7 +96,26 @@ async function run() {
     targetRow: 12,
     orderData: { orderer: 'Kim', phone: '01012345678', address: 'Seoul' },
   });
-  assert.deepEqual(guard, { range: "'Orders'!C12", col: 2, header: 'phone' });
+  assert.deepEqual(guard, { range: "'Orders'!C12", col: 2, header: 'phone', expected: '01012345678' });
+
+  // 가드 차단 판정 — 덮어쓰기 방지 + 자기 재기입 허용(멱등)
+  // 빈 칸 → 통과
+  assert.equal(guardBlocksWrite('', guard), false);
+  // 내가 쓴 값(서식 차이 무시: 하이픈 있어도 숫자만 비교) → 통과(재시도 멱등)
+  assert.equal(guardBlocksWrite('010-1234-5678', guard), false);
+  assert.equal(guardBlocksWrite('01012345678', guard), false);
+  // 외부/타 주문이 쓴 다른 값 → 차단
+  assert.equal(guardBlocksWrite('010-9999-0000', guard), true);
+  // 비연락처(주소) 가드는 trim 문자열 비교
+  const addrGuard = buildMirrorGuardRange({
+    tabName: 'Orders',
+    headers: ['no', 'orderer', 'address'],
+    targetRow: 7,
+    orderData: { orderer: 'Kim', address: 'Seoul 123' },
+  });
+  assert.equal(addrGuard.header, 'address');
+  assert.equal(guardBlocksWrite('Seoul 123', addrGuard), false);
+  assert.equal(guardBlocksWrite('Busan 456', addrGuard), true);
 
   const calls = [];
   const fakeClient = {
