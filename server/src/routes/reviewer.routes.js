@@ -332,6 +332,22 @@ router.get('/cs/campaigns', async (req, res, next) => {
   }
 });
 
+// GET /api/reviewer/cs/unread?phone8= — 내 미확인 메시지 총합(탭 뱃지용)
+router.get('/cs/unread', async (req, res, next) => {
+  try {
+    const phone8 = _normPhone8(req.query.phone8);
+    if (phone8.length !== 8) return res.status(400).json({ ok: false, error: 'phone8 필수 (8자리)' });
+    const { rows } = await pool.query(
+      `SELECT COALESCE(SUM(reviewer_unread_count),0)::int AS "totalUnread",
+              COUNT(*) FILTER (WHERE reviewer_unread_count > 0)::int AS "unreadRooms"
+       FROM cs_threads WHERE reviewer_phone8 = $1`, [phone8]
+    );
+    res.json({ ok: true, totalUnread: rows[0].totalUnread, unreadRooms: rows[0].unreadRooms });
+  } catch (err) {
+    next(err);
+  }
+});
+
 // GET /api/reviewer/cs/threads?phone8= — 내 문의방 목록
 router.get('/cs/threads', async (req, res, next) => {
   try {

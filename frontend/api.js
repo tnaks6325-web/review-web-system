@@ -53,6 +53,7 @@ const _ACTION_MAP = {
   // 탭 설정 (Section 6)
   'setTabConfig':     { method: 'POST', path: '/api/tab/config' },
   'getTabConfig':     { method: 'GET',  path: '/api/tab/config' },
+  'reopenSlots':      { method: 'POST', path: '/api/tab/reopen-slots' },
   'listDetailSheet':  { method: 'GET',  path: '/api/tab/config' },
   'setClosed':        { method: 'POST', path: '/api/tab/closed' },
   'getTabOptions':    { method: 'GET',  path: '/api/tab/options' },
@@ -289,6 +290,7 @@ const _ACTION_MAP = {
   // ★ C/S 문의창구 — 리뷰어 (토큰 없음, phone8 기반)
   'csReviewerCampaigns':   { method: 'GET',  path: '/api/reviewer/cs/campaigns' },
   'csReviewerThreads':     { method: 'GET',  path: '/api/reviewer/cs/threads' },
+  'csReviewerUnread':      { method: 'GET',  path: '/api/reviewer/cs/unread' },
   'csReviewerMessages':    { method: 'GET',  path: '/api/reviewer/cs/messages' },
   'csReviewerSend':        { method: 'POST', path: '/api/reviewer/cs/message' },
 

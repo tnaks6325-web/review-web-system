@@ -159,14 +159,16 @@ async function _mirrorOneSheet(sheetId, opts) {
 
   // ── 모든 탭 데이터 batchGet (A:ZZ — 전체 열 확보) ──
   const ranges = tabs.map(t => `'${t.properties.title}'!A:ZZ`);
+  // ★ 미러는 FORMATTED_VALUE로 읽는다 → 시트에 표기된 그대로 보존
+  //   (구매날짜 등 날짜 셀이 직렬숫자 45463이 아니라 "11/23" 표기 문자열로 저장)
   let batchResults = [];
   try {
     if (ranges.length <= BATCH_CHUNK_SIZE) {
-      batchResults = await throttledCall(() => batchReadSheet(sheetId, ranges));
+      batchResults = await throttledCall(() => batchReadSheet(sheetId, ranges, 'FORMATTED_VALUE'));
     } else {
       for (let s = 0; s < ranges.length; s += BATCH_CHUNK_SIZE) {
         const chunk = ranges.slice(s, s + BATCH_CHUNK_SIZE);
-        const part = await throttledCall(() => batchReadSheet(sheetId, chunk));
+        const part = await throttledCall(() => batchReadSheet(sheetId, chunk, 'FORMATTED_VALUE'));
         batchResults.push(...part);
       }
     }
@@ -180,7 +182,7 @@ async function _mirrorOneSheet(sheetId, opts) {
     for (const t of tabs) {
       try {
         const values = await throttledCall(() =>
-          readSheet(sheetId, `'${t.properties.title}'!A:ZZ`, { gid: String(t.properties.sheetId) })
+          readSheet(sheetId, `'${t.properties.title}'!A:ZZ`, { gid: String(t.properties.sheetId), valueRenderOption: 'FORMATTED_VALUE' })
         );
         batchResults.push({ values: values || [] });
       } catch (readErr) {

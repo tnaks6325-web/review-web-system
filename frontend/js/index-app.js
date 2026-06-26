@@ -7239,6 +7239,9 @@ function openTcPopover(e, tcData) {
     });
   }
 
+  // ★ 다중 캡처 슬롯 에디터 렌더 (서버에서 현재 설정 조회 → 디커플)
+  _renderCaptureSlotsEditor(tcData);
+
   // 위치 계산 — 뷰포트 경계 감지하여 자동 조정
   pop.classList.add("open"); // 먼저 열어서 실제 크기 측정
   const pw = pop.offsetWidth  || 304;
@@ -7471,6 +7474,119 @@ function _syncTcTimePicker() {
 function closeTcPopover() {
   document.getElementById("tcPopover").classList.remove("open");
   _tcCurrent = null;
+}
+
+/* ── 다중 캡처 슬롯 에디터 (탭 설정 팝오버 내) ── */
+// 서버에서 현재 capture_slots를 조회해 라벨 입력 행을 렌더한다.
+async function _renderCaptureSlotsEditor(tcData) {
+  const list = document.getElementById("tcCaptureSlotsList");
+  if (!list) return;
+  list.innerHTML = '<div style="font-size:.66rem;color:#9CA3AF">불러오는 중...</div>';
+
+  let slots = Array.isArray(tcData.captureSlots) ? tcData.captureSlots : null;
+  if (!slots) {
+    try {
+      const json = await gasGet({ action: "getTabConfig", sheetId: tcData.sheetId, tabName: tcData.tabName });
+      const cfgs = json?.configs || [];
+      const cfg = cfgs.find(c => c.tab_name === tcData.tabName && c.sheet_id === tcData.sheetId) || cfgs[0];
+      slots = Array.isArray(cfg?.capture_slots) ? cfg.capture_slots : [];
+    } catch (_) { slots = []; }
+  }
+
+  // 팝오버가 그새 다른 탭으로 바뀌었으면 렌더 취소
+  if (!_tcCurrent || _tcCurrent.tabName !== tcData.tabName) return;
+
+  list.innerHTML = "";
+  if (!slots || slots.length === 0) {
+    _csAddSlotRow("리뷰");   // 첫 슬롯 시드 (기존 리뷰 제출과 호환)
+  } else {
+    slots.forEach(s => _csAddSlotRow((s && s.label) || ""));
+  }
+}
+
+function _csAddSlotRow(label) {
+  const list = document.getElementById("tcCaptureSlotsList");
+  if (!list) return;
+  const row = document.createElement("div");
+  row.className = "tc-cs-row";
+  row.style.cssText = "display:flex;gap:6px;margin-bottom:5px;align-items:center";
+  row.innerHTML =
+    '<span class="tc-cs-num" style="font-size:.66rem;color:#92400E;width:14px;text-align:center;flex-shrink:0"></span>' +
+    '<input type="text" class="tc-cs-label" placeholder="예: 리뷰 / 현금영수증" style="flex:1;min-width:0;padding:5px 8px;border:1px solid #FCD34D;border-radius:6px;font-size:.74rem;outline:none">' +
+    '<button type="button" class="tc-cs-del" style="border:none;background:#FEE2E2;color:#B91C1C;border-radius:6px;padding:4px 8px;cursor:pointer;font-size:.7rem;flex-shrink:0">삭제</button>';
+  const input = row.querySelector(".tc-cs-label");
+  input.value = label || "";
+  row.querySelector(".tc-cs-del").addEventListener("click", () => { row.remove(); _csRenumberSlots(); });
+  list.appendChild(row);
+  _csRenumberSlots();
+}
+
+function _csRenumberSlots() {
+  const list = document.getElementById("tcCaptureSlotsList");
+  if (!list) return;
+  Array.from(list.querySelectorAll(".tc-cs-row .tc-cs-num")).forEach((el, i) => { el.textContent = (i + 1); });
+}
+
+async function saveCaptureSlots() {
+  if (!_tcCurrent) return;
+  if (!APP_CONFIG.GAS_WEB_APP_URL) { showToast("API 서버 URL이 설정되지 않았습니다.", true); return; }
+  const sheetId = _tcCurrent.sheetId || "";
+  const tabName = _tcCurrent.tabName || "";
+  if (!sheetId || !tabName) { showToast("sheetId/tabName을 특정할 수 없습니다.", true); return; }
+
+  const labels = Array.from(document.querySelectorAll("#tcCaptureSlotsList .tc-cs-label"))
+    .map(i => i.value.trim()).filter(Boolean);
+
+  // 라벨 중복 방지
+  const dup = labels.find((l, i) => labels.indexOf(l) !== i);
+  if (dup) { showToast(`슬롯 라벨이 중복됩니다: "${dup}"`, "error"); return; }
+
+  try {
+    const json = await gasPost({ action: "setTabConfig", sheetId, tabName, captureSlots: labels });
+    if (json && json.ok) {
+      const n = (json.captureSlots || []).length;
+      if (n > 1) {
+        showToast(`다중 캡처 슬롯 저장됨 (${n}종) · 이미 완료된 기존 건을 받으려면 아래 '기존 완료행 보완 재오픈'을 누르세요`, "warning");
+      } else {
+        showToast("캡처 슬롯: 단일 기본(리뷰 1장)으로 저장됨", "success");
+      }
+    } else {
+      showToast("캡처 슬롯 저장 실패: " + (json?.error || "알 수 없는 오류"), "error");
+    }
+  } catch (e) {
+    showToast("캡처 슬롯 저장 오류: " + (e.message || ""), "error");
+  }
+}
+
+// 기존 완료행 보완 재오픈 (저장된 슬롯 기준 — 먼저 dryRun으로 대상 수 확인 후 확정)
+async function reopenIncompleteSlots() {
+  if (!_tcCurrent) return;
+  if (!APP_CONFIG.GAS_WEB_APP_URL) { showToast("API 서버 URL이 설정되지 않았습니다.", "error"); return; }
+  const sheetId = _tcCurrent.sheetId || "";
+  const tabName = _tcCurrent.tabName || "";
+  if (!sheetId || !tabName) { showToast("sheetId/tabName을 특정할 수 없습니다.", "error"); return; }
+
+  try {
+    // 1) dryRun — 대상 건수 확인
+    const dry = await gasPost({ action: "reopenSlots", sheetId, tabName, dryRun: true });
+    if (!dry || !dry.ok) { showToast("재오픈 대상 조회 실패: " + (dry?.error || dry?.note || ""), "error"); return; }
+    const cnt = dry.candidates || 0;
+    if (cnt === 0) {
+      showToast(dry.note || "재오픈할 완료행이 없습니다.", "info");
+      return;
+    }
+    if (!confirm(`"${tabName}" 탭에서 누락 슬롯이 있는 완료행 ${cnt}건을 재오픈합니다.\n\n해당 행은 미제출 상태로 돌아가 리뷰어 검색에 다시 노출되고, 제출완료 카운트가 ${cnt} 차감됩니다.\n계속할까요?`)) return;
+
+    // 2) 실제 재오픈
+    const res = await gasPost({ action: "reopenSlots", sheetId, tabName });
+    if (res && res.ok) {
+      showToast(`↺ ${res.reopened || 0}건 재오픈됨 — 리뷰어가 보완 제출할 수 있습니다.`, "success");
+    } else {
+      showToast("재오픈 실패: " + (res?.error || "알 수 없는 오류"), "error");
+    }
+  } catch (e) {
+    showToast("재오픈 오류: " + (e.message || ""), "error");
+  }
 }
 
 /* ── 네이버+쿠팡 모드 헤더 변환 ── */

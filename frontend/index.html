@@ -693,7 +693,7 @@
   <div class="tabbar">
     <button class="tab-rec on" onclick="switchTab('recruit')"><i class="fas fa-bullhorn"></i>모집공고</button>
     <button class="tab-sts" onclick="switchTab('status')"><i class="fas fa-clipboard-list"></i>내 참여현황</button>
-    <button id="tabBtnCs" onclick="if(window.ReviewerCS){ReviewerCS.open();}else{try{showToast('잠시 후 다시 시도해주세요');}catch(e){}}" style="position:relative"><i class="fas fa-headset"></i>1:1문의<span id="rcsTabDot" style="display:none;position:absolute;top:1px;left:50%;margin-left:6px;width:8px;height:8px;background:#EF4444;border-radius:50%"></span></button>
+    <button id="tabBtnCs" onclick="if(window.ReviewerCS){ReviewerCS.open();}else{try{showToast('잠시 후 다시 시도해주세요');}catch(e){}}" style="position:relative"><i class="fas fa-headset"></i>1:1문의<span id="rcsTabDot" style="display:none;position:absolute;top:0;right:8px;min-width:16px;height:16px;padding:0 4px;background:#EF4444;color:#fff;font-size:.6rem;font-weight:800;line-height:16px;text-align:center;border-radius:8px;box-sizing:border-box"></span></button>
     <button class="tab-inf" onclick="switchTab('info')"><i class="fas fa-user"></i>내정보</button>
     <button onclick="openOnboard()"><i class="fas fa-book-open"></i>가이드</button>
   </div>
@@ -704,10 +704,11 @@
       <div class="ohandle"></div>
       <div class="oic"><i class="fas fa-hand-sparkles"></i></div>
       <h3>아이에이리뷰 시작하기</h3>
-      <p class="od">처음이시군요! 3단계만 알면 바로 참여할 수 있어요.</p>
+      <p class="od">처음이시군요! 4단계만 알면 바로 참여할 수 있어요.</p>
       <div class="ostep"><div class="num">1</div><div class="tx"><b>캠페인 찾기</b><p>모집공고에서 마음에 드는 캠페인을 골라요.</p></div></div>
       <div class="ostep"><div class="num">2</div><div class="tx"><b>신청 &amp; 구매</b><p>참여 신청 후 안내대로 구매하고 리뷰를 남겨요.</p></div></div>
       <div class="ostep"><div class="num">3</div><div class="tx"><b>페이백 받기</b><p>리뷰 완료 후 매주 화/금 등록 계좌로 정산돼요.</p></div></div>
+      <div class="ostep"><div class="num">4</div><div class="tx"><b>1:1 문의</b><p>궁금한 점은 하단 탭바의 1:1문의에서 바로 물어봐요.</p></div></div>
       <button class="ostart" onclick="closeOnboard()">시작하기</button>
       <button class="oskip" onclick="closeOnboard()">다음에 볼게요</button>
     </div>

@@ -12,6 +12,16 @@ const { emitReviewSubmit, emitOrderSubmit } = require('../utils/sse');
 const { authMiddleware } = require('../middleware/auth.middleware');
 
 // ═══════════════════════════════════════════════════════════
+// 캡처 슬롯 유틸 — 탭의 capture_slots(JSONB)에서 필요 슬롯 key 목록 추출
+//   NULL/[] = 단일 암묵 'review' 슬롯 (기존 동작 그대로)
+// ═══════════════════════════════════════════════════════════
+function requiredSlotKeys(captureSlots) {
+  if (!Array.isArray(captureSlots) || captureSlots.length === 0) return ['review'];
+  const keys = captureSlots.map(s => s && s.key).filter(Boolean);
+  return keys.length ? keys : ['review'];
+}
+
+// ═══════════════════════════════════════════════════════════
 // 한국 실명 판별 유틸리티
 // ═══════════════════════════════════════════════════════════
 const KOREAN_SURNAMES = new Set([
@@ -474,30 +484,73 @@ router.post('/review', async (req, res, next) => {
     const submitValue = value || '제출';
     const sheetOpts = gid ? { gid } : {};
 
-    // ── Step 1: DB 즉시 업데이트 (가장 빠름) ──
-    let dbUpdated = false;
+    // ── Step 1: 완료 판정 + DB 업데이트 ──
+    //   다중 캡처 슬롯 탭(예: 리뷰+현금영수증)은 "필요 슬롯 전부 제출"되어야 완료.
+    //   업로드(/api/image/review-upload)가 submitReview보다 먼저 실행되어 원장
+    //   (review_submissions.slot_key)이 이미 채워져 있다는 전제(프론트 보장).
+    //   단일 슬롯(기존 탭, capture_slots NULL) = fast-path로 기존 동작 그대로.
+    let dbUpdated = false;     // is_submitted=TRUE 로 전이/유지되었는지
+    let complete = true;       // 모든 필요 슬롯 충족 여부
+    let missingSlots = [];
     try {
-      const result = await pool.query(
-        `UPDATE review_index SET is_submitted = TRUE, built_at = NOW()
-         WHERE sheet_id = $1 AND tab_name = $2 AND row_index = $3`,
+      // 탭의 필요 슬롯 + 현재 행의 is_submitted 조회
+      const { rows: ctxRows } = await pool.query(
+        `SELECT tc.capture_slots AS capture_slots, ri.is_submitted AS is_submitted
+           FROM review_index ri
+           LEFT JOIN tab_configs tc
+             ON tc.sheet_id = ri.sheet_id AND tc.tab_name = ri.tab_name
+          WHERE ri.sheet_id = $1 AND ri.tab_name = $2 AND ri.row_index = $3
+          LIMIT 1`,
         [sheetId, tabName, rowIndex]
       );
-      dbUpdated = result.rowCount > 0;
+      const wasSubmitted = ctxRows[0]?.is_submitted === true;
+      const required = requiredSlotKeys(ctxRows[0]?.capture_slots);
+      const isMultiSlot = !(required.length === 1 && required[0] === 'review');
+
+      if (isMultiSlot) {
+        // 원장에서 이 행의 제출된 distinct 슬롯 조회
+        const { rows: slotRows } = await pool.query(
+          `SELECT DISTINCT slot_key FROM review_submissions
+            WHERE sheet_id = $1 AND tab_name = $2 AND row_index = $3`,
+          [sheetId, tabName, rowIndex]
+        );
+        const covered = new Set(slotRows.map(r => r.slot_key));
+        missingSlots = required.filter(k => !covered.has(k));
+        complete = missingSlots.length === 0;
+      }
+
+      if (complete) {
+        // 완료 → is_submitted=TRUE (멱등). 이미 TRUE여도 안전.
+        const result = await pool.query(
+          `UPDATE review_index SET is_submitted = TRUE, built_at = NOW()
+           WHERE sheet_id = $1 AND tab_name = $2 AND row_index = $3`,
+          [sheetId, tabName, rowIndex]
+        );
+        dbUpdated = result.rowCount > 0;
+
+        // index_master 카운트: FALSE→TRUE 전이일 때만 증가 (보완 제출 중복 방지)
+        if (dbUpdated && !wasSubmitted) {
+          try {
+            await pool.query(
+              `UPDATE index_master
+               SET submitted_count = submitted_count + 1
+               WHERE sheet_id = $1 AND tab_name = $2
+                 AND submitted_count < row_count`,
+              [sheetId, tabName]
+            );
+          } catch (_) { /* 대시보드 카운트 보조 — 실패해도 무시 */ }
+        }
+      } else {
+        // 부분 제출 → is_submitted 유지(FALSE), 타임스탬프만 갱신해 행 재오픈 상태 유지
+        await pool.query(
+          `UPDATE review_index SET built_at = NOW()
+           WHERE sheet_id = $1 AND tab_name = $2 AND row_index = $3`,
+          [sheetId, tabName, rowIndex]
+        );
+        logger.info(`[submit/review] 부분 제출 — 미충족 슬롯: ${missingSlots.join(', ')} (row=${rowIndex})`);
+      }
     } catch (dbErr) {
       logger.warn(`[submit/review] DB 업데이트 실패: ${dbErr.message}`);
-    }
-
-    // ── Phase 1: index_master 카운트 즉시 반영 ──
-    if (dbUpdated) {
-      try {
-        await pool.query(
-          `UPDATE index_master
-           SET submitted_count = submitted_count + 1
-           WHERE sheet_id = $1 AND tab_name = $2
-             AND submitted_count < row_count`,
-          [sheetId, tabName]
-        );
-      } catch (_) { /* 대시보드 카운트 보조 — 실패해도 무시 */ }
     }
 
     // ── ★ Step 2: 즉시 응답 반환 (DB 저장 완료 = 제출 성공) ──
@@ -514,6 +567,8 @@ router.post('/review', async (req, res, next) => {
     res.json({
       ok: true,
       submitted: submitValue,
+      complete,                  // 모든 필요 슬롯 충족 여부 (다중 슬롯 탭)
+      missingSlots,              // 아직 미제출인 슬롯 key 목록
       dbUpdated,
       sheetsWritten: false,  // Sheets는 백그라운드에서 처리
       queued: true,          // 항상 큐 처리 방식
