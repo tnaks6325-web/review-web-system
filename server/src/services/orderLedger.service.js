@@ -183,12 +183,12 @@ function buildBatchUpdateData({ tabName, headers, targetRow, orderData }) {
 }
 
 function buildMirrorGuardRange({ tabName, headers, targetRow, orderData = {} }) {
+  const rowData = mapOrderToSheetRow(headers, orderData);
   const preferredCol = findColumn(headers, ['연락처', '전화', '핸드폰', '휴대폰'], ['phone']);
   const addressCol = findColumn(headers, ['주소', 'address']);
   let col = preferredCol >= 0 ? preferredCol : addressCol;
 
   if (col < 0) {
-    const rowData = mapOrderToSheetRow(headers, orderData);
     col = rowData.findIndex(v => v !== null && String(v == null ? '' : v).trim() !== '');
   }
   if (col < 0) return null;
@@ -197,7 +197,31 @@ function buildMirrorGuardRange({ tabName, headers, targetRow, orderData = {} }) 
     range: `'${tabName}'!${getColLetter(col)}${targetRow}`,
     col,
     header: headers[col] || '',
+    // ★ 이 주문이 가드 칸에 쓸 값(보통 연락처). 재시도 시 "내가 쓴 값"과 외부 기입을 구분하는 데 사용.
+    expected: rowData[col] != null ? String(rowData[col]) : '',
   };
+}
+
+// 가드 칸 값 정규화 — 연락처류는 숫자만 비교(서식 차이 무시), 그 외는 trim 비교.
+function normalizeGuardValue(header, val) {
+  const s = String(val == null ? '' : val).trim();
+  if (/연락처|전화|핸드폰|휴대폰|phone/i.test(String(header || ''))) {
+    return s.replace(/[^0-9]/g, '');
+  }
+  return s;
+}
+
+// 미러 쓰기를 막아야 하는가? (덮어쓰기 방지)
+//   - 가드 칸이 비어있음            → false (안전, 써도 됨)
+//   - 가드 칸 == 이 주문의 기대값    → false (내가 이미 쓴 값 = 멱등 재기입, 허용)
+//   - 가드 칸에 다른 값             → true  (외부/타 주문 기입 = 차단)
+function guardBlocksWrite(existingVal, guard) {
+  const header = guard && guard.header;
+  const existing = normalizeGuardValue(header, existingVal);
+  if (!existing) return false;
+  const expected = normalizeGuardValue(header, guard && guard.expected);
+  if (expected && existing === expected) return false;
+  return true;
 }
 
 function escapeSheetName(name) {
@@ -644,6 +668,8 @@ module.exports = {
   mapOrderToSheetRow,
   buildBatchUpdateData,
   buildMirrorGuardRange,
+  guardBlocksWrite,
+  normalizeGuardValue,
   loadRawTabContext,
   claimRow,
   createOrderLedgerEntry,
