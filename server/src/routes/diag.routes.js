@@ -13,6 +13,7 @@ const { addClient, getStatus: getSSEStatus, emitImageExtract, emitImageUpload } 
 const { logger } = require('../utils/logger');
 const { logAbnormal } = require('../services/errorLog.service');
 const { parseTabRows, buildOneSheet } = require('../services/indexBuilder.service');
+const { mirrorOneSheet } = require('../services/rawMirror.service');
 
 // ── Auto-migration: review_submissions.slot_key 컬럼 추가 (제출 파일이 어느 캡처 슬롯인지) ──
 // 기존 행은 DEFAULT 'review'로 채워짐. NULL 없음. (migration 034 와 동일)
@@ -416,6 +417,14 @@ router.post('/add-campaign', authMiddleware, async (req, res, next) => {
     } catch (sheetErr) {
       logger.error(`[add-campaign] 시트DB 추가 실패 (DB 등록은 완료): ${sheetErr.message}`);
     }
+
+    // ★ RAW 미러 즉시 반영 (best-effort, 비차단 — 등록과 동시에 RAW 미러에 채워짐)
+    //   단일 시트만 미러(전체 미러 대기 없음), throttle 경유라 쿼터 안전. 실패해도 등록은 유지.
+    setImmediate(() => {
+      mirrorOneSheet(finalSheetId).catch(mirrorErr =>
+        logger.warn(`[add-campaign] RAW 미러 즉시반영 실패 (등록은 완료): ${mirrorErr.message}`)
+      );
+    });
 
     res.json({ ok: true, sheetId: finalSheetId, campaignName: resolvedName, addedToSheetDB, shareResult, autoInsertedTabs, url: `https://docs.google.com/spreadsheets/d/${finalSheetId}/edit` });
   } catch (err) {

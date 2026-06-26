@@ -309,7 +309,47 @@ async function _upsertTabMeta({ sheetId, sheetUrl, spreadsheetTitle, tabGid, tab
   );
 }
 
+/**
+ * 단일 시트만 즉시 RAW 미러링 (탭/캠페인 등록 시 best-effort 호출용)
+ *
+ * - 등록 직후 해당 시트가 RAW 미러에 바로 채워지도록 한다(전체 미러 대기 없음).
+ * - 해당 시트의 기존 체크섬/수정시각만 로드해 _mirrorOneSheet에 위임 → 변경된 탭만 갱신.
+ * - 신규 등록 시트는 기존 데이터가 없으므로 모든(비숨김 포함) 탭이 새로 미러된다.
+ * - 모든 시트 읽기는 throttle 경유라 쿼터 안전. 호출 측은 비차단(fire-and-forget) 권장.
+ *
+ * @param {string} sheetId
+ * @param {object} opts { force=false, includeHidden=true }
+ * @returns {object} { tabsMirrored, tabsSkipped, rowsWritten, errors }
+ */
+async function mirrorOneSheet(sheetId, { force = false, includeHidden = true } = {}) {
+  if (!sheetId) throw new Error('sheetId가 필요합니다.');
+
+  // 해당 시트의 기존 미러 메타(증분 비교용)만 로드
+  const { rows: existingTabs } = await pool.query(
+    'SELECT tab_gid, checksum, sheet_modified_at FROM raw_sheet_tabs WHERE sheet_id = $1',
+    [sheetId]
+  );
+  const checksumMap = {};
+  const sheetModifiedMap = {};
+  for (const t of existingTabs) {
+    checksumMap[`${sheetId}||${t.tab_gid}`] = t.checksum;
+    if (t.sheet_modified_at) {
+      const ms = new Date(t.sheet_modified_at).getTime();
+      if (!sheetModifiedMap[sheetId] || ms > sheetModifiedMap[sheetId]) {
+        sheetModifiedMap[sheetId] = ms;
+      }
+    }
+  }
+
+  const r = await _mirrorOneSheet(sheetId, {
+    force, includeHidden, checksumMap, sheetModifiedMap, startTime: Date.now(),
+  });
+  logger.info(`[rawMirror] 단일 시트 미러 완료 (${sheetId.substring(0, 12)}…): 탭 ${r.tabsMirrored}(스킵 ${r.tabsSkipped}), 행 ${r.rowsWritten}, 오류 ${r.errors}`);
+  return r;
+}
+
 module.exports = {
   mirrorAllSheets,
+  mirrorOneSheet,
   SYSTEM_TAB_KEYWORDS,
 };
