@@ -1290,7 +1290,14 @@ function openSubmitMulti(items) {
   S.filesByIdx   = {};
   S.memoByIdx    = {};
   S.files        = [];
+  S.filesBySlot  = {};                 // 캡처 슬롯별 파일 (슬롯 모드)
   S.step         = 1;
+
+  // ── 캡처 슬롯 모드 판정 ──
+  //   단일 행 + 탭에 다중 캡처 슬롯(capture_slots, 2개 이상)이 설정된 경우만 슬롯 모드.
+  //   (다중 행 선택 시에는 기존 행별 슬롯 UI를 유지 — MVP는 슬롯×행 매트릭스 미지원)
+  const cs0 = items[0] && Array.isArray(items[0].captureSlots) ? items[0].captureSlots : null;
+  S.captureSlots = (items.length === 1 && cs0 && cs0.length > 1) ? cs0 : null;
 
   // 헤더 타이틀 — [날짜] [표시명/탭명] 옵션:옵션명
   const firstForTitle = items[0];
@@ -1405,10 +1412,20 @@ function _renderMultiImageSlots(items) {
   // 기존 슬롯 영역 초기화
   let slotsWrap = document.getElementById("mrSlotsWrap");
   if (slotsWrap) slotsWrap.remove();
+  let csWrap = document.getElementById("csSlotsWrap");
+  if (csWrap) csWrap.remove();
   // 기존 단건 dropZone / memoWrap 가시성 제어
   const singleDrop  = document.getElementById("dropZone");
   const singleMemo  = document.querySelector(".memo-wrap");
   const progressWrap = document.getElementById("mrProgressWrap");
+
+  // ── 캡처 슬롯 모드 (단일 행 + 다중 캡처 슬롯) ──
+  if (S.captureSlots) {
+    if (singleDrop) singleDrop.style.display = "none";
+    if (singleMemo) singleMemo.style.display = "none";
+    _renderCaptureSlots(items[0], S.captureSlots, paneCard);
+    return;
+  }
 
   if (items.length === 1) {
     // 단건: 기존 UI 그대로
@@ -1460,6 +1477,118 @@ function _renderMultiImageSlots(items) {
   // step-nav 앞에 삽입
   const stepNav = paneCard.querySelector(".step-nav");
   paneCard.insertBefore(slotsWrap, stepNav);
+}
+
+/* ─── 캡처 슬롯 모드: 단일 행에 여러 종류(리뷰/현금영수증 등) 캡처 제출 ─── */
+/**
+ * item: 선택된 단일 행
+ * slots: [{key,label}, ...] (2개 이상)
+ * paneCard: step2 .pane-card
+ */
+function _renderCaptureSlots(item, slots, paneCard) {
+  const submitted = new Set(Array.isArray(item.submittedSlots) ? item.submittedSlots : []);
+
+  const wrap = document.createElement("div");
+  wrap.id = "csSlotsWrap";
+  wrap.style.marginBottom = "14px";
+
+  slots.forEach((slot, i) => {
+    const isDone = submitted.has(slot.key);
+    const statusHtml = isDone
+      ? `<span class="mr-slot-status ok" id="csStatus_${slot.key}">✓ 제출됨</span>`
+      : `<span class="mr-slot-status wait" id="csStatus_${slot.key}">대기</span>`;
+    const slotEl = document.createElement("div");
+    slotEl.className = "mr-slot";
+    slotEl.id = `csSlot_${slot.key}`;
+    slotEl.innerHTML = `
+      <div class="mr-slot-header">
+        <div class="mr-slot-num">${i + 1}</div>
+        <div class="mr-slot-title">${escHtml(slot.label || slot.key)}${isDone ? ' <span style="font-size:.72rem;color:#16a34a;font-weight:600">(이미 제출 — 다시 올리면 교체)</span>' : ''}</div>
+        ${statusHtml}
+      </div>
+      <div class="mr-slot-dropzone" id="csDz_${slot.key}"
+           ondragover="event.preventDefault();this.classList.add('drag-over')"
+           ondragleave="this.classList.remove('drag-over')"
+           ondrop="_csOnDrop(event,'${slot.key}')">
+        <input type="file" accept="image/*" multiple id="csFile_${slot.key}"
+               onchange="_csOnFilesSelected(this,'${slot.key}')">
+        <div class="mr-slot-dz-hint" id="csDzHint_${slot.key}">
+          <i class="fas fa-cloud-upload-alt"></i>
+          <span>클릭 또는 드래그 · JPG/PNG/WebP</span>
+        </div>
+        <div class="mr-slot-preview hidden" id="csPreview_${slot.key}"></div>
+      </div>`;
+    wrap.appendChild(slotEl);
+  });
+
+  // 공통 비고 입력 (행 1개이므로 단일 메모)
+  const memoEl = document.createElement("textarea");
+  memoEl.className = "mr-slot-memo";
+  memoEl.id = "csMemo";
+  memoEl.rows = 1;
+  memoEl.placeholder = "비고 - 블로그체험단인 경우 포스팅URL (선택)";
+  memoEl.style.marginTop = "4px";
+  wrap.appendChild(memoEl);
+
+  const stepNav = paneCard.querySelector(".step-nav");
+  paneCard.insertBefore(wrap, stepNav);
+}
+
+async function _csAddFiles(slotKey, newFiles) {
+  if (!S.filesBySlot[slotKey]) S.filesBySlot[slotKey] = [];
+  const MAX = 10 * 1024 * 1024;
+  for (const f of newFiles) {
+    if (f.size > MAX) { showToast(`${f.name}: 10MB 초과`, "warning"); continue; }
+    try {
+      const b64 = await fileToBase64(f);
+      const actualType = (f.type.startsWith('image/') && f.size > 1024 * 1024) ? 'image/jpeg' : f.type;
+      S.filesBySlot[slotKey].push({ file: f, b64, size: f.size, type: actualType, name: f.name });
+    } catch (e) {
+      showToast(`${f.name}: 이미지 읽기 실패 (다시 선택해주세요)`, "error");
+    }
+  }
+  _csRenderPreview(slotKey);
+}
+function _csOnFilesSelected(input, slotKey) {
+  const files = Array.from(input.files || []);
+  _csAddFiles(slotKey, files);
+  input.value = "";
+}
+function _csOnDrop(e, slotKey) {
+  e.preventDefault();
+  const dz = document.getElementById("csDz_" + slotKey);
+  if (dz) dz.classList.remove("drag-over");
+  const files = Array.from(e.dataTransfer?.files || []).filter(f => f.type.startsWith("image/"));
+  _csAddFiles(slotKey, files);
+}
+function _csRemoveFile(slotKey, fileIdx) {
+  if (S.filesBySlot[slotKey]) S.filesBySlot[slotKey].splice(fileIdx, 1);
+  _csRenderPreview(slotKey);
+}
+function _csRenderPreview(slotKey) {
+  const files = S.filesBySlot[slotKey] || [];
+  const hint    = document.getElementById("csDzHint_" + slotKey);
+  const preview = document.getElementById("csPreview_" + slotKey);
+  const status  = document.getElementById("csStatus_" + slotKey);
+  if (!preview) return;
+  if (files.length === 0) {
+    preview.innerHTML = "";
+    preview.classList.add("hidden");
+    if (hint) hint.style.display = "";
+    if (status) { status.textContent = "대기"; status.className = "mr-slot-status wait"; }
+    return;
+  }
+  if (hint) hint.style.display = "none";
+  preview.classList.remove("hidden");
+  preview.innerHTML = files.map((fo, fi) => {
+    return `<div class="mr-slot-thumb">
+      <img src="data:${fo.type};base64,${fo.b64}" alt="">
+      <button class="mr-remove" onclick="_csRemoveFile('${slotKey}',${fi})" title="삭제">
+        <i class="fas fa-times"></i>
+      </button>
+    </div>`;
+  }).join("");
+  if (status) { status.textContent = `${files.length}장`; status.className = "mr-slot-status ok"; }
 }
 
 /* ─── 다건 슬롯 파일 핸들러 ─── */
@@ -1793,11 +1922,156 @@ function renderPreviews() {
   prev.appendChild(add);
 }
 
+/* ── 캡처 슬롯 모드 제출 (단일 행에 리뷰/현금영수증 등 여러 종류 캡처) ── */
+async function _submitReviewSlots(item) {
+  const slots = S.captureSlots || [];
+  const submitted = new Set(Array.isArray(item.submittedSlots) ? item.submittedSlots : []);
+
+  // 이번에 업로드할 슬롯 = 파일이 첨부된 슬롯
+  const slotsToUpload = slots.filter(s => (S.filesBySlot[s.key] || []).length > 0);
+  if (slotsToUpload.length === 0) {
+    showToast("제출할 캡처 이미지를 1장 이상 첨부해주세요.", "warning");
+    return;
+  }
+
+  // 용량 검사 (전체 합산 15MB)
+  const MAX_TOTAL_MB = 15;
+  const totalBytes = slotsToUpload.reduce((s, slot) =>
+    s + (S.filesBySlot[slot.key] || []).reduce((a, fo) => a + (fo.size || 0), 0), 0);
+  if (totalBytes > MAX_TOTAL_MB * 1024 * 1024) {
+    showToast(`이미지 총 용량이 ${MAX_TOTAL_MB}MB를 초과합니다.`, "warning");
+    return;
+  }
+
+  const btn = document.getElementById("btnSubmit");
+  btn.disabled = true;
+
+  const reviewerName = item.recipientName || item.displayName || "이름없음";
+  const { options: rowOpts } = extractProductOption(item.row || {});
+  const optionFolderName = rowOpts.map(o => o.value).filter(Boolean).join(" ").trim();
+  const memo = document.getElementById("csMemo")?.value.trim() || "";
+
+  const uploadErrors = [];
+  try {
+    // ── 슬롯별 업로드 (슬롯당 1회 호출, slotKey 전달) ──
+    for (const slot of slotsToUpload) {
+      const files = S.filesBySlot[slot.key] || [];
+      const status = document.getElementById("csStatus_" + slot.key);
+      if (status) { status.textContent = "업로드 중..."; status.className = "mr-slot-status wait"; }
+      showLoading(`${slot.label || slot.key} 업로드 중...`);
+      btn.innerHTML = `<i class="fas fa-circle-notch fa-spin"></i> ${escHtml(slot.label || slot.key)} 업로드 중...`;
+      try {
+        const fileData = files.map(fo => fo.b64);
+        if (fileData.some(b => !b)) throw new Error("이미지 데이터가 없습니다. 다시 선택해주세요.");
+        const upRes = await gasPostUpload({
+          action:           "uploadReviewImage",
+          sheetId:          item.sheetId,
+          tabName:          item.tabName,
+          gid:              item.gid,
+          rowIndex:         item.rowIndex,
+          reviewerName,
+          submitCol:        item.submitCol,
+          campaignName:     item.campaignName,
+          optionFolderName,
+          memo,
+          slotKey:          slot.key,
+          files: fileData.map((b64, fi) => ({
+            name:     reviewerName + "_" + (fi + 1),
+            mimeType: files[fi].type || "image/jpeg",
+            data:     b64,
+          }))
+        }, 180000);
+        if (!upRes || (!upRes.ok && !upRes.success)) {
+          throw new Error(upRes?.error || "이미지 업로드 실패");
+        }
+        if (status) { status.textContent = "✓ 업로드됨"; status.className = "mr-slot-status ok"; }
+      } catch (slotErr) {
+        uploadErrors.push(`${slot.label || slot.key}: ${slotErr.message || "실패"}`);
+        if (status) { status.textContent = "✗ 실패"; status.className = "mr-slot-status wait"; }
+      }
+    }
+
+    if (uploadErrors.length === slotsToUpload.length) {
+      hideLoading();
+      showToast("업로드 실패: " + uploadErrors.join(" / "), "error");
+      return;
+    }
+
+    // ── 제출 기록 + 완료 판정 (서버가 필요 슬롯 충족 여부 계산) ──
+    const now = new Date();
+    const submitTimeValue = `${now.getMonth()+1}/${now.getDate()} ${String(now.getHours()).padStart(2,'0')}:${String(now.getMinutes()).padStart(2,'0')}`;
+    const result = await gasPost({
+      action:       "submitReview",
+      sheetId:      item.sheetId,
+      tabName:      item.tabName,
+      gid:          item.gid,
+      rowIndex:     item.rowIndex,
+      reviewerName,
+      submitCol:    item.submitCol,
+      value:        submitTimeValue,
+      campaignName: item.campaignName,
+      memo,
+    }, 30000);
+    hideLoading();
+
+    if (!result || (!result.success && !result.ok)) {
+      throw new Error(result?.error || "제출 기록 실패");
+    }
+
+    _clearSearchCache();
+
+    // 이번 제출 후 충족된 슬롯 = 기존 제출 + 이번 업로드 성공
+    const justUploaded = new Set(slotsToUpload
+      .filter(s => !uploadErrors.some(e => e.startsWith((s.label || s.key) + ":")))
+      .map(s => s.key));
+    const coveredKeys = new Set([...submitted, ...justUploaded]);
+    const complete = (typeof result.complete === 'boolean')
+      ? result.complete
+      : slots.every(s => coveredKeys.has(s.key));
+    const missing = Array.isArray(result.missingSlots) && result.missingSlots.length
+      ? result.missingSlots
+      : slots.filter(s => !coveredKeys.has(s.key)).map(s => s.key);
+
+    const slotLabel = k => (slots.find(s => s.key === k)?.label) || k;
+    if (complete) {
+      const doneList = slots.map(s => `${escHtml(s.label || s.key)} ✓`).join(" / ");
+      document.getElementById("successMessage").innerHTML =
+        `<strong>${escHtml(reviewerName)}</strong>님의 캡처가 모두 제출되었습니다 😊<br>`
+        + `<span style="font-size:.82rem;color:#16a34a">${doneList}</span>`;
+      show("successModal", "flex");
+    } else {
+      const doneList = slots.map(s =>
+        coveredKeys.has(s.key) ? `${escHtml(s.label || s.key)} ✓` : `${escHtml(s.label || s.key)} <span style="color:#DC2626">미제출</span>`
+      ).join(" / ");
+      const missLabels = missing.map(slotLabel).map(escHtml).join(", ");
+      document.getElementById("successMessage").innerHTML =
+        `일부 캡처가 제출되었습니다.<br><span style="font-size:.82rem">${doneList}</span>`
+        + `<br><span style="font-size:.82rem;color:#DC2626">${missLabels} 을(를) 보완 제출하면 완료됩니다.</span>`;
+      show("successModal", "flex");
+    }
+    if (uploadErrors.length > 0) {
+      showToast("일부 업로드 실패: " + uploadErrors.join(" / "), "warning", 5000);
+    }
+  } catch (err) {
+    hideLoading();
+    const msg = (err.message && err.message !== "undefined" && err.message !== "null")
+      ? err.message : "제출에 실패했습니다. 네트워크를 확인하고 다시 시도해주세요.";
+    showToast("제출 실패: " + msg, "error");
+    console.error("[submitReviewSlots] 오류:", err);
+  } finally {
+    btn.disabled = false;
+    btn.innerHTML = '<i class="fas fa-paper-plane"></i> 제출하기';
+  }
+}
+
 /* ── 리뷰 제출 ── */
 async function submitReview() {
   const items = S.selectedRows && S.selectedRows.length > 0 ? S.selectedRows : (S.selectedRow ? [S.selectedRow] : []);
   if (!items.length) { showToast("주문 정보를 다시 확인해주세요.", "error"); return; }
   if (!APP_CONFIG.GAS_WEB_APP_URL) { showToast("GAS URL을 설정해주세요.", "error"); return; }
+
+  // ── 캡처 슬롯 모드 (단일 행, 여러 종류 캡처) → 전용 핸들러 ──
+  if (S.captureSlots) { return _submitReviewSlots(items[0]); }
 
   const isMulti = items.length > 1;
 
@@ -1964,6 +2238,7 @@ async function submitReview() {
 function resetApp() {
   hide("successModal");
   S.files = []; S.selectedRow = null; S.selectedRows = []; S.filesByIdx = {}; S.memoByIdx = {};
+  S.filesBySlot = {}; S.captureSlots = null;
   const nameEl = document.getElementById("nameInput");
   const memoEl = document.getElementById("memoTxt");
   if (nameEl) nameEl.value = "";
@@ -1974,6 +2249,8 @@ function resetApp() {
   // 다건 슬롯 제거
   const slotsWrap = document.getElementById("mrSlotsWrap");
   if (slotsWrap) slotsWrap.remove();
+  const csWrap = document.getElementById("csSlotsWrap");
+  if (csWrap) csWrap.remove();
   const singleDrop = document.getElementById("dropZone");
   const singleMemo = document.querySelector(".memo-wrap");
   if (singleDrop) singleDrop.style.display = "";

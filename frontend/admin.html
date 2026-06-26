@@ -2154,6 +2154,22 @@ body{ letter-spacing:-.01em; }
       <button class="tc-opt" data-val="케이뱅크">케이뱅크</button>
     </div>
   </div>
+  <!-- ★ 다중 캡처 슬롯 (1작업에 여러 종류 캡처 제출) -->
+  <div style="margin-top:12px;padding:10px 12px;background:#FFFBEB;border:1.5px solid #FCD34D;border-radius:10px">
+    <div style="font-size:.72rem;font-weight:700;color:#92400E;margin-bottom:6px">
+      <i class="fas fa-images" style="margin-right:4px"></i>다중 캡처 슬롯
+      <span style="font-weight:400;color:#9CA3AF;font-size:.66rem">(1작업에 여러 종류 캡처 — 예: 리뷰+현금영수증)</span>
+    </div>
+    <div style="font-size:.64rem;color:#9CA3AF;margin-bottom:6px;line-height:1.5">
+      슬롯 라벨을 <b>2개 이상</b> 추가하면 리뷰어가 종류별로 캡처를 제출하고, 모두 제출해야 완료됩니다.<br>비우거나 1개면 기존처럼 리뷰 1장만 받습니다. (첫 슬롯은 기존 리뷰 제출과 호환)
+    </div>
+    <div id="tcCaptureSlotsList"></div>
+    <div style="display:flex;gap:6px;margin-top:6px">
+      <button type="button" onclick="_csAddSlotRow('')" style="flex:1;border:1px dashed #F59E0B;background:#fff;color:#B45309;border-radius:6px;padding:5px;cursor:pointer;font-size:.72rem;font-weight:600">+ 슬롯 추가</button>
+      <button type="button" onclick="saveCaptureSlots()" style="flex:1;border:none;background:#F59E0B;color:#fff;border-radius:6px;padding:5px;cursor:pointer;font-size:.72rem;font-weight:700">캡처 슬롯 저장</button>
+    </div>
+    <button type="button" onclick="reopenIncompleteSlots()" style="width:100%;margin-top:6px;border:1px solid #FCA5A5;background:#FEF2F2;color:#B91C1C;border-radius:6px;padding:5px;cursor:pointer;font-size:.7rem;font-weight:600" title="저장된 슬롯 기준 — 이미 제출완료된 행 중 누락 슬롯이 있는 건을 다시 열어 보완 제출받습니다">↺ 기존 완료행 보완 재오픈</button>
+  </div>
   <div class="tc-popover-btns">
     <button class="tc-btn-cancel" onclick="closeTcPopover()">취소</button>
     <button class="tc-btn-save" onclick="requestTcSave()">수정</button>
