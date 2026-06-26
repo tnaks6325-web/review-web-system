@@ -1630,6 +1630,76 @@ router.post('/folder-audit', authMiddleware, async (req, res, next) => {
 });
 
 // ═══════════════════════════════════════════════════════════
+// POST /api/drive/share-review-folder — 탭의 [리뷰] 폴더를 '링크공유(anyone reader)'로
+//   만들어 업체 보고용 폴더 링크를 반환한다.
+//
+// 목적: 직원이 리뷰 이미지를 자기 드라이브에 복제(→ 직원 용량 차감)하지 않고도,
+//   tnaks 소유 원본 [리뷰] 폴더 링크를 그대로 업체에 전달해 보고할 수 있게 한다.
+//   (복제 0 · 직원 용량 0 · 업체는 로그인 없이 열람·다운로드)
+//
+// body: { sheetId?, tabName?, folderUrl? }
+//   - folderUrl 우선 → 없으면 tab_configs.folder_url → 그래도 없으면 [리뷰] 폴더를
+//     생성·연결한 뒤 공유(미연결 탭이어도 유효한 링크 확보, 빈 폴더 가능).
+// 비파괴: 파일 이동/복제 없음. 폴더에 읽기 권한만 부여(드라이브에서 언제든 해제 가능).
+// ═══════════════════════════════════════════════════════════
+router.post('/share-review-folder', authMiddleware, async (req, res, next) => {
+  try {
+    const { sheetId, tabName, folderUrl } = req.body || {};
+
+    // ── 1) 대상 [리뷰] 폴더 확보 ──
+    let url = (folderUrl || '').trim();
+    if (!url && sheetId && tabName) {
+      const { rows } = await pool.query(
+        'SELECT folder_url FROM tab_configs WHERE sheet_id = $1 AND tab_name = $2 LIMIT 1',
+        [sheetId, tabName]
+      );
+      url = rows[0]?.folder_url || '';
+    }
+    let folderId = extractFolderId(url);
+
+    // 미연결 탭이면 [리뷰] 폴더를 생성·연결 (빈 폴더라도 유효한 링크 확보)
+    let created = false;
+    if (!folderId) {
+      if (!sheetId || !tabName) {
+        return res.json({ ok: false, error: '폴더를 찾을 수 없습니다. folderUrl 또는 sheetId+tabName이 필요합니다.' });
+      }
+      const rootFolderId = getRootFolderId();
+      if (!rootFolderId) return res.json({ ok: false, error: 'AI_REVIEW_FOLDER_ID 미설정' });
+      const sheetTitle = await getSheetTitle(sheetId, tabName);
+      const result = await driveService.ensureReviewFolderPath(rootFolderId, sheetTitle, tabName);
+      folderId = result.id;
+      url = result.url;
+      created = true;
+      await pool.query(
+        'UPDATE tab_configs SET folder_url = $1, updated_at = NOW() WHERE sheet_id = $2 AND tab_name = $3',
+        [url, sheetId, tabName]
+      );
+    }
+
+    // ── 2) 링크공유(anyone reader) 설정 (idempotent) ──
+    const share = await driveService.setFolderAnyoneReader(folderId);
+
+    // ── 3) 폴더 내 파일 수(참고용 — 실패해도 무시) ──
+    let fileCount = null;
+    try {
+      const items = await driveService.listFolderContents(folderId);
+      fileCount = items.filter(f => f.mimeType !== 'application/vnd.google-apps.folder').length;
+    } catch (_) {}
+
+    res.json({
+      ok: true,
+      folderId,
+      folderUrl: url || `https://drive.google.com/drive/folders/${folderId}`,
+      alreadyShared: share.alreadyShared,
+      created,
+      fileCount,
+    });
+  } catch (err) {
+    next(err);
+  }
+});
+
+// ═══════════════════════════════════════════════════════════
 // GET /api/drive/image/:id — Drive 이미지 스트리밍 프록시 (모달 인라인 미리보기)
 //   <img src>가 헤더 인증을 못 보내므로 무인증. id는 추측 불가한 Drive fileId(20+).
 //   서버 OAuth(소유자 계정)로 받아 스트리밍 → 비공개/링크공유 섞여도 표시.
