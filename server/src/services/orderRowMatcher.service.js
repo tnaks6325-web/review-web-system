@@ -1,4 +1,7 @@
 const INAD_COL_KEYWORDS = ['인애드', '인애드명', '인애드제출', '카톡', '카카오', '닉네임'];
+// ★ 인애드 후보에서 제외할 헤더 키워드 — 자유기재(비고/특이사항/메모) 컬럼은
+//   "비고(닉네임 등 자유)"처럼 '닉네임'을 포함해도 인애드 컬럼으로 인식하지 않는다.
+const INAD_EXCLUDE_KEYWORDS = ['비고', '특이사항', '메모', 'memo'];
 const OPTION_COL_KEYWORDS = ['옵션', 'option'];
 const MAX_OPTION_COLS = 3;
 
@@ -24,6 +27,7 @@ function getOrderRowColumns(headers, maxOptionCols = MAX_OPTION_COLS) {
   return {
     inadColIdx: headers.findIndex((h) => {
       const hl = String(h || '').trim().toLowerCase();
+      if (INAD_EXCLUDE_KEYWORDS.some((kw) => hl.includes(kw))) return false;
       return INAD_COL_KEYWORDS.some((kw) => hl.includes(kw));
     }),
     optionColIndices,
