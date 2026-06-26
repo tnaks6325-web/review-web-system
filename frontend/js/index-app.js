@@ -7540,7 +7540,7 @@ async function saveCaptureSlots() {
     if (json && json.ok) {
       const n = (json.captureSlots || []).length;
       if (n > 1) {
-        showToast(`다중 캡처 슬롯 저장됨 (${n}종) · 이후 제출분부터 적용 (기존 완료건은 재오픈 안 됨)`, "warning");
+        showToast(`다중 캡처 슬롯 저장됨 (${n}종) · 이미 완료된 기존 건을 받으려면 아래 '기존 완료행 보완 재오픈'을 누르세요`, "warning");
       } else {
         showToast("캡처 슬롯: 단일 기본(리뷰 1장)으로 저장됨", "success");
       }
@@ -7549,6 +7549,37 @@ async function saveCaptureSlots() {
     }
   } catch (e) {
     showToast("캡처 슬롯 저장 오류: " + (e.message || ""), "error");
+  }
+}
+
+// 기존 완료행 보완 재오픈 (저장된 슬롯 기준 — 먼저 dryRun으로 대상 수 확인 후 확정)
+async function reopenIncompleteSlots() {
+  if (!_tcCurrent) return;
+  if (!APP_CONFIG.GAS_WEB_APP_URL) { showToast("API 서버 URL이 설정되지 않았습니다.", "error"); return; }
+  const sheetId = _tcCurrent.sheetId || "";
+  const tabName = _tcCurrent.tabName || "";
+  if (!sheetId || !tabName) { showToast("sheetId/tabName을 특정할 수 없습니다.", "error"); return; }
+
+  try {
+    // 1) dryRun — 대상 건수 확인
+    const dry = await gasPost({ action: "reopenSlots", sheetId, tabName, dryRun: true });
+    if (!dry || !dry.ok) { showToast("재오픈 대상 조회 실패: " + (dry?.error || dry?.note || ""), "error"); return; }
+    const cnt = dry.candidates || 0;
+    if (cnt === 0) {
+      showToast(dry.note || "재오픈할 완료행이 없습니다.", "info");
+      return;
+    }
+    if (!confirm(`"${tabName}" 탭에서 누락 슬롯이 있는 완료행 ${cnt}건을 재오픈합니다.\n\n해당 행은 미제출 상태로 돌아가 리뷰어 검색에 다시 노출되고, 제출완료 카운트가 ${cnt} 차감됩니다.\n계속할까요?`)) return;
+
+    // 2) 실제 재오픈
+    const res = await gasPost({ action: "reopenSlots", sheetId, tabName });
+    if (res && res.ok) {
+      showToast(`↺ ${res.reopened || 0}건 재오픈됨 — 리뷰어가 보완 제출할 수 있습니다.`, "success");
+    } else {
+      showToast("재오픈 실패: " + (res?.error || "알 수 없는 오류"), "error");
+    }
+  } catch (e) {
+    showToast("재오픈 오류: " + (e.message || ""), "error");
   }
 }
 

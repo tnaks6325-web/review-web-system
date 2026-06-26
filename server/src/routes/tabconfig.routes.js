@@ -279,6 +279,89 @@ router.post('/config', authMiddleware, async (req, res, next) => {
   }
 });
 
+// ═══════════════════════════════════════════════════════════
+// POST /api/tab/reopen-slots — 기존 완료행 보완 재오픈
+//
+// 탭에 새 캡처 슬롯(예: 현금영수증)을 추가했을 때, 이미 제출완료
+// (is_submitted=TRUE)된 행 중 "필요 슬롯을 다 채우지 못한" 행을 다시 열어
+// 리뷰어 검색에 재노출(is_submitted=FALSE)하고 index_master.submitted_count를 차감한다.
+//   - 필요 슬롯이 단일('review')뿐이면(=다중 슬롯 미설정) 아무 것도 하지 않음.
+//   - dryRun=true 이면 변경 없이 대상 건수만 반환.
+//   - 판정: review_submissions에서 (필요 슬롯에 속한) distinct slot_key 수 < 필요 슬롯 수.
+//     → 구버전(원장 없음) 완료행도 재오픈됨(의도된 동작: 새 요구를 소급 적용).
+// ═══════════════════════════════════════════════════════════
+router.post('/reopen-slots', authMiddleware, async (req, res, next) => {
+  try {
+    const sheetId = (req.body.sheetId || '').trim();
+    const tabName = (req.body.tabName || '').trim();
+    const dryRun = !!req.body.dryRun;
+    if (!sheetId || !tabName) return res.json({ ok: false, error: 'sheetId, tabName이 필요합니다.' });
+
+    // 탭의 필요 슬롯 확인
+    const { rows: cfgRows } = await pool.query(
+      'SELECT capture_slots FROM tab_configs WHERE sheet_id = $1 AND tab_name = $2 LIMIT 1',
+      [sheetId, tabName]
+    );
+    const cs = cfgRows[0]?.capture_slots;
+    const required = (Array.isArray(cs) && cs.length)
+      ? cs.map(s => s && s.key).filter(Boolean)
+      : ['review'];
+    const isMultiSlot = !(required.length === 1 && required[0] === 'review');
+    if (!isMultiSlot) {
+      return res.json({ ok: true, reopened: 0, candidates: 0, dryRun, note: '다중 캡처 슬롯이 설정되지 않아 재오픈 대상이 없습니다.' });
+    }
+
+    // 미충족 완료행 판정 조건 (공통)
+    const coverCond = `
+      ( SELECT COUNT(DISTINCT rs.slot_key)
+          FROM review_submissions rs
+         WHERE rs.sheet_id = ri.sheet_id AND rs.tab_name = ri.tab_name
+           AND rs.row_index = ri.row_index AND rs.slot_key = ANY($3) ) < $4`;
+
+    if (dryRun) {
+      const { rows } = await pool.query(
+        `SELECT COUNT(*)::int AS cnt
+           FROM review_index ri
+          WHERE ri.sheet_id = $1 AND ri.tab_name = $2 AND ri.is_submitted = TRUE
+            AND ${coverCond}`,
+        [sheetId, tabName, required, required.length]
+      );
+      return res.json({ ok: true, dryRun: true, candidates: rows[0]?.cnt || 0, reopened: 0 });
+    }
+
+    // 실제 재오픈
+    const { rows: reopenedRows } = await pool.query(
+      `UPDATE review_index ri
+          SET is_submitted = FALSE, built_at = NOW()
+        WHERE ri.sheet_id = $1 AND ri.tab_name = $2 AND ri.is_submitted = TRUE
+          AND ${coverCond}
+        RETURNING ri.row_index`,
+      [sheetId, tabName, required, required.length]
+    );
+    const reopened = reopenedRows.length;
+
+    // index_master.submitted_count 차감 (0 미만 방지)
+    if (reopened > 0) {
+      try {
+        await pool.query(
+          `UPDATE index_master
+              SET submitted_count = GREATEST(0, submitted_count - $3)
+            WHERE sheet_id = $1 AND tab_name = $2`,
+          [sheetId, tabName, reopened]
+        );
+      } catch (cntErr) {
+        logger.warn(`[reopen-slots] submitted_count 차감 실패 (무시): ${cntErr.message}`);
+      }
+    }
+
+    logger.info(`[reopen-slots] ${sheetId}/${tabName} — ${reopened}개 행 재오픈 (필요 슬롯: ${required.join(',')})`);
+    return res.json({ ok: true, dryRun: false, reopened, candidates: reopened });
+  } catch (err) {
+    logger.error(`[reopen-slots] ${err.message}`);
+    return res.json({ ok: false, error: err.message });
+  }
+});
+
 // GET /api/tab/config — 탭 설정 조회 (세부목록 전체 or 단건)
 router.get('/config', authMiddleware, async (req, res, next) => {
   try {

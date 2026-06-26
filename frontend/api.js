@@ -53,6 +53,7 @@ const _ACTION_MAP = {
   // 탭 설정 (Section 6)
   'setTabConfig':     { method: 'POST', path: '/api/tab/config' },
   'getTabConfig':     { method: 'GET',  path: '/api/tab/config' },
+  'reopenSlots':      { method: 'POST', path: '/api/tab/reopen-slots' },
   'listDetailSheet':  { method: 'GET',  path: '/api/tab/config' },
   'setClosed':        { method: 'POST', path: '/api/tab/closed' },
   'getTabOptions':    { method: 'GET',  path: '/api/tab/options' },
