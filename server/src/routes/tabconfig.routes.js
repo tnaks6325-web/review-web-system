@@ -1,7 +1,7 @@
 const express = require('express');
 const router = express.Router();
 const pool = require('../db/pool');
-const { authMiddleware } = require('../middleware/auth.middleware');
+const { authMiddleware, adminOrMasterMiddleware } = require('../middleware/auth.middleware');
 const { getSpreadsheetMeta, readSheet } = require('../services/sheets.service');
 // [DEPRECATED — v11.8.0] masterSheet.service.js 함수들은 2탭 통합으로 deprecated
 // import는 유지하되 라우트에서 deprecated 응답 반환
@@ -60,6 +60,25 @@ const { throttledCall, throttledMap } = require('../utils/sheetsThrottle');
     logger.info('[tabconfig] round_meta 컬럼 확인/추가 완료');
   } catch (err) {
     logger.warn('[tabconfig] round_meta 컬럼 추가 실패 (이미 존재할 수 있음):', err.message);
+  }
+})();
+
+// ── Auto-migration: provider_memo 컬럼 추가 (구매양식 제공정보 메모) ──
+(async () => {
+  try {
+    await pool.query(`
+      ALTER TABLE tab_configs
+      ADD COLUMN IF NOT EXISTS provider_memo TEXT DEFAULT ''
+    `);
+    // 회사 공통 사업자번호 키 시드 (없을 때만)
+    await pool.query(`
+      INSERT INTO app_settings (key, value)
+      VALUES ('company_business_no', '')
+      ON CONFLICT (key) DO NOTHING
+    `);
+    logger.info('[tabconfig] provider_memo 컬럼/회사 사업자번호 키 확인/추가 완료');
+  } catch (err) {
+    logger.warn('[tabconfig] provider_memo 컬럼 추가 실패 (이미 존재할 수 있음):', err.message);
   }
 })();
 
@@ -247,6 +266,7 @@ router.post('/config', authMiddleware, async (req, res, next) => {
       deposit_name: b.depositName  !== undefined ? b.depositName  : undefined,
       transfer_bank:b.transferBank !== undefined ? b.transferBank : undefined,
       income_type:  b.incomeType   !== undefined ? b.incomeType   : undefined,
+      provider_memo:b.providerMemo !== undefined ? b.providerMemo : undefined,
       campaign_name:b.campaignName !== undefined ? b.campaignName : undefined,
     };
 
@@ -400,6 +420,7 @@ router.get('/config', authMiddleware, async (req, res, next) => {
         depositName: r.deposit_name,
         transferBank: r.transfer_bank,
         incomeType: r.income_type,
+        providerMemo: r.provider_memo,
         campaignName: r.campaign_name,
         sheetUrl: r.sheet_url,
         captureSlots: Array.isArray(r.capture_slots) && r.capture_slots.length ? r.capture_slots : null,
@@ -407,6 +428,64 @@ router.get('/config', authMiddleware, async (req, res, next) => {
     });
 
     res.json({ ok: true, configs: rows, detailMap });
+  } catch (err) {
+    next(err);
+  }
+});
+
+// ═══════════════════════════════════════════════════════════
+// GET /api/tab/provider-info — 구매양식 "제공정보" 카드용 안내정보 (인증 불필요)
+// Query: sheetId, tabName (둘 다 선택 — 없으면 회사 사업자번호만 반환)
+// 반환: { ok, providerMemo, incomeType, companyBusinessNo }
+//  - providerMemo: 탭별 제공정보 메모 (공란이면 화면에 미노출)
+//  - incomeType: 진행방식 (사업자현영이면 현금영수증 안내 표시 조건)
+//  - companyBusinessNo: 회사 공통 사업자번호 (지출증빙 현금영수증 발행용)
+// ═══════════════════════════════════════════════════════════
+router.get('/provider-info', async (req, res, next) => {
+  try {
+    const { sheetId, tabName } = req.query;
+
+    // 회사 공통 사업자번호 (항상 반환)
+    let companyBusinessNo = '';
+    try {
+      const { rows: sRows } = await pool.query(
+        "SELECT value FROM app_settings WHERE key = 'company_business_no'"
+      );
+      companyBusinessNo = sRows[0]?.value || '';
+    } catch (_) { /* app_settings 없을 수 있음 — 무시 */ }
+
+    let providerMemo = '';
+    let incomeType = '';
+    if (sheetId && tabName) {
+      const { rows } = await pool.query(
+        'SELECT provider_memo, income_type FROM tab_configs WHERE sheet_id = $1 AND tab_name = $2',
+        [sheetId, tabName]
+      );
+      providerMemo = rows[0]?.provider_memo || '';
+      incomeType   = rows[0]?.income_type   || '';
+    }
+
+    res.json({ ok: true, providerMemo, incomeType, companyBusinessNo });
+  } catch (err) {
+    next(err);
+  }
+});
+
+// ═══════════════════════════════════════════════════════════
+// POST /api/tab/company-business-no — 회사 공통 사업자번호 설정 (관리자)
+// Body: { businessNo }
+// ═══════════════════════════════════════════════════════════
+router.post('/company-business-no', adminOrMasterMiddleware, async (req, res, next) => {
+  try {
+    const businessNo = String(req.body?.businessNo ?? '').trim();
+    await pool.query(
+      `INSERT INTO app_settings (key, value, updated_at)
+       VALUES ('company_business_no', $1, NOW())
+       ON CONFLICT (key) DO UPDATE SET value = $1, updated_at = NOW()`,
+      [businessNo]
+    );
+    logger.info(`[tabconfig] 회사 사업자번호 설정: ${businessNo || '(공란)'}`);
+    res.json({ ok: true, businessNo });
   } catch (err) {
     next(err);
   }
@@ -1188,7 +1267,7 @@ router.get('/dashboard', authMiddleware, async (req, res, next) => {
         tc.payment_type, tc.display_name, tc.display_name_map, tc.option_columns, tc.option_columns_map, tc.is_closed,
         tc.folder_url, tc.capture_folder_url, tc.is_bulk, tc.delivery_type,
         tc.round, tc.nc_mode, tc.deposit_name, tc.transfer_bank,
-        tc.income_type, tc.updated_at, tc.closed_rounds, tc.round_meta,
+        tc.income_type, tc.provider_memo, tc.updated_at, tc.closed_rounds, tc.round_meta,
         tc.capture_slots,
         im.row_count, im.submitted_count, im.status AS index_status,
         im.built_at AS index_built_at, im.checksum,

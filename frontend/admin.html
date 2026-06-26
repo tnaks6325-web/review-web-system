@@ -1344,6 +1344,26 @@ body{ letter-spacing:-.01em; }
 
         <hr style="margin:28px 0;border:none;border-top:1px solid #E5E7EB">
 
+        <!-- 회사 공통 사업자번호 설정 -->
+        <div class="admin-section-header">
+          <span style="font-size:.95rem;font-weight:700;color:var(--t1)">
+            <i class="fas fa-building" style="color:#B45309;margin-right:6px"></i>회사 사업자번호 (제공정보)
+          </span>
+        </div>
+        <p style="font-size:.78rem;color:var(--t3);margin:8px 0 12px">
+          진행방식이 <b>사업자현영</b>인 탭의 구매양식 제출화면에 <b>지출증빙용 현금영수증 발행</b> 안내와 함께 표시됩니다. 회사 공통으로 1개만 설정합니다.
+        </p>
+        <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center;max-width:480px">
+          <input type="text" id="companyBusinessNoInput" placeholder="예: 311-87-02345"
+            style="flex:1;min-width:180px;padding:8px 12px;border:1.5px solid #D1D5DB;border-radius:8px;font-size:.85rem;outline:none">
+          <button onclick="saveCompanyBusinessNo()"
+            style="padding:8px 18px;background:var(--p);color:#fff;border:none;border-radius:8px;font-size:.82rem;font-weight:600;cursor:pointer">
+            <i class="fas fa-save"></i> 저장
+          </button>
+        </div>
+
+        <hr style="margin:28px 0;border:none;border-top:1px solid #E5E7EB">
+
         <!-- 인식 실패 탭 진단 -->
         <div class="admin-section-header">
           <span style="font-size:.95rem;font-weight:700;color:var(--t1)">
@@ -2140,6 +2160,12 @@ body{ letter-spacing:-.01em; }
       <button class="tc-opt" data-val="사업자현영">사업자현영</button>
       <button class="tc-opt" data-val="소득신고" style="color:#3182f6;border-color:#3182f6">소득신고</button>
     </div>
+  </div>
+  <!-- ★ 제공정보 메모 (구매양식 제출화면 "제공정보" 카드에 표시) -->
+  <div style="margin-top:12px;padding:10px 12px;background:#F8FAFC;border:1.5px solid #E2E8F0;border-radius:10px">
+    <div style="font-size:.72rem;font-weight:700;color:#475569;margin-bottom:4px"><i class="fas fa-circle-info" style="margin-right:4px"></i>제공정보 메모 <span style="font-weight:400;color:#9CA3AF;font-size:.68rem">(구매양식 제출화면에 표시 · 공란이면 미노출)</span></div>
+    <div style="font-size:.66rem;color:#94A3B8;margin-bottom:6px">진행방식 안내·특이사항 등을 자유롭게 입력. 예) 현영인 경우 지출증빙 현금영수증 필수 / 포스팅 시 해시태그 5개 이상</div>
+    <textarea id="tcProviderMemoInput" rows="3" placeholder="추가 안내·특이사항 입력 (선택)" style="width:100%;box-sizing:border-box;padding:8px 10px;border:1.5px solid #CBD5E1;border-radius:8px;font-size:.8rem;font-family:inherit;line-height:1.5;resize:vertical;outline:none" onfocus="this.style.borderColor='#3182f6'" onblur="this.style.borderColor='#CBD5E1'"></textarea>
   </div>
   <!-- ★ 입금처리 설정 -->
   <div style="margin-top:12px;padding:10px 12px;background:#F0FDF4;border:1.5px solid #6EE7B7;border-radius:10px">

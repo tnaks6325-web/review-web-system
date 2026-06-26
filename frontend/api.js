@@ -82,6 +82,8 @@ const _ACTION_MAP = {
   'getOptionData':    { method: 'GET',  path: '/api/tab/option-data' },
   'getReviewerOptions':{ method: 'GET', path: '/api/tab/reviewer-options' },
   'refreshOptionCache':{ method: 'POST', path: '/api/tab/refresh-option-cache' },
+  'getProviderInfo':   { method: 'GET',  path: '/api/tab/provider-info' },
+  'setCompanyBusinessNo':{ method: 'POST', path: '/api/tab/company-business-no' },
 
   // 리뷰어 관리 (Section 7)
   'registerReviewer':   { method: 'POST', path: '/api/reviewer/register' },
