@@ -1275,6 +1275,7 @@ function switchAdminTab(tabName) {
   if (pane) pane.classList.add("active");
   // 탭별 자동 로드
   if (tabName === "reviewers") loadReviewerList();
+  if (tabName === "cs-inquiry") { try { loadCsRooms(); } catch(_){} }
   if (tabName === "recruit")   { loadRecruitList(); loadRecruitTabOptions(); }
   if (tabName === "work-orders") { try { loadWorkOrders(); } catch(_){} }
   if (tabName === "payment")   initPaymentPanel();
@@ -15791,6 +15792,264 @@ async function _deleteNotice(id) {
     showToast('오류: ' + err.message, 'error');
   }
 }
+
+/* ══════════════════════════════════════════════════════════════
+   ★ C/S 문의창구 — 관리자
+   리뷰어별 채팅방 목록 + 메신저형 대화방 + 관리자 전용 메모
+   ══════════════════════════════════════════════════════════════ */
+let _csRooms = [];               // 방 목록 캐시
+let _csActiveThreadId = null;    // 현재 열린 대화방 threadId
+
+async function loadCsRooms() {
+  const wrap = document.getElementById("csRoomListWrap");
+  if (!wrap) return;
+  wrap.innerHTML = '<div style="padding:30px;text-align:center;color:#9CA3AF;font-size:.85rem"><i class="fas fa-circle-notch fa-spin"></i> 불러오는 중...</div>';
+  const status = (document.getElementById("csStatusFilter") || {}).value || "all";
+  const q = (document.getElementById("csSearchInput") || {}).value || "";
+  try {
+    const data = await gasGet({ action: "csAdminThreads", status, q });
+    if (!data || data.ok === false) throw new Error((data && data.error) || "불러오기 실패");
+    _csRooms = data.threads || [];
+    _renderCsRooms(_csRooms);
+    csUpdateBadge(data.totalUnread || 0);
+  } catch (err) {
+    wrap.innerHTML = `<div style="padding:30px;text-align:center;color:#EF4444;font-size:.85rem">오류: ${escHtml(err.message)}</div>`;
+  }
+}
+
+function csFilterRooms(keyword) {
+  const kw = (keyword || "").trim().toLowerCase();
+  if (!kw) { _renderCsRooms(_csRooms); return; }
+  const filtered = _csRooms.filter(r =>
+    (r.reviewerName || "").toLowerCase().includes(kw) ||
+    (r.reviewerPhone8 || "").includes(kw) ||
+    (r.campaignLabel || "").toLowerCase().includes(kw)
+  );
+  _renderCsRooms(filtered);
+}
+
+function _csTimeAgo(iso) {
+  if (!iso) return "";
+  const d = new Date(iso); const diff = Date.now() - d.getTime();
+  const m = Math.floor(diff / 60000);
+  if (m < 1) return "방금";
+  if (m < 60) return m + "분 전";
+  const h = Math.floor(m / 60); if (h < 24) return h + "시간 전";
+  const day = Math.floor(h / 24); if (day < 7) return day + "일 전";
+  return d.toLocaleDateString("ko-KR");
+}
+
+function _renderCsRooms(list) {
+  const wrap = document.getElementById("csRoomListWrap");
+  if (!wrap) return;
+  if (!list.length) {
+    wrap.innerHTML = '<div style="padding:40px;text-align:center;color:#9CA3AF;font-size:.85rem"><i class="fas fa-comment-slash" style="font-size:1.6rem;display:block;margin-bottom:8px;opacity:.5"></i>문의가 없습니다.</div>';
+    return;
+  }
+  // 리뷰어별 그룹핑(이름+phone8 기준), 그룹 내 최근순
+  const groups = new Map();
+  list.forEach(r => {
+    const key = (r.reviewerName || "?") + "|" + (r.reviewerPhone8 || "");
+    if (!groups.has(key)) groups.set(key, []);
+    groups.get(key).push(r);
+  });
+  let html = "";
+  for (const [key, rooms] of groups) {
+    const [name, phone8] = key.split("|");
+    const unread = rooms.reduce((s, r) => s + (r.adminUnread || 0), 0);
+    html += `<div style="padding:10px 14px;background:#f7faff;border-bottom:1px solid #eef2f7;display:flex;align-items:center;gap:8px">
+      <i class="fas fa-user-circle" style="color:#94a3b8"></i>
+      <span style="font-weight:700;color:var(--t1);font-size:.86rem">${escHtml(name)}</span>
+      <span style="color:#94a3b8;font-size:.74rem;font-family:monospace">${escHtml(phone8)}</span>
+      ${unread > 0 ? `<span style="margin-left:auto;background:#EF4444;color:#fff;font-size:.66rem;font-weight:700;padding:1px 7px;border-radius:10px">미확인 ${unread}</span>` : ''}
+    </div>`;
+    rooms.forEach(r => {
+      const nameSafe = (r.reviewerName || "").replace(/'/g, "\\'");
+      const phoneSafe = (r.reviewerPhone8 || "").replace(/'/g, "\\'");
+      const statusChip = r.status === 'closed'
+        ? '<span style="background:#F3F4F6;color:#6B7280;font-size:.66rem;padding:1px 7px;border-radius:8px">종료</span>'
+        : '<span style="background:#D1FAE5;color:#065F46;font-size:.66rem;padding:1px 7px;border-radius:8px">진행중</span>';
+      html += `<div onclick="csOpenConversation('${r.id}','${nameSafe}','${phoneSafe}')"
+        style="padding:11px 16px 11px 30px;border-bottom:1px solid #f3f4f6;cursor:pointer;display:flex;align-items:center;gap:10px"
+        onmouseover="this.style.background='#f9fafb'" onmouseout="this.style.background='#fff'">
+        <div style="flex:1;min-width:0">
+          <div style="display:flex;align-items:center;gap:6px;margin-bottom:2px">
+            <i class="fas fa-tag" style="color:#cbd5e1;font-size:.7rem"></i>
+            <span style="font-weight:600;color:var(--t1);font-size:.82rem;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${escHtml(r.campaignLabel || '문의')}</span>
+            ${statusChip}
+          </div>
+          <div style="color:var(--t3);font-size:.76rem;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${escHtml(r.lastMessagePreview || '')}</div>
+        </div>
+        <div style="text-align:right;flex-shrink:0">
+          <div style="color:#9CA3AF;font-size:.7rem">${_csTimeAgo(r.lastMessageAt)}</div>
+          ${r.adminUnread > 0 ? `<span style="display:inline-block;margin-top:3px;background:#EF4444;color:#fff;font-size:.64rem;font-weight:700;padding:1px 6px;border-radius:9px">${r.adminUnread}</span>` : ''}
+        </div>
+      </div>`;
+    });
+  }
+  wrap.innerHTML = html;
+}
+
+async function csOpenConversation(threadId, reviewerName, reviewerPhone8) {
+  _csActiveThreadId = threadId;
+  let ov = document.getElementById("csConvOverlay");
+  if (!ov) {
+    ov = document.createElement("div");
+    ov.id = "csConvOverlay";
+    ov.style.cssText = "position:fixed;inset:0;background:rgba(15,23,42,.45);z-index:10000;display:flex;align-items:center;justify-content:center;padding:16px";
+    ov.addEventListener("click", e => { if (e.target === ov) csCloseConversation(); });
+    document.body.appendChild(ov);
+  }
+  ov.style.display = "flex";
+  ov.innerHTML = `<div style="background:#fff;border-radius:16px;width:560px;max-width:96vw;height:78vh;display:flex;flex-direction:column;overflow:hidden;box-shadow:0 12px 40px rgba(0,0,0,.25)">
+    <div style="padding:13px 16px;border-bottom:1px solid #eef2f7;display:flex;align-items:center;gap:8px">
+      <i class="fas fa-comments" style="color:var(--p)"></i>
+      <div style="flex:1;min-width:0">
+        <div style="font-weight:700;font-size:.9rem;color:var(--t1)">${escHtml(reviewerName)} <span style="color:#94a3b8;font-weight:400;font-size:.76rem;font-family:monospace">${escHtml(reviewerPhone8)}</span></div>
+        <div id="csConvCampaign" style="font-size:.74rem;color:var(--t3)">불러오는 중...</div>
+      </div>
+      <button id="csConvStatusBtn" onclick="csToggleStatus()" style="padding:5px 10px;background:#F3F4F6;color:#374151;border:none;border-radius:8px;font-size:.74rem;font-weight:600;cursor:pointer">—</button>
+      <button onclick="csCloseConversation()" style="width:30px;height:30px;background:#F3F4F6;border:none;border-radius:8px;cursor:pointer;color:#6B7280"><i class="fas fa-times"></i></button>
+    </div>
+    <div style="display:flex;flex:1;min-height:0">
+      <div id="csConvThread" style="flex:1;overflow-y:auto;padding:14px;background:#f9fafb;display:flex;flex-direction:column;gap:8px">
+        <div style="text-align:center;color:#9CA3AF;font-size:.82rem"><i class="fas fa-circle-notch fa-spin"></i></div>
+      </div>
+      <div style="width:190px;border-left:1px solid #eef2f7;padding:12px;display:flex;flex-direction:column;background:#fffdf5">
+        <div style="font-size:.74rem;font-weight:700;color:#92400E;margin-bottom:6px"><i class="fas fa-lock"></i> 관리자 메모<div style="font-weight:400;font-size:.66rem;color:#b45309">리뷰어 비공개·영구저장</div></div>
+        <textarea id="csMemoText" placeholder="이 리뷰어에 대한 메모..." style="flex:1;resize:none;border:1px solid #FDE68A;border-radius:8px;padding:8px;font-size:.78rem;font-family:inherit;outline:none;background:#fff"></textarea>
+        <button onclick="csSaveMemo('${(reviewerPhone8||'').replace(/'/g,"\\'")}')" style="margin-top:8px;padding:6px;background:#F59E0B;color:#fff;border:none;border-radius:8px;font-size:.76rem;font-weight:700;cursor:pointer">메모 저장</button>
+      </div>
+    </div>
+    <div style="padding:10px 12px;border-top:1px solid #eef2f7;display:flex;gap:8px;align-items:flex-end">
+      <textarea id="csReplyText" rows="2" placeholder="답장 입력... (Shift+Enter 줄바꿈)" style="flex:1;resize:none;border:1px solid #e5e7eb;border-radius:10px;padding:9px;font-size:.82rem;font-family:inherit;outline:none"
+        onkeydown="if(event.key==='Enter'&&!event.shiftKey){event.preventDefault();csSendReply('${threadId}');}"></textarea>
+      <button onclick="csSendReply('${threadId}')" style="padding:10px 16px;background:#3182f6;color:#fff;border:none;border-radius:10px;font-weight:700;font-size:.82rem;cursor:pointer;white-space:nowrap"><i class="fas fa-paper-plane"></i></button>
+    </div>
+  </div>`;
+  await csReloadConversation(threadId);
+}
+
+async function csReloadConversation(threadId) {
+  if (_csActiveThreadId !== threadId) return;
+  try {
+    const data = await gasGet({ action: "csAdminMessages", threadId });
+    if (!data || data.ok === false) throw new Error((data && data.error) || "불러오기 실패");
+    const t = data.thread || {};
+    const camp = document.getElementById("csConvCampaign");
+    if (camp) camp.innerHTML = `<i class="fas fa-tag" style="font-size:.68rem"></i> ${escHtml(t.campaignLabel || '문의')}`;
+    const memo = document.getElementById("csMemoText");
+    if (memo && document.activeElement !== memo) memo.value = t.adminMemo || "";
+    const sBtn = document.getElementById("csConvStatusBtn");
+    if (sBtn) {
+      if (t.status === 'closed') { sBtn.textContent = "재오픈"; sBtn.dataset.status = "closed"; }
+      else { sBtn.textContent = "문의 종료"; sBtn.dataset.status = "open"; }
+    }
+    _csRenderMessages(data.messages || []);
+    // 대시보드 뱃지 동기화(열람 시 미확인 리셋됨)
+    csRefreshBadge();
+  } catch (err) {
+    const thread = document.getElementById("csConvThread");
+    if (thread) thread.innerHTML = `<div style="text-align:center;color:#EF4444;font-size:.82rem">오류: ${escHtml(err.message)}</div>`;
+  }
+}
+
+function _csRenderMessages(messages) {
+  const box = document.getElementById("csConvThread");
+  if (!box) return;
+  if (!messages.length) {
+    box.innerHTML = '<div style="text-align:center;color:#9CA3AF;font-size:.82rem;margin-top:20px">아직 메시지가 없습니다.</div>';
+    return;
+  }
+  box.innerHTML = messages.map(m => {
+    const isAdmin = m.senderRole === 'admin';
+    const ts = m.createdAt ? new Date(m.createdAt).toLocaleString("ko-KR", { month:'numeric', day:'numeric', hour:'2-digit', minute:'2-digit' }) : "";
+    return `<div style="display:flex;flex-direction:column;align-items:${isAdmin ? 'flex-end' : 'flex-start'}">
+      <div style="font-size:.66rem;color:#9CA3AF;margin-bottom:2px">${escHtml(m.senderName || (isAdmin ? '관리자' : '리뷰어'))}</div>
+      <div style="max-width:78%;background:${isAdmin ? '#3182f6' : '#fff'};color:${isAdmin ? '#fff' : '#111827'};border:1px solid ${isAdmin ? '#3182f6' : '#e5e7eb'};padding:8px 11px;border-radius:12px;font-size:.83rem;line-height:1.45;white-space:pre-wrap;word-break:break-word">${escHtml(m.content || '')}</div>
+      <div style="font-size:.62rem;color:#cbd5e1;margin-top:2px">${ts}</div>
+    </div>`;
+  }).join("");
+  box.scrollTop = box.scrollHeight;
+}
+
+async function csSendReply(threadId) {
+  const ta = document.getElementById("csReplyText");
+  if (!ta) return;
+  const content = ta.value.trim();
+  if (!content) return;
+  ta.value = "";
+  try {
+    const data = await gasPost({ action: "csAdminReply", threadId, content });
+    if (!data || data.ok === false) throw new Error((data && data.error) || "전송 실패");
+    await csReloadConversation(threadId);
+    loadCsRooms();
+  } catch (err) {
+    showToast("전송 오류: " + err.message, true);
+    ta.value = content;
+  }
+}
+
+async function csSaveMemo(phone8) {
+  const memo = (document.getElementById("csMemoText") || {}).value || "";
+  try {
+    const data = await gasPost({ action: "csAdminSaveMemo", phone8, memo });
+    if (!data || data.ok === false) throw new Error((data && data.error) || "저장 실패");
+    showToast("메모가 저장되었습니다.");
+  } catch (err) {
+    showToast("메모 저장 오류: " + err.message, true);
+  }
+}
+
+async function csToggleStatus() {
+  const btn = document.getElementById("csConvStatusBtn");
+  if (!btn || !_csActiveThreadId) return;
+  const next = btn.dataset.status === 'closed' ? 'open' : 'closed';
+  try {
+    const data = await gasPost({ action: "csAdminStatus", threadId: _csActiveThreadId, status: next });
+    if (!data || data.ok === false) throw new Error((data && data.error) || "변경 실패");
+    showToast(next === 'closed' ? "문의를 종료했습니다." : "문의를 다시 열었습니다.");
+    await csReloadConversation(_csActiveThreadId);
+    loadCsRooms();
+  } catch (err) {
+    showToast("상태 변경 오류: " + err.message, true);
+  }
+}
+
+function csCloseConversation() {
+  _csActiveThreadId = null;
+  const ov = document.getElementById("csConvOverlay");
+  if (ov) ov.style.display = "none";
+}
+
+function csUpdateBadge(count) {
+  const b = document.getElementById("csInquiryBadge");
+  if (!b) return;
+  if (count > 0) { b.textContent = count; b.style.display = "inline-block"; }
+  else b.style.display = "none";
+}
+
+async function csRefreshBadge() {
+  try {
+    const data = await gasGet({ action: "csAdminUnread" });
+    if (data && data.ok !== false) csUpdateBadge(data.totalUnread || 0);
+  } catch (_) {}
+}
+
+/** SSE 수신 핸들러 (index-payment.js에서 호출) */
+function csOnSSE(evtType, data) {
+  data = data || {};
+  // 대시보드 뱃지 갱신
+  csRefreshBadge();
+  // C/S 탭이 활성화되어 있으면 목록 새로고침
+  const pane = document.getElementById("tab-cs-inquiry");
+  if (pane && pane.classList.contains("active")) { try { loadCsRooms(); } catch(_){} }
+  // 열린 대화방이 해당 스레드면 재조회
+  if (_csActiveThreadId && data.threadId === _csActiveThreadId) {
+    try { csReloadConversation(_csActiveThreadId); } catch(_){}
+  }
+}
+window.csOnSSE = csOnSSE;
 
 // ═══════════════════════════════════════════════════════════
 // 리뷰 캡처 정리 — 내 드라이브 루트 등에 흩어진 리뷰 캡처를

@@ -173,8 +173,9 @@ async function lookupPhone(phone8) {
  */
 async function getReviewerList() {
   const { rows } = await pool.query(`
-    SELECT name, phone, registered_at AS "registeredAt", consent, status,
-           income_type AS "incomeType", sub_accounts AS "subAccounts"
+    SELECT name, phone, phone8, registered_at AS "registeredAt", consent, status,
+           income_type AS "incomeType", sub_accounts AS "subAccounts",
+           admin_memo AS "memo"
     FROM reviewers
     ORDER BY registered_at DESC
   `);

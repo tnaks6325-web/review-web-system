@@ -976,6 +976,8 @@ const _SSE_ICONS = {
   index_build:   { icon: 'fa-database', color: '#F59E0B', label: '인덱스' },
   system:        { icon: 'fa-info-circle', color: '#6B7280', label: '시스템' },
   dirty_detected:{ icon: 'fa-bolt', color: '#D97706', label: '변경 감지' },
+  cs_new_inquiry:{ icon: 'fa-comments', color: '#7C3AED', label: 'C/S 문의' },
+  cs_message:    { icon: 'fa-comment-dots', color: '#7C3AED', label: 'C/S 메시지' },
   connected:     { icon: 'fa-plug', color: '#12b886', label: '연결됨' },
 };
 
@@ -1010,10 +1012,16 @@ function connectSSE() {
     };
 
     // 이벤트별 핸들러
-    ['review_submit', 'order_submit', 'order_update', 'image_extract', 'image_upload', 'index_build', 'system', 'dirty_detected', 'smart_build_done', 'dirty_auto_built', 'db_rebuild_progress', 'db_rebuild_done'].forEach(function(evtType) {
+    ['review_submit', 'order_submit', 'order_update', 'image_extract', 'image_upload', 'index_build', 'system', 'dirty_detected', 'smart_build_done', 'dirty_auto_built', 'db_rebuild_progress', 'db_rebuild_done', 'cs_new_inquiry', 'cs_message'].forEach(function(evtType) {
       _sseSource.addEventListener(evtType, function(event) {
         try {
           const data = JSON.parse(event.data);
+          // ★ C/S 문의 이벤트: 새 문의만 알림센터에 표시, 갱신은 전용 핸들러가 처리
+          if (evtType === 'cs_new_inquiry' || evtType === 'cs_message') {
+            if (evtType === 'cs_new_inquiry') _addNotification(data);
+            if (typeof csOnSSE === 'function') { try { csOnSSE(evtType, data); } catch(_){} }
+            return;
+          }
           _addNotification(data);
           // ★ 인트라넷에서 작업오더 인박스 원본이 수정됨 → 목록/간편보기 즉시 갱신
           if (evtType === 'order_update') {
