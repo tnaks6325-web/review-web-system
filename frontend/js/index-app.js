@@ -16082,9 +16082,16 @@ function openReviewRelocate() {
 
         <div style="margin-top:14px;border-top:1px dashed #E5E7EB;padding-top:14px">
           <div style="font-size:.82rem;font-weight:800;color:#0F172A"><i class="fas fa-paper-plane" style="color:#0891B2"></i> 업체 보고 링크 <span style="font-weight:600;color:#9CA3AF;font-size:.7rem">(직원 복제 불필요)</span></div>
-          <div style="font-size:.68rem;color:#6B7280;margin:4px 0 8px">위에서 <b>탭을 선택</b>하면 그 탭의 <b>[리뷰]</b> 폴더를 '링크공유'로 만들어 업체에 보낼 링크를 생성합니다. 원본은 그대로(내 소유)라 <b>직원 드라이브에 복제되지 않습니다</b>.</div>
-          <button onclick="_relocateMakeReportLink()" style="width:100%;padding:9px;background:#0891B2;color:#fff;border:none;border-radius:8px;font-size:.82rem;font-weight:700;cursor:pointer"><i class="fas fa-link"></i> 선택 탭 업체 보고 링크 만들기</button>
+          <div style="font-size:.68rem;color:#6B7280;margin:4px 0 8px">위에서 <b>탭을 선택</b>한 뒤 링크를 만들어 업체에 전달하세요. 업체는 <b>로그인 없이</b> 열람하고, 원본은 그대로(내 소유)라 <b>직원 드라이브에 복제되지 않습니다</b>.</div>
+          <button onclick="_relocateMakeReportPageLink()" style="width:100%;padding:9px;background:#0891B2;color:#fff;border:none;border-radius:8px;font-size:.82rem;font-weight:700;cursor:pointer"><i class="fas fa-link"></i> 선택 탭 보고 링크 만들기 (이미지 모아보기)</button>
           <div id="rlcReportResult" style="margin-top:10px"></div>
+          <details style="margin-top:8px">
+            <summary style="cursor:pointer;font-size:.7rem;color:#6B7280">또는 Drive 폴더 공유링크로 전달 (폴더 그대로)</summary>
+            <div style="margin-top:6px">
+              <button onclick="_relocateMakeReportLink()" style="width:100%;padding:8px;background:#fff;color:#0891B2;border:1px solid #0891B2;border-radius:8px;font-size:.76rem;font-weight:700;cursor:pointer"><i class="fas fa-folder-open"></i> 선택 탭 [리뷰] 폴더 공유링크 만들기</button>
+              <div id="rlcFolderShareResult" style="margin-top:8px"></div>
+            </div>
+          </details>
         </div>
 
         <div style="margin-top:8px;text-align:right">
@@ -16147,14 +16154,46 @@ function _relocateSelectTab(i) {
   document.getElementById('rlcResult').innerHTML = '';
 }
 
-// 업체 보고 링크 만들기 — 선택 탭의 [리뷰] 폴더를 '링크공유(anyone reader)'로 설정하고
-//   업체에 전달할 폴더 링크를 반환. 원본은 tnaks 소유 그대로 → 직원이 복제할 필요 없음.
+// [주] 공개 보고 페이지 링크 만들기 — 선택 탭의 추측불가 코드를 발급하고
+//   report.html 공개 페이지 링크를 반환. 업체는 로그인 없이 이미지 모아보기로 열람.
+//   이미지는 서버 프록시로 표시 → 폴더 공개공유 불필요, 원본 복제 0.
+async function _relocateMakeReportPageLink() {
+  const t = _relocateTabs[_relocateSelIdx];
+  if (!t) { showToast('먼저 위에서 대상 탭을 선택하세요.', 'error'); return; }
+  const out = document.getElementById('rlcReportResult');
+  if (out) out.innerHTML = `<div style="font-size:.76rem;color:#0E7490"><i class="fas fa-spinner fa-spin"></i> 보고 링크 생성 중…</div>`;
+  try {
+    const res = await gasPost({ action: 'reviewReportLink', sheetId: t.sheetId, tabName: t.tabName, displayName: t.displayName }, 60000);
+    if (!res || res.ok === false || res.error || !res.reportUrl) {
+      if (out) out.innerHTML = `<div style="font-size:.76rem;color:#DC2626">오류: ${escHtml((res && res.error) || '실패')}</div>`;
+      return;
+    }
+    const link = res.reportUrl;
+    if (out) out.innerHTML = `
+      <div style="background:#ECFEFF;border:1px solid #A5F3FC;border-radius:8px;padding:10px">
+        <div style="font-size:.74rem;font-weight:700;color:#155E75;margin-bottom:6px"><i class="fas fa-check-circle"></i> 업체 보고 링크 준비됨 <span style="font-weight:500;color:#0E7490">(이미지 모아보기 페이지)</span></div>
+        <div style="display:flex;gap:6px;align-items:stretch">
+          <input id="rlcReportPageLink" type="text" readonly value="${escHtml(link)}" onclick="this.select()" style="flex:1;padding:7px 9px;border:1px solid #A5F3FC;border-radius:8px;font-size:.7rem;font-family:monospace;background:#fff">
+          <button onclick="_relocateCopyLink('rlcReportPageLink')" style="padding:7px 12px;background:#0891B2;color:#fff;border:none;border-radius:8px;font-size:.76rem;font-weight:700;cursor:pointer;white-space:nowrap"><i class="fas fa-copy"></i> 복사</button>
+          <a href="${escHtml(link)}" target="_blank" rel="noopener" title="미리보기" style="padding:7px 11px;background:#fff;color:#0891B2;border:1px solid #0891B2;border-radius:8px;font-size:.76rem;font-weight:700;cursor:pointer;white-space:nowrap;text-decoration:none;display:flex;align-items:center"><i class="fas fa-arrow-up-right-from-square"></i></a>
+        </div>
+        <div style="font-size:.64rem;color:#0E7490;margin-top:6px">이 링크를 업체에 전달하세요. 업체는 <b>로그인 없이</b> 리뷰 이미지를 모아볼 수 있고, 원본은 그대로라 <b>직원 드라이브 용량을 쓰지 않습니다</b>.</div>
+        <div style="font-size:.6rem;color:#9CA3AF;margin-top:3px">※ 링크를 아는 사람은 열람할 수 있습니다(추측불가 코드). 리뷰어 이름이 함께 표시됩니다.</div>
+      </div>`;
+    showToast('업체 보고 링크 준비됨', 'success');
+  } catch (e) {
+    if (out) out.innerHTML = `<div style="font-size:.76rem;color:#DC2626">오류: ${escHtml(e.message)}</div>`;
+  }
+}
+
+// [보조] Drive 폴더 공유링크 만들기 — 선택 탭의 [리뷰] 폴더를 '링크공유(anyone reader)'로
+//   설정하고 폴더 링크를 반환(폴더 그대로 전달). 원본은 tnaks 소유 그대로 → 복제 불필요.
 async function _relocateMakeReportLink() {
   const t = _relocateTabs[_relocateSelIdx];
   if (!t) { showToast('먼저 위에서 대상 탭을 선택하세요.', 'error'); return; }
   const folderUrl = (document.getElementById('rlcFolderUrl').value || '').trim();
-  const out = document.getElementById('rlcReportResult');
-  if (out) out.innerHTML = `<div style="font-size:.76rem;color:#0E7490"><i class="fas fa-spinner fa-spin"></i> 보고 링크 생성 중…</div>`;
+  const out = document.getElementById('rlcFolderShareResult');
+  if (out) out.innerHTML = `<div style="font-size:.76rem;color:#0E7490"><i class="fas fa-spinner fa-spin"></i> 폴더 공유링크 생성 중…</div>`;
   try {
     const res = await gasPost({ action: 'shareReviewFolder', sheetId: t.sheetId, tabName: t.tabName, folderUrl }, 60000);
     if (!res || res.ok === false || res.error) {
@@ -16168,25 +16207,25 @@ async function _relocateMakeReportLink() {
       ? ' · 빈 [리뷰] 폴더를 새로 만들어 연결했습니다(아직 제출 0건)'
       : (res.alreadyShared ? ' · 이미 공유돼 있던 폴더' : '');
     if (out) out.innerHTML = `
-      <div style="background:#ECFEFF;border:1px solid #A5F3FC;border-radius:8px;padding:10px">
-        <div style="font-size:.74rem;font-weight:700;color:#155E75;margin-bottom:6px"><i class="fas fa-check-circle"></i> 업체 보고 링크 준비됨 <span style="font-weight:500;color:#0E7490">(${cntTxt})</span></div>
+      <div style="background:#F8FAFC;border:1px solid #CBD5E1;border-radius:8px;padding:10px">
+        <div style="font-size:.74rem;font-weight:700;color:#155E75;margin-bottom:6px"><i class="fas fa-check-circle"></i> Drive 폴더 공유링크 준비됨 <span style="font-weight:500;color:#0E7490">(${cntTxt})</span></div>
         <div style="display:flex;gap:6px;align-items:stretch">
-          <input id="rlcReportLink" type="text" readonly value="${escHtml(link)}" onclick="this.select()" style="flex:1;padding:7px 9px;border:1px solid #A5F3FC;border-radius:8px;font-size:.7rem;font-family:monospace;background:#fff">
-          <button onclick="_relocateCopyReportLink()" style="padding:7px 12px;background:#0891B2;color:#fff;border:none;border-radius:8px;font-size:.76rem;font-weight:700;cursor:pointer;white-space:nowrap"><i class="fas fa-copy"></i> 복사</button>
+          <input id="rlcFolderShareLink" type="text" readonly value="${escHtml(link)}" onclick="this.select()" style="flex:1;padding:7px 9px;border:1px solid #CBD5E1;border-radius:8px;font-size:.7rem;font-family:monospace;background:#fff">
+          <button onclick="_relocateCopyLink('rlcFolderShareLink')" style="padding:7px 12px;background:#0891B2;color:#fff;border:none;border-radius:8px;font-size:.76rem;font-weight:700;cursor:pointer;white-space:nowrap"><i class="fas fa-copy"></i> 복사</button>
           <a href="${escHtml(link)}" target="_blank" rel="noopener" title="새 창에서 열기" style="padding:7px 11px;background:#fff;color:#0891B2;border:1px solid #0891B2;border-radius:8px;font-size:.76rem;font-weight:700;cursor:pointer;white-space:nowrap;text-decoration:none;display:flex;align-items:center"><i class="fas fa-arrow-up-right-from-square"></i></a>
         </div>
-        <div style="font-size:.64rem;color:#0E7490;margin-top:6px">이 링크를 업체에 전달하세요. 업체는 <b>로그인 없이</b> 열람·다운로드할 수 있고, 원본은 그대로라 <b>직원 드라이브 용량을 쓰지 않습니다</b>.${note}</div>
+        <div style="font-size:.64rem;color:#0E7490;margin-top:6px">폴더를 그대로 전달합니다. 업체는 로그인 없이 열람·다운로드, 직원 복제 불필요.${note}</div>
         <div style="font-size:.6rem;color:#9CA3AF;margin-top:3px">※ 파일명에 리뷰어 이름이 보입니다. 공유 해제는 구글 드라이브에서 폴더 '공유 → 링크 보기 제한'으로 가능합니다.</div>
       </div>`;
-    showToast(res.created ? '빈 [리뷰] 폴더 생성·공유링크 준비' : '업체 보고 링크 준비됨', 'success');
+    showToast(res.created ? '빈 [리뷰] 폴더 생성·공유링크 준비' : 'Drive 폴더 공유링크 준비됨', 'success');
   } catch (e) {
     if (out) out.innerHTML = `<div style="font-size:.76rem;color:#DC2626">오류: ${escHtml(e.message)}</div>`;
   }
 }
 
-// 업체 보고 링크 클립보드 복사
-function _relocateCopyReportLink() {
-  const el = document.getElementById('rlcReportLink');
+// 보고 링크 클립보드 복사 (입력칸 id 지정)
+function _relocateCopyLink(inputId) {
+  const el = document.getElementById(inputId);
   if (!el) return;
   const v = el.value || '';
   const done = () => showToast('보고 링크를 복사했습니다.', 'success');

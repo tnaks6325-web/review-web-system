@@ -1700,6 +1700,134 @@ router.post('/share-review-folder', authMiddleware, async (req, res, next) => {
 });
 
 // ═══════════════════════════════════════════════════════════
+// 업체 보고용 공개 링크 (탭 단위)
+//   - POST /report-link (관리자): 탭당 추측불가 코드 발급(재생성 시 동일 코드 재사용)
+//   - GET  /report/:code (공개): 코드 → 탭의 리뷰 이미지 목록 반환(이미지 자체는
+//     기존 /api/drive/image/:id 프록시로 표시 → 폴더 공개공유 불필요, 원본 복제 0)
+// ═══════════════════════════════════════════════════════════
+const _REPORT_CODE_CHARS = 'abcdefghjkmnpqrstuvwxyz23456789'; // 혼동문자 제외
+function _genReportCode(len = 10) {
+  let c = '';
+  for (let i = 0; i < len; i++) c += _REPORT_CODE_CHARS.charAt(Math.floor(Math.random() * _REPORT_CODE_CHARS.length));
+  return c;
+}
+function _frontendBase() {
+  return (process.env.FRONTEND_URL || 'https://review-web-system.pages.dev').replace(/\/+$/, '');
+}
+
+// 탭당 보고 코드 확보 (없으면 생성, 있으면 재사용 — 동일 링크 유지)
+async function _ensureReportCode(sheetId, tabName, displayName, createdBy) {
+  const found = await pool.query(
+    'SELECT code FROM review_report_links WHERE sheet_id = $1 AND tab_name = $2 LIMIT 1',
+    [sheetId, tabName]
+  );
+  if (found.rows[0]) {
+    if (displayName) {
+      await pool.query('UPDATE review_report_links SET display_name = $1 WHERE code = $2', [displayName, found.rows[0].code]);
+    }
+    return found.rows[0].code;
+  }
+  for (let i = 0; i < 12; i++) {
+    const c = _genReportCode();
+    try {
+      await pool.query(
+        'INSERT INTO review_report_links (code, sheet_id, tab_name, display_name, created_by) VALUES ($1, $2, $3, $4, $5)',
+        [c, sheetId, tabName, displayName || null, createdBy || null]
+      );
+      return c;
+    } catch (e) {
+      if (e.code === '23505') {
+        // 탭 유니크 충돌(동시 생성) → 기존 코드 재선택 / 코드 충돌이면 재시도
+        const r = await pool.query('SELECT code FROM review_report_links WHERE sheet_id = $1 AND tab_name = $2 LIMIT 1', [sheetId, tabName]);
+        if (r.rows[0]) return r.rows[0].code;
+        continue;
+      }
+      throw e;
+    }
+  }
+  throw new Error('보고 코드 생성 실패');
+}
+
+// POST /api/drive/report-link — 탭의 업체 보고용 공개 링크 발급(관리자)
+//   body: { sheetId, tabName, displayName? }
+router.post('/report-link', authMiddleware, async (req, res, next) => {
+  try {
+    const { sheetId, tabName, displayName } = req.body || {};
+    if (!sheetId || !tabName) return res.json({ ok: false, error: 'sheetId, tabName이 필요합니다.' });
+    const createdBy = (req.user && (req.user.username || req.user.email || req.user.id)) || null;
+    const code = await _ensureReportCode(sheetId, tabName, (displayName || '').trim() || null, createdBy);
+    res.json({
+      ok: true,
+      code,
+      reportUrl: `${_frontendBase()}/report.html?r=${code}`,
+    });
+  } catch (err) {
+    next(err);
+  }
+});
+
+// GET /api/drive/report/:code — 공개: 코드 → 탭 리뷰 이미지 목록 (무인증)
+//   review_submissions 원장 우선 → 비어 있으면 [리뷰] 폴더 라이브 스캔 폴백.
+router.get('/report/:code', async (req, res, next) => {
+  try {
+    const code = String(req.params.code || '').trim();
+    if (!/^[a-z2-9]{6,16}$/.test(code)) return res.status(404).json({ ok: false, error: '유효하지 않은 링크입니다.' });
+
+    const { rows } = await pool.query(
+      'SELECT sheet_id, tab_name, display_name FROM review_report_links WHERE code = $1 LIMIT 1',
+      [code]
+    );
+    if (!rows[0]) return res.status(404).json({ ok: false, error: '유효하지 않은 링크입니다.' });
+    const { sheet_id: sheetId, tab_name: tabName, display_name: displayName } = rows[0];
+
+    // 1) 제출 원장 우선
+    let images = [];
+    try {
+      const sub = await pool.query(
+        `SELECT file_id, file_name, reviewer_name, uploaded_at
+           FROM review_submissions
+          WHERE sheet_id = $1 AND tab_name = $2 AND file_id IS NOT NULL AND file_id <> ''
+          ORDER BY reviewer_name NULLS LAST, uploaded_at ASC NULLS LAST`,
+        [sheetId, tabName]
+      );
+      images = sub.rows.map(r => ({
+        id: r.file_id,
+        name: r.file_name || '',
+        reviewer: (r.reviewer_name || driveService.extractReviewerNameFromFile(r.file_name) || '').trim(),
+      }));
+    } catch (_) {}
+
+    // 2) 원장이 비어 있으면 [리뷰] 폴더 라이브 스캔 폴백
+    if (images.length === 0) {
+      try {
+        const { rows: tcfg } = await pool.query(
+          'SELECT folder_url FROM tab_configs WHERE sheet_id = $1 AND tab_name = $2 LIMIT 1',
+          [sheetId, tabName]
+        );
+        const folderId = extractFolderId(tcfg[0]?.folder_url);
+        if (folderId) {
+          const files = await driveService.listFolderFilesRecursive(folderId);
+          images = files
+            .filter(f => (f.mimeType || '').indexOf('image/') === 0 || /\.(jpe?g|png|gif|webp)$/i.test(f.name || ''))
+            .map(f => ({ id: f.id, name: f.name || '', reviewer: (driveService.extractReviewerNameFromFile(f.name) || '').trim() }));
+        }
+      } catch (e) {
+        logger.warn(`[report] 폴더 스캔 폴백 실패 (${code}): ${e.message}`);
+      }
+    }
+
+    res.json({
+      ok: true,
+      title: (displayName || tabName || '리뷰 보고'),
+      count: images.length,
+      images,
+    });
+  } catch (err) {
+    next(err);
+  }
+});
+
+// ═══════════════════════════════════════════════════════════
 // GET /api/drive/image/:id — Drive 이미지 스트리밍 프록시 (모달 인라인 미리보기)
 //   <img src>가 헤더 인증을 못 보내므로 무인증. id는 추측 불가한 Drive fileId(20+).
 //   서버 OAuth(소유자 계정)로 받아 스트리밍 → 비공개/링크공유 섞여도 표시.
