@@ -65,6 +65,12 @@
     table.grid td.gutter, table.grid th.gutter{ position:sticky; left:0; background:#fafbfe; color:var(--t3); text-align:right; font-variant-numeric:tabular-nums; z-index:2; }
     table.grid thead th.gutter{ z-index:3; }
     table.grid tr.headrow td{ background:#fffbeb; font-weight:600; }
+    /* 데이터 그리드: 열 너비 고정(table-layout:fixed) + 드래그 리사이즈 */
+    table.grid-data{ table-layout:fixed; }
+    table.grid-data th, table.grid-data td{ max-width:none; }
+    .col-rsz{ position:absolute; top:0; right:0; width:8px; height:100%; cursor:col-resize; user-select:none; z-index:5; }
+    .col-rsz:hover{ background:rgba(49,130,246,.4); }
+    body.col-resizing, body.col-resizing *{ cursor:col-resize !important; user-select:none !important; }
     .pager{ display:flex; align-items:center; gap:10px; margin-top:10px; font-size:12px; color:var(--t2); }
     .empty{ text-align:center; color:var(--t3); padding:50px 20px; font-size:13px; }
     .toast{ position:fixed; top:18px; left:50%; transform:translateX(-50%); color:#fff; padding:10px 20px; border-radius:10px; font-size:13px; font-weight:500; z-index:9999; box-shadow:0 4px 16px rgba(0,0,0,.2); }
@@ -105,6 +111,13 @@
     <div class="layout">
       <div class="card sidebar">
         <input type="text" class="search-box" id="tabSearch" placeholder="🔎 시트/탭 이름 검색…" oninput="renderTabList()"/>
+        <div style="display:flex;align-items:center;justify-content:space-between;gap:8px;margin-bottom:8px">
+          <label title="현재 캠페인 탭 목록에 표시되는 활성 탭만 보기 (마감·시스템·숨김 탭 숨김)"
+                 style="display:inline-flex;align-items:center;gap:6px;font-size:12.5px;color:var(--t2);cursor:pointer">
+            <input type="checkbox" id="optActiveOnly" checked onchange="renderTabList()"/> 활성 탭만
+          </label>
+          <span id="tabCount" style="font-size:11px;color:var(--t3)"></span>
+        </div>
         <div id="tabList"><div class="empty">불러오는 중…</div></div>
       </div>
 
@@ -137,6 +150,28 @@
   let _sel = null;            // { sheetId, gid, tabName }
   let _page = { offset:0, limit:200, total:0 };
   let _statusTimer = null;
+
+  // ── 열 너비(드래그 리사이즈) ──
+  let _userColW = {};         // 현재 탭에서 사용자가 드래그한 열 너비 (colIndex→px)
+  const DEFAULT_COLW = 150, GUTTER_W = 52, MIN_COLW = 44, MAX_AUTO_COLW = 320;
+
+  // 내용 기반 기본 열 너비(헤더 라벨 + 상위 40행 글자수 추정)
+  function computeColW(rows, colCount){
+    const w = new Array(colCount).fill(DEFAULT_COLW);
+    for (let c=0;c<colCount;c++){
+      let max = String(colLabel(c)).length;
+      const n = Math.min(rows.length, 40);
+      for (let i=0;i<n;i++){
+        const cells = Array.isArray(rows[i].cells) ? rows[i].cells : [];
+        const v = cells[c];
+        if (v==null) continue;
+        const L = String(v).length;
+        if (L>max) max=L;
+      }
+      w[c] = Math.max(MIN_COLW+12, Math.min(Math.round(max*8.2)+22, MAX_AUTO_COLW));
+    }
+    return w;
+  }
 
   function showToast(msg, type){
     const t = document.createElement('div');
@@ -215,10 +250,27 @@
 
   function renderTabList(){
     const q = (document.getElementById('tabSearch').value||'').trim().toLowerCase();
-    const list = _allTabs.filter(t =>
+    const activeEl = document.getElementById('optActiveOnly');
+    const activeOnly = !!(activeEl && activeEl.checked);
+    let list = _allTabs.filter(t =>
       !q || (t.tabName||'').toLowerCase().includes(q) || (t.spreadsheetTitle||'').toLowerCase().includes(q)
     );
-    if (list.length===0){ document.getElementById('tabList').innerHTML='<div class="empty">'+(_allTabs.length?'검색 결과 없음':'미러링된 탭이 없습니다.<br/>위 [전체 미러링 실행]을 먼저 눌러주세요.')+'</div>'; return; }
+    const activeCount = _allTabs.filter(t=>t.isActiveCampaign).length;
+    if (activeOnly) list = list.filter(t => t.isActiveCampaign);
+
+    const cntEl = document.getElementById('tabCount');
+    if (cntEl) cntEl.textContent = activeOnly
+      ? `활성 ${list.length}탭 / 전체 ${_allTabs.length}`
+      : `전체 ${_allTabs.length}탭 (활성 ${activeCount})`;
+
+    if (list.length===0){
+      const msg = _allTabs.length===0
+        ? '미러링된 탭이 없습니다.<br/>위 [전체 미러링 실행]을 먼저 눌러주세요.'
+        : (activeOnly
+            ? '표시할 활성 캠페인 탭이 없습니다.<br/><span style="color:var(--t3)">[활성 탭만] 체크를 해제하면 전체 탭이 표시됩니다.</span>'
+            : '검색 결과 없음');
+      document.getElementById('tabList').innerHTML='<div class="empty">'+msg+'</div>'; return;
+    }
 
     // 스프레드시트별 그룹
     const groups = {};
@@ -249,6 +301,7 @@
   async function selectTab(sheetId, gid, el){
     _sel = { sheetId, gid, tabName: el ? el.getAttribute('data-name') : '' };
     _page.offset = 0;
+    _userColW = {}; // 탭이 바뀌면 열 너비 초기화(내용 기반 기본값으로 재계산)
     document.querySelectorAll('.tab-item').forEach(n=>n.classList.remove('active'));
     if (el) el.classList.add('active');
     document.getElementById('btnMapping').style.display = 'inline-flex';
@@ -271,8 +324,16 @@
       `${esc(meta.tabName||_sel.tabName)} <small>· ${esc(meta.spreadsheetTitle||'')} · 총 ${(meta.rowCount||0).toLocaleString()}행 / ${colCount}열</small>`;
 
     // 표 렌더 (gutter = 시트 행번호, 1행은 헤더 강조)
+    // 열 너비: 내용 기반 기본값(base) + 사용자가 드래그한 값(_userColW) 우선
+    const base = computeColW(r.rows||[], colCount);
+    const widthFor = c => (_userColW[c] != null ? _userColW[c] : base[c]);
+
+    let colg = `<colgroup><col style="width:${GUTTER_W}px"/>`;
+    for (let c=0;c<colCount;c++) colg += `<col style="width:${widthFor(c)}px"/>`;
+    colg += '</colgroup>';
+
     let thead = '<tr><th class="gutter">#</th>';
-    for (let c=0;c<colCount;c++) thead += `<th>${colLabel(c)}</th>`;
+    for (let c=0;c<colCount;c++) thead += `<th>${colLabel(c)}<span class="col-rsz" data-c="${c}" title="드래그하여 열 너비 조절"></span></th>`;
     thead += '</tr>';
 
     let tbody = '';
@@ -289,7 +350,7 @@
     if (!tbody) tbody = `<tr><td class="gutter">-</td><td colspan="${colCount}" style="color:var(--t3)">데이터 없음</td></tr>`;
 
     document.getElementById('viewerBody').innerHTML =
-      `<div class="table-scroll"><table class="grid"><thead>${thead}</thead><tbody>${tbody}</tbody></table></div>${pagerHtml()}`;
+      `<div class="table-scroll"><table class="grid grid-data">${colg}<thead>${thead}</thead><tbody>${tbody}</tbody></table></div>${pagerHtml()}`;
     document.getElementById('pagerTop').innerHTML = pagerHtml(true);
   }
 
@@ -430,6 +491,32 @@
     document.getElementById('pagerTop').innerHTML = '';
     loadRows();
   }
+
+  // ════════════════ 열 너비 드래그 리사이즈 ════════════════
+  let _rsz = null;  // { col, c, startX, startW }
+  document.addEventListener('mousedown', e=>{
+    const h = e.target.closest && e.target.closest('.col-rsz');
+    if (!h) return;
+    e.preventDefault();
+    const table = h.closest('table');
+    if (!table) return;
+    const c = parseInt(h.getAttribute('data-c'), 10);
+    const col = table.querySelectorAll('colgroup col')[c+1]; // +1: gutter 열
+    if (!col) return;
+    _rsz = { col, c, startX:e.clientX, startW: parseFloat(col.style.width) || DEFAULT_COLW };
+    document.body.classList.add('col-resizing');
+  });
+  document.addEventListener('mousemove', e=>{
+    if (!_rsz) return;
+    const w = Math.max(MIN_COLW, Math.round(_rsz.startW + (e.clientX - _rsz.startX)));
+    _rsz.col.style.width = w + 'px';
+    _userColW[_rsz.c] = w;
+  });
+  document.addEventListener('mouseup', ()=>{
+    if (!_rsz) return;
+    _rsz = null;
+    document.body.classList.remove('col-resizing');
+  });
 
   // ════════════════ 시작 ════════════════
   loadStatus();

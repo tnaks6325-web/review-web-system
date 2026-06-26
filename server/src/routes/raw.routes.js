@@ -116,23 +116,32 @@ router.get('/tabs', authMiddleware, async (req, res, next) => {
     let where = '';
     if (sheetId) {
       params.push(sheetId);
-      where = 'WHERE sheet_id = $1';
+      where = 'WHERE rst.sheet_id = $1';
     }
     params.push(limit);
 
+    // isActiveCampaign: 이 raw 탭이 "현재 캠페인 탭 목록"(index_master status='active')에
+    //   포함되는 활성 탭인지 여부. 마감 탭은 indexBuilder가 index_master에서 아카이브로
+    //   빼내므로 active = 미마감. gid 우선 매칭, 없으면 탭 이름으로 매칭(gid 누락/리네임 대비).
     const { rows } = await pool.query(
-      `SELECT sheet_id   AS "sheetId",
-              spreadsheet_title AS "spreadsheetTitle",
-              tab_gid    AS "tabGid",
-              tab_name   AS "tabName",
-              row_count  AS "rowCount",
-              col_count  AS "colCount",
-              is_system_tab AS "isSystemTab",
-              is_hidden  AS "isHidden",
-              mirrored_at AS "mirroredAt"
-         FROM raw_sheet_tabs
+      `SELECT rst.sheet_id   AS "sheetId",
+              rst.spreadsheet_title AS "spreadsheetTitle",
+              rst.tab_gid    AS "tabGid",
+              rst.tab_name   AS "tabName",
+              rst.row_count  AS "rowCount",
+              rst.col_count  AS "colCount",
+              rst.is_system_tab AS "isSystemTab",
+              rst.is_hidden  AS "isHidden",
+              rst.mirrored_at AS "mirroredAt",
+              EXISTS (
+                SELECT 1 FROM index_master im
+                 WHERE im.status = 'active'
+                   AND im.sheet_id = rst.sheet_id
+                   AND (im.tab_gid = rst.tab_gid OR im.tab_name = rst.tab_name)
+              ) AS "isActiveCampaign"
+         FROM raw_sheet_tabs rst
          ${where}
-         ORDER BY spreadsheet_title, tab_name
+         ORDER BY rst.spreadsheet_title, rst.tab_name
          LIMIT $${params.length}`,
       params
     );
