@@ -273,6 +273,7 @@ router.get('/dashboard', authMiddleware, async (req, res, next) => {
         tc.deposit_name   AS "depositName",
         tc.transfer_bank  AS "transferBank",
         tc.income_type    AS "incomeType",
+        tc.provider_memo  AS "providerMemo",
         tc.taekhap,
         tc.sheet_url      AS "sheetUrl",
         tc.campaign_name  AS "tcCampaignName",
@@ -479,6 +480,7 @@ router.get('/dashboard', authMiddleware, async (req, res, next) => {
         depositName: t.depositName || '',
         transferBank: t.transferBank || '',
         incomeType:  t.incomeType || '',
+        providerMemo: t.providerMemo || '',
         folderUrl:   t.folderUrl || '',
         captureFolderUrl: t.captureFolderUrl || '',
       });

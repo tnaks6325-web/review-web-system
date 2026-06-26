@@ -21,6 +21,11 @@ GAS(Google Apps Script) 기반 리뷰 관리 시스템을 **Node.js Express + Po
 - `review_submissions`(032, A-2): 리뷰 이미지 파일 단위 원장(탭/행/리뷰어/파일ID/제출시각/출처). `file_id` 유니크 업서트로 재실행 안전.
 - 과거에 루트로 샌 캡처는 관리자 "리뷰 캡처 정리"(`POST /api/drive/relocate-orphan-reviews`)로 `[리뷰]` 폴더 이동 + 파일명 이름↔행 결정적 링크 백필(모호하면 링크 안 함).
 
+### 구매양식 "제공정보" 추가안내 (제공정보 메모 · 회사 사업자번호)
+- `tab_configs.provider_memo`(034): 탭별 자유 텍스트 "제공정보 메모"(진행방식 안내·특이사항 통합). 관리자 대시보드 탭설정 팝오버에서 편집. 구매양식 제출화면(`search.html`)의 "📦 제공정보" 카드에 표시되며 **공란이면 영역 미노출**.
+- `app_settings.company_business_no`: 회사 공통 사업자번호 1개(관리자 "설정" 탭에서 편집, `POST /api/tab/company-business-no` = admin/master). 진행방식(`income_type`)이 **현영 포함(사업자현영)** 인 탭에서만 "지출증빙 현금영수증 발행 필수" 안내와 함께 노출.
+- 폼은 진입 시 `GET /api/tab/provider-info?sheetId&tabName`(무인증, DB만 조회)로 `providerMemo/incomeType/companyBusinessNo`를 받아 렌더(`_loadProviderInfo`). 메모 URL은 `_linkifyMemo`로 링크화하되 href 속성 breakout XSS 방지(따옴표 제외 매칭).
+
 ### 폴더 소유권 & 자동 생성 (예방)
 - 폴더/파일은 **OAuth(`DRIVE_OAUTH_REFRESH_TOKEN` = tnaks6325) 우선 → 실패 시 SA 폴백**으로 생성된다(`createFolder`/`uploadFileBase64`). `_normalizeOwner`가 생성 직후 소유자를 `DRIVE_OWNER_EMAIL`로 보정한다(SA→tnaks 이전은 구글이 막아 무시될 수 있음 — 그래서 OAuth 우선이 핵심).
 - 폴더는 ① 첫 업로드 시 on-demand(`review-upload`), ② 배치(`POST /api/drive/sync-review`·`sync-capture`), ③ **스마트빌드 주기마다 자동**(`reviewFolders.service.js`의 `ensureReviewFoldersForActiveTabs`, `smartBuild` 말미 best-effort)로 생성된다. ③ 덕분에 **신규 활성 탭은 제출 0건이어도 tnaks 소유 `[리뷰]`/`[구매캡처]` 폴더가 미리 생성·연결**된다(비파괴·idempotent, `리뷰폼` 탭 제외, 1주기 최대 30탭).

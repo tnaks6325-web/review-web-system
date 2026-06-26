@@ -1281,7 +1281,7 @@ function switchAdminTab(tabName) {
   if (tabName === "payment")   initPaymentPanel();
   if (tabName === "dashboard") { try { loadTabDashboard(); } catch(_){} try { loadSystemMonitor(); } catch(_){} try { loadStatsOverview(); } catch(_){} try { loadDashWorkOrders(); } catch(_){} }
   if (tabName === "archive")   { try { loadArchiveList(); } catch(_){} try { _loadArchiveHistory(); } catch(_){} }
-  if (tabName === "settings")  { try { loadUnrecognizedTabs(); } catch(_){} try { loadKeywordList(); } catch(_){} }
+  if (tabName === "settings")  { try { loadUnrecognizedTabs(); } catch(_){} try { loadKeywordList(); } catch(_){} try { loadCompanyBusinessNo(); } catch(_){} }
   if (tabName === "errorlogs") { try { loadErrorLogs(); } catch(_){} }
   // ★ 컨텍스트 툴바 업데이트
   _updateContextToolbar(tabName);
@@ -2838,6 +2838,7 @@ async function loadAdminDashboard() {
           isBulk: t.isBulk||false,
           tcRound: t.tcRound || t.round || "",
           incomeType: t.incomeType||"",
+          providerMemo: t.providerMemo || t.provider_memo || "",
           depositName: t.depositName||"", transferBank: t.transferBank||"",
           _isClosed: isClosedTab };
         const tcAttr = escHtml(JSON.stringify(tcData));
@@ -3092,6 +3093,7 @@ function renderDashboard(data) {
         isBulk:t.isBulk||false,
         tcRound: t.tcRound || t.round || "",
         incomeType: t.incomeType||"",
+        providerMemo: t.providerMemo || t.provider_memo || "",
         depositName: t.depositName||"", transferBank: t.transferBank||"",
         _isClosed: isClosedTab };
       const tcAttr = escHtml(JSON.stringify(tcData));
@@ -7215,6 +7217,9 @@ function openTcPopover(e, tcData) {
   document.getElementById("tcCaptureFolderUrlInput").value = tcData.captureFolderUrl || "";
   // 네이버+쿠팡 모드
   document.getElementById("tcNcModeCheck").checked = !!tcData.ncMode;
+  // 제공정보 메모
+  const _tcPmInput = document.getElementById("tcProviderMemoInput");
+  if (_tcPmInput) _tcPmInput.value = tcData.providerMemo || "";
   // 입금명
   document.getElementById("tcDepositNameInput").value = tcData.depositName || "";
   _checkTcDepositRequired(tcData.depositName || "");
@@ -7565,6 +7570,7 @@ function requestTcSave() {
   _tcCurrent._pendingDepositName  = document.getElementById("tcDepositNameInput").value.trim();
   _tcCurrent._pendingTransferBank = (document.querySelector("#tcOptTransferBank .tc-opt.sel") || {}).dataset?.val ?? "";
   _tcCurrent._pendingIncomeType   = (document.querySelector("#tcOptIncomeType .tc-opt.sel")   || {}).dataset?.val ?? "";  // ★ v9.14
+  _tcCurrent._pendingProviderMemo = (document.getElementById("tcProviderMemoInput")?.value ?? "").replace(/\s+$/g, "");  // 제공정보 메모 (끝 공백만 제거)
 
   // ★ 상품명 필수 검증 (마감 탭은 예외)
   const _isClosedOrDone = !!_tcCurrent._isClosed;
@@ -7658,7 +7664,8 @@ async function confirmTcSave() {
     ncMode:       _tcCurrent._pendingNcMode ? "true" : "false",
     depositName:  _tcCurrent._pendingDepositName  ?? "",
     transferBank: _tcCurrent._pendingTransferBank ?? "",
-    incomeType:   _tcCurrent._pendingIncomeType   ?? ""    // ★ v9.14: 진행방식 (undefined → 기존값 보존, "" → 빈값으로 저장)
+    incomeType:   _tcCurrent._pendingIncomeType   ?? "",   // ★ v9.14: 진행방식 (undefined → 기존값 보존, "" → 빈값으로 저장)
+    providerMemo: _tcCurrent._pendingProviderMemo ?? ""    // 제공정보 메모 (구매양식 제출화면 표시)
   };
 
   // ④ 디버그 로그 (F12 콘솔에서 확인)
@@ -7731,7 +7738,8 @@ async function confirmTcSave() {
                              : prevCaptureUrl,
         depositName:       payload.depositName  || "",
         transferBank:      payload.transferBank || "",
-        incomeType:        payload.incomeType   || ""     // ★ v9.14: 진행방식
+        incomeType:        payload.incomeType   || "",    // ★ v9.14: 진행방식
+        providerMemo:      payload.providerMemo || ""     // 제공정보 메모
       });
     } else {
       console.error("[TC] 저장 실패 응답:", json);
@@ -11159,6 +11167,35 @@ async function _updateUnrecogBadge() {
 }
 
 // ── 인식 실패 탭 목록 로드 ──
+/** 회사 공통 사업자번호 불러오기 (설정 탭) */
+async function loadCompanyBusinessNo() {
+  const input = document.getElementById('companyBusinessNoInput');
+  if (!input) return;
+  try {
+    const data = await gasGet({ action: 'getProviderInfo' });
+    if (data && data.ok) input.value = data.companyBusinessNo || '';
+  } catch (e) {
+    console.warn('[companyBusinessNo] load 실패:', e.message);
+  }
+}
+
+/** 회사 공통 사업자번호 저장 (설정 탭) */
+async function saveCompanyBusinessNo() {
+  const input = document.getElementById('companyBusinessNoInput');
+  if (!input) return;
+  const businessNo = (input.value || '').trim();
+  try {
+    const data = await gasPost({ action: 'setCompanyBusinessNo', businessNo });
+    if (data && data.ok) {
+      showToast('✅ 회사 사업자번호가 저장되었습니다.');
+    } else {
+      showToast('❌ 저장 실패: ' + (data?.error || '알 수 없는 오류'), true);
+    }
+  } catch (e) {
+    showToast('❌ 저장 오류: ' + e.message, true);
+  }
+}
+
 async function loadUnrecognizedTabs() {
   const wrap = document.getElementById('unrecogListWrap');
   if (!wrap) return;
@@ -12887,7 +12924,7 @@ function _cellVal(t, col) {
     const nc = t.nc_mode ? "1" : "";
     const ic = escHtml(t.income_type || "");
     const su = escHtml(t.sheet_url || "");
-    const tcJson = JSON.stringify({sheetId:t.sheet_id,sheetUrl:t.sheet_url||"",tabName:t.tab_name,displayName:t.display_name||t.tab_name,round:t.round||"",ncMode:!!t.nc_mode,incomeType:t.income_type||"",tabGid:t.tab_gid||""}).replace(/"/g,'&quot;');
+    const tcJson = JSON.stringify({sheetId:t.sheet_id,sheetUrl:t.sheet_url||"",tabName:t.tab_name,displayName:t.display_name||t.tab_name,round:t.round||"",ncMode:!!t.nc_mode,incomeType:t.income_type||"",providerMemo:t.provider_memo||"",tabGid:t.tab_gid||""}).replace(/"/g,'&quot;');
     return `<button data-tc="${tcJson}" onclick="event.stopPropagation();copyShortLink(this)" style="background:none;border:none;cursor:pointer;color:#3182f6;font-size:.82rem" title="구매양식 제출링크 복사"><i class="fas fa-link"></i></button>`;
   }
   if (k === "_status") {

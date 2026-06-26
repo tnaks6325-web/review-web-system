@@ -3577,6 +3577,9 @@ function initOrderFormMode() {
   // ★ 옵션 데이터 비동기 로드 (화면 표시와 병렬)
   _loadReviewerOptionData(sheetId, tabName, gid, round);
 
+  // ★ 제공정보 추가안내(진행방식/사업자번호/특이사항) 비동기 로드
+  _loadProviderInfo(sheetId, tabName, incomeType);
+
   // ★ v9.14: 소득신고 섹션 초기화 (비동기, 병렬 로드)
   if (incomeType === "소득신고") {
     _loadReviewerProfileForForm().catch(e => {
@@ -3715,6 +3718,70 @@ function _buildReviewerOptKey() {
   const vals = Object.values(_reviewerSelectedOptions).filter(v => v);
   if (vals.length === 0) return '';
   return vals.join('|');
+}
+
+/** 제공정보 추가안내 로드 (구매양식 화면 "제공정보" 카드)
+ *  - 진행방식 안내문 + 회사 사업자번호(사업자현영시 현금영수증 안내) + 특이사항/메모
+ *  - 표시할 내용이 없으면 영역 미노출
+ *  @param {string} sheetId
+ *  @param {string} tabName
+ *  @param {string} urlIncomeType  URL(ic) 파라미터로 받은 진행방식 (서버값 없을 때 폴백)
+ */
+async function _loadProviderInfo(sheetId, tabName, urlIncomeType) {
+  const box = document.getElementById('orderFormProviderInfo');
+  if (!box) return;
+  try {
+    const data = await gasGet({ action: 'getProviderInfo', sheetId, tabName });
+    if (!data || !data.ok) { box.style.display = 'none'; return; }
+
+    const memo        = String(data.providerMemo || '').trim();
+    const incomeType  = String(data.incomeType || urlIncomeType || '').trim();
+    const businessNo  = String(data.companyBusinessNo || '').trim();
+    // 사업자현영(=현영) 진행방식 + 회사 사업자번호 등록되어 있을 때만 현금영수증 안내 표시
+    const showBiz = /현영/.test(incomeType) && !!businessNo;
+
+    let html = '';
+
+    // ① 사업자현영 현금영수증 안내 (지출증빙)
+    if (showBiz) {
+      html += '<div style="padding:10px 12px;background:#FFFBEB;border:1.5px solid #FCD34D;border-radius:10px;margin-bottom:8px">'
+            + '<div style="font-size:.68rem;font-weight:700;color:#92400E;margin-bottom:5px;letter-spacing:.03em">'
+            + '<i class="fas fa-receipt" style="margin-right:4px"></i>사업자현영 · 지출증빙 안내</div>'
+            + '<div style="font-size:.85rem;font-weight:700;color:#1F2937;line-height:1.5">'
+            + '사업자번호 <span style="color:#B45309">' + _safeText(businessNo) + '</span></div>'
+            + '<div style="font-size:.78rem;color:#92400E;line-height:1.5;margin-top:3px">'
+            + '지출증빙용 <b>현금영수증 발행 필수</b></div>'
+            + '</div>';
+    }
+
+    // ② 제공정보 메모 (진행방식 안내·특이사항 통합 자유 텍스트)
+    if (memo) {
+      html += '<div style="padding:10px 12px;background:#F8FAFC;border:1.5px solid #E2E8F0;border-radius:10px">'
+            + '<div style="font-size:.68rem;font-weight:700;color:#475569;margin-bottom:5px;letter-spacing:.03em">'
+            + '<i class="fas fa-circle-info" style="margin-right:4px"></i>추가 안내</div>'
+            + '<div style="font-size:.84rem;color:#1F2937;line-height:1.6;word-break:break-word">'
+            + _linkifyMemo(memo)
+            + '</div></div>';
+    }
+
+    if (!html) { box.style.display = 'none'; return; }
+    box.innerHTML = html;
+    box.style.display = 'block';
+  } catch (e) {
+    console.warn('[providerInfo]', e.message);
+    box.style.display = 'none';
+  }
+}
+
+/** 메모 텍스트를 안전하게 escape + 줄바꿈 보존 + http(s) URL 링크화
+ *  ★ URL 매칭 시 따옴표·꺾쇠를 제외하여 href 속성 이스케이프(breakout) XSS 방지.
+ *    _safeText는 &<>만 이스케이프하므로 URL에 "가 남으면 속성을 깨고 나갈 수 있어 문자클래스에서 제외한다. */
+function _linkifyMemo(text) {
+  const esc = _safeText(text);
+  const linked = esc.replace(/(https?:\/\/[^\s<>"']+)/g, function(url) {
+    return '<a href="' + url + '" target="_blank" rel="noopener" style="color:#1b64da;text-decoration:underline;word-break:break-all">' + url + '</a>';
+  });
+  return linked.replace(/\n/g, '<br>');
 }
 
 /** 리뷰어 옵션 데이터 비동기 로드 (구매양식 화면)
