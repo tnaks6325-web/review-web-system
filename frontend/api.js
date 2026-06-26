@@ -91,6 +91,7 @@ const _ACTION_MAP = {
   'getReviewerProfile': { method: 'POST', path: '/api/reviewer/profile', remap: 'get' },
   'saveSubAccounts':    { method: 'POST', path: '/api/reviewer/profile', remap: 'saveSubAccounts' },
   'saveIncomeInfo':     { method: 'POST', path: '/api/reviewer/profile', remap: 'saveIncomeInfo' },
+  'saveBankInfo':       { method: 'POST', path: '/api/reviewer/profile', remap: 'saveBankInfo' },
   'getInaedList':       { method: 'GET',  path: '/api/submit/get-inaed-list' },
 
   // 관리자 인증 (Section 8)
@@ -129,6 +130,7 @@ const _ACTION_MAP = {
   'organizeCaptureFolders': { method: 'POST', path: '/api/drive/organize-capture' },
   'saveCaptureFolder':      { method: 'POST', path: '/api/drive/save-capture' },
   'updateFolderUrls':       { method: 'POST', path: '/api/drive/update-urls' },
+  'findFolderCandidates':   { method: 'POST', path: '/api/drive/find-candidates' },
   'diagCaptureFolders':     { method: 'GET',  path: '/api/drive/diag' },
 
   // 단축URL / 메모 (Section 10)
@@ -180,9 +182,18 @@ const _ACTION_MAP = {
   'batchCreateFolders':  { method: 'POST', path: '/api/drive/batch-create' },
   'migrateToNewStructure': { method: 'POST', path: '/api/drive/migrate-to-new-structure' },
   'driveDiag':           { method: 'GET',  path: '/api/drive/diag' },
+  'driveAccountInfo':    { method: 'GET',  path: '/api/drive/account-info' },
+  'driveOwnershipAudit': { method: 'POST', path: '/api/drive/ownership-audit' },
+  'driveTransferOwnership': { method: 'POST', path: '/api/drive/transfer-ownership' },
   'checkDuplicates':     { method: 'POST', path: '/api/drive/check-duplicates' },
   'removeDuplicates':    { method: 'POST', path: '/api/drive/remove-duplicates' },
   'checkSubmissionStatus': { method: 'POST', path: '/api/drive/check-submission-status' },
+  'relocateOrphanReviews': { method: 'POST', path: '/api/drive/relocate-orphan-reviews' },
+  'reviewSubmissions':     { method: 'GET',  path: '/api/drive/review-submissions' },
+  'moveFolderContents':    { method: 'POST', path: '/api/drive/move-folder-contents' },
+  'folderAudit':           { method: 'POST', path: '/api/drive/folder-audit' },
+  'shareReviewFolder':     { method: 'POST', path: '/api/drive/share-review-folder' },
+  'reviewReportLink':      { method: 'POST', path: '/api/drive/report-link' },
   'getPendingRows':      { method: 'GET',  path: '/api/diag/pending-rows' },
   'getUnpaidRows':       { method: 'GET',  path: '/api/diag/unpaid-rows' },
   'addTab':              { method: 'POST', path: '/api/diag/add-tab' },
@@ -267,6 +278,7 @@ const _ACTION_MAP = {
   'orderAdminList':        { method: 'GET',  path: '/api/order/admin/list' },
   'orderNewCount':         { method: 'GET',  path: '/api/order/admin/new-count' },
   'orderAdminStatus':      { method: 'PUT',  path: '/api/order/admin/status' },
+  'orderAdminAccept':      { method: 'POST', path: '/api/order/admin/accept' },
   'orderAdminUpdate':      { method: 'PUT',  path: '/api/order/admin/update' },
   'orderSendMemo':         { method: 'PUT',  path: '/api/order/admin/send-memo' },
   'orderAdminDelete':      { method: 'DELETE', path: '/api/order/admin/delete' },
@@ -285,6 +297,17 @@ const _ACTION_MAP = {
   'csAdminReply':          { method: 'POST', path: '/api/cs/reply' },
   'csAdminStatus':         { method: 'POST', path: '/api/cs/status' },
   'csAdminSaveMemo':       { method: 'POST', path: '/api/cs/memo' },
+
+  // ★ 구글시트 전체 RAW 미러링 (Section 14)
+  'rawMirror':  { method: 'POST', path: '/api/raw/mirror' },
+  'rawStatus':  { method: 'GET',  path: '/api/raw/status' },
+  'rawTabs':    { method: 'GET',  path: '/api/raw/tabs' },
+  'rawRows':    { method: 'GET',  path: '/api/raw/rows' },
+
+  // ★ 명시적 컬럼 매핑 (Section 15)
+  'mappingFields': { method: 'GET',  path: '/api/mapping/fields' },
+  'mappingGet':    { method: 'GET',  path: '/api/mapping' },
+  'mappingSave':   { method: 'POST', path: '/api/mapping' },
 };
 
 // ═══════════════════════════════════════════════════════════

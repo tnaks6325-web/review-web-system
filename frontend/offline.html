@@ -1,0 +1,38 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+  <meta charset="UTF-8"/>
+  <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+  <title>오프라인 — 아이에이리뷰</title>
+  <meta name="theme-color" content="#3182f6"/>
+  <style>
+    *{margin:0;padding:0;box-sizing:border-box}
+    body{
+      font-family:-apple-system,BlinkMacSystemFont,'Noto Sans KR','Segoe UI',sans-serif;
+      background:#F0F2FA;color:#111827;min-height:100vh;
+      display:flex;align-items:center;justify-content:center;padding:24px;
+    }
+    .wrap{max-width:360px;text-align:center}
+    .ico{
+      width:72px;height:72px;margin:0 auto 20px;border-radius:20px;
+      background:#e8f1fe;color:#3182f6;
+      display:flex;align-items:center;justify-content:center;font-size:34px;
+    }
+    h1{font-size:1.25rem;font-weight:800;margin-bottom:8px}
+    p{color:#4B5563;font-size:.95rem;line-height:1.6;margin-bottom:24px}
+    button{
+      width:100%;padding:14px;border:none;border-radius:13px;
+      background:#3182f6;color:#fff;font-size:1rem;font-weight:800;cursor:pointer;
+    }
+    button:active{opacity:.85}
+  </style>
+</head>
+<body>
+  <div class="wrap">
+    <div class="ico">📡</div>
+    <h1>오프라인 상태입니다</h1>
+    <p>네트워크 연결을 확인한 뒤<br/>다시 시도해 주세요.</p>
+    <button onclick="location.reload()">다시 시도</button>
+  </div>
+</body>
+</html>

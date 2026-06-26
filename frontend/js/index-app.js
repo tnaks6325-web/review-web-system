@@ -877,6 +877,24 @@ function openWorkPortal() {
   window.open("portal.html", "_blank");
 }
 
+/* ── 구글시트 RAW 미러 페이지 열기 (자동 로그인 핸드오프) ── */
+function openRawMirror() {
+  const token = sessionStorage.getItem("admin_token") || "";
+  if (!token || !isAdminLoggedIn()) {
+    showToast("관리자 로그인이 필요합니다.", "warning");
+    return;
+  }
+  try {
+    localStorage.setItem("raw_sso", JSON.stringify({
+      token,
+      name: getAdminName(),
+      role: getAdminRole(),
+      ts: Date.now()
+    }));
+  } catch (e) { /* localStorage 불가 시에도 페이지 자체 처리로 폴백 */ }
+  window.open("raw-mirror.html", "_blank");
+}
+
 /* ── 관리자 로그인 모달 열기 ── */
 function openAdminLogin() {
   if (isAdminLoggedIn()) { enterAdminScreen(); return; }
@@ -1824,6 +1842,7 @@ function woNotice(msg) {
     m = document.createElement("div");
     m.id = "woNoticeModal";
     m.style.cssText = "position:fixed;inset:0;z-index:100000;background:rgba(0,0,0,.45);display:none;align-items:center;justify-content:center;padding:20px";
+    m.classList.add("toss-overlay");
     m.innerHTML = '<div style="background:#fff;border-radius:14px;max-width:340px;width:100%;padding:22px 20px;text-align:center;box-shadow:0 16px 48px rgba(0,0,0,.25)">'
       + '<div id="woNoticeMsg" style="font-size:.92rem;color:#111827;line-height:1.55;margin-bottom:16px;white-space:pre-wrap"></div>'
       + '<button id="woNoticeOk" style="background:#3182f6;color:#fff;border:none;border-radius:9px;padding:9px 24px;font-weight:700;font-size:.88rem;cursor:pointer">확인</button></div>';
@@ -1885,13 +1904,15 @@ async function woSendMemo(id) {
 }
 
 // 접수하기 (제출됨 → 접수됨)
-// ★ 업무 연계: 작업시트탭URL(gid 필수)을 [+작업시트추가]로 자동 등록 →
-//   캠페인 탭 관리에 활성 탭으로 즉시 반영 → 상태를 '접수됨'으로 전이
+// ★ 업무 연계: 작업시트탭URL(gid 필수)이 가리키는 "그 탭"을 캠페인 탭 관리에 등록하고,
+//   작업오더 기본정보(담당자·시간대·리뷰유형·배송·택배대행)를 탭 메타에 자동 입력 → 상태 '접수됨' 전이.
+//   동일 탭 재접수(2차 등)는 별도 탭을 만들지 않고 기존 한 줄을 유지(차수는 시트 차수컬럼 집계가 담당).
+//   서버 단일 엔드포인트(orderAdminAccept)가 등록+메타매핑+인덱스빌드+상태전이를 원자적으로 처리.
 async function woAccept(id) {
   const o = (_woCache || []).find(x => x.id === id);
   const url = ((o && o.work_sheet_url) || "").trim();
 
-  // 1) 작업시트탭URL + gid 검증 (gid 없으면 특정 탭을 지정할 수 없어 자동 등록 불가)
+  // 1) 빠른 클라이언트 사전검증 (서버도 동일하게 재검증) — 즉시 안내 UX 유지
   if (!url) {
     woNotice("작업시트탭URL이 없습니다.\nAE에게 gid가 포함된 탭 주소를 요청한 뒤 다시 접수해주세요.");
     return;
@@ -1904,33 +1925,26 @@ async function woAccept(id) {
   const btn = document.getElementById("woAcceptBtn_" + id);
   if (btn) { btn.disabled = true; btn.innerHTML = '<i class="fas fa-spinner fa-spin"></i> 접수 처리중...'; }
   try {
-    // 2) 작업시트 탭 자동 등록 + 인덱스 빌드 (gid 모드 add-tab)
-    const reg = await gasGet({ action: "addTab", url }, 60000);
-    if (!reg || !reg.ok) {
-      showToast("탭 등록 실패: " + ((reg && reg.error) || "알 수 없는 오류"), true);
-      if (btn) { btn.disabled = false; btn.innerHTML = '<i class="fas fa-inbox"></i> 접수하기'; }
-      return;
-    }
-
-    // 3) 상태 전이: 접수됨(reviewing)
-    const r = await gasGet({ action: "orderAdminStatus", id, status: "reviewing" });
+    // 2) 접수 단일 처리 (탭 등록 + 작업오더 기본정보 메타 매핑 + 인덱스 빌드 + 상태 reviewing)
+    const r = await gasGet({ action: "orderAdminAccept", id }, 60000);
     if (!(r && r.ok)) {
-      showToast((r && r.error) || "접수 상태 변경 실패 (탭은 등록됨)", true);
+      showToast((r && r.error) || "접수 실패", true);
       if (btn) { btn.disabled = false; btn.innerHTML = '<i class="fas fa-inbox"></i> 접수하기'; }
       return;
     }
 
-    // 4) 결과 안내 (등록된 탭 수에 따라)
-    if (reg.addedTabCount > 0) {
-      const names = reg.addedTabs ? reg.addedTabs.join(", ") : (reg.tabName || "");
-      showToast(`✅ 접수 완료 — 캠페인 탭 관리에 추가됨: ${names}`);
-    } else if (reg.message) {
-      showToast(`✅ 접수 완료 — ${reg.message}`);
+    // 3) 결과 안내 (신규 등록 vs 기존 탭 연결 = 차수 추가)
+    const tabName = r.tabName || "";
+    if (r.alreadyRegistered) {
+      showToast(`✅ 접수 완료 — 기존 탭에 연결됨: ${tabName} (차수 구분은 시트 기준 자동)`);
     } else {
-      showToast("✅ 접수 완료 — 캠페인 탭 관리에 반영되었습니다.");
+      showToast(`✅ 접수 완료 — 캠페인 탭 관리에 추가됨: ${tabName}`);
+    }
+    if (r.indexBuilt === false) {
+      showToast("탭은 등록됐지만 인덱스 빌드는 실패했습니다. 잠시 후 자동 갱신됩니다.", true);
     }
 
-    // 5) 인박스 + 캠페인 탭 관리 대시보드 동시 갱신 (업무 연계성)
+    // 4) 인박스 + 캠페인 탭 관리 대시보드 동시 갱신 (업무 연계성)
     loadWorkOrders();
     try { if (typeof loadTabDashboard === "function") loadTabDashboard(); } catch (_) {}
   } catch (e) {
@@ -2062,6 +2076,7 @@ async function _showNewOrderPopup(count) {
   const el = document.createElement("div");
   el.id = "woNewOrderPopup";
   el.style.cssText = "position:fixed;inset:0;z-index:99999;background:rgba(0,0,0,.45);display:flex;align-items:center;justify-content:center;padding:16px";
+  el.classList.add("toss-overlay");
   el.innerHTML = `
     <div style="background:#fff;border-radius:16px;max-width:460px;width:100%;padding:22px;box-shadow:0 12px 40px rgba(0,0,0,.25);animation:woPopIn .18s ease">
       <div style="display:flex;align-items:center;gap:8px;margin-bottom:14px">
@@ -2384,7 +2399,7 @@ function _showAllCompleteModal(completeTabs) {
   ).join('');
 
   modal.innerHTML = `
-    <div style="position:fixed;inset:0;background:rgba(0,0,0,.45);z-index:99999;display:flex;align-items:center;justify-content:center;animation:fadeIn .2s" onclick="if(event.target===this)this.remove()">
+    <div class="toss-overlay" style="position:fixed;inset:0;background:rgba(0,0,0,.45);z-index:99999;display:flex;align-items:center;justify-content:center;animation:fadeIn .2s" onclick="if(event.target===this)this.remove()">
       <div style="background:#fff;border-radius:16px;padding:28px 24px;width:92%;max-width:480px;max-height:80vh;overflow-y:auto;box-shadow:0 25px 60px rgba(0,0,0,.25);border-top:4px solid #EC4899">
         <div style="text-align:center;margin-bottom:16px">
           <div style="width:56px;height:56px;border-radius:50%;background:linear-gradient(135deg,#FDF2F8,#FCE7F3);display:inline-flex;align-items:center;justify-content:center;margin-bottom:10px">
@@ -2428,7 +2443,7 @@ async function _showPendingReviewersPopup(sheetId, tabName, rc, sc, round) {
   modal = document.createElement('div');
   modal.id = modalId;
   modal.innerHTML = `
-    <div style="position:fixed;inset:0;background:rgba(0,0,0,.45);z-index:99999;display:flex;align-items:center;justify-content:center;animation:fadeIn .2s" onclick="if(event.target===this)this.remove()">
+    <div class="toss-overlay" style="position:fixed;inset:0;background:rgba(0,0,0,.45);z-index:99999;display:flex;align-items:center;justify-content:center;animation:fadeIn .2s" onclick="if(event.target===this)this.remove()">
       <div style="background:#fff;border-radius:16px;padding:28px 24px;width:92%;max-width:480px;max-height:80vh;overflow-y:auto;box-shadow:0 25px 60px rgba(0,0,0,.25);border-top:4px solid #F59E0B">
         <div style="text-align:center;margin-bottom:16px">
           <div style="width:56px;height:56px;border-radius:50%;background:linear-gradient(135deg,#FEF3C7,#FDE68A);display:inline-flex;align-items:center;justify-content:center;margin-bottom:10px">
@@ -2514,7 +2529,7 @@ async function _showUnpaidReviewersPopup(sheetId, tabName, rc, pc, round) {
   modal.id = modalId;
   const roundInfo = round ? ` (${escHtml(round)})` : '';
   modal.innerHTML = `
-    <div style="position:fixed;inset:0;background:rgba(0,0,0,.45);z-index:99999;display:flex;align-items:center;justify-content:center;animation:fadeIn .2s" onclick="if(event.target===this)this.remove()">
+    <div class="toss-overlay" style="position:fixed;inset:0;background:rgba(0,0,0,.45);z-index:99999;display:flex;align-items:center;justify-content:center;animation:fadeIn .2s" onclick="if(event.target===this)this.remove()">
       <div style="background:#fff;border-radius:16px;padding:28px 24px;width:92%;max-width:480px;max-height:80vh;overflow-y:auto;box-shadow:0 25px 60px rgba(0,0,0,.25);border-top:4px solid #3B82F6">
         <div style="text-align:center;margin-bottom:16px">
           <div style="width:56px;height:56px;border-radius:50%;background:linear-gradient(135deg,#DBEAFE,#BFDBFE);display:inline-flex;align-items:center;justify-content:center;margin-bottom:10px">
@@ -12835,6 +12850,7 @@ function _showForceBankPopup(sheetId, tabName, incomeType) {
   const overlay = document.createElement("div");
   overlay.className = "td-force-bank-overlay";
   overlay.style.cssText = "position:fixed;inset:0;z-index:99999;background:rgba(0,0,0,.55);display:flex;justify-content:center;align-items:center";
+  overlay.classList.add("toss-overlay");
   // 바깥 클릭 차단 (닫히지 않음)
 
   const box = document.createElement("div");
@@ -13191,7 +13207,7 @@ function _showDuplicateModal(state, data) {
 
   if (state === 'loading') {
     modal.innerHTML = `
-      <div style="position:fixed;inset:0;background:rgba(0,0,0,.5);z-index:9999;display:flex;align-items:center;justify-content:center" onclick="if(event.target===this)this.remove()">
+      <div class="toss-overlay" style="position:fixed;inset:0;background:rgba(0,0,0,.5);z-index:9999;display:flex;align-items:center;justify-content:center" onclick="if(event.target===this)this.remove()">
         <div style="background:#fff;border-radius:12px;padding:24px;width:90%;max-width:600px;max-height:80vh;overflow-y:auto;box-shadow:0 20px 60px rgba(0,0,0,.3)">
           <h3 style="margin:0 0 16px;font-size:1rem;color:#1F2937"><i class="fas fa-spinner fa-spin" style="margin-right:8px;color:#3182f6"></i>리뷰폴더 중복검사 중...</h3>
           <div style="font-size:.8rem;color:#6B7280">
@@ -13205,7 +13221,7 @@ function _showDuplicateModal(state, data) {
 
   if (state === 'error') {
     modal.innerHTML = `
-      <div style="position:fixed;inset:0;background:rgba(0,0,0,.5);z-index:9999;display:flex;align-items:center;justify-content:center" onclick="if(event.target===this)this.remove()">
+      <div class="toss-overlay" style="position:fixed;inset:0;background:rgba(0,0,0,.5);z-index:9999;display:flex;align-items:center;justify-content:center" onclick="if(event.target===this)this.remove()">
         <div style="background:#fff;border-radius:12px;padding:24px;width:90%;max-width:500px;box-shadow:0 20px 60px rgba(0,0,0,.3)">
           <h3 style="margin:0 0 12px;font-size:1rem;color:#DC2626"><i class="fas fa-exclamation-circle" style="margin-right:8px"></i>오류</h3>
           <p style="font-size:.82rem;color:#6B7280">${escHtml(data.message)}</p>
@@ -13220,7 +13236,7 @@ function _showDuplicateModal(state, data) {
   if (state === 'results') {
     const { results, totalDuplicateFiles, tabInfo } = data;
     let html = `
-      <div style="position:fixed;inset:0;background:rgba(0,0,0,.5);z-index:9999;display:flex;align-items:center;justify-content:center" onclick="if(event.target===this)this.remove()">
+      <div class="toss-overlay" style="position:fixed;inset:0;background:rgba(0,0,0,.5);z-index:9999;display:flex;align-items:center;justify-content:center" onclick="if(event.target===this)this.remove()">
         <div style="background:#fff;border-radius:12px;padding:24px;width:95%;max-width:750px;max-height:85vh;overflow-y:auto;box-shadow:0 20px 60px rgba(0,0,0,.3)">
           <h3 style="margin:0 0 16px;font-size:1rem;color:#1F2937"><i class="fas fa-copy" style="margin-right:8px;color:#3182f6"></i>리뷰폴더 중복검사 결과</h3>`;
 
@@ -13393,7 +13409,7 @@ function _showSubmissionStatusModal(state, data) {
 
   if (state === 'loading') {
     modal.innerHTML = `
-      <div style="position:fixed;inset:0;background:rgba(0,0,0,.5);z-index:9999;display:flex;align-items:center;justify-content:center" onclick="if(event.target===this)this.remove()">
+      <div class="toss-overlay" style="position:fixed;inset:0;background:rgba(0,0,0,.5);z-index:9999;display:flex;align-items:center;justify-content:center" onclick="if(event.target===this)this.remove()">
         <div style="background:#fff;border-radius:12px;padding:24px;width:90%;max-width:600px;max-height:80vh;overflow-y:auto;box-shadow:0 20px 60px rgba(0,0,0,.3)">
           <h3 style="margin:0 0 16px;font-size:1rem;color:#1F2937"><i class="fas fa-spinner fa-spin" style="margin-right:8px;color:#0891B2"></i>제출현황 검사 중...</h3>
           <div style="font-size:.8rem;color:#6B7280">
@@ -13407,7 +13423,7 @@ function _showSubmissionStatusModal(state, data) {
 
   if (state === 'error') {
     modal.innerHTML = `
-      <div style="position:fixed;inset:0;background:rgba(0,0,0,.5);z-index:9999;display:flex;align-items:center;justify-content:center" onclick="if(event.target===this)this.remove()">
+      <div class="toss-overlay" style="position:fixed;inset:0;background:rgba(0,0,0,.5);z-index:9999;display:flex;align-items:center;justify-content:center" onclick="if(event.target===this)this.remove()">
         <div style="background:#fff;border-radius:12px;padding:24px;width:90%;max-width:500px;box-shadow:0 20px 60px rgba(0,0,0,.3)">
           <h3 style="margin:0 0 12px;font-size:1rem;color:#DC2626"><i class="fas fa-exclamation-circle" style="margin-right:8px"></i>오류</h3>
           <p style="font-size:.82rem;color:#6B7280">${escHtml(data.message)}</p>
@@ -13422,7 +13438,7 @@ function _showSubmissionStatusModal(state, data) {
   if (state === 'results') {
     const { results, tabs } = data;
     let html = `
-      <div style="position:fixed;inset:0;background:rgba(0,0,0,.5);z-index:9999;display:flex;align-items:center;justify-content:center" onclick="if(event.target===this)this.remove()">
+      <div class="toss-overlay" style="position:fixed;inset:0;background:rgba(0,0,0,.5);z-index:9999;display:flex;align-items:center;justify-content:center" onclick="if(event.target===this)this.remove()">
         <div style="background:#fff;border-radius:12px;padding:24px;width:95%;max-width:800px;max-height:85vh;overflow-y:auto;box-shadow:0 20px 60px rgba(0,0,0,.3)">
           <h3 style="margin:0 0 16px;font-size:1rem;color:#1F2937"><i class="fas fa-clipboard-check" style="margin-right:8px;color:#0891B2"></i>마감자료 검수 결과</h3>`;
 
@@ -13575,12 +13591,173 @@ async function _archiveCheckedTabs() {
 }
 
 // ── 차수 선택 마감 모달 ──
+// ▼▼▼ [임시] 드라이브 소유권(용량) 이관 도구 — 전부 tnaks6325 이관 완료 후 이 블록 삭제 ▼▼▼
+// 관련: admin.html #btnDriveOwnership 버튼 / api.js driveAccountInfo·driveOwnershipAudit·driveTransferOwnership
+const DRIVE_OWN_TARGET = 'tnaks6325@gmail.com';
+
+function openDriveOwnershipModal() {
+  const old = document.getElementById('driveOwnModal');
+  if (old) old.remove();
+  const html = `
+  <div id="driveOwnModal" class="toss-overlay" style="position:fixed;inset:0;z-index:10000;display:flex;align-items:flex-start;justify-content:center;background:rgba(0,0,0,.5);padding:24px 12px;overflow-y:auto">
+    <div style="background:#fff;border-radius:16px;max-width:720px;width:100%;box-shadow:0 24px 70px rgba(0,0,0,.35);overflow:hidden">
+      <div style="background:linear-gradient(135deg,#FACC15,#F59E0B);padding:16px 22px;display:flex;align-items:center;justify-content:space-between">
+        <h3 style="margin:0;font-size:1.05rem;font-weight:800;color:#7C2D12;display:flex;align-items:center;gap:8px">
+          <i class="fas fa-hdd"></i> 드라이브 용량 이관 <span style="background:#7C2D12;color:#FDE68A;font-size:.62rem;padding:2px 7px;border-radius:7px">임시 도구</span>
+        </h3>
+        <button onclick="closeDriveOwnershipModal()" style="background:none;border:none;cursor:pointer;font-size:1.2rem;color:#7C2D12"><i class="fas fa-times"></i></button>
+      </div>
+      <div style="padding:18px 22px;max-height:calc(90vh - 60px);overflow-y:auto">
+        <!-- 도움말 / 진행방법 -->
+        <div style="background:#FEFCE8;border:1px solid #FDE68A;border-radius:12px;padding:14px 16px;margin-bottom:16px">
+          <div style="font-weight:800;color:#92400E;font-size:.85rem;margin-bottom:8px"><i class="fas fa-circle-info"></i> 진행방법 (도움말)</div>
+          <p style="margin:0 0 10px;font-size:.76rem;color:#78350F;line-height:1.55">
+            구글드라이브 용량은 <b>파일 소유자 계정</b>에 귀속됩니다. 구매캡처·리뷰 업로드가
+            관리자(박세희·박은비) 계정 용량을 차지하는 문제를 점검·이관하는 임시 도구입니다.
+            <b>아래 ①~④ 순서대로</b> 진행하세요.
+          </p>
+          <ol style="margin:0;padding-left:18px;font-size:.76rem;color:#78350F;line-height:1.7">
+            <li><b>① 계정 확인</b> — 업로드 용량이 어느 구글계정에 잡히는지 확인.
+                <span style="color:#B45309">tnaks6325가 아니면</span> Railway 환경변수
+                <code style="background:#FEF3C7;padding:1px 4px;border-radius:4px">DRIVE_OAUTH_REFRESH_TOKEN</code>을
+                tnaks6325 계정 토큰으로 교체하면 <b>이후 업로드는 영구 해결</b>됩니다.</li>
+            <li><b>② 용량 점검</b> — 캡처·리뷰 폴더를 스캔해 <b>소유자별 파일수·용량</b>을 집계합니다.</li>
+            <li><b>③ 이관 미리보기</b> — 실제 변경 없이(dry-run) 이관 대상 파일을 먼저 확인합니다.</li>
+            <li><b>④ 이관 실행</b> — tnaks6325로 소유권 이관(데이터 삭제 없음, 되돌릴 수 있음).
+                <span style="color:#B45309">단, 관리자 소유 파일은 관리자 본인 자격이 필요</span>해
+                실패할 수 있으며, 그 경우 관리자가 직접 이관하거나 관리자 토큰이 필요합니다.</li>
+          </ol>
+          <p style="margin:10px 0 0;font-size:.72rem;color:#A16207">※ 이 버튼은 모든 소유권이 tnaks6325로 이관되면 삭제될 예정입니다.</p>
+        </div>
+        <!-- 액션 버튼 -->
+        <div style="display:grid;grid-template-columns:repeat(2,1fr);gap:8px;margin-bottom:14px">
+          <button onclick="driveOwnAccountCheck()" style="padding:11px;background:#FEF9C3;border:1.5px solid #EAB308;border-radius:10px;font-size:.82rem;font-weight:700;color:#854D0E;cursor:pointer"><i class="fas fa-id-card"></i> ① 계정 확인</button>
+          <button onclick="driveOwnAudit()" style="padding:11px;background:#FEF9C3;border:1.5px solid #EAB308;border-radius:10px;font-size:.82rem;font-weight:700;color:#854D0E;cursor:pointer"><i class="fas fa-chart-pie"></i> ② 용량 점검</button>
+          <button onclick="driveOwnTransfer(false)" style="padding:11px;background:#FEF9C3;border:1.5px solid #EAB308;border-radius:10px;font-size:.82rem;font-weight:700;color:#854D0E;cursor:pointer"><i class="fas fa-eye"></i> ③ 이관 미리보기</button>
+          <button onclick="driveOwnTransfer(true)" style="padding:11px;background:linear-gradient(135deg,#F59E0B,#D97706);border:1.5px solid #B45309;border-radius:10px;font-size:.82rem;font-weight:800;color:#fff;cursor:pointer"><i class="fas fa-right-left"></i> ④ 이관 실행</button>
+        </div>
+        <div id="driveOwnResult" style="min-height:60px;font-size:.78rem;color:#374151"></div>
+      </div>
+    </div>
+  </div>`;
+  document.body.insertAdjacentHTML('beforeend', html);
+}
+
+function closeDriveOwnershipModal() {
+  document.getElementById('driveOwnModal')?.remove();
+}
+
+function _driveOwnSetResult(html) {
+  const el = document.getElementById('driveOwnResult');
+  if (el) el.innerHTML = html;
+}
+
+function _driveOwnLoading(msg) {
+  _driveOwnSetResult(`<div style="padding:14px;text-align:center;color:#92400E"><i class="fas fa-spinner fa-spin"></i> ${escHtml(msg || '처리 중...')}</div>`);
+}
+
+async function driveOwnAccountCheck() {
+  _driveOwnLoading('현재 OAuth 계정/용량 조회 중...');
+  const r = await gasGet({ action: 'driveAccountInfo' }, 30000);
+  if (!r || r.ok === false || r.error) { _driveOwnSetResult(`<div style="color:#DC2626">조회 실패: ${escHtml((r && r.error) || '알수없음')}</div>`); return; }
+  const o = r.oauth || {};
+  const target = r.expectedOwnerEmail || DRIVE_OWN_TARGET;
+  let body = '';
+  if (!o.configured) {
+    body = `<div style="color:#DC2626;font-weight:700">❌ OAuth 미설정 (DRIVE_OAUTH_CLIENT_ID/SECRET/REFRESH_TOKEN)</div>`;
+  } else if (o.error) {
+    body = `<div style="color:#DC2626">❌ 계정 조회 실패: ${escHtml(o.error)}</div>`;
+  } else {
+    const match = o.matchesExpectedOwner;
+    const badge = match === true
+      ? `<span style="color:#059669;font-weight:800">✅ 일치 (정상)</span>`
+      : `<span style="color:#DC2626;font-weight:800">❌ 불일치 — 이 계정에 용량이 잡힙니다</span>`;
+    const q = o.quota || {};
+    body = `
+      <div style="line-height:1.8">
+        <div>현재 업로드 계정: <b>${escHtml(o.email || '-')}</b> ${o.displayName ? `(${escHtml(o.displayName)})` : ''}</div>
+        <div>기대 계정: <b>${escHtml(target)}</b></div>
+        <div>일치 여부: ${badge}</div>
+        ${q.limit != null ? `<div>저장용량: <b>${escHtml(q.usageHuman || '?')}</b> / ${escHtml(q.limitHuman || '?')}${q.usedPercent != null ? ` (${q.usedPercent}%)` : ''}</div>` : ''}
+      </div>
+      ${match === false ? `<div style="margin-top:10px;background:#FEF2F2;border:1px solid #FECACA;border-radius:8px;padding:10px;color:#991B1B;font-size:.74rem">
+        ⚠️ Railway 환경변수 <code>DRIVE_OAUTH_REFRESH_TOKEN</code>을 <b>${escHtml(target)}</b> 계정 토큰으로 교체하면
+        이후 업로드 용량은 정상 귀속됩니다. (기존 파일은 ②~④로 이관)
+      </div>` : ''}`;
+  }
+  _driveOwnSetResult(body);
+}
+
+async function driveOwnAudit() {
+  _driveOwnLoading('폴더 스캔 및 소유자별 용량 집계 중... (파일이 많으면 시간이 걸립니다)');
+  const r = await gasPost({ action: 'driveOwnershipAudit' }, 180000);
+  if (!r || r.ok === false || r.error) { _driveOwnSetResult(`<div style="color:#DC2626">집계 실패: ${escHtml((r && r.error) || '알수없음')}</div>`); return; }
+  const owners = r.owners || [];
+  let rows = owners.map(o => {
+    const isTarget = (o.email || '').toLowerCase() === DRIVE_OWN_TARGET.toLowerCase();
+    const color = isTarget ? '#059669' : '#DC2626';
+    return `<tr>
+      <td style="padding:6px 8px;border-bottom:1px solid #F3F4F6;color:${color};font-weight:${isTarget ? 700 : 600}">${escHtml(o.email)}${o.displayName ? ` <span style="color:#9CA3AF;font-weight:400">(${escHtml(o.displayName)})</span>` : ''}${isTarget ? ' ✅' : ''}</td>
+      <td style="padding:6px 8px;border-bottom:1px solid #F3F4F6;text-align:right">${o.fileCount}</td>
+      <td style="padding:6px 8px;border-bottom:1px solid #F3F4F6;text-align:right;font-weight:700">${escHtml(o.totalHuman || '-')}</td>
+    </tr>`;
+  }).join('');
+  if (!rows) rows = `<tr><td colspan="3" style="padding:10px;color:#9CA3AF;text-align:center">파일이 없습니다.</td></tr>`;
+  _driveOwnSetResult(`
+    <div style="margin-bottom:6px">스캔 폴더 ${r.scannedFolders}개 · 총 ${r.totalFiles}개 파일 · 합계 <b>${escHtml(r.totalHuman || '-')}</b>${r.elapsed != null ? ` · ${r.elapsed}초` : ''}</div>
+    <table style="width:100%;border-collapse:collapse;font-size:.76rem">
+      <thead><tr style="background:#FEF9C3;color:#854D0E">
+        <th style="padding:6px 8px;text-align:left">소유자</th><th style="padding:6px 8px;text-align:right">파일수</th><th style="padding:6px 8px;text-align:right">용량</th>
+      </tr></thead>
+      <tbody>${rows}</tbody>
+    </table>
+    ${(r.errors && r.errors.length) ? `<div style="margin-top:8px;color:#B45309;font-size:.72rem">⚠️ 스캔 실패 폴더 ${r.errors.length}개</div>` : ''}
+    <div style="margin-top:8px;color:#6B7280;font-size:.72rem">빨간색 = tnaks6325가 아닌 계정(이관 대상) · 초록색 = 정상 귀속</div>
+  `);
+}
+
+async function driveOwnTransfer(apply) {
+  if (apply) {
+    if (!confirm('비-tnaks6325 소유 파일의 소유권을 tnaks6325로 이관합니다.\n(데이터 삭제 없음 · 되돌릴 수 있음)\n\n진행할까요?')) return;
+  }
+  _driveOwnLoading(apply ? '소유권 이관 실행 중... (시간이 걸릴 수 있습니다)' : '이관 대상 미리보기 중...');
+  const r = await gasPost({ action: 'driveTransferOwnership', dryRun: !apply }, 180000);
+  if (!r || r.ok === false || r.error) { _driveOwnSetResult(`<div style="color:#DC2626">실패: ${escHtml((r && r.error) || '알수없음')}</div>`); return; }
+  const s = r.summary || {};
+  const head = apply
+    ? `<div style="font-weight:700;color:#92400E">이관 실행 결과 ${r.elapsed != null ? `(${r.elapsed}초)` : ''}</div>
+       <div style="line-height:1.8;margin-top:4px">스캔 ${s.scanned} · 이미 정상 ${s.alreadyOwned} · ✅ 이관성공 <b style="color:#059669">${s.transferred}</b> · ❌ 실패 <b style="color:#DC2626">${s.failed}</b></div>`
+    : `<div style="font-weight:700;color:#92400E">이관 미리보기 (dry-run) ${r.elapsed != null ? `(${r.elapsed}초)` : ''}</div>
+       <div style="line-height:1.8;margin-top:4px">스캔 ${s.scanned} · 이미 정상 ${s.alreadyOwned} · 이관대상 <b style="color:#B45309">${s.toTransfer}</b></div>`;
+  let list = '';
+  const acts = r.actions || [];
+  if (!apply && acts.length) {
+    list = `<div style="margin-top:8px;max-height:180px;overflow-y:auto;border:1px solid #F3F4F6;border-radius:8px">`
+      + acts.slice(0, 50).map(a => `<div style="padding:4px 8px;border-bottom:1px solid #F9FAFB;font-size:.72rem"><span style="color:#6B7280">[${escHtml(a.currentOwner || '?')}]</span> ${escHtml(a.name || a.fileId)}</div>`).join('')
+      + (acts.length > 50 ? `<div style="padding:4px 8px;color:#9CA3AF;font-size:.72rem">... 외 ${acts.length - 50}개</div>` : '')
+      + `</div>`;
+  }
+  let fail = '';
+  const fails = r.failures || [];
+  if (fails.length) {
+    fail = `<div style="margin-top:10px;background:#FEF2F2;border:1px solid #FECACA;border-radius:8px;padding:10px;color:#991B1B;font-size:.72rem">
+      ⚠️ 실패/주의 ${fails.length}건 (상위 8):<br>`
+      + fails.slice(0, 8).map(f => `· ${escHtml(f.name || f.folderId || '')} <span style="color:#B91C1C">(${escHtml(f.error || '')})</span>`).join('<br>')
+      + `<div style="margin-top:6px;color:#7F1D1D">관리자 소유 파일은 관리자 본인 자격(토큰)이 있어야 이관됩니다. 관리자가 직접 이관하거나, Railway에서 관리자 토큰으로 CLI 실행이 필요합니다.</div>
+      </div>`;
+  }
+  let next = '';
+  if (!apply && s.toTransfer > 0) next = `<div style="margin-top:8px;color:#B45309;font-size:.74rem">→ 실제 이관하려면 <b>④ 이관 실행</b> 버튼을 누르세요.</div>`;
+  _driveOwnSetResult(head + list + fail + next);
+}
+// ▲▲▲ [임시] 드라이브 소유권(용량) 이관 도구 끝 ▲▲▲
+
 function _showArchiveRoundModal(selectedTabs) {
   // 기존 모달 제거
   let modal = document.getElementById('archiveRoundModal');
   if (modal) modal.remove();
 
-  let html = `<div id="archiveRoundModal" style="position:fixed;inset:0;z-index:9999;display:flex;align-items:center;justify-content:center;background:rgba(0,0,0,.45)">
+  let html = `<div id="archiveRoundModal" class="toss-overlay" style="position:fixed;inset:0;z-index:9999;display:flex;align-items:center;justify-content:center;background:rgba(0,0,0,.45)">
     <div style="background:#fff;border-radius:14px;padding:24px;max-width:520px;width:90%;max-height:80vh;overflow-y:auto;box-shadow:0 20px 60px rgba(0,0,0,.3)">
       <h3 style="margin:0 0 6px;font-size:1rem;color:#1F2937"><i class="fas fa-archive" style="color:#4593fc;margin-right:6px"></i>마감 차수 선택</h3>
       <p style="margin:0 0 16px;font-size:.78rem;color:#6B7280">마감할 차수를 선택하세요. 선택하지 않은 차수는 대시보드에 유지됩니다.</p>`;
@@ -13705,6 +13882,7 @@ async function _fixSheetUrl(sheetId, tabName) {
   const modal = document.createElement('div');
   modal.id = 'fixSheetUrlModal';
   modal.style.cssText = 'position:fixed;inset:0;z-index:10000;display:flex;align-items:center;justify-content:center;background:rgba(0,0,0,.5)';
+  modal.classList.add('toss-overlay');
   modal.innerHTML = `
     <div style="background:#fff;border-radius:12px;padding:24px;width:480px;max-width:90vw;box-shadow:0 20px 60px rgba(0,0,0,.3)">
       <h3 style="margin:0 0 16px;font-size:1rem;color:#1F2937"><i class="fas fa-wrench" style="color:#D97706;margin-right:6px"></i>시트링크 수동보정</h3>
@@ -14872,6 +15050,7 @@ function openDedupeSelector() {
   const modal = document.createElement('div');
   modal.id = 'dedupeSelectorModal';
   modal.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,.45);z-index:9999;display:flex;align-items:center;justify-content:center;padding:20px';
+  modal.classList.add('toss-overlay');
   modal.innerHTML = `
     <div style="background:#fff;border-radius:12px;width:100%;max-width:480px;max-height:75vh;display:flex;flex-direction:column;box-shadow:0 20px 60px rgba(0,0,0,.2)">
       <div style="padding:16px 20px;border-bottom:1px solid #E5E7EB;flex-shrink:0">
@@ -14890,6 +15069,192 @@ function openDedupeSelector() {
   modal._tabsWithFolder = tabsWithFolder;
   document.body.appendChild(modal);
   modal.addEventListener('click', (e) => { if (e.target === modal) modal.remove(); });
+}
+
+/* ═══════════════════════════════════════════════════════════
+   폴더 찾기 & 재연결 — 사라진 캡처/리뷰 폴더를 탭명으로 검색하여 재연결
+   ═══════════════════════════════════════════════════════════ */
+
+/** 모달 열기 (presetSheetId/presetTabName 지정 시 해당 탭 자동 선택) */
+function openFolderRelink(presetSheetId, presetTabName) {
+  const existing = document.getElementById('folderRelinkModal');
+  if (existing) existing.remove();
+
+  let tabs = [];
+  if (_tabDashData && _tabDashData.tabs) {
+    tabs = _tabDashData.tabs.map(t => ({
+      sheetId: t.sheet_id, tabName: t.tab_name,
+      displayName: t.display_name || t.tab_name,
+      campName: t.campaign_name || '',
+      folderUrl: t.folder_url || '', captureUrl: t.capture_folder_url || '',
+    }));
+  }
+  if (tabs.length === 0) { showToast('먼저 탭 대시보드를 로드하세요.', 'info'); return; }
+
+  const options = tabs.map((t, i) =>
+    `<option value="${i}">${escHtml(t.displayName)}${t.campName ? ' — ' + escHtml(t.campName) : ''}</option>`
+  ).join('');
+
+  const modal = document.createElement('div');
+  modal.id = 'folderRelinkModal';
+  modal.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,.45);z-index:9999;display:flex;align-items:center;justify-content:center;padding:20px';
+  modal.classList.add('toss-overlay');
+  modal.innerHTML = `
+    <div style="background:#fff;border-radius:12px;width:100%;max-width:640px;max-height:86vh;display:flex;flex-direction:column;box-shadow:0 20px 60px rgba(0,0,0,.2)">
+      <div style="padding:16px 20px;border-bottom:1px solid #E5E7EB;flex-shrink:0">
+        <h3 style="margin:0;font-size:1rem;font-weight:700;color:#111"><i class="fas fa-link" style="color:#7C3AED"></i> 폴더 찾기 &amp; 재연결</h3>
+        <div style="font-size:.72rem;color:#6B7280;margin-top:4px">탭 선택 후 [폴더 찾기] → Drive에서 실제 폴더 후보 표시 → 맞는 폴더를 캡처/리뷰로 지정 → [재연결 저장].</div>
+      </div>
+      <div style="padding:14px 20px;overflow-y:auto;flex:1">
+        <div style="display:flex;gap:8px;align-items:flex-end;flex-wrap:wrap;margin-bottom:10px">
+          <label style="flex:2;min-width:220px;font-size:.72rem;color:#374151">탭 선택
+            <select id="frlTabSel" style="width:100%;margin-top:3px;padding:7px;border:1px solid #D1D5DB;border-radius:6px;font-size:.8rem">${options}</select>
+          </label>
+          <label style="flex:1;min-width:150px;font-size:.72rem;color:#374151">검색어(선택)
+            <input id="frlQuery" type="text" placeholder="비우면 탭명에서 자동" style="width:100%;margin-top:3px;padding:7px;border:1px solid #D1D5DB;border-radius:6px;font-size:.8rem">
+          </label>
+          <button id="frlSearchBtn" onclick="findFolderCandidatesUI()" style="padding:8px 14px;background:#7C3AED;color:#fff;border:none;border-radius:6px;font-size:.8rem;font-weight:600;cursor:pointer"><i class="fas fa-search"></i> 폴더 찾기</button>
+        </div>
+        <div id="frlPick" style="display:none;font-size:.75rem;background:#F5F3FF;border:1px solid #DDD6FE;border-radius:8px;padding:10px;margin-bottom:10px"></div>
+        <div id="frlResult" style="font-size:.75rem"></div>
+      </div>
+      <div style="padding:12px 20px;border-top:1px solid #E5E7EB;display:flex;justify-content:space-between;gap:8px;flex-shrink:0">
+        <button onclick="this.closest('#folderRelinkModal').remove()" style="padding:8px 16px;background:#6B7280;color:#fff;border:none;border-radius:6px;font-size:.8rem;font-weight:600;cursor:pointer">닫기</button>
+        <button id="frlSaveBtn" onclick="saveFolderRelink()" disabled style="padding:8px 16px;background:#0ca678;color:#fff;border:none;border-radius:6px;font-size:.8rem;font-weight:700;cursor:pointer;opacity:.5"><i class="fas fa-save"></i> 재연결 저장</button>
+      </div>
+    </div>`;
+  modal._tabs = tabs;
+  modal._pick = { captureUrl: '', captureName: '', reviewUrl: '', reviewName: '' };
+  document.body.appendChild(modal);
+  modal.addEventListener('click', (e) => { if (e.target === modal) modal.remove(); });
+
+  if (presetSheetId && presetTabName) {
+    const idx = tabs.findIndex(t => t.sheetId === presetSheetId && t.tabName === presetTabName);
+    if (idx >= 0) document.getElementById('frlTabSel').value = String(idx);
+  }
+}
+
+/** 선택한 탭으로 Drive 폴더 후보 검색 */
+async function findFolderCandidatesUI() {
+  const modal = document.getElementById('folderRelinkModal');
+  if (!modal) return;
+  const tab = modal._tabs[parseInt(document.getElementById('frlTabSel').value, 10)];
+  if (!tab) return;
+  const query = (document.getElementById('frlQuery').value || '').trim();
+  const resultEl = document.getElementById('frlResult');
+  resultEl.innerHTML = '<div style="padding:12px;color:#6B7280"><i class="fas fa-spinner fa-spin"></i> Drive에서 폴더 검색 중...</div>';
+
+  let data;
+  try {
+    data = await gasPost({ action: 'findFolderCandidates', sheetId: tab.sheetId, tabName: tab.tabName, query }, 60000);
+  } catch (e) { resultEl.innerHTML = `<div style="color:#DC2626">검색 실패: ${escHtml(e.message || '')}</div>`; return; }
+  if (!data || data.error) { resultEl.innerHTML = `<div style="color:#DC2626">${escHtml((data && data.error) || '검색 실패')}</div>`; return; }
+
+  modal._candidates = data.candidates || [];
+
+  const warn = (data.warnings || []).map(w => `<div style="color:#B45309;font-size:.72rem"><i class="fas fa-triangle-exclamation"></i> ${escHtml(w)}</div>`).join('');
+  const curC = data.current && data.current.captureFolderUrl ? `<a href="${data.current.captureFolderUrl}" target="_blank">현재 캡처</a>` : '<span style="color:#9CA3AF">캡처 미연결</span>';
+  const curR = data.current && data.current.folderUrl ? `<a href="${data.current.folderUrl}" target="_blank">현재 리뷰</a>` : '<span style="color:#9CA3AF">리뷰 미연결</span>';
+  const curLine = `현재 연결: ${curC} · ${curR}`;
+
+  const badge = (g) => {
+    if (g === 'capture') return '<span style="background:#DBEAFE;color:#1D4ED8;padding:1px 6px;border-radius:4px;font-size:.66rem;font-weight:700">캡처후보</span>';
+    if (g === 'review') return '<span style="background:#DCFCE7;color:#166534;padding:1px 6px;border-radius:4px;font-size:.66rem;font-weight:700">리뷰후보</span>';
+    if (g === 'container') return '<span style="background:#F3E8FF;color:#7C3AED;padding:1px 6px;border-radius:4px;font-size:.66rem;font-weight:700">상위폴더</span>';
+    return '<span style="background:#F3F4F6;color:#6B7280;padding:1px 6px;border-radius:4px;font-size:.66rem">기타</span>';
+  };
+
+  if (modal._candidates.length === 0) {
+    resultEl.innerHTML = `${warn ? `<div style="background:#FFFBEB;border:1px solid #FDE68A;border-radius:8px;padding:8px;margin-bottom:8px">${warn}</div>` : ''}<div style="padding:12px;color:#6B7280">검색 결과가 없습니다. 검색어를 바꿔 다시 시도하세요.<br><span style="color:#9CA3AF;font-size:.68rem">시도한 검색어: ${escHtml((data.searchTerms || []).join(' / '))}</span></div>`;
+    return;
+  }
+
+  const rows = modal._candidates.map((c, i) => `
+    <div style="border:1px solid #E5E7EB;border-radius:8px;padding:10px;margin-bottom:7px">
+      <div style="display:flex;align-items:center;gap:6px;margin-bottom:3px">
+        ${badge(c.guess)}
+        <span style="font-weight:600;color:#111;font-size:.78rem;word-break:break-all">${escHtml(c.name)}</span>
+        <a href="${c.url}" target="_blank" style="margin-left:auto;color:#3182f6;font-size:.7rem;white-space:nowrap"><i class="fas fa-up-right-from-square"></i> 열기</a>
+      </div>
+      <div style="font-size:.68rem;color:#6B7280;margin-bottom:5px">
+        상위: ${escHtml(c.parentName || '-')} · 파일 ${c.fileCount}개${c.reviewLikeCount ? ` (리뷰형식 ${c.reviewLikeCount})` : ''}${c.owner ? ' · ' + escHtml(c.owner) : ''}
+      </div>
+      <div style="display:flex;gap:6px">
+        <button onclick="pickFolderCandidate('capture',${i})" style="flex:1;padding:5px;background:#EFF6FF;color:#1D4ED8;border:1px solid #BFDBFE;border-radius:5px;font-size:.7rem;font-weight:600;cursor:pointer">📸 캡처로 지정</button>
+        <button onclick="pickFolderCandidate('review',${i})" style="flex:1;padding:5px;background:#F0FDF4;color:#166534;border:1px solid #BBF7D0;border-radius:5px;font-size:.7rem;font-weight:600;cursor:pointer">📝 리뷰로 지정</button>
+      </div>
+    </div>`).join('');
+
+  resultEl.innerHTML = `${warn
+    ? `<div style="background:#FFFBEB;border:1px solid #FDE68A;border-radius:8px;padding:8px;margin-bottom:8px">${warn}<div style="font-size:.68rem;color:#92400E;margin-top:2px">${curLine}</div></div>`
+    : `<div style="font-size:.7rem;color:#6B7280;margin-bottom:8px">${curLine}</div>`}${rows}`;
+  _renderFolderPick();
+}
+
+/** 후보를 캡처/리뷰 대상으로 지정 */
+function pickFolderCandidate(kind, idx) {
+  const modal = document.getElementById('folderRelinkModal');
+  if (!modal || !modal._candidates) return;
+  const c = modal._candidates[idx];
+  if (!c) return;
+  const label = c.name + (c.parentName ? ' (' + c.parentName + ')' : '');
+  if (kind === 'capture') { modal._pick.captureUrl = c.url; modal._pick.captureName = label; }
+  else { modal._pick.reviewUrl = c.url; modal._pick.reviewName = label; }
+  _renderFolderPick();
+}
+
+/** 지정 현황 + 저장버튼 상태 갱신 */
+function _renderFolderPick() {
+  const modal = document.getElementById('folderRelinkModal');
+  if (!modal) return;
+  const p = modal._pick;
+  const box = document.getElementById('frlPick');
+  const saveBtn = document.getElementById('frlSaveBtn');
+  const hasAny = !!(p.captureUrl || p.reviewUrl);
+  if (box) {
+    box.style.display = hasAny ? 'block' : 'none';
+    if (hasAny) {
+      box.innerHTML =
+        `<div style="font-weight:700;color:#6D28D9;margin-bottom:4px"><i class="fas fa-link"></i> 재연결 대상</div>` +
+        `<div>📸 캡처폴더: ${p.captureUrl ? escHtml(p.captureName) : '<span style="color:#9CA3AF">미지정(변경 안 함)</span>'}</div>` +
+        `<div>📝 리뷰폴더: ${p.reviewUrl ? escHtml(p.reviewName) : '<span style="color:#9CA3AF">미지정(변경 안 함)</span>'}</div>`;
+    }
+  }
+  if (saveBtn) { saveBtn.disabled = !hasAny; saveBtn.style.opacity = hasAny ? '1' : '.5'; }
+}
+
+/** 지정한 폴더 URL을 tab_configs에 저장(재연결) */
+async function saveFolderRelink() {
+  const modal = document.getElementById('folderRelinkModal');
+  if (!modal) return;
+  const tab = modal._tabs[parseInt(document.getElementById('frlTabSel').value, 10)];
+  const p = modal._pick;
+  if (!tab || (!p.captureUrl && !p.reviewUrl)) { showToast('지정된 폴더가 없습니다.', 'info'); return; }
+
+  const urls = {};
+  if (p.captureUrl) urls.captureFolderUrl = p.captureUrl;
+  if (p.reviewUrl) urls.folderUrl = p.reviewUrl;
+
+  const saveBtn = document.getElementById('frlSaveBtn');
+  if (saveBtn) { saveBtn.disabled = true; saveBtn.innerHTML = '<i class="fas fa-spinner fa-spin"></i> 저장 중...'; }
+
+  let data;
+  try {
+    data = await gasPost({ action: 'updateFolderUrls', sheetId: tab.sheetId, tabName: tab.tabName, urls });
+  } catch (e) {
+    showToast('저장 실패: ' + (e.message || ''), 'error');
+    if (saveBtn) { saveBtn.disabled = false; saveBtn.innerHTML = '<i class="fas fa-save"></i> 재연결 저장'; }
+    return;
+  }
+  if (!data || data.error) {
+    showToast((data && data.error) || '저장 실패', 'error');
+    if (saveBtn) { saveBtn.disabled = false; saveBtn.innerHTML = '<i class="fas fa-save"></i> 재연결 저장'; }
+    return;
+  }
+
+  showToast('폴더 링크가 재연결되었습니다.', 'info');
+  modal.remove();
+  try { loadTabDashboard(); } catch (_) {}
 }
 
 /**
@@ -15179,6 +15544,7 @@ function _showAdminNoticePopup(notices) {
   const overlay = document.createElement('div');
   overlay.id = 'adminNoticePopup';
   overlay.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,.5);z-index:9999;display:flex;align-items:center;justify-content:center;padding:16px';
+  overlay.classList.add('toss-overlay');
 
   let noticeHtml = '';
   notices.forEach((n, idx) => {
@@ -15246,6 +15612,7 @@ async function openNoticeMgmt() {
     modal = document.createElement('div');
     modal.id = 'noticeMgmtModal';
     modal.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,.45);z-index:9000;display:flex;align-items:center;justify-content:center;padding:16px';
+    modal.classList.add('toss-overlay');
     modal.innerHTML = `
       <div style="background:#fff;border-radius:14px;box-shadow:0 20px 60px rgba(0,0,0,.15);max-width:600px;width:100%;max-height:85vh;display:flex;flex-direction:column;overflow:hidden">
         <div style="padding:14px 20px;border-bottom:1px solid #E5E7EB;display:flex;align-items:center;background:#F8FAFC">
@@ -15683,3 +16050,665 @@ function csOnSSE(evtType, data) {
   }
 }
 window.csOnSSE = csOnSSE;
+
+// ═══════════════════════════════════════════════════════════
+// 리뷰 캡처 정리 — 내 드라이브 루트 등에 흩어진 리뷰 캡처를
+//   선택한 탭의 [리뷰] 폴더로 모아 이동 (미리보기 → 실제 이동)
+//   POST /api/drive/relocate-orphan-reviews (relocateOrphanReviews)
+// ═══════════════════════════════════════════════════════════
+let _relocateTabs = [];
+let _relocateSelIdx = -1; // 콤보박스에서 선택된 탭 인덱스
+let _relocateScanStop = false; // 전체 탭 스캔 중지 플래그
+let _relocateScanResults = {}; // 탭별 스캔 결과 (localStorage 임시저장)
+
+function _relocateCollectTabs() {
+  // folder_url이 비어 있어도(=리뷰폴더 미연결) 선택 가능하도록 모든 탭을 포함.
+  // (리뷰 캡처가 루트로 샌 탭은 folder_url이 비어 있을 수 있으므로)
+  const out = [];
+  if (typeof _tabDashData !== 'undefined' && _tabDashData && _tabDashData.tabs) {
+    _tabDashData.tabs.forEach(t => {
+      out.push({ sheetId: t.sheet_id, tabName: t.tab_name, displayName: t.display_name || t.tab_name, campName: t.campaign_name || '', folderUrl: t.folder_url || '' });
+    });
+  }
+  if (out.length === 0 && typeof _lastDashData !== 'undefined' && _lastDashData && _lastDashData.stats) {
+    _lastDashData.stats.forEach(camp => (camp.tabs || []).forEach(t => {
+      out.push({ sheetId: t.sheetId, tabName: t.tab, displayName: t.displayName || t.tab, campName: camp.campaign || '', folderUrl: t.folderUrl || '' });
+    }));
+  }
+  return out;
+}
+
+// 플랫폼/채널/일반어 — 키워드에서 제외(이게 들어가면 다른 캠페인까지 과대매칭됨)
+const _RELOCATE_STOPWORDS = new Set([
+  '네이버','쿠팡','쿠팡파트너스','파트너스','메이커스','카카오','카카오메이커스','11번가','지마켓','g마켓',
+  '옥션','위메프','티몬','자사몰','스마트스토어','스토어','인스타','인스타그램','블로그','카페','체험단',
+  '바이럴','리뷰','리뷰체험단','세트','박스','골드박스','시트','업무시트','견적서','실','현영'
+]);
+
+// 탭명에서 OCR 검색에 쓸 브랜드/상품 키워드 후보 추출 (플랫폼/일반어 제외)
+//   "5/28(쿠팡)서일농원_명인콩물두유 170건" → ["서일농원", "명인콩물두유"]
+//   "6/11퓨비아표백제_네이버15건" → ["퓨비아표백제"]  (네이버 제외)
+function _relocateDeriveKeywords(tabName) {
+  const out = [];
+  const push = v => {
+    v = (v || '').trim().replace(/\d+건?$/, '').trim();
+    if (v && v.length >= 2 && !/^\d+$/.test(v) && !_RELOCATE_STOPWORDS.has(v) && !out.includes(v)) out.push(v);
+  };
+  let core = String(tabName || '');
+  // 선두 날짜/채널 제거: "6/11", "6.17", "0618", "0528" + optional "(쿠팡)"
+  core = core.replace(/^\s*(\d{1,2}\s*[\/.]\s*\d{1,2}|\d{3,4})\s*(\([^)]*\))?\s*/, '');
+  // 후미 건수/차수 제거
+  core = core.replace(/\s*\d+\s*건\s*$/, '').replace(/\s*\d+\s*차\s*$/, '').trim();
+  core.split(/[_,/\s]+/).forEach(seg => push(seg));
+  return out;
+}
+
+// 탭명에서 "작업건수"(N건) 추출 — 과대매칭 판정 기준
+function _relocateParseCount(tabName) {
+  const m = String(tabName || '').match(/(\d+)\s*건/);
+  return m ? parseInt(m[1], 10) : 0;
+}
+
+// 후보 파일명 클릭 → 모달 내에서 이미지 인라인 펼침/접기 (서버 프록시로 비공개 파일도 표시)
+function _relocateToggleImg(headerEl, id) {
+  const box = headerEl.parentElement;
+  const wrap = box && box.querySelector('.rlc-img');
+  const chev = headerEl.querySelector('.fa-chevron-right');
+  if (!wrap) return;
+  if (wrap.style.display === 'none' || !wrap.style.display) {
+    if (!wrap.dataset.loaded) {
+      const proxy = `${API_BASE_URL}/api/drive/image/${encodeURIComponent(id)}`;
+      const thumb = `https://drive.google.com/thumbnail?id=${encodeURIComponent(id)}&sz=w1600`;
+      wrap.innerHTML = `<div style="padding:4px 0 8px"><img src="${proxy}" loading="lazy" style="max-width:100%;max-height:440px;border-radius:8px;border:1px solid #E5E7EB;display:block" onerror="this.onerror=null;this.src='${thumb}'"></div>`;
+      wrap.dataset.loaded = '1';
+    }
+    wrap.style.display = 'block';
+    if (chev) chev.style.transform = 'rotate(90deg)';
+  } else {
+    wrap.style.display = 'none';
+    if (chev) chev.style.transform = '';
+  }
+}
+
+// 활성 탭 리뷰폴더 현황 점검 — 대시보드 활성탭 한정 + '리뷰폼' 제외 + 26.3+ 판정
+async function _relocateFolderAudit() {
+  const resultEl = document.getElementById('rlcResult');
+  if (!resultEl) return;
+  if (!_relocateTabs || !_relocateTabs.length) _relocateTabs = _relocateCollectTabs();
+  const all = (_relocateTabs || []).map(t => ({ sheetId: t.sheetId, tabName: t.tabName, displayName: t.displayName, folderUrl: t.folderUrl }));
+  if (!all.length) {
+    resultEl.innerHTML = `<div style="font-size:.78rem;color:#DC2626">활성 탭 목록을 불러오지 못했습니다. 캠페인 탭 관리 대시보드를 먼저 연 뒤 다시 시도하세요.</div>`;
+    return;
+  }
+  // 긴 단일요청 대신 여러 탭씩 나눠 호출 + 진행률 (타임아웃/멈춤 방지)
+  resultEl.innerHTML = `<div style="font-size:.8rem;color:#3730A3;font-weight:700"><i class="fas fa-spinner fa-spin"></i> <span id="rlcAuditProg">리뷰폴더 점검 0/${all.length}…</span></div>`;
+  const agg = { totalTabs: all.length, excluded: 0, connected: 0, nonEmpty: 0, empty: 0, noFolder: 0, preMarch: 0, errors: 0, ownerTally: {}, details: [] };
+  const CHUNK = 8;
+  for (let i = 0; i < all.length; i += CHUNK) {
+    const chunk = all.slice(i, i + CHUNK);
+    try {
+      const res = await gasPost({ action: 'folderAudit', tabs: chunk, excludeName: '리뷰폼', sinceDate: '2026-03-01T00:00:00Z' }, 120000);
+      if (res && res.ok !== false) {
+        agg.excluded += res.excluded || 0; agg.connected += res.connected || 0; agg.nonEmpty += res.nonEmpty || 0;
+        agg.empty += res.empty || 0; agg.noFolder += res.noFolder || 0; agg.preMarch += res.preMarch || 0; agg.errors += res.errors || 0;
+        if (res.ownerTally) for (const k in res.ownerTally) agg.ownerTally[k] = (agg.ownerTally[k] || 0) + res.ownerTally[k];
+        if (Array.isArray(res.details)) agg.details.push(...res.details);
+      } else {
+        agg.errors += chunk.length;
+      }
+    } catch (e) {
+      agg.errors += chunk.length;
+    }
+    const prog = document.getElementById('rlcAuditProg');
+    if (prog) prog.textContent = `리뷰폴더 점검 ${Math.min(i + CHUNK, all.length)}/${all.length}…`;
+  }
+  _renderFolderAudit(resultEl, agg);
+}
+
+function _renderFolderAudit(resultEl, res) {
+  const d = res.details || [];
+  const empties = d.filter(x => x.status === 'empty');
+  const nofolder = d.filter(x => x.status === 'no-folder');
+  const haves = d.filter(x => x.status === 'has-files').sort((a, b) => b.count - a.count);
+  const pre = haves.filter(x => x.preMarch);
+  const target = haves.filter(x => !x.preMarch); // 26.3+ 정상 폴더
+  // 소유자 라벨 → 배지 (tnaks 외 소유자는 이관 대상이므로 강조)
+  const ownBadge = (lbl) => {
+    if (!lbl || lbl === 'tnaks6325') return '';
+    const color = (lbl === '박세희' || lbl === '박은비') ? '#DC2626' : (lbl === 'service-account' ? '#6B7280' : '#B45309');
+    return ` <span style="font-size:.62rem;font-weight:700;color:${color};background:${color}1A;border-radius:4px;padding:0 4px">${escHtml(lbl)}</span>`;
+  };
+  const liH = arr => arr.map(x => `<li style="font-size:.7rem;color:#374151;word-break:break-all">${escHtml(x.tab)}${ownBadge(x.ownerLabel)}${x.count ? ` <span style="color:#9CA3AF">— ${x.count}건${x.earliest ? `, 최초 ${x.earliest}` : ''}</span>` : ''}</li>`).join('');
+  const li = arr => arr.map(x => `<li style="font-size:.7rem;color:#374151;word-break:break-all">${escHtml(x.tab)}${ownBadge(x.ownerLabel)}</li>`).join('');
+  // 소유자 집계 + 이관 대상(tnaks 외) 강조
+  const ot = res.ownerTally || {};
+  const otOrder = ['tnaks6325', '박세희', '박은비', 'service-account', '기타', 'unknown'];
+  const otKeys = otOrder.filter(k => ot[k]).concat(Object.keys(ot).filter(k => otOrder.indexOf(k) < 0));
+  const nonTnaks = Object.keys(ot).reduce((s, k) => s + (k === 'tnaks6325' ? 0 : (ot[k] || 0)), 0);
+  const ownerChips = otKeys.map(k => {
+    const isMine = k === 'tnaks6325';
+    const c = isMine ? '#059669' : (k === '박세희' || k === '박은비') ? '#DC2626' : '#B45309';
+    return `<span style="font-size:.68rem;font-weight:700;color:${c};background:${c}14;border-radius:6px;padding:2px 7px">${escHtml(k)} ${ot[k]}</span>`;
+  }).join(' ');
+  resultEl.innerHTML = `
+    <div style="background:#F8FAFC;border:1px solid #E2E8F0;border-radius:8px;padding:12px">
+      <div style="font-size:.82rem;font-weight:800;color:#0F172A;margin-bottom:6px">활성 탭 리뷰폴더 현황</div>
+      <div style="font-size:.68rem;color:#9CA3AF;margin-bottom:8px">활성 ${res.totalTabs}개 중 '리뷰폼' ${res.excluded}개 제외 · 26.3+ 기준</div>
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:6px;font-size:.74rem">
+        <div style="background:#EEF2FF;border-radius:6px;padding:8px"><b>① 리뷰폴더 연결</b><br><span style="font-size:.92rem;font-weight:800;color:#4338CA">${res.connected}개</span></div>
+        <div style="background:#ECFDF5;border-radius:6px;padding:8px"><b>② 정상(파일 있음)</b><br><span style="font-size:.92rem;font-weight:800;color:#059669">${res.nonEmpty}개</span><br><span style="font-size:.64rem;color:#6B7280">26.3+ ${target.length} · 26.3이전 ${res.preMarch}</span></div>
+        <div style="background:#FEF2F2;border-radius:6px;padding:8px"><b>③ 비어있음</b><br><span style="font-size:.92rem;font-weight:800;color:#DC2626">${res.empty}개</span></div>
+        <div style="background:#FFFBEB;border-radius:6px;padding:8px"><b>폴더 미연결</b><br><span style="font-size:.92rem;font-weight:800;color:#B45309">${res.noFolder}개</span>${res.errors ? ` · 오류 ${res.errors}` : ''}</div>
+      </div>
+      ${ownerChips ? `<div style="margin-top:10px;background:#fff;border:1px solid #E2E8F0;border-radius:6px;padding:8px">
+        <div style="font-size:.72rem;font-weight:700;color:#0F172A;margin-bottom:5px">연결 폴더 소유자 <span style="font-weight:400;color:#9CA3AF">(이관 범위 판정)</span></div>
+        <div style="display:flex;flex-wrap:wrap;gap:5px">${ownerChips}</div>
+        ${nonTnaks ? `<div style="font-size:.66rem;color:#DC2626;margin-top:6px">※ tnaks6325 외 소유 <b>${nonTnaks}개</b> = 소유권 이관 대상 (아래 목록에 빨간 배지 표시)</div>` : `<div style="font-size:.66rem;color:#059669;margin-top:6px">※ 모든 연결 폴더가 tnaks6325 소유 — 이관 불필요</div>`}
+      </div>` : ''}
+      ${empties.length ? `<div style="margin-top:10px"><div style="font-size:.74rem;font-weight:700;color:#DC2626">③ 비어있는 리뷰폴더 (${empties.length}) — 정리 필요</div><ul style="margin:4px 0 0;padding-left:18px;max-height:140px;overflow:auto">${li(empties)}</ul></div>` : ''}
+      ${nofolder.length ? `<div style="margin-top:8px"><div style="font-size:.74rem;font-weight:700;color:#B45309">폴더 미연결 (${nofolder.length})</div><ul style="margin:4px 0 0;padding-left:18px;max-height:140px;overflow:auto">${li(nofolder)}</ul>
+        <button id="rlcConnectBtn" onclick="_relocateConnectUnlinked()" style="margin-top:8px;width:100%;padding:8px;background:#B45309;color:#fff;border:none;border-radius:8px;font-size:.78rem;font-weight:700;cursor:pointer"><i class="fas fa-link"></i> 미연결 탭 [리뷰] 폴더 생성·연결 (tnaks6325 소유)</button>
+        <div style="font-size:.64rem;color:#9CA3AF;margin-top:3px">※ 비마감 탭 중 폴더가 없는 탭에 빈 [리뷰] 폴더를 만들어 연결합니다(이미 연결된 탭은 건너뜀). 흩어진 캡처가 있으면 생성 후 위 '리뷰 캡처 정리'로 모으세요.</div>
+      </div>` : ''}
+      ${pre.length ? `<details style="margin-top:8px"><summary style="font-size:.72rem;font-weight:700;color:#9CA3AF;cursor:pointer">26.3 이전 파일 포함(대상 제외) (${pre.length})</summary><ul style="margin:4px 0 0;padding-left:18px;max-height:160px;overflow:auto">${liH(pre)}</ul></details>` : ''}
+      ${target.length ? `<details style="margin-top:8px" open><summary style="font-size:.74rem;font-weight:700;color:#059669;cursor:pointer">② 26.3+ 정상 폴더 (${target.length})</summary><ul style="margin:4px 0 0;padding-left:18px;max-height:220px;overflow:auto">${liH(target)}</ul></details>` : ''}
+    </div>`;
+}
+
+// 미연결 활성 탭에 [리뷰] 폴더 생성·연결 (OAuth=tnaks6325 소유로 생성, 비파괴/idempotent)
+//   sync-review: 비마감 탭 중 folder_url 없는 탭만 새 [리뷰] 폴더 생성 후 tab_configs 저장
+async function _relocateConnectUnlinked() {
+  if (!confirm('미연결 활성 탭에 빈 [리뷰] 폴더를 생성하고 연결합니다.\n· tnaks6325 소유로 생성 · 이미 연결된 탭은 건너뜀 · 파일 변경 없음\n\n진행할까요?')) return;
+  const btnEl = document.getElementById('rlcConnectBtn');
+  if (btnEl) { btnEl.disabled = true; btnEl.innerHTML = '<i class="fas fa-spinner fa-spin"></i> 생성·연결 중...'; }
+  try {
+    const res = await gasPost({ action: 'syncReviewFolders' }, 180000);
+    if (!res || res.ok === false || res.error) {
+      showToast('실패: ' + ((res && res.error) || '알수없음'), 'error');
+      if (btnEl) { btnEl.disabled = false; btnEl.innerHTML = '<i class="fas fa-link"></i> 미연결 탭 [리뷰] 폴더 생성·연결 (tnaks6325 소유)'; }
+      return;
+    }
+    showToast(`[리뷰] 폴더 ${res.created || 0}개 신규 생성 · 연결 확인 ${res.synced || 0}${res.errors ? ` · 오류 ${res.errors}` : ''}`, 'success');
+    _relocateFolderAudit(); // 현황 자동 재점검
+  } catch (e) {
+    showToast('오류: ' + e.message, 'error');
+    if (btnEl) { btnEl.disabled = false; btnEl.innerHTML = '<i class="fas fa-link"></i> 미연결 탭 [리뷰] 폴더 생성·연결 (tnaks6325 소유)'; }
+  }
+}
+
+// 원본 폴더 비우기 — 원본 폴더의 모든 파일을 선택 탭의 [리뷰] 폴더로 이동
+async function _relocateMoveFolder(apply) {
+  const fromUrl = (document.getElementById('rlcMoveFrom').value || '').trim();
+  const toUrl = (document.getElementById('rlcFolderUrl').value || '').trim();
+  if (!fromUrl) { showToast('비울 원본 폴더 링크를 입력하세요.', 'error'); return; }
+  if (!toUrl) { showToast('대상 [리뷰] 폴더 링크가 필요합니다 (탭을 선택하세요).', 'error'); return; }
+  if (apply && !confirm('원본 폴더의 모든 파일을 [리뷰] 폴더로 이동합니다. 진행할까요?')) return;
+  const resultEl = document.getElementById('rlcResult');
+  resultEl.innerHTML = `<div style="font-size:.78rem;color:#6B7280"><i class="fas fa-spinner fa-spin"></i> ${apply ? '이동 중' : '조회 중'}...</div>`;
+  try {
+    const res = await gasPost({ action: 'moveFolderContents', fromFolderUrl: fromUrl, toFolderUrl: toUrl, dryRun: !apply });
+    if (!res || res.ok === false) {
+      resultEl.innerHTML = `<div style="font-size:.78rem;color:#DC2626">오류: ${escHtml((res && res.error) || '실패')}</div>`;
+      return;
+    }
+    if (apply) {
+      const failHtml = (res.failed || []).map(f => `<li style="font-size:.66rem;color:#DC2626;word-break:break-all">${escHtml(f.name)} — ${escHtml(f.error || '')}</li>`).join('');
+      resultEl.innerHTML = `<div style="font-size:.84rem;color:#065F46;font-weight:700"><i class="fas fa-check-circle"></i> ${res.movedCount}건 이동 완료${res.failedCount ? ` · ${res.failedCount}건 실패` : ''}</div>
+        ${res.failedCount ? `<ul style="margin:6px 0 0;padding-left:18px">${failHtml}</ul><div style="font-size:.66rem;color:#9CA3AF;margin-top:2px">실패 건은 보통 그 파일 소유자(예: 박세희) 권한이 필요합니다 — 소유자 측에서 옮기거나 사본 처리해야 합니다.</div>` : ''}`;
+      showToast(`${res.movedCount}건 이동`, 'success');
+      return;
+    }
+    const list = (res.files || []).slice(0, 50).map(c => `
+      <div style="border-bottom:1px solid #E0F2FE">
+        <div onclick="_relocateToggleImg(this,'${escHtml(c.id)}')" style="cursor:pointer;font-size:.7rem;color:#374151;font-family:monospace;word-break:break-all;padding:5px 2px;display:flex;align-items:flex-start;gap:6px" title="클릭하면 이미지 미리보기">
+          <i class="fas fa-chevron-right" style="font-size:.6rem;color:#9CA3AF;margin-top:3px;transition:transform .15s"></i>
+          <span style="flex:1">${escHtml(c.name)}</span>
+        </div>
+        <div class="rlc-img" style="display:none"></div>
+      </div>`).join('');
+    const sub = (res.subfolders || []).length ? `<div style="font-size:.66rem;color:#D97706;margin-top:4px">※ 서브폴더 ${res.subfolders.length}개는 이동 대상에서 제외됩니다.</div>` : '';
+    resultEl.innerHTML = `
+      <div style="background:#ECFEFF;border:1px solid #A5F3FC;border-radius:8px;padding:12px">
+        <div style="font-size:.84rem;font-weight:700;color:#155E75">원본 폴더 파일: ${res.total}건 → [리뷰]로 이동 예정</div>
+        ${sub}
+        ${res.total
+          ? `<div style="margin:8px 0 0">${list}</div>
+             <div style="font-size:.64rem;color:#9CA3AF;margin-top:4px">※ 파일명을 누르면 이미지를 펼쳐 볼 수 있습니다.</div>
+             <button onclick="_relocateMoveFolder(true)" style="margin-top:12px;width:100%;padding:9px;background:#0891B2;color:#fff;border:none;border-radius:8px;font-size:.82rem;font-weight:700;cursor:pointer"><i class="fas fa-arrow-right-to-bracket"></i> ${res.total}건 전체 이동 실행</button>`
+          : `<div style="font-size:.72rem;color:#6B7280;margin-top:6px">원본 폴더에 이동할 파일이 없습니다.</div>`}
+      </div>`;
+  } catch (err) {
+    resultEl.innerHTML = `<div style="font-size:.78rem;color:#DC2626">오류: ${escHtml(err.message)}</div>`;
+  }
+}
+
+function openReviewRelocate() {
+  const existing = document.getElementById('reviewRelocateModal');
+  if (existing) existing.remove();
+
+  _relocateTabs = _relocateCollectTabs();
+  _relocateSelIdx = -1;
+  if (_relocateTabs.length === 0) {
+    showToast('탭 목록을 불러오지 못했습니다. 탭 관리 대시보드를 먼저 여세요.', 'info');
+    return;
+  }
+
+  const modal = document.createElement('div');
+  modal.id = 'reviewRelocateModal';
+  modal.classList.add('toss-overlay');
+  modal.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,.45);z-index:9999;display:flex;align-items:center;justify-content:center;padding:20px';
+  modal.innerHTML = `
+    <div style="background:#fff;border-radius:12px;width:100%;max-width:560px;max-height:82vh;display:flex;flex-direction:column;box-shadow:0 20px 60px rgba(0,0,0,.2)">
+      <div style="padding:16px 20px;border-bottom:1px solid #E5E7EB;flex-shrink:0">
+        <h3 style="margin:0;font-size:1rem;font-weight:700;color:#111"><i class="fas fa-folder-tree" style="color:#7C3AED"></i> 리뷰 캡처 정리</h3>
+        <div style="font-size:.72rem;color:#6B7280;margin-top:4px">내 드라이브 루트 등에 흩어진 리뷰 캡처를 선택한 탭의 <b>[리뷰]</b> 폴더로 이동합니다.</div>
+      </div>
+      <div style="padding:14px 20px;overflow-y:auto;flex:1">
+        <label style="font-size:.74rem;font-weight:600;color:#374151">대상 탭 <span style="color:#9CA3AF;font-weight:400">(검색해서 선택)</span></label>
+        <div style="position:relative;margin:4px 0 12px">
+          <input id="rlcTabSearch" type="text" autocomplete="off" placeholder="탭·상품·캠페인 검색…"
+            oninput="_relocateFilterTabs()" onfocus="_relocateFilterTabs()"
+            onblur="setTimeout(function(){var l=document.getElementById('rlcTabList');if(l)l.style.display='none'},150)"
+            style="width:100%;padding:7px 9px;border:1px solid #D1D5DB;border-radius:8px;font-size:.8rem">
+          <div id="rlcTabList" style="display:none;position:absolute;left:0;right:0;top:100%;margin-top:2px;background:#fff;border:1px solid #E5E7EB;border-radius:8px;box-shadow:0 8px 24px rgba(0,0,0,.12);max-height:240px;overflow-y:auto;z-index:5"></div>
+          <div id="rlcTabSelected" style="font-size:.7rem;color:#6B7280;margin-top:4px"></div>
+        </div>
+
+        <label style="font-size:.74rem;font-weight:600;color:#374151">[리뷰] 폴더 링크 <span style="color:#9CA3AF;font-weight:400">(비어 있으면 대상 [리뷰] 폴더 링크를 붙여넣으세요)</span></label>
+        <input id="rlcFolderUrl" type="text" placeholder="https://drive.google.com/drive/folders/..." style="width:100%;padding:7px 9px;border:1px solid #D1D5DB;border-radius:8px;font-size:.72rem;margin:4px 0 12px;font-family:monospace">
+
+        <label style="font-size:.74rem;font-weight:600;color:#374151">브랜드/상품 키워드 <span style="color:#9CA3AF;font-weight:400">(쉼표 구분 — 캡처에 보이는 단어)</span></label>
+        <input id="rlcKeywords" type="text" placeholder="예: 서일농원, 콩물" style="width:100%;padding:7px 9px;border:1px solid #D1D5DB;border-radius:8px;font-size:.8rem;margin:4px 0 12px">
+
+        <label style="font-size:.74rem;font-weight:600;color:#374151">시작일 <span style="color:#9CA3AF;font-weight:400">(이 날짜 이후 업로드만 — 비우면 전체)</span></label>
+        <input id="rlcSince" type="date" style="width:100%;padding:7px 9px;border:1px solid #D1D5DB;border-radius:8px;font-size:.8rem;margin:4px 0 4px">
+
+        <details style="margin-top:10px;border:1px dashed #CBD5E1;border-radius:8px;padding:8px 10px">
+          <summary style="cursor:pointer;font-size:.74rem;font-weight:700;color:#155E75">원본 폴더 비우기 (레거시/잘못된 폴더 → 위 [리뷰]로 전체 이동)</summary>
+          <div style="margin-top:8px">
+            <input id="rlcMoveFrom" type="text" placeholder="비울 원본 폴더 링크 (예: 박세희 소유 폴더)" style="width:100%;padding:7px 9px;border:1px solid #D1D5DB;border-radius:8px;font-size:.72rem;font-family:monospace">
+            <div style="font-size:.64rem;color:#9CA3AF;margin:5px 0">위 <b>[리뷰] 폴더 링크</b>가 이동 대상입니다(탭 선택 필요). 파일명 무관 <b>전체 이동</b>, 서브폴더는 제외.</div>
+            <button onclick="_relocateMoveFolder(false)" style="width:100%;padding:8px;background:#0891B2;color:#fff;border:none;border-radius:8px;font-size:.78rem;font-weight:700;cursor:pointer"><i class="fas fa-folder-open"></i> 원본 폴더 미리보기</button>
+          </div>
+        </details>
+
+        <div style="display:flex;gap:8px;margin-top:14px">
+          <button onclick="_relocateRun(false)" style="flex:1;padding:9px;background:#7C3AED;color:#fff;border:none;border-radius:8px;font-size:.82rem;font-weight:700;cursor:pointer"><i class="fas fa-search"></i> 선택 탭 미리보기</button>
+          <button onclick="_relocateScanAll()" style="flex:1;padding:9px;background:#4338CA;color:#fff;border:none;border-radius:8px;font-size:.82rem;font-weight:700;cursor:pointer"><i class="fas fa-layer-group"></i> 전체 탭 자동 스캔</button>
+        </div>
+        <button onclick="_relocateFolderAudit()" style="width:100%;margin-top:8px;padding:9px;background:#0F172A;color:#fff;border:none;border-radius:8px;font-size:.82rem;font-weight:700;cursor:pointer"><i class="fas fa-clipboard-list"></i> 리뷰폴더 현황 점검 (활성 탭 전체)</button>
+        <div style="font-size:.66rem;color:#9CA3AF;margin-top:6px">※ 전체 스캔은 모든 탭을 하나씩 조회해 탭별 대상 건수를 보여줍니다. 폴더 링크·키워드 칸은 무시하고 탭마다 자동 적용합니다.</div>
+
+        <div style="margin-top:14px;border-top:1px dashed #E5E7EB;padding-top:14px">
+          <div style="font-size:.82rem;font-weight:800;color:#0F172A"><i class="fas fa-paper-plane" style="color:#0891B2"></i> 업체 보고 링크 <span style="font-weight:600;color:#9CA3AF;font-size:.7rem">(직원 복제 불필요)</span></div>
+          <div style="font-size:.68rem;color:#6B7280;margin:4px 0 8px">위에서 <b>탭을 선택</b>한 뒤 링크를 만들어 업체에 전달하세요. 업체는 <b>로그인 없이</b> 열람하고, 원본은 그대로(내 소유)라 <b>직원 드라이브에 복제되지 않습니다</b>.</div>
+          <button onclick="_relocateMakeReportPageLink()" style="width:100%;padding:9px;background:#0891B2;color:#fff;border:none;border-radius:8px;font-size:.82rem;font-weight:700;cursor:pointer"><i class="fas fa-link"></i> 선택 탭 보고 링크 만들기 (이미지 모아보기)</button>
+          <div id="rlcReportResult" style="margin-top:10px"></div>
+          <details style="margin-top:8px">
+            <summary style="cursor:pointer;font-size:.7rem;color:#6B7280">또는 Drive 폴더 공유링크로 전달 (폴더 그대로)</summary>
+            <div style="margin-top:6px">
+              <button onclick="_relocateMakeReportLink()" style="width:100%;padding:8px;background:#fff;color:#0891B2;border:1px solid #0891B2;border-radius:8px;font-size:.76rem;font-weight:700;cursor:pointer"><i class="fas fa-folder-open"></i> 선택 탭 [리뷰] 폴더 공유링크 만들기</button>
+              <div id="rlcFolderShareResult" style="margin-top:8px"></div>
+            </div>
+          </details>
+        </div>
+
+        <div style="margin-top:8px;text-align:right">
+          <button onclick="document.getElementById('reviewRelocateModal').remove()" style="padding:7px 16px;background:#F3F4F6;color:#374151;border:none;border-radius:8px;font-size:.8rem;font-weight:600;cursor:pointer">닫기</button>
+        </div>
+        <div id="rlcResult" style="margin-top:14px"></div>
+      </div>
+    </div>`;
+  document.body.appendChild(modal);
+  const sb = document.getElementById('rlcTabSearch');
+  if (sb) sb.focus();
+
+  // 임시저장된 전체 스캔 결과가 있으면 자동 복원
+  _relocateScanStop = false;
+  _relocateScanResults = _relocateLoadScan().byTab || {};
+  if (Object.keys(_relocateScanResults).length) _relocateRenderScan();
+}
+
+// 검색어로 탭 목록 필터링 → 자동완성 리스트 렌더
+function _relocateFilterTabs() {
+  const inp = document.getElementById('rlcTabSearch');
+  const listEl = document.getElementById('rlcTabList');
+  if (!inp || !listEl) return;
+  const q = (inp.value || '').trim().toLowerCase();
+  const matches = [];
+  for (let i = 0; i < _relocateTabs.length && matches.length < 50; i++) {
+    const t = _relocateTabs[i];
+    const hay = `${t.displayName} ${t.campName} ${t.tabName}`.toLowerCase();
+    if (!q || hay.includes(q)) matches.push(i);
+  }
+  if (matches.length === 0) {
+    listEl.innerHTML = `<div style="padding:10px 12px;font-size:.74rem;color:#9CA3AF">검색 결과 없음</div>`;
+    listEl.style.display = 'block';
+    return;
+  }
+  listEl.innerHTML = matches.map(i => {
+    const t = _relocateTabs[i];
+    return `<div onmousedown="_relocateSelectTab(${i})" style="padding:8px 12px;cursor:pointer;border-bottom:1px solid #F3F4F6"
+        onmouseover="this.style.background='#F5F3FF'" onmouseout="this.style.background='#fff'">
+        <div style="font-size:.78rem;color:#111;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${escHtml(t.displayName)}</div>
+        ${t.campName ? `<div style="font-size:.66rem;color:#9CA3AF">${escHtml(t.campName)}</div>` : ''}
+      </div>`;
+  }).join('');
+  listEl.style.display = 'block';
+}
+
+// 자동완성 항목 선택 → 폴더링크·키워드 자동 채움
+function _relocateSelectTab(i) {
+  const t = _relocateTabs[i];
+  if (!t) return;
+  _relocateSelIdx = i;
+  const sb = document.getElementById('rlcTabSearch');
+  if (sb) sb.value = t.displayName;
+  const listEl = document.getElementById('rlcTabList');
+  if (listEl) listEl.style.display = 'none';
+  const selEl = document.getElementById('rlcTabSelected');
+  if (selEl) selEl.innerHTML = `선택됨: <b>${escHtml(t.displayName)}</b>${t.campName ? ' — ' + escHtml(t.campName) : ''}`;
+  document.getElementById('rlcFolderUrl').value = t.folderUrl || '';
+  document.getElementById('rlcKeywords').value = _relocateDeriveKeywords(t.tabName).join(', ');
+  document.getElementById('rlcResult').innerHTML = '';
+}
+
+// [주] 공개 보고 페이지 링크 만들기 — 선택 탭의 추측불가 코드를 발급하고
+//   report.html 공개 페이지 링크를 반환. 업체는 로그인 없이 이미지 모아보기로 열람.
+//   이미지는 서버 프록시로 표시 → 폴더 공개공유 불필요, 원본 복제 0.
+async function _relocateMakeReportPageLink() {
+  const t = _relocateTabs[_relocateSelIdx];
+  if (!t) { showToast('먼저 위에서 대상 탭을 선택하세요.', 'error'); return; }
+  const out = document.getElementById('rlcReportResult');
+  if (out) out.innerHTML = `<div style="font-size:.76rem;color:#0E7490"><i class="fas fa-spinner fa-spin"></i> 보고 링크 생성 중…</div>`;
+  try {
+    const res = await gasPost({ action: 'reviewReportLink', sheetId: t.sheetId, tabName: t.tabName, displayName: t.displayName }, 60000);
+    if (!res || res.ok === false || res.error || !res.reportUrl) {
+      if (out) out.innerHTML = `<div style="font-size:.76rem;color:#DC2626">오류: ${escHtml((res && res.error) || '실패')}</div>`;
+      return;
+    }
+    const link = res.reportUrl;
+    if (out) out.innerHTML = `
+      <div style="background:#ECFEFF;border:1px solid #A5F3FC;border-radius:8px;padding:10px">
+        <div style="font-size:.74rem;font-weight:700;color:#155E75;margin-bottom:6px"><i class="fas fa-check-circle"></i> 업체 보고 링크 준비됨 <span style="font-weight:500;color:#0E7490">(이미지 모아보기 페이지)</span></div>
+        <div style="display:flex;gap:6px;align-items:stretch">
+          <input id="rlcReportPageLink" type="text" readonly value="${escHtml(link)}" onclick="this.select()" style="flex:1;padding:7px 9px;border:1px solid #A5F3FC;border-radius:8px;font-size:.7rem;font-family:monospace;background:#fff">
+          <button onclick="_relocateCopyLink('rlcReportPageLink')" style="padding:7px 12px;background:#0891B2;color:#fff;border:none;border-radius:8px;font-size:.76rem;font-weight:700;cursor:pointer;white-space:nowrap"><i class="fas fa-copy"></i> 복사</button>
+          <a href="${escHtml(link)}" target="_blank" rel="noopener" title="미리보기" style="padding:7px 11px;background:#fff;color:#0891B2;border:1px solid #0891B2;border-radius:8px;font-size:.76rem;font-weight:700;cursor:pointer;white-space:nowrap;text-decoration:none;display:flex;align-items:center"><i class="fas fa-arrow-up-right-from-square"></i></a>
+        </div>
+        <div style="font-size:.64rem;color:#0E7490;margin-top:6px">이 링크를 업체에 전달하세요. 업체는 <b>로그인 없이</b> 리뷰 이미지를 모아볼 수 있고, 원본은 그대로라 <b>직원 드라이브 용량을 쓰지 않습니다</b>.</div>
+        <div style="font-size:.6rem;color:#9CA3AF;margin-top:3px">※ 링크를 아는 사람은 열람할 수 있습니다(추측불가 코드). 리뷰어 이름이 함께 표시됩니다.</div>
+      </div>`;
+    showToast('업체 보고 링크 준비됨', 'success');
+  } catch (e) {
+    if (out) out.innerHTML = `<div style="font-size:.76rem;color:#DC2626">오류: ${escHtml(e.message)}</div>`;
+  }
+}
+
+// [보조] Drive 폴더 공유링크 만들기 — 선택 탭의 [리뷰] 폴더를 '링크공유(anyone reader)'로
+//   설정하고 폴더 링크를 반환(폴더 그대로 전달). 원본은 tnaks 소유 그대로 → 복제 불필요.
+async function _relocateMakeReportLink() {
+  const t = _relocateTabs[_relocateSelIdx];
+  if (!t) { showToast('먼저 위에서 대상 탭을 선택하세요.', 'error'); return; }
+  const folderUrl = (document.getElementById('rlcFolderUrl').value || '').trim();
+  const out = document.getElementById('rlcFolderShareResult');
+  if (out) out.innerHTML = `<div style="font-size:.76rem;color:#0E7490"><i class="fas fa-spinner fa-spin"></i> 폴더 공유링크 생성 중…</div>`;
+  try {
+    const res = await gasPost({ action: 'shareReviewFolder', sheetId: t.sheetId, tabName: t.tabName, folderUrl }, 60000);
+    if (!res || res.ok === false || res.error) {
+      if (out) out.innerHTML = `<div style="font-size:.76rem;color:#DC2626">오류: ${escHtml((res && res.error) || '실패')}</div>`;
+      return;
+    }
+    const link = res.folderUrl;
+    document.getElementById('rlcFolderUrl').value = link; // 폴더 링크 칸 동기화
+    const cntTxt = (res.fileCount != null) ? `${res.fileCount}개 파일` : '파일 수 확인 안 됨';
+    const note = res.created
+      ? ' · 빈 [리뷰] 폴더를 새로 만들어 연결했습니다(아직 제출 0건)'
+      : (res.alreadyShared ? ' · 이미 공유돼 있던 폴더' : '');
+    if (out) out.innerHTML = `
+      <div style="background:#F8FAFC;border:1px solid #CBD5E1;border-radius:8px;padding:10px">
+        <div style="font-size:.74rem;font-weight:700;color:#155E75;margin-bottom:6px"><i class="fas fa-check-circle"></i> Drive 폴더 공유링크 준비됨 <span style="font-weight:500;color:#0E7490">(${cntTxt})</span></div>
+        <div style="display:flex;gap:6px;align-items:stretch">
+          <input id="rlcFolderShareLink" type="text" readonly value="${escHtml(link)}" onclick="this.select()" style="flex:1;padding:7px 9px;border:1px solid #CBD5E1;border-radius:8px;font-size:.7rem;font-family:monospace;background:#fff">
+          <button onclick="_relocateCopyLink('rlcFolderShareLink')" style="padding:7px 12px;background:#0891B2;color:#fff;border:none;border-radius:8px;font-size:.76rem;font-weight:700;cursor:pointer;white-space:nowrap"><i class="fas fa-copy"></i> 복사</button>
+          <a href="${escHtml(link)}" target="_blank" rel="noopener" title="새 창에서 열기" style="padding:7px 11px;background:#fff;color:#0891B2;border:1px solid #0891B2;border-radius:8px;font-size:.76rem;font-weight:700;cursor:pointer;white-space:nowrap;text-decoration:none;display:flex;align-items:center"><i class="fas fa-arrow-up-right-from-square"></i></a>
+        </div>
+        <div style="font-size:.64rem;color:#0E7490;margin-top:6px">폴더를 그대로 전달합니다. 업체는 로그인 없이 열람·다운로드, 직원 복제 불필요.${note}</div>
+        <div style="font-size:.6rem;color:#9CA3AF;margin-top:3px">※ 파일명에 리뷰어 이름이 보입니다. 공유 해제는 구글 드라이브에서 폴더 '공유 → 링크 보기 제한'으로 가능합니다.</div>
+      </div>`;
+    showToast(res.created ? '빈 [리뷰] 폴더 생성·공유링크 준비' : 'Drive 폴더 공유링크 준비됨', 'success');
+  } catch (e) {
+    if (out) out.innerHTML = `<div style="font-size:.76rem;color:#DC2626">오류: ${escHtml(e.message)}</div>`;
+  }
+}
+
+// 보고 링크 클립보드 복사 (입력칸 id 지정)
+function _relocateCopyLink(inputId) {
+  const el = document.getElementById(inputId);
+  if (!el) return;
+  const v = el.value || '';
+  const done = () => showToast('보고 링크를 복사했습니다.', 'success');
+  if (navigator.clipboard && navigator.clipboard.writeText) {
+    navigator.clipboard.writeText(v).then(done).catch(() => { el.select(); document.execCommand('copy'); done(); });
+  } else {
+    el.select(); document.execCommand('copy'); done();
+  }
+}
+
+async function _relocateRun(apply) {
+  const t = _relocateTabs[_relocateSelIdx];
+  if (!t) { showToast('대상 탭을 검색해서 선택하세요.', 'error'); return; }
+  const reviewFolderUrl = (document.getElementById('rlcFolderUrl').value || '').trim();
+  const brandKeywords = (document.getElementById('rlcKeywords').value || '').split(',').map(s => s.trim()).filter(Boolean);
+  const sinceRaw = (document.getElementById('rlcSince').value || '').trim();
+  const sinceDate = sinceRaw ? (sinceRaw + 'T00:00:00Z') : undefined;
+
+  if (!reviewFolderUrl) { showToast('[리뷰] 폴더 링크가 필요합니다.', 'error'); return; }
+  if (brandKeywords.length === 0) { showToast('브랜드/상품 키워드를 1개 이상 입력하세요.', 'error'); return; }
+  if (apply && !confirm(`선택한 캡처들을 [리뷰] 폴더로 이동합니다. 진행할까요?`)) return;
+
+  const resultEl = document.getElementById('rlcResult');
+  resultEl.innerHTML = `<div style="font-size:.78rem;color:#6B7280"><i class="fas fa-spinner fa-spin"></i> ${apply ? '이동 중' : '검색 중'}...</div>`;
+
+  try {
+    const res = await gasPost({
+      action: 'relocateOrphanReviews',
+      sheetId: t.sheetId, tabName: t.tabName,
+      reviewFolderUrl, brandKeywords, sinceDate,
+      dryRun: !apply,
+    });
+    if (!res || res.ok === false) {
+      resultEl.innerHTML = `<div style="font-size:.78rem;color:#DC2626">오류: ${escHtml((res && res.error) || '실패')}</div>`;
+      return;
+    }
+    // 인덱스 결정적 링크(B) 요약 — 모든 결과에 공통 표기
+    const lk = res.link || {};
+    const linkLine = (lk.linked || lk.ambiguous || lk.unmatched || lk.already)
+      ? `<div style="font-size:.72rem;color:#4338CA;margin-top:6px"><i class="fas fa-link"></i> 인덱스 링크: 연결 ${lk.linked || 0}${lk.already ? ` · 기존 ${lk.already}` : ''}${lk.ambiguous ? ` · 모호 ${lk.ambiguous}` : ''}${lk.unmatched ? ` · 명단없음 ${lk.unmatched}` : ''}</div>`
+      : '';
+
+    // 진단: 서버 검색이 실제로 몇 건을 반환했는지 (0이면 계정/스코프/가시성 문제)
+    const dg = res.diag || {};
+    const ss = (dg.searchStats || []).map(s => `${escHtml(s.kw)}[SA:${s.sa == null ? '-' : s.sa}/OAuth:${s.oauth == null ? '-' : s.oauth}${s.oauthError ? '⚠' : ''}]`).join(' ');
+    const errMsg = (dg.searchStats || []).map(s => s.oauthError || s.saError).find(Boolean);
+    const errLine = errMsg ? `<div style="font-size:.66rem;color:#DC2626;margin-top:3px;font-family:monospace;word-break:break-all">⚠ ${escHtml(String(errMsg).slice(0, 300))}</div>` : '';
+    const diagLine = `<div style="font-size:.68rem;color:#9CA3AF;margin-top:6px;font-family:monospace">🔎 서버검색 ${dg.searchFound ?? '-'}건(리뷰형식 ${dg.reviewFormatCount ?? '-'}) ${ss}</div>${errLine}`;
+
+    if (apply) {
+      resultEl.innerHTML = `<div style="font-size:.84rem;color:#065F46;font-weight:700"><i class="fas fa-check-circle"></i> ${res.movedCount}건 이동 완료${res.failedCount ? ` · ${res.failedCount}건 실패` : ''}</div>
+        ${linkLine}${diagLine}
+        <div style="font-size:.72rem;color:#6B7280;margin-top:4px">[리뷰] 폴더를 새로고침해 확인하세요. (이미 폴더에 있던 파일은 건너뜀)</div>`;
+      showToast(`${res.movedCount}건 이동${lk.linked ? ` · 인덱스 ${lk.linked}건 연결` : ''}`, 'success');
+      return;
+    }
+    // 후보 목록 — 파일명 클릭 시 모달 내에서 이미지 인라인 펼침(아코디언)
+    const showN = 50;
+    const list = (res.candidates || []).slice(0, showN).map(c => `
+      <div style="border-bottom:1px solid #ECECF5">
+        <div onclick="_relocateToggleImg(this,'${escHtml(c.id)}')" style="cursor:pointer;font-size:.7rem;color:#374151;font-family:monospace;word-break:break-all;padding:5px 2px;display:flex;align-items:flex-start;gap:6px" title="클릭하면 이미지 미리보기">
+          <i class="fas fa-chevron-right" style="font-size:.6rem;color:#9CA3AF;margin-top:3px;transition:transform .15s"></i>
+          <span style="flex:1">${escHtml(c.name)}</span>
+        </div>
+        <div class="rlc-img" style="display:none"></div>
+      </div>`).join('');
+    const more = res.candidateCount > showN ? `<div style="font-size:.7rem;color:#9CA3AF;margin-top:4px">… 외 ${res.candidateCount - showN}건</div>` : '';
+    const inTargetLine = res.alreadyInTarget ? `<div style="font-size:.7rem;color:#6B7280;margin-top:4px">이미 [리뷰] 폴더에 있는 ${res.alreadyInTarget}건도 인덱스 링크 대상에 포함됩니다.</div>` : '';
+    resultEl.innerHTML = `
+      <div style="background:#F5F3FF;border:1px solid #DDD6FE;border-radius:8px;padding:12px">
+        <div style="font-size:.84rem;font-weight:700;color:#5B21B6">이동 대상: ${res.candidateCount}건</div>
+        ${linkLine}${inTargetLine}${diagLine}
+        ${(res.candidateCount || res.alreadyInTarget)
+          ? `<div style="margin:8px 0 0">${list}</div>${more}
+             <div style="font-size:.64rem;color:#9CA3AF;margin-top:4px">※ 파일명을 누르면 이 화면에서 바로 이미지를 펼쳐 볼 수 있습니다.</div>
+             <button onclick="_relocateRun(true)" style="margin-top:12px;width:100%;padding:9px;background:#059669;color:#fff;border:none;border-radius:8px;font-size:.82rem;font-weight:700;cursor:pointer"><i class="fas fa-arrow-right-to-bracket"></i> 실행 (이동 ${res.candidateCount}건 + 인덱스 링크)</button>`
+          : `<div style="font-size:.72rem;color:#6B7280;margin-top:6px">대상이 없습니다. 키워드/시작일을 조정해 보세요. (OCR 색인이 안 된 캡처는 검색에 안 걸릴 수 있습니다.)</div>`}
+      </div>`;
+  } catch (err) {
+    resultEl.innerHTML = `<div style="font-size:.78rem;color:#DC2626">오류: ${escHtml(err.message)}</div>`;
+  }
+}
+
+// ── 전체 탭 스캔: 임시저장(localStorage) ──
+function _relocateTabKey(t) { return (t.sheetId || '') + '||' + (t.tabName || ''); }
+function _relocateLoadScan() {
+  try { const o = JSON.parse(localStorage.getItem('rlcScanResults_v1') || '{}'); return (o && o.byTab) ? o : { ts: 0, byTab: {} }; }
+  catch (_) { return { ts: 0, byTab: {} }; }
+}
+function _relocateSaveScan() {
+  try { localStorage.setItem('rlcScanResults_v1', JSON.stringify({ ts: Date.now(), byTab: _relocateScanResults })); } catch (_) {}
+}
+
+// 결과 1건 → 상태/액션 셀 HTML
+function _relocateScanRowInner(i, t, r) {
+  if (!t.folderUrl) return { status: `<span style="color:#D97706">폴더 미설정</span>`, action: '' };
+  if (!r) return { status: `<span style="color:#9CA3AF">대기</span>`, action: '' };
+  if (r.status === 'scanning') return { status: `<i class="fas fa-spinner fa-spin"></i> 스캔중`, action: '' };
+  if (r.status === 'error') return { status: `<span style="color:#DC2626" title="${escHtml(r.error || '')}">오류</span>`, action: '' };
+  if (r.status === 'moved') return { status: `<span style="color:#065F46;font-weight:700">✅ ${r.movedCount}건 이동</span>${r.linked ? ` <span style="color:#4338CA">링크 ${r.linked}</span>` : ''}`, action: '' };
+  const n = r.candidateCount || 0;
+  if (n === 0) return { status: `<span style="color:#9CA3AF">대상 0</span>`, action: '' };
+  if (r.over) return {
+    status: `<span style="color:#DC2626;font-weight:700" title="작업건수(${r.expected || '?'})보다 대상이 많음 — 단일 탭 모드에서 정확한 키워드로 확인하세요">⚠ 과다 ${n}/${r.expected || '?'}</span>`,
+    action: `<button onclick="_relocateSelectTab(${i});showToast('단일 탭 모드에서 정확한 키워드로 확인 후 이동하세요','info')" style="font-size:.68rem;background:#FEF3C7;color:#92400E;border:none;border-radius:6px;padding:4px 9px;cursor:pointer">검토</button>`,
+  };
+  return {
+    status: `<b style="color:#5B21B6">대상 ${n}건</b>${r.expected ? `<span style="color:#9CA3AF">/${r.expected}</span>` : ''}${r.ambiguous ? ` <span style="color:#9CA3AF">모호 ${r.ambiguous}</span>` : ''}`,
+    action: `<button id="rlcScanBtn_${i}" onclick="_relocateApplyTab(${i})" style="font-size:.72rem;background:#059669;color:#fff;border:none;border-radius:6px;padding:4px 11px;cursor:pointer">이동</button>`,
+  };
+}
+
+function _relocateUpdateRow(i) {
+  const t = _relocateTabs[i];
+  const inner = _relocateScanRowInner(i, t, _relocateScanResults[_relocateTabKey(t)]);
+  const s = document.getElementById('rlcScanStatus_' + i);
+  const a = document.getElementById('rlcScanAction_' + i);
+  if (s) s.innerHTML = inner.status;
+  if (a) a.innerHTML = inner.action;
+}
+
+// 저장된(또는 현재) 결과로 전체 목록 렌더
+function _relocateRenderScan() {
+  const resultEl = document.getElementById('rlcResult');
+  if (!resultEl) return;
+  const rows = _relocateTabs.map((t, i) => {
+    const inner = _relocateScanRowInner(i, t, _relocateScanResults[_relocateTabKey(t)]);
+    return `<div style="display:flex;align-items:center;gap:8px;padding:6px 10px;border-bottom:1px solid #F3F4F6">
+      <div style="flex:1;min-width:0">
+        <div style="font-size:.74rem;color:#111;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${escHtml(t.displayName)}</div>
+        ${t.campName ? `<div style="font-size:.62rem;color:#9CA3AF;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${escHtml(t.campName)}</div>` : ''}
+      </div>
+      <div id="rlcScanStatus_${i}" style="font-size:.7rem;white-space:nowrap">${inner.status}</div>
+      <div id="rlcScanAction_${i}" style="min-width:54px;text-align:right">${inner.action}</div>
+    </div>`;
+  }).join('');
+  const saved = _relocateLoadScan();
+  const tsTxt = saved.ts ? new Date(saved.ts).toLocaleString() : '';
+  resultEl.innerHTML = `
+    <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:6px;gap:8px">
+      <div id="rlcScanProgress" style="font-size:.72rem;font-weight:700;color:#3730A3;min-width:0;overflow:hidden;text-overflow:ellipsis">${tsTxt ? '임시저장 ' + escHtml(tsTxt) : '스캔 준비됨'}</div>
+      <div style="display:flex;gap:6px;flex-shrink:0">
+        <button onclick="_relocateScanAll()" style="font-size:.7rem;background:#4338CA;color:#fff;border:none;border-radius:6px;padding:4px 10px;cursor:pointer">다시 스캔</button>
+        <button onclick="_relocateScanStop=true" style="font-size:.7rem;background:#FEE2E2;color:#991B1B;border:none;border-radius:6px;padding:4px 10px;cursor:pointer">중지</button>
+      </div>
+    </div>
+    <div style="max-height:360px;overflow-y:auto;border:1px solid #E5E7EB;border-radius:8px">${rows}</div>`;
+}
+
+// 전체 탭 자동 스캔 — 모든 탭 순차 dryRun. requireRoster로 참여자 명단 제약 + 과대매칭 차단.
+async function _relocateScanAll() {
+  _relocateScanStop = false;
+  const sinceRaw = (document.getElementById('rlcSince').value || '').trim();
+  const sinceDate = sinceRaw ? (sinceRaw + 'T00:00:00Z') : undefined;
+  _relocateRenderScan();
+  const setProg = (txt) => { const p = document.getElementById('rlcScanProgress'); if (p) p.textContent = txt; };
+
+  let scanned = 0, withTargets = 0;
+  for (let i = 0; i < _relocateTabs.length; i++) {
+    if (_relocateScanStop) { setProg(`중지됨 (${scanned}/${_relocateTabs.length})`); _relocateSaveScan(); return; }
+    const t = _relocateTabs[i];
+    const key = _relocateTabKey(t);
+    if (_relocateScanResults[key] && _relocateScanResults[key].status === 'moved') { scanned++; continue; } // 이미 이동 → 건너뜀
+
+    if (!t.folderUrl) { _relocateScanResults[key] = { displayName: t.displayName, status: 'nofolder' }; _relocateUpdateRow(i); scanned++; continue; }
+    _relocateScanResults[key] = { displayName: t.displayName, status: 'scanning' }; _relocateUpdateRow(i);
+    try {
+      const res = await gasPost({
+        action: 'relocateOrphanReviews',
+        sheetId: t.sheetId, tabName: t.tabName,
+        reviewFolderUrl: t.folderUrl,
+        brandKeywords: _relocateDeriveKeywords(t.tabName),
+        requireRoster: true, sinceDate, dryRun: true,
+      });
+      if (!res || res.ok === false) {
+        _relocateScanResults[key] = { displayName: t.displayName, status: 'error', error: (res && res.error) || '' };
+      } else {
+        const n = res.candidateCount || 0;
+        const expected = (res.indexRowCount && res.indexRowCount > 0) ? res.indexRowCount : _relocateParseCount(t.tabName);
+        const over = expected > 0 ? (n > expected * 2 + 5) : (n > 50);
+        if (n > 0) withTargets++;
+        _relocateScanResults[key] = { displayName: t.displayName, status: 'ok', candidateCount: n, expected, over, ambiguous: (res.link && res.link.ambiguous) || 0 };
+      }
+    } catch (e) {
+      _relocateScanResults[key] = { displayName: t.displayName, status: 'error', error: e.message };
+    }
+    _relocateUpdateRow(i);
+    scanned++;
+    setProg(`스캔 ${scanned}/${_relocateTabs.length} · 대상 있는 탭 ${withTargets}`);
+    _relocateSaveScan();
+  }
+  setProg(`스캔 완료 ${scanned}/${_relocateTabs.length} · 대상 있는 탭 ${withTargets}`);
+  _relocateSaveScan();
+}
+
+// 스캔 목록에서 한 탭만 실제 이동(apply) — 과대매칭(over)은 차단
+async function _relocateApplyTab(i) {
+  const t = _relocateTabs[i];
+  if (!t || !t.folderUrl) return;
+  const key = _relocateTabKey(t);
+  const prev = _relocateScanResults[key];
+  if (prev && prev.over) { showToast('과대매칭 의심 — 단일 탭 모드에서 정확한 키워드로 확인 후 이동하세요', 'error'); return; }
+  const btn = document.getElementById('rlcScanBtn_' + i);
+  if (btn) { btn.disabled = true; btn.textContent = '이동중'; }
+  const sinceRaw = (document.getElementById('rlcSince').value || '').trim();
+  const sinceDate = sinceRaw ? (sinceRaw + 'T00:00:00Z') : undefined;
+  try {
+    const res = await gasPost({
+      action: 'relocateOrphanReviews',
+      sheetId: t.sheetId, tabName: t.tabName,
+      reviewFolderUrl: t.folderUrl,
+      brandKeywords: _relocateDeriveKeywords(t.tabName),
+      requireRoster: true, sinceDate, dryRun: false,
+    });
+    if (!res || res.ok === false) {
+      _relocateScanResults[key] = Object.assign({}, prev, { status: 'error', error: (res && res.error) || '' });
+      _relocateUpdateRow(i); _relocateSaveScan(); return;
+    }
+    const lk = res.link || {};
+    _relocateScanResults[key] = { displayName: t.displayName, status: 'moved', movedCount: res.movedCount, linked: lk.linked || 0 };
+    _relocateUpdateRow(i); _relocateSaveScan();
+    showToast(`${t.displayName}: ${res.movedCount}건 이동`, 'success');
+  } catch (e) {
+    _relocateScanResults[key] = Object.assign({}, prev, { status: 'error', error: e.message });
+    _relocateUpdateRow(i); _relocateSaveScan();
+  }
+}

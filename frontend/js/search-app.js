@@ -3585,7 +3585,43 @@ function initOrderFormMode() {
     });
   }
 
+  // ★ 저장된 계좌정보 자동완성 (모든 탭 공통 — 계좌 오타 방지)
+  _prefillBankFromProfile().catch(e => console.warn("[bank prefill]", e.message));
+
   return true;
+}
+
+/** 저장된 리뷰어 계좌정보를 구매양식 1번 카드에 자동완성 (빈 칸만) */
+async function _prefillBankFromProfile() {
+  const bankEl   = document.getElementById("of_bank");
+  const acctEl   = document.getElementById("of_account");
+  const holderEl = document.getElementById("of_depositor");
+  if (!bankEl && !acctEl && !holderEl) return;
+
+  const isEmpty = el => el && !el.value.trim();
+
+  let profile = window._reviewerProfile;
+  if (!profile || (!profile.bankAccount && !profile.bankName)) {
+    const authRaw = localStorage.getItem("rapp_reviewer_auth");
+    if (!authRaw) return;
+    let auth;
+    try { auth = JSON.parse(authRaw); } catch(_) { return; }
+    if (!auth || Date.now() > (auth.expAt || 0)) return;
+    const name = auth.name || "", phone8 = auth.phone8 || "";
+    if (!name || !phone8) return;
+    try {
+      const res = await gasGet({ action: "getReviewerProfile", name, phone8 });
+      if (res?.ok && res.profile) {
+        profile = { ...(window._reviewerProfile || {}), ...res.profile };
+        window._reviewerProfile = profile;
+      }
+    } catch(_) { return; }
+  }
+  if (!profile) return;
+
+  if (isEmpty(bankEl)   && profile.bankName)      bankEl.value   = profile.bankName;
+  if (isEmpty(acctEl)   && profile.bankAccount)   acctEl.value   = profile.bankAccount;
+  if (isEmpty(holderEl) && profile.accountHolder) holderEl.value = profile.accountHolder;
 }
 
 
@@ -6766,6 +6802,27 @@ async function submitOrderForm() {
     } catch(incErr) { console.warn("[saveIncomeInfo] 오류:", incErr.message); }
   }
 
+  // ★ 입금받을 계좌정보 저장 (1번 카드 은행/계좌/예금주 기준, 리뷰어 마스터에 영구 저장, 백그라운드)
+  if (successCount > 0 && (firstBank || firstAccount || firstDepositor)) {
+    try {
+      const authRawBank = localStorage.getItem("rapp_reviewer_auth");
+      let authBank;
+      try { authBank = JSON.parse(authRawBank || "{}"); } catch(_) { authBank = {}; }
+      const myPhone8Bank = authBank.phone8 || "";
+      if (myPhone8Bank) {
+        gasPost({
+          action:        "saveBankInfo",
+          phone8:        myPhone8Bank,
+          bankName:      firstBank,
+          bankAccount:   firstAccount,
+          accountHolder: firstDepositor,
+        })
+          .then(r => { if (r?.ok) console.log("[saveBankInfo] 저장 완료"); })
+          .catch(e => console.warn("[saveBankInfo] 저장 실패:", e.message));
+      }
+    } catch(bankErr) { console.warn("[saveBankInfo] 오류:", bankErr.message); }
+  }
+
   // 캡처폴더 URL 저장 (첫 번째 성공건)
   if (firstCaptureFolderUrl) {
     try {
@@ -8866,6 +8923,7 @@ function showCenterAlert(msg, duration=4000) {
   const overlay = document.createElement("div");
   overlay.id = "_centerAlertOverlay";
   overlay.style.cssText = "position:fixed;inset:0;z-index:99999;display:flex;align-items:center;justify-content:center;background:rgba(0,0,0,.35);padding:20px;animation:fadeIn .2s";
+  overlay.classList.add("toss-overlay");
   overlay.innerHTML = `<div style="background:#fff;border-radius:14px;padding:24px 28px;max-width:320px;width:100%;text-align:center;box-shadow:0 8px 32px rgba(0,0,0,.18)">
     <div style="font-size:.95rem;font-weight:600;color:#DC2626;line-height:1.5;word-break:keep-all">${msg}</div>
     <button onclick="this.closest('#_centerAlertOverlay').remove()" style="margin-top:18px;padding:10px 32px;border:none;border-radius:8px;background:#DC2626;color:#fff;font-size:.9rem;font-weight:600;cursor:pointer">확인</button>

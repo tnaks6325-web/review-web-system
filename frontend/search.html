@@ -4,13 +4,21 @@
   <meta charset="UTF-8"/>
   <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
   <title>아이에이리뷰</title>
+  <!-- PWA -->
+  <link rel="manifest" href="/manifest.webmanifest"/>
+  <meta name="theme-color" content="#3182f6"/>
+  <link rel="apple-touch-icon" href="/icons/apple-touch-icon-180.png"/>
+  <meta name="apple-mobile-web-app-capable" content="yes"/>
+  <meta name="mobile-web-app-capable" content="yes"/>
+  <meta name="apple-mobile-web-app-status-bar-style" content="default"/>
+  <meta name="apple-mobile-web-app-title" content="iA리뷰"/>
   <!-- OG/SNS 공유 미리보기 -->
-  <meta property="og:title" content="아이에이리뷰"/>
-  <meta property="og:description" content="본인 이름으로 참여 내역을 확인하세요."/>
+  <meta property="og:title" content="아이에이크루"/>
+  <meta property="og:description" content="쉽고 편한 리뷰체험단"/>
   <meta property="og:type" content="website"/>
   <meta name="twitter:card" content="summary"/>
-  <meta name="twitter:title" content="아이에이리뷰"/>
-  <meta name="twitter:description" content="구매 정보를 입력하고 제출해주세요."/>
+  <meta name="twitter:title" content="아이에이크루"/>
+  <meta name="twitter:description" content="쉽고 편한 리뷰체험단"/>
   <!-- Font Awesome (jsDelivr CDN) -->
   <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@fortawesome/fontawesome-free@6.4.0/css/all.min.css"/>
   <!-- Google Fonts -->
@@ -46,7 +54,7 @@ body{ background:#F4F5F8 !important; letter-spacing:-.01em; }
 </style>
 <link rel="stylesheet" href="css/toss-theme.css"/>
 </head>
-<body>
+<body class="toss-ui">
 <!-- ★ 직접 제출 모드: index.html에서 리뷰 카드 클릭 시 중간 화면을 보이지 않게 처리 -->
 <script>
 if (sessionStorage.getItem("iad_direct_submit_items")) {
@@ -1567,5 +1575,6 @@ if (sessionStorage.getItem("iad_direct_submit_items")) {
   </div>
 </div>
 
+<script src="js/pwa.js"></script>
 </body>
 </html>

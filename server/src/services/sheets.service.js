@@ -58,6 +58,41 @@ function _findSheetInMeta(sheetsArr, { gid, tabName }) {
   return null;
 }
 
+// ═══════════════════════════════════════════════════════════
+// ★ 구조 메타(gid↔title, gridProperties) 캐시 (읽기 쿼터 절감)
+//
+// GID 모드 읽기/쓰기는 매 호출마다 spreadsheets.get(=읽기 요청 1회)으로
+// gid↔title 매핑·행수를 조회했다. 동시 제출 버스트 때 이 숨은 읽기가
+// 쿼터를 추가 소모하는 주범 중 하나였다. 구조 메타는 자주 바뀌지 않으므로
+// 짧은 TTL로 캐시해 호출당 읽기를 제거한다.
+//   - 캐시되는 행수(rowCount)가 stale해도 안전: 너무 작으면 여유 행을
+//     약간 더 추가(무해), 너무 크면 기존 행에 그대로 기입(정상).
+//   - 행을 추가(appendDimension)한 직후엔 캐시를 무효화해 다음 쓰기가
+//     늘어난 행수를 반영하도록 한다.
+// ═══════════════════════════════════════════════════════════
+const _metaCache = new Map(); // spreadsheetId → { sheets, ts }
+const META_CACHE_TTL = 60 * 1000; // 60초
+
+async function _getCachedSheetMeta(spreadsheetId) {
+  const cached = _metaCache.get(spreadsheetId);
+  if (cached && Date.now() - cached.ts < META_CACHE_TTL) {
+    return cached.sheets;
+  }
+  const meta = await sheets.spreadsheets.get({
+    spreadsheetId,
+    includeGridData: false,
+    fields: 'sheets(properties(sheetId,title,gridProperties))',
+  });
+  const sheetsArr = meta.data.sheets || [];
+  _metaCache.set(spreadsheetId, { sheets: sheetsArr, ts: Date.now() });
+  return sheetsArr;
+}
+
+/** 행 추가 등 구조 변경 후 캐시 무효화 */
+function _invalidateMeta(spreadsheetId) {
+  _metaCache.delete(spreadsheetId);
+}
+
 /**
  * 시트 전체 데이터 읽기 (GAS: SpreadsheetApp.openById + getValues)
  *
@@ -99,20 +134,23 @@ async function _readSheetByGridData(spreadsheetId, range, opts = {}) {
   const cellRange = range.replace(/^'[^']*(?:''[^']*)*'!/, '');
   const { startRow, endRow, startCol, endCol } = _parseA1Range(cellRange);
 
-  // 스프레드시트 메타에서 GID 또는 탭 이름으로 검색
-  const meta = await sheets.spreadsheets.get({
-    spreadsheetId,
-    includeGridData: false,
-    fields: 'sheets(properties(sheetId,title,gridProperties))',
-  });
+  // 스프레드시트 메타에서 GID 또는 탭 이름으로 검색 (캐시)
+  const metaSheets = await _getCachedSheetMeta(spreadsheetId);
 
-  const targetSheet = _findSheetInMeta(meta.data.sheets || [], { gid: opts.gid, tabName });
+  const targetSheet = _findSheetInMeta(metaSheets, { gid: opts.gid, tabName });
   if (!targetSheet) {
-    const available = (meta.data.sheets || []).map(s => `"${s.properties.title}"`).join(', ');
+    const available = metaSheets.map(s => `"${s.properties.title}"`).join(', ');
     throw new Error(`시트를 찾을 수 없습니다: ${tabName || 'gid:' + opts.gid} (사용 가능: ${available})`);
   }
 
   const sheetId = targetSheet.properties.sheetId;
+  // ★ maxRows/maxCols는 캐시된 그리드 크기(_getCachedSheetMeta, 60s).
+  //   요청 범위를 그리드 경계로 클램프해 GridCoordinate 오류를 막는다.
+  //   주의(읽기측 staleness): 캐시 rowCount가 실제보다 작으면(우리 쓰기 외 경로 —
+  //   구글 UI 수동 행추가/타 인스턴스 — 로 그리드가 커진 경우) 읽기가 그 행수로
+  //   잘릴 수 있다. 단 ① 우리 쓰기는 appendDimension 시 캐시를 무효화하고,
+  //   ② 핫패스 읽기는 A1:ZZ500이라 그리드(보통 ≥1000행)보다 작아 클램프가 무의미하며,
+  //   ③ 60s 후 자동 갱신되어 self-heal 된다. 근본 제거는 Phase 1(행배정 DB 이관).
   const maxRows = targetSheet.properties.gridProperties?.rowCount || 1000;
   const maxCols = targetSheet.properties.gridProperties?.columnCount || 26;
 
@@ -230,15 +268,11 @@ async function _writeSheetByGridData(spreadsheetId, range, values, opts = {}) {
   const cellRange = range.replace(/^'[^']*(?:''[^']*)*'!/, '');
   const { startRow, startCol } = _parseA1Range(cellRange);
 
-  // 메타에서 GID 또는 탭 이름으로 검색
-  const meta = await sheets.spreadsheets.get({
-    spreadsheetId,
-    includeGridData: false,
-    fields: 'sheets(properties(sheetId,title,gridProperties))',
-  });
-  const targetSheet = _findSheetInMeta(meta.data.sheets || [], { gid: opts.gid, tabName });
+  // 메타에서 GID 또는 탭 이름으로 검색 (캐시)
+  const metaSheets = await _getCachedSheetMeta(spreadsheetId);
+  const targetSheet = _findSheetInMeta(metaSheets, { gid: opts.gid, tabName });
   if (!targetSheet) {
-    const available = (meta.data.sheets || []).map(s => `"${s.properties.title}"`).join(', ');
+    const available = metaSheets.map(s => `"${s.properties.title}"`).join(', ');
     throw new Error(`시트를 찾을 수 없습니다: ${tabName || 'gid:' + opts.gid} (사용 가능: ${available})`);
   }
 
@@ -257,8 +291,10 @@ async function _writeSheetByGridData(spreadsheetId, range, values, opts = {}) {
 
   // 요청 배열 구성: 행 부족 시 appendDimension으로 행 추가
   const requests = [];
+  let appendedRows = false;
   if (requiredRows > currentRowCount) {
     const rowsToAdd = requiredRows - currentRowCount + 10; // 여유 10행 추가
+    appendedRows = true;
     requests.push({
       appendDimension: {
         sheetId,
@@ -284,6 +320,9 @@ async function _writeSheetByGridData(spreadsheetId, range, values, opts = {}) {
     spreadsheetId,
     requestBody: { requests },
   });
+
+  // 행 수가 늘었으면 캐시 무효화 (다음 쓰기가 늘어난 행수 반영)
+  if (appendedRows) _invalidateMeta(spreadsheetId);
 }
 
 /**
@@ -321,15 +360,11 @@ async function appendSheet(spreadsheetId, range, values, opts = {}) {
       const existing = await _readSheetByGridData(spreadsheetId, `'${tabName || '_'}'!A1:A1000`, opts);
       const nextRow = (existing ? existing.length : 0) + 1;
 
-      // 메타에서 GID 또는 탭 이름으로 검색
-      const meta = await sheets.spreadsheets.get({
-        spreadsheetId,
-        includeGridData: false,
-        fields: 'sheets(properties(sheetId,title,gridProperties))',
-      });
-      const targetSheet = _findSheetInMeta(meta.data.sheets || [], { gid: opts.gid, tabName });
+      // 메타에서 GID 또는 탭 이름으로 검색 (캐시)
+      const metaSheets = await _getCachedSheetMeta(spreadsheetId);
+      const targetSheet = _findSheetInMeta(metaSheets, { gid: opts.gid, tabName });
       if (!targetSheet) {
-        const available = (meta.data.sheets || []).map(s => `"${s.properties.title}"`).join(', ');
+        const available = metaSheets.map(s => `"${s.properties.title}"`).join(', ');
         throw new Error(`시트를 찾을 수 없습니다: ${tabName || 'gid:' + opts.gid} (사용 가능: ${available})`);
       }
 
@@ -348,8 +383,10 @@ async function appendSheet(spreadsheetId, range, values, opts = {}) {
 
       // 요청 배열: 행 부족 시 appendDimension으로 자동 확장
       const requests = [];
+      let appendedRows = false;
       if (requiredRows > currentRowCount) {
         const rowsToAdd = requiredRows - currentRowCount + 10; // 여유 10행
+        appendedRows = true;
         requests.push({
           appendDimension: {
             sheetId,
@@ -375,6 +412,7 @@ async function appendSheet(spreadsheetId, range, values, opts = {}) {
         spreadsheetId,
         requestBody: { requests },
       });
+      if (appendedRows) _invalidateMeta(spreadsheetId);
       return;
     }
   }
@@ -692,20 +730,17 @@ async function batchUpdateSheet(spreadsheetId, data, valueInputOption = 'RAW', o
  * 실패 시 기존 순차 방식으로 자동 폴백 (안전장치)
  */
 async function _batchWriteByGrid(spreadsheetId, data, opts = {}) {
+  let appendedRows = false;
   try {
-    // 1. 메타 조회 (GID → sheetId 확인, 행 수 확인)
-    const meta = await sheets.spreadsheets.get({
-      spreadsheetId,
-      includeGridData: false,
-      fields: 'sheets(properties(sheetId,title,gridProperties))',
-    });
+    // 1. 메타 조회 (GID → sheetId 확인, 행 수 확인) — 캐시
+    const metaSheets = await _getCachedSheetMeta(spreadsheetId);
 
     // 첫 번째 data 항목에서 탭명 추출
     const firstRange = data[0]?.range || '';
     const tabMatch = firstRange.match(/^'([^']*(?:''[^']*)*)'!/);
     const tabName = tabMatch ? tabMatch[1].replace(/''/g, "'") : null;
 
-    const targetSheet = _findSheetInMeta(meta.data.sheets || [], { gid: opts.gid, tabName });
+    const targetSheet = _findSheetInMeta(metaSheets, { gid: opts.gid, tabName });
     if (!targetSheet) {
       throw new Error(`시트를 찾을 수 없습니다: ${tabName || 'gid:' + opts.gid}`);
     }
@@ -747,6 +782,7 @@ async function _batchWriteByGrid(spreadsheetId, data, opts = {}) {
     // 3. 행 부족 시 자동 추가
     if (maxRequiredRow > currentRowCount) {
       const rowsToAdd = maxRequiredRow - currentRowCount + 10;
+      appendedRows = true;
       requests.unshift({
         appendDimension: {
           sheetId,
@@ -761,6 +797,9 @@ async function _batchWriteByGrid(spreadsheetId, data, opts = {}) {
       spreadsheetId,
       requestBody: { requests },
     });
+
+    // 행 수가 늘었으면 캐시 무효화
+    if (appendedRows) _invalidateMeta(spreadsheetId);
 
   } catch (batchErr) {
     // ★ 안전 폴백: batch 실패 시 기존 순차 방식으로 재시도

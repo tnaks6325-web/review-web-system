@@ -84,7 +84,7 @@ body{ letter-spacing:-.01em; }
 </style>
 <link rel="stylesheet" href="css/toss-theme.css"/>
 </head>
-<body>
+<body class="toss-ui">
 
 <!-- ────────── 로딩 오버레이 ────────── -->
 <div id="loadingOverlay" class="loading-overlay" style="display:none">
@@ -341,6 +341,21 @@ body{ letter-spacing:-.01em; }
             <input type="checkbox" id="chkForceSync" style="width:13px;height:13px;accent-color:#EA580C;cursor:pointer">
             <span><b>강제 재설정</b> — 기존 URL도 덮어쓰기</span>
           </label>
+
+          <!-- 폴더 찾기 & 재연결 -->
+          <div style="margin-top:10px;border-top:1px dashed #E5E7EB;padding-top:8px">
+            <div style="font-size:.75rem;font-weight:600;color:#374151;margin-bottom:4px">
+              <i class="fas fa-link" style="color:#7C3AED"></i> 폴더 찾기 &amp; 재연결
+              <span style="font-size:.66rem;font-weight:400;color:#6B7280">(사라진 폴더를 탭명으로 검색 → 확인 → 재연결)</span>
+            </div>
+            <div style="font-size:.66rem;color:#6B7280;line-height:1.45;margin-bottom:5px">
+              캡처/리뷰 폴더 링크가 비었거나 위치가 바뀐 탭을, Drive에서 실제 폴더를 찾아 다시 연결합니다.
+            </div>
+            <button id="btnFolderRelink" onclick="openFolderRelink()"
+              style="width:100%;padding:8px;background:#F5F3FF;color:#6D28D9;border:1px solid #DDD6FE;border-radius:6px;font-size:.78rem;font-weight:600;cursor:pointer;display:flex;align-items:center;justify-content:center;gap:6px">
+              <i class="fas fa-magnifying-glass-location"></i> 폴더 찾기 / 재연결 열기
+            </button>
+          </div>
         </div>
       </div>
 
@@ -606,6 +621,14 @@ body{ letter-spacing:-.01em; }
 
         <!-- 외부 링크 그룹 (항상 표시) -->
         <div class="admin-header-actions" style="gap:5px">
+          <!-- ▼▼▼ [임시] 드라이브 용량 이관 버튼 — 전부 tnaks6325 이관 완료 후 이 블록 삭제 ▼▼▼ -->
+          <style>@keyframes driveOwnPulse{0%,100%{box-shadow:0 3px 10px rgba(245,158,11,.45)}50%{box-shadow:0 3px 18px rgba(245,158,11,.85)}}</style>
+          <button id="btnDriveOwnership" onclick="openDriveOwnershipModal()" title="구글드라이브 용량 귀속 점검·이관 (임시)"
+            style="padding:11px 20px;background:linear-gradient(135deg,#FACC15,#F59E0B);color:#7C2D12;border:2px solid #D97706;border-radius:12px;font-size:.9rem;font-weight:800;cursor:pointer;display:inline-flex;align-items:center;gap:7px;animation:driveOwnPulse 2s ease-in-out infinite;margin-right:4px">
+            <i class="fas fa-hdd"></i> 드라이브 용량 이관
+            <span style="background:#7C2D12;color:#FDE68A;font-size:.62rem;padding:2px 6px;border-radius:7px;font-weight:700">임시</span>
+          </button>
+          <!-- ▲▲▲ [임시] 드라이브 용량 이관 버튼 끝 ▲▲▲ -->
           <button class="btn-header-sq btn-header-portal" onclick="openWorkPortal()" title="업무포털 새창 열기 (자동 로그인)">
             <i class="fas fa-briefcase"></i>
             <span>업무포털</span>
@@ -617,6 +640,10 @@ body{ letter-spacing:-.01em; }
           <button class="btn-header-sq btn-header-review" onclick="window.open('search.html','_blank')" title="리뷰제출페이지 바로가기">
             <i class="fas fa-external-link-alt"></i>
             <span>리뷰제출</span>
+          </button>
+          <button class="btn-header-sq btn-header-mirror" onclick="openRawMirror()" title="구글시트 RAW 미러 — 전체 미러링 실행 + 시트별 데이터 뷰어 (자동 로그인)">
+            <i class="fas fa-database"></i>
+            <span>RAW 미러</span>
           </button>
 
           <!-- ▸ 탭별 컨텍스트 버튼 영역 -->
@@ -717,6 +744,9 @@ body{ letter-spacing:-.01em; }
 
             <button class="btn-sm" onclick="openDedupeSelector()" style="font-size:.78rem;background:#D97706;color:#fff;border:none;border-radius:6px;padding:5px 12px;cursor:pointer" title="리뷰폴더 중복 파일 정리">
               <i class="fas fa-copy"></i> 리뷰폴더 중복정리
+            </button>
+            <button class="btn-sm" onclick="openReviewRelocate()" style="font-size:.78rem;background:#7C3AED;color:#fff;border:none;border-radius:6px;padding:5px 12px;cursor:pointer" title="내 드라이브 루트에 흩어진 리뷰 캡처를 해당 탭 [리뷰] 폴더로 모아 이동">
+              <i class="fas fa-folder-tree"></i> 리뷰 캡처 정리
             </button>
             <button class="btn-sm" onclick="exportTabDashCSV()" style="font-size:.78rem;background:#0ca678;color:#fff;border:none;border-radius:6px;padding:5px 12px;cursor:pointer">
               <i class="fas fa-file-csv"></i> CSV 내보내기
@@ -1172,6 +1202,9 @@ body{ letter-spacing:-.01em; }
           </button>
         </div>
 
+        <!-- 정리 요약 (총건수 / 이체은행별 건수·금액 / 총금액) -->
+        <div id="paySummary" class="payment-summary" style="display:none"></div>
+
         <!-- 미리보기 테이블 -->
         <div class="payment-preview-wrap" id="payPreviewWrap" style="display:none">
           <div class="payment-preview-header">
@@ -1183,13 +1216,17 @@ body{ letter-spacing:-.01em; }
               <thead>
                 <tr>
                   <th class="col-check"><input type="checkbox" id="paySelectAll" onchange="togglePaySelectAll(this)" title="전체 선택/해제"></th>
+                  <th>결제방식</th>
+                  <th>이체은행</th>
+                  <th class="col-tab">탭명</th>
+                  <th>상품명</th>
+                  <th>입금자명</th>
                   <th>은행</th>
-                  <th>계좌번호</th>
+                  <th class="col-account">계좌번호</th>
                   <th>예금주</th>
                   <th class="col-amount">결제금액</th>
-                  <th>입금명</th>
-                  <th class="col-tab">탭</th>
-                  <th>캠페인</th>
+                  <th>소득명의</th>
+                  <th>주민등록번호</th>
                 </tr>
               </thead>
               <tbody id="payPreviewBody"></tbody>
@@ -1202,6 +1239,9 @@ body{ letter-spacing:-.01em; }
           <span class="payment-sel-count" id="paySelCount">0건 선택</span>
           <button class="payment-dl-btn" id="payDlBtn" onclick="downloadPaymentExcel()">
             <i class="fas fa-file-excel"></i> 이체파일 다운로드
+          </button>
+          <button class="payment-dl-btn" id="payDlOverviewBtn" onclick="downloadPaymentOverviewExcel()" style="background:#475569">
+            <i class="fas fa-table"></i> 전체내역 다운로드
           </button>
           <button class="payment-done-btn" id="payDoneBtn" onclick="openPaymentConfirm()">
             <i class="fas fa-check-circle"></i> 이체 완료 처리

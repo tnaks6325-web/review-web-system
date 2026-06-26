@@ -1,6 +1,7 @@
 const express = require('express');
 const router = express.Router();
 const { writeSheet, readSheet, appendSheet, getSpreadsheetMeta, batchReadSheet, batchUpdateSheet } = require('../services/sheets.service');
+const { throttledCall } = require('../utils/sheetsThrottle');
 const { enqueue } = require('../services/syncQueue.service');
 const { logAbnormal } = require('../services/errorLog.service');
 const { recordParticipationLink } = require('../services/participation.service');
@@ -49,6 +50,30 @@ const HEADER_CACHE_TTL = 5 * 60 * 1000; // 5분
 const tabDataCache = new Map();
 const TAB_DATA_CACHE_TTL = 3 * 60 * 1000; // 3분
 
+// ═══════════════════════════════════════════════════════════
+// ★ 탭별 직렬화 락 (구매양식 시트쓰기 동시폭주 방지)
+//
+// 같은 탭에 동시 제출이 몰리면 각자 A1:ZZ500을 통읽기(썬더링 herd)하고
+// 같은 빈 행을 동시에 골라 경합/중복을 만든다. 탭 단위로 백그라운드
+// 시트쓰기를 한 번에 하나씩 직렬화하면:
+//   - 첫 작업만 시트를 읽어 캐시를 채우고, 나머지는 캐시 히트 → 읽기 폭주 제거
+//   - 직전 쓰기가 반영된 뒤 다음 빈행을 고름 → 같은행 경합/중복 방지
+// (단일 프로세스 내 직렬화. 다중 인스턴스 환경은 쓰기 직전 race-check가 보조.)
+// ═══════════════════════════════════════════════════════════
+const _tabLocks = new Map(); // key → 직전 작업의 Promise(tail)
+
+function withTabLock(key, fn) {
+  const prev = _tabLocks.get(key) || Promise.resolve();
+  // 직전 작업의 성공/실패와 무관하게 이어서 실행
+  const run = prev.then(fn, fn);
+  // 락 체인의 꼬리는 항상 settled 상태로 유지 (다음 대기자가 throw에 막히지 않도록)
+  const tail = run.then(() => {}, () => {});
+  _tabLocks.set(key, tail);
+  // 맵 무한 증식 방지: 내가 마지막이면 정리
+  tail.then(() => { if (_tabLocks.get(key) === tail) _tabLocks.delete(key); });
+  return run;
+}
+
 // 헤더 행 자동 감지용 키워드 (smartBuild _isDataTabRow와 동일 로직)
 const HEADER_DETECT_KEYWORDS = ['번호', '주문자', '수취인', '수취인명', '성함', '이름', '성명', '신청자', '연락처', '전화번호', '아이디', '주소'];
 
@@ -89,7 +114,8 @@ async function getCachedHeaders(sheetId, tabName, opts = {}) {
 
   // 상위 50행을 읽어서 실제 헤더 행을 동적으로 탐색
   // ★ opts.gid가 있으면 GID 기반 조회로 탭 이름 변경에도 안전
-  const allRows = await readSheet(sheetId, `'${tabName}'!A1:ZZ50`, opts);
+  // ★ 글로벌 throttle로 감싸 읽기 쿼터 초과를 구조적으로 차단 (한도 근접 시 대기)
+  const allRows = await throttledCall(() => readSheet(sheetId, `'${tabName}'!A1:ZZ50`, opts));
   if (!allRows || allRows.length === 0) return null;
 
   let headerRow = null;
@@ -131,7 +157,8 @@ async function getCachedTabData(sheetId, tabName, opts = {}) {
 
   // 전체 탭 데이터 읽기 (최대 500행)
   // ★ opts.gid가 있으면 GID 기반 조회로 탭 이름 변경에도 안전
-  const allRows = await readSheet(sheetId, `'${tabName}'!A1:ZZ500`, opts);
+  // ★ 글로벌 throttle로 감싸 읽기 쿼터 초과를 구조적으로 차단 (한도 근접 시 대기)
+  const allRows = await throttledCall(() => readSheet(sheetId, `'${tabName}'!A1:ZZ500`, opts));
   if (!allRows || allRows.length === 0) return null;
 
   // 헤더 행 탐지 (상위 설정 영역이 30행 이상일 수 있으므로 50행까지 탐색)
@@ -505,7 +532,8 @@ router.post('/review', async (req, res, next) => {
 
           const colLetter = getColLetter(colIdx);
           const range = `'${tabName}'!${colLetter}${rowIndex}`;
-          await writeSheet(sheetId, range, [[submitValue]], sheetOpts);
+          // ★ 글로벌 throttle (멱등 쓰기 — 같은 셀에 고정값 기록이라 재시도/중복 안전)
+          await throttledCall(() => writeSheet(sheetId, range, [[submitValue]], sheetOpts));
           logger.info(`[submit/review:bg] Sheets 쓰기 성공 (sheet=${sheetId}, tab=${tabName}, row=${rowIndex})`);
 
           // ── 비고/포스팅 컬럼 쓰기 ──
@@ -518,7 +546,7 @@ router.post('/review', async (req, res, next) => {
             if (memoColIdx >= 0) {
               const memoColLetter = getColLetter(memoColIdx);
               const memoRange = `'${tabName}'!${memoColLetter}${rowIndex}`;
-              await writeSheet(sheetId, memoRange, [[memo.trim()]], sheetOpts);
+              await throttledCall(() => writeSheet(sheetId, memoRange, [[memo.trim()]], sheetOpts));
               logger.info(`[submit/review:bg] 비고 컬럼 쓰기 성공 (col=${headers[memoColIdx]}, colIdx=${memoColIdx}, row=${rowIndex})`);
             } else {
               logger.warn(`[submit/review:bg] 비고/포스팅 컬럼을 찾을 수 없음 (headers: ${headers.slice(0, 30).join(',')})`);
@@ -681,10 +709,8 @@ router.post('/order', async (req, res, next) => {
     });
 
     // ── ★ Step 3: 백그라운드 Sheets 쓰기 (응답 후 비동기 처리) ──
-    // 15초 타임아웃으로 빠르게 시도, 실패 시 큐에 등록
+    // 탭 단위 직렬화 + 글로벌 throttle로 처리(타임아웃 race 없음), 실패 시 큐에 등록
     // ★ 시트 기록 직전 중복 필터링: 같은 날 + 수취인+연락처+주소 일치 시 쓰기 생략
-    const SHEETS_TIMEOUT_MS = 15000;
-
     setImmediate(async () => {
       try {
         // ── 중복 필터링 (시트 기록 시점): 같은 날 + 수취인+연락처+주소 일치 시 쓰기 생략 ──
@@ -704,6 +730,8 @@ router.post('/order', async (req, res, next) => {
           logger.warn(`[submit/order:bg] 중복 검사 오류 (무시): ${dupErr.message}`);
         }
 
+        // ★ 탭 단위 직렬화: 같은 탭 동시 제출의 시트 읽기/쓰기 폭주·행경합 방지
+        await withTabLock(`${sheetId}||${tabName}`, async () => {
         const sheetsPromise = (async () => {
           // ★ 빈 행 탐색 후 writeSheet로 기입 (appendSheet는 마지막 데이터 행 다음에 추가하므로 중간 빈 행을 건너뜀)
           // getCachedTabData로 전체 데이터를 읽어 헤더 다음 첫 번째 빈 행을 찾음
@@ -884,7 +912,7 @@ router.post('/order', async (req, res, next) => {
           try {
             const checkColIdx = phoneColIdx >= 0 ? phoneColIdx : (addressColIdx >= 0 ? addressColIdx : 0);
             const checkRange = `'${tabName}'!${getColLetter(checkColIdx)}${targetRow}`;
-            const checkData = await readSheet(sheetId, checkRange, sheetOpts);
+            const checkData = await throttledCall(() => readSheet(sheetId, checkRange, sheetOpts));
             const existingVal = checkData && checkData[0] ? String(checkData[0][0] || '').trim() : '';
             if (existingVal) {
               // 이미 다른 제출이 들어간 경우 → 캐시 무효화 후 재탐색
@@ -912,7 +940,9 @@ router.post('/order', async (req, res, next) => {
               range: `'${tabName}'!${getColLetter(pair.col)}${targetRow}`,
               values: [[pair.val]],
             }));
-            await batchUpdateSheet(sheetId, batchData, 'RAW', sheetOpts);
+            // ★ 글로벌 throttle: 다중 탭 동시 제출의 쓰기까지 단일 50/분 윈도우 공유
+            //   (탭락은 같은 탭만 직렬화하므로, 서로 다른 탭의 쓰기는 throttle이 캡)
+            await throttledCall(() => batchUpdateSheet(sheetId, batchData, 'RAW', sheetOpts));
           }
 
           // 성공 시 캐시 무효화
@@ -927,14 +957,15 @@ router.post('/order', async (req, res, next) => {
           });
         })();
 
-        // 15초 타임아웃 적용
-        const timeoutPromise = new Promise((_, reject) =>
-          setTimeout(() => reject(new Error('Sheets 쓰기 타임아웃 (15초)')), SHEETS_TIMEOUT_MS)
-        );
-
-        await Promise.race([sheetsPromise, timeoutPromise]);
+        // ★ 구매양식은 타임아웃 race를 두지 않는다(직렬화+throttle로 처리).
+        //   15초 race를 두면 throttle 백프레셔(대기)가 타임아웃을 유발해 큐로 넘기고,
+        //   그 사이 detached 쓰기가 뒤늦게 성공하면 같은 주문이 다음 빈행에 한 번 더
+        //   기록돼 "중복 행"이 생긴다(이번 사고의 증상). 따라서 throttled 쓰기를
+        //   그대로 await: 성공이면 단일 기록, 실패면 throw → 아래 catch에서 큐 등록.
+        await sheetsPromise;
+        }); // ── withTabLock 끝 (탭 직렬화) ──
       } catch (bgErr) {
-        // Sheets 쓰기 실패/타임아웃 → 큐에 등록 (자동 재시도)
+        // Sheets 쓰기 실패 → 큐에 등록 (자동 재시도)
         logger.warn(`[submit/order:bg] Sheets 쓰기 실패 → 큐 등록: ${bgErr.message}`);
         logAbnormal({
           flow: 'order_submit', step: 'sheet_write', severity: 'warn', error: bgErr,
