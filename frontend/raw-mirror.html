@@ -1,0 +1,440 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+  <meta charset="UTF-8"/>
+  <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+  <title>구글시트 RAW 미러 — 리뷰웹시스템</title>
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@fortawesome/fontawesome-free@6.4.0/css/all.min.css"/>
+  <link href="https://fonts.googleapis.com/css2?family=Noto+Sans+KR:wght@400;500;600;700&display=swap" rel="stylesheet"/>
+  <script src="api.js"></script>
+  <style>
+    :root{
+      --p:#3182f6; --p-d:#1b64da; --p-l:#e8f1fe;
+      --bg:#f6f8fd; --card:#fff; --border:#e6eaf3; --border-d:#d6dcec;
+      --t1:#15213a; --t2:#46506b; --t3:#97a0b5;
+      --ok:#10b981; --warn:#f59e0b; --err:#dc2626;
+    }
+    *{ box-sizing:border-box; }
+    body{ margin:0; font-family:'Noto Sans KR',sans-serif; background:var(--bg); color:var(--t1); letter-spacing:-.01em; }
+    header.topbar{
+      display:flex; align-items:center; gap:12px; padding:12px 18px;
+      background:linear-gradient(135deg,var(--p),var(--p-d)); color:#fff;
+      box-shadow:0 2px 16px rgba(49,130,246,.28); position:sticky; top:0; z-index:10;
+    }
+    header.topbar h1{ font-size:17px; margin:0; font-weight:700; }
+    header.topbar .sub{ font-size:12px; opacity:.85; font-weight:400; }
+    .btn{ border:none; border-radius:10px; padding:9px 16px; font-size:13px; font-weight:600; cursor:pointer; font-family:inherit; transition:.15s; display:inline-flex; align-items:center; gap:7px; }
+    .btn:disabled{ opacity:.55; cursor:not-allowed; }
+    .btn-primary{ background:linear-gradient(135deg,var(--p),var(--p-d)); color:#fff; box-shadow:0 4px 14px rgba(49,130,246,.3); }
+    .btn-primary:hover:not(:disabled){ filter:brightness(1.05); }
+    .btn-ghost{ background:#fff; color:var(--p-d); border:1px solid var(--border-d); }
+    .btn-ghost:hover{ background:var(--p-l); }
+    .btn-sm{ padding:6px 11px; font-size:12px; border-radius:8px; }
+    .wrap{ max-width:1400px; margin:0 auto; padding:16px; }
+    .card{ background:var(--card); border:1px solid var(--border); border-radius:14px; padding:16px 18px; margin-bottom:14px; box-shadow:0 1px 3px rgba(20,33,58,.04); }
+    .control-row{ display:flex; align-items:center; gap:14px; flex-wrap:wrap; }
+    .control-row label{ display:inline-flex; align-items:center; gap:6px; font-size:13px; color:var(--t2); cursor:pointer; }
+    .stat-grid{ display:flex; gap:10px; flex-wrap:wrap; margin-top:12px; }
+    .stat{ background:var(--p-l); border-radius:10px; padding:9px 14px; min-width:92px; }
+    .stat .v{ font-size:19px; font-weight:700; color:var(--p-d); line-height:1.1; }
+    .stat .k{ font-size:11px; color:var(--t3); margin-top:2px; }
+    .runbadge{ font-size:12px; font-weight:600; padding:4px 10px; border-radius:20px; }
+    .runbadge.on{ background:#fff7ed; color:var(--warn); }
+    .runbadge.off{ background:#ecfdf5; color:var(--ok); }
+    .layout{ display:grid; grid-template-columns:340px 1fr; gap:14px; align-items:start; }
+    @media (max-width:880px){ .layout{ grid-template-columns:1fr; } }
+    .sidebar{ max-height:72vh; overflow:auto; }
+    .search-box{ width:100%; padding:9px 12px; border:1px solid var(--border-d); border-radius:10px; font-size:13px; font-family:inherit; margin-bottom:10px; }
+    .sheet-grp{ margin-bottom:6px; }
+    .sheet-grp-h{ font-size:12px; font-weight:700; color:var(--t2); padding:7px 8px; background:#f1f5fb; border-radius:8px; display:flex; justify-content:space-between; align-items:center; }
+    .tab-item{ display:flex; align-items:center; justify-content:space-between; gap:6px; padding:8px 10px; border-radius:8px; cursor:pointer; font-size:13px; color:var(--t1); }
+    .tab-item:hover{ background:var(--p-l); }
+    .tab-item.active{ background:var(--p); color:#fff; }
+    .tab-item .meta{ font-size:11px; color:var(--t3); }
+    .tab-item.active .meta{ color:#dbe9ff; }
+    .badge{ font-size:10px; padding:1px 6px; border-radius:6px; background:#eef1f7; color:var(--t3); margin-left:4px; }
+    .badge.sys{ background:#fef3c7; color:#92400e; }
+    .badge.hid{ background:#e5e7eb; color:#4b5563; }
+    .viewer-head{ display:flex; align-items:center; justify-content:space-between; gap:10px; flex-wrap:wrap; margin-bottom:10px; }
+    .viewer-title{ font-size:15px; font-weight:700; }
+    .viewer-title small{ font-weight:400; color:var(--t3); font-size:12px; }
+    .table-scroll{ overflow:auto; max-height:64vh; border:1px solid var(--border); border-radius:10px; }
+    table.grid{ border-collapse:collapse; font-size:12.5px; white-space:nowrap; }
+    table.grid th, table.grid td{ border:1px solid var(--border); padding:5px 9px; text-align:left; max-width:340px; overflow:hidden; text-overflow:ellipsis; }
+    table.grid thead th{ position:sticky; top:0; background:#f1f5fb; color:var(--t2); font-weight:600; z-index:1; }
+    table.grid td.gutter, table.grid th.gutter{ position:sticky; left:0; background:#fafbfe; color:var(--t3); text-align:right; font-variant-numeric:tabular-nums; z-index:2; }
+    table.grid thead th.gutter{ z-index:3; }
+    table.grid tr.headrow td{ background:#fffbeb; font-weight:600; }
+    .pager{ display:flex; align-items:center; gap:10px; margin-top:10px; font-size:12px; color:var(--t2); }
+    .empty{ text-align:center; color:var(--t3); padding:50px 20px; font-size:13px; }
+    .toast{ position:fixed; top:18px; left:50%; transform:translateX(-50%); color:#fff; padding:10px 20px; border-radius:10px; font-size:13px; font-weight:500; z-index:9999; box-shadow:0 4px 16px rgba(0,0,0,.2); }
+    .hint{ font-size:12px; color:var(--t3); margin-top:8px; line-height:1.5; }
+  </style>
+</head>
+<body>
+  <header class="topbar">
+    <i class="fas fa-database" style="font-size:18px"></i>
+    <div>
+      <h1>구글시트 RAW 미러</h1>
+      <div class="sub">인덱스로 관리되는 모든 시트의 모든 탭·행을 DB로 복사하고, 시트별로 열람합니다</div>
+    </div>
+    <div style="margin-left:auto">
+      <button class="btn btn-ghost btn-sm" onclick="window.close()"><i class="fas fa-xmark"></i> 닫기</button>
+    </div>
+  </header>
+
+  <div class="wrap">
+    <!-- ── 미러링 실행 + 현황 ── -->
+    <div class="card">
+      <div class="control-row">
+        <button id="btnMirror" class="btn btn-primary" onclick="runMirror()">
+          <i class="fas fa-cloud-arrow-down"></i> 전체 미러링 실행
+        </button>
+        <label><input type="checkbox" id="optForce"/> 강제 전체 재미러링 <span class="hint" style="margin:0">(체크섬 무시)</span></label>
+        <label><input type="checkbox" id="optHidden" checked/> 숨김 탭 포함</label>
+        <span id="runBadge" class="runbadge off">대기 중</span>
+        <button class="btn btn-ghost btn-sm" onclick="loadStatus(); loadTabs();" style="margin-left:auto">
+          <i class="fas fa-rotate"></i> 새로고침
+        </button>
+      </div>
+      <div class="stat-grid" id="statGrid"></div>
+      <div class="hint" id="lastRunHint"></div>
+    </div>
+
+    <!-- ── 뷰어 ── -->
+    <div class="layout">
+      <div class="card sidebar">
+        <input type="text" class="search-box" id="tabSearch" placeholder="🔎 시트/탭 이름 검색…" oninput="renderTabList()"/>
+        <div id="tabList"><div class="empty">불러오는 중…</div></div>
+      </div>
+
+      <div class="card">
+        <div class="viewer-head">
+          <div class="viewer-title" id="viewerTitle">탭을 선택하세요</div>
+          <div style="display:flex;align-items:center;gap:8px">
+            <div id="pagerTop"></div>
+            <button id="btnMapping" class="btn btn-ghost btn-sm" onclick="openMapping()" style="display:none"><i class="fas fa-sliders"></i> 컬럼 매핑</button>
+          </div>
+        </div>
+        <div id="viewerBody"><div class="empty"><i class="fas fa-table" style="font-size:28px;opacity:.4"></i><br/><br/>왼쪽에서 시트의 탭을 선택하면<br/>해당 탭의 원본 데이터가 표로 표시됩니다.</div></div>
+      </div>
+    </div>
+  </div>
+
+  <script>
+  // ── 토큰 핸드오프: admin.html에서 넘긴 raw_sso → sessionStorage ──
+  (function initToken(){
+    try {
+      const raw = localStorage.getItem("raw_sso");
+      if (raw) {
+        const sso = JSON.parse(raw);
+        if (sso && sso.token) sessionStorage.setItem("admin_token", sso.token);
+      }
+    } catch(_) {}
+  })();
+
+  let _allTabs = [];          // /api/raw/tabs 결과
+  let _sel = null;            // { sheetId, gid, tabName }
+  let _page = { offset:0, limit:200, total:0 };
+  let _statusTimer = null;
+
+  function showToast(msg, type){
+    const t = document.createElement('div');
+    const bg = type==='error' ? '#dc2626' : type==='warning' ? '#f59e0b' : '#10b981';
+    t.className='toast'; t.style.background=bg; t.textContent=msg;
+    document.body.appendChild(t);
+    setTimeout(()=>{ t.style.opacity='0'; t.style.transition='opacity .3s'; setTimeout(()=>t.remove(),350); }, 3200);
+  }
+  function esc(v){
+    if (v===null || v===undefined) return '';
+    return String(v).replace(/[&<>"]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
+  }
+  function noToken(){
+    return !sessionStorage.getItem("admin_token");
+  }
+
+  // ════════════════ 현황 ════════════════
+  async function loadStatus(){
+    if (noToken()){ document.getElementById('statGrid').innerHTML='<div class="hint" style="color:var(--err)">관리자 로그인이 필요합니다. 관리자 화면의 [RAW 미러] 버튼으로 다시 열어주세요.</div>'; return; }
+    const r = await gasGet({ action:'rawStatus' });
+    if (!r || r.error){ showToast('현황 조회 실패: '+((r&&r.error)||''),'error'); return; }
+
+    const badge = document.getElementById('runBadge');
+    if (r.running){ badge.className='runbadge on'; badge.innerHTML='<i class="fas fa-spinner fa-spin"></i> 미러링 진행 중…'; }
+    else { badge.className='runbadge off'; badge.textContent='대기 중'; }
+    document.getElementById('btnMirror').disabled = !!r.running;
+
+    document.getElementById('statGrid').innerHTML = [
+      ['시트', r.sheets], ['탭', r.tabs], ['행', (r.totalRows||0).toLocaleString()],
+      ['시스템 탭', r.systemTabs], ['숨김 탭', r.hiddenTabs],
+    ].map(([k,v])=>`<div class="stat"><div class="v">${v}</div><div class="k">${k}</div></div>`).join('');
+
+    let hint = r.lastMirroredStr && r.lastMirroredStr!=='-' ? `마지막 미러: ${esc(r.lastMirroredStr)}` : '아직 미러링 기록이 없습니다.';
+    if (r.lastRun){
+      const lr = r.lastRun;
+      if (lr.ok === false) hint += ` · <span style="color:var(--err)">직전 실행 오류: ${esc(lr.error||'')}</span>`;
+      else if (lr.tabsMirrored!==undefined) hint += ` · 직전 실행: 탭 ${lr.tabsMirrored}개 갱신 / 행 ${(lr.rowsWritten||0).toLocaleString()}개 / ${esc(lr.elapsed||'')}${lr.errors?` / 오류 ${lr.errors}`:''}`;
+    }
+    document.getElementById('lastRunHint').innerHTML = hint;
+
+    // 진행 중이면 폴링
+    if (r.running){
+      if (!_statusTimer) _statusTimer = setInterval(pollStatus, 3000);
+    } else if (_statusTimer){
+      clearInterval(_statusTimer); _statusTimer=null;
+      loadTabs(); // 완료 후 탭 목록 갱신
+    }
+  }
+  async function pollStatus(){ await loadStatus(); }
+
+  async function runMirror(){
+    if (noToken()){ showToast('관리자 로그인이 필요합니다.','warning'); return; }
+    const force = document.getElementById('optForce').checked;
+    const includeHidden = document.getElementById('optHidden').checked;
+    if (force && !confirm('강제 전체 재미러링은 모든 시트를 다시 읽습니다(시간이 더 걸림). 진행할까요?')) return;
+
+    document.getElementById('btnMirror').disabled = true;
+    const r = await gasPost({ action:'rawMirror', force, includeHidden });
+    if (!r || r.error || r.ok===false){
+      showToast('실행 실패: '+((r&&(r.error||r.message))||''),'error');
+      document.getElementById('btnMirror').disabled = false;
+      return;
+    }
+    showToast('미러링이 시작되었습니다. 진행상황을 표시합니다.','success');
+    setTimeout(loadStatus, 800);
+  }
+
+  // ════════════════ 탭 목록 ════════════════
+  async function loadTabs(){
+    if (noToken()) return;
+    const r = await gasGet({ action:'rawTabs', limit:5000 });
+    if (!r || r.error){ document.getElementById('tabList').innerHTML='<div class="empty">탭 목록 조회 실패</div>'; return; }
+    _allTabs = r.tabs || [];
+    renderTabList();
+  }
+
+  function renderTabList(){
+    const q = (document.getElementById('tabSearch').value||'').trim().toLowerCase();
+    const list = _allTabs.filter(t =>
+      !q || (t.tabName||'').toLowerCase().includes(q) || (t.spreadsheetTitle||'').toLowerCase().includes(q)
+    );
+    if (list.length===0){ document.getElementById('tabList').innerHTML='<div class="empty">'+(_allTabs.length?'검색 결과 없음':'미러링된 탭이 없습니다.<br/>위 [전체 미러링 실행]을 먼저 눌러주세요.')+'</div>'; return; }
+
+    // 스프레드시트별 그룹
+    const groups = {};
+    for (const t of list){
+      const key = (t.spreadsheetTitle||'(제목 없음)') + '|' + t.sheetId;
+      (groups[key] = groups[key] || []).push(t);
+    }
+    let html = '';
+    for (const key of Object.keys(groups).sort((a,b)=>a.localeCompare(b,'ko'))){
+      const tabs = groups[key];
+      const title = key.split('|')[0];
+      html += `<div class="sheet-grp"><div class="sheet-grp-h"><span>${esc(title)}</span><span style="font-weight:400;color:var(--t3)">${tabs.length}탭</span></div>`;
+      for (const t of tabs){
+        const active = _sel && _sel.sheetId===t.sheetId && _sel.gid===t.tabGid ? 'active' : '';
+        const sys = t.isSystemTab ? '<span class="badge sys">시스템</span>' : '';
+        const hid = t.isHidden ? '<span class="badge hid">숨김</span>' : '';
+        html += `<div class="tab-item ${active}" onclick="selectTab('${esc(t.sheetId)}','${esc(t.tabGid)}',this)" data-name="${esc(t.tabName)}">
+          <span>${esc(t.tabName)}${sys}${hid}</span>
+          <span class="meta">${t.rowCount}행·${t.colCount}열</span>
+        </div>`;
+      }
+      html += '</div>';
+    }
+    document.getElementById('tabList').innerHTML = html;
+  }
+
+  // ════════════════ 행 데이터 뷰어 ════════════════
+  async function selectTab(sheetId, gid, el){
+    _sel = { sheetId, gid, tabName: el ? el.getAttribute('data-name') : '' };
+    _page.offset = 0;
+    document.querySelectorAll('.tab-item').forEach(n=>n.classList.remove('active'));
+    if (el) el.classList.add('active');
+    document.getElementById('btnMapping').style.display = 'inline-flex';
+    await loadRows();
+  }
+
+  async function loadRows(){
+    if (!_sel) return;
+    document.getElementById('viewerBody').innerHTML = '<div class="empty"><i class="fas fa-spinner fa-spin"></i> 불러오는 중…</div>';
+    const r = await gasGet({ action:'rawRows', sheetId:_sel.sheetId, gid:_sel.gid, offset:_page.offset, limit:_page.limit });
+    if (!r || r.error || r.ok===false){
+      document.getElementById('viewerBody').innerHTML = '<div class="empty" style="color:var(--err)">조회 실패: '+esc((r&&(r.error||r.message))||'')+'</div>';
+      return;
+    }
+    const meta = r.meta || {};
+    _page.total = meta.rowCount || 0;
+    const colCount = Math.max(meta.colCount||0, 1);
+
+    document.getElementById('viewerTitle').innerHTML =
+      `${esc(meta.tabName||_sel.tabName)} <small>· ${esc(meta.spreadsheetTitle||'')} · 총 ${(meta.rowCount||0).toLocaleString()}행 / ${colCount}열</small>`;
+
+    // 표 렌더 (gutter = 시트 행번호, 1행은 헤더 강조)
+    let thead = '<tr><th class="gutter">#</th>';
+    for (let c=0;c<colCount;c++) thead += `<th>${colLabel(c)}</th>`;
+    thead += '</tr>';
+
+    let tbody = '';
+    for (const row of (r.rows||[])){
+      const cells = Array.isArray(row.cells) ? row.cells : [];
+      const isHead = row.rowIndex === 1;
+      tbody += `<tr class="${isHead?'headrow':''}"><td class="gutter">${row.rowIndex}</td>`;
+      for (let c=0;c<colCount;c++){
+        const v = cells[c]!==undefined && cells[c]!==null ? cells[c] : '';
+        tbody += `<td title="${esc(v)}">${esc(v)}</td>`;
+      }
+      tbody += '</tr>';
+    }
+    if (!tbody) tbody = `<tr><td class="gutter">-</td><td colspan="${colCount}" style="color:var(--t3)">데이터 없음</td></tr>`;
+
+    document.getElementById('viewerBody').innerHTML =
+      `<div class="table-scroll"><table class="grid"><thead>${thead}</thead><tbody>${tbody}</tbody></table></div>${pagerHtml()}`;
+    document.getElementById('pagerTop').innerHTML = pagerHtml(true);
+  }
+
+  function colLabel(n){ // 0→A, 25→Z, 26→AA
+    let s=''; n++;
+    while(n>0){ const m=(n-1)%26; s=String.fromCharCode(65+m)+s; n=Math.floor((n-1)/26); }
+    return s;
+  }
+  function pagerHtml(compact){
+    const from = _page.total ? _page.offset+1 : 0;
+    const to = Math.min(_page.offset+_page.limit, _page.total);
+    const prevDis = _page.offset<=0 ? 'disabled' : '';
+    const nextDis = to>=_page.total ? 'disabled' : '';
+    const label = `${from.toLocaleString()}–${to.toLocaleString()} / ${_page.total.toLocaleString()}행`;
+    if (compact) return `<span style="font-size:12px;color:var(--t3)">${label}</span>`;
+    return `<div class="pager">
+      <button class="btn btn-ghost btn-sm" ${prevDis} onclick="pageMove(-1)"><i class="fas fa-chevron-left"></i> 이전</button>
+      <span>${label}</span>
+      <button class="btn btn-ghost btn-sm" ${nextDis} onclick="pageMove(1)">다음 <i class="fas fa-chevron-right"></i></button>
+      <select class="btn-sm" style="border:1px solid var(--border-d);border-radius:8px;padding:5px" onchange="changeLimit(this.value)">
+        ${[100,200,500,1000].map(n=>`<option value="${n}" ${_page.limit===n?'selected':''}>${n}행씩</option>`).join('')}
+      </select>
+    </div>`;
+  }
+  function pageMove(dir){
+    const next = _page.offset + dir*_page.limit;
+    if (next<0 || next>=_page.total) return;
+    _page.offset = next; loadRows();
+  }
+  function changeLimit(v){ _page.limit = parseInt(v)||200; _page.offset=0; loadRows(); }
+
+  // ════════════════ 컬럼 매핑 에디터 ════════════════
+  let _fields = [];          // 표준필드 레지스트리
+  let _mapCols = [];         // 현재 편집 중 컬럼 매핑
+
+  const OWNER_OPTS = [
+    { v:'db',     t:'DB권위',  c:'#1b64da', bg:'#e8f1fe' },
+    { v:'sheet',  t:'시트권위', c:'#92400e', bg:'#fef3c7' },
+    { v:'shared', t:'공용',    c:'#047857', bg:'#ecfdf5' },
+  ];
+
+  async function loadFields(){
+    if (noToken()) return;
+    const r = await gasGet({ action:'mappingFields' });
+    if (r && r.ok) _fields = r.fields || [];
+  }
+
+  async function openMapping(){
+    if (!_sel){ showToast('탭을 먼저 선택하세요.','warning'); return; }
+    if (!_fields.length) await loadFields();
+    document.getElementById('viewerBody').innerHTML = '<div class="empty"><i class="fas fa-spinner fa-spin"></i> 매핑 불러오는 중…</div>';
+    const r = await gasGet({ action:'mappingGet', sheetId:_sel.sheetId, gid:_sel.gid });
+    if (!r || r.ok===false || r.error){
+      document.getElementById('viewerBody').innerHTML = '<div class="empty" style="color:var(--err)">매핑 조회 실패: '+esc((r&&(r.error||r.message))||'')+'</div>';
+      return;
+    }
+    if (!r.hasHeaders){
+      document.getElementById('viewerBody').innerHTML = '<div class="empty">이 탭은 아직 미러링되지 않아 헤더 정보가 없습니다.<br/>먼저 [전체 미러링 실행]으로 데이터를 가져온 뒤 매핑하세요.</div>';
+      return;
+    }
+    _mapCols = (r.columns||[]).map(c => ({...c}));
+    renderMappingEditor();
+  }
+
+  function fieldOptions(sel){
+    let html = `<option value="">(매핑 없음)</option>`;
+    for (const f of _fields){
+      html += `<option value="${esc(f.key)}" ${sel===f.key?'selected':''}>${esc(f.label)} (${esc(f.key)})</option>`;
+    }
+    return html;
+  }
+  function ownerOptions(sel){
+    return OWNER_OPTS.map(o=>`<option value="${o.v}" ${sel===o.v?'selected':''}>${o.t}</option>`).join('');
+  }
+
+  function renderMappingEditor(){
+    const mappedCount = _mapCols.filter(c=>c.dbField).length;
+    let rows = '';
+    _mapCols.forEach((c, i)=>{
+      const guessTxt = c.autoGuess ? `<span style="font-size:11px;color:var(--t3)">추측: ${esc(c.autoGuess)}</span>` : '';
+      const driftTag = c.drift ? `<span class="badge" style="background:#fee2e2;color:#b91c1c">헤더변경</span>` : '';
+      rows += `<tr>
+        <td class="gutter">${colLabel(c.colIndex)}</td>
+        <td style="font-weight:600">${esc(c.header)||'<span style=\"color:var(--t3)\">(빈 헤더)</span>'} ${driftTag}</td>
+        <td><select onchange="mapSet(${i},'dbField',this.value)" style="padding:5px;border:1px solid var(--border-d);border-radius:7px;font-family:inherit;font-size:12px;max-width:200px">${fieldOptions(c.dbField)}</select><br/>${guessTxt}</td>
+        <td><select onchange="mapSet(${i},'owner',this.value)" style="padding:5px;border:1px solid var(--border-d);border-radius:7px;font-family:inherit;font-size:12px">${ownerOptions(c.owner)}</select></td>
+      </tr>`;
+    });
+
+    document.getElementById('viewerTitle').innerHTML =
+      `🔧 컬럼 매핑 <small>· ${esc(_sel.tabName)} · ${_mapCols.length}열 중 ${mappedCount}개 매핑됨</small>`;
+    document.getElementById('pagerTop').innerHTML = '';
+
+    document.getElementById('viewerBody').innerHTML = `
+      <div style="display:flex;gap:8px;margin-bottom:10px;flex-wrap:wrap">
+        <button class="btn btn-ghost btn-sm" onclick="applyAllGuess()"><i class="fas fa-wand-magic-sparkles"></i> 자동추측 적용</button>
+        <button class="btn btn-primary btn-sm" onclick="saveMapping()"><i class="fas fa-floppy-disk"></i> 저장</button>
+        <button class="btn btn-ghost btn-sm" onclick="backToData()"><i class="fas fa-table"></i> 데이터 보기</button>
+        <span class="hint" style="margin:0;align-self:center">소유권: <b style="color:#1b64da">DB권위</b>=DB가 원본 · <b style="color:#92400e">시트권위</b>=시트가 원본 · <b style="color:#047857">공용</b>=양방향</span>
+      </div>
+      <div class="table-scroll">
+        <table class="grid" style="white-space:normal">
+          <thead><tr><th class="gutter">열</th><th>시트 헤더</th><th>DB 표준필드</th><th>소유권</th></tr></thead>
+          <tbody>${rows}</tbody>
+        </table>
+      </div>`;
+  }
+
+  function mapSet(i, key, val){
+    if (!_mapCols[i]) return;
+    _mapCols[i][key] = val || null;
+    // dbField 변경 시 소유권을 해당 필드 기본값으로 자동 제안(기존에 사용자가 안 건드린 경우)
+    if (key==='dbField' && val){
+      const f = _fields.find(x=>x.key===val);
+      if (f && f.defaultOwner){
+        _mapCols[i].owner = f.defaultOwner;
+        renderMappingEditor();
+      }
+    }
+  }
+  function applyAllGuess(){
+    _mapCols.forEach(c=>{
+      c.dbField = c.autoGuess || null;
+      const f = c.autoGuess ? _fields.find(x=>x.key===c.autoGuess) : null;
+      c.owner = f && f.defaultOwner ? f.defaultOwner : 'sheet';
+    });
+    renderMappingEditor();
+    showToast('자동추측을 적용했습니다. 확인 후 [저장]하세요.','success');
+  }
+  async function saveMapping(){
+    if (noToken()){ showToast('관리자 로그인이 필요합니다.','warning'); return; }
+    const columns = _mapCols.map(c=>({ colIndex:c.colIndex, header:c.header, dbField:c.dbField||null, owner:c.owner||'sheet' }));
+    const r = await gasPost({ action:'mappingSave', sheetId:_sel.sheetId, gid:_sel.gid, tabName:_sel.tabName, columns });
+    if (!r || r.ok===false || r.error){ showToast('저장 실패: '+esc((r&&(r.error||r.message))||''),'error'); return; }
+    showToast(`매핑 저장됨 (${r.mapped||0}개 필드 매핑)`,'success');
+  }
+  function backToData(){
+    document.getElementById('pagerTop').innerHTML = '';
+    loadRows();
+  }
+
+  // ════════════════ 시작 ════════════════
+  loadStatus();
+  loadTabs();
+  loadFields();
+</script>
+</body>
+</html>

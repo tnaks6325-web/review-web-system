@@ -877,6 +877,24 @@ function openWorkPortal() {
   window.open("portal.html", "_blank");
 }
 
+/* ── 구글시트 RAW 미러 페이지 열기 (자동 로그인 핸드오프) ── */
+function openRawMirror() {
+  const token = sessionStorage.getItem("admin_token") || "";
+  if (!token || !isAdminLoggedIn()) {
+    showToast("관리자 로그인이 필요합니다.", "warning");
+    return;
+  }
+  try {
+    localStorage.setItem("raw_sso", JSON.stringify({
+      token,
+      name: getAdminName(),
+      role: getAdminRole(),
+      ts: Date.now()
+    }));
+  } catch (e) { /* localStorage 불가 시에도 페이지 자체 처리로 폴백 */ }
+  window.open("raw-mirror.html", "_blank");
+}
+
 /* ── 관리자 로그인 모달 열기 ── */
 function openAdminLogin() {
   if (isAdminLoggedIn()) { enterAdminScreen(); return; }
@@ -1257,6 +1275,7 @@ function switchAdminTab(tabName) {
   if (pane) pane.classList.add("active");
   // 탭별 자동 로드
   if (tabName === "reviewers") loadReviewerList();
+  if (tabName === "cs-inquiry") { try { loadCsRooms(); } catch(_){} }
   if (tabName === "recruit")   { loadRecruitList(); loadRecruitTabOptions(); }
   if (tabName === "work-orders") { try { loadWorkOrders(); } catch(_){} }
   if (tabName === "payment")   initPaymentPanel();
@@ -1885,13 +1904,15 @@ async function woSendMemo(id) {
 }
 
 // 접수하기 (제출됨 → 접수됨)
-// ★ 업무 연계: 작업시트탭URL(gid 필수)을 [+작업시트추가]로 자동 등록 →
-//   캠페인 탭 관리에 활성 탭으로 즉시 반영 → 상태를 '접수됨'으로 전이
+// ★ 업무 연계: 작업시트탭URL(gid 필수)이 가리키는 "그 탭"을 캠페인 탭 관리에 등록하고,
+//   작업오더 기본정보(담당자·시간대·리뷰유형·배송·택배대행)를 탭 메타에 자동 입력 → 상태 '접수됨' 전이.
+//   동일 탭 재접수(2차 등)는 별도 탭을 만들지 않고 기존 한 줄을 유지(차수는 시트 차수컬럼 집계가 담당).
+//   서버 단일 엔드포인트(orderAdminAccept)가 등록+메타매핑+인덱스빌드+상태전이를 원자적으로 처리.
 async function woAccept(id) {
   const o = (_woCache || []).find(x => x.id === id);
   const url = ((o && o.work_sheet_url) || "").trim();
 
-  // 1) 작업시트탭URL + gid 검증 (gid 없으면 특정 탭을 지정할 수 없어 자동 등록 불가)
+  // 1) 빠른 클라이언트 사전검증 (서버도 동일하게 재검증) — 즉시 안내 UX 유지
   if (!url) {
     woNotice("작업시트탭URL이 없습니다.\nAE에게 gid가 포함된 탭 주소를 요청한 뒤 다시 접수해주세요.");
     return;
@@ -1904,33 +1925,26 @@ async function woAccept(id) {
   const btn = document.getElementById("woAcceptBtn_" + id);
   if (btn) { btn.disabled = true; btn.innerHTML = '<i class="fas fa-spinner fa-spin"></i> 접수 처리중...'; }
   try {
-    // 2) 작업시트 탭 자동 등록 + 인덱스 빌드 (gid 모드 add-tab)
-    const reg = await gasGet({ action: "addTab", url }, 60000);
-    if (!reg || !reg.ok) {
-      showToast("탭 등록 실패: " + ((reg && reg.error) || "알 수 없는 오류"), true);
-      if (btn) { btn.disabled = false; btn.innerHTML = '<i class="fas fa-inbox"></i> 접수하기'; }
-      return;
-    }
-
-    // 3) 상태 전이: 접수됨(reviewing)
-    const r = await gasGet({ action: "orderAdminStatus", id, status: "reviewing" });
+    // 2) 접수 단일 처리 (탭 등록 + 작업오더 기본정보 메타 매핑 + 인덱스 빌드 + 상태 reviewing)
+    const r = await gasGet({ action: "orderAdminAccept", id }, 60000);
     if (!(r && r.ok)) {
-      showToast((r && r.error) || "접수 상태 변경 실패 (탭은 등록됨)", true);
+      showToast((r && r.error) || "접수 실패", true);
       if (btn) { btn.disabled = false; btn.innerHTML = '<i class="fas fa-inbox"></i> 접수하기'; }
       return;
     }
 
-    // 4) 결과 안내 (등록된 탭 수에 따라)
-    if (reg.addedTabCount > 0) {
-      const names = reg.addedTabs ? reg.addedTabs.join(", ") : (reg.tabName || "");
-      showToast(`✅ 접수 완료 — 캠페인 탭 관리에 추가됨: ${names}`);
-    } else if (reg.message) {
-      showToast(`✅ 접수 완료 — ${reg.message}`);
+    // 3) 결과 안내 (신규 등록 vs 기존 탭 연결 = 차수 추가)
+    const tabName = r.tabName || "";
+    if (r.alreadyRegistered) {
+      showToast(`✅ 접수 완료 — 기존 탭에 연결됨: ${tabName} (차수 구분은 시트 기준 자동)`);
     } else {
-      showToast("✅ 접수 완료 — 캠페인 탭 관리에 반영되었습니다.");
+      showToast(`✅ 접수 완료 — 캠페인 탭 관리에 추가됨: ${tabName}`);
+    }
+    if (r.indexBuilt === false) {
+      showToast("탭은 등록됐지만 인덱스 빌드는 실패했습니다. 잠시 후 자동 갱신됩니다.", true);
     }
 
-    // 5) 인박스 + 캠페인 탭 관리 대시보드 동시 갱신 (업무 연계성)
+    // 4) 인박스 + 캠페인 탭 관리 대시보드 동시 갱신 (업무 연계성)
     loadWorkOrders();
     try { if (typeof loadTabDashboard === "function") loadTabDashboard(); } catch (_) {}
   } catch (e) {
@@ -15779,6 +15793,264 @@ async function _deleteNotice(id) {
   }
 }
 
+/* ══════════════════════════════════════════════════════════════
+   ★ C/S 문의창구 — 관리자
+   리뷰어별 채팅방 목록 + 메신저형 대화방 + 관리자 전용 메모
+   ══════════════════════════════════════════════════════════════ */
+let _csRooms = [];               // 방 목록 캐시
+let _csActiveThreadId = null;    // 현재 열린 대화방 threadId
+
+async function loadCsRooms() {
+  const wrap = document.getElementById("csRoomListWrap");
+  if (!wrap) return;
+  wrap.innerHTML = '<div style="padding:30px;text-align:center;color:#9CA3AF;font-size:.85rem"><i class="fas fa-circle-notch fa-spin"></i> 불러오는 중...</div>';
+  const status = (document.getElementById("csStatusFilter") || {}).value || "all";
+  const q = (document.getElementById("csSearchInput") || {}).value || "";
+  try {
+    const data = await gasGet({ action: "csAdminThreads", status, q });
+    if (!data || data.ok === false) throw new Error((data && data.error) || "불러오기 실패");
+    _csRooms = data.threads || [];
+    _renderCsRooms(_csRooms);
+    csUpdateBadge(data.totalUnread || 0);
+  } catch (err) {
+    wrap.innerHTML = `<div style="padding:30px;text-align:center;color:#EF4444;font-size:.85rem">오류: ${escHtml(err.message)}</div>`;
+  }
+}
+
+function csFilterRooms(keyword) {
+  const kw = (keyword || "").trim().toLowerCase();
+  if (!kw) { _renderCsRooms(_csRooms); return; }
+  const filtered = _csRooms.filter(r =>
+    (r.reviewerName || "").toLowerCase().includes(kw) ||
+    (r.reviewerPhone8 || "").includes(kw) ||
+    (r.campaignLabel || "").toLowerCase().includes(kw)
+  );
+  _renderCsRooms(filtered);
+}
+
+function _csTimeAgo(iso) {
+  if (!iso) return "";
+  const d = new Date(iso); const diff = Date.now() - d.getTime();
+  const m = Math.floor(diff / 60000);
+  if (m < 1) return "방금";
+  if (m < 60) return m + "분 전";
+  const h = Math.floor(m / 60); if (h < 24) return h + "시간 전";
+  const day = Math.floor(h / 24); if (day < 7) return day + "일 전";
+  return d.toLocaleDateString("ko-KR");
+}
+
+function _renderCsRooms(list) {
+  const wrap = document.getElementById("csRoomListWrap");
+  if (!wrap) return;
+  if (!list.length) {
+    wrap.innerHTML = '<div style="padding:40px;text-align:center;color:#9CA3AF;font-size:.85rem"><i class="fas fa-comment-slash" style="font-size:1.6rem;display:block;margin-bottom:8px;opacity:.5"></i>문의가 없습니다.</div>';
+    return;
+  }
+  // 리뷰어별 그룹핑(이름+phone8 기준), 그룹 내 최근순
+  const groups = new Map();
+  list.forEach(r => {
+    const key = (r.reviewerName || "?") + "|" + (r.reviewerPhone8 || "");
+    if (!groups.has(key)) groups.set(key, []);
+    groups.get(key).push(r);
+  });
+  let html = "";
+  for (const [key, rooms] of groups) {
+    const [name, phone8] = key.split("|");
+    const unread = rooms.reduce((s, r) => s + (r.adminUnread || 0), 0);
+    html += `<div style="padding:10px 14px;background:#f7faff;border-bottom:1px solid #eef2f7;display:flex;align-items:center;gap:8px">
+      <i class="fas fa-user-circle" style="color:#94a3b8"></i>
+      <span style="font-weight:700;color:var(--t1);font-size:.86rem">${escHtml(name)}</span>
+      <span style="color:#94a3b8;font-size:.74rem;font-family:monospace">${escHtml(phone8)}</span>
+      ${unread > 0 ? `<span style="margin-left:auto;background:#EF4444;color:#fff;font-size:.66rem;font-weight:700;padding:1px 7px;border-radius:10px">미확인 ${unread}</span>` : ''}
+    </div>`;
+    rooms.forEach(r => {
+      const nameSafe = (r.reviewerName || "").replace(/'/g, "\\'");
+      const phoneSafe = (r.reviewerPhone8 || "").replace(/'/g, "\\'");
+      const statusChip = r.status === 'closed'
+        ? '<span style="background:#F3F4F6;color:#6B7280;font-size:.66rem;padding:1px 7px;border-radius:8px">종료</span>'
+        : '<span style="background:#D1FAE5;color:#065F46;font-size:.66rem;padding:1px 7px;border-radius:8px">진행중</span>';
+      html += `<div onclick="csOpenConversation('${r.id}','${nameSafe}','${phoneSafe}')"
+        style="padding:11px 16px 11px 30px;border-bottom:1px solid #f3f4f6;cursor:pointer;display:flex;align-items:center;gap:10px"
+        onmouseover="this.style.background='#f9fafb'" onmouseout="this.style.background='#fff'">
+        <div style="flex:1;min-width:0">
+          <div style="display:flex;align-items:center;gap:6px;margin-bottom:2px">
+            <i class="fas fa-tag" style="color:#cbd5e1;font-size:.7rem"></i>
+            <span style="font-weight:600;color:var(--t1);font-size:.82rem;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${escHtml(r.campaignLabel || '문의')}</span>
+            ${statusChip}
+          </div>
+          <div style="color:var(--t3);font-size:.76rem;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${escHtml(r.lastMessagePreview || '')}</div>
+        </div>
+        <div style="text-align:right;flex-shrink:0">
+          <div style="color:#9CA3AF;font-size:.7rem">${_csTimeAgo(r.lastMessageAt)}</div>
+          ${r.adminUnread > 0 ? `<span style="display:inline-block;margin-top:3px;background:#EF4444;color:#fff;font-size:.64rem;font-weight:700;padding:1px 6px;border-radius:9px">${r.adminUnread}</span>` : ''}
+        </div>
+      </div>`;
+    });
+  }
+  wrap.innerHTML = html;
+}
+
+async function csOpenConversation(threadId, reviewerName, reviewerPhone8) {
+  _csActiveThreadId = threadId;
+  let ov = document.getElementById("csConvOverlay");
+  if (!ov) {
+    ov = document.createElement("div");
+    ov.id = "csConvOverlay";
+    ov.style.cssText = "position:fixed;inset:0;background:rgba(15,23,42,.45);z-index:10000;display:flex;align-items:center;justify-content:center;padding:16px";
+    ov.addEventListener("click", e => { if (e.target === ov) csCloseConversation(); });
+    document.body.appendChild(ov);
+  }
+  ov.style.display = "flex";
+  ov.innerHTML = `<div style="background:#fff;border-radius:16px;width:560px;max-width:96vw;height:78vh;display:flex;flex-direction:column;overflow:hidden;box-shadow:0 12px 40px rgba(0,0,0,.25)">
+    <div style="padding:13px 16px;border-bottom:1px solid #eef2f7;display:flex;align-items:center;gap:8px">
+      <i class="fas fa-comments" style="color:var(--p)"></i>
+      <div style="flex:1;min-width:0">
+        <div style="font-weight:700;font-size:.9rem;color:var(--t1)">${escHtml(reviewerName)} <span style="color:#94a3b8;font-weight:400;font-size:.76rem;font-family:monospace">${escHtml(reviewerPhone8)}</span></div>
+        <div id="csConvCampaign" style="font-size:.74rem;color:var(--t3)">불러오는 중...</div>
+      </div>
+      <button id="csConvStatusBtn" onclick="csToggleStatus()" style="padding:5px 10px;background:#F3F4F6;color:#374151;border:none;border-radius:8px;font-size:.74rem;font-weight:600;cursor:pointer">—</button>
+      <button onclick="csCloseConversation()" style="width:30px;height:30px;background:#F3F4F6;border:none;border-radius:8px;cursor:pointer;color:#6B7280"><i class="fas fa-times"></i></button>
+    </div>
+    <div style="display:flex;flex:1;min-height:0">
+      <div id="csConvThread" style="flex:1;overflow-y:auto;padding:14px;background:#f9fafb;display:flex;flex-direction:column;gap:8px">
+        <div style="text-align:center;color:#9CA3AF;font-size:.82rem"><i class="fas fa-circle-notch fa-spin"></i></div>
+      </div>
+      <div style="width:190px;border-left:1px solid #eef2f7;padding:12px;display:flex;flex-direction:column;background:#fffdf5">
+        <div style="font-size:.74rem;font-weight:700;color:#92400E;margin-bottom:6px"><i class="fas fa-lock"></i> 관리자 메모<div style="font-weight:400;font-size:.66rem;color:#b45309">리뷰어 비공개·영구저장</div></div>
+        <textarea id="csMemoText" placeholder="이 리뷰어에 대한 메모..." style="flex:1;resize:none;border:1px solid #FDE68A;border-radius:8px;padding:8px;font-size:.78rem;font-family:inherit;outline:none;background:#fff"></textarea>
+        <button onclick="csSaveMemo('${(reviewerPhone8||'').replace(/'/g,"\\'")}')" style="margin-top:8px;padding:6px;background:#F59E0B;color:#fff;border:none;border-radius:8px;font-size:.76rem;font-weight:700;cursor:pointer">메모 저장</button>
+      </div>
+    </div>
+    <div style="padding:10px 12px;border-top:1px solid #eef2f7;display:flex;gap:8px;align-items:flex-end">
+      <textarea id="csReplyText" rows="2" placeholder="답장 입력... (Shift+Enter 줄바꿈)" style="flex:1;resize:none;border:1px solid #e5e7eb;border-radius:10px;padding:9px;font-size:.82rem;font-family:inherit;outline:none"
+        onkeydown="if(event.key==='Enter'&&!event.shiftKey){event.preventDefault();csSendReply('${threadId}');}"></textarea>
+      <button onclick="csSendReply('${threadId}')" style="padding:10px 16px;background:#3182f6;color:#fff;border:none;border-radius:10px;font-weight:700;font-size:.82rem;cursor:pointer;white-space:nowrap"><i class="fas fa-paper-plane"></i></button>
+    </div>
+  </div>`;
+  await csReloadConversation(threadId);
+}
+
+async function csReloadConversation(threadId) {
+  if (_csActiveThreadId !== threadId) return;
+  try {
+    const data = await gasGet({ action: "csAdminMessages", threadId });
+    if (!data || data.ok === false) throw new Error((data && data.error) || "불러오기 실패");
+    const t = data.thread || {};
+    const camp = document.getElementById("csConvCampaign");
+    if (camp) camp.innerHTML = `<i class="fas fa-tag" style="font-size:.68rem"></i> ${escHtml(t.campaignLabel || '문의')}`;
+    const memo = document.getElementById("csMemoText");
+    if (memo && document.activeElement !== memo) memo.value = t.adminMemo || "";
+    const sBtn = document.getElementById("csConvStatusBtn");
+    if (sBtn) {
+      if (t.status === 'closed') { sBtn.textContent = "재오픈"; sBtn.dataset.status = "closed"; }
+      else { sBtn.textContent = "문의 종료"; sBtn.dataset.status = "open"; }
+    }
+    _csRenderMessages(data.messages || []);
+    // 대시보드 뱃지 동기화(열람 시 미확인 리셋됨)
+    csRefreshBadge();
+  } catch (err) {
+    const thread = document.getElementById("csConvThread");
+    if (thread) thread.innerHTML = `<div style="text-align:center;color:#EF4444;font-size:.82rem">오류: ${escHtml(err.message)}</div>`;
+  }
+}
+
+function _csRenderMessages(messages) {
+  const box = document.getElementById("csConvThread");
+  if (!box) return;
+  if (!messages.length) {
+    box.innerHTML = '<div style="text-align:center;color:#9CA3AF;font-size:.82rem;margin-top:20px">아직 메시지가 없습니다.</div>';
+    return;
+  }
+  box.innerHTML = messages.map(m => {
+    const isAdmin = m.senderRole === 'admin';
+    const ts = m.createdAt ? new Date(m.createdAt).toLocaleString("ko-KR", { month:'numeric', day:'numeric', hour:'2-digit', minute:'2-digit' }) : "";
+    return `<div style="display:flex;flex-direction:column;align-items:${isAdmin ? 'flex-end' : 'flex-start'}">
+      <div style="font-size:.66rem;color:#9CA3AF;margin-bottom:2px">${escHtml(m.senderName || (isAdmin ? '관리자' : '리뷰어'))}</div>
+      <div style="max-width:78%;background:${isAdmin ? '#3182f6' : '#fff'};color:${isAdmin ? '#fff' : '#111827'};border:1px solid ${isAdmin ? '#3182f6' : '#e5e7eb'};padding:8px 11px;border-radius:12px;font-size:.83rem;line-height:1.45;white-space:pre-wrap;word-break:break-word">${escHtml(m.content || '')}</div>
+      <div style="font-size:.62rem;color:#cbd5e1;margin-top:2px">${ts}</div>
+    </div>`;
+  }).join("");
+  box.scrollTop = box.scrollHeight;
+}
+
+async function csSendReply(threadId) {
+  const ta = document.getElementById("csReplyText");
+  if (!ta) return;
+  const content = ta.value.trim();
+  if (!content) return;
+  ta.value = "";
+  try {
+    const data = await gasPost({ action: "csAdminReply", threadId, content });
+    if (!data || data.ok === false) throw new Error((data && data.error) || "전송 실패");
+    await csReloadConversation(threadId);
+    loadCsRooms();
+  } catch (err) {
+    showToast("전송 오류: " + err.message, true);
+    ta.value = content;
+  }
+}
+
+async function csSaveMemo(phone8) {
+  const memo = (document.getElementById("csMemoText") || {}).value || "";
+  try {
+    const data = await gasPost({ action: "csAdminSaveMemo", phone8, memo });
+    if (!data || data.ok === false) throw new Error((data && data.error) || "저장 실패");
+    showToast("메모가 저장되었습니다.");
+  } catch (err) {
+    showToast("메모 저장 오류: " + err.message, true);
+  }
+}
+
+async function csToggleStatus() {
+  const btn = document.getElementById("csConvStatusBtn");
+  if (!btn || !_csActiveThreadId) return;
+  const next = btn.dataset.status === 'closed' ? 'open' : 'closed';
+  try {
+    const data = await gasPost({ action: "csAdminStatus", threadId: _csActiveThreadId, status: next });
+    if (!data || data.ok === false) throw new Error((data && data.error) || "변경 실패");
+    showToast(next === 'closed' ? "문의를 종료했습니다." : "문의를 다시 열었습니다.");
+    await csReloadConversation(_csActiveThreadId);
+    loadCsRooms();
+  } catch (err) {
+    showToast("상태 변경 오류: " + err.message, true);
+  }
+}
+
+function csCloseConversation() {
+  _csActiveThreadId = null;
+  const ov = document.getElementById("csConvOverlay");
+  if (ov) ov.style.display = "none";
+}
+
+function csUpdateBadge(count) {
+  const b = document.getElementById("csInquiryBadge");
+  if (!b) return;
+  if (count > 0) { b.textContent = count; b.style.display = "inline-block"; }
+  else b.style.display = "none";
+}
+
+async function csRefreshBadge() {
+  try {
+    const data = await gasGet({ action: "csAdminUnread" });
+    if (data && data.ok !== false) csUpdateBadge(data.totalUnread || 0);
+  } catch (_) {}
+}
+
+/** SSE 수신 핸들러 (index-payment.js에서 호출) */
+function csOnSSE(evtType, data) {
+  data = data || {};
+  // 대시보드 뱃지 갱신
+  csRefreshBadge();
+  // C/S 탭이 활성화되어 있으면 목록 새로고침
+  const pane = document.getElementById("tab-cs-inquiry");
+  if (pane && pane.classList.contains("active")) { try { loadCsRooms(); } catch(_){} }
+  // 열린 대화방이 해당 스레드면 재조회
+  if (_csActiveThreadId && data.threadId === _csActiveThreadId) {
+    try { csReloadConversation(_csActiveThreadId); } catch(_){}
+  }
+}
+window.csOnSSE = csOnSSE;
+
 // ═══════════════════════════════════════════════════════════
 // 리뷰 캡처 정리 — 내 드라이브 루트 등에 흩어진 리뷰 캡처를
 //   선택한 탭의 [리뷰] 폴더로 모아 이동 (미리보기 → 실제 이동)
@@ -15858,6 +16130,158 @@ function _relocateToggleImg(headerEl, id) {
   }
 }
 
+// 활성 탭 리뷰폴더 현황 점검 — 대시보드 활성탭 한정 + '리뷰폼' 제외 + 26.3+ 판정
+async function _relocateFolderAudit() {
+  const resultEl = document.getElementById('rlcResult');
+  if (!resultEl) return;
+  if (!_relocateTabs || !_relocateTabs.length) _relocateTabs = _relocateCollectTabs();
+  const all = (_relocateTabs || []).map(t => ({ sheetId: t.sheetId, tabName: t.tabName, displayName: t.displayName, folderUrl: t.folderUrl }));
+  if (!all.length) {
+    resultEl.innerHTML = `<div style="font-size:.78rem;color:#DC2626">활성 탭 목록을 불러오지 못했습니다. 캠페인 탭 관리 대시보드를 먼저 연 뒤 다시 시도하세요.</div>`;
+    return;
+  }
+  // 긴 단일요청 대신 여러 탭씩 나눠 호출 + 진행률 (타임아웃/멈춤 방지)
+  resultEl.innerHTML = `<div style="font-size:.8rem;color:#3730A3;font-weight:700"><i class="fas fa-spinner fa-spin"></i> <span id="rlcAuditProg">리뷰폴더 점검 0/${all.length}…</span></div>`;
+  const agg = { totalTabs: all.length, excluded: 0, connected: 0, nonEmpty: 0, empty: 0, noFolder: 0, preMarch: 0, errors: 0, ownerTally: {}, details: [] };
+  const CHUNK = 8;
+  for (let i = 0; i < all.length; i += CHUNK) {
+    const chunk = all.slice(i, i + CHUNK);
+    try {
+      const res = await gasPost({ action: 'folderAudit', tabs: chunk, excludeName: '리뷰폼', sinceDate: '2026-03-01T00:00:00Z' }, 120000);
+      if (res && res.ok !== false) {
+        agg.excluded += res.excluded || 0; agg.connected += res.connected || 0; agg.nonEmpty += res.nonEmpty || 0;
+        agg.empty += res.empty || 0; agg.noFolder += res.noFolder || 0; agg.preMarch += res.preMarch || 0; agg.errors += res.errors || 0;
+        if (res.ownerTally) for (const k in res.ownerTally) agg.ownerTally[k] = (agg.ownerTally[k] || 0) + res.ownerTally[k];
+        if (Array.isArray(res.details)) agg.details.push(...res.details);
+      } else {
+        agg.errors += chunk.length;
+      }
+    } catch (e) {
+      agg.errors += chunk.length;
+    }
+    const prog = document.getElementById('rlcAuditProg');
+    if (prog) prog.textContent = `리뷰폴더 점검 ${Math.min(i + CHUNK, all.length)}/${all.length}…`;
+  }
+  _renderFolderAudit(resultEl, agg);
+}
+
+function _renderFolderAudit(resultEl, res) {
+  const d = res.details || [];
+  const empties = d.filter(x => x.status === 'empty');
+  const nofolder = d.filter(x => x.status === 'no-folder');
+  const haves = d.filter(x => x.status === 'has-files').sort((a, b) => b.count - a.count);
+  const pre = haves.filter(x => x.preMarch);
+  const target = haves.filter(x => !x.preMarch); // 26.3+ 정상 폴더
+  // 소유자 라벨 → 배지 (tnaks 외 소유자는 이관 대상이므로 강조)
+  const ownBadge = (lbl) => {
+    if (!lbl || lbl === 'tnaks6325') return '';
+    const color = (lbl === '박세희' || lbl === '박은비') ? '#DC2626' : (lbl === 'service-account' ? '#6B7280' : '#B45309');
+    return ` <span style="font-size:.62rem;font-weight:700;color:${color};background:${color}1A;border-radius:4px;padding:0 4px">${escHtml(lbl)}</span>`;
+  };
+  const liH = arr => arr.map(x => `<li style="font-size:.7rem;color:#374151;word-break:break-all">${escHtml(x.tab)}${ownBadge(x.ownerLabel)}${x.count ? ` <span style="color:#9CA3AF">— ${x.count}건${x.earliest ? `, 최초 ${x.earliest}` : ''}</span>` : ''}</li>`).join('');
+  const li = arr => arr.map(x => `<li style="font-size:.7rem;color:#374151;word-break:break-all">${escHtml(x.tab)}${ownBadge(x.ownerLabel)}</li>`).join('');
+  // 소유자 집계 + 이관 대상(tnaks 외) 강조
+  const ot = res.ownerTally || {};
+  const otOrder = ['tnaks6325', '박세희', '박은비', 'service-account', '기타', 'unknown'];
+  const otKeys = otOrder.filter(k => ot[k]).concat(Object.keys(ot).filter(k => otOrder.indexOf(k) < 0));
+  const nonTnaks = Object.keys(ot).reduce((s, k) => s + (k === 'tnaks6325' ? 0 : (ot[k] || 0)), 0);
+  const ownerChips = otKeys.map(k => {
+    const isMine = k === 'tnaks6325';
+    const c = isMine ? '#059669' : (k === '박세희' || k === '박은비') ? '#DC2626' : '#B45309';
+    return `<span style="font-size:.68rem;font-weight:700;color:${c};background:${c}14;border-radius:6px;padding:2px 7px">${escHtml(k)} ${ot[k]}</span>`;
+  }).join(' ');
+  resultEl.innerHTML = `
+    <div style="background:#F8FAFC;border:1px solid #E2E8F0;border-radius:8px;padding:12px">
+      <div style="font-size:.82rem;font-weight:800;color:#0F172A;margin-bottom:6px">활성 탭 리뷰폴더 현황</div>
+      <div style="font-size:.68rem;color:#9CA3AF;margin-bottom:8px">활성 ${res.totalTabs}개 중 '리뷰폼' ${res.excluded}개 제외 · 26.3+ 기준</div>
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:6px;font-size:.74rem">
+        <div style="background:#EEF2FF;border-radius:6px;padding:8px"><b>① 리뷰폴더 연결</b><br><span style="font-size:.92rem;font-weight:800;color:#4338CA">${res.connected}개</span></div>
+        <div style="background:#ECFDF5;border-radius:6px;padding:8px"><b>② 정상(파일 있음)</b><br><span style="font-size:.92rem;font-weight:800;color:#059669">${res.nonEmpty}개</span><br><span style="font-size:.64rem;color:#6B7280">26.3+ ${target.length} · 26.3이전 ${res.preMarch}</span></div>
+        <div style="background:#FEF2F2;border-radius:6px;padding:8px"><b>③ 비어있음</b><br><span style="font-size:.92rem;font-weight:800;color:#DC2626">${res.empty}개</span></div>
+        <div style="background:#FFFBEB;border-radius:6px;padding:8px"><b>폴더 미연결</b><br><span style="font-size:.92rem;font-weight:800;color:#B45309">${res.noFolder}개</span>${res.errors ? ` · 오류 ${res.errors}` : ''}</div>
+      </div>
+      ${ownerChips ? `<div style="margin-top:10px;background:#fff;border:1px solid #E2E8F0;border-radius:6px;padding:8px">
+        <div style="font-size:.72rem;font-weight:700;color:#0F172A;margin-bottom:5px">연결 폴더 소유자 <span style="font-weight:400;color:#9CA3AF">(이관 범위 판정)</span></div>
+        <div style="display:flex;flex-wrap:wrap;gap:5px">${ownerChips}</div>
+        ${nonTnaks ? `<div style="font-size:.66rem;color:#DC2626;margin-top:6px">※ tnaks6325 외 소유 <b>${nonTnaks}개</b> = 소유권 이관 대상 (아래 목록에 빨간 배지 표시)</div>` : `<div style="font-size:.66rem;color:#059669;margin-top:6px">※ 모든 연결 폴더가 tnaks6325 소유 — 이관 불필요</div>`}
+      </div>` : ''}
+      ${empties.length ? `<div style="margin-top:10px"><div style="font-size:.74rem;font-weight:700;color:#DC2626">③ 비어있는 리뷰폴더 (${empties.length}) — 정리 필요</div><ul style="margin:4px 0 0;padding-left:18px;max-height:140px;overflow:auto">${li(empties)}</ul></div>` : ''}
+      ${nofolder.length ? `<div style="margin-top:8px"><div style="font-size:.74rem;font-weight:700;color:#B45309">폴더 미연결 (${nofolder.length})</div><ul style="margin:4px 0 0;padding-left:18px;max-height:140px;overflow:auto">${li(nofolder)}</ul>
+        <button id="rlcConnectBtn" onclick="_relocateConnectUnlinked()" style="margin-top:8px;width:100%;padding:8px;background:#B45309;color:#fff;border:none;border-radius:8px;font-size:.78rem;font-weight:700;cursor:pointer"><i class="fas fa-link"></i> 미연결 탭 [리뷰] 폴더 생성·연결 (tnaks6325 소유)</button>
+        <div style="font-size:.64rem;color:#9CA3AF;margin-top:3px">※ 비마감 탭 중 폴더가 없는 탭에 빈 [리뷰] 폴더를 만들어 연결합니다(이미 연결된 탭은 건너뜀). 흩어진 캡처가 있으면 생성 후 위 '리뷰 캡처 정리'로 모으세요.</div>
+      </div>` : ''}
+      ${pre.length ? `<details style="margin-top:8px"><summary style="font-size:.72rem;font-weight:700;color:#9CA3AF;cursor:pointer">26.3 이전 파일 포함(대상 제외) (${pre.length})</summary><ul style="margin:4px 0 0;padding-left:18px;max-height:160px;overflow:auto">${liH(pre)}</ul></details>` : ''}
+      ${target.length ? `<details style="margin-top:8px" open><summary style="font-size:.74rem;font-weight:700;color:#059669;cursor:pointer">② 26.3+ 정상 폴더 (${target.length})</summary><ul style="margin:4px 0 0;padding-left:18px;max-height:220px;overflow:auto">${liH(target)}</ul></details>` : ''}
+    </div>`;
+}
+
+// 미연결 활성 탭에 [리뷰] 폴더 생성·연결 (OAuth=tnaks6325 소유로 생성, 비파괴/idempotent)
+//   sync-review: 비마감 탭 중 folder_url 없는 탭만 새 [리뷰] 폴더 생성 후 tab_configs 저장
+async function _relocateConnectUnlinked() {
+  if (!confirm('미연결 활성 탭에 빈 [리뷰] 폴더를 생성하고 연결합니다.\n· tnaks6325 소유로 생성 · 이미 연결된 탭은 건너뜀 · 파일 변경 없음\n\n진행할까요?')) return;
+  const btnEl = document.getElementById('rlcConnectBtn');
+  if (btnEl) { btnEl.disabled = true; btnEl.innerHTML = '<i class="fas fa-spinner fa-spin"></i> 생성·연결 중...'; }
+  try {
+    const res = await gasPost({ action: 'syncReviewFolders' }, 180000);
+    if (!res || res.ok === false || res.error) {
+      showToast('실패: ' + ((res && res.error) || '알수없음'), 'error');
+      if (btnEl) { btnEl.disabled = false; btnEl.innerHTML = '<i class="fas fa-link"></i> 미연결 탭 [리뷰] 폴더 생성·연결 (tnaks6325 소유)'; }
+      return;
+    }
+    showToast(`[리뷰] 폴더 ${res.created || 0}개 신규 생성 · 연결 확인 ${res.synced || 0}${res.errors ? ` · 오류 ${res.errors}` : ''}`, 'success');
+    _relocateFolderAudit(); // 현황 자동 재점검
+  } catch (e) {
+    showToast('오류: ' + e.message, 'error');
+    if (btnEl) { btnEl.disabled = false; btnEl.innerHTML = '<i class="fas fa-link"></i> 미연결 탭 [리뷰] 폴더 생성·연결 (tnaks6325 소유)'; }
+  }
+}
+
+// 원본 폴더 비우기 — 원본 폴더의 모든 파일을 선택 탭의 [리뷰] 폴더로 이동
+async function _relocateMoveFolder(apply) {
+  const fromUrl = (document.getElementById('rlcMoveFrom').value || '').trim();
+  const toUrl = (document.getElementById('rlcFolderUrl').value || '').trim();
+  if (!fromUrl) { showToast('비울 원본 폴더 링크를 입력하세요.', 'error'); return; }
+  if (!toUrl) { showToast('대상 [리뷰] 폴더 링크가 필요합니다 (탭을 선택하세요).', 'error'); return; }
+  if (apply && !confirm('원본 폴더의 모든 파일을 [리뷰] 폴더로 이동합니다. 진행할까요?')) return;
+  const resultEl = document.getElementById('rlcResult');
+  resultEl.innerHTML = `<div style="font-size:.78rem;color:#6B7280"><i class="fas fa-spinner fa-spin"></i> ${apply ? '이동 중' : '조회 중'}...</div>`;
+  try {
+    const res = await gasPost({ action: 'moveFolderContents', fromFolderUrl: fromUrl, toFolderUrl: toUrl, dryRun: !apply });
+    if (!res || res.ok === false) {
+      resultEl.innerHTML = `<div style="font-size:.78rem;color:#DC2626">오류: ${escHtml((res && res.error) || '실패')}</div>`;
+      return;
+    }
+    if (apply) {
+      const failHtml = (res.failed || []).map(f => `<li style="font-size:.66rem;color:#DC2626;word-break:break-all">${escHtml(f.name)} — ${escHtml(f.error || '')}</li>`).join('');
+      resultEl.innerHTML = `<div style="font-size:.84rem;color:#065F46;font-weight:700"><i class="fas fa-check-circle"></i> ${res.movedCount}건 이동 완료${res.failedCount ? ` · ${res.failedCount}건 실패` : ''}</div>
+        ${res.failedCount ? `<ul style="margin:6px 0 0;padding-left:18px">${failHtml}</ul><div style="font-size:.66rem;color:#9CA3AF;margin-top:2px">실패 건은 보통 그 파일 소유자(예: 박세희) 권한이 필요합니다 — 소유자 측에서 옮기거나 사본 처리해야 합니다.</div>` : ''}`;
+      showToast(`${res.movedCount}건 이동`, 'success');
+      return;
+    }
+    const list = (res.files || []).slice(0, 50).map(c => `
+      <div style="border-bottom:1px solid #E0F2FE">
+        <div onclick="_relocateToggleImg(this,'${escHtml(c.id)}')" style="cursor:pointer;font-size:.7rem;color:#374151;font-family:monospace;word-break:break-all;padding:5px 2px;display:flex;align-items:flex-start;gap:6px" title="클릭하면 이미지 미리보기">
+          <i class="fas fa-chevron-right" style="font-size:.6rem;color:#9CA3AF;margin-top:3px;transition:transform .15s"></i>
+          <span style="flex:1">${escHtml(c.name)}</span>
+        </div>
+        <div class="rlc-img" style="display:none"></div>
+      </div>`).join('');
+    const sub = (res.subfolders || []).length ? `<div style="font-size:.66rem;color:#D97706;margin-top:4px">※ 서브폴더 ${res.subfolders.length}개는 이동 대상에서 제외됩니다.</div>` : '';
+    resultEl.innerHTML = `
+      <div style="background:#ECFEFF;border:1px solid #A5F3FC;border-radius:8px;padding:12px">
+        <div style="font-size:.84rem;font-weight:700;color:#155E75">원본 폴더 파일: ${res.total}건 → [리뷰]로 이동 예정</div>
+        ${sub}
+        ${res.total
+          ? `<div style="margin:8px 0 0">${list}</div>
+             <div style="font-size:.64rem;color:#9CA3AF;margin-top:4px">※ 파일명을 누르면 이미지를 펼쳐 볼 수 있습니다.</div>
+             <button onclick="_relocateMoveFolder(true)" style="margin-top:12px;width:100%;padding:9px;background:#0891B2;color:#fff;border:none;border-radius:8px;font-size:.82rem;font-weight:700;cursor:pointer"><i class="fas fa-arrow-right-to-bracket"></i> ${res.total}건 전체 이동 실행</button>`
+          : `<div style="font-size:.72rem;color:#6B7280;margin-top:6px">원본 폴더에 이동할 파일이 없습니다.</div>`}
+      </div>`;
+  } catch (err) {
+    resultEl.innerHTML = `<div style="font-size:.78rem;color:#DC2626">오류: ${escHtml(err.message)}</div>`;
+  }
+}
+
 function openReviewRelocate() {
   const existing = document.getElementById('reviewRelocateModal');
   if (existing) existing.remove();
@@ -15899,11 +16323,36 @@ function openReviewRelocate() {
         <label style="font-size:.74rem;font-weight:600;color:#374151">시작일 <span style="color:#9CA3AF;font-weight:400">(이 날짜 이후 업로드만 — 비우면 전체)</span></label>
         <input id="rlcSince" type="date" style="width:100%;padding:7px 9px;border:1px solid #D1D5DB;border-radius:8px;font-size:.8rem;margin:4px 0 4px">
 
+        <details style="margin-top:10px;border:1px dashed #CBD5E1;border-radius:8px;padding:8px 10px">
+          <summary style="cursor:pointer;font-size:.74rem;font-weight:700;color:#155E75">원본 폴더 비우기 (레거시/잘못된 폴더 → 위 [리뷰]로 전체 이동)</summary>
+          <div style="margin-top:8px">
+            <input id="rlcMoveFrom" type="text" placeholder="비울 원본 폴더 링크 (예: 박세희 소유 폴더)" style="width:100%;padding:7px 9px;border:1px solid #D1D5DB;border-radius:8px;font-size:.72rem;font-family:monospace">
+            <div style="font-size:.64rem;color:#9CA3AF;margin:5px 0">위 <b>[리뷰] 폴더 링크</b>가 이동 대상입니다(탭 선택 필요). 파일명 무관 <b>전체 이동</b>, 서브폴더는 제외.</div>
+            <button onclick="_relocateMoveFolder(false)" style="width:100%;padding:8px;background:#0891B2;color:#fff;border:none;border-radius:8px;font-size:.78rem;font-weight:700;cursor:pointer"><i class="fas fa-folder-open"></i> 원본 폴더 미리보기</button>
+          </div>
+        </details>
+
         <div style="display:flex;gap:8px;margin-top:14px">
           <button onclick="_relocateRun(false)" style="flex:1;padding:9px;background:#7C3AED;color:#fff;border:none;border-radius:8px;font-size:.82rem;font-weight:700;cursor:pointer"><i class="fas fa-search"></i> 선택 탭 미리보기</button>
           <button onclick="_relocateScanAll()" style="flex:1;padding:9px;background:#4338CA;color:#fff;border:none;border-radius:8px;font-size:.82rem;font-weight:700;cursor:pointer"><i class="fas fa-layer-group"></i> 전체 탭 자동 스캔</button>
         </div>
+        <button onclick="_relocateFolderAudit()" style="width:100%;margin-top:8px;padding:9px;background:#0F172A;color:#fff;border:none;border-radius:8px;font-size:.82rem;font-weight:700;cursor:pointer"><i class="fas fa-clipboard-list"></i> 리뷰폴더 현황 점검 (활성 탭 전체)</button>
         <div style="font-size:.66rem;color:#9CA3AF;margin-top:6px">※ 전체 스캔은 모든 탭을 하나씩 조회해 탭별 대상 건수를 보여줍니다. 폴더 링크·키워드 칸은 무시하고 탭마다 자동 적용합니다.</div>
+
+        <div style="margin-top:14px;border-top:1px dashed #E5E7EB;padding-top:14px">
+          <div style="font-size:.82rem;font-weight:800;color:#0F172A"><i class="fas fa-paper-plane" style="color:#0891B2"></i> 업체 보고 링크 <span style="font-weight:600;color:#9CA3AF;font-size:.7rem">(직원 복제 불필요)</span></div>
+          <div style="font-size:.68rem;color:#6B7280;margin:4px 0 8px">위에서 <b>탭을 선택</b>한 뒤 링크를 만들어 업체에 전달하세요. 업체는 <b>로그인 없이</b> 열람하고, 원본은 그대로(내 소유)라 <b>직원 드라이브에 복제되지 않습니다</b>.</div>
+          <button onclick="_relocateMakeReportPageLink()" style="width:100%;padding:9px;background:#0891B2;color:#fff;border:none;border-radius:8px;font-size:.82rem;font-weight:700;cursor:pointer"><i class="fas fa-link"></i> 선택 탭 보고 링크 만들기 (이미지 모아보기)</button>
+          <div id="rlcReportResult" style="margin-top:10px"></div>
+          <details style="margin-top:8px">
+            <summary style="cursor:pointer;font-size:.7rem;color:#6B7280">또는 Drive 폴더 공유링크로 전달 (폴더 그대로)</summary>
+            <div style="margin-top:6px">
+              <button onclick="_relocateMakeReportLink()" style="width:100%;padding:8px;background:#fff;color:#0891B2;border:1px solid #0891B2;border-radius:8px;font-size:.76rem;font-weight:700;cursor:pointer"><i class="fas fa-folder-open"></i> 선택 탭 [리뷰] 폴더 공유링크 만들기</button>
+              <div id="rlcFolderShareResult" style="margin-top:8px"></div>
+            </div>
+          </details>
+        </div>
+
         <div style="margin-top:8px;text-align:right">
           <button onclick="document.getElementById('reviewRelocateModal').remove()" style="padding:7px 16px;background:#F3F4F6;color:#374151;border:none;border-radius:8px;font-size:.8rem;font-weight:600;cursor:pointer">닫기</button>
         </div>
@@ -15962,6 +16411,88 @@ function _relocateSelectTab(i) {
   document.getElementById('rlcFolderUrl').value = t.folderUrl || '';
   document.getElementById('rlcKeywords').value = _relocateDeriveKeywords(t.tabName).join(', ');
   document.getElementById('rlcResult').innerHTML = '';
+}
+
+// [주] 공개 보고 페이지 링크 만들기 — 선택 탭의 추측불가 코드를 발급하고
+//   report.html 공개 페이지 링크를 반환. 업체는 로그인 없이 이미지 모아보기로 열람.
+//   이미지는 서버 프록시로 표시 → 폴더 공개공유 불필요, 원본 복제 0.
+async function _relocateMakeReportPageLink() {
+  const t = _relocateTabs[_relocateSelIdx];
+  if (!t) { showToast('먼저 위에서 대상 탭을 선택하세요.', 'error'); return; }
+  const out = document.getElementById('rlcReportResult');
+  if (out) out.innerHTML = `<div style="font-size:.76rem;color:#0E7490"><i class="fas fa-spinner fa-spin"></i> 보고 링크 생성 중…</div>`;
+  try {
+    const res = await gasPost({ action: 'reviewReportLink', sheetId: t.sheetId, tabName: t.tabName, displayName: t.displayName }, 60000);
+    if (!res || res.ok === false || res.error || !res.reportUrl) {
+      if (out) out.innerHTML = `<div style="font-size:.76rem;color:#DC2626">오류: ${escHtml((res && res.error) || '실패')}</div>`;
+      return;
+    }
+    const link = res.reportUrl;
+    if (out) out.innerHTML = `
+      <div style="background:#ECFEFF;border:1px solid #A5F3FC;border-radius:8px;padding:10px">
+        <div style="font-size:.74rem;font-weight:700;color:#155E75;margin-bottom:6px"><i class="fas fa-check-circle"></i> 업체 보고 링크 준비됨 <span style="font-weight:500;color:#0E7490">(이미지 모아보기 페이지)</span></div>
+        <div style="display:flex;gap:6px;align-items:stretch">
+          <input id="rlcReportPageLink" type="text" readonly value="${escHtml(link)}" onclick="this.select()" style="flex:1;padding:7px 9px;border:1px solid #A5F3FC;border-radius:8px;font-size:.7rem;font-family:monospace;background:#fff">
+          <button onclick="_relocateCopyLink('rlcReportPageLink')" style="padding:7px 12px;background:#0891B2;color:#fff;border:none;border-radius:8px;font-size:.76rem;font-weight:700;cursor:pointer;white-space:nowrap"><i class="fas fa-copy"></i> 복사</button>
+          <a href="${escHtml(link)}" target="_blank" rel="noopener" title="미리보기" style="padding:7px 11px;background:#fff;color:#0891B2;border:1px solid #0891B2;border-radius:8px;font-size:.76rem;font-weight:700;cursor:pointer;white-space:nowrap;text-decoration:none;display:flex;align-items:center"><i class="fas fa-arrow-up-right-from-square"></i></a>
+        </div>
+        <div style="font-size:.64rem;color:#0E7490;margin-top:6px">이 링크를 업체에 전달하세요. 업체는 <b>로그인 없이</b> 리뷰 이미지를 모아볼 수 있고, 원본은 그대로라 <b>직원 드라이브 용량을 쓰지 않습니다</b>.</div>
+        <div style="font-size:.6rem;color:#9CA3AF;margin-top:3px">※ 링크를 아는 사람은 열람할 수 있습니다(추측불가 코드). 리뷰어 이름이 함께 표시됩니다.</div>
+      </div>`;
+    showToast('업체 보고 링크 준비됨', 'success');
+  } catch (e) {
+    if (out) out.innerHTML = `<div style="font-size:.76rem;color:#DC2626">오류: ${escHtml(e.message)}</div>`;
+  }
+}
+
+// [보조] Drive 폴더 공유링크 만들기 — 선택 탭의 [리뷰] 폴더를 '링크공유(anyone reader)'로
+//   설정하고 폴더 링크를 반환(폴더 그대로 전달). 원본은 tnaks 소유 그대로 → 복제 불필요.
+async function _relocateMakeReportLink() {
+  const t = _relocateTabs[_relocateSelIdx];
+  if (!t) { showToast('먼저 위에서 대상 탭을 선택하세요.', 'error'); return; }
+  const folderUrl = (document.getElementById('rlcFolderUrl').value || '').trim();
+  const out = document.getElementById('rlcFolderShareResult');
+  if (out) out.innerHTML = `<div style="font-size:.76rem;color:#0E7490"><i class="fas fa-spinner fa-spin"></i> 폴더 공유링크 생성 중…</div>`;
+  try {
+    const res = await gasPost({ action: 'shareReviewFolder', sheetId: t.sheetId, tabName: t.tabName, folderUrl }, 60000);
+    if (!res || res.ok === false || res.error) {
+      if (out) out.innerHTML = `<div style="font-size:.76rem;color:#DC2626">오류: ${escHtml((res && res.error) || '실패')}</div>`;
+      return;
+    }
+    const link = res.folderUrl;
+    document.getElementById('rlcFolderUrl').value = link; // 폴더 링크 칸 동기화
+    const cntTxt = (res.fileCount != null) ? `${res.fileCount}개 파일` : '파일 수 확인 안 됨';
+    const note = res.created
+      ? ' · 빈 [리뷰] 폴더를 새로 만들어 연결했습니다(아직 제출 0건)'
+      : (res.alreadyShared ? ' · 이미 공유돼 있던 폴더' : '');
+    if (out) out.innerHTML = `
+      <div style="background:#F8FAFC;border:1px solid #CBD5E1;border-radius:8px;padding:10px">
+        <div style="font-size:.74rem;font-weight:700;color:#155E75;margin-bottom:6px"><i class="fas fa-check-circle"></i> Drive 폴더 공유링크 준비됨 <span style="font-weight:500;color:#0E7490">(${cntTxt})</span></div>
+        <div style="display:flex;gap:6px;align-items:stretch">
+          <input id="rlcFolderShareLink" type="text" readonly value="${escHtml(link)}" onclick="this.select()" style="flex:1;padding:7px 9px;border:1px solid #CBD5E1;border-radius:8px;font-size:.7rem;font-family:monospace;background:#fff">
+          <button onclick="_relocateCopyLink('rlcFolderShareLink')" style="padding:7px 12px;background:#0891B2;color:#fff;border:none;border-radius:8px;font-size:.76rem;font-weight:700;cursor:pointer;white-space:nowrap"><i class="fas fa-copy"></i> 복사</button>
+          <a href="${escHtml(link)}" target="_blank" rel="noopener" title="새 창에서 열기" style="padding:7px 11px;background:#fff;color:#0891B2;border:1px solid #0891B2;border-radius:8px;font-size:.76rem;font-weight:700;cursor:pointer;white-space:nowrap;text-decoration:none;display:flex;align-items:center"><i class="fas fa-arrow-up-right-from-square"></i></a>
+        </div>
+        <div style="font-size:.64rem;color:#0E7490;margin-top:6px">폴더를 그대로 전달합니다. 업체는 로그인 없이 열람·다운로드, 직원 복제 불필요.${note}</div>
+        <div style="font-size:.6rem;color:#9CA3AF;margin-top:3px">※ 파일명에 리뷰어 이름이 보입니다. 공유 해제는 구글 드라이브에서 폴더 '공유 → 링크 보기 제한'으로 가능합니다.</div>
+      </div>`;
+    showToast(res.created ? '빈 [리뷰] 폴더 생성·공유링크 준비' : 'Drive 폴더 공유링크 준비됨', 'success');
+  } catch (e) {
+    if (out) out.innerHTML = `<div style="font-size:.76rem;color:#DC2626">오류: ${escHtml(e.message)}</div>`;
+  }
+}
+
+// 보고 링크 클립보드 복사 (입력칸 id 지정)
+function _relocateCopyLink(inputId) {
+  const el = document.getElementById(inputId);
+  if (!el) return;
+  const v = el.value || '';
+  const done = () => showToast('보고 링크를 복사했습니다.', 'success');
+  if (navigator.clipboard && navigator.clipboard.writeText) {
+    navigator.clipboard.writeText(v).then(done).catch(() => { el.select(); document.execCommand('copy'); done(); });
+  } else {
+    el.select(); document.execCommand('copy'); done();
+  }
 }
 
 async function _relocateRun(apply) {

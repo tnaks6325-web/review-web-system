@@ -296,11 +296,11 @@ body{ letter-spacing:-.01em; }
 <script src="api.js"></script>
 <link rel="stylesheet" href="css/toss-theme.css"/>
 </head>
-<body class="toss-ui">
+<body>
 <div id="toastWrap"></div>
 
 <!-- ── v9.9 메모 공유 모달 (AE) ── -->
-<div class="memo-overlay toss-overlay" id="staffMemoOverlay" onclick="if(event.target===this)closeStaffMemo()">
+<div class="memo-overlay" id="staffMemoOverlay" onclick="if(event.target===this)closeStaffMemo()">
   <div class="memo-modal">
     <div class="memo-modal-head">
       <i class="fas fa-comment-dots" style="color:#3182f6;font-size:.95rem"></i>
@@ -318,7 +318,7 @@ body{ letter-spacing:-.01em; }
 </div>
 
 <!-- ── v9.10: 캠페인 시트 생성 모달 (staff) ── -->
-<div class="cs-overlay toss-overlay" id="staffCreateSheetOverlay" onclick="if(event.target===this)closeStaffCreateSheet()">
+<div class="cs-overlay" id="staffCreateSheetOverlay" onclick="if(event.target===this)closeStaffCreateSheet()">
   <div class="cs-box">
     <div class="cs-header">
       <span class="cs-title"><i class="fas fa-table"></i> 캠페인 시트 생성</span>
@@ -414,7 +414,7 @@ body{ letter-spacing:-.01em; }
   .so-st-revision{background:#FFEDD5;color:#9A3412}
 </style>
 <!-- ── 작업 오더 모달 (AE 제출·조회) ── -->
-<div class="cs-overlay toss-overlay" id="staffOrderOverlay" onclick="if(event.target===this)closeStaffOrder()">
+<div class="cs-overlay" id="staffOrderOverlay" onclick="if(event.target===this)closeStaffOrder()">
   <div class="cs-box" style="max-width:560px;max-height:88vh;overflow-y:auto">
     <div class="cs-header">
       <span class="cs-title"><i class="fas fa-clipboard-list"></i> 작업 오더</span>

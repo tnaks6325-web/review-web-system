@@ -1487,6 +1487,347 @@ router.get('/review-submissions', authMiddleware, async (req, res, next) => {
 });
 
 // ═══════════════════════════════════════════════════════════
+// POST /api/drive/move-folder-contents — 원본 폴더의 모든 파일을 대상 폴더로 이동
+//   레거시/잘못된 위치(예: 관리자 소유 폴더)에 남은 파일을 [리뷰] 폴더로 비우기.
+//   파일명 패턴 무관 전체 이동(서브폴더는 제외·리포트). dryRun 기본 true.
+//   body: { fromFolderUrl, toFolderUrl, dryRun }
+// ═══════════════════════════════════════════════════════════
+router.post('/move-folder-contents', authMiddleware, async (req, res, next) => {
+  try {
+    const { fromFolderUrl, toFolderUrl, dryRun } = req.body || {};
+    const fromId = extractFolderId(fromFolderUrl);
+    const toId = extractFolderId(toFolderUrl);
+    if (!fromId || !toId) return res.json({ ok: false, error: 'fromFolderUrl, toFolderUrl (둘 다 폴더 링크) 가 필요합니다.' });
+    if (fromId === toId) return res.json({ ok: false, error: '원본과 대상 폴더가 같습니다.' });
+    const isDryRun = dryRun !== false;
+
+    // SA+OAuth 병합 조회 (원본이 tnaks6325에만 공유된 폴더여도 누락 없이)
+    const items = await driveService.searchFiles(`'${fromId}' in parents and trashed = false`, { limit: 1000 });
+    const folders = items.filter(f => f.mimeType === 'application/vnd.google-apps.folder');
+    const files = items.filter(f => f.mimeType !== 'application/vnd.google-apps.folder');
+
+    const moved = [], failed = [];
+    if (!isDryRun) {
+      for (const f of files) {
+        try {
+          await driveService.moveFile(f.id, toId, fromId);
+          moved.push({ id: f.id, name: f.name });
+        } catch (e) {
+          logger.error(`[move-folder-contents] 이동 실패 (${f.name}): ${e.message}`);
+          failed.push({ id: f.id, name: f.name, error: e.message });
+        }
+      }
+    }
+
+    res.json({
+      ok: true, dryRun: isDryRun, fromId, toId,
+      total: files.length,
+      files: files.map(f => ({ id: f.id, name: f.name })),
+      subfolders: folders.map(f => f.name),
+      movedCount: moved.length, moved,
+      failedCount: failed.length, failed,
+    });
+  } catch (err) {
+    next(err);
+  }
+});
+
+// ═══════════════════════════════════════════════════════════
+// POST /api/drive/folder-audit — 활성 탭(프론트 제공) 리뷰폴더 현황 점검
+//   body: { tabs:[{sheetId,tabName,displayName,folderUrl}], excludeName, sinceDate }
+//   - 활성 탭은 대시보드(_tabDashData)에서 받아 한정(마감 탭 제외)
+//   - excludeName 포함 탭 제외(예: '리뷰폼')
+//   - 각 폴더 파일수 + "가장 이른 이미지 날짜" → sinceDate(예 26-03-01) 이전 파일 유무 판정
+//     (이미지가 모두 sinceDate 이후 = 26.3+ 캠페인 → 이관/정리 대상)
+// ═══════════════════════════════════════════════════════════
+router.post('/folder-audit', authMiddleware, async (req, res, next) => {
+  try {
+    const { tabs, excludeName, sinceDate } = req.body || {};
+    if (!Array.isArray(tabs)) return res.json({ ok: false, error: 'tabs 배열이 필요합니다.' });
+    const excl = (excludeName || '').trim();
+    const sinceTs = sinceDate ? new Date(sinceDate).getTime() : null;
+
+    // 폴더 파일수 + 가장 이른 이미지 생성일 (옵션 서브폴더까지 2단계)
+    const scanFolder = async (folderId) => {
+      let count = 0, earliest = null;
+      const walk = async (fid, depth) => {
+        const items = await driveService.searchFiles(`'${fid}' in parents and trashed = false`, { limit: 1000 });
+        for (const f of items) {
+          if (f.mimeType === 'application/vnd.google-apps.folder') { if (depth > 1) await walk(f.id, depth - 1); continue; }
+          count++;
+          if (f.mimeType && f.mimeType.indexOf('image/') === 0 && f.createdTime) {
+            const ts = new Date(f.createdTime).getTime();
+            if (earliest === null || ts < earliest) earliest = ts;
+          }
+        }
+      };
+      await walk(folderId, 2);
+      return { count, earliest };
+    };
+
+    // 소유자 이메일 → 라벨(이관 범위 판정용). 알려진 관리자/서비스계정만 구분, 나머지는 '기타'
+    const ownerLabel = (email) => {
+      const e = (email || '').toLowerCase();
+      if (!e) return 'unknown';
+      if (e === 'tnaks6325@gmail.com') return 'tnaks6325';
+      if (e === 'paksehui94@gmail.com') return '박세희';
+      if (e === 'ebbbb97@gmail.com') return '박은비';
+      if (e.indexOf('iam.gserviceaccount.com') >= 0) return 'service-account';
+      return '기타';
+    };
+
+    let connected = 0, nonEmpty = 0, empty = 0, noFolder = 0, excluded = 0, preMarch = 0, errors = 0;
+    const ownerTally = {}; // 연결된 폴더의 소유자 집계
+    const details = [];
+    for (const t of tabs) {
+      const name = t.tabName || t.displayName || '';
+      if (excl && name.indexOf(excl) >= 0) { excluded++; continue; } // 리뷰폼 등 제외
+      const folderId = extractFolderId(t.folderUrl);
+      if (!folderId) { noFolder++; details.push({ tab: name, status: 'no-folder' }); continue; }
+      connected++;
+      // 폴더 소유자 조회(이관 범위 판정) — 실패해도 스캔은 진행
+      let owner = '', ownerLbl = 'unknown';
+      try {
+        const meta = await driveService.getFolderMeta(folderId);
+        owner = (meta && meta.owner) || '';
+        ownerLbl = ownerLabel(owner);
+      } catch (_) {}
+      ownerTally[ownerLbl] = (ownerTally[ownerLbl] || 0) + 1;
+      try {
+        const { count, earliest } = await scanFolder(folderId);
+        const earliestIso = earliest ? new Date(earliest).toISOString().slice(0, 10) : null;
+        const hasPre = (sinceTs !== null && earliest !== null && earliest < sinceTs);
+        if (count > 0) {
+          nonEmpty++;
+          if (hasPre) preMarch++;
+          details.push({ tab: name, status: 'has-files', count, earliest: earliestIso, preMarch: hasPre, owner, ownerLabel: ownerLbl });
+        } else {
+          empty++;
+          details.push({ tab: name, status: 'empty', count: 0, owner, ownerLabel: ownerLbl });
+        }
+      } catch (e) {
+        errors++; details.push({ tab: name, status: 'error', error: e.message, owner, ownerLabel: ownerLbl });
+      }
+    }
+
+    res.json({
+      ok: true,
+      totalTabs: tabs.length,
+      excluded,                 // 리뷰폼 등 제외된 탭 수
+      connected,                // ① 리뷰폴더 연결된 탭 수
+      nonEmpty,                 // ② 파일 있는(정상) 폴더 수
+      preMarch,                 //   그중 26.3 이전 파일이 있어 대상에서 빠지는 수
+      empty,                    // ③ 비어있는 폴더 수
+      noFolder,                 // 폴더 미연결(비-리뷰폼) 수
+      errors,
+      ownerTally,               // 연결된 폴더의 소유자별 수 (이관 범위 판정)
+      sinceDate: sinceDate || null,
+      details,
+    });
+  } catch (err) {
+    next(err);
+  }
+});
+
+// ═══════════════════════════════════════════════════════════
+// POST /api/drive/share-review-folder — 탭의 [리뷰] 폴더를 '링크공유(anyone reader)'로
+//   만들어 업체 보고용 폴더 링크를 반환한다.
+//
+// 목적: 직원이 리뷰 이미지를 자기 드라이브에 복제(→ 직원 용량 차감)하지 않고도,
+//   tnaks 소유 원본 [리뷰] 폴더 링크를 그대로 업체에 전달해 보고할 수 있게 한다.
+//   (복제 0 · 직원 용량 0 · 업체는 로그인 없이 열람·다운로드)
+//
+// body: { sheetId?, tabName?, folderUrl? }
+//   - folderUrl 우선 → 없으면 tab_configs.folder_url → 그래도 없으면 [리뷰] 폴더를
+//     생성·연결한 뒤 공유(미연결 탭이어도 유효한 링크 확보, 빈 폴더 가능).
+// 비파괴: 파일 이동/복제 없음. 폴더에 읽기 권한만 부여(드라이브에서 언제든 해제 가능).
+// ═══════════════════════════════════════════════════════════
+router.post('/share-review-folder', authMiddleware, async (req, res, next) => {
+  try {
+    const { sheetId, tabName, folderUrl } = req.body || {};
+
+    // ── 1) 대상 [리뷰] 폴더 확보 ──
+    let url = (folderUrl || '').trim();
+    if (!url && sheetId && tabName) {
+      const { rows } = await pool.query(
+        'SELECT folder_url FROM tab_configs WHERE sheet_id = $1 AND tab_name = $2 LIMIT 1',
+        [sheetId, tabName]
+      );
+      url = rows[0]?.folder_url || '';
+    }
+    let folderId = extractFolderId(url);
+
+    // 미연결 탭이면 [리뷰] 폴더를 생성·연결 (빈 폴더라도 유효한 링크 확보)
+    let created = false;
+    if (!folderId) {
+      if (!sheetId || !tabName) {
+        return res.json({ ok: false, error: '폴더를 찾을 수 없습니다. folderUrl 또는 sheetId+tabName이 필요합니다.' });
+      }
+      const rootFolderId = getRootFolderId();
+      if (!rootFolderId) return res.json({ ok: false, error: 'AI_REVIEW_FOLDER_ID 미설정' });
+      const sheetTitle = await getSheetTitle(sheetId, tabName);
+      const result = await driveService.ensureReviewFolderPath(rootFolderId, sheetTitle, tabName);
+      folderId = result.id;
+      url = result.url;
+      created = true;
+      await pool.query(
+        'UPDATE tab_configs SET folder_url = $1, updated_at = NOW() WHERE sheet_id = $2 AND tab_name = $3',
+        [url, sheetId, tabName]
+      );
+    }
+
+    // ── 2) 링크공유(anyone reader) 설정 (idempotent) ──
+    const share = await driveService.setFolderAnyoneReader(folderId);
+
+    // ── 3) 폴더 내 파일 수(참고용 — 실패해도 무시) ──
+    let fileCount = null;
+    try {
+      const items = await driveService.listFolderContents(folderId);
+      fileCount = items.filter(f => f.mimeType !== 'application/vnd.google-apps.folder').length;
+    } catch (_) {}
+
+    res.json({
+      ok: true,
+      folderId,
+      folderUrl: url || `https://drive.google.com/drive/folders/${folderId}`,
+      alreadyShared: share.alreadyShared,
+      created,
+      fileCount,
+    });
+  } catch (err) {
+    next(err);
+  }
+});
+
+// ═══════════════════════════════════════════════════════════
+// 업체 보고용 공개 링크 (탭 단위)
+//   - POST /report-link (관리자): 탭당 추측불가 코드 발급(재생성 시 동일 코드 재사용)
+//   - GET  /report/:code (공개): 코드 → 탭의 리뷰 이미지 목록 반환(이미지 자체는
+//     기존 /api/drive/image/:id 프록시로 표시 → 폴더 공개공유 불필요, 원본 복제 0)
+// ═══════════════════════════════════════════════════════════
+const _REPORT_CODE_CHARS = 'abcdefghjkmnpqrstuvwxyz23456789'; // 혼동문자 제외
+function _genReportCode(len = 10) {
+  let c = '';
+  for (let i = 0; i < len; i++) c += _REPORT_CODE_CHARS.charAt(Math.floor(Math.random() * _REPORT_CODE_CHARS.length));
+  return c;
+}
+function _frontendBase() {
+  return (process.env.FRONTEND_URL || 'https://review-web-system.pages.dev').replace(/\/+$/, '');
+}
+
+// 탭당 보고 코드 확보 (없으면 생성, 있으면 재사용 — 동일 링크 유지)
+async function _ensureReportCode(sheetId, tabName, displayName, createdBy) {
+  const found = await pool.query(
+    'SELECT code FROM review_report_links WHERE sheet_id = $1 AND tab_name = $2 LIMIT 1',
+    [sheetId, tabName]
+  );
+  if (found.rows[0]) {
+    if (displayName) {
+      await pool.query('UPDATE review_report_links SET display_name = $1 WHERE code = $2', [displayName, found.rows[0].code]);
+    }
+    return found.rows[0].code;
+  }
+  for (let i = 0; i < 12; i++) {
+    const c = _genReportCode();
+    try {
+      await pool.query(
+        'INSERT INTO review_report_links (code, sheet_id, tab_name, display_name, created_by) VALUES ($1, $2, $3, $4, $5)',
+        [c, sheetId, tabName, displayName || null, createdBy || null]
+      );
+      return c;
+    } catch (e) {
+      if (e.code === '23505') {
+        // 탭 유니크 충돌(동시 생성) → 기존 코드 재선택 / 코드 충돌이면 재시도
+        const r = await pool.query('SELECT code FROM review_report_links WHERE sheet_id = $1 AND tab_name = $2 LIMIT 1', [sheetId, tabName]);
+        if (r.rows[0]) return r.rows[0].code;
+        continue;
+      }
+      throw e;
+    }
+  }
+  throw new Error('보고 코드 생성 실패');
+}
+
+// POST /api/drive/report-link — 탭의 업체 보고용 공개 링크 발급(관리자)
+//   body: { sheetId, tabName, displayName? }
+router.post('/report-link', authMiddleware, async (req, res, next) => {
+  try {
+    const { sheetId, tabName, displayName } = req.body || {};
+    if (!sheetId || !tabName) return res.json({ ok: false, error: 'sheetId, tabName이 필요합니다.' });
+    const createdBy = (req.user && (req.user.username || req.user.email || req.user.id)) || null;
+    const code = await _ensureReportCode(sheetId, tabName, (displayName || '').trim() || null, createdBy);
+    res.json({
+      ok: true,
+      code,
+      reportUrl: `${_frontendBase()}/report.html?r=${code}`,
+    });
+  } catch (err) {
+    next(err);
+  }
+});
+
+// GET /api/drive/report/:code — 공개: 코드 → 탭 리뷰 이미지 목록 (무인증)
+//   review_submissions 원장 우선 → 비어 있으면 [리뷰] 폴더 라이브 스캔 폴백.
+router.get('/report/:code', async (req, res, next) => {
+  try {
+    const code = String(req.params.code || '').trim();
+    if (!/^[a-z2-9]{6,16}$/.test(code)) return res.status(404).json({ ok: false, error: '유효하지 않은 링크입니다.' });
+
+    const { rows } = await pool.query(
+      'SELECT sheet_id, tab_name, display_name FROM review_report_links WHERE code = $1 LIMIT 1',
+      [code]
+    );
+    if (!rows[0]) return res.status(404).json({ ok: false, error: '유효하지 않은 링크입니다.' });
+    const { sheet_id: sheetId, tab_name: tabName, display_name: displayName } = rows[0];
+
+    // 1) 제출 원장 우선
+    let images = [];
+    try {
+      const sub = await pool.query(
+        `SELECT file_id, file_name, reviewer_name, uploaded_at
+           FROM review_submissions
+          WHERE sheet_id = $1 AND tab_name = $2 AND file_id IS NOT NULL AND file_id <> ''
+          ORDER BY reviewer_name NULLS LAST, uploaded_at ASC NULLS LAST`,
+        [sheetId, tabName]
+      );
+      images = sub.rows.map(r => ({
+        id: r.file_id,
+        name: r.file_name || '',
+        reviewer: (r.reviewer_name || driveService.extractReviewerNameFromFile(r.file_name) || '').trim(),
+      }));
+    } catch (_) {}
+
+    // 2) 원장이 비어 있으면 [리뷰] 폴더 라이브 스캔 폴백
+    if (images.length === 0) {
+      try {
+        const { rows: tcfg } = await pool.query(
+          'SELECT folder_url FROM tab_configs WHERE sheet_id = $1 AND tab_name = $2 LIMIT 1',
+          [sheetId, tabName]
+        );
+        const folderId = extractFolderId(tcfg[0]?.folder_url);
+        if (folderId) {
+          const files = await driveService.listFolderFilesRecursive(folderId);
+          images = files
+            .filter(f => (f.mimeType || '').indexOf('image/') === 0 || /\.(jpe?g|png|gif|webp)$/i.test(f.name || ''))
+            .map(f => ({ id: f.id, name: f.name || '', reviewer: (driveService.extractReviewerNameFromFile(f.name) || '').trim() }));
+        }
+      } catch (e) {
+        logger.warn(`[report] 폴더 스캔 폴백 실패 (${code}): ${e.message}`);
+      }
+    }
+
+    res.json({
+      ok: true,
+      title: (displayName || tabName || '리뷰 보고'),
+      count: images.length,
+      images,
+    });
+  } catch (err) {
+    next(err);
+  }
+});
+
+// ═══════════════════════════════════════════════════════════
 // GET /api/drive/image/:id — Drive 이미지 스트리밍 프록시 (모달 인라인 미리보기)
 //   <img src>가 헤더 인증을 못 보내므로 무인증. id는 추측 불가한 Drive fileId(20+).
 //   서버 OAuth(소유자 계정)로 받아 스트리밍 → 비공개/링크공유 섞여도 표시.

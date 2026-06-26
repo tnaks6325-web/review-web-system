@@ -29,6 +29,8 @@ const orderRoutes    = require('./routes/order.routes');
 const productRoutes  = require('./routes/product.routes');
 const portalRoutes   = require('./routes/portal.routes');
 const rawRoutes      = require('./routes/raw.routes');
+const csRoutes       = require('./routes/cs.routes');
+const mappingRoutes  = require('./routes/mapping.routes');
 
 const app = express();
 
@@ -83,8 +85,14 @@ app.use('/api/product',   productRoutes);
 // 업무포털 — 거래처(광고주)별 작업 관리 (Section 13)
 app.use('/api/portal',    portalRoutes);
 
+// 리뷰어 C/S 문의창구 — 관리자 (Section 15)
+app.use('/api/cs',        csRoutes);
+
 // 구글시트 전체 RAW 미러링 (Section 14)
 app.use('/api/raw',       rawRoutes);
+
+// 명시적 컬럼 매핑 (Section 15) — 구글시트 점진 대체 keystone
+app.use('/api/mapping',   mappingRoutes);
 app.use('/api/viewer',    diagRoutes);
 app.use('/api/image',     diagRoutes);
 app.use('/api/blacklist', diagRoutes);

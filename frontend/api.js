@@ -190,6 +190,10 @@ const _ACTION_MAP = {
   'checkSubmissionStatus': { method: 'POST', path: '/api/drive/check-submission-status' },
   'relocateOrphanReviews': { method: 'POST', path: '/api/drive/relocate-orphan-reviews' },
   'reviewSubmissions':     { method: 'GET',  path: '/api/drive/review-submissions' },
+  'moveFolderContents':    { method: 'POST', path: '/api/drive/move-folder-contents' },
+  'folderAudit':           { method: 'POST', path: '/api/drive/folder-audit' },
+  'shareReviewFolder':     { method: 'POST', path: '/api/drive/share-review-folder' },
+  'reviewReportLink':      { method: 'POST', path: '/api/drive/report-link' },
   'getPendingRows':      { method: 'GET',  path: '/api/diag/pending-rows' },
   'getUnpaidRows':       { method: 'GET',  path: '/api/diag/unpaid-rows' },
   'addTab':              { method: 'POST', path: '/api/diag/add-tab' },
@@ -274,10 +278,36 @@ const _ACTION_MAP = {
   'orderAdminList':        { method: 'GET',  path: '/api/order/admin/list' },
   'orderNewCount':         { method: 'GET',  path: '/api/order/admin/new-count' },
   'orderAdminStatus':      { method: 'PUT',  path: '/api/order/admin/status' },
+  'orderAdminAccept':      { method: 'POST', path: '/api/order/admin/accept' },
   'orderAdminUpdate':      { method: 'PUT',  path: '/api/order/admin/update' },
   'orderSendMemo':         { method: 'PUT',  path: '/api/order/admin/send-memo' },
   'orderAdminDelete':      { method: 'DELETE', path: '/api/order/admin/delete' },
   'productPreview':        { method: 'POST', path: '/api/product/preview' },
+
+  // ★ C/S 문의창구 — 리뷰어 (토큰 없음, phone8 기반)
+  'csReviewerCampaigns':   { method: 'GET',  path: '/api/reviewer/cs/campaigns' },
+  'csReviewerThreads':     { method: 'GET',  path: '/api/reviewer/cs/threads' },
+  'csReviewerMessages':    { method: 'GET',  path: '/api/reviewer/cs/messages' },
+  'csReviewerSend':        { method: 'POST', path: '/api/reviewer/cs/message' },
+
+  // ★ C/S 문의창구 — 관리자 (JWT + admin/master)
+  'csAdminThreads':        { method: 'GET',  path: '/api/cs/threads' },
+  'csAdminUnread':         { method: 'GET',  path: '/api/cs/unread-count' },
+  'csAdminMessages':       { method: 'GET',  path: '/api/cs/messages' },
+  'csAdminReply':          { method: 'POST', path: '/api/cs/reply' },
+  'csAdminStatus':         { method: 'POST', path: '/api/cs/status' },
+  'csAdminSaveMemo':       { method: 'POST', path: '/api/cs/memo' },
+
+  // ★ 구글시트 전체 RAW 미러링 (Section 14)
+  'rawMirror':  { method: 'POST', path: '/api/raw/mirror' },
+  'rawStatus':  { method: 'GET',  path: '/api/raw/status' },
+  'rawTabs':    { method: 'GET',  path: '/api/raw/tabs' },
+  'rawRows':    { method: 'GET',  path: '/api/raw/rows' },
+
+  // ★ 명시적 컬럼 매핑 (Section 15)
+  'mappingFields': { method: 'GET',  path: '/api/mapping/fields' },
+  'mappingGet':    { method: 'GET',  path: '/api/mapping' },
+  'mappingSave':   { method: 'POST', path: '/api/mapping' },
 };
 
 // ═══════════════════════════════════════════════════════════

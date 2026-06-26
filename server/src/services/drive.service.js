@@ -58,6 +58,51 @@ function _getReadDrive() {
   return drive;
 }
 
+// OAuth 계정 이메일 캐시 (소유권 보정 판단용 — about.get 1회만)
+let _oauthEmailCache;
+async function _getOAuthEmail() {
+  if (_oauthEmailCache !== undefined) return _oauthEmailCache;
+  _oauthEmailCache = null;
+  try {
+    const d = _getOAuthDrive();
+    if (d) {
+      const r = await d.about.get({ fields: 'user(emailAddress)' });
+      _oauthEmailCache = (r.data && r.data.user && r.data.user.emailAddress) || null;
+    }
+  } catch (e) { logger.warn(`[Drive] OAuth 이메일 조회 실패: ${e.message}`); }
+  return _oauthEmailCache;
+}
+
+/**
+ * 생성/업로드 직후 소유권을 DRIVE_OWNER_EMAIL(tnaks6325)로 보정한다 (파일·폴더 공통).
+ *  - SA로 만든 것: 항상 이전(SA는 쿼터/소유 부적합)
+ *  - OAuth로 만든 것: 그 계정이 소유주가 아닐 때만 이전(이미 소유주면 생략)
+ * 과거 OAuth 계정이 tnaks6325가 아니어서 폴더가 관리자(박세희) 소유로 남던 문제 방지.
+ */
+async function _normalizeOwner(usedClient, oauthClient, fileId) {
+  const ownerEmail = process.env.DRIVE_OWNER_EMAIL || 'tnaks6325@gmail.com';
+  let actClient = null;
+  if (usedClient === 'OAuth') {
+    const email = await _getOAuthEmail();
+    if (email && email.toLowerCase() === ownerEmail.toLowerCase()) return; // 이미 소유주 → 생략
+    actClient = oauthClient || _getOAuthDrive();
+  } else {
+    actClient = _getReadDrive();
+  }
+  if (!actClient) return;
+  try {
+    await actClient.permissions.create({
+      fileId,
+      transferOwnership: true,
+      requestBody: { role: 'owner', type: 'user', emailAddress: ownerEmail },
+      supportsAllDrives: true,
+    });
+    logger.info(`[Drive] 소유권 이전 완료: ${fileId} → ${ownerEmail}`);
+  } catch (e) {
+    logger.warn(`[Drive] 소유권 이전 실패 (무시): ${fileId} — ${e.message}`);
+  }
+}
+
 // ═══════════════════════════════════════════════════════════
 // 읽기 전용 함수 (Service Account 사용)
 // ═══════════════════════════════════════════════════════════
@@ -168,7 +213,10 @@ async function moveFile(fileId, newParentId, oldParentId) {
  * SA로 검색 시도 → 실패 시 OAuth로 재시도
  */
 async function findFolderByName(name, parentFolderId) {
-  const q = `name = '${name}' and '${parentFolderId}' in parents and mimeType = 'application/vnd.google-apps.folder' and trashed = false`;
+  // Drive q 문자열에 작은따옴표/역슬래시가 들어가면 쿼리가 깨진다(예: 상품명 "JJ's").
+  //   역슬래시 → 작은따옴표 순으로 이스케이프한다.
+  const escName = String(name).replace(/\\/g, '\\\\').replace(/'/g, "\\'");
+  const q = `name = '${escName}' and '${parentFolderId}' in parents and mimeType = 'application/vnd.google-apps.folder' and trashed = false`;
   const params = {
     q,
     fields: 'files(id, name, webViewLink)',
@@ -227,6 +275,7 @@ async function createFolder(name, parentFolderId) {
     try {
       const res = await oauth.files.create(createParams);
       logger.info(`[Drive] 폴더 생성 완료: "${name}" → ${res.data.id} (OAuth)`);
+      await _normalizeOwner('OAuth', oauth, res.data.id); // ① 폴더 소유권 보정
       return res.data;
     } catch (oauthErr) {
       logger.warn(`[Drive] OAuth 폴더 생성 실패 (SA 재시도): ${oauthErr.message}`);
@@ -238,6 +287,7 @@ async function createFolder(name, parentFolderId) {
   if (sa) {
     const res = await sa.files.create(createParams);
     logger.info(`[Drive] 폴더 생성 완료: "${name}" → ${res.data.id} (SA)`);
+    await _normalizeOwner('SA', oauth, res.data.id); // ① 폴더 소유권 보정 (SA→tnaks6325)
     return res.data;
   }
 
@@ -332,25 +382,10 @@ async function uploadFileBase64(base64Data, fileName, mimeType, parentFolderId, 
     }
   }
 
-  // ── 소유권 이전: Service Account → 실제 사용자 계정 ──
-  // Service Account는 스토리지 할당량이 없으므로 파일 소유권을 이전해야 함
-  const ownerEmail = process.env.DRIVE_OWNER_EMAIL || 'tnaks6325@gmail.com';
-  if (usedClient === 'SA') {
-    try {
-      const sa = _getReadDrive();
-      if (sa) {
-        await sa.permissions.create({
-          fileId: data.id,
-          transferOwnership: true,
-          requestBody: { role: 'owner', type: 'user', emailAddress: ownerEmail },
-          supportsAllDrives: true,
-        });
-        logger.info(`[Drive] 소유권 이전 완료: ${data.id} → ${ownerEmail}`);
-      }
-    } catch (ownerErr) {
-      logger.warn(`[Drive] 소유권 이전 실패 (무시): ${ownerErr.message}`);
-    }
-  }
+  // ── ② 소유권 보정: DRIVE_OWNER_EMAIL(tnaks6325)로 이전 ──
+  //   기존엔 SA 경로만 이전했으나, OAuth 계정이 tnaks6325가 아니면 OAuth 업로드도
+  //   잘못된 계정 소유로 남는다 → SA는 항상, OAuth는 계정 불일치 시 이전.
+  await _normalizeOwner(usedClient, oauth, data.id);
 
   return data;
 }
@@ -395,6 +430,53 @@ async function copyFile(fileId, newParentId, newName) {
   }
 
   throw new Error('Google Drive API가 설정되지 않았습니다. (OAuth 또는 SA 필요)');
+}
+
+/**
+ * 폴더를 "링크가 있는 모든 사용자 = 읽기"로 공유한다 (업체 보고용 폴더 공유링크).
+ *  - tnaks(OAuth=소유자) 자격으로 읽기 권한만 부여 → 업체가 로그인 없이 열람·다운로드.
+ *  - 원본은 tnaks 소유 그대로 → 직원이 자기 드라이브에 복제할 필요가 없다(= 직원 용량 0).
+ *  - 비파괴·idempotent: 파일을 이동/복제하지 않으며, 이미 anyone 권한이 있으면 생략한다.
+ *    공유 해제는 구글 드라이브에서 폴더 '공유 → 링크 제한'으로 언제든 가능(역가능).
+ * @param {string} folderId
+ * @returns {{ alreadyShared: boolean }}
+ */
+async function setFolderAnyoneReader(folderId) {
+  if (!folderId) throw new Error('folderId가 필요합니다.');
+  const d = _getOAuthDrive() || _getReadDrive();
+  if (!d) throw new Error('Drive 자격증명이 없습니다. (OAuth 또는 SA 필요)');
+
+  // 현재 anyone 권한 유무 조회 (중복 생성 방지)
+  const hasAnyone = async () => {
+    try {
+      const r = await d.permissions.list({
+        fileId: folderId,
+        fields: 'permissions(id, type, role)',
+        supportsAllDrives: true,
+      });
+      return (r.data.permissions || []).some(p => p.type === 'anyone' && (p.role === 'reader' || p.role === 'writer'));
+    } catch (e) {
+      logger.warn(`[Drive] 폴더 권한 조회 실패(계속 진행): ${folderId} — ${e.message}`);
+      return false;
+    }
+  };
+
+  // 이미 링크공유(anyone)면 생략
+  if (await hasAnyone()) return { alreadyShared: true };
+
+  try {
+    await d.permissions.create({
+      fileId: folderId,
+      requestBody: { role: 'reader', type: 'anyone' },
+      supportsAllDrives: true,
+    });
+  } catch (e) {
+    // 조회가 누락한 사이 이미 공유돼 있으면 구글이 중복 에러를 낸다 → 재확인 후 성공 처리
+    if (await hasAnyone()) return { alreadyShared: true };
+    throw e;
+  }
+  logger.info(`[Drive] 폴더 링크공유(anyone reader) 설정: ${folderId}`);
+  return { alreadyShared: false };
 }
 
 /**
@@ -958,8 +1040,11 @@ async function getFolderMeta(folderId) {
   for (const client of [sa, oauth]) {
     if (!client) continue;
     try {
-      const res = await client.files.get({ fileId: folderId, fields: 'id, name', supportsAllDrives: true });
-      if (res.data) return { id: res.data.id, name: res.data.name };
+      const res = await client.files.get({ fileId: folderId, fields: 'id, name, owners(emailAddress)', supportsAllDrives: true });
+      if (res.data) {
+        const owner = (res.data.owners && res.data.owners[0] && res.data.owners[0].emailAddress) || '';
+        return { id: res.data.id, name: res.data.name, owner };
+      }
     } catch (_) {}
   }
   return null;
@@ -1227,6 +1312,7 @@ module.exports = {
   copyFile,
   findFolderByName,
   uploadFileBase64,
+  setFolderAnyoneReader,
   getOrCreateSubFolder,
   getOAuthStatus,
   // 계정/쿼터 진단 + 소유권 점검·이전 (용량 귀속 확인)

@@ -1,0 +1,132 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>리뷰 보고</title>
+<meta name="robots" content="noindex,nofollow">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Pretendard:wght@400;500;600;700&display=swap" rel="stylesheet">
+<style>
+  *,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
+  :root{--p:#0891B2;--bg:#F8FAFC;--card:#fff;--t1:#0F172A;--t2:#475569;--t3:#94A3B8;--border:#E2E8F0}
+  body{font-family:'Pretendard',-apple-system,sans-serif;background:var(--bg);color:var(--t1);min-height:100vh;font-size:14px;-webkit-font-smoothing:antialiased}
+  .hdr{background:linear-gradient(135deg,#0E7490,#0891B2 70%,#22D3EE);color:#fff;padding:20px 18px}
+  .hdr h1{font-size:1.15rem;font-weight:700;word-break:break-all}
+  .hdr .sub{font-size:.78rem;opacity:.9;margin-top:4px}
+  .wrap{max-width:980px;margin:0 auto;padding:16px 14px 60px}
+  .grp{margin-top:18px}
+  .grp-h{display:flex;align-items:center;gap:7px;font-size:.92rem;font-weight:700;color:var(--t1);margin:0 2px 9px}
+  .grp-h .cnt{font-size:.72rem;font-weight:600;color:var(--p);background:#CFFAFE;border-radius:20px;padding:1px 9px}
+  .grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(150px,1fr));gap:10px}
+  .cell{background:var(--card);border:1px solid var(--border);border-radius:12px;overflow:hidden;cursor:pointer;transition:transform .12s,box-shadow .12s}
+  .cell:hover{transform:translateY(-2px);box-shadow:0 8px 22px rgba(8,145,178,.14)}
+  .cell .imgbox{aspect-ratio:3/4;background:#F1F5F9;display:flex;align-items:center;justify-content:center;overflow:hidden}
+  .cell img{width:100%;height:100%;object-fit:cover;display:block}
+  .cell .cap{padding:7px 9px;font-size:.72rem;color:var(--t2);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+  .state{text-align:center;padding:60px 20px;color:var(--t2)}
+  .state .ic{font-size:2.2rem;color:var(--t3);margin-bottom:10px}
+  .spin{width:34px;height:34px;border:3px solid #CFFAFE;border-top-color:var(--p);border-radius:50%;animation:r 0.8s linear infinite;margin:0 auto 12px}
+  @keyframes r{to{transform:rotate(360deg)}}
+  .foot{text-align:center;font-size:.68rem;color:var(--t3);margin-top:26px}
+  /* 라이트박스 */
+  .lb{position:fixed;inset:0;background:rgba(0,0,0,.86);z-index:50;display:none;align-items:center;justify-content:center;padding:16px}
+  .lb.on{display:flex}
+  .lb img{max-width:100%;max-height:88vh;border-radius:8px}
+  .lb .x{position:absolute;top:14px;right:16px;color:#fff;font-size:1.6rem;font-weight:700;cursor:pointer;line-height:1;background:none;border:none}
+  .lb .dl{position:absolute;bottom:18px;left:50%;transform:translateX(-50%);background:#fff;color:#0F172A;text-decoration:none;font-size:.82rem;font-weight:700;padding:8px 16px;border-radius:8px}
+</style>
+</head>
+<body>
+  <div class="hdr">
+    <h1 id="title">리뷰 보고</h1>
+    <div class="sub" id="sub">불러오는 중…</div>
+  </div>
+  <div class="wrap" id="wrap">
+    <div class="state"><div class="spin"></div>리뷰 이미지를 불러오는 중입니다…</div>
+  </div>
+  <div class="lb" id="lb" onclick="if(event.target===this)_closeLb()">
+    <button class="x" onclick="_closeLb()" aria-label="닫기">&times;</button>
+    <img id="lbImg" src="" alt="">
+    <a class="dl" id="lbDl" href="" download>이미지 저장</a>
+  </div>
+
+  <script src="api.js"></script>
+  <script>
+    function esc(s){ return String(s==null?'':s).replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c])); }
+    function qparam(k){ return new URLSearchParams(location.search).get(k) || ''; }
+    var IMG = (id)=> `${API_BASE_URL}/api/drive/image/${encodeURIComponent(id)}`;
+    var THUMB = (id)=> `https://drive.google.com/thumbnail?id=${encodeURIComponent(id)}&sz=w1000`;
+
+    function _openLb(id){
+      var lb=document.getElementById('lb'), im=document.getElementById('lbImg'), dl=document.getElementById('lbDl');
+      im.src=IMG(id); im.onerror=function(){ this.onerror=null; this.src=THUMB(id); };
+      dl.href=IMG(id);
+      lb.classList.add('on'); document.body.style.overflow='hidden';
+    }
+    function _closeLb(){ document.getElementById('lb').classList.remove('on'); document.body.style.overflow=''; }
+    document.addEventListener('keydown',e=>{ if(e.key==='Escape')_closeLb(); });
+
+    function render(data){
+      document.getElementById('title').textContent = data.title || '리뷰 보고';
+      document.getElementById('sub').textContent = `총 ${data.count}장의 리뷰 이미지`;
+      document.title = (data.title || '리뷰 보고') + ' — 리뷰 보고';
+      var wrap=document.getElementById('wrap');
+      if(!data.images || !data.images.length){
+        wrap.innerHTML = `<div class="state"><div class="ic">🗂️</div>아직 등록된 리뷰 이미지가 없습니다.</div>`;
+        return;
+      }
+      // 리뷰어별 그룹핑(이름 없으면 '기타')
+      var groups = {};
+      var order = [];
+      data.images.forEach(function(im){
+        var k = (im.reviewer||'').trim() || '기타';
+        if(!groups[k]){ groups[k]=[]; order.push(k); }
+        groups[k].push(im);
+      });
+      var html = order.map(function(name){
+        var cells = groups[name].map(function(im){
+          return `<div class="cell" onclick="_openLb('${esc(im.id)}')">
+            <div class="imgbox"><img loading="lazy" src="${IMG(im.id)}" alt="${esc(im.name)}"
+              onerror="this.onerror=null;this.src='${THUMB(im.id)}'"></div>
+            <div class="cap">${esc(name)}</div>
+          </div>`;
+        }).join('');
+        return `<div class="grp">
+          <div class="grp-h">${esc(name)} <span class="cnt">${groups[name].length}</span></div>
+          <div class="grid">${cells}</div>
+        </div>`;
+      }).join('');
+      wrap.innerHTML = html + `<div class="foot">이 페이지는 리뷰 보고용 링크입니다. 이미지를 누르면 크게 볼 수 있습니다.</div>`;
+    }
+
+    (async function(){
+      var code = qparam('r') || qparam('code');
+      var wrap=document.getElementById('wrap');
+      if(!code){
+        document.getElementById('sub').textContent='';
+        wrap.innerHTML = `<div class="state"><div class="ic">⚠️</div>잘못된 링크입니다. (코드 없음)</div>`;
+        return;
+      }
+      try{
+        var resp = await fetch(`${API_BASE_URL}/api/drive/report/${encodeURIComponent(code)}`);
+        if(resp.status===404){
+          document.getElementById('sub').textContent='';
+          wrap.innerHTML = `<div class="state"><div class="ic">🔒</div>유효하지 않거나 만료된 링크입니다.</div>`;
+          return;
+        }
+        var data = await resp.json();
+        if(!data || data.ok===false){
+          document.getElementById('sub').textContent='';
+          wrap.innerHTML = `<div class="state"><div class="ic">⚠️</div>${esc((data&&data.error)||'불러오기에 실패했습니다.')}</div>`;
+          return;
+        }
+        render(data);
+      }catch(e){
+        document.getElementById('sub').textContent='';
+        wrap.innerHTML = `<div class="state"><div class="ic">⚠️</div>네트워크 오류로 불러오지 못했습니다. 잠시 후 다시 시도해주세요.</div>`;
+      }
+    })();
+  </script>
+</body>
+</html>

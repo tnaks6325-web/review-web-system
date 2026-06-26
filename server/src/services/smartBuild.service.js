@@ -726,6 +726,23 @@ async function runSmartBuild() {
       ]);
     } catch (_) {}
 
+    // ── 리뷰/캡처 폴더 자동 보장 (신규/미연결 활성 탭) ──
+    //   on-demand(첫 업로드) 생성에만 의존하던 것을 보완 — 탭이 추가되면
+    //   tnaks6325 소유 [리뷰]/[구매캡처] 폴더를 미리 만들어 연결한다.
+    //   (타 소유권/미연결 폴더 예방). best-effort: 실패해도 빌드에 영향 없음.
+    try {
+      const reviewFolders = require('./reviewFolders.service');
+      const rf = await reviewFolders.ensureReviewFoldersForActiveTabs({ limit: 30 });
+      result.reviewFoldersCreated = rf.reviewCreated || 0;
+      result.captureFoldersCreated = rf.captureCreated || 0;
+      result.folderLinkErrors = rf.errors || 0; // 지속 실패 탭 가시화(예: 권한/이름 문제)
+      if (rf.reviewCreated || rf.captureCreated || rf.errors) {
+        logger.info(`[smartBuild] #${runNum} 폴더 자동연결: 리뷰 ${rf.reviewCreated}, 캡처 ${rf.captureCreated}, 오류 ${rf.errors}${rf.capped ? ' (일부 다음 주기)' : ''}`);
+      }
+    } catch (e) {
+      logger.warn(`[smartBuild] 폴더 자동연결 스킵: ${e.message}`);
+    }
+
   } catch (err) {
     result.ok = false;
     result.errors++;
