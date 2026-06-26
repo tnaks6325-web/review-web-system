@@ -70,11 +70,49 @@ function _buildRecruitCard(c) {
     ${badges.length ? `<div class="recruit-card-badges">${badges.map(b=>`<span class="recruit-card-badge">${escHtml(b)}</span>`).join("")}</div>` : ""}
     ${c.notes ? `<div style="font-size:.72rem;color:var(--t3);white-space:pre-line;overflow:hidden;display:-webkit-box;-webkit-line-clamp:3;-webkit-box-orient:vertical">${escHtml(c.notes)}</div>` : ""}
     <div class="recruit-card-actions">
-      <button class="recruit-btn recruit-btn-edit" onclick="openRecruitModal('${escHtml(c.id)}')"><i class="fas fa-pen"></i> 수정</button>
-      <button class="recruit-btn recruit-btn-del"  onclick="deleteRecruitPost('${escHtml(c.id)}', \`${escHtml(c.title||'')}\`)"><i class="fas fa-trash"></i> 삭제</button>
+      <div class="recruit-actions-left">
+        <button class="recruit-btn recruit-btn-edit" onclick="openRecruitModal('${escHtml(c.id)}')"><i class="fas fa-pen"></i> 수정</button>
+        <button class="recruit-btn recruit-btn-del"  onclick="deleteRecruitPost('${escHtml(c.id)}', \`${escHtml(c.title||'')}\`)"><i class="fas fa-trash"></i> 삭제</button>
+      </div>
+      ${_recruitToggleHtml(c)}
     </div>
   `;
   return div;
+}
+
+/* 게시/중단 토글 (임시저장↔모집중). 마감(closed) 카드는 토글 미표시 */
+function _recruitToggleHtml(c) {
+  const status = c.status || "draft";
+  if (status === "closed") return "";
+  const on = status === "active";
+  return `
+    <label class="recruit-toggle" title="${on ? "공고 게시중 — 끄면 임시저장(중단)" : "임시저장 — 켜면 공고 게시"}">
+      <span class="recruit-toggle-label ${on ? "on" : "off"}">${on ? "게시중" : "중단"}</span>
+      <input type="checkbox" ${on ? "checked" : ""} onchange="toggleRecruitPublish('${escHtml(c.id)}', this.checked, this)">
+      <span class="recruit-toggle-slider"></span>
+    </label>`;
+}
+
+/* 공고 게시/중단 토글 핸들러 — 켜면 active(모집중), 끄면 draft(임시저장) */
+async function toggleRecruitPublish(id, checked, inputEl) {
+  const newStatus = checked ? "active" : "draft";
+  if (inputEl) inputEl.disabled = true;
+  try {
+    const res = await fetch(API_BASE_URL + "/api/campaign/admin/" + encodeURIComponent(id) + "/status", {
+      method: "PUT",
+      headers: { "Content-Type": "application/json", ..._getAuthHeaders() },
+      body: JSON.stringify({ status: newStatus })
+    });
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({}));
+      throw new Error(err.error || ("HTTP " + res.status));
+    }
+    showToast(checked ? "공고를 게시했습니다." : "공고 게시를 중단했습니다.", "success");
+    loadRecruitList();
+  } catch (e) {
+    showToast("상태 변경 실패: " + e.message, "error");
+    if (inputEl) { inputEl.checked = !checked; inputEl.disabled = false; }
+  }
 }
 
 /* ═══════════════════════════════════════
