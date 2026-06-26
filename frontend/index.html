@@ -652,8 +652,41 @@
       </div>
       <!-- 계좌 관리 / 로그아웃 (내정보 탭) -->
       <div class="profile-card" style="margin-top:12px">
-        <div class="profile-card-title"><i class="fas fa-wallet"></i> 계좌 관리</div>
-        <div class="empty-state" style="padding:14px 8px">등록된 계좌가 없습니다</div>
+        <div class="profile-card-title" style="display:flex;align-items:center;justify-content:space-between">
+          <span><i class="fas fa-wallet"></i> 계좌 관리 <span style="font-size:.66rem;font-weight:400;color:var(--t3)">(페이백 입금 계좌)</span></span>
+          <button id="btnAddBankInfo" onclick="openBankForm()" style="padding:3px 10px;background:#EFF6FF;color:#2563EB;border:1px solid #93C5FD;border-radius:6px;font-size:.68rem;font-weight:700;cursor:pointer"><i class="fas fa-plus"></i> 계좌 등록</button>
+        </div>
+        <!-- 등록된 계좌 표시 -->
+        <div class="empty-state" id="bankEmptyState" style="padding:14px 8px">등록된 계좌가 없습니다</div>
+        <div id="bankInfoCard" style="display:none;padding:12px 14px;background:#F8FAFC;border:1px solid #E2E8F0;border-radius:10px">
+          <div style="display:flex;align-items:center;gap:8px;margin-bottom:4px;flex-wrap:wrap">
+            <span id="bankInfoBankName" style="font-weight:700;color:var(--t1);font-size:.9rem"></span>
+            <span style="font-size:.72rem;color:var(--t3)">예금주 <span id="bankInfoHolder" style="color:var(--t2);font-weight:600"></span></span>
+          </div>
+          <div id="bankInfoAccount" style="font-family:monospace;font-size:.92rem;color:var(--t1);letter-spacing:.3px"></div>
+        </div>
+        <!-- 계좌 입력 폼 -->
+        <div id="inlineBankForm" style="display:none;margin-top:10px;background:#EFF6FF;border:1.5px solid #BFDBFE;border-radius:10px;padding:12px 14px">
+          <div style="font-size:.73rem;font-weight:700;color:#1D4ED8;margin-bottom:8px">💳 입금받을 계좌 등록</div>
+          <div style="display:flex;gap:8px;margin-bottom:8px;flex-wrap:wrap">
+            <div style="flex:1;min-width:110px">
+              <label style="font-size:.68rem;font-weight:600;color:var(--t2)">은행명</label>
+              <input id="inlineBankNameInput" type="text" placeholder="예: 카카오뱅크" maxlength="20" style="width:100%;margin-top:3px;padding:7px 9px;border:1.5px solid #D1D5DB;border-radius:7px;font-size:.8rem;outline:none;box-sizing:border-box">
+            </div>
+            <div style="flex:1;min-width:100px">
+              <label style="font-size:.68rem;font-weight:600;color:var(--t2)">예금주</label>
+              <input id="inlineBankHolderInput" type="text" placeholder="예금주명" maxlength="20" style="width:100%;margin-top:3px;padding:7px 9px;border:1.5px solid #D1D5DB;border-radius:7px;font-size:.8rem;outline:none;box-sizing:border-box">
+            </div>
+          </div>
+          <div style="margin-bottom:8px">
+            <label style="font-size:.68rem;font-weight:600;color:var(--t2)">계좌번호 <span style="color:var(--t3);font-weight:400">(숫자만)</span></label>
+            <input id="inlineBankAccountInput" type="text" inputmode="numeric" placeholder="- 없이 숫자만 입력" maxlength="20" oninput="this.value=this.value.replace(/[^0-9]/g,'')" style="width:100%;margin-top:3px;padding:7px 9px;border:1.5px solid #D1D5DB;border-radius:7px;font-size:.8rem;outline:none;box-sizing:border-box">
+          </div>
+          <div style="display:flex;gap:8px">
+            <button onclick="cancelBankForm()" style="flex:1;padding:7px 0;background:#fff;color:var(--t2);border:1.5px solid #D1D5DB;border-radius:7px;font-size:.75rem;font-weight:600;cursor:pointer">취소</button>
+            <button id="btnSaveBankInfo" onclick="saveBankInfoInline()" style="flex:1;padding:7px 0;background:#2563EB;color:#fff;border:none;border-radius:7px;font-size:.75rem;font-weight:700;cursor:pointer">저장</button>
+          </div>
+        </div>
       </div>
       <button onclick="doLogout()" style="width:100%;padding:14px;background:#F1F2F6;color:#5B6472;border:none;border-radius:13px;font-weight:700;font-size:.9rem;cursor:pointer"><i class="fas fa-right-from-bracket"></i> 로그아웃</button>
     </div>
@@ -883,6 +916,9 @@ async function loadInlineProfile(user) {
         if (btnJm) btnJm.style.display = jd ? "none" : "";
       }
       
+      // 계좌 정보
+      renderBankInfo(p.bankName, p.bankAccount, p.accountHolder);
+
       // 타계정 목록
       let subs = p.subAccounts || [];
       if (typeof subs === 'string') { try { subs = JSON.parse(subs); } catch(_) { subs = []; } }
@@ -1060,6 +1096,87 @@ function renderInlineSubList(subs) {
 /* ═══════════════════════════════════════
    소득명의/주민번호 폼
 ═══════════════════════════════════════ */
+/* ═══ 계좌 관리 (입금받을 계좌) ═══ */
+function _maskAccount(acc) {
+  const d = (acc || "").replace(/[^0-9]/g, "");
+  if (d.length <= 4) return d;
+  return d.slice(0, d.length - 4).replace(/[0-9]/g, "•") + d.slice(-4);
+}
+function renderBankInfo(bankName, bankAccount, accountHolder) {
+  const empty = document.getElementById("bankEmptyState");
+  const card  = document.getElementById("bankInfoCard");
+  const btn   = document.getElementById("btnAddBankInfo");
+  const has = !!((bankName && bankName.trim()) || (bankAccount && bankAccount.trim()));
+  if (has) {
+    if (empty) empty.style.display = "none";
+    if (card)  card.style.display = "";
+    const bn = document.getElementById("bankInfoBankName");
+    const hd = document.getElementById("bankInfoHolder");
+    const ac = document.getElementById("bankInfoAccount");
+    if (bn) bn.textContent = bankName || "-";
+    if (hd) hd.textContent = accountHolder || "-";
+    if (ac) ac.textContent = _maskAccount(bankAccount);
+    if (btn) btn.innerHTML = '<i class="fas fa-pen"></i> 계좌 수정';
+  } else {
+    if (empty) empty.style.display = "";
+    if (card)  card.style.display = "none";
+    if (btn) btn.innerHTML = '<i class="fas fa-plus"></i> 계좌 등록';
+  }
+}
+function openBankForm() {
+  const form = document.getElementById("inlineBankForm");
+  if (!form) return;
+  const p = window._reviewerProfile || {};
+  document.getElementById("inlineBankNameInput").value = p.bankName || "";
+  document.getElementById("inlineBankHolderInput").value = p.accountHolder || p.name || "";
+  document.getElementById("inlineBankAccountInput").value = (p.bankAccount || "").replace(/[^0-9]/g, "");
+  form.style.display = "";
+}
+function cancelBankForm() {
+  const form = document.getElementById("inlineBankForm");
+  if (form) form.style.display = "none";
+}
+async function saveBankInfoInline() {
+  const bankName = (document.getElementById("inlineBankNameInput")?.value || "").trim();
+  const holder   = (document.getElementById("inlineBankHolderInput")?.value || "").trim();
+  const account  = (document.getElementById("inlineBankAccountInput")?.value || "").replace(/[^0-9]/g, "");
+
+  if (!bankName) { showToast("은행명을 입력해주세요"); return; }
+  if (!holder)   { showToast("예금주명을 입력해주세요"); return; }
+  if (!account || account.length < 6) { showToast("계좌번호를 정확히 입력해주세요"); return; }
+
+  const user = getSavedUser();
+  if (!user || !user.name || !user.phone8) { showToast("세션이 만료되었습니다"); return; }
+
+  const btn = document.getElementById("btnSaveBankInfo");
+  if (btn) { btn.disabled = true; btn.textContent = "저장 중..."; }
+  try {
+    const res = await gasPost({
+      action: "saveBankInfo",
+      name: user.name,
+      phone8: user.phone8,
+      bankName: bankName,
+      bankAccount: account,
+      accountHolder: holder
+    });
+    if (res && res.ok) {
+      showToast("✅ 계좌가 저장되었습니다");
+      if (!window._reviewerProfile) window._reviewerProfile = {};
+      window._reviewerProfile.bankName = bankName;
+      window._reviewerProfile.bankAccount = account;
+      window._reviewerProfile.accountHolder = holder;
+      renderBankInfo(bankName, account, holder);
+      cancelBankForm();
+    } else {
+      showToast((res && res.error) || "저장에 실패했습니다");
+    }
+  } catch (e) {
+    showToast("저장 중 오류: " + e.message);
+  } finally {
+    if (btn) { btn.disabled = false; btn.textContent = "저장"; }
+  }
+}
+
 function openIncomeInfoForm() {
   const form = document.getElementById("inlineIncomeForm");
   if (!form) return;
