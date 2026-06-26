@@ -433,6 +433,53 @@ async function copyFile(fileId, newParentId, newName) {
 }
 
 /**
+ * 폴더를 "링크가 있는 모든 사용자 = 읽기"로 공유한다 (업체 보고용 폴더 공유링크).
+ *  - tnaks(OAuth=소유자) 자격으로 읽기 권한만 부여 → 업체가 로그인 없이 열람·다운로드.
+ *  - 원본은 tnaks 소유 그대로 → 직원이 자기 드라이브에 복제할 필요가 없다(= 직원 용량 0).
+ *  - 비파괴·idempotent: 파일을 이동/복제하지 않으며, 이미 anyone 권한이 있으면 생략한다.
+ *    공유 해제는 구글 드라이브에서 폴더 '공유 → 링크 제한'으로 언제든 가능(역가능).
+ * @param {string} folderId
+ * @returns {{ alreadyShared: boolean }}
+ */
+async function setFolderAnyoneReader(folderId) {
+  if (!folderId) throw new Error('folderId가 필요합니다.');
+  const d = _getOAuthDrive() || _getReadDrive();
+  if (!d) throw new Error('Drive 자격증명이 없습니다. (OAuth 또는 SA 필요)');
+
+  // 현재 anyone 권한 유무 조회 (중복 생성 방지)
+  const hasAnyone = async () => {
+    try {
+      const r = await d.permissions.list({
+        fileId: folderId,
+        fields: 'permissions(id, type, role)',
+        supportsAllDrives: true,
+      });
+      return (r.data.permissions || []).some(p => p.type === 'anyone' && (p.role === 'reader' || p.role === 'writer'));
+    } catch (e) {
+      logger.warn(`[Drive] 폴더 권한 조회 실패(계속 진행): ${folderId} — ${e.message}`);
+      return false;
+    }
+  };
+
+  // 이미 링크공유(anyone)면 생략
+  if (await hasAnyone()) return { alreadyShared: true };
+
+  try {
+    await d.permissions.create({
+      fileId: folderId,
+      requestBody: { role: 'reader', type: 'anyone' },
+      supportsAllDrives: true,
+    });
+  } catch (e) {
+    // 조회가 누락한 사이 이미 공유돼 있으면 구글이 중복 에러를 낸다 → 재확인 후 성공 처리
+    if (await hasAnyone()) return { alreadyShared: true };
+    throw e;
+  }
+  logger.info(`[Drive] 폴더 링크공유(anyone reader) 설정: ${folderId}`);
+  return { alreadyShared: false };
+}
+
+/**
  * 캡처폴더 하위의 차수별 서브폴더 찾기/생성
  * 경로: DRIVE_ROOT / [캡처] 캠페인명 / 차수명(또는 탭명) /
  */
@@ -1265,6 +1312,7 @@ module.exports = {
   copyFile,
   findFolderByName,
   uploadFileBase64,
+  setFolderAnyoneReader,
   getOrCreateSubFolder,
   getOAuthStatus,
   // 계정/쿼터 진단 + 소유권 점검·이전 (용량 귀속 확인)

@@ -192,6 +192,7 @@ const _ACTION_MAP = {
   'reviewSubmissions':     { method: 'GET',  path: '/api/drive/review-submissions' },
   'moveFolderContents':    { method: 'POST', path: '/api/drive/move-folder-contents' },
   'folderAudit':           { method: 'POST', path: '/api/drive/folder-audit' },
+  'shareReviewFolder':     { method: 'POST', path: '/api/drive/share-review-folder' },
   'getPendingRows':      { method: 'GET',  path: '/api/diag/pending-rows' },
   'getUnpaidRows':       { method: 'GET',  path: '/api/diag/unpaid-rows' },
   'addTab':              { method: 'POST', path: '/api/diag/add-tab' },
