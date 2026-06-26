@@ -95,6 +95,30 @@ router.get('/messages', async (req, res, next) => {
     );
     thread.adminMemo = rRows[0] ? (rRows[0].adminMemo || '') : '';
 
+    // 관리자 확인용 시트제목(업체) — campaign_key("sheetId||tabName")에서 역조회.
+    //   리뷰어에게는 노출하지 않고 관리자 응대 화면에서만 보임.
+    thread.companyLabel = '';
+    const ck = (thread.campaignKey || '').toString();
+    const sep = ck.indexOf('||');
+    if (sep > -1) {
+      const sheetId = ck.slice(0, sep);
+      const tabName = ck.slice(sep + 2);
+      const { rows: cn } = await pool.query(
+        `SELECT campaign_name FROM review_index
+          WHERE sheet_id = $1 AND tab_name = $2 AND COALESCE(campaign_name,'') <> ''
+          LIMIT 1`, [sheetId, tabName]
+      );
+      if (cn[0]) thread.companyLabel = cn[0].campaign_name;
+      if (!thread.companyLabel) {
+        const { rows: cn2 } = await pool.query(
+          `SELECT campaign_name FROM tab_configs
+            WHERE sheet_id = $1 AND tab_name = $2 AND COALESCE(campaign_name,'') <> ''
+            LIMIT 1`, [sheetId, tabName]
+        );
+        if (cn2[0]) thread.companyLabel = cn2[0].campaign_name;
+      }
+    }
+
     const { rows: messages } = await pool.query(
       `SELECT id, sender_role AS "senderRole", sender_name AS "senderName", content,
               created_at AS "createdAt"

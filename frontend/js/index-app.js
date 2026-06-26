@@ -15937,7 +15937,10 @@ async function csReloadConversation(threadId) {
     if (!data || data.ok === false) throw new Error((data && data.error) || "불러오기 실패");
     const t = data.thread || {};
     const camp = document.getElementById("csConvCampaign");
-    if (camp) camp.innerHTML = `<i class="fas fa-tag" style="font-size:.68rem"></i> ${escHtml(t.campaignLabel || '문의')}`;
+    if (camp) {
+      const sheet = t.companyLabel ? ` <span style="color:#9CA3AF">· 시트: ${escHtml(t.companyLabel)}</span>` : '';
+      camp.innerHTML = `<i class="fas fa-tag" style="font-size:.68rem"></i> ${escHtml(t.campaignLabel || '문의')}${sheet}`;
+    }
     const memo = document.getElementById("csMemoText");
     if (memo && document.activeElement !== memo) memo.value = t.adminMemo || "";
     const sBtn = document.getElementById("csConvStatusBtn");

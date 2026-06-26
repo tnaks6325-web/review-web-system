@@ -282,15 +282,12 @@ router.get('/cs/campaigns', async (req, res, next) => {
 
     const map = new Map(); // campaignKey(sheet||tab) → { ... }
 
-    // 진행한 "탭" 단위로 목록 구성 (업체/시트 기준 아님).
-    // 라벨 우선순위: tab_configs.display_name → review_index.tab_name → campaign_name(시트/업체, 최후).
-    //   ("내 참여현황"과 동일 기준) / 업체명(campaign_name)은 companyLabel 로 별도 제공.
+    // 진행한 "탭" 단위로 목록 구성. 리뷰어 노출 라벨은 상품명(우선) → 탭명(차선)만 사용.
+    // ※ 시트제목(campaign_name)은 관리자 확인용 → 리뷰어 응답에는 절대 포함하지 않는다.
     const { rows: idx } = await pool.query(`
       SELECT ri.sheet_id AS "sheetId", ri.tab_name AS "tabName",
-             COALESCE(NULLIF(tc.display_name,''), NULLIF(ri.tab_name,''), NULLIF(ri.campaign_name,'')) AS "label",
-             NULLIF(ri.campaign_name,'') AS "company"
+             COALESCE(NULLIF(ri.product_name,''), NULLIF(ri.tab_name,'')) AS "label"
       FROM review_index ri
-      LEFT JOIN tab_configs tc ON ri.sheet_id = tc.sheet_id AND ri.tab_name = tc.tab_name
       WHERE ri.phone8 = $1 AND COALESCE(ri.tab_name,'') <> ''
       ORDER BY ri.built_at DESC
       LIMIT 200
@@ -301,7 +298,6 @@ router.get('/cs/campaigns', async (req, res, next) => {
       map.set(key, {
         campaignKey: key,
         campaignLabel: r.label || r.tabName,
-        companyLabel: r.company || '',
         campaignSource: 'review_index',
       });
     });
@@ -323,7 +319,7 @@ router.get('/cs/campaigns', async (req, res, next) => {
     // 일반 문의(탭 무관) — 항상 선택 가능
     const generalThread = tmap.get('');
     const general = {
-      campaignKey: '', campaignLabel: '일반 문의', companyLabel: '', campaignSource: 'general',
+      campaignKey: '', campaignLabel: '일반 문의', campaignSource: 'general',
       threadId: generalThread ? generalThread.threadId : undefined,
       status: generalThread ? generalThread.status : undefined,
       reviewerUnread: generalThread ? generalThread.reviewerUnread : 0,
