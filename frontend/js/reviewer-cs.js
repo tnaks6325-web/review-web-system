@@ -27,24 +27,15 @@
     catch (_) { return ""; }
   }
 
-  // ── 플로팅 버튼 ──
-  function ensureFab() {
+  // ── 진입점은 index.html 하단 탭바의 "1:1문의" 버튼(#tabBtnCs)이 담당.
+  //    여기서는 미확인 표시 점(#rcsTabDot)과 SSE 연결만 관리한다.
+  function ensureConnected() {
     const user = getUser();
-    let fab = document.getElementById("rcsFab");
-    if (!user || !user.name) { if (fab) fab.remove(); return; }
-    if (fab) return;
-    fab = document.createElement("button");
-    fab.id = "rcsFab";
-    fab.title = "1:1 문의";
-    // 라벨 있는 알약형 버튼 — 하단 탭바 위에 띄워 눈에 잘 띄게(탭바와 겹치지 않도록)
-    fab.innerHTML = '<i class="fas fa-headset" style="font-size:1.02rem"></i><span style="white-space:nowrap">1:1 문의</span><span id="rcsFabDot" style="display:none;position:absolute;top:-4px;right:-4px;width:13px;height:13px;background:#EF4444;border-radius:50%;border:2px solid #fff"></span>';
-    fab.style.cssText = "position:fixed;right:14px;bottom:calc(76px + env(safe-area-inset-bottom));z-index:350;display:flex;align-items:center;gap:7px;padding:11px 16px;border-radius:26px;background:#3182f6;color:#fff;border:none;box-shadow:0 6px 20px rgba(49,130,246,.5);font-size:.86rem;font-weight:700;cursor:pointer";
-    fab.onclick = openPicker;
-    document.body.appendChild(fab);
+    if (user && user.name && !_sse) connectSSE();
   }
   function setFabDot(on) {
     _unread = on;
-    const dot = document.getElementById("rcsFabDot");
+    const dot = document.getElementById("rcsTabDot");
     if (dot) dot.style.display = on ? "block" : "none";
   }
 
@@ -222,10 +213,9 @@
 
   // ── 초기화 ──
   function init() {
-    ensureFab();
-    connectSSE();
-    // 로그인/로그아웃 후 상태 변화 대응(가벼운 폴링)
-    setInterval(ensureFab, 3000);
+    ensureConnected();
+    // 로그인/로그아웃 후 상태 변화 대응(가벼운 폴링) — SSE 연결 보장
+    setInterval(ensureConnected, 3000);
   }
   if (document.readyState === "loading") document.addEventListener("DOMContentLoaded", init);
   else init();
