@@ -45,8 +45,10 @@ router.get('/threads', async (req, res, next) => {
         t.last_message_at      AS "lastMessageAt",
         t.last_message_preview AS "lastMessagePreview",
         t.admin_unread_count   AS "adminUnread",
-        t.created_at           AS "createdAt"
+        t.created_at           AS "createdAt",
+        rv.admin_memo          AS "adminMemo"
       FROM cs_threads t
+      LEFT JOIN reviewers rv ON rv.phone8 = t.reviewer_phone8
       ${whereSql}
       ORDER BY (t.admin_unread_count > 0) DESC, COALESCE(t.last_message_at, t.created_at) DESC
       LIMIT 500
