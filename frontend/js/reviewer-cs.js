@@ -72,7 +72,7 @@
         <span style="font-weight:800;font-size:1rem;color:#111827">1:1 문의하기</span>
         <button onclick="ReviewerCS.close()" style="margin-left:auto;width:30px;height:30px;border:none;background:#F3F4F6;border-radius:8px;color:#6B7280;cursor:pointer"><i class="fas fa-times"></i></button>
       </div>
-      <div style="padding:10px 16px;font-size:.8rem;color:#6B7280;background:#f9fafb;border-bottom:1px solid #f3f4f6">문의할 캠페인을 선택하세요</div>
+      <div style="padding:10px 16px;font-size:.8rem;color:#6B7280;background:#f9fafb;border-bottom:1px solid #f3f4f6">진행하신 탭을 선택해 문의하세요</div>
       <div id="rcsPickerList" style="flex:1;overflow-y:auto;padding:8px 0">
         <div style="text-align:center;padding:30px;color:#9CA3AF"><i class="fas fa-circle-notch fa-spin"></i> 불러오는 중...</div>
       </div>
@@ -91,17 +91,21 @@
   function renderPicker(items) {
     const el = document.getElementById("rcsPickerList");
     if (!el) return;
-    if (!items.length) { el.innerHTML = '<div style="text-align:center;padding:30px;color:#9CA3AF;font-size:.85rem">참여한 캠페인이 없습니다.<br>일반 문의로 남겨주세요.</div>'; return; }
+    if (!items.length) { el.innerHTML = '<div style="text-align:center;padding:30px;color:#9CA3AF;font-size:.85rem">진행한 탭이 없습니다.<br>일반 문의로 남겨주세요.</div>'; return; }
     el.innerHTML = items.map(c => {
       const isGeneral = c.campaignSource === 'general';
       const labelSafe = (c.campaignLabel || '').replace(/'/g, "\\'");
+      const companySafe = (c.companyLabel || '').replace(/'/g, "\\'");
       const unread = c.reviewerUnread > 0;
-      return `<div onclick="ReviewerCS.openChat('${(c.campaignKey || '').replace(/'/g,"\\'")}','${labelSafe}','${c.campaignSource || 'general'}')"
+      // 부제: 업체(시트)명 → 이전문의/상태
+      const showCompany = c.companyLabel && c.companyLabel !== c.campaignLabel;
+      const sub = (showCompany ? esc(c.companyLabel) + ' · ' : '') + (c.threadId ? '이전 문의 있음' : '새 문의') + (c.status === 'closed' ? ' · 종료됨' : '');
+      return `<div onclick="ReviewerCS.openChat('${(c.campaignKey || '').replace(/'/g,"\\'")}','${labelSafe}','${c.campaignSource || 'general'}','${companySafe}')"
         style="padding:13px 16px;border-bottom:1px solid #f3f4f6;cursor:pointer;display:flex;align-items:center;gap:10px" onmouseover="this.style.background='#f9fafb'" onmouseout="this.style.background='#fff'">
-        <div style="width:38px;height:38px;border-radius:10px;background:${isGeneral ? '#EDE9FE' : '#E0EDFF'};color:${isGeneral ? '#7C3AED' : '#3182f6'};display:flex;align-items:center;justify-content:center;flex-shrink:0"><i class="fas ${isGeneral ? 'fa-comment-dots' : 'fa-bullhorn'}"></i></div>
+        <div style="width:38px;height:38px;border-radius:10px;background:${isGeneral ? '#EDE9FE' : '#E0EDFF'};color:${isGeneral ? '#7C3AED' : '#3182f6'};display:flex;align-items:center;justify-content:center;flex-shrink:0"><i class="fas ${isGeneral ? 'fa-comment-dots' : 'fa-layer-group'}"></i></div>
         <div style="flex:1;min-width:0">
           <div style="font-weight:600;font-size:.88rem;color:#111827;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${esc(c.campaignLabel)}</div>
-          <div style="font-size:.72rem;color:#9CA3AF">${c.threadId ? '이전 문의 있음' : '새 문의'}${c.status === 'closed' ? ' · 종료됨' : ''}</div>
+          <div style="font-size:.72rem;color:#9CA3AF;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${sub}</div>
         </div>
         ${unread ? '<span style="width:9px;height:9px;background:#EF4444;border-radius:50%;flex-shrink:0"></span>' : ''}
         <i class="fas fa-chevron-right" style="color:#cbd5e1;font-size:.8rem"></i>
@@ -110,17 +114,18 @@
   }
 
   // ── 대화창 ──
-  async function openChat(campaignKey, campaignLabel, campaignSource) {
+  async function openChat(campaignKey, campaignLabel, campaignSource, companyLabel) {
     const user = getUser();
     if (!user || !user.phone8) { toast("로그인이 필요합니다"); return; }
-    _open = { campaignKey: campaignKey || "", campaignLabel: campaignLabel || "문의", campaignSource: campaignSource || "general", threadId: null };
+    _open = { campaignKey: campaignKey || "", campaignLabel: campaignLabel || "문의", campaignSource: campaignSource || "general", companyLabel: companyLabel || "", threadId: null };
+    const headerSub = _open.companyLabel ? esc(_open.companyLabel) : "관리자에게 문의를 남겨주세요";
     const ov = overlay();
     ov.innerHTML = `<div style="${SHEET}">
       <div style="padding:12px 14px;border-bottom:1px solid #eef2f7;display:flex;align-items:center;gap:8px">
         <button onclick="ReviewerCS.back()" style="width:30px;height:30px;border:none;background:#F3F4F6;border-radius:8px;color:#6B7280;cursor:pointer"><i class="fas fa-arrow-left"></i></button>
         <div style="flex:1;min-width:0">
           <div style="font-weight:700;font-size:.92rem;color:#111827;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${esc(_open.campaignLabel)}</div>
-          <div style="font-size:.72rem;color:#9CA3AF">관리자에게 문의를 남겨주세요</div>
+          <div style="font-size:.72rem;color:#9CA3AF;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${headerSub}</div>
         </div>
         <button onclick="ReviewerCS.close()" style="width:30px;height:30px;border:none;background:#F3F4F6;border-radius:8px;color:#6B7280;cursor:pointer"><i class="fas fa-times"></i></button>
       </div>

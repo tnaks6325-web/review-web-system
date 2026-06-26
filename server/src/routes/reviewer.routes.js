@@ -280,40 +280,30 @@ router.get('/cs/campaigns', async (req, res, next) => {
     const phone8 = _normPhone8(req.query.phone8);
     if (phone8.length !== 8) return res.status(400).json({ ok: false, error: 'phone8 필수 (8자리)' });
 
-    const { rows: rev } = await pool.query(`SELECT name FROM reviewers WHERE phone8 = $1 LIMIT 1`, [phone8]);
-    const reviewerName = rev[0] ? rev[0].name : '';
+    const map = new Map(); // campaignKey(sheet||tab) → { ... }
 
-    const map = new Map(); // campaignKey → { campaignKey, campaignLabel, campaignSource }
-
-    // 1) 모집공고 신청(campaign_applications → recruit_campaigns)
-    const { rows: apps } = await pool.query(`
-      SELECT ca.campaign_id AS "campaignKey", rc.title AS "label"
-      FROM campaign_applications ca
-      LEFT JOIN recruit_campaigns rc ON ca.campaign_id = rc.id
-      WHERE ($1 <> '' AND ca.applicant_name = $1) OR ca.applicant_phone LIKE $2
-      ORDER BY ca.applied_at DESC
-      LIMIT 50
-    `, [reviewerName, '%' + phone8]);
-    apps.forEach(a => {
-      const key = (a.campaignKey || '').toString();
-      if (!key || map.has('recruit:' + key)) return;
-      map.set('recruit:' + key, { campaignKey: key, campaignLabel: a.label || '모집공고', campaignSource: 'recruit' });
-    });
-
-    // 2) 시트 배정(review_index → tab_configs)
+    // 진행한 "탭" 단위로 목록 구성 (업체/시트 기준 아님).
+    // 라벨 우선순위: tab_configs.display_name → review_index.tab_name → campaign_name(시트/업체, 최후).
+    //   ("내 참여현황"과 동일 기준) / 업체명(campaign_name)은 companyLabel 로 별도 제공.
     const { rows: idx } = await pool.query(`
       SELECT ri.sheet_id AS "sheetId", ri.tab_name AS "tabName",
-             COALESCE(NULLIF(tc.display_name,''), NULLIF(ri.campaign_name,''), ri.tab_name) AS "label"
+             COALESCE(NULLIF(tc.display_name,''), NULLIF(ri.tab_name,''), NULLIF(ri.campaign_name,'')) AS "label",
+             NULLIF(ri.campaign_name,'') AS "company"
       FROM review_index ri
       LEFT JOIN tab_configs tc ON ri.sheet_id = tc.sheet_id AND ri.tab_name = tc.tab_name
-      WHERE ri.phone8 = $1
+      WHERE ri.phone8 = $1 AND COALESCE(ri.tab_name,'') <> ''
       ORDER BY ri.built_at DESC
-      LIMIT 100
+      LIMIT 200
     `, [phone8]);
     idx.forEach(r => {
       const key = `${r.sheetId}||${r.tabName}`;
-      if (map.has('ri:' + key)) return;
-      map.set('ri:' + key, { campaignKey: key, campaignLabel: r.label || r.tabName, campaignSource: 'review_index' });
+      if (map.has(key)) return;
+      map.set(key, {
+        campaignKey: key,
+        campaignLabel: r.label || r.tabName,
+        companyLabel: r.company || '',
+        campaignSource: 'review_index',
+      });
     });
 
     const campaigns = [...map.values()];
@@ -330,17 +320,17 @@ router.get('/cs/campaigns', async (req, res, next) => {
       if (t) { c.threadId = t.threadId; c.status = t.status; c.reviewerUnread = t.reviewerUnread; c.lastMessageAt = t.lastMessageAt; }
     });
 
-    // 일반 문의(캠페인 무관) — 항상 선택 가능
+    // 일반 문의(탭 무관) — 항상 선택 가능
     const generalThread = tmap.get('');
     const general = {
-      campaignKey: '', campaignLabel: '일반 문의', campaignSource: 'general',
+      campaignKey: '', campaignLabel: '일반 문의', companyLabel: '', campaignSource: 'general',
       threadId: generalThread ? generalThread.threadId : undefined,
       status: generalThread ? generalThread.status : undefined,
       reviewerUnread: generalThread ? generalThread.reviewerUnread : 0,
       lastMessageAt: generalThread ? generalThread.lastMessageAt : undefined,
     };
 
-    res.json({ ok: true, campaigns, general, reviewerName });
+    res.json({ ok: true, campaigns, general });
   } catch (err) {
     next(err);
   }
