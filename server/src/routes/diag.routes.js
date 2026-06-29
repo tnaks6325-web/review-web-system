@@ -2062,32 +2062,57 @@ router.post('/order-reconcile', authMiddleware, adminOrMasterMiddleware, async (
 //   글로벌 큐는 created_at FIFO라 최근 캠페인 탭이 뒤로 밀린다. 이 엔드포인트는
 //   ① 그 탭의 막힌 주문을 reconcile(탭 필터)로 enqueue → ② 그 탭의 order_append만 골라
 //   즉시 드레인(throttle만 가드). 관리자 "이 캠페인 지금 반영" 용도. admin/master.
-//   body: { sheetId, tabName, maxMillis? }
+//   body: { sheetId, tabName, maxMillis?, untilEmpty? }
+//   untilEmpty:true → 그 탭의 미반영(written 아님)이 0이 될 때까지 reconcile+drain 반복(하드캡 30분).
 // ═══════════════════════════════════════════════════════════
 let _flushTabRunning = false;
 let _lastFlushTab = null;
+async function _tabRemaining(sheetId, tabName) {
+  const { rows } = await pool.query(
+    `SELECT COUNT(*)::int AS c FROM order_submissions
+      WHERE sheet_id = $1 AND tab_name = $2 AND mirror_status <> 'written'`,
+    [sheetId, tabName]
+  );
+  return rows[0] ? rows[0].c : 0;
+}
 router.post('/order-flush-tab', authMiddleware, adminOrMasterMiddleware, async (req, res, next) => {
   try {
     const { sheetId, tabName } = req.body || {};
     if (!sheetId || !tabName) return res.status(400).json({ ok: false, error: 'sheetId, tabName 필수' });
     if (_flushTabRunning) return res.json({ ok: false, running: true, error: '다른 탭 우선반영이 진행 중입니다.', last: _lastFlushTab });
+    const untilEmpty = req.body?.untilEmpty === true;
     const maxMillis = Math.min(Math.max(parseInt(req.body?.maxMillis, 10) || 60000, 2000), 180000);
-    res.json({ ok: true, mode: 'async', message: `'${tabName}' 우선 반영을 시작했습니다. 현황으로 확인하세요.`, maxMillis });
+    res.json({ ok: true, mode: 'async', untilEmpty, message: `'${tabName}' 우선 반영을 시작했습니다. 현황으로 확인하세요.`, maxMillis });
 
     _flushTabRunning = true;
     setImmediate(async () => {
       const start = Date.now();
+      const HARD_CAP = 30 * 60 * 1000; // until-empty 안전 상한 30분
+      let rounds = 0, totalReq = 0, totalDrained = 0, remaining = null;
       try {
         const { reconcileStuckOrders } = require('../services/orderLedger.service');
-        // ① 탭 단위로 막힌 주문 enqueue(행배정 포함). perTabCap 해제로 그 탭 전체.
-        const rec = await reconcileStuckOrders({ sheetId, tabName, limit: 1000, perTabCap: 1000 });
-        // ② 그 탭의 order_append만 우선 드레인(FIFO 우회).
-        const drain = await drainTabQueue({ sheetId, tabName, maxMillis: Math.max(maxMillis - (Date.now() - start), 2000) });
-        _lastFlushTab = { sheetId, tabName, reconcile: { requeued: rec.requeued, skippedNoMeta: rec.skippedNoMeta, stillStuck: rec.stillStuck },
-          drain, elapsedMs: Date.now() - start, finishedAt: new Date().toISOString() };
-        logger.info(`[order-flush-tab] '${tabName}' 완료: requeued=${rec.requeued}, drained=${drain.succeeded}/${drain.processed}, ${Date.now() - start}ms`);
+        do {
+          rounds++;
+          // ① 탭 단위로 막힌 주문 enqueue(행배정 포함).
+          const rec = await reconcileStuckOrders({ sheetId, tabName, limit: 1000, perTabCap: 1000 });
+          totalReq += rec.requeued || 0;
+          // ② 그 탭의 order_append만 우선 드레인(FIFO 우회).
+          const drainMs = untilEmpty ? 60000 : Math.max(maxMillis - (Date.now() - start), 2000);
+          const drain = await drainTabQueue({ sheetId, tabName, maxMillis: drainMs });
+          totalDrained += drain.succeeded || 0;
+          remaining = await _tabRemaining(sheetId, tabName);
+          _lastFlushTab = { sheetId, tabName, untilEmpty, rounds, totalRequeued: totalReq, totalDrained,
+            remaining, running: true, elapsedMs: Date.now() - start };
+          if (!untilEmpty) break;
+          if (remaining === 0) break;
+          // 이번 라운드에 아무 진전 없음(메타없음 등 막힘) → 무한루프 방지로 종료
+          if ((drain.processed || 0) === 0 && (rec.requeued || 0) === 0) break;
+        } while (Date.now() - start < HARD_CAP);
+        _lastFlushTab = { sheetId, tabName, untilEmpty, rounds, totalRequeued: totalReq, totalDrained,
+          remaining, running: false, elapsedMs: Date.now() - start, finishedAt: new Date().toISOString() };
+        logger.info(`[order-flush-tab] '${tabName}' 완료: rounds=${rounds}, drained=${totalDrained}, remaining=${remaining}, ${Date.now() - start}ms`);
       } catch (err) {
-        _lastFlushTab = { sheetId, tabName, error: err.message, finishedAt: new Date().toISOString() };
+        _lastFlushTab = { sheetId, tabName, error: err.message, rounds, totalDrained, finishedAt: new Date().toISOString() };
         logger.error(`[order-flush-tab] '${tabName}' 오류: ${err.message}`);
       } finally {
         _flushTabRunning = false;
