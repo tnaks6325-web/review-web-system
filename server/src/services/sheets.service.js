@@ -876,6 +876,7 @@ module.exports = {
   batchUpdateSheet,
   setRowBackground,
   getSpreadsheetMeta,
+  invalidateSheetMeta: _invalidateMeta, // ★ D3b(#3): reconcile/guard 전 그리드 캐시 신선화용
   batchReadSheet,
   getSheetModifiedTime,
   copySpreadsheet,

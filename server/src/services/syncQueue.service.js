@@ -12,13 +12,14 @@
  */
 
 const pool = require('../db/pool');
-const { writeSheet, appendSheet, readSheet, batchUpdateSheet, setRowBackground } = require('./sheets.service');
+const { writeSheet, appendSheet, readSheet, batchUpdateSheet, setRowBackground, invalidateSheetMeta } = require('./sheets.service');
 const { throttledCall } = require('../utils/sheetsThrottle');
 const { recordParticipationLink } = require('./participation.service');
 const {
   loadRawTabContext,
   buildBatchUpdateData,
   buildMirrorGuardRange,
+  buildMirrorGuardRanges,
   guardBlocksWrite,
   markOrderWritten,
   markOrderMirrorFailed,
@@ -217,27 +218,33 @@ async function _executeItem(item) {
         if (!tabContext || !tabContext.headers || tabContext.headers.length === 0) {
           throw new Error('RAW 미러 헤더 메타를 찾을 수 없음');
         }
-        const guard = buildMirrorGuardRange({
+        // ★ D3a(#3): 다중컬럼 가드(연락처+주소+수취인) — 한 칸만 빈 수동입력행 덮어쓰기 방지.
+        //   한 번의 행 읽기(min~max col)로 쿼터 1회 유지, 셀별 판정.
+        //   D3b: 읽기 전 그리드 캐시 무효화 → append 행이 60s stale 그리드밖이라 빈배열([])로 오판되는 것 차단.
+        const guards = buildMirrorGuardRanges({
           tabName: tabContext.tabName || tabName,
           headers: tabContext.headers,
           targetRow: parseInt(sheetRow, 10),
           orderData,
         });
-        if (guard) {
-          const guardValues = await throttledCall(() =>
-            readSheet(sheetId, guard.range, tabContext.tabGid ? { gid: tabContext.tabGid } : (gid ? { gid } : {}))
+        if (guards.length) {
+          invalidateSheetMeta(sheetId);
+          const colsIdx = guards.map(g => g.col);
+          const minC = Math.min(...colsIdx), maxC = Math.max(...colsIdx);
+          const rowRange = `'${tabContext.tabName || tabName}'!${_getColLetter(minC)}${sheetRow}:${_getColLetter(maxC)}${sheetRow}`;
+          const read = await throttledCall(() =>
+            readSheet(sheetId, rowRange, tabContext.tabGid ? { gid: tabContext.tabGid } : (gid ? { gid } : {}))
           );
-          const existingVal = guardValues && guardValues[0]
-            ? String(guardValues[0][0] || '').trim()
-            : '';
-          // 내가 쓴 값이면(재시도 멱등) 통과, 외부/타 주문 값이면 덮어쓰기 차단
-          if (guardBlocksWrite(existingVal, guard)) {
+          const cells = (read && read[0]) || [];
+          // 내가 쓴 값이면(재시도 멱등) 통과, 어느 칸이든 외부/타 주문 값이면 덮어쓰기 차단
+          const blocked = guards.some(g => guardBlocksWrite(String(cells[g.col - minC] || '').trim(), g));
+          if (blocked) {
             // ★ 복구(append) 주문이 차단되면 = 그 하단행이 직원 수동입력 등으로 이미 채워짐.
             //   claim을 해제(행 점유/주문.sheet_row 비움)해 다음 리컨실이 "더 아래" 새 행을 잡게 한다(stuck loop 방지).
             if (recovered && dedupKey) {
               await _releaseOrderRowClaim({ sheetId, tabName: tabContext.tabName || tabName, dedupKey, orderSubmissionId });
             }
-            throw new Error(`target row already filled before mirror write: ${guard.header || guard.range}`);
+            throw new Error('target row already filled before mirror write (multi-col guard)');
           }
         }
         const batchData = buildBatchUpdateData({
