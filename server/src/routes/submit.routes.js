@@ -66,30 +66,6 @@ const HEADER_CACHE_TTL = 5 * 60 * 1000; // 5분
 const tabDataCache = new Map();
 const TAB_DATA_CACHE_TTL = 3 * 60 * 1000; // 3분
 
-// ═══════════════════════════════════════════════════════════
-// ★ 탭별 직렬화 락 (구매양식 시트쓰기 동시폭주 방지)
-//
-// 같은 탭에 동시 제출이 몰리면 각자 A1:ZZ500을 통읽기(썬더링 herd)하고
-// 같은 빈 행을 동시에 골라 경합/중복을 만든다. 탭 단위로 백그라운드
-// 시트쓰기를 한 번에 하나씩 직렬화하면:
-//   - 첫 작업만 시트를 읽어 캐시를 채우고, 나머지는 캐시 히트 → 읽기 폭주 제거
-//   - 직전 쓰기가 반영된 뒤 다음 빈행을 고름 → 같은행 경합/중복 방지
-// (단일 프로세스 내 직렬화. 다중 인스턴스 환경은 쓰기 직전 race-check가 보조.)
-// ═══════════════════════════════════════════════════════════
-const _tabLocks = new Map(); // key → 직전 작업의 Promise(tail)
-
-function withTabLock(key, fn) {
-  const prev = _tabLocks.get(key) || Promise.resolve();
-  // 직전 작업의 성공/실패와 무관하게 이어서 실행
-  const run = prev.then(fn, fn);
-  // 락 체인의 꼬리는 항상 settled 상태로 유지 (다음 대기자가 throw에 막히지 않도록)
-  const tail = run.then(() => {}, () => {});
-  _tabLocks.set(key, tail);
-  // 맵 무한 증식 방지: 내가 마지막이면 정리
-  tail.then(() => { if (_tabLocks.get(key) === tail) _tabLocks.delete(key); });
-  return run;
-}
-
 // 헤더 행 자동 감지용 키워드 (smartBuild _isDataTabRow와 동일 로직)
 const HEADER_DETECT_KEYWORDS = ['번호', '주문자', '수취인', '수취인명', '성함', '이름', '성명', '신청자', '연락처', '전화번호', '아이디', '주소'];
 

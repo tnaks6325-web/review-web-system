@@ -245,8 +245,14 @@ async function loadRawTabContextFromSheet(sheetId, tabGid, tabName) {
   const resolvedGid = String((target && target.properties && target.properties.sheetId) || tabGid || '');
   if (!resolvedTabName) return null;
 
+  // ★ 미러(rawMirror)와 동일하게 FORMATTED_VALUE로 읽어 라이브폴백/미러 간
+  //   raw_sheet_rows 표기 일관성 유지 (날짜 등이 직렬숫자 45463이 아니라 시트 표기 "11/23"로 저장).
+  //   행배정은 텍스트 컬럼(연락처/주소/인애드/옵션) 기준이라 서식 변경에 영향 없음.
   const rows = await throttledCall(() =>
-    readSheet(sheetId, `'${escapeSheetName(resolvedTabName)}'!A:ZZ`, resolvedGid ? { gid: resolvedGid } : {})
+    readSheet(sheetId, `'${escapeSheetName(resolvedTabName)}'!A:ZZ`,
+      resolvedGid
+        ? { gid: resolvedGid, valueRenderOption: 'FORMATTED_VALUE' }
+        : { valueRenderOption: 'FORMATTED_VALUE' })
   );
   const values = Array.isArray(rows) ? rows : [];
   const detected = detectSheetHeader(values);
