@@ -2018,16 +2018,20 @@ router.get('/order-mirror-status', authMiddleware, async (req, res, next) => {
     );
     const { rows: byTab } = await pool.query(
       `SELECT os.sheet_id AS "sheetId", os.tab_name AS "tabName",
+              COALESCE(MAX(NULLIF(os.tab_gid, '')), MAX(rst.tab_gid), MAX(tc.tab_gid)) AS "tabGid",
+              MAX(tc.display_name) AS "displayName",
               COUNT(*)::int AS stuck,
+              COUNT(*) FILTER (WHERE os.mirror_status = 'pending_no_row')::int AS "noRow",
               bool_or(rst.detected_headers IS NOT NULL) AS "hasRawMeta"
          FROM order_submissions os
          LEFT JOIN raw_sheet_tabs rst ON rst.sheet_id = os.sheet_id
               AND (rst.tab_gid = NULLIF(os.tab_gid, '') OR rst.tab_name = os.tab_name)
+         LEFT JOIN tab_configs tc ON tc.sheet_id = os.sheet_id AND tc.tab_name = os.tab_name
         WHERE os.mirror_status IN ('pending','pending_no_row','failed','queued')
         GROUP BY os.sheet_id, os.tab_name
-        ORDER BY stuck DESC LIMIT 50`
+        ORDER BY stuck DESC LIMIT 500`
     );
-    res.json({ ok: true, counts, stuck, byTab });
+    res.json({ ok: true, counts, byTab, stuck });
   } catch (err) {
     next(err);
   }
