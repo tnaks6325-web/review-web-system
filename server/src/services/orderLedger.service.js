@@ -734,6 +734,7 @@ async function reconcileStuckOrders({ limit = 50, perTabCap = 20, sheetId = null
 
   const result = { scanned: rows.length, requeued: 0, skippedNoMeta: 0, noCandidates: 0, stillStuck: 0, byTab: [], dryRun };
   const tabCount = new Map();
+  const tabCursors = new Map(); // tabKey → 마지막 배정 append 행(순차 커서, 20행 한계 제거)
 
   for (const row of rows) {
     const tabKey = `${row.sheet_id}||${row.tab_name}`;
@@ -772,12 +773,30 @@ async function reconcileStuckOrders({ limit = 50, perTabCap = 20, sheetId = null
       continue;
     }
 
-    const candidateRows = buildCandidateRows({
-      headers: tabContext.headers, dataRows: tabContext.dataRows,
-      headerRowIndex: tabContext.headerRowIndex, orderData, appendOnly: true,
-    });
-    if (!candidateRows.length) { result.noCandidates++; continue; }
-    if (dryRun) { result.requeued++; continue; }
+    if (dryRun) { result.requeued++; continue; } // 하단 append는 항상 가능
+
+    // ★ 하단 append 행을 "탭별 순차 커서"로 배정(O(n), 20행 한계 제거).
+    //   커서 시작 = max(미러 데이터 마지막행, 이미 점유된 sheet_row_claims 최대행) → 패스 간 충돌 없음.
+    let cursor = tabCursors.get(tabKey);
+    if (cursor == null) {
+      let baseRow = tabContext.headerRowIndex || 0;
+      for (const dr of (tabContext.dataRows || [])) {
+        const ri = parseInt(dr.rowIndex, 10) || 0;
+        if (ri > baseRow) baseRow = ri;
+      }
+      try {
+        const mc = await db.query(
+          `SELECT COALESCE(MAX(sheet_row), 0) AS m FROM sheet_row_claims WHERE sheet_id = $1 AND tab_name = $2`,
+          [row.sheet_id, row.tab_name]
+        );
+        const claimed = parseInt(mc.rows[0].m, 10) || 0;
+        if (claimed > baseRow) baseRow = claimed;
+      } catch (_) {}
+      cursor = baseRow;
+    }
+    cursor += 1;
+    const candidateRows = [cursor, cursor + 1, cursor + 2, cursor + 3, cursor + 4]; // 작은 버퍼(동시 cron 충돌 대비)
+    tabCursors.set(tabKey, cursor);
 
     const client = await db.connect();
     let claim = { row: null };
@@ -809,6 +828,7 @@ async function reconcileStuckOrders({ limit = 50, perTabCap = 20, sheetId = null
     client.release();
 
     if (!claim.row) { result.stillStuck++; continue; }
+    { const cr = parseInt(claim.row, 10) || 0; if (cr > (tabCursors.get(tabKey) || 0)) tabCursors.set(tabKey, cr); }
 
     try {
       await enqueue('order_append', {
