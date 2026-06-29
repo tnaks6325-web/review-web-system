@@ -121,7 +121,7 @@ function startCronJobs() {
       reconcileRunning = true;
       try {
         const { reconcileStuckOrders } = require('../services/orderLedger.service');
-        const r = await reconcileStuckOrders({ limit: 50 });
+        const r = await reconcileStuckOrders({ limit: 100, perTabCap: 60 });
         if (r.requeued > 0 || r.stillStuck > 0 || r.noCandidates > 0) {
           logger.info(`[CRON-Reconcile] requeued=${r.requeued}, skippedNoMeta=${r.skippedNoMeta}, noCandidates=${r.noCandidates}, stillStuck=${r.stillStuck}`);
         }
