@@ -932,6 +932,9 @@ body{ letter-spacing:-.01em; }
               <button class="btn-sm" onclick="runOrderReconcile(null)" style="font-size:.72rem;background:#16A34A;color:#fff;border:none;padding:4px 10px;border-radius:6px;cursor:pointer">
                 <i class="fas fa-redo"></i> 막힌 주문 재시도(복구)
               </button>
+              <button class="btn-sm" onclick="runQueueDrain()" style="font-size:.72rem;background:#2563EB;color:#fff;border:none;padding:4px 10px;border-radius:6px;cursor:pointer" title="대기 중인 시트 반영을 일시적으로 빠르게 처리합니다(쿼터 한도 내). 라이브 이벤트 중엔 사용 자제.">
+                <i class="fas fa-bolt"></i> 빠른 반영(가속)
+              </button>
               <span style="font-size:.7rem;color:var(--t2);align-self:center">복구분은 시트 하단에 노란 배경으로 기록됩니다</span>
             </div>
           </div>

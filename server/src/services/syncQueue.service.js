@@ -44,7 +44,7 @@ async function enqueue(type, payload, maxRetry = 3) {
 }
 
 // ── 큐 처리 (pending → processing → done/failed) ──
-async function processQueue(batchSize = 10) {
+async function processQueue(batchSize = 10, { interItemDelayMs = 2000 } = {}) {
   const startTime = Date.now();
   let processed = 0, succeeded = 0, failed = 0;
 
@@ -70,7 +70,7 @@ async function processQueue(batchSize = 10) {
       const baseDelay = 2000; // 기본 2초
       const backoffDelay = item.attempts > 0
         ? Math.min(baseDelay * Math.pow(2, item.attempts), 30000) // 최대 30초
-        : (i > 0 ? baseDelay : 0); // 첫 항목은 즉시, 이후 2초
+        : (i > 0 ? interItemDelayMs : 0); // 첫 항목은 즉시, 이후 interItemDelayMs (가속 드레인 시 0 — sheetsThrottle이 쿼터 가드)
       if (backoffDelay > 0) {
         await new Promise(r => setTimeout(r, backoffDelay));
       }

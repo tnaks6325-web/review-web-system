@@ -216,6 +216,7 @@ const _ACTION_MAP = {
   'syncQueueDelete':    { method: 'POST', path: '/api/diag/sync-queue/delete' },
   'orderMirrorStatus':  { method: 'GET',  path: '/api/diag/order-mirror-status' },
   'orderReconcile':     { method: 'POST', path: '/api/diag/order-reconcile' },
+  'queueDrain':         { method: 'POST', path: '/api/diag/queue-drain' },
   'buildHistory':       { method: 'GET',  path: '/api/diag/build-history' },
 
   // Phase 12: 시트 권한 관리
