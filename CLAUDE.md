@@ -31,6 +31,14 @@ GAS(Google Apps Script) 기반 리뷰 관리 시스템을 **Node.js Express + Po
 - 폴더는 ① 첫 업로드 시 on-demand(`review-upload`), ② 배치(`POST /api/drive/sync-review`·`sync-capture`), ③ **스마트빌드 주기마다 자동**(`reviewFolders.service.js`의 `ensureReviewFoldersForActiveTabs`, `smartBuild` 말미 best-effort)로 생성된다. ③ 덕분에 **신규 활성 탭은 제출 0건이어도 tnaks 소유 `[리뷰]`/`[구매캡처]` 폴더가 미리 생성·연결**된다(비파괴·idempotent, `리뷰폼` 탭 제외, 1주기 최대 30탭).
 - 관리자 점검: "리뷰폴더 현황 점검"(`POST /api/drive/folder-audit`)이 연결/정상/빈/미연결 + **폴더 소유자 집계**(tnaks/박세희/박은비/SA)를 보여주고, 미연결 탭은 현황 화면의 버튼으로 일괄 생성·연결한다. 파일 단위 소유자·용량은 "소유권"(`ownership-audit`/`transfer-ownership`)에서 확인·이관한다.
 
+### 구매양식 제출 = DB-first 원장 + 시트 비동기 미러 (order-ledger)
+- 구매양식 제출(`POST /api/submit/order`)은 **DB(`order_submissions`)에 먼저 확정**(`orderLedger.service.js`의 `createOrderLedgerEntry`) → RAW 미러(`raw_sheet_tabs.detected_headers`/`raw_sheet_rows`) 기반으로 행을 **원자적 배정**(`claimRow`, `sheet_row_claims` 행/dedup 2중 유니크 = 멱등·중복행 불가) → `enqueue('order_append')` → 큐 워커가 throttle(`sheetsThrottle`, 45/분)로 시트에 기록. 시트 통읽기 없음 = 쿼터 안전.
+- 주문 상태는 `order_submissions.mirror_status`: `pending`→`queued`→`written`, 또는 행 배정 실패 시 `pending_no_row`, 쓰기 실패 시 `failed`.
+- **막힌 주문 자동복구(reconcile)**: `reconcileStuckOrders()`가 `pending_no_row`/`failed`/정체 `queued` 주문을 찾아 행 재배정 후 재큐잉. cron `*/2`(RAW 미러 `*/5` **뒤**에 둠 — 메타 채워진 뒤 복구, throttle busy면 양보) + 관리자 강제 `POST /api/diag/order-reconcile`(admin/master). **메타 없는 탭은 skip**(다음 RAW 미러까지 자가치유). **복구분은 시트 하단에 append + 노란 배경**(`setRowBackground`)으로 기록해 직원 수동입력분·중복과 구분. 평상시 실시간 주문은 제자리(in-place)·기본색.
+- 관리자 가시성: `GET /api/diag/order-mirror-status`(카운트+막힌탭+`hasRawMeta`) + 대시보드 "구매주문 시트반영 현황" 위젯(원클릭 복구).
+- 리뷰어 참여조회(`GET /api/reviewer/my-status?phone8=`)는 **`review_index`(시트빌드) + `order_submissions`(DB) 병합**(phone8=연락처 끝8자리, sheet_row로 중복제거). 시트 반영 전 주문도 `stage:'processing'`로 노출 → DB-first라 리뷰어가 제출 즉시 자기 참여 확인 가능.
+- 운영 순서 규칙: **RAW 미러 → reconcile**(메타가 있어야 행 배정 가능). 신규 탭은 등록 시 `mirrorOneSheet`로 메타 선반영(누락복구 라이브폴백 최소화).
+
 ## 배포 (자동)
 - `main` 브랜치에 머지되면 **Cloudflare Pages(프론트)와 Railway(백엔드)가 GitHub 연동으로 자동 배포**합니다.
 - 별도의 빌드/배포 GitHub Action은 없습니다. `main` 머지 = 배포.

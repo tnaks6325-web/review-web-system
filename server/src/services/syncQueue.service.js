@@ -12,7 +12,7 @@
  */
 
 const pool = require('../db/pool');
-const { writeSheet, appendSheet, readSheet, batchUpdateSheet } = require('./sheets.service');
+const { writeSheet, appendSheet, readSheet, batchUpdateSheet, setRowBackground } = require('./sheets.service');
 const { throttledCall } = require('../utils/sheetsThrottle');
 const { recordParticipationLink } = require('./participation.service');
 const {
@@ -204,7 +204,7 @@ async function _executeItem(item) {
     }
 
     case 'order_append': {
-      const { sheetId, tabName, orderData, loginPhone8, loginName, gid, sheetRow, orderSubmissionId } = payload;
+      const { sheetId, tabName, orderData, loginPhone8, loginName, gid, sheetRow, orderSubmissionId, recovered, dedupKey } = payload;
       if (!sheetId || !tabName) throw new Error('payload 누락');
       if (!sheetRow) throw new Error('payload 누락: sheetRow');
 
@@ -228,6 +228,11 @@ async function _executeItem(item) {
             : '';
           // 내가 쓴 값이면(재시도 멱등) 통과, 외부/타 주문 값이면 덮어쓰기 차단
           if (guardBlocksWrite(existingVal, guard)) {
+            // ★ 복구(append) 주문이 차단되면 = 그 하단행이 직원 수동입력 등으로 이미 채워짐.
+            //   claim을 해제(행 점유/주문.sheet_row 비움)해 다음 리컨실이 "더 아래" 새 행을 잡게 한다(stuck loop 방지).
+            if (recovered && dedupKey) {
+              await _releaseOrderRowClaim({ sheetId, tabName: tabContext.tabName || tabName, dedupKey, orderSubmissionId });
+            }
             throw new Error(`target row already filled before mirror write: ${guard.header || guard.range}`);
           }
         }
@@ -244,6 +249,20 @@ async function _executeItem(item) {
             'RAW',
             tabContext.tabGid ? { gid: tabContext.tabGid } : (gid ? { gid } : {})
           ));
+        }
+
+        // ★ 복구 주문: 기록한 행을 노란 배경으로 표시(수동입력분·중복과 시각 구분). best-effort.
+        if (recovered) {
+          try {
+            await throttledCall(() => setRowBackground(sheetId, {
+              gid: tabContext.tabGid || gid,
+              tabName: tabContext.tabName || tabName,
+              rowIndex: parseInt(sheetRow, 10),
+              colCount: (tabContext.headers && tabContext.headers.length) || 30,
+            }));
+          } catch (bgErr) {
+            logger.warn(`[order_append] 복구행 배경색 적용 실패(무시): ${bgErr.message}`);
+          }
         }
 
         await recordParticipationLink({
@@ -357,6 +376,33 @@ async function purgeCompleted(hoursOld = 24) {
   );
   logger.info(`[syncQueue] ${rowCount}건 완료 항목 정리 (${hoursOld}시간 이상 경과)`);
   return { purged: rowCount };
+}
+
+// ── 헬퍼: 복구 append가 가드에 막히면 claim 해제 → 다음 리컨실이 더 아래 새 행 재배정 ──
+async function _releaseOrderRowClaim({ sheetId, tabName, dedupKey, orderSubmissionId }) {
+  try {
+    if (sheetId && tabName && dedupKey) {
+      await pool.query(
+        `DELETE FROM sheet_row_claims WHERE sheet_id = $1 AND tab_name = $2 AND dedup_key = $3`,
+        [sheetId, tabName, dedupKey]
+      );
+    }
+  } catch (e) {
+    logger.warn(`[order_append] claim 해제 실패(무시): ${e.message}`);
+  }
+  if (orderSubmissionId) {
+    try {
+      await pool.query(
+        `UPDATE order_submissions
+            SET sheet_row = NULL, mirror_status = 'failed',
+                sheet_error = 'append row occupied — claim released for re-assignment'
+          WHERE id = $1`,
+        [orderSubmissionId]
+      );
+    } catch (e) {
+      logger.warn(`[order_append] claim 해제 후 상태갱신 실패(무시): ${e.message}`);
+    }
+  }
 }
 
 // ── 헬퍼: 열 인덱스 → 알파벳 ──

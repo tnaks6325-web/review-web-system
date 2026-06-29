@@ -214,6 +214,8 @@ const _ACTION_MAP = {
   'syncQueueRetry':     { method: 'POST', path: '/api/diag/sync-queue/retry' },
   'syncQueuePurge':     { method: 'POST', path: '/api/diag/sync-queue/purge' },
   'syncQueueDelete':    { method: 'POST', path: '/api/diag/sync-queue/delete' },
+  'orderMirrorStatus':  { method: 'GET',  path: '/api/diag/order-mirror-status' },
+  'orderReconcile':     { method: 'POST', path: '/api/diag/order-reconcile' },
   'buildHistory':       { method: 'GET',  path: '/api/diag/build-history' },
 
   // Phase 12: 시트 권한 관리

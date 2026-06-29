@@ -7,6 +7,7 @@ const {
   buildMirrorGuardRange,
   guardBlocksWrite,
   createOrderLedgerEntry,
+  reconcileStuckOrders,
   __setPoolForTest,
 } = require('../src/services/orderLedger.service');
 
@@ -69,6 +70,18 @@ async function run() {
   assert.equal(candidates[0], 7);
   assert(candidates.includes(8));
   assert(candidates.includes(9));
+
+  // appendOnly(복구 경로): 제자리(인애드/빈행) 매칭 건너뛰고 하단 새 행만 후보
+  const appendCands = buildCandidateRows({
+    headers: detected.headers,
+    dataRows: rawRows.slice(detected.dataStartRow - 1).map((cells, idx) => ({ rowIndex: detected.dataStartRow + idx, cells })),
+    headerRowIndex: detected.headerRowIndex,
+    orderData: { orderer: 'Yeon', selectedOptKey: '' },
+    appendOnly: true,
+  });
+  assert.equal(appendCands[0], 9);          // maxRow(8)+1 = 첫 하단 후보
+  assert(!appendCands.includes(7));         // 인애드 제자리 매칭 제외
+  assert(!appendCands.includes(8));         // 기존 데이터행 제외
 
   const mapped = mapOrderToSheetRow(detected.headers, {
     orderer: 'Yeon',
@@ -165,6 +178,47 @@ async function run() {
     assert.equal(ledger.claim.error, 'claim_failed');
     assert(calls.some(c => c.scope === 'pool' && c.sql.includes('INSERT INTO order_submissions')));
     assert(calls.some(c => c.scope === 'pool' && c.sql.includes("mirror_status = 'pending_no_row'")));
+  } finally {
+    __setPoolForTest(null);
+  }
+
+  // ── reconcileStuckOrders (dryRun: enqueue/claim 없이 선택·분류만 검증) ──
+  const stuckRows = [
+    // A: pending_no_row, 행 없음, RAW 메타 있음(s1) → requeued
+    { id: 'o-A', sheet_id: 's1', tab_name: 'Orders', gid: '', tab_gid: '123', dedup_key: 'num:111111',
+      orderer: 'Kim', recipient: 'Kim', user_id: '', phone: '01011112222', address: 'Seoul',
+      order_num: '111111', date_str: '6/12', selected_opt_key: '', bank: '', account: '', depositor: '', price: '', memo: '',
+      mirror_status: 'pending_no_row', sheet_row: null },
+    // B: pending_no_row, RAW 메타 없음(s2) → skippedNoMeta
+    { id: 'o-B', sheet_id: 's2', tab_name: 'NoMeta', gid: '', tab_gid: '999', dedup_key: 'num:222222',
+      orderer: 'Lee', recipient: 'Lee', user_id: '', phone: '01022223333', address: 'Busan',
+      order_num: '222222', date_str: '6/12', selected_opt_key: '', bank: '', account: '', depositor: '', price: '', memo: '',
+      mirror_status: 'pending_no_row', sheet_row: null },
+    // C: failed, 이미 행 있음 → 재배정 없이 requeued
+    { id: 'o-C', sheet_id: 's1', tab_name: 'Orders', gid: '', tab_gid: '123', dedup_key: 'num:333333',
+      orderer: 'Park', recipient: 'Park', user_id: '', phone: '01033334444', address: 'Daegu',
+      order_num: '333333', date_str: '6/12', selected_opt_key: '', bank: '', account: '', depositor: '', price: '', memo: '',
+      mirror_status: 'failed', sheet_row: 50 },
+  ];
+  const rPool = {
+    query: async (sql, params) => {
+      if (sql.includes('FROM order_submissions os')) return { rows: stuckRows };
+      if (sql.includes('FROM raw_sheet_tabs')) {
+        if (params && params.includes('s2')) return { rows: [] }; // s2 = 메타 없음 → 라이브폴백(미설정)→null→skip
+        return { rows: [{ tab_gid: '123', tab_name: 'Orders', headers: ['orderer', 'phone', 'address'],
+                          detected_headers: ['orderer', 'phone', 'address'], header_row_index: 1, data_start_row: 2 }] };
+      }
+      if (sql.includes('FROM raw_sheet_rows')) return { rows: [{ rowIndex: 2, cells: ['Kim', '', ''] }] };
+      throw new Error('unexpected reconcile pool query: ' + sql);
+    },
+    connect: async () => { throw new Error('connect must not run in dryRun'); },
+  };
+  __setPoolForTest(rPool);
+  try {
+    const r = await reconcileStuckOrders({ dryRun: true, limit: 100 });
+    assert.equal(r.scanned, 3);
+    assert.equal(r.requeued, 2);      // A(메타O) + C(행 있음)
+    assert.equal(r.skippedNoMeta, 1); // B(메타X)
   } finally {
     __setPoolForTest(null);
   }

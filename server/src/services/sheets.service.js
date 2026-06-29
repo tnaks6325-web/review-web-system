@@ -819,11 +819,53 @@ async function _batchWriteByGrid(spreadsheetId, data, opts = {}) {
   }
 }
 
+/**
+ * 특정 행의 배경색 설정 (복구 주문을 노란색으로 표시 → 수동입력분과 구분)
+ * spreadsheets.batchUpdate + repeatCell 사용. best-effort(실패해도 값 쓰기엔 무관)로 호출 권장.
+ *
+ * @param {string} spreadsheetId
+ * @param {object} opts { gid, tabName, rowIndex(1-based), colCount=30, bgColor }
+ */
+async function setRowBackground(spreadsheetId, { gid, tabName, rowIndex, colCount = 30, bgColor } = {}) {
+  if (!sheets) throw new Error('Google Sheets API가 설정되지 않았습니다.');
+  const ri = parseInt(rowIndex, 10);
+  if (!Number.isInteger(ri) || ri < 1) throw new Error(`잘못된 rowIndex: ${rowIndex}`);
+
+  const metaSheets = await _getCachedSheetMeta(spreadsheetId);
+  const targetSheet = _findSheetInMeta(metaSheets, { gid, tabName });
+  if (!targetSheet) {
+    const available = metaSheets.map(s => `"${s.properties.title}"`).join(', ');
+    throw new Error(`시트를 찾을 수 없습니다: ${tabName || 'gid:' + gid} (사용 가능: ${available})`);
+  }
+  const sheetId = targetSheet.properties.sheetId;
+  const color = bgColor || { red: 1, green: 0.95, blue: 0.6 }; // 연한 노랑
+
+  await sheets.spreadsheets.batchUpdate({
+    spreadsheetId,
+    requestBody: {
+      requests: [{
+        repeatCell: {
+          range: {
+            sheetId,
+            startRowIndex: ri - 1,
+            endRowIndex: ri,
+            startColumnIndex: 0,
+            endColumnIndex: Math.max(1, colCount),
+          },
+          cell: { userEnteredFormat: { backgroundColor: color } },
+          fields: 'userEnteredFormat.backgroundColor',
+        },
+      }],
+    },
+  });
+}
+
 module.exports = {
   readSheet,
   writeSheet,
   appendSheet,
   batchUpdateSheet,
+  setRowBackground,
   getSpreadsheetMeta,
   batchReadSheet,
   getSheetModifiedTime,
