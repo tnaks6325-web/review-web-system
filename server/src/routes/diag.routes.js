@@ -2057,6 +2057,41 @@ router.post('/order-reconcile', authMiddleware, adminOrMasterMiddleware, async (
   }
 });
 
+// ═══════════════════════════════════════════════════════════
+// GET /api/diag/order-written-sample — 시트에 반영 완료된 주문 샘플(노란 복구행 육안확인용)
+//   query: { sheetId?, tabName?, limit? } — 최근 sheet_written_at 순. 행번호로 시트에서 직접 확인.
+//   reconcile(복구) 경로로 써진 행은 시트 하단에 노란 배경 → 이 목록의 sheetRow로 대조.
+// ═══════════════════════════════════════════════════════════
+router.get('/order-written-sample', authMiddleware, async (req, res, next) => {
+  try {
+    const { sheetId, tabName } = req.query;
+    const limit = Math.min(parseInt(req.query.limit, 10) || 20, 200);
+    const params = [];
+    const conds = [`os.mirror_status = 'written'`, `os.sheet_row IS NOT NULL`];
+    if (sheetId) { params.push(sheetId); conds.push(`os.sheet_id = $${params.length}`); }
+    if (tabName) { params.push(tabName); conds.push(`os.tab_name = $${params.length}`); }
+    params.push(limit);
+    const { rows } = await pool.query(
+      `SELECT os.id, os.sheet_id AS "sheetId", os.tab_name AS "tabName",
+              COALESCE(NULLIF(os.tab_gid, ''), rst.tab_gid) AS "tabGid",
+              os.sheet_row AS "sheetRow",
+              os.orderer, os.recipient, os.order_num AS "orderNum",
+              RIGHT(regexp_replace(COALESCE(os.phone, ''), '[^0-9]', '', 'g'), 4) AS "phone4",
+              os.sheet_written_at AS "writtenAt"
+         FROM order_submissions os
+         LEFT JOIN raw_sheet_tabs rst ON rst.sheet_id = os.sheet_id
+              AND (rst.tab_gid = NULLIF(os.tab_gid, '') OR rst.tab_name = os.tab_name)
+        WHERE ${conds.join(' AND ')}
+        ORDER BY os.sheet_written_at DESC NULLS LAST
+        LIMIT $${params.length}`,
+      params
+    );
+    res.json({ ok: true, count: rows.length, items: rows });
+  } catch (err) {
+    next(err);
+  }
+});
+
 // GET /api/diag/build-history — 빌드 히스토리
 router.get('/build-history', authMiddleware, async (req, res, next) => {
   try {
