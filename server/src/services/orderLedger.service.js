@@ -783,7 +783,9 @@ async function reconcileStuckOrders({ limit = 50, perTabCap = 20, sheetId = null
       selectedOptKey: row.selected_opt_key, bank: row.bank, account: row.account,
       depositor: row.depositor, price: row.price, memo: row.memo,
     };
-    const dedupKey = row.dedup_key || computeDedupKey(orderData);
+    // ★ D4 보강(리뷰 should-fix): INSERT↔dedup_key UPDATE 사이 크래시로 dedup_key가 NULL이면,
+    //   여기서 osid(row.id) 폴백을 넣어 재계산해야 원래 osid 키와 일치(없으면 약한 rcp 키로 떨어져 #5 충돌 재발).
+    const dedupKey = row.dedup_key || computeDedupKey({ ...orderData, orderSubmissionId: row.id });
     const gid = row.tab_gid || row.gid || '';
 
     // 이미 행이 있는 주문(failed/정체 queued) → 재배정 없이 바로 재-enqueue
