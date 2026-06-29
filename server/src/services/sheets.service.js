@@ -159,6 +159,15 @@ async function _readSheetByGridData(spreadsheetId, range, opts = {}) {
   const actualEndRow = endRow > 0 ? Math.min(endRow, maxRows) : maxRows;
   const actualEndCol = endCol > 0 ? Math.min(endCol, maxCols) : maxCols;
 
+  // ★ 요청 시작행/열이 그리드 경계를 넘으면(예: 복구 append가 현재 그리드보다 아래 행을
+  //   가드 읽기) 해당 영역엔 데이터가 없음 → 빈 결과 반환. (잘못된 gridRange =
+  //   endRowIndex < startRowIndex 로 API 호출하면 "endRowIndex cannot be before startRowIndex"
+  //   에러가 나서 가드 읽기가 실패한다.) 쓰기측 _batchWriteByGrid가 appendDimension으로
+  //   그리드를 확장하므로 그 행은 '비어있음'이 맞다.
+  if ((startRow - 1) >= actualEndRow || (startCol - 1) >= actualEndCol) {
+    return [];
+  }
+
   // getByDataFilter로 GID 기반 데이터 조회 (range 파싱 문제 완전 회피)
   const filterRes = await sheets.spreadsheets.getByDataFilter({
     spreadsheetId,
