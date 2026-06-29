@@ -2058,6 +2058,55 @@ router.post('/order-reconcile', authMiddleware, adminOrMasterMiddleware, async (
 });
 
 // ═══════════════════════════════════════════════════════════
+// POST /api/diag/order-relink — 탭 리네임으로 끊긴 막힌 주문을 현재 탭에 재연결
+//   시트 탭 이름이 바뀌어(예: '…100건'→'…81건') gid 없이 저장된 주문이
+//   현재 탭과 매칭되지 않아 영구 적체될 때, fromTabName 주문들의 tab_gid/tab_name을
+//   현재 탭(toTabGid/toTabName)으로 backfill + sheet_row 초기화 → 이후 reconcile이
+//   현재 탭 하단에 노란행으로 복구. 막힌(pending/pending_no_row/failed) 건만 대상.
+//   body: { sheetId, fromTabName, toTabGid, toTabName?, dryRun? } — admin/master 전용
+// ═══════════════════════════════════════════════════════════
+router.post('/order-relink', authMiddleware, adminOrMasterMiddleware, async (req, res, next) => {
+  try {
+    const { sheetId, fromTabName, toTabGid, toTabName, dryRun } = req.body || {};
+    if (!sheetId || !fromTabName || !toTabGid) {
+      return res.status(400).json({ ok: false, error: 'sheetId, fromTabName, toTabGid 필수' });
+    }
+    const targetName = toTabName || fromTabName;
+    const { rows: cntRows } = await pool.query(
+      `SELECT COUNT(*)::int AS cnt
+         FROM order_submissions
+        WHERE sheet_id = $1 AND tab_name = $2
+          AND mirror_status IN ('pending','pending_no_row','failed')`,
+      [sheetId, fromTabName]
+    );
+    const matched = cntRows[0]?.cnt || 0;
+
+    if (dryRun) {
+      return res.json({ ok: true, dryRun: true, matched, toTabGid, toTabName: targetName });
+    }
+
+    // 1) 옛 탭명으로 남은 phantom claim 제거(있다면) — 현재 탭명 네임스페이스로 재claim 유도
+    const { rowCount: claimsCleared } = await pool.query(
+      `DELETE FROM sheet_row_claims WHERE sheet_id = $1 AND tab_name = $2`,
+      [sheetId, fromTabName]
+    );
+    // 2) 막힌 주문을 현재 탭으로 재연결 + 행 초기화(reconcile이 하단 append 재배정)
+    const { rows: updated } = await pool.query(
+      `UPDATE order_submissions
+          SET tab_gid = $3, tab_name = $4,
+              sheet_row = NULL, mirror_status = 'pending_no_row', sheet_error = NULL
+        WHERE sheet_id = $1 AND tab_name = $2
+          AND mirror_status IN ('pending','pending_no_row','failed')
+        RETURNING id`,
+      [sheetId, fromTabName, String(toTabGid), targetName]
+    );
+    res.json({ ok: true, matched, relinked: updated.length, claimsCleared, toTabGid, toTabName: targetName });
+  } catch (err) {
+    next(err);
+  }
+});
+
+// ═══════════════════════════════════════════════════════════
 // GET /api/diag/order-written-sample — 시트에 반영 완료된 주문 샘플(노란 복구행 육안확인용)
 //   query: { sheetId?, tabName?, limit? } — 최근 sheet_written_at 순. 행번호로 시트에서 직접 확인.
 //   reconcile(복구) 경로로 써진 행은 시트 하단에 노란 배경 → 이 목록의 sheetRow로 대조.
