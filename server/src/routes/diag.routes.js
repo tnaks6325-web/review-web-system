@@ -2109,33 +2109,57 @@ router.post('/order-relink', authMiddleware, adminOrMasterMiddleware, async (req
 });
 
 // ═══════════════════════════════════════════════════════════
-// POST /api/diag/queue-drain — 백로그 가속 드레인(선택적·온디맨드)
+// POST /api/diag/queue-drain — 백로그 가속 드레인(선택적·온디맨드, 백그라운드)
 //   평상시 큐워커는 항목당 2초 안전대기(쿼터 보수)로 ~20/분. 이 엔드포인트는 그 대기를
-//   0으로 두고 sheetsThrottle(45/분)만 가드로 삼아 더 빨리 빼낸다. 시간/건수 상한으로 1콜 바운드.
+//   0으로 두고 sheetsThrottle(45/분)만 가드로 삼아 더 빨리 빼낸다. throttle 때문에 한 배치가
+//   길어질 수 있어 **백그라운드 실행 후 즉시 응답**(HTTP 타임아웃 방지) — 진행은 큐/현황으로 관찰.
 //   body: { maxMillis?, batchSize? } — admin/master 전용. 라이브 이벤트 중엔 사용 자제.
 // ═══════════════════════════════════════════════════════════
+let _queueDrainRunning = false;
+let _lastQueueDrain = null;
 router.post('/queue-drain', authMiddleware, adminOrMasterMiddleware, async (req, res, next) => {
   try {
-    const maxMillis = Math.min(Math.max(parseInt(req.body?.maxMillis, 10) || 20000, 2000), 55000);
-    const batchSize = Math.min(Math.max(parseInt(req.body?.batchSize, 10) || 25, 1), 50);
-    const start = Date.now();
-    let rounds = 0, processed = 0, succeeded = 0, failed = 0;
-    while (Date.now() - start < maxMillis) {
-      const r = await processQueue(batchSize, { interItemDelayMs: 0 });
-      rounds++;
-      processed += r.processed || 0;
-      succeeded += r.succeeded || 0;
-      failed += r.failed || 0;
-      if ((r.processed || 0) === 0) break; // 큐 비었음
+    if (_queueDrainRunning) {
+      return res.json({ ok: false, running: true, error: '가속 드레인이 이미 진행 중입니다.', last: _lastQueueDrain });
     }
+    const maxMillis = Math.min(Math.max(parseInt(req.body?.maxMillis, 10) || 60000, 2000), 180000);
+    const batchSize = Math.min(Math.max(parseInt(req.body?.batchSize, 10) || 20, 1), 50);
+    res.json({ ok: true, mode: 'async', message: '가속 드레인을 시작했습니다. 현황/큐로 진행을 확인하세요.', maxMillis, batchSize });
+
+    _queueDrainRunning = true;
+    setImmediate(async () => {
+      const start = Date.now();
+      let rounds = 0, processed = 0, succeeded = 0, failed = 0;
+      try {
+        while (Date.now() - start < maxMillis) {
+          const r = await processQueue(batchSize, { interItemDelayMs: 0 });
+          rounds++;
+          processed += r.processed || 0;
+          succeeded += r.succeeded || 0;
+          failed += r.failed || 0;
+          if ((r.processed || 0) === 0) break; // 큐 비었음
+        }
+        _lastQueueDrain = { rounds, processed, succeeded, failed, elapsedMs: Date.now() - start, finishedAt: new Date().toISOString() };
+        logger.info(`[queue-drain] 완료: rounds=${rounds}, processed=${processed}, succeeded=${succeeded}, failed=${failed}, ${Date.now() - start}ms`);
+      } catch (err) {
+        _lastQueueDrain = { error: err.message, finishedAt: new Date().toISOString() };
+        logger.error(`[queue-drain] 오류: ${err.message}`);
+      } finally {
+        _queueDrainRunning = false;
+      }
+    });
+  } catch (err) {
+    next(err);
+  }
+});
+
+// GET /api/diag/queue-drain — 마지막 가속 드레인 결과/진행 상태
+router.get('/queue-drain', authMiddleware, async (req, res, next) => {
+  try {
     const { rows: pend } = await pool.query(
       `SELECT COUNT(*)::int AS remaining FROM sync_queue WHERE status = 'pending' AND attempts < max_retry`
     );
-    res.json({
-      ok: true, rounds, processed, succeeded, failed,
-      remaining: pend[0]?.remaining || 0,
-      elapsedMs: Date.now() - start,
-    });
+    res.json({ ok: true, running: _queueDrainRunning, last: _lastQueueDrain, remaining: pend[0]?.remaining || 0 });
   } catch (err) {
     next(err);
   }

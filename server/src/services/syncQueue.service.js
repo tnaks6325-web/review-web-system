@@ -68,9 +68,13 @@ async function processQueue(batchSize = 10, { interItemDelayMs = 2000 } = {}) {
 
       // ★ A1: Exponential backoff — Quota 에러 이력이 있으면 대기 시간 증가
       const baseDelay = 2000; // 기본 2초
-      const backoffDelay = item.attempts > 0
-        ? Math.min(baseDelay * Math.pow(2, item.attempts), 30000) // 최대 30초
-        : (i > 0 ? interItemDelayMs : 0); // 첫 항목은 즉시, 이후 interItemDelayMs (가속 드레인 시 0 — sheetsThrottle이 쿼터 가드)
+      // 가속 드레인(interItemDelayMs===0): 모든 대기 제거(재시도 지수백오프 포함) — sheetsThrottle(45/분)이 쿼터 가드.
+      //   백오프를 두면 한 라운드가 항목당 최대 30초씩 늘어 HTTP가 막힌다(평상시 cron은 기본 2000으로 보수적 유지).
+      const backoffDelay = interItemDelayMs === 0
+        ? 0
+        : (item.attempts > 0
+            ? Math.min(baseDelay * Math.pow(2, item.attempts), 30000) // 최대 30초
+            : (i > 0 ? interItemDelayMs : 0)); // 첫 항목은 즉시, 이후 interItemDelayMs
       if (backoffDelay > 0) {
         await new Promise(r => setTimeout(r, backoffDelay));
       }
