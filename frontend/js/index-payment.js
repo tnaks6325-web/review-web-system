@@ -657,6 +657,19 @@ async function runOrderReconcile(sheetId) {
   }
 }
 
+// 백로그 가속 드레인(선택적·온디맨드) — 대기 중 시트반영을 일시적으로 빠르게 처리(쿼터 한도 내)
+async function runQueueDrain() {
+  if (!confirm("대기 중인 시트 반영을 빠르게 처리합니다(약 20초, 쿼터 한도 내).\n라이브 이벤트 중에는 사용을 자제하세요. 진행할까요?")) return;
+  try {
+    showToast("가속 드레인 시작…(약 20초)", "info");
+    const r = await gasPost({ action: "queueDrain", maxMillis: 20000, batchSize: 30 });
+    showToast(`가속 반영: 처리 ${r.processed || 0} · 성공 ${r.succeeded || 0} · 실패 ${r.failed || 0} · 남은 ${r.remaining ?? "?"}`, "success");
+    setTimeout(() => { loadOrderMirrorStatus(); if (typeof loadSyncQueueStats === "function") loadSyncQueueStats(); }, 1000);
+  } catch (err) {
+    showToast("가속 드레인 실패: " + err.message, "error");
+  }
+}
+
 async function loadSyncQueueStats() {
   const el = document.getElementById("syncQueueStats");
   const actionsEl = document.getElementById("syncQueueActions");

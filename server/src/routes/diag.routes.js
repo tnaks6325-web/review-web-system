@@ -3,7 +3,7 @@ const router = express.Router();
 const { authMiddleware, adminOrMasterMiddleware } = require('../middleware/auth.middleware');
 const pool = require('../db/pool');
 const { readSheet, getSpreadsheetMeta, writeSheet, appendSheet, copySpreadsheet, copySheetToSpreadsheet, renameSheet, shareSheetWithServiceAccount, checkSheetWriteAccess } = require('../services/sheets.service');
-const { getQueueStats, retryItem, retryAllFailed, purgeCompleted, deleteItem, deleteAllFailed } = require('../services/syncQueue.service');
+const { getQueueStats, retryItem, retryAllFailed, purgeCompleted, deleteItem, deleteAllFailed, processQueue } = require('../services/syncQueue.service');
 const { imageApiLimiter } = require('../middleware/rateLimit.middleware');
 const { extractOrderFromImage, verifyAddressMatch } = require('../services/gemini.service');
 const driveService = require('../services/drive.service');
@@ -2063,15 +2063,17 @@ router.post('/order-reconcile', authMiddleware, adminOrMasterMiddleware, async (
 //   현재 탭과 매칭되지 않아 영구 적체될 때, fromTabName 주문들의 tab_gid/tab_name을
 //   현재 탭(toTabGid/toTabName)으로 backfill + sheet_row 초기화 → 이후 reconcile이
 //   현재 탭 하단에 노란행으로 복구. 막힌(pending/pending_no_row/failed) 건만 대상.
-//   body: { sheetId, fromTabName, toTabGid, toTabName?, dryRun? } — admin/master 전용
+//   body: { sheetId, fromTabName, toTabGid, toTabName?, toSheetId?, dryRun? } — admin/master 전용
+//   toSheetId: sheet_id 자체가 손상된 주문(단축URL 혼입 등)을 올바른 시트로 이전할 때 사용.
 // ═══════════════════════════════════════════════════════════
 router.post('/order-relink', authMiddleware, adminOrMasterMiddleware, async (req, res, next) => {
   try {
-    const { sheetId, fromTabName, toTabGid, toTabName, dryRun } = req.body || {};
+    const { sheetId, fromTabName, toTabGid, toTabName, toSheetId, dryRun } = req.body || {};
     if (!sheetId || !fromTabName || !toTabGid) {
       return res.status(400).json({ ok: false, error: 'sheetId, fromTabName, toTabGid 필수' });
     }
     const targetName = toTabName || fromTabName;
+    const targetSheetId = toSheetId || sheetId;
     const { rows: cntRows } = await pool.query(
       `SELECT COUNT(*)::int AS cnt
          FROM order_submissions
@@ -2082,7 +2084,7 @@ router.post('/order-relink', authMiddleware, adminOrMasterMiddleware, async (req
     const matched = cntRows[0]?.cnt || 0;
 
     if (dryRun) {
-      return res.json({ ok: true, dryRun: true, matched, toTabGid, toTabName: targetName });
+      return res.json({ ok: true, dryRun: true, matched, toSheetId: targetSheetId, toTabGid, toTabName: targetName });
     }
 
     // 1) 옛 탭명으로 남은 phantom claim 제거(있다면) — 현재 탭명 네임스페이스로 재claim 유도
@@ -2090,17 +2092,50 @@ router.post('/order-relink', authMiddleware, adminOrMasterMiddleware, async (req
       `DELETE FROM sheet_row_claims WHERE sheet_id = $1 AND tab_name = $2`,
       [sheetId, fromTabName]
     );
-    // 2) 막힌 주문을 현재 탭으로 재연결 + 행 초기화(reconcile이 하단 append 재배정)
+    // 2) 막힌 주문을 현재 시트/탭으로 재연결 + 행 초기화(reconcile이 하단 append 재배정)
     const { rows: updated } = await pool.query(
       `UPDATE order_submissions
-          SET tab_gid = $3, tab_name = $4,
+          SET sheet_id = $5, tab_gid = $3, tab_name = $4,
               sheet_row = NULL, mirror_status = 'pending_no_row', sheet_error = NULL
         WHERE sheet_id = $1 AND tab_name = $2
           AND mirror_status IN ('pending','pending_no_row','failed')
         RETURNING id`,
-      [sheetId, fromTabName, String(toTabGid), targetName]
+      [sheetId, fromTabName, String(toTabGid), targetName, targetSheetId]
     );
-    res.json({ ok: true, matched, relinked: updated.length, claimsCleared, toTabGid, toTabName: targetName });
+    res.json({ ok: true, matched, relinked: updated.length, claimsCleared, toSheetId: targetSheetId, toTabGid, toTabName: targetName });
+  } catch (err) {
+    next(err);
+  }
+});
+
+// ═══════════════════════════════════════════════════════════
+// POST /api/diag/queue-drain — 백로그 가속 드레인(선택적·온디맨드)
+//   평상시 큐워커는 항목당 2초 안전대기(쿼터 보수)로 ~20/분. 이 엔드포인트는 그 대기를
+//   0으로 두고 sheetsThrottle(45/분)만 가드로 삼아 더 빨리 빼낸다. 시간/건수 상한으로 1콜 바운드.
+//   body: { maxMillis?, batchSize? } — admin/master 전용. 라이브 이벤트 중엔 사용 자제.
+// ═══════════════════════════════════════════════════════════
+router.post('/queue-drain', authMiddleware, adminOrMasterMiddleware, async (req, res, next) => {
+  try {
+    const maxMillis = Math.min(Math.max(parseInt(req.body?.maxMillis, 10) || 20000, 2000), 55000);
+    const batchSize = Math.min(Math.max(parseInt(req.body?.batchSize, 10) || 25, 1), 50);
+    const start = Date.now();
+    let rounds = 0, processed = 0, succeeded = 0, failed = 0;
+    while (Date.now() - start < maxMillis) {
+      const r = await processQueue(batchSize, { interItemDelayMs: 0 });
+      rounds++;
+      processed += r.processed || 0;
+      succeeded += r.succeeded || 0;
+      failed += r.failed || 0;
+      if ((r.processed || 0) === 0) break; // 큐 비었음
+    }
+    const { rows: pend } = await pool.query(
+      `SELECT COUNT(*)::int AS remaining FROM sync_queue WHERE status = 'pending' AND attempts < max_retry`
+    );
+    res.json({
+      ok: true, rounds, processed, succeeded, failed,
+      remaining: pend[0]?.remaining || 0,
+      elapsedMs: Date.now() - start,
+    });
   } catch (err) {
     next(err);
   }
