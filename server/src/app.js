@@ -34,6 +34,14 @@ const mappingRoutes  = require('./routes/mapping.routes');
 
 const app = express();
 
+// ── 프록시 신뢰 (Railway 등 리버스 프록시 뒤) ──
+// trust proxy 미설정 시 req.ip가 프록시 IP 하나로 고정되어 모든 사용자가
+// 동일한 rate-limit 버킷을 공유한다. 구매오픈 동시접속 시 폼 로드 API만으로
+// 분당 한도를 소진해 실제 제출(POST /api/submit/order)이 429로 차단되는 원인.
+// 1 = 첫 홉(Railway 엣지)만 신뢰 → X-Forwarded-For에서 실제 클라이언트 IP 사용.
+// (true로 두면 express-rate-limit가 우회 위험 경고를 내므로 홉 수로 지정)
+app.set('trust proxy', 1);
+
 // ── Sentry 초기화 (가장 먼저) ──
 initSentry(app);
 

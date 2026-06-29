@@ -1,9 +1,12 @@
 const rateLimit = require('express-rate-limit');
 const jwt = require('jsonwebtoken');
 
+// ★ max: 환경변수로 조정 가능(기본 600/분). trust proxy=1 적용으로 IP별 버킷이
+//    실제 클라이언트 기준이 되지만, 모바일 CGNAT(통신사 NAT)로 다수가 같은 공인
+//    IP를 공유할 수 있어 동시 구매오픈 대비 여유 있게 상향.
 const rateLimiter = rateLimit({
   windowMs: 60 * 1000,  // 1분
-  max: 120,             // 분당 120 요청
+  max: parseInt(process.env.RATE_LIMIT_MAX || '600', 10),  // 분당 요청 (기본 600)
   message: { error: '요청이 너무 많습니다. 잠시 후 다시 시도하세요.' },
   standardHeaders: true,
   legacyHeaders: false,
