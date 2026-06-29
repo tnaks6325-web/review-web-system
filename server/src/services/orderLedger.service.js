@@ -43,9 +43,13 @@ function normalizeText(v) {
   return String(v == null ? '' : v).trim().replace(/\s+/g, '');
 }
 
-function computeDedupKey({ orderNum, recipient, phone, dateStr, selectedOptKey } = {}) {
+function computeDedupKey({ orderNum, recipient, phone, dateStr, selectedOptKey, orderSubmissionId } = {}) {
   const num = String(orderNum == null ? '' : orderNum).replace(/[^0-9]/g, '');
   if (num.length >= 6) return `num:${num}`;
+  // ★ D4(#5): 주문번호가 약하면(쿠팡 비번호/분할주문 등 6자리 미만) 같은 사람·같은 날·같은 옵션의
+  //   별개 주문 2건이 동일 dedupKey → 같은 행 공유 → 한 건 시트 영구소실. orderSubmissionId(UUID)를
+  //   폴백 키로 써서 별개 주문은 별개 행. reconcile은 row.dedup_key를 재사용하므로 재시도 멱등 유지.
+  if (orderSubmissionId) return `osid:${orderSubmissionId}`;
   const rcp = normalizeText(recipient);
   const p8 = toPhone8(phone);
   const date = normalizeText(dateStr);
@@ -225,6 +229,28 @@ function buildMirrorGuardRange({ tabName, headers, targetRow, orderData = {} }) 
   };
 }
 
+// ★ D3a(#3): 다중컬럼 가드 — 연락처 한 칸만 보면 그 칸만 빈 수동입력행을 "비었음"으로 오판해 덮어쓴다.
+//   연락처+주소+수취인 3칸을 검사해 하나라도 외부값이면 차단. (range 없이 col만 — 호출부가 한 행을
+//   한 번에 읽어 셀별로 판정 → 쿼터 1회 유지.) 헤더에서 못 찾으면 첫 비어있지 않은 기대값 칸으로 폴백.
+function buildMirrorGuardRanges({ tabName, headers, targetRow, orderData = {} }) {
+  const rowData = mapOrderToSheetRow(headers, orderData);
+  const cols = [];
+  const add = (kw, ex = []) => { const i = findColumn(headers, kw, ex); if (i >= 0) cols.push(i); };
+  add(['연락처', '전화', '핸드폰', '휴대폰'], ['phone']);
+  add(['주소', 'address']);
+  add(['수취인', '받는분', '이름', 'recipient']);
+  let uniq = [...new Set(cols)];
+  if (!uniq.length) {
+    const i = rowData.findIndex(v => v !== null && String(v == null ? '' : v).trim() !== '');
+    if (i >= 0) uniq = [i];
+  }
+  return uniq.map(col => ({
+    col,
+    header: headers[col] || '',
+    expected: rowData[col] != null ? String(rowData[col]) : '',
+  }));
+}
+
 // 가드 칸 값 정규화 — 연락처류는 숫자만 비교(서식 차이 무시), 그 외는 trim 비교.
 function normalizeGuardValue(header, val) {
   const s = String(val == null ? '' : val).trim();
@@ -373,9 +399,11 @@ async function loadRawTabContext(sheetId, tabGid, tabName) {
   }
 
   const { rows: tabRows } = await pool.query(
-    `SELECT sheet_id, tab_gid, tab_name, headers, header_row_index, detected_headers, data_start_row
+    `SELECT sheet_id, tab_gid, tab_name, headers, header_row_index, detected_headers, data_start_row,
+            COUNT(*) OVER () AS _dup
        FROM raw_sheet_tabs
       WHERE ${where}
+      ORDER BY mirrored_at DESC NULLS LAST
       LIMIT 1`,
     params
   );
@@ -384,6 +412,12 @@ async function loadRawTabContext(sheetId, tabGid, tabName) {
     // ★ 미러 안 된 탭: per-제출 라이브읽기(버스트 시 시트 쿼터 위험) 대신
     //   그 시트를 백그라운드로 1회 자동미러(debounce) → 메타 채운 뒤 리컨실이 복구.
     //   이 주문은 일단 행 없음(null) → pending_no_row → 자동복구가 시트에 기록(손실 0).
+    _triggerSheetMirrorOnce(sheetId);
+    return null;
+  }
+  // ★ D5b(#8): gid 없이 tab_name으로 매칭했는데 동명 탭이 여러 개(복제 후 미정리)면 임의 1개 선택 시
+  //   다른 탭에 오배정 위험 → 보류(pending_no_row). 미러 재유도로 gid가 채워질 때까지 자가치유.
+  if (!tabGid && parseInt(tab._dup, 10) > 1) {
     _triggerSheetMirrorOnce(sheetId);
     return null;
   }
@@ -458,7 +492,9 @@ async function claimRow({ client, sheetId, tabGid, tabName, dedupKey, candidateR
       [sheetId, tabName, dedupKey]
     );
   } catch (e) {
-    if (e.code === '42P01') return { row: firstCandidate, isNew: true, fallback: true };
+    // ★ D5d(#10): claims 테이블 부재(부팅/복구 윈도우)면 무검증 firstCandidate 배정 금지.
+    //   배정 보류(pending_no_row) → 다음 reconcile이 정상 claim. 멱등·중복방지 무력화 차단.
+    if (e.code === '42P01') return { row: null, error: 'claims table missing (boot window)' };
     throw e;
   }
   if (existing.rows.length) {
@@ -513,14 +549,13 @@ async function createOrderLedgerEntry(input) {
     sheetId, tabName, gid, orderData,
     slotRowNumber, loginPhone8, loginName,
   } = input;
-  const dedupKey = computeDedupKey(orderData);
-
+  // ★ D4(#5): osid 폴백 dedupKey를 쓰려면 먼저 id가 필요 → INSERT(dedup_key NULL) 후 osid 포함 키 계산·UPDATE.
   const insert = await db.query(
     `INSERT INTO order_submissions
       (sheet_id, tab_name, gid, tab_gid, orderer, recipient, user_id, phone, address,
        order_num, date_str, selected_opt_key, bank, account, depositor, price, memo,
        dedup_key, mirror_status)
-     VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,'pending')
+     VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,NULL,'pending')
      RETURNING id`,
     [
       sheetId,
@@ -540,10 +575,11 @@ async function createOrderLedgerEntry(input) {
       orderData.depositor || '',
       orderData.price || '',
       orderData.memo || '',
-      dedupKey,
     ]
   );
   const orderSubmissionId = insert.rows[0].id;
+  const dedupKey = computeDedupKey({ ...orderData, orderSubmissionId });
+  await db.query(`UPDATE order_submissions SET dedup_key = $2 WHERE id = $1`, [orderSubmissionId, dedupKey]);
 
   let tabContext = null;
   let claim = { row: null, error: 'not_attempted' };
@@ -747,7 +783,9 @@ async function reconcileStuckOrders({ limit = 50, perTabCap = 20, sheetId = null
       selectedOptKey: row.selected_opt_key, bank: row.bank, account: row.account,
       depositor: row.depositor, price: row.price, memo: row.memo,
     };
-    const dedupKey = row.dedup_key || computeDedupKey(orderData);
+    // ★ D4 보강(리뷰 should-fix): INSERT↔dedup_key UPDATE 사이 크래시로 dedup_key가 NULL이면,
+    //   여기서 osid(row.id) 폴백을 넣어 재계산해야 원래 osid 키와 일치(없으면 약한 rcp 키로 떨어져 #5 충돌 재발).
+    const dedupKey = row.dedup_key || computeDedupKey({ ...orderData, orderSubmissionId: row.id });
     const gid = row.tab_gid || row.gid || '';
 
     // 이미 행이 있는 주문(failed/정체 queued) → 재배정 없이 바로 재-enqueue
@@ -852,6 +890,7 @@ module.exports = {
   mapOrderToSheetRow,
   buildBatchUpdateData,
   buildMirrorGuardRange,
+  buildMirrorGuardRanges,
   guardBlocksWrite,
   normalizeGuardValue,
   loadRawTabContext,

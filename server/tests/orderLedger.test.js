@@ -5,6 +5,7 @@ const {
   buildCandidateRows,
   mapOrderToSheetRow,
   buildMirrorGuardRange,
+  buildMirrorGuardRanges,
   guardBlocksWrite,
   createOrderLedgerEntry,
   reconcileStuckOrders,
@@ -129,6 +130,30 @@ async function run() {
   assert.equal(addrGuard.header, 'address');
   assert.equal(guardBlocksWrite('Seoul 123', addrGuard), false);
   assert.equal(guardBlocksWrite('Busan 456', addrGuard), true);
+
+  // ── D4(#5): dedupKey osid 폴백 — 약한 주문번호의 별개 주문이 같은 행 공유하는 소실 차단 ──
+  assert.equal(computeDedupKey({ orderNum: '12', orderSubmissionId: 'uuid-A' }), 'osid:uuid-A');
+  assert.equal(computeDedupKey({ orderNum: '12', orderSubmissionId: 'uuid-A' }), 'osid:uuid-A'); // 같은 osid → 동일(재시도 멱등)
+  assert.equal(computeDedupKey({ orderNum: '123456', orderSubmissionId: 'uuid-A' }), 'num:123456'); // 강한 주문번호 우선(osid 무시)
+  assert.equal(computeDedupKey({ orderNum: '12' }), 'rcp:|||'); // osid 없으면 기존 rcp 폴백(하위호환)
+  // 같은 사람·같은 날·같은 옵션의 별개 주문 2건 → osid로 분리(같은 행 공유 안 함)
+  assert.notEqual(
+    computeDedupKey({ orderNum: '', recipient: 'Kim', phone: '01011112222', dateStr: '6/12', selectedOptKey: 'A', orderSubmissionId: 'osidX' }),
+    computeDedupKey({ orderNum: '', recipient: 'Kim', phone: '01011112222', dateStr: '6/12', selectedOptKey: 'A', orderSubmissionId: 'osidY' })
+  );
+
+  // ── D3a(#3): 다중컬럼 가드 — 연락처+주소+수취인, 어느 칸이든 외부값이면 차단(한 칸만 보던 덮어쓰기 방지) ──
+  const mguards = buildMirrorGuardRanges({
+    tabName: 'Orders',
+    headers: ['no', K.recipient, K.phone, K.address],
+    targetRow: 7,
+    orderData: { recipient: 'Kim', phone: '01012345678', address: 'Seoul' },
+  });
+  assert.equal(mguards.length, 3); // 수취인+연락처+주소
+  assert.equal(mguards.some(g => guardBlocksWrite('', g)), false); // 모두 빈칸 → 통과
+  const addrCellGuard = mguards.find(g => g.header === K.address);
+  assert.equal(guardBlocksWrite('Seoul', addrCellGuard), false);     // 내 값 → 통과
+  assert.equal(guardBlocksWrite('Busan 999', addrCellGuard), true);  // 주소칸만 외부값이어도 차단
 
   const calls = [];
   const fakeClient = {
