@@ -214,6 +214,16 @@ async function _mirrorOneSheet(sheetId, opts) {
         continue;
       }
 
+      // ★ DB-primary 가드: 미반영(dirty) 편집이 있는 탭은 미러 skip.
+      //   아웃바운드 cell_write 큐가 시트에 다 쓸 때까지 양보 → 옛 시트값 덮어쓰기 방지.
+      //   checksum 을 전진시키지 않으므로 다음 주기에 다시 평가된다.
+      const { tabHasDirtyRows } = require('./gridEdit.service'); // lazy: 순환참조 회피
+      if (await tabHasDirtyRows(sheetId, tabGid)) {
+        tabsSkipped++;
+        logger.info(`[rawMirror] dirty 탭 skip: ${tabName} (시트 반영 대기 중)`);
+        continue;
+      }
+
       const written = await _replaceTabRows(sheetId, tabGid, tabName, values);
       await _upsertTabMeta({
         sheetId, sheetUrl, spreadsheetTitle, tabGid, tabName,
@@ -238,6 +248,15 @@ async function _replaceTabRows(sheetId, tabGid, tabName, values) {
   const client = await pool.connect();
   try {
     await client.query('BEGIN');
+
+    // ★ 방어선: DELETE 전에 dirty 행(미반영 편집)을 보존해 시트 옛 값으로 덮어쓰기 방지.
+    //   상위 루프의 dirty-skip 가드가 1차 방어이고, 이건 미러 도중 dirty 전환된 행 대비.
+    const { rows: dirtyRows } = await client.query(
+      `SELECT row_index, cells, dirty_at, synced_at, edited_by
+         FROM raw_sheet_rows
+        WHERE sheet_id = $1 AND tab_gid = $2 AND dirty_at IS NOT NULL`,
+      [sheetId, tabGid]
+    );
     await client.query(
       'DELETE FROM raw_sheet_rows WHERE sheet_id = $1 AND tab_gid = $2',
       [sheetId, tabGid]
@@ -262,6 +281,19 @@ async function _replaceTabRows(sheetId, tabGid, tabName, values) {
         );
         written += batch.length;
       }
+    }
+
+    // ★ dirty 행 복원: 시트 값으로 들어간 행을 DB 편집값으로 되돌리고 dirty 유지
+    //   (values 범위를 벗어난 dirty 행도 다시 삽입)
+    for (const dr of dirtyRows) {
+      await client.query(
+        `INSERT INTO raw_sheet_rows (sheet_id, tab_gid, tab_name, row_index, cells, dirty_at, synced_at, edited_by)
+         VALUES ($1,$2,$3,$4,$5,$6,$7,$8)
+         ON CONFLICT (sheet_id, tab_gid, row_index)
+         DO UPDATE SET cells = EXCLUDED.cells, dirty_at = EXCLUDED.dirty_at,
+                       synced_at = EXCLUDED.synced_at, edited_by = EXCLUDED.edited_by`,
+        [sheetId, tabGid, tabName, dr.row_index, JSON.stringify(dr.cells), dr.dirty_at, dr.synced_at, dr.edited_by]
+      );
     }
 
     await client.query('COMMIT');

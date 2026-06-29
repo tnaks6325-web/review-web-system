@@ -13266,7 +13266,7 @@ function _renderFullTableView(wrap, filtered) {
       const mw = c.width ? c.width : c.key==='campaign_name'?'140px':c.key==='tab_name'?'180px':'120px';
       html += `<td style="padding:5px;text-align:${c.align};max-width:${mw};${c.width?'width:'+c.width+';':''};overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="${escHtml(String(t[c.key]||''))}">${_cellVal(t, c)}</td>`;
     });
-    if (!_tabDashSimple) html += `<td style="padding:5px;text-align:center"><button onclick="openTabDashDetail(${idx})" style="background:none;border:none;color:#1D4ED8;cursor:pointer;font-size:.78rem"><i class="fas fa-expand-alt"></i></button></td>`;
+    if (!_tabDashSimple) html += `<td style="padding:5px;text-align:center;white-space:nowrap"><button onclick="openTabDashDetail(${idx})" style="background:none;border:none;color:#1D4ED8;cursor:pointer;font-size:.78rem" title="상세"><i class="fas fa-expand-alt"></i></button> <button onclick="event.stopPropagation();openGridEditor('${escHtml(t.sheet_id)}','${escHtml(t.tab_gid||'')}','${escHtml(t.tab_name)}')" style="background:none;border:none;color:#059669;cursor:pointer;font-size:.78rem" title="시트 편집(그리드)"><i class="fas fa-table"></i></button></td>`;
     html += `</tr>`;
   });
 
@@ -13312,6 +13312,180 @@ function _updateArchiveBar() {
     bar.style.display = "none";
     bar.innerHTML = "";
   }
+}
+
+// ═══════════════════════════════════════════════════════════
+// DB-primary 그리드 편집기 (Phase 1, 값 전용) — 셀 양방향 동기화
+//   raw_sheet_rows 를 직접 편집 → /api/grid/* → 큐 → 구글시트 반영
+// ═══════════════════════════════════════════════════════════
+let _gridState = null; // { sheetId, gid, tabName, meta, rows, offset, limit, pending, flushTimer, pollTimer }
+
+function _gridColLetter(i) {
+  let s = '', n = i;
+  while (n >= 0) { s = String.fromCharCode((n % 26) + 65) + s; n = Math.floor(n / 26) - 1; }
+  return s;
+}
+
+async function openGridEditor(sheetId, gid, tabName) {
+  if (!gid) { alert('이 탭은 gid가 없어 그리드 편집을 사용할 수 없습니다. 먼저 RAW 미러링/탭 동기화를 해주세요.'); return; }
+  _gridState = { sheetId, gid: String(gid), tabName, offset: 0, limit: 500, pending: new Map(), flushTimer: null, pollTimer: null };
+  _ensureGridModal();
+  document.getElementById('gridEditorOverlay').style.display = 'flex';
+  await _gridLoad();
+  // 20초마다 dirty/synced 상태 새로고침 (편집 중 입력 칸은 건드리지 않음)
+  _gridState.pollTimer = setInterval(() => { if (!document.activeElement || !document.activeElement.matches || !document.activeElement.matches('td[contenteditable]')) _gridLoad(true); }, 20000);
+}
+
+function _ensureGridModal() {
+  if (document.getElementById('gridEditorOverlay')) return;
+  const ov = document.createElement('div');
+  ov.id = 'gridEditorOverlay';
+  ov.className = 'grid-editor-overlay';
+  ov.innerHTML = `
+    <div class="grid-editor-modal">
+      <div class="grid-editor-head">
+        <div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap">
+          <strong id="gridEditorTitle" style="font-size:.95rem"><i class="fas fa-table" style="color:#059669"></i> 시트 편집</strong>
+          <span id="gridEditorStatus" style="font-size:.72rem;color:#6B7280"></span>
+        </div>
+        <div style="display:flex;align-items:center;gap:6px">
+          <button class="ge-btn" onclick="_gridAddRow()" title="맨 아래 행 추가"><i class="fas fa-plus"></i> 행</button>
+          <button class="ge-btn" onclick="_gridAddCol()" title="맨 오른쪽 열 추가"><i class="fas fa-plus"></i> 열</button>
+          <button class="ge-btn" onclick="_gridLoad()" title="새로고침"><i class="fas fa-sync"></i></button>
+          <button class="ge-btn ge-btn-close" onclick="_gridClose()" title="닫기"><i class="fas fa-times"></i></button>
+        </div>
+      </div>
+      <div class="grid-editor-hint">셀을 클릭해 값을 편집하면 자동 저장되고 연결된 구글시트에 반영됩니다. <b>노란 칸</b> = 시트 반영 대기. (행높이·열너비·서식은 추후 지원)</div>
+      <div id="gridEditorBody" class="grid-editor-body"></div>
+    </div>`;
+  document.body.appendChild(ov);
+  // 편집 캡처(이벤트 위임)
+  const body = ov.querySelector('#gridEditorBody');
+  body.addEventListener('focusin', (e) => {
+    const td = e.target.closest('td[contenteditable]');
+    if (td) td.dataset.orig = td.innerText;
+  });
+  body.addEventListener('focusout', (e) => {
+    const td = e.target.closest('td[contenteditable]');
+    if (!td) return;
+    const v = td.innerText;
+    if (v !== td.dataset.orig) {
+      const r = parseInt(td.dataset.r, 10), c = parseInt(td.dataset.c, 10);
+      _gridState.pending.set(`${r},${c}`, { rowIndex: r, colIndex: c, value: v });
+      td.classList.add('ge-dirty');
+      _gridScheduleFlush();
+    }
+  });
+}
+
+async function _gridLoad(silent) {
+  const s = _gridState; if (!s) return;
+  if (!silent) document.getElementById('gridEditorStatus').textContent = '불러오는 중...';
+  try {
+    const res = await gasGet({ action: 'gridData', sheetId: s.sheetId, gid: s.gid, offset: s.offset, limit: s.limit });
+    if (!res || res.ok === false) throw new Error((res && res.error) || '조회 실패');
+    s.meta = res.meta; s.rows = res.rows || [];
+    _gridRender();
+  } catch (err) {
+    document.getElementById('gridEditorStatus').textContent = '오류: ' + err.message;
+  }
+}
+
+function _gridRender() {
+  const s = _gridState; if (!s) return;
+  document.getElementById('gridEditorTitle').innerHTML = `<i class="fas fa-table" style="color:#059669"></i> ${escHtml(s.meta?.spreadsheetTitle || '')} · ${escHtml(s.tabName)}`;
+  const dirtyCount = s.rows.filter(r => r.dirty).length;
+  const totalRows = s.meta?.rowCount || s.rows.length;
+  const truncated = totalRows > s.rows.length;
+  document.getElementById('gridEditorStatus').textContent =
+    `${s.rows.length}행` + (truncated ? ` (전체 ${totalRows}행 중 상위 ${s.limit}행만 표시)` : '')
+    + (dirtyCount ? ` · ${dirtyCount}행 반영대기` : ' · 동기화됨');
+
+  let colCount = s.meta?.colCount || 0;
+  s.rows.forEach(r => { const len = Array.isArray(r.cells) ? r.cells.length : 0; if (len > colCount) colCount = len; });
+  colCount = Math.max(colCount, 1);
+
+  let html = '<table class="grid-editor-table"><thead><tr><th class="ge-corner">#</th>';
+  for (let c = 0; c < colCount; c++) {
+    html += `<th class="ge-colhead">${_gridColLetter(c)}<button class="ge-coldel" onclick="_gridDelCol(${c})" title="이 열 삭제">×</button></th>`;
+  }
+  html += '</tr></thead><tbody>';
+  s.rows.forEach(r => {
+    const cells = Array.isArray(r.cells) ? r.cells : [];
+    html += `<tr${r.dirty ? ' class="ge-rowdirty"' : ''}><td class="ge-rownum">${r.rowIndex}<button class="ge-rowdel" onclick="_gridDelRow(${r.rowIndex})" title="이 행 삭제">×</button></td>`;
+    for (let c = 0; c < colCount; c++) {
+      const v = cells[c] == null ? '' : String(cells[c]);
+      const pend = s.pending.has(`${r.rowIndex},${c}`);
+      html += `<td contenteditable="true" data-r="${r.rowIndex}" data-c="${c}"${(r.dirty || pend) ? ' class="ge-dirty"' : ''}>${escHtml(v)}</td>`;
+    }
+    html += '</tr>';
+  });
+  html += '</tbody></table>';
+  document.getElementById('gridEditorBody').innerHTML = html;
+}
+
+function _gridScheduleFlush() {
+  const s = _gridState; if (!s) return;
+  if (s.flushTimer) clearTimeout(s.flushTimer);
+  s.flushTimer = setTimeout(_gridFlush, 800);
+}
+
+async function _gridFlush() {
+  const s = _gridState; if (!s || s.pending.size === 0) return;
+  const edits = Array.from(s.pending.values());
+  s.pending.clear();
+  document.getElementById('gridEditorStatus').textContent = '저장 중...';
+  try {
+    const res = await gasPost({ action: 'gridCell', sheetId: s.sheetId, gid: s.gid, tabName: s.tabName, edits });
+    if (!res || res.ok === false) throw new Error((res && res.error) || '저장 실패');
+    document.getElementById('gridEditorStatus').textContent = `저장됨 · 시트 반영 대기(${edits.length}칸)`;
+  } catch (err) {
+    document.getElementById('gridEditorStatus').textContent = '저장 실패: ' + err.message;
+    // 실패분 복원 — 단, 그 사이 새 편집이 들어온 칸은 덮어쓰지 않음
+    edits.forEach(e => { const k = `${e.rowIndex},${e.colIndex}`; if (!s.pending.has(k)) s.pending.set(k, e); });
+    _gridScheduleFlush();
+  }
+}
+
+async function _gridStructOp(action, body, confirmMsg) {
+  const s = _gridState; if (!s) return;
+  if (s.pending.size > 0) await _gridFlush();
+  if (confirmMsg && !confirm(confirmMsg)) return;
+  document.getElementById('gridEditorStatus').textContent = '처리 중...';
+  try {
+    const res = await gasPost(Object.assign({ action, sheetId: s.sheetId, gid: s.gid, tabName: s.tabName }, body));
+    if (!res || res.ok === false) throw new Error((res && res.error) || '실패');
+    await _gridLoad();
+  } catch (err) {
+    alert(err.message);
+    document.getElementById('gridEditorStatus').textContent = '오류: ' + err.message;
+  }
+}
+
+function _gridAddRow() {
+  const s = _gridState; if (!s) return;
+  const last = s.rows.length ? s.rows[s.rows.length - 1].rowIndex : 0;
+  _gridStructOp('gridRowAdd', { afterRowIndex: last });
+}
+function _gridDelRow(rowIndex) { _gridStructOp('gridRowDel', { rowIndex }, `${rowIndex}행을 삭제할까요? (구글시트에도 반영됩니다)`); }
+function _gridAddCol() {
+  const s = _gridState; if (!s) return;
+  let colCount = s.meta?.colCount || 0;
+  s.rows.forEach(r => { const len = Array.isArray(r.cells) ? r.cells.length : 0; if (len > colCount) colCount = len; });
+  _gridStructOp('gridColAdd', { afterColIndex: colCount - 1 });
+}
+function _gridDelCol(colIndex) { _gridStructOp('gridColDel', { colIndex }, `${_gridColLetter(colIndex)}열을 삭제할까요? (구글시트에도 반영됩니다)`); }
+
+function _gridClose() {
+  const s = _gridState;
+  if (s) {
+    if (s.flushTimer) clearTimeout(s.flushTimer);
+    if (s.pollTimer) clearInterval(s.pollTimer);
+    if (s.pending.size > 0) _gridFlush();
+  }
+  const ov = document.getElementById('gridEditorOverlay');
+  if (ov) ov.style.display = 'none';
+  _gridState = null;
 }
 
 // ── 리뷰폴더 중복검사 ──

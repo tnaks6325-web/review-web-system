@@ -29,6 +29,7 @@ const orderRoutes    = require('./routes/order.routes');
 const productRoutes  = require('./routes/product.routes');
 const portalRoutes   = require('./routes/portal.routes');
 const rawRoutes      = require('./routes/raw.routes');
+const gridRoutes     = require('./routes/grid.routes');
 const csRoutes       = require('./routes/cs.routes');
 const mappingRoutes  = require('./routes/mapping.routes');
 
@@ -90,6 +91,9 @@ app.use('/api/cs',        csRoutes);
 
 // 구글시트 전체 RAW 미러링 (Section 14)
 app.use('/api/raw',       rawRoutes);
+
+// DB-primary 그리드 편집 — 셀 값 양방향 동기화 (Section 16)
+app.use('/api/grid',      gridRoutes);
 
 // 명시적 컬럼 매핑 (Section 15) — 구글시트 점진 대체 keystone
 app.use('/api/mapping',   mappingRoutes);

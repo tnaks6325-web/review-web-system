@@ -286,6 +286,24 @@ async function _executeItem(item) {
       break;
     }
 
+    case 'cell_write': {
+      // 그리드 셀 편집 → 구글시트 반영 (행 단위 다중 셀). 멱등(last-write-wins).
+      const { sheetId, tabName, gid, rowIndex, colWrites, dirtyAt } = payload;
+      if (!sheetId || !tabName || !rowIndex || !Array.isArray(colWrites)) throw new Error('payload 누락');
+      const data = colWrites.map(({ col, value }) => ({
+        range: `'${tabName}'!${_getColLetter(col)}${rowIndex}`,
+        values: [[value == null ? '' : value]],
+      }));
+      if (data.length > 0) {
+        await throttledCall(() => batchUpdateSheet(sheetId, data, 'RAW', gid ? { gid } : {}));
+      }
+      // 동기화 완료 → dirty 해제 (미러가 다시 이 탭을 처리할 수 있게).
+      //   단, 큐잉 이후 더 최신 편집이 있으면 dirty 유지(markRowSynced 내부 가드).
+      const { markRowSynced } = require('./gridEdit.service'); // lazy: 순환참조 회피
+      await markRowSynced(sheetId, gid, rowIndex, dirtyAt);
+      break;
+    }
+
     default:
       throw new Error(`알 수 없는 큐 타입: ${item.type}`);
   }

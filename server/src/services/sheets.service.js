@@ -860,11 +860,80 @@ async function setRowBackground(spreadsheetId, { gid, tabName, rowIndex, colCoun
   });
 }
 
+/**
+ * 행/열 삽입·삭제 (구조 변경) — GID 기반 batchUpdate.
+ * 그리드 편집의 add/delete row/col 을 구글시트에 반영한다.
+ *
+ * @param {string} spreadsheetId
+ * @param {object} opts { gid, op, rowIndex(1-based), colIndex(0-based) }
+ *   op: 'insert_row' | 'delete_row' | 'insert_col' | 'delete_col'
+ */
+async function applyDimensionOp(spreadsheetId, { gid, op, rowIndex, colIndex } = {}) {
+  if (!sheets) throw new Error('Google Sheets API가 설정되지 않았습니다.');
+
+  const metaSheets = await _getCachedSheetMeta(spreadsheetId);
+  const targetSheet = _findSheetInMeta(metaSheets, { gid });
+  if (!targetSheet) throw new Error(`시트를 찾을 수 없습니다: gid=${gid}`);
+  const sheetId = targetSheet.properties.sheetId;
+
+  let request;
+  switch (op) {
+    case 'insert_row': {
+      const ri = parseInt(rowIndex, 10); // 1-based: 이 행 위치에 새 행 삽입
+      request = {
+        insertDimension: {
+          range: { sheetId, dimension: 'ROWS', startIndex: ri - 1, endIndex: ri },
+          inheritFromBefore: ri > 1,
+        },
+      };
+      break;
+    }
+    case 'delete_row': {
+      const ri = parseInt(rowIndex, 10);
+      request = {
+        deleteDimension: {
+          range: { sheetId, dimension: 'ROWS', startIndex: ri - 1, endIndex: ri },
+        },
+      };
+      break;
+    }
+    case 'insert_col': {
+      const ci = parseInt(colIndex, 10); // 0-based
+      request = {
+        insertDimension: {
+          range: { sheetId, dimension: 'COLUMNS', startIndex: ci, endIndex: ci + 1 },
+          inheritFromBefore: ci > 0,
+        },
+      };
+      break;
+    }
+    case 'delete_col': {
+      const ci = parseInt(colIndex, 10);
+      request = {
+        deleteDimension: {
+          range: { sheetId, dimension: 'COLUMNS', startIndex: ci, endIndex: ci + 1 },
+        },
+      };
+      break;
+    }
+    default:
+      throw new Error(`알 수 없는 dimension op: ${op}`);
+  }
+
+  await sheets.spreadsheets.batchUpdate({
+    spreadsheetId,
+    requestBody: { requests: [request] },
+  });
+  // 행/열 수가 바뀌었으므로 구조 메타 캐시 무효화
+  _invalidateMeta(spreadsheetId);
+}
+
 module.exports = {
   readSheet,
   writeSheet,
   appendSheet,
   batchUpdateSheet,
+  applyDimensionOp,
   setRowBackground,
   getSpreadsheetMeta,
   batchReadSheet,

@@ -311,6 +311,15 @@ const _ACTION_MAP = {
   'rawTabs':    { method: 'GET',  path: '/api/raw/tabs' },
   'rawRows':    { method: 'GET',  path: '/api/raw/rows' },
 
+  // ★ DB-primary 그리드 편집 (Section 16) — 셀 값 양방향 동기화
+  'gridData':   { method: 'GET',  path: '/api/grid/data' },
+  'gridCell':   { method: 'POST', path: '/api/grid/cell' },
+  'gridRowAdd': { method: 'POST', path: '/api/grid/row/add' },
+  'gridRowDel': { method: 'POST', path: '/api/grid/row/delete' },
+  'gridColAdd': { method: 'POST', path: '/api/grid/col/add' },
+  'gridColDel': { method: 'POST', path: '/api/grid/col/delete' },
+  'gridEnable': { method: 'POST', path: '/api/grid/enable' },
+
   // ★ 명시적 컬럼 매핑 (Section 15)
   'mappingFields': { method: 'GET',  path: '/api/mapping/fields' },
   'mappingGet':    { method: 'GET',  path: '/api/mapping' },
