@@ -2043,7 +2043,8 @@ router.post('/order-reconcile', authMiddleware, adminOrMasterMiddleware, async (
     const { sheetId, limit, dryRun } = req.body || {};
     const r = await reconcileStuckOrders({
       sheetId: sheetId || null,
-      limit: Math.min(parseInt(limit, 10) || 100, 500),
+      limit: Math.min(parseInt(limit, 10) || 100, 1000),
+      perTabCap: sheetId ? 1000 : 20, // 시트 지정 강제복구는 탭 cap 해제(이벤트 일괄)
       dryRun: !!dryRun,
     });
     res.json({ ok: true, ...r });

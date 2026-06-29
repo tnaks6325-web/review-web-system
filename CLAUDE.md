@@ -37,7 +37,7 @@ GAS(Google Apps Script) 기반 리뷰 관리 시스템을 **Node.js Express + Po
 - **막힌 주문 자동복구(reconcile)**: `reconcileStuckOrders()`가 `pending_no_row`/`failed`/정체 `queued` 주문을 찾아 행 재배정 후 재큐잉. cron `*/2`(RAW 미러 `*/5` **뒤**에 둠 — 메타 채워진 뒤 복구, throttle busy면 양보) + 관리자 강제 `POST /api/diag/order-reconcile`(admin/master). **메타 없는 탭은 skip**(다음 RAW 미러까지 자가치유). **복구분은 시트 하단에 append + 노란 배경**(`setRowBackground`)으로 기록해 직원 수동입력분·중복과 구분. 평상시 실시간 주문은 제자리(in-place)·기본색.
 - 관리자 가시성: `GET /api/diag/order-mirror-status`(카운트+막힌탭+`hasRawMeta`) + 대시보드 "구매주문 시트반영 현황" 위젯(원클릭 복구).
 - 리뷰어 참여조회(`GET /api/reviewer/my-status?phone8=`)는 **`review_index`(시트빌드) + `order_submissions`(DB) 병합**(phone8=연락처 끝8자리, sheet_row로 중복제거). 시트 반영 전 주문도 `stage:'processing'`로 노출 → DB-first라 리뷰어가 제출 즉시 자기 참여 확인 가능.
-- 운영 순서 규칙: **RAW 미러 → reconcile**(메타가 있어야 행 배정 가능). 신규 탭은 등록 시 `mirrorOneSheet`로 메타 선반영(누락복구 라이브폴백 최소화).
+- 운영 순서 규칙: **RAW 미러 → reconcile**(메타가 있어야 행 배정 가능). 메타 자동 공급은 3중: ① 탭 등록 시 `mirrorOneSheet`(#134), ② RAW 미러 cron `*/5`, ③ **미러 안 된 탭에 주문이 오면 `_triggerSheetMirrorOnce`가 그 시트만 백그라운드 1회 자동미러(탭당 60초 debounce) + 즉시 리컨실** — per-제출 라이브 시트읽기를 없애 버스트에도 시트 쿼터 안전(관리자 수동미러 불필요, 근실시간 자동동기화).
 
 ## 배포 (자동)
 - `main` 브랜치에 머지되면 **Cloudflare Pages(프론트)와 Railway(백엔드)가 GitHub 연동으로 자동 배포**합니다.

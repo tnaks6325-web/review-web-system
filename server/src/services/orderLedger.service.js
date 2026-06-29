@@ -15,6 +15,25 @@ function __setPoolForTest(pool) {
   _pool = pool || null;
 }
 
+// ★ 미러 안 된 탭에 주문이 오면 그 시트를 백그라운드로 1회 자동미러(탭당 60초 debounce)
+//   → 메타가 채워지면 즉시 그 시트의 막힌 주문을 리컨실(행배정+큐). 버스트에도 시트당 미러 1회뿐.
+//   (예전: 제출마다 시트를 라이브로 통읽기 → 동시 수백건이면 시트 쿼터 폭발. 그 경로를 대체.)
+const _mirrorTriggered = new Map(); // sheetId → 마지막 트리거 시각(ms)
+function _triggerSheetMirrorOnce(sheetId) {
+  if (!sheetId) return;
+  const now = Date.now();
+  const last = _mirrorTriggered.get(sheetId) || 0;
+  if (now - last < 60000) return; // 60초 debounce
+  _mirrorTriggered.set(sheetId, now);
+  setImmediate(async () => {
+    try {
+      const { mirrorOneSheet } = require('./rawMirror.service');
+      await mirrorOneSheet(sheetId);
+      await reconcileStuckOrders({ sheetId, limit: 500, perTabCap: 500 });
+    } catch (_) { /* best-effort; 정규 cron(미러 5분·리컨실 2분)이 backstop */ }
+  });
+}
+
 function toPhone8(v) {
   const d = String(v == null ? '' : v).replace(/[^0-9]/g, '');
   return d.length >= 8 ? d.slice(-8) : '';
@@ -362,11 +381,11 @@ async function loadRawTabContext(sheetId, tabGid, tabName) {
   );
   const tab = tabRows[0];
   if (!tab) {
-    try {
-      return await loadRawTabContextFromSheet(sheetId, tabGid, tabName);
-    } catch (_) {
-      return null;
-    }
+    // ★ 미러 안 된 탭: per-제출 라이브읽기(버스트 시 시트 쿼터 위험) 대신
+    //   그 시트를 백그라운드로 1회 자동미러(debounce) → 메타 채운 뒤 리컨실이 복구.
+    //   이 주문은 일단 행 없음(null) → pending_no_row → 자동복구가 시트에 기록(손실 0).
+    _triggerSheetMirrorOnce(sheetId);
+    return null;
   }
 
   let headers = Array.isArray(tab.detected_headers) ? tab.detected_headers : null;
