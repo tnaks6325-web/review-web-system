@@ -584,10 +584,10 @@ async function createOrderLedgerEntry(input) {
         });
         await client.query(
           `UPDATE order_submissions
-              SET sheet_row = $2,
+              SET sheet_row = $2::int,
                   tab_gid = COALESCE(NULLIF($3, ''), tab_gid),
-                  mirror_status = CASE WHEN $2 IS NULL THEN 'pending_no_row' ELSE 'pending' END,
-                  sheet_error = CASE WHEN $2 IS NULL THEN $4 ELSE NULL END
+                  mirror_status = CASE WHEN $2::int IS NULL THEN 'pending_no_row' ELSE 'pending' END,
+                  sheet_error = CASE WHEN $2::int IS NULL THEN $4 ELSE NULL END
             WHERE id = $1`,
           [
             orderSubmissionId,
@@ -653,7 +653,7 @@ async function markOrderWritten(orderSubmissionId, sheetRow) {
   await getPool().query(
     `UPDATE order_submissions
         SET mirror_status = 'written',
-            sheet_row = COALESCE($2, sheet_row),
+            sheet_row = COALESCE($2::int, sheet_row),
             sheet_written_at = NOW(),
             sheet_error = NULL
       WHERE id = $1`,
@@ -791,10 +791,10 @@ async function reconcileStuckOrders({ limit = 50, perTabCap = 20, sheetId = null
       });
       await client.query(
         `UPDATE order_submissions
-            SET sheet_row = $2,
+            SET sheet_row = $2::int,
                 tab_gid = COALESCE(NULLIF($3, ''), tab_gid),
-                mirror_status = CASE WHEN $2 IS NULL THEN 'pending_no_row' ELSE 'pending' END,
-                sheet_error = CASE WHEN $2 IS NULL THEN $4 ELSE NULL END
+                mirror_status = CASE WHEN $2::int IS NULL THEN 'pending_no_row' ELSE 'pending' END,
+                sheet_error = CASE WHEN $2::int IS NULL THEN $4 ELSE NULL END
           WHERE id = $1`,
         [row.id, claim.row || null, tabContext.tabGid || gid,
          claim.error || (claim.exhausted ? 'row claim exhausted' : 'row claim failed')]
