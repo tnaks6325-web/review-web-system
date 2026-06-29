@@ -3,7 +3,7 @@ const router = express.Router();
 const { authMiddleware, adminOrMasterMiddleware } = require('../middleware/auth.middleware');
 const pool = require('../db/pool');
 const { readSheet, getSpreadsheetMeta, writeSheet, appendSheet, copySpreadsheet, copySheetToSpreadsheet, renameSheet, shareSheetWithServiceAccount, checkSheetWriteAccess } = require('../services/sheets.service');
-const { getQueueStats, retryItem, retryAllFailed, purgeCompleted, deleteItem, deleteAllFailed, processQueue } = require('../services/syncQueue.service');
+const { getQueueStats, retryItem, retryAllFailed, purgeCompleted, deleteItem, deleteAllFailed, processQueue, drainTabQueue } = require('../services/syncQueue.service');
 const { imageApiLimiter } = require('../middleware/rateLimit.middleware');
 const { extractOrderFromImage, verifyAddressMatch } = require('../services/gemini.service');
 const driveService = require('../services/drive.service');
@@ -2052,6 +2052,56 @@ router.post('/order-reconcile', authMiddleware, adminOrMasterMiddleware, async (
       dryRun: !!dryRun,
     });
     res.json({ ok: true, ...r });
+  } catch (err) {
+    next(err);
+  }
+});
+
+// ═══════════════════════════════════════════════════════════
+// POST /api/diag/order-flush-tab — 특정 탭만 우선 시트반영(FIFO 우회, 백그라운드)
+//   글로벌 큐는 created_at FIFO라 최근 캠페인 탭이 뒤로 밀린다. 이 엔드포인트는
+//   ① 그 탭의 막힌 주문을 reconcile(탭 필터)로 enqueue → ② 그 탭의 order_append만 골라
+//   즉시 드레인(throttle만 가드). 관리자 "이 캠페인 지금 반영" 용도. admin/master.
+//   body: { sheetId, tabName, maxMillis? }
+// ═══════════════════════════════════════════════════════════
+let _flushTabRunning = false;
+let _lastFlushTab = null;
+router.post('/order-flush-tab', authMiddleware, adminOrMasterMiddleware, async (req, res, next) => {
+  try {
+    const { sheetId, tabName } = req.body || {};
+    if (!sheetId || !tabName) return res.status(400).json({ ok: false, error: 'sheetId, tabName 필수' });
+    if (_flushTabRunning) return res.json({ ok: false, running: true, error: '다른 탭 우선반영이 진행 중입니다.', last: _lastFlushTab });
+    const maxMillis = Math.min(Math.max(parseInt(req.body?.maxMillis, 10) || 60000, 2000), 180000);
+    res.json({ ok: true, mode: 'async', message: `'${tabName}' 우선 반영을 시작했습니다. 현황으로 확인하세요.`, maxMillis });
+
+    _flushTabRunning = true;
+    setImmediate(async () => {
+      const start = Date.now();
+      try {
+        const { reconcileStuckOrders } = require('../services/orderLedger.service');
+        // ① 탭 단위로 막힌 주문 enqueue(행배정 포함). perTabCap 해제로 그 탭 전체.
+        const rec = await reconcileStuckOrders({ sheetId, tabName, limit: 1000, perTabCap: 1000 });
+        // ② 그 탭의 order_append만 우선 드레인(FIFO 우회).
+        const drain = await drainTabQueue({ sheetId, tabName, maxMillis: Math.max(maxMillis - (Date.now() - start), 2000) });
+        _lastFlushTab = { sheetId, tabName, reconcile: { requeued: rec.requeued, skippedNoMeta: rec.skippedNoMeta, stillStuck: rec.stillStuck },
+          drain, elapsedMs: Date.now() - start, finishedAt: new Date().toISOString() };
+        logger.info(`[order-flush-tab] '${tabName}' 완료: requeued=${rec.requeued}, drained=${drain.succeeded}/${drain.processed}, ${Date.now() - start}ms`);
+      } catch (err) {
+        _lastFlushTab = { sheetId, tabName, error: err.message, finishedAt: new Date().toISOString() };
+        logger.error(`[order-flush-tab] '${tabName}' 오류: ${err.message}`);
+      } finally {
+        _flushTabRunning = false;
+      }
+    });
+  } catch (err) {
+    next(err);
+  }
+});
+
+// GET /api/diag/order-flush-tab — 마지막 탭 우선반영 결과/진행 상태
+router.get('/order-flush-tab', authMiddleware, async (req, res, next) => {
+  try {
+    res.json({ ok: true, running: _flushTabRunning, last: _lastFlushTab });
   } catch (err) {
     next(err);
   }

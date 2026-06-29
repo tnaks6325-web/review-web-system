@@ -133,6 +133,42 @@ async function processQueue(batchSize = 10, { interItemDelayMs = 2000 } = {}) {
   return { processed, succeeded, failed, elapsed };
 }
 
+// ── 특정 탭만 우선 드레인(FIFO 우회) ──
+//   글로벌 큐는 created_at FIFO라 최근 탭이 뒤로 밀린다. 이 함수는 payload의 sheetId+tabName이
+//   일치하는 order_append만 골라 즉시 처리(대기 0, sheetsThrottle이 쿼터 가드). 관리자 "탭 우선 반영"용.
+async function drainTabQueue({ sheetId, tabName, maxMillis = 30000, batchSize = 20 } = {}) {
+  if (!sheetId || !tabName) throw new Error('drainTabQueue: sheetId, tabName 필수');
+  const start = Date.now();
+  let processed = 0, succeeded = 0, failed = 0;
+  while (Date.now() - start < maxMillis) {
+    const { rows: items } = await pool.query(
+      `SELECT * FROM sync_queue
+        WHERE status = 'pending' AND attempts < max_retry AND type = 'order_append'
+          AND payload->>'sheetId' = $1 AND payload->>'tabName' = $2
+        ORDER BY created_at ASC
+        LIMIT $3`,
+      [sheetId, tabName, batchSize]
+    );
+    if (!items.length) break;
+    for (const item of items) {
+      processed++;
+      await pool.query(`UPDATE sync_queue SET status = 'processing', attempts = attempts + 1 WHERE id = $1`, [item.id]);
+      try {
+        await _executeItem(item);
+        await pool.query(`UPDATE sync_queue SET status = 'done', processed_at = NOW(), error_msg = NULL WHERE id = $1`, [item.id]);
+        succeeded++;
+      } catch (err) {
+        const newAttempts = (item.attempts || 0) + 1;
+        const newStatus = newAttempts >= item.max_retry ? 'failed' : 'pending';
+        await pool.query(`UPDATE sync_queue SET status = $1, error_msg = $2, processed_at = NOW() WHERE id = $3`,
+          [newStatus, String(err.message || '').substring(0, 500), item.id]);
+        failed++;
+      }
+    }
+  }
+  return { processed, succeeded, failed, elapsedMs: Date.now() - start };
+}
+
 // ── 개별 항목 실행 ──
 async function _executeItem(item) {
   const payload = typeof item.payload === 'string' ? JSON.parse(item.payload) : item.payload;
@@ -487,6 +523,7 @@ async function deleteAllFailed() {
 module.exports = {
   enqueue,
   processQueue,
+  drainTabQueue,
   getQueueStats,
   retryItem,
   retryAllFailed,

@@ -737,13 +737,14 @@ async function recordReviewIdentity({ sheetId, tabName, tabGid, rowIndex, phone8
  *   행배정 하위단계(loadRawTabContext→buildCandidateRows(appendOnly)→claimRow)만 재실행
  * - claimRow의 dedup 유니크로 재시도해도 같은 행 반환 → 시트 중복행 없음
  */
-async function reconcileStuckOrders({ limit = 50, perTabCap = 20, sheetId = null, staleQueuedMinutes = 10, dryRun = false } = {}) {
+async function reconcileStuckOrders({ limit = 50, perTabCap = 20, sheetId = null, tabName = null, staleQueuedMinutes = 10, dryRun = false } = {}) {
   const db = getPool();
   const { enqueue } = require('./syncQueue.service'); // lazy: require 순환 회피
 
   const params = [staleQueuedMinutes];
   let sheetFilter = '';
-  if (sheetId) { params.push(sheetId); sheetFilter = `AND os.sheet_id = $${params.length}`; }
+  if (sheetId) { params.push(sheetId); sheetFilter += ` AND os.sheet_id = $${params.length}`; }
+  if (tabName) { params.push(tabName); sheetFilter += ` AND os.tab_name = $${params.length}`; } // 탭 단위 우선 복구
   params.push(limit);
   const limitIdx = params.length;
 
