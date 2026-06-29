@@ -1,6 +1,6 @@
 const express = require('express');
 const router = express.Router();
-const { authMiddleware } = require('../middleware/auth.middleware');
+const { authMiddleware, adminOrMasterMiddleware } = require('../middleware/auth.middleware');
 const pool = require('../db/pool');
 const { readSheet, getSpreadsheetMeta, writeSheet, appendSheet, copySpreadsheet, copySheetToSpreadsheet, renameSheet, shareSheetWithServiceAccount, checkSheetWriteAccess } = require('../services/sheets.service');
 const { getQueueStats, retryItem, retryAllFailed, purgeCompleted, deleteItem, deleteAllFailed } = require('../services/syncQueue.service');
@@ -1987,6 +1987,66 @@ router.post('/sync-queue/delete', authMiddleware, async (req, res, next) => {
     if (!id) return res.json({ error: 'id 필요' });
     const result = await deleteItem(parseInt(id));
     res.json({ ok: true, ...result });
+  } catch (err) {
+    next(err);
+  }
+});
+
+// ═══════════════════════════════════════════════════════════
+// GET /api/diag/order-mirror-status — 구매주문 시트반영 현황(막힌 주문 가시성)
+//   mirror_status 카운트 + 최근 막힌 주문 + 영향탭 롤업(hasRawMeta로 "먼저 RAW 미러 필요" 판단)
+// ═══════════════════════════════════════════════════════════
+router.get('/order-mirror-status', authMiddleware, async (req, res, next) => {
+  try {
+    const { rows: counts } = await pool.query(
+      `SELECT mirror_status AS "mirrorStatus", COUNT(*)::int AS count
+         FROM order_submissions GROUP BY mirror_status ORDER BY count DESC`
+    );
+    const { rows: stuck } = await pool.query(
+      `SELECT os.id, os.sheet_id AS "sheetId", os.tab_name AS "tabName",
+              tc.display_name AS "displayName",
+              os.mirror_status AS "mirrorStatus", os.sheet_error AS "sheetError",
+              os.submitted_at AS "submittedAt", os.queued_at AS "queuedAt",
+              (rst.detected_headers IS NOT NULL) AS "hasRawMeta"
+         FROM order_submissions os
+         LEFT JOIN tab_configs tc ON tc.sheet_id = os.sheet_id AND tc.tab_name = os.tab_name
+         LEFT JOIN raw_sheet_tabs rst ON rst.sheet_id = os.sheet_id
+              AND (rst.tab_gid = NULLIF(os.tab_gid, '') OR rst.tab_name = os.tab_name)
+        WHERE os.mirror_status IN ('pending','pending_no_row','failed','queued')
+        ORDER BY os.submitted_at DESC
+        LIMIT 50`
+    );
+    const { rows: byTab } = await pool.query(
+      `SELECT os.sheet_id AS "sheetId", os.tab_name AS "tabName",
+              COUNT(*)::int AS stuck,
+              bool_or(rst.detected_headers IS NOT NULL) AS "hasRawMeta"
+         FROM order_submissions os
+         LEFT JOIN raw_sheet_tabs rst ON rst.sheet_id = os.sheet_id
+              AND (rst.tab_gid = NULLIF(os.tab_gid, '') OR rst.tab_name = os.tab_name)
+        WHERE os.mirror_status IN ('pending','pending_no_row','failed','queued')
+        GROUP BY os.sheet_id, os.tab_name
+        ORDER BY stuck DESC LIMIT 50`
+    );
+    res.json({ ok: true, counts, stuck, byTab });
+  } catch (err) {
+    next(err);
+  }
+});
+
+// ═══════════════════════════════════════════════════════════
+// POST /api/diag/order-reconcile — 막힌 주문 강제 복구(리컨실)
+//   body: { sheetId?, limit?, dryRun? } — 시트 쓰기 유발이므로 admin/master 전용
+// ═══════════════════════════════════════════════════════════
+router.post('/order-reconcile', authMiddleware, adminOrMasterMiddleware, async (req, res, next) => {
+  try {
+    const { reconcileStuckOrders } = require('../services/orderLedger.service');
+    const { sheetId, limit, dryRun } = req.body || {};
+    const r = await reconcileStuckOrders({
+      sheetId: sheetId || null,
+      limit: Math.min(parseInt(limit, 10) || 100, 500),
+      dryRun: !!dryRun,
+    });
+    res.json({ ok: true, ...r });
   } catch (err) {
     next(err);
   }

@@ -919,6 +919,23 @@ body{ letter-spacing:-.01em; }
             </div>
           </div>
 
+          <!-- 구매주문 시트반영 현황 (막힌 주문 복구) -->
+          <div style="background:#fff;border-radius:12px;padding:16px;box-shadow:0 1px 4px rgba(0,0,0,.06);border:1px solid var(--border)">
+            <h4 style="margin:0 0 12px;font-size:.88rem;color:var(--t1)">
+              <i class="fas fa-truck-loading" style="color:#16A34A"></i> 구매주문 시트반영 현황
+              <button class="btn-sm" onclick="loadOrderMirrorStatus()" style="float:right;font-size:.7rem;background:#E5E7EB;color:#111;border:none;padding:3px 8px;border-radius:6px;cursor:pointer"><i class="fas fa-sync"></i> 새로고침</button>
+            </h4>
+            <div id="orderMirrorPanel" style="font-size:.82rem;color:var(--t2)">
+              <i class="fas fa-circle-notch fa-spin"></i> 불러오는 중...
+            </div>
+            <div id="orderMirrorActions" class="hidden" style="margin-top:10px;display:flex;gap:6px;flex-wrap:wrap">
+              <button class="btn-sm" onclick="runOrderReconcile(null)" style="font-size:.72rem;background:#16A34A;color:#fff;border:none;padding:4px 10px;border-radius:6px;cursor:pointer">
+                <i class="fas fa-redo"></i> 막힌 주문 재시도(복구)
+              </button>
+              <span style="font-size:.7rem;color:var(--t2);align-self:center">복구분은 시트 하단에 노란 배경으로 기록됩니다</span>
+            </div>
+          </div>
+
           <!-- 빌드 히스토리 -->
           <div style="background:#fff;border-radius:12px;padding:16px;box-shadow:0 1px 4px rgba(0,0,0,.06);border:1px solid var(--border)">
             <h4 style="margin:0 0 12px;font-size:.88rem;color:var(--t1)">

@@ -594,9 +594,67 @@ async function saveDepositNames() {
 
 async function loadSystemMonitor() {
   loadSyncQueueStats();
+  loadOrderMirrorStatus();
   loadBuildHistory();
   loadApiMetrics();
   loadSmartBuildStatus();
+}
+
+// 구매주문 시트반영 현황(막힌 주문 가시성 + 복구)
+async function loadOrderMirrorStatus() {
+  const el = document.getElementById("orderMirrorPanel");
+  const actionsEl = document.getElementById("orderMirrorActions");
+  if (!el) return;
+  try {
+    const data = await gasGet({ action: "orderMirrorStatus" });
+    if (!data || data.error) { el.innerHTML = `<span style="color:var(--t3)">데이터 없음</span>`; return; }
+    const cmap = {};
+    (data.counts || []).forEach(c => { cmap[c.mirrorStatus] = c.count; });
+    const written = cmap.written || 0;
+    const queued = cmap.queued || 0;
+    const pending = cmap.pending || 0;
+    const pendingNoRow = cmap.pending_no_row || 0;
+    const failed = cmap.failed || 0;
+    const stuckTotal = queued + pending + pendingNoRow + failed;
+    const badge = (label, n, color, bg) => `<div style="background:${bg};border-radius:8px;padding:8px"><div style="font-size:1.2rem;font-weight:700;color:${color}">${n}</div><div style="font-size:.7rem;color:#6B7280">${label}</div></div>`;
+    el.innerHTML = `
+      <div style="display:grid;grid-template-columns:repeat(5,1fr);gap:8px;text-align:center">
+        ${badge('반영완료', written, '#16A34A', '#F0FDF4')}
+        ${badge('대기중', pending + queued, '#D97706', '#FEF3C7')}
+        ${badge('행없음', pendingNoRow, pendingNoRow ? '#DC2626' : '#9CA3AF', pendingNoRow ? '#FEE2E2' : '#F3F4F6')}
+        ${badge('실패', failed, failed ? '#DC2626' : '#9CA3AF', failed ? '#FEE2E2' : '#F3F4F6')}
+        ${badge('막힘합계', stuckTotal, stuckTotal ? '#B91C1C' : '#9CA3AF', stuckTotal ? '#FEF2F2' : '#F3F4F6')}
+      </div>
+      ${(data.byTab && data.byTab.length) ? `
+        <div style="margin-top:10px;font-size:.74rem;max-height:200px;overflow-y:auto">
+          <div style="font-weight:600;color:#374151;margin-bottom:4px">막힌 탭:</div>
+          ${data.byTab.map(t => {
+            const meta = t.hasRawMeta ? '' : ` <span style="color:#DC2626;font-weight:600">⚠ RAW미러 필요</span>`;
+            const link = t.sheetId ? `<a href="https://docs.google.com/spreadsheets/d/${t.sheetId}" target="_blank" style="color:#2563EB">${(t.sheetId || '').substring(0,8)}…</a>` : '';
+            return `<div style="background:#F8FAFC;padding:5px 8px;border-radius:6px;margin-bottom:3px;display:flex;justify-content:space-between;gap:6px;align-items:center">
+              <span><b>${t.stuck}</b>건 · ${t.tabName || ''} ${link}${meta}</span>
+              <button onclick="runOrderReconcile('${t.sheetId}')" style="font-size:.66rem;background:#16A34A;color:#fff;border:none;padding:2px 8px;border-radius:4px;cursor:pointer;flex-shrink:0">복구</button>
+            </div>`;
+          }).join('')}
+        </div>` : '<div style="margin-top:8px;color:#16A34A;font-size:.75rem">✅ 막힌 주문 없음</div>'}
+    `;
+    if (actionsEl) actionsEl.classList.toggle("hidden", stuckTotal === 0);
+  } catch (err) {
+    el.innerHTML = `<span style="color:#EF4444">로드 실패: ${err.message}</span>`;
+  }
+}
+
+async function runOrderReconcile(sheetId) {
+  if (!confirm("막힌 주문을 시트에 복구합니까?\n(시트 하단에 노란 배경으로 기록 → 수동입력분과 구분)")) return;
+  try {
+    const params = { action: "orderReconcile", limit: 200 };
+    if (sheetId) params.sheetId = sheetId;
+    const r = await gasPost(params);
+    showToast(`복구 등록: 재시도 ${r.requeued || 0} · 메타대기 ${r.skippedNoMeta || 0} · 미해결 ${r.stillStuck || 0}`, "success");
+    setTimeout(() => loadOrderMirrorStatus(), 1500);
+  } catch (err) {
+    showToast("복구 실패: " + err.message, "error");
+  }
 }
 
 async function loadSyncQueueStats() {

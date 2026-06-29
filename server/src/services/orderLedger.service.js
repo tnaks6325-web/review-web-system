@@ -83,7 +83,7 @@ function pushUnique(arr, seen, rowIndex) {
   }
 }
 
-function buildCandidateRows({ headers, dataRows, headerRowIndex, orderData = {} }) {
+function buildCandidateRows({ headers, dataRows, headerRowIndex, orderData = {}, appendOnly = false }) {
   const candidates = [];
   const seen = new Set();
   const rows = (dataRows || []).map((r, idx) => ({
@@ -91,6 +91,9 @@ function buildCandidateRows({ headers, dataRows, headerRowIndex, orderData = {} 
     cells: normalizeCells(r.cells || r),
   }));
 
+  // ★ appendOnly: 복구(reconcile) 경로 — 제자리(인애드/옵션/빈행) 매칭을 건너뛰고
+  //   기존 데이터 "아래"의 새 행만 후보로 삼는다(노란 배경으로 append 기록 → 수동입력분과 구분).
+  if (!appendOnly) {
   const inadColIdx = findColumn(headers, INAD_COL_KEYWORDS);
   const submittedOrderer = String(orderData.orderer || '').trim();
   if (inadColIdx >= 0 && submittedOrderer) {
@@ -132,6 +135,7 @@ function buildCandidateRows({ headers, dataRows, headerRowIndex, orderData = {} 
       pushUnique(candidates, seen, row.rowIndex);
     }
   }
+  } // end if(!appendOnly)
 
   const maxRow = rows.reduce((max, row) => Math.max(max, row.rowIndex), headerRowIndex || 1);
   for (let i = 1; i <= APPEND_CANDIDATE_COUNT; i++) {
@@ -668,9 +672,144 @@ async function recordReviewIdentity({ sheetId, tabName, tabGid, rowIndex, phone8
   }
 }
 
+/**
+ * 막힌 주문 복구/리컨실 — order_submissions에서 시트에 못 들어간 주문을 찾아
+ * 행을 재배정하고 order_append 큐에 다시 올린다. (복구분은 하단 append + 노란 배경)
+ *
+ * - 대상: mirror_status IN ('pending','pending_no_row','failed') + 정체된 'queued'
+ * - RAW 미러 메타가 없는 탭은 skip(자가치유 대기) — 여기서 라이브폴백 금지(쿼터 버스트 방지)
+ * - createOrderLedgerEntry는 호출 안 함(매번 INSERT됨). 기존 order 행에 대해
+ *   행배정 하위단계(loadRawTabContext→buildCandidateRows(appendOnly)→claimRow)만 재실행
+ * - claimRow의 dedup 유니크로 재시도해도 같은 행 반환 → 시트 중복행 없음
+ */
+async function reconcileStuckOrders({ limit = 50, perTabCap = 20, sheetId = null, staleQueuedMinutes = 10, dryRun = false } = {}) {
+  const db = getPool();
+  const { enqueue } = require('./syncQueue.service'); // lazy: require 순환 회피
+
+  const params = [staleQueuedMinutes];
+  let sheetFilter = '';
+  if (sheetId) { params.push(sheetId); sheetFilter = `AND os.sheet_id = $${params.length}`; }
+  params.push(limit);
+  const limitIdx = params.length;
+
+  const { rows } = await db.query(
+    `SELECT os.id, os.sheet_id, os.tab_name, os.gid, os.tab_gid, os.dedup_key,
+            os.orderer, os.recipient, os.user_id, os.phone, os.address,
+            os.order_num, os.date_str, os.selected_opt_key, os.bank, os.account,
+            os.depositor, os.price, os.memo, os.mirror_status, os.sheet_row
+       FROM order_submissions os
+      WHERE (os.mirror_status IN ('pending','pending_no_row','failed')
+             OR (os.mirror_status = 'queued'
+                 AND os.queued_at IS NOT NULL
+                 AND os.queued_at < NOW() - ($1 || ' minutes')::interval
+                 AND NOT EXISTS (
+                   SELECT 1 FROM sync_queue sq
+                    WHERE sq.type = 'order_append'
+                      AND sq.status IN ('pending','processing')
+                      AND (sq.payload->>'orderSubmissionId') = os.id::text)))
+        ${sheetFilter}
+      ORDER BY (os.mirror_status <> 'pending_no_row'), os.submitted_at ASC
+      LIMIT $${limitIdx}`,
+    params
+  );
+
+  const result = { scanned: rows.length, requeued: 0, skippedNoMeta: 0, noCandidates: 0, stillStuck: 0, byTab: [], dryRun };
+  const tabCount = new Map();
+
+  for (const row of rows) {
+    const tabKey = `${row.sheet_id}||${row.tab_name}`;
+    if ((tabCount.get(tabKey) || 0) >= perTabCap) continue;
+    tabCount.set(tabKey, (tabCount.get(tabKey) || 0) + 1);
+
+    const orderData = {
+      orderer: row.orderer, recipient: row.recipient, userId: row.user_id, phone: row.phone,
+      address: row.address, orderNum: row.order_num, dateStr: row.date_str,
+      selectedOptKey: row.selected_opt_key, bank: row.bank, account: row.account,
+      depositor: row.depositor, price: row.price, memo: row.memo,
+    };
+    const dedupKey = row.dedup_key || computeDedupKey(orderData);
+    const gid = row.tab_gid || row.gid || '';
+
+    // 이미 행이 있는 주문(failed/정체 queued) → 재배정 없이 바로 재-enqueue
+    if (row.sheet_row) {
+      if (dryRun) { result.requeued++; continue; }
+      try {
+        await enqueue('order_append', {
+          sheetId: row.sheet_id, tabName: row.tab_name, gid,
+          orderData, orderSubmissionId: row.id, sheetRow: row.sheet_row,
+          dedupKey, loginPhone8: '', loginName: '', recovered: true,
+        });
+        await markOrderQueued(row.id);
+        result.requeued++;
+      } catch (_) { result.stillStuck++; }
+      continue;
+    }
+
+    // 행 배정 필요 → RAW 컨텍스트(메타 없으면 skip, 라이브폴백 금지)
+    let tabContext = null;
+    try { tabContext = await loadRawTabContext(row.sheet_id, gid, row.tab_name); } catch (_) {}
+    if (!tabContext || !tabContext.headers || !tabContext.headers.length) {
+      result.skippedNoMeta++;
+      continue;
+    }
+
+    const candidateRows = buildCandidateRows({
+      headers: tabContext.headers, dataRows: tabContext.dataRows,
+      headerRowIndex: tabContext.headerRowIndex, orderData, appendOnly: true,
+    });
+    if (!candidateRows.length) { result.noCandidates++; continue; }
+    if (dryRun) { result.requeued++; continue; }
+
+    const client = await db.connect();
+    let claim = { row: null };
+    try {
+      await client.query('BEGIN');
+      claim = await claimRow({
+        client, sheetId: row.sheet_id,
+        tabGid: tabContext.tabGid || gid, tabName: row.tab_name,
+        dedupKey, candidateRows, orderId: row.id,
+        meta: { name: row.orderer || row.recipient || '', phone: row.phone, source: 'order_reconcile' },
+      });
+      await client.query(
+        `UPDATE order_submissions
+            SET sheet_row = $2,
+                tab_gid = COALESCE(NULLIF($3, ''), tab_gid),
+                mirror_status = CASE WHEN $2 IS NULL THEN 'pending_no_row' ELSE 'pending' END,
+                sheet_error = CASE WHEN $2 IS NULL THEN $4 ELSE NULL END
+          WHERE id = $1`,
+        [row.id, claim.row || null, tabContext.tabGid || gid,
+         claim.error || (claim.exhausted ? 'row claim exhausted' : 'row claim failed')]
+      );
+      await client.query('COMMIT');
+    } catch (err) {
+      try { await client.query('ROLLBACK'); } catch (_) {}
+      result.stillStuck++;
+      client.release();
+      continue;
+    }
+    client.release();
+
+    if (!claim.row) { result.stillStuck++; continue; }
+
+    try {
+      await enqueue('order_append', {
+        sheetId: row.sheet_id, tabName: row.tab_name, gid: tabContext.tabGid || gid,
+        orderData, orderSubmissionId: row.id, sheetRow: claim.row,
+        dedupKey, loginPhone8: '', loginName: '', recovered: true,
+      });
+      await markOrderQueued(row.id);
+      result.requeued++;
+    } catch (_) { result.stillStuck++; }
+  }
+
+  result.byTab = Array.from(tabCount.entries()).map(([tab, processed]) => ({ tab, processed }));
+  return result;
+}
+
 module.exports = {
   computeDedupKey,
   buildCandidateRows,
+  reconcileStuckOrders,
   mapOrderToSheetRow,
   buildBatchUpdateData,
   buildMirrorGuardRange,

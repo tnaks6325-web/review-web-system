@@ -10,6 +10,7 @@ const { emitIndexBuild, broadcast } = require('../utils/sse');
 const { logAbnormal } = require('../services/errorLog.service');
 const pool = require('../db/pool');
 let rawMirrorRunning = false;
+let reconcileRunning = false;
 // [REMOVED] readSheet — 세부목록→DB 자동동기화 CRON 제거됨 (DB가 원본)
 
 /**
@@ -100,6 +101,35 @@ function startCronJobs() {
         logAbnormal({ flow: 'cron', step: 'raw_mirror', error: err, context: { job: 'raw_mirror' } });
       } finally {
         rawMirrorRunning = false;
+      }
+    }, { timezone: 'Asia/Seoul' });
+  }
+
+  // ── 막힌 주문 자동복구(리컨실): 2분마다 — RAW 미러 뒤에 둠(메타 채워진 뒤 복구) ──
+  //   pending_no_row/failed/정체 queued 주문을 시트에 다시 밀어넣는다(복구분은 하단 노란행).
+  //   읽기 쿼터 부담 0(메타 없는 탭은 skip). 아침 폭주 시 throttle busy면 양보.
+  if (process.env.ORDER_RECONCILE_CRON_ENABLED !== 'false') {
+    const reconcileSchedule = process.env.ORDER_RECONCILE_CRON_SCHEDULE || '*/2 * * * *';
+    cron.schedule(reconcileSchedule, async () => {
+      if (reconcileRunning) return;
+      const throttle = getThrottleStatus();
+      const busyThreshold = parseInt(process.env.ORDER_RECONCILE_BUSY_THRESHOLD || '20', 10);
+      if (throttle.requestsInLastMinute > busyThreshold) {
+        logger.debug(`[CRON-Reconcile] throttle busy (${throttle.requestsInLastMinute}/${throttle.limit}), skip`);
+        return;
+      }
+      reconcileRunning = true;
+      try {
+        const { reconcileStuckOrders } = require('../services/orderLedger.service');
+        const r = await reconcileStuckOrders({ limit: 50 });
+        if (r.requeued > 0 || r.stillStuck > 0 || r.noCandidates > 0) {
+          logger.info(`[CRON-Reconcile] requeued=${r.requeued}, skippedNoMeta=${r.skippedNoMeta}, noCandidates=${r.noCandidates}, stillStuck=${r.stillStuck}`);
+        }
+      } catch (err) {
+        logger.error(`[CRON-Reconcile] error: ${err.message}`);
+        logAbnormal({ flow: 'cron', step: 'order_reconcile', error: err, context: { job: 'order_reconcile' } });
+      } finally {
+        reconcileRunning = false;
       }
     }, { timezone: 'Asia/Seoul' });
   }
