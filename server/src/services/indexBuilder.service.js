@@ -400,7 +400,9 @@ async function buildIndexSmart(forceFullRebuild = false) {
               logEntry.NAME_KEYWORDS_count = NAME_KEYWORDS.length;
             }
 
-            const rows = parseTabRows(values, tab.sheet_id, tab.tab_name, tab.tab_gid, tab.campaign_name);
+            // ★ P2b: DB컬럼매핑(있으면) 로드 → 매핑 우선 감지. 없으면 null=키워드 전용(P2a 동일).
+            const dbColMap = await require('./columnMapping.service').getTabColumnIndexMap(tab.sheet_id, tab.tab_gid);
+            const rows = parseTabRows(values, tab.sheet_id, tab.tab_name, tab.tab_gid, tab.campaign_name, dbColMap);
             logEntry.parsedRows = rows.length;
             if (rows.length > 0) {
               // 성공! review_index에 upsert + unrecognized에서 resolve
@@ -640,7 +642,9 @@ async function _processOneSheet(sheetId, opts) {
       }
 
       // 헤더 파싱 + DB 업데이트
-      const rows = parseTabRows(values, sheetId, tabName, tabGid, spreadsheetTitle);
+      // ★ P2b: DB컬럼매핑(있으면) 로드 → 매핑 우선. 없으면 null=키워드 전용(P2a 동일).
+      const dbColMap = await require('./columnMapping.service').getTabColumnIndexMap(sheetId, tabGid);
+      const rows = parseTabRows(values, sheetId, tabName, tabGid, spreadsheetTitle, dbColMap);
 
       // 리뷰 인덱스 구성요건 미충족 (헤더 없음 or 데이터 0건) → 인덱스 등록 스킵 + 기존 데이터 삭제
       if (rows.length === 0) {
@@ -900,13 +904,14 @@ async function _upsertTabIndex(sheetId, tabName, tabGid, checksum, rows, modifie
 // 탭 데이터 파싱 (기존 로직 100% 유지)
 // ═══════════════════════════════════════════════════════════
 
-function parseTabRows(values, sheetId, tabName, tabGid, campaignTitle) {
+function parseTabRows(values, sheetId, tabName, tabGid, campaignTitle, dbColMap = null) {
   // ★ P2a: 컬럼감지·행파싱을 공용 columnResolver로 위임 — 동일 로직·동일 kw라 출력 100% 동일.
   //   smartBuild._parseTabRows도 같은 공용함수를 사용해 두 빌더의 인덱싱이 일치한다(진동 제거).
+  //   ★ P2b: dbColMap(있으면) 전달 — DB컬럼매핑 우선 감지. 없으면(null) P2a와 100% 동일.
   //   아래 원본 로직은 unreachable(후속 정리 PR에서 제거 예정).
   return require('./columnResolver').parseTabRows(values, sheetId, tabName, tabGid, campaignTitle, {
     NAME_KEYWORDS, SUBMIT_KEYWORDS, DATA_TAB_KEYWORDS, SUBMITTED_VALUES,
-  });
+  }, dbColMap);
   // eslint-disable-next-line no-unreachable
   const HEADER_SCAN_LIMIT = 50; // Phase 14: 20→50 확대 (32행 등 깊은 헤더 대응)
   let headerRowIdx = -1;
