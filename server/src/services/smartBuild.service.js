@@ -141,6 +141,13 @@ function _formatDate(val) {
 }
 
 function _parseTabRows(values, sheetId, tabName, tabGid, campaignTitle) {
+  // ★ P2a: indexBuilder와 동일한 공용 columnResolver로 위임(동일 kw → 동일 출력).
+  //   이제 recipientName/isSubmitted2/submitCol2도 반환되며 _upsertTab이 이를 기록한다.
+  //   아래 원본(부분집합) 로직은 unreachable(후속 정리 PR에서 제거 예정).
+  return require('./columnResolver').parseTabRows(values, sheetId, tabName, tabGid, campaignTitle, {
+    NAME_KEYWORDS, SUBMIT_KEYWORDS, DATA_TAB_KEYWORDS, SUBMITTED_VALUES,
+  });
+  // eslint-disable-next-line no-unreachable
   const HEADER_SCAN_LIMIT = 50;
   let headerRowIdx = -1;
   for (let i = 0; i < Math.min(values.length, HEADER_SCAN_LIMIT); i++) {
@@ -322,14 +329,16 @@ async function _upsertTab(sheetId, tabName, tabGid, checksum, rows, modifiedTime
         for (const row of batch) {
           newRowIndices.add(row.rowIndex);
           insertPlaceholders.push(
-            `($${paramIdx++},$${paramIdx++},$${paramIdx++},$${paramIdx++},$${paramIdx++},$${paramIdx++},$${paramIdx++},$${paramIdx++},$${paramIdx++},$${paramIdx++},$${paramIdx++},$${paramIdx++},$${paramIdx++},$${paramIdx++},$${paramIdx++})`
+            `($${paramIdx++},$${paramIdx++},$${paramIdx++},$${paramIdx++},$${paramIdx++},$${paramIdx++},$${paramIdx++},$${paramIdx++},$${paramIdx++},$${paramIdx++},$${paramIdx++},$${paramIdx++},$${paramIdx++},$${paramIdx++},$${paramIdx++},$${paramIdx++},$${paramIdx++},$${paramIdx++})`
           );
           insertValues.push(
             row.name, sheetId, row.tabGid, tabName,
             row.campaignName, row.rowIndex, row.isSubmitted,
             row.productUrl, row.productName, row.submitCol,
             JSON.stringify(row.rowJson), row.startDate, row.endDate, row.round,
-            row.phone8 || null
+            row.phone8 || null,
+            // ★ P2a: 공용 columnResolver가 이제 제공하는 3컬럼(이전 smartBuild엔 누락 → 진동 원인)
+            row.recipientName || null, row.isSubmitted2 || null, row.submitCol2 || null
           );
         }
 
@@ -337,7 +346,8 @@ async function _upsertTab(sheetId, tabName, tabGid, checksum, rows, modifiedTime
           INSERT INTO review_index
             (reviewer_name, sheet_id, tab_gid, tab_name, campaign_name,
              row_index, is_submitted, product_url, product_name,
-             submit_col, row_json, start_date, end_date, round, phone8)
+             submit_col, row_json, start_date, end_date, round, phone8,
+             recipient_name, is_submitted2, submit_col2)
           VALUES ${insertPlaceholders.join(', ')}
           ON CONFLICT (sheet_id, tab_name, row_index) DO UPDATE SET
             reviewer_name = EXCLUDED.reviewer_name,
@@ -352,6 +362,9 @@ async function _upsertTab(sheetId, tabName, tabGid, checksum, rows, modifiedTime
             end_date = EXCLUDED.end_date,
             round = EXCLUDED.round,
             phone8 = EXCLUDED.phone8,
+            recipient_name = EXCLUDED.recipient_name,
+            is_submitted2 = EXCLUDED.is_submitted2,
+            submit_col2 = EXCLUDED.submit_col2,
             built_at = NOW()
         `, insertValues);
       }

@@ -901,6 +901,13 @@ async function _upsertTabIndex(sheetId, tabName, tabGid, checksum, rows, modifie
 // ═══════════════════════════════════════════════════════════
 
 function parseTabRows(values, sheetId, tabName, tabGid, campaignTitle) {
+  // ★ P2a: 컬럼감지·행파싱을 공용 columnResolver로 위임 — 동일 로직·동일 kw라 출력 100% 동일.
+  //   smartBuild._parseTabRows도 같은 공용함수를 사용해 두 빌더의 인덱싱이 일치한다(진동 제거).
+  //   아래 원본 로직은 unreachable(후속 정리 PR에서 제거 예정).
+  return require('./columnResolver').parseTabRows(values, sheetId, tabName, tabGid, campaignTitle, {
+    NAME_KEYWORDS, SUBMIT_KEYWORDS, DATA_TAB_KEYWORDS, SUBMITTED_VALUES,
+  });
+  // eslint-disable-next-line no-unreachable
   const HEADER_SCAN_LIMIT = 50; // Phase 14: 20→50 확대 (32행 등 깊은 헤더 대응)
   let headerRowIdx = -1;
   for (let i = 0; i < Math.min(values.length, HEADER_SCAN_LIMIT); i++) {
