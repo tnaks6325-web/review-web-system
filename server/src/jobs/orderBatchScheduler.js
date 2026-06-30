@@ -121,18 +121,29 @@ async function _cycleInterleave() {
     return { tabs: 0, drained: 0, succeeded: 0 };
   }
 
-  if (busy) {                                // busy: 인터리브 폴백 = oldest(첫 active) 1탭만
-    const first = active.values().next().value;
-    await _reconcileOnce(first.sheetId, first.tabName, reconciled);
-    try {
-      const res = await drainTabQueueBatched({ sheetId: first.sheetId, tabName: first.tabName,
-        maxMillis: PER_TAB_MS, oneChunk: false, runReconcileFirst: false });
-      if (res && res.succeeded) { succeeded += res.succeeded; bump(first.tabName, res.succeeded); }
-    } catch (e) { logger.warn(`[orderBatchTick] busy 1탭 실패(무시): ${e && e.message}`); }
-    beat();
-    if (succeeded) logger.info(`[orderBatchTick] interleave-busy 1탭, ${succeeded}건 반영`);
-    _record({ seq, mode: 'busy', busy, throttleStart, kickLen, activeTabs: activeNames, perTab, rounds: 1, durationMs: Date.now() - start, succeeded });
-    return { tabs: active.size, drained: 1, succeeded, mode: 'busy' };
+  if (busy) {
+    // ★ busy 폴백(수정): "첫 1탭 전체 드레인"은 그 탭이 throttle 제약으로 여러 사이클을 잡아먹는 동안
+    //   나머지 탭을 수분 굶긴다(기아 버그). 대신 "1청크/탭 한 라운드만" 공평히 돌고 즉시 양보(throttle 회복).
+    //   다음 사이클(cron/rerun)이 다음 라운드 → busy 지속에도 전탭이 라운드당 1청크씩 공평 진행.
+    let bkeys = [...active.keys()];
+    if (_rrKey) { const bi = bkeys.indexOf(_rrKey); if (bi >= 0) bkeys = bkeys.slice(bi + 1).concat(bkeys.slice(0, bi + 1)); }
+    let bLast = _rrKey;
+    for (const key of bkeys) {
+      const t = active.get(key); if (!t) continue;
+      await _reconcileOnce(t.sheetId, t.tabName, reconciled);
+      let res = null;
+      try {
+        res = await drainTabQueueBatched({ sheetId: t.sheetId, tabName: t.tabName,
+          maxMillis: PER_TAB_MS, oneChunk: true, runReconcileFirst: false });
+      } catch (e) { logger.warn(`[orderBatchTick] busy 청크 실패(무시): ${e && e.message}`); }
+      drained++; bLast = key; beat();
+      if (res && res.succeeded) { succeeded += res.succeeded; bump(t.tabName, res.succeeded); }
+      if (res && res.quotaExceeded) break;   // quota면 즉시 중단(양보)
+    }
+    _rrKey = bLast;
+    if (succeeded) logger.info(`[orderBatchTick] interleave-busy(공평) ${drained}청크, ${succeeded}건 반영`);
+    _record({ seq, mode: 'busy-fair', busy, throttleStart, kickLen, activeTabs: activeNames, perTab, rounds: 1, durationMs: Date.now() - start, succeeded });
+    return { tabs: active.size, drained, succeeded, mode: 'busy-fair' };
   }
 
   // R6: 마지막 처리 키 다음부터 시작하도록 키 배열 회전.
