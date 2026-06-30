@@ -325,7 +325,7 @@ async function _executeBatch(items, sheetId, tabName) {
     const { rows } = await pool.query(
       `SELECT id, deleted_at, orderer, recipient, user_id, phone, address, bank, account,
               depositor, price, order_num, memo, date_str, selected_opt_key
-         FROM order_submissions WHERE id = ANY($1::int[])`, [osIds]);
+         FROM order_submissions WHERE id = ANY($1::uuid[])`, [osIds]);
     for (const row of rows) aliveMap.set(row.id, row);
   }
 
