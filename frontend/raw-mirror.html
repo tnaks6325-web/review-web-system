@@ -68,8 +68,10 @@
     /* 데이터 그리드: 열 너비 고정(table-layout:fixed) + 드래그 리사이즈 */
     table.grid-data{ table-layout:fixed; }
     table.grid-data th, table.grid-data td{ max-width:none; }
-    .col-rsz{ position:absolute; top:0; right:0; width:8px; height:100%; cursor:col-resize; user-select:none; z-index:5; }
-    .col-rsz:hover{ background:rgba(49,130,246,.4); }
+    /* 열 리사이즈 핸들: 헤더 셀 우측에 항상 보이는 경계선 + 넓은 히트영역(잡기 쉽게) */
+    .col-rsz{ position:absolute; top:0; bottom:0; right:0; width:12px; cursor:col-resize; user-select:none; z-index:6; }
+    .col-rsz::after{ content:''; position:absolute; right:0; top:0; bottom:0; width:2px; background:var(--border-d); transition:background .1s, width .1s; }
+    .col-rsz:hover::after, body.col-resizing .col-rsz::after{ background:var(--p); width:3px; }
     body.col-resizing, body.col-resizing *{ cursor:col-resize !important; user-select:none !important; }
     .pager{ display:flex; align-items:center; gap:10px; margin-top:10px; font-size:12px; color:var(--t2); }
     .empty{ text-align:center; color:var(--t3); padding:50px 20px; font-size:13px; }
