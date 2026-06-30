@@ -892,10 +892,73 @@ async function reconcileStuckOrders({ limit = 50, perTabCap = 20, sheetId = null
   return result;
 }
 
+// ── PR-B 헬퍼: order_submissions 행 → orderData(편집/취소/append fresh값 공유) ──
+function _osRowToOrderData(os) {
+  return {
+    orderer: os.orderer, recipient: os.recipient, userId: os.user_id, phone: os.phone, address: os.address,
+    bank: os.bank, account: os.account, depositor: os.depositor, price: os.price, orderNum: os.order_num,
+    memo: os.memo, dateStr: os.date_str, selectedOptKey: os.selected_opt_key,
+  };
+}
+
+// 편집 가능 필드 → 헤더 키워드(한글/라틴). _fieldToCol이 헤더에서 컬럼 인덱스를 찾는다.
+const _FIELD_HEADER_KW = {
+  orderer: [['주문자'], ['orderer']],
+  recipient: [['수취인', '받는분', '이름'], ['recipient']],
+  user_id: [['아이디'], ['userid', 'id']],
+  phone: [['연락처', '전화', '핸드폰', '휴대폰'], ['phone']],
+  address: [['주소'], ['address']],
+  bank: [['은행'], ['bank']],
+  account: [['계좌'], ['account']],
+  depositor: [['예금주'], ['depositor']],
+  price: [['금액'], ['price']],
+  order_num: [['주문번호'], ['ordernum']],
+  memo: [['비고', '특이사항'], ['memo']],
+  date_str: [['일자', '날짜'], ['date']],
+  selected_opt_key: [['옵션'], ['option']],
+};
+function _fieldToCol(headers, field) {
+  const def = _FIELD_HEADER_KW[field];
+  if (!def) return -1;
+  return findColumn(headers, def[0], def[1] || []);
+}
+
+// ── R1: 그 시트 행이 "여전히 이 주문의 것"인지 다중칸(연락처+수취인+주소) AND 일치로 판정.
+//   취소 클리어 전 안전가드 — 사람이 그 행을 재사용했으면 일치 안 해 클리어 거부(데이터 파괴 방지).
+//   J-2: 그리드밖 행(빈읽기)은 사람이 손댈 수 없으므로 gridOutOfRange=true로 표시(호출부가 진행 허용).
+async function rowIdentityMatches(os, tabContext) {
+  const { readSheet, invalidateSheetMeta } = require('./sheets.service');
+  const { throttledCall } = require('../utils/sheetsThrottle');
+  const sheetId = os.sheet_id || os.sheetId;
+  const cands = [
+    [findColumn(tabContext.headers, ['연락처', '전화', '핸드폰', '휴대폰'], ['phone']), os.phone],
+    [findColumn(tabContext.headers, ['수취인', '받는분', '이름'], ['recipient']), os.recipient],
+    [findColumn(tabContext.headers, ['주소'], ['address']), os.address],
+  ].filter(([c, v]) => c >= 0 && String(v == null ? '' : v).trim());
+  if (!cands.length) return { match: false, gridOutOfRange: false }; // 비교 불가 → 안전: 클리어 거부
+  const cols = cands.map(([c]) => c);
+  const minC = Math.min(...cols), maxC = Math.max(...cols);
+  const range = `'${tabContext.tabName}'!${getColLetter(minC)}${os.sheet_row}:${getColLetter(maxC)}${os.sheet_row}`;
+  invalidateSheetMeta(sheetId);
+  const read = await throttledCall(() => readSheet(sheetId, range,
+    tabContext.tabGid ? { gid: tabContext.tabGid } : {}));
+  if (!read || read.length === 0) return { match: false, gridOutOfRange: true }; // J-2: 그리드밖=사람 손 불가
+  const cells = read[0] || [];
+  const match = cands.every(([col, val]) => {
+    const cur = normalizeGuardValue(tabContext.headers[col], cells[col - minC]);
+    const exp = normalizeGuardValue(tabContext.headers[col], val);
+    return cur && exp && cur === exp;
+  });
+  return { match, gridOutOfRange: false };
+}
+
 module.exports = {
   computeDedupKey,
   buildCandidateRows,
   reconcileStuckOrders,
+  _osRowToOrderData,
+  _fieldToCol,
+  rowIdentityMatches,
   mapOrderToSheetRow,
   buildBatchUpdateData,
   buildMirrorGuardRange,
