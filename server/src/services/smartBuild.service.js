@@ -481,6 +481,7 @@ async function runSmartBuild() {
   const runNum = _runCount;
   const startTime = Date.now();
   const isFirstRun = Object.keys(_modifiedTimeCache).length === 0;
+  let _buildLockHeld = false; // ★ G4: indexBuilder와 build_locks 공유 여부
 
   const result = {
     ok: true,
@@ -499,6 +500,25 @@ async function runSmartBuild() {
   };
 
   try {
+    // ── ★ G4: 빌더 직렬화 — buildIndexSmart/buildOneSheet와 동일한 build_locks('INDEX_BUILD')를 공유 ──
+    //   smartBuild만 이 락을 우회하던 버그로, 두 빌더가 같은 탭 review_index를 동시 인터리브 갱신해
+    //   is_submitted/recipient_name 등이 빌드마다 진동·torn write 되던 것을 차단한다.
+    //   점유 중(타 빌드 진행)이면 이번 5분 주기는 양보(다음 주기 재시도). 락 획득 자체가 실패하면
+    //   smartBuild를 막지 않도록 best-effort로 진행(드문 DB오류 시 기능 우선).
+    try {
+      const { acquireBuildLock } = require('./indexBuilder.service');
+      const lk = await acquireBuildLock('smartBuild');
+      if (!lk || !lk.acquired) {
+        result.ok = false;
+        result.reason = 'build_locked';
+        logger.info('[smartBuild] build_locks 점유 중(타 빌드 진행) — 이번 주기 양보');
+        return result; // finally가 _isRunning=false 처리(락 미보유라 해제 없음)
+      }
+      _buildLockHeld = true;
+    } catch (lockErr) {
+      logger.warn(`[smartBuild] build lock 획득 실패(best-effort 진행): ${lockErr.message}`);
+    }
+
     // ── 0단계: 키워드 로드 ──
     await _loadKeywords();
 
@@ -750,6 +770,12 @@ async function runSmartBuild() {
     logger.error(`[smartBuild] #${runNum} 전체 오류: ${err.message}`);
   } finally {
     result.elapsed = Date.now() - startTime;
+    // ★ G4: 보유한 build_locks 해제(획득한 경우만). 실패해도 TTL(10분)로 자동 회수.
+    if (_buildLockHeld) {
+      try { const { releaseBuildLock } = require('./indexBuilder.service'); await releaseBuildLock(); }
+      catch (e) { logger.warn(`[smartBuild] build lock 해제 실패(무시, TTL 회수): ${e.message}`); }
+      _buildLockHeld = false;
+    }
     _isRunning = false;
     _lastRunResult = result;
 
