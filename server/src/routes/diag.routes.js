@@ -2364,6 +2364,81 @@ router.post('/order-flush-one', authMiddleware, adminOrMasterMiddleware, async (
   } catch (err) { next(err); }
 });
 
+// 0-based 컬럼 인덱스 → A1 컬럼 문자(AA 등 지원)
+function _a1col(idx) {
+  let s = '', n = idx + 1;
+  while (n > 0) { const m = (n - 1) % 26; s = String.fromCharCode(65 + m) + s; n = Math.floor((n - 1) / 26); }
+  return s;
+}
+
+// POST /api/diag/review-reflect { sheetId, tabName, gid?, dryRun? } (admin/master)
+// ★ 리뷰제출 DB→시트 검토·반영: review_index.is_submitted=TRUE 인데 시트 "리뷰제출" 칸이 빈 행을 찾아
+//   채운다(빈 칸에만 '제출' 기록 — 기존 값 덮어쓰기 없음). dryRun=true(기본)면 미반영 건수만 보고.
+//   배경: 리뷰제출은 시트에 전경 쓰기 + 실패 시 큐 폴백인데, throttle 포화로 일부가 시트 미반영일 수 있음.
+router.post('/review-reflect', authMiddleware, adminOrMasterMiddleware, async (req, res, next) => {
+  try {
+    const { sheetId, tabName, gid } = req.body || {};
+    const dryRun = req.body?.dryRun !== false; // 기본 dryRun=true(안전)
+    if (!sheetId || !tabName) return res.status(400).json({ ok: false, error: 'sheetId, tabName 필수' });
+
+    // 1) DB에서 is_submitted=TRUE 행 + submit_col
+    const { rows } = await pool.query(
+      `SELECT row_index, submit_col FROM review_index
+        WHERE sheet_id=$1 AND tab_name=$2 AND is_submitted=TRUE AND row_index IS NOT NULL
+        ORDER BY row_index ASC`,
+      [sheetId, tabName]
+    );
+    if (!rows.length) return res.json({ ok: true, dbSubmitted: 0, unreflected: 0 });
+
+    // submit_col 최빈값(탭 내 일관)
+    const cc = {};
+    rows.forEach(r => { if (r.submit_col) cc[r.submit_col] = (cc[r.submit_col] || 0) + 1; });
+    const entries = Object.entries(cc).sort((a, b) => b[1] - a[1]);
+    const submitCol = entries.length ? entries[0][0] : null;
+    if (!submitCol) return res.json({ ok: true, dbSubmitted: rows.length, unreflected: 0, note: 'submit_col 미상(인덱스 재빌드 필요)' });
+
+    // 2) 헤더에서 컬럼 인덱스
+    const { rows: tr } = await pool.query(
+      `SELECT detected_headers, headers FROM raw_sheet_tabs WHERE sheet_id=$1 AND tab_gid=$2`,
+      [sheetId, String(gid || '')]
+    );
+    const headers = tr[0] && (Array.isArray(tr[0].detected_headers) ? tr[0].detected_headers
+                    : (Array.isArray(tr[0].headers) ? tr[0].headers : null));
+    if (!headers) return res.json({ ok: false, error: '헤더 메타 없음(gid 확인 또는 RAW 재미러 필요)' });
+    const colIdx = headers.findIndex(h => String(h || '').trim() === String(submitCol).trim());
+    if (colIdx < 0) return res.json({ ok: false, error: `submit_col '${submitCol}' 헤더 미발견`, headers: headers.slice(0, 25) });
+    const colL = _a1col(colIdx);
+
+    // 3) 시트의 그 컬럼 읽기(min..max row, 1콜)
+    const minR = rows[0].row_index, maxR = rows[rows.length - 1].row_index;
+    const { throttledCall } = require('../utils/sheetsThrottle');
+    const grid = await throttledCall(() => readSheet(sheetId, `'${tabName}'!${colL}${minR}:${colL}${maxR}`, gid ? { gid } : {}));
+
+    // 4) 미반영(시트 칸 빈) 찾기
+    const unref = [];
+    for (const r of rows) {
+      const row = grid && grid[r.row_index - minR];
+      const cell = row ? String(row[0] || '').trim() : '';
+      if (!cell) unref.push(r.row_index);
+    }
+    if (dryRun) {
+      return res.json({ ok: true, dryRun: true, dbSubmitted: rows.length, submitCol, unreflected: unref.length, sampleRows: unref.slice(0, 20) });
+    }
+
+    // 5) 반영: 빈 칸에만 '제출' 일괄 기록(청크 50, batchUpdate 1콜/청크)
+    let reflected = 0;
+    if (unref.length) {
+      const { batchUpdateSheet } = require('../services/sheets.service');
+      for (let i = 0; i < unref.length; i += 50) {
+        const data = unref.slice(i, i + 50).map(ri => ({ range: `'${tabName}'!${colL}${ri}`, values: [['제출']] }));
+        await throttledCall(() => batchUpdateSheet(sheetId, data, 'RAW', gid ? { gid } : {}));
+      }
+      reflected = unref.length;
+    }
+    res.json({ ok: true, dryRun: false, dbSubmitted: rows.length, submitCol, reflected });
+  } catch (err) { next(err); }
+});
+
 // POST /api/diag/order-orphan-cleanup { dryRun? } (admin/master)
 // ★ 고아 큐 정리: written/deleted된 주문의 잔여 pending/processing order_append를 시트콜 0으로 done 처리.
 //   reconcile 재큐잉이 남긴 고아가 throttle를 반복 잠식하던 것을 1회성으로 청소. dryRun=true면 카운트만.
