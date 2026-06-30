@@ -60,11 +60,17 @@ async function processQueue(batchSize = 10, { interItemDelayMs = 2000 } = {}) {
     //   pending 항목을 동시에 집어 이중 시트쓰기(중복행)·정체(processing stall)가 나던 경합을 차단.
     //   - 다른 워커가 이미 잠근 행은 SKIP LOCKED 로 건너뛴다(대기 없음).
     //   - attempts는 여기서 올리지 않는다(원본 시맨틱 유지: 항목별 실행 직전에 +1).
+    // ★ 제안A: ORDER_BATCH_AUTO=1이면 order_append는 상시 배치 스케줄러 전담(단건 2콜/건 금지).
+    //   30초 cron의 단건 order_append가 throttle 45/분을 최대 40콜/분 잠식하던 것을 제거 →
+    //   배치(라운드당 2콜)로 단일화해 쿼터 효율 극대화. review/deposit 등 다른 타입은 계속 처리(손실0).
+    //   AUTO 끄면 즉시 단건 cron이 order_append 흡수(되돌리기). 큐 백스톱은 15초 배치 cron이 담당.
+    const skipOrderAppend = process.env.ORDER_BATCH_AUTO === '1';
     const { rows: items } = await pool.query(
       `UPDATE sync_queue SET status = 'processing', processed_at = NOW()
         WHERE id IN (
           SELECT id FROM sync_queue
            WHERE status = 'pending' AND attempts < max_retry
+             ${skipOrderAppend ? "AND type <> 'order_append'" : ''}
            ORDER BY created_at ASC
            LIMIT $1
            FOR UPDATE SKIP LOCKED
