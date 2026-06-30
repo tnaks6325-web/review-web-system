@@ -38,6 +38,17 @@ const MIRROR_TIME_GUARD_MS = 15 * 60 * 1000;
 // row 일괄 INSERT 배치 크기
 const ROW_INSERT_BATCH = 500;
 
+// ── (A) 비활성 시트 미러 주기 완화 — env 게이트(기본 OFF=기존 매 사이클 전체 미러). ──
+//   RAW미러의 유일 소비처는 "주문 행배정"(claimRow/loadRawTabContext/reconcile)이고
+//   review_index 빌드(smartBuild)는 시트를 직접 읽어 RAW미러에 의존하지 않는다(검증됨).
+//   따라서 "최근 주문이 없는 시트"는 미러를 매 사이클 돌릴 필요가 없다. INACTIVE_EVERY 사이클마다 1회만 미러.
+//   안전: 비활성 시트에 주문이 오면 loadRawTabContext가 _triggerSheetMirrorOnce로 즉시 자동미러(자가치유).
+//   force(수동 전체미러)·mirrorOneSheet(단일)·_triggerSheetMirrorOnce는 완화 무관(항상 미러).
+const INACTIVE_RELAX  = () => process.env.RAW_MIRROR_INACTIVE_RELAX === '1';
+const INACTIVE_DAYS   = parseInt(process.env.RAW_MIRROR_INACTIVE_DAYS  || '30', 10);
+const INACTIVE_EVERY  = Math.max(2, parseInt(process.env.RAW_MIRROR_INACTIVE_EVERY || '6', 10));
+let _mirrorCycleCount = 0;
+
 function _isSystemTab(tabName) {
   const lower = (tabName || '').toLowerCase();
   return SYSTEM_TAB_KEYWORDS.some(kw => lower.includes(kw.toLowerCase()));
@@ -58,9 +69,31 @@ async function mirrorAllSheets({ force = false, includeHidden = true } = {}) {
   const { rows: idRows } = await pool.query(
     'SELECT DISTINCT sheet_id FROM campaigns UNION SELECT DISTINCT sheet_id FROM tab_configs'
   );
-  const sheetIds = [...new Set(idRows.map(r => r.sheet_id))].filter(Boolean);
+  let sheetIds = [...new Set(idRows.map(r => r.sheet_id))].filter(Boolean);
+  const totalRegistered = sheetIds.length;
 
-  logger.info(`[rawMirror] 시작: ${sheetIds.length}개 시트 (force=${force}, includeHidden=${includeHidden})`);
+  // ── (A) 비활성 시트 완화: relax 사이클에는 "최근 주문 있는 활성 시트"만 미러. ──
+  const cycle = ++_mirrorCycleCount;
+  let deferredInactive = 0;
+  const relaxThisCycle = INACTIVE_RELAX() && !force && (cycle % INACTIVE_EVERY !== 0);
+  if (relaxThisCycle) {
+    try {
+      const { rows: act } = await pool.query(
+        `SELECT DISTINCT sheet_id FROM order_submissions
+           WHERE deleted_at IS NULL AND submitted_at > NOW() - ($1 || ' days')::interval
+             AND sheet_id IS NOT NULL`,
+        [String(INACTIVE_DAYS)]
+      );
+      const activeSet = new Set(act.map(r => r.sheet_id));
+      const kept = sheetIds.filter(id => activeSet.has(id));
+      deferredInactive = sheetIds.length - kept.length;
+      sheetIds = kept;
+    } catch (e) {
+      logger.warn(`[rawMirror] 활성시트 조회 실패 → 완화 미적용(전체 미러): ${e.message}`);
+    }
+  }
+
+  logger.info(`[rawMirror] 시작: ${sheetIds.length}/${totalRegistered}개 시트 (force=${force}, cycle=${cycle}, relax=${relaxThisCycle}, 비활성연기=${deferredInactive})`);
 
   // ── 2) 기존 미러 메타 로드 (증분 비교용) ──
   const { rows: existingTabs } = await pool.query(
@@ -109,6 +142,9 @@ async function mirrorAllSheets({ force = false, includeHidden = true } = {}) {
   const summary = {
     ok: true,
     sheetsScanned: sheetIds.length,
+    totalRegistered,
+    deferredInactive,           // (A) 이번 사이클에 비활성으로 건너뛴 시트 수(다음 INACTIVE_EVERY 사이클에 미러)
+    relaxCycle: relaxThisCycle,
     sheetsSkipped,
     tabsMirrored,
     tabsSkipped,
@@ -119,7 +155,7 @@ async function mirrorAllSheets({ force = false, includeHidden = true } = {}) {
     throttle: getThrottleStatus(),
     mirroredAt: new Date().toISOString(),
   };
-  logger.info(`[rawMirror] 완료: 탭 미러 ${tabsMirrored}개(스킵 ${tabsSkipped}), 행 ${rowsWritten}개, 시트스킵 ${sheetsSkipped}, 오류 ${errors} — ${elapsed}`);
+  logger.info(`[rawMirror] 완료: 탭 미러 ${tabsMirrored}개(스킵 ${tabsSkipped}), 행 ${rowsWritten}개, 시트스킵 ${sheetsSkipped}, 비활성연기 ${deferredInactive}, 오류 ${errors} — ${elapsed}`);
   return summary;
 }
 
