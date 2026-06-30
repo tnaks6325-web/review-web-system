@@ -2932,6 +2932,161 @@ router.get('/yellow-rows-export', authMiddleware, adminOrMasterMiddleware, async
   }
 });
 
+// ═══════════════════════════════════════════════════════════
+// POST /api/diag/yellow-rows-delete — 노란 복구행(적체) 삭제 (탭 단위, admin/master, 되돌릴 수 없음)
+//   body: { sheetId, gid, tabName?, beforeDateKst:'YYYY-MM-DD', source?:'reconcile'|'manual'|'all', confirm? }
+//   - 대상: source(복구/수동) 의 'written' claim 중 주문 submitted_at < (beforeDateKst 00:00 KST) 인 행.
+//   - 안전장치:
+//     ① 실행 직전 시트의 현재 배경색을 다시 읽어, DB가 아는 노란행 집합(EXPECTED=written claim)과
+//        시트 실제 노란행 집합(ACTUAL)이 '완전히 일치'할 때만 진행. 불일치(행 밀림/수동변경) → 삭제 없이 mismatch 보고.
+//     ② 삭제는 아래→위(내림차순) + 연속구간 병합. 삭제 전 행 내용을 backup으로 반환(복구 대비).
+//     ③ confirm !== true 면 dry-run(무엇을 지울지만 반환).
+//     ④ 삭제 후: 삭제행 claim 제거 + 이 탭 잔여 claim의 sheet_row를 밀림만큼 보정(다음 6/30 작업 정합).
+// ═══════════════════════════════════════════════════════════
+router.post('/yellow-rows-delete', authMiddleware, adminOrMasterMiddleware, async (req, res, next) => {
+  try {
+    const { readRowsWithFormat, deleteRows } = require('../services/sheets.service');
+    const { throttledCall } = require('../utils/sheetsThrottle');
+    const { withJobLock } = require('../utils/jobLock');
+    const b = req.body || {};
+    const sheetId = b.sheetId;
+    const gid = (b.gid != null && b.gid !== '') ? String(b.gid) : '';
+    const tabNameIn = b.tabName ? String(b.tabName) : '';
+    const beforeDateKst = String(b.beforeDateKst || '').trim();
+    const srcParam = String(b.source || 'reconcile').toLowerCase();
+    const confirm = b.confirm === true || b.confirm === 'true';
+    if (!sheetId || (!gid && !tabNameIn)) return res.status(400).json({ ok: false, error: 'sheetId 와 gid(또는 tabName) 필수' });
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(beforeDateKst)) return res.status(400).json({ ok: false, error: "beforeDateKst='YYYY-MM-DD' 형식 필수" });
+    const sources = srcParam === 'all' ? ['order_reconcile', 'manual'] : srcParam === 'manual' ? ['manual'] : ['order_reconcile'];
+
+    const isYellow = (c) => {
+      if (!c) return false;
+      const r = c.red == null ? 0 : c.red, g = c.green == null ? 0 : c.green, bl = c.blue == null ? 0 : c.blue;
+      // 연한 노랑 {red:1, green:0.95, blue:0.6} ± 허용. 흰색(1,1,1)·기타색 제외.
+      return r >= 0.92 && g >= 0.88 && g <= 0.99 && bl >= 0.50 && bl <= 0.72;
+    };
+    const onlyDigits = (s) => String(s == null ? '' : s).replace(/\D/g, '');
+
+    // EXPECTED: 이 탭의 복구/수동 claim (order 조인 — 날짜·written 여부·내용대조 키)
+    const params = [sources, sheetId];
+    let tabCond = '';
+    if (gid) { params.push(gid); tabCond += ` AND c.tab_gid = $${params.length}`; }
+    if (tabNameIn) { params.push(tabNameIn); tabCond += ` AND c.tab_name = $${params.length}`; }
+    const { rows: claimRows } = await pool.query(
+      `SELECT c.sheet_row, c.tab_name, os.submitted_at, os.mirror_status, os.order_num, os.phone
+         FROM sheet_row_claims c
+         LEFT JOIN order_submissions os ON os.id = c.order_id
+        WHERE c.source = ANY($1) AND c.sheet_id = $2 AND c.sheet_row IS NOT NULL${tabCond}`,
+      params
+    );
+    // 'written' 만 실제 노란행(yellow는 쓰기 성공 후 적용)
+    const writtenClaims = claimRows.filter(r => r.mirror_status === 'written');
+    const resolvedTabName = tabNameIn || (writtenClaims[0] && writtenClaims[0].tab_name) || '';
+    if (!writtenClaims.length) {
+      return res.json({ ok: true, tab: resolvedTabName, gid, deleted: 0, note: '이 탭에 written 복구/수동 행 없음' });
+    }
+    const writtenRowSet = new Set(writtenClaims.map(r => Number(r.sheet_row)));
+    const boundary = new Date(`${beforeDateKst}T00:00:00+09:00`); // KST(UTC+9) 00:00 이전 = 삭제 대상
+
+    // ── 임계영역: 게이트 읽기 ~ 삭제 ~ DB 정리를 reconcile/queue 와 같은 락으로 직렬화(TOCTOU 차단). ──
+    //   락 보유 중 시트 현재 상태를 다시 읽어 행번호가 실행시점과 일치함을 보장한다.
+    const work = async () => {
+      // 시트 현재 상태(값+배경색) 1회 읽기
+      const grid = await throttledCall(() => readRowsWithFormat(sheetId, { gid, tabName: resolvedTabName }));
+      const tabTitle = grid.title || resolvedTabName;
+      const actualYellow = new Set();
+      for (const [row, info] of grid.rows.entries()) { if (isYellow(info.bg)) actualYellow.add(row); }
+      const extraYellow = [...actualYellow].filter(r => !writtenRowSet.has(r)).sort((a, b) => a - b); // 정보용(order_submit 복구분 등)
+
+      const candidates = writtenClaims.filter(r => r.submitted_at && new Date(r.submitted_at) < boundary);
+      const undatedKept = writtenClaims.filter(r => !r.submitted_at).map(r => Number(r.sheet_row)).sort((a, b) => a - b);
+
+      // 행별 검증: ① 현재 노란색 ② 행 내용이 그 주문의 주문번호/연락처(끝8)를 포함(=밀림/오매칭 차단).
+      //   키가 없으면(주문번호·연락처 모두 없음) 노란색만으로 허용(드묾).
+      const delRows = [], backup = [], skippedRows = [];
+      for (const c of candidates) {
+        const row = Number(c.sheet_row);
+        const info = grid.rows.get(row);
+        if (!info || !isYellow(info.bg)) { skippedRows.push({ row, reason: 'not-yellow' }); continue; }
+        const rowDigits = onlyDigits((info.values || []).join('|'));
+        const onum = onlyDigits(c.order_num);
+        const ph8 = onlyDigits(c.phone).slice(-8);
+        const hasKey = onum.length >= 5 || ph8.length >= 8;
+        const matched = !hasKey || (onum.length >= 5 && rowDigits.includes(onum)) || (ph8.length >= 8 && rowDigits.includes(ph8));
+        if (!matched) { skippedRows.push({ row, reason: 'content-mismatch' }); continue; }
+        delRows.push(row);
+        backup.push({ row, values: info.values || [] });
+      }
+      delRows.sort((a, b) => a - b);
+
+      const baseResp = {
+        ok: true, tab: tabTitle, gid, expectedWritten: writtenClaims.length,
+        actualYellow: actualYellow.size, extraYellow: extraYellow.length, extraYellowRows: extraYellow.slice(0, 50),
+        skippedCount: skippedRows.length, skippedRows: skippedRows.slice(0, 50), undatedKept,
+      };
+
+      if (!delRows.length) return { ...baseResp, deleted: 0, note: '삭제 대상(기준일 이전 · 노란 · 내용일치) 없음' };
+      if (!confirm) return { ...baseResp, dryRun: true, wouldDelete: delRows.length, rows: delRows, backup };
+
+      // #6: 확정 삭제는 백업이 행 수만큼 갖춰졌을 때만(백업 없는 비가역 삭제 금지)
+      if (backup.length !== delRows.length) {
+        return { ...baseResp, ok: false, deleted: 0, error: '백업 구성 실패 — 안전을 위해 삭제 중단(재시도 요망)' };
+      }
+
+      // 실제 삭제(아래→위)
+      await throttledCall(() => deleteRows(sheetId, { gid, tabName: tabTitle, rowIndexes: delRows }));
+
+      // DB 정리(트랜잭션): 삭제행 claim 제거 + 잔여 claim sheet_row 밀림 보정(이 탭).
+      //   밀림 보정은 유니크(sheet_id,tab_name,sheet_row) 행별 즉시검사 때문에 단일 UPDATE면 과도기
+      //   중복키가 날 수 있어 오름차순 한 행씩 갱신(낮은 행 먼저 비워져 충돌 없음).
+      //   claim 은 저장된 tab_name 으로 키잉(시트는 gid/현재제목, DB는 claimTab).
+      const claimTab = resolvedTabName || tabTitle;
+      const delSet = new Set(delRows);
+      let claimCleanupFailed = false;
+      const dbClient = await pool.connect();
+      try {
+        await dbClient.query('BEGIN');
+        await dbClient.query(
+          `DELETE FROM sheet_row_claims WHERE sheet_id = $1 AND tab_name = $2 AND sheet_row = ANY($3::int[])`,
+          [sheetId, claimTab, delRows]
+        );
+        const { rows: shiftRows } = await dbClient.query(
+          `SELECT id, sheet_row FROM sheet_row_claims
+            WHERE sheet_id = $1 AND tab_name = $2 AND sheet_row IS NOT NULL
+              AND (SELECT count(*) FROM unnest($3::int[]) d WHERE d < sheet_row) > 0
+            ORDER BY sheet_row ASC`,
+          [sheetId, claimTab, delRows]
+        );
+        for (const s of shiftRows) {
+          const r = Number(s.sheet_row);
+          let shift = 0; for (const d of delSet) { if (d < r) shift++; }
+          if (shift > 0) await dbClient.query(`UPDATE sheet_row_claims SET sheet_row = $2, updated_at = NOW() WHERE id = $1`, [s.id, r - shift]);
+        }
+        await dbClient.query('COMMIT');
+      } catch (dbErr) {
+        try { await dbClient.query('ROLLBACK'); } catch (_) {}
+        claimCleanupFailed = true; // ★ 시트는 지워졌으나 DB가 불일치 → 응답으로 알려 재실행 금지 유도
+        logger.error(`[yellow-delete] claim 정리 실패(시트 삭제 완료됨, DB 불일치!): ${dbErr.message}`);
+      } finally {
+        dbClient.release();
+      }
+
+      logger.info(`[yellow-delete] tab="${tabTitle}" sheet=${sheetId} 삭제 ${delRows.length}행 (기준 ${beforeDateKst} KST 이전)`);
+      return { ...baseResp, deleted: delRows.length, rows: delRows, backup, claimCleanupFailed };
+    };
+
+    // dry-run(읽기 전용)은 락 불필요. 확정 삭제만 order_reconcile 락으로 직렬화.
+    const result = confirm
+      ? await withJobLock('order_reconcile', work, {
+          onBusy: () => ({ ok: true, skipped: 'busy', deleted: 0, tab: resolvedTabName, gid, reason: 'reconcile/queue 작업 진행 중 — 잠시 후 재시도' }),
+        })
+      : await work();
+    return res.json(result);
+  } catch (err) {
+    next(err);
+  }
+});
+
 // GET /api/diag/build-history — 빌드 히스토리
 router.get('/build-history', authMiddleware, async (req, res, next) => {
   try {

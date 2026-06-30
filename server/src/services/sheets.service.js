@@ -906,6 +906,78 @@ async function setRowsBackground(spreadsheetId, { gid, tabName, rowIndexes = [],
   await sheets.spreadsheets.batchUpdate({ spreadsheetId, requestBody: { requests } });
 }
 
+/**
+ * 탭의 각 행을 배경색 + 셀 값과 함께 한 번에 읽어온다(노란행 식별 + 내용대조 + 백업용).
+ * 행 전체가 같은 색으로 칠해지므로 행의 배경색은 1열(A)의 색으로 본다.
+ * @param {object} opts { gid, tabName, maxCols=40 }
+ * @returns {Promise<{sheetId:number, title:string, rowCount:number, rows: Map<number,{bg:object|null, values:string[]}>}>}
+ *   rows: rowIndex(1-based) → { bg: {red,green,blue}|null, values: [셀 표시문자열...] }
+ *   ⚠ getByDataFilter는 데이터/서식이 있는 마지막 행까지만 rowData를 채운다. 노란행은 항상
+ *     배경색이 있으므로 rowData에 포함된다(빠지지 않음) — 이 가정이 게이트의 안전성을 떠받친다.
+ */
+async function readRowsWithFormat(spreadsheetId, { gid, tabName, maxCols = 40 } = {}) {
+  if (!sheets) throw new Error('Google Sheets API가 설정되지 않았습니다.');
+  const metaSheets = await _getCachedSheetMeta(spreadsheetId);
+  const targetSheet = _findSheetInMeta(metaSheets, { gid, tabName });
+  if (!targetSheet) throw new Error(`시트를 찾을 수 없습니다: ${tabName || 'gid:' + gid}`);
+  const sheetId = targetSheet.properties.sheetId;
+  const rowCount = targetSheet.properties.gridProperties?.rowCount || 1000;
+  const colCount = Math.min(maxCols, targetSheet.properties.gridProperties?.columnCount || maxCols);
+  const res = await sheets.spreadsheets.getByDataFilter({
+    spreadsheetId,
+    requestBody: {
+      dataFilters: [{
+        gridRange: { sheetId, startRowIndex: 0, endRowIndex: rowCount, startColumnIndex: 0, endColumnIndex: Math.max(1, colCount) },
+      }],
+      includeGridData: true,
+    },
+    fields: 'sheets(data(rowData(values(formattedValue,userEnteredFormat(backgroundColor),effectiveFormat(backgroundColor)))))',
+  });
+  const rowData = res.data.sheets?.[0]?.data?.[0]?.rowData || [];
+  const rows = new Map();
+  for (let i = 0; i < rowData.length; i++) {
+    const cells = rowData[i]?.values || [];
+    const first = cells[0];
+    const bg = (first && first.userEnteredFormat && first.userEnteredFormat.backgroundColor)
+      || (first && first.effectiveFormat && first.effectiveFormat.backgroundColor) || null;
+    const values = cells.map(c => (c && c.formattedValue != null) ? String(c.formattedValue) : '');
+    rows.set(i + 1, { bg, values });
+  }
+  return { sheetId, title: targetSheet.properties.title, rowCount, rows };
+}
+
+/**
+ * 지정한 1-based 행들을 삭제(deleteDimension). 내림차순으로 적용해 인덱스 밀림을 방지하고,
+ * 연속 구간은 한 range로 병합해 batchUpdate 1회로 처리한다. 삭제 후 메타 캐시 무효화.
+ * @returns {Promise<{deleted:number, ranges:number}>}
+ */
+async function deleteRows(spreadsheetId, { gid, tabName, rowIndexes = [] } = {}) {
+  if (!sheets) throw new Error('Google Sheets API가 설정되지 않았습니다.');
+  const ris = [...new Set((rowIndexes || []).map(r => parseInt(r, 10)).filter(n => Number.isInteger(n) && n >= 1))]
+    .sort((a, b) => a - b);
+  if (!ris.length) return { deleted: 0, ranges: 0 };
+  const metaSheets = await _getCachedSheetMeta(spreadsheetId);
+  const targetSheet = _findSheetInMeta(metaSheets, { gid, tabName });
+  if (!targetSheet) throw new Error(`시트를 찾을 수 없습니다: ${tabName || 'gid:' + gid}`);
+  const sheetId = targetSheet.properties.sheetId;
+  // 연속 행 병합 → [start,end] (1-based, inclusive)
+  const ranges = [];
+  let s = ris[0], prev = ris[0];
+  for (let i = 1; i < ris.length; i++) {
+    if (ris[i] === prev + 1) { prev = ris[i]; continue; }
+    ranges.push([s, prev]); s = ris[i]; prev = ris[i];
+  }
+  ranges.push([s, prev]);
+  // 내림차순(아래 구간 먼저 삭제) → 위 구간 인덱스 불변
+  ranges.sort((a, b) => b[0] - a[0]);
+  const requests = ranges.map(([startRow, endRow]) => ({
+    deleteDimension: { range: { sheetId, dimension: 'ROWS', startIndex: startRow - 1, endIndex: endRow } },
+  }));
+  await sheets.spreadsheets.batchUpdate({ spreadsheetId, requestBody: { requests } });
+  _invalidateMeta(spreadsheetId);
+  return { deleted: ris.length, ranges: ranges.length };
+}
+
 module.exports = {
   readSheet,
   writeSheet,
@@ -914,6 +986,8 @@ module.exports = {
   clearSheetValues,
   setRowBackground,
   setRowsBackground,
+  readRowsWithFormat,
+  deleteRows,
   getSpreadsheetMeta,
   invalidateSheetMeta: _invalidateMeta, // ★ D3b(#3): reconcile/guard 전 그리드 캐시 신선화용
   batchReadSheet,

@@ -938,8 +938,19 @@ body{ letter-spacing:-.01em; }
               <button class="btn-sm" onclick="downloadYellowRowsCsv('detail.csv')" style="font-size:.72rem;background:#FCD34D;color:#111;border:none;padding:4px 10px;border-radius:6px;cursor:pointer" title="노란 복구행을 행 단위로(주문자·주문번호·시트행 포함) CSV로 받습니다.">
                 <i class="fas fa-list"></i> 행단위 상세
               </button>
-              <span style="font-size:.68rem;color:var(--t3)">노란배경=복구(적체)/수동추가 행 → 수동 확인 후 삭제용</span>
+              <span style="font-size:.68rem;color:var(--t3)">노란배경=복구(적체)/수동추가 행</span>
             </div>
+            <div style="margin-top:8px;display:flex;gap:6px;flex-wrap:wrap;align-items:center;border-top:1px dashed var(--border);padding-top:8px">
+              <span style="font-size:.7rem;color:var(--t2)">적체 노란행 삭제 — 기준일(이 날짜 0시 KST 이전 제출분만 삭제):</span>
+              <input id="yellowDelBefore" type="date" value="2026-06-30" style="font-size:.72rem;padding:3px 6px;border:1px solid var(--border);border-radius:6px">
+              <button class="btn-sm" onclick="runYellowRowsDelete(false)" style="font-size:.72rem;background:#6B7280;color:#fff;border:none;padding:4px 10px;border-radius:6px;cursor:pointer" title="삭제하지 않고 각 탭에서 지워질 행 수만 미리 계산합니다.">
+                <i class="fas fa-search"></i> 미리보기(삭제 안 함)
+              </button>
+              <button class="btn-sm" onclick="runYellowRowsDelete(true)" style="font-size:.72rem;background:#DC2626;color:#fff;border:none;padding:4px 10px;border-radius:6px;cursor:pointer" title="기준일 이전 적체 노란행을 실제로 삭제합니다(되돌릴 수 없음). 시트 현재 색을 재확인하고 DB와 일치하는 탭만 아래→위로 삭제. 불일치 탭은 자동 건너뜀.">
+                <i class="fas fa-trash-alt"></i> 적체 노란행 삭제 실행
+              </button>
+            </div>
+            <div id="yellowDelResult" style="margin-top:8px;font-size:.72rem;color:var(--t2)"></div>
             <div id="orderMirrorActions" class="hidden" style="margin-top:10px;display:flex;gap:6px;flex-wrap:wrap">
               <button class="btn-sm" onclick="runOrderReconcile(null)" style="font-size:.72rem;background:#16A34A;color:#fff;border:none;padding:4px 10px;border-radius:6px;cursor:pointer">
                 <i class="fas fa-redo"></i> 막힌 주문 재시도(복구)

@@ -698,6 +698,114 @@ async function downloadYellowRowsCsv(fmt) {
   }
 }
 
+// ── 적체 노란행(복구) 일괄 삭제 ── 되돌릴 수 없음. 탭별로 서버가 현재 색 재확인 + DB 일치 시에만 삭제.
+let _yellowDelBackup = [];
+function _escH(s) { return String(s == null ? "" : s).replace(/[&<>"]/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c])); }
+
+async function runYellowRowsDelete(doDelete) {
+  const inp = document.getElementById("yellowDelBefore");
+  const beforeDateKst = (inp && inp.value) ? inp.value : "2026-06-30";
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(beforeDateKst)) { showToast("기준일을 YYYY-MM-DD로 입력하세요.", "error"); return; }
+  if (doDelete) {
+    if (!confirm(`[되돌릴 수 없음] ${beforeDateKst} 0시(KST) 이전 제출된 '적체(복구) 노란행'을 모든 탭에서 실제로 삭제합니다.\n\n· 시트의 현재 노란색을 재확인하고, DB 기록과 일치하는 탭만 삭제합니다(불일치 탭은 자동 건너뜀).\n· 삭제된 행 내용은 백업 CSV로 받을 수 있습니다.\n\n진행할까요?`)) return;
+    if (!confirm("정말 삭제를 실행합니다. 한 번 더 확인합니다. 계속할까요?")) return;
+  }
+  const token = sessionStorage.getItem("admin_token");
+  const base = (typeof API_BASE_URL !== "undefined" && API_BASE_URL) ? API_BASE_URL : "";
+  const hdr = token ? { "Authorization": "Bearer " + token } : {};
+  const resultEl = document.getElementById("yellowDelResult");
+  const setMsg = (h) => { if (resultEl) resultEl.innerHTML = h; };
+  setMsg('<i class="fas fa-spinner fa-spin"></i> 대상 탭 목록 불러오는 중…');
+
+  let items = [];
+  try {
+    const r = await fetch(base + "/api/diag/yellow-rows-export?format=json&source=reconcile", { headers: hdr });
+    if (!r.ok) throw new Error("HTTP " + r.status);
+    const j = await r.json();
+    items = (j && j.items) || [];
+  } catch (e) { setMsg('<span style="color:#DC2626">탭 목록 로드 실패: ' + _escH(e.message || e) + "</span>"); return; }
+  if (!items.length) { setMsg("복구(적체) 노란행이 있는 탭이 없습니다."); return; }
+
+  const callTab = async (it) => {
+    // busy(reconcile/queue 진행중)면 잠시 후 최대 2회 재시도
+    for (let attempt = 0; attempt < 3; attempt++) {
+      const r = await fetch(base + "/api/diag/yellow-rows-delete", {
+        method: "POST",
+        headers: Object.assign({ "Content-Type": "application/json" }, hdr),
+        body: JSON.stringify({ sheetId: it.sheetId, gid: it.gid, tabName: it.tabName, beforeDateKst, source: "reconcile", confirm: doDelete }),
+      });
+      const j = await r.json().catch(() => ({}));
+      if (!r.ok) { j._http = r.status; return j; }
+      if (j.skipped === "busy" && attempt < 2) { await new Promise(rs => setTimeout(rs, 1800)); continue; }
+      return j;
+    }
+  };
+
+  _yellowDelBackup = [];
+  let totalDeleted = 0, totalSkippedRows = 0, totalExtra = 0, doneTabs = 0;
+  const busyTabs = [], errorTabs = [], claimFailTabs = [], skipRowTabs = [];
+  for (const it of items) {
+    doneTabs++;
+    setMsg(`<i class="fas fa-spinner fa-spin"></i> ${doDelete ? "삭제" : "미리보기"} ${doneTabs}/${items.length} — ${_escH(it.tabName || "")} (누적 ${totalDeleted})`);
+    try {
+      const j = await callTab(it);
+      if (!j || j.ok === false || j._http) { errorTabs.push({ tab: it.tabName, msg: (j && j.error) || ("HTTP " + (j && j._http)) }); continue; }
+      if (j.skipped === "busy") { busyTabs.push({ tab: j.tab || it.tabName, url: it.sheetTabUrl }); continue; }
+      totalDeleted += doDelete ? (j.deleted || 0) : (j.wouldDelete || 0);
+      totalSkippedRows += (j.skippedCount || 0);
+      totalExtra += (j.extraYellow || 0);
+      if (j.skippedCount) skipRowTabs.push({ tab: j.tab || it.tabName, url: it.sheetTabUrl, n: j.skippedCount });
+      if (j.claimCleanupFailed) claimFailTabs.push({ tab: j.tab || it.tabName, url: it.sheetTabUrl });
+      if (doDelete && j.backup && j.backup.length) {
+        for (const bk of j.backup) _yellowDelBackup.push({ tab: j.tab || it.tabName, url: it.sheetTabUrl, row: bk.row, values: bk.values });
+      }
+    } catch (e) { errorTabs.push({ tab: it.tabName, msg: e.message || String(e) }); }
+  }
+
+  let html = `<div style="font-weight:600;color:${doDelete ? "#DC2626" : "#374151"}">${doDelete ? "삭제 완료" : "미리보기"} — 총 ${doDelete ? "삭제" : "예정"} ${totalDeleted}행 · 탭 ${items.length}개${totalSkippedRows ? ` · 건너뛴 행 ${totalSkippedRows}` : ""}${totalExtra ? ` · 기타노란행 ${totalExtra}` : ""}</div>`;
+  if (claimFailTabs.length) {
+    html += `<div style="margin-top:6px;color:#B91C1C;font-weight:700">⛔ DB 정리 실패 ${claimFailTabs.length}탭 — 시트는 삭제됐으나 DB가 불일치합니다. 해당 탭은 재실행하지 마시고 알려주세요:<ul style="margin:4px 0 0 16px">` +
+      claimFailTabs.map(m => `<li>${_escH(m.tab)} ${m.url ? `<a href="${m.url}" target="_blank" style="color:#2563EB">열기</a>` : ""}</li>`).join("") + "</ul></div>";
+  }
+  if (busyTabs.length) {
+    html += `<div style="margin-top:6px;color:#B45309"><b>⏳ 진행중 충돌로 건너뜀 ${busyTabs.length}탭</b> — 잠시 후 다시 실행하세요: ` +
+      busyTabs.map(m => _escH(m.tab)).join(", ") + "</div>";
+  }
+  if (skipRowTabs.length) {
+    html += `<div style="margin-top:6px;color:#6B7280"><b>일부 행 건너뜀</b>(노란색 아님/내용불일치 — 행 밀림 가능, 수동 확인): ` +
+      skipRowTabs.map(m => `${_escH(m.tab)}(${m.n})${m.url ? ` <a href="${m.url}" target="_blank" style="color:#2563EB">열기</a>` : ""}`).join(", ") + "</div>";
+  }
+  if (errorTabs.length) {
+    html += `<div style="margin-top:6px;color:#DC2626"><b>오류 ${errorTabs.length}탭</b>: ` + errorTabs.map(e => _escH(e.tab) + "(" + _escH(e.msg) + ")").join(", ") + "</div>";
+  }
+  if (doDelete && _yellowDelBackup.length) {
+    html += `<div style="margin-top:6px"><button onclick="downloadYellowDelBackup()" style="font-size:.72rem;background:#0ca678;color:#fff;border:none;padding:4px 10px;border-radius:6px;cursor:pointer"><i class="fas fa-download"></i> 삭제분 백업 CSV (${_yellowDelBackup.length}행)</button> <span style="color:#B45309">※ 삭제 직후 반드시 백업을 받아두세요</span></div>`;
+  }
+  setMsg(html);
+  showToast(`${doDelete ? "삭제" : "미리보기"} 완료 — ${totalDeleted}행${busyTabs.length ? `, 충돌 ${busyTabs.length}탭` : ""}${claimFailTabs.length ? `, ⛔DB불일치 ${claimFailTabs.length}` : ""}`, claimFailTabs.length ? "error" : (doDelete ? "success" : "info"));
+  if (doDelete) setTimeout(() => loadOrderMirrorStatus(), 1500);
+}
+
+function downloadYellowDelBackup() {
+  if (!_yellowDelBackup.length) return;
+  const esc2 = (v) => { v = String(v == null ? "" : v); return /[",\n\r]/.test(v) ? '"' + v.replace(/"/g, '""') + '"' : v; };
+  const maxCols = _yellowDelBackup.reduce((m, b) => Math.max(m, (b.values || []).length), 0);
+  const head = ["탭명", "시트탭URL", "시트행"];
+  for (let i = 0; i < maxCols; i++) head.push("C" + (i + 1));
+  const lines = [head.map(esc2).join(",")];
+  for (const b of _yellowDelBackup) {
+    const row = [b.tab, b.url || "", b.row].concat((b.values || []).map(v => v));
+    lines.push(row.map(esc2).join(","));
+  }
+  const csv = "﻿" + lines.join("\r\n");
+  const blob = new Blob([csv], { type: "text/csv;charset=utf-8" });
+  const dlUrl = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  a.href = dlUrl; a.download = "삭제분_백업_" + new Date().toISOString().slice(0, 10) + ".csv";
+  document.body.appendChild(a); a.click(); a.remove();
+  setTimeout(() => URL.revokeObjectURL(dlUrl), 1000);
+}
+
 async function loadSyncQueueStats() {
   const el = document.getElementById("syncQueueStats");
   const actionsEl = document.getElementById("syncQueueActions");
