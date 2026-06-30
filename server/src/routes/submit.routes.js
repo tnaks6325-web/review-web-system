@@ -4,12 +4,10 @@ const { writeSheet, readSheet, appendSheet, getSpreadsheetMeta, batchReadSheet, 
 const { throttledCall } = require('../utils/sheetsThrottle');
 const { enqueue } = require('../services/syncQueue.service');
 const { logAbnormal } = require('../services/errorLog.service');
-const { recordParticipationLink } = require('../services/participation.service');
 const {
   createOrderLedgerEntry,
   markOrderQueued,
   markOrderMirrorFailed,
-  recordReviewIdentity,
 } = require('../services/orderLedger.service');
 const pool = require('../db/pool');
 const { logger } = require('../utils/logger');
@@ -706,17 +704,12 @@ router.post('/order', async (req, res, next) => {
       loginName: loginName || '',
     });
 
-    if (ledger.sheetRow) {
-      await recordParticipationLink({
-        sheetId, tabName, rowIndex: ledger.sheetRow,
-        phone8: loginPhone8, phone, name: loginName || orderer,
-        source: 'order_submit',
-      });
-      await recordReviewIdentity({
-        sheetId, tabName, tabGid: ledger.tabGid, rowIndex: ledger.sheetRow,
-        phone8: loginPhone8, phone, name: loginName || orderer, recipient,
-      });
-    }
+    // ★ 신원 기록(recordParticipationLink/recordReviewIdentity)은 여기서 하지 않는다.
+    //   제출 시점의 ledger.sheetRow는 RAW 미러 스냅샷 기반 "빈 행" 추정치라,
+    //   미러 stale·로스터 선기입 탭에서는 '다른 리뷰어의 행'을 가리킬 수 있다.
+    //   가드 전에 그 행에 phone8을 찍으면(=리뷰어 교차노출 버그) review_index/participation_links가 오염된다.
+    //   → 신원 기록은 큐 워커(syncQueue order_append)에서 "다중컬럼 가드 통과 + 실제 시트쓰기 성공 후,
+    //     실제로 쓴 행에만" 수행한다(거기서만 신뢰 가능한 시트행↔phone8 링크가 확정됨).
 
     let queued = false;
     if (ledger.sheetRow) {
