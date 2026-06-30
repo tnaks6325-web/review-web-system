@@ -28,6 +28,7 @@ const {
   _osRowToOrderData,
   _fieldToCol,
   rowIdentityMatches,
+  computeRowWriteSig,
 } = require('./orderLedger.service');
 const { logger } = require('../utils/logger');
 
@@ -452,11 +453,15 @@ async function _executeBatch(items, sheetId, tabName) {
       // ★ R-1b: 조건부 written(mirror_status<>'written'). 락분리(AUTO=1)로 단건 백스톱이
       //   같은 주문을 먼저 썼다면 0행 갱신 → 신원기록 생략(이중 흡수). markOrderWritten 전역함수는
       //   reconcile 등 타 호출자 보존 위해 손대지 않고 여기서 로컬 조건부 UPDATE.
+      // 역동기 provenance(R1): 방금 쓴 매핑칸 서명 기록 → detect가 내 흔적을 변경으로 오인 안 함.
+      let _sig = null;
+      try { _sig = computeRowWriteSig(tabContext.headers, x.orderData); } catch (_) {}
       const w = await pool.query(
         `UPDATE order_submissions SET mirror_status='written',
-                sheet_row=COALESCE($2::int, sheet_row), sheet_written_at=NOW(), sheet_error=NULL
+                sheet_row=COALESCE($2::int, sheet_row), sheet_written_at=NOW(), sheet_error=NULL,
+                last_sheet_write_sig=COALESCE($3, last_sheet_write_sig)
           WHERE id=$1 AND mirror_status<>'written' RETURNING id`,
-        [x.p.orderSubmissionId, x.sheetRow]
+        [x.p.orderSubmissionId, x.sheetRow, _sig]
       );
       if (w.rowCount === 0) {
         await pool.query(`UPDATE sync_queue SET status='done', processed_at=NOW(), error_msg=NULL WHERE id=$1`, [x.item.id]);
@@ -657,7 +662,8 @@ async function _executeItem(item) {
           name: loginName || (orderData && orderData.orderer),
           recipient: orderData && orderData.recipient,
         });
-        await markOrderWritten(orderSubmissionId, sheetRow);
+        let _sig = null; try { _sig = computeRowWriteSig(tabContext.headers, orderData); } catch (_) {}
+        await markOrderWritten(orderSubmissionId, sheetRow, _sig);
       } catch (err) {
         await markOrderMirrorFailed(orderSubmissionId, err);
         throw err;
@@ -685,7 +691,7 @@ async function _executeItem(item) {
       if (!tabContext || !tabContext.headers || !tabContext.headers.length) throw new Error('RAW 메타 없음'); // 재시도
       const fullRow = mapOrderToSheetRow(tabContext.headers, _osRowToOrderData(os)); // 최신 DB값(=newValue)
       const cols = (edits || []).map(e => _fieldToCol(tabContext.headers, e.field)).filter(c => c >= 0);
-      if (!cols.length) { await markOrderWritten(orderSubmissionId, os.sheet_row); break; }
+      if (!cols.length) { let _s=null; try{_s=computeRowWriteSig(tabContext.headers,_osRowToOrderData(os));}catch(_){} await markOrderWritten(orderSubmissionId, os.sheet_row, _s); break; }
       const minC = Math.min(...cols), maxC = Math.max(...cols);
       invalidateSheetMeta(os.sheet_id);
       const rowRange = `'${tabContext.tabName}'!${_getColLetter(minC)}${os.sheet_row}:${_getColLetter(maxC)}${os.sheet_row}`;
@@ -718,7 +724,8 @@ async function _executeItem(item) {
         `UPDATE order_submissions SET last_edit_seq = GREATEST(last_edit_seq, $2) WHERE id = $1`,
         [orderSubmissionId, Number(editSeq) || 0]
       );
-      await markOrderWritten(orderSubmissionId, os.sheet_row);
+      { let _sig = null; try { _sig = computeRowWriteSig(tabContext.headers, _osRowToOrderData(os)); } catch (_) {}
+        await markOrderWritten(orderSubmissionId, os.sheet_row, _sig); }
       break;
     }
 

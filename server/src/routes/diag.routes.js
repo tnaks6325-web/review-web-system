@@ -2245,6 +2245,103 @@ router.post('/order-edit', authMiddleware, adminOrMasterMiddleware, async (req, 
   } catch (err) { next(err); }
 });
 
+// ═══════════════════════════════════════════════════════════
+// 시트→DB 역동기화(옵션·수동·기본 OFF) — 감지/조회/적용. (admin/master 전용)
+//   SHEET_REVERSE_SYNC='1' 에서만 동작. 적대검증(레드→블루→심판) 최종설계 반영.
+//   자동 무인 동기 없음: detect로 "제안" 생성 → 사람이 목록 검토 → apply로 명시 적용(order_update 위임).
+// ═══════════════════════════════════════════════════════════
+
+// POST /api/diag/reverse-sync-detect { sheetId, tabName, includeNullSig? } — 감지(읽기전용, 제안 생성)
+router.post('/reverse-sync-detect', authMiddleware, adminOrMasterMiddleware, async (req, res, next) => {
+  try {
+    if (process.env.SHEET_REVERSE_SYNC !== '1') return res.status(403).json({ ok: false, error: '역동기화 비활성(SHEET_REVERSE_SYNC)' });
+    const { sheetId, tabName, includeNullSig } = req.body || {};
+    if (!sheetId || !tabName) return res.status(400).json({ ok: false, error: 'sheetId, tabName 필수' });
+    const { detectReverseSyncProposals } = require('../services/orderLedger.service');
+    const out = await detectReverseSyncProposals({ sheetId, tabName, includeNullSig: includeNullSig === true });
+    res.json({ ok: true, ...out });
+  } catch (err) { next(err); }
+});
+
+// GET /api/diag/reverse-sync-list?sheetId&tabName&status=open — 제안 목록(검토용)
+router.get('/reverse-sync-list', authMiddleware, adminOrMasterMiddleware, async (req, res, next) => {
+  try {
+    const status = ['open', 'applied', 'dismissed'].includes(req.query.status) ? req.query.status : 'open';
+    const params = [status];
+    const conds = ['status = $1'];
+    if (req.query.sheetId) { params.push(req.query.sheetId); conds.push(`sheet_id = $${params.length}`); }
+    if (req.query.tabName) { params.push(req.query.tabName); conds.push(`tab_name = $${params.length}`); }
+    const lim = Math.min(Math.max(parseInt(req.query.limit, 10) || 200, 1), 1000);
+    const { rows } = await pool.query(
+      `SELECT id, os_id AS "osId", sheet_id AS "sheetId", tab_name AS "tabName", sheet_row AS "sheetRow",
+              proposal_type AS "type", field, old_value AS "oldValue", new_value AS "newValue",
+              status, detected_at AS "detectedAt", resolved_at AS "resolvedAt", resolved_by AS "resolvedBy"
+         FROM reverse_sync_proposals WHERE ${conds.join(' AND ')}
+        ORDER BY detected_at DESC LIMIT ${lim}`,
+      params
+    );
+    res.json({ ok: true, count: rows.length, items: rows });
+  } catch (err) { next(err); }
+});
+
+// POST /api/diag/reverse-sync-apply { proposalId } — edit 제안 적용(order_update 위임). cancel_suspect 거부.
+router.post('/reverse-sync-apply', authMiddleware, adminOrMasterMiddleware, async (req, res, next) => {
+  try {
+    if (process.env.SHEET_REVERSE_SYNC !== '1') return res.status(403).json({ ok: false, error: '역동기화 비활성(SHEET_REVERSE_SYNC)' });
+    if (process.env.ORDER_LEDGER_WRITE_ENABLED !== 'true') return res.status(503).json({ ok: false, error: 'order ledger 쓰기 비활성(ORDER_LEDGER_WRITE_ENABLED)' });
+    const { proposalId } = req.body || {};
+    if (!proposalId) return res.status(400).json({ ok: false, error: 'proposalId 필수' });
+    const { rows } = await pool.query(`SELECT * FROM reverse_sync_proposals WHERE id = $1 AND status = 'open'`, [proposalId]);
+    if (!rows.length) return res.status(404).json({ ok: false, error: 'not_found_or_resolved' });
+    const p = rows[0];
+    if (p.proposal_type === 'cancel_suspect') return res.status(409).json({ ok: false, error: 'cancel은 order-cancel 엔드포인트로 명시 처리하세요' }); // R4
+    // G1: field 화이트리스트 재검증(인젝션/오염 방어).
+    if (!_ORDER_LEDGER_EDIT_FIELDS.includes(p.field)) return res.status(400).json({ ok: false, error: `허용되지 않은 필드: ${p.field}` });
+
+    const by = String((req.admin && (req.admin.name || req.admin.role)) || 'admin').slice(0, 100);
+    const editSeq = Date.now();
+    const { withJobLock } = require('../utils/jobLock');
+    const { enqueue } = require('../services/syncQueue.service');
+    // R5/R7/G6: 기존 order-edit과 동일 per-order 락 + deleted_at + edit_seq 불변 검증 후 order_update 위임.
+    const out = await withJobLock('order_ledger:' + p.os_id, async () => {
+      const { rows: cur } = await pool.query(`SELECT last_edit_seq, deleted_at FROM order_submissions WHERE id = $1`, [p.os_id]);
+      if (!cur.length || cur[0].deleted_at) return { stale: true };
+      // G6: 감지 후 정식 편집/취소가 있었으면 stale → 거부(최신편집을 옛 시트값으로 덮음 방지).
+      if (p.detected_edit_seq != null && Number(cur[0].last_edit_seq) !== Number(p.detected_edit_seq)) return { stale: true };
+      const { rows: up } = await pool.query(
+        `UPDATE order_submissions SET ${p.field} = $2, updated_at = NOW()
+           WHERE id = $1 AND deleted_at IS NULL RETURNING mirror_status`,    // field=화이트리스트라 인젝션 불가
+        [p.os_id, p.new_value]
+      );
+      if (!up.length) return { stale: true };
+      await enqueue('order_update', { orderSubmissionId: p.os_id, editSeq, edits: [{ field: p.field, oldValue: p.old_value, newValue: p.new_value }] });
+      return { mirrorStatus: up[0].mirror_status };
+    });
+    if (out && out.skipped) return res.status(409).json({ ok: false, error: '다른 편집/취소 진행 중 — 재시도하세요' });
+    if (out && out.stale) {
+      await pool.query(`UPDATE reverse_sync_proposals SET status='dismissed', resolved_at=NOW(), resolved_by=$2 WHERE id=$1`, [proposalId, by]);
+      return res.status(409).json({ ok: false, error: 'stale_proposal_dismissed (감지 후 주문이 편집/취소됨)' });
+    }
+    await pool.query(`UPDATE reverse_sync_proposals SET status='applied', resolved_at=NOW(), resolved_by=$2 WHERE id=$1`, [proposalId, by]);
+    require('../jobs/queuePump').kickQueuePump();
+    res.json({ ok: true, applied: true, field: p.field, editSeq });
+  } catch (err) { next(err); }
+});
+
+// POST /api/diag/reverse-sync-dismiss { proposalId } — 제안 기각(적용 안 함)
+router.post('/reverse-sync-dismiss', authMiddleware, adminOrMasterMiddleware, async (req, res, next) => {
+  try {
+    const { proposalId } = req.body || {};
+    if (!proposalId) return res.status(400).json({ ok: false, error: 'proposalId 필수' });
+    const by = String((req.admin && (req.admin.name || req.admin.role)) || 'admin').slice(0, 100);
+    const { rowCount } = await pool.query(
+      `UPDATE reverse_sync_proposals SET status='dismissed', resolved_at=NOW(), resolved_by=$2 WHERE id=$1 AND status='open'`,
+      [proposalId, by]
+    );
+    res.json({ ok: true, dismissed: rowCount });
+  } catch (err) { next(err); }
+});
+
 // POST /api/diag/order-cancel — 주문 소프트삭제(deleted_at) + 시트행 클리어(written이면 큐 order_cancel)
 router.post('/order-cancel', authMiddleware, adminOrMasterMiddleware, async (req, res, next) => {
   try {
