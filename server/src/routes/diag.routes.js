@@ -2116,8 +2116,10 @@ router.post('/order-flush-tab', authMiddleware, adminOrMasterMiddleware, async (
             remaining, running: true, elapsedMs: Date.now() - start };
           if (!untilEmpty) break;
           if (remaining === 0) break;
-          // 이번 라운드에 아무 진전 없음
-          if ((drain.processed || 0) === 0 && recRequeued === 0) {
+          // 이번 라운드에 아무 진전 없음 — 시트 반영 성공(succeeded) 기준으로 판정.
+          //   (processed 기준이면 claim 후 전부 실패→pending 복원된 라운드도 '진전'으로 오인해
+          //    같은 항목을 HARD_CAP까지 빠르게 재시도하며 쿼터를 낭비할 수 있음.)
+          if ((drain.succeeded || 0) === 0 && recRequeued === 0) {
             // reconcile이 락 경합으로 양보됐을 뿐이면(다른 reconcile 진행 중) busy-spin 없이 잠깐 대기 후 재시도.
             if (recSkipped) { await new Promise(r => setTimeout(r, 5000)); continue; }
             break; // 진짜 진전 없음(메타없음 등 막힘) → 무한루프 방지 종료
