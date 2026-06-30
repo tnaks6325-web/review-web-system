@@ -127,6 +127,7 @@
           <div style="display:flex;align-items:center;gap:8px">
             <div id="pagerTop"></div>
             <button id="btnMapping" class="btn btn-ghost btn-sm" onclick="openMapping()" style="display:none"><i class="fas fa-sliders"></i> 컬럼 매핑</button>
+            <button id="btnCsv" class="btn btn-ghost btn-sm" onclick="downloadCsv()" style="display:none" title="이 탭에 저장된 전체 데이터를 CSV로 다운로드"><i class="fas fa-file-csv"></i> CSV 다운로드</button>
           </div>
         </div>
         <div id="viewerBody"><div class="empty"><i class="fas fa-table" style="font-size:28px;opacity:.4"></i><br/><br/>왼쪽에서 시트의 탭을 선택하면<br/>해당 탭의 원본 데이터가 표로 표시됩니다.</div></div>
@@ -305,7 +306,32 @@
     document.querySelectorAll('.tab-item').forEach(n=>n.classList.remove('active'));
     if (el) el.classList.add('active');
     document.getElementById('btnMapping').style.display = 'inline-flex';
+    document.getElementById('btnCsv').style.display = 'inline-flex';
     await loadRows();
+  }
+
+  // 이 탭에 저장된 RAW 행 전체를 CSV로 다운로드 (인증 헤더 필요 → fetch+blob)
+  async function downloadCsv(){
+    if (!_sel) return;
+    const btn = document.getElementById('btnCsv');
+    const orig = btn.innerHTML; btn.disabled = true; btn.innerHTML = '<i class="fas fa-spinner fa-spin"></i> 준비 중…';
+    try {
+      const token = sessionStorage.getItem('admin_token');
+      const url = API_BASE_URL + '/api/raw/rows.csv?sheetId=' + encodeURIComponent(_sel.sheetId) + '&gid=' + encodeURIComponent(_sel.gid);
+      const res = await fetch(url, { headers: token ? { 'Authorization': 'Bearer ' + token } : {} });
+      if (!res.ok) throw new Error('HTTP ' + res.status);
+      const blob = await res.blob();
+      const dlUrl = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = dlUrl;
+      a.download = 'raw_' + String(_sel.tabName || 'tab').replace(/[^\w가-힣().-]+/g, '_') + '.csv';
+      document.body.appendChild(a); a.click(); a.remove();
+      setTimeout(() => URL.revokeObjectURL(dlUrl), 1000);
+    } catch (e) {
+      alert('CSV 다운로드 실패: ' + (e && e.message ? e.message : e));
+    } finally {
+      btn.disabled = false; btn.innerHTML = orig;
+    }
   }
 
   async function loadRows(){
