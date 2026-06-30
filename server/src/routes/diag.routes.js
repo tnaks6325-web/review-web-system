@@ -2292,6 +2292,35 @@ router.get('/order-written-sample', authMiddleware, async (req, res, next) => {
   }
 });
 
+// ═══════════════════════════════════════════════════════════
+// GET /api/diag/order-stuck-export?sheetId&tabName — 막힌 주문 전체 데이터 추출(수동 입력용)
+//   시트에 반영 못 한(written 아님) 주문의 전체 필드를 내려준다. PII 포함이라 admin/master 전용.
+//   직원이 시트 빈 행에 붙여넣어 수동 반영할 때 사용. limit 기본 2000.
+// ═══════════════════════════════════════════════════════════
+router.get('/order-stuck-export', authMiddleware, adminOrMasterMiddleware, async (req, res, next) => {
+  try {
+    const { sheetId, tabName } = req.query;
+    if (!sheetId || !tabName) return res.status(400).json({ ok: false, error: 'sheetId, tabName 필수' });
+    const limit = Math.min(parseInt(req.query.limit, 10) || 2000, 5000);
+    const { rows } = await pool.query(
+      `SELECT os.id, os.mirror_status AS "mirrorStatus", os.sheet_row AS "sheetRow",
+              os.orderer, os.recipient, os.user_id AS "userId", os.phone, os.address,
+              os.bank, os.account, os.depositor, os.price,
+              os.order_num AS "orderNum", os.date_str AS "dateStr",
+              os.selected_opt_key AS "selectedOptKey", os.memo,
+              os.submitted_at AS "submittedAt"
+         FROM order_submissions os
+        WHERE os.sheet_id = $1 AND os.tab_name = $2 AND os.mirror_status <> 'written'
+        ORDER BY os.submitted_at ASC
+        LIMIT $3`,
+      [sheetId, tabName, limit]
+    );
+    res.json({ ok: true, count: rows.length, items: rows });
+  } catch (err) {
+    next(err);
+  }
+});
+
 // GET /api/diag/build-history — 빌드 히스토리
 router.get('/build-history', authMiddleware, async (req, res, next) => {
   try {
