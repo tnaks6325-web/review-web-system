@@ -13,15 +13,17 @@ const express = require('express');
 const router = express.Router();
 const pool = require('../db/pool');
 const { authMiddleware, adminOrMasterMiddleware } = require('../middleware/auth.middleware');
-const { mirrorAllSheets } = require('../services/rawMirror.service');
+const { mirrorAllSheets, mirrorOneSheet } = require('../services/rawMirror.service');
 
 // 동시 미러링 방지용 메모리 잠금
 let _mirrorRunning = false;
 let _lastMirror = null; // 마지막 실행 요약
 
 // ═══════════════════════════════════════════════════════════
-// POST /api/raw/mirror — 전체 RAW 미러링 (비동기)
-//   body: { force?: boolean, includeHidden?: boolean }
+// POST /api/raw/mirror — RAW 미러링
+//   body: { sheetId?: string, force?: boolean, includeHidden?: boolean }
+//   - sheetId 지정 시: 그 시트만 미러(필요한 탭만 → 전체 순회 없이 시간 절약). inline 결과 즉시 반환.
+//   - sheetId 미지정 시: 등록된 전체 시트 미러(기존 동작, 비동기 백그라운드).
 // ═══════════════════════════════════════════════════════════
 router.post('/mirror', authMiddleware, adminOrMasterMiddleware, async (req, res, next) => {
   try {
@@ -31,10 +33,25 @@ router.post('/mirror', authMiddleware, adminOrMasterMiddleware, async (req, res,
 
     const force = req.body?.force === true;
     const includeHidden = req.body?.includeHidden !== false; // 기본 true
+    const sheetId = String(req.body?.sheetId || '').trim();
+
+    // ★ 단일 시트 미러(필요한 탭만): 등록된 전체 시트를 순회하지 않고 해당 시트만 재읽기 → 시간 절약.
+    //   캠페인 시트 1개라 빠르므로 inline await 후 결과를 즉시 반환(전체 미러처럼 폴링 불필요).
+    if (sheetId) {
+      _mirrorRunning = true;
+      try {
+        const result = await mirrorOneSheet(sheetId, { force, includeHidden });
+        _lastMirror = { ...result, scope: 'single', sheetId, force, finishedAt: new Date().toISOString() };
+        return res.json({ ok: true, mode: 'sync', scope: 'single', sheetId, force, ...result });
+      } finally {
+        _mirrorRunning = false;
+      }
+    }
 
     res.json({
       ok: true,
       mode: 'async',
+      scope: 'all',
       message: 'RAW 미러링이 시작되었습니다. 완료 후 /api/raw/status 로 확인하세요.',
     });
 
