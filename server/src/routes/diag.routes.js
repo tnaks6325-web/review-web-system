@@ -2802,6 +2802,136 @@ router.get('/order-stuck-export', authMiddleware, adminOrMasterMiddleware, async
   }
 });
 
+// ═══════════════════════════════════════════════════════════
+// GET /api/diag/yellow-rows-export — 노란배경(복구/수동추가) 행이 있는 탭 목록 추출
+//   배경: reconcile 자동복구·order-manual-add 는 시트 하단에 새 행을 append 하고
+//     연한 노랑({red:1,green:0.95,blue:0.6}) 배경으로 표시한다(수동입력분과 시각 구분).
+//     그 행들은 sheet_row_claims 에 source='order_reconcile'(적체복구) 또는 'manual'(수동추가)
+//     로 기록된다. 쓰기 차단 시 claim 은 삭제(_releaseOrderRowClaim)되므로, 남아있는 claim
+//     = 실제로 (거의 다) 시트에 기록된 노란행.
+//   이 엔드포인트는 그 claim 들을 탭별로 집계해 "노란행이 있는 탭"의 탭명/시트탭URL/행번호를
+//     CSV(또는 JSON)로 내려준다. 사용자가 수동 확인 후 삭제하는 용도. admin/master 전용.
+//   query: { format: ''(json)|csv|detail.csv, source: all|reconcile|manual, sheetId?, writtenOnly? }
+//   - format=csv      : 탭 단위 요약(탭명·시트탭URL·노란행수·행번호목록)
+//   - format=detail.csv: 행 단위 상세(시트행·주문자·주문번호·상태 포함)
+//   한계: 실시간 주문이 실패 후 "제자리(원래 행)"에서 복구돼 노란색이 된 경우는 claim source가
+//     'order_submit' 이라 빠질 수 있다(append 신규행이 아닌 in-place 복구). 대부분의 적체 노란행은
+//     하단 append(=reconcile/manual)이므로 본 목록으로 커버된다.
+// ═══════════════════════════════════════════════════════════
+router.get('/yellow-rows-export', authMiddleware, adminOrMasterMiddleware, async (req, res, next) => {
+  try {
+    const format = String(req.query.format || '').toLowerCase();
+    const srcParam = String(req.query.source || 'all').toLowerCase();
+    const sources = srcParam === 'reconcile' ? ['order_reconcile']
+      : srcParam === 'manual' ? ['manual']
+      : ['order_reconcile', 'manual'];
+    const writtenOnly = req.query.writtenOnly === '1' || req.query.writtenOnly === 'true';
+
+    const params = [sources];
+    let whereExtra = '';
+    if (req.query.sheetId) { params.push(String(req.query.sheetId)); whereExtra += ` AND c.sheet_id = $${params.length}`; }
+    const writtenCond = writtenOnly ? ` AND os.mirror_status = 'written'` : '';
+
+    const sheetUrl = (sheetId, gid) => {
+      const base = `https://docs.google.com/spreadsheets/d/${sheetId}/edit`;
+      return (gid !== null && gid !== undefined && String(gid) !== '') ? `${base}#gid=${gid}` : base;
+    };
+    const esc = (v) => { v = String(v == null ? '' : v); return /[",\n\r]/.test(v) ? '"' + v.replace(/"/g, '""') + '"' : v; };
+    const fmtKST = (d) => {
+      if (!d) return '';
+      const dt = d instanceof Date ? d : new Date(d);
+      if (isNaN(dt.getTime())) return String(d);
+      try {
+        return new Intl.DateTimeFormat('sv-SE', {
+          timeZone: 'Asia/Seoul', year: 'numeric', month: '2-digit', day: '2-digit',
+          hour: '2-digit', minute: '2-digit', second: '2-digit', hour12: false,
+        }).format(dt);
+      } catch (_) { return dt.toISOString(); }
+    };
+    const srcMap = { order_reconcile: '복구(적체)', manual: '수동추가' };
+
+    // ── 행 단위 상세 (format=detail.csv) ──
+    if (format === 'detail.csv' || format === 'detail' || req.query.detail === '1') {
+      const { rows } = await pool.query(
+        `SELECT c.sheet_id, c.tab_gid, c.tab_name, c.sheet_row, c.source,
+                os.orderer, os.recipient, os.phone, os.order_num,
+                os.mirror_status, os.submitted_at, c.created_at
+           FROM sheet_row_claims c
+           LEFT JOIN order_submissions os ON os.id = c.order_id
+          WHERE c.source = ANY($1) AND c.sheet_row IS NOT NULL${whereExtra}${writtenCond}
+          ORDER BY c.sheet_id, c.tab_name, c.sheet_row`,
+        params
+      );
+      const head = ['탭명', '시트탭URL', '시트행', '출처', '주문자', '수취인', '연락처', '주문번호', '상태', '제출시각(KST)', '기록시각(KST)', '시트ID', 'gid'];
+      const lines = [head.map(esc).join(',')];
+      for (const r of rows) {
+        lines.push([
+          r.tab_name || '', sheetUrl(r.sheet_id, r.tab_gid), r.sheet_row || '',
+          srcMap[r.source] || r.source || '', r.orderer || '', r.recipient || '', r.phone || '',
+          r.order_num || '', r.mirror_status || '', fmtKST(r.submitted_at), fmtKST(r.created_at),
+          r.sheet_id || '', r.tab_gid || '',
+        ].map(esc).join(','));
+      }
+      const csv = '﻿' + lines.join('\r\n'); // UTF-8 BOM
+      res.setHeader('Content-Type', 'text/csv; charset=utf-8');
+      res.setHeader('Content-Disposition', `attachment; filename="yellow_rows_detail.csv"; filename*=UTF-8''${encodeURIComponent('노란행_상세.csv')}`);
+      return res.send(csv);
+    }
+
+    // ── 탭 단위 집계 (기본 JSON / format=csv) ──
+    const { rows } = await pool.query(
+      `SELECT c.sheet_id, c.tab_gid, c.tab_name,
+              COUNT(*)::int AS yellow_rows,
+              COUNT(*) FILTER (WHERE c.source = 'order_reconcile')::int AS reconcile_rows,
+              COUNT(*) FILTER (WHERE c.source = 'manual')::int AS manual_rows,
+              COUNT(*) FILTER (WHERE os.mirror_status = 'written')::int AS written_rows,
+              MIN(c.sheet_row)::int AS min_row,
+              MAX(c.sheet_row)::int AS max_row,
+              array_agg(c.sheet_row ORDER BY c.sheet_row) AS row_numbers,
+              MAX(c.created_at) AS last_claim_at
+         FROM sheet_row_claims c
+         LEFT JOIN order_submissions os ON os.id = c.order_id
+        WHERE c.source = ANY($1) AND c.sheet_row IS NOT NULL${whereExtra}${writtenCond}
+        GROUP BY c.sheet_id, c.tab_gid, c.tab_name
+        ORDER BY c.sheet_id, c.tab_name`,
+      params
+    );
+
+    if (format === 'csv') {
+      const head = ['탭명', '시트탭URL', '노란행수', '복구(적체)', '수동추가', '반영확인(written)', '행번호목록', '시트ID', 'gid'];
+      const lines = [head.map(esc).join(',')];
+      for (const r of rows) {
+        const rowNums = (r.row_numbers || []).join(' ');
+        lines.push([
+          r.tab_name || '', sheetUrl(r.sheet_id, r.tab_gid), r.yellow_rows || 0,
+          r.reconcile_rows || 0, r.manual_rows || 0, r.written_rows || 0, rowNums,
+          r.sheet_id || '', r.tab_gid || '',
+        ].map(esc).join(','));
+      }
+      const csv = '﻿' + lines.join('\r\n'); // UTF-8 BOM
+      res.setHeader('Content-Type', 'text/csv; charset=utf-8');
+      res.setHeader('Content-Disposition', `attachment; filename="yellow_rows_tabs.csv"; filename*=UTF-8''${encodeURIComponent('노란행_탭목록.csv')}`);
+      return res.send(csv);
+    }
+
+    const items = rows.map(r => ({
+      tabName: r.tab_name, sheetId: r.sheet_id, gid: r.tab_gid,
+      sheetTabUrl: sheetUrl(r.sheet_id, r.tab_gid),
+      yellowRows: r.yellow_rows, reconcileRows: r.reconcile_rows, manualRows: r.manual_rows,
+      writtenRows: r.written_rows, minRow: r.min_row, maxRow: r.max_row,
+      rowNumbers: r.row_numbers || [], lastClaimAt: r.last_claim_at,
+    }));
+    res.json({
+      ok: true, source: srcParam, writtenOnly,
+      tabCount: items.length,
+      totalYellowRows: items.reduce((s, i) => s + (i.yellowRows || 0), 0),
+      items,
+    });
+  } catch (err) {
+    next(err);
+  }
+});
+
 // GET /api/diag/build-history — 빌드 히스토리
 router.get('/build-history', authMiddleware, async (req, res, next) => {
   try {

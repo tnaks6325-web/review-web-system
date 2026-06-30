@@ -674,6 +674,30 @@ async function runQueueDrain() {
   }
 }
 
+// 노란배경(복구·수동추가) 행이 있는 탭 목록 CSV 다운로드 — 수동 확인 후 삭제용.
+//   format='csv'(탭 단위 요약) | 'detail.csv'(행 단위 상세). 인증 헤더 필요 → fetch+blob.
+async function downloadYellowRowsCsv(fmt) {
+  const format = fmt || "csv";
+  try {
+    const token = sessionStorage.getItem("admin_token");
+    const base = (typeof API_BASE_URL !== "undefined" && API_BASE_URL) ? API_BASE_URL : "";
+    const url = base + "/api/diag/yellow-rows-export?format=" + encodeURIComponent(format);
+    const res = await fetch(url, { headers: token ? { "Authorization": "Bearer " + token } : {} });
+    if (!res.ok) throw new Error("HTTP " + res.status);
+    const blob = await res.blob();
+    if (blob.size < 40) { showToast("노란 복구행 기록이 없습니다.", "info"); return; }
+    const dlUrl = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = dlUrl;
+    const day = new Date().toISOString().slice(0, 10);
+    a.download = (format === "detail.csv" ? "노란행_상세_" : "노란행_탭목록_") + day + ".csv";
+    document.body.appendChild(a); a.click(); a.remove();
+    setTimeout(() => URL.revokeObjectURL(dlUrl), 1000);
+  } catch (err) {
+    showToast("CSV 다운로드 실패: " + (err && err.message ? err.message : err), "error");
+  }
+}
+
 async function loadSyncQueueStats() {
   const el = document.getElementById("syncQueueStats");
   const actionsEl = document.getElementById("syncQueueActions");
