@@ -2370,11 +2370,22 @@ router.post('/order-flush-one', authMiddleware, adminOrMasterMiddleware, async (
 //   비차단(즉시 응답 + 백그라운드 실행). 진행/결과는 order-mirror-status·서버 로그로 관찰.
 router.post('/order-batch-drain', authMiddleware, adminOrMasterMiddleware, async (req, res, next) => {
   try {
-    const { sheetId, tabName } = req.body || {};
+    const { sheetId, tabName, sync } = req.body || {};
     if (!sheetId || !tabName) return res.status(400).json({ ok: false, error: 'sheetId, tabName 필수' });
-    const maxMillis = Math.min(Math.max(parseInt(req.body?.maxMillis, 10) || 60000, 2000), 180000);
+    const flag = process.env.ORDER_BATCH_DRAIN === '1' ? 'batch' : 'single(fallback)';
     const { drainTabQueueBatched } = require('../services/syncQueue.service');
-    res.json({ ok: true, mode: 'async', message: '배치 드레인 시작', flag: process.env.ORDER_BATCH_DRAIN === '1' ? 'batch' : 'single(fallback)' });
+    // sync 모드: 결과를 동기 반환(진단·소량). maxMillis 25s 상한(HTTP 타임아웃 회피).
+    if (sync) {
+      const maxMillis = Math.min(Math.max(parseInt(req.body?.maxMillis, 10) || 20000, 2000), 25000);
+      try {
+        const r = await drainTabQueueBatched({ sheetId, tabName, maxMillis });
+        return res.json({ ok: true, mode: 'sync', flag, result: r });
+      } catch (e) {
+        return res.json({ ok: false, mode: 'sync', flag, error: String(e && e.message), stack: String(e && e.stack).split('\n').slice(0, 4) });
+      }
+    }
+    const maxMillis = Math.min(Math.max(parseInt(req.body?.maxMillis, 10) || 60000, 2000), 180000);
+    res.json({ ok: true, mode: 'async', message: '배치 드레인 시작', flag });
     setImmediate(async () => {
       try {
         const r = await drainTabQueueBatched({ sheetId, tabName, maxMillis });
