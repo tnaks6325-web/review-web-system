@@ -767,8 +767,15 @@ router.post('/order', async (req, res, next) => {
     //   res.json·emitOrderSubmit·markOrderQueued 모두 끝난 뒤라 R1(written→queued 역행) 안전.
     //   order_append만 kick(메타전제 자동충족, R8). 실패해도 30초 cron이 백스톱이라 throw 안 함.
     if (queued) {
-      try { require('../jobs/queuePump').kickQueuePump(); }
-      catch (e) { logger.warn(`[submit/order] queue pump kick 실패(무시, cron 백스톱): ${e.message}`); }
+      try {
+        // ★ 상시 배치(ORDER_BATCH_AUTO=1): 주문은 배치 스케줄러가 탭별로 묶어 근실시간 반영
+        //   (단건 펌프보다 throttle 효율 수십배). 미설정 시 기존 단건 펌프(되돌리기).
+        if (process.env.ORDER_BATCH_AUTO === '1') {
+          require('../jobs/orderBatchScheduler').kickOrderBatch();
+        } else {
+          require('../jobs/queuePump').kickQueuePump();
+        }
+      } catch (e) { logger.warn(`[submit/order] kick 실패(무시, cron 백스톱): ${e.message}`); }
     }
 
   } catch (err) {

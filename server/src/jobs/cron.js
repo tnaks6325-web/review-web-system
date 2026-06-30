@@ -181,6 +181,14 @@ function startCronJobs() {
     }
   });
 
+  // ── ★ 상시 배치 드레인 백스톱 — 15초마다 백로그 탭을 배치로 시트반영(근실시간) ──
+  //   ORDER_BATCH_AUTO=1 일 때만 동작(kickOrderBatch 내부 게이트). 코얼레싱이라 중복 사이클 없음.
+  //   제출 시 즉시 kick + 이 15초 cron이 백스톱(kick 누락·재시작 잔여분 흡수).
+  cron.schedule('*/15 * * * * *', () => {
+    try { require('../jobs/orderBatchScheduler').kickOrderBatch(); }
+    catch (err) { logger.warn(`[CRON-OrderBatch] kick 실패(무시): ${err.message}`); }
+  });
+
   // ── ★ A2+C2: 매시간 stuck/failed 자동 복구 ──
   cron.schedule('0 * * * *', async () => {
     try {
