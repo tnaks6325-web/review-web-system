@@ -681,8 +681,12 @@ async function createOrderLedgerEntry(input) {
 
 async function markOrderQueued(orderSubmissionId) {
   if (!orderSubmissionId) return;
+  // ★ R1: 단조전이 가드. 펌프(queuePump)가 enqueue 직후 이 주문을 이미 'written' 처리했다면
+  //   여기서 'queued'로 역행시키지 않는다(written이면 UPDATE 0행=무해). markOrderWritten은
+  //   무가드 유지 — reconcile의 'failed'→'written' 정상전이를 막지 않기 위함.
   await getPool().query(
-    `UPDATE order_submissions SET queued_at = NOW(), mirror_status = 'queued' WHERE id = $1`,
+    `UPDATE order_submissions SET queued_at = NOW(), mirror_status = 'queued'
+       WHERE id = $1 AND mirror_status <> 'written'`,
     [orderSubmissionId]
   );
 }

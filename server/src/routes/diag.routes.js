@@ -2223,16 +2223,24 @@ router.post('/queue-drain', authMiddleware, adminOrMasterMiddleware, async (req,
       const start = Date.now();
       let rounds = 0, processed = 0, succeeded = 0, failed = 0;
       try {
-        while (Date.now() - start < maxMillis) {
-          const r = await processQueue(batchSize, { interItemDelayMs: 0 });
-          rounds++;
-          processed += r.processed || 0;
-          succeeded += r.succeeded || 0;
-          failed += r.failed || 0;
-          if ((r.processed || 0) === 0) break; // 큐 비었음
-        }
-        _lastQueueDrain = { rounds, processed, succeeded, failed, elapsedMs: Date.now() - start, finishedAt: new Date().toISOString() };
-        logger.info(`[queue-drain] 완료: rounds=${rounds}, processed=${processed}, succeeded=${succeeded}, failed=${failed}, ${Date.now() - start}ms`);
+        const { withJobLock } = require('../utils/jobLock');
+        // ★ R6: 펌프(queuePump)와 동일 advisory lock에 합류 — 펌프·관리자 가속드레인이 동시에
+        //   시트를 드레인해 throttle를 3중 경쟁하지 않도록 동시 1개만 가동. 펌프가 락 보유 중이면
+        //   여기선 즉시 양보(펌프가 이미 처리 중). flush-tab은 별 집합(drainTabQueue)이라 합류 제외.
+        const lockResult = await withJobLock('queue_pump_drain', async () => {
+          while (Date.now() - start < maxMillis) {
+            const r = await processQueue(batchSize, { interItemDelayMs: 0 });
+            rounds++;
+            processed += r.processed || 0;
+            succeeded += r.succeeded || 0;
+            failed += r.failed || 0;
+            if ((r.processed || 0) === 0) break; // 큐 비었음
+            if (r.quotaExceeded) break;           // quota → cron 백오프에 양보
+          }
+        });
+        const skipped = !!(lockResult && lockResult.skipped);
+        _lastQueueDrain = { rounds, processed, succeeded, failed, skipped, elapsedMs: Date.now() - start, finishedAt: new Date().toISOString() };
+        logger.info(`[queue-drain] 완료: rounds=${rounds}, processed=${processed}, succeeded=${succeeded}, failed=${failed}${skipped ? ' (펌프 가동 중 — 양보)' : ''}, ${Date.now() - start}ms`);
       } catch (err) {
         _lastQueueDrain = { error: err.message, finishedAt: new Date().toISOString() };
         logger.error(`[queue-drain] 오류: ${err.message}`);
