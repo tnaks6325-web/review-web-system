@@ -1,79 +1,126 @@
 /**
- * orderBatchScheduler.js — 구매주문 시트반영 "상시 배치" 스케줄러 (근실시간)
+ * orderBatchScheduler.js — 구매주문 시트반영 "상시 배치" 스케줄러 (근실시간, 공정화)
  *
- * 목적: 모든 활성 탭의 order_append를 탭별 배치(가드 1콜 + 쓰기 1콜/청크)로 "상시" 드레인 →
+ * 목적: 활성 탭의 order_append를 탭별 배치(가드 1콜 + 쓰기 1콜/청크)로 "상시" 드레인 →
  *   throttle 쿼터 안전 + 단건 대비 수십배 효율로 근실시간 시트반영.
  *
- * 동작: 제출 시 kick(즉시성) + 15초 cron(백스톱). 코얼레싱(_running/_rerun)으로 한 번에 1사이클만.
- *   각 탭은 검증된 drainTabQueueBatched(레드-블루-심판 + E2E 통과)로 처리 — advisory lock(queue_pump_drain
- *   ∩ order_reconcile)으로 펌프·가속드레인·reconcile과 직렬화(이중쓰기·throttle 과구독 차단).
+ * 공정화(레드-블루-심판 최종안):
+ *  - #1 kick 타깃팅: 제출 시 kickOrderBatch(sheetId,tabName) → 그 탭이 글로벌 우선순위 밖이어도
+ *    이 사이클에 "직접" 드레인(_kickQueue 우선처리) → 소량/저빈도 탭 18~20분 지연 제거.
+ *  - #2 공정 선정: 건수순(count DESC) → "가장 오래 기다린 미반영 주문(min_ready)" FIFO + 대량탭 보장슬롯
+ *    + 라운드로빈 커서(전탭 순회 보장 — top-N 반복편향/기아 제거).
+ *  - busy(throttle>임계)면 전체 양보 대신 "oldest 1탭만" 처리(자가 throttle 봉쇄 회피).
  *
- * 게이트: ORDER_BATCH_AUTO=1 일 때만 활성. 미설정 시 no-op(기존 펌프/30초 cron이 처리 = 되돌리기).
- *   (drainTabQueueBatched 자체는 ORDER_BATCH_DRAIN=1 이라야 배치, 아니면 단건 폴백.)
+ * 각 탭은 검증된 drainTabQueueBatched(advisory lock 직렬화·멱등·손실0·markWritten 후행)로 처리.
  *
- * 손실 0: 실패/quota/락경합은 모두 양보 → 30초 cron·2분주기 reconcile 백스톱이 흡수.
- *   markWritten은 시트 쓰기 성공 후에만(교차노출 불변식 유지).
+ * 게이트: ORDER_BATCH_AUTO=1 일 때만 활성. 미설정 시 no-op(기존 펌프/30초 cron = 되돌리기).
  */
 const pool = require('../db/pool');
 const { logger } = require('../utils/logger');
 
-const TICK_MAX_MS = parseInt(process.env.ORDER_BATCH_TICK_MAX_MS || '25000', 10);   // 한 사이클 총상한
-const PER_TAB_MS = parseInt(process.env.ORDER_BATCH_PER_TAB_MS || '12000', 10);     // 탭당 드레인 상한
-const MAX_TABS = parseInt(process.env.ORDER_BATCH_MAX_TABS || '10', 10);            // 사이클당 탭 수
+const TICK_MAX_MS   = parseInt(process.env.ORDER_BATCH_TICK_MAX_MS || '25000', 10);  // 한 사이클 총상한
+const PER_TAB_MS    = parseInt(process.env.ORDER_BATCH_PER_TAB_MS  || '12000', 10);  // 탭당 드레인 상한
+const MAX_TABS      = parseInt(process.env.ORDER_BATCH_MAX_TABS    || '10', 10);     // 사이클당 탭 수
+const BACKLOG_SLOTS = parseInt(process.env.ORDER_BATCH_BACKLOG_SLOTS || '3', 10);    // 대량탭 보장슬롯(기아 반대전이 방지)
 
-let _running = false, _rerun = false;
+let _running = false, _rerun = false, _rrCursor = 0;
+const _kickQueue = [];   // #1: 타깃 탭 대기열(중복제거)
 
-function isAutoEnabled() {
-  return process.env.ORDER_BATCH_AUTO === '1';
+function isAutoEnabled() { return process.env.ORDER_BATCH_AUTO === '1'; }
+
+// #2: 미반영 탭 선정 — FIFO(min_ready=행배정된 가장 오래된 주문) + count 보장슬롯.
+//   pending_no_row는 reconcile이 행을 줘야 빠지므로 min_ready에서 제외(디프라이오리티) → 행 있는 주문 우선.
+async function _selectTabs() {
+  const { rows } = await pool.query(
+    `WITH agg AS (
+       SELECT sheet_id, tab_name, COUNT(*)::int AS c,
+              MIN(submitted_at) FILTER (WHERE mirror_status <> 'pending_no_row') AS min_ready,
+              MIN(submitted_at) AS min_any
+         FROM order_submissions
+        WHERE deleted_at IS NULL
+          AND mirror_status IN ('pending','pending_no_row','queued','failed')
+          AND sheet_id IS NOT NULL AND tab_name IS NOT NULL AND tab_name <> ''
+        GROUP BY sheet_id, tab_name)
+     SELECT sheet_id, tab_name, c,
+            COALESCE(min_ready, min_any + interval '1 hour') AS sort_key
+       FROM agg ORDER BY sort_key ASC`
+  );
+  if (!rows.length) return [];
+  const fifoN = Math.max(1, MAX_TABS - BACKLOG_SLOTS);
+  const picked = new Map();
+  for (const r of rows.slice(0, fifoN)) picked.set(`${r.sheet_id}||${r.tab_name}`, r);  // FIFO 상위
+  for (const r of [...rows].sort((a, b) => b.c - a.c)) {                                 // 보장슬롯: 대량탭
+    if (picked.size >= MAX_TABS) break;
+    picked.set(`${r.sheet_id}||${r.tab_name}`, r);
+  }
+  return [...picked.values()];
 }
 
-// 시트 미반영 주문이 있는 탭을 건수 내림차순으로 추려 배치 드레인.
-// ★ order_submissions(원장) 기준 — 큐에 없는 pending_no_row(버스트 시 행 미배정분)도 포함해야
-//   drainTabQueueBatched의 reconcile 선행이 행배정+enqueue 후 곧바로 드레인한다(큐만 보면 사각지대).
 async function _cycle() {
   const start = Date.now();
-  // ★ 제안B: throttle가 이미 바쁘면(리뷰제출·RAW미러 등이 예산 사용 중) 이번 사이클 양보 →
-  //   45/분 한도 안에서 다른 시트작업과 공존(배치가 예산 독식 안 함). 다음 kick/15초 cron이 재시도.
-  try {
-    const { getThrottleStatus } = require('../utils/sheetsThrottle');
-    const busyThreshold = parseInt(process.env.ORDER_BATCH_BUSY_THRESHOLD || '35', 10);
-    if (getThrottleStatus().requestsInLastMinute > busyThreshold) {
-      return { tabs: 0, drained: 0, skipped: 'throttle_busy' };
-    }
-  } catch (_) { /* throttle 상태 조회 실패는 무시하고 진행 */ }
-  const { rows } = await pool.query(
-    `SELECT os.sheet_id AS sheet_id, os.tab_name AS tab_name, COUNT(*)::int AS c
-       FROM order_submissions os
-      WHERE os.deleted_at IS NULL
-        AND os.mirror_status IN ('pending','pending_no_row','queued','failed')
-        AND os.sheet_id IS NOT NULL AND os.tab_name IS NOT NULL AND os.tab_name <> ''
-      GROUP BY os.sheet_id, os.tab_name
-      ORDER BY c DESC
-      LIMIT $1`,
-    [MAX_TABS]
-  );
-  if (!rows.length) return { tabs: 0, drained: 0 };
-
   const { drainTabQueueBatched } = require('../services/syncQueue.service');
   let drained = 0, succeeded = 0;
-  for (const r of rows) {
-    if (Date.now() - start > TICK_MAX_MS) break;
-    if (!r.sheet_id || !r.tab_name) continue;
+  const seen = new Set();
+  const drainOne = async (sheetId, tabName) => {
+    const key = `${sheetId}||${tabName}`;
+    if (seen.has(key)) return null;
+    seen.add(key);
     try {
-      const res = await drainTabQueueBatched({ sheetId: r.sheet_id, tabName: r.tab_name, maxMillis: PER_TAB_MS });
+      const res = await drainTabQueueBatched({ sheetId, tabName, maxMillis: PER_TAB_MS });
       drained++;
       if (res && res.succeeded) succeeded += res.succeeded;
+      return res;
     } catch (e) {
-      logger.warn(`[orderBatchTick] tab=${r.tab_name} 드레인 실패(무시, cron 백스톱): ${e && e.message}`);
+      logger.warn(`[orderBatchTick] tab=${tabName} 드레인 실패(무시): ${e && e.message}`);
+      return null;
     }
+  };
+
+  // #1: 타깃 큐 먼저(제출 즉시성). busy여도 제출자 탭은 처리.
+  const targets = [];
+  while (_kickQueue.length) targets.push(_kickQueue.shift());
+  for (const key of targets) {
+    if (Date.now() - start > TICK_MAX_MS) { if (!_kickQueue.includes(key)) _kickQueue.push(key); continue; }
+    const sep = key.indexOf('||');
+    const sheetId = key.slice(0, sep), tabName = key.slice(sep + 2);
+    const res = await drainOne(sheetId, tabName);
+    if (res && res.skipped && !_kickQueue.includes(key)) _kickQueue.push(key);  // 락 busy면 되돌림(다음 tick)
   }
-  if (succeeded) logger.info(`[orderBatchTick] ${drained}개 탭 드레인, ${succeeded}건 시트반영`);
-  return { tabs: rows.length, drained, succeeded };
+
+  // busy면 전체 양보 대신 oldest 1탭만(자가 throttle 봉쇄 회피).
+  let busy = false;
+  try {
+    const { getThrottleStatus } = require('../utils/sheetsThrottle');
+    busy = getThrottleStatus().requestsInLastMinute >
+           parseInt(process.env.ORDER_BATCH_BUSY_THRESHOLD || '40', 10);
+  } catch (_) { /* 조회 실패는 무시 */ }
+
+  const tabs = await _selectTabs();
+  if (busy) {
+    if (tabs[0]) await drainOne(tabs[0].sheet_id, tabs[0].tab_name);
+    if (succeeded) logger.info(`[orderBatchTick] busy: ${drained}탭, ${succeeded}건 반영`);
+    return { tabs: tabs.length, drained, succeeded, mode: 'busy' };
+  }
+
+  // #2: 라운드로빈 커서로 시작점 회전 → 전탭 순회 보장(top-N 반복편향 제거).
+  const n = tabs.length;
+  for (let i = 0; i < n; i++) {
+    if (Date.now() - start > TICK_MAX_MS) break;
+    const r = tabs[(_rrCursor + i) % n];
+    await drainOne(r.sheet_id, r.tab_name);
+  }
+  if (n) _rrCursor = (_rrCursor + 1) % n;
+  if (succeeded) logger.info(`[orderBatchTick] ${drained}탭 드레인, ${succeeded}건 반영`);
+  return { tabs: n, drained, succeeded };
 }
 
-// 비차단 코얼레싱 kick. 제출/cron이 호출. 실행 중이면 1회 재실행 예약.
-function kickOrderBatch() {
+// 비차단 코얼레싱 kick. 인자(sheetId,tabName) 있으면 타깃 큐 적재(제출 즉시성), 없으면 순수 백스톱(15초 cron).
+function kickOrderBatch(sheetId, tabName) {
   if (!isAutoEnabled()) return;
+  if (sheetId && tabName) {
+    const key = `${sheetId}||${tabName}`;
+    if (!_kickQueue.includes(key)) _kickQueue.push(key);
+  }
   if (_running) { _rerun = true; return; }
   _running = true;
   setImmediate(async () => {
@@ -83,4 +130,4 @@ function kickOrderBatch() {
   });
 }
 
-module.exports = { kickOrderBatch, isAutoEnabled, _cycle };
+module.exports = { kickOrderBatch, isAutoEnabled, _cycle, _selectTabs };
