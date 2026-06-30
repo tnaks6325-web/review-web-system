@@ -12,7 +12,7 @@
  */
 
 const pool = require('../db/pool');
-const { writeSheet, appendSheet, readSheet, batchUpdateSheet, setRowBackground, invalidateSheetMeta } = require('./sheets.service');
+const { writeSheet, appendSheet, readSheet, batchUpdateSheet, setRowBackground, setRowsBackground, invalidateSheetMeta } = require('./sheets.service');
 const { throttledCall } = require('../utils/sheetsThrottle');
 const { recordParticipationLink } = require('./participation.service');
 const {
@@ -216,6 +216,219 @@ async function drainTabQueue({ sheetId, tabName, maxMillis = 30000, batchSize = 
     }
   }
   return { processed, succeeded, failed, elapsedMs: Date.now() - start };
+}
+
+// ═══════════════════════════════════════════════════════════
+// ★ 배치 드레인 (버스트 전용) — 한 탭 order_append를 가드 1콜 + write 1콜(청크당)로 반영.
+//   라이브 핫패스. 레드-블루-심판 적대검증 통과(R-B1~B10 방어). ORDER_BATCH_DRAIN=1 일 때만 활성.
+// ═══════════════════════════════════════════════════════════
+const BATCH_ROW_CAP = parseInt(process.env.ORDER_BATCH_ROW_CAP || '50', 10); // R-B9: 1콜당 행 상한
+
+function _isQuota(err) {
+  if (!err) return false;
+  const m = String(err.message || '');
+  const status = err.code || err.status || (err.response && err.response.status);
+  return status === 429 || /quota|rate limit|RESOURCE_EXHAUSTED|429/i.test(m);
+}
+
+async function _restorePending(items) {
+  const ids = (items || []).map(it => it.id);
+  if (ids.length) {
+    await pool.query(
+      `UPDATE sync_queue SET status='pending', processed_at=NOW() WHERE id = ANY($1::int[]) AND status='processing'`,
+      [ids]
+    );
+  }
+}
+
+// ★ R-B3: values.batchGet 금지. readSheet(GID모드 _readSheetByGridData) 단일 사각형 1콜.
+//   여러 targetRow를 minRow:maxRow × minCol:maxCol 한 사각형으로 읽고 행→cells 맵 반환.
+//   그리드밖 행 = 사각형이 []거나 짧은 배열 → 없는 행은 [] = 빈칸 통과(단건경로 시맨틱 동일).
+//   minCol/maxCol/cols 는 0-based(buildMirrorGuardRanges의 g.col, _getColLetter 와 동일).
+async function _readGuardWindow(sheetId, tabName, gid, rows, minCol, maxCol, _reader) {
+  const nums = [...new Set(rows.map(r => parseInt(r, 10)).filter(n => Number.isInteger(n) && n > 0))];
+  if (!nums.length) return new Map();
+  const minRow = Math.min(...nums), maxRow = Math.max(...nums);
+  const range = `'${tabName}'!${_getColLetter(minCol)}${minRow}:${_getColLetter(maxCol)}${maxRow}`;
+  // _reader: 테스트 주입용(없으면 실제 throttled readSheet). 반환은 행배열의 배열(grid).
+  const read = _reader || ((rng, opts) => throttledCall(() => readSheet(sheetId, rng, opts)));
+  const grid = await read(range, gid ? { gid } : {});
+  const map = new Map();
+  for (const r of nums) {
+    const off = r - minRow;
+    map.set(r, (grid && grid[off]) || []); // 없으면 [] = guardBlocksWrite false(통과)
+  }
+  return map;
+}
+
+// 한 탭의 pending order_append를 묶어 가드 1콜 + write 1콜(청크당)으로 반영.
+// ★ R-B1: queue_pump_drain + order_reconcile 두 락 중첩 → 펌프·가속드레인·reconcile 모두와 직렬화.
+async function drainTabQueueBatched({ sheetId, tabName, maxMillis = 60000, batchSize = BATCH_ROW_CAP, runReconcileFirst = true } = {}) {
+  if (!sheetId || !tabName) throw new Error('drainTabQueueBatched: sheetId, tabName 필수');
+  if (process.env.ORDER_BATCH_DRAIN !== '1') {                  // R-B10: 플래그 게이트(되돌리기)
+    return drainTabQueue({ sheetId, tabName, maxMillis });      // 미설정 시 검증된 단건 경로
+  }
+  const { withJobLock } = require('../utils/jobLock');
+  // 락 중첩: 바깥 queue_pump_drain(펌프/가속드레인 배제) → 안 order_reconcile(reconcile 배제).
+  return withJobLock('queue_pump_drain', async () => {
+    return withJobLock('order_reconcile', async () => {
+      // ★ R-B5 완화: 배치는 큐만 드레인 → 행 미배정 주문(pending_no_row)은 큐에 없다.
+      //   같은 락 안에서 reconcile 먼저 돌려 행배정+enqueue → 그 큐를 곧바로 빼낸다.
+      if (runReconcileFirst) {
+        try {
+          const { reconcileStuckOrders } = require('./orderLedger.service');
+          await reconcileStuckOrders({ sheetId, tabName, limit: 1000, perTabCap: 1000 });
+        } catch (e) { logger.warn(`[batchDrain] reconcile 선행 실패(무시): ${e.message}`); }
+      }
+      const start = Date.now();
+      let processed = 0, succeeded = 0, failed = 0, deferred = 0;
+      while (Date.now() - start < maxMillis) {
+        // R-B8: 단건과 동일 클레임 조건(type='order_append') → 같은 항목은 한쪽만 점유(SKIP LOCKED).
+        const { rows: items } = await pool.query(
+          `UPDATE sync_queue SET status='processing', processed_at=NOW()
+            WHERE id IN (SELECT id FROM sync_queue
+               WHERE status='pending' AND attempts<max_retry AND type='order_append'
+                 AND payload->>'sheetId'=$1 AND payload->>'tabName'=$2
+               ORDER BY created_at ASC LIMIT $3 FOR UPDATE SKIP LOCKED)
+            RETURNING *`,
+          [sheetId, tabName, batchSize]
+        );
+        if (!items.length) break;
+        const r = await _executeBatch(items, sheetId, tabName);
+        processed += r.processed; succeeded += r.succeeded; failed += r.failed; deferred += r.deferred;
+        if (r.quotaExceeded) break;                             // R-B9: quota → 양보(락 해제)
+      }
+      return { processed, succeeded, failed, deferred, elapsedMs: Date.now() - start };
+    }, { onBusy: () => ({ skipped: true, reason: 'order_reconcile_lock_busy' }) });
+  }, { onBusy: () => ({ skipped: true, reason: 'queue_pump_drain_lock_busy' }) });
+}
+
+async function _executeBatch(items, sheetId, tabName) {
+  let succeeded = 0, failed = 0, deferred = 0, quotaExceeded = false;
+  // 실행 직전 attempts +1 (원본 시맨틱 — 클레임이 아니라 실행 단위)
+  await pool.query(`UPDATE sync_queue SET attempts=attempts+1 WHERE id = ANY($1::int[])`, [items.map(it => it.id)]);
+
+  const parsed = items.map(it => ({ item: it, p: typeof it.payload === 'string' ? JSON.parse(it.payload) : it.payload }));
+
+  // ── J-1 (R-B6): id=ANY 단일 SELECT로 전 항목 최신값 재조회. ──
+  const osIds = parsed.map(x => x.p.orderSubmissionId).filter(Boolean);
+  const aliveMap = new Map();
+  if (osIds.length) {
+    const { rows } = await pool.query(
+      `SELECT id, deleted_at, orderer, recipient, user_id, phone, address, bank, account,
+              depositor, price, order_num, memo, date_str, selected_opt_key
+         FROM order_submissions WHERE id = ANY($1::int[])`, [osIds]);
+    for (const row of rows) aliveMap.set(row.id, row);
+  }
+
+  // ── 탭 컨텍스트 1회. 메타 없으면 전체 pending 복원(자가치유). ──
+  let tabContext = null;
+  try { tabContext = await loadRawTabContext(sheetId, parsed[0].p.gid, tabName); } catch (_) { tabContext = null; }
+  if (!tabContext || !tabContext.headers || !tabContext.headers.length) {
+    await _restorePending(items);
+    return { processed: items.length, succeeded: 0, failed: 0, deferred: items.length, quotaExceeded };
+  }
+  const ctxTab = tabContext.tabName || tabName;
+  const ctxGid = tabContext.tabGid || parsed[0].p.gid || '';
+
+  // ── 후보 구성: deleted=큐 done, 행 미배정=pending, 그 외 J-1 최신값으로 orderData 교체. ──
+  const live = [];
+  for (const x of parsed) {
+    const os = x.p.orderSubmissionId ? aliveMap.get(x.p.orderSubmissionId) : null;
+    if (x.p.orderSubmissionId && (!os || os.deleted_at)) {
+      await pool.query(`UPDATE sync_queue SET status='done', processed_at=NOW(), error_msg=NULL WHERE id=$1`, [x.item.id]);
+      continue;
+    }
+    if (!x.p.sheetRow) {
+      await pool.query(`UPDATE sync_queue SET status='pending', processed_at=NOW() WHERE id=$1 AND status='processing'`, [x.item.id]);
+      deferred++; continue;
+    }
+    const orderData = os ? _osRowToOrderData(os) : x.p.orderData;
+    live.push({ item: x.item, p: x.p, orderData, sheetRow: parseInt(x.p.sheetRow, 10) });
+  }
+  if (!live.length) return { processed: items.length, succeeded, failed, deferred, quotaExceeded };
+
+  // ── 가드 1콜 (R-B3): 모든 가드 col union을 minCol..maxCol 한 사각형으로. ──
+  const allCols = new Set();
+  for (const x of live) {
+    x.guards = buildMirrorGuardRanges({ tabName: ctxTab, headers: tabContext.headers, targetRow: x.sheetRow, orderData: x.orderData });
+    for (const g of x.guards) allCols.add(g.col);
+  }
+  invalidateSheetMeta(sheetId);                                 // D3b: stale 그리드 무효화
+  if (allCols.size) {
+    const cols = [...allCols];
+    const minCol = Math.min(...cols), maxCol = Math.max(...cols);
+    let guardMap;
+    try {
+      guardMap = await _readGuardWindow(sheetId, ctxTab, ctxGid, live.map(x => x.sheetRow), minCol, maxCol);
+    } catch (err) {
+      await _restorePending(items);                             // 가드 실패=전체 보류(쓰기 금지)
+      if (_isQuota(err)) return { processed: items.length, succeeded, failed, deferred, quotaExceeded: true };
+      throw err;
+    }
+    for (const x of live) {
+      const cells = guardMap.get(x.sheetRow) || [];
+      x.blocked = x.guards.some(g => guardBlocksWrite(String(cells[g.col - minCol] || '').trim(), g));
+    }
+  }
+
+  // ── 차단행: claim 해제(복구분만) + 큐 pending(다음 reconcile이 더 아래 행). ── (R-B1/B7)
+  const passed = [];
+  for (const x of live) {
+    if (x.blocked) {
+      if (x.p.recovered && x.p.dedupKey) {
+        try { await _releaseOrderRowClaim({ sheetId, tabName: ctxTab, dedupKey: x.p.dedupKey, orderSubmissionId: x.p.orderSubmissionId }); } catch (_) {}
+      }
+      await pool.query(`UPDATE sync_queue SET status='pending', error_msg='guard blocked', processed_at=NOW() WHERE id=$1 AND status='processing'`, [x.item.id]);
+      deferred++;
+    } else {
+      passed.push(x);                                           // R-B7: 단일 진실원본
+    }
+  }
+  if (!passed.length) return { processed: items.length, succeeded, failed, deferred, quotaExceeded };
+
+  // ── 쓰기 (R-B9 청크 캡). 청크당 batchUpdate 1콜, 순차폴백 비활성. ──
+  for (let i = 0; i < passed.length; i += BATCH_ROW_CAP) {
+    const chunk = passed.slice(i, i + BATCH_ROW_CAP);
+    const batchData = [];
+    for (const x of chunk) {
+      batchData.push(...buildBatchUpdateData({ tabName: ctxTab, headers: tabContext.headers, targetRow: x.sheetRow, orderData: x.orderData }));
+    }
+    try {
+      if (batchData.length) {
+        await throttledCall(() => batchUpdateSheet(sheetId, batchData, 'RAW',
+          { ...(ctxGid ? { gid: ctxGid } : {}), noSequentialFallback: true }));  // R-B9
+      }
+    } catch (err) {
+      await _restorePending(chunk.map(x => x.item));             // R-B2: 청크 전체 멱등 재시도
+      if (_isQuota(err)) { quotaExceeded = true; break; }
+      failed += chunk.length; continue;
+    }
+    // ── 쓰기 성공 청크에만: 신원기록 + markWritten (같은 루프, 단일 진실원본). ──
+    const recoveredRows = [];
+    for (const x of chunk) {
+      try {
+        await recordParticipationLink({ sheetId, tabName: ctxTab, rowIndex: x.sheetRow,
+          phone8: x.p.loginPhone8, phone: x.orderData && x.orderData.phone,
+          name: x.p.loginName || (x.orderData && x.orderData.orderer), source: 'order_batch_drain' });
+        await recordReviewIdentity({ sheetId, tabName: ctxTab, tabGid: ctxGid, rowIndex: x.sheetRow,
+          phone8: x.p.loginPhone8, phone: x.orderData && x.orderData.phone,
+          name: x.p.loginName || (x.orderData && x.orderData.orderer), recipient: x.orderData && x.orderData.recipient });
+      } catch (idErr) { logger.warn(`[batchDrain] 신원기록 실패(무시): ${idErr.message}`); }
+      await markOrderWritten(x.p.orderSubmissionId, x.sheetRow);
+      await pool.query(`UPDATE sync_queue SET status='done', processed_at=NOW(), error_msg=NULL WHERE id=$1`, [x.item.id]);
+      succeeded++;
+      if (x.p.recovered) recoveredRows.push(x.sheetRow);
+    }
+    // ── R-B4: 복구행 배경색 1콜(N행 묶음). best-effort. ──
+    if (recoveredRows.length) {
+      try {
+        await throttledCall(() => setRowsBackground(sheetId, { gid: ctxGid, tabName: ctxTab,
+          rowIndexes: recoveredRows, colCount: (tabContext.headers && tabContext.headers.length) || 30 }));
+      } catch (bgErr) { logger.warn(`[batchDrain] 배경색 묶음 실패(무시): ${bgErr.message}`); }
+    }
+  }
+  return { processed: items.length, succeeded, failed, deferred, quotaExceeded };
 }
 
 // ── 개별 항목 실행 ──
@@ -740,7 +953,10 @@ module.exports = {
   enqueue,
   processQueue,
   drainTabQueue,
+  drainTabQueueBatched,
   drainOrderQueue,
+  _isQuota,            // 테스트용
+  _readGuardWindow,    // 테스트용(reader 주입)
   getQueueStats,
   retryItem,
   retryAllFailed,
