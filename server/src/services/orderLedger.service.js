@@ -28,8 +28,11 @@ function _triggerSheetMirrorOnce(sheetId) {
   setImmediate(async () => {
     try {
       const { mirrorOneSheet } = require('./rawMirror.service');
+      const { withJobLock } = require('../utils/jobLock');
       await mirrorOneSheet(sheetId);
-      await reconcileStuckOrders({ sheetId, limit: 500, perTabCap: 500 });
+      // ★ #1: cron/flush reconcile과 동일한 order_reconcile 락으로 직렬화(동시 행배정 경합 차단).
+      //   락 busy면 양보 — 정규 cron(리컨실 2분)이 backstop.
+      await withJobLock('order_reconcile', () => reconcileStuckOrders({ sheetId, limit: 500, perTabCap: 500 }));
     } catch (_) { /* best-effort; 정규 cron(미러 5분·리컨실 2분)이 backstop */ }
   });
 }

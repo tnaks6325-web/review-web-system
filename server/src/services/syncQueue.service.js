@@ -50,12 +50,21 @@ async function processQueue(batchSize = 10, { interItemDelayMs = 2000 } = {}) {
   let processed = 0, succeeded = 0, failed = 0;
 
   try {
-    // pending 상태이고 최대 재시도 미달인 항목을 가져옴
+    // ★ #2 큐 클레임 원자화: SELECT … FOR UPDATE SKIP LOCKED 로 batch를 한 번에 'processing'으로
+    //   점유한다. 멀티워커/멀티인스턴스(또는 rolling 배포 중 old+new 공존)에서 두 워커가 같은
+    //   pending 항목을 동시에 집어 이중 시트쓰기(중복행)·정체(processing stall)가 나던 경합을 차단.
+    //   - 다른 워커가 이미 잠근 행은 SKIP LOCKED 로 건너뛴다(대기 없음).
+    //   - attempts는 여기서 올리지 않는다(원본 시맨틱 유지: 항목별 실행 직전에 +1).
     const { rows: items } = await pool.query(
-      `SELECT * FROM sync_queue
-       WHERE status = 'pending' AND attempts < max_retry
-       ORDER BY created_at ASC
-       LIMIT $1`,
+      `UPDATE sync_queue SET status = 'processing', processed_at = NOW()
+        WHERE id IN (
+          SELECT id FROM sync_queue
+           WHERE status = 'pending' AND attempts < max_retry
+           ORDER BY created_at ASC
+           LIMIT $1
+           FOR UPDATE SKIP LOCKED
+        )
+        RETURNING *`,
       [batchSize]
     );
 
@@ -80,9 +89,9 @@ async function processQueue(batchSize = 10, { interItemDelayMs = 2000 } = {}) {
         await new Promise(r => setTimeout(r, backoffDelay));
       }
 
-      // processing 상태로 변경
+      // ★ #2: 이미 위 원자 클레임에서 'processing'으로 점유됨 → 여기선 시도횟수만 증가(원본 시맨틱 유지).
       await pool.query(
-        `UPDATE sync_queue SET status = 'processing', attempts = attempts + 1 WHERE id = $1`,
+        `UPDATE sync_queue SET attempts = attempts + 1 WHERE id = $1`,
         [item.id]
       );
 
@@ -114,7 +123,20 @@ async function processQueue(batchSize = 10, { interItemDelayMs = 2000 } = {}) {
         } else {
           // ★ Quota 에러 시 남은 항목 스킵 (backoff 대기 후 다음 CRON 사이클에서 처리)
           if (isQuotaError) {
-            logger.warn(`[syncQueue] ⚠️ id=${item.id} Quota 에러 — 나머지 ${items.length - i - 1}건 다음 사이클로 연기`);
+            // ★ #2: 원자 클레임으로 나머지 항목도 이미 'processing' 상태다. 이번 사이클에 손대지 않으므로
+            //   다시 'pending'으로 되돌려 다음 큐워커 사이클(30초)이 집게 한다(processing stall 방지).
+            const restIds = items.slice(i + 1).map(it => it.id);
+            if (restIds.length) {
+              try {
+                await pool.query(
+                  `UPDATE sync_queue SET status = 'pending' WHERE id = ANY($1::int[]) AND status = 'processing'`,
+                  [restIds]
+                );
+              } catch (relErr) {
+                logger.warn(`[syncQueue] quota 연기 중 나머지 ${restIds.length}건 pending 복원 실패(매시 retryAllFailed가 backstop): ${relErr.message}`);
+              }
+            }
+            logger.warn(`[syncQueue] ⚠️ id=${item.id} Quota 에러 — 나머지 ${restIds.length}건 다음 사이클로 연기`);
             break;
           }
           logger.warn(`[syncQueue] ⚠️ id=${item.id} 재시도 예정 (${newAttempts}/${item.max_retry}): ${err.message}`);
@@ -141,18 +163,25 @@ async function drainTabQueue({ sheetId, tabName, maxMillis = 30000, batchSize = 
   const start = Date.now();
   let processed = 0, succeeded = 0, failed = 0;
   while (Date.now() - start < maxMillis) {
+    // ★ #2: 글로벌 큐워커와 동시에 돌아도 같은 항목을 이중처리하지 않도록 원자 클레임(SKIP LOCKED).
+    //   (탭 우선 flush가 글로벌 워커와 경합해 stall 나던 직접 원인 제거.)
     const { rows: items } = await pool.query(
-      `SELECT * FROM sync_queue
-        WHERE status = 'pending' AND attempts < max_retry AND type = 'order_append'
-          AND payload->>'sheetId' = $1 AND payload->>'tabName' = $2
-        ORDER BY created_at ASC
-        LIMIT $3`,
+      `UPDATE sync_queue SET status = 'processing', processed_at = NOW()
+        WHERE id IN (
+          SELECT id FROM sync_queue
+           WHERE status = 'pending' AND attempts < max_retry AND type = 'order_append'
+             AND payload->>'sheetId' = $1 AND payload->>'tabName' = $2
+           ORDER BY created_at ASC
+           LIMIT $3
+           FOR UPDATE SKIP LOCKED
+        )
+        RETURNING *`,
       [sheetId, tabName, batchSize]
     );
     if (!items.length) break;
     for (const item of items) {
       processed++;
-      await pool.query(`UPDATE sync_queue SET status = 'processing', attempts = attempts + 1 WHERE id = $1`, [item.id]);
+      await pool.query(`UPDATE sync_queue SET attempts = attempts + 1 WHERE id = $1`, [item.id]);
       try {
         await _executeItem(item);
         await pool.query(`UPDATE sync_queue SET status = 'done', processed_at = NOW(), error_msg = NULL WHERE id = $1`, [item.id]);

@@ -2044,13 +2044,21 @@ router.get('/order-mirror-status', authMiddleware, async (req, res, next) => {
 router.post('/order-reconcile', authMiddleware, adminOrMasterMiddleware, async (req, res, next) => {
   try {
     const { reconcileStuckOrders } = require('../services/orderLedger.service');
+    const { withJobLock } = require('../utils/jobLock');
     const { sheetId, limit, dryRun } = req.body || {};
-    const r = await reconcileStuckOrders({
+    const opts = {
       sheetId: sheetId || null,
       limit: Math.min(parseInt(limit, 10) || 100, 1000),
       perTabCap: sheetId ? 1000 : 20, // 시트 지정 강제복구는 탭 cap 해제(이벤트 일괄)
       dryRun: !!dryRun,
-    });
+    };
+    // ★ #1: dryRun(읽기전용 분류)은 락 불필요. 실제 복구는 cron/flush와 order_reconcile 락으로 직렬화.
+    const r = opts.dryRun
+      ? await reconcileStuckOrders(opts)
+      : await withJobLock('order_reconcile', () => reconcileStuckOrders(opts));
+    if (r && r.skipped) {
+      return res.json({ ok: false, busy: true, error: '다른 reconcile(cron/flush)이 진행 중입니다. 잠시 후 다시 시도하세요.' });
+    }
     res.json({ ok: true, ...r });
   } catch (err) {
     next(err);
@@ -2091,12 +2099,15 @@ router.post('/order-flush-tab', authMiddleware, adminOrMasterMiddleware, async (
       let rounds = 0, totalReq = 0, totalDrained = 0, remaining = null;
       try {
         const { reconcileStuckOrders } = require('../services/orderLedger.service');
+        const { withJobLock } = require('../utils/jobLock');
         do {
           rounds++;
-          // ① 탭 단위로 막힌 주문 enqueue(행배정 포함).
-          const rec = await reconcileStuckOrders({ sheetId, tabName, limit: 1000, perTabCap: 1000 });
-          totalReq += rec.requeued || 0;
-          // ② 그 탭의 order_append만 우선 드레인(FIFO 우회).
+          // ① 탭 단위로 막힌 주문 enqueue(행배정 포함). ★ #1: cron/인라인 reconcile과 order_reconcile 락으로 직렬화.
+          const rec = await withJobLock('order_reconcile', () => reconcileStuckOrders({ sheetId, tabName, limit: 1000, perTabCap: 1000 }));
+          const recSkipped = !!(rec && rec.skipped);
+          const recRequeued = (rec && rec.requeued) || 0;
+          totalReq += recRequeued;
+          // ② 그 탭의 order_append만 우선 드레인(FIFO 우회). 큐 클레임(#2)으로 글로벌 워커와 비경합.
           const drainMs = untilEmpty ? 60000 : Math.max(maxMillis - (Date.now() - start), 2000);
           const drain = await drainTabQueue({ sheetId, tabName, maxMillis: drainMs });
           totalDrained += drain.succeeded || 0;
@@ -2105,8 +2116,14 @@ router.post('/order-flush-tab', authMiddleware, adminOrMasterMiddleware, async (
             remaining, running: true, elapsedMs: Date.now() - start };
           if (!untilEmpty) break;
           if (remaining === 0) break;
-          // 이번 라운드에 아무 진전 없음(메타없음 등 막힘) → 무한루프 방지로 종료
-          if ((drain.processed || 0) === 0 && (rec.requeued || 0) === 0) break;
+          // 이번 라운드에 아무 진전 없음 — 시트 반영 성공(succeeded) 기준으로 판정.
+          //   (processed 기준이면 claim 후 전부 실패→pending 복원된 라운드도 '진전'으로 오인해
+          //    같은 항목을 HARD_CAP까지 빠르게 재시도하며 쿼터를 낭비할 수 있음.)
+          if ((drain.succeeded || 0) === 0 && recRequeued === 0) {
+            // reconcile이 락 경합으로 양보됐을 뿐이면(다른 reconcile 진행 중) busy-spin 없이 잠깐 대기 후 재시도.
+            if (recSkipped) { await new Promise(r => setTimeout(r, 5000)); continue; }
+            break; // 진짜 진전 없음(메타없음 등 막힘) → 무한루프 방지 종료
+          }
         } while (Date.now() - start < HARD_CAP);
         _lastFlushTab = { sheetId, tabName, untilEmpty, rounds, totalRequeued: totalReq, totalDrained,
           remaining, running: false, elapsedMs: Date.now() - start, finishedAt: new Date().toISOString() };

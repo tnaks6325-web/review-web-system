@@ -121,9 +121,14 @@ function startCronJobs() {
       reconcileRunning = true;
       try {
         const { reconcileStuckOrders } = require('../services/orderLedger.service');
-        const r = await reconcileStuckOrders({ limit: 100, perTabCap: 60 });
-        if (r.requeued > 0 || r.stillStuck > 0 || r.noCandidates > 0) {
+        const { withJobLock } = require('../utils/jobLock');
+        // ★ #1: 멀티인스턴스/rolling 배포(old+new 공존) 경합 차단 — order_reconcile advisory lock으로
+        //   cron·flush·인라인 reconcile을 하나로 직렬화. 다른 인스턴스가 보유 중이면 이번 틱은 양보.
+        const r = await withJobLock('order_reconcile', () => reconcileStuckOrders({ limit: 100, perTabCap: 60 }));
+        if (r && (r.requeued > 0 || r.stillStuck > 0 || r.noCandidates > 0)) {
           logger.info(`[CRON-Reconcile] requeued=${r.requeued}, skippedNoMeta=${r.skippedNoMeta}, noCandidates=${r.noCandidates}, stillStuck=${r.stillStuck}`);
+        } else if (r && r.skipped) {
+          logger.debug('[CRON-Reconcile] order_reconcile lock busy — 다른 인스턴스 처리 중, 양보');
         }
       } catch (err) {
         logger.error(`[CRON-Reconcile] error: ${err.message}`);
