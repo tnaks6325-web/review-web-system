@@ -67,7 +67,69 @@ function run() {
   const v4 = [['컬럼A', '컬럼B'], ['x', 'y']];
   assert.deepEqual(parseTabRows(v4, 's4', 'tabD', 'gidD', 'D', KW), [], '헤더 미검출 → 빈 배열');
 
-  console.log('  케이스1~4 통과 (recipientName/isSubmitted2/submitCol2 포함 슈퍼셋 검증)');
+  // ════════════ P2b: DB컬럼매핑 우선 케이스 ════════════
+
+  // ── 케이스5: DB매핑이 제출/입금 컬럼을 키워드와 다르게 강제(재앵커 통과) ──
+  const v5 = [
+    ['번호', '주문자', '수취인', '연락처', '완료', '리뷰제출', '입금'],
+    ['1', '주문킴', '수취킴', '010-1234-5678', 'O', '', '완료'],
+  ];
+  const map5 = new Map([
+    ['review_submit', { colIndex: 4, header: '완료' }],   // 키워드는 col5(리뷰제출)을 고르지만 DB가 col4 강제
+    ['payment', { colIndex: 6, header: '입금' }],
+  ]);
+  const r5 = parseTabRows(v5, 's5', 't5', 'g5', 'C5', KW, map5);
+  assert.equal(r5[0].submitCol, '완료', '★ DB review_submit→col4 override');
+  assert.equal(r5[0].isSubmitted, true, 'col4 값 "O" → true');
+  assert.equal(r5[0].submitCol2, '입금', 'DB payment→col6');
+  assert.equal(r5[0].isSubmitted2, 'PAID', 'col6 "완료" → PAID');
+  // 대조: dbColMap 없으면 키워드 = 리뷰제출(col5, 빈값) → false
+  const r5b = parseTabRows(v5, 's5', 't5', 'g5', 'C5', KW);
+  assert.equal(r5b[0].submitCol, '리뷰제출', '매핑 없으면 키워드(리뷰접두사)');
+  assert.equal(r5b[0].isSubmitted, false, 'col5 빈값 → false');
+
+  // ── 케이스6: 재앵커 불일치(저장헤더≠현재헤더) → 키워드 폴백 ──
+  const v6 = [
+    ['번호', '주문자', '수취인', '연락처', '완료', '리뷰제출'],
+    ['1', '주문킴', '수취킴', '010-1234-5678', 'O', ''],
+  ];
+  const map6 = new Map([['review_submit', { colIndex: 4, header: '리뷰완료' }]]); // 현재 headers[4]='완료'≠'리뷰완료'
+  const r6 = parseTabRows(v6, 's6', 't6', 'g6', 'C6', KW, map6);
+  assert.equal(r6[0].submitCol, '리뷰제출', '★ 재앵커 불일치 → 키워드 폴백(col5)');
+
+  // ── 케이스7: col_index 범위밖 → 키워드 폴백 ──
+  const v7 = [
+    ['번호', '주문자', '수취인', '연락처', '리뷰제출'],
+    ['1', '주문킴', '수취킴', '010-1234-5678', 'O'],
+  ];
+  const map7 = new Map([['review_submit', { colIndex: 99, header: '리뷰제출' }]]); // 범위밖
+  const r7 = parseTabRows(v7, 's7', 't7', 'g7', 'C7', KW, map7);
+  assert.equal(r7[0].submitCol, '리뷰제출', '★ 범위밖 colIndex → 키워드 폴백');
+  assert.equal(r7[0].isSubmitted, true);
+
+  // ── 케이스8: DB recipient가 키워드 미검출 열을 지정(재앵커 통과) ──
+  const v8 = [
+    ['번호', '주문자', '받는사람', '연락처'],
+    ['1', '주문킴', '수취킴', '01012345678'],
+  ];
+  const map8 = new Map([['recipient', { colIndex: 2, header: '받는사람' }]]);
+  const r8 = parseTabRows(v8, 's8', 't8', 'g8', 'C8', KW, map8);
+  assert.equal(r8[0].recipientName, '수취킴', '★ DB recipient→col2(키워드 미검출 "받는사람")');
+  // 대조: 매핑 없으면 '받는사람'은 RECIPIENT_KEYWORDS 불일치 → null
+  const r8b = parseTabRows(v8, 's8', 't8', 'g8', 'C8', KW);
+  assert.equal(r8b[0].recipientName, null, '키워드만으론 "받는사람" 미검출 → null');
+
+  // ── 케이스9: nameColIdx는 DB override 제외(PII 안전) — 매핑 있어도 키워드 이름열 유지 ──
+  const v9 = [
+    ['번호', '주문자', '수취인', '연락처', '리뷰제출'],
+    ['1', '주문킴', '수취킴', '01012345678', 'O'],
+  ];
+  // recipient를 col1(주문자=nameColIdx)로 지정해도 name은 키워드(주문자)대로, recipientName만 영향
+  const map9 = new Map([['recipient', { colIndex: 1, header: '주문자' }]]);
+  const r9 = parseTabRows(v9, 's9', 't9', 'g9', 'C9', KW, map9);
+  assert.equal(r9[0].name, '주문킴', '★ name은 키워드 전용(DB override 없음)');
+
+  console.log('  케이스1~9 통과 (P2a 슈퍼셋 + P2b DB매핑 우선/재앵커/범위가드/PII가드)');
 }
 
 try { run(); console.log('columnResolver tests passed'); }

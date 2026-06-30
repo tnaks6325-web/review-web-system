@@ -195,6 +195,38 @@ async function saveMapping(sheetId, tabGid, tabName, columns, updatedBy) {
   return { saved: clean.length, mapped: clean.filter(c => c.dbField).length };
 }
 
+/**
+ * P2b: 인덱스 빌더용 경량 매핑 — db_field → { colIndex, header } Map.
+ *   columnResolver가 컬럼감지를 "DB매핑 우선"으로 하기 위한 입력.
+ *   매핑이 없거나(미설정 탭) sheetId/tabGid가 없으면 null → 빌더는 키워드 전용(P2a 동일).
+ *   같은 db_field가 여러 컬럼에 매핑되면 가장 앞(작은 col_index)만 사용(determinism).
+ * @returns {Promise<Map<string,{colIndex:number,header:string|null}>|null>}
+ */
+async function getTabColumnIndexMap(sheetId, tabGid) {
+  if (!sheetId || tabGid === undefined || tabGid === null || tabGid === '') return null;
+  let rows;
+  try {
+    ({ rows } = await pool.query(
+      `SELECT col_index, header_text, db_field
+         FROM tab_column_mappings
+        WHERE sheet_id = $1 AND tab_gid = $2 AND db_field IS NOT NULL
+        ORDER BY col_index ASC`,
+      [sheetId, String(tabGid)]
+    ));
+  } catch (err) {
+    // 매핑 테이블 부재/조회 실패는 치명 아님 — 키워드 폴백(P2a 동일)
+    return null;
+  }
+  if (!rows || !rows.length) return null;
+  const m = new Map();
+  for (const r of rows) {
+    if (!r.db_field || m.has(r.db_field)) continue;       // 첫(최소 col_index) 매핑만
+    if (!Number.isInteger(r.col_index) || r.col_index < 0) continue;
+    m.set(r.db_field, { colIndex: r.col_index, header: r.header_text != null ? String(r.header_text) : null });
+  }
+  return m.size ? m : null;
+}
+
 module.exports = {
   STANDARD_FIELDS,
   OWNERS,
@@ -203,4 +235,5 @@ module.exports = {
   defaultOwnerOf,
   getMapping,
   saveMapping,
+  getTabColumnIndexMap,
 };

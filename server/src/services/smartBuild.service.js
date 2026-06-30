@@ -140,13 +140,14 @@ function _formatDate(val) {
   return s;
 }
 
-function _parseTabRows(values, sheetId, tabName, tabGid, campaignTitle) {
+function _parseTabRows(values, sheetId, tabName, tabGid, campaignTitle, dbColMap = null) {
   // ★ P2a: indexBuilder와 동일한 공용 columnResolver로 위임(동일 kw → 동일 출력).
   //   이제 recipientName/isSubmitted2/submitCol2도 반환되며 _upsertTab이 이를 기록한다.
+  //   ★ P2b: dbColMap(있으면) 전달 — DB컬럼매핑 우선. 없으면(null) P2a와 100% 동일.
   //   아래 원본(부분집합) 로직은 unreachable(후속 정리 PR에서 제거 예정).
   return require('./columnResolver').parseTabRows(values, sheetId, tabName, tabGid, campaignTitle, {
     NAME_KEYWORDS, SUBMIT_KEYWORDS, DATA_TAB_KEYWORDS, SUBMITTED_VALUES,
-  });
+  }, dbColMap);
   // eslint-disable-next-line no-unreachable
   const HEADER_SCAN_LIMIT = 50;
   let headerRowIdx = -1;
@@ -702,7 +703,9 @@ async function runSmartBuild() {
             }
 
             // 변경됨 → 파싱 + DB 갱신
-            const rows = _parseTabRows(values, sheetId, tabName, tabGid, spreadsheetTitle);
+            // ★ P2b: DB컬럼매핑(있으면) 로드 → 매핑 우선. 없으면 null=키워드 전용(P2a 동일).
+            const dbColMap = await require('./columnMapping.service').getTabColumnIndexMap(sheetId, tabGid);
+            const rows = _parseTabRows(values, sheetId, tabName, tabGid, spreadsheetTitle, dbColMap);
 
             if (rows.length === 0) {
               // ★ 인식 실패 탭 기록 (indexBuilder와 동일)
