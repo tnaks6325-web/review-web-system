@@ -24,6 +24,7 @@ const MAX_TABS      = parseInt(process.env.ORDER_BATCH_MAX_TABS    || '10', 10);
 const BACKLOG_SLOTS = parseInt(process.env.ORDER_BATCH_BACKLOG_SLOTS || '3', 10);    // 대량탭 보장슬롯(기아 반대전이 방지)
 
 let _running = false, _rerun = false, _rrCursor = 0;
+let _lastTickAt = 0, _cycleStartAt = 0;   // F3 워치독: 마지막 사이클 완료/시작 시각
 const _kickQueue = [];   // #1: 타깃 탭 대기열(중복제거)
 
 function isAutoEnabled() { return process.env.ORDER_BATCH_AUTO === '1'; }
@@ -118,13 +119,22 @@ function kickOrderBatch(sheetId, tabName) {
     const key = `${sheetId}||${tabName}`;
     if (!_kickQueue.includes(key)) _kickQueue.push(key);
   }
+  // ★ R-F3-a 워치독: _running이 시작 후 TICK_MAX_MS*3 넘게 true면 데드(미처리 예외·OOM·재시작) 판정 →
+  //   강제 리셋. 안 하면 kick이 영구 no-op(_rerun만 set) + AUTO=1이라 30초 cron도 order_append 제외 = 영구정지.
+  if (_running && _cycleStartAt && (Date.now() - _cycleStartAt > TICK_MAX_MS * 3)) {
+    logger.warn(`[orderBatch] _running stale ${Date.now() - _cycleStartAt}ms → 강제 리셋(워치독)`);
+    _running = false;
+  }
   if (_running) { _rerun = true; return; }
-  _running = true;
+  _running = true; _cycleStartAt = Date.now();
   setImmediate(async () => {
-    try { await _cycle(); }
+    try { await _cycle(); _lastTickAt = Date.now(); }
     catch (e) { logger.warn(`[orderBatchTick] 사이클 오류(무시): ${e && e.message}`); }
-    finally { _running = false; if (_rerun) { _rerun = false; kickOrderBatch(); } }
+    finally { _running = false; _cycleStartAt = 0; if (_rerun) { _rerun = false; kickOrderBatch(); } }
   });
 }
 
-module.exports = { kickOrderBatch, isAutoEnabled, _cycle, _selectTabs };
+// F3 백스톱용: cron이 배치 생존(heartbeat)을 확인 → 끊겼으면 단건 백스톱 가동.
+function getHeartbeat() { return { running: _running, lastTickAt: _lastTickAt, cycleStartAt: _cycleStartAt }; }
+
+module.exports = { kickOrderBatch, isAutoEnabled, _cycle, _selectTabs, getHeartbeat };
