@@ -49,6 +49,18 @@ GAS(Google Apps Script) 기반 리뷰 관리 시스템을 **Node.js Express + Po
 - **신원링크(시트행↔phone8) 기록은 "쓰기 성공 후"에만**(리뷰어 교차노출 버그 방어): 리뷰어 대시보드 "리뷰 내역"은 `searchAll`(`/api/search`, `searchByName(name,phone8)`)로 조회하며 매칭 통과키가 `review_index.phone8` **또는** `participation_links.phone8`(P5 확정신원) 단독이다. 따라서 어떤 행이든 그 행의 phone8이 내 phone8이면 이름이 달라도 내 참여로 뜬다. 과거엔 구매양식 제출(`submit/order`)이 가드/시트쓰기 **전에** 낙관적 claim 행(`ledger.sheetRow`, RAW 미러 스냅샷의 "빈 행" 추정 — 미러 stale·로스터 선기입 시 *남의 행*)에 `recordParticipationLink`/`recordReviewIdentity`로 phone8을 선기입해 교차노출을 유발했다. **이제 제출 시점 선기입을 제거**하고, 신원기록은 **큐 워커(`syncQueue` `order_append`)가 다중컬럼 가드 통과 + 실제 시트쓰기 성공 후, 실제로 쓴 행에만** 수행한다(신뢰 가능한 링크만 남음). 과거 오염 정리: `POST /api/diag/participation-cleanup {sheetId?,tabName?,dryRun?}`(admin/master, 기본 dryRun=카운트만) — written 주문이 없는 `participation_links` 행(=가짜 신원링크) 삭제. `review_index.phone8` 오염은 강제 전체 재빌드(`POST /api/index/build {forceFullRebuild:true}`)로 시트 값 재유도.
 - 운영 순서 규칙: **RAW 미러 → reconcile**(메타가 있어야 행 배정 가능). 메타 자동 공급은 3중: ① 탭 등록 시 `mirrorOneSheet`(#134), ② RAW 미러 cron `*/5`, ③ **미러 안 된 탭에 주문이 오면 `_triggerSheetMirrorOnce`가 그 시트만 백그라운드 1회 자동미러(탭당 60초 debounce) + 즉시 리컨실** — per-제출 라이브 시트읽기를 없애 버스트에도 시트 쿼터 안전(관리자 수동미러 불필요, 근실시간 자동동기화).
 
+### 상시 배치 스케줄러 — 다탭 인터리브(공평) 드레인
+- `orderBatchScheduler.js`의 `_cycle`은 기본 "탭 순차 드레인"(한 탭 끝까지 → 다음 탭)이지만, `ORDER_BATCH_INTERLEAVE=1`이면 `_cycleInterleave`로 **탭당 1청크(≤50행)씩 키기반 라운드로빈**(공평) — 다탭 동시버스트에서 뒤 탭이 앞 탭 뒤에 줄서 굶지 않게. reconcile은 사이클당 탭별 1회(`_reconcileOnce`, `order_reconcile` 락, `useLiveMaxRow`). `getDiag()`/`GET /api/diag/order-batch-state`로 사이클 이력(mode·busy·perTab·rounds) 관찰. **주의(레드-블루-심판으로 수정된 버그)**: throttle busy(>40)일 때의 폴백을 "첫 1탭 전체 드레인"으로 두면 그 탭이 throttle 제약으로 여러 사이클을 잡아먹어 나머지 탭을 수분 굶긴다 → 반드시 **busy도 "1청크/탭 한 라운드 후 양보"(busy-fair)**. 회귀가드 `tests/interleaveScheduler.test.js`.
+
+### RAW 미러 비활성 시트 완화 (A)
+- RAW미러의 유일 소비처는 주문 행배정(claimRow/loadRawTabContext/reconcile)이고 `smartBuild`(리뷰 인덱스)는 시트를 직접 읽어 RAW미러에 의존하지 않음. `RAW_MIRROR_INACTIVE_RELAX=1`(기본 OFF)이면 `INACTIVE_EVERY`(6) 사이클 중 5번은 "최근 `INACTIVE_DAYS`(30)일 내 주문 있는 활성 시트"만 미러, 비활성은 연기(6번째는 전체). 비활성 시트에 주문 오면 `_triggerSheetMirrorOnce`가 즉시 자동미러(자가치유). 요약에 `deferredInactive`.
+
+### 시트→DB 역동기화 (옵션·수동·기본 OFF) — `SHEET_REVERSE_SYNC`
+- 주문은 **DB-first**(order_submissions 원본 → 시트는 출력). 시트에서 주문 행을 손으로 고쳐도 DB는 자동 반영 안 함. 이를 보정하는 **옵션·수동** 안전망(레드→블루→심판 설계; 자동 무인 동기·자동취소는 **기각**).
+- `migration 039`: `order_submissions.last_sheet_write_sig`(정방향 written 시 기록한 매핑칸 서명=R1 루프차단 provenance) + `reverse_sync_proposals`(제안 감사원장).
+- `POST /api/diag/reverse-sync-detect`(읽기전용, gid 필수·throttle busy면 양보·`order_reconcile` 락·라이브 단일사각형읽기): 시트≠DB인 written·미취소·**기본 sig-not-null** 주문만 비교 → identity(연락처+수취인+주소) 통과 시 필드별 `edit` 제안, 전공란/그리드밖은 `cancel_suspect` 플래그만(자동취소 금지). `selected_opt_key`·옵션칸 제외(G4). open 제안 교체(DELETE→INSERT)로 멱등.
+- `GET /api/diag/reverse-sync-list` 검토 → `POST /api/diag/reverse-sync-apply {proposalId}`(`ORDER_LEDGER_WRITE_ENABLED=true` 추가게이트): per-order 락 + `deleted_at`·`detected_edit_seq` 불변 재검증(G6) 후 화이트리스트 필드 직접 UPDATE + `enqueue('order_update')` 위임 → `order_update`가 `cur===wantNew` no-op(시트 안 건드림)으로 **핑퐁 0**. `reverse-sync-dismiss`로 기각. **권고: detect만 먼저 켜 제안량 관측 후 apply 활성**(효용 낮으면 기존 `order-edit`/`order-cancel` 관리자 정정으로 일원화가 더 안전).
+
 ## 배포 (자동)
 - `main` 브랜치에 머지되면 **Cloudflare Pages(프론트)와 Railway(백엔드)가 GitHub 연동으로 자동 배포**합니다.
 - 별도의 빌드/배포 GitHub Action은 없습니다. `main` 머지 = 배포.

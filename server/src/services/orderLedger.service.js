@@ -726,16 +726,17 @@ async function markOrderQueued(orderSubmissionId) {
   );
 }
 
-async function markOrderWritten(orderSubmissionId, sheetRow) {
+async function markOrderWritten(orderSubmissionId, sheetRow, sig = null) {
   if (!orderSubmissionId) return;
   await getPool().query(
     `UPDATE order_submissions
         SET mirror_status = 'written',
             sheet_row = COALESCE($2::int, sheet_row),
             sheet_written_at = NOW(),
-            sheet_error = NULL
+            sheet_error = NULL,
+            last_sheet_write_sig = COALESCE($3, last_sheet_write_sig)
       WHERE id = $1`,
-    [orderSubmissionId, sheetRow || null]
+    [orderSubmissionId, sheetRow || null, sig]
   );
 }
 
@@ -993,6 +994,24 @@ function _fieldToCol(headers, field) {
   return findColumn(headers, def[0], def[1] || []);
 }
 
+// ── 시트→DB 역동기화(옵션·수동) 대상 필드(G4: 옵션·dedup영향칸 제외). ──
+//   selected_opt_key(옵션칸)는 역매핑이 비결정적이라 제외. recipient/phone은 dedupKey 입력이지만
+//   apply가 order_update(매핑칸 in-place)만 타고 dedup_key/claims를 안 건드리므로 포함 가능(R6 방어).
+const REVERSE_SYNC_FIELDS = ['orderer', 'recipient', 'user_id', 'phone', 'address', 'bank', 'account', 'depositor', 'price', 'order_num', 'memo', 'date_str'];
+
+// R1 provenance: DB가 "마지막으로 시트에 쓴 매핑칸 값"의 서명. 정방향 written 시 기록.
+//   detect가 "현재 시트값 == 이 서명"이면 내가 쓴 흔적 → 제외(핑퐁/노이즈 차단).
+//   detect의 _sigFromCells와 동일 필드·순서·정규화를 써야 일치한다.
+function computeRowWriteSig(headers, orderData) {
+  const mapped = mapOrderToSheetRow(headers, orderData || {});
+  const parts = [];
+  for (const f of REVERSE_SYNC_FIELDS) {
+    const c = _fieldToCol(headers, f);
+    if (c >= 0) parts.push(f + '=' + normalizeText(mapped[c]));
+  }
+  return parts.join('');
+}
+
 // ── R1: 그 시트 행이 "여전히 이 주문의 것"인지 다중칸(연락처+수취인+주소) AND 일치로 판정.
 //   취소 클리어 전 안전가드 — 사람이 그 행을 재사용했으면 일치 안 해 클리어 거부(데이터 파괴 방지).
 //   J-2: 그리드밖 행(빈읽기)은 사람이 손댈 수 없으므로 gridOutOfRange=true로 표시(호출부가 진행 허용).
@@ -1022,6 +1041,161 @@ async function rowIdentityMatches(os, tabContext) {
   return { match, gridOutOfRange: false };
 }
 
+// ════════════════════════════════════════════════════════════════════════
+// 시트→DB 역동기화(옵션·수동·기본 OFF) — 감지(detect). 읽기 전용 + 제안 생성.
+//   심판 최종설계: 자동 무인 동기 금지. 사람이 reverse-sync-apply로 명시 적용.
+//   방어: R1(sig 제외) · R2(라이브 단일 사각형 읽기, 미러 값판정 금지) · R3(identity AND 3칸)
+//        · R4(그리드밖/전공란=cancel_suspect 플래그만, 단칸 공란 무시) · R5(order_reconcile 락)
+//        · R10/G5(throttle busy면 양보) · R11(gid 없으면 보류) · G3(기본 sig-not-null 주문만).
+// ════════════════════════════════════════════════════════════════════════
+async function detectReverseSyncProposals({ sheetId, tabName, limit = 200, includeNullSig = false } = {}) {
+  if (process.env.SHEET_REVERSE_SYNC !== '1') return { skipped: true, reason: 'disabled' };
+  if (!sheetId || !tabName) throw new Error('detectReverseSyncProposals: sheetId, tabName 필수');
+  const { withJobLock } = require('../utils/jobLock');
+  return withJobLock('order_reconcile',
+    () => _detectReverseSyncInner({ sheetId, tabName, limit, includeNullSig }),
+    { onBusy: () => ({ skipped: true, reason: 'order_reconcile_lock_busy' }) });
+}
+
+async function _detectReverseSyncInner({ sheetId, tabName, limit, includeNullSig }) {
+  const db = getPool();
+  const { getThrottleStatus, throttledCall } = require('../utils/sheetsThrottle');
+  const { readSheet, invalidateSheetMeta } = require('./sheets.service');
+
+  // R10/G5: throttle 여유 없으면 양보(정방향 핫패스 우선).
+  const busyN = parseInt(process.env.REVERSE_SYNC_BUSY || '15', 10);
+  if (getThrottleStatus().requestsInLastMinute > busyN) return { skipped: true, reason: 'throttle_busy' };
+
+  // R11: gid 필수(동명탭 보류). 헤더/gid는 미러 메타에서만(값판정 아님).
+  const ctx = await loadRawTabContext(sheetId, null, tabName);
+  if (!ctx || !ctx.tabGid || !ctx.headers || !ctx.headers.length) return { skipped: true, reason: 'no_meta_or_gid' };
+  const headers = ctx.headers;
+
+  // 필드→컬럼 매핑(헤더 고정). 식별칸(연락처/수취인/주소) + 역동기 대상칸.
+  const fieldCols = {};
+  for (const f of REVERSE_SYNC_FIELDS) { const c = _fieldToCol(headers, f); if (c >= 0) fieldCols[f] = c; }
+  const idFields = ['phone', 'recipient', 'address'].filter(f => fieldCols[f] != null);
+  if (!Object.keys(fieldCols).length || !idFields.length) return { scanned: 0, proposals: 0, reason: 'no_mappable_cols' };
+
+  // R9/G3: written·미취소·행배정 주문만. 기본은 sig 있는 주문만(과거 전수비교 노이즈 폭발 차단).
+  const sigFilter = includeNullSig ? '' : ' AND last_sheet_write_sig IS NOT NULL';
+  const { rows: orders } = await db.query(
+    `SELECT id, sheet_row, orderer, recipient, user_id, phone, address, bank, account, depositor,
+            price, order_num, memo, date_str, selected_opt_key, last_sheet_write_sig, last_edit_seq
+       FROM order_submissions
+      WHERE sheet_id = $1 AND tab_name = $2 AND deleted_at IS NULL
+        AND mirror_status = 'written' AND sheet_row IS NOT NULL${sigFilter}
+      ORDER BY sheet_row LIMIT $3`,
+    [sheetId, tabName, limit]
+  );
+  if (!orders.length) return { scanned: 0, proposals: 0 };
+
+  // R2: 라이브 단일 사각형 1콜(미러 금지). 매핑칸 union × 주문 행 범위.
+  const cols = Object.values(fieldCols);
+  const minC = Math.min(...cols), maxC = Math.max(...cols);
+  const rows = orders.map(o => o.sheet_row);
+  const minR = Math.min(...rows), maxR = Math.max(...rows);
+  invalidateSheetMeta(sheetId);
+  const grid = await throttledCall(() => readSheet(sheetId,
+    `'${ctx.tabName}'!${getColLetter(minC)}${minR}:${getColLetter(maxC)}${maxR}`, { gid: ctx.tabGid }));
+
+  let made = 0, edits = 0, suspects = 0, skippedSig = 0, identMismatch = 0;
+  for (const os of orders) {
+    const gi = os.sheet_row - minR;
+    const gridRow = grid && grid[gi];
+    const cellAt = (c) => (gridRow ? gridRow[c - minC] : undefined);
+    const gridOutOfRange = !gridRow || gridRow.length === 0; // R4: 그리드밖/빈행 = 사람 손 불가
+
+    // R3: identity AND(연락처+수취인+주소) — cells에서 직접(추가 쿼터 0).
+    let allGuardEmpty = true, idMatch = true, idComparable = 0;
+    for (const f of idFields) {
+      const c = fieldCols[f];
+      const cur = normalizeGuardValue(headers[c], cellAt(c));
+      const exp = normalizeGuardValue(headers[c], os[f]);
+      if (cur) allGuardEmpty = false;
+      if (exp) { idComparable++; if (!(cur && cur === exp)) idMatch = false; }
+    }
+
+    if (gridOutOfRange) { continue; } // R4: 그리드밖은 취소 오인 금지 — 스킵
+    if (idComparable === 0 || !idMatch) {
+      // 식별 불일치: 사람이 그 행을 다른 용도로 재사용 가능. 전부 공란이면 "취소 의심" 플래그만(자동취소 금지).
+      identMismatch++;
+      if (allGuardEmpty) {
+        made += await _replaceOpenProposal(db, os, sheetId, tabName, ctx.tabGid,
+          { type: 'cancel_suspect', field: null, oldv: null, newv: null, sig: null });
+        suspects++;
+      }
+      continue;
+    }
+
+    // R1: 현재 시트서명 == 내가 마지막 쓴 서명 → 내가 쓴 값(변경 아님) 제외.
+    const curSig = _sigFromCells(headers, fieldCols, cellAt);
+    if (os.last_sheet_write_sig && curSig === os.last_sheet_write_sig) { skippedSig++; continue; }
+
+    // 필드별 diff → edit 제안. 단칸 공란은 무시(R2/R4 원본 보존).
+    const mapped = mapOrderToSheetRow(headers, _osRowToOrderData(os));
+    const fieldEdits = [];
+    for (const f of REVERSE_SYNC_FIELDS) {
+      const c = fieldCols[f]; if (c == null) continue;
+      const dbv = normalizeText(mapped[c]);
+      const shv = normalizeText(cellAt(c));
+      if (shv === dbv) continue;
+      if (shv === '') continue; // 공란은 자동 역반영 금지(실수/미러 누락 보호)
+      fieldEdits.push({ field: f, oldv: dbv, newv: shv });
+    }
+    if (fieldEdits.length) {
+      made += await _replaceOpenProposalEdits(db, os, sheetId, tabName, ctx.tabGid, fieldEdits, curSig, os.last_edit_seq);
+      edits += fieldEdits.length;
+    }
+  }
+  return { scanned: orders.length, proposals: made, edits, cancelSuspects: suspects, skippedBySig: skippedSig, identityMismatch: identMismatch };
+}
+
+// detect의 시트행 서명(write-time computeRowWriteSig와 동일 필드·순서·정규화).
+function _sigFromCells(headers, fieldCols, cellAt) {
+  const parts = [];
+  for (const f of REVERSE_SYNC_FIELDS) {
+    if (fieldCols[f] == null) continue;
+    parts.push(f + '=' + normalizeText(cellAt(fieldCols[f])));
+  }
+  return parts.join('');
+}
+
+// G2 멱등: 트랜잭션 내 "open 제안 교체(DELETE→INSERT)". (단일 cancel_suspect/전체 edits 교체)
+async function _replaceOpenProposal(db, os, sheetId, tabName, tabGid, { type, field, oldv, newv, sig }) {
+  const client = await db.connect();
+  try {
+    await client.query('BEGIN');
+    await client.query(`DELETE FROM reverse_sync_proposals WHERE os_id = $1 AND status = 'open'`, [os.id]);
+    await client.query(
+      `INSERT INTO reverse_sync_proposals (os_id, sheet_id, tab_name, tab_gid, sheet_row, proposal_type, field, old_value, new_value, detected_sig, detected_edit_seq)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11)`,
+      [os.id, sheetId, tabName, tabGid, os.sheet_row, type, field, oldv, newv, sig, os.last_edit_seq]
+    );
+    await client.query('COMMIT');
+    return 1;
+  } catch (e) { try { await client.query('ROLLBACK'); } catch (_) {} logger.warn(`[reverseSync] 제안 기록 실패: ${e.message}`); return 0; }
+  finally { client.release(); }
+}
+
+async function _replaceOpenProposalEdits(db, os, sheetId, tabName, tabGid, fieldEdits, sig, detectedEditSeq) {
+  const client = await db.connect();
+  try {
+    await client.query('BEGIN');
+    await client.query(`DELETE FROM reverse_sync_proposals WHERE os_id = $1 AND status = 'open'`, [os.id]);
+    for (const e of fieldEdits) {
+      await client.query(
+        `INSERT INTO reverse_sync_proposals (os_id, sheet_id, tab_name, tab_gid, sheet_row, proposal_type, field, old_value, new_value, detected_sig, detected_edit_seq)
+         VALUES ($1,$2,$3,$4,$5,'edit',$6,$7,$8,$9,$10)`,
+        [os.id, sheetId, tabName, tabGid, os.sheet_row, e.field, e.oldv, e.newv, sig, detectedEditSeq]
+      );
+    }
+    await client.query('COMMIT');
+    return fieldEdits.length;
+  } catch (e) { try { await client.query('ROLLBACK'); } catch (_) {} logger.warn(`[reverseSync] edit 제안 기록 실패: ${e.message}`); return 0; }
+  finally { client.release(); }
+}
+
 module.exports = {
   computeDedupKey,
   buildCandidateRows,
@@ -1043,5 +1217,7 @@ module.exports = {
   markOrderMirrorFailed,
   recordReviewIdentity,
   getColLetter,
+  computeRowWriteSig,
+  detectReverseSyncProposals,
   __setPoolForTest,
 };
