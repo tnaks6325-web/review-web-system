@@ -22,8 +22,14 @@ const TICK_MAX_MS   = parseInt(process.env.ORDER_BATCH_TICK_MAX_MS || '25000', 1
 const PER_TAB_MS    = parseInt(process.env.ORDER_BATCH_PER_TAB_MS  || '12000', 10);  // 탭당 드레인 상한
 const MAX_TABS      = parseInt(process.env.ORDER_BATCH_MAX_TABS    || '10', 10);     // 사이클당 탭 수
 const BACKLOG_SLOTS = parseInt(process.env.ORDER_BATCH_BACKLOG_SLOTS || '3', 10);    // 대량탭 보장슬롯(기아 반대전이 방지)
+// ── 인터리브(다탭 공평 드레인) — env 게이트(끄면 기존 순차 _cycle). 30탭 스태거드 버스트 공평성. ──
+const INTERLEAVE        = process.env.ORDER_BATCH_INTERLEAVE === '1';
+const INTERLEAVE_MAX_MS = parseInt(process.env.ORDER_BATCH_INTERLEAVE_MAX_MS || '20000', 10); // ≤ TICK_MAX_MS
+const EMPTY_ROUNDS_DROP = parseInt(process.env.ORDER_BATCH_EMPTY_ROUNDS_DROP || '2', 10);     // 연속 빈 라운드 N회면 라운드서 제외
+const BUSY_THRESHOLD    = parseInt(process.env.ORDER_BATCH_BUSY_THRESHOLD || '40', 10);
 
 let _running = false, _rerun = false, _rrCursor = 0;
+let _rrKey = null;                          // R6: 인터리브용 키기반 RR 커서(가변정렬 안전)
 let _lastTickAt = 0, _cycleStartAt = 0;   // F3 워치독: 마지막 사이클 완료/시작 시각
 const _kickQueue = [];   // #1: 타깃 탭 대기열(중복제거)
 
@@ -54,7 +60,112 @@ async function _selectTabs() {
   return [...picked.values()];
 }
 
+// 인터리브 전용 reconcile: 사이클당 탭별 1회(R1·R7·R8·R10). 락 busy면 양보(다른 경로가 reconcile 중) — 다음 사이클 재시도.
+async function _reconcileOnce(sheetId, tabName, reconciledSet) {
+  const key = `${sheetId}||${tabName}`;
+  if (reconciledSet.has(key)) return;
+  reconciledSet.add(key);                   // busy로 양보돼도 이번 사이클은 마크(다음 사이클 새 Set으로 재시도)
+  const { withJobLock } = require('../utils/jobLock');
+  await withJobLock('order_reconcile', async () => {
+    try {
+      const { reconcileStuckOrders } = require('../services/orderLedger.service');
+      await reconcileStuckOrders({ sheetId, tabName, limit: 300, perTabCap: 60, useLiveMaxRow: true });
+    } catch (e) { logger.warn(`[orderBatch] reconcileOnce 실패(무시): ${e && e.message}`); }
+  }, { onBusy: () => null });
+}
+
+// 다탭 인터리브 드레인: 탭마다 1청크씩 라운드로빈(공평). reconcile는 탭당 사이클 1회.
+async function _cycleInterleave() {
+  const start = Date.now();
+  const { drainTabQueueBatched } = require('../services/syncQueue.service');
+  let drained = 0, succeeded = 0;
+  const reconciled = new Set();
+  const beat = () => { _lastTickAt = Date.now(); };   // J-A: 사이클 길어도 heartbeat 갱신(cron 단건 백스톱 오발동 차단)
+
+  // busy면 인터리브 대신 oldest-1탭만(자가 throttle 봉쇄 회피 — 기존 안전망 보존).
+  let busy = false;
+  try {
+    const { getThrottleStatus } = require('../utils/sheetsThrottle');
+    busy = getThrottleStatus().requestsInLastMinute > BUSY_THRESHOLD;
+  } catch (_) {}
+
+  const active = new Map();   // tabKey → {sheetId,tabName,emptyStreak}
+  const addTab = (sheetId, tabName) => {
+    const key = `${sheetId}||${tabName}`;
+    if (!active.has(key)) active.set(key, { sheetId, tabName, emptyStreak: 0 });
+    return key;
+  };
+  while (_kickQueue.length) {                // 진입 시 kick 1회 흡수
+    const k = _kickQueue.shift();
+    const sep = k.indexOf('||'); addTab(k.slice(0, sep), k.slice(sep + 2));
+  }
+  for (const r of await _selectTabs()) addTab(r.sheet_id, r.tab_name);
+  if (!active.size) return { tabs: 0, drained: 0, succeeded: 0 };
+
+  if (busy) {                                // busy: 인터리브 폴백 = oldest(첫 active) 1탭만
+    const first = active.values().next().value;
+    await _reconcileOnce(first.sheetId, first.tabName, reconciled);
+    try {
+      const res = await drainTabQueueBatched({ sheetId: first.sheetId, tabName: first.tabName,
+        maxMillis: PER_TAB_MS, oneChunk: false, runReconcileFirst: false });
+      if (res && res.succeeded) succeeded += res.succeeded;
+    } catch (e) { logger.warn(`[orderBatchTick] busy 1탭 실패(무시): ${e && e.message}`); }
+    beat();
+    if (succeeded) logger.info(`[orderBatchTick] interleave-busy 1탭, ${succeeded}건 반영`);
+    return { tabs: active.size, drained: 1, succeeded, mode: 'busy' };
+  }
+
+  // R6: 마지막 처리 키 다음부터 시작하도록 키 배열 회전.
+  let keys = [...active.keys()];
+  if (_rrKey) {
+    const idx = keys.indexOf(_rrKey);
+    if (idx >= 0) keys = keys.slice(idx + 1).concat(keys.slice(0, idx + 1));
+  }
+
+  let lastKey = _rrKey;
+  while (Date.now() - start < INTERLEAVE_MAX_MS && keys.length) {
+    while (_kickQueue.length) {              // 라운드 중 신규 kick 합류(R3 race 완화)
+      const k = _kickQueue.shift();
+      const sep = k.indexOf('||'); const nk = addTab(k.slice(0, sep), k.slice(sep + 2));
+      if (!keys.includes(nk)) keys.push(nk);
+    }
+    const nextKeys = [];
+    let quotaHit = false;
+    for (const key of keys) {
+      if (Date.now() - start > INTERLEAVE_MAX_MS) { nextKeys.push(key); continue; }
+      const t = active.get(key);
+      if (!t) continue;
+      await _reconcileOnce(t.sheetId, t.tabName, reconciled);
+      let res = null;
+      try {
+        res = await drainTabQueueBatched({ sheetId: t.sheetId, tabName: t.tabName,
+          maxMillis: PER_TAB_MS, oneChunk: true, runReconcileFirst: false });  // R1: reconcile 분리
+      } catch (e) { logger.warn(`[orderBatchTick] tab=${t.tabName} 청크 실패(무시): ${e && e.message}`); }
+      drained++; lastKey = key; beat();     // J-A: 청크마다 heartbeat
+      if (res && res.succeeded) succeeded += res.succeeded;
+      if (res && res.skipped) { nextKeys.push(key); continue; }        // 락 busy → 다음 라운드
+      if (res && res.quotaExceeded) {                                  // R5: 전체 라운드 즉시 중단
+        quotaHit = true;
+        // J-B: 미처리 잔여(이 키 포함 이후) kick 즉시성 보존 — active 키를 _kickQueue로 복원.
+        for (const rk of nextKeys) if (!_kickQueue.includes(rk)) _kickQueue.push(rk);
+        if (!_kickQueue.includes(key)) _kickQueue.push(key);
+        break;
+      }
+      if (res && res.emptied) {
+        t.emptyStreak++;
+        if (t.emptyStreak < EMPTY_ROUNDS_DROP) nextKeys.push(key);     // 아직 완료 단정 안 함
+      } else { t.emptyStreak = 0; nextKeys.push(key); }
+    }
+    if (quotaHit) { _rrKey = lastKey; logger.info(`[orderBatchTick] interleave quota: ${drained}청크, ${succeeded}건`); return { tabs: active.size, drained, succeeded, mode: 'quota' }; }
+    keys = nextKeys;
+  }
+  _rrKey = lastKey;
+  if (succeeded) logger.info(`[orderBatchTick] interleave ${drained}청크, ${succeeded}건 반영`);
+  return { tabs: active.size, drained, succeeded, mode: 'interleave' };
+}
+
 async function _cycle() {
+  if (INTERLEAVE) return _cycleInterleave();      // 인터리브 게이트(끄면 아래 기존 순차 경로)
   const start = Date.now();
   const { drainTabQueueBatched } = require('../services/syncQueue.service');
   let drained = 0, succeeded = 0;
@@ -121,7 +232,8 @@ function kickOrderBatch(sheetId, tabName) {
   }
   // ★ R-F3-a 워치독: _running이 시작 후 TICK_MAX_MS*3 넘게 true면 데드(미처리 예외·OOM·재시작) 판정 →
   //   강제 리셋. 안 하면 kick이 영구 no-op(_rerun만 set) + AUTO=1이라 30초 cron도 order_append 제외 = 영구정지.
-  if (_running && _cycleStartAt && (Date.now() - _cycleStartAt > TICK_MAX_MS * 3)) {
+  const _cycleCap = INTERLEAVE ? Math.max(INTERLEAVE_MAX_MS, TICK_MAX_MS) : TICK_MAX_MS;
+  if (_running && _cycleStartAt && (Date.now() - _cycleStartAt > _cycleCap * 3)) {
     logger.warn(`[orderBatch] _running stale ${Date.now() - _cycleStartAt}ms → 강제 리셋(워치독)`);
     _running = false;
   }

@@ -273,7 +273,7 @@ async function _readGuardWindow(sheetId, tabName, gid, rows, minCol, maxCol, _re
 
 // 한 탭의 pending order_append를 묶어 가드 1콜 + write 1콜(청크당)으로 반영.
 // ★ R-B1: queue_pump_drain + order_reconcile 두 락 중첩 → 펌프·가속드레인·reconcile 모두와 직렬화.
-async function drainTabQueueBatched({ sheetId, tabName, maxMillis = 60000, batchSize = BATCH_ROW_CAP, runReconcileFirst = true } = {}) {
+async function drainTabQueueBatched({ sheetId, tabName, maxMillis = 60000, batchSize = BATCH_ROW_CAP, runReconcileFirst = true, oneChunk = false } = {}) {
   if (!sheetId || !tabName) throw new Error('drainTabQueueBatched: sheetId, tabName 필수');
   if (process.env.ORDER_BATCH_DRAIN !== '1') {                  // R-B10: 플래그 게이트(되돌리기)
     return drainTabQueue({ sheetId, tabName, maxMillis });      // 미설정 시 검증된 단건 경로
@@ -310,13 +310,14 @@ async function drainTabQueueBatched({ sheetId, tabName, maxMillis = 60000, batch
     // 락 busy여도 큐 드레인은 계속(이미 행배정된 항목 빼냄).
   }
   // ── (2) 큐 드레인: 락 밖. SKIP LOCKED + STALE(60s) 재점유가 이중처리 차단(R-1b 조건부 written이 안전 흡수). ──
-  return _drainLoop({ sheetId, tabName, maxMillis, batchSize });
+  return _drainLoop({ sheetId, tabName, maxMillis, batchSize, oneChunk });
 }
 
 // 드레인 루프(락 안/밖 공용). 한 탭 order_append를 청크 배치(가드1콜+쓰기1콜)로 반영.
-async function _drainLoop({ sheetId, tabName, maxMillis, batchSize }) {
+// oneChunk=true(인터리브): 1 batch만 처리하고 반환(점유시간 최소·공평 양보). emptied=클레임 0행(이번 라운드 비움 — 완료 단정 아님).
+async function _drainLoop({ sheetId, tabName, maxMillis, batchSize, oneChunk = false }) {
   const start = Date.now();
-  let processed = 0, succeeded = 0, failed = 0, deferred = 0;
+  let processed = 0, succeeded = 0, failed = 0, deferred = 0, quotaExceeded = false, emptied = false;
   while (Date.now() - start < maxMillis) {
     // R-B8: 단건과 동일 클레임 조건(type='order_append') → 같은 항목은 한쪽만 점유(SKIP LOCKED).
     const { rows: items } = await pool.query(
@@ -333,12 +334,13 @@ async function _drainLoop({ sheetId, tabName, maxMillis, batchSize }) {
         RETURNING *`,
       [sheetId, tabName, batchSize, String(STALE_PROCESSING_SEC)]
     );
-    if (!items.length) break;
+    if (!items.length) { emptied = true; break; }           // 빈 큐 = 이번 라운드 비움(완료 신호 아님)
     const r = await _executeBatch(items, sheetId, tabName);
     processed += r.processed; succeeded += r.succeeded; failed += r.failed; deferred += r.deferred;
-    if (r.quotaExceeded) break;                             // R-B9: quota → 양보(락 해제)
+    if (r.quotaExceeded) { quotaExceeded = true; break; }   // R-B9: quota → 양보(락 해제)
+    if (oneChunk) break;                                     // R2/R5: 1청크만 → 점유시간 최소·공평 양보
   }
-  return { processed, succeeded, failed, deferred, elapsedMs: Date.now() - start };
+  return { processed, succeeded, failed, deferred, quotaExceeded, emptied, elapsedMs: Date.now() - start };
 }
 
 async function _executeBatch(items, sheetId, tabName) {
