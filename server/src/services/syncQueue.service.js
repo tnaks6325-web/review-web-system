@@ -792,7 +792,23 @@ async function getQueueStats() {
     LIMIT 5
   `);
 
-  return { stats, recentFailed };
+  // ★ 타입×상태 분해(적체 원인 진단: review_submit vs order_append 고아 구분)
+  const { rows: byType } = await pool.query(`
+    SELECT type, status, COUNT(*)::int AS count
+    FROM sync_queue
+    GROUP BY type, status
+    ORDER BY type, status
+  `);
+  // pending order_append 중 "이미 written/canceled/삭제된 주문"(고아) 수 — 실제 미반영과 구분
+  const { rows: orphanRows } = await pool.query(`
+    SELECT COUNT(*)::int AS orphans
+    FROM sync_queue sq
+    JOIN order_submissions os ON os.id = (sq.payload->>'orderSubmissionId')::uuid
+    WHERE sq.type='order_append' AND sq.status='pending'
+      AND (os.deleted_at IS NOT NULL OR os.mirror_status IN ('written','canceled'))
+  `).catch(() => [{ orphans: null }]);
+
+  return { stats, recentFailed, byType, orphanOrderAppendPending: orphanRows[0] && orphanRows[0].orphans };
 }
 
 // ── 특정 항목 수동 재시도 ──
