@@ -1,12 +1,16 @@
 const cron = require('node-cron');
 const { buildIndexSmart, checkDirtySheets, buildOneSheet } = require('../services/indexBuilder.service');
 const { processQueue, purgeCompleted, retryAllFailed } = require('../services/syncQueue.service');
+const { mirrorAllSheets } = require('../services/rawMirror.service');
+const { getThrottleStatus } = require('../utils/sheetsThrottle');
 // [DEPRECATED — v11.8.0] syncSettingsOnly 제거: DB가 설정 원본이므로 시트→DB 동기화 불필요
 // const { syncSettingsOnly } = require('../services/masterSheet.service');
 const { logger } = require('../utils/logger');
 const { emitIndexBuild, broadcast } = require('../utils/sse');
 const { logAbnormal } = require('../services/errorLog.service');
 const pool = require('../db/pool');
+let rawMirrorRunning = false;
+let reconcileRunning = false;
 // [REMOVED] readSheet — 세부목록→DB 자동동기화 CRON 제거됨 (DB가 원본)
 
 /**
@@ -72,6 +76,69 @@ function startCronJobs() {
   }, { timezone: 'Asia/Seoul' });
 
   // ── 인덱스 전체 빌드: 하루 2회 (09시, 15시) ──
+  // RAW mirror dirty check: keep DB source data close to manually edited Sheets.
+  if (process.env.RAW_MIRROR_CRON_ENABLED !== 'false') {
+    const rawMirrorSchedule = process.env.RAW_MIRROR_CRON_SCHEDULE || '*/5 * * * *';
+    cron.schedule(rawMirrorSchedule, async () => {
+      if (rawMirrorRunning) {
+        logger.debug('[CRON-RawMirror] previous run still active, skip');
+        return;
+      }
+      const throttle = getThrottleStatus();
+      const busyThreshold = parseInt(process.env.RAW_MIRROR_BUSY_THRESHOLD || '10', 10);
+      if (throttle.requestsInLastMinute > busyThreshold) {
+        logger.debug(`[CRON-RawMirror] throttle busy (${throttle.requestsInLastMinute}/${throttle.limit}), skip`);
+        return;
+      }
+      rawMirrorRunning = true;
+      try {
+        const result = await mirrorAllSheets({ force: false, includeHidden: true });
+        if ((result.tabsMirrored || 0) > 0 || (result.errors || 0) > 0) {
+          logger.info(`[CRON-RawMirror] tabs=${result.tabsMirrored}, rows=${result.rowsWritten}, skipped=${result.sheetsSkipped}, errors=${result.errors}, elapsed=${result.elapsed}`);
+        }
+      } catch (err) {
+        logger.error(`[CRON-RawMirror] error: ${err.message}`);
+        logAbnormal({ flow: 'cron', step: 'raw_mirror', error: err, context: { job: 'raw_mirror' } });
+      } finally {
+        rawMirrorRunning = false;
+      }
+    }, { timezone: 'Asia/Seoul' });
+  }
+
+  // ── 막힌 주문 자동복구(리컨실): 2분마다 — RAW 미러 뒤에 둠(메타 채워진 뒤 복구) ──
+  //   pending_no_row/failed/정체 queued 주문을 시트에 다시 밀어넣는다(복구분은 하단 노란행).
+  //   읽기 쿼터 부담 0(메타 없는 탭은 skip). 아침 폭주 시 throttle busy면 양보.
+  if (process.env.ORDER_RECONCILE_CRON_ENABLED !== 'false') {
+    const reconcileSchedule = process.env.ORDER_RECONCILE_CRON_SCHEDULE || '*/2 * * * *';
+    cron.schedule(reconcileSchedule, async () => {
+      if (reconcileRunning) return;
+      const throttle = getThrottleStatus();
+      const busyThreshold = parseInt(process.env.ORDER_RECONCILE_BUSY_THRESHOLD || '20', 10);
+      if (throttle.requestsInLastMinute > busyThreshold) {
+        logger.debug(`[CRON-Reconcile] throttle busy (${throttle.requestsInLastMinute}/${throttle.limit}), skip`);
+        return;
+      }
+      reconcileRunning = true;
+      try {
+        const { reconcileStuckOrders } = require('../services/orderLedger.service');
+        const { withJobLock } = require('../utils/jobLock');
+        // ★ #1: 멀티인스턴스/rolling 배포(old+new 공존) 경합 차단 — order_reconcile advisory lock으로
+        //   cron·flush·인라인 reconcile을 하나로 직렬화. 다른 인스턴스가 보유 중이면 이번 틱은 양보.
+        const r = await withJobLock('order_reconcile', () => reconcileStuckOrders({ limit: 100, perTabCap: 60 }));
+        if (r && (r.requeued > 0 || r.stillStuck > 0 || r.noCandidates > 0)) {
+          logger.info(`[CRON-Reconcile] requeued=${r.requeued}, skippedNoMeta=${r.skippedNoMeta}, noCandidates=${r.noCandidates}, stillStuck=${r.stillStuck}`);
+        } else if (r && r.skipped) {
+          logger.debug('[CRON-Reconcile] order_reconcile lock busy — 다른 인스턴스 처리 중, 양보');
+        }
+      } catch (err) {
+        logger.error(`[CRON-Reconcile] error: ${err.message}`);
+        logAbnormal({ flow: 'cron', step: 'order_reconcile', error: err, context: { job: 'order_reconcile' } });
+      } finally {
+        reconcileRunning = false;
+      }
+    }, { timezone: 'Asia/Seoul' });
+  }
+
   const schedule = process.env.INDEX_CRON_SCHEDULE || '0 9,15 * * 1-6';
   cron.schedule(schedule, async () => {
     logger.info(`[CRON] 인덱스 빌드 시작: ${new Date().toISOString()}`);
@@ -112,6 +179,14 @@ function startCronJobs() {
       logger.error(`[CRON-Queue] 큐 처리 오류: ${err.message}`);
       logAbnormal({ flow: 'sync_queue', step: 'process_queue', error: err, context: { job: '큐 워커' } });
     }
+  });
+
+  // ── ★ 상시 배치 드레인 백스톱 — 15초마다 백로그 탭을 배치로 시트반영(근실시간) ──
+  //   ORDER_BATCH_AUTO=1 일 때만 동작(kickOrderBatch 내부 게이트). 코얼레싱이라 중복 사이클 없음.
+  //   제출 시 즉시 kick + 이 15초 cron이 백스톱(kick 누락·재시작 잔여분 흡수).
+  cron.schedule('*/15 * * * * *', () => {
+    try { require('../jobs/orderBatchScheduler').kickOrderBatch(); }
+    catch (err) { logger.warn(`[CRON-OrderBatch] kick 실패(무시): ${err.message}`); }
   });
 
   // ── ★ A2+C2: 매시간 stuck/failed 자동 복구 ──

@@ -159,6 +159,15 @@ async function _readSheetByGridData(spreadsheetId, range, opts = {}) {
   const actualEndRow = endRow > 0 ? Math.min(endRow, maxRows) : maxRows;
   const actualEndCol = endCol > 0 ? Math.min(endCol, maxCols) : maxCols;
 
+  // ★ 요청 시작행/열이 그리드 경계를 넘으면(예: 복구 append가 현재 그리드보다 아래 행을
+  //   가드 읽기) 해당 영역엔 데이터가 없음 → 빈 결과 반환. (잘못된 gridRange =
+  //   endRowIndex < startRowIndex 로 API 호출하면 "endRowIndex cannot be before startRowIndex"
+  //   에러가 나서 가드 읽기가 실패한다.) 쓰기측 _batchWriteByGrid가 appendDimension으로
+  //   그리드를 확장하므로 그 행은 '비어있음'이 맞다.
+  if ((startRow - 1) >= actualEndRow || (startCol - 1) >= actualEndCol) {
+    return [];
+  }
+
   // getByDataFilter로 GID 기반 데이터 조회 (range 파싱 문제 완전 회피)
   const filterRes = await sheets.spreadsheets.getByDataFilter({
     spreadsheetId,
@@ -261,6 +270,15 @@ async function writeSheet(spreadsheetId, range, values, opts = {}) {
     valueInputOption: 'RAW',
     requestBody: { values },
   });
+}
+
+/**
+ * 범위 값 비우기 (values.clear). 테스트 탭 리셋 등에 사용. 슬래시 탭명은 A1 path가 깨질 수 있어 주의.
+ */
+async function clearSheetValues(spreadsheetId, range) {
+  if (!sheets) throw new Error('Google Sheets API가 설정되지 않았습니다.');
+  await sheets.spreadsheets.values.clear({ spreadsheetId, range });
+  _invalidateMeta(spreadsheetId);
 }
 
 /**
@@ -810,8 +828,15 @@ async function _batchWriteByGrid(spreadsheetId, data, opts = {}) {
     if (appendedRows) _invalidateMeta(spreadsheetId);
 
   } catch (batchErr) {
-    // ★ 안전 폴백: batch 실패 시 기존 순차 방식으로 재시도
     const { logger } = require('../utils/logger');
+    // ★ R-B9: 배치(버스트) 경로는 순차폴백 금지. data가 수십~수천 range면 폴백이 throttle 콜을
+    //   폭발시킨다(300건×15col=4500콜). 청크 단위로 throw → 호출부가 그 청크만 멱등 재시도
+    //   (claimRow 2중유니크 + my-own-value 가드 통과로 중복행 0).
+    if (opts && opts.noSequentialFallback) {
+      logger.warn(`[batchUpdateSheet] GID batch 실패(폴백 비활성) → throw: ${batchErr.message}`);
+      throw batchErr;
+    }
+    // ★ 안전 폴백: batch 실패 시 기존 순차 방식으로 재시도
     logger.warn(`[batchUpdateSheet] GID batch 쓰기 실패 → 순차 폴백: ${batchErr.message}`);
     for (const item of data) {
       await writeSheet(spreadsheetId, item.range, item.values, opts);
@@ -819,12 +844,78 @@ async function _batchWriteByGrid(spreadsheetId, data, opts = {}) {
   }
 }
 
+/**
+ * 특정 행의 배경색 설정 (복구 주문을 노란색으로 표시 → 수동입력분과 구분)
+ * spreadsheets.batchUpdate + repeatCell 사용. best-effort(실패해도 값 쓰기엔 무관)로 호출 권장.
+ *
+ * @param {string} spreadsheetId
+ * @param {object} opts { gid, tabName, rowIndex(1-based), colCount=30, bgColor }
+ */
+async function setRowBackground(spreadsheetId, { gid, tabName, rowIndex, colCount = 30, bgColor } = {}) {
+  if (!sheets) throw new Error('Google Sheets API가 설정되지 않았습니다.');
+  const ri = parseInt(rowIndex, 10);
+  if (!Number.isInteger(ri) || ri < 1) throw new Error(`잘못된 rowIndex: ${rowIndex}`);
+
+  const metaSheets = await _getCachedSheetMeta(spreadsheetId);
+  const targetSheet = _findSheetInMeta(metaSheets, { gid, tabName });
+  if (!targetSheet) {
+    const available = metaSheets.map(s => `"${s.properties.title}"`).join(', ');
+    throw new Error(`시트를 찾을 수 없습니다: ${tabName || 'gid:' + gid} (사용 가능: ${available})`);
+  }
+  const sheetId = targetSheet.properties.sheetId;
+  const color = bgColor || { red: 1, green: 0.95, blue: 0.6 }; // 연한 노랑
+
+  await sheets.spreadsheets.batchUpdate({
+    spreadsheetId,
+    requestBody: {
+      requests: [{
+        repeatCell: {
+          range: {
+            sheetId,
+            startRowIndex: ri - 1,
+            endRowIndex: ri,
+            startColumnIndex: 0,
+            endColumnIndex: Math.max(1, colCount),
+          },
+          cell: { userEnteredFormat: { backgroundColor: color } },
+          fields: 'userEnteredFormat.backgroundColor',
+        },
+      }],
+    },
+  });
+}
+
+// ★ R-B4: 복구행 N개 배경색을 repeatCell N요청으로 묶어 batchUpdate 1콜로 처리.
+//   (setRowBackground는 행당 1콜 → 버스트에서 배경색만 수백콜 폭주. 이 함수로 1콜.)
+async function setRowsBackground(spreadsheetId, { gid, tabName, rowIndexes = [], colCount = 30, bgColor } = {}) {
+  if (!sheets) throw new Error('Google Sheets API가 설정되지 않았습니다.');
+  const ris = [...new Set((rowIndexes || []).map(r => parseInt(r, 10)).filter(n => Number.isInteger(n) && n >= 1))];
+  if (!ris.length) return;
+  const metaSheets = await _getCachedSheetMeta(spreadsheetId);
+  const targetSheet = _findSheetInMeta(metaSheets, { gid, tabName });
+  if (!targetSheet) throw new Error(`시트를 찾을 수 없습니다: ${tabName || 'gid:' + gid}`);
+  const sheetId = targetSheet.properties.sheetId;
+  const color = bgColor || { red: 1, green: 0.95, blue: 0.6 }; // 연한 노랑
+  const requests = ris.map(ri => ({
+    repeatCell: {
+      range: { sheetId, startRowIndex: ri - 1, endRowIndex: ri, startColumnIndex: 0, endColumnIndex: Math.max(1, colCount) },
+      cell: { userEnteredFormat: { backgroundColor: color } },
+      fields: 'userEnteredFormat.backgroundColor',
+    },
+  }));
+  await sheets.spreadsheets.batchUpdate({ spreadsheetId, requestBody: { requests } });
+}
+
 module.exports = {
   readSheet,
   writeSheet,
   appendSheet,
   batchUpdateSheet,
+  clearSheetValues,
+  setRowBackground,
+  setRowsBackground,
   getSpreadsheetMeta,
+  invalidateSheetMeta: _invalidateMeta, // ★ D3b(#3): reconcile/guard 전 그리드 캐시 신선화용
   batchReadSheet,
   getSheetModifiedTime,
   copySpreadsheet,

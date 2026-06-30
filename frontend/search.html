@@ -1068,6 +1068,23 @@ if (sessionStorage.getItem("iad_direct_submit_items")) {
     </header>
     <main class="screen-body" style="max-width:520px;margin:0 auto;padding:20px 16px 40px">
 
+      <!-- ★ 로그인된 리뷰어 정보 (최상단) -->
+      <div id="orderFormReviewerInfo" class="pane-card" style="display:none;margin-bottom:12px;padding:12px 16px">
+        <div style="display:flex;align-items:center;gap:10px">
+          <div style="width:38px;height:38px;border-radius:50%;background:#e8f1fe;display:flex;align-items:center;justify-content:center;color:#1b64da;flex-shrink:0">
+            <i class="fas fa-user" style="font-size:1rem"></i>
+          </div>
+          <div style="line-height:1.45;min-width:0">
+            <div style="font-size:.68rem;color:var(--t3);font-weight:700;letter-spacing:.03em">👤 로그인된 리뷰어</div>
+            <div style="font-size:.95rem;font-weight:700;color:var(--t1)">
+              <span id="ofReviewerName">-</span>
+              <span id="ofReviewerBadge" style="display:none;margin-left:6px;font-size:.62rem;font-weight:700;color:#1b64da;background:#e8f1fe;border:1px solid #a6c8fb;border-radius:6px;padding:1px 6px;vertical-align:middle">회원</span>
+            </div>
+            <div id="ofReviewerPhone" style="display:none;font-size:.72rem;color:var(--t3)"></div>
+          </div>
+        </div>
+      </div>
+
       <!-- 제공정보 카드 -->
       <div class="pane-card" style="margin-bottom:16px;padding:14px 16px">
         <div style="font-size:.7rem;font-weight:700;color:var(--t3);margin-bottom:8px;letter-spacing:.04em">📦 제공정보</div>
@@ -1154,9 +1171,14 @@ if (sessionStorage.getItem("iad_direct_submit_items")) {
         <div style="font-size:3rem;margin-bottom:16px">✅</div>
         <div style="font-size:1.1rem;font-weight:700;color:var(--t1);margin-bottom:8px">제출 완료!</div>
         <div id="orderFormDoneMsg" style="font-size:.85rem;color:var(--t2)">구매양식이 성공적으로 제출되었습니다.<br>창을 닫아도 됩니다.</div>
-        <button onclick="resetOrderFormForReentry()" style="margin-top:24px;padding:12px 28px;border:1.5px solid #D1D5DB;border-radius:10px;background:#fff;color:var(--t1);font-size:.9rem;font-weight:600;cursor:pointer;display:inline-flex;align-items:center;gap:6px">
-          <i class="fas fa-arrow-left"></i> 이전 화면으로
-        </button>
+        <div style="margin-top:24px;display:flex;gap:8px;justify-content:center;flex-wrap:wrap">
+          <button onclick="goToReviewerMain()" style="padding:12px 28px;border:none;border-radius:10px;background:#3182f6;color:#fff;font-size:.9rem;font-weight:700;cursor:pointer;display:inline-flex;align-items:center;gap:6px">
+            <i class="fas fa-home"></i> 리뷰어 메인으로
+          </button>
+          <button onclick="resetOrderFormForReentry()" style="padding:12px 28px;border:1.5px solid #D1D5DB;border-radius:10px;background:#fff;color:var(--t1);font-size:.9rem;font-weight:600;cursor:pointer;display:inline-flex;align-items:center;gap:6px">
+            <i class="fas fa-arrow-left"></i> 이전 화면으로
+          </button>
+        </div>
       </div>
 
     </main>

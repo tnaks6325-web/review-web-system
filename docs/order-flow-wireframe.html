@@ -1,0 +1,288 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>구매양식 제출 흐름 — 직원 안내 와이어프레임</title>
+<style>
+  :root{
+    --ink:#1f2933; --line:#3b4754; --muted:#6b7785; --soft:#9aa5b1;
+    --bg:#f5f7fa; --card:#ffffff; --accent:#2563eb; --accentbg:#e8efff;
+    --ok:#15803d; --okbg:#e7f6ec; --warn:#b45309; --warnbg:#fdf3e3;
+    --bad:#b91c1c; --badbg:#fdeaea; --wait:#475569; --waitbg:#eef1f5;
+  }
+  *{box-sizing:border-box}
+  body{
+    margin:0; background:var(--bg); color:var(--ink);
+    font-family:"Apple SD Gothic Neo","Malgun Gothic","Segoe UI",sans-serif;
+    line-height:1.6; padding:32px 16px 80px;
+  }
+  .wrap{max-width:1080px;margin:0 auto}
+  header.top{text-align:center;margin-bottom:8px}
+  header.top h1{font-size:26px;margin:0 0 6px;letter-spacing:-.5px}
+  header.top p{margin:0;color:var(--muted);font-size:15px}
+  .legendbar{
+    display:flex;gap:10px;justify-content:center;flex-wrap:wrap;
+    margin:20px 0 34px;font-size:13px;color:var(--muted)
+  }
+  .legendbar b{color:var(--ink)}
+
+  /* 단계 묶음 */
+  .phase{
+    background:var(--card);border:1px solid #e1e6ec;border-radius:14px;
+    padding:20px 22px 24px;margin-bottom:22px;
+    box-shadow:0 1px 0 rgba(16,24,40,.03);
+  }
+  .phase > h2{
+    margin:0 0 4px;font-size:17px;display:flex;align-items:center;gap:10px
+  }
+  .pnum{
+    width:26px;height:26px;border-radius:50%;background:var(--ink);color:#fff;
+    font-size:14px;display:inline-flex;align-items:center;justify-content:center;flex:0 0 auto
+  }
+  .phase > .sub{margin:0 0 18px 36px;color:var(--muted);font-size:13.5px}
+
+  /* 흐름 박스 행 */
+  .flow{display:flex;align-items:stretch;flex-wrap:wrap;gap:0}
+  .step{
+    flex:1 1 0;min-width:150px;background:#fff;border:1.5px solid var(--line);
+    border-radius:10px;padding:12px 13px;position:relative
+  }
+  .step .tag{font-size:11px;color:var(--soft);font-family:monospace;letter-spacing:.3px}
+  .step .ttl{font-size:14.5px;font-weight:700;margin:3px 0 5px}
+  .step .desc{font-size:12.5px;color:var(--muted)}
+  .step.user{border-color:var(--accent);background:var(--accentbg)}
+  .step.db{border-style:dashed}
+  .arrow{
+    flex:0 0 30px;display:flex;align-items:center;justify-content:center;
+    color:var(--soft);font-size:22px;font-weight:700
+  }
+  .arrow.down{flex-basis:100%;height:26px}
+  @media(max-width:760px){
+    .flow{flex-direction:column}
+    .arrow{flex-basis:100%;height:24px;transform:rotate(90deg)}
+  }
+
+  /* 콜아웃 */
+  .callout{
+    margin-top:16px;border-left:4px solid var(--accent);background:#f8faff;
+    padding:11px 14px;border-radius:0 8px 8px 0;font-size:13px
+  }
+  .callout.ok{border-color:var(--ok);background:var(--okbg)}
+  .callout.warn{border-color:var(--warn);background:var(--warnbg)}
+  .callout b{display:block;margin-bottom:2px}
+
+  /* 상태 범례 카드 */
+  .grid2{display:grid;grid-template-columns:1fr 1fr;gap:14px}
+  @media(max-width:760px){.grid2{grid-template-columns:1fr}}
+  .statusrow{display:flex;align-items:flex-start;gap:10px;padding:8px 0;border-bottom:1px dashed #e5e9ef}
+  .statusrow:last-child{border-bottom:0}
+  .chip{
+    font-family:monospace;font-size:11.5px;font-weight:700;padding:3px 9px;border-radius:20px;
+    white-space:nowrap;flex:0 0 auto;margin-top:1px
+  }
+  .c-wait{background:var(--waitbg);color:var(--wait)}
+  .c-ok{background:var(--okbg);color:var(--ok)}
+  .c-warn{background:var(--warnbg);color:var(--warn)}
+  .c-bad{background:var(--badbg);color:var(--bad)}
+  .statusrow .st-d{font-size:13px;color:var(--ink)}
+  .statusrow .st-d small{color:var(--muted)}
+
+  /* 타임라인 */
+  .timeline{display:flex;gap:0;align-items:center;flex-wrap:wrap;margin-top:8px}
+  .tl{flex:1 1 0;min-width:130px;text-align:center;padding:10px 6px}
+  .tl .t{font-size:20px;font-weight:800;color:var(--accent)}
+  .tl .l{font-size:12.5px;color:var(--muted)}
+  .tl + .tl{border-left:2px dotted #d6dce4}
+
+  .yellow-demo{
+    display:inline-block;background:#fff7d6;border:1px solid #e9d27a;
+    border-radius:5px;padding:2px 8px;font-size:12px;color:#7a5b00;font-weight:600
+  }
+  footer.note{
+    text-align:center;color:var(--soft);font-size:12px;margin-top:30px
+  }
+  .keybox{
+    background:#0f172a;color:#e2e8f0;border-radius:12px;padding:18px 22px;margin-bottom:22px
+  }
+  .keybox h2{margin:0 0 10px;font-size:16px;color:#fff}
+  .keybox ul{margin:0;padding-left:18px}
+  .keybox li{font-size:13.5px;margin:5px 0;color:#cbd5e1}
+  .keybox b{color:#fff}
+</style>
+</head>
+<body>
+<div class="wrap">
+
+  <header class="top">
+    <h1>📦 구매양식 제출 흐름</h1>
+    <p>리뷰어가 구매양식을 제출하면 → <b>먼저 서버 DB에 저장</b> → <b>몇 초 뒤 구글시트에 자동 기록</b>됩니다.</p>
+  </header>
+
+  <div class="legendbar">
+    <span>🟦 <b>리뷰어 화면</b></span>
+    <span>⬜ <b>서버(자동)</b></span>
+    <span>⬛ <b>구글시트</b></span>
+    <span>· 점선 박스 = 서버 DB(원장)</span>
+  </div>
+
+  <!-- 한눈에 요약 -->
+  <div class="keybox">
+    <h2>🔑 직원이 꼭 알아야 할 3가지</h2>
+    <ul>
+      <li><b>① DB가 먼저, 시트는 나중.</b> 제출하면 서버 DB에 <b>즉시</b> 저장돼 절대 사라지지 않습니다. 구글시트 칸은 보통 <b>2~5초 뒤</b> 자동으로 채워집니다(잠깐 비어 보여도 정상).</li>
+      <li><b>② 시트가 비어 보이면 "상태"를 보세요.</b> 관리자 대시보드의 <b>"구매주문 시트반영 현황"</b> 위젯에서 대기/완료/문제를 한눈에 봅니다.</li>
+      <li><b>③ <span class="yellow-demo">노란 배경 행</span>은 자동복구분.</b> 시스템이 뒤늦게 채운 줄입니다. 직원이 손으로 넣은 줄·정상 줄과 구분하려고 색을 입힙니다.</li>
+    </ul>
+  </div>
+
+  <!-- PHASE 1 -->
+  <section class="phase">
+    <h2><span class="pnum">1</span> 제출 — 그 즉시 (DB 확정)</h2>
+    <p class="sub">리뷰어가 "제출" 버튼을 누르는 순간 일어나는 일. 여기까지는 <b>1초 안</b>에 끝납니다.</p>
+
+    <div class="flow">
+      <div class="step user">
+        <div class="tag">search.html</div>
+        <div class="ttl">리뷰어 제출</div>
+        <div class="desc">구매양식 작성 후 제출 버튼</div>
+      </div>
+      <div class="arrow">→</div>
+      <div class="step db">
+        <div class="tag">order_submissions</div>
+        <div class="ttl">① DB에 즉시 저장</div>
+        <div class="desc">서버 원장에 먼저 확정<br>(이때부터 손실 없음)</div>
+      </div>
+      <div class="arrow">→</div>
+      <div class="step db">
+        <div class="tag">claimRow</div>
+        <div class="ttl">② 들어갈 줄 예약</div>
+        <div class="desc">시트의 빈 줄 1칸을<br>중복 없이 콕 집어 예약</div>
+      </div>
+      <div class="arrow">→</div>
+      <div class="step">
+        <div class="tag">enqueue · kick</div>
+        <div class="ttl">③ 기록 대기열 등록</div>
+        <div class="desc">"시트에 써줘" 작업을<br>줄 세우고 즉시 깨움</div>
+      </div>
+    </div>
+
+    <div class="callout ok">
+      <b>✓ 리뷰어는 이 순간 바로 확인 가능</b>
+      참여조회 화면에 <code>처리중</code> 상태로 즉시 표시됩니다. 시트 기록을 기다릴 필요가 없습니다(DB부터 보기 때문).
+    </div>
+  </section>
+
+  <!-- PHASE 2 -->
+  <section class="phase">
+    <h2><span class="pnum">2</span> 구글시트 반영 — 몇 초 뒤 (자동)</h2>
+    <p class="sub">대기열에 등록된 작업을 시스템이 알아서 처리합니다. 직원이 누를 것은 없습니다.</p>
+
+    <div class="flow">
+      <div class="step">
+        <div class="tag">queue worker</div>
+        <div class="ttl">④ 대기열 처리</div>
+        <div class="desc">제출 직후 바로(펌프) 또는<br>30초 주기로 꺼냄</div>
+      </div>
+      <div class="arrow">→</div>
+      <div class="step">
+        <div class="tag">throttle 45/분</div>
+        <div class="ttl">⑤ 속도 제한 통과</div>
+        <div class="desc">구글 한도를 넘지 않게<br>호출 수를 자동 조절</div>
+      </div>
+      <div class="arrow">→</div>
+      <div class="step">
+        <div class="tag">guard read</div>
+        <div class="ttl">⑥ 덮어쓰기 방지 점검</div>
+        <div class="desc">연락처·주소·수취인 3칸을<br>확인 → 남의 줄이면 양보</div>
+      </div>
+      <div class="arrow">→</div>
+      <div class="step" style="border-color:#1f2933;background:#f0f2f5">
+        <div class="tag">Google Sheet</div>
+        <div class="ttl">⑦ 시트에 기록 ✓</div>
+        <div class="desc">정상 위치(제자리)에 기록<br>상태 = <b>완료</b></div>
+      </div>
+    </div>
+
+    <div class="callout">
+      <b>🔒 신원 연결은 "기록 성공 후"에만</b>
+      리뷰어↔줄 연결(참여 신원)은 시트에 실제로 써진 다음에만 기록합니다. 그래서 <b>남의 리뷰가 내 것으로 잘못 보이는 사고</b>가 생기지 않습니다.
+    </div>
+  </section>
+
+  <!-- PHASE 3 -->
+  <section class="phase">
+    <h2><span class="pnum">3</span> 막혔을 때 — 자동 복구</h2>
+    <p class="sub">빈 줄을 못 찾았거나 기록에 실패하면, 시스템이 <b>2분마다</b> 스스로 다시 시도합니다.</p>
+
+    <div class="flow">
+      <div class="step" style="border-color:var(--warn)">
+        <div class="tag">pending_no_row / failed</div>
+        <div class="ttl">⚠ 막힌 주문 발생</div>
+        <div class="desc">줄을 못 찾음 / 기록 실패<br>(DB엔 그대로 안전히 보관)</div>
+      </div>
+      <div class="arrow">→</div>
+      <div class="step">
+        <div class="tag">reconcile (2분 주기)</div>
+        <div class="ttl">🔁 자동 재배정</div>
+        <div class="desc">새 줄을 다시 잡아<br>대기열에 재등록</div>
+      </div>
+      <div class="arrow">→</div>
+      <div class="step" style="border-color:#e9d27a;background:#fff7d6">
+        <div class="tag">시트 하단 append</div>
+        <div class="ttl">📌 노란 줄로 복구</div>
+        <div class="desc">시트 맨 아래에 추가 +<br><span class="yellow-demo">노란 배경</span> 표시</div>
+      </div>
+    </div>
+
+    <div class="callout warn">
+      <b>왜 노란색인가요?</b>
+      자동복구분은 원래 자리가 아니라 <b>시트 맨 아래</b>에 붙습니다. 직원이 손으로 입력한 줄·정상 실시간 줄과 헷갈리지 않도록 <span class="yellow-demo">노란 배경</span>으로 구분 표시합니다.
+    </div>
+  </section>
+
+  <!-- 상태 범례 -->
+  <section class="phase">
+    <h2><span class="pnum">★</span> 상태 한눈에 보기 (mirror_status)</h2>
+    <p class="sub">관리자 대시보드 "구매주문 시트반영 현황" 위젯에 뜨는 상태값의 의미입니다.</p>
+    <div class="grid2">
+      <div>
+        <div class="statusrow"><span class="chip c-wait">pending</span><span class="st-d">DB 저장됨, 시트 반영 대기<br><small>곧 자동 처리됨 — 정상</small></span></div>
+        <div class="statusrow"><span class="chip c-wait">queued</span><span class="st-d">대기열 등록됨<br><small>워커가 곧 시트에 기록</small></span></div>
+        <div class="statusrow"><span class="chip c-ok">written</span><span class="st-d">시트 반영 완료 ✓<br><small>끝. 더 볼 것 없음</small></span></div>
+      </div>
+      <div>
+        <div class="statusrow"><span class="chip c-warn">pending_no_row</span><span class="st-d">들어갈 줄을 못 찾음<br><small>시트 정보 채워지면 자동복구</small></span></div>
+        <div class="statusrow"><span class="chip c-bad">failed</span><span class="st-d">기록 실패<br><small>2분마다 자동 재시도</small></span></div>
+        <div class="statusrow"><span class="chip c-wait">processing</span><span class="st-d">(리뷰어 화면) 제출됨·반영중<br><small>리뷰어가 보는 표시</small></span></div>
+      </div>
+    </div>
+    <div class="callout">
+      <b>직원 행동 요령</b>
+      <code>pending·queued·processing</code>은 <b>기다리면 됨</b>. <code>written</code>은 <b>완료</b>. <code>pending_no_row·failed</code>가 오래 남으면 위젯의 <b>"복구"</b> 버튼을 누르거나, 밀려 있으면 <b>"빠른 반영(가속)"</b>을 누릅니다.
+    </div>
+  </section>
+
+  <!-- 타임라인 -->
+  <section class="phase">
+    <h2><span class="pnum">⏱</span> 얼마나 걸리나요?</h2>
+    <div class="timeline">
+      <div class="tl"><div class="t">즉시</div><div class="l">제출 → DB 저장<br>(리뷰어 참여조회에 바로 보임)</div></div>
+      <div class="tl"><div class="t">2~5초</div><div class="l">평상시 DB → 시트 기록<br>(자동)</div></div>
+      <div class="tl"><div class="t">~20건/분</div><div class="l">동시 폭주 시 처리 천장<br>(구글 한도 보호)</div></div>
+      <div class="tl"><div class="t">손실 0</div><div class="l">초과분은 대기 후 순차 기록<br>(절대 누락 안 됨)</div></div>
+    </div>
+    <div class="callout ok">
+      <b>핵심 안심 포인트</b>
+      시트에 늦게 떠도 <b>DB에 이미 있으므로 데이터는 안전</b>합니다. 시트는 "보기 좋은 사본"이고, 진짜 원본은 서버 DB입니다.
+    </div>
+  </section>
+
+  <footer class="note">
+    구매양식 제출 흐름 와이어프레임 · 직원 교육용 · review-web-system<br>
+    (기술 출처: <code>POST /api/submit/order</code> → order_submissions → claimRow → queue(order_append) → sheetsThrottle → reconcile)
+  </footer>
+
+</div>
+</body>
+</html>

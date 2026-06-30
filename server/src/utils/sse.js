@@ -178,6 +178,18 @@ function emitOrderUpdate(data) {
   });
 }
 
+// ── 주문 원장(order ledger) — 편집/취소/수동추가/큐 상태변경 단일 이벤트(PR-B) ──
+//   PII 차단: action/orderSubmissionId/mirror_status/field 만. newValue·oldValue·phone·address 절대 미포함.
+//   ('order_update' 이벤트명은 작업오더가 점유 → 'order_ledger' 신규명 사용)
+function emitOrderLedger(data) {
+  broadcast('order_ledger', {
+    action: data.action || '',
+    orderSubmissionId: data.orderSubmissionId || null,
+    mirror_status: data.mirror_status || null,
+    field: data.field || null,
+  });
+}
+
 function emitImageExtract(data) {
   broadcast('image_extract', {
     message: `AI 분석 완료: ${data.fileName || '이미지'}`,
@@ -227,6 +239,7 @@ module.exports = {
   emitReviewSubmit,
   emitOrderSubmit,
   emitOrderUpdate,
+  emitOrderLedger,
   emitImageExtract,
   emitImageUpload,
   emitIndexBuild,

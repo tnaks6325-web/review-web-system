@@ -691,6 +691,9 @@ body{ letter-spacing:-.01em; }
         <button class="admin-tab-btn" data-tab="errorlogs" onclick="switchAdminTab('errorlogs')">
           <i class="fas fa-bug"></i> 오류디버깅 <span id="errorLogBadge" style="display:none;background:#EF4444;color:#fff;font-size:.65rem;padding:1px 5px;border-radius:8px;margin-left:4px;font-weight:700">0</span>
         </button>
+        <button class="admin-tab-btn" data-tab="order-ledger" onclick="switchAdminTab('order-ledger')">
+          <i class="fas fa-table"></i> 주문원장
+        </button>
       </nav>
 
       <!-- 제출 현황 대시보드 -->
@@ -916,6 +919,26 @@ body{ letter-spacing:-.01em; }
               <button class="btn-sm" onclick="purgeSyncQueue()" style="font-size:.72rem;background:#6B7280;color:#fff;border:none;padding:4px 10px;border-radius:6px;cursor:pointer">
                 <i class="fas fa-broom"></i> 완료 항목 정리
               </button>
+            </div>
+          </div>
+
+          <!-- 구매주문 시트반영 현황 (막힌 주문 복구) -->
+          <div style="background:#fff;border-radius:12px;padding:16px;box-shadow:0 1px 4px rgba(0,0,0,.06);border:1px solid var(--border)">
+            <h4 style="margin:0 0 12px;font-size:.88rem;color:var(--t1)">
+              <i class="fas fa-truck-loading" style="color:#16A34A"></i> 구매주문 시트반영 현황
+              <button class="btn-sm" onclick="loadOrderMirrorStatus()" style="float:right;font-size:.7rem;background:#E5E7EB;color:#111;border:none;padding:3px 8px;border-radius:6px;cursor:pointer"><i class="fas fa-sync"></i> 새로고침</button>
+            </h4>
+            <div id="orderMirrorPanel" style="font-size:.82rem;color:var(--t2)">
+              <i class="fas fa-circle-notch fa-spin"></i> 불러오는 중...
+            </div>
+            <div id="orderMirrorActions" class="hidden" style="margin-top:10px;display:flex;gap:6px;flex-wrap:wrap">
+              <button class="btn-sm" onclick="runOrderReconcile(null)" style="font-size:.72rem;background:#16A34A;color:#fff;border:none;padding:4px 10px;border-radius:6px;cursor:pointer">
+                <i class="fas fa-redo"></i> 막힌 주문 재시도(복구)
+              </button>
+              <button class="btn-sm" onclick="runQueueDrain()" style="font-size:.72rem;background:#2563EB;color:#fff;border:none;padding:4px 10px;border-radius:6px;cursor:pointer" title="대기 중인 시트 반영을 일시적으로 빠르게 처리합니다(쿼터 한도 내). 라이브 이벤트 중엔 사용 자제.">
+                <i class="fas fa-bolt"></i> 빠른 반영(가속)
+              </button>
+              <span style="font-size:.7rem;color:var(--t2);align-self:center">복구분은 시트 하단에 노란 배경으로 기록됩니다</span>
             </div>
           </div>
 
@@ -1433,6 +1456,9 @@ body{ letter-spacing:-.01em; }
       </div><!-- /tab-settings -->
 
       <!-- 오류디버깅(Error Debugging) 탭 — 좌측 목록 + 우측 상세 패널(모달 아님) -->
+      <!-- 주문 원장(DB 주체) 인라인 뷰어/편집 -->
+      <div id="tab-order-ledger" class="admin-tab-pane" style="padding:16px"></div>
+
       <div id="tab-errorlogs" class="admin-tab-pane" style="padding:16px">
         <div class="admin-section-header">
           <span style="font-size:.95rem;font-weight:700;color:var(--t1)">
@@ -2675,6 +2701,11 @@ body{ letter-spacing:-.01em; }
      💰 입금처리 패널 JavaScript
      ══════════════════════════════════════════════════════ -->
 <script src="js/index-payment.js"></script>
+
+<!-- ══════════════════════════════════════════════════════
+     📒 주문 원장(DB 주체) 인라인 뷰어/편집 JavaScript
+     ══════════════════════════════════════════════════════ -->
+<script src="js/index-order-ledger.js"></script>
 
 </body>
 </html>

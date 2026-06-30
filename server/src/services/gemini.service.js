@@ -27,11 +27,16 @@ let _poolIndex = 0;
 // 모델/생성 설정 — 기본을 thinking 없는 빠른 모델로. 필요시 GEMINI_MODEL로 override.
 // ※ gemini-2.0-flash 는 구글에서 단종(404)되어 현행 모델로 기본값 변경.
 //   배포 환경에서는 GEMINI_MODEL 환경변수로 명시 지정 권장(AI Studio 모델 목록 확인).
+// ★ gemini-2.5-flash 는 thinking 이 기본 ON 이라, 작은 maxOutputTokens(800) 에서는
+//   추론이 출력 토큰을 다 먹어 본문 JSON 이 빈/잘린 채(MAX_TOKENS) 반환되어
+//   "분석 완료인데 전 필드 추출 실패"가 발생한다. → thinkingBudget:0 으로 끄고 토큰 상향.
 const MODEL_NAME = process.env.GEMINI_MODEL || 'gemini-2.5-flash';
 const GEN_CONFIG = {
   temperature: 0,                       // 결정적 출력(추출 안정)
-  maxOutputTokens: 800,
+  maxOutputTokens: parseInt(process.env.GEMINI_MAX_TOKENS || '2048', 10),
   responseMimeType: 'application/json',  // JSON 강제 → 파싱 신뢰 + 응답 단축
+  // thinking 비활성(2.5 계열). 미지원 모델/SDK에서는 무시되므로 안전.
+  thinkingConfig: { thinkingBudget: 0 },
 };
 const GEMINI_TIMEOUT_MS = parseInt(process.env.GEMINI_TIMEOUT_MS || '9000', 10);
 
@@ -193,6 +198,12 @@ async function extractOrderFromImage(base64Data, mimeType = 'image/jpeg') {
     // ── 라운드로빈 + 재시도 + 타임아웃 ──
     const { text, key: usedKey } = await _runModel([EXTRACT_PROMPT, imagePart], 'extract');
 
+    // 빈 응답 가드: thinking 이 토큰을 다 먹거나 잘리면 text 가 빈 문자열로 온다.
+    // 이 경우 ok:true 로 위장(전 필드 공란)하면 "분석 완료인데 추출 실패"가 되므로 명시적 에러.
+    if (!text || !text.trim()) {
+      throw new Error('AI 응답이 비어 있습니다 (출력 토큰 초과/잘림 추정). 다시 시도해주세요.');
+    }
+
     // JSON 파싱 (마크다운 코드블록 제거)
     const jsonStr = text.replace(/```json\s*/g, '').replace(/```\s*/g, '').trim();
     let extracted;
@@ -204,12 +215,20 @@ async function extractOrderFromImage(base64Data, mimeType = 'image/jpeg') {
       extracted = _fallbackParse(text);
     }
 
+    // 핵심 필드가 전부 공란이면 추출 실패로 간주 — 빈 결과를 성공/캐시로 남기지 않는다.
+    const _v = k => String(extracted[k] || '').trim();
+    const allBlank = !['orderNumber', 'recipient', 'phone', 'address', 'price'].some(_v);
+    if (allBlank) {
+      logger.warn(`[Gemini] 추출 결과 전 필드 공란 (key=${usedKey}, 응답: ${text.substring(0, 200)})`);
+      throw new Error('주문 정보를 인식하지 못했습니다. 주문 캡처 이미지가 맞는지 확인 후 다시 시도해주세요.');
+    }
+
     const elapsed = Date.now() - startTime;
     logger.info(`[Gemini] 이미지 분석 완료: ${elapsed}ms, key=${usedKey}, 수취인=${extracted.recipient || '-'}, 주문번호=${extracted.orderNumber || '-'}`);
 
     const finalResult = { ok: true, ...extracted };
 
-    // ── 4번: 결과 캐시 저장 ──
+    // ── 4번: 결과 캐시 저장 (성공한 결과만) ──
     _putToCache(cacheHash, finalResult);
 
     return { ...finalResult, elapsed };

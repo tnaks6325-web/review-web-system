@@ -1,9 +1,9 @@
 const express = require('express');
 const router = express.Router();
-const { authMiddleware } = require('../middleware/auth.middleware');
+const { authMiddleware, adminOrMasterMiddleware } = require('../middleware/auth.middleware');
 const pool = require('../db/pool');
 const { readSheet, getSpreadsheetMeta, writeSheet, appendSheet, copySpreadsheet, copySheetToSpreadsheet, renameSheet, shareSheetWithServiceAccount, checkSheetWriteAccess } = require('../services/sheets.service');
-const { getQueueStats, retryItem, retryAllFailed, purgeCompleted, deleteItem, deleteAllFailed } = require('../services/syncQueue.service');
+const { getQueueStats, retryItem, retryAllFailed, purgeCompleted, deleteItem, deleteAllFailed, processQueue, drainTabQueue } = require('../services/syncQueue.service');
 const { imageApiLimiter } = require('../middleware/rateLimit.middleware');
 const { extractOrderFromImage, verifyAddressMatch } = require('../services/gemini.service');
 const driveService = require('../services/drive.service');
@@ -1987,6 +1987,714 @@ router.post('/sync-queue/delete', authMiddleware, async (req, res, next) => {
     if (!id) return res.json({ error: 'id 필요' });
     const result = await deleteItem(parseInt(id));
     res.json({ ok: true, ...result });
+  } catch (err) {
+    next(err);
+  }
+});
+
+// ═══════════════════════════════════════════════════════════
+// GET /api/diag/order-mirror-status — 구매주문 시트반영 현황(막힌 주문 가시성)
+//   mirror_status 카운트 + 최근 막힌 주문 + 영향탭 롤업(hasRawMeta로 "먼저 RAW 미러 필요" 판단)
+// ═══════════════════════════════════════════════════════════
+router.get('/order-mirror-status', authMiddleware, async (req, res, next) => {
+  try {
+    const { rows: counts } = await pool.query(
+      `SELECT mirror_status AS "mirrorStatus", COUNT(*)::int AS count
+         FROM order_submissions GROUP BY mirror_status ORDER BY count DESC`
+    );
+    const { rows: stuck } = await pool.query(
+      `SELECT os.id, os.sheet_id AS "sheetId", os.tab_name AS "tabName",
+              tc.display_name AS "displayName",
+              os.mirror_status AS "mirrorStatus", os.sheet_error AS "sheetError",
+              os.submitted_at AS "submittedAt", os.queued_at AS "queuedAt",
+              (rst.detected_headers IS NOT NULL) AS "hasRawMeta"
+         FROM order_submissions os
+         LEFT JOIN tab_configs tc ON tc.sheet_id = os.sheet_id AND tc.tab_name = os.tab_name
+         LEFT JOIN raw_sheet_tabs rst ON rst.sheet_id = os.sheet_id
+              AND (rst.tab_gid = NULLIF(os.tab_gid, '') OR rst.tab_name = os.tab_name)
+        WHERE os.mirror_status IN ('pending','pending_no_row','failed','queued')
+        ORDER BY os.submitted_at DESC
+        LIMIT 50`
+    );
+    const { rows: byTab } = await pool.query(
+      `SELECT os.sheet_id AS "sheetId", os.tab_name AS "tabName",
+              COALESCE(MAX(NULLIF(os.tab_gid, '')), MAX(rst.tab_gid), MAX(tc.tab_gid)) AS "tabGid",
+              MAX(tc.display_name) AS "displayName",
+              COUNT(*)::int AS stuck,
+              COUNT(*) FILTER (WHERE os.mirror_status = 'pending_no_row')::int AS "noRow",
+              bool_or(rst.detected_headers IS NOT NULL) AS "hasRawMeta"
+         FROM order_submissions os
+         LEFT JOIN raw_sheet_tabs rst ON rst.sheet_id = os.sheet_id
+              AND (rst.tab_gid = NULLIF(os.tab_gid, '') OR rst.tab_name = os.tab_name)
+         LEFT JOIN tab_configs tc ON tc.sheet_id = os.sheet_id AND tc.tab_name = os.tab_name
+        WHERE os.mirror_status IN ('pending','pending_no_row','failed','queued')
+        GROUP BY os.sheet_id, os.tab_name
+        ORDER BY stuck DESC LIMIT 500`
+    );
+    res.json({ ok: true, counts, byTab, stuck });
+  } catch (err) {
+    next(err);
+  }
+});
+
+// ═══════════════════════════════════════════════════════════
+// POST /api/diag/order-reconcile — 막힌 주문 강제 복구(리컨실)
+//   body: { sheetId?, limit?, dryRun? } — 시트 쓰기 유발이므로 admin/master 전용
+// ═══════════════════════════════════════════════════════════
+router.post('/order-reconcile', authMiddleware, adminOrMasterMiddleware, async (req, res, next) => {
+  try {
+    const { reconcileStuckOrders } = require('../services/orderLedger.service');
+    const { withJobLock } = require('../utils/jobLock');
+    const { sheetId, limit, dryRun } = req.body || {};
+    const opts = {
+      sheetId: sheetId || null,
+      limit: Math.min(parseInt(limit, 10) || 100, 1000),
+      perTabCap: sheetId ? 1000 : 20, // 시트 지정 강제복구는 탭 cap 해제(이벤트 일괄)
+      dryRun: !!dryRun,
+    };
+    // ★ #1: dryRun(읽기전용 분류)은 락 불필요. 실제 복구는 cron/flush와 order_reconcile 락으로 직렬화.
+    const r = opts.dryRun
+      ? await reconcileStuckOrders(opts)
+      : await withJobLock('order_reconcile', () => reconcileStuckOrders(opts));
+    if (r && r.skipped) {
+      return res.json({ ok: false, busy: true, error: '다른 reconcile(cron/flush)이 진행 중입니다. 잠시 후 다시 시도하세요.' });
+    }
+    res.json({ ok: true, ...r });
+  } catch (err) {
+    next(err);
+  }
+});
+
+// ═══════════════════════════════════════════════════════════
+// POST /api/diag/order-flush-tab — 특정 탭만 우선 시트반영(FIFO 우회, 백그라운드)
+//   글로벌 큐는 created_at FIFO라 최근 캠페인 탭이 뒤로 밀린다. 이 엔드포인트는
+//   ① 그 탭의 막힌 주문을 reconcile(탭 필터)로 enqueue → ② 그 탭의 order_append만 골라
+//   즉시 드레인(throttle만 가드). 관리자 "이 캠페인 지금 반영" 용도. admin/master.
+//   body: { sheetId, tabName, maxMillis?, untilEmpty? }
+//   untilEmpty:true → 그 탭의 미반영(written 아님)이 0이 될 때까지 reconcile+drain 반복(하드캡 30분).
+// ═══════════════════════════════════════════════════════════
+let _flushTabRunning = false;
+let _lastFlushTab = null;
+async function _tabRemaining(sheetId, tabName) {
+  const { rows } = await pool.query(
+    `SELECT COUNT(*)::int AS c FROM order_submissions
+      WHERE sheet_id = $1 AND tab_name = $2 AND mirror_status <> 'written'`,
+    [sheetId, tabName]
+  );
+  return rows[0] ? rows[0].c : 0;
+}
+router.post('/order-flush-tab', authMiddleware, adminOrMasterMiddleware, async (req, res, next) => {
+  try {
+    const { sheetId, tabName } = req.body || {};
+    if (!sheetId || !tabName) return res.status(400).json({ ok: false, error: 'sheetId, tabName 필수' });
+    if (_flushTabRunning) return res.json({ ok: false, running: true, error: '다른 탭 우선반영이 진행 중입니다.', last: _lastFlushTab });
+    const untilEmpty = req.body?.untilEmpty === true;
+    const maxMillis = Math.min(Math.max(parseInt(req.body?.maxMillis, 10) || 60000, 2000), 180000);
+    res.json({ ok: true, mode: 'async', untilEmpty, message: `'${tabName}' 우선 반영을 시작했습니다. 현황으로 확인하세요.`, maxMillis });
+
+    _flushTabRunning = true;
+    setImmediate(async () => {
+      const start = Date.now();
+      const HARD_CAP = 30 * 60 * 1000; // until-empty 안전 상한 30분
+      let rounds = 0, totalReq = 0, totalDrained = 0, remaining = null;
+      try {
+        const { reconcileStuckOrders } = require('../services/orderLedger.service');
+        const { withJobLock } = require('../utils/jobLock');
+        do {
+          rounds++;
+          // ① 탭 단위로 막힌 주문 enqueue(행배정 포함). ★ #1: cron/인라인 reconcile과 order_reconcile 락으로 직렬화.
+          const rec = await withJobLock('order_reconcile', () => reconcileStuckOrders({ sheetId, tabName, limit: 1000, perTabCap: 1000 }));
+          const recSkipped = !!(rec && rec.skipped);
+          const recRequeued = (rec && rec.requeued) || 0;
+          totalReq += recRequeued;
+          // ② 그 탭의 order_append만 우선 드레인(FIFO 우회). 큐 클레임(#2)으로 글로벌 워커와 비경합.
+          const drainMs = untilEmpty ? 60000 : Math.max(maxMillis - (Date.now() - start), 2000);
+          const drain = await drainTabQueue({ sheetId, tabName, maxMillis: drainMs });
+          totalDrained += drain.succeeded || 0;
+          remaining = await _tabRemaining(sheetId, tabName);
+          _lastFlushTab = { sheetId, tabName, untilEmpty, rounds, totalRequeued: totalReq, totalDrained,
+            remaining, running: true, elapsedMs: Date.now() - start };
+          if (!untilEmpty) break;
+          if (remaining === 0) break;
+          // 이번 라운드에 아무 진전 없음 — 시트 반영 성공(succeeded) 기준으로 판정.
+          //   (processed 기준이면 claim 후 전부 실패→pending 복원된 라운드도 '진전'으로 오인해
+          //    같은 항목을 HARD_CAP까지 빠르게 재시도하며 쿼터를 낭비할 수 있음.)
+          if ((drain.succeeded || 0) === 0 && recRequeued === 0) {
+            // reconcile이 락 경합으로 양보됐을 뿐이면(다른 reconcile 진행 중) busy-spin 없이 잠깐 대기 후 재시도.
+            if (recSkipped) { await new Promise(r => setTimeout(r, 5000)); continue; }
+            break; // 진짜 진전 없음(메타없음 등 막힘) → 무한루프 방지 종료
+          }
+        } while (Date.now() - start < HARD_CAP);
+        _lastFlushTab = { sheetId, tabName, untilEmpty, rounds, totalRequeued: totalReq, totalDrained,
+          remaining, running: false, elapsedMs: Date.now() - start, finishedAt: new Date().toISOString() };
+        logger.info(`[order-flush-tab] '${tabName}' 완료: rounds=${rounds}, drained=${totalDrained}, remaining=${remaining}, ${Date.now() - start}ms`);
+      } catch (err) {
+        _lastFlushTab = { sheetId, tabName, error: err.message, rounds, totalDrained, finishedAt: new Date().toISOString() };
+        logger.error(`[order-flush-tab] '${tabName}' 오류: ${err.message}`);
+      } finally {
+        _flushTabRunning = false;
+      }
+    });
+  } catch (err) {
+    next(err);
+  }
+});
+
+// GET /api/diag/order-flush-tab — 마지막 탭 우선반영 결과/진행 상태
+router.get('/order-flush-tab', authMiddleware, async (req, res, next) => {
+  try {
+    res.json({ ok: true, running: _flushTabRunning, last: _lastFlushTab });
+  } catch (err) {
+    next(err);
+  }
+});
+
+// ═══════════════════════════════════════════════════════════
+// POST /api/diag/order-relink — 탭 리네임으로 끊긴 막힌 주문을 현재 탭에 재연결
+//   시트 탭 이름이 바뀌어(예: '…100건'→'…81건') gid 없이 저장된 주문이
+//   현재 탭과 매칭되지 않아 영구 적체될 때, fromTabName 주문들의 tab_gid/tab_name을
+//   현재 탭(toTabGid/toTabName)으로 backfill + sheet_row 초기화 → 이후 reconcile이
+//   현재 탭 하단에 노란행으로 복구. 막힌(pending/pending_no_row/failed) 건만 대상.
+//   body: { sheetId, fromTabName, toTabGid, toTabName?, toSheetId?, dryRun? } — admin/master 전용
+//   toSheetId: sheet_id 자체가 손상된 주문(단축URL 혼입 등)을 올바른 시트로 이전할 때 사용.
+// ═══════════════════════════════════════════════════════════
+router.post('/order-relink', authMiddleware, adminOrMasterMiddleware, async (req, res, next) => {
+  try {
+    const { sheetId, fromTabName, toTabGid, toTabName, toSheetId, dryRun } = req.body || {};
+    if (!sheetId || !fromTabName || !toTabGid) {
+      return res.status(400).json({ ok: false, error: 'sheetId, fromTabName, toTabGid 필수' });
+    }
+    const targetName = toTabName || fromTabName;
+    const targetSheetId = toSheetId || sheetId;
+    const { rows: cntRows } = await pool.query(
+      `SELECT COUNT(*)::int AS cnt
+         FROM order_submissions
+        WHERE sheet_id = $1 AND tab_name = $2
+          AND deleted_at IS NULL
+          AND mirror_status IN ('pending','pending_no_row','failed')`,
+      [sheetId, fromTabName]
+    );
+    const matched = cntRows[0]?.cnt || 0;
+
+    if (dryRun) {
+      return res.json({ ok: true, dryRun: true, matched, toSheetId: targetSheetId, toTabGid, toTabName: targetName });
+    }
+
+    // 1) 옛 탭명으로 남은 phantom claim 제거(있다면) — 현재 탭명 네임스페이스로 재claim 유도
+    const { rowCount: claimsCleared } = await pool.query(
+      `DELETE FROM sheet_row_claims WHERE sheet_id = $1 AND tab_name = $2`,
+      [sheetId, fromTabName]
+    );
+    // 2) 막힌 주문을 현재 시트/탭으로 재연결 + 행 초기화(reconcile이 하단 append 재배정)
+    const { rows: updated } = await pool.query(
+      `UPDATE order_submissions
+          SET sheet_id = $5, tab_gid = $3, tab_name = $4,
+              sheet_row = NULL, mirror_status = 'pending_no_row', sheet_error = NULL
+        WHERE sheet_id = $1 AND tab_name = $2
+          AND deleted_at IS NULL
+          AND mirror_status IN ('pending','pending_no_row','failed')
+        RETURNING id`,
+      [sheetId, fromTabName, String(toTabGid), targetName, targetSheetId]
+    );
+    res.json({ ok: true, matched, relinked: updated.length, claimsCleared, toSheetId: targetSheetId, toTabGid, toTabName: targetName });
+  } catch (err) {
+    next(err);
+  }
+});
+
+// ═══════════════════════════════════════════════════════════
+// 주문 원장(order ledger) PR-B — 인라인 편집/취소/수동추가/조회 (admin/master 전용)
+//   쓰기 3종은 ORDER_LEDGER_WRITE_ENABLED='true'에서만 동작(롤링배포·점진 활성 게이트).
+//   편집/취소는 per-order 락(order_ledger:<id>)로 DB UPDATE 직렬화 → 큐(order_update/order_cancel)로 in-place 시트반영.
+// ═══════════════════════════════════════════════════════════
+const _ORDER_LEDGER_EDIT_FIELDS = ['orderer','recipient','user_id','phone','address','bank','account','depositor','price','order_num','memo','date_str','selected_opt_key'];
+
+// POST /api/diag/order-edit — 주문 필드 편집 → DB 즉시 + 큐(order_update) in-place 시트반영
+router.post('/order-edit', authMiddleware, adminOrMasterMiddleware, async (req, res, next) => {
+  try {
+    if (process.env.ORDER_LEDGER_WRITE_ENABLED !== 'true') return res.status(503).json({ ok: false, error: 'order ledger 쓰기 비활성(ORDER_LEDGER_WRITE_ENABLED)' });
+    const { orderSubmissionId } = req.body || {};
+    const edits = Array.isArray(req.body?.edits) ? req.body.edits : [];
+    if (!orderSubmissionId || !edits.length) return res.status(400).json({ ok: false, error: 'orderSubmissionId, edits 필수' });
+    const clean = [];
+    for (const e of edits) {
+      if (!e || !_ORDER_LEDGER_EDIT_FIELDS.includes(e.field)) return res.status(400).json({ ok: false, error: `허용되지 않은 편집 필드: ${e && e.field}` });
+      clean.push({ field: e.field, oldValue: e.oldValue == null ? '' : String(e.oldValue), newValue: e.newValue == null ? '' : String(e.newValue) });
+    }
+    const editSeq = Date.now(); // per-order 락 직렬화 하 단조(시트 stale 편집 무시 기준)
+    const { withJobLock } = require('../utils/jobLock');
+    const { enqueue } = require('../services/syncQueue.service');
+    const out = await withJobLock('order_ledger:' + orderSubmissionId, async () => {
+      const sets = clean.map((e, idx) => `${e.field} = $${idx + 2}`); // field는 화이트리스트라 인젝션 불가
+      const vals = [orderSubmissionId, ...clean.map(e => e.newValue)];
+      const { rows } = await pool.query(
+        `UPDATE order_submissions SET ${sets.join(', ')}, updated_at = NOW()
+          WHERE id = $1 AND deleted_at IS NULL
+        RETURNING id, mirror_status`,
+        vals
+      );
+      if (!rows.length) return { notFound: true };
+      await enqueue('order_update', { orderSubmissionId, editSeq, edits: clean });
+      return { mirrorStatus: rows[0].mirror_status };
+    });
+    if (out && out.skipped) return res.status(409).json({ ok: false, error: '다른 편집/취소 진행 중 — 재시도하세요' });
+    if (out && out.notFound) return res.status(404).json({ ok: false, error: '주문 없음 또는 이미 취소됨' });
+    require('../jobs/queuePump').kickQueuePump();
+    require('../utils/sse').emitOrderLedger({ action: 'edit', orderSubmissionId, mirror_status: out.mirrorStatus });
+    res.json({ ok: true, queued: true, editSeq });
+  } catch (err) { next(err); }
+});
+
+// POST /api/diag/order-cancel — 주문 소프트삭제(deleted_at) + 시트행 클리어(written이면 큐 order_cancel)
+router.post('/order-cancel', authMiddleware, adminOrMasterMiddleware, async (req, res, next) => {
+  try {
+    if (process.env.ORDER_LEDGER_WRITE_ENABLED !== 'true') return res.status(503).json({ ok: false, error: 'order ledger 쓰기 비활성' });
+    const { orderSubmissionId } = req.body || {};
+    if (!orderSubmissionId) return res.status(400).json({ ok: false, error: 'orderSubmissionId 필수' });
+    const canceledBy = String((req.admin && (req.admin.name || req.admin.role)) || 'admin').slice(0, 100);
+    const { withJobLock } = require('../utils/jobLock');
+    const { enqueue } = require('../services/syncQueue.service');
+    const out = await withJobLock('order_ledger:' + orderSubmissionId, async () => {
+      const { rows } = await pool.query(
+        `UPDATE order_submissions SET deleted_at = NOW(), canceled_by = $2, updated_at = NOW()
+          WHERE id = $1 AND deleted_at IS NULL
+        RETURNING sheet_row, mirror_status`,
+        [orderSubmissionId, canceledBy]
+      );
+      if (!rows.length) return { alreadyCanceled: true };
+      // in-flight 선삭제(pending만; processing은 PR-A의 order_append deleted_at 가드가 done-noop).
+      //   deposit_mark는 payload에 osid가 없고 입금칸은 클리어 매핑 밖이라 제외.
+      await pool.query(
+        `DELETE FROM sync_queue WHERE status = 'pending'
+           AND type IN ('order_append','order_update','order_cancel')
+           AND (payload->>'orderSubmissionId') = $1`,
+        [String(orderSubmissionId)]
+      );
+      const os = rows[0];
+      if (!os.sheet_row || os.mirror_status !== 'written') {
+        // 시트 미반영 → 클리어 불필요. 점유한 빈 행 claim은 해제(재사용 허용; 쓰인 데이터 없음).
+        try { await pool.query(`DELETE FROM sheet_row_claims WHERE order_id = $1::uuid`, [orderSubmissionId]); } catch (_) {}
+        await pool.query(`UPDATE order_submissions SET mirror_status = 'canceled' WHERE id = $1`, [orderSubmissionId]);
+        return { cleared: false };
+      }
+      await enqueue('order_cancel', { orderSubmissionId });
+      return { cleared: true };
+    });
+    if (out && out.skipped) return res.status(409).json({ ok: false, error: '다른 편집/취소 진행 중 — 재시도하세요' });
+    if (out && out.alreadyCanceled) return res.json({ ok: true, alreadyCanceled: true });
+    if (out.cleared) require('../jobs/queuePump').kickQueuePump();
+    require('../utils/sse').emitOrderLedger({ action: 'canceled', orderSubmissionId });
+    res.json({ ok: true, cleared: out.cleared });
+  } catch (err) { next(err); }
+});
+
+// POST /api/diag/order-manual-add — 수동 주문추가(원자 INSERT, source=manual, osid dedup, 하단 노란행 append)
+router.post('/order-manual-add', authMiddleware, adminOrMasterMiddleware, async (req, res, next) => {
+  try {
+    if (process.env.ORDER_LEDGER_WRITE_ENABLED !== 'true') return res.status(503).json({ ok: false, error: 'order ledger 쓰기 비활성' });
+    const { sheetId, tabName, gid, phone } = req.body || {};
+    const od = (req.body && req.body.orderData) || {};
+    if (!sheetId || !tabName) return res.status(400).json({ ok: false, error: 'sheetId, tabName 필수' });
+    if (!gid) return res.status(400).json({ ok: false, error: 'gid 필수(동명탭 오배정 방지)' });
+    const { loadRawTabContext, buildCandidateRows, claimRow, markOrderQueued } = require('../services/orderLedger.service');
+    const { enqueue } = require('../services/syncQueue.service');
+    const { emitOrderLedger } = require('../utils/sse');
+    const odPhone = phone || od.phone || '';
+    const { rows: ins } = await pool.query(
+      `INSERT INTO order_submissions
+         (sheet_id, tab_name, gid, tab_gid, orderer, recipient, user_id, phone, address, bank, account,
+          depositor, price, order_num, date_str, selected_opt_key, memo, source, mirror_status, submitted_at)
+       VALUES ($1,$2,$3,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,'manual','pending',NOW())
+       RETURNING id`,
+      [sheetId, tabName, String(gid), od.orderer||'', od.recipient||'', od.userId||'', odPhone, od.address||'',
+       od.bank||'', od.account||'', od.depositor||'', od.price||'', od.orderNum||'', od.dateStr||'', od.selectedOptKey||'', od.memo||'']
+    );
+    const orderId = ins[0].id;
+    const dedupKey = 'osid:' + orderId;
+    await pool.query(`UPDATE order_submissions SET dedup_key = $2 WHERE id = $1`, [orderId, dedupKey]);
+    const odForMap = { orderer: od.orderer||'', recipient: od.recipient||'', userId: od.userId||'', phone: odPhone,
+      address: od.address||'', bank: od.bank||'', account: od.account||'', depositor: od.depositor||'',
+      price: od.price||'', orderNum: od.orderNum||'', dateStr: od.dateStr||'', selectedOptKey: od.selectedOptKey||'', memo: od.memo||'' };
+
+    const tabContext = await loadRawTabContext(sheetId, String(gid), tabName);
+    if (!tabContext || !tabContext.headers || !tabContext.headers.length) {
+      await pool.query(`UPDATE order_submissions SET mirror_status='pending_no_row' WHERE id=$1`, [orderId]);
+      emitOrderLedger({ action: 'created', orderSubmissionId: orderId, mirror_status: 'pending_no_row' });
+      return res.json({ ok: true, orderSubmissionId: orderId, mirrorStatus: 'pending_no_row', note: 'RAW 메타 없음 — reconcile가 흡수' });
+    }
+    if (tabContext.tabName && tabContext.tabName !== tabName) { // R9: stale gid 오탭 방지
+      await pool.query(`UPDATE order_submissions SET mirror_status='pending_no_row', sheet_error='gid/tabName 불일치' WHERE id=$1`, [orderId]);
+      return res.status(400).json({ ok: false, error: `gid가 다른 탭(${tabContext.tabName})을 가리킵니다`, orderSubmissionId: orderId });
+    }
+    const candidateRows = buildCandidateRows({ headers: tabContext.headers, dataRows: tabContext.dataRows, headerRowIndex: tabContext.headerRowIndex, orderData: odForMap, appendOnly: true });
+    const client = await pool.connect();
+    let claim = { row: null };
+    try {
+      await client.query('BEGIN');
+      claim = await claimRow({ client, sheetId, tabGid: tabContext.tabGid || String(gid), tabName, dedupKey, candidateRows, orderId, meta: { name: od.orderer || od.recipient || '', phone: odPhone, source: 'manual' } });
+      await client.query(
+        `UPDATE order_submissions SET sheet_row = $2::int, tab_gid = COALESCE(NULLIF($3,''), tab_gid),
+            mirror_status = CASE WHEN $2::int IS NULL THEN 'pending_no_row' ELSE 'pending' END WHERE id = $1`,
+        [orderId, claim.row || null, tabContext.tabGid || String(gid)]
+      );
+      await client.query('COMMIT');
+    } catch (e) { try { await client.query('ROLLBACK'); } catch (_) {} client.release(); throw e; }
+    client.release();
+    if (claim.row) {
+      await enqueue('order_append', { sheetId, tabName, gid: tabContext.tabGid || String(gid), orderData: odForMap, orderSubmissionId: orderId, sheetRow: claim.row, dedupKey, loginPhone8: '', loginName: '', recovered: true });
+      await markOrderQueued(orderId);
+      require('../jobs/queuePump').kickQueuePump();
+      emitOrderLedger({ action: 'created', orderSubmissionId: orderId, mirror_status: 'queued' });
+      return res.json({ ok: true, orderSubmissionId: orderId, sheetRow: claim.row, mirrorStatus: 'queued' });
+    }
+    emitOrderLedger({ action: 'created', orderSubmissionId: orderId, mirror_status: 'pending_no_row' });
+    res.json({ ok: true, orderSubmissionId: orderId, mirrorStatus: 'pending_no_row', note: '행 배정 실패 — reconcile가 흡수' });
+  } catch (err) { next(err); }
+});
+
+// POST /api/diag/order-flush-one — 특정 주문의 pending 큐항목(append/update/cancel)을 즉시 반영(FIFO 우회).
+//   글로벌 큐 백로그 시 편집/취소가 밀리므로 "이 주문만 지금 반영". 동기 실행(항목 소수, throttle 가드).
+router.post('/order-flush-one', authMiddleware, adminOrMasterMiddleware, async (req, res, next) => {
+  try {
+    const { orderSubmissionId } = req.body || {};
+    if (!orderSubmissionId) return res.status(400).json({ ok: false, error: 'orderSubmissionId 필수' });
+    const { drainOrderQueue } = require('../services/syncQueue.service');
+    const r = await drainOrderQueue(orderSubmissionId, { maxItems: 5 });
+    res.json({ ok: true, ...r });
+  } catch (err) { next(err); }
+});
+
+// POST /api/diag/order-batch-drain { sheetId, tabName, maxMillis? } (admin/master)
+// ★ 빈 시트 버스트 전용: 한 탭을 가드 batchGet 1콜 + batchUpdate 1콜(청크당)로 빠르게 반영.
+//   ORDER_BATCH_DRAIN=1 일 때만 배치 경로, 아니면 drainTabQueueBatched가 단건 drainTabQueue로 폴백.
+//   비차단(즉시 응답 + 백그라운드 실행). 진행/결과는 order-mirror-status·서버 로그로 관찰.
+router.post('/order-batch-drain', authMiddleware, adminOrMasterMiddleware, async (req, res, next) => {
+  try {
+    const { sheetId, tabName, sync } = req.body || {};
+    if (!sheetId || !tabName) return res.status(400).json({ ok: false, error: 'sheetId, tabName 필수' });
+    const flag = process.env.ORDER_BATCH_DRAIN === '1' ? 'batch' : 'single(fallback)';
+    const { drainTabQueueBatched } = require('../services/syncQueue.service');
+    // sync 모드: 결과를 동기 반환(진단·소량). maxMillis 25s 상한(HTTP 타임아웃 회피).
+    if (sync) {
+      const maxMillis = Math.min(Math.max(parseInt(req.body?.maxMillis, 10) || 20000, 2000), 25000);
+      try {
+        const r = await drainTabQueueBatched({ sheetId, tabName, maxMillis });
+        return res.json({ ok: true, mode: 'sync', flag, result: r });
+      } catch (e) {
+        return res.json({ ok: false, mode: 'sync', flag, error: String(e && e.message), stack: String(e && e.stack).split('\n').slice(0, 4) });
+      }
+    }
+    const maxMillis = Math.min(Math.max(parseInt(req.body?.maxMillis, 10) || 60000, 2000), 180000);
+    res.json({ ok: true, mode: 'async', message: '배치 드레인 시작', flag });
+    setImmediate(async () => {
+      try {
+        const r = await drainTabQueueBatched({ sheetId, tabName, maxMillis });
+        console.log('[order-batch-drain] 완료:', JSON.stringify(r));
+      } catch (e) {
+        console.error('[order-batch-drain] 실패:', e.message);
+      }
+    });
+  } catch (err) { next(err); }
+});
+
+// POST /api/diag/test-tab-reset { sheetId, tabName, gid?, confirm:'RESET-TEST' } (admin/master)
+// ★ 테스트 탭 초기화: 그 탭의 주문 소프트삭제 + claim/큐 정리 + 시트 데이터행 클리어.
+//   파괴적이라 confirm='RESET-TEST' 필수. order_submissions는 deleted_at(복구가능), claim/큐는 하드삭제.
+//   ★ 테스트 전용 — 실제 캠페인 탭에 쓰지 말 것(주문이 stuck/스케줄러에서 사라짐).
+router.post('/test-tab-reset', authMiddleware, adminOrMasterMiddleware, async (req, res, next) => {
+  try {
+    const { sheetId, tabName, gid, confirm } = req.body || {};
+    if (!sheetId || !tabName) return res.status(400).json({ ok: false, error: 'sheetId, tabName 필수' });
+    if (confirm !== 'RESET-TEST') return res.status(400).json({ ok: false, error: "confirm:'RESET-TEST' 필요(파괴적)" });
+    const by = String((req.admin && (req.admin.name || req.admin.role)) || 'admin').slice(0, 100);
+
+    // 1) 주문 소프트삭제(복구가능) — 미반영분 포함 전부
+    const del = await pool.query(
+      `UPDATE order_submissions SET deleted_at = NOW(), canceled_by = $3, mirror_status = 'canceled', updated_at = NOW()
+        WHERE sheet_id = $1 AND tab_name = $2 AND deleted_at IS NULL
+        RETURNING id`,
+      [sheetId, tabName, by]
+    );
+    // 2) claim/큐 하드삭제(이 탭)
+    const claims = await pool.query(`DELETE FROM sheet_row_claims WHERE sheet_id = $1 AND tab_name = $2`, [sheetId, tabName]);
+    const q = await pool.query(
+      `DELETE FROM sync_queue WHERE type IN ('order_append','order_update','order_cancel')
+         AND payload->>'sheetId' = $1 AND payload->>'tabName' = $2`,
+      [sheetId, tabName]
+    );
+    // 3) 시트 데이터행 클리어(헤더 아래 전부). gid 슬래시탭 아니므로 A1 range 사용.
+    let sheetCleared = false;
+    try {
+      const { rows: tabRows } = await pool.query(
+        `SELECT header_row_index FROM raw_sheet_tabs WHERE sheet_id = $1 AND tab_gid = $2`,
+        [sheetId, String(gid || '')]
+      );
+      const hdrIdx = (tabRows[0] && Number.isInteger(tabRows[0].header_row_index)) ? tabRows[0].header_row_index : 9;
+      const dataStart = hdrIdx + 2; // 0-based header → 1-based 데이터 시작 = hdrIdx+2
+      const { clearSheetValues } = require('../services/sheets.service');
+      await clearSheetValues(sheetId, `'${tabName}'!A${dataStart}:BZ5000`);
+      sheetCleared = true;
+    } catch (clearErr) {
+      return res.json({ ok: true, ordersDeleted: del.rowCount, claimsDeleted: claims.rowCount, queueDeleted: q.rowCount, sheetCleared: false, sheetClearError: String(clearErr.message) });
+    }
+    res.json({ ok: true, ordersDeleted: del.rowCount, claimsDeleted: claims.rowCount, queueDeleted: q.rowCount, sheetCleared });
+  } catch (err) { next(err); }
+});
+
+// GET /api/diag/order-ledger — 원장 그리드(keyset 커서, PII는 admin/master만). 읽기 전용(flag 무관).
+router.get('/order-ledger', authMiddleware, adminOrMasterMiddleware, async (req, res, next) => {
+  try {
+    const lim = Math.min(Math.max(parseInt(req.query.limit, 10) || 50, 1), 200);
+    const where = []; const params = [];
+    if (!(req.query.includeCanceled === 'true' || req.query.includeCanceled === '1')) where.push('deleted_at IS NULL');
+    if (req.query.sheetId) { params.push(req.query.sheetId); where.push(`sheet_id = $${params.length}`); }
+    if (req.query.tabName) { params.push(req.query.tabName); where.push(`tab_name = $${params.length}`); }
+    if (req.query.mirrorStatus) { params.push(req.query.mirrorStatus); where.push(`mirror_status = $${params.length}`); }
+    if (req.query.q) { params.push('%' + String(req.query.q) + '%'); const i = params.length; where.push(`(orderer ILIKE $${i} OR recipient ILIKE $${i} OR phone ILIKE $${i} OR order_num ILIKE $${i})`); }
+    if (req.query.cursor) { // keyset: "<submitted_at_iso>|<id>"
+      const [cAt, cId] = String(req.query.cursor).split('|');
+      params.push(cAt); const a = params.length; params.push(cId); const b = params.length;
+      where.push(`(submitted_at, id) < ($${a}::timestamptz, $${b}::uuid)`);
+    }
+    const sql = `SELECT id, sheet_id AS "sheetId", tab_name AS "tabName", orderer, recipient, user_id AS "userId",
+            phone, address, bank, account, depositor, price, order_num AS "orderNum", date_str AS "dateStr",
+            selected_opt_key AS "selectedOptKey", memo, mirror_status AS "mirrorStatus", sheet_row AS "sheetRow",
+            source, deleted_at AS "deletedAt", last_edit_seq AS "lastEditSeq", submitted_at AS "submittedAt"
+       FROM order_submissions ${where.length ? 'WHERE ' + where.join(' AND ') : ''}
+       ORDER BY submitted_at DESC, id DESC LIMIT ${lim + 1}`;
+    const { rows } = await pool.query(sql, params);
+    const hasMore = rows.length > lim;
+    const page = hasMore ? rows.slice(0, lim) : rows;
+    const last = page[page.length - 1];
+    const nextCursor = hasMore && last ? `${new Date(last.submittedAt).toISOString()}|${last.id}` : null;
+    res.json({ ok: true, rows: page, nextCursor, count: page.length });
+  } catch (err) { next(err); }
+});
+
+// ═══════════════════════════════════════════════════════════
+// POST /api/diag/participation-cleanup — 리뷰어 교차노출 오염 정리(participation_links)
+//   배경: 과거 구매양식 제출이 가드/시트쓰기 검증 전에 "낙관적 claim 행"에 신원을 미리 찍어,
+//        미러 stale·로스터 선기입 탭에서 '다른 리뷰어의 행'에 phone8을 남겼다(리뷰어 교차노출).
+//        그 오염 pl 행은 = "해당 (sheet,tab,row)에 실제로 written 된 주문이 없는" 행이다
+//        (정상 pl은 큐 워커가 가드 통과+쓰기 성공 후 그 행에만 기록 → written 주문이 반드시 존재).
+//   동작: written 주문이 없는 participation_links 행을 삭제(가짜 신원링크 제거). 정상 pl은 보존.
+//        삭제해도 리뷰어는 이름/재빌드된 phone8 매칭으로 정상 조회된다(P5 단축키만 사라짐).
+//   주의: 파괴적 → 기본 dryRun(카운트만). 실제 삭제는 {dryRun:false} 명시 필요.
+//        review_index.phone8 오염은 강제 전체 재빌드(POST /api/index/build {forceFullRebuild:true})로 정리.
+//   body: { sheetId?, tabName?, dryRun? } — admin/master 전용.
+// ═══════════════════════════════════════════════════════════
+router.post('/participation-cleanup', authMiddleware, adminOrMasterMiddleware, async (req, res, next) => {
+  try {
+    const { sheetId, tabName, dryRun = true } = req.body || {};
+    const params = [];
+    let scope = '';
+    if (sheetId) { params.push(sheetId); scope += ` AND pl.sheet_id = $${params.length}`; }
+    if (tabName) { params.push(tabName); scope += ` AND pl.tab_name = $${params.length}`; }
+
+    // 오염 후보 = 해당 (sheet,tab,row)에 written 주문이 없는 pl 행
+    const orphanWhere = `
+      WHERE NOT EXISTS (
+        SELECT 1 FROM order_submissions os
+         WHERE os.sheet_id = pl.sheet_id
+           AND os.tab_name = pl.tab_name
+           AND os.sheet_row = pl.row_index
+           AND os.mirror_status = 'written'
+      )${scope}`;
+
+    const { rows: cntRows } = await pool.query(
+      `SELECT COUNT(*)::int AS orphans FROM participation_links pl ${orphanWhere}`,
+      params
+    );
+    const orphans = cntRows[0]?.orphans || 0;
+
+    // 전체 pl 수(스코프 내) — 비율 가시화
+    const totParams = [];
+    let totScope = '';
+    if (sheetId) { totParams.push(sheetId); totScope += ` AND sheet_id = $${totParams.length}`; }
+    if (tabName) { totParams.push(tabName); totScope += ` AND tab_name = $${totParams.length}`; }
+    const { rows: totRows } = await pool.query(
+      `SELECT COUNT(*)::int AS cnt FROM participation_links WHERE TRUE${totScope}`,
+      totParams
+    );
+    const totalInScope = totRows[0]?.cnt || 0;
+
+    if (dryRun) {
+      return res.json({ ok: true, dryRun: true, totalInScope, orphansToDelete: orphans, sheetId: sheetId || null, tabName: tabName || null });
+    }
+
+    const { rowCount: deleted } = await pool.query(
+      `DELETE FROM participation_links pl ${orphanWhere}`,
+      params
+    );
+    res.json({ ok: true, dryRun: false, totalInScope, deleted, sheetId: sheetId || null, tabName: tabName || null });
+  } catch (err) {
+    next(err);
+  }
+});
+
+// ═══════════════════════════════════════════════════════════
+// POST /api/diag/queue-drain — 백로그 가속 드레인(선택적·온디맨드, 백그라운드)
+//   평상시 큐워커는 항목당 2초 안전대기(쿼터 보수)로 ~20/분. 이 엔드포인트는 그 대기를
+//   0으로 두고 sheetsThrottle(45/분)만 가드로 삼아 더 빨리 빼낸다. throttle 때문에 한 배치가
+//   길어질 수 있어 **백그라운드 실행 후 즉시 응답**(HTTP 타임아웃 방지) — 진행은 큐/현황으로 관찰.
+//   body: { maxMillis?, batchSize? } — admin/master 전용. 라이브 이벤트 중엔 사용 자제.
+// ═══════════════════════════════════════════════════════════
+let _queueDrainRunning = false;
+let _lastQueueDrain = null;
+router.post('/queue-drain', authMiddleware, adminOrMasterMiddleware, async (req, res, next) => {
+  try {
+    if (_queueDrainRunning) {
+      return res.json({ ok: false, running: true, error: '가속 드레인이 이미 진행 중입니다.', last: _lastQueueDrain });
+    }
+    const maxMillis = Math.min(Math.max(parseInt(req.body?.maxMillis, 10) || 60000, 2000), 180000);
+    const batchSize = Math.min(Math.max(parseInt(req.body?.batchSize, 10) || 20, 1), 50);
+    res.json({ ok: true, mode: 'async', message: '가속 드레인을 시작했습니다. 현황/큐로 진행을 확인하세요.', maxMillis, batchSize });
+
+    _queueDrainRunning = true;
+    setImmediate(async () => {
+      const start = Date.now();
+      let rounds = 0, processed = 0, succeeded = 0, failed = 0;
+      try {
+        const { withJobLock } = require('../utils/jobLock');
+        // ★ R6: 펌프(queuePump)와 동일 advisory lock에 합류 — 펌프·관리자 가속드레인이 동시에
+        //   시트를 드레인해 throttle를 3중 경쟁하지 않도록 동시 1개만 가동. 펌프가 락 보유 중이면
+        //   여기선 즉시 양보(펌프가 이미 처리 중). flush-tab은 별 집합(drainTabQueue)이라 합류 제외.
+        const lockResult = await withJobLock('queue_pump_drain', async () => {
+          while (Date.now() - start < maxMillis) {
+            const r = await processQueue(batchSize, { interItemDelayMs: 0 });
+            rounds++;
+            processed += r.processed || 0;
+            succeeded += r.succeeded || 0;
+            failed += r.failed || 0;
+            if ((r.processed || 0) === 0) break; // 큐 비었음
+            if (r.quotaExceeded) break;           // quota → cron 백오프에 양보
+          }
+        });
+        const skipped = !!(lockResult && lockResult.skipped);
+        _lastQueueDrain = { rounds, processed, succeeded, failed, skipped, elapsedMs: Date.now() - start, finishedAt: new Date().toISOString() };
+        logger.info(`[queue-drain] 완료: rounds=${rounds}, processed=${processed}, succeeded=${succeeded}, failed=${failed}${skipped ? ' (펌프 가동 중 — 양보)' : ''}, ${Date.now() - start}ms`);
+      } catch (err) {
+        _lastQueueDrain = { error: err.message, finishedAt: new Date().toISOString() };
+        logger.error(`[queue-drain] 오류: ${err.message}`);
+      } finally {
+        _queueDrainRunning = false;
+      }
+    });
+  } catch (err) {
+    next(err);
+  }
+});
+
+// GET /api/diag/queue-drain — 마지막 가속 드레인 결과/진행 상태
+router.get('/queue-drain', authMiddleware, async (req, res, next) => {
+  try {
+    const { rows: pend } = await pool.query(
+      `SELECT COUNT(*)::int AS remaining FROM sync_queue WHERE status = 'pending' AND attempts < max_retry`
+    );
+    res.json({ ok: true, running: _queueDrainRunning, last: _lastQueueDrain, remaining: pend[0]?.remaining || 0 });
+  } catch (err) {
+    next(err);
+  }
+});
+
+// ═══════════════════════════════════════════════════════════
+// GET /api/diag/order-written-sample — 시트에 반영 완료된 주문 샘플(노란 복구행 육안확인용)
+//   query: { sheetId?, tabName?, limit? } — 최근 sheet_written_at 순. 행번호로 시트에서 직접 확인.
+//   reconcile(복구) 경로로 써진 행은 시트 하단에 노란 배경 → 이 목록의 sheetRow로 대조.
+// ═══════════════════════════════════════════════════════════
+router.get('/order-written-sample', authMiddleware, async (req, res, next) => {
+  try {
+    const { sheetId, tabName } = req.query;
+    const limit = Math.min(parseInt(req.query.limit, 10) || 20, 200);
+    const params = [];
+    const conds = [`os.mirror_status = 'written'`, `os.sheet_row IS NOT NULL`];
+    if (sheetId) { params.push(sheetId); conds.push(`os.sheet_id = $${params.length}`); }
+    if (tabName) { params.push(tabName); conds.push(`os.tab_name = $${params.length}`); }
+    params.push(limit);
+    const { rows } = await pool.query(
+      `SELECT os.id, os.sheet_id AS "sheetId", os.tab_name AS "tabName",
+              COALESCE(NULLIF(os.tab_gid, ''), rst.tab_gid) AS "tabGid",
+              os.sheet_row AS "sheetRow",
+              os.orderer, os.recipient, os.order_num AS "orderNum",
+              RIGHT(regexp_replace(COALESCE(os.phone, ''), '[^0-9]', '', 'g'), 4) AS "phone4",
+              os.sheet_written_at AS "writtenAt"
+         FROM order_submissions os
+         LEFT JOIN raw_sheet_tabs rst ON rst.sheet_id = os.sheet_id
+              AND (rst.tab_gid = NULLIF(os.tab_gid, '') OR rst.tab_name = os.tab_name)
+        WHERE ${conds.join(' AND ')}
+        ORDER BY os.sheet_written_at DESC NULLS LAST
+        LIMIT $${params.length}`,
+      params
+    );
+    res.json({ ok: true, count: rows.length, items: rows });
+  } catch (err) {
+    next(err);
+  }
+});
+
+// ═══════════════════════════════════════════════════════════
+// GET /api/diag/order-stuck-export?sheetId&tabName[&includeWritten=true][&format=csv] — 제출된 구매양식(DB) 추출
+//   서버 DB(order_submissions = 실제 제출된 구매양식)를 내려준다. 시트 미러가 아니라 원장 원본.
+//   기본: 미반영(written 아님)만. includeWritten=true(또는 all=1): 그 탭 전 주문(반영분 포함).
+//   format=csv: 엑셀/구글시트 붙여넣기용 CSV(UTF-8 BOM). PII 포함 → admin/master 전용. limit 기본 2000(최대 5000).
+// ═══════════════════════════════════════════════════════════
+router.get('/order-stuck-export', authMiddleware, adminOrMasterMiddleware, async (req, res, next) => {
+  try {
+    const { sheetId, tabName } = req.query;
+    if (!sheetId || !tabName) return res.status(400).json({ ok: false, error: 'sheetId, tabName 필수' });
+    const includeWritten = req.query.includeWritten === 'true' || req.query.all === '1';
+    const limit = Math.min(parseInt(req.query.limit, 10) || 2000, 5000);
+    const statusCond = includeWritten ? '' : ` AND os.mirror_status <> 'written'`;
+    const { rows } = await pool.query(
+      `SELECT os.id, os.mirror_status AS "mirrorStatus", os.sheet_row AS "sheetRow",
+              os.orderer, os.recipient, os.user_id AS "userId", os.phone, os.address,
+              os.bank, os.account, os.depositor, os.price,
+              os.order_num AS "orderNum", os.date_str AS "dateStr",
+              os.selected_opt_key AS "selectedOptKey", os.memo,
+              os.sheet_written_at AS "writtenAt", os.submitted_at AS "submittedAt"
+         FROM order_submissions os
+        WHERE os.sheet_id = $1 AND os.tab_name = $2${statusCond}
+        ORDER BY os.sheet_row ASC NULLS LAST, os.submitted_at ASC
+        LIMIT $3`,
+      [sheetId, tabName, limit]
+    );
+
+    if (String(req.query.format || '').toLowerCase() === 'csv') {
+      const stMap = { written: '반영완료', queued: '미반영(대기)', failed: '미반영(실패)', pending: '미반영', pending_no_row: '미반영(행없음)' };
+      const esc = (v) => { v = String(v == null ? '' : v); return /[",\n\r]/.test(v) ? '"' + v.replace(/"/g, '""') + '"' : v; };
+      // 제출시각을 한국시간(KST)으로 — sv-SE 로캘이 'YYYY-MM-DD HH:mm:ss' 형식을 준다.
+      const fmtKST = (d) => {
+        if (!d) return '';
+        const dt = d instanceof Date ? d : new Date(d);
+        if (isNaN(dt.getTime())) return String(d);
+        try {
+          return new Intl.DateTimeFormat('sv-SE', {
+            timeZone: 'Asia/Seoul', year: 'numeric', month: '2-digit', day: '2-digit',
+            hour: '2-digit', minute: '2-digit', second: '2-digit', hour12: false,
+          }).format(dt);
+        } catch (_) { return dt.toISOString(); }
+      };
+      const head = ['상태', '시트행', '구매일자', '주문자', '수취인', '네이버아이디', '연락처', '주소', '은행', '계좌번호', '예금주', '결제금액', '주문번호', '비고', '제출시각(KST)'];
+      const lines = [head.map(esc).join(',')];
+      for (const o of rows) {
+        let memo = o.memo || '';
+        if (o.selectedOptKey) memo = (memo ? memo + ' / ' : '') + '옵션:' + o.selectedOptKey;
+        const line = [
+          stMap[o.mirrorStatus] || o.mirrorStatus || '', o.sheetRow || '', o.dateStr || '', o.orderer || '',
+          o.recipient || '', o.userId || '', o.phone || '', o.address || '', o.bank || '', o.account || '',
+          o.depositor || '', o.price || '', o.orderNum || '', memo, fmtKST(o.submittedAt),
+        ];
+        lines.push(line.map(esc).join(','));
+      }
+      const csv = '﻿' + lines.join('\r\n'); // UTF-8 BOM
+      const asciiName = `orders_${String(tabName).replace(/[^\w.()-]+/g, '_').slice(0, 60) || 'tab'}.csv`;
+      res.setHeader('Content-Type', 'text/csv; charset=utf-8');
+      res.setHeader('Content-Disposition',
+        `attachment; filename="${asciiName}"; filename*=UTF-8''${encodeURIComponent('구매양식_' + tabName + '.csv')}`);
+      return res.send(csv);
+    }
+
+    res.json({ ok: true, count: rows.length, includeWritten, items: rows });
   } catch (err) {
     next(err);
   }

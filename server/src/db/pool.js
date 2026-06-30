@@ -5,9 +5,15 @@ const { logger } = require('../utils/logger');
 const isProduction = process.env.NODE_ENV === 'production';
 const connectionString = process.env.DATABASE_URL;
 
+// ★ 제안D: 풀 크기 env 조정 가능(DB_POOL_MAX). 제출 폭주 시 err의 실제 원인이 시트 throttle가
+//   아니라 PG 커넥션 풀 고갈이므로, Railway PG의 max_connections 한도 내에서 상향하면 제출 안정화.
+//   기본값은 무변경(프로덕션 20/개발 10) — 무분별 상향이 PG 한도를 넘으면 오히려 연결실패가 나므로,
+//   PG max_connections 확인 후 DB_POOL_MAX로 명시 상향 권장(예: 30~40).
+const envPoolMax = parseInt(process.env.DB_POOL_MAX || '', 10);
+const poolMax = Number.isInteger(envPoolMax) && envPoolMax > 0 ? envPoolMax : (isProduction ? 20 : 10);
 const poolConfig = {
   connectionString,
-  max: isProduction ? 20 : 10,              // 프로덕션은 풀 크기 증가
+  max: poolMax,
   idleTimeoutMillis: 30000,
   connectionTimeoutMillis: isProduction ? 10000 : 5000,
 };

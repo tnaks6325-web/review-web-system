@@ -14,6 +14,7 @@
  */
 
 const pool = require('../db/pool');
+const { logger } = require('../utils/logger');
 
 const OWNERS = ['db', 'sheet', 'shared'];
 
@@ -94,12 +95,15 @@ async function getMapping(sheetId, tabGid) {
 
   // 현재 헤더 — raw 미러에서 가져옴 (미러링돼 있어야 함)
   const { rows: tabRows } = await pool.query(
-    `SELECT tab_name, spreadsheet_title, headers, col_count
+    `SELECT tab_name, spreadsheet_title, headers, detected_headers,
+            header_row_index, data_start_row, col_count
        FROM raw_sheet_tabs WHERE sheet_id = $1 AND tab_gid = $2`,
     [sheetId, gid]
   );
   const tab = tabRows[0] || null;
-  const headers = tab && Array.isArray(tab.headers) ? tab.headers : [];
+  const headers = tab && Array.isArray(tab.detected_headers)
+    ? tab.detected_headers
+    : (tab && Array.isArray(tab.headers) ? tab.headers : []);
 
   // 저장된 매핑
   const { rows: stored } = await pool.query(
@@ -133,7 +137,14 @@ async function getMapping(sheetId, tabGid) {
 
   return {
     hasHeaders: headers.length > 0,
-    tab: tab ? { tabName: tab.tab_name, spreadsheetTitle: tab.spreadsheet_title, colCount: tab.col_count } : null,
+    tab: tab ? {
+      tabName: tab.tab_name,
+      spreadsheetTitle: tab.spreadsheet_title,
+      colCount: tab.col_count,
+      headerRowIndex: tab.header_row_index || null,
+      dataStartRow: tab.data_start_row || null,
+      detected: Array.isArray(tab.detected_headers),
+    } : null,
     columns,
   };
 }
@@ -182,7 +193,56 @@ async function saveMapping(sheetId, tabGid, tabName, columns, updatedBy) {
     client.release();
   }
 
+  // ── P2c: 매핑 변경 = 컬럼해석 변경. 시트 데이터 체크섬은 그대로라 빌더가 스킵하므로,
+  //   해당 탭의 index_master.checksum=NULL로 강제 무효화 → 두 빌더(인덱스/스마트)가 다음 빌드에서 재파싱.
+  //   (시트 데이터 미변경이라 재파싱 1회 후 동일 체크섬 재기록 → 자동 안정화.)
+  //   best-effort: 실패해도 매핑 저장 자체는 성공 처리(다음 강제 재빌드/재시작으로 자가치유).
+  try {
+    await pool.query(
+      `UPDATE index_master SET checksum = NULL
+         WHERE sheet_id = $1 AND (tab_gid = $2 OR tab_name = $3)`,
+      [sheetId, gid, tabName || null]
+    );
+    // 스마트빌드 장수 프로세스의 인메모리 캐시도 무효화(isFirstRun 이후 DB 재로드 안 함)
+    try { require('./smartBuild.service').invalidateChecksumCache(sheetId, tabName); } catch (_) {}
+    logger.info(`[mapping] 체크섬 무효화 — sheet=${String(sheetId).slice(0,12)} gid=${gid} tab=${tabName} → 다음 빌드 재파싱`);
+  } catch (err) {
+    logger.warn(`[mapping] 체크섬 무효화 실패(무시, 매핑은 저장됨): ${err.message}`);
+  }
+
   return { saved: clean.length, mapped: clean.filter(c => c.dbField).length };
+}
+
+/**
+ * P2b: 인덱스 빌더용 경량 매핑 — db_field → { colIndex, header } Map.
+ *   columnResolver가 컬럼감지를 "DB매핑 우선"으로 하기 위한 입력.
+ *   매핑이 없거나(미설정 탭) sheetId/tabGid가 없으면 null → 빌더는 키워드 전용(P2a 동일).
+ *   같은 db_field가 여러 컬럼에 매핑되면 가장 앞(작은 col_index)만 사용(determinism).
+ * @returns {Promise<Map<string,{colIndex:number,header:string|null}>|null>}
+ */
+async function getTabColumnIndexMap(sheetId, tabGid) {
+  if (!sheetId || tabGid === undefined || tabGid === null || tabGid === '') return null;
+  let rows;
+  try {
+    ({ rows } = await pool.query(
+      `SELECT col_index, header_text, db_field
+         FROM tab_column_mappings
+        WHERE sheet_id = $1 AND tab_gid = $2 AND db_field IS NOT NULL
+        ORDER BY col_index ASC`,
+      [sheetId, String(tabGid)]
+    ));
+  } catch (err) {
+    // 매핑 테이블 부재/조회 실패는 치명 아님 — 키워드 폴백(P2a 동일)
+    return null;
+  }
+  if (!rows || !rows.length) return null;
+  const m = new Map();
+  for (const r of rows) {
+    if (!r.db_field || m.has(r.db_field)) continue;       // 첫(최소 col_index) 매핑만
+    if (!Number.isInteger(r.col_index) || r.col_index < 0) continue;
+    m.set(r.db_field, { colIndex: r.col_index, header: r.header_text != null ? String(r.header_text) : null });
+  }
+  return m.size ? m : null;
 }
 
 module.exports = {
@@ -193,4 +253,5 @@ module.exports = {
   defaultOwnerOf,
   getMapping,
   saveMapping,
+  getTabColumnIndexMap,
 };

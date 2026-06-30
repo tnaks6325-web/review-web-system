@@ -13,15 +13,17 @@ const express = require('express');
 const router = express.Router();
 const pool = require('../db/pool');
 const { authMiddleware, adminOrMasterMiddleware } = require('../middleware/auth.middleware');
-const { mirrorAllSheets } = require('../services/rawMirror.service');
+const { mirrorAllSheets, mirrorOneSheet } = require('../services/rawMirror.service');
 
 // 동시 미러링 방지용 메모리 잠금
 let _mirrorRunning = false;
 let _lastMirror = null; // 마지막 실행 요약
 
 // ═══════════════════════════════════════════════════════════
-// POST /api/raw/mirror — 전체 RAW 미러링 (비동기)
-//   body: { force?: boolean, includeHidden?: boolean }
+// POST /api/raw/mirror — RAW 미러링
+//   body: { sheetId?: string, force?: boolean, includeHidden?: boolean }
+//   - sheetId 지정 시: 그 시트만 미러(필요한 탭만 → 전체 순회 없이 시간 절약). inline 결과 즉시 반환.
+//   - sheetId 미지정 시: 등록된 전체 시트 미러(기존 동작, 비동기 백그라운드).
 // ═══════════════════════════════════════════════════════════
 router.post('/mirror', authMiddleware, adminOrMasterMiddleware, async (req, res, next) => {
   try {
@@ -31,10 +33,25 @@ router.post('/mirror', authMiddleware, adminOrMasterMiddleware, async (req, res,
 
     const force = req.body?.force === true;
     const includeHidden = req.body?.includeHidden !== false; // 기본 true
+    const sheetId = String(req.body?.sheetId || '').trim();
+
+    // ★ 단일 시트 미러(필요한 탭만): 등록된 전체 시트를 순회하지 않고 해당 시트만 재읽기 → 시간 절약.
+    //   캠페인 시트 1개라 빠르므로 inline await 후 결과를 즉시 반환(전체 미러처럼 폴링 불필요).
+    if (sheetId) {
+      _mirrorRunning = true;
+      try {
+        const result = await mirrorOneSheet(sheetId, { force, includeHidden });
+        _lastMirror = { ...result, scope: 'single', sheetId, force, finishedAt: new Date().toISOString() };
+        return res.json({ ok: true, mode: 'sync', scope: 'single', sheetId, force, ...result });
+      } finally {
+        _mirrorRunning = false;
+      }
+    }
 
     res.json({
       ok: true,
       mode: 'async',
+      scope: 'all',
       message: 'RAW 미러링이 시작되었습니다. 완료 후 /api/raw/status 로 확인하세요.',
     });
 
@@ -192,6 +209,59 @@ router.get('/rows', authMiddleware, async (req, res, next) => {
       count: rows.length,
       rows,
     });
+  } catch (err) {
+    next(err);
+  }
+});
+
+// ═══════════════════════════════════════════════════════════
+// GET /api/raw/rows.csv?sheetId&gid — 그 탭에 저장된 RAW 행 전체를 CSV로 다운로드
+//   미러된 시트 데이터(헤더 포함 전 행)를 그대로 CSV로 내려준다. 페이지네이션 없이 전량.
+//   라우터의 행 뷰어와 동일 권한(authMiddleware). UTF-8 BOM으로 엑셀/시트 한글 호환.
+// ═══════════════════════════════════════════════════════════
+router.get('/rows.csv', authMiddleware, async (req, res, next) => {
+  try {
+    const { sheetId, gid } = req.query;
+    if (!sheetId || !gid) {
+      return res.status(400).json({ ok: false, error: 'sheetId, gid 파라미터가 필요합니다.' });
+    }
+    const { rows: metaRows } = await pool.query(
+      `SELECT tab_name AS "tabName", col_count AS "colCount"
+         FROM raw_sheet_tabs WHERE sheet_id = $1 AND tab_gid = $2`,
+      [sheetId, String(gid)]
+    );
+    if (metaRows.length === 0) {
+      return res.status(404).json({ ok: false, error: '미러링된 탭을 찾을 수 없습니다.' });
+    }
+    const colCount = Math.max(metaRows[0].colCount || 0, 1);
+    const tabName = metaRows[0].tabName || 'tab';
+
+    const { rows } = await pool.query(
+      `SELECT cells FROM raw_sheet_rows
+        WHERE sheet_id = $1 AND tab_gid = $2
+        ORDER BY row_index`,
+      [sheetId, String(gid)]
+    );
+
+    const esc = (v) => {
+      v = String(v == null ? '' : v);
+      return /[",\n\r]/.test(v) ? '"' + v.replace(/"/g, '""') + '"' : v;
+    };
+    const lines = rows.map((r) => {
+      const cells = Array.isArray(r.cells) ? r.cells : [];
+      const out = [];
+      for (let c = 0; c < colCount; c++) out.push(esc(cells[c] != null ? cells[c] : ''));
+      return out.join(',');
+    });
+    const csv = '﻿' + lines.join('\r\n'); // UTF-8 BOM (엑셀/구글시트 한글 호환)
+
+    const asciiName = `raw_${String(tabName).replace(/[^\w.()-]+/g, '_').slice(0, 60) || 'tab'}.csv`;
+    res.setHeader('Content-Type', 'text/csv; charset=utf-8');
+    res.setHeader(
+      'Content-Disposition',
+      `attachment; filename="${asciiName}"; filename*=UTF-8''${encodeURIComponent('raw_' + tabName + '.csv')}`
+    );
+    res.send(csv);
   } catch (err) {
     next(err);
   }

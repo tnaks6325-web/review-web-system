@@ -59,6 +59,12 @@ const _ACTION_MAP = {
   'getTabOptions':    { method: 'GET',  path: '/api/tab/options' },
   'getTabEndDate':    { method: 'GET',  path: '/api/tab/end-date' },
   'getCampaignStats': { method: 'GET',  path: '/api/diag/campaign-stats' },
+
+  // 주문 원장(order ledger) PR-B — DB 주체 인라인 뷰어/편집/취소/수동추가
+  'orderLedgerList':  { method: 'GET',  path: '/api/diag/order-ledger' },
+  'orderEdit':        { method: 'POST', path: '/api/diag/order-edit' },
+  'orderCancel':      { method: 'POST', path: '/api/diag/order-cancel' },
+  'orderManualAdd':   { method: 'POST', path: '/api/diag/order-manual-add' },
   'syncTabFromSheet': { method: 'POST', path: '/api/tab/sync-from-sheet' },  // deprecated
   'syncTabNames':     { method: 'POST', path: '/api/tab/sync-tab-names' },
   // [DEPRECATED v11.8.0] 2탭 통합으로 폐기된 액션 — 서버에서 deprecated 응답 반환
@@ -95,6 +101,7 @@ const _ACTION_MAP = {
   'saveSubAccounts':    { method: 'POST', path: '/api/reviewer/profile', remap: 'saveSubAccounts' },
   'saveIncomeInfo':     { method: 'POST', path: '/api/reviewer/profile', remap: 'saveIncomeInfo' },
   'saveBankInfo':       { method: 'POST', path: '/api/reviewer/profile', remap: 'saveBankInfo' },
+  'saveAddress':        { method: 'POST', path: '/api/reviewer/profile', remap: 'saveAddress' },
   'getInaedList':       { method: 'GET',  path: '/api/submit/get-inaed-list' },
 
   // 관리자 인증 (Section 8)
@@ -213,6 +220,9 @@ const _ACTION_MAP = {
   'syncQueueRetry':     { method: 'POST', path: '/api/diag/sync-queue/retry' },
   'syncQueuePurge':     { method: 'POST', path: '/api/diag/sync-queue/purge' },
   'syncQueueDelete':    { method: 'POST', path: '/api/diag/sync-queue/delete' },
+  'orderMirrorStatus':  { method: 'GET',  path: '/api/diag/order-mirror-status' },
+  'orderReconcile':     { method: 'POST', path: '/api/diag/order-reconcile' },
+  'queueDrain':         { method: 'POST', path: '/api/diag/queue-drain' },
   'buildHistory':       { method: 'GET',  path: '/api/diag/build-history' },
 
   // Phase 12: 시트 권한 관리

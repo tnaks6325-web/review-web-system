@@ -155,7 +155,7 @@ router.get('/my-status', async (req, res, next) => {
       return res.status(400).json({ ok: false, error: 'phone8 필수 (8자리)' });
     }
 
-    // review_index에서 해당 phone8의 모든 참여 내역 조회
+    // review_index에서 해당 phone8의 모든 참여 내역 조회 (시트 기반)
     const { rows } = await pool.query(`
       SELECT
         ri.id,
@@ -163,6 +163,7 @@ router.get('/my-status', async (req, res, next) => {
         ri.tab_name AS "tabName",
         ri.campaign_name AS "campaignName",
         ri.sheet_id AS "sheetId",
+        ri.row_index AS "rowIndex",
         ri.is_submitted AS "isSubmitted",
         ri.is_submitted2 AS "paymentStatus",
         ri.product_name AS "productName",
@@ -190,16 +191,78 @@ router.get('/my-status', async (req, res, next) => {
       if (r.paymentStatus === 'PAID') stage = 'paid'; // 입금완료
       if (r.isClosed && !r.isSubmitted) stage = 'closed'; // 마감(미제출)
 
-      return { ...r, stage };
+      return { ...r, stage, source: 'review_index' };
     });
 
-    // 통계
+    // ★ DB 기반 보강: order_submissions(시트 반영 전/실패 포함)도 노출.
+    //   시스템이 DB-first라 시트 미반영이어도 리뷰어가 "제출 즉시" 자기 참여를 확인할 수 있어야 함.
+    //   매칭: phone8 = 주문 연락처 끝 8자리. 이미 시트반영돼 review_index가 대표하는 행(sheetRow 동일)은 중복제거.
+    const seenRows = new Set(
+      items.filter(i => i.rowIndex != null).map(i => `${i.sheetId}||${i.tabName}||${i.rowIndex}`)
+    );
+    const { rows: orderRows } = await pool.query(`
+      SELECT
+        os.id,
+        os.recipient AS "name",
+        os.tab_name AS "tabName",
+        tc.campaign_name AS "campaignName",
+        os.sheet_id AS "sheetId",
+        os.sheet_row AS "sheetRow",
+        os.order_num AS "orderNum",
+        os.mirror_status AS "mirrorStatus",
+        os.submitted_at AS "submittedAt",
+        tc.display_name AS "displayName",
+        tc.manager,
+        tc.review_type AS "reviewType",
+        tc.delivery_type AS "deliveryType",
+        tc.is_closed AS "isClosed"
+      FROM order_submissions os
+      LEFT JOIN tab_configs tc ON tc.sheet_id = os.sheet_id AND tc.tab_name = os.tab_name
+      WHERE RIGHT(regexp_replace(COALESCE(os.phone, ''), '[^0-9]', '', 'g'), 8) = $1
+      ORDER BY os.submitted_at DESC
+      LIMIT 100
+    `, [phone8]);
+
+    for (const o of orderRows) {
+      // 이미 시트에 반영돼 review_index가 대표하는 주문은 건너뜀(중복 방지)
+      if (o.sheetRow != null && seenRows.has(`${o.sheetId}||${o.tabName}||${o.sheetRow}`)) continue;
+      // written인데 아직 review_index 미반영=반영대기 / 그 외(pending·queued·pending_no_row·failed)=처리중
+      const stage = (o.mirrorStatus === 'written') ? 'submitted_db' : 'processing';
+      items.push({
+        id: `os-${o.id}`,
+        name: o.name,
+        tabName: o.tabName,
+        campaignName: o.campaignName,
+        sheetId: o.sheetId,
+        rowIndex: o.sheetRow,
+        isSubmitted: false,
+        paymentStatus: null,
+        productName: null,
+        productUrl: null,
+        startDate: null,
+        endDate: null,
+        round: null,
+        displayName: o.displayName,
+        manager: o.manager,
+        reviewType: o.reviewType,
+        deliveryType: o.deliveryType,
+        isClosed: o.isClosed,
+        orderNum: o.orderNum,
+        mirrorStatus: o.mirrorStatus,
+        submittedAt: o.submittedAt,
+        stage,
+        source: 'order_submissions',
+      });
+    }
+
+    // 통계 (processing은 DB-only 추가분 = 접수됨·처리중/반영대기)
     const stats = {
       total: items.length,
       assigned: items.filter(i => i.stage === 'assigned').length,
       submitted: items.filter(i => i.stage === 'submitted').length,
       paid: items.filter(i => i.stage === 'paid').length,
       closed: items.filter(i => i.stage === 'closed').length,
+      processing: items.filter(i => i.stage === 'processing' || i.stage === 'submitted_db').length,
     };
 
     res.json({ ok: true, items, stats });

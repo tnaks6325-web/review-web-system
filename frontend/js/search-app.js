@@ -61,6 +61,29 @@ function _saveAuthSession(name, verified, registeredMember, phone8) {
   _authState = obj;
 }
 
+/** ★ 구매양식 최상단에 현재 로그인된 리뷰어 정보 표시
+ *  세션(name/phone8/registeredMember)만 사용 — 연락처는 뒤 4자리만 노출 */
+function _renderOrderFormReviewerInfo(auth) {
+  const box = document.getElementById("orderFormReviewerInfo");
+  if (!box) return;
+  if (!auth || !auth.name) { box.style.display = "none"; return; }
+
+  const nameEl  = document.getElementById("ofReviewerName");
+  const phoneEl = document.getElementById("ofReviewerPhone");
+  const badgeEl = document.getElementById("ofReviewerBadge");
+
+  if (nameEl) nameEl.textContent = auth.name;
+
+  const p8 = String(auth.phone8 || "").replace(/[^0-9]/g, "");
+  if (phoneEl) {
+    if (p8) { phoneEl.textContent = "연락처 ····-" + p8.slice(-4); phoneEl.style.display = ""; }
+    else    { phoneEl.style.display = "none"; }
+  }
+  if (badgeEl) badgeEl.style.display = auth.registeredMember ? "" : "none";
+
+  box.style.display = "";
+}
+
 /* ══════════════════════════════════════════════════════════════
    ★ 관리자 바이패스 모드
    ────────────────────────────────────────────────────────────
@@ -3813,6 +3836,9 @@ function initOrderFormMode() {
   if (subtitleEl) subtitleEl.textContent = tabName || "";
   if (productEl)  productEl.textContent  = displayName || "상품명 정보 없음";
 
+  // ★ 로그인된 리뷰어 정보 배너 표시 (최상단)
+  _renderOrderFormReviewerInfo(authSession);
+
   // 페이지 title도 변경
   document.title = titleText;
 
@@ -3951,6 +3977,8 @@ let _memoHeader      = "";   // 비고 헤더명
 let _orderNumHeader  = "";   // 주문번호 헤더명 (없으면 "")
 let _selectedOptKey  = null; // 선택된 옵션 키 (null = 옵션 없음 or 미선택)
 let _reviewerSelectedOptions = null; // ★ reviewer-options API 기반 드롭다운 선택값 { "상품명": "값", ... }
+let _reviewerDistinctValues = null;  // ★ reviewer-options distinctValues { "옵션컬럼": ["값1","값2"] } — 노란 옵션 피커에서 선택
+let _reviewerOptionColNames = [];    // ★ 옵션 컬럼명 순서
 
 /** ★ 리뷰어 옵션 드롭다운 변경 핸들러 (window에 바인딩) */
 window._onReviewerOptChange = function(colName, value) {
@@ -4078,100 +4106,32 @@ async function _loadReviewerOptionData(sheetId, tabName, gid, round) {
 
     const data = await gasGet(params);
 
+    // ★ 파란 "내 옵션 정보" 블록은 제거 — 옵션 선택은 노란 "본인의 옵션을 선택해주세요" 블록 1곳으로 통합한다.
     const infoEl = document.getElementById('orderFormOptionInfo');
-    const contentEl = document.getElementById('orderFormOptionContent');
-    if (!infoEl || !contentEl) return;
+    if (infoEl) infoEl.style.display = 'none';
 
     if (!data || !data.ok) {
-      infoEl.style.display = 'none';
+      _reviewerDistinctValues = null;
+      _reviewerOptionColNames = [];
       return;
     }
 
-    // ★ headersOnly 모드 또는 매칭 0건: 옵션 컬럼명 표시
-    if (data.headersOnly || !data.optionLabels || data.optionLabels.length === 0) {
-      const colNames = data.optionColumns || [];
-      if (colNames.length === 0) {
-        infoEl.style.display = 'none';
-        return;
-      }
-
-      // ★★★ matched=0 + distinctValues 존재 → 드롭다운 선택 UI 렌더링
-      if (!data.headersOnly && data.distinctValues) {
-        _reviewerSelectedOptions = {};   // 초기화
-        let html = '';
-        let allSingleValue = true;  // 모든 컬럼이 1개 값만 가지는지 체크
-        for (const colName of colNames) {
-          const values = data.distinctValues[colName] || [];
-          if (values.length === 0) continue;
-          if (values.length > 1) allSingleValue = false;
-
-          // ★ 값이 1개뿐이면 자동 선택
-          _reviewerSelectedOptions[colName] = values.length === 1 ? values[0] : '';
-
-          html += '<div style="padding:4px 0">';
-          html += '<div style="font-size:.75rem;font-weight:700;color:#3182f6;margin-bottom:3px">' + _safeText(colName) + '</div>';
-
-          if (values.length === 1) {
-            // ★ 1개 값: 드롭다운 대신 확정 표시 (자동 선택됨)
-            html += '<div style="padding:8px 10px;border:1.5px solid #6fa6f5;border-radius:8px;'
-                  + 'font-size:.85rem;font-weight:600;color:#1F2937;background:#e8f1fe">'
-                  + '<i class="fas fa-check-circle" style="color:#3182f6;margin-right:5px"></i>'
-                  + _safeText(values[0])
-                  + '</div>';
-          } else {
-            // ★ 2개 이상: 카드 선택 방식 (직관적)
-            html += '<div style="display:flex;flex-wrap:wrap;gap:6px">';
-            for (let vi = 0; vi < values.length; vi++) {
-              const v = values[vi];
-              const safeCol = _safeText(colName).replace(/'/g, "\\'");
-              const safeVal = _safeText(v).replace(/'/g, "\\'");
-              html += '<button type="button" '
-                    + 'id="rOptCard_' + _safeText(colName) + '_' + vi + '" '
-                    + 'onclick="window._onReviewerOptCardSelect(\'' + safeCol + '\', \'' + safeVal + '\', this)" '
-                    + 'style="flex:1 1 calc(50% - 3px);min-width:0;padding:9px 10px;border:1.5px solid #DCE0E8;border-radius:10px;'
-                    + 'background:#fff;cursor:pointer;text-align:left;transition:all .15s;outline:none">'
-                    + '<div style="font-size:.82rem;font-weight:600;color:#374151;line-height:1.35;word-break:break-word">'
-                    + _safeText(v)
-                    + '</div></button>';
-            }
-            html += '</div>';
-          }
-          html += '</div>';
-        }
-        if (!html) {
-          infoEl.style.display = 'none';
-          return;
-        }
-        contentEl.innerHTML = html;
-        infoEl.style.display = 'block';
-        console.log('[옵션] ★ 드롭다운 선택 UI 렌더링 (matched:0, distinctValues):', colNames,
-          allSingleValue ? '(모두 자동선택)' : '(선택 필요)');
-        return;
-      }
-
-      // 일반 안내 메시지 (headersOnly 또는 distinctValues 없음)
-      const hint = data.headersOnly
-        ? '로그인 후 표시됩니다'                    // 비로그인 (headersOnly)
-        : '배정된 옵션 정보가 아직 없습니다';       // 로그인했지만 매칭 0건
-      contentEl.innerHTML = colNames.map(n =>
-        `<div style="padding:3px 0"><span style="color:#3182f6;font-weight:700">${_safeText(n)}</span><span style="color:#9CA3AF;margin-left:4px">— ${hint}</span></div>`
-      ).join('');
-      infoEl.style.display = 'block';
-      console.log('[옵션] 옵션 헤더 표시:', colNames, data.headersOnly ? '(headersOnly)' : '(matched:0)');
-      return;
+    // ★ 이름 매칭 0건 + distinctValues 존재 → 시트 옵션 컬럼의 고유값을
+    //   노란 옵션 피커에서 직접 선택하도록 저장 (예: 937,000원 짜리 / 906,000원 짜리).
+    //   (이름 매칭 성공 시엔 optionLabels가 오므로 distinct 선택을 쓰지 않고 인애드 기반 흐름 유지)
+    const matchedZero = data.headersOnly || !data.optionLabels || data.optionLabels.length === 0;
+    if (matchedZero && !data.headersOnly && data.distinctValues
+        && Object.keys(data.distinctValues).length > 0) {
+      _reviewerDistinctValues = data.distinctValues;
+      _reviewerOptionColNames = data.optionColumns || [];
+      console.log('[옵션] reviewer-options distinctValues 수신 → 노란 옵션 피커에서 선택:', _reviewerDistinctValues);
+    } else {
+      _reviewerDistinctValues = null;
+      _reviewerOptionColNames = [];
     }
 
-    // 옵션 라벨 표시 (리뷰어 이름 매칭 성공)
-    const labels = data.optionLabels.filter(l => l);
-    if (labels.length === 0) {
-      infoEl.style.display = 'none';
-      return;
-    }
-
-    contentEl.innerHTML = labels.map(l => `<div style="padding:3px 0">${_safeText(l)}</div>`).join('');
-    infoEl.style.display = 'block';
-
-    console.log('[옵션] ★ 리뷰어 옵션 표시 완료:', labels);
+    // 인애드명단 로드와 병렬이므로, 어느 쪽이 늦게 끝나도 피커가 최신 데이터로 렌더되도록 재호출
+    _renderOptionPicker();
   } catch (err) {
     console.warn('[옵션] 리뷰어 옵션 로드 실패:', err.message);
   }
@@ -4217,6 +4177,88 @@ function _renderDynamicFields() {
   _renderOptionPicker();
 }
 
+/** ★ reviewer-options distinctValues를 노란 옵션 피커에 렌더 (단일 옵션 선택 블록)
+ *  - 옵션 컬럼별 고유값을 카드로 표시, 값이 1개면 자동 확정
+ *  - 선택 결과를 _selectedOptKey(파이프 키)로 빌드하여 제출 시 사용
+ *  - 렌더 성공 시 true 반환(인애드 기반 피커는 건너뜀) */
+function _renderPickerFromDistinct(pickerWrap, tabsEl) {
+  const colNames = (_reviewerOptionColNames || []).filter(c => (_reviewerDistinctValues[c] || []).length > 0);
+  if (colNames.length === 0) return false;
+
+  // 이미 distinct 카드가 렌더되어 있으면 사용자의 선택 상태를 보존 (중복 렌더 방지)
+  if (tabsEl.querySelector('[data-distcol]')) { pickerWrap.style.display = ""; return true; }
+
+  _reviewerSelectedOptions = {};
+  let html = '';
+  let needSelect = false;
+  for (const colName of colNames) {
+    const values = _reviewerDistinctValues[colName] || [];
+    _reviewerSelectedOptions[colName] = values.length === 1 ? values[0] : '';
+
+    html += '<div style="margin-bottom:8px">';
+    if (colNames.length > 1) {
+      html += '<div style="font-size:.73rem;font-weight:700;color:#3182f6;margin-bottom:4px">' + _safeText(colName) + '</div>';
+    }
+    if (values.length === 1) {
+      // 값 1개: 선택 불필요, 확정 표시 + 자동 선택
+      html += '<div style="padding:10px 12px;border:1.5px solid #6fa6f5;border-radius:10px;'
+            + 'background:#e8f1fe;font-size:.85rem;font-weight:700;color:#1F2937">'
+            + '<i class="fas fa-check-circle" style="color:#3182f6;margin-right:5px"></i>'
+            + _safeText(values[0]) + '</div>';
+    } else {
+      // 값 2개 이상: 카드 선택 (선택 필수)
+      needSelect = true;
+      html += '<div style="display:flex;flex-wrap:wrap;gap:6px">';
+      for (let vi = 0; vi < values.length; vi++) {
+        const v = values[vi];
+        const safeCol = _safeText(colName).replace(/'/g, "\\'");
+        const safeVal = _safeText(v).replace(/'/g, "\\'");
+        html += '<button type="button" data-distcol="' + _safeText(colName) + '" '
+              + 'onclick="window._onPickerDistinctSelect(\'' + safeCol + '\',\'' + safeVal + '\',this)" '
+              + 'style="flex:1 1 calc(50% - 3px);min-width:0;padding:10px 12px;border:1.5px solid #DCE0E8;'
+              + 'border-radius:10px;background:#fff;cursor:pointer;text-align:left;transition:all .15s;'
+              + 'font-size:.85rem;font-weight:600;color:#374151;word-break:break-word">'
+              + _safeText(v) + '</button>';
+      }
+      html += '</div>';
+    }
+    html += '</div>';
+  }
+
+  tabsEl.innerHTML = html;
+  pickerWrap.style.display = "";
+  // 모두 자동선택(단일값)이면 즉시 확정, 미선택 카드가 있으면 선택 강제(null)
+  _selectedOptKey = needSelect ? null : _buildReviewerOptKey();
+  window._preSelectedOptKey = _selectedOptKey || null;
+  _setOrdererDisabled(false);
+  console.log('[옵션] ★ distinct 옵션 피커 렌더:', colNames, needSelect ? '(선택 필요)' : '(자동확정: ' + _selectedOptKey + ')');
+  return true;
+}
+
+/** ★ distinct 옵션 카드 선택 핸들러 (window 바인딩) */
+window._onPickerDistinctSelect = function(colName, value, btnEl) {
+  if (!_reviewerSelectedOptions) _reviewerSelectedOptions = {};
+  // 같은 컬럼 카드 스타일 초기화 후 선택 카드만 강조
+  const tabsEl = document.getElementById('of_option_tabs');
+  if (tabsEl) {
+    tabsEl.querySelectorAll('button[data-distcol]').forEach(b => {
+      if (b.getAttribute('data-distcol') !== colName) return;
+      b.style.border = '1.5px solid #DCE0E8';
+      b.style.background = '#fff';
+      b.style.color = '#374151';
+    });
+  }
+  btnEl.style.border = '1.5px solid #3182f6';
+  btnEl.style.background = '#f2f7ff';
+  btnEl.style.color = '#1b64da';
+
+  _reviewerSelectedOptions[colName] = value;
+  const allChosen = Object.values(_reviewerSelectedOptions).every(v => v);
+  _selectedOptKey = allChosen ? _buildReviewerOptKey() : null;
+  window._preSelectedOptKey = _selectedOptKey || null;
+  console.log('[옵션] 피커 선택:', colName, '→', value, '| key:', _selectedOptKey);
+};
+
 /** ── 옵션 먼저 선택 UI ──
  *  _inaedNames 중 options[] 값이 존재하는 고유 옵션 목록을 추출하여
  *  옵션 버튼으로 표시한다. 옵션이 1개 이하이면 피커를 숨긴다.
@@ -4225,6 +4267,14 @@ function _renderOptionPicker() {
   const pickerWrap = document.getElementById("of_option_picker_wrap");
   const tabsEl     = document.getElementById("of_option_tabs");
   if (!pickerWrap || !tabsEl) return;
+
+  // ★ reviewer-options distinctValues가 있으면 이를 단일 옵션 선택 블록으로 사용한다.
+  //   (이름 미배정 양식: 시트 옵션 컬럼의 실제 고유값으로 선택 → 선택한 옵션 행에 정확히 누적)
+  if (_reviewerDistinctValues && Object.keys(_reviewerDistinctValues).length > 0) {
+    if (_renderPickerFromDistinct(pickerWrap, tabsEl)) return;
+  }
+  // 인애드명단 기반 경로에서는 distinct 선택값을 쓰지 않는다.
+  _reviewerSelectedOptions = null;
 
   // 각 항목의 options[0] (첫 번째 옵션 컬럼 값)으로 고유 옵션 키 추출
   // 옵션 헤더가 없거나 options 배열이 모두 빈 경우 피커 숨김
@@ -6838,8 +6888,8 @@ async function submitOrderForm() {
     const unselected = Object.entries(_reviewerSelectedOptions).filter(([,v]) => !v);
     if (unselected.length > 0) {
       showToast("옵션을 선택해주세요: " + unselected.map(([k]) => k).join(", "), "warning");
-      const infoEl = document.getElementById("orderFormOptionInfo");
-      if (infoEl) infoEl.scrollIntoView({ behavior: "smooth", block: "center" });
+      const pickerEl = document.getElementById("of_option_picker_wrap");
+      if (pickerEl) pickerEl.scrollIntoView({ behavior: "smooth", block: "center" });
       _resetBtn(); return;
     }
   }
@@ -7233,6 +7283,33 @@ function resetOrderFormForReentry() {
 
   // 재제출 플래그 초기화
   window._submitOrderFormInProgress = false;
+}
+
+/** ★ 제출 완료 화면 → 리뷰어 메인화면(아이에이리뷰)으로 이동 */
+function goToReviewerMain() {
+  // 완료 화면/구매양식 입력 상태 정리 (다음 진입 시 깨끗하도록)
+  resetOrderFormForReentry();
+
+  // 구매양식 단축링크 진입 플래그 해제 + 검색 화면 헤더 기본값 복원
+  window._pendingOrderForm = false;
+  const titleEl = document.getElementById("searchTitle");
+  const descEl  = document.getElementById("searchHeaderDesc");
+  if (titleEl) titleEl.textContent = "아이에이리뷰";
+  if (descEl)  descEl.textContent  = "로그인하여 리뷰 내역을 확인하세요";
+
+  // 메인(검색) 화면 표시
+  showScreen("screenSearch");
+
+  // 로그인 상태면 로그인 UI 적용 + 리뷰 내역 조회, 아니면 로그인 화면
+  const session = _loadAuthSession();
+  if (session && session.name) {
+    const nameEl = document.getElementById("nameInput");
+    if (nameEl) nameEl.value = session.name;
+    _applyLoginUI(session.name);
+    doSearch().catch(() => {});
+  } else {
+    _switchAuthTab("login");
+  }
 }
 
 async function quickEditCell(e, cell) {

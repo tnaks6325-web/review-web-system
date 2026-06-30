@@ -109,132 +109,13 @@ function _isDataTabRow(cells) {
   return false;
 }
 
-/**
- * 제출 여부 판단 로직 (강화된 3단계)
- * 1단계: SUBMITTED_VALUES에 직접 매칭 (기존 로직)
- * 2단계: 날짜 패턴 인식 (MM/DD HH:MM, YYYY-MM-DD, M/D 등)
- * 3단계: 비어있지 않은 값이면 제출로 간주 (빈 칸 = 미제출)
- */
-function _isSubmittedValue(val) {
-  if (!val) return false;
-  // 1단계: 기존 SUBMITTED_VALUES 직접 매칭
-  if (SUBMITTED_VALUES.includes(val)) return true;
-  // 2단계: 날짜/시간 패턴 인식 (리뷰제출일 열에 "04/11 22:26" 같은 값)
-  if (/\d{1,2}\/\d{1,2}/.test(val)) return true;   // MM/DD 또는 M/D
-  if (/\d{4}[-/]\d{1,2}[-/]\d{1,2}/.test(val)) return true;  // YYYY-MM-DD
-  if (/\d{1,2}[-/.]\d{1,2}[-/.]\d{2,4}/.test(val)) return true;  // DD.MM.YYYY 등
-  // 3단계: 비어있지 않은 값이면 제출로 간주 (e.g. "리뷰등록", "작성완료" 등 커스텀 값)
-  return val.length > 0;
-}
-
-function _formatDate(val) {
-  if (!val) return null;
-  const s = String(val).trim();
-  if (!s) return null;
-  if (/^\d{4}[-/]\d{1,2}[-/]\d{1,2}/.test(s)) return s;
-  const num = Number(s);
-  if (!isNaN(num) && num > 40000 && num < 50000) {
-    const date = new Date((num - 25569) * 86400 * 1000);
-    return date.toISOString().split('T')[0];
-  }
-  return s;
-}
-
-function _parseTabRows(values, sheetId, tabName, tabGid, campaignTitle) {
-  const HEADER_SCAN_LIMIT = 50;
-  let headerRowIdx = -1;
-  for (let i = 0; i < Math.min(values.length, HEADER_SCAN_LIMIT); i++) {
-    const cells = values[i] ? values[i].map(c => String(c || '').trim()) : [];
-    if (_isDataTabRow(cells)) { headerRowIdx = i; break; }
-  }
-  if (headerRowIdx < 0) return [];
-
-  const headers = values[headerRowIdx].map(h => String(h || '').trim());
-  const dataRows = values.slice(headerRowIdx + 1);
-
-  const nameColIdx = headers.findIndex(h => NAME_KEYWORDS.some(k => h.includes(k)));
-  if (nameColIdx < 0) return [];
-
-  // ── 제출열 탐색: 우선순위 기반 ("리뷰제출" > "리뷰완료" > 기타 "제출") ──
-  // 1단계: 정확한 키워드 일치 (= 헤더가 키워드와 동일)
-  // 2단계: "리뷰" 접두사 포함 매칭 우선 ("리뷰제출", "리뷰제출일", "리뷰완료")
-  // 3단계: 일반 부분 매칭 ("제출", "완료" 등) — 단, "주문자" 포함 헤더 제외
-  let submitColIdx = -1;
-  const SUBMIT_PRIORITY_PREFIXES = ['리뷰'];  // 이 접두사가 있는 열을 우선
-  const SUBMIT_EXCLUDE_PATTERNS = ['주문자', '수취인', '이름', '성함', '예금주'];  // 사람이름 열 제외
-
-  // 1단계: "리뷰" 접두사 + 키워드 매칭 (최우선)
-  for (let hi = 0; hi < headers.length && submitColIdx < 0; hi++) {
-    const hl = headers[hi].toLowerCase();
-    if (SUBMIT_PRIORITY_PREFIXES.some(p => hl.includes(p)) &&
-        SUBMIT_KEYWORDS.some(k => hl.includes(k.toLowerCase()))) {
-      submitColIdx = hi;
-    }
-  }
-  // 2단계: 일반 키워드 매칭 (사람이름 열 제외)
-  if (submitColIdx < 0) {
-    for (let hi = 0; hi < headers.length && submitColIdx < 0; hi++) {
-      const hl = headers[hi].toLowerCase();
-      if (SUBMIT_EXCLUDE_PATTERNS.some(p => hl.includes(p))) continue;
-      if (SUBMIT_KEYWORDS.some(k => hl.includes(k.toLowerCase()))) {
-        submitColIdx = hi;
-      }
-    }
-  }
-  // 3단계: 폴백 — 제외 패턴 무시하고 원래 로직 (호환성)
-  if (submitColIdx < 0) {
-    submitColIdx = headers.findIndex(h => SUBMIT_KEYWORDS.some(k => h.toLowerCase().includes(k.toLowerCase())));
-  }
-
-  const productKeywords = ['상품명', '제품명', '상품', 'product'];
-  const productColIdx = headers.findIndex(h => productKeywords.some(k => h.toLowerCase().includes(k.toLowerCase())));
-
-  const urlKeywords = ['상품url', '제품url', '상품링크', 'url', '링크'];
-  const urlColIdx = headers.findIndex(h => urlKeywords.some(k => h.toLowerCase().includes(k.toLowerCase())));
-
-  const phoneKeywords = ['연락처', '전화번호', '핸드폰', '휴대폰', 'phone'];
-  const phoneColIdx = headers.findIndex(h => phoneKeywords.some(k => h.toLowerCase().includes(k.toLowerCase())));
-
-  const startDateKeywords = ['시작일', '구매일', '주문일', '배정일'];
-  const endDateKeywords = ['종료일', '마감일', '완료일', '제출마감'];
-  const startDateIdx = headers.findIndex(h => startDateKeywords.some(k => h.includes(k)));
-  const endDateIdx = headers.findIndex(h => endDateKeywords.some(k => h.includes(k)));
-
-  const roundKeywords = ['회차', '차수', 'round'];
-  const roundIdx = headers.findIndex(h => roundKeywords.some(k => h.toLowerCase().includes(k.toLowerCase())));
-
-  return dataRows
-    .map((row, i) => {
-      const name = String(row[nameColIdx] || '').trim();
-      if (!name) return null;
-
-      const submitVal = submitColIdx >= 0 ? String(row[submitColIdx] || '').trim() : '';
-      // 제출 판단: (1) SUBMITTED_VALUES 직접 매칭, (2) 날짜 패턴 인식, (3) 비어있지 않은 값
-      const isSubmitted = _isSubmittedValue(submitVal);
-
-      let phone8 = null;
-      if (phoneColIdx >= 0) {
-        const phoneRaw = String(row[phoneColIdx] || '').replace(/[^0-9]/g, '');
-        if (phoneRaw.length >= 8) phone8 = phoneRaw.slice(-8);
-      }
-
-      return {
-        name,
-        tabGid,
-        rowIndex: headerRowIdx + 1 + i + 1,
-        isSubmitted,
-        submitCol: submitColIdx >= 0 ? headers[submitColIdx] : '',
-        productName: productColIdx >= 0 ? String(row[productColIdx] || '').trim() : '',
-        productUrl: urlColIdx >= 0 ? String(row[urlColIdx] || '').trim() : '',
-        rowJson: Object.fromEntries(headers.map((h, j) => [h, row[j] !== undefined ? row[j] : ''])),
-        startDate: startDateIdx >= 0 ? _formatDate(row[startDateIdx]) : null,
-        endDate: endDateIdx >= 0 ? _formatDate(row[endDateIdx]) : null,
-        round: roundIdx >= 0 ? String(row[roundIdx] || '').trim() : '',
-        campaignName: campaignTitle || tabName,
-        phone8,
-      };
-    })
-    .filter(Boolean);
+function _parseTabRows(values, sheetId, tabName, tabGid, campaignTitle, dbColMap = null) {
+  // ★ P2a: indexBuilder와 동일한 공용 columnResolver로 위임(동일 kw → 동일 출력).
+  //   이제 recipientName/isSubmitted2/submitCol2도 반환되며 _upsertTab이 이를 기록한다.
+  //   ★ P2b: dbColMap(있으면) 전달 — DB컬럼매핑 우선. 없으면(null) P2a와 100% 동일.
+  return require('./columnResolver').parseTabRows(values, sheetId, tabName, tabGid, campaignTitle, {
+    NAME_KEYWORDS, SUBMIT_KEYWORDS, DATA_TAB_KEYWORDS, SUBMITTED_VALUES,
+  }, dbColMap);
 }
 
 // ═══════════════════════════════════════════════════════════
@@ -322,14 +203,16 @@ async function _upsertTab(sheetId, tabName, tabGid, checksum, rows, modifiedTime
         for (const row of batch) {
           newRowIndices.add(row.rowIndex);
           insertPlaceholders.push(
-            `($${paramIdx++},$${paramIdx++},$${paramIdx++},$${paramIdx++},$${paramIdx++},$${paramIdx++},$${paramIdx++},$${paramIdx++},$${paramIdx++},$${paramIdx++},$${paramIdx++},$${paramIdx++},$${paramIdx++},$${paramIdx++},$${paramIdx++})`
+            `($${paramIdx++},$${paramIdx++},$${paramIdx++},$${paramIdx++},$${paramIdx++},$${paramIdx++},$${paramIdx++},$${paramIdx++},$${paramIdx++},$${paramIdx++},$${paramIdx++},$${paramIdx++},$${paramIdx++},$${paramIdx++},$${paramIdx++},$${paramIdx++},$${paramIdx++},$${paramIdx++})`
           );
           insertValues.push(
             row.name, sheetId, row.tabGid, tabName,
             row.campaignName, row.rowIndex, row.isSubmitted,
             row.productUrl, row.productName, row.submitCol,
             JSON.stringify(row.rowJson), row.startDate, row.endDate, row.round,
-            row.phone8 || null
+            row.phone8 || null,
+            // ★ P2a: 공용 columnResolver가 이제 제공하는 3컬럼(이전 smartBuild엔 누락 → 진동 원인)
+            row.recipientName || null, row.isSubmitted2 || null, row.submitCol2 || null
           );
         }
 
@@ -337,7 +220,8 @@ async function _upsertTab(sheetId, tabName, tabGid, checksum, rows, modifiedTime
           INSERT INTO review_index
             (reviewer_name, sheet_id, tab_gid, tab_name, campaign_name,
              row_index, is_submitted, product_url, product_name,
-             submit_col, row_json, start_date, end_date, round, phone8)
+             submit_col, row_json, start_date, end_date, round, phone8,
+             recipient_name, is_submitted2, submit_col2)
           VALUES ${insertPlaceholders.join(', ')}
           ON CONFLICT (sheet_id, tab_name, row_index) DO UPDATE SET
             reviewer_name = EXCLUDED.reviewer_name,
@@ -352,6 +236,9 @@ async function _upsertTab(sheetId, tabName, tabGid, checksum, rows, modifiedTime
             end_date = EXCLUDED.end_date,
             round = EXCLUDED.round,
             phone8 = EXCLUDED.phone8,
+            recipient_name = EXCLUDED.recipient_name,
+            is_submitted2 = EXCLUDED.is_submitted2,
+            submit_col2 = EXCLUDED.submit_col2,
             built_at = NOW()
         `, insertValues);
       }
@@ -481,6 +368,7 @@ async function runSmartBuild() {
   const runNum = _runCount;
   const startTime = Date.now();
   const isFirstRun = Object.keys(_modifiedTimeCache).length === 0;
+  let _buildLockHeld = false; // ★ G4: indexBuilder와 build_locks 공유 여부
 
   const result = {
     ok: true,
@@ -499,6 +387,25 @@ async function runSmartBuild() {
   };
 
   try {
+    // ── ★ G4: 빌더 직렬화 — buildIndexSmart/buildOneSheet와 동일한 build_locks('INDEX_BUILD')를 공유 ──
+    //   smartBuild만 이 락을 우회하던 버그로, 두 빌더가 같은 탭 review_index를 동시 인터리브 갱신해
+    //   is_submitted/recipient_name 등이 빌드마다 진동·torn write 되던 것을 차단한다.
+    //   점유 중(타 빌드 진행)이면 이번 5분 주기는 양보(다음 주기 재시도). 락 획득 자체가 실패하면
+    //   smartBuild를 막지 않도록 best-effort로 진행(드문 DB오류 시 기능 우선).
+    try {
+      const { acquireBuildLock } = require('./indexBuilder.service');
+      const lk = await acquireBuildLock('smartBuild');
+      if (!lk || !lk.acquired) {
+        result.ok = false;
+        result.reason = 'build_locked';
+        logger.info('[smartBuild] build_locks 점유 중(타 빌드 진행) — 이번 주기 양보');
+        return result; // finally가 _isRunning=false 처리(락 미보유라 해제 없음)
+      }
+      _buildLockHeld = true;
+    } catch (lockErr) {
+      logger.warn(`[smartBuild] build lock 획득 실패(best-effort 진행): ${lockErr.message}`);
+    }
+
     // ── 0단계: 키워드 로드 ──
     await _loadKeywords();
 
@@ -669,7 +576,9 @@ async function runSmartBuild() {
             }
 
             // 변경됨 → 파싱 + DB 갱신
-            const rows = _parseTabRows(values, sheetId, tabName, tabGid, spreadsheetTitle);
+            // ★ P2b: DB컬럼매핑(있으면) 로드 → 매핑 우선. 없으면 null=키워드 전용(P2a 동일).
+            const dbColMap = await require('./columnMapping.service').getTabColumnIndexMap(sheetId, tabGid);
+            const rows = _parseTabRows(values, sheetId, tabName, tabGid, spreadsheetTitle, dbColMap);
 
             if (rows.length === 0) {
               // ★ 인식 실패 탭 기록 (indexBuilder와 동일)
@@ -750,6 +659,12 @@ async function runSmartBuild() {
     logger.error(`[smartBuild] #${runNum} 전체 오류: ${err.message}`);
   } finally {
     result.elapsed = Date.now() - startTime;
+    // ★ G4: 보유한 build_locks 해제(획득한 경우만). 실패해도 TTL(10분)로 자동 회수.
+    if (_buildLockHeld) {
+      try { const { releaseBuildLock } = require('./indexBuilder.service'); await releaseBuildLock(); }
+      catch (e) { logger.warn(`[smartBuild] build lock 해제 실패(무시, TTL 회수): ${e.message}`); }
+      _buildLockHeld = false;
+    }
     _isRunning = false;
     _lastRunResult = result;
 
@@ -820,6 +735,25 @@ function getSmartBuildStatus() {
 // ═══════════════════════════════════════════════════════════
 // 캐시 리셋 — DB 초기화 후 전체 재빌드를 위해
 // ═══════════════════════════════════════════════════════════
+
+// P2c: 단일 탭 체크섬 무효화 — 매핑 변경 시 smartBuild 인메모리 캐시에서 그 탭만 제거.
+//   (index_master.checksum=NULL은 saveMapping이 DB에 직접 수행; 이 함수는 장수 프로세스의
+//    인메모리 _checksumCache가 isFirstRun 이후 DB를 다시 안 읽는 문제를 보완 — 다음 주기에 강제 재파싱.)
+//   tabName 또는 tabGid(현재 인덱스의 tab_name 역추적)로 매칭. 데이터 미변경이라 1회만 재파싱 후 안정화.
+function invalidateChecksumCache(sheetId, tabName) {
+  if (!sheetId) return 0;
+  let n = 0;
+  if (tabName) {
+    const key = `${sheetId}||${tabName}`;
+    if (Object.prototype.hasOwnProperty.call(_checksumCache, key)) {
+      delete _checksumCache[key];
+      delete _modifiedTimeCache[key];
+      n++;
+    }
+  }
+  if (n) logger.info(`[smartBuild] 체크섬 캐시 무효화 — sheet=${String(sheetId).slice(0,12)} tab=${tabName} (${n}건) → 다음 주기 재파싱`);
+  return n;
+}
 
 function resetSmartBuildCache() {
   const prev = {
@@ -935,5 +869,6 @@ module.exports = {
   stopSmartBuild,
   getSmartBuildStatus,
   resetSmartBuildCache,
+  invalidateChecksumCache,
   SMART_BUILD_INTERVAL_MS,
 };
