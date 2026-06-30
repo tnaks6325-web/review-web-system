@@ -281,6 +281,19 @@ async function _executeItem(item) {
       if (!sheetRow) throw new Error('payload 누락: sheetRow');
 
       try {
+        // ★ PR-A: 취소/삭제(소프트딜리트)된 주문은 시트에 쓰지 않는다(큐 done 처리 — markFailed/throw 금지).
+        //   취소가 enqueue↔실행 사이에 끼어들어도 in-flight order_append가 빈칸을 시트에 덮어쓰지 않게 방어.
+        //   (deleted_at은 평상시 NULL이라 무영향 — 취소 기능(PR-B)이 들어와야 활성화되는 도먼트 가드.)
+        if (orderSubmissionId) {
+          const { rows: alive } = await pool.query(
+            'SELECT deleted_at FROM order_submissions WHERE id = $1',
+            [orderSubmissionId]
+          );
+          if (!alive.length || alive[0].deleted_at) {
+            logger.info(`[order_append] 취소/삭제된 주문 — 시트쓰기 건너뜀 (id=${orderSubmissionId})`);
+            return;
+          }
+        }
         const tabContext = await loadRawTabContext(sheetId, gid, tabName);
         if (!tabContext || !tabContext.headers || tabContext.headers.length === 0) {
           throw new Error('RAW 미러 헤더 메타를 찾을 수 없음');
@@ -457,18 +470,23 @@ async function purgeCompleted(hoursOld = 24) {
 }
 
 // ── 헬퍼: 복구 append가 가드에 막히면 claim 해제 → 다음 리컨실이 더 아래 새 행 재배정 ──
-async function _releaseOrderRowClaim({ sheetId, tabName, dedupKey, orderSubmissionId }) {
+async function _releaseOrderRowClaim({ sheetId, tabName, dedupKey, orderSubmissionId, orderId = null, skipFail = false }) {
   try {
     if (sheetId && tabName && dedupKey) {
+      // ★ PR-A(#1): orderId가 주어지면 그 주문이 보유한 claim만 삭제(엉뚱한 주문의 claim 삭제 차단).
+      //   orderId 없으면(기존 호출부) dedup_key 기준 삭제로 하위호환.
       await pool.query(
-        `DELETE FROM sheet_row_claims WHERE sheet_id = $1 AND tab_name = $2 AND dedup_key = $3`,
-        [sheetId, tabName, dedupKey]
+        `DELETE FROM sheet_row_claims
+          WHERE sheet_id = $1 AND tab_name = $2 AND dedup_key = $3
+            AND ($4::uuid IS NULL OR order_id = $4)`,
+        [sheetId, tabName, dedupKey, orderId]
       );
     }
   } catch (e) {
     logger.warn(`[order_append] claim 해제 실패(무시): ${e.message}`);
   }
-  if (orderSubmissionId) {
+  // ★ PR-A: skipFail=true면 order_submissions를 'failed'로 마킹하지 않는다(취소(order_cancel) 경로용 — 취소건을 failed로 되돌려 부활시키지 않게).
+  if (orderSubmissionId && !skipFail) {
     try {
       await pool.query(
         `UPDATE order_submissions

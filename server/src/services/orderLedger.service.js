@@ -761,7 +761,8 @@ async function reconcileStuckOrders({ limit = 50, perTabCap = 20, sheetId = null
             os.order_num, os.date_str, os.selected_opt_key, os.bank, os.account,
             os.depositor, os.price, os.memo, os.mirror_status, os.sheet_row
        FROM order_submissions os
-      WHERE (os.mirror_status IN ('pending','pending_no_row','failed')
+      WHERE os.deleted_at IS NULL
+        AND (os.mirror_status IN ('pending','pending_no_row','failed')
              OR (os.mirror_status = 'queued'
                  AND os.queued_at IS NOT NULL
                  AND os.queued_at < NOW() - ($1 || ' minutes')::interval
