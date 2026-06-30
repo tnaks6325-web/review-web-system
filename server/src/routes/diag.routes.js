@@ -2397,6 +2397,50 @@ router.post('/order-batch-drain', authMiddleware, adminOrMasterMiddleware, async
   } catch (err) { next(err); }
 });
 
+// POST /api/diag/test-tab-reset { sheetId, tabName, gid?, confirm:'RESET-TEST' } (admin/master)
+// ★ 테스트 탭 초기화: 그 탭의 주문 소프트삭제 + claim/큐 정리 + 시트 데이터행 클리어.
+//   파괴적이라 confirm='RESET-TEST' 필수. order_submissions는 deleted_at(복구가능), claim/큐는 하드삭제.
+//   ★ 테스트 전용 — 실제 캠페인 탭에 쓰지 말 것(주문이 stuck/스케줄러에서 사라짐).
+router.post('/test-tab-reset', authMiddleware, adminOrMasterMiddleware, async (req, res, next) => {
+  try {
+    const { sheetId, tabName, gid, confirm } = req.body || {};
+    if (!sheetId || !tabName) return res.status(400).json({ ok: false, error: 'sheetId, tabName 필수' });
+    if (confirm !== 'RESET-TEST') return res.status(400).json({ ok: false, error: "confirm:'RESET-TEST' 필요(파괴적)" });
+    const by = String((req.admin && (req.admin.name || req.admin.role)) || 'admin').slice(0, 100);
+
+    // 1) 주문 소프트삭제(복구가능) — 미반영분 포함 전부
+    const del = await pool.query(
+      `UPDATE order_submissions SET deleted_at = NOW(), canceled_by = $3, mirror_status = 'canceled', updated_at = NOW()
+        WHERE sheet_id = $1 AND tab_name = $2 AND deleted_at IS NULL
+        RETURNING id`,
+      [sheetId, tabName, by]
+    );
+    // 2) claim/큐 하드삭제(이 탭)
+    const claims = await pool.query(`DELETE FROM sheet_row_claims WHERE sheet_id = $1 AND tab_name = $2`, [sheetId, tabName]);
+    const q = await pool.query(
+      `DELETE FROM sync_queue WHERE type IN ('order_append','order_update','order_cancel')
+         AND payload->>'sheetId' = $1 AND payload->>'tabName' = $2`,
+      [sheetId, tabName]
+    );
+    // 3) 시트 데이터행 클리어(헤더 아래 전부). gid 슬래시탭 아니므로 A1 range 사용.
+    let sheetCleared = false;
+    try {
+      const { rows: tabRows } = await pool.query(
+        `SELECT header_row_index FROM raw_sheet_tabs WHERE sheet_id = $1 AND tab_gid = $2`,
+        [sheetId, String(gid || '')]
+      );
+      const hdrIdx = (tabRows[0] && Number.isInteger(tabRows[0].header_row_index)) ? tabRows[0].header_row_index : 9;
+      const dataStart = hdrIdx + 2; // 0-based header → 1-based 데이터 시작 = hdrIdx+2
+      const { clearSheetValues } = require('../services/sheets.service');
+      await clearSheetValues(sheetId, `'${tabName}'!A${dataStart}:BZ5000`);
+      sheetCleared = true;
+    } catch (clearErr) {
+      return res.json({ ok: true, ordersDeleted: del.rowCount, claimsDeleted: claims.rowCount, queueDeleted: q.rowCount, sheetCleared: false, sheetClearError: String(clearErr.message) });
+    }
+    res.json({ ok: true, ordersDeleted: del.rowCount, claimsDeleted: claims.rowCount, queueDeleted: q.rowCount, sheetCleared });
+  } catch (err) { next(err); }
+});
+
 // GET /api/diag/order-ledger — 원장 그리드(keyset 커서, PII는 admin/master만). 읽기 전용(flag 무관).
 router.get('/order-ledger', authMiddleware, adminOrMasterMiddleware, async (req, res, next) => {
   try {

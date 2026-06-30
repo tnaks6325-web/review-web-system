@@ -273,6 +273,15 @@ async function writeSheet(spreadsheetId, range, values, opts = {}) {
 }
 
 /**
+ * 범위 값 비우기 (values.clear). 테스트 탭 리셋 등에 사용. 슬래시 탭명은 A1 path가 깨질 수 있어 주의.
+ */
+async function clearSheetValues(spreadsheetId, range) {
+  if (!sheets) throw new Error('Google Sheets API가 설정되지 않았습니다.');
+  await sheets.spreadsheets.values.clear({ spreadsheetId, range });
+  _invalidateMeta(spreadsheetId);
+}
+
+/**
  * GID 기반 시트 쓰기 (슬래시 포함 탭 이름 우회)
  * ★ 행 수 부족 시 자동으로 행을 추가하여 GridCoordinate 오류 방지
  */
@@ -902,6 +911,7 @@ module.exports = {
   writeSheet,
   appendSheet,
   batchUpdateSheet,
+  clearSheetValues,
   setRowBackground,
   setRowsBackground,
   getSpreadsheetMeta,
