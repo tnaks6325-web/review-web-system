@@ -1,4 +1,5 @@
 const { detectSheetHeader, normalizeCells } = require('../utils/sheetHeader');
+const { logger } = require('../utils/logger');
 
 const INAD_COL_KEYWORDS = ['인애드', '인애드명', '인애드제출', '카톡', '카카오', '닉네임'];
 const OPTION_COL_KEYWORDS = ['옵션', 'option'];
@@ -35,6 +36,22 @@ function _triggerSheetMirrorOnce(sheetId) {
       await withJobLock('order_reconcile', () => reconcileStuckOrders({ sheetId, limit: 500, perTabCap: 500 }));
     } catch (_) { /* best-effort; 정규 cron(미러 5분·리컨실 2분)이 backstop */ }
   });
+}
+
+// ★ F2: 실시간 시트 그리드 끝행(rowCount)을 시트당 1콜로 조회(getSpreadsheetMeta는 캐시 안 탐 = 라이브).
+//   metaCache(사이클 맵)로 같은 사이클 내 시트당 중복콜 제거. append base 하한 보정 전용(배치 reconcile만 사용).
+async function _getRealMaxRow(sheetId, tabGid, tabName, metaCache) {
+  const { getSpreadsheetMeta } = require('./sheets.service');
+  const { throttledCall } = require('../utils/sheetsThrottle');
+  let sheetsArr = metaCache && metaCache.get(sheetId);
+  if (!sheetsArr) {
+    sheetsArr = await throttledCall(() => getSpreadsheetMeta(sheetId)); // 라이브 1콜
+    if (metaCache) metaCache.set(sheetId, sheetsArr);
+  }
+  const want = String(tabGid || '');
+  const m = (sheetsArr || []).find(s =>
+    (want && String(s.properties.sheetId) === want) || (!want && s.properties.title === tabName));
+  return m && m.properties.gridProperties ? (m.properties.gridProperties.rowCount || 0) : 0;
 }
 
 function toPhone8(v) {
@@ -109,7 +126,7 @@ function pushUnique(arr, seen, rowIndex) {
   }
 }
 
-function buildCandidateRows({ headers, dataRows, headerRowIndex, orderData = {}, appendOnly = false }) {
+function buildCandidateRows({ headers, dataRows, headerRowIndex, orderData = {}, appendOnly = false, appendBaseRow = 0 }) {
   const candidates = [];
   const seen = new Set();
   const rows = (dataRows || []).map((r, idx) => ({
@@ -163,7 +180,13 @@ function buildCandidateRows({ headers, dataRows, headerRowIndex, orderData = {},
   }
   } // end if(!appendOnly)
 
-  const maxRow = rows.reduce((max, row) => Math.max(max, row.rowIndex), headerRowIndex || 1);
+  // ★ R-2a: append base를 미러 maxRow와 claims MAX(appendBaseRow) 중 큰 값으로 통일.
+  //   제출 핫패스가 claims를 안 보면 같은 maxRow+1을 여러 제출이 동시 후보로 잡아 동일행 경쟁(버스트) →
+  //   claims MAX 합류로 reconcile과 단일 진실원본화(단조증가, 손실0).
+  const maxRow = Math.max(
+    rows.reduce((max, row) => Math.max(max, row.rowIndex), headerRowIndex || 1),
+    parseInt(appendBaseRow, 10) || 0
+  );
   for (let i = 1; i <= APPEND_CANDIDATE_COUNT; i++) {
     pushUnique(candidates, seen, maxRow + i);
   }
@@ -591,6 +614,15 @@ async function createOrderLedgerEntry(input) {
 
   try {
     tabContext = await loadRawTabContext(sheetId, gid, tabName);
+    // ★ R-2a: 제출 claim 후보 base에 claims MAX 합류(reconcile과 동일기준) → 버스트 동일행 경쟁 차단.
+    let claimsMax = 0;
+    try {
+      const mc = await db.query(
+        `SELECT COALESCE(MAX(sheet_row),0) AS m FROM sheet_row_claims WHERE sheet_id=$1 AND tab_name=$2`,
+        [sheetId, tabName]
+      );
+      claimsMax = parseInt(mc.rows[0].m, 10) || 0;
+    } catch (_) { /* claims 조회 실패는 미러 base로 폴백 */ }
     candidateRows = slotRowNumber
       ? [parseInt(slotRowNumber, 10)]
       : (tabContext ? buildCandidateRows({
@@ -598,6 +630,7 @@ async function createOrderLedgerEntry(input) {
           dataRows: tabContext.dataRows,
           headerRowIndex: tabContext.headerRowIndex,
           orderData,
+          appendBaseRow: claimsMax,
         }) : []);
 
     if (!candidateRows.length) {
@@ -744,9 +777,10 @@ async function recordReviewIdentity({ sheetId, tabName, tabGid, rowIndex, phone8
  *   행배정 하위단계(loadRawTabContext→buildCandidateRows(appendOnly)→claimRow)만 재실행
  * - claimRow의 dedup 유니크로 재시도해도 같은 행 반환 → 시트 중복행 없음
  */
-async function reconcileStuckOrders({ limit = 50, perTabCap = 20, sheetId = null, tabName = null, staleQueuedMinutes = 10, dryRun = false } = {}) {
+async function reconcileStuckOrders({ limit = 50, perTabCap = 20, sheetId = null, tabName = null, staleQueuedMinutes = 10, dryRun = false, useLiveMaxRow = false } = {}) {
   const db = getPool();
   const { enqueue } = require('./syncQueue.service'); // lazy: require 순환 회피
+  const _metaByTab = new Map(); // F2/J-2: 사이클 내 getSpreadsheetMeta 중복콜 제거(시트당 1콜)
 
   const params = [staleQueuedMinutes];
   let sheetFilter = '';
@@ -849,6 +883,15 @@ async function reconcileStuckOrders({ limit = 50, perTabCap = 20, sheetId = null
         const claimed = parseInt(mc.rows[0].m, 10) || 0;
         if (claimed > baseRow) baseRow = claimed;
       } catch (_) {}
+      // ★ F2: stale 미러로 base가 실제 시트보다 작으면 이미 채워진 행을 claim → 가드블록 스래싱.
+      //   useLiveMaxRow(배치 reconcile만)일 때 실시간 그리드 끝행을 base 하한으로 보정(시트당 1콜, 사이클 캐시).
+      //   append-only라 그리드 끝 아래는 항상 빈칸 → 가드 통과 보장.
+      if (useLiveMaxRow) {
+        try {
+          const realMax = await _getRealMaxRow(row.sheet_id, tabContext.tabGid || gid, row.tab_name, _metaByTab);
+          if (realMax > baseRow) baseRow = realMax;
+        } catch (e) { logger.warn(`[reconcile] realMaxRow 실패(미러 base 유지): ${e.message}`); }
+      }
       cursor = baseRow;
     }
     cursor += 1;

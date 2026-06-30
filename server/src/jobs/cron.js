@@ -179,6 +179,19 @@ function startCronJobs() {
       if (result.processed > 0) {
         logger.info(`[CRON-Queue] 처리: ${result.succeeded}/${result.processed} 성공, ${result.failed} 실패, ${result.elapsed}ms`);
       }
+      // ★ R-F3-a 백스톱: AUTO=1이면 평소 order_append를 배치가 전담하지만, 배치 heartbeat가
+      //   STALE 이상 끊기면(워치독도 못 살린 영구정지) cron이 소량 단건으로 order_append를 흡수 → 미반영 방지.
+      if (process.env.ORDER_BATCH_AUTO === '1') {
+        const STALE = parseInt(process.env.ORDER_BATCH_HEARTBEAT_STALE_SEC || '120', 10);
+        try {
+          const { getHeartbeat } = require('../jobs/orderBatchScheduler');
+          const hb = getHeartbeat();
+          if (Date.now() - (hb.lastTickAt || 0) > STALE * 1000) {
+            logger.warn(`[CRON-Queue] 배치 heartbeat ${Math.round((Date.now() - (hb.lastTickAt || 0)) / 1000)}s 끊김 → order_append 단건 백스톱(5건)`);
+            await processQueue(5, { onlyType: 'order_append' });
+          }
+        } catch (hbErr) { logger.warn(`[CRON-Queue] heartbeat 백스톱 체크 실패(무시): ${hbErr.message}`); }
+      }
     } catch (err) {
       logger.error(`[CRON-Queue] 큐 처리 오류: ${err.message}`);
       logAbnormal({ flow: 'sync_queue', step: 'process_queue', error: err, context: { job: '큐 워커' } });
