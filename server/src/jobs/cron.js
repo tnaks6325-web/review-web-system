@@ -112,6 +112,10 @@ function startCronJobs() {
     const reconcileSchedule = process.env.ORDER_RECONCILE_CRON_SCHEDULE || '*/2 * * * *';
     cron.schedule(reconcileSchedule, async () => {
       if (reconcileRunning) return;
+      // ★ AUTO 배치 시 cron reconcile 양보: 배치 스케줄러가 탭별 reconcile-first(DB-only, 시트콜0)를
+      //   직접 수행하므로 이 cron은 order_reconcile 락만 점유해 배치 드레인을 skip시키는 역효과.
+      //   AUTO=1이면 cron reconcile 비활성(배치가 전탭 FIFO 순회로 reconcile 커버). AUTO 끄면 복귀.
+      if (process.env.ORDER_BATCH_AUTO === '1') return;
       const throttle = getThrottleStatus();
       const busyThreshold = parseInt(process.env.ORDER_RECONCILE_BUSY_THRESHOLD || '20', 10);
       if (throttle.requestsInLastMinute > busyThreshold) {

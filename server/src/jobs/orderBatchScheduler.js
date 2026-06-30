@@ -28,22 +28,19 @@ const _kickQueue = [];   // #1: 타깃 탭 대기열(중복제거)
 
 function isAutoEnabled() { return process.env.ORDER_BATCH_AUTO === '1'; }
 
-// #2: 미반영 탭 선정 — FIFO(min_ready=행배정된 가장 오래된 주문) + count 보장슬롯.
-//   pending_no_row는 reconcile이 행을 줘야 빠지므로 min_ready에서 제외(디프라이오리티) → 행 있는 주문 우선.
+// #2: 미반영 탭 선정 — FIFO(가장 오래 기다린 주문) + count 보장슬롯.
+//   ★ sort_key=MIN(submitted_at) (상태 무관). pending_no_row도 reconcile(DB-only, 시트콜0)이 행을 주면
+//   바로 빠지므로 디프라이오리티하면 안 됨(그러면 버스트 pending_no_row 다발 탭이 기아 → 무한지연).
 async function _selectTabs() {
   const { rows } = await pool.query(
-    `WITH agg AS (
-       SELECT sheet_id, tab_name, COUNT(*)::int AS c,
-              MIN(submitted_at) FILTER (WHERE mirror_status <> 'pending_no_row') AS min_ready,
-              MIN(submitted_at) AS min_any
-         FROM order_submissions
-        WHERE deleted_at IS NULL
-          AND mirror_status IN ('pending','pending_no_row','queued','failed')
-          AND sheet_id IS NOT NULL AND tab_name IS NOT NULL AND tab_name <> ''
-        GROUP BY sheet_id, tab_name)
-     SELECT sheet_id, tab_name, c,
-            COALESCE(min_ready, min_any + interval '1 hour') AS sort_key
-       FROM agg ORDER BY sort_key ASC`
+    `SELECT sheet_id, tab_name, COUNT(*)::int AS c,
+            MIN(submitted_at) AS sort_key
+       FROM order_submissions
+      WHERE deleted_at IS NULL
+        AND mirror_status IN ('pending','pending_no_row','queued','failed')
+        AND sheet_id IS NOT NULL AND tab_name IS NOT NULL AND tab_name <> ''
+      GROUP BY sheet_id, tab_name
+      ORDER BY sort_key ASC`
   );
   if (!rows.length) return [];
   const fifoN = Math.max(1, MAX_TABS - BACKLOG_SLOTS);
