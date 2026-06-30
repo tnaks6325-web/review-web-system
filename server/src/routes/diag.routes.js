@@ -2364,6 +2364,28 @@ router.post('/order-flush-one', authMiddleware, adminOrMasterMiddleware, async (
   } catch (err) { next(err); }
 });
 
+// POST /api/diag/order-batch-drain { sheetId, tabName, maxMillis? } (admin/master)
+// ★ 빈 시트 버스트 전용: 한 탭을 가드 batchGet 1콜 + batchUpdate 1콜(청크당)로 빠르게 반영.
+//   ORDER_BATCH_DRAIN=1 일 때만 배치 경로, 아니면 drainTabQueueBatched가 단건 drainTabQueue로 폴백.
+//   비차단(즉시 응답 + 백그라운드 실행). 진행/결과는 order-mirror-status·서버 로그로 관찰.
+router.post('/order-batch-drain', authMiddleware, adminOrMasterMiddleware, async (req, res, next) => {
+  try {
+    const { sheetId, tabName } = req.body || {};
+    if (!sheetId || !tabName) return res.status(400).json({ ok: false, error: 'sheetId, tabName 필수' });
+    const maxMillis = Math.min(Math.max(parseInt(req.body?.maxMillis, 10) || 60000, 2000), 180000);
+    const { drainTabQueueBatched } = require('../services/syncQueue.service');
+    res.json({ ok: true, mode: 'async', message: '배치 드레인 시작', flag: process.env.ORDER_BATCH_DRAIN === '1' ? 'batch' : 'single(fallback)' });
+    setImmediate(async () => {
+      try {
+        const r = await drainTabQueueBatched({ sheetId, tabName, maxMillis });
+        console.log('[order-batch-drain] 완료:', JSON.stringify(r));
+      } catch (e) {
+        console.error('[order-batch-drain] 실패:', e.message);
+      }
+    });
+  } catch (err) { next(err); }
+});
+
 // GET /api/diag/order-ledger — 원장 그리드(keyset 커서, PII는 admin/master만). 읽기 전용(flag 무관).
 router.get('/order-ledger', authMiddleware, adminOrMasterMiddleware, async (req, res, next) => {
   try {
