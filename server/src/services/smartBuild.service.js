@@ -863,6 +863,25 @@ function getSmartBuildStatus() {
 // 캐시 리셋 — DB 초기화 후 전체 재빌드를 위해
 // ═══════════════════════════════════════════════════════════
 
+// P2c: 단일 탭 체크섬 무효화 — 매핑 변경 시 smartBuild 인메모리 캐시에서 그 탭만 제거.
+//   (index_master.checksum=NULL은 saveMapping이 DB에 직접 수행; 이 함수는 장수 프로세스의
+//    인메모리 _checksumCache가 isFirstRun 이후 DB를 다시 안 읽는 문제를 보완 — 다음 주기에 강제 재파싱.)
+//   tabName 또는 tabGid(현재 인덱스의 tab_name 역추적)로 매칭. 데이터 미변경이라 1회만 재파싱 후 안정화.
+function invalidateChecksumCache(sheetId, tabName) {
+  if (!sheetId) return 0;
+  let n = 0;
+  if (tabName) {
+    const key = `${sheetId}||${tabName}`;
+    if (Object.prototype.hasOwnProperty.call(_checksumCache, key)) {
+      delete _checksumCache[key];
+      delete _modifiedTimeCache[key];
+      n++;
+    }
+  }
+  if (n) logger.info(`[smartBuild] 체크섬 캐시 무효화 — sheet=${String(sheetId).slice(0,12)} tab=${tabName} (${n}건) → 다음 주기 재파싱`);
+  return n;
+}
+
 function resetSmartBuildCache() {
   const prev = {
     modifiedTimeEntries: Object.keys(_modifiedTimeCache).length,
@@ -977,5 +996,6 @@ module.exports = {
   stopSmartBuild,
   getSmartBuildStatus,
   resetSmartBuildCache,
+  invalidateChecksumCache,
   SMART_BUILD_INTERVAL_MS,
 };
