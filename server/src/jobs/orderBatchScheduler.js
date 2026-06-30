@@ -32,6 +32,15 @@ function isAutoEnabled() {
 //   drainTabQueueBatched의 reconcile 선행이 행배정+enqueue 후 곧바로 드레인한다(큐만 보면 사각지대).
 async function _cycle() {
   const start = Date.now();
+  // ★ 제안B: throttle가 이미 바쁘면(리뷰제출·RAW미러 등이 예산 사용 중) 이번 사이클 양보 →
+  //   45/분 한도 안에서 다른 시트작업과 공존(배치가 예산 독식 안 함). 다음 kick/15초 cron이 재시도.
+  try {
+    const { getThrottleStatus } = require('../utils/sheetsThrottle');
+    const busyThreshold = parseInt(process.env.ORDER_BATCH_BUSY_THRESHOLD || '35', 10);
+    if (getThrottleStatus().requestsInLastMinute > busyThreshold) {
+      return { tabs: 0, drained: 0, skipped: 'throttle_busy' };
+    }
+  } catch (_) { /* throttle 상태 조회 실패는 무시하고 진행 */ }
   const { rows } = await pool.query(
     `SELECT os.sheet_id AS sheet_id, os.tab_name AS tab_name, COUNT(*)::int AS c
        FROM order_submissions os
