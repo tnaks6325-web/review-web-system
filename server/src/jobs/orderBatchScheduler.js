@@ -20,7 +20,6 @@ const { logger } = require('../utils/logger');
 const TICK_MAX_MS = parseInt(process.env.ORDER_BATCH_TICK_MAX_MS || '25000', 10);   // 한 사이클 총상한
 const PER_TAB_MS = parseInt(process.env.ORDER_BATCH_PER_TAB_MS || '12000', 10);     // 탭당 드레인 상한
 const MAX_TABS = parseInt(process.env.ORDER_BATCH_MAX_TABS || '10', 10);            // 사이클당 탭 수
-const STALE_SEC = parseInt(process.env.ORDER_BATCH_STALE_PROCESSING_SEC || '20', 10);
 
 let _running = false, _rerun = false;
 
@@ -28,19 +27,21 @@ function isAutoEnabled() {
   return process.env.ORDER_BATCH_AUTO === '1';
 }
 
-// 백로그(대기/정체 processing) 있는 탭을 건수 내림차순으로 추려 배치 드레인.
+// 시트 미반영 주문이 있는 탭을 건수 내림차순으로 추려 배치 드레인.
+// ★ order_submissions(원장) 기준 — 큐에 없는 pending_no_row(버스트 시 행 미배정분)도 포함해야
+//   drainTabQueueBatched의 reconcile 선행이 행배정+enqueue 후 곧바로 드레인한다(큐만 보면 사각지대).
 async function _cycle() {
   const start = Date.now();
   const { rows } = await pool.query(
-    `SELECT payload->>'sheetId' AS sheet_id, payload->>'tabName' AS tab_name, COUNT(*)::int AS c
-       FROM sync_queue
-      WHERE type='order_append' AND attempts < max_retry
-        AND (status='pending'
-             OR (status='processing' AND processed_at < NOW() - ($1 || ' seconds')::interval))
-      GROUP BY 1, 2
+    `SELECT os.sheet_id AS sheet_id, os.tab_name AS tab_name, COUNT(*)::int AS c
+       FROM order_submissions os
+      WHERE os.deleted_at IS NULL
+        AND os.mirror_status IN ('pending','pending_no_row','queued','failed')
+        AND os.sheet_id IS NOT NULL AND os.tab_name IS NOT NULL AND os.tab_name <> ''
+      GROUP BY os.sheet_id, os.tab_name
       ORDER BY c DESC
-      LIMIT $2`,
-    [String(STALE_SEC), MAX_TABS]
+      LIMIT $1`,
+    [MAX_TABS]
   );
   if (!rows.length) return { tabs: 0, drained: 0 };
 
