@@ -2201,6 +2201,67 @@ router.post('/order-relink', authMiddleware, adminOrMasterMiddleware, async (req
 });
 
 // ═══════════════════════════════════════════════════════════
+// POST /api/diag/participation-cleanup — 리뷰어 교차노출 오염 정리(participation_links)
+//   배경: 과거 구매양식 제출이 가드/시트쓰기 검증 전에 "낙관적 claim 행"에 신원을 미리 찍어,
+//        미러 stale·로스터 선기입 탭에서 '다른 리뷰어의 행'에 phone8을 남겼다(리뷰어 교차노출).
+//        그 오염 pl 행은 = "해당 (sheet,tab,row)에 실제로 written 된 주문이 없는" 행이다
+//        (정상 pl은 큐 워커가 가드 통과+쓰기 성공 후 그 행에만 기록 → written 주문이 반드시 존재).
+//   동작: written 주문이 없는 participation_links 행을 삭제(가짜 신원링크 제거). 정상 pl은 보존.
+//        삭제해도 리뷰어는 이름/재빌드된 phone8 매칭으로 정상 조회된다(P5 단축키만 사라짐).
+//   주의: 파괴적 → 기본 dryRun(카운트만). 실제 삭제는 {dryRun:false} 명시 필요.
+//        review_index.phone8 오염은 강제 전체 재빌드(POST /api/index/build {forceFullRebuild:true})로 정리.
+//   body: { sheetId?, tabName?, dryRun? } — admin/master 전용.
+// ═══════════════════════════════════════════════════════════
+router.post('/participation-cleanup', authMiddleware, adminOrMasterMiddleware, async (req, res, next) => {
+  try {
+    const { sheetId, tabName, dryRun = true } = req.body || {};
+    const params = [];
+    let scope = '';
+    if (sheetId) { params.push(sheetId); scope += ` AND pl.sheet_id = $${params.length}`; }
+    if (tabName) { params.push(tabName); scope += ` AND pl.tab_name = $${params.length}`; }
+
+    // 오염 후보 = 해당 (sheet,tab,row)에 written 주문이 없는 pl 행
+    const orphanWhere = `
+      WHERE NOT EXISTS (
+        SELECT 1 FROM order_submissions os
+         WHERE os.sheet_id = pl.sheet_id
+           AND os.tab_name = pl.tab_name
+           AND os.sheet_row = pl.row_index
+           AND os.mirror_status = 'written'
+      )${scope}`;
+
+    const { rows: cntRows } = await pool.query(
+      `SELECT COUNT(*)::int AS orphans FROM participation_links pl ${orphanWhere}`,
+      params
+    );
+    const orphans = cntRows[0]?.orphans || 0;
+
+    // 전체 pl 수(스코프 내) — 비율 가시화
+    const totParams = [];
+    let totScope = '';
+    if (sheetId) { totParams.push(sheetId); totScope += ` AND sheet_id = $${totParams.length}`; }
+    if (tabName) { totParams.push(tabName); totScope += ` AND tab_name = $${totParams.length}`; }
+    const { rows: totRows } = await pool.query(
+      `SELECT COUNT(*)::int AS cnt FROM participation_links WHERE TRUE${totScope}`,
+      totParams
+    );
+    const totalInScope = totRows[0]?.cnt || 0;
+
+    if (dryRun) {
+      return res.json({ ok: true, dryRun: true, totalInScope, orphansToDelete: orphans, sheetId: sheetId || null, tabName: tabName || null });
+    }
+
+    const { rowCount: deleted } = await pool.query(
+      `DELETE FROM participation_links pl ${orphanWhere}`,
+      params
+    );
+    res.json({ ok: true, dryRun: false, totalInScope, deleted, sheetId: sheetId || null, tabName: tabName || null });
+  } catch (err) {
+    next(err);
+  }
+});
+
+// ═══════════════════════════════════════════════════════════
 // POST /api/diag/queue-drain — 백로그 가속 드레인(선택적·온디맨드, 백그라운드)
 //   평상시 큐워커는 항목당 2초 안전대기(쿼터 보수)로 ~20/분. 이 엔드포인트는 그 대기를
 //   0으로 두고 sheetsThrottle(45/분)만 가드로 삼아 더 빨리 빼낸다. throttle 때문에 한 배치가
