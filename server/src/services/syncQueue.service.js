@@ -223,6 +223,7 @@ async function drainTabQueue({ sheetId, tabName, maxMillis = 30000, batchSize = 
 //   라이브 핫패스. 레드-블루-심판 적대검증 통과(R-B1~B10 방어). ORDER_BATCH_DRAIN=1 일 때만 활성.
 // ═══════════════════════════════════════════════════════════
 const BATCH_ROW_CAP = parseInt(process.env.ORDER_BATCH_ROW_CAP || '50', 10); // R-B9: 1콜당 행 상한
+const STALE_PROCESSING_SEC = parseInt(process.env.ORDER_BATCH_STALE_PROCESSING_SEC || '20', 10); // 정체 processing 재점유 임계
 
 function _isQuota(err) {
   if (!err) return false;
@@ -285,13 +286,20 @@ async function drainTabQueueBatched({ sheetId, tabName, maxMillis = 60000, batch
       while (Date.now() - start < maxMillis) {
         // R-B8: 단건과 동일 클레임 조건(type='order_append') → 같은 항목은 한쪽만 점유(SKIP LOCKED).
         const { rows: items } = await pool.query(
+          // ★ 버스트/백로그 대응: pending뿐 아니라 "정체된 processing"도 재점유.
+          //   펌프가 submit-kick으로 항목을 즉시 processing으로 잡고 throttle 대기에 묶이면(백로그 시 다수),
+          //   pending-only claim은 그 탭 항목을 못 빼낸다. 배치는 queue_pump_drain 락을 쥐어 펌프가 멈춰 있으므로,
+          //   STALE_PROCESSING_SEC(기본 20s) 넘은 processing은 안전하게 재점유한다.
+          //   (재처리해도 claim 2중유니크 + my-own-value 가드로 동일행 멱등 재기록 = 무해.)
           `UPDATE sync_queue SET status='processing', processed_at=NOW()
             WHERE id IN (SELECT id FROM sync_queue
-               WHERE status='pending' AND attempts<max_retry AND type='order_append'
+               WHERE attempts<max_retry AND type='order_append'
                  AND payload->>'sheetId'=$1 AND payload->>'tabName'=$2
+                 AND (status='pending'
+                      OR (status='processing' AND processed_at < NOW() - ($4 || ' seconds')::interval))
                ORDER BY created_at ASC LIMIT $3 FOR UPDATE SKIP LOCKED)
             RETURNING *`,
-          [sheetId, tabName, batchSize]
+          [sheetId, tabName, batchSize, String(STALE_PROCESSING_SEC)]
         );
         if (!items.length) break;
         const r = await _executeBatch(items, sheetId, tabName);
