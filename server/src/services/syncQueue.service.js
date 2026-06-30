@@ -690,10 +690,57 @@ async function deleteAllFailed() {
   return { deleted: rowCount };
 }
 
+// ── 특정 주문(orderSubmissionId)의 pending 큐항목을 즉시 처리(FIFO 우회) ──
+//   order_append/order_update/order_cancel은 payload에 orderSubmissionId가 있다(tabName은 update/cancel엔 없음).
+//   글로벌 큐가 백로그면 편집/취소가 FIFO 뒤로 밀리는데, 이 함수로 그 주문의 항목만 골라 즉시 반영한다.
+//   sheetsThrottle(45/분)이 쿼터 가드. 관리자 "이 주문 즉시 반영" + 자동화 테스트용. 동기 실행(항목 소수).
+async function drainOrderQueue(orderSubmissionId, { maxItems = 5 } = {}) {
+  if (!orderSubmissionId) throw new Error('drainOrderQueue: orderSubmissionId 필수');
+  let processed = 0, succeeded = 0, failed = 0;
+  for (let n = 0; n < maxItems; n++) {
+    const { rows: items } = await pool.query(
+      `UPDATE sync_queue SET status = 'processing', processed_at = NOW()
+        WHERE id IN (
+          SELECT id FROM sync_queue
+           WHERE status = 'pending' AND attempts < max_retry
+             AND (payload->>'orderSubmissionId') = $1
+           ORDER BY created_at ASC
+           LIMIT 1
+           FOR UPDATE SKIP LOCKED
+        )
+        RETURNING *`,
+      [String(orderSubmissionId)]
+    );
+    if (!items.length) break;
+    const item = items[0];
+    processed++;
+    await pool.query(`UPDATE sync_queue SET attempts = attempts + 1 WHERE id = $1`, [item.id]);
+    try {
+      await _executeItem(item);
+      await pool.query(`UPDATE sync_queue SET status = 'done', processed_at = NOW(), error_msg = NULL WHERE id = $1`, [item.id]);
+      succeeded++;
+    } catch (err) {
+      if (err && err.__defer) {
+        await pool.query(`UPDATE sync_queue SET status='pending', attempts=GREATEST(attempts-1,0), processed_at=NOW() WHERE id=$1`, [item.id]);
+        break;
+      }
+      const newAttempts = (item.attempts || 0) + 1;
+      const isQuotaError = err.message && (err.message.includes('Quota exceeded') || err.message.includes('429') || err.message.includes('RATE_LIMIT'));
+      const newStatus = (newAttempts >= item.max_retry && !isQuotaError) ? 'failed' : 'pending';
+      await pool.query(`UPDATE sync_queue SET status = $1, error_msg = $2, processed_at = NOW() WHERE id = $3`,
+        [newStatus, String(err.message || '').substring(0, 500), item.id]);
+      failed++;
+      if (isQuotaError) break;
+    }
+  }
+  return { processed, succeeded, failed };
+}
+
 module.exports = {
   enqueue,
   processQueue,
   drainTabQueue,
+  drainOrderQueue,
   getQueueStats,
   retryItem,
   retryAllFailed,

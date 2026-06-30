@@ -2352,6 +2352,18 @@ router.post('/order-manual-add', authMiddleware, adminOrMasterMiddleware, async 
   } catch (err) { next(err); }
 });
 
+// POST /api/diag/order-flush-one — 특정 주문의 pending 큐항목(append/update/cancel)을 즉시 반영(FIFO 우회).
+//   글로벌 큐 백로그 시 편집/취소가 밀리므로 "이 주문만 지금 반영". 동기 실행(항목 소수, throttle 가드).
+router.post('/order-flush-one', authMiddleware, adminOrMasterMiddleware, async (req, res, next) => {
+  try {
+    const { orderSubmissionId } = req.body || {};
+    if (!orderSubmissionId) return res.status(400).json({ ok: false, error: 'orderSubmissionId 필수' });
+    const { drainOrderQueue } = require('../services/syncQueue.service');
+    const r = await drainOrderQueue(orderSubmissionId, { maxItems: 5 });
+    res.json({ ok: true, ...r });
+  } catch (err) { next(err); }
+});
+
 // GET /api/diag/order-ledger — 원장 그리드(keyset 커서, PII는 admin/master만). 읽기 전용(flag 무관).
 router.get('/order-ledger', authMiddleware, adminOrMasterMiddleware, async (req, res, next) => {
   try {
