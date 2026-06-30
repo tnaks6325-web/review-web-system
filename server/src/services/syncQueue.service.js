@@ -48,6 +48,7 @@ async function enqueue(type, payload, maxRetry = 3) {
 async function processQueue(batchSize = 10, { interItemDelayMs = 2000 } = {}) {
   const startTime = Date.now();
   let processed = 0, succeeded = 0, failed = 0;
+  let quotaExceeded = false;   // ★ R2: quota 에러로 배치 중단 시 true → 펌프(queuePump)가 보고 양보
 
   try {
     // ★ #2 큐 클레임 원자화: SELECT … FOR UPDATE SKIP LOCKED 로 batch를 한 번에 'processing'으로
@@ -137,6 +138,7 @@ async function processQueue(batchSize = 10, { interItemDelayMs = 2000 } = {}) {
               }
             }
             logger.warn(`[syncQueue] ⚠️ id=${item.id} Quota 에러 — 나머지 ${restIds.length}건 다음 사이클로 연기`);
+            quotaExceeded = true;   // ★ R2: 펌프가 이 플래그 보고 중단 → 30초 cron 백오프에 양보
             break;
           }
           logger.warn(`[syncQueue] ⚠️ id=${item.id} 재시도 예정 (${newAttempts}/${item.max_retry}): ${err.message}`);
@@ -152,7 +154,7 @@ async function processQueue(batchSize = 10, { interItemDelayMs = 2000 } = {}) {
     logger.info(`[syncQueue] 처리 완료: ${succeeded}/${processed} 성공, ${failed} 실패, ${elapsed}ms`);
   }
 
-  return { processed, succeeded, failed, elapsed };
+  return { processed, succeeded, failed, elapsed, quotaExceeded };
 }
 
 // ── 특정 탭만 우선 드레인(FIFO 우회) ──
