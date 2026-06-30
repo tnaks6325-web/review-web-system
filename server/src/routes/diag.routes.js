@@ -2258,7 +2258,8 @@ router.post('/reverse-sync-detect', authMiddleware, adminOrMasterMiddleware, asy
     const { sheetId, tabName, includeNullSig } = req.body || {};
     if (!sheetId || !tabName) return res.status(400).json({ ok: false, error: 'sheetId, tabName 필수' });
     const { detectReverseSyncProposals } = require('../services/orderLedger.service');
-    const out = await detectReverseSyncProposals({ sheetId, tabName, includeNullSig: includeNullSig === true });
+    // 수동 트리거: throttle busy여도 1콜 기다려 실행(관리자 즉시 결과). cron은 ignoreBusy 미전달로 양보.
+    const out = await detectReverseSyncProposals({ sheetId, tabName, includeNullSig: includeNullSig === true, ignoreBusy: true });
     res.json({ ok: true, ...out });
   } catch (err) { next(err); }
 });
