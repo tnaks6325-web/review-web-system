@@ -14,6 +14,7 @@
  */
 
 const pool = require('../db/pool');
+const { logger } = require('../utils/logger');
 
 const OWNERS = ['db', 'sheet', 'shared'];
 
@@ -190,6 +191,23 @@ async function saveMapping(sheetId, tabGid, tabName, columns, updatedBy) {
     throw err;
   } finally {
     client.release();
+  }
+
+  // ── P2c: 매핑 변경 = 컬럼해석 변경. 시트 데이터 체크섬은 그대로라 빌더가 스킵하므로,
+  //   해당 탭의 index_master.checksum=NULL로 강제 무효화 → 두 빌더(인덱스/스마트)가 다음 빌드에서 재파싱.
+  //   (시트 데이터 미변경이라 재파싱 1회 후 동일 체크섬 재기록 → 자동 안정화.)
+  //   best-effort: 실패해도 매핑 저장 자체는 성공 처리(다음 강제 재빌드/재시작으로 자가치유).
+  try {
+    await pool.query(
+      `UPDATE index_master SET checksum = NULL
+         WHERE sheet_id = $1 AND (tab_gid = $2 OR tab_name = $3)`,
+      [sheetId, gid, tabName || null]
+    );
+    // 스마트빌드 장수 프로세스의 인메모리 캐시도 무효화(isFirstRun 이후 DB 재로드 안 함)
+    try { require('./smartBuild.service').invalidateChecksumCache(sheetId, tabName); } catch (_) {}
+    logger.info(`[mapping] 체크섬 무효화 — sheet=${String(sheetId).slice(0,12)} gid=${gid} tab=${tabName} → 다음 빌드 재파싱`);
+  } catch (err) {
+    logger.warn(`[mapping] 체크섬 무효화 실패(무시, 매핑은 저장됨): ${err.message}`);
   }
 
   return { saved: clean.length, mapped: clean.filter(c => c.dbField).length };
