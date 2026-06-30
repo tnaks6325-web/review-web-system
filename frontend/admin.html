@@ -931,6 +931,15 @@ body{ letter-spacing:-.01em; }
             <div id="orderMirrorPanel" style="font-size:.82rem;color:var(--t2)">
               <i class="fas fa-circle-notch fa-spin"></i> 불러오는 중...
             </div>
+            <div style="margin-top:10px;display:flex;gap:6px;flex-wrap:wrap;align-items:center">
+              <button class="btn-sm" onclick="downloadYellowRowsCsv('csv')" style="font-size:.72rem;background:#CA8A04;color:#fff;border:none;padding:4px 10px;border-radius:6px;cursor:pointer" title="복구·수동추가로 시트에 노란 배경으로 기록된 행이 있는 탭 목록을 CSV로 받습니다(탭명·시트탭URL·노란행수·행번호). 수동 확인 후 삭제용.">
+                <i class="fas fa-file-csv"></i> 노란 복구행 탭목록 CSV
+              </button>
+              <button class="btn-sm" onclick="downloadYellowRowsCsv('detail.csv')" style="font-size:.72rem;background:#FCD34D;color:#111;border:none;padding:4px 10px;border-radius:6px;cursor:pointer" title="노란 복구행을 행 단위로(주문자·주문번호·시트행 포함) CSV로 받습니다.">
+                <i class="fas fa-list"></i> 행단위 상세
+              </button>
+              <span style="font-size:.68rem;color:var(--t3)">노란배경=복구(적체)/수동추가 행 → 수동 확인 후 삭제용</span>
+            </div>
             <div id="orderMirrorActions" class="hidden" style="margin-top:10px;display:flex;gap:6px;flex-wrap:wrap">
               <button class="btn-sm" onclick="runOrderReconcile(null)" style="font-size:.72rem;background:#16A34A;color:#fff;border:none;padding:4px 10px;border-radius:6px;cursor:pointer">
                 <i class="fas fa-redo"></i> 막힌 주문 재시도(복구)
