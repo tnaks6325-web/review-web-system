@@ -33,6 +33,15 @@ let _rrKey = null;                          // R6: 인터리브용 키기반 RR 
 let _lastTickAt = 0, _cycleStartAt = 0;   // F3 워치독: 마지막 사이클 완료/시작 시각
 const _kickQueue = [];   // #1: 타깃 탭 대기열(중복제거)
 
+// ── 진단: 사이클 이력 링버퍼(인터리브 기아 디버그용). getDiag()/order-batch-state로 관찰. ──
+let _cycleSeq = 0;
+const _HISTORY_CAP = 40;
+const _history = [];
+function _record(e) {
+  _history.push(e);
+  while (_history.length > _HISTORY_CAP) _history.shift();
+}
+
 function isAutoEnabled() { return process.env.ORDER_BATCH_AUTO === '1'; }
 
 // #2: 미반영 탭 선정 — FIFO(가장 오래 기다린 주문) + count 보장슬롯.
@@ -77,16 +86,20 @@ async function _reconcileOnce(sheetId, tabName, reconciledSet) {
 // 다탭 인터리브 드레인: 탭마다 1청크씩 라운드로빈(공평). reconcile는 탭당 사이클 1회.
 async function _cycleInterleave() {
   const start = Date.now();
+  const seq = ++_cycleSeq;
   const { drainTabQueueBatched } = require('../services/syncQueue.service');
-  let drained = 0, succeeded = 0;
+  let drained = 0, succeeded = 0, rounds = 0;
   const reconciled = new Set();
+  const perTab = {};                                  // 진단: tabName → 청크처리수
+  const bump = (name, n) => { perTab[name] = (perTab[name] || 0) + (n || 0); };
   const beat = () => { _lastTickAt = Date.now(); };   // J-A: 사이클 길어도 heartbeat 갱신(cron 단건 백스톱 오발동 차단)
 
   // busy면 인터리브 대신 oldest-1탭만(자가 throttle 봉쇄 회피 — 기존 안전망 보존).
-  let busy = false;
+  let busy = false, throttleStart = -1;
   try {
     const { getThrottleStatus } = require('../utils/sheetsThrottle');
-    busy = getThrottleStatus().requestsInLastMinute > BUSY_THRESHOLD;
+    throttleStart = getThrottleStatus().requestsInLastMinute;
+    busy = throttleStart > BUSY_THRESHOLD;
   } catch (_) {}
 
   const active = new Map();   // tabKey → {sheetId,tabName,emptyStreak}
@@ -95,12 +108,18 @@ async function _cycleInterleave() {
     if (!active.has(key)) active.set(key, { sheetId, tabName, emptyStreak: 0 });
     return key;
   };
+  let kickLen = _kickQueue.length;
   while (_kickQueue.length) {                // 진입 시 kick 1회 흡수
     const k = _kickQueue.shift();
     const sep = k.indexOf('||'); addTab(k.slice(0, sep), k.slice(sep + 2));
   }
   for (const r of await _selectTabs()) addTab(r.sheet_id, r.tab_name);
-  if (!active.size) return { tabs: 0, drained: 0, succeeded: 0 };
+  const tabName = (k) => { const s = k.indexOf('||'); return k.slice(s + 2); };
+  const activeNames = [...active.keys()].map(tabName);
+  if (!active.size) {
+    _record({ seq, mode: 'empty', busy, throttleStart, kickLen, activeTabs: [], perTab: {}, rounds: 0, durationMs: Date.now() - start });
+    return { tabs: 0, drained: 0, succeeded: 0 };
+  }
 
   if (busy) {                                // busy: 인터리브 폴백 = oldest(첫 active) 1탭만
     const first = active.values().next().value;
@@ -108,10 +127,11 @@ async function _cycleInterleave() {
     try {
       const res = await drainTabQueueBatched({ sheetId: first.sheetId, tabName: first.tabName,
         maxMillis: PER_TAB_MS, oneChunk: false, runReconcileFirst: false });
-      if (res && res.succeeded) succeeded += res.succeeded;
+      if (res && res.succeeded) { succeeded += res.succeeded; bump(first.tabName, res.succeeded); }
     } catch (e) { logger.warn(`[orderBatchTick] busy 1탭 실패(무시): ${e && e.message}`); }
     beat();
     if (succeeded) logger.info(`[orderBatchTick] interleave-busy 1탭, ${succeeded}건 반영`);
+    _record({ seq, mode: 'busy', busy, throttleStart, kickLen, activeTabs: activeNames, perTab, rounds: 1, durationMs: Date.now() - start, succeeded });
     return { tabs: active.size, drained: 1, succeeded, mode: 'busy' };
   }
 
@@ -124,6 +144,7 @@ async function _cycleInterleave() {
 
   let lastKey = _rrKey;
   while (Date.now() - start < INTERLEAVE_MAX_MS && keys.length) {
+    rounds++;
     while (_kickQueue.length) {              // 라운드 중 신규 kick 합류(R3 race 완화)
       const k = _kickQueue.shift();
       const sep = k.indexOf('||'); const nk = addTab(k.slice(0, sep), k.slice(sep + 2));
@@ -142,7 +163,7 @@ async function _cycleInterleave() {
           maxMillis: PER_TAB_MS, oneChunk: true, runReconcileFirst: false });  // R1: reconcile 분리
       } catch (e) { logger.warn(`[orderBatchTick] tab=${t.tabName} 청크 실패(무시): ${e && e.message}`); }
       drained++; lastKey = key; beat();     // J-A: 청크마다 heartbeat
-      if (res && res.succeeded) succeeded += res.succeeded;
+      if (res && res.succeeded) { succeeded += res.succeeded; bump(t.tabName, res.succeeded); }
       if (res && res.skipped) { nextKeys.push(key); continue; }        // 락 busy → 다음 라운드
       if (res && res.quotaExceeded) {                                  // R5: 전체 라운드 즉시 중단
         quotaHit = true;
@@ -156,11 +177,12 @@ async function _cycleInterleave() {
         if (t.emptyStreak < EMPTY_ROUNDS_DROP) nextKeys.push(key);     // 아직 완료 단정 안 함
       } else { t.emptyStreak = 0; nextKeys.push(key); }
     }
-    if (quotaHit) { _rrKey = lastKey; logger.info(`[orderBatchTick] interleave quota: ${drained}청크, ${succeeded}건`); return { tabs: active.size, drained, succeeded, mode: 'quota' }; }
+    if (quotaHit) { _rrKey = lastKey; logger.info(`[orderBatchTick] interleave quota: ${drained}청크, ${succeeded}건`); _record({ seq, mode: 'quota', busy, throttleStart, kickLen, activeTabs: activeNames, perTab, rounds, durationMs: Date.now() - start, succeeded }); return { tabs: active.size, drained, succeeded, mode: 'quota' }; }
     keys = nextKeys;
   }
   _rrKey = lastKey;
   if (succeeded) logger.info(`[orderBatchTick] interleave ${drained}청크, ${succeeded}건 반영`);
+  _record({ seq, mode: 'interleave', busy, throttleStart, kickLen, activeTabs: activeNames, perTab, rounds, durationMs: Date.now() - start, succeeded, exit: keys.length ? 'timecap' : 'drained' });
   return { tabs: active.size, drained, succeeded, mode: 'interleave' };
 }
 
@@ -249,4 +271,15 @@ function kickOrderBatch(sheetId, tabName) {
 // F3 백스톱용: cron이 배치 생존(heartbeat)을 확인 → 끊겼으면 단건 백스톱 가동.
 function getHeartbeat() { return { running: _running, lastTickAt: _lastTickAt, cycleStartAt: _cycleStartAt }; }
 
-module.exports = { kickOrderBatch, isAutoEnabled, _cycle, _selectTabs, getHeartbeat };
+// 진단: 스케줄러 내부상태 + 사이클 이력(인터리브 기아 디버그용).
+function getDiag() {
+  return {
+    now: Date.now(), interleave: INTERLEAVE, running: _running, rerun: _rerun,
+    cycleStartAt: _cycleStartAt, lastTickAt: _lastTickAt, rrKey: _rrKey,
+    kickQueueLen: _kickQueue.length, kickQueue: _kickQueue.slice(0, 20),
+    cycleSeq: _cycleSeq, history: _history.slice(-30),
+    cfg: { INTERLEAVE_MAX_MS, TICK_MAX_MS, PER_TAB_MS, BUSY_THRESHOLD, EMPTY_ROUNDS_DROP, MAX_TABS, BACKLOG_SLOTS },
+  };
+}
+
+module.exports = { kickOrderBatch, isAutoEnabled, _cycle, _selectTabs, getHeartbeat, getDiag };

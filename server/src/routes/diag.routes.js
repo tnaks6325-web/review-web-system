@@ -2466,6 +2466,14 @@ router.post('/order-orphan-cleanup', authMiddleware, adminOrMasterMiddleware, as
   } catch (err) { next(err); }
 });
 
+// GET /api/diag/order-batch-state — 배치 스케줄러 내부상태 + 사이클 이력(인터리브 기아 디버그)
+router.get('/order-batch-state', authMiddleware, async (req, res, next) => {
+  try {
+    const { getDiag } = require('../jobs/orderBatchScheduler');
+    res.json({ ok: true, ...getDiag() });
+  } catch (err) { next(err); }
+});
+
 // POST /api/diag/order-batch-drain { sheetId, tabName, maxMillis? } (admin/master)
 // ★ 빈 시트 버스트 전용: 한 탭을 가드 batchGet 1콜 + batchUpdate 1콜(청크당)로 빠르게 반영.
 //   ORDER_BATCH_DRAIN=1 일 때만 배치 경로, 아니면 drainTabQueueBatched가 단건 drainTabQueue로 폴백.
