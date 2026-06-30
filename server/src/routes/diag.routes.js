@@ -2293,9 +2293,10 @@ router.get('/order-written-sample', authMiddleware, async (req, res, next) => {
 });
 
 // ═══════════════════════════════════════════════════════════
-// GET /api/diag/order-stuck-export?sheetId&tabName[&includeWritten=true] — 주문 전체 데이터 추출
-//   기본: 시트 미반영(written 아님) 주문만. includeWritten=true(또는 all=1): 그 탭 전 주문(반영분 포함).
-//   PII 포함이라 admin/master 전용. 수동 입력/감사/대조용. limit 기본 2000(최대 5000).
+// GET /api/diag/order-stuck-export?sheetId&tabName[&includeWritten=true][&format=csv] — 제출된 구매양식(DB) 추출
+//   서버 DB(order_submissions = 실제 제출된 구매양식)를 내려준다. 시트 미러가 아니라 원장 원본.
+//   기본: 미반영(written 아님)만. includeWritten=true(또는 all=1): 그 탭 전 주문(반영분 포함).
+//   format=csv: 엑셀/구글시트 붙여넣기용 CSV(UTF-8 BOM). PII 포함 → admin/master 전용. limit 기본 2000(최대 5000).
 // ═══════════════════════════════════════════════════════════
 router.get('/order-stuck-export', authMiddleware, adminOrMasterMiddleware, async (req, res, next) => {
   try {
@@ -2317,6 +2318,30 @@ router.get('/order-stuck-export', authMiddleware, adminOrMasterMiddleware, async
         LIMIT $3`,
       [sheetId, tabName, limit]
     );
+
+    if (String(req.query.format || '').toLowerCase() === 'csv') {
+      const stMap = { written: '반영완료', queued: '미반영(대기)', failed: '미반영(실패)', pending: '미반영', pending_no_row: '미반영(행없음)' };
+      const esc = (v) => { v = String(v == null ? '' : v); return /[",\n\r]/.test(v) ? '"' + v.replace(/"/g, '""') + '"' : v; };
+      const head = ['상태', '시트행', '구매일자', '주문자', '수취인', '네이버아이디', '연락처', '주소', '은행', '계좌번호', '예금주', '결제금액', '주문번호', '비고', '제출시각(UTC)'];
+      const lines = [head.map(esc).join(',')];
+      for (const o of rows) {
+        let memo = o.memo || '';
+        if (o.selectedOptKey) memo = (memo ? memo + ' / ' : '') + '옵션:' + o.selectedOptKey;
+        const line = [
+          stMap[o.mirrorStatus] || o.mirrorStatus || '', o.sheetRow || '', o.dateStr || '', o.orderer || '',
+          o.recipient || '', o.userId || '', o.phone || '', o.address || '', o.bank || '', o.account || '',
+          o.depositor || '', o.price || '', o.orderNum || '', memo, o.submittedAt || '',
+        ];
+        lines.push(line.map(esc).join(','));
+      }
+      const csv = '﻿' + lines.join('\r\n'); // UTF-8 BOM
+      const asciiName = `orders_${String(tabName).replace(/[^\w.()-]+/g, '_').slice(0, 60) || 'tab'}.csv`;
+      res.setHeader('Content-Type', 'text/csv; charset=utf-8');
+      res.setHeader('Content-Disposition',
+        `attachment; filename="${asciiName}"; filename*=UTF-8''${encodeURIComponent('구매양식_' + tabName + '.csv')}`);
+      return res.send(csv);
+    }
+
     res.json({ ok: true, count: rows.length, includeWritten, items: rows });
   } catch (err) {
     next(err);
