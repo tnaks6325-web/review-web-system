@@ -214,4 +214,57 @@ router.get('/rows', authMiddleware, async (req, res, next) => {
   }
 });
 
+// ═══════════════════════════════════════════════════════════
+// GET /api/raw/rows.csv?sheetId&gid — 그 탭에 저장된 RAW 행 전체를 CSV로 다운로드
+//   미러된 시트 데이터(헤더 포함 전 행)를 그대로 CSV로 내려준다. 페이지네이션 없이 전량.
+//   라우터의 행 뷰어와 동일 권한(authMiddleware). UTF-8 BOM으로 엑셀/시트 한글 호환.
+// ═══════════════════════════════════════════════════════════
+router.get('/rows.csv', authMiddleware, async (req, res, next) => {
+  try {
+    const { sheetId, gid } = req.query;
+    if (!sheetId || !gid) {
+      return res.status(400).json({ ok: false, error: 'sheetId, gid 파라미터가 필요합니다.' });
+    }
+    const { rows: metaRows } = await pool.query(
+      `SELECT tab_name AS "tabName", col_count AS "colCount"
+         FROM raw_sheet_tabs WHERE sheet_id = $1 AND tab_gid = $2`,
+      [sheetId, String(gid)]
+    );
+    if (metaRows.length === 0) {
+      return res.status(404).json({ ok: false, error: '미러링된 탭을 찾을 수 없습니다.' });
+    }
+    const colCount = Math.max(metaRows[0].colCount || 0, 1);
+    const tabName = metaRows[0].tabName || 'tab';
+
+    const { rows } = await pool.query(
+      `SELECT cells FROM raw_sheet_rows
+        WHERE sheet_id = $1 AND tab_gid = $2
+        ORDER BY row_index`,
+      [sheetId, String(gid)]
+    );
+
+    const esc = (v) => {
+      v = String(v == null ? '' : v);
+      return /[",\n\r]/.test(v) ? '"' + v.replace(/"/g, '""') + '"' : v;
+    };
+    const lines = rows.map((r) => {
+      const cells = Array.isArray(r.cells) ? r.cells : [];
+      const out = [];
+      for (let c = 0; c < colCount; c++) out.push(esc(cells[c] != null ? cells[c] : ''));
+      return out.join(',');
+    });
+    const csv = '﻿' + lines.join('\r\n'); // UTF-8 BOM (엑셀/구글시트 한글 호환)
+
+    const asciiName = `raw_${String(tabName).replace(/[^\w.()-]+/g, '_').slice(0, 60) || 'tab'}.csv`;
+    res.setHeader('Content-Type', 'text/csv; charset=utf-8');
+    res.setHeader(
+      'Content-Disposition',
+      `attachment; filename="${asciiName}"; filename*=UTF-8''${encodeURIComponent('raw_' + tabName + '.csv')}`
+    );
+    res.send(csv);
+  } catch (err) {
+    next(err);
+  }
+});
+
 module.exports = router;
