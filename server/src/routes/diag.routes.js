@@ -2170,6 +2170,7 @@ router.post('/order-relink', authMiddleware, adminOrMasterMiddleware, async (req
       `SELECT COUNT(*)::int AS cnt
          FROM order_submissions
         WHERE sheet_id = $1 AND tab_name = $2
+          AND deleted_at IS NULL
           AND mirror_status IN ('pending','pending_no_row','failed')`,
       [sheetId, fromTabName]
     );
@@ -2190,6 +2191,7 @@ router.post('/order-relink', authMiddleware, adminOrMasterMiddleware, async (req
           SET sheet_id = $5, tab_gid = $3, tab_name = $4,
               sheet_row = NULL, mirror_status = 'pending_no_row', sheet_error = NULL
         WHERE sheet_id = $1 AND tab_name = $2
+          AND deleted_at IS NULL
           AND mirror_status IN ('pending','pending_no_row','failed')
         RETURNING id`,
       [sheetId, fromTabName, String(toTabGid), targetName, targetSheetId]
