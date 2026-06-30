@@ -2364,6 +2364,33 @@ router.post('/order-flush-one', authMiddleware, adminOrMasterMiddleware, async (
   } catch (err) { next(err); }
 });
 
+// POST /api/diag/order-orphan-cleanup { dryRun? } (admin/master)
+// ★ 고아 큐 정리: written/deleted된 주문의 잔여 pending/processing order_append를 시트콜 0으로 done 처리.
+//   reconcile 재큐잉이 남긴 고아가 throttle를 반복 잠식하던 것을 1회성으로 청소. dryRun=true면 카운트만.
+//   (공정화 #3 dup-guard가 신규 고아 발생을 막으므로 이건 기존 잔량 정리용.)
+router.post('/order-orphan-cleanup', authMiddleware, adminOrMasterMiddleware, async (req, res, next) => {
+  try {
+    const dryRun = req.body?.dryRun !== false; // 기본 dryRun=true(안전)
+    const sel = await pool.query(
+      `SELECT COUNT(*)::int AS n FROM sync_queue sq
+        WHERE sq.type = 'order_append' AND sq.status IN ('pending','processing')
+          AND EXISTS (SELECT 1 FROM order_submissions os
+                       WHERE os.id::text = (sq.payload->>'orderSubmissionId')
+                         AND (os.mirror_status = 'written' OR os.deleted_at IS NOT NULL))`
+    );
+    const orphanCount = sel.rows[0].n;
+    if (dryRun) return res.json({ ok: true, dryRun: true, orphanCount });
+    const upd = await pool.query(
+      `UPDATE sync_queue sq SET status='done', processed_at=NOW(), error_msg='orphan_cleanup'
+        WHERE sq.type = 'order_append' AND sq.status IN ('pending','processing')
+          AND EXISTS (SELECT 1 FROM order_submissions os
+                       WHERE os.id::text = (sq.payload->>'orderSubmissionId')
+                         AND (os.mirror_status = 'written' OR os.deleted_at IS NOT NULL))`
+    );
+    res.json({ ok: true, dryRun: false, cleaned: upd.rowCount });
+  } catch (err) { next(err); }
+});
+
 // POST /api/diag/order-batch-drain { sheetId, tabName, maxMillis? } (admin/master)
 // ★ 빈 시트 버스트 전용: 한 탭을 가드 batchGet 1콜 + batchUpdate 1콜(청크당)로 빠르게 반영.
 //   ORDER_BATCH_DRAIN=1 일 때만 배치 경로, 아니면 drainTabQueueBatched가 단건 drainTabQueue로 폴백.

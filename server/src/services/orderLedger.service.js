@@ -800,6 +800,16 @@ async function reconcileStuckOrders({ limit = 50, perTabCap = 20, sheetId = null
     // 이미 행이 있는 주문(failed/정체 queued) → 재배정 없이 바로 재-enqueue
     if (row.sheet_row) {
       if (dryRun) { result.requeued++; continue; }
+      // ★ 공정화 #3(R1 근원): 이미 live(pending/processing) order_append가 있으면 재생성 금지 →
+      //   고아 큐 누적 차단(written된 주문의 잔여 항목이 throttle를 반복 잠식하던 원인). queued 분기와 동일 가드.
+      try {
+        const { rows: dup } = await db.query(
+          `SELECT 1 FROM sync_queue WHERE type='order_append' AND status IN ('pending','processing')
+             AND (payload->>'orderSubmissionId') = $1 LIMIT 1`,
+          [String(row.id)]
+        );
+        if (dup.length) { result.requeued++; continue; }
+      } catch (_) { /* 가드 조회 실패는 무시하고 재큐잉(보수적) */ }
       try {
         await enqueue('order_append', {
           sheetId: row.sheet_id, tabName: row.tab_name, gid,

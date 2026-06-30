@@ -329,7 +329,7 @@ async function _executeBatch(items, sheetId, tabName) {
   const aliveMap = new Map();
   if (osIds.length) {
     const { rows } = await pool.query(
-      `SELECT id, deleted_at, orderer, recipient, user_id, phone, address, bank, account,
+      `SELECT id, deleted_at, mirror_status, orderer, recipient, user_id, phone, address, bank, account,
               depositor, price, order_num, memo, date_str, selected_opt_key
          FROM order_submissions WHERE id = ANY($1::uuid[])`, [osIds]);
     for (const row of rows) aliveMap.set(row.id, row);
@@ -349,7 +349,9 @@ async function _executeBatch(items, sheetId, tabName) {
   const live = [];
   for (const x of parsed) {
     const os = x.p.orderSubmissionId ? aliveMap.get(x.p.orderSubmissionId) : null;
-    if (x.p.orderSubmissionId && (!os || os.deleted_at)) {
+    // ★ 공정화 #4(R1/R10 보조): deleted/written(고아)면 시트 재기록 금지 → 시트콜 0으로 큐만 done.
+    //   written 재기록은 멱등이라 무해하나 throttle 낭비 → 흡수해서 신규에 예산 집중.
+    if (x.p.orderSubmissionId && (!os || os.deleted_at || os.mirror_status === 'written')) {
       await pool.query(`UPDATE sync_queue SET status='done', processed_at=NOW(), error_msg=NULL WHERE id=$1`, [x.item.id]);
       continue;
     }
