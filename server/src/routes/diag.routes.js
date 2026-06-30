@@ -2203,6 +2203,186 @@ router.post('/order-relink', authMiddleware, adminOrMasterMiddleware, async (req
 });
 
 // ═══════════════════════════════════════════════════════════
+// 주문 원장(order ledger) PR-B — 인라인 편집/취소/수동추가/조회 (admin/master 전용)
+//   쓰기 3종은 ORDER_LEDGER_WRITE_ENABLED='true'에서만 동작(롤링배포·점진 활성 게이트).
+//   편집/취소는 per-order 락(order_ledger:<id>)로 DB UPDATE 직렬화 → 큐(order_update/order_cancel)로 in-place 시트반영.
+// ═══════════════════════════════════════════════════════════
+const _ORDER_LEDGER_EDIT_FIELDS = ['orderer','recipient','user_id','phone','address','bank','account','depositor','price','order_num','memo','date_str','selected_opt_key'];
+
+// POST /api/diag/order-edit — 주문 필드 편집 → DB 즉시 + 큐(order_update) in-place 시트반영
+router.post('/order-edit', authMiddleware, adminOrMasterMiddleware, async (req, res, next) => {
+  try {
+    if (process.env.ORDER_LEDGER_WRITE_ENABLED !== 'true') return res.status(503).json({ ok: false, error: 'order ledger 쓰기 비활성(ORDER_LEDGER_WRITE_ENABLED)' });
+    const { orderSubmissionId } = req.body || {};
+    const edits = Array.isArray(req.body?.edits) ? req.body.edits : [];
+    if (!orderSubmissionId || !edits.length) return res.status(400).json({ ok: false, error: 'orderSubmissionId, edits 필수' });
+    const clean = [];
+    for (const e of edits) {
+      if (!e || !_ORDER_LEDGER_EDIT_FIELDS.includes(e.field)) return res.status(400).json({ ok: false, error: `허용되지 않은 편집 필드: ${e && e.field}` });
+      clean.push({ field: e.field, oldValue: e.oldValue == null ? '' : String(e.oldValue), newValue: e.newValue == null ? '' : String(e.newValue) });
+    }
+    const editSeq = Date.now(); // per-order 락 직렬화 하 단조(시트 stale 편집 무시 기준)
+    const { withJobLock } = require('../utils/jobLock');
+    const { enqueue } = require('../services/syncQueue.service');
+    const out = await withJobLock('order_ledger:' + orderSubmissionId, async () => {
+      const sets = clean.map((e, idx) => `${e.field} = $${idx + 2}`); // field는 화이트리스트라 인젝션 불가
+      const vals = [orderSubmissionId, ...clean.map(e => e.newValue)];
+      const { rows } = await pool.query(
+        `UPDATE order_submissions SET ${sets.join(', ')}, updated_at = NOW()
+          WHERE id = $1 AND deleted_at IS NULL
+        RETURNING id, mirror_status`,
+        vals
+      );
+      if (!rows.length) return { notFound: true };
+      await enqueue('order_update', { orderSubmissionId, editSeq, edits: clean });
+      return { mirrorStatus: rows[0].mirror_status };
+    });
+    if (out && out.skipped) return res.status(409).json({ ok: false, error: '다른 편집/취소 진행 중 — 재시도하세요' });
+    if (out && out.notFound) return res.status(404).json({ ok: false, error: '주문 없음 또는 이미 취소됨' });
+    require('../jobs/queuePump').kickQueuePump();
+    require('../utils/sse').emitOrderLedger({ action: 'edit', orderSubmissionId, mirror_status: out.mirrorStatus });
+    res.json({ ok: true, queued: true, editSeq });
+  } catch (err) { next(err); }
+});
+
+// POST /api/diag/order-cancel — 주문 소프트삭제(deleted_at) + 시트행 클리어(written이면 큐 order_cancel)
+router.post('/order-cancel', authMiddleware, adminOrMasterMiddleware, async (req, res, next) => {
+  try {
+    if (process.env.ORDER_LEDGER_WRITE_ENABLED !== 'true') return res.status(503).json({ ok: false, error: 'order ledger 쓰기 비활성' });
+    const { orderSubmissionId } = req.body || {};
+    if (!orderSubmissionId) return res.status(400).json({ ok: false, error: 'orderSubmissionId 필수' });
+    const canceledBy = String((req.admin && (req.admin.name || req.admin.role)) || 'admin').slice(0, 100);
+    const { withJobLock } = require('../utils/jobLock');
+    const { enqueue } = require('../services/syncQueue.service');
+    const out = await withJobLock('order_ledger:' + orderSubmissionId, async () => {
+      const { rows } = await pool.query(
+        `UPDATE order_submissions SET deleted_at = NOW(), canceled_by = $2, updated_at = NOW()
+          WHERE id = $1 AND deleted_at IS NULL
+        RETURNING sheet_row, mirror_status`,
+        [orderSubmissionId, canceledBy]
+      );
+      if (!rows.length) return { alreadyCanceled: true };
+      // in-flight 선삭제(pending만; processing은 PR-A의 order_append deleted_at 가드가 done-noop).
+      //   deposit_mark는 payload에 osid가 없고 입금칸은 클리어 매핑 밖이라 제외.
+      await pool.query(
+        `DELETE FROM sync_queue WHERE status = 'pending'
+           AND type IN ('order_append','order_update','order_cancel')
+           AND (payload->>'orderSubmissionId') = $1`,
+        [String(orderSubmissionId)]
+      );
+      const os = rows[0];
+      if (!os.sheet_row || os.mirror_status !== 'written') {
+        // 시트 미반영 → 클리어 불필요. 점유한 빈 행 claim은 해제(재사용 허용; 쓰인 데이터 없음).
+        try { await pool.query(`DELETE FROM sheet_row_claims WHERE order_id = $1::uuid`, [orderSubmissionId]); } catch (_) {}
+        await pool.query(`UPDATE order_submissions SET mirror_status = 'canceled' WHERE id = $1`, [orderSubmissionId]);
+        return { cleared: false };
+      }
+      await enqueue('order_cancel', { orderSubmissionId });
+      return { cleared: true };
+    });
+    if (out && out.skipped) return res.status(409).json({ ok: false, error: '다른 편집/취소 진행 중 — 재시도하세요' });
+    if (out && out.alreadyCanceled) return res.json({ ok: true, alreadyCanceled: true });
+    if (out.cleared) require('../jobs/queuePump').kickQueuePump();
+    require('../utils/sse').emitOrderLedger({ action: 'canceled', orderSubmissionId });
+    res.json({ ok: true, cleared: out.cleared });
+  } catch (err) { next(err); }
+});
+
+// POST /api/diag/order-manual-add — 수동 주문추가(원자 INSERT, source=manual, osid dedup, 하단 노란행 append)
+router.post('/order-manual-add', authMiddleware, adminOrMasterMiddleware, async (req, res, next) => {
+  try {
+    if (process.env.ORDER_LEDGER_WRITE_ENABLED !== 'true') return res.status(503).json({ ok: false, error: 'order ledger 쓰기 비활성' });
+    const { sheetId, tabName, gid, phone } = req.body || {};
+    const od = (req.body && req.body.orderData) || {};
+    if (!sheetId || !tabName) return res.status(400).json({ ok: false, error: 'sheetId, tabName 필수' });
+    if (!gid) return res.status(400).json({ ok: false, error: 'gid 필수(동명탭 오배정 방지)' });
+    const { loadRawTabContext, buildCandidateRows, claimRow, markOrderQueued } = require('../services/orderLedger.service');
+    const { enqueue } = require('../services/syncQueue.service');
+    const { emitOrderLedger } = require('../utils/sse');
+    const odPhone = phone || od.phone || '';
+    const { rows: ins } = await pool.query(
+      `INSERT INTO order_submissions
+         (sheet_id, tab_name, gid, tab_gid, orderer, recipient, user_id, phone, address, bank, account,
+          depositor, price, order_num, date_str, selected_opt_key, memo, source, mirror_status, submitted_at)
+       VALUES ($1,$2,$3,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,'manual','pending',NOW())
+       RETURNING id`,
+      [sheetId, tabName, String(gid), od.orderer||'', od.recipient||'', od.userId||'', odPhone, od.address||'',
+       od.bank||'', od.account||'', od.depositor||'', od.price||'', od.orderNum||'', od.dateStr||'', od.selectedOptKey||'', od.memo||'']
+    );
+    const orderId = ins[0].id;
+    const dedupKey = 'osid:' + orderId;
+    await pool.query(`UPDATE order_submissions SET dedup_key = $2 WHERE id = $1`, [orderId, dedupKey]);
+    const odForMap = { orderer: od.orderer||'', recipient: od.recipient||'', userId: od.userId||'', phone: odPhone,
+      address: od.address||'', bank: od.bank||'', account: od.account||'', depositor: od.depositor||'',
+      price: od.price||'', orderNum: od.orderNum||'', dateStr: od.dateStr||'', selectedOptKey: od.selectedOptKey||'', memo: od.memo||'' };
+
+    const tabContext = await loadRawTabContext(sheetId, String(gid), tabName);
+    if (!tabContext || !tabContext.headers || !tabContext.headers.length) {
+      await pool.query(`UPDATE order_submissions SET mirror_status='pending_no_row' WHERE id=$1`, [orderId]);
+      emitOrderLedger({ action: 'created', orderSubmissionId: orderId, mirror_status: 'pending_no_row' });
+      return res.json({ ok: true, orderSubmissionId: orderId, mirrorStatus: 'pending_no_row', note: 'RAW 메타 없음 — reconcile가 흡수' });
+    }
+    if (tabContext.tabName && tabContext.tabName !== tabName) { // R9: stale gid 오탭 방지
+      await pool.query(`UPDATE order_submissions SET mirror_status='pending_no_row', sheet_error='gid/tabName 불일치' WHERE id=$1`, [orderId]);
+      return res.status(400).json({ ok: false, error: `gid가 다른 탭(${tabContext.tabName})을 가리킵니다`, orderSubmissionId: orderId });
+    }
+    const candidateRows = buildCandidateRows({ headers: tabContext.headers, dataRows: tabContext.dataRows, headerRowIndex: tabContext.headerRowIndex, orderData: odForMap, appendOnly: true });
+    const client = await pool.connect();
+    let claim = { row: null };
+    try {
+      await client.query('BEGIN');
+      claim = await claimRow({ client, sheetId, tabGid: tabContext.tabGid || String(gid), tabName, dedupKey, candidateRows, orderId, meta: { name: od.orderer || od.recipient || '', phone: odPhone, source: 'manual' } });
+      await client.query(
+        `UPDATE order_submissions SET sheet_row = $2::int, tab_gid = COALESCE(NULLIF($3,''), tab_gid),
+            mirror_status = CASE WHEN $2::int IS NULL THEN 'pending_no_row' ELSE 'pending' END WHERE id = $1`,
+        [orderId, claim.row || null, tabContext.tabGid || String(gid)]
+      );
+      await client.query('COMMIT');
+    } catch (e) { try { await client.query('ROLLBACK'); } catch (_) {} client.release(); throw e; }
+    client.release();
+    if (claim.row) {
+      await enqueue('order_append', { sheetId, tabName, gid: tabContext.tabGid || String(gid), orderData: odForMap, orderSubmissionId: orderId, sheetRow: claim.row, dedupKey, loginPhone8: '', loginName: '', recovered: true });
+      await markOrderQueued(orderId);
+      require('../jobs/queuePump').kickQueuePump();
+      emitOrderLedger({ action: 'created', orderSubmissionId: orderId, mirror_status: 'queued' });
+      return res.json({ ok: true, orderSubmissionId: orderId, sheetRow: claim.row, mirrorStatus: 'queued' });
+    }
+    emitOrderLedger({ action: 'created', orderSubmissionId: orderId, mirror_status: 'pending_no_row' });
+    res.json({ ok: true, orderSubmissionId: orderId, mirrorStatus: 'pending_no_row', note: '행 배정 실패 — reconcile가 흡수' });
+  } catch (err) { next(err); }
+});
+
+// GET /api/diag/order-ledger — 원장 그리드(keyset 커서, PII는 admin/master만). 읽기 전용(flag 무관).
+router.get('/order-ledger', authMiddleware, adminOrMasterMiddleware, async (req, res, next) => {
+  try {
+    const lim = Math.min(Math.max(parseInt(req.query.limit, 10) || 50, 1), 200);
+    const where = []; const params = [];
+    if (!(req.query.includeCanceled === 'true' || req.query.includeCanceled === '1')) where.push('deleted_at IS NULL');
+    if (req.query.sheetId) { params.push(req.query.sheetId); where.push(`sheet_id = $${params.length}`); }
+    if (req.query.tabName) { params.push(req.query.tabName); where.push(`tab_name = $${params.length}`); }
+    if (req.query.mirrorStatus) { params.push(req.query.mirrorStatus); where.push(`mirror_status = $${params.length}`); }
+    if (req.query.q) { params.push('%' + String(req.query.q) + '%'); const i = params.length; where.push(`(orderer ILIKE $${i} OR recipient ILIKE $${i} OR phone ILIKE $${i} OR order_num ILIKE $${i})`); }
+    if (req.query.cursor) { // keyset: "<submitted_at_iso>|<id>"
+      const [cAt, cId] = String(req.query.cursor).split('|');
+      params.push(cAt); const a = params.length; params.push(cId); const b = params.length;
+      where.push(`(submitted_at, id) < ($${a}::timestamptz, $${b}::uuid)`);
+    }
+    const sql = `SELECT id, sheet_id AS "sheetId", tab_name AS "tabName", orderer, recipient, user_id AS "userId",
+            phone, address, bank, account, depositor, price, order_num AS "orderNum", date_str AS "dateStr",
+            selected_opt_key AS "selectedOptKey", memo, mirror_status AS "mirrorStatus", sheet_row AS "sheetRow",
+            source, deleted_at AS "deletedAt", last_edit_seq AS "lastEditSeq", submitted_at AS "submittedAt"
+       FROM order_submissions ${where.length ? 'WHERE ' + where.join(' AND ') : ''}
+       ORDER BY submitted_at DESC, id DESC LIMIT ${lim + 1}`;
+    const { rows } = await pool.query(sql, params);
+    const hasMore = rows.length > lim;
+    const page = hasMore ? rows.slice(0, lim) : rows;
+    const last = page[page.length - 1];
+    const nextCursor = hasMore && last ? `${new Date(last.submittedAt).toISOString()}|${last.id}` : null;
+    res.json({ ok: true, rows: page, nextCursor, count: page.length });
+  } catch (err) { next(err); }
+});
+
+// ═══════════════════════════════════════════════════════════
 // POST /api/diag/participation-cleanup — 리뷰어 교차노출 오염 정리(participation_links)
 //   배경: 과거 구매양식 제출이 가드/시트쓰기 검증 전에 "낙관적 claim 행"에 신원을 미리 찍어,
 //        미러 stale·로스터 선기입 탭에서 '다른 리뷰어의 행'에 phone8을 남겼다(리뷰어 교차노출).

@@ -24,6 +24,10 @@ const {
   markOrderWritten,
   markOrderMirrorFailed,
   recordReviewIdentity,
+  mapOrderToSheetRow,
+  _osRowToOrderData,
+  _fieldToCol,
+  rowIdentityMatches,
 } = require('./orderLedger.service');
 const { logger } = require('../utils/logger');
 
@@ -108,6 +112,16 @@ async function processQueue(batchSize = 10, { interItemDelayMs = 2000 } = {}) {
         logger.info(`[syncQueue] ✅ id=${item.id} type=${item.type} 완료`);
 
       } catch (err) {
+        // ★ PR-B(R4/R12): execute가 보류(defer) 신호(err.__defer)를 던지면 done도 failed도 아닌 pending 복원.
+        //   락 busy/old 인스턴스가 신규 큐타입 만남 → 실행 직전 +1한 attempts를 되돌려 다음 사이클 재처리.
+        if (err && err.__defer) {
+          await pool.query(
+            `UPDATE sync_queue SET status='pending', attempts=GREATEST(attempts-1,0), processed_at=NOW() WHERE id=$1`,
+            [item.id]
+          );
+          logger.debug(`[syncQueue] id=${item.id} 보류(defer) → pending 복원`);
+          continue;
+        }
         const newAttempts = (item.attempts || 0) + 1;
         const isQuotaError = err.message && (err.message.includes('Quota exceeded') || err.message.includes('429') || err.message.includes('RATE_LIMIT'));
         // quota 에러 시 재시도 기회 보존 (max_retry를 초과하지 않도록)
@@ -189,6 +203,10 @@ async function drainTabQueue({ sheetId, tabName, maxMillis = 30000, batchSize = 
         await pool.query(`UPDATE sync_queue SET status = 'done', processed_at = NOW(), error_msg = NULL WHERE id = $1`, [item.id]);
         succeeded++;
       } catch (err) {
+        if (err && err.__defer) {
+          await pool.query(`UPDATE sync_queue SET status='pending', attempts=GREATEST(attempts-1,0), processed_at=NOW() WHERE id=$1`, [item.id]);
+          continue;
+        }
         const newAttempts = (item.attempts || 0) + 1;
         const newStatus = newAttempts >= item.max_retry ? 'failed' : 'pending';
         await pool.query(`UPDATE sync_queue SET status = $1, error_msg = $2, processed_at = NOW() WHERE id = $3`,
@@ -276,23 +294,26 @@ async function _executeItem(item) {
     }
 
     case 'order_append': {
-      const { sheetId, tabName, orderData, loginPhone8, loginName, gid, sheetRow, orderSubmissionId, recovered, dedupKey } = payload;
+      let { sheetId, tabName, orderData, loginPhone8, loginName, gid, sheetRow, orderSubmissionId, recovered, dedupKey } = payload;
       if (!sheetId || !tabName) throw new Error('payload 누락');
       if (!sheetRow) throw new Error('payload 누락: sheetRow');
 
       try {
-        // ★ PR-A: 취소/삭제(소프트딜리트)된 주문은 시트에 쓰지 않는다(큐 done 처리 — markFailed/throw 금지).
-        //   취소가 enqueue↔실행 사이에 끼어들어도 in-flight order_append가 빈칸을 시트에 덮어쓰지 않게 방어.
-        //   (deleted_at은 평상시 NULL이라 무영향 — 취소 기능(PR-B)이 들어와야 활성화되는 도먼트 가드.)
+        // ★ PR-A 가드 + J-1(B4): 취소/삭제된 주문은 시트쓰기 skip(큐 done — markFailed/throw 금지) +
+        //   동시에 최신 필드를 재조회해 orderData를 교체한다. payload는 enqueue 시점 스냅샷이라,
+        //   편집(order_update) 후 deferred append되는 주문은 이 재조회가 없으면 옛값으로 기록(편집 소실).
         if (orderSubmissionId) {
           const { rows: alive } = await pool.query(
-            'SELECT deleted_at FROM order_submissions WHERE id = $1',
+            `SELECT deleted_at, orderer, recipient, user_id, phone, address, bank, account, depositor,
+                    price, order_num, memo, date_str, selected_opt_key
+               FROM order_submissions WHERE id = $1`,
             [orderSubmissionId]
           );
           if (!alive.length || alive[0].deleted_at) {
             logger.info(`[order_append] 취소/삭제된 주문 — 시트쓰기 건너뜀 (id=${orderSubmissionId})`);
             return;
           }
+          orderData = _osRowToOrderData(alive[0]); // ★ J-1: stale 스냅샷 대체 = 편집값 반영
         }
         const tabContext = await loadRawTabContext(sheetId, gid, tabName);
         if (!tabContext || !tabContext.headers || tabContext.headers.length === 0) {
@@ -377,8 +398,102 @@ async function _executeItem(item) {
       break;
     }
 
-    default:
-      throw new Error(`알 수 없는 큐 타입: ${item.type}`);
+    // ── PR-B: 주문 편집(in-place 시트반영). execute는 락-프리(claims가 동시성), 엔드포인트가 per-order 락. ──
+    case 'order_update': {
+      const { orderSubmissionId, editSeq, edits } = payload;
+      if (!orderSubmissionId) throw new Error('payload 누락: orderSubmissionId');
+      const { rows } = await pool.query(
+        `SELECT deleted_at, last_edit_seq, sheet_row, tab_gid, gid, tab_name, sheet_id, mirror_status,
+                orderer, recipient, user_id, phone, address, bank, account, depositor,
+                price, order_num, memo, date_str, selected_opt_key
+           FROM order_submissions WHERE id = $1`,
+        [orderSubmissionId]
+      );
+      if (!rows.length || rows[0].deleted_at) return;                            // R7: 취소/삭제 → done-noop
+      const os = rows[0];
+      if (editSeq != null && Number(editSeq) < Number(os.last_edit_seq)) return; // R5: stale 편집 → done-noop
+      // R10/J-1: 아직 시트반영 전(written 아님)이면 손대지 않음 — order_append이 B4(fresh DB값)로 최신 기록.
+      if (os.mirror_status !== 'written' || !os.sheet_row) return;
+      const tabContext = await loadRawTabContext(os.sheet_id, os.tab_gid || os.gid, os.tab_name);
+      if (!tabContext || !tabContext.headers || !tabContext.headers.length) throw new Error('RAW 메타 없음'); // 재시도
+      const fullRow = mapOrderToSheetRow(tabContext.headers, _osRowToOrderData(os)); // 최신 DB값(=newValue)
+      const cols = (edits || []).map(e => _fieldToCol(tabContext.headers, e.field)).filter(c => c >= 0);
+      if (!cols.length) { await markOrderWritten(orderSubmissionId, os.sheet_row); break; }
+      const minC = Math.min(...cols), maxC = Math.max(...cols);
+      invalidateSheetMeta(os.sheet_id);
+      const rowRange = `'${tabContext.tabName}'!${_getColLetter(minC)}${os.sheet_row}:${_getColLetter(maxC)}${os.sheet_row}`;
+      const read = await throttledCall(() => readSheet(os.sheet_id, rowRange,
+        tabContext.tabGid ? { gid: tabContext.tabGid } : {}));
+      const cells = (read && read[0]) || [];
+      const gridOutOfRange = !read || read.length === 0;                         // J-2: 그리드밖=빈읽기(사람 손 불가)
+      const writeData = [];
+      for (const e of (edits || [])) {
+        const col = _fieldToCol(tabContext.headers, e.field); if (col < 0) continue;
+        const wantNew = String(fullRow[col] == null ? '' : fullRow[col]).trim();
+        const cur = gridOutOfRange ? '' : String(cells[col - minC] || '').trim();
+        const wantOld = String(e.oldValue == null ? '' : e.oldValue).trim();
+        if (cur === wantNew) continue;                                           // 멱등 no-op(R5 흡수)
+        if (gridOutOfRange || cur === '' || cur === wantOld) {                    // 빈칸/내옛값/그리드밖 → 안전 쓰기
+          writeData.push({ range: `'${tabContext.tabName}'!${_getColLetter(col)}${os.sheet_row}`, values: [[wantNew]] });
+        } else {                                                                 // R3: 사람이 다른값 → 클로버 금지, 안전정지
+          await pool.query(
+            `UPDATE order_submissions SET mirror_status='conflict', sheet_error=$2 WHERE id=$1`,
+            [orderSubmissionId, `cell conflict col=${col} cur=${cur.slice(0, 40)}`]
+          );
+          return;                                                                // R11: idx_os_attention로 가시화
+        }
+      }
+      if (writeData.length) {
+        await throttledCall(() => batchUpdateSheet(os.sheet_id, writeData, 'RAW',
+          tabContext.tabGid ? { gid: tabContext.tabGid } : {}));
+      }
+      await pool.query(
+        `UPDATE order_submissions SET last_edit_seq = GREATEST(last_edit_seq, $2) WHERE id = $1`,
+        [orderSubmissionId, Number(editSeq) || 0]
+      );
+      await markOrderWritten(orderSubmissionId, os.sheet_row);
+      break;
+    }
+
+    // ── PR-B: 주문 취소(소프트삭제 후 시트행 클리어). identity-match로 사람 재사용행 파괴 차단. ──
+    case 'order_cancel': {
+      const { orderSubmissionId } = payload;
+      if (!orderSubmissionId) throw new Error('payload 누락: orderSubmissionId');
+      const { rows } = await pool.query(
+        `SELECT deleted_at, sheet_row, tab_gid, gid, tab_name, sheet_id, dedup_key,
+                orderer, recipient, phone, address FROM order_submissions WHERE id = $1`,
+        [orderSubmissionId]
+      );
+      if (!rows.length || !rows[0].deleted_at) return;                           // 취소 아님 → noop
+      const os = rows[0];
+      if (!os.sheet_row) return;                                                 // 시트 미반영 → 클리어 불필요
+      const tabContext = await loadRawTabContext(os.sheet_id, os.tab_gid || os.gid, os.tab_name);
+      if (!tabContext || !tabContext.headers || !tabContext.headers.length) throw new Error('RAW 메타 없음'); // 재시도
+      // R1/J-2: identity-match(연락처+수취인+주소 AND). 그리드밖(빈읽기)=사람 손 불가 → 클리어 진행.
+      const idy = await rowIdentityMatches(os, tabContext);
+      if (!idy.match && !idy.gridOutOfRange) {
+        await pool.query(`UPDATE order_submissions SET mirror_status='canceled_sheet_dirty' WHERE id=$1`, [orderSubmissionId]);
+        return;                                                                  // R1: 사람 재사용행 → 클리어 금지(R11 가시화)
+      }
+      const blank = buildBatchUpdateData({
+        tabName: tabContext.tabName, headers: tabContext.headers,
+        targetRow: parseInt(os.sheet_row, 10), orderData: {},                    // 매핑칸만 ''(입금칸·관리자칸은 매핑밖=보존)
+      });
+      if (blank.length) {
+        await throttledCall(() => batchUpdateSheet(os.sheet_id, blank, 'RAW',
+          tabContext.tabGid ? { gid: tabContext.tabGid } : {}));
+      }
+      // R13: claim 보존(_releaseOrderRowClaim 호출 안 함) → 빈 행 재점유 차단. mirror_status만 canceled.
+      await pool.query(`UPDATE order_submissions SET mirror_status='canceled' WHERE id=$1`, [orderSubmissionId]);
+      break;
+    }
+
+    default: {
+      // ★ PR-B(R12): 롤링배포 중 old 인스턴스가 new가 enqueue한 신규 타입을 만나면 throw 대신 보류(defer).
+      const e = new Error(`미지원 큐 타입(보류): ${item.type}`);
+      e.__defer = true;
+      throw e;
+    }
   }
 }
 
@@ -428,12 +543,16 @@ async function retryItem(id) {
 
 // ── 모든 실패 항목 재시도 ──
 async function retryAllFailed() {
+  // ★ PR-B(R6): order_update/order_cancel은 backstop 재시도 대상에서 제외.
+  //   이미 conflict/canceled_sheet_dirty로 "판정·안전정지"한 건을 시간차 재실행해
+  //   사람 재사용행 클리어(R1)·클로버(R3) 파괴를 재발시키지 않게 한다. (3개 쿼리 모두 적용)
   // stuck된 processing 항목도 함께 리셋 (5분 이상 경과)
   const { rowCount: unstuck } = await pool.query(
     `UPDATE sync_queue
      SET status = 'pending', attempts = 0, error_msg = 'reset: stuck processing'
      WHERE status = 'processing'
-       AND (processed_at IS NULL OR processed_at < NOW() - INTERVAL '5 minutes')`
+       AND (processed_at IS NULL OR processed_at < NOW() - INTERVAL '5 minutes')
+       AND type NOT IN ('order_update','order_cancel')`
   );
   if (unstuck > 0) {
     logger.info(`[syncQueue] ${unstuck}건 stuck processing 항목 리셋`);
@@ -443,14 +562,16 @@ async function retryAllFailed() {
   const { rowCount } = await pool.query(
     `UPDATE sync_queue
      SET status = 'pending', attempts = 0, error_msg = NULL
-     WHERE status = 'failed'`
+     WHERE status = 'failed'
+       AND type NOT IN ('order_update','order_cancel')`
   );
 
   // pending이지만 attempts >= max_retry로 처리 불가능한 항목도 리셋
   const { rowCount: resetExhausted } = await pool.query(
     `UPDATE sync_queue
      SET attempts = 0, error_msg = NULL
-     WHERE status = 'pending' AND attempts >= max_retry`
+     WHERE status = 'pending' AND attempts >= max_retry
+       AND type NOT IN ('order_update','order_cancel')`
   );
   if (resetExhausted > 0) {
     logger.info(`[syncQueue] ${resetExhausted}건 exhausted pending 항목 attempts 리셋`);

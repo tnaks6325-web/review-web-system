@@ -1283,6 +1283,7 @@ function switchAdminTab(tabName) {
   if (tabName === "archive")   { try { loadArchiveList(); } catch(_){} try { _loadArchiveHistory(); } catch(_){} }
   if (tabName === "settings")  { try { loadUnrecognizedTabs(); } catch(_){} try { loadKeywordList(); } catch(_){} try { loadCompanyBusinessNo(); } catch(_){} }
   if (tabName === "errorlogs") { try { loadErrorLogs(); } catch(_){} }
+  if (tabName === "order-ledger") { try { loadOrderLedger(); } catch(_){} }
   // ★ 컨텍스트 툴바 업데이트
   _updateContextToolbar(tabName);
 }
