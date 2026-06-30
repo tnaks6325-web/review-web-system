@@ -888,11 +888,26 @@ async function reconcileStuckOrders({ limit = 50, perTabCap = 20, sheetId = null
       // ★ F2: stale 미러로 base가 실제 시트보다 작으면 이미 채워진 행을 claim → 가드블록 스래싱.
       //   useLiveMaxRow(배치 reconcile만)일 때 실시간 그리드 끝행을 base 하한으로 보정(시트당 1콜, 사이클 캐시).
       //   append-only라 그리드 끝 아래는 항상 빈칸 → 가드 통과 보장.
+      //   ★ 단, 라이브읽기는 throttle(45/분)에 직렬화되므로 버스트로 throttle 포화면 ~60s 블록 →
+      //     pnr 복구가 60s 지연(인터리브 다탭 관측). claims MAX/미러 base가 이미 append에 충분하므로
+      //     throttle 여유 없을 땐 라이브읽기 SKIP(캐시값 있으면 사용). 수동행은 다중컬럼 가드가 잡음.
       if (useLiveMaxRow) {
-        try {
-          const realMax = await _getRealMaxRow(row.sheet_id, tabContext.tabGid || gid, row.tab_name, _metaByTab);
-          if (realMax > baseRow) baseRow = realMax;
-        } catch (e) { logger.warn(`[reconcile] realMaxRow 실패(미러 base 유지): ${e.message}`); }
+        let live = false;
+        const cached = _metaByTab.has(`${row.sheet_id}||${row.tab_name}`);
+        if (cached) { live = true; }
+        else {
+          try {
+            const { getThrottleStatus } = require('../utils/sheetsThrottle');
+            const busyN = parseInt(process.env.ORDER_RECONCILE_LIVE_MAXROW_BUSY || '30', 10);
+            live = getThrottleStatus().requestsInLastMinute < busyN;
+          } catch (_) { live = true; }
+        }
+        if (live) {
+          try {
+            const realMax = await _getRealMaxRow(row.sheet_id, tabContext.tabGid || gid, row.tab_name, _metaByTab);
+            if (realMax > baseRow) baseRow = realMax;
+          } catch (e) { logger.warn(`[reconcile] realMaxRow 실패(미러 base 유지): ${e.message}`); }
+        }
       }
       cursor = baseRow;
     }
