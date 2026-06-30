@@ -129,7 +129,7 @@ app.get('/health', async (req, res) => {
     dbTime,
     google: googleStatus,
     serviceAccount: saEmail,
-    version: '2.22.0-participation-match',
+    version: '2.23.0-livemaxrow-lastdata',
     uptime: Math.floor(process.uptime()),
     memory: Math.round(process.memoryUsage().heapUsed / 1024 / 1024) + 'MB',
     sentry: isSentryEnabled() ? 'active' : 'inactive',

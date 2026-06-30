@@ -38,20 +38,22 @@ function _triggerSheetMirrorOnce(sheetId) {
   });
 }
 
-// ★ F2: 실시간 시트 그리드 끝행(rowCount)을 시트당 1콜로 조회(getSpreadsheetMeta는 캐시 안 탐 = 라이브).
-//   metaCache(사이클 맵)로 같은 사이클 내 시트당 중복콜 제거. append base 하한 보정 전용(배치 reconcile만 사용).
+// ★ F2: 실시간 "마지막 데이터 행"을 탭당 1콜로 조회.
+//   주의: gridProperties.rowCount는 그리드 할당크기(예 1010)지 데이터 끝이 아니다 →
+//   그걸 base로 쓰면 append가 데이터 한참 아래(빈칸 수백 행 점프)로 떨어진다.
+//   values.get(범위=탭명)은 후행 빈 행을 트림 → 반환 행수 = 실제 마지막 데이터행(1-indexed). 이게 정답.
+//   metaCache(사이클 맵)로 같은 사이클 내 탭당 중복콜 제거. base 하한 보정 전용(배치 reconcile만 사용).
 async function _getRealMaxRow(sheetId, tabGid, tabName, metaCache) {
-  const { getSpreadsheetMeta } = require('./sheets.service');
+  const { readSheet } = require('./sheets.service');
   const { throttledCall } = require('../utils/sheetsThrottle');
-  let sheetsArr = metaCache && metaCache.get(sheetId);
-  if (!sheetsArr) {
-    sheetsArr = await throttledCall(() => getSpreadsheetMeta(sheetId)); // 라이브 1콜
-    if (metaCache) metaCache.set(sheetId, sheetsArr);
-  }
-  const want = String(tabGid || '');
-  const m = (sheetsArr || []).find(s =>
-    (want && String(s.properties.sheetId) === want) || (!want && s.properties.title === tabName));
-  return m && m.properties.gridProperties ? (m.properties.gridProperties.rowCount || 0) : 0;
+  const cacheKey = `${sheetId}||${tabName}`;
+  if (metaCache && metaCache.has(cacheKey)) return metaCache.get(cacheKey);
+  const safeTab = String(tabName || '').replace(/'/g, "''");
+  // gid 미전달 → values.get 경로(후행 빈행 트림). 탭명은 시트 내 유니크(구글 강제)라 안전.
+  const grid = await throttledCall(() => readSheet(sheetId, `'${safeTab}'`, {}));
+  const lastRow = Array.isArray(grid) ? grid.length : 0;
+  if (metaCache) metaCache.set(cacheKey, lastRow);
+  return lastRow;
 }
 
 function toPhone8(v) {
