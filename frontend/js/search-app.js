@@ -820,12 +820,15 @@ document.addEventListener("DOMContentLoaded", () => {
   // ★ mode=form / s= 파라미터 감지 → 구매양식 전용 화면 진입
   if (initOrderFormMode()) return; // 구매양식 모드이면 이후 일반 초기화 스킵
 
-  // ★ 로그인 세션/관리자 세션 없으면 메인(/)으로 리다이렉트 (중복 로그인 화면 방지)
-  // 단, #register 해시로 진입한 경우(리뷰어 등록)는 허용
-  const _hasReviewerSession = (() => { try { const r = localStorage.getItem(REVIEWER_AUTH_KEY); if (!r) return false; const o = JSON.parse(r); return o && Date.now() <= o.expAt; } catch(_){return false;} })();
+  // ★ 구 search.html 메인(screenSearch = "아이에이리뷰" 리뷰내역 화면)은 더 이상 리뷰어 홈이 아니다.
+  //   리뷰어 홈은 index.html(=/)로 일원화 → 일반 진입은 무조건 메인으로 리다이렉트.
+  //   예외(계속 search.html 사용): ① 리뷰어 등록(#register), ② 관리자 바이패스(이름검색),
+  //   ③ index.html 리뷰카드에서 넘어온 직접 제출(iad_direct_submit_items).
+  //   (구매양식 form 모드는 위 initOrderFormMode()에서 이미 return 되어 여기 도달 안 함)
   const _hasAdminSession = (() => { try { const exp = Number(sessionStorage.getItem(ADMIN_BYPASS_KEY) || 0); return Date.now() < exp; } catch(_){return false;} })();
   const _isRegisterMode = location.hash === "#register";
-  if (!_hasReviewerSession && !_hasAdminSession && !_isRegisterMode) {
+  const _hasDirectSubmit = (() => { try { return !!sessionStorage.getItem("iad_direct_submit_items"); } catch(_){return false;} })();
+  if (!_hasAdminSession && !_isRegisterMode && !_hasDirectSubmit) {
     window.location.replace("/");
     return;
   }
@@ -7285,31 +7288,15 @@ function resetOrderFormForReentry() {
   window._submitOrderFormInProgress = false;
 }
 
-/** ★ 제출 완료 화면 → 리뷰어 메인화면(아이에이리뷰)으로 이동 */
+/** ★ 리뷰어 메인화면으로 이동 = 신규 포털(index.html)
+ *  구 search.html 의 screenSearch(아이에이리뷰 리뷰내역 화면)는 더 이상 메인으로 쓰지 않는다.
+ *  리뷰어 로그인 세션(localStorage)은 동일 오리진이라 index.html 에서 그대로 유지된다. */
 function goToReviewerMain() {
-  // 완료 화면/구매양식 입력 상태 정리 (다음 진입 시 깨끗하도록)
-  resetOrderFormForReentry();
-
-  // 구매양식 단축링크 진입 플래그 해제 + 검색 화면 헤더 기본값 복원
+  // 구매양식 입력 상태 정리 (혹시 모를 잔여 상태 초기화)
+  try { resetOrderFormForReentry(); } catch (_) {}
   window._pendingOrderForm = false;
-  const titleEl = document.getElementById("searchTitle");
-  const descEl  = document.getElementById("searchHeaderDesc");
-  if (titleEl) titleEl.textContent = "아이에이리뷰";
-  if (descEl)  descEl.textContent  = "로그인하여 리뷰 내역을 확인하세요";
-
-  // 메인(검색) 화면 표시
-  showScreen("screenSearch");
-
-  // 로그인 상태면 로그인 UI 적용 + 리뷰 내역 조회, 아니면 로그인 화면
-  const session = _loadAuthSession();
-  if (session && session.name) {
-    const nameEl = document.getElementById("nameInput");
-    if (nameEl) nameEl.value = session.name;
-    _applyLoginUI(session.name);
-    doSearch().catch(() => {});
-  } else {
-    _switchAuthTab("login");
-  }
+  // 신규 리뷰어 홈(index.html = 루트)으로 전체 페이지 이동
+  window.location.href = "index.html";
 }
 
 async function quickEditCell(e, cell) {
