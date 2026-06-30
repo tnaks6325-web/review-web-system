@@ -127,7 +127,7 @@
           <div style="display:flex;align-items:center;gap:8px">
             <div id="pagerTop"></div>
             <button id="btnMapping" class="btn btn-ghost btn-sm" onclick="openMapping()" style="display:none"><i class="fas fa-sliders"></i> 컬럼 매핑</button>
-            <button id="btnCsv" class="btn btn-ghost btn-sm" onclick="downloadCsv()" style="display:none" title="이 탭에 저장된 전체 데이터를 CSV로 다운로드"><i class="fas fa-file-csv"></i> CSV 다운로드</button>
+            <button id="btnCsv" class="btn btn-ghost btn-sm" onclick="downloadCsv()" style="display:none" title="이 탭에 실제로 제출된 구매양식(서버 DB)을 CSV로 다운로드 — 시트 붙여넣기용"><i class="fas fa-file-csv"></i> 구매양식 CSV</button>
           </div>
         </div>
         <div id="viewerBody"><div class="empty"><i class="fas fa-table" style="font-size:28px;opacity:.4"></i><br/><br/>왼쪽에서 시트의 탭을 선택하면<br/>해당 탭의 원본 데이터가 표로 표시됩니다.</div></div>
@@ -310,21 +310,26 @@
     await loadRows();
   }
 
-  // 이 탭에 저장된 RAW 행 전체를 CSV로 다운로드 (인증 헤더 필요 → fetch+blob)
+  // 이 탭에 실제로 제출된 구매양식(서버 DB: order_submissions)을 CSV로 다운로드.
+  //   시트 미러가 아니라 원장 원본 → 시트 붙여넣기로 일괄적용용. (인증 헤더 필요 → fetch+blob)
   async function downloadCsv(){
-    if (!_sel) return;
+    if (!_sel || !_sel.tabName) { alert('탭을 먼저 선택하세요.'); return; }
     const btn = document.getElementById('btnCsv');
     const orig = btn.innerHTML; btn.disabled = true; btn.innerHTML = '<i class="fas fa-spinner fa-spin"></i> 준비 중…';
     try {
       const token = sessionStorage.getItem('admin_token');
-      const url = API_BASE_URL + '/api/raw/rows.csv?sheetId=' + encodeURIComponent(_sel.sheetId) + '&gid=' + encodeURIComponent(_sel.gid);
+      const url = API_BASE_URL + '/api/diag/order-stuck-export'
+        + '?sheetId=' + encodeURIComponent(_sel.sheetId)
+        + '&tabName=' + encodeURIComponent(_sel.tabName)
+        + '&includeWritten=true&format=csv&limit=5000';
       const res = await fetch(url, { headers: token ? { 'Authorization': 'Bearer ' + token } : {} });
       if (!res.ok) throw new Error('HTTP ' + res.status);
       const blob = await res.blob();
+      if (blob.size < 40) { alert('이 탭에 제출된 구매양식 데이터가 없습니다.'); return; }
       const dlUrl = URL.createObjectURL(blob);
       const a = document.createElement('a');
       a.href = dlUrl;
-      a.download = 'raw_' + String(_sel.tabName || 'tab').replace(/[^\w가-힣().-]+/g, '_') + '.csv';
+      a.download = '구매양식_' + String(_sel.tabName || 'tab').replace(/[^\w가-힣().-]+/g, '_') + '.csv';
       document.body.appendChild(a); a.click(); a.remove();
       setTimeout(() => URL.revokeObjectURL(dlUrl), 1000);
     } catch (e) {
