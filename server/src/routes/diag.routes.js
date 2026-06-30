@@ -2322,7 +2322,19 @@ router.get('/order-stuck-export', authMiddleware, adminOrMasterMiddleware, async
     if (String(req.query.format || '').toLowerCase() === 'csv') {
       const stMap = { written: '반영완료', queued: '미반영(대기)', failed: '미반영(실패)', pending: '미반영', pending_no_row: '미반영(행없음)' };
       const esc = (v) => { v = String(v == null ? '' : v); return /[",\n\r]/.test(v) ? '"' + v.replace(/"/g, '""') + '"' : v; };
-      const head = ['상태', '시트행', '구매일자', '주문자', '수취인', '네이버아이디', '연락처', '주소', '은행', '계좌번호', '예금주', '결제금액', '주문번호', '비고', '제출시각(UTC)'];
+      // 제출시각을 한국시간(KST)으로 — sv-SE 로캘이 'YYYY-MM-DD HH:mm:ss' 형식을 준다.
+      const fmtKST = (d) => {
+        if (!d) return '';
+        const dt = d instanceof Date ? d : new Date(d);
+        if (isNaN(dt.getTime())) return String(d);
+        try {
+          return new Intl.DateTimeFormat('sv-SE', {
+            timeZone: 'Asia/Seoul', year: 'numeric', month: '2-digit', day: '2-digit',
+            hour: '2-digit', minute: '2-digit', second: '2-digit', hour12: false,
+          }).format(dt);
+        } catch (_) { return dt.toISOString(); }
+      };
+      const head = ['상태', '시트행', '구매일자', '주문자', '수취인', '네이버아이디', '연락처', '주소', '은행', '계좌번호', '예금주', '결제금액', '주문번호', '비고', '제출시각(KST)'];
       const lines = [head.map(esc).join(',')];
       for (const o of rows) {
         let memo = o.memo || '';
@@ -2330,7 +2342,7 @@ router.get('/order-stuck-export', authMiddleware, adminOrMasterMiddleware, async
         const line = [
           stMap[o.mirrorStatus] || o.mirrorStatus || '', o.sheetRow || '', o.dateStr || '', o.orderer || '',
           o.recipient || '', o.userId || '', o.phone || '', o.address || '', o.bank || '', o.account || '',
-          o.depositor || '', o.price || '', o.orderNum || '', memo, o.submittedAt || '',
+          o.depositor || '', o.price || '', o.orderNum || '', memo, fmtKST(o.submittedAt),
         ];
         lines.push(line.map(esc).join(','));
       }
