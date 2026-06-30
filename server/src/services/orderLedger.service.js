@@ -1048,23 +1048,24 @@ async function rowIdentityMatches(os, tabContext) {
 //        · R4(그리드밖/전공란=cancel_suspect 플래그만, 단칸 공란 무시) · R5(order_reconcile 락)
 //        · R10/G5(throttle busy면 양보) · R11(gid 없으면 보류) · G3(기본 sig-not-null 주문만).
 // ════════════════════════════════════════════════════════════════════════
-async function detectReverseSyncProposals({ sheetId, tabName, limit = 200, includeNullSig = false } = {}) {
+async function detectReverseSyncProposals({ sheetId, tabName, limit = 200, includeNullSig = false, ignoreBusy = false } = {}) {
   if (process.env.SHEET_REVERSE_SYNC !== '1') return { skipped: true, reason: 'disabled' };
   if (!sheetId || !tabName) throw new Error('detectReverseSyncProposals: sheetId, tabName 필수');
   const { withJobLock } = require('../utils/jobLock');
   return withJobLock('order_reconcile',
-    () => _detectReverseSyncInner({ sheetId, tabName, limit, includeNullSig }),
+    () => _detectReverseSyncInner({ sheetId, tabName, limit, includeNullSig, ignoreBusy }),
     { onBusy: () => ({ skipped: true, reason: 'order_reconcile_lock_busy' }) });
 }
 
-async function _detectReverseSyncInner({ sheetId, tabName, limit, includeNullSig }) {
+async function _detectReverseSyncInner({ sheetId, tabName, limit, includeNullSig, ignoreBusy }) {
   const db = getPool();
   const { getThrottleStatus, throttledCall } = require('../utils/sheetsThrottle');
   const { readSheet, invalidateSheetMeta } = require('./sheets.service');
 
-  // R10/G5: throttle 여유 없으면 양보(정방향 핫패스 우선).
+  // R10/G5: throttle 여유 없으면 양보(정방향 핫패스 우선). 단 수동 트리거(ignoreBusy)는 1콜뿐이라
+  //   busy-skip 대신 throttledCall이 슬롯을 기다려 실행(관리자 즉시 결과). cron은 ignoreBusy=false로 양보.
   const busyN = parseInt(process.env.REVERSE_SYNC_BUSY || '15', 10);
-  if (getThrottleStatus().requestsInLastMinute > busyN) return { skipped: true, reason: 'throttle_busy' };
+  if (!ignoreBusy && getThrottleStatus().requestsInLastMinute > busyN) return { skipped: true, reason: 'throttle_busy' };
 
   // R11: gid 필수(동명탭 보류). 헤더/gid는 미러 메타에서만(값판정 아님).
   const ctx = await loadRawTabContext(sheetId, null, tabName);
