@@ -74,7 +74,13 @@ function parseTabRows(values, sheetId, tabName, tabGid, campaignTitle, kw, dbCol
   const dataRows = values.slice(headerRowIdx + 1);
 
   // ★ nameColIdx는 키워드 전용(P2b: DB override 제외 — reviewer_name 열 이동 시 phone8 교차노출 위험).
-  const nameColIdx = headers.findIndex(h => NAME_KEYWORDS.some(k => h.includes(k)));
+  //   ★ 이름열 우선순위(사용자 지정): 주문자 계열('주문자'/'주문자제출')을 최우선으로 잡는다.
+  //     리뷰 작성자 = 구매자(주문자)라는 도메인 규칙 — 여러 이름 키워드가 공존하고 수취인이 더 왼쪽이어도
+  //     주문자열이 있으면 그걸 이름열로. 주문자열이 없을 때만 나머지 NAME_KEYWORDS(수취인/이름/…) 폴백.
+  //     (NAME_PRIORITY_KEYWORDS는 '주문자' 하나로 '주문자제출'까지 포함매칭으로 커버.)
+  const NAME_PRIORITY_KEYWORDS = ['주문자'];
+  let nameColIdx = headers.findIndex(h => NAME_PRIORITY_KEYWORDS.some(k => h.includes(k)));
+  if (nameColIdx < 0) nameColIdx = headers.findIndex(h => NAME_KEYWORDS.some(k => h.includes(k)));
   if (nameColIdx < 0) {
     logger.warn(`[parseTabRows] 이름 컬럼 미발견 — tab=${tabName} headerRow=${headerRowIdx} headers=${JSON.stringify(headers.slice(0, 20))} NAME_KEYWORDS=${JSON.stringify(NAME_KEYWORDS)}`);
     return [];

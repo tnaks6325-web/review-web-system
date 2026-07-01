@@ -34,19 +34,36 @@ function run() {
   assert.equal(a.rowIndex, 2, 'headerRow(0)+1+0+1');
   assert.equal(a.campaignName, '캠페인A');
 
-  // ── 케이스2: 수취인형(수취인=name, 주문자 별도→recipientColIdx) + 입금 미제출 ──
+  // ── 케이스2: 주문자 우선순위 — 수취인이 더 왼쪽이어도 주문자열을 이름으로(리뷰어=구매자). ──
+  //   (구 동작: name=수취인. 신 동작: 주문자 우선 → name=주문자, 수취인은 recipientName.)
   const v2 = [
     ['번호', '수취인', '주문자', '전화번호', '리뷰', '입금'],
     ['1', '박수취', '이주문', '01099998888', '', ''],
   ];
   const r2 = parseTabRows(v2, 's2', 'tabB', 'gidB', null, KW);
   assert.equal(r2.length, 1);
-  assert.equal(r2[0].name, '박수취');
-  assert.equal(r2[0].recipientName, '이주문', '수취인형: 주문자열이 recipientColIdx로');
+  assert.equal(r2[0].name, '이주문', '★ 주문자 우선: 수취인이 왼쪽이어도 주문자가 이름열');
+  assert.equal(r2[0].recipientName, '박수취', '★ 주문자 우선 시 수취인은 recipientName로');
   assert.equal(r2[0].isSubmitted, false, '리뷰 빈값 → false');
   assert.equal(r2[0].isSubmitted2, 'NONE', '입금 빈값 → NONE');
   assert.equal(r2[0].phone8, '99998888');
   assert.equal(r2[0].campaignName, 'tabB', 'campaignTitle 없으면 tabName 폴백');
+
+  // ── 케이스2b: 주문자제출(제출 문구 포함)도 '주문자' 포함매칭으로 이름열 우선 획득 ──
+  const v2b = [
+    ['번호', '인애드명단', '주문자제출', '수취인', '연락처', '리뷰제출'],
+    ['1', '인애드A', '제출한이름', '받는이', '010-2222-3333', 'O'],
+  ];
+  const r2b = parseTabRows(v2b, 's2b', 'tabB2', 'g', null, KW);
+  assert.equal(r2b[0].name, '제출한이름', '★ 주문자제출 열이 이름열(주문자 포함매칭)');
+
+  // ── 케이스2c: 주문자열이 없으면 나머지 NAME_KEYWORDS(수취인) 폴백 ──
+  const v2c = [
+    ['번호', '수취인', '연락처', '리뷰제출'],
+    ['1', '수취만', '010-4444-5555', 'O'],
+  ];
+  const r2c = parseTabRows(v2c, 's2c', 'tabB3', 'g', null, KW);
+  assert.equal(r2c[0].name, '수취만', '★ 주문자 없으면 수취인 폴백');
 
   // ── 케이스3: 깊은 헤더(메타 행 선행) + 입금열 없음(isSubmitted2 null) ──
   const v3 = [
