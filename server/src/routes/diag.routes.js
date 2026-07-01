@@ -2227,11 +2227,13 @@ router.post('/order-edit', authMiddleware, adminOrMasterMiddleware, async (req, 
     const out = await withJobLock('order_ledger:' + orderSubmissionId, async () => {
       const sets = clean.map((e, idx) => `${e.field} = $${idx + 2}`); // field는 화이트리스트라 인젝션 불가
       const vals = [orderSubmissionId, ...clean.map(e => e.newValue)];
+      // 심판[치명1]: 편집 확정 즉시 last_edit_seq 단조증가(큐워커 지연 무관) → 무인 역동기가 이 편집을 stale로 인식·보존.
       const { rows } = await pool.query(
-        `UPDATE order_submissions SET ${sets.join(', ')}, updated_at = NOW()
+        `UPDATE order_submissions SET ${sets.join(', ')}, updated_at = NOW(),
+                last_edit_seq = GREATEST(COALESCE(last_edit_seq, 0), $${clean.length + 2})
           WHERE id = $1 AND deleted_at IS NULL
         RETURNING id, mirror_status`,
-        vals
+        [...vals, editSeq]
       );
       if (!rows.length) return { notFound: true };
       await enqueue('order_update', { orderSubmissionId, editSeq, edits: clean });
@@ -2310,9 +2312,10 @@ router.post('/reverse-sync-apply', authMiddleware, adminOrMasterMiddleware, asyn
       // G6: 감지 후 정식 편집/취소가 있었으면 stale → 거부(최신편집을 옛 시트값으로 덮음 방지).
       if (p.detected_edit_seq != null && Number(cur[0].last_edit_seq) !== Number(p.detected_edit_seq)) return { stale: true };
       const { rows: up } = await pool.query(
-        `UPDATE order_submissions SET ${p.field} = $2, updated_at = NOW()
-           WHERE id = $1 AND deleted_at IS NULL RETURNING mirror_status`,    // field=화이트리스트라 인젝션 불가
-        [p.os_id, p.new_value]
+        `UPDATE order_submissions SET ${p.field} = $2, updated_at = NOW(),
+                last_edit_seq = GREATEST(COALESCE(last_edit_seq, 0), $3)
+           WHERE id = $1 AND deleted_at IS NULL RETURNING mirror_status`,     // field=화이트리스트라 인젝션 불가, 치명1: seq 단조증가
+        [p.os_id, p.new_value, editSeq]
       );
       if (!up.length) return { stale: true };
       await enqueue('order_update', { orderSubmissionId: p.os_id, editSeq, edits: [{ field: p.field, oldValue: p.old_value, newValue: p.new_value }] });
@@ -2340,6 +2343,74 @@ router.post('/reverse-sync-dismiss', authMiddleware, adminOrMasterMiddleware, as
       [proposalId, by]
     );
     res.json({ ok: true, dismissed: rowCount });
+  } catch (err) { next(err); }
+});
+
+// ── 무인 자동적용(constrained auto-apply) — 강제 트리거/롤백/상태 (admin/master) ──
+//   게이트는 서비스 내부(SHEET_REVERSE_SYNC=1·REVERSE_SYNC_AUTO=1·ORDER_LEDGER_WRITE_ENABLED=true).
+//   평상시 cron이 자동 수행. 아래는 수동 강제/되돌리기/관측용.
+
+// POST /api/diag/reverse-sync-auto-run { dryRun? } — 무인 사이클 즉시 실행(관리자 강제)
+router.post('/reverse-sync-auto-run', authMiddleware, adminOrMasterMiddleware, async (req, res, next) => {
+  try {
+    if (process.env.SHEET_REVERSE_SYNC !== '1') return res.status(403).json({ ok: false, error: '역동기화 비활성(SHEET_REVERSE_SYNC)' });
+    if (process.env.REVERSE_SYNC_AUTO !== '1') return res.status(403).json({ ok: false, error: '무인 자동적용 비활성(REVERSE_SYNC_AUTO)' });
+    const dryRun = req.body && req.body.dryRun === true;
+    if (dryRun) {
+      // dryRun: detect는 건너뛰고 현재 open 제안에 대한 apply 시뮬레이션만(쓰기 없음).
+      const { autoApplyReverseSync } = require('../services/orderLedger.service');
+      const out = await autoApplyReverseSync({ dryRun: true });
+      return res.json({ ok: true, dryRun: true, apply: out });
+    }
+    const { runReverseSyncAutoCycle } = require('../services/orderLedger.service');
+    const out = await runReverseSyncAutoCycle({});
+    res.json({ ok: true, ...out });
+  } catch (err) { next(err); }
+});
+
+// POST /api/diag/reverse-sync-rollback { proposalId | osId } — 자동적용 되돌리기(DB+시트 원복)
+router.post('/reverse-sync-rollback', authMiddleware, adminOrMasterMiddleware, async (req, res, next) => {
+  try {
+    if (process.env.ORDER_LEDGER_WRITE_ENABLED !== 'true') return res.status(503).json({ ok: false, error: 'order ledger 쓰기 비활성(ORDER_LEDGER_WRITE_ENABLED)' });
+    const { proposalId, osId } = req.body || {};
+    if (!proposalId && !osId) return res.status(400).json({ ok: false, error: 'proposalId 또는 osId 필수' });
+    const { rollbackAutoApplied } = require('../services/orderLedger.service');
+    const out = await rollbackAutoApplied({ proposalId, osId });
+    if (out && out.skipped) return res.status(409).json({ ok: false, error: '다른 편집 진행 중 — 재시도하세요' });
+    if (!out || !out.rolledBack) return res.status(404).json({ ok: false, error: (out && out.reason) || 'not_found' });
+    require('../jobs/queuePump').kickQueuePump();
+    res.json({ ok: true, ...out });
+  } catch (err) { next(err); }
+});
+
+// GET /api/diag/reverse-sync-auto-status — 무인 자동적용 상태/집계(관측)
+router.get('/reverse-sync-auto-status', authMiddleware, adminOrMasterMiddleware, async (req, res, next) => {
+  try {
+    const { autoApplyReverseSync } = require('../services/orderLedger.service');
+    // 심판[중대3]: dryRun은 ORDER_LEDGER_WRITE_ENABLED 게이트를 건너뛰므로, 쓰기 OFF에서 관측용 GET이
+    //   시트 라이브읽기(쿼터 소모)를 하지 않도록 프리뷰는 쓰기게이트 ON일 때만.
+    const dry = (process.env.ORDER_LEDGER_WRITE_ENABLED === 'true')
+      ? await autoApplyReverseSync({ dryRun: true })
+      : { skipped: true, reason: 'ledger_write_disabled_preview_off' };
+    const { rows } = await pool.query(
+      `SELECT
+         COUNT(*) FILTER (WHERE status='open'  AND proposal_type='edit')          AS open_edits,
+         COUNT(*) FILTER (WHERE status='open'  AND proposal_type='cancel_suspect') AS open_cancel_suspects,
+         COUNT(*) FILTER (WHERE status='applied' AND auto_applied=TRUE)            AS auto_applied_total,
+         COUNT(*) FILTER (WHERE status='applied' AND auto_applied=TRUE AND resolved_at > NOW() - INTERVAL '24 hours') AS auto_applied_24h
+       FROM reverse_sync_proposals`
+    );
+    res.json({
+      ok: true,
+      gates: {
+        SHEET_REVERSE_SYNC: process.env.SHEET_REVERSE_SYNC === '1',
+        REVERSE_SYNC_AUTO: process.env.REVERSE_SYNC_AUTO === '1',
+        ORDER_LEDGER_WRITE_ENABLED: process.env.ORDER_LEDGER_WRITE_ENABLED === 'true',
+      },
+      safeFields: require('../services/orderLedger.service')._autoSafeFields(),
+      counts: rows[0],
+      dryRunPreview: dry,
+    });
   } catch (err) { next(err); }
 });
 
