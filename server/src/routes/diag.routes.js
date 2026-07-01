@@ -2343,6 +2343,70 @@ router.post('/reverse-sync-dismiss', authMiddleware, adminOrMasterMiddleware, as
   } catch (err) { next(err); }
 });
 
+// ── 무인 자동적용(constrained auto-apply) — 강제 트리거/롤백/상태 (admin/master) ──
+//   게이트는 서비스 내부(SHEET_REVERSE_SYNC=1·REVERSE_SYNC_AUTO=1·ORDER_LEDGER_WRITE_ENABLED=true).
+//   평상시 cron이 자동 수행. 아래는 수동 강제/되돌리기/관측용.
+
+// POST /api/diag/reverse-sync-auto-run { dryRun? } — 무인 사이클 즉시 실행(관리자 강제)
+router.post('/reverse-sync-auto-run', authMiddleware, adminOrMasterMiddleware, async (req, res, next) => {
+  try {
+    if (process.env.SHEET_REVERSE_SYNC !== '1') return res.status(403).json({ ok: false, error: '역동기화 비활성(SHEET_REVERSE_SYNC)' });
+    if (process.env.REVERSE_SYNC_AUTO !== '1') return res.status(403).json({ ok: false, error: '무인 자동적용 비활성(REVERSE_SYNC_AUTO)' });
+    const dryRun = req.body && req.body.dryRun === true;
+    if (dryRun) {
+      // dryRun: detect는 건너뛰고 현재 open 제안에 대한 apply 시뮬레이션만(쓰기 없음).
+      const { autoApplyReverseSync } = require('../services/orderLedger.service');
+      const out = await autoApplyReverseSync({ dryRun: true });
+      return res.json({ ok: true, dryRun: true, apply: out });
+    }
+    const { runReverseSyncAutoCycle } = require('../services/orderLedger.service');
+    const out = await runReverseSyncAutoCycle({});
+    res.json({ ok: true, ...out });
+  } catch (err) { next(err); }
+});
+
+// POST /api/diag/reverse-sync-rollback { proposalId | osId } — 자동적용 되돌리기(DB+시트 원복)
+router.post('/reverse-sync-rollback', authMiddleware, adminOrMasterMiddleware, async (req, res, next) => {
+  try {
+    if (process.env.ORDER_LEDGER_WRITE_ENABLED !== 'true') return res.status(503).json({ ok: false, error: 'order ledger 쓰기 비활성(ORDER_LEDGER_WRITE_ENABLED)' });
+    const { proposalId, osId } = req.body || {};
+    if (!proposalId && !osId) return res.status(400).json({ ok: false, error: 'proposalId 또는 osId 필수' });
+    const { rollbackAutoApplied } = require('../services/orderLedger.service');
+    const out = await rollbackAutoApplied({ proposalId, osId });
+    if (out && out.skipped) return res.status(409).json({ ok: false, error: '다른 편집 진행 중 — 재시도하세요' });
+    if (!out || !out.rolledBack) return res.status(404).json({ ok: false, error: (out && out.reason) || 'not_found' });
+    require('../jobs/queuePump').kickQueuePump();
+    res.json({ ok: true, ...out });
+  } catch (err) { next(err); }
+});
+
+// GET /api/diag/reverse-sync-auto-status — 무인 자동적용 상태/집계(관측)
+router.get('/reverse-sync-auto-status', authMiddleware, adminOrMasterMiddleware, async (req, res, next) => {
+  try {
+    const { autoApplyReverseSync } = require('../services/orderLedger.service');
+    const dry = await autoApplyReverseSync({ dryRun: true }); // 게이트 OFF면 {skipped}
+    const { rows } = await pool.query(
+      `SELECT
+         COUNT(*) FILTER (WHERE status='open'  AND proposal_type='edit')          AS open_edits,
+         COUNT(*) FILTER (WHERE status='open'  AND proposal_type='cancel_suspect') AS open_cancel_suspects,
+         COUNT(*) FILTER (WHERE status='applied' AND auto_applied=TRUE)            AS auto_applied_total,
+         COUNT(*) FILTER (WHERE status='applied' AND auto_applied=TRUE AND resolved_at > NOW() - INTERVAL '24 hours') AS auto_applied_24h
+       FROM reverse_sync_proposals`
+    );
+    res.json({
+      ok: true,
+      gates: {
+        SHEET_REVERSE_SYNC: process.env.SHEET_REVERSE_SYNC === '1',
+        REVERSE_SYNC_AUTO: process.env.REVERSE_SYNC_AUTO === '1',
+        ORDER_LEDGER_WRITE_ENABLED: process.env.ORDER_LEDGER_WRITE_ENABLED === 'true',
+      },
+      safeFields: require('../services/orderLedger.service')._autoSafeFields(),
+      counts: rows[0],
+      dryRunPreview: dry,
+    });
+  } catch (err) { next(err); }
+});
+
 // POST /api/diag/order-cancel — 주문 소프트삭제(deleted_at) + 시트행 클리어(written이면 큐 order_cancel)
 router.post('/order-cancel', authMiddleware, adminOrMasterMiddleware, async (req, res, next) => {
   try {

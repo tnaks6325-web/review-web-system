@@ -143,6 +143,37 @@ function startCronJobs() {
     }, { timezone: 'Asia/Seoul' });
   }
 
+  // ── 시트→DB 역동기화 무인 사이클(detect+constrained auto-apply): 기본 OFF ──
+  //   REVERSE_SYNC_AUTO=1 에서만 동작(SHEET_REVERSE_SYNC=1·ORDER_LEDGER_WRITE_ENABLED=true 추가게이트는 서비스 내부).
+  //   활성탭 라운드로빈 detect → 안전필드만 apply시점 라이브 재검증 후 자동적용(전용 락 reverse_sync_auto).
+  //   RAW미러(*/5)·reconcile(*/2)와 겹치지 않게 3분 오프셋. throttle busy면 서비스가 양보.
+  if (process.env.REVERSE_SYNC_AUTO === '1') {
+    const reverseAutoSchedule = process.env.REVERSE_SYNC_AUTO_SCHEDULE || '1-59/3 * * * *';
+    let reverseAutoRunning = false;
+    cron.schedule(reverseAutoSchedule, async () => {
+      if (reverseAutoRunning) return;
+      const throttle = getThrottleStatus();
+      const busyThreshold = parseInt(process.env.REVERSE_SYNC_BUSY || '15', 10);
+      if (throttle.requestsInLastMinute > busyThreshold) {
+        logger.debug(`[CRON-ReverseSync] throttle busy (${throttle.requestsInLastMinute}/${throttle.limit}), skip`);
+        return;
+      }
+      reverseAutoRunning = true;
+      try {
+        const { runReverseSyncAutoCycle } = require('../services/orderLedger.service');
+        const r = await runReverseSyncAutoCycle({});
+        if (r && !r.skipped && ((r.detected || 0) > 0 || (r.apply && (r.apply.applied || 0) > 0))) {
+          logger.info(`[CRON-ReverseSync] tabs=${r.activeTabs} detectRuns=${r.detectRuns} detected=${r.detected} applied=${r.apply && r.apply.applied} orders=${r.apply && r.apply.orders} reverifyFail=${r.apply && r.apply.reverifyFail}`);
+        }
+      } catch (err) {
+        logger.error(`[CRON-ReverseSync] error: ${err.message}`);
+        logAbnormal({ flow: 'cron', step: 'reverse_sync_auto', error: err, context: { job: 'reverse_sync_auto' } });
+      } finally {
+        reverseAutoRunning = false;
+      }
+    }, { timezone: 'Asia/Seoul' });
+  }
+
   const schedule = process.env.INDEX_CRON_SCHEDULE || '0 9,15 * * 1-6';
   cron.schedule(schedule, async () => {
     logger.info(`[CRON] 인덱스 빌드 시작: ${new Date().toISOString()}`);
