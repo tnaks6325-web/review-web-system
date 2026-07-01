@@ -762,6 +762,76 @@ async function _executeItem(item) {
       break;
     }
 
+    // ── Phase 2b: 참여자 로스터 → 시트 되쓰기(DB→시트 단방향). order_update/order_cancel 가드 이식. ──
+    case 'participant_mirror': {
+      if (process.env.PARTICIPANTS_SHEET_MIRROR !== '1') return;              // R9: 런타임 이중게이트(끄면 무동작·done)
+      const { sheetId, tabName, ids } = payload;
+      if (!sheetId || !tabName || !Array.isArray(ids) || !ids.length) return;
+      const { _normSubmitCell, _wantMark } = require('./participantMirror.service');
+      const { rowIdentityMatches, loadRawTabContext } = require('./orderLedger.service');
+      const { getThrottleStatus } = require('../utils/sheetsThrottle');
+      const BUSY = parseInt(process.env.PARTICIPANT_MIRROR_BUSY_THRESHOLD || '20', 10);
+
+      const { rows: parts } = await pool.query(
+        `SELECT id, seq, sheet_row, tab_gid, tab_name, sheet_id, phone8, recipient_name,
+                is_submitted, is_paid, submit_col, submit_col2
+           FROM campaign_participants
+          WHERE id = ANY($1::uuid[]) AND deleted_at IS NULL
+            AND source='import' AND sheet_row IS NOT NULL AND tab_gid IS NOT NULL`,
+        [ids]);
+      if (!parts.length) return;
+
+      const tabContext = await loadRawTabContext(sheetId, parts[0].tab_gid, tabName);
+      if (!tabContext || !tabContext.headers || !tabContext.headers.length) throw new Error('RAW 메타 없음'); // 재시도
+      const headers = tabContext.headers;
+
+      for (const p of parts) {
+        // R6: throttle busy면 남은 참여자 양보(멱등이라 재큐 안전).
+        if (getThrottleStatus().requestsInLastMinute > BUSY) {
+          const e = new Error('throttle busy — 참여자 미러 양보'); e.__defer = true; throw e;
+        }
+        // R1: 저장 헤더명 정확일치만(라이브 재감지 금지 — 오감지 열 덮어쓰기 차단).
+        const c1 = p.submit_col ? headers.indexOf(p.submit_col) : -1;
+        const c2 = p.submit_col2 ? headers.indexOf(p.submit_col2) : -1;
+        if (c1 < 0 && c2 < 0) { await _setPStatus(pool, p.id, 'no_col'); continue; }
+
+        // R3: 신원 최소 2칸(연락처+수취인) 둘 다 유효해야 미러 허용(교차오염 방어).
+        //   recipient_name NULL(구 import·미감지 탭)이면 phone 1칸으로 축소되어 위험 → 선차단(no_identity, 자가치유).
+        if (!p.phone8 || !p.recipient_name) { await _setPStatus(pool, p.id, 'no_identity'); continue; }
+        const osLike = { sheet_id: sheetId, sheet_row: p.sheet_row, tab_gid: p.tab_gid, tab_name: tabName,
+                         phone: p.phone8, recipient: p.recipient_name, address: null };
+        const idy = await rowIdentityMatches(osLike, tabContext);            // 1콜(사각형)
+        if (!idy.match) { await _setPStatus(pool, p.id, 'identity_mismatch'); continue; } // 그리드밖도 미러 안 함
+
+        // R2/R6: 제출·입금 셀을 한 사각형으로 읽어 가드(행당 1콜). 빈칸-only 쓰기.
+        const cols = [c1, c2].filter(c => c >= 0);
+        const minC = Math.min(...cols), maxC = Math.max(...cols);
+        invalidateSheetMeta(sheetId);
+        const rng = `'${tabName}'!${_getColLetter(minC)}${p.sheet_row}:${_getColLetter(maxC)}${p.sheet_row}`;
+        const read = await throttledCall(() => readSheet(sheetId, rng, { gid: p.tab_gid }));
+        const cells = (read && read[0]) || [];
+        const writeData = [];
+        let conflict = false;
+        for (const [col, flag] of [[c1, p.is_submitted], [c2, p.is_paid]]) {
+          if (col < 0) continue;
+          const wantNew = _normSubmitCell(_wantMark(flag));
+          const cur = _normSubmitCell(cells[col - minC]);
+          if (cur === wantNew) continue;                                     // R5: 멱등 no-op
+          if (cur === '') {                                                  // R2: 빈칸-only(보수)
+            writeData.push({ range: `'${tabName}'!${_getColLetter(col)}${p.sheet_row}`, values: [[_wantMark(flag)]] });
+          } else { conflict = true; }                                        // R3: 사람 손 → 클로버 금지
+        }
+        if (writeData.length) {
+          await throttledCall(() => batchUpdateSheet(sheetId, writeData, 'RAW', { gid: p.tab_gid }));
+        }
+        const sig = `s=${_normSubmitCell(_wantMark(p.is_submitted))}|p=${_normSubmitCell(_wantMark(p.is_paid))}`;
+        await pool.query(
+          `UPDATE campaign_participants SET last_sheet_write_sig=$2, mirror_status=$3, updated_at=NOW() WHERE id=$1`,
+          [p.id, sig, conflict ? 'conflict' : 'written']);
+      }
+      break;
+    }
+
     default: {
       // ★ PR-B(R12): 롤링배포 중 old 인스턴스가 new가 enqueue한 신규 타입을 만나면 throw 대신 보류(defer).
       const e = new Error(`미지원 큐 타입(보류): ${item.type}`);
@@ -769,6 +839,10 @@ async function _executeItem(item) {
       throw e;
     }
   }
+}
+
+async function _setPStatus(pool, id, st) {
+  await pool.query(`UPDATE campaign_participants SET mirror_status=$2, updated_at=NOW() WHERE id=$1`, [id, st]);
 }
 
 // ── 큐 통계 조회 ──

@@ -103,4 +103,16 @@ router.post('/delete', authMiddleware, masterOnlyMiddleware, async (req, res, ne
   } catch (err) { next(err); }
 });
 
+// ── Phase 2b: 탭단위 DB→시트 되쓰기 트리거 (master 전용 · 게이트 이중 · 기본 OFF) ──
+router.post('/mirror-tab', authMiddleware, masterOnlyMiddleware, async (req, res, next) => {
+  try {
+    if (process.env.PARTICIPANTS_SHEET_MIRROR !== '1')
+      return res.status(403).json({ ok: false, error: '시트 미러 비활성(PARTICIPANTS_SHEET_MIRROR)' });
+    const { sheetId, tabName } = req.body || {};
+    if (!sheetId || !tabName) return res.status(400).json({ ok: false, error: 'sheetId, tabName 필수' });
+    const out = await require('../services/participantMirror.service').enqueueTabMirror({ sheetId, tabName, by: _by(req) });
+    res.json({ ok: true, ...out });
+  } catch (err) { next(err); }
+});
+
 module.exports = router;

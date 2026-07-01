@@ -27,8 +27,8 @@ async function importTabFromIndex({ sheetId, tabName, dryRun = false, by = 'test
   if (!sheetId || !tabName) throw new Error('importTabFromIndex: sheetId, tabName 필수');
   const db = getPool();
   const { rows: idx } = await db.query(
-    `SELECT reviewer_name, tab_gid, campaign_name, row_index, is_submitted, is_submitted2,
-            product_url, product_name, row_json, start_date, end_date, round, phone8
+    `SELECT reviewer_name, recipient_name, tab_gid, campaign_name, row_index, is_submitted, is_submitted2,
+            submit_col, submit_col2, product_url, product_name, row_json, start_date, end_date, round, phone8
        FROM review_index
       WHERE sheet_id = $1 AND tab_name = $2 AND row_index IS NOT NULL
       ORDER BY row_index`,
@@ -53,20 +53,23 @@ async function importTabFromIndex({ sheetId, tabName, dryRun = false, by = 'test
     const isPaid = r.is_submitted2 === 'PAID';
     const res = await db.query(
       `INSERT INTO campaign_participants
-         (sheet_id, tab_gid, tab_name, campaign_name, seq, reviewer_name, phone8, round,
+         (sheet_id, tab_gid, tab_name, campaign_name, seq, reviewer_name, recipient_name, phone8, round,
           product_name, product_url, start_date, end_date, is_submitted, is_paid, source,
-          sheet_row, row_json, imported_at, updated_at, updated_by)
-       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,'import',$5,$15,NOW(),NOW(),$16)
+          sheet_row, submit_col, submit_col2, row_json, imported_at, updated_at, updated_by)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,'import',$5,$16,$17,$18,NOW(),NOW(),$19)
        ON CONFLICT (sheet_id, tab_name, seq) DO UPDATE SET
          tab_gid = EXCLUDED.tab_gid, campaign_name = EXCLUDED.campaign_name,
-         reviewer_name = EXCLUDED.reviewer_name, phone8 = EXCLUDED.phone8, round = EXCLUDED.round,
+         reviewer_name = EXCLUDED.reviewer_name, recipient_name = EXCLUDED.recipient_name,
+         phone8 = EXCLUDED.phone8, round = EXCLUDED.round,
          product_name = EXCLUDED.product_name, product_url = EXCLUDED.product_url,
          start_date = EXCLUDED.start_date, end_date = EXCLUDED.end_date,
+         submit_col = EXCLUDED.submit_col, submit_col2 = EXCLUDED.submit_col2,
          row_json = EXCLUDED.row_json, sheet_row = EXCLUDED.sheet_row,
          deleted_at = NULL, imported_at = NOW()
        RETURNING (xmax = 0) AS inserted`,
-      [sheetId, r.tab_gid, tabName, r.campaign_name, r.row_index, r.reviewer_name, r.phone8, r.round,
+      [sheetId, r.tab_gid, tabName, r.campaign_name, r.row_index, r.reviewer_name, r.recipient_name, r.phone8, r.round,
        r.product_name, r.product_url, r.start_date, r.end_date, !!r.is_submitted, isPaid,
+       r.submit_col || null, r.submit_col2 || null,
        JSON.stringify(r.row_json || {}), String(by).slice(0, 100)]
     );
     if (res.rows[0] && res.rows[0].inserted) inserted++; else updated++;
