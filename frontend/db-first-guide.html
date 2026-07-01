@@ -1,0 +1,143 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>새 기능 안내 — 캠페인탭 참여자 명단(시스템 관리)</title>
+<style>
+  :root{ --ink:#1f2328; --mut:#5b6470; --line:#e2e6ea; --bg:#f5f7fa; --blue:#0b62d6; --blue-bg:#e7f0ff;
+         --green:#1a7f37; --green-bg:#e6f6ec; --amber:#9a6700; --amber-bg:#fff8db; --red:#cf222e; }
+  *{box-sizing:border-box}
+  body{margin:0;font-family:'Apple SD Gothic Neo','Malgun Gothic',system-ui,sans-serif;color:var(--ink);background:var(--bg);line-height:1.65}
+  .wrap{max-width:900px;margin:0 auto;padding:22px 18px 70px}
+  h1{font-size:23px;margin:0 0 4px}
+  h2{font-size:18px;margin:30px 0 10px;padding-bottom:6px;border-bottom:2px solid var(--ink)}
+  h3{font-size:15px;margin:16px 0 6px}
+  p,li{font-size:14.5px}
+  .sub{color:var(--mut);margin:0 0 6px}
+  .card{background:#fff;border:1px solid var(--line);border-radius:12px;padding:15px 17px;margin:12px 0;box-shadow:0 1px 3px rgba(0,0,0,.04)}
+  .lead{font-size:15px;background:var(--blue-bg);border-left:4px solid var(--blue);padding:13px 16px;border-radius:0 10px 10px 0;margin:12px 0}
+  .safe{background:var(--green-bg);border-left:4px solid var(--green);padding:12px 16px;border-radius:0 10px 10px 0;margin:12px 0;font-size:14px}
+  .warn{background:var(--amber-bg);border-left:4px solid var(--amber);padding:12px 16px;border-radius:0 10px 10px 0;margin:12px 0;font-size:14px}
+  /* flow */
+  .flow{display:flex;align-items:stretch;gap:0;flex-wrap:wrap;margin:10px 0}
+  .fbox{flex:1;min-width:120px;background:#fff;border:1.5px solid var(--line);border-radius:10px;padding:11px 10px;text-align:center;font-size:13px}
+  .fbox b{display:block;font-size:13.5px;margin-bottom:2px}
+  .fbox small{color:var(--mut);font-size:11.5px}
+  .farr{display:flex;align-items:center;justify-content:center;font-size:20px;color:#9aa4af;padding:0 3px}
+  .step{display:flex;gap:12px;align-items:flex-start;margin:10px 0}
+  .num{flex:none;width:26px;height:26px;border-radius:50%;background:var(--blue);color:#fff;font-weight:800;font-size:13px;display:flex;align-items:center;justify-content:center;margin-top:1px}
+  /* wireframe */
+  .wf{background:#fbfcfd;border:1.5px solid #b9c2cc;border-radius:12px;overflow:hidden;margin:12px 0}
+  .wf-top{background:#eaeef2;border-bottom:1.5px solid #b9c2cc;padding:8px 13px;font-size:12.5px;font-weight:700;display:flex;gap:8px;align-items:center}
+  .dot{width:9px;height:9px;border-radius:50%;background:#cbd3da}
+  .wf-body{padding:13px}
+  .pill{display:inline-flex;align-items:center;gap:5px;background:#fff;border:1px solid var(--line);border-radius:7px;padding:5px 10px;font-size:12.5px;margin:2px}
+  .btn{display:inline-flex;align-items:center;background:var(--blue);color:#fff;border-radius:7px;padding:6px 11px;font-size:12.5px;font-weight:700;margin:2px}
+  .btn.g{background:var(--green)}
+  .btn.gray{background:#eef1f4;color:#333}
+  table.wg{width:100%;border-collapse:collapse;font-size:12px;margin-top:8px}
+  table.wg th,table.wg td{border:1px solid #d7dee5;padding:5px 7px;text-align:left}
+  table.wg th{background:#f0f3f6}
+  .muted{color:var(--mut);font-size:12.5px}
+  .q{font-weight:700;color:var(--blue)}
+  .badge{display:inline-block;font-size:11px;font-weight:700;padding:1px 8px;border-radius:20px}
+  .b-now{background:var(--green-bg);color:var(--green)}
+  .b-soon{background:#eef1f4;color:#5b6470}
+</style>
+</head>
+<body>
+<div class="wrap">
+
+  <h1>📋 새 기능 안내 — 캠페인탭 <b>참여자 명단</b>을 시스템에서 직접 관리</h1>
+  <p class="sub">지금까지 구글시트로만 하던 캠페인 참여자 관리를, <b>시스템 안에서</b> 확인·편집할 수 있게 준비했습니다. (현재 안전 테스트 단계)</p>
+
+  <div class="lead">
+    <b>한 줄 요약</b> — 캠페인탭의 <b>참여자 명단</b>(리뷰어 목록 + 리뷰제출·입금 표시 + 차수·상품)을
+    구글시트를 열지 않고도 <b>시스템 화면에서 보고·고칠 수 있게</b> 만드는 중입니다.
+    지금은 <b>테스트 저장공간</b>에서만 동작하며, <b>실제 서비스(리뷰어·구글시트)에는 아무 영향이 없습니다.</b>
+  </div>
+
+  <h2>1. 왜 만들었나요?</h2>
+  <div class="card">
+    <ul>
+      <li><b>시트는 탭마다 제각각</b> — 헤더 위치·이름이 달라(예: <i>리뷰제출</i> vs <i>리뷰</i>) 시스템이 잘못 읽는 경우가 있었습니다.</li>
+      <li><b>이중 관리</b> — 입금·상태가 시트와 시스템에 따로 있어 안 맞을 수 있었습니다.</li>
+      <li>→ <b>참여자 명단의 "진짜 원본"을 시스템(DB)으로</b> 옮기면, 이런 혼선이 사라지고 관리가 한 곳에서 됩니다.</li>
+    </ul>
+  </div>
+
+  <h2>2. 전체 그림 (아주 쉽게)</h2>
+  <div class="flow">
+    <div class="fbox"><b>구글시트</b><small>지금까지의 원본</small></div>
+    <div class="farr">→</div>
+    <div class="fbox"><b>시스템으로 가져오기</b><small>명단을 복사</small></div>
+    <div class="farr">→</div>
+    <div class="fbox"><b>시스템에서 관리</b><small>보기·추가·수정·삭제</small></div>
+    <div class="farr">→</div>
+    <div class="fbox"><b>(선택) 시트로 되보내기</b><small>원하면 시트도 최신</small></div>
+  </div>
+  <p class="muted">지금은 <b>가운데 두 칸</b>(가져오기·시스템에서 관리)까지 테스트할 수 있습니다. 맨 오른쪽(시트로 되보내기)은 준비만 해두고 꺼져 있습니다.</p>
+
+  <h2>3. 화면 미리보기 (이렇게 생겼습니다)</h2>
+  <div class="wf">
+    <div class="wf-top"><span class="dot"></span><span class="dot"></span><span class="dot"></span> &nbsp;캠페인탭 참여자 명단 (테스트 화면)</div>
+    <div class="wf-body">
+      <div style="margin-bottom:8px">
+        <span class="pill">캠페인/탭 선택 ▾ <b>6/10 온열안대</b></span>
+        <span class="btn">미리보기</span>
+        <span class="btn g">명단 가져오기</span>
+        <span class="btn gray">원본과 비교</span>
+        <span class="btn gray">명단 보기</span>
+        <span class="btn g">＋ 참여자 추가</span>
+      </div>
+      <table class="wg">
+        <tr><th>순번</th><th>참여자(인애드명)</th><th>연락처</th><th>차수</th><th>상품</th><th>리뷰제출</th><th>입금</th><th>수정/삭제</th></tr>
+        <tr><td>1</td><td>인애드A</td><td>••••1234</td><td>2</td><td>온열안대</td><td>✅</td><td>✅</td><td>✎ 🗑</td></tr>
+        <tr><td>2</td><td>인애드B</td><td>••••5678</td><td>2</td><td>온열안대</td><td>✅</td><td>⬜</td><td>✎ 🗑</td></tr>
+        <tr><td>3</td><td>인애드C</td><td>••••9012</td><td>2</td><td>온열안대</td><td>⬜</td><td>⬜</td><td>✎ 🗑</td></tr>
+      </table>
+      <p class="muted" style="margin-top:6px">체크박스(✅/⬜)를 눌러 리뷰제출·입금을 표시. ✎로 수정, 🗑로 삭제. 연락처는 뒷자리만 보입니다.</p>
+    </div>
+  </div>
+
+  <h2>4. 사용 흐름 (단계별)</h2>
+  <div class="card">
+    <div class="step"><div class="num">1</div><div><b>탭 선택</b> — 위 셀렉터에서 관리할 캠페인 탭을 고릅니다.</div></div>
+    <div class="step"><div class="num">2</div><div><b>미리보기</b> — 그 탭 시트에서 <b>몇 명이 들어올지</b> 먼저 확인합니다. (저장 안 함)</div></div>
+    <div class="step"><div class="num">3</div><div><b>명단 가져오기</b> — 시트의 참여자 명단을 <b>시스템으로 복사</b>합니다.</div></div>
+    <div class="step"><div class="num">4</div><div><b>명단 보기 / 관리</b> — 리뷰제출·입금 <b>체크</b>, 참여자 <b>추가·수정·삭제</b>를 시스템에서 바로 합니다.</div></div>
+    <div class="step"><div class="num">5</div><div><b>원본과 비교</b> — 시스템 명단이 시트와 <b>같은지</b> 한 번에 확인합니다.</div></div>
+  </div>
+
+  <h2>5. 꼭 알아둘 점 (안전)</h2>
+  <div class="safe">
+    ✅ <b>지금은 전부 "테스트 저장공간"에만 반영됩니다.</b> 여기서 무엇을 하든 <b>리뷰어 화면·검색·구글시트·주문</b>은 전혀 바뀌지 않습니다.
+    마음껏 눌러보셔도 실제 업무에 영향이 없습니다.
+  </div>
+  <div class="warn">
+    🔑 <b>지금은 최고관리자(master) 전용</b>입니다. 일반 관리자·AE담당자 화면에는 아직 나타나지 않습니다.
+    충분히 검증한 뒤 단계적으로 넓힐 예정입니다.
+  </div>
+
+  <h2>6. 앞으로 (단계 로드맵)</h2>
+  <div class="card">
+    <table class="wg">
+      <tr><th>단계</th><th>내용</th><th>상태</th></tr>
+      <tr><td>1</td><td>시트 명단을 시스템으로 가져오기 · 보기 · 비교</td><td><span class="badge b-now">사용 가능</span></td></tr>
+      <tr><td>2</td><td>참여자 추가 · 수정 · 삭제 (테스트 저장공간)</td><td><span class="badge b-now">사용 가능</span></td></tr>
+      <tr><td>2-보조</td><td>시스템 명단을 실제 시트로 되보내기(선택)</td><td><span class="badge b-soon">준비됨·꺼짐</span></td></tr>
+      <tr><td>기반</td><td>시스템 명단을 자동으로 최신 유지</td><td><span class="badge b-soon">준비됨·꺼짐</span></td></tr>
+      <tr><td>3</td><td>검색·리뷰어조회가 시스템 명단을 원본으로 사용(탭 1개부터)</td><td><span class="badge b-soon">다음 예정</span></td></tr>
+    </table>
+    <p class="muted" style="margin-top:6px">각 단계는 오류 검증(적대적 검토)을 거쳐, 문제가 생기면 <b>즉시 되돌릴 수 있게</b> 켜고 끄는 스위치로 도입합니다.</p>
+  </div>
+
+  <div class="lead" style="margin-top:22px">
+    <span class="q">질문/이상한 점이 보이면</span> 편하게 알려주세요. 실제 서비스에 영향 없는 테스트 단계라, 지금 많이 눌러보고 피드백 주실수록 좋습니다. 🙏
+  </div>
+
+  <p class="muted" style="margin-top:16px">이 안내는 관리자 대시보드 공지에서 다시 열 수 있습니다.</p>
+</div>
+</body>
+</html>
