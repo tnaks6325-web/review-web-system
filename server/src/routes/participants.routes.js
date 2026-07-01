@@ -42,6 +42,20 @@ router.get('/compare', authMiddleware, masterOnlyMiddleware, async (req, res, ne
   } catch (err) { next(err); }
 });
 
+// POST /api/participants/sync { sheetId?, tabName? } — DB를 review_index에서 최신화(수동편집 보존).
+//   sheetId/tabName 주면 그 탭만, 없으면 이미 가져온 전 탭. 시트 재읽기 0(review_index=DB). master 전용.
+router.post('/sync', authMiddleware, masterOnlyMiddleware, async (req, res, next) => {
+  try {
+    const { sheetId, tabName } = req.body || {};
+    if (sheetId && tabName) {
+      const out = await svc.importTabFromIndex({ sheetId, tabName, by: _by(req) });
+      return res.json({ ok: true, tab: tabName, ...out });
+    }
+    const out = await svc.syncImportedTabs({ by: _by(req) });
+    res.json({ ok: true, ...out });
+  } catch (err) { next(err); }
+});
+
 // GET /api/participants/tabs — 프리뷰 탭 셀렉터용 활성 캠페인 탭(master 전용)
 router.get('/tabs', authMiddleware, masterOnlyMiddleware, async (req, res, next) => {
   try {
