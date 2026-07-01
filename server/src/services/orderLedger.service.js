@@ -1305,7 +1305,10 @@ async function _autoApplyInner({ limit, dryRun }) {
     for (const f of REVERSE_SYNC_FIELDS) { const c = _fieldToCol(headers, f); if (c >= 0) fieldCols[f] = c; }
     const idFields = ['phone', 'recipient', 'address'].filter(f => fieldCols[f] != null);
     const editCols = tabProps.map(p => fieldCols[p.field]).filter(c => c != null);
-    if (!editCols.length || !idFields.length) { tabsSkipped++; continue; }
+    if (!editCols.length) { tabsSkipped++; continue; }
+    // 심판[중대2]: 무인 자동적용은 신원 3칸(연락처+수취인+주소) 전부 매핑될 때만.
+    //   라이브 헤더 재감지에서 한 칸이라도 사라지면(약한 신원검증) 자동 대상서 제외 → 그 탭은 수동 apply로.
+    if (idFields.length < 3) { tabsSkipped++; continue; }
     const cols = [...editCols, ...idFields.map(f => fieldCols[f])];
     const minC = Math.min(...cols), maxC = Math.max(...cols);
     const rowsN = tabProps.map(p => p.sheet_row);
@@ -1368,21 +1371,25 @@ async function _autoApplyInner({ limit, dryRun }) {
           toApply.push({ propId: p.id, field: p.field, newValue: p.new_value, appliedOld: dbCur == null ? '' : String(dbCur) });
         }
 
-        if (dryRun) return { wouldApply: toApply.length, wouldDismiss: dismiss.length, applying: toApply };
+        if (dryRun) return { appliedFields: 0, dismissed: 0, wouldApply: toApply.length, wouldDismiss: dismiss.length };
 
         // stale/재검증실패 제안 정리(open→dismissed) — detect가 유효하면 재생성.
         for (const id of dismiss) {
           await db.query(`UPDATE reverse_sync_proposals SET status='dismissed', resolved_at=NOW(), resolved_by='auto:reverify' WHERE id=$1 AND status='open'`, [id]);
         }
-        if (!toApply.length) return { onlyDismissed: dismiss.length };
+        if (!toApply.length) return { appliedFields: 0, dismissed: dismiss.length };
 
-        // 다중필드 원자 UPDATE(화이트리스트 필드만 → 인젝션 불가) + 쿨다운 스탬프.
+        // 심판[치명1]: 편집 확정 시점에 last_edit_seq를 락 안에서 즉시 단조증가 →
+        //   큐워커 지연과 무관하게 후속 detect/apply가 이 자동적용을 stale로 인식(관리자편집 덮어쓰기 창 차단).
+        //   editSeq는 UPDATE와 enqueue가 동일값을 써야 큐워커 GREATEST가 no-op.
+        const editSeq = Date.now();
+        // 다중필드 원자 UPDATE(화이트리스트 필드만 → 인젝션 불가) + 쿨다운 스탬프 + edit_seq 단조증가.
         const sets = toApply.map((e, i) => `${e.field} = $${i + 2}`);
         const vals = [osId, ...toApply.map(e => e.newValue)];
         await db.query(
-          `UPDATE order_submissions SET ${sets.join(', ')}, updated_at = NOW(), reverse_sync_last_auto_at = NOW()
-             WHERE id = $1 AND deleted_at IS NULL`, vals);
-        const editSeq = Date.now();
+          `UPDATE order_submissions SET ${sets.join(', ')}, updated_at = NOW(), reverse_sync_last_auto_at = NOW(),
+                  last_edit_seq = GREATEST(COALESCE(last_edit_seq, 0), $${vals.length + 1})
+             WHERE id = $1 AND deleted_at IS NULL`, [...vals, editSeq]);
         await enqueue('order_update', { orderSubmissionId: osId, editSeq,
           edits: toApply.map(e => ({ field: e.field, oldValue: e.appliedOld, newValue: e.newValue })) });
         for (const e of toApply) {
@@ -1394,9 +1401,10 @@ async function _autoApplyInner({ limit, dryRun }) {
       });
 
       if (!out) continue; // 락 busy 등 → 다음 사이클
-      if (out.appliedFields) { applied += out.appliedFields; ordersApplied++; dismissed += (out.dismissed || 0); }
-      else if (out.wouldApply != null) { applied += out.wouldApply; if (out.wouldApply) ordersApplied++; }
-      else if (out.onlyDismissed) { dismissed += out.onlyDismissed; reverifyFail++; }
+      // dryRun은 wouldApply/wouldDismiss로 실행 예측(실적용과 동일 의미의 집계).
+      const addApplied = out.wouldApply != null ? out.wouldApply : (out.appliedFields || 0);
+      const addDismissed = out.wouldDismiss != null ? out.wouldDismiss : (out.dismissed || 0);
+      if (addApplied || addDismissed) { applied += addApplied; if (addApplied) ordersApplied++; dismissed += addDismissed; }
       else if (out.identityFail) { reverifyFail++; }
       else if (out.staleOrder) { staleG6++; }
       // cooldown → 조용히 스킵(다음 사이클)
@@ -1421,17 +1429,21 @@ async function rollbackAutoApplied({ proposalId, osId } = {}) {
   if (!rows.length) return { rolledBack: 0, reason: 'not_found' };
   const p = rows[0];
   if (!REVERSE_SYNC_FIELDS.includes(p.field)) return { rolledBack: 0, reason: 'field_not_allowed' }; // 인젝션 방어
+  const restore = p.applied_old_value == null ? '' : p.applied_old_value; // 코드리뷰[#3]: NULL→'' 정규화(비교 일관)
   return withJobLock('order_ledger:' + p.os_id, async () => {
     const { rows: cu } = await db.query(`SELECT deleted_at FROM order_submissions WHERE id = $1`, [p.os_id]);
     if (!cu.length || cu[0].deleted_at) return { rolledBack: 0, reason: 'order_deleted' };
     const editSeq = Date.now();
+    // 롤백도 편집 확정이므로 last_edit_seq 단조증가(치명1 일관) — 자동적용값을 stale로 만들어 재적용 차단.
     await db.query(
-      `UPDATE order_submissions SET ${p.field} = $2, updated_at = NOW() WHERE id = $1 AND deleted_at IS NULL`,
-      [p.os_id, p.applied_old_value]);
+      `UPDATE order_submissions SET ${p.field} = $2, updated_at = NOW(),
+              last_edit_seq = GREATEST(COALESCE(last_edit_seq, 0), $3)
+         WHERE id = $1 AND deleted_at IS NULL`,
+      [p.os_id, restore, editSeq]);
     await enqueue('order_update', { orderSubmissionId: p.os_id, editSeq,
-      edits: [{ field: p.field, oldValue: p.new_value, newValue: p.applied_old_value }] });
+      edits: [{ field: p.field, oldValue: p.new_value, newValue: restore }] });
     await db.query(`UPDATE reverse_sync_proposals SET status='dismissed', resolved_at=NOW(), resolved_by='rollback' WHERE id = $1`, [p.id]);
-    return { rolledBack: 1, field: p.field, osId: p.os_id, restored: p.applied_old_value };
+    return { rolledBack: 1, field: p.field, osId: p.os_id, restored: restore };
   });
 }
 
@@ -1440,6 +1452,8 @@ async function rollbackAutoApplied({ proposalId, osId } = {}) {
 let _reverseAutoCursor = 0;
 async function runReverseSyncAutoCycle({ tabsPerCycle } = {}) {
   if (process.env.SHEET_REVERSE_SYNC !== '1' || process.env.REVERSE_SYNC_AUTO !== '1') return { skipped: true, reason: 'disabled' };
+  // 코드리뷰[#4]/심판[중대3]: 쓰기게이트 OFF면 detect(라이브 시트읽기=쿼터) 자체를 건너뜀(순수 옵트인).
+  if (process.env.ORDER_LEDGER_WRITE_ENABLED !== 'true') return { skipped: true, reason: 'ledger_write_disabled' };
   const db = getPool();
   const perCycle = Math.min(Math.max(parseInt(tabsPerCycle || process.env.REVERSE_SYNC_TABS_PER_CYCLE || '3', 10), 1), 30);
   // 시트 편집은 주문 updated_at을 바꾸지 않으므로 시간필터 없이 written+sig 탭 전체를 라운드로빈(오래된 주문의 시트편집도 커버).

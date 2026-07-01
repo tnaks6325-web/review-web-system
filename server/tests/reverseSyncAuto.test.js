@@ -28,9 +28,10 @@ let _enqueues = [];
 mockModule('../src/services/syncQueue.service', {
   enqueue: async (type, payload) => { _enqueues.push({ type, payload }); },
 });
-// 라이브 헤더 재감지 → 고정 헤더(orderer,user_id,recipient,phone,address,memo,date_str)
+// 라이브 헤더 재감지 → 고정 헤더(orderer,user_id,recipient,phone,address,memo,date_str). _liveHeaders로 가변.
+let _liveHeaders = ['주문자', '아이디', '수취인', '연락처', '주소', '비고', '일자'];
 mockModule('../src/utils/sheetHeader', {
-  detectSheetHeader: () => ({ headers: ['주문자', '아이디', '수취인', '연락처', '주소', '비고', '일자'] }),
+  detectSheetHeader: () => ({ headers: _liveHeaders }),
   normalizeCells: (x) => x,
 });
 
@@ -142,6 +143,36 @@ async function run() {
   assert.equal(off.skipped, true, 'F: REVERSE_SYNC_AUTO=0 → skipped');
   process.env.REVERSE_SYNC_AUTO = '1';
   console.log('  (F) 게이트 OFF skip 통과');
+
+  // ── (G) 심판[중대2]: 라이브 헤더에서 신원칸(수취인) 소실 → idFields<3 → 탭 스킵(미적용) ──
+  _liveHeaders = ['주문자', '아이디', '연락처', '주소', '비고', '일자']; // 수취인 없음
+  r = await withScenario({ candidates: [{ ...baseCandidate }], order: { ...baseOrder } },
+    [gridRow('홍길동', '01011112222', '서울시', '새메모')],
+    () => ledger.autoApplyReverseSync({}));
+  assert.equal(r.applied, 0, 'G: 신원 3칸 미매핑 → 미적용');
+  assert.equal(r.tabsSkipped, 1, 'G: 탭 스킵 집계');
+  assert.equal(_enqueues.length, 0, 'G: enqueue 없음');
+  _liveHeaders = ['주문자', '아이디', '수취인', '연락처', '주소', '비고', '일자']; // 복구
+  console.log('  (G) idFields<3 탭 스킵 통과');
+
+  // ── (H) 심판[치명1]: 감지 후 관리자 편집(last_edit_seq 6 > detected 5) → G6 dismiss(관리자값 보존) ──
+  r = await withScenario({ candidates: [{ ...baseCandidate, detected_edit_seq: 5 }], order: { ...baseOrder, last_edit_seq: 6 } },
+    [gridRow('홍길동', '01011112222', '서울시', '새메모')],
+    (pool) => ledger.autoApplyReverseSync({}).then(o => ({ o, pool })));
+  assert.equal(r.o.applied, 0, 'H: G6 stale → 미적용(관리자편집 보존)');
+  assert.equal(r.pool.calls.dismissed.length, 1, 'H: stale 제안 dismiss');
+  assert.equal(_enqueues.length, 0, 'H: enqueue 없음');
+  console.log('  (H) G6 편집경쟁 stale 차단 통과');
+
+  // ── (I) 치명1: 적용 시 UPDATE의 last_edit_seq 파라미터 == enqueue editSeq(동일값 → 큐워커 no-op) ──
+  r = await withScenario({ candidates: [{ ...baseCandidate }], order: { ...baseOrder } },
+    [gridRow('홍길동', '01011112222', '서울시', '새메모')],
+    (pool) => ledger.autoApplyReverseSync({}).then(() => pool));
+  const upd = r.calls.updates[0];
+  const seqParam = upd.params[upd.params.length - 1];     // UPDATE 마지막 파라미터 = editSeq
+  assert.equal(seqParam, _enqueues[0].payload.editSeq, 'I: UPDATE last_edit_seq == enqueue editSeq');
+  assert.ok(/last_edit_seq = GREATEST/.test(upd.s), 'I: UPDATE에 last_edit_seq 단조증가 포함');
+  console.log('  (I) last_edit_seq 단조증가 정합 통과');
 }
 
 run().then(() => console.log('reverseSyncAuto tests passed')).catch(e => { console.error(e); process.exit(1); });

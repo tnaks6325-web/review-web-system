@@ -21,8 +21,9 @@ const { logger } = require('./logger');
 // 작업 이름(문자열) → 두 개의 32-bit 정수 키(64-bit advisory lock).
 //   안정적·결정적 해시여야 인스턴스 간 같은 이름이 같은 키로 매핑된다.
 //   ⚠️ 향후 락 이름을 추가할 때 주의: 서로 다른 이름이 같은 키로 해시 충돌하면
-//   무관한 두 작업이 조용히 직렬화된다(한쪽이 다른쪽 보유 중 항상 양보). 현재는
-//   'order_reconcile' 한 개뿐이라 무해. 이름이 늘면 충돌 없는 고정 상수 키 권장.
+//   무관한 두 작업이 조용히 직렬화된다(한쪽이 다른쪽 보유 중 항상 양보).
+//   현재 사용 이름: 'order_reconcile', 'queue_pump_drain', 'reverse_sync_auto', 'order_ledger:<id>'.
+//   신규 추가 시 tests/… 또는 `node -e "require('./jobLock')._lockKeys('name')"`로 기존 키와 비충돌 확인할 것.
 function _lockKeys(name) {
   let h1 = 0x12345678 | 0;
   let h2 = 0x9e3779b9 | 0;

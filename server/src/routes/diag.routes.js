@@ -2227,11 +2227,13 @@ router.post('/order-edit', authMiddleware, adminOrMasterMiddleware, async (req, 
     const out = await withJobLock('order_ledger:' + orderSubmissionId, async () => {
       const sets = clean.map((e, idx) => `${e.field} = $${idx + 2}`); // field는 화이트리스트라 인젝션 불가
       const vals = [orderSubmissionId, ...clean.map(e => e.newValue)];
+      // 심판[치명1]: 편집 확정 즉시 last_edit_seq 단조증가(큐워커 지연 무관) → 무인 역동기가 이 편집을 stale로 인식·보존.
       const { rows } = await pool.query(
-        `UPDATE order_submissions SET ${sets.join(', ')}, updated_at = NOW()
+        `UPDATE order_submissions SET ${sets.join(', ')}, updated_at = NOW(),
+                last_edit_seq = GREATEST(COALESCE(last_edit_seq, 0), $${clean.length + 2})
           WHERE id = $1 AND deleted_at IS NULL
         RETURNING id, mirror_status`,
-        vals
+        [...vals, editSeq]
       );
       if (!rows.length) return { notFound: true };
       await enqueue('order_update', { orderSubmissionId, editSeq, edits: clean });
@@ -2310,9 +2312,10 @@ router.post('/reverse-sync-apply', authMiddleware, adminOrMasterMiddleware, asyn
       // G6: 감지 후 정식 편집/취소가 있었으면 stale → 거부(최신편집을 옛 시트값으로 덮음 방지).
       if (p.detected_edit_seq != null && Number(cur[0].last_edit_seq) !== Number(p.detected_edit_seq)) return { stale: true };
       const { rows: up } = await pool.query(
-        `UPDATE order_submissions SET ${p.field} = $2, updated_at = NOW()
-           WHERE id = $1 AND deleted_at IS NULL RETURNING mirror_status`,    // field=화이트리스트라 인젝션 불가
-        [p.os_id, p.new_value]
+        `UPDATE order_submissions SET ${p.field} = $2, updated_at = NOW(),
+                last_edit_seq = GREATEST(COALESCE(last_edit_seq, 0), $3)
+           WHERE id = $1 AND deleted_at IS NULL RETURNING mirror_status`,     // field=화이트리스트라 인젝션 불가, 치명1: seq 단조증가
+        [p.os_id, p.new_value, editSeq]
       );
       if (!up.length) return { stale: true };
       await enqueue('order_update', { orderSubmissionId: p.os_id, editSeq, edits: [{ field: p.field, oldValue: p.old_value, newValue: p.new_value }] });
@@ -2384,7 +2387,11 @@ router.post('/reverse-sync-rollback', authMiddleware, adminOrMasterMiddleware, a
 router.get('/reverse-sync-auto-status', authMiddleware, adminOrMasterMiddleware, async (req, res, next) => {
   try {
     const { autoApplyReverseSync } = require('../services/orderLedger.service');
-    const dry = await autoApplyReverseSync({ dryRun: true }); // 게이트 OFF면 {skipped}
+    // 심판[중대3]: dryRun은 ORDER_LEDGER_WRITE_ENABLED 게이트를 건너뛰므로, 쓰기 OFF에서 관측용 GET이
+    //   시트 라이브읽기(쿼터 소모)를 하지 않도록 프리뷰는 쓰기게이트 ON일 때만.
+    const dry = (process.env.ORDER_LEDGER_WRITE_ENABLED === 'true')
+      ? await autoApplyReverseSync({ dryRun: true })
+      : { skipped: true, reason: 'ledger_write_disabled_preview_off' };
     const { rows } = await pool.query(
       `SELECT
          COUNT(*) FILTER (WHERE status='open'  AND proposal_type='edit')          AS open_edits,
