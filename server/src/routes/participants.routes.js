@@ -61,4 +61,46 @@ router.post('/status', authMiddleware, masterOnlyMiddleware, async (req, res, ne
   } catch (err) { next(err); }
 });
 
+// ── Phase 2a: 참여자 추가/수정/삭제 (신규 테이블만 · master 전용 · 라이브 무영향) ──
+
+// POST /api/participants/add { sheetId, tabName, reviewerName, recipientName?, phone?, round?, optionText?, productName? }
+router.post('/add', authMiddleware, masterOnlyMiddleware, async (req, res, next) => {
+  try {
+    const b = req.body || {};
+    if (!b.sheetId || !b.tabName) return res.status(400).json({ ok: false, error: 'sheetId, tabName 필수' });
+    if (!b.reviewerName && !b.phone) return res.status(400).json({ ok: false, error: '이름 또는 연락처 중 하나는 필요' });
+    const out = await svc.addParticipant({ ...b, by: _by(req) });
+    res.json({ ok: true, ...out });
+  } catch (err) { next(err); }
+});
+
+// POST /api/participants/update { id, reviewerName?, recipientName?, phone?, round?, optionText?, productName? }
+router.post('/update', authMiddleware, masterOnlyMiddleware, async (req, res, next) => {
+  try {
+    const b = req.body || {};
+    if (!b.id) return res.status(400).json({ ok: false, error: 'id 필수' });
+    const fields = {};
+    if (b.reviewerName !== undefined) fields.reviewer_name = b.reviewerName;
+    if (b.recipientName !== undefined) fields.recipient_name = b.recipientName;
+    if (b.phone !== undefined) fields.phone8 = b.phone;
+    if (b.round !== undefined) fields.round = b.round;
+    if (b.optionText !== undefined) fields.option_text = b.optionText;
+    if (b.productName !== undefined) fields.product_name = b.productName;
+    const out = await svc.updateParticipant({ id: b.id, fields, by: _by(req) });
+    if (!out.updated) return res.status(out.reason === 'no_editable_fields' ? 400 : 404).json({ ok: false, error: out.reason || 'not_found' });
+    res.json({ ok: true, ...out });
+  } catch (err) { next(err); }
+});
+
+// POST /api/participants/delete { id } — 소프트삭제(신규 테이블만)
+router.post('/delete', authMiddleware, masterOnlyMiddleware, async (req, res, next) => {
+  try {
+    const { id } = req.body || {};
+    if (!id) return res.status(400).json({ ok: false, error: 'id 필수' });
+    const out = await svc.softDeleteParticipant({ id, by: _by(req) });
+    if (!out.deleted) return res.status(404).json({ ok: false, error: 'not_found' });
+    res.json({ ok: true, ...out });
+  } catch (err) { next(err); }
+});
+
 module.exports = router;

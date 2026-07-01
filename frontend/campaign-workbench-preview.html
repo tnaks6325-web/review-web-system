@@ -60,9 +60,21 @@
     <div class="card">
       <div class="row" style="justify-content:space-between">
         <b>시스템에 저장된 참여자 명단</b>
-        <span class="muted">체크박스로 리뷰제출·입금 표시(테스트 저장공간에만 반영). 연락처는 뒷자리만.</span>
+        <button class="g" onclick="toggleAdd()">➕ 참여자 추가</button>
       </div>
-      <div id="grid"><div class="muted" style="padding:10px">탭을 고른 뒤 <b>명단 보기</b> 또는 <b>명단 가져오기</b>를 눌러주세요.</div></div>
+      <span class="muted">체크박스로 리뷰제출·입금 표시. ✎ 수정 · 🗑 삭제. 모두 테스트 저장공간에만 반영. 연락처는 뒷자리만.</span>
+      <div id="addForm" style="display:none;margin-top:8px;padding:10px;background:#f6faf6;border:1px solid #cfe6cf;border-radius:8px">
+        <div class="row">
+          <input id="a_name" placeholder="이름(인애드명)" style="width:150px">
+          <input id="a_phone" placeholder="연락처(010-…)" style="width:150px">
+          <input id="a_round" placeholder="차수" style="width:70px">
+          <input id="a_opt" placeholder="옵션" style="width:110px">
+          <input id="a_prod" placeholder="상품" style="width:120px">
+          <button class="g" onclick="doAdd()">추가</button>
+          <button onclick="toggleAdd()">취소</button>
+        </div>
+      </div>
+      <div id="grid" style="margin-top:8px"><div class="muted" style="padding:10px">탭을 고른 뒤 <b>명단 보기</b> 또는 <b>명단 가져오기</b>를 눌러주세요.</div></div>
     </div>
   </div>
 
@@ -123,12 +135,37 @@ async function loadList(){ const t=sel(); if(!t)return;
   const g=document.getElementById('grid');
   if(!j.ok){ g.innerHTML='<div class="bad">오류: '+esc(j.error||'')+'</div>'; return; }
   if(!j.items.length){ g.innerHTML='<div class="muted" style="padding:10px">아직 명단이 없습니다 — <b>명단 가져오기</b>를 눌러주세요.</div>'; return; }
-  g.innerHTML='<table><thead><tr><th>순번</th><th>참여자(인애드명)</th><th>연락처</th><th>차수</th><th>상품</th><th>리뷰제출</th><th>입금</th><th>구분</th></tr></thead><tbody>'+
+  window._rows = {}; j.items.forEach(r=>window._rows[r.id]=r);
+  g.innerHTML='<table><thead><tr><th>순번</th><th>참여자(인애드명)</th><th>연락처</th><th>차수</th><th>상품</th><th>리뷰제출</th><th>입금</th><th>구분</th><th>수정/삭제</th></tr></thead><tbody>'+
     j.items.map(r=>`<tr>
       <td>${r.seq}</td><td>${esc(r.reviewerName)}</td><td>${esc(r.phone8)}</td><td>${esc(r.round||'')}</td><td>${esc(r.productName||'')}</td>
       <td class="chk" onclick="tog('${r.id}','sub',${!r.isSubmitted})" title="클릭해서 표시/해제">${r.isSubmitted?'✅':'⬜'}</td>
       <td class="chk" onclick="tog('${r.id}','pay',${!r.isPaid})" title="클릭해서 표시/해제">${r.isPaid?'✅':'⬜'}</td>
-      <td><span class="pill">${esc(srcLabel(r.source))}</span></td></tr>`).join('')+'</tbody></table>';
+      <td><span class="pill">${esc(srcLabel(r.source))}</span></td>
+      <td><span class="chk" onclick="doEdit('${r.id}')" title="수정">✎</span> <span class="chk" onclick="doDelete('${r.id}','${esc(r.reviewerName)}')" title="삭제">🗑</span></td></tr>`).join('')+'</tbody></table>';
+}
+function toggleAdd(){ const f=document.getElementById('addForm'); f.style.display = f.style.display==='none'?'block':'none'; }
+async function doAdd(){ const t=sel(); if(!t)return;
+  const name=document.getElementById('a_name').value.trim(), phone=document.getElementById('a_phone').value.trim();
+  if(!name && !phone){ msg('이름 또는 연락처를 입력하세요','bad'); return; }
+  const body={sheetId:t.sheetId,tabName:t.tabName,reviewerName:name,phone,round:document.getElementById('a_round').value.trim(),optionText:document.getElementById('a_opt').value.trim(),productName:document.getElementById('a_prod').value.trim()};
+  const j=await api('/api/participants/add',{method:'POST',body:JSON.stringify(body)});
+  if(!j.ok){ msg('추가 실패: '+(j.error||''),'bad'); return; }
+  ['a_name','a_phone','a_round','a_opt','a_prod'].forEach(id=>document.getElementById(id).value='');
+  toggleAdd(); msg('참여자 추가됨 (테스트 저장공간) ✓','ok'); loadList();
+}
+async function doEdit(id){ const r=(window._rows||{})[id]; if(!r)return;
+  const name=prompt('이름(인애드명):', r.reviewerName||''); if(name===null)return;
+  const phone=prompt('연락처(빈칸=유지, 뒷자리만 저장):', ''); // 마스킹값 대신 새 값만
+  const round=prompt('차수:', r.round||''); if(round===null)return;
+  const prod=prompt('상품:', r.productName||''); if(prod===null)return;
+  const body={id, reviewerName:name, round, productName:prod}; if(phone && phone.trim()) body.phone=phone.trim();
+  const j=await api('/api/participants/update',{method:'POST',body:JSON.stringify(body)});
+  if(!j.ok){ msg('수정 실패: '+(j.error||''),'bad'); return; } msg('수정됨 (테스트 저장공간) ✓','ok'); loadList();
+}
+async function doDelete(id,name){ if(!confirm('"'+name+'" 참여자를 명단에서 삭제할까요?\n(테스트 저장공간에서만 삭제 — 시트·리뷰어 무영향)'))return;
+  const j=await api('/api/participants/delete',{method:'POST',body:JSON.stringify({id})});
+  if(!j.ok){ msg('삭제 실패: '+(j.error||''),'bad'); return; } msg('삭제됨 (테스트 저장공간) ✓','ok'); loadList();
 }
 async function tog(id,kind,val){ const body={id}; if(kind==='sub')body.isSubmitted=val; else body.isPaid=val;
   const j=await api('/api/participants/status',{method:'POST',body:JSON.stringify(body)});

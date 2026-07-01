@@ -132,6 +132,65 @@ async function setParticipantStatus({ id, isSubmitted, isPaid, by = 'test' } = {
   return { updated: 1, ...rows[0] };
 }
 
+// ── Phase 2a: 참여자 직접 추가/수정/삭제 (여전히 신규 테이블만 — 라이브·시트 무영향) ──
+function _toPhone8(v) { const d = String(v == null ? '' : v).replace(/[^0-9]/g, ''); return d.length >= 8 ? d.slice(-8) : (d || null); }
+
+// 수동 추가: import 행(seq=row_index, 보통 1~수백)과 절대 충돌 안 하게 seq를 900000+ 범위로 배정.
+const _MANUAL_SEQ_BASE = 900000;
+async function addParticipant({ sheetId, tabName, reviewerName, recipientName, phone, round, optionText, productName, by = 'test' } = {}) {
+  if (!sheetId || !tabName) throw new Error('addParticipant: sheetId, tabName 필수');
+  const db = getPool();
+  const { rows: meta } = await db.query(
+    `SELECT COALESCE(MAX(seq) FILTER (WHERE seq >= ${_MANUAL_SEQ_BASE}), ${_MANUAL_SEQ_BASE - 1}) + 1 AS nextseq,
+            (SELECT tab_gid FROM campaign_participants WHERE sheet_id=$1 AND tab_name=$2 AND tab_gid IS NOT NULL LIMIT 1) AS tab_gid
+       FROM campaign_participants WHERE sheet_id=$1 AND tab_name=$2`,
+    [sheetId, tabName]
+  );
+  const nextSeq = meta[0].nextseq;
+  const tabGid = meta[0].tab_gid || null;
+  const { rows } = await db.query(
+    `INSERT INTO campaign_participants
+       (sheet_id, tab_gid, tab_name, seq, reviewer_name, recipient_name, phone8, round, option_text, product_name, source, updated_by, updated_at)
+     VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,'manual',$11,NOW())
+     RETURNING id, seq`,
+    [sheetId, tabGid, tabName, nextSeq, reviewerName || null, recipientName || null, _toPhone8(phone),
+     round || null, optionText || null, productName || null, String(by).slice(0, 100)]
+  );
+  return { added: 1, id: rows[0].id, seq: rows[0].seq };
+}
+
+const _EDITABLE_FIELDS = ['reviewer_name', 'recipient_name', 'phone8', 'round', 'option_text', 'product_name'];
+async function updateParticipant({ id, fields, by = 'test' } = {}) {
+  if (!id) throw new Error('updateParticipant: id 필수');
+  const db = getPool();
+  const clean = {};
+  for (const k of Object.keys(fields || {})) {
+    if (!_EDITABLE_FIELDS.includes(k)) continue;               // 화이트리스트(인젝션 방어)
+    clean[k] = k === 'phone8' ? _toPhone8(fields[k]) : (fields[k] == null ? null : String(fields[k]));
+  }
+  const cols = Object.keys(clean);
+  if (!cols.length) return { updated: 0, reason: 'no_editable_fields' };
+  const vals = [id, ...cols.map(c => clean[c])];
+  const sets = cols.map((c, i) => `${c} = $${i + 2}`);           // c는 화이트리스트라 인젝션 불가
+  const { rows } = await db.query(
+    `UPDATE campaign_participants SET ${sets.join(', ')}, source='manual', updated_at=NOW(), updated_by=$${vals.length + 1}
+       WHERE id=$1 AND deleted_at IS NULL RETURNING id`,
+    [...vals, String(by).slice(0, 100)]
+  );
+  return { updated: rows.length };
+}
+
+async function softDeleteParticipant({ id, by = 'test' } = {}) {
+  if (!id) throw new Error('softDeleteParticipant: id 필수');
+  const db = getPool();
+  const { rows } = await db.query(
+    `UPDATE campaign_participants SET deleted_at=NOW(), updated_at=NOW(), updated_by=$2
+       WHERE id=$1 AND deleted_at IS NULL RETURNING id`,
+    [id, String(by).slice(0, 100)]
+  );
+  return { deleted: rows.length };
+}
+
 // 프리뷰 탭 셀렉터용 활성 캠페인 탭 목록(master 전용 라우트에서 사용 — /api/raw/tabs 의존 제거).
 async function listActiveTabs({ limit = 500 } = {}) {
   const db = getPool();
@@ -155,6 +214,9 @@ module.exports = {
   listParticipants,
   compareWithIndex,
   setParticipantStatus,
+  addParticipant,
+  updateParticipant,
+  softDeleteParticipant,
   listActiveTabs,
   __setPoolForTest,
 };
