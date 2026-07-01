@@ -26,6 +26,10 @@ function startCronJobs() {
   // 설정은 웹 UI(POST /api/tab/config)에서 직접 DB에 저장됩니다.
 
   // ── ★ Dirty Check + 자동 빌드: 15분마다 ──
+  //   #2 일원화: smartBuild(5분, 더 완전·더 근실시간)가 같은 review_index를 이미 변경감지·갱신하므로
+  //   이 dirty-check(15분)는 중복 폴러다. 기본 OFF로 두어 smartBuild를 단일 폴러화(getSheetModifiedTime 폴링 감축).
+  //   INDEX_DIRTY_CRON_ENABLED=true 로 즉시 원복 가능(롤백가능). 전체빌드(09/15/04)는 drift 백스톱으로 유지.
+  if (process.env.INDEX_DIRTY_CRON_ENABLED === 'true') {
   cron.schedule('*/15 9-19 * * 1-6', async () => {
     try {
       const dirtySheets = await checkDirtySheets();
@@ -74,6 +78,9 @@ function startCronJobs() {
       logger.warn(`[CRON-Dirty] 변경 감지 오류: ${err.message}`);
     }
   }, { timezone: 'Asia/Seoul' });
+  } else {
+    logger.info('[CRON] dirty-check(15분) 비활성 — smartBuild 단일 폴러(#2 일원화). INDEX_DIRTY_CRON_ENABLED=true로 원복.');
+  }
 
   // ── 인덱스 전체 빌드: 하루 2회 (09시, 15시) ──
   // RAW mirror dirty check: keep DB source data close to manually edited Sheets.
@@ -276,7 +283,7 @@ function startCronJobs() {
     }
   }, { timezone: 'Asia/Seoul' });
 
-  logger.info(`[CRON] 스케줄러 등록 완료: dirty+자동빌드=15분, 인덱스=${schedule}, 전체재빌드=매일04시, 큐워커=30초, 자동복구=매시간, 정리=매일03시, 이상로그정리=매일03시30분`);
+  logger.info(`[CRON] 스케줄러 등록 완료: dirty=${process.env.INDEX_DIRTY_CRON_ENABLED === 'true' ? '15분' : 'OFF(smartBuild단일)'}, 인덱스=${schedule}, 전체재빌드=매일04시, 큐워커=30초, 자동복구=매시간, 정리=매일03시, 이상로그정리=매일03시30분`);
 }
 
 module.exports = { startCronJobs };
