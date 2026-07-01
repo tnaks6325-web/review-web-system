@@ -1,0 +1,132 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>캠페인탭 워크벤치 (미리보기 · master 전용 · shadow)</title>
+<style>
+  :root{ --ink:#1f2328; --mut:#656d76; --line:#d0d7de; --bg:#f6f8fa; --blue:#0b62d6; --green:#1a7f37; --amber:#9a6700; --red:#cf222e; }
+  *{box-sizing:border-box}
+  body{margin:0;font-family:'Apple SD Gothic Neo','Malgun Gothic',system-ui,sans-serif;color:var(--ink);background:var(--bg);padding:16px}
+  .wrap{max-width:1080px;margin:0 auto}
+  h1{font-size:19px;margin:0 0 2px}
+  .sub{color:var(--mut);font-size:13px;margin:0 0 12px}
+  .banner{background:#fff8c5;border:1px solid #eac54f;border-radius:8px;padding:8px 12px;font-size:12.5px;margin-bottom:12px}
+  .card{background:#fff;border:1px solid var(--line);border-radius:10px;padding:12px 14px;margin-bottom:12px}
+  select,input{padding:6px 9px;border:1px solid var(--line);border-radius:7px;font-size:13px}
+  button{border:0;border-radius:7px;padding:6px 12px;font-size:12.5px;font-weight:700;cursor:pointer;background:#eef1f4;color:#333}
+  button.p{background:var(--blue);color:#fff}
+  button.g{background:var(--green);color:#fff}
+  .row{display:flex;gap:8px;flex-wrap:wrap;align-items:center}
+  table{border-collapse:collapse;width:100%;font-size:12.5px;margin-top:8px}
+  th,td{border:1px solid var(--line);padding:5px 8px;text-align:left}
+  th{background:#eef1f4}
+  .chk{cursor:pointer;font-size:15px}
+  .meta{display:flex;gap:14px;flex-wrap:wrap;font-size:12.5px;color:#333;margin-top:6px}
+  .pill{background:#eef1f4;border-radius:20px;padding:2px 10px;font-size:12px}
+  .ok{color:var(--green)} .bad{color:var(--red)}
+  .login{max-width:320px;margin:60px auto;background:#fff;border:1px solid var(--line);border-radius:10px;padding:16px}
+  .login input{width:100%;margin:6px 0}
+  .muted{color:var(--mut);font-size:12px}
+  #msg{font-size:12.5px;min-height:16px;color:var(--blue)}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <h1>🧪 캠페인탭 워크벤치 <span style="font-size:12px;color:var(--mut)">미리보기 · master 전용 · shadow</span></h1>
+  <p class="sub">신규 DB 원장(campaign_participants)을 실데이터로 테스트합니다. <b>여기서 하는 모든 동작은 신규 테이블에만 반영</b> — 실서비스(검색·리뷰어·시트)에 영향 없습니다.</p>
+  <div class="banner">⚠️ SHADOW 모드: 임포트/토글은 <b>campaign_participants 테이블</b>에만 기록되고, 리뷰어·관리자 화면·구글시트·주문 흐름은 전혀 바뀌지 않습니다. 소스 전환은 별도 단계(추후).</div>
+
+  <div id="app" style="display:none">
+    <div class="card">
+      <div class="row">
+        <select id="tabSel" style="min-width:340px"><option>탭 로딩 중…</option></select>
+        <button class="p" onclick="doDry()">임포트 미리보기(dryRun)</button>
+        <button class="g" onclick="doImport()">DB로 임포트</button>
+        <button onclick="doCompare()">충실도 대조</button>
+        <button onclick="loadList()">DB 로스터 보기</button>
+      </div>
+      <div id="msg"></div>
+      <div class="meta" id="meta"></div>
+    </div>
+
+    <div class="card">
+      <div class="row" style="justify-content:space-between">
+        <b>DB 로스터 (campaign_participants)</b>
+        <span class="muted">체크박스=토글(신규 테이블만). phone8 마스킹.</span>
+      </div>
+      <div id="grid"><div class="muted" style="padding:10px">탭 선택 후 "DB 로스터 보기" 또는 임포트하세요.</div></div>
+    </div>
+  </div>
+
+  <div id="loginBox" class="login" style="display:none">
+    <div style="font-weight:700;margin-bottom:6px">master 로그인</div>
+    <input id="n" placeholder="이름"><input id="p" type="password" placeholder="비밀번호">
+    <div id="lerr" class="bad" style="font-size:12px;min-height:14px"></div>
+    <button class="p" style="width:100%" onclick="doLogin()">로그인</button>
+  </div>
+</div>
+
+<script>
+const API_BASE = (location.hostname==='localhost') ? 'http://localhost:3000'
+  : (window.REVIEW_API_URL || 'https://sublime-magic-production-790b.up.railway.app');
+(function(){ try{ const raw=localStorage.getItem('raw_sso'); if(raw){ const s=JSON.parse(raw); if(s&&s.token) sessionStorage.setItem('admin_token', s.token); } }catch(_){}})();
+function tok(){ return sessionStorage.getItem('admin_token')||''; }
+function esc(v){ return String(v==null?'':v).replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c])); }
+async function api(path, opts){ opts=opts||{}; opts.headers=Object.assign({'Authorization':'Bearer '+tok(),'Content-Type':'application/json'},opts.headers||{}); const r=await fetch(API_BASE+path,opts); return r.json(); }
+function msg(t,cls){ const m=document.getElementById('msg'); m.textContent=t; m.className=cls||''; }
+
+async function doLogin(){
+  const n=document.getElementById('n').value.trim(), p=document.getElementById('p').value;
+  try{ const r=await fetch(API_BASE+'/api/admin/login',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({name:n,pw:p})});
+    const j=await r.json(); if(j&&j.token){ sessionStorage.setItem('admin_token',j.token); start(); } else document.getElementById('lerr').textContent=(j&&j.error)||'로그인 실패'; }
+  catch(e){ document.getElementById('lerr').textContent='네트워크 오류'; }
+}
+function sel(){ const o=document.getElementById('tabSel').selectedOptions[0]; return o?{sheetId:o.dataset.sid,tabName:o.dataset.tab}:null; }
+
+async function start(){
+  document.getElementById('loginBox').style.display='none';
+  document.getElementById('app').style.display='block';
+  const j=await api('/api/participants/tabs');
+  if(!j||!j.ok){ msg('탭 목록 조회 실패(권한? master 필요)','bad'); return; }
+  const tabs=(j.tabs||[]);
+  const s=document.getElementById('tabSel');
+  s.innerHTML = tabs.map(t=>`<option data-sid="${esc(t.sheetId)}" data-tab="${esc(t.tabName)}">${esc(t.spreadsheetTitle)} · ${esc(t.tabName)}</option>`).join('') || '<option>활성 탭 없음</option>';
+}
+async function doDry(){ const t=sel(); if(!t)return; msg('미리보기 중…');
+  const j=await api('/api/participants/import',{method:'POST',body:JSON.stringify({sheetId:t.sheetId,tabName:t.tabName,dryRun:true})});
+  if(!j.ok){ msg('오류: '+(j.error||''),'bad'); return; }
+  document.getElementById('meta').innerHTML=`<span class="pill">index 행 ${j.indexRows}</span><span class="pill">DB 기존 ${j.existingInDb}</span>`;
+  msg(`미리보기: review_index ${j.indexRows}행 → 임포트 예정. 샘플 ${(j.sample||[]).length}건.`,'ok');
+}
+async function doImport(){ const t=sel(); if(!t)return; if(!confirm('신규 DB 테이블로 임포트합니다(시트·리뷰어 무영향). 진행?'))return; msg('임포트 중…');
+  const j=await api('/api/participants/import',{method:'POST',body:JSON.stringify({sheetId:t.sheetId,tabName:t.tabName})});
+  if(!j.ok){ msg('오류: '+(j.error||''),'bad'); return; }
+  msg(`임포트 완료: 신규 ${j.inserted} · 갱신 ${j.updated} (총 ${j.imported})`,'ok'); loadList();
+}
+async function doCompare(){ const t=sel(); if(!t)return;
+  const j=await api('/api/participants/compare?sheetId='+encodeURIComponent(t.sheetId)+'&tabName='+encodeURIComponent(t.tabName));
+  if(!j.ok){ msg('오류: '+(j.error||''),'bad'); return; }
+  document.getElementById('meta').innerHTML=`<span class="pill">index ${j.indexRows}</span><span class="pill">DB ${j.dbRows}</span><span class="pill">이름일치 ${j.nameMatch}</span><span class="pill">수동편집 ${j.manualEdited}</span><span class="pill ${j.inSync?'ok':'bad'}">${j.inSync?'동기화됨':'차이있음'}</span>`;
+  msg(j.inSync?'DB와 review_index 일치 ✓':'차이 있음 — 임포트 필요하거나 수동편집 존재','ok');
+}
+async function loadList(){ const t=sel(); if(!t)return;
+  const j=await api('/api/participants?sheetId='+encodeURIComponent(t.sheetId)+'&tabName='+encodeURIComponent(t.tabName));
+  const g=document.getElementById('grid');
+  if(!j.ok){ g.innerHTML='<div class="bad">오류: '+esc(j.error||'')+'</div>'; return; }
+  if(!j.items.length){ g.innerHTML='<div class="muted" style="padding:10px">DB에 없음 — 임포트하세요.</div>'; return; }
+  g.innerHTML='<table><thead><tr><th>#</th><th>인애드명</th><th>연락처8</th><th>차수</th><th>상품</th><th>리뷰제출</th><th>입금</th><th>출처</th></tr></thead><tbody>'+
+    j.items.map(r=>`<tr>
+      <td>${r.seq}</td><td>${esc(r.reviewerName)}</td><td>${esc(r.phone8)}</td><td>${esc(r.round||'')}</td><td>${esc(r.productName||'')}</td>
+      <td class="chk" onclick="tog('${r.id}','sub',${!r.isSubmitted})">${r.isSubmitted?'✅':'⬜'}</td>
+      <td class="chk" onclick="tog('${r.id}','pay',${!r.isPaid})">${r.isPaid?'✅':'⬜'}</td>
+      <td><span class="pill">${esc(r.source)}</span></td></tr>`).join('')+'</tbody></table>';
+}
+async function tog(id,kind,val){ const body={id}; if(kind==='sub')body.isSubmitted=val; else body.isPaid=val;
+  const j=await api('/api/participants/status',{method:'POST',body:JSON.stringify(body)});
+  if(!j.ok){ msg('토글 실패: '+(j.error||''),'bad'); return; } msg('토글 저장(신규 테이블만) ✓','ok'); loadList();
+}
+if(tok()) start(); else document.getElementById('loginBox').style.display='block';
+</script>
+</body>
+</html>
