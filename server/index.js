@@ -89,9 +89,17 @@ async function runMigrations() {
       logger.info('⏭ 개발 환경 — 기존 CRON 스케줄러 비활성화 (수동 빌드 사용)');
     }
 
-    // ★ 스마트 빌드 스케줄러 시작 (환경 무관 — 5분 주기)
-    startSmartBuild();
-    logger.info('✅ 스마트 빌드 스케줄러 시작됨 (5분 주기, Drive+Sheets API)');
+    // ★ 스마트 빌드 스케줄러 시작 (기본 ON — 근실시간 변경감지 유일 폴러).
+    //   SMART_BUILD_DISABLED=1 이면 코드레벨 미기동(env 킬스위치). 미설정=기존 동작(가산적·롤백가능).
+    //   startSmartBuild는 app_settings.smart_build_paused_until을 읽어 관리자 pause를 부팅 복원(async)한다.
+    //   listen 콜백은 async가 아니므로 fire-and-forget(.then/.catch) — 부팅복원 실패는 비치명.
+    if (process.env.SMART_BUILD_DISABLED === '1') {
+      logger.warn('⏸ SMART_BUILD_DISABLED=1 — 스마트 빌드 스케줄러 미기동(env 킬스위치). 근실시간 인덱스 갱신 없음(전체빌드만).');
+    } else {
+      startSmartBuild()
+        .then(() => logger.info('✅ 스마트 빌드 스케줄러 시작됨 (5분 주기, Drive+Sheets API)'))
+        .catch(err => logger.error(`[smartBuild] 시작 실패: ${err.message}`));
+    }
   });
 
   // ── Graceful Shutdown (Railway / Docker 대응) ──

@@ -68,6 +68,37 @@ let _checksumCache = {};       // "sheetId||tabName" → checksum
 let _runCount = 0;
 let _startedAt = null;
 
+// ── pause 상태(적대검증 RED-1 끈채방치 / RED-2 재배포 부활 방어) ──
+//   interval은 계속 돌되 now < _pausedUntil이면 tick만 스킵(자동재개). app_settings에 영속화해
+//   재배포/재부팅에도 관리자 정지 의도 보존. pause 만료 시 자동 재개(끈 채 방치 방지).
+let _pausedUntil = null;   // Date | null
+const SMART_BUILD_DEFAULT_PAUSE_MIN = 60;
+
+async function _persistPauseUntil(iso) {
+  try {
+    await pool.query(
+      `INSERT INTO app_settings (key, value, updated_at)
+       VALUES ('smart_build_paused_until', $1, NOW())
+       ON CONFLICT (key) DO UPDATE SET value = $1, updated_at = NOW()`,
+      [iso || '']
+    );
+  } catch (e) { logger.warn(`[smartBuild] pause 영속화 실패(무시): ${e.message}`); }
+}
+
+async function _loadPersistedPause() {
+  try {
+    const { rows } = await pool.query(
+      "SELECT value FROM app_settings WHERE key = 'smart_build_paused_until'"
+    );
+    const v = rows[0] && rows[0].value;
+    if (v) {
+      const until = new Date(v);
+      if (!isNaN(until.getTime()) && until.getTime() > Date.now()) return until;
+    }
+  } catch (e) { logger.warn(`[smartBuild] pause 복원 조회 실패(무시): ${e.message}`); }
+  return null;
+}
+
 // ═══════════════════════════════════════════════════════════
 // DB에서 키워드 로드
 // ═══════════════════════════════════════════════════════════
@@ -687,42 +718,83 @@ async function runSmartBuild() {
 // 스케줄러: 5분 주기 자동 실행
 // ═══════════════════════════════════════════════════════════
 
-function startSmartBuild() {
+async function startSmartBuild() {
   if (_intervalHandle) {
     logger.warn('[smartBuild] 이미 스케줄러 실행 중');
     return false;
   }
 
+  // ★ RED-2: 부팅 시 관리자 pause 상태 복원(재배포로 정지 의도가 뒤집히지 않게).
+  _pausedUntil = await _loadPersistedPause();
+  if (_pausedUntil) {
+    logger.warn(`[smartBuild] 부팅 시 pause 복원 — ${_pausedUntil.toISOString()}까지 정지(자동재개)`);
+  }
+
   _startedAt = new Date().toISOString();
   logger.info(`[smartBuild] 스케줄러 시작 — ${SMART_BUILD_INTERVAL_MS / 1000}초 주기`);
 
-  // 최초 실행: 서버 시작 30초 후 (다른 초기화가 완료될 시간 확보)
-  setTimeout(() => {
-    runSmartBuild().catch(err => logger.error(`[smartBuild] 초기 실행 오류: ${err.message}`));
-  }, 30 * 1000);
-
-  // 주기적 실행
-  _intervalHandle = setInterval(() => {
-    runSmartBuild().catch(err => logger.error(`[smartBuild] 주기 실행 오류: ${err.message}`));
-  }, SMART_BUILD_INTERVAL_MS);
+  // 최초 실행도 pause 판정 경유(부팅복원 pause가 첫 tick에도 적용 — 심판 수정1).
+  setTimeout(() => { _tickSmartBuild(); }, 30 * 1000);
+  _intervalHandle = setInterval(() => { _tickSmartBuild(); }, SMART_BUILD_INTERVAL_MS);
 
   return true;
 }
 
+// tick: interval은 계속 돌되 pause면 스킵. pausedUntil 경과 시 자동 재개(끈 채 방치 방지 — RED-1).
+function _tickSmartBuild() {
+  if (_pausedUntil) {
+    if (Date.now() < _pausedUntil.getTime()) {
+      logger.debug(`[smartBuild] pause 중 — ${_pausedUntil.toISOString()}까지 tick 스킵`);
+      return;
+    }
+    logger.info('[smartBuild] pause 만료 — 자동 재개');
+    _pausedUntil = null;
+    _persistPauseUntil(''); // 영속 해제(다음 부팅 복원 안 됨)
+  }
+  runSmartBuild().catch(err => logger.error(`[smartBuild] 주기 실행 오류: ${err.message}`));
+}
+
+// graceful shutdown 전용(index.js) — 영구 clearInterval. 영속 pause는 안 건드림(재부팅 시 정상 재기동).
+//   ⚠️ 관리자 정지는 반드시 pauseSmartBuild 경유(영속·자동재개). 이건 프로세스 종료용.
 function stopSmartBuild() {
   if (_intervalHandle) {
     clearInterval(_intervalHandle);
     _intervalHandle = null;
-    logger.info('[smartBuild] 스케줄러 중지');
+    logger.info('[smartBuild] 스케줄러 중지(프로세스 종료)');
     return true;
   }
   return false;
 }
 
+// 관리자 일시정지: interval 유지, pausedUntil까지 tick만 스킵(자동재개·영속화). RED-1/RED-2.
+async function pauseSmartBuild(minutes) {
+  const min = Number.isFinite(minutes) && minutes > 0 ? minutes : SMART_BUILD_DEFAULT_PAUSE_MIN;
+  _pausedUntil = new Date(Date.now() + min * 60 * 1000);
+  await _persistPauseUntil(_pausedUntil.toISOString());
+  logger.info(`[smartBuild] pause ${min}분 — ${_pausedUntil.toISOString()}까지(자동재개)`);
+  return { paused: true, pausedUntil: _pausedUntil.toISOString(), autoResumeMinutes: min };
+}
+
+async function resumeSmartBuild() {
+  _pausedUntil = null;
+  await _persistPauseUntil('');
+  logger.info('[smartBuild] 수동 재개');
+  return { paused: false };
+}
+
 function getSmartBuildStatus() {
+  const now = Date.now();
+  const paused = !!(_pausedUntil && _pausedUntil.getTime() > now);
+  const pausedMinutesLeft = paused ? Math.ceil((_pausedUntil.getTime() - now) / 60000) : 0;
   return {
     running: _isRunning,
     schedulerActive: !!_intervalHandle,
+    paused,
+    pausedUntil: _pausedUntil ? _pausedUntil.toISOString() : null,
+    pausedMinutesLeft,
+    // schedulerActive=false(킬스위치/미기동) 또는 paused면 근실시간 변경감지 없음 → 대시보드 배너용(RED-1).
+    staleWarning: (!_intervalHandle) || paused,
+    staleReason: !_intervalHandle ? 'scheduler_inactive' : (paused ? 'paused' : null),
     startedAt: _startedAt,
     intervalMs: SMART_BUILD_INTERVAL_MS,
     runCount: _runCount,
@@ -867,8 +939,12 @@ module.exports = {
   runSmartBuild,
   startSmartBuild,
   stopSmartBuild,
+  pauseSmartBuild,
+  resumeSmartBuild,
   getSmartBuildStatus,
   resetSmartBuildCache,
   invalidateChecksumCache,
   SMART_BUILD_INTERVAL_MS,
+  _tickSmartBuild,
+  _loadPersistedPause,
 };
