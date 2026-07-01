@@ -65,6 +65,12 @@ async function importTabFromIndex({ sheetId, tabName, dryRun = false, by = 'test
          start_date = EXCLUDED.start_date, end_date = EXCLUDED.end_date,
          submit_col = EXCLUDED.submit_col, submit_col2 = EXCLUDED.submit_col2,
          row_json = EXCLUDED.row_json, sheet_row = EXCLUDED.sheet_row,
+         -- ★ Phase 4: import 행은 리뷰제출/입금 상태도 review_index에서 최신화(DB를 살아있는 원본화).
+         --   campaign_participants.* = 갱신 전(기존행) 값(EXCLUDED=새 행). 기존행 source='import'면 새 상태로,
+         --   'manual'(직접 토글/추가)이면 보존. 한 번 손대면 그 행은 통째로 수동관리(컬럼별 provenance 없음).
+         --   manual 추가행(seq 900000+)은 애초에 seq 충돌이 없어 여기 안 걸림.
+         is_submitted = CASE WHEN campaign_participants.source='import' THEN EXCLUDED.is_submitted ELSE campaign_participants.is_submitted END,
+         is_paid      = CASE WHEN campaign_participants.source='import' THEN EXCLUDED.is_paid      ELSE campaign_participants.is_paid END,
          deleted_at = NULL, imported_at = NOW()
        RETURNING (xmax = 0) AS inserted`,
       [sheetId, r.tab_gid, tabName, r.campaign_name, r.row_index, r.reviewer_name, r.recipient_name, r.phone8, r.round,
@@ -133,6 +139,29 @@ async function setParticipantStatus({ id, isSubmitted, isPaid, by = 'test' } = {
      RETURNING id, is_submitted AS "isSubmitted", is_paid AS "isPaid"`, vals);
   if (!rows.length) return { updated: 0 };
   return { updated: 1, ...rows[0] };
+}
+
+// ── Phase 4: DB를 "살아있는 원본"으로 — 이미 가져온 탭들을 review_index에서 주기 최신화(시트 재읽기 0). ──
+//   라이브 소비처 아직 없음(shadow) → 리뷰어·관리자·시트 무영향. 수동편집 행은 importTabFromIndex가 보존.
+//   ⚠️ 주의: PARTICIPANTS_SHEET_MIRROR=1(Phase 2b)과 "동시에" 켜면, 여기서 최신화한 is_submitted/is_paid가
+//     이후 mirror-tab 트리거 시 시트 빈칸으로 흐를 수 있다(빈칸-only·비파괴이나 review_index→시트 round-trip).
+//     단독(sync만)으로는 시트 무영향. 둘을 함께 쓸 땐 그 흐름을 이해하고 운영할 것.
+async function syncImportedTabs({ limit = 200, by = 'auto-sync' } = {}) {
+  const db = getPool();
+  const { rows: tabs } = await db.query(
+    `SELECT sheet_id AS "sheetId", tab_name AS "tabName"
+       FROM campaign_participants WHERE deleted_at IS NULL AND source='import'
+      GROUP BY sheet_id, tab_name ORDER BY sheet_id, tab_name LIMIT $1`,
+    [Math.min(Math.max(parseInt(limit, 10) || 200, 1), 1000)]
+  );
+  let tabsSynced = 0, updated = 0, inserted = 0, errors = 0;
+  for (const t of tabs) {
+    try {
+      const r = await importTabFromIndex({ sheetId: t.sheetId, tabName: t.tabName, by });
+      tabsSynced++; updated += r.updated || 0; inserted += r.inserted || 0;
+    } catch (e) { errors++; logger.warn(`[participantsSync] ${t.tabName} 실패: ${e.message}`); }
+  }
+  return { candidateTabs: tabs.length, tabsSynced, inserted, updated, errors };
 }
 
 // ── Phase 2a: 참여자 직접 추가/수정/삭제 (여전히 신규 테이블만 — 라이브·시트 무영향) ──
@@ -214,6 +243,7 @@ async function listActiveTabs({ limit = 500 } = {}) {
 
 module.exports = {
   importTabFromIndex,
+  syncImportedTabs,
   listParticipants,
   compareWithIndex,
   setParticipantStatus,

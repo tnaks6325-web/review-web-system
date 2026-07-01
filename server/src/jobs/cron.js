@@ -181,6 +181,30 @@ function startCronJobs() {
     }, { timezone: 'Asia/Seoul' });
   }
 
+  // ── Phase 4: campaign_participants를 review_index에서 주기 최신화(DB를 살아있는 원본화): 기본 OFF ──
+  //   PARTICIPANTS_AUTO_SYNC=1 에서만. 시트 재읽기 0(DB→DB 복사)·라이브 소비처 없음(shadow) → 무영향.
+  //   수동편집(source='manual') 행은 보존. 이미 가져온 탭만 대상(규모 작음).
+  if (process.env.PARTICIPANTS_AUTO_SYNC === '1') {
+    if (process.env.PARTICIPANTS_SHEET_MIRROR === '1') {
+      logger.warn('[CRON-ParticipantsSync] ⚠️ AUTO_SYNC + SHEET_MIRROR 동시 활성 — sync가 최신화한 상태값이 mirror-tab 시 시트로 흐를 수 있음(빈칸-only·비파괴). 의도 확인 후 운영.');
+    }
+    const partSyncSchedule = process.env.PARTICIPANTS_AUTO_SYNC_SCHEDULE || '*/10 * * * *';
+    let partSyncRunning = false;
+    cron.schedule(partSyncSchedule, async () => {
+      if (partSyncRunning) return;
+      partSyncRunning = true;
+      try {
+        const { syncImportedTabs } = require('../services/participants.service');
+        const r = await syncImportedTabs({ by: 'cron' });
+        if (r && (r.tabsSynced > 0) && (r.inserted > 0 || r.updated > 0)) {
+          logger.info(`[CRON-ParticipantsSync] tabs=${r.tabsSynced} inserted=${r.inserted} updated=${r.updated} errors=${r.errors}`);
+        }
+      } catch (err) {
+        logger.error(`[CRON-ParticipantsSync] error: ${err.message}`);
+      } finally { partSyncRunning = false; }
+    }, { timezone: 'Asia/Seoul' });
+  }
+
   const schedule = process.env.INDEX_CRON_SCHEDULE || '0 9,15 * * 1-6';
   cron.schedule(schedule, async () => {
     logger.info(`[CRON] 인덱스 빌드 시작: ${new Date().toISOString()}`);

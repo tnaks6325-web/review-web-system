@@ -15,6 +15,7 @@ function makePool(scenario) {
     async query(sql, params) {
       const s = sql.replace(/\s+/g, ' ').trim();
       q.push({ s, params });
+      if (/FROM campaign_participants WHERE deleted_at IS NULL AND source='import' GROUP BY/.test(s)) return { rows: scenario.syncTabs || [] };
       if (/FROM review_index/.test(s)) return { rows: scenario.index || [] };
       if (/COUNT\(\*\)::int AS n FROM campaign_participants/.test(s)) return { rows: [{ n: scenario.existing || 0 }] };
       if (/SELECT COALESCE\(MAX\(seq\)/.test(s)) return { rows: [{ nextseq: scenario.nextseq || 900001, tab_gid: scenario.tabGid || null }] };
@@ -52,13 +53,14 @@ async function run() {
   const ins = pool.q.find(x => /INSERT INTO campaign_participants/.test(x.s));
   assert.ok(ins, 'INSERT 실행');
   assert.ok(/ON CONFLICT \(sheet_id, tab_name, seq\) DO UPDATE/.test(ins.s), '멱등 upsert 키');
-  // conflict update SET 절에 is_submitted/is_paid/source가 없어야 함(토글·출처 보존)
+  // Phase 4: conflict update가 is_submitted/is_paid를 CASE로 갱신하되 source='import'일 때만(수동 보존).
   const doUpdate = ins.s.split('DO UPDATE SET')[1] || '';
-  assert.ok(!/is_submitted\s*=/.test(doUpdate), 'conflict update에 is_submitted 미포함(토글 보존)');
-  assert.ok(!/is_paid\s*=/.test(doUpdate), 'conflict update에 is_paid 미포함(토글 보존)');
-  assert.ok(!/source\s*=/.test(doUpdate), 'conflict update에 source 미포함(수동표시 보존)');
+  assert.ok(/is_submitted = CASE WHEN campaign_participants.source='import'/.test(doUpdate), 'import행만 상태 최신화');
+  assert.ok(/is_paid\s*=\s*CASE WHEN campaign_participants.source='import'/.test(doUpdate), 'import행만 입금 최신화');
+  // source 컬럼은 SET 대상이 아님(수동표시 보존): campaign_participants.source(조건참조) 외에 'source =' 할당 없음.
+  assert.ok(!/source\s*=\s*(EXCLUDED|'manual')/.test(doUpdate), 'source 컬럼 미갱신(수동표시 보존)');
   assert.ok(/deleted_at = NULL/.test(doUpdate), '재임포트 시 소프트삭제 해제');
-  console.log('  실임포트 upsert·토글보존 통과');
+  console.log('  실임포트 upsert·상태최신화(수동보존) 통과');
 
   // ── setParticipantStatus: source='manual' + 상태 UPDATE ──
   pool = makePool({});
@@ -105,6 +107,15 @@ async function run() {
   const dMiss = await svc.softDeleteParticipant({ id: 'gone', by: 'm' });
   assert.equal(dMiss.deleted, 0, '없는 id → deleted 0');
   console.log('  삭제(소프트) 통과');
+
+  // ── Phase 4: syncImportedTabs — 가져온 탭들을 순회하며 importTabFromIndex(시트 재읽기 0) ──
+  pool = makePool({ syncTabs: [{ sheetId: 's1', tabName: 'T1' }, { sheetId: 's1', tabName: 'T2' }], index: [] });
+  svc.__setPoolForTest(pool);
+  const sy = await svc.syncImportedTabs({ by: 'cron' });
+  assert.equal(sy.candidateTabs, 2, '가져온 탭 2개 후보');
+  assert.equal(sy.tabsSynced, 2, '2탭 동기화');
+  assert.ok(!pool.q.some(x => /getSpreadsheetMeta|readSheet/.test(x.s)), '시트 재읽기 없음(DB→DB)');
+  console.log('  syncImportedTabs(DB→DB, 시트0) 통과');
 
   svc.__setPoolForTest(null);
 }
