@@ -109,6 +109,31 @@ body{ letter-spacing:-.01em; }
   </div>
 </div>
 
+<!-- ────────── 신기능 안내 강제 팝업 (캠페인탭 참여자 명단 / DB-first) ────────── -->
+<div id="dbFirstGuideModal" class="modal-overlay hidden" style="display:none;z-index:9999">
+  <div class="modal-box" style="max-width:520px">
+    <div class="modal-header" style="display:flex;align-items:center;justify-content:space-between">
+      <h2 style="margin:0"><i class="fas fa-bullhorn" style="color:#3B82F6"></i> 새 기능 안내</h2>
+      <button class="btn-icon-sm" onclick="closeDbFirstGuide(false)" title="닫기"><i class="fas fa-times"></i></button>
+    </div>
+    <div class="modal-body" style="font-size:14px;line-height:1.65">
+      <p style="margin:0 0 8px"><b>캠페인탭 참여자 명단</b>을 구글시트가 아니라 <b>시스템에서 직접 관리</b>하는 기능을 준비했습니다.</p>
+      <ul style="margin:6px 0 10px;padding-left:18px">
+        <li>시트 명단을 <b>시스템으로 가져오기</b> → 화면에서 보기·<b>추가/수정/삭제</b>·리뷰제출/입금 체크</li>
+        <li>지금은 <b>안전 테스트 단계</b> — 모든 동작이 <b>테스트 저장공간에만</b> 반영되어 <b>리뷰어·구글시트·주문에 영향 0</b></li>
+        <li>현재 <b>최고관리자 전용</b> (검증 후 단계적 확대)</li>
+      </ul>
+      <div style="background:#e6f6ec;border-left:4px solid #1a7f37;padding:9px 12px;border-radius:0 8px 8px 0;font-size:13px">
+        직원분들께 설명할 수 있는 <b>쉬운 안내서(유저플로우)</b>를 준비했습니다. 아래 버튼으로 열어보세요.
+      </div>
+      <div class="modal-actions" style="margin-top:16px">
+        <button class="btn-primary" onclick="openDbFirstGuide()"><i class="fas fa-book-open"></i> 직원 안내서 보기</button>
+        <button class="btn-secondary" onclick="closeDbFirstGuide(true)">확인했어요 (다시 안 보기)</button>
+      </div>
+    </div>
+  </div>
+</div>
+
 <!-- ────────── 시작일 편집 팝업 ────────── -->
 <div id="startDatePopup">
   <div class="sdp-title"><i class="fas fa-calendar-edit"></i> 시작일 수정</div>

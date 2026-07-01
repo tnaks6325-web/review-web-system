@@ -18,6 +18,16 @@ function _pct(done, total) {
 ══════════════════════════════════════════ */
 const SYSTEM_NOTICES = [
   {
+    version: "2026-07-01-dbfirst",
+    date: "2026-07-01",
+    title: "신기능 — 캠페인탭 참여자 명단을 시스템에서 직접 관리 (테스트 단계)",
+    changes: [
+      { type: "feat", text: "시트 참여자 명단을 시스템으로 가져와 화면에서 보기·추가/수정/삭제·리뷰제출/입금 체크 (최고관리자 전용)" },
+      { type: "feat", text: "직원 안내서(유저플로우) 제공 — 공지 팝업의 '직원 안내서 보기' 또는 db-first-guide.html" },
+      { type: "warn", text: "안전 테스트 단계: 모든 동작이 테스트 저장공간에만 반영 → 리뷰어·구글시트·주문에 영향 없음" },
+    ]
+  },
+  {
     version: "2026-05-06-4",
     date: "2026-05-06",
     title: "모바일 리뷰 제출 시간초과 오류 해결",
@@ -109,6 +119,24 @@ function checkAndShowNotice() {
     content.style.display = "none";
     _updateNoticeButtons(false, true);
   }
+}
+
+// ★ 신기능 안내 강제 팝업 (캠페인탭 참여자 명단 / DB-first) — 확인 전까지 로그인 시마다 표시.
+const DBFIRST_GUIDE_VERSION = "v1";
+function _showDbFirstGuidePopup() {
+  try {
+    if (localStorage.getItem("dbfirst_guide_seen") === DBFIRST_GUIDE_VERSION) return; // 다시 안 보기 처리됨
+    if (typeof show === "function") show("dbFirstGuideModal", "flex");
+    else { const m = document.getElementById("dbFirstGuideModal"); if (m) { m.classList.remove("hidden"); m.style.display = "flex"; } }
+  } catch (_) {}
+}
+function closeDbFirstGuide(markSeen) {
+  try { if (markSeen) localStorage.setItem("dbfirst_guide_seen", DBFIRST_GUIDE_VERSION); } catch (_) {}
+  if (typeof hide === "function") hide("dbFirstGuideModal");
+  else { const m = document.getElementById("dbFirstGuideModal"); if (m) { m.classList.add("hidden"); m.style.display = "none"; } }
+}
+function openDbFirstGuide() {
+  window.open("db-first-guide.html", "_blank");
 }
 
 function _renderNoticeList(content, dismissedVersion, collapsed) {
@@ -993,6 +1021,9 @@ function enterAdminScreen() {
 
   // ★ 관리자 공지 팝업 (DB 기반, 마스터가 작성한 공지)
   setTimeout(_checkAdminNoticePopup, 400);
+
+  // ★ 신기능 안내 강제 팝업 (캠페인탭 참여자 명단) — 확인 전까지 표시
+  setTimeout(_showDbFirstGuidePopup, 700);
 
   // ── Phase 5/6: 시스템 모니터링 + API 메트릭 자동 로드 ──
   if (typeof loadSystemMonitor === 'function') {
