@@ -1048,29 +1048,44 @@ async function rowIdentityMatches(os, tabContext) {
 //        · R4(그리드밖/전공란=cancel_suspect 플래그만, 단칸 공란 무시) · R5(order_reconcile 락)
 //        · R10/G5(throttle busy면 양보) · R11(gid 없으면 보류) · G3(기본 sig-not-null 주문만).
 // ════════════════════════════════════════════════════════════════════════
-async function detectReverseSyncProposals({ sheetId, tabName, limit = 200, includeNullSig = false, ignoreBusy = false } = {}) {
+async function detectReverseSyncProposals({ sheetId, tabName, limit = 200, includeNullSig = false, ignoreBusy = false, useLiveHeaders = true } = {}) {
   if (process.env.SHEET_REVERSE_SYNC !== '1') return { skipped: true, reason: 'disabled' };
   if (!sheetId || !tabName) throw new Error('detectReverseSyncProposals: sheetId, tabName 필수');
   const { withJobLock } = require('../utils/jobLock');
   return withJobLock('order_reconcile',
-    () => _detectReverseSyncInner({ sheetId, tabName, limit, includeNullSig, ignoreBusy }),
+    () => _detectReverseSyncInner({ sheetId, tabName, limit, includeNullSig, ignoreBusy, useLiveHeaders }),
     { onBusy: () => ({ skipped: true, reason: 'order_reconcile_lock_busy' }) });
 }
 
-async function _detectReverseSyncInner({ sheetId, tabName, limit, includeNullSig, ignoreBusy }) {
+const _HEADER_SCAN_ROWS = parseInt(process.env.REVERSE_SYNC_HEADER_SCAN || '20', 10);
+
+async function _detectReverseSyncInner({ sheetId, tabName, limit, includeNullSig, ignoreBusy, useLiveHeaders }) {
   const db = getPool();
   const { getThrottleStatus, throttledCall } = require('../utils/sheetsThrottle');
   const { readSheet, invalidateSheetMeta } = require('./sheets.service');
 
-  // R10/G5: throttle 여유 없으면 양보(정방향 핫패스 우선). 단 수동 트리거(ignoreBusy)는 1콜뿐이라
+  // R10/G5: throttle 여유 없으면 양보(정방향 핫패스 우선). 단 수동 트리거(ignoreBusy)는 소량 콜이라
   //   busy-skip 대신 throttledCall이 슬롯을 기다려 실행(관리자 즉시 결과). cron은 ignoreBusy=false로 양보.
   const busyN = parseInt(process.env.REVERSE_SYNC_BUSY || '15', 10);
   if (!ignoreBusy && getThrottleStatus().requestsInLastMinute > busyN) return { skipped: true, reason: 'throttle_busy' };
 
-  // R11: gid 필수(동명탭 보류). 헤더/gid는 미러 메타에서만(값판정 아님).
+  // R11: gid 필수(동명탭 보류). gid는 미러 메타에서.
   const ctx = await loadRawTabContext(sheetId, null, tabName);
-  if (!ctx || !ctx.tabGid || !ctx.headers || !ctx.headers.length) return { skipped: true, reason: 'no_meta_or_gid' };
-  const headers = ctx.headers;
+  if (!ctx || !ctx.tabGid) return { skipped: true, reason: 'no_meta_or_gid' };
+  let headers = ctx.headers;
+
+  // ★ 라이브 헤더 읽기(#2): 미러가 stale/희소하면 detected_headers가 실제 시트 열배치와 어긋나
+  //   컬럼 오매핑→오탐(cancel_suspect 폭발). 상단 N행을 라이브로 읽어 헤더를 현재 시트 기준 재감지(1콜).
+  //   미러 헤더와 무관하게 컬럼 정확도 보장 → 어떤 탭에서도 detect 정확.
+  if (useLiveHeaders) {
+    try {
+      const top = await throttledCall(() => readSheet(sheetId,
+        `'${ctx.tabName}'!A1:ZZ${_HEADER_SCAN_ROWS}`, { gid: ctx.tabGid }));
+      const det = detectSheetHeader(Array.isArray(top) ? top : []);
+      if (det && det.headers && det.headers.length) headers = det.headers;
+    } catch (e) { logger.warn(`[reverseSync] 라이브 헤더 읽기 실패(미러 헤더 사용): ${e.message}`); }
+  }
+  if (!headers || !headers.length) return { skipped: true, reason: 'no_headers' };
 
   // 필드→컬럼 매핑(헤더 고정). 식별칸(연락처/수취인/주소) + 역동기 대상칸.
   const fieldCols = {};

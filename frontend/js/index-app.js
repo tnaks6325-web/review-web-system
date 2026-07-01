@@ -895,6 +895,16 @@ function openRawMirror() {
   window.open("raw-mirror.html", "_blank");
 }
 
+/* ── 시트 API 쿼터 모니터(45/분 실시간 사용량·출처·잔량) — 자동 로그인 핸드오프 ── */
+function openThrottleMonitor() {
+  const token = sessionStorage.getItem("admin_token") || "";
+  if (!token || !isAdminLoggedIn()) { showToast("관리자 로그인이 필요합니다.", "warning"); return; }
+  try {
+    localStorage.setItem("raw_sso", JSON.stringify({ token, name: getAdminName(), role: getAdminRole(), ts: Date.now() }));
+  } catch (e) { /* 폴백: 페이지에서 로그인 */ }
+  window.open("throttle-monitor.html", "_blank");
+}
+
 /* ── 관리자 로그인 모달 열기 ── */
 function openAdminLogin() {
   if (isAdminLoggedIn()) { enterAdminScreen(); return; }
