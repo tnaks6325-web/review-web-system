@@ -19,48 +19,74 @@ const REQUESTS_PER_MINUTE = parseInt(process.env.SHEETS_REQUESTS_PER_MINUTE || '
 const MIN_INTERVAL_MS = Math.ceil(60000 / REQUESTS_PER_MINUTE); // ≈ 1200ms
 const DEFAULT_CONCURRENCY = 3;   // 동시 처리 수 (3개씩 → 간격 유지)
 
-// 글로벌 요청 타임스탬프 큐 (슬라이딩 윈도우)
-const _requestTimestamps = [];
+// 글로벌 요청 큐 (슬라이딩 윈도우) — {ts, label} 객체로 "어디서 호출했는지" 추적(#3 모니터).
+const _requests = [];
+// 최근 호출 로그(라벨 포함, 최대 120건) — 대시보드 실시간 로그용.
+const _recentLog = [];
+const _RECENT_CAP = 120;
 
-/**
- * 다음 API 호출까지 대기해야 하는 시간(ms) 계산
- * 슬라이딩 윈도우: 최근 1분간 요청 수를 추적
- */
-function _getWaitTime() {
-  const now = Date.now();
-  // 1분 이전의 타임스탬프 제거
-  while (_requestTimestamps.length > 0 && _requestTimestamps[0] < now - 60000) {
-    _requestTimestamps.shift();
+// 파일명 → 친화 라벨(호출 출처 분류). 스택에서 첫 non-throttle 프레임으로 자동 귀속(호출부 수정 0).
+const _FILE_LABEL = {
+  'rawMirror.service.js': 'RAW미러',
+  'syncQueue.service.js': '주문쓰기/큐',
+  'orderLedger.service.js': '주문행배정/역동기',
+  'smartBuild.service.js': '리뷰인덱스빌드',
+  'indexBuilder.service.js': '리뷰인덱스빌드',
+  'indexScan.service.js': '인덱스스캔',
+  'submit.routes.js': '제출(리뷰/구매)',
+  'tabconfig.routes.js': '탭설정',
+  'diag.routes.js': '진단/수동도구',
+  'drive.service.js': 'Drive',
+  'sheets.service.js': '시트IO',
+};
+function _callerLabel() {
+  const stack = (new Error().stack || '').split('\n');
+  for (let i = 2; i < stack.length; i++) {
+    const line = stack[i];
+    if (!line || line.includes('sheetsThrottle.js')) continue;
+    const m = line.match(/\/([A-Za-z0-9_.-]+\.js):\d+:\d+/);
+    if (!m) continue;
+    const file = m[1];
+    const fnM = line.match(/at (?:async )?([A-Za-z0-9_$.<>]+)/);
+    const fn = fnM ? fnM[1] : '?';
+    return { label: _FILE_LABEL[file] || file, file, fn };
   }
-  
-  // 현재 윈도우 내 요청 수가 한도 미만이면 대기 불필요
-  if (_requestTimestamps.length < REQUESTS_PER_MINUTE) {
-    // 단, 마지막 요청과의 최소 간격은 유지
-    if (_requestTimestamps.length > 0) {
-      const lastReq = _requestTimestamps[_requestTimestamps.length - 1];
-      const sinceLastReq = now - lastReq;
-      if (sinceLastReq < MIN_INTERVAL_MS) {
-        return MIN_INTERVAL_MS - sinceLastReq;
-      }
-    }
-    return 0;
-  }
-  
-  // 한도 도달 → 가장 오래된 요청이 윈도우에서 빠질 때까지 대기
-  const oldestInWindow = _requestTimestamps[0];
-  return (oldestInWindow + 60000) - now + 100; // +100ms 여유
+  return { label: 'other', file: '?', fn: '?' };
+}
+
+function _prune(now) {
+  while (_requests.length > 0 && _requests[0].ts < now - 60000) _requests.shift();
 }
 
 /**
- * 대기 후 타임스탬프 기록
+ * 다음 API 호출까지 대기해야 하는 시간(ms) 계산 (슬라이딩 윈도우)
  */
-async function _waitAndRecord() {
+function _getWaitTime() {
+  const now = Date.now();
+  _prune(now);
+  if (_requests.length < REQUESTS_PER_MINUTE) {
+    if (_requests.length > 0) {
+      const sinceLastReq = now - _requests[_requests.length - 1].ts;
+      if (sinceLastReq < MIN_INTERVAL_MS) return MIN_INTERVAL_MS - sinceLastReq;
+    }
+    return 0;
+  }
+  return (_requests[0].ts + 60000) - now + 100; // +100ms 여유
+}
+
+/**
+ * 대기 후 타임스탬프+라벨 기록
+ */
+async function _waitAndRecord(caller) {
   const waitMs = _getWaitTime();
   if (waitMs > 0) {
-    logger.debug(`[throttle] API 호출 대기 ${waitMs}ms (현재 ${_requestTimestamps.length}/${REQUESTS_PER_MINUTE} req/min)`);
+    logger.debug(`[throttle] API 호출 대기 ${waitMs}ms (현재 ${_requests.length}/${REQUESTS_PER_MINUTE} req/min)`);
     await new Promise(r => setTimeout(r, waitMs));
   }
-  _requestTimestamps.push(Date.now());
+  const rec = { ts: Date.now(), label: (caller && caller.label) || 'other', fn: (caller && caller.fn) || '?' };
+  _requests.push(rec);
+  _recentLog.push(rec);
+  while (_recentLog.length > _RECENT_CAP) _recentLog.shift();
 }
 
 // ═══════════════════════════════════════════════════════════
@@ -77,8 +103,9 @@ async function _waitAndRecord() {
  *   const meta = await throttledCall(() => getSpreadsheetMeta(sheetId));
  */
 async function throttledCall(fn, maxRetries = 2) {
+  const caller = _callerLabel();
   for (let attempt = 0; attempt <= maxRetries; attempt++) {
-    await _waitAndRecord();
+    await _waitAndRecord(caller);
     try {
       return await fn();
     } catch (err) {
@@ -116,11 +143,12 @@ async function throttledMap(items, fn, concurrency = DEFAULT_CONCURRENCY) {
   const results = new Array(items.length);
   let nextIndex = 0;
   
+  const caller = _callerLabel();
   async function worker() {
     while (nextIndex < items.length) {
       const idx = nextIndex++;
       try {
-        await _waitAndRecord();
+        await _waitAndRecord(caller);
         results[idx] = { status: 'fulfilled', value: await fn(items[idx], idx) };
       } catch (err) {
         results[idx] = { status: 'rejected', reason: err };
@@ -143,12 +171,35 @@ async function throttledMap(items, fn, concurrency = DEFAULT_CONCURRENCY) {
  */
 function getThrottleStatus() {
   const now = Date.now();
-  const recentCount = _requestTimestamps.filter(t => t > now - 60000).length;
+  _prune(now);
   return {
-    requestsInLastMinute: recentCount,
+    requestsInLastMinute: _requests.length,
     limit: REQUESTS_PER_MINUTE,
     minIntervalMs: MIN_INTERVAL_MS,
     nextWaitMs: _getWaitTime(),
+  };
+}
+
+// #3 모니터: 최근 1분 사용량 + 출처별 분해 + 실시간 최근 호출 로그 + 잔량.
+function getThrottleMonitor() {
+  const now = Date.now();
+  _prune(now);
+  const byLabelMap = {};
+  for (const r of _requests) byLabelMap[r.label] = (byLabelMap[r.label] || 0) + 1;
+  const byLabel = Object.entries(byLabelMap)
+    .map(([label, count]) => ({ label, count }))
+    .sort((a, b) => b.count - a.count);
+  const used = _requests.length;
+  return {
+    limit: REQUESTS_PER_MINUTE,
+    used,
+    remaining: Math.max(0, REQUESTS_PER_MINUTE - used),
+    pct: Math.round((used / REQUESTS_PER_MINUTE) * 100),
+    nextWaitMs: _getWaitTime(),
+    minIntervalMs: MIN_INTERVAL_MS,
+    byLabel,
+    recent: _recentLog.slice(-40).reverse().map(r => ({ ageMs: now - r.ts, label: r.label, fn: r.fn })),
+    ts: now,
   };
 }
 
@@ -156,6 +207,7 @@ module.exports = {
   throttledCall,
   throttledMap,
   getThrottleStatus,
+  getThrottleMonitor,
   // 설정값 노출 (테스트용)
   REQUESTS_PER_MINUTE,
   MIN_INTERVAL_MS,

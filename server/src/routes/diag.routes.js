@@ -2564,6 +2564,14 @@ router.post('/order-orphan-cleanup', authMiddleware, adminOrMasterMiddleware, as
   } catch (err) { next(err); }
 });
 
+// GET /api/diag/throttle-monitor — 시트 API 45/분 실시간 사용량·출처분해·최근로그·잔량(#3)
+router.get('/throttle-monitor', authMiddleware, async (req, res, next) => {
+  try {
+    const { getThrottleMonitor } = require('../utils/sheetsThrottle');
+    res.json({ ok: true, ...getThrottleMonitor() });
+  } catch (err) { next(err); }
+});
+
 // GET /api/diag/order-batch-state — 배치 스케줄러 내부상태 + 사이클 이력(인터리브 기아 디버그)
 router.get('/order-batch-state', authMiddleware, async (req, res, next) => {
   try {

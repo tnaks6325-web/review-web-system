@@ -1,0 +1,158 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>시트 API 쿼터 모니터 (45/분)</title>
+<style>
+  :root{ --ok:#1a7f37; --warn:#b8860b; --crit:#d11a2a; --ink:#1f2328; --mut:#656d76; --line:#d0d7de; --bg:#f6f8fa; }
+  *{box-sizing:border-box}
+  body{margin:0;font-family:'Apple SD Gothic Neo','Malgun Gothic',system-ui,sans-serif;color:var(--ink);background:var(--bg);padding:18px}
+  .wrap{max-width:900px;margin:0 auto}
+  h1{font-size:19px;margin:0 0 2px}
+  .sub{color:var(--mut);font-size:13px;margin:0 0 16px}
+  .top{display:grid;grid-template-columns:1.1fr 1fr;gap:14px;margin-bottom:16px}
+  .card{background:#fff;border:1px solid var(--line);border-radius:12px;padding:16px 18px}
+  .gauge{display:flex;align-items:baseline;gap:10px}
+  .big{font-size:44px;font-weight:800;line-height:1}
+  .of{font-size:16px;color:var(--mut)}
+  .bar{height:14px;border-radius:8px;background:#eef1f4;overflow:hidden;margin-top:12px}
+  .bar > i{display:block;height:100%;transition:width .4s,background .4s}
+  .meta{display:flex;gap:18px;margin-top:12px;font-size:13px;color:#333;flex-wrap:wrap}
+  .meta b{font-weight:700}
+  .lbl{font-size:12px;color:var(--mut);text-transform:none}
+  h2{font-size:15px;margin:2px 0 10px}
+  .rowlbl{display:flex;align-items:center;gap:10px;margin:7px 0;font-size:13px}
+  .rowlbl .name{width:150px;flex:none;font-weight:600}
+  .rowlbl .track{flex:1;height:12px;background:#eef1f4;border-radius:7px;overflow:hidden}
+  .rowlbl .track > i{display:block;height:100%;background:#4b82e8}
+  .rowlbl .cnt{width:42px;text-align:right;color:#333;font-variant-numeric:tabular-nums}
+  .log{max-height:340px;overflow:auto;border:1px solid var(--line);border-radius:10px;background:#fff}
+  .log table{width:100%;border-collapse:collapse;font-size:12.5px}
+  .log td,.log th{padding:5px 10px;border-bottom:1px solid #f0f2f4;text-align:left}
+  .log th{position:sticky;top:0;background:#f3f5f7;color:#444;font-size:12px}
+  .tag{display:inline-block;padding:1px 7px;border-radius:6px;background:#eef1f4;font-size:11.5px}
+  .status{font-size:12px;color:var(--mut);margin-top:8px}
+  .login{background:#fff;border:1px solid var(--line);border-radius:12px;padding:16px;max-width:340px;margin:40px auto}
+  .login input{width:100%;padding:8px 10px;margin:6px 0;border:1px solid var(--line);border-radius:8px}
+  .login button{width:100%;padding:9px;border:0;border-radius:8px;background:#0b62d6;color:#fff;font-weight:700;cursor:pointer}
+  .err{color:var(--crit);font-size:12.5px;min-height:16px}
+  .muted{color:var(--mut)}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <h1>📊 구글 시트 API 쿼터 모니터</h1>
+  <p class="sub">최근 1분간 시트 API 호출을 실시간 추적 — 한도 <b id="limit">45</b>/분 · 어디서 얼마나 쓰는지 + 잔량</p>
+
+  <div id="app" style="display:none">
+    <div class="top">
+      <div class="card">
+        <div class="lbl">최근 1분 사용량</div>
+        <div class="gauge"><span class="big" id="used">0</span><span class="of">/ <span id="limit2">45</span> 콜</span></div>
+        <div class="bar"><i id="usedBar" style="width:0%;background:var(--ok)"></i></div>
+        <div class="meta">
+          <span>잔량 <b id="remain">45</b>콜</span>
+          <span>사용률 <b id="pct">0</b>%</span>
+          <span>다음 호출 대기 <b id="wait">0</b>ms</span>
+        </div>
+      </div>
+      <div class="card">
+        <div class="lbl">상태</div>
+        <div id="verdict" style="font-size:22px;font-weight:800;margin-top:6px">—</div>
+        <div class="status muted" id="verdictNote"></div>
+        <div class="status">자동 새로고침 2초 · <span id="ts"></span></div>
+      </div>
+    </div>
+
+    <div class="card" style="margin-bottom:16px">
+      <h2>출처별 사용량 (최근 1분)</h2>
+      <div id="byLabel"><div class="muted" style="font-size:13px">호출 없음</div></div>
+    </div>
+
+    <div class="card">
+      <h2>실시간 호출 로그 (최근 40건)</h2>
+      <div class="log">
+        <table><thead><tr><th style="width:80px">경과</th><th style="width:170px">출처</th><th>함수</th></tr></thead>
+        <tbody id="logBody"></tbody></table>
+      </div>
+    </div>
+  </div>
+
+  <div id="loginBox" class="login" style="display:none">
+    <div style="font-weight:700;margin-bottom:6px">관리자 로그인</div>
+    <input id="n" placeholder="이름" autocomplete="username">
+    <input id="p" type="password" placeholder="비밀번호" autocomplete="current-password">
+    <div class="err" id="lerr"></div>
+    <button onclick="doLogin()">로그인</button>
+    <div class="muted" style="font-size:12px;margin-top:8px">관리자 화면의 [시트API 모니터] 버튼으로 열면 자동 로그인됩니다.</div>
+  </div>
+</div>
+
+<script>
+const API_BASE = (location.hostname === 'localhost') ? 'http://localhost:3000'
+  : (window.REVIEW_API_URL || 'https://sublime-magic-production-790b.up.railway.app');
+
+// SSO 핸드오프(raw_sso 재사용) → admin_token
+(function(){
+  try { const raw = localStorage.getItem('raw_sso'); if (raw){ const s=JSON.parse(raw); if(s&&s.token) sessionStorage.setItem('admin_token', s.token); } } catch(_){}
+})();
+function token(){ return sessionStorage.getItem('admin_token') || ''; }
+
+async function doLogin(){
+  const n=document.getElementById('n').value.trim(), p=document.getElementById('p').value;
+  document.getElementById('lerr').textContent='';
+  try{
+    const r=await fetch(API_BASE+'/api/admin/login',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({name:n,pw:p})});
+    const j=await r.json();
+    if(j&&j.token){ sessionStorage.setItem('admin_token', j.token); showApp(); }
+    else document.getElementById('lerr').textContent=(j&&j.error)||'로그인 실패';
+  }catch(e){ document.getElementById('lerr').textContent='네트워크 오류'; }
+}
+
+let _timer=null;
+function showApp(){
+  document.getElementById('loginBox').style.display='none';
+  document.getElementById('app').style.display='block';
+  if(_timer) clearInterval(_timer);
+  poll(); _timer=setInterval(poll, 2000);
+}
+function esc(v){ return String(v==null?'':v).replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c])); }
+
+async function poll(){
+  const t=token();
+  if(!t){ clearInterval(_timer); document.getElementById('app').style.display='none'; document.getElementById('loginBox').style.display='block'; return; }
+  let d;
+  try{ const r=await fetch(API_BASE+'/api/diag/throttle-monitor',{headers:{'Authorization':'Bearer '+t}}); d=await r.json(); }
+  catch(e){ document.getElementById('ts').textContent='연결 오류'; return; }
+  if(!d||!d.ok){ if(d&&/인증/.test(d.error||'')){ sessionStorage.removeItem('admin_token'); poll(); } return; }
+
+  document.getElementById('limit').textContent=d.limit; document.getElementById('limit2').textContent=d.limit;
+  document.getElementById('used').textContent=d.used;
+  document.getElementById('remain').textContent=d.remaining;
+  document.getElementById('pct').textContent=d.pct;
+  document.getElementById('wait').textContent=d.nextWaitMs;
+  const color = d.pct>=90?'var(--crit)':d.pct>=66?'var(--warn)':'var(--ok)';
+  const bar=document.getElementById('usedBar'); bar.style.width=Math.min(100,d.pct)+'%'; bar.style.background=color;
+  const v=document.getElementById('verdict');
+  if(d.pct>=90){ v.textContent='🔴 포화 임박'; v.style.color='var(--crit)'; document.getElementById('verdictNote').textContent='한도 근접 — 신규 호출은 대기(다음 분까지)할 수 있음'; }
+  else if(d.pct>=66){ v.textContent='🟡 바쁨'; v.style.color='var(--warn)'; document.getElementById('verdictNote').textContent='여유 있으나 대량작업 시 주의'; }
+  else { v.textContent='🟢 여유'; v.style.color='var(--ok)'; document.getElementById('verdictNote').textContent='정상 — 잔량 충분'; }
+  document.getElementById('ts').textContent=new Date(d.ts).toLocaleTimeString();
+
+  const max = Math.max(1, ...(d.byLabel||[]).map(x=>x.count));
+  document.getElementById('byLabel').innerHTML = (d.byLabel&&d.byLabel.length)
+    ? d.byLabel.map(x=>`<div class="rowlbl"><span class="name">${esc(x.label)}</span><span class="track"><i style="width:${Math.round(x.count/max*100)}%"></i></span><span class="cnt">${x.count}</span></div>`).join('')
+    : '<div class="muted" style="font-size:13px">최근 1분 호출 없음</div>';
+
+  document.getElementById('logBody').innerHTML = (d.recent||[]).map(r=>{
+    const s=(r.ageMs/1000).toFixed(1);
+    return `<tr><td>${s}s 전</td><td><span class="tag">${esc(r.label)}</span></td><td class="muted">${esc(r.fn)}</td></tr>`;
+  }).join('') || '<tr><td colspan="3" class="muted">—</td></tr>';
+}
+
+// 시작
+if(token()) showApp(); else document.getElementById('loginBox').style.display='block';
+</script>
+</body>
+</html>
