@@ -2622,6 +2622,9 @@ router.post('/backfill-userid', authMiddleware, adminOrMasterMiddleware, async (
     if (!sheetId || !tabName) return res.status(400).json({ ok: false, error: 'sheetId, tabName 필수' });
     const dryRun = !(req.body && req.body.dryRun === false);                 // 명시적 false만 실제 기입
     const limit = Math.min(Math.max(parseInt(req.body && req.body.limit, 10) || 1000, 1), 5000); // default 1000(타임아웃 여유)
+    // matchBy: 'db_row'(기본) = DB sheet_row 기준 / 'identity' = 시트행의 연락처로 DB userId 매칭
+    //   (DB sheet_row가 손상된 탭 — 시트엔 정상인데 DB 행포인터가 어긋난 경우 — 은 identity 모드가 정답).
+    const matchBy = (req.body && req.body.matchBy) === 'identity' ? 'identity' : 'db_row';
     if (!dryRun && _backfillUserIdRunning) return res.status(409).json({ ok: false, error: '백필 진행 중 — 잠시 후 재시도' });
 
     const { throttledCall, getThrottleStatus } = require('../utils/sheetsThrottle');
@@ -2639,9 +2642,10 @@ router.post('/backfill-userid', authMiddleware, adminOrMasterMiddleware, async (
       const ctx = await loadRawTabContext(sheetId, gid || null, tabName);
       if (!ctx || !ctx.tabGid) return { skipped: true, reason: 'no_meta_or_gid' };
       let headers = ctx.headers;
+      let det = null;
       try {
         const top = await throttledCall(() => readSheet(sheetId, `'${ctx.tabName}'!A1:ZZ20`, { gid: ctx.tabGid }));
-        const det = detectSheetHeader(Array.isArray(top) ? top : []);
+        det = detectSheetHeader(Array.isArray(top) ? top : []);
         if (det && det.headers && det.headers.length) headers = det.headers;
       } catch (_) { /* 미러 헤더 폴백 */ }
       if (!headers || !headers.length) return { skipped: true, reason: 'no_headers' };
@@ -2650,6 +2654,66 @@ router.post('/backfill-userid', authMiddleware, adminOrMasterMiddleware, async (
       const idCol = _fieldToCol(headers, 'user_id');                          // _singleIdCol → 정확히 1개일 때만 >=0
       if (idCol < 0) return { skipped: true, reason: 'id_col_not_single',
         idCandidates: headers.filter(h => /아이디|id/i.test(String(h || ''))) };
+
+      // ── identity 모드: 시트행(연락처 有 + id 空)을 DB의 연락처→userId로 매칭해 그 행 id칸만 채움 ──
+      //   DB sheet_row가 손상된 탭 전용. 시트를 원천으로 보고 신원(연락처)으로만 링크 → 오배정 없음.
+      if (matchBy === 'identity') {
+        const phoneCol = _fieldToCol(headers, 'phone');
+        if (phoneCol < 0) return { skipped: true, reason: 'no_phone_col' };
+        const dataStart = (det && det.dataStartRow) || (ctx.headerRowIndex ? ctx.headerRowIndex + 1 : 2);
+        // DB: 이 탭 미삭제·userId보유 주문 → 연락처(숫자정규화)별 distinct userId 집합
+        const { rows: dbrows } = await pool.query(
+          `SELECT user_id, phone FROM order_submissions
+            WHERE sheet_id = $1 AND tab_name = $2 AND deleted_at IS NULL
+              AND user_id IS NOT NULL AND btrim(user_id) <> ''`,
+          [sheetId, tabName]);
+        const phoneHeader = headers[phoneCol];
+        const byPhone = new Map();
+        for (const r of dbrows) {
+          const p = normalizeGuardValue(phoneHeader, r.phone); if (!p) continue;
+          if (!byPhone.has(p)) byPhone.set(p, new Set());
+          byPhone.get(p).add(String(r.user_id).trim());
+        }
+        // 시트 id+연락처 열을 데이터 범위 1회 rect read (grid[i] = dataStart+i 행)
+        const cCols = [idCol, phoneCol];
+        const cMinC = Math.min(...cCols), cMaxC = Math.max(...cCols);
+        invalidateSheetMeta(sheetId);
+        const g = await throttledCall(() => readSheet(sheetId,
+          `'${ctx.tabName}'!${getColLetter(cMinC)}${dataStart}:${getColLetter(cMaxC)}${dataStart + limit}`,
+          { gid: ctx.tabGid }));
+        const grid = Array.isArray(g) ? g : [];
+        const R = { mode: 'identity', scanned: 0, phoneRows: 0, written: 0, skippedFilled: 0,
+                    skippedNoMatch: 0, skippedAmbiguous: 0, wouldWrite: 0,
+                    idCol, idHeader: headers[idCol], phoneCol, dataStart, tabGid: ctx.tabGid, dryRun };
+        const writeData = [], samples = [];
+        for (let i = 0; i < grid.length; i++) {
+          const row = grid[i]; if (!row) continue;
+          R.scanned++;
+          const cellAt = (c) => row[c - cMinC];
+          const ph = normalizeGuardValue(phoneHeader, cellAt(phoneCol)); if (!ph) continue;
+          R.phoneRows++;
+          const idCur = String(cellAt(idCol) == null ? '' : cellAt(idCol)).trim();
+          if (idCur !== '') { R.skippedFilled++; continue; }
+          const set = byPhone.get(ph);
+          if (!set || set.size === 0) { R.skippedNoMatch++; continue; }
+          if (set.size > 1) { R.skippedAmbiguous++; continue; }
+          const uid = [...set][0];
+          const sheetRow = dataStart + i;
+          writeData.push({ range: `'${ctx.tabName}'!${getColLetter(idCol)}${sheetRow}`, values: [[uid]] });
+          if (samples.length < 15) samples.push({ sheetRow, phone4: ph.slice(-4), userId: uid });
+        }
+        R.wouldWrite = writeData.length;
+        R.samples = samples;
+        if (dryRun || !writeData.length) return R;
+        const CH = 200;
+        for (let s = 0; s < writeData.length; s += CH) {
+          const batch = writeData.slice(s, s + CH);
+          await throttledCall(() => batchUpdateSheet(sheetId, batch, 'RAW', { gid: ctx.tabGid }));
+          R.written += batch.length;
+        }
+        return R;
+      }
+
       const idyCols = [['phone', _fieldToCol(headers, 'phone')],
                        ['recipient', _fieldToCol(headers, 'recipient')],
                        ['address', _fieldToCol(headers, 'address')]].filter(([, c]) => c >= 0);
