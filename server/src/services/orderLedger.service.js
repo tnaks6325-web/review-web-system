@@ -1534,6 +1534,9 @@ module.exports = {
   computeDedupKey,
   buildCandidateRows,
   reconcileStuckOrders,
+  // 시트 변경 감지용 공개 트리거: 가드 차단(=시트가 예상과 다름 신호) 시 그 시트만 자동 재미러+리컨실.
+  //   내부 60초/시트 debounce + order_reconcile 락 직렬화 그대로 — 이벤트성 호출에 안전.
+  triggerSheetMirrorOnce: _triggerSheetMirrorOnce,
   _osRowToOrderData,
   _fieldToCol,
   _isIdHeader,

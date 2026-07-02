@@ -430,8 +430,10 @@ async function _executeBatch(items, sheetId, tabName) {
   //   defer:   attempts 되돌림 + deferredIds로 동일 드레인콜 재클레임 제외(옛 점유행 재읽기·busy-spin 차단·R3).
   //   giveup:  reassign 상한 초과 → stuck_manual(reconcile/스케줄러 제외 = 무한 append 종결·R2) + claim 보존.
   const passed = [];
+  let anyBlocked = false;
   for (const x of live) {
     if (!x.blocked) { passed.push(x); continue; }               // R-B7: 단일 진실원본
+    anyBlocked = true;
     const os = x.p.orderSubmissionId ? aliveMap.get(x.p.orderSubmissionId) : null;
     const decision = _guardBlockDecision({
       recovered: x.p.recovered, submittedAt: os && os.submitted_at, reassignCount: os && os.reassign_count });
@@ -453,6 +455,12 @@ async function _executeBatch(items, sheetId, tabName) {
       await pool.query(`UPDATE sync_queue SET status='pending', attempts=GREATEST(attempts-1,0), error_msg='guard blocked (grace/defer)', processed_at=NOW() WHERE id=$1 AND status='processing'`, [x.item.id]);
       deferredIds.push(x.item.id); deferred++;
     }
+  }
+  // ★ 시트 변경 감지(이벤트 기반): 가드 차단 = "시트가 예상과 다름"(수동 편집/재배치 신호) →
+  //   그 시트만 자동 재미러+리컨실(triggerSheetMirrorOnce, 60초/시트 debounce·order_reconcile 락).
+  //   released 주문이 사람 클릭 없이 현재 실제 하단 빈 행으로 재배정된다. best-effort(백그라운드).
+  if (anyBlocked) {
+    try { require('./orderLedger.service').triggerSheetMirrorOnce(sheetId); } catch (_) {}
   }
   if (!passed.length) return { processed: items.length, succeeded, failed, deferred, quotaExceeded, deferredIds };
 
@@ -654,8 +662,10 @@ async function _executeItem(item) {
           // 내가 쓴 값이면(재시도 멱등) 통과, 어느 칸이든 외부/타 주문 값이면 덮어쓰기 차단
           const blocked = guards.some(g => guardBlocksWrite(String(cells[g.col - minC] || '').trim(), g));
           if (blocked) {
-            // 버그1: 차단 = 배정행이 이미 타인 데이터로 채워짐. 복구분/게이트ON·grace경과 실시간건은 release(재배정),
+            // 버그1: 차단 = 배정행이 이미 타인 데이터로 채워짐. 복구분/grace경과 실시간건은 release(재배정),
             //   grace 미경과 실시간건은 defer(일시경합 오판 방지), reassign 상한 초과는 giveup(수동전환·무한루프 종결).
+            // ★ 시트 변경 감지(이벤트 기반): 차단 신호로 그 시트만 자동 재미러+리컨실(60초 debounce, best-effort).
+            try { require('./orderLedger.service').triggerSheetMirrorOnce(sheetId); } catch (_) {}
             const decision = _guardBlockDecision({
               recovered, submittedAt: osMeta && osMeta.submitted_at, reassignCount: osMeta && osMeta.reassign_count });
             if (decision === 'release') {
@@ -1008,10 +1018,11 @@ async function purgeCompleted(hoursOld = 24) {
 
 // ── 가드 차단 행동 결정(버그1): defer(유예)/release(재배정)/giveup(수동전환·상한) ──
 //   유예는 배치공유 attempts가 아니라 "주문 단위 시각(submitted_at)"으로 판정(R6: 방금 제출한 실시간 주문의
-//   일시 write 경합을 영구소실로 오판하지 않음). 비복구 release·상한(giveup)은 ORDER_GUARD_REASSIGN=1 게이트.
-//   게이트 OFF: 비복구는 현행대로 defer(재배정 안 함), 복구분(reconcile 하단재배정건)만 release — 순수 R1/R3 픽스.
+//   일시 write 경합을 영구소실로 오판하지 않음).
+//   ★ 기본 ON: 가드는 남의 데이터를 절대 덮지 않고(차선책) 하단 빈 행 재배정으로 폴백 = 손실 0·수동 0.
+//     끄려면 ORDER_GUARD_REASSIGN=0 (OFF: 비복구는 defer만 = 재배정 안 함, 복구분만 release — 순수 R1/R3 픽스).
 function _guardBlockDecision({ recovered, submittedAt, reassignCount } = {}) {
-  const gateOn = process.env.ORDER_GUARD_REASSIGN === '1';
+  const gateOn = process.env.ORDER_GUARD_REASSIGN !== '0';
   const maxReassign = parseInt(process.env.ORDER_MAX_REASSIGN || '5', 10);
   const rc = parseInt(reassignCount, 10) || 0;
   if (gateOn && rc >= maxReassign) return 'giveup';    // R2: 무한 append 종결(수동전환)
