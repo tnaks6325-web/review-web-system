@@ -195,19 +195,51 @@ function buildCandidateRows({ headers, dataRows, headerRowIndex, orderData = {},
   return candidates;
 }
 
+// ★ id열 판정 공용 규칙 — '쿠팡id'/'네이버id'/'id'/'아이디'/'userid' 인식, 'paid'(앞 a-z) 오탐 회피.
+//   mapOrderToSheetRow · _fieldToCol('user_id') · 백필이 이 규칙을 공유해 append/update/cancel/sig/detect가 일관되게 같은 열을 본다.
+//   (버그이력: 옛 규칙 key==='id' 는 헤더 '쿠팡id'를 못 잡아 쿠팡탭 id열이 영구 공란이었다.)
+const _ID_EXACT_ADMIN = ['번호', 'no', '#'];
+const _ID_ADMIN_KW = ['인애드', '카톡', '닉네임', '상품', '상품명'];
+function _isIdHeader(key) {
+  const k = String(key || '').toLowerCase().trim();
+  if (!k) return false;
+  return k.includes('아이디') || k.includes('userid') || k === 'id' || /(^|[^a-z])id$/.test(k);
+}
+// ★ map의 id-규칙이 실제로 "이기는" 열만 카운트 — id 규칙보다 앞선 규칙(관리자/주문자/수취인)에
+//   선점된 열 + '비고(아이디확인)'류 메모열(오탐)을 제외한 잔여 id열만 센다.
+function _idColIndices(headers) {
+  const out = [];
+  (headers || []).forEach((h, i) => {
+    const key = String(h || '').toLowerCase().trim();
+    if (_ID_EXACT_ADMIN.includes(key)) return;
+    if (_ID_ADMIN_KW.some(kw => key === kw || key.includes(kw))) return;
+    if (key.includes('주문자') || key.includes('orderer')) return;
+    if (key.includes('수취인') || key.includes('받는분') || key.includes('이름') || key.includes('recipient')) return;
+    if (key.includes('비고') || key.includes('특이사항') || key.includes('memo')) return; // 메모열 오탐 제외
+    if (_isIdHeader(key)) out.push(i);
+  });
+  return out;
+}
+// id열이 '정확히 1개'일 때만 그 인덱스, 아니면 -1(0개=없음 / 2개+=NC 동시탭 → 채널구분 불가로 공란).
+function _singleIdCol(headers) {
+  const idx = _idColIndices(headers);
+  return idx.length === 1 ? idx[0] : -1;
+}
+
 function mapOrderToSheetRow(headers, orderData = {}) {
   const optParts = String(orderData.selectedOptKey || '').split('|').map(v => v.trim());
   let optColCounter = 0;
-  const exactAdminHeaders = ['번호', 'no', '#'];
-  const adminOnlyKeywords = ['인애드', '카톡', '닉네임', '상품', '상품명'];
+  // ★ id열은 탭 전체에서 '정확히 1개'일 때만 채운다(단일 쿠팡id/네이버id/id). NC(네이버+쿠팡)
+  //   동시탭은 id열이 2개라 채널구분 불가 → 오기입 방지 위해 둘 다 공란(현행과 동일=무회귀). 판정은 선행규칙 뒤.
+  const idCol = _singleIdCol(headers);
 
-  return (headers || []).map(h => {
+  return (headers || []).map((h, colIdx) => {
     const key = String(h || '').toLowerCase().trim();
-    if (exactAdminHeaders.includes(key)) return null;
-    if (adminOnlyKeywords.some(kw => key === kw || key.includes(kw))) return null;
+    if (_ID_EXACT_ADMIN.includes(key)) return null;
+    if (_ID_ADMIN_KW.some(kw => key === kw || key.includes(kw))) return null;
     if (key.includes('주문자') || key.includes('orderer')) return orderData.orderer || '';
     if (key.includes('수취인') || key.includes('받는분') || key.includes('이름') || key.includes('recipient')) return orderData.recipient || '';
-    if (key.includes('아이디') || key.includes('userid') || key === 'id') return orderData.userId || '';
+    if (colIdx === idCol) return orderData.userId || '';   // ★ 옛 규칙(includes '아이디' / ==='id') 대체 — '쿠팡id' 인식
     if (key.includes('전화') || key.includes('연락') || key.includes('핸드폰') || key.includes('휴대폰') || key === 'phone') return orderData.phone || '';
     if (key.includes('주소') || key.includes('address')) return orderData.address || '';
     if (key.includes('은행') || key.includes('bank')) return orderData.bank || '';
@@ -989,6 +1021,9 @@ const _FIELD_HEADER_KW = {
   selected_opt_key: [['옵션'], ['option']],
 };
 function _fieldToCol(headers, field) {
+  // ★ user_id는 _singleIdCol 단일열 게이트로 통일('쿠팡id' 인식 + NC 2열이면 -1).
+  //   append(map)·order_update·order_cancel·computeRowWriteSig·reverse-sync가 같은 열 판정을 공유(비대칭 divergence 방지).
+  if (field === 'user_id') return _singleIdCol(headers);
   const def = _FIELD_HEADER_KW[field];
   if (!def) return -1;
   return findColumn(headers, def[0], def[1] || []);
@@ -1485,6 +1520,8 @@ module.exports = {
   reconcileStuckOrders,
   _osRowToOrderData,
   _fieldToCol,
+  _isIdHeader,
+  _singleIdCol,
   rowIdentityMatches,
   mapOrderToSheetRow,
   buildBatchUpdateData,
