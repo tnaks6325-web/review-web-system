@@ -2794,6 +2794,91 @@ router.post('/backfill-userid', authMiddleware, adminOrMasterMiddleware, async (
   } catch (err) { next(err); }
 });
 
+// GET /api/diag/field-consistency-audit?sheetId&tabName&limit (admin/master)
+//   재발방지 #2: 제출필드(특히 쿠팡id)가 시트에 빠졌는지 "RAW 미러(DB)만" 스캔해 탭별 집계.
+//   ★ 구글 시트 API 무사용 = 쿼터 0. raw_sheet_rows(시트 스냅샷) vs order_submissions(원장) 비교.
+//   탭별 idBlankWithPhone(연락처有·id空 시트행) + recoverableByDb(그 연락처가 DB userId 보유 → backfill 가능).
+//   비고: RAW 미러 기준이라 최대 수분 stale 가능(감사 목적엔 무해). 실제 복구는 /backfill-userid matchBy=identity.
+router.get('/field-consistency-audit', authMiddleware, adminOrMasterMiddleware, async (req, res, next) => {
+  try {
+    const { _singleIdCol, _fieldToCol, normalizeGuardValue } = require('../services/orderLedger.service');
+    const oneSheet = req.query.sheetId ? String(req.query.sheetId) : null;
+    const oneTab = req.query.tabName ? String(req.query.tabName) : null;
+    const tabLimit = Math.min(Math.max(parseInt(req.query.limit, 10) || 500, 1), 2000);
+
+    // 1) 감사 대상: userId 보유 주문이 있는 (sheet_id, tab_name) — 그 탭들은 시트에 id가 있어야 함
+    const cparams = [];
+    let cwhere = `deleted_at IS NULL AND user_id IS NOT NULL AND btrim(user_id) <> ''`;
+    if (oneSheet) { cparams.push(oneSheet); cwhere += ` AND sheet_id = $${cparams.length}`; }
+    if (oneTab) { cparams.push(oneTab); cwhere += ` AND tab_name = $${cparams.length}`; }
+    cparams.push(tabLimit);
+    const { rows: cands } = await pool.query(
+      `SELECT sheet_id, tab_name, COUNT(*)::int AS orders_with_uid
+         FROM order_submissions WHERE ${cwhere}
+        GROUP BY sheet_id, tab_name
+        ORDER BY COUNT(*) DESC LIMIT $${cparams.length}`, cparams);
+
+    const gaps = [], skipped = [];
+    let totalBlank = 0, totalRecoverable = 0;
+
+    for (const cand of cands) {
+      const sheetId = cand.sheet_id, tabName = cand.tab_name;
+      // 헤더 메타(미러) — detected_headers 우선
+      const { rows: tr } = await pool.query(
+        `SELECT tab_gid, detected_headers, headers FROM raw_sheet_tabs
+          WHERE sheet_id = $1 AND tab_name = $2
+          ORDER BY (detected_headers IS NOT NULL) DESC LIMIT 1`, [sheetId, tabName]);
+      if (!tr.length) { skipped.push({ sheetId, tabName, reason: 'no_mirror_tab' }); continue; }
+      const gid = tr[0].tab_gid;
+      const headers = Array.isArray(tr[0].detected_headers) ? tr[0].detected_headers
+                    : (Array.isArray(tr[0].headers) ? tr[0].headers : null);
+      if (!headers || !headers.length) { skipped.push({ sheetId, tabName, gid, reason: 'no_headers' }); continue; }
+      const idCol = _singleIdCol(headers);
+      if (idCol < 0) { skipped.push({ sheetId, tabName, gid, reason: 'id_col_not_single' }); continue; }
+      const phoneCol = _fieldToCol(headers, 'phone');
+      if (phoneCol < 0) { skipped.push({ sheetId, tabName, gid, reason: 'no_phone_col' }); continue; }
+      const phoneHeader = headers[phoneCol];
+
+      // 미러 행(시트 스냅샷) + DB 연락처→userId 보유 집합 — 전부 DB, 시트 API 없음
+      const { rows: mrows } = await pool.query(
+        `SELECT cells FROM raw_sheet_rows WHERE sheet_id = $1 AND tab_gid = $2`, [sheetId, gid]);
+      const { rows: drows } = await pool.query(
+        `SELECT phone FROM order_submissions
+          WHERE sheet_id = $1 AND tab_name = $2 AND deleted_at IS NULL
+            AND user_id IS NOT NULL AND btrim(user_id) <> ''`, [sheetId, tabName]);
+      const dbPhones = new Set();
+      for (const d of drows) { const p = normalizeGuardValue(phoneHeader, d.phone); if (p) dbPhones.add(p); }
+
+      let phoneRows = 0, idBlank = 0, recoverable = 0;
+      for (const mr of mrows) {
+        const cells = Array.isArray(mr.cells) ? mr.cells : [];
+        const ph = normalizeGuardValue(phoneHeader, cells[phoneCol]);
+        if (!ph) continue;
+        phoneRows++;
+        const idv = String(cells[idCol] == null ? '' : cells[idCol]).trim();
+        if (idv !== '') continue;
+        idBlank++;
+        if (dbPhones.has(ph)) recoverable++;
+      }
+      if (idBlank > 0) {
+        gaps.push({ sheetId, tabName, gid, idHeader: headers[idCol], ordersWithUid: cand.orders_with_uid,
+                    phoneRows, idBlankWithPhone: idBlank, recoverableByDb: recoverable });
+        totalBlank += idBlank; totalRecoverable += recoverable;
+      }
+    }
+    gaps.sort((a, b) => b.idBlankWithPhone - a.idBlankWithPhone);
+    const skippedSummary = {};
+    skipped.forEach(s => { skippedSummary[s.reason] = (skippedSummary[s.reason] || 0) + 1; });
+    res.json({
+      ok: true, source: 'raw_mirror(DB) — Sheets API 무사용',
+      scannedTabs: cands.length, tabsWithGaps: gaps.length,
+      totalIdBlankWithPhone: totalBlank, totalRecoverableByDb: totalRecoverable,
+      gaps, skippedSummary, skippedSample: skipped.slice(0, 30),
+      note: 'RAW 미러 기준(최대 수분 stale). 복구: POST /api/diag/backfill-userid {matchBy:"identity"}.',
+    });
+  } catch (err) { next(err); }
+});
+
 // POST /api/diag/order-orphan-cleanup { dryRun? } (admin/master)
 // ★ 고아 큐 정리: written/deleted된 주문의 잔여 pending/processing order_append를 시트콜 0으로 done 처리.
 //   reconcile 재큐잉이 남긴 고아가 throttle를 반복 잠식하던 것을 1회성으로 청소. dryRun=true면 카운트만.
