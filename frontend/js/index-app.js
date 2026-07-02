@@ -190,12 +190,10 @@ function _toggleNoticeList() {
 
   const isCollapsed = section.dataset.collapsed === "true";
   if (isCollapsed) {
-    // 펼치기
+    // 펼치기 — 기본 높이(max-height 인라인값) + 스크롤 유지, 창 확장 없음
     const dismissedVersion = localStorage.getItem("notice_dismissed_version");
     _renderNoticeList(content, dismissedVersion, false);
     content.style.display = "block";
-    content.style.maxHeight = "400px";
-    content.style.overflowY = "auto";
     section.dataset.collapsed = "false";
     _updateNoticeButtons(false, false);
   } else {
@@ -923,14 +921,49 @@ function openRawMirror() {
   window.open("raw-mirror.html", "_blank");
 }
 
-/* ── 시트 API 쿼터 모니터(45/분 실시간 사용량·출처·잔량) — 자동 로그인 핸드오프 ── */
+/* ── 시트 API 쿼터 모니터(45/분 실시간 사용량·출처·잔량) — 인페이지 팝업(iframe) ── */
 function openThrottleMonitor() {
   const token = sessionStorage.getItem("admin_token") || "";
   if (!token || !isAdminLoggedIn()) { showToast("관리자 로그인이 필요합니다.", "warning"); return; }
   try {
     localStorage.setItem("raw_sso", JSON.stringify({ token, name: getAdminName(), role: getAdminRole(), ts: Date.now() }));
   } catch (e) { /* 폴백: 페이지에서 로그인 */ }
-  window.open("throttle-monitor.html", "_blank");
+
+  let ov = document.getElementById("throttleMonitorOverlay");
+  if (!ov) {
+    ov = document.createElement("div");
+    ov.id = "throttleMonitorOverlay";
+    ov.style.cssText = "position:fixed;inset:0;background:rgba(15,23,42,.55);z-index:10500;display:flex;align-items:center;justify-content:center;padding:20px";
+    ov.addEventListener("click", (e) => { if (e.target === ov) closeThrottleMonitor(); });
+    ov.innerHTML = `
+      <div style="background:#fff;border-radius:14px;width:1080px;max-width:96vw;height:86vh;display:flex;flex-direction:column;overflow:hidden;box-shadow:0 14px 44px rgba(0,0,0,.3)">
+        <div style="padding:11px 16px;border-bottom:1px solid #eef2f7;display:flex;align-items:center;gap:8px;flex-shrink:0">
+          <i class="fas fa-gauge-high" style="color:#3182f6"></i>
+          <span style="font-weight:700;font-size:.92rem;color:var(--t1)">시트API 모니터</span>
+          <span style="font-size:.7rem;color:var(--t3)">구글 시트 API 45/분 쿼터 실시간 사용량·출처·잔량</span>
+          <div style="margin-left:auto;display:flex;gap:6px">
+            <button onclick="window.open('throttle-monitor.html','_blank')" title="새 창으로 열기" style="width:30px;height:30px;background:#F3F4F6;border:none;border-radius:8px;cursor:pointer;color:#6B7280"><i class="fas fa-up-right-from-square"></i></button>
+            <button onclick="closeThrottleMonitor()" title="닫기" style="width:30px;height:30px;background:#F3F4F6;border:none;border-radius:8px;cursor:pointer;color:#6B7280"><i class="fas fa-times"></i></button>
+          </div>
+        </div>
+        <iframe id="throttleMonitorFrame" src="" style="flex:1;border:none;width:100%"></iframe>
+      </div>`;
+    document.body.appendChild(ov);
+  }
+  ov.style.display = "flex";
+  // 열 때마다 새로 로드(SSO 토큰 최신 반영)
+  const frame = document.getElementById("throttleMonitorFrame");
+  if (frame) frame.src = "throttle-monitor.html";
+}
+
+function closeThrottleMonitor() {
+  const ov = document.getElementById("throttleMonitorOverlay");
+  if (ov) {
+    ov.style.display = "none";
+    // 폴링 중단을 위해 iframe 언로드
+    const frame = document.getElementById("throttleMonitorFrame");
+    if (frame) frame.src = "about:blank";
+  }
 }
 
 /* ── 관리자 로그인 모달 열기 ── */
