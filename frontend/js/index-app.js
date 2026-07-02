@@ -12480,13 +12480,11 @@ async function loadTabDashboard() {
     if (kpiEl) {
       const rate = _pct(s.totalSubmitted, s.totalRows);
       const payRate = _pct(s.totalPaid, s.totalSubmitted);
-      const noFolder = s.noFolder || 0;
       kpiEl.innerHTML = [
         _kpiCard("전체 탭", s.total, "#1D4ED8", "fa-list"),
         _kpiCard("활성", s.active, "#0ca678", "fa-play-circle"),
         _kpiCard("인덱스", s.indexed, "#3182f6", "fa-database"),
         _kpiCard("미지정", s.noManager, "#9CA3AF", "fa-user-slash"),
-        _kpiCard("폴더 미설정", noFolder, noFolder>0?"#D97706":"#0ca678", "fa-folder-open"),
         _kpiCard("제출률", `${rate}%`, rate>=80?"#0ca678":rate>=50?"#D97706":"#DC2626", "fa-chart-pie"),
         _kpiCard("입금률", `${payRate}%`, payRate>=80?"#0ca678":payRate>=50?"#D97706":"#DC2626", "fa-coins"),
       ].join("");
