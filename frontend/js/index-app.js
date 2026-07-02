@@ -2607,6 +2607,7 @@ async function loadAdminDashboard() {
   // ★ v11.5: 캠페인 탭 관리 UI로 통합 — 대시보드 메인은 loadTabDashboard()가 담당
   try { await loadTabDashboard(); } catch(_){}
   try { loadDashWorkOrders(); } catch(_){}
+  try { loadReviewerNoticesAdmin(); } catch(_){}
 
   if (!isAdminLoggedIn()) { showToast("세션이 만료되었습니다. 다시 로그인하세요.", "warning"); exitAdmin(); return; }
   
@@ -16790,9 +16791,24 @@ async function saveReviewerNotice() {
   }
 }
 
+function toggleReviewerNoticeForm() {
+  const wrap = document.getElementById("rvNoticeFormWrap");
+  if (!wrap) return;
+  const opening = wrap.style.display === "none";
+  if (opening) {
+    wrap.style.display = "";
+    const t = document.getElementById("rvNoticeTitle");
+    if (t) t.focus();
+  } else {
+    cancelReviewerNoticeEdit();
+  }
+}
+
 function editReviewerNotice(id) {
   const n = _rvNotices.find(x => x.id === id);
   if (!n) return;
+  const wrap = document.getElementById("rvNoticeFormWrap");
+  if (wrap) wrap.style.display = "";
   document.getElementById("rvNoticeEditId").value = n.id;
   document.getElementById("rvNoticeTitle").value = n.title || "";
   document.getElementById("rvNoticeBody").value = n.body || "";
@@ -16809,6 +16825,7 @@ function cancelReviewerNoticeEdit() {
   const p = document.getElementById("rvNoticePinned"); if (p) p.checked = false;
   const c = document.getElementById("rvNoticeCancelBtn"); if (c) c.style.display = "none";
   const s = document.getElementById("rvNoticeSaveBtn"); if (s) s.innerHTML = '<i class="fas fa-paper-plane"></i> 게시';
+  const wrap = document.getElementById("rvNoticeFormWrap"); if (wrap) wrap.style.display = "none";
 }
 
 async function toggleReviewerNotice(id) {
