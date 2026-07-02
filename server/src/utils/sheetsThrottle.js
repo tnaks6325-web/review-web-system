@@ -19,6 +19,18 @@ const REQUESTS_PER_MINUTE = parseInt(process.env.SHEETS_REQUESTS_PER_MINUTE || '
 const MIN_INTERVAL_MS = Math.ceil(60000 / REQUESTS_PER_MINUTE); // ≈ 1200ms
 const DEFAULT_CONCURRENCY = 3;   // 동시 처리 수 (3개씩 → 간격 유지)
 
+// ── 버그2: order_append 기아 방지 — 저우선(smartBuild) 서브캡. 45 하드리밋 '내부' 예약(바이패스 아님). ──
+//   저우선 호출(리뷰인덱스빌드)은 45-RESERVE로 자기제한 → 항상 RESERVE 슬롯이 주문(normal)용으로 남는다.
+//   RESERVE=0이면 기존과 완전 동일. 정적예약이라 백로그 신호 무의존(smartBuild 영구기아 불가).
+const ORDER_RESERVE = parseInt(process.env.SHEETS_ORDER_RESERVE || '8', 10);
+const _LOW_PRIORITY_LABELS = new Set(
+  (process.env.SHEETS_LOW_PRIORITY_LABELS || '리뷰인덱스빌드').split(',').map(s => s.trim()).filter(Boolean)
+);
+function _effectiveCap(priority) {
+  if (priority === 'low' && ORDER_RESERVE > 0) return Math.max(1, REQUESTS_PER_MINUTE - ORDER_RESERVE);
+  return REQUESTS_PER_MINUTE;   // normal/high(또는 미지정) → 45 전량
+}
+
 // 글로벌 요청 큐 (슬라이딩 윈도우) — {ts, label} 객체로 "어디서 호출했는지" 추적(#3 모니터).
 const _requests = [];
 // 최근 호출 로그(라벨 포함, 최대 120건) — 대시보드 실시간 로그용.
@@ -61,10 +73,11 @@ function _prune(now) {
 /**
  * 다음 API 호출까지 대기해야 하는 시간(ms) 계산 (슬라이딩 윈도우)
  */
-function _getWaitTime() {
+function _getWaitTime(priority) {
   const now = Date.now();
   _prune(now);
-  if (_requests.length < REQUESTS_PER_MINUTE) {
+  const cap = _effectiveCap(priority);
+  if (_requests.length < cap) {
     if (_requests.length > 0) {
       const sinceLastReq = now - _requests[_requests.length - 1].ts;
       if (sinceLastReq < MIN_INTERVAL_MS) return MIN_INTERVAL_MS - sinceLastReq;
@@ -77,13 +90,13 @@ function _getWaitTime() {
 /**
  * 대기 후 타임스탬프+라벨 기록
  */
-async function _waitAndRecord(caller) {
-  const waitMs = _getWaitTime();
+async function _waitAndRecord(caller, priority) {
+  const waitMs = _getWaitTime(priority);
   if (waitMs > 0) {
-    logger.debug(`[throttle] API 호출 대기 ${waitMs}ms (현재 ${_requests.length}/${REQUESTS_PER_MINUTE} req/min)`);
+    logger.debug(`[throttle] API 호출 대기 ${waitMs}ms (현재 ${_requests.length}/${REQUESTS_PER_MINUTE} req/min, prio=${priority || 'normal'})`);
     await new Promise(r => setTimeout(r, waitMs));
   }
-  const rec = { ts: Date.now(), label: (caller && caller.label) || 'other', fn: (caller && caller.fn) || '?' };
+  const rec = { ts: Date.now(), label: (caller && caller.label) || 'other', fn: (caller && caller.fn) || '?', priority: priority || 'normal' };
   _requests.push(rec);
   _recentLog.push(rec);
   while (_recentLog.length > _RECENT_CAP) _recentLog.shift();
@@ -102,10 +115,11 @@ async function _waitAndRecord(caller) {
  * 사용법:
  *   const meta = await throttledCall(() => getSpreadsheetMeta(sheetId));
  */
-async function throttledCall(fn, maxRetries = 2) {
+async function throttledCall(fn, maxRetries = 2, opts = {}) {
   const caller = _callerLabel();
+  const priority = (opts && opts.priority) || (_LOW_PRIORITY_LABELS.has(caller.label) ? 'low' : 'normal');
   for (let attempt = 0; attempt <= maxRetries; attempt++) {
-    await _waitAndRecord(caller);
+    await _waitAndRecord(caller, priority);
     try {
       return await fn();
     } catch (err) {
@@ -144,11 +158,12 @@ async function throttledMap(items, fn, concurrency = DEFAULT_CONCURRENCY) {
   let nextIndex = 0;
   
   const caller = _callerLabel();
+  const priority = _LOW_PRIORITY_LABELS.has(caller.label) ? 'low' : 'normal';
   async function worker() {
     while (nextIndex < items.length) {
       const idx = nextIndex++;
       try {
-        await _waitAndRecord(caller);
+        await _waitAndRecord(caller, priority);
         results[idx] = { status: 'fulfilled', value: await fn(items[idx], idx) };
       } catch (err) {
         results[idx] = { status: 'rejected', reason: err };
@@ -197,8 +212,9 @@ function getThrottleMonitor() {
     pct: Math.round((used / REQUESTS_PER_MINUTE) * 100),
     nextWaitMs: _getWaitTime(),
     minIntervalMs: MIN_INTERVAL_MS,
+    reserve: ORDER_RESERVE, lowCap: _effectiveCap('low'),
     byLabel,
-    recent: _recentLog.slice(-40).reverse().map(r => ({ ageMs: now - r.ts, label: r.label, fn: r.fn })),
+    recent: _recentLog.slice(-40).reverse().map(r => ({ ageMs: now - r.ts, label: r.label, fn: r.fn, priority: r.priority })),
     ts: now,
   };
 }
@@ -212,4 +228,15 @@ module.exports = {
   REQUESTS_PER_MINUTE,
   MIN_INTERVAL_MS,
   DEFAULT_CONCURRENCY,
+  _effectiveCap,            // 테스트용(cap 검증)
+  _getWaitTime,             // 테스트용(wait 검증)
+  __injectRequests,         // 테스트훅
+  __resetForTest,           // 테스트훅
 };
+
+// 테스트훅 (호이스팅되는 function 선언이므로 export 뒤 정의 무방)
+function __injectRequests(n, ageMs = 5000) {
+  const now = Date.now();
+  for (let i = 0; i < n; i++) _requests.push({ ts: now - ageMs, label: 'test', fn: 'test', priority: 'test' });
+}
+function __resetForTest() { _requests.length = 0; _recentLog.length = 0; }
