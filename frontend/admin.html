@@ -709,6 +709,27 @@ body{ letter-spacing:-.01em; }
           <div id="noticeContent" style="font-size:.8rem;color:#1F2937;line-height:1.7;max-height:134px;overflow-y:auto"></div>
         </div>
 
+        <!-- ★ 리뷰어 소식·공지 관리 (리뷰어 홈 상단 노출) -->
+        <div style="margin-bottom:16px;border:1px solid #E5E7EB;border-radius:12px;background:#fff;padding:16px 18px">
+          <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:10px">
+            <span style="font-size:.88rem;font-weight:700;color:var(--t1)"><i class="fas fa-bullhorn" style="color:#7C3AED;margin-right:6px"></i>리뷰어 소식·공지 <span style="font-size:.65rem;font-weight:400;color:#6B7280">(리뷰어 홈 상단 노출)</span></span>
+            <button onclick="loadReviewerNoticesAdmin()" style="padding:4px 10px;background:#F3F4F6;color:#374151;border:none;border-radius:7px;font-size:.72rem;font-weight:600;cursor:pointer"><i class="fas fa-sync-alt"></i> 새로고침</button>
+          </div>
+          <div style="background:#FAFAFB;border:1px solid #EEF0F5;border-radius:10px;padding:12px;margin-bottom:12px">
+            <input type="hidden" id="rvNoticeEditId" value="">
+            <input id="rvNoticeTitle" type="text" placeholder="공지 제목" maxlength="100" style="width:100%;padding:8px 10px;border:1px solid #D1D5DB;border-radius:7px;font-size:.82rem;outline:none;box-sizing:border-box;margin-bottom:8px">
+            <textarea id="rvNoticeBody" rows="3" placeholder="공지 내용 (리뷰어에게 보여집니다)" maxlength="2000" style="width:100%;padding:8px 10px;border:1px solid #D1D5DB;border-radius:7px;font-size:.82rem;font-family:inherit;outline:none;box-sizing:border-box;resize:vertical;margin-bottom:8px"></textarea>
+            <div style="display:flex;align-items:center;gap:10px">
+              <label style="display:flex;align-items:center;gap:5px;font-size:.76rem;color:var(--t2);cursor:pointer"><input type="checkbox" id="rvNoticePinned"> 상단 고정</label>
+              <div style="margin-left:auto;display:flex;gap:6px">
+                <button id="rvNoticeCancelBtn" onclick="cancelReviewerNoticeEdit()" style="display:none;padding:7px 14px;background:#fff;color:var(--t2);border:1px solid #D1D5DB;border-radius:7px;font-size:.78rem;font-weight:600;cursor:pointer">취소</button>
+                <button id="rvNoticeSaveBtn" onclick="saveReviewerNotice()" style="padding:7px 16px;background:#7C3AED;color:#fff;border:none;border-radius:7px;font-size:.78rem;font-weight:700;cursor:pointer"><i class="fas fa-paper-plane"></i> 게시</button>
+              </div>
+            </div>
+          </div>
+          <div id="rvNoticeList"><div style="text-align:center;color:#9CA3AF;font-size:.8rem;padding:10px">불러오는 중...</div></div>
+        </div>
+
         <!-- ★ 작업오더 간편보기 (최신 4건) -->
         <div id="dashWoSection" style="margin-bottom:16px;border:1px solid #E5E7EB;border-radius:12px;background:#fff;padding:14px 16px">
           <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:8px">
