@@ -31,6 +31,12 @@ GAS(Google Apps Script) 기반 리뷰 관리 시스템을 **Node.js Express + Po
 - 폴더는 ① 첫 업로드 시 on-demand(`review-upload`), ② 배치(`POST /api/drive/sync-review`·`sync-capture`), ③ **스마트빌드 주기마다 자동**(`reviewFolders.service.js`의 `ensureReviewFoldersForActiveTabs`, `smartBuild` 말미 best-effort)로 생성된다. ③ 덕분에 **신규 활성 탭은 제출 0건이어도 tnaks 소유 `[리뷰]`/`[구매캡처]` 폴더가 미리 생성·연결**된다(비파괴·idempotent, `리뷰폼` 탭 제외, 1주기 최대 30탭).
 - 관리자 점검: "리뷰폴더 현황 점검"(`POST /api/drive/folder-audit`)이 연결/정상/빈/미연결 + **폴더 소유자 집계**(tnaks/박세희/박은비/SA)를 보여주고, 미연결 탭은 현황 화면의 버튼으로 일괄 생성·연결한다. 파일 단위 소유자·용량은 "소유권"(`ownership-audit`/`transfer-ownership`)에서 확인·이관한다.
 
+### 시트/Drive API throttle — lane 분리 (쿼터 근본해결)
+- `utils/sheetsThrottle.js`는 **2-lane**: ① **sheets lane 45/분**(`throttledCall` — spreadsheets.* 전용, `SHEETS_ORDER_RESERVE`(8)·저우선 서브캡·`getThrottleStatus()` 시맨틱 불변), ② **drive lane 120/분**(`driveThrottledCall` — `getSheetModifiedTime`(drive.files.get)/`shareSheetWithServiceAccount`(drive.permissions) 전용, 평평한 cap). **Drive API는 별도 쿼터인데 과거 시트 lane을 오점유**(smartBuild가 5분마다 시트 ~57개 modifiedTime 폴링 = 모니터 "리뷰인덱스빌드 33/분"의 정체)하던 것을 이관. env: `DRIVE_REQUESTS_PER_MINUTE`.
+- **팬텀 슬롯 제거**: `concurrentMap`(무기록 동시성 map, allSettled 계약) — fn 내부가 스스로 `*ThrottledCall` 하는 호출처(rawMirror/indexBuilder/indexScan)는 map 레벨 슬롯 기록 없이 실 API콜만 계량. `throttledMap`은 레거시(내부 throttle 없는 fn 전용)로 유지.
+- `getThrottleStatus()`는 **시트 lane 전용 계약**(busy-gate 소비처들이 "시트 여유"로 해석) — drive 필드 추가 금지. 모니터(`getThrottleMonitor`/`throttle-monitor.html`)는 시트 lane 기존 필드 불변 + `drive:{…}` 하위객체(구백엔드 응답이면 프론트가 Drive 카드 자동 숨김).
+- 부속 방어(레드-블루-심판): RAW미러 cron은 **부팅유예 2분**(`RAW_MIRROR_BOOT_GRACE_SEC`) + **`withJobLock('raw_mirror_all')` 인스턴스 직렬화**(rolling 배포 이중미러 차단) + bulk 사이클 중 시트 lane>`RAW_MIRROR_YIELD_THRESHOLD`(30)면 시트 단위 연기(`sheetsDeferred`, 단일미러/`_triggerSheetMirrorOnce`는 미적용=자가치유 보존). smartBuild·rawMirror의 Drive 변경감지 **연속실패 ≥`*_DRIVE_FAIL_SKIP_AFTER`(2)면 "변경 간주" 대신 그 시트 1사이클 skip**(drive 장애→풀리드 폭풍 전이 차단). 'RAW미러'도 저우선 라벨 기본 포함(주문 예약 8슬롯 보호). 회귀가드 `tests/throttleLanes.test.js`·`tests/driveLaneCallsites.test.js`.
+
 ### 구매양식 제출 = DB-first 원장 + 시트 비동기 미러 (order-ledger)
 - 구매양식 제출(`POST /api/submit/order`)은 **DB(`order_submissions`)에 먼저 확정**(`orderLedger.service.js`의 `createOrderLedgerEntry`) → RAW 미러(`raw_sheet_tabs.detected_headers`/`raw_sheet_rows`) 기반으로 행을 **원자적 배정**(`claimRow`, `sheet_row_claims` 행/dedup 2중 유니크 = 멱등·중복행 불가) → `enqueue('order_append')` → 큐 워커가 throttle(`sheetsThrottle`, 45/분)로 시트에 기록. 시트 통읽기 없음 = 쿼터 안전.
 - 주문 상태는 `order_submissions.mirror_status`: `pending`→`queued`→`written`, 또는 행 배정 실패 시 `pending_no_row`, 쓰기 실패 시 `failed`.

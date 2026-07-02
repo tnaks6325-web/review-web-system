@@ -20,7 +20,7 @@ const pool = require('../db/pool');
 const { readSheet, getSpreadsheetMeta, batchReadSheet, getSheetModifiedTime, shareSheetWithServiceAccount } = require('./sheets.service');
 const { computeChecksum } = require('../utils/checksum');
 const { logger } = require('../utils/logger');
-const { throttledCall } = require('../utils/sheetsThrottle');
+const { throttledCall, driveThrottledCall } = require('../utils/sheetsThrottle');
 
 // ═══════════════════════════════════════════════════════════
 // 상수 및 상태
@@ -67,6 +67,13 @@ let _modifiedTimeCache = {};   // sheetId → { modifiedTime, checkedAt }
 let _checksumCache = {};       // "sheetId||tabName" → checksum
 let _runCount = 0;
 let _startedAt = null;
+
+// (R5) Drive 변경감지 연속실패 스트릭 — streak>=N이면 "변경 간주" 대신 이번 사이클 skip(풀리드 폭풍 차단).
+//   성공 시 리셋. 백스톱: 전체빌드 cron(09/15/04). 비활성화: SMARTBUILD_DRIVE_FAIL_SKIP_AFTER=999
+const _driveFailStreak = {};
+const DRIVE_FAIL_SKIP_AFTER = (n => (Number.isFinite(n) && n > 0 ? n : 2))(
+  parseInt(process.env.SMARTBUILD_DRIVE_FAIL_SKIP_AFTER || '2', 10)
+);
 
 // ── pause 상태(적대검증 RED-1 끈채방치 / RED-2 재배포 부활 방어) ──
 //   interval은 계속 돌되 now < _pausedUntil이면 tick만 스킵(자동재개). app_settings에 영속화해
@@ -374,7 +381,8 @@ async function _ensureSheetsShared(sheetIds, result) {
   let granted = 0, alreadyOk = 0, failed = 0;
   for (const sheetId of sheetIds) {
     try {
-      const r = await throttledCall(() => shareSheetWithServiceAccount(sheetId));
+      // drive lane 1슬롯 = 내부 실 Drive 콜 최대 4회(permissions.list/create × SA/OAuth) 언더카운트 — 120/분 여유폭 내
+      const r = await driveThrottledCall(() => shareSheetWithServiceAccount(sheetId));
       if (r.alreadyShared) alreadyOk++;
       else granted++;
     } catch (err) {
@@ -492,7 +500,9 @@ async function runSmartBuild() {
 
     for (const sheetId of sheetIds) {
       try {
-        const modifiedTime = await throttledCall(() => getSheetModifiedTime(sheetId));
+        // drive lane — 시트 45/분 미소모(모니터 'Drive' 게이지에 계수)
+        const modifiedTime = await driveThrottledCall(() => getSheetModifiedTime(sheetId));
+        _driveFailStreak[sheetId] = 0;
         const cached = _modifiedTimeCache[sheetId];
 
         if (!cached || cached.modifiedTime !== modifiedTime) {
@@ -500,9 +510,16 @@ async function runSmartBuild() {
           _modifiedTimeCache[sheetId] = { modifiedTime, checkedAt: Date.now() };
         }
       } catch (err) {
-        // Drive API 실패 → 안전하게 변경된 것으로 간주
-        changedSheetIds.push(sheetId);
-        result.errorDetails.push({ phase: 'drive', sheetId: sheetId.substring(0, 15), error: err.message, desc: _translateError(err.message) });
+        const streak = (_driveFailStreak[sheetId] || 0) + 1;
+        _driveFailStreak[sheetId] = streak;
+        if (streak >= DRIVE_FAIL_SKIP_AFTER) {
+          // (R5) 연속실패 — "변경 간주" 증폭 대신 이번 사이클 skip. 다음 성공 시 자동 재개.
+          result.errorDetails.push({ phase: 'drive_defer', sheetId: sheetId.substring(0, 15), error: err.message, desc: `Drive 확인 ${streak}연속 실패 — 이번 주기 건너뜀(폭풍 방지)` });
+        } else {
+          // 1회성 실패는 현행대로 안전측(변경 간주)
+          changedSheetIds.push(sheetId);
+          result.errorDetails.push({ phase: 'drive', sheetId: sheetId.substring(0, 15), error: err.message, desc: _translateError(err.message) });
+        }
       }
     }
 

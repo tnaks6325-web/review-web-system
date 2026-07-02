@@ -65,6 +65,13 @@
       </div>
     </div>
 
+    <div class="card" id="driveCard" style="display:none;margin-bottom:16px">
+      <h2>Drive API lane (별도 쿼터 — 시트 45/분과 독립)</h2>
+      <div class="gauge"><span class="big" style="font-size:30px" id="dUsed">0</span><span class="of">/ <span id="dLimit">120</span> 콜</span></div>
+      <div class="bar"><i id="dBar" style="width:0%;background:var(--ok)"></i></div>
+      <div id="dByLabel" style="margin-top:10px"></div>
+    </div>
+
     <div class="card" style="margin-bottom:16px">
       <h2>출처별 사용량 (최근 1분)</h2>
       <div id="byLabel"><div class="muted" style="font-size:13px">호출 없음</div></div>
@@ -149,6 +156,26 @@ async function poll(){
     const s=(r.ageMs/1000).toFixed(1);
     return `<tr><td>${s}s 전</td><td><span class="tag">${esc(r.label)}</span></td><td class="muted">${esc(r.fn)}</td></tr>`;
   }).join('') || '<tr><td colspan="3" class="muted">—</td></tr>';
+
+  // Drive lane (신규 — 구백엔드 응답엔 d.drive 없음 → 카드 숨김, poll 생존)
+  const dl = d.drive, dCard = document.getElementById('driveCard');
+  if (dCard) {
+    if (dl && typeof dl.used === 'number') {
+      dCard.style.display = '';
+      document.getElementById('dUsed').textContent = dl.used;
+      document.getElementById('dLimit').textContent = dl.limit;
+      const dpct = Number(dl.pct) || 0;
+      const dbar = document.getElementById('dBar');
+      dbar.style.width = Math.min(100, dpct) + '%';
+      dbar.style.background = dpct >= 90 ? 'var(--crit)' : dpct >= 66 ? 'var(--warn)' : 'var(--ok)';
+      const dmax = Math.max(1, ...((dl.byLabel || []).map(x => Number(x.count) || 0)));
+      document.getElementById('dByLabel').innerHTML = (dl.byLabel && dl.byLabel.length)
+        ? dl.byLabel.map(x => `<div class="rowlbl"><span class="name">${esc(x.label)}</span><span class="track"><i style="width:${Math.round((Number(x.count)||0)/dmax*100)}%"></i></span><span class="cnt">${Number(x.count)||0}</span></div>`).join('')
+        : '<div class="muted" style="font-size:13px">최근 1분 호출 없음</div>';
+    } else {
+      dCard.style.display = 'none';
+    }
+  }
 }
 
 // 시작

@@ -86,9 +86,18 @@ function startCronJobs() {
   // RAW mirror dirty check: keep DB source data close to manually edited Sheets.
   if (process.env.RAW_MIRROR_CRON_ENABLED !== 'false') {
     const rawMirrorSchedule = process.env.RAW_MIRROR_CRON_SCHEDULE || '*/5 * * * *';
+    const bootGraceSec = (n => (Number.isFinite(n) && n >= 0 ? n : 120))(
+      parseInt(process.env.RAW_MIRROR_BOOT_GRACE_SEC || '120', 10)
+    );
     cron.schedule(rawMirrorSchedule, async () => {
       if (rawMirrorRunning) {
         logger.debug('[CRON-RawMirror] previous run still active, skip');
+        return;
+      }
+      // (R1) 배포 직후 해빙 폭주 완충: 부팅 유예 — rolling 공존창(30~60s)엔 old 인스턴스가 담당,
+      //   new는 유예 후 합류. 유예 중 신규 주문 시트는 _triggerSheetMirrorOnce가 자가치유(현행 백스톱).
+      if (process.uptime() < bootGraceSec) {
+        logger.debug(`[CRON-RawMirror] boot grace ${Math.round(process.uptime())}s/${bootGraceSec}s, skip`);
         return;
       }
       const throttle = getThrottleStatus();
@@ -99,9 +108,14 @@ function startCronJobs() {
       }
       rawMirrorRunning = true;
       try {
-        const result = await mirrorAllSheets({ force: false, includeHidden: true });
-        if ((result.tabsMirrored || 0) > 0 || (result.errors || 0) > 0) {
-          logger.info(`[CRON-RawMirror] tabs=${result.tabsMirrored}, rows=${result.rowsWritten}, skipped=${result.sheetsSkipped}, errors=${result.errors}, elapsed=${result.elapsed}`);
+        // (R1) 인스턴스 경계 직렬화 — rolling 배포 중 old+new 동시 미러(합산 실쿼터 초과) 차단.
+        //   기존 reconcile/queuePump와 동일한 jobLock 패턴. busy면 즉시 양보(다음 5분 cron 백스톱).
+        const { withJobLock } = require('../utils/jobLock');
+        const result = await withJobLock('raw_mirror_all', () => mirrorAllSheets({ force: false, includeHidden: true }));
+        if (result && result.skipped) {
+          logger.debug('[CRON-RawMirror] raw_mirror_all lock busy — 다른 인스턴스 미러 중, 양보');
+        } else if ((result.tabsMirrored || 0) > 0 || (result.errors || 0) > 0 || (result.sheetsDeferred || 0) > 0) {
+          logger.info(`[CRON-RawMirror] tabs=${result.tabsMirrored}, rows=${result.rowsWritten}, skipped=${result.sheetsSkipped}, deferred=${result.sheetsDeferred || 0}, errors=${result.errors}, elapsed=${result.elapsed}`);
         }
       } catch (err) {
         logger.error(`[CRON-RawMirror] error: ${err.message}`);

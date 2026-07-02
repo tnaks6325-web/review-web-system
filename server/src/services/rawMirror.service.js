@@ -19,7 +19,7 @@
 const pool = require('../db/pool');
 const { getSpreadsheetMeta, batchReadSheet, readSheet, getSheetModifiedTime } = require('./sheets.service');
 const { computeChecksum } = require('../utils/checksum');
-const { throttledCall, throttledMap, getThrottleStatus } = require('../utils/sheetsThrottle');
+const { throttledCall, driveThrottledCall, concurrentMap, getThrottleStatus } = require('../utils/sheetsThrottle');
 const { logger } = require('../utils/logger');
 const { detectSheetHeader } = require('../utils/sheetHeader');
 
@@ -48,6 +48,16 @@ const INACTIVE_RELAX  = () => process.env.RAW_MIRROR_INACTIVE_RELAX === '1';
 const INACTIVE_DAYS   = parseInt(process.env.RAW_MIRROR_INACTIVE_DAYS  || '30', 10);
 const INACTIVE_EVERY  = Math.max(2, parseInt(process.env.RAW_MIRROR_INACTIVE_EVERY || '6', 10));
 let _mirrorCycleCount = 0;
+
+// (R2) bulk 미러 중간 양보 임계(시트 lane 기준) — 초과 시 그 시트를 다음 사이클로 연기. 999로 사실상 비활성.
+const YIELD_THRESHOLD = (n => (Number.isFinite(n) && n > 0 ? n : 30))(
+  parseInt(process.env.RAW_MIRROR_YIELD_THRESHOLD || '30', 10)
+);
+// (R5) Drive 변경감지 연속실패 스트릭(bulk 경로 전용) — 999로 사실상 비활성.
+const _driveFailStreak = new Map();
+const DRIVE_FAIL_SKIP_AFTER = (n => (Number.isFinite(n) && n > 0 ? n : 2))(
+  parseInt(process.env.RAW_MIRROR_DRIVE_FAIL_SKIP_AFTER || '2', 10)
+);
 
 function _isSystemTab(tabName) {
   const lower = (tabName || '').toLowerCase();
@@ -111,15 +121,15 @@ async function mirrorAllSheets({ force = false, includeHidden = true } = {}) {
     }
   }
 
-  // ── 3) 시트별 처리 (동시성 3 + throttle) ──
-  const results = await throttledMap(
+  // ── 3) 시트별 처리 (동시성 3 — 실 API콜은 내부 throttledCall/driveThrottledCall이 정확 계량, 팬텀 슬롯 0) ──
+  const results = await concurrentMap(
     sheetIds,
-    (sheetId) => _mirrorOneSheet(sheetId, { force, includeHidden, checksumMap, sheetModifiedMap, startTime }),
+    (sheetId) => _mirrorOneSheet(sheetId, { force, includeHidden, checksumMap, sheetModifiedMap, startTime, deferOnBusy: true, deferOnDriveFail: true }),
     3
   );
 
   // ── 4) 집계 ──
-  let tabsMirrored = 0, tabsSkipped = 0, rowsWritten = 0, sheetsSkipped = 0, errors = 0;
+  let tabsMirrored = 0, tabsSkipped = 0, rowsWritten = 0, sheetsSkipped = 0, sheetsDeferred = 0, errors = 0;
   const errorDetails = [];
   for (let i = 0; i < results.length; i++) {
     const r = results[i];
@@ -129,6 +139,7 @@ async function mirrorAllSheets({ force = false, includeHidden = true } = {}) {
       tabsSkipped  += v.tabsSkipped;
       rowsWritten  += v.rowsWritten;
       if (v.sheetSkipped) sheetsSkipped++;
+      if (v.sheetDeferred) sheetsDeferred++;
       errors += v.errors;
     } else {
       errors++;
@@ -146,6 +157,7 @@ async function mirrorAllSheets({ force = false, includeHidden = true } = {}) {
     deferredInactive,           // (A) 이번 사이클에 비활성으로 건너뛴 시트 수(다음 INACTIVE_EVERY 사이클에 미러)
     relaxCycle: relaxThisCycle,
     sheetsSkipped,
+    sheetsDeferred,
     tabsMirrored,
     tabsSkipped,
     rowsWritten,
@@ -155,7 +167,7 @@ async function mirrorAllSheets({ force = false, includeHidden = true } = {}) {
     throttle: getThrottleStatus(),
     mirroredAt: new Date().toISOString(),
   };
-  logger.info(`[rawMirror] 완료: 탭 미러 ${tabsMirrored}개(스킵 ${tabsSkipped}), 행 ${rowsWritten}개, 시트스킵 ${sheetsSkipped}, 비활성연기 ${deferredInactive}, 오류 ${errors} — ${elapsed}`);
+  logger.info(`[rawMirror] 완료: 탭 미러 ${tabsMirrored}개(스킵 ${tabsSkipped}), 행 ${rowsWritten}개, 시트스킵 ${sheetsSkipped}, 양보연기 ${sheetsDeferred}, 비활성연기 ${deferredInactive}, 오류 ${errors} — ${elapsed}`);
   return summary;
 }
 
@@ -163,14 +175,22 @@ async function mirrorAllSheets({ force = false, includeHidden = true } = {}) {
  * 시트 1개의 모든 탭을 미러링
  */
 async function _mirrorOneSheet(sheetId, opts) {
-  const { force, includeHidden, checksumMap, sheetModifiedMap, startTime } = opts;
+  const { force, includeHidden, checksumMap, sheetModifiedMap, startTime,
+          deferOnBusy = false, deferOnDriveFail = false } = opts;
   let tabsMirrored = 0, tabsSkipped = 0, rowsWritten = 0, errors = 0;
 
-  // ── Drive 변경감지: 수정시각 변동 없으면 시트 전체 스킵 ──
+  // (R2/R1) bulk 사이클 중간 양보 — 시트 lane이 달아오르면(주문 버스트/해빙 직후) 이 시트는 다음 사이클로.
+  //   단일 미러(mirrorOneSheet)·_triggerSheetMirrorOnce 자동미러는 deferOnBusy 미전달(false) → 현행 유지(자가치유 보존).
+  if (!force && deferOnBusy && getThrottleStatus().requestsInLastMinute > YIELD_THRESHOLD) {
+    return { tabsMirrored: 0, tabsSkipped: 0, rowsWritten: 0, errors: 0, sheetDeferred: true };
+  }
+
+  // ── Drive 변경감지: drive lane 사용(시트 45/분 미소모) — 수정시각 변동 없으면 시트 전체 스킵 ──
   let modifiedTime = null;
   if (!force) {
     try {
-      modifiedTime = await throttledCall(() => getSheetModifiedTime(sheetId));
+      modifiedTime = await driveThrottledCall(() => getSheetModifiedTime(sheetId));
+      _driveFailStreak.delete(sheetId);
       if (modifiedTime) {
         const remote = new Date(modifiedTime).getTime();
         const lastKnown = sheetModifiedMap[sheetId] || 0;
@@ -179,7 +199,13 @@ async function _mirrorOneSheet(sheetId, opts) {
         }
       }
     } catch (err) {
-      logger.warn(`[rawMirror] Drive 변경감지 실패 (${sheetId.substring(0, 15)}): ${err.message}`);
+      const streak = (_driveFailStreak.get(sheetId) || 0) + 1;
+      _driveFailStreak.set(sheetId, streak);
+      logger.warn(`[rawMirror] Drive 변경감지 실패 ${streak}회 (${sheetId.substring(0, 15)}): ${err.message}`);
+      // (R5) bulk 경로 연속실패 — 전체읽기 진행(=시트 lane 폭풍) 대신 이번 사이클 연기.
+      if (deferOnDriveFail && streak >= DRIVE_FAIL_SKIP_AFTER) {
+        return { tabsMirrored: 0, tabsSkipped: 0, rowsWritten: 0, errors: 0, sheetDeferred: true };
+      }
     }
   }
 

@@ -3,7 +3,7 @@ const { readSheet, getSpreadsheetMeta, batchReadSheet, getSheetModifiedTime } = 
 const { computeChecksum } = require('../utils/checksum');
 const { logger } = require('../utils/logger');
 const { emitIndexBuild } = require('../utils/sse');
-const { throttledCall, throttledMap, getThrottleStatus } = require('../utils/sheetsThrottle');
+const { throttledCall, driveThrottledCall, concurrentMap, getThrottleStatus } = require('../utils/sheetsThrottle');
 
 // ═══════════════════════════════════════════════════════════
 // Phase 14: DB에서 키워드 로드 (하드코딩 폴백)
@@ -288,7 +288,7 @@ async function buildIndexSmart(forceFullRebuild = false) {
     // ── 3단계: 시트별 처리 (throttle 적용 — quota 초과 방지) ──
     // 동시 3개씩 + API 호출 간 최소 1.2초 간격 유지
     logger.info(`[buildIndex] throttle 상태: ${JSON.stringify(getThrottleStatus())}`);
-    const sheetResults = await throttledMap(
+    const sheetResults = await concurrentMap(
       sheetIds,
       (sheetId) => _processOneSheet(sheetId, {
         forceFullRebuild,
@@ -476,7 +476,7 @@ async function _processOneSheet(sheetId, opts) {
   let cachedModifiedTime = null;
   if (!forceFullRebuild) {
     try {
-      cachedModifiedTime = await throttledCall(() => getSheetModifiedTime(sheetId));
+      cachedModifiedTime = await driveThrottledCall(() => getSheetModifiedTime(sheetId));
       if (cachedModifiedTime) {
         const remoteModified = new Date(cachedModifiedTime).getTime();
         const lastKnown = sheetModifiedMap[sheetId] || 0;
@@ -1064,11 +1064,11 @@ async function checkDirtySheets() {
     };
   });
 
-  // ★ 성능 개선: 순차 → 병렬 처리 (throttledMap, 동시 3개)
-  //   기존: 55시트 × 1.2초 간격 = ~66초+ (순차)
-  //   개선: 55시트 ÷ 3 동시 = ~22초 (병렬)
-  const results = await throttledMap(sheetIds, async (sheetId) => {
-    const remoteModified = await getSheetModifiedTime(sheetId);
+  // ★ 병렬 처리 (concurrentMap, 동시 3개) — 팬텀 슬롯 0
+  // (R4) 이 지점은 팬텀 슬롯이 유일한 페이싱이던 곳 — concurrentMap 교체 시 반드시
+  //   driveThrottledCall로 감싼다(래핑 누락 = 완전 무제한 호출, tests/driveLaneCallsites.test.js가 핀).
+  const results = await concurrentMap(sheetIds, async (sheetId) => {
+    const remoteModified = await driveThrottledCall(() => getSheetModifiedTime(sheetId));
     return { sheetId, remoteModified };
   }, 3);
 

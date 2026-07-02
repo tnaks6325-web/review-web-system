@@ -10,7 +10,7 @@
  */
 
 const { readSheet, writeSheet, getSpreadsheetMeta } = require('./sheets.service');
-const { throttledCall, throttledMap, getThrottleStatus } = require('../utils/sheetsThrottle');
+const { throttledCall, concurrentMap, getThrottleStatus } = require('../utils/sheetsThrottle');
 const { logger } = require('../utils/logger');
 
 // ── 환경변수 ──
@@ -162,7 +162,7 @@ async function runIndexScan(dryRun = true) {
   const errors = [];
   let totalTabs = 0;
 
-  await throttledMap(sheetEntries, async (entry) => {
+  await concurrentMap(sheetEntries, async (entry) => {
     try {
       const meta = await throttledCall(() => getSpreadsheetMeta(entry.sheetId));
       if (!meta || meta.length === 0) {
