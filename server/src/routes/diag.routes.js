@@ -2012,7 +2012,7 @@ router.get('/order-mirror-status', authMiddleware, async (req, res, next) => {
          LEFT JOIN tab_configs tc ON tc.sheet_id = os.sheet_id AND tc.tab_name = os.tab_name
          LEFT JOIN raw_sheet_tabs rst ON rst.sheet_id = os.sheet_id
               AND (rst.tab_gid = NULLIF(os.tab_gid, '') OR rst.tab_name = os.tab_name)
-        WHERE os.mirror_status IN ('pending','pending_no_row','failed','queued')
+        WHERE os.mirror_status IN ('pending','pending_no_row','failed','queued','stuck_manual')
         ORDER BY os.submitted_at DESC
         LIMIT 50`
     );
@@ -2022,12 +2022,13 @@ router.get('/order-mirror-status', authMiddleware, async (req, res, next) => {
               MAX(tc.display_name) AS "displayName",
               COUNT(*)::int AS stuck,
               COUNT(*) FILTER (WHERE os.mirror_status = 'pending_no_row')::int AS "noRow",
+              COUNT(*) FILTER (WHERE os.mirror_status = 'stuck_manual')::int AS "needManual",
               bool_or(rst.detected_headers IS NOT NULL) AS "hasRawMeta"
          FROM order_submissions os
          LEFT JOIN raw_sheet_tabs rst ON rst.sheet_id = os.sheet_id
               AND (rst.tab_gid = NULLIF(os.tab_gid, '') OR rst.tab_name = os.tab_name)
          LEFT JOIN tab_configs tc ON tc.sheet_id = os.sheet_id AND tc.tab_name = os.tab_name
-        WHERE os.mirror_status IN ('pending','pending_no_row','failed','queued')
+        WHERE os.mirror_status IN ('pending','pending_no_row','failed','queued','stuck_manual')
         GROUP BY os.sheet_id, os.tab_name
         ORDER BY stuck DESC LIMIT 500`
     );
@@ -3132,7 +3133,7 @@ router.get('/order-stuck-export', authMiddleware, adminOrMasterMiddleware, async
     );
 
     if (String(req.query.format || '').toLowerCase() === 'csv') {
-      const stMap = { written: '반영완료', queued: '미반영(대기)', failed: '미반영(실패)', pending: '미반영', pending_no_row: '미반영(행없음)' };
+      const stMap = { written: '반영완료', queued: '미반영(대기)', failed: '미반영(실패)', pending: '미반영', pending_no_row: '미반영(행없음)', stuck_manual: '미반영(수동입력필요)' };
       const esc = (v) => { v = String(v == null ? '' : v); return /[",\n\r]/.test(v) ? '"' + v.replace(/"/g, '""') + '"' : v; };
       // 제출시각을 한국시간(KST)으로 — sv-SE 로캘이 'YYYY-MM-DD HH:mm:ss' 형식을 준다.
       const fmtKST = (d) => {

@@ -319,25 +319,30 @@ async function drainTabQueueBatched({ sheetId, tabName, maxMillis = 60000, batch
 async function _drainLoop({ sheetId, tabName, maxMillis, batchSize, oneChunk = false }) {
   const start = Date.now();
   let processed = 0, succeeded = 0, failed = 0, deferred = 0, quotaExceeded = false, emptied = false;
+  // ★ 버그1(R3): 이번 드레인콜에서 defer된 항목은 재클레임 제외(옛 stale sheetRow 재읽기·throttle 낭비·busy-spin 차단).
+  const skipIds = [];
   while (Date.now() - start < maxMillis) {
     // R-B8: 단건과 동일 클레임 조건(type='order_append') → 같은 항목은 한쪽만 점유(SKIP LOCKED).
     const { rows: items } = await pool.query(
       // ★ 버스트/백로그 대응: pending뿐 아니라 "정체된 processing"도 재점유.
       //   STALE_PROCESSING_SEC(기본 60s) 넘은 processing은 재점유한다(R-1b: 단건 백스톱과 겹쳐도
       //   조건부 written이 이중쓰기를 멱등 흡수).
+      //   ★ ($5 IS NULL OR id <> ALL($5)) 선행 필수: id<>ALL(NULL)은 NULL이라 전건 제외되므로 skipIds 없을 땐 NULL 전달.
       `UPDATE sync_queue SET status='processing', processed_at=NOW()
         WHERE id IN (SELECT id FROM sync_queue
            WHERE attempts<max_retry AND type='order_append'
              AND payload->>'sheetId'=$1 AND payload->>'tabName'=$2
+             AND ($5::int[] IS NULL OR id <> ALL($5::int[]))
              AND (status='pending'
                   OR (status='processing' AND processed_at < NOW() - ($4 || ' seconds')::interval))
            ORDER BY created_at ASC LIMIT $3 FOR UPDATE SKIP LOCKED)
         RETURNING *`,
-      [sheetId, tabName, batchSize, String(STALE_PROCESSING_SEC)]
+      [sheetId, tabName, batchSize, String(STALE_PROCESSING_SEC), skipIds.length ? skipIds : null]
     );
     if (!items.length) { emptied = true; break; }           // 빈 큐 = 이번 라운드 비움(완료 신호 아님)
     const r = await _executeBatch(items, sheetId, tabName);
     processed += r.processed; succeeded += r.succeeded; failed += r.failed; deferred += r.deferred;
+    if (Array.isArray(r.deferredIds)) for (const id of r.deferredIds) if (!skipIds.includes(id)) skipIds.push(id);
     if (r.quotaExceeded) { quotaExceeded = true; break; }   // R-B9: quota → 양보(락 해제)
     if (oneChunk) break;                                     // R2/R5: 1청크만 → 점유시간 최소·공평 양보
   }
@@ -346,6 +351,7 @@ async function _drainLoop({ sheetId, tabName, maxMillis, batchSize, oneChunk = f
 
 async function _executeBatch(items, sheetId, tabName) {
   let succeeded = 0, failed = 0, deferred = 0, quotaExceeded = false;
+  const deferredIds = [];   // 버그1(R3): 같은 드레인콜서 재클레임 제외할 defer 항목(스핀/throttle 낭비 차단)
   // 실행 직전 attempts +1 (원본 시맨틱 — 클레임이 아니라 실행 단위)
   await pool.query(`UPDATE sync_queue SET attempts=attempts+1 WHERE id = ANY($1::int[])`, [items.map(it => it.id)]);
 
@@ -357,7 +363,8 @@ async function _executeBatch(items, sheetId, tabName) {
   if (osIds.length) {
     const { rows } = await pool.query(
       `SELECT id, deleted_at, mirror_status, orderer, recipient, user_id, phone, address, bank, account,
-              depositor, price, order_num, memo, date_str, selected_opt_key
+              depositor, price, order_num, memo, date_str, selected_opt_key,
+              submitted_at, reassign_count
          FROM order_submissions WHERE id = ANY($1::uuid[])`, [osIds]);
     for (const row of rows) aliveMap.set(row.id, row);
   }
@@ -367,7 +374,8 @@ async function _executeBatch(items, sheetId, tabName) {
   try { tabContext = await loadRawTabContext(sheetId, parsed[0].p.gid, tabName); } catch (_) { tabContext = null; }
   if (!tabContext || !tabContext.headers || !tabContext.headers.length) {
     await _restorePending(items);
-    return { processed: items.length, succeeded: 0, failed: 0, deferred: items.length, quotaExceeded };
+    return { processed: items.length, succeeded: 0, failed: 0, deferred: items.length, quotaExceeded,
+             deferredIds: items.map(it => it.id) };
   }
   const ctxTab = tabContext.tabName || tabName;
   const ctxGid = tabContext.tabGid || parsed[0].p.gid || '';
@@ -378,18 +386,18 @@ async function _executeBatch(items, sheetId, tabName) {
     const os = x.p.orderSubmissionId ? aliveMap.get(x.p.orderSubmissionId) : null;
     // ★ 공정화 #4(R1/R10 보조): deleted/written(고아)면 시트 재기록 금지 → 시트콜 0으로 큐만 done.
     //   written 재기록은 멱등이라 무해하나 throttle 낭비 → 흡수해서 신규에 예산 집중.
-    if (x.p.orderSubmissionId && (!os || os.deleted_at || os.mirror_status === 'written')) {
+    if (x.p.orderSubmissionId && (!os || os.deleted_at || os.mirror_status === 'written' || os.mirror_status === 'stuck_manual')) {
       await pool.query(`UPDATE sync_queue SET status='done', processed_at=NOW(), error_msg=NULL WHERE id=$1`, [x.item.id]);
       continue;
     }
     if (!x.p.sheetRow) {
-      await pool.query(`UPDATE sync_queue SET status='pending', processed_at=NOW() WHERE id=$1 AND status='processing'`, [x.item.id]);
-      deferred++; continue;
+      await pool.query(`UPDATE sync_queue SET status='pending', attempts=GREATEST(attempts-1,0), processed_at=NOW() WHERE id=$1 AND status='processing'`, [x.item.id]);
+      deferredIds.push(x.item.id); deferred++; continue;
     }
     const orderData = os ? _osRowToOrderData(os) : x.p.orderData;
     live.push({ item: x.item, p: x.p, orderData, sheetRow: parseInt(x.p.sheetRow, 10) });
   }
-  if (!live.length) return { processed: items.length, succeeded, failed, deferred, quotaExceeded };
+  if (!live.length) return { processed: items.length, succeeded, failed, deferred, quotaExceeded, deferredIds };
 
   // ── 가드 1콜 (R-B3): 모든 가드 col union을 minCol..maxCol 한 사각형으로. ──
   const allCols = new Set();
@@ -415,20 +423,36 @@ async function _executeBatch(items, sheetId, tabName) {
     }
   }
 
-  // ── 차단행: claim 해제(복구분만) + 큐 pending(다음 reconcile이 더 아래 행). ── (R-B1/B7)
+  // ── 차단행 처리(버그1): defer(유예)/release(재배정)/giveup(수동전환·상한). ── (R1/R2/R3/R6)
+  //   release: 큐항목 'done'을 '먼저' → 그 뒤 claim 해제/강등(크래시 시에도 stale 재드레인 churn 불가·J1).
+  //   defer:   attempts 되돌림 + deferredIds로 동일 드레인콜 재클레임 제외(옛 점유행 재읽기·busy-spin 차단·R3).
+  //   giveup:  reassign 상한 초과 → stuck_manual(reconcile/스케줄러 제외 = 무한 append 종결·R2) + claim 보존.
   const passed = [];
   for (const x of live) {
-    if (x.blocked) {
-      if (x.p.recovered && x.p.dedupKey) {
-        try { await _releaseOrderRowClaim({ sheetId, tabName: ctxTab, dedupKey: x.p.dedupKey, orderSubmissionId: x.p.orderSubmissionId }); } catch (_) {}
-      }
-      await pool.query(`UPDATE sync_queue SET status='pending', error_msg='guard blocked', processed_at=NOW() WHERE id=$1 AND status='processing'`, [x.item.id]);
+    if (!x.blocked) { passed.push(x); continue; }               // R-B7: 단일 진실원본
+    const os = x.p.orderSubmissionId ? aliveMap.get(x.p.orderSubmissionId) : null;
+    const decision = _guardBlockDecision({
+      recovered: x.p.recovered, submittedAt: os && os.submitted_at, reassignCount: os && os.reassign_count });
+    if (decision === 'giveup') {
+      await pool.query(
+        `UPDATE order_submissions SET mirror_status='stuck_manual',
+                sheet_error='guard blocked; exceeded max reassign — needs manual entry'
+          WHERE id=$1 AND mirror_status<>'written'`, [x.p.orderSubmissionId]);
+      await pool.query(`UPDATE sync_queue SET status='done', error_msg='guard blocked; giveup(stuck_manual)', processed_at=NOW() WHERE id=$1 AND status='processing'`, [x.item.id]);
       deferred++;
-    } else {
-      passed.push(x);                                           // R-B7: 단일 진실원본
+    } else if (decision === 'release') {
+      // J1: 큐 'done'을 release '앞에' → 크래시-윈도에도 stale 항목 재드레인 없음(order는 done된 큐 없이 reconcile 재진입).
+      await pool.query(`UPDATE sync_queue SET status='done', error_msg='guard blocked; released for reassignment', processed_at=NOW() WHERE id=$1 AND status='processing'`, [x.item.id]);
+      // J2: dedupKey 유무와 무관하게 무조건 호출(내부에서 dedupKey/orderId 가드) → sheet_row NULL·failed로 reconcile 재배정.
+      try { await _releaseOrderRowClaim({ sheetId, tabName: ctxTab, dedupKey: x.p.dedupKey, orderId: x.p.orderSubmissionId, orderSubmissionId: x.p.orderSubmissionId }); } catch (_) {}
+      await pool.query(`UPDATE order_submissions SET reassign_count=COALESCE(reassign_count,0)+1 WHERE id=$1`, [x.p.orderSubmissionId]);
+      deferred++;
+    } else { // defer(유예): grace 미경과 실시간 주문 — 일시 write 경합을 영구소실로 오판하지 않음(R6)
+      await pool.query(`UPDATE sync_queue SET status='pending', attempts=GREATEST(attempts-1,0), error_msg='guard blocked (grace/defer)', processed_at=NOW() WHERE id=$1 AND status='processing'`, [x.item.id]);
+      deferredIds.push(x.item.id); deferred++;
     }
   }
-  if (!passed.length) return { processed: items.length, succeeded, failed, deferred, quotaExceeded };
+  if (!passed.length) return { processed: items.length, succeeded, failed, deferred, quotaExceeded, deferredIds };
 
   // ── 쓰기 (R-B9 청크 캡). 청크당 batchUpdate 1콜, 순차폴백 비활성. ──
   for (let i = 0; i < passed.length; i += BATCH_ROW_CAP) {
@@ -487,7 +511,7 @@ async function _executeBatch(items, sheetId, tabName) {
       } catch (bgErr) { logger.warn(`[batchDrain] 배경색 묶음 실패(무시): ${bgErr.message}`); }
     }
   }
-  return { processed: items.length, succeeded, failed, deferred, quotaExceeded };
+  return { processed: items.length, succeeded, failed, deferred, quotaExceeded, deferredIds };
 }
 
 // ── 개별 항목 실행 ──
@@ -574,17 +598,20 @@ async function _executeItem(item) {
         // ★ PR-A 가드 + J-1(B4): 취소/삭제된 주문은 시트쓰기 skip(큐 done — markFailed/throw 금지) +
         //   동시에 최신 필드를 재조회해 orderData를 교체한다. payload는 enqueue 시점 스냅샷이라,
         //   편집(order_update) 후 deferred append되는 주문은 이 재조회가 없으면 옛값으로 기록(편집 소실).
+        let osMeta = null;
         if (orderSubmissionId) {
           const { rows: alive } = await pool.query(
-            `SELECT deleted_at, orderer, recipient, user_id, phone, address, bank, account, depositor,
-                    price, order_num, memo, date_str, selected_opt_key
+            `SELECT deleted_at, mirror_status, orderer, recipient, user_id, phone, address, bank, account, depositor,
+                    price, order_num, memo, date_str, selected_opt_key, submitted_at, reassign_count
                FROM order_submissions WHERE id = $1`,
             [orderSubmissionId]
           );
-          if (!alive.length || alive[0].deleted_at) {
-            logger.info(`[order_append] 취소/삭제된 주문 — 시트쓰기 건너뜀 (id=${orderSubmissionId})`);
+          // J3: written/stuck_manual(종결)도 skip — stale 재드레인이 written 주문을 release→failed 강등→중복행 방지.
+          if (!alive.length || alive[0].deleted_at || alive[0].mirror_status === 'written' || alive[0].mirror_status === 'stuck_manual') {
+            logger.info(`[order_append] 취소/삭제/이미반영·수동 주문 — 시트쓰기 건너뜀 (id=${orderSubmissionId})`);
             return;
           }
+          osMeta = alive[0];
           orderData = _osRowToOrderData(alive[0]); // ★ J-1: stale 스냅샷 대체 = 편집값 반영
         }
         const tabContext = await loadRawTabContext(sheetId, gid, tabName);
@@ -612,12 +639,21 @@ async function _executeItem(item) {
           // 내가 쓴 값이면(재시도 멱등) 통과, 어느 칸이든 외부/타 주문 값이면 덮어쓰기 차단
           const blocked = guards.some(g => guardBlocksWrite(String(cells[g.col - minC] || '').trim(), g));
           if (blocked) {
-            // ★ 복구(append) 주문이 차단되면 = 그 하단행이 직원 수동입력 등으로 이미 채워짐.
-            //   claim을 해제(행 점유/주문.sheet_row 비움)해 다음 리컨실이 "더 아래" 새 행을 잡게 한다(stuck loop 방지).
-            if (recovered && dedupKey) {
-              await _releaseOrderRowClaim({ sheetId, tabName: tabContext.tabName || tabName, dedupKey, orderSubmissionId });
+            // 버그1: 차단 = 배정행이 이미 타인 데이터로 채워짐. 복구분/게이트ON·grace경과 실시간건은 release(재배정),
+            //   grace 미경과 실시간건은 defer(일시경합 오판 방지), reassign 상한 초과는 giveup(수동전환·무한루프 종결).
+            const decision = _guardBlockDecision({
+              recovered, submittedAt: osMeta && osMeta.submitted_at, reassignCount: osMeta && osMeta.reassign_count });
+            if (decision === 'release') {
+              // J2: 무조건 호출(내부 dedupKey/orderId 가드) → sheet_row NULL·failed로 reconcile이 하단 새 행 재배정.
+              try { await _releaseOrderRowClaim({ sheetId, tabName: tabContext.tabName || tabName, dedupKey, orderId: orderSubmissionId, orderSubmissionId }); } catch (_) {}
+              await pool.query(`UPDATE order_submissions SET reassign_count=COALESCE(reassign_count,0)+1 WHERE id=$1`, [orderSubmissionId]);
+              return;   // 큐항목 done(성공경로) — reconcile이 새 행 재배정
             }
-            throw new Error('target row already filled before mirror write (multi-col guard)');
+            if (decision === 'giveup') {
+              await pool.query(`UPDATE order_submissions SET mirror_status='stuck_manual', sheet_error='guard blocked; exceeded max reassign — needs manual entry' WHERE id=$1 AND mirror_status<>'written'`, [orderSubmissionId]);
+              return;   // 큐항목 done(수동입력 대상)
+            }
+            const e = new Error('target row occupied — defer (grace)'); e.__defer = true; throw e;  // defer: attempts 되돌림, failed 마킹 금지
           }
         }
         const batchData = buildBatchUpdateData({
@@ -665,7 +701,8 @@ async function _executeItem(item) {
         let _sig = null; try { _sig = computeRowWriteSig(tabContext.headers, orderData); } catch (_) {}
         await markOrderWritten(orderSubmissionId, sheetRow, _sig);
       } catch (err) {
-        await markOrderMirrorFailed(orderSubmissionId, err);
+        // defer(grace 미경과 일시경합)는 주문을 'failed'로 강등하지 않는다(queued 유지 → 재시도/grace 후 release).
+        if (!(err && err.__defer)) await markOrderMirrorFailed(orderSubmissionId, err);
         throw err;
       }
       break;
@@ -954,6 +991,23 @@ async function purgeCompleted(hoursOld = 24) {
   return { purged: rowCount };
 }
 
+// ── 가드 차단 행동 결정(버그1): defer(유예)/release(재배정)/giveup(수동전환·상한) ──
+//   유예는 배치공유 attempts가 아니라 "주문 단위 시각(submitted_at)"으로 판정(R6: 방금 제출한 실시간 주문의
+//   일시 write 경합을 영구소실로 오판하지 않음). 비복구 release·상한(giveup)은 ORDER_GUARD_REASSIGN=1 게이트.
+//   게이트 OFF: 비복구는 현행대로 defer(재배정 안 함), 복구분(reconcile 하단재배정건)만 release — 순수 R1/R3 픽스.
+function _guardBlockDecision({ recovered, submittedAt, reassignCount } = {}) {
+  const gateOn = process.env.ORDER_GUARD_REASSIGN === '1';
+  const maxReassign = parseInt(process.env.ORDER_MAX_REASSIGN || '5', 10);
+  const rc = parseInt(reassignCount, 10) || 0;
+  if (gateOn && rc >= maxReassign) return 'giveup';    // R2: 무한 append 종결(수동전환)
+  if (recovered) return 'release';                     // 복구분 — 항상 done경로 release(순수 R1/R3 픽스)
+  if (!gateOn) return 'defer';                         // 게이트 OFF → 비복구는 현행(release 안 함)
+  const graceSec = parseInt(process.env.ORDER_BLOCK_GRACE_SEC || '90', 10);
+  const t = submittedAt ? new Date(submittedAt).getTime() : NaN;
+  const ageMs = Number.isFinite(t) ? (Date.now() - t) : Infinity;
+  return ageMs >= graceSec * 1000 ? 'release' : 'defer';  // grace 경과 후에만 release(일시경합 오판 방지)
+}
+
 // ── 헬퍼: 복구 append가 가드에 막히면 claim 해제 → 다음 리컨실이 더 아래 새 행 재배정 ──
 async function _releaseOrderRowClaim({ sheetId, tabName, dedupKey, orderSubmissionId, orderId = null, skipFail = false }) {
   try {
@@ -977,7 +1031,7 @@ async function _releaseOrderRowClaim({ sheetId, tabName, dedupKey, orderSubmissi
         `UPDATE order_submissions
             SET sheet_row = NULL, mirror_status = 'failed',
                 sheet_error = 'append row occupied — claim released for re-assignment'
-          WHERE id = $1`,
+          WHERE id = $1 AND mirror_status <> 'written'`,
         [orderSubmissionId]
       );
     } catch (e) {
@@ -1108,6 +1162,7 @@ module.exports = {
   drainOrderQueue,
   _isQuota,            // 테스트용
   _readGuardWindow,    // 테스트용(reader 주입)
+  _guardBlockDecision, // 테스트용(defer/release/giveup 진리표)
   getQueueStats,
   retryItem,
   retryAllFailed,
