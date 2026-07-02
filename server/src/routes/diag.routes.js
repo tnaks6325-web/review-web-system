@@ -2608,6 +2608,127 @@ router.post('/review-reflect', authMiddleware, adminOrMasterMiddleware, async (r
   } catch (err) { next(err); }
 });
 
+// POST /api/diag/backfill-userid { sheetId, tabName, gid?, dryRun?, limit? } (admin/master, PII)
+//   과거 미기록된 단일 id열(쿠팡id 등)을 written 주문의 id셀만 채운다(전체행 재기입 금지 = 직원 수동편집 보존).
+//   배경: 시트쓰기 매퍼가 옛날 '쿠팡id' 헤더를 못 잡아 쿠팡탭 id열이 공란이던 버그의 소급 복구.
+//   방어: 라이브헤더 재감지 + 단일 id열일 때만 진행(오배정/NC 방지) · 탭당 1 rect read + 청크 write(쿼터안전)
+//        · identity AND 강검증(오각인 방지) · id셀 빈칸만(멱등/수동보존) · 절대행오프셋(그리드밖 skip)
+//        · order_reconcile 락 + busy양보 + 중복가드 + 쓰기직전 취소 재확인 · dryRun 기본 ON.
+let _backfillUserIdRunning = false;
+router.post('/backfill-userid', authMiddleware, adminOrMasterMiddleware, async (req, res, next) => {
+  try {
+    const { sheetId, tabName } = req.body || {};
+    const gid = req.body && req.body.gid ? String(req.body.gid) : '';
+    if (!sheetId || !tabName) return res.status(400).json({ ok: false, error: 'sheetId, tabName 필수' });
+    const dryRun = !(req.body && req.body.dryRun === false);                 // 명시적 false만 실제 기입
+    const limit = Math.min(Math.max(parseInt(req.body && req.body.limit, 10) || 1000, 1), 5000); // default 1000(타임아웃 여유)
+    if (!dryRun && _backfillUserIdRunning) return res.status(409).json({ ok: false, error: '백필 진행 중 — 잠시 후 재시도' });
+
+    const { throttledCall, getThrottleStatus } = require('../utils/sheetsThrottle');
+    const { batchUpdateSheet, invalidateSheetMeta } = require('../services/sheets.service');
+    const { detectSheetHeader } = require('../utils/sheetHeader');
+    const { loadRawTabContext, _fieldToCol, normalizeGuardValue, getColLetter } = require('../services/orderLedger.service');
+    const { withJobLock } = require('../utils/jobLock');
+
+    const BUSY = parseInt(process.env.BACKFILL_USERID_BUSY || '25', 10);      // 라이브 주문 우선
+    if (getThrottleStatus().requestsInLastMinute > BUSY)
+      return res.status(429).json({ ok: false, error: 'throttle busy — 나중에 재시도(라이브 주문 우선)' });
+
+    const run = () => withJobLock('order_reconcile', async () => {            // reconcile·detect·batched drain과 직렬화
+      // 1) 컨텍스트 + 라이브 헤더 재감지(stale 미러 헤더로 오배정 write 방지)
+      const ctx = await loadRawTabContext(sheetId, gid || null, tabName);
+      if (!ctx || !ctx.tabGid) return { skipped: true, reason: 'no_meta_or_gid' };
+      let headers = ctx.headers;
+      try {
+        const top = await throttledCall(() => readSheet(sheetId, `'${ctx.tabName}'!A1:ZZ20`, { gid: ctx.tabGid }));
+        const det = detectSheetHeader(Array.isArray(top) ? top : []);
+        if (det && det.headers && det.headers.length) headers = det.headers;
+      } catch (_) { /* 미러 헤더 폴백 */ }
+      if (!headers || !headers.length) return { skipped: true, reason: 'no_headers' };
+
+      // 2) 단일 id열일 때만 진행. NC 2열·0열이면 abort(오기입 방지).
+      const idCol = _fieldToCol(headers, 'user_id');                          // _singleIdCol → 정확히 1개일 때만 >=0
+      if (idCol < 0) return { skipped: true, reason: 'id_col_not_single',
+        idCandidates: headers.filter(h => /아이디|id/i.test(String(h || ''))) };
+      const idyCols = [['phone', _fieldToCol(headers, 'phone')],
+                       ['recipient', _fieldToCol(headers, 'recipient')],
+                       ['address', _fieldToCol(headers, 'address')]].filter(([, c]) => c >= 0);
+      if (!idyCols.length) return { skipped: true, reason: 'no_identity_cols' };
+
+      // 3) 대상: 그 탭 written·미삭제·행배정·user_id 보유
+      const { rows: orders } = await pool.query(
+        `SELECT id, sheet_row, user_id, phone, recipient, address
+           FROM order_submissions
+          WHERE sheet_id = $1 AND tab_name = $2 AND mirror_status = 'written'
+            AND sheet_row IS NOT NULL AND deleted_at IS NULL
+            AND user_id IS NOT NULL AND btrim(user_id) <> ''
+          ORDER BY sheet_row LIMIT $3`,
+        [sheetId, tabName, limit]);
+      const R = { scanned: orders.length, written: 0, skippedFilled: 0, skippedMismatch: 0,
+                  skippedGridOut: 0, idCol, idHeader: headers[idCol], tabGid: ctx.tabGid, dryRun };
+      if (!orders.length) return R;
+
+      // 4) 탭당 1 rect read(id+신원 union × 행범위) — 쿼터 안전
+      const cols = [idCol, ...idyCols.map(([, c]) => c)];
+      const minC = Math.min(...cols), maxC = Math.max(...cols);
+      const rowsN = orders.map(o => o.sheet_row);
+      const minR = Math.min(...rowsN), maxR = Math.max(...rowsN);
+      invalidateSheetMeta(sheetId);
+      const grid = await throttledCall(() => readSheet(sheetId,
+        `'${ctx.tabName}'!${getColLetter(minC)}${minR}:${getColLetter(maxC)}${maxR}`, { gid: ctx.tabGid }));
+
+      const writeData = [], writeIds = [];
+      for (const os of orders) {
+        const gi = os.sheet_row - minR;                                       // 절대행 오프셋
+        const gridRow = grid && grid[gi];
+        if (!gridRow || gridRow.length === 0) { R.skippedGridOut++; continue; }
+        const cellAt = (c) => gridRow[c - minC];
+
+        // identity AND 강검증: comparable 전부 일치 + (연락처 포함 or ≥2칸)
+        let comparable = 0, matched = 0, phoneOk = false;
+        for (const [f, c] of idyCols) {
+          const exp = normalizeGuardValue(headers[c], os[f]); if (!exp) continue;
+          comparable++;
+          const cur = normalizeGuardValue(headers[c], cellAt(c));
+          if (cur && cur === exp) { matched++; if (f === 'phone') phoneOk = true; }
+        }
+        if (comparable === 0 || matched !== comparable || (!phoneOk && comparable < 2)) { R.skippedMismatch++; continue; }
+
+        // id셀 이미 값 있으면 skip(멱등 + 수동 id 보존)
+        const idCur = String(cellAt(idCol) == null ? '' : cellAt(idCol)).trim();
+        if (idCur !== '') { R.skippedFilled++; continue; }
+
+        writeData.push({ range: `'${ctx.tabName}'!${getColLetter(idCol)}${os.sheet_row}`, values: [[String(os.user_id).trim()]] });
+        writeIds.push(os.id);
+      }
+
+      if (dryRun) { R.wouldWrite = writeData.length; return R; }
+      if (!writeData.length) return R;
+
+      // 5) 쓰기 직전 취소 재확인
+      const { rows: alive } = await pool.query(
+        `SELECT id FROM order_submissions WHERE id = ANY($1::uuid[]) AND deleted_at IS NULL AND mirror_status = 'written'`,
+        [writeIds]);
+      const aliveSet = new Set(alive.map(r => r.id));
+      const finalWrites = writeData.filter((_, i) => aliveSet.has(writeIds[i]));
+
+      // 6) 청크 write(각 1콜, throttle 준수) — id셀만
+      const CHUNK = 200;
+      for (let s = 0; s < finalWrites.length; s += CHUNK) {
+        const batch = finalWrites.slice(s, s + CHUNK);
+        await throttledCall(() => batchUpdateSheet(sheetId, batch, 'RAW', { gid: ctx.tabGid }));
+        R.written += batch.length;
+      }
+      return R;
+    }, { onBusy: () => ({ skipped: true, reason: 'order_reconcile_lock_busy' }) });
+
+    if (dryRun) return res.json({ ok: true, ...(await run()) });
+    _backfillUserIdRunning = true;
+    try { res.json({ ok: true, ...(await run()) }); }
+    finally { _backfillUserIdRunning = false; }
+  } catch (err) { next(err); }
+});
+
 // POST /api/diag/order-orphan-cleanup { dryRun? } (admin/master)
 // ★ 고아 큐 정리: written/deleted된 주문의 잔여 pending/processing order_append를 시트콜 0으로 done 처리.
 //   reconcile 재큐잉이 남긴 고아가 throttle를 반복 잠식하던 것을 1회성으로 청소. dryRun=true면 카운트만.

@@ -17,6 +17,14 @@ function _findFirstCol(headers, keywords, exact = []) {
   });
 }
 
+// ★ orderLedger._isIdHeader 와 동일 규칙('쿠팡id'/'네이버id'/'id'/'아이디'/'userid'). dead-code 모듈이라
+//   순환 require 회피 위해 지역 복제. NOTE: 이 모듈은 현재 src/ 어디서도 import되지 않음(test/만 참조).
+function _isIdHeaderRM(h) {
+  const k = String(h || '').trim().toLowerCase();
+  if (!k) return false;
+  return k.includes('아이디') || k.includes('userid') || k === 'id' || /(^|[^a-z])id$/.test(k);
+}
+
 function getOrderRowColumns(headers, maxOptionCols = MAX_OPTION_COLS) {
   const optionColIndices = [];
   for (let ci = 0; ci < headers.length && optionColIndices.length < maxOptionCols; ci++) {
@@ -34,7 +42,7 @@ function getOrderRowColumns(headers, maxOptionCols = MAX_OPTION_COLS) {
     orderNumColIdx: _findFirstCol(headers, ['주문번호', 'ordernum', 'order_num', 'order number']),
     ordererColIdx: _findFirstCol(headers, ['주문자제출', '주문자', 'orderer']),
     recipientColIdx: _findFirstCol(headers, ['수취인', '받는분', 'recipient'], ['성함', '이름']),
-    userIdColIdx: _findFirstCol(headers, ['아이디', 'userid'], ['id']),
+    userIdColIdx: headers.findIndex((h) => _isIdHeaderRM(h)),
     phoneColIdx: _findFirstCol(headers, ['연락처', '전화', '핸드폰', '휴대폰'], ['phone']),
     addressColIdx: _findFirstCol(headers, ['주소', 'address']),
     bankColIdx: _findFirstCol(headers, ['은행', 'bank']),
