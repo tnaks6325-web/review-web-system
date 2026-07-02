@@ -646,14 +646,6 @@ body{ letter-spacing:-.01em; }
 
         <!-- 외부 링크 그룹 (항상 표시) -->
         <div class="admin-header-actions" style="gap:5px">
-          <!-- ▼▼▼ [임시] 드라이브 용량 이관 버튼 — 전부 tnaks6325 이관 완료 후 이 블록 삭제 ▼▼▼ -->
-          <style>@keyframes driveOwnPulse{0%,100%{box-shadow:0 3px 10px rgba(245,158,11,.45)}50%{box-shadow:0 3px 18px rgba(245,158,11,.85)}}</style>
-          <button id="btnDriveOwnership" onclick="openDriveOwnershipModal()" title="구글드라이브 용량 귀속 점검·이관 (임시)"
-            style="padding:11px 20px;background:linear-gradient(135deg,#FACC15,#F59E0B);color:#7C2D12;border:2px solid #D97706;border-radius:12px;font-size:.9rem;font-weight:800;cursor:pointer;display:inline-flex;align-items:center;gap:7px;animation:driveOwnPulse 2s ease-in-out infinite;margin-right:4px">
-            <i class="fas fa-hdd"></i> 드라이브 용량 이관
-            <span style="background:#7C2D12;color:#FDE68A;font-size:.62rem;padding:2px 6px;border-radius:7px;font-weight:700">임시</span>
-          </button>
-          <!-- ▲▲▲ [임시] 드라이브 용량 이관 버튼 끝 ▲▲▲ -->
           <button class="btn-header-sq btn-header-portal" onclick="openWorkPortal()" title="업무포털 새창 열기 (자동 로그인)">
             <i class="fas fa-briefcase"></i>
             <span>업무포털</span>
@@ -747,9 +739,12 @@ body{ letter-spacing:-.01em; }
         <div style="min-width:0;border:1px solid #E5E7EB;border-radius:12px;background:#fff;padding:16px 18px">
           <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:10px">
             <span style="font-size:.88rem;font-weight:700;color:var(--t1)"><i class="fas fa-bullhorn" style="color:#7C3AED;margin-right:6px"></i>리뷰어 소식·공지 <span style="font-size:.65rem;font-weight:400;color:#6B7280">(리뷰어 홈 상단 노출)</span></span>
-            <button onclick="loadReviewerNoticesAdmin()" style="padding:4px 10px;background:#F3F4F6;color:#374151;border:none;border-radius:7px;font-size:.72rem;font-weight:600;cursor:pointer"><i class="fas fa-sync-alt"></i> 새로고침</button>
+            <div style="display:flex;gap:6px">
+              <button id="rvNoticeWriteBtn" onclick="toggleReviewerNoticeForm()" style="padding:4px 12px;background:#7C3AED;color:#fff;border:none;border-radius:7px;font-size:.72rem;font-weight:700;cursor:pointer"><i class="fas fa-pen"></i> 작성</button>
+              <button onclick="loadReviewerNoticesAdmin()" style="padding:4px 10px;background:#F3F4F6;color:#374151;border:none;border-radius:7px;font-size:.72rem;font-weight:600;cursor:pointer"><i class="fas fa-sync-alt"></i> 새로고침</button>
+            </div>
           </div>
-          <div style="background:#FAFAFB;border:1px solid #EEF0F5;border-radius:10px;padding:12px;margin-bottom:12px">
+          <div id="rvNoticeFormWrap" style="display:none;background:#FAFAFB;border:1px solid #EEF0F5;border-radius:10px;padding:12px;margin-bottom:12px">
             <input type="hidden" id="rvNoticeEditId" value="">
             <input id="rvNoticeTitle" type="text" placeholder="공지 제목" maxlength="100" style="width:100%;padding:8px 10px;border:1px solid #D1D5DB;border-radius:7px;font-size:.82rem;outline:none;box-sizing:border-box;margin-bottom:8px">
             <textarea id="rvNoticeBody" rows="3" placeholder="공지 내용 (리뷰어에게 보여집니다)" maxlength="2000" style="width:100%;padding:8px 10px;border:1px solid #D1D5DB;border-radius:7px;font-size:.82rem;font-family:inherit;outline:none;box-sizing:border-box;resize:vertical;margin-bottom:8px"></textarea>
