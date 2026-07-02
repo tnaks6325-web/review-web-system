@@ -696,8 +696,9 @@ body{ letter-spacing:-.01em; }
       <!-- 제출 현황 대시보드 -->
       <div id="tab-dashboard" class="admin-tab-pane active">
 
-        <!-- ★ 공지사항 (배포 변경 이력 — 누적 관리) -->
-        <div id="noticeSection" style="display:none;margin-bottom:16px;border:1px solid #DBEAFE;border-radius:12px;background:linear-gradient(135deg,#EFF6FF,#F0F9FF);padding:16px 18px;position:relative">
+        <!-- ★ 상단 2단: 시스템 변경 공지 | 리뷰어 소식·공지 -->
+        <div style="display:flex;gap:16px;align-items:flex-start;flex-wrap:wrap;margin-bottom:16px">
+        <div id="noticeSection" style="display:none;flex:1;min-width:280px;border:1px solid #DBEAFE;border-radius:12px;background:linear-gradient(135deg,#EFF6FF,#F0F9FF);padding:16px 18px;position:relative">
           <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:10px">
             <span style="font-size:.88rem;font-weight:700;color:#1E40AF">
               <i class="fas fa-bullhorn" style="color:#3B82F6;margin-right:6px"></i>시스템 변경 공지
@@ -709,8 +710,8 @@ body{ letter-spacing:-.01em; }
           <div id="noticeContent" style="font-size:.8rem;color:#1F2937;line-height:1.7;max-height:134px;overflow-y:auto"></div>
         </div>
 
-        <!-- ★ 리뷰어 소식·공지 관리 (리뷰어 홈 상단 노출) -->
-        <div style="margin-bottom:16px;border:1px solid #E5E7EB;border-radius:12px;background:#fff;padding:16px 18px">
+        <!-- 리뷰어 소식·공지 관리 (리뷰어 홈 상단 노출) -->
+        <div style="flex:1;min-width:280px;border:1px solid #E5E7EB;border-radius:12px;background:#fff;padding:16px 18px">
           <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:10px">
             <span style="font-size:.88rem;font-weight:700;color:var(--t1)"><i class="fas fa-bullhorn" style="color:#7C3AED;margin-right:6px"></i>리뷰어 소식·공지 <span style="font-size:.65rem;font-weight:400;color:#6B7280">(리뷰어 홈 상단 노출)</span></span>
             <button onclick="loadReviewerNoticesAdmin()" style="padding:4px 10px;background:#F3F4F6;color:#374151;border:none;border-radius:7px;font-size:.72rem;font-weight:600;cursor:pointer"><i class="fas fa-sync-alt"></i> 새로고침</button>
@@ -729,9 +730,12 @@ body{ letter-spacing:-.01em; }
           </div>
           <div id="rvNoticeList"><div style="text-align:center;color:#9CA3AF;font-size:.8rem;padding:10px">불러오는 중...</div></div>
         </div>
+        </div><!-- /상단 2단(공지) -->
 
-        <!-- ★ 작업오더 간편보기 (최신 4건) -->
-        <div id="dashWoSection" style="margin-bottom:16px;border:1px solid #E5E7EB;border-radius:12px;background:#fff;padding:14px 16px">
+        <!-- ★ 하단 2단: 작업오더 간편보기 | 캠페인 탭 관리 -->
+        <div style="display:flex;gap:16px;align-items:flex-start;flex-wrap:wrap">
+        <!-- 작업오더 간편보기 (최신 4건) — 좌측 열 -->
+        <div id="dashWoSection" style="flex:0 0 340px;min-width:300px;border:1px solid #E5E7EB;border-radius:12px;background:#fff;padding:14px 16px">
           <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:8px">
             <span style="font-size:.88rem;font-weight:700;color:#111827">
               <i class="fas fa-clipboard-list" style="color:#3182f6;margin-right:6px"></i>작업오더 간편보기
@@ -741,8 +745,8 @@ body{ letter-spacing:-.01em; }
           </div>
           <div id="dashWoList" style="max-height:134px;overflow-y:auto;transition:max-height .2s ease"></div>
         </div>
-
-        <!-- ★ 캠페인 탭 관리 (대시보드 메인) -->
+        <!-- 캠페인 탭 관리 (대시보드 메인) — 우측 열 -->
+        <div style="flex:1;min-width:0">
         <div class="admin-section-header">
           <span style="font-size:.95rem;font-weight:700;color:var(--t1)">
             <i class="fas fa-th-list" style="color:#1D4ED8;margin-right:6px"></i>캠페인 탭 관리
@@ -1061,6 +1065,8 @@ body{ letter-spacing:-.01em; }
           </details>
         </div>
         <!-- /Phase 9 -->
+        </div><!-- /캠페인 우측 열 -->
+        </div><!-- /하단 2단 -->
 
       </div><!-- /tab-dashboard -->
 
