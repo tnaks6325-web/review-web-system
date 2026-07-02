@@ -600,6 +600,9 @@ async function loadSystemMonitor() {
   loadSmartBuildStatus();
 }
 
+// 수동입력 필요(stuck_manual) 탭 목록 — 현황 렌더 시 기록(전체 CSV 버튼용).
+let _stuckManualTabs = [];
+
 // 구매주문 시트반영 현황(막힌 주문 가시성 + 복구)
 async function loadOrderMirrorStatus() {
   const el = document.getElementById("orderMirrorPanel");
@@ -615,14 +618,24 @@ async function loadOrderMirrorStatus() {
     const pending = cmap.pending || 0;
     const pendingNoRow = cmap.pending_no_row || 0;
     const failed = cmap.failed || 0;
+    const stuckManual = cmap.stuck_manual || 0;   // 자동복구 포기 → 사람이 수동입력해야 하는 유일한 터치포인트
     const stuckTotal = queued + pending + pendingNoRow + failed;
     const badge = (label, n, color, bg) => `<div style="background:${bg};border-radius:8px;padding:8px"><div style="font-size:1.2rem;font-weight:700;color:${color}">${n}</div><div style="font-size:.7rem;color:#6B7280">${label}</div></div>`;
+    // ★ 능동 알림: stuck_manual(수동입력 필요)은 자동복구 대상에서 제외되므로 안 보면 '조용한 누락'이 됨 → 최상단 경고 배너.
+    const manualBanner = stuckManual > 0 ? `
+      <div style="background:#FEF2F2;border:1.5px solid #DC2626;border-radius:8px;padding:10px 12px;margin-bottom:10px;display:flex;justify-content:space-between;align-items:center;gap:8px;flex-wrap:wrap">
+        <span style="color:#B91C1C;font-weight:700">🚨 수동입력 필요 ${stuckManual}건 <span style="font-weight:400;color:#7F1D1D">— 자동복구가 자리를 못 잡은 주문. 아래 탭에서 CSV 받아 시트에 수동입력하세요.</span></span>
+        <button onclick="downloadAllStuckManualCsv()" style="font-size:.7rem;background:#DC2626;color:#fff;border:none;padding:4px 10px;border-radius:5px;cursor:pointer;flex-shrink:0">전체 CSV</button>
+      </div>` : '';
+    _stuckManualTabs = (data.byTab || []).filter(t => (t.needManual || 0) > 0).map(t => ({ sheetId: t.sheetId, tabName: t.tabName }));
     el.innerHTML = `
-      <div style="display:grid;grid-template-columns:repeat(5,1fr);gap:8px;text-align:center">
+      ${manualBanner}
+      <div style="display:grid;grid-template-columns:repeat(6,1fr);gap:8px;text-align:center">
         ${badge('반영완료', written, '#16A34A', '#F0FDF4')}
         ${badge('대기중', pending + queued, '#D97706', '#FEF3C7')}
         ${badge('행없음', pendingNoRow, pendingNoRow ? '#DC2626' : '#9CA3AF', pendingNoRow ? '#FEE2E2' : '#F3F4F6')}
         ${badge('실패', failed, failed ? '#DC2626' : '#9CA3AF', failed ? '#FEE2E2' : '#F3F4F6')}
+        ${badge('수동필요', stuckManual, stuckManual ? '#B91C1C' : '#9CA3AF', stuckManual ? '#FEE2E2' : '#F3F4F6')}
         ${badge('막힘합계', stuckTotal, stuckTotal ? '#B91C1C' : '#9CA3AF', stuckTotal ? '#FEF2F2' : '#F3F4F6')}
       </div>
       ${(data.byTab && data.byTab.length) ? `
@@ -631,9 +644,15 @@ async function loadOrderMirrorStatus() {
           ${data.byTab.map(t => {
             const meta = t.hasRawMeta ? '' : ` <span style="color:#DC2626;font-weight:600">⚠ RAW미러 필요</span>`;
             const link = t.sheetId ? `<a href="https://docs.google.com/spreadsheets/d/${t.sheetId}" target="_blank" style="color:#2563EB">${(t.sheetId || '').substring(0,8)}…</a>` : '';
+            const nm = (t.needManual || 0) > 0 ? ` <span style="color:#B91C1C;font-weight:700;background:#FEE2E2;border-radius:4px;padding:0 5px">🚨수동 ${t.needManual}</span>` : '';
+            // needManual(stuck_manual)은 reconcile 대상 아님 → CSV로 수동입력. 그 외 막힘은 복구 버튼.
+            const csvBtn = (t.needManual || 0) > 0
+              ? `<button onclick="downloadStuckManualCsv('${t.sheetId}', '${encodeURIComponent(t.tabName || '')}')" style="font-size:.66rem;background:#DC2626;color:#fff;border:none;padding:2px 8px;border-radius:4px;cursor:pointer;flex-shrink:0">수동CSV</button>` : '';
+            const fixBtn = (t.stuck - (t.needManual || 0)) > 0
+              ? `<button onclick="runOrderReconcile('${t.sheetId}')" style="font-size:.66rem;background:#16A34A;color:#fff;border:none;padding:2px 8px;border-radius:4px;cursor:pointer;flex-shrink:0">복구</button>` : '';
             return `<div style="background:#F8FAFC;padding:5px 8px;border-radius:6px;margin-bottom:3px;display:flex;justify-content:space-between;gap:6px;align-items:center">
-              <span><b>${t.stuck}</b>건 · ${t.tabName || ''} ${link}${meta}</span>
-              <button onclick="runOrderReconcile('${t.sheetId}')" style="font-size:.66rem;background:#16A34A;color:#fff;border:none;padding:2px 8px;border-radius:4px;cursor:pointer;flex-shrink:0">복구</button>
+              <span><b>${t.stuck}</b>건 · ${t.tabName || ''} ${link}${nm}${meta}</span>
+              <span style="display:flex;gap:4px;flex-shrink:0">${fixBtn}${csvBtn}</span>
             </div>`;
           }).join('')}
         </div>` : '<div style="margin-top:8px;color:#16A34A;font-size:.75rem">✅ 막힌 주문 없음</div>'}
@@ -695,6 +714,44 @@ async function downloadYellowRowsCsv(fmt) {
     setTimeout(() => URL.revokeObjectURL(dlUrl), 1000);
   } catch (err) {
     showToast("CSV 다운로드 실패: " + (err && err.message ? err.message : err), "error");
+  }
+}
+
+// 수동입력 필요(stuck_manual) 주문을 탭 단위 CSV로 다운로드 — order-stuck-export(미반영분, 상태 라벨 포함).
+//   자동복구가 포기한 주문을 사람이 시트에 붙여넣기 위한 목록. 인증 헤더 fetch→blob.
+async function downloadStuckManualCsv(sheetId, tabNameEnc) {
+  const sid = sheetId || '';
+  const tab = tabNameEnc ? decodeURIComponent(tabNameEnc) : '';
+  if (!sid || !tab) { showToast("탭 정보가 없어 CSV를 받을 수 없습니다.", "error"); return; }
+  try {
+    const token = sessionStorage.getItem("admin_token");
+    const base = (typeof API_BASE_URL !== "undefined" && API_BASE_URL) ? API_BASE_URL : "";
+    const url = base + "/api/diag/order-stuck-export?format=csv"
+      + "&sheetId=" + encodeURIComponent(sid) + "&tabName=" + encodeURIComponent(tab);
+    const res = await fetch(url, { headers: token ? { "Authorization": "Bearer " + token } : {} });
+    if (!res.ok) throw new Error("HTTP " + res.status);
+    const blob = await res.blob();
+    if (blob.size < 40) { showToast("해당 탭에 미반영 주문이 없습니다.", "info"); return; }
+    const dlUrl = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = dlUrl;
+    const day = new Date().toISOString().slice(0, 10);
+    a.download = "수동입력_" + tab.replace(/[\\/:*?"<>|]/g, "_").slice(0, 40) + "_" + day + ".csv";
+    document.body.appendChild(a); a.click(); a.remove();
+    setTimeout(() => URL.revokeObjectURL(dlUrl), 1000);
+  } catch (err) {
+    showToast("CSV 다운로드 실패: " + (err && err.message ? err.message : err), "error");
+  }
+}
+
+// 수동입력 필요 탭 '전체'를 탭별 CSV로 순차 다운로드(order-stuck-export가 탭 단위 필수라 반복 호출).
+async function downloadAllStuckManualCsv() {
+  const tabs = _stuckManualTabs || [];
+  if (!tabs.length) { showToast("수동입력 필요 주문이 없습니다.", "info"); return; }
+  if (tabs.length > 1 && !confirm(`수동입력 필요 탭 ${tabs.length}개의 CSV를 각각 받습니다. 진행할까요?`)) return;
+  for (const t of tabs) {
+    await downloadStuckManualCsv(t.sheetId, encodeURIComponent(t.tabName || ''));
+    await new Promise(r => setTimeout(r, 400)); // 브라우저 다중 다운로드 안정화
   }
 }
 
