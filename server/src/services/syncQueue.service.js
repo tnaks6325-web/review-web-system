@@ -12,7 +12,7 @@
  */
 
 const pool = require('../db/pool');
-const { writeSheet, appendSheet, readSheet, batchUpdateSheet, setRowBackground, setRowsBackground, invalidateSheetMeta } = require('./sheets.service');
+const { writeSheet, appendSheet, readSheet, batchUpdateSheet, invalidateSheetMeta } = require('./sheets.service');
 const { throttledCall } = require('../utils/sheetsThrottle');
 const { recordParticipationLink } = require('./participation.service');
 const {
@@ -469,7 +469,9 @@ async function _executeBatch(items, sheetId, tabName) {
     const chunk = passed.slice(i, i + BATCH_ROW_CAP);
     const batchData = [];
     for (const x of chunk) {
-      batchData.push(...buildBatchUpdateData({ tabName: ctxTab, headers: tabContext.headers, targetRow: x.sheetRow, orderData: x.orderData }));
+      // 복구분(재배정 append)은 배경색 대신 비고란에 'system' 표기.
+      const od = x.p.recovered ? { ...x.orderData, memo: _markSystemMemo(x.orderData && x.orderData.memo) } : x.orderData;
+      batchData.push(...buildBatchUpdateData({ tabName: ctxTab, headers: tabContext.headers, targetRow: x.sheetRow, orderData: od }));
     }
     try {
       if (batchData.length) {
@@ -482,7 +484,6 @@ async function _executeBatch(items, sheetId, tabName) {
       failed += chunk.length; continue;
     }
     // ── 쓰기 성공 청크에만: 조건부 written + 신원기록 (같은 루프, 단일 진실원본). ──
-    const recoveredRows = [];
     for (const x of chunk) {
       // ★ R-1b: 조건부 written(mirror_status<>'written'). 락분리(AUTO=1)로 단건 백스톱이
       //   같은 주문을 먼저 썼다면 0행 갱신 → 신원기록 생략(이중 흡수). markOrderWritten 전역함수는
@@ -511,15 +512,8 @@ async function _executeBatch(items, sheetId, tabName) {
       } catch (idErr) { logger.warn(`[batchDrain] 신원기록 실패(무시): ${idErr.message}`); }
       await pool.query(`UPDATE sync_queue SET status='done', processed_at=NOW(), error_msg=NULL WHERE id=$1`, [x.item.id]);
       succeeded++;
-      if (x.p.recovered) recoveredRows.push(x.sheetRow);
     }
-    // ── R-B4: 복구행 배경색 1콜(N행 묶음). best-effort. ──
-    if (recoveredRows.length) {
-      try {
-        await throttledCall(() => setRowsBackground(sheetId, { gid: ctxGid, tabName: ctxTab,
-          rowIndexes: recoveredRows, colCount: (tabContext.headers && tabContext.headers.length) || 30 }));
-      } catch (bgErr) { logger.warn(`[batchDrain] 배경색 묶음 실패(무시): ${bgErr.message}`); }
-    }
+    // (복구행 표식은 배경색 대신 비고란 'system'으로 대체 — 위 batchData 생성 시 반영.)
   }
   return { processed: items.length, succeeded, failed, deferred, quotaExceeded, deferredIds };
 }
@@ -681,11 +675,13 @@ async function _executeItem(item) {
             const e = new Error('target row occupied — defer (grace)'); e.__defer = true; throw e;  // defer: attempts 되돌림, failed 마킹 금지
           }
         }
+        // 복구분(재배정 append)은 배경색 대신 비고란에 'system' 표기(수동입력분·실시간분과 구분).
+        const _od = recovered ? { ...orderData, memo: _markSystemMemo(orderData && orderData.memo) } : orderData;
         const batchData = buildBatchUpdateData({
           tabName: tabContext.tabName || tabName,
           headers: tabContext.headers,
           targetRow: parseInt(sheetRow, 10),
-          orderData,
+          orderData: _od,
         });
         if (batchData.length > 0) {
           await throttledCall(() => batchUpdateSheet(
@@ -694,20 +690,6 @@ async function _executeItem(item) {
             'RAW',
             tabContext.tabGid ? { gid: tabContext.tabGid } : (gid ? { gid } : {})
           ));
-        }
-
-        // ★ 복구 주문: 기록한 행을 노란 배경으로 표시(수동입력분·중복과 시각 구분). best-effort.
-        if (recovered) {
-          try {
-            await throttledCall(() => setRowBackground(sheetId, {
-              gid: tabContext.tabGid || gid,
-              tabName: tabContext.tabName || tabName,
-              rowIndex: parseInt(sheetRow, 10),
-              colCount: (tabContext.headers && tabContext.headers.length) || 30,
-            }));
-          } catch (bgErr) {
-            logger.warn(`[order_append] 복구행 배경색 적용 실패(무시): ${bgErr.message}`);
-          }
         }
 
         await recordParticipationLink({
@@ -1021,6 +1003,14 @@ async function purgeCompleted(hoursOld = 24) {
 //   일시 write 경합을 영구소실로 오판하지 않음).
 //   ★ 기본 ON: 가드는 남의 데이터를 절대 덮지 않고(차선책) 하단 빈 행 재배정으로 폴백 = 손실 0·수동 0.
 //     끄려면 ORDER_GUARD_REASSIGN=0 (OFF: 비복구는 defer만 = 재배정 안 함, 복구분만 release — 순수 R1/R3 픽스).
+// 복구(재배정 append) 행 표식: 배경색 대신 비고란에 'system' 표기(수동입력분·실시간분과 구분).
+//   기존 메모가 있으면 보존하며 마커만 덧붙임(비파괴). 이미 표기돼 있으면 중복 안 함(재시도 멱등).
+function _markSystemMemo(memo) {
+  const s = String(memo == null ? '' : memo).trim();
+  if (!s) return 'system';
+  return /\bsystem\b/i.test(s) ? s : `${s} [system]`;
+}
+
 function _guardBlockDecision({ recovered, submittedAt, reassignCount } = {}) {
   const gateOn = process.env.ORDER_GUARD_REASSIGN !== '0';
   const maxReassign = parseInt(process.env.ORDER_MAX_REASSIGN || '5', 10);
@@ -1189,6 +1179,7 @@ module.exports = {
   _isQuota,            // 테스트용
   _readGuardWindow,    // 테스트용(reader 주입)
   _guardBlockDecision, // 테스트용(defer/release/giveup 진리표)
+  _markSystemMemo,     // 테스트용(복구행 비고 'system' 표기)
   getQueueStats,
   retryItem,
   retryAllFailed,

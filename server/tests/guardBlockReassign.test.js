@@ -6,7 +6,7 @@
  * 실행: node tests/guardBlockReassign.test.js
  */
 const assert = require('assert');
-const { _guardBlockDecision } = require('../src/services/syncQueue.service');
+const { _guardBlockDecision, _markSystemMemo } = require('../src/services/syncQueue.service');
 
 function withGate(mode, fn) {
   // mode: 'on'(='1') | 'off'(='0') | 'unset'(미설정 → 기본 ON)
@@ -56,6 +56,15 @@ async function run() {
     assert.equal(_guardBlockDecision({ recovered: false, submittedAt: past, reassignCount: 4 }), 'release', 'rc=4(<5) → 아직 release');
   });
   console.log('  상한 경계(rc=4) 통과');
+
+  // ── 복구행 비고 'system' 표기(배경색 대체) — 비파괴·멱등 ──
+  assert.equal(_markSystemMemo(''), 'system', '빈 메모 → system');
+  assert.equal(_markSystemMemo(null), 'system', 'null → system');
+  assert.equal(_markSystemMemo('  '), 'system', '공백 → system');
+  assert.equal(_markSystemMemo('닉네임'), '닉네임 [system]', '기존 메모 보존 + 마커');
+  assert.equal(_markSystemMemo('닉네임 [system]'), '닉네임 [system]', '이미 표기됨 → 멱등(중복 안 함)');
+  assert.equal(_markSystemMemo('system'), 'system', '이미 system → 그대로');
+  console.log('  복구행 비고 system 표기 통과');
 
   console.log('✅ guardBlockReassign 전체 통과');
 }
