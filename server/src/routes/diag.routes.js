@@ -3030,6 +3030,33 @@ router.get('/order-ledger', authMiddleware, adminOrMasterMiddleware, async (req,
 });
 
 // ═══════════════════════════════════════════════════════════
+// GET /api/diag/row-claims — 행 점유 원장(sheet_row_claims) 조회 (읽기전용 진단)
+//   비연속 행배정(행 건너뜀) 원인 추적용: 어떤 행이 어떤 주문/출처(source)로 언제 점유됐는지 +
+//   연결 주문의 상태·재배정횟수·에러를 함께 본다. query: sheetId, tabName, fromRow?, toRow?
+// ═══════════════════════════════════════════════════════════
+router.get('/row-claims', authMiddleware, adminOrMasterMiddleware, async (req, res, next) => {
+  try {
+    const { sheetId, tabName } = req.query;
+    if (!sheetId || !tabName) return res.status(400).json({ ok: false, error: 'sheetId, tabName 필수' });
+    const fromRow = parseInt(req.query.fromRow, 10) || 1;
+    const toRow = parseInt(req.query.toRow, 10) || 1000000;
+    const { rows } = await pool.query(
+      `SELECT c.sheet_row AS "row", c.source, c.dedup_key AS "dedupKey", c.order_id AS "orderId",
+              c.created_at AS "claimedAt", c.updated_at AS "updatedAt",
+              os.orderer, os.mirror_status AS "mirrorStatus", os.sheet_row AS "orderSheetRow",
+              os.reassign_count AS "reassignCount", os.sheet_error AS "sheetError",
+              os.deleted_at AS "deletedAt", os.submitted_at AS "submittedAt"
+         FROM sheet_row_claims c
+         LEFT JOIN order_submissions os ON os.id = c.order_id
+        WHERE c.sheet_id = $1 AND c.tab_name = $2 AND c.sheet_row BETWEEN $3 AND $4
+        ORDER BY c.sheet_row`,
+      [sheetId, tabName, fromRow, toRow]
+    );
+    res.json({ ok: true, count: rows.length, claims: rows });
+  } catch (err) { next(err); }
+});
+
+// ═══════════════════════════════════════════════════════════
 // POST /api/diag/participation-cleanup — 리뷰어 교차노출 오염 정리(participation_links)
 //   배경: 과거 구매양식 제출이 가드/시트쓰기 검증 전에 "낙관적 claim 행"에 신원을 미리 찍어,
 //        미러 stale·로스터 선기입 탭에서 '다른 리뷰어의 행'에 phone8을 남겼다(리뷰어 교차노출).
