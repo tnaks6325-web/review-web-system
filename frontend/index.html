@@ -723,6 +723,16 @@
       </div>
     </div>
 
+    <!-- 소식·공지 섹션 (홈 상단) -->
+    <div class="home-section" id="sectionNews">
+      <div class="home-section-title">
+        <span><i class="fas fa-bullhorn" style="color:var(--p)"></i> 소식 · 공지</span>
+      </div>
+      <div id="reviewerNoticeList">
+        <div class="empty-state" style="padding:12px"><i class="fas fa-circle-notch fa-spin"></i> 불러오는 중...</div>
+      </div>
+    </div>
+
     <!-- 모집공고 섹션 -->
     <div class="home-section" id="sectionRecruit">
       <div class="home-section-title rc-title-row">
@@ -745,10 +755,8 @@
 
   <!-- 하단 탭바 -->
   <div class="tabbar">
-    <button class="tab-rec on" onclick="switchTab('recruit')"><i class="fas fa-bullhorn"></i>모집공고</button>
-    <button class="tab-sts" onclick="switchTab('status')"><i class="fas fa-clipboard-list"></i>내 참여현황</button>
-    <button id="tabBtnCs" onclick="if(window.ReviewerCS){ReviewerCS.open();}else{try{showToast('잠시 후 다시 시도해주세요');}catch(e){}}" style="position:relative"><i class="fas fa-headset"></i>1:1문의<span id="rcsTabDot" style="display:none;position:absolute;top:0;right:8px;min-width:16px;height:16px;padding:0 4px;background:#EF4444;color:#fff;font-size:.6rem;font-weight:800;line-height:16px;text-align:center;border-radius:8px;box-sizing:border-box"></span></button>
-    <button class="tab-inf" onclick="switchTab('info')"><i class="fas fa-user"></i>내정보</button>
+    <button class="tab-home on" onclick="switchTab('home')"><i class="fas fa-house"></i>홈</button>
+    <button class="tab-my" onclick="switchTab('my')"><i class="fas fa-id-card"></i>내정보/현황</button>
     <button onclick="openOnboard()"><i class="fas fa-book-open"></i>가이드</button>
   </div>
 
@@ -799,12 +807,13 @@ function showHome(user) {
   // ★ /search 페이지 세션 동기화 (rapp_reviewer_auth 키)
   syncSearchSession(user);
 
-  // 프로필 + 리뷰 내역 로드
+  // 프로필 + 리뷰 내역 + 소식·공지 로드
   loadInlineProfile(user);
   loadReviewList(user);
+  loadReviewerNoticesHome();
 
-  // 기본 탭 = 모집공고
-  switchTab('recruit');
+  // 기본 탭 = 홈(소식·공지 + 모집공고)
+  switchTab('home');
   // 첫 이용 온보딩 (1회)
   if (!localStorage.getItem('inad_onboarded')) setTimeout(openOnboard, 500);
 }
@@ -1540,25 +1549,58 @@ document.addEventListener("DOMContentLoaded", () => {
 let _currentTab = 'all';
 
 function switchTab(tab) {
-  _currentTab = tab;
+  // 신규 2탭 체계로 정규화: home(소식·공지 + 모집공고) / my(내정보 + 참여현황)
+  //   (구 호출 호환: recruit·all→home, status·info→my)
+  const key = (tab === 'my' || tab === 'info' || tab === 'status') ? 'my' : 'home';
+  _currentTab = key;
   const profile    = document.getElementById('sectionProfile');
   const reviewList = document.getElementById('sectionReviewList');
   const recruit    = document.getElementById('sectionRecruit');
+  const news       = document.getElementById('sectionNews');
   const show = (el, on) => { if (el) el.style.display = on ? '' : 'none'; };
-  // 하단 탭별 단독 표시 (recruit/status/info)
-  show(profile,    tab === 'info');
-  show(reviewList, tab === 'status');
-  show(recruit,    tab === 'recruit' || tab === 'all');
+  // 홈: 소식·공지(상) + 모집공고(하) / 내정보·현황: 내정보(상) + 참여현황(하)
+  show(news,       key === 'home');
+  show(recruit,    key === 'home');
+  show(profile,    key === 'my');
+  show(reviewList, key === 'my');
   // 앱바 타이틀
-  const titles = { recruit: '모집공고', status: '내 참여현황', info: '내정보', all: '모집공고' };
   const t = document.getElementById('greetingText');
-  if (t) t.textContent = titles[tab] || '모집공고';
+  if (t) t.textContent = key === 'my' ? '내정보 / 현황' : '홈';
   // 하단 탭 활성 표시
   document.querySelectorAll('.tabbar button').forEach(b => b.classList.remove('on'));
-  const map = { recruit: '.tab-rec', status: '.tab-sts', info: '.tab-inf', all: '.tab-rec' };
-  const ab = document.querySelector(map[tab] || '.tab-rec');
+  const ab = document.querySelector(key === 'my' ? '.tab-my' : '.tab-home');
   if (ab) ab.classList.add('on');
   window.scrollTo(0, 0);
+}
+
+/* ═══ 소식·공지 (홈 상단) ═══ */
+async function loadReviewerNoticesHome() {
+  const wrap = document.getElementById("reviewerNoticeList");
+  if (!wrap) return;
+  try {
+    const res = await fetch(API_BASE_URL + "/api/reviewer/notices");
+    const json = await res.json();
+    const list = (json.notices || []);
+    if (!list.length) {
+      wrap.innerHTML = '<div class="empty-state" style="padding:12px;color:var(--t3)">새로운 소식이 없습니다</div>';
+      return;
+    }
+    wrap.innerHTML = list.map(n => {
+      const d = n.createdAt ? new Date(n.createdAt).toLocaleDateString("ko-KR", { year:'2-digit', month:'2-digit', day:'2-digit' }) : "";
+      const title = escHtml(n.title || "");
+      const body = escHtml(n.body || "").replace(/\n/g, "<br>");
+      return `<div style="background:#fff;border:1px solid #EEF0F5;border-radius:12px;padding:12px 14px;margin-bottom:8px;box-shadow:0 1px 4px rgba(17,24,40,.03)">
+        <div style="display:flex;align-items:center;gap:6px;margin-bottom:${body?'6px':'0'}">
+          ${n.pinned ? '<span style="font-size:.68rem;background:#FEF3C7;color:#92400E;font-weight:700;padding:1px 6px;border-radius:6px">📌 고정</span>' : ''}
+          <span style="font-weight:700;color:var(--t1);font-size:.9rem;flex:1;min-width:0">${title || '(제목 없음)'}</span>
+          <span style="font-size:.68rem;color:#9CA3AF;flex-shrink:0">${d}</span>
+        </div>
+        ${body ? `<div style="font-size:.82rem;color:var(--t2);line-height:1.55">${body}</div>` : ''}
+      </div>`;
+    }).join("");
+  } catch (e) {
+    wrap.innerHTML = '<div class="empty-state" style="padding:12px;color:var(--t3)">소식을 불러오지 못했습니다</div>';
+  }
 }
 
 /* ═══ 모집공고 미리보기 (홈 인라인) ═══ */
@@ -1719,7 +1761,8 @@ function openOnboard(){ const o=document.getElementById('onboard'); if(o) o.clas
 function closeOnboard(){ const o=document.getElementById('onboard'); if(o) o.classList.remove('on'); localStorage.setItem('inad_onboarded','1'); }
 </script>
 <script src="js/pwa.js"></script>
-<!-- 리뷰어 C/S 문의창구 -->
+<!-- 리뷰어 C/S 문의창구 (현재 비활성화)
 <script src="js/reviewer-cs.js"></script>
+-->
 </body>
 </html>

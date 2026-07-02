@@ -1,6 +1,6 @@
 const express = require('express');
 const router = express.Router();
-const { authMiddleware } = require('../middleware/auth.middleware');
+const { authMiddleware, adminOrMasterMiddleware } = require('../middleware/auth.middleware');
 const { registerLimiter } = require('../middleware/rateLimit.middleware');
 const {
   registerReviewer,
@@ -553,6 +553,77 @@ router.get('/cs/events', (req, res) => {
   const phone8 = _normPhone8(req.query.phone8);
   if (phone8.length !== 8) { res.status(400).json({ ok: false, error: 'phone8 필수' }); return; }
   addClient(req, res, { role: 'reviewer', phone8 });
+});
+
+// ═══════════════════════════════════════════════════════════
+// 리뷰어 소식·공지 (관리자 작성 → 리뷰어 홈 상단 노출)
+// ═══════════════════════════════════════════════════════════
+
+// GET /api/reviewer/notices — 리뷰어 홈용(공개, 노출중인 것만)
+router.get('/notices', async (req, res, next) => {
+  try {
+    const { rows } = await pool.query(
+      `SELECT id, title, body, pinned, created_at AS "createdAt"
+       FROM reviewer_notices
+       WHERE active = TRUE
+       ORDER BY pinned DESC, created_at DESC
+       LIMIT 30`
+    );
+    res.json({ ok: true, notices: rows });
+  } catch (err) { next(err); }
+});
+
+// GET /api/reviewer/notices/all — 관리자용(전체, 숨김 포함)
+router.get('/notices/all', authMiddleware, adminOrMasterMiddleware, async (req, res, next) => {
+  try {
+    const { rows } = await pool.query(
+      `SELECT id, title, body, pinned, active, created_by AS "createdBy", created_at AS "createdAt"
+       FROM reviewer_notices
+       ORDER BY pinned DESC, created_at DESC
+       LIMIT 200`
+    );
+    res.json({ ok: true, notices: rows });
+  } catch (err) { next(err); }
+});
+
+// POST /api/reviewer/notices/save — 관리자 작성/수정 { id?, title, body, pinned?, active? }
+router.post('/notices/save', authMiddleware, adminOrMasterMiddleware, async (req, res, next) => {
+  try {
+    const b = req.body || {};
+    const title = (b.title || '').toString().trim();
+    const body = (b.body || '').toString().trim();
+    if (!title && !body) return res.status(400).json({ ok: false, error: '제목 또는 내용을 입력하세요.' });
+    const pinned = b.pinned === true || b.pinned === 'true';
+    const active = b.active === undefined ? true : (b.active === true || b.active === 'true');
+    const by = req.admin?.name || '';
+
+    if (b.id) {
+      const { rows } = await pool.query(
+        `UPDATE reviewer_notices
+           SET title = $2, body = $3, pinned = $4, active = $5, updated_at = NOW()
+         WHERE id = $1 RETURNING id`,
+        [b.id, title, body, pinned, active]
+      );
+      if (rows.length === 0) return res.status(404).json({ ok: false, error: '공지를 찾을 수 없습니다.' });
+      return res.json({ ok: true, id: rows[0].id });
+    }
+    const { rows } = await pool.query(
+      `INSERT INTO reviewer_notices (title, body, pinned, active, created_by)
+       VALUES ($1, $2, $3, $4, $5) RETURNING id`,
+      [title, body, pinned, active, by]
+    );
+    res.json({ ok: true, id: rows[0].id });
+  } catch (err) { next(err); }
+});
+
+// POST /api/reviewer/notices/delete — 관리자 삭제 { id }
+router.post('/notices/delete', authMiddleware, adminOrMasterMiddleware, async (req, res, next) => {
+  try {
+    const id = (req.body && req.body.id || '').toString();
+    if (!id) return res.status(400).json({ ok: false, error: 'id가 필요합니다.' });
+    await pool.query(`DELETE FROM reviewer_notices WHERE id = $1`, [id]);
+    res.json({ ok: true });
+  } catch (err) { next(err); }
 });
 
 module.exports = router;

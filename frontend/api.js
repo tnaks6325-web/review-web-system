@@ -102,6 +102,12 @@ const _ACTION_MAP = {
   'saveIncomeInfo':     { method: 'POST', path: '/api/reviewer/profile', remap: 'saveIncomeInfo' },
   'saveBankInfo':       { method: 'POST', path: '/api/reviewer/profile', remap: 'saveBankInfo' },
   'saveAddress':        { method: 'POST', path: '/api/reviewer/profile', remap: 'saveAddress' },
+
+  // 리뷰어 소식·공지
+  'reviewerNotices':      { method: 'GET',  path: '/api/reviewer/notices' },        // 공개
+  'reviewerNoticesAll':   { method: 'GET',  path: '/api/reviewer/notices/all' },    // 관리자
+  'reviewerNoticeSave':   { method: 'POST', path: '/api/reviewer/notices/save' },   // 관리자
+  'reviewerNoticeDelete': { method: 'POST', path: '/api/reviewer/notices/delete' }, // 관리자
   'getInaedList':       { method: 'GET',  path: '/api/submit/get-inaed-list' },
 
   // 관리자 인증 (Section 8)

@@ -1320,7 +1320,7 @@ function switchAdminTab(tabName) {
   if (tabName === "recruit")   { loadRecruitList(); loadRecruitTabOptions(); }
   if (tabName === "work-orders") { try { loadWorkOrders(); } catch(_){} }
   if (tabName === "payment")   initPaymentPanel();
-  if (tabName === "dashboard") { try { loadTabDashboard(); } catch(_){} try { loadSystemMonitor(); } catch(_){} try { loadStatsOverview(); } catch(_){} try { loadDashWorkOrders(); } catch(_){} }
+  if (tabName === "dashboard") { try { loadTabDashboard(); } catch(_){} try { loadSystemMonitor(); } catch(_){} try { loadStatsOverview(); } catch(_){} try { loadDashWorkOrders(); } catch(_){} try { loadReviewerNoticesAdmin(); } catch(_){} }
   if (tabName === "archive")   { try { loadArchiveList(); } catch(_){} try { _loadArchiveHistory(); } catch(_){} }
   if (tabName === "settings")  { try { loadUnrecognizedTabs(); } catch(_){} try { loadKeywordList(); } catch(_){} try { loadCompanyBusinessNo(); } catch(_){} }
   if (tabName === "errorlogs") { try { loadErrorLogs(); } catch(_){} }
@@ -16916,5 +16916,119 @@ async function _relocateApplyTab(i) {
   } catch (e) {
     _relocateScanResults[key] = Object.assign({}, prev, { status: 'error', error: e.message });
     _relocateUpdateRow(i); _relocateSaveScan();
+  }
+}
+
+/* ══════════════════════════════════════════════════════════════
+   ★ 리뷰어 소식·공지 관리 (관리자) — 리뷰어 홈 상단 노출
+   ══════════════════════════════════════════════════════════════ */
+let _rvNotices = [];
+
+async function loadReviewerNoticesAdmin() {
+  const wrap = document.getElementById("rvNoticeList");
+  if (!wrap) return;
+  try {
+    const data = await gasGet({ action: "reviewerNoticesAll" });
+    if (!data || data.ok === false) throw new Error((data && data.error) || "불러오기 실패");
+    _rvNotices = data.notices || [];
+    _renderReviewerNoticesAdmin(_rvNotices);
+  } catch (err) {
+    wrap.innerHTML = `<div style="text-align:center;color:#EF4444;font-size:.8rem;padding:10px">오류: ${escHtml(err.message)}</div>`;
+  }
+}
+
+function _renderReviewerNoticesAdmin(list) {
+  const wrap = document.getElementById("rvNoticeList");
+  if (!wrap) return;
+  if (!list.length) {
+    wrap.innerHTML = '<div style="text-align:center;color:#9CA3AF;font-size:.8rem;padding:10px">등록된 공지가 없습니다</div>';
+    return;
+  }
+  wrap.innerHTML = list.map(n => {
+    const d = n.createdAt ? new Date(n.createdAt).toLocaleDateString("ko-KR", { year:'2-digit', month:'2-digit', day:'2-digit' }) : "";
+    const hidden = !n.active;
+    return `<div style="border:1px solid ${hidden ? '#E5E7EB' : '#DDD6FE'};background:${hidden ? '#F9FAFB' : '#fff'};border-radius:9px;padding:10px 12px;margin-bottom:8px;opacity:${hidden ? '.6' : '1'}">
+      <div style="display:flex;align-items:center;gap:6px;margin-bottom:4px">
+        ${n.pinned ? '<span style="font-size:.62rem;background:#FEF3C7;color:#92400E;font-weight:700;padding:1px 5px;border-radius:5px">📌 고정</span>' : ''}
+        ${hidden ? '<span style="font-size:.62rem;background:#F3F4F6;color:#6B7280;font-weight:700;padding:1px 5px;border-radius:5px">숨김</span>' : '<span style="font-size:.62rem;background:#D1FAE5;color:#065F46;font-weight:700;padding:1px 5px;border-radius:5px">노출중</span>'}
+        <span style="font-weight:700;color:var(--t1);font-size:.83rem;flex:1;min-width:0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${escHtml(n.title || '(제목 없음)')}</span>
+        <span style="font-size:.66rem;color:#9CA3AF;flex-shrink:0">${d}</span>
+      </div>
+      ${n.body ? `<div style="font-size:.76rem;color:var(--t2);line-height:1.5;white-space:pre-wrap;word-break:break-word;margin-bottom:6px">${escHtml(n.body)}</div>` : ''}
+      <div style="display:flex;gap:5px;justify-content:flex-end">
+        <button onclick="toggleReviewerNotice('${n.id}')" style="padding:3px 9px;background:#F3F4F6;color:#374151;border:none;border-radius:6px;font-size:.68rem;font-weight:600;cursor:pointer">${hidden ? '노출' : '숨김'}</button>
+        <button onclick="editReviewerNotice('${n.id}')" style="padding:3px 9px;background:#EFF6FF;color:#2563EB;border:1px solid #BFDBFE;border-radius:6px;font-size:.68rem;font-weight:600;cursor:pointer">수정</button>
+        <button onclick="deleteReviewerNotice('${n.id}')" style="padding:3px 9px;background:#FEF2F2;color:#DC2626;border:1px solid #FECACA;border-radius:6px;font-size:.68rem;font-weight:600;cursor:pointer">삭제</button>
+      </div>
+    </div>`;
+  }).join("");
+}
+
+async function saveReviewerNotice() {
+  const id = (document.getElementById("rvNoticeEditId") || {}).value || "";
+  const title = (document.getElementById("rvNoticeTitle") || {}).value || "";
+  const body = (document.getElementById("rvNoticeBody") || {}).value || "";
+  const pinned = !!(document.getElementById("rvNoticePinned") || {}).checked;
+  if (!title.trim() && !body.trim()) { showToast("제목 또는 내용을 입력하세요", true); return; }
+  const btn = document.getElementById("rvNoticeSaveBtn");
+  if (btn) { btn.disabled = true; }
+  try {
+    const payload = { action: "reviewerNoticeSave", title, body, pinned };
+    if (id) payload.id = id;
+    const data = await gasPost(payload);
+    if (!data || data.ok === false) throw new Error((data && data.error) || "저장 실패");
+    showToast(id ? "공지가 수정되었습니다" : "공지가 게시되었습니다");
+    cancelReviewerNoticeEdit();
+    loadReviewerNoticesAdmin();
+  } catch (err) {
+    showToast("저장 오류: " + err.message, true);
+  } finally {
+    if (btn) btn.disabled = false;
+  }
+}
+
+function editReviewerNotice(id) {
+  const n = _rvNotices.find(x => x.id === id);
+  if (!n) return;
+  document.getElementById("rvNoticeEditId").value = n.id;
+  document.getElementById("rvNoticeTitle").value = n.title || "";
+  document.getElementById("rvNoticeBody").value = n.body || "";
+  document.getElementById("rvNoticePinned").checked = !!n.pinned;
+  const c = document.getElementById("rvNoticeCancelBtn"); if (c) c.style.display = "";
+  const s = document.getElementById("rvNoticeSaveBtn"); if (s) s.innerHTML = '<i class="fas fa-check"></i> 수정 저장';
+  document.getElementById("rvNoticeTitle").scrollIntoView({ behavior: "smooth", block: "center" });
+}
+
+function cancelReviewerNoticeEdit() {
+  const idEl = document.getElementById("rvNoticeEditId"); if (idEl) idEl.value = "";
+  const t = document.getElementById("rvNoticeTitle"); if (t) t.value = "";
+  const b = document.getElementById("rvNoticeBody"); if (b) b.value = "";
+  const p = document.getElementById("rvNoticePinned"); if (p) p.checked = false;
+  const c = document.getElementById("rvNoticeCancelBtn"); if (c) c.style.display = "none";
+  const s = document.getElementById("rvNoticeSaveBtn"); if (s) s.innerHTML = '<i class="fas fa-paper-plane"></i> 게시';
+}
+
+async function toggleReviewerNotice(id) {
+  const n = _rvNotices.find(x => x.id === id);
+  if (!n) return;
+  try {
+    const data = await gasPost({ action: "reviewerNoticeSave", id: n.id, title: n.title, body: n.body, pinned: n.pinned, active: !n.active });
+    if (!data || data.ok === false) throw new Error((data && data.error) || "변경 실패");
+    showToast(!n.active ? "노출로 변경했습니다" : "숨김으로 변경했습니다");
+    loadReviewerNoticesAdmin();
+  } catch (err) {
+    showToast("변경 오류: " + err.message, true);
+  }
+}
+
+async function deleteReviewerNotice(id) {
+  if (!confirm("이 공지를 삭제하시겠습니까?")) return;
+  try {
+    const data = await gasPost({ action: "reviewerNoticeDelete", id });
+    if (!data || data.ok === false) throw new Error((data && data.error) || "삭제 실패");
+    showToast("공지가 삭제되었습니다");
+    loadReviewerNoticesAdmin();
+  } catch (err) {
+    showToast("삭제 오류: " + err.message, true);
   }
 }
