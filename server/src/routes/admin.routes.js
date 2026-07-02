@@ -714,11 +714,12 @@ router.post('/smart-build/run', authMiddleware, async (req, res, next) => {
       log.info(`[smartBuild] 강제 실행 — 캐시 리셋: ${JSON.stringify(cacheResult)}`);
     }
 
-    // 백그라운드 실행
-    runSmartBuild().then(result => {
+    // 백그라운드 실행 — 강제(force) 실행은 시트 lane 양보 없이 완주(부분완료 보고 방지)
+    runSmartBuild({ noYield: force }).then(result => {
       const { broadcast } = require('../utils/sse');
+      const deferredNote = (result.sheetsDeferred || 0) > 0 ? `, ${result.sheetsDeferred}시트 연기(다음 주기 처리)` : '';
       broadcast('smart_build_done', {
-        message: `스마트빌드 완료: ${result.tabsUpdated}탭 갱신, ${result.tabsSkipped}탭 스킵, ${result.errors}건 오류`,
+        message: `스마트빌드 완료: ${result.tabsUpdated}탭 갱신, ${result.tabsSkipped}탭 스킵, ${result.errors}건 오류${deferredNote}`,
         ...result,
       });
     }).catch(err => {
@@ -842,8 +843,8 @@ router.post('/db-rebuild', authMiddleware, masterOnlyMiddleware, async (req, res
     // ── Step 4: 스마트빌드 1회 실행 (백그라운드) ──
     broadcast('db_rebuild_progress', { step: 4, message: '스마트빌드 실행 시작... (백그라운드)' });
 
-    // 백그라운드로 스마트빌드 실행
-    runSmartBuild().then(result => {
+    // 백그라운드로 스마트빌드 실행 — DB 재구축은 양보 없이 완주("완료" 보고가 부분완료가 되지 않게)
+    runSmartBuild({ noYield: true }).then(result => {
       const totalElapsed = ((Date.now() - startTime) / 1000).toFixed(1);
       logger.info(`[db-rebuild] Step4 스마트빌드 완료: ${result.tabsUpdated}탭 갱신, ${result.tabsSkipped}탭 스킵`);
       broadcast('db_rebuild_done', {

@@ -20,13 +20,22 @@ const pool = require('../db/pool');
 const { readSheet, getSpreadsheetMeta, batchReadSheet, getSheetModifiedTime, shareSheetWithServiceAccount } = require('./sheets.service');
 const { computeChecksum } = require('../utils/checksum');
 const { logger } = require('../utils/logger');
-const { throttledCall, driveThrottledCall } = require('../utils/sheetsThrottle');
+const { throttledCall, driveThrottledCall, getThrottleStatus } = require('../utils/sheetsThrottle');
 
 // ═══════════════════════════════════════════════════════════
 // 상수 및 상태
 // ═══════════════════════════════════════════════════════════
 
-const SMART_BUILD_INTERVAL_MS = 5 * 60 * 1000; // 5분
+// 주기(env 조절, 기본 5분·60초 미만은 60으로 클램프) — 쿼터 여유가 더 필요하면 SMART_BUILD_INTERVAL_SEC=600 등으로 상향
+const SMART_BUILD_INTERVAL_MS = (n => (Number.isFinite(n) && n > 0 ? Math.max(60, n) : 300))(
+  parseInt(process.env.SMART_BUILD_INTERVAL_SEC || '300', 10)
+) * 1000;
+
+// 시트 lane 중간 양보 임계 — 변경시트 처리 중 최근 1분 시트 lane 사용량이 이 값을 넘으면
+// 남은 변경 시트를 다음 주기로 연기(제출/주문 쿼터 헤드룸 상시 확보). 999로 사실상 비활성.
+const SMARTBUILD_YIELD_THRESHOLD = (n => (Number.isFinite(n) && n > 0 ? n : 25))(
+  parseInt(process.env.SMARTBUILD_YIELD_THRESHOLD || '25', 10)
+);
 
 // ── 에러 메시지 한글 번역 헬퍼 ──
 function _translateError(msg) {
@@ -75,6 +84,16 @@ const DRIVE_FAIL_SKIP_AFTER = (n => (Number.isFinite(n) && n > 0 ? n : 2))(
   parseInt(process.env.SMARTBUILD_DRIVE_FAIL_SKIP_AFTER || '2', 10)
 );
 
+// 시트 처리(meta/batchGet/탭) 실패 시: modifiedTime 캐시를 무효화해 다음 주기 재시도 —
+//   실패한 데이터가 "반영됨(T2)"으로 영속 스냅샷에 남는 것을 방지. 단 연속 실패가 상한을
+//   넘으면 캐시를 유지해 5분 재읽기 루프를 중단(백스톱: 04:00 전체빌드 또는 다음 시트 편집).
+const _sheetErrStreak = {};
+const SHEET_ERR_RETRY_CYCLES = 3;
+
+// resetSmartBuildCache 직후의 첫 실행이 방금 지운 영속 스냅샷을 복원해 "강제 전체 갱신"을
+// 무력화하지 않도록(DELETE 실패/지연 대비) 1회성 복원 스킵 플래그.
+let _skipPersistedRestore = false;
+
 // ── pause 상태(적대검증 RED-1 끈채방치 / RED-2 재배포 부활 방어) ──
 //   interval은 계속 돌되 now < _pausedUntil이면 tick만 스킵(자동재개). app_settings에 영속화해
 //   재배포/재부팅에도 관리자 정지 의도 보존. pause 만료 시 자동 재개(끈 채 방치 방지).
@@ -104,6 +123,55 @@ async function _loadPersistedPause() {
     }
   } catch (e) { logger.warn(`[smartBuild] pause 복원 조회 실패(무시): ${e.message}`); }
   return null;
+}
+
+// ── modifiedTime 캐시 영속화 (재배포 콜드스타트 전체 스윕 제거) ──
+//   _modifiedTimeCache는 인메모리라 재배포마다 소실 → 첫 주기에 전 시트(~57개)가 "변경됨"으로
+//   간주되어 meta+batchGet 전량 재읽기(시트 lane ~30콜/분 수 분간 점유)되던 것을,
+//   사이클 말미에 app_settings로 스냅샷 저장 + 부팅 첫 주기에 복원해 제거한다.
+//   실제 변경된 시트는 modifiedTime이 달라 정상 감지(안전측). best-effort — 실패해도 기능 영향 0.
+async function _persistModifiedCache(currentSheetIds = null) {
+  try {
+    const keep = currentSheetIds ? new Set(currentSheetIds) : null;
+    const flat = {};
+    for (const [sid, v] of Object.entries(_modifiedTimeCache)) {
+      if (keep && !keep.has(sid)) continue; // 등록 해제된 시트 엔트리 정리(스냅샷 무한 잔류 방지)
+      if (v && v.modifiedTime) flat[sid] = v.modifiedTime;
+    }
+    await pool.query(
+      `INSERT INTO app_settings (key, value, updated_at)
+       VALUES ('smart_build_modified_cache', $1, NOW())
+       ON CONFLICT (key) DO UPDATE SET value = $1, updated_at = NOW()`,
+      [JSON.stringify(flat)]
+    );
+  } catch (e) { logger.warn(`[smartBuild] modifiedTime 캐시 영속화 실패(무시): ${e.message}`); }
+}
+
+async function _loadPersistedModifiedCache() {
+  if (_skipPersistedRestore) {
+    _skipPersistedRestore = false;
+    logger.info('[smartBuild] 캐시 리셋 직후 — 영속 modifiedTime 스냅샷 복원 스킵(강제 전체 갱신 보존)');
+    return 0;
+  }
+  try {
+    const { rows } = await pool.query(
+      "SELECT value FROM app_settings WHERE key = 'smart_build_modified_cache'"
+    );
+    const raw = rows[0] && rows[0].value;
+    if (!raw) return 0;
+    const flat = JSON.parse(raw);
+    let n = 0;
+    for (const [sid, mt] of Object.entries(flat || {})) {
+      if (sid && typeof mt === 'string' && mt) {
+        _modifiedTimeCache[sid] = { modifiedTime: mt, checkedAt: 0 };
+        n++;
+      }
+    }
+    return n;
+  } catch (e) {
+    logger.warn(`[smartBuild] modifiedTime 캐시 복원 실패(전체 재감지로 폴백): ${e.message}`);
+    return 0;
+  }
 }
 
 // ═══════════════════════════════════════════════════════════
@@ -396,7 +464,7 @@ async function _ensureSheetsShared(sheetIds, result) {
   }
 }
 
-async function runSmartBuild() {
+async function runSmartBuild({ noYield = false } = {}) {
   if (_isRunning) {
     logger.warn('[smartBuild] 이미 실행 중 — 스킵');
     return { ok: false, reason: 'already_running' };
@@ -415,6 +483,7 @@ async function runSmartBuild() {
     isFirstRun,
     sheetsChecked: 0,
     sheetsChanged: 0,
+    sheetsDeferred: 0,
     sheetsShared: 0,
     tabsScanned: 0,
     tabsUpdated: 0,
@@ -461,7 +530,9 @@ async function runSmartBuild() {
       masterRows.forEach(r => {
         _checksumCache[`${r.sheet_id}||${r.tab_name}`] = r.checksum;
       });
-      logger.info(`[smartBuild] 첫 실행: 체크섬 캐시 ${masterRows.length}건 로드`);
+      // ★ modifiedTime 캐시 복원 — 재배포 직후 "전 시트 변경 간주" 콜드스타트 스윕 제거
+      const restored = await _loadPersistedModifiedCache();
+      logger.info(`[smartBuild] 첫 실행: 체크섬 캐시 ${masterRows.length}건 + modifiedTime 캐시 ${restored}건 복원`);
     }
 
     // 마감 탭 목록 로드
@@ -540,6 +611,15 @@ async function runSmartBuild() {
 
     // ── 3단계: 변경된 시트별 batchGet + 체크섬 비교 + DB 갱신 ──
     for (const sheetId of changedSheetIds) {
+      // ★ 시트 lane 중간 양보 — 제출/주문 버스트 중이면 남은 변경 시트는 다음 주기로 연기.
+      //   modifiedTime 캐시를 지워 다음 주기에 반드시 재감지(변경 유실 없음). 백스톱: 전체빌드 cron.
+      //   noYield(관리자 강제실행/DB재구축)는 조각나지 않게 양보 없이 완주.
+      if (!noYield && getThrottleStatus().requestsInLastMinute > SMARTBUILD_YIELD_THRESHOLD) {
+        result.sheetsDeferred++;
+        delete _modifiedTimeCache[sheetId];
+        continue;
+      }
+      let sheetHadError = false;
       try {
         // 시트 메타 조회 (탭 목록) — throttle 적용
         const meta = await throttledCall(() => getSpreadsheetMeta(sheetId));
@@ -655,6 +735,7 @@ async function runSmartBuild() {
             logger.info(`[smartBuild] 갱신: ${spreadsheetTitle}/${tabName} — ${rows.length}행 (제출:${rows.filter(r => r.isSubmitted).length}) [차수: ${roundSummary}]`);
 
           } catch (tabErr) {
+            sheetHadError = true;
             result.errors++;
             result.errorDetails.push({ phase: 'tab', sheetId: sheetId.substring(0, 15), tabName, error: tabErr.message, desc: _translateError(tabErr.message) });
             logger.error(`[smartBuild] 탭 처리 오류 (${tabName}): ${tabErr.message}`);
@@ -662,14 +743,31 @@ async function runSmartBuild() {
         }
 
       } catch (sheetErr) {
+        sheetHadError = true;
         result.errors++;
         result.errorDetails.push({ phase: 'sheet', sheetId: sheetId.substring(0, 15), error: sheetErr.message, desc: _translateError(sheetErr.message) });
         logger.error(`[smartBuild] 시트 처리 오류 (${sheetId.substring(0, 15)}): ${sheetErr.message}`);
       }
+      // ★ 실패 시트는 캐시 무효화(다음 주기 재시도) — 미반영 데이터가 "반영됨"으로 영속되는 것 방지.
+      //   연속 실패가 상한을 넘으면 캐시 유지 → 재읽기 루프 중단(백스톱: 04시 전체빌드/다음 편집).
+      if (sheetHadError) {
+        const streak = (_sheetErrStreak[sheetId] || 0) + 1;
+        _sheetErrStreak[sheetId] = streak;
+        if (streak <= SHEET_ERR_RETRY_CYCLES) {
+          delete _modifiedTimeCache[sheetId];
+        } else {
+          logger.warn(`[smartBuild] ${sheetId.substring(0, 15)} ${streak}주기 연속 실패 — 재시도 중단(캐시 유지)`);
+        }
+      } else {
+        delete _sheetErrStreak[sheetId];
+      }
     }
 
     result.elapsed = Date.now() - startTime;
-    logger.info(`[smartBuild] #${runNum} 완료: 변경 ${result.sheetsChanged}시트, 스캔 ${result.tabsScanned}탭, 갱신 ${result.tabsUpdated}탭, 스킵 ${result.tabsSkipped}, 오류 ${result.errors}, ${result.elapsed}ms`);
+    logger.info(`[smartBuild] #${runNum} 완료: 변경 ${result.sheetsChanged}시트(연기 ${result.sheetsDeferred}), 스캔 ${result.tabsScanned}탭, 갱신 ${result.tabsUpdated}탭, 스킵 ${result.tabsSkipped}, 오류 ${result.errors}, ${result.elapsed}ms`);
+
+    // ★ modifiedTime 캐시 스냅샷 저장 — 다음 재배포의 콜드스타트 전체 스윕 제거(best-effort)
+    await _persistModifiedCache(sheetIds);
 
     // 빌드 히스토리 기록
     try {
@@ -836,9 +934,16 @@ function invalidateChecksumCache(sheetId, tabName) {
     const key = `${sheetId}||${tabName}`;
     if (Object.prototype.hasOwnProperty.call(_checksumCache, key)) {
       delete _checksumCache[key];
-      delete _modifiedTimeCache[key];
       n++;
     }
+  }
+  // 시트 단위 modifiedTime 캐시도 무효화 — 시트가 그동안 미편집이어도 다음 주기에
+  // 재읽기·재파싱되도록(매핑 변경 즉시 반영 의도 관철; 캐시 키는 sheetId 단위).
+  if (Object.prototype.hasOwnProperty.call(_modifiedTimeCache, sheetId)) {
+    delete _modifiedTimeCache[sheetId];
+    n++;
+    // 영속 스냅샷에도 즉시 반영 — 다음 사이클 전 재배포돼도 복원이 이 시트를 되살리지 않게(best-effort)
+    _persistModifiedCache();
   }
   if (n) logger.info(`[smartBuild] 체크섬 캐시 무효화 — sheet=${String(sheetId).slice(0,12)} tab=${tabName} (${n}건) → 다음 주기 재파싱`);
   return n;
@@ -855,6 +960,12 @@ function resetSmartBuildCache() {
   // DB의 index_master.checksum도 NULL로 초기화 → 다음 빌드에서 전체 탭 강제 갱신
   pool.query("UPDATE index_master SET checksum = NULL").catch(err => {
     logger.error(`[SmartBuild] DB 체크섬 초기화 실패: ${err.message}`);
+  });
+  // 영속 modifiedTime 캐시도 함께 삭제 — 리셋 후 첫 주기가 전 시트를 재읽기하도록(전체 재빌드 의도 보존)
+  // + DELETE 실패/지연 대비 1회성 복원 스킵 플래그(리셋 직후 첫 실행이 옛 스냅샷을 되살리지 않게)
+  _skipPersistedRestore = true;
+  pool.query("DELETE FROM app_settings WHERE key = 'smart_build_modified_cache'").catch(err => {
+    logger.error(`[SmartBuild] 영속 modifiedTime 캐시 삭제 실패: ${err.message}`);
   });
   logger.info(`[SmartBuild] 캐시 리셋 완료 — modifiedTime: ${prev.modifiedTimeEntries}→0, checksum: ${prev.checksumEntries}→0, DB checksum→NULL`);
   return prev;
