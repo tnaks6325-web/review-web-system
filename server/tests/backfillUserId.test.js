@@ -28,4 +28,13 @@ assert.equal(_singleIdCol(['주문자제출','paid','쿠팡id']), 2);
 assert.equal(_singleIdCol(['수취인','받는분id','id']), 2);          // 받는분id는 수취인 선점 → id 1개
 assert.equal(_singleIdCol(['쿠팡id','비고(아이디확인)']), 0);        // 메모열 오탐 제외 → 쿠팡id 단일 유지
 assert.equal(mapOrderToSheetRow(['쿠팡id','비고(아이디확인)'], od)[0], 'cpid123');
+
+// 재발방지 #1: unmappedSubmittedFields — 제출값 있는데 넣을 열 못 찾은 필드 감지
+const { unmappedSubmittedFields } = require('../src/services/orderLedger.service');
+// 쿠팡 단일탭: 모든 필드 매핑됨 → 미매핑 없음(false positive 없음)
+assert.deepEqual(unmappedSubmittedFields(coupang, { userId: 'x', phone: '010', recipient: 'K' }), []);
+// id열 없는 탭 + userId 값 → user_id 미매핑 감지(조용한 누락 신호)
+assert.deepEqual(unmappedSubmittedFields(['번호', '주문자제출', '연락처'], { userId: 'x' }), ['user_id']);
+// NC(2 id열): user_id는 의도적 미기입이라 미보고(노이즈 억제)
+assert.deepEqual(unmappedSubmittedFields(nc, { userId: 'x' }), []);
 console.log('backfill-userid unit OK');

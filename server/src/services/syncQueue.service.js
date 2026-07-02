@@ -27,10 +27,12 @@ const {
   mapOrderToSheetRow,
   _osRowToOrderData,
   _fieldToCol,
+  unmappedSubmittedFields,
   rowIdentityMatches,
   computeRowWriteSig,
 } = require('./orderLedger.service');
 const { logger } = require('../utils/logger');
+const { logAbnormal } = require('./errorLog.service');
 
 // ── 큐에 작업 추가 ──
 async function enqueue(type, payload, maxRetry = 3) {
@@ -618,6 +620,19 @@ async function _executeItem(item) {
         if (!tabContext || !tabContext.headers || tabContext.headers.length === 0) {
           throw new Error('RAW 미러 헤더 메타를 찾을 수 없음');
         }
+        // ★ 재발방지(#1): 제출값이 있는데 넣을 열을 못 찾은 필드가 있으면 경고 — '쿠팡id'류 헤더 미인식이
+        //   조용히 새지 않게 즉시 신호로 남긴다(쓰기는 계속: 매칭된 열만 기록). best-effort.
+        try {
+          const _unmapped = unmappedSubmittedFields(tabContext.headers, orderData);
+          if (_unmapped.length) {
+            logger.warn(`[order_append] ⚠️ 시트에 넣을 열 못 찾은 제출필드: ${_unmapped.join(',')} (tab=${tabContext.tabName || tabName}) — 헤더 확인 필요`);
+            logAbnormal({
+              flow: 'order_mirror', step: 'field_unmapped', severity: 'warn',
+              error: new Error('제출 필드 미매핑: ' + _unmapped.join(',')),
+              context: { sheetId, tabName: tabContext.tabName || tabName, gid: tabContext.tabGid || gid, unmapped: _unmapped, orderSubmissionId },
+            });
+          }
+        } catch (_) { /* 관측용 — 실패해도 쓰기 진행 */ }
         // ★ D3a(#3): 다중컬럼 가드(연락처+주소+수취인) — 한 칸만 빈 수동입력행 덮어쓰기 방지.
         //   한 번의 행 읽기(min~max col)로 쿼터 1회 유지, 셀별 판정.
         //   D3b: 읽기 전 그리드 캐시 무효화 → append 행이 60s stale 그리드밖이라 빈배열([])로 오판되는 것 차단.

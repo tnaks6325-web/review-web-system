@@ -1029,6 +1029,22 @@ function _fieldToCol(headers, field) {
   return findColumn(headers, def[0], def[1] || []);
 }
 
+// ★ 재발방지: 제출값이 있는데 시트에 넣을 열을 못 찾은 필드 목록(조용한 누락 관측용).
+//   쓰기측(order_append)이 이걸로 warn/logAbnormal → '쿠팡id'류 헤더 미인식이 조용히 새지 않고 즉시 신호로 뜬다.
+//   user_id는 NC(id열 2개=동시탭)면 '의도적 미기입'이라 제외하고, id열이 아예 0개인데 값이 있으면 누락으로 본다.
+const _UNMAPPED_CHECK_FIELDS = ['recipient', 'phone', 'address', 'bank', 'account', 'depositor', 'order_num'];
+const _FIELD_ODKEY = { recipient: 'recipient', phone: 'phone', address: 'address', bank: 'bank',
+  account: 'account', depositor: 'depositor', order_num: 'orderNum', user_id: 'userId' };
+function unmappedSubmittedFields(headers, orderData = {}) {
+  const val = (f) => String((orderData || {})[_FIELD_ODKEY[f]] || '').trim();
+  const out = [];
+  for (const f of _UNMAPPED_CHECK_FIELDS) {
+    if (val(f) && _fieldToCol(headers, f) < 0) out.push(f);
+  }
+  if (val('user_id') && _idColIndices(headers).length === 0) out.push('user_id'); // NC(2열)는 의도적 미기입 → 제외
+  return out;
+}
+
 // ── 시트→DB 역동기화(옵션·수동) 대상 필드(G4: 옵션·dedup영향칸 제외). ──
 //   selected_opt_key(옵션칸)는 역매핑이 비결정적이라 제외. recipient/phone은 dedupKey 입력이지만
 //   apply가 order_update(매핑칸 in-place)만 타고 dedup_key/claims를 안 건드리므로 포함 가능(R6 방어).
@@ -1522,6 +1538,7 @@ module.exports = {
   _fieldToCol,
   _isIdHeader,
   _singleIdCol,
+  unmappedSubmittedFields,
   rowIdentityMatches,
   mapOrderToSheetRow,
   buildBatchUpdateData,
