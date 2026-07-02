@@ -728,9 +728,10 @@ body{ letter-spacing:-.01em; }
       <!-- 제출 현황 대시보드 -->
       <div id="tab-dashboard" class="admin-tab-pane active">
 
-        <!-- ★ 상단 2단: 시스템 변경 공지 | 리뷰어 소식·공지 -->
-        <div style="display:flex;gap:16px;align-items:flex-start;flex-wrap:wrap;margin-bottom:16px">
-        <div id="noticeSection" style="display:none;flex:1;min-width:280px;border:1px solid #DBEAFE;border-radius:12px;background:linear-gradient(135deg,#EFF6FF,#F0F9FF);padding:16px 18px;position:relative">
+        <!-- ★ 대시보드 2×2 균등 블록: 시스템공지 | 리뷰어공지 / 작업오더 | 캠페인탭관리 -->
+        <style>@media (max-width:900px){ #dashGrid{ grid-template-columns:1fr !important; } }</style>
+        <div id="dashGrid" style="display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:16px;align-items:stretch;margin-bottom:16px">
+        <div id="noticeSection" style="display:none;min-width:0;border:1px solid #DBEAFE;border-radius:12px;background:linear-gradient(135deg,#EFF6FF,#F0F9FF);padding:16px 18px;position:relative">
           <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:10px">
             <span style="font-size:.88rem;font-weight:700;color:#1E40AF">
               <i class="fas fa-bullhorn" style="color:#3B82F6;margin-right:6px"></i>시스템 변경 공지
@@ -743,7 +744,7 @@ body{ letter-spacing:-.01em; }
         </div>
 
         <!-- 리뷰어 소식·공지 관리 (리뷰어 홈 상단 노출) -->
-        <div style="flex:1;min-width:280px;border:1px solid #E5E7EB;border-radius:12px;background:#fff;padding:16px 18px">
+        <div style="min-width:0;border:1px solid #E5E7EB;border-radius:12px;background:#fff;padding:16px 18px">
           <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:10px">
             <span style="font-size:.88rem;font-weight:700;color:var(--t1)"><i class="fas fa-bullhorn" style="color:#7C3AED;margin-right:6px"></i>리뷰어 소식·공지 <span style="font-size:.65rem;font-weight:400;color:#6B7280">(리뷰어 홈 상단 노출)</span></span>
             <button onclick="loadReviewerNoticesAdmin()" style="padding:4px 10px;background:#F3F4F6;color:#374151;border:none;border-radius:7px;font-size:.72rem;font-weight:600;cursor:pointer"><i class="fas fa-sync-alt"></i> 새로고침</button>
@@ -760,14 +761,11 @@ body{ letter-spacing:-.01em; }
               </div>
             </div>
           </div>
-          <div id="rvNoticeList"><div style="text-align:center;color:#9CA3AF;font-size:.8rem;padding:10px">불러오는 중...</div></div>
+          <div id="rvNoticeList" style="max-height:220px;overflow-y:auto"><div style="text-align:center;color:#9CA3AF;font-size:.8rem;padding:10px">불러오는 중...</div></div>
         </div>
-        </div><!-- /상단 2단(공지) -->
 
-        <!-- ★ 하단 2단: 작업오더 간편보기 | 캠페인 탭 관리 -->
-        <div style="display:flex;gap:16px;align-items:flex-start;flex-wrap:wrap">
-        <!-- 작업오더 간편보기 (최신 4건) — 좌측 열 -->
-        <div id="dashWoSection" style="flex:0 0 340px;min-width:300px;border:1px solid #E5E7EB;border-radius:12px;background:#fff;padding:14px 16px">
+        <!-- 작업오더 간편보기 (최신 4건) -->
+        <div id="dashWoSection" style="min-width:0;border:1px solid #E5E7EB;border-radius:12px;background:#fff;padding:14px 16px">
           <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:8px">
             <span style="font-size:.88rem;font-weight:700;color:#111827">
               <i class="fas fa-clipboard-list" style="color:#3182f6;margin-right:6px"></i>작업오더 간편보기
@@ -775,12 +773,13 @@ body{ letter-spacing:-.01em; }
             </span>
             <button onclick="switchAdminTab('work-orders')" style="font-size:.72rem;background:#e8f1fe;color:#1b64da;border:1px solid #cce0fb;border-radius:7px;padding:4px 10px;cursor:pointer"><i class="fas fa-list"></i> 전체 보기</button>
           </div>
-          <div id="dashWoList" style="max-height:134px;overflow-y:auto;transition:max-height .2s ease"></div>
+          <div id="dashWoList" style="max-height:220px;overflow-y:auto;transition:max-height .2s ease"></div>
         </div>
-        <!-- 캠페인 탭 관리 (대시보드 메인) — 우측 열 -->
-        <div style="flex:1;min-width:0">
-        <div class="admin-section-header">
-          <span style="font-size:.95rem;font-weight:700;color:var(--t1)">
+
+        <!-- 캠페인 탭 관리 (관리 액션 + 상태 + KPI 카드) -->
+        <div style="min-width:0;border:1px solid #E5E7EB;border-radius:12px;background:#fff;padding:14px 16px">
+        <div class="admin-section-header" style="margin-bottom:4px">
+          <span style="font-size:.88rem;font-weight:700;color:var(--t1)">
             <i class="fas fa-th-list" style="color:#1D4ED8;margin-right:6px"></i>캠페인 탭 관리
           </span>
           <div style="display:flex;gap:6px;margin-left:auto;flex-wrap:wrap;align-items:center">
@@ -816,11 +815,19 @@ body{ letter-spacing:-.01em; }
           데이터 원본: DB(tab_configs) &middot; 스마트빌드 5분 자동갱신 &middot; 로딩중...
         </div>
 
+        <!-- KPI 카드 -->
+        <div id="tabDashKPI" style="display:grid;grid-template-columns:repeat(auto-fit,minmax(96px,1fr));gap:8px"></div>
+        </div><!-- /캠페인 탭 관리 카드 -->
+        </div><!-- /dashGrid(2×2) -->
+
+        <!-- ★ 작업 중인 탭 목록 — 전체폭 단독 블록 -->
+        <div style="border:1px solid #E5E7EB;border-radius:12px;background:#fff;padding:16px 18px">
+        <div style="font-size:.92rem;font-weight:700;color:var(--t1);margin-bottom:10px">
+          <i class="fas fa-list-check" style="color:#1D4ED8;margin-right:6px"></i>작업 중인 탭 목록
+        </div>
+
         <!-- ★ 완료감지 결과 영역 (대시보드 내 인라인) -->
         <div id="dashArchiveDetectWrap" style="display:none;margin-bottom:14px"></div>
-
-        <!-- KPI 카드 -->
-        <div id="tabDashKPI" style="display:grid;grid-template-columns:repeat(auto-fit,minmax(110px,1fr));gap:8px;margin-bottom:14px"></div>
 
         <!-- 필터 -->
         <div style="display:flex;gap:8px;margin-bottom:10px;flex-wrap:wrap;align-items:center">
@@ -1137,8 +1144,7 @@ body{ letter-spacing:-.01em; }
           </details>
         </div>
         <!-- /Phase 9 -->
-        </div><!-- /캠페인 우측 열 -->
-        </div><!-- /하단 2단 -->
+        </div><!-- /작업 중인 탭 목록 블록 -->
 
       </div><!-- /tab-dashboard -->
 
