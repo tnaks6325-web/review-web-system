@@ -1355,7 +1355,7 @@ function switchAdminTab(tabName) {
   if (tabName === "payment")   initPaymentPanel();
   if (tabName === "dashboard") { try { loadTabDashboard(); } catch(_){} try { loadSystemMonitor(); } catch(_){} try { loadStatsOverview(); } catch(_){} try { loadDashWorkOrders(); } catch(_){} try { loadReviewerNoticesAdmin(); } catch(_){} }
   if (tabName === "archive")   { try { loadArchiveList(); } catch(_){} try { _loadArchiveHistory(); } catch(_){} }
-  if (tabName === "settings")  { try { loadUnrecognizedTabs(); } catch(_){} try { loadKeywordList(); } catch(_){} try { loadCompanyBusinessNo(); } catch(_){} }
+  if (tabName === "settings")  { try { loadUnrecognizedTabs(); } catch(_){} try { loadMappingCoverage(); } catch(_){} try { loadKeywordList(); } catch(_){} try { loadCompanyBusinessNo(); } catch(_){} }
   if (tabName === "errorlogs") { try { loadErrorLogs(); } catch(_){} }
   if (tabName === "order-ledger") { try { loadOrderLedger(); } catch(_){} }
   // ★ 컨텍스트 툴바 업데이트
@@ -11388,6 +11388,56 @@ async function saveCompanyBusinessNo() {
   }
 }
 
+/* ── 컬럼매핑 현황 (컬럼 판정 DB화 1단계 관측) ──
+   활성 탭별 매핑 보유율 + 출처(자동기록/수동) + 드리프트(기록≠현재 시트 → 키워드 폴백 중) 목록 */
+async function loadMappingCoverage() {
+  const wrap = document.getElementById('mappingCoverageWrap');
+  if (!wrap) return;
+  wrap.innerHTML = '<div style="text-align:center;padding:12px;color:var(--t3)"><i class="fas fa-circle-notch fa-spin"></i> 불러오는 중...</div>';
+  try {
+    const data = await gasGet({ action: 'mappingCoverage' });
+    if (!data.ok) {
+      wrap.innerHTML = `<div style="padding:12px;color:#EF4444"><i class="fas fa-exclamation-circle"></i> ${escHtml(data.error || '조회 실패')}</div>`;
+      return;
+    }
+    const s = data.stats || {};
+    const tabs = data.tabs || [];
+    const drifting = tabs.filter(t => (t.drift || []).length > 0);
+
+    const chip = (label, val, color) =>
+      `<div style="flex:1 1 110px;min-width:100px;border:1px solid #E5E7EB;border-radius:8px;padding:8px 10px;background:var(--bg2,#fff)">
+        <div style="font-size:.68rem;color:var(--t3)">${label}</div>
+        <div style="font-size:1.05rem;font-weight:700;color:${color || 'var(--t1)'}">${val}</div>
+      </div>`;
+
+    let html = `<div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:10px">`
+      + chip('활성 탭', s.total ?? 0)
+      + chip('매핑 기록됨', `${s.mapped ?? 0} (자동 ${s.byProvenance?.auto ?? 0} · 수동 ${s.byProvenance?.manual ?? 0})`, '#0ca678')
+      + chip('미기록', s.unmapped ?? 0, (s.unmapped ? '#D97706' : undefined))
+      + chip('gid 없음(기록 불가)', s.noGid ?? 0, (s.noGid ? '#6B7280' : undefined))
+      + chip('⚠ 드리프트', s.drifting ?? 0, (s.drifting ? '#DC2626' : '#0ca678'))
+      + `</div>`;
+
+    if (drifting.length === 0) {
+      html += '<div style="padding:8px 4px;color:var(--t3)"><i class="fas fa-check-circle" style="color:#12b886"></i> 드리프트 없음 — 모든 기록이 현재 시트 구조와 일치합니다.</div>';
+    } else {
+      html += `<div style="font-size:.75rem;color:var(--t3);margin:4px 0 6px">⚠ 드리프트 탭 ${drifting.length}건 — 시트 구조가 기록과 어긋나 해당 항목은 임시(키워드) 방식으로 감지 중. 컬럼 매핑에서 재확인하세요.</div>`;
+      drifting.forEach(t => {
+        const fields = (t.drift || []).map(d => `${escHtml(d.field)}(${escHtml(d.reason)})`).join(', ');
+        const mapUrl = `raw-mirror.html?sheetId=${encodeURIComponent(t.sheetId || '')}&gid=${encodeURIComponent(t.tabGid || '')}`;
+        html += `<div style="display:flex;align-items:center;gap:8px;padding:7px 10px;border:1px solid #FDE68A;background:#FFFBEB;border-radius:8px;margin-bottom:6px;flex-wrap:wrap">
+          <span style="font-weight:600">${escHtml(t.campaignName || '')} / ${escHtml(t.tabName || '')}</span>
+          <span style="font-size:.72rem;color:#92400E">${fields}</span>
+          <a href="${mapUrl}" target="_blank" style="margin-left:auto;font-size:.74rem;color:#1D4ED8;text-decoration:underline;white-space:nowrap">컬럼 매핑 열기</a>
+        </div>`;
+      });
+    }
+    wrap.innerHTML = html;
+  } catch (e) {
+    wrap.innerHTML = `<div style="padding:12px;color:#EF4444"><i class="fas fa-exclamation-circle"></i> ${escHtml(e.message || '조회 실패')}</div>`;
+  }
+}
+
 async function loadUnrecognizedTabs() {
   const wrap = document.getElementById('unrecogListWrap');
   if (!wrap) return;
@@ -13126,7 +13176,11 @@ function _cellVal(t, col) {
     // ★ 차수별 행이면 해당 차수의 인원/제출 표시
     const rc = t._isRoundRow ? (t._roundTotal || 0) : (t.row_count || 0);
     const sc = t._isRoundRow ? (t._roundSubmitted || 0) : (t.submitted_count || 0);
-    if (rc === 0) return '<span style="color:#D1D5DB">—</span>';
+    // ★ 컬럼매핑 드리프트 배지 — 저장된 컬럼 기록과 시트 구조가 어긋나 키워드 폴백 동작 중(탭 행에만)
+    const driftBadge = (!t._isRoundRow && Array.isArray(t.detect_drift) && t.detect_drift.length > 0)
+      ? ` <span style="color:#D97706;cursor:help;font-size:.72rem" title="컬럼매핑 드리프트 — 시트 구조가 기록과 달라 임시(키워드) 방식으로 세는 중. 설정 탭 › 컬럼매핑 현황에서 확인하세요">⚠</span>`
+      : '';
+    if (rc === 0) return '<span style="color:#D1D5DB">—</span>' + driftBadge;
     const pct = _pct(sc, rc);
     const clr = pct >= 80 ? "#0ca678" : pct >= 50 ? "#D97706" : "#DC2626";
     const pending = rc - sc;
@@ -13135,9 +13189,9 @@ function _cellVal(t, col) {
       const sid = escHtml(t.sheet_id);
       const tn = escHtml(t.tab_name);
       const rd = t._isRoundRow ? escHtml(t._roundLabel || '') : '';
-      return `<span style="font-weight:600;cursor:pointer;text-decoration:underline;text-decoration-style:dotted;text-underline-offset:3px" onclick="event.stopPropagation();_showPendingReviewersPopup('${sid}','${tn}',${rc},${sc},'${rd}')" title="클릭하여 미제출자 ${pending}명 확인">${sc}/${rc}</span> <span style="color:${clr};font-size:.68rem">(${pct}%)</span>`;
+      return `<span style="font-weight:600;cursor:pointer;text-decoration:underline;text-decoration-style:dotted;text-underline-offset:3px" onclick="event.stopPropagation();_showPendingReviewersPopup('${sid}','${tn}',${rc},${sc},'${rd}')" title="클릭하여 미제출자 ${pending}명 확인">${sc}/${rc}</span> <span style="color:${clr};font-size:.68rem">(${pct}%)</span>${driftBadge}`;
     }
-    return `<span style="font-weight:600">${sc}/${rc}</span> <span style="color:${clr};font-size:.68rem">(${pct}%)</span>`;
+    return `<span style="font-weight:600">${sc}/${rc}</span> <span style="color:${clr};font-size:.68rem">(${pct}%)</span>${driftBadge}`;
   }
   if (k === "_paid") {
     // ★ 입금 현황: paid_count / row_count

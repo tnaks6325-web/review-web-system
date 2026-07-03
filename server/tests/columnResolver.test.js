@@ -146,7 +146,56 @@ function run() {
   const r9 = parseTabRows(v9, 's9', 't9', 'g9', 'C9', KW, map9);
   assert.equal(r9[0].name, '주문킴', '★ name은 키워드 전용(DB override 없음)');
 
-  console.log('  케이스1~9 통과 (P2a 슈퍼셋 + P2b DB매핑 우선/재앵커/범위가드/PII가드)');
+  // ════════════ 1단계(컬럼 판정 DB화): meta provenance + drift ════════════
+
+  // ── 케이스10: meta out-param — 필드별 src('db'|'keyword'|'none') + headerRowIdx 보고 ──
+  const meta10 = {};
+  const r10 = parseTabRows(v5, 's5', 't5', 'g5', 'C5', KW, map5, meta10);
+  assert.equal(r10[0].submitCol, '완료', 'meta 전달해도 파싱 결과 불변');
+  assert.equal(meta10.headerRowIdx, 0, 'headerRowIdx 보고');
+  assert.equal(meta10.fields.review_submit.src, 'db', '★ DB매핑 사용 필드 = src db');
+  assert.equal(meta10.fields.review_submit.col, 4);
+  assert.equal(meta10.fields.payment.src, 'db');
+  assert.equal(meta10.fields.name.src, 'keyword', 'name은 항상 키워드');
+  assert.equal(meta10.fields.phone.src, 'keyword', '매핑 없는 필드 = 키워드');
+  assert.equal(meta10.fields.round.src, 'none', '미검출 필드 = none');
+  assert.equal(meta10.fields.round.col, -1);
+  assert.deepEqual(meta10.drift, [], '거부된 매핑 없음 → drift 빈 배열');
+
+  // ── 케이스11: drift 보고 — 재앵커 불일치(reanchor) / 범위밖(range) ──
+  const meta11a = {};
+  parseTabRows(v6, 's6', 't6', 'g6', 'C6', KW, map6, meta11a);
+  assert.equal(meta11a.drift.length, 1, '재앵커 거부 1건');
+  assert.deepEqual(meta11a.drift[0], {
+    field: 'review_submit', reason: 'reanchor', storedCol: 4, storedHeader: '리뷰완료', currentHeader: '완료',
+  }, '★ reanchor drift 상세');
+  assert.equal(meta11a.fields.review_submit.src, 'keyword', '거부 후 키워드 폴백으로 보고');
+  const meta11b = {};
+  parseTabRows(v7, 's7', 't7', 'g7', 'C7', KW, map7, meta11b);
+  assert.equal(meta11b.drift.length, 1, '범위밖 거부 1건');
+  assert.equal(meta11b.drift[0].reason, 'range', '★ range drift');
+
+  // ── 케이스12: 무변경 정리(theorem) — 키워드 감지 결과(meta)로 dbColMap을 구성해 재파싱하면
+  //    전체 행 출력이 완전 동일(자동기록 매핑 ≡ 키워드 결과 = 숫자 무변경의 수학적 근거) ──
+  const RECORDABLE = ['recipient', 'review_submit', 'product', 'phone', 'round', 'payment'];
+  for (const vv of [v1, v2, v3, v5]) {
+    const metaA = {};
+    const base = parseTabRows(vv, 'sx', 'tx', 'gx', 'CX', KW, null, metaA);
+    const rebuilt = new Map();
+    for (const f of RECORDABLE) {
+      const info = metaA.fields[f];
+      if (info && info.src === 'keyword' && info.col >= 0) rebuilt.set(f, { colIndex: info.col, header: info.header });
+    }
+    const metaB = {};
+    const replay = parseTabRows(vv, 'sx', 'tx', 'gx', 'CX', KW, rebuilt, metaB);
+    assert.deepEqual(replay, base, '★ 기록된 매핑으로 재파싱 = 키워드 파싱과 완전 동일(무변경)');
+    for (const [f] of rebuilt) {
+      assert.equal(metaB.fields[f].src, 'db', `재파싱 시 ${f}는 db 소스로 보고`);
+    }
+    assert.deepEqual(metaB.drift, [], '재앵커 전부 통과 → drift 없음');
+  }
+
+  console.log('  케이스1~12 통과 (P2a 슈퍼셋 + P2b DB매핑 우선/재앵커/범위가드/PII가드 + meta/drift/무변경정리)');
 }
 
 try { run(); console.log('columnResolver tests passed'); }

@@ -215,20 +215,21 @@ function _isDataTabRow(cells) {
   return false;
 }
 
-function _parseTabRows(values, sheetId, tabName, tabGid, campaignTitle, dbColMap = null) {
+function _parseTabRows(values, sheetId, tabName, tabGid, campaignTitle, dbColMap = null, meta = null) {
   // ★ P2a: indexBuilder와 동일한 공용 columnResolver로 위임(동일 kw → 동일 출력).
   //   이제 recipientName/isSubmitted2/submitCol2도 반환되며 _upsertTab이 이를 기록한다.
   //   ★ P2b: dbColMap(있으면) 전달 — DB컬럼매핑 우선. 없으면(null) P2a와 100% 동일.
+  //   ★ meta(있으면): 감지 provenance out-param — index_master.detect_source/drift 기록용.
   return require('./columnResolver').parseTabRows(values, sheetId, tabName, tabGid, campaignTitle, {
     NAME_KEYWORDS, SUBMIT_KEYWORDS, DATA_TAB_KEYWORDS, SUBMITTED_VALUES,
-  }, dbColMap);
+  }, dbColMap, meta);
 }
 
 // ═══════════════════════════════════════════════════════════
 // DB Upsert (자체 구현 — indexBuilder와 독립)
 // ═══════════════════════════════════════════════════════════
 
-async function _upsertTab(sheetId, tabName, tabGid, checksum, rows, modifiedTime, campaignName, archivedRoundsCache) {
+async function _upsertTab(sheetId, tabName, tabGid, checksum, rows, modifiedTime, campaignName, archivedRoundsCache, meta = null) {
   const client = await pool.connect();
   try {
     await client.query('BEGIN');
@@ -373,10 +374,14 @@ async function _upsertTab(sheetId, tabName, tabGid, checksum, rows, modifiedTime
     // else: filteredRows가 0이지만 아카이브된 차수가 있으면 → 기존 아카이브 차수 행 보존
 
     // index_master 갱신 (filteredRows 기준 카운트)
+    // ★ 감지 provenance(detect_source/drift, migration 044) 동시 기록 — 관측용, 로직 영향 없음
+    const detectSource = meta && meta.fields ? JSON.stringify({ headerRow: meta.headerRowIdx, ...meta.fields }) : null;
+    const detectDrift = meta && meta.drift && meta.drift.length ? JSON.stringify(meta.drift) : null;
     await client.query(`
       INSERT INTO index_master (sheet_id, tab_name, tab_gid, campaign_name, checksum, built_at,
-                                row_count, submitted_count, status, sheet_modified_at)
-      VALUES ($1,$2,$3,$4,$5,NOW(),$6,$7,'active',$8)
+                                row_count, submitted_count, status, sheet_modified_at,
+                                detect_source, detect_drift, detected_at)
+      VALUES ($1,$2,$3,$4,$5,NOW(),$6,$7,'active',$8,$9::jsonb,$10::jsonb,NOW())
       ON CONFLICT (sheet_id, tab_name) DO UPDATE SET
         tab_gid = EXCLUDED.tab_gid,
         checksum = EXCLUDED.checksum,
@@ -386,11 +391,14 @@ async function _upsertTab(sheetId, tabName, tabGid, checksum, rows, modifiedTime
         campaign_name = EXCLUDED.campaign_name,
         status = 'active',
         error_msg = NULL,
-        sheet_modified_at = EXCLUDED.sheet_modified_at
+        sheet_modified_at = EXCLUDED.sheet_modified_at,
+        detect_source = EXCLUDED.detect_source,
+        detect_drift = EXCLUDED.detect_drift,
+        detected_at = NOW()
     `, [
       sheetId, tabName, tabGid, campaignName || tabName,
       checksum, filteredRows.length, filteredRows.filter(r => r.isSubmitted).length,
-      modifiedTime || null
+      modifiedTime || null, detectSource, detectDrift
     ]);
 
     // tab_configs도 현재 탭의 tab_gid + campaign_name 갱신
@@ -706,7 +714,8 @@ async function runSmartBuild({ noYield = false } = {}) {
             // 변경됨 → 파싱 + DB 갱신
             // ★ P2b: DB컬럼매핑(있으면) 로드 → 매핑 우선. 없으면 null=키워드 전용(P2a 동일).
             const dbColMap = await require('./columnMapping.service').getTabColumnIndexMap(sheetId, tabGid);
-            const rows = _parseTabRows(values, sheetId, tabName, tabGid, spreadsheetTitle, dbColMap);
+            const meta = {};
+            const rows = _parseTabRows(values, sheetId, tabName, tabGid, spreadsheetTitle, dbColMap, meta);
 
             if (rows.length === 0) {
               // ★ 인식 실패 탭 기록 (indexBuilder와 동일)
@@ -716,7 +725,19 @@ async function runSmartBuild({ noYield = false } = {}) {
             }
 
             const modifiedTime = _modifiedTimeCache[sheetId]?.modifiedTime || null;
-            await _upsertTab(sheetId, tabName, tabGid, newChecksum, rows, modifiedTime, spreadsheetTitle, archivedRoundsCache);
+            await _upsertTab(sheetId, tabName, tabGid, newChecksum, rows, modifiedTime, spreadsheetTitle, archivedRoundsCache, meta);
+
+            // ★ 드리프트 경고 — 저장 매핑이 재앵커/범위가드로 거부돼 키워드 폴백 중(무로그 폴백 해소)
+            if (meta.drift && meta.drift.length) {
+              logger.warn(`[smartBuild] 컬럼매핑 드리프트 — ${spreadsheetTitle}/${tabName}: ${meta.drift.map(d => `${d.field}(${d.reason})`).join(', ')} → 키워드 폴백 동작 중`);
+            }
+            // ★ 컬럼매핑 자동 기록 (detection snapshot, 기본 OFF·best-effort — 빌드 실패 유발 불가)
+            //   매핑 없는 탭(!dbColMap)에서 방금 키워드가 고른 컬럼을 그대로 기록 → 기록≡실동작(무변경).
+            if (process.env.COLUMN_MAPPING_AUTO_RECORD === '1' && !dbColMap && tabGid) {
+              try {
+                await require('./columnMapping.service').recordDetectedMappings({ sheetId, tabGid, tabName, meta });
+              } catch (_) {}
+            }
 
             // ★ 인식 성공 → unrecognized_tabs에서 resolve
             await _resolveRecognizedTab(sheetId, tabName, tabGid);
