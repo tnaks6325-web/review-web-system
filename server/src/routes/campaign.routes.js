@@ -1,15 +1,93 @@
 const express = require('express');
 const router = express.Router();
 const crypto = require('crypto');
+const jwt = require('jsonwebtoken');
+const rateLimit = require('express-rate-limit');
 const pool = require('../db/pool');
-const { authMiddleware } = require('../middleware/auth.middleware');
+const { authMiddleware, adminOrMasterMiddleware } = require('../middleware/auth.middleware');
 const { appendSheet, readSheet } = require('../services/sheets.service');
 const { logger } = require('../utils/logger');
+const {
+  computeCampaignState,
+  fetchCampaignCounts,
+} = require('../services/campaignState.service');
+const { sanitizeWorkDetail } = require('../utils/sanitizeGuideHtml');
 
 // ID 생성 헬퍼
 function _genCampaignId() {
   return 'camp_' + crypto.randomBytes(6).toString('hex');
 }
+
+// ═══════════════════════════════════════════════════════════
+// 공개 응답 화이트리스트 (M1 선행 보안 — PRD §08)
+//   레거시(participation_mode=false): 현행 /list 반환 필드 그대로 유지(카톡 신청 플로우 호환).
+//   참여형(participation_mode=true): chat_url·notes·description·max/current_slots·linked_* 미반환
+//     — 작업내용·카톡URL은 신청(홀드) 후 work-detail 게이트에서만, 총원 계열은 어디에도 노출 금지.
+// ═══════════════════════════════════════════════════════════
+const PUBLIC_FIELDS_LEGACY = [
+  'id', 'title', 'channel', 'channel_custom', 'manager', 'time_range',
+  'delivery_type', 'review_fee', 'badges', 'notes', 'chat_url',
+  'status', 'sort_order', 'max_slots', 'current_slots', 'deadline',
+  'description', 'linked_sheet_id', 'linked_tab_name', 'created_at',
+];
+const PUBLIC_FIELDS_PARTICIPATION = [
+  'id', 'title', 'channel', 'channel_custom', 'manager', 'time_range',
+  'delivery_type', 'review_fee', 'badges', 'status', 'sort_order',
+  'thumbnail_url', 'created_at',
+];
+
+function _pick(row, fields) {
+  const out = {};
+  for (const f of fields) if (row[f] !== undefined) out[f] = row[f];
+  return out;
+}
+
+/** 공개 뷰: 레거시/참여형 분기 + 참여형은 상태엔진 페이로드 병합 */
+function _publicView(row, counts, now) {
+  if (!row.participation_mode) {
+    return { ..._pick(row, PUBLIC_FIELDS_LEGACY), participation_mode: false };
+  }
+  const st = computeCampaignState(row, counts || {
+    activeHolds: 0, todayActiveHolds: 0, submittedAll: 0, todaySubmitted: 0, submittedBeforeToday: 0,
+  }, now);
+  return {
+    ..._pick(row, PUBLIC_FIELDS_PARTICIPATION),
+    participation_mode: true,
+    state: st.state,
+    todayCount: st.todayCount,
+    dailyQuota: st.dailyQuota,
+    opensAt: st.opensAt,
+    closesAt: st.closesAt,
+    cutoffAt: st.cutoffAt,
+  };
+}
+
+/** 유효한 admin/master JWT 요청인지 (무인증 라우트에서 관리자에게만 전체 필드 반환할 때) */
+function _isAdminReq(req) {
+  const authHeader = req.headers['authorization'];
+  const token = authHeader && authHeader.split(' ')[1];
+  if (!token) return false;
+  try {
+    const decoded = jwt.verify(token, process.env.JWT_SECRET);
+    return ['admin', 'master'].includes(decoded.role);
+  } catch (_) {
+    return false;
+  }
+}
+
+// 오픈 러시 방어: 무인증 참여 엔드포인트 rate limit (신청 가부의 SoT는 서버 재검사)
+const applyLimiter = rateLimit({
+  windowMs: 60 * 1000, max: 12, standardHeaders: true, legacyHeaders: false,
+  message: { ok: false, error: '요청이 너무 많습니다. 잠시 후 다시 시도하세요.', reason: 'rate_limited' },
+});
+const detailLimiter = rateLimit({
+  windowMs: 60 * 1000, max: 40, standardHeaders: true, legacyHeaders: false,
+  message: { ok: false, error: '요청이 너무 많습니다. 잠시 후 다시 시도하세요.', reason: 'rate_limited' },
+});
+
+// GET /api/campaign/list 5초 서버 캐시(rows+counts만 캐시, 상태는 매 요청 신선한 시각으로 재계산)
+let _listCache = { at: 0, rows: null, countsMap: null };
+const LIST_CACHE_MS = 5000;
 
 // ═══════════════════════════════════════════════════════════
 // 테이블 자동 생성 (마이그레이션 실패 시 안전장치)
@@ -74,55 +152,180 @@ async function _ensureTables() {
 // ═══════════════════════════════════════════════════════════
 
 // GET /api/campaign/list — 공개 캠페인 목록 (active 우선, closed 하단)
+//   ★ M1 보안: 공개 화이트리스트만 반환(SELECT * 금지). 참여형은 상태엔진 페이로드 포함.
+//   오픈 러시 방어: rows/counts 5초 캐시 — 상태·serverNow는 매 요청 신선하게 재계산.
 router.get('/list', async (req, res, next) => {
   try {
     await _ensureTables();
-    const { rows } = await pool.query(`
-      SELECT id, title, channel, channel_custom, manager, time_range,
-             delivery_type, review_fee, badges, notes, chat_url,
-             status, sort_order, max_slots, current_slots, deadline,
-             description, linked_sheet_id, linked_tab_name,
-             created_at
-      FROM recruit_campaigns
-      WHERE status IN ('active', 'closed')
-      ORDER BY 
-        CASE WHEN status = 'active' THEN 0 ELSE 1 END,
-        sort_order ASC,
-        created_at DESC
-    `);
-    res.json({ ok: true, data: rows });
+    const now = new Date();
+    let { rows, countsMap } = _listCache;
+    if (!rows || now.getTime() - _listCache.at > LIST_CACHE_MS) {
+      const q = await pool.query(`
+        SELECT id, title, channel, channel_custom, manager, time_range,
+               delivery_type, review_fee, badges, notes, chat_url,
+               status, sort_order, max_slots, current_slots, deadline,
+               description, linked_sheet_id, linked_tab_name, created_at,
+               participation_mode, thumbnail_url, daily_limit, recruit_total,
+               window_start, window_end, close_buffer_min, hold_ttl_min
+        FROM recruit_campaigns
+        WHERE status IN ('active', 'closed')
+        ORDER BY
+          CASE WHEN status = 'active' THEN 0 ELSE 1 END,
+          sort_order ASC,
+          created_at DESC
+      `);
+      rows = q.rows;
+      const partIds = rows.filter(r => r.participation_mode).map(r => r.id);
+      countsMap = await fetchCampaignCounts(pool, partIds, now);
+      _listCache = { at: now.getTime(), rows, countsMap };
+    }
+    const data = rows.map(r => _publicView(r, countsMap.get(r.id), now));
+    res.json({ ok: true, data, serverNow: now.toISOString() });
   } catch (err) {
     next(err);
   }
 });
 
 // GET /api/campaign/:id — 캠페인 상세
+//   ★ M1 보안: SELECT * 무인증 반환 제거. admin/master JWT면 전체(관리자 수정 모달 호환),
+//     그 외에는 공개 화이트리스트(레거시/참여형 분기)만.
 router.get('/:id', async (req, res, next) => {
   try {
     const { id } = req.params;
     const { rows } = await pool.query('SELECT * FROM recruit_campaigns WHERE id = $1', [id]);
     if (rows.length === 0) return res.status(404).json({ ok: false, error: '캠페인을 찾을 수 없습니다.' });
-    res.json({ ok: true, data: rows[0] });
+    if (_isAdminReq(req)) {
+      return res.json({ ok: true, data: rows[0] });
+    }
+    const now = new Date();
+    const row = rows[0];
+    const countsMap = row.participation_mode ? await fetchCampaignCounts(pool, [id], now) : null;
+    res.json({ ok: true, data: _publicView(row, countsMap && countsMap.get(id), now), serverNow: now.toISOString() });
   } catch (err) {
     next(err);
   }
 });
 
-// GET /api/campaign/:id/applications — 캠페인 참여자 목록 (공개)
+// GET /api/campaign/:id/applications — 참여 카운트 (공개)
+//   ★ M1 보안: 신청자 실명 명단 무인증 반환 제거 — count만 반환(프론트 소비처 없음 확인).
+//     전체 명단은 관리자 전용 GET /admin/:id/applications 사용.
 router.get('/:id/applications', async (req, res, next) => {
   try {
     const { id } = req.params;
     const { rows } = await pool.query(
-      `SELECT applicant_name, applied_at FROM campaign_applications 
-       WHERE campaign_id = $1 AND status = 'confirmed' 
-       ORDER BY applied_at ASC`,
+      `SELECT COUNT(*) FILTER (WHERE status = 'confirmed') AS legacy_count,
+              COUNT(*) FILTER (WHERE status = 'submitted'
+                               OR (status = 'applied' AND expires_at > NOW())) AS participation_count
+         FROM campaign_applications
+        WHERE campaign_id = $1`,
       [id]
     );
-    res.json({ ok: true, data: rows, count: rows.length });
+    const r = rows[0] || {};
+    const count = (Number(r.legacy_count) || 0) + (Number(r.participation_count) || 0);
+    res.json({ ok: true, data: [], count });
   } catch (err) {
     next(err);
   }
 });
+
+// GET /api/campaign/:id/work-detail — 작업내용 (신청 게이트 뒤, PRD §03-E)
+//   유효 홀드(시각 기준) 또는 제출확정 이력 + holdToken 일치 시에만 반환.
+//   만료 403 — 유예 없음(당일 재신청 불가 정책과 함께 만료 화면에서 운영자 문의 안내).
+router.get('/:id/work-detail', detailLimiter, async (req, res, next) => {
+  try {
+    const { id } = req.params;
+    const p8 = String(req.query.phone8 || '').replace(/\D/g, '').slice(-8);
+    const token = String(req.query.holdToken || '').trim();
+    if (p8.length !== 8 || !token) {
+      return res.status(400).json({ ok: false, error: 'phone8(8자리)과 holdToken이 필요합니다.' });
+    }
+
+    const { rows: camps } = await pool.query('SELECT * FROM recruit_campaigns WHERE id = $1', [id]);
+    if (camps.length === 0) return res.status(404).json({ ok: false, error: '캠페인을 찾을 수 없습니다.' });
+    const camp = camps[0];
+    if (!camp.participation_mode) return res.status(404).json({ ok: false, error: '작업내용이 없는 공고입니다.' });
+
+    // holdToken은 신청 시 발급된 1회성 열쇠 — phone8만 아는 제3자의 열람 차단(정확 일치)
+    const { rows: apps } = await pool.query(
+      `SELECT id, status, expires_at, applied_at, submitted_at
+         FROM campaign_applications
+        WHERE campaign_id = $1 AND phone8 = $2 AND hold_token = $3
+        ORDER BY applied_at DESC
+        LIMIT 1`,
+      [id, p8, token]
+    );
+    if (apps.length === 0) {
+      return res.status(403).json({ ok: false, error: '참여 내역이 없습니다.', reason: 'no_hold' });
+    }
+    const app = apps[0];
+    const now = new Date();
+    const validHold = app.status === 'applied' && app.expires_at && new Date(app.expires_at) > now;
+    const isSubmitted = app.status === 'submitted';
+    if (!validHold && !isSubmitted) {
+      return res.status(403).json({
+        ok: false, reason: 'expired',
+        error: '참여가 만료되었어요. 오늘은 이 캠페인에 다시 참여할 수 없어요(내일 가능). 이미 구매하셨다면 운영자에게 문의해주세요.',
+      });
+    }
+
+    res.json({
+      ok: true,
+      serverNow: now.toISOString(),
+      application: {
+        id: app.id,
+        status: app.status,
+        appliedAt: app.applied_at,
+        expiresAt: app.expires_at,
+        submittedAt: app.submitted_at,
+      },
+      workDetail: sanitizeWorkDetail(camp.work_detail),          // HTML은 응답 직전 방어적 재정화
+      chatUrl: camp.chat_url || '',
+      landingUrl: camp.landing_url || '',
+      form: {                                                     // 인라인 구매양식(iframe) 진입 파라미터
+        sheetId: camp.linked_sheet_id || '',
+        gid: camp.linked_tab_gid || '',
+        tabName: camp.linked_tab_name || '',
+        displayName: camp.title || '',
+      },
+    });
+  } catch (err) {
+    next(err);
+  }
+});
+
+// POST /api/campaign/:id/cancel — 본인 홀드 취소 (phone8+holdToken 이중 열쇠)
+//   취소해도 당일 이력이 남아 같은 캠페인 당일 재신청은 불가(§03-C — 프론트 확인 다이얼로그에서 고지).
+router.post('/:id/cancel', applyLimiter, async (req, res, next) => {
+  try {
+    const { id } = req.params;
+    const p8 = String(req.body.phone8 || '').replace(/\D/g, '').slice(-8);
+    const token = String(req.body.holdToken || '').trim();
+    if (p8.length !== 8 || !token) {
+      return res.status(400).json({ ok: false, error: 'phone8(8자리)과 holdToken이 필요합니다.' });
+    }
+    // status='applied' 조건부 UPDATE — 제출확정·스윕과의 경합에서도 원자적(이미 submitted면 0행)
+    const { rows } = await pool.query(
+      `UPDATE campaign_applications
+          SET status = 'cancelled'
+        WHERE campaign_id = $1 AND phone8 = $2 AND hold_token = $3
+          AND status = 'applied'
+        RETURNING id`,
+      [id, p8, token]
+    );
+    if (rows.length === 0) {
+      return res.status(404).json({ ok: false, error: '취소할 수 있는 참여가 없습니다.' });
+    }
+    logger.info(`[campaign/cancel] camp=${id} app=${rows[0].id} phone8=***${p8.slice(-4)}`);
+    res.json({ ok: true, message: '참여가 취소되었습니다. 오늘은 이 캠페인에 다시 참여할 수 없어요.' });
+  } catch (err) {
+    next(err);
+  }
+});
+
+// 참여형(홀드) 신청 — 원자 검사+홀드 생성. 구현은 아래에서 정의(레드-블루-심판 최종 구조).
+async function _applyParticipation(req, res, next, camp) {
+  return res.status(503).json({ ok: false, error: '참여 신청 준비 중입니다.', reason: 'not_ready' });
+}
 
 // POST /api/campaign/:id/apply — 참여 신청
 router.post('/:id/apply', async (req, res, next) => {
@@ -150,6 +353,11 @@ router.post('/:id/apply', async (req, res, next) => {
       return res.status(404).json({ ok: false, error: '캠페인을 찾을 수 없습니다.' });
     }
     const camp = campRows[0];
+
+    // ★ 참여형 공고는 레거시 경로(슬롯 증가·시트 행 추가) 진입 금지 — 홀드 기반 신규 경로로 처리
+    if (camp.participation_mode) {
+      return _applyParticipation(req, res, next, camp);
+    }
 
     if (camp.status !== 'active') {
       return res.status(400).json({ ok: false, error: '모집이 마감된 캠페인입니다.' });
@@ -229,7 +437,7 @@ router.post('/:id/apply', async (req, res, next) => {
 // ═══════════════════════════════════════════════════════════
 
 // GET /api/campaign/admin/list — 관리자 전체 목록 (draft 포함)
-router.get('/admin/list', authMiddleware, async (req, res, next) => {
+router.get('/admin/list', authMiddleware, adminOrMasterMiddleware, async (req, res, next) => {
   try {
     await _ensureTables();
     const { rows } = await pool.query(`
@@ -246,7 +454,7 @@ router.get('/admin/list', authMiddleware, async (req, res, next) => {
 });
 
 // POST /api/campaign/admin/create — 캠페인 생성
-router.post('/admin/create', authMiddleware, async (req, res, next) => {
+router.post('/admin/create', authMiddleware, adminOrMasterMiddleware, async (req, res, next) => {
   try {
     const {
       title, channel, channel_custom, manager, time_range,
@@ -297,7 +505,7 @@ router.post('/admin/create', authMiddleware, async (req, res, next) => {
 });
 
 // PUT /api/campaign/admin/:id — 캠페인 수정
-router.put('/admin/:id', authMiddleware, async (req, res, next) => {
+router.put('/admin/:id', authMiddleware, adminOrMasterMiddleware, async (req, res, next) => {
   try {
     const { id } = req.params;
     const {
@@ -351,7 +559,7 @@ router.put('/admin/:id', authMiddleware, async (req, res, next) => {
 });
 
 // DELETE /api/campaign/admin/:id — 캠페인 삭제
-router.delete('/admin/:id', authMiddleware, async (req, res, next) => {
+router.delete('/admin/:id', authMiddleware, adminOrMasterMiddleware, async (req, res, next) => {
   try {
     const { id } = req.params;
     const result = await pool.query('DELETE FROM recruit_campaigns WHERE id = $1', [id]);
@@ -365,7 +573,7 @@ router.delete('/admin/:id', authMiddleware, async (req, res, next) => {
 });
 
 // PUT /api/campaign/admin/:id/status — 상태 변경 (active/closed/draft)
-router.put('/admin/:id/status', authMiddleware, async (req, res, next) => {
+router.put('/admin/:id/status', authMiddleware, adminOrMasterMiddleware, async (req, res, next) => {
   try {
     const { id } = req.params;
     const { status } = req.body;
@@ -386,7 +594,7 @@ router.put('/admin/:id/status', authMiddleware, async (req, res, next) => {
 });
 
 // GET /api/campaign/admin/:id/applications — 관리자: 참여자 전체 목록
-router.get('/admin/:id/applications', authMiddleware, async (req, res, next) => {
+router.get('/admin/:id/applications', authMiddleware, adminOrMasterMiddleware, async (req, res, next) => {
   try {
     const { id } = req.params;
     const { rows } = await pool.query(
