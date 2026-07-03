@@ -224,10 +224,11 @@
       한 흐름으로 완료하도록 만드는 기능의 요구정의(PRD)와 유저플로우·와이어프레임 문서입니다.
     </p>
     <div class="meta">
-      <span class="chip">문서 버전 <b>v1.0</b></span>
+      <span class="chip">문서 버전 <b>v1.1</b></span>
       <span class="chip">작성일 <b>2026-07-03</b></span>
       <span class="chip">상태 <b>설계 검토용 (구현 전)</b></span>
       <span class="chip">기준 코드 <b>recruit_campaigns · work_orders · order_submissions</b></span>
+      <span class="chip">검증 <b>3관점 적대검토 반영(보안·실사용자·운영리스크)</b></span>
     </div>
   </header>
 
@@ -294,7 +295,12 @@
           <tr>
             <td class="area">작업내용 공개 범위</td>
             <td><b>전부 공개</b> — 상품·옵션·결제금액, 유입가이드(이미지 포함), 리뷰등록가이드, 특이사항, 카톡 팀채팅방 URL</td>
-            <td>단, <b>작업시트 URL·물건비 등 내부 운영 필드는 어떤 경우에도 비공개</b></td>
+            <td>단, <b>작업시트 URL·물건비 등 내부 운영 필드는 어떤 경우에도 비공개</b>. 스크래핑 어뷰징 관측 시 카톡URL만 "제출 확정 후 공개"로 늦추는 옵션 보유(§09 미결)</td>
+          </tr>
+          <tr>
+            <td class="area">신청 자격 (기본값 채택)</td>
+            <td><b>등록 리뷰어만</b> — 신청 시 서버가 (이름, phone8)의 리뷰어 등록 여부를 검증. 미등록자는 간편등록 유도 후 신청</td>
+            <td>봇/일회용 신원의 작업내용 스크래핑·홀드 스쿼팅 차단의 1차 게이트 (§08). 구매양식도 어차피 동일 세션 필요</td>
           </tr>
           <tr>
             <td class="area">노출 위치</td>
@@ -349,7 +355,7 @@
           <tr><td>2</td><td><b>시간대 수동 운영</b> — time_range가 자유 텍스트라 기계 판정 불가, 켜고 끄는 건 관리자 몫</td><td>구조화 시간창 + 서버 상태엔진 (§03-B)</td></tr>
           <tr><td>3</td><td><b>작업내용 전달이 시스템 밖</b> — 유입가이드·결제금액이 카톡 수동 전달</td><td>신청 게이트 뒤 전용 상세 페이지 (§03-D)</td></tr>
           <tr><td>4</td><td><b>신청 시 시트 직쓰기</b> — apply가 시트에 행을 즉시 추가(<code>_addApplicationToSheet</code>). 오픈 러시=쿼터 위험 + 구매양식 행배정과 이중 점유/가드 오판 유발 가능</td><td><b>신청 단계 시트쓰기 폐지.</b> 명단 SoT=DB(campaign_applications), 시트 기록은 구매양식 제출 경로(큐)만 (§03-E)</td></tr>
-          <tr><td>5</td><td><b>무인증 상세 API가 SELECT *</b> — <code>GET /api/campaign/:id</code>가 전 컬럼 반환. 여기에 작업내용을 넣으면 신청 없이 유출</td><td>공개 필드 화이트리스트 + 신청 검증 API 분리 — <b>구현 1단계에서 선행</b> (§08)</td></tr>
+          <tr><td>5</td><td><b>무인증 표면이 이미 과다</b> — <code>GET /api/campaign/:id</code>가 SELECT * 반환, <code>GET /api/campaign/list</code>가 카톡URL·notes까지 전원 반환, <code>GET /:id/applications</code>가 신청자 실명 명단 공개, campaign admin 라우트 6종이 역할 구분 없이 staff 토큰도 통과</td><td>공개 필드 화이트리스트(참여형/레거시 분기) + 명단 API 축소 + admin 라우트 adminOrMaster 적용 — <b>구현 1단계 첫 커밋에서 선행</b> (§08)</td></tr>
         </tbody>
       </table>
     </div>
@@ -371,9 +377,17 @@
       <span class="parrow">→</span>
       <div class="pnode state-done"><h6>daily_done 금일완료</h6><span>일일한도 충족 또는 시간창 종료. "금일 모집완료 · 내일 14:00 오픈" — 비노출 아님</span></div>
       <span class="parrow">→</span>
-      <div class="pnode state-closed"><h6>closed 종료</h6><span>총 모집인원 소진 or 관리자 종료. 마감 섹션으로 이동</span></div>
+      <div class="pnode state-closed"><h6>closed 종료</h6><span>누적 제출확정 ≥ 총 모집 or 관리자 종료. 마감 섹션으로 이동 — <b>종착(되돌아오지 않음)</b></span></div>
     </div>
-    <p class="flow-note"><b>daily_done → (다음 날 window_start) → preopen/open</b>으로 매일 자동 순환. 상태는 저장하지 않고 매 요청 시 계산하므로 드리프트·크론 누락이 없습니다.</p>
+    <p class="flow-note"><b>daily_done → (다음 날 window_start) → preopen/open</b>으로 매일 자동 순환. preopen~daily_done은 저장하지 않고 매 요청 시 계산(드리프트·크론 누락 없음).
+      단 <b>closed만은 예외로 영속화</b>합니다: 누적 제출확정이 총 모집에 도달하는 순간 status를 실제 <code>closed</code>로 저장 — 홀드 만료로 카운트가 내려가도 마감 섹션에서 되살아나는 플립을 차단.</p>
+    <div class="card plain" style="margin-top:10px">
+      <ul>
+        <li><b>역전이 규칙</b> — 일일한도 충족형 <code>daily_done</code>은 홀드가 만료 반환되면 <b>open으로 복귀</b>합니다(자리가 다시 열림 — 정상 동작이며 카운터도 함께 내려감). 시간창 종료형 daily_done은 다음 날까지 복귀 없음.</li>
+        <li><b>soft_full (잔여 대기)</b> — "누적 제출확정 + 유효 홀드 ≥ 총 모집"이면 <b>신청만 차단</b>(apply 409 사유 <code>soft_full</code>)하고 표시는 daily_done 계열("잔여 대기")로 처리. 홀드가 만료되면 다시 열립니다. closed(종착)와 명확히 구분 — closed는 <b>제출확정 기준</b>으로만 판정.</li>
+        <li><b>참여형 공고에만 적용</b> — <code>participation_mode=false</code>(기존 공고)는 이 상태머신을 타지 않고 현행 status(active/closed)+max_slots 로직을 그대로 유지.</li>
+      </ul>
+    </div>
 
     <h3>B. 시간 규칙</h3>
     <div class="pol-grid">
@@ -385,7 +399,8 @@
       <div class="card pol">
         <div class="pk">신청 마감 버퍼</div>
         <div class="pv">종료 <b>10분 전</b> 신규 신청 차단</div>
-        <div class="pnote"><code>close_buffer_min</code> 기본 10, 공고별 조정. "종료 시각까지 구매 완료" 기준이므로 막판 신청은 물리적으로 제출 불가 → 선차단</div>
+        <div class="pnote"><code>close_buffer_min</code> 기본 10, 공고별 조정. "종료 시각까지 구매 완료" 기준이므로 막판 신청은 물리적으로 제출 불가 → 선차단.
+        <b>발행 검증</b>: 시간창 길이 &gt; 버퍼 + 15분 필수(아니면 영구 신청불가 공고), 실효 홀드가 TTL 절반 미만이 되는 짧은 창은 발행 폼에서 경고</div>
       </div>
       <div class="card pol">
         <div class="pk">오픈 전 노출</div>
@@ -411,11 +426,14 @@
     </div>
     <div class="card plain" style="margin-top:12px">
       <ul>
-        <li><b>TTL 기본 30분</b> (<code>hold_ttl_min</code>, 공고별 조정). 상세 페이지 상단에 남은 시간 타이머 상시 표시.</li>
-        <li><b>만료 스윕</b>: 매분 크론이 expires_at 경과 + 미제출 홀드를 expired 처리(<code>withJobLock</code>으로 다중 인스턴스 직렬화). 만료 판정 직전 <code>order_submissions</code> 링크 존재를 재확인해 "제출했는데 만료" 경합을 차단.</li>
-        <li><b>중복 방지</b>: 캠페인당 phone8 기준 활성(applied)·확정(submitted) 신청은 1건. expired/cancelled 후 재신청 허용.</li>
-        <li><b>신원</b>: 리뷰어 홈 세션(이름+전화 뒷 8자리, 기존 <code>reviewer/verify</code>) 필수. 미확인 사용자는 신청 버튼에서 본인확인 → 이어서 신청.</li>
-        <li><b>취소</b>: 리뷰어 스스로 "참여 취소" 가능(홀드 즉시 반환). 노쇼 반복 시 제재는 v2 검토(§09).</li>
+        <li><b>TTL 기본 30분</b> (<code>hold_ttl_min</code>, 공고별 조정), <code>expires_at = min(now+TTL, window_end)</code>. 안내는 "30분"이 아니라 <b>절대시각 동적 표기</b>: apply 응답의 expires_at 기준 "15:50까지(25분) 제출 완료" — 창 막판 신청자가 "30분 준다더니 잘렸다"고 느끼지 않게.</li>
+        <li><b>유효 홀드 판정은 시각 기준</b>: 모든 카운트·게이트 쿼리는 <code>status='applied' AND expires_at &gt; now()</code>. 만료 스윕(매분 크론, <code>withJobLock</code>)은 정리용일 뿐 — 크론이 죽어도 만료 홀드가 자리를 점유하지 못함.</li>
+        <li><b>만료 유예(grace) 10분</b>: 만료 후 10분 내 구매양식 제출이 도착하면 expired→submitted <b>재확정 허용</b>(이미 결제한 리뷰어 보호). grace 밖 제출은 주문 원장에 정상 수용하되 홀드는 초과분으로 표기 + 관리자 관제 알림(§06-E).</li>
+        <li><b>만료 스윕 경합 차단</b>: expired 확정 직전 <code>order_submissions</code> 링크 존재를 재확인 — <b>제출 우선</b>.</li>
+        <li><b>중복 방지</b>: 캠페인당 phone8 기준 활성(applied)·확정(submitted) 신청은 1건. expired/cancelled 후 재신청 허용하되 <b>같은 캠페인 당일 재신청 2회까지</b>(3회째 "내일 다시 신청해주세요") — 방치 반복으로 자리 1개를 하루 종일 점유하는 것 차단.</li>
+        <li><b>신원 = 등록 리뷰어만</b>: 신청 시 서버가 (이름, phone8) 리뷰어 등록 여부를 검증(기존 <code>reviewer/verify</code> 로직 서버측 재사용). 미확인 사용자는 신청 버튼에서 본인확인 바텀시트 → 성공 시 <b>구매양식과 동일 키·포맷(<code>rapp_reviewer_auth</code>: name/phone8/verified/expAt)으로 세션 저장</b> — 인라인 iframe에서 2차 로그인이 뜨지 않게 하는 필수 조건(§06-D).</li>
+        <li><b>남용 방어</b>: phone8당 동시 활성 홀드 상한(전 캠페인 합산 2건) + phone8·IP 단위 apply rate limit + 신청 성공 시 <b>1회성 holdToken 발급</b>(랜덤, DB 저장) — work-detail·cancel의 공통 열쇠로 사용해 phone8만 아는 제3자의 열람·강제취소를 차단.</li>
+        <li><b>취소</b>: 리뷰어 스스로 "참여 취소" 가능(홀드 즉시 반환, phone8+holdToken 필요, 이벤트 로깅). 노쇼 반복 제재(횟수 기반 차단)는 M3 노쇼 데이터 확보 후 v2 확정(§09).</li>
       </ul>
     </div>
 
@@ -426,17 +444,22 @@
         <tbody>
           <tr>
             <td class="area">일일 카운터 "n/20"</td>
-            <td><b>n = 오늘의 유효 홀드(applied·미만료) + 오늘의 제출확정(submitted)</b> · 분모 = daily_limit</td>
-            <td>리뷰어 카드·상세에 실시간(폴링 15초, 서버 5초 캐시). 홀드가 만료되면 n이 내려가고 자리가 다시 열림</td>
+            <td><b>n = 오늘의 유효 홀드(applied AND expires_at&gt;now) + 오늘의 제출확정(submitted)</b> · 분모 = 오늘의 dailyQuota(아래)</td>
+            <td>리뷰어 카드·상세에 <b>준실시간(≤20초)</b> — 목록 폴링 15초+서버 캐시 5초, 상세 폴링 10초. 단 <b>자기 액션(신청 성공·만료 감지)은 응답의 최신 카운트로 즉시 갱신</b>. 홀드가 만료되면 n이 내려가고 자리가 다시 열림</td>
           </tr>
           <tr>
-            <td class="area">총 소진 판정</td>
-            <td>누적 submitted + 현재 유효 홀드 ≥ recruit_total → closed</td>
+            <td class="area">일일 분모 (dailyQuota)</td>
+            <td><b>dailyQuota = min(daily_limit, recruit_total − 전일까지의 누적 제출확정)</b> — <b>KST 일 시작 시점에 고정</b>, 장중 불변</td>
+            <td>오늘 제출분을 분자·분모 양쪽에서 빼는 이중차감 방지(마지막 날 잔여의 절반에서 조기 마감되는 결함 차단). 분모가 장중에 "0/7→2/5"처럼 흔들리지 않음. recruit_total≤0(무제한)이면 dailyQuota=daily_limit, daily_limit은 발행 검증에서 ≥1 강제</td>
+          </tr>
+          <tr>
+            <td class="area">총 소진 판정 2단</td>
+            <td>① <b>soft_full</b>: 누적 submitted + 현재 유효 홀드 ≥ recruit_total → 신청만 차단("잔여 대기", 홀드 만료 시 재개) ② <b>closed(종착)</b>: 누적 submitted ≥ recruit_total → status 영속 저장</td>
             <td><b>총 모집인원·누적치는 리뷰어에게 미표시</b>(요구사항). 관리자 화면에만 표시</td>
           </tr>
           <tr>
             <td class="area">잔여일 반영</td>
-            <td>마지막 날 잔여 &lt; daily_limit이면 분모를 잔여로 축소 표시 (예 "3/7")</td>
+            <td>마지막 날 dailyQuota가 자동 축소 (예 잔여 7이면 "3/7")</td>
             <td>총원 노출 없이 자연스럽게 마감 유도</td>
           </tr>
         </tbody>
@@ -454,13 +477,13 @@
         <tbody>
           <tr>
             <td class="area">신청 전 (누구나)</td>
-            <td>상품 썸네일 · 제목 · 채널 · <b>배송유형</b> · <b>구매시간대</b> · 리뷰비 · 배지 · 상태/카운터/카운트다운</td>
+            <td>상품 썸네일 · 제목 · 채널 · <b>배송유형</b> · <b>구매시간대</b> · 리뷰비 · 배지 · 상태/카운터/카운트다운 · <b>선결제 고지문</b>("상품을 직접 구매(선결제)한 뒤 리뷰비와 함께 환급받는 방식입니다" — 금액 비공개, 신청 후 취소·노쇼를 예방)</td>
             <td><code>GET /api/campaign/list</code> — 공개 필드 화이트리스트만 반환 (SELECT * 금지)</td>
           </tr>
           <tr>
             <td class="area">신청 후 (유효 홀드·제출자)</td>
             <td><b>작업내용 전부</b>: 상품/옵션/결제금액 · 유입가이드(이미지) · 리뷰등록가이드 · 특이사항 · 카톡 팀채팅방 URL · 랜딩페이지 버튼 · 인라인 구매양식</td>
-            <td><code>GET /api/campaign/:id/work-detail?phone8=</code> — 활성 홀드 or 제출 이력 검증 후 반환. 만료 시 403</td>
+            <td><code>GET /api/campaign/:id/work-detail?phone8=&amp;holdToken=</code> — 활성 홀드(시각 기준) or 제출 이력 + holdToken 일치 검증 후 반환. 만료 시 403</td>
           </tr>
           <tr>
             <td class="area">영구 비공개</td>
@@ -471,8 +494,12 @@
       </table>
     </div>
     <div class="callout warn">
-      <b>유입가이드 HTML은 처음으로 리뷰어 공개면에 노출됩니다.</b> 지금까지 관리자·AE 화면에서만 렌더되던 HTML(이미지 임베드 포함)이므로,
-      상세 페이지 렌더 전에 서버측 sanitize(허용 태그 화이트리스트: p·br·img·a·b·ul·li 등)를 필수 적용합니다. 이미지 프록시(<code>/api/order/guide-image/:id</code>)는 기존 무인증 능력토큰 방식 유지.
+      <b>유입가이드 HTML은 처음으로 리뷰어 공개면에 노출됩니다.</b> 지금까지 관리자·AE 화면에서만 렌더되던 HTML(이미지 임베드 포함)이므로 서버측 sanitize를 필수 적용하되,
+      정규식 수작업이 아닌 <b>검증된 라이브러리(sanitize-html) 채택을 명문화</b>합니다: 허용 태그 p·br·img·a·b·strong·ul·ol·li,
+      img src는 자사 guide-image 프록시 경로+https만, a href는 https만+<code>rel="noopener"</code> 강제.
+      적용 시점은 <b>발행 시 스냅샷 복사 직후 1회(저장) + 응답 직전 방어적 재적용(이중)</b> — 기존 work_orders 저장분(오염 가능)도 복사 시점에 정화됩니다.
+      프론트는 sanitize된 서버 응답만 innerHTML로 신뢰(M2 완료기준).
+      이미지 프록시(<code>/api/order/guide-image/:id</code>)는 추측 곤란 fileId 기반 무인증 방식 유지 — 단 파일이 링크 공개로 저장되고 썸네일 폴백이 있어 <b>URL이 한 번 유출되면 게이트와 무관하게 열람 가능</b>합니다. 민감도가 높아지면 서명 URL(만료 토큰) 전환을 v2에서 검토(§09).
     </div>
   </section>
 
@@ -492,7 +519,7 @@
       <div class="fstep"><span class="n">5</span><h5>랜딩페이지 이동</h5><p>[상품 페이지 열기] → 유입가이드대로 (키워드 검색 or 링크) 진입·구매</p><span class="where">외부 쇼핑몰 (새 탭)</span></div>
       <div class="fstep"><span class="n">6</span><h5>복귀 → 인라인 제출</h5><p>같은 상세 페이지 하단 구매양식에 주문번호·계좌 등 입력 후 제출</p><span class="where">campaign.html 내 임베드</span></div>
       <div class="fstep sysbox"><span class="n">7</span><h5>자동 확정</h5><p>제출이 order_submissions 저장 → 홀드 submitted 확정 → 시트 반영은 기존 큐가 처리</p><span class="where">서버</span></div>
-      <div class="fstep"><span class="n">8</span><h5>내역 확인</h5><p>내정보·현황 "리뷰 내역"에 즉시 processing 노출 → 이후 리뷰 제출·입금 단계로 연결</p><span class="where">index.html 내정보</span></div>
+      <div class="fstep"><span class="n">8</span><h5>내역 확인</h5><p>확정 화면 + 참여현황(my-status)에 즉시 processing 노출. "리뷰 내역" 탭 반영은 시트 기록 후 수 분 소요(고지 문구 표시)</p><span class="where">index.html 내정보</span></div>
     </div>
 
     <h3>예외 플로우</h3>
@@ -500,12 +527,14 @@
       <table>
         <thead><tr><th>상황</th><th>시스템 동작</th><th>리뷰어 화면</th></tr></thead>
         <tbody>
-          <tr><td class="area">홀드 만료 (30분 미제출)</td><td>스윕이 expired 처리, 자리 반환, work-detail 403</td><td>상세 페이지에 "신청이 만료되었습니다 — 자리가 남아 있으면 재신청 가능" + [재신청] 버튼</td></tr>
-          <tr><td class="area">일일한도 도달</td><td>state=daily_done, apply 409</td><td>카드에 "금일 모집완료 · 내일 14:00 오픈" 배지(회색화, 비노출 아님)</td></tr>
-          <tr><td class="area">종료 10분 전 이후</td><td>신규 apply 409 (진행 홀드는 유지)</td><td>버튼 "오늘 신청 마감" 비활성. 홀드 보유자는 제출 계속 가능</td></tr>
+          <tr><td class="area">홀드 만료 (미제출)</td><td>시각 기준 즉시 무효(스윕은 정리용), 자리 반환, work-detail 403</td><td>상세 페이지에 "신청이 만료되었습니다" + [재신청](당일 2회 한도) + <b>[이미 구매하셨나요?]</b> 버튼</td></tr>
+          <tr><td class="area"><b>만료 후 기구매</b> (이미 결제하고 복귀)</td><td>만료 후 <b>10분 유예(grace)</b> 내 제출은 expired→submitted 재확정. grace 밖 제출도 주문은 원장에 수용(홀드는 초과분 표기 + 관제 알림)</td><td>돈을 먼저 쓴 리뷰어가 제출 경로를 잃지 않음. grace 밖이면 "제출은 접수되었어요. 운영자 확인 후 반영됩니다" 안내 + CS 채널 버튼</td></tr>
+          <tr><td class="area">일일한도 도달</td><td>state=daily_done, apply 409. <b>유효 홀드 보유자의 제출은 계속 수용</b>(제출 가부는 캠페인 상태가 아니라 홀드 유효성 기준)</td><td>카드에 "금일 모집완료 · 내일 14:00 오픈" 배지(회색화, 비노출 아님). 홀드 만료로 자리가 반환되면 open 복귀</td></tr>
+          <tr><td class="area">종료 10분 전 이후 (cutoff)</td><td>신규 apply 409 (진행 홀드는 유지, 창 종료까지 제출 가능)</td><td>버튼 "오늘 신청 마감" 비활성 + "진행 중인 분은 16:00까지 제출" 안내</td></tr>
           <tr><td class="area">동시 신청 경합 (마지막 1자리)</td><td>원자 조건부 INSERT — 1명만 성공</td><td>실패자에게 "방금 마감되었어요" 토스트 + 카운터 갱신</td></tr>
-          <tr><td class="area">총 모집 소진</td><td>state=closed (매일 재오픈 중단)</td><td>"모집 종료" — 마감 섹션으로 이동</td></tr>
-          <tr><td class="area">제출 vs 만료 경합</td><td>스윕이 만료 직전 제출 링크 재확인 — 제출 우선</td><td>정상 확정 (리뷰어 무감지)</td></tr>
+          <tr><td class="area">잔여 대기 (soft_full)</td><td>누적 제출+유효 홀드 ≥ 총 모집 → 신청만 차단, 홀드 만료 시 재개</td><td>"잔여 대기" 배지 — 마감 섹션으로 이동하지 않음(closed 아님)</td></tr>
+          <tr><td class="area">총 모집 소진 (closed)</td><td>누적 <b>제출확정</b> ≥ 총 모집 → status 영속 closed (종착)</td><td>"모집 종료" — 마감 섹션으로 이동, 되살아나지 않음</td></tr>
+          <tr><td class="area">제출 vs 만료 경합</td><td>스윕이 만료 확정 직전 제출 링크 재확인 — 제출 우선</td><td>정상 확정 (리뷰어 무감지)</td></tr>
         </tbody>
       </table>
     </div>
@@ -547,6 +576,7 @@
           <div><span class="pin">2</span><span><b>배송유형</b> — 사전 제공정보 ②</span></div>
           <div><span class="pin">3</span><span><b>구매시간대</b> — 사전 제공정보 ③ (구조화 시간창의 표시)</span></div>
           <div><span class="pin">4</span><span><b>오픈예정 타이머</b> — 굵은 흰 글씨, 서버시간 보정 1초 단위 갱신. 0이 되면 필터 해제→모집중 전환</span></div>
+          <div><span class="pin">·</span><span><b>사전 본인확인 유도</b> — 세션 없는 사용자에겐 오버레이 아래 "미리 본인확인해두면 오픈 즉시 신청할 수 있어요" 안내+버튼(오픈 러시에서 로그인 지연으로 자리를 놓치지 않게)</span></div>
         </div>
       </div>
 
@@ -560,7 +590,7 @@
             <div class="ccard">
               <div class="thumb">상품 썸네일</div>
               <div class="cbody">
-                <div class="crow"><span class="cchip">쿠팡</span><span class="ctitle">○○ 무선 청소기</span></div>
+                <div class="crow"><span class="cchip">쿠팡</span><span class="ctitle">○○ 무선 청소기</span><span class="bdg done">바로참여 <span class="pin">8</span></span></div>
                 <div class="cmeta"><span>🚚 실배송</span><span>🕑 14:00~16:00</span><span>💰 리뷰비 5,000</span></div>
                 <div class="crow" style="justify-content:space-between">
                   <span class="counter">🔥 5/20 참여중 <span class="pin">5</span></span>
@@ -569,12 +599,23 @@
                 <span class="wbtn">참여 신청하기 <span class="pin">7</span></span>
               </div>
             </div>
+            <div class="ccard">
+              <div class="cbody">
+                <div class="crow"><span class="cchip">쿠팡</span><span class="ctitle">(cutoff 변형) 신청마감 후</span></div>
+                <div class="crow" style="justify-content:space-between">
+                  <span class="counter">🔥 17/20 참여중</span>
+                  <span class="bdg wait">진행자는 16:00까지 제출</span>
+                </div>
+                <span class="wbtn disabled">오늘 신청 마감</span>
+              </div>
+            </div>
           </div>
         </div></div>
         <div class="legend">
-          <div><span class="pin">5</span><span><b>실시간 카운터</b> — 유효 홀드+금일 제출. 15초 폴링, 신청·만료 즉시 반영</span></div>
-          <div><span class="pin">6</span><span><b>신청 마감 예고</b> — 종료 10분 전(버퍼) 시각 고지</span></div>
+          <div><span class="pin">5</span><span><b>카운터</b> — 유효 홀드+금일 제출, 준실시간(≤20초 · 목록 15초 폴링+서버 5초 캐시). 내 신청·만료는 응답값으로 즉시 반영</span></div>
+          <div><span class="pin">6</span><span><b>신청 마감 예고</b> — 종료 10분 전(버퍼) 시각 고지. 그 후엔 아래 <b>cutoff 변형 카드</b>: 신규 신청만 비활성, 홀드 보유자는 제출 계속</span></div>
           <div><span class="pin">7</span><span><b>참여 신청</b> — 탭 시 본인확인(세션 없으면) → 홀드 생성 → 상세 페이지 이동</span></div>
+          <div><span class="pin">8</span><span><b>"바로참여" 배지</b> — 참여형(신규)과 기존 카톡 신청형 공고가 홈에 섞이는 혼재 기간의 시각 구분(§09 M3에서 신규 발행은 참여형으로 일원화)</span></div>
         </div>
       </div>
 
@@ -654,15 +695,15 @@
             </div>
             <div class="blk">
               <div class="t">⏱ 신청 안내 <span class="pin">2</span></div>
-              <div style="font-size:.6rem;color:var(--mut)">신청하면 30분 안에 구매와 구매양식 제출까지 완료해야 해요. 시간이 지나면 자동 취소됩니다.</div>
+              <div style="font-size:.6rem;color:var(--mut)">지금 신청하면 <b>15:12까지(30분)</b> 구매와 구매양식 제출을 완료해야 해요. 시간이 지나면 자동 취소됩니다.<br/>이 캠페인은 상품을 <b>직접 구매(선결제)</b> 후 리뷰비와 함께 환급받는 방식이에요.</div>
             </div>
             <span class="wbtn" style="margin:0 2px">참여 신청하기 <span class="pin">3</span></span>
           </div>
         </div></div>
         <div class="legend">
           <div><span class="pin">1</span><span><b>작업내용 잠금 카드</b> — 게이트를 시각화. 서버도 미신청자에게 데이터 자체를 안 내림</span></div>
-          <div><span class="pin">2</span><span><b>홀드 규칙 사전 고지</b> — TTL을 신청 전에 명확히 알림(노쇼 예방)</span></div>
-          <div><span class="pin">3</span><span>세션 없으면 본인확인(이름+전화 뒷8자리) 바텀시트 → 확인 후 즉시 신청</span></div>
+          <div><span class="pin">2</span><span><b>홀드 규칙 사전 고지</b> — apply 응답 expires_at 기반 <b>절대시각 동적 표기</b>(창 막판엔 "15:50까지(10분)"로 자동 축소 표시) + 선결제 방식 고지(신청 후 이탈·노쇼 예방)</span></div>
+          <div><span class="pin">3</span><span>세션 없으면 본인확인(이름+전화 뒷8자리) 바텀시트 → <b>등록 리뷰어 검증</b> 후 즉시 신청. 성공 시 <code>rapp_reviewer_auth</code> 세션 저장(구매양식 iframe과 공유)</span></div>
         </div>
       </div>
 
@@ -726,11 +767,13 @@
               <div style="font-size:.66rem;font-weight:800;color:var(--warn)">⌛ 만료 화면 (참고)</div>
               <div style="font-size:.58rem;color:var(--mut)">시간 내 제출되지 않아 신청이 취소되었어요.</div>
               <span class="wbtn ghost" style="margin-top:6px">다시 신청하기 (7/20)</span>
+              <span class="wbtn ghost">이미 구매하셨나요? → 제출 이어하기</span>
             </div>
           </div>
         </div></div>
         <div class="legend">
-          <div><span class="pin">·</span><span>확정 후 "리뷰 내역"에 즉시 <b>processing</b>으로 노출(기존 my-status 병합) + 신청 단계는 <b>applied</b> 스테이지로 추가</span></div>
+          <div><span class="pin">·</span><span>확정 즉시 <b>참여현황(my-status)</b>에 processing 노출 + 신청 단계는 <b>applied</b> 스테이지로 추가(§06-C 확장). "리뷰 내역" 탭은 시트 기록·인덱스 빌드 후 수 분 지연 — 확정 화면에 "리뷰 내역 반영은 몇 분 걸려요" 고지</span></div>
+          <div><span class="pin">·</span><span><b>만료 화면의 [제출 이어하기]</b> — 만료 후 10분 유예(grace) 내에는 구매양식 제출 가능(§03-C). grace 밖이면 제출은 접수되고 운영자 확인 안내</span></div>
         </div>
       </div>
     </div>
@@ -766,10 +809,16 @@
             <td class="area">campaign_applications</td>
             <td>
               <code>phone8 TEXT</code> · <code>status 확장(applied/submitted/expired/cancelled)</code> ·
-              <code>expires_at TIMESTAMPTZ</code> · <code>order_submission_id BIGINT</code> ·
-              부분 유니크 인덱스 <code>(campaign_id, phone8) WHERE status IN ('applied','submitted')</code>
+              <code>expires_at TIMESTAMPTZ</code> · <code>order_submission_id BIGINT</code> · <code>hold_token TEXT</code> ·
+              부분 유니크 인덱스 <code>(campaign_id, phone8) WHERE status IN ('applied','submitted')</code> ·
+              <b>기존 <code>UNIQUE(campaign_id, applicant_name, applicant_phone)</code> 제약 DROP</b>
             </td>
-            <td>홀드 라이프사이클 + 제출 확정 링크 + 재신청 허용형 중복 방지(만료·취소 건은 유니크에서 제외)</td>
+            <td>
+              홀드 라이프사이클 + 제출 확정 링크 + holdToken(열람·취소 열쇠) + 재신청 허용형 중복 방지.
+              <b>구 UNIQUE를 드롭하지 않으면 expired 행이 키를 점유해 재신청이 전부 23505로 실패</b>(하위호환 결함 방지).
+              기존 행의 <code>status='confirmed'</code>는 <b>레거시 전용 상태로 보존</b> — 신형 카운트·부분 유니크에서 제외, participation_mode=false 공고는 계속 current_slots 사용.
+              phone8은 <code>regexp_replace(applicant_phone,'\D','','g')</code> 끝 8자리로 백필하고 신규 신청은 <b>서버가 파생</b>(클라이언트 입력 불신)
+            </td>
           </tr>
           <tr>
             <td class="area">order_submissions</td>
@@ -781,20 +830,25 @@
     </div>
 
     <h3>B. 상태 판정 (서버 단일 함수, 의사코드)</h3>
-    <pre class="code">function campaignState(c, now /*KST*/) {
-  if (c.status !== 'active')                        return 'closed';
-  const used  = countSubmittedAll(c) + countActiveHolds(c);      // 누적 제출 + 유효 홀드
-  if (c.recruit_total > 0 && used >= c.recruit_total) return 'closed';   // 총 소진
+    <pre class="code">// 유효 홀드 = status='applied' AND expires_at > now()   ← 스윕은 정리용, 판정은 항상 시각 기준
+function campaignState(c, now /*KST*/) {
+  if (!c.participation_mode)                        return legacyState(c); // 기존 공고: status+max_slots 현행 로직
+  if (c.status !== 'active')                        return 'closed';       // closed는 영속값(제출확정 도달 시 저장)
   const t = timeOfDay(now);
-  if (t <  c.window_start)                          return 'preopen';    // 회색 + 카운트다운
-  if (t >= c.window_end)                            return 'daily_done'; // 내일 재오픈
+  if (t <  c.window_start)                          return 'preopen';      // 회색 + 카운트다운
+  if (t >= c.window_end)                            return 'daily_done';   // 내일 재오픈
   const today = countTodaySubmitted(c) + countTodayActiveHolds(c);
-  if (today >= dailyQuota(c))                       return 'daily_done'; // 금일완료
-  if (t >= c.window_end - c.close_buffer_min)       return 'cutoff';     // 신규신청만 차단
+  if (today >= dailyQuota(c))                       return 'daily_done';   // 금일완료 (홀드 만료 시 open 복귀)
+  const softFull = countSubmittedAll(c) + countActiveHolds(c) >= c.recruit_total;
+  if (c.recruit_total > 0 && softFull)              return 'soft_full';    // 잔여 대기 — 신청만 차단, 종착 아님
+  if (t >= c.window_end - c.close_buffer_min)       return 'cutoff';       // 신규신청만 차단
   return 'open';
 }
-// dailyQuota = min(daily_limit, recruit_total - 누적확정)  ← 마지막 날 잔여 축소
-// 응답에 serverNow·opensAt·closesAt 포함 → 클라 타이머는 오프셋 보정만 담당</pre>
+// dailyQuota = (recruit_total <= 0) ? daily_limit                          // 무제한 캠페인 가드
+//            : min(daily_limit, recruit_total - 전일까지의_누적확정)        // KST 일 시작 시점 고정(장중 불변)
+//   → 오늘 제출분이 분자·분모에서 이중차감되지 않음. daily_limit >= 1 은 발행 검증에서 강제
+// closed 영속화: 제출 확정 트랜잭션이 누적확정 >= recruit_total 도달 시 status='closed' 저장 (비단조 플립 방지)
+// 응답에 serverNow·opensAt·closesAt·todayCount·dailyQuota 포함 → 클라 타이머는 오프셋 보정만 담당</pre>
 
     <h3>C. API 목록</h3>
     <div class="tablewrap card">
@@ -802,44 +856,56 @@
         <thead><tr><th>엔드포인트</th><th>인증</th><th>동작</th></tr></thead>
         <tbody>
           <tr>
-            <td class="area">GET /api/campaign/list <span class="tag sys">확장</span></td>
+            <td class="area">GET /api/campaign/list <span class="tag risk">보안 축소+확장</span></td>
             <td>무인증</td>
-            <td>공개 화이트리스트 필드 + <code>state</code>·<code>todayCount/dailyQuota</code>·<code>serverNow/opensAt/closesAt</code>. 서버 5초 캐시(오픈 러시 방어)</td>
+            <td>공개 화이트리스트 필드 + <code>state</code>·<code>todayCount/dailyQuota</code>·<code>serverNow/opensAt/closesAt</code>. 서버 5초 캐시(오픈 러시 방어).
+              <b>participation_mode=true 공고는 chat_url·notes·description 미반환</b>(작업내용 게이트로 이동), <b>레거시(false) 공고는 현행 필드 유지</b>(카톡 신청 플로우 보존 — 하위호환)</td>
           </tr>
           <tr>
             <td class="area">GET /api/campaign/:id <span class="tag risk">보안 축소</span></td>
             <td>무인증</td>
-            <td><b>SELECT * → 공개 화이트리스트로 축소 (선행 수정)</b>. work_detail·chat_url 등 비공개 필드 제거</td>
+            <td><b>SELECT * → 공개 화이트리스트로 축소 (선행 수정)</b>. work_detail·chat_url 등 비공개 필드 제거 — /list와 동일한 참여형/레거시 분기</td>
+          </tr>
+          <tr>
+            <td class="area">GET /api/campaign/:id/applications <span class="tag risk">보안 축소</span></td>
+            <td>무인증</td>
+            <td><b>현행: 신청자 실명 명단을 전원에게 반환 → 선행 수정 대상.</b> 참여형 공고는 명단 비공개(count만, 카운터는 /list의 todayCount 사용), 레거시 공고도 실명 마스킹("김*정") 또는 count만으로 축소</td>
           </tr>
           <tr>
             <td class="area">POST /api/campaign/:id/apply <span class="tag sys">강화</span></td>
-            <td>무인증 + 본인확인 파라미터</td>
-            <td>서버 원자 검사(시간창·버퍼·일일한도·총잔여·중복) → 홀드 생성. <b>시트쓰기 없음</b>(기존 _addApplicationToSheet 제거). 409 사유 코드 반환(preopen/cutoff/daily_done/closed/duplicate)</td>
+            <td>무인증 + 서버측 신원 검증</td>
+            <td><b>등록 리뷰어 검증</b>(이름+phone8, 미등록 403+등록 유도) → 서버 원자 검사(시간창·버퍼·일일한도·총잔여·soft_full·중복·재신청 상한·동시 홀드 상한) → 홀드 생성 + <b>holdToken 발급</b>.
+              <b>참여형 공고는 시트쓰기 없음</b>(레거시 공고의 _addApplicationToSheet 경로는 유지 — 분기). phone8·IP rate limit. 409 사유 코드(preopen/cutoff/daily_done/soft_full/closed/duplicate/limit)</td>
           </tr>
           <tr>
             <td class="area">GET /api/campaign/:id/work-detail <span class="tag new">신규</span></td>
-            <td>무인증 + phone8 게이트</td>
-            <td>활성 홀드 or submitted 이력 검증 → 작업내용(sanitized HTML)+chat_url+landing_url+인라인 폼 파라미터 반환. 만료 403</td>
+            <td>무인증 + phone8+holdToken 게이트</td>
+            <td>활성 홀드(시각 기준) or submitted 이력 + holdToken 일치 검증 → 작업내용(sanitized HTML)+chat_url+landing_url+인라인 폼 파라미터 반환. 만료 403. rate limit</td>
           </tr>
           <tr>
             <td class="area">POST /api/campaign/:id/cancel <span class="tag new">신규</span></td>
-            <td>무인증 + phone8</td>
-            <td>본인 홀드 취소(자리 즉시 반환)</td>
+            <td>무인증 + phone8+holdToken</td>
+            <td>본인 홀드 취소(자리 즉시 반환). holdToken 없이는 불가 — phone8만 아는 제3자의 강제취소(자리 뺏기) 차단. 취소 이벤트 로깅</td>
           </tr>
           <tr>
             <td class="area">POST /api/submit/order <span class="tag sys">확장</span></td>
             <td>기존과 동일</td>
-            <td>body에 <code>campaignApplicationId</code> 추가 → 저장 시 홀드 submitted 확정(트랜잭션). 이후 시트 반영은 기존 order_append 큐 그대로</td>
+            <td>body에 <code>campaignApplicationId</code> 추가. <b>소유권 검증 후에만 확정</b>: ① 홀드가 applied·미만료(또는 grace 내 expired) ② 홀드 phone8 == 주문 연락처 끝 8자리 ③ 홀드 캠페인의 연결 탭 == 제출 대상 탭 — 셋 다 일치할 때만 submitted 전이. <b>불일치·0행이어도 주문은 정상 저장</b>(주문 손실 금지), 링크만 거부+경고 로그. 이후 시트 반영은 기존 order_append 큐 그대로</td>
+          </tr>
+          <tr>
+            <td class="area">GET /api/reviewer/my-status <span class="tag sys">확장</span></td>
+            <td>무인증(phone8)</td>
+            <td>campaign_applications의 활성 홀드를 <b>stage:'applied'</b>로 병합(만료 시 자동 제외) — 신청 직후에도 참여현황에 즉시 표시(리뷰 내역 지연 보완)</td>
           </tr>
           <tr>
             <td class="area">홀드 만료 스윕 <span class="tag new">신규 cron</span></td>
             <td>내부 (매분)</td>
-            <td><code>withJobLock('campaign_hold_sweep')</code> — expires_at 경과·order_submission_id NULL·연결 제출 부재 재확인 후 expired 처리</td>
+            <td><code>withJobLock('campaign_hold_sweep')</code> — expires_at+grace 경과·order_submission_id NULL·연결 제출 부재 재확인 후 expired 처리. <b>판정은 시각 기준이므로 크론 장애가 카운터를 오염시키지 않음</b></td>
           </tr>
           <tr>
-            <td class="area">GET /api/campaign/admin/:id/applications <span class="tag sys">확장</span></td>
+            <td class="area">campaign admin 라우트 6종 <span class="tag risk">권한 교정</span></td>
             <td>admin/master</td>
-            <td>상태별(applied/submitted/expired) 집계 + 노쇼 리스트 — 관리 위젯 데이터</td>
+            <td><b>현행 갭: admin/list·create·수정·삭제·status·applications가 역할 구분 없는 authMiddleware만 사용(staff 토큰 통과) → adminOrMasterMiddleware 적용을 M1 선행 작업에 포함.</b> 신청현황 확장(상태별 집계+노쇼 리스트)도 여기에 실림. 발행 폼이 재사용하는 /api/product/preview는 이미 adminOrMaster — 추가 조치 불필요</td>
           </tr>
         </tbody>
       </table>
@@ -850,8 +916,14 @@
       <ul>
         <li><b>채택: 동일오리진 iframe 임베드.</b> 구매양식(search.html)은 9,600줄 search-app.js에 결합된 화면이라 부분 이식이 불가하고, 프론트가 같은 오리진(Cloudflare Pages)이라 <code>X-Frame-Options SAMEORIGIN</code>·localStorage 세션이 그대로 통합니다. AI 캡처 자동입력·다건 카드·검증 로직을 <b>재구현 없이 100% 재사용</b>합니다.</li>
         <li>진입 파라미터: 기존 <code>s/g/t/d</code>(공고의 linked_sheet_id/gid/tab_name/display_name) + 신규 <code>app=신청ID&amp;embed=1</code>. <code>embed=1</code>이면 헤더·중복 UI 숨김(임베드 전용 모드).</li>
+        <li><b>세션 선행 조건(필수)</b>: 구매양식은 <code>localStorage rapp_reviewer_auth</code>(name/phone8/verified/expAt, 12시간) 부재 시 자체 로그인 화면을 띄운다(search-app.js 실코드 확인).
+          campaign.html 본인확인 성공 시 <b>동일 키·동일 포맷으로 세션을 기록</b>해 iframe 2차 로그인을 차단하고,
+          embed 모드에서 세션 부재·만료가 감지되면 iframe 자체 로그인 대신 <code>postMessage</code>로 부모에 위임 → 바텀시트 재호출.</li>
+        <li><b>입력값 복원</b>: 외부 쇼핑몰(쿠팡 앱 전환 등)에 다녀오는 동안 모바일 브라우저가 탭을 리로드해도 폼 값이 살아나도록, iframe 폼 입력을 sessionStorage에 자동 저장하고 <code>app=신청ID</code> 재진입 시 복원 (M2 완료기준).</li>
+        <li><b>표시 vs 제출값 우선순위</b>: 상세 페이지의 상품/옵션/결제금액은 <b>표시=공고 스냅샷</b>, <b>제출값=폼(연결 탭 라이브)</b> — 불일치 시 폼 기준. 공고 수정 모달의 "다시 불러오기"에서 라이브 값 대조 표시.</li>
         <li>완료 통신: 제출 성공 시 <code>postMessage({type:'order-submitted'})</code> → 부모(campaign.html)가 확정 화면 전환·카운터 갱신. iframe 높이는 postMessage 자동 조정.</li>
-        <li>폴백: iframe 로드 실패 시 "구매양식 열기(새 창)" 버튼으로 동일 URL 직행 — 흐름은 유지.</li>
+        <li>폴백: iframe 로드 실패 시 "구매양식 열기(새 창)" 버튼으로 동일 URL 직행. <b>새 창 제출은 postMessage가 닿지 않으므로</b> 부모 상세 페이지가 10초 폴링(홀드 상태 조회) + <code>visibilitychange</code> 복귀 시 즉시 1회 재조회로 submitted 전환을 감지해 확정 화면으로 자동 전환.</li>
+        <li><b>카톡 인앱브라우저</b>(recruit.html 공유 진입): localStorage·새 탭 동작이 불안정하므로 인앱 감지 시 "기본 브라우저로 열기" 유도 배너 + 외부 링크는 새 탭 대신 현재 탭 이동 정책.</li>
         <li><span class="tag sys">v2 검토</span> 임베드 UX 실측 후 필요 시 경량 전용 폼(원장 API 직접 호출)으로 교체 — 로드맵 §09.</li>
       </ul>
     </div>
@@ -860,7 +932,7 @@
     <div class="pipe">
       <div class="pnode"><h6>인라인 제출</h6><span>iframe → POST /api/submit/order (+campaignApplicationId)</span></div>
       <span class="parrow">→</span>
-      <div class="pnode store"><h6>DB-first 원장</h6><span>order_submissions 저장 + 같은 트랜잭션에서 홀드 applied→submitted</span></div>
+      <div class="pnode store"><h6>DB-first 원장</h6><span>order_submissions 저장 + 같은 트랜잭션에서 홀드 소유권 검증(§06-C) 통과 시 applied→submitted. <b>검증 실패·0행이어도 주문은 저장</b>(롤백 금지) — 링크만 거부. 누적확정 도달 시 closed 영속화</span></div>
       <span class="parrow">→</span>
       <div class="pnode"><h6>시트 반영 (비동기)</h6><span>기존 claimRow→큐→throttle 쓰기. 신원링크도 기존 원칙(쓰기 성공 후) 그대로</span></div>
       <span class="parrow">→</span>
@@ -899,11 +971,11 @@
       </div></div>
     </div>
     <div class="legend">
-      <div><span class="pin">1</span><span>자유 텍스트가 아닌 <b>구조화 TIME 입력</b> — 자동 활성/비활성의 근거. 자정 넘김 입력은 차단(v1)</span></div>
-      <div><span class="pin">2</span><span>총 모집은 관리자 화면 전용 — 리뷰어 노출면에는 어디에도 내려가지 않음</span></div>
-      <div><span class="pin">3</span><span>기본값 30/10분, 공고 특성(구매 소요시간)에 따라 조정</span></div>
-      <div><span class="pin">4</span><span>기존 <code>/api/product/preview</code>(OG 추출) 재사용 + Drive 업로드(가이드이미지 프록시 패턴) 보완. 이번엔 <b>DB에 저장</b></span></div>
-      <div><span class="pin">5</span><span>스냅샷 방식 — 발행 후 작업오더 수정은 공고에 자동 반영되지 않음(공고 수정으로 갱신). 내부 필드는 복사 대상에서 제외</span></div>
+      <div><span class="pin">1</span><span>자유 텍스트가 아닌 <b>구조화 TIME 입력</b> — 자동 활성/비활성의 근거. <b>간단 파서가 "2시~4시"→14:00/16:00 프리필</b>하고 관리자는 확인·수정만. 자정 넘김 입력 차단(v1) + 창 길이 &gt; 버퍼+15분 검증, 실효 홀드가 TTL 절반 미만이면 경고</span></div>
+      <div><span class="pin">2</span><span>총 모집은 관리자 화면 전용 — 리뷰어 노출면에는 어디에도 내려가지 않음. 발행 검증: <b>daily_limit ≥ 1</b> 필수, recruit_total은 0=무제한 허용(≥ daily_limit 권장)</span></div>
+      <div><span class="pin">3</span><span>기본값 30/10분 — 사실상 고정값이므로 <b>"고급 설정" 접힘 처리</b>(매번 노출하지 않음). 공고 특성(구매 소요시간)에 따라만 조정</span></div>
+      <div><span class="pin">4</span><span>기존 <code>/api/product/preview</code>(OG 추출) 재사용 + Drive 업로드(가이드이미지 프록시 패턴) 보완. 이번엔 <b>DB에 저장</b>. 쿠팡 등 봇 차단으로 추출 실패가 잦으므로 <b>실패 시 채널 기본 이미지 폴백</b> — 썸네일 때문에 발행이 막히지 않음</span></div>
+      <div><span class="pin">5</span><span>스냅샷 방식 — 발행 후 작업오더 수정은 공고에 자동 반영되지 않음(공고 수정 모달의 "작업오더에서 다시 불러오기"로 갱신). 내부 필드는 복사 대상에서 제외. 복사 직후 유입가이드 sanitize 적용(§03-E)</span></div>
     </div>
 
     <h3>관제 위젯 (모집공고 탭)</h3>
@@ -927,27 +999,36 @@
 
     <h3>선행 보안 수정 (구현 1단계 첫 커밋)</h3>
     <div class="callout risk">
-      <b>GET /api/campaign/:id 의 SELECT * 축소가 모든 작업의 선행 조건입니다.</b> 작업내용(work_detail)·카톡URL을 컬럼에 추가하기 전에
-      공개 필드 화이트리스트를 먼저 배포해야, 중간 배포 시점에도 비공개 데이터가 무인증으로 새지 않습니다.
+      <b>무인증 표면 4건의 축소·교정이 모든 작업의 선행 조건입니다.</b> ① <code>GET /api/campaign/:id</code> SELECT * → 화이트리스트,
+      ② <code>GET /api/campaign/list</code>의 chat_url·notes 노출 → 참여형/레거시 분기(레거시는 현행 유지로 카톡 신청 플로우 보존),
+      ③ <code>GET /:id/applications</code> 신청자 실명 명단 → count·마스킹으로 축소,
+      ④ campaign admin 라우트 6종의 역할 미구분(staff 토큰 통과) → adminOrMaster 적용.
+      작업내용(work_detail)·카톡URL을 컬럼에 추가하기 <b>전에</b> 이것들이 먼저 배포되어야, 중간 배포 시점에도 비공개 데이터가 무인증으로 새지 않습니다.
     </div>
 
     <div class="tablewrap card">
       <table>
         <thead><tr><th>분류</th><th>시나리오</th><th>방어</th></tr></thead>
         <tbody>
+          <tr><td class="area">남용</td><td><b>봇/일회용 신원의 작업내용 스크래핑</b> — 신청만 하면 결제금액·유입가이드·카톡URL이 열리므로, 무비용 신청 반복으로 전 캠페인 수집</td><td>① 등록 리뷰어 검증(미등록 403) ② phone8당 동시 활성 홀드 상한(전 캠페인 2건) ③ phone8·IP apply rate limit ④ 어뷰징 관측 시 카톡URL만 "제출 후 공개"로 지연하는 옵션 보유(§09)</td></tr>
+          <tr><td class="area">남용</td><td><b>홀드 스쿼팅 DoS</b> — 오픈 정각 가짜 신청 20건으로 일일한도 소진 → 매일 daily_done 강제</td><td>위 ①~③ + 같은 캠페인 당일 재신청 2회 제한 + 만료 홀드는 30분 내 자동 반환(영구 봉쇄 불가) + 관제 위젯의 만료율 이상 감지(노쇼 목록)</td></tr>
+          <tr><td class="area">남용</td><td>phone8만 아는 제3자가 타인 홀드 강제 취소(자리 뺏기)·열람</td><td>cancel·work-detail 모두 <b>phone8+holdToken</b>(신청 시 발급, DB 저장) 이중 열쇠 + rate limit + 취소 이벤트 로깅</td></tr>
+          <tr><td class="area">남용</td><td>위조 campaignApplicationId로 타인 홀드를 자기 주문에 결박</td><td>제출 확정은 소유권 3중 검증(applied·phone8 일치·연결 탭 일치) 통과 시만 — 불일치는 링크 거부(주문은 저장)+경고 로그</td></tr>
           <tr><td class="area">동시성</td><td>오픈 정각 러시 — 마지막 1자리에 동시 신청</td><td>단일 SQL 원자 조건부 INSERT(한도 검사 포함, 트랜잭션) — 애플리케이션 레벨 검사·증가 분리 금지. 구현 시 <b>레드-블루-심판</b> 프로세스 적용 대상</td></tr>
-          <tr><td class="area">동시성</td><td>만료 스윕 vs 막판 제출 경합</td><td>스윕이 expired 확정 직전 order_submissions 링크 존재 재확인 — <b>제출 우선</b></td></tr>
+          <tr><td class="area">동시성</td><td>만료 스윕 vs 막판 제출 경합</td><td>스윕이 expired 확정 직전 order_submissions 링크 존재 재확인 — <b>제출 우선</b>. 스윕 자체가 죽어도 판정은 시각 기준이라 카운터 무오염</td></tr>
           <tr><td class="area">동시성</td><td>멀티 인스턴스(rolling 배포) 이중 스윕</td><td><code>withJobLock</code> advisory lock (기존 패턴 재사용)</td></tr>
           <tr><td class="area">시간</td><td>클라이언트 시계 오차 — 타이머 조작/오표시</td><td>모든 응답에 serverNow 포함, 클라는 오프셋 보정 표시만. 신청 가부는 서버 재검사</td></tr>
-          <tr><td class="area">시간</td><td>TTL이 시간창 종료를 넘어감 (15:50 신청 + 30분)</td><td><code>expires_at = min(now+TTL, window_end)</code> — 종료 시각까지 구매 완료 원칙 유지</td></tr>
-          <tr><td class="area">시간</td><td>자정 넘는 시간창</td><td>v1 발행 폼에서 차단(명시적 제약). 수요 확인 후 v2</td></tr>
-          <tr><td class="area">데이터</td><td>참여신청만으로 시트에 행 생성 → 행배정 충돌</td><td><b>신청 시트쓰기 폐지</b> — 시트 기록은 제출 경로만. 기존 신원링크 원칙("쓰기 성공 후")도 그대로 유지</td></tr>
-          <tr><td class="area">보안</td><td>미신청자가 work-detail URL 직접 호출</td><td>phone8+활성홀드 서버 검증, 만료 403. 카드·목록 API에는 작업내용 자체가 없음</td></tr>
-          <tr><td class="area">보안</td><td>유입가이드 HTML XSS</td><td>서버 sanitize(태그·속성 화이트리스트) 후 저장·반환. href/src 프로토콜 검사(https·프록시만)</td></tr>
-          <tr><td class="area">보안</td><td>phone8 무차별 대입으로 타인 홀드 열람</td><td>work-detail은 (campaign_id × phone8) 정확 일치 + rate limit. 응답에 타인 식별정보 미포함</td></tr>
+          <tr><td class="area">시간</td><td>TTL이 시간창 종료를 넘어감 (15:45 신청 + 30분)</td><td><code>expires_at = min(now+TTL, window_end)</code> + 안내는 절대시각 동적 표기("15:50까지(10분)") — "30분 준다더니 잘렸다" 항의 예방</td></tr>
+          <tr><td class="area">시간</td><td>자정 넘는 시간창 / 신청 불가능한 짧은 창</td><td>v1 발행 폼에서 차단: 자정 넘김 금지 + 창 길이 &gt; 버퍼+15분. 수요 확인 후 v2</td></tr>
+          <tr><td class="area">데이터</td><td>참여신청만으로 시트에 행 생성 → 행배정 충돌</td><td><b>참여형 공고는 신청 시트쓰기 없음</b> — 시트 기록은 제출 경로만(레거시 공고 경로는 분기 유지). 기존 신원링크 원칙("쓰기 성공 후")도 그대로</td></tr>
+          <tr><td class="area">데이터</td><td>만료 후 제출 도착(기구매) — 주문·홀드 정합</td><td>grace 10분 내 재확정 / 밖이면 <b>주문 수용+홀드 초과분 표기+관제 알림</b>. 확정 UPDATE 0행이어도 주문 롤백 금지(실물 구매 손실 방지)</td></tr>
+          <tr><td class="area">보안</td><td>미신청자가 work-detail URL 직접 호출</td><td>phone8+holdToken+활성홀드(시각 기준) 서버 검증, 만료 403. 카드·목록 API에는 작업내용 자체가 없음</td></tr>
+          <tr><td class="area">보안</td><td>유입가이드 HTML XSS</td><td>sanitize-html 라이브러리(태그·src·href 화이트리스트, §03-E 명세) — 스냅샷 저장 시 + 응답 직전 이중 적용. 정규식 수작업 sanitizer 금지</td></tr>
           <tr><td class="area">부하</td><td>오픈 직후 목록 폴링 스파이크</td><td>목록 응답 서버 5초 캐시 + 폴링 15초 + 상세만 10초. SSE는 도입하지 않음(과잉)</td></tr>
-          <tr><td class="area">UX</td><td>구매하러 나갔다 돌아왔더니 만료</td><td>TTL 사전 고지(신청 전 안내) + 상세 상단 상시 타이머 + 만료 화면에서 원탭 재신청(잔여 시)</td></tr>
+          <tr><td class="area">UX</td><td>구매하러 나갔다 돌아왔더니 만료·입력값 소실</td><td>TTL 사전 고지 + 상시 타이머 + grace 10분 + 폼 입력 sessionStorage 복원 + 만료 화면 원탭 재신청·[이미 구매하셨나요?] 경로</td></tr>
+          <tr><td class="area">UX</td><td>카톡 인앱브라우저·쿠팡 앱 전환 복귀</td><td>인앱 감지 시 기본 브라우저 유도 배너, 외부 링크 현재 탭 정책, M2 실기기 테스트 항목에 포함</td></tr>
           <tr><td class="area">운영</td><td>발행 후 작업오더 수정이 공고에 미반영(스냅샷)</td><td>의도된 동작 — 공고 수정 모달에서 "작업오더에서 다시 불러오기" 버튼 제공</td></tr>
+          <tr><td class="area">운영</td><td>구·신 공고 혼재 기간 — 같은 "참여 신청" 버튼이 다른 동작</td><td>신규 카드 "바로참여" 배지 + 버튼 문구 차등, M3부터 발행 폼은 참여형만(구형 신규 발행 중단), 전환 운영 공지</td></tr>
         </tbody>
       </table>
     </div>
@@ -965,17 +1046,17 @@
         <tbody>
           <tr>
             <td class="area">M1 · 기반</td>
-            <td>① <b>/:id 화이트리스트 축소(선행)</b> ② 마이그레이션(스키마 §06-A) ③ 상태엔진+list 확장 ④ apply 원자화·시트쓰기 폐지 ⑤ 홀드 스윕 cron ⑥ work-detail API</td>
-            <td>단위테스트: 상태판정 표준 케이스 + 동시신청 경합 + 만료/제출 경합 (레드-블루-심판 적용)</td>
+            <td>① <b>선행 보안 4종(§08 콜아웃: /:id·/list 화이트리스트, /:id/applications 축소, admin 라우트 권한)</b> ② 마이그레이션(스키마 §06-A — 구 UNIQUE DROP·confirmed 레거시 보존·phone8 백필 포함) ③ 상태엔진+list 확장 ④ <b>참여형 apply 신규 경로</b>(원자화·시트쓰기 없음·등록검증·holdToken) — <b>레거시 apply 경로는 분기 유지(기존 공고 불파손)</b> ⑤ 홀드 스윕 cron ⑥ work-detail API ⑦ submit/order 소유권 검증·grace 확정</td>
+            <td>단위테스트: 상태판정 표준 케이스(마지막 날 이중차감·soft_full·recruit_total=0 가드·스윕 미실행 카운트 포함) + 동시신청 경합 + 만료/제출 경합 (레드-블루-심판 적용)</td>
           </tr>
           <tr>
             <td class="area">M2 · 리뷰어 화면</td>
-            <td>공용 카드 모듈(4상태+타이머) → index.html·recruit.html 적용, campaign.html 상세(참여 전/후), iframe 인라인 제출(embed 모드+postMessage), my-status applied 스테이지</td>
-            <td>모바일 실기기에서 여정 1~8 완주, bfcache 복귀·새로고침 시 상태 복원</td>
+            <td>공용 카드 모듈(preopen/open/cutoff/daily_done/soft_full/closed + 타이머) → index.html·recruit.html 적용, campaign.html 상세(참여 전/후·만료·기구매 경로), iframe 인라인 제출(embed 모드+postMessage+세션 키 통일+입력값 복원), my-status applied 스테이지 병합</td>
+            <td>모바일 실기기에서 여정 1~8 완주 + <b>쿠팡 앱 전환 후 복귀(입력값 복원)</b> + <b>카톡 인앱브라우저 진입</b> + bfcache 복귀·새로고침 상태 복원</td>
           </tr>
           <tr>
             <td class="area">M3 · 관리자</td>
-            <td>발행 폼 확장(시간창·한도·홀드·썸네일 저장·작업내용 스냅샷), 관제 위젯(오늘/누적/노쇼)</td>
+            <td>발행 폼 확장(시간창 파서 프리필·검증, 한도·홀드 고급설정, 썸네일 저장+폴백, 작업내용 스냅샷+sanitize), 관제 위젯(오늘/누적/노쇼/만료율), <b>신규 발행은 참여형으로 일원화(구형 발행 중단)</b></td>
             <td>작업오더→발행→자동 운영 1사이클 무개입 통과</td>
           </tr>
           <tr>
@@ -990,17 +1071,20 @@
     <h3>미결 사항 (v2 검토 — 구현 차단 아님)</h3>
     <div class="card plain">
       <ul>
-        <li><b>노쇼 제재</b> — 만료 반복 리뷰어의 신청 제한(예 3회 만료 시 당일 차단). M3의 노쇼 데이터로 기준 결정.</li>
+        <li><b>노쇼 제재</b> — 만료 반복 리뷰어의 계정 단위 신청 제한(예 3회 만료 시 당일 차단). v1은 캠페인당 재신청 2회 상한만 두고, M3의 노쇼 데이터로 기준 결정.</li>
+        <li><b>카톡URL 공개 시점 지연</b> — 스크래핑 어뷰징 관측 시 "신청 후" → "제출 확정 후"로 한 단계 늦추는 옵션(공고별 플래그).</li>
+        <li><b>유입가이드 이미지 서명 URL</b> — 현행 fileId 능력토큰(링크 공개 저장)은 URL 유출 시 영구 열람 가능 — 민감도 상승 시 만료 토큰 방식 전환.</li>
         <li><b>경량 인라인 폼</b> — iframe UX가 모바일에서 불편하면 원장 API 직결 전용 폼으로 교체.</li>
         <li><b>자정 넘김 시간창</b> — 실제 수요 확인 후.</li>
         <li><b>알림</b> — 오픈 10분 전 PWA 푸시(이미 푸시 인프라 있음) — 오픈 러시를 키우는 부작용도 함께 검토.</li>
         <li><b>차수(회차) 연동</b> — 같은 탭의 2차·3차 진행 시 공고 재사용 vs 신규 발행 규칙.</li>
+        <li><b>리뷰 내역 탭 직결</b> — "리뷰 내역"(searchAll)에 order_submissions/campaign_applications 병합해 지연 없는 표시(기존 무인증 보안 가드와의 정합 검토 필요).</li>
       </ul>
     </div>
   </section>
 
   <footer>
-    아이에이리뷰 · 리뷰어 직접참여 캠페인 PRD v1.0 — 이 문서는 설계 검토용이며, 확정 시 CLAUDE.md와 구현 마이그레이션에 반영됩니다.
+    아이에이리뷰 · 리뷰어 직접참여 캠페인 PRD v1.1 — 3관점(운영·보안/실사용자/운영리스크) 적대 검토 반영본. 이 문서는 설계 검토용이며, 확정 시 CLAUDE.md와 구현 마이그레이션에 반영됩니다.
   </footer>
 </div>
 </body>
