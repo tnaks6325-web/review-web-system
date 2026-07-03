@@ -33,7 +33,7 @@ ok('apply: phone8 advisory xact lock', /pg_advisory_xact_lock\(hashtext\('camp_h
 ok('apply: 23505 백스톱(duplicate_hold)', /duplicate_hold/.test(routes));
 ok('apply: 당일 재신청 차단(상태 무관 이력 검사)', /already_today/.test(routes));
 // 레드 #5·심판 J2: 확정과 스윕의 grace 경계 단일 출처 + SAVEPOINT 격리(주문 손실 0)
-ok('hold: HOLD_GRACE_SEC 단일 정의', (hold.match(/HOLD_GRACE_SEC = parseInt/g) || []).length === 1);
+ok('hold: HOLD_GRACE_SEC 단일 정의', (hold.match(/const HOLD_GRACE_SEC = /g) || []).length === 1);
 ok('hold: confirm은 applied+grace 경계', /status = 'applied'[\s\S]*?expires_at > NOW\(\) - make_interval/.test(hold));
 ok('hold: sweep SKIP LOCKED(확정 tx와 교착 0)', /FOR UPDATE SKIP LOCKED/.test(hold));
 ok('ledger: SAVEPOINT hold_confirm(주문 손실 0)', /SAVEPOINT hold_confirm/.test(ledger) && /ROLLBACK TO SAVEPOINT hold_confirm/.test(ledger));
@@ -59,6 +59,10 @@ ok("state: stateReason 'window_invalid'", /window_invalid/.test(state));
 ok('활성화 게이트: 2개 라우트 적용', (routes.match(/_participationActivationErrors\(/g) || []).length >= 3); // 정의 1 + 호출 2
 // 레드 #7: 수동확정 선-취소 + 이중확정 거부
 ok('수동확정: applied 선-취소', /admin\/:id\/confirm[\s\S]*?SET status = 'cancelled'\s+WHERE campaign_id = \$1 AND phone8 = \$2 AND id <> \$3 AND status = 'applied'/.test(routes));
+// 코드리뷰 #1: provenance 링크는 소유권(campaign+phone8+holdToken) 검증 통과 신청에만 — 위조 applicationId 오염 차단
+ok('provenance: 소유권 EXISTS 서브쿼리', /SET campaign_application_id = \$2[\s\S]*?EXISTS \(SELECT 1 FROM campaign_applications ca[\s\S]*?ca\.hold_token = \$5/.test(hold));
+// 코드리뷰 #6: env NaN 가드
+ok('grace: NaN 폴백 30', /Number\.isFinite\(_grace\)/.test(hold));
 // 레드 #8③: closed 영속 3소비처(자동확정·수동확정·스윕)
 ok('closed 영속: confirmHoldInTx → maybePersistClosed', /maybePersistClosed\(client, campaignId\)/.test(hold));
 ok('closed 영속: 수동확정 → maybePersistClosed', /maybePersistClosed\(client, id\)/.test(routes));

@@ -669,6 +669,9 @@ async function createOrderLedgerEntry(input) {
     }
     if (holdResult === 'tab_mismatch') {
       logger.warn(`[orderLedger] 캠페인 탭 불일치 — 홀드확정 보류(주문은 저장, 관제 수동확정 대상): camp=${campaignHold.campaignId} os=${orderSubmissionId} sheet=${sheetId} gid=${gid || ''} tab=${tabName}`);
+    } else if (holdResult === 'not_found' || holdResult === 'invalid_params') {
+      // 무신호 방지(코드리뷰 #7): 위조/오염 문맥 — 주문은 저장됐고 홀드 링크만 거부됨
+      logger.warn(`[orderLedger] 홀드확정 문맥 무효(${holdResult}) — 주문은 저장: camp=${campaignHold.campaignId} app=${campaignHold.applicationId} os=${orderSubmissionId}`);
     }
   } else {
     // 비참여 주문: 기존 경로 그대로(핫패스 무변경 — 트랜잭션·커넥션 점유 없음)

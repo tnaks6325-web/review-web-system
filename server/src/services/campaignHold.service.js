@@ -10,7 +10,9 @@ const { logger } = require('../utils/logger');
 
 // 처리지연 grace(사용자 유예 아님 — 유예 정책은 제거됨): 확정 UPDATE와 스윕이 같은 경계를 공유해
 // "TTL 마지막 초 제출이 처리지연으로 expired" 경합 창을 제거한다.
-const HOLD_GRACE_SEC = parseInt(process.env.CAMPAIGN_HOLD_GRACE_SEC || '30', 10);
+// NaN 가드(코드리뷰 #6): env 비숫자면 make_interval(NaN)으로 확정·스윕 SQL이 전부 실패하므로 30 폴백.
+const _grace = parseInt(process.env.CAMPAIGN_HOLD_GRACE_SEC || '30', 10);
+const HOLD_GRACE_SEC = Number.isFinite(_grace) && _grace >= 0 ? _grace : 30;
 
 /** gid 우선(탭 리네임 불변) → gid 없으면 정규화 이름 비교 (레드 #6) */
 function tabMatchesCampaign(camp, sheetId, gid, tabName) {
@@ -45,10 +47,16 @@ async function confirmHoldInTx(client, { applicationId, campaignId, phone8, hold
   if (!cRows.length || !cRows[0].participation_mode) return 'not_found';
   const camp = cRows[0];
 
-  // provenance 링크: 확정 성패와 무관하게 기록 → 만료건은 스윕이 late_order_id 백필(관제 수동확정 목록 입력)
+  // provenance 링크: 확정 성패와 무관하게 기록 → 만료건은 스윕이 late_order_id 백필(관제 수동확정 목록 입력).
+  //   ★ 소유권 검증을 통과한 신청에만 링크(코드리뷰 #1): applicationId는 클라이언트 입력(SERIAL 추측 가능)이라
+  //     무검증 링크는 타인 신청 오염 → 스윕 백필 → 수동확정 오염으로 전파된다.
   await client.query(
-    `UPDATE order_submissions SET campaign_application_id = $2 WHERE id = $1 AND campaign_application_id IS NULL`,
-    [orderSubmissionId, appId]
+    `UPDATE order_submissions os SET campaign_application_id = $2
+      WHERE os.id = $1 AND os.campaign_application_id IS NULL
+        AND EXISTS (SELECT 1 FROM campaign_applications ca
+                     WHERE ca.id = $2 AND ca.campaign_id = $3 AND ca.phone8 = $4
+                       AND ca.hold_token = $5 AND ca.hold_token <> '')`,
+    [orderSubmissionId, appId, campaignId, phone8, holdToken]
   );
 
   if (!tabMatchesCampaign(camp, sheetId, gid, tabName)) return 'tab_mismatch'; // 확정 보류 — 호출측 관제 로그

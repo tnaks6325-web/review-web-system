@@ -407,11 +407,11 @@ async function _applyParticipation(req, res, next, campPre) {
               COUNT(*) FILTER (WHERE applied_at >= $2) AS today_applies
          FROM campaign_applications WHERE phone8 = $1`,
       [p8, dayStartIso]);
-    if (Number(caps.rows[0].active_holds) >= parseInt(process.env.CAMPAIGN_HOLD_CAP || '2', 10)) {
+    if (Number(caps.rows[0].active_holds) >= (parseInt(process.env.CAMPAIGN_HOLD_CAP || '2', 10) || 2)) {
       await client.query('ROLLBACK');
       return res.status(409).json({ ok: false, reason: 'hold_cap', error: '동시에 참여 가능한 캠페인은 2개까지예요.' });
     }
-    if (Number(caps.rows[0].today_applies) >= parseInt(process.env.CAMPAIGN_DAILY_APPLY_CAP || '10', 10)) {
+    if (Number(caps.rows[0].today_applies) >= (parseInt(process.env.CAMPAIGN_DAILY_APPLY_CAP || '10', 10) || 10)) {
       await client.query('ROLLBACK');
       return res.status(429).json({ ok: false, reason: 'daily_apply_cap', error: '오늘 신청 가능한 횟수를 넘었어요.' });
     }

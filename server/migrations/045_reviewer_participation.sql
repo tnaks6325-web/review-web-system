@@ -25,6 +25,19 @@ ALTER TABLE campaign_applications
   ADD COLUMN IF NOT EXISTS hold_token          TEXT,                   -- 열람·취소 열쇠(NULL=미발급 — '' 기본값 매칭함정 금지)
   ADD COLUMN IF NOT EXISTS late_order_id       UUID;                   -- 만료 후 도착한 제출의 주문 id(자동확정 없음 — 관제 수동확정 대상 표기)
 
+-- 방어(코드리뷰 #3): 개발 중 구판(BIGINT) 045가 이미 적용된 DB의 무전환·무신호 함정 차단.
+--   IF NOT EXISTS는 타입이 달라도 no-op이므로, BIGINT로 남아 있으면 UUID로 강제 전환(기능 미라이브 = 데이터 없음 → USING NULL 안전).
+DO $$ BEGIN
+  IF EXISTS (SELECT 1 FROM information_schema.columns
+              WHERE table_name = 'campaign_applications' AND column_name = 'order_submission_id' AND data_type = 'bigint') THEN
+    ALTER TABLE campaign_applications ALTER COLUMN order_submission_id TYPE UUID USING NULL;
+  END IF;
+  IF EXISTS (SELECT 1 FROM information_schema.columns
+              WHERE table_name = 'campaign_applications' AND column_name = 'late_order_id' AND data_type = 'bigint') THEN
+    ALTER TABLE campaign_applications ALTER COLUMN late_order_id TYPE UUID USING NULL;
+  END IF;
+END $$;
+
 -- status CHECK 확장: 기존 CHECK(confirmed/cancelled)를 참여형 상태 포함으로 교체.
 --   'confirmed'는 레거시 전용 상태로 보존(신형 카운트·유니크에서 제외).
 DO $$
