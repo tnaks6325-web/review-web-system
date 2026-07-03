@@ -44,6 +44,7 @@ function makeRow(over = {}) {
     tabName: '탭', sheetId: 'S', gid: '1', rowIndex: 2,
     isSubmitted: false, productName: '', productUrl: '', startDate: '7/1', endDate: '',
     round: '', rowJson: '{"연락처":"010-1234-5678","주소":"서울"}', submitCol: '리뷰제출',
+    isSubmitted2: null,
     reviewFileAt: null, manager: null, timeRange: null, reviewType: null, taekhap: null,
     isClosed: false, deliveryType: null, isBulk: null, incomeType: null,
     displayName: null, ncMode: null, folderUrl: null, captureFolderUrl: null,
@@ -67,7 +68,7 @@ async function run() {
   captured.queries = [];
   reviewRows = [
     makeRow(),
-    makeRow({ rowIndex: 3, isSubmitted: true, reviewFileAt: '2026-06-21T09:30:00Z' }),
+    makeRow({ rowIndex: 3, isSubmitted: true, isSubmitted2: 'PAID', reviewFileAt: '2026-06-21T09:30:00Z' }),
   ];
   const r2 = await searchByName('홍길동', '12345678', { includeSubmitted: true });
   sql = mainSql();
@@ -85,7 +86,10 @@ async function run() {
   assert.equal(done.submitCol, null, '2: 제출완료 행 submitCol 비움');
   assert.equal(done.reviewFileAt, '2026-06-21T09:30:00Z', '2: reviewFileAt 전달');
   assert.equal(pending.row['주소'], '서울', '2: 대기 행 row는 기존대로 유지');
-  console.log('  2. 이름+phone8 — 강한 신원키 가드 + row 최소화 ✓');
+  // 입금완료 배지: is_submitted2='PAID' → isPaid (row 비우기 전 판정)
+  assert.equal(done.isPaid, true, '2: PAID → isPaid=true');
+  assert.equal(pending.isPaid, false, '2: 입금 데이터 없으면 isPaid=false');
+  console.log('  2. 이름+phone8 — 강한 신원키 가드 + row 최소화 + isPaid ✓');
 
   // ── 3) 이름 단독 + includeSubmitted: 항상 무시(대기 건만) ──
   captured.queries = [];
@@ -99,13 +103,16 @@ async function run() {
 
   // ── 4) phone8 단독 + includeSubmitted: 매칭 자체가 강한 키 → 필터만 해제 ──
   captured.queries = [];
-  reviewRows = [makeRow({ isSubmitted: true })];
-  await searchByName('', '12345678', { includeSubmitted: true });
+  // 입금칸 미감지(isSubmitted2=null) 탭이라도 row_json의 입금 키워드 컬럼에 값이 있으면 완료(대시보드 폴백 동일)
+  reviewRows = [makeRow({ isSubmitted: true, rowJson: '{"입금":"6/25","주소":"서울"}' })];
+  const r4 = await searchByName('', '12345678', { includeSubmitted: true });
   sql = mainSql();
   assert.ok(/WHERE TRUE/.test(sql), '4: phone8 단독 분기는 필터 해제');
   assert.ok(sql.includes('ri.phone8 = ANY('), '4: 매칭은 phone8/확정신원 한정');
   assert.ok(sql.includes('LIMIT 400') && sql.includes('ri.is_submitted ASC'), '4: LIMIT 상향 + 대기 우선');
-  console.log('  4. phone8 단독 — 필터 해제(강한 키 매칭) ✓');
+  assert.equal(r4.results[0].isPaid, true, '4: 입금 키워드 컬럼 값 존재 → isPaid=true (폴백)');
+  assert.deepEqual(r4.results[0].row, {}, '4: isPaid 판정 후에도 완료 행 row는 비움');
+  console.log('  4. phone8 단독 — 필터 해제(강한 키 매칭) + isPaid 폴백 ✓');
 
   console.log('✅ searchSubmittedGuard 테스트 전체 통과');
 }

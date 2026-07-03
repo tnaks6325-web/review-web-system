@@ -194,6 +194,7 @@
     .result-chevron { color:var(--t3); font-size:.75rem; }
     .status-badge-pending { font-size:.62rem; font-weight:700; padding:3px 8px; border-radius:6px; background:var(--warn-light); color:#92400E; }
     .status-badge-submitted { font-size:.62rem; font-weight:700; padding:3px 8px; border-radius:6px; background:var(--ok-light); color:#065F46; }
+    .status-badge-paid { font-size:.62rem; font-weight:700; padding:3px 8px; border-radius:6px; background:#E0E7FF; color:#3730A3; }
 
     /* ─── Result Group Card ─── */
     .result-group-card {
@@ -250,6 +251,7 @@
     .result-card.done, .result-group-card.done { cursor:default; }
     .result-card.done:hover, .result-group-card.done:hover { border-color:var(--border); box-shadow:none; }
     .result-group-item-badge.done { background:var(--ok-light); color:#065F46; }
+    .result-group-item-badge.paid { background:#E0E7FF; color:#3730A3; }
 
     /* ─── Section ─── */
     .home-section { padding:0 0 12px; }
@@ -1123,8 +1125,9 @@ function renderReviewSubTab() {
 
     if (isSingle) {
       const item = items[0];
+      // 제출완료 카드: 입금칸에 데이터가 채워졌으면(isPaid) "입금완료" 배지 병기
       const badgeHtml = isDone
-        ? `<span class="status-badge-submitted">제출완료</span>`
+        ? `${item.isPaid ? '<span class="status-badge-paid">입금완료</span> ' : ''}<span class="status-badge-submitted">제출완료</span>`
         : `<span class="status-badge-pending">${escHtml(_pendingBadgeText(item))}</span>`;
       const roundBadge = item.round
         ? `<span style="display:inline-block;font-size:.6rem;font-weight:700;padding:1px 6px;border-radius:10px;background:#e8f1fe;color:#1b64da;border:1px solid #cce0fb;margin-left:4px;vertical-align:middle">${escHtml(item.round)}</span>`
@@ -1180,6 +1183,7 @@ function renderReviewSubTab() {
         return `<div class="result-group-item">
           <i class="fas ${isDone ? 'fa-check' : 'fa-box'}" style="color:${isDone ? 'var(--ok)' : 'var(--p)'};font-size:.72rem;flex-shrink:0"></i>
           <span class="result-group-item-label">${escHtml(taskLabel)}${escHtml(roundTxt)}${doneDate ? ` <span style="color:var(--t4)">· 제출 ${doneDate}</span>` : ''}</span>
+          ${isDone && item.isPaid ? '<span class="result-group-item-badge paid">입금완료</span>' : ''}
           <span class="result-group-item-badge${isDone ? ' done' : ''}">${isDone ? '제출완료' : escHtml(_pendingBadgeText(item))}</span>
         </div>`;
       }).join("");

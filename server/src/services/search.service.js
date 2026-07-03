@@ -15,6 +15,26 @@ function _parseRowJson(rowJson) {
   }
 }
 
+// 입금 컬럼 키워드 (admin.routes.js 대시보드 집계와 동일 판정)
+const PAYMENT_COL_KEYWORDS = ['입금', '페이백', '입금완료', '입금확인', '입금여부'];
+
+/**
+ * 입금 완료 여부 — is_submitted2='PAID'(입금칸 감지+값 존재) 우선,
+ * 미감지 탭은 row_json의 입금 키워드 컬럼에 값이 있으면 완료로 간주(대시보드 폴백과 동일)
+ */
+function _isPaid(isSubmitted2, rowObj) {
+  if (isSubmitted2 === 'PAID') return true;
+  if (!rowObj || typeof rowObj !== 'object') return false;
+  for (const key of Object.keys(rowObj)) {
+    const lk = key.toLowerCase();
+    if (PAYMENT_COL_KEYWORDS.some(kw => lk.includes(kw.toLowerCase()))) {
+      const val = String(rowObj[key] || '').trim();
+      if (val.length > 0) return true;
+    }
+  }
+  return false;
+}
+
 /**
  * ★ 리뷰어 프로필에서 본인 + 타계정의 phone8 목록을 가져온다
  * 반환: ['29979075', '62900585', ...] (본인 포함)
@@ -114,6 +134,7 @@ async function searchByName(query, phone8, opts = {}) {
     ri.round,
     ri.row_json          AS "rowJson",
     ri.submit_col        AS "submitCol",
+    ri.is_submitted2     AS "isSubmitted2",
     ri.review_file_at    AS "reviewFileAt",
     tc.manager,
     tc.time_range        AS "timeRange",
@@ -265,7 +286,9 @@ async function searchByName(query, phone8, opts = {}) {
     });
 
     // GAS 호환 결과 변환
-    const results = filteredRows.map(row => ({
+    const results = filteredRows.map(row => {
+      const rowObj = _parseRowJson(row.rowJson);
+      return {
       displayName: (row.idxName || '').split('/')[0],
       idxName:     row.idxName,
       recipientName: row.recipientName || '',
@@ -296,11 +319,13 @@ async function searchByName(query, phone8, opts = {}) {
       captureSlots: Array.isArray(row.captureSlots) && row.captureSlots.length ? row.captureSlots : null,
       submittedSlots: [],   // 아래에서 다중 슬롯 행에 한해 채움
       // ★ 제출완료 행은 행 전체 JSON을 반환하지 않는다(데이터 최소화 — 완료 탭 표시에 불필요)
-      row:         row.isSubmitted ? {} : _parseRowJson(row.rowJson),
+      row:         row.isSubmitted ? {} : rowObj,
       submitCol:   row.isSubmitted ? null : row.submitCol,
       reviewFileAt: row.reviewFileAt || null, // 대표 리뷰 이미지 연결 시각 (제출완료 탭 표시용)
+      isPaid:      _isPaid(row.isSubmitted2, rowObj), // 입금완료 배지용 (row 비우기 전 판정)
       score:       row.score, // 유사도 점수 (1.0=정확매칭, <1.0=유사매칭)
-    }));
+      };
+    });
 
     // ── 다중 캡처 슬롯 행: 이미 제출된 슬롯(submittedSlots) 일괄 조회 ──
     //   captureSlots가 있는 행이 하나라도 있을 때만 1회 배치 쿼리 (단일 슬롯 검색은 비용 0)
@@ -437,7 +462,9 @@ async function searchByNameFallback(q, p8, SELECT_FIELDS, includeSubmitted) {
     return !archivedSet.has(row.round);
   });
 
-  const results = filteredRows.map(row => ({
+  const results = filteredRows.map(row => {
+    const rowObj = _parseRowJson(row.rowJson);
+    return {
     displayName: (row.idxName || '').split('/')[0],
     idxName:     row.idxName,
     recipientName: row.recipientName || '',
@@ -458,10 +485,12 @@ async function searchByNameFallback(q, p8, SELECT_FIELDS, includeSubmitted) {
     captureSlots: Array.isArray(row.captureSlots) && row.captureSlots.length ? row.captureSlots : null,
     submittedSlots: [],
     // ★ 제출완료 행은 행 전체 JSON 미반환 (본검색과 동일한 데이터 최소화)
-    row:         row.isSubmitted ? {} : _parseRowJson(row.rowJson),
+    row:         row.isSubmitted ? {} : rowObj,
     submitCol:   row.isSubmitted ? null : row.submitCol,
     reviewFileAt: row.reviewFileAt || null,
-  }));
+    isPaid:      _isPaid(row.isSubmitted2, rowObj),
+    };
+  });
 
   return {
     results,
