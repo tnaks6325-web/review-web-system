@@ -22,7 +22,7 @@ GAS(Google Apps Script) 기반 리뷰 관리 시스템을 **Node.js Express + Po
 - 과거에 루트로 샌 캡처는 관리자 "리뷰 캡처 정리"(`POST /api/drive/relocate-orphan-reviews`)로 `[리뷰]` 폴더 이동 + 파일명 이름↔행 결정적 링크 백필(모호하면 링크 안 함).
 
 ### 리뷰어 홈 "리뷰 내역" 제출대기/제출완료 탭
-- `index.html` 내정보/현황의 리뷰 내역은 `GET /api/search?includeSubmitted=1`로 대기+완료를 한 번에 받아 `isSubmitted`로 좌우 서브탭(기본 [제출대기]) 분리. 완료 카드는 클릭/이동 없음(초록 배지) + `review_index.review_file_at` 기반 제출일 표시. 다중 캡처 슬롯 부분 제출은 대기 탭에서 "n/m 제출" 배지. bfcache 복귀(pageshow persisted) 시 재조회.
+- `index.html` 내정보/현황의 리뷰 내역은 `GET /api/search?includeSubmitted=1`로 대기+완료를 한 번에 받아 `isSubmitted`로 좌우 서브탭(기본 [제출대기]) 분리. 완료 카드는 클릭/이동 없음(초록 배지) + `review_index.review_file_at` 기반 제출일 표시 + **입금 데이터가 채워진 행은 "입금완료" 남색 배지 병기**(`isPaid` = `is_submitted2='PAID'` 또는 row_json 입금 키워드 컬럼 값 존재 — 대시보드 집계와 동일 판정, row 비우기 전 서버에서 계산). 다중 캡처 슬롯 부분 제출은 대기 탭에서 "n/m 제출" 배지. bfcache 복귀(pageshow persisted) 시 재조회.
 - **보안 가드**(`/api/search`는 무인증): 제출완료 행은 **phone8/participation_links 정확 일치 매칭에만 포함**(이름 단독·이름+전화근접 약한 키엔 미개방 — 이름만으로 타인 제출이력 스크래핑 차단), 완료 행의 `row`(행 전체 JSON)는 비워 반환(데이터 최소화). includeSubmitted 시 LIMIT 400 + `is_submitted ASC` 정렬(대기 건 절단 보호, 절단 시 완료 탭 하단 고지). 회귀가드 `tests/searchSubmittedGuard.test.js`.
 - 한계: 완료 탭은 활성 `review_index`의 뷰 — 차수/탭 아카이브 시 해당 완료 내역은 화면에서 사라진다(archive 테이블 미조회). 과거 오염 `participation_links`가 완료 탭에 재부상할 수 있으므로 필요 시 `POST /api/diag/participation-cleanup`(dryRun 먼저) 권장.
 
