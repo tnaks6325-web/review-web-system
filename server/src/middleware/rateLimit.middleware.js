@@ -7,7 +7,15 @@ const rateLimiter = rateLimit({
   message: { error: '요청이 너무 많습니다. 잠시 후 다시 시도하세요.' },
   standardHeaders: true,
   legacyHeaders: false,
-  skip: (req) => req.path.startsWith('/api/index/'),
+  skip: (req) => {
+    // ★ app.use('/api/', …) 마운트 내부에선 req.path가 마운트 경로가 벗겨진 값('/index/…')이라
+    //   '/api/…' 프리픽스 비교는 절대 매치되지 않았다(심판 실측 — 기존 skip은 dead code).
+    //   baseUrl+path로 전체 경로를 복원해 판정: ① /api/index/* (원 주석 의도 복원),
+    //   ② 참여형 목록 폴링(GET /api/campaign/list — 5초 서버캐시·무PII·화이트리스트라 저비용).
+    const p = (req.baseUrl || '') + (req.path || '');
+    return p.startsWith('/api/index/')
+        || (req.method === 'GET' && p === '/api/campaign/list');
+  },
 });
 
 // 리뷰어 등록은 더 엄격한 제한

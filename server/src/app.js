@@ -35,6 +35,11 @@ const participantsRoutes = require('./routes/participants.routes');
 
 const app = express();
 
+// ★ Railway 프록시 1홉 신뢰(레드-블루-심판, 레드 #4): 미설정이면 req.ip가 프록시 IP로 수렴해
+//   전역 rate limiter(분당 120)가 전 사용자 공용 버킷이 된다(참여형 오픈 러시 정각 전면 429).
+//   express-rate-limit v7의 X-Forwarded-For 검증(ERR_ERL_UNEXPECTED_X_FORWARDED_FOR)도 함께 해소.
+app.set('trust proxy', 1);
+
 // ── Sentry 초기화 (가장 먼저) ──
 initSentry(app);
 

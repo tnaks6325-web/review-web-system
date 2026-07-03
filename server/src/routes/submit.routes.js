@@ -702,6 +702,14 @@ router.post('/order', async (req, res, next) => {
       slotRowNumber: slotRowNumber || null,
       loginPhone8: loginPhone8 || '',
       loginName: loginName || '',
+      // ★ 참여형 캠페인 홀드 확정 문맥(전부 optional — 비참여 제출 무영향).
+      //   확정은 orderLedger 단일 트랜잭션 안에서 소유권 3중검증(applied·phone8·연결탭) 통과 시에만.
+      campaignHold: (b.campaignId && b.campaignApplicationId && b.holdToken) ? {
+        applicationId: parseInt(b.campaignApplicationId, 10),
+        campaignId: String(b.campaignId),
+        phone8: String(b.holdPhone8 || loginPhone8 || '').replace(/\D/g, '').slice(-8),
+        holdToken: String(b.holdToken).trim(),
+      } : undefined,
     });
 
     // ★ 신원 기록(recordParticipationLink/recordReviewIdentity)은 여기서 하지 않는다.
@@ -754,6 +762,7 @@ router.post('/order', async (req, res, next) => {
       sheetRow: ledger.sheetRow,
       orderSubmissionId: ledger.orderSubmissionId,
       mirrorStatus: queued ? 'queued' : (ledger.sheetRow ? 'failed' : 'pending_no_row'),
+      campaignHold: ledger.holdResult || null, // 'confirmed'|'late'|'tab_mismatch'|'error'|null — 확정 외에는 "구매는 접수됨, 운영자 확인 중" 안내
     });
 
     emitOrderSubmit({

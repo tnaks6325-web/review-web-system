@@ -608,38 +608,78 @@ async function createOrderLedgerEntry(input) {
   const {
     sheetId, tabName, gid, orderData,
     slotRowNumber, loginPhone8, loginName,
+    campaignHold, // 참여형 홀드 확정 문맥 {applicationId, campaignId, phone8, holdToken} | undefined
   } = input;
   // ★ D4(#5): osid 폴백 dedupKey를 쓰려면 먼저 id가 필요 → INSERT(dedup_key NULL) 후 osid 포함 키 계산·UPDATE.
-  const insert = await db.query(
-    `INSERT INTO order_submissions
+  const ORDER_INSERT_SQL = `INSERT INTO order_submissions
       (sheet_id, tab_name, gid, tab_gid, orderer, recipient, user_id, phone, address,
        order_num, date_str, selected_opt_key, bank, account, depositor, price, memo,
        dedup_key, mirror_status)
      VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,NULL,'pending')
-     RETURNING id`,
-    [
-      sheetId,
-      tabName,
-      gid || '',
-      gid || '',
-      orderData.orderer || '',
-      orderData.recipient || '',
-      orderData.userId || '',
-      orderData.phone || '',
-      orderData.address || '',
-      orderData.orderNum || '',
-      orderData.dateStr || '',
-      orderData.selectedOptKey || '',
-      orderData.bank || '',
-      orderData.account || '',
-      orderData.depositor || '',
-      orderData.price || '',
-      orderData.memo || '',
-    ]
-  );
-  const orderSubmissionId = insert.rows[0].id;
-  const dedupKey = computeDedupKey({ ...orderData, orderSubmissionId });
-  await db.query(`UPDATE order_submissions SET dedup_key = $2 WHERE id = $1`, [orderSubmissionId, dedupKey]);
+     RETURNING id`;
+  const orderInsertParams = [
+    sheetId,
+    tabName,
+    gid || '',
+    gid || '',
+    orderData.orderer || '',
+    orderData.recipient || '',
+    orderData.userId || '',
+    orderData.phone || '',
+    orderData.address || '',
+    orderData.orderNum || '',
+    orderData.dateStr || '',
+    orderData.selectedOptKey || '',
+    orderData.bank || '',
+    orderData.account || '',
+    orderData.depositor || '',
+    orderData.price || '',
+    orderData.memo || '',
+  ];
+
+  let orderSubmissionId;
+  let dedupKey;
+  let holdResult = null;
+
+  if (campaignHold && campaignHold.applicationId) {
+    // ★ 참여형(레드-블루-심판 최종안): 주문 INSERT + dedup + 홀드확정 + provenance 링크 = 단일 트랜잭션(부분상태 불가).
+    //   홀드확정 내부 오류는 SAVEPOINT로 격리(심판 J2) — 어떤 경우에도 주문 INSERT는 살아남는다(주문 손실 0).
+    const client = await db.connect();
+    try {
+      await client.query('BEGIN');
+      const ins = await client.query(ORDER_INSERT_SQL, orderInsertParams);
+      orderSubmissionId = ins.rows[0].id;
+      dedupKey = computeDedupKey({ ...orderData, orderSubmissionId });
+      await client.query(`UPDATE order_submissions SET dedup_key = $2 WHERE id = $1`, [orderSubmissionId, dedupKey]);
+      await client.query('SAVEPOINT hold_confirm');
+      try {
+        const { confirmHoldInTx } = require('./campaignHold.service'); // 지연 require(순환 방지 — 기존 패턴)
+        holdResult = await confirmHoldInTx(client, { ...campaignHold, orderSubmissionId, sheetId, gid, tabName });
+      } catch (holdErr) {
+        await client.query('ROLLBACK TO SAVEPOINT hold_confirm');
+        holdResult = 'error';
+        logger.warn(`[orderLedger] 홀드확정 오류(주문은 보존): ${holdErr.message} camp=${campaignHold.campaignId} os=${orderSubmissionId}`);
+      }
+      await client.query('COMMIT');
+    } catch (err) {
+      try { await client.query('ROLLBACK'); } catch (_) { /* noop */ }
+      throw err;
+    } finally {
+      client.release();
+    }
+    if (holdResult === 'tab_mismatch') {
+      logger.warn(`[orderLedger] 캠페인 탭 불일치 — 홀드확정 보류(주문은 저장, 관제 수동확정 대상): camp=${campaignHold.campaignId} os=${orderSubmissionId} sheet=${sheetId} gid=${gid || ''} tab=${tabName}`);
+    } else if (holdResult === 'not_found' || holdResult === 'invalid_params') {
+      // 무신호 방지(코드리뷰 #7): 위조/오염 문맥 — 주문은 저장됐고 홀드 링크만 거부됨
+      logger.warn(`[orderLedger] 홀드확정 문맥 무효(${holdResult}) — 주문은 저장: camp=${campaignHold.campaignId} app=${campaignHold.applicationId} os=${orderSubmissionId}`);
+    }
+  } else {
+    // 비참여 주문: 기존 경로 그대로(핫패스 무변경 — 트랜잭션·커넥션 점유 없음)
+    const insert = await db.query(ORDER_INSERT_SQL, orderInsertParams);
+    orderSubmissionId = insert.rows[0].id;
+    dedupKey = computeDedupKey({ ...orderData, orderSubmissionId });
+    await db.query(`UPDATE order_submissions SET dedup_key = $2 WHERE id = $1`, [orderSubmissionId, dedupKey]);
+  }
 
   let tabContext = null;
   let claim = { row: null, error: 'not_attempted' };
@@ -743,6 +783,7 @@ async function createOrderLedgerEntry(input) {
     tabContext,
     tabGid: (tabContext && tabContext.tabGid) || gid || '',
     headers: tabContext ? tabContext.headers : [],
+    holdResult, // 참여형 홀드 확정 결과('confirmed'|'late'|'tab_mismatch'|'error'|null)
   };
 }
 

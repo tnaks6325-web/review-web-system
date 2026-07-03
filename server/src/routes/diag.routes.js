@@ -2441,20 +2441,40 @@ router.post('/order-cancel', authMiddleware, adminOrMasterMiddleware, async (req
         [String(orderSubmissionId)]
       );
       const os = rows[0];
+      // ★ 참여형 홀드 반환(레드-블루-심판, 레드 #9): 이 주문으로 확정된 신청을 cancelled로 — 카운트 즉시 정합.
+      //   closed 자동 재오픈은 하지 않음(비단조 유지) — 필요 시 관리자가 status 라우트로 명시 재오픈.
+      //   실패해도 주문취소는 계속(홀드 정합은 관제 수동확정/취소로 교정 가능).
+      let campaignSeatReleased = null;
+      try {
+        const { rows: held } = await pool.query(
+          `UPDATE campaign_applications
+              SET status = 'cancelled', submitted_at = NULL, order_submission_id = NULL
+            WHERE order_submission_id = $1::uuid AND status = 'submitted'
+            RETURNING id, campaign_id`, [orderSubmissionId]);
+        await pool.query(
+          `UPDATE campaign_applications SET late_order_id = NULL
+            WHERE late_order_id = $1::uuid AND status <> 'submitted'`, [orderSubmissionId]);
+        if (held.length) {
+          campaignSeatReleased = held[0].campaign_id;
+          logger.info(`[order-cancel] 캠페인 확정 반환: camp=${campaignSeatReleased} app=${held[0].id} — closed 캠페인이면 수동 재오픈 검토`);
+        }
+      } catch (holdErr) {
+        logger.warn(`[order-cancel] 홀드 반환 실패(주문취소는 계속): ${holdErr.message}`);
+      }
       if (!os.sheet_row || os.mirror_status !== 'written') {
         // 시트 미반영 → 클리어 불필요. 점유한 빈 행 claim은 해제(재사용 허용; 쓰인 데이터 없음).
         try { await pool.query(`DELETE FROM sheet_row_claims WHERE order_id = $1::uuid`, [orderSubmissionId]); } catch (_) {}
         await pool.query(`UPDATE order_submissions SET mirror_status = 'canceled' WHERE id = $1`, [orderSubmissionId]);
-        return { cleared: false };
+        return { cleared: false, campaignSeatReleased };
       }
       await enqueue('order_cancel', { orderSubmissionId });
-      return { cleared: true };
+      return { cleared: true, campaignSeatReleased };
     });
     if (out && out.skipped) return res.status(409).json({ ok: false, error: '다른 편집/취소 진행 중 — 재시도하세요' });
     if (out && out.alreadyCanceled) return res.json({ ok: true, alreadyCanceled: true });
     if (out.cleared) require('../jobs/queuePump').kickQueuePump();
     require('../utils/sse').emitOrderLedger({ action: 'canceled', orderSubmissionId });
-    res.json({ ok: true, cleared: out.cleared });
+    res.json({ ok: true, cleared: out.cleared, campaignSeatReleased: out.campaignSeatReleased || null });
   } catch (err) { next(err); }
 });
 
