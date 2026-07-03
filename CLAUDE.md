@@ -9,7 +9,7 @@ GAS(Google Apps Script) 기반 리뷰 관리 시스템을 **Node.js Express + Po
 - **인증**: JWT (`/api/admin/login` 발급, `Authorization: Bearer` 헤더)
 
 ## 디렉터리 구조
-- `frontend/` — 정적 페이지(`admin.html` 관리자 대시보드, `portal.html` 업무포털, `search.html` 리뷰제출, `staff.html` AE담당자 등)와 `js/`, `css/`
+- `frontend/` — 정적 페이지(`admin.html` 관리자 대시보드, `portal.html` 업무포털, `search.html` 리뷰제출, `staff.html` AE담당자 등)와 `js/`, `css/`. `docs/prd-userflow.html` = 시스템 소개서(PRD·유저플로우·와이어프레임, 관리자 헤더 "시스템 소개서" 버튼에서 새창 열람)
 - `frontend/api.js` — GAS 호환 API 래퍼(`gasGet`/`gasPost`), 토큰은 `sessionStorage.admin_token`
 - `server/src/routes/` — Express 라우트(`*.routes.js`), `server/src/middleware/auth.middleware.js`에 역할별 미들웨어(master/admin/staff)
 - `server/migrations/` — DB 마이그레이션
