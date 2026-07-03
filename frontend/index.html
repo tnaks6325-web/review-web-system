@@ -225,6 +225,32 @@
     .results-title { font-size:.82rem; font-weight:700; color:var(--t2); display:flex; align-items:center; gap:4px; }
     .results-badge { font-size:.68rem; font-weight:700; background:var(--p-light); color:var(--p); padding:2px 8px; border-radius:10px; }
 
+    /* ─── 리뷰 내역 서브탭 (제출대기 / 제출완료) ─── */
+    .review-subtabs {
+      display:flex; gap:0; margin-bottom:10px;
+      background:#fff; border-radius:10px; padding:3px;
+      box-shadow:0 1px 4px rgba(0,0,0,.06); border:1px solid var(--border);
+    }
+    .review-subtab {
+      flex:1; padding:8px; border:none; background:transparent;
+      border-radius:8px; font-size:.78rem; font-weight:700;
+      color:var(--t3); cursor:pointer; transition:all .2s;
+      font-family:inherit; display:flex; align-items:center;
+      justify-content:center; gap:6px;
+    }
+    .review-subtab:hover { background:#F1F5F9; color:var(--t1); }
+    .review-subtab.active { background:var(--p); color:#fff; box-shadow:0 2px 8px rgba(49,130,246,.3); }
+    .review-subtab.active:hover { background:var(--p-dark); }
+    .review-subtab .cnt {
+      font-size:.64rem; font-weight:700; background:#EEF2F7; color:var(--t2);
+      border-radius:9px; padding:1px 7px; min-width:20px; text-align:center;
+    }
+    .review-subtab.active .cnt { background:rgba(255,255,255,.28); color:#fff; }
+    /* 제출완료 카드: 클릭 대상 아님 (제출 이동 없음) */
+    .result-card.done, .result-group-card.done { cursor:default; }
+    .result-card.done:hover, .result-group-card.done:hover { border-color:var(--border); box-shadow:none; }
+    .result-group-item-badge.done { background:var(--ok-light); color:#065F46; }
+
     /* ─── Section ─── */
     .home-section { padding:0 0 12px; }
     .home-section-title { font-size:.82rem; font-weight:700; color:var(--t2); margin-bottom:10px; display:flex; align-items:center; gap:6px; }
@@ -718,6 +744,15 @@
         <span class="results-title"><i class="fas fa-clipboard-list" style="color:var(--p)"></i> 리뷰 내역</span>
         <span id="reviewResultsCount" class="results-badge">0건</span>
       </div>
+      <!-- 제출대기 / 제출완료 서브탭 -->
+      <div class="review-subtabs">
+        <button type="button" class="review-subtab active" id="subtabPending" onclick="switchReviewSubTab('pending')">
+          제출대기 <span class="cnt" id="subtabPendingCount">0</span>
+        </button>
+        <button type="button" class="review-subtab" id="subtabDone" onclick="switchReviewSubTab('done')">
+          제출완료 <span class="cnt" id="subtabDoneCount">0</span>
+        </button>
+      </div>
       <div id="reviewResultsList">
         <div class="empty-state"><i class="fas fa-circle-notch fa-spin"></i> 불러오는 중...</div>
       </div>
@@ -969,116 +1004,208 @@ async function loadInlineProfile(user) {
 
 /* ═══════════════════════════════════════
    리뷰 내역 로드 (searchAll API 사용)
+   — 제출대기(기본) / 제출완료 서브탭
 ═══════════════════════════════════════ */
+let _reviewSubTab = 'pending';                       // 'pending' | 'done'
+let _reviewListData = { pending: [], done: [] };
+let _reviewListError = '';
+let _reviewListLoading = true;                       // 최초/재조회 중 스피너 유지용
+let _reviewListTruncated = false;                    // 서버 LIMIT(400)에 걸려 오래된 완료건이 잘렸을 가능성
+
 async function loadReviewList(user) {
+  const name = user.name || "";
+  const phone8 = user.phone8 || "";
+
+  _reviewListLoading = true;
+  renderReviewSubTab();
+  try {
+    // includeSubmitted=1 → 제출완료 건 포함 응답 (isSubmitted로 대기/완료 분리)
+    const res = await gasGet({ action: "searchAll", query: name, phone8, includeSubmitted: "1" });
+    if (res.error && !Array.isArray(res.results) && !Array.isArray(res.data)) throw new Error(res.error);
+    const results = res.data || res.results || [];
+    _reviewListData = {
+      pending: results.filter(item => !item.isSubmitted),
+      done:    results.filter(item => item.isSubmitted),
+    };
+    _reviewListTruncated = results.length >= 400; // 서버 LIMIT 도달 = 절단 가능성
+    _reviewListError = '';
+  } catch(e) {
+    _reviewListData = { pending: [], done: [] };
+    _reviewListError = e.message || '알 수 없는 오류';
+  }
+  _reviewListLoading = false;
+  renderReviewSubTab();
+}
+
+// bfcache 복원(제출 후 뒤로가기) 시 리뷰 내역 재조회 — 방금 제출한 건이 제출완료 탭에 반영되게
+window.addEventListener('pageshow', (e) => {
+  if (!e.persisted) return;
+  const u = getSavedUser();
+  if (u && u.name) loadReviewList(u);
+});
+
+/** 서브탭 전환 (제출대기 ↔ 제출완료) */
+function switchReviewSubTab(key) {
+  _reviewSubTab = key === 'done' ? 'done' : 'pending';
+  renderReviewSubTab();
+}
+
+/** yyyy.mm.dd 포맷 (제출완료 카드의 제출일 표시용) */
+function _fmtReviewDate(v) {
+  if (!v) return '';
+  const d = new Date(v);
+  if (isNaN(d.getTime())) return '';
+  return d.getFullYear() + '.' + String(d.getMonth() + 1).padStart(2, '0') + '.' + String(d.getDate()).padStart(2, '0');
+}
+
+/** 대기 건 배지 텍스트 — 다중 캡처 슬롯 부분 제출이면 "n/m 제출"로 진행 표시 */
+function _pendingBadgeText(item) {
+  const total = Array.isArray(item.captureSlots) ? item.captureSlots.length : 0;
+  const done = Array.isArray(item.submittedSlots) ? Math.min(item.submittedSlots.length, total) : 0;
+  if (total > 1 && done > 0) return done + "/" + total + " 제출";
+  return "미제출";
+}
+
+/** 현재 서브탭 기준 리뷰 내역 렌더 */
+function renderReviewSubTab() {
   const listEl = document.getElementById("reviewResultsList");
   const countEl = document.getElementById("reviewResultsCount");
   if (!listEl) return;
 
-  const name = user.name || "";
-  const phone8 = user.phone8 || "";
+  const isDone = _reviewSubTab === 'done';
+  const btnPending = document.getElementById("subtabPending");
+  const btnDone = document.getElementById("subtabDone");
+  if (btnPending) btnPending.classList.toggle('active', !isDone);
+  if (btnDone) btnDone.classList.toggle('active', isDone);
+  const cntPending = document.getElementById("subtabPendingCount");
+  const cntDone = document.getElementById("subtabDoneCount");
+  if (cntPending) cntPending.textContent = _reviewListData.pending.length;
+  if (cntDone) cntDone.textContent = _reviewListData.done.length;
 
-  try {
-    const res = await gasGet({ action: "searchAll", query: name, phone8 });
-    const results = res.data || res.results || [];
+  // 로딩 중에는 스피너 유지 (빈 상태 문구로 착각하지 않게)
+  if (_reviewListLoading) {
+    if (countEl) countEl.textContent = "-";
+    listEl.innerHTML = `<div class="empty-state"><i class="fas fa-circle-notch fa-spin"></i> 불러오는 중...</div>`;
+    return;
+  }
 
-    // 미제출 건만 필터
-    const pending = results.filter(item => !item.isSubmitted);
-    if (countEl) countEl.textContent = pending.length + "건";
+  if (_reviewListError) {
+    if (countEl) countEl.textContent = "0건";
+    listEl.innerHTML = `<div class="empty-state"><i class="fas fa-exclamation-circle"></i>리뷰 내역 로드 실패<br><span style="font-size:.72rem;color:var(--t4)">${escHtml(_reviewListError)}</span></div>`;
+    return;
+  }
 
-    if (pending.length === 0) {
-      listEl.innerHTML = `<div class="empty-state"><i class="fas fa-clipboard-list"></i>아직 참여 내역이 없습니다<br><span style="font-size:.72rem;color:var(--t4)">신규 캠페인이 배정되면 이곳에 표시됩니다</span></div>`;
-      return;
-    }
+  const list = isDone ? _reviewListData.done : _reviewListData.pending;
+  if (countEl) countEl.textContent = list.length + "건";
 
-    // 그룹핑: 같은 이름 + 같은 인덱스(sheetId+tabName) 기준
-    const groups = new Map();
-    pending.forEach(item => {
-      const n = (item.displayName || "이름 없음").trim();
-      const sid = (item.sheetId || "").trim();
-      const tab = (item.tabName || "").trim();
-      const key = n + "\x00" + sid + "\x00" + tab;
-      if (!groups.has(key)) groups.set(key, []);
-      groups.get(key).push(item);
-    });
+  if (list.length === 0) {
+    listEl.innerHTML = isDone
+      ? `<div class="empty-state"><i class="fas fa-clipboard-check"></i>제출 완료한 내역이 없습니다<br><span style="font-size:.72rem;color:var(--t4)">리뷰를 제출하면 이곳에 표시됩니다</span></div>`
+      : `<div class="empty-state"><i class="fas fa-clipboard-list"></i>아직 참여 내역이 없습니다<br><span style="font-size:.72rem;color:var(--t4)">신규 캠페인이 배정되면 이곳에 표시됩니다</span></div>`;
+    return;
+  }
 
-    listEl.innerHTML = "";
-    groups.forEach((items, groupKey) => {
-      const itemName = groupKey.split("\x00")[0];
-      const isSingle = items.length === 1;
+  // 그룹핑: 같은 이름 + 같은 인덱스(sheetId+tabName) 기준
+  const groups = new Map();
+  list.forEach(item => {
+    const n = (item.displayName || "이름 없음").trim();
+    const sid = (item.sheetId || "").trim();
+    const tab = (item.tabName || "").trim();
+    const key = n + "\x00" + sid + "\x00" + tab;
+    if (!groups.has(key)) groups.set(key, []);
+    groups.get(key).push(item);
+  });
 
-      if (isSingle) {
-        const item = items[0];
-        const roundBadge = item.round
-          ? `<span style="display:inline-block;font-size:.6rem;font-weight:700;padding:1px 6px;border-radius:10px;background:#e8f1fe;color:#1b64da;border:1px solid #cce0fb;margin-left:4px;vertical-align:middle">${escHtml(item.round)}</span>`
-          : "";
+  listEl.innerHTML = "";
+  groups.forEach((items, groupKey) => {
+    const itemName = groupKey.split("\x00")[0];
+    const isSingle = items.length === 1;
 
+    if (isSingle) {
+      const item = items[0];
+      const badgeHtml = isDone
+        ? `<span class="status-badge-submitted">제출완료</span>`
+        : `<span class="status-badge-pending">${escHtml(_pendingBadgeText(item))}</span>`;
+      const roundBadge = item.round
+        ? `<span style="display:inline-block;font-size:.6rem;font-weight:700;padding:1px 6px;border-radius:10px;background:#e8f1fe;color:#1b64da;border:1px solid #cce0fb;margin-left:4px;vertical-align:middle">${escHtml(item.round)}</span>`
+        : "";
+
+      const taskDate = item.startDate || "";
+      const taskName = item.displayNameTC || item.tcDisplayName || item.tabName || item.campaignName || "";
+      const optionName = item.productName || "";
+      const taskParts = [];
+      if (taskDate) taskParts.push(taskDate);
+      if (taskName) taskParts.push(taskName);
+      if (optionName) taskParts.push("옵션:" + optionName);
+      const taskLabel = taskParts.join(" ");
+
+      // 제출완료 건은 제출일(대표 리뷰 이미지 연결 시각)을 함께 표시
+      const doneDate = isDone ? _fmtReviewDate(item.reviewFileAt) : '';
+      const subLabel = escHtml(itemName) + (doneDate ? ` <span style="color:var(--t4)">· 제출 ${doneDate}</span>` : '');
+
+      const productHtml = taskLabel
+        ? `<div class="result-name result-product-name">${escHtml(taskLabel)}${roundBadge}</div>
+           <div class="result-product-label">${subLabel}</div>`
+        : `<div class="result-name result-product-name">${escHtml(itemName)}${roundBadge}</div>
+           <div class="result-product-label ${doneDate ? '' : 'result-product-empty'}">${doneDate ? `<span style="color:var(--t4)">제출 ${doneDate}</span>` : '참여 작업 정보 없음'}</div>`;
+
+      const card = document.createElement("div");
+      card.className = "result-card" + (isDone ? " done" : "");
+      card.innerHTML = `
+        <div class="result-avatar"><i class="fas ${isDone ? 'fa-check' : 'fa-user'}" style="font-size:.8rem;color:${isDone ? 'var(--ok)' : 'var(--p)'}"></i></div>
+        <div class="result-body">${productHtml}</div>
+        <div class="result-right">
+          ${badgeHtml}
+          ${isDone ? '' : '<i class="fas fa-chevron-right result-chevron"></i>'}
+        </div>`;
+      if (!isDone) card.addEventListener("click", () => goToSubmit(items));
+      listEl.appendChild(card);
+    } else {
+      // 다건 그룹 카드
+      const groupCard = document.createElement("div");
+      groupCard.className = "result-group-card" + (isDone ? " done" : "");
+      const campLabel = items[0].displayNameTC || items[0].tcDisplayName || items[0].tabName || items[0].campaignName || "";
+
+      const itemLines = items.map(item => {
         const taskDate = item.startDate || "";
-        const taskName = item.tcDisplayName || item.tabName || item.campaignName || "";
+        const taskName = item.displayNameTC || item.tcDisplayName || item.tabName || item.campaignName || "";
         const optionName = item.productName || "";
+        const roundTxt = item.round ? ` · ${item.round}` : "";
         const taskParts = [];
         if (taskDate) taskParts.push(taskDate);
         if (taskName) taskParts.push(taskName);
         if (optionName) taskParts.push("옵션:" + optionName);
-        const taskLabel = taskParts.join(" ");
+        const taskLabel = taskParts.join(" ") || "작업 정보 없음";
+        const doneDate = isDone ? _fmtReviewDate(item.reviewFileAt) : '';
+        return `<div class="result-group-item">
+          <i class="fas ${isDone ? 'fa-check' : 'fa-box'}" style="color:${isDone ? 'var(--ok)' : 'var(--p)'};font-size:.72rem;flex-shrink:0"></i>
+          <span class="result-group-item-label">${escHtml(taskLabel)}${escHtml(roundTxt)}${doneDate ? ` <span style="color:var(--t4)">· 제출 ${doneDate}</span>` : ''}</span>
+          <span class="result-group-item-badge${isDone ? ' done' : ''}">${isDone ? '제출완료' : escHtml(_pendingBadgeText(item))}</span>
+        </div>`;
+      }).join("");
 
-        const productHtml = taskLabel
-          ? `<div class="result-name result-product-name">${escHtml(taskLabel)}${roundBadge}</div>
-             <div class="result-product-label">${escHtml(itemName)}</div>`
-          : `<div class="result-name result-product-name">${escHtml(itemName)}${roundBadge}</div>
-             <div class="result-product-label result-product-empty">참여 작업 정보 없음</div>`;
-
-        const card = document.createElement("div");
-        card.className = "result-card";
-        card.innerHTML = `
-          <div class="result-avatar"><i class="fas fa-user" style="font-size:.8rem;color:var(--p)"></i></div>
-          <div class="result-body">${productHtml}</div>
-          <div class="result-right">
-            <span class="status-badge-pending">미제출</span>
-            <i class="fas fa-chevron-right result-chevron"></i>
-          </div>`;
-        card.addEventListener("click", () => goToSubmit(items));
-        listEl.appendChild(card);
-      } else {
-        // 다건 그룹 카드
-        const groupCard = document.createElement("div");
-        groupCard.className = "result-group-card";
-        const campLabel = items[0].tcDisplayName || items[0].tabName || items[0].campaignName || "";
-
-        const itemLines = items.map(item => {
-          const taskDate = item.startDate || "";
-          const taskName = item.tcDisplayName || item.tabName || item.campaignName || "";
-          const optionName = item.productName || "";
-          const roundTxt = item.round ? ` · ${item.round}` : "";
-          const taskParts = [];
-          if (taskDate) taskParts.push(taskDate);
-          if (taskName) taskParts.push(taskName);
-          if (optionName) taskParts.push("옵션:" + optionName);
-          const taskLabel = taskParts.join(" ") || "작업 정보 없음";
-          return `<div class="result-group-item">
-            <i class="fas fa-box" style="color:var(--p);font-size:.72rem;flex-shrink:0"></i>
-            <span class="result-group-item-label">${escHtml(taskLabel)}${escHtml(roundTxt)}</span>
-            <span class="result-group-item-badge">미제출</span>
-          </div>`;
-        }).join("");
-
-        groupCard.innerHTML = `
-          <div class="result-group-header">
-            <i class="fas fa-user-circle" style="font-size:1.4rem;color:var(--p);flex-shrink:0"></i>
-            <div style="flex:1;min-width:0">
-              <div class="result-group-name">${escHtml(campLabel || itemName)}</div>
-              ${campLabel ? `<div style="font-size:.68rem;color:var(--t3);margin-top:1px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${escHtml(itemName)}</div>` : ""}
-            </div>
-            <span class="result-group-badge"><i class="fas fa-layer-group"></i> ${items.length}건</span>
-            <i class="fas fa-chevron-right" style="color:var(--t3);font-size:.8rem;flex-shrink:0"></i>
+      groupCard.innerHTML = `
+        <div class="result-group-header">
+          <i class="fas fa-user-circle" style="font-size:1.4rem;color:${isDone ? 'var(--ok)' : 'var(--p)'};flex-shrink:0"></i>
+          <div style="flex:1;min-width:0">
+            <div class="result-group-name">${escHtml(campLabel || itemName)}</div>
+            ${campLabel ? `<div style="font-size:.68rem;color:var(--t3);margin-top:1px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${escHtml(itemName)}</div>` : ""}
           </div>
-          <div class="result-group-items">${itemLines}</div>`;
-        groupCard.addEventListener("click", () => goToSubmit(items));
-        listEl.appendChild(groupCard);
-      }
-    });
-  } catch(e) {
-    listEl.innerHTML = `<div class="empty-state"><i class="fas fa-exclamation-circle"></i>리뷰 내역 로드 실패<br><span style="font-size:.72rem;color:var(--t4)">${escHtml(e.message)}</span></div>`;
+          <span class="result-group-badge"><i class="fas fa-layer-group"></i> ${items.length}건</span>
+          ${isDone ? '' : '<i class="fas fa-chevron-right" style="color:var(--t3);font-size:.8rem;flex-shrink:0"></i>'}
+        </div>
+        <div class="result-group-items">${itemLines}</div>`;
+      if (!isDone) groupCard.addEventListener("click", () => goToSubmit(items));
+      listEl.appendChild(groupCard);
+    }
+  });
+
+  // 서버 LIMIT 도달 시(장기 활동 리뷰어) 오래된 완료 내역이 잘릴 수 있음을 고지
+  if (isDone && _reviewListTruncated) {
+    const note = document.createElement("div");
+    note.style.cssText = "text-align:center;padding:8px 4px 2px;font-size:.7rem;color:var(--t4)";
+    note.textContent = "내역이 많아 오래된 제출완료 건 일부는 표시되지 않을 수 있습니다";
+    listEl.appendChild(note);
   }
 }
 
