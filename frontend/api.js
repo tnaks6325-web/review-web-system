@@ -328,6 +328,8 @@ const _ACTION_MAP = {
   'mappingFields': { method: 'GET',  path: '/api/mapping/fields' },
   'mappingGet':    { method: 'GET',  path: '/api/mapping' },
   'mappingSave':   { method: 'POST', path: '/api/mapping' },
+  'mappingCoverage': { method: 'GET', path: '/api/mapping/coverage' },
+  'mappingDrift':    { method: 'GET', path: '/api/mapping/drift' },
 };
 
 // ═══════════════════════════════════════════════════════════

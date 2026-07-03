@@ -21,6 +21,12 @@ GAS(Google Apps Script) 기반 리뷰 관리 시스템을 **Node.js Express + Po
 - `review_submissions`(032, A-2): 리뷰 이미지 파일 단위 원장(탭/행/리뷰어/파일ID/제출시각/출처). `file_id` 유니크 업서트로 재실행 안전.
 - 과거에 루트로 샌 캡처는 관리자 "리뷰 캡처 정리"(`POST /api/drive/relocate-orphan-reviews`)로 `[리뷰]` 폴더 이동 + 파일명 이름↔행 결정적 링크 백필(모호하면 링크 안 함).
 
+### 컬럼감지 SoT (컬럼 판정 DB화 1단계) — 매핑 우선 · 키워드는 부트스트랩/폴백
+- 리뷰 인덱스의 컬럼 감지(`columnResolver.parseTabRows`, 두 빌더 공용)는 **DB매핑(`tab_column_mappings`) 우선 → 키워드 폴백**. DB 오버라이드 6필드 = recipient/review_submit/product/phone/round/payment. **name은 PII 가드로 영구 키워드 전용**(테스트 케이스 9). 매핑은 재앵커(저장 헤더==현재 헤더)·범위가드 통과 시만 신뢰.
+- **자동기록(detection snapshot)**: `COLUMN_MAPPING_AUTO_RECORD=1`이면 빌더가 매핑 없는 탭에서 "방금 키워드가 고른 컬럼"을 `recordDetectedMappings`로 기록(원자 `WHERE NOT EXISTS`+`ON CONFLICT DO NOTHING` = **수동 매핑 절대 미덮어씀**, `updated_by='auto:detect'`, **checksum 무효화 없음** — 기록≡키워드 결과라 재파싱 불필요). 전 탭 백필 = 플래그 켜고 `smart-build/run {force:true}` 1회(또는 04:00 전체 리빌드 대기). ★ `autoGuessField`(매핑 UI 추측) 기반 백필 금지 — resolver와 시맨틱 불일치(예: '입금자명').
+- **관측(migration 044)**: 빌더가 `index_master.detect_source`(필드별 col/header/src)·`detect_drift`(매핑 거부 사유)·`detected_at` 기록 + 드리프트 `logger.warn`(무로그 폴백 해소). `GET /api/mapping/coverage`·`/drift`(admin/master), 관리자 설정탭 "컬럼매핑 현황" 카드, 캠페인탭관리 인원/제출 셀 ⚠배지. 교정은 raw-mirror.html 컬럼 매핑 에디터(`?sheetId=&gid=`로 탭 preselect+에디터 자동 오픈).
+- **무변경 보장**: 기록된 매핑 ≡ 키워드 결과(회귀가드 `tests/columnResolver.test.js` 케이스 12 = 기록→재파싱 deepEqual, `tests/columnMappingRecord.test.js`). 2단계(집계 소스 DB 원장 전환, `tab_configs.source_of_truth` 활용)는 1단계 게이트 통과 후 별도 작업.
+
 ### 구매양식 "제공정보" 추가안내 (제공정보 메모 · 회사 사업자번호)
 - `tab_configs.provider_memo`(034): 탭별 자유 텍스트 "제공정보 메모"(진행방식 안내·특이사항 통합). 관리자 대시보드 탭설정 팝오버에서 편집. 구매양식 제출화면(`search.html`)의 "📦 제공정보" 카드에 표시되며 **공란이면 영역 미노출**.
 - `app_settings.company_business_no`: 회사 공통 사업자번호 1개(관리자 "설정" 탭에서 편집, `POST /api/tab/company-business-no` = admin/master). 진행방식(`income_type`)이 **현영 포함(사업자현영)** 인 탭에서만 "지출증빙 현금영수증 발행 필수" 안내와 함께 노출.

@@ -245,6 +245,76 @@ async function getTabColumnIndexMap(sheetId, tabGid) {
   return m.size ? m : null;
 }
 
+// ═══════════════════════════════════════════════════════════
+// 자동 기록 (detection snapshot) — 컬럼 판정 DB화 1단계의 백필 경로
+//
+//   빌더가 방금 파싱하며 "키워드가 실제로 고른 컬럼"(columnResolver meta)을 그대로 기록한다.
+//   ★ autoGuessField/raw_sheet_tabs 헤더 기반 백필 금지 — columnResolver와 시맨틱이 달라
+//     (예: '입금자명'은 resolver가 PAYMENT_EXCLUDE로 제외하지만 autoGuess는 payment로 매치)
+//     기록≠실동작이 되어 숫자가 조용히 바뀐다. 기록은 반드시 "실제 판정 결과"만.
+//   ★ 수동 매핑 절대 미덮어씀: 그 탭에 행이 하나라도 있으면(수동 저장 포함) 전체 skip
+//     (원자 WHERE NOT EXISTS + ON CONFLICT DO NOTHING — saveMapping(replace-all)과 경합해도 수동이 승자).
+//   ★ saveMapping과 달리 checksum 무효화를 하지 않는다 — 기록된 매핑 ≡ 방금 키워드 결과라
+//     재파싱이 불필요(무변경)하고, 전 탭 백필 시 쿼터 폭풍을 막는다.
+// ═══════════════════════════════════════════════════════════
+
+// 자동 기록 대상 = columnResolver가 DB 오버라이드를 소비하는 6필드만.
+// name(PII 가드)·url/날짜(resolver 미소비 → 죽은 매핑 방지)는 기록하지 않는다.
+const RECORDABLE_FIELDS = ['recipient', 'review_submit', 'product', 'phone', 'round', 'payment'];
+
+let _testPool = null;
+function __setPoolForTest(p) { _testPool = p || null; }
+function _db() { return _testPool || pool; }
+
+async function recordDetectedMappings({ sheetId, tabGid, tabName, meta, by = 'auto:detect' } = {}) {
+  if (!sheetId || tabGid === undefined || tabGid === null || tabGid === '') return { skipped: true, reason: 'no-gid' };
+  if (!meta || !meta.fields) return { skipped: true, reason: 'no-meta' };
+  const gid = String(tabGid);
+
+  const seenCols = new Set();
+  const candidates = [];
+  for (const field of RECORDABLE_FIELDS) {
+    const f = meta.fields[field];
+    if (!f || f.src !== 'keyword' || !Number.isInteger(f.col) || f.col < 0) continue;
+    if (seenCols.has(f.col)) continue; // 같은 컬럼 중복 매핑 방지(결정적)
+    seenCols.add(f.col);
+    candidates.push({
+      colIndex: f.col,
+      header: f.header != null ? String(f.header) : '',
+      dbField: field,
+      owner: defaultOwnerOf(field),
+    });
+  }
+  if (!candidates.length) return { skipped: true, reason: 'no-candidates' };
+
+  const params = [sheetId, gid, tabName || null, by];
+  const valuesSql = candidates.map((c) => {
+    const base = params.length;
+    params.push(c.colIndex, c.header, c.dbField, c.owner);
+    return `($${base + 1}::int, $${base + 2}::text, $${base + 3}::text, $${base + 4}::text)`;
+  }).join(', ');
+
+  try {
+    const { rowCount } = await _db().query(
+      `INSERT INTO tab_column_mappings
+         (sheet_id, tab_gid, tab_name, col_index, header_text, db_field, owner, updated_at, updated_by)
+       SELECT $1, $2, $3, v.col_index, v.header_text, v.db_field, v.owner, NOW(), $4
+       FROM (VALUES ${valuesSql}) AS v(col_index, header_text, db_field, owner)
+       WHERE NOT EXISTS (SELECT 1 FROM tab_column_mappings t WHERE t.sheet_id = $1 AND t.tab_gid = $2)
+       ON CONFLICT (sheet_id, tab_gid, col_index) DO NOTHING`,
+      params
+    );
+    if (rowCount > 0) {
+      logger.info(`[mapping] 컬럼매핑 자동기록 — sheet=${String(sheetId).slice(0, 12)} gid=${gid} tab=${tabName} fields=${candidates.map(c => `${c.dbField}:${c.colIndex}`).join(',')}`);
+    }
+    return { recorded: rowCount };
+  } catch (err) {
+    // best-effort — 기록 실패가 빌드를 실패시키면 안 됨
+    logger.warn(`[mapping] 컬럼매핑 자동기록 실패(무시): ${err.message}`);
+    return { skipped: true, reason: 'error', error: err.message };
+  }
+}
+
 module.exports = {
   STANDARD_FIELDS,
   OWNERS,
@@ -254,4 +324,7 @@ module.exports = {
   getMapping,
   saveMapping,
   getTabColumnIndexMap,
+  recordDetectedMappings,
+  RECORDABLE_FIELDS,
+  __setPoolForTest,
 };
