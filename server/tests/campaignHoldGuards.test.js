@@ -1,0 +1,67 @@
+/**
+ * campaignHoldGuards.test.js — 참여형 홀드 방어 구조 회귀가드 (레드-블루-심판 최종안 고정)
+ * 실행: node tests/campaignHoldGuards.test.js
+ * 방식: 소스 grep (driveLaneCallsites 스타일 — DB/서버 기동 불필요)
+ */
+const assert = require('assert');
+const fs = require('fs');
+const path = require('path');
+const read = (p) => fs.readFileSync(path.join(__dirname, '..', p), 'utf8');
+
+const mig = read('migrations/045_reviewer_participation.sql');
+const routes = read('src/routes/campaign.routes.js');
+const hold = read('src/services/campaignHold.service.js');
+const ledger = read('src/services/orderLedger.service.js');
+const rl = read('src/middleware/rateLimit.middleware.js');
+const state = read('src/services/campaignState.service.js');
+const appJs = read('src/app.js');
+
+let passed = 0;
+function ok(name, cond) { assert(cond, name); passed++; console.log('  ✓ ' + name); }
+
+// 심판 J1: order_submissions.id=UUID — BIGINT 링크 금지
+ok('045: order_submission_id UUID', /order_submission_id UUID/.test(mig));
+ok('045: late_order_id UUID', /late_order_id\s+UUID/.test(mig));
+ok('045: hold_token 기본값 없음(NULL — 빈문자 매칭함정 금지)', !/hold_token\s+TEXT\s+DEFAULT/.test(mig));
+// 레드 #1: 레거시(confirmed) 부분 유니크 복원 — 구 UNIQUE DROP의 동시성 방어 회귀 차단
+ok('045: uq_campaign_apps_legacy(confirmed) 존재', /uq_campaign_apps_legacy[\s\S]*?WHERE status = 'confirmed'/.test(mig));
+ok('045: submitted_at CHECK 존재(분모 오염 → 시끄러운 에러)', /campaign_apps_submitted_at_check/.test(mig));
+ok('045: 스윕 부분 인덱스 존재', /idx_campaign_apps_sweep[\s\S]*?WHERE status = 'applied'/.test(mig));
+// 레드 #3: apply 잠금 계층(캠페인 행 직렬화 → write-skew 차단)
+ok('apply: 캠페인 행 FOR UPDATE', /_applyParticipation[\s\S]*?FROM recruit_campaigns WHERE id = \$1 FOR UPDATE/.test(routes));
+ok('apply: phone8 advisory xact lock', /pg_advisory_xact_lock\(hashtext\('camp_hold_phone:/.test(routes));
+ok('apply: 23505 백스톱(duplicate_hold)', /duplicate_hold/.test(routes));
+ok('apply: 당일 재신청 차단(상태 무관 이력 검사)', /already_today/.test(routes));
+// 레드 #5·심판 J2: 확정과 스윕의 grace 경계 단일 출처 + SAVEPOINT 격리(주문 손실 0)
+ok('hold: HOLD_GRACE_SEC 단일 정의', (hold.match(/HOLD_GRACE_SEC = parseInt/g) || []).length === 1);
+ok('hold: confirm은 applied+grace 경계', /status = 'applied'[\s\S]*?expires_at > NOW\(\) - make_interval/.test(hold));
+ok('hold: sweep SKIP LOCKED(확정 tx와 교착 0)', /FOR UPDATE SKIP LOCKED/.test(hold));
+ok('ledger: SAVEPOINT hold_confirm(주문 손실 0)', /SAVEPOINT hold_confirm/.test(ledger) && /ROLLBACK TO SAVEPOINT hold_confirm/.test(ledger));
+ok('ledger: 비참여 경로 무트랜잭션 유지', /비참여 주문: 기존 경로 그대로/.test(ledger));
+// 레드 #2: 공개 화이트리스트에 비밀 필드 부재
+{
+  const m = routes.match(/PUBLIC_FIELDS_PARTICIPATION = \[[\s\S]*?\];/);
+  for (const secret of ['work_detail', 'chat_url', 'landing_url', 'recruit_total', 'max_slots', 'current_slots', 'notes', 'description']) {
+    ok(`publicFields(참여형): ${secret} 미포함`, m && !m[0].includes(`'${secret}'`));
+  }
+}
+// 레드 #11: work-detail·cancel 게이트에 hold_token 빈값 벨트
+ok('work-detail: hold_token <> \'\' 벨트', /work-detail[\s\S]{0,2000}hold_token = \$3 AND hold_token <> ''/.test(routes));
+// 심판 J4: 전역 리미터 skip은 baseUrl+path 판정(마운트 스트리핑 함정)
+ok('rateLimit: baseUrl+path 판정', /req\.baseUrl/.test(rl));
+// 레드 #4: trust proxy 1홉(공용버킷 방지) + 참여 리미터 phone8 키
+ok('app: trust proxy 설정', /app\.set\('trust proxy', 1\)/.test(appJs));
+ok('routes: 리미터 phone8 keyGenerator', /keyGenerator: _p8Key/.test(routes));
+// 레드 #10: 24:00 허용 + window_invalid 신호
+ok("state: '24:00' → 1440", /hh === 24 && mm === 0/.test(state));
+ok("state: stateReason 'window_invalid'", /window_invalid/.test(state));
+// 심판 J7: COALESCE 편집 활성화 우회 차단(양 라우트 게이트)
+ok('활성화 게이트: 2개 라우트 적용', (routes.match(/_participationActivationErrors\(/g) || []).length >= 3); // 정의 1 + 호출 2
+// 레드 #7: 수동확정 선-취소 + 이중확정 거부
+ok('수동확정: applied 선-취소', /admin\/:id\/confirm[\s\S]*?SET status = 'cancelled'\s+WHERE campaign_id = \$1 AND phone8 = \$2 AND id <> \$3 AND status = 'applied'/.test(routes));
+// 레드 #8③: closed 영속 3소비처(자동확정·수동확정·스윕)
+ok('closed 영속: confirmHoldInTx → maybePersistClosed', /maybePersistClosed\(client, campaignId\)/.test(hold));
+ok('closed 영속: 수동확정 → maybePersistClosed', /maybePersistClosed\(client, id\)/.test(routes));
+ok('closed 영속: 스윕 백스톱', /closed 영속 백스톱/.test(hold));
+
+console.log(`\n✅ campaignHoldGuards: ${passed}개 통과`);

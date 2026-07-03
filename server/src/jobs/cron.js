@@ -321,7 +321,29 @@ function startCronJobs() {
     }
   }, { timezone: 'Asia/Seoul' });
 
-  logger.info(`[CRON] 스케줄러 등록 완료: dirty=${process.env.INDEX_DIRTY_CRON_ENABLED === 'true' ? '15분' : 'OFF(smartBuild단일)'}, 인덱스=${schedule}, 전체재빌드=매일04시, 큐워커=30초, 자동복구=매시간, 정리=매일03시, 이상로그정리=매일03시30분`);
+  // ── 참여형 캠페인 홀드 만료 스윕: 매분 (DB-only — 시트 쿼터 0) ──
+  //   판정 SoT는 시각 기준(status='applied' AND expires_at>now)이라 스윕 지연·미실행은 카운터를 오염시키지 않는다.
+  //   역할: 정리(expired 마킹) + late_order_id 백필(관제 수동확정 목록) + closed 영속 백스톱.
+  //   멀티인스턴스: withJobLock('campaign_hold_sweep') — 기존 락 이름들과 키 비충돌 확인(심판 실측).
+  let holdSweepRunning = false;
+  cron.schedule('* * * * *', async () => {
+    if (holdSweepRunning) return;
+    holdSweepRunning = true;
+    try {
+      const { withJobLock } = require('../utils/jobLock');
+      const { sweepExpiredHolds } = require('../services/campaignHold.service');
+      const r = await withJobLock('campaign_hold_sweep', () => sweepExpiredHolds(pool));
+      if (r && !r.skipped && ((r.expired || 0) > 0 || (r.closedPersisted || 0) > 0)) {
+        logger.info(`[CRON-HoldSweep] expired=${r.expired} closedPersisted=${r.closedPersisted}`);
+      }
+    } catch (err) {
+      logger.error(`[CRON-HoldSweep] ${err.message}`);
+    } finally {
+      holdSweepRunning = false;
+    }
+  }, { timezone: 'Asia/Seoul' });
+
+  logger.info(`[CRON] 스케줄러 등록 완료: dirty=${process.env.INDEX_DIRTY_CRON_ENABLED === 'true' ? '15분' : 'OFF(smartBuild단일)'}, 인덱스=${schedule}, 전체재빌드=매일04시, 큐워커=30초, 자동복구=매시간, 정리=매일03시, 이상로그정리=매일03시30분, 홀드스윕=매분`);
 }
 
 module.exports = { startCronJobs };

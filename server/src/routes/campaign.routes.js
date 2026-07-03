@@ -10,6 +10,9 @@ const { logger } = require('../utils/logger');
 const {
   computeCampaignState,
   fetchCampaignCounts,
+  timeStrToMinutes,
+  kstDayStartUtc,
+  kstTodayAt,
 } = require('../services/campaignState.service');
 const { sanitizeWorkDetail } = require('../utils/sanitizeGuideHtml');
 
@@ -76,14 +79,32 @@ function _isAdminReq(req) {
 }
 
 // 오픈 러시 방어: 무인증 참여 엔드포인트 rate limit (신청 가부의 SoT는 서버 재검사)
+//   키 = phone8(있으면) — 공유 NAT/프록시에서도 개인별 버킷. 없으면 req.ip(app.js trust proxy 1홉 전제).
+//   ※ express-rate-limit 7.5.1엔 ipKeyGenerator export가 없다(심판 실측) — req.ip 직접 사용.
+function _p8Key(req) {
+  const src = (req.body && (req.body.phone8 || req.body.phone)) || (req.query && req.query.phone8) || '';
+  const p8 = String(src).replace(/\D/g, '').slice(-8);
+  return p8.length === 8 ? 'p8:' + p8 : 'ip:' + (req.ip || 'unknown');
+}
 const applyLimiter = rateLimit({
-  windowMs: 60 * 1000, max: 12, standardHeaders: true, legacyHeaders: false,
+  windowMs: 60 * 1000, max: 12, standardHeaders: true, legacyHeaders: false, keyGenerator: _p8Key,
   message: { ok: false, error: '요청이 너무 많습니다. 잠시 후 다시 시도하세요.', reason: 'rate_limited' },
 });
 const detailLimiter = rateLimit({
-  windowMs: 60 * 1000, max: 40, standardHeaders: true, legacyHeaders: false,
+  windowMs: 60 * 1000, max: 40, standardHeaders: true, legacyHeaders: false, keyGenerator: _p8Key,
   message: { ok: false, error: '요청이 너무 많습니다. 잠시 후 다시 시도하세요.', reason: 'rate_limited' },
 });
+
+/** 참여형 활성화 게이트(레드 #6·#10): gid·시간창·일일건수 없인 active 불가 */
+function _participationActivationErrors(c) {
+  const errs = [];
+  if (!c.linked_sheet_id || !c.linked_tab_gid) errs.push('연결 시트/탭 gid 필수(탭 리네임 내성)');
+  const s = timeStrToMinutes(c.window_start);
+  const e = timeStrToMinutes(c.window_end);
+  if (s === null || e === null || e <= s) errs.push('구매시간창(window_start < window_end) 필수');
+  if (!(Number(c.daily_limit) >= 1)) errs.push('일일진행건수(daily_limit ≥ 1) 필수');
+  return errs;
+}
 
 // GET /api/campaign/list 5초 서버 캐시(rows+counts만 캐시, 상태는 매 요청 신선한 시각으로 재계산)
 let _listCache = { at: 0, rows: null, countsMap: null };
@@ -249,7 +270,7 @@ router.get('/:id/work-detail', detailLimiter, async (req, res, next) => {
     const { rows: apps } = await pool.query(
       `SELECT id, status, expires_at, applied_at, submitted_at
          FROM campaign_applications
-        WHERE campaign_id = $1 AND phone8 = $2 AND hold_token = $3
+        WHERE campaign_id = $1 AND phone8 = $2 AND hold_token = $3 AND hold_token <> ''
         ORDER BY applied_at DESC
         LIMIT 1`,
       [id, p8, token]
@@ -307,7 +328,7 @@ router.post('/:id/cancel', applyLimiter, async (req, res, next) => {
     const { rows } = await pool.query(
       `UPDATE campaign_applications
           SET status = 'cancelled'
-        WHERE campaign_id = $1 AND phone8 = $2 AND hold_token = $3
+        WHERE campaign_id = $1 AND phone8 = $2 AND hold_token = $3 AND hold_token <> ''
           AND status = 'applied'
         RETURNING id`,
       [id, p8, token]
@@ -322,13 +343,107 @@ router.post('/:id/cancel', applyLimiter, async (req, res, next) => {
   }
 });
 
-// 참여형(홀드) 신청 — 원자 검사+홀드 생성. 구현은 아래에서 정의(레드-블루-심판 최종 구조).
-async function _applyParticipation(req, res, next, camp) {
-  return res.status(503).json({ ok: false, error: '참여 신청 준비 중입니다.', reason: 'not_ready' });
+// 참여형(홀드) 신청 — 원자 검사+홀드 생성 (레드-블루-심판 최종 구조)
+//   잠금 계층(고정): ① recruit_campaigns 행 FOR UPDATE → ② phone8 advisory(xact) → ③ INSERT.
+//   주문확정(confirmHoldInTx)·수동확정도 ①을 먼저 잡으므로 write-skew(레드 #3)와 교착이 동시에 제거된다.
+async function _applyParticipation(req, res, next, campPre) {
+  const id = campPre.id;
+  const name = String(req.body.name || '').trim().slice(0, 100);
+  const rawPhone = String(req.body.phone || '').trim().slice(0, 40);
+  const p8 = rawPhone.replace(/\D/g, '').slice(-8);
+  if (!name) return res.status(400).json({ ok: false, error: '이름을 입력해주세요.' });
+  if (p8.length !== 8) return res.status(400).json({ ok: false, error: '연락처를 정확히 입력해주세요.' });
+
+  const client = await pool.connect();
+  try {
+    await client.query('BEGIN');
+    // ① 캠페인 행 잠금 — 이 캠페인의 모든 신청/확정 쓰기 직렬화(READ COMMITTED write-skew 원천 차단)
+    const { rows: cRows } = await client.query('SELECT * FROM recruit_campaigns WHERE id = $1 FOR UPDATE', [id]);
+    if (!cRows.length) { await client.query('ROLLBACK'); return res.status(404).json({ ok: false, error: '캠페인을 찾을 수 없습니다.' }); }
+    const camp = cRows[0];
+    const now = new Date();
+
+    // ② phone8 advisory(xact) — 교차 캠페인 홀드 상한의 동시성(항상 캠페인 락 뒤 = 교착 불가)
+    await client.query(`SELECT pg_advisory_xact_lock(hashtext('camp_hold_phone:' || $1::text))`, [p8]);
+
+    // 잠금 후 신선 재집계 → 상태 게이트(open만 통과; READ COMMITTED 문장별 새 스냅샷이 선행 커밋 반영)
+    const countsMap = await fetchCampaignCounts(client, [id], now);
+    const st = computeCampaignState(camp, countsMap.get(id), now);
+    if (st.state !== 'open') {
+      await client.query('ROLLBACK');
+      return res.status(409).json({ ok: false, reason: st.state, state: st, error: '지금은 신청할 수 없습니다.' });
+    }
+
+    // 등록 리뷰어만(레드 #12 — 스크래핑 비용 상승, 완전 차단은 아님)
+    const reg = await client.query('SELECT 1 FROM reviewers WHERE phone8 = $1 LIMIT 1', [p8]);
+    if (!reg.rows.length) {
+      await client.query('ROLLBACK');
+      return res.status(403).json({ ok: false, reason: 'not_registered', error: '리뷰어 등록 후 참여할 수 있어요.' });
+    }
+
+    const dayStartIso = kstDayStartUtc(now).toISOString();
+
+    // 제출확정 이력 선검사(영구 1인 1참여 — uq_campaign_apps_active_hold 의미론): 23505 대신 명확한 사유(심판 J8)
+    const done = await client.query(
+      `SELECT 1 FROM campaign_applications WHERE campaign_id = $1 AND phone8 = $2 AND status = 'submitted' LIMIT 1`,
+      [id, p8]);
+    if (done.rows.length) {
+      await client.query('ROLLBACK');
+      return res.status(409).json({ ok: false, reason: 'already_submitted', error: '이미 참여 완료한 캠페인이에요.' });
+    }
+
+    // 당일(KST) 동일 캠페인 이력 — expired/cancelled 포함 전 상태 차단(재신청 0회, §03-C)
+    const hist = await client.query(
+      `SELECT 1 FROM campaign_applications WHERE campaign_id = $1 AND phone8 = $2 AND applied_at >= $3 LIMIT 1`,
+      [id, p8, dayStartIso]);
+    if (hist.rows.length) {
+      await client.query('ROLLBACK');
+      return res.status(409).json({ ok: false, reason: 'already_today', error: '오늘은 이 캠페인에 이미 참여 이력이 있어요(내일 가능).' });
+    }
+
+    // 전역 상한: 활성홀드 2건 + 당일 신청 총량(DB COUNT = 멀티인스턴스 안전, 레드 #12)
+    const caps = await client.query(
+      `SELECT COUNT(*) FILTER (WHERE status = 'applied' AND expires_at > NOW()) AS active_holds,
+              COUNT(*) FILTER (WHERE applied_at >= $2) AS today_applies
+         FROM campaign_applications WHERE phone8 = $1`,
+      [p8, dayStartIso]);
+    if (Number(caps.rows[0].active_holds) >= parseInt(process.env.CAMPAIGN_HOLD_CAP || '2', 10)) {
+      await client.query('ROLLBACK');
+      return res.status(409).json({ ok: false, reason: 'hold_cap', error: '동시에 참여 가능한 캠페인은 2개까지예요.' });
+    }
+    if (Number(caps.rows[0].today_applies) >= parseInt(process.env.CAMPAIGN_DAILY_APPLY_CAP || '10', 10)) {
+      await client.query('ROLLBACK');
+      return res.status(429).json({ ok: false, reason: 'daily_apply_cap', error: '오늘 신청 가능한 횟수를 넘었어요.' });
+    }
+
+    // 홀드 생성: expires_at = min(now+TTL, 오늘 window_end) — state=open이므로 closesAt는 항상 유효·미래
+    const ttlMs = (Number(camp.hold_ttl_min) || 15) * 60000;
+    const closesAt = kstTodayAt(camp.window_end, now);
+    const expiresAt = new Date(Math.min(now.getTime() + ttlMs, closesAt.getTime()));
+    const holdToken = crypto.randomBytes(24).toString('base64url');
+    const ins = await client.query(
+      `INSERT INTO campaign_applications
+         (campaign_id, applicant_name, applicant_phone, phone8, status, expires_at, hold_token)
+       VALUES ($1,$2,$3,$4,'applied',$5,$6)
+       RETURNING id, expires_at`,
+      [id, name, rawPhone, p8, expiresAt.toISOString(), holdToken]);
+    await client.query('COMMIT');
+    logger.info(`[campaign/apply] 홀드 생성 camp=${id} app=${ins.rows[0].id} phone8=***${p8.slice(-4)}`);
+    return res.json({
+      ok: true, applicationId: ins.rows[0].id, holdToken, phone8: p8,
+      expiresAt: ins.rows[0].expires_at, serverNow: now.toISOString(),
+    });
+  } catch (err) {
+    try { await client.query('ROLLBACK'); } catch (_) { /* noop */ }
+    if (err.code === '23505') return res.status(409).json({ ok: false, reason: 'duplicate_hold', error: '이미 참여 중인 캠페인입니다.' }); // uq_campaign_apps_active_hold 백스톱
+    return next(err);
+  } finally {
+    client.release();
+  }
 }
 
 // POST /api/campaign/:id/apply — 참여 신청
-router.post('/:id/apply', async (req, res, next) => {
+router.post('/:id/apply', applyLimiter, async (req, res, next) => {
   try {
     const { id } = req.params;
     const { name, phone, inad } = req.body;
@@ -515,6 +630,20 @@ router.put('/admin/:id', authMiddleware, adminOrMasterMiddleware, async (req, re
       linked_sheet_id, linked_tab_name, linked_tab_gid,
     } = req.body;
 
+    // ★ 참여형 활성화 게이트(심판 J7): COALESCE 편집으로 status='active' 우회 방지
+    if (status === 'active') {
+      const { rows: cur } = await pool.query('SELECT * FROM recruit_campaigns WHERE id = $1', [id]);
+      if (cur.length && cur[0].participation_mode) {
+        const eff = {
+          ...cur[0],
+          linked_sheet_id: (linked_sheet_id === undefined || linked_sheet_id === null) ? cur[0].linked_sheet_id : linked_sheet_id,
+          linked_tab_gid: (linked_tab_gid === undefined || linked_tab_gid === null) ? cur[0].linked_tab_gid : linked_tab_gid,
+        };
+        const errs = _participationActivationErrors(eff);
+        if (errs.length) return res.status(400).json({ ok: false, error: '참여형 활성화 불가: ' + errs.join(', ') });
+      }
+    }
+
     const { rows } = await pool.query(
       `UPDATE recruit_campaigns SET
         title = COALESCE($2, title),
@@ -580,6 +709,16 @@ router.put('/admin/:id/status', authMiddleware, adminOrMasterMiddleware, async (
     if (!['draft', 'active', 'closed'].includes(status)) {
       return res.status(400).json({ ok: false, error: '유효하지 않은 상태입니다.' });
     }
+    // ★ 참여형 활성화 게이트(레드 #6·#10): gid·시간창·일일건수 없이 발행되면
+    //   상태엔진이 closed(window_invalid)로만 보여 "발행했는데 안 보임" 무신호 장애가 된다 → 선차단.
+    if (status === 'active') {
+      const { rows: cur } = await pool.query('SELECT * FROM recruit_campaigns WHERE id = $1', [id]);
+      if (!cur.length) return res.status(404).json({ ok: false, error: '캠페인을 찾을 수 없습니다.' });
+      if (cur[0].participation_mode) {
+        const errs = _participationActivationErrors(cur[0]);
+        if (errs.length) return res.status(400).json({ ok: false, error: '참여형 활성화 불가: ' + errs.join(', ') });
+      }
+    }
     const { rows } = await pool.query(
       `UPDATE recruit_campaigns SET status = $2, updated_at = NOW() WHERE id = $1 RETURNING *`,
       [id, status]
@@ -606,6 +745,60 @@ router.get('/admin/:id/applications', authMiddleware, adminOrMasterMiddleware, a
     res.json({ ok: true, data: rows, count: rows.length });
   } catch (err) {
     next(err);
+  }
+});
+
+// POST /api/campaign/admin/:id/confirm {applicationId} — 만료+기구매(late) 구제의 유일 경로 (admin/master)
+//   유예 정책 제거에 따라, 만료 후 도착한 제출(late_order_id)은 이 수동확정으로만 자리 확정된다.
+//   잠금 계층 apply·주문확정과 동일: 캠페인 행 FOR UPDATE → 신청 행 FOR UPDATE. 동일 phone8 applied 선-취소(레드 #7).
+router.post('/admin/:id/confirm', authMiddleware, adminOrMasterMiddleware, async (req, res, next) => {
+  const { id } = req.params;
+  const appId = parseInt(req.body.applicationId, 10);
+  if (!appId) return res.status(400).json({ ok: false, error: 'applicationId 필수' });
+  const client = await pool.connect();
+  try {
+    await client.query('BEGIN');
+    const { rows: cRows } = await client.query('SELECT * FROM recruit_campaigns WHERE id = $1 FOR UPDATE', [id]);
+    if (!cRows.length) { await client.query('ROLLBACK'); return res.status(404).json({ ok: false, error: '캠페인을 찾을 수 없습니다.' }); }
+    if (!cRows[0].participation_mode) { await client.query('ROLLBACK'); return res.status(400).json({ ok: false, error: '참여형 공고가 아닙니다.' }); }
+    const { rows: t } = await client.query(
+      `SELECT * FROM campaign_applications WHERE id = $1 AND campaign_id = $2 FOR UPDATE`, [appId, id]);
+    if (!t.length) { await client.query('ROLLBACK'); return res.status(404).json({ ok: false, error: '신청을 찾을 수 없습니다.' }); }
+    const a = t[0];
+    if (a.status === 'submitted') { await client.query('ROLLBACK'); return res.json({ ok: true, already: true }); } // 멱등
+    if (!['applied', 'expired', 'cancelled'].includes(a.status)) {
+      await client.query('ROLLBACK');
+      return res.status(400).json({ ok: false, error: `'${a.status}' 상태는 확정 대상이 아닙니다(레거시 오확정 방지).` });
+    }
+    // 레드 #7: 같은 (campaign, phone8)의 다른 활성행 정리 — submitted 존재 시 이중확정 거부, applied는 선-취소
+    const { rows: dup } = await client.query(
+      `SELECT id FROM campaign_applications WHERE campaign_id = $1 AND phone8 = $2 AND id <> $3 AND status = 'submitted' LIMIT 1`,
+      [id, a.phone8, appId]);
+    if (dup.length) { await client.query('ROLLBACK'); return res.status(409).json({ ok: false, error: `이미 확정된 참여(#${dup[0].id})가 있습니다.` }); }
+    await client.query(
+      `UPDATE campaign_applications SET status = 'cancelled'
+        WHERE campaign_id = $1 AND phone8 = $2 AND id <> $3 AND status = 'applied'`, [id, a.phone8, appId]);
+    // 레드 #8②: submitted_at 소급 — late 주문의 제출시각(order_submissions.submitted_at = 생성시각; created_at 컬럼 없음, 심판 J5)
+    //   → 없으면 applied_at → NOW(). 과거시각 소급 = 오늘 쿼터 미소비("일 시작 고정" 약속 보존).
+    await client.query(
+      `UPDATE campaign_applications ca
+          SET status = 'submitted',
+              submitted_at = COALESCE(
+                (SELECT os.submitted_at FROM order_submissions os WHERE os.id = ca.late_order_id),
+                ca.applied_at, NOW()),
+              order_submission_id = COALESCE(ca.order_submission_id, ca.late_order_id)
+        WHERE ca.id = $1`, [appId]);
+    const { maybePersistClosed } = require('../services/campaignHold.service');
+    await maybePersistClosed(client, id); // 레드 #8③: 수동 경로도 closed 영속 복제
+    await client.query('COMMIT');
+    logger.info(`[campaign/confirm] 수동확정 camp=${id} app=${appId} by=${req.admin && req.admin.name}`);
+    res.json({ ok: true });
+  } catch (err) {
+    try { await client.query('ROLLBACK'); } catch (_) { /* noop */ }
+    if (err.code === '23505') return res.status(409).json({ ok: false, error: '동일 리뷰어의 활성 참여와 충돌 — 새로고침 후 재시도하세요.' });
+    next(err);
+  } finally {
+    client.release();
   }
 });
 

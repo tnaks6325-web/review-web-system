@@ -148,6 +148,18 @@ ok('시간창 미설정/역전은 참여 불가(closed) 방어', () => {
   assert.strictEqual(computeCampaignState({ ...CAMP, window_start: '16:00', window_end: '14:00' }, ZERO, kst('14:30')).state, 'closed');
 });
 
+ok("timeStrToMinutes('24:00') = 1440 (PG TIME 자정 종료 창 — 무신호 closed 위장 방지)", () => {
+  assert.strictEqual(timeStrToMinutes('24:00'), 1440);
+  assert.strictEqual(timeStrToMinutes('24:00:00'), 1440);
+  assert.strictEqual(timeStrToMinutes('24:01'), null);
+});
+
+ok('window 미설정 → closed + stateReason=window_invalid (관리자 원인 식별 신호)', () => {
+  const st = computeCampaignState({ ...CAMP, window_start: null, window_end: null }, ZERO, kst('15:00'));
+  assert.strictEqual(st.state, 'closed');
+  assert.strictEqual(st.stateReason, 'window_invalid');
+});
+
 ok('스윕 미실행 계약: 만료 홀드는 counts 집계 조건(expires_at>now)에서 이미 제외', () => {
   // fetchCampaignCounts의 SQL 이 status='applied' AND expires_at > NOW() 를 사용하므로
   // 순수 함수에는 "유효 홀드"만 도달한다 — 여기서는 그 계약을 상태 전이로 재확인.

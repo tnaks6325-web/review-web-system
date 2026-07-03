@@ -21,9 +21,9 @@ ALTER TABLE campaign_applications
   ADD COLUMN IF NOT EXISTS phone8              TEXT DEFAULT '',        -- 연락처 끝 8자리(서버 파생 — 클라이언트 입력 불신)
   ADD COLUMN IF NOT EXISTS expires_at          TIMESTAMPTZ,            -- 홀드 만료시각 = min(now+TTL, 당일 window_end)
   ADD COLUMN IF NOT EXISTS submitted_at        TIMESTAMPTZ,            -- 제출확정 시각(전일까지 누적확정 = dailyQuota 분모 계산 기준)
-  ADD COLUMN IF NOT EXISTS order_submission_id BIGINT,                 -- 확정 링크(order_submissions.id)
-  ADD COLUMN IF NOT EXISTS hold_token          TEXT DEFAULT '',        -- 열람·취소 열쇠(신청 응답으로 발급)
-  ADD COLUMN IF NOT EXISTS late_order_id       BIGINT;                 -- 만료 후 도착한 제출의 주문 id(자동확정 없음 — 관제 수동확정 대상 표기)
+  ADD COLUMN IF NOT EXISTS order_submission_id UUID,                   -- 확정 링크(order_submissions.id = UUID — BIGINT 금지, 심판 J1)
+  ADD COLUMN IF NOT EXISTS hold_token          TEXT,                   -- 열람·취소 열쇠(NULL=미발급 — '' 기본값 매칭함정 금지)
+  ADD COLUMN IF NOT EXISTS late_order_id       UUID;                   -- 만료 후 도착한 제출의 주문 id(자동확정 없음 — 관제 수동확정 대상 표기)
 
 -- status CHECK 확장: 기존 CHECK(confirmed/cancelled)를 참여형 상태 포함으로 교체.
 --   'confirmed'는 레거시 전용 상태로 보존(신형 카운트·유니크에서 제외).
@@ -58,6 +58,27 @@ BEGIN
     EXECUTE format('ALTER TABLE campaign_applications DROP CONSTRAINT %I', u.conname);
   END LOOP;
 END $$;
+
+-- 레거시(confirmed) 동시중복 방어 복원 (레드 #1): 구 UNIQUE(campaign_id,name,phone)를 부분 유니크로 대체.
+--   레거시 apply(check-then-insert)의 23505 캐치(campaign.routes.js)가 다시 유효해진다.
+--   구 제약이 전 status를 커버했으므로 confirmed 부분집합에 기존 중복 없음 → 생성 실패 불가.
+--   (CREATE INDEX는 contype='u' 제약이 아니므로 위 DROP 루프 재실행에도 지워지지 않는다.)
+CREATE UNIQUE INDEX IF NOT EXISTS uq_campaign_apps_legacy
+  ON campaign_applications (campaign_id, applicant_name, applicant_phone)
+  WHERE status = 'confirmed';
+
+-- submitted면 submitted_at 필수(조용한 dailyQuota 분모 오염 → 시끄러운 에러로, 레드 #8①).
+--   ※ 이 블록은 status CHECK-drop 루프(위, LIKE '%status%')보다 뒤에 있어야 한다
+--     — migrate.js 전체 재실행 시 루프가 이 CHECK도 지우고, 여기서 재생성된다.
+DO $$ BEGIN
+  ALTER TABLE campaign_applications
+    ADD CONSTRAINT campaign_apps_submitted_at_check
+    CHECK (status <> 'submitted' OR submitted_at IS NOT NULL);
+EXCEPTION WHEN duplicate_object THEN NULL; END $$;
+
+-- 스윕 전용(전 캠페인 스캔: applied만 부분 인덱스)
+CREATE INDEX IF NOT EXISTS idx_campaign_apps_sweep
+  ON campaign_applications (expires_at) WHERE status = 'applied';
 
 -- phone8 백필(레거시 행): 숫자만 남긴 끝 8자리. 신규 신청은 서버가 파생 저장.
 UPDATE campaign_applications

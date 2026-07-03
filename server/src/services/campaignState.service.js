@@ -19,6 +19,7 @@ function timeStrToMinutes(t) {
   if (!m) return null;
   const hh = parseInt(m[1], 10);
   const mm = parseInt(m[2], 10);
+  if (hh === 24 && mm === 0) return 1440; // PG TIME '24:00:00' 허용(자정 종료 창) — 무신호 closed 위장 방지(레드 #10)
   if (hh > 23 || mm > 59) return null;
   return hh * 60 + mm;
 }
@@ -84,8 +85,8 @@ function computeCampaignState(c, counts, now = new Date()) {
   const startMin = timeStrToMinutes(c.window_start);
   const endMin = timeStrToMinutes(c.window_end);
   if (startMin === null || endMin === null || endMin <= startMin) {
-    // 시간창 미설정/역전(발행 검증이 막지만 방어) — 참여 불가로 취급
-    return { ...payload, state: 'closed' };
+    // 시간창 미설정/역전(활성화 게이트가 막지만 SQL 직생성 방어) — 참여 불가 + 원인 신호(관리자 식별용)
+    return { ...payload, state: 'closed', stateReason: 'window_invalid' };
   }
 
   const t = kstMinutesOfDay(now);
