@@ -1,0 +1,672 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+  <meta charset="UTF-8"/>
+  <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+  <title>아이에이리뷰 — PRD &amp; 유저플로우</title>
+  <style>
+  :root{
+    --paper:#F4F6FC; --card:#FFFFFF; --ink:#151B26; --mut:#5E6A7C; --faint:#8B96A8;
+    --line:#E2E7F0; --accent:#3182F6; --accent-deep:#1B64DA; --accent-soft:#E9F1FE;
+    --ok:#12B886; --ok-soft:#DDF5EC; --warn:#B45309; --warn-soft:#FDF0D9;
+    --paid:#3F51B5; --paid-soft:#E4E9FB;
+    --wire:#CBD4E1; --wire-soft:#EEF1F7;
+    --shadow:0 2px 14px rgba(21,40,80,.07);
+  }
+  @media (prefers-color-scheme: dark){
+    :root{
+      --paper:#0E131B; --card:#161D29; --ink:#E8EDF5; --mut:#9AA6B8; --faint:#6E7A8C;
+      --line:#2A3444; --accent:#5B9BF8; --accent-deep:#82B4FA; --accent-soft:#1B2A44;
+      --ok:#3DCF9F; --ok-soft:#123528; --warn:#F0B35C; --warn-soft:#3A2B12;
+      --paid:#98A6EE; --paid-soft:#232B4E;
+      --wire:#3A4658; --wire-soft:#1D2634;
+      --shadow:0 2px 14px rgba(0,0,0,.35);
+    }
+  }
+  :root[data-theme="dark"]{
+    --paper:#0E131B; --card:#161D29; --ink:#E8EDF5; --mut:#9AA6B8; --faint:#6E7A8C;
+    --line:#2A3444; --accent:#5B9BF8; --accent-deep:#82B4FA; --accent-soft:#1B2A44;
+    --ok:#3DCF9F; --ok-soft:#123528; --warn:#F0B35C; --warn-soft:#3A2B12;
+    --paid:#98A6EE; --paid-soft:#232B4E;
+    --wire:#3A4658; --wire-soft:#1D2634;
+    --shadow:0 2px 14px rgba(0,0,0,.35);
+  }
+  :root[data-theme="light"]{
+    --paper:#F4F6FC; --card:#FFFFFF; --ink:#151B26; --mut:#5E6A7C; --faint:#8B96A8;
+    --line:#E2E7F0; --accent:#3182F6; --accent-deep:#1B64DA; --accent-soft:#E9F1FE;
+    --ok:#12B886; --ok-soft:#DDF5EC; --warn:#B45309; --warn-soft:#FDF0D9;
+    --paid:#3F51B5; --paid-soft:#E4E9FB;
+    --wire:#CBD4E1; --wire-soft:#EEF1F7;
+    --shadow:0 2px 14px rgba(21,40,80,.07);
+  }
+  *{box-sizing:border-box;margin:0;padding:0}
+  body{
+    background:var(--paper); color:var(--ink);
+    font-family:"Apple SD Gothic Neo","Pretendard","Noto Sans KR","Malgun Gothic",system-ui,sans-serif;
+    line-height:1.65; -webkit-font-smoothing:antialiased;
+  }
+  .wrap{max-width:1000px;margin:0 auto;padding:0 20px 80px}
+
+  /* ── 헤더 ── */
+  .hero{padding:52px 0 30px}
+  .hero .eyebrow{font-size:.78rem;font-weight:700;letter-spacing:.14em;color:var(--accent);text-transform:uppercase}
+  .hero h1{font-size:clamp(1.7rem,4.4vw,2.5rem);font-weight:800;letter-spacing:-.02em;text-wrap:balance;margin:8px 0 10px}
+  .hero p.lead{font-size:1.02rem;color:var(--mut);max-width:62ch}
+  .hero .meta{display:flex;flex-wrap:wrap;gap:8px;margin-top:18px}
+  .chip{display:inline-flex;align-items:center;gap:6px;font-size:.74rem;font-weight:600;color:var(--mut);
+    background:var(--card);border:1px solid var(--line);border-radius:999px;padding:5px 12px}
+  .chip b{color:var(--ink);font-weight:700}
+
+  /* ── 목차 내비 ── */
+  nav.toc{position:sticky;top:0;z-index:50;background:var(--paper);padding:10px 0;border-bottom:1px solid var(--line);
+    display:flex;gap:6px;overflow-x:auto;-webkit-overflow-scrolling:touch}
+  nav.toc a{flex-shrink:0;font-size:.8rem;font-weight:700;color:var(--mut);text-decoration:none;
+    padding:7px 13px;border-radius:999px;border:1px solid transparent}
+  nav.toc a:hover,nav.toc a:focus-visible{color:var(--accent-deep);background:var(--accent-soft);outline:none}
+
+  /* ── 섹션 공통 ── */
+  section{padding-top:56px}
+  .sec-label{font-size:.74rem;font-weight:700;letter-spacing:.12em;color:var(--accent);margin-bottom:6px}
+  section>h2{font-size:1.45rem;font-weight:800;letter-spacing:-.015em;text-wrap:balance;margin-bottom:8px}
+  section>p.desc{color:var(--mut);max-width:68ch;margin-bottom:22px}
+  h3{font-size:1.02rem;font-weight:800;margin:30px 0 12px}
+  .card{background:var(--card);border:1px solid var(--line);border-radius:14px;box-shadow:var(--shadow)}
+
+  /* ── 개요 스탯 ── */
+  .stats{display:grid;grid-template-columns:repeat(auto-fit,minmax(210px,1fr));gap:12px;margin-bottom:20px}
+  .stat{padding:18px 20px}
+  .stat .k{font-size:.76rem;font-weight:700;color:var(--faint)}
+  .stat .v{font-size:1.25rem;font-weight:800;letter-spacing:-.01em;margin-top:2px}
+  .stat .s{font-size:.8rem;color:var(--mut);margin-top:4px}
+
+  .plain{padding:20px 22px}
+  .plain ul{list-style:none;display:flex;flex-direction:column;gap:10px}
+  .plain li{padding-left:24px;position:relative;font-size:.94rem}
+  .plain li::before{content:"";position:absolute;left:4px;top:.62em;width:8px;height:8px;border-radius:50%;background:var(--accent)}
+  .plain li b{font-weight:700}
+
+  /* ── 퍼소나 ── */
+  .personas{display:grid;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));gap:12px}
+  .persona{padding:18px 20px}
+  .persona .who{display:flex;align-items:center;gap:10px;margin-bottom:8px}
+  .persona .dot{width:34px;height:34px;border-radius:10px;background:var(--accent-soft);color:var(--accent-deep);
+    display:flex;align-items:center;justify-content:center;font-weight:800;font-size:.9rem;flex-shrink:0}
+  .persona h4{font-size:.95rem;font-weight:800}
+  .persona .role{font-size:.72rem;color:var(--faint);font-weight:600}
+  .persona p{font-size:.84rem;color:var(--mut)}
+  .persona .goal{margin-top:10px;font-size:.78rem;background:var(--wire-soft);border-radius:8px;padding:8px 10px;color:var(--ink)}
+  .persona .goal b{color:var(--accent-deep)}
+
+  /* ── 기능 표 ── */
+  .tablewrap{overflow-x:auto;border-radius:14px}
+  table{width:100%;border-collapse:collapse;background:var(--card);font-size:.86rem;min-width:640px}
+  thead th{text-align:left;font-size:.73rem;letter-spacing:.06em;color:var(--faint);font-weight:700;
+    padding:12px 16px;border-bottom:2px solid var(--line);white-space:nowrap}
+  tbody td{padding:12px 16px;border-bottom:1px solid var(--line);vertical-align:top}
+  tbody tr:last-child td{border-bottom:none}
+  td.area{font-weight:800;white-space:nowrap;color:var(--accent-deep)}
+  td .sub{display:block;font-size:.78rem;color:var(--mut);margin-top:2px}
+  .tag{display:inline-block;font-size:.68rem;font-weight:700;border-radius:6px;padding:2px 8px;margin:1px 2px 1px 0;white-space:nowrap}
+  .tag.rv{background:var(--accent-soft);color:var(--accent-deep)}
+  .tag.ad{background:var(--warn-soft);color:var(--warn)}
+  .tag.ae{background:var(--paid-soft);color:var(--paid)}
+  .tag.sys{background:var(--wire-soft);color:var(--mut)}
+
+  /* ── 플로우 ── */
+  .flow{display:flex;flex-wrap:wrap;align-items:stretch;gap:10px;margin:14px 0 6px}
+  .fstep{flex:1 1 150px;min-width:150px;max-width:230px;position:relative;padding:14px 14px 12px;border-radius:12px;
+    background:var(--card);border:1px solid var(--line);box-shadow:var(--shadow)}
+  .fstep .n{position:absolute;top:-10px;left:12px;background:var(--accent);color:#fff;font-size:.68rem;font-weight:800;
+    border-radius:999px;padding:2px 9px;letter-spacing:.04em}
+  .fstep h5{font-size:.88rem;font-weight:800;margin:4px 0 4px}
+  .fstep p{font-size:.76rem;color:var(--mut)}
+  .fstep .where{display:inline-block;margin-top:8px;font-size:.66rem;font-weight:700;color:var(--faint);
+    background:var(--wire-soft);border-radius:6px;padding:2px 7px}
+  .fstep.sysbox{background:var(--wire-soft);border-style:dashed}
+  .fstep.sysbox .n{background:var(--mut)}
+  .flow-note{font-size:.78rem;color:var(--mut);margin:8px 0 0;padding-left:2px}
+  .flow-note b{color:var(--ink)}
+
+  .pipe{display:flex;flex-wrap:wrap;align-items:center;gap:8px;margin:14px 0 4px}
+  .pnode{padding:10px 14px;border-radius:11px;background:var(--card);border:1px solid var(--line);box-shadow:var(--shadow)}
+  .pnode h6{font-size:.82rem;font-weight:800}
+  .pnode span{display:block;font-size:.7rem;color:var(--mut);max-width:180px}
+  .pnode.store{border-color:var(--accent);border-width:1.5px}
+  .parrow{color:var(--faint);font-weight:800;font-size:1rem;flex-shrink:0}
+
+  /* ── 와이어프레임 ── */
+  .wf-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(280px,1fr));gap:22px;align-items:start}
+  .phone-slot h4{font-size:.92rem;font-weight:800;margin-bottom:3px}
+  .phone-slot .cap{font-size:.78rem;color:var(--mut);margin-bottom:12px;max-width:38ch}
+  .phone{width:100%;max-width:290px;border:2px solid var(--wire);border-radius:26px;background:var(--card);
+    padding:10px;box-shadow:var(--shadow)}
+  .screen{border-radius:18px;overflow:hidden;background:var(--paper);border:1px solid var(--line)}
+  .appbar{background:var(--accent);color:#fff;padding:10px 12px;font-size:.78rem;font-weight:800;display:flex;justify-content:space-between;align-items:center}
+  .appbar .r{font-size:.62rem;font-weight:600;opacity:.85}
+  .scr-body{padding:10px;display:flex;flex-direction:column;gap:8px}
+  .blk{background:var(--card);border:1px solid var(--line);border-radius:10px;padding:9px 10px}
+  .blk .t{font-size:.66rem;font-weight:800;color:var(--faint);margin-bottom:5px;letter-spacing:.02em}
+  .wl{height:8px;border-radius:4px;background:var(--wire-soft);margin:4px 0}
+  .wl.w60{width:60%} .wl.w80{width:80%} .wl.w40{width:40%}
+  .wbtn{display:block;text-align:center;background:var(--accent);color:#fff;font-size:.74rem;font-weight:800;
+    border-radius:8px;padding:8px;margin-top:4px}
+  .wbtn.ghost{background:var(--wire-soft);color:var(--mut)}
+  .field{border:1.5px solid var(--line);border-radius:7px;padding:7px 9px;font-size:.7rem;color:var(--faint);background:var(--card);margin:3px 0}
+  .tabs2{display:flex;background:var(--card);border:1px solid var(--line);border-radius:9px;padding:3px;gap:2px}
+  .tabs2 span{flex:1;text-align:center;font-size:.68rem;font-weight:800;padding:6px 4px;border-radius:7px;color:var(--mut)}
+  .tabs2 span.on{background:var(--accent);color:#fff}
+  .rowitem{display:flex;align-items:center;gap:8px;background:var(--card);border:1px solid var(--line);border-radius:10px;padding:9px 10px}
+  .rowitem .av{width:24px;height:24px;border-radius:50%;background:var(--accent-soft);flex-shrink:0}
+  .rowitem .tx{flex:1;min-width:0}
+  .rowitem .tx .a{font-size:.7rem;font-weight:800;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+  .rowitem .tx .b{font-size:.62rem;color:var(--faint)}
+  .bdg{font-size:.58rem;font-weight:800;border-radius:6px;padding:2px 6px;white-space:nowrap;flex-shrink:0}
+  .bdg.wait{background:var(--warn-soft);color:var(--warn)}
+  .bdg.done{background:var(--ok-soft);color:var(--ok)}
+  .bdg.paid{background:var(--paid-soft);color:var(--paid)}
+  .tabbar{display:flex;border-top:1px solid var(--line);background:var(--card)}
+  .tabbar span{flex:1;text-align:center;font-size:.6rem;font-weight:700;color:var(--faint);padding:8px 2px}
+  .tabbar span.on{color:var(--accent)}
+  .pin{display:inline-flex;align-items:center;justify-content:center;width:17px;height:17px;border-radius:50%;
+    background:var(--accent);color:#fff;font-size:.62rem;font-weight:800;flex-shrink:0;line-height:1}
+  .legend{margin-top:10px;display:flex;flex-direction:column;gap:6px}
+  .legend div{display:flex;gap:8px;font-size:.76rem;color:var(--mut);align-items:flex-start}
+  .legend .pin{margin-top:2px}
+  .legend b{color:var(--ink)}
+  .newchip{display:inline-block;font-size:.58rem;font-weight:800;background:var(--ok);color:#fff;border-radius:5px;padding:1px 6px;vertical-align:middle;margin-left:4px}
+
+  /* 데스크톱 프레임 (관리자) */
+  .desk{border:2px solid var(--wire);border-radius:14px;overflow:hidden;background:var(--card);box-shadow:var(--shadow)}
+  .desk .bar{display:flex;align-items:center;gap:6px;background:var(--wire-soft);padding:8px 12px;border-bottom:1px solid var(--line)}
+  .desk .bar i{width:9px;height:9px;border-radius:50%;background:var(--wire);display:inline-block}
+  .desk .bar .url{margin-left:8px;flex:1;background:var(--card);border:1px solid var(--line);border-radius:6px;
+    font-size:.66rem;color:var(--faint);padding:3px 10px;font-family:ui-monospace,Consolas,monospace}
+  .desk-body{display:grid;grid-template-columns:150px 1fr;min-height:300px}
+  .desk-side{border-right:1px solid var(--line);padding:12px 10px;display:flex;flex-direction:column;gap:6px;background:var(--paper)}
+  .desk-side span{font-size:.7rem;font-weight:700;color:var(--mut);padding:6px 9px;border-radius:7px}
+  .desk-side span.on{background:var(--accent-soft);color:var(--accent-deep)}
+  .desk-main{padding:14px;display:flex;flex-direction:column;gap:10px}
+  .widgets{display:grid;grid-template-columns:1fr 1fr;gap:10px}
+  .widget{border:1px solid var(--line);border-radius:10px;padding:10px 12px;background:var(--paper)}
+  .widget .t{font-size:.68rem;font-weight:800;color:var(--faint);margin-bottom:6px}
+  .widget .num{font-size:1.05rem;font-weight:800}
+  .widget .num small{font-size:.66rem;color:var(--mut);font-weight:600}
+  @media (max-width:560px){ .desk-body{grid-template-columns:1fr} .desk-side{flex-direction:row;flex-wrap:wrap;border-right:none;border-bottom:1px solid var(--line)} .widgets{grid-template-columns:1fr} }
+
+  /* ── 안전장치 ── */
+  .guards{display:grid;grid-template-columns:repeat(auto-fit,minmax(230px,1fr));gap:12px}
+  .guard{padding:18px 20px}
+  .guard h4{font-size:.92rem;font-weight:800;display:flex;align-items:center;gap:8px;margin-bottom:6px}
+  .guard h4 .ic{width:26px;height:26px;border-radius:8px;background:var(--ok-soft);color:var(--ok);
+    display:inline-flex;align-items:center;justify-content:center;font-weight:800;font-size:.8rem;flex-shrink:0}
+  .guard p{font-size:.82rem;color:var(--mut)}
+
+  /* ── 용어 ── */
+  dl.gloss{display:grid;grid-template-columns:repeat(auto-fit,minmax(280px,1fr));gap:10px}
+  dl.gloss>div{background:var(--card);border:1px solid var(--line);border-radius:12px;padding:13px 16px;box-shadow:var(--shadow)}
+  dt{font-size:.85rem;font-weight:800;color:var(--accent-deep)}
+  dd{font-size:.8rem;color:var(--mut);margin-top:3px}
+
+  footer{margin-top:64px;padding-top:18px;border-top:1px solid var(--line);font-size:.76rem;color:var(--faint)}
+  footer b{color:var(--mut)}
+  @media (prefers-reduced-motion:no-preference){ html{scroll-behavior:smooth} }
+</style>
+</head>
+<body>
+<div class="wrap">
+
+  <header class="hero">
+    <div class="eyebrow">Product Requirements &amp; User Flow</div>
+    <h1>아이에이리뷰 — 리뷰 체험단 운영 시스템</h1>
+    <p class="lead">리뷰어 모집부터 구매·리뷰 제출·페이백 입금까지, 구글시트로 하던 체험단 운영을
+      자동화한 웹 시스템입니다. 이 문서는 실제 코드를 기준으로 제품의 목적·기능·사용 흐름을
+      처음 보는 분도 이해할 수 있게 정리한 보고서입니다.</p>
+    <div class="meta">
+      <span class="chip">작성 기준 <b>저장소 코드 (main)</b></span>
+      <span class="chip">작성일 <b>2026-07-03</b></span>
+      <span class="chip">프론트 <b>Cloudflare Pages</b></span>
+      <span class="chip">백엔드 <b>Node.js + PostgreSQL (Railway)</b></span>
+    </div>
+  </header>
+
+  <nav class="toc" aria-label="목차">
+    <a href="#overview">한눈에 보기</a>
+    <a href="#users">누가 쓰나요</a>
+    <a href="#prd">핵심 기능 (PRD)</a>
+    <a href="#flows">유저 플로우</a>
+    <a href="#wireframes">와이어프레임</a>
+    <a href="#screens">화면 지도</a>
+    <a href="#guards">안전장치</a>
+    <a href="#gloss">용어 사전</a>
+  </nav>
+
+  <!-- ════════ 1. 한눈에 보기 ════════ -->
+  <section id="overview">
+    <div class="sec-label">01 · OVERVIEW</div>
+    <h2>한눈에 보기</h2>
+    <p class="desc">"구글시트 장부는 그대로 쓰되, 사람 손을 거치던 일을 시스템이 대신한다"가 이 제품의 핵심입니다.</p>
+
+    <div class="stats">
+      <div class="card stat"><div class="k">사용자 그룹</div><div class="v">4개</div><div class="s">리뷰어 · 관리자 · AE담당자 · 광고주</div></div>
+      <div class="card stat"><div class="k">리뷰어 화면</div><div class="v">모바일 우선</div><div class="s">홈 · 내정보/현황 · 제출 화면</div></div>
+      <div class="card stat"><div class="k">데이터 원칙</div><div class="v">DB 먼저 저장</div><div class="s">제출 즉시 확정 → 시트엔 자동 기록</div></div>
+      <div class="card stat"><div class="k">최종 장부</div><div class="v">구글시트 유지</div><div class="s">운영팀의 기존 업무 방식 보존</div></div>
+    </div>
+
+    <div class="card plain">
+      <ul>
+        <li><b>리뷰어는 셀프서비스로 제출합니다.</b> 이름+전화번호만으로 로그인해서 구매 내역(구매양식)과 리뷰 캡처를 직접 올리고, 내 진행 상황(제출대기 → 제출완료 → 입금완료)을 스스로 확인합니다.</li>
+        <li><b>운영팀의 장부(구글시트)는 자동으로 채워집니다.</b> 리뷰어가 제출하면 서버 데이터베이스에 먼저 안전하게 저장되고, 시스템이 알아서 해당 캠페인 시트의 알맞은 행에 기록합니다.</li>
+        <li><b>이미지는 구글드라이브에 자동 정리됩니다.</b> 리뷰 캡처가 캠페인·탭별 [리뷰] 폴더로 저장되고, 시트의 해당 행과 자동으로 연결됩니다.</li>
+      </ul>
+    </div>
+  </section>
+
+  <!-- ════════ 2. 사용자 ════════ -->
+  <section id="users">
+    <div class="sec-label">02 · USERS</div>
+    <h2>누가 쓰나요</h2>
+    <p class="desc">역할마다 들어가는 화면과 할 수 있는 일이 다릅니다. 관리자 기능은 로그인(JWT)과 역할 권한(master / admin / staff)으로 보호됩니다.</p>
+    <div class="personas">
+      <div class="card persona">
+        <div class="who"><span class="dot">리</span><div><h4>리뷰어</h4><div class="role">체험단 참가자 · 모바일</div></div></div>
+        <p>캠페인에 참여해 상품을 구매하고 리뷰를 남긴 뒤 페이백을 받습니다. 로그인은 이름+전화번호.</p>
+        <div class="goal">목표 — <b>제출 빠뜨리지 않고, 입금까지 확인</b></div>
+      </div>
+      <div class="card persona">
+        <div class="who"><span class="dot">관</span><div><h4>관리자 (운영팀)</h4><div class="role">admin / master · PC</div></div></div>
+        <p>캠페인 시트 등록, 모집·탭 설정, 제출/입금 현황 관리, 문제 상황 복구를 담당합니다.</p>
+        <div class="goal">목표 — <b>시트 수작업 최소화, 사고 없는 운영</b></div>
+      </div>
+      <div class="card persona">
+        <div class="who"><span class="dot">A</span><div><h4>AE 담당자</h4><div class="role">staff · PC</div></div></div>
+        <p>자기가 맡은 캠페인의 모집·제출 현황을 AE 대시보드에서 확인하고, 업무포털로 작업을 발주합니다.</p>
+        <div class="goal">목표 — <b>담당 캠페인 진행률 파악</b></div>
+      </div>
+      <div class="card persona">
+        <div class="who"><span class="dot">광</span><div><h4>광고주</h4><div class="role">외부 열람용 링크</div></div></div>
+        <p>캠페인 현황 뷰어와 리뷰 보고 페이지로 진행 상황과 결과 리뷰를 열람만 합니다.</p>
+        <div class="goal">목표 — <b>내 캠페인 결과를 한 번에 확인</b></div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ════════ 3. PRD ════════ -->
+  <section id="prd">
+    <div class="sec-label">03 · PRD</div>
+    <h2>핵심 기능 (제품 요구사항)</h2>
+    <p class="desc">원래 구글 앱스 스크립트(GAS)로 운영하던 시스템을 Node.js + PostgreSQL로 옮기면서,
+      "제출 데이터가 유실되지 않을 것 · 구글 API 사용량 한도를 넘지 않을 것 · 리뷰어 개인정보가 새지 않을 것"을 전제 조건으로 삼았습니다.</p>
+
+    <h3>제품 목표</h3>
+    <div class="card plain">
+      <ul>
+        <li><b>목표 1 · 셀프서비스</b> — 리뷰어가 운영자에게 묻지 않고 제출·확인을 끝낼 수 있다.</li>
+        <li><b>목표 2 · 자동 기록</b> — 제출 한 건도 잃지 않고 구글시트 장부에 자동으로 반영된다.</li>
+        <li><b>목표 3 · 운영 가시성</b> — 관리자는 막힌 곳(미반영 주문, 미연결 폴더, 미입금)을 대시보드에서 바로 보고 원클릭으로 복구한다.</li>
+      </ul>
+    </div>
+
+    <h3>기능 목록</h3>
+    <div class="tablewrap card">
+      <table>
+        <thead><tr><th>영역</th><th>무엇을 하나</th><th>주 사용자</th></tr></thead>
+        <tbody>
+          <tr>
+            <td class="area">모집</td>
+            <td>모집공고 게시·신청 접수, 카카오톡 신청 연동<span class="sub">recruit.html · index.html 홈 탭 · 관리자 모집공고 관리</span></td>
+            <td><span class="tag rv">리뷰어</span><span class="tag ad">관리자</span></td>
+          </tr>
+          <tr>
+            <td class="area">구매양식 제출</td>
+            <td>주문정보(수취인·연락처·주소·주문번호) 제출 → DB 원장에 즉시 확정 → 시트에 자동 기록. 탭별 "제공정보" 안내(진행방식 메모, 현금영수증 사업자번호) 표시<span class="sub">search.html → POST /api/submit/order → order_submissions → 큐 → 구글시트</span></td>
+            <td><span class="tag rv">리뷰어</span><span class="tag sys">시스템</span></td>
+          </tr>
+          <tr>
+            <td class="area">리뷰 제출</td>
+            <td>리뷰 캡처 이미지 업로드(다중 슬롯 지원) → 드라이브 [리뷰] 폴더 자동 저장 → 시트 행과 자동 연결, AI 이미지 인식 보조<span class="sub">search.html · review-upload · review_index / review_submissions</span></td>
+            <td><span class="tag rv">리뷰어</span><span class="tag sys">시스템</span></td>
+          </tr>
+          <tr>
+            <td class="area">내 현황</td>
+            <td>리뷰 내역을 [제출대기]/[제출완료] 탭으로 확인, 제출일·<b>입금완료 배지</b>·부분 제출(n/m) 표시. 내 등록정보·타계정·페이백 계좌 관리<span class="sub">index.html 내정보/현황 · GET /api/search?includeSubmitted=1</span></td>
+            <td><span class="tag rv">리뷰어</span></td>
+          </tr>
+          <tr>
+            <td class="area">캠페인 관리</td>
+            <td>캠페인 시트 등록, 탭 설정(차수·마감·캡처 슬롯·제공정보 메모), 컬럼 매핑 교정, 차수 마감·아카이브<span class="sub">admin.html · tab_configs · 컬럼감지(키워드+DB매핑)</span></td>
+            <td><span class="tag ad">관리자</span></td>
+          </tr>
+          <tr>
+            <td class="area">인덱스 빌드</td>
+            <td>등록된 모든 캠페인 시트를 5분 주기로 읽어 검색용 색인(review_index)을 자동 갱신 — 리뷰어 검색·현황의 원천<span class="sub">smartBuild cron · 새벽 4시 전체 재빌드</span></td>
+            <td><span class="tag sys">시스템</span></td>
+          </tr>
+          <tr>
+            <td class="area">입금 처리</td>
+            <td>리뷰 완료·입금 대기 건을 모아 입금 처리하면 시트와 색인에 PAID로 기록 → 리뷰어 화면에 "입금완료" 배지<span class="sub">/api/payment · is_submitted2</span></td>
+            <td><span class="tag ad">관리자</span></td>
+          </tr>
+          <tr>
+            <td class="area">드라이브 관리</td>
+            <td>캠페인·탭별 [리뷰]/[구매캡처] 폴더 자동 생성, 소유권 점검·이관, 길 잃은 캡처 자동 정리<span class="sub">reviewFolders · folder-audit · relocate-orphan-reviews</span></td>
+            <td><span class="tag ad">관리자</span><span class="tag sys">시스템</span></td>
+          </tr>
+          <tr>
+            <td class="area">운영 진단</td>
+            <td>구매주문 시트반영 현황(막힌 주문 원클릭 복구), RAW 미러 뷰어, API 사용량 모니터, 역동기화 제안(수동 승인)<span class="sub">diag API 모음 · raw-mirror.html · throttle-monitor.html</span></td>
+            <td><span class="tag ad">관리자</span></td>
+          </tr>
+          <tr>
+            <td class="area">작업 오더</td>
+            <td>업무포털에서 광고주 작업 발주 → 관리자가 수락·진행 상태 관리<span class="sub">portal.html · work_orders</span></td>
+            <td><span class="tag ae">AE</span><span class="tag ad">관리자</span></td>
+          </tr>
+          <tr>
+            <td class="area">C/S 문의</td>
+            <td>리뷰어 ↔ 관리자 1:1 문의 스레드 (전화번호 기반, 별도 가입 없음)<span class="sub">/api/reviewer/cs · /api/cs</span></td>
+            <td><span class="tag rv">리뷰어</span><span class="tag ad">관리자</span></td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+
+    <h3>범위 밖 (하지 않는 것)</h3>
+    <div class="card plain">
+      <ul>
+        <li>쇼핑몰 구매·리뷰 작성 자체는 시스템 밖(각 쇼핑몰)에서 일어납니다 — 시스템은 그 <b>증빙 수집과 장부 기록</b>을 맡습니다.</li>
+        <li>구글시트를 대체하지 않습니다 — 시트는 여전히 운영팀의 최종 장부이며, 시스템은 시트를 <b>자동으로 채우고 지켜보는 역할</b>입니다.</li>
+        <li>시트에서 손으로 고친 주문 내용을 DB로 자동 반영하지 않습니다 — 안전을 위해 <b>관리자가 검토·승인하는 수동 절차</b>(역동기화 제안)만 둡니다.</li>
+      </ul>
+    </div>
+  </section>
+
+  <!-- ════════ 4. 유저 플로우 ════════ -->
+  <section id="flows">
+    <div class="sec-label">04 · USER FLOW</div>
+    <h2>유저 플로우</h2>
+    <p class="desc">리뷰어의 한 캠페인 참여가 처음부터 끝까지 어떻게 흘러가는지, 그리고 그 뒤에서 시스템이 무엇을 하는지입니다.</p>
+
+    <h3>리뷰어 여정 — 모집부터 입금까지</h3>
+    <div class="flow">
+      <div class="fstep"><span class="n">1</span><h5>모집공고 보기</h5><p>홈에서 진행 중 캠페인 확인, 마음에 들면 신청</p><span class="where">홈 · 모집공고</span></div>
+      <div class="fstep"><span class="n">2</span><h5>로그인</h5><p>이름 + 전화번호 입력 (가입 절차 없음)</p><span class="where">리뷰어 홈</span></div>
+      <div class="fstep"><span class="n">3</span><h5>구매양식 제출</h5><p>구매 후 수취인·주소·주문번호 제출 → 장부에 자동 기록</p><span class="where">제출 화면</span></div>
+      <div class="fstep"><span class="n">4</span><h5>리뷰 작성</h5><p>쇼핑몰에서 리뷰 작성 (시스템 밖)</p><span class="where">쇼핑몰</span></div>
+      <div class="fstep"><span class="n">5</span><h5>리뷰 캡처 제출</h5><p>리뷰 화면 캡처 업로드 → 드라이브 자동 정리</p><span class="where">제출 화면</span></div>
+      <div class="fstep"><span class="n">6</span><h5>현황 확인</h5><p>내정보/현황 → [제출완료] 탭에서 제출일 확인</p><span class="where">내정보/현황</span></div>
+      <div class="fstep"><span class="n">7</span><h5>페이백 수령</h5><p>관리자 입금 처리 → "입금완료" 배지로 확인</p><span class="where">내정보/현황</span></div>
+    </div>
+    <p class="flow-note">3·5단계에서 제출한 데이터는 아래 두 흐름을 따라 자동 처리됩니다. 리뷰어가 기다리거나 새로고침할 필요가 없습니다.</p>
+
+    <h3>뒷단 흐름 A — 구매양식이 시트에 기록되기까지</h3>
+    <div class="pipe">
+      <div class="pnode"><h6>① 제출</h6><span>리뷰어가 구매양식 전송</span></div>
+      <span class="parrow">→</span>
+      <div class="pnode store"><h6>② DB 원장에 확정</h6><span>서버 금고에 먼저 저장 — 이 순간 데이터는 안전</span></div>
+      <span class="parrow">→</span>
+      <div class="pnode"><h6>③ 빈 행 배정</h6><span>시트 복사본에서 알맞은 빈 행을 예약 (중복 방지)</span></div>
+      <span class="parrow">→</span>
+      <div class="pnode"><h6>④ 줄 서서 기록</h6><span>구글 사용량 한도(분당 45회) 안에서 순서대로 시트에 기록</span></div>
+      <span class="parrow">→</span>
+      <div class="pnode"><h6>⑤ 자동 복구</h6><span>막힌 건은 2분마다 재시도, 남의 데이터는 절대 덮지 않고 빈 행으로</span></div>
+    </div>
+    <p class="flow-note"><b>왜 이렇게?</b> 시트에 바로 쓰면 구글 사용량 한도 초과·동시 제출 충돌로 데이터가 사라질 수 있습니다.
+      DB에 먼저 확정하면 시트 기록이 늦어져도 <b>잃어버리는 제출은 0건</b>입니다.</p>
+
+    <h3>뒷단 흐름 B — 리뷰 캡처가 "입금완료"가 되기까지</h3>
+    <div class="pipe">
+      <div class="pnode"><h6>① 캡처 업로드</h6><span>리뷰어가 이미지 제출 (여러 장 슬롯 지원)</span></div>
+      <span class="parrow">→</span>
+      <div class="pnode"><h6>② 드라이브 정리</h6><span>캠페인·탭별 [리뷰] 폴더에 자동 저장</span></div>
+      <span class="parrow">→</span>
+      <div class="pnode store"><h6>③ 제출완료 기록</h6><span>색인에 제출 표시 + 시트 행과 연결</span></div>
+      <span class="parrow">→</span>
+      <div class="pnode"><h6>④ 관리자 입금 처리</h6><span>완료 건 모아서 페이백 입금 → PAID 기록</span></div>
+      <span class="parrow">→</span>
+      <div class="pnode"><h6>⑤ 리뷰어 확인</h6><span>제출완료 탭에 "입금완료" 배지 표시</span></div>
+    </div>
+
+    <h3>관리자 운영 루프</h3>
+    <div class="flow">
+      <div class="fstep"><span class="n">A</span><h5>캠페인 등록</h5><p>구글시트 주소를 등록하면 색인·폴더가 자동 준비됨</p><span class="where">관리자 대시보드</span></div>
+      <div class="fstep"><span class="n">B</span><h5>탭 설정</h5><p>차수·마감·캡처 슬롯 수·제공정보 안내문 지정</p><span class="where">캠페인탭 관리</span></div>
+      <div class="fstep"><span class="n">C</span><h5>모집 게시</h5><p>모집공고 작성 → 리뷰어 홈에 노출</p><span class="where">모집공고 관리</span></div>
+      <div class="fstep sysbox"><span class="n">·</span><h5>자동 운영</h5><p>5분마다 색인 갱신, 제출 자동 기록, 막힌 건 자동 복구</p><span class="where">시스템</span></div>
+      <div class="fstep"><span class="n">D</span><h5>현황·복구</h5><p>시트반영 현황 위젯에서 막힌 주문 확인·원클릭 복구</p><span class="where">대시보드 위젯</span></div>
+      <div class="fstep"><span class="n">E</span><h5>입금 → 마감</h5><p>입금 처리 후 차수 마감·아카이브로 장부 정리</p><span class="where">입금처리 · 아카이브</span></div>
+    </div>
+  </section>
+
+  <!-- ════════ 5. 와이어프레임 ════════ -->
+  <section id="wireframes">
+    <div class="sec-label">05 · WIREFRAME</div>
+    <h2>와이어프레임</h2>
+    <p class="desc">주요 화면의 구조를 단순화해 그린 그림입니다. 실제 화면과 배치가 같으며, 파란 번호 핀은 아래 설명과 짝을 이룹니다.</p>
+
+    <div class="wf-grid">
+
+      <!-- 로그인 -->
+      <div class="phone-slot">
+        <h4>① 리뷰어 로그인</h4>
+        <p class="cap">가입 절차 없이 이름과 전화번호만으로 시작합니다.</p>
+        <div class="phone"><div class="screen">
+          <div class="appbar">아이에이리뷰 <span class="r">관리자</span></div>
+          <div class="scr-body">
+            <div class="blk" style="text-align:center;padding:16px 10px">
+              <div style="font-size:.8rem;font-weight:800">참여 캠페인 조회 <span class="pin">1</span></div>
+              <div style="font-size:.62rem;color:var(--faint);margin:4px 0 10px">이름과 전화번호로 로그인하세요</div>
+              <div class="field">이름</div>
+              <div class="field">010 - 전화번호</div>
+              <span class="wbtn">로그인 <span style="opacity:.7">›</span></span>
+              <div style="font-size:.58rem;color:var(--faint);margin-top:8px">처음이신가요? <u>리뷰어 등록</u> <span class="pin">2</span></div>
+            </div>
+            <div class="blk"><div class="t">소식 · 공지</div><div class="wl w80"></div><div class="wl w60"></div></div>
+          </div>
+        </div></div>
+        <div class="legend">
+          <div><span class="pin">1</span><span><b>간편 로그인</b> — 등록된 이름+전화번호 조합이 맞으면 바로 입장</span></div>
+          <div><span class="pin">2</span><span><b>신규 등록</b> — 이름·전화만으로 1분 등록</span></div>
+        </div>
+      </div>
+
+      <!-- 홈 -->
+      <div class="phone-slot">
+        <h4>② 리뷰어 홈</h4>
+        <p class="cap">소식·공지와 모집 중 캠페인이 먼저 보입니다.</p>
+        <div class="phone"><div class="screen">
+          <div class="appbar">홈 <span class="r">로그아웃</span></div>
+          <div class="scr-body">
+            <div class="blk"><div class="t">소식 · 공지 <span class="pin">1</span></div><div class="wl w80"></div><div class="wl w40"></div></div>
+            <div class="blk">
+              <div class="t">모집공고 <span class="pin">2</span></div>
+              <div class="rowitem" style="border:none;padding:4px 0"><span class="tx"><span class="a">여름 신상 샴푸 체험단</span><span class="b">담당 김AE · 7/1~7/10</span></span><span class="bdg done">모집중</span></div>
+              <span class="wbtn" style="background:#FEE500;color:#3C1E1E">카카오톡으로 신청 <span class="pin" style="background:var(--mut)">3</span></span>
+              <div class="rowitem" style="border:none;padding:4px 0"><span class="tx"><span class="a">비타민 리뷰 캠페인</span><span class="b">담당 박AE</span></span><span class="bdg wait">마감임박</span></div>
+            </div>
+          </div>
+          <div class="tabbar"><span class="on">홈</span><span>내정보/현황</span><span>가이드</span></div>
+        </div></div>
+        <div class="legend">
+          <div><span class="pin">1</span><span><b>공지 우선</b> — 운영팀 안내가 항상 위에</span></div>
+          <div><span class="pin">2</span><span><b>모집 카드</b> — 진행 중 캠페인만 노출, 행/카드 보기 전환</span></div>
+          <div><span class="pin">3</span><span><b>신청 버튼</b> — 카카오톡 오픈채팅 또는 즉시 신청 폼</span></div>
+        </div>
+      </div>
+
+      <!-- 내정보/현황 -->
+      <div class="phone-slot">
+        <h4>③ 내정보/현황 — 리뷰 내역 <span class="newchip">최근 추가</span></h4>
+        <p class="cap">이번에 추가된 좌우 탭: 제출대기(기본) / 제출완료. 입금까지 끝난 건엔 남색 "입금완료" 배지가 붙습니다.</p>
+        <div class="phone"><div class="screen">
+          <div class="appbar">내정보 / 현황 <span class="r">관리자</span></div>
+          <div class="scr-body">
+            <div class="blk"><div class="t">내 등록정보 · 계좌 관리</div><div class="wl w80"></div><div class="wl w60"></div></div>
+            <div class="blk" style="background:transparent;border:none;padding:0">
+              <div class="t" style="margin-bottom:6px">리뷰 내역 <span class="pin">1</span></div>
+              <div class="tabs2"><span>제출대기 2</span><span class="on">제출완료 3</span></div>
+            </div>
+            <div class="rowitem"><span class="av"></span><span class="tx"><span class="a">6/20 치약 30건 · 2차</span><span class="b">제출 2026.06.21</span></span><span class="bdg paid">입금완료</span><span class="bdg done">제출완료</span></div>
+            <div class="rowitem"><span class="av"></span><span class="tx"><span class="a">6/20 치약 30건 · 2차</span><span class="b">제출 2026.06.22 <span class="pin">2</span></span></span><span class="bdg done">제출완료</span></div>
+            <div class="rowitem"><span class="av"></span><span class="tx"><span class="a">6/10 핸드크림 20건</span><span class="b">김아름</span></span><span class="bdg paid">입금완료 <i style="font-style:normal" class="pin">3</i></span><span class="bdg done">제출완료</span></div>
+          </div>
+          <div class="tabbar"><span>홈</span><span class="on">내정보/현황</span><span>가이드</span></div>
+        </div></div>
+        <div class="legend">
+          <div><span class="pin">1</span><span><b>좌우 탭</b> — 기본은 [제출대기], 완료 건은 [제출완료]에 계속 남아 확인 가능</span></div>
+          <div><span class="pin">2</span><span><b>제출일</b> — 리뷰 캡처가 접수된 날짜 자동 표기</span></div>
+          <div><span class="pin">3</span><span><b>입금완료 배지</b> — 장부의 입금 칸이 채워지면 자동 표시</span></div>
+        </div>
+      </div>
+
+      <!-- 리뷰 제출 -->
+      <div class="phone-slot">
+        <h4>④ 리뷰 캡처 제출</h4>
+        <p class="cap">제출대기 카드를 누르면 열리는 화면. 캡처를 올리면 드라이브에 자동 정리됩니다.</p>
+        <div class="phone"><div class="screen">
+          <div class="appbar">리뷰 제출 <span class="r">‹ 뒤로</span></div>
+          <div class="scr-body">
+            <div class="blk"><div class="t">참여 정보</div>
+              <div style="font-size:.72rem;font-weight:800">7/1 샴푸 100건 · 1차 <span class="pin">1</span></div>
+              <div style="font-size:.6rem;color:var(--faint)">김아름 · 옵션: 허브샴푸</div>
+            </div>
+            <div class="blk"><div class="t">리뷰 캡처 업로드 <span class="pin">2</span></div>
+              <div style="display:flex;gap:6px">
+                <div style="flex:1;border:1.5px dashed var(--wire);border-radius:8px;text-align:center;font-size:.6rem;color:var(--ok);padding:12px 4px;font-weight:800">영수증 ✓</div>
+                <div style="flex:1;border:1.5px dashed var(--wire);border-radius:8px;text-align:center;font-size:.6rem;color:var(--faint);padding:12px 4px">포토리뷰 +</div>
+              </div>
+              <div style="font-size:.58rem;color:var(--faint);margin-top:6px">1/2 제출됨 — 남은 슬롯만 올리면 완료 <span class="pin">3</span></div>
+            </div>
+            <span class="wbtn">제출하기</span>
+          </div>
+        </div></div>
+        <div class="legend">
+          <div><span class="pin">1</span><span><b>자동 매칭</b> — 내 이름·전화번호로 장부의 내 행을 자동으로 찾음</span></div>
+          <div><span class="pin">2</span><span><b>다중 슬롯</b> — 캠페인이 요구하는 캡처 종류별로 따로 업로드</span></div>
+          <div><span class="pin">3</span><span><b>부분 제출 허용</b> — 나눠 올려도 되고, 모두 채우면 제출완료로 전환</span></div>
+        </div>
+      </div>
+
+      <!-- 구매양식 -->
+      <div class="phone-slot">
+        <h4>⑤ 구매양식 제출</h4>
+        <p class="cap">구매 직후 주문 정보를 제출하는 화면. 캡처를 올리면 AI가 주문번호를 읽어 채워줍니다.</p>
+        <div class="phone"><div class="screen">
+          <div class="appbar">구매양식 <span class="r">‹ 뒤로</span></div>
+          <div class="scr-body">
+            <div class="blk" style="border-color:var(--accent)"><div class="t" style="color:var(--accent-deep)">📦 제공정보 <span class="pin">1</span></div>
+              <div class="wl w80"></div><div class="wl w60"></div>
+              <div style="font-size:.58rem;color:var(--warn);font-weight:700;margin-top:4px">지출증빙 현금영수증 발행 필수 · 사업자번호 000-00-00000</div>
+            </div>
+            <div class="blk"><div class="t">주문 캡처 <span class="pin">2</span></div>
+              <div style="border:1.5px dashed var(--wire);border-radius:8px;text-align:center;font-size:.62rem;color:var(--faint);padding:12px">이미지 올리기 — AI가 자동 인식</div>
+            </div>
+            <div class="blk"><div class="t">주문 정보</div>
+              <div class="field">수취인</div><div class="field">연락처</div><div class="field">주소</div><div class="field">주문번호</div>
+            </div>
+            <span class="wbtn">제출하기 <span class="pin" style="background:rgba(255,255,255,.35)">3</span></span>
+          </div>
+        </div></div>
+        <div class="legend">
+          <div><span class="pin">1</span><span><b>제공정보 카드</b> — 탭별 진행방식 안내·현금영수증 정보가 자동 표시</span></div>
+          <div><span class="pin">2</span><span><b>AI 보조 입력</b> — 주문 캡처에서 주문번호·금액을 자동 추출</span></div>
+          <div><span class="pin">3</span><span><b>제출 즉시 확정</b> — DB에 먼저 저장, 시트 기록은 시스템이 알아서</span></div>
+        </div>
+      </div>
+
+      <!-- 관리자 -->
+      <div class="phone-slot" style="grid-column:1/-1">
+        <h4>⑥ 관리자 대시보드 (PC)</h4>
+        <p class="cap">운영팀의 조종석입니다. 캠페인 통계와 "지금 손봐야 할 것"이 위젯으로 먼저 보입니다.</p>
+        <div class="desk">
+          <div class="bar"><i></i><i></i><i></i><span class="url">review-web-system.pages.dev/admin</span></div>
+          <div class="desk-body">
+            <div class="desk-side">
+              <span class="on">대시보드</span><span>캠페인탭 관리</span><span>모집공고</span><span>입금처리</span><span>리뷰폴더 현황</span><span>설정</span>
+            </div>
+            <div class="desk-main">
+              <div class="widgets">
+                <div class="widget"><div class="t">진행 중 캠페인 <span class="pin">1</span></div><div class="num">57 <small>시트 · 5분마다 자동 갱신</small></div></div>
+                <div class="widget"><div class="t">구매주문 시트반영 현황 <span class="pin">2</span></div><div class="num">막힘 2 <small>원클릭 복구 · 빠른 반영(가속)</small></div></div>
+                <div class="widget"><div class="t">오늘 제출 / 입금 대기</div><div class="num">128 / 43 <small>리뷰 캡처 · 페이백</small></div></div>
+                <div class="widget"><div class="t">리뷰폴더 · 컬럼매핑 점검 <span class="pin">3</span></div><div class="num">⚠ 1 <small>미연결 탭 일괄 생성 버튼</small></div></div>
+              </div>
+              <div class="widget"><div class="t">캠페인 탭 목록</div><div class="wl w80"></div><div class="wl w60"></div><div class="wl w40"></div></div>
+            </div>
+          </div>
+        </div>
+        <div class="legend">
+          <div><span class="pin">1</span><span><b>자동 집계</b> — 등록된 모든 시트의 인원·제출·입금 수가 색인에서 계산됨</span></div>
+          <div><span class="pin">2</span><span><b>막힌 주문 위젯</b> — 시트에 아직 못 쓴 주문을 보여주고 버튼 한 번으로 재시도</span></div>
+          <div><span class="pin">3</span><span><b>점검 배지</b> — 폴더 미연결·컬럼 인식 이상 등 사람이 봐야 할 곳만 ⚠ 표시</span></div>
+        </div>
+      </div>
+
+    </div>
+  </section>
+
+  <!-- ════════ 6. 화면 지도 ════════ -->
+  <section id="screens">
+    <div class="sec-label">06 · SCREEN MAP</div>
+    <h2>화면 지도</h2>
+    <p class="desc">저장소 frontend/ 폴더의 실제 페이지 목록입니다.</p>
+    <div class="tablewrap card">
+      <table>
+        <thead><tr><th>페이지</th><th>이름</th><th>사용자</th><th>한 줄 설명</th></tr></thead>
+        <tbody>
+          <tr><td class="area">index.html</td><td>리뷰어 홈</td><td><span class="tag rv">리뷰어</span></td><td>로그인 · 소식/모집공고 · 내정보/현황(리뷰 내역 탭)</td></tr>
+          <tr><td class="area">search.html</td><td>리뷰 제출</td><td><span class="tag rv">리뷰어</span></td><td>내 참여 조회 · 구매양식 제출 · 리뷰 캡처 업로드</td></tr>
+          <tr><td class="area">recruit.html</td><td>캠페인 모집</td><td><span class="tag rv">리뷰어</span></td><td>모집공고 목록·신청 전용 페이지</td></tr>
+          <tr><td class="area">admin.html</td><td>관리자 대시보드</td><td><span class="tag ad">관리자</span></td><td>캠페인·탭·모집·입금·폴더·진단 등 운영 전반</td></tr>
+          <tr><td class="area">staff.html</td><td>AE 대시보드</td><td><span class="tag ae">AE</span></td><td>담당 캠페인 모집·제출 현황</td></tr>
+          <tr><td class="area">portal.html</td><td>업무포털</td><td><span class="tag ae">AE</span><span class="tag ad">관리자</span></td><td>광고주 작업 발주(work orders) 접수·관리</td></tr>
+          <tr><td class="area">viewer.html</td><td>캠페인 현황 뷰어</td><td><span class="tag sys">광고주</span></td><td>외부 공유용 진행 현황 열람</td></tr>
+          <tr><td class="area">report.html</td><td>리뷰 보고</td><td><span class="tag sys">광고주</span></td><td>완료 리뷰 이미지 모음 보고 페이지</td></tr>
+          <tr><td class="area">raw-mirror.html</td><td>RAW 미러 뷰어</td><td><span class="tag ad">관리자</span></td><td>시트 복사본 열람 · 컬럼 매핑 교정 · 구매양식 CSV</td></tr>
+          <tr><td class="area">throttle-monitor.html</td><td>API 사용량 모니터</td><td><span class="tag ad">관리자</span></td><td>구글 API 분당 사용량(시트 45/분 · 드라이브 120/분) 관찰</td></tr>
+        </tbody>
+      </table>
+    </div>
+  </section>
+
+  <!-- ════════ 7. 안전장치 ════════ -->
+  <section id="guards">
+    <div class="sec-label">07 · SAFEGUARDS</div>
+    <h2>안전장치 (비기능 요구사항)</h2>
+    <p class="desc">눈에 보이지 않지만 이 제품의 절반은 안전장치입니다. 문제가 생겨도 데이터를 잃지 않고 스스로 복구하도록 설계되어 있습니다.</p>
+    <div class="guards">
+      <div class="card guard"><h4><span class="ic">✓</span>제출 유실 0건</h4><p>모든 제출은 DB에 먼저 확정됩니다. 시트 기록이 실패해도 원본이 남아 있어 자동 재시도(2분 주기)로 반드시 반영됩니다.</p></div>
+      <div class="card guard"><h4><span class="ic">✓</span>남의 데이터 보호</h4><p>시트에 쓰기 직전 연락처·주소·수취인 3중 확인으로, 이미 다른 사람 데이터가 있는 행은 절대 덮어쓰지 않고 빈 행으로 비켜갑니다.</p></div>
+      <div class="card guard"><h4><span class="ic">✓</span>개인정보 최소 노출</h4><p>무인증 조회는 본인 전화번호가 정확히 일치할 때만 제출 이력을 보여주고, 완료 건의 상세 행 데이터는 아예 응답에서 제외합니다.</p></div>
+      <div class="card guard"><h4><span class="ic">✓</span>구글 사용량 보호</h4><p>시트 분당 45회·드라이브 분당 120회 한도 안에서만 호출하고, 주문 기록용 슬롯 8개를 항상 예약해 제출이 밀리지 않게 합니다.</p></div>
+      <div class="card guard"><h4><span class="ic">✓</span>중복 방지</h4><p>같은 주문이 두 번 기록되지 않도록 주문번호 기반 열쇠로 행을 예약하고, 서버가 여러 대여도 한 건은 한 번만 처리됩니다.</p></div>
+      <div class="card guard"><h4><span class="ic">✓</span>역할별 권한</h4><p>관리 기능은 로그인 토큰과 역할(master/admin/staff)로 구분되어, AE는 담당 범위만 접근할 수 있습니다.</p></div>
+    </div>
+  </section>
+
+  <!-- ════════ 8. 용어 ════════ -->
+  <section id="gloss">
+    <div class="sec-label">08 · GLOSSARY</div>
+    <h2>용어 사전</h2>
+    <p class="desc">문서와 관리자 화면에 나오는 말들을 쉬운 말로 풀었습니다.</p>
+    <dl class="gloss">
+      <div><dt>캠페인 / 탭 / 차수</dt><dd>캠페인 = 구글시트 하나. 탭 = 그 시트 안의 작업 단위(예: "샴푸 100건"). 차수 = 같은 탭에서 회차를 나눈 것(1차, 2차…).</dd></div>
+      <div><dt>인덱스 (색인)</dt><dd>모든 시트의 참여자 행을 서버가 5분마다 읽어 만들어 두는 검색용 목록. 리뷰어의 "내 참여 조회"가 이걸 봅니다.</dd></div>
+      <div><dt>DB-first (DB 먼저)</dt><dd>제출을 구글시트가 아니라 서버 데이터베이스(금고)에 먼저 저장하는 원칙. 시트는 그 다음에 자동으로 채워지는 장부.</dd></div>
+      <div><dt>RAW 미러</dt><dd>구글시트 내용을 서버에 통째로 복사해 둔 것. 주문을 어느 행에 쓸지 정할 때 시트를 매번 읽지 않고 이 복사본을 봅니다.</dd></div>
+      <div><dt>리컨실 (자동 복구)</dt><dd>시트에 기록되지 못하고 막힌 주문을 2분마다 찾아 다시 시도하는 청소부. 복구된 행에는 비고란에 system 표시.</dd></div>
+      <div><dt>스로틀 (사용량 조절)</dt><dd>구글 API 한도를 넘지 않게 호출 속도를 분당 45회로 제한하는 밸브. 넘칠 것 같으면 줄 세워서 천천히 보냅니다.</dd></div>
+      <div><dt>제출완료 / 입금완료</dt><dd>제출완료 = 리뷰 캡처가 접수되어 장부에 표시된 상태. 입금완료 = 그 건의 페이백 입금 칸까지 채워진 상태(남색 배지).</dd></div>
+      <div><dt>아카이브</dt><dd>끝난 차수·탭의 기록을 별도 보관함으로 옮겨 현재 장부를 가볍게 유지하는 것. 보관함에서 복원도 가능합니다.</dd></div>
+    </dl>
+  </section>
+
+  <footer>
+    <b>근거</b> — 이 문서는 review-web-system 저장소의 실제 코드(frontend/ 화면, server/src/ API·서비스, CLAUDE.md 운영 규칙)를 기준으로 작성되었습니다.
+    최근 반영: 리뷰 내역 제출대기/제출완료 탭(#234), 입금완료 배지(#235). · 2026-07-03
+  </footer>
+
+</div>
+
+</body>
+</html>
