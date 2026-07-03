@@ -73,11 +73,23 @@ const SIMILARITY_THRESHOLD = 0.15;
 /**
  * 이름/전화번호로 리뷰 인덱스 검색
  * GAS: handleSearchAll(query, phone8)
- * isSubmitted=false 행만 반환 (제출 완료 제외)
+ * 기본: isSubmitted=false 행만 반환 (제출 완료 제외)
+ * opts.includeSubmitted: true면 제출 완료 행도 함께 반환 (리뷰어 홈 제출대기/제출완료 탭용).
+ *   - ★ 보안 가드: 무인증 엔드포인트이므로 제출완료 행은 phone8 정확 일치
+ *     (본인+타계정 연락처 또는 participation_links 확정 신원)로 매칭된 행만 포함한다.
+ *     이름 단독/이름+전화근접(약한 키) 매칭에는 절대 제출 이력을 열지 않는다
+ *     (이름만 아는 임의 호출자가 타인의 누적 제출 이력·row_json PII를 긁는 것 차단).
+ *   - 미제출 우선 정렬(is_submitted ASC)로 LIMIT에 걸려도 대기 건이 잘리지 않는다.
+ *   - 제출완료 행은 row(행 전체 JSON)를 비워 반환한다(데이터 최소화 — 완료 탭 표시에 불필요).
  */
-async function searchByName(query, phone8) {
+async function searchByName(query, phone8, opts = {}) {
   const q = (query || '').trim().replace(/\s/g, '');
   const p8 = (phone8 || '').replace(/[^0-9]/g, '');
+  // 제출완료 포함은 phone8(8자리)이 있을 때만 유효 — 이름 단독 분기에서는 무시
+  const includeSubmitted = !!(opts && opts.includeSubmitted) && p8.length === 8;
+  const orderPrefix = includeSubmitted ? 'ri.is_submitted ASC, ' : '';
+  // 완료 이력이 합산되므로 LIMIT 상향(대기 건은 정렬 프리픽스로 보호됨)
+  const limit = includeSubmitted ? 400 : 200;
 
   if (!q && p8.length !== 8) {
     return { error: '2글자 이상 입력하세요.', results: [] };
@@ -102,6 +114,7 @@ async function searchByName(query, phone8) {
     ri.round,
     ri.row_json          AS "rowJson",
     ri.submit_col        AS "submitCol",
+    ri.review_file_at    AS "reviewFileAt",
     tc.manager,
     tc.time_range        AS "timeRange",
     tc.review_type       AS "reviewType",
@@ -135,6 +148,11 @@ async function searchByName(query, phone8) {
     const phonePrefixParam = paramIdx++;     // 앞4자리 (오인식 구제)
     const phoneSuffixParam = paramIdx++;     // 뒤4자리 (오인식 구제)
 
+    // ★ 제출완료 행은 강한 신원키(phone8/확정신원) 일치 시에만 포함 — 약한 키(이름+근접)는 대기 건만
+    const submittedCond = includeSubmitted
+      ? `(ri.is_submitted = FALSE OR ri.phone8 = ANY($${phoneListParam}) OR pl.phone8 = ANY($${phoneListParam}))`
+      : 'ri.is_submitted = FALSE';
+
     sql = `
       SELECT ${SELECT_FIELDS},
              CASE
@@ -153,7 +171,7 @@ async function searchByName(query, phone8) {
       LEFT JOIN tab_configs tc ON ri.sheet_id = tc.sheet_id AND ri.tab_name = tc.tab_name
       LEFT JOIN participation_links pl
         ON pl.sheet_id = ri.sheet_id AND pl.tab_name = ri.tab_name AND pl.row_index = ri.row_index
-      WHERE ri.is_submitted = FALSE
+      WHERE ${submittedCond}
         AND tc.sheet_id IS NOT NULL
         AND (
           ri.phone8 = ANY($${phoneListParam})          -- P0: 연락처 phone8 단독 통과
@@ -168,8 +186,8 @@ async function searchByName(query, phone8) {
             )
           )
         )
-      ORDER BY score DESC, ri.start_date DESC NULLS LAST
-      LIMIT 200
+      ORDER BY ${orderPrefix}score DESC, ri.start_date DESC NULLS LAST
+      LIMIT ${limit}
     `;
     params.push(q, phoneList, p8.substring(0, 4), p8.substring(4, 8));
 
@@ -178,17 +196,19 @@ async function searchByName(query, phone8) {
     // ★ P0/P5: 본인+타계정 phone8 또는 확정 신원(participation_links)으로 매칭
     const phoneList = await _getReviewerPhoneList(p8);
     const phoneListParam = paramIdx++;
+    // 이 분기는 매칭 자체가 강한 신원키(phone8/확정신원)뿐 → 제출완료 포함 시 필터만 해제
+    const submittedCond = includeSubmitted ? 'TRUE' : 'ri.is_submitted = FALSE';
     sql = `
       SELECT ${SELECT_FIELDS}
       FROM review_index ri
       LEFT JOIN tab_configs tc ON ri.sheet_id = tc.sheet_id AND ri.tab_name = tc.tab_name
       LEFT JOIN participation_links pl
         ON pl.sheet_id = ri.sheet_id AND pl.tab_name = ri.tab_name AND pl.row_index = ri.row_index
-      WHERE ri.is_submitted = FALSE
+      WHERE ${submittedCond}
         AND tc.sheet_id IS NOT NULL
         AND (ri.phone8 = ANY($${phoneListParam}) OR pl.phone8 = ANY($${phoneListParam}))
-      ORDER BY ri.start_date DESC NULLS LAST
-      LIMIT 200
+      ORDER BY ${orderPrefix}ri.start_date DESC NULLS LAST
+      LIMIT ${limit}
     `;
     params.push(phoneList);
 
@@ -197,6 +217,8 @@ async function searchByName(query, phone8) {
     // reviewer_name이 검색어와 정확히 일치하는 경우만 반환
     // 공백 제거 후 비교: "김 수 만" == "김수만"
     // ★ reviewer_name OR recipient_name 매칭 (수취인 검색 지원)
+    // ★ 이름 단독 분기는 includeSubmitted 무시(항상 대기 건만) — 무인증 이름 조회로
+    //   타인의 제출 이력이 노출되는 것을 차단
     const nameParam = paramIdx++;
     sql = `
       SELECT ${SELECT_FIELDS},
@@ -273,8 +295,10 @@ async function searchByName(query, phone8) {
       captureFolderUrl: row.captureFolderUrl,
       captureSlots: Array.isArray(row.captureSlots) && row.captureSlots.length ? row.captureSlots : null,
       submittedSlots: [],   // 아래에서 다중 슬롯 행에 한해 채움
-      row:         _parseRowJson(row.rowJson),
-      submitCol:   row.submitCol,
+      // ★ 제출완료 행은 행 전체 JSON을 반환하지 않는다(데이터 최소화 — 완료 탭 표시에 불필요)
+      row:         row.isSubmitted ? {} : _parseRowJson(row.rowJson),
+      submitCol:   row.isSubmitted ? null : row.submitCol,
+      reviewFileAt: row.reviewFileAt || null, // 대표 리뷰 이미지 연결 시각 (제출완료 탭 표시용)
       score:       row.score, // 유사도 점수 (1.0=정확매칭, <1.0=유사매칭)
     }));
 
@@ -321,7 +345,7 @@ async function searchByName(query, phone8) {
     // pg_trgm 미설치 시 fallback: 기존 ILIKE 검색
     if (err.message.includes('function similarity') || err.message.includes('operator does not exist: %')) {
       logger.warn('[Search] pg_trgm 미설치 — ILIKE fallback 사용');
-      return searchByNameFallback(q, p8, SELECT_FIELDS);
+      return searchByNameFallback(q, p8, SELECT_FIELDS, includeSubmitted);
     }
     throw new Error('검색 쿼리 오류: ' + err.message);
   }
@@ -330,22 +354,29 @@ async function searchByName(query, phone8) {
 /**
  * pg_trgm 미설치 시 fallback (기존 ILIKE 방식)
  */
-async function searchByNameFallback(q, p8, SELECT_FIELDS) {
+async function searchByNameFallback(q, p8, SELECT_FIELDS, includeSubmitted) {
   let sql;
   const params = [];
   let paramIdx = 1;
+  // ★ 보안 가드(본검색과 동일): 제출완료 행은 phone8 정확 일치 매칭에만 포함,
+  //   이름 매칭(ILIKE 부분일치 포함)에는 절대 열지 않는다
+  const orderPrefix = includeSubmitted ? 'ri.is_submitted ASC, ' : '';
+  const limit = includeSubmitted ? 400 : 200;
 
   if (q && p8.length === 8) {
     // ★ P0/P5: phone8(연락처) 또는 확정 신원(pl) 일치 시 이름 불일치여도 통과
     const nameParam = paramIdx++;
     const phoneParam = paramIdx++;
+    const submittedCond = includeSubmitted
+      ? `(ri.is_submitted = FALSE OR ri.phone8 = $${phoneParam} OR pl.phone8 = $${phoneParam})`
+      : 'ri.is_submitted = FALSE';
     sql = `
       SELECT ${SELECT_FIELDS}
       FROM review_index ri
       LEFT JOIN tab_configs tc ON ri.sheet_id = tc.sheet_id AND ri.tab_name = tc.tab_name
       LEFT JOIN participation_links pl
         ON pl.sheet_id = ri.sheet_id AND pl.tab_name = ri.tab_name AND pl.row_index = ri.row_index
-      WHERE ri.is_submitted = FALSE
+      WHERE ${submittedCond}
         AND tc.sheet_id IS NOT NULL
         AND (
           ri.phone8 = $${phoneParam}
@@ -353,26 +384,28 @@ async function searchByNameFallback(q, p8, SELECT_FIELDS) {
           OR ri.reviewer_name ILIKE $${nameParam}
           OR ri.recipient_name ILIKE $${nameParam}
         )
-      ORDER BY ri.start_date DESC NULLS LAST
-      LIMIT 200
+      ORDER BY ${orderPrefix}ri.start_date DESC NULLS LAST
+      LIMIT ${limit}
     `;
     params.push(`%${q}%`, p8);
   } else if (p8.length === 8) {
     const phoneParam = paramIdx++;
+    const submittedCond = includeSubmitted ? 'TRUE' : 'ri.is_submitted = FALSE';
     sql = `
       SELECT ${SELECT_FIELDS}
       FROM review_index ri
       LEFT JOIN tab_configs tc ON ri.sheet_id = tc.sheet_id AND ri.tab_name = tc.tab_name
       LEFT JOIN participation_links pl
         ON pl.sheet_id = ri.sheet_id AND pl.tab_name = ri.tab_name AND pl.row_index = ri.row_index
-      WHERE ri.is_submitted = FALSE
+      WHERE ${submittedCond}
         AND tc.sheet_id IS NOT NULL
         AND (ri.phone8 = $${phoneParam} OR pl.phone8 = $${phoneParam})
-      ORDER BY ri.start_date DESC NULLS LAST
-      LIMIT 200
+      ORDER BY ${orderPrefix}ri.start_date DESC NULLS LAST
+      LIMIT ${limit}
     `;
     params.push(p8);
   } else {
+    // ★ 이름 단독 분기는 includeSubmitted 무시(항상 대기 건만)
     const nameParam = paramIdx++;
     sql = `
       SELECT ${SELECT_FIELDS}
@@ -409,12 +442,25 @@ async function searchByNameFallback(q, p8, SELECT_FIELDS) {
     idxName:     row.idxName,
     recipientName: row.recipientName || '',
     campaignName: row.tcCampaignName || row.campaignName || '',
+    tabName:     row.tabName,
+    sheetId:     row.sheetId,
+    gid:         row.gid,
+    rowIndex:    row.rowIndex,
+    isSubmitted: row.isSubmitted,
+    productName: row.productName,
+    productUrl:  row.productUrl,
+    startDate:   row.startDate,
+    endDate:     row.endDate,
+    round:       row.round,
+    displayNameTC: row.displayName,
     folderUrl:   row.folderUrl,
     captureFolderUrl: row.captureFolderUrl,
     captureSlots: Array.isArray(row.captureSlots) && row.captureSlots.length ? row.captureSlots : null,
     submittedSlots: [],
-    row:         _parseRowJson(row.rowJson),
-    submitCol:   row.submitCol,
+    // ★ 제출완료 행은 행 전체 JSON 미반환 (본검색과 동일한 데이터 최소화)
+    row:         row.isSubmitted ? {} : _parseRowJson(row.rowJson),
+    submitCol:   row.isSubmitted ? null : row.submitCol,
+    reviewFileAt: row.reviewFileAt || null,
   }));
 
   return {
