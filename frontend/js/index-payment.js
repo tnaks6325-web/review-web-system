@@ -595,6 +595,7 @@ async function saveDepositNames() {
 async function loadSystemMonitor() {
   loadSyncQueueStats();
   loadOrderMirrorStatus();
+  loadReviewEditRequests();
   loadBuildHistory();
   loadApiMetrics();
   loadSmartBuildStatus();
@@ -661,6 +662,75 @@ async function loadOrderMirrorStatus() {
   } catch (err) {
     el.innerHTML = `<span style="color:#EF4444">로드 실패: ${err.message}</span>`;
   }
+}
+
+// ── 리뷰 이미지 수정요청 (리뷰어 → 관리자 승인 → [리뷰] 폴더 파일 교체) ──
+function _escReviewEdit(s){ const d = document.createElement('div'); d.textContent = (s == null ? '' : String(s)); return d.innerHTML; }
+
+async function loadReviewEditRequests() {
+  const el = document.getElementById("reviewEditPanel");
+  const badge = document.getElementById("reviewEditBadge");
+  if (!el) return;
+  try {
+    const data = await gasGet({ action: "reviewEditList", status: "pending" });
+    if (!data || data.ok === false) { el.innerHTML = `<span style="color:var(--t3)">데이터 없음</span>`; return; }
+    const reqs = data.requests || [];
+    const n = data.pendingCount != null ? data.pendingCount : reqs.length;
+    if (badge) { badge.textContent = n; badge.classList.toggle("hidden", !n); }
+    if (reqs.length === 0) {
+      el.innerHTML = '<div style="color:#16A34A;font-size:.8rem"><i class="fas fa-check-circle"></i> 대기 중인 수정요청 없음</div>';
+      return;
+    }
+    const IMG = (id) => `${API_BASE_URL}/api/drive/image/${encodeURIComponent(id)}`;
+    const THUMB = (id) => `https://drive.google.com/thumbnail?id=${encodeURIComponent(id)}&sz=w400`;
+    const imgCell = (id, label, color, border) => id
+      ? `<div style="text-align:center"><div style="font-size:.64rem;color:${color};font-weight:700">${label}</div><img src="${IMG(id)}" loading="lazy" onerror="this.onerror=null;this.src='${THUMB(id)}'" style="width:104px;height:104px;object-fit:cover;border-radius:8px;border:${border};cursor:zoom-in" onclick="window.open('${IMG(id)}','_blank')"></div>`
+      : '';
+    el.innerHTML = reqs.map(r => {
+      const reason = r.reason ? `<div style="font-size:.72rem;color:#5B6472;margin-top:6px;background:#F8FAFC;border-radius:6px;padding:5px 8px">사유: ${_escReviewEdit(r.reason)}</div>` : '';
+      return `<div style="border:1px solid var(--border);border-radius:10px;padding:10px;margin-bottom:8px">
+        <div style="display:flex;justify-content:space-between;gap:6px;align-items:flex-start;margin-bottom:8px">
+          <div style="min-width:0">
+            <div style="font-weight:700;font-size:.8rem;color:var(--t1);overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${_escReviewEdit(r.campaign_label || r.tab_name || '')}</div>
+            <div style="font-size:.7rem;color:var(--t3)">${_escReviewEdit(r.reviewer_name || '리뷰어')} · 행 ${r.row_index || '-'} · ${_escReviewEdit(r.slot_key || 'review')}</div>
+          </div>
+          <div style="display:flex;gap:5px;flex-shrink:0">
+            <button onclick="approveReviewEdit('${r.id}')" style="font-size:.72rem;background:#16A34A;color:#fff;border:none;padding:5px 12px;border-radius:6px;cursor:pointer;font-weight:700">승인</button>
+            <button onclick="rejectReviewEdit('${r.id}')" style="font-size:.72rem;background:#EF4444;color:#fff;border:none;padding:5px 10px;border-radius:6px;cursor:pointer">반려</button>
+          </div>
+        </div>
+        <div style="display:flex;gap:12px;align-items:center;justify-content:center">
+          ${imgCell(r.old_file_id, '현재', '#98A0AC', '1px solid #E5E7EB')}
+          <i class="fas fa-arrow-right" style="color:#3182f6"></i>
+          ${imgCell(r.new_file_id, '교체', '#16A34A', '2px solid #3182f6')}
+        </div>
+        ${reason}
+      </div>`;
+    }).join('');
+  } catch (err) {
+    el.innerHTML = `<span style="color:#EF4444">로드 실패: ${err.message}</span>`;
+  }
+}
+
+async function approveReviewEdit(id) {
+  if (!confirm('이 수정요청을 승인합니까?\n\n[리뷰] 폴더의 파일이 리뷰어가 올린 새 이미지로 교체되고,\n기존 파일은 휴지통으로 이동됩니다(복구 가능).')) return;
+  try {
+    const r = await gasPost({ action: "reviewEditApprove", id: id });
+    if (!r || r.ok === false) throw new Error((r && r.error) || '승인 실패');
+    showToast('승인 완료 — 리뷰 파일이 교체되었습니다', 'success');
+    loadReviewEditRequests();
+  } catch (e) { showToast('승인 실패: ' + (e.message || ''), 'error'); }
+}
+
+async function rejectReviewEdit(id) {
+  const note = prompt('반려 사유를 입력하세요 (리뷰어에게 표시됩니다):', '');
+  if (note === null) return;
+  try {
+    const r = await gasPost({ action: "reviewEditReject", id: id, note: note });
+    if (!r || r.ok === false) throw new Error((r && r.error) || '반려 실패');
+    showToast('반려 처리되었습니다', 'success');
+    loadReviewEditRequests();
+  } catch (e) { showToast('반려 실패: ' + (e.message || ''), 'error'); }
 }
 
 async function runOrderReconcile(sheetId) {
@@ -1242,6 +1312,7 @@ const _SSE_ICONS = {
   dirty_detected:{ icon: 'fa-bolt', color: '#D97706', label: '변경 감지' },
   cs_new_inquiry:{ icon: 'fa-comments', color: '#7C3AED', label: 'C/S 문의' },
   cs_message:    { icon: 'fa-comment-dots', color: '#7C3AED', label: 'C/S 메시지' },
+  review_edit_request: { icon: 'fa-images', color: '#3182f6', label: '리뷰 수정요청' },
   connected:     { icon: 'fa-plug', color: '#12b886', label: '연결됨' },
 };
 
@@ -1276,7 +1347,7 @@ function connectSSE() {
     };
 
     // 이벤트별 핸들러
-    ['review_submit', 'order_submit', 'order_update', 'image_extract', 'image_upload', 'index_build', 'system', 'dirty_detected', 'smart_build_done', 'dirty_auto_built', 'db_rebuild_progress', 'db_rebuild_done', 'cs_new_inquiry', 'cs_message'].forEach(function(evtType) {
+    ['review_submit', 'order_submit', 'order_update', 'image_extract', 'image_upload', 'index_build', 'system', 'dirty_detected', 'smart_build_done', 'dirty_auto_built', 'db_rebuild_progress', 'db_rebuild_done', 'cs_new_inquiry', 'cs_message', 'review_edit_request'].forEach(function(evtType) {
       _sseSource.addEventListener(evtType, function(event) {
         try {
           const data = JSON.parse(event.data);
@@ -1291,6 +1362,10 @@ function connectSSE() {
           if (evtType === 'order_update') {
             if (typeof loadWorkOrders === 'function') { try { loadWorkOrders(); } catch(_) {} }
             if (typeof loadDashWorkOrders === 'function') { try { loadDashWorkOrders(); } catch(_) {} }
+          }
+          // ★ 리뷰 이미지 수정요청 발생/처리 → 관리자 위젯 즉시 갱신
+          if (evtType === 'review_edit_request' && typeof loadReviewEditRequests === 'function') {
+            try { loadReviewEditRequests(); } catch(_) {}
           }
           // ★ Phase 4: dirty_detected 수신 시 대시보드 dirty 배지 갱신
           if (evtType === 'dirty_detected' && typeof _renderDirtyBadges === 'function') {

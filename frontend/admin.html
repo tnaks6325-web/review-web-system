@@ -1022,6 +1022,18 @@ body{ letter-spacing:-.01em; }
             </div>
           </div>
 
+          <!-- 리뷰 이미지 수정요청 (리뷰어 → 관리자 승인) -->
+          <div style="background:#fff;border-radius:12px;padding:16px;box-shadow:0 1px 4px rgba(0,0,0,.06);border:1px solid var(--border)">
+            <h4 style="margin:0 0 12px;font-size:.88rem;color:var(--t1)">
+              <i class="fas fa-images" style="color:#3182f6"></i> 리뷰 이미지 수정요청
+              <span id="reviewEditBadge" class="hidden" style="background:#DC2626;color:#fff;font-size:.66rem;font-weight:700;border-radius:10px;padding:1px 7px;margin-left:4px"></span>
+              <button class="btn-sm" onclick="loadReviewEditRequests()" style="float:right;font-size:.7rem;background:#E5E7EB;color:#111;border:none;padding:3px 8px;border-radius:6px;cursor:pointer"><i class="fas fa-sync"></i> 새로고침</button>
+            </h4>
+            <div id="reviewEditPanel" style="font-size:.82rem;color:var(--t2)">
+              <i class="fas fa-circle-notch fa-spin"></i> 불러오는 중...
+            </div>
+          </div>
+
           <!-- 빌드 히스토리 -->
           <div style="background:#fff;border-radius:12px;padding:16px;box-shadow:0 1px 4px rgba(0,0,0,.06);border:1px solid var(--border)">
             <h4 style="margin:0 0 12px;font-size:.88rem;color:var(--t1)">
