@@ -3,8 +3,9 @@
 //
 // 흐름:
 //   1) 리뷰어(무인증, phone8 강한-키 게이트)가 제출완료 내역에서 제출 이미지를 확인
-//   2) 잘못 올린 파일을 교체 요청 → 새 파일은 [리뷰]/[수정대기] 폴더에 "스테이징"만 됨
-//      (review_index / review_submissions 는 그대로 = 실제 리뷰 파일 미변경)
+//   2) 잘못 올린 파일을 교체 요청 → 새 파일은 최상위 [리뷰수정대기] 폴더에 "스테이징"만 됨
+//      (모든 탭 [리뷰] 폴더 밖 + 비리뷰형식 파일명 = 관리자 리뷰정리 도구가 승인 전 승격/링크 못 함;
+//       review_index / review_submissions 도 그대로 = 실제 리뷰 파일 미변경)
 //   3) 관리자(adminOrMaster)가 승인하면 그 때 비로소 파일 교체:
 //        새 파일을 [리뷰](또는 슬롯) 폴더로 이동 → DB 포인터 스왑 → 구 파일 휴지통 이동
 //      반려하면 스테이징 새 파일을 휴지통 이동.
@@ -14,6 +15,7 @@
 //       search.service 의 제출완료 강한-키 술어와 동일 규율(이름 단독 매칭은 절대 미개방).
 // ═══════════════════════════════════════════════════════════
 const express = require('express');
+const crypto = require('crypto');
 const router = express.Router();
 const pool = require('../db/pool');
 const { logger } = require('../utils/logger');
@@ -91,8 +93,12 @@ async function _resolveFolders(sheetId, tabName, slot) {
     targetFolderId = sf.id;
   }
 
-  // 스테이징: [리뷰]/[수정대기] (승인 전 새 파일은 여기에만 — report/목록 노출 안 됨)
-  const staging = await driveService.getOrCreateSubFolder(reviewFolderId, '[수정대기]');
+  // 스테이징: 최상위 [리뷰수정대기] — 모든 탭 [리뷰] 폴더 "밖"에 격리한다.
+  //   ★ folder-audit(탭별 [리뷰] 재귀 스캔)는 [리뷰] 밖이라 승인 전 파일을 안 셈.
+  //   ★ relocate-orphan-reviews(전역 키워드 검색)는 리뷰형식 파일명만 대상 → 스테이징
+  //     파일명을 비리뷰형식(수정대기_*)으로 두어 승인 전 [리뷰]로 승격/링크되는 것을 막는다.
+  const rootFolderIdForStaging = rootFolderId;
+  const staging = await driveService.getOrCreateSubFolder(rootFolderIdForStaging, '[리뷰수정대기]');
 
   const campaignLabel = cfg.display_name || cfg.campaign_name || tabName;
   return { reviewFolderId, targetFolderId, stagingFolderId: staging.id, campaignLabel };
@@ -157,7 +163,7 @@ router.get('/my-files', async (req, res) => {
     });
   } catch (err) {
     logger.error(`[review-edit] my-files 실패: ${err.message}`);
-    res.status(500).json({ ok: false, error: err.message });
+    res.status(500).json({ ok: false, error: '조회 중 오류가 발생했습니다.' });
   }
 });
 
@@ -206,8 +212,10 @@ router.post('/request', imageApiLimiter, async (req, res) => {
     }
 
     // 폴더 확보 + 새 파일 스테이징 업로드
+    //   ★ 스테이징 파일명은 "비리뷰형식"(수정대기_*) — 승인 전에는 리뷰형식 파일명 재배치
+    //     도구(relocate-orphan-reviews)의 reviewPattern에 걸리지 않게. 승인 시 정식명으로 rename.
     const { targetFolderId, stagingFolderId, campaignLabel } = await _resolveFolders(sheetId, tabName, slot);
-    const newName = driveService.generateReviewFileName(reviewerName || '익명', 1, file.mimeType || 'image/jpeg');
+    const newName = '수정대기_' + crypto.randomBytes(6).toString('hex') + '.jpg';
     const uploaded = await driveService.uploadFileBase64(
       file.data, newName, file.mimeType || 'image/jpeg', stagingFolderId
     );
@@ -266,7 +274,7 @@ router.get('/my-requests', async (req, res) => {
     res.json({ ok: true, requests: rows });
   } catch (err) {
     logger.error(`[review-edit] my-requests 실패: ${err.message}`);
-    res.status(500).json({ ok: false, error: err.message });
+    res.status(500).json({ ok: false, error: '조회 중 오류가 발생했습니다.' });
   }
 });
 
@@ -339,86 +347,96 @@ router.get('/list', authMiddleware, adminOrMasterMiddleware, async (req, res) =>
 });
 
 // POST /api/review-edit/approve  body: { id, note? }
-//   핫패스: 요청행 FOR UPDATE + status 화이트리스트(이중승인 차단).
-//   순서: (재시도 안전) 새 파일 이동 → DB 포인터 스왑 → 커밋 → 구 파일 휴지통(비치명적).
+//   ★ Drive 연산(비트랜잭셔널)은 트랜잭션 "밖"에서 먼저(멱등) 수행하고, 짧은 트랜잭션에서만
+//     FOR UPDATE 재검증 + DB 포인터 스왑 + 상태확정 → 커밋 → 구 파일 휴지통(커밋 후·비치명적).
+//   → Drive 왕복 동안 커넥션/행 락을 잡지 않는다(스타베이션 방지). 이동/이름변경은 재시도 안전.
 router.post('/approve', authMiddleware, adminOrMasterMiddleware, async (req, res) => {
   const { id, note } = req.body;
   if (!id) return res.json({ ok: false, error: 'id가 필요합니다.' });
 
-  const client = await pool.connect();
   try {
-    await client.query('BEGIN');
-    const { rows } = await client.query(
-      `SELECT * FROM review_edit_requests WHERE id = $1 FOR UPDATE`, [id]
-    );
-    const r = rows[0];
-    if (!r) { await client.query('ROLLBACK'); return res.json({ ok: false, error: '요청을 찾을 수 없습니다.' }); }
-    if (r.status !== 'pending') {
-      await client.query('ROLLBACK');
-      return res.json({ ok: false, error: `이미 처리된 요청입니다 (${r.status}).`, status: r.status });
-    }
-    if (!r.new_file_id) { await client.query('ROLLBACK'); return res.json({ ok: false, error: '스테이징된 새 파일이 없습니다.' }); }
+    // 0) 사전 로드(락 없음) — Drive 이동을 트랜잭션 밖에서 하기 위한 정보 확보
+    const { rows: pre } = await pool.query('SELECT * FROM review_edit_requests WHERE id = $1', [id]);
+    const r0 = pre[0];
+    if (!r0) return res.json({ ok: false, error: '요청을 찾을 수 없습니다.' });
+    if (r0.status !== 'pending') return res.json({ ok: false, error: `이미 처리된 요청입니다 (${r0.status}).`, status: r0.status });
+    if (!r0.new_file_id) return res.json({ ok: false, error: '스테이징된 새 파일이 없습니다.' });
 
-    // 대상 폴더 재확보(요청 이후 폴더가 이동/재생성됐어도 현재 [리뷰]로 배치)
-    let targetFolderId = r.target_folder_id;
+    // 1) 대상 폴더 확보(트랜잭션 밖) — 요청 이후 폴더가 이동/재생성됐어도 현재 [리뷰]로 배치
+    let targetFolderId = r0.target_folder_id;
     if (!targetFolderId) {
-      const f = await _resolveFolders(r.sheet_id, r.tab_name, r.slot_key || 'review');
-      targetFolderId = f.targetFolderId;
+      targetFolderId = (await _resolveFolders(r0.sheet_id, r0.tab_name, r0.slot_key || 'review')).targetFolderId;
     }
 
-    // 1) 새 파일을 대상 폴더로 이동 (멱등: 이미 대상에 있으면 skip)
-    const meta = await driveService.getFileParents(r.new_file_id);
-    if (meta.trashed) { await client.query('ROLLBACK'); return res.json({ ok: false, error: '스테이징 파일이 삭제되어 승인할 수 없습니다.' }); }
-    const parents = Array.isArray(meta.parents) ? meta.parents : [];
+    // 2) 새 파일을 대상 폴더로 이동(멱등: 이미 대상이면 skip) + 정식 리뷰 파일명으로 rename
+    //    (스테이징 중엔 비리뷰형식 이름이었으므로 승인 시점에 정식명으로 되돌린다)
+    const meta = await driveService.getFileParents(r0.new_file_id);
+    if (meta && meta.trashed) return res.json({ ok: false, error: '스테이징 파일이 삭제되어 승인할 수 없습니다.' });
+    const parents = Array.isArray(meta && meta.parents) ? meta.parents : [];
     if (!parents.includes(targetFolderId)) {
-      await driveService.moveFile(r.new_file_id, targetFolderId, parents[0] || r.new_parent_id);
+      await driveService.moveFile(r0.new_file_id, targetFolderId, parents[0] || r0.new_parent_id);
+    }
+    const finalName = driveService.generateReviewFileName(r0.reviewer_name || '익명', 1, 'image/jpeg');
+    try { await driveService.renameFile(r0.new_file_id, finalName); }
+    catch (e) { logger.warn(`[review-edit] 새 파일 rename 실패(무시): ${e.message}`); }
+    const finalUrl = r0.new_file_url || `https://drive.google.com/file/d/${r0.new_file_id}/view`;
+
+    // 3) 짧은 트랜잭션: FOR UPDATE 재검증(이중승인 차단) + DB 포인터 스왑 + 상태확정
+    const client = await pool.connect();
+    let committed = null;
+    try {
+      await client.query('BEGIN');
+      const { rows } = await client.query('SELECT * FROM review_edit_requests WHERE id = $1 FOR UPDATE', [id]);
+      const r = rows[0];
+      if (!r || r.status !== 'pending') {
+        await client.query('ROLLBACK');
+        return res.json({ ok: false, error: '이미 처리된 요청입니다.', status: r && r.status });
+      }
+      // review_submissions: 구 파일 레코드를 새 파일로 (원 제출시각 uploaded_at 보존 = 제출일 유지)
+      await client.query(
+        `UPDATE review_submissions
+            SET file_id = $1, file_url = $2, file_name = $3
+          WHERE file_id = $4 AND sheet_id = $5 AND tab_name = $6 AND row_index = $7`,
+        [r.new_file_id, finalUrl, finalName, r.old_file_id, r.sheet_id, r.tab_name, r.row_index]
+      );
+      // review_index: 대표이미지가 구 파일과 일치할 때만 교체 (원 연결시각 review_file_at 보존)
+      await client.query(
+        `UPDATE review_index
+            SET review_file_id = $1, review_file_url = $2, review_file_name = $3
+          WHERE sheet_id = $4 AND tab_name = $5 AND row_index = $6 AND review_file_id = $7`,
+        [r.new_file_id, finalUrl, finalName, r.sheet_id, r.tab_name, r.row_index, r.old_file_id]
+      );
+      // 요청 확정 (새 파일 최종명/URL 스냅샷 갱신)
+      await client.query(
+        `UPDATE review_edit_requests
+            SET status = 'approved', resolved_by = $1, resolved_at = NOW(), updated_at = NOW(),
+                new_file_name = $2, new_file_url = $3, admin_note = COALESCE($4, admin_note)
+          WHERE id = $5`,
+        [req.admin?.name || '', finalName, finalUrl, note ? _sanitizeReason(note) : null, id]
+      );
+      await client.query('COMMIT');
+      committed = r;
+    } catch (e) {
+      try { await client.query('ROLLBACK'); } catch (_) {}
+      throw e;
+    } finally {
+      client.release();
     }
 
-    // 2) DB 포인터 스왑 — review_submissions(구 파일 레코드를 새 파일로) + review_index(대표이미지 일치 시)
-    await client.query(
-      `UPDATE review_submissions
-          SET file_id = $1, file_url = $2, file_name = $3, uploaded_at = NOW()
-        WHERE file_id = $4 AND sheet_id = $5 AND tab_name = $6 AND row_index = $7`,
-      [r.new_file_id, r.new_file_url, r.new_file_name, r.old_file_id, r.sheet_id, r.tab_name, r.row_index]
-    );
-    await client.query(
-      `UPDATE review_index
-          SET review_file_id = $1, review_file_url = $2, review_file_name = $3, review_file_at = NOW()
-        WHERE sheet_id = $4 AND tab_name = $5 AND row_index = $6 AND review_file_id = $7`,
-      [r.new_file_id, r.new_file_url, r.new_file_name, r.sheet_id, r.tab_name, r.row_index, r.old_file_id]
-    );
-
-    // 3) 요청 확정
-    await client.query(
-      `UPDATE review_edit_requests
-          SET status = 'approved', resolved_by = $1, resolved_at = NOW(), updated_at = NOW(),
-              admin_note = COALESCE($2, admin_note)
-        WHERE id = $3`,
-      [req.admin?.name || '', note ? _sanitizeReason(note) : null, id]
-    );
-    await client.query('COMMIT');
-
-    // 4) 구 파일 휴지통 이동(커밋 후, 비치명적 — 복구 가능)
+    // 4) 구 파일 휴지통 이동(커밋 후·비치명적 — 복구 가능)
     try {
-      if (r.old_file_id) await driveService.trashFiles([{ id: r.old_file_id, name: r.old_file_name || '' }]);
+      if (committed.old_file_id) await driveService.trashFiles([{ id: committed.old_file_id, name: committed.old_file_name || '' }]);
     } catch (e) {
       logger.warn(`[review-edit] 구 파일 휴지통 실패(무시): ${e.message}`);
     }
 
-    // 5) 알림 — 관리자 위젯 갱신 + 리뷰어 본인 타깃
+    // 5) 관리자 위젯 실시간 갱신
     try { sse.broadcast('review_edit_request', { message: '리뷰 수정요청 승인 완료', requestId: id, action: 'approved' }); } catch (_) {}
-    try {
-      sse.broadcast('review_edit_resolved', { requestId: id, status: 'approved' },
-        (c) => c.meta && c.meta.role === 'reviewer' && c.meta.phone8 === r.phone8);
-    } catch (_) {}
 
     res.json({ ok: true });
   } catch (err) {
-    try { await client.query('ROLLBACK'); } catch (_) {}
     logger.error(`[review-edit] approve 실패: ${err.message}`);
     res.json({ ok: false, error: err.message || '승인 처리 중 오류가 발생했습니다.' });
-  } finally {
-    client.release();
   }
 });
 
@@ -451,10 +469,6 @@ router.post('/reject', authMiddleware, adminOrMasterMiddleware, async (req, res)
     try { if (r.new_file_id) await driveService.trashFiles([{ id: r.new_file_id, name: r.new_file_name || '' }]); } catch (_) {}
 
     try { sse.broadcast('review_edit_request', { message: '리뷰 수정요청 반려', requestId: id, action: 'rejected' }); } catch (_) {}
-    try {
-      sse.broadcast('review_edit_resolved', { requestId: id, status: 'rejected' },
-        (c) => c.meta && c.meta.role === 'reviewer' && c.meta.phone8 === r.phone8);
-    } catch (_) {}
 
     res.json({ ok: true });
   } catch (err) {
