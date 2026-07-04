@@ -190,6 +190,15 @@ const _ACTION_MAP = {
   'verifyAddressMatch':  { method: 'POST', path: '/api/image/verify-address' },
   'uploadReviewImage':   { method: 'POST', path: '/api/image/review-upload' },
 
+  // 리뷰 이미지 수정요청 (리뷰어 → 관리자 승인)
+  'reviewEditMyFiles':    { method: 'GET',  path: '/api/review-edit/my-files' },
+  'reviewEditRequest':    { method: 'POST', path: '/api/review-edit/request' },
+  'reviewEditMyRequests': { method: 'GET',  path: '/api/review-edit/my-requests' },
+  'reviewEditCancel':     { method: 'POST', path: '/api/review-edit/cancel' },
+  'reviewEditList':       { method: 'GET',  path: '/api/review-edit/list' },
+  'reviewEditApprove':    { method: 'POST', path: '/api/review-edit/approve' },
+  'reviewEditReject':     { method: 'POST', path: '/api/review-edit/reject' },
+
   // Drive 폴더 관리
   'initRootFolder':      { method: 'POST', path: '/api/drive/init-root' },
   'syncCaptureFolders':  { method: 'POST', path: '/api/drive/sync-capture' },

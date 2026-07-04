@@ -497,6 +497,31 @@
   /* ===== 온보딩 바텀시트 ===== */
   .ovl{ position:fixed; inset:0; background:rgba(25,31,40,.45); z-index:400; display:none; align-items:flex-end; justify-content:center; }
   .ovl.on{ display:flex; }
+  /* ===== 리뷰 이미지 확인·수정요청 ===== */
+  .re-edit-cardbtn{ width:100%; margin:-4px 0 8px; padding:9px; background:#F2F7FF; color:#1b64da; border:1px solid #d6e6ff; border-radius:10px; font-size:.78rem; font-weight:700; cursor:pointer; display:flex; align-items:center; justify-content:center; gap:6px; }
+  .re-edit-cardbtn:active{ background:#e3eeff; }
+  .re-edit-minibtn{ flex-shrink:0; background:#F2F7FF; color:#1b64da; border:1px solid #d6e6ff; border-radius:8px; font-size:.66rem; font-weight:700; padding:2px 8px; cursor:pointer; }
+  .re-edit-sheet{ background:#fff; border-radius:24px 24px 0 0; width:100%; max-width:440px; max-height:88vh; overflow-y:auto; padding:8px 20px 26px; animation:obIn .3s cubic-bezier(.2,.8,.2,1); }
+  .re-edit-head{ display:flex; align-items:center; justify-content:space-between; font-size:1rem; font-weight:800; letter-spacing:-.02em; padding:14px 0 4px; position:sticky; top:0; background:#fff; }
+  .re-edit-x{ background:none; border:none; font-size:1.6rem; line-height:1; color:#98A0AC; cursor:pointer; }
+  .re-edit-sub{ font-size:.8rem; color:#5B6472; margin-bottom:12px; }
+  .re-edit-grid{ display:grid; grid-template-columns:repeat(2,1fr); gap:10px; }
+  .re-edit-card{ border:1px solid #EFEFF3; border-radius:12px; padding:8px; text-align:center; }
+  .re-edit-card img{ width:100%; height:120px; object-fit:cover; border-radius:8px; background:#F4F5F7; }
+  .re-edit-cap{ font-size:.72rem; color:#5B6472; margin:5px 0; font-weight:600; }
+  .re-edit-replace{ width:100%; padding:6px; background:#3182f6; color:#fff; border:none; border-radius:8px; font-size:.72rem; font-weight:700; cursor:pointer; }
+  .re-edit-pendtag{ font-size:.7rem; color:#D97706; background:#FEF3C7; border-radius:8px; padding:2px 0; margin-bottom:5px; font-weight:700; }
+  .re-edit-cancel{ width:100%; padding:5px; background:#F3F4F6; color:#6B7280; border:none; border-radius:8px; font-size:.7rem; cursor:pointer; }
+  .re-edit-back{ background:none; border:none; color:#5B6472; font-size:.8rem; cursor:pointer; padding:6px 0; }
+  .re-edit-compare{ display:flex; align-items:center; gap:8px; margin:8px 0 12px; }
+  .re-edit-compare > div{ flex:1; text-align:center; }
+  .re-edit-compare img, .re-edit-newprev{ width:100%; height:130px; object-fit:cover; border-radius:10px; background:#F4F5F7; display:grid; place-items:center; color:#C4C9D2; font-size:1.6rem; }
+  .re-edit-lbl{ font-size:.7rem; color:#98A0AC; margin-bottom:4px; font-weight:700; }
+  .re-edit-arrow{ flex:0 0 auto !important; color:#3182f6; }
+  .re-edit-pick{ width:100%; padding:11px; background:#EEF3FB; color:#1b64da; border:1px dashed #9ec1f5; border-radius:10px; font-size:.82rem; font-weight:700; cursor:pointer; margin-bottom:10px; }
+  .re-edit-reason{ width:100%; box-sizing:border-box; min-height:56px; border:1px solid #E6E6EC; border-radius:10px; padding:9px; font-size:.82rem; font-family:inherit; resize:vertical; margin-bottom:10px; }
+  .re-edit-submit{ width:100%; padding:12px; background:#3182f6; color:#fff; border:none; border-radius:12px; font-size:.9rem; font-weight:800; cursor:pointer; }
+  .re-edit-submit:disabled{ background:#C4C9D2; cursor:not-allowed; }
   .obx{ background:#fff; border-radius:24px 24px 0 0; width:100%; max-width:440px; padding:8px 24px 26px; animation:obIn .3s cubic-bezier(.2,.8,.2,1); }
   @keyframes obIn{ from{ transform:translateY(100%); } to{ transform:none; } }
   .ohandle{ width:40px; height:4px; border-radius:4px; background:#E6E6EC; margin:8px auto 18px; }
@@ -1073,6 +1098,7 @@ function renderReviewSubTab() {
   const listEl = document.getElementById("reviewResultsList");
   const countEl = document.getElementById("reviewResultsCount");
   if (!listEl) return;
+  window._reEditReg = {};  // 완료 카드 재렌더마다 수정요청 버튼 레지스트리 초기화(무한증가 방지)
 
   const isDone = _reviewSubTab === 'done';
   const btnPending = document.getElementById("subtabPending");
@@ -1163,6 +1189,8 @@ function renderReviewSubTab() {
         </div>`;
       if (!isDone) card.addEventListener("click", () => goToSubmit(items));
       listEl.appendChild(card);
+      // 제출완료 카드: 제출 이미지 확인 + 잘못 올린 파일 수정요청 버튼
+      if (isDone) listEl.appendChild(_reEditButtonEl(item));
     } else {
       // 다건 그룹 카드
       const groupCard = document.createElement("div");
@@ -1185,6 +1213,7 @@ function renderReviewSubTab() {
           <span class="result-group-item-label">${escHtml(taskLabel)}${escHtml(roundTxt)}${doneDate ? ` <span style="color:var(--t4)">· 제출 ${doneDate}</span>` : ''}</span>
           ${isDone && item.isPaid ? '<span class="result-group-item-badge paid">입금완료</span>' : ''}
           <span class="result-group-item-badge${isDone ? ' done' : ''}">${isDone ? '제출완료' : escHtml(_pendingBadgeText(item))}</span>
+          ${isDone ? _reEditBtnHtml(item) : ''}
         </div>`;
       }).join("");
 
@@ -1211,6 +1240,231 @@ function renderReviewSubTab() {
     note.textContent = "내역이 많아 오래된 제출완료 건 일부는 표시되지 않을 수 있습니다";
     listEl.appendChild(note);
   }
+}
+
+/* ═══════════════════════════════════════
+   리뷰 이미지 확인 · 수정요청 (리뷰어 → 관리자 승인)
+   — 새 파일은 즉시 교체되지 않고 관리자 승인 후 [리뷰] 폴더 파일이 교체된다.
+═══════════════════════════════════════ */
+window._reEditReg = window._reEditReg || {};
+let _reEditSeq = 0;
+let _reEditCtx = null;          // { phone8, sheetId, tabName, gid, rowIndex, label }
+let _reEditFiles = [];
+let _reEditPending = [];
+let _reEditNewB64 = null;
+let _reEditTargetOldId = null;
+
+function _reEditImgUrl(fileId){
+  const base = (typeof API_BASE_URL !== 'undefined' && API_BASE_URL) ? API_BASE_URL : '';
+  return base + '/api/drive/image/' + encodeURIComponent(fileId);
+}
+function _reEditThumb(fileId){
+  return 'https://drive.google.com/thumbnail?id=' + encodeURIComponent(fileId) + '&sz=w400';
+}
+
+function _reEditRegister(item){
+  const id = 're' + (_reEditSeq++);
+  window._reEditReg[id] = {
+    sheetId: item.sheetId, tabName: item.tabName, gid: item.gid, rowIndex: item.rowIndex,
+    label: item.displayNameTC || item.tcDisplayName || item.tabName || item.campaignName || ''
+  };
+  return id;
+}
+function _reEditButtonEl(item){
+  const id = _reEditRegister(item);
+  const b = document.createElement('button');
+  b.className = 're-edit-cardbtn';
+  b.innerHTML = '<i class="fas fa-images"></i> 제출 이미지 확인 · 수정요청';
+  b.addEventListener('click', (e)=>{ e.stopPropagation(); openReviewEditModal(id); });
+  return b;
+}
+function _reEditBtnHtml(item){
+  const id = _reEditRegister(item);
+  return '<button class="re-edit-minibtn" onclick="event.stopPropagation();openReviewEditModal(\''+id+'\')"><i class="fas fa-images"></i> 수정요청</button>';
+}
+
+function _reEditEnsureOverlay(){
+  if (document.getElementById('reEditOvl')) return;
+  const ovl = document.createElement('div');
+  ovl.id = 'reEditOvl';
+  ovl.className = 'ovl';
+  ovl.innerHTML =
+    '<div class="re-edit-sheet">' +
+      '<div class="re-edit-head"><div><i class="fas fa-images" style="color:#3182f6"></i> 제출 이미지 확인 · 수정요청</div>' +
+      '<button class="re-edit-x" onclick="closeReviewEditModal()">&times;</button></div>' +
+      '<div class="re-edit-sub" id="reEditLabel"></div>' +
+      '<div class="re-edit-body" id="reEditBody"></div>' +
+    '</div>';
+  ovl.addEventListener('click', (e)=>{ if (e.target === ovl) closeReviewEditModal(); });
+  document.body.appendChild(ovl);
+}
+
+async function openReviewEditModal(regId){
+  const item = window._reEditReg[regId];
+  if (!item) return;
+  const user = getSavedUser();
+  const phone8 = (user && user.phone8) ? String(user.phone8).replace(/[^0-9]/g,'') : '';
+  if (phone8.length !== 8){ showToast('로그인 정보가 없어 조회할 수 없습니다.'); return; }
+  _reEditCtx = { phone8, sheetId:item.sheetId, tabName:item.tabName, gid:item.gid, rowIndex:item.rowIndex, label:item.label };
+  _reEditNewB64 = null; _reEditTargetOldId = null;
+  _reEditEnsureOverlay();
+  document.getElementById('reEditLabel').textContent = item.label || '';
+  document.getElementById('reEditBody').innerHTML = '<div style="text-align:center;color:#98A0AC;padding:24px"><i class="fas fa-circle-notch fa-spin"></i> 불러오는 중...</div>';
+  document.getElementById('reEditOvl').classList.add('on');
+  document.body.style.overflow = 'hidden';
+  await _reEditLoadFiles();
+}
+function closeReviewEditModal(){
+  const o = document.getElementById('reEditOvl');
+  if (o) o.classList.remove('on');
+  document.body.style.overflow = '';
+}
+
+async function _reEditLoadFiles(){
+  const c = _reEditCtx; if (!c) return;
+  try{
+    const res = await gasGet({ action:'reviewEditMyFiles', phone8:c.phone8, sheetId:c.sheetId, tabName:c.tabName, rowIndex:c.rowIndex });
+    if (!res || res.ok === false) throw new Error((res && res.error) || '조회에 실패했습니다.');
+    _reEditFiles = res.files || [];
+    _reEditPending = res.pending || [];
+    _reEditRenderFiles();
+  }catch(e){
+    const b = document.getElementById('reEditBody');
+    if (b) b.innerHTML = '<div style="color:#EF4444;text-align:center;padding:20px">' + escHtml(e.message || '조회 실패') + '</div>';
+  }
+}
+
+function _reEditRenderFiles(){
+  const body = document.getElementById('reEditBody'); if (!body) return;
+  const pendById = {};
+  _reEditPending.forEach(p => { pendById[p.oldFileId] = p; });
+  let html = '';
+  if (_reEditFiles.length === 0){
+    html += '<div style="color:#98A0AC;text-align:center;padding:16px">제출된 이미지가 없습니다.</div>';
+  } else {
+    html += '<div style="font-size:.78rem;color:#5B6472;margin-bottom:8px">제출한 이미지입니다. 잘못 올린 이미지가 있으면 <b>교체 요청</b>을 눌러 올바른 이미지를 올려 주세요. <span style="color:#98A0AC">(관리자 승인 후 교체됩니다)</span></div>';
+    html += '<div class="re-edit-grid">';
+    _reEditFiles.forEach(f => {
+      const pend = pendById[f.fileId];
+      html += '<div class="re-edit-card">' +
+        '<img src="' + _reEditImgUrl(f.fileId) + '" loading="lazy" onerror="this.onerror=null;this.src=\'' + _reEditThumb(f.fileId) + '\'">' +
+        '<div class="re-edit-cap">' + escHtml(f.slotLabel || '리뷰') + '</div>' +
+        (pend
+          ? '<div class="re-edit-pendtag">수정요청 검토중</div><button class="re-edit-cancel" onclick="_reEditCancel(\'' + pend.id + '\')">요청 취소</button>'
+          : '<button class="re-edit-replace" onclick="_reEditStartReplace(\'' + f.fileId + '\')">이 이미지 교체 요청</button>') +
+      '</div>';
+    });
+    html += '</div>';
+  }
+  html += '<div id="reEditMyReqs" style="margin-top:14px"></div>';
+  body.innerHTML = html;
+  _reEditLoadMyRequests();
+}
+
+function _reEditStartReplace(oldFileId){
+  _reEditTargetOldId = oldFileId; _reEditNewB64 = null;
+  const body = document.getElementById('reEditBody'); if (!body) return;
+  body.innerHTML =
+    '<button class="re-edit-back" onclick="_reEditRenderFiles()"><i class="fas fa-chevron-left"></i> 뒤로</button>' +
+    '<div style="font-size:.8rem;color:#5B6472;margin:6px 0 10px">아래에 <b>올바른 이미지</b>를 선택하면 관리자에게 교체 요청이 전송됩니다. <span style="color:#98A0AC">(즉시 교체되지 않고 승인 후 반영)</span></div>' +
+    '<div class="re-edit-compare">' +
+      '<div><div class="re-edit-lbl">현재</div><img src="' + _reEditImgUrl(oldFileId) + '" onerror="this.onerror=null;this.src=\'' + _reEditThumb(oldFileId) + '\'"></div>' +
+      '<div class="re-edit-arrow"><i class="fas fa-arrow-right"></i></div>' +
+      '<div><div class="re-edit-lbl">교체할 이미지</div><div id="reEditNewPrev" class="re-edit-newprev"><i class="fas fa-image"></i></div></div>' +
+    '</div>' +
+    '<input type="file" id="reEditFileInput" accept="image/*" style="display:none" onchange="_reEditPickFile(this)">' +
+    '<button class="re-edit-pick" onclick="document.getElementById(\'reEditFileInput\').click()"><i class="fas fa-camera"></i> 새 이미지 선택</button>' +
+    '<textarea id="reEditReason" class="re-edit-reason" placeholder="사유(선택): 예) 다른 캠페인 리뷰를 잘못 첨부했어요" maxlength="500"></textarea>' +
+    '<button id="reEditSubmitBtn" class="re-edit-submit" onclick="_reEditSubmit()" disabled><i class="fas fa-paper-plane"></i> 수정 요청 보내기</button>';
+}
+
+async function _reEditPickFile(input){
+  const file = input.files && input.files[0];
+  if (!file) return;
+  if (!/^image\//.test(file.type || '')){ showToast('이미지 파일만 올릴 수 있습니다.'); return; }
+  try{
+    const b64 = await _reEditCompress(file);
+    _reEditNewB64 = b64;
+    const prev = document.getElementById('reEditNewPrev');
+    if (prev) prev.innerHTML = '<img src="data:image/jpeg;base64,' + b64 + '">';
+    const btn = document.getElementById('reEditSubmitBtn'); if (btn) btn.disabled = false;
+  }catch(e){ showToast('이미지 처리 실패: ' + (e.message || '')); }
+}
+
+function _reEditCompress(file){
+  return new Promise((resolve, reject) => {
+    const img = new Image();
+    const url = URL.createObjectURL(file);
+    img.onload = () => {
+      URL.revokeObjectURL(url);
+      const maxW = 1600; let w = img.width, h = img.height;
+      if (w > maxW){ h = Math.round(h * maxW / w); w = maxW; }
+      const cv = document.createElement('canvas'); cv.width = w; cv.height = h;
+      cv.getContext('2d').drawImage(img, 0, 0, w, h);
+      const dataUrl = cv.toDataURL('image/jpeg', 0.8);
+      resolve(dataUrl.split(',')[1]);
+    };
+    img.onerror = () => { URL.revokeObjectURL(url); reject(new Error('이미지 로드 실패')); };
+    img.src = url;
+  });
+}
+
+async function _reEditSubmit(){
+  const c = _reEditCtx;
+  if (!c || !_reEditTargetOldId || !_reEditNewB64){ showToast('교체할 이미지를 선택해 주세요.'); return; }
+  const btn = document.getElementById('reEditSubmitBtn');
+  if (btn){ btn.disabled = true; btn.innerHTML = '<i class="fas fa-circle-notch fa-spin"></i> 전송 중...'; }
+  const reasonEl = document.getElementById('reEditReason');
+  const reason = reasonEl ? reasonEl.value : '';
+  try{
+    const res = await gasPostUpload({
+      action:'reviewEditRequest', phone8:c.phone8, sheetId:c.sheetId, tabName:c.tabName, gid:c.gid,
+      rowIndex:c.rowIndex, oldFileId:_reEditTargetOldId, reason,
+      file:{ data:_reEditNewB64, mimeType:'image/jpeg', name:'replace.jpg' }
+    }, 120000);
+    if (!res || res.ok === false) throw new Error((res && res.error) || '요청에 실패했습니다.');
+    showToast('수정 요청이 접수되었습니다. 관리자 확인 후 반영됩니다.');
+    _reEditNewB64 = null; _reEditTargetOldId = null;
+    await _reEditLoadFiles();
+  }catch(e){
+    showToast(e.message || '요청 실패');
+    if (btn){ btn.disabled = false; btn.innerHTML = '<i class="fas fa-paper-plane"></i> 수정 요청 보내기'; }
+  }
+}
+
+async function _reEditCancel(id){
+  const c = _reEditCtx; if (!c) return;
+  if (!confirm('이 수정요청을 취소할까요?')) return;
+  try{
+    const res = await gasPost({ action:'reviewEditCancel', phone8:c.phone8, requestId:id });
+    if (!res || res.ok === false) throw new Error((res && res.error) || '취소에 실패했습니다.');
+    showToast('요청을 취소했습니다.');
+    await _reEditLoadFiles();
+  }catch(e){ showToast(e.message || '취소 실패'); }
+}
+
+async function _reEditLoadMyRequests(){
+  const c = _reEditCtx; const el = document.getElementById('reEditMyReqs');
+  if (!c || !el) return;
+  try{
+    const res = await gasGet({ action:'reviewEditMyRequests', phone8:c.phone8 });
+    const reqs = (res && res.requests) || [];
+    if (reqs.length === 0){ el.innerHTML = ''; return; }
+    const stMap = { pending:['검토중','#D97706','#FEF3C7'], approved:['교체완료','#16A34A','#F0FDF4'], rejected:['반려','#DC2626','#FEE2E2'], cancelled:['취소','#6B7280','#F3F4F6'] };
+    let h = '<div style="border-top:1px solid #EFEFF3;padding-top:10px"><div style="font-size:.74rem;font-weight:700;color:#5B6472;margin-bottom:6px">내 수정요청 내역</div>';
+    reqs.slice(0, 8).forEach(r => {
+      const s = stMap[r.status] || ['?', '#6B7280', '#F3F4F6'];
+      h += '<div style="display:flex;justify-content:space-between;gap:6px;align-items:center;font-size:.72rem;padding:4px 0;border-bottom:1px dashed #F1F5F9">' +
+        '<span style="color:#3A4250;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">' + escHtml(r.campaign_label || r.tab_name || '') + '</span>' +
+        '<span style="flex-shrink:0;background:' + s[2] + ';color:' + s[1] + ';border-radius:8px;padding:1px 8px;font-weight:700">' + s[0] + '</span>' +
+      '</div>';
+      if (r.status === 'rejected' && r.admin_note){
+        h += '<div style="font-size:.68rem;color:#B91C1C;padding:2px 0 4px">└ 사유: ' + escHtml(r.admin_note) + '</div>';
+      }
+    });
+    h += '</div>';
+    el.innerHTML = h;
+  }catch(_){ el.innerHTML = ''; }
 }
 
 /** 리뷰 제출 클릭 → /search 페이지로 즉시 제출 화면 이동 */

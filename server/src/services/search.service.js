@@ -548,4 +548,4 @@ async function searchByNameDebug(query) {
   }
 }
 
-module.exports = { searchByName, searchByNameDebug };
+module.exports = { searchByName, searchByNameDebug, _getReviewerPhoneList };
