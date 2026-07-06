@@ -77,12 +77,14 @@
   table.sheetgrid thead th{position:sticky;top:0;z-index:3;background:var(--card2);font-weight:700;color:var(--muted);font-size:10.5px;border-bottom:2px solid var(--line2)}
   table.sheetgrid .gfz{position:sticky;background:var(--card);z-index:2}
   table.sheetgrid thead th.gfz{z-index:4;background:var(--card2)}
-  .gfz0{left:0;width:44px;min-width:44px;text-align:center;color:var(--faint);font-weight:700}
-  .gfz1{left:44px;width:100px;min-width:100px;font-weight:600}
-  .gfz2{left:144px;width:108px;min-width:108px;box-shadow:1px 0 0 var(--line2)}
+  .gnum{text-align:center;color:var(--faint);font-weight:700} .gnm{font-weight:600}
   table.sheetgrid .gph{font-family:var(--mono);font-size:11.5px;color:var(--muted)}
   table.sheetgrid tbody tr:hover td{background:#F7FBFB} table.sheetgrid tbody tr:hover td.gfz{background:#eef6f6}
   .gcell.gempty{color:var(--line2)} .gcell.gok{color:var(--safe);font-weight:600}
+  .gridbar{display:flex;align-items:center;gap:8px;margin-bottom:8px;flex-wrap:wrap}
+  .gridbar label{font-size:12px;color:var(--muted);font-weight:650}
+  .gridbar select{font:inherit;font-size:12.5px;padding:5px 9px;border:1px solid var(--line2);border-radius:7px;background:var(--card);color:var(--ink)}
+  .gnote{font-size:11px;color:var(--faint)} .gnote b{color:var(--muted)}
   .rail{border-left:1px solid var(--line);background:var(--card);padding:14px 12px;overflow:auto}
   .rail .sh{font-size:10px;font-weight:750;letter-spacing:.05em;text-transform:uppercase;color:var(--faint);margin:2px 2px 10px}
   .parity{border:1px solid var(--line);border-radius:10px;padding:12px;margin-bottom:14px}
@@ -149,7 +151,7 @@ const esc=s=>String(s==null?'':s).replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;',
 function toast(m){ const t=$('#toast'); t.textContent=m; t.classList.add('show'); setTimeout(()=>t.classList.remove('show'),1800); }
 function parseJwt(t){ try{ return JSON.parse(atob(t.split('.')[1])); }catch(_){ return {}; } }
 
-let STATE = { role:'', name:'', view:'workdesk', tabs:[], cur:null,
+let STATE = { role:'', name:'', view:'workdesk', tabs:[], cur:null, wd:null, freezeUpto:null,
               advs:[], advCur:null, tabIndex:{}, sheetMap:{}, addMode:'all', addSheet:null, addTabs:{} };
 
 async function boot(){
@@ -255,20 +257,43 @@ function renderWorkdesk(wd){
     <div class="counts"><div class="cc"><div class="big">${c.total||0}</div><div class="lb">참여자</div></div><div class="cc s"><div class="big">${c.submitted||0}</div><div class="lb">제출완료</div></div><div class="cc p"><div class="big">${c.paid||0}</div><div class="lb">입금완료</div></div></div>
     ${tableSection}`;
 }
-// 시트형 그리드: 왼쪽 고정 = 참여자/연락처(DB 리뷰어 신원) + # · 오른쪽 = 시트 컬럼 전체(시트 순서), 가로 스크롤.
+// 컬럼 폭(px) — 고정열 오프셋 계산과 최소폭에 사용. 없으면 기본값.
+const _COLW={'#':44,'참여자':112,'연락처':110,'번호':48,'담당자':66,'구매일자':98,'인애드명단':90,'주문자제출':90,'수취인':78,'id':118,'주소':190,'은행':66,'계좌번호':116,'예금주':72,'결제금액':82,'리뷰제출':96,'입금':64,'주문번호':134,'비고(닉네임)':110};
+function _colW(h){ return _COLW[h]||92; }
+// 시트 일련번호(1899-12-30 기준) → YYYY-MM-DD. 날짜형 헤더 + 순수 숫자일 때만 변환(금액 등 오변환 방지).
+function _serialToDate(n){ const ms=Math.round((n-25569)*86400000); const d=new Date(ms); if(isNaN(d.getTime()))return null; const y=d.getUTCFullYear(); if(y<2000||y>2100)return null; const p=x=>String(x).padStart(2,'0'); return `${y}-${p(d.getUTCMonth()+1)}-${p(d.getUTCDate())}`; }
+function _gridVal(h, raw){ const v=(raw==null?'':String(raw)).trim(); if(!v)return ''; if(/일자|날짜|date/i.test(h)&&/^\d{4,6}(\.\d+)?$/.test(v)){ const dt=_serialToDate(parseFloat(v)); if(dt)return dt; } return v; }
+
+// 시트형 그리드: 왼쪽 고정 = #·참여자·연락처(DB 리뷰어 신원) + (선택 시)시트 컬럼 수취인까지 · 오른쪽 = 시트 컬럼 전체.
 function buildGrid(wd){
   const H=wd.headers||[];
   const revI=H.indexOf('리뷰제출'), payI=H.indexOf('입금');
-  const thead=`<tr><th class="gfz gfz0">#</th><th class="gfz gfz1">참여자</th><th class="gfz gfz2">연락처</th>${H.map(h=>`<th>${esc(h)}</th>`).join('')}</tr>`;
+  // 전체 컬럼: [#, 참여자, 연락처, ...시트헤더]. 고정 개수 = 3 + (freezeUpto 시트컬럼 인덱스+1)
+  const fzIdx = STATE.freezeUpto ? H.indexOf(STATE.freezeUpto) : -1;
+  const frozenN = 3 + (fzIdx>=0 ? fzIdx+1 : 0);
+  const cols = ['#','참여자','연락처', ...H];
+  const lefts=[]; let acc=0; for(let i=0;i<cols.length;i++){ lefts[i]=acc; acc+=_colW(cols[i]); }
+  const cstyle=(i)=>{ const w=_colW(cols[i]); let s=`min-width:${w}px;width:${w}px;`; if(i<frozenN){ s+=`left:${lefts[i]}px;`; if(i===frozenN-1)s+='box-shadow:2px 0 0 var(--line2);'; } return s; };
+  const cls=(i,extra)=>`class="${i<frozenN?'gfz ':''}${extra||''}"`;
+  const thead=`<tr>${cols.map((h,i)=>`<th ${cls(i)} style="${cstyle(i)}">${esc(h==='#'?'#':h)}</th>`).join('')}</tr>`;
   const body=(wd.roster||[]).map(r=>{
     const rj=(r.rowJson&&typeof r.rowJson==='object')?r.rowJson:{};
     const badge = r.source==='manual'?' <span class="src manual">수동</span>':(r.hasOrder?' <span class="src order">주문</span>':'');
-    const cells=H.map((h,i)=>{ const v=rj[h]==null?'':String(rj[h]); const ok=((i===revI||i===payI)&&v)?' gok':''; return `<td class="gcell${v?'':' gempty'}${ok}">${esc(v)}</td>`; }).join('');
-    return `<tr><td class="gfz gfz0 gnum">${esc(r.seq)}</td><td class="gfz gfz1 gnm">${esc(r.name||'—')}${badge}</td><td class="gfz gfz2 gph">${esc(r.phone8||'')}</td>${cells}</tr>`;
-  }).join('')||`<tr><td class="gfz gfz0"></td><td class="gfz gfz1"></td><td class="gfz gfz2"></td><td colspan="${H.length}" class="empty">명단 없음 — 그림자 투영을 실행하세요.</td></tr>`;
-  return `<div class="gridscroll"><table class="sheetgrid"><thead>${thead}</thead><tbody>${body}</tbody></table></div>
-    <div class="editnote">구글시트와 동일한 컬럼·가로 배열의 <b>열람 전용</b> 그리드입니다(왼쪽 참여자·연락처 고정). 편집은 후속 반영 예정.</div>`;
+    let tds=`<td ${cls(0,'gnum')} style="${cstyle(0)}">${esc(r.seq)}</td>`+
+            `<td ${cls(1,'gnm')} style="${cstyle(1)}">${esc(r.name||'—')}${badge}</td>`+
+            `<td ${cls(2,'gph')} style="${cstyle(2)}">${esc(r.phone8||'')}</td>`;
+    H.forEach((h,j)=>{ const i=j+3; const v=_gridVal(h, rj[h]); const ok=((j===revI||j===payI)&&v)?' gok':''; tds+=`<td ${cls(i,'gcell'+(v?'':' gempty')+ok)} style="${cstyle(i)}">${esc(v)}</td>`; });
+    return `<tr>${tds}</tr>`;
+  }).join('')||`<tr><td colspan="${cols.length}" class="empty">명단 없음 — 그림자 투영을 실행하세요.</td></tr>`;
+  // 고정 열 선택(수취인까지 등) — 시트 컬럼 중 신원계열만 옵션으로.
+  const fzOpts=['<option value="">기본(연락처까지)</option>']
+    .concat(H.filter(h=>['번호','담당자','구매일자','인애드명단','주문자제출','수취인','주소'].includes(h))
+      .map(h=>`<option value="${esc(h)}"${STATE.freezeUpto===h?' selected':''}>${esc(h)}까지 고정</option>`)).join('');
+  return `<div class="gridbar"><label>고정 열</label><select id="fzsel" onchange="setFreeze(this.value)">${fzOpts}</select>
+      <span class="gnote">구글시트와 동일 컬럼·가로 배열 · <b>열람 전용</b> · 날짜 자동표시</span></div>
+    <div class="gridscroll"><table class="sheetgrid"><thead>${thead}</thead><tbody>${body}</tbody></table></div>`;
 }
+function setFreeze(v){ STATE.freezeUpto=v||null; if(STATE.wd) renderWorkdesk(STATE.wd); }
 function beginEdit(el, rowId, field){
   if(el.querySelector('input')) return;
   const cur=el.getAttribute('data-val')||'';
