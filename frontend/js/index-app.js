@@ -921,6 +921,24 @@ function openRawMirror() {
   window.open("raw-mirror.html", "_blank");
 }
 
+/* ── Track B 통합 작업대(그림자) 열기 (자동 로그인 핸드오프) ── */
+function openWorkdesk() {
+  const token = sessionStorage.getItem("admin_token") || "";
+  if (!token || !isAdminLoggedIn()) {
+    showToast("관리자 로그인이 필요합니다.", "warning");
+    return;
+  }
+  try {
+    localStorage.setItem("raw_sso", JSON.stringify({
+      token,
+      name: getAdminName(),
+      role: getAdminRole(),
+      ts: Date.now()
+    }));
+  } catch (e) { /* localStorage 불가 시에도 페이지 자체 로그인으로 폴백 */ }
+  window.open("workdesk.html", "_blank");
+}
+
 /* ── 시트 API 쿼터 모니터(45/분 실시간 사용량·출처·잔량) — 인페이지 팝업(iframe) ── */
 function openThrottleMonitor() {
   const token = sessionStorage.getItem("admin_token") || "";
