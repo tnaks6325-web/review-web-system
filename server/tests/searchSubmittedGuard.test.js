@@ -14,6 +14,7 @@ const path = require('path');
 const poolPath = require.resolve('../src/db/pool');
 const captured = { queries: [] };
 let reviewRows = [];
+let forceTrgm = false;   // true면 본검색(= ANY) 강제실패 → pg_trgm fallback(searchByNameFallback) 경로 진입
 
 const fakePool = {
   query: async (sql, params) => {
@@ -22,6 +23,10 @@ const fakePool = {
     if (/set_limit/.test(sql)) return { rows: [] };
     if (/COUNT\(\*\)/.test(sql)) return { rows: [{ count: '0', built_at: null }] };
     if (/FROM review_submissions/.test(sql)) return { rows: [] };
+    // 본검색(= ANY)만 강제실패 → searchByName catch → searchByNameFallback(= $) 재실행
+    if (forceTrgm && /FROM review_index/.test(sql) && /= ANY\(\$/.test(sql)) {
+      throw new Error('operator does not exist: % boolean');
+    }
     if (/FROM review_index/.test(sql)) return { rows: reviewRows };
     return { rows: [] };
   },
@@ -53,6 +58,25 @@ function makeRow(over = {}) {
   };
 }
 
+// ★ 교차노출 게이트 회귀가드(구조 불변식):
+//   pl(확정신원)을 신원키로 쓰는 모든 곳은 반드시 'ri.phone8 IS NULL AND ...' 게이트 뒤에만 온다.
+//   미게이트 'OR pl.phone8 = ANY(' 가 재도입되면(=stale pl 교차노출 버그 부활) 실패시킨다.
+function assertPlGated(sql, label) {
+  const all   = (sql.match(/pl\.phone8 = ANY\(/g) || []).length;
+  const gated = (sql.match(/ri\.phone8 IS NULL AND pl\.phone8 = ANY\(/g) || []).length;
+  assert.ok(all > 0, `${label}: pl.phone8 신원키가 존재해야 함`);
+  assert.strictEqual(all, gated, `${label}: 모든 pl.phone8 = ANY 는 ri.phone8 IS NULL 게이트 뒤에만(미게이트 pl 금지)`);
+  assert.ok(!/OR pl\.phone8 = ANY\(/.test(sql), `${label}: 미게이트 'OR pl.phone8 = ANY(' 재도입 금지`);
+}
+// fallback(= $ 단일 파라미터)도 동일 게이트
+function assertPlGatedFallback(sql, label) {
+  const all   = (sql.match(/pl\.phone8 = \$/g) || []).length;
+  const gated = (sql.match(/ri\.phone8 IS NULL AND pl\.phone8 = \$/g) || []).length;
+  assert.ok(all > 0, `${label}: fallback pl.phone8 신원키가 존재해야 함`);
+  assert.strictEqual(all, gated, `${label}: fallback pl 신원키도 모두 ri.phone8 IS NULL 게이트 뒤`);
+  assert.ok(!/OR pl\.phone8 = \$/.test(sql), `${label}: 미게이트 'OR pl.phone8 = $' 재도입 금지`);
+}
+
 async function run() {
   // ── 1) 기본(옵션 미지정) = 기존과 동일: FALSE 필터 + LIMIT 200 + ASC 프리픽스 없음 ──
   captured.queries = [];
@@ -73,9 +97,10 @@ async function run() {
   const r2 = await searchByName('홍길동', '12345678', { includeSubmitted: true });
   sql = mainSql();
   assert.ok(
-    sql.includes('(ri.is_submitted = FALSE OR ri.phone8 = ANY(') && sql.includes('OR pl.phone8 = ANY('),
+    sql.includes('(ri.is_submitted = FALSE OR ri.phone8 = ANY('),
     '2: 제출완료 행은 phone8/확정신원 일치 시에만 (이름/근접 매칭엔 미개방)'
   );
+  assertPlGated(sql, '2 이름+phone8');   // pl 신원키는 stale 교차노출 차단 게이트 뒤에만
   assert.ok(!/WHERE TRUE/.test(sql), '2: 하이브리드 분기에 무조건 TRUE 해제 금지');
   assert.ok(sql.includes('ORDER BY ri.is_submitted ASC'), '2: 미제출 우선 정렬(대기 건 LIMIT 보호)');
   assert.ok(sql.includes('LIMIT 400'), '2: 완료 포함 시 LIMIT 상향');
@@ -109,10 +134,33 @@ async function run() {
   sql = mainSql();
   assert.ok(/WHERE TRUE/.test(sql), '4: phone8 단독 분기는 필터 해제');
   assert.ok(sql.includes('ri.phone8 = ANY('), '4: 매칭은 phone8/확정신원 한정');
+  assertPlGated(sql, '4 phone8단독');
   assert.ok(sql.includes('LIMIT 400') && sql.includes('ri.is_submitted ASC'), '4: LIMIT 상향 + 대기 우선');
   assert.equal(r4.results[0].isPaid, true, '4: 입금 키워드 컬럼 값 존재 → isPaid=true (폴백)');
   assert.deepEqual(r4.results[0].row, {}, '4: isPaid 판정 후에도 완료 행 row는 비움');
   console.log('  4. phone8 단독 — 필터 해제(강한 키 매칭) + isPaid 폴백 ✓');
+
+  // ── 5) pg_trgm 미설치 fallback 경로(searchByNameFallback)도 동일 pl 게이트 ──
+  captured.queries = []; forceTrgm = true; reviewRows = [makeRow()];
+  await searchByName('홍길동', '12345678', { includeSubmitted: true });
+  forceTrgm = false;
+  const fbSql = captured.queries
+    .filter(x => /FROM review_index/.test(x.sql))
+    .map(x => x.sql)
+    .find(s => /pl\.phone8 = \$/.test(s));   // fallback은 '= $'(본검색 '= ANY(' 와 구분)
+  assert.ok(fbSql, '5: pg_trgm fallback review_index 쿼리가 실행되어야 함');
+  assertPlGatedFallback(fbSql, '5 fallback');
+  console.log('  5. pg_trgm fallback 경로 pl 게이트 ✓');
+
+  // ── 6) 게이트 시맨틱 고정: stale pl(재배정 전 주인)은 미개방 / 현재주인(ri.phone8)은 개방 ──
+  //   ri.phone8(현재 시트 소유자)이 채워진 행에서는 stale pl 이 그 행을 절대 못 연다
+  //   (양미경 정상사용 r78 → 박은비 미노출). 현재주인은 첫 disjunct 'ri.phone8 = ANY' 로 개방.
+  captured.queries = []; reviewRows = [makeRow()];
+  await searchByName('', '82217191', { includeSubmitted: true });   // 박은비 phone8 단독
+  const s6 = mainSql();
+  assertPlGated(s6, '6 stale-pl 미개방');
+  assert.ok(/ri\.phone8 = ANY\(/.test(s6), '6: 현재주인(ri.phone8)은 첫 disjunct 로 개방');
+  console.log('  6. stale pl 미개방 / 현재주인 개방 구조 고정 ✓');
 
   console.log('✅ searchSubmittedGuard 테스트 전체 통과');
 }
