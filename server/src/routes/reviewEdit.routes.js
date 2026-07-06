@@ -39,6 +39,9 @@ function _sanitizeReason(v) {
 /**
  * 행 소유권 검증 (강한-키 전용): review_index.phone8 또는 participation_links.phone8 이
  * 요청자 phone8 목록(본인+타계정)과 정확 일치하는 행만 소유로 인정.
+ * ★ pl(확정신원)은 review_index.phone8 이 공란일 때만 신원키로 인정한다(시트 현재값 우선).
+ *   재배정된 행(로스터 행 주인이 바뀐 경우)의 stale pl 로 타인 리뷰 이미지를 열람·교체요청하는
+ *   무인증 교차노출을 차단한다(search.service 의 P5 게이트와 동일 규율).
  */
 async function _verifyRowOwnership(phoneList, sheetId, tabName, rowIndex) {
   const { rows } = await pool.query(
@@ -47,7 +50,7 @@ async function _verifyRowOwnership(phoneList, sheetId, tabName, rowIndex) {
        LEFT JOIN participation_links pl
          ON pl.sheet_id = ri.sheet_id AND pl.tab_name = ri.tab_name AND pl.row_index = ri.row_index
       WHERE ri.sheet_id = $1 AND ri.tab_name = $2 AND ri.row_index = $3
-        AND (ri.phone8 = ANY($4) OR pl.phone8 = ANY($4))
+        AND (ri.phone8 = ANY($4) OR (ri.phone8 IS NULL AND pl.phone8 = ANY($4)))
       LIMIT 1`,
     [sheetId, tabName, rowIndex, phoneList]
   );

@@ -171,13 +171,13 @@ async function searchByName(query, phone8, opts = {}) {
 
     // ★ 제출완료 행은 강한 신원키(phone8/확정신원) 일치 시에만 포함 — 약한 키(이름+근접)는 대기 건만
     const submittedCond = includeSubmitted
-      ? `(ri.is_submitted = FALSE OR ri.phone8 = ANY($${phoneListParam}) OR pl.phone8 = ANY($${phoneListParam}))`
+      ? `(ri.is_submitted = FALSE OR ri.phone8 = ANY($${phoneListParam}) OR (ri.phone8 IS NULL AND pl.phone8 = ANY($${phoneListParam})))`
       : 'ri.is_submitted = FALSE';
 
     sql = `
       SELECT ${SELECT_FIELDS},
              CASE
-               WHEN ri.phone8 = ANY($${phoneListParam}) OR pl.phone8 = ANY($${phoneListParam}) THEN 1.0
+               WHEN ri.phone8 = ANY($${phoneListParam}) OR (ri.phone8 IS NULL AND pl.phone8 = ANY($${phoneListParam})) THEN 1.0
                WHEN (REPLACE(ri.reviewer_name, ' ', '') = $${nameParam}
                      OR REPLACE(ri.recipient_name, ' ', '') = $${nameParam})
                     AND ri.phone8 IS NOT NULL AND (
@@ -195,8 +195,8 @@ async function searchByName(query, phone8, opts = {}) {
       WHERE ${submittedCond}
         AND tc.sheet_id IS NOT NULL
         AND (
-          ri.phone8 = ANY($${phoneListParam})          -- P0: 연락처 phone8 단독 통과
-          OR pl.phone8 = ANY($${phoneListParam})        -- P5: 확정 신원 단독 통과
+          ri.phone8 = ANY($${phoneListParam})                              -- P0: 연락처 phone8 단독 통과
+          OR (ri.phone8 IS NULL AND pl.phone8 = ANY($${phoneListParam}))   -- P5: 시트에 연락처 없을 때만 확정 신원 통과(시트 현재값 우선 = 재배정된 행의 stale pl 교차노출 차단)
           OR (
             (REPLACE(ri.reviewer_name, ' ', '') = $${nameParam}
              OR REPLACE(ri.recipient_name, ' ', '') = $${nameParam})
@@ -227,7 +227,7 @@ async function searchByName(query, phone8, opts = {}) {
         ON pl.sheet_id = ri.sheet_id AND pl.tab_name = ri.tab_name AND pl.row_index = ri.row_index
       WHERE ${submittedCond}
         AND tc.sheet_id IS NOT NULL
-        AND (ri.phone8 = ANY($${phoneListParam}) OR pl.phone8 = ANY($${phoneListParam}))
+        AND (ri.phone8 = ANY($${phoneListParam}) OR (ri.phone8 IS NULL AND pl.phone8 = ANY($${phoneListParam})))
       ORDER BY ${orderPrefix}ri.start_date DESC NULLS LAST
       LIMIT ${limit}
     `;
@@ -393,7 +393,7 @@ async function searchByNameFallback(q, p8, SELECT_FIELDS, includeSubmitted) {
     const nameParam = paramIdx++;
     const phoneParam = paramIdx++;
     const submittedCond = includeSubmitted
-      ? `(ri.is_submitted = FALSE OR ri.phone8 = $${phoneParam} OR pl.phone8 = $${phoneParam})`
+      ? `(ri.is_submitted = FALSE OR ri.phone8 = $${phoneParam} OR (ri.phone8 IS NULL AND pl.phone8 = $${phoneParam}))`
       : 'ri.is_submitted = FALSE';
     sql = `
       SELECT ${SELECT_FIELDS}
@@ -405,7 +405,7 @@ async function searchByNameFallback(q, p8, SELECT_FIELDS, includeSubmitted) {
         AND tc.sheet_id IS NOT NULL
         AND (
           ri.phone8 = $${phoneParam}
-          OR pl.phone8 = $${phoneParam}
+          OR (ri.phone8 IS NULL AND pl.phone8 = $${phoneParam})
           OR ri.reviewer_name ILIKE $${nameParam}
           OR ri.recipient_name ILIKE $${nameParam}
         )
@@ -424,7 +424,7 @@ async function searchByNameFallback(q, p8, SELECT_FIELDS, includeSubmitted) {
         ON pl.sheet_id = ri.sheet_id AND pl.tab_name = ri.tab_name AND pl.row_index = ri.row_index
       WHERE ${submittedCond}
         AND tc.sheet_id IS NOT NULL
-        AND (ri.phone8 = $${phoneParam} OR pl.phone8 = $${phoneParam})
+        AND (ri.phone8 = $${phoneParam} OR (ri.phone8 IS NULL AND pl.phone8 = $${phoneParam}))
       ORDER BY ${orderPrefix}ri.start_date DESC NULLS LAST
       LIMIT ${limit}
     `;
