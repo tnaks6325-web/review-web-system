@@ -19,7 +19,10 @@ router.post('/project', authMiddleware, masterOnlyMiddleware, async (req, res, n
   try {
     const { sheetId, tabName } = req.body || {};
     if (sheetId && tabName) return res.json({ ok: true, ...(await svc.projectTab({ sheetId, tabName, by: _by(req) })) });
-    res.json({ ok: true, ...(await svc.projectActive({ by: _by(req) })) });
+    // bulk 투영은 cron(trackb_project 락)과 상호배제 — 멀티인스턴스 이중투영·seen-set 플래핑 차단.
+    const { withJobLock } = require('../utils/jobLock');
+    const r = await withJobLock('trackb_project', () => svc.projectActive({ by: _by(req) }));
+    res.json({ ok: true, ...r });
   } catch (err) { next(err); }
 });
 
@@ -71,13 +74,47 @@ router.delete('/ownership', authMiddleware, adminOrMasterMiddleware, async (req,
 // ── 통합 작업대 데이터(읽기): 세부+명단+상태. 역할 렌즈(광고주는 소유 스코프+PII 마스킹) ──
 router.get('/workdesk', authMiddleware, async (req, res, next) => {
   try {
+    // ★ staff PII 구멍 봉합: master/admin(전체) · advertiser(스코프+마스킹)만. staff·reviewer 하드차단.
+    const role = _role(req);
+    if (!['master', 'admin', 'advertiser'].includes(role)) return res.status(403).json({ ok: false, error: '작업대 열람 권한이 없습니다.' });
     const { sheetId, tabName, tabGid } = req.query;
     if (!sheetId || !tabName) return res.status(400).json({ ok: false, error: 'sheetId, tabName 필수' });
-    const role = _role(req);
     const advertiserId = (req.admin && req.admin.advertiser_id) || null;
     const out = await svc.workdeskTab({ sheetId, tabName, tabGid: tabGid || null, role, advertiserId });
     if (out.denied) return res.status(403).json({ ok: false, error: '소유하지 않은 작업(스코프 밖)' });
     res.json({ ok: true, ...out });
+  } catch (err) { next(err); }
+});
+
+// ── 통합 작업대 편집(오버레이) — adminOrMaster 라우트레벨 강제(advertiser/staff 하드차단). ──
+//   rowId ∈ (sheetId,tabName) 재검증·앵커 산출·거부조건은 서비스가 수행.
+router.post('/workdesk/edit', authMiddleware, adminOrMasterMiddleware, async (req, res, next) => {
+  try {
+    const { sheetId, tabName, rowId, field, value } = req.body || {};
+    if (!sheetId || !tabName || !rowId || !field) return res.status(400).json({ ok: false, error: 'sheetId, tabName, rowId, field 필수' });
+    const out = await svc.editWorkdeskRow({ sheetId, tabName, rowId, field, value, by: _by(req) });
+    res.status(out.ok ? 200 : (out.error === 'concurrent_edit_conflict' ? 409 : 400)).json(out);
+  } catch (err) { next(err); }
+});
+router.post('/workdesk/revert', authMiddleware, adminOrMasterMiddleware, async (req, res, next) => {
+  try {
+    const { sheetId, tabName, rowId, field } = req.body || {};
+    if (!sheetId || !tabName || !rowId || !field) return res.status(400).json({ ok: false, error: 'sheetId, tabName, rowId, field 필수' });
+    res.json(await svc.revertWorkdeskEdit({ sheetId, tabName, rowId, field, by: _by(req) }));
+  } catch (err) { next(err); }
+});
+router.post('/workdesk/hide', authMiddleware, adminOrMasterMiddleware, async (req, res, next) => {
+  try {
+    const { sheetId, tabName, rowId } = req.body || {};
+    if (!sheetId || !tabName || !rowId) return res.status(400).json({ ok: false, error: 'sheetId, tabName, rowId 필수' });
+    res.json(await svc.hideWorkdeskRow({ sheetId, tabName, rowId, by: _by(req) }));
+  } catch (err) { next(err); }
+});
+router.post('/workdesk/add', authMiddleware, adminOrMasterMiddleware, async (req, res, next) => {
+  try {
+    const { sheetId, tabName, reviewerName, recipientName, phone, round, optionText, productName } = req.body || {};
+    if (!sheetId || !tabName) return res.status(400).json({ ok: false, error: 'sheetId, tabName 필수' });
+    res.json({ ok: true, ...(await svc.addWorkdeskRow({ sheetId, tabName, reviewerName, recipientName, phone, round, optionText, productName, by: _by(req) })) });
   } catch (err) { next(err); }
 });
 

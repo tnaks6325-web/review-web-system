@@ -48,6 +48,19 @@
   .chk{font-weight:800}.chk.y{color:var(--safe)}.chk.n{color:var(--faint)}
   .ph{font-family:var(--mono);font-size:11.5px;color:var(--muted)}
   .src{font-size:10px;font-weight:700;padding:1px 6px;border-radius:5px;background:var(--card2);color:var(--faint)} .src.manual{background:var(--warn-soft);color:var(--warn)} .src.order{background:var(--accent-soft);color:var(--accent)}
+  /* ── 편집 UI ── */
+  .ecell{cursor:text;border-bottom:1px dashed transparent;border-radius:3px;padding:1px 3px} .ecell:hover{border-bottom-color:var(--line2);background:var(--card2)}
+  .ecell.edited{background:var(--accent-soft);border-bottom-color:var(--accent)}
+  .chk.clk{cursor:pointer;border-radius:4px;padding:0 4px} .chk.clk:hover{background:var(--card2)} .chk.clk.edited{outline:1px solid var(--accent);outline-offset:1px}
+  .einp{font:inherit;font-size:12.5px;width:100%;min-width:60px;padding:2px 5px;border:1px solid var(--accent);border-radius:5px;background:var(--card);color:var(--ink)}
+  .revb{cursor:pointer;color:var(--accent);font-size:12px;user-select:none} .revb:hover{color:var(--bad)}
+  .lock{font-size:10px;opacity:.5}
+  tr.amb{background:color-mix(in srgb,var(--warn-soft) 40%,transparent)}
+  .rmrow{width:22px;height:22px;border-radius:6px;border:1px solid var(--line);background:var(--card);color:var(--faint);cursor:pointer;font-size:13px;line-height:1} .rmrow:hover{color:var(--bad);border-color:var(--bad)}
+  .wchip{font-size:10.5px;font-weight:700;padding:3px 9px;border-radius:999px;background:var(--warn-soft);color:var(--warn);cursor:pointer} .wchip.bad{background:var(--bad-soft);color:var(--bad)}
+  .addgrid{display:grid;grid-template-columns:1fr 1fr;gap:7px;margin:8px 0} .addgrid input{padding:7px 10px;border:1px solid var(--line2);border-radius:7px;font:inherit;font-size:13px}
+  .editnote{font-size:11px;color:var(--faint);margin-top:12px;line-height:1.5;padding:8px 10px;background:var(--card2);border-radius:8px}
+  .hrow{display:flex;justify-content:space-between;align-items:center;padding:5px 0;font-size:12.5px;border-top:1px solid var(--line)}
   .rail{border-left:1px solid var(--line);background:var(--card);padding:14px 12px;overflow:auto}
   .rail .sh{font-size:10px;font-weight:750;letter-spacing:.05em;text-transform:uppercase;color:var(--faint);margin:2px 2px 10px}
   .parity{border:1px solid var(--line);border-radius:10px;padding:12px;margin-bottom:14px}
@@ -172,17 +185,98 @@ async function selTab(i){ const t=STATE.tabs[i]; STATE.cur=t;
   $('#wrap').classList.remove('showlist'); $('#main').innerHTML=`<div class="empty">불러오는 중…</div>`;
   const q=`sheetId=${encodeURIComponent(t.sheetId)}&tabName=${encodeURIComponent(t.tabName)}&tabGid=${encodeURIComponent(t.tabGid||'')}`;
   renderWorkdesk(await api('/api/trackb/workdesk?'+q)); loadParity(t); }
+function _tcell(r, field, val){   // 편집 가능 텍스트 셀
+  const v = val==null?'':val;
+  if(!STATE.canEdit) return `<td>${esc(v||'')}</td>`;
+  if(r.editable===false) return `<td>${esc(v||'')} <span class="lock" title="주문/신원 앵커 없음 또는 중복 — 편집 잠금">🔒</span></td>`;
+  const edited=(r.editedFields||[]).includes(field);
+  return `<td><span class="ecell${edited?' edited':''}" data-val="${esc(v)}" onclick="beginEdit(this,'${r.id}','${field}')">${esc(v||'—')}</span>${edited?` <span class="revb" title="되돌리기" onclick="event.stopPropagation();revertEdit('${r.id}','${field}')">↩</span>`:''}</td>`;
+}
+function _bcell(r, field, val){   // 제출/입금 토글 셀
+  if(!STATE.canEdit || r.editable===false) return `<td><span class="chk ${val?'y':'n'}">${val?'✓':'–'}</span></td>`;
+  const edited=(r.editedFields||[]).includes(field);
+  return `<td><span class="chk ${val?'y':'n'} clk${edited?' edited':''}" onclick="toggleBool('${r.id}','${field}',${val?'true':'false'})">${val?'✓':'–'}</span>${edited?` <span class="revb" title="되돌리기" onclick="event.stopPropagation();revertEdit('${r.id}','${field}')">↩</span>`:''}</td>`;
+}
 function renderWorkdesk(wd){
   if(!wd||!wd.ok){ $('#main').innerHTML=`<div class="empty">${esc((wd&&wd.error)||'조회 실패')}</div>`; return; }
-  const d=wd.detail||{},m=wd.meta||{},c=wd.counts||{}, isMaster=STATE.role==='master';
+  STATE.wd=wd; STATE.canEdit=(STATE.role==='master'||STATE.role==='admin');
+  const d=wd.detail||{},m=wd.meta||{},c=wd.counts||{}, isMaster=STATE.role==='master', canEdit=STATE.canEdit;
   const metaCards=[['상품',d.productOption||m.campaignName||'—'],['모집',(d.recruitCount||'—')+(m.manager?(' · '+m.manager):'')],['구매시간',d.purchaseTime||'자율'],['배송',d.deliveryType||m.deliveryType||'—']].map(([k,v])=>`<div class="mf"><div class="k">${esc(k)}</div><div class="v">${esc(v)}</div></div>`).join('');
-  const rows=(wd.roster||[]).map(r=>`<tr><td>${esc(r.seq)}</td><td>${esc(r.name||'—')}${r.source==='manual'?' <span class="src manual">수동</span>':(r.hasOrder?' <span class="src order">주문</span>':'')}</td><td class="ph">${esc(r.phone8||'')}</td><td>${esc(r.round||'')}</td><td>${esc(r.option||'')}</td><td><span class="chk ${r.submitted?'y':'n'}">${r.submitted?'✓':'–'}</span></td><td><span class="chk ${r.paid?'y':'n'}">${r.paid?'✓':'–'}</span></td></tr>`).join('')||`<tr><td colspan="7" class="empty">명단 없음 — 그림자 투영을 실행하세요.</td></tr>`;
+  const rows=(wd.roster||[]).map(r=>`<tr${r.ambiguous?' class="amb"':''}><td>${esc(r.seq)}</td>`+
+    `<td>${canEdit&&r.editable!==false?`<span class="ecell${(r.editedFields||[]).includes('reviewer_name')?' edited':''}" data-val="${esc(r.name||'')}" onclick="beginEdit(this,'${r.id}','reviewer_name')">${esc(r.name||'—')}</span>`:esc(r.name||'—')}`+
+    `${r.source==='manual'?' <span class="src manual">수동</span>':(r.hasOrder?' <span class="src order">주문</span>':'')}${r.ambiguous?' <span class="src" style="background:var(--warn-soft);color:var(--warn)" title="중복 신원">⚠중복</span>':''}${(r.editedFields||[]).includes('reviewer_name')?` <span class="revb" onclick="event.stopPropagation();revertEdit('${r.id}','reviewer_name')">↩</span>`:''}</td>`+
+    `<td class="ph">${esc(r.phone8||'')}</td>`+
+    _tcell(r,'round',r.round)+_tcell(r,'option_text',r.option)+
+    _bcell(r,'is_submitted',r.submitted)+_bcell(r,'is_paid',r.paid)+
+    (canEdit?`<td>${r.source==='manual'||r.editable!==false?`<button class="rmrow" title="명단에서 제거(숨김)" onclick="hideRow('${r.id}')">×</button>`:''}</td>`:'')
+    +`</tr>`).join('')||`<tr><td colspan="${canEdit?8:7}" class="empty">명단 없음 — 그림자 투영을 실행하세요.</td></tr>`;
+  const warn=[];
+  if(canEdit && c.hidden>0) warn.push(`<span class="wchip" onclick="showHidden()">숨김 ${c.hidden}</span>`);
+  if(canEdit && wd.orphanEdits && wd.orphanEdits.count>0) warn.push(`<span class="wchip bad" title="앵커가 현재 명단에 없는 편집 — 재투영/재정렬로 앵커행이 사라졌을 수 있음">미부착 편집 ${wd.orphanEdits.count}</span>`);
+  if(canEdit && c.ambiguous>0) warn.push(`<span class="wchip" title="중복 신원으로 편집 잠긴 행">중복 잠금 ${c.ambiguous}</span>`);
   $('#main').innerHTML=`<div class="mh"><h1>${esc(STATE.cur.tabName)}</h1>
-    ${wd.maskPII?'<span class="bd">개인정보 마스킹(광고주)</span>':''}<span class="bd g">참여자 ${c.total||0}</span>
+    ${wd.maskPII?'<span class="bd">개인정보 마스킹(광고주)</span>':''}<span class="bd g">참여자 ${c.total||0}</span>${warn.join('')}
     ${isMaster?'<span class="sp" style="flex:1"></span><button class="btn" id="projBtn" onclick="projectCur()">그림자 투영(새로고침)</button>':''}</div>
     <div class="metagrid">${metaCards}</div>
     <div class="counts"><div class="cc"><div class="big">${c.total||0}</div><div class="lb">참여자</div></div><div class="cc s"><div class="big">${c.submitted||0}</div><div class="lb">제출완료</div></div><div class="cc p"><div class="big">${c.paid||0}</div><div class="lb">입금완료</div></div></div>
-    <table><thead><tr><th>#</th><th>참여자</th><th>연락처</th><th>차수</th><th>옵션</th><th>제출</th><th>입금</th></tr></thead><tbody>${rows}</tbody></table>`;
+    <table><thead><tr><th>#</th><th>참여자</th><th>연락처</th><th>차수</th><th>옵션</th><th>제출</th><th>입금</th>${canEdit?'<th></th>':''}</tr></thead><tbody>${rows}</tbody></table>
+    ${canEdit?`<div id="addbox"></div><button class="btn" style="margin-top:10px" onclick="showAddForm()">＋ 참여자 추가</button>`:''}
+    ${canEdit?'<div class="editnote">편집은 이 화면(Track B)에만 저장됩니다 — 구글시트·주문은 바뀌지 않습니다(리허설). 셀 클릭으로 수정, ↩로 되돌리기.</div>':''}`;
+}
+function beginEdit(el, rowId, field){
+  if(el.querySelector('input')) return;
+  const cur=el.getAttribute('data-val')||'';
+  el.innerHTML=`<input class="einp" value="${esc(cur)}">`;
+  const inp=el.querySelector('input'); inp.focus(); inp.select();
+  let handled=false;
+  const finish=(save)=>{ if(handled)return; handled=true; if(save&&inp.value!==cur) saveEdit(rowId,field,inp.value); else reloadWorkdesk(); };
+  inp.addEventListener('blur',()=>finish(true));
+  inp.addEventListener('keydown',e=>{ if(e.key==='Enter'){e.preventDefault();inp.blur();} else if(e.key==='Escape'){handled=true;reloadWorkdesk();} });
+}
+async function saveEdit(rowId, field, value){
+  const t=STATE.cur; if(!t)return;
+  const r=await api('/api/trackb/workdesk/edit',{method:'POST',body:JSON.stringify({sheetId:t.sheetId,tabName:t.tabName,rowId,field,value})});
+  if(r&&r.ok) toast('저장됨');
+  else if(r&&r.error==='concurrent_edit_conflict') toast('동시 편집 감지 — 새로고침');
+  else toast(r&&r.error?('편집 거부: '+r.error):'편집 실패');
+  reloadWorkdesk();
+}
+async function toggleBool(rowId, field, cur){ await saveEdit(rowId, field, !cur); }
+async function revertEdit(rowId, field){ const t=STATE.cur; if(!t)return;
+  const r=await api('/api/trackb/workdesk/revert',{method:'POST',body:JSON.stringify({sheetId:t.sheetId,tabName:t.tabName,rowId,field})});
+  toast(r&&r.reverted?'되돌림':'되돌릴 편집 없음'); reloadWorkdesk();
+}
+async function hideRow(rowId){ if(!confirm('이 참여자를 명단에서 제거(숨김)할까요? (Track B에만 반영, 되돌릴 수 있음)'))return; const t=STATE.cur;
+  const r=await api('/api/trackb/workdesk/hide',{method:'POST',body:JSON.stringify({sheetId:t.sheetId,tabName:t.tabName,rowId})});
+  toast(r&&r.ok?'제거됨':'실패'); reloadWorkdesk();
+}
+function showHidden(){ const wd=STATE.wd; if(!wd||!wd.hiddenRows)return;
+  const list=wd.hiddenRows.map(h=>`<div class="hrow"><span>#${esc(h.seq)} ${esc(h.name||'—')}</span><button class="btn" onclick="revertEdit('${h.id}','_hidden')">복원</button></div>`).join('')||'<div class="empty">숨김 없음</div>';
+  const box=$('#addbox'); if(box){ box.innerHTML=`<div class="add" style="margin-top:10px"><label>숨김 참여자 (${wd.hiddenRows.length})</label>${list}</div>`; box.scrollIntoView({behavior:'smooth'}); }
+}
+function showAddForm(){ const box=$('#addbox'); if(!box)return;
+  box.innerHTML=`<div class="add" style="margin-top:10px">
+    <label>참여자 추가 (Track B 수동행)</label>
+    <div class="addgrid">
+      <input id="a_name" placeholder="참여자명">
+      <input id="a_phone" placeholder="연락처(끝 8자리 매칭)">
+      <input id="a_round" placeholder="차수">
+      <input id="a_opt" placeholder="옵션">
+    </div>
+    <button class="btn pri assignbtn" onclick="submitAdd()">추가</button>
+    <button class="btn" onclick="document.getElementById('addbox').innerHTML=''">취소</button>
+  </div>`;
+  box.scrollIntoView({behavior:'smooth'});
+}
+async function submitAdd(){ const t=STATE.cur; if(!t)return;
+  const body={sheetId:t.sheetId,tabName:t.tabName,reviewerName:$('#a_name').value.trim(),phone:$('#a_phone').value.trim(),round:$('#a_round').value.trim(),optionText:$('#a_opt').value.trim()};
+  if(!body.reviewerName&&!body.phone){ toast('참여자명 또는 연락처를 입력하세요'); return; }
+  const r=await api('/api/trackb/workdesk/add',{method:'POST',body:JSON.stringify(body)});
+  toast(r&&r.ok?'추가됨':'실패'); $('#addbox').innerHTML=''; reloadWorkdesk();
+}
+async function reloadWorkdesk(){ const t=STATE.cur; if(!t)return;
+  const q=`sheetId=${encodeURIComponent(t.sheetId)}&tabName=${encodeURIComponent(t.tabName)}&tabGid=${encodeURIComponent(t.tabGid||'')}`;
+  renderWorkdesk(await api('/api/trackb/workdesk?'+q)); loadParity(t);
 }
 async function loadParity(t){ const rail=$('#rail'); if(!rail)return;
   rail.innerHTML=`<div class="sh">Parity (B ↔ 현행)</div><div class="empty" style="padding:14px">확인 중…</div>`;

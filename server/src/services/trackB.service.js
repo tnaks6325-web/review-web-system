@@ -38,6 +38,26 @@ function identityKey({ orderNum, recipient, phone8, dateStr, optKey } = {}) {
   return p8 ? `phone8:${p8}` : '';
 }
 
+// ── 앵커 도출(order > manual > identity). seq(물리행) 앵커 금지 = 정렬 면역. 편집/합성/revert 공유. ──
+//   _ikFromRow: _enrichTab(비주문행 identity_key 계산)과 동형 재료 — 편집시점 계산 ≡ 투영시점 값.
+function _ikFromRow(row) {
+  const rj = (row.row_json && typeof row.row_json === 'object') ? row.row_json : {};
+  let orderNum = '';
+  for (const k of Object.keys(rj)) { const kl = k.toLowerCase(); if (kl.includes('주문번호') || kl.includes('ordernum')) { orderNum = rj[k]; break; } }
+  return { orderNum, recipient: row.recipient_name, phone8: row.phone8, dateStr: '', optKey: row.option_text };
+}
+function _deriveAnchor(row) {
+  if (row.order_submission_id) return { type: 'order', value: String(row.order_submission_id) };
+  if (row.source === 'manual') return { type: 'manual', value: String(row.id) };   // 재투영 면역 물리행
+  const ik = row.identity_key || identityKey(_ikFromRow(row));
+  return ik ? { type: 'identity', value: ik } : null;
+}
+// 편집 가능 필드 → 형태(bool/text). '_hidden'=제거 오버레이(import행). 화이트리스트(인젝션·형오류 차단).
+const _EDIT_FIELD_KIND = {
+  reviewer_name: 'text', recipient_name: 'text', round: 'text', option_text: 'text',
+  product_name: 'text', phone8: 'text', is_submitted: 'bool', is_paid: 'bool', _hidden: 'bool',
+};
+
 // ── 그림자 투영: 임포트(participants) + 신원키/주문링크 강화 + seen-set 재투영 ──
 async function projectTab({ sheetId, tabName, by = 'trackB' } = {}) {
   if (!sheetId || !tabName) throw new Error('projectTab: sheetId, tabName 필수');
@@ -142,10 +162,23 @@ async function parityReport({ sheetId, tabName } = {}) {
        FROM review_index WHERE sheet_id=$1 AND tab_name=$2 AND row_index IS NOT NULL`,
     [sheetId, tabName]);
   const { rows: bRows } = await db.query(
-    `SELECT reviewer_name AS name, phone8, is_submitted AS submitted, is_paid AS paid, round, source, active
+    `SELECT id, reviewer_name AS name, phone8, is_submitted AS submitted, is_paid AS paid, round, source, active,
+            order_submission_id, identity_key, recipient_name, option_text, row_json
        FROM campaign_participants WHERE sheet_id=$1 AND tab_name=$2 AND deleted_at IS NULL AND active = TRUE`,
     [sheetId, tabName]);
-  const base = classifyParity(aRows, bRows);
+  // 편집된 앵커의 phone8 집합 → classifyParity가 그 행의 A↔B 차이를 real 아닌 benign(BD-8)로 분류.
+  const { rows: edRows } = await db.query(
+    `SELECT DISTINCT anchor_type, anchor_value FROM participant_edits
+      WHERE sheet_id=$1 AND tab_name=$2 AND reverted_at IS NULL`, [sheetId, tabName]).catch(() => ({ rows: [] }));
+  const editedAnchors = new Set(edRows.map(e => e.anchor_type + ' ' + e.anchor_value));
+  const editedKeys = new Set();
+  if (editedAnchors.size) {
+    for (const b of bRows) {
+      const a = _deriveAnchor(b);
+      if (a && editedAnchors.has(a.type + ' ' + a.value)) { const p8 = _phone8(b.phone8); if (p8) editedKeys.add(p8); }
+    }
+  }
+  const base = classifyParity(aRows, bRows, editedKeys);
   // d4/d5/d6 는 A↔B "차이"가 아니라 전환 준비도(coverage/귀속) 관측 — data-parity pass 를 뒤집지 않음(별도).
   const readiness = await _readinessFor({ sheetId, tabName });
   return { ...base, readiness };
@@ -208,7 +241,7 @@ async function _readinessFor({ sheetId, tabName } = {}) {
  *   - A-only(B에 없음) → real(그림자 누락). (A=review_index=현행 소스라 A에 있으면 있어야 함)
  *   - 짝된 쌍 상태(submitted/paid/round) 불일치 → real(시차 BD-5는 상위 관측기간에서 흡수).
  */
-function classifyParity(aRows, bRows) {
+function classifyParity(aRows, bRows, editedKeys = new Set()) {
   const norm = r => ({ p8: _phone8(r.phone8), name: _norm(r.name), submitted: !!r.submitted, paid: !!r.paid, round: _norm(r.round), source: r.source });
   const A = aRows.map(norm).filter(r => r.p8);
   const B = bRows.map(norm).filter(r => r.p8);
@@ -225,12 +258,14 @@ function classifyParity(aRows, bRows) {
     // 상태 대조(대표 1쌍)
     const a = arr[0], b = bl[0];
     if (a.submitted === b.submitted && a.paid === b.paid && a.round === b.round) buckets.match++;
+    else if (editedKeys.has(p8)) buckets.benign.push({ bd: 'BD-8/edited', kind: 'state_edit', phone8: _mask(p8) });   // 의도된 편집 = benign
     else buckets.real.push({ kind: 'state_diff', phone8: _mask(p8), a: { s: a.submitted, p: a.paid, r: a.round }, b: { s: b.submitted, p: b.paid, r: b.round } });
   }
   // B-only
   for (const [p8, arr] of bByP) {
     if (aByP.has(p8)) continue;
     if (arr.some(x => x.source === 'manual')) buckets.benign.push({ bd: 'BD-6/manual', kind: 'b_only_manual', phone8: _mask(p8) });
+    else if (editedKeys.has(p8)) buckets.benign.push({ bd: 'BD-8/edited', kind: 'b_only_edited', phone8: _mask(p8) });
     else buckets.real.push({ kind: 'B_only', phone8: _mask(p8), name: arr[0].name });
   }
   return {
@@ -310,19 +345,22 @@ async function scopedTabsForAdvertiser(advertiserId) {
   return { sheetIds: [...new Set(rows.map(r => r.sheetId))], tabGids, allTabSheetIds };
 }
 
-// ── 통합 작업대 데이터(읽기): 세부 + 명단 + 상태 + (소통 placeholder). 역할별 PII 마스킹. ──
+function _akey(type, value) { return type + '\t' + value; }   // 앵커 조합키(정렬무관, 값에 탭 없음)
+
+// ── 통합 작업대 데이터(읽기): 세부 + 명단 + 상태 + 활성 오버레이 read-time 합성. 역할별 PII 마스킹. ──
+//   ★ 물리행은 순수 투영(review_index 사본) 유지 — 편집은 participant_edits(오버레이)에만 살고 여기서 합성만.
+//     정렬/재투영이 물리행을 덮어도 편집 무손실·무오염(교차노출 근본 차단). staff는 라우트가 이미 차단.
 async function workdeskTab({ sheetId, tabName, tabGid, role = 'master', advertiserId = null } = {}) {
   if (!sheetId || !tabName) throw new Error('workdeskTab: sheetId, tabName 필수');
   const db = getPool();
-  // 광고주는 소유 스코프 강제
   if (role === 'advertiser') {
     const scope = await scopedTabsForAdvertiser(advertiserId);
     const owns = scope.allTabSheetIds.includes(sheetId) ||
       (tabGid && scope.tabGids.includes(`${sheetId}::${tabGid}`));
     if (!owns) return { scoped: true, denied: true };
   }
-  const maskPII = role === 'advertiser';   // 광고주 뷰는 리뷰어 개인정보 마스킹
-  // 세부(작업발주 정형필드 우선 → 없으면 tab_configs/campaign)
+  const maskPII = role === 'advertiser';       // 광고주 뷰는 리뷰어 개인정보 마스킹
+  const showEdits = role !== 'advertiser';     // 편집 어포던스·orphan·hidden은 내부(master/admin)만
   const { rows: meta } = await db.query(
     `SELECT tc.campaign_name AS "campaignName", tc.manager, tc.review_type AS "reviewType",
             tc.delivery_type AS "deliveryType", tc.income_type AS "incomeType"
@@ -332,32 +370,189 @@ async function workdeskTab({ sheetId, tabName, tabGid, role = 'master', advertis
             purchase_time AS "purchaseTime", delivery_type AS "deliveryType", recruit_count AS "recruitCount"
        FROM work_orders WHERE linked_tab_sheet_id=$1 AND linked_tab_name=$2 AND deleted_at IS NULL
       ORDER BY created_at DESC LIMIT 1`, [sheetId, tabName]).catch(() => ({ rows: [] }));
-  // 명단(활성)
+  // 명단(활성) — 앵커 도출에 필요한 컬럼 포함
   const { rows: roster } = await db.query(
-    `SELECT id, seq, reviewer_name AS "name", recipient_name AS "recipient", phone8,
-            round, option_text AS "option", product_name AS "product",
-            is_submitted AS "submitted", is_paid AS "paid", source, order_submission_id AS "orderId"
+    `SELECT id, seq, reviewer_name AS name, recipient_name AS recipient, phone8,
+            round, option_text AS option, product_name AS product,
+            is_submitted AS submitted, is_paid AS paid, source,
+            order_submission_id, identity_key, row_json
        FROM campaign_participants
       WHERE sheet_id=$1 AND tab_name=$2 AND deleted_at IS NULL AND active = TRUE
       ORDER BY seq`, [sheetId, tabName]);
-  const counts = {
-    total: roster.length,
-    submitted: roster.filter(r => r.submitted).length,
-    paid: roster.filter(r => r.paid).length,
-  };
-  return {
-    role, maskPII,
-    meta: meta[0] || {}, detail: wo[0] || null,
-    counts,
-    roster: roster.map(r => ({
+  // 활성 오버레이(합성 + orphan 판정 공용 — 추가 쿼리 없음)
+  const { rows: edits } = await db.query(
+    `SELECT anchor_type, anchor_value, field, kind, value_bool, value_text
+       FROM participant_edits
+      WHERE sheet_id=$1 AND tab_name=$2 AND reverted_at IS NULL`, [sheetId, tabName]).catch(() => ({ rows: [] }));
+  const editMap = new Map();   // 앵커키 -> { field: value }
+  for (const e of edits) {
+    const k = _akey(e.anchor_type, e.anchor_value);
+    if (!editMap.has(k)) editMap.set(k, {});
+    editMap.get(k)[e.field] = e.kind === 'bool' ? !!e.value_bool : (e.value_text == null ? '' : e.value_text);
+  }
+  // identity 중복 카운트(ambiguous 게이트, 윈도우 SQL 대신 JS Map)
+  const identCount = new Map();
+  for (const r of roster) {
+    if (r.order_submission_id || r.source === 'manual') continue;
+    const ik = r.identity_key || identityKey(_ikFromRow(r));
+    if (ik) identCount.set(ik, (identCount.get(ik) || 0) + 1);
+  }
+  const consumed = new Set();
+  const out = [], hiddenList = [];
+  let ambiguousCount = 0;
+  for (const r of roster) {
+    const anchor = _deriveAnchor(r);
+    let ov = {}, editable = !!anchor, ambiguous = false;
+    if (anchor) {
+      const k = _akey(anchor.type, anchor.value);
+      if (anchor.type === 'identity' && (identCount.get(anchor.value) || 0) > 1) {
+        ambiguous = true; editable = false; ambiguousCount++;
+        if (editMap.has(k)) consumed.add(k);          // 소비 표시(orphan 오분류 방지), 단 미적용
+      } else if (editMap.has(k)) { ov = editMap.get(k); consumed.add(k); }
+    }
+    const pick = (f, phys) => (Object.prototype.hasOwnProperty.call(ov, f) ? ov[f] : phys);
+    const syn = {
       id: r.id, seq: r.seq,
-      name: r.name, recipient: r.recipient,
-      phone8: maskPII ? _mask(r.phone8) : r.phone8,
-      round: r.round, option: r.option, product: r.product,
-      submitted: r.submitted, paid: r.paid, source: r.source, hasOrder: !!r.orderId,
-    })),
+      name: pick('reviewer_name', r.name),
+      recipient: pick('recipient_name', r.recipient),
+      phone8: pick('phone8', r.phone8),
+      round: pick('round', r.round),
+      option: pick('option_text', r.option),
+      product: pick('product_name', r.product),
+      submitted: !!pick('is_submitted', r.submitted),
+      paid: !!pick('is_paid', r.paid),
+      source: r.source, hasOrder: !!r.order_submission_id,
+    };
+    if (ov._hidden === true) {                          // 제거 오버레이 → 본 목록서 제외
+      if (showEdits) hiddenList.push({ id: r.id, seq: r.seq, name: syn.name });
+      continue;
+    }
+    syn.phone8 = maskPII ? _mask(syn.phone8) : syn.phone8;
+    if (showEdits) {
+      syn.anchorType = anchor ? anchor.type : null;
+      syn.editable = editable; syn.ambiguous = ambiguous;
+      syn.editedFields = Object.keys(ov).filter(f => f !== '_hidden');
+    }
+    out.push(syn);
+  }
+  // orphan: 활성 오버레이 중 어떤 활성 행에도 안 붙은 것(카운트/타입만 — PII·원장ID 비노출)
+  let orphanCount = 0; const orphanByType = {};
+  for (const [k] of editMap) {
+    if (consumed.has(k)) continue;
+    orphanCount++; const t = k.split('\t')[0]; orphanByType[t] = (orphanByType[t] || 0) + 1;
+  }
+  const counts = {
+    total: out.length,
+    submitted: out.filter(r => r.submitted).length,
+    paid: out.filter(r => r.paid).length,
+    edited: showEdits ? out.filter(r => (r.editedFields || []).length).length : undefined,
+    ambiguous: ambiguousCount, hidden: hiddenList.length,
   };
+  const res = { role, maskPII, meta: meta[0] || {}, detail: wo[0] || null, counts, roster: out };
+  if (showEdits) { res.hiddenRows = hiddenList; res.orphanEdits = { count: orphanCount, byType: orphanByType }; }
+  return res;
 }
+
+// ── 통합 작업대 편집(오버레이-only, 물리컬럼 무편집) ──
+//   앵커: order_submission_id(불변 UUID) > manual(물리행 UUID, 재투영 면역) > identity_key(중복 아니면) > 거부.
+//   단일 tx + 대상행 FOR UPDATE(동일행 직렬화) + revert(활성)→insert(신규, append-only 감사).
+//   부분유니크 uq_participant_edits_active 가 cross-row 레이스 backstop(23505 → concurrent_edit_conflict).
+async function editWorkdeskRow({ sheetId, tabName, rowId, field, value, by = 'admin' } = {}) {
+  if (!sheetId || !tabName || !rowId || !field) throw new Error('editWorkdeskRow: 필수 인자 누락');
+  const kind = _EDIT_FIELD_KIND[field];
+  if (!kind) return { ok: false, error: 'field_not_editable', field };
+  const db = getPool();
+  const client = await db.connect();
+  try {
+    await client.query('BEGIN');
+    const { rows: pr } = await client.query(
+      `SELECT id, source, order_submission_id, identity_key, phone8, recipient_name, option_text, row_json
+         FROM campaign_participants
+        WHERE id=$1 AND sheet_id=$2 AND tab_name=$3 AND deleted_at IS NULL FOR UPDATE`,
+      [rowId, sheetId, tabName]);
+    if (!pr.length) { await client.query('ROLLBACK'); return { ok: false, error: 'row_not_found' }; }
+    const row = pr[0];
+    let anchorType, anchorValue;
+    if (row.order_submission_id) { anchorType = 'order'; anchorValue = String(row.order_submission_id); }
+    else if (row.source === 'manual') { anchorType = 'manual'; anchorValue = String(row.id); }
+    else {
+      let ik = row.identity_key;
+      if (!ik) {
+        ik = identityKey(_ikFromRow(row));
+        if (ik) await client.query(`UPDATE campaign_participants SET identity_key=$2 WHERE id=$1 AND identity_key IS NULL`, [row.id, ik]);
+      }
+      if (!ik) { await client.query('ROLLBACK'); return { ok: false, error: 'no_stable_anchor' }; }
+      const { rows: dup } = await client.query(
+        `SELECT COUNT(*)::int AS n FROM campaign_participants
+          WHERE sheet_id=$1 AND tab_name=$2 AND deleted_at IS NULL AND active=TRUE
+            AND order_submission_id IS NULL AND source<>'manual' AND identity_key=$3`,
+        [sheetId, tabName, ik]);
+      if ((dup[0].n || 0) > 1) { await client.query('ROLLBACK'); return { ok: false, error: 'ambiguous_identity' }; }
+      anchorType = 'identity'; anchorValue = ik;
+    }
+    let vBool = null, vText = null;
+    if (kind === 'bool') vBool = (value === true || value === 'true' || value === 1 || value === '1');
+    else vText = field === 'phone8' ? (_phone8(value) || '') : (value == null ? '' : String(value));
+    await client.query(
+      `UPDATE participant_edits SET reverted_at=NOW(), reverted_by=$1
+        WHERE sheet_id=$2 AND tab_name=$3 AND anchor_type=$4 AND anchor_value=$5 AND field=$6 AND reverted_at IS NULL`,
+      [String(by).slice(0, 100), sheetId, tabName, anchorType, anchorValue, field]);
+    const ins = await client.query(
+      `INSERT INTO participant_edits (sheet_id, tab_name, anchor_type, anchor_value, field, kind, value_bool, value_text, created_by)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9) RETURNING id`,
+      [sheetId, tabName, anchorType, anchorValue, field, kind, vBool, vText, String(by).slice(0, 100)]);
+    await client.query('COMMIT');
+    return { ok: true, editId: ins.rows[0].id, anchorType, field, value: kind === 'bool' ? vBool : vText };
+  } catch (e) {
+    try { await client.query('ROLLBACK'); } catch (_) {}
+    if (e && e.code === '23505') return { ok: false, error: 'concurrent_edit_conflict' };
+    throw e;
+  } finally { client.release(); }
+}
+
+// 편집 되돌리기(개별 행/필드) — 하드삭제 없이 reverted_at 마킹(감사 이력 보존).
+async function revertWorkdeskEdit({ sheetId, tabName, rowId, field, by = 'admin' } = {}) {
+  if (!sheetId || !tabName || !rowId || !field) throw new Error('revertWorkdeskEdit: 필수 인자 누락');
+  const db = getPool();
+  const client = await db.connect();
+  try {
+    await client.query('BEGIN');
+    const { rows: pr } = await client.query(
+      `SELECT id, source, order_submission_id, identity_key, phone8, recipient_name, option_text, row_json
+         FROM campaign_participants WHERE id=$1 AND sheet_id=$2 AND tab_name=$3 FOR UPDATE`,
+      [rowId, sheetId, tabName]);
+    if (!pr.length) { await client.query('ROLLBACK'); return { ok: false, error: 'row_not_found' }; }
+    const a = _deriveAnchor(pr[0]);
+    if (!a) { await client.query('ROLLBACK'); return { ok: false, error: 'no_stable_anchor' }; }
+    const { rowCount } = await client.query(
+      `UPDATE participant_edits SET reverted_at=NOW(), reverted_by=$1
+        WHERE sheet_id=$2 AND tab_name=$3 AND anchor_type=$4 AND anchor_value=$5 AND field=$6 AND reverted_at IS NULL`,
+      [String(by).slice(0, 100), sheetId, tabName, a.type, a.value, field]);
+    await client.query('COMMIT');
+    return { ok: true, reverted: rowCount };
+  } catch (e) { try { await client.query('ROLLBACK'); } catch (_) {} throw e; }
+  finally { client.release(); }
+}
+
+// 제거: manual 물리행=soft-delete(재투영 부활 없음), import행=hidden 오버레이(앵커 불변).
+async function hideWorkdeskRow({ sheetId, tabName, rowId, by = 'admin' } = {}) {
+  const db = getPool();
+  const { rows } = await db.query(
+    `SELECT id, source FROM campaign_participants WHERE id=$1 AND sheet_id=$2 AND tab_name=$3 AND deleted_at IS NULL`,
+    [rowId, sheetId, tabName]);
+  if (!rows.length) return { ok: false, error: 'row_not_found' };
+  if (rows[0].source === 'manual') {
+    const { rowCount } = await db.query(
+      `UPDATE campaign_participants SET deleted_at=NOW(), updated_at=NOW(), updated_by=$2 WHERE id=$1 AND deleted_at IS NULL`,
+      [rowId, String(by).slice(0, 100)]);
+    return { ok: true, mode: 'soft_delete', removed: rowCount };
+  }
+  const r = await editWorkdeskRow({ sheetId, tabName, rowId, field: '_hidden', value: true, by });
+  return r.ok ? { ok: true, mode: 'overlay_hidden', editId: r.editId } : r;
+}
+
+// 추가: 앵커 대상 없음(신규 참여자) → source='manual' 물리행(오버레이 아님). participants가 seq 원자화.
+async function addWorkdeskRow(args) { return participants.addParticipant(args); }
 
 module.exports = {
   identityKey,
@@ -371,5 +566,9 @@ module.exports = {
   listAdvertisersWithOwnership,
   scopedTabsForAdvertiser,
   workdeskTab,
+  editWorkdeskRow,
+  revertWorkdeskEdit,
+  hideWorkdeskRow,
+  addWorkdeskRow,
   __setPoolForTest,
 };
