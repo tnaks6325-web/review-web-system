@@ -390,6 +390,20 @@ async function workdeskTab({ sheetId, tabName, tabGid, role = 'master', advertis
     if (!editMap.has(k)) editMap.set(k, {});
     editMap.get(k)[e.field] = e.kind === 'bool' ? !!e.value_bool : (e.value_text == null ? '' : e.value_text);
   }
+  // 제출한 구매양식 원본(order_submissions) — 링크된 주문의 실제 제출 내용. 내부(master/admin)만 PII 상세 노출.
+  let ordMap = new Map();
+  if (showEdits) {
+    const orderIds = [...new Set(roster.map(r => r.order_submission_id).filter(Boolean).map(String))];
+    if (orderIds.length) {
+      const { rows: ords } = await db.query(
+        `SELECT id, orderer, recipient, phone, address, order_num, date_str,
+                selected_opt_key AS "selectedOptKey", price, submitted_at AS "submittedAt",
+                mirror_status AS "mirrorStatus", sheet_row AS "sheetRow"
+           FROM order_submissions WHERE id = ANY($1::uuid[]) AND deleted_at IS NULL`,
+        [orderIds]).catch(() => ({ rows: [] }));
+      ordMap = new Map(ords.map(o => [String(o.id), o]));
+    }
+  }
   // identity 중복 카운트(ambiguous 게이트, 윈도우 SQL 대신 JS Map)
   const identCount = new Map();
   for (const r of roster) {
@@ -432,6 +446,9 @@ async function workdeskTab({ sheetId, tabName, tabGid, role = 'master', advertis
       syn.anchorType = anchor ? anchor.type : null;
       syn.editable = editable; syn.ambiguous = ambiguous;
       syn.editedFields = Object.keys(ov).filter(f => f !== '_hidden');
+      // 실 데이터 전량 투영: 시트 행 전체(row_json) + 제출 구매양식 원본(order). 상세 펼침용.
+      syn.rowJson = (r.row_json && typeof r.row_json === 'object') ? r.row_json : null;
+      syn.order = r.order_submission_id ? (ordMap.get(String(r.order_submission_id)) || null) : null;
     }
     out.push(syn);
   }
