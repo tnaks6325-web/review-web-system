@@ -667,6 +667,10 @@ async function loadOrderMirrorStatus() {
 // ── 리뷰 이미지 수정요청 (리뷰어 → 관리자 승인 → [리뷰] 폴더 파일 교체) ──
 function _escReviewEdit(s){ const d = document.createElement('div'); d.textContent = (s == null ? '' : String(s)); return d.innerHTML; }
 
+// 현재 렌더된 수정요청(id→row) — 비교보기 모달에서 old/new 파일ID·메타 조회용
+let _reviewEditReqs = {};
+let _reEditCmpId = null;
+
 async function loadReviewEditRequests() {
   const el = document.getElementById("reviewEditPanel");
   const badge = document.getElementById("reviewEditBadge");
@@ -681,13 +685,15 @@ async function loadReviewEditRequests() {
       el.innerHTML = '<div style="color:#16A34A;font-size:.8rem"><i class="fas fa-check-circle"></i> 대기 중인 수정요청 없음</div>';
       return;
     }
-    // 썸네일은 Google 썸네일 CDN을 1차(빠름), 서버 프록시를 폴백(원본 전체 다운로드라 느림)으로.
+    _reviewEditReqs = {};
+    // 썸네일은 Google 썸네일 CDN을 1차(빠름), 서버 프록시를 폴백으로. 클릭 시 비교보기 모달.
     const IMG = (id) => `${API_BASE_URL}/api/drive/image/${encodeURIComponent(id)}`;
     const THUMB = (id) => `https://drive.google.com/thumbnail?id=${encodeURIComponent(id)}&sz=w400`;
-    const imgCell = (id, label, color, border) => id
-      ? `<div style="text-align:center"><div style="font-size:.64rem;color:${color};font-weight:700">${label}</div><img src="${THUMB(id)}" loading="lazy" onerror="this.onerror=null;this.src='${IMG(id)}'" style="width:104px;height:104px;object-fit:cover;border-radius:8px;border:${border};cursor:zoom-in" onclick="window.open('${IMG(id)}','_blank')"></div>`
+    const imgCell = (id, label, color, border, reqId) => id
+      ? `<div style="text-align:center"><div style="font-size:.64rem;color:${color};font-weight:700">${label}</div><img src="${THUMB(id)}" loading="lazy" onerror="this.onerror=null;this.src='${IMG(id)}'" style="width:104px;height:104px;object-fit:cover;border-radius:8px;border:${border};cursor:zoom-in" onclick="openReviewEditCompare('${reqId}')" title="비교보기"></div>`
       : '';
     el.innerHTML = reqs.map(r => {
+      _reviewEditReqs[r.id] = r;
       const reason = r.reason ? `<div style="font-size:.72rem;color:#5B6472;margin-top:6px;background:#F8FAFC;border-radius:6px;padding:5px 8px">사유: ${_escReviewEdit(r.reason)}</div>` : '';
       return `<div data-reqid="${r.id}" style="border:1px solid var(--border);border-radius:10px;padding:10px;margin-bottom:8px">
         <div style="display:flex;justify-content:space-between;gap:6px;align-items:flex-start;margin-bottom:8px">
@@ -696,14 +702,15 @@ async function loadReviewEditRequests() {
             <div style="font-size:.7rem;color:var(--t3)">${_escReviewEdit(r.reviewer_name || '리뷰어')} · 행 ${r.row_index || '-'} · ${_escReviewEdit(r.slot_key || 'review')}</div>
           </div>
           <div style="display:flex;gap:5px;flex-shrink:0">
+            <button onclick="openReviewEditCompare('${r.id}')" style="font-size:.72rem;background:#EAF1FF;color:#2f6df0;border:none;padding:5px 10px;border-radius:6px;cursor:pointer;font-weight:700">🔍 비교</button>
             <button onclick="approveReviewEdit('${r.id}')" style="font-size:.72rem;background:#16A34A;color:#fff;border:none;padding:5px 12px;border-radius:6px;cursor:pointer;font-weight:700">승인</button>
             <button onclick="rejectReviewEdit('${r.id}')" style="font-size:.72rem;background:#EF4444;color:#fff;border:none;padding:5px 10px;border-radius:6px;cursor:pointer">반려</button>
           </div>
         </div>
         <div style="display:flex;gap:12px;align-items:center;justify-content:center">
-          ${imgCell(r.old_file_id, '현재', '#98A0AC', '1px solid #E5E7EB')}
+          ${imgCell(r.old_file_id, '현재', '#98A0AC', '1px solid #E5E7EB', r.id)}
           <i class="fas fa-arrow-right" style="color:#3182f6"></i>
-          ${imgCell(r.new_file_id, '교체', '#16A34A', '2px solid #3182f6')}
+          ${imgCell(r.new_file_id, '교체', '#16A34A', '2px solid #3182f6', r.id)}
         </div>
         ${reason}
       </div>`;
@@ -755,6 +762,92 @@ async function rejectReviewEdit(id) {
     showToast('반려 실패: ' + (e.message || '') + ' — 목록을 새로고침합니다', 'error');
     loadReviewEditRequests();   // 실패 시 서버 상태로 복원
   }
+}
+
+// ── 비교보기 모달(현재 ↔ 교체 좌우 나란히 확대) ──
+function _reviewEditEnsureCompareModal() {
+  if (document.getElementById('reCmpOvl')) return;
+  const st = document.createElement('style');
+  st.textContent =
+    '.re-cmp-ovl{position:fixed;inset:0;background:rgba(20,26,38,.62);z-index:5000;display:none;align-items:center;justify-content:center;padding:20px}' +
+    '.re-cmp-ovl.on{display:flex}' +
+    '.re-cmp-panel{background:#fff;border-radius:16px;box-shadow:0 20px 60px rgba(0,0,0,.35);width:100%;max-width:920px;max-height:92vh;display:flex;flex-direction:column;overflow:hidden}' +
+    '.re-cmp-head{display:flex;align-items:center;justify-content:space-between;gap:10px;padding:14px 16px;border-bottom:1px solid #E9ECF2}' +
+    '.re-cmp-h1{font-size:.92rem;font-weight:800;color:#191F28}.re-cmp-h2{font-size:.72rem;color:#98A0AC;margin-top:1px}' +
+    '.re-cmp-x{width:30px;height:30px;border-radius:8px;border:1px solid #E9ECF2;background:#fff;color:#98A0AC;font-size:1.2rem;line-height:1;cursor:pointer;flex-shrink:0}' +
+    '.re-cmp-body{display:flex;gap:10px;align-items:stretch;justify-content:center;padding:16px;overflow:auto;flex-wrap:wrap}' +
+    '.re-cmp-col{flex:1 1 340px;min-width:280px;display:flex;flex-direction:column}' +
+    '.re-cmp-cap{text-align:center;font-size:.72rem;font-weight:800;margin-bottom:7px}' +
+    '.re-cmp-cap.now{color:#98A0AC}.re-cmp-cap.new{color:#16A34A}' +
+    '.re-cmp-frame{flex:1;background:#F4F6FA;border:1px solid #E9ECF2;border-radius:10px;padding:10px;display:flex;align-items:flex-start;justify-content:center;min-height:200px}' +
+    '.re-cmp-frame.new{border-color:#3182f6}' +
+    '.re-cmp-frame img{max-width:100%;max-height:64vh;object-fit:contain;border-radius:6px;cursor:zoom-in;background:#fff}' +
+    '.re-cmp-arrow{align-self:center;color:#3182f6;font-size:1.3rem;flex:0 0 auto}' +
+    '.re-cmp-foot{display:flex;align-items:center;justify-content:space-between;gap:8px;padding:12px 16px;border-top:1px solid #E9ECF2;background:#FAFBFD;flex-wrap:wrap}' +
+    '.re-cmp-hint{font-size:.72rem;color:#98A0AC}' +
+    '.re-cmp-actions{display:flex;gap:8px}' +
+    '.re-cmp-btn{border:none;border-radius:8px;font-weight:800;font-size:.8rem;padding:9px 18px;cursor:pointer;color:#fff}' +
+    '.re-cmp-btn.ok{background:#16A34A}.re-cmp-btn.no{background:#EF4444}' +
+    '@media(max-width:640px){.re-cmp-arrow{display:none}}';
+  document.head.appendChild(st);
+
+  const ovl = document.createElement('div');
+  ovl.id = 'reCmpOvl';
+  ovl.className = 're-cmp-ovl';
+  ovl.innerHTML =
+    '<div class="re-cmp-panel">' +
+      '<div class="re-cmp-head"><div><div class="re-cmp-h1" id="reCmpTitle"></div><div class="re-cmp-h2" id="reCmpSub"></div></div>' +
+      '<button class="re-cmp-x" onclick="closeReviewEditCompare()" title="닫기">&times;</button></div>' +
+      '<div class="re-cmp-body">' +
+        '<div class="re-cmp-col"><div class="re-cmp-cap now">현재</div><div class="re-cmp-frame"><a id="reCmpOldLink" target="_blank" rel="noopener"><img id="reCmpOld" alt="현재 이미지"></a></div></div>' +
+        '<div class="re-cmp-arrow"><i class="fas fa-arrow-right"></i></div>' +
+        '<div class="re-cmp-col"><div class="re-cmp-cap new">교체</div><div class="re-cmp-frame new"><a id="reCmpNewLink" target="_blank" rel="noopener"><img id="reCmpNew" alt="교체 이미지"></a></div></div>' +
+      '</div>' +
+      '<div class="re-cmp-foot"><span class="re-cmp-hint">이미지 클릭 시 원본 새창에서 열림</span>' +
+      '<div class="re-cmp-actions"><button class="re-cmp-btn no" onclick="_reviewEditCompareReject()">반려</button><button class="re-cmp-btn ok" onclick="_reviewEditCompareApprove()">승인</button></div></div>' +
+    '</div>';
+  ovl.addEventListener('click', (e) => { if (e.target === ovl) closeReviewEditCompare(); });
+  document.addEventListener('keydown', (e) => { if (e.key === 'Escape') closeReviewEditCompare(); });
+  document.body.appendChild(ovl);
+}
+
+function openReviewEditCompare(id) {
+  const r = _reviewEditReqs[id];
+  if (!r) return;
+  _reEditCmpId = id;
+  _reviewEditEnsureCompareModal();
+  const P = (fid) => fid ? `${API_BASE_URL}/api/drive/image/${encodeURIComponent(fid)}` : '';
+  const T = (fid) => fid ? `https://drive.google.com/thumbnail?id=${encodeURIComponent(fid)}&sz=w1600` : '';
+  document.getElementById('reCmpTitle').textContent = r.campaign_label || r.tab_name || '';
+  document.getElementById('reCmpSub').textContent =
+    (r.reviewer_name || '리뷰어') + ' · 행 ' + (r.row_index || '-') + ' · ' + (r.slot_key || 'review');
+  const oldImg = document.getElementById('reCmpOld');
+  const newImg = document.getElementById('reCmpNew');
+  oldImg.onerror = function () { this.onerror = null; this.src = P(r.old_file_id); };
+  newImg.onerror = function () { this.onerror = null; this.src = P(r.new_file_id); };
+  oldImg.src = T(r.old_file_id);
+  newImg.src = T(r.new_file_id);
+  document.getElementById('reCmpOldLink').href = P(r.old_file_id) || '#';
+  document.getElementById('reCmpNewLink').href = P(r.new_file_id) || '#';
+  document.getElementById('reCmpOvl').classList.add('on');
+  document.body.style.overflow = 'hidden';
+}
+
+function closeReviewEditCompare() {
+  const o = document.getElementById('reCmpOvl');
+  if (o) o.classList.remove('on');
+  document.body.style.overflow = '';
+}
+
+function _reviewEditCompareApprove() {
+  const id = _reEditCmpId;
+  if (id) approveReviewEdit(id);   // 자체 confirm → 확인 시 목록 카드 즉시 제거 + API
+  closeReviewEditCompare();
+}
+function _reviewEditCompareReject() {
+  const id = _reEditCmpId;
+  if (id) rejectReviewEdit(id);    // 자체 사유 prompt → 목록 카드 즉시 제거 + API
+  closeReviewEditCompare();
 }
 
 async function runOrderReconcile(sheetId) {
