@@ -278,11 +278,21 @@ function buildGrid(wd){
   const thead=`<tr>${cols.map((h,i)=>`<th ${cls(i)} style="${cstyle(i)}">${esc(h==='#'?'#':h)}</th>`).join('')}</tr>`;
   const body=(wd.roster||[]).map(r=>{
     const rj=(r.rowJson&&typeof r.rowJson==='object')?r.rowJson:{};
-    const badge = r.source==='manual'?' <span class="src manual">수동</span>':(r.hasOrder?' <span class="src order">주문</span>':'');
+    const ceMap=(r.cellEdits&&typeof r.cellEdits==='object')?r.cellEdits:{};
+    const canE = STATE.canEdit && r.editable!==false;
+    const badge = r.source==='manual'?' <span class="src manual">수동</span>':(r.hasOrder?' <span class="src order">주문</span>':'')
+                + (r.editable===false?' <span class="lock" title="주문/신원 앵커 없음 또는 중복 — 편집 잠금">🔒</span>':'');
+    // 편집 셀 렌더(주입 안전: 헤더는 data-field 속성으로만 전달, onclick 인라인 없음)
+    const eCell=(field, disp, edited, extraCls, styleI)=> canE
+      ? `<td ${cls(styleI,'gcell'+(disp?'':' gempty')+(extraCls||''))} style="${cstyle(styleI)}"><span class="ecell${edited?' edited':''}" data-val="${esc(disp)}" data-id="${esc(r.id)}" data-field="${esc(field)}" onclick="beginEditCell(this)">${esc(disp||'—')}</span>${edited?` <span class="revb" title="되돌리기" data-id="${esc(r.id)}" data-field="${esc(field)}" onclick="revertCell(event,this)">↩</span>`:''}</td>`
+      : `<td ${cls(styleI,'gcell'+(disp?'':' gempty')+(extraCls||''))} style="${cstyle(styleI)}">${esc(disp||'')}</td>`;
     let tds=`<td ${cls(0,'gnum')} style="${cstyle(0)}">${esc(r.seq)}</td>`+
-            `<td ${cls(1,'gnm')} style="${cstyle(1)}">${esc(r.name||'—')}${badge}</td>`+
-            `<td ${cls(2,'gph')} style="${cstyle(2)}">${esc(r.phone8||'')}</td>`;
-    H.forEach((h,j)=>{ const i=j+3; const v=_gridVal(h, rj[h]); const ok=((j===revI||j===payI)&&v)?' gok':''; tds+=`<td ${cls(i,'gcell'+(v?'':' gempty')+ok)} style="${cstyle(i)}">${esc(v)}</td>`; });
+            (canE
+              ? `<td ${cls(1,'gnm')} style="${cstyle(1)}"><span class="ecell${(r.editedFields||[]).includes('reviewer_name')?' edited':''}" data-val="${esc(r.name||'')}" data-id="${esc(r.id)}" data-field="reviewer_name" onclick="beginEditCell(this)">${esc(r.name||'—')}</span>${badge}</td>`
+              : `<td ${cls(1,'gnm')} style="${cstyle(1)}">${esc(r.name||'—')}${badge}</td>`)+
+            eCell('phone8', r.phone8||'', (r.editedFields||[]).includes('phone8'), 'gph', 2);
+    H.forEach((h,j)=>{ const i=j+3; const ed=(h in ceMap); const raw= ed?ceMap[h]:rj[h]; const disp= ed?(raw==null?'':String(raw)):_gridVal(h, raw); const ok=((j===revI||j===payI)&&disp)?' gok':'';
+      tds+=eCell('col:'+h, disp, ed, ok, i); });
     return `<tr>${tds}</tr>`;
   }).join('')||`<tr><td colspan="${cols.length}" class="empty">명단 없음 — 그림자 투영을 실행하세요.</td></tr>`;
   // 고정 열 선택(수취인까지 등) — 시트 컬럼 중 신원계열만 옵션으로.
@@ -290,10 +300,13 @@ function buildGrid(wd){
     .concat(H.filter(h=>['번호','담당자','구매일자','인애드명단','주문자제출','수취인','주소'].includes(h))
       .map(h=>`<option value="${esc(h)}"${STATE.freezeUpto===h?' selected':''}>${esc(h)}까지 고정</option>`)).join('');
   return `<div class="gridbar"><label>고정 열</label><select id="fzsel" onchange="setFreeze(this.value)">${fzOpts}</select>
-      <span class="gnote">구글시트와 동일 컬럼·가로 배열 · <b>열람 전용</b> · 날짜 자동표시</span></div>
+      <span class="gnote">구글시트와 동일 컬럼·가로 배열 · <b>셀 클릭 편집</b>(Track B 전용, 시트·주문 무접촉) · ↩ 되돌리기 · 날짜 자동표시</span></div>
     <div class="gridscroll"><table class="sheetgrid"><thead>${thead}</thead><tbody>${body}</tbody></table></div>`;
 }
 function setFreeze(v){ STATE.freezeUpto=v||null; if(STATE.wd) renderWorkdesk(STATE.wd); }
+// 그리드 셀 편집: 헤더/필드는 data 속성으로만 전달(주입 안전). beginEdit/revertEdit(기존 오버레이 경로) 재사용.
+function beginEditCell(el){ beginEdit(el, el.getAttribute('data-id'), el.getAttribute('data-field')); }
+function revertCell(ev, el){ if(ev)ev.stopPropagation(); revertEdit(el.getAttribute('data-id'), el.getAttribute('data-field')); }
 function beginEdit(el, rowId, field){
   if(el.querySelector('input')) return;
   const cur=el.getAttribute('data-val')||'';

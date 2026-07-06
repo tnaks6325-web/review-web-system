@@ -465,6 +465,9 @@ async function workdeskTab({ sheetId, tabName, tabGid, role = 'master', advertis
       // 실 데이터 전량 투영: 시트 행 전체(row_json) + 제출 구매양식 원본(order). 상세 펼침용.
       syn.rowJson = (r.row_json && typeof r.row_json === 'object') ? r.row_json : null;
       syn.order = r.order_submission_id ? (ordMap.get(String(r.order_submission_id)) || null) : null;
+      // 시트 컬럼 편집(col:<헤더>) 오버레이 → 그리드 셀 합성용 {헤더: 값}. 앵커 게이트(ambiguous면 ov={}이라 자동 미적용).
+      const ce = {}; for (const k in ov) { if (k.indexOf('col:') === 0) ce[k.slice(4)] = ov[k]; }
+      syn.cellEdits = ce;
     }
     out.push(syn);
   }
@@ -486,13 +489,29 @@ async function workdeskTab({ sheetId, tabName, tabGid, role = 'master', advertis
   return res;
 }
 
+// 시트 컬럼(col:<헤더>) 편집 허용 검증 — 헤더가 그 탭의 detected_headers 에 실재할 때만(임의 컬럼·인젝션 차단).
+async function _isTabColumn(sheetId, tabName, colName) {
+  if (!colName) return false;
+  const db = getPool();
+  const { rows } = await db.query(
+    `SELECT detected_headers FROM raw_sheet_tabs
+      WHERE sheet_id=$1 AND tab_name=$2 AND detected_headers IS NOT NULL LIMIT 1`,
+    [sheetId, tabName]).catch(() => ({ rows: [] }));
+  const dh = rows[0] && rows[0].detected_headers;
+  return Array.isArray(dh) && dh.some(h => String(h == null ? '' : h).trim() === colName);
+}
+
 // ── 통합 작업대 편집(오버레이-only, 물리컬럼 무편집) ──
 //   앵커: order_submission_id(불변 UUID) > manual(물리행 UUID, 재투영 면역) > identity_key(중복 아니면) > 거부.
 //   단일 tx + 대상행 FOR UPDATE(동일행 직렬화) + revert(활성)→insert(신규, append-only 감사).
 //   부분유니크 uq_participant_edits_active 가 cross-row 레이스 backstop(23505 → concurrent_edit_conflict).
+//   field: 물리필드(_EDIT_FIELD_KIND) 또는 'col:<시트헤더>'(그 탭 실재 컬럼만, text 오버레이) — 물리컬럼 무접촉.
 async function editWorkdeskRow({ sheetId, tabName, rowId, field, value, by = 'admin' } = {}) {
   if (!sheetId || !tabName || !rowId || !field) throw new Error('editWorkdeskRow: 필수 인자 누락');
-  const kind = _EDIT_FIELD_KIND[field];
+  let kind = _EDIT_FIELD_KIND[field];
+  if (!kind && typeof field === 'string' && field.startsWith('col:')) {
+    if (await _isTabColumn(sheetId, tabName, field.slice(4))) kind = 'text';   // 시트 컬럼 오버레이(text)
+  }
   if (!kind) return { ok: false, error: 'field_not_editable', field };
   const db = getPool();
   const client = await db.connect();
