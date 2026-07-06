@@ -70,6 +70,19 @@
   .dpair{display:flex;gap:8px;font-size:12px;line-height:1.5;border-bottom:1px dotted var(--line);padding:2px 0} .dpair:last-child{border-bottom:none}
   .dpair .dk{flex:none;width:96px;color:var(--faint);font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis} .dpair .dv{flex:1;color:var(--ink);word-break:break-word}
   .dnone{font-size:12px;color:var(--faint);padding:4px 0}
+  /* ── 시트형 그리드(열람) ── */
+  .gridscroll{border:1px solid var(--line);border-radius:10px;overflow:auto;max-height:calc(100vh - 300px);background:var(--card)}
+  table.sheetgrid{border-collapse:separate;border-spacing:0;font-size:12px;white-space:nowrap;min-width:100%}
+  table.sheetgrid th,table.sheetgrid td{border-right:1px solid var(--line);border-bottom:1px solid var(--line);padding:5px 9px;text-align:left;height:30px}
+  table.sheetgrid thead th{position:sticky;top:0;z-index:3;background:var(--card2);font-weight:700;color:var(--muted);font-size:10.5px;border-bottom:2px solid var(--line2)}
+  table.sheetgrid .gfz{position:sticky;background:var(--card);z-index:2}
+  table.sheetgrid thead th.gfz{z-index:4;background:var(--card2)}
+  .gfz0{left:0;width:44px;min-width:44px;text-align:center;color:var(--faint);font-weight:700}
+  .gfz1{left:44px;width:100px;min-width:100px;font-weight:600}
+  .gfz2{left:144px;width:108px;min-width:108px;box-shadow:1px 0 0 var(--line2)}
+  table.sheetgrid .gph{font-family:var(--mono);font-size:11.5px;color:var(--muted)}
+  table.sheetgrid tbody tr:hover td{background:#F7FBFB} table.sheetgrid tbody tr:hover td.gfz{background:#eef6f6}
+  .gcell.gempty{color:var(--line2)} .gcell.gok{color:var(--safe);font-weight:600}
   .rail{border-left:1px solid var(--line);background:var(--card);padding:14px 12px;overflow:auto}
   .rail .sh{font-size:10px;font-weight:750;letter-spacing:.05em;text-transform:uppercase;color:var(--faint);margin:2px 2px 10px}
   .parity{border:1px solid var(--line);border-radius:10px;padding:12px;margin-bottom:14px}
@@ -213,26 +226,48 @@ function renderWorkdesk(wd){
   STATE.wd=wd; STATE.canEdit=(STATE.role==='master'||STATE.role==='admin');
   const d=wd.detail||{},m=wd.meta||{},c=wd.counts||{}, isMaster=STATE.role==='master', canEdit=STATE.canEdit;
   const metaCards=[['상품',d.productOption||m.campaignName||'—'],['모집',(d.recruitCount||'—')+(m.manager?(' · '+m.manager):'')],['구매시간',d.purchaseTime||'자율'],['배송',d.deliveryType||m.deliveryType||'—']].map(([k,v])=>`<div class="mf"><div class="k">${esc(k)}</div><div class="v">${esc(v)}</div></div>`).join('');
-  const rows=(wd.roster||[]).map(r=>`<tr id="row-${esc(r.id)}"${r.ambiguous?' class="amb"':''}><td>${canEdit?`<span class="exp" title="제출 내용·시트 행 펼치기" onclick="toggleDetail('${esc(r.id)}')">▸</span> `:''}${esc(r.seq)}</td>`+
-    `<td>${canEdit&&r.editable!==false?`<span class="ecell${(r.editedFields||[]).includes('reviewer_name')?' edited':''}" data-val="${esc(r.name||'')}" onclick="beginEdit(this,'${r.id}','reviewer_name')">${esc(r.name||'—')}</span>`:esc(r.name||'—')}`+
-    `${r.source==='manual'?' <span class="src manual">수동</span>':(r.hasOrder?' <span class="src order">주문</span>':'')}${r.ambiguous?' <span class="src" style="background:var(--warn-soft);color:var(--warn)" title="중복 신원">⚠중복</span>':''}${(r.editedFields||[]).includes('reviewer_name')?` <span class="revb" onclick="event.stopPropagation();revertEdit('${r.id}','reviewer_name')">↩</span>`:''}</td>`+
-    `<td class="ph">${esc(r.phone8||'')}</td>`+
-    _tcell(r,'round',r.round)+_tcell(r,'option_text',r.option)+
-    _bcell(r,'is_submitted',r.submitted)+_bcell(r,'is_paid',r.paid)+
-    (canEdit?`<td>${r.source==='manual'||r.editable!==false?`<button class="rmrow" title="명단에서 제거(숨김)" onclick="hideRow('${r.id}')">×</button>`:''}</td>`:'')
-    +`</tr>`).join('')||`<tr><td colspan="${canEdit?8:7}" class="empty">명단 없음 — 그림자 투영을 실행하세요.</td></tr>`;
+  // 시트형 그리드 모드(master/admin, 시트 헤더 순서 수신 시): 시트와 동일한 가로 그리드로 렌더(열람 전용).
+  const gridMode = canEdit && Array.isArray(wd.headers) && wd.headers.length;
   const warn=[];
-  if(canEdit && c.hidden>0) warn.push(`<span class="wchip" onclick="showHidden()">숨김 ${c.hidden}</span>`);
-  if(canEdit && wd.orphanEdits && wd.orphanEdits.count>0) warn.push(`<span class="wchip bad" title="앵커가 현재 명단에 없는 편집 — 재투영/재정렬로 앵커행이 사라졌을 수 있음">미부착 편집 ${wd.orphanEdits.count}</span>`);
-  if(canEdit && c.ambiguous>0) warn.push(`<span class="wchip" title="중복 신원으로 편집 잠긴 행">중복 잠금 ${c.ambiguous}</span>`);
+  if(!gridMode && canEdit && c.hidden>0) warn.push(`<span class="wchip" onclick="showHidden()">숨김 ${c.hidden}</span>`);
+  if(!gridMode && canEdit && wd.orphanEdits && wd.orphanEdits.count>0) warn.push(`<span class="wchip bad" title="앵커가 현재 명단에 없는 편집">미부착 편집 ${wd.orphanEdits.count}</span>`);
+  if(canEdit && c.ambiguous>0) warn.push(`<span class="wchip" title="중복 신원 행">중복 신원 ${c.ambiguous}</span>`);
+  let tableSection;
+  if(gridMode){
+    tableSection = buildGrid(wd);
+  } else {
+    const rows=(wd.roster||[]).map(r=>`<tr id="row-${esc(r.id)}"${r.ambiguous?' class="amb"':''}><td>${canEdit?`<span class="exp" title="제출 내용·시트 행 펼치기" onclick="toggleDetail('${esc(r.id)}')">▸</span> `:''}${esc(r.seq)}</td>`+
+      `<td>${canEdit&&r.editable!==false?`<span class="ecell${(r.editedFields||[]).includes('reviewer_name')?' edited':''}" data-val="${esc(r.name||'')}" onclick="beginEdit(this,'${r.id}','reviewer_name')">${esc(r.name||'—')}</span>`:esc(r.name||'—')}`+
+      `${r.source==='manual'?' <span class="src manual">수동</span>':(r.hasOrder?' <span class="src order">주문</span>':'')}${r.ambiguous?' <span class="src" style="background:var(--warn-soft);color:var(--warn)" title="중복 신원">⚠중복</span>':''}${(r.editedFields||[]).includes('reviewer_name')?` <span class="revb" onclick="event.stopPropagation();revertEdit('${r.id}','reviewer_name')">↩</span>`:''}</td>`+
+      `<td class="ph">${esc(r.phone8||'')}</td>`+
+      _tcell(r,'round',r.round)+_tcell(r,'option_text',r.option)+
+      _bcell(r,'is_submitted',r.submitted)+_bcell(r,'is_paid',r.paid)+
+      (canEdit?`<td>${r.source==='manual'||r.editable!==false?`<button class="rmrow" title="명단에서 제거(숨김)" onclick="hideRow('${r.id}')">×</button>`:''}</td>`:'')
+      +`</tr>`).join('')||`<tr><td colspan="${canEdit?8:7}" class="empty">명단 없음 — 그림자 투영을 실행하세요.</td></tr>`;
+    tableSection = `<table><thead><tr><th>#</th><th>참여자</th><th>연락처</th><th>차수</th><th>옵션</th><th>제출</th><th>입금</th>${canEdit?'<th></th>':''}</tr></thead><tbody>${rows}</tbody></table>
+      ${canEdit?`<div id="addbox"></div><button class="btn" style="margin-top:10px" onclick="showAddForm()">＋ 참여자 추가</button>`:''}
+      ${canEdit?'<div class="editnote">편집은 이 화면(Track B)에만 저장됩니다 — 구글시트·주문은 바뀌지 않습니다(리허설). 셀 클릭으로 수정, ↩로 되돌리기.</div>':''}`;
+  }
   $('#main').innerHTML=`<div class="mh"><h1>${esc(STATE.cur.tabName)}</h1>
-    ${wd.maskPII?'<span class="bd">개인정보 마스킹(광고주)</span>':''}<span class="bd g">참여자 ${c.total||0}</span>${warn.join('')}
+    ${wd.maskPII?'<span class="bd">개인정보 마스킹(광고주)</span>':''}<span class="bd g">참여자 ${c.total||0}</span>${gridMode?'<span class="bd" title="구글시트와 동일 컬럼·가로 펼침 (열람 전용)">시트 그리드 · 열람</span>':''}${warn.join('')}
     ${isMaster?'<span class="sp" style="flex:1"></span><button class="btn" id="projBtn" onclick="projectCur()">그림자 투영(새로고침)</button>':''}</div>
     <div class="metagrid">${metaCards}</div>
     <div class="counts"><div class="cc"><div class="big">${c.total||0}</div><div class="lb">참여자</div></div><div class="cc s"><div class="big">${c.submitted||0}</div><div class="lb">제출완료</div></div><div class="cc p"><div class="big">${c.paid||0}</div><div class="lb">입금완료</div></div></div>
-    <table><thead><tr><th>#</th><th>참여자</th><th>연락처</th><th>차수</th><th>옵션</th><th>제출</th><th>입금</th>${canEdit?'<th></th>':''}</tr></thead><tbody>${rows}</tbody></table>
-    ${canEdit?`<div id="addbox"></div><button class="btn" style="margin-top:10px" onclick="showAddForm()">＋ 참여자 추가</button>`:''}
-    ${canEdit?'<div class="editnote">편집은 이 화면(Track B)에만 저장됩니다 — 구글시트·주문은 바뀌지 않습니다(리허설). 셀 클릭으로 수정, ↩로 되돌리기.</div>':''}`;
+    ${tableSection}`;
+}
+// 시트형 그리드: 왼쪽 고정 = 참여자/연락처(DB 리뷰어 신원) + # · 오른쪽 = 시트 컬럼 전체(시트 순서), 가로 스크롤.
+function buildGrid(wd){
+  const H=wd.headers||[];
+  const revI=H.indexOf('리뷰제출'), payI=H.indexOf('입금');
+  const thead=`<tr><th class="gfz gfz0">#</th><th class="gfz gfz1">참여자</th><th class="gfz gfz2">연락처</th>${H.map(h=>`<th>${esc(h)}</th>`).join('')}</tr>`;
+  const body=(wd.roster||[]).map(r=>{
+    const rj=(r.rowJson&&typeof r.rowJson==='object')?r.rowJson:{};
+    const badge = r.source==='manual'?' <span class="src manual">수동</span>':(r.hasOrder?' <span class="src order">주문</span>':'');
+    const cells=H.map((h,i)=>{ const v=rj[h]==null?'':String(rj[h]); const ok=((i===revI||i===payI)&&v)?' gok':''; return `<td class="gcell${v?'':' gempty'}${ok}">${esc(v)}</td>`; }).join('');
+    return `<tr><td class="gfz gfz0 gnum">${esc(r.seq)}</td><td class="gfz gfz1 gnm">${esc(r.name||'—')}${badge}</td><td class="gfz gfz2 gph">${esc(r.phone8||'')}</td>${cells}</tr>`;
+  }).join('')||`<tr><td class="gfz gfz0"></td><td class="gfz gfz1"></td><td class="gfz gfz2"></td><td colspan="${H.length}" class="empty">명단 없음 — 그림자 투영을 실행하세요.</td></tr>`;
+  return `<div class="gridscroll"><table class="sheetgrid"><thead>${thead}</thead><tbody>${body}</tbody></table></div>
+    <div class="editnote">구글시트와 동일한 컬럼·가로 배열의 <b>열람 전용</b> 그리드입니다(왼쪽 참여자·연락처 고정). 편집은 후속 반영 예정.</div>`;
 }
 function beginEdit(el, rowId, field){
   if(el.querySelector('input')) return;

@@ -404,6 +404,22 @@ async function workdeskTab({ sheetId, tabName, tabGid, role = 'master', advertis
       ordMap = new Map(ords.map(o => [String(o.id), o]));
     }
   }
+  // 시트형 그리드용: 시트 실제 헤더 순서(raw_sheet_tabs.detected_headers = 주문원장이 쓰는 열 순서 원본).
+  //   내부(master/admin)만. 없으면 폴백(row_json 키 — 길이순이라 시트순 아님, 최후수단).
+  let headers = null;
+  if (showEdits) {
+    const { rows: hh } = await db.query(
+      `SELECT detected_headers FROM raw_sheet_tabs
+        WHERE sheet_id=$1 AND (($2::text IS NOT NULL AND tab_gid=$2) OR tab_name=$3)
+        ORDER BY ($2::text IS NOT NULL AND tab_gid=$2) DESC LIMIT 1`,
+      [sheetId, tabGid, tabName]).catch(() => ({ rows: [] }));
+    const dh = hh[0] && hh[0].detected_headers;
+    if (Array.isArray(dh)) headers = [...new Set(dh.map(h => String(h == null ? '' : h).trim()).filter(Boolean))];
+    if ((!headers || !headers.length)) {
+      const rj = roster.find(r => r.row_json && typeof r.row_json === 'object' && Object.keys(r.row_json).length);
+      headers = rj ? Object.keys(rj.row_json).filter(k => k !== 'id') : [];
+    }
+  }
   // identity 중복 카운트(ambiguous 게이트, 윈도우 SQL 대신 JS Map)
   const identCount = new Map();
   for (const r of roster) {
@@ -466,7 +482,7 @@ async function workdeskTab({ sheetId, tabName, tabGid, role = 'master', advertis
     ambiguous: ambiguousCount, hidden: hiddenList.length,
   };
   const res = { role, maskPII, meta: meta[0] || {}, detail: wo[0] || null, counts, roster: out };
-  if (showEdits) { res.hiddenRows = hiddenList; res.orphanEdits = { count: orphanCount, byType: orphanByType }; }
+  if (showEdits) { res.hiddenRows = hiddenList; res.orphanEdits = { count: orphanCount, byType: orphanByType }; res.headers = headers || []; }
   return res;
 }
 
