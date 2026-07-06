@@ -118,6 +118,8 @@
 
 <script>
 const API_BASE = (function(){ if (window.REVIEW_API_URL) return window.REVIEW_API_URL; if (location.hostname==='localhost') return 'http://localhost:3000'; return 'https://sublime-magic-production-790b.up.railway.app'; })();
+// 토큰 핸드오프: admin.html에서 넘긴 raw_sso → sessionStorage(자동 로그인). raw-mirror.html과 동일 계약.
+(function initToken(){ try{ const raw=localStorage.getItem('raw_sso'); if(raw){ const sso=JSON.parse(raw); if(sso&&sso.token&&!sessionStorage.getItem('admin_token')) sessionStorage.setItem('admin_token', sso.token); } }catch(_){} })();
 function token(){ return sessionStorage.getItem('admin_token') || ''; }
 async function api(path, opts){ const o=Object.assign({headers:{}},opts||{}); o.headers['Authorization']='Bearer '+token(); if(o.body)o.headers['Content-Type']='application/json'; const r=await fetch(API_BASE+path,o); return r.json(); }
 const $=(s,el)=>(el||document).querySelector(s);
