@@ -1358,7 +1358,7 @@ function _reEditRenderFiles(){
     _reEditFiles.forEach(f => {
       const pend = pendById[f.fileId];
       html += '<div class="re-edit-card">' +
-        '<img src="' + _reEditImgUrl(f.fileId) + '" loading="lazy" onerror="this.onerror=null;this.src=\'' + _reEditThumb(f.fileId) + '\'">' +
+        '<img src="' + _reEditThumb(f.fileId) + '" loading="lazy" onerror="this.onerror=null;this.src=\'' + _reEditImgUrl(f.fileId) + '\'">' +
         '<div class="re-edit-cap">' + escHtml(f.slotLabel || '리뷰') + '</div>' +
         (pend
           ? '<div class="re-edit-pendtag">수정요청 검토중</div><button class="re-edit-cancel" onclick="_reEditCancel(\'' + pend.id + '\')">요청 취소</button>'
@@ -1379,7 +1379,7 @@ function _reEditStartReplace(oldFileId){
     '<button class="re-edit-back" onclick="_reEditRenderFiles()"><i class="fas fa-chevron-left"></i> 뒤로</button>' +
     '<div style="font-size:.8rem;color:#5B6472;margin:6px 0 10px">아래에 <b>올바른 이미지</b>를 선택하면 관리자에게 교체 요청이 전송됩니다. <span style="color:#98A0AC">(즉시 교체되지 않고 승인 후 반영)</span></div>' +
     '<div class="re-edit-compare">' +
-      '<div><div class="re-edit-lbl">현재</div><img src="' + _reEditImgUrl(oldFileId) + '" onerror="this.onerror=null;this.src=\'' + _reEditThumb(oldFileId) + '\'"></div>' +
+      '<div><div class="re-edit-lbl">현재</div><img src="' + _reEditThumb(oldFileId) + '" onerror="this.onerror=null;this.src=\'' + _reEditImgUrl(oldFileId) + '\'"></div>' +
       '<div class="re-edit-arrow"><i class="fas fa-arrow-right"></i></div>' +
       '<div><div class="re-edit-lbl">교체할 이미지</div><div id="reEditNewPrev" class="re-edit-newprev"><i class="fas fa-image"></i></div></div>' +
     '</div>' +

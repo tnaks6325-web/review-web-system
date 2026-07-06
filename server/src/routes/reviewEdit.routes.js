@@ -7,7 +7,7 @@
 //      (모든 탭 [리뷰] 폴더 밖 + 비리뷰형식 파일명 = 관리자 리뷰정리 도구가 승인 전 승격/링크 못 함;
 //       review_index / review_submissions 도 그대로 = 실제 리뷰 파일 미변경)
 //   3) 관리자(adminOrMaster)가 승인하면 그 때 비로소 파일 교체:
-//        새 파일을 [리뷰](또는 슬롯) 폴더로 이동 → DB 포인터 스왑 → 구 파일 휴지통 이동
+//        새 파일을 [리뷰](또는 슬롯) 폴더로 이동 → DB 포인터 스왑 → 구 파일 [리뷰교체보관]으로 이동(보관)
 //      반려하면 스테이징 새 파일을 휴지통 이동.
 //
 // 보안: /my-files·/request·/my-requests·/cancel 은 무인증이므로 phone8 정확일치
@@ -102,6 +102,30 @@ async function _resolveFolders(sheetId, tabName, slot) {
 
   const campaignLabel = cfg.display_name || cfg.campaign_name || tabName;
   return { reviewFolderId, targetFolderId, stagingFolderId: staging.id, campaignLabel };
+}
+
+/**
+ * 교체된 구 파일 "보관 전용" 폴더 확보 — 최상위 [리뷰교체보관].
+ *   휴지통 폐기가 아니라 원본 보존이 목적. 모든 탭 [리뷰] 폴더 밖이라 report/폴더점검이 안 셈.
+ */
+async function _resolveArchiveFolder() {
+  const rootFolderId = process.env.AI_REVIEW_FOLDER_ID || process.env.DRIVE_ROOT_FOLDER_ID;
+  if (!rootFolderId) throw new Error('AI_REVIEW_FOLDER_ID 미설정');
+  const f = await driveService.getOrCreateSubFolder(rootFolderId, '[리뷰교체보관]');
+  return f.id;
+}
+
+/**
+ * 보관 파일명 규칙: 교체전_{yyyyMMdd_HHmmss}_{리뷰어}_{캠페인/탭}_행{행번호}.{확장자}
+ *   - "교체전_" 표식(비리뷰형식이라 리뷰정리 도구가 승격 안 함)
+ *   - 승인(교체) 시각(KST)로 정렬 가능 + 리뷰어/캠페인/행으로 역추적 가능
+ */
+function _archiveName(r, origName) {
+  const ext = (String(origName || '').match(/\.([A-Za-z0-9]+)$/) || [, 'jpg'])[1];
+  const clean = (s) => String(s || '').replace(/[\/\\:*?"<>|]/g, '_').replace(/\s+/g, '').slice(0, 24);
+  const kst = new Date(Date.now() + 9 * 3600 * 1000);
+  const ts = kst.toISOString().replace(/[-:T]/g, '').slice(0, 15).replace(/^(\d{8})(\d{6}).*/, '$1_$2');
+  return `교체전_${ts}_${clean(r.reviewer_name || '익명')}_${clean(r.campaign_label || r.tab_name)}_행${r.row_index || 0}.${ext}`;
 }
 
 // ═══════════════════════════════════════════════════════════
@@ -348,7 +372,7 @@ router.get('/list', authMiddleware, adminOrMasterMiddleware, async (req, res) =>
 
 // POST /api/review-edit/approve  body: { id, note? }
 //   ★ Drive 연산(비트랜잭셔널)은 트랜잭션 "밖"에서 먼저(멱등) 수행하고, 짧은 트랜잭션에서만
-//     FOR UPDATE 재검증 + DB 포인터 스왑 + 상태확정 → 커밋 → 구 파일 휴지통(커밋 후·비치명적).
+//     FOR UPDATE 재검증 + DB 포인터 스왑 + 상태확정 → 커밋 → 구 파일 [리뷰교체보관] 이동(커밋 후·비치명적).
 //   → Drive 왕복 동안 커넥션/행 락을 잡지 않는다(스타베이션 방지). 이동/이름변경은 재시도 안전.
 router.post('/approve', authMiddleware, adminOrMasterMiddleware, async (req, res) => {
   const { id, note } = req.body;
@@ -423,11 +447,20 @@ router.post('/approve', authMiddleware, adminOrMasterMiddleware, async (req, res
       client.release();
     }
 
-    // 4) 구 파일 휴지통 이동(커밋 후·비치명적 — 복구 가능)
+    // 4) 구 파일: 휴지통이 아니라 [리뷰교체보관] 폴더로 이동 + 규칙 파일명(보관 목적, 커밋 후·비치명적)
     try {
-      if (committed.old_file_id) await driveService.trashFiles([{ id: committed.old_file_id, name: committed.old_file_name || '' }]);
+      if (committed.old_file_id) {
+        const archiveId = await _resolveArchiveFolder();
+        const oldMeta = await driveService.getFileParents(committed.old_file_id);
+        const oldParents = Array.isArray(oldMeta.parents) ? oldMeta.parents : [];
+        if (!oldParents.includes(archiveId)) {
+          await driveService.moveFile(committed.old_file_id, archiveId, oldParents.join(',') || undefined);
+        }
+        try { await driveService.renameFile(committed.old_file_id, _archiveName(committed, committed.old_file_name)); }
+        catch (e) { logger.warn(`[review-edit] 보관 파일 rename 실패(무시): ${e.message}`); }
+      }
     } catch (e) {
-      logger.warn(`[review-edit] 구 파일 휴지통 실패(무시): ${e.message}`);
+      logger.warn(`[review-edit] 구 파일 보관 이동 실패(무시): ${e.message}`);
     }
 
     // 5) 관리자 위젯 실시간 갱신
