@@ -167,9 +167,12 @@ async function parityReport({ sheetId, tabName } = {}) {
        FROM campaign_participants WHERE sheet_id=$1 AND tab_name=$2 AND deleted_at IS NULL AND active = TRUE`,
     [sheetId, tabName]);
   // 편집된 앵커의 phone8 집합 → classifyParity가 그 행의 A↔B 차이를 real 아닌 benign(BD-8)로 분류.
+  //   ★ parity가 실제 비교하는 필드(제출/입금/차수/이름)의 편집만 집계 — col:* 등 미비교 컬럼 편집이
+  //     진짜 상태 불일치를 benign으로 가리지 못하게(전환 게이트 약화 방지).
   const { rows: edRows } = await db.query(
     `SELECT DISTINCT anchor_type, anchor_value FROM participant_edits
-      WHERE sheet_id=$1 AND tab_name=$2 AND reverted_at IS NULL`, [sheetId, tabName]).catch(() => ({ rows: [] }));
+      WHERE sheet_id=$1 AND tab_name=$2 AND reverted_at IS NULL
+        AND field IN ('reviewer_name','is_submitted','is_paid','round')`, [sheetId, tabName]).catch(() => ({ rows: [] }));
   const editedAnchors = new Set(edRows.map(e => e.anchor_type + ' ' + e.anchor_value));
   const editedKeys = new Set();
   if (editedAnchors.size) {
@@ -465,6 +468,9 @@ async function workdeskTab({ sheetId, tabName, tabGid, role = 'master', advertis
       // 실 데이터 전량 투영: 시트 행 전체(row_json) + 제출 구매양식 원본(order). 상세 펼침용.
       syn.rowJson = (r.row_json && typeof r.row_json === 'object') ? r.row_json : null;
       syn.order = r.order_submission_id ? (ordMap.get(String(r.order_submission_id)) || null) : null;
+      // 시트 컬럼 편집(col:<헤더>) 오버레이 → 그리드 셀 합성용 {헤더: 값}. 앵커 게이트(ambiguous면 ov={}이라 자동 미적용).
+      const ce = {}; for (const k in ov) { if (k.indexOf('col:') === 0) ce[k.slice(4)] = ov[k]; }
+      syn.cellEdits = ce;
     }
     out.push(syn);
   }
@@ -486,25 +492,49 @@ async function workdeskTab({ sheetId, tabName, tabGid, role = 'master', advertis
   return res;
 }
 
+// 시트 컬럼(col:<헤더>) 편집 허용 검증 — 그리드 표시와 동일 소스로 "실재 컬럼"만 허용(임의 컬럼·인젝션 차단).
+//   ★ 그리드 헤더와 정합: gid-우선 detected_headers → NULL이면 그 행 row_json 키 폴백(workdeskTab 헤더 산출과 동형).
+//   client(in-tx)로 조회해 잠근 행 문맥과 일관. tabGid 없거나 동명탭이면 gid 우선, 그다음 tab_name.
+async function _isTabColumn(client, sheetId, tabName, tabGid, colName, rowJson) {
+  if (!colName) return false;
+  const { rows } = await client.query(
+    `SELECT detected_headers FROM raw_sheet_tabs
+      WHERE sheet_id=$1 AND (($2::text IS NOT NULL AND tab_gid=$2) OR tab_name=$3)
+      ORDER BY ($2::text IS NOT NULL AND tab_gid=$2) DESC LIMIT 1`,
+    [sheetId, tabGid, tabName]).catch(() => ({ rows: [] }));
+  const dh = rows[0] && rows[0].detected_headers;
+  if (Array.isArray(dh) && dh.some(h => String(h == null ? '' : h).trim() === colName)) return true;
+  return !!(rowJson && typeof rowJson === 'object' && Object.prototype.hasOwnProperty.call(rowJson, colName));
+}
+
 // ── 통합 작업대 편집(오버레이-only, 물리컬럼 무편집) ──
 //   앵커: order_submission_id(불변 UUID) > manual(물리행 UUID, 재투영 면역) > identity_key(중복 아니면) > 거부.
 //   단일 tx + 대상행 FOR UPDATE(동일행 직렬화) + revert(활성)→insert(신규, append-only 감사).
 //   부분유니크 uq_participant_edits_active 가 cross-row 레이스 backstop(23505 → concurrent_edit_conflict).
+//   field: 물리필드(_EDIT_FIELD_KIND) 또는 'col:<시트헤더>'(그 탭 실재 컬럼만, text 오버레이) — 물리컬럼 무접촉.
 async function editWorkdeskRow({ sheetId, tabName, rowId, field, value, by = 'admin' } = {}) {
   if (!sheetId || !tabName || !rowId || !field) throw new Error('editWorkdeskRow: 필수 인자 누락');
-  const kind = _EDIT_FIELD_KIND[field];
-  if (!kind) return { ok: false, error: 'field_not_editable', field };
+  let kind = _EDIT_FIELD_KIND[field];
+  const isCol = !kind && typeof field === 'string' && field.startsWith('col:');
+  if (!kind && !isCol) return { ok: false, error: 'field_not_editable', field };
   const db = getPool();
   const client = await db.connect();
   try {
     await client.query('BEGIN');
     const { rows: pr } = await client.query(
-      `SELECT id, source, order_submission_id, identity_key, phone8, recipient_name, option_text, row_json
+      `SELECT id, source, order_submission_id, identity_key, phone8, recipient_name, option_text, row_json, tab_gid
          FROM campaign_participants
         WHERE id=$1 AND sheet_id=$2 AND tab_name=$3 AND deleted_at IS NULL FOR UPDATE`,
       [rowId, sheetId, tabName]);
     if (!pr.length) { await client.query('ROLLBACK'); return { ok: false, error: 'row_not_found' }; }
     const row = pr[0];
+    // col:<헤더> 는 잠근 행 문맥으로 실재 컬럼 검증(그리드 표시와 동일 소스). 미실재면 거부(표시=수락 정합).
+    if (isCol) {
+      if (!await _isTabColumn(client, sheetId, tabName, row.tab_gid, field.slice(4), row.row_json)) {
+        await client.query('ROLLBACK'); return { ok: false, error: 'field_not_editable', field };
+      }
+      kind = 'text';
+    }
     let anchorType, anchorValue;
     if (row.order_submission_id) { anchorType = 'order'; anchorValue = String(row.order_submission_id); }
     else if (row.source === 'manual') { anchorType = 'manual'; anchorValue = String(row.id); }
@@ -525,7 +555,7 @@ async function editWorkdeskRow({ sheetId, tabName, rowId, field, value, by = 'ad
     }
     let vBool = null, vText = null;
     if (kind === 'bool') vBool = (value === true || value === 'true' || value === 1 || value === '1');
-    else vText = field === 'phone8' ? (_phone8(value) || '') : (value == null ? '' : String(value));
+    else vText = field === 'phone8' ? (_phone8(value) || '') : (value == null ? '' : String(value).slice(0, 2000));
     await client.query(
       `UPDATE participant_edits SET reverted_at=NOW(), reverted_by=$1
         WHERE sheet_id=$2 AND tab_name=$3 AND anchor_type=$4 AND anchor_value=$5 AND field=$6 AND reverted_at IS NULL`,

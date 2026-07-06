@@ -35,9 +35,11 @@ function makeConnectPool(scn) {
       if (/FROM campaign_participants WHERE id=\$1 .* FOR UPDATE/.test(s)) return { rows: scn.row ? [scn.row] : [] };
       if (/UPDATE campaign_participants SET identity_key/.test(s)) return { rows: [] };
       if (/COUNT\(\*\)::int AS n FROM campaign_participants/.test(s)) return { rows: [{ n: scn.dupCount || 1 }] };
+      if (/FROM raw_sheet_tabs/.test(s)) return { rows: scn.detectedHeaders ? [{ detected_headers: scn.detectedHeaders }] : [] };
       if (/UPDATE participant_edits SET reverted_at/.test(s)) return { rows: [] };
       if (/INSERT INTO participant_edits/.test(s)) {
         if (scn.insertThrows) { const e = new Error('dup'); e.code = '23505'; throw e; }
+        scn._ins = params;   // 마지막 insert 파라미터 캡처(검증용)
         return { rows: [{ id: 42 }] };
       }
       return { rows: [] };
@@ -158,7 +160,25 @@ async function run() {
   e = await svc.editWorkdeskRow({ sheetId: 's', tabName: 'T', rowId: 'r1', field: 'round', value: '1' });
   assert.ok(!e.ok && e.error === 'concurrent_edit_conflict', '3i: 부분유니크 위반 → concurrent_edit_conflict');
   assert.ok(cp.q.some(x => /^ROLLBACK/.test(x.s)), '3i2: 실패 시 ROLLBACK');
-  console.log('  3. editWorkdeskRow — 앵커 우선순위·거부·bool분리·레이스 backstop ✓');
+  // 3j: col:<헤더> — detected_headers 에 실재하면 text 오버레이로 수락
+  cp = makeConnectPool({ row: { id: 'r1', source: 'manual', order_submission_id: null, identity_key: null, phone8: '1', recipient_name: null, option_text: null, row_json: {}, tab_gid: '9' }, detectedHeaders: ['번호', '주소', '수취인'] });
+  svc.__setPoolForTest(cp);
+  e = await svc.editWorkdeskRow({ sheetId: 's', tabName: 'T', rowId: 'r1', field: 'col:주소', value: '서울 …', by: 'm' });
+  assert.ok(e.ok && e.anchorType === 'manual' && e.field === 'col:주소', '3j: 실재 시트컬럼 col: 수락');
+  const insC = cp.q.find(x => /INSERT INTO participant_edits/.test(x.s));
+  assert.equal(insC.params[4], 'col:주소', '3j2: field=col:주소 저장'); assert.equal(insC.params[5], 'text', '3j3: kind=text');
+  // 3k: col:<헤더> — detected_headers 에도 없고 row_json 키에도 없으면 거부
+  cp = makeConnectPool({ row: { id: 'r1', source: 'manual', order_submission_id: null, identity_key: null, phone8: '1', recipient_name: null, option_text: null, row_json: { 번호: '1' }, tab_gid: '9' }, detectedHeaders: ['번호', '주소'] });
+  svc.__setPoolForTest(cp);
+  e = await svc.editWorkdeskRow({ sheetId: 's', tabName: 'T', rowId: 'r1', field: 'col:없는컬럼', value: 'x' });
+  assert.ok(!e.ok && e.error === 'field_not_editable', '3k: 미실재 col: 컬럼 거부');
+  assert.ok(cp.q.some(x => /^ROLLBACK/.test(x.s)), '3k2: 거부 시 ROLLBACK');
+  // 3l: detected_headers NULL 이어도 그 행 row_json 키에 있으면 수락(그리드 폴백 정합)
+  cp = makeConnectPool({ row: { id: 'r1', source: 'manual', order_submission_id: null, identity_key: null, phone8: '1', recipient_name: null, option_text: null, row_json: { 비고: '메모' }, tab_gid: '9' } });
+  svc.__setPoolForTest(cp);
+  e = await svc.editWorkdeskRow({ sheetId: 's', tabName: 'T', rowId: 'r1', field: 'col:비고', value: 'y' });
+  assert.ok(e.ok && e.field === 'col:비고', '3l: detected_headers NULL → row_json 키 폴백 수락');
+  console.log('  3. editWorkdeskRow — 앵커·거부·bool분리·레이스 + col:시트컬럼 검증 ✓');
 
   // ═══ 4. classifyParity editedKeys → BD-8 benign(하위호환 기본 Set) ═══
   const A = [{ phone8: '11112222', name: 'A', submitted: false, paid: false, round: '1' }];
