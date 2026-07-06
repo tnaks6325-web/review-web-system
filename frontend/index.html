@@ -498,8 +498,14 @@
   .ovl{ position:fixed; inset:0; background:rgba(25,31,40,.45); z-index:400; display:none; align-items:flex-end; justify-content:center; }
   .ovl.on{ display:flex; }
   /* ===== 리뷰 이미지 확인·수정요청 ===== */
-  .re-edit-cardbtn{ width:100%; margin:-4px 0 8px; padding:9px; background:#F2F7FF; color:#1b64da; border:1px solid #d6e6ff; border-radius:10px; font-size:.78rem; font-weight:700; cursor:pointer; display:flex; align-items:center; justify-content:center; gap:6px; }
-  .re-edit-cardbtn:active{ background:#e3eeff; }
+  /* 제출완료 카드: 본문(rc-main) + 하단 구분선 액션을 카드 안에 한 몸으로 */
+  .result-card.has-editfoot{ flex-direction:column; align-items:stretch; padding:0; gap:0; overflow:hidden; }
+  .result-card.has-editfoot .rc-main{ display:flex; align-items:center; gap:10px; padding:12px 14px; }
+  .re-edit-cardbtn{ width:100%; padding:12px; background:none; color:#1b64da; border:none; border-top:1px solid #EFEFF3; border-radius:0; font-size:.77rem; font-weight:700; cursor:pointer; display:flex; align-items:center; justify-content:center; gap:7px; font-family:inherit; }
+  .re-edit-cardbtn i{ font-size:.85rem; }
+  .re-edit-cardbtn:hover{ background:#f7faff; }
+  .re-edit-cardbtn:active{ background:#eef4ff; }
+  .re-edit-cardbtn:focus-visible{ outline:2px solid #3182f6; outline-offset:-3px; }
   .re-edit-minibtn{ flex-shrink:0; background:#F2F7FF; color:#1b64da; border:1px solid #d6e6ff; border-radius:8px; font-size:.66rem; font-weight:700; padding:2px 8px; cursor:pointer; }
   .re-edit-sheet{ background:#fff; border-radius:24px 24px 0 0; width:100%; max-width:440px; max-height:88vh; overflow-y:auto; padding:8px 20px 26px; animation:obIn .3s cubic-bezier(.2,.8,.2,1); }
   .re-edit-head{ display:flex; align-items:center; justify-content:space-between; font-size:1rem; font-weight:800; letter-spacing:-.02em; padding:14px 0 4px; position:sticky; top:0; background:#fff; }
@@ -1179,18 +1185,23 @@ function renderReviewSubTab() {
            <div class="result-product-label ${doneDate ? '' : 'result-product-empty'}">${doneDate ? `<span style="color:var(--t4)">제출 ${doneDate}</span>` : '참여 작업 정보 없음'}</div>`;
 
       const card = document.createElement("div");
-      card.className = "result-card" + (isDone ? " done" : "");
-      card.innerHTML = `
+      card.className = "result-card" + (isDone ? " done has-editfoot" : "");
+      const _rowHtml = `
         <div class="result-avatar"><i class="fas ${isDone ? 'fa-check' : 'fa-user'}" style="font-size:.8rem;color:${isDone ? 'var(--ok)' : 'var(--p)'}"></i></div>
         <div class="result-body">${productHtml}</div>
         <div class="result-right">
           ${badgeHtml}
           ${isDone ? '' : '<i class="fas fa-chevron-right result-chevron"></i>'}
         </div>`;
-      if (!isDone) card.addEventListener("click", () => goToSubmit(items));
+      if (isDone) {
+        // 제출완료 카드: 본문(rc-main) + 하단 구분선 액션(이미지 확인·수정요청)을 카드 안 한 몸으로
+        card.innerHTML = `<div class="rc-main">${_rowHtml}</div>`;
+        card.appendChild(_reEditButtonEl(item));
+      } else {
+        card.innerHTML = _rowHtml;
+        card.addEventListener("click", () => goToSubmit(items));
+      }
       listEl.appendChild(card);
-      // 제출완료 카드: 제출 이미지 확인 + 잘못 올린 파일 수정요청 버튼
-      if (isDone) listEl.appendChild(_reEditButtonEl(item));
     } else {
       // 다건 그룹 카드
       const groupCard = document.createElement("div");
