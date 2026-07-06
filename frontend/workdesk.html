@@ -1,0 +1,250 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>통합 작업대 (Track B · 그림자)</title>
+<style>
+  :root{
+    --paper:#F4F6F7;--card:#FFFFFF;--card2:#EEF2F3;--ink:#15232A;--muted:#5C6B72;--faint:#8A979D;
+    --line:#DDE4E6;--line2:#C9D3D6;--accent:#127C8A;--accent-soft:#E1F0F1;
+    --safe:#2E7D64;--safe-soft:#E2F1EA;--warn:#A9721E;--warn-soft:#F5EBD8;--bad:#BB4E37;--bad-soft:#F7E5E0;
+    --mono:'SF Mono','JetBrains Mono',ui-monospace,monospace;
+    --sans:'Pretendard','Apple SD Gothic Neo','Malgun Gothic',system-ui,-apple-system,sans-serif;
+  }
+  *{box-sizing:border-box}
+  body{margin:0;background:var(--paper);color:var(--ink);font-family:var(--sans);font-size:14px;line-height:1.5}
+  .top{display:flex;align-items:center;gap:12px;padding:11px 18px;background:var(--card);border-bottom:1px solid var(--line);position:sticky;top:0;z-index:5}
+  .top .logo{font-weight:800;letter-spacing:-.02em;font-size:15px}
+  .top .logo .tag{font-size:10px;font-weight:700;color:var(--accent);background:var(--accent-soft);padding:2px 8px;border-radius:999px;margin-left:8px;letter-spacing:.03em}
+  .top .sp{flex:1}
+  .rolebadge{font-size:11px;font-weight:750;padding:4px 11px;border-radius:999px;background:var(--accent-soft);color:var(--accent)}
+  .btn{font:inherit;font-size:12px;font-weight:650;padding:6px 12px;border-radius:8px;border:1px solid var(--line2);background:var(--card);color:var(--ink);cursor:pointer}
+  .btn:hover{background:var(--card2)}
+  .btn.pri{background:var(--accent);color:#fff;border-color:var(--accent)}
+  .btn:disabled{opacity:.5;cursor:default}
+  .wrap{display:grid;grid-template-columns:230px 1fr 240px;min-height:calc(100vh - 49px)}
+  @media(max-width:900px){.wrap{grid-template-columns:1fr}.side,.rail{display:none}.wrap.showlist .main{display:none}.wrap.showlist .side{display:block}}
+  .side{border-right:1px solid var(--line);background:var(--card);padding:12px 10px;overflow:auto}
+  .side .sh{font-size:10px;font-weight:750;letter-spacing:.05em;text-transform:uppercase;color:var(--faint);margin:6px 6px 8px;display:flex;justify-content:space-between}
+  .titem{font-size:12.5px;padding:8px 10px;border-radius:8px;margin-bottom:3px;color:var(--muted);cursor:pointer;border:1px solid transparent;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+  .titem:hover{background:var(--card2)}
+  .titem.on{background:var(--accent-soft);border-color:color-mix(in srgb,var(--accent) 30%,transparent);color:var(--ink);font-weight:650}
+  .titem .sub{font-size:10.5px;color:var(--faint);font-weight:400}
+  .main{padding:18px 22px;overflow:auto}
+  .mh{display:flex;align-items:center;gap:10px;flex-wrap:wrap;margin-bottom:14px}
+  .mh h1{font-size:19px;margin:0;font-weight:800;letter-spacing:-.02em}
+  .bd{font-size:10.5px;font-weight:700;padding:3px 9px;border-radius:6px;background:var(--card2);color:var(--muted);border:1px solid var(--line)}
+  .bd.g{background:var(--safe-soft);color:var(--safe);border-color:transparent}
+  .metagrid{display:grid;grid-template-columns:repeat(auto-fill,minmax(150px,1fr));gap:9px;margin-bottom:16px}
+  .mf{background:var(--card);border:1px solid var(--line);border-radius:9px;padding:9px 11px}
+  .mf .k{font-size:10px;color:var(--faint);text-transform:uppercase;letter-spacing:.03em}
+  .mf .v{font-size:13px;font-weight:600;margin-top:2px}
+  .counts{display:flex;gap:10px;margin-bottom:14px;flex-wrap:wrap}
+  .cc{flex:1;min-width:90px;background:var(--card);border:1px solid var(--line);border-radius:10px;padding:11px 13px;text-align:center}
+  .cc .big{font-size:22px;font-weight:800;letter-spacing:-.02em}
+  .cc .lb{font-size:11px;color:var(--muted);margin-top:1px}
+  .cc.s .big{color:var(--safe)}.cc.p .big{color:var(--accent)}
+  table{width:100%;border-collapse:collapse;font-size:12.5px;background:var(--card);border:1px solid var(--line);border-radius:10px;overflow:hidden}
+  thead th{background:var(--card2);text-align:left;padding:9px 11px;font-size:10.5px;text-transform:uppercase;letter-spacing:.03em;color:var(--muted);font-weight:750}
+  tbody td{padding:9px 11px;border-top:1px solid var(--line)}
+  tbody tr:hover{background:var(--card2)}
+  .chk{font-weight:800}.chk.y{color:var(--safe)}.chk.n{color:var(--faint)}
+  .ph{font-family:var(--mono);font-size:11.5px;color:var(--muted)}
+  .src{font-size:10px;font-weight:700;padding:1px 6px;border-radius:5px;background:var(--card2);color:var(--faint)}
+  .src.manual{background:var(--warn-soft);color:var(--warn)}
+  .src.order{background:var(--accent-soft);color:var(--accent)}
+  .rail{border-left:1px solid var(--line);background:var(--card);padding:14px 12px;overflow:auto}
+  .rail .sh{font-size:10px;font-weight:750;letter-spacing:.05em;text-transform:uppercase;color:var(--faint);margin:2px 2px 10px}
+  .parity{border:1px solid var(--line);border-radius:10px;padding:12px;margin-bottom:14px}
+  .pbar{display:flex;height:8px;border-radius:5px;overflow:hidden;margin:8px 0}
+  .pbar i{display:block}.pbar .m{background:var(--safe)}.pbar .b{background:var(--warn)}.pbar .r{background:var(--bad)}
+  .plegend{display:flex;flex-direction:column;gap:5px;font-size:11.5px}
+  .plegend .row{display:flex;justify-content:space-between}
+  .plegend .dot{display:inline-block;width:8px;height:8px;border-radius:2px;margin-right:6px}
+  .verdict{font-size:12px;font-weight:750;padding:8px 10px;border-radius:8px;margin-top:8px;text-align:center}
+  .verdict.pass{background:var(--safe-soft);color:var(--safe)}
+  .verdict.fail{background:var(--bad-soft);color:var(--bad)}
+  .cmt{font-size:11px;background:var(--card2);border:1px solid var(--line);border-radius:8px;padding:8px 10px;margin-bottom:6px;color:var(--muted)}
+  .empty{color:var(--faint);font-size:13px;text-align:center;padding:40px 10px}
+  .loginbox{max-width:320px;margin:80px auto;background:var(--card);border:1px solid var(--line);border-radius:14px;padding:28px;box-shadow:0 8px 28px rgba(20,35,42,.08)}
+  .loginbox h2{margin:0 0 14px;font-size:18px}
+  .loginbox input{width:100%;padding:9px 12px;border:1px solid var(--line2);border-radius:8px;margin-bottom:9px;font:inherit}
+  .loginbox .err{color:var(--bad);font-size:12px;margin-top:6px;min-height:16px}
+  .note{font-size:11px;color:var(--faint);margin-top:10px;line-height:1.5}
+</style>
+</head>
+<body>
+<div id="app"></div>
+
+<script>
+const API_BASE = (function(){
+  if (window.REVIEW_API_URL) return window.REVIEW_API_URL;
+  if (location.hostname === 'localhost') return 'http://localhost:3000';
+  return 'https://sublime-magic-production-790b.up.railway.app';
+})();
+function token(){ return sessionStorage.getItem('admin_token') || ''; }
+async function api(path, opts){
+  const o = Object.assign({ headers:{} }, opts||{});
+  o.headers['Authorization'] = 'Bearer ' + token();
+  if (o.body) o.headers['Content-Type'] = 'application/json';
+  const r = await fetch(API_BASE + path, o);
+  return r.json();
+}
+const $ = (s,el)=> (el||document).querySelector(s);
+const esc = s => String(s==null?'':s).replace(/[&<>"]/g, c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
+
+let STATE = { role:'', name:'', tabs:[], cur:null };
+
+// ── 로그인 게이트 ──
+async function boot(){
+  if (!token()) return renderLogin();
+  // 토큰 유효성 + 역할 파악: 활성 탭 목록 시도(참여자 tabs는 master 전용). 실패 시 workdesk만.
+  const me = parseJwt(token());
+  STATE.role = me.role || ''; STATE.name = me.name || '';
+  renderShell();
+  await loadTabs();
+}
+function parseJwt(t){ try{ return JSON.parse(atob(t.split('.')[1])); }catch(_){ return {}; } }
+
+function renderLogin(){
+  document.getElementById('app').innerHTML = `
+    <div class="loginbox">
+      <h2>통합 작업대 로그인</h2>
+      <input id="lname" placeholder="아이디 (master / admin)" autocomplete="username">
+      <input id="lpw" type="password" placeholder="비밀번호" autocomplete="current-password">
+      <button class="btn pri" style="width:100%;padding:9px" onclick="doLogin()">로그인</button>
+      <div class="err" id="lerr"></div>
+      <div class="note">Track B 그림자 화면입니다. 관리자(master/admin)로 로그인하면 통합 작업대(읽기)와 parity 리포트를 봅니다. 광고주는 별도 로그인 시 본인 캠페인만 열립니다.</div>
+    </div>`;
+  $('#lpw').addEventListener('keydown', e=>{ if(e.key==='Enter') doLogin(); });
+}
+async function doLogin(){
+  const name = $('#lname').value.trim(), pw = $('#lpw').value;
+  const r = await api('/api/admin/login', { method:'POST', body: JSON.stringify({ name, pw }) });
+  if (r && r.success && r.token){ sessionStorage.setItem('admin_token', r.token); boot(); }
+  else $('#lerr').textContent = (r && (r.error||r.message)) || '로그인 실패';
+}
+
+function renderShell(){
+  const isMaster = STATE.role === 'master';
+  document.getElementById('app').innerHTML = `
+    <div class="top">
+      <span class="logo">통합 작업대 <span class="tag">TRACK B · 그림자</span></span>
+      <span class="sp"></span>
+      <span class="rolebadge">${esc(STATE.role||'?')}${STATE.name?(' · '+esc(STATE.name)):''}</span>
+      ${isMaster?'<button class="btn" id="projBtn" onclick="projectCur()">그림자 투영(새로고침)</button>':''}
+      <button class="btn" onclick="logout()">로그아웃</button>
+    </div>
+    <div class="wrap showlist" id="wrap">
+      <div class="side">
+        <div class="sh"><span>작업 목록</span><span id="tcount"></span></div>
+        <div id="tabs"><div class="empty">불러오는 중…</div></div>
+      </div>
+      <div class="main" id="main"><div class="empty">왼쪽에서 작업을 선택하세요.</div></div>
+      <div class="rail" id="rail"></div>
+    </div>`;
+}
+function logout(){ sessionStorage.removeItem('admin_token'); boot(); }
+
+async function loadTabs(){
+  // 활성 탭 목록(master 전용 /participants/tabs 재사용). admin은 목록 API 접근 제한될 수 있어 안내.
+  const r = await api('/api/participants/tabs?limit=300');
+  if (!r || !r.ok){ $('#tabs').innerHTML = `<div class="empty">작업 목록은 master 로그인에서 제공됩니다.<br>(admin은 작업 링크로 진입)</div>`; return; }
+  STATE.tabs = r.tabs || [];
+  $('#tcount').textContent = STATE.tabs.length;
+  $('#tabs').innerHTML = STATE.tabs.map((t,i)=>`
+    <div class="titem" data-i="${i}" onclick="selTab(${i})">
+      ${esc(t.tabName)}<div class="sub">${esc(t.spreadsheetTitle||'')}</div>
+    </div>`).join('') || `<div class="empty">활성 작업 없음</div>`;
+}
+
+async function selTab(i){
+  const t = STATE.tabs[i]; STATE.cur = t;
+  document.querySelectorAll('.titem').forEach(el=>el.classList.toggle('on', +el.dataset.i===i));
+  $('#wrap').classList.remove('showlist');
+  $('#main').innerHTML = `<div class="empty">불러오는 중…</div>`;
+  const q = `sheetId=${encodeURIComponent(t.sheetId)}&tabName=${encodeURIComponent(t.tabName)}&tabGid=${encodeURIComponent(t.tabGid||'')}`;
+  const wd = await api('/api/trackb/workdesk?'+q);
+  renderWorkdesk(wd);
+  loadParity(t);
+}
+
+function renderWorkdesk(wd){
+  if (!wd || !wd.ok){ $('#main').innerHTML = `<div class="empty">${esc((wd&&wd.error)||'조회 실패')}</div>`; return; }
+  const d = wd.detail || {}, m = wd.meta || {}, c = wd.counts || {};
+  const metaCards = [
+    ['상품', d.productOption || m.campaignName || '—'],
+    ['모집', (d.recruitCount||'—') + (m.manager?(' · '+m.manager):'')],
+    ['구매시간', d.purchaseTime || '자율'],
+    ['배송', d.deliveryType || m.deliveryType || '—'],
+  ].map(([k,v])=>`<div class="mf"><div class="k">${esc(k)}</div><div class="v">${esc(v)}</div></div>`).join('');
+  const rows = (wd.roster||[]).map(r=>`
+    <tr>
+      <td>${esc(r.seq)}</td>
+      <td>${esc(r.name||'—')}${r.source==='manual'?' <span class="src manual">수동</span>':(r.hasOrder?' <span class="src order">주문</span>':'')}</td>
+      <td class="ph">${esc(r.phone8||'')}</td>
+      <td>${esc(r.round||'')}</td>
+      <td>${esc(r.option||'')}</td>
+      <td><span class="chk ${r.submitted?'y':'n'}">${r.submitted?'✓':'–'}</span></td>
+      <td><span class="chk ${r.paid?'y':'n'}">${r.paid?'✓':'–'}</span></td>
+    </tr>`).join('') || `<tr><td colspan="7" class="empty">명단 없음 — 그림자 투영을 실행하세요.</td></tr>`;
+  $('#main').innerHTML = `
+    <div class="mh"><h1>${esc(STATE.cur.tabName)}</h1>
+      ${wd.maskPII?'<span class="bd">개인정보 마스킹(광고주)</span>':''}
+      <span class="bd g">참여자 ${c.total||0}</span></div>
+    <div class="metagrid">${metaCards}</div>
+    <div class="counts">
+      <div class="cc"><div class="big">${c.total||0}</div><div class="lb">참여자</div></div>
+      <div class="cc s"><div class="big">${c.submitted||0}</div><div class="lb">제출완료</div></div>
+      <div class="cc p"><div class="big">${c.paid||0}</div><div class="lb">입금완료</div></div>
+    </div>
+    <table>
+      <thead><tr><th>#</th><th>참여자</th><th>연락처</th><th>차수</th><th>옵션</th><th>제출</th><th>입금</th></tr></thead>
+      <tbody>${rows}</tbody>
+    </table>`;
+}
+
+async function loadParity(t){
+  const rail = $('#rail'); if (!rail) return;
+  rail.innerHTML = `<div class="sh">Parity (B ↔ 현행)</div><div class="empty" style="padding:14px">확인 중…</div>
+    <div class="sh" style="margin-top:16px">소통</div>
+    <div class="cmt">역할 간 코멘트 레인 (후속: 3채널 통합)</div>`;
+  const p = await api(`/api/trackb/parity?sheetId=${encodeURIComponent(t.sheetId)}&tabName=${encodeURIComponent(t.tabName)}`);
+  if (!p || !p.ok){ rail.querySelector('.empty').textContent = 'parity는 master에서 제공'; return; }
+  const b = p.buckets || {match:0,benign:0,real:0};
+  const tot = Math.max(1, b.match+b.benign+b.real);
+  const pct = n => (n/tot*100).toFixed(1)+'%';
+  rail.innerHTML = `
+    <div class="sh">Parity (B ↔ 현행)</div>
+    <div class="parity">
+      <div class="pbar">
+        <i class="m" style="width:${pct(b.match)}"></i><i class="b" style="width:${pct(b.benign)}"></i><i class="r" style="width:${pct(b.real)}"></i>
+      </div>
+      <div class="plegend">
+        <div class="row"><span><span class="dot" style="background:var(--safe)"></span>일치</span><b>${b.match}</b></div>
+        <div class="row"><span><span class="dot" style="background:var(--warn)"></span>의도된차이</span><b>${b.benign}</b></div>
+        <div class="row"><span><span class="dot" style="background:var(--bad)"></span>진짜 불일치</span><b>${b.real}</b></div>
+      </div>
+      <div class="verdict ${p.pass?'pass':'fail'}">${p.pass?'✓ 진짜 불일치 0':('진짜 불일치 '+b.real+'건')}</div>
+    </div>
+    <div class="sh">차원 요약</div>
+    <div class="cmt">참여자 A ${p.dims.d1_membership.aSet} · B ${p.dims.d1_membership.bSet}<br>
+      제출 A ${p.dims.d3_counts.aSubmitted} · B ${p.dims.d3_counts.bSubmitted}<br>
+      입금 A ${p.dims.d3_counts.aPaid} · B ${p.dims.d3_counts.bPaid}</div>
+    <div class="sh" style="margin-top:14px">소통</div>
+    <div class="cmt">역할 간 코멘트 레인 (후속: 3채널 통합)</div>`;
+}
+
+async function projectCur(){
+  if (!STATE.cur) return;
+  const btn = $('#projBtn'); if (btn){ btn.disabled = true; btn.textContent='투영 중…'; }
+  await api('/api/trackb/project', { method:'POST', body: JSON.stringify({ sheetId: STATE.cur.sheetId, tabName: STATE.cur.tabName }) });
+  if (btn){ btn.disabled = false; btn.textContent='그림자 투영(새로고침)'; }
+  selTab(STATE.tabs.indexOf(STATE.cur));
+}
+
+boot();
+</script>
+</body>
+</html>

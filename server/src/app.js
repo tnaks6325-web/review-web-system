@@ -32,6 +32,7 @@ const rawRoutes      = require('./routes/raw.routes');
 const csRoutes       = require('./routes/cs.routes');
 const mappingRoutes  = require('./routes/mapping.routes');
 const participantsRoutes = require('./routes/participants.routes');
+const trackBRoutes = require('./routes/trackB.routes');
 const reviewEditRoutes = require('./routes/reviewEdit.routes');
 
 const app = express();
@@ -101,6 +102,7 @@ app.use('/api/raw',       rawRoutes);
 // 명시적 컬럼 매핑 (Section 15) — 구글시트 점진 대체 keystone
 app.use('/api/mapping',   mappingRoutes);
 app.use('/api/participants', participantsRoutes);  // Phase 1 shadow — master 전용, 신규 테이블만
+app.use('/api/trackb', trackBRoutes);              // Track B(평행 트랙) — master/광고주 스코프, 라이브 무영향
 
 // 리뷰 이미지 수정요청 (리뷰어 → 관리자 승인 → [리뷰] 폴더 파일 교체)
 app.use('/api/review-edit', reviewEditRoutes);
