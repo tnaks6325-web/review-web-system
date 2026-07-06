@@ -219,6 +219,24 @@ function startCronJobs() {
     }, { timezone: 'Asia/Seoul' });
   }
 
+  // ── Track B(평행 트랙) 그림자 투영: 플래그 OFF 기본. 라이브 읽어 B 원장 최신화(추가·읽기·격리, 라이브 무영향). ──
+  //   등록 자체를 TRACK_B_PROJECTION=1 게이트 뒤에 둔다(off면 스케줄 미등록). projectActive도 내부 재확인.
+  if (process.env.TRACK_B_PROJECTION === '1') {
+    const trackBSchedule = process.env.TRACK_B_PROJECTION_SCHEDULE || '*/10 * * * *';
+    let trackBRunning = false;
+    cron.schedule(trackBSchedule, async () => {
+      if (trackBRunning) return;
+      trackBRunning = true;
+      try {
+        const { projectActive } = require('../services/trackB.service');
+        const r = await projectActive({ by: 'cron' });
+        if (r && r.done > 0) logger.info(`[CRON-TrackB] projected tabs=${r.done}/${r.candidateTabs} errors=${r.errors}`);
+      } catch (err) {
+        logger.error(`[CRON-TrackB] error: ${err.message}`);
+      } finally { trackBRunning = false; }
+    }, { timezone: 'Asia/Seoul' });
+  }
+
   const schedule = process.env.INDEX_CRON_SCHEDULE || '0 9,15 * * 1-6';
   cron.schedule(schedule, async () => {
     logger.info(`[CRON] 인덱스 빌드 시작: ${new Date().toISOString()}`);
