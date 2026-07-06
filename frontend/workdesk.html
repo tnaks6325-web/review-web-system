@@ -56,6 +56,10 @@
   .plegend .dot{display:inline-block;width:8px;height:8px;border-radius:2px;margin-right:6px}
   .verdict{font-size:12px;font-weight:750;padding:8px 10px;border-radius:8px;margin-top:8px;text-align:center} .verdict.pass{background:var(--safe-soft);color:var(--safe)} .verdict.fail{background:var(--bad-soft);color:var(--bad)}
   .cmt{font-size:11px;background:var(--card2);border:1px solid var(--line);border-radius:8px;padding:8px 10px;margin-bottom:6px;color:var(--muted)}
+  .rdlist{display:flex;flex-direction:column;gap:6px}
+  .rdrow{display:flex;align-items:center;gap:8px;font-size:11.5px}
+  .rdrow .rdot{width:8px;height:8px;border-radius:50%;flex:none} .rdot.ok{background:var(--safe)} .rdot.warn{background:var(--warn)} .rdot.no{background:var(--line2)}
+  .rdrow .rl{color:var(--muted);flex:none;width:72px} .rdrow .rv{color:var(--ink);font-weight:600;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
   .empty{color:var(--faint);font-size:13px;text-align:center;padding:40px 10px}
   .loginbox{max-width:320px;margin:80px auto;background:var(--card);border:1px solid var(--line);border-radius:14px;padding:28px;box-shadow:0 8px 28px rgba(20,35,42,.08)}
   .loginbox h2{margin:0 0 14px;font-size:18px} .loginbox input{width:100%;padding:9px 12px;border:1px solid var(--line2);border-radius:8px;margin-bottom:9px;font:inherit}
@@ -189,7 +193,22 @@ async function loadParity(t){ const rail=$('#rail'); if(!rail)return;
     <div class="pbar"><i class="m" style="width:${pct(b.match)}"></i><i class="b" style="width:${pct(b.benign)}"></i><i class="r" style="width:${pct(b.real)}"></i></div>
     <div class="plegend"><div class="row"><span><span class="dot" style="background:var(--safe)"></span>일치</span><b>${b.match}</b></div><div class="row"><span><span class="dot" style="background:var(--warn)"></span>의도된차이</span><b>${b.benign}</b></div><div class="row"><span><span class="dot" style="background:var(--bad)"></span>진짜 불일치</span><b>${b.real}</b></div></div>
     <div class="verdict ${p.pass?'pass':'fail'}">${p.pass?'✓ 진짜 불일치 0':('진짜 불일치 '+b.real+'건')}</div></div>
-    <div class="sh">차원 요약</div><div class="cmt">참여자 A ${p.dims.d1_membership.aSet} · B ${p.dims.d1_membership.bSet}<br>제출 A ${p.dims.d3_counts.aSubmitted} · B ${p.dims.d3_counts.bSubmitted}<br>입금 A ${p.dims.d3_counts.aPaid} · B ${p.dims.d3_counts.bPaid}</div>`;
+    <div class="sh">차원 요약</div><div class="cmt">참여자 A ${p.dims.d1_membership.aSet} · B ${p.dims.d1_membership.bSet}<br>제출 A ${p.dims.d3_counts.aSubmitted} · B ${p.dims.d3_counts.bSubmitted}<br>입금 A ${p.dims.d3_counts.aPaid} · B ${p.dims.d3_counts.bPaid}</div>
+    ${renderReadiness(p.readiness)}`;
+}
+function renderReadiness(rd){ if(!rd) return '';
+  const wo=rd.workOrder||{}, ow=rd.ownership||{}, fi=rd.financial||{};
+  const dot=(ok,warn)=>`<span class="rdot ${ok?'ok':(warn?'warn':'no')}"></span>`;
+  const woOk=wo.linked && wo.filled>=3;
+  const owNames=(ow.owners||[]).map(o=>esc(o.name)+(o.wholeSheet?'(시트전체)':'')).join(', ');
+  const linkPct = fi.activeRows ? Math.round(fi.linkedOrders/fi.activeRows*100) : 0;
+  const won = (fi.writtenAmount||0).toLocaleString('ko-KR');
+  return `<div class="sh" style="margin-top:14px">전환 준비도</div>
+    <div class="rdlist">
+      <div class="rdrow">${dot(woOk, wo.linked&&!woOk)}<span class="rl">작업발주 연결</span><span class="rv">${wo.linked?(wo.filled+'/'+wo.of+' 필드'):'미연결'}</span></div>
+      <div class="rdrow">${dot(ow.assigned)}<span class="rl">업체 소유</span><span class="rv">${ow.assigned?(owNames||'지정됨'):'미지정'}</span></div>
+      <div class="rdrow">${dot(fi.linkedOrders>0, fi.activeRows>0&&fi.linkedOrders===0)}<span class="rl">주문 귀속</span><span class="rv">${fi.linkedOrders}/${fi.activeRows} 링크${won!=='0'?(' · '+won+'원'):''}</span></div>
+    </div>`;
 }
 async function projectCur(){ if(!STATE.cur)return; const btn=$('#projBtn'); if(btn){btn.disabled=true;btn.textContent='투영 중…';}
   await api('/api/trackb/project',{method:'POST',body:JSON.stringify({sheetId:STATE.cur.sheetId,tabName:STATE.cur.tabName})});

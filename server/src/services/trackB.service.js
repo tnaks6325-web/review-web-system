@@ -145,7 +145,60 @@ async function parityReport({ sheetId, tabName } = {}) {
     `SELECT reviewer_name AS name, phone8, is_submitted AS submitted, is_paid AS paid, round, source, active
        FROM campaign_participants WHERE sheet_id=$1 AND tab_name=$2 AND deleted_at IS NULL AND active = TRUE`,
     [sheetId, tabName]);
-  return classifyParity(aRows, bRows);
+  const base = classifyParity(aRows, bRows);
+  // d4/d5/d6 는 A↔B "차이"가 아니라 전환 준비도(coverage/귀속) 관측 — data-parity pass 를 뒤집지 않음(별도).
+  const readiness = await _readinessFor({ sheetId, tabName });
+  return { ...base, readiness };
+}
+
+/**
+ * 전환 준비도(readiness): 정형 소스가 얼마나 채워졌나. data-parity(d1~d3) 게이트와 분리한 별도 신호.
+ *   - workOrder(d4): 이 탭에 연결된 작업발주 정형필드(작업세부 원본, 사용자 확정 ②)가 있고 채워졌나.
+ *   - ownership(d5): 이 탭이 업체 소유로 지정됐나(사용자 확정 ③, 1:N) — 소유자명 포함.
+ *   - financial(d6): 주문원장은 공용이라 "귀속"만 관측 — 링크된 주문 수·written 금액합.
+ */
+async function _readinessFor({ sheetId, tabName } = {}) {
+  const db = getPool();
+  // 이름 변경에 안전한 gid 확보(있으면 시트단위/탭단위 소유 판정에 사용)
+  const { rows: gidRows } = await db.query(
+    `SELECT tab_gid AS "tabGid" FROM raw_sheet_tabs WHERE sheet_id=$1 AND tab_name=$2 LIMIT 1`,
+    [sheetId, tabName]).catch(() => ({ rows: [] }));
+  const tabGid = (gidRows[0] && gidRows[0].tabGid) || null;
+
+  // d4 작업발주 연결/충실도
+  const { rows: wo } = await db.query(
+    `SELECT title, product_option AS "productOption", daily_count AS "dailyCount",
+            purchase_time AS "purchaseTime", delivery_type AS "deliveryType", recruit_count AS "recruitCount"
+       FROM work_orders WHERE linked_tab_sheet_id=$1 AND linked_tab_name=$2 AND deleted_at IS NULL
+      ORDER BY created_at DESC LIMIT 1`, [sheetId, tabName]).catch(() => ({ rows: [] }));
+  const w = wo[0] || null;
+  const woFields = w ? ['productOption', 'purchaseTime', 'deliveryType', 'recruitCount'].filter(k => _norm(w[k])) : [];
+  const workOrder = { linked: !!w, filled: woFields.length, of: 4, title: w ? w.title : null };
+
+  // d5 소유 지정(시트전체 tab_gid NULL 소유가 이 탭을 덮거나, 이 tab_gid 직접 소유)
+  const { rows: owners } = await db.query(
+    `SELECT DISTINCT adv.id, adv.name, (ac.tab_gid IS NULL) AS "wholeSheet"
+       FROM advertiser_campaigns ac JOIN advertisers adv ON adv.id = ac.advertiser_id
+      WHERE ac.deleted_at IS NULL AND ac.sheet_id = $1
+        AND (ac.tab_gid IS NULL OR ac.tab_gid = $2)`,
+    [sheetId, tabGid]).catch(() => ({ rows: [] }));
+  const ownership = { assigned: owners.length > 0, owners: owners.map(o => ({ name: o.name, wholeSheet: o.wholeSheet })) };
+
+  // d6 금액 귀속(공용 주문원장 관측 전용): 링크된 B 참여자 수 + written 주문 금액합
+  const { rows: fin } = await db.query(
+    `SELECT
+        (SELECT COUNT(*)::int FROM campaign_participants
+          WHERE sheet_id=$1 AND tab_name=$2 AND deleted_at IS NULL AND active AND order_submission_id IS NOT NULL) AS "linkedOrders",
+        (SELECT COUNT(*)::int FROM campaign_participants
+          WHERE sheet_id=$1 AND tab_name=$2 AND deleted_at IS NULL AND active) AS "activeRows",
+        (SELECT COALESCE(SUM(NULLIF(regexp_replace(COALESCE(price,''),'[^0-9]','','g'),'')::numeric),0)::bigint
+           FROM order_submissions
+          WHERE sheet_id=$1 AND tab_name=$2 AND deleted_at IS NULL AND mirror_status='written') AS "writtenAmount"`,
+    [sheetId, tabName]).catch(() => ({ rows: [{}] }));
+  const f = fin[0] || {};
+  const financial = { linkedOrders: f.linkedOrders || 0, activeRows: f.activeRows || 0, writtenAmount: Number(f.writtenAmount || 0) };
+
+  return { tabGid, workOrder, ownership, financial };
 }
 
 /**
@@ -189,9 +242,9 @@ function classifyParity(aRows, bRows) {
         aSubmitted: A.filter(r => r.submitted).length, bSubmitted: B.filter(r => r.submitted).length,
         aPaid: A.filter(r => r.paid).length, bPaid: B.filter(r => r.paid).length,
       },
-      d4_meta: { note: 'scaffolded — 발주 정형필드 대조 후속' },
-      d5_ownership: { note: 'scaffolded — 정답(업체매핑) 대조 후속' },
-      d6_financial: { note: 'scaffolded — 주문원장 공용이라 귀속만 관측' },
+      d4_meta: { note: 'readiness.workOrder 참조(작업발주 정형필드 충실도)' },
+      d5_ownership: { note: 'readiness.ownership 참조(업체 소유 지정 여부)' },
+      d6_financial: { note: 'readiness.financial 참조(공용 원장 귀속 관측)' },
     },
     buckets: { match: buckets.match, benign: buckets.benign.length, real: buckets.real.length },
     benignSample: buckets.benign.slice(0, 20),
