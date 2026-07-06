@@ -9,6 +9,7 @@ const express = require('express');
 const router = express.Router();
 const { authMiddleware, masterOnlyMiddleware, adminOrMasterMiddleware } = require('../middleware/auth.middleware');
 const svc = require('../services/trackB.service');
+const participants = require('../services/participants.service');
 
 function _by(req) { return String((req.admin && (req.admin.name || req.admin.role)) || 'admin').slice(0, 100); }
 function _role(req) { return (req.admin && req.admin.role) || ''; }
@@ -29,6 +30,22 @@ router.get('/parity', authMiddleware, masterOnlyMiddleware, async (req, res, nex
     if (!sheetId || !tabName) return res.status(400).json({ ok: false, error: 'sheetId, tabName 필수' });
     res.json({ ok: true, ...(await svc.parityReport({ sheetId, tabName })) });
   } catch (err) { next(err); }
+});
+
+// ── 작업/소유 UI 공용: 활성 탭 목록 — adminOrMaster(그림자 콘솔 스코프) ──
+//   participants/tabs 는 master 전용이라 admin이 소유 지정 화면의 시트 피커를 못 채운다.
+//   Track B 콘솔은 adminOrMaster 이므로 같은 읽기전용 목록을 네임스페이스 내에서 재노출한다.
+router.get('/tabs', authMiddleware, adminOrMasterMiddleware, async (req, res, next) => {
+  try {
+    const tabs = await participants.listActiveTabs({ limit: req.query.limit });
+    res.json({ ok: true, count: tabs.length, tabs });
+  } catch (err) { next(err); }
+});
+
+// ── 소유 지정 UI 좌측: 업체 목록 + 소유수 — admin/master ──
+router.get('/advertisers', authMiddleware, adminOrMasterMiddleware, async (req, res, next) => {
+  try { res.json({ ok: true, items: await svc.listAdvertisersWithOwnership() }); }
+  catch (err) { next(err); }
 });
 
 // ── 업체 소유 매핑(1:N) — admin/master ──

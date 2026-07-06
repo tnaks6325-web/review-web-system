@@ -232,6 +232,19 @@ async function listOwnership({ advertiserId, sheetId } = {}) {
        FROM advertiser_campaigns WHERE ${where.join(' AND ')} ORDER BY created_at DESC`, vals);
   return rows;
 }
+// 소유 지정 UI 좌측: 업체 목록 + 소유 캠페인 수(종료 거래처 제외).
+async function listAdvertisersWithOwnership() {
+  const db = getPool();
+  const { rows } = await db.query(
+    `SELECT a.id, a.name, a.status,
+            (SELECT COUNT(*) FROM advertiser_campaigns ac
+              WHERE ac.advertiser_id = a.id AND ac.deleted_at IS NULL)::int AS owned
+       FROM advertisers a
+      WHERE a.status <> 'ended'
+      ORDER BY a.sort_order ASC, a.name ASC`);
+  return rows;
+}
+
 // 광고주 스코프: 이 업체가 소유한 (sheet_id, tab_gid) 집합. tab_gid NULL 소유 = 그 시트 전체.
 async function scopedTabsForAdvertiser(advertiserId) {
   if (!advertiserId) return { sheetIds: [], tabGids: [], allTabSheetIds: [] };
@@ -302,6 +315,7 @@ module.exports = {
   setOwnership,
   removeOwnership,
   listOwnership,
+  listAdvertisersWithOwnership,
   scopedTabsForAdvertiser,
   workdeskTab,
   __setPoolForTest,

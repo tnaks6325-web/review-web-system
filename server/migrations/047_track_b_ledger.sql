@@ -29,7 +29,7 @@ CREATE INDEX IF NOT EXISTS idx_participants_order
 --   advertiser_id 는 advertisers.id(026_portal) 참조(FK 미설정 — 부팅 전량 재실행/삭제순서 안전 위해 느슨).
 CREATE TABLE IF NOT EXISTS advertiser_campaigns (
   id            UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-  advertiser_id UUID NOT NULL,
+  advertiser_id TEXT NOT NULL,                 -- advertisers.id (TEXT 'adv_'+hex, 026_portal) — UUID 아님
   sheet_id      TEXT NOT NULL,
   tab_gid       TEXT,                       -- NULL = 시트 전체(모든 탭)
   assigned_by   TEXT,
