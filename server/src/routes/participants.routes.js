@@ -51,7 +51,9 @@ router.post('/sync', authMiddleware, masterOnlyMiddleware, async (req, res, next
       const out = await svc.importTabFromIndex({ sheetId, tabName, by: _by(req) });
       return res.json({ ok: true, tab: tabName, ...out });
     }
-    const out = await svc.syncImportedTabs({ by: _by(req) });
+    // bulk sync 는 Track B 투영 cron 과 같은 락으로 상호배제(seen-set/오버레이 합성 안정).
+    const { withJobLock } = require('../utils/jobLock');
+    const out = await withJobLock('trackb_project', () => svc.syncImportedTabs({ by: _by(req) }));
     res.json({ ok: true, ...out });
   } catch (err) { next(err); }
 });

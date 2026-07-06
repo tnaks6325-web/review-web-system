@@ -172,23 +172,32 @@ const _MANUAL_SEQ_BASE = 900000;
 async function addParticipant({ sheetId, tabName, reviewerName, recipientName, phone, round, optionText, productName, by = 'test' } = {}) {
   if (!sheetId || !tabName) throw new Error('addParticipant: sheetId, tabName 필수');
   const db = getPool();
-  const { rows: meta } = await db.query(
-    `SELECT COALESCE(MAX(seq) FILTER (WHERE seq >= ${_MANUAL_SEQ_BASE}), ${_MANUAL_SEQ_BASE - 1}) + 1 AS nextseq,
-            (SELECT tab_gid FROM campaign_participants WHERE sheet_id=$1 AND tab_name=$2 AND tab_gid IS NOT NULL LIMIT 1) AS tab_gid
-       FROM campaign_participants WHERE sheet_id=$1 AND tab_name=$2`,
-    [sheetId, tabName]
-  );
-  const nextSeq = meta[0].nextseq;
-  const tabGid = meta[0].tab_gid || null;
-  const { rows } = await db.query(
-    `INSERT INTO campaign_participants
-       (sheet_id, tab_gid, tab_name, seq, reviewer_name, recipient_name, phone8, round, option_text, product_name, source, updated_by, updated_at)
-     VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,'manual',$11,NOW())
-     RETURNING id, seq`,
-    [sheetId, tabGid, tabName, nextSeq, reviewerName || null, recipientName || null, _toPhone8(phone),
-     round || null, optionText || null, productName || null, String(by).slice(0, 100)]
-  );
-  return { added: 1, id: rows[0].id, seq: rows[0].seq };
+  // 동시 add가 같은 nextSeq를 계산해도 uq_participants_seq(sheet_id,tab_name,seq)가 중복행을 차단한다.
+  //   23505(유니크 위반) 시 seq를 재계산해 재시도(advisory 락 불필요 — 예방 대신 회복, 동일 정확성).
+  for (let attempt = 0; ; attempt++) {
+    const { rows: meta } = await db.query(
+      `SELECT COALESCE(MAX(seq) FILTER (WHERE seq >= ${_MANUAL_SEQ_BASE}), ${_MANUAL_SEQ_BASE - 1}) + 1 AS nextseq,
+              (SELECT tab_gid FROM campaign_participants WHERE sheet_id=$1 AND tab_name=$2 AND tab_gid IS NOT NULL LIMIT 1) AS tab_gid
+         FROM campaign_participants WHERE sheet_id=$1 AND tab_name=$2`,
+      [sheetId, tabName]
+    );
+    const nextSeq = meta[0].nextseq;
+    const tabGid = meta[0].tab_gid || null;
+    try {
+      const { rows } = await db.query(
+        `INSERT INTO campaign_participants
+           (sheet_id, tab_gid, tab_name, seq, reviewer_name, recipient_name, phone8, round, option_text, product_name, source, updated_by, updated_at)
+         VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,'manual',$11,NOW())
+         RETURNING id, seq`,
+        [sheetId, tabGid, tabName, nextSeq, reviewerName || null, recipientName || null, _toPhone8(phone),
+         round || null, optionText || null, productName || null, String(by).slice(0, 100)]
+      );
+      return { added: 1, id: rows[0].id, seq: rows[0].seq };
+    } catch (e) {
+      if (e && e.code === '23505' && attempt < 4) continue;   // seq 레이스 → 재계산 재시도
+      throw e;
+    }
+  }
 }
 
 const _EDITABLE_FIELDS = ['reviewer_name', 'recipient_name', 'phone8', 'round', 'option_text', 'product_name'];

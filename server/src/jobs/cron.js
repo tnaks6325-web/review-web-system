@@ -209,13 +209,35 @@ function startCronJobs() {
       partSyncRunning = true;
       try {
         const { syncImportedTabs } = require('../services/participants.service');
-        const r = await syncImportedTabs({ by: 'cron' });
+        const { withJobLock } = require('../utils/jobLock');
+        // rolling 배포 시 old+new 인스턴스의 두 cron이 겹쳐 seen-set 오염하는 걸 직렬화(busy면 이번 주기 skip).
+        const r = await withJobLock('trackb_project', () => syncImportedTabs({ by: 'cron' }));
         if (r && (r.tabsSynced > 0) && (r.inserted > 0 || r.updated > 0)) {
           logger.info(`[CRON-ParticipantsSync] tabs=${r.tabsSynced} inserted=${r.inserted} updated=${r.updated} errors=${r.errors}`);
         }
       } catch (err) {
         logger.error(`[CRON-ParticipantsSync] error: ${err.message}`);
       } finally { partSyncRunning = false; }
+    }, { timezone: 'Asia/Seoul' });
+  }
+
+  // ── Track B(평행 트랙) 그림자 투영: 플래그 OFF 기본. 라이브 읽어 B 원장 최신화(추가·읽기·격리, 라이브 무영향). ──
+  //   등록 자체를 TRACK_B_PROJECTION=1 게이트 뒤에 둔다(off면 스케줄 미등록). projectActive도 내부 재확인.
+  if (process.env.TRACK_B_PROJECTION === '1') {
+    const trackBSchedule = process.env.TRACK_B_PROJECTION_SCHEDULE || '*/10 * * * *';
+    let trackBRunning = false;
+    cron.schedule(trackBSchedule, async () => {
+      if (trackBRunning) return;
+      trackBRunning = true;
+      try {
+        const { projectActive } = require('../services/trackB.service');
+        const { withJobLock } = require('../utils/jobLock');
+        // participants sync cron 과 같은 락으로 상호배제(멀티인스턴스 이중투영·seen-set 플래핑 차단).
+        const r = await withJobLock('trackb_project', () => projectActive({ by: 'cron' }));
+        if (r && r.done > 0) logger.info(`[CRON-TrackB] projected tabs=${r.done}/${r.candidateTabs} errors=${r.errors}`);
+      } catch (err) {
+        logger.error(`[CRON-TrackB] error: ${err.message}`);
+      } finally { trackBRunning = false; }
     }, { timezone: 'Asia/Seoul' });
   }
 
