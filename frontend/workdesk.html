@@ -366,7 +366,9 @@ async function reloadWorkdesk(){ const t=STATE.cur; if(!t)return;
 function _dpair(k,v){ const s=(v==null?'':String(v)); return `<div class="dpair"><span class="dk">${esc(k)}</span><span class="dv">${esc(s)||'—'}</span></div>`; }
 function _fmtTs(t){ if(!t)return ''; try{ return new Date(t).toLocaleString('ko-KR'); }catch(_){ return String(t); } }
 function renderDetail(r){
-  const o=r.order, rj=(r.rowJson&&typeof r.rowJson==='object')?r.rowJson:{};
+  const o=r.order;
+  // 시트 행 표시에 셀 편집(col: 오버레이) 반영 — 그리드 셀과 상세 패널 값 일치(표시 전용).
+  const rj=Object.assign({}, (r.rowJson&&typeof r.rowJson==='object')?r.rowJson:{}, (r.cellEdits&&typeof r.cellEdits==='object')?r.cellEdits:{});
   const orderHtml = o ? `<div class="dcard"><div class="dch">🛒 제출 구매양식 (DB 원장)</div><div class="dgrid">${
       _dpair('주문번호',o.order_num)+_dpair('수취인',o.recipient||o.orderer)+_dpair('연락처',o.phone)+_dpair('주소',o.address)+
       _dpair('옵션',o.selectedOptKey)+_dpair('금액',o.price)+_dpair('제출시각',_fmtTs(o.submittedAt))+
