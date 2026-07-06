@@ -681,14 +681,15 @@ async function loadReviewEditRequests() {
       el.innerHTML = '<div style="color:#16A34A;font-size:.8rem"><i class="fas fa-check-circle"></i> 대기 중인 수정요청 없음</div>';
       return;
     }
+    // 썸네일은 Google 썸네일 CDN을 1차(빠름), 서버 프록시를 폴백(원본 전체 다운로드라 느림)으로.
     const IMG = (id) => `${API_BASE_URL}/api/drive/image/${encodeURIComponent(id)}`;
     const THUMB = (id) => `https://drive.google.com/thumbnail?id=${encodeURIComponent(id)}&sz=w400`;
     const imgCell = (id, label, color, border) => id
-      ? `<div style="text-align:center"><div style="font-size:.64rem;color:${color};font-weight:700">${label}</div><img src="${IMG(id)}" loading="lazy" onerror="this.onerror=null;this.src='${THUMB(id)}'" style="width:104px;height:104px;object-fit:cover;border-radius:8px;border:${border};cursor:zoom-in" onclick="window.open('${IMG(id)}','_blank')"></div>`
+      ? `<div style="text-align:center"><div style="font-size:.64rem;color:${color};font-weight:700">${label}</div><img src="${THUMB(id)}" loading="lazy" onerror="this.onerror=null;this.src='${IMG(id)}'" style="width:104px;height:104px;object-fit:cover;border-radius:8px;border:${border};cursor:zoom-in" onclick="window.open('${IMG(id)}','_blank')"></div>`
       : '';
     el.innerHTML = reqs.map(r => {
       const reason = r.reason ? `<div style="font-size:.72rem;color:#5B6472;margin-top:6px;background:#F8FAFC;border-radius:6px;padding:5px 8px">사유: ${_escReviewEdit(r.reason)}</div>` : '';
-      return `<div style="border:1px solid var(--border);border-radius:10px;padding:10px;margin-bottom:8px">
+      return `<div data-reqid="${r.id}" style="border:1px solid var(--border);border-radius:10px;padding:10px;margin-bottom:8px">
         <div style="display:flex;justify-content:space-between;gap:6px;align-items:flex-start;margin-bottom:8px">
           <div style="min-width:0">
             <div style="font-weight:700;font-size:.8rem;color:var(--t1);overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${_escReviewEdit(r.campaign_label || r.tab_name || '')}</div>
@@ -712,25 +713,48 @@ async function loadReviewEditRequests() {
   }
 }
 
+// 낙관적 즉시 반영: 카드 제거 + 배지 감소(응답을 기다리지 않고 목록에서 사라지게)
+function _reviewEditRemoveCard(id) {
+  const el = document.getElementById("reviewEditPanel");
+  const badge = document.getElementById("reviewEditBadge");
+  if (!el) return;
+  const card = el.querySelector('[data-reqid="' + id + '"]');
+  if (card) card.remove();
+  if (badge) {
+    const n = Math.max(0, (parseInt(badge.textContent, 10) || 1) - 1);
+    badge.textContent = n;
+    badge.classList.toggle("hidden", !n);
+  }
+  if (!el.querySelector('[data-reqid]')) {
+    el.innerHTML = '<div style="color:#16A34A;font-size:.8rem"><i class="fas fa-check-circle"></i> 대기 중인 수정요청 없음</div>';
+  }
+}
+
 async function approveReviewEdit(id) {
-  if (!confirm('이 수정요청을 승인합니까?\n\n[리뷰] 폴더의 파일이 리뷰어가 올린 새 이미지로 교체되고,\n기존 파일은 휴지통으로 이동됩니다(복구 가능).')) return;
+  if (!confirm('이 수정요청을 승인합니까?\n\n[리뷰] 폴더의 파일이 리뷰어가 올린 새 이미지로 교체되고,\n기존 파일은 [리뷰교체보관] 폴더로 이동됩니다(휴지통 아님·보관).')) return;
+  _reviewEditRemoveCard(id);   // 즉시 목록에서 제거(새로고침 불필요)
   try {
     const r = await gasPost({ action: "reviewEditApprove", id: id });
     if (!r || r.ok === false) throw new Error((r && r.error) || '승인 실패');
     showToast('승인 완료 — 리뷰 파일이 교체되었습니다', 'success');
-    loadReviewEditRequests();
-  } catch (e) { showToast('승인 실패: ' + (e.message || ''), 'error'); }
+  } catch (e) {
+    showToast('승인 실패: ' + (e.message || '') + ' — 목록을 새로고침합니다', 'error');
+    loadReviewEditRequests();   // 실패 시 서버 상태로 복원
+  }
 }
 
 async function rejectReviewEdit(id) {
   const note = prompt('반려 사유를 입력하세요 (리뷰어에게 표시됩니다):', '');
   if (note === null) return;
+  _reviewEditRemoveCard(id);   // 즉시 목록에서 제거(새로고침 불필요)
   try {
     const r = await gasPost({ action: "reviewEditReject", id: id, note: note });
     if (!r || r.ok === false) throw new Error((r && r.error) || '반려 실패');
     showToast('반려 처리되었습니다', 'success');
-    loadReviewEditRequests();
-  } catch (e) { showToast('반려 실패: ' + (e.message || ''), 'error'); }
+  } catch (e) {
+    showToast('반려 실패: ' + (e.message || '') + ' — 목록을 새로고침합니다', 'error');
+    loadReviewEditRequests();   // 실패 시 서버 상태로 복원
+  }
 }
 
 async function runOrderReconcile(sheetId) {
