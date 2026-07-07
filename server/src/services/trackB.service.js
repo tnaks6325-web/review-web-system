@@ -57,6 +57,14 @@ const _EDIT_FIELD_KIND = {
   reviewer_name: 'text', recipient_name: 'text', round: 'text', option_text: 'text',
   product_name: 'text', phone8: 'text', is_submitted: 'bool', is_paid: 'bool', _hidden: 'bool',
 };
+// 시트 컬럼(헤더)이 제출/입금 상태열이면 물리 토글로 연동 → 카운트(제출완료/입금완료)와 일치.
+//   '주문자제출' 등은 제외(리뷰 제출 아님). 미매칭이면 null(연동 안 함, 안전).
+function _linkedToggle(header) {
+  const h = String(header || '');
+  if (h === '리뷰제출' || /리뷰.*제출/.test(h)) return 'is_submitted';
+  if (h === '입금' || /^입금/.test(h)) return 'is_paid';
+  return null;
+}
 
 // ── 그림자 투영: 임포트(participants) + 신원키/주문링크 강화 + seen-set 재투영 ──
 async function projectTab({ sheetId, tabName, by = 'trackB' } = {}) {
@@ -605,8 +613,24 @@ async function editWorkdeskRow({ sheetId, tabName, rowId, field, value, by = 'ad
       `INSERT INTO participant_edits (sheet_id, tab_name, anchor_type, anchor_value, field, kind, value_bool, value_text, created_by)
        VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9) RETURNING id`,
       [sheetId, tabName, anchorType, anchorValue, field, kind, vBool, vText, String(by).slice(0, 100)]);
+    // 카운트 연동: col:리뷰제출/입금 편집 시 물리 토글(is_submitted/is_paid)도 같은 tx로 갱신(값 유무=완료여부).
+    let linkedField = null;
+    if (isCol) {
+      linkedField = _linkedToggle(field.slice(4));
+      if (linkedField) {
+        const lb = (vText || '').trim() !== '';
+        await client.query(
+          `UPDATE participant_edits SET reverted_at=NOW(), reverted_by=$1
+            WHERE sheet_id=$2 AND tab_name=$3 AND anchor_type=$4 AND anchor_value=$5 AND field=$6 AND reverted_at IS NULL`,
+          [String(by).slice(0, 100), sheetId, tabName, anchorType, anchorValue, linkedField]);
+        await client.query(
+          `INSERT INTO participant_edits (sheet_id, tab_name, anchor_type, anchor_value, field, kind, value_bool, value_text, created_by)
+           VALUES ($1,$2,$3,$4,$5,'bool',$6,NULL,$7)`,
+          [sheetId, tabName, anchorType, anchorValue, linkedField, lb, String(by).slice(0, 100)]);
+      }
+    }
     await client.query('COMMIT');
-    return { ok: true, editId: ins.rows[0].id, anchorType, field, value: kind === 'bool' ? vBool : vText };
+    return { ok: true, editId: ins.rows[0].id, anchorType, field, linkedField, value: kind === 'bool' ? vBool : vText };
   } catch (e) {
     try { await client.query('ROLLBACK'); } catch (_) {}
     if (e && e.code === '23505') return { ok: false, error: 'concurrent_edit_conflict' };
@@ -628,12 +652,20 @@ async function revertWorkdeskEdit({ sheetId, tabName, rowId, field, by = 'admin'
     if (!pr.length) { await client.query('ROLLBACK'); return { ok: false, error: 'row_not_found' }; }
     const a = _deriveAnchor(pr[0]);
     if (!a) { await client.query('ROLLBACK'); return { ok: false, error: 'no_stable_anchor' }; }
-    const { rowCount } = await client.query(
-      `UPDATE participant_edits SET reverted_at=NOW(), reverted_by=$1
-        WHERE sheet_id=$2 AND tab_name=$3 AND anchor_type=$4 AND anchor_value=$5 AND field=$6 AND reverted_at IS NULL`,
-      [String(by).slice(0, 100), sheetId, tabName, a.type, a.value, field]);
+    let n = 0;
+    const doRevert = async (f) => {
+      const { rowCount } = await client.query(
+        `UPDATE participant_edits SET reverted_at=NOW(), reverted_by=$1
+          WHERE sheet_id=$2 AND tab_name=$3 AND anchor_type=$4 AND anchor_value=$5 AND field=$6 AND reverted_at IS NULL`,
+        [String(by).slice(0, 100), sheetId, tabName, a.type, a.value, f]);
+      return rowCount;
+    };
+    n += await doRevert(field);
+    // 연동 되돌리기: col:리뷰제출/입금 을 되돌리면 링크된 물리 토글(is_submitted/is_paid)도 함께 되돌림.
+    const linked = field.indexOf('col:') === 0 ? _linkedToggle(field.slice(4)) : null;
+    if (linked) n += await doRevert(linked);
     await client.query('COMMIT');
-    return { ok: true, reverted: rowCount };
+    return { ok: true, reverted: n };
   } catch (e) { try { await client.query('ROLLBACK'); } catch (_) {} throw e; }
   finally { client.release(); }
 }
@@ -658,6 +690,33 @@ async function hideWorkdeskRow({ sheetId, tabName, rowId, by = 'admin' } = {}) {
 // 추가: 앵커 대상 없음(신규 참여자) → source='manual' 물리행(오버레이 아님). participants가 seq 원자화.
 async function addWorkdeskRow(args) { return participants.addParticipant(args); }
 
+// ── 편집 이력(감사): 이 탭의 최근 편집(활성+되돌림)을 시각·편집자·필드·값·상태로. 앵커→참여자명 best-effort. ──
+async function listEdits({ sheetId, tabName, limit = 200 } = {}) {
+  if (!sheetId || !tabName) throw new Error('listEdits: sheetId, tabName 필수');
+  const db = getPool();
+  const lim = Math.min(Math.max(parseInt(limit, 10) || 200, 1), 1000);
+  const { rows } = await db.query(
+    `SELECT pe.id, pe.field, pe.kind, pe.value_bool AS "valueBool", pe.value_text AS "valueText",
+            pe.created_by AS "createdBy", pe.created_at AS "createdAt",
+            pe.reverted_by AS "revertedBy", pe.reverted_at AS "revertedAt",
+            (SELECT cp.reviewer_name FROM campaign_participants cp
+               WHERE cp.sheet_id=pe.sheet_id AND cp.tab_name=pe.tab_name AND cp.deleted_at IS NULL AND cp.active=TRUE
+                 AND ((pe.anchor_type='order' AND cp.order_submission_id::text=pe.anchor_value)
+                   OR (pe.anchor_type='manual' AND cp.id::text=pe.anchor_value)
+                   OR (pe.anchor_type='identity' AND cp.identity_key=pe.anchor_value)) LIMIT 1) AS name
+       FROM participant_edits pe
+      WHERE pe.sheet_id=$1 AND pe.tab_name=$2
+      ORDER BY pe.created_at DESC LIMIT $3`,
+    [sheetId, tabName, lim]);
+  return rows.map(r => ({
+    id: r.id, name: r.name || null,
+    field: r.field === '_hidden' ? '(행 숨김)' : (r.field.indexOf('col:') === 0 ? r.field.slice(4) : r.field),
+    value: r.kind === 'bool' ? (r.valueBool ? '완료/있음' : '해제/없음') : (r.valueText || ''),
+    by: r.createdBy || '', at: r.createdAt,
+    reverted: !!r.revertedAt, revertedBy: r.revertedBy || null, revertedAt: r.revertedAt,
+  }));
+}
+
 module.exports = {
   identityKey,
   classifyParity,
@@ -675,5 +734,6 @@ module.exports = {
   revertWorkdeskEdit,
   hideWorkdeskRow,
   addWorkdeskRow,
+  listEdits,
   __setPoolForTest,
 };

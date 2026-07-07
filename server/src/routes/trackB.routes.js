@@ -116,6 +116,14 @@ router.post('/workdesk/hide', authMiddleware, adminOrMasterMiddleware, async (re
     res.json(await svc.hideWorkdeskRow({ sheetId, tabName, rowId, by: _by(req) }));
   } catch (err) { next(err); }
 });
+// ── 편집 이력(감사) — adminOrMaster ──
+router.get('/workdesk/edits', authMiddleware, adminOrMasterMiddleware, async (req, res, next) => {
+  try {
+    const { sheetId, tabName, limit } = req.query;
+    if (!sheetId || !tabName) return res.status(400).json({ ok: false, error: 'sheetId, tabName 필수' });
+    res.json({ ok: true, items: await svc.listEdits({ sheetId, tabName, limit }) });
+  } catch (err) { next(err); }
+});
 router.post('/workdesk/add', authMiddleware, adminOrMasterMiddleware, async (req, res, next) => {
   try {
     const { sheetId, tabName, reviewerName, recipientName, phone, round, optionText, productName } = req.body || {};

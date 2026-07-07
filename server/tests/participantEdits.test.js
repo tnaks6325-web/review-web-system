@@ -178,7 +178,16 @@ async function run() {
   svc.__setPoolForTest(cp);
   e = await svc.editWorkdeskRow({ sheetId: 's', tabName: 'T', rowId: 'r1', field: 'col:비고', value: 'y' });
   assert.ok(e.ok && e.field === 'col:비고', '3l: detected_headers NULL → row_json 키 폴백 수락');
-  console.log('  3. editWorkdeskRow — 앵커·거부·bool분리·레이스 + col:시트컬럼 검증 ✓');
+  // 3m: col:리뷰제출 편집 → 물리 is_submitted 토글도 함께 기록(카운트 연동)
+  cp = makeConnectPool({ row: { id: 'r1', source: 'manual', order_submission_id: null, identity_key: null, phone8: '1', recipient_name: null, option_text: null, row_json: {}, tab_gid: '9' }, detectedHeaders: ['리뷰제출', '입금'] });
+  svc.__setPoolForTest(cp);
+  e = await svc.editWorkdeskRow({ sheetId: 's', tabName: 'T', rowId: 'r1', field: 'col:리뷰제출', value: '6/20', by: 'm' });
+  assert.ok(e.ok && e.linkedField === 'is_submitted', '3m: col:리뷰제출 → linkedField=is_submitted');
+  const insList = cp.q.filter(x => /INSERT INTO participant_edits/.test(x.s));
+  assert.equal(insList.length, 2, '3m2: 오버레이 2건(col:리뷰제출 + is_submitted)');
+  const boolIns = insList.find(x => x.params[4] === 'is_submitted');   // 링크 insert 파라미터: [sheet,tab,type,val,field,value_bool,by]
+  assert.ok(boolIns && boolIns.params[5] === true, '3m3: is_submitted value_bool=true(값 있음)');
+  console.log('  3. editWorkdeskRow — 앵커·거부·bool분리·레이스 + col:검증 + 제출/입금 카운트연동 ✓');
 
   // ═══ 4. classifyParity editedKeys → BD-8 benign(하위호환 기본 Set) ═══
   const A = [{ phone8: '11112222', name: 'A', submitted: false, paid: false, round: '1' }];
