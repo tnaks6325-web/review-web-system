@@ -144,7 +144,9 @@
   .rm:hover{color:var(--adv);border-color:color-mix(in srgb,var(--adv) 40%,transparent)}
   .add{border:1px dashed var(--line2);border-radius:11px;padding:15px;background:var(--card2)}
   .add label{font-size:11px;color:var(--faint);font-weight:650;display:block;margin-bottom:4px}
-  .add select{width:100%;padding:8px 11px;border:1px solid var(--line2);border-radius:8px;font:inherit;font-size:13px;background:var(--card);color:var(--ink)}
+  .add select,.add input{width:100%;padding:8px 11px;border:1px solid var(--line2);border-radius:8px;font:inherit;font-size:13px;background:var(--card);color:var(--ink)}
+  .advlist .sh.row{display:flex;align-items:center;justify-content:space-between;gap:6px}
+  .addadv{font-size:10.5px;font-weight:700;padding:3px 8px;border-radius:7px;border:1px solid var(--line2);background:var(--card);color:var(--adv);cursor:pointer;text-transform:none;letter-spacing:0} .addadv:hover{background:var(--adv-soft)}
   .radios{display:flex;gap:8px;margin-top:10px;flex-wrap:wrap}
   .radio{font-size:12px;padding:6px 12px;border-radius:8px;border:1px solid var(--line2);background:var(--card);cursor:pointer;display:flex;align-items:center;gap:6px}
   .radio.on{border-color:var(--accent);background:var(--accent-soft);color:var(--accent);font-weight:650}
@@ -560,7 +562,7 @@ async function flipSoT(value, force){
 // ══ 소유 지정 뷰 ══
 async function renderOwnershipView(){
   $('#viewroot').innerHTML = `<div class="own-wrap">
-    <div class="advlist"><div class="sh" style="font-size:10px;font-weight:750;letter-spacing:.05em;text-transform:uppercase;color:var(--faint);margin:4px 6px 9px">업체(광고주)</div><div id="advs"><div class="empty">불러오는 중…</div></div></div>
+    <div class="advlist"><div class="sh row" style="font-size:10px;font-weight:750;letter-spacing:.05em;text-transform:uppercase;color:var(--faint);margin:4px 6px 9px">업체(광고주)<button class="addadv" onclick="showAddAdvertiser()">＋ 업체 추가</button></div><div id="advs"><div class="empty">불러오는 중…</div></div></div>
     <div class="own-panel" id="ownPanel"><div class="empty">왼쪽에서 업체를 선택하세요.</div></div></div>`;
   // 탭 인덱스(시트명/탭명 조회용) 1회 로드
   if(!STATE.tabs.length){ const r=await api('/api/trackb/tabs?limit=500'); STATE.tabs=(r&&r.tabs)||[]; }
@@ -569,6 +571,34 @@ async function renderOwnershipView(){
   if(!r||!r.ok){ $('#advs').innerHTML=`<div class="empty">업체 목록은 admin/master에서 제공</div>`; return; }
   STATE.advs=r.items||[];
   $('#advs').innerHTML = STATE.advs.map((a,i)=>`<div class="advitem" data-i="${i}" onclick="selAdv(${i})"><span class="ava">${esc((a.name||'?').slice(0,1))}</span><span class="nm">${esc(a.name)}</span><span class="ct">${a.owned}</span></div>`).join('')||`<div class="empty">등록된 업체 없음</div>`;
+}
+// 업체(거래처) 추가 — 기존 포털 거래처 원장(POST /api/portal/advertisers, adminOrMaster) 재사용.
+//   담당 AE(inad_pm)까지 입력하면 소유 지정 + AE 스코프에 즉시 사용 가능.
+function showAddAdvertiser(){
+  STATE.advCur=null; document.querySelectorAll('.advitem').forEach(el=>el.classList.remove('on'));
+  $('#ownPanel').innerHTML = `
+    <div class="ph2"><span class="big">＋</span><div><h2>업체(거래처) 추가</h2><div class="acc">새 광고주를 등록하면 이 목록에 뜨고, 아래에서 시트/탭 소유를 지정할 수 있습니다.</div></div></div>
+    <div class="sect"><div class="st">새 업체</div>
+      <div class="add">
+        <label>거래처명 *</label>
+        <input id="advName" placeholder="예: (주)콩고물" autocomplete="off" onkeydown="if(event.key==='Enter')createAdvertiser()">
+        <label style="margin-top:11px">담당 AE (선택 · 로그인 아이디와 정확히 일치해야 스코프 연결)</label>
+        <input id="advPm" placeholder="예: 김수만" autocomplete="off" onkeydown="if(event.key==='Enter')createAdvertiser()">
+        <div id="advErr" style="color:var(--bad);font-size:12px;margin-top:9px;min-height:15px"></div>
+        <button class="btn pri assignbtn" onclick="createAdvertiser()">＋ 업체 등록</button>
+      </div>
+    </div>`;
+  setTimeout(()=>{ const el=$('#advName'); if(el) el.focus(); },40);
+}
+async function createAdvertiser(){
+  const name=($('#advName').value||'').trim(), inad_pm=($('#advPm').value||'').trim();
+  const err=$('#advErr'); if(err) err.textContent='';
+  if(!name){ if(err) err.textContent='거래처명을 입력하세요.'; return; }
+  const r=await api('/api/portal/advertisers',{method:'POST',body:JSON.stringify({ name, inad_pm })});
+  if(r&&r.ok){ toast('업체 등록: '+name); const newId=r.data&&r.data.id;
+    await renderOwnershipView();
+    const idx=(STATE.advs||[]).findIndex(a=>a.id===newId); if(idx>=0) selAdv(idx);
+  } else if(err){ err.textContent=(r&&r.error)||'등록 실패'; }
 }
 function buildTabIndex(){ STATE.sheetMap={}; STATE.tabIndex={};
   for(const t of STATE.tabs){ if(!STATE.sheetMap[t.sheetId]) STATE.sheetMap[t.sheetId]={title:t.spreadsheetTitle||t.sheetId,tabs:[]};
