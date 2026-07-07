@@ -195,6 +195,9 @@
     .status-badge-pending { font-size:.62rem; font-weight:700; padding:3px 8px; border-radius:6px; background:var(--warn-light); color:#92400E; }
     .status-badge-submitted { font-size:.62rem; font-weight:700; padding:3px 8px; border-radius:6px; background:var(--ok-light); color:#065F46; }
     .status-badge-paid { font-size:.62rem; font-weight:700; padding:3px 8px; border-radius:6px; background:#E0E7FF; color:#3730A3; }
+    .status-badge-order { font-size:.62rem; font-weight:700; padding:3px 8px; border-radius:6px; background:#E0EDFF; color:#1B4F9C; }
+    .status-badge-order.attention { background:#FEE2E2; color:#991B1B; }
+    .result-card.is-order-pending { cursor:default; }
 
     /* ─── Result Group Card ─── */
     .result-group-card {
@@ -252,6 +255,8 @@
     .result-card.done:hover, .result-group-card.done:hover { border-color:var(--border); box-shadow:none; }
     .result-group-item-badge.done { background:var(--ok-light); color:#065F46; }
     .result-group-item-badge.paid { background:#E0E7FF; color:#3730A3; }
+    .result-group-item-badge.order { background:#E0EDFF; color:#1B4F9C; }
+    .result-group-item-badge.order.attention { background:#FEE2E2; color:#991B1B; }
 
     /* ─── Section ─── */
     .home-section { padding:0 0 12px; }
@@ -1045,12 +1050,15 @@ let _reviewListError = '';
 let _reviewListLoading = true;                       // 최초/재조회 중 스피너 유지용
 let _reviewListTruncated = false;                    // 서버 LIMIT(400)에 걸려 오래된 완료건이 잘렸을 가능성
 
-async function loadReviewList(user) {
+let _orderPollTimer = null;   // '구매양식 반영중' 주문 자동 재조회 타이머
+let _orderPollCount = 0;      // 폴링 상한(무한폴링 방지)
+
+async function loadReviewList(user, opts = {}) {
   const name = user.name || "";
   const phone8 = user.phone8 || "";
+  const silent = !!opts.silent;   // 폴링 재조회는 스피너 깜빡임/에러표시 없이
 
-  _reviewListLoading = true;
-  renderReviewSubTab();
+  if (!silent) { _reviewListLoading = true; renderReviewSubTab(); }
   try {
     // includeSubmitted=1 → 제출완료 건 포함 응답 (isSubmitted로 대기/완료 분리)
     const res = await gasGet({ action: "searchAll", query: name, phone8, includeSubmitted: "1" });
@@ -1060,14 +1068,30 @@ async function loadReviewList(user) {
       pending: results.filter(item => !item.isSubmitted),
       done:    results.filter(item => item.isSubmitted),
     };
-    _reviewListTruncated = results.length >= 400; // 서버 LIMIT 도달 = 절단 가능성
+    // 병합된 주문(isOrderPending)은 서버 LIMIT(400) 밖 append분 → 절단 판정에서 제외
+    _reviewListTruncated = results.filter(item => !item.isOrderPending).length >= 400;
     _reviewListError = '';
   } catch(e) {
-    _reviewListData = { pending: [], done: [] };
-    _reviewListError = e.message || '알 수 없는 오류';
+    // silent 재조회 실패는 기존 화면 유지(조용히 무시) — 방금 보던 목록이 사라지지 않게
+    if (!silent) { _reviewListData = { pending: [], done: [] }; _reviewListError = e.message || '알 수 없는 오류'; }
   }
   _reviewListLoading = false;
   renderReviewSubTab();
+  _scheduleOrderPendingRefresh(user);
+}
+
+// '구매양식 반영중' 주문이 남아있을 때만 가벼운 자동 재조회(가시상태 한정·상한 6회≈3분).
+// 시트반영(written)+색인빌드(~5분) 후 review_index 정상행으로 대체되면 배지가 사라진다.
+function _scheduleOrderPendingRefresh(user) {
+  if (_orderPollTimer) { clearTimeout(_orderPollTimer); _orderPollTimer = null; }
+  const hasOrderPending = (_reviewListData.pending || []).some(i => i.isOrderPending);
+  if (!hasOrderPending) { _orderPollCount = 0; return; }   // 다 걷히면 리셋
+  if (_orderPollCount >= 6) return;                          // 무한폴링 금지(상한)
+  _orderPollTimer = setTimeout(() => {
+    _orderPollCount++;
+    if (document.visibilityState === 'visible') loadReviewList(user, { silent: true });
+    else _scheduleOrderPendingRefresh(user);   // 숨김 상태면 재예약만(부하 억제)
+  }, 30000);
 }
 
 // bfcache 복원(제출 후 뒤로가기) 시 리뷰 내역 재조회 — 방금 제출한 건이 제출완료 탭에 반영되게
@@ -1160,7 +1184,9 @@ function renderReviewSubTab() {
       // 제출완료 카드: 입금칸에 데이터가 채워졌으면(isPaid) "입금완료" 배지 병기
       const badgeHtml = isDone
         ? `${item.isPaid ? '<span class="status-badge-paid">입금완료</span> ' : ''}<span class="status-badge-submitted">제출완료</span>`
-        : `<span class="status-badge-pending">${escHtml(_pendingBadgeText(item))}</span>`;
+        : item.isOrderPending
+          ? `<span class="status-badge-order${item.orderStage === 'attention' ? ' attention' : ''}">${item.orderStage === 'attention' ? '확인필요' : '구매양식 반영중'}</span>`
+          : `<span class="status-badge-pending">${escHtml(_pendingBadgeText(item))}</span>`;
       const roundBadge = item.round
         ? `<span style="display:inline-block;font-size:.6rem;font-weight:700;padding:1px 6px;border-radius:10px;background:#e8f1fe;color:#1b64da;border:1px solid #cce0fb;margin-left:4px;vertical-align:middle">${escHtml(item.round)}</span>`
         : "";
@@ -1191,7 +1217,7 @@ function renderReviewSubTab() {
         <div class="result-body">${productHtml}</div>
         <div class="result-right">
           ${badgeHtml}
-          ${isDone ? '' : '<i class="fas fa-chevron-right result-chevron"></i>'}
+          ${(isDone || item.isOrderPending) ? '' : '<i class="fas fa-chevron-right result-chevron"></i>'}
         </div>`;
       if (isDone) {
         // 제출완료 카드: 본문(rc-main) + 하단 구분선 액션(이미지 확인·수정요청)을 카드 안 한 몸으로
@@ -1199,7 +1225,11 @@ function renderReviewSubTab() {
         card.appendChild(_reEditButtonEl(item));
       } else {
         card.innerHTML = _rowHtml;
-        card.addEventListener("click", () => goToSubmit(items));
+        if (item.isOrderPending) {
+          card.classList.add("is-order-pending");   // 시트반영 전 주문 = 제출 대상 아님(클릭 비활성)
+        } else {
+          card.addEventListener("click", () => goToSubmit(items));
+        }
       }
       listEl.appendChild(card);
     } else {
@@ -1207,6 +1237,8 @@ function renderReviewSubTab() {
       const groupCard = document.createElement("div");
       groupCard.className = "result-group-card" + (isDone ? " done" : "");
       const campLabel = items[0].displayNameTC || items[0].tcDisplayName || items[0].tabName || items[0].campaignName || "";
+      const groupSubmitItems = items.filter(i => !i.isOrderPending);   // 주문(반영중) 항목은 제출 대상 아님
+      const groupClickable = !isDone && groupSubmitItems.length > 0;
 
       const itemLines = items.map(item => {
         const taskDate = item.startDate || "";
@@ -1223,7 +1255,7 @@ function renderReviewSubTab() {
           <i class="fas ${isDone ? 'fa-check' : 'fa-box'}" style="color:${isDone ? 'var(--ok)' : 'var(--p)'};font-size:.72rem;flex-shrink:0"></i>
           <span class="result-group-item-label">${escHtml(taskLabel)}${escHtml(roundTxt)}${doneDate ? ` <span style="color:var(--t4)">· 제출 ${doneDate}</span>` : ''}</span>
           ${isDone && item.isPaid ? '<span class="result-group-item-badge paid">입금완료</span>' : ''}
-          <span class="result-group-item-badge${isDone ? ' done' : ''}">${isDone ? '제출완료' : escHtml(_pendingBadgeText(item))}</span>
+          <span class="result-group-item-badge${isDone ? ' done' : ''}${item.isOrderPending ? ' order' + (item.orderStage === 'attention' ? ' attention' : '') : ''}">${isDone ? '제출완료' : item.isOrderPending ? (item.orderStage === 'attention' ? '확인필요' : '반영중') : escHtml(_pendingBadgeText(item))}</span>
           ${isDone ? _reEditBtnHtml(item) : ''}
         </div>`;
       }).join("");
@@ -1236,10 +1268,10 @@ function renderReviewSubTab() {
             ${campLabel ? `<div style="font-size:.68rem;color:var(--t3);margin-top:1px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${escHtml(itemName)}</div>` : ""}
           </div>
           <span class="result-group-badge"><i class="fas fa-layer-group"></i> ${items.length}건</span>
-          ${isDone ? '' : '<i class="fas fa-chevron-right" style="color:var(--t3);font-size:.8rem;flex-shrink:0"></i>'}
+          ${groupClickable ? '<i class="fas fa-chevron-right" style="color:var(--t3);font-size:.8rem;flex-shrink:0"></i>' : ''}
         </div>
         <div class="result-group-items">${itemLines}</div>`;
-      if (!isDone) groupCard.addEventListener("click", () => goToSubmit(items));
+      if (groupClickable) groupCard.addEventListener("click", () => goToSubmit(groupSubmitItems));
       listEl.appendChild(groupCard);
     }
   });
