@@ -17,6 +17,11 @@ function makeQueryPool(scn) {
       q.push(s);
       if (/FROM tab_configs/.test(s)) return { rows: scn.meta || [] };
       if (/FROM work_orders/.test(s)) return { rows: scn.wo || [] };
+      if (/FROM advertiser_campaigns ac JOIN advertisers a/.test(s)) return { rows: scn.staffScope || [] };  // scopedTabsForStaff
+      if (/tab_gid FROM raw_sheet_tabs WHERE sheet_id=\$1 AND tab_name=\$2/.test(s)) {
+        if (Array.isArray(scn.tabGidRows)) return { rows: scn.tabGidRows.map(g => ({ tab_gid: g })) };  // 동명탭(여러 gid)
+        return { rows: scn.tabGidRow ? [{ tab_gid: scn.tabGidRow }] : [] };
+      }
       if (/FROM participant_edits/.test(s)) return { rows: scn.edits || [] };
       if (/reviewer_name AS name.*FROM campaign_participants.*ORDER BY seq/.test(s)) return { rows: scn.roster || [] };
       return { rows: [] };
@@ -220,6 +225,24 @@ async function run() {
   assert.equal(bOnly.buckets.benign, 1, '4d: B-only 편집분 = benign');
   assert.equal(bOnly.buckets.real, 0, '4e: B-only 편집분 real 아님');
   console.log('  4. classifyParity editedKeys — BD-8 benign·하위호환 ✓');
+
+  // ═══ 6. AE(staff) 스코프 — 담당 탭만 접근(교차 차단) ═══
+  let p6 = makeQueryPool({ staffScope: [{ sheetId: 'S1', tabGid: null }] }); svc.__setPoolForTest(p6);
+  assert.equal(await svc.canAccessTab({ role: 'staff', staffName: '김수만', sheetId: 'S1', tabName: 'T' }), true, '6a: 시트 전체 소유 → 접근 허용');
+  assert.equal(await svc.canAccessTab({ role: 'staff', staffName: '김수만', sheetId: 'OTHER', tabName: 'T' }), false, '6a2: 소유 밖 시트 → 차단');
+  p6 = makeQueryPool({ staffScope: [{ sheetId: 'S1', tabGid: '99' }], tabGidRow: '99' }); svc.__setPoolForTest(p6);
+  assert.equal(await svc.canAccessTab({ role: 'staff', staffName: '김수만', sheetId: 'S1', tabName: 'T' }), true, '6b: 담당 탭(gid 일치) → 허용');
+  p6 = makeQueryPool({ staffScope: [{ sheetId: 'S1', tabGid: '99' }], tabGidRow: '77' }); svc.__setPoolForTest(p6);
+  assert.equal(await svc.canAccessTab({ role: 'staff', staffName: '김수만', sheetId: 'S1', tabName: 'T' }), false, '6c: 다른 탭(gid 불일치) → 차단');
+  p6 = makeQueryPool({ staffScope: [] }); svc.__setPoolForTest(p6);
+  assert.equal(await svc.canAccessTab({ role: 'staff', staffName: '무담당', sheetId: 'S1', tabName: 'T' }), false, '6d: 담당 업체 없음 → 차단');
+  assert.equal(await svc.canAccessTab({ role: 'master', sheetId: 'X', tabName: 'Y' }), true, '6e: master 전체 허용(스코프 무관)');
+  // 6f: 동명탭(같은 tab_name 여러 gid) — 소유 gid가 하나라도 있으면 결정적으로 허용(LIMIT 1 비결정 제거)
+  p6 = makeQueryPool({ staffScope: [{ sheetId: 'S1', tabGid: '99' }], tabGidRows: ['77', '99'] }); svc.__setPoolForTest(p6);
+  assert.equal(await svc.canAccessTab({ role: 'staff', staffName: '김수만', sheetId: 'S1', tabName: 'T' }), true, '6f: 동명탭 중 소유 gid 존재 → 허용(결정적)');
+  p6 = makeQueryPool({ staffScope: [{ sheetId: 'S1', tabGid: '99' }], tabGidRows: ['77', '88'] }); svc.__setPoolForTest(p6);
+  assert.equal(await svc.canAccessTab({ role: 'staff', staffName: '김수만', sheetId: 'S1', tabName: 'T' }), false, '6f2: 동명탭 전부 미소유 → 차단');
+  console.log('  6. AE(staff) 스코프 — canAccessTab 담당/차단(교차 접근 차단) ✓');
 
   console.log('✅ participantEdits 테스트 전체 통과');
 }
