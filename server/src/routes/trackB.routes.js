@@ -45,6 +45,12 @@ router.get('/tabs', authMiddleware, adminOrMasterMiddleware, async (req, res, ne
   } catch (err) { next(err); }
 });
 
+// ── 관측 대시보드: 투영된 전 탭 롤업(카운트 대조 + 준비도) — adminOrMaster ──
+router.get('/overview', authMiddleware, adminOrMasterMiddleware, async (req, res, next) => {
+  try { res.json({ ok: true, items: await svc.overview() }); }
+  catch (err) { next(err); }
+});
+
 // ── 소유 지정 UI 좌측: 업체 목록 + 소유수 — admin/master ──
 router.get('/advertisers', authMiddleware, adminOrMasterMiddleware, async (req, res, next) => {
   try { res.json({ ok: true, items: await svc.listAdvertisersWithOwnership() }); }

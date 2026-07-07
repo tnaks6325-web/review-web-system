@@ -336,6 +336,47 @@ async function listAdvertisersWithOwnership() {
   return rows;
 }
 
+// ── 관측 대시보드: 투영된 전 탭의 롤업(카운트 대조 + 준비도) 한 번에. 정밀 parity(진짜불일치)는 탭별 온디맨드. ──
+//   경량 집계(탭당 상관 서브쿼리, 인덱스 사용) — 카운트 레벨 대조라 "동수 다른사람" 은 못 잡으니 게이트가 아닌 트리아지.
+async function overview() {
+  const db = getPool();
+  const { rows } = await db.query(
+    `WITH b AS (
+       SELECT sheet_id, tab_name, MIN(tab_gid) AS tab_gid,
+              COUNT(*) FILTER (WHERE active) AS b_total,
+              COUNT(*) FILTER (WHERE active AND is_submitted) AS b_sub,
+              COUNT(*) FILTER (WHERE active AND is_paid) AS b_paid,
+              COUNT(*) FILTER (WHERE active AND order_submission_id IS NOT NULL) AS b_linked,
+              MAX(imported_at) AS last_proj
+         FROM campaign_participants WHERE deleted_at IS NULL
+         GROUP BY sheet_id, tab_name
+     )
+     SELECT b.sheet_id AS "sheetId", b.tab_name AS "tabName", b.tab_gid AS "tabGid",
+            b.b_total AS "bTotal", b.b_sub AS "bSub", b.b_paid AS "bPaid", b.b_linked AS "bLinked",
+            b.last_proj AS "lastProjectedAt",
+            rst.spreadsheet_title AS "spreadsheetTitle",
+            (SELECT COUNT(*) FROM review_index ri WHERE ri.sheet_id=b.sheet_id AND ri.tab_name=b.tab_name AND ri.row_index IS NOT NULL) AS "aTotal",
+            (SELECT COUNT(*) FROM review_index ri WHERE ri.sheet_id=b.sheet_id AND ri.tab_name=b.tab_name AND ri.is_submitted) AS "aSub",
+            (SELECT COUNT(*) FROM review_index ri WHERE ri.sheet_id=b.sheet_id AND ri.tab_name=b.tab_name AND ri.is_submitted2='PAID') AS "aPaid",
+            EXISTS(SELECT 1 FROM advertiser_campaigns ac WHERE ac.deleted_at IS NULL AND ac.sheet_id=b.sheet_id
+                     AND (ac.tab_gid IS NULL OR ac.tab_gid=b.tab_gid)) AS "owned",
+            EXISTS(SELECT 1 FROM work_orders wo WHERE wo.deleted_at IS NULL
+                     AND wo.linked_tab_sheet_id=b.sheet_id AND wo.linked_tab_name=b.tab_name) AS "woLinked"
+       FROM b LEFT JOIN raw_sheet_tabs rst ON rst.sheet_id=b.sheet_id AND rst.tab_name=b.tab_name
+      ORDER BY rst.spreadsheet_title NULLS LAST, b.tab_name`);
+  return rows.map(r => {
+    const aTotal = Number(r.aTotal), aSub = Number(r.aSub), aPaid = Number(r.aPaid);
+    const bTotal = Number(r.bTotal), bSub = Number(r.bSub), bPaid = Number(r.bPaid);
+    const countMatch = (aTotal === bTotal && aSub === bSub && aPaid === bPaid);
+    return {
+      sheetId: r.sheetId, tabName: r.tabName, tabGid: r.tabGid, spreadsheetTitle: r.spreadsheetTitle || r.sheetId,
+      a: { total: aTotal, submitted: aSub, paid: aPaid },
+      b: { total: bTotal, submitted: bSub, paid: bPaid, linked: Number(r.bLinked) },
+      countMatch, owned: !!r.owned, woLinked: !!r.woLinked, lastProjectedAt: r.lastProjectedAt,
+    };
+  });
+}
+
 // 광고주 스코프: 이 업체가 소유한 (sheet_id, tab_gid) 집합. tab_gid NULL 소유 = 그 시트 전체.
 async function scopedTabsForAdvertiser(advertiserId) {
   if (!advertiserId) return { sheetIds: [], tabGids: [], allTabSheetIds: [] };
@@ -628,6 +669,7 @@ module.exports = {
   listOwnership,
   listAdvertisersWithOwnership,
   scopedTabsForAdvertiser,
+  overview,
   workdeskTab,
   editWorkdeskRow,
   revertWorkdeskEdit,

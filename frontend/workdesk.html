@@ -85,6 +85,18 @@
   .gridbar label{font-size:12px;color:var(--muted);font-weight:650}
   .gridbar select{font:inherit;font-size:12.5px;padding:5px 9px;border:1px solid var(--line2);border-radius:7px;background:var(--card);color:var(--ink)}
   .gnote{font-size:11px;color:var(--faint)} .gnote b{color:var(--muted)}
+  /* ── 관측 대시보드 ── */
+  .ovwrap{padding:18px 22px;overflow:auto;height:calc(100vh - 50px)}
+  .ovnote{font-size:11.5px;color:var(--faint);margin:-4px 0 14px;line-height:1.5} .ovnote b{color:var(--muted)}
+  .ovsearch{font:inherit;font-size:12.5px;padding:6px 11px;border:1px solid var(--line2);border-radius:8px;background:var(--card);color:var(--ink);width:180px}
+  .tablewrap{overflow-x:auto;border:1px solid var(--line);border-radius:10px;background:var(--card)}
+  table.ovtable{width:100%;border-collapse:collapse;font-size:12.5px;min-width:820px}
+  table.ovtable thead th{background:var(--card2);text-align:left;padding:9px 11px;font-size:10.5px;color:var(--muted);font-weight:750;white-space:nowrap;position:sticky;top:0}
+  table.ovtable td{padding:8px 11px;border-top:1px solid var(--line);white-space:nowrap} table.ovtable tbody tr:hover{background:var(--card2)}
+  table.ovtable td.num,table.ovtable td.ctr{text-align:center} table.ovtable td.ctr{font-weight:800}
+  .ovnm{cursor:pointer} .ovnm:hover b{color:var(--accent);text-decoration:underline} .ovsub{font-size:10.5px;color:var(--faint);font-weight:400}
+  .ovtable .ok{color:var(--safe)} .ovtable .no{color:var(--bad)} .ovtable .vs{color:var(--line2);margin:0 1px} .ovtable .diff{color:var(--bad);font-weight:700}
+  .btn.xs{font-size:11px;padding:3px 9px}
   .rail{border-left:1px solid var(--line);background:var(--card);padding:14px 12px;overflow:auto}
   .rail .sh{font-size:10px;font-weight:750;letter-spacing:.05em;text-transform:uppercase;color:var(--faint);margin:2px 2px 10px}
   .parity{border:1px solid var(--line);border-radius:10px;padding:12px;margin-bottom:14px}
@@ -152,6 +164,7 @@ function toast(m){ const t=$('#toast'); t.textContent=m; t.classList.add('show')
 function parseJwt(t){ try{ return JSON.parse(atob(t.split('.')[1])); }catch(_){ return {}; } }
 
 let STATE = { role:'', name:'', view:'workdesk', tabs:[], cur:null, wd:null, freezeUpto:null,
+              ov:[], ovq:'', pendingTab:null,
               advs:[], advCur:null, tabIndex:{}, sheetMap:{}, addMode:'all', addSheet:null, addTabs:{} };
 
 async function boot(){
@@ -179,6 +192,7 @@ function renderShell(){
       <span class="logo">통합 작업대 <span class="tag">TRACK B · 그림자</span></span>
       ${isAdmin?`<nav class="nav">
         <button class="navb" data-v="workdesk" onclick="switchView('workdesk')">작업대</button>
+        <button class="navb" data-v="overview" onclick="switchView('overview')">관측</button>
         <button class="navb" data-v="ownership" onclick="switchView('ownership')">소유 지정</button></nav>`:''}
       <span class="sp"></span>
       <span class="rolebadge">${esc(STATE.role||'?')}${STATE.name?(' · '+esc(STATE.name)):''}</span>
@@ -188,7 +202,7 @@ function renderShell(){
   switchView(STATE.view||'workdesk');
 }
 function switchView(v){ STATE.view=v; document.querySelectorAll('.navb').forEach(b=>b.classList.toggle('on',b.dataset.v===v));
-  if(v==='ownership') renderOwnershipView(); else renderWorkdeskView(); }
+  if(v==='ownership') renderOwnershipView(); else if(v==='overview') renderOverviewView(); else renderWorkdeskView(); }
 
 // ══ 작업대 뷰 ══
 function renderWorkdeskView(){
@@ -205,6 +219,10 @@ async function loadTabs(){
   if(!r||!r.ok){ $('#tabs').innerHTML=`<div class="empty">작업 목록은 관리자 로그인에서 제공됩니다.</div>`; return; }
   STATE.tabs=r.tabs||[]; $('#tcount').textContent=STATE.tabs.length;
   $('#tabs').innerHTML = STATE.tabs.map((t,i)=>`<div class="titem" data-i="${i}" onclick="selTab(${i})">${esc(t.tabName)}<div class="sub">${esc(t.spreadsheetTitle||'')}</div></div>`).join('')||`<div class="empty">활성 작업 없음</div>`;
+  // 관측 대시보드에서 "열기"로 넘어온 탭 자동 선택
+  if(STATE.pendingTab){ const pt=STATE.pendingTab; STATE.pendingTab=null;
+    const idx=STATE.tabs.findIndex(t=>t.sheetId===pt.sheetId&&t.tabName===pt.tabName);
+    if(idx>=0) selTab(idx); else { STATE.tabs.push(pt); selTab(STATE.tabs.length-1); } }
 }
 async function selTab(i){ const t=STATE.tabs[i]; STATE.cur=t;
   document.querySelectorAll('.titem').forEach(el=>el.classList.toggle('on',+el.dataset.i===i));
@@ -307,6 +325,44 @@ function setFreeze(v){ STATE.freezeUpto=v||null; if(STATE.wd) renderWorkdesk(STA
 // 그리드 셀 편집: 헤더/필드는 data 속성으로만 전달(주입 안전). beginEdit/revertEdit(기존 오버레이 경로) 재사용.
 function beginEditCell(el){ beginEdit(el, el.getAttribute('data-id'), el.getAttribute('data-field')); }
 function revertCell(ev, el){ if(ev)ev.stopPropagation(); revertEdit(el.getAttribute('data-id'), el.getAttribute('data-field')); }
+
+// ══ 관측 대시보드 뷰 ══
+async function renderOverviewView(){
+  $('#viewroot').innerHTML=`<div class="ovwrap"><div id="ovhead"></div><div id="ovbody"><div class="empty">불러오는 중…</div></div></div>`;
+  const r=await api('/api/trackb/overview');
+  if(!r||!r.ok){ $('#ovbody').innerHTML=`<div class="empty">관측 데이터는 admin/master에서 제공</div>`; return; }
+  STATE.ov=r.items||[]; renderOverviewHead(); renderOverviewBody(STATE.ovq||'');
+}
+function renderOverviewHead(){
+  const it=STATE.ov||[]; const n=it.length, nM=it.filter(x=>x.countMatch).length, nO=it.filter(x=>x.owned).length, nW=it.filter(x=>x.woLinked).length;
+  $('#ovhead').innerHTML=`<div class="mh"><h1>관측 대시보드</h1><span class="bd g">투영 ${n}탭</span>
+    <span class="bd">카운트일치 ${nM}</span><span class="bd">소유 ${nO}</span><span class="bd">발주 ${nW}</span>
+    <span class="sp" style="flex:1"></span><input id="ovq" class="ovsearch" placeholder="탭/시트 검색" oninput="renderOverviewBody(this.value)" value="${esc(STATE.ovq||'')}"></div>
+    <div class="ovnote">A(현행 시트)↔B(Track B) <b>카운트 대조</b>와 준비도입니다. 카운트대조는 트리아지(동수·다른사람은 못 잡음) — 실제 전환 게이트는 행 <b>[정밀]</b>(진짜 불일치 0) 또는 탭을 열어 확인하세요.</div>`;
+}
+function renderOverviewBody(q){
+  q=(q||'').trim(); STATE.ovq=q; const it=STATE.ov||[];
+  const cmp=(a,b)=>`${a}<span class="vs">/</span>${b}${a===b?'':' <span class="diff">≠</span>'}`;
+  const chk=b=>b?'<span class="ok">✓</span>':'<span class="no">–</span>';
+  const rows=it.map((o,i)=>({o,i})).filter(({o})=>!q||((o.tabName||'')+(o.spreadsheetTitle||'')).includes(q)).map(({o,i})=>`<tr>
+      <td class="ovnm" onclick="openTabFromOverview(${i})" title="작업대에서 열기"><b>${esc(o.tabName)}</b><div class="ovsub">${esc(o.spreadsheetTitle)}</div></td>
+      <td class="num">${o.b.total}</td>
+      <td class="num">${cmp(o.a.total,o.b.total)}</td>
+      <td class="num">${cmp(o.a.submitted,o.b.submitted)}</td>
+      <td class="num">${cmp(o.a.paid,o.b.paid)}</td>
+      <td class="ctr">${o.countMatch?'<span class="ok">✓</span>':'<span class="no">✗</span>'}</td>
+      <td class="ctr">${chk(o.owned)}</td>
+      <td class="ctr">${chk(o.woLinked)}</td>
+      <td class="num">${o.b.linked}/${o.b.total}</td>
+      <td class="ctr" id="prec-${i}"><button class="btn xs" onclick="checkPrecise(${i})">정밀</button></td>
+    </tr>`).join('')||`<tr><td colspan="10" class="empty">투영된 탭 없음 — 자동 투영(10분) 또는 작업대의 "그림자 투영"을 기다리세요.</td></tr>`;
+  $('#ovbody').innerHTML=`<div class="tablewrap"><table class="ovtable"><thead><tr><th>탭 / 시트</th><th>B참여</th><th>참여 A/B</th><th>제출 A/B</th><th>입금 A/B</th><th>카운트</th><th>소유</th><th>발주</th><th>주문링크</th><th>진짜불일치</th></tr></thead><tbody>${rows}</tbody></table></div>`;
+}
+async function checkPrecise(i){ const o=STATE.ov[i]; const cell=document.getElementById('prec-'+i); if(cell)cell.textContent='…';
+  const p=await api(`/api/trackb/parity?sheetId=${encodeURIComponent(o.sheetId)}&tabName=${encodeURIComponent(o.tabName)}`);
+  if(cell){ if(p&&p.ok){ const real=p.buckets.real; cell.innerHTML= real===0?'<span class="ok">✓ 0</span>':`<span class="no">✗ ${real}</span>`; } else cell.innerHTML='<span class="no">오류</span>'; }
+}
+function openTabFromOverview(i){ const o=STATE.ov[i]; STATE.pendingTab={sheetId:o.sheetId,tabName:o.tabName,tabGid:o.tabGid,spreadsheetTitle:o.spreadsheetTitle}; switchView('workdesk'); }
 function beginEdit(el, rowId, field){
   if(el.querySelector('input')) return;
   const cur=el.getAttribute('data-val')||'';
