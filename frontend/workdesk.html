@@ -35,7 +35,7 @@
   .main{padding:18px 22px;overflow:auto}
   .mh{display:flex;align-items:center;gap:10px;flex-wrap:wrap;margin-bottom:14px}
   .mh h1{font-size:19px;margin:0;font-weight:800;letter-spacing:-.02em}
-  .bd{font-size:10.5px;font-weight:700;padding:3px 9px;border-radius:6px;background:var(--card2);color:var(--muted);border:1px solid var(--line)} .bd.g{background:var(--safe-soft);color:var(--safe);border-color:transparent}
+  .bd{font-size:10.5px;font-weight:700;padding:3px 9px;border-radius:6px;background:var(--card2);color:var(--muted);border:1px solid var(--line)} .bd.g{background:var(--safe-soft);color:var(--safe);border-color:transparent} .bd.sot{background:var(--accent-soft);color:var(--accent);border-color:transparent}
   .metagrid{display:grid;grid-template-columns:repeat(auto-fill,minmax(150px,1fr));gap:9px;margin-bottom:16px}
   .mf{background:var(--card);border:1px solid var(--line);border-radius:9px;padding:9px 11px}
   .mf .k{font-size:10px;color:var(--faint);text-transform:uppercase;letter-spacing:.03em} .mf .v{font-size:13px;font-weight:600;margin-top:2px}
@@ -279,9 +279,12 @@ function renderWorkdesk(wd){
       ${canEdit?`<div id="addbox"></div><button class="btn" style="margin-top:10px" onclick="showAddForm()">＋ 참여자 추가</button>`:''}
       ${canEdit?'<div class="editnote">편집은 이 화면(Track B)에만 저장됩니다 — 구글시트·주문은 바뀌지 않습니다(리허설). 셀 클릭으로 수정, ↩로 되돌리기.</div>':''}`;
   }
+  const sot=wd.sourceOfTruth||'sheet';
+  const sotBadge=`<span class="bd ${sot==='db'?'sot':''}" title="이 탭의 진실원천(원본). 시트=레거시(현행 Track A) · Track B=DB 원본(cutover). 전환해도 쓰기반영 엔진(P2) 전까지 라이브 동작은 불변.">원본: ${sot==='db'?'Track B':'시트'}</span>`;
+  const flipBtn=isMaster?`<button class="btn" id="sotBtn" title="진실원천 전환(옵션 A · 되돌리기 가능). 'db' 전환은 진짜불일치 0 게이트를 통과해야 함(force로 우회). 현재는 상태·게이트만 — 시트 쓰기반영은 P2 엔진 예정." onclick="flipSoT('${sot==='db'?'sheet':'db'}')">${sot==='db'?'시트로 되돌리기':'Track B로 전환'}</button>`:'';
   $('#main').innerHTML=`<div class="mh"><h1>${esc(STATE.cur.tabName)}</h1>
-    ${wd.maskPII?'<span class="bd">개인정보 마스킹(광고주)</span>':''}<span class="bd g">참여자 ${c.total||0}</span>${gridMode?'<span class="bd" title="구글시트와 동일 컬럼·가로 펼침 (열람 전용)">시트 그리드 · 열람</span>':''}${warn.join('')}
-    ${isMaster?'<span class="sp" style="flex:1"></span><button class="btn" id="projBtn" onclick="projectCur()">그림자 투영(새로고침)</button>':''}</div>
+    ${wd.maskPII?'<span class="bd">개인정보 마스킹(광고주)</span>':''}<span class="bd g">참여자 ${c.total||0}</span>${sotBadge}${gridMode?'<span class="bd" title="구글시트와 동일 컬럼·가로 펼침 (열람 전용)">시트 그리드 · 열람</span>':''}${warn.join('')}
+    ${isMaster?`<span class="sp" style="flex:1"></span>${flipBtn}<button class="btn" id="projBtn" onclick="projectCur()">그림자 투영(새로고침)</button>`:''}</div>
     <div class="metagrid">${metaCards}</div>
     <div class="counts"><div class="cc"><div class="big">${c.total||0}</div><div class="lb">참여자</div></div><div class="cc s"><div class="big">${c.submitted||0}</div><div class="lb">제출완료</div></div><div class="cc p"><div class="big">${c.paid||0}</div><div class="lb">입금완료</div></div></div>
     ${tableSection}`;
@@ -388,8 +391,9 @@ function renderOverviewBody(q){
       <td class="ctr" id="prec-${i}">${typeof o.real==='number'
         ? `<span class="${o.real===0?'ok':'no'}" style="cursor:pointer" title="추이 보기" onclick="showTrend(${i})">${o.real===0?'✓ 0':'✗ '+o.real}</span>`
         : `<button class="btn xs" onclick="checkPrecise(${i})">정밀</button>`}</td>
-    </tr>`).join('')||`<tr><td colspan="10" class="empty">투영된 탭 없음 — 자동 투영(10분) 또는 작업대의 "그림자 투영"을 기다리세요.</td></tr>`;
-  $('#ovbody').innerHTML=`<div class="tablewrap"><table class="ovtable"><thead><tr><th>탭 / 시트</th><th>B참여</th><th>참여 A/B</th><th>제출 A/B</th><th>입금 A/B</th><th>카운트</th><th>소유</th><th>발주</th><th>주문링크</th><th>진짜불일치</th></tr></thead><tbody>${rows}</tbody></table></div>`;
+      <td class="ctr"><span class="bd ${o.sourceOfTruth==='db'?'sot':''}" title="진실원천(원본): 시트=현행 Track A · Track B=DB 원본(cutover)">${o.sourceOfTruth==='db'?'Track B':'시트'}</span></td>
+    </tr>`).join('')||`<tr><td colspan="11" class="empty">투영된 탭 없음 — 자동 투영(10분) 또는 작업대의 "그림자 투영"을 기다리세요.</td></tr>`;
+  $('#ovbody').innerHTML=`<div class="tablewrap"><table class="ovtable"><thead><tr><th>탭 / 시트</th><th>B참여</th><th>참여 A/B</th><th>제출 A/B</th><th>입금 A/B</th><th>카운트</th><th>소유</th><th>발주</th><th>주문링크</th><th>진짜불일치</th><th>원본</th></tr></thead><tbody>${rows}</tbody></table></div>`;
 }
 async function checkPrecise(i){ const o=STATE.ov[i]; const cell=document.getElementById('prec-'+i); if(cell)cell.textContent='…';
   const p=await api(`/api/trackb/parity?sheetId=${encodeURIComponent(o.sheetId)}&tabName=${encodeURIComponent(o.tabName)}`);
@@ -538,6 +542,19 @@ function renderReadiness(rd){ if(!rd) return '';
 async function projectCur(){ if(!STATE.cur)return; const btn=$('#projBtn'); if(btn){btn.disabled=true;btn.textContent='투영 중…';}
   await api('/api/trackb/project',{method:'POST',body:JSON.stringify({sheetId:STATE.cur.sheetId,tabName:STATE.cur.tabName})});
   selTab(STATE.tabs.indexOf(STATE.cur)); }
+
+// 진실원천 전환(master 전용) — 옵션 A cutover 스위치. 'db' 전환은 진짜불일치 0 게이트(409면 force 확인).
+async function flipSoT(value, force){
+  if(!STATE.cur)return;
+  if(value==='db' && !force && !confirm(`이 탭의 원본을 Track B(DB)로 전환합니다.\n\n옵션 A(미러 유지·되돌리기 가능)이며, 시트 쓰기반영 엔진(P2)이 붙기 전까지 라이브 동작은 바뀌지 않습니다.\n계속할까요?`)) return;
+  const btn=$('#sotBtn'); if(btn){btn.disabled=true;btn.textContent='전환 중…';}
+  const r=await api('/api/trackb/source-of-truth',{method:'POST',body:JSON.stringify({sheetId:STATE.cur.sheetId,tabName:STATE.cur.tabName,value,force:!!force})});
+  if(r&&r.ok){ toast(`원본 → ${value==='db'?'Track B':'시트'}`); selTab(STATE.tabs.indexOf(STATE.cur)); return; }
+  if(r&&r.error==='parity_not_clean'){
+    if(confirm(`진짜 불일치 ${r.real}건이 남아 있습니다(권장: 0).\n그래도 강제로 Track B로 전환할까요?`)) return flipSoT('db', true);
+  } else { toast('전환 실패: '+((r&&r.error)||'오류')); }
+  if(btn){btn.disabled=false;btn.textContent=value==='db'?'Track B로 전환':'시트로 되돌리기';}
+}
 
 // ══ 소유 지정 뷰 ══
 async function renderOwnershipView(){
