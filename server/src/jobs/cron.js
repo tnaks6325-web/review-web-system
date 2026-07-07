@@ -257,6 +257,28 @@ function startCronJobs() {
     }, { timezone: 'Asia/Seoul' });
   }
 
+  // ── Track B P2 상태 토글 write-back(기본 OFF): cutover 탭(진실원천 플래그='db')의 is_submitted/is_paid
+  //   오버레이 편집만 시트 리뷰제출/입금 상태칸에 반영. Track A 무접촉(스윕이 유일 구동자), 저우선·멱등·blank-only.
+  //   ★ 플래그 판정은 writebackSweep(trackB.service, 격리 ALLOWED) 안에서만 — 이 파일은 플래그를 읽지 않는다. ──
+  if (process.env.TRACK_B_WRITEBACK === '1') {
+    if (process.env.PARTICIPANTS_SHEET_MIRROR === '1')
+      logger.warn('[CRON-TrackB-WB] ⚠️ TRACK_B_WRITEBACK + PARTICIPANTS_SHEET_MIRROR 동시 활성 — 같은 상태칸 이중미러(blank-only라 비파괴). 같은 cutover 탭엔 하나만 권장.');
+    const wbSchedule = process.env.TRACK_B_WRITEBACK_SCHEDULE || '*/5 * * * *';
+    let wbRunning = false;
+    cron.schedule(wbSchedule, async () => {
+      if (wbRunning) return;
+      wbRunning = true;
+      try {
+        const { writebackSweep } = require('../services/trackB.service');
+        const { withJobLock } = require('../utils/jobLock');
+        const r = await withJobLock('trackb_writeback', () => writebackSweep({}));
+        if (r && r.written > 0) logger.info(`[CRON-TrackB-WB] tabs=${r.done} written=${r.written} held=${r.held} errors=${r.errors}`);
+      } catch (err) {
+        logger.error(`[CRON-TrackB-WB] error: ${err.message}`);
+      } finally { wbRunning = false; }
+    }, { timezone: 'Asia/Seoul' });
+  }
+
   const schedule = process.env.INDEX_CRON_SCHEDULE || '0 9,15 * * 1-6';
   cron.schedule(schedule, async () => {
     logger.info(`[CRON] 인덱스 빌드 시작: ${new Date().toISOString()}`);
