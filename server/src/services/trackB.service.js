@@ -416,8 +416,10 @@ async function overview() {
             EXISTS(SELECT 1 FROM advertiser_campaigns ac WHERE ac.deleted_at IS NULL AND ac.sheet_id=b.sheet_id
                      AND (ac.tab_gid IS NULL OR ac.tab_gid=b.tab_gid)) AS "owned",
             EXISTS(SELECT 1 FROM work_orders wo WHERE wo.deleted_at IS NULL
-                     AND wo.linked_tab_sheet_id=b.sheet_id AND wo.linked_tab_name=b.tab_name) AS "woLinked"
+                     AND wo.linked_tab_sheet_id=b.sheet_id AND wo.linked_tab_name=b.tab_name) AS "woLinked",
+            tc.source_of_truth AS "sourceOfTruth"
        FROM b LEFT JOIN raw_sheet_tabs rst ON rst.sheet_id=b.sheet_id AND rst.tab_name=b.tab_name
+              LEFT JOIN tab_configs tc ON tc.sheet_id=b.sheet_id AND tc.tab_name=b.tab_name
       ORDER BY rst.spreadsheet_title NULLS LAST, b.tab_name`);
   return rows.map(r => {
     const aTotal = Number(r.aTotal), aSub = Number(r.aSub), aPaid = Number(r.aPaid);
@@ -428,8 +430,46 @@ async function overview() {
       a: { total: aTotal, submitted: aSub, paid: aPaid },
       b: { total: bTotal, submitted: bSub, paid: bPaid, linked: Number(r.bLinked) },
       countMatch, owned: !!r.owned, woLinked: !!r.woLinked, lastProjectedAt: r.lastProjectedAt,
+      sourceOfTruth: r.sourceOfTruth || 'sheet',   // 진실원천(옵션 A cutover 스위치): 'sheet'(레거시) | 'db'(Track B)
     };
   });
+}
+
+// ══ 진실원천(source_of_truth) 컨트롤 — 옵션 A cutover 스위치 (P1: 기반·관측, 동작은 P2 write-back 엔진) ══
+//   ★★ 격리 불변식(Track A 무접촉): 이 플래그를 읽는 곳은 **Track B write-back 엔진(P2, 미착수)뿐**이다.
+//      Track A 라이브 핫패스(검색 search.service · 주문원장 orderLedger · 리뷰인덱스빌드 smartBuild ·
+//      행배정 claimRow · 큐워커 syncQueue · RAW미러 rawMirror)는 source_of_truth 를 절대 참조하지 않으므로,
+//      여기서 값을 'db'로 바꿔도 **라이브 동작은 완전 불변**(write-back 엔진이 생기기 전까지 플립은 inert).
+//      이 불변식은 회귀가드 tests/trackBSourceOfTruth.test.js 가 Track A 파일에서 'source_of_truth' 미참조로 고정.
+const _SOT_VALUES = new Set(['sheet', 'db']);   // 'sheet'=레거시 기본 · 'db'=Track B 원본(cutover)
+
+async function getSourceOfTruth({ sheetId, tabName } = {}) {
+  if (!sheetId || !tabName) throw new Error('getSourceOfTruth: sheetId, tabName 필수');
+  const db = getPool();
+  const { rows } = await db.query(
+    `SELECT source_of_truth AS "sourceOfTruth" FROM tab_configs WHERE sheet_id=$1 AND tab_name=$2 LIMIT 1`,
+    [sheetId, tabName]);
+  return (rows[0] && rows[0].sourceOfTruth) || 'sheet';
+}
+
+// 플립(master 전용, 라우트 게이트). 'db' 전환은 **진짜 불일치(real) 0 게이트**(force 시 우회) — 준비 안 된 탭의
+//   조기 cutover 방지. 반환에 parity 요약 동봉(UI가 게이트 결과 노출). 되돌리기 = value 'sheet'.
+async function setSourceOfTruth({ sheetId, tabName, value, by = 'admin', force = false } = {}) {
+  if (!sheetId || !tabName) throw new Error('setSourceOfTruth: sheetId, tabName 필수');
+  if (!_SOT_VALUES.has(value)) return { ok: false, error: 'invalid_value', allowed: [..._SOT_VALUES] };
+  let parity = null;
+  if (value === 'db') {
+    parity = await parityReport({ sheetId, tabName }).catch(() => null);   // data-parity 게이트(readiness 별도)
+    const real = parity && parity.buckets ? parity.buckets.real : null;
+    if (!force && real != null && real > 0) return { ok: false, error: 'parity_not_clean', real, parity };
+  }
+  const db = getPool();
+  const { rowCount } = await db.query(
+    `UPDATE tab_configs SET source_of_truth=$3 WHERE sheet_id=$1 AND tab_name=$2`,
+    [sheetId, tabName, value]);
+  if (!rowCount) return { ok: false, error: 'tab_not_found' };
+  logger.info(`[trackB] source_of_truth ${sheetId}/${tabName} → ${value} (by ${by}${force ? ', forced' : ''})`);
+  return { ok: true, sheetId, tabName, sourceOfTruth: value, parity };
 }
 
 // 광고주 스코프: 이 업체가 소유한 (sheet_id, tab_gid) 집합. tab_gid NULL 소유 = 그 시트 전체.
@@ -513,7 +553,8 @@ async function workdeskTab({ sheetId, tabName, tabGid, role = 'master', advertis
   const showEdits = role !== 'advertiser';     // 편집 어포던스·orphan·hidden은 내부(master/admin/staff)
   const { rows: meta } = await db.query(
     `SELECT tc.campaign_name AS "campaignName", tc.manager, tc.review_type AS "reviewType",
-            tc.delivery_type AS "deliveryType", tc.income_type AS "incomeType"
+            tc.delivery_type AS "deliveryType", tc.income_type AS "incomeType",
+            tc.source_of_truth AS "sourceOfTruth"
        FROM tab_configs tc WHERE tc.sheet_id=$1 AND tc.tab_name=$2 LIMIT 1`, [sheetId, tabName]);
   const { rows: wo } = await db.query(
     `SELECT title, product_option AS "productOption", daily_count AS "dailyCount",
@@ -634,7 +675,8 @@ async function workdeskTab({ sheetId, tabName, tabGid, role = 'master', advertis
     edited: showEdits ? out.filter(r => (r.editedFields || []).length).length : undefined,
     ambiguous: ambiguousCount, hidden: hiddenList.length,
   };
-  const res = { role, maskPII, meta: meta[0] || {}, detail: wo[0] || null, counts, roster: out };
+  const res = { role, maskPII, meta: meta[0] || {}, detail: wo[0] || null, counts, roster: out,
+    sourceOfTruth: (meta[0] && meta[0].sourceOfTruth) || 'sheet' };   // 진실원천(cutover 상태) 표시용
   if (showEdits) { res.hiddenRows = hiddenList; res.orphanEdits = { count: orphanCount, byType: orphanByType }; res.headers = headers || []; }
   return res;
 }
@@ -833,6 +875,8 @@ module.exports = {
   scopedActiveTabs,
   canAccessTab,
   overview,
+  getSourceOfTruth,
+  setSourceOfTruth,
   workdeskTab,
   editWorkdeskRow,
   revertWorkdeskEdit,

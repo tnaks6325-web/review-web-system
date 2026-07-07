@@ -79,6 +79,25 @@ router.get('/parity-trend', authMiddleware, adminOrMasterMiddleware, async (req,
   } catch (err) { next(err); }
 });
 
+// ── 진실원천(source_of_truth) 컨트롤 — 옵션 A cutover 스위치 ──
+//   ★ 격리: 이 플래그를 읽는 소비처는 Track B write-back 엔진(P2, 미착수)뿐 — 값을 바꿔도 Track A 라이브 불변.
+//   읽기는 adminOrMaster(관측), 플립(설정)은 master 전용(되돌리기 어려운 방향 전환이라 보수적).
+router.get('/source-of-truth', authMiddleware, adminOrMasterMiddleware, async (req, res, next) => {
+  try {
+    const { sheetId, tabName } = req.query;
+    if (!sheetId || !tabName) return res.status(400).json({ ok: false, error: 'sheetId, tabName 필수' });
+    res.json({ ok: true, sourceOfTruth: await svc.getSourceOfTruth({ sheetId, tabName }) });
+  } catch (err) { next(err); }
+});
+router.post('/source-of-truth', authMiddleware, masterOnlyMiddleware, async (req, res, next) => {
+  try {
+    const { sheetId, tabName, value, force } = req.body || {};
+    if (!sheetId || !tabName || !value) return res.status(400).json({ ok: false, error: 'sheetId, tabName, value 필수' });
+    const out = await svc.setSourceOfTruth({ sheetId, tabName, value, by: _by(req), force: !!force });
+    res.status(out.ok ? 200 : (out.error === 'parity_not_clean' ? 409 : 400)).json(out);
+  } catch (err) { next(err); }
+});
+
 // ── 소유 지정 UI 좌측: 업체 목록 + 소유수 — admin/master ──
 router.get('/advertisers', authMiddleware, adminOrMasterMiddleware, async (req, res, next) => {
   try { res.json({ ok: true, items: await svc.listAdvertisersWithOwnership() }); }
