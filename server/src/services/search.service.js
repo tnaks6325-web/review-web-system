@@ -73,6 +73,79 @@ async function _getReviewerPhoneList(phone8) {
   }
 }
 
+// ── order_submissions 병합(A안): 방금 제출한 구매양식 주문을 '반영중'으로 즉시 노출 ──
+//   · 추가만·읽기만(기존 3분기/폴백 SQL 무변경). best-effort(실패해도 리뷰내역 정상).
+//   · 강한 신원키(phone8) 매칭에서만 병합 → includeSubmitted && p8.length===8 게이트에서만 호출.
+//   · dedup: 이미 색인(written→review_index) 반영된 행(sheetId||tabName||sheet_row) 제외.
+//   · 상태매핑: pending/queued/pending_no_row/written→'반영중'(processing),
+//     failed/stuck_manual→'확인필요'(attention), canceled*/conflict/soft-delete(deleted_at)→병합 제외.
+//   ★ WHERE의 deleted_at/mirror_status 리터럴은 migration 051 부분 인덱스 predicate와
+//     "문자 그대로 동일"해야 planner가 부분 인덱스를 선택한다(파라미터 배열이면 매칭 실패).
+const _ORDER_MERGE_LIMIT = 40;
+const _ORDER_MERGE_DAYS = 14;
+const _ORDER_ATTENTION_STATUSES = new Set(['failed', 'stuck_manual']);
+
+async function _mergeOrderSubmissions(results, phoneList) {
+  if (!Array.isArray(results) || !Array.isArray(phoneList) || phoneList.length === 0) return results;
+  try {
+    // dedup 기준 = phoneList 전체의 written 색인행(결과 필터/아카이브로 빠진 행까지 포함).
+    // idx_review_phone8(migration 001)로 인덱스 스캔 — 신규 seq scan 아님.
+    const { rows: seenRows } = await pool.query(
+      `SELECT sheet_id AS "sheetId", tab_name AS "tabName", row_index AS "rowIndex"
+         FROM review_index
+        WHERE phone8 = ANY($1) AND row_index IS NOT NULL`,
+      [phoneList]
+    );
+    const seen = new Set(seenRows.map(r => `${r.sheetId}||${r.tabName}||${r.rowIndex}`));
+
+    // ★ mirror_status 리터럴 IN-list는 migration 051 부분 인덱스 predicate와 동일(파라미터 배열 금지).
+    const { rows: orderRows } = await pool.query(
+      `SELECT os.id, os.sheet_id AS "sheetId", os.tab_name AS "tabName",
+              os.tab_gid AS "gid", os.sheet_row AS "sheetRow",
+              os.mirror_status AS "mirrorStatus", os.recipient AS "recipientName",
+              tc.display_name AS "displayNameTC", tc.campaign_name AS "campaignName",
+              tc.manager, tc.review_type AS "reviewType",
+              tc.delivery_type AS "deliveryType", tc.income_type AS "incomeType",
+              tc.is_closed AS "isClosed"
+         FROM order_submissions os
+         JOIN tab_configs tc
+           ON tc.sheet_id = os.sheet_id AND tc.tab_name = os.tab_name
+        WHERE RIGHT(regexp_replace(COALESCE(os.phone, ''), '[^0-9]', '', 'g'), 8) = ANY($1)
+          AND os.deleted_at IS NULL
+          AND os.mirror_status IN ('pending', 'queued', 'pending_no_row', 'written', 'failed', 'stuck_manual')
+          AND os.submitted_at > now() - ($2 || ' days')::interval
+        ORDER BY os.submitted_at DESC
+        LIMIT ${_ORDER_MERGE_LIMIT}`,
+      [phoneList, String(_ORDER_MERGE_DAYS)]
+    );
+
+    for (const o of orderRows) {
+      // 이미 시트반영→색인 대표행이 있으면 중복 제거(재배정으로 sheet_row NULL이면 스킵 안 함 → 다음 빌드까지 노출)
+      if (o.sheetRow != null && seen.has(`${o.sheetId}||${o.tabName}||${o.sheetRow}`)) continue;
+      const attention = _ORDER_ATTENTION_STATUSES.has(o.mirrorStatus);
+      // 색인행 item shape와 정합(displayName=사람이름 자리=recipient, displayNameTC=탭표시명).
+      // PII 최소: row:{}, submitCol:null, order_num 미노출. rowIndex:null → goToSubmit 대상 아님.
+      results.push({
+        displayName: o.recipientName || '', idxName: o.recipientName || '',
+        recipientName: o.recipientName || '', campaignName: o.campaignName || '',
+        tabName: o.tabName, sheetId: o.sheetId, gid: o.gid,
+        rowIndex: null, isSubmitted: false, submitVal: '',
+        productName: null, productUrl: null, startDate: null, endDate: null, round: null,
+        manager: o.manager, timeRange: null, reviewType: o.reviewType, taekhap: null,
+        isClosed: o.isClosed || false, deliveryType: o.deliveryType, isBulk: null,
+        incomeType: o.incomeType, displayNameTC: o.displayNameTC, ncMode: null,
+        folderUrl: null, captureFolderUrl: null, captureSlots: null, submittedSlots: [],
+        row: {}, submitCol: null, reviewFileAt: null, isPaid: false, score: 0.5,
+        isOrderPending: true, orderMirrorStatus: o.mirrorStatus,
+        orderStage: attention ? 'attention' : 'processing',
+      });
+    }
+  } catch (e) {
+    logger.warn('[Search] order_submissions 병합 실패(무시): ' + e.message);
+  }
+  return results;
+}
+
 /**
  * Phase 7: pg_trgm 기반 검색 최적화
  * 
@@ -117,6 +190,7 @@ async function searchByName(query, phone8, opts = {}) {
 
   const params = [];
   let paramIdx = 1;
+  let mergePhoneList = null;   // includeSubmitted 강한키(phone8) 분기에서만 order 병합용
 
   const SELECT_FIELDS = `
     ri.reviewer_name     AS "idxName",
@@ -163,6 +237,7 @@ async function searchByName(query, phone8, opts = {}) {
     // ★ P5: participation_links(제출 시점 확정 신원)도 단독 통과 키로 사용.
     //   기존 동작(이름 일치 + 전화 근접/NULL)도 그대로 유지(하위 호환).
     const phoneList = await _getReviewerPhoneList(p8);
+    mergePhoneList = phoneList;
 
     const nameParam = paramIdx++;
     const phoneListParam = paramIdx++;       // 본인+타계정 phone8 배열
@@ -216,6 +291,7 @@ async function searchByName(query, phone8, opts = {}) {
     // ── phone8 단독 검색 (이름 미입력) ──
     // ★ P0/P5: 본인+타계정 phone8 또는 확정 신원(participation_links)으로 매칭
     const phoneList = await _getReviewerPhoneList(p8);
+    mergePhoneList = phoneList;
     const phoneListParam = paramIdx++;
     // 이 분기는 매칭 자체가 강한 신원키(phone8/확정신원)뿐 → 제출완료 포함 시 필터만 해제
     const submittedCond = includeSubmitted ? 'TRUE' : 'ri.is_submitted = FALSE';
@@ -357,6 +433,11 @@ async function searchByName(query, phone8, opts = {}) {
       }
     }
 
+    // ── order_submissions 병합(append·best-effort) — 색인행 뒤에 붙어 results[0..n-1] 불변 ──
+    if (includeSubmitted && mergePhoneList) {
+      await _mergeOrderSubmissions(results, mergePhoneList);
+    }
+
     return {
       results,
       total: results.length,
@@ -491,6 +572,11 @@ async function searchByNameFallback(q, p8, SELECT_FIELDS, includeSubmitted) {
     isPaid:      _isPaid(row.isSubmitted2, rowObj),
     };
   });
+
+  // ── order_submissions 병합(폴백 경로도 누락 없이) — 폴백은 phoneList 미계산이므로 [p8] ──
+  if (includeSubmitted && p8 && p8.length === 8) {
+    await _mergeOrderSubmissions(results, [p8]);
+  }
 
   return {
     results,
