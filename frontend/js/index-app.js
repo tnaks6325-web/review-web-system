@@ -566,6 +566,10 @@ function renderInfoGrid(row, tabDisplayName) {
   const grid = document.getElementById("infoGrid");
   grid.innerHTML = "";
 
+  // ★ 방어: row가 null/undefined/비객체여도 throw하지 않음(정보그리드 예외 방지).
+  if (!row || typeof row !== "object") row = {};
+  if (typeof tabDisplayName !== "string") tabDisplayName = tabDisplayName == null ? "" : String(tabDisplayName);
+
   // ── 전화번호 마스킹: 010-1234-5678 → 010-****-5678
   function maskPhone(val) {
     const s = String(val).trim();

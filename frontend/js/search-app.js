@@ -248,8 +248,14 @@ async function _restoreReviewerSession() {
   const directItems = _consumeDirectSubmitItems();
   if (directItems) {
     console.log("[DirectSubmit] 직접 제출 모드 — 검색 생략, 즉시 제출 화면 표시:", directItems.length, "건");
-    openSubmitMulti(directItems);
-    _revealBodyIfHidden();
+    try {
+      openSubmitMulti(directItems);
+    } catch (e) {
+      // 렌더 중 예외가 나도 body를 숨긴 채로 두지 않는다(백지 방지).
+      console.error("[DirectSubmit] 제출 화면 렌더 실패:", e && e.message);
+    } finally {
+      _revealBodyIfHidden();
+    }
     return;
   }
 
@@ -852,7 +858,13 @@ document.addEventListener("DOMContentLoaded", () => {
   const isAdminMode = _isRegisterMode ? false : _checkAdminBypass();
 
   // ★ 리뷰어 로그인 세션 복원 (관리자 모드가 아닐 때만, #register 모드도 스킵)
-  if (!isAdminMode && !_isRegisterMode) _restoreReviewerSession();
+  //   비동기 예외가 body 숨김을 남기지 않도록 catch에서 강제 노출(백지 방지).
+  if (!isAdminMode && !_isRegisterMode) {
+    Promise.resolve(_restoreReviewerSession()).catch((e) => {
+      console.error("[restoreSession] 예외:", e && e.message);
+      _revealBodyIfHidden();
+    });
+  }
 
   // ── 창 크기 변경 시 sticky 위치 재보정 ──
   window.addEventListener("resize", () => _fixStickyPositions());
@@ -1388,6 +1400,8 @@ function _renderMultiInfoGrid(items) {
   if (items.length === 1) {
     // 단건: 기존 방식
     renderInfoGrid(items[0].row, items[0].tcDisplayName || "");
+    // ★ 폴백: row_json 공백 등으로 정보확인이 텅 비면(백지) item 상단 필드로 최소 정보 + 안내 표시
+    if (!_infoGridHasData(grid)) grid.appendChild(_buildInfoFallback(items[0]));
     return;
   }
 
@@ -1413,6 +1427,8 @@ function _renderMultiInfoGrid(items) {
 
     // 기존 renderInfoGrid 로직을 inner에 적용
     _renderInfoGridInto(innerGrid, item.row, item.tcDisplayName || "");
+    // ★ 폴백: 이 항목 정보가 비면 item 상단 필드로 최소 정보 표시
+    if (!_infoGridHasData(innerGrid)) innerGrid.appendChild(_buildInfoFallback(item));
   });
 }
 
@@ -1425,9 +1441,50 @@ function _renderInfoGridInto(gridEl, row, tabDisplayName) {
   // gridEl을 실제 DOM infoGrid 위치에 임시로 넣어서 renderInfoGrid 재사용
   orig.id = "__infoGrid_bak";
   gridEl.id = "infoGrid";
-  renderInfoGrid(row, tabDisplayName);
-  gridEl.id = "";
-  orig.id = "infoGrid";
+  try {
+    renderInfoGrid(row, tabDisplayName);
+  } finally {
+    // ★ renderInfoGrid가 어떤 이유로 throw해도 id를 반드시 원복
+    //   (#infoGrid 소실 → 이후 getElementById("infoGrid") 연쇄 실패 방지)
+    gridEl.id = "";
+    orig.id = "infoGrid";
+  }
+}
+
+/** 정보확인 그리드에 실제 데이터 행이 하나라도 렌더됐는지 (섹션헤더 제외, 실데이터만) */
+function _infoGridHasData(gridEl) {
+  if (!gridEl) return false;
+  return gridEl.querySelector(".ig-row, .ig-row-pair") !== null;
+}
+
+/**
+ * ★ row_json이 비어(정보확인 백지) 최소 정보도 못 그릴 때, item의 상단 필드로
+ *   대체 정보 행 + 안내를 만든다. (이미지 제출 자체는 sheetId/tabName/rowIndex로 진행 가능하므로 막지 않음)
+ *   반환: DocumentFragment (호출부에서 append)
+ */
+function _buildInfoFallback(item) {
+  item = item || {};
+  const esc = (typeof escHtml === "function") ? escHtml : (s) => String(s == null ? "" : s);
+  const rows = [];
+  const push = (label, val) => {
+    const v = (val == null ? "" : String(val)).trim();
+    if (v) rows.push(`<div class="ig-row"><div class="ig-label">${esc(label)}</div><div class="ig-value"><span>${esc(v)}</span></div></div>`);
+  };
+  push("상품/캠페인", item.tcDisplayName || item.displayNameTC || item.productName || item.campaignName || "");
+  push("수취인", item.recipientName || item.displayName || "");
+  push("진행일", item.startDate || "");
+  rows.push(
+    `<div class="ig-row" style="border:none">` +
+    `<div class="ig-value" style="color:var(--t3);font-size:.78rem;line-height:1.55">` +
+    `⚠️ 주문 상세 정보를 불러오지 못했습니다. <b>이미지 제출은 정상 진행</b>됩니다.<br>` +
+    `정보가 계속 비어 보이면 새로고침하거나 담당자에게 문의해 주세요.` +
+    `</div></div>`
+  );
+  const tmp = document.createElement("div");
+  tmp.innerHTML = rows.join("");
+  const frag = document.createDocumentFragment();
+  while (tmp.firstChild) frag.appendChild(tmp.firstChild);
+  return frag;
 }
 
 /** STEP2: 다건 이미지 슬롯 동적 생성 */
@@ -1714,6 +1771,11 @@ function goStep(n) {
 function renderInfoGrid(row, tabDisplayName) {
   const grid = document.getElementById("infoGrid");
   grid.innerHTML = "";
+
+  // ★ 방어: row가 null/undefined/비객체여도 throw하지 않음(백지·예외 방지).
+  //   빈 객체로 취급 → 실제 폴백 표시는 상위(_renderMultiInfoGrid)에서 담당.
+  if (!row || typeof row !== "object") row = {};
+  if (typeof tabDisplayName !== "string") tabDisplayName = tabDisplayName == null ? "" : String(tabDisplayName);
 
   // ── 전화번호 마스킹: 010-1234-5678 → 010-****-5678
   function maskPhone(val) {

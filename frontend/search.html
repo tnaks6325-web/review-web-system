@@ -60,6 +60,15 @@ body{ background:#F4F5F8 !important; letter-spacing:-.01em; }
 if (sessionStorage.getItem("iad_direct_submit_items")) {
   document.body.style.visibility = "hidden";
   document.body.style.overflow = "hidden";
+  // ★ 실패안전(백지 방지): 스크립트 로드 실패·렌더 예외 등 어떤 이유로든 복원 로직이
+  //   못 돌아도 4초 뒤 강제로 화면을 노출한다. 외부 함수에 비의존(자기완결) — search-app.js
+  //   로드 순서/실패와 무관하게 동작한다. 이미 노출됐으면(visibility!=="hidden") no-op.
+  setTimeout(function () {
+    if (document.body.style.visibility === "hidden") {
+      document.body.style.visibility = "";
+      document.body.style.overflow = "";
+    }
+  }, 4000);
 }
 </script>
 
