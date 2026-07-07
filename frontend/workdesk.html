@@ -297,7 +297,7 @@ function renderWorkdesk(wd){
   const flipBtn=isMaster?`<button class="btn" id="sotBtn" title="진실원천 전환(옵션 A · 되돌리기 가능). 'db' 전환은 진짜불일치 0 게이트를 통과해야 함(force로 우회). 현재는 상태·게이트만 — 시트 쓰기반영은 P2 엔진 예정." onclick="flipSoT('${sot==='db'?'sheet':'db'}')">${sot==='db'?'시트로 되돌리기':'Track B로 전환'}</button>`:'';
   $('#main').innerHTML=`<div class="mh"><h1>${esc(STATE.cur.tabName)}</h1>
     ${wd.maskPII?'<span class="bd">개인정보 마스킹(광고주)</span>':''}<span class="bd g">참여자 ${c.total||0}</span>${sotBadge}${gridMode?'<span class="bd" title="구글시트와 동일 컬럼·가로 펼침 (열람 전용)">시트 그리드 · 열람</span>':''}${warn.join('')}
-    ${isMaster?`<span class="sp" style="flex:1"></span>${flipBtn}<button class="btn" id="projBtn" onclick="projectCur()">그림자 투영(새로고침)</button>`:''}</div>
+    ${isMaster?`<span class="sp" style="flex:1"></span>${flipBtn}<button class="btn" onclick="showWritebackSim()" title="이 탭 편집이 시트에 반영된다면 무엇이 바뀔지 미리보기 (시뮬레이션 · 실제 시트 무접촉)">write-back 시뮬</button><button class="btn" id="projBtn" onclick="projectCur()">그림자 투영(새로고침)</button>`:''}</div>
     <div class="metagrid">${metaCards}</div>
     ${renderWorkOrderSection(wd)}
     <div class="counts"><div class="cc"><div class="big">${c.total||0}</div><div class="lb">참여자</div></div><div class="cc s"><div class="big">${c.submitted||0}</div><div class="lb">제출완료</div></div><div class="cc p"><div class="big">${c.paid||0}</div><div class="lb">입금완료</div></div></div>
@@ -618,6 +618,27 @@ async function prepareRoster(){ const t=STATE.cur; if(!t)return;
   const r=await api('/api/trackb/work-order/prepare-roster',{method:'POST',body:JSON.stringify({sheetId:t.sheetId,tabName:t.tabName,tabGid:t.tabGid||null})});
   if(r&&r.ok){ toast(r.created>0?`빈 슬롯 ${r.created}칸 생성 (모집 ${r.target}/현재 ${r.current})`:`이미 충족 — 생성 0 (모집 ${r.target}/현재 ${r.current})`); reloadWorkdesk(); }
   else toast('명단 준비 실패: '+((r&&r.error)||''));
+}
+
+// ══ write-back 시뮬레이션(P2-2) — 편집이 시트에 반영된다면 무엇이 바뀔지 미리보기(실제 시트 무접촉) ══
+async function showWritebackSim(){
+  const t=STATE.cur; if(!t)return;
+  let ov=document.getElementById('wbov'); if(!ov){ov=document.createElement('div');ov.id='wbov';ov.className='modalov';ov.addEventListener('click',e=>{if(e.target===ov)ov.remove();});document.body.appendChild(ov);}
+  ov.innerHTML=`<div class="modalbox"><div class="modalhd"><b>write-back 시뮬레이션 · ${esc(t.tabName)}</b><button class="btn xs" onclick="document.getElementById('wbov').remove()">닫기</button></div><div class="modalbd" id="wbbd"><div class="empty">계산 중…</div></div></div>`;
+  const r=await api(`/api/trackb/writeback/simulate?sheetId=${encodeURIComponent(t.sheetId)}&tabName=${encodeURIComponent(t.tabName)}`);
+  const bd=$('#wbbd'); if(!bd)return;
+  if(!r||!r.ok){ bd.innerHTML=`<div class="empty">${esc((r&&r.error)||'조회 실패')}</div>`; return; }
+  const s=r.summary||{}, ops=r.ops||[];
+  const gmap={ok:'✅ 반영',risky_ownership_key:'⚠️ 위험(소유권키·제외)',risky_coords:'⚠️ 위험(좌표·제외)',risky_append:'⚠️ 위험(추가·제외)',no_anchor:'⛔ 앵커없음',ambiguous:'⛔ 중복신원',no_column:'⛔ 컬럼없음',no_sheet_row:'⛔ 행없음'};
+  const tmap={toggle:'제출/입금',edit:'필드편집',add:'행추가',clear:'행삭제'};
+  const rows=ops.map(o=>{ const nv=(o.newValue&&typeof o.newValue==='object')?JSON.stringify(o.newValue):(o.newValue==null?'':String(o.newValue));
+    return `<tr><td>${esc(tmap[o.type]||o.type)}</td><td>${esc(o.field||'')}</td><td>${esc(o.name||'—')}</td><td>${o.sheetRow||'-'}${o.column?(' · '+esc(o.column)+'열'):''}${o.header?(' <span style="color:var(--faint)">('+esc(o.header)+')</span>'):''}</td><td>${esc(nv)}</td><td>${gmap[o.guard]||esc(o.guard)}</td></tr>`;
+  }).join('')||`<tr><td colspan="6" class="empty">반영할 편집 없음</td></tr>`;
+  bd.innerHTML=`<div style="font-size:12px;color:var(--muted);background:var(--card2);border:1px solid var(--line);border-radius:8px;padding:9px 11px;margin-bottom:10px">
+      이 탭 편집이 시트에 <b>반영된다면</b> 이렇게 됩니다 — <b style="color:var(--accent)">시뮬레이션이라 실제 시트에는 쓰지 않습니다.</b><br>
+      원본: ${r.cutover?'<b>Track B(cutover)</b>':'시트'} · 실제적용 트리거(<code>TRACK_B_WRITEBACK_FULL</code>): <b>${r.triggerOn?'ON':'OFF'}</b>${r.triggerOn?'':' <span style="color:var(--faint)">(OFF = 시뮬레이션만, 시트 무접촉)</span>'}</div>
+    <div style="font-size:12.5px;font-weight:650;margin-bottom:8px">총 ${s.total||0} · <span class="ok">반영가능 ${s.ok||0}</span> · <span style="color:var(--warn)">위험(적용제외) ${s.risky||0}</span> · <span style="color:var(--bad)">차단 ${s.blocked||0}</span></div>
+    <table class="histtable"><thead><tr><th>유형</th><th>필드</th><th>참여자</th><th>대상(행·열)</th><th>값</th><th>상태</th></tr></thead><tbody>${rows}</tbody></table>`;
 }
 
 // ══ 소유 지정 뷰 ══

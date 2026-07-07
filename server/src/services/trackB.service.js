@@ -1113,6 +1113,147 @@ async function writebackStatus() {
   return rows[0] || { held: 0, blocked: 0, written: 0 };
 }
 
+// ══════════════════════════════════════════════════════════════════════════
+// P2-2 (시뮬레이터 · 확장 write-back): 상태 토글 외 **필드편집(이름/수취인/전화/차수/옵션/col:*) +
+//   manual 추가/삭제행**까지 "시트에 무엇을 쓸지" 플랜으로 산출. ★ 기본은 SIMULATE(시트 무접촉).
+//   실제 적용은 **트리거** `TRACK_B_WRITEBACK_FULL=1` + cutover 이중게이트 뒤에서만(수동, 크론 미연결).
+//   ★★ 격리: source_of_truth 판정은 이 파일에서만. 트리거 OFF면 applyWritebackFull은 즉시 반환(무접촉).
+//   ⚠️ 소유권키/주문매핑 컬럼(연락처·수취인·주소·주문번호)·manual append/clear는 **위험군**으로 분류 —
+//      시뮬레이션엔 뜨지만 실제 적용에서 제외(red-blue-judge 후 별도 단계). 안전군(차수/옵션/이름/토글/
+//      col:비매핑)만 트리거 ON 시 blank-only + 신원 재검증으로 적용.
+// ══════════════════════════════════════════════════════════════════════════
+function _wbEditFieldCol(ol, headers, field) {
+  if (field.indexOf('col:') === 0) return headers.indexOf(field.slice(4));
+  const m = { recipient_name: 'recipient', phone8: 'phone', option_text: 'selected_opt_key' };
+  if (m[field]) return ol._fieldToCol(headers, m[field]);
+  const kw = { round: /차수|회차|round/i, reviewer_name: /참여자|리뷰어|닉네임|이름/ };
+  if (kw[field]) { for (let i = 0; i < headers.length; i++) if (kw[field].test(String(headers[i] || ''))) return i; }
+  return -1;
+}
+// 위험군: 소유권키(phone8/recipient) 또는 주문매핑 컬럼(연락처/수취인/주소/주문번호) — 실제 적용 제외.
+function _wbIsRiskyField(field, header) {
+  if (field === 'phone8' || field === 'recipient_name') return true;
+  const h = field.indexOf('col:') === 0 ? field.slice(4) : (header || '');
+  return /연락처|전화|핸드폰|휴대폰|phone|주소|address|수취인|받는분|주문번호|ordernum/i.test(h);
+}
+
+// 이 탭의 write-back 플랜 산출(순수 읽기·시트 무접촉): 활성 편집 + manual 행 → 시트 반영 계획.
+async function _computeWritebackPlan(db, sheetId, tabName) {
+  const ol = require('./orderLedger.service');
+  const { rows: edits } = await db.query(
+    `SELECT id, anchor_type, anchor_value, field, kind, value_bool, value_text
+       FROM participant_edits WHERE sheet_id=$1 AND tab_name=$2 AND reverted_at IS NULL`, [sheetId, tabName]);
+  const { rows: roster } = await db.query(
+    `SELECT id, seq, reviewer_name, recipient_name, phone8, round, option_text, product_name,
+            sheet_row, tab_gid, submit_col, submit_col2, source, order_submission_id, identity_key, deleted_at, active
+       FROM campaign_participants WHERE sheet_id=$1 AND tab_name=$2`, [sheetId, tabName]);
+  const byOrder = new Map(), byManual = new Map(), byIdent = new Map(), identCount = new Map();
+  for (const r of roster) {
+    if (r.deleted_at || !r.active) continue;
+    byManual.set(String(r.id), r);
+    if (r.order_submission_id) byOrder.set(String(r.order_submission_id), r);
+    if (r.source !== 'manual') { const ik = r.identity_key || identityKey(_ikFromRow(r)); if (ik) { identCount.set(ik, (identCount.get(ik) || 0) + 1); if (!byIdent.has(ik)) byIdent.set(ik, r); } }
+  }
+  let headers = [];
+  const gid = (roster.find(r => r.tab_gid) || {}).tab_gid || null;
+  try { const ctx = await ol.loadRawTabContext(sheetId, gid, tabName); headers = (ctx && ctx.headers) || []; } catch (_) {}
+  const resolve = (e) => {
+    if (e.anchor_type === 'order') return byOrder.get(e.anchor_value) || null;
+    if (e.anchor_type === 'manual') return byManual.get(e.anchor_value) || null;
+    if (e.anchor_type === 'identity') return (identCount.get(e.anchor_value) || 0) > 1 ? { __ambiguous: true } : (byIdent.get(e.anchor_value) || null);
+    return null;
+  };
+  const ops = []; const hiddenManual = new Set();
+  for (const e of edits) {
+    const row = resolve(e);
+    if (e.field === '_hidden') { if (row && !row.__ambiguous && row.source === 'manual') hiddenManual.add(String(row.id)); continue; }
+    const nv = e.kind === 'bool' ? (e.value_bool ? 'O' : '') : (e.value_text == null ? '' : e.value_text);
+    if (!row) { ops.push({ editId: e.id, type: 'edit', field: e.field, newValue: nv, guard: 'no_anchor' }); continue; }
+    if (row.__ambiguous) { ops.push({ editId: e.id, type: 'edit', field: e.field, newValue: nv, guard: 'ambiguous' }); continue; }
+    const base = { editId: e.id, participantId: row.id, seq: row.seq, name: row.reviewer_name, sheetRow: row.sheet_row, field: e.field, newValue: nv };
+    if (e.field === 'is_submitted' || e.field === 'is_paid') {
+      const col = e.field === 'is_submitted' ? row.submit_col : row.submit_col2;
+      const ci = col ? headers.indexOf(col) : -1;
+      ops.push({ ...base, type: 'toggle', header: col || null, column: ci >= 0 ? ol.getColLetter(ci) : null, guard: !row.sheet_row ? 'no_sheet_row' : (ci < 0 ? 'no_column' : 'ok') });
+    } else {
+      const ci = _wbEditFieldCol(ol, headers, e.field);
+      const header = ci >= 0 ? headers[ci] : null;
+      let guard = 'ok';
+      if (!row.sheet_row) guard = 'no_sheet_row'; else if (ci < 0) guard = 'no_column'; else if (_wbIsRiskyField(e.field, header)) guard = 'risky_ownership_key';
+      ops.push({ ...base, type: 'edit', header, column: ci >= 0 ? ol.getColLetter(ci) : null, guard });
+    }
+  }
+  for (const r of roster) {
+    if (r.source !== 'manual') continue;
+    if (r.deleted_at || hiddenManual.has(String(r.id))) {
+      if (r.sheet_row) ops.push({ participantId: r.id, seq: r.seq, name: r.reviewer_name, sheetRow: r.sheet_row, type: 'clear', guard: 'risky_coords' });
+    } else if (r.active) {
+      ops.push({ participantId: r.id, seq: r.seq, name: r.reviewer_name, sheetRow: r.sheet_row || null, type: 'add', guard: 'risky_append',
+        newValue: { reviewer: r.reviewer_name, recipient: r.recipient_name, option: r.option_text } });
+    }
+  }
+  return { headers, ops, roster };
+}
+
+const _WB_BLOCKED = ['no_anchor', 'ambiguous', 'no_column', 'no_sheet_row'];
+const _WB_RISKY = ['risky_ownership_key', 'risky_coords', 'risky_append'];
+
+// 시뮬레이션(시트 무접촉): 무엇이 시트에 반영될지 플랜 + 요약. cutover/트리거 상태 동봉.
+async function simulateWriteback({ sheetId, tabName } = {}) {
+  if (!sheetId || !tabName) throw new Error('simulateWriteback: sheetId, tabName 필수');
+  const db = getPool();
+  const sot = await getSourceOfTruth({ sheetId, tabName });
+  const { ops } = await _computeWritebackPlan(db, sheetId, tabName);
+  const byType = {}; for (const o of ops) byType[o.type] = (byType[o.type] || 0) + 1;
+  const summary = {
+    total: ops.length,
+    ok: ops.filter(o => o.guard === 'ok').length,
+    risky: ops.filter(o => _WB_RISKY.includes(o.guard)).length,
+    blocked: ops.filter(o => _WB_BLOCKED.includes(o.guard)).length,
+    byType,
+  };
+  return { tabName, cutover: sot === 'db', triggerOn: process.env.TRACK_B_WRITEBACK_FULL === '1', mode: 'simulate', ops, summary };
+}
+
+// 실제 적용(트리거) — 기본 완전 inert. TRACK_B_WRITEBACK_FULL=1 + cutover 에서만 안전군(토글·비위험 필드편집)을
+//   blank-only + 신원 재검증으로 반영. 위험군(소유권키/주문컬럼)·manual append/clear 는 제외(deferred).
+//   ⚠️ 프로덕션 활성 전 red-blue-judge 로 apply 경로 검증 권장. 크론 미연결(수동 트리거만).
+async function applyWritebackFull({ sheetId, tabName } = {}) {
+  if (process.env.TRACK_B_WRITEBACK_FULL !== '1') return { skipped: true, reason: 'trigger_off' };   // ★ 시뮬레이션만
+  if (!sheetId || !tabName) return { skipped: true, reason: 'missing_args' };
+  if (await getSourceOfTruth({ sheetId, tabName }) !== 'db') return { skipped: true, reason: 'not_cutover' };
+  const db = getPool();
+  const ol = require('./orderLedger.service');
+  const { readSheet, batchUpdateSheet, invalidateSheetMeta } = require('./sheets.service');
+  const { throttledCall, getThrottleStatus } = require('../utils/sheetsThrottle');
+  const { ops, roster } = await _computeWritebackPlan(db, sheetId, tabName);
+  const rmap = new Map(roster.map(r => [String(r.id), r]));
+  const ctx = await ol.loadRawTabContext(sheetId, (roster.find(r => r.tab_gid) || {}).tab_gid || null, tabName);
+  if (!ctx || !ctx.headers || !ctx.headers.length) return { skipped: true, reason: 'no_meta' };
+  const BUSY = parseInt(process.env.TRACK_B_WRITEBACK_BUSY || '20', 10);
+  let written = 0, held = 0, blocked = 0, deferred = 0;
+  for (const op of ops) {
+    if (op.guard !== 'ok' || (op.type !== 'toggle' && op.type !== 'edit')) { deferred += 1; continue; }   // 위험군·manual = 시뮬만
+    if (getThrottleStatus().requestsInLastMinute > BUSY) { deferred += 1; continue; }
+    const row = rmap.get(String(op.participantId)); if (!row || !op.column) { blocked += 1; continue; }
+    if (!row.phone8 || !row.recipient_name) { blocked += 1; continue; }
+    let idy; try { idy = await ol.rowIdentityMatches({ sheet_id: sheetId, sheet_row: op.sheetRow, tab_gid: row.tab_gid, tab_name: tabName, phone: row.phone8, recipient: row.recipient_name, address: null }, ctx); }
+    catch (_) { deferred += 1; continue; }
+    if (!idy.match) { blocked += 1; continue; }
+    const rng = `'${tabName}'!${op.column}${op.sheetRow}:${op.column}${op.sheetRow}`;
+    invalidateSheetMeta(sheetId);
+    let cur; try { const rd = await throttledCall(() => readSheet(sheetId, rng, { gid: row.tab_gid }), 2, { priority: 'low' }); cur = String((rd && rd[0] && rd[0][0]) || '').trim(); }
+    catch (_) { deferred += 1; continue; }
+    const want = String(op.newValue == null ? '' : op.newValue).trim();
+    if (cur === want) { written += 0; continue; }                 // 멱등
+    if (cur !== '') { held += 1; continue; }                       // blank-only: 사람/기존값 보호
+    if (want === '') continue;                                     // 빈값 쓰기 없음
+    try { await throttledCall(() => batchUpdateSheet(sheetId, [{ range: rng, values: [[want]] }], 'RAW', { gid: row.tab_gid }), 2, { priority: 'low' }); written += 1; }
+    catch (_) { deferred += 1; }
+  }
+  return { applied: true, written, held, blocked, deferred };
+}
+
 module.exports = {
   identityKey,
   classifyParity,
@@ -1140,6 +1281,8 @@ module.exports = {
   writebackSweep,
   writebackStatus,
   _buildToggleWrite,
+  simulateWriteback,
+  applyWritebackFull,
   workdeskTab,
   editWorkdeskRow,
   revertWorkdeskEdit,

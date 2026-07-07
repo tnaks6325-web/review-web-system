@@ -114,6 +114,25 @@ router.post('/writeback/run', authMiddleware, masterOnlyMiddleware, async (req, 
   } catch (err) { next(err); }
 });
 
+// ── P2-2 확장 write-back — 시뮬레이션(시트 무접촉) + 실제 적용 트리거(TRACK_B_WRITEBACK_FULL 게이트) — master ──
+//   simulate = 무엇이 시트에 반영될지 플랜만(안전). apply-full = 트리거 ON+cutover 에서만 안전군 적용(수동).
+router.get('/writeback/simulate', authMiddleware, masterOnlyMiddleware, async (req, res, next) => {
+  try {
+    const { sheetId, tabName } = req.query;
+    if (!sheetId || !tabName) return res.status(400).json({ ok: false, error: 'sheetId, tabName 필수' });
+    res.json({ ok: true, ...(await svc.simulateWriteback({ sheetId, tabName })) });
+  } catch (err) { next(err); }
+});
+router.post('/writeback/apply-full', authMiddleware, masterOnlyMiddleware, async (req, res, next) => {
+  try {
+    const { sheetId, tabName } = req.body || {};
+    if (!sheetId || !tabName) return res.status(400).json({ ok: false, error: 'sheetId, tabName 필수' });
+    const { withJobLock } = require('../utils/jobLock');
+    const r = await withJobLock('trackb_writeback', () => svc.applyWritebackFull({ sheetId, tabName }));
+    res.json({ ok: true, ...r });
+  } catch (err) { next(err); }
+});
+
 // ── 작업오더(발주) 연동 — 수동 링크 + 작업세부 + 명단 골격 준비 — admin/master ──
 //   ★ Track A 무접촉: 링크는 Track B 전용 테이블 trackb_work_order_links(051)에만 저장(work_orders는 읽기만).
 //     work_orders.linked_tab_* 는 order.routes 승인 흐름이 읽어 분기하므로 절대 안 씀. 명단 골격은 manual 슬롯.
