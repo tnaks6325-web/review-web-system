@@ -50,6 +50,19 @@ router.get('/overview', authMiddleware, adminOrMasterMiddleware, async (req, res
   try { res.json({ ok: true, items: await svc.overview() }); }
   catch (err) { next(err); }
 });
+// ── 전체 정밀 계산(진짜 불일치 일괄) + 스냅샷 저장 — adminOrMaster ──
+router.post('/parity-all', authMiddleware, adminOrMasterMiddleware, async (req, res, next) => {
+  try { res.json({ ok: true, ...(await svc.parityAll({ store: true, source: 'manual' })) }); }
+  catch (err) { next(err); }
+});
+// ── parity 추이(한 탭 스냅샷 이력) — adminOrMaster ──
+router.get('/parity-trend', authMiddleware, adminOrMasterMiddleware, async (req, res, next) => {
+  try {
+    const { sheetId, tabName, limit } = req.query;
+    if (!sheetId || !tabName) return res.status(400).json({ ok: false, error: 'sheetId, tabName 필수' });
+    res.json({ ok: true, items: await svc.parityTrend({ sheetId, tabName, limit }) });
+  } catch (err) { next(err); }
+});
 
 // ── 소유 지정 UI 좌측: 업체 목록 + 소유수 — admin/master ──
 router.get('/advertisers', authMiddleware, adminOrMasterMiddleware, async (req, res, next) => {

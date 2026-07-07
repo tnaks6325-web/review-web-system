@@ -173,7 +173,7 @@ function toast(m){ const t=$('#toast'); t.textContent=m; t.classList.add('show')
 function parseJwt(t){ try{ return JSON.parse(atob(t.split('.')[1])); }catch(_){ return {}; } }
 
 let STATE = { role:'', name:'', view:'workdesk', tabs:[], cur:null, wd:null, freezeUpto:null,
-              ov:[], ovq:'', pendingTab:null,
+              ov:[], ovq:'', pendingTab:null, lastBatch:null,
               advs:[], advCur:null, tabIndex:{}, sheetMap:{}, addMode:'all', addSheet:null, addTabs:{} };
 
 async function boot(){
@@ -361,10 +361,13 @@ async function renderOverviewView(){
 }
 function renderOverviewHead(){
   const it=STATE.ov||[]; const n=it.length, nM=it.filter(x=>x.countMatch).length, nO=it.filter(x=>x.owned).length, nW=it.filter(x=>x.woLinked).length;
+  const nR = it.filter(x=>x.real===0).length, nRk = it.filter(x=>typeof x.real==='number').length;
   $('#ovhead').innerHTML=`<div class="mh"><h1>관측 대시보드</h1><span class="bd g">투영 ${n}탭</span>
-    <span class="bd">카운트일치 ${nM}</span><span class="bd">소유 ${nO}</span><span class="bd">발주 ${nW}</span>
-    <span class="sp" style="flex:1"></span><input id="ovq" class="ovsearch" placeholder="탭/시트 검색" oninput="renderOverviewBody(this.value)" value="${esc(STATE.ovq||'')}"></div>
-    <div class="ovnote">A(현행 시트)↔B(Track B) <b>카운트 대조</b>와 준비도입니다. 카운트대조는 트리아지(동수·다른사람은 못 잡음) — 실제 전환 게이트는 행 <b>[정밀]</b>(진짜 불일치 0) 또는 탭을 열어 확인하세요.</div>`;
+    <span class="bd">카운트일치 ${nM}</span><span class="bd">소유 ${nO}</span><span class="bd">발주 ${nW}</span>${nRk?`<span class="bd" title="정밀 계산된 탭 중 진짜 불일치 0">진짜불일치0 ${nR}/${nRk}</span>`:''}
+    <span class="sp" style="flex:1"></span>
+    <button class="btn pri" id="paBtn" onclick="runParityAll()" title="투영된 전 탭의 진짜 불일치를 일괄 계산하고 추이 스냅샷 저장">전체 정밀 계산</button>
+    <input id="ovq" class="ovsearch" placeholder="탭/시트 검색" oninput="renderOverviewBody(this.value)" value="${esc(STATE.ovq||'')}"></div>
+    <div class="ovnote">A(현행 시트)↔B(Track B) <b>카운트 대조</b>와 준비도. 실제 전환 게이트 = <b>진짜 불일치 0</b>(행 [정밀] 또는 "전체 정밀 계산"). 진짜불일치 값 클릭 시 <b>추이</b>(2주 관측)를 봅니다.${STATE.lastBatch?` · 최근 계산 ${esc(_fmtTs(STATE.lastBatch))}`:''}</div>`;
 }
 function renderOverviewBody(q){
   q=(q||'').trim(); STATE.ovq=q; const it=STATE.ov||[];
@@ -380,13 +383,43 @@ function renderOverviewBody(q){
       <td class="ctr">${chk(o.owned)}</td>
       <td class="ctr">${chk(o.woLinked)}</td>
       <td class="num">${o.b.linked}/${o.b.total}</td>
-      <td class="ctr" id="prec-${i}"><button class="btn xs" onclick="checkPrecise(${i})">정밀</button></td>
+      <td class="ctr" id="prec-${i}">${typeof o.real==='number'
+        ? `<span class="${o.real===0?'ok':'no'}" style="cursor:pointer" title="추이 보기" onclick="showTrend(${i})">${o.real===0?'✓ 0':'✗ '+o.real}</span>`
+        : `<button class="btn xs" onclick="checkPrecise(${i})">정밀</button>`}</td>
     </tr>`).join('')||`<tr><td colspan="10" class="empty">투영된 탭 없음 — 자동 투영(10분) 또는 작업대의 "그림자 투영"을 기다리세요.</td></tr>`;
   $('#ovbody').innerHTML=`<div class="tablewrap"><table class="ovtable"><thead><tr><th>탭 / 시트</th><th>B참여</th><th>참여 A/B</th><th>제출 A/B</th><th>입금 A/B</th><th>카운트</th><th>소유</th><th>발주</th><th>주문링크</th><th>진짜불일치</th></tr></thead><tbody>${rows}</tbody></table></div>`;
 }
 async function checkPrecise(i){ const o=STATE.ov[i]; const cell=document.getElementById('prec-'+i); if(cell)cell.textContent='…';
   const p=await api(`/api/trackb/parity?sheetId=${encodeURIComponent(o.sheetId)}&tabName=${encodeURIComponent(o.tabName)}`);
-  if(cell){ if(p&&p.ok){ const real=p.buckets.real; cell.innerHTML= real===0?'<span class="ok">✓ 0</span>':`<span class="no">✗ ${real}</span>`; } else cell.innerHTML='<span class="no">오류</span>'; }
+  if(p&&p.ok){ STATE.ov[i].real=p.buckets.real; renderOverviewHead(); renderOverviewBody(STATE.ovq); }
+  else if(cell) cell.innerHTML='<span class="no">오류</span>';
+}
+// 전체 정밀 계산: 투영된 전 탭 진짜불일치 일괄 + 스냅샷 저장
+async function runParityAll(){
+  const btn=document.getElementById('paBtn'); if(btn){btn.disabled=true;btn.textContent='계산 중…';}
+  const r=await api('/api/trackb/parity-all',{method:'POST'});
+  if(r&&r.ok){ const by={}; (r.results||[]).forEach(x=>by[x.sheetId+'\t'+x.tabName]=x.real);
+    (STATE.ov||[]).forEach(o=>{ const v=by[o.sheetId+'\t'+o.tabName]; if(typeof v==='number')o.real=v; });
+    STATE.lastBatch=r.batchAt; renderOverviewHead(); renderOverviewBody(STATE.ovq); toast(`정밀 계산 완료 · 진짜불일치0 ${r.realZero}/${r.tabs}탭`); }
+  else toast('계산 실패');
+  const b2=document.getElementById('paBtn'); if(b2){b2.disabled=false;b2.textContent='전체 정밀 계산';}
+}
+function _spark(vals){ if(!vals.length)return ''; const w=520,h=46,pad=4,max=Math.max(1,...vals),n=vals.length;
+  const X=i=>pad+(n<=1?(w-2*pad)/2:i*(w-2*pad)/(n-1)), Y=v=>h-pad-(v/max)*(h-2*pad);
+  const pts=vals.map((v,i)=>`${X(i).toFixed(1)},${Y(v).toFixed(1)}`).join(' '); const last=vals[vals.length-1];
+  const dots=vals.map((v,i)=>`<circle cx="${X(i).toFixed(1)}" cy="${Y(v).toFixed(1)}" r="2.2" fill="${v===0?'var(--safe)':'var(--bad)'}"/>`).join('');
+  return `<svg width="100%" viewBox="0 0 ${w} ${h}" preserveAspectRatio="none" style="margin-bottom:10px;background:var(--card2);border-radius:8px">${n>1?`<polyline fill="none" stroke="${last===0?'var(--safe)':'var(--bad)'}" stroke-width="2" points="${pts}"/>`:''}${dots}</svg>`;
+}
+async function showTrend(i){ const o=STATE.ov[i];
+  let ov=document.getElementById('trendov'); if(!ov){ov=document.createElement('div');ov.id='trendov';ov.className='modalov';ov.addEventListener('click',e=>{if(e.target===ov)ov.remove();});document.body.appendChild(ov);}
+  ov.innerHTML=`<div class="modalbox" style="width:600px"><div class="modalhd"><b>진짜 불일치 추이 · ${esc(o.tabName)}</b><button class="btn xs" onclick="document.getElementById('trendov').remove()">닫기</button></div><div class="modalbd" id="trendbd"><div class="empty">불러오는 중…</div></div></div>`;
+  const r=await api(`/api/trackb/parity-trend?sheetId=${encodeURIComponent(o.sheetId)}&tabName=${encodeURIComponent(o.tabName)}`);
+  const items=(r&&r.items)||[]; const bd=$('#trendbd'); if(!bd)return;
+  bd.innerHTML= items.length
+    ? `${_spark(items.map(x=>x.real))}<table class="histtable"><thead><tr><th>시각</th><th>진짜불일치</th><th>일치</th><th>의도된차이</th><th>출처</th></tr></thead><tbody>${
+        items.slice().reverse().map(x=>`<tr><td class="hts">${esc(_fmtTs(x.takenAt))}</td><td class="${x.real===0?'ok':'no'}" style="font-weight:700">${x.real}</td><td>${x.match}</td><td>${x.benign}</td><td>${esc(x.source||'')}</td></tr>`).join('')
+      }</tbody></table>`
+    : `<div class="empty">스냅샷 없음 — "전체 정밀 계산"으로 첫 추이 기록을 만드세요.</div>`;
 }
 function openTabFromOverview(i){ const o=STATE.ov[i]; STATE.pendingTab={sheetId:o.sheetId,tabName:o.tabName,tabGid:o.tabGid,spreadsheetTitle:o.spreadsheetTitle}; switchView('workdesk'); }
 function beginEdit(el, rowId, field){

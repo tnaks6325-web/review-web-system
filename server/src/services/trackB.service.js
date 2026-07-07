@@ -164,8 +164,8 @@ async function projectActive({ limit = 100, by = 'trackB-cron' } = {}) {
 // ── parity 리포트: B(campaign_participants) ↔ A(review_index), 6차원 × 3버킷 ──
 //   확정 기준: 짝짓기=phone8(행번호 금지), 완료판정=review_index의 is_submitted/is_submitted2 그대로.
 //   버킷: match / benign(카탈로그 BD-1~7) / real(진짜 불일치, 전환 전 0이어야).
-async function parityReport({ sheetId, tabName } = {}) {
-  if (!sheetId || !tabName) throw new Error('parityReport: sheetId, tabName 필수');
+//   _parityCore: readiness 제외 코어(A/B 로드+편집셋+classifyParity). parityReport·parityAll 공용.
+async function _parityCore(sheetId, tabName) {
   const db = getPool();
   const { rows: aRows } = await db.query(
     `SELECT reviewer_name AS name, phone8, is_submitted AS submitted,
@@ -192,10 +192,54 @@ async function parityReport({ sheetId, tabName } = {}) {
       if (a && editedAnchors.has(a.type + ' ' + a.value)) { const p8 = _phone8(b.phone8); if (p8) editedKeys.add(p8); }
     }
   }
-  const base = classifyParity(aRows, bRows, editedKeys);
+  return classifyParity(aRows, bRows, editedKeys);
+}
+
+async function parityReport({ sheetId, tabName } = {}) {
+  if (!sheetId || !tabName) throw new Error('parityReport: sheetId, tabName 필수');
+  const base = await _parityCore(sheetId, tabName);
   // d4/d5/d6 는 A↔B "차이"가 아니라 전환 준비도(coverage/귀속) 관측 — data-parity pass 를 뒤집지 않음(별도).
   const readiness = await _readinessFor({ sheetId, tabName });
   return { ...base, readiness };
+}
+
+// ── 전체 정밀 계산: 투영된 전 탭의 정밀 parity(진짜 불일치)를 일괄 계산 + 스냅샷 저장(2주 추이 정량화). ──
+//   읽기+관측기록만(라이브 무접촉). store=false면 계산만. source: 'manual'(버튼) | 'cron'(일일).
+async function parityAll({ store = true, source = 'manual' } = {}) {
+  const db = getPool();
+  const { rows: tabs } = await db.query(
+    `SELECT sheet_id AS "sheetId", tab_name AS "tabName", MIN(tab_gid) AS "tabGid"
+       FROM campaign_participants WHERE deleted_at IS NULL AND active
+      GROUP BY sheet_id, tab_name`);
+  const batchAt = new Date();
+  const results = [];
+  for (const t of tabs) {
+    try {
+      const p = await _parityCore(t.sheetId, t.tabName);
+      const d3 = (p.dims && p.dims.d3_counts) || {};
+      const rec = { sheetId: t.sheetId, tabName: t.tabName, tabGid: t.tabGid,
+        aTotal: d3.aTotal || 0, bTotal: d3.bTotal || 0,
+        match: p.buckets.match, benign: p.buckets.benign, real: p.buckets.real, pass: p.pass };
+      results.push(rec);
+      if (store) await db.query(
+        `INSERT INTO parity_snapshots (sheet_id, tab_name, tab_gid, batch_at, a_total, b_total, match_cnt, benign_cnt, real_cnt, pass, source)
+         VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11)`,
+        [t.sheetId, t.tabName, t.tabGid, batchAt, rec.aTotal, rec.bTotal, rec.match, rec.benign, rec.real, rec.pass, source]);
+    } catch (e) { logger.warn(`[trackB] parityAll ${t.tabName} 실패: ${e.message}`); }
+  }
+  return { batchAt, tabs: results.length, realZero: results.filter(r => r.real === 0).length, results };
+}
+
+// ── parity 추이: 한 탭의 스냅샷 이력(오래된→최근, 스파크라인용). ──
+async function parityTrend({ sheetId, tabName, limit = 30 } = {}) {
+  if (!sheetId || !tabName) throw new Error('parityTrend: sheetId, tabName 필수');
+  const db = getPool();
+  const lim = Math.min(Math.max(parseInt(limit, 10) || 30, 1), 200);
+  const { rows } = await db.query(
+    `SELECT taken_at AS "takenAt", real_cnt AS "real", match_cnt AS "match", benign_cnt AS "benign", pass, source
+       FROM parity_snapshots WHERE sheet_id=$1 AND tab_name=$2 ORDER BY taken_at DESC LIMIT $3`,
+    [sheetId, tabName, lim]).catch(() => ({ rows: [] }));
+  return rows.reverse();
 }
 
 /**
@@ -727,6 +771,8 @@ module.exports = {
   projectTab,
   projectActive,
   parityReport,
+  parityAll,
+  parityTrend,
   setOwnership,
   removeOwnership,
   listOwnership,
