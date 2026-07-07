@@ -36,7 +36,7 @@ function makeConnectPool(scn) {
       if (/UPDATE campaign_participants SET identity_key/.test(s)) return { rows: [] };
       if (/COUNT\(\*\)::int AS n FROM campaign_participants/.test(s)) return { rows: [{ n: scn.dupCount || 1 }] };
       if (/FROM raw_sheet_tabs/.test(s)) return { rows: scn.detectedHeaders ? [{ detected_headers: scn.detectedHeaders }] : [] };
-      if (/UPDATE participant_edits SET reverted_at/.test(s)) return { rows: [] };
+      if (/UPDATE participant_edits SET reverted_at/.test(s)) return { rows: [], rowCount: (scn.revertN == null ? 1 : scn.revertN) };
       if (/INSERT INTO participant_edits/.test(s)) {
         if (scn.insertThrows) { const e = new Error('dup'); e.code = '23505'; throw e; }
         scn._ins = params;   // 마지막 insert 파라미터 캡처(검증용)
@@ -187,7 +187,25 @@ async function run() {
   assert.equal(insList.length, 2, '3m2: 오버레이 2건(col:리뷰제출 + is_submitted)');
   const boolIns = insList.find(x => x.params[4] === 'is_submitted');   // 링크 insert 파라미터: [sheet,tab,type,val,field,value_bool,by]
   assert.ok(boolIns && boolIns.params[5] === true, '3m3: is_submitted value_bool=true(값 있음)');
-  console.log('  3. editWorkdeskRow — 앵커·거부·bool분리·레이스 + col:검증 + 제출/입금 카운트연동 ✓');
+  // 3n: col:입금자명(정보열)은 링크 토글 안 함 — is_paid 오탐 차단(리뷰 지적 #1)
+  cp = makeConnectPool({ row: { id: 'r1', source: 'manual', order_submission_id: null, identity_key: null, phone8: '1', recipient_name: null, option_text: null, row_json: {}, tab_gid: '9' }, detectedHeaders: ['입금자명', '입금'] });
+  svc.__setPoolForTest(cp);
+  e = await svc.editWorkdeskRow({ sheetId: 's', tabName: 'T', rowId: 'r1', field: 'col:입금자명', value: '김철수', by: 'm' });
+  assert.ok(e.ok && e.linkedField == null, '3n: 입금자명은 상태 토글 연동 안 함');
+  assert.equal(cp.q.filter(x => /INSERT INTO participant_edits/.test(x.s)).length, 1, '3n2: 오버레이 1건(연동 없음)');
+  console.log('  3. editWorkdeskRow — 앵커·거부·bool분리·레이스 + col:검증 + 카운트연동(오탐차단) ✓');
+
+  // ═══ 5. revertWorkdeskEdit 연동 되돌리기 — primary 실제 revert 시에만 연쇄(리뷰 지적 #2) ═══
+  const rrow = { id: 'r1', source: 'manual', order_submission_id: null, identity_key: null, phone8: '1', recipient_name: null, option_text: null, row_json: {} };
+  // 5a: col:리뷰제출 revert 되고(revertN=1) → is_submitted 도 함께 revert(2회)
+  cp = makeConnectPool({ row: rrow, revertN: 1 }); svc.__setPoolForTest(cp);
+  await svc.revertWorkdeskEdit({ sheetId: 's', tabName: 'T', rowId: 'r1', field: 'col:리뷰제출', by: 'm' });
+  assert.equal(cp.q.filter(x => /UPDATE participant_edits SET reverted_at/.test(x.s)).length, 2, '5a: primary 되돌림 시 링크 토글도 되돌림(2회)');
+  // 5b: col:리뷰제출 활성 편집 없음(revertN=0) → 링크 토글 건드리지 않음(1회) — 독립 토글 보호
+  cp = makeConnectPool({ row: rrow, revertN: 0 }); svc.__setPoolForTest(cp);
+  await svc.revertWorkdeskEdit({ sheetId: 's', tabName: 'T', rowId: 'r1', field: 'col:리뷰제출', by: 'm' });
+  assert.equal(cp.q.filter(x => /UPDATE participant_edits SET reverted_at/.test(x.s)).length, 1, '5b: primary 미되돌림 시 링크 미연쇄(독립 토글 보호)');
+  console.log('  5. revertWorkdeskEdit — 연동 되돌리기 provenance 게이트 ✓');
 
   // ═══ 4. classifyParity editedKeys → BD-8 benign(하위호환 기본 Set) ═══
   const A = [{ phone8: '11112222', name: 'A', submitted: false, paid: false, round: '1' }];

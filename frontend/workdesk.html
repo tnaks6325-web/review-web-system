@@ -258,7 +258,7 @@ function renderWorkdesk(wd){
   // 시트형 그리드 모드(master/admin, 시트 헤더 순서 수신 시): 시트와 동일한 가로 그리드로 렌더(열람 전용).
   const gridMode = canEdit && Array.isArray(wd.headers) && wd.headers.length;
   const warn=[];
-  if(!gridMode && canEdit && c.hidden>0) warn.push(`<span class="wchip" onclick="showHidden()">숨김 ${c.hidden}</span>`);
+  if(canEdit && c.hidden>0) warn.push(`<span class="wchip" title="제거(숨김)된 행 — 클릭해 복원" onclick="showHidden()">숨김 ${c.hidden}</span>`);
   if(!gridMode && canEdit && wd.orphanEdits && wd.orphanEdits.count>0) warn.push(`<span class="wchip bad" title="앵커가 현재 명단에 없는 편집">미부착 편집 ${wd.orphanEdits.count}</span>`);
   if(canEdit && c.ambiguous>0) warn.push(`<span class="wchip" title="중복 신원 행">중복 신원 ${c.ambiguous}</span>`);
   let tableSection;

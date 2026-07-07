@@ -57,12 +57,15 @@ const _EDIT_FIELD_KIND = {
   reviewer_name: 'text', recipient_name: 'text', round: 'text', option_text: 'text',
   product_name: 'text', phone8: 'text', is_submitted: 'bool', is_paid: 'bool', _hidden: 'bool',
 };
-// 시트 컬럼(헤더)이 제출/입금 상태열이면 물리 토글로 연동 → 카운트(제출완료/입금완료)와 일치.
-//   '주문자제출' 등은 제외(리뷰 제출 아님). 미매칭이면 null(연동 안 함, 안전).
+// 시트 컬럼(헤더)이 제출/입금 "상태 토글"열이면 물리 토글로 연동 → 카운트(제출완료/입금완료)와 일치.
+//   ★ 정확 화이트리스트 — '입금자명/입금계좌/입금일'·'리뷰제출일/리뷰미제출'·'주문자제출' 등 정보열 오탐 차단.
+//   미매칭이면 null(연동 안 함, 안전). 새 상태열 명칭은 여기 추가.
+const _SUBMIT_HEADERS = new Set(['리뷰제출', '리뷰제출여부', '리뷰제출완료', '제출']);
+const _PAID_HEADERS = new Set(['입금', '입금여부', '입금완료']);
 function _linkedToggle(header) {
-  const h = String(header || '');
-  if (h === '리뷰제출' || /리뷰.*제출/.test(h)) return 'is_submitted';
-  if (h === '입금' || /^입금/.test(h)) return 'is_paid';
+  const h = String(header || '').trim();
+  if (_SUBMIT_HEADERS.has(h)) return 'is_submitted';
+  if (_PAID_HEADERS.has(h)) return 'is_paid';
   return null;
 }
 
@@ -660,10 +663,11 @@ async function revertWorkdeskEdit({ sheetId, tabName, rowId, field, by = 'admin'
         [String(by).slice(0, 100), sheetId, tabName, a.type, a.value, f]);
       return rowCount;
     };
-    n += await doRevert(field);
-    // 연동 되돌리기: col:리뷰제출/입금 을 되돌리면 링크된 물리 토글(is_submitted/is_paid)도 함께 되돌림.
+    const revertedPrimary = await doRevert(field); n += revertedPrimary;
+    // 연동 되돌리기: col:리뷰제출/입금 을 되돌리면 링크된 물리 토글도 함께 되돌림.
+    //   ★ primary 가 실제로 되돌렸을 때만 연쇄(독립적으로 토글한 is_submitted 를 무관한 revert 로 지우지 않게).
     const linked = field.indexOf('col:') === 0 ? _linkedToggle(field.slice(4)) : null;
-    if (linked) n += await doRevert(linked);
+    if (linked && revertedPrimary > 0) n += await doRevert(linked);
     await client.query('COMMIT');
     return { ok: true, reverted: n };
   } catch (e) { try { await client.query('ROLLBACK'); } catch (_) {} throw e; }
