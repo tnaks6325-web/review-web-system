@@ -22,6 +22,8 @@ function __setPoolForTest(p) { _pool = p || null; }
 function _phone8(v) { const d = String(v == null ? '' : v).replace(/[^0-9]/g, ''); return d.length >= 8 ? d.slice(-8) : ''; }
 function _norm(v) { return String(v == null ? '' : v).trim().replace(/\s+/g, ''); }
 function _mask(p8) { const s = String(p8 || ''); return s.length >= 4 ? '••••' + s.slice(-4) : (s || ''); }
+// 이름/수취인 부분 마스킹(광고주 외부 뷰): 첫 글자만 노출 + 나머지 ○(식별성 유지 + PII 보호). 1글자·공란은 그대로.
+function _maskName(n) { const s = String(n == null ? '' : n).trim(); if (s.length <= 1) return s; return s[0] + '○'.repeat(Math.min(s.length - 1, 4)); }
 
 /**
  * 정렬무관 내용키(computeDedupKey 규칙 재현): 주문번호 6자리↑ → num:, 아니면 rcp:(수취인+연락처+날짜+옵션),
@@ -490,10 +492,13 @@ async function scopedTabsForStaff(staffName) {
   const nm = String(staffName || '').trim();
   if (!nm) return { sheetIds: [], tabGids: [], allTabSheetIds: [] };
   const db = getPool();
+  // ★ 담당 매칭 정규화: inad_pm(자유입력)의 앞뒤 공백·표기차로 스코프가 조용히 비는 것을 방지(양쪽 TRIM).
+  //   한계: 이름 문자열 매칭이라 동명 AE는 스코프를 공유한다(admin 신뢰경계 내). 안정 식별자(staff_id) 연결은
+  //   별도 후속 — 운영상 inad_pm 은 staff 로그인명과 정확히 일치하는 유일값으로 관리할 것.
   const { rows } = await db.query(
     `SELECT ac.sheet_id AS "sheetId", ac.tab_gid AS "tabGid"
        FROM advertiser_campaigns ac JOIN advertisers a ON a.id = ac.advertiser_id
-      WHERE a.inad_pm = $1 AND ac.deleted_at IS NULL`, [nm]);
+      WHERE TRIM(a.inad_pm) = $1 AND ac.deleted_at IS NULL`, [nm]);
   const allTabSheetIds = rows.filter(r => !r.tabGid).map(r => r.sheetId);
   const tabGids = rows.filter(r => r.tabGid).map(r => `${r.sheetId}::${r.tabGid}`);
   return { sheetIds: [...new Set(rows.map(r => r.sheetId))], tabGids, allTabSheetIds };
@@ -648,7 +653,8 @@ async function workdeskTab({ sheetId, tabName, tabGid, role = 'master', advertis
       if (showEdits) hiddenList.push({ id: r.id, seq: r.seq, name: syn.name });
       continue;
     }
-    syn.phone8 = maskPII ? _mask(syn.phone8) : syn.phone8;
+    // 광고주(외부)는 phone8 + 이름·수취인(PII)까지 마스킹. AE/관리자(내부)는 전체.
+    if (maskPII) { syn.phone8 = _mask(syn.phone8); syn.name = _maskName(syn.name); syn.recipient = _maskName(syn.recipient); }
     if (showEdits) {
       syn.anchorType = anchor ? anchor.type : null;
       syn.editable = editable; syn.ambiguous = ambiguous;

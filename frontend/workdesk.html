@@ -183,16 +183,17 @@ async function boot(){
 }
 function renderLogin(){
   $('#app').innerHTML = `<div class="loginbox"><h2>통합 작업대 로그인</h2>
-    <input id="lname" placeholder="아이디 (master / admin)" autocomplete="username">
+    <input id="lname" placeholder="아이디 (관리자 / AE / 광고주)" autocomplete="username">
     <input id="lpw" type="password" placeholder="비밀번호" autocomplete="current-password">
     <button class="btn pri" style="width:100%;padding:9px" onclick="doLogin()">로그인</button>
     <div class="err" id="lerr"></div>
-    <div class="note">Track B 통합 작업대입니다. 관리자(master/admin)는 전체·관측·소유 지정, AE(영업담당)는 자기 담당 업체 탭을 열람/편집합니다.</div></div>`;
+    <div class="note">Track B 통합 작업대입니다. 관리자(master/admin)는 전체·관측·소유 지정, AE(영업담당)는 담당 업체 탭 열람/편집, 광고주(거래처)는 소유 탭을 열람합니다(개인정보 마스킹).</div></div>`;
   $('#lpw').addEventListener('keydown',e=>{if(e.key==='Enter')doLogin();});
 }
 async function doLogin(){ const name=$('#lname').value.trim(), pw=$('#lpw').value;
   let r=await api('/api/admin/login',{method:'POST',body:JSON.stringify({name,pw})});
   if(!(r&&r.success&&r.token)){ r=await api('/api/admin/staff-login',{method:'POST',body:JSON.stringify({name,pw})}); }  // AE(영업담당) 폴백
+  if(!(r&&r.success&&r.token)){ r=await api('/api/admin/advertiser-login',{method:'POST',body:JSON.stringify({name,pw})}); }  // 광고주(거래처) 폴백 — 소유 탭만·PII 마스킹
   if(r&&r.success&&r.token){ sessionStorage.setItem('admin_token',r.token); boot(); } else $('#lerr').textContent=(r&&(r.error||r.message))||'로그인 실패'; }
 function logout(){ sessionStorage.removeItem('admin_token'); boot(); }
 
