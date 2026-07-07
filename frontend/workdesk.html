@@ -39,6 +39,16 @@
   .metagrid{display:grid;grid-template-columns:repeat(auto-fill,minmax(150px,1fr));gap:9px;margin-bottom:16px}
   .mf{background:var(--card);border:1px solid var(--line);border-radius:9px;padding:9px 11px}
   .mf .k{font-size:10px;color:var(--faint);text-transform:uppercase;letter-spacing:.03em} .mf .v{font-size:13px;font-weight:600;margin-top:2px}
+  .wobar{display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin-bottom:12px;padding:10px 12px;border:1px solid var(--line);border-radius:10px;background:var(--card2)}
+  .wobar .wt{font-size:12.5px;font-weight:700} .wobar .wsub{font-size:11px;color:var(--faint)}
+  .wodetail{border:1px solid var(--line);border-radius:11px;background:var(--card);margin-bottom:16px;overflow:hidden}
+  .wodetail summary{cursor:pointer;list-style:none;padding:11px 14px;font-size:12.5px;font-weight:700;background:var(--card2);display:flex;align-items:center;gap:8px}
+  .wodetail summary::-webkit-details-marker{display:none}
+  .worow{display:grid;grid-template-columns:120px 1fr;gap:10px;padding:8px 14px;border-top:1px solid var(--line);font-size:12.5px}
+  .worow .wk{color:var(--faint);font-weight:650} .worow .wv{white-space:pre-wrap;word-break:break-word}
+  .wochip{display:inline-block;font-size:11px;font-weight:650;padding:2px 8px;border-radius:999px;background:var(--adv-soft);color:var(--adv);margin:2px 4px 2px 0}
+  .worow2{padding:9px 11px;border:1px solid var(--line);border-radius:9px;margin-bottom:6px;cursor:pointer} .worow2:hover{background:var(--card2)} .worow2.on{border-color:var(--adv);background:var(--adv-soft)}
+  .worow2 .t{font-size:12.5px;font-weight:650} .worow2 .s{font-size:11px;color:var(--faint);margin-top:2px}
   .counts{display:flex;gap:10px;margin-bottom:14px;flex-wrap:wrap}
   .cc{flex:1;min-width:90px;background:var(--card);border:1px solid var(--line);border-radius:10px;padding:11px 13px;text-align:center}
   .cc .big{font-size:22px;font-weight:800;letter-spacing:-.02em} .cc .lb{font-size:11px;color:var(--muted);margin-top:1px} .cc.s .big{color:var(--safe)} .cc.p .big{color:var(--accent)}
@@ -289,6 +299,7 @@ function renderWorkdesk(wd){
     ${wd.maskPII?'<span class="bd">개인정보 마스킹(광고주)</span>':''}<span class="bd g">참여자 ${c.total||0}</span>${sotBadge}${gridMode?'<span class="bd" title="구글시트와 동일 컬럼·가로 펼침 (열람 전용)">시트 그리드 · 열람</span>':''}${warn.join('')}
     ${isMaster?`<span class="sp" style="flex:1"></span>${flipBtn}<button class="btn" id="projBtn" onclick="projectCur()">그림자 투영(새로고침)</button>`:''}</div>
     <div class="metagrid">${metaCards}</div>
+    ${renderWorkOrderSection(wd)}
     <div class="counts"><div class="cc"><div class="big">${c.total||0}</div><div class="lb">참여자</div></div><div class="cc s"><div class="big">${c.submitted||0}</div><div class="lb">제출완료</div></div><div class="cc p"><div class="big">${c.paid||0}</div><div class="lb">입금완료</div></div></div>
     ${tableSection}`;
 }
@@ -557,6 +568,56 @@ async function flipSoT(value, force){
     if(confirm(`진짜 불일치 ${r.real}건이 남아 있습니다(권장: 0).\n그래도 강제로 Track B로 전환할까요?`)) return flipSoT('db', true);
   } else { toast('전환 실패: '+((r&&r.error)||'오류')); }
   if(btn){btn.disabled=false;btn.textContent=value==='db'?'Track B로 전환':'시트로 되돌리기';}
+}
+
+// ══ 작업오더(발주) 연동 — 연결 상태 바 + 작업세부 표(펼침) + 명단 준비(admin/master) ══
+function renderWorkOrderSection(wd){
+  const d=wd.detail||null, isAdmin=(STATE.role==='master'||STATE.role==='admin');
+  if(!d){
+    if(!isAdmin) return '';
+    return `<div class="wobar"><span class="wt">작업발주 미연결</span><span class="wsub">발주(작업오더)를 연결하면 작업세부가 표시되고 모집 인원만큼 명단을 준비할 수 있습니다.</span>
+      <span style="flex:1"></span><button class="btn pri" onclick="openWorkOrderPicker()">＋ 발주 연결</button></div>`;
+  }
+  const fields=[['상품',d.productOption],['모집 인원',d.recruitCount],['일건수',d.dailyCountText||d.dailyCount],
+    ['구매시간',d.purchaseTime],['배송',d.deliveryType],['페이',d.payAmount?Number(d.payAmount).toLocaleString()+'원':''],
+    ['리뷰유형',d.reviewType],['유입키워드',d.inflowKeyword],['유입방식',d.inflowType],['유입가이드',d.inflowGuide],
+    ['리뷰가이드',d.reviewGuide],['특이사항',d.specialNotes],['상품 URL',d.productUrl],
+    ['시작일',d.startDate?String(d.startDate).slice(0,10):''],['담당',d.managerName]];
+  const opts=Array.isArray(d.options)?d.options:[];
+  const optRow=opts.length?`<div class="worow"><span class="wk">옵션</span><span class="wv">${opts.map(o=>`<span class="wochip">${esc(o)}</span>`).join('')}</span></div>`:'';
+  const rows=fields.filter(([k,v])=>v!=null&&String(v).trim()!=='').map(([k,v])=>`<div class="worow"><span class="wk">${esc(k)}</span><span class="wv">${esc(String(v))}</span></div>`).join('');
+  const adminCtl=isAdmin?`<span style="flex:1"></span>
+      <button class="btn xs" onclick="prepareRoster()" title="발주 모집 인원만큼 빈 명단 슬롯을 준비(부족분만 생성·멱등)">명단 준비 (모집 ${d.recruitCount||0})</button>
+      <button class="btn xs" onclick="openWorkOrderPicker()">발주 변경</button>
+      <button class="btn xs" onclick="unlinkWO()">연결 해제</button>`:'';
+  return `<div class="wobar"><span class="wt">📋 발주: ${esc(d.title||'(제목 없음)')}</span><span class="wsub">${esc(d.status||'')} · 모집 ${d.recruitCount||0}</span>${adminCtl}</div>
+    <details class="wodetail"><summary>작업세부 펼치기 (발주 정형 정보)</summary>${optRow}${rows||'<div class="worow"><span class="wv">세부 정보 없음</span></div>'}</details>`;
+}
+async function openWorkOrderPicker(){
+  const t=STATE.cur; if(!t)return;
+  let ov=document.getElementById('woov'); if(!ov){ov=document.createElement('div');ov.id='woov';ov.className='modalov';ov.addEventListener('click',e=>{if(e.target===ov)ov.remove();});document.body.appendChild(ov);}
+  ov.innerHTML=`<div class="modalbox"><div class="modalhd"><b>발주 연결 · ${esc(t.tabName)}</b><button class="btn xs" onclick="document.getElementById('woov').remove()">닫기</button></div><div class="modalbd" id="wobd"><div class="empty">불러오는 중…</div></div></div>`;
+  const r=await api(`/api/trackb/work-orders?sheetId=${encodeURIComponent(t.sheetId)}&tabName=${encodeURIComponent(t.tabName)}`);
+  const items=(r&&r.items)||[]; const bd=$('#wobd'); if(!bd)return;
+  bd.innerHTML= items.length? items.map(w=>`<div class="worow2 ${w.linkedHere?'on':''}" onclick="linkWO('${esc(w.id)}')">
+     <div class="t">${esc(w.title||'(제목 없음)')} ${w.linkedHere?'<span class="bd g">현재 연결</span>':(w.linkedElsewhere?`<span class="bd" title="다른 탭에 연결됨">${esc(w.linkedTabName||'')} 연결</span>`:'')}</div>
+     <div class="s">모집 ${w.recruitCount||0} · ${esc(w.status||'')}</div></div>`).join('')
+   : `<div class="empty">발주 없음 — 업무포털에서 발주(작업오더)를 먼저 접수하세요.</div>`;
+}
+async function linkWO(id){ const t=STATE.cur; if(!t)return;
+  const r=await api('/api/trackb/work-order/link',{method:'POST',body:JSON.stringify({workOrderId:id,sheetId:t.sheetId,tabName:t.tabName,tabGid:t.tabGid||null})});
+  const ov=document.getElementById('woov'); if(ov)ov.remove();
+  if(r&&r.ok){ toast('발주 연결됨'); reloadWorkdesk(); } else toast('연결 실패: '+((r&&r.error)||''));
+}
+async function unlinkWO(){ const t=STATE.cur; if(!t)return; if(!confirm('이 탭의 발주 연결을 해제할까요? (명단·데이터는 그대로)'))return;
+  const r=await api('/api/trackb/work-order/unlink',{method:'POST',body:JSON.stringify({sheetId:t.sheetId,tabName:t.tabName})});
+  if(r&&r.ok){ toast('연결 해제됨'); reloadWorkdesk(); } else toast('해제 실패');
+}
+async function prepareRoster(){ const t=STATE.cur; if(!t)return;
+  if(!confirm('발주 모집 인원 기준으로 부족한 만큼 빈 명단 슬롯을 만듭니다(이미 충족이면 0개). 계속할까요?'))return;
+  const r=await api('/api/trackb/work-order/prepare-roster',{method:'POST',body:JSON.stringify({sheetId:t.sheetId,tabName:t.tabName,tabGid:t.tabGid||null})});
+  if(r&&r.ok){ toast(r.created>0?`빈 슬롯 ${r.created}칸 생성 (모집 ${r.target}/현재 ${r.current})`:`이미 충족 — 생성 0 (모집 ${r.target}/현재 ${r.current})`); reloadWorkdesk(); }
+  else toast('명단 준비 실패: '+((r&&r.error)||''));
 }
 
 // ══ 소유 지정 뷰 ══

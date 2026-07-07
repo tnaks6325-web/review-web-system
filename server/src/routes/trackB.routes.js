@@ -114,6 +114,37 @@ router.post('/writeback/run', authMiddleware, masterOnlyMiddleware, async (req, 
   } catch (err) { next(err); }
 });
 
+// ── 작업오더(발주) 연동 — 수동 링크 + 작업세부 + 명단 골격 준비 — admin/master ──
+//   ★ Track A 무접촉: 링크는 Track B 전용 테이블 trackb_work_order_links(051)에만 저장(work_orders는 읽기만).
+//     work_orders.linked_tab_* 는 order.routes 승인 흐름이 읽어 분기하므로 절대 안 씀. 명단 골격은 manual 슬롯.
+router.get('/work-orders', authMiddleware, adminOrMasterMiddleware, async (req, res, next) => {
+  try { res.json({ ok: true, items: await svc.listWorkOrders({ sheetId: req.query.sheetId, tabName: req.query.tabName, limit: req.query.limit }) }); }
+  catch (err) { next(err); }
+});
+router.post('/work-order/link', authMiddleware, adminOrMasterMiddleware, async (req, res, next) => {
+  try {
+    const { workOrderId, sheetId, tabName, tabGid } = req.body || {};
+    if (!workOrderId || !sheetId || !tabName) return res.status(400).json({ ok: false, error: 'workOrderId, sheetId, tabName 필수' });
+    const out = await svc.linkWorkOrder({ workOrderId, sheetId, tabName, tabGid: tabGid || null, by: _by(req) });
+    res.status(out.ok ? 200 : 404).json(out);
+  } catch (err) { next(err); }
+});
+router.post('/work-order/unlink', authMiddleware, adminOrMasterMiddleware, async (req, res, next) => {
+  try {
+    const { sheetId, tabName } = req.body || {};
+    if (!sheetId || !tabName) return res.status(400).json({ ok: false, error: 'sheetId, tabName 필수' });
+    res.json(await svc.unlinkWorkOrder({ sheetId, tabName }));
+  } catch (err) { next(err); }
+});
+router.post('/work-order/prepare-roster', authMiddleware, adminOrMasterMiddleware, async (req, res, next) => {
+  try {
+    const { sheetId, tabName, tabGid } = req.body || {};
+    if (!sheetId || !tabName) return res.status(400).json({ ok: false, error: 'sheetId, tabName 필수' });
+    const out = await svc.prepareRosterFromWorkOrder({ sheetId, tabName, tabGid: tabGid || null, by: _by(req) });
+    res.status(out.ok ? 200 : 400).json(out);
+  } catch (err) { next(err); }
+});
+
 // ── 소유 지정 UI 좌측: 업체 목록 + 소유수 — admin/master ──
 router.get('/advertisers', authMiddleware, adminOrMasterMiddleware, async (req, res, next) => {
   try { res.json({ ok: true, items: await svc.listAdvertisersWithOwnership() }); }
