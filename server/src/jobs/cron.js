@@ -239,6 +239,22 @@ function startCronJobs() {
         logger.error(`[CRON-TrackB] error: ${err.message}`);
       } finally { trackBRunning = false; }
     }, { timezone: 'Asia/Seoul' });
+
+    // ── Track B parity 일일 스냅샷: 2주 관측 정량화(추이). 투영이 켜진 경우만 의미 → 같은 게이트 안. ──
+    const snapSchedule = process.env.TRACK_B_PARITY_SNAPSHOT_SCHEDULE || '30 5 * * *';   // 매일 05:30 KST
+    let snapRunning = false;
+    cron.schedule(snapSchedule, async () => {
+      if (snapRunning) return;
+      snapRunning = true;
+      try {
+        const { parityAll } = require('../services/trackB.service');
+        const { withJobLock } = require('../utils/jobLock');
+        const r = await withJobLock('trackb_parity_snap', () => parityAll({ store: true, source: 'cron' }));
+        if (r && r.tabs) logger.info(`[CRON-TrackB-Parity] snapshot tabs=${r.tabs} realZero=${r.realZero}`);
+      } catch (err) {
+        logger.error(`[CRON-TrackB-Parity] error: ${err.message}`);
+      } finally { snapRunning = false; }
+    }, { timezone: 'Asia/Seoul' });
   }
 
   const schedule = process.env.INDEX_CRON_SCHEDULE || '0 9,15 * * 1-6';
