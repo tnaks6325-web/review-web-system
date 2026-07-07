@@ -258,12 +258,14 @@ async function _readinessFor({ sheetId, tabName } = {}) {
     [sheetId, tabName]).catch(() => ({ rows: [] }));
   const tabGid = (gidRows[0] && gidRows[0].tabGid) || null;
 
-  // d4 작업발주 연결/충실도
+  // d4 작업발주 연결/충실도 — Track B 링크(수동) 우선 → work_orders.linked_tab(Track A 승인) 폴백.
   const { rows: wo } = await db.query(
     `SELECT title, product_option AS "productOption", daily_count AS "dailyCount",
             purchase_time AS "purchaseTime", delivery_type AS "deliveryType", recruit_count AS "recruitCount"
-       FROM work_orders WHERE linked_tab_sheet_id=$1 AND linked_tab_name=$2 AND deleted_at IS NULL
-      ORDER BY created_at DESC LIMIT 1`, [sheetId, tabName]).catch(() => ({ rows: [] }));
+       FROM work_orders
+      WHERE deleted_at IS NULL AND ($3::text IS NOT NULL AND id=$3 OR (linked_tab_sheet_id=$1 AND linked_tab_name=$2))
+      ORDER BY ($3::text IS NOT NULL AND id=$3) DESC, created_at DESC LIMIT 1`,
+    [sheetId, tabName, await _effectiveLinkedWorkOrderId(db, sheetId, tabName)]).catch(() => ({ rows: [] }));
   const w = wo[0] || null;
   const woFields = w ? ['productOption', 'purchaseTime', 'deliveryType', 'recruitCount'].filter(k => _norm(w[k])) : [];
   const workOrder = { linked: !!w, filled: woFields.length, of: 4, title: w ? w.title : null };
@@ -393,6 +395,93 @@ async function listAdvertisersWithOwnership() {
   return rows;
 }
 
+// ══ 작업오더(발주) 연동 — 수동 링크 + 작업세부 노출 + 명단 골격 준비. B 내부·격리(라이브 무접촉). ══
+//   ★★ Track A 무접촉: work_orders.linked_tab_* 는 order.routes 승인(accept) 흐름이 **읽어 동작을 분기**한다
+//      (비적격 상태+linked_tab 설정 시 승인 멱등 skip, idempotent 판정). 그래서 Track B는 그 컬럼을 절대 안 쓰고
+//      **Track B 전용 링크 테이블(trackb_work_order_links, migration 051)** 에 발주↔탭 연결을 저장한다.
+//      작업세부 표시는 [Track B 링크] 우선 → 없으면 [work_orders.linked_tab](Track A 승인 링크) 폴백으로 읽기만.
+function _parseWoOptions(json) {
+  if (!json) return [];
+  let v; try { v = typeof json === 'string' ? JSON.parse(json) : json; } catch (_) { return []; }
+  if (!Array.isArray(v)) return [];
+  return v.map(o => {
+    if (o == null) return '';
+    if (typeof o === 'string') return o.trim();
+    if (typeof o === 'object') return String(o.name || o.option || o.optionName || o.label || o.title || o.value || '').trim() || '';
+    return String(o).trim();
+  }).filter(Boolean);
+}
+
+// 이 탭의 유효 링크 발주 id: Track B 링크(수동) 우선 → 없으면 work_orders.linked_tab(Track A 승인) 폴백.
+async function _effectiveLinkedWorkOrderId(db, sheetId, tabName) {
+  const { rows } = await db.query(
+    `SELECT work_order_id FROM trackb_work_order_links WHERE sheet_id=$1 AND tab_name=$2 AND deleted_at IS NULL LIMIT 1`,
+    [sheetId, tabName]).catch(() => ({ rows: [] }));
+  return (rows[0] && rows[0].work_order_id) || null;
+}
+
+// 링크 후보 발주 목록(드롭다운용): Track B 링크 상태 표기 + 최근순.
+async function listWorkOrders({ sheetId, tabName, limit = 100 } = {}) {
+  const db = getPool();
+  const lim = Math.min(Math.max(parseInt(limit, 10) || 100, 1), 300);
+  const { rows } = await db.query(
+    `SELECT w.id, w.title, w.recruit_count AS "recruitCount", w.status, w.created_at AS "createdAt",
+            l.sheet_id AS "linkSheetId", l.tab_name AS "linkTabName"
+       FROM work_orders w
+       LEFT JOIN LATERAL (SELECT sheet_id, tab_name FROM trackb_work_order_links
+                           WHERE work_order_id = w.id AND deleted_at IS NULL ORDER BY created_at DESC LIMIT 1) l ON TRUE
+      WHERE w.deleted_at IS NULL
+      ORDER BY w.created_at DESC LIMIT $1`, [lim]);
+  return rows.map(r => {
+    const here = !!(sheetId && r.linkSheetId === sheetId && r.linkTabName === tabName);
+    return { id: r.id, title: r.title, recruitCount: r.recruitCount, status: r.status, createdAt: r.createdAt,
+      linkedHere: here, linkedElsewhere: !!(r.linkSheetId && !here), linkedTabName: r.linkTabName || null };
+  }).sort((a, b) => (b.linkedHere ? 1 : 0) - (a.linkedHere ? 1 : 0));
+}
+
+// 링크: work_orders 무접촉 — Track B 링크 테이블에 upsert(탭당 활성 1개, 교체 시 대체). tabGid는 미사용(안정성).
+async function linkWorkOrder({ workOrderId, sheetId, tabName, tabGid = null, by = 'admin' } = {}) {
+  if (!workOrderId || !sheetId || !tabName) throw new Error('linkWorkOrder: workOrderId, sheetId, tabName 필수');
+  const db = getPool();
+  const { rows: exist } = await db.query(`SELECT id FROM work_orders WHERE id=$1 AND deleted_at IS NULL LIMIT 1`, [workOrderId]);
+  if (!exist.length) return { ok: false, error: 'work_order_not_found' };
+  await db.query(
+    `INSERT INTO trackb_work_order_links (sheet_id, tab_name, work_order_id, linked_by)
+       VALUES ($1,$2,$3,$4)
+     ON CONFLICT (sheet_id, tab_name) WHERE deleted_at IS NULL
+     DO UPDATE SET work_order_id = EXCLUDED.work_order_id, linked_by = EXCLUDED.linked_by, created_at = NOW()`,
+    [sheetId, tabName, workOrderId, String(by).slice(0, 100)]);
+  return { ok: true };
+}
+async function unlinkWorkOrder({ sheetId, tabName } = {}) {
+  if (!sheetId || !tabName) throw new Error('unlinkWorkOrder: sheetId, tabName 필수');
+  const db = getPool();
+  const { rowCount } = await db.query(
+    `UPDATE trackb_work_order_links SET deleted_at = NOW()
+      WHERE sheet_id=$1 AND tab_name=$2 AND deleted_at IS NULL`, [sheetId, tabName]);
+  return { ok: true, unlinked: rowCount };
+}
+
+// 발주 기준 명단 골격 준비: 유효 링크 발주의 모집인원·옵션으로 빈 슬롯을 부족분만 생성(gap-fill·멱등).
+async function prepareRosterFromWorkOrder({ sheetId, tabName, tabGid = null, by = 'admin' } = {}) {
+  if (!sheetId || !tabName) throw new Error('prepareRosterFromWorkOrder: sheetId, tabName 필수');
+  const db = getPool();
+  const linkedId = await _effectiveLinkedWorkOrderId(db, sheetId, tabName);
+  const { rows } = await db.query(
+    `SELECT recruit_count AS "recruitCount", product_options_json AS "optionsJson", product_option AS "productOption", title
+       FROM work_orders
+      WHERE deleted_at IS NULL AND ($3::text IS NOT NULL AND id=$3 OR (linked_tab_sheet_id=$1 AND linked_tab_name=$2))
+      ORDER BY ($3::text IS NOT NULL AND id=$3) DESC, created_at DESC LIMIT 1`, [sheetId, tabName, linkedId]);
+  const w = rows[0];
+  if (!w) return { ok: false, error: 'no_linked_work_order' };
+  const target = parseInt(w.recruitCount, 10) || 0;
+  if (target <= 0) return { ok: false, error: 'recruit_count_zero' };
+  let options = _parseWoOptions(w.optionsJson);
+  if (!options.length && w.productOption && String(w.productOption).trim()) options = [String(w.productOption).trim()];
+  const r = await participants.prepareRosterSlots({ sheetId, tabName, target, options, productName: w.title || null, by });
+  return { ok: true, ...r };
+}
+
 // ── 관측 대시보드: 투영된 전 탭의 롤업(카운트 대조 + 준비도) 한 번에. 정밀 parity(진짜불일치)는 탭별 온디맨드. ──
 //   경량 집계(탭당 상관 서브쿼리, 인덱스 사용) — 카운트 레벨 대조라 "동수 다른사람" 은 못 잡으니 게이트가 아닌 트리아지.
 async function overview() {
@@ -417,8 +506,10 @@ async function overview() {
             (SELECT COUNT(*) FROM review_index ri WHERE ri.sheet_id=b.sheet_id AND ri.tab_name=b.tab_name AND ri.is_submitted2='PAID') AS "aPaid",
             EXISTS(SELECT 1 FROM advertiser_campaigns ac WHERE ac.deleted_at IS NULL AND ac.sheet_id=b.sheet_id
                      AND (ac.tab_gid IS NULL OR ac.tab_gid=b.tab_gid)) AS "owned",
-            EXISTS(SELECT 1 FROM work_orders wo WHERE wo.deleted_at IS NULL
-                     AND wo.linked_tab_sheet_id=b.sheet_id AND wo.linked_tab_name=b.tab_name) AS "woLinked",
+            (EXISTS(SELECT 1 FROM work_orders wo WHERE wo.deleted_at IS NULL
+                      AND wo.linked_tab_sheet_id=b.sheet_id AND wo.linked_tab_name=b.tab_name)
+             OR EXISTS(SELECT 1 FROM trackb_work_order_links l WHERE l.deleted_at IS NULL
+                      AND l.sheet_id=b.sheet_id AND l.tab_name=b.tab_name)) AS "woLinked",
             tc.source_of_truth AS "sourceOfTruth"
        FROM b LEFT JOIN raw_sheet_tabs rst ON rst.sheet_id=b.sheet_id AND rst.tab_name=b.tab_name
               LEFT JOIN tab_configs tc ON tc.sheet_id=b.sheet_id AND tc.tab_name=b.tab_name
@@ -562,10 +653,18 @@ async function workdeskTab({ sheetId, tabName, tabGid, role = 'master', advertis
             tc.source_of_truth AS "sourceOfTruth"
        FROM tab_configs tc WHERE tc.sheet_id=$1 AND tc.tab_name=$2 LIMIT 1`, [sheetId, tabName]);
   const { rows: wo } = await db.query(
-    `SELECT title, product_option AS "productOption", daily_count AS "dailyCount",
-            purchase_time AS "purchaseTime", delivery_type AS "deliveryType", recruit_count AS "recruitCount"
-       FROM work_orders WHERE linked_tab_sheet_id=$1 AND linked_tab_name=$2 AND deleted_at IS NULL
-      ORDER BY created_at DESC LIMIT 1`, [sheetId, tabName]).catch(() => ({ rows: [] }));
+    `SELECT id, title, product_option AS "productOption", product_options_json AS "productOptionsJson",
+            pay_amount AS "payAmount", daily_count AS "dailyCount", daily_count_text AS "dailyCountText",
+            purchase_time AS "purchaseTime", inflow_keyword AS "inflowKeyword", inflow_type AS "inflowType",
+            inflow_guide AS "inflowGuide", delivery_type AS "deliveryType", courier_proxy AS "courierProxy",
+            review_type AS "reviewType", recruit_count AS "recruitCount", review_guide AS "reviewGuide",
+            special_notes AS "specialNotes", product_url AS "productUrl", start_date AS "startDate",
+            manager_name AS "managerName", status
+       FROM work_orders
+      WHERE deleted_at IS NULL AND ($3::text IS NOT NULL AND id=$3 OR (linked_tab_sheet_id=$1 AND linked_tab_name=$2))
+      ORDER BY ($3::text IS NOT NULL AND id=$3) DESC, created_at DESC LIMIT 1`,
+    [sheetId, tabName, await _effectiveLinkedWorkOrderId(db, sheetId, tabName)]).catch(() => ({ rows: [] }));
+  if (wo[0]) wo[0].options = _parseWoOptions(wo[0].productOptionsJson);
   // 명단(활성) — 앵커 도출에 필요한 컬럼 포함
   const { rows: roster } = await db.query(
     `SELECT id, seq, reviewer_name AS name, recipient_name AS recipient, phone8,
@@ -1026,6 +1125,10 @@ module.exports = {
   removeOwnership,
   listOwnership,
   listAdvertisersWithOwnership,
+  listWorkOrders,
+  linkWorkOrder,
+  unlinkWorkOrder,
+  prepareRosterFromWorkOrder,
   scopedTabsForAdvertiser,
   scopedTabsForStaff,
   scopedActiveTabs,
