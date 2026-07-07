@@ -97,6 +97,15 @@
   .ovnm{cursor:pointer} .ovnm:hover b{color:var(--accent);text-decoration:underline} .ovsub{font-size:10.5px;color:var(--faint);font-weight:400}
   .ovtable .ok{color:var(--safe)} .ovtable .no{color:var(--bad)} .ovtable .vs{color:var(--line2);margin:0 1px} .ovtable .diff{color:var(--bad);font-weight:700}
   .btn.xs{font-size:11px;padding:3px 9px}
+  /* ── 그리드 제거 × · 편집 이력 모달 ── */
+  .rmx{cursor:pointer;color:var(--faint);font-weight:700;font-size:13px;margin-left:6px;opacity:0;transition:opacity .12s} tr:hover .rmx{opacity:.7} .rmx:hover{color:var(--bad);opacity:1}
+  .modalov{position:fixed;inset:0;background:rgba(15,35,42,.5);z-index:200;display:flex;align-items:center;justify-content:center;padding:24px}
+  .modalbox{background:var(--card);border-radius:14px;width:900px;max-width:96vw;max-height:86vh;display:flex;flex-direction:column;overflow:hidden;box-shadow:0 14px 44px rgba(0,0,0,.28)}
+  .modalhd{display:flex;align-items:center;gap:10px;padding:12px 16px;border-bottom:1px solid var(--line)} .modalhd b{font-size:14px;flex:1}
+  .modalbd{overflow:auto;padding:12px 16px}
+  table.histtable{width:100%;border-collapse:collapse;font-size:12px} table.histtable th{text-align:left;padding:7px 9px;font-size:10.5px;color:var(--muted);font-weight:750;border-bottom:1px solid var(--line);position:sticky;top:0;background:var(--card)}
+  table.histtable td{padding:6px 9px;border-bottom:1px solid var(--line)} table.histtable tr.histrev td{color:var(--faint);text-decoration:line-through} table.histtable tr.histrev .hval{text-decoration:none}
+  table.histtable .hts{font-family:var(--mono);font-size:11px;color:var(--muted);white-space:nowrap} .histtable .ok{color:var(--safe);font-weight:700} .histtable .no{color:var(--faint);font-weight:700}
   .rail{border-left:1px solid var(--line);background:var(--card);padding:14px 12px;overflow:auto}
   .rail .sh{font-size:10px;font-weight:750;letter-spacing:.05em;text-transform:uppercase;color:var(--faint);margin:2px 2px 10px}
   .parity{border:1px solid var(--line);border-radius:10px;padding:12px;margin-bottom:14px}
@@ -249,7 +258,7 @@ function renderWorkdesk(wd){
   // 시트형 그리드 모드(master/admin, 시트 헤더 순서 수신 시): 시트와 동일한 가로 그리드로 렌더(열람 전용).
   const gridMode = canEdit && Array.isArray(wd.headers) && wd.headers.length;
   const warn=[];
-  if(!gridMode && canEdit && c.hidden>0) warn.push(`<span class="wchip" onclick="showHidden()">숨김 ${c.hidden}</span>`);
+  if(canEdit && c.hidden>0) warn.push(`<span class="wchip" title="제거(숨김)된 행 — 클릭해 복원" onclick="showHidden()">숨김 ${c.hidden}</span>`);
   if(!gridMode && canEdit && wd.orphanEdits && wd.orphanEdits.count>0) warn.push(`<span class="wchip bad" title="앵커가 현재 명단에 없는 편집">미부착 편집 ${wd.orphanEdits.count}</span>`);
   if(canEdit && c.ambiguous>0) warn.push(`<span class="wchip" title="중복 신원 행">중복 신원 ${c.ambiguous}</span>`);
   let tableSection;
@@ -306,7 +315,7 @@ function buildGrid(wd){
       : `<td ${cls(styleI,'gcell'+(disp?'':' gempty')+(extraCls||''))} style="${cstyle(styleI)}">${esc(disp||'')}</td>`;
     let tds=`<td ${cls(0,'gnum')} style="${cstyle(0)}">${esc(r.seq)}</td>`+
             (canE
-              ? `<td ${cls(1,'gnm')} style="${cstyle(1)}"><span class="ecell${(r.editedFields||[]).includes('reviewer_name')?' edited':''}" data-val="${esc(r.name||'')}" data-id="${esc(r.id)}" data-field="reviewer_name" onclick="beginEditCell(this)">${esc(r.name||'—')}</span>${badge}</td>`
+              ? `<td ${cls(1,'gnm')} style="${cstyle(1)}"><span class="ecell${(r.editedFields||[]).includes('reviewer_name')?' edited':''}" data-val="${esc(r.name||'')}" data-id="${esc(r.id)}" data-field="reviewer_name" onclick="beginEditCell(this)">${esc(r.name||'—')}</span>${badge}<span class="rmx" title="명단에서 제거(숨김)" onclick="hideRow('${esc(r.id)}')">×</span></td>`
               : `<td ${cls(1,'gnm')} style="${cstyle(1)}">${esc(r.name||'—')}${badge}</td>`)+
             eCell('phone8', r.phone8||'', (r.editedFields||[]).includes('phone8'), 'gph', 2);
     H.forEach((h,j)=>{ const i=j+3; const ed=(h in ceMap); const raw= ed?ceMap[h]:rj[h]; const disp= ed?(raw==null?'':String(raw)):_gridVal(h, raw); const ok=((j===revI||j===payI)&&disp)?' gok':'';
@@ -318,13 +327,30 @@ function buildGrid(wd){
     .concat(H.filter(h=>['번호','담당자','구매일자','인애드명단','주문자제출','수취인','주소'].includes(h))
       .map(h=>`<option value="${esc(h)}"${STATE.freezeUpto===h?' selected':''}>${esc(h)}까지 고정</option>`)).join('');
   return `<div class="gridbar"><label>고정 열</label><select id="fzsel" onchange="setFreeze(this.value)">${fzOpts}</select>
-      <span class="gnote">구글시트와 동일 컬럼·가로 배열 · <b>셀 클릭 편집</b>(Track B 전용, 시트·주문 무접촉) · ↩ 되돌리기 · 날짜 자동표시</span></div>
-    <div class="gridscroll"><table class="sheetgrid"><thead>${thead}</thead><tbody>${body}</tbody></table></div>`;
+      <button class="btn xs" onclick="showEditHistory()">편집 이력</button>
+      <span class="gnote">구글시트와 동일 컬럼·가로 배열 · <b>셀 클릭 편집</b>(Track B 전용, 시트·주문 무접촉) · ↩ 되돌리기 · 날짜 자동표시 · 리뷰제출/입금 편집 시 카운트 연동</span></div>
+    <div class="gridscroll"><table class="sheetgrid"><thead>${thead}</thead><tbody>${body}</tbody></table></div>
+    <div id="addbox"></div>
+    <button class="btn" style="margin-top:10px" onclick="showAddForm()">＋ 참여자 추가</button>`;
 }
 function setFreeze(v){ STATE.freezeUpto=v||null; if(STATE.wd) renderWorkdesk(STATE.wd); }
 // 그리드 셀 편집: 헤더/필드는 data 속성으로만 전달(주입 안전). beginEdit/revertEdit(기존 오버레이 경로) 재사용.
 function beginEditCell(el){ beginEdit(el, el.getAttribute('data-id'), el.getAttribute('data-field')); }
 function revertCell(ev, el){ if(ev)ev.stopPropagation(); revertEdit(el.getAttribute('data-id'), el.getAttribute('data-field')); }
+// 편집 이력(감사) 모달
+async function showEditHistory(){
+  const t=STATE.cur; if(!t)return;
+  let ov=document.getElementById('histov');
+  if(!ov){ ov=document.createElement('div'); ov.id='histov'; ov.className='modalov'; ov.addEventListener('click',e=>{if(e.target===ov)ov.remove();}); document.body.appendChild(ov); }
+  ov.innerHTML=`<div class="modalbox"><div class="modalhd"><b>편집 이력 · ${esc(t.tabName)}</b><button class="btn xs" onclick="document.getElementById('histov').remove()">닫기</button></div><div class="modalbd" id="histbd"><div class="empty">불러오는 중…</div></div></div>`;
+  const r=await api(`/api/trackb/workdesk/edits?sheetId=${encodeURIComponent(t.sheetId)}&tabName=${encodeURIComponent(t.tabName)}`);
+  const items=(r&&r.items)||[]; const bd=$('#histbd'); if(!bd)return;
+  bd.innerHTML= items.length
+    ? `<table class="histtable"><thead><tr><th>시각</th><th>참여자</th><th>필드</th><th>값</th><th>편집자</th><th>상태</th></tr></thead><tbody>${
+        items.map(e=>`<tr class="${e.reverted?'histrev':''}"><td class="hts">${esc(_fmtTs(e.at))}</td><td>${esc(e.name||'—')}</td><td>${esc(e.field)}</td><td class="hval">${esc(e.value)}</td><td>${esc(e.by)}</td><td>${e.reverted?'<span class="no">되돌림</span>':'<span class="ok">활성</span>'}</td></tr>`).join('')
+      }</tbody></table>`
+    : `<div class="empty">편집 이력 없음</div>`;
+}
 
 // ══ 관측 대시보드 뷰 ══
 async function renderOverviewView(){
