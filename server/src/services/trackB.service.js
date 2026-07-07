@@ -444,22 +444,73 @@ async function scopedTabsForAdvertiser(advertiserId) {
   return { sheetIds: [...new Set(rows.map(r => r.sheetId))], tabGids, allTabSheetIds };
 }
 
+// AE(staff) 스코프: 그 AE가 담당(advertisers.inad_pm=로그인명)하는 업체가 소유한 (sheet_id, tab_gid) 집합.
+//   담당 매핑 = 기존 inad_pm 재사용. tab_gid NULL 소유 = 그 시트 전체.
+async function scopedTabsForStaff(staffName) {
+  const nm = String(staffName || '').trim();
+  if (!nm) return { sheetIds: [], tabGids: [], allTabSheetIds: [] };
+  const db = getPool();
+  const { rows } = await db.query(
+    `SELECT ac.sheet_id AS "sheetId", ac.tab_gid AS "tabGid"
+       FROM advertiser_campaigns ac JOIN advertisers a ON a.id = ac.advertiser_id
+      WHERE a.inad_pm = $1 AND ac.deleted_at IS NULL`, [nm]);
+  const allTabSheetIds = rows.filter(r => !r.tabGid).map(r => r.sheetId);
+  const tabGids = rows.filter(r => r.tabGid).map(r => `${r.sheetId}::${r.tabGid}`);
+  return { sheetIds: [...new Set(rows.map(r => r.sheetId))], tabGids, allTabSheetIds };
+}
+
+// 역할별 스코프 해석: advertiser→소유업체, staff→담당업체(inad_pm), 그 외→null(전체).
+async function _scopeFor({ role, staffName, advertiserId } = {}) {
+  if (role === 'advertiser') return await scopedTabsForAdvertiser(advertiserId);
+  if (role === 'staff') return await scopedTabsForStaff(staffName);
+  return null;   // master/admin = 전체
+}
+function _scopeOwns(scope, sheetId, tabGid) {
+  if (!scope) return true;   // 전체 스코프(master/admin)
+  return scope.allTabSheetIds.includes(sheetId) || (!!tabGid && scope.tabGids.includes(`${sheetId}::${tabGid}`));
+}
+
+// 탭 접근 권한(스코프): 편집 라우트(gid 미전달)용 — raw_sheet_tabs 로 gid 해석 후 스코프 판정.
+async function canAccessTab({ role, staffName, advertiserId, sheetId, tabName } = {}) {
+  const scope = await _scopeFor({ role, staffName, advertiserId });
+  if (!scope) return true;                          // master/admin
+  if (scope.allTabSheetIds.includes(sheetId)) return true;   // 시트 전체 소유
+  if (!scope.tabGids.length) return false;
+  const db = getPool();
+  // 동명탭(같은 tab_name 여러 gid)이 있어도 결정적으로 판정 — LIMIT 1(비결정) 대신 그 tab_name을 가진
+  //   모든 gid를 모아, 소유 gid와 교집합이 있으면 허용(명단은 tab_name으로 병합 조회되므로 이 기준이 일관).
+  const { rows } = await db.query(
+    `SELECT DISTINCT tab_gid FROM raw_sheet_tabs WHERE sheet_id=$1 AND tab_name=$2 AND tab_gid IS NOT NULL`,
+    [sheetId, tabName]).catch(() => ({ rows: [] }));
+  return rows.some(r => scope.tabGids.includes(`${sheetId}::${r.tab_gid}`));
+}
+
+// 역할 스코프 적용된 활성 탭 목록: staff/advertiser 는 담당/소유 탭만, master/admin 은 전체.
+async function scopedActiveTabs({ role, staffName, advertiserId, limit } = {}) {
+  const all = await participants.listActiveTabs({ limit });
+  const scope = await _scopeFor({ role, staffName, advertiserId });
+  if (!scope) return all;
+  return all.filter(t => _scopeOwns(scope, t.sheetId, t.tabGid));
+}
+
 function _akey(type, value) { return type + '\t' + value; }   // 앵커 조합키(정렬무관, 값에 탭 없음)
 
 // ── 통합 작업대 데이터(읽기): 세부 + 명단 + 상태 + 활성 오버레이 read-time 합성. 역할별 PII 마스킹. ──
 //   ★ 물리행은 순수 투영(review_index 사본) 유지 — 편집은 participant_edits(오버레이)에만 살고 여기서 합성만.
 //     정렬/재투영이 물리행을 덮어도 편집 무손실·무오염(교차노출 근본 차단). staff는 라우트가 이미 차단.
-async function workdeskTab({ sheetId, tabName, tabGid, role = 'master', advertiserId = null } = {}) {
+async function workdeskTab({ sheetId, tabName, tabGid, role = 'master', advertiserId = null, staffName = null } = {}) {
   if (!sheetId || !tabName) throw new Error('workdeskTab: sheetId, tabName 필수');
   const db = getPool();
-  if (role === 'advertiser') {
-    const scope = await scopedTabsForAdvertiser(advertiserId);
-    const owns = scope.allTabSheetIds.includes(sheetId) ||
-      (tabGid && scope.tabGids.includes(`${sheetId}::${tabGid}`));
-    if (!owns) return { scoped: true, denied: true };
+  // 스코프 강제: advertiser=소유업체, staff(AE)=담당업체(inad_pm). 스코프 밖 탭은 거부(교차 접근 차단).
+  //   ★ 판정은 클라이언트가 보낸 tabGid를 신뢰하지 않고 (sheetId, tabName)으로 gid를 재해석(canAccessTab).
+  //     명단·PII·주문원장은 전부 tabName으로 조회되므로, 스코프도 반드시 tabName 기준이어야 read/edit
+  //     비대칭이 사라진다(과거: 소유 gid를 쿼리스트링에 실어 타 탭 tabName의 명단을 긁는 교차 열람이 뚫렸음).
+  if (role === 'advertiser' || role === 'staff') {
+    const okc = await canAccessTab({ role, staffName, advertiserId, sheetId, tabName });
+    if (!okc) return { scoped: true, denied: true };
   }
-  const maskPII = role === 'advertiser';       // 광고주 뷰는 리뷰어 개인정보 마스킹
-  const showEdits = role !== 'advertiser';     // 편집 어포던스·orphan·hidden은 내부(master/admin)만
+  const maskPII = role === 'advertiser';       // 광고주(외부)만 마스킹 · AE(내부)는 전체
+  const showEdits = role !== 'advertiser';     // 편집 어포던스·orphan·hidden은 내부(master/admin/staff)
   const { rows: meta } = await db.query(
     `SELECT tc.campaign_name AS "campaignName", tc.manager, tc.review_type AS "reviewType",
             tc.delivery_type AS "deliveryType", tc.income_type AS "incomeType"
@@ -778,6 +829,9 @@ module.exports = {
   listOwnership,
   listAdvertisersWithOwnership,
   scopedTabsForAdvertiser,
+  scopedTabsForStaff,
+  scopedActiveTabs,
+  canAccessTab,
   overview,
   workdeskTab,
   editWorkdeskRow,

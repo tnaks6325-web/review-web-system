@@ -187,10 +187,12 @@ function renderLogin(){
     <input id="lpw" type="password" placeholder="비밀번호" autocomplete="current-password">
     <button class="btn pri" style="width:100%;padding:9px" onclick="doLogin()">로그인</button>
     <div class="err" id="lerr"></div>
-    <div class="note">Track B 그림자 화면입니다. 관리자(master/admin)로 로그인하면 통합 작업대·parity·소유 지정을 봅니다.</div></div>`;
+    <div class="note">Track B 통합 작업대입니다. 관리자(master/admin)는 전체·관측·소유 지정, AE(영업담당)는 자기 담당 업체 탭을 열람/편집합니다.</div></div>`;
   $('#lpw').addEventListener('keydown',e=>{if(e.key==='Enter')doLogin();});
 }
-async function doLogin(){ const r=await api('/api/admin/login',{method:'POST',body:JSON.stringify({name:$('#lname').value.trim(),pw:$('#lpw').value})});
+async function doLogin(){ const name=$('#lname').value.trim(), pw=$('#lpw').value;
+  let r=await api('/api/admin/login',{method:'POST',body:JSON.stringify({name,pw})});
+  if(!(r&&r.success&&r.token)){ r=await api('/api/admin/staff-login',{method:'POST',body:JSON.stringify({name,pw})}); }  // AE(영업담당) 폴백
   if(r&&r.success&&r.token){ sessionStorage.setItem('admin_token',r.token); boot(); } else $('#lerr').textContent=(r&&(r.error||r.message))||'로그인 실패'; }
 function logout(){ sessionStorage.removeItem('admin_token'); boot(); }
 
@@ -252,7 +254,7 @@ function _bcell(r, field, val){   // 제출/입금 토글 셀
 }
 function renderWorkdesk(wd){
   if(!wd||!wd.ok){ $('#main').innerHTML=`<div class="empty">${esc((wd&&wd.error)||'조회 실패')}</div>`; return; }
-  STATE.wd=wd; STATE.canEdit=(STATE.role==='master'||STATE.role==='admin');
+  STATE.wd=wd; STATE.canEdit=(STATE.role!=='advertiser');   // master/admin/staff(AE) 편집 · 광고주는 열람
   const d=wd.detail||{},m=wd.meta||{},c=wd.counts||{}, isMaster=STATE.role==='master', canEdit=STATE.canEdit;
   const metaCards=[['상품',d.productOption||m.campaignName||'—'],['모집',(d.recruitCount||'—')+(m.manager?(' · '+m.manager):'')],['구매시간',d.purchaseTime||'자율'],['배송',d.deliveryType||m.deliveryType||'—']].map(([k,v])=>`<div class="mf"><div class="k">${esc(k)}</div><div class="v">${esc(v)}</div></div>`).join('');
   // 시트형 그리드 모드(master/admin, 시트 헤더 순서 수신 시): 시트와 동일한 가로 그리드로 렌더(열람 전용).
