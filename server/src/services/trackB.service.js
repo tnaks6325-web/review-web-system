@@ -858,6 +858,156 @@ async function listEdits({ sheetId, tabName, limit = 200 } = {}) {
   }));
 }
 
+// ══════════════════════════════════════════════════════════════════════════
+// P2 (최소 출시 · 심판 확정): 상태 토글 write-back — cutover 탭의 is_submitted/is_paid 오버레이
+//   편집만 시트의 리뷰제출/입금 상태칸에 반영. 그 외(이름/수취인/phone8/round/옵션/col:*·manual
+//   추가/삭제)는 범위 밖(B 내부 유지) — 다음 red-blue-judge 단계.
+//
+// ★★ Track A 리스크 = 0 (구조로 보장, 리스트 방어 아님):
+//   1) 격리: source_of_truth 재확인은 이 파일(회귀가드 ALLOWED)에서만. Track A 파일(syncQueue/
+//      orderLedger/smartBuild/claimRow/rawMirror) 0줄 수정 — cron 스윕이 유일 구동자.
+//   2) 컬럼 disjoint: order_append(mapOrderToSheetRow)는 상태칸(리뷰제출/입금)을 **절대 안 씀**.
+//      write-back은 submit_col/submit_col2 **두 열에만** 쓴다(_buildToggleWrite가 물리적으로 강제)
+//      → 같은 행 충돌·연락처/수취인/주소 오염·review_index.phone8(소유권키) 변조가 **불가능**.
+//   3) blank-only: 사람/라이브가 채운 셀은 절대 클로버 안 함(비면 held). un-write 안 함.
+//   4) 신원 재검증(rowIdentityMatches): 행 이동/재사용 시 mismatch=blocked(자가치유 재시도).
+//   5) 저우선 throttle({priority:'low'}) + BUSY 양보: 주문 예약 8슬롯·라이브 시트작업 무굶김.
+//   6) 멱등: _normSubmitCell no-op + status='written'(재픽업 안 함) → 핑퐁 0.
+//   7) 이중 게이트: TRACK_B_WRITEBACK=1(글로벌) AND source_of_truth='db'(탭별). 기본 OFF=완전 inert.
+// ══════════════════════════════════════════════════════════════════════════
+function _wbColLetter(idx) { let s = '', i = idx; while (i >= 0) { s = String.fromCharCode((i % 26) + 65) + s; i = Math.floor(i / 26) - 1; } return s; }
+
+// 상태 토글 쓰기 산출(순수·단위테스트 대상). ★ c1/c2(submit_col/submit_col2) 두 열 외 range 생성 불가.
+//   want=false(해제)는 blank-only상 못 쓴다(현재 'O'면 conflict). cells는 minC..maxC 슬라이스.
+function _buildToggleWrite({ tabName, headers, submitCol, submitCol2, wantSubmitted, wantPaid, cells, minC, sheetRow }) {
+  const { _normSubmitCell, _wantMark } = require('./participantMirror.service');
+  const c1 = submitCol ? headers.indexOf(submitCol) : -1;
+  const c2 = submitCol2 ? headers.indexOf(submitCol2) : -1;
+  const writeData = []; let conflict = false;
+  for (const [col, want] of [[c1, wantSubmitted], [c2, wantPaid]]) {
+    if (col < 0 || want == null) continue;
+    const wantMark = _normSubmitCell(_wantMark(want));
+    const cur = _normSubmitCell(cells[col - minC]);
+    if (cur === wantMark) continue;                    // 멱등 no-op(이미 원하는 상태)
+    if (cur === '') writeData.push({ range: `'${tabName}'!${_wbColLetter(col)}${sheetRow}`, values: [[_wantMark(want)]] });
+    else conflict = true;                              // 사람/라이브가 채운 셀 → 클로버 금지(held)
+  }
+  return { writeData, conflict, c1, c2 };
+}
+
+// cutover 탭 1개의 미반영 상태 토글을 시트에 반영. 큐 없이 cron/수동이 직접 호출(멱등·재시도 안전).
+async function executeWriteback({ sheetId, tabName } = {}) {
+  if (process.env.TRACK_B_WRITEBACK !== '1') return { skipped: true, reason: 'gate_off' };
+  if (!sheetId || !tabName) return { skipped: true, reason: 'missing_args' };
+  if (await getSourceOfTruth({ sheetId, tabName }) !== 'db') return { skipped: true, reason: 'not_cutover' };
+  const db = getPool();
+  const { loadRawTabContext, rowIdentityMatches } = require('./orderLedger.service');
+  const { readSheet, batchUpdateSheet, invalidateSheetMeta } = require('./sheets.service');
+  const { throttledCall, getThrottleStatus } = require('../utils/sheetsThrottle');
+
+  const { rows: edits } = await db.query(
+    `SELECT id, anchor_type, anchor_value, field, value_bool FROM participant_edits
+      WHERE sheet_id=$1 AND tab_name=$2 AND reverted_at IS NULL AND field IN ('is_submitted','is_paid')
+        AND (writeback_status IS NULL OR writeback_status='blocked')`, [sheetId, tabName]);
+  if (!edits.length) return { skipped: true, reason: 'no_pending', tabName };
+
+  // import행만(manual 추가행은 범위 밖 = append 필요). 상태칸·신원 있는 행.
+  const { rows: roster } = await db.query(
+    `SELECT id, order_submission_id, identity_key, sheet_row, tab_gid, phone8, recipient_name,
+            reviewer_name, round, option_text, submit_col, submit_col2
+       FROM campaign_participants
+      WHERE sheet_id=$1 AND tab_name=$2 AND deleted_at IS NULL AND active=TRUE
+        AND source='import' AND sheet_row IS NOT NULL AND tab_gid IS NOT NULL`, [sheetId, tabName]);
+  const byOrder = new Map(), byIdent = new Map(), identCount = new Map();
+  for (const r of roster) {
+    if (r.order_submission_id) byOrder.set(String(r.order_submission_id), r);
+    const ik = r.identity_key || identityKey(_ikFromRow(r));
+    if (ik) { identCount.set(ik, (identCount.get(ik) || 0) + 1); if (!byIdent.has(ik)) byIdent.set(ik, r); }
+  }
+  const markStatus = (id, st, sig) => db.query(
+    `UPDATE participant_edits SET writeback_status=$2, writeback_at=NOW(), writeback_sig=COALESCE($3,writeback_sig) WHERE id=$1`,
+    [id, st, sig || null]);
+
+  const perRow = new Map();   // participant.id → { row, wantSubmitted, wantPaid, editIds }
+  let blocked = 0;
+  for (const e of edits) {
+    let row = null;
+    if (e.anchor_type === 'order') row = byOrder.get(e.anchor_value) || null;
+    else if (e.anchor_type === 'identity' && (identCount.get(e.anchor_value) || 0) === 1) row = byIdent.get(e.anchor_value) || null;
+    if (!row) { await markStatus(e.id, 'blocked'); blocked++; continue; }   // manual앵커/모호/미부착 → 자가치유
+    if (!perRow.has(row.id)) perRow.set(row.id, { row, wantSubmitted: null, wantPaid: null, editIds: [] });
+    const s = perRow.get(row.id);
+    if (e.field === 'is_submitted') s.wantSubmitted = !!e.value_bool; else s.wantPaid = !!e.value_bool;
+    s.editIds.push(e.id);
+  }
+  if (!perRow.size) return { tabName, written: 0, held: 0, blocked, deferred: 0 };
+
+  const ctx = await loadRawTabContext(sheetId, roster[0].tab_gid, tabName);
+  if (!ctx || !ctx.headers || !ctx.headers.length) return { skipped: true, reason: 'no_meta', tabName };
+  const headers = ctx.headers;
+  const BUSY = parseInt(process.env.TRACK_B_WRITEBACK_BUSY || '20', 10);
+  let written = 0, held = 0, deferred = 0;
+
+  for (const { row, wantSubmitted, wantPaid, editIds } of perRow.values()) {
+    if (getThrottleStatus().requestsInLastMinute > BUSY) { deferred += editIds.length; continue; }   // 라이브 양보(멱등 재시도)
+    const c1 = row.submit_col ? headers.indexOf(row.submit_col) : -1;
+    const c2 = row.submit_col2 ? headers.indexOf(row.submit_col2) : -1;
+    if (c1 < 0 && c2 < 0) { for (const id of editIds) await markStatus(id, 'blocked'); blocked += editIds.length; continue; }   // 헤더 드리프트
+    if (!row.phone8 || !row.recipient_name) { for (const id of editIds) await markStatus(id, 'blocked'); blocked += editIds.length; continue; }
+    let idy;
+    try { idy = await rowIdentityMatches({ sheet_id: sheetId, sheet_row: row.sheet_row, tab_gid: row.tab_gid, tab_name: tabName, phone: row.phone8, recipient: row.recipient_name, address: null }, ctx); }
+    catch (_) { deferred += editIds.length; continue; }
+    if (!idy.match) { for (const id of editIds) await markStatus(id, 'blocked'); blocked += editIds.length; continue; }   // 행이동/재사용 차단
+    const cols = [c1, c2].filter(c => c >= 0);
+    const minC = Math.min(...cols), maxC = Math.max(...cols);
+    invalidateSheetMeta(sheetId);
+    const rng = `'${tabName}'!${_wbColLetter(minC)}${row.sheet_row}:${_wbColLetter(maxC)}${row.sheet_row}`;
+    let cells;
+    try { const rd = await throttledCall(() => readSheet(sheetId, rng, { gid: row.tab_gid }), 2, { priority: 'low' }); cells = (rd && rd[0]) || []; }
+    catch (_) { deferred += editIds.length; continue; }
+    const { writeData, conflict } = _buildToggleWrite({ tabName, headers, submitCol: row.submit_col, submitCol2: row.submit_col2, wantSubmitted, wantPaid, cells, minC, sheetRow: row.sheet_row });
+    if (writeData.length) {
+      try { await throttledCall(() => batchUpdateSheet(sheetId, writeData, 'RAW', { gid: row.tab_gid }), 2, { priority: 'low' }); }
+      catch (_) { deferred += editIds.length; continue; }   // blank-only라 재시도 멱등
+    }
+    const sig = `s=${wantSubmitted == null ? '-' : (wantSubmitted ? 'O' : '')}|p=${wantPaid == null ? '-' : (wantPaid ? 'O' : '')}`;
+    const st = conflict ? 'held' : 'written';
+    for (const id of editIds) await markStatus(id, st, sig);
+    if (conflict) held += editIds.length; else written += editIds.length;
+  }
+  return { tabName, written, held, blocked, deferred };
+}
+
+// cron/수동 진입점: cutover(source_of_truth='db') 탭 중 미반영 토글이 있는 탭만 순회.
+//   락(trackb_writeback)은 호출측(cron/route)에서 감싼다 — 멀티인스턴스 이중 스윕 직렬화.
+async function writebackSweep({ limit = 100 } = {}) {
+  if (process.env.TRACK_B_WRITEBACK !== '1') return { skipped: true, reason: 'gate_off' };
+  const db = getPool();
+  const { rows: tabs } = await db.query(
+    `SELECT DISTINCT pe.sheet_id AS "sheetId", pe.tab_name AS "tabName"
+       FROM participant_edits pe JOIN tab_configs tc ON tc.sheet_id=pe.sheet_id AND tc.tab_name=pe.tab_name
+      WHERE pe.reverted_at IS NULL AND pe.field IN ('is_submitted','is_paid')
+        AND (pe.writeback_status IS NULL
+             OR (pe.writeback_status='blocked' AND (pe.writeback_at IS NULL OR pe.writeback_at < NOW() - INTERVAL '30 minutes')))
+        AND tc.source_of_truth='db'
+      LIMIT $1`, [limit]);
+  let done = 0, written = 0, held = 0, errors = 0;
+  for (const t of tabs) {
+    try { const r = await executeWriteback({ sheetId: t.sheetId, tabName: t.tabName }); done++; written += r.written || 0; held += r.held || 0; }
+    catch (e) { errors++; logger.warn(`[trackB] writeback ${t.tabName} 실패: ${e.message}`); }
+  }
+  return { candidateTabs: tabs.length, done, written, held, errors };
+}
+
+async function writebackStatus() {
+  const { rows } = await getPool().query(
+    `SELECT COUNT(*) FILTER (WHERE writeback_status='held')::int AS held,
+            COUNT(*) FILTER (WHERE writeback_status='blocked')::int AS blocked,
+            COUNT(*) FILTER (WHERE writeback_status='written')::int AS written
+       FROM participant_edits WHERE reverted_at IS NULL AND field IN ('is_submitted','is_paid')`);
+  return rows[0] || { held: 0, blocked: 0, written: 0 };
+}
+
 module.exports = {
   identityKey,
   classifyParity,
@@ -877,6 +1027,10 @@ module.exports = {
   overview,
   getSourceOfTruth,
   setSourceOfTruth,
+  executeWriteback,
+  writebackSweep,
+  writebackStatus,
+  _buildToggleWrite,
   workdeskTab,
   editWorkdeskRow,
   revertWorkdeskEdit,

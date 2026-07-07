@@ -98,6 +98,22 @@ router.post('/source-of-truth', authMiddleware, masterOnlyMiddleware, async (req
   } catch (err) { next(err); }
 });
 
+// ── P2 상태 토글 write-back 관측/수동 트리거 — master 전용 ──
+//   status = held/blocked/written 카운트(관측). run = 즉시 스윕(탭 지정 시 그 탭만). 락으로 cron과 상호배제.
+router.get('/writeback/status', authMiddleware, masterOnlyMiddleware, async (req, res, next) => {
+  try { res.json({ ok: true, ...(await svc.writebackStatus()) }); }
+  catch (err) { next(err); }
+});
+router.post('/writeback/run', authMiddleware, masterOnlyMiddleware, async (req, res, next) => {
+  try {
+    const { sheetId, tabName } = req.body || {};
+    const { withJobLock } = require('../utils/jobLock');
+    const r = await withJobLock('trackb_writeback',
+      () => (sheetId && tabName) ? svc.executeWriteback({ sheetId, tabName }) : svc.writebackSweep({}));
+    res.json({ ok: true, ...r });
+  } catch (err) { next(err); }
+});
+
 // ── 소유 지정 UI 좌측: 업체 목록 + 소유수 — admin/master ──
 router.get('/advertisers', authMiddleware, adminOrMasterMiddleware, async (req, res, next) => {
   try { res.json({ ok: true, items: await svc.listAdvertisersWithOwnership() }); }
