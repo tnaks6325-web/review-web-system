@@ -94,7 +94,7 @@ async function run() {
 
   // ═══ 2. 광고주 렌즈: 스코프 밖 거부 + PII 마스킹 + 편집메타 미노출 ═══
   const pool2 = makeQueryPool({ meta: [], roster: [
-    { id: 'r1', seq: 1, name: 'A', recipient: null, phone8: '11112222', round: '1', option: '', product: '', submitted: false, paid: false, source: 'import', order_submission_id: null, identity_key: 'phone8:11112222', row_json: {} },
+    { id: 'r1', seq: 1, name: '홍길동', recipient: '김철수', phone8: '11112222', round: '1', option: '', product: '', submitted: false, paid: false, source: 'import', order_submission_id: null, identity_key: 'phone8:11112222', row_json: {} },
   ], edits: [] });
   // scopedTabsForAdvertiser 는 별도 query — 소유로 통과시키기 위해 목 확장
   pool2.query = (function (orig) {
@@ -108,6 +108,8 @@ async function run() {
   const wda = await svc.workdeskTab({ sheetId: 's', tabName: 'T', role: 'advertiser', advertiserId: 'adv_1' });
   assert.equal(wda.maskPII, true, '2a: 광고주 마스킹 on');
   assert.ok(/••••/.test(wda.roster[0].phone8), '2b: phone8 마스킹');
+  assert.equal(wda.roster[0].name, '홍○○', '2b2: 이름 부분마스킹(첫글자+○)');
+  assert.equal(wda.roster[0].recipient, '김○○', '2b3: 수취인 부분마스킹');
   assert.equal(wda.roster[0].editedFields, undefined, '2c: 광고주엔 편집메타 미노출');
   assert.equal(wda.orphanEdits, undefined, '2d: 광고주엔 orphan 미노출');
   const wdDenied = await svc.workdeskTab({ sheetId: 'other', tabName: 'T', role: 'advertiser', advertiserId: 'adv_1' });
@@ -229,6 +231,7 @@ async function run() {
   // ═══ 6. AE(staff) 스코프 — 담당 탭만 접근(교차 차단) ═══
   let p6 = makeQueryPool({ staffScope: [{ sheetId: 'S1', tabGid: null }] }); svc.__setPoolForTest(p6);
   assert.equal(await svc.canAccessTab({ role: 'staff', staffName: '김수만', sheetId: 'S1', tabName: 'T' }), true, '6a: 시트 전체 소유 → 접근 허용');
+  assert.ok(p6.q.some(s => /TRIM\(a\.inad_pm\)\s*=\s*\$1/.test(s)), '6a-trim: 담당 매칭은 inad_pm 양쪽 TRIM(공백·표기차 footgun 차단)');
   assert.equal(await svc.canAccessTab({ role: 'staff', staffName: '김수만', sheetId: 'OTHER', tabName: 'T' }), false, '6a2: 소유 밖 시트 → 차단');
   p6 = makeQueryPool({ staffScope: [{ sheetId: 'S1', tabGid: '99' }], tabGidRow: '99' }); svc.__setPoolForTest(p6);
   assert.equal(await svc.canAccessTab({ role: 'staff', staffName: '김수만', sheetId: 'S1', tabName: 'T' }), true, '6b: 담당 탭(gid 일치) → 허용');
