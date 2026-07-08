@@ -381,18 +381,35 @@ async function renderOverviewView(){
 function renderOverviewHead(){
   const it=STATE.ov||[]; const n=it.length, nM=it.filter(x=>x.countMatch).length, nO=it.filter(x=>x.owned).length, nW=it.filter(x=>x.woLinked).length;
   const nR = it.filter(x=>x.real===0).length, nRk = it.filter(x=>typeof x.real==='number').length;
+  const nReady = it.filter(x=>{const v=_cutoverVerdict(x); return v.txt==='✅ 준비';}).length;
+  const nDb = it.filter(x=>x.sourceOfTruth==='db').length;
   $('#ovhead').innerHTML=`<div class="mh"><h1>관측 대시보드</h1><span class="bd g">투영 ${n}탭</span>
-    <span class="bd">카운트일치 ${nM}</span><span class="bd">소유 ${nO}</span><span class="bd">발주 ${nW}</span>${nRk?`<span class="bd" title="정밀 계산된 탭 중 진짜 불일치 0">진짜불일치0 ${nR}/${nRk}</span>`:''}
+    <span class="bd">카운트일치 ${nM}</span><span class="bd">소유 ${nO}</span><span class="bd">발주 ${nW}</span>${nRk?`<span class="bd" title="정밀 계산된 탭 중 진짜 불일치 0">진짜불일치0 ${nR}/${nRk}</span>`:''}<span class="bd g" title="카운트·소유·발주·진짜불일치0 종합 충족 → cutover 가능">cutover 준비 ${nReady}</span>${nDb?`<span class="bd sot" title="이미 Track B 원본으로 전환된 탭">전환됨 ${nDb}</span>`:''}
     <span class="sp" style="flex:1"></span>
     <button class="btn pri" id="paBtn" onclick="runParityAll()" title="투영된 전 탭의 진짜 불일치를 일괄 계산하고 추이 스냅샷 저장">전체 정밀 계산</button>
     <input id="ovq" class="ovsearch" placeholder="탭/시트 검색" oninput="renderOverviewBody(this.value)" value="${esc(STATE.ovq||'')}"></div>
     <div class="ovnote">A(현행 시트)↔B(Track B) <b>카운트 대조</b>와 준비도. 실제 전환 게이트 = <b>진짜 불일치 0</b>(행 [정밀] 또는 "전체 정밀 계산"). 진짜불일치 값 클릭 시 <b>추이</b>(2주 관측)를 봅니다.${STATE.lastBatch?` · 최근 계산 ${esc(_fmtTs(STATE.lastBatch))}`:''}</div>`;
 }
+// cutover 종합 판정: 완성 신호(카운트·소유·발주·원본·진짜불일치)를 하나의 결정으로 수렴.
+function _cutoverVerdict(o){
+  if(o.sourceOfTruth==='db') return {cls:'ok',txt:'전환됨',title:'이미 Track B 원본(cutover 완료)'};
+  const base=o.countMatch&&o.owned&&o.woLinked;
+  if(!base){ const m=[]; if(!o.countMatch)m.push('카운트'); if(!o.owned)m.push('소유'); if(!o.woLinked)m.push('발주'); return {cls:'no',txt:'미충족',title:'미충족: '+m.join('·')}; }
+  if(typeof o.real==='number') return o.real===0?{cls:'ok',txt:'✅ 준비',title:'카운트·소유·발주·진짜불일치0 충족 → cutover 가능'}:{cls:'no',txt:'불일치 '+o.real,title:'진짜 불일치 '+o.real+'건 (정밀)'};
+  return {cls:'warn',txt:'정밀 필요',title:'카운트·소유·발주 충족 — [정밀]로 진짜불일치 확인 필요'};
+}
+function _wbCell(o){
+  const wb=o.writeback||{held:0,blocked:0};
+  if(o.sourceOfTruth==='db') return (wb.held||wb.blocked)?`<span class="no" title="held=사람셀 충돌·blocked=신원/컬럼 불일치(자가치유)">⚠ ${wb.held}·${wb.blocked}</span>`:'<span class="ok" title="반영 이슈 없음">정상</span>';
+  return o.editCount?`<span class="bd" title="반영 대기 편집 — cutover 후 write-back 대상">편집 ${o.editCount}</span>`:'<span class="ovsub">—</span>';
+}
 function renderOverviewBody(q){
   q=(q||'').trim(); STATE.ovq=q; const it=STATE.ov||[];
   const cmp=(a,b)=>`${a}<span class="vs">/</span>${b}${a===b?'':' <span class="diff">≠</span>'}`;
   const chk=b=>b?'<span class="ok">✓</span>':'<span class="no">–</span>';
-  const rows=it.map((o,i)=>({o,i})).filter(({o})=>!q||((o.tabName||'')+(o.spreadsheetTitle||'')).includes(q)).map(({o,i})=>`<tr>
+  const rows=it.map((o,i)=>({o,i})).filter(({o})=>!q||((o.tabName||'')+(o.spreadsheetTitle||'')).includes(q)).map(({o,i})=>{
+    const v=_cutoverVerdict(o);
+    return `<tr>
       <td class="ovnm" onclick="openTabFromOverview(${i})" title="작업대에서 열기"><b>${esc(o.tabName)}</b><div class="ovsub">${esc(o.spreadsheetTitle)}</div></td>
       <td class="num">${o.b.total}</td>
       <td class="num">${cmp(o.a.total,o.b.total)}</td>
@@ -406,8 +423,11 @@ function renderOverviewBody(q){
         ? `<span class="${o.real===0?'ok':'no'}" style="cursor:pointer" title="추이 보기" onclick="showTrend(${i})">${o.real===0?'✓ 0':'✗ '+o.real}</span>`
         : `<button class="btn xs" onclick="checkPrecise(${i})">정밀</button>`}</td>
       <td class="ctr"><span class="bd ${o.sourceOfTruth==='db'?'sot':''}" title="진실원천(원본): 시트=현행 Track A · Track B=DB 원본(cutover)">${o.sourceOfTruth==='db'?'Track B':'시트'}</span></td>
-    </tr>`).join('')||`<tr><td colspan="11" class="empty">투영된 탭 없음 — 자동 투영(10분) 또는 작업대의 "그림자 투영"을 기다리세요.</td></tr>`;
-  $('#ovbody').innerHTML=`<div class="tablewrap"><table class="ovtable"><thead><tr><th>탭 / 시트</th><th>B참여</th><th>참여 A/B</th><th>제출 A/B</th><th>입금 A/B</th><th>카운트</th><th>소유</th><th>발주</th><th>주문링크</th><th>진짜불일치</th><th>원본</th></tr></thead><tbody>${rows}</tbody></table></div>`;
+      <td class="ctr">${_wbCell(o)}</td>
+      <td class="ctr"><span class="${v.cls==='ok'?'ok':(v.cls==='no'?'no':'')}" style="font-weight:700${v.cls==='warn'?';color:var(--warn)':''}" title="${esc(v.title)}">${esc(v.txt)}</span></td>
+    </tr>`;
+  }).join('')||`<tr><td colspan="13" class="empty">투영된 탭 없음 — 자동 투영(10분) 또는 작업대의 "그림자 투영"을 기다리세요.</td></tr>`;
+  $('#ovbody').innerHTML=`<div class="tablewrap"><table class="ovtable"><thead><tr><th>탭 / 시트</th><th>B참여</th><th>참여 A/B</th><th>제출 A/B</th><th>입금 A/B</th><th>카운트</th><th>소유</th><th>발주</th><th>주문링크</th><th>진짜불일치</th><th>원본</th><th>write-back</th><th title="카운트·소유·발주·진짜불일치0 종합">cutover</th></tr></thead><tbody>${rows}</tbody></table></div>`;
 }
 async function checkPrecise(i){ const o=STATE.ov[i]; const cell=document.getElementById('prec-'+i); if(cell)cell.textContent='…';
   const p=await api(`/api/trackb/parity?sheetId=${encodeURIComponent(o.sheetId)}&tabName=${encodeURIComponent(o.tabName)}`);

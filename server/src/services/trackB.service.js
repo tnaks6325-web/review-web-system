@@ -510,7 +510,11 @@ async function overview() {
                       AND wo.linked_tab_sheet_id=b.sheet_id AND wo.linked_tab_name=b.tab_name)
              OR EXISTS(SELECT 1 FROM trackb_work_order_links l WHERE l.deleted_at IS NULL
                       AND l.sheet_id=b.sheet_id AND l.tab_name=b.tab_name)) AS "woLinked",
-            tc.source_of_truth AS "sourceOfTruth"
+            tc.source_of_truth AS "sourceOfTruth",
+            -- write-back 건강(P2/P2-2): 활성 편집수 + held(사람셀 충돌)·blocked(신원/컬럼) 카운트.
+            (SELECT COUNT(*) FROM participant_edits pe WHERE pe.sheet_id=b.sheet_id AND pe.tab_name=b.tab_name AND pe.reverted_at IS NULL) AS "editCount",
+            (SELECT COUNT(*) FROM participant_edits pe WHERE pe.sheet_id=b.sheet_id AND pe.tab_name=b.tab_name AND pe.reverted_at IS NULL AND pe.writeback_status='held') AS "wbHeld",
+            (SELECT COUNT(*) FROM participant_edits pe WHERE pe.sheet_id=b.sheet_id AND pe.tab_name=b.tab_name AND pe.reverted_at IS NULL AND pe.writeback_status='blocked') AS "wbBlocked"
        FROM b LEFT JOIN raw_sheet_tabs rst ON rst.sheet_id=b.sheet_id AND rst.tab_name=b.tab_name
               LEFT JOIN tab_configs tc ON tc.sheet_id=b.sheet_id AND tc.tab_name=b.tab_name
       ORDER BY rst.spreadsheet_title NULLS LAST, b.tab_name`);
@@ -518,12 +522,19 @@ async function overview() {
     const aTotal = Number(r.aTotal), aSub = Number(r.aSub), aPaid = Number(r.aPaid);
     const bTotal = Number(r.bTotal), bSub = Number(r.bSub), bPaid = Number(r.bPaid);
     const countMatch = (aTotal === bTotal && aSub === bSub && aPaid === bPaid);
+    const sot = r.sourceOfTruth || 'sheet';
+    const owned = !!r.owned, woLinked = !!r.woLinked;
+    // cutover 준비 종합(경량 triage): 아직 시트원본이면서 카운트일치·소유·발주연결 = 정밀검증(real=0) 대상.
+    //   ★ 최종 게이트는 진짜불일치 real=0(정밀계산) — 프론트가 real 있으면 그걸로 판정 강화.
+    const cutoverReady = sot === 'sheet' && countMatch && owned && woLinked;
     return {
       sheetId: r.sheetId, tabName: r.tabName, tabGid: r.tabGid, spreadsheetTitle: r.spreadsheetTitle || r.sheetId,
       a: { total: aTotal, submitted: aSub, paid: aPaid },
       b: { total: bTotal, submitted: bSub, paid: bPaid, linked: Number(r.bLinked) },
-      countMatch, owned: !!r.owned, woLinked: !!r.woLinked, lastProjectedAt: r.lastProjectedAt,
-      sourceOfTruth: r.sourceOfTruth || 'sheet',   // 진실원천(옵션 A cutover 스위치): 'sheet'(레거시) | 'db'(Track B)
+      countMatch, owned, woLinked, lastProjectedAt: r.lastProjectedAt,
+      sourceOfTruth: sot,   // 진실원천(옵션 A cutover 스위치): 'sheet'(레거시) | 'db'(Track B)
+      editCount: Number(r.editCount), writeback: { held: Number(r.wbHeld), blocked: Number(r.wbBlocked) },
+      cutoverReady,
     };
   });
 }
