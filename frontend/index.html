@@ -197,6 +197,7 @@
     .status-badge-paid { font-size:.62rem; font-weight:700; padding:3px 8px; border-radius:6px; background:#E0E7FF; color:#3730A3; }
     .status-badge-order { font-size:.62rem; font-weight:700; padding:3px 8px; border-radius:6px; background:#E0EDFF; color:#1B4F9C; }
     .status-badge-order.attention { background:#FEE2E2; color:#991B1B; }
+    .status-badge-order.reflected { background:#DCFCE7; color:#166534; }
     .result-card.is-order-pending { cursor:default; }
 
     /* ─── Result Group Card ─── */
@@ -257,6 +258,7 @@
     .result-group-item-badge.paid { background:#E0E7FF; color:#3730A3; }
     .result-group-item-badge.order { background:#E0EDFF; color:#1B4F9C; }
     .result-group-item-badge.order.attention { background:#FEE2E2; color:#991B1B; }
+    .result-group-item-badge.order.reflected { background:#DCFCE7; color:#166534; }
 
     /* ─── Section ─── */
     .home-section { padding:0 0 12px; }
@@ -1123,6 +1125,17 @@ function _pendingBadgeText(item) {
   return "미제출";
 }
 
+/** 구매양식 주문(isOrderPending) 카드의 배지 상태 → CSS 클래스 / 문구.
+ *  reflected = 시트 반영완료, attention = 확인필요, processing = 반영중 */
+function _orderStageClass(stage) {
+  return stage === 'attention' ? 'attention' : stage === 'reflected' ? 'reflected' : '';
+}
+function _orderStageLabel(stage, short) {
+  if (stage === 'attention') return '확인필요';
+  if (stage === 'reflected') return '반영완료';
+  return short ? '반영중' : '구매양식 반영중';
+}
+
 /** 현재 서브탭 기준 리뷰 내역 렌더 */
 function renderReviewSubTab() {
   const listEl = document.getElementById("reviewResultsList");
@@ -1185,7 +1198,7 @@ function renderReviewSubTab() {
       const badgeHtml = isDone
         ? `${item.isPaid ? '<span class="status-badge-paid">입금완료</span> ' : ''}<span class="status-badge-submitted">제출완료</span>`
         : item.isOrderPending
-          ? `<span class="status-badge-order${item.orderStage === 'attention' ? ' attention' : ''}">${item.orderStage === 'attention' ? '확인필요' : '구매양식 반영중'}</span>`
+          ? `<span class="status-badge-order ${_orderStageClass(item.orderStage)}">${_orderStageLabel(item.orderStage)}</span>`
           : `<span class="status-badge-pending">${escHtml(_pendingBadgeText(item))}</span>`;
       const roundBadge = item.round
         ? `<span style="display:inline-block;font-size:.6rem;font-weight:700;padding:1px 6px;border-radius:10px;background:#e8f1fe;color:#1b64da;border:1px solid #cce0fb;margin-left:4px;vertical-align:middle">${escHtml(item.round)}</span>`
@@ -1255,7 +1268,7 @@ function renderReviewSubTab() {
           <i class="fas ${isDone ? 'fa-check' : 'fa-box'}" style="color:${isDone ? 'var(--ok)' : 'var(--p)'};font-size:.72rem;flex-shrink:0"></i>
           <span class="result-group-item-label">${escHtml(taskLabel)}${escHtml(roundTxt)}${doneDate ? ` <span style="color:var(--t4)">· 제출 ${doneDate}</span>` : ''}</span>
           ${isDone && item.isPaid ? '<span class="result-group-item-badge paid">입금완료</span>' : ''}
-          <span class="result-group-item-badge${isDone ? ' done' : ''}${item.isOrderPending ? ' order' + (item.orderStage === 'attention' ? ' attention' : '') : ''}">${isDone ? '제출완료' : item.isOrderPending ? (item.orderStage === 'attention' ? '확인필요' : '반영중') : escHtml(_pendingBadgeText(item))}</span>
+          <span class="result-group-item-badge${isDone ? ' done' : ''}${item.isOrderPending ? ' order ' + _orderStageClass(item.orderStage) : ''}">${isDone ? '제출완료' : item.isOrderPending ? _orderStageLabel(item.orderStage, true) : escHtml(_pendingBadgeText(item))}</span>
           ${isDone ? _reEditBtnHtml(item) : ''}
         </div>`;
       }).join("");

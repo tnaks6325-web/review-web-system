@@ -77,8 +77,11 @@ async function _getReviewerPhoneList(phone8) {
 //   · 추가만·읽기만(기존 3분기/폴백 SQL 무변경). best-effort(실패해도 리뷰내역 정상).
 //   · 강한 신원키(phone8) 매칭에서만 병합 → includeSubmitted && p8.length===8 게이트에서만 호출.
 //   · dedup: 이미 색인(written→review_index) 반영된 행(sheetId||tabName||sheet_row) 제외.
-//   · 상태매핑: pending/queued/pending_no_row/written→'반영중'(processing),
+//   · 상태매핑: pending/queued/pending_no_row→'반영중'(processing), written→'반영완료'(reflected),
 //     failed/stuck_manual→'확인필요'(attention), canceled*/conflict/soft-delete(deleted_at)→병합 제외.
+//   ★ written(=시트 반영 완료)은 sheet_written_at 최근 2시간 것만 노출 — 색인 리빌드(~5분) 지연을
+//     커버하되, 탭 리네임/행이동으로 positional dedup(tab_name·행번호)이 실패한 오래된 written이
+//     '반영완료'로 영원히 남지 않게 상한(리뷰어는 그 뒤 review_index 정상 카드로 자기 참여를 본다).
 //   ★ WHERE의 deleted_at/mirror_status 리터럴은 migration 051 부분 인덱스 predicate와
 //     "문자 그대로 동일"해야 planner가 부분 인덱스를 선택한다(파라미터 배열이면 매칭 실패).
 const _ORDER_MERGE_LIMIT = 40;
@@ -114,6 +117,7 @@ async function _mergeOrderSubmissions(results, phoneList) {
           AND os.deleted_at IS NULL
           AND os.mirror_status IN ('pending', 'queued', 'pending_no_row', 'written', 'failed', 'stuck_manual')
           AND os.submitted_at > now() - ($2 || ' days')::interval
+          AND (os.mirror_status <> 'written' OR os.sheet_written_at > now() - interval '2 hours')
         ORDER BY os.submitted_at DESC
         LIMIT ${_ORDER_MERGE_LIMIT}`,
       [phoneList, String(_ORDER_MERGE_DAYS)]
@@ -122,7 +126,9 @@ async function _mergeOrderSubmissions(results, phoneList) {
     for (const o of orderRows) {
       // 이미 시트반영→색인 대표행이 있으면 중복 제거(재배정으로 sheet_row NULL이면 스킵 안 함 → 다음 빌드까지 노출)
       if (o.sheetRow != null && seen.has(`${o.sheetId}||${o.tabName}||${o.sheetRow}`)) continue;
-      const attention = _ORDER_ATTENTION_STATUSES.has(o.mirrorStatus);
+      // written=시트반영완료(반영완료), failed/stuck_manual=확인필요, 그 외(pending/queued/pending_no_row)=반영중
+      const orderStage = _ORDER_ATTENTION_STATUSES.has(o.mirrorStatus) ? 'attention'
+        : (o.mirrorStatus === 'written' ? 'reflected' : 'processing');
       // 색인행 item shape와 정합(displayName=사람이름 자리=recipient, displayNameTC=탭표시명).
       // PII 최소: row:{}, submitCol:null, order_num 미노출. rowIndex:null → goToSubmit 대상 아님.
       results.push({
@@ -137,7 +143,7 @@ async function _mergeOrderSubmissions(results, phoneList) {
         folderUrl: null, captureFolderUrl: null, captureSlots: null, submittedSlots: [],
         row: {}, submitCol: null, reviewFileAt: null, isPaid: false, score: 0.5,
         isOrderPending: true, orderMirrorStatus: o.mirrorStatus,
-        orderStage: attention ? 'attention' : 'processing',
+        orderStage,
       });
     }
   } catch (e) {

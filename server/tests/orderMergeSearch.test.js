@@ -114,6 +114,15 @@ async function run() {
   assert.equal(r6.results.filter(x => x.isOrderPending).length, 1, '6: 주문 1건 병합');
   console.log('  6. phone8 단독 분기 병합 ✓');
 
+  // ── 7) written(시트 반영 완료) → orderStage='reflected'(반영완료) ──
+  captured.queries = []; reviewRows = []; seenRows = [];
+  orderRows = [orderRow({ mirrorStatus: 'written' })];
+  const r7 = await searchByName('홍길동', '12345678', { includeSubmitted: true });
+  const m7 = r7.results.find(x => x.isOrderPending);
+  assert.ok(m7, '7: written 주문 병합됨');
+  assert.equal(m7.orderStage, 'reflected', "7: written → orderStage='reflected'(반영완료)");
+  console.log('  7. written → 반영완료(reflected) ✓');
+
   console.log('✅ orderMergeSearch 테스트 전체 통과');
 }
 
