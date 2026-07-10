@@ -186,12 +186,12 @@ async function _parityCore(sheetId, tabName) {
     `SELECT DISTINCT anchor_type, anchor_value FROM participant_edits
       WHERE sheet_id=$1 AND tab_name=$2 AND reverted_at IS NULL
         AND field IN ('reviewer_name','is_submitted','is_paid','round')`, [sheetId, tabName]).catch(() => ({ rows: [] }));
-  const editedAnchors = new Set(edRows.map(e => e.anchor_type + ' ' + e.anchor_value));
+  const editedAnchors = new Set(edRows.map(e => e.anchor_type + '\u0000' + e.anchor_value));
   const editedKeys = new Set();
   if (editedAnchors.size) {
     for (const b of bRows) {
       const a = _deriveAnchor(b);
-      if (a && editedAnchors.has(a.type + ' ' + a.value)) { const p8 = _phone8(b.phone8); if (p8) editedKeys.add(p8); }
+      if (a && editedAnchors.has(a.type + '\u0000' + a.value)) { const p8 = _phone8(b.phone8); if (p8) editedKeys.add(p8); }
     }
   }
   return classifyParity(aRows, bRows, editedKeys);
@@ -483,7 +483,13 @@ async function prepareRosterFromWorkOrder({ sheetId, tabName, tabGid = null, by 
 }
 
 // ── 관측 대시보드: 투영된 전 탭의 롤업(카운트 대조 + 준비도) 한 번에. 정밀 parity(진짜불일치)는 탭별 온디맨드. ──
-//   경량 집계(탭당 상관 서브쿼리, 인덱스 사용) — 카운트 레벨 대조라 "동수 다른사람" 은 못 잡으니 게이트가 아닌 트리아지.
+//   ★ fail-closed 신호 계약(레드-블루-심판): "모름/미검증/비었음"은 준비·정상으로 새지 않는다.
+//     · cutoverCandidate = 경량 triage(시트원본·카운트일치·소유·발주·비유령) — 정밀검증 "대상"일 뿐(자동화 소비 금지가 이름에 내장).
+//     · cutoverReady    = candidate + **신선한 정밀 스냅샷 real=0**(parity_snapshots 최신, TRACK_B_PARITY_FRESH_HOURS 기본 24h)
+//       — 카운트 레벨 "동수 다른사람" 함정을 이 필드 단독 소비자도 못 밟게 real 게이트 내장.
+//     · ghost = A·B 모두 활성 0행(아카이브/리네임 잔재) — 0==0 카운트일치로 준비 오판 금지.
+//     · write-back 건강 = 토글(is_submitted/is_paid, 자동 반영 대상)만 집계 + pending(미시도 NULL)·engineOn 노출
+//       — gate_off/스윕 양보(deferred)로 status NULL인 편집이 "정상"으로 새는 허위 건강 차단.
 async function overview() {
   const db = getPool();
   const { rows } = await db.query(
@@ -497,44 +503,73 @@ async function overview() {
          FROM campaign_participants WHERE deleted_at IS NULL
          GROUP BY sheet_id, tab_name
      )
-     SELECT b.sheet_id AS "sheetId", b.tab_name AS "tabName", b.tab_gid AS "tabGid",
+     SELECT b.sheet_id AS "sheetId", b.tab_name AS "tabName",
+            COALESCE(b.tab_gid, rst.tab_gid) AS "tabGid",
             b.b_total AS "bTotal", b.b_sub AS "bSub", b.b_paid AS "bPaid", b.b_linked AS "bLinked",
             b.last_proj AS "lastProjectedAt",
             rst.spreadsheet_title AS "spreadsheetTitle",
             (SELECT COUNT(*) FROM review_index ri WHERE ri.sheet_id=b.sheet_id AND ri.tab_name=b.tab_name AND ri.row_index IS NOT NULL) AS "aTotal",
             (SELECT COUNT(*) FROM review_index ri WHERE ri.sheet_id=b.sheet_id AND ri.tab_name=b.tab_name AND ri.is_submitted) AS "aSub",
             (SELECT COUNT(*) FROM review_index ri WHERE ri.sheet_id=b.sheet_id AND ri.tab_name=b.tab_name AND ri.is_submitted2='PAID') AS "aPaid",
+            -- 수동 슬롯만 있어 participants gid가 전부 NULL인 탭도 raw_sheet_tabs gid로 탭단위 소유 판정(오탐 축소).
             EXISTS(SELECT 1 FROM advertiser_campaigns ac WHERE ac.deleted_at IS NULL AND ac.sheet_id=b.sheet_id
-                     AND (ac.tab_gid IS NULL OR ac.tab_gid=b.tab_gid)) AS "owned",
+                     AND (ac.tab_gid IS NULL OR ac.tab_gid=COALESCE(b.tab_gid, rst.tab_gid))) AS "owned",
             (EXISTS(SELECT 1 FROM work_orders wo WHERE wo.deleted_at IS NULL
                       AND wo.linked_tab_sheet_id=b.sheet_id AND wo.linked_tab_name=b.tab_name)
              OR EXISTS(SELECT 1 FROM trackb_work_order_links l WHERE l.deleted_at IS NULL
                       AND l.sheet_id=b.sheet_id AND l.tab_name=b.tab_name)) AS "woLinked",
             tc.source_of_truth AS "sourceOfTruth",
-            -- write-back 건강(P2/P2-2): 활성 편집수 + held(사람셀 충돌)·blocked(신원/컬럼) 카운트.
-            (SELECT COUNT(*) FROM participant_edits pe WHERE pe.sheet_id=b.sheet_id AND pe.tab_name=b.tab_name AND pe.reverted_at IS NULL) AS "editCount",
-            (SELECT COUNT(*) FROM participant_edits pe WHERE pe.sheet_id=b.sheet_id AND pe.tab_name=b.tab_name AND pe.reverted_at IS NULL AND pe.writeback_status='held') AS "wbHeld",
-            (SELECT COUNT(*) FROM participant_edits pe WHERE pe.sheet_id=b.sheet_id AND pe.tab_name=b.tab_name AND pe.reverted_at IS NULL AND pe.writeback_status='blocked') AS "wbBlocked"
-       FROM b LEFT JOIN raw_sheet_tabs rst ON rst.sheet_id=b.sheet_id AND rst.tab_name=b.tab_name
+            pec.edit_count AS "editCount", pec.edit_toggle AS "editToggle",
+            pec.wb_pending AS "wbPending", pec.wb_held AS "wbHeld", pec.wb_blocked AS "wbBlocked",
+            ps.real_cnt AS "snapReal", ps.taken_at AS "snapAt"
+       FROM b LEFT JOIN LATERAL (
+                -- 동명탭(같은 sheet_id·tab_name·다른 gid) 곱증식 차단: raw_sheet_tabs 는 (sheet_id,tab_gid)
+                --   유니크뿐이라 평조인 시 overview 행·헤더 카운터가 배가 — 최신 미러 1행만(탭당 정확히 1행).
+                SELECT r2.spreadsheet_title, r2.tab_gid FROM raw_sheet_tabs r2
+                 WHERE r2.sheet_id=b.sheet_id AND r2.tab_name=b.tab_name
+                 ORDER BY r2.mirrored_at DESC NULLS LAST LIMIT 1) rst ON TRUE
               LEFT JOIN tab_configs tc ON tc.sheet_id=b.sheet_id AND tc.tab_name=b.tab_name
+              -- write-back 건강(P2): 탭당 1스캔(048 부분인덱스 idx_participant_edits_tab). 토글만 상태 스코프
+              --   (writeback_status 는 executeWriteback(토글 전용)만 기록 — 비토글 상태는 현재 writer 없음).
+              LEFT JOIN LATERAL (
+                SELECT COUNT(*) AS edit_count,
+                       COUNT(*) FILTER (WHERE pe.field IN ('is_submitted','is_paid')) AS edit_toggle,
+                       COUNT(*) FILTER (WHERE pe.field IN ('is_submitted','is_paid') AND pe.writeback_status IS NULL) AS wb_pending,
+                       COUNT(*) FILTER (WHERE pe.field IN ('is_submitted','is_paid') AND pe.writeback_status='held') AS wb_held,
+                       COUNT(*) FILTER (WHERE pe.field IN ('is_submitted','is_paid') AND pe.writeback_status='blocked') AS wb_blocked
+                  FROM participant_edits pe
+                 WHERE pe.sheet_id=b.sheet_id AND pe.tab_name=b.tab_name AND pe.reverted_at IS NULL) pec ON TRUE
+              -- 최신 정밀 스냅샷(049 idx_parity_snap_tab 정확 매치 top-1) — cutoverReady 의 real=0 근거.
+              LEFT JOIN LATERAL (
+                SELECT p0.real_cnt, p0.taken_at FROM parity_snapshots p0
+                 WHERE p0.sheet_id=b.sheet_id AND p0.tab_name=b.tab_name
+                 ORDER BY p0.taken_at DESC LIMIT 1) ps ON TRUE
       ORDER BY rst.spreadsheet_title NULLS LAST, b.tab_name`);
+  const wbEngineOn = process.env.TRACK_B_WRITEBACK === '1';   // 글로벌 게이트 상태를 관측에 동봉(허위 '정상' 차단)
+  const fhRaw = parseInt(process.env.TRACK_B_PARITY_FRESH_HOURS || '24', 10);
+  const freshMs = (Number.isFinite(fhRaw) && fhRaw > 0 ? fhRaw : 24) * 3600 * 1000;
+  const now = Date.now();
   return rows.map(r => {
     const aTotal = Number(r.aTotal), aSub = Number(r.aSub), aPaid = Number(r.aPaid);
     const bTotal = Number(r.bTotal), bSub = Number(r.bSub), bPaid = Number(r.bPaid);
     const countMatch = (aTotal === bTotal && aSub === bSub && aPaid === bPaid);
     const sot = r.sourceOfTruth || 'sheet';
     const owned = !!r.owned, woLinked = !!r.woLinked;
-    // cutover 준비 종합(경량 triage): 아직 시트원본이면서 카운트일치·소유·발주연결 = 정밀검증(real=0) 대상.
-    //   ★ 최종 게이트는 진짜불일치 real=0(정밀계산) — 프론트가 real 있으면 그걸로 판정 강화.
-    const cutoverReady = sot === 'sheet' && countMatch && owned && woLinked;
+    const ghost = aTotal === 0 && bTotal === 0;   // 아카이브/리네임 잔재 — 후보 제외
+    const snapReal = r.snapReal == null ? null : Number(r.snapReal);
+    const parityFresh = !!r.snapAt && (now - new Date(r.snapAt).getTime()) < freshMs;
+    const cutoverCandidate = sot === 'sheet' && countMatch && owned && woLinked && !ghost;
+    const cutoverReady = cutoverCandidate && parityFresh && snapReal === 0;
     return {
       sheetId: r.sheetId, tabName: r.tabName, tabGid: r.tabGid, spreadsheetTitle: r.spreadsheetTitle || r.sheetId,
       a: { total: aTotal, submitted: aSub, paid: aPaid },
       b: { total: bTotal, submitted: bSub, paid: bPaid, linked: Number(r.bLinked) },
-      countMatch, owned, woLinked, lastProjectedAt: r.lastProjectedAt,
+      countMatch, owned, woLinked, ghost, lastProjectedAt: r.lastProjectedAt,
       sourceOfTruth: sot,   // 진실원천(옵션 A cutover 스위치): 'sheet'(레거시) | 'db'(Track B)
-      editCount: Number(r.editCount), writeback: { held: Number(r.wbHeld), blocked: Number(r.wbBlocked) },
-      cutoverReady,
+      lastParity: { real: snapReal, takenAt: r.snapAt || null, fresh: parityFresh },
+      editCount: Number(r.editCount), editToggle: Number(r.editToggle),
+      writeback: { engineOn: wbEngineOn, pending: Number(r.wbPending), held: Number(r.wbHeld), blocked: Number(r.wbBlocked) },
+      cutoverCandidate, cutoverReady,
     };
   });
 }
@@ -556,24 +591,32 @@ async function getSourceOfTruth({ sheetId, tabName } = {}) {
   return (rows[0] && rows[0].sourceOfTruth) || 'sheet';
 }
 
-// 플립(master 전용, 라우트 게이트). 'db' 전환은 **진짜 불일치(real) 0 게이트**(force 시 우회) — 준비 안 된 탭의
-//   조기 cutover 방지. 반환에 parity 요약 동봉(UI가 게이트 결과 노출). 되돌리기 = value 'sheet'.
+// 플립(master 전용, 라우트 게이트). 'db' 전환 게이트(fail-closed · 레드-블루-심판):
+//   ① parity 검증 실패/미상(real=null)은 "통과"가 아니라 거부(parity_check_failed) — 구 .catch(()=>null) fail-open 봉합.
+//   ② 진짜 불일치 real>0 → parity_not_clean. ③ A·B(phone8 기준) 모두 0행(유령/빈 탭) → empty_tab(cutover 무의미).
+//   force 만 ①~③ 우회(로그에 forced/UNVERIFIED 명시). 되돌리기 = value 'sheet'(게이트 없음).
 async function setSourceOfTruth({ sheetId, tabName, value, by = 'admin', force = false } = {}) {
   if (!sheetId || !tabName) throw new Error('setSourceOfTruth: sheetId, tabName 필수');
   if (!_SOT_VALUES.has(value)) return { ok: false, error: 'invalid_value', allowed: [..._SOT_VALUES] };
-  let parity = null;
+  let parity = null, parityErr = null;
   if (value === 'db') {
-    parity = await parityReport({ sheetId, tabName }).catch(() => null);   // data-parity 게이트(readiness 별도)
+    try { parity = await parityReport({ sheetId, tabName }); }   // data-parity 게이트(readiness 별도)
+    catch (e) { parityErr = e.message; }
     const real = parity && parity.buckets ? parity.buckets.real : null;
-    if (!force && real != null && real > 0) return { ok: false, error: 'parity_not_clean', real, parity };
+    if (!force && real == null) return { ok: false, error: 'parity_check_failed', detail: parityErr || 'real=null' };
+    if (!force && real > 0) return { ok: false, error: 'parity_not_clean', real, parity };
+    const d3 = (parity && parity.dims && parity.dims.d3_counts) || {};
+    if (!force && !(Number(d3.aTotal) > 0 && Number(d3.bTotal) > 0)) {
+      return { ok: false, error: 'empty_tab', aTotal: Number(d3.aTotal) || 0, bTotal: Number(d3.bTotal) || 0 };
+    }
   }
   const db = getPool();
   const { rowCount } = await db.query(
     `UPDATE tab_configs SET source_of_truth=$3 WHERE sheet_id=$1 AND tab_name=$2`,
     [sheetId, tabName, value]);
   if (!rowCount) return { ok: false, error: 'tab_not_found' };
-  logger.info(`[trackB] source_of_truth ${sheetId}/${tabName} → ${value} (by ${by}${force ? ', forced' : ''})`);
-  return { ok: true, sheetId, tabName, sourceOfTruth: value, parity };
+  logger.info(`[trackB] source_of_truth ${sheetId}/${tabName} → ${value} (by ${by}${force ? ', forced' : ''}${parityErr ? ', parity UNVERIFIED: ' + parityErr : ''})`);
+  return { ok: true, sheetId, tabName, sourceOfTruth: value, parity, parityVerified: value === 'db' ? !parityErr : null };
 }
 
 // 광고주 스코프: 이 업체가 소유한 (sheet_id, tab_gid) 집합. tab_gid NULL 소유 = 그 시트 전체.

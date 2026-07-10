@@ -33,7 +33,7 @@ function makePool(scn = {}) {
       q.push(s);
       if (/UPDATE tab_configs SET source_of_truth/.test(s)) return { rowCount: scn.updRowCount == null ? 1 : scn.updRowCount };
       if (/source_of_truth AS "sourceOfTruth" FROM tab_configs/.test(s)) return { rows: scn.sotRow ? [{ sourceOfTruth: scn.sotRow }] : [] };
-      if (/FROM review_index/.test(s)) return { rows: scn.aRows || [] };
+      if (/FROM review_index/.test(s)) { if (scn.aThrow) throw new Error('parity source down'); return { rows: scn.aRows || [] }; }
       if (/FROM campaign_participants/.test(s)) return { rows: scn.bRows || [] };
       // participant_edits · work_orders · advertiser_campaigns · order_submissions · raw_sheet_tabs(readiness) 등
       return { rows: [] };
@@ -73,12 +73,33 @@ async function run() {
   r = await svc.setSourceOfTruth({ sheetId: 'S1', tabName: '없음', value: 'sheet' });
   assert.equal(r.ok, false); assert.equal(r.error, 'tab_not_found', '2c: 없는 탭 거부');
 
-  // 2d: 'db' 전환 — parity real=0(빈 A/B)면 허용 + UPDATE 실행
-  p = makePool({ aRows: [], bRows: [], updRowCount: 1 }); svc.__setPoolForTest(p);
+  // 2d: 'db' 전환 — A·B 짝 일치(real=0, 비유령)면 허용 + UPDATE 실행
+  const aOne = [{ name: '홍길동', phone8: '12345678', submitted: false, paid: false, round: '' }];
+  const bOne = [{ id: 1, name: '홍길동', phone8: '12345678', submitted: false, paid: false, round: '', source: 'import', active: true }];
+  p = makePool({ aRows: aOne, bRows: bOne, updRowCount: 1 }); svc.__setPoolForTest(p);
   r = await svc.setSourceOfTruth({ sheetId: 'S1', tabName: 'T', value: 'db', by: 'master' });
-  assert.equal(r.ok, true); assert.equal(r.sourceOfTruth, 'db', '2d: real=0 → db 전환 허용');
+  assert.equal(r.ok, true); assert.equal(r.sourceOfTruth, 'db', '2d: real=0(비유령) → db 전환 허용');
+  assert.equal(r.parityVerified, true, '2d: parity 검증됨 표기');
   assert.ok(p.q.some(s => /FROM review_index/.test(s)), '2d: db 전환은 parity 게이트 조회함');
-  console.log('  2. setSourceOfTruth — invalid_value·sheet복귀·tab_not_found·db게이트(real0 허용) ✓');
+
+  // 2e: 'db' 전환 — A·B 모두 0행(유령/빈 탭)은 real=0이어도 거부(empty_tab, fail-closed)
+  p = makePool({ aRows: [], bRows: [], updRowCount: 1 }); svc.__setPoolForTest(p);
+  r = await svc.setSourceOfTruth({ sheetId: 'S1', tabName: 'T', value: 'db' });
+  assert.equal(r.ok, false); assert.equal(r.error, 'empty_tab', '2e: 유령/빈 탭 거부');
+  assert.ok(!p.q.some(s => /UPDATE tab_configs SET source_of_truth/.test(s)), '2e: 거부 시 UPDATE 미실행');
+
+  // 2f: 'db' 전환 — parity 계산 실패(real 미상)는 통과가 아니라 거부(parity_check_failed, fail-open 봉합)
+  p = makePool({ aThrow: true, updRowCount: 1 }); svc.__setPoolForTest(p);
+  r = await svc.setSourceOfTruth({ sheetId: 'S1', tabName: 'T', value: 'db' });
+  assert.equal(r.ok, false); assert.equal(r.error, 'parity_check_failed', '2f: 검증 실패 = 거부');
+  assert.ok(String(r.detail || '').includes('parity source down'), '2f: 실패 사유 동봉');
+  assert.ok(!p.q.some(s => /UPDATE tab_configs SET source_of_truth/.test(s)), '2f: 거부 시 UPDATE 미실행');
+
+  // 2g: force 는 ①~③ 전부 우회(검증 불가여도 마스터 의지로 전환, UNVERIFIED 로그 경로)
+  p = makePool({ aThrow: true, updRowCount: 1 }); svc.__setPoolForTest(p);
+  r = await svc.setSourceOfTruth({ sheetId: 'S1', tabName: 'T', value: 'db', force: true });
+  assert.equal(r.ok, true); assert.equal(r.parityVerified, false, '2g: force 전환 + 미검증 표기');
+  console.log('  2. setSourceOfTruth — invalid_value·sheet복귀·tab_not_found·real0 허용·empty_tab·parity_check_failed·force ✓');
 
   // ═══ 3. getSourceOfTruth 기본값 ═══
   svc.__setPoolForTest(makePool({ sotRow: null }));

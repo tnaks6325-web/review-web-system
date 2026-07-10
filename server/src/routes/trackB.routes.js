@@ -38,8 +38,10 @@ router.post('/project', authMiddleware, masterOnlyMiddleware, async (req, res, n
   } catch (err) { next(err); }
 });
 
-// ── parity 리포트(B ↔ A, 6차원×3버킷) — master 전용 ──
-router.get('/parity', authMiddleware, masterOnlyMiddleware, async (req, res, next) => {
+// ── parity 리포트(B ↔ A, 6차원×3버킷) — adminOrMaster ──
+//   관측 뷰(adminOrMaster)의 [정밀] 버튼이 호출하는데 master 전용이면 admin이 dead-end.
+//   PII 등가: real/benign 샘플 phone8은 _mask 처리 + 동일 수치가 parity-all(adminOrMaster)로 기노출 → 신규 노출 0.
+router.get('/parity', authMiddleware, adminOrMasterMiddleware, async (req, res, next) => {
   try {
     const { sheetId, tabName } = req.query;
     if (!sheetId || !tabName) return res.status(400).json({ ok: false, error: 'sheetId, tabName 필수' });

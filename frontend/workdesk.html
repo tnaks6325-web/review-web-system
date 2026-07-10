@@ -384,24 +384,44 @@ function renderOverviewHead(){
   const nReady = it.filter(x=>{const v=_cutoverVerdict(x); return v.txt==='✅ 준비';}).length;
   const nDb = it.filter(x=>x.sourceOfTruth==='db').length;
   $('#ovhead').innerHTML=`<div class="mh"><h1>관측 대시보드</h1><span class="bd g">투영 ${n}탭</span>
-    <span class="bd">카운트일치 ${nM}</span><span class="bd">소유 ${nO}</span><span class="bd">발주 ${nW}</span>${nRk?`<span class="bd" title="정밀 계산된 탭 중 진짜 불일치 0">진짜불일치0 ${nR}/${nRk}</span>`:''}<span class="bd g" title="카운트·소유·발주·진짜불일치0 종합 충족 → cutover 가능">cutover 준비 ${nReady}</span>${nDb?`<span class="bd sot" title="이미 Track B 원본으로 전환된 탭">전환됨 ${nDb}</span>`:''}
+    <span class="bd">카운트일치 ${nM}</span><span class="bd">소유 ${nO}</span><span class="bd">발주 ${nW}</span>${nRk?`<span class="bd" title="정밀 계산된 탭 중 진짜 불일치 0">진짜불일치0 ${nR}/${nRk}</span>`:''}<span class="bd g" title="카운트·소유·발주 + 신선한 진짜불일치0(세션 정밀 30분 내 또는 서버 스냅샷 24h 내) 충족 → cutover 가능">cutover 준비 ${nReady}</span>${nDb?`<span class="bd sot" title="이미 Track B 원본으로 전환된 탭">전환됨 ${nDb}</span>`:''}
     <span class="sp" style="flex:1"></span>
     <button class="btn pri" id="paBtn" onclick="runParityAll()" title="투영된 전 탭의 진짜 불일치를 일괄 계산하고 추이 스냅샷 저장">전체 정밀 계산</button>
     <input id="ovq" class="ovsearch" placeholder="탭/시트 검색" oninput="renderOverviewBody(this.value)" value="${esc(STATE.ovq||'')}"></div>
     <div class="ovnote">A(현행 시트)↔B(Track B) <b>카운트 대조</b>와 준비도. 실제 전환 게이트 = <b>진짜 불일치 0</b>(행 [정밀] 또는 "전체 정밀 계산"). 진짜불일치 값 클릭 시 <b>추이</b>(2주 관측)를 봅니다.${STATE.lastBatch?` · 최근 계산 ${esc(_fmtTs(STATE.lastBatch))}`:''}</div>`;
 }
-// cutover 종합 판정: 완성 신호(카운트·소유·발주·원본·진짜불일치)를 하나의 결정으로 수렴.
+// cutover 종합 판정 — fail-closed: real은 "신선한" 값만 인정(세션 [정밀] 30분 TTL > 서버 스냅샷 fresh > 없음=미검증).
+const REAL_TTL_MS = 30*60*1000;
+function _freshReal(o){
+  if(typeof o.real==='number' && o.realAt && (Date.now()-o.realAt)<REAL_TTL_MS) return {v:o.real,src:'방금 정밀',at:o.realAt};
+  const lp=o.lastParity;
+  if(lp && lp.fresh && typeof lp.real==='number') return {v:lp.real,src:'스냅샷',at:lp.takenAt?new Date(lp.takenAt).getTime():null};
+  return null;
+}
 function _cutoverVerdict(o){
   if(o.sourceOfTruth==='db') return {cls:'ok',txt:'전환됨',title:'이미 Track B 원본(cutover 완료)'};
+  if(o.ghost) return {cls:'no',txt:'유령',title:'A·B 모두 활성 0행(아카이브/리네임 잔재) — cutover 대상 아님'};
   const base=o.countMatch&&o.owned&&o.woLinked;
   if(!base){ const m=[]; if(!o.countMatch)m.push('카운트'); if(!o.owned)m.push('소유'); if(!o.woLinked)m.push('발주'); return {cls:'no',txt:'미충족',title:'미충족: '+m.join('·')}; }
-  if(typeof o.real==='number') return o.real===0?{cls:'ok',txt:'✅ 준비',title:'카운트·소유·발주·진짜불일치0 충족 → cutover 가능'}:{cls:'no',txt:'불일치 '+o.real,title:'진짜 불일치 '+o.real+'건 (정밀)'};
+  const fr=_freshReal(o);
+  if(fr) return fr.v===0
+    ?{cls:'ok',txt:'✅ 준비',title:`카운트·소유·발주·진짜불일치0 충족 (${fr.src}${fr.at?' '+_fmtTs(fr.at):''}) → cutover 가능`}
+    :{cls:'no',txt:'불일치 '+fr.v,title:`진짜 불일치 ${fr.v}건 (${fr.src})`};
+  if(typeof o.real==='number') return {cls:'warn',txt:'정밀 만료',title:'정밀 결과가 30분 경과 — [정밀] 재실행 필요'};
   return {cls:'warn',txt:'정밀 필요',title:'카운트·소유·발주 충족 — [정밀]로 진짜불일치 확인 필요'};
 }
 function _wbCell(o){
-  const wb=o.writeback||{held:0,blocked:0};
-  if(o.sourceOfTruth==='db') return (wb.held||wb.blocked)?`<span class="no" title="held=사람셀 충돌·blocked=신원/컬럼 불일치(자가치유)">⚠ ${wb.held}·${wb.blocked}</span>`:'<span class="ok" title="반영 이슈 없음">정상</span>';
-  return o.editCount?`<span class="bd" title="반영 대기 편집 — cutover 후 write-back 대상">편집 ${o.editCount}</span>`:'<span class="ovsub">—</span>';
+  const wb=o.writeback;
+  if(o.sourceOfTruth==='db'){
+    if(!wb||wb.engineOn===undefined) return '<span class="ovsub" title="구 백엔드 응답(배포 스큐) — write-back 상태 미상. 백엔드 배포 완료 후 새로고침">?</span>';
+    if(!wb.engineOn) return `<span class="no" title="TRACK_B_WRITEBACK=1 미설정 — 토글 편집이 시트에 반영되지 않는 중${wb.pending?` (대기 ${wb.pending})`:''}">엔진 OFF</span>`;
+    const parts=[]; if(wb.pending)parts.push('대기 '+wb.pending); if(wb.held)parts.push('held '+wb.held); if(wb.blocked)parts.push('blk '+wb.blocked);
+    if(parts.length) return `<span class="no" title="대기=미시도(스윕 5분 주기·양보 포함) · held=사람셀 충돌(수동 확인, 재시도 없음) · blocked=신원/컬럼 불일치(30분 주기 자가치유)">⚠ ${parts.join('·')}</span>`;
+    return '<span class="ok" title="반영 이슈 없음(엔진 ON·대기/충돌 0)">정상</span>';
+  }
+  return o.editCount
+    ?`<span class="bd" title="활성 편집 ${o.editCount}건 — 이 중 토글(제출/입금) ${o.editToggle||0}건만 cutover 후 자동 write-back 대상, 나머지는 DB 오버레이 유지(시뮬 대상)">편집 ${o.editCount}${(o.editToggle!=null&&o.editToggle!==o.editCount)?` (토글 ${o.editToggle})`:''}</span>`
+    :'<span class="ovsub">—</span>';
 }
 function renderOverviewBody(q){
   q=(q||'').trim(); STATE.ovq=q; const it=STATE.ov||[];
@@ -431,7 +451,7 @@ function renderOverviewBody(q){
 }
 async function checkPrecise(i){ const o=STATE.ov[i]; const cell=document.getElementById('prec-'+i); if(cell)cell.textContent='…';
   const p=await api(`/api/trackb/parity?sheetId=${encodeURIComponent(o.sheetId)}&tabName=${encodeURIComponent(o.tabName)}`);
-  if(p&&p.ok){ STATE.ov[i].real=p.buckets.real; renderOverviewHead(); renderOverviewBody(STATE.ovq); }
+  if(p&&p.ok){ STATE.ov[i].real=p.buckets.real; STATE.ov[i].realAt=Date.now(); renderOverviewHead(); renderOverviewBody(STATE.ovq); }
   else if(cell) cell.innerHTML='<span class="no">오류</span>';
 }
 // 전체 정밀 계산: 투영된 전 탭 진짜불일치 일괄 + 스냅샷 저장
@@ -439,7 +459,7 @@ async function runParityAll(){
   const btn=document.getElementById('paBtn'); if(btn){btn.disabled=true;btn.textContent='계산 중…';}
   const r=await api('/api/trackb/parity-all',{method:'POST'});
   if(r&&r.ok){ const by={}; (r.results||[]).forEach(x=>by[x.sheetId+'\t'+x.tabName]=x.real);
-    (STATE.ov||[]).forEach(o=>{ const v=by[o.sheetId+'\t'+o.tabName]; if(typeof v==='number')o.real=v; });
+    (STATE.ov||[]).forEach(o=>{ const v=by[o.sheetId+'\t'+o.tabName]; if(typeof v==='number'){ o.real=v; o.realAt=Date.now(); } });
     STATE.lastBatch=r.batchAt; renderOverviewHead(); renderOverviewBody(STATE.ovq); toast(`정밀 계산 완료 · 진짜불일치0 ${r.realZero}/${r.tabs}탭`); }
   else toast('계산 실패');
   const b2=document.getElementById('paBtn'); if(b2){b2.disabled=false;b2.textContent='전체 정밀 계산';}
@@ -585,7 +605,14 @@ async function flipSoT(value, force){
   const r=await api('/api/trackb/source-of-truth',{method:'POST',body:JSON.stringify({sheetId:STATE.cur.sheetId,tabName:STATE.cur.tabName,value,force:!!force})});
   if(r&&r.ok){ toast(`원본 → ${value==='db'?'Track B':'시트'}`); selTab(STATE.tabs.indexOf(STATE.cur)); return; }
   if(r&&r.error==='parity_not_clean'){
-    if(confirm(`진짜 불일치 ${r.real}건이 남아 있습니다(권장: 0).\n그래도 강제로 Track B로 전환할까요?`)) return flipSoT('db', true);
+    // force 마찰: confirm 원클릭이 아니라 탭명을 직접 타이핑해야 강제 전환(우발적 force 차단, 검증 미통과 명시).
+    const typed=prompt(`방금 서버가 재계산한 진짜 불일치가 ${r.real}건입니다(권장: 0).\n(화면의 이전 [정밀] 결과가 아니라 지금 시점 값입니다.)\n\n검증 미통과 상태로 강제 전환하려면 탭 이름을 정확히 입력하세요:\n${STATE.cur.tabName}`);
+    if(typed!==null && typed.trim()===STATE.cur.tabName) return flipSoT('db', true);
+    if(typed!==null) toast('탭 이름 불일치 — 강제 전환 취소됨');
+  } else if(r&&r.error==='parity_check_failed'){
+    toast('전환 거부: 정밀검증 실패('+((r&&r.detail)||'오류')+') — 잠시 후 재시도하세요');
+  } else if(r&&r.error==='empty_tab'){
+    toast('전환 거부: A·B 모두 0행(유령/아카이브 탭) — cutover 대상이 아닙니다');
   } else { toast('전환 실패: '+((r&&r.error)||'오류')); }
   if(btn){btn.disabled=false;btn.textContent=value==='db'?'Track B로 전환':'시트로 되돌리기';}
 }
