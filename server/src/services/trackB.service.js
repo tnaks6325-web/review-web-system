@@ -395,6 +395,40 @@ async function listAdvertisersWithOwnership() {
   return rows;
 }
 
+// ══ 인트라넷(inadd-webapp, Cloudflare D1) 광고주DB 자동완성 프록시 ══
+//   workdesk 업체(거래처) 추가 폼의 거래처명 자동완성용. 브라우저는 인트라넷을 직접 안 보고
+//   이 서버 프록시(adminOrMaster 게이트)만 호출 — 응답은 이름·담당자만 추려 반환(급여·근태 등
+//   인트라넷 타 테이블·민감 필드 미노출). 60초 캐시로 인트라넷 부하 최소화. 실패=빈 목록(fail-soft).
+//   env: INTRANET_API_BASE (기본 https://inadd-system.pages.dev)
+let _intraAdvCache = { at: 0, rows: null };
+async function intranetAdvertisers({ q = '', limit = 20 } = {}) {
+  const base = (process.env.INTRANET_API_BASE || 'https://inadd-system.pages.dev').trim().replace(/\/$/, '');
+  const now = Date.now();
+  if (!_intraAdvCache.rows || now - _intraAdvCache.at > 60 * 1000) {
+    const ctrl = new AbortController();
+    const timer = setTimeout(() => ctrl.abort(), 5000);
+    try {
+      const resp = await fetch(`${base}/api/tables/advertisers?limit=2000&sort=business_name&order=ASC`, { signal: ctrl.signal });
+      if (!resp.ok) throw new Error(`intranet HTTP ${resp.status}`);
+      const j = await resp.json();
+      // 실데이터 확인: 거래처명은 business_name(사업자명, 인트라넷 UI 필수 필드) — company_name 은 레거시(전량 공란).
+      _intraAdvCache = { at: now, rows: (j.data || []).map(r => ({
+        intranetId: r.id, name: String(r.business_name || r.company_name || '').trim(), manager: String(r.manager || '').trim() || null,
+      })).filter(r => r.name) };
+    } catch (e) {
+      logger.warn(`[trackB] 인트라넷 광고주DB 조회 실패: ${e.message}`);
+      if (!_intraAdvCache.rows) return { ok: false, error: 'intranet_unreachable', items: [] };
+      // stale 캐시라도 있으면 그걸로 응답(자동완성 연속성)
+    } finally { clearTimeout(timer); }
+  }
+  const needle = String(q || '').trim().toLowerCase();
+  const lim = Math.min(Math.max(parseInt(limit, 10) || 20, 1), 50);
+  const items = (_intraAdvCache.rows || [])
+    .filter(r => !needle || r.name.toLowerCase().includes(needle))
+    .slice(0, lim);
+  return { ok: true, items };
+}
+
 // ══ 작업오더(발주) 연동 — 수동 링크 + 작업세부 노출 + 명단 골격 준비. B 내부·격리(라이브 무접촉). ══
 //   ★★ Track A 무접촉: work_orders.linked_tab_* 는 order.routes 승인(accept) 흐름이 **읽어 동작을 분기**한다
 //      (비적격 상태+linked_tab 설정 시 승인 멱등 skip, idempotent 판정). 그래서 Track B는 그 컬럼을 절대 안 쓰고
@@ -1401,6 +1435,7 @@ module.exports = {
   removeOwnership,
   listOwnership,
   listAdvertisersWithOwnership,
+  intranetAdvertisers,
   listWorkOrders,
   linkWorkOrder,
   unlinkWorkOrder,

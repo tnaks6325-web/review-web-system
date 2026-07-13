@@ -172,6 +172,12 @@ router.get('/advertisers', authMiddleware, adminOrMasterMiddleware, async (req, 
   catch (err) { next(err); }
 });
 
+// ── 인트라넷 광고주DB 자동완성 프록시(거래처명) — admin/master. 이름·담당자만 반환(민감필드 미노출). ──
+router.get('/intranet/advertisers', authMiddleware, adminOrMasterMiddleware, async (req, res, next) => {
+  try { res.json(await svc.intranetAdvertisers({ q: req.query.q, limit: req.query.limit })); }
+  catch (err) { next(err); }
+});
+
 // ── 업체 소유 매핑(1:N) — admin/master ──
 router.get('/ownership', authMiddleware, adminOrMasterMiddleware, async (req, res, next) => {
   try { res.json({ ok: true, items: await svc.listOwnership({ advertiserId: req.query.advertiserId, sheetId: req.query.sheetId }) }); }
