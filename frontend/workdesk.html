@@ -35,6 +35,11 @@
   .tgh{display:flex;align-items:center;gap:6px;font-size:11px;font-weight:750;color:var(--ink);padding:10px 6px 4px;border-bottom:1px solid var(--line);margin-bottom:4px}
   .tgh:first-child{padding-top:2px}
   .tgc{font-size:10px;font-weight:600;color:var(--faint);background:var(--card2);border-radius:8px;padding:1px 6px}
+  .advsug{display:none;position:absolute;top:100%;left:0;right:0;z-index:30;background:var(--card);border:1px solid var(--line);border-radius:8px;margin-top:3px;max-height:220px;overflow-y:auto;box-shadow:0 6px 18px rgba(0,0,0,.12)}
+  .advsug.show{display:block}
+  .sugitem{padding:8px 11px;font-size:12.5px;cursor:pointer;display:flex;justify-content:space-between;gap:8px}
+  .sugitem:hover{background:var(--accent-soft)}
+  .sugm{color:var(--faint);font-size:11px}
   .main{padding:18px 22px;overflow:auto}
   .mh{display:flex;align-items:center;gap:10px;flex-wrap:wrap;margin-bottom:14px}
   .mh h1{font-size:19px;margin:0;font-weight:800;letter-spacing:-.02em}
@@ -185,7 +190,7 @@ async function api(path, opts){ const o=Object.assign({headers:{}},opts||{}); o.
 const $=(s,el)=>(el||document).querySelector(s);
 const esc=s=>String(s==null?'':s).replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
 function toast(m){ const t=$('#toast'); t.textContent=m; t.classList.add('show'); setTimeout(()=>t.classList.remove('show'),1800); }
-function parseJwt(t){ try{ return JSON.parse(atob(t.split('.')[1])); }catch(_){ return {}; } }
+function parseJwt(t){ try{ const b=atob(t.split('.')[1].replace(/-/g,'+').replace(/_/g,'/')); return JSON.parse(new TextDecoder().decode(Uint8Array.from(b,c=>c.charCodeAt(0)))); }catch(_){ return {}; } }   // base64url + UTF-8(한글 이름) 정상 디코드
 
 let STATE = { role:'', name:'', view:'workdesk', tabs:[], cur:null, wd:null, freezeUpto:null,
               ov:[], ovq:'', pendingTab:null, lastBatch:null,
@@ -719,18 +724,36 @@ function showAddAdvertiser(){
     <div class="ph2"><span class="big">＋</span><div><h2>업체(거래처) 추가</h2><div class="acc">새 광고주를 등록하면 이 목록에 뜨고, 아래에서 시트/탭 소유를 지정할 수 있습니다.</div></div></div>
     <div class="sect"><div class="st">새 업체</div>
       <div class="add">
-        <label>거래처명 *</label>
-        <input id="advName" placeholder="예: (주)콩고물" autocomplete="off" onkeydown="if(event.key==='Enter')createAdvertiser()">
-        <label style="margin-top:11px">담당 AE (선택 · 로그인 아이디와 정확히 일치해야 스코프 연결)</label>
-        <input id="advPm" placeholder="예: 김수만" autocomplete="off" onkeydown="if(event.key==='Enter')createAdvertiser()">
+        <label>거래처명 * <span style="color:var(--faint);font-weight:400">(인트라넷 광고주DB 검색 — 입력하면 자동완성)</span></label>
+        <div style="position:relative">
+          <input id="advName" placeholder="예: (주)콩고물" autocomplete="off" oninput="intraSuggest(this.value)" onkeydown="if(event.key==='Enter')createAdvertiser()">
+          <div id="advSug" class="advsug"></div>
+        </div>
+        <label style="margin-top:11px">담당 AE (로그인 정보 기준 자동 지정)</label>
+        <input id="advPm" value="" readonly style="background:var(--card2);color:var(--muted);cursor:not-allowed">
         <div id="advErr" style="color:var(--bad);font-size:12px;margin-top:9px;min-height:15px"></div>
         <button class="btn pri assignbtn" onclick="createAdvertiser()">＋ 업체 등록</button>
       </div>
     </div>`;
+  $('#advPm').value = STATE.name || '';
   setTimeout(()=>{ const el=$('#advName'); if(el) el.focus(); },40);
 }
+// 인트라넷 광고주DB 자동완성(서버 프록시 경유 — 브라우저는 인트라넷 직접 미호출). 실패 시 조용히 무시(수동 입력 가능).
+let _sugTimer=null;
+function intraSuggest(q){
+  clearTimeout(_sugTimer); const box=$('#advSug'); if(!box) return;
+  if(!(q||'').trim()){ box.classList.remove('show'); box.innerHTML=''; return; }
+  _sugTimer=setTimeout(async()=>{
+    const r=await api('/api/trackb/intranet/advertisers?q='+encodeURIComponent(q.trim())).catch(()=>null);
+    const items=(r&&r.ok&&r.items)||[];
+    if(!items.length){ box.classList.remove('show'); box.innerHTML=''; return; }
+    box.innerHTML=items.map(it=>`<div class="sugitem" onclick="pickIntra('${esc(it.name).replace(/'/g,'&#39;')}')">${esc(it.name)}${it.manager?`<span class="sugm">${esc(it.manager)}</span>`:''}</div>`).join('');
+    box.classList.add('show');
+  },250);
+}
+function pickIntra(name){ const el=$('#advName'); if(el) el.value=name; const box=$('#advSug'); if(box){ box.classList.remove('show'); box.innerHTML=''; } }
 async function createAdvertiser(){
-  const name=($('#advName').value||'').trim(), inad_pm=($('#advPm').value||'').trim();
+  const name=($('#advName').value||'').trim(), inad_pm=(STATE.name||'').trim();
   const err=$('#advErr'); if(err) err.textContent='';
   if(!name){ if(err) err.textContent='거래처명을 입력하세요.'; return; }
   const r=await api('/api/portal/advertisers',{method:'POST',body:JSON.stringify({ name, inad_pm })});
