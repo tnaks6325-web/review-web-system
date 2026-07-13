@@ -676,7 +676,7 @@ async function showWritebackSim(){
   const bd=$('#wbbd'); if(!bd)return;
   if(!r||!r.ok){ bd.innerHTML=`<div class="empty">${esc((r&&r.error)||'조회 실패')}</div>`; return; }
   const s=r.summary||{}, ops=r.ops||[];
-  const gmap={ok:'✅ 반영',risky_ownership_key:'⚠️ 위험(소유권키·제외)',risky_coords:'⚠️ 위험(좌표·제외)',risky_append:'⚠️ 위험(추가·제외)',no_anchor:'⛔ 앵커없음',ambiguous:'⛔ 중복신원',no_column:'⛔ 컬럼없음',no_sheet_row:'⛔ 행없음'};
+  const gmap={ok:'✅ 반영',risky_ownership_key:'⚠️ 위험(소유권키·제외)',risky_order_mapped:'⚠️ 위험(주문매핑칸·제외)',risky_coords:'⚠️ 위험(좌표·제외)',risky_append:'⚠️ 위험(추가·제외)',manual_row:'⚠️ 수동행(검토·제외)',no_anchor:'⛔ 앵커없음',ambiguous:'⛔ 중복신원',no_column:'⛔ 컬럼없음',no_sheet_row:'⛔ 행없음',no_tab_gid:'⛔ gid없음'};
   const tmap={toggle:'제출/입금',edit:'필드편집',add:'행추가',clear:'행삭제'};
   const rows=ops.map(o=>{ const nv=(o.newValue&&typeof o.newValue==='object')?JSON.stringify(o.newValue):(o.newValue==null?'':String(o.newValue));
     return `<tr><td>${esc(tmap[o.type]||o.type)}</td><td>${esc(o.field||'')}</td><td>${esc(o.name||'—')}</td><td>${o.sheetRow||'-'}${o.column?(' · '+esc(o.column)+'열'):''}${o.header?(' <span style="color:var(--faint)">('+esc(o.header)+')</span>'):''}</td><td>${esc(nv)}</td><td>${gmap[o.guard]||esc(o.guard)}</td></tr>`;

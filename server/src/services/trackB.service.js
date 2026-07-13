@@ -1018,21 +1018,28 @@ async function listEdits({ sheetId, tabName, limit = 200 } = {}) {
 }
 
 // ══════════════════════════════════════════════════════════════════════════
-// P2 (최소 출시 · 심판 확정): 상태 토글 write-back — cutover 탭의 is_submitted/is_paid 오버레이
-//   편집만 시트의 리뷰제출/입금 상태칸에 반영. 그 외(이름/수취인/phone8/round/옵션/col:*·manual
-//   추가/삭제)는 범위 밖(B 내부 유지) — 다음 red-blue-judge 단계.
+// P2/P2-2 write-back 경로 정합(red-blue-judge 확정): 플랜(_computeWritebackPlan)이 **유일 op 산출원**,
+//   _writebackEngine 이 tier 실행기 — base(cron·TRACK_B_WRITEBACK=1)=상태 토글만 /
+//   full(수동 apply-full·TRACK_B_WRITEBACK_FULL=1)=base+안전군 필드편집 / simulate=전체 플랜(시트 무접촉).
 //
-// ★★ Track A 리스크 = 0 (구조로 보장, 리스트 방어 아님):
-//   1) 격리: source_of_truth 재확인은 이 파일(회귀가드 ALLOWED)에서만. Track A 파일(syncQueue/
-//      orderLedger/smartBuild/claimRow/rawMirror) 0줄 수정 — cron 스윕이 유일 구동자.
-//   2) 컬럼 disjoint: order_append(mapOrderToSheetRow)는 상태칸(리뷰제출/입금)을 **절대 안 씀**.
-//      write-back은 submit_col/submit_col2 **두 열에만** 쓴다(_buildToggleWrite가 물리적으로 강제)
-//      → 같은 행 충돌·연락처/수취인/주소 오염·review_index.phone8(소유권키) 변조가 **불가능**.
-//   3) blank-only: 사람/라이브가 채운 셀은 절대 클로버 안 함(비면 held). un-write 안 함.
-//   4) 신원 재검증(rowIdentityMatches): 행 이동/재사용 시 mismatch=blocked(자가치유 재시도).
-//   5) 저우선 throttle({priority:'low'}) + BUSY 양보: 주문 예약 8슬롯·라이브 시트작업 무굶김.
-//   6) 멱등: _normSubmitCell no-op + status='written'(재픽업 안 함) → 핑퐁 0.
-//   7) 이중 게이트: TRACK_B_WRITEBACK=1(글로벌) AND source_of_truth='db'(탭별). 기본 OFF=완전 inert.
+// ★★ 불변식(위반=Blocker):
+//   1) 격리: source_of_truth·양 env 판정은 이 파일에서만. Track A 파일·cron.js·routes 변경 0줄.
+//   2) 컬럼 disjoint: _wbOrderMappedMask = mapOrderToSheetRow(headers,{}) 의 non-null 칸(주문매핑칸).
+//      빈 orderData 에도 매핑칸은 ''(non-null)·비매핑칸은 null 을 반환(실코드 검증) — 옵션/계좌/금액/
+//      일자/비고/이름류까지 자동 위험군(risky_order_mapped). ★토글도 대상칸이 매핑칸이면 실적용 금지
+//      (예: submit_col2='입금일자' 는 일자칸 → order_append 와 충돌 가능 — 기존 P2 의 잠복 구멍 봉합).
+//   3) blank-only · un-write 불가 · 사람셀 클로버 금지: 충돌=held(비재시도). own-provenance(sig 로
+//      "내가 쓴 O" 지우기)는 기각 — 입금칸은 사람 입금표기와 공유라 sig 로도 현재 'O' 의 배타 소유 증명 불가.
+//   4) 신원 fail-closed: _wbIdentityOk(전화=digits 끝8자리 · 수취인=trim, AND, 비교불가=불일치).
+//      ★ ol.rowIdentityMatches 사용 금지 — normalizeGuardValue 가 digits '전체' equality 라
+//        시트 01012345678 vs DB phone8(12345678)이 상시 불일치 → 전건 blocked 잠복버그(이번에 수정).
+//   5) 저우선 throttle({priority:'low'}) + BUSY 양보 + 행당 저우선 읽기 1콜(신원칸∪대상칸 사각형)
+//      + TRACK_B_WRITEBACK_MAX_ROWS 상한 — 주문 예약 8슬롯(SHEETS_ORDER_RESERVE) 무굶김.
+//   6) 멱등·핑퐁0: no-op 수렴마킹(written) + written 재픽업 안 함 + 쓰기실패=무마킹 defer(재시도 멱등)
+//      + no_meta=무마킹 skip(마킹은 헤더 확보 후에만 — 오마킹 방지).
+//   7) status 어휘 고정 {NULL,'written','held','blocked'}(migration 052 CHECK 백스톱) — 구버전 픽업
+//      (IS NULL OR ='blocked')과 롤백 호환. markStatus 화이트리스트 + editId 없는 op(add/clear) 미호출.
+//   8) 두 env 미설정 = 완전 inert(gate_off/trigger_off 즉시 반환, DB·시트 무접촉).
 // ══════════════════════════════════════════════════════════════════════════
 function _wbColLetter(idx) { let s = '', i = idx; while (i >= 0) { s = String.fromCharCode((i % 26) + 65) + s; i = Math.floor(i / 26) - 1; } return s; }
 
@@ -1054,128 +1061,28 @@ function _buildToggleWrite({ tabName, headers, submitCol, submitCol2, wantSubmit
   return { writeData, conflict, c1, c2 };
 }
 
-// cutover 탭 1개의 미반영 상태 토글을 시트에 반영. 큐 없이 cron/수동이 직접 호출(멱등·재시도 안전).
-async function executeWriteback({ sheetId, tabName } = {}) {
-  if (process.env.TRACK_B_WRITEBACK !== '1') return { skipped: true, reason: 'gate_off' };
-  if (!sheetId || !tabName) return { skipped: true, reason: 'missing_args' };
-  if (await getSourceOfTruth({ sheetId, tabName }) !== 'db') return { skipped: true, reason: 'not_cutover' };
-  const db = getPool();
-  const { loadRawTabContext, rowIdentityMatches } = require('./orderLedger.service');
-  const { readSheet, batchUpdateSheet, invalidateSheetMeta } = require('./sheets.service');
-  const { throttledCall, getThrottleStatus } = require('../utils/sheetsThrottle');
-
-  const { rows: edits } = await db.query(
-    `SELECT id, anchor_type, anchor_value, field, value_bool FROM participant_edits
-      WHERE sheet_id=$1 AND tab_name=$2 AND reverted_at IS NULL AND field IN ('is_submitted','is_paid')
-        AND (writeback_status IS NULL OR writeback_status='blocked')`, [sheetId, tabName]);
-  if (!edits.length) return { skipped: true, reason: 'no_pending', tabName };
-
-  // import행만(manual 추가행은 범위 밖 = append 필요). 상태칸·신원 있는 행.
-  const { rows: roster } = await db.query(
-    `SELECT id, order_submission_id, identity_key, sheet_row, tab_gid, phone8, recipient_name,
-            reviewer_name, round, option_text, submit_col, submit_col2
-       FROM campaign_participants
-      WHERE sheet_id=$1 AND tab_name=$2 AND deleted_at IS NULL AND active=TRUE
-        AND source='import' AND sheet_row IS NOT NULL AND tab_gid IS NOT NULL`, [sheetId, tabName]);
-  const byOrder = new Map(), byIdent = new Map(), identCount = new Map();
-  for (const r of roster) {
-    if (r.order_submission_id) byOrder.set(String(r.order_submission_id), r);
-    const ik = r.identity_key || identityKey(_ikFromRow(r));
-    if (ik) { identCount.set(ik, (identCount.get(ik) || 0) + 1); if (!byIdent.has(ik)) byIdent.set(ik, r); }
-  }
-  const markStatus = (id, st, sig) => db.query(
-    `UPDATE participant_edits SET writeback_status=$2, writeback_at=NOW(), writeback_sig=COALESCE($3,writeback_sig) WHERE id=$1`,
-    [id, st, sig || null]);
-
-  const perRow = new Map();   // participant.id → { row, wantSubmitted, wantPaid, editIds }
-  let blocked = 0;
-  for (const e of edits) {
-    let row = null;
-    if (e.anchor_type === 'order') row = byOrder.get(e.anchor_value) || null;
-    else if (e.anchor_type === 'identity' && (identCount.get(e.anchor_value) || 0) === 1) row = byIdent.get(e.anchor_value) || null;
-    if (!row) { await markStatus(e.id, 'blocked'); blocked++; continue; }   // manual앵커/모호/미부착 → 자가치유
-    if (!perRow.has(row.id)) perRow.set(row.id, { row, wantSubmitted: null, wantPaid: null, editIds: [] });
-    const s = perRow.get(row.id);
-    if (e.field === 'is_submitted') s.wantSubmitted = !!e.value_bool; else s.wantPaid = !!e.value_bool;
-    s.editIds.push(e.id);
-  }
-  if (!perRow.size) return { tabName, written: 0, held: 0, blocked, deferred: 0 };
-
-  const ctx = await loadRawTabContext(sheetId, roster[0].tab_gid, tabName);
-  if (!ctx || !ctx.headers || !ctx.headers.length) return { skipped: true, reason: 'no_meta', tabName };
-  const headers = ctx.headers;
-  const BUSY = parseInt(process.env.TRACK_B_WRITEBACK_BUSY || '20', 10);
-  let written = 0, held = 0, deferred = 0;
-
-  for (const { row, wantSubmitted, wantPaid, editIds } of perRow.values()) {
-    if (getThrottleStatus().requestsInLastMinute > BUSY) { deferred += editIds.length; continue; }   // 라이브 양보(멱등 재시도)
-    const c1 = row.submit_col ? headers.indexOf(row.submit_col) : -1;
-    const c2 = row.submit_col2 ? headers.indexOf(row.submit_col2) : -1;
-    if (c1 < 0 && c2 < 0) { for (const id of editIds) await markStatus(id, 'blocked'); blocked += editIds.length; continue; }   // 헤더 드리프트
-    if (!row.phone8 || !row.recipient_name) { for (const id of editIds) await markStatus(id, 'blocked'); blocked += editIds.length; continue; }
-    let idy;
-    try { idy = await rowIdentityMatches({ sheet_id: sheetId, sheet_row: row.sheet_row, tab_gid: row.tab_gid, tab_name: tabName, phone: row.phone8, recipient: row.recipient_name, address: null }, ctx); }
-    catch (_) { deferred += editIds.length; continue; }
-    if (!idy.match) { for (const id of editIds) await markStatus(id, 'blocked'); blocked += editIds.length; continue; }   // 행이동/재사용 차단
-    const cols = [c1, c2].filter(c => c >= 0);
-    const minC = Math.min(...cols), maxC = Math.max(...cols);
-    invalidateSheetMeta(sheetId);
-    const rng = `'${tabName}'!${_wbColLetter(minC)}${row.sheet_row}:${_wbColLetter(maxC)}${row.sheet_row}`;
-    let cells;
-    try { const rd = await throttledCall(() => readSheet(sheetId, rng, { gid: row.tab_gid }), 2, { priority: 'low' }); cells = (rd && rd[0]) || []; }
-    catch (_) { deferred += editIds.length; continue; }
-    const { writeData, conflict } = _buildToggleWrite({ tabName, headers, submitCol: row.submit_col, submitCol2: row.submit_col2, wantSubmitted, wantPaid, cells, minC, sheetRow: row.sheet_row });
-    if (writeData.length) {
-      try { await throttledCall(() => batchUpdateSheet(sheetId, writeData, 'RAW', { gid: row.tab_gid }), 2, { priority: 'low' }); }
-      catch (_) { deferred += editIds.length; continue; }   // blank-only라 재시도 멱등
-    }
-    const sig = `s=${wantSubmitted == null ? '-' : (wantSubmitted ? 'O' : '')}|p=${wantPaid == null ? '-' : (wantPaid ? 'O' : '')}`;
-    const st = conflict ? 'held' : 'written';
-    for (const id of editIds) await markStatus(id, st, sig);
-    if (conflict) held += editIds.length; else written += editIds.length;
-  }
-  return { tabName, written, held, blocked, deferred };
+// ── 주문매핑칸 마스크(disjoint 자동 유도): mapOrderToSheetRow 는 빈 orderData 에도
+//    주문칸에 ''(non-null)·비주문칸에 null 을 반환 → non-null = order_append 가 쓰는 칸. ──
+function _wbOrderMappedMask(headers) {
+  const ol = require('./orderLedger.service');
+  return ol.mapOrderToSheetRow(headers || [], {}).map(v => v !== null);
 }
 
-// cron/수동 진입점: cutover(source_of_truth='db') 탭 중 미반영 토글이 있는 탭만 순회.
-//   락(trackb_writeback)은 호출측(cron/route)에서 감싼다 — 멀티인스턴스 이중 스윕 직렬화.
-async function writebackSweep({ limit = 100 } = {}) {
-  if (process.env.TRACK_B_WRITEBACK !== '1') return { skipped: true, reason: 'gate_off' };
-  const db = getPool();
-  const { rows: tabs } = await db.query(
-    `SELECT DISTINCT pe.sheet_id AS "sheetId", pe.tab_name AS "tabName"
-       FROM participant_edits pe JOIN tab_configs tc ON tc.sheet_id=pe.sheet_id AND tc.tab_name=pe.tab_name
-      WHERE pe.reverted_at IS NULL AND pe.field IN ('is_submitted','is_paid')
-        AND (pe.writeback_status IS NULL
-             OR (pe.writeback_status='blocked' AND (pe.writeback_at IS NULL OR pe.writeback_at < NOW() - INTERVAL '30 minutes')))
-        AND tc.source_of_truth='db'
-      LIMIT $1`, [limit]);
-  let done = 0, written = 0, held = 0, errors = 0;
-  for (const t of tabs) {
-    try { const r = await executeWriteback({ sheetId: t.sheetId, tabName: t.tabName }); done++; written += r.written || 0; held += r.held || 0; }
-    catch (e) { errors++; logger.warn(`[trackB] writeback ${t.tabName} 실패: ${e.message}`); }
+// ── 신원 재검증(fail-closed): rowIdentityMatches 의 의미(존재 칸 AND 일치·비교불가=거부) 승계 +
+//    전화는 digits 끝8자리 비교(DB phone8 과 정합 — 전체 equality 잠복버그 수정). ──
+function _wbIdentityOk({ cells, minC, phoneCol, recipCol, phone8, recipient }) {
+  const checks = [];
+  if (phoneCol >= 0 && String(phone8 || '').trim()) {
+    const cur = String(cells[phoneCol - minC] == null ? '' : cells[phoneCol - minC]).replace(/[^0-9]/g, '');
+    checks.push(cur.length >= 8 && cur.slice(-8) === String(phone8).trim());
   }
-  return { candidateTabs: tabs.length, done, written, held, errors };
+  if (recipCol >= 0 && String(recipient || '').trim()) {
+    const cur = String(cells[recipCol - minC] == null ? '' : cells[recipCol - minC]).trim();
+    checks.push(!!cur && cur === String(recipient).trim());
+  }
+  return checks.length > 0 && checks.every(Boolean);
 }
 
-async function writebackStatus() {
-  const { rows } = await getPool().query(
-    `SELECT COUNT(*) FILTER (WHERE writeback_status='held')::int AS held,
-            COUNT(*) FILTER (WHERE writeback_status='blocked')::int AS blocked,
-            COUNT(*) FILTER (WHERE writeback_status='written')::int AS written
-       FROM participant_edits WHERE reverted_at IS NULL AND field IN ('is_submitted','is_paid')`);
-  return rows[0] || { held: 0, blocked: 0, written: 0 };
-}
-
-// ══════════════════════════════════════════════════════════════════════════
-// P2-2 (시뮬레이터 · 확장 write-back): 상태 토글 외 **필드편집(이름/수취인/전화/차수/옵션/col:*) +
-//   manual 추가/삭제행**까지 "시트에 무엇을 쓸지" 플랜으로 산출. ★ 기본은 SIMULATE(시트 무접촉).
-//   실제 적용은 **트리거** `TRACK_B_WRITEBACK_FULL=1` + cutover 이중게이트 뒤에서만(수동, 크론 미연결).
-//   ★★ 격리: source_of_truth 판정은 이 파일에서만. 트리거 OFF면 applyWritebackFull은 즉시 반환(무접촉).
-//   ⚠️ 소유권키/주문매핑 컬럼(연락처·수취인·주소·주문번호)·manual append/clear는 **위험군**으로 분류 —
-//      시뮬레이션엔 뜨지만 실제 적용에서 제외(red-blue-judge 후 별도 단계). 안전군(차수/옵션/이름/토글/
-//      col:비매핑)만 트리거 ON 시 blank-only + 신원 재검증으로 적용.
-// ══════════════════════════════════════════════════════════════════════════
 function _wbEditFieldCol(ol, headers, field) {
   if (field.indexOf('col:') === 0) return headers.indexOf(field.slice(4));
   const m = { recipient_name: 'recipient', phone8: 'phone', option_text: 'selected_opt_key' };
@@ -1184,19 +1091,34 @@ function _wbEditFieldCol(ol, headers, field) {
   if (kw[field]) { for (let i = 0; i < headers.length; i++) if (kw[field].test(String(headers[i] || ''))) return i; }
   return -1;
 }
-// 위험군: 소유권키(phone8/recipient) 또는 주문매핑 컬럼(연락처/수취인/주소/주문번호) — 실제 적용 제외.
+// 위험군(필드명 기준): 소유권키(phone8/recipient) + 연락처/주소/수취인/주문번호 헤더 — 실적용 제외.
+//   (주문매핑칸 일반은 _wbOrderMappedMask 가 헤더 기준으로 추가 차단 — 이중 안전망.)
 function _wbIsRiskyField(field, header) {
   if (field === 'phone8' || field === 'recipient_name') return true;
   const h = field.indexOf('col:') === 0 ? field.slice(4) : (header || '');
   return /연락처|전화|핸드폰|휴대폰|phone|주소|address|수취인|받는분|주문번호|ordernum/i.test(h);
 }
 
-// 이 탭의 write-back 플랜 산출(순수 읽기·시트 무접촉): 활성 편집 + manual 행 → 시트 반영 계획.
-async function _computeWritebackPlan(db, sheetId, tabName) {
+const _WB_BLOCKED = ['no_anchor', 'ambiguous', 'no_column', 'no_sheet_row', 'no_tab_gid'];
+const _WB_RISKY = ['risky_ownership_key', 'risky_order_mapped', 'risky_coords', 'risky_append', 'manual_row'];
+const _WB_STATUSES = new Set(['written', 'held', 'blocked']);   // R3: 어휘 고정(052 CHECK 와 동형)
+
+// ── 유일 op 산출원(시트 무접촉·순수 읽기): scope='all'(시뮬 전체) | 'base'(토글 미반영) | 'full'(비토글 포함 미반영).
+//    픽업 술어(R2/R9): '_hidden' 은 base(IN 토글)·full(<>'_hidden') 양쪽 SQL 에서 제외 — 영구 재픽업 원천 차단.
+//    full 은 소유권키 필드(phone8/recipient_name)도 SQL 제외(실행·오마킹 자체가 없음, 시뮬엔 노출). ──
+async function _computeWritebackPlan(db, sheetId, tabName, { scope = 'all' } = {}) {
   const ol = require('./orderLedger.service');
-  const { rows: edits } = await db.query(
-    `SELECT id, anchor_type, anchor_value, field, kind, value_bool, value_text
-       FROM participant_edits WHERE sheet_id=$1 AND tab_name=$2 AND reverted_at IS NULL`, [sheetId, tabName]);
+  let editSql = `SELECT id, anchor_type, anchor_value, field, kind, value_bool, value_text
+       FROM participant_edits WHERE sheet_id=$1 AND tab_name=$2 AND reverted_at IS NULL`;
+  if (scope === 'base') {
+    editSql += ` AND field IN ('is_submitted','is_paid') AND (writeback_status IS NULL OR writeback_status='blocked')`;
+  } else if (scope === 'full') {
+    editSql += ` AND field <> '_hidden' AND field NOT IN ('phone8','recipient_name')
+        AND (writeback_status IS NULL OR writeback_status='blocked')`;
+  }
+  const { rows: edits } = await db.query(editSql, [sheetId, tabName]);
+  if (scope !== 'all' && !edits.length) return { noPending: true, edits: [], ops: [], roster: [], headers: [] };
+
   const { rows: roster } = await db.query(
     `SELECT id, seq, reviewer_name, recipient_name, phone8, round, option_text, product_name,
             sheet_row, tab_gid, submit_col, submit_col2, source, order_submission_id, identity_key, deleted_at, active
@@ -1211,101 +1133,245 @@ async function _computeWritebackPlan(db, sheetId, tabName) {
   let headers = [];
   const gid = (roster.find(r => r.tab_gid) || {}).tab_gid || null;
   try { const ctx = await ol.loadRawTabContext(sheetId, gid, tabName); headers = (ctx && ctx.headers) || []; } catch (_) {}
+  const mask = headers.length ? _wbOrderMappedMask(headers) : [];
+
   const resolve = (e) => {
     if (e.anchor_type === 'order') return byOrder.get(e.anchor_value) || null;
     if (e.anchor_type === 'manual') return byManual.get(e.anchor_value) || null;
     if (e.anchor_type === 'identity') return (identCount.get(e.anchor_value) || 0) > 1 ? { __ambiguous: true } : (byIdent.get(e.anchor_value) || null);
     return null;
   };
+  const tierOf = (type, guard) => {
+    if (type === 'add' || type === 'clear' || _WB_RISKY.includes(guard)) return 'manual';
+    if (_WB_BLOCKED.includes(guard)) return 'blocked';
+    return type === 'toggle' ? 'base' : 'full';
+  };
   const ops = []; const hiddenManual = new Set();
   for (const e of edits) {
     const row = resolve(e);
     if (e.field === '_hidden') { if (row && !row.__ambiguous && row.source === 'manual') hiddenManual.add(String(row.id)); continue; }
     const nv = e.kind === 'bool' ? (e.value_bool ? 'O' : '') : (e.value_text == null ? '' : e.value_text);
-    if (!row) { ops.push({ editId: e.id, type: 'edit', field: e.field, newValue: nv, guard: 'no_anchor' }); continue; }
-    if (row.__ambiguous) { ops.push({ editId: e.id, type: 'edit', field: e.field, newValue: nv, guard: 'ambiguous' }); continue; }
+    if (!row) { ops.push({ editId: e.id, type: 'edit', field: e.field, newValue: nv, guard: 'no_anchor', tier: 'blocked' }); continue; }
+    if (row.__ambiguous) { ops.push({ editId: e.id, type: 'edit', field: e.field, newValue: nv, guard: 'ambiguous', tier: 'blocked' }); continue; }
     const base = { editId: e.id, participantId: row.id, seq: row.seq, name: row.reviewer_name, sheetRow: row.sheet_row, field: e.field, newValue: nv };
-    if (e.field === 'is_submitted' || e.field === 'is_paid') {
+    const isToggle = (e.field === 'is_submitted' || e.field === 'is_paid');
+    let ci = -1, header = null;
+    if (isToggle) {
       const col = e.field === 'is_submitted' ? row.submit_col : row.submit_col2;
-      const ci = col ? headers.indexOf(col) : -1;
-      ops.push({ ...base, type: 'toggle', header: col || null, column: ci >= 0 ? ol.getColLetter(ci) : null, guard: !row.sheet_row ? 'no_sheet_row' : (ci < 0 ? 'no_column' : 'ok') });
+      ci = col ? headers.indexOf(col) : -1; header = col || null;
     } else {
-      const ci = _wbEditFieldCol(ol, headers, e.field);
-      const header = ci >= 0 ? headers[ci] : null;
-      let guard = 'ok';
-      if (!row.sheet_row) guard = 'no_sheet_row'; else if (ci < 0) guard = 'no_column'; else if (_wbIsRiskyField(e.field, header)) guard = 'risky_ownership_key';
-      ops.push({ ...base, type: 'edit', header, column: ci >= 0 ? ol.getColLetter(ci) : null, guard });
+      ci = _wbEditFieldCol(ol, headers, e.field); header = ci >= 0 ? headers[ci] : null;
+    }
+    let guard = 'ok';
+    if (!row.sheet_row) guard = 'no_sheet_row';
+    else if (!row.tab_gid) guard = 'no_tab_gid';
+    else if (ci < 0) guard = 'no_column';
+    else if (!isToggle && _wbIsRiskyField(e.field, header)) guard = 'risky_ownership_key';
+    else if (mask[ci]) guard = 'risky_order_mapped';            // ★ disjoint: 주문매핑칸은 토글도 실적용 금지
+    else if (row.source === 'manual') guard = 'manual_row';     // B 전용 물리행 — 시트 좌표 신뢰 불가(수동 검토)
+    const type = isToggle ? 'toggle' : 'edit';
+    ops.push({ ...base, type, header, colIndex: ci >= 0 ? ci : null,
+      column: ci >= 0 ? ol.getColLetter(ci) : null, valueBool: e.kind === 'bool' ? !!e.value_bool : null,
+      guard, tier: tierOf(type, guard) });
+  }
+  if (scope === 'all') {   // manual add/clear 는 시뮬 전용(editId 없음 → 엔진 실행·마킹 대상 아님, R11)
+    for (const r of roster) {
+      if (r.source !== 'manual') continue;
+      if (r.deleted_at || hiddenManual.has(String(r.id))) {
+        if (r.sheet_row) ops.push({ participantId: r.id, seq: r.seq, name: r.reviewer_name, sheetRow: r.sheet_row, type: 'clear', guard: 'risky_coords', tier: 'manual' });
+      } else if (r.active) {
+        ops.push({ participantId: r.id, seq: r.seq, name: r.reviewer_name, sheetRow: r.sheet_row || null, type: 'add', guard: 'risky_append', tier: 'manual',
+          newValue: { reviewer: r.reviewer_name, recipient: r.recipient_name, option: r.option_text } });
+      }
     }
   }
-  for (const r of roster) {
-    if (r.source !== 'manual') continue;
-    if (r.deleted_at || hiddenManual.has(String(r.id))) {
-      if (r.sheet_row) ops.push({ participantId: r.id, seq: r.seq, name: r.reviewer_name, sheetRow: r.sheet_row, type: 'clear', guard: 'risky_coords' });
-    } else if (r.active) {
-      ops.push({ participantId: r.id, seq: r.seq, name: r.reviewer_name, sheetRow: r.sheet_row || null, type: 'add', guard: 'risky_append',
-        newValue: { reviewer: r.reviewer_name, recipient: r.recipient_name, option: r.option_text } });
-    }
-  }
-  return { headers, ops, roster };
+  return { edits, ops, roster, headers };
 }
 
-const _WB_BLOCKED = ['no_anchor', 'ambiguous', 'no_column', 'no_sheet_row'];
-const _WB_RISKY = ['risky_ownership_key', 'risky_coords', 'risky_append'];
+// ── tier 실행기(단일 엔진): base=토글만 / full=토글+안전군 필드편집. 게이트는 공개 래퍼가 통과시킨 뒤 호출. ──
+async function _writebackEngine({ sheetId, tabName, tier }) {
+  const db = getPool();
+  const ol = require('./orderLedger.service');
+  const { readSheet, batchUpdateSheet, invalidateSheetMeta } = require('./sheets.service');
+  const { throttledCall, getThrottleStatus } = require('../utils/sheetsThrottle');
 
-// 시뮬레이션(시트 무접촉): 무엇이 시트에 반영될지 플랜 + 요약. cutover/트리거 상태 동봉.
+  const plan = await _computeWritebackPlan(db, sheetId, tabName, { scope: tier });
+  if (plan.noPending) return { skipped: true, reason: 'no_pending', tabName };
+  const headers = plan.headers;
+  if (!headers.length) return { skipped: true, reason: 'no_meta', tabName };   // R6: 메타 없으면 무마킹 skip(자가치유)
+
+  const markStatus = async (editId, st, sig) => {
+    if (!editId || !_WB_STATUSES.has(st)) return;   // R3(어휘 고정) · R11(editId 없는 op 마킹 금지)
+    await db.query(
+      `UPDATE participant_edits SET writeback_status=$2, writeback_at=NOW(), writeback_sig=COALESCE($3,writeback_sig) WHERE id=$1`,
+      [editId, st, sig || null]);
+  };
+  const rmap = new Map(plan.roster.map(r => [String(r.id), r]));
+  const phoneCol = ol._fieldToCol(headers, 'phone');
+  const recipCol = ol._fieldToCol(headers, 'recipient');
+  let written = 0, held = 0, blocked = 0, deferred = 0, remaining = 0;
+
+  // per-row 그룹핑(R5): 같은 행의 토글·필드편집을 1회 읽기 + 1회 쓰기로(신원칸∪대상칸 사각형).
+  const perRow = new Map();
+  for (const op of plan.ops) {
+    if ((op.type !== 'toggle' && op.type !== 'edit') || !op.editId) continue;
+    if (_WB_BLOCKED.includes(op.guard)) { await markStatus(op.editId, 'blocked'); blocked++; continue; }   // 자가치유 재시도(30분)
+    if (_WB_RISKY.includes(op.guard)) { await markStatus(op.editId, 'held'); held++; continue; }           // 수동 대상(비재시도)
+    const row = rmap.get(String(op.participantId));
+    if (!row) { await markStatus(op.editId, 'blocked'); blocked++; continue; }
+    const key = String(row.id);
+    if (!perRow.has(key)) perRow.set(key, { row, wantSubmitted: null, wantPaid: null, toggleIds: [], fields: [] });
+    const g = perRow.get(key);
+    if (op.type === 'toggle') {
+      if (op.field === 'is_submitted') g.wantSubmitted = !!op.valueBool; else g.wantPaid = !!op.valueBool;
+      g.toggleIds.push(op.editId);
+    } else g.fields.push(op);
+  }
+  if (!perRow.size) return { tabName, written, held, blocked, deferred };
+
+  const BUSY = parseInt(process.env.TRACK_B_WRITEBACK_BUSY || '20', 10);
+  const MAX_ROWS = parseInt(process.env.TRACK_B_WRITEBACK_MAX_ROWS || '40', 10);   // R8: 첫 활성화 폭주 상한
+  invalidateSheetMeta(sheetId);   // 런당 1회(행당 재무효화는 그리드 메타 재조회 낭비 — R5)
+  let processed = 0;
+
+  for (const g of perRow.values()) {
+    const { row } = g;
+    const pend = g.toggleIds.length + g.fields.length;
+    const markAll = async (st) => { for (const id of g.toggleIds) await markStatus(id, st); for (const f of g.fields) await markStatus(f.editId, st); };
+    if (processed >= MAX_ROWS) { remaining += pend; continue; }                              // 다음 주기 재픽업(무마킹)
+    if (getThrottleStatus().requestsInLastMinute > BUSY) { deferred += pend; continue; }     // 저우선 양보(무마킹·멱등)
+    if (!row.phone8 || !row.recipient_name) { await markAll('blocked'); blocked += pend; continue; }
+    const idCols = [phoneCol, recipCol].filter(c => c >= 0);
+    if (!idCols.length) { await markAll('blocked'); blocked += pend; continue; }             // 신원 비교불가 = fail-closed
+    processed++;
+    const tCols = [];
+    if (g.toggleIds.length) {
+      const c1 = row.submit_col ? headers.indexOf(row.submit_col) : -1;
+      const c2 = row.submit_col2 ? headers.indexOf(row.submit_col2) : -1;
+      if (c1 >= 0) tCols.push(c1);
+      if (c2 >= 0) tCols.push(c2);
+    }
+    for (const f of g.fields) tCols.push(f.colIndex);
+    const allCols = idCols.concat(tCols);
+    const minC = Math.min(...allCols), maxC = Math.max(...allCols);
+    const rng = `'${tabName}'!${_wbColLetter(minC)}${row.sheet_row}:${_wbColLetter(maxC)}${row.sheet_row}`;
+    let cells;
+    try { const rd = await throttledCall(() => readSheet(sheetId, rng, { gid: row.tab_gid }), 2, { priority: 'low' }); cells = (rd && rd[0]) || null; }
+    catch (_) { deferred += pend; continue; }
+    if (!cells || !_wbIdentityOk({ cells, minC, phoneCol, recipCol, phone8: row.phone8, recipient: row.recipient_name })) {
+      await markAll('blocked'); blocked += pend; continue;   // 행이동/재사용/그리드밖 → 재투영 후 자가치유
+    }
+    const writeData = [];
+    let toggleStatus = null, toggleSig = null;
+    if (g.toggleIds.length) {
+      const { writeData: wd, conflict } = _buildToggleWrite({ tabName, headers, submitCol: row.submit_col, submitCol2: row.submit_col2,
+        wantSubmitted: g.wantSubmitted, wantPaid: g.wantPaid, cells, minC, sheetRow: row.sheet_row });
+      writeData.push(...wd);
+      toggleStatus = conflict ? 'held' : 'written';   // 수렴마킹: 이미 원하는 상태(no-op)도 written(R1 재편집 수렴)
+      toggleSig = `s=${g.wantSubmitted == null ? '-' : (g.wantSubmitted ? 'O' : '')}|p=${g.wantPaid == null ? '-' : (g.wantPaid ? 'O' : '')}`;
+    }
+    const fieldMarks = [];
+    for (const f of g.fields) {
+      const cur = String(cells[f.colIndex - minC] == null ? '' : cells[f.colIndex - minC]).trim();
+      const want = String(f.newValue == null ? '' : f.newValue).trim();
+      if (cur === want) { fieldMarks.push([f.editId, 'written', `f=${f.field}`]); continue; }   // 수렴(no-op)·멱등·핑퐁0
+      if (cur !== '') { fieldMarks.push([f.editId, 'held', null]); continue; }                   // blank-only(사람셀·un-write 보호)
+      writeData.push({ range: `'${tabName}'!${_wbColLetter(f.colIndex)}${row.sheet_row}`, values: [[want]] });   // want!=='' 보장(cur===''≠want)
+      fieldMarks.push([f.editId, 'written', `f=${f.field}`]);
+    }
+    if (writeData.length) {
+      try { await throttledCall(() => batchUpdateSheet(sheetId, writeData, 'RAW', { gid: row.tab_gid }), 2, { priority: 'low' }); }
+      catch (_) { deferred += pend; continue; }   // 실패=무마킹 defer(blank-only 재시도 멱등, 부분성공은 다음 런 no-op 수렴)
+    }
+    if (toggleStatus) {
+      for (const id of g.toggleIds) await markStatus(id, toggleStatus, toggleSig);
+      if (toggleStatus === 'held') held += g.toggleIds.length; else written += g.toggleIds.length;
+    }
+    for (const [id, st, sg] of fieldMarks) { await markStatus(id, st, sg); if (st === 'held') held++; else written++; }
+  }
+  const out = { tabName, written, held, blocked, deferred };
+  if (remaining) out.remaining = remaining;
+  return out;
+}
+
+// cutover 탭 1개의 미반영 상태 토글을 시트에 반영(base tier). 큐 없이 cron/수동이 직접 호출(멱등·재시도 안전).
+async function executeWriteback({ sheetId, tabName } = {}) {
+  if (process.env.TRACK_B_WRITEBACK !== '1') return { skipped: true, reason: 'gate_off' };
+  if (!sheetId || !tabName) return { skipped: true, reason: 'missing_args' };
+  if (await getSourceOfTruth({ sheetId, tabName }) !== 'db') return { skipped: true, reason: 'not_cutover' };
+  return _writebackEngine({ sheetId, tabName, tier: 'base' });
+}
+
+// cron/수동 진입점: cutover(source_of_truth='db') 탭 중 미반영 토글이 있는 탭만 순회(050 부분인덱스).
+//   락(trackb_writeback)은 호출측(cron/route)에서 감싼다 — 멀티인스턴스 이중 스윕 직렬화.
+async function writebackSweep({ limit = 100 } = {}) {
+  if (process.env.TRACK_B_WRITEBACK !== '1') return { skipped: true, reason: 'gate_off' };
+  const db = getPool();
+  const { rows: tabs } = await db.query(
+    `SELECT DISTINCT pe.sheet_id AS "sheetId", pe.tab_name AS "tabName"
+       FROM participant_edits pe JOIN tab_configs tc ON tc.sheet_id=pe.sheet_id AND tc.tab_name=pe.tab_name
+      WHERE pe.reverted_at IS NULL AND pe.field IN ('is_submitted','is_paid')
+        AND (pe.writeback_status IS NULL
+             OR (pe.writeback_status='blocked' AND (pe.writeback_at IS NULL OR pe.writeback_at < NOW() - INTERVAL '30 minutes')))
+        AND tc.source_of_truth='db'
+      LIMIT $1`, [limit]);
+  let done = 0, written = 0, held = 0, blocked = 0, errors = 0;
+  for (const t of tabs) {
+    try {
+      const r = await executeWriteback({ sheetId: t.sheetId, tabName: t.tabName });
+      done++; written += r.written || 0; held += r.held || 0; blocked += r.blocked || 0;
+    }
+    catch (e) { errors++; logger.warn(`[trackB] writeback ${t.tabName} 실패: ${e.message}`); }
+  }
+  return { candidateTabs: tabs.length, done, written, held, blocked, errors };
+}
+
+// 관측: 토글 3필드(기존 계약 불변) + 필드편집 하위객체 + staleWritten(되돌려진 written — 시트에 stale 'O' 잔존 신호).
+async function writebackStatus() {
+  const { rows } = await getPool().query(
+    `SELECT COUNT(*) FILTER (WHERE reverted_at IS NULL AND field IN ('is_submitted','is_paid') AND writeback_status='held')::int AS held,
+            COUNT(*) FILTER (WHERE reverted_at IS NULL AND field IN ('is_submitted','is_paid') AND writeback_status='blocked')::int AS blocked,
+            COUNT(*) FILTER (WHERE reverted_at IS NULL AND field IN ('is_submitted','is_paid') AND writeback_status='written')::int AS written,
+            COUNT(*) FILTER (WHERE reverted_at IS NULL AND field NOT IN ('is_submitted','is_paid','_hidden') AND writeback_status='written')::int AS "feWritten",
+            COUNT(*) FILTER (WHERE reverted_at IS NULL AND field NOT IN ('is_submitted','is_paid','_hidden') AND writeback_status='held')::int AS "feHeld",
+            COUNT(*) FILTER (WHERE reverted_at IS NULL AND field NOT IN ('is_submitted','is_paid','_hidden') AND writeback_status='blocked')::int AS "feBlocked",
+            COUNT(*) FILTER (WHERE reverted_at IS NOT NULL AND writeback_status='written')::int AS "staleWritten"
+       FROM participant_edits`);
+  const r = rows[0] || {};
+  return {
+    held: r.held || 0, blocked: r.blocked || 0, written: r.written || 0,
+    fieldEdits: { written: r.feWritten || 0, held: r.feHeld || 0, blocked: r.feBlocked || 0 },
+    staleWritten: r.staleWritten || 0,
+  };
+}
+
+// 시뮬레이션(시트 무접촉): 전체 플랜(scope='all') + tier 라벨(base=토글cron/full=수동적용/manual=시뮬만/blocked).
 async function simulateWriteback({ sheetId, tabName } = {}) {
   if (!sheetId || !tabName) throw new Error('simulateWriteback: sheetId, tabName 필수');
   const db = getPool();
   const sot = await getSourceOfTruth({ sheetId, tabName });
-  const { ops } = await _computeWritebackPlan(db, sheetId, tabName);
-  const byType = {}; for (const o of ops) byType[o.type] = (byType[o.type] || 0) + 1;
+  const { ops, headers } = await _computeWritebackPlan(db, sheetId, tabName, { scope: 'all' });
+  const byType = {}; const byTier = {};
+  for (const o of ops) { byType[o.type] = (byType[o.type] || 0) + 1; byTier[o.tier] = (byTier[o.tier] || 0) + 1; }
   const summary = {
     total: ops.length,
     ok: ops.filter(o => o.guard === 'ok').length,
     risky: ops.filter(o => _WB_RISKY.includes(o.guard)).length,
     blocked: ops.filter(o => _WB_BLOCKED.includes(o.guard)).length,
-    byType,
+    byType, byTier,
   };
-  return { tabName, cutover: sot === 'db', triggerOn: process.env.TRACK_B_WRITEBACK_FULL === '1', mode: 'simulate', ops, summary };
+  return { tabName, cutover: sot === 'db', triggerOn: process.env.TRACK_B_WRITEBACK_FULL === '1',
+    mode: 'simulate', noMeta: !headers.length, ops, summary };
 }
 
-// 실제 적용(트리거) — 기본 완전 inert. TRACK_B_WRITEBACK_FULL=1 + cutover 에서만 안전군(토글·비위험 필드편집)을
-//   blank-only + 신원 재검증으로 반영. 위험군(소유권키/주문컬럼)·manual append/clear 는 제외(deferred).
-//   ⚠️ 프로덕션 활성 전 red-blue-judge 로 apply 경로 검증 권장. 크론 미연결(수동 트리거만).
+// 실제 적용(full tier) — 기본 완전 inert. TRACK_B_WRITEBACK_FULL=1 + cutover 이중게이트(수동·크론 미연결).
+//   base 와 동일 엔진(단일 경로) — 안전군 필드편집까지, 위험군(소유권키/주문매핑칸/manual)은 held/시뮬만.
 async function applyWritebackFull({ sheetId, tabName } = {}) {
   if (process.env.TRACK_B_WRITEBACK_FULL !== '1') return { skipped: true, reason: 'trigger_off' };   // ★ 시뮬레이션만
   if (!sheetId || !tabName) return { skipped: true, reason: 'missing_args' };
   if (await getSourceOfTruth({ sheetId, tabName }) !== 'db') return { skipped: true, reason: 'not_cutover' };
-  const db = getPool();
-  const ol = require('./orderLedger.service');
-  const { readSheet, batchUpdateSheet, invalidateSheetMeta } = require('./sheets.service');
-  const { throttledCall, getThrottleStatus } = require('../utils/sheetsThrottle');
-  const { ops, roster } = await _computeWritebackPlan(db, sheetId, tabName);
-  const rmap = new Map(roster.map(r => [String(r.id), r]));
-  const ctx = await ol.loadRawTabContext(sheetId, (roster.find(r => r.tab_gid) || {}).tab_gid || null, tabName);
-  if (!ctx || !ctx.headers || !ctx.headers.length) return { skipped: true, reason: 'no_meta' };
-  const BUSY = parseInt(process.env.TRACK_B_WRITEBACK_BUSY || '20', 10);
-  let written = 0, held = 0, blocked = 0, deferred = 0;
-  for (const op of ops) {
-    if (op.guard !== 'ok' || (op.type !== 'toggle' && op.type !== 'edit')) { deferred += 1; continue; }   // 위험군·manual = 시뮬만
-    if (getThrottleStatus().requestsInLastMinute > BUSY) { deferred += 1; continue; }
-    const row = rmap.get(String(op.participantId)); if (!row || !op.column) { blocked += 1; continue; }
-    if (!row.phone8 || !row.recipient_name) { blocked += 1; continue; }
-    let idy; try { idy = await ol.rowIdentityMatches({ sheet_id: sheetId, sheet_row: op.sheetRow, tab_gid: row.tab_gid, tab_name: tabName, phone: row.phone8, recipient: row.recipient_name, address: null }, ctx); }
-    catch (_) { deferred += 1; continue; }
-    if (!idy.match) { blocked += 1; continue; }
-    const rng = `'${tabName}'!${op.column}${op.sheetRow}:${op.column}${op.sheetRow}`;
-    invalidateSheetMeta(sheetId);
-    let cur; try { const rd = await throttledCall(() => readSheet(sheetId, rng, { gid: row.tab_gid }), 2, { priority: 'low' }); cur = String((rd && rd[0] && rd[0][0]) || '').trim(); }
-    catch (_) { deferred += 1; continue; }
-    const want = String(op.newValue == null ? '' : op.newValue).trim();
-    if (cur === want) { written += 0; continue; }                 // 멱등
-    if (cur !== '') { held += 1; continue; }                       // blank-only: 사람/기존값 보호
-    if (want === '') continue;                                     // 빈값 쓰기 없음
-    try { await throttledCall(() => batchUpdateSheet(sheetId, [{ range: rng, values: [[want]] }], 'RAW', { gid: row.tab_gid }), 2, { priority: 'low' }); written += 1; }
-    catch (_) { deferred += 1; }
-  }
-  return { applied: true, written, held, blocked, deferred };
+  const r = await _writebackEngine({ sheetId, tabName, tier: 'full' });
+  return r.skipped ? r : { applied: true, ...r };
 }
 
 module.exports = {
@@ -1337,6 +1403,10 @@ module.exports = {
   _buildToggleWrite,
   simulateWriteback,
   applyWritebackFull,
+  _wbOrderMappedMask,
+  _wbIdentityOk,
+  _computeWritebackPlan,
+  _writebackEngine,
   workdeskTab,
   editWorkdeskRow,
   revertWorkdeskEdit,
