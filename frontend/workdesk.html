@@ -32,6 +32,9 @@
   .titem{font-size:12.5px;padding:8px 10px;border-radius:8px;margin-bottom:3px;color:var(--muted);cursor:pointer;border:1px solid transparent;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
   .titem:hover{background:var(--card2)} .titem.on{background:var(--accent-soft);border-color:color-mix(in srgb,var(--accent) 30%,transparent);color:var(--ink);font-weight:650}
   .titem .sub{font-size:10.5px;color:var(--faint);font-weight:400}
+  .tgh{display:flex;align-items:center;gap:6px;font-size:11px;font-weight:750;color:var(--ink);padding:10px 6px 4px;border-bottom:1px solid var(--line);margin-bottom:4px}
+  .tgh:first-child{padding-top:2px}
+  .tgc{font-size:10px;font-weight:600;color:var(--faint);background:var(--card2);border-radius:8px;padding:1px 6px}
   .main{padding:18px 22px;overflow:auto}
   .mh{display:flex;align-items:center;gap:10px;flex-wrap:wrap;margin-bottom:14px}
   .mh h1{font-size:19px;margin:0;font-weight:800;letter-spacing:-.02em}
@@ -242,7 +245,14 @@ async function loadTabs(){
   const r = await api('/api/trackb/tabs?limit=300');
   if(!r||!r.ok){ $('#tabs').innerHTML=`<div class="empty">작업 목록은 관리자 로그인에서 제공됩니다.</div>`; return; }
   STATE.tabs=r.tabs||[]; $('#tcount').textContent=STATE.tabs.length;
-  $('#tabs').innerHTML = STATE.tabs.map((t,i)=>`<div class="titem" data-i="${i}" onclick="selTab(${i})">${esc(t.tabName)}<div class="sub">${esc(t.spreadsheetTitle||'')}</div></div>`).join('')||`<div class="empty">활성 작업 없음</div>`;
+  // 소유지정(advertiser_campaigns) 기준 업체별 그룹핑 — 미지정은 마지막 그룹. 인덱스는 STATE.tabs 원본 유지(selTab 계약 불변).
+  const groups=new Map();
+  STATE.tabs.forEach((t,i)=>{ const k=t.advertiserName||''; if(!groups.has(k)) groups.set(k,[]); groups.get(k).push(i); });
+  const gkeys=[...groups.keys()].sort((a,b)=>{ if(!a) return 1; if(!b) return -1; return a.localeCompare(b,'ko'); });
+  const item=i=>{ const t=STATE.tabs[i]; return `<div class="titem" data-i="${i}" onclick="selTab(${i})">${esc(t.tabName)}<div class="sub">${esc(t.spreadsheetTitle||'')}</div></div>`; };
+  $('#tabs').innerHTML = STATE.tabs.length
+    ? gkeys.map(k=>`<div class="tgh">${k?esc(k):'미지정'}<span class="tgc">${groups.get(k).length}</span></div>`+groups.get(k).map(item).join('')).join('')
+    : `<div class="empty">활성 작업 없음</div>`;
   // 관측 대시보드에서 "열기"로 넘어온 탭 자동 선택
   if(STATE.pendingTab){ const pt=STATE.pendingTab; STATE.pendingTab=null;
     const idx=STATE.tabs.findIndex(t=>t.sheetId===pt.sheetId&&t.tabName===pt.tabName);
