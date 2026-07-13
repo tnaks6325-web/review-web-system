@@ -679,8 +679,23 @@ async function canAccessTab({ role, staffName, advertiserId, sheetId, tabName } 
 async function scopedActiveTabs({ role, staffName, advertiserId, limit } = {}) {
   const all = await participants.listActiveTabs({ limit });
   const scope = await _scopeFor({ role, staffName, advertiserId });
-  if (!scope) return all;
-  return all.filter(t => _scopeOwns(scope, t.sheetId, t.tabGid));
+  const tabs = scope ? all.filter(t => _scopeOwns(scope, t.sheetId, t.tabGid)) : all;
+  // 소유 업체 주석(작업목록 업체별 그룹핑용, 읽기 전용 추가 필드): 탭지정 소유 > 시트전체 소유 우선.
+  //   advertiser_campaigns 미적용/빈 환경은 주석 없이 통과(graceful) — 기존 응답 필드 불변.
+  try {
+    const { rows: own } = await getPool().query(
+      `SELECT ac.sheet_id AS "sheetId", ac.tab_gid AS "tabGid", a.id AS "advId", a.name AS "advName"
+         FROM advertiser_campaigns ac JOIN advertisers a ON a.id = ac.advertiser_id
+        WHERE ac.deleted_at IS NULL ORDER BY a.name, ac.created_at`);
+    if (own.length) {
+      for (const t of tabs) {
+        const hit = own.find(o => o.sheetId === t.sheetId && o.tabGid != null && String(o.tabGid) === String(t.tabGid))
+                 || own.find(o => o.sheetId === t.sheetId && o.tabGid == null);
+        if (hit) { t.advertiserId = hit.advId; t.advertiserName = hit.advName; }
+      }
+    }
+  } catch (_) {}
+  return tabs;
 }
 
 function _akey(type, value) { return type + '\t' + value; }   // 앵커 조합키(정렬무관, 값에 탭 없음)
