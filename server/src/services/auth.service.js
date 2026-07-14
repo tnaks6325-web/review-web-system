@@ -76,6 +76,44 @@ async function loginStaff(name, pw) {
 }
 
 // ═══════════════════════════════════════════════════════════
+// 인트라넷(inadd-webapp) 계정으로 AE(staff) 로그인 — Track B 통합작업대 SSO.
+//   자격 검증은 인트라넷 서버(POST /api/auth/login, Cloudflare D1 서버측 대조)에 프록시 —
+//   공유키 불필요(사용자 비밀번호가 결속 비밀). 성공 시 review JWT 발급.
+//   ★ 역할은 항상 'staff'로 고정(인트라넷 role 무시 — 권한 상승 차단). 관리자는 기존 리뷰 계정 사용.
+//   JWT name = 인트라넷 display_name(한글 실명) → advertisers.inad_pm(TRIM) 스코프 매칭과 정합.
+// ═══════════════════════════════════════════════════════════
+async function loginIntranet(name, pw, _fetch = fetch) {
+  if (!name || !pw) {
+    return { success: false, error: '이름과 비밀번호를 입력하세요.' };
+  }
+  const base = (process.env.INTRANET_API_BASE || 'https://inadd-system.pages.dev').trim().replace(/\/$/, '');
+  const ctrl = new AbortController();
+  const timer = setTimeout(() => ctrl.abort(), 5000);
+  let resp, body;
+  try {
+    resp = await _fetch(`${base}/api/auth/login`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ username: String(name).trim(), password: String(pw) }),
+      signal: ctrl.signal,
+    });
+    body = await resp.json().catch(() => null);
+  } catch (_) {
+    return { success: false, error: '인트라넷 인증 서버에 연결할 수 없습니다.' };
+  } finally { clearTimeout(timer); }
+  if (!resp.ok || !body || !body.username) {
+    return { success: false, error: (body && body.error) || '이름 또는 비밀번호가 올바르지 않습니다.' };
+  }
+  const display = String(body.display_name || body.username).trim();
+  const token = jwt.sign(
+    { name: display, role: 'staff', via: 'intranet' },
+    process.env.JWT_SECRET,
+    { expiresIn: process.env.JWT_EXPIRES_IN || '8h' }
+  );
+  return { success: true, name: display, role: 'staff', via: 'intranet', token };
+}
+
+// ═══════════════════════════════════════════════════════════
 // 광고주(Advertiser) 로그인 — 업무포털 거래처 계정
 // staff 로그인 패턴과 동일하되, JWT 에 advertiser_id 를 포함해
 // API 가 "본인 거래처만" 으로 강제 스코핑할 수 있게 한다.
@@ -370,6 +408,7 @@ async function changeMasterPw(currentMasterPw, newPw) {
 module.exports = {
   loginAdmin,
   loginStaff,
+  loginIntranet,
   loginAdvertiser,
   addAdvertiserUser,
   editAdvertiserUser,

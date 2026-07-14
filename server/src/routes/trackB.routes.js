@@ -57,7 +57,8 @@ router.get('/tabs', authMiddleware, async (req, res, next) => {
     const role = _role(req);
     if (!['master', 'admin', 'staff', 'advertiser'].includes(role)) return res.status(403).json({ ok: false, error: '권한 없음' });
     // 역할 스코프: master/admin=전체 · staff=담당(inad_pm) · advertiser=소유 탭만.
-    const tabs = await svc.scopedActiveTabs({ role, staffName: req.admin && req.admin.name, advertiserId: (req.admin && req.admin.advertiser_id) || null, limit: req.query.limit });
+    //   forMapping=1(소유지정 초기매핑): staff에 한해 전체 탭명 목록(서비스에서 advertiser는 무시 — 스코프 유지).
+    const tabs = await svc.scopedActiveTabs({ role, staffName: req.admin && req.admin.name, advertiserId: (req.admin && req.admin.advertiser_id) || null, limit: req.query.limit, forMapping: req.query.forMapping === '1' });
     res.json({ ok: true, count: tabs.length, tabs });
   } catch (err) { next(err); }
 });
@@ -167,41 +168,64 @@ router.post('/work-order/prepare-roster', authMiddleware, adminOrMasterMiddlewar
 });
 
 // ── 소유 지정 UI 좌측: 업체 목록 + 소유수 — admin/master ──
-router.get('/advertisers', authMiddleware, adminOrMasterMiddleware, async (req, res, next) => {
+// 내부인(master/admin/staff) 미들웨어 — 소유지정 초기매핑을 AE(staff)에게 개방하되 advertiser(외부)는 차단.
+//   staff 쓰기(생성·소유 지정/해제)는 아래 라우트별 inad_pm 게이트로 "자기 담당 업체"에 한정.
+function internalMiddleware(req, res, next) {
+  const r = _role(req);
+  if (r === 'master' || r === 'admin' || r === 'staff') return next();
+  return res.status(403).json({ ok: false, error: '권한 없음' });
+}
+
+router.get('/advertisers', authMiddleware, internalMiddleware, async (req, res, next) => {
   try { res.json({ ok: true, items: await svc.listAdvertisersWithOwnership() }); }
   catch (err) { next(err); }
 });
 
-// ── 인트라넷 광고주DB 자동완성 프록시(거래처명) — admin/master. 이름·담당자만 반환(민감필드 미노출). ──
-router.get('/intranet/advertisers', authMiddleware, adminOrMasterMiddleware, async (req, res, next) => {
+// ── Track B 업체(거래처) 생성 — 내부인. staff는 inad_pm=자기 로그인명 강제(서버 강제, 타 AE 명의 차단). ──
+router.post('/advertisers', authMiddleware, internalMiddleware, async (req, res, next) => {
+  try {
+    const { name, inad_pm } = req.body || {};
+    const out = await svc.createAdvertiserScoped({ name, inadPm: inad_pm, role: _role(req), byName: (req.admin && req.admin.name) || '' });
+    res.status(out.ok ? 200 : (out.code || 400)).json(out);
+  } catch (err) { next(err); }
+});
+
+// ── 인트라넷 광고주DB 자동완성 프록시(거래처명) — 내부인. 이름·담당자만 반환(민감필드 미노출). ──
+router.get('/intranet/advertisers', authMiddleware, internalMiddleware, async (req, res, next) => {
   try { res.json(await svc.intranetAdvertisers({ q: req.query.q, limit: req.query.limit })); }
   catch (err) { next(err); }
 });
 
-// ── 업체 소유 시트의 전체 탭 나열(최신 관측순) — admin/master ──
-router.get('/ownership/tabs', authMiddleware, adminOrMasterMiddleware, async (req, res, next) => {
+// ── 업체 소유 시트의 전체 탭 나열(최신 관측순) — 내부인 ──
+router.get('/ownership/tabs', authMiddleware, internalMiddleware, async (req, res, next) => {
   try {
     if (!req.query.advertiserId) return res.status(400).json({ ok: false, error: 'advertiserId 필수' });
     res.json({ ok: true, items: await svc.ownedTabsForAdvertiser({ advertiserId: req.query.advertiserId }) });
   } catch (err) { next(err); }
 });
 
-// ── 업체 소유 매핑(1:N) — admin/master ──
-router.get('/ownership', authMiddleware, adminOrMasterMiddleware, async (req, res, next) => {
+// ── 업체 소유 매핑(1:N) — 읽기=내부인 · 쓰기=admin/master 전체, staff는 자기 담당(inad_pm) 업체만 ──
+router.get('/ownership', authMiddleware, internalMiddleware, async (req, res, next) => {
   try { res.json({ ok: true, items: await svc.listOwnership({ advertiserId: req.query.advertiserId, sheetId: req.query.sheetId }) }); }
   catch (err) { next(err); }
 });
-router.post('/ownership', authMiddleware, adminOrMasterMiddleware, async (req, res, next) => {
+async function _ownershipWriteAllowed(req, advertiserId) {
+  if (_role(req) !== 'staff') return true;   // master/admin — 전체 허용(기존 시맨틱)
+  return svc.staffOwnsAdvertiser({ advertiserId, staffName: (req.admin && req.admin.name) || '' });
+}
+router.post('/ownership', authMiddleware, internalMiddleware, async (req, res, next) => {
   try {
     const { advertiserId, sheetId, tabGid } = req.body || {};
     if (!advertiserId || !sheetId) return res.status(400).json({ ok: false, error: 'advertiserId, sheetId 필수' });
+    if (!(await _ownershipWriteAllowed(req, advertiserId))) return res.status(403).json({ ok: false, error: '담당(inad_pm)이 아닌 업체의 소유는 지정할 수 없습니다.' });
     res.json({ ok: true, ...(await svc.setOwnership({ advertiserId, sheetId, tabGid: tabGid || null, by: _by(req) })) });
   } catch (err) { next(err); }
 });
-router.delete('/ownership', authMiddleware, adminOrMasterMiddleware, async (req, res, next) => {
+router.delete('/ownership', authMiddleware, internalMiddleware, async (req, res, next) => {
   try {
     const { advertiserId, sheetId, tabGid } = req.body || {};
     if (!advertiserId || !sheetId) return res.status(400).json({ ok: false, error: 'advertiserId, sheetId 필수' });
+    if (!(await _ownershipWriteAllowed(req, advertiserId))) return res.status(403).json({ ok: false, error: '담당(inad_pm)이 아닌 업체의 소유는 해제할 수 없습니다.' });
     res.json({ ok: true, ...(await svc.removeOwnership({ advertiserId, sheetId, tabGid: tabGid || null })) });
   } catch (err) { next(err); }
 });
