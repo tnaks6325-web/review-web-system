@@ -661,6 +661,63 @@ async function settlementForTab({ sheetId, tabName, role = 'master', advertiserI
   };
 }
 
+// ══════════════════════════════════════════════════════════════════════════
+// P3 — 마감자료 자동 생성(리뷰완료 증빙 스냅샷, migration 055)
+//   제출률 100%(또는 부분마감) 시 Track B 명단으로 마감자료 CSV 생성 + 마감일 자동 기록.
+//   ★ 격리: campaign_participants(투영 명단) 읽기 + trackb_tab_closeouts write 만. Track A/시트 무접촉.
+//   ★ latestCloseout 정의 = settlementForTab 의 스텝퍼 ①(마감자료)이 이 시점부터 라이브(closeoutAvailable).
+// ══════════════════════════════════════════════════════════════════════════
+// 활성 명단(투영 물리행) — 마감자료 CSV·건수의 단일 소스. deleted_at·active 필터.
+async function _closeoutRoster(sheetId, tabName) {
+  const { rows } = await getPool().query(
+    `SELECT seq, reviewer_name AS name, recipient_name AS recipient, phone8, round, option_text AS option,
+            product_name AS product, is_submitted AS submitted, is_paid AS paid, submitted_at AS "submittedAt"
+       FROM campaign_participants
+      WHERE sheet_id=$1 AND tab_name=$2 AND active=TRUE AND deleted_at IS NULL
+      ORDER BY seq ASC`, [sheetId, tabName]);
+  return rows;
+}
+// 마감자료 생성(이력 보존 — 재생성 시 새 행). 마감일=오늘 KST. 건수=활성/제출.
+async function generateCloseout({ sheetId, tabName, by = '' } = {}) {
+  if (!sheetId || !tabName) return { ok: false, code: 400, error: 'sheetId, tabName 필수' };
+  const roster = await _closeoutRoster(sheetId, tabName);
+  if (!roster.length) return { ok: false, code: 400, error: '활성 명단이 없습니다(그림자 투영 후 생성).' };
+  const subCount = roster.filter(r => r.submitted).length;
+  const kstDate = new Date(Date.now() + 9 * 3600 * 1000).toISOString().slice(0, 10);   // KST 날짜
+  const { rows } = await getPool().query(
+    `INSERT INTO trackb_tab_closeouts (sheet_id, tab_name, closed_date, row_count, sub_count, created_by)
+     VALUES ($1,$2,$3,$4,$5,$6)
+     RETURNING id, closed_date AS "date", row_count AS "rowCount", sub_count AS "subCount", created_by AS "createdBy", created_at AS "createdAt"`,
+    [sheetId, tabName, kstDate, roster.length, subCount, String(by || '').slice(0, 100)]);
+  return { ok: true, closeout: rows[0] };
+}
+// 최신 마감(스텝퍼 ① 소스). settlementForTab 이 병합.
+async function latestCloseout({ sheetId, tabName } = {}) {
+  if (!sheetId || !tabName) return null;
+  const { rows } = await getPool().query(
+    `SELECT id, closed_date AS "date", row_count AS "rowCount", sub_count AS "subCount", created_by AS "createdBy", created_at AS "createdAt"
+       FROM trackb_tab_closeouts WHERE sheet_id=$1 AND tab_name=$2 AND deleted_at IS NULL
+      ORDER BY created_at DESC LIMIT 1`, [sheetId, tabName]);
+  return rows[0] || null;
+}
+// 마감자료 CSV(UTF-8 BOM). PII라 내부(master/admin/staff) + 소유 광고주만 — reviewer 차단은 라우트 스코프.
+//   광고주 렌즈면 연락처 마스킹(끝4자리) — 노출 토글 OFF 여부는 라우트가 사전 게이트.
+function _csvCell(v) { const s = v == null ? '' : String(v); return /[",\n]/.test(s) ? '"' + s.replace(/"/g, '""') + '"' : s; }
+async function closeoutCsv({ sheetId, tabName, role = 'master' } = {}) {
+  const roster = await _closeoutRoster(sheetId, tabName);
+  const isAdv = role === 'advertiser';
+  const header = ['번호', '참여자', '연락처', '수취인', '차수', '옵션', '상품', '제출', '입금', '제출일'];
+  const lines = [header.join(',')];
+  for (const r of roster) {
+    const phone = isAdv ? (r.phone8 ? '****' + String(r.phone8).slice(-4) : '') : (r.phone8 || '');
+    lines.push([
+      r.seq, r.name, phone, r.recipient, r.round, r.option, r.product,
+      r.submitted ? 'O' : '', r.paid ? 'O' : '', r.submittedAt ? String(r.submittedAt).slice(0, 10) : '',
+    ].map(_csvCell).join(','));
+  }
+  return '﻿' + lines.join('\r\n');
+}
+
 // ══ 작업오더(발주) 연동 — 수동 링크 + 작업세부 노출 + 명단 골격 준비. B 내부·격리(라이브 무접촉). ══
 //   ★★ Track A 무접촉: work_orders.linked_tab_* 는 order.routes 승인(accept) 흐름이 **읽어 동작을 분기**한다
 //      (비적격 상태+linked_tab 설정 시 승인 멱등 skip, idempotent 판정). 그래서 Track B는 그 컬럼을 절대 안 쓰고
@@ -1809,6 +1866,9 @@ module.exports = {
   unlinkSettlement,
   setSettlementVisible,
   settlementForTab,
+  generateCloseout,
+  latestCloseout,
+  closeoutCsv,
   listThread,
   addThread,
   setRequestStatus,

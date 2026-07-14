@@ -445,9 +445,12 @@ function renderSettlement(){
     return;
   }
   const co=d.closeout, q=d.quote, inv=d.invoice, pay=d.payment;
-  const coAvail=d.closeoutAvailable!==false;   // P3 도착 전이면 false → ① 준비중(오해 방지)
+  const coAvail=d.closeoutAvailable!==false;   // 데이터 원천(P3) 있으면 생성/CSV 어포던스
   const coState=!coAvail?'off':(co&&co.date?'done':'wait');
-  const coSub=!coAvail?'<span class="stpoff">준비중(P3)</span>':(co&&co.date?`${esc(String(co.date).slice(0,10))} · ${co.rowCount||0}건`:(co?'<span class="stpoff">미생성</span>':'<span class="stpoff">—</span>'));
+  const coSub=!coAvail?'<span class="stpoff">준비중</span>'
+    :(co&&co.date
+      ?`${esc(String(co.date).slice(0,10))} · ${co.rowCount||0}건 · <a href="#" onclick="dlCloseoutCsv(event)">CSV</a>${canLink?` · <a href="#" onclick="genCloseout(event)">재생성</a>`:''}`
+      :(canLink?'<a href="#" onclick="genCloseout(event)">마감자료 생성</a>':'<span class="stpoff">미생성</span>'));
   const qSub=q&&q.quoteNumber?`${esc(q.quoteNumber)}${q.status?` · <span class="bb ${(_SETTLE_Q[q.status]||['',''])[1]}">${(_SETTLE_Q[q.status]||[q.status])[0]}</span>`:''}`:'<span class="stpoff">견적 없음</span>';
   const invSub=inv?`<span class="bb ${(_SETTLE_INV[inv.status]||['','neutral'])[1]||'neutral'}">${(_SETTLE_INV[inv.status]||[inv.status])[0]}</span>${inv.date?` · ${esc(String(inv.date).slice(0,10))}`:''}`:'<span class="stpoff">—</span>';
   const paySub=pay?`<span class="bb ${(_SETTLE_PAY[pay.status]||['','neutral'])[1]||'neutral'}">${(_SETTLE_PAY[pay.status]||[pay.status])[0]}</span>${pay.date?` · ${esc(String(pay.date).slice(0,10))}`:''}`:'<span class="stpoff">—</span>';
@@ -502,6 +505,20 @@ async function toggleSettleVis(advertiserId,visible){
   const r=await api('/api/trackb/settlement/visibility',{method:'POST',body:JSON.stringify({advertiserId,visible})});
   if(r&&r.ok){ toast(visible?'정산 노출 ON':'정산 노출 OFF'); const a=(STATE.advs||[]).find(x=>x.id===advertiserId); if(a) a.settlementVisible=visible; }
   else toast((r&&r.error)||'실패');
+}
+// P3 마감자료 생성/CSV
+async function genCloseout(e){ if(e)e.preventDefault();
+  const st=STATE.settle; if(!st) return; const t=st.tab;
+  const r=await api('/api/trackb/settlement/closeout',{method:'POST',body:JSON.stringify({sheetId:t.sheetId,tabName:t.tabName})});
+  if(r&&r.ok){ toast(`마감자료 생성 (${r.closeout.rowCount}건)`); loadSettlement(t); } else toast((r&&r.error)||'생성 실패');
+}
+async function dlCloseoutCsv(e){ if(e)e.preventDefault();
+  const st=STATE.settle; if(!st) return; const t=st.tab;
+  const url=`/api/trackb/settlement/closeout.csv?sheetId=${encodeURIComponent(t.sheetId)}&tabName=${encodeURIComponent(t.tabName)}`;
+  const resp=await fetch(API_BASE+url,{headers:{Authorization:'Bearer '+token()}});
+  if(!resp.ok){ toast('CSV 다운로드 실패'); return; }
+  const blob=await resp.blob(); const a=document.createElement('a');
+  a.href=URL.createObjectURL(blob); a.download=`closeout_${t.tabName}.csv`; document.body.appendChild(a); a.click(); a.remove(); URL.revokeObjectURL(a.href);
 }
 
 // ══ P1 탭 스레드(협업 코멘트 + 확인요청 + 내부 메모) ══

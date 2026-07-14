@@ -300,6 +300,33 @@ router.post('/settlement/visibility', authMiddleware, adminOrMasterMiddleware, a
   } catch (err) { next(err); }
 });
 
+// ── P3 마감자료: 생성(내부만) + CSV 다운로드(내부·소유 광고주, PII) ──
+router.post('/settlement/closeout', authMiddleware, async (req, res, next) => {
+  try {
+    const { sheetId, tabName } = req.body || {};
+    if (!sheetId || !tabName) return res.status(400).json({ ok: false, error: 'sheetId, tabName 필수' });
+    const g = await _ensureEditScope(req, sheetId, tabName); if (!g.ok) return res.status(g.code).json({ ok: false, error: g.error });   // 내부(master/admin/staff 담당)만 생성
+    const out = await svc.generateCloseout({ sheetId, tabName, by: _by(req) });
+    res.status(out.ok ? 200 : (out.code || 400)).json(out);
+  } catch (err) { next(err); }
+});
+router.get('/settlement/closeout.csv', authMiddleware, async (req, res, next) => {
+  try {
+    const { sheetId, tabName } = req.query;
+    if (!sheetId || !tabName) return res.status(400).json({ ok: false, error: 'sheetId, tabName 필수' });
+    const g = await _ensureThreadScope(req, sheetId, tabName); if (!g.ok) return res.status(g.code).json({ ok: false, error: g.error });   // 내부 + 소유 광고주(reviewer 차단)
+    // 광고주는 정산 노출 토글 OFF 면 CSV(PII)도 차단.
+    if (_role(req) === 'advertiser') {
+      const s = await svc.settlementForTab({ sheetId, tabName, role: 'advertiser', advertiserId: (req.admin && req.admin.advertiser_id) || null });
+      if (s.hidden) return res.status(403).json({ ok: false, error: '정산 정보가 비공개로 설정되어 있습니다.' });
+    }
+    const csv = await svc.closeoutCsv({ sheetId, tabName, role: _role(req) });
+    res.setHeader('Content-Type', 'text/csv; charset=utf-8');
+    res.setHeader('Content-Disposition', `attachment; filename="closeout_${encodeURIComponent(tabName)}.csv"`);
+    res.send(csv);
+  } catch (err) { next(err); }
+});
+
 // ══ P1 탭 스레드(협업 코멘트 + 확인요청 + 내부 메모) — 역할 스코프(_ensureThreadScope). ══
 //   광고주(외부)도 자기 소유 탭에 양방향 작성. 내부 전용 글(internal_only)은 서비스가 광고주 조회에서 제외.
 router.get('/workdesk/thread', authMiddleware, async (req, res, next) => {
