@@ -821,6 +821,7 @@ async function addThread({ sheetId, tabName, body, internalOnly = false, asReque
   if (!sheetId || !tabName) return { ok: false, code: 400, error: 'sheetId, tabName 필수' };
   const text = String(body || '').trim();
   if (!text) return { ok: false, code: 400, error: '내용을 입력하세요.' };
+  if (text.length > 5000) return { ok: false, code: 400, error: '내용이 너무 깁니다(최대 5000자).' };   // 저장 폭주 방지(nit)
   const kind = asRequest ? 'request' : 'comment';
   const status = asRequest ? 'open' : null;
   const internal = role === 'advertiser' ? false : !!internalOnly;
@@ -834,29 +835,34 @@ async function addThread({ sheetId, tabName, body, internalOnly = false, asReque
 }
 
 // 확인요청 상태 전이(confirming/done). done 시 resolved 기록. comment/없는 글은 400.
-async function setRequestStatus({ id, status, role = 'master', name = '' } = {}) {
-  if (!id || !['confirming', 'done'].includes(status)) return { ok: false, code: 400, error: '잘못된 상태값' };
+//   ★ B1(IDOR) 방어: 스코프 통과한 (sheetId,tabName)에 UPDATE를 결속 — id만으로 타 테넌트 요청 변조 차단.
+async function setRequestStatus({ id, sheetId, tabName, status, role = 'master', name = '' } = {}) {
+  if (!id || !sheetId || !tabName || !['confirming', 'done'].includes(status)) return { ok: false, code: 400, error: '잘못된 요청' };
   const resolved = status === 'done';
   const { rows } = await getPool().query(
     `UPDATE trackb_tab_threads
         SET status=$2, resolved_at=CASE WHEN $3 THEN NOW() ELSE NULL END,
             resolved_by=CASE WHEN $3 THEN $4 ELSE NULL END
-      WHERE id=$1 AND kind='request' AND deleted_at IS NULL
+      WHERE id=$1 AND sheet_id=$5 AND tab_name=$6 AND kind='request' AND deleted_at IS NULL
       RETURNING id, status, resolved_at AS "resolvedAt", resolved_by AS "resolvedBy"`,
-    [id, status, resolved, String(name || '').slice(0, 100)]);
+    [id, status, resolved, String(name || '').slice(0, 100), sheetId, tabName]);
   if (!rows.length) return { ok: false, code: 404, error: '확인요청을 찾을 수 없습니다.' };
   return { ok: true, item: rows[0] };
 }
 
-// 글 삭제(soft). 작성자 본인 또는 master/admin 만(staff/광고주는 자기 글만).
-async function deleteThread({ id, role = 'master', name = '' } = {}) {
+// 글 삭제(soft). 작성자 본인 또는 master/admin 만.
+//   ★ S1 방어: 스코프 통과한 (sheetId,tabName)에 SELECT·UPDATE 결속(교차 탭 삭제 차단, 동명 로그인 콜리전 방어).
+async function deleteThread({ id, sheetId, tabName, role = 'master', name = '' } = {}) {
+  if (!id || !sheetId || !tabName) return { ok: false, code: 400, error: '잘못된 요청' };
   const db = getPool();
-  const { rows } = await db.query('SELECT author_role, author_name FROM trackb_tab_threads WHERE id=$1 AND deleted_at IS NULL', [id]);
+  const { rows } = await db.query(
+    'SELECT author_role, author_name FROM trackb_tab_threads WHERE id=$1 AND sheet_id=$2 AND tab_name=$3 AND deleted_at IS NULL',
+    [id, sheetId, tabName]);
   if (!rows.length) return { ok: false, code: 404, error: '글을 찾을 수 없습니다.' };
   const isAdmin = role === 'master' || role === 'admin';
   const isAuthor = rows[0].author_role === role && String(rows[0].author_name || '') === String(name || '');
   if (!isAdmin && !isAuthor) return { ok: false, code: 403, error: '삭제 권한이 없습니다.' };
-  await db.query('UPDATE trackb_tab_threads SET deleted_at=NOW() WHERE id=$1', [id]);
+  await db.query('UPDATE trackb_tab_threads SET deleted_at=NOW() WHERE id=$1 AND sheet_id=$2 AND tab_name=$3', [id, sheetId, tabName]);
   return { ok: true };
 }
 
@@ -873,7 +879,17 @@ async function markThreadSeen({ sheetId, tabName, role = 'master', name = '', ad
 
 // 미확인 수 집계(1쿼리): 내 last_seen 이후 생성 + 내가 볼 수 있는(광고주=internal_only FALSE) 글.
 //   tabs 지정 시 그 탭들만(작업목록 배지), 미지정 시 전체. 반환 = { 'sheetId\ttabName': count } 맵 + total.
+//   ★ B2(교차 테넌트 메타 유출) 방어: staff/advertiser는 소유/담당 탭으로 서버 강제 제한 —
+//     클라 tabs는 소유와 교집합만, tabs 미지정도 전역 쿼리 금지(소유 탭으로 대체). master/admin만 전체.
 async function unseenCounts({ role = 'master', name = '', advertiserId = null, tabs = null } = {}) {
+  if (role === 'staff' || role === 'advertiser') {
+    const scoped = await scopedActiveTabs({ role, staffName: name, advertiserId });
+    const ownedSet = new Set(scoped.map(t => `${t.sheetId}\t${t.tabName}`));
+    if (!ownedSet.size) return { map: {}, total: 0 };
+    const base = (Array.isArray(tabs) && tabs.length) ? tabs : scoped.map(t => ({ sheetId: t.sheetId, tabName: t.tabName }));
+    tabs = base.filter(t => t && ownedSet.has(`${t.sheetId}\t${t.tabName}`));
+    if (!tabs.length) return { map: {}, total: 0 };
+  }
   const userKey = _threadUserKey({ role, name, advertiserId });
   const advGate = role === 'advertiser' ? 'AND t.internal_only = FALSE' : '';
   const params = [userKey];
@@ -897,11 +913,13 @@ async function unseenCounts({ role = 'master', name = '', advertiserId = null, t
 }
 
 // 탭별 미완료(open/confirming) 확인요청 수 — 정산/카드 상단 고정 배지.
-async function openRequestCounts({ sheetId, tabName } = {}) {
+//   role='advertiser'면 internal_only 요청 제외(광고주 뷰에 노출 대비 — 노출 전 게이트 내장).
+async function openRequestCounts({ sheetId, tabName, role = 'master' } = {}) {
+  const advGate = role === 'advertiser' ? 'AND internal_only = FALSE' : '';
   const { rows } = await getPool().query(
     `SELECT COUNT(*)::int AS n FROM trackb_tab_threads
       WHERE sheet_id=$1 AND tab_name=$2 AND kind='request' AND deleted_at IS NULL
-        AND status IN ('open','confirming')`, [sheetId, tabName]);
+        AND status IN ('open','confirming') ${advGate}`, [sheetId, tabName]);
   return (rows[0] && rows[0].n) || 0;
 }
 

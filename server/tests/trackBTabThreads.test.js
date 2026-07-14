@@ -10,6 +10,7 @@
  */
 const assert = require('assert');
 const svc = require('../src/services/trackB.service');
+const participants = require('../src/services/participants.service');
 
 // 간이 목: SQL 패턴별 응답 + 캡처. addThread/list 는 INSERT/SELECT 파라미터 검증 위주.
 function makePool(handlers = {}) {
@@ -72,57 +73,92 @@ async function run() {
   assert.equal(captured[2], 'request', '2d: asRequest → kind=request'); assert.equal(captured[5], 'open', '2d: status=open');
   console.log('  2. addThread — 광고주 internal 강제 FALSE · 빈값 거부 · request open ✓');
 
-  // ═══ 3. request 상태전이 ═══
+  // ═══ 3. request 상태전이 (+ B1: (sheetId,tabName) 결속) ═══
   p = pool([[/UPDATE trackb_tab_threads SET status/, (s, prm) => prm[1] === 'done'
     ? { rows: [{ id: 5, status: 'done', resolvedAt: 'now', resolvedBy: prm[3] }] }
     : { rows: [{ id: 5, status: 'confirming', resolvedAt: null, resolvedBy: null }] }]]);
   svc.__setPoolForTest(p);
-  let r = await svc.setRequestStatus({ id: 5, status: 'confirming', role: 'staff', name: '김수만' });
+  let r = await svc.setRequestStatus({ id: 5, sheetId: 'S1', tabName: 'T', status: 'confirming', role: 'staff', name: '김수만' });
   assert.equal(r.ok, true); assert.equal(r.item.status, 'confirming', '3a: confirming 전이');
-  r = await svc.setRequestStatus({ id: 5, status: 'done', role: 'staff', name: '김수만' });
+  assert.ok(/sheet_id=\$5 AND tab_name=\$6/.test(p.q[p.q.length - 1].s), '3a2: B1 — UPDATE가 (sheetId,tabName)에 결속');
+  r = await svc.setRequestStatus({ id: 5, sheetId: 'S1', tabName: 'T', status: 'done', role: 'staff', name: '김수만' });
   assert.equal(r.item.resolvedBy, '김수만', '3b: done 시 resolved_by 기록');
   assert.ok(/kind='request'/.test(p.q[p.q.length - 1].s), '3c: request 만 대상(comment 불가)');
-  r = await svc.setRequestStatus({ id: 5, status: 'garbage' });
+  r = await svc.setRequestStatus({ id: 5, sheetId: 'S1', tabName: 'T', status: 'garbage' });
   assert.equal(r.ok, false, '3d: 잘못된 상태값 거부');
-  // 대상 없음 → 404
+  r = await svc.setRequestStatus({ id: 5, status: 'done' });  // sheetId/tabName 누락
+  assert.equal(r.ok, false, '3d2: sheetId/tabName 없으면 거부');
+  // 대상 없음(또는 타 탭 id) → 404
   p = pool([[/UPDATE trackb_tab_threads SET status/, () => ({ rows: [] })]]); svc.__setPoolForTest(p);
-  r = await svc.setRequestStatus({ id: 99, status: 'done' });
-  assert.equal(r.code, 404, '3e: 없는 request → 404');
-  console.log('  3. setRequestStatus — open→confirming→done·resolved·request전용·검증 ✓');
+  r = await svc.setRequestStatus({ id: 99, sheetId: 'S1', tabName: 'T', status: 'done' });
+  assert.equal(r.code, 404, '3e: 없는(또는 타 탭) request → 404');
+  console.log('  3. setRequestStatus — 상태전이·resolved·request전용·(sheetId,tabName) 결속(B1) ✓');
 
-  // ═══ 4. deleteThread 권한 ═══
+  // ═══ 4. deleteThread 권한 (+ S1: (sheetId,tabName) 결속) ═══
   const mkDel = (author) => pool([
     [/SELECT author_role, author_name FROM trackb_tab_threads/, () => ({ rows: [author] })],
     [/UPDATE trackb_tab_threads SET deleted_at/, () => ({ rows: [] })],
   ]);
   p = mkDel({ author_role: 'staff', author_name: '김수만' }); svc.__setPoolForTest(p);
-  r = await svc.deleteThread({ id: 1, role: 'staff', name: '김수만' });
+  r = await svc.deleteThread({ id: 1, sheetId: 'S1', tabName: 'T', role: 'staff', name: '김수만' });
   assert.equal(r.ok, true, '4a: 작성자 본인 삭제 허용');
+  assert.ok(/WHERE id=\$1 AND sheet_id=\$2 AND tab_name=\$3/.test(p.q[0].s), '4a2: S1 — SELECT가 (sheetId,tabName)에 결속');
   p = mkDel({ author_role: 'staff', author_name: '박세희' }); svc.__setPoolForTest(p);
-  r = await svc.deleteThread({ id: 1, role: 'staff', name: '김수만' });
+  r = await svc.deleteThread({ id: 1, sheetId: 'S1', tabName: 'T', role: 'staff', name: '김수만' });
   assert.equal(r.code, 403, '4b: 타인 글 삭제 거부(staff)');
   p = mkDel({ author_role: 'advertiser', author_name: '광고주A' }); svc.__setPoolForTest(p);
-  r = await svc.deleteThread({ id: 1, role: 'admin', name: 'root' });
+  r = await svc.deleteThread({ id: 1, sheetId: 'S1', tabName: 'T', role: 'admin', name: 'root' });
   assert.equal(r.ok, true, '4c: admin 은 타인 글도 삭제');
+  r = await svc.deleteThread({ id: 1, role: 'admin' });  // sheetId/tabName 누락
+  assert.equal(r.ok, false, '4c2: sheetId/tabName 없으면 거부');
   p = pool([[/SELECT author_role, author_name/, () => ({ rows: [] })]]); svc.__setPoolForTest(p);
-  r = await svc.deleteThread({ id: 9, role: 'admin' });
-  assert.equal(r.code, 404, '4d: 없는 글 404');
-  console.log('  4. deleteThread — 작성자/admin 만·타인 거부·404 ✓');
+  r = await svc.deleteThread({ id: 9, sheetId: 'S1', tabName: 'T', role: 'admin' });
+  assert.equal(r.code, 404, '4d: 없는(또는 타 탭) 글 404');
+  console.log('  4. deleteThread — 작성자/admin·타인 거부·404·(sheetId,tabName) 결속(S1) ✓');
 
-  // ═══ 5. unseenCounts ═══
+  // ═══ 5. unseenCounts (master/admin: 전체·tabs 그대로) ═══
   p = pool([[/FROM trackb_tab_threads t LEFT JOIN trackb_thread_seen s/, (s, prm) => ({
     rows: [{ sheetId: 'S1', tabName: 'A', n: 3 }, { sheetId: 'S1', tabName: 'B', n: 1 }] })]]);
   svc.__setPoolForTest(p);
-  r = await svc.unseenCounts({ role: 'advertiser', advertiserId: 'adv_1' });
-  assert.ok(/internal_only = FALSE/.test(p.q[0].s), '5a: 광고주 미확인도 internal 제외');
-  assert.equal(r.total, 4, '5b: total 합산'); assert.equal(r.map['S1\tA'], 3, '5c: 탭별 맵');
-  assert.equal(p.q[0].params[0], 'adv:adv_1', '5d: seen 키 = adv:id');
-  p = pool([[/FROM trackb_tab_threads t LEFT JOIN trackb_thread_seen s/, () => ({ rows: [] })]]); svc.__setPoolForTest(p);
-  await svc.unseenCounts({ role: 'staff', name: '김수만', tabs: [{ sheetId: 'S1', tabName: 'A' }] });
-  assert.ok(!/internal_only = FALSE/.test(p.q[0].s), '5e: 내부는 internal 필터 없음');
-  assert.ok(/t.sheet_id=\$2 AND t.tab_name=\$3/.test(p.q[0].s), '5f: tabs 스코프 필터');
-  console.log('  5. unseenCounts — 광고주 internal 제외·total/맵·tabs 스코프 ✓');
+  r = await svc.unseenCounts({ role: 'master', name: 'root' });
+  assert.equal(r.total, 4, '5a: master total 합산'); assert.equal(r.map['S1\tA'], 3, '5b: 탭별 맵');
+  assert.ok(!/internal_only = FALSE/.test(p.q[0].s), '5c: 내부는 internal 필터 없음');
+  assert.equal(p.q[0].params[0], 'master:root', '5d: seen 키 = role:name');
 
+  // ═══ 5.5 B2: staff/advertiser 는 소유 탭으로 서버 강제 제한 ═══
+  //   scopedActiveTabs 목: participants.listActiveTabs(전체 탭) + svc 풀(advertiser_campaigns 스코프/주석).
+  //   광고주 adv_1 은 시트 S1 전체 소유 → S1 탭만. S2(타 업체)는 소유 아님.
+  const allTabs = [
+    { sheetId: 'S1', tabName: 'A', tabGid: '11', spreadsheetTitle: '내시트' },
+    { sheetId: 'S2', tabName: 'X', tabGid: '21', spreadsheetTitle: '타시트' },
+  ];
+  participants.__setPoolForTest({ async query() { return { rows: allTabs.map(t => ({ ...t, rowCount: 1 })) }; } });
+  const svcPool = pool([
+    [/FROM advertiser_campaigns WHERE advertiser_id/, () => ({ rows: [{ sheetId: 'S1', tabGid: null }] })],           // 소유 = S1 전체
+    [/FROM advertiser_campaigns ac JOIN advertisers a/, () => ({ rows: [{ sheetId: 'S1', tabGid: null, advId: 'adv_1', advName: '어니스트캄' }] })],
+    [/FROM trackb_tab_threads t LEFT JOIN trackb_thread_seen s/, () => ({ rows: [{ sheetId: 'S1', tabName: 'A', n: 2 }] })],
+  ]);
+  svc.__setPoolForTest(svcPool);
+  // 광고주가 소유 S1/A + 타 업체 S2/X 를 요청 → S2/X 는 드롭(교차 메타 유출 차단)
+  r = await svc.unseenCounts({ role: 'advertiser', advertiserId: 'adv_1', tabs: [{ sheetId: 'S1', tabName: 'A' }, { sheetId: 'S2', tabName: 'X' }] });
+  const threadQ = svcPool.q.find(x => /FROM trackb_tab_threads t LEFT JOIN/.test(x.s));
+  assert.ok(threadQ, '5.5a: 스레드 쿼리 실행됨');
+  assert.ok(/internal_only = FALSE/.test(threadQ.s), '5.5a2: 광고주 internal 제외');
+  const qparams = threadQ.params.slice(1);   // params[0]=userKey
+  assert.ok(qparams.includes('S1') && qparams.includes('A'), '5.5b: 소유 S1/A 는 쿼리에 포함');
+  assert.ok(!qparams.includes('S2') && !qparams.includes('X'), '5.5c: B2 — 타 업체 S2/X 는 서버가 드롭(교차 메타 유출 차단)');
+  assert.equal(r.map['S1\tA'], 2, '5.5d: 소유 탭 카운트');
+
+  // 소유가 전혀 없는 광고주 → 전역 쿼리 없이 빈 결과
+  participants.__setPoolForTest({ async query() { return { rows: allTabs.map(t => ({ ...t, rowCount: 1 })) }; } });
+  const emptyPool = pool([[/FROM advertiser_campaigns WHERE advertiser_id/, () => ({ rows: [] })]]);
+  svc.__setPoolForTest(emptyPool);
+  r = await svc.unseenCounts({ role: 'advertiser', advertiserId: 'adv_none', tabs: [{ sheetId: 'S2', tabName: 'X' }] });
+  assert.deepEqual(r, { map: {}, total: 0 }, '5.5e: 무소유 → 빈 결과');
+  assert.ok(!emptyPool.q.some(x => /FROM trackb_tab_threads t LEFT JOIN/.test(x.s)), '5.5f: 무소유는 전역 스레드 쿼리 미실행');
+  console.log('  5. unseenCounts — master 전체 + B2 staff/advertiser 소유 강제(교차 드롭·무소유 빈결과) ✓');
+
+  participants.__setPoolForTest(null);
   svc.__setPoolForTest(null);
   console.log('✅ trackBTabThreads 테스트 전체 통과');
 }

@@ -289,7 +289,7 @@ router.post('/workdesk/thread/:id/status', authMiddleware, async (req, res, next
     const { sheetId, tabName, status } = req.body || {};
     if (!sheetId || !tabName) return res.status(400).json({ ok: false, error: 'sheetId, tabName 필수' });
     const g = await _ensureThreadScope(req, sheetId, tabName); if (!g.ok) return res.status(g.code).json({ ok: false, error: g.error });
-    const out = await svc.setRequestStatus({ id: req.params.id, status, role: _role(req), name: (req.admin && req.admin.name) || '' });
+    const out = await svc.setRequestStatus({ id: req.params.id, sheetId, tabName, status, role: _role(req), name: (req.admin && req.admin.name) || '' });
     res.status(out.ok ? 200 : (out.code || 400)).json(out);
   } catch (err) { next(err); }
 });
@@ -298,7 +298,7 @@ router.delete('/workdesk/thread/:id', authMiddleware, async (req, res, next) => 
     const { sheetId, tabName } = req.body || {};
     if (!sheetId || !tabName) return res.status(400).json({ ok: false, error: 'sheetId, tabName 필수' });
     const g = await _ensureThreadScope(req, sheetId, tabName); if (!g.ok) return res.status(g.code).json({ ok: false, error: g.error });
-    const out = await svc.deleteThread({ id: req.params.id, role: _role(req), name: (req.admin && req.admin.name) || '' });
+    const out = await svc.deleteThread({ id: req.params.id, sheetId, tabName, role: _role(req), name: (req.admin && req.admin.name) || '' });
     res.status(out.ok ? 200 : (out.code || 400)).json(out);
   } catch (err) { next(err); }
 });
