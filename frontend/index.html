@@ -730,6 +730,15 @@
               <label style="font-size:.7rem;font-weight:600;color:var(--t2)">주소 <span style="color:var(--t3);font-weight:400">(선택)</span></label>
               <input id="inlineSubAddr" type="text" placeholder="배송받을 주소" maxlength="200" style="width:100%;margin-top:3px;padding:8px 10px;border:1.5px solid #D1D5DB;border-radius:7px;font-size:.82rem;outline:none;box-sizing:border-box">
             </div>
+            <!-- ★ 타계정별 개별 계좌정보 (리뷰비 입금용 — 미입력 시 본인 공통계좌 사용) -->
+            <div style="margin-bottom:10px;padding:10px;border:1.5px dashed #93C5FD;border-radius:8px;background:#F8FAFF">
+              <div style="font-size:.7rem;font-weight:700;color:#1D4ED8;margin-bottom:6px"><i class="fas fa-wallet" style="margin-right:4px"></i>이 타계정 전용 계좌 <span style="color:var(--t3);font-weight:400">(선택 — 미입력 시 본인 계좌로 입금)</span></div>
+              <div style="display:flex;gap:6px;margin-bottom:6px">
+                <input id="inlineSubBankName" type="text" placeholder="은행명" maxlength="20" style="flex:1;min-width:0;padding:8px 10px;border:1.5px solid #D1D5DB;border-radius:7px;font-size:.82rem;outline:none;box-sizing:border-box">
+                <input id="inlineSubAccountHolder" type="text" placeholder="예금주" maxlength="20" style="flex:1;min-width:0;padding:8px 10px;border:1.5px solid #D1D5DB;border-radius:7px;font-size:.82rem;outline:none;box-sizing:border-box">
+              </div>
+              <input id="inlineSubBankAccount" type="text" placeholder="계좌번호" maxlength="30" style="width:100%;padding:8px 10px;border:1.5px solid #D1D5DB;border-radius:7px;font-size:.82rem;outline:none;box-sizing:border-box">
+            </div>
             <div style="display:flex;gap:8px">
               <button onclick="cancelInlineSubForm()" style="flex:1;padding:9px 0;background:#fff;color:var(--t2);border:1.5px solid #D1D5DB;border-radius:7px;font-size:.78rem;font-weight:600;cursor:pointer">취소</button>
               <button id="btnInlineSubSave" onclick="saveInlineSubAccount()" style="flex:1;padding:9px 0;background:#2563EB;color:#fff;border:none;border-radius:7px;font-size:.78rem;font-weight:700;cursor:pointer">저장</button>
@@ -1557,6 +1566,7 @@ function renderInlineSubList(subs) {
         <div style="font-size:.8rem;font-weight:700;color:var(--t1);margin-bottom:2px">[${idx+1}] ${escHtml(sub.name)} <span style="font-weight:400;color:var(--t3);font-size:.7rem">${escHtml(sub.phone||'')}</span></div>
         <div style="font-size:.68rem;color:var(--t3)">소득명의: <span style="color:var(--t2)">${escHtml(sub.incomeName||'-')}</span> | 주민번호: <span style="color:var(--t2)">${jDisplay}</span></div>
         ${sub.address ? `<div style="font-size:.68rem;color:var(--t3);margin-top:1px">주소: <span style="color:var(--t2)">${escHtml(sub.address)}</span></div>` : ''}
+        ${(sub.bankAccount || sub.bankName) ? `<div style="font-size:.68rem;color:var(--t3);margin-top:1px">전용계좌: <span style="color:var(--t2)">${escHtml([sub.bankName, sub.bankAccount, sub.accountHolder].filter(Boolean).join(' '))}</span></div>` : ''}
       </div>
       <div style="display:flex;gap:4px;flex-shrink:0">
         <button onclick="editInlineSubAccount(${idx})" style="padding:3px 7px;background:#EFF6FF;color:#2563EB;border:1.5px solid #93C5FD;border-radius:6px;font-size:.65rem;font-weight:700;cursor:pointer">수정</button>
@@ -1792,6 +1802,9 @@ function toggleInlineSubForm() {
   document.getElementById("inlineSubIncomeName").value = "";
   document.getElementById("inlineSubJumin").value = "";
   document.getElementById("inlineSubAddr").value = "";
+  const _bn = document.getElementById("inlineSubBankName");      if (_bn) _bn.value = "";
+  const _ba = document.getElementById("inlineSubBankAccount");   if (_ba) _ba.value = "";
+  const _bh = document.getElementById("inlineSubAccountHolder"); if (_bh) _bh.value = "";
   form.style.display = "";
   document.getElementById("inlineSubName").focus();
 }
@@ -1813,6 +1826,9 @@ function editInlineSubAccount(idx) {
   const jd = (sub.jumin || sub.residentNo || "").replace(/[^0-9]/g, "");
   document.getElementById("inlineSubJumin").value = jd.length > 6 ? jd.slice(0,6)+"-"+jd.slice(6) : jd;
   document.getElementById("inlineSubAddr").value = sub.address || "";
+  const _bn = document.getElementById("inlineSubBankName");      if (_bn) _bn.value = sub.bankName || "";
+  const _ba = document.getElementById("inlineSubBankAccount");   if (_ba) _ba.value = sub.bankAccount || "";
+  const _bh = document.getElementById("inlineSubAccountHolder"); if (_bh) _bh.value = sub.accountHolder || "";
   form.style.display = "";
   document.getElementById("inlineSubName").focus();
 }
@@ -1875,7 +1891,8 @@ async function saveInlineSubAccount() {
         <div style="display:flex;gap:6px;margin-bottom:5px"><span style="font-size:.7rem;color:var(--t3);min-width:55px">전화번호</span><span style="font-size:.8rem;font-weight:700;color:#2563EB">${escHtml(phoneFormatted)}</span></div>
         <div style="display:flex;gap:6px;margin-bottom:5px"><span style="font-size:.7rem;color:var(--t3);min-width:55px">소득명의</span><span style="font-size:.8rem;color:var(--t2)">${escHtml(incomeName || '(미입력)')}</span></div>
         <div style="display:flex;gap:6px;margin-bottom:5px"><span style="font-size:.7rem;color:var(--t3);min-width:55px">주민번호</span><span style="font-size:.8rem;font-weight:700;color:#DC2626">${escHtml(juminFormatted)}</span></div>
-        <div style="display:flex;gap:6px"><span style="font-size:.7rem;color:var(--t3);min-width:55px">주소</span><span style="font-size:.8rem;color:var(--t2)">${escHtml((document.getElementById('inlineSubAddr')?.value||'').trim() || '(미입력)')}</span></div>
+        <div style="display:flex;gap:6px;margin-bottom:5px"><span style="font-size:.7rem;color:var(--t3);min-width:55px">주소</span><span style="font-size:.8rem;color:var(--t2)">${escHtml((document.getElementById('inlineSubAddr')?.value||'').trim() || '(미입력)')}</span></div>
+        <div style="display:flex;gap:6px"><span style="font-size:.7rem;color:var(--t3);min-width:55px">전용계좌</span><span style="font-size:.8rem;color:var(--t2)">${escHtml(((document.getElementById('inlineSubBankName')?.value||'').trim() + ' ' + (document.getElementById('inlineSubBankAccount')?.value||'').trim() + ' ' + (document.getElementById('inlineSubAccountHolder')?.value||'').trim()).trim() || '(미입력 — 본인 계좌 사용)')}</span></div>
       </div>
       <div style="font-size:.7rem;color:#B45309;text-align:center;margin-bottom:10px;line-height:1.5">이 정보가 정확히 맞는지 확인해주세요<br><strong>*전화번호 오타, 주민번호 오타 확인 필수</strong></div>
       <div style="display:flex;gap:8px">
@@ -1907,11 +1924,16 @@ async function confirmSaveInlineSubAccount() {
     phone: phone.slice(0,3) + "-" + phone.slice(3,7) + "-" + phone.slice(7),
     incomeName,
     jumin: juminDigits,
-    address: (document.getElementById("inlineSubAddr")?.value || "").trim()
+    address: (document.getElementById("inlineSubAddr")?.value || "").trim(),
+    // ★ 타계정별 개별 계좌정보 (공란 = 본인 공통계좌 사용)
+    bankName: (document.getElementById("inlineSubBankName")?.value || "").trim(),
+    bankAccount: (document.getElementById("inlineSubBankAccount")?.value || "").trim(),
+    accountHolder: (document.getElementById("inlineSubAccountHolder")?.value || "").trim()
   };
 
   if (editIdx >= 0 && editIdx < subs.length) {
-    subs[editIdx] = newSub;
+    // 기존 필드 보존 병합 (자동등록 등으로 추가된 알 수 없는 필드 유실 방지)
+    subs[editIdx] = { ...subs[editIdx], ...newSub };
   } else {
     if (subs.length >= 10) { showToast("타계정은 최대 10개까지 등록 가능합니다"); return; }
     subs.push(newSub);
@@ -1978,6 +2000,10 @@ document.addEventListener("DOMContentLoaded", () => {
   initPage();
   loadRecruitPreview();
   applyRecruitView();
+  // ★ #my / #info 해시 진입 시 내정보/현황 탭 자동 오픈 (구매양식 내정보 게이트 배너 링크용)
+  if (location.hash === "#my" || location.hash === "#info") {
+    try { switchTab("my"); } catch (_) {}
+  }
   document.getElementById("loginPhone").addEventListener("keydown", e => {
     if (e.key === "Enter") doLogin();
   });

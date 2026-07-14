@@ -39,6 +39,14 @@ GAS(Google Apps Script) 기반 리뷰 관리 시스템을 **Node.js Express + Po
 - **관측(migration 044)**: 빌더가 `index_master.detect_source`(필드별 col/header/src)·`detect_drift`(매핑 거부 사유)·`detected_at` 기록 + 드리프트 `logger.warn`(무로그 폴백 해소). `GET /api/mapping/coverage`·`/drift`(admin/master), 관리자 설정탭 "컬럼매핑 현황" 카드, 캠페인탭관리 인원/제출 셀 ⚠배지. 교정은 raw-mirror.html 컬럼 매핑 에디터(`?sheetId=&gid=`로 탭 preselect+에디터 자동 오픈).
 - **무변경 보장**: 기록된 매핑 ≡ 키워드 결과(회귀가드 `tests/columnResolver.test.js` 케이스 12 = 기록→재파싱 deepEqual, `tests/columnMappingRecord.test.js`). 2단계(집계 소스 DB 원장 전환, `tab_configs.source_of_truth` 활용)는 1단계 게이트 통과 후 별도 작업.
 
+### 구매양식 신원게이트 (내정보 필수 · 제출정보 유사도검증 · 타계정 자동등록)
+- **필수입력**: 구매양식 카드에서 **주문번호·비고 제외 전 필드 필수**(주문자/아이디/수취인/연락처/배송주소/은행/계좌/예금주/결제금액). "1번과 동일" 체크·nc모드 쿠팡카드 재사용값은 유효값으로 인정(`submitOrderForm` 검증).
+- **내정보 게이트**: 리뷰어는 내정보 4종(**사용자명/전화번호/주소/계좌**)을 등록해야 제출 가능. 프론트(진입 배너 `#ofProfileGate` + 제출 차단, `index.html#my` 딥링크로 내정보 탭 오픈) + 서버(`POST /api/submit/order`가 `PROFILE_INCOMPLETE` 반환) 이중 강제. `loginPhone8` 없는 제출(레거시/관리자 경유)은 게이트 미적용.
+- **유사도 검증**(`identity.service.js`): 제출정보(캡처 AI 추출값 `extractedRecipient/Phone/Address` 우선, 없으면 폼 입력값)를 본인 프로필·타계정(sub_accounts)과 대조. 이름=공백제거 정확일치, 전화=뒤8자리, 주소=**휴리스틱(호수·동 숫자 불일치=즉시 mismatch, 호수 일치+바이그램≥0.25=match — "서면다인로얄팰리스 728호"≈"서면팰리스 728호" 축약 허용) → 애매하면 Gemini(`verifyAddressMatch` 재사용) 보완, Gemini 실패시 소프트 처리**. 계좌는 SELF=본인계좌/예금주, SUB=타계정 전용계좌 **또는 본인 공통계좌**(타계정 참여 리뷰비를 본인 계좌로 받는 흐름 정상) 일치면 통과.
+- **판정→동작**: `SELF`/`SUB` 통과(SUB는 빈 주소/계좌 자동보강 — 단 본인 공통계좌는 전용계좌로 오기록 안 함) / `NEED_CONFIRM`(이름·전화는 맞는데 주소·계좌 상이) → 프론트 확인 다이얼로그 → `identityConfirmed=true` 재제출시 통과+`logAbnormal` 기록 / `NEED_SUB_REGISTER`(본인·타계정 모두 불일치) → **"내 정보와 다른 정보가 감지되었습니다. 현재 입력값을 나의 타계정으로 등록할까요?"** 다이얼로그 → `saveSubAccounts`로 자동 등록(계좌 포함) 후 제출 계속.
+- **사전검증**: 제출 직전 `POST /api/reviewer/identity-precheck`(무인증, phone8 스코프)로 프로필 완비+주문별 판정을 미리 받아 다이얼로그 처리 → 서버 게이트는 최종 방어. **fail-open 원칙**: 게이트 내부 오류·Gemini 장애는 주문 접수를 막지 않음(라이브 핫패스 보호).
+- **타계정별 전용계좌**: `sub_accounts` JSON에 `bankName/bankAccount/accountHolder` 추가(마이그레이션 불필요). `index.html` 타계정 폼에서 편집(수정 시 기존 필드 보존 병합), 미입력=본인 공통계좌 사용. 회귀가드 `tests/identityMatch.test.js`.
+
 ### 구매양식 "제공정보" 추가안내 (제공정보 메모 · 회사 사업자번호)
 - `tab_configs.provider_memo`(034): 탭별 자유 텍스트 "제공정보 메모"(진행방식 안내·특이사항 통합). 관리자 대시보드 탭설정 팝오버에서 편집. 구매양식 제출화면(`search.html`)의 "📦 제공정보" 카드에 표시되며 **공란이면 영역 미노출**.
 - `app_settings.company_business_no`: 회사 공통 사업자번호 1개(관리자 "설정" 탭에서 편집, `POST /api/tab/company-business-no` = admin/master). 진행방식(`income_type`)이 **현영 포함(사업자현영)** 인 탭에서만 "지출증빙 현금영수증 발행 필수" 안내와 함께 노출.
