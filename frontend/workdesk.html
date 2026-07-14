@@ -5,26 +5,31 @@
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>통합 작업대 (Track B · 그림자)</title>
 <style>
+  /* ═══ Clarity Console 공용 UI 키트 토큰 — 단일 블루 액센트 + 쿨그레이 뉴트럴, tabular-nums ═══ */
   :root{
-    --paper:#F4F6F7;--card:#FFFFFF;--card2:#EEF2F3;--ink:#15232A;--muted:#5C6B72;--faint:#8A979D;
-    --line:#DDE4E6;--line2:#C9D3D6;--accent:#127C8A;--accent-soft:#E1F0F1;
-    --safe:#2E7D64;--safe-soft:#E2F1EA;--warn:#A9721E;--warn-soft:#F5EBD8;--bad:#BB4E37;--bad-soft:#F7E5E0;
-    --adv:#7A5AA6;--adv-soft:#EFE8F5;
+    --paper:#f4f6f9;--card:#ffffff;--card2:#f1f4f8;--ink:#101828;--muted:#667085;--faint:#98a2b3;
+    --line:#e6eaf0;--line2:#d0d9e4;--accent:#2563eb;--accent-soft:#eff4ff;--accent-deep:#1d4ed8;--accent-line:#d7e3fd;
+    --safe:#16a34a;--safe-soft:#e9f7ee;--warn:#b45309;--warn-soft:#fdf6ec;--bad:#e5484d;--bad-soft:#fdf0f0;
+    --adv:#6d5ac9;--adv-soft:#efecfa;
+    --ease:cubic-bezier(.22,1,.36,1);
+    --shadow-card:0 1px 2px rgba(16,24,40,.04),0 10px 26px rgba(16,24,40,.05);
     --mono:'SF Mono','JetBrains Mono',ui-monospace,monospace;
-    --sans:'Pretendard','Apple SD Gothic Neo','Malgun Gothic',system-ui,-apple-system,sans-serif;
+    --sans:'Pretendard',-apple-system,BlinkMacSystemFont,'Segoe UI','Noto Sans KR','Apple SD Gothic Neo',sans-serif;
   }
   *{box-sizing:border-box}
-  body{margin:0;background:var(--paper);color:var(--ink);font-family:var(--sans);font-size:14px;line-height:1.5}
+  body{margin:0;background:var(--paper);color:var(--ink);font-family:var(--sans);font-size:14px;line-height:1.55;-webkit-font-smoothing:antialiased;font-variant-numeric:tabular-nums}
   .top{display:flex;align-items:center;gap:12px;padding:10px 18px;background:var(--card);border-bottom:1px solid var(--line);position:sticky;top:0;z-index:5;flex-wrap:wrap}
   .top .logo{font-weight:800;letter-spacing:-.02em;font-size:15px}
-  .top .logo .tag{font-size:10px;font-weight:700;color:var(--accent);background:var(--accent-soft);padding:2px 8px;border-radius:999px;margin-left:8px;letter-spacing:.03em}
-  .nav{display:flex;gap:4px;margin-left:6px}
-  .navb{font:inherit;font-size:12.5px;font-weight:650;padding:6px 13px;border-radius:8px;border:1px solid transparent;background:none;color:var(--muted);cursor:pointer}
-  .navb.on{background:var(--accent-soft);color:var(--accent)}
+  .top .logo .tag{font-size:10px;font-weight:800;color:var(--accent-deep);background:var(--accent-soft);border:1px solid var(--accent-line);padding:2px 9px;border-radius:999px;margin-left:8px;letter-spacing:.05em}
+  .nav{display:flex;gap:0;margin-left:6px;background:var(--card2);border-radius:10px;padding:3px}
+  .navb{font:inherit;font-size:12.5px;font-weight:700;height:30px;padding:0 14px;border-radius:8px;border:none;background:none;color:var(--muted);cursor:pointer;transition:color .2s,background .2s}
+  .navb.on{background:var(--card);color:var(--accent-deep);box-shadow:0 1px 3px rgba(16,24,40,.12)}
   .top .sp{flex:1}
-  .rolebadge{font-size:11px;font-weight:750;padding:4px 11px;border-radius:999px;background:var(--accent-soft);color:var(--accent)}
-  .btn{font:inherit;font-size:12px;font-weight:650;padding:6px 12px;border-radius:8px;border:1px solid var(--line2);background:var(--card);color:var(--ink);cursor:pointer}
-  .btn:hover{background:var(--card2)} .btn.pri{background:var(--accent);color:#fff;border-color:var(--accent)} .btn:disabled{opacity:.5;cursor:default}
+  .rolebadge{font-size:11px;font-weight:750;padding:4px 12px;border-radius:999px;background:var(--accent-soft);border:1px solid var(--accent-line);color:var(--accent-deep)}
+  .btn{font:inherit;font-size:12px;font-weight:700;padding:0 13px;height:32px;display:inline-flex;align-items:center;gap:6px;border-radius:9px;border:1px solid var(--line);background:var(--card);color:var(--ink);cursor:pointer;white-space:nowrap;transition:background .15s,border-color .15s,color .15s,transform .1s,box-shadow .15s}
+  .btn:hover{border-color:var(--accent-line);background:var(--card2)} .btn:active{transform:scale(.97)}
+  .btn.pri{background:var(--accent);color:#fff;border-color:var(--accent);box-shadow:0 1px 2px rgba(37,99,235,.32)} .btn.pri:hover{background:var(--accent-deep);border-color:var(--accent-deep)}
+  .btn:disabled{background:var(--card2);color:var(--faint);border-color:var(--card2);cursor:not-allowed;box-shadow:none;transform:none}
   .wrap{display:grid;grid-template-columns:230px 1fr 240px;min-height:calc(100vh - 50px)}
   @media(max-width:900px){.wrap{grid-template-columns:1fr}.side,.rail{display:none}.wrap.showlist .main{display:none}.wrap.showlist .side{display:block}}
   .side{border-right:1px solid var(--line);background:var(--card);padding:12px 10px;overflow:auto}
@@ -40,12 +45,20 @@
   .sugitem{padding:8px 11px;font-size:12.5px;cursor:pointer;display:flex;justify-content:space-between;gap:8px}
   .sugitem:hover{background:var(--accent-soft)}
   .sugm{color:var(--faint);font-size:11px}
-  .owntab{display:flex;align-items:center;gap:10px;padding:9px 12px;border:1px solid var(--line);border-radius:9px;margin-bottom:6px;cursor:pointer}
-  .owntab:hover{background:var(--accent-soft)}
+  .owntab{display:flex;align-items:center;gap:12px;padding:11px 14px;border:1px solid var(--line);border-radius:13px;margin-bottom:7px;cursor:pointer;background:var(--card);transition:transform .25s var(--ease),box-shadow .2s,border-color .2s}
+  .owntab:hover{transform:translateY(-2px);box-shadow:0 6px 18px rgba(16,24,40,.08);border-color:var(--accent-line)}
   .owntab .info{flex:1;min-width:0}
-  .owntab .info b{font-size:12.5px;display:block;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
-  .owntab .info span{font-size:11px;color:var(--faint)}
-  .owntab .openb{font-size:11px;color:var(--accent);font-weight:650;white-space:nowrap}
+  .owntab .info>b{font-size:13px;display:block;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+  .owntab .obadges{display:flex;gap:5px;flex-wrap:wrap;margin-top:4px}
+  .owntab .osub{display:block;font-size:11px;color:var(--faint);margin-top:4px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+  .owntab .osub b{color:var(--muted);font-weight:700}
+  .owntab .openb{font-size:11px;color:var(--accent);font-weight:700;white-space:nowrap}
+  /* 키트 배지(ok/warn/bad/neutral) — 연결탭 속성 배지 공용 */
+  .bb{display:inline-flex;align-items:center;gap:4px;font-size:10.5px;font-weight:700;padding:2px 8px;border-radius:999px;background:var(--card2);color:var(--muted)}
+  .bb.ok{background:var(--accent-soft);color:var(--accent-deep)}
+  .bb.safe{background:var(--safe-soft);color:var(--safe)}
+  .bb.warn{background:var(--warn-soft);color:var(--warn)}
+  .bb.bad{background:var(--bad-soft);color:var(--bad)}
   .main{padding:18px 22px;overflow:auto}
   .mh{display:flex;align-items:center;gap:10px;flex-wrap:wrap;margin-bottom:14px}
   .mh h1{font-size:19px;margin:0;font-weight:800;letter-spacing:-.02em}
@@ -63,12 +76,22 @@
   .wochip{display:inline-block;font-size:11px;font-weight:650;padding:2px 8px;border-radius:999px;background:var(--adv-soft);color:var(--adv);margin:2px 4px 2px 0}
   .worow2{padding:9px 11px;border:1px solid var(--line);border-radius:9px;margin-bottom:6px;cursor:pointer} .worow2:hover{background:var(--card2)} .worow2.on{border-color:var(--adv);background:var(--adv-soft)}
   .worow2 .t{font-size:12.5px;font-weight:650} .worow2 .s{font-size:11px;color:var(--faint);margin-top:2px}
-  .counts{display:flex;gap:10px;margin-bottom:14px;flex-wrap:wrap}
-  .cc{flex:1;min-width:90px;background:var(--card);border:1px solid var(--line);border-radius:10px;padding:11px 13px;text-align:center}
-  .cc .big{font-size:22px;font-weight:800;letter-spacing:-.02em} .cc .lb{font-size:11px;color:var(--muted);margin-top:1px} .cc.s .big{color:var(--safe)} .cc.p .big{color:var(--accent)}
-  table{width:100%;border-collapse:collapse;font-size:12.5px;background:var(--card);border:1px solid var(--line);border-radius:10px;overflow:hidden}
-  thead th{background:var(--card2);text-align:left;padding:9px 11px;font-size:10.5px;text-transform:uppercase;letter-spacing:.03em;color:var(--muted);font-weight:750}
-  tbody td{padding:9px 11px;border-top:1px solid var(--line)} tbody tr:hover{background:var(--card2)}
+  .counts{display:flex;gap:12px;margin-bottom:16px;flex-wrap:wrap}
+  .cc{flex:1;min-width:170px;background:var(--card);border:1px solid var(--line);border-radius:13px;padding:13px 16px;display:flex;align-items:center;justify-content:space-between;gap:12px;text-align:left;transition:transform .25s var(--ease),box-shadow .2s,border-color .2s}
+  .cc:hover{transform:translateY(-2px);box-shadow:0 6px 18px rgba(16,24,40,.08);border-color:var(--accent-line)}
+  .cc .big{font-size:20px;font-weight:800;letter-spacing:-.02em} .cc .big small{font-size:11.5px;font-weight:600;color:var(--faint);margin-left:2px}
+  .cc .lb{font-size:11px;font-weight:600;color:var(--muted);margin-top:0} .cc.s .big{color:var(--safe)} .cc.p .big{color:var(--accent-deep)}
+  /* KPI 게이지(도넛) — 키트 cc-gauge */
+  .gauge{width:44px;height:44px;position:relative;flex:none}
+  .gauge svg{transform:rotate(-90deg);display:block}
+  .gauge circle{fill:none;stroke-width:4}
+  .gauge .trk{stroke:var(--card2)}
+  .gauge .bar{stroke:var(--accent);stroke-linecap:round;stroke-dasharray:113;transition:stroke-dashoffset .9s var(--ease)}
+  .gauge.g-safe .bar{stroke:var(--safe)} .gauge.g-warn .bar{stroke:var(--warn)}
+  .gauge .pct{position:absolute;inset:0;display:grid;place-items:center;font-size:10px;font-weight:800;color:var(--muted)}
+  table{width:100%;border-collapse:collapse;font-size:12.5px;background:var(--card);border:1px solid var(--line);border-radius:12px;overflow:hidden}
+  thead th{background:var(--card2);text-align:left;padding:10px 12px;font-size:11px;letter-spacing:.02em;color:var(--muted);font-weight:750;border-bottom:2px solid var(--accent-line)}
+  tbody td{padding:9px 12px;border-top:1px solid var(--line)} tbody tr{transition:background .12s} tbody tr:hover{background:var(--card2)}
   .chk{font-weight:800}.chk.y{color:var(--safe)}.chk.n{color:var(--faint)}
   .ph{font-family:var(--mono);font-size:11.5px;color:var(--muted)}
   .src{font-size:10px;font-weight:700;padding:1px 6px;border-radius:5px;background:var(--card2);color:var(--faint)} .src.manual{background:var(--warn-soft);color:var(--warn)} .src.order{background:var(--accent-soft);color:var(--accent)}
@@ -103,7 +126,7 @@
   table.sheetgrid thead th.gfz{z-index:4;background:var(--card2)}
   .gnum{text-align:center;color:var(--faint);font-weight:700} .gnm{font-weight:600}
   table.sheetgrid .gph{font-family:var(--mono);font-size:11.5px;color:var(--muted)}
-  table.sheetgrid tbody tr:hover td{background:#F7FBFB} table.sheetgrid tbody tr:hover td.gfz{background:#eef6f6}
+  table.sheetgrid tbody tr:hover td{background:#f7faff} table.sheetgrid tbody tr:hover td.gfz{background:#eef4ff}
   .gcell.gempty{color:var(--line2)} .gcell.gok{color:var(--safe);font-weight:600}
   .gridbar{display:flex;align-items:center;gap:8px;margin-bottom:8px;flex-wrap:wrap}
   .gridbar label{font-size:12px;color:var(--muted);font-weight:650}
@@ -208,6 +231,16 @@ const $=(s,el)=>(el||document).querySelector(s);
 const esc=s=>String(s==null?'':s).replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
 function toast(m){ const t=$('#toast'); t.textContent=m; t.classList.add('show'); setTimeout(()=>t.classList.remove('show'),1800); }
 function parseJwt(t){ try{ const b=atob(t.split('.')[1].replace(/-/g,'+').replace(/_/g,'/')); return JSON.parse(new TextDecoder().decode(Uint8Array.from(b,c=>c.charCodeAt(0)))); }catch(_){ return {}; } }   // base64url + UTF-8(한글 이름) 정상 디코드
+// ── Clarity 키트 헬퍼 ──
+// KPI 도넛 게이지(r=18, 둘레≈113). cls: ''(블루)/'g-safe'/'g-warn'
+function gaugeSvg(pct, label, cls){ const p=Math.max(0,Math.min(100,Math.round(pct||0)));
+  return `<span class="gauge ${cls||''}"><svg width="44" height="44"><circle class="trk" cx="22" cy="22" r="18"/><circle class="bar" cx="22" cy="22" r="18" style="stroke-dashoffset:${(113*(1-p/100)).toFixed(1)}"/></svg><span class="pct">${esc(label!=null?label:p+'%')}</span></span>`; }
+// 탭명 파싱: "7/3(쿠팡)디아쉬끄_헤어틴트 50건", "6/25(공영쇼핑)…" → 채널·목표건수·차수 (비정형은 미표시)
+function parseTabMeta(name){ const s=String(name||''); const m={};
+  const ch=s.match(/\(([^)]{1,10})\)/); if(ch&&!/^\d/.test(ch[1])) m.channel=ch[1].trim();
+  const cnt=s.match(/(\d{1,4})\s*건/); if(cnt) m.count=parseInt(cnt[1],10);
+  const rnd=s.match(/(\d{1,2})\s*차(?![수선])/); if(rnd) m.round=rnd[1]+'차';
+  return m; }
 
 let STATE = { role:'', name:'', view:'workdesk', tabs:[], cur:null, wd:null, freezeUpto:null,
               ov:[], ovq:'', pendingTab:null, lastBatch:null,
@@ -340,7 +373,14 @@ function renderWorkdesk(wd){
     ${isMaster?`<span class="sp" style="flex:1"></span>${flipBtn}<button class="btn" onclick="showWritebackSim()" title="이 탭 편집이 시트에 반영된다면 무엇이 바뀔지 미리보기 (시뮬레이션 · 실제 시트 무접촉)">write-back 시뮬</button><button class="btn" id="projBtn" onclick="projectCur()">그림자 투영(새로고침)</button>`:''}</div>
     <div class="metagrid">${metaCards}</div>
     ${renderWorkOrderSection(wd)}
-    <div class="counts"><div class="cc"><div class="big">${c.total||0}</div><div class="lb">참여자</div></div><div class="cc s"><div class="big">${c.submitted||0}</div><div class="lb">제출완료</div></div><div class="cc p"><div class="big">${c.paid||0}</div><div class="lb">입금완료</div></div></div>
+    ${(()=>{ // KPI 게이지 카드(키트): 목표=발주 모집인원 > 탭명 파싱 건수 > 참여자수
+      const target=(d.recruitCount&&+d.recruitCount)||parseTabMeta(STATE.cur.tabName).count||c.total||0;
+      const pT=target?Math.round((c.total||0)/target*100):0, pS=c.total?Math.round((c.submitted||0)/c.total*100):0, pP=c.total?Math.round((c.paid||0)/c.total*100):0;
+      return `<div class="counts">
+        <div class="cc"><div><div class="lb">참여자${target&&target!==c.total?` / 목표 ${target}`:''}</div><div class="big">${c.total||0}${target&&target!==c.total?`<small>/ ${target}</small>`:''}</div></div>${gaugeSvg(pT,null,'')}</div>
+        <div class="cc s"><div><div class="lb">제출완료</div><div class="big">${c.submitted||0}<small>/ ${c.total||0}</small></div></div>${gaugeSvg(pS,null,'g-safe')}</div>
+        <div class="cc p"><div><div class="lb">입금완료</div><div class="big">${c.paid||0}<small>/ ${c.total||0}</small></div></div>${gaugeSvg(pP,null,'')}</div>
+      </div>`; })()}
     ${tableSection}`;
 }
 // 컬럼 폭(px) — 고정열 오프셋 계산과 최소폭에 사용. 없으면 기본값.
@@ -837,8 +877,24 @@ function renderOwnPanel(a, items){
   }).join('') || `<div class="empty" style="padding:20px">소유 캠페인 없음 — 아래에서 추가하세요.</div>`;
   const sheetOpts = Object.keys(STATE.sheetMap).map(sid=>`<option value="${esc(sid)}">${esc(sheetTitle(sid))}</option>`).join('');
   const ot=STATE.ownTabs||[];
-  const tabList = ot.map((t,i)=>`<div class="owntab" onclick="openOwnTab(${i})"><div class="info"><b>${esc(t.tabName)}</b><span>${esc(t.spreadsheetTitle||sheetTitle(t.sheetId))}${t.rowCount?` · ${t.rowCount}행`:''}${t.firstSeenAt?` · ${esc(String(t.firstSeenAt).slice(0,10))}`:''}</span></div>${t.active?'<span class="scope all">활성</span>':'<span class="scope tab" style="opacity:.55">비활성</span>'}<span class="openb">열기 ›</span></div>`).join('')
-    || `<div class="empty" style="padding:14px">연결된 탭 없음</div>`;
+  // 연결탭 카드: 진행률 게이지(제출/참여) + 채널·목표건수·차수 배지(발주 우선→탭명 파싱) + 담당 + 카운트
+  const tabList = ot.map((t,i)=>{
+    const pm=parseTabMeta(t.tabName);
+    const target=(t.woRecruit&&+t.woRecruit)||pm.count||null;
+    const total=t.bTotal||0, sub=t.bSub||0, paid=t.bPaid||0;
+    const pct=total?Math.round(sub/total*100):0;
+    const badges=[
+      pm.channel?`<span class="bb ok">${esc(pm.channel)}</span>`:'',
+      target?`<span class="bb">${target}건${t.woRecruit?' · 발주':''}</span>`:'',
+      pm.round?`<span class="bb">${esc(pm.round)}</span>`:'',
+      t.active?'<span class="bb safe">활성</span>':'<span class="bb" style="opacity:.6">비활성</span>',
+    ].filter(Boolean).join('');
+    const gauge=total?gaugeSvg(pct,pct+'%',pct>=100?'g-safe':''):gaugeSvg(0,'—','');
+    return `<div class="owntab" onclick="openOwnTab(${i})">${gauge}<div class="info"><b>${esc(t.tabName)}</b>
+      <span class="obadges">${badges}</span>
+      <span class="osub">${esc(t.spreadsheetTitle||sheetTitle(t.sheetId))}${t.manager?` · 담당 <b>${esc(t.manager)}</b>`:''} · 참여 <b>${total}</b> · 제출 <b>${sub}</b> · 입금 <b>${paid}</b>${t.firstSeenAt?` · ${esc(String(t.firstSeenAt).slice(0,10))}`:''}</span></div>
+      <span class="openb">열기 ›</span></div>`;
+  }).join('') || `<div class="empty" style="padding:14px">연결된 탭 없음</div>`;
   $('#ownPanel').innerHTML = `
     <div class="ph2"><span class="big">${esc((a.name||'?').slice(0,1))}</span><div><h2>${esc(a.name)}</h2><div class="acc">거래처 ID: ${esc(a.id)} · 소유 ${items.length}</div></div></div>
     <div class="sect"><div class="st">소유 캠페인</div>${owns}</div>
