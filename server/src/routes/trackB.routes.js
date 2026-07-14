@@ -208,6 +208,21 @@ router.get('/intranet/advertisers', authMiddleware, internalMiddleware, async (r
   catch (err) { next(err); }
 });
 
+// ── 인트라넷 사용자(AE) 자동완성 프록시 — 담당AE 매칭 전용. 이름·아이디·부서만(민감필드 미노출). ──
+router.get('/intranet/users', authMiddleware, adminOrMasterMiddleware, async (req, res, next) => {
+  try { res.json(await svc.intranetStaffUsers({ q: req.query.q, limit: req.query.limit })); }
+  catch (err) { next(err); }
+});
+
+// ── 담당 AE(inad_pm) 매칭/변경 — master/admin 전용(스코프 재배치는 관리자 소관, staff 자기지정은 생성 시 강제). ──
+router.post('/advertisers/inad-pm', authMiddleware, adminOrMasterMiddleware, async (req, res, next) => {
+  try {
+    const { advertiserId, inadPm } = req.body || {};
+    const out = await svc.setAdvertiserInadPm({ advertiserId, inadPm, by: _by(req) });
+    res.status(out.ok ? 200 : (out.code || 400)).json(out);
+  } catch (err) { next(err); }
+});
+
 // ── 업체 소유 시트의 전체 탭 나열(최신 관측순) — 내부인 ──
 router.get('/ownership/tabs', authMiddleware, internalMiddleware, async (req, res, next) => {
   try {

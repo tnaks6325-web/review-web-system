@@ -386,7 +386,7 @@ async function listOwnership({ advertiserId, sheetId } = {}) {
 async function listAdvertisersWithOwnership() {
   const db = getPool();
   const { rows } = await db.query(
-    `SELECT a.id, a.name, a.status,
+    `SELECT a.id, a.name, a.status, a.inad_pm AS "inadPm",
             (SELECT COUNT(*) FROM advertiser_campaigns ac
               WHERE ac.advertiser_id = a.id AND ac.deleted_at IS NULL)::int AS owned,
             COALESCE(p.settlement_visible, TRUE) AS "settlementVisible"
@@ -395,6 +395,18 @@ async function listAdvertisersWithOwnership() {
       WHERE a.status <> 'ended'
       ORDER BY a.sort_order ASC, a.name ASC`);
   return rows;
+}
+
+// ── 담당 AE(inad_pm) 매칭 — master/admin 전용(라우트 게이트). 빈 값 = 담당 해제. ──
+//   inad_pm 은 staff 스코프 키(TRIM 매칭)라 앞뒤 공백을 제거해 저장(표기차 footgun 방지).
+async function setAdvertiserInadPm({ advertiserId, inadPm = '', by = '' } = {}) {
+  if (!advertiserId) return { ok: false, code: 400, error: 'advertiserId 필수' };
+  const pm = ((typeof inadPm === 'string' ? inadPm : '')).trim().slice(0, 100);
+  const { rows } = await getPool().query(
+    'UPDATE advertisers SET inad_pm = $2 WHERE id = $1 RETURNING id, name, inad_pm AS "inadPm"', [advertiserId, pm]);
+  if (!rows.length) return { ok: false, code: 404, error: '거래처를 찾을 수 없습니다.' };
+  logger.info(`[trackB] 담당AE 매칭: ${rows[0].name}(${advertiserId}) → '${pm || '(해제)'}' by ${by}`);
+  return { ok: true, advertiser: rows[0] };
 }
 
 // ── Track B 스코프 업체(거래처) 생성 — workdesk 업체추가 전용(포털 라우트와 동일 시맨틱·테이블).
@@ -526,6 +538,33 @@ async function intranetAdvertisers({ q = '', limit = 20 } = {}) {
   const lim = Math.min(Math.max(parseInt(limit, 10) || 20, 1), 50);
   const items = (_intraAdvCache.rows || [])
     .filter(r => !needle || r.name.toLowerCase().includes(needle))
+    .slice(0, lim);
+  return { ok: true, items };
+}
+
+// ══ 인트라넷 사용자(AE) 자동완성 프록시 ══ 담당AE(inad_pm) 매칭용. 스코프 키인 display_name +
+//   username·부서만 추려 반환 — 인트라넷 users 의 비밀번호·생일 등 민감필드는 매핑에서 즉시 폐기(미노출).
+//   60초 캐시·5초 타임아웃·fail-soft(stale 캐시 유지). 소비 라우트는 adminOrMaster 로 제한할 것.
+let _intraUserCache = { at: 0, rows: null };
+async function intranetStaffUsers({ q = '', limit = 20 } = {}) {
+  const now = Date.now();
+  if (!_intraUserCache.rows || now - _intraUserCache.at > 60 * 1000) {
+    try {
+      const j = await _intranetGet('/api/tables/users?limit=500&sort=display_name&order=ASC');
+      _intraUserCache = { at: now, rows: (j.data || []).map(r => ({
+        name: String(r.display_name || '').trim(),
+        username: String(r.username || '').trim(),
+        department: String(r.department || '').trim() || null,
+      })).filter(r => r.name) };
+    } catch (e) {
+      logger.warn(`[trackB] 인트라넷 사용자(AE) 조회 실패: ${e.message}`);
+      if (!_intraUserCache.rows) return { ok: false, error: 'intranet_unreachable', items: [] };
+    }
+  }
+  const needle = String(q || '').trim().toLowerCase();
+  const lim = Math.min(Math.max(parseInt(limit, 10) || 20, 1), 50);
+  const items = (_intraUserCache.rows || [])
+    .filter(r => !needle || r.name.toLowerCase().includes(needle) || r.username.toLowerCase().includes(needle))
     .slice(0, lim);
   return { ok: true, items };
 }
@@ -1978,7 +2017,7 @@ module.exports = {
   createAdvertiserScoped,
   staffOwnsAdvertiser,
   sheetAssignableByStaff,
-  intranetAdvertisers,
+  intranetAdvertisers, intranetStaffUsers, setAdvertiserInadPm,
   intranetSalesSearch,
   linkSettlement,
   unlinkSettlement,

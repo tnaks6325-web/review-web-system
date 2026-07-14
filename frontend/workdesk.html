@@ -200,6 +200,11 @@
   .advitem .ava{width:26px;height:26px;border-radius:8px;background:var(--adv-soft);color:var(--adv);display:grid;place-items:center;font-weight:800;font-size:12px;flex:none}
   .advitem .nm{font-size:12.5px;font-weight:650;flex:1;min-width:0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
   .advitem .ct{font-size:10.5px;font-weight:700;color:var(--faint);background:var(--card2);border-radius:999px;padding:1px 7px} .advitem.on .ct{background:var(--card);color:var(--adv)}
+  .advitem .pmn{display:block;font-size:10px;font-style:normal;font-weight:500;color:var(--faint);margin-top:1px}
+  .advitem .pmn.noae{color:var(--warn)}
+  .aebox{display:flex;align-items:center;gap:6px;font-size:12px;color:var(--muted);margin-right:8px;white-space:nowrap}
+  .aebox b{color:var(--ink)}
+  .aebox input{font:inherit;font-size:12px;padding:4px 8px;border:1px solid var(--accent-line);border-radius:7px;background:var(--card);color:var(--ink);outline:none}
   .own-panel{padding:18px 20px;overflow:auto}
   .ph2{display:flex;align-items:center;gap:11px;margin-bottom:4px}
   .ph2 .big{width:40px;height:40px;border-radius:11px;background:var(--adv-soft);color:var(--adv);display:grid;place-items:center;font-weight:800;font-size:16px;flex:none}
@@ -645,7 +650,17 @@ const _COLW={'#':44,'참여자':112,'연락처':110,'번호':48,'담당자':66,'
 function _colW(h){ return _COLW[h]||92; }
 // 시트 일련번호(1899-12-30 기준) → YYYY-MM-DD. 날짜형 헤더 + 순수 숫자일 때만 변환(금액 등 오변환 방지).
 function _serialToDate(n){ const ms=Math.round((n-25569)*86400000); const d=new Date(ms); if(isNaN(d.getTime()))return null; const y=d.getUTCFullYear(); if(y<2000||y>2100)return null; const p=x=>String(x).padStart(2,'0'); return `${y}-${p(d.getUTCMonth()+1)}-${p(d.getUTCDate())}`; }
-function _gridVal(h, raw){ const v=(raw==null?'':String(raw)).trim(); if(!v)return ''; if(/일자|날짜|date/i.test(h)&&/^\d{4,6}(\.\d+)?$/.test(v)){ const dt=_serialToDate(parseFloat(v)); if(dt)return dt; } return v; }
+// 편집 시작값(정본): 일련번호는 ISO 로, 그 외는 원본 그대로 — 셀 클릭 편집이 표시용 축약값으로 오염되지 않게 분리.
+function _gridEditVal(h, raw){ const v=(raw==null?'':String(raw)).trim(); if(!v)return ''; if(/일자|날짜|date/i.test(h)&&/^\d{4,6}(\.\d+)?$/.test(v)){ const dt=_serialToDate(parseFloat(v)); if(dt)return dt; } return v; }
+// 표시값: 날짜형 헤더(구매일자 등)는 "월/일 (요일)" 로 통일 — ISO(yyyy-mm-dd)·일련번호는 요일 계산, 시트식 "7 / 3 (금)" 은 표기 정규화.
+function _gridVal(h, raw){ const v=_gridEditVal(h, raw); if(!v)return ''; return /일자|날짜|date/i.test(h) ? _fmtKDate(v) : v; }
+function _fmtKDate(v){
+  const iso=v.match(/^(\d{4})-(\d{2})-(\d{2})/);
+  if(iso){ const wd=['일','월','화','수','목','금','토'][new Date(Date.UTC(+iso[1],+iso[2]-1,+iso[3])).getUTCDay()]; return `${+iso[2]}/${+iso[3]} (${wd})`; }
+  const md=v.match(/^(\d{1,2})\s*[\/.]\s*(\d{1,2})\s*(?:\(\s*([일월화수목금토])\s*\.?\s*\))?$/);
+  if(md) return `${+md[1]}/${+md[2]}`+(md[3]?` (${md[3]})`:'');
+  return v;   // 비정형(텍스트 메모 등)은 원본 유지
+}
 
 // 시트형 그리드: 왼쪽 고정 = #·참여자·연락처(DB 리뷰어 신원) + (선택 시)시트 컬럼 수취인까지 · 오른쪽 = 시트 컬럼 전체.
 function buildGrid(wd){
@@ -666,16 +681,20 @@ function buildGrid(wd){
     const badge = r.source==='manual'?' <span class="src manual">수동</span>':(r.hasOrder?' <span class="src order">주문</span>':'')
                 + (r.editable===false?' <span class="lock" title="주문/신원 앵커 없음 또는 중복 — 편집 잠금">🔒</span>':'');
     // 편집 셀 렌더(주입 안전: 헤더는 data-field 속성으로만 전달, onclick 인라인 없음)
-    const eCell=(field, disp, edited, extraCls, styleI)=> canE
-      ? `<td ${cls(styleI,'gcell'+(disp?'':' gempty')+(extraCls||''))} style="${cstyle(styleI)}"><span class="ecell${edited?' edited':''}" data-val="${esc(disp)}" data-id="${esc(r.id)}" data-field="${esc(field)}" onclick="beginEditCell(this)">${esc(disp||'—')}</span>${edited?` <span class="revb" title="되돌리기" data-id="${esc(r.id)}" data-field="${esc(field)}" onclick="revertCell(event,this)">↩</span>`:''}</td>`
+    //   editv = 편집 시작값(생략 시 disp) — 날짜 컬럼은 표시("7/3 (금)")와 별개로 ISO 정본으로 편집 시작.
+    const eCell=(field, disp, edited, extraCls, styleI, editv)=> canE
+      ? `<td ${cls(styleI,'gcell'+(disp?'':' gempty')+(extraCls||''))} style="${cstyle(styleI)}"><span class="ecell${edited?' edited':''}" data-val="${esc(editv!=null?editv:disp)}" data-id="${esc(r.id)}" data-field="${esc(field)}" onclick="beginEditCell(this)">${esc(disp||'—')}</span>${edited?` <span class="revb" title="되돌리기" data-id="${esc(r.id)}" data-field="${esc(field)}" onclick="revertCell(event,this)">↩</span>`:''}</td>`
       : `<td ${cls(styleI,'gcell'+(disp?'':' gempty')+(extraCls||''))} style="${cstyle(styleI)}">${esc(disp||'')}</td>`;
     let tds=`<td ${cls(0,'gnum')} style="${cstyle(0)}">${esc(r.seq)}</td>`+
             (canE
               ? `<td ${cls(1,'gnm')} style="${cstyle(1)}"><span class="ecell${(r.editedFields||[]).includes('reviewer_name')?' edited':''}" data-val="${esc(r.name||'')}" data-id="${esc(r.id)}" data-field="reviewer_name" onclick="beginEditCell(this)">${esc(r.name||'—')}</span>${badge}<span class="rmx" title="명단에서 제거(숨김)" onclick="hideRow('${esc(r.id)}')">×</span></td>`
               : `<td ${cls(1,'gnm')} style="${cstyle(1)}">${esc(r.name||'—')}${badge}</td>`)+
             eCell('phone8', r.phone8||'', (r.editedFields||[]).includes('phone8'), 'gph', 2);
-    H.forEach((h,j)=>{ const i=j+3; const ed=(h in ceMap); const raw= ed?ceMap[h]:rj[h]; const disp= ed?(raw==null?'':String(raw)):_gridVal(h, raw); const ok=((j===revI||j===payI)&&disp)?' gok':'';
-      tds+=eCell('col:'+h, disp, ed, ok, i); });
+    H.forEach((h,j)=>{ const i=j+3; const ed=(h in ceMap); const raw= ed?ceMap[h]:rj[h];
+      const disp= ed?(raw==null?'':String(raw)):_gridVal(h, raw);
+      const editv= ed?disp:_gridEditVal(h, raw);   // 편집은 정본값에서 시작(표시 축약값 오염 방지)
+      const ok=((j===revI||j===payI)&&disp)?' gok':'';
+      tds+=eCell('col:'+h, disp, ed, ok, i, editv); });
     return `<tr>${tds}</tr>`;
   }).join('')||`<tr><td colspan="${cols.length}" class="empty">명단 없음 — 그림자 투영을 실행하세요.</td></tr>`;
   // 고정 열 선택(수취인까지 등) — 시트 컬럼 중 신원계열만 옵션으로.
@@ -1037,7 +1056,7 @@ async function renderOwnershipView(){
   const r=await api('/api/trackb/advertisers');
   if(!r||!r.ok){ $('#advs').innerHTML=`<div class="empty">업체 목록은 admin/master에서 제공</div>`; return; }
   STATE.advs=r.items||[];
-  $('#advs').innerHTML = STATE.advs.map((a,i)=>`<div class="advitem" data-i="${i}" onclick="selAdv(${i})"><span class="ava">${esc((a.name||'?').slice(0,1))}</span><span class="nm">${esc(a.name)}</span><span class="ct">${a.owned}</span></div>`).join('')||`<div class="empty">등록된 업체 없음</div>`;
+  $('#advs').innerHTML = STATE.advs.map((a,i)=>`<div class="advitem" data-i="${i}" onclick="selAdv(${i})"><span class="ava">${esc((a.name||'?').slice(0,1))}</span><span class="nm">${esc(a.name)}<i class="pmn ${a.inadPm?'':'noae'}">${a.inadPm?('AE '+esc(a.inadPm)):'AE 미지정'}</i></span><span class="ct">${a.owned}</span></div>`).join('')||`<div class="empty">등록된 업체 없음</div>`;
 }
 // 업체(거래처) 추가 — 기존 포털 거래처 원장(POST /api/portal/advertisers, adminOrMaster) 재사용.
 //   흐름: ① 캠페인 시트 먼저 선택(탭 미리보기로 어떤 캠페인인지 확인) → ② 거래처명 검색(인트라넷 자동완성)
@@ -1057,13 +1076,19 @@ function showAddAdvertiser(){
           <input id="advName" placeholder="먼저 캠페인 시트를 선택하세요" autocomplete="off" disabled oninput="intraSuggest(this.value)" onkeydown="if(event.key==='Enter')createAdvertiser()">
           <div id="advSug" class="advsug"></div>
         </div>
-        <label style="margin-top:11px">담당 AE (로그인 정보 기준 자동 지정)</label>
-        <input id="advPm" value="" readonly style="background:var(--card2);color:var(--muted);cursor:not-allowed">
+        <label style="margin-top:11px">담당 AE ${(STATE.role==='master'||STATE.role==='admin')?'<span style="color:var(--faint);font-weight:400">(인트라넷 사용자 자동완성 · 거래처 선택 시 담당자 자동 제안 · 비우면 미지정)</span>':'(로그인 정보 기준 자동 지정)'}</label>
+        ${(STATE.role==='master'||STATE.role==='admin')
+          ? `<input id="advPm" list="aelist2" placeholder="예: 박세희" autocomplete="off"><datalist id="aelist2"></datalist>`
+          : `<input id="advPm" value="" readonly style="background:var(--card2);color:var(--muted);cursor:not-allowed">`}
         <div id="advErr" style="color:var(--bad);font-size:12px;margin-top:9px;min-height:15px"></div>
         <button class="btn pri assignbtn" onclick="createAdvertiser()">＋ 업체 등록 + 시트 소유 지정</button>
       </div>
     </div>`;
-  $('#advPm').value = STATE.name || '';
+  if(STATE.role==='master'||STATE.role==='admin'){
+    api('/api/trackb/intranet/users').then(r=>{ const dl=$('#aelist2');
+      if(dl&&r&&r.ok) dl.innerHTML=(r.items||[]).map(u=>`<option value="${esc(u.name)}">${esc(u.username)}${u.department?' · '+esc(u.department):''}</option>`).join('');
+    }).catch(()=>{});
+  } else $('#advPm').value = STATE.name || '';
   setTimeout(()=>{ const el=$('#advSheet'); if(el) el.focus(); },40);
 }
 // 시트 선택 → 거래처명 입력 활성화 + 탭 미리보기(어떤 캠페인 시트인지 확인용).
@@ -1084,14 +1109,18 @@ function intraSuggest(q){
     const r=await api('/api/trackb/intranet/advertisers?q='+encodeURIComponent(q.trim())).catch(()=>null);
     const items=(r&&r.ok&&r.items)||[];
     if(!items.length){ box.classList.remove('show'); box.innerHTML=''; return; }
-    box.innerHTML=items.map(it=>`<div class="sugitem" onclick="pickIntra('${esc(it.name).replace(/'/g,'&#39;')}')">${esc(it.name)}${it.manager?`<span class="sugm">${esc(it.manager)}</span>`:''}</div>`).join('');
+    box.innerHTML=items.map(it=>`<div class="sugitem" onclick="pickIntra('${esc(it.name).replace(/'/g,'&#39;')}','${esc(it.manager||'').replace(/'/g,'&#39;')}')">${esc(it.name)}${it.manager?`<span class="sugm">${esc(it.manager)}</span>`:''}</div>`).join('');
     box.classList.add('show');
   },250);
 }
-function pickIntra(name){ const el=$('#advName'); if(el) el.value=name; const box=$('#advSug'); if(box){ box.classList.remove('show'); box.innerHTML=''; } }
+// 거래처 선택 시: master/admin 이고 담당AE 칸이 비어 있으면 인트라넷 광고주DB의 담당자(manager)를 자동 제안(수정 가능).
+function pickIntra(name, manager){ const el=$('#advName'); if(el) el.value=name;
+  const pm=$('#advPm');
+  if(pm&&!pm.readOnly&&!pm.value.trim()&&(manager||'').trim()) pm.value=manager.trim();
+  const box=$('#advSug'); if(box){ box.classList.remove('show'); box.innerHTML=''; } }
 async function createAdvertiser(){
   const sheetId=($('#advSheet')&&$('#advSheet').value)||'';
-  const name=($('#advName').value||'').trim(), inad_pm=(STATE.name||'').trim();
+  const name=($('#advName').value||'').trim(), inad_pm=(($('#advPm')&&$('#advPm').value)||'').trim();
   const err=$('#advErr'); if(err) err.textContent='';
   if(!sheetId){ if(err) err.textContent='캠페인 시트를 먼저 선택하세요.'; return; }
   if(!name){ if(err) err.textContent='거래처명을 입력하세요.'; return; }
@@ -1139,6 +1168,7 @@ function renderOwnPanel(a, items){
   const ot=STATE.ownTabs||[];
   $('#ownPanel').innerHTML = `
     <div class="ph2"><span class="big">${esc((a.name||'?').slice(0,1))}</span><div style="flex:1"><h2>${esc(a.name)}</h2><div class="acc">거래처 ID: ${esc(a.id)} · 소유 ${items.length}</div></div>
+      <div class="aebox" id="aebox">${_aeChipHtml(a)}</div>
       <label class="setvis" title="이 거래처가 통합작업대에서 정산(금액·상태)을 볼 수 있는지"><input type="checkbox" id="setvis" ${a.settlementVisible===false?'':'checked'} onchange="toggleSettleVis('${esc(a.id)}',this.checked)"> 정산 노출</label></div>
     <div class="sect"><div class="st">소유 캠페인</div>${owns}</div>
     <div class="sect" id="owntabsSect">${_ownTabsHtml()}</div>
@@ -1154,6 +1184,33 @@ function renderOwnPanel(a, items){
         <button class="btn pri assignbtn" onclick="assignOwn()">＋ 소유 지정</button>
       </div>
     </div>`;
+}
+// ── 담당 AE(inad_pm) 매칭 — master/admin 만 편집(staff 는 표시만). 인트라넷 사용자 자동완성(datalist). ──
+function _aeChipHtml(a){
+  const isAdmin = STATE.role==='master'||STATE.role==='admin';
+  const cur = a.inadPm ? `<b>${esc(a.inadPm)}</b>` : '<b style="color:var(--warn)">미지정</b>';
+  return `담당 AE: ${cur}${isAdmin?` <button class="btn xs" onclick="editAe()">변경</button>`:''}`;
+}
+function editAe(){ const a=STATE.advCur; if(!a) return; const box=$('#aebox'); if(!box||box.querySelector('input')) return;
+  box.innerHTML=`담당 AE: <input id="aein" list="aelist" placeholder="인트라넷 사용자명" autocomplete="off" style="width:130px"
+      onkeydown="if(event.key==='Enter')saveAe(); else if(event.key==='Escape')cancelAe()"><datalist id="aelist"></datalist>
+    <button class="btn xs pri" onclick="saveAe()">저장</button> <button class="btn xs" onclick="cancelAe()">취소</button>`;
+  const inp=$('#aein'); inp.value=a.inadPm||''; inp.focus(); inp.select();
+  api('/api/trackb/intranet/users').then(r=>{ const dl=$('#aelist');
+    if(dl&&r&&r.ok) dl.innerHTML=(r.items||[]).map(u=>`<option value="${esc(u.name)}">${esc(u.username)}${u.department?' · '+esc(u.department):''}</option>`).join('');
+  }).catch(()=>{});
+}
+function cancelAe(){ const a=STATE.advCur, box=$('#aebox'); if(box&&a) box.innerHTML=_aeChipHtml(a); }
+async function saveAe(){ const a=STATE.advCur; if(!a) return;
+  const v=(($('#aein')&&$('#aein').value)||'').trim();
+  let r=null; try{ r=await api('/api/trackb/advertisers/inad-pm',{method:'POST',body:JSON.stringify({advertiserId:a.id, inadPm:v})}); }catch(_){ }
+  if(r&&r.ok){ a.inadPm=(r.advertiser&&r.advertiser.inadPm)||v; toast(a.inadPm?('담당 AE 매칭: '+a.inadPm):'담당 AE 해제');
+    const li=(STATE.advs||[]).find(x=>x.id===a.id); if(li) li.inadPm=a.inadPm;
+    // 좌측 업체 목록 서브라벨 즉시 갱신(재조회 없이)
+    document.querySelectorAll('.advitem').forEach(el=>{ const ad=STATE.advs[+el.dataset.i], pm=el.querySelector('.pmn');
+      if(ad&&pm){ pm.textContent=ad.inadPm?('AE '+ad.inadPm):'AE 미지정'; pm.classList.toggle('noae',!ad.inadPm); } });
+  } else toast('담당 AE 저장 실패'+(r&&r.error?': '+r.error:''));
+  cancelAe();
 }
 // 연결된 탭 섹션(컬럼형) — 브랜드 필터 칩 + 헤더 + 행 그리드. setOwnBrand 가 이 섹션만 재렌더(#owntabsSect).
 // openOwnTab 인덱스는 항상 STATE.ownTabs 원본 기준(필터로 순서가 바뀌어도 원본 i 를 넘김).
