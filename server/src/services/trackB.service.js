@@ -456,15 +456,27 @@ async function ownedTabsForAdvertiser({ advertiserId } = {}) {
         ORDER BY rst.sheet_id, rst.tab_gid, rst.mirrored_at DESC
      )
      SELECT t.sheet_id AS "sheetId", t.spreadsheet_title AS "spreadsheetTitle", t.tab_gid AS "tabGid",
-            t.tab_name AS "tabName", t.row_count AS "rowCount", fs.first_seen AS "firstSeenAt",
+            t.tab_name AS "tabName", t.row_count AS "rowCount", cnt.first_seen AS "firstSeenAt",
+            cnt.total AS "bTotal", cnt.submitted AS "bSub", cnt.paid AS "bPaid",
+            tc.manager, wo.recruit_count AS "woRecruit",
             EXISTS (SELECT 1 FROM index_master im WHERE im.status = 'active' AND im.sheet_id = t.sheet_id
                       AND (im.tab_gid = t.tab_gid OR im.tab_name = t.tab_name)) AS "active"
        FROM tabs t
        LEFT JOIN LATERAL (
-         SELECT MIN(cp.first_seen_at) AS first_seen FROM campaign_participants cp
+         SELECT MIN(cp.first_seen_at) AS first_seen,
+                COUNT(*) FILTER (WHERE cp.active AND cp.deleted_at IS NULL)::int AS total,
+                COUNT(*) FILTER (WHERE cp.active AND cp.deleted_at IS NULL AND cp.is_submitted)::int AS submitted,
+                COUNT(*) FILTER (WHERE cp.active AND cp.deleted_at IS NULL AND cp.is_paid)::int AS paid
+           FROM campaign_participants cp
           WHERE cp.sheet_id = t.sheet_id AND (cp.tab_gid = t.tab_gid OR cp.tab_name = t.tab_name)
-       ) fs ON TRUE
-      ORDER BY COALESCE(fs.first_seen, t.mirrored_at) DESC NULLS LAST, t.tab_name DESC`, [advertiserId]);
+       ) cnt ON TRUE
+       LEFT JOIN tab_configs tc ON tc.sheet_id = t.sheet_id AND tc.tab_name = t.tab_name
+       LEFT JOIN LATERAL (
+         SELECT w.recruit_count FROM trackb_work_order_links l JOIN work_orders w ON w.id = l.work_order_id
+          WHERE l.sheet_id = t.sheet_id AND l.tab_name = t.tab_name AND l.deleted_at IS NULL
+          ORDER BY l.created_at DESC LIMIT 1
+       ) wo ON TRUE
+      ORDER BY COALESCE(cnt.first_seen, t.mirrored_at) DESC NULLS LAST, t.tab_name DESC`, [advertiserId]);
   return rows;
 }
 
