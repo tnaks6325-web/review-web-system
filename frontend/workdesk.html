@@ -45,14 +45,28 @@
   .sugitem{padding:8px 11px;font-size:12.5px;cursor:pointer;display:flex;justify-content:space-between;gap:8px}
   .sugitem:hover{background:var(--accent-soft)}
   .sugm{color:var(--faint);font-size:11px}
-  .owntab{display:flex;align-items:center;gap:12px;padding:11px 14px;border:1px solid var(--line);border-radius:13px;margin-bottom:7px;cursor:pointer;background:var(--card);transition:transform .25s var(--ease),box-shadow .2s,border-color .2s}
+  /* 연결탭 목록 — 컬럼형 그리드(헤더·행 동일 템플릿, 정보를 행 전체 폭에 펼침). 좁은 화면은 otwrap 가로 스크롤 */
+  .otwrap{overflow-x:auto;padding-bottom:2px}
+  .othead,.owntab{display:grid;grid-template-columns:44px minmax(170px,1.6fr) 96px minmax(100px,1.2fr) 86px 92px 64px 116px 44px;gap:10px;align-items:center;min-width:900px}
+  .othead{font-size:9.5px;font-weight:750;letter-spacing:.05em;text-transform:uppercase;color:var(--faint);padding:0 14px 5px}
+  .owntab{padding:9px 14px;border:1px solid var(--line);border-radius:13px;margin-bottom:7px;cursor:pointer;background:var(--card);transition:transform .25s var(--ease),box-shadow .2s,border-color .2s}
   .owntab:hover{transform:translateY(-2px);box-shadow:0 6px 18px rgba(16,24,40,.08);border-color:var(--accent-line)}
-  .owntab .info{flex:1;min-width:0}
-  .owntab .info>b{font-size:13px;display:block;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
-  .owntab .obadges{display:flex;gap:5px;flex-wrap:wrap;margin-top:4px}
-  .owntab .osub{display:block;font-size:11px;color:var(--faint);margin-top:4px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
-  .owntab .osub b{color:var(--muted);font-weight:700}
-  .owntab .openb{font-size:11px;color:var(--accent);font-weight:700;white-space:nowrap}
+  .owntab .oname{min-width:0}
+  .owntab .oname b{font-size:12.5px;display:block;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+  .owntab .osub{display:block;font-size:10.5px;color:var(--faint);margin-top:3px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+  .owntab .ocol{font-size:12px;min-width:0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+  .owntab .ocol.dim{color:var(--faint)}
+  .owntab .obr{font-weight:700}
+  .owntab .ocnt{font-size:12px;font-variant-numeric:tabular-nums;white-space:nowrap;color:var(--muted)}
+  .owntab .ocnt b{font-weight:700;color:var(--ink)} .owntab .ocnt .c-sub{color:var(--accent)} .owntab .ocnt .c-paid{color:var(--safe)}
+  .owntab .openb{font-size:11px;color:var(--accent);font-weight:700;white-space:nowrap;text-align:right}
+  .odot{display:inline-block;width:7px;height:7px;border-radius:50%;background:var(--faint);opacity:.35;margin-right:6px;vertical-align:1px}
+  .odot.a{background:var(--safe);opacity:1}
+  /* 브랜드 필터 칩(한 광고주가 다수 브랜드 보유 — 관제실 '브랜드' 컬럼 대응) */
+  .obchips{display:flex;gap:6px;flex-wrap:wrap;margin:2px 0 10px}
+  .obchip{font-size:11px;font-weight:650;padding:3px 10px;border-radius:999px;border:1px solid var(--line);background:var(--card);cursor:pointer;color:var(--muted)}
+  .obchip:hover{border-color:var(--accent-line)}
+  .obchip.on{background:var(--accent-soft);border-color:color-mix(in srgb,var(--accent) 35%,transparent);color:var(--accent-deep)}
   /* 키트 배지(ok/warn/bad/neutral) — 연결탭 속성 배지 공용 */
   .bb{display:inline-flex;align-items:center;gap:4px;font-size:10.5px;font-weight:700;padding:2px 8px;border-radius:999px;background:var(--card2);color:var(--muted)}
   .bb.ok{background:var(--accent-soft);color:var(--accent-deep)}
@@ -265,16 +279,34 @@ function parseJwt(t){ try{ const b=atob(t.split('.')[1].replace(/-/g,'+').replac
 // KPI 도넛 게이지(r=18, 둘레≈113). cls: ''(블루)/'g-safe'/'g-warn'
 function gaugeSvg(pct, label, cls){ const p=Math.max(0,Math.min(100,Math.round(pct||0)));
   return `<span class="gauge ${cls||''}"><svg width="44" height="44"><circle class="trk" cx="22" cy="22" r="18"/><circle class="bar" cx="22" cy="22" r="18" style="stroke-dashoffset:${(113*(1-p/100)).toFixed(1)}"/></svg><span class="pct">${esc(label!=null?label:p+'%')}</span></span>`; }
-// 탭명 파싱: "7/3(쿠팡)디아쉬끄_헤어틴트 50건", "6/25(공영쇼핑)…" → 채널·목표건수·차수 (비정형은 미표시)
+// 탭명 파싱 v2: "7/3(쿠팡)디아쉬끄_퀵픽싱 헤어틴트 50건" → 채널·목표건수·차수 + 브랜드·상품·바이럴.
+// 관제실(어니스트캄x인애드 업무포털) 컬럼(브랜드|상품|채널|차수|건수)을 탭명에서 근사 추출 — 비정형은 미표시(fail-soft).
+// 브랜드 = 첫 '_' 세그먼트(날짜·채널 제거 후): "0604엘시스테인_화이트닝코렉터크림100건" → 엘시스테인/화이트닝코렉터크림.
+const _TAB_CHANNELS=['쿠팡','네이버','스마트스토어','메이커스','톡스토어','카카오','컬리','마켓컬리','공영쇼핑','올리브영','W컨셉','무신사','지그재그','에이블리','오늘의집','11번가','지마켓','옥션','티몬','위메프','SSG','롯데온'];
 function parseTabMeta(name){ const s=String(name||''); const m={};
   const ch=s.match(/\(([^)]{1,10})\)/); if(ch&&!/^\d/.test(ch[1])) m.channel=ch[1].trim();
   const cnt=s.match(/(\d{1,4})\s*건/); if(cnt) m.count=parseInt(cnt[1],10);
   const rnd=s.match(/(\d{1,2})\s*차(?![수선])/); if(rnd) m.round=rnd[1]+'차';
+  if(/바이럴|체험단|카페\s*\/\s*(블로그|커뮤)/.test(s)) m.viral=true;
+  // 브랜드/상품: (채널)·선행날짜(7/3, 0612)) 제거 → '_' 분해 → 세그 꼬리(건수·차수·바이럴 채널어) 정리
+  const core=s.replace(/\([^)]{0,10}\)/g,' ')
+    .replace(/^\s*\d{1,2}\s*\/\s*\d{1,2}\s*[).\-]?/,'')
+    .replace(/^\s*\d{4}\s*[).\-]?/,'').trim();
+  let segs=core.split(/_+/).map(x=>x.trim()).filter(Boolean);
+  if(segs.length&&_TAB_CHANNELS.includes(segs[0])){ if(!m.channel)m.channel=segs[0]; segs=segs.slice(1); }
+  segs=segs.map(x=>x
+    .replace(/\d{1,4}\s*건.*$/,'')
+    .replace(/(\s*\/?\s*(카페|블로그|커뮤니티|커뮤|바이럴|체험단))+\s*$/,'')
+    .replace(/\s*\d{1,2}\s*차(?![수선])\s*$/,'')
+    .trim()).filter(Boolean);
+  if(segs.length>=2){ if(segs[0].length<=14){ m.brand=segs[0]; m.product=segs.slice(1).join(' '); } else m.product=segs.join(' '); }
+  else if(segs.length===1&&(m.channel||m.count||m.viral)) m.product=segs[0];   // 차수만으론 상품 추정 안 함(탭명 중복 노출 방지)
   return m; }
 
 let STATE = { role:'', name:'', view:'workdesk', tabs:[], cur:null, wd:null, freezeUpto:null,
               ov:[], ovq:'', pendingTab:null, lastBatch:null,
-              advs:[], advCur:null, tabIndex:{}, sheetMap:{}, addMode:'all', addSheet:null, addTabs:{} };
+              advs:[], advCur:null, tabIndex:{}, sheetMap:{}, addMode:'all', addSheet:null, addTabs:{},
+              ownTabs:[], ownBrand:null, ownBrandList:[] };   // 연결탭 목록 + 브랜드 필터(null=전체, ''=미분류)
 
 async function boot(){
   if (!token()) return renderLogin();
@@ -1067,7 +1099,7 @@ function buildTabIndex(list){ STATE.sheetMap={}; STATE.tabIndex={};
   for(const t of (list||STATE.tabs)){ if(!STATE.sheetMap[t.sheetId]) STATE.sheetMap[t.sheetId]={title:t.spreadsheetTitle||t.sheetId,tabs:[]};
     STATE.sheetMap[t.sheetId].tabs.push(t); STATE.tabIndex[t.sheetId+'::'+(t.tabGid||'')]=t.tabName; } }
 
-async function selAdv(i){ const a=STATE.advs[i]; STATE.advCur=a; STATE.addSheet=null; STATE.addMode='all'; STATE.addTabs={};
+async function selAdv(i){ const a=STATE.advs[i]; STATE.advCur=a; STATE.addSheet=null; STATE.addMode='all'; STATE.addTabs={}; STATE.ownBrand=null;
   document.querySelectorAll('.advitem').forEach(el=>el.classList.toggle('on',+el.dataset.i===i));
   $('#ownPanel').innerHTML=`<div class="empty">불러오는 중…</div>`;
   const [r, rt]=await Promise.all([
@@ -1093,29 +1125,11 @@ function renderOwnPanel(a, items){
   }).join('') || `<div class="empty" style="padding:20px">소유 캠페인 없음 — 아래에서 추가하세요.</div>`;
   const sheetOpts = Object.keys(STATE.sheetMap).map(sid=>`<option value="${esc(sid)}">${esc(sheetTitle(sid))}</option>`).join('');
   const ot=STATE.ownTabs||[];
-  // 연결탭 카드: 진행률 게이지(제출/참여) + 채널·목표건수·차수 배지(발주 우선→탭명 파싱) + 담당 + 카운트
-  const tabList = ot.map((t,i)=>{
-    const pm=parseTabMeta(t.tabName);
-    const target=(t.woRecruit&&+t.woRecruit)||pm.count||null;
-    const total=t.bTotal||0, sub=t.bSub||0, paid=t.bPaid||0;
-    const pct=total?Math.round(sub/total*100):0;
-    const badges=[
-      pm.channel?`<span class="bb ok">${esc(pm.channel)}</span>`:'',
-      target?`<span class="bb">${target}건${t.woRecruit?' · 발주':''}</span>`:'',
-      pm.round?`<span class="bb">${esc(pm.round)}</span>`:'',
-      t.active?'<span class="bb safe">활성</span>':'<span class="bb" style="opacity:.6">비활성</span>',
-    ].filter(Boolean).join('');
-    const gauge=total?gaugeSvg(pct,pct+'%',pct>=100?'g-safe':''):gaugeSvg(0,'—','');
-    return `<div class="owntab" onclick="openOwnTab(${i})">${gauge}<div class="info"><b>${esc(t.tabName)}</b>
-      <span class="obadges">${badges}</span>
-      <span class="osub">${esc(t.spreadsheetTitle||sheetTitle(t.sheetId))}${t.manager?` · 담당 <b>${esc(t.manager)}</b>`:''} · 참여 <b>${total}</b> · 제출 <b>${sub}</b> · 입금 <b>${paid}</b>${t.firstSeenAt?` · ${esc(String(t.firstSeenAt).slice(0,10))}`:''}</span></div>
-      <span class="openb">열기 ›</span></div>`;
-  }).join('') || `<div class="empty" style="padding:14px">연결된 탭 없음</div>`;
   $('#ownPanel').innerHTML = `
     <div class="ph2"><span class="big">${esc((a.name||'?').slice(0,1))}</span><div style="flex:1"><h2>${esc(a.name)}</h2><div class="acc">거래처 ID: ${esc(a.id)} · 소유 ${items.length}</div></div>
       <label class="setvis" title="이 거래처가 통합작업대에서 정산(금액·상태)을 볼 수 있는지"><input type="checkbox" id="setvis" ${a.settlementVisible===false?'':'checked'} onchange="toggleSettleVis('${esc(a.id)}',this.checked)"> 정산 노출</label></div>
     <div class="sect"><div class="st">소유 캠페인</div>${owns}</div>
-    <div class="sect"><div class="st">연결된 탭 ${ot.length} <span style="font-weight:400;color:var(--faint);font-size:11px">· 최신순 — 클릭하면 작업대로 열기</span></div>${tabList}</div>
+    <div class="sect" id="owntabsSect">${_ownTabsHtml()}</div>
     <div class="sect"><div class="st">소유 추가</div>
       <div class="add">
         <label>캠페인 시트</label>
@@ -1129,6 +1143,47 @@ function renderOwnPanel(a, items){
       </div>
     </div>`;
 }
+// 연결된 탭 섹션(컬럼형) — 브랜드 필터 칩 + 헤더 + 행 그리드. setOwnBrand 가 이 섹션만 재렌더(#owntabsSect).
+// openOwnTab 인덱스는 항상 STATE.ownTabs 원본 기준(필터로 순서가 바뀌어도 원본 i 를 넘김).
+function _ownTabsHtml(){
+  const ot=STATE.ownTabs||[];
+  const rows=ot.map((t,i)=>({t,i,pm:parseTabMeta(t.tabName)}));
+  const bc={}; let noBrand=0;
+  rows.forEach(r=>{ if(r.pm.brand) bc[r.pm.brand]=(bc[r.pm.brand]||0)+1; else noBrand++; });
+  const brands=Object.keys(bc).sort((a,b)=>bc[b]-bc[a]||a.localeCompare(b));
+  STATE.ownBrandList=brands;
+  if(STATE.ownBrand!==null&&STATE.ownBrand!==''&&!bc[STATE.ownBrand]) STATE.ownBrand=null;   // 목록 갱신으로 사라진 브랜드
+  const chips=(brands.length>=2||(brands.length===1&&noBrand))
+    ? `<div class="obchips"><span class="obchip ${STATE.ownBrand===null?'on':''}" onclick="setOwnBrand(-1)">전체 ${ot.length}</span>`
+      + brands.map((b,bi)=>`<span class="obchip ${STATE.ownBrand===b?'on':''}" onclick="setOwnBrand(${bi})">${esc(b)} ${bc[b]}</span>`).join('')
+      + (noBrand?`<span class="obchip ${STATE.ownBrand===''?'on':''}" onclick="setOwnBrand(-2)">미분류 ${noBrand}</span>`:'')+`</div>` : '';
+  const vis=rows.filter(r=>STATE.ownBrand===null||(STATE.ownBrand===''?!r.pm.brand:r.pm.brand===STATE.ownBrand));
+  const list=vis.map(({t,i,pm})=>{
+    const target=(t.woRecruit&&+t.woRecruit)||pm.count||null;
+    const total=t.bTotal||0, sub=t.bSub||0, paid=t.bPaid||0;
+    const pct=total?Math.round(sub/total*100):0;
+    const gauge=total?gaugeSvg(pct,pct+'%',pct>=100?'g-safe':''):gaugeSvg(0,'—','');
+    const chan=[pm.channel?`<span class="bb ok">${esc(pm.channel)}</span>`:'', pm.viral?'<span class="bb warn">바이럴</span>':''].filter(Boolean).join(' ')||'<span class="ocol dim">—</span>';
+    const tgt=[target?`${target}건${t.woRecruit?'·발주':''}`:'', pm.round||''].filter(Boolean).join(' · ')||'—';
+    return `<div class="owntab" onclick="openOwnTab(${i})" title="${esc(t.tabName)}">
+      ${gauge}
+      <div class="oname"><b><i class="odot ${t.active?'a':''}" title="${t.active?'활성':'비활성'}"></i>${esc(t.tabName)}</b>
+        <span class="osub">${esc(t.spreadsheetTitle||sheetTitle(t.sheetId))}${t.firstSeenAt?` · ${esc(String(t.firstSeenAt).slice(0,10))}`:''}</span></div>
+      <span class="ocol ${pm.brand?'obr':'dim'}">${esc(pm.brand||'—')}</span>
+      <span class="ocol ${pm.product?'':'dim'}" title="${esc(pm.product||'')}">${esc(pm.product||'—')}</span>
+      <span class="ocol">${chan}</span>
+      <span class="ocol ${tgt==='—'?'dim':''}">${esc(tgt)}</span>
+      <span class="ocol ${t.manager?'':'dim'}">${esc(t.manager||'—')}</span>
+      <span class="ocnt"><b>${total}</b> · <b class="c-sub">${sub}</b> · <b class="c-paid">${paid}</b></span>
+      <span class="openb">열기 ›</span></div>`;
+  }).join('');
+  const body=ot.length
+    ? `${chips}<div class="otwrap"><div class="othead"><span>진행</span><span>캠페인 탭</span><span>브랜드</span><span>상품</span><span>채널</span><span>목표·차수</span><span>담당</span><span>참여·제출·입금</span><span></span></div>${list||'<div class="empty" style="padding:14px">이 브랜드의 탭 없음</div>'}</div>`
+    : `<div class="empty" style="padding:14px">연결된 탭 없음</div>`;
+  return `<div class="st">연결된 탭 ${ot.length} <span style="font-weight:400;color:var(--faint);font-size:11px">· 최신순 — 클릭하면 작업대로 열기</span></div>${body}`;
+}
+function setOwnBrand(i){ STATE.ownBrand = i===-1?null : i===-2?'' : ((STATE.ownBrandList||[])[i]!=null?STATE.ownBrandList[i]:null);
+  const el=$('#owntabsSect'); if(el) el.innerHTML=_ownTabsHtml(); }
 function setAddMode(m){ STATE.addMode=m; document.querySelectorAll('.radio').forEach(r=>r.classList.toggle('on',r.dataset.m===m));
   const to=$('#taboptions'); to.classList.toggle('show', m==='tab' && STATE.addSheet); if(m==='tab') renderTabOptions(); else to.innerHTML=''; }
 function onAddSheet(){ STATE.addSheet=$('#addSheet').value||null; STATE.addTabs={}; if(STATE.addMode==='tab') renderTabOptions(); }
