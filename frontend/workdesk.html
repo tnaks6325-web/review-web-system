@@ -47,7 +47,7 @@
   .sugm{color:var(--faint);font-size:11px}
   /* 연결탭 목록 — 컬럼형 그리드(헤더·행 동일 템플릿, 정보를 행 전체 폭에 펼침). 좁은 화면은 otwrap 가로 스크롤 */
   .otwrap{overflow-x:auto;padding-bottom:2px}
-  .othead,.owntab{display:grid;grid-template-columns:44px minmax(170px,1.6fr) 96px minmax(100px,1.2fr) 86px 92px 64px 116px 44px;gap:10px;align-items:center;min-width:900px}
+  .othead,.owntab{display:grid;grid-template-columns:44px minmax(170px,1.5fr) 90px minmax(100px,1fr) 80px 88px 60px 108px 64px 64px 64px 148px 64px minmax(120px,1fr) 44px;gap:10px;align-items:center;min-width:1420px}
   .othead{font-size:9.5px;font-weight:750;letter-spacing:.05em;text-transform:uppercase;color:var(--faint);padding:0 14px 5px}
   .owntab{padding:9px 14px;border:1px solid var(--line);border-radius:13px;margin-bottom:7px;cursor:pointer;background:var(--card);transition:transform .25s var(--ease),box-shadow .2s,border-color .2s}
   .owntab:hover{transform:translateY(-2px);box-shadow:0 6px 18px rgba(16,24,40,.08);border-color:var(--accent-line)}
@@ -62,6 +62,14 @@
   .owntab .openb{font-size:11px;color:var(--accent);font-weight:700;white-space:nowrap;text-align:right}
   .odot{display:inline-block;width:7px;height:7px;border-radius:50%;background:var(--faint);opacity:.35;margin-right:6px;vertical-align:1px}
   .odot.a{background:var(--safe);opacity:1}
+  /* 정산 컬럼(관제실 대응): 날짜셀·금액셀·비고(클릭 편집) */
+  .owntab .odate{font-size:11.5px;font-variant-numeric:tabular-nums}
+  .owntab .omoney{font-size:11px;font-variant-numeric:tabular-nums;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+  .owntab .omoney .pd-ok{color:var(--safe);font-weight:700} .owntab .omoney .pd-part{color:var(--warn);font-weight:700} .owntab .omoney .pd-zero{color:var(--faint)}
+  .owntab .omemo{font-size:11.5px;color:var(--muted);cursor:text;border-radius:6px;padding:3px 6px;margin:-3px -6px}
+  .owntab .omemo:hover{background:var(--card2);outline:1px dashed var(--accent-line)}
+  .owntab .omemo i{color:var(--faint);font-style:normal;opacity:.6}
+  .omemoin{width:100%;font:inherit;font-size:11.5px;padding:3px 6px;border:1px solid var(--accent-line);border-radius:6px;background:var(--card);color:var(--ink);outline:none}
   /* 브랜드 필터 칩(한 광고주가 다수 브랜드 보유 — 관제실 '브랜드' 컬럼 대응) */
   .obchips{display:flex;gap:6px;flex-wrap:wrap;margin:2px 0 10px}
   .obchip{font-size:11px;font-weight:650;padding:3px 10px;border-radius:999px;border:1px solid var(--line);background:var(--card);cursor:pointer;color:var(--muted)}
@@ -306,7 +314,8 @@ function parseTabMeta(name){ const s=String(name||''); const m={};
 let STATE = { role:'', name:'', view:'workdesk', tabs:[], cur:null, wd:null, freezeUpto:null,
               ov:[], ovq:'', pendingTab:null, lastBatch:null,
               advs:[], advCur:null, tabIndex:{}, sheetMap:{}, addMode:'all', addSheet:null, addTabs:{},
-              ownTabs:[], ownBrand:null, ownBrandList:[] };   // 연결탭 목록 + 브랜드 필터(null=전체, ''=미분류)
+              ownTabs:[], ownBrand:null, ownBrandList:[],     // 연결탭 목록 + 브랜드 필터(null=전체, ''=미분류)
+              ownSettle:{}, ownSettleFor:null };              // 연결탭 정산 요약(비동기 필, 업체 전환 경합 가드)
 
 async function boot(){
   if (!token()) return renderLogin();
@@ -1100,6 +1109,7 @@ function buildTabIndex(list){ STATE.sheetMap={}; STATE.tabIndex={};
     STATE.sheetMap[t.sheetId].tabs.push(t); STATE.tabIndex[t.sheetId+'::'+(t.tabGid||'')]=t.tabName; } }
 
 async function selAdv(i){ const a=STATE.advs[i]; STATE.advCur=a; STATE.addSheet=null; STATE.addMode='all'; STATE.addTabs={}; STATE.ownBrand=null;
+  STATE.ownSettle={}; STATE.ownSettleFor=a.id;
   document.querySelectorAll('.advitem').forEach(el=>el.classList.toggle('on',+el.dataset.i===i));
   $('#ownPanel').innerHTML=`<div class="empty">불러오는 중…</div>`;
   const [r, rt]=await Promise.all([
@@ -1108,6 +1118,7 @@ async function selAdv(i){ const a=STATE.advs[i]; STATE.advCur=a; STATE.addSheet=
   ]);
   STATE.ownTabs=(rt&&rt.ok&&rt.items)||[];
   renderOwnPanel(a, (r&&r.items)||[]);
+  loadOwnSettlement(a.id);   // 정산 컬럼은 비동기 필(패널 렌더 비차단)
 }
 // 연결된 탭 클릭 → 작업대에서 그 탭 열기(관측 뷰 "열기"와 동일한 pendingTab 계약).
 function openOwnTab(i){ const t=(STATE.ownTabs||[])[i]; if(!t) return;
@@ -1165,6 +1176,27 @@ function _ownTabsHtml(){
     const gauge=total?gaugeSvg(pct,pct+'%',pct>=100?'g-safe':''):gaugeSvg(0,'—','');
     const chan=[pm.channel?`<span class="bb ok">${esc(pm.channel)}</span>`:'', pm.viral?'<span class="bb warn">바이럴</span>':''].filter(Boolean).join(' ')||'<span class="ocol dim">—</span>';
     const tgt=[target?`${target}건${t.woRecruit?'·발주':''}`:'', pm.round||''].filter(Boolean).join(' · ')||'—';
+    // 정산 컬럼(관제실 대응): 링크된 탭만 인트라넷 요약 대상. 요약 도착 전 '…', 미링크 '—'.
+    const st=(STATE.ownSettle||{})[t.sheetId+'\t'+t.tabName];
+    const linked=!!t.salesId;
+    const dOr = v => linked ? (st ? (st.proxyDown?'<span class="dim" title="인트라넷 연결 실패">?</span>':(v||'<span class="dim">—</span>')) : '<span class="dim">…</span>') : '<span class="dim">—</span>';
+    const quoteCell=dOr(st&&st.quoteDate?`<span title="${esc(st.quoteDate)}${st.contractNumber?' · '+esc(st.contractNumber):''}">${_md(st.quoteDate)}</span>`:null);
+    const invoiceCell=dOr(st&&st.invoiceDate?`<span title="${esc(st.invoiceDate)}">${_md(st.invoiceDate)}</span>`:null);
+    const paidDateCell=dOr(st&&st.paidDate?`<span title="${esc(st.paidDate)}">${_md(st.paidDate)}</span>`:null);
+    const closeoutCell=t.closeoutDate
+      ? `<span class="odate" title="마감 ${esc(String(t.closeoutDate).slice(0,10))} · ${t.closeoutRows||0}건(제출 ${t.closeoutSubs||0})">${_md(t.closeoutDate)}</span>`
+      : '<span class="dim">—</span>';
+    let moneyCell='<span class="dim">—</span>';
+    if(linked){
+      if(!st) moneyCell='<span class="dim">…</span>';
+      else if(st.proxyDown) moneyCell='<span class="dim" title="인트라넷 연결 실패">?</span>';
+      else{
+        const pa=st.paidAmount, tc=st.totalCost;
+        const pcls=(pa&&tc&&pa>=tc)?'pd-ok':(pa>0?'pd-part':'pd-zero');
+        const warn=st.amountMismatch?' <span class="bb warn" title="견적서·계약 금액 불일치">⚠</span>':'';
+        moneyCell=`<span title="입금 ${_won(pa)} / 총비용 ${_won(tc)}${st.contractNumber?' · '+esc(st.contractNumber):''}"><b class="${pcls}">${_won(pa)}</b> / ${_won(tc)}${warn}</span>`;
+      }
+    }
     return `<div class="owntab" onclick="openOwnTab(${i})" title="${esc(t.tabName)}">
       ${gauge}
       <div class="oname"><b><i class="odot ${t.active?'a':''}" title="${t.active?'활성':'비활성'}"></i>${esc(t.tabName)}</b>
@@ -1175,15 +1207,48 @@ function _ownTabsHtml(){
       <span class="ocol ${tgt==='—'?'dim':''}">${esc(tgt)}</span>
       <span class="ocol ${t.manager?'':'dim'}">${esc(t.manager||'—')}</span>
       <span class="ocnt"><b>${total}</b> · <b class="c-sub">${sub}</b> · <b class="c-paid">${paid}</b></span>
+      <span class="ocol odate">${quoteCell}</span>
+      <span class="ocol odate">${closeoutCell}</span>
+      <span class="ocol odate">${invoiceCell}</span>
+      <span class="ocol omoney">${moneyCell}</span>
+      <span class="ocol odate">${paidDateCell}</span>
+      <span class="ocol omemo" onclick="editTabMemo(event,${i})" title="클릭하여 비고 편집">${t.memo?esc(t.memo):'<i>비고…</i>'}</span>
       <span class="openb">열기 ›</span></div>`;
   }).join('');
   const body=ot.length
-    ? `${chips}<div class="otwrap"><div class="othead"><span>진행</span><span>캠페인 탭</span><span>브랜드</span><span>상품</span><span>채널</span><span>목표·차수</span><span>담당</span><span>참여·제출·입금</span><span></span></div>${list||'<div class="empty" style="padding:14px">이 브랜드의 탭 없음</div>'}</div>`
+    ? `${chips}<div class="otwrap"><div class="othead"><span>진행</span><span>캠페인 탭</span><span>브랜드</span><span>상품</span><span>채널</span><span>목표·차수</span><span>담당</span><span>참여·제출·입금</span><span>견적서</span><span>마감자료</span><span>계산서</span><span>입금액/총비용</span><span>입금일</span><span>비고</span><span></span></div>${list||'<div class="empty" style="padding:14px">이 브랜드의 탭 없음</div>'}</div>`
     : `<div class="empty" style="padding:14px">연결된 탭 없음</div>`;
-  return `<div class="st">연결된 탭 ${ot.length} <span style="font-weight:400;color:var(--faint);font-size:11px">· 최신순 — 클릭하면 작업대로 열기</span></div>${body}`;
+  return `<div class="st">연결된 탭 ${ot.length} <span style="font-weight:400;color:var(--faint);font-size:11px">· 최신순 — 클릭하면 작업대로 열기 · 정산(견적·계산서·입금)은 정산 링크된 탭만 표시</span></div>${body}`;
 }
+// 날짜 → M/D 축약(관제실 표기), 금액 → 천단위 콤마.
+function _md(d){ const m=String(d||'').match(/^(\d{4})-(\d{2})-(\d{2})/); return m?`${+m[2]}/${+m[3]}`:esc(String(d||'')); }
+function _won(n){ return n==null?'—':Number(n).toLocaleString('ko-KR'); }
 function setOwnBrand(i){ STATE.ownBrand = i===-1?null : i===-2?'' : ((STATE.ownBrandList||[])[i]!=null?STATE.ownBrandList[i]:null);
   const el=$('#owntabsSect'); if(el) el.innerHTML=_ownTabsHtml(); }
+// 정산 요약(견적·계산서·입금매칭) 비동기 로드 — 패널 렌더를 막지 않음. 업체 전환 경합은 ownSettleFor 로 무시.
+async function loadOwnSettlement(advId){
+  let r=null; try{ r=await api('/api/trackb/ownership/settlement?advertiserId='+encodeURIComponent(advId)); }catch(_){ }
+  if(STATE.ownSettleFor!==advId) return;   // 이미 다른 업체로 전환됨
+  const m={}; for(const it of ((r&&r.ok&&r.items)||[])) m[it.sheetId+'\t'+it.tabName]=it;
+  STATE.ownSettle=m;
+  const el=$('#owntabsSect'); if(el) el.innerHTML=_ownTabsHtml();
+}
+// 비고 인라인 편집: 셀 클릭 → input 치환 → Enter/blur 저장, Esc 취소. 행 클릭(탭 열기)과 격리(stopPropagation).
+function editTabMemo(ev,i){ ev.stopPropagation(); const t=(STATE.ownTabs||[])[i]; if(!t) return;
+  const cell=ev.currentTarget; if(cell.querySelector('input')) return;
+  cell.innerHTML=`<input class="omemoin" maxlength="2000" onclick="event.stopPropagation()" onkeydown="_memoKey(event)" onblur="saveOwnMemo(${i},this)">`;
+  const inp=cell.querySelector('input'); inp.value=t.memo||''; inp.focus(); inp.select();
+}
+function _memoKey(ev){ if(ev.key==='Enter') ev.target.blur(); else if(ev.key==='Escape'){ ev.target.dataset.esc='1'; ev.target.blur(); } }
+async function saveOwnMemo(i,inp){ const t=(STATE.ownTabs||[])[i];
+  const rerender=()=>{ const el=$('#owntabsSect'); if(el) el.innerHTML=_ownTabsHtml(); };
+  if(!t||inp.dataset.esc){ rerender(); return; }
+  const memo=inp.value.trim();
+  if(memo===(t.memo||'')){ rerender(); return; }
+  const r=await api('/api/trackb/tab-memo',{method:'POST',body:JSON.stringify({sheetId:t.sheetId,tabName:t.tabName,memo})});
+  if(r&&r.ok){ t.memo=r.memo; toast('비고 저장됨'); } else toast('비고 저장 실패'+(r&&r.error?': '+r.error:''));
+  rerender();
+}
 function setAddMode(m){ STATE.addMode=m; document.querySelectorAll('.radio').forEach(r=>r.classList.toggle('on',r.dataset.m===m));
   const to=$('#taboptions'); to.classList.toggle('show', m==='tab' && STATE.addSheet); if(m==='tab') renderTabOptions(); else to.innerHTML=''; }
 function onAddSheet(){ STATE.addSheet=$('#addSheet').value||null; STATE.addTabs={}; if(STATE.addMode==='tab') renderTabOptions(); }
