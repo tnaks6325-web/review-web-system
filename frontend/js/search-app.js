@@ -3959,6 +3959,9 @@ function initOrderFormMode() {
   // ★ 저장된 계좌정보 자동완성 (모든 탭 공통 — 계좌 오타 방지)
   _prefillBankFromProfile().catch(e => console.warn("[bank prefill]", e.message));
 
+  // ★ 내정보(사용자명/전화/주소/계좌) 미등록 안내 배너 (비차단 — 제출 시 차단)
+  _precheckProfileGateOnEntry(window._slotAuth || {});
+
   return true;
 }
 
@@ -5232,58 +5235,58 @@ function _buildOrderCardHtml(cid, idx, type) {
 
     <!-- 수취인 -->
     <div class="of-field">
-      <label class="of-label">수취인</label>
-      <input id="${cid}_recipient" class="of-input" type="text" placeholder="수취인 이름">
+      <label class="of-label of-label-required">수취인</label>
+      <input id="${cid}_recipient" class="of-input" type="text" placeholder="수취인 이름" oninput="_ofClearError('${cid}_recipient')">
     </div>
     <!-- 연락처 -->
     <div class="of-field">
-      <label class="of-label">연락처</label>
-      <input id="${cid}_phone" class="of-input" type="tel" placeholder="010-0000-0000" oninput="formatPhoneInput(this)" maxlength="13">
+      <label class="of-label of-label-required">연락처</label>
+      <input id="${cid}_phone" class="of-input" type="tel" placeholder="010-0000-0000" oninput="formatPhoneInput(this);_ofClearError('${cid}_phone')" maxlength="13">
     </div>
     <!-- 배송주소 -->
     <div class="of-field">
-      <label class="of-label">배송주소</label>
-      <input id="${cid}_address" class="of-input" type="text" placeholder="배송받을 주소">
+      <label class="of-label of-label-required">배송주소</label>
+      <input id="${cid}_address" class="of-input" type="text" placeholder="배송받을 주소" oninput="_ofClearError('${cid}_address')">
     </div>
 
     <!-- 은행/계좌/예금주 (공유 가능) -->
     <div id="${cid}_bankWrap" class="${lockClass}">
       ${isFirst ? `
       <div class="of-field">
-        <label class="of-label">은행</label>
+        <label class="of-label of-label-required">은행</label>
         <div class="of-autocomplete-wrap">
           <input id="of_bank" class="of-input" type="text" placeholder="은행명 (클릭시 선택도 가능)" autocomplete="off"
-            oninput="onBankInput(this)" onkeydown="onBankKeydown(event)" onfocus="onBankFocus()" onblur="onBankBlur()">
+            oninput="onBankInput(this);_ofClearError('of_bank')" onkeydown="onBankKeydown(event)" onfocus="onBankFocus()" onblur="onBankBlur()">
           <div id="of_bank_list" class="of-autocomplete-list" role="listbox"></div>
         </div>
       </div>
       <div class="of-field">
-        <label class="of-label">계좌</label>
-        <input id="of_account" class="of-input" type="text" placeholder="계좌번호">
+        <label class="of-label of-label-required">계좌</label>
+        <input id="of_account" class="of-input" type="text" placeholder="계좌번호" oninput="_ofClearError('of_account')">
       </div>
       <div class="of-field">
-        <label class="of-label">예금주</label>
-        <input id="of_depositor" class="of-input" type="text" placeholder="예금주 이름">
+        <label class="of-label of-label-required">예금주</label>
+        <input id="of_depositor" class="of-input" type="text" placeholder="예금주 이름" oninput="_ofClearError('of_depositor')">
       </div>` : `
       <div class="of-field">
-        <label class="of-label">은행</label>
-        <input id="${cid}_bank" class="of-input" type="text" placeholder="은행명" readonly style="background:#F9FAFB;color:var(--t3)">
+        <label class="of-label of-label-required">은행</label>
+        <input id="${cid}_bank" class="of-input" type="text" placeholder="은행명" readonly style="background:#F9FAFB;color:var(--t3)" oninput="_ofClearError('${cid}_bank')">
       </div>
       <div class="of-field">
-        <label class="of-label">계좌</label>
-        <input id="${cid}_account" class="of-input" type="text" placeholder="계좌번호" readonly style="background:#F9FAFB;color:var(--t3)">
+        <label class="of-label of-label-required">계좌</label>
+        <input id="${cid}_account" class="of-input" type="text" placeholder="계좌번호" readonly style="background:#F9FAFB;color:var(--t3)" oninput="_ofClearError('${cid}_account')">
       </div>
       <div class="of-field">
-        <label class="of-label">예금주</label>
-        <input id="${cid}_depositor" class="of-input" type="text" placeholder="예금주" readonly style="background:#F9FAFB;color:var(--t3)">
+        <label class="of-label of-label-required">예금주</label>
+        <input id="${cid}_depositor" class="of-input" type="text" placeholder="예금주" readonly style="background:#F9FAFB;color:var(--t3)" oninput="_ofClearError('${cid}_depositor')">
       </div>`}
     </div>
 
     <!-- 결제금액 -->
     <div class="of-field">
-      <label class="of-label">결제금액</label>
+      <label class="of-label of-label-required">결제금액</label>
       <input id="${cid}_price" class="of-input" type="text" placeholder="결제한 금액 (예: 47,000)"
-        oninput="formatPriceInput(this);this.classList.remove('ai-filled');this.dataset.userEdited='1';" inputmode="numeric">
+        oninput="formatPriceInput(this);this.classList.remove('ai-filled');this.dataset.userEdited='1';_ofClearError('${cid}_price')" inputmode="numeric">
     </div>
 
     <!-- 비고 (모든 카드에 표시) -->
@@ -6901,6 +6904,136 @@ function _ofClearError(inputId) {
 }
 
 /* ══════════════════════════════════════════════════════
+   ★ 신원/내정보 검증 (제출 전 사전검증)
+   - 내정보(사용자명/전화/주소/계좌) 미등록 → 게이트 배너 + 차단
+   - NEED_SUB_REGISTER → "타계정으로 등록할까요?" 다이얼로그 → 등록 후 진행
+   - NEED_CONFIRM → 확인 다이얼로그 → identityConfirmed 마킹 후 진행
+   - 사전검증 API 오류 시 fail-open (서버 /api/submit/order가 최종 방어)
+   ══════════════════════════════════════════════════════ */
+async function _runIdentityPrecheck(auth, orders) {
+  let pre;
+  try {
+    pre = await gasPost({
+      action: "identityPrecheck",
+      phone8: auth.phone8,
+      orders: orders.map(o => ({
+        recipient: o.recipient, phone: o.phone, address: o.address,
+        bank: o.bank, account: o.account, depositor: o.depositor,
+        extractedRecipient: o.extractedRecipient, extractedPhone: o.extractedPhone,
+        extractedAddress: o.extractedAddress,
+      })),
+    }, 30000);
+  } catch (e) {
+    console.warn("[identityPrecheck] 오류(서버 최종검증으로 진행):", e.message);
+    return true;
+  }
+  if (!pre || !pre.ok) return true; // fail-open — 서버 게이트가 최종 방어
+
+  // ① 내정보 미등록 → 차단 + 게이트 배너
+  if (Array.isArray(pre.profileMissing) && pre.profileMissing.length > 0) {
+    _showProfileGateBanner(pre.profileMissing);
+    showToast("내정보 미등록 항목: " + pre.profileMissing.join(", ") + " — 등록 후 제출할 수 있습니다.", "error");
+    return false;
+  }
+
+  // ② 주문별 신원 판정 처리
+  const _handledIds = new Set(); // 같은 신원 다건 → 다이얼로그/등록 1회만
+  for (const r of (pre.results || [])) {
+    if (r.status === "NEED_SUB_REGISTER") {
+      const idn = r.identity || {};
+      const _idKey = (idn.name || "").replace(/\s+/g, "") + "|" + (idn.phone || "").replace(/[^0-9]/g, "").slice(-8);
+      if (_handledIds.has(_idKey)) continue; // 이미 이번 제출에서 등록 처리됨
+      const msg = "⚠️ 내 정보와 다른 정보가 감지되었습니다.\n\n"
+        + `이름: ${idn.name || "-"}\n연락처: ${idn.phone || "-"}\n주소: ${idn.address || "-"}\n`
+        + `계좌: ${idn.bankName || ""} ${idn.bankAccount || "-"} (${idn.accountHolder || "-"})\n\n`
+        + "현재 입력값을 나의 타계정으로 등록할까요?\n(등록해야 제출을 계속할 수 있습니다)";
+      if (!confirm(msg)) {
+        showToast("제출이 취소되었습니다. 입력 정보를 다시 확인해주세요.", "warning");
+        return false;
+      }
+      const okReg = await _registerSubAccountFromOrder(auth, idn);
+      if (!okReg) {
+        showToast("타계정 등록에 실패했습니다. 리뷰어 홈 > 내정보에서 직접 등록해주세요.", "error");
+        return false;
+      }
+      showToast(`타계정(${idn.name}) 등록 완료 — 제출을 계속합니다.`, "success");
+      _handledIds.add(_idKey);
+    } else if (r.status === "NEED_CONFIRM") {
+      const msg = "⚠️ 등록된 내정보와 달라 보이는 항목이 있습니다.\n\n"
+        + "- " + (r.reasons || []).join("\n- ")
+        + "\n\n입력 정보가 정확한지 확인했으며 그대로 제출할까요?";
+      if (!confirm(msg)) {
+        showToast("제출이 취소되었습니다. 입력 정보를 다시 확인해주세요.", "warning");
+        return false;
+      }
+      if (orders[r.idx]) orders[r.idx].identityConfirmed = true;
+    }
+  }
+  return true;
+}
+
+/** 신원 불일치 감지 시 현재 주문 입력값을 타계정으로 자동 등록 */
+async function _registerSubAccountFromOrder(auth, idn) {
+  try {
+    const prof = await gasGet({ action: "getReviewerProfile", name: auth.name, phone8: auth.phone8 });
+    if (!prof?.ok || !prof.profile) return false;
+    const subs = Array.isArray(prof.profile.subAccounts) ? prof.profile.subAccounts : [];
+    // ★ 중복 등록 방지: 같은 이름+전화(뒤8자리) 타계정이 이미 있으면 성공으로 간주
+    const _n = (idn.name || "").replace(/\s+/g, "");
+    const _p8 = (idn.phone || "").replace(/[^0-9]/g, "").slice(-8);
+    if (subs.some(s => (s?.name || "").replace(/\s+/g, "") === _n
+        && (s?.phone || "").replace(/[^0-9]/g, "").slice(-8) === _p8)) {
+      return true;
+    }
+    if (subs.length >= 10) { showToast("타계정은 최대 10개까지 등록할 수 있습니다.", "error"); return false; }
+    subs.push({
+      name: (idn.name || "").trim(),
+      phone: (idn.phone || "").trim(),
+      incomeName: "", jumin: "",
+      address: (idn.address || "").trim(),
+      // ★ 타계정별 개별 계좌정보
+      bankName: (idn.bankName || "").trim(),
+      bankAccount: (idn.bankAccount || "").trim(),
+      accountHolder: (idn.accountHolder || "").trim(),
+    });
+    const r = await gasPost({ action: "saveSubAccounts", name: auth.name, phone8: auth.phone8, subAccounts: JSON.stringify(subs) });
+    if (r?.ok) {
+      if (window._reviewerProfile) window._reviewerProfile.subAccounts = subs;
+      return true;
+    }
+    return false;
+  } catch (e) {
+    console.warn("[subRegister] 실패:", e.message);
+    return false;
+  }
+}
+
+/** 내정보 미등록 게이트 배너 표시 (구매양식 상단) */
+function _showProfileGateBanner(missing) {
+  const box = document.getElementById("ofProfileGate");
+  if (!box) return;
+  const items = (missing || []).map(m => `<b>${_safeText(m)}</b>`).join(", ");
+  box.innerHTML =
+    '<div style="font-size:.9rem;font-weight:700;margin-bottom:6px"><i class="fas fa-user-lock" style="margin-right:6px"></i>내정보 등록이 필요합니다</div>'
+    + `<div style="font-size:.8rem;line-height:1.6;margin-bottom:10px">미등록 항목: ${items}<br>구매양식은 내정보(사용자명·전화번호·주소·계좌)를 등록한 리뷰어만 제출할 수 있습니다.</div>`
+    + '<a href="index.html#my" target="_blank" rel="noopener" style="display:inline-flex;align-items:center;gap:6px;padding:9px 16px;background:#DC2626;color:#fff;border-radius:9px;font-size:.82rem;font-weight:700;text-decoration:none"><i class="fas fa-id-card"></i> 내정보 등록하러 가기</a>'
+    + '<span style="font-size:.72rem;color:#991B1B;margin-left:10px">등록 후 이 화면에서 다시 제출하면 됩니다.</span>';
+  box.style.display = "block";
+  box.scrollIntoView({ behavior: "smooth", block: "center" });
+}
+
+/** 구매양식 진입 시 내정보 완비 여부 미리 안내 (비차단 — 차단은 제출 시) */
+async function _precheckProfileGateOnEntry(auth) {
+  try {
+    if (!auth || !auth.phone8) return;
+    const pre = await gasPost({ action: "identityPrecheck", phone8: auth.phone8, orders: [] }, 15000);
+    if (pre?.ok && Array.isArray(pre.profileMissing) && pre.profileMissing.length > 0) {
+      _showProfileGateBanner(pre.profileMissing);
+    }
+  } catch (_) { /* 진입 안내는 best-effort */ }
+}
+
+/* ══════════════════════════════════════════════════════
    다건 일괄 제출 (submitOrderForm)
    ══════════════════════════════════════════════════════ */
 async function submitOrderForm() {
@@ -6974,11 +7107,39 @@ async function submitOrderForm() {
   // 주문자 필수
   if (!firstOrderer) { _ofShowError("of_orderer"); hasError = true; }
 
-  // 각 카드 아이디 필수
-  _orderCardIds.forEach(cid => {
-    const uid = gv(cid + "_userId");
-    if (!uid) { _ofShowError(cid + "_userId"); hasError = true; }
+  // ★ 주문번호·비고 제외 전 항목 필수 (카드별)
+  //   - 주문자/은행/계좌/예금주는 "1번과 동일" 체크 시 1번 카드 값을 유효값으로 인정
+  //   - nc모드 2번(쿠팡) 카드는 주문자/은행/계좌/예금주/수취인/연락처/주소를 1번 카드에서 재사용하므로 검사 제외
+  const _missingLabels = [];
+  _orderCardIds.forEach((cid, idx) => {
+    const isFirst = idx === 0;
+    const isCoupangCard = window._ncMode && idx === 1;
+    const chkSame = !isFirst && !isCoupangCard && document.getElementById(cid + "_sameChk")?.checked;
+
+    // 각 카드 개별 필수: 아이디 / 수취인 / 연락처 / 배송주소 / 결제금액
+    const perCard = [
+      [cid + "_userId", "아이디"],
+      [cid + "_price", "결제금액"],
+    ];
+    if (!isCoupangCard) {
+      perCard.push([cid + "_recipient", "수취인"], [cid + "_phone", "연락처"], [cid + "_address", "배송주소"]);
+    }
+    perCard.forEach(([id, label]) => {
+      if (!gv(id)) { _ofShowError(id); _missingLabels.push(label); hasError = true; }
+    });
+
+    // 주문자/은행/계좌/예금주 — 공유 로직 반영한 유효값 기준
+    if (!isFirst && !isCoupangCard && !chkSame) {
+      if (!gv(cid + "_orderer")) { _ofShowError(cid + "_orderer"); _missingLabels.push("주문자"); hasError = true; }
+      if (!gv(cid + "_bank"))     { _ofShowError(cid + "_bank");     _missingLabels.push("은행"); hasError = true; }
+      if (!gv(cid + "_account"))  { _ofShowError(cid + "_account");  _missingLabels.push("계좌"); hasError = true; }
+      if (!gv(cid + "_depositor")){ _ofShowError(cid + "_depositor");_missingLabels.push("예금주"); hasError = true; }
+    }
   });
+  // 1번 카드(=공유 원본) 은행/계좌/예금주 필수
+  if (!firstBank)      { _ofShowError("of_bank");      _missingLabels.push("은행"); hasError = true; }
+  if (!firstAccount)   { _ofShowError("of_account");   _missingLabels.push("계좌"); hasError = true; }
+  if (!firstDepositor) { _ofShowError("of_depositor"); _missingLabels.push("예금주"); hasError = true; }
 
   // ★ nc 모드: 쿠팡 결제금액 필수 + 동일인 검증 확인
   if (window._ncMode && _orderCardIds.length >= 2) {
@@ -7012,7 +7173,10 @@ async function submitOrderForm() {
   if (hasError) {
     const firstErr = document.querySelector(".of-input--error");
     if (firstErr) firstErr.scrollIntoView({ behavior: "smooth", block: "center" });
-    showToast("필수 항목을 입력해주세요.", "warning");
+    const _uniqMissing = [...new Set(_missingLabels)];
+    showToast(_uniqMissing.length
+      ? "필수 항목을 입력해주세요: " + _uniqMissing.join(", ")
+      : "필수 항목을 입력해주세요.", "warning");
     _resetBtn(); return;
   }
 
@@ -7114,13 +7278,29 @@ async function submitOrderForm() {
       ncMode:         !!window._ncMode,
       // ★ v9.14: 카드별 소득신고 정보
       incomeName:     cardIncomeName,
-      residentNo:     cardResidentNo
+      residentNo:     cardResidentNo,
+      // ★ 신원검증: 캡처 AI 추출값 스냅샷 (캡처 있으면 추출값 우선 대조 — 서버 정책)
+      extractedRecipient: _cardAiState[cid]?.extracted?.recipient || "",
+      extractedPhone:     _cardAiState[cid]?.extracted?.phone     || "",
+      extractedAddress:   _cardAiState[cid]?.extracted?.address   || "",
+      identityConfirmed:  false
     };
   });
 
   // ── 중복 검사 제거 (v2.16.7): 시트 기록 시점에서 서버가 자동 필터링 ──
   window._dupIgnored = false;
   window._dupPayload = null;
+
+  // ═══ 내정보 게이트 + 신원 사전검증 (제출 전) ═══
+  // 프로필(사용자명/전화/주소/계좌) 미등록 → 차단, 신원 불일치 → 타계정 등록/확인 다이얼로그
+  {
+    const _idAuth = window._slotAuth || {};
+    if (_idAuth.phone8) {
+      if (btn) btn.innerHTML = '<i class="fas fa-spinner fa-spin"></i> 내정보 대조 중...';
+      const _goOn = await _runIdentityPrecheck(_idAuth, orders);
+      if (!_goOn) { _resetBtn(); return; }
+    }
+  }
 
   if (btn) btn.innerHTML = `<i class="fas fa-spinner fa-spin"></i> 제출 중... (0/${orders.length})`;
 
@@ -7197,7 +7377,12 @@ async function submitOrderForm() {
       slotRowNumber: currentSlotInfo ? currentSlotInfo.rowNumber : "",
       slotInadName: currentSlotInfo ? currentSlotInfo.inadName : "",
       loginPhone8: slotAuth.phone8 || "",
-      loginName: slotAuth.name || ""
+      loginName: slotAuth.name || "",
+      // ★ 신원검증: 캡처 AI 추출값(있으면 서버가 이 값 우선 대조) + 사전확인 플래그
+      extractedRecipient: o.extractedRecipient || "",
+      extractedPhone:     o.extractedPhone     || "",
+      extractedAddress:   o.extractedAddress   || "",
+      identityConfirmed:  o.identityConfirmed ? "true" : "false"
     };
 
     try {
@@ -7210,6 +7395,42 @@ async function submitOrderForm() {
         } catch(e2) { throw new Error("서버 연결 실패"); }
       }
       if (!res) throw new Error("서버 응답이 없습니다.");
+
+      // ★ 서버 신원게이트 판정 처리 (precheck와 판정이 달라진 경우의 탈출구 —
+      //   예: 앞 주문 제출로 타계정 정보가 자동보강되어 뒤 주문 판정이 바뀐 경우)
+      if (!res.ok && res.code === "NEED_CONFIRM") {
+        const msgC = `⚠️ ${i+1}번째 주문: 등록된 내정보와 달라 보이는 항목이 있습니다.\n\n- `
+          + (res.reasons || []).join("\n- ")
+          + "\n\n입력 정보가 정확한지 확인했으며 그대로 제출할까요?";
+        if (confirm(msgC)) {
+          payload.identityConfirmed = "true";
+          try { res = await gasPost(payload, 30000); } catch(_) { throw new Error("서버 연결 실패 (재확인 제출)"); }
+        } else {
+          showToast(`${i+1}번째 주문은 취소되었습니다. 정보 확인 후 이 주문만 다시 제출해주세요.`, "warning");
+          continue;
+        }
+      } else if (!res.ok && res.code === "NEED_SUB_REGISTER") {
+        const idn = res.identity || {};
+        const msgR = `⚠️ ${i+1}번째 주문: 내 정보와 다른 정보가 감지되었습니다.\n\n`
+          + `이름: ${idn.name || "-"}\n연락처: ${idn.phone || "-"}\n\n현재 입력값을 나의 타계정으로 등록하고 제출할까요?`;
+        if (confirm(msgR)) {
+          const okReg2 = await _registerSubAccountFromOrder(window._slotAuth || {}, idn);
+          if (okReg2) {
+            try { res = await gasPost(payload, 30000); } catch(_) { throw new Error("서버 연결 실패 (타계정 등록 후 재제출)"); }
+          } else {
+            showToast("타계정 등록 실패 — 이 주문은 건너뜁니다. 내정보에서 등록 후 다시 제출해주세요.", "error");
+            continue;
+          }
+        } else {
+          showToast(`${i+1}번째 주문은 취소되었습니다.`, "warning");
+          continue;
+        }
+      } else if (!res.ok && res.code === "PROFILE_INCOMPLETE") {
+        _showProfileGateBanner(res.profileMissing || []);
+        showToast("내정보 미등록으로 제출이 중단되었습니다. 등록 후 다시 제출해주세요.", "error");
+        break; // 이후 주문도 동일하게 막히므로 중단
+      }
+
       if (!res.ok) throw new Error(res.error||"제출 실패");
 
       successCount++;
@@ -7233,7 +7454,8 @@ async function submitOrderForm() {
         })();
       }
     } catch(err) {
-      showCenterAlert(`❌ ${i+1}번째 주문 제출 실패: ${err.message}`);
+      // ★ err.message에 서버/AI 자유텍스트가 포함될 수 있어 escape (innerHTML 주입 방어)
+      showCenterAlert(`❌ ${i+1}번째 주문 제출 실패: ${_safeText(err.message)}`);
       console.error(`[제출 ${i+1}] 오류:`, err);
     }
   }

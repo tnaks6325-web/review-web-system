@@ -1,7 +1,7 @@
 const express = require('express');
 const router = express.Router();
 const { authMiddleware, adminOrMasterMiddleware } = require('../middleware/auth.middleware');
-const { registerLimiter } = require('../middleware/rateLimit.middleware');
+const { registerLimiter, imageApiLimiter } = require('../middleware/rateLimit.middleware');
 const {
   registerReviewer,
   verifyReviewer,
@@ -76,6 +76,55 @@ router.post('/profile', async (req, res, next) => {
     res.json(result);
   } catch (err) {
     next(err);
+  }
+});
+
+// ═══════════════════════════════════════════════════════════
+// POST /api/reviewer/identity-precheck — 구매양식 제출 전 신원/유사도 사전검증
+// Body: { phone8, orders: [{ recipient, phone, address, bank, account, depositor,
+//                            extractedRecipient?, extractedPhone?, extractedAddress? }] }
+// 반환: { ok, profileMissing: string[], results: [{ idx, status, subIndex, reasons, identity }] }
+//   status: SELF | SUB | NEED_CONFIRM | NEED_SUB_REGISTER
+// 인증 불필요 — /profile과 동일하게 phone8이 본인 스코프 키.
+// ★ fail-open: 내부 오류 시 { ok:false }를 반환하고 프론트는 제출을 막지 않는다
+//   (최종 게이트는 /api/submit/order 서버검증).
+// ═══════════════════════════════════════════════════════════
+// ★ Gemini 비용 보호: 이미지 API와 동일한 리미터 적용 (무인증 엔드포인트 DoS 방지)
+router.post('/identity-precheck', imageApiLimiter, async (req, res) => {
+  try {
+    const { profileMissing, resolveOrderIdentity } = require('../services/identity.service');
+    const p8 = String(req.body?.phone8 || '').replace(/[^0-9]/g, '').slice(-8);
+    if (p8.length !== 8) return res.json({ ok: false, error: 'phone8이 필요합니다.' });
+
+    const { rows } = await pool.query(
+      `SELECT name, phone, phone8, address, bank_name, bank_account, account_holder, sub_accounts
+       FROM reviewers WHERE phone8 = $1 LIMIT 1`, [p8]
+    );
+    if (rows.length === 0) return res.json({ ok: false, error: '등록된 리뷰어가 아닙니다.' });
+
+    const reviewer = rows[0];
+    // sub_accounts 방어 파싱 (문자열 스칼라 이중인코딩 호환)
+    if (typeof reviewer.sub_accounts === 'string') {
+      try { reviewer.sub_accounts = JSON.parse(reviewer.sub_accounts); } catch (_) { reviewer.sub_accounts = []; }
+    }
+    if (!Array.isArray(reviewer.sub_accounts)) reviewer.sub_accounts = [];
+
+    const missing = profileMissing(reviewer);
+    if (missing.length > 0) {
+      return res.json({ ok: true, profileMissing: missing, results: [] });
+    }
+
+    // 카드 최대 5장(MAX_ORDER_CARDS)과 동일 상한 — Gemini 호출 폭 제한
+    const orders = Array.isArray(req.body?.orders) ? req.body.orders.slice(0, 5) : [];
+    const results = [];
+    for (let i = 0; i < orders.length; i++) {
+      const r = await resolveOrderIdentity(reviewer, orders[i] || {}, { mode: 'precheck' });
+      results.push({ idx: i, ...r });
+    }
+    res.json({ ok: true, profileMissing: [], results });
+  } catch (err) {
+    // fail-open — 프론트는 ok:false면 사전검증 생략(서버 최종게이트가 방어)
+    res.json({ ok: false, error: err.message });
   }
 });
 

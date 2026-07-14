@@ -695,6 +695,114 @@ router.post('/order', async (req, res, next) => {
       return res.json({ error: 'sheetId와 tabName이 필요합니다.' });
     }
 
+    // ═══ 신원 게이트: 내정보(사용자명/전화/주소/계좌) 완비 + 제출정보 유사도 검증 ═══
+    // - loginPhone8이 있는 리뷰어 제출에만 적용 (레거시/관리자 경유 제출은 통과)
+    // - identityConfirmed='true'면 NEED_CONFIRM 단계는 리뷰어가 확인한 것으로 간주(로그만 남김)
+    // - ★ fail-open: 게이트 내부 오류는 주문 접수를 막지 않는다 (라이브 핫패스 보호)
+    const _idPhone8 = String(loginPhone8 || '').replace(/[^0-9]/g, '').slice(-8);
+    if (_idPhone8.length === 8) {
+      try {
+        const { profileMissing, resolveOrderIdentity } = require('../services/identity.service');
+        const { rows: _rvRows } = await pool.query(
+          `SELECT name, phone, phone8, address, bank_name, bank_account, account_holder, sub_accounts
+           FROM reviewers WHERE phone8 = $1 LIMIT 1`, [_idPhone8]
+        );
+        if (_rvRows.length > 0) {
+          const _rv = _rvRows[0];
+          if (typeof _rv.sub_accounts === 'string') {
+            try { _rv.sub_accounts = JSON.parse(_rv.sub_accounts); } catch (_) { _rv.sub_accounts = []; }
+          }
+          if (!Array.isArray(_rv.sub_accounts)) _rv.sub_accounts = [];
+
+          const _missing = profileMissing(_rv);
+          if (_missing.length > 0) {
+            return res.json({
+              ok: false, code: 'PROFILE_INCOMPLETE', profileMissing: _missing,
+              error: `내정보 미등록 항목이 있어 제출할 수 없습니다: ${_missing.join(', ')}. 리뷰어 홈 > 내정보에서 등록해주세요.`,
+            });
+          }
+
+          // ★ 서버측 필수필드 검증 (주문번호·비고 제외 전 필드 — 리뷰어 제출에만 적용, 프론트 우회 차단)
+          const _reqFields = [
+            [orderer, '주문자'], [userId, '아이디'], [recipient, '수취인'], [phone, '연락처'],
+            [address, '배송주소'], [bank, '은행'], [account, '계좌'], [depositor, '예금주'], [price, '결제금액'],
+          ];
+          const _emptyFields = _reqFields.filter(([v]) => !String(v || '').trim()).map(([, l]) => l);
+          if (_emptyFields.length > 0) {
+            return res.json({
+              ok: false, code: 'FIELDS_REQUIRED',
+              error: `필수 항목이 비어 있습니다: ${_emptyFields.join(', ')} (주문번호·비고 외 전 항목 필수)`,
+            });
+          }
+
+          // ★ mode:'submit' = Gemini 미사용(핫패스 지연/비결정성 차단 — Gemini는 precheck 전용),
+          //   uncertain은 통과·mismatch만 차단. identityConfirmed면 주소/계좌 상세대조 생략(분류만).
+          const _verdict = await resolveOrderIdentity(_rv, {
+            recipient, phone, address, bank, account, depositor,
+            extractedRecipient: b.extractedRecipient || '',
+            extractedPhone: b.extractedPhone || '',
+            extractedAddress: b.extractedAddress || '',
+          }, { mode: 'submit', skipDetailChecks: String(b.identityConfirmed) === 'true' });
+
+          if (_verdict.status === 'NEED_SUB_REGISTER') {
+            return res.json({
+              ok: false, code: 'NEED_SUB_REGISTER',
+              identity: _verdict.identity, reasons: _verdict.reasons,
+              error: '내 정보와 다른 정보가 감지되었습니다. 타계정으로 등록 후 제출해주세요.',
+            });
+          }
+          if (_verdict.status === 'NEED_CONFIRM') {
+            return res.json({
+              ok: false, code: 'NEED_CONFIRM',
+              identity: _verdict.identity, reasons: _verdict.reasons,
+              error: '등록된 내정보와 달라 보이는 항목이 있습니다: ' + _verdict.reasons.join(' / '),
+            });
+          }
+          // 리뷰어가 경고 확인 후 제출(identityConfirmed) — 통과시키되 이상로그로 관리자 가시성 확보
+          if (String(b.identityConfirmed) === 'true') {
+            logAbnormal({
+              flow: 'order_submit', step: 'identity_confirm_override', source: 'validation',
+              error: new Error('신원 유사도 경고 확인 후 제출 (리뷰어 확인 완료)'),
+              context: { sheetId, tabName, loginPhone8: _idPhone8, recipient: recipient || '' },
+            });
+          }
+          // SUB 매칭 시 타계정의 빈 주소/계좌 자동 보강 (best-effort)
+          if (_verdict.status === 'SUB' && _verdict.subIndex >= 0) {
+            try {
+              const _sub = _rv.sub_accounts[_verdict.subIndex] || {};
+              let _dirty = false;
+              if (!String(_sub.address || '').trim() && (b.extractedAddress || address)) {
+                _sub.address = String(b.extractedAddress || address).trim(); _dirty = true;
+              }
+              // 계좌 보강은 "본인 공통계좌와 다른 계좌"일 때만 (본인 계좌로 입금받는 흐름을
+              // 타계정 전용계좌로 오기록하지 않도록)
+              const _mainAcctDigits = String(_rv.bank_account || '').replace(/[^0-9]/g, '');
+              const _orderAcctDigits = String(account || '').replace(/[^0-9]/g, '');
+              if (!String(_sub.bankAccount || '').trim() && _orderAcctDigits && _orderAcctDigits !== _mainAcctDigits) {
+                _sub.bankName = _sub.bankName || bank || '';
+                _sub.bankAccount = account;
+                _sub.accountHolder = _sub.accountHolder || depositor || '';
+                _dirty = true;
+              }
+              if (_dirty) {
+                _rv.sub_accounts[_verdict.subIndex] = _sub;
+                await pool.query(
+                  'UPDATE reviewers SET sub_accounts = $1::jsonb WHERE phone8 = $2',
+                  [JSON.stringify(_rv.sub_accounts), _idPhone8]
+                );
+                logger.info(`[order-identity] 타계정 자동보강: ${_idPhone8} sub[${_verdict.subIndex}] ${_sub.name || ''}`);
+              }
+            } catch (enrichErr) {
+              logger.warn(`[order-identity] 타계정 자동보강 실패(무시): ${enrichErr.message}`);
+            }
+          }
+        }
+      } catch (gateErr) {
+        // fail-open: 게이트 오류는 접수를 막지 않는다
+        logger.warn(`[order-identity] 신원 게이트 오류(통과 처리): ${gateErr.message}`);
+      }
+    }
+
     const orderData = { orderer, recipient, userId, phone, address, bank, account, depositor, price, dateStr, orderNum, memo, selectedOptKey };
     const ledger = await createOrderLedgerEntry({
       sheetId, tabName, gid,
