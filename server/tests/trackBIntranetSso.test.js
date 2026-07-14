@@ -48,7 +48,36 @@ async function run() {
   // 1e: 200이지만 username 없는 이상 응답 → 거부(fail-closed)
   r = await auth.loginIntranet('kim.ae', 'pw', mockFetch(200, {}));
   assert.equal(r.success, false, '1e: 이상 응답 거부');
-  console.log('  1. loginIntranet — staff 고정·display_name 신원·401/연결불가/이상응답 fail-closed ✓');
+
+  // 1f: display_name이 공백뿐 → 거부(빈 신원 토큰 발급 차단)
+  r = await auth.loginIntranet('kim.ae', 'pw', mockFetch(200, { username: '   ', display_name: '  ' }));
+  assert.equal(r.success, false, '1f: 공백 신원 거부');
+
+  // 1g: iu(인트라넷 username) 감사 클레임 동봉
+  r = await auth.loginIntranet('kim.ae', 'pw', mockFetch(200, { username: 'kim.ae', display_name: '김수만' }));
+  assert.equal(jwt.verify(r.token, process.env.JWT_SECRET).iu, 'kim.ae', '1g: iu 클레임');
+  console.log('  1. loginIntranet — staff 고정·display_name 신원·fail-closed·공백거부·iu 감사 ✓');
+
+  // ═══ 1.5 authMiddleware — via:intranet 토큰은 /api/trackb/* 전용(폭발반경 격리) ═══
+  const { authMiddleware } = require('../src/middleware/auth.middleware');
+  const intraToken = r.token;   // via:'intranet'
+  const staffToken = jwt.sign({ name: '김수만', role: 'staff' }, process.env.JWT_SECRET);   // 자체 staff(via 없음)
+  function runMw(tok, baseUrl, path) {
+    return new Promise(resolve => {
+      const req = { headers: { authorization: 'Bearer ' + tok }, query: {}, baseUrl, path };
+      const res = { status(c) { this.code = c; return this; }, json(b) { resolve({ code: this.code, body: b, nexted: false }); } };
+      authMiddleware(req, res, () => resolve({ nexted: true, admin: req.admin }));
+    });
+  }
+  let mw = await runMw(intraToken, '/api/trackb', '/tabs');
+  assert.equal(mw.nexted, true, '1.5a: intranet 토큰 — /api/trackb/* 통과');
+  mw = await runMw(intraToken, '/api/tab', '/reset-all');
+  assert.equal(mw.code, 403, '1.5b: intranet 토큰 — Track A(탭설정 리셋) 차단');
+  mw = await runMw(intraToken, '/api/memo', '/save');
+  assert.equal(mw.code, 403, '1.5c: intranet 토큰 — Track A(메모) 차단');
+  mw = await runMw(staffToken, '/api/tab', '/reset-all');
+  assert.equal(mw.nexted, true, '1.5d: 자체 staff 토큰(via 없음)은 기존 동작 불변');
+  console.log('  1.5 authMiddleware — via:intranet 토큰 Track B 전용 격리(Track A 차단·기존 토큰 불변) ✓');
 
   // ═══ 2. createAdvertiserScoped ═══
   const q = [];
@@ -86,6 +115,29 @@ async function run() {
   assert.equal(await svc.staffOwnsAdvertiser({ advertiserId: 'adv_none', staffName: '김수만' }), false, '3c: 없는 업체 거부');
   assert.equal(await svc.staffOwnsAdvertiser({ advertiserId: 'adv_mine', staffName: '' }), false, '3d: 무명 거부');
   console.log('  3. staffOwnsAdvertiser — 자기 담당만 허용(fail-closed) ✓');
+
+  // ═══ 3.5 sheetAssignableByStaff — 타 AE 소유 시트로의 자가 스코프 확장 차단 ═══
+  svc.__setPoolForTest({ async query(sql, vals) {
+    const s = String(sql).replace(/\s+/g, ' ').trim();
+    if (/COUNT\(\*\)::int AS others/.test(s)) return { rows: [{ others: vals[0] === 'S_free' ? 0 : 2 }] };
+    return { rows: [] };
+  } });
+  assert.equal(await svc.sheetAssignableByStaff({ sheetId: 'S_free', staffName: '김수만' }), true, '3.5a: 무소유(또는 전부 자기 소유) 시트 허용');
+  assert.equal(await svc.sheetAssignableByStaff({ sheetId: 'S_taken', staffName: '김수만' }), false, '3.5b: 타 AE/업체 소유 시트 거부');
+  assert.equal(await svc.sheetAssignableByStaff({ sheetId: '', staffName: '김수만' }), false, '3.5c: 인자 누락 거부');
+  console.log('  3.5 sheetAssignableByStaff — staff 자가 스코프 확장 차단 ✓');
+
+  // ═══ 3.6 createAdvertiserScoped — 동시 생성 레이스(23505) → 409 ═══
+  svc.__setPoolForTest({ async query(sql) {
+    const s = String(sql).replace(/\s+/g, ' ').trim();
+    if (/SELECT 1 FROM advertisers WHERE name/.test(s)) return { rows: [] };
+    if (/INSERT INTO advertisers/.test(s)) { const e = new Error('duplicate'); e.code = '23505'; throw e; }
+    return { rows: [] };
+  } });
+  const race = await svc.createAdvertiserScoped({ name: '레이스업체', role: 'staff', byName: '김수만' });
+  assert.equal(race.ok, false, '3.6: 레이스 실패');
+  assert.equal(race.code, 409, '3.6: 23505 → 409(서버오류 마스킹 방지)');
+  console.log('  3.6 createAdvertiserScoped — UNIQUE 레이스 409 ✓');
 
   // ═══ 4. scopedActiveTabs forMapping ═══
   const allTabs = [

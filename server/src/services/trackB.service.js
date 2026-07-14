@@ -406,10 +406,15 @@ async function createAdvertiserScoped({ name, inadPm = '', role = 'admin', byNam
   const dup = await db.query('SELECT 1 FROM advertisers WHERE name = $1', [nm]);
   if (dup.rows.length > 0) return { ok: false, code: 409, error: '이미 존재하는 거래처명입니다.' };
   const id = 'adv_' + require('crypto').randomBytes(6).toString('hex');
-  const { rows } = await db.query(
-    `INSERT INTO advertisers (id, name, status, inad_pm, contact, memo, sort_order)
-     VALUES ($1,$2,'active',$3,'','',0) RETURNING *`, [id, nm, pm]);
-  return { ok: true, data: rows[0] };
+  try {
+    const { rows } = await db.query(
+      `INSERT INTO advertisers (id, name, status, inad_pm, contact, memo, sort_order)
+       VALUES ($1,$2,'active',$3,'','',0) RETURNING *`, [id, nm, pm]);
+    return { ok: true, data: rows[0] };
+  } catch (e) {
+    if (e && e.code === '23505') return { ok: false, code: 409, error: '이미 존재하는 거래처명입니다.' };   // 동시 생성 레이스(UNIQUE 백스톱)
+    throw e;
+  }
 }
 
 // ── staff(AE) 소유권 게이트: 해당 업체의 담당(inad_pm)이 본인인 경우만 소유 지정/해제 허용. ──
@@ -417,6 +422,19 @@ async function staffOwnsAdvertiser({ advertiserId, staffName } = {}) {
   if (!advertiserId || !String(staffName || '').trim()) return false;
   const { rows } = await getPool().query('SELECT inad_pm FROM advertisers WHERE id = $1', [advertiserId]);
   return rows.length > 0 && String(rows[0].inad_pm || '').trim() === String(staffName).trim();
+}
+
+// ── staff 초기매핑 시트 게이트: 시트가 무소유(전 업체)거나 기존 소유가 전부 자기 담당 업체일 때만
+//    staff가 새 소유를 지정할 수 있다 — 타 AE/업체가 이미 소유한 시트로의 자가 스코프 확장 차단.
+//    (초기매핑=주인 없는 시트에 첫 매핑. 이미 매핑된 시트의 재배치는 admin/master 소관.) ──
+async function sheetAssignableByStaff({ sheetId, staffName } = {}) {
+  if (!sheetId || !String(staffName || '').trim()) return false;
+  const { rows } = await getPool().query(
+    `SELECT COUNT(*)::int AS others
+       FROM advertiser_campaigns ac JOIN advertisers a ON a.id = ac.advertiser_id
+      WHERE ac.sheet_id = $1 AND ac.deleted_at IS NULL
+        AND TRIM(COALESCE(a.inad_pm, '')) <> TRIM($2)`, [sheetId, String(staffName).trim()]);
+  return rows.length > 0 && Number(rows[0].others) === 0;
 }
 
 // ── 업체 소유 시트의 전체 탭 나열(소유지정 상세 패널): 시트전체 소유=그 시트 모든 탭, 탭지정 소유=그 탭만.
@@ -1496,6 +1514,7 @@ module.exports = {
   ownedTabsForAdvertiser,
   createAdvertiserScoped,
   staffOwnsAdvertiser,
+  sheetAssignableByStaff,
   intranetAdvertisers,
   listWorkOrders,
   linkWorkOrder,

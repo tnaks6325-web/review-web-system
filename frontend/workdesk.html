@@ -191,11 +191,17 @@
 const API_BASE = (function(){ if (window.REVIEW_API_URL) return window.REVIEW_API_URL; if (location.hostname==='localhost') return 'http://localhost:3000'; return 'https://sublime-magic-production-790b.up.railway.app'; })();
 // 토큰 핸드오프 2경로: ① 인트라넷 SSO(#sso=<token> 프래그먼트, 크로스오리진이라 URL 경유 — 도착 즉시 저장 후
 //   주소창에서 제거, 새 신원 도착이므로 기존 세션 덮어씀) ② admin.html raw_sso(localStorage, 기존 세션 존중).
-(function initToken(){ try{
-  const m=(location.hash||'').match(/[#&]sso=([^&]+)/);
-  if(m){ sessionStorage.setItem('admin_token', decodeURIComponent(m[1])); history.replaceState(null,'',location.pathname+location.search); return; }
-  const raw=localStorage.getItem('raw_sso'); if(raw){ const sso=JSON.parse(raw); if(sso&&sso.token&&!sessionStorage.getItem('admin_token')) sessionStorage.setItem('admin_token', sso.token); }
-}catch(_){} })();
+(function initToken(){
+  try{   // ① #sso — 디코드 실패해도 raw_sso 폴백이 죽지 않게 분리 try
+    const m=(location.hash||'').match(/[#&]sso=([^&]+)/);
+    if(m){ let t=null; try{ t=decodeURIComponent(m[1]); }catch(_){ }
+      try{ history.replaceState(null,'',location.pathname+location.search); }catch(_){ }
+      if(t){ sessionStorage.setItem('admin_token', t); return; } }
+  }catch(_){ }
+  try{   // ② raw_sso(관리자 핸드오프) — 기존 세션 존중
+    const raw=localStorage.getItem('raw_sso'); if(raw){ const sso=JSON.parse(raw); if(sso&&sso.token&&!sessionStorage.getItem('admin_token')) sessionStorage.setItem('admin_token', sso.token); }
+  }catch(_){ }
+})();
 function token(){ return sessionStorage.getItem('admin_token') || ''; }
 async function api(path, opts){ const o=Object.assign({headers:{}},opts||{}); o.headers['Authorization']='Bearer '+token(); if(o.body)o.headers['Content-Type']='application/json'; const r=await fetch(API_BASE+path,o); return r.json(); }
 const $=(s,el)=>(el||document).querySelector(s);
@@ -210,6 +216,7 @@ let STATE = { role:'', name:'', view:'workdesk', tabs:[], cur:null, wd:null, fre
 async function boot(){
   if (!token()) return renderLogin();
   const me = parseJwt(token()); STATE.role=me.role||''; STATE.name=me.name||'';
+  if(!STATE.role){ sessionStorage.removeItem('admin_token'); return renderLogin(); }   // 깨진/위조 토큰 → 빈 셸 대신 로그인
   renderShell();
 }
 function renderLogin(){
@@ -224,10 +231,12 @@ function renderLogin(){
 async function doLogin(){ const name=$('#lname').value.trim(), pw=$('#lpw').value;
   let r=await api('/api/admin/login',{method:'POST',body:JSON.stringify({name,pw})});
   if(!(r&&r.success&&r.token)){ r=await api('/api/admin/staff-login',{method:'POST',body:JSON.stringify({name,pw})}); }  // AE(영업담당) 폴백
-  if(!(r&&r.success&&r.token)){ r=await api('/api/admin/intranet-login',{method:'POST',body:JSON.stringify({name,pw})}); }  // 인트라넷(inadd) 계정 폴백 — AE(staff) 스코프
   if(!(r&&r.success&&r.token)){ r=await api('/api/admin/advertiser-login',{method:'POST',body:JSON.stringify({name,pw})}); }  // 광고주(거래처) 폴백 — 소유 탭만·PII 마스킹
+  if(!(r&&r.success&&r.token)){ r=await api('/api/admin/intranet-login',{method:'POST',body:JSON.stringify({name,pw})}); }  // 인트라넷(inadd) 계정 폴백 — 마지막(자체 계정 자격을 외부로 안 흘리고, 인트라넷 장애 지연도 자체 계정에 무영향)
   if(r&&r.success&&r.token){ sessionStorage.setItem('admin_token',r.token); boot(); } else $('#lerr').textContent=(r&&(r.error||r.message))||'로그인 실패'; }
-function logout(){ sessionStorage.removeItem('admin_token'); boot(); }
+function logout(){ sessionStorage.removeItem('admin_token');
+  Object.assign(STATE,{ role:'',name:'',tabs:[],mapTabs:[],advs:[],ownTabs:[],sheetMap:{},tabIndex:{},cur:null,wd:null,ov:[] });   // 역할 전환 재로그인 대비 메모리 잔재 정리
+  boot(); }
 
 function renderShell(){
   const isAdmin = STATE.role==='master' || STATE.role==='admin';

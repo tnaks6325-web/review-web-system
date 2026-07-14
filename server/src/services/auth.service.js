@@ -105,8 +105,13 @@ async function loginIntranet(name, pw, _fetch = fetch) {
     return { success: false, error: (body && body.error) || '이름 또는 비밀번호가 올바르지 않습니다.' };
   }
   const display = String(body.display_name || body.username).trim();
+  if (!display) {
+    return { success: false, error: '인트라넷 계정에 표시 이름이 없습니다. 관리자에게 문의하세요.' };
+  }
+  // iu = 인트라넷 username(감사 추적용 원천 식별자). 스코프 키는 display_name(=inad_pm 매칭) —
+  //   인트라넷 직원DB의 실명은 관리자 관할(HR 데이터)이라는 가정을 문서화(부품4/CLAUDE.md).
   const token = jwt.sign(
-    { name: display, role: 'staff', via: 'intranet' },
+    { name: display, role: 'staff', via: 'intranet', iu: String(body.username) },
     process.env.JWT_SECRET,
     { expiresIn: process.env.JWT_EXPIRES_IN || '8h' }
   );
