@@ -216,6 +216,25 @@ router.get('/ownership/tabs', authMiddleware, internalMiddleware, async (req, re
   } catch (err) { next(err); }
 });
 
+// ── 연결탭 정산 요약(견적서일·계산서일·입금액/총비용·입금일) — 내부인(광고주 미도달, 금액 포함). ──
+//   링크된 탭만 인트라넷 프록시. 소유지정 패널이 탭 목록 렌더 후 비동기로 채움.
+router.get('/ownership/settlement', authMiddleware, internalMiddleware, async (req, res, next) => {
+  try {
+    if (!req.query.advertiserId) return res.status(400).json({ ok: false, error: 'advertiserId 필수' });
+    res.json({ ok: true, items: await svc.settlementSummaryForAdvertiser({ advertiserId: req.query.advertiserId }) });
+  } catch (err) { next(err); }
+});
+
+// ── 연결탭 비고(자유 텍스트) 저장 — master/admin 전체 · staff 담당 탭만(_ensureEditScope). ──
+router.post('/tab-memo', authMiddleware, async (req, res, next) => {
+  try {
+    const { sheetId, tabName, memo } = req.body || {};
+    if (!sheetId || !tabName) return res.status(400).json({ ok: false, error: 'sheetId, tabName 필수' });
+    const g = await _ensureEditScope(req, sheetId, tabName); if (!g.ok) return res.status(g.code).json({ ok: false, error: g.error });
+    res.json(await svc.saveTabMemo({ sheetId, tabName, memo, by: _by(req) }));
+  } catch (err) { next(err); }
+});
+
 // ── 업체 소유 매핑(1:N) — 읽기=내부인 · 쓰기=admin/master 전체, staff는 자기 담당(inad_pm) 업체만 ──
 router.get('/ownership', authMiddleware, internalMiddleware, async (req, res, next) => {
   try { res.json({ ok: true, items: await svc.listOwnership({ advertiserId: req.query.advertiserId, sheetId: req.query.sheetId }) }); }

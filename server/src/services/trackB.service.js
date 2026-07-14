@@ -461,6 +461,9 @@ async function ownedTabsForAdvertiser({ advertiserId } = {}) {
             t.tab_name AS "tabName", t.row_count AS "rowCount", cnt.first_seen AS "firstSeenAt",
             cnt.total AS "bTotal", cnt.submitted AS "bSub", cnt.paid AS "bPaid",
             tc.manager, wo.recruit_count AS "woRecruit",
+            sl.sales_id AS "salesId", sl.contract_number AS "contractNumber",
+            co.closed_date AS "closeoutDate", co.row_count AS "closeoutRows", co.sub_count AS "closeoutSubs",
+            tm.memo,
             EXISTS (SELECT 1 FROM index_master im WHERE im.status = 'active' AND im.sheet_id = t.sheet_id
                       AND (im.tab_gid = t.tab_gid OR im.tab_name = t.tab_name)) AS "active"
        FROM tabs t
@@ -478,6 +481,17 @@ async function ownedTabsForAdvertiser({ advertiserId } = {}) {
           WHERE l.sheet_id = t.sheet_id AND l.tab_name = t.tab_name AND l.deleted_at IS NULL
           ORDER BY l.created_at DESC LIMIT 1
        ) wo ON TRUE
+       LEFT JOIN LATERAL (
+         SELECT s.sales_id, s.contract_number FROM trackb_settlement_links s
+          WHERE s.sheet_id = t.sheet_id AND s.tab_name = t.tab_name AND s.deleted_at IS NULL
+          ORDER BY s.created_at DESC LIMIT 1
+       ) sl ON TRUE
+       LEFT JOIN LATERAL (
+         SELECT c.closed_date::text AS closed_date, c.row_count, c.sub_count FROM trackb_tab_closeouts c
+          WHERE c.sheet_id = t.sheet_id AND c.tab_name = t.tab_name AND c.deleted_at IS NULL
+          ORDER BY c.created_at DESC, c.id DESC LIMIT 1
+       ) co ON TRUE
+       LEFT JOIN trackb_tab_memos tm ON tm.sheet_id = t.sheet_id AND tm.tab_name = t.tab_name
       ORDER BY COALESCE(cnt.first_seen, t.mirrored_at) DESC NULLS LAST, t.tab_name DESC`, [advertiserId]);
   return rows;
 }
@@ -557,6 +571,8 @@ function _mapSales(r) {
     manager: String(r.manager || '').trim() || null, amount: Number(r.amount) || 0,
     paymentStatus: r.payment_status || 'unpaid', invoiceStatus: r.invoice_status || 'not_issued',
     paymentDate: r.payment_date || null, invoiceDate: r.invoice_date || null,
+    // 입금매칭(인트라넷 계약관리 sales_bank_matches 의 집계 파생값): 누적 입금액 + 최근 입금일
+    paidAmount: Number(r.matched_bank_amount) || 0, paidDate: r.matched_bank_date || null,
   };
 }
 
@@ -617,13 +633,18 @@ async function _salesById(salesId) {
   } catch (_) { return c ? c.sales : null; }   // stale 있으면 유지, 없으면 null
 }
 // S2: 견적서는 sales_id 로 quotes 를 역파생(quotes.sales_id, 화이트리스트 테이블) — 별도 quote 링크 불필요.
+//   20초 캐시(salesId별) — 정산 요약 배치·스텝퍼 연속 렌더의 인트라넷 왕복 방지(_salesById 와 동일 시맨틱).
+const _quoteCache = new Map();   // salesId → { at, quote }
 async function _quoteForSales(salesId) {
+  const now = Date.now(); const c = _quoteCache.get(salesId);
+  if (c && now - c.at < 20 * 1000) return c.quote;
   try {
     const j = await _intranetGet(`/api/tables/quotes?where=sales_id=${encodeURIComponent(salesId)}&limit=1`);
     const q = (j.data || [])[0];
-    if (!q) return null;
-    return { quoteNumber: String(q.quote_number || '').trim(), status: q.status || 'draft', quoteDate: q.quote_date || null, totalAmount: Number(q.total_amount) || 0 };
-  } catch (_) { return null; }
+    const quote = q ? { quoteNumber: String(q.quote_number || '').trim(), status: q.status || 'draft', quoteDate: q.quote_date || null, totalAmount: Number(q.total_amount) || 0 } : null;
+    _quoteCache.set(salesId, { at: now, quote });
+    return quote;
+  } catch (_) { return c ? c.quote : null; }   // stale 있으면 유지, 없으면 null
 }
 
 // 탭 정산 스텝퍼(마감자료→견적서→계산서→선금/잔금). 링크 조회 → 인트라넷 프록시 병합 → 역할 렌즈.
@@ -660,6 +681,59 @@ async function settlementForTab({ sheetId, tabName, role = 'master', advertiserI
     amount: sales ? sales.amount : null,
     salesInfo: sales ? { advertiserName: sales.advertiserName, productName: sales.productName, manager: isAdv ? undefined : sales.manager } : null,
   };
+}
+
+// ── 소유지정 연결탭 정산 요약(관제실 컬럼: 견적서일·계산서일·입금액/총비용·입금일) — 내부 전용 배치. ──
+//   링크된 탭만 인트라넷 프록시(정산 링크 없는 탭은 프록시 0회). 같은 sales 를 공유하는 탭은 1회만 조회
+//   (_salesById/_quoteForSales 20초 캐시 공유). fail-soft: sales 조회 실패 = proxyDown 표기(스로우 금지).
+//   ★ 광고주 렌즈 없음 — 이 함수의 소비 라우트는 internalMiddleware(master/admin/staff)로 제한할 것.
+async function settlementSummaryForAdvertiser({ advertiserId } = {}) {
+  if (!advertiserId) throw new Error('settlementSummaryForAdvertiser: advertiserId 필수');
+  const tabs = await ownedTabsForAdvertiser({ advertiserId });
+  const linked = tabs.filter(t => t.salesId);
+  const bySales = new Map();
+  for (const t of linked) if (!bySales.has(t.salesId)) bySales.set(t.salesId, null);
+  await Promise.all([...bySales.keys()].map(async (sid) => {
+    const [sales, quote] = await Promise.all([_salesById(sid), _quoteForSales(sid)]);
+    bySales.set(sid, { sales, quote });
+  }));
+  return linked.map(t => {
+    const { sales = null, quote = null } = bySales.get(t.salesId) || {};
+    const quoteAmount = quote && quote.totalAmount > 0 ? quote.totalAmount : null;
+    const contractAmount = sales && sales.amount > 0 ? sales.amount : null;
+    return {
+      sheetId: t.sheetId, tabName: t.tabName, salesId: t.salesId,
+      contractNumber: t.contractNumber || (sales && sales.contractNumber) || '',
+      proxyDown: !sales,
+      quoteDate: quote ? _normIntraDate(quote.quoteDate) : null,
+      invoiceDate: sales ? _normIntraDate(sales.invoiceDate) : null,
+      invoiceStatus: sales ? sales.invoiceStatus : null,
+      paidAmount: sales ? sales.paidAmount : null,                            // 현재까지 매칭된 입금 누계
+      paidDate: sales ? _normIntraDate(sales.paidDate || sales.paymentDate) : null,   // 최근 입금매칭일
+      paymentStatus: sales ? sales.paymentStatus : null,
+      // 총비용 = 견적서상 금액(원칙). 견적 없으면 계약금액 폴백. 견적↔계약 금액 불일치는 ⚠ 신호만(자동 판정 안 함).
+      totalCost: quoteAmount != null ? quoteAmount : contractAmount,
+      amountMismatch: !!(quoteAmount && contractAmount && quoteAmount !== contractAmount),
+    };
+  });
+}
+// 인트라넷 날짜 정규화: 'YYYYMMDD'(팝빌 trade_date) → 'YYYY-MM-DD', 그 외는 앞 10자.
+function _normIntraDate(s) {
+  const v = String(s || '').trim(); if (!v) return null;
+  if (/^\d{8}$/.test(v)) return `${v.slice(0, 4)}-${v.slice(4, 6)}-${v.slice(6, 8)}`;
+  return v.slice(0, 10);
+}
+
+// ── 연결탭 비고(자유 텍스트, migration 056) — 탭당 1행 upsert. 관제실 '비고(인애드)' 대응. ──
+async function saveTabMemo({ sheetId, tabName, memo = '', by = '' } = {}) {
+  if (!sheetId || !tabName) return { ok: false, code: 400, error: 'sheetId, tabName 필수' };
+  const text = ((typeof memo === 'string' || typeof memo === 'number') ? String(memo) : '').slice(0, 2000);
+  await getPool().query(
+    `INSERT INTO trackb_tab_memos (sheet_id, tab_name, memo, updated_by, updated_at)
+     VALUES ($1,$2,$3,$4,NOW())
+     ON CONFLICT (sheet_id, tab_name) DO UPDATE SET memo=$3, updated_by=$4, updated_at=NOW()`,
+    [sheetId, tabName, text, String(by || '').slice(0, 100)]);
+  return { ok: true, memo: text };
 }
 
 // ══════════════════════════════════════════════════════════════════════════
@@ -1910,6 +1984,7 @@ module.exports = {
   unlinkSettlement,
   setSettlementVisible,
   settlementForTab,
+  settlementSummaryForAdvertiser, saveTabMemo,
   settlementVisibleFor,
   generateCloseout,
   latestCloseout,
