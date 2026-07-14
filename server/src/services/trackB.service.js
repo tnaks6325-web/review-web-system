@@ -561,16 +561,24 @@ function _mapSales(r) {
 }
 
 // 탭 ↔ 계약/견적 링크(탭당 활성 1, 소프트삭제 교체). trackb_settlement_links 만 write(인트라넷 무접촉).
+//   Nit4: UPDATE+INSERT 를 단일 tx 로(동시 링크 유니크충돌·중간실패 시 무링크 방지).
+//   S1: 링크된 계약의 업체명을 로그로 남겨 오링크(타 업체 계약을 남의 탭에 연결) 사후추적 — advertiserName 반환.
 async function linkSettlement({ sheetId, tabName, salesId, quoteId = null, by = '' } = {}) {
   if (!sheetId || !tabName || !salesId) return { ok: false, code: 400, error: 'sheetId, tabName, salesId 필수' };
-  const db = getPool();
-  let contractNumber = '';
-  try { const j = await _intranetGet(`/api/tables/sales/${encodeURIComponent(salesId)}`); contractNumber = String((j.data && j.data.contract_number) || '').trim(); } catch (_) {}
-  await db.query('UPDATE trackb_settlement_links SET deleted_at=NOW() WHERE sheet_id=$1 AND tab_name=$2 AND deleted_at IS NULL', [sheetId, tabName]);
-  await db.query(
-    `INSERT INTO trackb_settlement_links (sheet_id, tab_name, sales_id, quote_id, contract_number, linked_by)
-     VALUES ($1,$2,$3,$4,$5,$6)`, [sheetId, tabName, salesId, quoteId || null, contractNumber, String(by || '').slice(0, 100)]);
-  return { ok: true, contractNumber };
+  let contractNumber = '', advertiserName = '';
+  try { const j = await _intranetGet(`/api/tables/sales/${encodeURIComponent(salesId)}`); contractNumber = String((j.data && j.data.contract_number) || '').trim(); advertiserName = String((j.data && j.data.advertiser_name) || '').trim(); } catch (_) {}
+  const client = await getPool().connect();
+  try {
+    await client.query('BEGIN');
+    await client.query('UPDATE trackb_settlement_links SET deleted_at=NOW() WHERE sheet_id=$1 AND tab_name=$2 AND deleted_at IS NULL', [sheetId, tabName]);
+    await client.query(
+      `INSERT INTO trackb_settlement_links (sheet_id, tab_name, sales_id, quote_id, contract_number, linked_by)
+       VALUES ($1,$2,$3,$4,$5,$6)`, [sheetId, tabName, salesId, quoteId || null, contractNumber, String(by || '').slice(0, 100)]);
+    await client.query('COMMIT');
+  } catch (e) { await client.query('ROLLBACK').catch(() => {}); throw e; }
+  finally { client.release(); }
+  logger.info(`[trackB] 정산 링크: ${sheetId}/${tabName} → 계약 ${contractNumber || salesId}(업체:${advertiserName || '?'}) by ${by}`);
+  return { ok: true, contractNumber, advertiserName };
 }
 async function unlinkSettlement({ sheetId, tabName } = {}) {
   if (!sheetId || !tabName) return { ok: false, code: 400, error: 'sheetId, tabName 필수' };
@@ -595,6 +603,28 @@ async function _settlementVisibleFor(advertiserId) {
   return rows.length ? rows[0].settlement_visible !== false : true;   // 행 없음 = 기본 노출
 }
 
+// Nit6: sales 단건 프록시 20초 캐시(salesId별) — 광고주 페이지 렌더마다 인트라넷 왕복 방지.
+const _salesByIdCache = new Map();   // salesId → { at, sales }
+async function _salesById(salesId) {
+  const now = Date.now(); const c = _salesByIdCache.get(salesId);
+  if (c && now - c.at < 20 * 1000) return c.sales;
+  try {
+    const j = await _intranetGet(`/api/tables/sales/${encodeURIComponent(salesId)}`);
+    const sales = j.data ? _mapSales(j.data) : null;
+    _salesByIdCache.set(salesId, { at: now, sales });
+    return sales;
+  } catch (_) { return c ? c.sales : null; }   // stale 있으면 유지, 없으면 null
+}
+// S2: 견적서는 sales_id 로 quotes 를 역파생(quotes.sales_id, 화이트리스트 테이블) — 별도 quote 링크 불필요.
+async function _quoteForSales(salesId) {
+  try {
+    const j = await _intranetGet(`/api/tables/quotes?where=sales_id=${encodeURIComponent(salesId)}&limit=1`);
+    const q = (j.data || [])[0];
+    if (!q) return null;
+    return { quoteNumber: String(q.quote_number || '').trim(), status: q.status || 'draft', quoteDate: q.quote_date || null, totalAmount: Number(q.total_amount) || 0 };
+  } catch (_) { return null; }
+}
+
 // 탭 정산 스텝퍼(마감자료→견적서→계산서→선금/잔금). 링크 조회 → 인트라넷 프록시 병합 → 역할 렌즈.
 //   광고주(Q4-c): settlement_visible=FALSE 면 {hidden:true}(금액·상태 미포함). TRUE 면 금액 포함 전체.
 async function settlementForTab({ sheetId, tabName, role = 'master', advertiserId = null } = {}) {
@@ -604,26 +634,30 @@ async function settlementForTab({ sheetId, tabName, role = 'master', advertiserI
     `SELECT sales_id AS "salesId", quote_id AS "quoteId", contract_number AS "contractNumber", linked_by AS "linkedBy"
        FROM trackb_settlement_links WHERE sheet_id=$1 AND tab_name=$2 AND deleted_at IS NULL LIMIT 1`, [sheetId, tabName]);
   const link = rows[0] || null;
+  const isAdv = role === 'advertiser';
   // 광고주 노출 게이트(Q4-c 안전장치): 토글 OFF 면 정산 자체 비공개.
-  if (role === 'advertiser' && !(await _settlementVisibleFor(advertiserId))) {
+  if (isAdv && !(await _settlementVisibleFor(advertiserId))) {
     return { linked: !!link, hidden: true };
   }
-  const closeout = await (typeof latestCloseout === 'function' ? latestCloseout({ sheetId, tabName }) : Promise.resolve(null));
-  if (!link) return { linked: false, closeout };
-  // 링크된 sales/quote 단건만 프록시(그 탭에 링크된 계약만 — 타 업체 계약 도달 불가).
-  let sales = null, quote = null;
-  if (link.salesId) { try { const j = await _intranetGet(`/api/tables/sales/${encodeURIComponent(link.salesId)}`); if (j.data) sales = _mapSales(j.data); } catch (_) {} }
-  if (link.quoteId) { try { const q = await _intranetGet(`/api/quotes/${encodeURIComponent(link.quoteId)}`); if (q && q.id) quote = { quoteNumber: String(q.quote_number || '').trim(), status: q.status || 'draft', quoteDate: q.quote_date || null, totalAmount: Number(q.total_amount) || 0 }; } catch (_) {} }
+  // S3: 마감자료(①)는 P3(migration 055) 도착 전까지 데이터 원천 없음 — 준비중으로 표기(오해 방지).
+  const closeoutAvailable = typeof latestCloseout === 'function';
+  const closeout = closeoutAvailable ? await latestCloseout({ sheetId, tabName }) : null;
+  if (!link) return { linked: false, closeout, closeoutAvailable };
+  // 링크된 sales 단건만 프록시(그 탭에 링크된 계약만 — 타 업체 계약 도달 불가). 견적은 sales_id 로 역파생.
+  const sales = link.salesId ? await _salesById(link.salesId) : null;
+  const quote = link.salesId ? await _quoteForSales(link.salesId) : null;
   const contractNumber = (sales && sales.contractNumber) || link.contractNumber || '';
   return {
-    linked: true, contractNumber, salesId: link.salesId, quoteId: link.quoteId, linkedBy: link.linkedBy,
+    linked: true, contractNumber, salesId: link.salesId,
+    // Nit5: 광고주에겐 내부 정보(linkedBy·담당자) 미노출.
+    linkedBy: isAdv ? undefined : link.linkedBy,
     proxyDown: link.salesId && !sales,   // 프록시 실패(라벨만) 신호
-    closeout,
-    quote: quote || (link.quoteId ? { quoteNumber: '', status: null } : null),
+    closeout, closeoutAvailable,
+    quote: quote || null,
     invoice: sales ? { status: sales.invoiceStatus, date: sales.invoiceDate } : null,
     payment: sales ? { status: sales.paymentStatus, date: sales.paymentDate } : null,
     amount: sales ? sales.amount : null,
-    salesInfo: sales ? { advertiserName: sales.advertiserName, productName: sales.productName, manager: sales.manager } : null,
+    salesInfo: sales ? { advertiserName: sales.advertiserName, productName: sales.productName, manager: isAdv ? undefined : sales.manager } : null,
   };
 }
 

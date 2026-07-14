@@ -445,14 +445,16 @@ function renderSettlement(){
     return;
   }
   const co=d.closeout, q=d.quote, inv=d.invoice, pay=d.payment;
-  const coSub=co&&co.date?`${esc(String(co.date).slice(0,10))} · ${co.rowCount||0}건`:(co?'<span class="stpoff">미생성</span>':'<span class="stpoff">—</span>');
-  const qSub=q&&q.quoteNumber?`${esc(q.quoteNumber)}${q.status?` · <span class="bb ${(_SETTLE_Q[q.status]||['',''])[1]}">${(_SETTLE_Q[q.status]||[q.status])[0]}</span>`:''}`:(d.quoteId?'<span class="stpoff">조회 실패</span>':'<span class="stpoff">미연결</span>');
+  const coAvail=d.closeoutAvailable!==false;   // P3 도착 전이면 false → ① 준비중(오해 방지)
+  const coState=!coAvail?'off':(co&&co.date?'done':'wait');
+  const coSub=!coAvail?'<span class="stpoff">준비중(P3)</span>':(co&&co.date?`${esc(String(co.date).slice(0,10))} · ${co.rowCount||0}건`:(co?'<span class="stpoff">미생성</span>':'<span class="stpoff">—</span>'));
+  const qSub=q&&q.quoteNumber?`${esc(q.quoteNumber)}${q.status?` · <span class="bb ${(_SETTLE_Q[q.status]||['',''])[1]}">${(_SETTLE_Q[q.status]||[q.status])[0]}</span>`:''}`:'<span class="stpoff">견적 없음</span>';
   const invSub=inv?`<span class="bb ${(_SETTLE_INV[inv.status]||['','neutral'])[1]||'neutral'}">${(_SETTLE_INV[inv.status]||[inv.status])[0]}</span>${inv.date?` · ${esc(String(inv.date).slice(0,10))}`:''}`:'<span class="stpoff">—</span>';
   const paySub=pay?`<span class="bb ${(_SETTLE_PAY[pay.status]||['','neutral'])[1]||'neutral'}">${(_SETTLE_PAY[pay.status]||[pay.status])[0]}</span>${pay.date?` · ${esc(String(pay.date).slice(0,10))}`:''}`:'<span class="stpoff">—</span>';
   box.innerHTML=`<div class="sect" style="margin-top:16px"><div class="st">정산 ${d.contractNumber?`<span class="bb ok">${esc(d.contractNumber)}</span>`:''}${d.amount!=null?`<span class="bb">${_wonFmt(d.amount)}</span>`:''}${d.proxyDown?'<span class="bb warn" title="인트라넷 조회 실패 — 라벨만 표시">연동 지연</span>':''}</div>
     <div class="stpcard">
       <div class="stprow">
-        ${_step(1,'마감자료',co&&co.date?'done':'wait',coSub)}
+        ${_step(1,'마감자료',coState,coSub)}
         <div class="stparrow">→</div>
         ${_step(2,'견적서',q&&q.status==='accepted'?'done':(q&&q.quoteNumber?'wait':'off'),qSub)}
         <div class="stparrow">→</div>
