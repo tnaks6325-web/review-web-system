@@ -178,6 +178,14 @@ router.get('/intranet/advertisers', authMiddleware, adminOrMasterMiddleware, asy
   catch (err) { next(err); }
 });
 
+// ── 업체 소유 시트의 전체 탭 나열(최신 관측순) — admin/master ──
+router.get('/ownership/tabs', authMiddleware, adminOrMasterMiddleware, async (req, res, next) => {
+  try {
+    if (!req.query.advertiserId) return res.status(400).json({ ok: false, error: 'advertiserId 필수' });
+    res.json({ ok: true, items: await svc.ownedTabsForAdvertiser({ advertiserId: req.query.advertiserId }) });
+  } catch (err) { next(err); }
+});
+
 // ── 업체 소유 매핑(1:N) — admin/master ──
 router.get('/ownership', authMiddleware, adminOrMasterMiddleware, async (req, res, next) => {
   try { res.json({ ok: true, items: await svc.listOwnership({ advertiserId: req.query.advertiserId, sheetId: req.query.sheetId }) }); }

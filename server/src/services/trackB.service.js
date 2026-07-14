@@ -395,6 +395,37 @@ async function listAdvertisersWithOwnership() {
   return rows;
 }
 
+// ── 업체 소유 시트의 전체 탭 나열(소유지정 상세 패널): 시트전체 소유=그 시트 모든 탭, 탭지정 소유=그 탭만.
+//    정렬 = "생성 최신순" 근사: 시스템에 탭 생성시각 원천이 없어 MIN(campaign_participants.first_seen_at)
+//    (재투영에도 보존되는 최초 관측시각) 우선, 미투영 탭은 raw_sheet_tabs.mirrored_at 폴백.
+async function ownedTabsForAdvertiser({ advertiserId } = {}) {
+  if (!advertiserId) throw new Error('ownedTabsForAdvertiser: advertiserId 필수');
+  const db = getPool();
+  const { rows } = await db.query(
+    `WITH own AS (
+       SELECT sheet_id, tab_gid FROM advertiser_campaigns
+        WHERE advertiser_id = $1 AND deleted_at IS NULL
+     ), tabs AS (
+       SELECT DISTINCT ON (rst.sheet_id, rst.tab_gid)
+              rst.sheet_id, rst.spreadsheet_title, rst.tab_gid, rst.tab_name, rst.row_count, rst.mirrored_at
+         FROM raw_sheet_tabs rst
+         JOIN own o ON o.sheet_id = rst.sheet_id AND (o.tab_gid IS NULL OR o.tab_gid = rst.tab_gid)
+        WHERE rst.is_system_tab = FALSE
+        ORDER BY rst.sheet_id, rst.tab_gid, rst.mirrored_at DESC
+     )
+     SELECT t.sheet_id AS "sheetId", t.spreadsheet_title AS "spreadsheetTitle", t.tab_gid AS "tabGid",
+            t.tab_name AS "tabName", t.row_count AS "rowCount", fs.first_seen AS "firstSeenAt",
+            EXISTS (SELECT 1 FROM index_master im WHERE im.status = 'active' AND im.sheet_id = t.sheet_id
+                      AND (im.tab_gid = t.tab_gid OR im.tab_name = t.tab_name)) AS "active"
+       FROM tabs t
+       LEFT JOIN LATERAL (
+         SELECT MIN(cp.first_seen_at) AS first_seen FROM campaign_participants cp
+          WHERE cp.sheet_id = t.sheet_id AND (cp.tab_gid = t.tab_gid OR cp.tab_name = t.tab_name)
+       ) fs ON TRUE
+      ORDER BY COALESCE(fs.first_seen, t.mirrored_at) DESC NULLS LAST, t.tab_name DESC`, [advertiserId]);
+  return rows;
+}
+
 // ══ 인트라넷(inadd-webapp, Cloudflare D1) 광고주DB 자동완성 프록시 ══
 //   workdesk 업체(거래처) 추가 폼의 거래처명 자동완성용. 브라우저는 인트라넷을 직접 안 보고
 //   이 서버 프록시(adminOrMaster 게이트)만 호출 — 응답은 이름·담당자만 추려 반환(급여·근태 등
@@ -1435,6 +1466,7 @@ module.exports = {
   removeOwnership,
   listOwnership,
   listAdvertisersWithOwnership,
+  ownedTabsForAdvertiser,
   intranetAdvertisers,
   listWorkOrders,
   linkWorkOrder,

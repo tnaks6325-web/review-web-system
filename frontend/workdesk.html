@@ -40,6 +40,12 @@
   .sugitem{padding:8px 11px;font-size:12.5px;cursor:pointer;display:flex;justify-content:space-between;gap:8px}
   .sugitem:hover{background:var(--accent-soft)}
   .sugm{color:var(--faint);font-size:11px}
+  .owntab{display:flex;align-items:center;gap:10px;padding:9px 12px;border:1px solid var(--line);border-radius:9px;margin-bottom:6px;cursor:pointer}
+  .owntab:hover{background:var(--accent-soft)}
+  .owntab .info{flex:1;min-width:0}
+  .owntab .info b{font-size:12.5px;display:block;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+  .owntab .info span{font-size:11px;color:var(--faint)}
+  .owntab .openb{font-size:11px;color:var(--accent);font-weight:650;white-space:nowrap}
   .main{padding:18px 22px;overflow:auto}
   .mh{display:flex;align-items:center;gap:10px;flex-wrap:wrap;margin-bottom:14px}
   .mh h1{font-size:19px;margin:0;font-weight:800;letter-spacing:-.02em}
@@ -717,26 +723,40 @@ async function renderOwnershipView(){
   $('#advs').innerHTML = STATE.advs.map((a,i)=>`<div class="advitem" data-i="${i}" onclick="selAdv(${i})"><span class="ava">${esc((a.name||'?').slice(0,1))}</span><span class="nm">${esc(a.name)}</span><span class="ct">${a.owned}</span></div>`).join('')||`<div class="empty">등록된 업체 없음</div>`;
 }
 // 업체(거래처) 추가 — 기존 포털 거래처 원장(POST /api/portal/advertisers, adminOrMaster) 재사용.
-//   담당 AE(inad_pm)까지 입력하면 소유 지정 + AE 스코프에 즉시 사용 가능.
+//   흐름: ① 캠페인 시트 먼저 선택(탭 미리보기로 어떤 캠페인인지 확인) → ② 거래처명 검색(인트라넷 자동완성)
+//   → ③ 등록 = 업체 생성 + 선택 시트 전체 소유 자동 지정. 담당AE는 로그인명 자동.
 function showAddAdvertiser(){
   STATE.advCur=null; document.querySelectorAll('.advitem').forEach(el=>el.classList.remove('on'));
+  const sheetOpts = Object.keys(STATE.sheetMap).map(sid=>`<option value="${esc(sid)}">${esc(sheetTitle(sid))}</option>`).join('');
   $('#ownPanel').innerHTML = `
-    <div class="ph2"><span class="big">＋</span><div><h2>업체(거래처) 추가</h2><div class="acc">새 광고주를 등록하면 이 목록에 뜨고, 아래에서 시트/탭 소유를 지정할 수 있습니다.</div></div></div>
+    <div class="ph2"><span class="big">＋</span><div><h2>업체(거래처) 추가</h2><div class="acc">① 캠페인 시트를 먼저 선택하고 → ② 거래처명을 검색해 등록하세요. 등록하면 선택한 시트 전체가 이 업체 소유로 자동 지정됩니다.</div></div></div>
     <div class="sect"><div class="st">새 업체</div>
       <div class="add">
-        <label>거래처명 * <span style="color:var(--faint);font-weight:400">(인트라넷 광고주DB 검색 — 입력하면 자동완성)</span></label>
+        <label>① 캠페인 시트 *</label>
+        <select id="advSheet" onchange="onAdvSheet()"><option value="">— 시트 선택 —</option>${sheetOpts}</select>
+        <div id="advSheetTabs" style="font-size:11.5px;color:var(--faint);margin-top:6px;min-height:15px"></div>
+        <label style="margin-top:11px">② 거래처명 * <span style="color:var(--faint);font-weight:400">(인트라넷 광고주DB 검색 — 입력하면 자동완성)</span></label>
         <div style="position:relative">
-          <input id="advName" placeholder="예: (주)콩고물" autocomplete="off" oninput="intraSuggest(this.value)" onkeydown="if(event.key==='Enter')createAdvertiser()">
+          <input id="advName" placeholder="먼저 캠페인 시트를 선택하세요" autocomplete="off" disabled oninput="intraSuggest(this.value)" onkeydown="if(event.key==='Enter')createAdvertiser()">
           <div id="advSug" class="advsug"></div>
         </div>
         <label style="margin-top:11px">담당 AE (로그인 정보 기준 자동 지정)</label>
         <input id="advPm" value="" readonly style="background:var(--card2);color:var(--muted);cursor:not-allowed">
         <div id="advErr" style="color:var(--bad);font-size:12px;margin-top:9px;min-height:15px"></div>
-        <button class="btn pri assignbtn" onclick="createAdvertiser()">＋ 업체 등록</button>
+        <button class="btn pri assignbtn" onclick="createAdvertiser()">＋ 업체 등록 + 시트 소유 지정</button>
       </div>
     </div>`;
   $('#advPm').value = STATE.name || '';
-  setTimeout(()=>{ const el=$('#advName'); if(el) el.focus(); },40);
+  setTimeout(()=>{ const el=$('#advSheet'); if(el) el.focus(); },40);
+}
+// 시트 선택 → 거래처명 입력 활성화 + 탭 미리보기(어떤 캠페인 시트인지 확인용).
+function onAdvSheet(){
+  const sid=($('#advSheet')&&$('#advSheet').value)||'';
+  const nameEl=$('#advName'), prev=$('#advSheetTabs');
+  if(!sid){ if(nameEl){ nameEl.disabled=true; nameEl.placeholder='먼저 캠페인 시트를 선택하세요'; } if(prev) prev.textContent=''; return; }
+  const tabs=((STATE.sheetMap[sid]||{}).tabs||[]);
+  if(prev){ const names=tabs.map(t=>t.tabName); prev.textContent = tabs.length ? `탭 ${tabs.length}개: `+names.slice(0,5).join(' · ')+(names.length>5?` 외 ${names.length-5}개`:'') : '이 시트에 활성 탭 없음'; }
+  if(nameEl){ nameEl.disabled=false; nameEl.placeholder='예: (주)콩고물'; nameEl.focus(); }
 }
 // 인트라넷 광고주DB 자동완성(서버 프록시 경유 — 브라우저는 인트라넷 직접 미호출). 실패 시 조용히 무시(수동 입력 가능).
 let _sugTimer=null;
@@ -753,14 +773,19 @@ function intraSuggest(q){
 }
 function pickIntra(name){ const el=$('#advName'); if(el) el.value=name; const box=$('#advSug'); if(box){ box.classList.remove('show'); box.innerHTML=''; } }
 async function createAdvertiser(){
+  const sheetId=($('#advSheet')&&$('#advSheet').value)||'';
   const name=($('#advName').value||'').trim(), inad_pm=(STATE.name||'').trim();
   const err=$('#advErr'); if(err) err.textContent='';
+  if(!sheetId){ if(err) err.textContent='캠페인 시트를 먼저 선택하세요.'; return; }
   if(!name){ if(err) err.textContent='거래처명을 입력하세요.'; return; }
   const r=await api('/api/portal/advertisers',{method:'POST',body:JSON.stringify({ name, inad_pm })});
-  if(r&&r.ok){ toast('업체 등록: '+name); const newId=r.data&&r.data.id;
-    await renderOwnershipView();
-    const idx=(STATE.advs||[]).findIndex(a=>a.id===newId); if(idx>=0) selAdv(idx);
-  } else if(err){ err.textContent=(r&&r.error)||'등록 실패'; }
+  if(!(r&&r.ok)){ if(err) err.textContent=(r&&r.error)||'등록 실패'; return; }
+  const newId=r.data&&r.data.id;
+  let ownOk=false;
+  if(newId){ const o=await api('/api/trackb/ownership',{method:'POST',body:JSON.stringify({advertiserId:newId, sheetId, tabGid:null})}); ownOk=!!(o&&o.ok); }
+  toast(ownOk ? ('업체 등록 + 시트 소유 지정: '+name) : ('업체 등록: '+name+' (소유 지정 실패 — 아래에서 수동 지정)'));
+  await renderOwnershipView();
+  const idx=(STATE.advs||[]).findIndex(a=>a.id===newId); if(idx>=0) selAdv(idx);
 }
 function buildTabIndex(){ STATE.sheetMap={}; STATE.tabIndex={};
   for(const t of STATE.tabs){ if(!STATE.sheetMap[t.sheetId]) STATE.sheetMap[t.sheetId]={title:t.spreadsheetTitle||t.sheetId,tabs:[]};
@@ -769,9 +794,17 @@ function buildTabIndex(){ STATE.sheetMap={}; STATE.tabIndex={};
 async function selAdv(i){ const a=STATE.advs[i]; STATE.advCur=a; STATE.addSheet=null; STATE.addMode='all'; STATE.addTabs={};
   document.querySelectorAll('.advitem').forEach(el=>el.classList.toggle('on',+el.dataset.i===i));
   $('#ownPanel').innerHTML=`<div class="empty">불러오는 중…</div>`;
-  const r=await api('/api/trackb/ownership?advertiserId='+encodeURIComponent(a.id));
+  const [r, rt]=await Promise.all([
+    api('/api/trackb/ownership?advertiserId='+encodeURIComponent(a.id)),
+    api('/api/trackb/ownership/tabs?advertiserId='+encodeURIComponent(a.id)).catch(()=>null),
+  ]);
+  STATE.ownTabs=(rt&&rt.ok&&rt.items)||[];
   renderOwnPanel(a, (r&&r.items)||[]);
 }
+// 연결된 탭 클릭 → 작업대에서 그 탭 열기(관측 뷰 "열기"와 동일한 pendingTab 계약).
+function openOwnTab(i){ const t=(STATE.ownTabs||[])[i]; if(!t) return;
+  STATE.pendingTab={sheetId:t.sheetId, tabGid:t.tabGid, tabName:t.tabName, spreadsheetTitle:t.spreadsheetTitle||sheetTitle(t.sheetId)};
+  switchView('workdesk'); }
 function sheetTitle(sid){ return (STATE.sheetMap[sid]&&STATE.sheetMap[sid].title)||sid; }
 function renderOwnPanel(a, items){
   const owns = items.map(o=>{
@@ -783,9 +816,13 @@ function renderOwnPanel(a, items){
       <button class="rm" title="소유 해제" onclick="rmOwn('${esc(o.sheetId)}','${esc(o.tabGid||'')}')">×</button></div>`;
   }).join('') || `<div class="empty" style="padding:20px">소유 캠페인 없음 — 아래에서 추가하세요.</div>`;
   const sheetOpts = Object.keys(STATE.sheetMap).map(sid=>`<option value="${esc(sid)}">${esc(sheetTitle(sid))}</option>`).join('');
+  const ot=STATE.ownTabs||[];
+  const tabList = ot.map((t,i)=>`<div class="owntab" onclick="openOwnTab(${i})"><div class="info"><b>${esc(t.tabName)}</b><span>${esc(t.spreadsheetTitle||sheetTitle(t.sheetId))}${t.rowCount?` · ${t.rowCount}행`:''}${t.firstSeenAt?` · ${esc(String(t.firstSeenAt).slice(0,10))}`:''}</span></div>${t.active?'<span class="scope all">활성</span>':'<span class="scope tab" style="opacity:.55">비활성</span>'}<span class="openb">열기 ›</span></div>`).join('')
+    || `<div class="empty" style="padding:14px">연결된 탭 없음</div>`;
   $('#ownPanel').innerHTML = `
     <div class="ph2"><span class="big">${esc((a.name||'?').slice(0,1))}</span><div><h2>${esc(a.name)}</h2><div class="acc">거래처 ID: ${esc(a.id)} · 소유 ${items.length}</div></div></div>
     <div class="sect"><div class="st">소유 캠페인</div>${owns}</div>
+    <div class="sect"><div class="st">연결된 탭 ${ot.length} <span style="font-weight:400;color:var(--faint);font-size:11px">· 최신순 — 클릭하면 작업대로 열기</span></div>${tabList}</div>
     <div class="sect"><div class="st">소유 추가</div>
       <div class="add">
         <label>캠페인 시트</label>
