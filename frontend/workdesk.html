@@ -507,16 +507,20 @@ async function toggleSettleVis(advertiserId,visible){
   else toast((r&&r.error)||'실패');
 }
 // P3 마감자료 생성/CSV
+let _genBusy=false;
 async function genCloseout(e){ if(e)e.preventDefault();
-  const st=STATE.settle; if(!st) return; const t=st.tab;
-  const r=await api('/api/trackb/settlement/closeout',{method:'POST',body:JSON.stringify({sheetId:t.sheetId,tabName:t.tabName})});
-  if(r&&r.ok){ toast(`마감자료 생성 (${r.closeout.rowCount}건)`); loadSettlement(t); } else toast((r&&r.error)||'생성 실패');
+  if(_genBusy) return; _genBusy=true;   // N-3: 더블클릭 중복생성 방지
+  const st=STATE.settle; if(!st){ _genBusy=false; return; } const t=st.tab;
+  try{
+    const r=await api('/api/trackb/settlement/closeout',{method:'POST',body:JSON.stringify({sheetId:t.sheetId,tabName:t.tabName})});
+    if(r&&r.ok){ toast(`마감자료 생성 (${r.closeout.rowCount}건)`); loadSettlement(t); } else toast((r&&r.error)||'생성 실패');
+  } finally { _genBusy=false; }
 }
 async function dlCloseoutCsv(e){ if(e)e.preventDefault();
   const st=STATE.settle; if(!st) return; const t=st.tab;
   const url=`/api/trackb/settlement/closeout.csv?sheetId=${encodeURIComponent(t.sheetId)}&tabName=${encodeURIComponent(t.tabName)}`;
   const resp=await fetch(API_BASE+url,{headers:{Authorization:'Bearer '+token()}});
-  if(!resp.ok){ toast('CSV 다운로드 실패'); return; }
+  if(!resp.ok){ let msg='CSV 다운로드 실패'; try{ const j=await resp.json(); if(j&&j.error) msg=j.error; }catch(_){}  toast(msg); return; }   // N-5: 서버 사유 표시
   const blob=await resp.blob(); const a=document.createElement('a');
   a.href=URL.createObjectURL(blob); a.download=`closeout_${t.tabName}.csv`; document.body.appendChild(a); a.click(); a.remove(); URL.revokeObjectURL(a.href);
 }

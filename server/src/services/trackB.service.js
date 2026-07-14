@@ -602,6 +602,7 @@ async function _settlementVisibleFor(advertiserId) {
   const { rows } = await getPool().query('SELECT settlement_visible FROM trackb_advertiser_prefs WHERE advertiser_id=$1', [advertiserId]);
   return rows.length ? rows[0].settlement_visible !== false : true;   // 행 없음 = 기본 노출
 }
+function settlementVisibleFor(advertiserId) { return _settlementVisibleFor(advertiserId); }   // 라우트용 경량 게이트(N-2)
 
 // Nit6: sales 단건 프록시 20초 캐시(salesId별) — 광고주 페이지 렌더마다 인트라넷 왕복 방지.
 const _salesByIdCache = new Map();   // salesId → { at, sales }
@@ -667,15 +668,51 @@ async function settlementForTab({ sheetId, tabName, role = 'master', advertiserI
 //   ★ 격리: campaign_participants(투영 명단) 읽기 + trackb_tab_closeouts write 만. Track A/시트 무접촉.
 //   ★ latestCloseout 정의 = settlementForTab 의 스텝퍼 ①(마감자료)이 이 시점부터 라이브(closeoutAvailable).
 // ══════════════════════════════════════════════════════════════════════════
-// 활성 명단(투영 물리행) — 마감자료 CSV·건수의 단일 소스. deleted_at·active 필터.
+// 활성 명단(투영 물리행 + participant_edits 오버레이 합성) — 마감자료 CSV·건수의 단일 소스.
+//   ★ SF-3: 제거(_hidden) 오버레이 행은 제외(작업대에서 안 보이는 행이 CSV에 재등장 방지),
+//     이름/수취인/차수/옵션/제출/입금 편집 보정도 반영 — workdeskTab 합성과 동일 규칙.
 async function _closeoutRoster(sheetId, tabName) {
-  const { rows } = await getPool().query(
-    `SELECT seq, reviewer_name AS name, recipient_name AS recipient, phone8, round, option_text AS option,
-            product_name AS product, is_submitted AS submitted, is_paid AS paid, submitted_at AS "submittedAt"
+  const db = getPool();
+  const { rows } = await db.query(
+    `SELECT id, seq, reviewer_name AS name, recipient_name AS recipient, phone8, round, option_text AS option,
+            product_name AS product, is_submitted AS submitted, is_paid AS paid, submitted_at AS "submittedAt",
+            source, order_submission_id, identity_key
        FROM campaign_participants
       WHERE sheet_id=$1 AND tab_name=$2 AND active=TRUE AND deleted_at IS NULL
       ORDER BY seq ASC`, [sheetId, tabName]);
-  return rows;
+  const { rows: edits } = await db.query(
+    `SELECT anchor_type, anchor_value, field, kind, value_bool, value_text
+       FROM participant_edits WHERE sheet_id=$1 AND tab_name=$2 AND reverted_at IS NULL`, [sheetId, tabName])
+    .catch(() => ({ rows: [] }));
+  const editMap = new Map();
+  for (const e of edits) {
+    const k = _akey(e.anchor_type, e.anchor_value);
+    if (!editMap.has(k)) editMap.set(k, {});
+    editMap.get(k)[e.field] = e.kind === 'bool' ? !!e.value_bool : (e.value_text == null ? '' : e.value_text);
+  }
+  const identCount = new Map();
+  for (const r of rows) {
+    if (r.order_submission_id || r.source === 'manual') continue;
+    const ik = r.identity_key || identityKey(_ikFromRow(r));
+    if (ik) identCount.set(ik, (identCount.get(ik) || 0) + 1);
+  }
+  const out = [];
+  for (const r of rows) {
+    const anchor = _deriveAnchor(r);
+    let ov = {};
+    if (anchor && !(anchor.type === 'identity' && (identCount.get(anchor.value) || 0) > 1)) {
+      const k = _akey(anchor.type, anchor.value); if (editMap.has(k)) ov = editMap.get(k);
+    }
+    if (ov._hidden === true) continue;   // 제거 오버레이 → 마감자료에서 제외
+    const pick = (f, phys) => (Object.prototype.hasOwnProperty.call(ov, f) ? ov[f] : phys);
+    out.push({
+      seq: r.seq, name: pick('reviewer_name', r.name), recipient: pick('recipient_name', r.recipient),
+      phone8: pick('phone8', r.phone8), round: pick('round', r.round), option: pick('option_text', r.option),
+      product: pick('product_name', r.product), submitted: !!pick('is_submitted', r.submitted),
+      paid: !!pick('is_paid', r.paid), submittedAt: r.submittedAt,
+    });
+  }
+  return out;
 }
 // 마감자료 생성(이력 보존 — 재생성 시 새 행). 마감일=오늘 KST. 건수=활성/제출.
 async function generateCloseout({ sheetId, tabName, by = '' } = {}) {
@@ -691,18 +728,24 @@ async function generateCloseout({ sheetId, tabName, by = '' } = {}) {
     [sheetId, tabName, kstDate, roster.length, subCount, String(by || '').slice(0, 100)]);
   return { ok: true, closeout: rows[0] };
 }
-// 최신 마감(스텝퍼 ① 소스). settlementForTab 이 병합.
+// 최신 마감(스텝퍼 ① 소스). settlementForTab 이 병합. N-1: 동시각 tie 는 id DESC 로 결정적.
 async function latestCloseout({ sheetId, tabName } = {}) {
   if (!sheetId || !tabName) return null;
   const { rows } = await getPool().query(
     `SELECT id, closed_date AS "date", row_count AS "rowCount", sub_count AS "subCount", created_by AS "createdBy", created_at AS "createdAt"
        FROM trackb_tab_closeouts WHERE sheet_id=$1 AND tab_name=$2 AND deleted_at IS NULL
-      ORDER BY created_at DESC LIMIT 1`, [sheetId, tabName]);
+      ORDER BY created_at DESC, id DESC LIMIT 1`, [sheetId, tabName]);
   return rows[0] || null;
 }
+// CSV 셀 이스케이프 + 수식 인젝션 무력화(SF-2/N-4): =+-@ 또는 탭/CR 로 시작하면 앞에 ' 를 붙이고,
+//   ",\r,\n 포함 시 따옴표로 감싼다(Excel/LibreOffice 수식 실행 CWE-1236 차단).
+function _csvCell(v) {
+  let s = v == null ? '' : String(v);
+  if (/^[=+\-@\t\r]/.test(s)) s = "'" + s;
+  return /[",\r\n]/.test(s) ? '"' + s.replace(/"/g, '""') + '"' : s;
+}
 // 마감자료 CSV(UTF-8 BOM). PII라 내부(master/admin/staff) + 소유 광고주만 — reviewer 차단은 라우트 스코프.
-//   광고주 렌즈면 연락처 마스킹(끝4자리) — 노출 토글 OFF 여부는 라우트가 사전 게이트.
-function _csvCell(v) { const s = v == null ? '' : String(v); return /[",\n]/.test(s) ? '"' + s.replace(/"/g, '""') + '"' : s; }
+//   광고주 렌즈면 연락처·이름·수취인 마스킹(workdeskTab 정책 일치) — 노출 토글 OFF 여부는 라우트가 사전 게이트.
 async function closeoutCsv({ sheetId, tabName, role = 'master' } = {}) {
   const roster = await _closeoutRoster(sheetId, tabName);
   const isAdv = role === 'advertiser';
@@ -711,7 +754,8 @@ async function closeoutCsv({ sheetId, tabName, role = 'master' } = {}) {
   for (const r of roster) {
     const phone = isAdv ? (r.phone8 ? '****' + String(r.phone8).slice(-4) : '') : (r.phone8 || '');
     lines.push([
-      r.seq, r.name, phone, r.recipient, r.round, r.option, r.product,
+      r.seq, isAdv ? _maskName(r.name) : r.name, phone, isAdv ? _maskName(r.recipient) : r.recipient,
+      r.round, r.option, r.product,
       r.submitted ? 'O' : '', r.paid ? 'O' : '', r.submittedAt ? String(r.submittedAt).slice(0, 10) : '',
     ].map(_csvCell).join(','));
   }
@@ -1866,6 +1910,7 @@ module.exports = {
   unlinkSettlement,
   setSettlementVisible,
   settlementForTab,
+  settlementVisibleFor,
   generateCloseout,
   latestCloseout,
   closeoutCsv,

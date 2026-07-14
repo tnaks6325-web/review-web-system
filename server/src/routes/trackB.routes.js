@@ -315,10 +315,10 @@ router.get('/settlement/closeout.csv', authMiddleware, async (req, res, next) =>
     const { sheetId, tabName } = req.query;
     if (!sheetId || !tabName) return res.status(400).json({ ok: false, error: 'sheetId, tabName 필수' });
     const g = await _ensureThreadScope(req, sheetId, tabName); if (!g.ok) return res.status(g.code).json({ ok: false, error: g.error });   // 내부 + 소유 광고주(reviewer 차단)
-    // 광고주는 정산 노출 토글 OFF 면 CSV(PII)도 차단.
+    // 광고주는 정산 노출 토글 OFF 면 CSV(PII)도 차단(N-2: 경량 게이트 — 인트라넷 프록시 왕복 없음).
     if (_role(req) === 'advertiser') {
-      const s = await svc.settlementForTab({ sheetId, tabName, role: 'advertiser', advertiserId: (req.admin && req.admin.advertiser_id) || null });
-      if (s.hidden) return res.status(403).json({ ok: false, error: '정산 정보가 비공개로 설정되어 있습니다.' });
+      const visible = await svc.settlementVisibleFor((req.admin && req.admin.advertiser_id) || null);
+      if (!visible) return res.status(403).json({ ok: false, error: '정산 정보가 비공개로 설정되어 있습니다.' });
     }
     const csv = await svc.closeoutCsv({ sheetId, tabName, role: _role(req) });
     res.setHeader('Content-Type', 'text/csv; charset=utf-8');
