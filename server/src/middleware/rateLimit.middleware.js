@@ -25,6 +25,16 @@ const registerLimiter = rateLimit({
   message: { error: '등록 요청이 너무 많습니다.' },
 });
 
+// ── 인트라넷 SSO 로그인(무인증 자격 프록시) 전용 — 리뷰서버가 인트라넷 대상
+//    크리덴셜 스터핑 오라클/프록시가 되는 것 방지(전역 120/분 대비 강한 10/분).
+const intranetLoginLimiter = rateLimit({
+  windowMs: 60 * 1000,
+  max: 10,
+  message: { success: false, error: '로그인 시도가 너무 많습니다. 잠시 후 다시 시도하세요.' },
+  standardHeaders: true,
+  legacyHeaders: false,
+});
+
 // ── 이미지 API 전용 rate limiter (Gemini/Drive 비용 보호) ──
 // 관리자 로그인 시 skip, 비로그인은 분당 10회 제한
 const imageApiLimiter = rateLimit({
@@ -47,4 +57,4 @@ const imageApiLimiter = rateLimit({
   },
 });
 
-module.exports = { rateLimiter, registerLimiter, imageApiLimiter };
+module.exports = { rateLimiter, registerLimiter, imageApiLimiter, intranetLoginLimiter };

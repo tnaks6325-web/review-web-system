@@ -24,6 +24,16 @@ function authMiddleware(req, res, next) {
       }
       return res.status(401).json({ error: '유효하지 않은 인증 토큰입니다.' });
     }
+    // ★ 인트라넷 SSO 토큰(via:'intranet')은 Track B 통합작업대(/api/trackb/*) 전용.
+    //   외부(inadd) 발급 신원이 Track A의 authMiddleware-only 라우트(탭설정 리셋·메모 등
+    //   파괴적 쓰기)에 도달하는 폭발반경을 원천 차단(폐쇄 기본). 기존 토큰(via 없음)은 무영향.
+    //   경로 판정은 baseUrl+path(마운트 스트리핑 함정 회피 — 전역 리미터 skip과 동일 규칙).
+    if (decoded && decoded.via === 'intranet') {
+      const p = (req.baseUrl || '') + (req.path || '');
+      if (!(p === '/api/trackb' || p.startsWith('/api/trackb/'))) {
+        return res.status(403).json({ error: '인트라넷 연동 계정은 통합 작업대(Track B)에서만 사용할 수 있습니다.' });
+      }
+    }
     req.admin = decoded; // { name, role, iat, exp }
     next();
   });

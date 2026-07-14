@@ -2,7 +2,7 @@ const express = require('express');
 const router = express.Router();
 const { authMiddleware, masterOnlyMiddleware, adminOrMasterMiddleware } = require('../middleware/auth.middleware');
 const {
-  loginAdmin, loginStaff, loginAdvertiser,
+  loginAdmin, loginStaff, loginAdvertiser, loginIntranet,
   addAdminUser, editAdminUser, deleteAdminUser, listAdminUsers,
   addStaffUser, editStaffUser, deleteStaffUser, listStaffUsers,
   addAdvertiserUser, editAdvertiserUser, deleteAdvertiserUser, listAdvertiserUsers,
@@ -31,6 +31,21 @@ router.post('/staff-login', async (req, res, next) => {
     const { name, pw } = req.body;
     const result = await loginStaff(name, pw);
     res.json(result);
+  } catch (err) {
+    next(err);
+  }
+});
+
+// ═══════════════════════════════════════════════════════════
+// POST /api/admin/intranet-login — 인트라넷(inadd) 계정으로 AE(staff) 로그인
+//   Track B 통합작업대 SSO: 인트라넷 서버에 자격 프록시 검증 후 review JWT(role='staff') 발급.
+//   인트라넷 로그인 성공 시점에 이 엔드포인트로 받은 토큰을 #sso 프래그먼트로 이어받는다.
+// ═══════════════════════════════════════════════════════════
+const { intranetLoginLimiter } = require('../middleware/rateLimit.middleware');
+router.post('/intranet-login', intranetLoginLimiter, async (req, res, next) => {
+  try {
+    const b = req.body || {};
+    res.json(await loginIntranet(b.name || b.username, b.pw || b.password));
   } catch (err) {
     next(err);
   }

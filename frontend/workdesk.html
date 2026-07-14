@@ -189,8 +189,19 @@
 
 <script>
 const API_BASE = (function(){ if (window.REVIEW_API_URL) return window.REVIEW_API_URL; if (location.hostname==='localhost') return 'http://localhost:3000'; return 'https://sublime-magic-production-790b.up.railway.app'; })();
-// 토큰 핸드오프: admin.html에서 넘긴 raw_sso → sessionStorage(자동 로그인). raw-mirror.html과 동일 계약.
-(function initToken(){ try{ const raw=localStorage.getItem('raw_sso'); if(raw){ const sso=JSON.parse(raw); if(sso&&sso.token&&!sessionStorage.getItem('admin_token')) sessionStorage.setItem('admin_token', sso.token); } }catch(_){} })();
+// 토큰 핸드오프 2경로: ① 인트라넷 SSO(#sso=<token> 프래그먼트, 크로스오리진이라 URL 경유 — 도착 즉시 저장 후
+//   주소창에서 제거, 새 신원 도착이므로 기존 세션 덮어씀) ② admin.html raw_sso(localStorage, 기존 세션 존중).
+(function initToken(){
+  try{   // ① #sso — 디코드 실패해도 raw_sso 폴백이 죽지 않게 분리 try
+    const m=(location.hash||'').match(/[#&]sso=([^&]+)/);
+    if(m){ let t=null; try{ t=decodeURIComponent(m[1]); }catch(_){ }
+      try{ history.replaceState(null,'',location.pathname+location.search); }catch(_){ }
+      if(t){ sessionStorage.setItem('admin_token', t); return; } }
+  }catch(_){ }
+  try{   // ② raw_sso(관리자 핸드오프) — 기존 세션 존중
+    const raw=localStorage.getItem('raw_sso'); if(raw){ const sso=JSON.parse(raw); if(sso&&sso.token&&!sessionStorage.getItem('admin_token')) sessionStorage.setItem('admin_token', sso.token); }
+  }catch(_){ }
+})();
 function token(){ return sessionStorage.getItem('admin_token') || ''; }
 async function api(path, opts){ const o=Object.assign({headers:{}},opts||{}); o.headers['Authorization']='Bearer '+token(); if(o.body)o.headers['Content-Type']='application/json'; const r=await fetch(API_BASE+path,o); return r.json(); }
 const $=(s,el)=>(el||document).querySelector(s);
@@ -205,6 +216,7 @@ let STATE = { role:'', name:'', view:'workdesk', tabs:[], cur:null, wd:null, fre
 async function boot(){
   if (!token()) return renderLogin();
   const me = parseJwt(token()); STATE.role=me.role||''; STATE.name=me.name||'';
+  if(!STATE.role){ sessionStorage.removeItem('admin_token'); return renderLogin(); }   // 깨진/위조 토큰 → 빈 셸 대신 로그인
   renderShell();
 }
 function renderLogin(){
@@ -213,24 +225,31 @@ function renderLogin(){
     <input id="lpw" type="password" placeholder="비밀번호" autocomplete="current-password">
     <button class="btn pri" style="width:100%;padding:9px" onclick="doLogin()">로그인</button>
     <div class="err" id="lerr"></div>
-    <div class="note">Track B 통합 작업대입니다. 관리자(master/admin)는 전체·관측·소유 지정, AE(영업담당)는 담당 업체 탭 열람/편집, 광고주(거래처)는 소유 탭을 열람합니다(개인정보 마스킹).</div></div>`;
+    <div class="note">Track B 통합 작업대입니다. 관리자(master/admin)는 전체·관측·소유 지정, AE(영업담당)는 담당 업체 탭 열람/편집 + 소유 지정(초기매핑), 광고주(거래처)는 소유 탭을 열람합니다(개인정보 마스킹). <b>인트라넷 계정으로도 로그인 가능</b>(인트라넷에서 "통합 작업대" 버튼으로 오면 자동 로그인).</div></div>`;
   $('#lpw').addEventListener('keydown',e=>{if(e.key==='Enter')doLogin();});
 }
 async function doLogin(){ const name=$('#lname').value.trim(), pw=$('#lpw').value;
   let r=await api('/api/admin/login',{method:'POST',body:JSON.stringify({name,pw})});
   if(!(r&&r.success&&r.token)){ r=await api('/api/admin/staff-login',{method:'POST',body:JSON.stringify({name,pw})}); }  // AE(영업담당) 폴백
   if(!(r&&r.success&&r.token)){ r=await api('/api/admin/advertiser-login',{method:'POST',body:JSON.stringify({name,pw})}); }  // 광고주(거래처) 폴백 — 소유 탭만·PII 마스킹
+  if(!(r&&r.success&&r.token)){ r=await api('/api/admin/intranet-login',{method:'POST',body:JSON.stringify({name,pw})}); }  // 인트라넷(inadd) 계정 폴백 — 마지막(자체 계정 자격을 외부로 안 흘리고, 인트라넷 장애 지연도 자체 계정에 무영향)
   if(r&&r.success&&r.token){ sessionStorage.setItem('admin_token',r.token); boot(); } else $('#lerr').textContent=(r&&(r.error||r.message))||'로그인 실패'; }
-function logout(){ sessionStorage.removeItem('admin_token'); boot(); }
+function logout(){ sessionStorage.removeItem('admin_token');
+  Object.assign(STATE,{ role:'',name:'',tabs:[],mapTabs:[],advs:[],ownTabs:[],sheetMap:{},tabIndex:{},cur:null,wd:null,ov:[] });   // 역할 전환 재로그인 대비 메모리 잔재 정리
+  boot(); }
 
 function renderShell(){
   const isAdmin = STATE.role==='master' || STATE.role==='admin';
+  const isStaff = STATE.role==='staff';   // AE — 작업대(담당 탭) + 소유 지정(초기매핑, 자기 담당 업체만)
   $('#app').innerHTML = `
     <div class="top">
       <span class="logo">통합 작업대 <span class="tag">TRACK B · 그림자</span></span>
       ${isAdmin?`<nav class="nav">
         <button class="navb" data-v="workdesk" onclick="switchView('workdesk')">작업대</button>
         <button class="navb" data-v="overview" onclick="switchView('overview')">관측</button>
+        <button class="navb" data-v="ownership" onclick="switchView('ownership')">소유 지정</button></nav>`
+      :isStaff?`<nav class="nav">
+        <button class="navb" data-v="workdesk" onclick="switchView('workdesk')">작업대</button>
         <button class="navb" data-v="ownership" onclick="switchView('ownership')">소유 지정</button></nav>`:''}
       <span class="sp"></span>
       <span class="rolebadge">${esc(STATE.role||'?')}${STATE.name?(' · '+esc(STATE.name)):''}</span>
@@ -714,9 +733,10 @@ async function renderOwnershipView(){
   $('#viewroot').innerHTML = `<div class="own-wrap">
     <div class="advlist"><div class="sh row" style="font-size:10px;font-weight:750;letter-spacing:.05em;text-transform:uppercase;color:var(--faint);margin:4px 6px 9px">업체(광고주)<button class="addadv" onclick="showAddAdvertiser()">＋ 업체 추가</button></div><div id="advs"><div class="empty">불러오는 중…</div></div></div>
     <div class="own-panel" id="ownPanel"><div class="empty">왼쪽에서 업체를 선택하세요.</div></div></div>`;
-  // 탭 인덱스(시트명/탭명 조회용) 1회 로드
-  if(!STATE.tabs.length){ const r=await api('/api/trackb/tabs?limit=500'); STATE.tabs=(r&&r.tabs)||[]; }
-  buildTabIndex();
+  // 탭 인덱스(시트명/탭명 조회용): 매핑용 전체 목록(forMapping=1 — staff도 전체 탭명 수신, 미소유 시트 매핑 가능).
+  //   작업대 사이드바(STATE.tabs, 스코프 적용)와 분리 보관해 스코프 오염 방지.
+  if(!STATE.mapTabs||!STATE.mapTabs.length){ const r=await api('/api/trackb/tabs?limit=500&forMapping=1'); STATE.mapTabs=(r&&r.tabs)||[]; }
+  buildTabIndex(STATE.mapTabs);
   const r=await api('/api/trackb/advertisers');
   if(!r||!r.ok){ $('#advs').innerHTML=`<div class="empty">업체 목록은 admin/master에서 제공</div>`; return; }
   STATE.advs=r.items||[];
@@ -778,7 +798,7 @@ async function createAdvertiser(){
   const err=$('#advErr'); if(err) err.textContent='';
   if(!sheetId){ if(err) err.textContent='캠페인 시트를 먼저 선택하세요.'; return; }
   if(!name){ if(err) err.textContent='거래처명을 입력하세요.'; return; }
-  const r=await api('/api/portal/advertisers',{method:'POST',body:JSON.stringify({ name, inad_pm })});
+  const r=await api('/api/trackb/advertisers',{method:'POST',body:JSON.stringify({ name, inad_pm })});
   if(!(r&&r.ok)){ if(err) err.textContent=(r&&r.error)||'등록 실패'; return; }
   const newId=r.data&&r.data.id;
   let ownOk=false;
@@ -787,8 +807,8 @@ async function createAdvertiser(){
   await renderOwnershipView();
   const idx=(STATE.advs||[]).findIndex(a=>a.id===newId); if(idx>=0) selAdv(idx);
 }
-function buildTabIndex(){ STATE.sheetMap={}; STATE.tabIndex={};
-  for(const t of STATE.tabs){ if(!STATE.sheetMap[t.sheetId]) STATE.sheetMap[t.sheetId]={title:t.spreadsheetTitle||t.sheetId,tabs:[]};
+function buildTabIndex(list){ STATE.sheetMap={}; STATE.tabIndex={};
+  for(const t of (list||STATE.tabs)){ if(!STATE.sheetMap[t.sheetId]) STATE.sheetMap[t.sheetId]={title:t.spreadsheetTitle||t.sheetId,tabs:[]};
     STATE.sheetMap[t.sheetId].tabs.push(t); STATE.tabIndex[t.sheetId+'::'+(t.tabGid||'')]=t.tabName; } }
 
 async function selAdv(i){ const a=STATE.advs[i]; STATE.advCur=a; STATE.addSheet=null; STATE.addMode='all'; STATE.addTabs={};
