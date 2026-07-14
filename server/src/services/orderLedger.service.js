@@ -1,4 +1,5 @@
 const { detectSheetHeader, normalizeCells } = require('../utils/sheetHeader');
+const { logger } = require('../utils/logger');
 
 const INAD_COL_KEYWORDS = ['인애드', '인애드명', '인애드제출', '카톡', '카카오', '닉네임'];
 const OPTION_COL_KEYWORDS = ['옵션', 'option'];
@@ -35,6 +36,24 @@ function _triggerSheetMirrorOnce(sheetId) {
       await withJobLock('order_reconcile', () => reconcileStuckOrders({ sheetId, limit: 500, perTabCap: 500 }));
     } catch (_) { /* best-effort; 정규 cron(미러 5분·리컨실 2분)이 backstop */ }
   });
+}
+
+// ★ F2: 실시간 "마지막 데이터 행"을 탭당 1콜로 조회.
+//   주의: gridProperties.rowCount는 그리드 할당크기(예 1010)지 데이터 끝이 아니다 →
+//   그걸 base로 쓰면 append가 데이터 한참 아래(빈칸 수백 행 점프)로 떨어진다.
+//   values.get(범위=탭명)은 후행 빈 행을 트림 → 반환 행수 = 실제 마지막 데이터행(1-indexed). 이게 정답.
+//   metaCache(사이클 맵)로 같은 사이클 내 탭당 중복콜 제거. base 하한 보정 전용(배치 reconcile만 사용).
+async function _getRealMaxRow(sheetId, tabGid, tabName, metaCache) {
+  const { readSheet } = require('./sheets.service');
+  const { throttledCall } = require('../utils/sheetsThrottle');
+  const cacheKey = `${sheetId}||${tabName}`;
+  if (metaCache && metaCache.has(cacheKey)) return metaCache.get(cacheKey);
+  const safeTab = String(tabName || '').replace(/'/g, "''");
+  // gid 미전달 → values.get 경로(후행 빈행 트림). 탭명은 시트 내 유니크(구글 강제)라 안전.
+  const grid = await throttledCall(() => readSheet(sheetId, `'${safeTab}'`, {}));
+  const lastRow = Array.isArray(grid) ? grid.length : 0;
+  if (metaCache) metaCache.set(cacheKey, lastRow);
+  return lastRow;
 }
 
 function toPhone8(v) {
@@ -109,7 +128,7 @@ function pushUnique(arr, seen, rowIndex) {
   }
 }
 
-function buildCandidateRows({ headers, dataRows, headerRowIndex, orderData = {}, appendOnly = false }) {
+function buildCandidateRows({ headers, dataRows, headerRowIndex, orderData = {}, appendOnly = false, appendBaseRow = 0 }) {
   const candidates = [];
   const seen = new Set();
   const rows = (dataRows || []).map((r, idx) => ({
@@ -163,26 +182,64 @@ function buildCandidateRows({ headers, dataRows, headerRowIndex, orderData = {},
   }
   } // end if(!appendOnly)
 
-  const maxRow = rows.reduce((max, row) => Math.max(max, row.rowIndex), headerRowIndex || 1);
+  // ★ R-2a: append base를 미러 maxRow와 claims MAX(appendBaseRow) 중 큰 값으로 통일.
+  //   제출 핫패스가 claims를 안 보면 같은 maxRow+1을 여러 제출이 동시 후보로 잡아 동일행 경쟁(버스트) →
+  //   claims MAX 합류로 reconcile과 단일 진실원본화(단조증가, 손실0).
+  const maxRow = Math.max(
+    rows.reduce((max, row) => Math.max(max, row.rowIndex), headerRowIndex || 1),
+    parseInt(appendBaseRow, 10) || 0
+  );
   for (let i = 1; i <= APPEND_CANDIDATE_COUNT; i++) {
     pushUnique(candidates, seen, maxRow + i);
   }
   return candidates;
 }
 
+// ★ id열 판정 공용 규칙 — '쿠팡id'/'네이버id'/'id'/'아이디'/'userid' 인식, 'paid'(앞 a-z) 오탐 회피.
+//   mapOrderToSheetRow · _fieldToCol('user_id') · 백필이 이 규칙을 공유해 append/update/cancel/sig/detect가 일관되게 같은 열을 본다.
+//   (버그이력: 옛 규칙 key==='id' 는 헤더 '쿠팡id'를 못 잡아 쿠팡탭 id열이 영구 공란이었다.)
+const _ID_EXACT_ADMIN = ['번호', 'no', '#'];
+const _ID_ADMIN_KW = ['인애드', '카톡', '닉네임', '상품', '상품명'];
+function _isIdHeader(key) {
+  const k = String(key || '').toLowerCase().trim();
+  if (!k) return false;
+  return k.includes('아이디') || k.includes('userid') || k === 'id' || /(^|[^a-z])id$/.test(k);
+}
+// ★ map의 id-규칙이 실제로 "이기는" 열만 카운트 — id 규칙보다 앞선 규칙(관리자/주문자/수취인)에
+//   선점된 열 + '비고(아이디확인)'류 메모열(오탐)을 제외한 잔여 id열만 센다.
+function _idColIndices(headers) {
+  const out = [];
+  (headers || []).forEach((h, i) => {
+    const key = String(h || '').toLowerCase().trim();
+    if (_ID_EXACT_ADMIN.includes(key)) return;
+    if (_ID_ADMIN_KW.some(kw => key === kw || key.includes(kw))) return;
+    if (key.includes('주문자') || key.includes('orderer')) return;
+    if (key.includes('수취인') || key.includes('받는분') || key.includes('이름') || key.includes('recipient')) return;
+    if (key.includes('비고') || key.includes('특이사항') || key.includes('memo')) return; // 메모열 오탐 제외
+    if (_isIdHeader(key)) out.push(i);
+  });
+  return out;
+}
+// id열이 '정확히 1개'일 때만 그 인덱스, 아니면 -1(0개=없음 / 2개+=NC 동시탭 → 채널구분 불가로 공란).
+function _singleIdCol(headers) {
+  const idx = _idColIndices(headers);
+  return idx.length === 1 ? idx[0] : -1;
+}
+
 function mapOrderToSheetRow(headers, orderData = {}) {
   const optParts = String(orderData.selectedOptKey || '').split('|').map(v => v.trim());
   let optColCounter = 0;
-  const exactAdminHeaders = ['번호', 'no', '#'];
-  const adminOnlyKeywords = ['인애드', '카톡', '닉네임', '상품', '상품명'];
+  // ★ id열은 탭 전체에서 '정확히 1개'일 때만 채운다(단일 쿠팡id/네이버id/id). NC(네이버+쿠팡)
+  //   동시탭은 id열이 2개라 채널구분 불가 → 오기입 방지 위해 둘 다 공란(현행과 동일=무회귀). 판정은 선행규칙 뒤.
+  const idCol = _singleIdCol(headers);
 
-  return (headers || []).map(h => {
+  return (headers || []).map((h, colIdx) => {
     const key = String(h || '').toLowerCase().trim();
-    if (exactAdminHeaders.includes(key)) return null;
-    if (adminOnlyKeywords.some(kw => key === kw || key.includes(kw))) return null;
+    if (_ID_EXACT_ADMIN.includes(key)) return null;
+    if (_ID_ADMIN_KW.some(kw => key === kw || key.includes(kw))) return null;
     if (key.includes('주문자') || key.includes('orderer')) return orderData.orderer || '';
     if (key.includes('수취인') || key.includes('받는분') || key.includes('이름') || key.includes('recipient')) return orderData.recipient || '';
-    if (key.includes('아이디') || key.includes('userid') || key === 'id') return orderData.userId || '';
+    if (colIdx === idCol) return orderData.userId || '';   // ★ 옛 규칙(includes '아이디' / ==='id') 대체 — '쿠팡id' 인식
     if (key.includes('전화') || key.includes('연락') || key.includes('핸드폰') || key.includes('휴대폰') || key === 'phone') return orderData.phone || '';
     if (key.includes('주소') || key.includes('address')) return orderData.address || '';
     if (key.includes('은행') || key.includes('bank')) return orderData.bank || '';
@@ -551,38 +608,78 @@ async function createOrderLedgerEntry(input) {
   const {
     sheetId, tabName, gid, orderData,
     slotRowNumber, loginPhone8, loginName,
+    campaignHold, // 참여형 홀드 확정 문맥 {applicationId, campaignId, phone8, holdToken} | undefined
   } = input;
   // ★ D4(#5): osid 폴백 dedupKey를 쓰려면 먼저 id가 필요 → INSERT(dedup_key NULL) 후 osid 포함 키 계산·UPDATE.
-  const insert = await db.query(
-    `INSERT INTO order_submissions
+  const ORDER_INSERT_SQL = `INSERT INTO order_submissions
       (sheet_id, tab_name, gid, tab_gid, orderer, recipient, user_id, phone, address,
        order_num, date_str, selected_opt_key, bank, account, depositor, price, memo,
        dedup_key, mirror_status)
      VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,NULL,'pending')
-     RETURNING id`,
-    [
-      sheetId,
-      tabName,
-      gid || '',
-      gid || '',
-      orderData.orderer || '',
-      orderData.recipient || '',
-      orderData.userId || '',
-      orderData.phone || '',
-      orderData.address || '',
-      orderData.orderNum || '',
-      orderData.dateStr || '',
-      orderData.selectedOptKey || '',
-      orderData.bank || '',
-      orderData.account || '',
-      orderData.depositor || '',
-      orderData.price || '',
-      orderData.memo || '',
-    ]
-  );
-  const orderSubmissionId = insert.rows[0].id;
-  const dedupKey = computeDedupKey({ ...orderData, orderSubmissionId });
-  await db.query(`UPDATE order_submissions SET dedup_key = $2 WHERE id = $1`, [orderSubmissionId, dedupKey]);
+     RETURNING id`;
+  const orderInsertParams = [
+    sheetId,
+    tabName,
+    gid || '',
+    gid || '',
+    orderData.orderer || '',
+    orderData.recipient || '',
+    orderData.userId || '',
+    orderData.phone || '',
+    orderData.address || '',
+    orderData.orderNum || '',
+    orderData.dateStr || '',
+    orderData.selectedOptKey || '',
+    orderData.bank || '',
+    orderData.account || '',
+    orderData.depositor || '',
+    orderData.price || '',
+    orderData.memo || '',
+  ];
+
+  let orderSubmissionId;
+  let dedupKey;
+  let holdResult = null;
+
+  if (campaignHold && campaignHold.applicationId) {
+    // ★ 참여형(레드-블루-심판 최종안): 주문 INSERT + dedup + 홀드확정 + provenance 링크 = 단일 트랜잭션(부분상태 불가).
+    //   홀드확정 내부 오류는 SAVEPOINT로 격리(심판 J2) — 어떤 경우에도 주문 INSERT는 살아남는다(주문 손실 0).
+    const client = await db.connect();
+    try {
+      await client.query('BEGIN');
+      const ins = await client.query(ORDER_INSERT_SQL, orderInsertParams);
+      orderSubmissionId = ins.rows[0].id;
+      dedupKey = computeDedupKey({ ...orderData, orderSubmissionId });
+      await client.query(`UPDATE order_submissions SET dedup_key = $2 WHERE id = $1`, [orderSubmissionId, dedupKey]);
+      await client.query('SAVEPOINT hold_confirm');
+      try {
+        const { confirmHoldInTx } = require('./campaignHold.service'); // 지연 require(순환 방지 — 기존 패턴)
+        holdResult = await confirmHoldInTx(client, { ...campaignHold, orderSubmissionId, sheetId, gid, tabName });
+      } catch (holdErr) {
+        await client.query('ROLLBACK TO SAVEPOINT hold_confirm');
+        holdResult = 'error';
+        logger.warn(`[orderLedger] 홀드확정 오류(주문은 보존): ${holdErr.message} camp=${campaignHold.campaignId} os=${orderSubmissionId}`);
+      }
+      await client.query('COMMIT');
+    } catch (err) {
+      try { await client.query('ROLLBACK'); } catch (_) { /* noop */ }
+      throw err;
+    } finally {
+      client.release();
+    }
+    if (holdResult === 'tab_mismatch') {
+      logger.warn(`[orderLedger] 캠페인 탭 불일치 — 홀드확정 보류(주문은 저장, 관제 수동확정 대상): camp=${campaignHold.campaignId} os=${orderSubmissionId} sheet=${sheetId} gid=${gid || ''} tab=${tabName}`);
+    } else if (holdResult === 'not_found' || holdResult === 'invalid_params') {
+      // 무신호 방지(코드리뷰 #7): 위조/오염 문맥 — 주문은 저장됐고 홀드 링크만 거부됨
+      logger.warn(`[orderLedger] 홀드확정 문맥 무효(${holdResult}) — 주문은 저장: camp=${campaignHold.campaignId} app=${campaignHold.applicationId} os=${orderSubmissionId}`);
+    }
+  } else {
+    // 비참여 주문: 기존 경로 그대로(핫패스 무변경 — 트랜잭션·커넥션 점유 없음)
+    const insert = await db.query(ORDER_INSERT_SQL, orderInsertParams);
+    orderSubmissionId = insert.rows[0].id;
+    dedupKey = computeDedupKey({ ...orderData, orderSubmissionId });
+    await db.query(`UPDATE order_submissions SET dedup_key = $2 WHERE id = $1`, [orderSubmissionId, dedupKey]);
+  }
 
   let tabContext = null;
   let claim = { row: null, error: 'not_attempted' };
@@ -591,6 +688,15 @@ async function createOrderLedgerEntry(input) {
 
   try {
     tabContext = await loadRawTabContext(sheetId, gid, tabName);
+    // ★ R-2a: 제출 claim 후보 base에 claims MAX 합류(reconcile과 동일기준) → 버스트 동일행 경쟁 차단.
+    let claimsMax = 0;
+    try {
+      const mc = await db.query(
+        `SELECT COALESCE(MAX(sheet_row),0) AS m FROM sheet_row_claims WHERE sheet_id=$1 AND tab_name=$2`,
+        [sheetId, tabName]
+      );
+      claimsMax = parseInt(mc.rows[0].m, 10) || 0;
+    } catch (_) { /* claims 조회 실패는 미러 base로 폴백 */ }
     candidateRows = slotRowNumber
       ? [parseInt(slotRowNumber, 10)]
       : (tabContext ? buildCandidateRows({
@@ -598,6 +704,7 @@ async function createOrderLedgerEntry(input) {
           dataRows: tabContext.dataRows,
           headerRowIndex: tabContext.headerRowIndex,
           orderData,
+          appendBaseRow: claimsMax,
         }) : []);
 
     if (!candidateRows.length) {
@@ -676,6 +783,7 @@ async function createOrderLedgerEntry(input) {
     tabContext,
     tabGid: (tabContext && tabContext.tabGid) || gid || '',
     headers: tabContext ? tabContext.headers : [],
+    holdResult, // 참여형 홀드 확정 결과('confirmed'|'late'|'tab_mismatch'|'error'|null)
   };
 }
 
@@ -691,16 +799,17 @@ async function markOrderQueued(orderSubmissionId) {
   );
 }
 
-async function markOrderWritten(orderSubmissionId, sheetRow) {
+async function markOrderWritten(orderSubmissionId, sheetRow, sig = null) {
   if (!orderSubmissionId) return;
   await getPool().query(
     `UPDATE order_submissions
         SET mirror_status = 'written',
             sheet_row = COALESCE($2::int, sheet_row),
             sheet_written_at = NOW(),
-            sheet_error = NULL
+            sheet_error = NULL,
+            last_sheet_write_sig = COALESCE($3, last_sheet_write_sig)
       WHERE id = $1`,
-    [orderSubmissionId, sheetRow || null]
+    [orderSubmissionId, sheetRow || null, sig]
   );
 }
 
@@ -744,9 +853,10 @@ async function recordReviewIdentity({ sheetId, tabName, tabGid, rowIndex, phone8
  *   행배정 하위단계(loadRawTabContext→buildCandidateRows(appendOnly)→claimRow)만 재실행
  * - claimRow의 dedup 유니크로 재시도해도 같은 행 반환 → 시트 중복행 없음
  */
-async function reconcileStuckOrders({ limit = 50, perTabCap = 20, sheetId = null, tabName = null, staleQueuedMinutes = 10, dryRun = false } = {}) {
+async function reconcileStuckOrders({ limit = 50, perTabCap = 20, sheetId = null, tabName = null, staleQueuedMinutes = 10, dryRun = false, useLiveMaxRow = false } = {}) {
   const db = getPool();
   const { enqueue } = require('./syncQueue.service'); // lazy: require 순환 회피
+  const _metaByTab = new Map(); // F2/J-2: 사이클 내 getSpreadsheetMeta 중복콜 제거(시트당 1콜)
 
   const params = [staleQueuedMinutes];
   let sheetFilter = '';
@@ -800,6 +910,16 @@ async function reconcileStuckOrders({ limit = 50, perTabCap = 20, sheetId = null
     // 이미 행이 있는 주문(failed/정체 queued) → 재배정 없이 바로 재-enqueue
     if (row.sheet_row) {
       if (dryRun) { result.requeued++; continue; }
+      // ★ 공정화 #3(R1 근원): 이미 live(pending/processing) order_append가 있으면 재생성 금지 →
+      //   고아 큐 누적 차단(written된 주문의 잔여 항목이 throttle를 반복 잠식하던 원인). queued 분기와 동일 가드.
+      try {
+        const { rows: dup } = await db.query(
+          `SELECT 1 FROM sync_queue WHERE type='order_append' AND status IN ('pending','processing')
+             AND (payload->>'orderSubmissionId') = $1 LIMIT 1`,
+          [String(row.id)]
+        );
+        if (dup.length) { result.requeued++; continue; }
+      } catch (_) { /* 가드 조회 실패는 무시하고 재큐잉(보수적) */ }
       try {
         await enqueue('order_append', {
           sheetId: row.sheet_id, tabName: row.tab_name, gid,
@@ -839,6 +959,30 @@ async function reconcileStuckOrders({ limit = 50, perTabCap = 20, sheetId = null
         const claimed = parseInt(mc.rows[0].m, 10) || 0;
         if (claimed > baseRow) baseRow = claimed;
       } catch (_) {}
+      // ★ F2: stale 미러로 base가 실제 시트보다 작으면 이미 채워진 행을 claim → 가드블록 스래싱.
+      //   useLiveMaxRow(배치 reconcile만)일 때 실시간 그리드 끝행을 base 하한으로 보정(시트당 1콜, 사이클 캐시).
+      //   append-only라 그리드 끝 아래는 항상 빈칸 → 가드 통과 보장.
+      //   ★ 단, 라이브읽기는 throttle(45/분)에 직렬화되므로 버스트로 throttle 포화면 ~60s 블록 →
+      //     pnr 복구가 60s 지연(인터리브 다탭 관측). claims MAX/미러 base가 이미 append에 충분하므로
+      //     throttle 여유 없을 땐 라이브읽기 SKIP(캐시값 있으면 사용). 수동행은 다중컬럼 가드가 잡음.
+      if (useLiveMaxRow) {
+        let live = false;
+        const cached = _metaByTab.has(`${row.sheet_id}||${row.tab_name}`);
+        if (cached) { live = true; }
+        else {
+          try {
+            const { getThrottleStatus } = require('../utils/sheetsThrottle');
+            const busyN = parseInt(process.env.ORDER_RECONCILE_LIVE_MAXROW_BUSY || '30', 10);
+            live = getThrottleStatus().requestsInLastMinute < busyN;
+          } catch (_) { live = true; }
+        }
+        if (live) {
+          try {
+            const realMax = await _getRealMaxRow(row.sheet_id, tabContext.tabGid || gid, row.tab_name, _metaByTab);
+            if (realMax > baseRow) baseRow = realMax;
+          } catch (e) { logger.warn(`[reconcile] realMaxRow 실패(미러 base 유지): ${e.message}`); }
+        }
+      }
       cursor = baseRow;
     }
     cursor += 1;
@@ -918,9 +1062,46 @@ const _FIELD_HEADER_KW = {
   selected_opt_key: [['옵션'], ['option']],
 };
 function _fieldToCol(headers, field) {
+  // ★ user_id는 _singleIdCol 단일열 게이트로 통일('쿠팡id' 인식 + NC 2열이면 -1).
+  //   append(map)·order_update·order_cancel·computeRowWriteSig·reverse-sync가 같은 열 판정을 공유(비대칭 divergence 방지).
+  if (field === 'user_id') return _singleIdCol(headers);
   const def = _FIELD_HEADER_KW[field];
   if (!def) return -1;
   return findColumn(headers, def[0], def[1] || []);
+}
+
+// ★ 재발방지: 제출값이 있는데 시트에 넣을 열을 못 찾은 필드 목록(조용한 누락 관측용).
+//   쓰기측(order_append)이 이걸로 warn/logAbnormal → '쿠팡id'류 헤더 미인식이 조용히 새지 않고 즉시 신호로 뜬다.
+//   user_id는 NC(id열 2개=동시탭)면 '의도적 미기입'이라 제외하고, id열이 아예 0개인데 값이 있으면 누락으로 본다.
+const _UNMAPPED_CHECK_FIELDS = ['recipient', 'phone', 'address', 'bank', 'account', 'depositor', 'order_num'];
+const _FIELD_ODKEY = { recipient: 'recipient', phone: 'phone', address: 'address', bank: 'bank',
+  account: 'account', depositor: 'depositor', order_num: 'orderNum', user_id: 'userId' };
+function unmappedSubmittedFields(headers, orderData = {}) {
+  const val = (f) => String((orderData || {})[_FIELD_ODKEY[f]] || '').trim();
+  const out = [];
+  for (const f of _UNMAPPED_CHECK_FIELDS) {
+    if (val(f) && _fieldToCol(headers, f) < 0) out.push(f);
+  }
+  if (val('user_id') && _idColIndices(headers).length === 0) out.push('user_id'); // NC(2열)는 의도적 미기입 → 제외
+  return out;
+}
+
+// ── 시트→DB 역동기화(옵션·수동) 대상 필드(G4: 옵션·dedup영향칸 제외). ──
+//   selected_opt_key(옵션칸)는 역매핑이 비결정적이라 제외. recipient/phone은 dedupKey 입력이지만
+//   apply가 order_update(매핑칸 in-place)만 타고 dedup_key/claims를 안 건드리므로 포함 가능(R6 방어).
+const REVERSE_SYNC_FIELDS = ['orderer', 'recipient', 'user_id', 'phone', 'address', 'bank', 'account', 'depositor', 'price', 'order_num', 'memo', 'date_str'];
+
+// R1 provenance: DB가 "마지막으로 시트에 쓴 매핑칸 값"의 서명. 정방향 written 시 기록.
+//   detect가 "현재 시트값 == 이 서명"이면 내가 쓴 흔적 → 제외(핑퐁/노이즈 차단).
+//   detect의 _sigFromCells와 동일 필드·순서·정규화를 써야 일치한다.
+function computeRowWriteSig(headers, orderData) {
+  const mapped = mapOrderToSheetRow(headers, orderData || {});
+  const parts = [];
+  for (const f of REVERSE_SYNC_FIELDS) {
+    const c = _fieldToCol(headers, f);
+    if (c >= 0) parts.push(f + '=' + normalizeText(mapped[c]));
+  }
+  return parts.join('');
 }
 
 // ── R1: 그 시트 행이 "여전히 이 주문의 것"인지 다중칸(연락처+수취인+주소) AND 일치로 판정.
@@ -952,12 +1133,456 @@ async function rowIdentityMatches(os, tabContext) {
   return { match, gridOutOfRange: false };
 }
 
+// ════════════════════════════════════════════════════════════════════════
+// 시트→DB 역동기화(옵션·수동·기본 OFF) — 감지(detect). 읽기 전용 + 제안 생성.
+//   심판 최종설계: 자동 무인 동기 금지. 사람이 reverse-sync-apply로 명시 적용.
+//   방어: R1(sig 제외) · R2(라이브 단일 사각형 읽기, 미러 값판정 금지) · R3(identity AND 3칸)
+//        · R4(그리드밖/전공란=cancel_suspect 플래그만, 단칸 공란 무시) · R5(order_reconcile 락)
+//        · R10/G5(throttle busy면 양보) · R11(gid 없으면 보류) · G3(기본 sig-not-null 주문만).
+// ════════════════════════════════════════════════════════════════════════
+async function detectReverseSyncProposals({ sheetId, tabName, limit = 200, includeNullSig = false, ignoreBusy = false, useLiveHeaders = true } = {}) {
+  if (process.env.SHEET_REVERSE_SYNC !== '1') return { skipped: true, reason: 'disabled' };
+  if (!sheetId || !tabName) throw new Error('detectReverseSyncProposals: sheetId, tabName 필수');
+  const { withJobLock } = require('../utils/jobLock');
+  return withJobLock('order_reconcile',
+    () => _detectReverseSyncInner({ sheetId, tabName, limit, includeNullSig, ignoreBusy, useLiveHeaders }),
+    { onBusy: () => ({ skipped: true, reason: 'order_reconcile_lock_busy' }) });
+}
+
+const _HEADER_SCAN_ROWS = parseInt(process.env.REVERSE_SYNC_HEADER_SCAN || '20', 10);
+
+async function _detectReverseSyncInner({ sheetId, tabName, limit, includeNullSig, ignoreBusy, useLiveHeaders }) {
+  const db = getPool();
+  const { getThrottleStatus, throttledCall } = require('../utils/sheetsThrottle');
+  const { readSheet, invalidateSheetMeta } = require('./sheets.service');
+
+  // R10/G5: throttle 여유 없으면 양보(정방향 핫패스 우선). 단 수동 트리거(ignoreBusy)는 소량 콜이라
+  //   busy-skip 대신 throttledCall이 슬롯을 기다려 실행(관리자 즉시 결과). cron은 ignoreBusy=false로 양보.
+  const busyN = parseInt(process.env.REVERSE_SYNC_BUSY || '15', 10);
+  if (!ignoreBusy && getThrottleStatus().requestsInLastMinute > busyN) return { skipped: true, reason: 'throttle_busy' };
+
+  // R11: gid 필수(동명탭 보류). gid는 미러 메타에서.
+  const ctx = await loadRawTabContext(sheetId, null, tabName);
+  if (!ctx || !ctx.tabGid) return { skipped: true, reason: 'no_meta_or_gid' };
+  let headers = ctx.headers;
+
+  // ★ 라이브 헤더 읽기(#2): 미러가 stale/희소하면 detected_headers가 실제 시트 열배치와 어긋나
+  //   컬럼 오매핑→오탐(cancel_suspect 폭발). 상단 N행을 라이브로 읽어 헤더를 현재 시트 기준 재감지(1콜).
+  //   미러 헤더와 무관하게 컬럼 정확도 보장 → 어떤 탭에서도 detect 정확.
+  if (useLiveHeaders) {
+    try {
+      const top = await throttledCall(() => readSheet(sheetId,
+        `'${ctx.tabName}'!A1:ZZ${_HEADER_SCAN_ROWS}`, { gid: ctx.tabGid }));
+      const det = detectSheetHeader(Array.isArray(top) ? top : []);
+      if (det && det.headers && det.headers.length) headers = det.headers;
+    } catch (e) { logger.warn(`[reverseSync] 라이브 헤더 읽기 실패(미러 헤더 사용): ${e.message}`); }
+  }
+  if (!headers || !headers.length) return { skipped: true, reason: 'no_headers' };
+
+  // 필드→컬럼 매핑(헤더 고정). 식별칸(연락처/수취인/주소) + 역동기 대상칸.
+  const fieldCols = {};
+  for (const f of REVERSE_SYNC_FIELDS) { const c = _fieldToCol(headers, f); if (c >= 0) fieldCols[f] = c; }
+  const idFields = ['phone', 'recipient', 'address'].filter(f => fieldCols[f] != null);
+  if (!Object.keys(fieldCols).length || !idFields.length) return { scanned: 0, proposals: 0, reason: 'no_mappable_cols' };
+
+  // R9/G3: written·미취소·행배정 주문만. 기본은 sig 있는 주문만(과거 전수비교 노이즈 폭발 차단).
+  const sigFilter = includeNullSig ? '' : ' AND last_sheet_write_sig IS NOT NULL';
+  const { rows: orders } = await db.query(
+    `SELECT id, sheet_row, orderer, recipient, user_id, phone, address, bank, account, depositor,
+            price, order_num, memo, date_str, selected_opt_key, last_sheet_write_sig, last_edit_seq
+       FROM order_submissions
+      WHERE sheet_id = $1 AND tab_name = $2 AND deleted_at IS NULL
+        AND mirror_status = 'written' AND sheet_row IS NOT NULL${sigFilter}
+      ORDER BY sheet_row LIMIT $3`,
+    [sheetId, tabName, limit]
+  );
+  if (!orders.length) return { scanned: 0, proposals: 0 };
+
+  // R2: 라이브 단일 사각형 1콜(미러 금지). 매핑칸 union × 주문 행 범위.
+  const cols = Object.values(fieldCols);
+  const minC = Math.min(...cols), maxC = Math.max(...cols);
+  const rows = orders.map(o => o.sheet_row);
+  const minR = Math.min(...rows), maxR = Math.max(...rows);
+  invalidateSheetMeta(sheetId);
+  const grid = await throttledCall(() => readSheet(sheetId,
+    `'${ctx.tabName}'!${getColLetter(minC)}${minR}:${getColLetter(maxC)}${maxR}`, { gid: ctx.tabGid }));
+
+  let made = 0, edits = 0, suspects = 0, skippedSig = 0, identMismatch = 0;
+  for (const os of orders) {
+    const gi = os.sheet_row - minR;
+    const gridRow = grid && grid[gi];
+    const cellAt = (c) => (gridRow ? gridRow[c - minC] : undefined);
+    const gridOutOfRange = !gridRow || gridRow.length === 0; // R4: 그리드밖/빈행 = 사람 손 불가
+
+    // R3: identity AND(연락처+수취인+주소) — cells에서 직접(추가 쿼터 0).
+    let allGuardEmpty = true, idMatch = true, idComparable = 0;
+    for (const f of idFields) {
+      const c = fieldCols[f];
+      const cur = normalizeGuardValue(headers[c], cellAt(c));
+      const exp = normalizeGuardValue(headers[c], os[f]);
+      if (cur) allGuardEmpty = false;
+      if (exp) { idComparable++; if (!(cur && cur === exp)) idMatch = false; }
+    }
+
+    if (gridOutOfRange) { continue; } // R4: 그리드밖은 취소 오인 금지 — 스킵
+    if (idComparable === 0 || !idMatch) {
+      // 식별 불일치: 사람이 그 행을 다른 용도로 재사용 가능. 전부 공란이면 "취소 의심" 플래그만(자동취소 금지).
+      identMismatch++;
+      if (allGuardEmpty) {
+        made += await _replaceOpenProposal(db, os, sheetId, tabName, ctx.tabGid,
+          { type: 'cancel_suspect', field: null, oldv: null, newv: null, sig: null });
+        suspects++;
+      }
+      continue;
+    }
+
+    // R1: 현재 시트서명 == 내가 마지막 쓴 서명 → 내가 쓴 값(변경 아님) 제외.
+    const curSig = _sigFromCells(headers, fieldCols, cellAt);
+    if (os.last_sheet_write_sig && curSig === os.last_sheet_write_sig) { skippedSig++; continue; }
+
+    // 필드별 diff → edit 제안. 단칸 공란은 무시(R2/R4 원본 보존).
+    const mapped = mapOrderToSheetRow(headers, _osRowToOrderData(os));
+    const fieldEdits = [];
+    for (const f of REVERSE_SYNC_FIELDS) {
+      const c = fieldCols[f]; if (c == null) continue;
+      const dbv = normalizeText(mapped[c]);
+      const shv = normalizeText(cellAt(c));
+      if (shv === dbv) continue;
+      if (shv === '') continue; // 공란은 자동 역반영 금지(실수/미러 누락 보호)
+      fieldEdits.push({ field: f, oldv: dbv, newv: shv });
+    }
+    if (fieldEdits.length) {
+      made += await _replaceOpenProposalEdits(db, os, sheetId, tabName, ctx.tabGid, fieldEdits, curSig, os.last_edit_seq);
+      edits += fieldEdits.length;
+    }
+  }
+  return { scanned: orders.length, proposals: made, edits, cancelSuspects: suspects, skippedBySig: skippedSig, identityMismatch: identMismatch };
+}
+
+// detect의 시트행 서명(write-time computeRowWriteSig와 동일 필드·순서·정규화).
+function _sigFromCells(headers, fieldCols, cellAt) {
+  const parts = [];
+  for (const f of REVERSE_SYNC_FIELDS) {
+    if (fieldCols[f] == null) continue;
+    parts.push(f + '=' + normalizeText(cellAt(fieldCols[f])));
+  }
+  return parts.join('');
+}
+
+// G2 멱등: 트랜잭션 내 "open 제안 교체(DELETE→INSERT)". (단일 cancel_suspect/전체 edits 교체)
+async function _replaceOpenProposal(db, os, sheetId, tabName, tabGid, { type, field, oldv, newv, sig }) {
+  const client = await db.connect();
+  try {
+    await client.query('BEGIN');
+    await client.query(`DELETE FROM reverse_sync_proposals WHERE os_id = $1 AND status = 'open'`, [os.id]);
+    await client.query(
+      `INSERT INTO reverse_sync_proposals (os_id, sheet_id, tab_name, tab_gid, sheet_row, proposal_type, field, old_value, new_value, detected_sig, detected_edit_seq)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11)`,
+      [os.id, sheetId, tabName, tabGid, os.sheet_row, type, field, oldv, newv, sig, os.last_edit_seq]
+    );
+    await client.query('COMMIT');
+    return 1;
+  } catch (e) { try { await client.query('ROLLBACK'); } catch (_) {} logger.warn(`[reverseSync] 제안 기록 실패: ${e.message}`); return 0; }
+  finally { client.release(); }
+}
+
+async function _replaceOpenProposalEdits(db, os, sheetId, tabName, tabGid, fieldEdits, sig, detectedEditSeq) {
+  const client = await db.connect();
+  try {
+    await client.query('BEGIN');
+    await client.query(`DELETE FROM reverse_sync_proposals WHERE os_id = $1 AND status = 'open'`, [os.id]);
+    for (const e of fieldEdits) {
+      await client.query(
+        `INSERT INTO reverse_sync_proposals (os_id, sheet_id, tab_name, tab_gid, sheet_row, proposal_type, field, old_value, new_value, detected_sig, detected_edit_seq)
+         VALUES ($1,$2,$3,$4,$5,'edit',$6,$7,$8,$9,$10)`,
+        [os.id, sheetId, tabName, tabGid, os.sheet_row, e.field, e.oldv, e.newv, sig, detectedEditSeq]
+      );
+    }
+    await client.query('COMMIT');
+    return fieldEdits.length;
+  } catch (e) { try { await client.query('ROLLBACK'); } catch (_) {} logger.warn(`[reverseSync] edit 제안 기록 실패: ${e.message}`); return 0; }
+  finally { client.release(); }
+}
+
+// ════════════════════════════════════════════════════════════════════════
+// 시트→DB 역동기화 "무인 자동적용(constrained auto-apply)".
+//   게이트: SHEET_REVERSE_SYNC=1 AND REVERSE_SYNC_AUTO=1 AND ORDER_LEDGER_WRITE_ENABLED=true
+//           (셋 중 하나라도 아니면 비활성 — 순수 옵트인, 기본 OFF, 되돌리기 쉬움).
+//   적대검증(레드→블루→심판) 방어:
+//     - 전용 락 reverse_sync_auto: 인스턴스/사이클 직렬화. order_reconcile·order_ledger와 키 비충돌 확인.
+//     - 안전필드 화이트리스트(_autoSafeFields): price/order_num/identity 하드 제외(돈·송장·오배송 비가역 차단).
+//     - apply시점 라이브 재검증: 탭당 1 사각형 읽기로 (a)편집셀이 여전히 new_value (b)identity(연락처+수취인+주소) 재일치.
+//     - per-order 쿨다운(reverse_sync_last_auto_at): 자동적용 폭주/핑퐁 hysteresis.
+//     - per-order 락(order_ledger:<id>) + G6 edit_seq 불변 + written·미삭제 재확인 → 정식편집과 경합 차단.
+//     - applied_old_value 기록 → 롤백(rollbackAutoApplied) 가능. order_update no-op으로 시트 재기록 없음(핑퐁 0).
+// ════════════════════════════════════════════════════════════════════════
+const REVERSE_SYNC_AUTO_FIELDS_DEFAULT = 'orderer,user_id,memo,date_str';
+function _autoSafeFields() {
+  const raw = process.env.REVERSE_SYNC_AUTO_FIELDS || REVERSE_SYNC_AUTO_FIELDS_DEFAULT;
+  const set = new Set(String(raw).split(',').map(s => s.trim()).filter(Boolean));
+  // 하드 제외(어떤 env 설정으로도 무인 자동적용 금지):
+  //   price/order_num = 돈·송장(비가역 오염), phone/recipient/address = 신원(detect가 제안도 안 하지만 방어적으로).
+  for (const f of ['price', 'order_num', 'phone', 'recipient', 'address']) set.delete(f);
+  // 화이트리스트 교집합(REVERSE_SYNC_FIELDS에 있는 필드만 — 인젝션/오타 방어).
+  return [...set].filter(f => REVERSE_SYNC_FIELDS.includes(f));
+}
+
+async function autoApplyReverseSync({ limit, dryRun = false } = {}) {
+  if (process.env.SHEET_REVERSE_SYNC !== '1') return { skipped: true, reason: 'reverse_sync_disabled' };
+  if (process.env.REVERSE_SYNC_AUTO !== '1') return { skipped: true, reason: 'auto_disabled' };
+  if (!dryRun && process.env.ORDER_LEDGER_WRITE_ENABLED !== 'true') return { skipped: true, reason: 'ledger_write_disabled' };
+  const { withJobLock } = require('../utils/jobLock');
+  return withJobLock('reverse_sync_auto',
+    () => _autoApplyInner({ limit, dryRun }),
+    { onBusy: () => ({ skipped: true, reason: 'reverse_sync_auto_lock_busy' }) });
+}
+
+async function _autoApplyInner({ limit, dryRun }) {
+  const db = getPool();
+  const { throttledCall, getThrottleStatus } = require('../utils/sheetsThrottle');
+  const { readSheet, invalidateSheetMeta } = require('./sheets.service');
+  const { withJobLock } = require('../utils/jobLock');
+  const { enqueue } = require('./syncQueue.service');
+
+  // busy면 양보(정방향 핫패스 우선) — cron 재시도가 backstop.
+  const busyN = parseInt(process.env.REVERSE_SYNC_BUSY || '15', 10);
+  if (getThrottleStatus().requestsInLastMinute > busyN) return { skipped: true, reason: 'throttle_busy' };
+
+  const rateCap = Math.min(Math.max(parseInt(limit || process.env.REVERSE_SYNC_AUTO_MAX || '20', 10), 1), 200);
+  const cooldownMin = Math.max(parseInt(process.env.REVERSE_SYNC_AUTO_COOLDOWN_MIN || '10', 10), 0);
+  const safeArr = _autoSafeFields();
+  if (!safeArr.length) return { skipped: true, reason: 'no_safe_fields' };
+
+  // 후보: open edit 제안(안전필드) + written·미삭제 + per-order 쿨다운 통과. 오래된 순.
+  //   주문 단위로 묶기 위해 os_id로도 정렬(같은 주문 제안 인접).
+  const { rows: props } = await db.query(
+    `SELECT p.id, p.os_id, p.sheet_id, p.tab_name, p.tab_gid, p.sheet_row, p.field,
+            p.new_value, p.detected_edit_seq
+       FROM reverse_sync_proposals p
+       JOIN order_submissions o ON o.id = p.os_id
+      WHERE p.status = 'open' AND p.proposal_type = 'edit'
+        AND p.field = ANY($1::text[])
+        AND o.deleted_at IS NULL AND o.mirror_status = 'written' AND o.sheet_row IS NOT NULL
+        AND (o.reverse_sync_last_auto_at IS NULL
+             OR o.reverse_sync_last_auto_at < NOW() - ($2 || ' minutes')::interval)
+      ORDER BY p.detected_at ASC, p.os_id
+      LIMIT $3`,
+    [safeArr, String(cooldownMin), rateCap]
+  );
+  if (!props.length) return { candidates: 0, applied: 0, orders: 0, dismissed: 0, reverifyFail: 0, dryRun: !!dryRun };
+
+  // 탭별 그룹 → 탭당 1 사각형 라이브 읽기(쿼터 절약). 그 안에서 다시 os_id별로 묶어 주문단위 적용.
+  const byTab = new Map();
+  for (const p of props) {
+    const key = `${p.sheet_id}||${p.tab_name}`;
+    if (!byTab.has(key)) byTab.set(key, []);
+    byTab.get(key).push(p);
+  }
+
+  let applied = 0, ordersApplied = 0, dismissed = 0, reverifyFail = 0, staleG6 = 0, tabsSkipped = 0;
+  for (const [, tabProps] of byTab) {
+    const first = tabProps[0];
+    const ctx = await loadRawTabContext(first.sheet_id, first.tab_gid, first.tab_name);
+    if (!ctx || !ctx.tabGid) { tabsSkipped++; continue; }
+    let headers = ctx.headers;
+    try {
+      const top = await throttledCall(() => readSheet(first.sheet_id,
+        `'${ctx.tabName}'!A1:ZZ${_HEADER_SCAN_ROWS}`, { gid: ctx.tabGid }));
+      const det = detectSheetHeader(Array.isArray(top) ? top : []);
+      if (det && det.headers && det.headers.length) headers = det.headers;
+    } catch (e) { logger.warn(`[reverseSyncAuto] 라이브 헤더 실패(미러 사용): ${e.message}`); }
+    if (!headers || !headers.length) { tabsSkipped++; continue; }
+
+    const fieldCols = {};
+    for (const f of REVERSE_SYNC_FIELDS) { const c = _fieldToCol(headers, f); if (c >= 0) fieldCols[f] = c; }
+    const idFields = ['phone', 'recipient', 'address'].filter(f => fieldCols[f] != null);
+    const editCols = tabProps.map(p => fieldCols[p.field]).filter(c => c != null);
+    if (!editCols.length) { tabsSkipped++; continue; }
+    // 심판[중대2]: 무인 자동적용은 신원 3칸(연락처+수취인+주소) 전부 매핑될 때만.
+    //   라이브 헤더 재감지에서 한 칸이라도 사라지면(약한 신원검증) 자동 대상서 제외 → 그 탭은 수동 apply로.
+    if (idFields.length < 3) { tabsSkipped++; continue; }
+    const cols = [...editCols, ...idFields.map(f => fieldCols[f])];
+    const minC = Math.min(...cols), maxC = Math.max(...cols);
+    const rowsN = tabProps.map(p => p.sheet_row);
+    const minR = Math.min(...rowsN), maxR = Math.max(...rowsN);
+    invalidateSheetMeta(first.sheet_id);
+    let grid;
+    try {
+      grid = await throttledCall(() => readSheet(first.sheet_id,
+        `'${ctx.tabName}'!${getColLetter(minC)}${minR}:${getColLetter(maxC)}${maxR}`, { gid: ctx.tabGid }));
+    } catch (e) { logger.warn(`[reverseSyncAuto] 라이브 재검증 읽기 실패: ${e.message}`); tabsSkipped++; continue; }
+
+    // 주문(os_id) 단위 묶기 — 같은 주문의 여러 필드는 한 락에서 함께 적용(쿨다운 형제 굶김 방지).
+    const byOrder = new Map();
+    for (const p of tabProps) {
+      if (!byOrder.has(p.os_id)) byOrder.set(p.os_id, []);
+      byOrder.get(p.os_id).push(p);
+    }
+
+    for (const [osId, oProps] of byOrder) {
+      const sheetRow = oProps[0].sheet_row;
+      const gi = sheetRow - minR;
+      const gridRow = grid && grid[gi];
+      const cellAt = (c) => (gridRow ? gridRow[c - minC] : undefined);
+      // 그리드밖/빈행 = 사람 손 불가(취소 오인 금지) → 그대로 두고 스킵(다음 detect가 정리).
+      if (!gridRow || gridRow.length === 0) { continue; }
+
+      const out = await withJobLock('order_ledger:' + osId, async () => {
+        const { rows: cur } = await db.query(
+          `SELECT orderer, user_id, memo, date_str, bank, account, depositor,
+                  phone, recipient, address, last_edit_seq, deleted_at, mirror_status, reverse_sync_last_auto_at
+             FROM order_submissions WHERE id = $1`, [osId]);
+        if (!cur.length || cur[0].deleted_at || cur[0].mirror_status !== 'written') return { staleOrder: true };
+        // 쿨다운 경합 재확인.
+        const lastAuto = cur[0].reverse_sync_last_auto_at ? new Date(cur[0].reverse_sync_last_auto_at).getTime() : 0;
+        if (lastAuto && (Date.now() - lastAuto) < cooldownMin * 60000) return { cooldown: true };
+        // identity 재일치(연락처+수취인+주소 AND) — grid 셀 vs DB 최신값.
+        let idMatch = idFields.length > 0, idComparable = 0;
+        for (const f of idFields) {
+          const c = fieldCols[f];
+          const gv = normalizeGuardValue(headers[c], cellAt(c));
+          const dv = normalizeGuardValue(headers[c], cur[0][f]);
+          if (dv) idComparable++;
+          if (!(gv && dv && gv === dv)) idMatch = false;
+        }
+        if (idComparable === 0 || !idMatch) return { identityFail: true };
+
+        // 필드별 최종 재검증 → 적용 대상 수집.
+        const toApply = []; // { propId, field, newValue, appliedOld }
+        const dismiss = []; // propId (재검증 실패 → 정리)
+        for (const p of oProps) {
+          // G6: 감지 후 정식 편집/취소가 있었으면 이 필드는 stale.
+          if (p.detected_edit_seq != null && Number(cur[0].last_edit_seq) !== Number(p.detected_edit_seq)) { dismiss.push(p.id); continue; }
+          const editC = fieldCols[p.field];
+          if (editC == null) { dismiss.push(p.id); continue; }
+          const shv = normalizeText(cellAt(editC));
+          if (shv === '') { dismiss.push(p.id); continue; }            // 공란 자동반영 금지
+          if (shv !== normalizeText(p.new_value)) { dismiss.push(p.id); continue; } // 시트가 또 바뀜 → 이번 제안 무효(detect 재생성)
+          const dbCur = cur[0][p.field];
+          if (normalizeText(dbCur) === shv) { dismiss.push(p.id); continue; } // 이미 동기 = no-op
+          toApply.push({ propId: p.id, field: p.field, newValue: p.new_value, appliedOld: dbCur == null ? '' : String(dbCur) });
+        }
+
+        if (dryRun) return { appliedFields: 0, dismissed: 0, wouldApply: toApply.length, wouldDismiss: dismiss.length };
+
+        // stale/재검증실패 제안 정리(open→dismissed) — detect가 유효하면 재생성.
+        for (const id of dismiss) {
+          await db.query(`UPDATE reverse_sync_proposals SET status='dismissed', resolved_at=NOW(), resolved_by='auto:reverify' WHERE id=$1 AND status='open'`, [id]);
+        }
+        if (!toApply.length) return { appliedFields: 0, dismissed: dismiss.length };
+
+        // 심판[치명1]: 편집 확정 시점에 last_edit_seq를 락 안에서 즉시 단조증가 →
+        //   큐워커 지연과 무관하게 후속 detect/apply가 이 자동적용을 stale로 인식(관리자편집 덮어쓰기 창 차단).
+        //   editSeq는 UPDATE와 enqueue가 동일값을 써야 큐워커 GREATEST가 no-op.
+        const editSeq = Date.now();
+        // 다중필드 원자 UPDATE(화이트리스트 필드만 → 인젝션 불가) + 쿨다운 스탬프 + edit_seq 단조증가.
+        const sets = toApply.map((e, i) => `${e.field} = $${i + 2}`);
+        const vals = [osId, ...toApply.map(e => e.newValue)];
+        await db.query(
+          `UPDATE order_submissions SET ${sets.join(', ')}, updated_at = NOW(), reverse_sync_last_auto_at = NOW(),
+                  last_edit_seq = GREATEST(COALESCE(last_edit_seq, 0), $${vals.length + 1})
+             WHERE id = $1 AND deleted_at IS NULL`, [...vals, editSeq]);
+        await enqueue('order_update', { orderSubmissionId: osId, editSeq,
+          edits: toApply.map(e => ({ field: e.field, oldValue: e.appliedOld, newValue: e.newValue })) });
+        for (const e of toApply) {
+          await db.query(
+            `UPDATE reverse_sync_proposals SET status='applied', auto_applied=TRUE, applied_old_value=$2, resolved_at=NOW(), resolved_by='auto'
+               WHERE id=$1 AND status='open'`, [e.propId, e.appliedOld]);
+        }
+        return { appliedFields: toApply.length, dismissed: dismiss.length };
+      });
+
+      if (!out) continue; // 락 busy 등 → 다음 사이클
+      // dryRun은 wouldApply/wouldDismiss로 실행 예측(실적용과 동일 의미의 집계).
+      const addApplied = out.wouldApply != null ? out.wouldApply : (out.appliedFields || 0);
+      const addDismissed = out.wouldDismiss != null ? out.wouldDismiss : (out.dismissed || 0);
+      if (addApplied || addDismissed) { applied += addApplied; if (addApplied) ordersApplied++; dismissed += addDismissed; }
+      else if (out.identityFail) { reverifyFail++; }
+      else if (out.staleOrder) { staleG6++; }
+      // cooldown → 조용히 스킵(다음 사이클)
+    }
+  }
+  return { candidates: props.length, applied, orders: ordersApplied, dismissed, reverifyFail, staleG6, tabsSkipped, dryRun: !!dryRun };
+}
+
+// 자동적용 롤백: auto_applied 제안의 applied_old_value로 필드 복원 + order_update 재큐(시트도 원복).
+async function rollbackAutoApplied({ proposalId, osId } = {}) {
+  if (process.env.ORDER_LEDGER_WRITE_ENABLED !== 'true') return { skipped: true, reason: 'ledger_write_disabled' };
+  const db = getPool();
+  const { withJobLock } = require('../utils/jobLock');
+  const { enqueue } = require('./syncQueue.service');
+  let where, params;
+  if (proposalId) { where = `id = $1 AND auto_applied = TRUE AND status = 'applied'`; params = [proposalId]; }
+  else if (osId) { where = `os_id = $1 AND auto_applied = TRUE AND status = 'applied'`; params = [osId]; }
+  else throw new Error('rollbackAutoApplied: proposalId 또는 osId 필수');
+  const { rows } = await db.query(
+    `SELECT id, os_id, field, applied_old_value, new_value FROM reverse_sync_proposals
+      WHERE ${where} ORDER BY resolved_at DESC LIMIT 1`, params);
+  if (!rows.length) return { rolledBack: 0, reason: 'not_found' };
+  const p = rows[0];
+  if (!REVERSE_SYNC_FIELDS.includes(p.field)) return { rolledBack: 0, reason: 'field_not_allowed' }; // 인젝션 방어
+  const restore = p.applied_old_value == null ? '' : p.applied_old_value; // 코드리뷰[#3]: NULL→'' 정규화(비교 일관)
+  return withJobLock('order_ledger:' + p.os_id, async () => {
+    const { rows: cu } = await db.query(`SELECT deleted_at FROM order_submissions WHERE id = $1`, [p.os_id]);
+    if (!cu.length || cu[0].deleted_at) return { rolledBack: 0, reason: 'order_deleted' };
+    const editSeq = Date.now();
+    // 롤백도 편집 확정이므로 last_edit_seq 단조증가(치명1 일관) — 자동적용값을 stale로 만들어 재적용 차단.
+    await db.query(
+      `UPDATE order_submissions SET ${p.field} = $2, updated_at = NOW(),
+              last_edit_seq = GREATEST(COALESCE(last_edit_seq, 0), $3)
+         WHERE id = $1 AND deleted_at IS NULL`,
+      [p.os_id, restore, editSeq]);
+    await enqueue('order_update', { orderSubmissionId: p.os_id, editSeq,
+      edits: [{ field: p.field, oldValue: p.new_value, newValue: restore }] });
+    await db.query(`UPDATE reverse_sync_proposals SET status='dismissed', resolved_at=NOW(), resolved_by='rollback' WHERE id = $1`, [p.id]);
+    return { rolledBack: 1, field: p.field, osId: p.os_id, restored: restore };
+  });
+}
+
+// 무인 사이클(cron): 활성탭(written+sig)을 라운드로빈으로 detect → 전체 open 제안 1회 autoApply.
+//   탭당 라이브읽기라 perCycle로 쿼터 캡. 커서로 사이클마다 다음 탭묶음 → 전탭 순회.
+let _reverseAutoCursor = 0;
+async function runReverseSyncAutoCycle({ tabsPerCycle } = {}) {
+  if (process.env.SHEET_REVERSE_SYNC !== '1' || process.env.REVERSE_SYNC_AUTO !== '1') return { skipped: true, reason: 'disabled' };
+  // 코드리뷰[#4]/심판[중대3]: 쓰기게이트 OFF면 detect(라이브 시트읽기=쿼터) 자체를 건너뜀(순수 옵트인).
+  if (process.env.ORDER_LEDGER_WRITE_ENABLED !== 'true') return { skipped: true, reason: 'ledger_write_disabled' };
+  const db = getPool();
+  const perCycle = Math.min(Math.max(parseInt(tabsPerCycle || process.env.REVERSE_SYNC_TABS_PER_CYCLE || '3', 10), 1), 30);
+  // 시트 편집은 주문 updated_at을 바꾸지 않으므로 시간필터 없이 written+sig 탭 전체를 라운드로빈(오래된 주문의 시트편집도 커버).
+  const { rows: tabs } = await db.query(
+    `SELECT sheet_id, tab_name FROM order_submissions
+      WHERE deleted_at IS NULL AND mirror_status = 'written' AND sheet_row IS NOT NULL AND last_sheet_write_sig IS NOT NULL
+      GROUP BY sheet_id, tab_name ORDER BY sheet_id, tab_name LIMIT 500`
+  );
+  let detected = 0, detectRuns = 0;
+  if (tabs.length) {
+    const start = _reverseAutoCursor % tabs.length;
+    for (let i = 0; i < Math.min(perCycle, tabs.length); i++) {
+      const t = tabs[(start + i) % tabs.length];
+      try {
+        const d = await detectReverseSyncProposals({ sheetId: t.sheet_id, tabName: t.tab_name }); // ignoreBusy=false → busy면 양보
+        detectRuns++;
+        if (d && d.proposals) detected += d.proposals;
+      } catch (e) { logger.warn(`[reverseSyncAuto] detect 실패 ${t.tab_name}: ${e.message}`); }
+    }
+    _reverseAutoCursor = (start + perCycle) % tabs.length;
+  }
+  const apply = await autoApplyReverseSync({});
+  return { activeTabs: tabs.length, detectRuns, detected, apply };
+}
+
 module.exports = {
   computeDedupKey,
   buildCandidateRows,
   reconcileStuckOrders,
+  // 시트 변경 감지용 공개 트리거: 가드 차단(=시트가 예상과 다름 신호) 시 그 시트만 자동 재미러+리컨실.
+  //   내부 60초/시트 debounce + order_reconcile 락 직렬화 그대로 — 이벤트성 호출에 안전.
+  triggerSheetMirrorOnce: _triggerSheetMirrorOnce,
   _osRowToOrderData,
   _fieldToCol,
+  _isIdHeader,
+  _singleIdCol,
+  unmappedSubmittedFields,
   rowIdentityMatches,
   mapOrderToSheetRow,
   buildBatchUpdateData,
@@ -973,5 +1598,11 @@ module.exports = {
   markOrderMirrorFailed,
   recordReviewIdentity,
   getColLetter,
+  computeRowWriteSig,
+  detectReverseSyncProposals,
+  autoApplyReverseSync,
+  rollbackAutoApplied,
+  runReverseSyncAutoCycle,
+  _autoSafeFields,
   __setPoolForTest,
 };

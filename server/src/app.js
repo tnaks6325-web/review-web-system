@@ -31,8 +31,16 @@ const portalRoutes   = require('./routes/portal.routes');
 const rawRoutes      = require('./routes/raw.routes');
 const csRoutes       = require('./routes/cs.routes');
 const mappingRoutes  = require('./routes/mapping.routes');
+const participantsRoutes = require('./routes/participants.routes');
+const trackBRoutes = require('./routes/trackB.routes');
+const reviewEditRoutes = require('./routes/reviewEdit.routes');
 
 const app = express();
+
+// ★ Railway 프록시 1홉 신뢰(레드-블루-심판, 레드 #4): 미설정이면 req.ip가 프록시 IP로 수렴해
+//   전역 rate limiter(분당 120)가 전 사용자 공용 버킷이 된다(참여형 오픈 러시 정각 전면 429).
+//   express-rate-limit v7의 X-Forwarded-For 검증(ERR_ERL_UNEXPECTED_X_FORWARDED_FOR)도 함께 해소.
+app.set('trust proxy', 1);
 
 // ── Sentry 초기화 (가장 먼저) ──
 initSentry(app);
@@ -93,6 +101,12 @@ app.use('/api/raw',       rawRoutes);
 
 // 명시적 컬럼 매핑 (Section 15) — 구글시트 점진 대체 keystone
 app.use('/api/mapping',   mappingRoutes);
+app.use('/api/participants', participantsRoutes);  // Phase 1 shadow — master 전용, 신규 테이블만
+app.use('/api/trackb', trackBRoutes);              // Track B(평행 트랙) — master/광고주 스코프, 라이브 무영향
+
+// 리뷰 이미지 수정요청 (리뷰어 → 관리자 승인 → [리뷰] 폴더 파일 교체)
+app.use('/api/review-edit', reviewEditRoutes);
+
 app.use('/api/viewer',    diagRoutes);
 app.use('/api/image',     diagRoutes);
 app.use('/api/blacklist', diagRoutes);
@@ -129,7 +143,7 @@ app.get('/health', async (req, res) => {
     dbTime,
     google: googleStatus,
     serviceAccount: saEmail,
-    version: '2.22.0-participation-match',
+    version: '2.26.0-throttle-monitor',
     uptime: Math.floor(process.uptime()),
     memory: Math.round(process.memoryUsage().heapUsed / 1024 / 1024) + 'MB',
     sentry: isSentryEnabled() ? 'active' : 'inactive',

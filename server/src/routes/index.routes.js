@@ -12,8 +12,11 @@ const pool = require('../db/pool');
 // ═══════════════════════════════════════════════════════════
 router.get('/', async (req, res, next) => {
   try {
-    const { query, phone8 } = req.query;
-    const result = await searchByName(query, phone8);
+    const { query, phone8, includeSubmitted } = req.query;
+    const result = await searchByName(query, phone8, {
+      // 리뷰어 홈 제출대기/제출완료 탭용 — 제출 완료 행도 포함해 반환
+      includeSubmitted: includeSubmitted === '1' || includeSubmitted === 'true',
+    });
     res.json(result);
   } catch (err) {
     next(err);

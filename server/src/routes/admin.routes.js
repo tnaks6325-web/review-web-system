@@ -683,6 +683,8 @@ const {
   runSmartBuild,
   startSmartBuild,
   stopSmartBuild,
+  pauseSmartBuild,
+  resumeSmartBuild,
   getSmartBuildStatus,
   resetSmartBuildCache,
 } = require('../services/smartBuild.service');
@@ -712,11 +714,12 @@ router.post('/smart-build/run', authMiddleware, async (req, res, next) => {
       log.info(`[smartBuild] 강제 실행 — 캐시 리셋: ${JSON.stringify(cacheResult)}`);
     }
 
-    // 백그라운드 실행
-    runSmartBuild().then(result => {
+    // 백그라운드 실행 — 강제(force) 실행은 시트 lane 양보 없이 완주(부분완료 보고 방지)
+    runSmartBuild({ noYield: force }).then(result => {
       const { broadcast } = require('../utils/sse');
+      const deferredNote = (result.sheetsDeferred || 0) > 0 ? `, ${result.sheetsDeferred}시트 연기(다음 주기 처리)` : '';
       broadcast('smart_build_done', {
-        message: `스마트빌드 완료: ${result.tabsUpdated}탭 갱신, ${result.tabsSkipped}탭 스킵, ${result.errors}건 오류`,
+        message: `스마트빌드 완료: ${result.tabsUpdated}탭 갱신, ${result.tabsSkipped}탭 스킵, ${result.errors}건 오류${deferredNote}`,
         ...result,
       });
     }).catch(err => {
@@ -728,19 +731,38 @@ router.post('/smart-build/run', authMiddleware, async (req, res, next) => {
   } catch (err) { next(err); }
 });
 
-// POST /api/admin/smart-build/start — 스케줄러 시작 (5분 주기)
+// POST /api/admin/smart-build/start — 스케줄러 시작 (5분 주기). async라 await(심판 수정2).
 router.post('/smart-build/start', authMiddleware, masterOnlyMiddleware, async (req, res, next) => {
   try {
-    const started = startSmartBuild();
+    const started = await startSmartBuild();
     res.json({ ok: true, started, status: getSmartBuildStatus() });
   } catch (err) { next(err); }
 });
 
-// POST /api/admin/smart-build/stop — 스케줄러 정지
+// POST /api/admin/smart-build/pause { minutes? } — 관리자 일시정지(영속·자동재개). 라이브 이벤트 중 쿼터 회복용.
+//   stop과 달리 interval은 유지하고 pausedUntil까지 tick만 스킵 → 만료 시 자동 재개(끈 채 방치 방지).
+router.post('/smart-build/pause', authMiddleware, masterOnlyMiddleware, async (req, res, next) => {
+  try {
+    const minutes = parseInt((req.body && req.body.minutes), 10);
+    const out = await pauseSmartBuild(Number.isFinite(minutes) ? minutes : undefined);
+    res.json({ ok: true, ...out, status: getSmartBuildStatus() });
+  } catch (err) { next(err); }
+});
+
+// POST /api/admin/smart-build/resume — 관리자 수동 재개(pause 해제)
+router.post('/smart-build/resume', authMiddleware, masterOnlyMiddleware, async (req, res, next) => {
+  try {
+    const out = await resumeSmartBuild();
+    res.json({ ok: true, ...out, status: getSmartBuildStatus() });
+  } catch (err) { next(err); }
+});
+
+// POST /api/admin/smart-build/stop — 스케줄러 정지(프로세스성 clearInterval; 재부팅 시 복원됨).
+//   ⚠️ 오래 끄려면 pause를 쓸 것(stop은 재배포/재부팅에 리셋됨).
 router.post('/smart-build/stop', authMiddleware, masterOnlyMiddleware, async (req, res, next) => {
   try {
     const stopped = stopSmartBuild();
-    res.json({ ok: true, stopped, status: getSmartBuildStatus() });
+    res.json({ ok: true, stopped, note: '재부팅 시 재기동됨. 오래 정지하려면 /smart-build/pause 사용', status: getSmartBuildStatus() });
   } catch (err) { next(err); }
 });
 
@@ -821,8 +843,8 @@ router.post('/db-rebuild', authMiddleware, masterOnlyMiddleware, async (req, res
     // ── Step 4: 스마트빌드 1회 실행 (백그라운드) ──
     broadcast('db_rebuild_progress', { step: 4, message: '스마트빌드 실행 시작... (백그라운드)' });
 
-    // 백그라운드로 스마트빌드 실행
-    runSmartBuild().then(result => {
+    // 백그라운드로 스마트빌드 실행 — DB 재구축은 양보 없이 완주("완료" 보고가 부분완료가 되지 않게)
+    runSmartBuild({ noYield: true }).then(result => {
       const totalElapsed = ((Date.now() - startTime) / 1000).toFixed(1);
       logger.info(`[db-rebuild] Step4 스마트빌드 완료: ${result.tabsUpdated}탭 갱신, ${result.tabsSkipped}탭 스킵`);
       broadcast('db_rebuild_done', {

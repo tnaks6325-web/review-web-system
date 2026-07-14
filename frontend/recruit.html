@@ -406,7 +406,9 @@ async function loadCampaigns() {
   try {
     const res  = await fetch(API_BASE_URL + "/api/campaign/list");
     const json = await res.json();
-    const all  = json.data || [];
+    // ★ 참여형(participation_mode) 공고는 신규 참여 UI(M2) 배포 전까지 레거시 카드에서 숨김
+    //   — 구 신청 폼은 holdToken을 저장하지 못해 신청 즉시 당일 참여권이 소각되는 사고 방지.
+    const all  = (json.data || []).filter(c => !c.participation_mode);
 
     document.getElementById("rcLoading").style.display = "none";
 

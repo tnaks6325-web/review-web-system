@@ -3,7 +3,7 @@ const { readSheet, getSpreadsheetMeta, batchReadSheet, getSheetModifiedTime } = 
 const { computeChecksum } = require('../utils/checksum');
 const { logger } = require('../utils/logger');
 const { emitIndexBuild } = require('../utils/sse');
-const { throttledCall, throttledMap, getThrottleStatus } = require('../utils/sheetsThrottle');
+const { throttledCall, driveThrottledCall, concurrentMap, getThrottleStatus } = require('../utils/sheetsThrottle');
 
 // ═══════════════════════════════════════════════════════════
 // Phase 14: DB에서 키워드 로드 (하드코딩 폴백)
@@ -288,7 +288,7 @@ async function buildIndexSmart(forceFullRebuild = false) {
     // ── 3단계: 시트별 처리 (throttle 적용 — quota 초과 방지) ──
     // 동시 3개씩 + API 호출 간 최소 1.2초 간격 유지
     logger.info(`[buildIndex] throttle 상태: ${JSON.stringify(getThrottleStatus())}`);
-    const sheetResults = await throttledMap(
+    const sheetResults = await concurrentMap(
       sheetIds,
       (sheetId) => _processOneSheet(sheetId, {
         forceFullRebuild,
@@ -402,13 +402,20 @@ async function buildIndexSmart(forceFullRebuild = false) {
 
             // ★ P2b: DB컬럼매핑(있으면) 로드 → 매핑 우선 감지. 없으면 null=키워드 전용(P2a 동일).
             const dbColMap = await require('./columnMapping.service').getTabColumnIndexMap(tab.sheet_id, tab.tab_gid);
-            const rows = parseTabRows(values, tab.sheet_id, tab.tab_name, tab.tab_gid, tab.campaign_name, dbColMap);
+            const detectMeta = {};
+            const rows = parseTabRows(values, tab.sheet_id, tab.tab_name, tab.tab_gid, tab.campaign_name, dbColMap, detectMeta);
             logEntry.parsedRows = rows.length;
             if (rows.length > 0) {
               // 성공! review_index에 upsert + unrecognized에서 resolve
               const checksum = computeChecksum(values);
-              await _upsertTabIndex(tab.sheet_id, tab.tab_name, tab.tab_gid, checksum, rows, null, tab.campaign_name);
+              await _upsertTabIndex(tab.sheet_id, tab.tab_name, tab.tab_gid, checksum, rows, null, tab.campaign_name, detectMeta);
               await _resolveRecognizedTab(tab.sheet_id, tab.tab_name, tab.tab_gid);
+              // ★ 컬럼매핑 자동 기록 (메인 루프와 동일 게이트, best-effort)
+              if (process.env.COLUMN_MAPPING_AUTO_RECORD === '1' && !dbColMap && tab.tab_gid) {
+                try {
+                  await require('./columnMapping.service').recordDetectedMappings({ sheetId: tab.sheet_id, tabGid: tab.tab_gid, tabName: tab.tab_name, meta: detectMeta });
+                } catch (_) {}
+              }
               resolvedCount++;
               logEntry.resolved = true;
               logger.info(`[buildIndex] post-build 해결: ${tab.tab_name} (${rows.length}행)`);
@@ -476,7 +483,7 @@ async function _processOneSheet(sheetId, opts) {
   let cachedModifiedTime = null;
   if (!forceFullRebuild) {
     try {
-      cachedModifiedTime = await throttledCall(() => getSheetModifiedTime(sheetId));
+      cachedModifiedTime = await driveThrottledCall(() => getSheetModifiedTime(sheetId));
       if (cachedModifiedTime) {
         const remoteModified = new Date(cachedModifiedTime).getTime();
         const lastKnown = sheetModifiedMap[sheetId] || 0;
@@ -644,7 +651,8 @@ async function _processOneSheet(sheetId, opts) {
       // 헤더 파싱 + DB 업데이트
       // ★ P2b: DB컬럼매핑(있으면) 로드 → 매핑 우선. 없으면 null=키워드 전용(P2a 동일).
       const dbColMap = await require('./columnMapping.service').getTabColumnIndexMap(sheetId, tabGid);
-      const rows = parseTabRows(values, sheetId, tabName, tabGid, spreadsheetTitle, dbColMap);
+      const detectMeta = {};
+      const rows = parseTabRows(values, sheetId, tabName, tabGid, spreadsheetTitle, dbColMap, detectMeta);
 
       // 리뷰 인덱스 구성요건 미충족 (헤더 없음 or 데이터 0건) → 인덱스 등록 스킵 + 기존 데이터 삭제
       if (rows.length === 0) {
@@ -700,9 +708,20 @@ async function _processOneSheet(sheetId, opts) {
         }
       }
 
-      await _upsertTabIndex(sheetId, tabName, tabGid, newChecksum, filteredRows, currentModifiedTime, spreadsheetTitle);
+      await _upsertTabIndex(sheetId, tabName, tabGid, newChecksum, filteredRows, currentModifiedTime, spreadsheetTitle, detectMeta);
       await _resolveRecognizedTab(sheetId, tabName, tabGid);
       rebuilt++;
+
+      // ★ 드리프트 경고 — 저장 매핑이 재앵커/범위가드로 거부돼 키워드 폴백 중(무로그 폴백 해소)
+      if (detectMeta.drift && detectMeta.drift.length) {
+        logger.warn(`[buildIndex] 컬럼매핑 드리프트 — ${spreadsheetTitle}/${tabName}: ${detectMeta.drift.map(d => `${d.field}(${d.reason})`).join(', ')} → 키워드 폴백 동작 중`);
+      }
+      // ★ 컬럼매핑 자동 기록 (detection snapshot, 기본 OFF·best-effort — 빌드 실패 유발 불가)
+      if (process.env.COLUMN_MAPPING_AUTO_RECORD === '1' && !dbColMap && tabGid) {
+        try {
+          await require('./columnMapping.service').recordDetectedMappings({ sheetId, tabGid, tabName, meta: detectMeta });
+        } catch (_) {}
+      }
 
     } catch (err) {
       logger.error(`[buildIndex] 탭 처리 오류 (${tabName}): ${err.message}`);
@@ -769,7 +788,7 @@ async function _removeNonIndexTab(sheetId, tabName) {
 // DB 업데이트 (트랜잭션) — 기존 로직 그대로 유지
 // ═══════════════════════════════════════════════════════════
 
-async function _upsertTabIndex(sheetId, tabName, tabGid, checksum, rows, modifiedTime, campaignName) {
+async function _upsertTabIndex(sheetId, tabName, tabGid, checksum, rows, modifiedTime, campaignName, meta = null) {
   const client = await pool.connect();
   try {
     await client.query('BEGIN');
@@ -853,10 +872,14 @@ async function _upsertTabIndex(sheetId, tabName, tabGid, checksum, rows, modifie
     }
 
     // index_master 체크섬 + 수정시각 업데이트
+    // ★ 감지 provenance(detect_source/drift, migration 044) 동시 기록 — 관측용, 로직 영향 없음
+    const detectSource = meta && meta.fields ? JSON.stringify({ headerRow: meta.headerRowIdx, ...meta.fields }) : null;
+    const detectDrift = meta && meta.drift && meta.drift.length ? JSON.stringify(meta.drift) : null;
     await client.query(`
       INSERT INTO index_master (sheet_id, tab_name, tab_gid, campaign_name, checksum, built_at,
-                                row_count, submitted_count, status, sheet_modified_at)
-      VALUES ($1,$2,$3,$4,$5,NOW(),$6,$7,'active',$8)
+                                row_count, submitted_count, status, sheet_modified_at,
+                                detect_source, detect_drift, detected_at)
+      VALUES ($1,$2,$3,$4,$5,NOW(),$6,$7,'active',$8,$9::jsonb,$10::jsonb,NOW())
       ON CONFLICT (sheet_id, tab_name) DO UPDATE SET
         checksum = EXCLUDED.checksum,
         built_at = NOW(),
@@ -865,11 +888,14 @@ async function _upsertTabIndex(sheetId, tabName, tabGid, checksum, rows, modifie
         campaign_name = EXCLUDED.campaign_name,
         status = 'active',
         error_msg = NULL,
-        sheet_modified_at = EXCLUDED.sheet_modified_at
+        sheet_modified_at = EXCLUDED.sheet_modified_at,
+        detect_source = EXCLUDED.detect_source,
+        detect_drift = EXCLUDED.detect_drift,
+        detected_at = NOW()
     `, [
       sheetId, tabName, tabGid, campaignName || tabName,
       checksum, rows.length, rows.filter(r => r.isSubmitted).length,
-      modifiedTime || null
+      modifiedTime || null, detectSource, detectDrift
     ]);
 
     // ★ tab_configs.campaign_name 교정: spreadsheetTitle(시트 제목)이 전달된 경우
@@ -904,13 +930,14 @@ async function _upsertTabIndex(sheetId, tabName, tabGid, checksum, rows, modifie
 // 탭 데이터 파싱 (기존 로직 100% 유지)
 // ═══════════════════════════════════════════════════════════
 
-function parseTabRows(values, sheetId, tabName, tabGid, campaignTitle, dbColMap = null) {
+function parseTabRows(values, sheetId, tabName, tabGid, campaignTitle, dbColMap = null, meta = null) {
   // ★ P2a: 컬럼감지·행파싱을 공용 columnResolver로 위임 — 동일 로직·동일 kw라 출력 100% 동일.
   //   smartBuild._parseTabRows도 같은 공용함수를 사용해 두 빌더의 인덱싱이 일치한다(진동 제거).
   //   ★ P2b: dbColMap(있으면) 전달 — DB컬럼매핑 우선 감지. 없으면(null) P2a와 100% 동일.
+  //   ★ meta(있으면): 감지 provenance out-param — index_master.detect_source/drift 기록용.
   return require('./columnResolver').parseTabRows(values, sheetId, tabName, tabGid, campaignTitle, {
     NAME_KEYWORDS, SUBMIT_KEYWORDS, DATA_TAB_KEYWORDS, SUBMITTED_VALUES,
-  }, dbColMap);
+  }, dbColMap, meta);
 }
 
 function _isDataTabRow(cells) {
@@ -1064,11 +1091,11 @@ async function checkDirtySheets() {
     };
   });
 
-  // ★ 성능 개선: 순차 → 병렬 처리 (throttledMap, 동시 3개)
-  //   기존: 55시트 × 1.2초 간격 = ~66초+ (순차)
-  //   개선: 55시트 ÷ 3 동시 = ~22초 (병렬)
-  const results = await throttledMap(sheetIds, async (sheetId) => {
-    const remoteModified = await getSheetModifiedTime(sheetId);
+  // ★ 병렬 처리 (concurrentMap, 동시 3개) — 팬텀 슬롯 0
+  // (R4) 이 지점은 팬텀 슬롯이 유일한 페이싱이던 곳 — concurrentMap 교체 시 반드시
+  //   driveThrottledCall로 감싼다(래핑 누락 = 완전 무제한 호출, tests/driveLaneCallsites.test.js가 핀).
+  const results = await concurrentMap(sheetIds, async (sheetId) => {
+    const remoteModified = await driveThrottledCall(() => getSheetModifiedTime(sheetId));
     return { sheetId, remoteModified };
   }, 3);
 

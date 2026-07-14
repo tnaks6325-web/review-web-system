@@ -102,6 +102,12 @@ const _ACTION_MAP = {
   'saveIncomeInfo':     { method: 'POST', path: '/api/reviewer/profile', remap: 'saveIncomeInfo' },
   'saveBankInfo':       { method: 'POST', path: '/api/reviewer/profile', remap: 'saveBankInfo' },
   'saveAddress':        { method: 'POST', path: '/api/reviewer/profile', remap: 'saveAddress' },
+
+  // 리뷰어 소식·공지
+  'reviewerNotices':      { method: 'GET',  path: '/api/reviewer/notices' },        // 공개
+  'reviewerNoticesAll':   { method: 'GET',  path: '/api/reviewer/notices/all' },    // 관리자
+  'reviewerNoticeSave':   { method: 'POST', path: '/api/reviewer/notices/save' },   // 관리자
+  'reviewerNoticeDelete': { method: 'POST', path: '/api/reviewer/notices/delete' }, // 관리자
   'getInaedList':       { method: 'GET',  path: '/api/submit/get-inaed-list' },
 
   // 관리자 인증 (Section 8)
@@ -183,6 +189,15 @@ const _ACTION_MAP = {
   'uploadOrderImage':    { method: 'POST', path: '/api/image/image-upload' },
   'verifyAddressMatch':  { method: 'POST', path: '/api/image/verify-address' },
   'uploadReviewImage':   { method: 'POST', path: '/api/image/review-upload' },
+
+  // 리뷰 이미지 수정요청 (리뷰어 → 관리자 승인)
+  'reviewEditMyFiles':    { method: 'GET',  path: '/api/review-edit/my-files' },
+  'reviewEditRequest':    { method: 'POST', path: '/api/review-edit/request' },
+  'reviewEditMyRequests': { method: 'GET',  path: '/api/review-edit/my-requests' },
+  'reviewEditCancel':     { method: 'POST', path: '/api/review-edit/cancel' },
+  'reviewEditList':       { method: 'GET',  path: '/api/review-edit/list' },
+  'reviewEditApprove':    { method: 'POST', path: '/api/review-edit/approve' },
+  'reviewEditReject':     { method: 'POST', path: '/api/review-edit/reject' },
 
   // Drive 폴더 관리
   'initRootFolder':      { method: 'POST', path: '/api/drive/init-root' },
@@ -322,6 +337,8 @@ const _ACTION_MAP = {
   'mappingFields': { method: 'GET',  path: '/api/mapping/fields' },
   'mappingGet':    { method: 'GET',  path: '/api/mapping' },
   'mappingSave':   { method: 'POST', path: '/api/mapping' },
+  'mappingCoverage': { method: 'GET', path: '/api/mapping/coverage' },
+  'mappingDrift':    { method: 'GET', path: '/api/mapping/drift' },
 };
 
 // ═══════════════════════════════════════════════════════════

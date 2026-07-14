@@ -109,6 +109,31 @@ body{ letter-spacing:-.01em; }
   </div>
 </div>
 
+<!-- ────────── 신기능 안내 강제 팝업 (캠페인탭 참여자 명단 / DB-first) ────────── -->
+<div id="dbFirstGuideModal" class="modal-overlay hidden" style="display:none;z-index:9999">
+  <div class="modal-box" style="max-width:520px">
+    <div class="modal-header" style="display:flex;align-items:center;justify-content:space-between">
+      <h2 style="margin:0"><i class="fas fa-bullhorn" style="color:#3B82F6"></i> 새 기능 안내</h2>
+      <button class="btn-icon-sm" onclick="closeDbFirstGuide(false)" title="닫기"><i class="fas fa-times"></i></button>
+    </div>
+    <div class="modal-body" style="font-size:14px;line-height:1.65">
+      <p style="margin:0 0 8px"><b>캠페인탭 참여자 명단</b>을 구글시트가 아니라 <b>시스템에서 직접 관리</b>하는 기능을 준비했습니다.</p>
+      <ul style="margin:6px 0 10px;padding-left:18px">
+        <li>시트 명단을 <b>시스템으로 가져오기</b> → 화면에서 보기·<b>추가/수정/삭제</b>·리뷰제출/입금 체크</li>
+        <li>지금은 <b>안전 테스트 단계</b> — 모든 동작이 <b>테스트 저장공간에만</b> 반영되어 <b>리뷰어·구글시트·주문에 영향 0</b></li>
+        <li>현재 <b>최고관리자 전용</b> (검증 후 단계적 확대)</li>
+      </ul>
+      <div style="background:#e6f6ec;border-left:4px solid #1a7f37;padding:9px 12px;border-radius:0 8px 8px 0;font-size:13px">
+        직원분들께 설명할 수 있는 <b>쉬운 안내서(유저플로우)</b>를 준비했습니다. 아래 버튼으로 열어보세요.
+      </div>
+      <div class="modal-actions" style="margin-top:16px">
+        <button class="btn-primary" onclick="openDbFirstGuide()"><i class="fas fa-book-open"></i> 직원 안내서 보기</button>
+        <button class="btn-secondary" onclick="closeDbFirstGuide(true)">확인했어요 (다시 안 보기)</button>
+      </div>
+    </div>
+  </div>
+</div>
+
 <!-- ────────── 시작일 편집 팝업 ────────── -->
 <div id="startDatePopup">
   <div class="sdp-title"><i class="fas fa-calendar-edit"></i> 시작일 수정</div>
@@ -621,14 +646,6 @@ body{ letter-spacing:-.01em; }
 
         <!-- 외부 링크 그룹 (항상 표시) -->
         <div class="admin-header-actions" style="gap:5px">
-          <!-- ▼▼▼ [임시] 드라이브 용량 이관 버튼 — 전부 tnaks6325 이관 완료 후 이 블록 삭제 ▼▼▼ -->
-          <style>@keyframes driveOwnPulse{0%,100%{box-shadow:0 3px 10px rgba(245,158,11,.45)}50%{box-shadow:0 3px 18px rgba(245,158,11,.85)}}</style>
-          <button id="btnDriveOwnership" onclick="openDriveOwnershipModal()" title="구글드라이브 용량 귀속 점검·이관 (임시)"
-            style="padding:11px 20px;background:linear-gradient(135deg,#FACC15,#F59E0B);color:#7C2D12;border:2px solid #D97706;border-radius:12px;font-size:.9rem;font-weight:800;cursor:pointer;display:inline-flex;align-items:center;gap:7px;animation:driveOwnPulse 2s ease-in-out infinite;margin-right:4px">
-            <i class="fas fa-hdd"></i> 드라이브 용량 이관
-            <span style="background:#7C2D12;color:#FDE68A;font-size:.62rem;padding:2px 6px;border-radius:7px;font-weight:700">임시</span>
-          </button>
-          <!-- ▲▲▲ [임시] 드라이브 용량 이관 버튼 끝 ▲▲▲ -->
           <button class="btn-header-sq btn-header-portal" onclick="openWorkPortal()" title="업무포털 새창 열기 (자동 로그인)">
             <i class="fas fa-briefcase"></i>
             <span>업무포털</span>
@@ -644,6 +661,18 @@ body{ letter-spacing:-.01em; }
           <button class="btn-header-sq btn-header-mirror" onclick="openRawMirror()" title="구글시트 RAW 미러 — 전체 미러링 실행 + 시트별 데이터 뷰어 (자동 로그인)">
             <i class="fas fa-database"></i>
             <span>RAW 미러</span>
+          </button>
+          <button class="btn-header-sq btn-header-mirror" onclick="openThrottleMonitor()" title="구글 시트 API 45/분 쿼터 실시간 모니터 — 어디서 얼마나 쓰는지 + 잔량 (자동 로그인)">
+            <i class="fas fa-gauge-high"></i>
+            <span>시트API 모니터</span>
+          </button>
+          <button class="btn-header-sq btn-header-mirror" onclick="openWorkdesk()" title="Track B 통합 작업대(그림자) — 구글시트 대체 평행 트랙: 명단·상태·소유 열람/편집 리허설. 라이브 무영향 (자동 로그인)">
+            <i class="fas fa-layer-group"></i>
+            <span>통합 작업대</span>
+          </button>
+          <button class="btn-header-sq" onclick="window.open('/docs/prd-userflow.html','_blank')" title="시스템 소개서 — PRD·유저플로우·와이어프레임 보고서 (새창)">
+            <i class="fas fa-book-open"></i>
+            <span>시스템 소개서</span>
           </button>
 
           <!-- ▸ 탭별 컨텍스트 버튼 영역 -->
@@ -699,8 +728,10 @@ body{ letter-spacing:-.01em; }
       <!-- 제출 현황 대시보드 -->
       <div id="tab-dashboard" class="admin-tab-pane active">
 
-        <!-- ★ 공지사항 (배포 변경 이력 — 누적 관리) -->
-        <div id="noticeSection" style="display:none;margin-bottom:16px;border:1px solid #DBEAFE;border-radius:12px;background:linear-gradient(135deg,#EFF6FF,#F0F9FF);padding:16px 18px;position:relative">
+        <!-- ★ 대시보드 2×2 균등 블록: 시스템공지 | 리뷰어공지 / 작업오더 | 캠페인탭관리 -->
+        <style>@media (max-width:900px){ #dashGrid{ grid-template-columns:1fr !important; } }</style>
+        <div id="dashGrid" style="display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:16px;align-items:stretch;margin-bottom:16px">
+        <div id="noticeSection" style="display:none;min-width:0;border:1px solid #DBEAFE;border-radius:12px;background:linear-gradient(135deg,#EFF6FF,#F0F9FF);padding:16px 18px;position:relative">
           <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:10px">
             <span style="font-size:.88rem;font-weight:700;color:#1E40AF">
               <i class="fas fa-bullhorn" style="color:#3B82F6;margin-right:6px"></i>시스템 변경 공지
@@ -712,8 +743,32 @@ body{ letter-spacing:-.01em; }
           <div id="noticeContent" style="font-size:.8rem;color:#1F2937;line-height:1.7;max-height:134px;overflow-y:auto"></div>
         </div>
 
-        <!-- ★ 작업오더 간편보기 (최신 4건) -->
-        <div id="dashWoSection" style="margin-bottom:16px;border:1px solid #E5E7EB;border-radius:12px;background:#fff;padding:14px 16px">
+        <!-- 리뷰어 소식·공지 관리 (리뷰어 홈 상단 노출) -->
+        <div style="min-width:0;border:1px solid #E5E7EB;border-radius:12px;background:#fff;padding:16px 18px">
+          <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:10px">
+            <span style="font-size:.88rem;font-weight:700;color:var(--t1)"><i class="fas fa-bullhorn" style="color:#7C3AED;margin-right:6px"></i>리뷰어 소식·공지 <span style="font-size:.65rem;font-weight:400;color:#6B7280">(리뷰어 홈 상단 노출)</span></span>
+            <div style="display:flex;gap:6px">
+              <button id="rvNoticeWriteBtn" onclick="toggleReviewerNoticeForm()" style="padding:4px 12px;background:#7C3AED;color:#fff;border:none;border-radius:7px;font-size:.72rem;font-weight:700;cursor:pointer"><i class="fas fa-pen"></i> 작성</button>
+              <button onclick="loadReviewerNoticesAdmin()" style="padding:4px 10px;background:#F3F4F6;color:#374151;border:none;border-radius:7px;font-size:.72rem;font-weight:600;cursor:pointer"><i class="fas fa-sync-alt"></i> 새로고침</button>
+            </div>
+          </div>
+          <div id="rvNoticeFormWrap" style="display:none;background:#FAFAFB;border:1px solid #EEF0F5;border-radius:10px;padding:12px;margin-bottom:12px">
+            <input type="hidden" id="rvNoticeEditId" value="">
+            <input id="rvNoticeTitle" type="text" placeholder="공지 제목" maxlength="100" style="width:100%;padding:8px 10px;border:1px solid #D1D5DB;border-radius:7px;font-size:.82rem;outline:none;box-sizing:border-box;margin-bottom:8px">
+            <textarea id="rvNoticeBody" rows="3" placeholder="공지 내용 (리뷰어에게 보여집니다)" maxlength="2000" style="width:100%;padding:8px 10px;border:1px solid #D1D5DB;border-radius:7px;font-size:.82rem;font-family:inherit;outline:none;box-sizing:border-box;resize:vertical;margin-bottom:8px"></textarea>
+            <div style="display:flex;align-items:center;gap:10px">
+              <label style="display:flex;align-items:center;gap:5px;font-size:.76rem;color:var(--t2);cursor:pointer"><input type="checkbox" id="rvNoticePinned"> 상단 고정</label>
+              <div style="margin-left:auto;display:flex;gap:6px">
+                <button id="rvNoticeCancelBtn" onclick="cancelReviewerNoticeEdit()" style="display:none;padding:7px 14px;background:#fff;color:var(--t2);border:1px solid #D1D5DB;border-radius:7px;font-size:.78rem;font-weight:600;cursor:pointer">취소</button>
+                <button id="rvNoticeSaveBtn" onclick="saveReviewerNotice()" style="padding:7px 16px;background:#7C3AED;color:#fff;border:none;border-radius:7px;font-size:.78rem;font-weight:700;cursor:pointer"><i class="fas fa-paper-plane"></i> 게시</button>
+              </div>
+            </div>
+          </div>
+          <div id="rvNoticeList" style="max-height:220px;overflow-y:auto"><div style="text-align:center;color:#9CA3AF;font-size:.8rem;padding:10px">불러오는 중...</div></div>
+        </div>
+
+        <!-- 작업오더 간편보기 (최신 4건) -->
+        <div id="dashWoSection" style="min-width:0;border:1px solid #E5E7EB;border-radius:12px;background:#fff;padding:14px 16px">
           <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:8px">
             <span style="font-size:.88rem;font-weight:700;color:#111827">
               <i class="fas fa-clipboard-list" style="color:#3182f6;margin-right:6px"></i>작업오더 간편보기
@@ -721,12 +776,13 @@ body{ letter-spacing:-.01em; }
             </span>
             <button onclick="switchAdminTab('work-orders')" style="font-size:.72rem;background:#e8f1fe;color:#1b64da;border:1px solid #cce0fb;border-radius:7px;padding:4px 10px;cursor:pointer"><i class="fas fa-list"></i> 전체 보기</button>
           </div>
-          <div id="dashWoList" style="max-height:134px;overflow-y:auto;transition:max-height .2s ease"></div>
+          <div id="dashWoList" style="max-height:220px;overflow-y:auto;transition:max-height .2s ease"></div>
         </div>
 
-        <!-- ★ 캠페인 탭 관리 (대시보드 메인) -->
-        <div class="admin-section-header">
-          <span style="font-size:.95rem;font-weight:700;color:var(--t1)">
+        <!-- 캠페인 탭 관리 (관리 액션 + 상태 + KPI 카드) -->
+        <div style="min-width:0;border:1px solid #E5E7EB;border-radius:12px;background:#fff;padding:14px 16px">
+        <div class="admin-section-header" style="margin-bottom:4px">
+          <span style="font-size:.88rem;font-weight:700;color:var(--t1)">
             <i class="fas fa-th-list" style="color:#1D4ED8;margin-right:6px"></i>캠페인 탭 관리
           </span>
           <div style="display:flex;gap:6px;margin-left:auto;flex-wrap:wrap;align-items:center">
@@ -762,11 +818,19 @@ body{ letter-spacing:-.01em; }
           데이터 원본: DB(tab_configs) &middot; 스마트빌드 5분 자동갱신 &middot; 로딩중...
         </div>
 
+        <!-- KPI 카드 -->
+        <div id="tabDashKPI" style="display:grid;grid-template-columns:repeat(auto-fit,minmax(96px,1fr));gap:8px"></div>
+        </div><!-- /캠페인 탭 관리 카드 -->
+        </div><!-- /dashGrid(2×2) -->
+
+        <!-- ★ 작업 중인 탭 목록 — 전체폭 단독 블록 -->
+        <div style="border:1px solid #E5E7EB;border-radius:12px;background:#fff;padding:16px 18px">
+        <div style="font-size:.92rem;font-weight:700;color:var(--t1);margin-bottom:10px">
+          <i class="fas fa-list-check" style="color:#1D4ED8;margin-right:6px"></i>작업 중인 탭 목록
+        </div>
+
         <!-- ★ 완료감지 결과 영역 (대시보드 내 인라인) -->
         <div id="dashArchiveDetectWrap" style="display:none;margin-bottom:14px"></div>
-
-        <!-- KPI 카드 -->
-        <div id="tabDashKPI" style="display:grid;grid-template-columns:repeat(auto-fit,minmax(110px,1fr));gap:8px;margin-bottom:14px"></div>
 
         <!-- 필터 -->
         <div style="display:flex;gap:8px;margin-bottom:10px;flex-wrap:wrap;align-items:center">
@@ -931,6 +995,26 @@ body{ letter-spacing:-.01em; }
             <div id="orderMirrorPanel" style="font-size:.82rem;color:var(--t2)">
               <i class="fas fa-circle-notch fa-spin"></i> 불러오는 중...
             </div>
+            <div style="margin-top:10px;display:flex;gap:6px;flex-wrap:wrap;align-items:center">
+              <button class="btn-sm" onclick="downloadYellowRowsCsv('csv')" style="font-size:.72rem;background:#CA8A04;color:#fff;border:none;padding:4px 10px;border-radius:6px;cursor:pointer" title="복구·수동추가로 시트에 노란 배경으로 기록된 행이 있는 탭 목록을 CSV로 받습니다(탭명·시트탭URL·노란행수·행번호). 수동 확인 후 삭제용.">
+                <i class="fas fa-file-csv"></i> 노란 복구행 탭목록 CSV
+              </button>
+              <button class="btn-sm" onclick="downloadYellowRowsCsv('detail.csv')" style="font-size:.72rem;background:#FCD34D;color:#111;border:none;padding:4px 10px;border-radius:6px;cursor:pointer" title="노란 복구행을 행 단위로(주문자·주문번호·시트행 포함) CSV로 받습니다.">
+                <i class="fas fa-list"></i> 행단위 상세
+              </button>
+              <span style="font-size:.68rem;color:var(--t3)">노란배경=복구(적체)/수동추가 행</span>
+            </div>
+            <div style="margin-top:8px;display:flex;gap:6px;flex-wrap:wrap;align-items:center;border-top:1px dashed var(--border);padding-top:8px">
+              <span style="font-size:.7rem;color:var(--t2)">적체 노란행 삭제 — 기준일(이 날짜 0시 KST 이전 제출분만 삭제):</span>
+              <input id="yellowDelBefore" type="date" value="2026-06-30" style="font-size:.72rem;padding:3px 6px;border:1px solid var(--border);border-radius:6px">
+              <button class="btn-sm" onclick="runYellowRowsDelete(false)" style="font-size:.72rem;background:#6B7280;color:#fff;border:none;padding:4px 10px;border-radius:6px;cursor:pointer" title="삭제하지 않고 각 탭에서 지워질 행 수만 미리 계산합니다.">
+                <i class="fas fa-search"></i> 미리보기(삭제 안 함)
+              </button>
+              <button class="btn-sm" onclick="runYellowRowsDelete(true)" style="font-size:.72rem;background:#DC2626;color:#fff;border:none;padding:4px 10px;border-radius:6px;cursor:pointer" title="기준일 이전 적체 노란행을 실제로 삭제합니다(되돌릴 수 없음). 시트 현재 색을 재확인하고 DB와 일치하는 탭만 아래→위로 삭제. 불일치 탭은 자동 건너뜀.">
+                <i class="fas fa-trash-alt"></i> 적체 노란행 삭제 실행
+              </button>
+            </div>
+            <div id="yellowDelResult" style="margin-top:8px;font-size:.72rem;color:var(--t2)"></div>
             <div id="orderMirrorActions" class="hidden" style="margin-top:10px;display:flex;gap:6px;flex-wrap:wrap">
               <button class="btn-sm" onclick="runOrderReconcile(null)" style="font-size:.72rem;background:#16A34A;color:#fff;border:none;padding:4px 10px;border-radius:6px;cursor:pointer">
                 <i class="fas fa-redo"></i> 막힌 주문 재시도(복구)
@@ -939,6 +1023,18 @@ body{ letter-spacing:-.01em; }
                 <i class="fas fa-bolt"></i> 빠른 반영(가속)
               </button>
               <span style="font-size:.7rem;color:var(--t2);align-self:center">복구분은 시트 하단에 노란 배경으로 기록됩니다</span>
+            </div>
+          </div>
+
+          <!-- 리뷰 이미지 수정요청 (리뷰어 → 관리자 승인) -->
+          <div style="background:#fff;border-radius:12px;padding:16px;box-shadow:0 1px 4px rgba(0,0,0,.06);border:1px solid var(--border)">
+            <h4 style="margin:0 0 12px;font-size:.88rem;color:var(--t1)">
+              <i class="fas fa-images" style="color:#3182f6"></i> 리뷰 이미지 수정요청
+              <span id="reviewEditBadge" class="hidden" style="background:#DC2626;color:#fff;font-size:.66rem;font-weight:700;border-radius:10px;padding:1px 7px;margin-left:4px"></span>
+              <button class="btn-sm" onclick="loadReviewEditRequests()" style="float:right;font-size:.7rem;background:#E5E7EB;color:#111;border:none;padding:3px 8px;border-radius:6px;cursor:pointer"><i class="fas fa-sync"></i> 새로고침</button>
+            </h4>
+            <div id="reviewEditPanel" style="font-size:.82rem;color:var(--t2)">
+              <i class="fas fa-circle-notch fa-spin"></i> 불러오는 중...
             </div>
           </div>
 
@@ -1063,6 +1159,7 @@ body{ letter-spacing:-.01em; }
           </details>
         </div>
         <!-- /Phase 9 -->
+        </div><!-- /작업 중인 탭 목록 블록 -->
 
       </div><!-- /tab-dashboard -->
 
@@ -1416,6 +1513,25 @@ body{ letter-spacing:-.01em; }
           </button>
         </div>
         <div id="unrecogListWrap" style="font-size:.82rem;color:var(--t2)">
+          <span style="color:var(--t3)">탭 전환 시 자동 로드</span>
+        </div>
+
+        <!-- 컬럼매핑 현황 (컬럼 판정 DB화 1단계 관측) -->
+        <div class="admin-section-header" style="margin-top:28px">
+          <span style="font-size:.95rem;font-weight:700;color:var(--t1)">
+            <i class="fas fa-map-signs" style="color:#1D4ED8;margin-right:6px"></i>컬럼매핑 현황
+          </span>
+          <div style="display:flex;gap:6px;margin-left:auto">
+            <button class="btn-sm" onclick="loadMappingCoverage()" style="font-size:.78rem">
+              <i class="fas fa-sync-alt"></i> 새로고침
+            </button>
+          </div>
+        </div>
+        <p style="font-size:.78rem;color:var(--t3);margin:8px 0 12px">
+          활성 탭별로 제출/입금 등 컬럼 위치가 DB에 기록돼 있는지, 시트 구조 변경으로 기록과 어긋난 탭(드리프트 ⚠)이 있는지 보여줍니다.
+          드리프트 탭은 <a href="raw-mirror.html" target="_blank" style="color:#1D4ED8;text-decoration:underline">RAW 미러 › 컬럼 매핑</a>에서 바로잡으세요.
+        </p>
+        <div id="mappingCoverageWrap" style="font-size:.82rem;color:var(--t2)">
           <span style="color:var(--t3)">탭 전환 시 자동 로드</span>
         </div>
 

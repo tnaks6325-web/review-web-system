@@ -1,0 +1,864 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>통합 작업대 (Track B · 그림자)</title>
+<style>
+  :root{
+    --paper:#F4F6F7;--card:#FFFFFF;--card2:#EEF2F3;--ink:#15232A;--muted:#5C6B72;--faint:#8A979D;
+    --line:#DDE4E6;--line2:#C9D3D6;--accent:#127C8A;--accent-soft:#E1F0F1;
+    --safe:#2E7D64;--safe-soft:#E2F1EA;--warn:#A9721E;--warn-soft:#F5EBD8;--bad:#BB4E37;--bad-soft:#F7E5E0;
+    --adv:#7A5AA6;--adv-soft:#EFE8F5;
+    --mono:'SF Mono','JetBrains Mono',ui-monospace,monospace;
+    --sans:'Pretendard','Apple SD Gothic Neo','Malgun Gothic',system-ui,-apple-system,sans-serif;
+  }
+  *{box-sizing:border-box}
+  body{margin:0;background:var(--paper);color:var(--ink);font-family:var(--sans);font-size:14px;line-height:1.5}
+  .top{display:flex;align-items:center;gap:12px;padding:10px 18px;background:var(--card);border-bottom:1px solid var(--line);position:sticky;top:0;z-index:5;flex-wrap:wrap}
+  .top .logo{font-weight:800;letter-spacing:-.02em;font-size:15px}
+  .top .logo .tag{font-size:10px;font-weight:700;color:var(--accent);background:var(--accent-soft);padding:2px 8px;border-radius:999px;margin-left:8px;letter-spacing:.03em}
+  .nav{display:flex;gap:4px;margin-left:6px}
+  .navb{font:inherit;font-size:12.5px;font-weight:650;padding:6px 13px;border-radius:8px;border:1px solid transparent;background:none;color:var(--muted);cursor:pointer}
+  .navb.on{background:var(--accent-soft);color:var(--accent)}
+  .top .sp{flex:1}
+  .rolebadge{font-size:11px;font-weight:750;padding:4px 11px;border-radius:999px;background:var(--accent-soft);color:var(--accent)}
+  .btn{font:inherit;font-size:12px;font-weight:650;padding:6px 12px;border-radius:8px;border:1px solid var(--line2);background:var(--card);color:var(--ink);cursor:pointer}
+  .btn:hover{background:var(--card2)} .btn.pri{background:var(--accent);color:#fff;border-color:var(--accent)} .btn:disabled{opacity:.5;cursor:default}
+  .wrap{display:grid;grid-template-columns:230px 1fr 240px;min-height:calc(100vh - 50px)}
+  @media(max-width:900px){.wrap{grid-template-columns:1fr}.side,.rail{display:none}.wrap.showlist .main{display:none}.wrap.showlist .side{display:block}}
+  .side{border-right:1px solid var(--line);background:var(--card);padding:12px 10px;overflow:auto}
+  .side .sh{font-size:10px;font-weight:750;letter-spacing:.05em;text-transform:uppercase;color:var(--faint);margin:6px 6px 8px;display:flex;justify-content:space-between}
+  .titem{font-size:12.5px;padding:8px 10px;border-radius:8px;margin-bottom:3px;color:var(--muted);cursor:pointer;border:1px solid transparent;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+  .titem:hover{background:var(--card2)} .titem.on{background:var(--accent-soft);border-color:color-mix(in srgb,var(--accent) 30%,transparent);color:var(--ink);font-weight:650}
+  .titem .sub{font-size:10.5px;color:var(--faint);font-weight:400}
+  .tgh{display:flex;align-items:center;gap:6px;font-size:11px;font-weight:750;color:var(--ink);padding:10px 6px 4px;border-bottom:1px solid var(--line);margin-bottom:4px}
+  .tgh:first-child{padding-top:2px}
+  .tgc{font-size:10px;font-weight:600;color:var(--faint);background:var(--card2);border-radius:8px;padding:1px 6px}
+  .advsug{display:none;position:absolute;top:100%;left:0;right:0;z-index:30;background:var(--card);border:1px solid var(--line);border-radius:8px;margin-top:3px;max-height:220px;overflow-y:auto;box-shadow:0 6px 18px rgba(0,0,0,.12)}
+  .advsug.show{display:block}
+  .sugitem{padding:8px 11px;font-size:12.5px;cursor:pointer;display:flex;justify-content:space-between;gap:8px}
+  .sugitem:hover{background:var(--accent-soft)}
+  .sugm{color:var(--faint);font-size:11px}
+  .owntab{display:flex;align-items:center;gap:10px;padding:9px 12px;border:1px solid var(--line);border-radius:9px;margin-bottom:6px;cursor:pointer}
+  .owntab:hover{background:var(--accent-soft)}
+  .owntab .info{flex:1;min-width:0}
+  .owntab .info b{font-size:12.5px;display:block;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+  .owntab .info span{font-size:11px;color:var(--faint)}
+  .owntab .openb{font-size:11px;color:var(--accent);font-weight:650;white-space:nowrap}
+  .main{padding:18px 22px;overflow:auto}
+  .mh{display:flex;align-items:center;gap:10px;flex-wrap:wrap;margin-bottom:14px}
+  .mh h1{font-size:19px;margin:0;font-weight:800;letter-spacing:-.02em}
+  .bd{font-size:10.5px;font-weight:700;padding:3px 9px;border-radius:6px;background:var(--card2);color:var(--muted);border:1px solid var(--line)} .bd.g{background:var(--safe-soft);color:var(--safe);border-color:transparent} .bd.sot{background:var(--accent-soft);color:var(--accent);border-color:transparent}
+  .metagrid{display:grid;grid-template-columns:repeat(auto-fill,minmax(150px,1fr));gap:9px;margin-bottom:16px}
+  .mf{background:var(--card);border:1px solid var(--line);border-radius:9px;padding:9px 11px}
+  .mf .k{font-size:10px;color:var(--faint);text-transform:uppercase;letter-spacing:.03em} .mf .v{font-size:13px;font-weight:600;margin-top:2px}
+  .wobar{display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin-bottom:12px;padding:10px 12px;border:1px solid var(--line);border-radius:10px;background:var(--card2)}
+  .wobar .wt{font-size:12.5px;font-weight:700} .wobar .wsub{font-size:11px;color:var(--faint)}
+  .wodetail{border:1px solid var(--line);border-radius:11px;background:var(--card);margin-bottom:16px;overflow:hidden}
+  .wodetail summary{cursor:pointer;list-style:none;padding:11px 14px;font-size:12.5px;font-weight:700;background:var(--card2);display:flex;align-items:center;gap:8px}
+  .wodetail summary::-webkit-details-marker{display:none}
+  .worow{display:grid;grid-template-columns:120px 1fr;gap:10px;padding:8px 14px;border-top:1px solid var(--line);font-size:12.5px}
+  .worow .wk{color:var(--faint);font-weight:650} .worow .wv{white-space:pre-wrap;word-break:break-word}
+  .wochip{display:inline-block;font-size:11px;font-weight:650;padding:2px 8px;border-radius:999px;background:var(--adv-soft);color:var(--adv);margin:2px 4px 2px 0}
+  .worow2{padding:9px 11px;border:1px solid var(--line);border-radius:9px;margin-bottom:6px;cursor:pointer} .worow2:hover{background:var(--card2)} .worow2.on{border-color:var(--adv);background:var(--adv-soft)}
+  .worow2 .t{font-size:12.5px;font-weight:650} .worow2 .s{font-size:11px;color:var(--faint);margin-top:2px}
+  .counts{display:flex;gap:10px;margin-bottom:14px;flex-wrap:wrap}
+  .cc{flex:1;min-width:90px;background:var(--card);border:1px solid var(--line);border-radius:10px;padding:11px 13px;text-align:center}
+  .cc .big{font-size:22px;font-weight:800;letter-spacing:-.02em} .cc .lb{font-size:11px;color:var(--muted);margin-top:1px} .cc.s .big{color:var(--safe)} .cc.p .big{color:var(--accent)}
+  table{width:100%;border-collapse:collapse;font-size:12.5px;background:var(--card);border:1px solid var(--line);border-radius:10px;overflow:hidden}
+  thead th{background:var(--card2);text-align:left;padding:9px 11px;font-size:10.5px;text-transform:uppercase;letter-spacing:.03em;color:var(--muted);font-weight:750}
+  tbody td{padding:9px 11px;border-top:1px solid var(--line)} tbody tr:hover{background:var(--card2)}
+  .chk{font-weight:800}.chk.y{color:var(--safe)}.chk.n{color:var(--faint)}
+  .ph{font-family:var(--mono);font-size:11.5px;color:var(--muted)}
+  .src{font-size:10px;font-weight:700;padding:1px 6px;border-radius:5px;background:var(--card2);color:var(--faint)} .src.manual{background:var(--warn-soft);color:var(--warn)} .src.order{background:var(--accent-soft);color:var(--accent)}
+  /* ── 편집 UI ── */
+  .ecell{cursor:text;border-bottom:1px dashed transparent;border-radius:3px;padding:1px 3px} .ecell:hover{border-bottom-color:var(--line2);background:var(--card2)}
+  .ecell.edited{background:var(--accent-soft);border-bottom-color:var(--accent)}
+  .chk.clk{cursor:pointer;border-radius:4px;padding:0 4px} .chk.clk:hover{background:var(--card2)} .chk.clk.edited{outline:1px solid var(--accent);outline-offset:1px}
+  .einp{font:inherit;font-size:12.5px;width:100%;min-width:60px;padding:2px 5px;border:1px solid var(--accent);border-radius:5px;background:var(--card);color:var(--ink)}
+  .revb{cursor:pointer;color:var(--accent);font-size:12px;user-select:none} .revb:hover{color:var(--bad)}
+  .lock{font-size:10px;opacity:.5}
+  tr.amb{background:color-mix(in srgb,var(--warn-soft) 40%,transparent)}
+  .rmrow{width:22px;height:22px;border-radius:6px;border:1px solid var(--line);background:var(--card);color:var(--faint);cursor:pointer;font-size:13px;line-height:1} .rmrow:hover{color:var(--bad);border-color:var(--bad)}
+  .wchip{font-size:10.5px;font-weight:700;padding:3px 9px;border-radius:999px;background:var(--warn-soft);color:var(--warn);cursor:pointer} .wchip.bad{background:var(--bad-soft);color:var(--bad)}
+  .addgrid{display:grid;grid-template-columns:1fr 1fr;gap:7px;margin:8px 0} .addgrid input{padding:7px 10px;border:1px solid var(--line2);border-radius:7px;font:inherit;font-size:13px}
+  .editnote{font-size:11px;color:var(--faint);margin-top:12px;line-height:1.5;padding:8px 10px;background:var(--card2);border-radius:8px}
+  .hrow{display:flex;justify-content:space-between;align-items:center;padding:5px 0;font-size:12.5px;border-top:1px solid var(--line)}
+  .exp{display:inline-block;cursor:pointer;color:var(--faint);font-size:11px;transition:transform .15s;user-select:none;width:12px} .exp:hover{color:var(--accent)} .exp.open{transform:rotate(90deg);color:var(--accent)}
+  tr.detrow td{background:var(--card2);padding:0} tr.detrow:hover{background:var(--card2)}
+  .detwrap{display:grid;grid-template-columns:1fr 1fr;gap:12px;padding:12px 14px} @media(max-width:820px){.detwrap{grid-template-columns:1fr}}
+  .dcard{background:var(--card);border:1px solid var(--line);border-radius:9px;padding:10px 12px}
+  .dch{font-size:11px;font-weight:750;color:var(--muted);margin-bottom:8px}
+  .dgrid{display:grid;grid-template-columns:1fr;gap:4px}
+  .dpair{display:flex;gap:8px;font-size:12px;line-height:1.5;border-bottom:1px dotted var(--line);padding:2px 0} .dpair:last-child{border-bottom:none}
+  .dpair .dk{flex:none;width:96px;color:var(--faint);font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis} .dpair .dv{flex:1;color:var(--ink);word-break:break-word}
+  .dnone{font-size:12px;color:var(--faint);padding:4px 0}
+  /* ── 시트형 그리드(열람) ── */
+  .gridscroll{border:1px solid var(--line);border-radius:10px;overflow:auto;max-height:calc(100vh - 300px);background:var(--card)}
+  table.sheetgrid{border-collapse:separate;border-spacing:0;font-size:12px;white-space:nowrap;min-width:100%}
+  table.sheetgrid th,table.sheetgrid td{border-right:1px solid var(--line);border-bottom:1px solid var(--line);padding:5px 9px;text-align:left;height:30px}
+  table.sheetgrid thead th{position:sticky;top:0;z-index:3;background:var(--card2);font-weight:700;color:var(--muted);font-size:10.5px;border-bottom:2px solid var(--line2)}
+  table.sheetgrid .gfz{position:sticky;background:var(--card);z-index:2}
+  table.sheetgrid thead th.gfz{z-index:4;background:var(--card2)}
+  .gnum{text-align:center;color:var(--faint);font-weight:700} .gnm{font-weight:600}
+  table.sheetgrid .gph{font-family:var(--mono);font-size:11.5px;color:var(--muted)}
+  table.sheetgrid tbody tr:hover td{background:#F7FBFB} table.sheetgrid tbody tr:hover td.gfz{background:#eef6f6}
+  .gcell.gempty{color:var(--line2)} .gcell.gok{color:var(--safe);font-weight:600}
+  .gridbar{display:flex;align-items:center;gap:8px;margin-bottom:8px;flex-wrap:wrap}
+  .gridbar label{font-size:12px;color:var(--muted);font-weight:650}
+  .gridbar select{font:inherit;font-size:12.5px;padding:5px 9px;border:1px solid var(--line2);border-radius:7px;background:var(--card);color:var(--ink)}
+  .gnote{font-size:11px;color:var(--faint)} .gnote b{color:var(--muted)}
+  /* ── 관측 대시보드 ── */
+  .ovwrap{padding:18px 22px;overflow:auto;height:calc(100vh - 50px)}
+  .ovnote{font-size:11.5px;color:var(--faint);margin:-4px 0 14px;line-height:1.5} .ovnote b{color:var(--muted)}
+  .ovsearch{font:inherit;font-size:12.5px;padding:6px 11px;border:1px solid var(--line2);border-radius:8px;background:var(--card);color:var(--ink);width:180px}
+  .tablewrap{overflow-x:auto;border:1px solid var(--line);border-radius:10px;background:var(--card)}
+  table.ovtable{width:100%;border-collapse:collapse;font-size:12.5px;min-width:820px}
+  table.ovtable thead th{background:var(--card2);text-align:left;padding:9px 11px;font-size:10.5px;color:var(--muted);font-weight:750;white-space:nowrap;position:sticky;top:0}
+  table.ovtable td{padding:8px 11px;border-top:1px solid var(--line);white-space:nowrap} table.ovtable tbody tr:hover{background:var(--card2)}
+  table.ovtable td.num,table.ovtable td.ctr{text-align:center} table.ovtable td.ctr{font-weight:800}
+  .ovnm{cursor:pointer} .ovnm:hover b{color:var(--accent);text-decoration:underline} .ovsub{font-size:10.5px;color:var(--faint);font-weight:400}
+  .ovtable .ok{color:var(--safe)} .ovtable .no{color:var(--bad)} .ovtable .vs{color:var(--line2);margin:0 1px} .ovtable .diff{color:var(--bad);font-weight:700}
+  .btn.xs{font-size:11px;padding:3px 9px}
+  /* ── 그리드 제거 × · 편집 이력 모달 ── */
+  .rmx{cursor:pointer;color:var(--faint);font-weight:700;font-size:13px;margin-left:6px;opacity:0;transition:opacity .12s} tr:hover .rmx{opacity:.7} .rmx:hover{color:var(--bad);opacity:1}
+  .modalov{position:fixed;inset:0;background:rgba(15,35,42,.5);z-index:200;display:flex;align-items:center;justify-content:center;padding:24px}
+  .modalbox{background:var(--card);border-radius:14px;width:900px;max-width:96vw;max-height:86vh;display:flex;flex-direction:column;overflow:hidden;box-shadow:0 14px 44px rgba(0,0,0,.28)}
+  .modalhd{display:flex;align-items:center;gap:10px;padding:12px 16px;border-bottom:1px solid var(--line)} .modalhd b{font-size:14px;flex:1}
+  .modalbd{overflow:auto;padding:12px 16px}
+  table.histtable{width:100%;border-collapse:collapse;font-size:12px} table.histtable th{text-align:left;padding:7px 9px;font-size:10.5px;color:var(--muted);font-weight:750;border-bottom:1px solid var(--line);position:sticky;top:0;background:var(--card)}
+  table.histtable td{padding:6px 9px;border-bottom:1px solid var(--line)} table.histtable tr.histrev td{color:var(--faint);text-decoration:line-through} table.histtable tr.histrev .hval{text-decoration:none}
+  table.histtable .hts{font-family:var(--mono);font-size:11px;color:var(--muted);white-space:nowrap} .histtable .ok{color:var(--safe);font-weight:700} .histtable .no{color:var(--faint);font-weight:700}
+  .rail{border-left:1px solid var(--line);background:var(--card);padding:14px 12px;overflow:auto}
+  .rail .sh{font-size:10px;font-weight:750;letter-spacing:.05em;text-transform:uppercase;color:var(--faint);margin:2px 2px 10px}
+  .parity{border:1px solid var(--line);border-radius:10px;padding:12px;margin-bottom:14px}
+  .pbar{display:flex;height:8px;border-radius:5px;overflow:hidden;margin:8px 0} .pbar i{display:block}.pbar .m{background:var(--safe)}.pbar .b{background:var(--warn)}.pbar .r{background:var(--bad)}
+  .plegend{display:flex;flex-direction:column;gap:5px;font-size:11.5px} .plegend .row{display:flex;justify-content:space-between}
+  .plegend .dot{display:inline-block;width:8px;height:8px;border-radius:2px;margin-right:6px}
+  .verdict{font-size:12px;font-weight:750;padding:8px 10px;border-radius:8px;margin-top:8px;text-align:center} .verdict.pass{background:var(--safe-soft);color:var(--safe)} .verdict.fail{background:var(--bad-soft);color:var(--bad)}
+  .cmt{font-size:11px;background:var(--card2);border:1px solid var(--line);border-radius:8px;padding:8px 10px;margin-bottom:6px;color:var(--muted)}
+  .rdlist{display:flex;flex-direction:column;gap:6px}
+  .rdrow{display:flex;align-items:center;gap:8px;font-size:11.5px}
+  .rdrow .rdot{width:8px;height:8px;border-radius:50%;flex:none} .rdot.ok{background:var(--safe)} .rdot.warn{background:var(--warn)} .rdot.no{background:var(--line2)}
+  .rdrow .rl{color:var(--muted);flex:none;width:72px} .rdrow .rv{color:var(--ink);font-weight:600;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+  .empty{color:var(--faint);font-size:13px;text-align:center;padding:40px 10px}
+  .loginbox{max-width:320px;margin:80px auto;background:var(--card);border:1px solid var(--line);border-radius:14px;padding:28px;box-shadow:0 8px 28px rgba(20,35,42,.08)}
+  .loginbox h2{margin:0 0 14px;font-size:18px} .loginbox input{width:100%;padding:9px 12px;border:1px solid var(--line2);border-radius:8px;margin-bottom:9px;font:inherit}
+  .loginbox .err{color:var(--bad);font-size:12px;margin-top:6px;min-height:16px} .note{font-size:11px;color:var(--faint);margin-top:10px;line-height:1.5}
+  /* ── 소유 지정 뷰 ── */
+  .own-wrap{display:grid;grid-template-columns:250px 1fr;min-height:calc(100vh - 50px)}
+  @media(max-width:780px){.own-wrap{grid-template-columns:1fr}}
+  .advlist{border-right:1px solid var(--line);background:var(--card);padding:12px 11px;overflow:auto}
+  .advitem{display:flex;align-items:center;gap:9px;padding:9px 10px;border-radius:9px;margin-bottom:4px;cursor:pointer;border:1px solid transparent}
+  .advitem:hover{background:var(--card2)} .advitem.on{background:var(--adv-soft);border-color:color-mix(in srgb,var(--adv) 35%,transparent)}
+  .advitem .ava{width:26px;height:26px;border-radius:8px;background:var(--adv-soft);color:var(--adv);display:grid;place-items:center;font-weight:800;font-size:12px;flex:none}
+  .advitem .nm{font-size:12.5px;font-weight:650;flex:1;min-width:0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+  .advitem .ct{font-size:10.5px;font-weight:700;color:var(--faint);background:var(--card2);border-radius:999px;padding:1px 7px} .advitem.on .ct{background:var(--card);color:var(--adv)}
+  .own-panel{padding:18px 20px;overflow:auto}
+  .ph2{display:flex;align-items:center;gap:11px;margin-bottom:4px}
+  .ph2 .big{width:40px;height:40px;border-radius:11px;background:var(--adv-soft);color:var(--adv);display:grid;place-items:center;font-weight:800;font-size:16px;flex:none}
+  .ph2 h2{margin:0;font-size:18px;font-weight:800} .ph2 .acc{font-size:12px;color:var(--muted)}
+  .sect{margin-top:20px} .sect .st{font-size:11px;font-weight:750;letter-spacing:.04em;text-transform:uppercase;color:var(--faint);margin-bottom:10px}
+  .own{display:flex;align-items:center;gap:11px;padding:11px 13px;border:1px solid var(--line);border-radius:10px;background:var(--card);margin-bottom:8px}
+  .own .ic{width:30px;height:30px;border-radius:8px;background:var(--accent-soft);color:var(--accent);display:grid;place-items:center;flex:none;font-size:15px}
+  .own .info{flex:1;min-width:0} .own .info b{font-size:13.5px;display:block;white-space:nowrap;overflow:hidden;text-overflow:ellipsis} .own .info span{font-size:11.5px;color:var(--muted)}
+  .scope{font-size:10px;font-weight:750;padding:2px 8px;border-radius:6px;white-space:nowrap} .scope.all{background:var(--safe-soft);color:var(--safe)} .scope.tab{background:var(--warn-soft);color:var(--warn)}
+  .rm{width:26px;height:26px;border-radius:7px;border:1px solid var(--line);background:var(--card);color:var(--faint);cursor:pointer;flex:none;font-size:14px}
+  .rm:hover{color:var(--adv);border-color:color-mix(in srgb,var(--adv) 40%,transparent)}
+  .add{border:1px dashed var(--line2);border-radius:11px;padding:15px;background:var(--card2)}
+  .add label{font-size:11px;color:var(--faint);font-weight:650;display:block;margin-bottom:4px}
+  .add select,.add input{width:100%;padding:8px 11px;border:1px solid var(--line2);border-radius:8px;font:inherit;font-size:13px;background:var(--card);color:var(--ink)}
+  .advlist .sh.row{display:flex;align-items:center;justify-content:space-between;gap:6px}
+  .addadv{font-size:10.5px;font-weight:700;padding:3px 8px;border-radius:7px;border:1px solid var(--line2);background:var(--card);color:var(--adv);cursor:pointer;text-transform:none;letter-spacing:0} .addadv:hover{background:var(--adv-soft)}
+  .radios{display:flex;gap:8px;margin-top:10px;flex-wrap:wrap}
+  .radio{font-size:12px;padding:6px 12px;border-radius:8px;border:1px solid var(--line2);background:var(--card);cursor:pointer;display:flex;align-items:center;gap:6px}
+  .radio.on{border-color:var(--accent);background:var(--accent-soft);color:var(--accent);font-weight:650}
+  .radio .d{width:10px;height:10px;border-radius:50%;border:2px solid var(--line2)} .radio.on .d{border-color:var(--accent);background:var(--accent)}
+  .taboptions{margin-top:10px;display:none;flex-wrap:wrap;gap:6px} .taboptions.show{display:flex}
+  .tchip{font-size:11.5px;padding:5px 10px;border-radius:7px;border:1px solid var(--line2);background:var(--card);cursor:pointer;display:flex;align-items:center;gap:6px}
+  .tchip.on{border-color:var(--accent);background:var(--accent-soft);color:var(--accent)}
+  .tchip .cb{width:13px;height:13px;border-radius:3px;border:1.5px solid var(--line2);display:grid;place-items:center;font-size:9px;color:#fff} .tchip.on .cb{background:var(--accent);border-color:var(--accent)}
+  .assignbtn{margin-top:12px}
+  .toast{position:fixed;top:16px;left:50%;transform:translateX(-50%);background:var(--ink);color:var(--paper);padding:9px 18px;border-radius:10px;font-size:13px;z-index:99;opacity:0;transition:opacity .25s} .toast.show{opacity:1}
+</style>
+</head>
+<body>
+<div id="app"></div>
+<div class="toast" id="toast"></div>
+
+<script>
+const API_BASE = (function(){ if (window.REVIEW_API_URL) return window.REVIEW_API_URL; if (location.hostname==='localhost') return 'http://localhost:3000'; return 'https://sublime-magic-production-790b.up.railway.app'; })();
+// 토큰 핸드오프: admin.html에서 넘긴 raw_sso → sessionStorage(자동 로그인). raw-mirror.html과 동일 계약.
+(function initToken(){ try{ const raw=localStorage.getItem('raw_sso'); if(raw){ const sso=JSON.parse(raw); if(sso&&sso.token&&!sessionStorage.getItem('admin_token')) sessionStorage.setItem('admin_token', sso.token); } }catch(_){} })();
+function token(){ return sessionStorage.getItem('admin_token') || ''; }
+async function api(path, opts){ const o=Object.assign({headers:{}},opts||{}); o.headers['Authorization']='Bearer '+token(); if(o.body)o.headers['Content-Type']='application/json'; const r=await fetch(API_BASE+path,o); return r.json(); }
+const $=(s,el)=>(el||document).querySelector(s);
+const esc=s=>String(s==null?'':s).replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
+function toast(m){ const t=$('#toast'); t.textContent=m; t.classList.add('show'); setTimeout(()=>t.classList.remove('show'),1800); }
+function parseJwt(t){ try{ const b=atob(t.split('.')[1].replace(/-/g,'+').replace(/_/g,'/')); return JSON.parse(new TextDecoder().decode(Uint8Array.from(b,c=>c.charCodeAt(0)))); }catch(_){ return {}; } }   // base64url + UTF-8(한글 이름) 정상 디코드
+
+let STATE = { role:'', name:'', view:'workdesk', tabs:[], cur:null, wd:null, freezeUpto:null,
+              ov:[], ovq:'', pendingTab:null, lastBatch:null,
+              advs:[], advCur:null, tabIndex:{}, sheetMap:{}, addMode:'all', addSheet:null, addTabs:{} };
+
+async function boot(){
+  if (!token()) return renderLogin();
+  const me = parseJwt(token()); STATE.role=me.role||''; STATE.name=me.name||'';
+  renderShell();
+}
+function renderLogin(){
+  $('#app').innerHTML = `<div class="loginbox"><h2>통합 작업대 로그인</h2>
+    <input id="lname" placeholder="아이디 (관리자 / AE / 광고주)" autocomplete="username">
+    <input id="lpw" type="password" placeholder="비밀번호" autocomplete="current-password">
+    <button class="btn pri" style="width:100%;padding:9px" onclick="doLogin()">로그인</button>
+    <div class="err" id="lerr"></div>
+    <div class="note">Track B 통합 작업대입니다. 관리자(master/admin)는 전체·관측·소유 지정, AE(영업담당)는 담당 업체 탭 열람/편집, 광고주(거래처)는 소유 탭을 열람합니다(개인정보 마스킹).</div></div>`;
+  $('#lpw').addEventListener('keydown',e=>{if(e.key==='Enter')doLogin();});
+}
+async function doLogin(){ const name=$('#lname').value.trim(), pw=$('#lpw').value;
+  let r=await api('/api/admin/login',{method:'POST',body:JSON.stringify({name,pw})});
+  if(!(r&&r.success&&r.token)){ r=await api('/api/admin/staff-login',{method:'POST',body:JSON.stringify({name,pw})}); }  // AE(영업담당) 폴백
+  if(!(r&&r.success&&r.token)){ r=await api('/api/admin/advertiser-login',{method:'POST',body:JSON.stringify({name,pw})}); }  // 광고주(거래처) 폴백 — 소유 탭만·PII 마스킹
+  if(r&&r.success&&r.token){ sessionStorage.setItem('admin_token',r.token); boot(); } else $('#lerr').textContent=(r&&(r.error||r.message))||'로그인 실패'; }
+function logout(){ sessionStorage.removeItem('admin_token'); boot(); }
+
+function renderShell(){
+  const isAdmin = STATE.role==='master' || STATE.role==='admin';
+  $('#app').innerHTML = `
+    <div class="top">
+      <span class="logo">통합 작업대 <span class="tag">TRACK B · 그림자</span></span>
+      ${isAdmin?`<nav class="nav">
+        <button class="navb" data-v="workdesk" onclick="switchView('workdesk')">작업대</button>
+        <button class="navb" data-v="overview" onclick="switchView('overview')">관측</button>
+        <button class="navb" data-v="ownership" onclick="switchView('ownership')">소유 지정</button></nav>`:''}
+      <span class="sp"></span>
+      <span class="rolebadge">${esc(STATE.role||'?')}${STATE.name?(' · '+esc(STATE.name)):''}</span>
+      <button class="btn" onclick="logout()">로그아웃</button>
+    </div>
+    <div id="viewroot"></div>`;
+  switchView(STATE.view||'workdesk');
+}
+function switchView(v){ STATE.view=v; document.querySelectorAll('.navb').forEach(b=>b.classList.toggle('on',b.dataset.v===v));
+  if(v==='ownership') renderOwnershipView(); else if(v==='overview') renderOverviewView(); else renderWorkdeskView(); }
+
+// ══ 작업대 뷰 ══
+function renderWorkdeskView(){
+  const isMaster = STATE.role==='master';
+  $('#viewroot').innerHTML = `<div class="wrap showlist" id="wrap">
+    <div class="side"><div class="sh"><span>작업 목록</span><span id="tcount"></span></div>
+      <div id="tabs"><div class="empty">불러오는 중…</div></div></div>
+    <div class="main" id="main"><div class="empty">왼쪽에서 작업을 선택하세요.</div></div>
+    <div class="rail" id="rail"></div></div>`;
+  loadTabs();
+}
+async function loadTabs(){
+  const r = await api('/api/trackb/tabs?limit=300');
+  if(!r||!r.ok){ $('#tabs').innerHTML=`<div class="empty">작업 목록은 관리자 로그인에서 제공됩니다.</div>`; return; }
+  STATE.tabs=r.tabs||[]; $('#tcount').textContent=STATE.tabs.length;
+  // 소유지정(advertiser_campaigns) 기준 업체별 그룹핑 — 미지정은 마지막 그룹. 인덱스는 STATE.tabs 원본 유지(selTab 계약 불변).
+  const groups=new Map();
+  STATE.tabs.forEach((t,i)=>{ const k=t.advertiserName||''; if(!groups.has(k)) groups.set(k,[]); groups.get(k).push(i); });
+  const gkeys=[...groups.keys()].sort((a,b)=>{ if(!a) return 1; if(!b) return -1; return a.localeCompare(b,'ko'); });
+  const item=i=>{ const t=STATE.tabs[i]; return `<div class="titem" data-i="${i}" onclick="selTab(${i})">${esc(t.tabName)}<div class="sub">${esc(t.spreadsheetTitle||'')}</div></div>`; };
+  $('#tabs').innerHTML = STATE.tabs.length
+    ? gkeys.map(k=>`<div class="tgh">${k?esc(k):'미지정'}<span class="tgc">${groups.get(k).length}</span></div>`+groups.get(k).map(item).join('')).join('')
+    : `<div class="empty">활성 작업 없음</div>`;
+  // 관측 대시보드에서 "열기"로 넘어온 탭 자동 선택
+  if(STATE.pendingTab){ const pt=STATE.pendingTab; STATE.pendingTab=null;
+    const idx=STATE.tabs.findIndex(t=>t.sheetId===pt.sheetId&&t.tabName===pt.tabName);
+    if(idx>=0) selTab(idx); else { STATE.tabs.push(pt); selTab(STATE.tabs.length-1); } }
+}
+async function selTab(i){ const t=STATE.tabs[i]; STATE.cur=t;
+  document.querySelectorAll('.titem').forEach(el=>el.classList.toggle('on',+el.dataset.i===i));
+  $('#wrap').classList.remove('showlist'); $('#main').innerHTML=`<div class="empty">불러오는 중…</div>`;
+  const q=`sheetId=${encodeURIComponent(t.sheetId)}&tabName=${encodeURIComponent(t.tabName)}&tabGid=${encodeURIComponent(t.tabGid||'')}`;
+  renderWorkdesk(await api('/api/trackb/workdesk?'+q)); loadParity(t); }
+function _tcell(r, field, val){   // 편집 가능 텍스트 셀
+  const v = val==null?'':val;
+  if(!STATE.canEdit) return `<td>${esc(v||'')}</td>`;
+  if(r.editable===false) return `<td>${esc(v||'')} <span class="lock" title="주문/신원 앵커 없음 또는 중복 — 편집 잠금">🔒</span></td>`;
+  const edited=(r.editedFields||[]).includes(field);
+  return `<td><span class="ecell${edited?' edited':''}" data-val="${esc(v)}" onclick="beginEdit(this,'${r.id}','${field}')">${esc(v||'—')}</span>${edited?` <span class="revb" title="되돌리기" onclick="event.stopPropagation();revertEdit('${r.id}','${field}')">↩</span>`:''}</td>`;
+}
+function _bcell(r, field, val){   // 제출/입금 토글 셀
+  if(!STATE.canEdit || r.editable===false) return `<td><span class="chk ${val?'y':'n'}">${val?'✓':'–'}</span></td>`;
+  const edited=(r.editedFields||[]).includes(field);
+  return `<td><span class="chk ${val?'y':'n'} clk${edited?' edited':''}" onclick="toggleBool('${r.id}','${field}',${val?'true':'false'})">${val?'✓':'–'}</span>${edited?` <span class="revb" title="되돌리기" onclick="event.stopPropagation();revertEdit('${r.id}','${field}')">↩</span>`:''}</td>`;
+}
+function renderWorkdesk(wd){
+  if(!wd||!wd.ok){ $('#main').innerHTML=`<div class="empty">${esc((wd&&wd.error)||'조회 실패')}</div>`; return; }
+  STATE.wd=wd; STATE.canEdit=(STATE.role!=='advertiser');   // master/admin/staff(AE) 편집 · 광고주는 열람
+  const d=wd.detail||{},m=wd.meta||{},c=wd.counts||{}, isMaster=STATE.role==='master', canEdit=STATE.canEdit;
+  const metaCards=[['상품',d.productOption||m.campaignName||'—'],['모집',(d.recruitCount||'—')+(m.manager?(' · '+m.manager):'')],['구매시간',d.purchaseTime||'자율'],['배송',d.deliveryType||m.deliveryType||'—']].map(([k,v])=>`<div class="mf"><div class="k">${esc(k)}</div><div class="v">${esc(v)}</div></div>`).join('');
+  // 시트형 그리드 모드(master/admin, 시트 헤더 순서 수신 시): 시트와 동일한 가로 그리드로 렌더(열람 전용).
+  const gridMode = canEdit && Array.isArray(wd.headers) && wd.headers.length;
+  const warn=[];
+  if(canEdit && c.hidden>0) warn.push(`<span class="wchip" title="제거(숨김)된 행 — 클릭해 복원" onclick="showHidden()">숨김 ${c.hidden}</span>`);
+  if(!gridMode && canEdit && wd.orphanEdits && wd.orphanEdits.count>0) warn.push(`<span class="wchip bad" title="앵커가 현재 명단에 없는 편집">미부착 편집 ${wd.orphanEdits.count}</span>`);
+  if(canEdit && c.ambiguous>0) warn.push(`<span class="wchip" title="중복 신원 행">중복 신원 ${c.ambiguous}</span>`);
+  let tableSection;
+  if(gridMode){
+    tableSection = buildGrid(wd);
+  } else {
+    const rows=(wd.roster||[]).map(r=>`<tr id="row-${esc(r.id)}"${r.ambiguous?' class="amb"':''}><td>${canEdit?`<span class="exp" title="제출 내용·시트 행 펼치기" onclick="toggleDetail('${esc(r.id)}')">▸</span> `:''}${esc(r.seq)}</td>`+
+      `<td>${canEdit&&r.editable!==false?`<span class="ecell${(r.editedFields||[]).includes('reviewer_name')?' edited':''}" data-val="${esc(r.name||'')}" onclick="beginEdit(this,'${r.id}','reviewer_name')">${esc(r.name||'—')}</span>`:esc(r.name||'—')}`+
+      `${r.source==='manual'?' <span class="src manual">수동</span>':(r.hasOrder?' <span class="src order">주문</span>':'')}${r.ambiguous?' <span class="src" style="background:var(--warn-soft);color:var(--warn)" title="중복 신원">⚠중복</span>':''}${(r.editedFields||[]).includes('reviewer_name')?` <span class="revb" onclick="event.stopPropagation();revertEdit('${r.id}','reviewer_name')">↩</span>`:''}</td>`+
+      `<td class="ph">${esc(r.phone8||'')}</td>`+
+      _tcell(r,'round',r.round)+_tcell(r,'option_text',r.option)+
+      _bcell(r,'is_submitted',r.submitted)+_bcell(r,'is_paid',r.paid)+
+      (canEdit?`<td>${r.source==='manual'||r.editable!==false?`<button class="rmrow" title="명단에서 제거(숨김)" onclick="hideRow('${r.id}')">×</button>`:''}</td>`:'')
+      +`</tr>`).join('')||`<tr><td colspan="${canEdit?8:7}" class="empty">명단 없음 — 그림자 투영을 실행하세요.</td></tr>`;
+    tableSection = `<table><thead><tr><th>#</th><th>참여자</th><th>연락처</th><th>차수</th><th>옵션</th><th>제출</th><th>입금</th>${canEdit?'<th></th>':''}</tr></thead><tbody>${rows}</tbody></table>
+      ${canEdit?`<div id="addbox"></div><button class="btn" style="margin-top:10px" onclick="showAddForm()">＋ 참여자 추가</button>`:''}
+      ${canEdit?'<div class="editnote">편집은 이 화면(Track B)에만 저장됩니다 — 구글시트·주문은 바뀌지 않습니다(리허설). 셀 클릭으로 수정, ↩로 되돌리기.</div>':''}`;
+  }
+  const sot=wd.sourceOfTruth||'sheet';
+  const sotBadge=`<span class="bd ${sot==='db'?'sot':''}" title="이 탭의 진실원천(원본). 시트=레거시(현행 Track A) · Track B=DB 원본(cutover). 전환해도 쓰기반영 엔진(P2) 전까지 라이브 동작은 불변.">원본: ${sot==='db'?'Track B':'시트'}</span>`;
+  const flipBtn=isMaster?`<button class="btn" id="sotBtn" title="진실원천 전환(옵션 A · 되돌리기 가능). 'db' 전환은 진짜불일치 0 게이트를 통과해야 함(force로 우회). 현재는 상태·게이트만 — 시트 쓰기반영은 P2 엔진 예정." onclick="flipSoT('${sot==='db'?'sheet':'db'}')">${sot==='db'?'시트로 되돌리기':'Track B로 전환'}</button>`:'';
+  $('#main').innerHTML=`<div class="mh"><h1>${esc(STATE.cur.tabName)}</h1>
+    ${wd.maskPII?'<span class="bd">개인정보 마스킹(광고주)</span>':''}<span class="bd g">참여자 ${c.total||0}</span>${sotBadge}${gridMode?'<span class="bd" title="구글시트와 동일 컬럼·가로 펼침 (열람 전용)">시트 그리드 · 열람</span>':''}${warn.join('')}
+    ${isMaster?`<span class="sp" style="flex:1"></span>${flipBtn}<button class="btn" onclick="showWritebackSim()" title="이 탭 편집이 시트에 반영된다면 무엇이 바뀔지 미리보기 (시뮬레이션 · 실제 시트 무접촉)">write-back 시뮬</button><button class="btn" id="projBtn" onclick="projectCur()">그림자 투영(새로고침)</button>`:''}</div>
+    <div class="metagrid">${metaCards}</div>
+    ${renderWorkOrderSection(wd)}
+    <div class="counts"><div class="cc"><div class="big">${c.total||0}</div><div class="lb">참여자</div></div><div class="cc s"><div class="big">${c.submitted||0}</div><div class="lb">제출완료</div></div><div class="cc p"><div class="big">${c.paid||0}</div><div class="lb">입금완료</div></div></div>
+    ${tableSection}`;
+}
+// 컬럼 폭(px) — 고정열 오프셋 계산과 최소폭에 사용. 없으면 기본값.
+const _COLW={'#':44,'참여자':112,'연락처':110,'번호':48,'담당자':66,'구매일자':98,'인애드명단':90,'주문자제출':90,'수취인':78,'id':118,'주소':190,'은행':66,'계좌번호':116,'예금주':72,'결제금액':82,'리뷰제출':96,'입금':64,'주문번호':134,'비고(닉네임)':110};
+function _colW(h){ return _COLW[h]||92; }
+// 시트 일련번호(1899-12-30 기준) → YYYY-MM-DD. 날짜형 헤더 + 순수 숫자일 때만 변환(금액 등 오변환 방지).
+function _serialToDate(n){ const ms=Math.round((n-25569)*86400000); const d=new Date(ms); if(isNaN(d.getTime()))return null; const y=d.getUTCFullYear(); if(y<2000||y>2100)return null; const p=x=>String(x).padStart(2,'0'); return `${y}-${p(d.getUTCMonth()+1)}-${p(d.getUTCDate())}`; }
+function _gridVal(h, raw){ const v=(raw==null?'':String(raw)).trim(); if(!v)return ''; if(/일자|날짜|date/i.test(h)&&/^\d{4,6}(\.\d+)?$/.test(v)){ const dt=_serialToDate(parseFloat(v)); if(dt)return dt; } return v; }
+
+// 시트형 그리드: 왼쪽 고정 = #·참여자·연락처(DB 리뷰어 신원) + (선택 시)시트 컬럼 수취인까지 · 오른쪽 = 시트 컬럼 전체.
+function buildGrid(wd){
+  const H=wd.headers||[];
+  const revI=H.indexOf('리뷰제출'), payI=H.indexOf('입금');
+  // 전체 컬럼: [#, 참여자, 연락처, ...시트헤더]. 고정 개수 = 3 + (freezeUpto 시트컬럼 인덱스+1)
+  const fzIdx = STATE.freezeUpto ? H.indexOf(STATE.freezeUpto) : -1;
+  const frozenN = 3 + (fzIdx>=0 ? fzIdx+1 : 0);
+  const cols = ['#','참여자','연락처', ...H];
+  const lefts=[]; let acc=0; for(let i=0;i<cols.length;i++){ lefts[i]=acc; acc+=_colW(cols[i]); }
+  const cstyle=(i)=>{ const w=_colW(cols[i]); let s=`min-width:${w}px;width:${w}px;`; if(i<frozenN){ s+=`left:${lefts[i]}px;`; if(i===frozenN-1)s+='box-shadow:2px 0 0 var(--line2);'; } return s; };
+  const cls=(i,extra)=>`class="${i<frozenN?'gfz ':''}${extra||''}"`;
+  const thead=`<tr>${cols.map((h,i)=>`<th ${cls(i)} style="${cstyle(i)}">${esc(h==='#'?'#':h)}</th>`).join('')}</tr>`;
+  const body=(wd.roster||[]).map(r=>{
+    const rj=(r.rowJson&&typeof r.rowJson==='object')?r.rowJson:{};
+    const ceMap=(r.cellEdits&&typeof r.cellEdits==='object')?r.cellEdits:{};
+    const canE = STATE.canEdit && r.editable!==false;
+    const badge = r.source==='manual'?' <span class="src manual">수동</span>':(r.hasOrder?' <span class="src order">주문</span>':'')
+                + (r.editable===false?' <span class="lock" title="주문/신원 앵커 없음 또는 중복 — 편집 잠금">🔒</span>':'');
+    // 편집 셀 렌더(주입 안전: 헤더는 data-field 속성으로만 전달, onclick 인라인 없음)
+    const eCell=(field, disp, edited, extraCls, styleI)=> canE
+      ? `<td ${cls(styleI,'gcell'+(disp?'':' gempty')+(extraCls||''))} style="${cstyle(styleI)}"><span class="ecell${edited?' edited':''}" data-val="${esc(disp)}" data-id="${esc(r.id)}" data-field="${esc(field)}" onclick="beginEditCell(this)">${esc(disp||'—')}</span>${edited?` <span class="revb" title="되돌리기" data-id="${esc(r.id)}" data-field="${esc(field)}" onclick="revertCell(event,this)">↩</span>`:''}</td>`
+      : `<td ${cls(styleI,'gcell'+(disp?'':' gempty')+(extraCls||''))} style="${cstyle(styleI)}">${esc(disp||'')}</td>`;
+    let tds=`<td ${cls(0,'gnum')} style="${cstyle(0)}">${esc(r.seq)}</td>`+
+            (canE
+              ? `<td ${cls(1,'gnm')} style="${cstyle(1)}"><span class="ecell${(r.editedFields||[]).includes('reviewer_name')?' edited':''}" data-val="${esc(r.name||'')}" data-id="${esc(r.id)}" data-field="reviewer_name" onclick="beginEditCell(this)">${esc(r.name||'—')}</span>${badge}<span class="rmx" title="명단에서 제거(숨김)" onclick="hideRow('${esc(r.id)}')">×</span></td>`
+              : `<td ${cls(1,'gnm')} style="${cstyle(1)}">${esc(r.name||'—')}${badge}</td>`)+
+            eCell('phone8', r.phone8||'', (r.editedFields||[]).includes('phone8'), 'gph', 2);
+    H.forEach((h,j)=>{ const i=j+3; const ed=(h in ceMap); const raw= ed?ceMap[h]:rj[h]; const disp= ed?(raw==null?'':String(raw)):_gridVal(h, raw); const ok=((j===revI||j===payI)&&disp)?' gok':'';
+      tds+=eCell('col:'+h, disp, ed, ok, i); });
+    return `<tr>${tds}</tr>`;
+  }).join('')||`<tr><td colspan="${cols.length}" class="empty">명단 없음 — 그림자 투영을 실행하세요.</td></tr>`;
+  // 고정 열 선택(수취인까지 등) — 시트 컬럼 중 신원계열만 옵션으로.
+  const fzOpts=['<option value="">기본(연락처까지)</option>']
+    .concat(H.filter(h=>['번호','담당자','구매일자','인애드명단','주문자제출','수취인','주소'].includes(h))
+      .map(h=>`<option value="${esc(h)}"${STATE.freezeUpto===h?' selected':''}>${esc(h)}까지 고정</option>`)).join('');
+  return `<div class="gridbar"><label>고정 열</label><select id="fzsel" onchange="setFreeze(this.value)">${fzOpts}</select>
+      <button class="btn xs" onclick="showEditHistory()">편집 이력</button>
+      <span class="gnote">구글시트와 동일 컬럼·가로 배열 · <b>셀 클릭 편집</b>(Track B 전용, 시트·주문 무접촉) · ↩ 되돌리기 · 날짜 자동표시 · 리뷰제출/입금 편집 시 카운트 연동</span></div>
+    <div class="gridscroll"><table class="sheetgrid"><thead>${thead}</thead><tbody>${body}</tbody></table></div>
+    <div id="addbox"></div>
+    <button class="btn" style="margin-top:10px" onclick="showAddForm()">＋ 참여자 추가</button>`;
+}
+function setFreeze(v){ STATE.freezeUpto=v||null; if(STATE.wd) renderWorkdesk(STATE.wd); }
+// 그리드 셀 편집: 헤더/필드는 data 속성으로만 전달(주입 안전). beginEdit/revertEdit(기존 오버레이 경로) 재사용.
+function beginEditCell(el){ beginEdit(el, el.getAttribute('data-id'), el.getAttribute('data-field')); }
+function revertCell(ev, el){ if(ev)ev.stopPropagation(); revertEdit(el.getAttribute('data-id'), el.getAttribute('data-field')); }
+// 편집 이력(감사) 모달
+async function showEditHistory(){
+  const t=STATE.cur; if(!t)return;
+  let ov=document.getElementById('histov');
+  if(!ov){ ov=document.createElement('div'); ov.id='histov'; ov.className='modalov'; ov.addEventListener('click',e=>{if(e.target===ov)ov.remove();}); document.body.appendChild(ov); }
+  ov.innerHTML=`<div class="modalbox"><div class="modalhd"><b>편집 이력 · ${esc(t.tabName)}</b><button class="btn xs" onclick="document.getElementById('histov').remove()">닫기</button></div><div class="modalbd" id="histbd"><div class="empty">불러오는 중…</div></div></div>`;
+  const r=await api(`/api/trackb/workdesk/edits?sheetId=${encodeURIComponent(t.sheetId)}&tabName=${encodeURIComponent(t.tabName)}`);
+  const items=(r&&r.items)||[]; const bd=$('#histbd'); if(!bd)return;
+  bd.innerHTML= items.length
+    ? `<table class="histtable"><thead><tr><th>시각</th><th>참여자</th><th>필드</th><th>값</th><th>편집자</th><th>상태</th></tr></thead><tbody>${
+        items.map(e=>`<tr class="${e.reverted?'histrev':''}"><td class="hts">${esc(_fmtTs(e.at))}</td><td>${esc(e.name||'—')}</td><td>${esc(e.field)}</td><td class="hval">${esc(e.value)}</td><td>${esc(e.by)}</td><td>${e.reverted?'<span class="no">되돌림</span>':'<span class="ok">활성</span>'}</td></tr>`).join('')
+      }</tbody></table>`
+    : `<div class="empty">편집 이력 없음</div>`;
+}
+
+// ══ 관측 대시보드 뷰 ══
+async function renderOverviewView(){
+  $('#viewroot').innerHTML=`<div class="ovwrap"><div id="ovhead"></div><div id="ovbody"><div class="empty">불러오는 중…</div></div></div>`;
+  const r=await api('/api/trackb/overview');
+  if(!r||!r.ok){ $('#ovbody').innerHTML=`<div class="empty">관측 데이터는 admin/master에서 제공</div>`; return; }
+  STATE.ov=r.items||[]; renderOverviewHead(); renderOverviewBody(STATE.ovq||'');
+}
+function renderOverviewHead(){
+  const it=STATE.ov||[]; const n=it.length, nM=it.filter(x=>x.countMatch).length, nO=it.filter(x=>x.owned).length, nW=it.filter(x=>x.woLinked).length;
+  const nR = it.filter(x=>x.real===0).length, nRk = it.filter(x=>typeof x.real==='number').length;
+  const nReady = it.filter(x=>{const v=_cutoverVerdict(x); return v.txt==='✅ 준비';}).length;
+  const nDb = it.filter(x=>x.sourceOfTruth==='db').length;
+  $('#ovhead').innerHTML=`<div class="mh"><h1>관측 대시보드</h1><span class="bd g">투영 ${n}탭</span>
+    <span class="bd">카운트일치 ${nM}</span><span class="bd">소유 ${nO}</span><span class="bd">발주 ${nW}</span>${nRk?`<span class="bd" title="정밀 계산된 탭 중 진짜 불일치 0">진짜불일치0 ${nR}/${nRk}</span>`:''}<span class="bd g" title="카운트·소유·발주 + 신선한 진짜불일치0(세션 정밀 30분 내 또는 서버 스냅샷 24h 내) 충족 → cutover 가능">cutover 준비 ${nReady}</span>${nDb?`<span class="bd sot" title="이미 Track B 원본으로 전환된 탭">전환됨 ${nDb}</span>`:''}
+    <span class="sp" style="flex:1"></span>
+    <button class="btn pri" id="paBtn" onclick="runParityAll()" title="투영된 전 탭의 진짜 불일치를 일괄 계산하고 추이 스냅샷 저장">전체 정밀 계산</button>
+    <input id="ovq" class="ovsearch" placeholder="탭/시트 검색" oninput="renderOverviewBody(this.value)" value="${esc(STATE.ovq||'')}"></div>
+    <div class="ovnote">A(현행 시트)↔B(Track B) <b>카운트 대조</b>와 준비도. 실제 전환 게이트 = <b>진짜 불일치 0</b>(행 [정밀] 또는 "전체 정밀 계산"). 진짜불일치 값 클릭 시 <b>추이</b>(2주 관측)를 봅니다.${STATE.lastBatch?` · 최근 계산 ${esc(_fmtTs(STATE.lastBatch))}`:''}</div>`;
+}
+// cutover 종합 판정 — fail-closed: real은 "신선한" 값만 인정(세션 [정밀] 30분 TTL > 서버 스냅샷 fresh > 없음=미검증).
+const REAL_TTL_MS = 30*60*1000;
+function _freshReal(o){
+  if(typeof o.real==='number' && o.realAt && (Date.now()-o.realAt)<REAL_TTL_MS) return {v:o.real,src:'방금 정밀',at:o.realAt};
+  const lp=o.lastParity;
+  if(lp && lp.fresh && typeof lp.real==='number') return {v:lp.real,src:'스냅샷',at:lp.takenAt?new Date(lp.takenAt).getTime():null};
+  return null;
+}
+function _cutoverVerdict(o){
+  if(o.sourceOfTruth==='db') return {cls:'ok',txt:'전환됨',title:'이미 Track B 원본(cutover 완료)'};
+  if(o.ghost) return {cls:'no',txt:'유령',title:'A·B 모두 활성 0행(아카이브/리네임 잔재) — cutover 대상 아님'};
+  const base=o.countMatch&&o.owned&&o.woLinked;
+  if(!base){ const m=[]; if(!o.countMatch)m.push('카운트'); if(!o.owned)m.push('소유'); if(!o.woLinked)m.push('발주'); return {cls:'no',txt:'미충족',title:'미충족: '+m.join('·')}; }
+  const fr=_freshReal(o);
+  if(fr) return fr.v===0
+    ?{cls:'ok',txt:'✅ 준비',title:`카운트·소유·발주·진짜불일치0 충족 (${fr.src}${fr.at?' '+_fmtTs(fr.at):''}) → cutover 가능`}
+    :{cls:'no',txt:'불일치 '+fr.v,title:`진짜 불일치 ${fr.v}건 (${fr.src})`};
+  if(typeof o.real==='number') return {cls:'warn',txt:'정밀 만료',title:'정밀 결과가 30분 경과 — [정밀] 재실행 필요'};
+  return {cls:'warn',txt:'정밀 필요',title:'카운트·소유·발주 충족 — [정밀]로 진짜불일치 확인 필요'};
+}
+function _wbCell(o){
+  const wb=o.writeback;
+  if(o.sourceOfTruth==='db'){
+    if(!wb||wb.engineOn===undefined) return '<span class="ovsub" title="구 백엔드 응답(배포 스큐) — write-back 상태 미상. 백엔드 배포 완료 후 새로고침">?</span>';
+    if(!wb.engineOn) return `<span class="no" title="TRACK_B_WRITEBACK=1 미설정 — 토글 편집이 시트에 반영되지 않는 중${wb.pending?` (대기 ${wb.pending})`:''}">엔진 OFF</span>`;
+    const parts=[]; if(wb.pending)parts.push('대기 '+wb.pending); if(wb.held)parts.push('held '+wb.held); if(wb.blocked)parts.push('blk '+wb.blocked);
+    if(parts.length) return `<span class="no" title="대기=미시도(스윕 5분 주기·양보 포함) · held=사람셀 충돌(수동 확인, 재시도 없음) · blocked=신원/컬럼 불일치(30분 주기 자가치유)">⚠ ${parts.join('·')}</span>`;
+    return '<span class="ok" title="반영 이슈 없음(엔진 ON·대기/충돌 0)">정상</span>';
+  }
+  return o.editCount
+    ?`<span class="bd" title="활성 편집 ${o.editCount}건 — 이 중 토글(제출/입금) ${o.editToggle||0}건만 cutover 후 자동 write-back 대상, 나머지는 DB 오버레이 유지(시뮬 대상)">편집 ${o.editCount}${(o.editToggle!=null&&o.editToggle!==o.editCount)?` (토글 ${o.editToggle})`:''}</span>`
+    :'<span class="ovsub">—</span>';
+}
+function renderOverviewBody(q){
+  q=(q||'').trim(); STATE.ovq=q; const it=STATE.ov||[];
+  const cmp=(a,b)=>`${a}<span class="vs">/</span>${b}${a===b?'':' <span class="diff">≠</span>'}`;
+  const chk=b=>b?'<span class="ok">✓</span>':'<span class="no">–</span>';
+  const rows=it.map((o,i)=>({o,i})).filter(({o})=>!q||((o.tabName||'')+(o.spreadsheetTitle||'')).includes(q)).map(({o,i})=>{
+    const v=_cutoverVerdict(o);
+    return `<tr>
+      <td class="ovnm" onclick="openTabFromOverview(${i})" title="작업대에서 열기"><b>${esc(o.tabName)}</b><div class="ovsub">${esc(o.spreadsheetTitle)}</div></td>
+      <td class="num">${o.b.total}</td>
+      <td class="num">${cmp(o.a.total,o.b.total)}</td>
+      <td class="num">${cmp(o.a.submitted,o.b.submitted)}</td>
+      <td class="num">${cmp(o.a.paid,o.b.paid)}</td>
+      <td class="ctr">${o.countMatch?'<span class="ok">✓</span>':'<span class="no">✗</span>'}</td>
+      <td class="ctr">${chk(o.owned)}</td>
+      <td class="ctr">${chk(o.woLinked)}</td>
+      <td class="num">${o.b.linked}/${o.b.total}</td>
+      <td class="ctr" id="prec-${i}">${typeof o.real==='number'
+        ? `<span class="${o.real===0?'ok':'no'}" style="cursor:pointer" title="추이 보기" onclick="showTrend(${i})">${o.real===0?'✓ 0':'✗ '+o.real}</span>`
+        : `<button class="btn xs" onclick="checkPrecise(${i})">정밀</button>`}</td>
+      <td class="ctr"><span class="bd ${o.sourceOfTruth==='db'?'sot':''}" title="진실원천(원본): 시트=현행 Track A · Track B=DB 원본(cutover)">${o.sourceOfTruth==='db'?'Track B':'시트'}</span></td>
+      <td class="ctr">${_wbCell(o)}</td>
+      <td class="ctr"><span class="${v.cls==='ok'?'ok':(v.cls==='no'?'no':'')}" style="font-weight:700${v.cls==='warn'?';color:var(--warn)':''}" title="${esc(v.title)}">${esc(v.txt)}</span></td>
+    </tr>`;
+  }).join('')||`<tr><td colspan="13" class="empty">투영된 탭 없음 — 자동 투영(10분) 또는 작업대의 "그림자 투영"을 기다리세요.</td></tr>`;
+  $('#ovbody').innerHTML=`<div class="tablewrap"><table class="ovtable"><thead><tr><th>탭 / 시트</th><th>B참여</th><th>참여 A/B</th><th>제출 A/B</th><th>입금 A/B</th><th>카운트</th><th>소유</th><th>발주</th><th>주문링크</th><th>진짜불일치</th><th>원본</th><th>write-back</th><th title="카운트·소유·발주·진짜불일치0 종합">cutover</th></tr></thead><tbody>${rows}</tbody></table></div>`;
+}
+async function checkPrecise(i){ const o=STATE.ov[i]; const cell=document.getElementById('prec-'+i); if(cell)cell.textContent='…';
+  const p=await api(`/api/trackb/parity?sheetId=${encodeURIComponent(o.sheetId)}&tabName=${encodeURIComponent(o.tabName)}`);
+  if(p&&p.ok){ STATE.ov[i].real=p.buckets.real; STATE.ov[i].realAt=Date.now(); renderOverviewHead(); renderOverviewBody(STATE.ovq); }
+  else if(cell) cell.innerHTML='<span class="no">오류</span>';
+}
+// 전체 정밀 계산: 투영된 전 탭 진짜불일치 일괄 + 스냅샷 저장
+async function runParityAll(){
+  const btn=document.getElementById('paBtn'); if(btn){btn.disabled=true;btn.textContent='계산 중…';}
+  const r=await api('/api/trackb/parity-all',{method:'POST'});
+  if(r&&r.ok){ const by={}; (r.results||[]).forEach(x=>by[x.sheetId+'\t'+x.tabName]=x.real);
+    (STATE.ov||[]).forEach(o=>{ const v=by[o.sheetId+'\t'+o.tabName]; if(typeof v==='number'){ o.real=v; o.realAt=Date.now(); } });
+    STATE.lastBatch=r.batchAt; renderOverviewHead(); renderOverviewBody(STATE.ovq); toast(`정밀 계산 완료 · 진짜불일치0 ${r.realZero}/${r.tabs}탭`); }
+  else toast('계산 실패');
+  const b2=document.getElementById('paBtn'); if(b2){b2.disabled=false;b2.textContent='전체 정밀 계산';}
+}
+function _spark(vals){ if(!vals.length)return ''; const w=520,h=46,pad=4,max=Math.max(1,...vals),n=vals.length;
+  const X=i=>pad+(n<=1?(w-2*pad)/2:i*(w-2*pad)/(n-1)), Y=v=>h-pad-(v/max)*(h-2*pad);
+  const pts=vals.map((v,i)=>`${X(i).toFixed(1)},${Y(v).toFixed(1)}`).join(' '); const last=vals[vals.length-1];
+  const dots=vals.map((v,i)=>`<circle cx="${X(i).toFixed(1)}" cy="${Y(v).toFixed(1)}" r="2.2" fill="${v===0?'var(--safe)':'var(--bad)'}"/>`).join('');
+  return `<svg width="100%" viewBox="0 0 ${w} ${h}" preserveAspectRatio="none" style="margin-bottom:10px;background:var(--card2);border-radius:8px">${n>1?`<polyline fill="none" stroke="${last===0?'var(--safe)':'var(--bad)'}" stroke-width="2" points="${pts}"/>`:''}${dots}</svg>`;
+}
+async function showTrend(i){ const o=STATE.ov[i];
+  let ov=document.getElementById('trendov'); if(!ov){ov=document.createElement('div');ov.id='trendov';ov.className='modalov';ov.addEventListener('click',e=>{if(e.target===ov)ov.remove();});document.body.appendChild(ov);}
+  ov.innerHTML=`<div class="modalbox" style="width:600px"><div class="modalhd"><b>진짜 불일치 추이 · ${esc(o.tabName)}</b><button class="btn xs" onclick="document.getElementById('trendov').remove()">닫기</button></div><div class="modalbd" id="trendbd"><div class="empty">불러오는 중…</div></div></div>`;
+  const r=await api(`/api/trackb/parity-trend?sheetId=${encodeURIComponent(o.sheetId)}&tabName=${encodeURIComponent(o.tabName)}`);
+  const items=(r&&r.items)||[]; const bd=$('#trendbd'); if(!bd)return;
+  bd.innerHTML= items.length
+    ? `${_spark(items.map(x=>x.real))}<table class="histtable"><thead><tr><th>시각</th><th>진짜불일치</th><th>일치</th><th>의도된차이</th><th>출처</th></tr></thead><tbody>${
+        items.slice().reverse().map(x=>`<tr><td class="hts">${esc(_fmtTs(x.takenAt))}</td><td class="${x.real===0?'ok':'no'}" style="font-weight:700">${x.real}</td><td>${x.match}</td><td>${x.benign}</td><td>${esc(x.source||'')}</td></tr>`).join('')
+      }</tbody></table>`
+    : `<div class="empty">스냅샷 없음 — "전체 정밀 계산"으로 첫 추이 기록을 만드세요.</div>`;
+}
+function openTabFromOverview(i){ const o=STATE.ov[i]; STATE.pendingTab={sheetId:o.sheetId,tabName:o.tabName,tabGid:o.tabGid,spreadsheetTitle:o.spreadsheetTitle}; switchView('workdesk'); }
+function beginEdit(el, rowId, field){
+  if(el.querySelector('input')) return;
+  const cur=el.getAttribute('data-val')||'';
+  el.innerHTML=`<input class="einp" value="${esc(cur)}">`;
+  const inp=el.querySelector('input'); inp.focus(); inp.select();
+  let handled=false;
+  const finish=(save)=>{ if(handled)return; handled=true; if(save&&inp.value!==cur) saveEdit(rowId,field,inp.value); else reloadWorkdesk(); };
+  inp.addEventListener('blur',()=>finish(true));
+  inp.addEventListener('keydown',e=>{ if(e.key==='Enter'){e.preventDefault();inp.blur();} else if(e.key==='Escape'){handled=true;reloadWorkdesk();} });
+}
+async function saveEdit(rowId, field, value){
+  const t=STATE.cur; if(!t)return;
+  const r=await api('/api/trackb/workdesk/edit',{method:'POST',body:JSON.stringify({sheetId:t.sheetId,tabName:t.tabName,rowId,field,value})});
+  if(r&&r.ok) toast('저장됨');
+  else if(r&&r.error==='concurrent_edit_conflict') toast('동시 편집 감지 — 새로고침');
+  else toast(r&&r.error?('편집 거부: '+r.error):'편집 실패');
+  reloadWorkdesk();
+}
+async function toggleBool(rowId, field, cur){ await saveEdit(rowId, field, !cur); }
+async function revertEdit(rowId, field){ const t=STATE.cur; if(!t)return;
+  const r=await api('/api/trackb/workdesk/revert',{method:'POST',body:JSON.stringify({sheetId:t.sheetId,tabName:t.tabName,rowId,field})});
+  toast(r&&r.reverted?'되돌림':'되돌릴 편집 없음'); reloadWorkdesk();
+}
+async function hideRow(rowId){ if(!confirm('이 참여자를 명단에서 제거(숨김)할까요? (Track B에만 반영, 되돌릴 수 있음)'))return; const t=STATE.cur;
+  const r=await api('/api/trackb/workdesk/hide',{method:'POST',body:JSON.stringify({sheetId:t.sheetId,tabName:t.tabName,rowId})});
+  toast(r&&r.ok?'제거됨':'실패'); reloadWorkdesk();
+}
+function showHidden(){ const wd=STATE.wd; if(!wd||!wd.hiddenRows)return;
+  const list=wd.hiddenRows.map(h=>`<div class="hrow"><span>#${esc(h.seq)} ${esc(h.name||'—')}</span><button class="btn" onclick="revertEdit('${h.id}','_hidden')">복원</button></div>`).join('')||'<div class="empty">숨김 없음</div>';
+  const box=$('#addbox'); if(box){ box.innerHTML=`<div class="add" style="margin-top:10px"><label>숨김 참여자 (${wd.hiddenRows.length})</label>${list}</div>`; box.scrollIntoView({behavior:'smooth'}); }
+}
+function showAddForm(){ const box=$('#addbox'); if(!box)return;
+  box.innerHTML=`<div class="add" style="margin-top:10px">
+    <label>참여자 추가 (Track B 수동행)</label>
+    <div class="addgrid">
+      <input id="a_name" placeholder="참여자명">
+      <input id="a_phone" placeholder="연락처(끝 8자리 매칭)">
+      <input id="a_round" placeholder="차수">
+      <input id="a_opt" placeholder="옵션">
+    </div>
+    <button class="btn pri assignbtn" onclick="submitAdd()">추가</button>
+    <button class="btn" onclick="document.getElementById('addbox').innerHTML=''">취소</button>
+  </div>`;
+  box.scrollIntoView({behavior:'smooth'});
+}
+async function submitAdd(){ const t=STATE.cur; if(!t)return;
+  const body={sheetId:t.sheetId,tabName:t.tabName,reviewerName:$('#a_name').value.trim(),phone:$('#a_phone').value.trim(),round:$('#a_round').value.trim(),optionText:$('#a_opt').value.trim()};
+  if(!body.reviewerName&&!body.phone){ toast('참여자명 또는 연락처를 입력하세요'); return; }
+  const r=await api('/api/trackb/workdesk/add',{method:'POST',body:JSON.stringify(body)});
+  toast(r&&r.ok?'추가됨':'실패'); $('#addbox').innerHTML=''; reloadWorkdesk();
+}
+async function reloadWorkdesk(){ const t=STATE.cur; if(!t)return;
+  const q=`sheetId=${encodeURIComponent(t.sheetId)}&tabName=${encodeURIComponent(t.tabName)}&tabGid=${encodeURIComponent(t.tabGid||'')}`;
+  renderWorkdesk(await api('/api/trackb/workdesk?'+q)); loadParity(t);
+}
+// ── 행 상세 펼치기: 제출한 구매양식 원본(DB) + 시트 행 전체 ──
+function _dpair(k,v){ const s=(v==null?'':String(v)); return `<div class="dpair"><span class="dk">${esc(k)}</span><span class="dv">${esc(s)||'—'}</span></div>`; }
+function _fmtTs(t){ if(!t)return ''; try{ return new Date(t).toLocaleString('ko-KR'); }catch(_){ return String(t); } }
+function renderDetail(r){
+  const o=r.order;
+  // 시트 행 표시에 셀 편집(col: 오버레이) 반영 — 그리드 셀과 상세 패널 값 일치(표시 전용).
+  const rj=Object.assign({}, (r.rowJson&&typeof r.rowJson==='object')?r.rowJson:{}, (r.cellEdits&&typeof r.cellEdits==='object')?r.cellEdits:{});
+  const orderHtml = o ? `<div class="dcard"><div class="dch">🛒 제출 구매양식 (DB 원장)</div><div class="dgrid">${
+      _dpair('주문번호',o.order_num)+_dpair('수취인',o.recipient||o.orderer)+_dpair('연락처',o.phone)+_dpair('주소',o.address)+
+      _dpair('옵션',o.selectedOptKey)+_dpair('금액',o.price)+_dpair('제출시각',_fmtTs(o.submittedAt))+
+      _dpair('시트반영',(o.mirrorStatus||'')+(o.sheetRow?(' · 행 '+o.sheetRow):''))
+    }</div></div>`
+    : `<div class="dcard"><div class="dch">🛒 제출 구매양식</div><div class="dnone">DB 링크 주문 없음 (시트 직접 제출이거나 미링크 — 시트 행 참고)</div></div>`;
+  const keys=Object.keys(rj).filter(k=>String(rj[k]==null?'':rj[k]).trim()!=='');
+  const sheetHtml = keys.length
+    ? `<div class="dcard"><div class="dch">📋 시트 행 전체 (${keys.length}칸)</div><div class="dgrid">${keys.map(k=>_dpair(k,rj[k])).join('')}</div></div>`
+    : `<div class="dcard"><div class="dch">📋 시트 행</div><div class="dnone">행 스냅샷 없음 — 그림자 투영을 다시 실행하세요.</div></div>`;
+  return `<div class="detwrap">${orderHtml}${sheetHtml}</div>`;
+}
+function toggleDetail(id){
+  const existing=document.getElementById('det-'+id);
+  const rowEl=document.getElementById('row-'+id);
+  const arrow=rowEl?rowEl.querySelector('.exp'):null;
+  if(existing){ existing.remove(); if(arrow)arrow.classList.remove('open'); return; }
+  const r=(STATE.wd&&STATE.wd.roster||[]).find(x=>String(x.id)===String(id));
+  if(!r||!rowEl)return;
+  const tr=document.createElement('tr'); tr.id='det-'+id; tr.className='detrow';
+  tr.innerHTML=`<td colspan="${STATE.canEdit?8:7}">${renderDetail(r)}</td>`;
+  rowEl.after(tr); if(arrow)arrow.classList.add('open');
+}
+async function loadParity(t){ const rail=$('#rail'); if(!rail)return;
+  rail.innerHTML=`<div class="sh">Parity (B ↔ 현행)</div><div class="empty" style="padding:14px">확인 중…</div>`;
+  const p=await api(`/api/trackb/parity?sheetId=${encodeURIComponent(t.sheetId)}&tabName=${encodeURIComponent(t.tabName)}`);
+  if(!p||!p.ok){ rail.innerHTML=`<div class="sh">Parity</div><div class="empty" style="padding:14px">master에서 제공</div>`; return; }
+  const b=p.buckets||{match:0,benign:0,real:0}, tot=Math.max(1,b.match+b.benign+b.real), pct=n=>(n/tot*100).toFixed(1)+'%';
+  rail.innerHTML=`<div class="sh">Parity (B ↔ 현행)</div><div class="parity">
+    <div class="pbar"><i class="m" style="width:${pct(b.match)}"></i><i class="b" style="width:${pct(b.benign)}"></i><i class="r" style="width:${pct(b.real)}"></i></div>
+    <div class="plegend"><div class="row"><span><span class="dot" style="background:var(--safe)"></span>일치</span><b>${b.match}</b></div><div class="row"><span><span class="dot" style="background:var(--warn)"></span>의도된차이</span><b>${b.benign}</b></div><div class="row"><span><span class="dot" style="background:var(--bad)"></span>진짜 불일치</span><b>${b.real}</b></div></div>
+    <div class="verdict ${p.pass?'pass':'fail'}">${p.pass?'✓ 진짜 불일치 0':('진짜 불일치 '+b.real+'건')}</div></div>
+    <div class="sh">차원 요약</div><div class="cmt">참여자 A ${p.dims.d1_membership.aSet} · B ${p.dims.d1_membership.bSet}<br>제출 A ${p.dims.d3_counts.aSubmitted} · B ${p.dims.d3_counts.bSubmitted}<br>입금 A ${p.dims.d3_counts.aPaid} · B ${p.dims.d3_counts.bPaid}</div>
+    ${renderReadiness(p.readiness)}`;
+}
+function renderReadiness(rd){ if(!rd) return '';
+  const wo=rd.workOrder||{}, ow=rd.ownership||{}, fi=rd.financial||{};
+  const dot=(ok,warn)=>`<span class="rdot ${ok?'ok':(warn?'warn':'no')}"></span>`;
+  const woOk=wo.linked && wo.filled>=3;
+  const owNames=(ow.owners||[]).map(o=>esc(o.name)+(o.wholeSheet?'(시트전체)':'')).join(', ');
+  const linkPct = fi.activeRows ? Math.round(fi.linkedOrders/fi.activeRows*100) : 0;
+  const won = (fi.writtenAmount||0).toLocaleString('ko-KR');
+  return `<div class="sh" style="margin-top:14px">전환 준비도</div>
+    <div class="rdlist">
+      <div class="rdrow">${dot(woOk, wo.linked&&!woOk)}<span class="rl">작업발주 연결</span><span class="rv">${wo.linked?(wo.filled+'/'+wo.of+' 필드'):'미연결'}</span></div>
+      <div class="rdrow">${dot(ow.assigned)}<span class="rl">업체 소유</span><span class="rv">${ow.assigned?(owNames||'지정됨'):'미지정'}</span></div>
+      <div class="rdrow">${dot(fi.linkedOrders>0, fi.activeRows>0&&fi.linkedOrders===0)}<span class="rl">주문 귀속</span><span class="rv">${fi.linkedOrders}/${fi.activeRows} 링크${won!=='0'?(' · '+won+'원'):''}</span></div>
+    </div>`;
+}
+async function projectCur(){ if(!STATE.cur)return; const btn=$('#projBtn'); if(btn){btn.disabled=true;btn.textContent='투영 중…';}
+  await api('/api/trackb/project',{method:'POST',body:JSON.stringify({sheetId:STATE.cur.sheetId,tabName:STATE.cur.tabName})});
+  selTab(STATE.tabs.indexOf(STATE.cur)); }
+
+// 진실원천 전환(master 전용) — 옵션 A cutover 스위치. 'db' 전환은 진짜불일치 0 게이트(409면 force 확인).
+async function flipSoT(value, force){
+  if(!STATE.cur)return;
+  if(value==='db' && !force && !confirm(`이 탭의 원본을 Track B(DB)로 전환합니다.\n\n옵션 A(미러 유지·되돌리기 가능)이며, 시트 쓰기반영 엔진(P2)이 붙기 전까지 라이브 동작은 바뀌지 않습니다.\n계속할까요?`)) return;
+  const btn=$('#sotBtn'); if(btn){btn.disabled=true;btn.textContent='전환 중…';}
+  const r=await api('/api/trackb/source-of-truth',{method:'POST',body:JSON.stringify({sheetId:STATE.cur.sheetId,tabName:STATE.cur.tabName,value,force:!!force})});
+  if(r&&r.ok){ toast(`원본 → ${value==='db'?'Track B':'시트'}`); selTab(STATE.tabs.indexOf(STATE.cur)); return; }
+  if(r&&r.error==='parity_not_clean'){
+    // force 마찰: confirm 원클릭이 아니라 탭명을 직접 타이핑해야 강제 전환(우발적 force 차단, 검증 미통과 명시).
+    const typed=prompt(`방금 서버가 재계산한 진짜 불일치가 ${r.real}건입니다(권장: 0).\n(화면의 이전 [정밀] 결과가 아니라 지금 시점 값입니다.)\n\n검증 미통과 상태로 강제 전환하려면 탭 이름을 정확히 입력하세요:\n${STATE.cur.tabName}`);
+    if(typed!==null && typed.trim()===STATE.cur.tabName) return flipSoT('db', true);
+    if(typed!==null) toast('탭 이름 불일치 — 강제 전환 취소됨');
+  } else if(r&&r.error==='parity_check_failed'){
+    toast('전환 거부: 정밀검증 실패('+((r&&r.detail)||'오류')+') — 잠시 후 재시도하세요');
+  } else if(r&&r.error==='empty_tab'){
+    toast('전환 거부: A·B 모두 0행(유령/아카이브 탭) — cutover 대상이 아닙니다');
+  } else { toast('전환 실패: '+((r&&r.error)||'오류')); }
+  if(btn){btn.disabled=false;btn.textContent=value==='db'?'Track B로 전환':'시트로 되돌리기';}
+}
+
+// ══ 작업오더(발주) 연동 — 연결 상태 바 + 작업세부 표(펼침) + 명단 준비(admin/master) ══
+function renderWorkOrderSection(wd){
+  const d=wd.detail||null, isAdmin=(STATE.role==='master'||STATE.role==='admin');
+  if(!d){
+    if(!isAdmin) return '';
+    return `<div class="wobar"><span class="wt">작업발주 미연결</span><span class="wsub">발주(작업오더)를 연결하면 작업세부가 표시되고 모집 인원만큼 명단을 준비할 수 있습니다.</span>
+      <span style="flex:1"></span><button class="btn pri" onclick="openWorkOrderPicker()">＋ 발주 연결</button></div>`;
+  }
+  const fields=[['상품',d.productOption],['모집 인원',d.recruitCount],['일건수',d.dailyCountText||d.dailyCount],
+    ['구매시간',d.purchaseTime],['배송',d.deliveryType],['페이',d.payAmount?Number(d.payAmount).toLocaleString()+'원':''],
+    ['리뷰유형',d.reviewType],['유입키워드',d.inflowKeyword],['유입방식',d.inflowType],['유입가이드',d.inflowGuide],
+    ['리뷰가이드',d.reviewGuide],['특이사항',d.specialNotes],['상품 URL',d.productUrl],
+    ['시작일',d.startDate?String(d.startDate).slice(0,10):''],['담당',d.managerName]];
+  const opts=Array.isArray(d.options)?d.options:[];
+  const optRow=opts.length?`<div class="worow"><span class="wk">옵션</span><span class="wv">${opts.map(o=>`<span class="wochip">${esc(o)}</span>`).join('')}</span></div>`:'';
+  const rows=fields.filter(([k,v])=>v!=null&&String(v).trim()!=='').map(([k,v])=>`<div class="worow"><span class="wk">${esc(k)}</span><span class="wv">${esc(String(v))}</span></div>`).join('');
+  const adminCtl=isAdmin?`<span style="flex:1"></span>
+      <button class="btn xs" onclick="prepareRoster()" title="발주 모집 인원만큼 빈 명단 슬롯을 준비(부족분만 생성·멱등)">명단 준비 (모집 ${d.recruitCount||0})</button>
+      <button class="btn xs" onclick="openWorkOrderPicker()">발주 변경</button>
+      <button class="btn xs" onclick="unlinkWO()">연결 해제</button>`:'';
+  return `<div class="wobar"><span class="wt">📋 발주: ${esc(d.title||'(제목 없음)')}</span><span class="wsub">${esc(d.status||'')} · 모집 ${d.recruitCount||0}</span>${adminCtl}</div>
+    <details class="wodetail"><summary>작업세부 펼치기 (발주 정형 정보)</summary>${optRow}${rows||'<div class="worow"><span class="wv">세부 정보 없음</span></div>'}</details>`;
+}
+async function openWorkOrderPicker(){
+  const t=STATE.cur; if(!t)return;
+  let ov=document.getElementById('woov'); if(!ov){ov=document.createElement('div');ov.id='woov';ov.className='modalov';ov.addEventListener('click',e=>{if(e.target===ov)ov.remove();});document.body.appendChild(ov);}
+  ov.innerHTML=`<div class="modalbox"><div class="modalhd"><b>발주 연결 · ${esc(t.tabName)}</b><button class="btn xs" onclick="document.getElementById('woov').remove()">닫기</button></div><div class="modalbd" id="wobd"><div class="empty">불러오는 중…</div></div></div>`;
+  const r=await api(`/api/trackb/work-orders?sheetId=${encodeURIComponent(t.sheetId)}&tabName=${encodeURIComponent(t.tabName)}`);
+  const items=(r&&r.items)||[]; const bd=$('#wobd'); if(!bd)return;
+  bd.innerHTML= items.length? items.map(w=>`<div class="worow2 ${w.linkedHere?'on':''}" onclick="linkWO('${esc(w.id)}')">
+     <div class="t">${esc(w.title||'(제목 없음)')} ${w.linkedHere?'<span class="bd g">현재 연결</span>':(w.linkedElsewhere?`<span class="bd" title="다른 탭에 연결됨">${esc(w.linkedTabName||'')} 연결</span>`:'')}</div>
+     <div class="s">모집 ${w.recruitCount||0} · ${esc(w.status||'')}</div></div>`).join('')
+   : `<div class="empty">발주 없음 — 업무포털에서 발주(작업오더)를 먼저 접수하세요.</div>`;
+}
+async function linkWO(id){ const t=STATE.cur; if(!t)return;
+  const r=await api('/api/trackb/work-order/link',{method:'POST',body:JSON.stringify({workOrderId:id,sheetId:t.sheetId,tabName:t.tabName,tabGid:t.tabGid||null})});
+  const ov=document.getElementById('woov'); if(ov)ov.remove();
+  if(r&&r.ok){ toast('발주 연결됨'); reloadWorkdesk(); } else toast('연결 실패: '+((r&&r.error)||''));
+}
+async function unlinkWO(){ const t=STATE.cur; if(!t)return; if(!confirm('이 탭의 발주 연결을 해제할까요? (명단·데이터는 그대로)'))return;
+  const r=await api('/api/trackb/work-order/unlink',{method:'POST',body:JSON.stringify({sheetId:t.sheetId,tabName:t.tabName})});
+  if(r&&r.ok){ toast('연결 해제됨'); reloadWorkdesk(); } else toast('해제 실패');
+}
+async function prepareRoster(){ const t=STATE.cur; if(!t)return;
+  if(!confirm('발주 모집 인원 기준으로 부족한 만큼 빈 명단 슬롯을 만듭니다(이미 충족이면 0개). 계속할까요?'))return;
+  const r=await api('/api/trackb/work-order/prepare-roster',{method:'POST',body:JSON.stringify({sheetId:t.sheetId,tabName:t.tabName,tabGid:t.tabGid||null})});
+  if(r&&r.ok){ toast(r.created>0?`빈 슬롯 ${r.created}칸 생성 (모집 ${r.target}/현재 ${r.current})`:`이미 충족 — 생성 0 (모집 ${r.target}/현재 ${r.current})`); reloadWorkdesk(); }
+  else toast('명단 준비 실패: '+((r&&r.error)||''));
+}
+
+// ══ write-back 시뮬레이션(P2-2) — 편집이 시트에 반영된다면 무엇이 바뀔지 미리보기(실제 시트 무접촉) ══
+async function showWritebackSim(){
+  const t=STATE.cur; if(!t)return;
+  let ov=document.getElementById('wbov'); if(!ov){ov=document.createElement('div');ov.id='wbov';ov.className='modalov';ov.addEventListener('click',e=>{if(e.target===ov)ov.remove();});document.body.appendChild(ov);}
+  ov.innerHTML=`<div class="modalbox"><div class="modalhd"><b>write-back 시뮬레이션 · ${esc(t.tabName)}</b><button class="btn xs" onclick="document.getElementById('wbov').remove()">닫기</button></div><div class="modalbd" id="wbbd"><div class="empty">계산 중…</div></div></div>`;
+  const r=await api(`/api/trackb/writeback/simulate?sheetId=${encodeURIComponent(t.sheetId)}&tabName=${encodeURIComponent(t.tabName)}`);
+  const bd=$('#wbbd'); if(!bd)return;
+  if(!r||!r.ok){ bd.innerHTML=`<div class="empty">${esc((r&&r.error)||'조회 실패')}</div>`; return; }
+  const s=r.summary||{}, ops=r.ops||[];
+  const gmap={ok:'✅ 반영',risky_ownership_key:'⚠️ 위험(소유권키·제외)',risky_order_mapped:'⚠️ 위험(주문매핑칸·제외)',risky_coords:'⚠️ 위험(좌표·제외)',risky_append:'⚠️ 위험(추가·제외)',manual_row:'⚠️ 수동행(검토·제외)',no_anchor:'⛔ 앵커없음',ambiguous:'⛔ 중복신원',no_column:'⛔ 컬럼없음',no_sheet_row:'⛔ 행없음',no_tab_gid:'⛔ gid없음'};
+  const tmap={toggle:'제출/입금',edit:'필드편집',add:'행추가',clear:'행삭제'};
+  const rows=ops.map(o=>{ const nv=(o.newValue&&typeof o.newValue==='object')?JSON.stringify(o.newValue):(o.newValue==null?'':String(o.newValue));
+    return `<tr><td>${esc(tmap[o.type]||o.type)}</td><td>${esc(o.field||'')}</td><td>${esc(o.name||'—')}</td><td>${o.sheetRow||'-'}${o.column?(' · '+esc(o.column)+'열'):''}${o.header?(' <span style="color:var(--faint)">('+esc(o.header)+')</span>'):''}</td><td>${esc(nv)}</td><td>${gmap[o.guard]||esc(o.guard)}</td></tr>`;
+  }).join('')||`<tr><td colspan="6" class="empty">반영할 편집 없음</td></tr>`;
+  bd.innerHTML=`<div style="font-size:12px;color:var(--muted);background:var(--card2);border:1px solid var(--line);border-radius:8px;padding:9px 11px;margin-bottom:10px">
+      이 탭 편집이 시트에 <b>반영된다면</b> 이렇게 됩니다 — <b style="color:var(--accent)">시뮬레이션이라 실제 시트에는 쓰지 않습니다.</b><br>
+      원본: ${r.cutover?'<b>Track B(cutover)</b>':'시트'} · 실제적용 트리거(<code>TRACK_B_WRITEBACK_FULL</code>): <b>${r.triggerOn?'ON':'OFF'}</b>${r.triggerOn?'':' <span style="color:var(--faint)">(OFF = 시뮬레이션만, 시트 무접촉)</span>'}</div>
+    <div style="font-size:12.5px;font-weight:650;margin-bottom:8px">총 ${s.total||0} · <span class="ok">반영가능 ${s.ok||0}</span> · <span style="color:var(--warn)">위험(적용제외) ${s.risky||0}</span> · <span style="color:var(--bad)">차단 ${s.blocked||0}</span></div>
+    <table class="histtable"><thead><tr><th>유형</th><th>필드</th><th>참여자</th><th>대상(행·열)</th><th>값</th><th>상태</th></tr></thead><tbody>${rows}</tbody></table>`;
+}
+
+// ══ 소유 지정 뷰 ══
+async function renderOwnershipView(){
+  $('#viewroot').innerHTML = `<div class="own-wrap">
+    <div class="advlist"><div class="sh row" style="font-size:10px;font-weight:750;letter-spacing:.05em;text-transform:uppercase;color:var(--faint);margin:4px 6px 9px">업체(광고주)<button class="addadv" onclick="showAddAdvertiser()">＋ 업체 추가</button></div><div id="advs"><div class="empty">불러오는 중…</div></div></div>
+    <div class="own-panel" id="ownPanel"><div class="empty">왼쪽에서 업체를 선택하세요.</div></div></div>`;
+  // 탭 인덱스(시트명/탭명 조회용) 1회 로드
+  if(!STATE.tabs.length){ const r=await api('/api/trackb/tabs?limit=500'); STATE.tabs=(r&&r.tabs)||[]; }
+  buildTabIndex();
+  const r=await api('/api/trackb/advertisers');
+  if(!r||!r.ok){ $('#advs').innerHTML=`<div class="empty">업체 목록은 admin/master에서 제공</div>`; return; }
+  STATE.advs=r.items||[];
+  $('#advs').innerHTML = STATE.advs.map((a,i)=>`<div class="advitem" data-i="${i}" onclick="selAdv(${i})"><span class="ava">${esc((a.name||'?').slice(0,1))}</span><span class="nm">${esc(a.name)}</span><span class="ct">${a.owned}</span></div>`).join('')||`<div class="empty">등록된 업체 없음</div>`;
+}
+// 업체(거래처) 추가 — 기존 포털 거래처 원장(POST /api/portal/advertisers, adminOrMaster) 재사용.
+//   흐름: ① 캠페인 시트 먼저 선택(탭 미리보기로 어떤 캠페인인지 확인) → ② 거래처명 검색(인트라넷 자동완성)
+//   → ③ 등록 = 업체 생성 + 선택 시트 전체 소유 자동 지정. 담당AE는 로그인명 자동.
+function showAddAdvertiser(){
+  STATE.advCur=null; document.querySelectorAll('.advitem').forEach(el=>el.classList.remove('on'));
+  const sheetOpts = Object.keys(STATE.sheetMap).map(sid=>`<option value="${esc(sid)}">${esc(sheetTitle(sid))}</option>`).join('');
+  $('#ownPanel').innerHTML = `
+    <div class="ph2"><span class="big">＋</span><div><h2>업체(거래처) 추가</h2><div class="acc">① 캠페인 시트를 먼저 선택하고 → ② 거래처명을 검색해 등록하세요. 등록하면 선택한 시트 전체가 이 업체 소유로 자동 지정됩니다.</div></div></div>
+    <div class="sect"><div class="st">새 업체</div>
+      <div class="add">
+        <label>① 캠페인 시트 *</label>
+        <select id="advSheet" onchange="onAdvSheet()"><option value="">— 시트 선택 —</option>${sheetOpts}</select>
+        <div id="advSheetTabs" style="font-size:11.5px;color:var(--faint);margin-top:6px;min-height:15px"></div>
+        <label style="margin-top:11px">② 거래처명 * <span style="color:var(--faint);font-weight:400">(인트라넷 광고주DB 검색 — 입력하면 자동완성)</span></label>
+        <div style="position:relative">
+          <input id="advName" placeholder="먼저 캠페인 시트를 선택하세요" autocomplete="off" disabled oninput="intraSuggest(this.value)" onkeydown="if(event.key==='Enter')createAdvertiser()">
+          <div id="advSug" class="advsug"></div>
+        </div>
+        <label style="margin-top:11px">담당 AE (로그인 정보 기준 자동 지정)</label>
+        <input id="advPm" value="" readonly style="background:var(--card2);color:var(--muted);cursor:not-allowed">
+        <div id="advErr" style="color:var(--bad);font-size:12px;margin-top:9px;min-height:15px"></div>
+        <button class="btn pri assignbtn" onclick="createAdvertiser()">＋ 업체 등록 + 시트 소유 지정</button>
+      </div>
+    </div>`;
+  $('#advPm').value = STATE.name || '';
+  setTimeout(()=>{ const el=$('#advSheet'); if(el) el.focus(); },40);
+}
+// 시트 선택 → 거래처명 입력 활성화 + 탭 미리보기(어떤 캠페인 시트인지 확인용).
+function onAdvSheet(){
+  const sid=($('#advSheet')&&$('#advSheet').value)||'';
+  const nameEl=$('#advName'), prev=$('#advSheetTabs');
+  if(!sid){ if(nameEl){ nameEl.disabled=true; nameEl.placeholder='먼저 캠페인 시트를 선택하세요'; } if(prev) prev.textContent=''; return; }
+  const tabs=((STATE.sheetMap[sid]||{}).tabs||[]);
+  if(prev){ const names=tabs.map(t=>t.tabName); prev.textContent = tabs.length ? `탭 ${tabs.length}개: `+names.slice(0,5).join(' · ')+(names.length>5?` 외 ${names.length-5}개`:'') : '이 시트에 활성 탭 없음'; }
+  if(nameEl){ nameEl.disabled=false; nameEl.placeholder='예: (주)콩고물'; nameEl.focus(); }
+}
+// 인트라넷 광고주DB 자동완성(서버 프록시 경유 — 브라우저는 인트라넷 직접 미호출). 실패 시 조용히 무시(수동 입력 가능).
+let _sugTimer=null;
+function intraSuggest(q){
+  clearTimeout(_sugTimer); const box=$('#advSug'); if(!box) return;
+  if(!(q||'').trim()){ box.classList.remove('show'); box.innerHTML=''; return; }
+  _sugTimer=setTimeout(async()=>{
+    const r=await api('/api/trackb/intranet/advertisers?q='+encodeURIComponent(q.trim())).catch(()=>null);
+    const items=(r&&r.ok&&r.items)||[];
+    if(!items.length){ box.classList.remove('show'); box.innerHTML=''; return; }
+    box.innerHTML=items.map(it=>`<div class="sugitem" onclick="pickIntra('${esc(it.name).replace(/'/g,'&#39;')}')">${esc(it.name)}${it.manager?`<span class="sugm">${esc(it.manager)}</span>`:''}</div>`).join('');
+    box.classList.add('show');
+  },250);
+}
+function pickIntra(name){ const el=$('#advName'); if(el) el.value=name; const box=$('#advSug'); if(box){ box.classList.remove('show'); box.innerHTML=''; } }
+async function createAdvertiser(){
+  const sheetId=($('#advSheet')&&$('#advSheet').value)||'';
+  const name=($('#advName').value||'').trim(), inad_pm=(STATE.name||'').trim();
+  const err=$('#advErr'); if(err) err.textContent='';
+  if(!sheetId){ if(err) err.textContent='캠페인 시트를 먼저 선택하세요.'; return; }
+  if(!name){ if(err) err.textContent='거래처명을 입력하세요.'; return; }
+  const r=await api('/api/portal/advertisers',{method:'POST',body:JSON.stringify({ name, inad_pm })});
+  if(!(r&&r.ok)){ if(err) err.textContent=(r&&r.error)||'등록 실패'; return; }
+  const newId=r.data&&r.data.id;
+  let ownOk=false;
+  if(newId){ const o=await api('/api/trackb/ownership',{method:'POST',body:JSON.stringify({advertiserId:newId, sheetId, tabGid:null})}); ownOk=!!(o&&o.ok); }
+  toast(ownOk ? ('업체 등록 + 시트 소유 지정: '+name) : ('업체 등록: '+name+' (소유 지정 실패 — 아래에서 수동 지정)'));
+  await renderOwnershipView();
+  const idx=(STATE.advs||[]).findIndex(a=>a.id===newId); if(idx>=0) selAdv(idx);
+}
+function buildTabIndex(){ STATE.sheetMap={}; STATE.tabIndex={};
+  for(const t of STATE.tabs){ if(!STATE.sheetMap[t.sheetId]) STATE.sheetMap[t.sheetId]={title:t.spreadsheetTitle||t.sheetId,tabs:[]};
+    STATE.sheetMap[t.sheetId].tabs.push(t); STATE.tabIndex[t.sheetId+'::'+(t.tabGid||'')]=t.tabName; } }
+
+async function selAdv(i){ const a=STATE.advs[i]; STATE.advCur=a; STATE.addSheet=null; STATE.addMode='all'; STATE.addTabs={};
+  document.querySelectorAll('.advitem').forEach(el=>el.classList.toggle('on',+el.dataset.i===i));
+  $('#ownPanel').innerHTML=`<div class="empty">불러오는 중…</div>`;
+  const [r, rt]=await Promise.all([
+    api('/api/trackb/ownership?advertiserId='+encodeURIComponent(a.id)),
+    api('/api/trackb/ownership/tabs?advertiserId='+encodeURIComponent(a.id)).catch(()=>null),
+  ]);
+  STATE.ownTabs=(rt&&rt.ok&&rt.items)||[];
+  renderOwnPanel(a, (r&&r.items)||[]);
+}
+// 연결된 탭 클릭 → 작업대에서 그 탭 열기(관측 뷰 "열기"와 동일한 pendingTab 계약).
+function openOwnTab(i){ const t=(STATE.ownTabs||[])[i]; if(!t) return;
+  STATE.pendingTab={sheetId:t.sheetId, tabGid:t.tabGid, tabName:t.tabName, spreadsheetTitle:t.spreadsheetTitle||sheetTitle(t.sheetId)};
+  switchView('workdesk'); }
+function sheetTitle(sid){ return (STATE.sheetMap[sid]&&STATE.sheetMap[sid].title)||sid; }
+function renderOwnPanel(a, items){
+  const owns = items.map(o=>{
+    const whole = !o.tabGid;
+    const label = whole ? sheetTitle(o.sheetId) : (STATE.tabIndex[o.sheetId+'::'+o.tabGid] || ('탭 '+o.tabGid));
+    const sub = whole ? '시트 전체 · 모든 탭 자동 포함' : ('시트: '+sheetTitle(o.sheetId));
+    return `<div class="own"><span class="ic">${whole?'▦':'▤'}</span><div class="info"><b>${esc(label)}</b><span>${esc(sub)}</span></div>
+      <span class="scope ${whole?'all':'tab'}">${whole?'시트 전체':'특정 탭'}</span>
+      <button class="rm" title="소유 해제" onclick="rmOwn('${esc(o.sheetId)}','${esc(o.tabGid||'')}')">×</button></div>`;
+  }).join('') || `<div class="empty" style="padding:20px">소유 캠페인 없음 — 아래에서 추가하세요.</div>`;
+  const sheetOpts = Object.keys(STATE.sheetMap).map(sid=>`<option value="${esc(sid)}">${esc(sheetTitle(sid))}</option>`).join('');
+  const ot=STATE.ownTabs||[];
+  const tabList = ot.map((t,i)=>`<div class="owntab" onclick="openOwnTab(${i})"><div class="info"><b>${esc(t.tabName)}</b><span>${esc(t.spreadsheetTitle||sheetTitle(t.sheetId))}${t.rowCount?` · ${t.rowCount}행`:''}${t.firstSeenAt?` · ${esc(String(t.firstSeenAt).slice(0,10))}`:''}</span></div>${t.active?'<span class="scope all">활성</span>':'<span class="scope tab" style="opacity:.55">비활성</span>'}<span class="openb">열기 ›</span></div>`).join('')
+    || `<div class="empty" style="padding:14px">연결된 탭 없음</div>`;
+  $('#ownPanel').innerHTML = `
+    <div class="ph2"><span class="big">${esc((a.name||'?').slice(0,1))}</span><div><h2>${esc(a.name)}</h2><div class="acc">거래처 ID: ${esc(a.id)} · 소유 ${items.length}</div></div></div>
+    <div class="sect"><div class="st">소유 캠페인</div>${owns}</div>
+    <div class="sect"><div class="st">연결된 탭 ${ot.length} <span style="font-weight:400;color:var(--faint);font-size:11px">· 최신순 — 클릭하면 작업대로 열기</span></div>${tabList}</div>
+    <div class="sect"><div class="st">소유 추가</div>
+      <div class="add">
+        <label>캠페인 시트</label>
+        <select id="addSheet" onchange="onAddSheet()"><option value="">— 시트 선택 —</option>${sheetOpts}</select>
+        <div class="radios">
+          <div class="radio on" data-m="all" onclick="setAddMode('all')"><span class="d"></span>시트 전체(모든 탭)</div>
+          <div class="radio" data-m="tab" onclick="setAddMode('tab')"><span class="d"></span>특정 탭만</div>
+        </div>
+        <div class="taboptions" id="taboptions"></div>
+        <button class="btn pri assignbtn" onclick="assignOwn()">＋ 소유 지정</button>
+      </div>
+    </div>`;
+}
+function setAddMode(m){ STATE.addMode=m; document.querySelectorAll('.radio').forEach(r=>r.classList.toggle('on',r.dataset.m===m));
+  const to=$('#taboptions'); to.classList.toggle('show', m==='tab' && STATE.addSheet); if(m==='tab') renderTabOptions(); else to.innerHTML=''; }
+function onAddSheet(){ STATE.addSheet=$('#addSheet').value||null; STATE.addTabs={}; if(STATE.addMode==='tab') renderTabOptions(); }
+function renderTabOptions(){ const to=$('#taboptions'); if(!STATE.addSheet){ to.classList.remove('show'); to.innerHTML=''; return; }
+  const tabs=(STATE.sheetMap[STATE.addSheet]||{}).tabs||[];
+  to.classList.add('show');
+  to.innerHTML = tabs.map(t=>`<div class="tchip ${STATE.addTabs[t.tabGid||'']?'on':''}" onclick="tglTab('${esc(t.tabGid||'')}')"><span class="cb">${STATE.addTabs[t.tabGid||'']?'✓':''}</span>${esc(t.tabName)}</div>`).join('')||'<span style="font-size:12px;color:var(--faint)">이 시트에 활성 탭 없음</span>'; }
+function tglTab(gid){ STATE.addTabs[gid]=!STATE.addTabs[gid]; renderTabOptions(); }
+async function assignOwn(){ const a=STATE.advCur; if(!a) return; if(!STATE.addSheet){ toast('시트를 선택하세요'); return; }
+  let posts=[];
+  if(STATE.addMode==='all') posts=[{sheetId:STATE.addSheet, tabGid:null}];
+  else { const gids=Object.keys(STATE.addTabs).filter(g=>STATE.addTabs[g]); if(!gids.length){ toast('탭을 선택하세요'); return; } posts=gids.map(g=>({sheetId:STATE.addSheet, tabGid:g})); }
+  for(const p of posts) await api('/api/trackb/ownership',{method:'POST',body:JSON.stringify({advertiserId:a.id, sheetId:p.sheetId, tabGid:p.tabGid})});
+  toast('소유 지정 완료'); refreshAdvCounts(); selAdv(STATE.advs.indexOf(a));
+}
+async function rmOwn(sheetId, tabGid){ const a=STATE.advCur; if(!a) return;
+  await api('/api/trackb/ownership',{method:'DELETE',body:JSON.stringify({advertiserId:a.id, sheetId, tabGid:tabGid||null})});
+  toast('소유 해제'); refreshAdvCounts(); selAdv(STATE.advs.indexOf(a));
+}
+async function refreshAdvCounts(){ const r=await api('/api/trackb/advertisers'); if(r&&r.ok){ STATE.advs=r.items||[];
+  document.querySelectorAll('.advitem').forEach((el)=>{ const i=+el.dataset.i; if(STATE.advs[i]) el.querySelector('.ct').textContent=STATE.advs[i].owned; }); } }
+
+boot();
+</script>
+</body>
+</html>

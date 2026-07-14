@@ -595,10 +595,14 @@ async function saveDepositNames() {
 async function loadSystemMonitor() {
   loadSyncQueueStats();
   loadOrderMirrorStatus();
+  loadReviewEditRequests();
   loadBuildHistory();
   loadApiMetrics();
   loadSmartBuildStatus();
 }
+
+// 수동입력 필요(stuck_manual) 탭 목록 — 현황 렌더 시 기록(전체 CSV 버튼용).
+let _stuckManualTabs = [];
 
 // 구매주문 시트반영 현황(막힌 주문 가시성 + 복구)
 async function loadOrderMirrorStatus() {
@@ -615,14 +619,24 @@ async function loadOrderMirrorStatus() {
     const pending = cmap.pending || 0;
     const pendingNoRow = cmap.pending_no_row || 0;
     const failed = cmap.failed || 0;
+    const stuckManual = cmap.stuck_manual || 0;   // 자동복구 포기 → 사람이 수동입력해야 하는 유일한 터치포인트
     const stuckTotal = queued + pending + pendingNoRow + failed;
     const badge = (label, n, color, bg) => `<div style="background:${bg};border-radius:8px;padding:8px"><div style="font-size:1.2rem;font-weight:700;color:${color}">${n}</div><div style="font-size:.7rem;color:#6B7280">${label}</div></div>`;
+    // ★ 능동 알림: stuck_manual(수동입력 필요)은 자동복구 대상에서 제외되므로 안 보면 '조용한 누락'이 됨 → 최상단 경고 배너.
+    const manualBanner = stuckManual > 0 ? `
+      <div style="background:#FEF2F2;border:1.5px solid #DC2626;border-radius:8px;padding:10px 12px;margin-bottom:10px;display:flex;justify-content:space-between;align-items:center;gap:8px;flex-wrap:wrap">
+        <span style="color:#B91C1C;font-weight:700">🚨 수동입력 필요 ${stuckManual}건 <span style="font-weight:400;color:#7F1D1D">— 자동복구가 자리를 못 잡은 주문. 아래 탭에서 CSV 받아 시트에 수동입력하세요.</span></span>
+        <button onclick="downloadAllStuckManualCsv()" style="font-size:.7rem;background:#DC2626;color:#fff;border:none;padding:4px 10px;border-radius:5px;cursor:pointer;flex-shrink:0">전체 CSV</button>
+      </div>` : '';
+    _stuckManualTabs = (data.byTab || []).filter(t => (t.needManual || 0) > 0).map(t => ({ sheetId: t.sheetId, tabName: t.tabName }));
     el.innerHTML = `
-      <div style="display:grid;grid-template-columns:repeat(5,1fr);gap:8px;text-align:center">
+      ${manualBanner}
+      <div style="display:grid;grid-template-columns:repeat(6,1fr);gap:8px;text-align:center">
         ${badge('반영완료', written, '#16A34A', '#F0FDF4')}
         ${badge('대기중', pending + queued, '#D97706', '#FEF3C7')}
         ${badge('행없음', pendingNoRow, pendingNoRow ? '#DC2626' : '#9CA3AF', pendingNoRow ? '#FEE2E2' : '#F3F4F6')}
         ${badge('실패', failed, failed ? '#DC2626' : '#9CA3AF', failed ? '#FEE2E2' : '#F3F4F6')}
+        ${badge('수동필요', stuckManual, stuckManual ? '#B91C1C' : '#9CA3AF', stuckManual ? '#FEE2E2' : '#F3F4F6')}
         ${badge('막힘합계', stuckTotal, stuckTotal ? '#B91C1C' : '#9CA3AF', stuckTotal ? '#FEF2F2' : '#F3F4F6')}
       </div>
       ${(data.byTab && data.byTab.length) ? `
@@ -631,9 +645,15 @@ async function loadOrderMirrorStatus() {
           ${data.byTab.map(t => {
             const meta = t.hasRawMeta ? '' : ` <span style="color:#DC2626;font-weight:600">⚠ RAW미러 필요</span>`;
             const link = t.sheetId ? `<a href="https://docs.google.com/spreadsheets/d/${t.sheetId}" target="_blank" style="color:#2563EB">${(t.sheetId || '').substring(0,8)}…</a>` : '';
+            const nm = (t.needManual || 0) > 0 ? ` <span style="color:#B91C1C;font-weight:700;background:#FEE2E2;border-radius:4px;padding:0 5px">🚨수동 ${t.needManual}</span>` : '';
+            // needManual(stuck_manual)은 reconcile 대상 아님 → CSV로 수동입력. 그 외 막힘은 복구 버튼.
+            const csvBtn = (t.needManual || 0) > 0
+              ? `<button onclick="downloadStuckManualCsv('${t.sheetId}', '${encodeURIComponent(t.tabName || '')}')" style="font-size:.66rem;background:#DC2626;color:#fff;border:none;padding:2px 8px;border-radius:4px;cursor:pointer;flex-shrink:0">수동CSV</button>` : '';
+            const fixBtn = (t.stuck - (t.needManual || 0)) > 0
+              ? `<button onclick="runOrderReconcile('${t.sheetId}')" style="font-size:.66rem;background:#16A34A;color:#fff;border:none;padding:2px 8px;border-radius:4px;cursor:pointer;flex-shrink:0">복구</button>` : '';
             return `<div style="background:#F8FAFC;padding:5px 8px;border-radius:6px;margin-bottom:3px;display:flex;justify-content:space-between;gap:6px;align-items:center">
-              <span><b>${t.stuck}</b>건 · ${t.tabName || ''} ${link}${meta}</span>
-              <button onclick="runOrderReconcile('${t.sheetId}')" style="font-size:.66rem;background:#16A34A;color:#fff;border:none;padding:2px 8px;border-radius:4px;cursor:pointer;flex-shrink:0">복구</button>
+              <span><b>${t.stuck}</b>건 · ${t.tabName || ''} ${link}${nm}${meta}</span>
+              <span style="display:flex;gap:4px;flex-shrink:0">${fixBtn}${csvBtn}</span>
             </div>`;
           }).join('')}
         </div>` : '<div style="margin-top:8px;color:#16A34A;font-size:.75rem">✅ 막힌 주문 없음</div>'}
@@ -642,6 +662,192 @@ async function loadOrderMirrorStatus() {
   } catch (err) {
     el.innerHTML = `<span style="color:#EF4444">로드 실패: ${err.message}</span>`;
   }
+}
+
+// ── 리뷰 이미지 수정요청 (리뷰어 → 관리자 승인 → [리뷰] 폴더 파일 교체) ──
+function _escReviewEdit(s){ const d = document.createElement('div'); d.textContent = (s == null ? '' : String(s)); return d.innerHTML; }
+
+// 현재 렌더된 수정요청(id→row) — 비교보기 모달에서 old/new 파일ID·메타 조회용
+let _reviewEditReqs = {};
+let _reEditCmpId = null;
+
+async function loadReviewEditRequests() {
+  const el = document.getElementById("reviewEditPanel");
+  const badge = document.getElementById("reviewEditBadge");
+  if (!el) return;
+  try {
+    const data = await gasGet({ action: "reviewEditList", status: "pending" });
+    if (!data || data.ok === false) { el.innerHTML = `<span style="color:var(--t3)">데이터 없음</span>`; return; }
+    const reqs = data.requests || [];
+    const n = data.pendingCount != null ? data.pendingCount : reqs.length;
+    if (badge) { badge.textContent = n; badge.classList.toggle("hidden", !n); }
+    if (reqs.length === 0) {
+      el.innerHTML = '<div style="color:#16A34A;font-size:.8rem"><i class="fas fa-check-circle"></i> 대기 중인 수정요청 없음</div>';
+      return;
+    }
+    _reviewEditReqs = {};
+    // 썸네일은 Google 썸네일 CDN을 1차(빠름), 서버 프록시를 폴백으로. 클릭 시 비교보기 모달.
+    const IMG = (id) => `${API_BASE_URL}/api/drive/image/${encodeURIComponent(id)}`;
+    const THUMB = (id) => `https://drive.google.com/thumbnail?id=${encodeURIComponent(id)}&sz=w400`;
+    const imgCell = (id, label, color, border, reqId) => id
+      ? `<div style="text-align:center"><div style="font-size:.64rem;color:${color};font-weight:700">${label}</div><img src="${THUMB(id)}" loading="lazy" onerror="this.onerror=null;this.src='${IMG(id)}'" style="width:104px;height:104px;object-fit:cover;border-radius:8px;border:${border};cursor:zoom-in" onclick="openReviewEditCompare('${reqId}')" title="비교보기"></div>`
+      : '';
+    el.innerHTML = reqs.map(r => {
+      _reviewEditReqs[r.id] = r;
+      const reason = r.reason ? `<div style="font-size:.72rem;color:#5B6472;margin-top:6px;background:#F8FAFC;border-radius:6px;padding:5px 8px">사유: ${_escReviewEdit(r.reason)}</div>` : '';
+      return `<div data-reqid="${r.id}" style="border:1px solid var(--border);border-radius:10px;padding:10px;margin-bottom:8px">
+        <div style="display:flex;justify-content:space-between;gap:6px;align-items:flex-start;margin-bottom:8px">
+          <div style="min-width:0">
+            <div style="font-weight:700;font-size:.8rem;color:var(--t1);overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${_escReviewEdit(r.campaign_label || r.tab_name || '')}</div>
+            <div style="font-size:.7rem;color:var(--t3)">${_escReviewEdit(r.reviewer_name || '리뷰어')} · 행 ${r.row_index || '-'} · ${_escReviewEdit(r.slot_key || 'review')}</div>
+          </div>
+          <div style="display:flex;gap:5px;flex-shrink:0">
+            <button onclick="openReviewEditCompare('${r.id}')" style="font-size:.72rem;background:#EAF1FF;color:#2f6df0;border:none;padding:5px 10px;border-radius:6px;cursor:pointer;font-weight:700">🔍 비교</button>
+            <button onclick="approveReviewEdit('${r.id}')" style="font-size:.72rem;background:#16A34A;color:#fff;border:none;padding:5px 12px;border-radius:6px;cursor:pointer;font-weight:700">승인</button>
+            <button onclick="rejectReviewEdit('${r.id}')" style="font-size:.72rem;background:#EF4444;color:#fff;border:none;padding:5px 10px;border-radius:6px;cursor:pointer">반려</button>
+          </div>
+        </div>
+        <div style="display:flex;gap:12px;align-items:center;justify-content:center">
+          ${imgCell(r.old_file_id, '현재', '#98A0AC', '1px solid #E5E7EB', r.id)}
+          <i class="fas fa-arrow-right" style="color:#3182f6"></i>
+          ${imgCell(r.new_file_id, '교체', '#16A34A', '2px solid #3182f6', r.id)}
+        </div>
+        ${reason}
+      </div>`;
+    }).join('');
+  } catch (err) {
+    el.innerHTML = `<span style="color:#EF4444">로드 실패: ${err.message}</span>`;
+  }
+}
+
+// 낙관적 즉시 반영: 카드 제거 + 배지 감소(응답을 기다리지 않고 목록에서 사라지게)
+function _reviewEditRemoveCard(id) {
+  const el = document.getElementById("reviewEditPanel");
+  const badge = document.getElementById("reviewEditBadge");
+  if (!el) return;
+  const card = el.querySelector('[data-reqid="' + id + '"]');
+  if (card) card.remove();
+  if (badge) {
+    const n = Math.max(0, (parseInt(badge.textContent, 10) || 1) - 1);
+    badge.textContent = n;
+    badge.classList.toggle("hidden", !n);
+  }
+  if (!el.querySelector('[data-reqid]')) {
+    el.innerHTML = '<div style="color:#16A34A;font-size:.8rem"><i class="fas fa-check-circle"></i> 대기 중인 수정요청 없음</div>';
+  }
+}
+
+async function approveReviewEdit(id) {
+  if (!confirm('이 수정요청을 승인합니까?\n\n[리뷰] 폴더의 파일이 리뷰어가 올린 새 이미지로 교체되고,\n기존 파일은 [리뷰교체보관] 폴더로 이동됩니다(휴지통 아님·보관).')) return;
+  _reviewEditRemoveCard(id);   // 즉시 목록에서 제거(새로고침 불필요)
+  try {
+    const r = await gasPost({ action: "reviewEditApprove", id: id });
+    if (!r || r.ok === false) throw new Error((r && r.error) || '승인 실패');
+    showToast('승인 완료 — 리뷰 파일이 교체되었습니다', 'success');
+  } catch (e) {
+    showToast('승인 실패: ' + (e.message || '') + ' — 목록을 새로고침합니다', 'error');
+    loadReviewEditRequests();   // 실패 시 서버 상태로 복원
+  }
+}
+
+async function rejectReviewEdit(id) {
+  const note = prompt('반려 사유를 입력하세요 (리뷰어에게 표시됩니다):', '');
+  if (note === null) return;
+  _reviewEditRemoveCard(id);   // 즉시 목록에서 제거(새로고침 불필요)
+  try {
+    const r = await gasPost({ action: "reviewEditReject", id: id, note: note });
+    if (!r || r.ok === false) throw new Error((r && r.error) || '반려 실패');
+    showToast('반려 처리되었습니다', 'success');
+  } catch (e) {
+    showToast('반려 실패: ' + (e.message || '') + ' — 목록을 새로고침합니다', 'error');
+    loadReviewEditRequests();   // 실패 시 서버 상태로 복원
+  }
+}
+
+// ── 비교보기 모달(현재 ↔ 교체 좌우 나란히 확대) ──
+function _reviewEditEnsureCompareModal() {
+  if (document.getElementById('reCmpOvl')) return;
+  const st = document.createElement('style');
+  st.textContent =
+    '.re-cmp-ovl{position:fixed;inset:0;background:rgba(20,26,38,.62);z-index:5000;display:none;align-items:center;justify-content:center;padding:20px}' +
+    '.re-cmp-ovl.on{display:flex}' +
+    '.re-cmp-panel{background:#fff;border-radius:16px;box-shadow:0 20px 60px rgba(0,0,0,.35);width:100%;max-width:920px;max-height:92vh;display:flex;flex-direction:column;overflow:hidden}' +
+    '.re-cmp-head{display:flex;align-items:center;justify-content:space-between;gap:10px;padding:14px 16px;border-bottom:1px solid #E9ECF2}' +
+    '.re-cmp-h1{font-size:.92rem;font-weight:800;color:#191F28}.re-cmp-h2{font-size:.72rem;color:#98A0AC;margin-top:1px}' +
+    '.re-cmp-x{width:30px;height:30px;border-radius:8px;border:1px solid #E9ECF2;background:#fff;color:#98A0AC;font-size:1.2rem;line-height:1;cursor:pointer;flex-shrink:0}' +
+    '.re-cmp-body{display:flex;gap:10px;align-items:stretch;justify-content:center;padding:16px;overflow:auto;flex-wrap:wrap}' +
+    '.re-cmp-col{flex:1 1 340px;min-width:280px;display:flex;flex-direction:column}' +
+    '.re-cmp-cap{text-align:center;font-size:.72rem;font-weight:800;margin-bottom:7px}' +
+    '.re-cmp-cap.now{color:#98A0AC}.re-cmp-cap.new{color:#16A34A}' +
+    '.re-cmp-frame{flex:1;background:#F4F6FA;border:1px solid #E9ECF2;border-radius:10px;padding:10px;display:flex;align-items:flex-start;justify-content:center;min-height:200px}' +
+    '.re-cmp-frame.new{border-color:#3182f6}' +
+    '.re-cmp-frame img{max-width:100%;max-height:64vh;object-fit:contain;border-radius:6px;cursor:zoom-in;background:#fff}' +
+    '.re-cmp-arrow{align-self:center;color:#3182f6;font-size:1.3rem;flex:0 0 auto}' +
+    '.re-cmp-foot{display:flex;align-items:center;justify-content:space-between;gap:8px;padding:12px 16px;border-top:1px solid #E9ECF2;background:#FAFBFD;flex-wrap:wrap}' +
+    '.re-cmp-hint{font-size:.72rem;color:#98A0AC}' +
+    '.re-cmp-actions{display:flex;gap:8px}' +
+    '.re-cmp-btn{border:none;border-radius:8px;font-weight:800;font-size:.8rem;padding:9px 18px;cursor:pointer;color:#fff}' +
+    '.re-cmp-btn.ok{background:#16A34A}.re-cmp-btn.no{background:#EF4444}' +
+    '@media(max-width:640px){.re-cmp-arrow{display:none}}';
+  document.head.appendChild(st);
+
+  const ovl = document.createElement('div');
+  ovl.id = 'reCmpOvl';
+  ovl.className = 're-cmp-ovl';
+  ovl.innerHTML =
+    '<div class="re-cmp-panel">' +
+      '<div class="re-cmp-head"><div><div class="re-cmp-h1" id="reCmpTitle"></div><div class="re-cmp-h2" id="reCmpSub"></div></div>' +
+      '<button class="re-cmp-x" onclick="closeReviewEditCompare()" title="닫기">&times;</button></div>' +
+      '<div class="re-cmp-body">' +
+        '<div class="re-cmp-col"><div class="re-cmp-cap now">현재</div><div class="re-cmp-frame"><a id="reCmpOldLink" target="_blank" rel="noopener"><img id="reCmpOld" alt="현재 이미지"></a></div></div>' +
+        '<div class="re-cmp-arrow"><i class="fas fa-arrow-right"></i></div>' +
+        '<div class="re-cmp-col"><div class="re-cmp-cap new">교체</div><div class="re-cmp-frame new"><a id="reCmpNewLink" target="_blank" rel="noopener"><img id="reCmpNew" alt="교체 이미지"></a></div></div>' +
+      '</div>' +
+      '<div class="re-cmp-foot"><span class="re-cmp-hint">이미지 클릭 시 원본 새창에서 열림</span>' +
+      '<div class="re-cmp-actions"><button class="re-cmp-btn no" onclick="_reviewEditCompareReject()">반려</button><button class="re-cmp-btn ok" onclick="_reviewEditCompareApprove()">승인</button></div></div>' +
+    '</div>';
+  ovl.addEventListener('click', (e) => { if (e.target === ovl) closeReviewEditCompare(); });
+  document.addEventListener('keydown', (e) => { if (e.key === 'Escape') closeReviewEditCompare(); });
+  document.body.appendChild(ovl);
+}
+
+function openReviewEditCompare(id) {
+  const r = _reviewEditReqs[id];
+  if (!r) return;
+  _reEditCmpId = id;
+  _reviewEditEnsureCompareModal();
+  const P = (fid) => fid ? `${API_BASE_URL}/api/drive/image/${encodeURIComponent(fid)}` : '';
+  const T = (fid) => fid ? `https://drive.google.com/thumbnail?id=${encodeURIComponent(fid)}&sz=w1600` : '';
+  document.getElementById('reCmpTitle').textContent = r.campaign_label || r.tab_name || '';
+  document.getElementById('reCmpSub').textContent =
+    (r.reviewer_name || '리뷰어') + ' · 행 ' + (r.row_index || '-') + ' · ' + (r.slot_key || 'review');
+  const oldImg = document.getElementById('reCmpOld');
+  const newImg = document.getElementById('reCmpNew');
+  oldImg.onerror = function () { this.onerror = null; this.src = P(r.old_file_id); };
+  newImg.onerror = function () { this.onerror = null; this.src = P(r.new_file_id); };
+  oldImg.src = T(r.old_file_id);
+  newImg.src = T(r.new_file_id);
+  document.getElementById('reCmpOldLink').href = P(r.old_file_id) || '#';
+  document.getElementById('reCmpNewLink').href = P(r.new_file_id) || '#';
+  document.getElementById('reCmpOvl').classList.add('on');
+  document.body.style.overflow = 'hidden';
+}
+
+function closeReviewEditCompare() {
+  const o = document.getElementById('reCmpOvl');
+  if (o) o.classList.remove('on');
+  document.body.style.overflow = '';
+}
+
+function _reviewEditCompareApprove() {
+  const id = _reEditCmpId;
+  if (id) approveReviewEdit(id);   // 자체 confirm → 확인 시 목록 카드 즉시 제거 + API
+  closeReviewEditCompare();
+}
+function _reviewEditCompareReject() {
+  const id = _reEditCmpId;
+  if (id) rejectReviewEdit(id);    // 자체 사유 prompt → 목록 카드 즉시 제거 + API
+  closeReviewEditCompare();
 }
 
 async function runOrderReconcile(sheetId) {
@@ -672,6 +878,176 @@ async function runQueueDrain() {
   } catch (err) {
     showToast("가속 드레인 실패: " + err.message, "error");
   }
+}
+
+// 노란배경(복구·수동추가) 행이 있는 탭 목록 CSV 다운로드 — 수동 확인 후 삭제용.
+//   format='csv'(탭 단위 요약) | 'detail.csv'(행 단위 상세). 인증 헤더 필요 → fetch+blob.
+async function downloadYellowRowsCsv(fmt) {
+  const format = fmt || "csv";
+  try {
+    const token = sessionStorage.getItem("admin_token");
+    const base = (typeof API_BASE_URL !== "undefined" && API_BASE_URL) ? API_BASE_URL : "";
+    const url = base + "/api/diag/yellow-rows-export?format=" + encodeURIComponent(format);
+    const res = await fetch(url, { headers: token ? { "Authorization": "Bearer " + token } : {} });
+    if (!res.ok) throw new Error("HTTP " + res.status);
+    const blob = await res.blob();
+    if (blob.size < 40) { showToast("노란 복구행 기록이 없습니다.", "info"); return; }
+    const dlUrl = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = dlUrl;
+    const day = new Date().toISOString().slice(0, 10);
+    a.download = (format === "detail.csv" ? "노란행_상세_" : "노란행_탭목록_") + day + ".csv";
+    document.body.appendChild(a); a.click(); a.remove();
+    setTimeout(() => URL.revokeObjectURL(dlUrl), 1000);
+  } catch (err) {
+    showToast("CSV 다운로드 실패: " + (err && err.message ? err.message : err), "error");
+  }
+}
+
+// 수동입력 필요(stuck_manual) 주문을 탭 단위 CSV로 다운로드 — order-stuck-export(미반영분, 상태 라벨 포함).
+//   자동복구가 포기한 주문을 사람이 시트에 붙여넣기 위한 목록. 인증 헤더 fetch→blob.
+async function downloadStuckManualCsv(sheetId, tabNameEnc) {
+  const sid = sheetId || '';
+  const tab = tabNameEnc ? decodeURIComponent(tabNameEnc) : '';
+  if (!sid || !tab) { showToast("탭 정보가 없어 CSV를 받을 수 없습니다.", "error"); return; }
+  try {
+    const token = sessionStorage.getItem("admin_token");
+    const base = (typeof API_BASE_URL !== "undefined" && API_BASE_URL) ? API_BASE_URL : "";
+    const url = base + "/api/diag/order-stuck-export?format=csv"
+      + "&sheetId=" + encodeURIComponent(sid) + "&tabName=" + encodeURIComponent(tab);
+    const res = await fetch(url, { headers: token ? { "Authorization": "Bearer " + token } : {} });
+    if (!res.ok) throw new Error("HTTP " + res.status);
+    const blob = await res.blob();
+    if (blob.size < 40) { showToast("해당 탭에 미반영 주문이 없습니다.", "info"); return; }
+    const dlUrl = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = dlUrl;
+    const day = new Date().toISOString().slice(0, 10);
+    a.download = "수동입력_" + tab.replace(/[\\/:*?"<>|]/g, "_").slice(0, 40) + "_" + day + ".csv";
+    document.body.appendChild(a); a.click(); a.remove();
+    setTimeout(() => URL.revokeObjectURL(dlUrl), 1000);
+  } catch (err) {
+    showToast("CSV 다운로드 실패: " + (err && err.message ? err.message : err), "error");
+  }
+}
+
+// 수동입력 필요 탭 '전체'를 탭별 CSV로 순차 다운로드(order-stuck-export가 탭 단위 필수라 반복 호출).
+async function downloadAllStuckManualCsv() {
+  const tabs = _stuckManualTabs || [];
+  if (!tabs.length) { showToast("수동입력 필요 주문이 없습니다.", "info"); return; }
+  if (tabs.length > 1 && !confirm(`수동입력 필요 탭 ${tabs.length}개의 CSV를 각각 받습니다. 진행할까요?`)) return;
+  for (const t of tabs) {
+    await downloadStuckManualCsv(t.sheetId, encodeURIComponent(t.tabName || ''));
+    await new Promise(r => setTimeout(r, 400)); // 브라우저 다중 다운로드 안정화
+  }
+}
+
+// ── 적체 노란행(복구) 일괄 삭제 ── 되돌릴 수 없음. 탭별로 서버가 현재 색 재확인 + DB 일치 시에만 삭제.
+let _yellowDelBackup = [];
+function _escH(s) { return String(s == null ? "" : s).replace(/[&<>"]/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c])); }
+
+async function runYellowRowsDelete(doDelete) {
+  const inp = document.getElementById("yellowDelBefore");
+  const beforeDateKst = (inp && inp.value) ? inp.value : "2026-06-30";
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(beforeDateKst)) { showToast("기준일을 YYYY-MM-DD로 입력하세요.", "error"); return; }
+  if (doDelete) {
+    if (!confirm(`[되돌릴 수 없음] ${beforeDateKst} 0시(KST) 이전 제출된 '적체(복구) 노란행'을 모든 탭에서 실제로 삭제합니다.\n\n· 시트의 현재 노란색을 재확인하고, DB 기록과 일치하는 탭만 삭제합니다(불일치 탭은 자동 건너뜀).\n· 삭제된 행 내용은 백업 CSV로 받을 수 있습니다.\n\n진행할까요?`)) return;
+    if (!confirm("정말 삭제를 실행합니다. 한 번 더 확인합니다. 계속할까요?")) return;
+  }
+  const token = sessionStorage.getItem("admin_token");
+  const base = (typeof API_BASE_URL !== "undefined" && API_BASE_URL) ? API_BASE_URL : "";
+  const hdr = token ? { "Authorization": "Bearer " + token } : {};
+  const resultEl = document.getElementById("yellowDelResult");
+  const setMsg = (h) => { if (resultEl) resultEl.innerHTML = h; };
+  setMsg('<i class="fas fa-spinner fa-spin"></i> 대상 탭 목록 불러오는 중…');
+
+  let items = [];
+  try {
+    const r = await fetch(base + "/api/diag/yellow-rows-export?format=json&source=reconcile", { headers: hdr });
+    if (!r.ok) throw new Error("HTTP " + r.status);
+    const j = await r.json();
+    items = (j && j.items) || [];
+  } catch (e) { setMsg('<span style="color:#DC2626">탭 목록 로드 실패: ' + _escH(e.message || e) + "</span>"); return; }
+  if (!items.length) { setMsg("복구(적체) 노란행이 있는 탭이 없습니다."); return; }
+
+  const callTab = async (it) => {
+    // busy(reconcile/queue 진행중)면 잠시 후 최대 2회 재시도
+    for (let attempt = 0; attempt < 3; attempt++) {
+      const r = await fetch(base + "/api/diag/yellow-rows-delete", {
+        method: "POST",
+        headers: Object.assign({ "Content-Type": "application/json" }, hdr),
+        body: JSON.stringify({ sheetId: it.sheetId, gid: it.gid, tabName: it.tabName, beforeDateKst, source: "reconcile", confirm: doDelete }),
+      });
+      const j = await r.json().catch(() => ({}));
+      if (!r.ok) { j._http = r.status; return j; }
+      if (j.skipped === "busy" && attempt < 2) { await new Promise(rs => setTimeout(rs, 1800)); continue; }
+      return j;
+    }
+  };
+
+  _yellowDelBackup = [];
+  let totalDeleted = 0, totalSkippedRows = 0, totalExtra = 0, doneTabs = 0;
+  const busyTabs = [], errorTabs = [], claimFailTabs = [], skipRowTabs = [];
+  for (const it of items) {
+    doneTabs++;
+    setMsg(`<i class="fas fa-spinner fa-spin"></i> ${doDelete ? "삭제" : "미리보기"} ${doneTabs}/${items.length} — ${_escH(it.tabName || "")} (누적 ${totalDeleted})`);
+    try {
+      const j = await callTab(it);
+      if (!j || j.ok === false || j._http) { errorTabs.push({ tab: it.tabName, msg: (j && j.error) || ("HTTP " + (j && j._http)) }); continue; }
+      if (j.skipped === "busy") { busyTabs.push({ tab: j.tab || it.tabName, url: it.sheetTabUrl }); continue; }
+      totalDeleted += doDelete ? (j.deleted || 0) : (j.wouldDelete || 0);
+      totalSkippedRows += (j.skippedCount || 0);
+      totalExtra += (j.extraYellow || 0);
+      if (j.skippedCount) skipRowTabs.push({ tab: j.tab || it.tabName, url: it.sheetTabUrl, n: j.skippedCount });
+      if (j.claimCleanupFailed) claimFailTabs.push({ tab: j.tab || it.tabName, url: it.sheetTabUrl });
+      if (doDelete && j.backup && j.backup.length) {
+        for (const bk of j.backup) _yellowDelBackup.push({ tab: j.tab || it.tabName, url: it.sheetTabUrl, row: bk.row, values: bk.values });
+      }
+    } catch (e) { errorTabs.push({ tab: it.tabName, msg: e.message || String(e) }); }
+  }
+
+  let html = `<div style="font-weight:600;color:${doDelete ? "#DC2626" : "#374151"}">${doDelete ? "삭제 완료" : "미리보기"} — 총 ${doDelete ? "삭제" : "예정"} ${totalDeleted}행 · 탭 ${items.length}개${totalSkippedRows ? ` · 건너뛴 행 ${totalSkippedRows}` : ""}${totalExtra ? ` · 기타노란행 ${totalExtra}` : ""}</div>`;
+  if (claimFailTabs.length) {
+    html += `<div style="margin-top:6px;color:#B91C1C;font-weight:700">⛔ DB 정리 실패 ${claimFailTabs.length}탭 — 시트는 삭제됐으나 DB가 불일치합니다. 해당 탭은 재실행하지 마시고 알려주세요:<ul style="margin:4px 0 0 16px">` +
+      claimFailTabs.map(m => `<li>${_escH(m.tab)} ${m.url ? `<a href="${m.url}" target="_blank" style="color:#2563EB">열기</a>` : ""}</li>`).join("") + "</ul></div>";
+  }
+  if (busyTabs.length) {
+    html += `<div style="margin-top:6px;color:#B45309"><b>⏳ 진행중 충돌로 건너뜀 ${busyTabs.length}탭</b> — 잠시 후 다시 실행하세요: ` +
+      busyTabs.map(m => _escH(m.tab)).join(", ") + "</div>";
+  }
+  if (skipRowTabs.length) {
+    html += `<div style="margin-top:6px;color:#6B7280"><b>일부 행 건너뜀</b>(노란색 아님/내용불일치 — 행 밀림 가능, 수동 확인): ` +
+      skipRowTabs.map(m => `${_escH(m.tab)}(${m.n})${m.url ? ` <a href="${m.url}" target="_blank" style="color:#2563EB">열기</a>` : ""}`).join(", ") + "</div>";
+  }
+  if (errorTabs.length) {
+    html += `<div style="margin-top:6px;color:#DC2626"><b>오류 ${errorTabs.length}탭</b>: ` + errorTabs.map(e => _escH(e.tab) + "(" + _escH(e.msg) + ")").join(", ") + "</div>";
+  }
+  if (doDelete && _yellowDelBackup.length) {
+    html += `<div style="margin-top:6px"><button onclick="downloadYellowDelBackup()" style="font-size:.72rem;background:#0ca678;color:#fff;border:none;padding:4px 10px;border-radius:6px;cursor:pointer"><i class="fas fa-download"></i> 삭제분 백업 CSV (${_yellowDelBackup.length}행)</button> <span style="color:#B45309">※ 삭제 직후 반드시 백업을 받아두세요</span></div>`;
+  }
+  setMsg(html);
+  showToast(`${doDelete ? "삭제" : "미리보기"} 완료 — ${totalDeleted}행${busyTabs.length ? `, 충돌 ${busyTabs.length}탭` : ""}${claimFailTabs.length ? `, ⛔DB불일치 ${claimFailTabs.length}` : ""}`, claimFailTabs.length ? "error" : (doDelete ? "success" : "info"));
+  if (doDelete) setTimeout(() => loadOrderMirrorStatus(), 1500);
+}
+
+function downloadYellowDelBackup() {
+  if (!_yellowDelBackup.length) return;
+  const esc2 = (v) => { v = String(v == null ? "" : v); return /[",\n\r]/.test(v) ? '"' + v.replace(/"/g, '""') + '"' : v; };
+  const maxCols = _yellowDelBackup.reduce((m, b) => Math.max(m, (b.values || []).length), 0);
+  const head = ["탭명", "시트탭URL", "시트행"];
+  for (let i = 0; i < maxCols; i++) head.push("C" + (i + 1));
+  const lines = [head.map(esc2).join(",")];
+  for (const b of _yellowDelBackup) {
+    const row = [b.tab, b.url || "", b.row].concat((b.values || []).map(v => v));
+    lines.push(row.map(esc2).join(","));
+  }
+  const csv = "﻿" + lines.join("\r\n");
+  const blob = new Blob([csv], { type: "text/csv;charset=utf-8" });
+  const dlUrl = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  a.href = dlUrl; a.download = "삭제분_백업_" + new Date().toISOString().slice(0, 10) + ".csv";
+  document.body.appendChild(a); a.click(); a.remove();
+  setTimeout(() => URL.revokeObjectURL(dlUrl), 1000);
 }
 
 async function loadSyncQueueStats() {
@@ -1053,6 +1429,7 @@ const _SSE_ICONS = {
   dirty_detected:{ icon: 'fa-bolt', color: '#D97706', label: '변경 감지' },
   cs_new_inquiry:{ icon: 'fa-comments', color: '#7C3AED', label: 'C/S 문의' },
   cs_message:    { icon: 'fa-comment-dots', color: '#7C3AED', label: 'C/S 메시지' },
+  review_edit_request: { icon: 'fa-images', color: '#3182f6', label: '리뷰 수정요청' },
   connected:     { icon: 'fa-plug', color: '#12b886', label: '연결됨' },
 };
 
@@ -1087,7 +1464,7 @@ function connectSSE() {
     };
 
     // 이벤트별 핸들러
-    ['review_submit', 'order_submit', 'order_update', 'image_extract', 'image_upload', 'index_build', 'system', 'dirty_detected', 'smart_build_done', 'dirty_auto_built', 'db_rebuild_progress', 'db_rebuild_done', 'cs_new_inquiry', 'cs_message'].forEach(function(evtType) {
+    ['review_submit', 'order_submit', 'order_update', 'image_extract', 'image_upload', 'index_build', 'system', 'dirty_detected', 'smart_build_done', 'dirty_auto_built', 'db_rebuild_progress', 'db_rebuild_done', 'cs_new_inquiry', 'cs_message', 'review_edit_request'].forEach(function(evtType) {
       _sseSource.addEventListener(evtType, function(event) {
         try {
           const data = JSON.parse(event.data);
@@ -1102,6 +1479,10 @@ function connectSSE() {
           if (evtType === 'order_update') {
             if (typeof loadWorkOrders === 'function') { try { loadWorkOrders(); } catch(_) {} }
             if (typeof loadDashWorkOrders === 'function') { try { loadDashWorkOrders(); } catch(_) {} }
+          }
+          // ★ 리뷰 이미지 수정요청 발생/처리 → 관리자 위젯 즉시 갱신
+          if (evtType === 'review_edit_request' && typeof loadReviewEditRequests === 'function') {
+            try { loadReviewEditRequests(); } catch(_) {}
           }
           // ★ Phase 4: dirty_detected 수신 시 대시보드 dirty 배지 갱신
           if (evtType === 'dirty_detected' && typeof _renderDirtyBadges === 'function') {

@@ -209,6 +209,34 @@ async function moveFile(fileId, newParentId, oldParentId) {
 }
 
 /**
+ * 파일의 부모 폴더/상태 조회 (OAuth 우선 → SA 폴백)
+ *   승인 시 새 파일 이동의 멱등성 확보용 — 이미 대상 폴더에 있으면 재이동을 건너뛴다
+ *   (크래시 후 재시도 시 removeParents 불일치로 실패하는 것 방지).
+ * @returns {{ id, parents:string[], name, trashed }}
+ */
+async function getFileParents(fileId) {
+  const params = { fileId, fields: 'id, parents, name, trashed', supportsAllDrives: true };
+
+  const oauth = _getOAuthDrive();
+  if (oauth) {
+    try {
+      const res = await oauth.files.get(params);
+      return { parents: [], ...res.data };
+    } catch (oauthErr) {
+      logger.warn(`[Drive] OAuth 부모 조회 실패 (SA 재시도): ${oauthErr.message}`);
+    }
+  }
+
+  const sa = _getReadDrive();
+  if (sa) {
+    const res = await sa.files.get(params);
+    return { parents: [], ...res.data };
+  }
+
+  throw new Error('Google Drive API가 설정되지 않았습니다. (OAuth 또는 SA 필요)');
+}
+
+/**
  * 폴더 이름으로 검색 (특정 부모 폴더 내)
  * SA로 검색 시도 → 실패 시 OAuth로 재시도
  */
@@ -1310,6 +1338,7 @@ module.exports = {
   renameFile,
   moveFile,
   copyFile,
+  getFileParents,
   findFolderByName,
   uploadFileBase64,
   setFolderAnyoneReader,

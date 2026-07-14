@@ -18,6 +18,16 @@ function _pct(done, total) {
 ══════════════════════════════════════════ */
 const SYSTEM_NOTICES = [
   {
+    version: "2026-07-01-dbfirst",
+    date: "2026-07-01",
+    title: "신기능 — 캠페인탭 참여자 명단을 시스템에서 직접 관리 (테스트 단계)",
+    changes: [
+      { type: "feat", text: "시트 참여자 명단을 시스템으로 가져와 화면에서 보기·추가/수정/삭제·리뷰제출/입금 체크 (최고관리자 전용)" },
+      { type: "feat", text: "직원 안내서(유저플로우) 제공 — 공지 팝업의 '직원 안내서 보기' 또는 db-first-guide.html" },
+      { type: "warn", text: "안전 테스트 단계: 모든 동작이 테스트 저장공간에만 반영 → 리뷰어·구글시트·주문에 영향 없음" },
+    ]
+  },
+  {
     version: "2026-05-06-4",
     date: "2026-05-06",
     title: "모바일 리뷰 제출 시간초과 오류 해결",
@@ -111,6 +121,24 @@ function checkAndShowNotice() {
   }
 }
 
+// ★ 신기능 안내 강제 팝업 (캠페인탭 참여자 명단 / DB-first) — 확인 전까지 로그인 시마다 표시.
+const DBFIRST_GUIDE_VERSION = "v1";
+function _showDbFirstGuidePopup() {
+  try {
+    if (localStorage.getItem("dbfirst_guide_seen") === DBFIRST_GUIDE_VERSION) return; // 다시 안 보기 처리됨
+    if (typeof show === "function") show("dbFirstGuideModal", "flex");
+    else { const m = document.getElementById("dbFirstGuideModal"); if (m) { m.classList.remove("hidden"); m.style.display = "flex"; } }
+  } catch (_) {}
+}
+function closeDbFirstGuide(markSeen) {
+  try { if (markSeen) localStorage.setItem("dbfirst_guide_seen", DBFIRST_GUIDE_VERSION); } catch (_) {}
+  if (typeof hide === "function") hide("dbFirstGuideModal");
+  else { const m = document.getElementById("dbFirstGuideModal"); if (m) { m.classList.add("hidden"); m.style.display = "none"; } }
+}
+function openDbFirstGuide() {
+  window.open("db-first-guide.html", "_blank");
+}
+
 function _renderNoticeList(content, dismissedVersion, collapsed) {
   // 모든 공지를 누적 표시 (최신이 위)
   let html = '';
@@ -162,12 +190,10 @@ function _toggleNoticeList() {
 
   const isCollapsed = section.dataset.collapsed === "true";
   if (isCollapsed) {
-    // 펼치기
+    // 펼치기 — 기본 높이(max-height 인라인값) + 스크롤 유지, 창 확장 없음
     const dismissedVersion = localStorage.getItem("notice_dismissed_version");
     _renderNoticeList(content, dismissedVersion, false);
     content.style.display = "block";
-    content.style.maxHeight = "400px";
-    content.style.overflowY = "auto";
     section.dataset.collapsed = "false";
     _updateNoticeButtons(false, false);
   } else {
@@ -540,6 +566,10 @@ function renderInfoGrid(row, tabDisplayName) {
   const grid = document.getElementById("infoGrid");
   grid.innerHTML = "";
 
+  // ★ 방어: row가 null/undefined/비객체여도 throw하지 않음(정보그리드 예외 방지).
+  if (!row || typeof row !== "object") row = {};
+  if (typeof tabDisplayName !== "string") tabDisplayName = tabDisplayName == null ? "" : String(tabDisplayName);
+
   // ── 전화번호 마스킹: 010-1234-5678 → 010-****-5678
   function maskPhone(val) {
     const s = String(val).trim();
@@ -895,6 +925,69 @@ function openRawMirror() {
   window.open("raw-mirror.html", "_blank");
 }
 
+/* ── Track B 통합 작업대(그림자) 열기 (자동 로그인 핸드오프) ── */
+function openWorkdesk() {
+  const token = sessionStorage.getItem("admin_token") || "";
+  if (!token || !isAdminLoggedIn()) {
+    showToast("관리자 로그인이 필요합니다.", "warning");
+    return;
+  }
+  try {
+    localStorage.setItem("raw_sso", JSON.stringify({
+      token,
+      name: getAdminName(),
+      role: getAdminRole(),
+      ts: Date.now()
+    }));
+  } catch (e) { /* localStorage 불가 시에도 페이지 자체 로그인으로 폴백 */ }
+  window.open("workdesk.html", "_blank");
+}
+
+/* ── 시트 API 쿼터 모니터(45/분 실시간 사용량·출처·잔량) — 인페이지 팝업(iframe) ── */
+function openThrottleMonitor() {
+  const token = sessionStorage.getItem("admin_token") || "";
+  if (!token || !isAdminLoggedIn()) { showToast("관리자 로그인이 필요합니다.", "warning"); return; }
+  try {
+    localStorage.setItem("raw_sso", JSON.stringify({ token, name: getAdminName(), role: getAdminRole(), ts: Date.now() }));
+  } catch (e) { /* 폴백: 페이지에서 로그인 */ }
+
+  let ov = document.getElementById("throttleMonitorOverlay");
+  if (!ov) {
+    ov = document.createElement("div");
+    ov.id = "throttleMonitorOverlay";
+    ov.style.cssText = "position:fixed;inset:0;background:rgba(15,23,42,.55);z-index:10500;display:flex;align-items:center;justify-content:center;padding:20px";
+    ov.addEventListener("click", (e) => { if (e.target === ov) closeThrottleMonitor(); });
+    ov.innerHTML = `
+      <div style="background:#fff;border-radius:14px;width:1080px;max-width:96vw;height:86vh;display:flex;flex-direction:column;overflow:hidden;box-shadow:0 14px 44px rgba(0,0,0,.3)">
+        <div style="padding:11px 16px;border-bottom:1px solid #eef2f7;display:flex;align-items:center;gap:8px;flex-shrink:0">
+          <i class="fas fa-gauge-high" style="color:#3182f6"></i>
+          <span style="font-weight:700;font-size:.92rem;color:var(--t1)">시트API 모니터</span>
+          <span style="font-size:.7rem;color:var(--t3)">구글 시트 API 45/분 쿼터 실시간 사용량·출처·잔량</span>
+          <div style="margin-left:auto;display:flex;gap:6px">
+            <button onclick="window.open('throttle-monitor.html','_blank')" title="새 창으로 열기" style="width:30px;height:30px;background:#F3F4F6;border:none;border-radius:8px;cursor:pointer;color:#6B7280"><i class="fas fa-up-right-from-square"></i></button>
+            <button onclick="closeThrottleMonitor()" title="닫기" style="width:30px;height:30px;background:#F3F4F6;border:none;border-radius:8px;cursor:pointer;color:#6B7280"><i class="fas fa-times"></i></button>
+          </div>
+        </div>
+        <iframe id="throttleMonitorFrame" src="" style="flex:1;border:none;width:100%"></iframe>
+      </div>`;
+    document.body.appendChild(ov);
+  }
+  ov.style.display = "flex";
+  // 열 때마다 새로 로드(SSO 토큰 최신 반영)
+  const frame = document.getElementById("throttleMonitorFrame");
+  if (frame) frame.src = "throttle-monitor.html";
+}
+
+function closeThrottleMonitor() {
+  const ov = document.getElementById("throttleMonitorOverlay");
+  if (ov) {
+    ov.style.display = "none";
+    // 폴링 중단을 위해 iframe 언로드
+    const frame = document.getElementById("throttleMonitorFrame");
+    if (frame) frame.src = "about:blank";
+  }
+}
+
 /* ── 관리자 로그인 모달 열기 ── */
 function openAdminLogin() {
   if (isAdminLoggedIn()) { enterAdminScreen(); return; }
@@ -983,6 +1076,9 @@ function enterAdminScreen() {
 
   // ★ 관리자 공지 팝업 (DB 기반, 마스터가 작성한 공지)
   setTimeout(_checkAdminNoticePopup, 400);
+
+  // ★ 신기능 안내 강제 팝업 (캠페인탭 참여자 명단) — 확인 전까지 표시
+  setTimeout(_showDbFirstGuidePopup, 700);
 
   // ── Phase 5/6: 시스템 모니터링 + API 메트릭 자동 로드 ──
   if (typeof loadSystemMonitor === 'function') {
@@ -1279,9 +1375,9 @@ function switchAdminTab(tabName) {
   if (tabName === "recruit")   { loadRecruitList(); loadRecruitTabOptions(); }
   if (tabName === "work-orders") { try { loadWorkOrders(); } catch(_){} }
   if (tabName === "payment")   initPaymentPanel();
-  if (tabName === "dashboard") { try { loadTabDashboard(); } catch(_){} try { loadSystemMonitor(); } catch(_){} try { loadStatsOverview(); } catch(_){} try { loadDashWorkOrders(); } catch(_){} }
+  if (tabName === "dashboard") { try { loadTabDashboard(); } catch(_){} try { loadSystemMonitor(); } catch(_){} try { loadStatsOverview(); } catch(_){} try { loadDashWorkOrders(); } catch(_){} try { loadReviewerNoticesAdmin(); } catch(_){} }
   if (tabName === "archive")   { try { loadArchiveList(); } catch(_){} try { _loadArchiveHistory(); } catch(_){} }
-  if (tabName === "settings")  { try { loadUnrecognizedTabs(); } catch(_){} try { loadKeywordList(); } catch(_){} try { loadCompanyBusinessNo(); } catch(_){} }
+  if (tabName === "settings")  { try { loadUnrecognizedTabs(); } catch(_){} try { loadMappingCoverage(); } catch(_){} try { loadKeywordList(); } catch(_){} try { loadCompanyBusinessNo(); } catch(_){} }
   if (tabName === "errorlogs") { try { loadErrorLogs(); } catch(_){} }
   if (tabName === "order-ledger") { try { loadOrderLedger(); } catch(_){} }
   // ★ 컨텍스트 툴바 업데이트
@@ -2608,6 +2704,7 @@ async function loadAdminDashboard() {
   // ★ v11.5: 캠페인 탭 관리 UI로 통합 — 대시보드 메인은 loadTabDashboard()가 담당
   try { await loadTabDashboard(); } catch(_){}
   try { loadDashWorkOrders(); } catch(_){}
+  try { loadReviewerNoticesAdmin(); } catch(_){}
 
   if (!isAdminLoggedIn()) { showToast("세션이 만료되었습니다. 다시 로그인하세요.", "warning"); exitAdmin(); return; }
   
@@ -11313,6 +11410,56 @@ async function saveCompanyBusinessNo() {
   }
 }
 
+/* ── 컬럼매핑 현황 (컬럼 판정 DB화 1단계 관측) ──
+   활성 탭별 매핑 보유율 + 출처(자동기록/수동) + 드리프트(기록≠현재 시트 → 키워드 폴백 중) 목록 */
+async function loadMappingCoverage() {
+  const wrap = document.getElementById('mappingCoverageWrap');
+  if (!wrap) return;
+  wrap.innerHTML = '<div style="text-align:center;padding:12px;color:var(--t3)"><i class="fas fa-circle-notch fa-spin"></i> 불러오는 중...</div>';
+  try {
+    const data = await gasGet({ action: 'mappingCoverage' });
+    if (!data.ok) {
+      wrap.innerHTML = `<div style="padding:12px;color:#EF4444"><i class="fas fa-exclamation-circle"></i> ${escHtml(data.error || '조회 실패')}</div>`;
+      return;
+    }
+    const s = data.stats || {};
+    const tabs = data.tabs || [];
+    const drifting = tabs.filter(t => (t.drift || []).length > 0);
+
+    const chip = (label, val, color) =>
+      `<div style="flex:1 1 110px;min-width:100px;border:1px solid #E5E7EB;border-radius:8px;padding:8px 10px;background:var(--bg2,#fff)">
+        <div style="font-size:.68rem;color:var(--t3)">${label}</div>
+        <div style="font-size:1.05rem;font-weight:700;color:${color || 'var(--t1)'}">${val}</div>
+      </div>`;
+
+    let html = `<div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:10px">`
+      + chip('활성 탭', s.total ?? 0)
+      + chip('매핑 기록됨', `${s.mapped ?? 0} (자동 ${s.byProvenance?.auto ?? 0} · 수동 ${s.byProvenance?.manual ?? 0})`, '#0ca678')
+      + chip('미기록', s.unmapped ?? 0, (s.unmapped ? '#D97706' : undefined))
+      + chip('gid 없음(기록 불가)', s.noGid ?? 0, (s.noGid ? '#6B7280' : undefined))
+      + chip('⚠ 드리프트', s.drifting ?? 0, (s.drifting ? '#DC2626' : '#0ca678'))
+      + `</div>`;
+
+    if (drifting.length === 0) {
+      html += '<div style="padding:8px 4px;color:var(--t3)"><i class="fas fa-check-circle" style="color:#12b886"></i> 드리프트 없음 — 모든 기록이 현재 시트 구조와 일치합니다.</div>';
+    } else {
+      html += `<div style="font-size:.75rem;color:var(--t3);margin:4px 0 6px">⚠ 드리프트 탭 ${drifting.length}건 — 시트 구조가 기록과 어긋나 해당 항목은 임시(키워드) 방식으로 감지 중. 컬럼 매핑에서 재확인하세요.</div>`;
+      drifting.forEach(t => {
+        const fields = (t.drift || []).map(d => `${escHtml(d.field)}(${escHtml(d.reason)})`).join(', ');
+        const mapUrl = `raw-mirror.html?sheetId=${encodeURIComponent(t.sheetId || '')}&gid=${encodeURIComponent(t.tabGid || '')}`;
+        html += `<div style="display:flex;align-items:center;gap:8px;padding:7px 10px;border:1px solid #FDE68A;background:#FFFBEB;border-radius:8px;margin-bottom:6px;flex-wrap:wrap">
+          <span style="font-weight:600">${escHtml(t.campaignName || '')} / ${escHtml(t.tabName || '')}</span>
+          <span style="font-size:.72rem;color:#92400E">${fields}</span>
+          <a href="${mapUrl}" target="_blank" style="margin-left:auto;font-size:.74rem;color:#1D4ED8;text-decoration:underline;white-space:nowrap">컬럼 매핑 열기</a>
+        </div>`;
+      });
+    }
+    wrap.innerHTML = html;
+  } catch (e) {
+    wrap.innerHTML = `<div style="padding:12px;color:#EF4444"><i class="fas fa-exclamation-circle"></i> ${escHtml(e.message || '조회 실패')}</div>`;
+  }
+}
+
 async function loadUnrecognizedTabs() {
   const wrap = document.getElementById('unrecogListWrap');
   if (!wrap) return;
@@ -12439,13 +12586,11 @@ async function loadTabDashboard() {
     if (kpiEl) {
       const rate = _pct(s.totalSubmitted, s.totalRows);
       const payRate = _pct(s.totalPaid, s.totalSubmitted);
-      const noFolder = s.noFolder || 0;
       kpiEl.innerHTML = [
         _kpiCard("전체 탭", s.total, "#1D4ED8", "fa-list"),
         _kpiCard("활성", s.active, "#0ca678", "fa-play-circle"),
         _kpiCard("인덱스", s.indexed, "#3182f6", "fa-database"),
         _kpiCard("미지정", s.noManager, "#9CA3AF", "fa-user-slash"),
-        _kpiCard("폴더 미설정", noFolder, noFolder>0?"#D97706":"#0ca678", "fa-folder-open"),
         _kpiCard("제출률", `${rate}%`, rate>=80?"#0ca678":rate>=50?"#D97706":"#DC2626", "fa-chart-pie"),
         _kpiCard("입금률", `${payRate}%`, payRate>=80?"#0ca678":payRate>=50?"#D97706":"#DC2626", "fa-coins"),
       ].join("");
@@ -13053,7 +13198,11 @@ function _cellVal(t, col) {
     // ★ 차수별 행이면 해당 차수의 인원/제출 표시
     const rc = t._isRoundRow ? (t._roundTotal || 0) : (t.row_count || 0);
     const sc = t._isRoundRow ? (t._roundSubmitted || 0) : (t.submitted_count || 0);
-    if (rc === 0) return '<span style="color:#D1D5DB">—</span>';
+    // ★ 컬럼매핑 드리프트 배지 — 저장된 컬럼 기록과 시트 구조가 어긋나 키워드 폴백 동작 중(탭 행에만)
+    const driftBadge = (!t._isRoundRow && Array.isArray(t.detect_drift) && t.detect_drift.length > 0)
+      ? ` <span style="color:#D97706;cursor:help;font-size:.72rem" title="컬럼매핑 드리프트 — 시트 구조가 기록과 달라 임시(키워드) 방식으로 세는 중. 설정 탭 › 컬럼매핑 현황에서 확인하세요">⚠</span>`
+      : '';
+    if (rc === 0) return '<span style="color:#D1D5DB">—</span>' + driftBadge;
     const pct = _pct(sc, rc);
     const clr = pct >= 80 ? "#0ca678" : pct >= 50 ? "#D97706" : "#DC2626";
     const pending = rc - sc;
@@ -13062,9 +13211,9 @@ function _cellVal(t, col) {
       const sid = escHtml(t.sheet_id);
       const tn = escHtml(t.tab_name);
       const rd = t._isRoundRow ? escHtml(t._roundLabel || '') : '';
-      return `<span style="font-weight:600;cursor:pointer;text-decoration:underline;text-decoration-style:dotted;text-underline-offset:3px" onclick="event.stopPropagation();_showPendingReviewersPopup('${sid}','${tn}',${rc},${sc},'${rd}')" title="클릭하여 미제출자 ${pending}명 확인">${sc}/${rc}</span> <span style="color:${clr};font-size:.68rem">(${pct}%)</span>`;
+      return `<span style="font-weight:600;cursor:pointer;text-decoration:underline;text-decoration-style:dotted;text-underline-offset:3px" onclick="event.stopPropagation();_showPendingReviewersPopup('${sid}','${tn}',${rc},${sc},'${rd}')" title="클릭하여 미제출자 ${pending}명 확인">${sc}/${rc}</span> <span style="color:${clr};font-size:.68rem">(${pct}%)</span>${driftBadge}`;
     }
-    return `<span style="font-weight:600">${sc}/${rc}</span> <span style="color:${clr};font-size:.68rem">(${pct}%)</span>`;
+    return `<span style="font-weight:600">${sc}/${rc}</span> <span style="color:${clr};font-size:.68rem">(${pct}%)</span>${driftBadge}`;
   }
   if (k === "_paid") {
     // ★ 입금 현황: paid_count / row_count
@@ -16875,5 +17024,135 @@ async function _relocateApplyTab(i) {
   } catch (e) {
     _relocateScanResults[key] = Object.assign({}, prev, { status: 'error', error: e.message });
     _relocateUpdateRow(i); _relocateSaveScan();
+  }
+}
+
+/* ══════════════════════════════════════════════════════════════
+   ★ 리뷰어 소식·공지 관리 (관리자) — 리뷰어 홈 상단 노출
+   ══════════════════════════════════════════════════════════════ */
+let _rvNotices = [];
+
+async function loadReviewerNoticesAdmin() {
+  const wrap = document.getElementById("rvNoticeList");
+  if (!wrap) return;
+  try {
+    const data = await gasGet({ action: "reviewerNoticesAll" });
+    if (!data || data.ok === false) throw new Error((data && data.error) || "불러오기 실패");
+    _rvNotices = data.notices || [];
+    _renderReviewerNoticesAdmin(_rvNotices);
+  } catch (err) {
+    wrap.innerHTML = `<div style="text-align:center;color:#EF4444;font-size:.8rem;padding:10px">오류: ${escHtml(err.message)}</div>`;
+  }
+}
+
+function _renderReviewerNoticesAdmin(list) {
+  const wrap = document.getElementById("rvNoticeList");
+  if (!wrap) return;
+  if (!list.length) {
+    wrap.innerHTML = '<div style="text-align:center;color:#9CA3AF;font-size:.8rem;padding:10px">등록된 공지가 없습니다</div>';
+    return;
+  }
+  wrap.innerHTML = list.map(n => {
+    const d = n.createdAt ? new Date(n.createdAt).toLocaleDateString("ko-KR", { year:'2-digit', month:'2-digit', day:'2-digit' }) : "";
+    const hidden = !n.active;
+    return `<div style="border:1px solid ${hidden ? '#E5E7EB' : '#DDD6FE'};background:${hidden ? '#F9FAFB' : '#fff'};border-radius:9px;padding:10px 12px;margin-bottom:8px;opacity:${hidden ? '.6' : '1'}">
+      <div style="display:flex;align-items:center;gap:6px;margin-bottom:4px">
+        ${n.pinned ? '<span style="font-size:.62rem;background:#FEF3C7;color:#92400E;font-weight:700;padding:1px 5px;border-radius:5px">📌 고정</span>' : ''}
+        ${hidden ? '<span style="font-size:.62rem;background:#F3F4F6;color:#6B7280;font-weight:700;padding:1px 5px;border-radius:5px">숨김</span>' : '<span style="font-size:.62rem;background:#D1FAE5;color:#065F46;font-weight:700;padding:1px 5px;border-radius:5px">노출중</span>'}
+        <span style="font-weight:700;color:var(--t1);font-size:.83rem;flex:1;min-width:0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${escHtml(n.title || '(제목 없음)')}</span>
+        <span style="font-size:.66rem;color:#9CA3AF;flex-shrink:0">${d}</span>
+      </div>
+      ${n.body ? `<div style="font-size:.76rem;color:var(--t2);line-height:1.5;white-space:pre-wrap;word-break:break-word;margin-bottom:6px">${escHtml(n.body)}</div>` : ''}
+      <div style="display:flex;gap:5px;justify-content:flex-end">
+        <button onclick="toggleReviewerNotice('${n.id}')" style="padding:3px 9px;background:#F3F4F6;color:#374151;border:none;border-radius:6px;font-size:.68rem;font-weight:600;cursor:pointer">${hidden ? '노출' : '숨김'}</button>
+        <button onclick="editReviewerNotice('${n.id}')" style="padding:3px 9px;background:#EFF6FF;color:#2563EB;border:1px solid #BFDBFE;border-radius:6px;font-size:.68rem;font-weight:600;cursor:pointer">수정</button>
+        <button onclick="deleteReviewerNotice('${n.id}')" style="padding:3px 9px;background:#FEF2F2;color:#DC2626;border:1px solid #FECACA;border-radius:6px;font-size:.68rem;font-weight:600;cursor:pointer">삭제</button>
+      </div>
+    </div>`;
+  }).join("");
+}
+
+async function saveReviewerNotice() {
+  const id = (document.getElementById("rvNoticeEditId") || {}).value || "";
+  const title = (document.getElementById("rvNoticeTitle") || {}).value || "";
+  const body = (document.getElementById("rvNoticeBody") || {}).value || "";
+  const pinned = !!(document.getElementById("rvNoticePinned") || {}).checked;
+  if (!title.trim() && !body.trim()) { showToast("제목 또는 내용을 입력하세요", true); return; }
+  const btn = document.getElementById("rvNoticeSaveBtn");
+  if (btn) { btn.disabled = true; }
+  try {
+    const payload = { action: "reviewerNoticeSave", title, body, pinned };
+    if (id) payload.id = id;
+    const data = await gasPost(payload);
+    if (!data || data.ok === false) throw new Error((data && data.error) || "저장 실패");
+    showToast(id ? "공지가 수정되었습니다" : "공지가 게시되었습니다");
+    cancelReviewerNoticeEdit();
+    loadReviewerNoticesAdmin();
+  } catch (err) {
+    showToast("저장 오류: " + err.message, true);
+  } finally {
+    if (btn) btn.disabled = false;
+  }
+}
+
+function toggleReviewerNoticeForm() {
+  const wrap = document.getElementById("rvNoticeFormWrap");
+  if (!wrap) return;
+  const opening = wrap.style.display === "none";
+  if (opening) {
+    wrap.style.display = "";
+    const t = document.getElementById("rvNoticeTitle");
+    if (t) t.focus();
+  } else {
+    cancelReviewerNoticeEdit();
+  }
+}
+
+function editReviewerNotice(id) {
+  const n = _rvNotices.find(x => x.id === id);
+  if (!n) return;
+  const wrap = document.getElementById("rvNoticeFormWrap");
+  if (wrap) wrap.style.display = "";
+  document.getElementById("rvNoticeEditId").value = n.id;
+  document.getElementById("rvNoticeTitle").value = n.title || "";
+  document.getElementById("rvNoticeBody").value = n.body || "";
+  document.getElementById("rvNoticePinned").checked = !!n.pinned;
+  const c = document.getElementById("rvNoticeCancelBtn"); if (c) c.style.display = "";
+  const s = document.getElementById("rvNoticeSaveBtn"); if (s) s.innerHTML = '<i class="fas fa-check"></i> 수정 저장';
+  document.getElementById("rvNoticeTitle").scrollIntoView({ behavior: "smooth", block: "center" });
+}
+
+function cancelReviewerNoticeEdit() {
+  const idEl = document.getElementById("rvNoticeEditId"); if (idEl) idEl.value = "";
+  const t = document.getElementById("rvNoticeTitle"); if (t) t.value = "";
+  const b = document.getElementById("rvNoticeBody"); if (b) b.value = "";
+  const p = document.getElementById("rvNoticePinned"); if (p) p.checked = false;
+  const c = document.getElementById("rvNoticeCancelBtn"); if (c) c.style.display = "none";
+  const s = document.getElementById("rvNoticeSaveBtn"); if (s) s.innerHTML = '<i class="fas fa-paper-plane"></i> 게시';
+  const wrap = document.getElementById("rvNoticeFormWrap"); if (wrap) wrap.style.display = "none";
+}
+
+async function toggleReviewerNotice(id) {
+  const n = _rvNotices.find(x => x.id === id);
+  if (!n) return;
+  try {
+    const data = await gasPost({ action: "reviewerNoticeSave", id: n.id, title: n.title, body: n.body, pinned: n.pinned, active: !n.active });
+    if (!data || data.ok === false) throw new Error((data && data.error) || "변경 실패");
+    showToast(!n.active ? "노출로 변경했습니다" : "숨김으로 변경했습니다");
+    loadReviewerNoticesAdmin();
+  } catch (err) {
+    showToast("변경 오류: " + err.message, true);
+  }
+}
+
+async function deleteReviewerNotice(id) {
+  if (!confirm("이 공지를 삭제하시겠습니까?")) return;
+  try {
+    const data = await gasPost({ action: "reviewerNoticeDelete", id });
+    if (!data || data.ok === false) throw new Error((data && data.error) || "삭제 실패");
+    showToast("공지가 삭제되었습니다");
+    loadReviewerNoticesAdmin();
+  } catch (err) {
+    showToast("삭제 오류: " + err.message, true);
   }
 }

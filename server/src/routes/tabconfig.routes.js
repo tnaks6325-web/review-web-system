@@ -1271,6 +1271,7 @@ router.get('/dashboard', authMiddleware, async (req, res, next) => {
         tc.capture_slots,
         im.row_count, im.submitted_count, im.status AS index_status,
         im.built_at AS index_built_at, im.checksum,
+        im.detect_drift,
         COALESCE(paid.paid_count, 0) AS paid_count
       FROM tab_configs tc
       LEFT JOIN index_master im ON tc.sheet_id = im.sheet_id AND tc.tab_name = im.tab_name

@@ -702,6 +702,14 @@ router.post('/order', async (req, res, next) => {
       slotRowNumber: slotRowNumber || null,
       loginPhone8: loginPhone8 || '',
       loginName: loginName || '',
+      // ★ 참여형 캠페인 홀드 확정 문맥(전부 optional — 비참여 제출 무영향).
+      //   확정은 orderLedger 단일 트랜잭션 안에서 소유권 3중검증(applied·phone8·연결탭) 통과 시에만.
+      campaignHold: (b.campaignId && b.campaignApplicationId && b.holdToken) ? {
+        applicationId: parseInt(b.campaignApplicationId, 10),
+        campaignId: String(b.campaignId),
+        phone8: String(b.holdPhone8 || loginPhone8 || '').replace(/\D/g, '').slice(-8),
+        holdToken: String(b.holdToken).trim(),
+      } : undefined,
     });
 
     // ★ 신원 기록(recordParticipationLink/recordReviewIdentity)은 여기서 하지 않는다.
@@ -754,6 +762,7 @@ router.post('/order', async (req, res, next) => {
       sheetRow: ledger.sheetRow,
       orderSubmissionId: ledger.orderSubmissionId,
       mirrorStatus: queued ? 'queued' : (ledger.sheetRow ? 'failed' : 'pending_no_row'),
+      campaignHold: ledger.holdResult || null, // 'confirmed'|'late'|'tab_mismatch'|'error'|null — 확정 외에는 "구매는 접수됨, 운영자 확인 중" 안내
     });
 
     emitOrderSubmit({
@@ -771,7 +780,8 @@ router.post('/order', async (req, res, next) => {
         // ★ 상시 배치(ORDER_BATCH_AUTO=1): 주문은 배치 스케줄러가 탭별로 묶어 근실시간 반영
         //   (단건 펌프보다 throttle 효율 수십배). 미설정 시 기존 단건 펌프(되돌리기).
         if (process.env.ORDER_BATCH_AUTO === '1') {
-          require('../jobs/orderBatchScheduler').kickOrderBatch();
+          // ★ 공정화 #1: 제출한 탭을 타깃으로 전달 → 그 탭이 글로벌 우선순위 밖이어도 이 사이클에 직접 드레인(즉시성).
+          require('../jobs/orderBatchScheduler').kickOrderBatch(sheetId, tabName);
         } else {
           require('../jobs/queuePump').kickQueuePump();
         }

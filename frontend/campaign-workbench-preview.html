@@ -1,0 +1,177 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>캠페인탭 참여자 명단 (테스트 화면)</title>
+<style>
+  :root{ --ink:#1f2328; --mut:#656d76; --line:#d0d7de; --bg:#f6f8fa; --blue:#0b62d6; --green:#1a7f37; --amber:#9a6700; --red:#cf222e; }
+  *{box-sizing:border-box}
+  body{margin:0;font-family:'Apple SD Gothic Neo','Malgun Gothic',system-ui,sans-serif;color:var(--ink);background:var(--bg);padding:16px}
+  .wrap{max-width:1080px;margin:0 auto}
+  h1{font-size:19px;margin:0 0 2px}
+  .sub{color:var(--mut);font-size:13px;margin:0 0 12px}
+  .banner{background:#fff8c5;border:1px solid #eac54f;border-radius:8px;padding:8px 12px;font-size:12.5px;margin-bottom:12px}
+  .card{background:#fff;border:1px solid var(--line);border-radius:10px;padding:12px 14px;margin-bottom:12px}
+  select,input{padding:6px 9px;border:1px solid var(--line);border-radius:7px;font-size:13px}
+  button{border:0;border-radius:7px;padding:6px 12px;font-size:12.5px;font-weight:700;cursor:pointer;background:#eef1f4;color:#333}
+  button.p{background:var(--blue);color:#fff}
+  button.g{background:var(--green);color:#fff}
+  .row{display:flex;gap:8px;flex-wrap:wrap;align-items:center}
+  table{border-collapse:collapse;width:100%;font-size:12.5px;margin-top:8px}
+  th,td{border:1px solid var(--line);padding:5px 8px;text-align:left}
+  th{background:#eef1f4}
+  .chk{cursor:pointer;font-size:15px}
+  .meta{display:flex;gap:14px;flex-wrap:wrap;font-size:12.5px;color:#333;margin-top:6px}
+  .pill{background:#eef1f4;border-radius:20px;padding:2px 10px;font-size:12px}
+  .ok{color:var(--green)} .bad{color:var(--red)}
+  .login{max-width:320px;margin:60px auto;background:#fff;border:1px solid var(--line);border-radius:10px;padding:16px}
+  .login input{width:100%;margin:6px 0}
+  .muted{color:var(--mut);font-size:12px}
+  #msg{font-size:12.5px;min-height:16px;color:var(--blue)}
+  .help{background:#eef4ff;border:1px solid #cfe0ff;border-radius:8px;padding:8px 12px;font-size:12px;color:#33415c;margin-bottom:12px}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <h1>📋 캠페인탭 참여자 명단 <span style="font-size:12px;color:var(--mut)">테스트 화면 · 최고관리자 전용</span></h1>
+  <p class="sub">캠페인 참여자 명단을 <b>구글시트가 아니라 시스템에 직접 저장·수정</b>하는 걸 미리 시험해 보는 화면입니다.</p>
+  <div class="banner">⚠️ <b>안전 테스트 모드</b> — 여기서 하는 '명단 가져오기'와 체크 표시는 <b>테스트용 저장공간에만</b> 기록됩니다. 리뷰어·관리자 화면, 구글시트, 주문은 <b>전혀 바뀌지 않습니다.</b> 마음껏 눌러보셔도 됩니다.</div>
+
+  <div id="app" style="display:none">
+    <div class="help">
+      💡 <b>버튼 설명</b> &nbsp;·&nbsp; <b>미리보기</b>: 시트에서 몇 명이 들어올지 미리 봅니다(저장 안 함) &nbsp;·&nbsp;
+      <b>명단 가져오기</b>: 시트의 참여자 명단을 시스템으로 복사 &nbsp;·&nbsp;
+      <b>명단 보기</b>: 시스템에 저장된 명단 확인 &nbsp;·&nbsp;
+      <b>원본과 비교</b>: 시트 명단과 시스템 명단이 같은지 확인
+    </div>
+    <div class="card">
+      <div class="row">
+        <select id="tabSel" style="min-width:340px"><option>탭 불러오는 중…</option></select>
+        <button class="p" onclick="doDry()">미리보기</button>
+        <button class="g" onclick="doImport()">명단 가져오기</button>
+        <button onclick="doCompare()">원본과 비교</button>
+        <button onclick="loadList()">명단 보기</button>
+      </div>
+      <div id="msg"></div>
+      <div class="meta" id="meta"></div>
+    </div>
+
+    <div class="card">
+      <div class="row" style="justify-content:space-between">
+        <b>시스템에 저장된 참여자 명단</b>
+        <button class="g" onclick="toggleAdd()">➕ 참여자 추가</button>
+      </div>
+      <span class="muted">체크박스로 리뷰제출·입금 표시. ✎ 수정 · 🗑 삭제. 모두 테스트 저장공간에만 반영. 연락처는 뒷자리만.</span>
+      <div id="addForm" style="display:none;margin-top:8px;padding:10px;background:#f6faf6;border:1px solid #cfe6cf;border-radius:8px">
+        <div class="row">
+          <input id="a_name" placeholder="이름(인애드명)" style="width:150px">
+          <input id="a_phone" placeholder="연락처(010-…)" style="width:150px">
+          <input id="a_round" placeholder="차수" style="width:70px">
+          <input id="a_opt" placeholder="옵션" style="width:110px">
+          <input id="a_prod" placeholder="상품" style="width:120px">
+          <button class="g" onclick="doAdd()">추가</button>
+          <button onclick="toggleAdd()">취소</button>
+        </div>
+      </div>
+      <div id="grid" style="margin-top:8px"><div class="muted" style="padding:10px">탭을 고른 뒤 <b>명단 보기</b> 또는 <b>명단 가져오기</b>를 눌러주세요.</div></div>
+    </div>
+  </div>
+
+  <div id="loginBox" class="login" style="display:none">
+    <div style="font-weight:700;margin-bottom:6px">최고관리자 로그인</div>
+    <input id="n" placeholder="이름"><input id="p" type="password" placeholder="비밀번호">
+    <div id="lerr" class="bad" style="font-size:12px;min-height:14px"></div>
+    <button class="p" style="width:100%" onclick="doLogin()">로그인</button>
+  </div>
+</div>
+
+<script>
+const API_BASE = (location.hostname==='localhost') ? 'http://localhost:3000'
+  : (window.REVIEW_API_URL || 'https://sublime-magic-production-790b.up.railway.app');
+(function(){ try{ const raw=localStorage.getItem('raw_sso'); if(raw){ const s=JSON.parse(raw); if(s&&s.token) sessionStorage.setItem('admin_token', s.token); } }catch(_){}})();
+function tok(){ return sessionStorage.getItem('admin_token')||''; }
+function esc(v){ return String(v==null?'':v).replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c])); }
+function srcLabel(s){ return s==='manual' ? '직접수정' : (s==='order' ? '주문' : '가져옴'); }
+async function api(path, opts){ opts=opts||{}; opts.headers=Object.assign({'Authorization':'Bearer '+tok(),'Content-Type':'application/json'},opts.headers||{}); const r=await fetch(API_BASE+path,opts); return r.json(); }
+function msg(t,cls){ const m=document.getElementById('msg'); m.textContent=t; m.className=cls||''; }
+
+async function doLogin(){
+  const n=document.getElementById('n').value.trim(), p=document.getElementById('p').value;
+  try{ const r=await fetch(API_BASE+'/api/admin/login',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({name:n,pw:p})});
+    const j=await r.json(); if(j&&j.token){ sessionStorage.setItem('admin_token',j.token); start(); } else document.getElementById('lerr').textContent=(j&&j.error)||'로그인 실패'; }
+  catch(e){ document.getElementById('lerr').textContent='네트워크 오류'; }
+}
+function sel(){ const o=document.getElementById('tabSel').selectedOptions[0]; return o?{sheetId:o.dataset.sid,tabName:o.dataset.tab}:null; }
+
+async function start(){
+  document.getElementById('loginBox').style.display='none';
+  document.getElementById('app').style.display='block';
+  const j=await api('/api/participants/tabs');
+  if(!j||!j.ok){ msg('탭 목록을 불러오지 못했습니다(최고관리자 권한 필요)','bad'); return; }
+  const tabs=(j.tabs||[]);
+  const s=document.getElementById('tabSel');
+  s.innerHTML = tabs.map(t=>`<option data-sid="${esc(t.sheetId)}" data-tab="${esc(t.tabName)}">${esc(t.spreadsheetTitle)} · ${esc(t.tabName)}</option>`).join('') || '<option>진행 중 캠페인 탭이 없습니다</option>';
+}
+async function doDry(){ const t=sel(); if(!t)return; msg('미리보는 중…');
+  const j=await api('/api/participants/import',{method:'POST',body:JSON.stringify({sheetId:t.sheetId,tabName:t.tabName,dryRun:true})});
+  if(!j.ok){ msg('오류: '+(j.error||''),'bad'); return; }
+  document.getElementById('meta').innerHTML=`<span class="pill">시트 명단 ${j.indexRows}명</span><span class="pill">시스템 저장 ${j.existingInDb}명</span>`;
+  msg(`미리보기: 시트 참여자 ${j.indexRows}명을 가져올 수 있습니다. (아직 저장 안 함)`,'ok');
+}
+async function doImport(){ const t=sel(); if(!t)return; if(!confirm('시트의 참여자 명단을 시스템으로 가져옵니다.\n(구글시트·리뷰어에는 영향 없음) 진행할까요?'))return; msg('가져오는 중…');
+  const j=await api('/api/participants/import',{method:'POST',body:JSON.stringify({sheetId:t.sheetId,tabName:t.tabName})});
+  if(!j.ok){ msg('오류: '+(j.error||''),'bad'); return; }
+  msg(`가져오기 완료: 새로 ${j.inserted}명 · 갱신 ${j.updated}명 (합계 ${j.imported}명)`,'ok'); loadList();
+}
+async function doCompare(){ const t=sel(); if(!t)return;
+  const j=await api('/api/participants/compare?sheetId='+encodeURIComponent(t.sheetId)+'&tabName='+encodeURIComponent(t.tabName));
+  if(!j.ok){ msg('오류: '+(j.error||''),'bad'); return; }
+  document.getElementById('meta').innerHTML=`<span class="pill">시트 명단 ${j.indexRows}명</span><span class="pill">시스템 명단 ${j.dbRows}명</span><span class="pill">이름 일치 ${j.nameMatch}명</span><span class="pill">직접 수정 ${j.manualEdited}건</span><span class="pill ${j.inSync?'ok':'bad'}">${j.inSync?'같음 ✓':'다름'}</span>`;
+  msg(j.inSync?'시스템 명단이 시트 명단과 같습니다 ✓':'차이가 있습니다 — 다시 가져오거나, 직접 수정한 항목이 있습니다.','ok');
+}
+async function loadList(){ const t=sel(); if(!t)return;
+  const j=await api('/api/participants?sheetId='+encodeURIComponent(t.sheetId)+'&tabName='+encodeURIComponent(t.tabName));
+  const g=document.getElementById('grid');
+  if(!j.ok){ g.innerHTML='<div class="bad">오류: '+esc(j.error||'')+'</div>'; return; }
+  if(!j.items.length){ g.innerHTML='<div class="muted" style="padding:10px">아직 명단이 없습니다 — <b>명단 가져오기</b>를 눌러주세요.</div>'; return; }
+  window._rows = {}; j.items.forEach(r=>window._rows[r.id]=r);
+  g.innerHTML='<table><thead><tr><th>순번</th><th>참여자(인애드명)</th><th>연락처</th><th>차수</th><th>상품</th><th>리뷰제출</th><th>입금</th><th>구분</th><th>수정/삭제</th></tr></thead><tbody>'+
+    j.items.map(r=>`<tr>
+      <td>${r.seq}</td><td>${esc(r.reviewerName)}</td><td>${esc(r.phone8)}</td><td>${esc(r.round||'')}</td><td>${esc(r.productName||'')}</td>
+      <td class="chk" onclick="tog('${r.id}','sub',${!r.isSubmitted})" title="클릭해서 표시/해제">${r.isSubmitted?'✅':'⬜'}</td>
+      <td class="chk" onclick="tog('${r.id}','pay',${!r.isPaid})" title="클릭해서 표시/해제">${r.isPaid?'✅':'⬜'}</td>
+      <td><span class="pill">${esc(srcLabel(r.source))}</span></td>
+      <td><span class="chk" onclick="doEdit('${r.id}')" title="수정">✎</span> <span class="chk" onclick="doDelete('${r.id}','${esc(r.reviewerName)}')" title="삭제">🗑</span></td></tr>`).join('')+'</tbody></table>';
+}
+function toggleAdd(){ const f=document.getElementById('addForm'); f.style.display = f.style.display==='none'?'block':'none'; }
+async function doAdd(){ const t=sel(); if(!t)return;
+  const name=document.getElementById('a_name').value.trim(), phone=document.getElementById('a_phone').value.trim();
+  if(!name && !phone){ msg('이름 또는 연락처를 입력하세요','bad'); return; }
+  const body={sheetId:t.sheetId,tabName:t.tabName,reviewerName:name,phone,round:document.getElementById('a_round').value.trim(),optionText:document.getElementById('a_opt').value.trim(),productName:document.getElementById('a_prod').value.trim()};
+  const j=await api('/api/participants/add',{method:'POST',body:JSON.stringify(body)});
+  if(!j.ok){ msg('추가 실패: '+(j.error||''),'bad'); return; }
+  ['a_name','a_phone','a_round','a_opt','a_prod'].forEach(id=>document.getElementById(id).value='');
+  toggleAdd(); msg('참여자 추가됨 (테스트 저장공간) ✓','ok'); loadList();
+}
+async function doEdit(id){ const r=(window._rows||{})[id]; if(!r)return;
+  const name=prompt('이름(인애드명):', r.reviewerName||''); if(name===null)return;
+  const phone=prompt('연락처(빈칸=유지, 뒷자리만 저장):', ''); // 마스킹값 대신 새 값만
+  const round=prompt('차수:', r.round||''); if(round===null)return;
+  const prod=prompt('상품:', r.productName||''); if(prod===null)return;
+  const body={id, reviewerName:name, round, productName:prod}; if(phone && phone.trim()) body.phone=phone.trim();
+  const j=await api('/api/participants/update',{method:'POST',body:JSON.stringify(body)});
+  if(!j.ok){ msg('수정 실패: '+(j.error||''),'bad'); return; } msg('수정됨 (테스트 저장공간) ✓','ok'); loadList();
+}
+async function doDelete(id,name){ if(!confirm('"'+name+'" 참여자를 명단에서 삭제할까요?\n(테스트 저장공간에서만 삭제 — 시트·리뷰어 무영향)'))return;
+  const j=await api('/api/participants/delete',{method:'POST',body:JSON.stringify({id})});
+  if(!j.ok){ msg('삭제 실패: '+(j.error||''),'bad'); return; } msg('삭제됨 (테스트 저장공간) ✓','ok'); loadList();
+}
+async function tog(id,kind,val){ const body={id}; if(kind==='sub')body.isSubmitted=val; else body.isPaid=val;
+  const j=await api('/api/participants/status',{method:'POST',body:JSON.stringify(body)});
+  if(!j.ok){ msg('표시 저장 실패: '+(j.error||''),'bad'); return; } msg('표시 저장됨 (테스트 저장공간에만 반영) ✓','ok'); loadList();
+}
+if(tok()) start(); else document.getElementById('loginBox').style.display='block';
+</script>
+</body>
+</html>
