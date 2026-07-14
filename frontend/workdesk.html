@@ -219,6 +219,21 @@
   .throw{display:flex;align-items:center;gap:12px;margin-top:8px;flex-wrap:wrap}
   .thopt{font-size:12px;color:var(--muted);font-weight:600;display:flex;align-items:center;gap:5px;cursor:pointer}
   .unb{font-size:10px;font-weight:800;color:var(--accent-deep);background:var(--accent-soft);border:1px solid var(--accent-line);border-radius:999px;padding:0 6px;margin-left:6px;white-space:nowrap}
+  /* ── P2 정산 스텝퍼 ── */
+  .stpcard{border:1px solid var(--line);border-radius:13px;background:var(--card);padding:14px 16px}
+  .stpcard.nolink{display:flex;align-items:center;justify-content:space-between;gap:14px;flex-wrap:wrap}
+  .stpnl b{font-size:13px;display:block} .stpnl span{font-size:11.5px;color:var(--faint)}
+  .stprow{display:flex;align-items:stretch;gap:8px;flex-wrap:wrap}
+  .stpstep{flex:1;min-width:150px;display:flex;align-items:center;gap:10px;padding:10px 12px;border:1px solid var(--line);border-radius:11px;background:var(--card2)}
+  .stpstep.done{background:var(--safe-soft);border-color:transparent} .stpstep.wait{background:var(--card)} .stpstep.off{opacity:.6}
+  .stpic{width:26px;height:26px;border-radius:8px;display:grid;place-items:center;font-weight:800;font-size:13px;flex:none;background:var(--card);color:var(--faint);border:1px solid var(--line)}
+  .stpstep.done .stpic{background:var(--safe);color:#fff;border-color:transparent} .stpstep.wait .stpic{background:var(--accent-soft);color:var(--accent-deep);border-color:var(--accent-line)}
+  .stpk{font-size:11px;color:var(--muted);font-weight:600} .stpv{font-size:12.5px;font-weight:650;margin-top:1px} .stpoff{color:var(--faint);font-weight:400}
+  .stparrow{display:flex;align-items:center;color:var(--line2);font-weight:700} @media(max-width:820px){.stparrow{display:none}}
+  .stpfoot{display:flex;align-items:center;gap:8px;margin-top:11px;padding-top:10px;border-top:1px solid var(--line)} .stpby{font-size:11px;color:var(--faint);flex:1}
+  .lkrow{display:flex;align-items:center;justify-content:space-between;gap:10px;padding:10px 12px;border:1px solid var(--line);border-radius:10px;margin-bottom:6px;cursor:pointer} .lkrow:hover{background:var(--accent-soft);border-color:var(--accent-line)}
+  .lkinfo b{font-size:12.5px;display:block} .lkinfo span{font-size:11px;color:var(--faint)} .lkamt{font-size:12px;font-weight:700;color:var(--accent-deep);white-space:nowrap}
+  .setvis{font-size:11.5px;color:var(--muted);font-weight:600;display:flex;align-items:center;gap:5px;cursor:pointer;white-space:nowrap;flex:none;align-self:center}
 </style>
 </head>
 <body>
@@ -397,9 +412,94 @@ function renderWorkdesk(wd){
         <div class="cc s"><div><div class="lb">제출완료</div><div class="big">${c.submitted||0}<small>/ ${c.total||0}</small></div></div>${gaugeSvg(pS,null,'g-safe')}</div>
         <div class="cc p"><div><div class="lb">입금완료</div><div class="big">${c.paid||0}<small>/ ${c.total||0}</small></div></div>${gaugeSvg(pP,null,'')}</div>
       </div>`; })()}
+    <div id="settlementsec"></div>
     ${tableSection}
     <div id="threadsec"></div>`;
+  loadSettlement(STATE.cur);
   loadThread(STATE.cur);
+}
+
+// ══ P2 정산 파이프라인 스텝퍼 ══
+const _SETTLE_PAY={unpaid:['미입금','bad'],partial:['부분입금','warn'],paid:['입금완료','safe']};
+const _SETTLE_INV={not_issued:['미발행','warn'],issued:['발행완료','safe'],requested:['발행요청','warn']};
+const _SETTLE_Q={draft:['작성중','warn'],sent:['발송','ok'],accepted:['수락','safe'],rejected:['반려','bad'],expired:['만료','bad']};
+function _wonFmt(n){ return (Number(n)||0).toLocaleString('ko-KR')+'원'; }
+async function loadSettlement(t){
+  if(!t) return; const box=$('#settlementsec'); if(!box) return;
+  const r=await api(`/api/trackb/workdesk/settlement?sheetId=${encodeURIComponent(t.sheetId)}&tabName=${encodeURIComponent(t.tabName)}`).catch(()=>null);
+  if(!r||!r.ok){ box.innerHTML=''; return; }
+  STATE.settle={ data:r, tab:t }; renderSettlement();
+}
+function _step(n,label,state,sub){ // state: 'done'|'wait'|'off'
+  const ic=state==='done'?'✓':(state==='wait'?'…':'—');
+  return `<div class="stpstep ${state}"><div class="stpic">${ic}</div><div class="stpmeta"><div class="stpk">${esc(label)}</div><div class="stpv">${sub||'<span class="stpoff">—</span>'}</div></div></div>`;
+}
+function renderSettlement(){
+  const st=STATE.settle; if(!st) return; const box=$('#settlementsec'); if(!box) return; const d=st.data;
+  const canLink=STATE.role!=='advertiser';
+  if(d.hidden){ box.innerHTML=`<div class="sect" style="margin-top:16px"><div class="st">정산</div><div class="stpcard"><div class="empty" style="padding:16px">정산 정보는 비공개로 설정되어 있습니다.</div></div></div>`; return; }
+  if(!d.linked){
+    box.innerHTML=`<div class="sect" style="margin-top:16px"><div class="st">정산</div>
+      <div class="stpcard nolink"><div class="stpnl"><b>연결된 계약이 없습니다.</b><span>인트라넷 계약(C-번호)을 연결하면 견적·계산서·입금 상태가 여기 표시됩니다.</span></div>
+      ${canLink?`<button class="btn pri" onclick="openLinkModal()">계약 연결</button>`:''}</div></div>`;
+    return;
+  }
+  const co=d.closeout, q=d.quote, inv=d.invoice, pay=d.payment;
+  const coSub=co&&co.date?`${esc(String(co.date).slice(0,10))} · ${co.rowCount||0}건`:(co?'<span class="stpoff">미생성</span>':'<span class="stpoff">—</span>');
+  const qSub=q&&q.quoteNumber?`${esc(q.quoteNumber)}${q.status?` · <span class="bb ${(_SETTLE_Q[q.status]||['',''])[1]}">${(_SETTLE_Q[q.status]||[q.status])[0]}</span>`:''}`:(d.quoteId?'<span class="stpoff">조회 실패</span>':'<span class="stpoff">미연결</span>');
+  const invSub=inv?`<span class="bb ${(_SETTLE_INV[inv.status]||['','neutral'])[1]||'neutral'}">${(_SETTLE_INV[inv.status]||[inv.status])[0]}</span>${inv.date?` · ${esc(String(inv.date).slice(0,10))}`:''}`:'<span class="stpoff">—</span>';
+  const paySub=pay?`<span class="bb ${(_SETTLE_PAY[pay.status]||['','neutral'])[1]||'neutral'}">${(_SETTLE_PAY[pay.status]||[pay.status])[0]}</span>${pay.date?` · ${esc(String(pay.date).slice(0,10))}`:''}`:'<span class="stpoff">—</span>';
+  box.innerHTML=`<div class="sect" style="margin-top:16px"><div class="st">정산 ${d.contractNumber?`<span class="bb ok">${esc(d.contractNumber)}</span>`:''}${d.amount!=null?`<span class="bb">${_wonFmt(d.amount)}</span>`:''}${d.proxyDown?'<span class="bb warn" title="인트라넷 조회 실패 — 라벨만 표시">연동 지연</span>':''}</div>
+    <div class="stpcard">
+      <div class="stprow">
+        ${_step(1,'마감자료',co&&co.date?'done':'wait',coSub)}
+        <div class="stparrow">→</div>
+        ${_step(2,'견적서',q&&q.status==='accepted'?'done':(q&&q.quoteNumber?'wait':'off'),qSub)}
+        <div class="stparrow">→</div>
+        ${_step(3,'계산서',inv&&inv.status==='issued'?'done':(inv?'wait':'off'),invSub)}
+        <div class="stparrow">→</div>
+        ${_step(4,'입금',pay&&pay.status==='paid'?'done':(pay?'wait':'off'),paySub)}
+      </div>
+      ${canLink?`<div class="stpfoot"><span class="stpby">연결: ${esc(d.linkedBy||'')}</span><button class="btn xs" onclick="openLinkModal()">계약 변경</button><button class="btn xs" onclick="unlinkSettle()">연결 해제</button></div>`:''}
+    </div></div>`;
+}
+function openLinkModal(){
+  const st=STATE.settle; if(!st) return;
+  const wrap=document.createElement('div'); wrap.className='modalov'; wrap.id='linkmodal';
+  wrap.innerHTML=`<div class="modalbox" style="width:620px"><div class="modalhd"><b>계약 연결</b><button class="btn xs" onclick="closeLinkModal()">닫기</button></div>
+    <div class="modalbd"><input id="lksearch" class="ovsearch" style="width:100%" placeholder="C-번호 / 업체명 / 작업명 검색…" oninput="searchSales(this.value)">
+    <div id="lkresults" style="margin-top:10px"><div class="empty" style="padding:20px">검색어를 입력하세요.</div></div></div></div>`;
+  document.body.appendChild(wrap); wrap.addEventListener('click',e=>{ if(e.target===wrap) closeLinkModal(); });
+  setTimeout(()=>{ const el=$('#lksearch'); if(el) el.focus(); },40);
+}
+function closeLinkModal(){ const m=$('#linkmodal'); if(m) m.remove(); }
+let _lkTimer=null;
+function searchSales(q){
+  clearTimeout(_lkTimer); const box=$('#lkresults'); if(!box) return;
+  if(!(q||'').trim()){ box.innerHTML='<div class="empty" style="padding:20px">검색어를 입력하세요.</div>'; return; }
+  _lkTimer=setTimeout(async()=>{
+    const r=await api('/api/trackb/settlement/sales-search?q='+encodeURIComponent(q.trim())).catch(()=>null);
+    if(!r||!r.ok){ box.innerHTML='<div class="empty" style="padding:20px">인트라넷 조회 실패</div>'; return; }
+    const items=r.items||[];
+    box.innerHTML=items.length?items.map(s=>`<div class="lkrow" onclick="pickSales('${esc(s.salesId)}')">
+      <div class="lkinfo"><b>${esc(s.contractNumber||'(번호없음)')}</b><span>${esc(s.advertiserName||'')}${s.productName?' · '+esc(s.productName):''}${s.manager?' · '+esc(s.manager):''}</span></div>
+      <div class="lkamt">${s.amount?_wonFmt(s.amount):''}</div></div>`).join(''):'<div class="empty" style="padding:20px">결과 없음</div>';
+  },280);
+}
+async function pickSales(salesId){
+  const st=STATE.settle; if(!st) return; const t=st.tab;
+  const r=await api('/api/trackb/settlement/link',{method:'POST',body:JSON.stringify({sheetId:t.sheetId,tabName:t.tabName,salesId})});
+  if(r&&r.ok){ toast('계약 연결됨'); closeLinkModal(); loadSettlement(t); } else toast((r&&r.error)||'연결 실패');
+}
+async function unlinkSettle(){
+  const st=STATE.settle; if(!st) return; const t=st.tab;
+  const r=await api('/api/trackb/settlement/unlink',{method:'POST',body:JSON.stringify({sheetId:t.sheetId,tabName:t.tabName})});
+  if(r&&r.ok){ toast('연결 해제'); loadSettlement(t); } else toast((r&&r.error)||'실패');
+}
+async function toggleSettleVis(advertiserId,visible){
+  const r=await api('/api/trackb/settlement/visibility',{method:'POST',body:JSON.stringify({advertiserId,visible})});
+  if(r&&r.ok){ toast(visible?'정산 노출 ON':'정산 노출 OFF'); const a=(STATE.advs||[]).find(x=>x.id===advertiserId); if(a) a.settlementVisible=visible; }
+  else toast((r&&r.error)||'실패');
 }
 
 // ══ P1 탭 스레드(협업 코멘트 + 확인요청 + 내부 메모) ══
@@ -989,7 +1089,8 @@ function renderOwnPanel(a, items){
       <span class="openb">열기 ›</span></div>`;
   }).join('') || `<div class="empty" style="padding:14px">연결된 탭 없음</div>`;
   $('#ownPanel').innerHTML = `
-    <div class="ph2"><span class="big">${esc((a.name||'?').slice(0,1))}</span><div><h2>${esc(a.name)}</h2><div class="acc">거래처 ID: ${esc(a.id)} · 소유 ${items.length}</div></div></div>
+    <div class="ph2"><span class="big">${esc((a.name||'?').slice(0,1))}</span><div style="flex:1"><h2>${esc(a.name)}</h2><div class="acc">거래처 ID: ${esc(a.id)} · 소유 ${items.length}</div></div>
+      <label class="setvis" title="이 거래처가 통합작업대에서 정산(금액·상태)을 볼 수 있는지"><input type="checkbox" id="setvis" ${a.settlementVisible===false?'':'checked'} onchange="toggleSettleVis('${esc(a.id)}',this.checked)"> 정산 노출</label></div>
     <div class="sect"><div class="st">소유 캠페인</div>${owns}</div>
     <div class="sect"><div class="st">연결된 탭 ${ot.length} <span style="font-weight:400;color:var(--faint);font-size:11px">· 최신순 — 클릭하면 작업대로 열기</span></div>${tabList}</div>
     <div class="sect"><div class="st">소유 추가</div>

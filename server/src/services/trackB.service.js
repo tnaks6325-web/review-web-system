@@ -388,8 +388,10 @@ async function listAdvertisersWithOwnership() {
   const { rows } = await db.query(
     `SELECT a.id, a.name, a.status,
             (SELECT COUNT(*) FROM advertiser_campaigns ac
-              WHERE ac.advertiser_id = a.id AND ac.deleted_at IS NULL)::int AS owned
+              WHERE ac.advertiser_id = a.id AND ac.deleted_at IS NULL)::int AS owned,
+            COALESCE(p.settlement_visible, TRUE) AS "settlementVisible"
        FROM advertisers a
+       LEFT JOIN trackb_advertiser_prefs p ON p.advertiser_id = a.id
       WHERE a.status <> 'ended'
       ORDER BY a.sort_order ASC, a.name ASC`);
   return rows;
@@ -512,6 +514,117 @@ async function intranetAdvertisers({ q = '', limit = 20 } = {}) {
     .filter(r => !needle || r.name.toLowerCase().includes(needle))
     .slice(0, lim);
   return { ok: true, items };
+}
+
+// ══════════════════════════════════════════════════════════════════════════
+// P2 — 정산 파이프라인(탭 ↔ 인트라넷 계약/견적 링크 + 프록시 스텝퍼, migration 054)
+//   ★ 격리: 인트라넷 D1 무접촉(HTTP GET 프록시만). 링크는 리뷰 PG(trackb_settlement_links)에만 write.
+//   ★ Q4-c(금액 광고주 노출): settlementForTab 역할 렌즈 — 광고주는 trackb_advertiser_prefs.settlement_visible
+//     TRUE(기본)일 때만, 그리고 "그 탭에 링크된 sales" 단건만 프록시(타 업체 계약 도달 불가).
+// ══════════════════════════════════════════════════════════════════════════
+function _intranetBase() { return (process.env.INTRANET_API_BASE || 'https://inadd-system.pages.dev').trim().replace(/\/$/, ''); }
+async function _intranetGet(path) {
+  const ctrl = new AbortController();
+  const timer = setTimeout(() => ctrl.abort(), 5000);
+  try {
+    const resp = await fetch(`${_intranetBase()}${path}`, { signal: ctrl.signal });
+    if (!resp.ok) throw new Error(`intranet HTTP ${resp.status}`);
+    return await resp.json();
+  } finally { clearTimeout(timer); }
+}
+
+// 계약 검색(링크 UI). C-번호/업체명/작업명 — 인트라넷 범용 테이블 검색 프록시. 이름·상태·금액만 추림.
+let _intraSalesCache = { at: 0, q: null, rows: null };
+async function intranetSalesSearch({ q = '', limit = 30 } = {}) {
+  const needle = String(q || '').trim();
+  const now = Date.now();
+  if (_intraSalesCache.q !== needle || !_intraSalesCache.rows || now - _intraSalesCache.at > 30 * 1000) {
+    try {
+      const j = await _intranetGet(`/api/tables/sales?search=${encodeURIComponent(needle)}&limit=50&sort=created_at&order=DESC`);
+      _intraSalesCache = { at: now, q: needle, rows: (j.data || []).map(_mapSales) };
+    } catch (e) {
+      logger.warn(`[trackB] 인트라넷 계약(sales) 조회 실패: ${e.message}`);
+      return { ok: false, error: 'intranet_unreachable', items: [] };
+    }
+  }
+  const lim = Math.min(Math.max(parseInt(limit, 10) || 30, 1), 50);
+  return { ok: true, items: (_intraSalesCache.rows || []).slice(0, lim) };
+}
+function _mapSales(r) {
+  return {
+    salesId: r.id, contractNumber: String(r.contract_number || '').trim(),
+    advertiserName: String(r.advertiser_name || '').trim(), productName: String(r.product_name || '').trim(),
+    manager: String(r.manager || '').trim() || null, amount: Number(r.amount) || 0,
+    paymentStatus: r.payment_status || 'unpaid', invoiceStatus: r.invoice_status || 'not_issued',
+    paymentDate: r.payment_date || null, invoiceDate: r.invoice_date || null,
+  };
+}
+
+// 탭 ↔ 계약/견적 링크(탭당 활성 1, 소프트삭제 교체). trackb_settlement_links 만 write(인트라넷 무접촉).
+async function linkSettlement({ sheetId, tabName, salesId, quoteId = null, by = '' } = {}) {
+  if (!sheetId || !tabName || !salesId) return { ok: false, code: 400, error: 'sheetId, tabName, salesId 필수' };
+  const db = getPool();
+  let contractNumber = '';
+  try { const j = await _intranetGet(`/api/tables/sales/${encodeURIComponent(salesId)}`); contractNumber = String((j.data && j.data.contract_number) || '').trim(); } catch (_) {}
+  await db.query('UPDATE trackb_settlement_links SET deleted_at=NOW() WHERE sheet_id=$1 AND tab_name=$2 AND deleted_at IS NULL', [sheetId, tabName]);
+  await db.query(
+    `INSERT INTO trackb_settlement_links (sheet_id, tab_name, sales_id, quote_id, contract_number, linked_by)
+     VALUES ($1,$2,$3,$4,$5,$6)`, [sheetId, tabName, salesId, quoteId || null, contractNumber, String(by || '').slice(0, 100)]);
+  return { ok: true, contractNumber };
+}
+async function unlinkSettlement({ sheetId, tabName } = {}) {
+  if (!sheetId || !tabName) return { ok: false, code: 400, error: 'sheetId, tabName 필수' };
+  const { rowCount } = await getPool().query(
+    'UPDATE trackb_settlement_links SET deleted_at=NOW() WHERE sheet_id=$1 AND tab_name=$2 AND deleted_at IS NULL', [sheetId, tabName]);
+  return { ok: true, removed: rowCount };
+}
+
+// 광고주 정산 노출 토글(master/admin). 기본 TRUE.
+async function setSettlementVisible({ advertiserId, visible, by = '' } = {}) {
+  if (!advertiserId) return { ok: false, code: 400, error: 'advertiserId 필수' };
+  await getPool().query(
+    `INSERT INTO trackb_advertiser_prefs (advertiser_id, settlement_visible, updated_by, updated_at)
+     VALUES ($1,$2,$3,NOW())
+     ON CONFLICT (advertiser_id) DO UPDATE SET settlement_visible=$2, updated_by=$3, updated_at=NOW()`,
+    [advertiserId, !!visible, String(by || '').slice(0, 100)]);
+  return { ok: true, visible: !!visible };
+}
+async function _settlementVisibleFor(advertiserId) {
+  if (!advertiserId) return true;
+  const { rows } = await getPool().query('SELECT settlement_visible FROM trackb_advertiser_prefs WHERE advertiser_id=$1', [advertiserId]);
+  return rows.length ? rows[0].settlement_visible !== false : true;   // 행 없음 = 기본 노출
+}
+
+// 탭 정산 스텝퍼(마감자료→견적서→계산서→선금/잔금). 링크 조회 → 인트라넷 프록시 병합 → 역할 렌즈.
+//   광고주(Q4-c): settlement_visible=FALSE 면 {hidden:true}(금액·상태 미포함). TRUE 면 금액 포함 전체.
+async function settlementForTab({ sheetId, tabName, role = 'master', advertiserId = null } = {}) {
+  if (!sheetId || !tabName) throw new Error('settlementForTab: sheetId, tabName 필수');
+  const db = getPool();
+  const { rows } = await db.query(
+    `SELECT sales_id AS "salesId", quote_id AS "quoteId", contract_number AS "contractNumber", linked_by AS "linkedBy"
+       FROM trackb_settlement_links WHERE sheet_id=$1 AND tab_name=$2 AND deleted_at IS NULL LIMIT 1`, [sheetId, tabName]);
+  const link = rows[0] || null;
+  // 광고주 노출 게이트(Q4-c 안전장치): 토글 OFF 면 정산 자체 비공개.
+  if (role === 'advertiser' && !(await _settlementVisibleFor(advertiserId))) {
+    return { linked: !!link, hidden: true };
+  }
+  const closeout = await (typeof latestCloseout === 'function' ? latestCloseout({ sheetId, tabName }) : Promise.resolve(null));
+  if (!link) return { linked: false, closeout };
+  // 링크된 sales/quote 단건만 프록시(그 탭에 링크된 계약만 — 타 업체 계약 도달 불가).
+  let sales = null, quote = null;
+  if (link.salesId) { try { const j = await _intranetGet(`/api/tables/sales/${encodeURIComponent(link.salesId)}`); if (j.data) sales = _mapSales(j.data); } catch (_) {} }
+  if (link.quoteId) { try { const q = await _intranetGet(`/api/quotes/${encodeURIComponent(link.quoteId)}`); if (q && q.id) quote = { quoteNumber: String(q.quote_number || '').trim(), status: q.status || 'draft', quoteDate: q.quote_date || null, totalAmount: Number(q.total_amount) || 0 }; } catch (_) {} }
+  const contractNumber = (sales && sales.contractNumber) || link.contractNumber || '';
+  return {
+    linked: true, contractNumber, salesId: link.salesId, quoteId: link.quoteId, linkedBy: link.linkedBy,
+    proxyDown: link.salesId && !sales,   // 프록시 실패(라벨만) 신호
+    closeout,
+    quote: quote || (link.quoteId ? { quoteNumber: '', status: null } : null),
+    invoice: sales ? { status: sales.invoiceStatus, date: sales.invoiceDate } : null,
+    payment: sales ? { status: sales.paymentStatus, date: sales.paymentDate } : null,
+    amount: sales ? sales.amount : null,
+    salesInfo: sales ? { advertiserName: sales.advertiserName, productName: sales.productName, manager: sales.manager } : null,
+  };
 }
 
 // ══ 작업오더(발주) 연동 — 수동 링크 + 작업세부 노출 + 명단 골격 준비. B 내부·격리(라이브 무접촉). ══
@@ -1657,6 +1770,11 @@ module.exports = {
   staffOwnsAdvertiser,
   sheetAssignableByStaff,
   intranetAdvertisers,
+  intranetSalesSearch,
+  linkSettlement,
+  unlinkSettlement,
+  setSettlementVisible,
+  settlementForTab,
   listThread,
   addThread,
   setRequestStatus,

@@ -261,6 +261,45 @@ router.get('/workdesk', authMiddleware, async (req, res, next) => {
   } catch (err) { next(err); }
 });
 
+// ══ P2 정산 파이프라인 — 탭 ↔ 인트라넷 계약/견적 링크 + 프록시 스텝퍼 + 광고주 노출 토글. ══
+//   ★ 인트라넷 D1 무접촉(HTTP GET 프록시만). 링크는 trackb_settlement_links 만 write.
+router.get('/settlement/sales-search', authMiddleware, internalMiddleware, async (req, res, next) => {
+  try { res.json(await svc.intranetSalesSearch({ q: req.query.q, limit: req.query.limit })); }
+  catch (err) { next(err); }
+});
+router.post('/settlement/link', authMiddleware, async (req, res, next) => {
+  try {
+    const { sheetId, tabName, salesId, quoteId } = req.body || {};
+    if (!sheetId || !tabName || !salesId) return res.status(400).json({ ok: false, error: 'sheetId, tabName, salesId 필수' });
+    const g = await _ensureEditScope(req, sheetId, tabName); if (!g.ok) return res.status(g.code).json({ ok: false, error: g.error });   // 내부(master/admin/staff 담당)만 링크
+    res.json(await svc.linkSettlement({ sheetId, tabName, salesId, quoteId, by: _by(req) }));
+  } catch (err) { next(err); }
+});
+router.post('/settlement/unlink', authMiddleware, async (req, res, next) => {
+  try {
+    const { sheetId, tabName } = req.body || {};
+    if (!sheetId || !tabName) return res.status(400).json({ ok: false, error: 'sheetId, tabName 필수' });
+    const g = await _ensureEditScope(req, sheetId, tabName); if (!g.ok) return res.status(g.code).json({ ok: false, error: g.error });
+    res.json(await svc.unlinkSettlement({ sheetId, tabName }));
+  } catch (err) { next(err); }
+});
+// 정산 스텝퍼 조회 — 역할 렌즈(광고주 소유 탭 + 노출토글 게이트는 서비스가 처리).
+router.get('/workdesk/settlement', authMiddleware, async (req, res, next) => {
+  try {
+    const { sheetId, tabName } = req.query;
+    if (!sheetId || !tabName) return res.status(400).json({ ok: false, error: 'sheetId, tabName 필수' });
+    const g = await _ensureThreadScope(req, sheetId, tabName); if (!g.ok) return res.status(g.code).json({ ok: false, error: g.error });   // 내부+광고주 소유 탭
+    const out = await svc.settlementForTab({ sheetId, tabName, role: _role(req), advertiserId: (req.admin && req.admin.advertiser_id) || null });
+    res.json({ ok: true, ...out });
+  } catch (err) { next(err); }
+});
+router.post('/settlement/visibility', authMiddleware, adminOrMasterMiddleware, async (req, res, next) => {
+  try {
+    const { advertiserId, visible } = req.body || {};
+    res.json(await svc.setSettlementVisible({ advertiserId, visible, by: _by(req) }));
+  } catch (err) { next(err); }
+});
+
 // ══ P1 탭 스레드(협업 코멘트 + 확인요청 + 내부 메모) — 역할 스코프(_ensureThreadScope). ══
 //   광고주(외부)도 자기 소유 탭에 양방향 작성. 내부 전용 글(internal_only)은 서비스가 광고주 조회에서 제외.
 router.get('/workdesk/thread', authMiddleware, async (req, res, next) => {
