@@ -487,7 +487,7 @@ async function ownedTabsForAdvertiser({ advertiserId } = {}) {
           ORDER BY s.created_at DESC LIMIT 1
        ) sl ON TRUE
        LEFT JOIN LATERAL (
-         SELECT c.closed_date, c.row_count, c.sub_count FROM trackb_tab_closeouts c
+         SELECT c.closed_date::text AS closed_date, c.row_count, c.sub_count FROM trackb_tab_closeouts c
           WHERE c.sheet_id = t.sheet_id AND c.tab_name = t.tab_name AND c.deleted_at IS NULL
           ORDER BY c.created_at DESC, c.id DESC LIMIT 1
        ) co ON TRUE
@@ -727,7 +727,7 @@ function _normIntraDate(s) {
 // ── 연결탭 비고(자유 텍스트, migration 056) — 탭당 1행 upsert. 관제실 '비고(인애드)' 대응. ──
 async function saveTabMemo({ sheetId, tabName, memo = '', by = '' } = {}) {
   if (!sheetId || !tabName) return { ok: false, code: 400, error: 'sheetId, tabName 필수' };
-  const text = String(memo == null ? '' : memo).slice(0, 2000);
+  const text = ((typeof memo === 'string' || typeof memo === 'number') ? String(memo) : '').slice(0, 2000);
   await getPool().query(
     `INSERT INTO trackb_tab_memos (sheet_id, tab_name, memo, updated_by, updated_at)
      VALUES ($1,$2,$3,$4,NOW())

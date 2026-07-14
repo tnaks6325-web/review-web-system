@@ -1116,9 +1116,10 @@ async function selAdv(i){ const a=STATE.advs[i]; STATE.advCur=a; STATE.addSheet=
     api('/api/trackb/ownership?advertiserId='+encodeURIComponent(a.id)),
     api('/api/trackb/ownership/tabs?advertiserId='+encodeURIComponent(a.id)).catch(()=>null),
   ]);
+  if(STATE.advCur!==a) return;   // 빠른 업체 전환 경합 — 늦게 온 stale 응답이 현재 패널을 덮지 않게 폐기
   STATE.ownTabs=(rt&&rt.ok&&rt.items)||[];
   renderOwnPanel(a, (r&&r.items)||[]);
-  loadOwnSettlement(a.id);   // 정산 컬럼은 비동기 필(패널 렌더 비차단)
+  if(STATE.ownTabs.some(t=>t.salesId)) loadOwnSettlement(a.id);   // 정산 컬럼 비동기 필(링크 탭 0이면 호출 생략)
 }
 // 연결된 탭 클릭 → 작업대에서 그 탭 열기(관측 뷰 "열기"와 동일한 pendingTab 계약).
 function openOwnTab(i){ const t=(STATE.ownTabs||[])[i]; if(!t) return;
@@ -1224,14 +1225,21 @@ function _ownTabsHtml(){
 function _md(d){ const m=String(d||'').match(/^(\d{4})-(\d{2})-(\d{2})/); return m?`${+m[2]}/${+m[3]}`:esc(String(d||'')); }
 function _won(n){ return n==null?'—':Number(n).toLocaleString('ko-KR'); }
 function setOwnBrand(i){ STATE.ownBrand = i===-1?null : i===-2?'' : ((STATE.ownBrandList||[])[i]!=null?STATE.ownBrandList[i]:null);
-  const el=$('#owntabsSect'); if(el) el.innerHTML=_ownTabsHtml(); }
+  _rerenderOwnTabs(); }
+// 연결탭 섹션 재렌더 — 비고 편집 중(.omemoin 존재)이면 연기(포커스 input이 innerHTML 교체로
+// 제거되면 blur 미발생 → 입력 무음 소실). 저장/취소 후 rerender 가 pending 을 소화.
+function _rerenderOwnTabs(){ const el=$('#owntabsSect'); if(!el) return;
+  if(el.querySelector('.omemoin')){ STATE._ownRerenderPending=true; return; }
+  STATE._ownRerenderPending=false; el.innerHTML=_ownTabsHtml(); }
 // 정산 요약(견적·계산서·입금매칭) 비동기 로드 — 패널 렌더를 막지 않음. 업체 전환 경합은 ownSettleFor 로 무시.
 async function loadOwnSettlement(advId){
   let r=null; try{ r=await api('/api/trackb/ownership/settlement?advertiserId='+encodeURIComponent(advId)); }catch(_){ }
   if(STATE.ownSettleFor!==advId) return;   // 이미 다른 업체로 전환됨
-  const m={}; for(const it of ((r&&r.ok&&r.items)||[])) m[it.sheetId+'\t'+it.tabName]=it;
+  const m={};
+  if(r&&r.ok){ for(const it of (r.items||[])) m[it.sheetId+'\t'+it.tabName]=it; }
+  else { for(const t of (STATE.ownTabs||[])) if(t.salesId) m[t.sheetId+'\t'+t.tabName]={proxyDown:true}; }   // 로드 실패 = '…' 영구 대신 '?' 표기
   STATE.ownSettle=m;
-  const el=$('#owntabsSect'); if(el) el.innerHTML=_ownTabsHtml();
+  _rerenderOwnTabs();
 }
 // 비고 인라인 편집: 셀 클릭 → input 치환 → Enter/blur 저장, Esc 취소. 행 클릭(탭 열기)과 격리(stopPropagation).
 function editTabMemo(ev,i){ ev.stopPropagation(); const t=(STATE.ownTabs||[])[i]; if(!t) return;
@@ -1241,12 +1249,15 @@ function editTabMemo(ev,i){ ev.stopPropagation(); const t=(STATE.ownTabs||[])[i]
 }
 function _memoKey(ev){ if(ev.key==='Enter') ev.target.blur(); else if(ev.key==='Escape'){ ev.target.dataset.esc='1'; ev.target.blur(); } }
 async function saveOwnMemo(i,inp){ const t=(STATE.ownTabs||[])[i];
-  const rerender=()=>{ const el=$('#owntabsSect'); if(el) el.innerHTML=_ownTabsHtml(); };
+  // 편집 종료 시점 = 연기된 재렌더(_ownRerenderPending)까지 함께 소화(최신 STATE 로 강제 렌더).
+  const rerender=()=>{ STATE._ownRerenderPending=false; const el=$('#owntabsSect'); if(el) el.innerHTML=_ownTabsHtml(); };
   if(!t||inp.dataset.esc){ rerender(); return; }
   const memo=inp.value.trim();
   if(memo===(t.memo||'')){ rerender(); return; }
-  const r=await api('/api/trackb/tab-memo',{method:'POST',body:JSON.stringify({sheetId:t.sheetId,tabName:t.tabName,memo})});
-  if(r&&r.ok){ t.memo=r.memo; toast('비고 저장됨'); } else toast('비고 저장 실패'+(r&&r.error?': '+r.error:''));
+  try{
+    const r=await api('/api/trackb/tab-memo',{method:'POST',body:JSON.stringify({sheetId:t.sheetId,tabName:t.tabName,memo})});
+    if(r&&r.ok){ t.memo=r.memo; toast('비고 저장됨'); } else toast('비고 저장 실패'+(r&&r.error?': '+r.error:''));
+  }catch(_){ toast('비고 저장 실패: 네트워크 오류'); }
   rerender();
 }
 function setAddMode(m){ STATE.addMode=m; document.querySelectorAll('.radio').forEach(r=>r.classList.toggle('on',r.dataset.m===m));
