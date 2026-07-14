@@ -26,6 +26,18 @@ async function _ensureEditScope(req, sheetId, tabName) {
   return { ok: false, code: 403, error: '편집 권한이 없습니다.' };
 }
 
+// 스레드 스코프 가드: master/admin=전체 · staff=담당 탭 · advertiser=소유 탭(양방향 협업이라 read/write 동일) · reviewer 차단.
+//   ★ (sheetId, tabName) 기준 canAccessTab(gid 신뢰 금지). 광고주 내부글 제외는 서비스(internal_only 필터)가 담당.
+async function _ensureThreadScope(req, sheetId, tabName) {
+  const role = _role(req);
+  if (role === 'master' || role === 'admin') return { ok: true };
+  if (role === 'staff' || role === 'advertiser') {
+    const okc = await svc.canAccessTab({ role, staffName: (req.admin && req.admin.name) || null, advertiserId: (req.admin && req.admin.advertiser_id) || null, sheetId, tabName });
+    return okc ? { ok: true } : { ok: false, code: 403, error: '스코프 밖 탭(담당/소유 아님)' };
+  }
+  return { ok: false, code: 403, error: '권한이 없습니다.' };
+}
+
 // ── 그림자 투영(라이브 읽어 B 최신화) — master 전용 ──
 router.post('/project', authMiddleware, masterOnlyMiddleware, async (req, res, next) => {
   try {
@@ -245,6 +257,58 @@ router.get('/workdesk', authMiddleware, async (req, res, next) => {
     const advertiserId = (req.admin && req.admin.advertiser_id) || null;
     const out = await svc.workdeskTab({ sheetId, tabName, tabGid: tabGid || null, role, advertiserId, staffName: (req.admin && req.admin.name) || null });
     if (out.denied) return res.status(403).json({ ok: false, error: '스코프 밖 작업(담당/소유 아님)' });
+    res.json({ ok: true, ...out });
+  } catch (err) { next(err); }
+});
+
+// ══ P1 탭 스레드(협업 코멘트 + 확인요청 + 내부 메모) — 역할 스코프(_ensureThreadScope). ══
+//   광고주(외부)도 자기 소유 탭에 양방향 작성. 내부 전용 글(internal_only)은 서비스가 광고주 조회에서 제외.
+router.get('/workdesk/thread', authMiddleware, async (req, res, next) => {
+  try {
+    const { sheetId, tabName } = req.query;
+    if (!sheetId || !tabName) return res.status(400).json({ ok: false, error: 'sheetId, tabName 필수' });
+    const g = await _ensureThreadScope(req, sheetId, tabName); if (!g.ok) return res.status(g.code).json({ ok: false, error: g.error });
+    const role = _role(req);
+    const items = await svc.listThread({ sheetId, tabName, role });
+    // 열람 마킹(미확인 배지 기준) — best-effort.
+    await svc.markThreadSeen({ sheetId, tabName, role, name: (req.admin && req.admin.name) || '', advertiserId: (req.admin && req.admin.advertiser_id) || null }).catch(() => {});
+    res.json({ ok: true, items, canInternal: role !== 'advertiser' });
+  } catch (err) { next(err); }
+});
+router.post('/workdesk/thread', authMiddleware, async (req, res, next) => {
+  try {
+    const { sheetId, tabName, body, internalOnly, asRequest } = req.body || {};
+    if (!sheetId || !tabName) return res.status(400).json({ ok: false, error: 'sheetId, tabName 필수' });
+    const g = await _ensureThreadScope(req, sheetId, tabName); if (!g.ok) return res.status(g.code).json({ ok: false, error: g.error });
+    const out = await svc.addThread({ sheetId, tabName, body, internalOnly, asRequest, role: _role(req), name: (req.admin && req.admin.name) || '' });
+    res.status(out.ok ? 200 : (out.code || 400)).json(out);
+  } catch (err) { next(err); }
+});
+router.post('/workdesk/thread/:id/status', authMiddleware, async (req, res, next) => {
+  try {
+    const { sheetId, tabName, status } = req.body || {};
+    if (!sheetId || !tabName) return res.status(400).json({ ok: false, error: 'sheetId, tabName 필수' });
+    const g = await _ensureThreadScope(req, sheetId, tabName); if (!g.ok) return res.status(g.code).json({ ok: false, error: g.error });
+    const out = await svc.setRequestStatus({ id: req.params.id, status, role: _role(req), name: (req.admin && req.admin.name) || '' });
+    res.status(out.ok ? 200 : (out.code || 400)).json(out);
+  } catch (err) { next(err); }
+});
+router.delete('/workdesk/thread/:id', authMiddleware, async (req, res, next) => {
+  try {
+    const { sheetId, tabName } = req.body || {};
+    if (!sheetId || !tabName) return res.status(400).json({ ok: false, error: 'sheetId, tabName 필수' });
+    const g = await _ensureThreadScope(req, sheetId, tabName); if (!g.ok) return res.status(g.code).json({ ok: false, error: g.error });
+    const out = await svc.deleteThread({ id: req.params.id, role: _role(req), name: (req.admin && req.admin.name) || '' });
+    res.status(out.ok ? 200 : (out.code || 400)).json(out);
+  } catch (err) { next(err); }
+});
+// 미확인 배지(작업목록/헤더). body 없이 스코프 전체, 또는 tabs=[{sheetId,tabName}] 로 특정.
+router.post('/workdesk/unseen', authMiddleware, async (req, res, next) => {
+  try {
+    const role = _role(req);
+    if (!['master', 'admin', 'staff', 'advertiser'].includes(role)) return res.status(403).json({ ok: false, error: '권한 없음' });
+    const tabs = Array.isArray(req.body && req.body.tabs) ? req.body.tabs.slice(0, 500) : null;
+    const out = await svc.unseenCounts({ role, name: (req.admin && req.admin.name) || '', advertiserId: (req.admin && req.admin.advertiser_id) || null, tabs });
     res.json({ ok: true, ...out });
   } catch (err) { next(err); }
 });

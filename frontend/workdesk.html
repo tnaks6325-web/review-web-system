@@ -204,6 +204,21 @@
   .tchip .cb{width:13px;height:13px;border-radius:3px;border:1.5px solid var(--line2);display:grid;place-items:center;font-size:9px;color:#fff} .tchip.on .cb{background:var(--accent);border-color:var(--accent)}
   .assignbtn{margin-top:12px}
   .toast{position:fixed;top:16px;left:50%;transform:translateX(-50%);background:var(--ink);color:var(--paper);padding:9px 18px;border-radius:10px;font-size:13px;z-index:99;opacity:0;transition:opacity .25s} .toast.show{opacity:1}
+  /* ── P1 탭 스레드 ── */
+  .thlist{display:flex;flex-direction:column;gap:8px;margin-bottom:12px}
+  .thitem{border:1px solid var(--line);border-radius:11px;padding:10px 13px;background:var(--card)}
+  .thitem.req{border-color:var(--warn-soft);background:color-mix(in srgb,var(--warn-soft) 30%,var(--card))}
+  .thhd{display:flex;align-items:center;gap:7px;flex-wrap:wrap;margin-bottom:5px}
+  .thhd b{font-size:12.5px;font-weight:700}
+  .thwhen{font-size:10.5px;color:var(--faint);margin-left:2px}
+  .thdel{margin-left:auto;cursor:pointer;color:var(--faint);font-weight:700;font-size:14px;line-height:1;opacity:.6} .thdel:hover{color:var(--bad);opacity:1}
+  .thbody{font-size:13px;line-height:1.55;white-space:pre-wrap;word-break:break-word}
+  .thstatus{margin-top:7px;display:flex;align-items:center;gap:7px;flex-wrap:wrap}
+  .thform{border:1px solid var(--line);border-radius:11px;padding:10px;background:var(--card2)}
+  .thform textarea{width:100%;font:inherit;font-size:13px;padding:8px 10px;border:1px solid var(--line2);border-radius:8px;background:var(--card);color:var(--ink);resize:vertical}
+  .throw{display:flex;align-items:center;gap:12px;margin-top:8px;flex-wrap:wrap}
+  .thopt{font-size:12px;color:var(--muted);font-weight:600;display:flex;align-items:center;gap:5px;cursor:pointer}
+  .unb{font-size:10px;font-weight:800;color:var(--accent-deep);background:var(--accent-soft);border:1px solid var(--accent-line);border-radius:999px;padding:0 6px;margin-left:6px;white-space:nowrap}
 </style>
 </head>
 <body>
@@ -316,6 +331,7 @@ async function loadTabs(){
   $('#tabs').innerHTML = STATE.tabs.length
     ? gkeys.map(k=>`<div class="tgh">${k?esc(k):'미지정'}<span class="tgc">${groups.get(k).length}</span></div>`+groups.get(k).map(item).join('')).join('')
     : `<div class="empty">활성 작업 없음</div>`;
+  refreshUnseen();   // 작업목록 미확인(스레드) 배지
   // 관측 대시보드에서 "열기"로 넘어온 탭 자동 선택
   if(STATE.pendingTab){ const pt=STATE.pendingTab; STATE.pendingTab=null;
     const idx=STATE.tabs.findIndex(t=>t.sheetId===pt.sheetId&&t.tabName===pt.tabName);
@@ -381,7 +397,84 @@ function renderWorkdesk(wd){
         <div class="cc s"><div><div class="lb">제출완료</div><div class="big">${c.submitted||0}<small>/ ${c.total||0}</small></div></div>${gaugeSvg(pS,null,'g-safe')}</div>
         <div class="cc p"><div><div class="lb">입금완료</div><div class="big">${c.paid||0}<small>/ ${c.total||0}</small></div></div>${gaugeSvg(pP,null,'')}</div>
       </div>`; })()}
-    ${tableSection}`;
+    ${tableSection}
+    <div id="threadsec"></div>`;
+  loadThread(STATE.cur);
+}
+
+// ══ P1 탭 스레드(협업 코멘트 + 확인요청 + 내부 메모) ══
+async function loadThread(t){
+  if(!t) return;
+  const r=await api(`/api/trackb/workdesk/thread?sheetId=${encodeURIComponent(t.sheetId)}&tabName=${encodeURIComponent(t.tabName)}`).catch(()=>null);
+  const box=$('#threadsec'); if(!box) return;
+  if(!r||!r.ok){ box.innerHTML=''; return; }
+  STATE.thread={ items:r.items||[], canInternal:!!r.canInternal, tab:t };
+  renderThread();
+  // 이 탭을 열었으니 목록/헤더 미확인 배지 갱신
+  if(typeof refreshUnseen==='function') refreshUnseen();
+}
+function renderThread(){
+  const st=STATE.thread; if(!st) return; const box=$('#threadsec'); if(!box) return;
+  const items=st.items, ci=st.canInternal;
+  const openReq=items.filter(x=>x.kind==='request'&&x.status!=='done').length;
+  const rows=items.map(x=>{
+    const mine=(x.authorRole===STATE.role)&&(String(x.authorName||'')===String(STATE.name||''));
+    const canDel=mine||STATE.role==='master'||STATE.role==='admin';
+    const roleLbl={master:'관리자',admin:'관리자',staff:'AE',advertiser:'광고주'}[x.authorRole]||x.authorRole;
+    const when=x.createdAt?String(x.createdAt).replace('T',' ').slice(0,16):'';
+    let statusChip='';
+    if(x.kind==='request'){ const s=x.status||'open';
+      const smap={open:['요청','bad'],confirming:['확인중','warn'],done:['완료','safe']};
+      statusChip=`<span class="bb ${smap[s][1]}">${smap[s][0]}</span>`;
+      if(s!=='done') statusChip+=` <button class="btn xs" onclick="setThreadStatus('${x.id}','${s==='open'?'confirming':'done'}')">${s==='open'?'확인중':'완료'}로</button>`;
+      else statusChip+=x.resolvedBy?` <span style="font-size:10.5px;color:var(--faint)">by ${esc(x.resolvedBy)}</span>`:'';
+    }
+    return `<div class="thitem${x.kind==='request'?' req':''}">
+      <div class="thhd"><span class="bb ${x.authorRole==='advertiser'?'':'ok'}">${esc(roleLbl)}</span><b>${esc(x.authorName||'')}</b>
+        ${x.kind==='request'?'<span class="bb warn">확인요청</span>':''}${x.internalOnly?'<span class="bb" title="내부 전용 — 광고주 미노출">🔒 내부</span>':''}
+        <span class="thwhen">${esc(when)}</span>${canDel?`<span class="thdel" title="삭제" onclick="delThread('${x.id}')">×</span>`:''}</div>
+      <div class="thbody">${esc(x.body||'')}</div>
+      ${statusChip?`<div class="thstatus">${statusChip}</div>`:''}</div>`;
+  }).join('')||`<div class="empty" style="padding:18px">아직 글이 없습니다. 첫 코멘트/확인요청을 남겨보세요.</div>`;
+  box.innerHTML=`<div class="sect" style="margin-top:22px"><div class="st">스레드 · 협업/메모 ${openReq?`<span class="bb bad">미완료 확인요청 ${openReq}</span>`:''}</div>
+    <div class="thlist">${rows}</div>
+    <div class="thform">
+      <textarea id="thbody" rows="2" placeholder="코멘트 또는 확인요청 내용… (Ctrl+Enter로 등록)"></textarea>
+      <div class="throw">
+        <label class="thopt"><input type="checkbox" id="threq"> 확인요청으로 등록</label>
+        ${ci?`<label class="thopt"><input type="checkbox" id="thint"> 내부만(광고주 미노출)</label>`:''}
+        <span style="flex:1"></span>
+        <button class="btn pri" onclick="postThread()">등록</button>
+      </div></div></div>`;
+  const ta=$('#thbody'); if(ta) ta.addEventListener('keydown',e=>{ if((e.ctrlKey||e.metaKey)&&e.key==='Enter') postThread(); });
+}
+async function postThread(){
+  const st=STATE.thread; if(!st) return; const t=st.tab;
+  const body=($('#thbody')&&$('#thbody').value||'').trim(); if(!body){ toast('내용을 입력하세요'); return; }
+  const asRequest=!!($('#threq')&&$('#threq').checked), internalOnly=!!($('#thint')&&$('#thint').checked);
+  const r=await api('/api/trackb/workdesk/thread',{method:'POST',body:JSON.stringify({sheetId:t.sheetId,tabName:t.tabName,body,asRequest,internalOnly})});
+  if(r&&r.ok){ toast(asRequest?'확인요청 등록':'등록됨'); loadThread(t); } else toast((r&&r.error)||'등록 실패');
+}
+async function setThreadStatus(id,status){
+  const st=STATE.thread; if(!st) return; const t=st.tab;
+  const r=await api(`/api/trackb/workdesk/thread/${encodeURIComponent(id)}/status`,{method:'POST',body:JSON.stringify({sheetId:t.sheetId,tabName:t.tabName,status})});
+  if(r&&r.ok){ toast('상태 변경'); loadThread(t); } else toast((r&&r.error)||'실패');
+}
+async function delThread(id){
+  const st=STATE.thread; if(!st) return; const t=st.tab;
+  const r=await api(`/api/trackb/workdesk/thread/${encodeURIComponent(id)}`,{method:'DELETE',body:JSON.stringify({sheetId:t.sheetId,tabName:t.tabName})});
+  if(r&&r.ok){ loadThread(t); } else toast((r&&r.error)||'삭제 실패');
+}
+// 미확인 배지: 현재 작업목록 탭들의 미확인 수를 받아 뱃지 갱신(작업대 사이드바 + 관측/소유엔 미적용).
+async function refreshUnseen(){
+  const tabs=(STATE.tabs||[]).map(t=>({sheetId:t.sheetId,tabName:t.tabName}));
+  if(!tabs.length) return;
+  const r=await api('/api/trackb/workdesk/unseen',{method:'POST',body:JSON.stringify({tabs})}).catch(()=>null);
+  if(!r||!r.ok) return; STATE.unseen=r.map||{};
+  document.querySelectorAll('.titem[data-i]').forEach(el=>{ const t=STATE.tabs[+el.dataset.i]; if(!t) return;
+    const n=STATE.unseen[`${t.sheetId}\t${t.tabName}`]||0; let b=el.querySelector('.unb');
+    if(n>0){ if(!b){ b=document.createElement('span'); b.className='unb'; el.appendChild(b); } b.textContent='💬 '+n; }
+    else if(b) b.remove(); });
 }
 // 컬럼 폭(px) — 고정열 오프셋 계산과 최소폭에 사용. 없으면 기본값.
 const _COLW={'#':44,'참여자':112,'연락처':110,'번호':48,'담당자':66,'구매일자':98,'인애드명단':90,'주문자제출':90,'수취인':78,'id':118,'주소':190,'은행':66,'계좌번호':116,'예금주':72,'결제금액':82,'리뷰제출':96,'입금':64,'주문번호':134,'비고(닉네임)':110};
