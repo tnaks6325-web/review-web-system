@@ -794,6 +794,135 @@ async function canAccessTab({ role, staffName, advertiserId, sheetId, tabName } 
   return rows.some(r => scope.tabGids.includes(`${sheetId}::${r.tab_gid}`));
 }
 
+// ══════════════════════════════════════════════════════════════════════════
+// P1 — 탭 스레드(협업 코멘트 + 확인요청 + 내부 메모 통합, migration 053)
+//   ★ 격리: 리뷰 PG 신규 테이블만. Track A/인트라넷 무접촉. 광고주 노출은 internal_only 서버 필터로 게이트.
+// ══════════════════════════════════════════════════════════════════════════
+function _threadUserKey({ role, name, advertiserId } = {}) {
+  return role === 'advertiser' ? `adv:${advertiserId || ''}` : `${role || ''}:${name || ''}`;
+}
+
+// 탭 스레드 조회(시간순). 광고주는 internal_only=FALSE 만(서버 필터 — 클라이언트 신뢰 안 함).
+async function listThread({ sheetId, tabName, role = 'master' } = {}) {
+  if (!sheetId || !tabName) throw new Error('listThread: sheetId, tabName 필수');
+  const where = ['sheet_id=$1', 'tab_name=$2', 'deleted_at IS NULL'];
+  if (role === 'advertiser') where.push('internal_only = FALSE');
+  const { rows } = await getPool().query(
+    `SELECT id, kind, body, internal_only AS "internalOnly", status,
+            author_role AS "authorRole", author_name AS "authorName",
+            created_at AS "createdAt", resolved_at AS "resolvedAt", resolved_by AS "resolvedBy"
+       FROM trackb_tab_threads WHERE ${where.join(' AND ')} ORDER BY created_at ASC, id ASC`,
+    [sheetId, tabName]);
+  return rows;
+}
+
+// 글 작성. 광고주는 internal_only 강제 FALSE(외부인이 내부 전용 글 못 만듦). request 는 status='open' 시작.
+async function addThread({ sheetId, tabName, body, internalOnly = false, asRequest = false, role = 'master', name = '' } = {}) {
+  if (!sheetId || !tabName) return { ok: false, code: 400, error: 'sheetId, tabName 필수' };
+  const text = String(body || '').trim();
+  if (!text) return { ok: false, code: 400, error: '내용을 입력하세요.' };
+  if (text.length > 5000) return { ok: false, code: 400, error: '내용이 너무 깁니다(최대 5000자).' };   // 저장 폭주 방지(nit)
+  const kind = asRequest ? 'request' : 'comment';
+  const status = asRequest ? 'open' : null;
+  const internal = role === 'advertiser' ? false : !!internalOnly;
+  const { rows } = await getPool().query(
+    `INSERT INTO trackb_tab_threads (sheet_id, tab_name, kind, body, internal_only, status, author_role, author_name)
+     VALUES ($1,$2,$3,$4,$5,$6,$7,$8)
+     RETURNING id, kind, body, internal_only AS "internalOnly", status,
+               author_role AS "authorRole", author_name AS "authorName", created_at AS "createdAt"`,
+    [sheetId, tabName, kind, text, internal, status, role, String(name || '').slice(0, 100)]);
+  return { ok: true, item: rows[0] };
+}
+
+// 확인요청 상태 전이(confirming/done). done 시 resolved 기록. comment/없는 글은 400.
+//   ★ B1(IDOR) 방어: 스코프 통과한 (sheetId,tabName)에 UPDATE를 결속 — id만으로 타 테넌트 요청 변조 차단.
+async function setRequestStatus({ id, sheetId, tabName, status, role = 'master', name = '' } = {}) {
+  if (!id || !sheetId || !tabName || !['confirming', 'done'].includes(status)) return { ok: false, code: 400, error: '잘못된 요청' };
+  const resolved = status === 'done';
+  const { rows } = await getPool().query(
+    `UPDATE trackb_tab_threads
+        SET status=$2, resolved_at=CASE WHEN $3 THEN NOW() ELSE NULL END,
+            resolved_by=CASE WHEN $3 THEN $4 ELSE NULL END
+      WHERE id=$1 AND sheet_id=$5 AND tab_name=$6 AND kind='request' AND deleted_at IS NULL
+      RETURNING id, status, resolved_at AS "resolvedAt", resolved_by AS "resolvedBy"`,
+    [id, status, resolved, String(name || '').slice(0, 100), sheetId, tabName]);
+  if (!rows.length) return { ok: false, code: 404, error: '확인요청을 찾을 수 없습니다.' };
+  return { ok: true, item: rows[0] };
+}
+
+// 글 삭제(soft). 작성자 본인 또는 master/admin 만.
+//   ★ S1 방어: 스코프 통과한 (sheetId,tabName)에 SELECT·UPDATE 결속(교차 탭 삭제 차단, 동명 로그인 콜리전 방어).
+async function deleteThread({ id, sheetId, tabName, role = 'master', name = '' } = {}) {
+  if (!id || !sheetId || !tabName) return { ok: false, code: 400, error: '잘못된 요청' };
+  const db = getPool();
+  const { rows } = await db.query(
+    'SELECT author_role, author_name FROM trackb_tab_threads WHERE id=$1 AND sheet_id=$2 AND tab_name=$3 AND deleted_at IS NULL',
+    [id, sheetId, tabName]);
+  if (!rows.length) return { ok: false, code: 404, error: '글을 찾을 수 없습니다.' };
+  const isAdmin = role === 'master' || role === 'admin';
+  const isAuthor = rows[0].author_role === role && String(rows[0].author_name || '') === String(name || '');
+  if (!isAdmin && !isAuthor) return { ok: false, code: 403, error: '삭제 권한이 없습니다.' };
+  await db.query('UPDATE trackb_tab_threads SET deleted_at=NOW() WHERE id=$1 AND sheet_id=$2 AND tab_name=$3', [id, sheetId, tabName]);
+  return { ok: true };
+}
+
+// 열람 마킹(미확인 배지 기준점). 탭 열 때 호출.
+async function markThreadSeen({ sheetId, tabName, role = 'master', name = '', advertiserId = null } = {}) {
+  if (!sheetId || !tabName) return { ok: false };
+  await getPool().query(
+    `INSERT INTO trackb_thread_seen (user_key, sheet_id, tab_name, last_seen_at)
+     VALUES ($1,$2,$3,NOW())
+     ON CONFLICT (user_key, sheet_id, tab_name) DO UPDATE SET last_seen_at=NOW()`,
+    [_threadUserKey({ role, name, advertiserId }), sheetId, tabName]);
+  return { ok: true };
+}
+
+// 미확인 수 집계(1쿼리): 내 last_seen 이후 생성 + 내가 볼 수 있는(광고주=internal_only FALSE) 글.
+//   tabs 지정 시 그 탭들만(작업목록 배지), 미지정 시 전체. 반환 = { 'sheetId\ttabName': count } 맵 + total.
+//   ★ B2(교차 테넌트 메타 유출) 방어: staff/advertiser는 소유/담당 탭으로 서버 강제 제한 —
+//     클라 tabs는 소유와 교집합만, tabs 미지정도 전역 쿼리 금지(소유 탭으로 대체). master/admin만 전체.
+async function unseenCounts({ role = 'master', name = '', advertiserId = null, tabs = null } = {}) {
+  if (role === 'staff' || role === 'advertiser') {
+    const scoped = await scopedActiveTabs({ role, staffName: name, advertiserId });
+    const ownedSet = new Set(scoped.map(t => `${t.sheetId}\t${t.tabName}`));
+    if (!ownedSet.size) return { map: {}, total: 0 };
+    const base = (Array.isArray(tabs) && tabs.length) ? tabs : scoped.map(t => ({ sheetId: t.sheetId, tabName: t.tabName }));
+    tabs = base.filter(t => t && ownedSet.has(`${t.sheetId}\t${t.tabName}`));
+    if (!tabs.length) return { map: {}, total: 0 };
+  }
+  const userKey = _threadUserKey({ role, name, advertiserId });
+  const advGate = role === 'advertiser' ? 'AND t.internal_only = FALSE' : '';
+  const params = [userKey];
+  let scopeFilter = '';
+  if (Array.isArray(tabs) && tabs.length) {
+    const pairs = tabs.map((t, i) => `(t.sheet_id=$${i * 2 + 2} AND t.tab_name=$${i * 2 + 3})`).join(' OR ');
+    tabs.forEach(t => { params.push(t.sheetId, t.tabName); });
+    scopeFilter = `AND (${pairs})`;
+  }
+  const { rows } = await getPool().query(
+    `SELECT t.sheet_id AS "sheetId", t.tab_name AS "tabName", COUNT(*)::int AS n
+       FROM trackb_tab_threads t
+       LEFT JOIN trackb_thread_seen s
+         ON s.user_key=$1 AND s.sheet_id=t.sheet_id AND s.tab_name=t.tab_name
+      WHERE t.deleted_at IS NULL ${advGate} ${scopeFilter}
+        AND t.created_at > COALESCE(s.last_seen_at, 'epoch'::timestamptz)
+      GROUP BY t.sheet_id, t.tab_name`, params);
+  const map = {}; let total = 0;
+  for (const r of rows) { map[`${r.sheetId}\t${r.tabName}`] = r.n; total += r.n; }
+  return { map, total };
+}
+
+// 탭별 미완료(open/confirming) 확인요청 수 — 정산/카드 상단 고정 배지.
+//   role='advertiser'면 internal_only 요청 제외(광고주 뷰에 노출 대비 — 노출 전 게이트 내장).
+async function openRequestCounts({ sheetId, tabName, role = 'master' } = {}) {
+  const advGate = role === 'advertiser' ? 'AND internal_only = FALSE' : '';
+  const { rows } = await getPool().query(
+    `SELECT COUNT(*)::int AS n FROM trackb_tab_threads
+      WHERE sheet_id=$1 AND tab_name=$2 AND kind='request' AND deleted_at IS NULL
+        AND status IN ('open','confirming') ${advGate}`, [sheetId, tabName]);
+  return (rows[0] && rows[0].n) || 0;
+}
+
 // 역할 스코프 적용된 활성 탭 목록: staff/advertiser 는 담당/소유 탭만, master/admin 은 전체.
 async function scopedActiveTabs({ role, staffName, advertiserId, limit, forMapping = false } = {}) {
   const all = await participants.listActiveTabs({ limit });
@@ -1528,6 +1657,13 @@ module.exports = {
   staffOwnsAdvertiser,
   sheetAssignableByStaff,
   intranetAdvertisers,
+  listThread,
+  addThread,
+  setRequestStatus,
+  deleteThread,
+  markThreadSeen,
+  unseenCounts,
+  openRequestCounts,
   listWorkOrders,
   linkWorkOrder,
   unlinkWorkOrder,
