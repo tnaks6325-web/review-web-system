@@ -1,7 +1,7 @@
 const express = require('express');
 const router = express.Router();
 const { authMiddleware, adminOrMasterMiddleware } = require('../middleware/auth.middleware');
-const { registerLimiter } = require('../middleware/rateLimit.middleware');
+const { registerLimiter, imageApiLimiter } = require('../middleware/rateLimit.middleware');
 const {
   registerReviewer,
   verifyReviewer,
@@ -89,7 +89,8 @@ router.post('/profile', async (req, res, next) => {
 // ★ fail-open: 내부 오류 시 { ok:false }를 반환하고 프론트는 제출을 막지 않는다
 //   (최종 게이트는 /api/submit/order 서버검증).
 // ═══════════════════════════════════════════════════════════
-router.post('/identity-precheck', async (req, res) => {
+// ★ Gemini 비용 보호: 이미지 API와 동일한 리미터 적용 (무인증 엔드포인트 DoS 방지)
+router.post('/identity-precheck', imageApiLimiter, async (req, res) => {
   try {
     const { profileMissing, resolveOrderIdentity } = require('../services/identity.service');
     const p8 = String(req.body?.phone8 || '').replace(/[^0-9]/g, '').slice(-8);
@@ -113,10 +114,11 @@ router.post('/identity-precheck', async (req, res) => {
       return res.json({ ok: true, profileMissing: missing, results: [] });
     }
 
-    const orders = Array.isArray(req.body?.orders) ? req.body.orders.slice(0, 10) : [];
+    // 카드 최대 5장(MAX_ORDER_CARDS)과 동일 상한 — Gemini 호출 폭 제한
+    const orders = Array.isArray(req.body?.orders) ? req.body.orders.slice(0, 5) : [];
     const results = [];
     for (let i = 0; i < orders.length; i++) {
-      const r = await resolveOrderIdentity(reviewer, orders[i] || {});
+      const r = await resolveOrderIdentity(reviewer, orders[i] || {}, { mode: 'precheck' });
       results.push({ idx: i, ...r });
     }
     res.json({ ok: true, profileMissing: [], results });

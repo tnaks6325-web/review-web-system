@@ -183,5 +183,64 @@ function ok(name, fn) {
     assert.strictEqual(r.status, 'NEED_SUB_REGISTER');
   });
 
+  /* ── 리뷰 반영: 마스킹 추출값 폴백 (B1) ── */
+  await ok('★ B1: 마스킹(*) 추출값은 폼 값으로 폴백 → 본인(SELF) 정상 판정', async () => {
+    const r = await resolveOrderIdentity(reviewer, {
+      recipient: '김수만', phone: '010-8592-6325', address: '서면다인로얄팰리스 728호',
+      bank: 'KEB하나', account: '33891033003807', depositor: '김수만',
+      extractedRecipient: '김*만', extractedPhone: '010-****-6325', extractedAddress: '부산 부산진구 ***',
+    });
+    assert.strictEqual(r.status, 'SELF', JSON.stringify(r));
+  });
+  await ok('B1: 추출 전화가 8자리 미만이면 폼 값 폴백', async () => {
+    const r = await resolveOrderIdentity(reviewer, {
+      recipient: '김수만', phone: '010-8592-6325', address: '서면다인로얄팰리스 728호',
+      bank: 'KEB하나', account: '33891033003807', depositor: '김수만',
+      extractedPhone: '6325',
+    });
+    assert.strictEqual(r.status, 'SELF');
+  });
+
+  /* ── 리뷰 반영: 법정동 숫자 오탐 방지 (S1) ── */
+  await ok('★ S1: 법정동 "성수1동"의 1을 건물동으로 오탐하지 않음', () => {
+    assert.strictEqual(extractDong('서울 성동구 성수1동 656-323 101동 202호'), '101');
+    const r = addressHeuristic('서울 성동구 성수1동 656-323 101동 202호', '서울 성동구 아차산로 49 101동 202호');
+    assert.notStrictEqual(r.verdict, 'mismatch', JSON.stringify(r));
+  });
+
+  /* ── 리뷰 반영: submit 모드 (B2/S2) ── */
+  await ok('★ S2: submit 모드는 주소 uncertain을 통과 (Gemini 미사용·mismatch만 차단)', async () => {
+    // 지번 표기(건물명 생략) = 호수 일치 + 유사도 낮음 → 휴리스틱 uncertain
+    const addrJibun = '부전동 123-45 728호';
+    const h = addressHeuristic(reviewer.address, addrJibun);
+    assert.strictEqual(h.verdict, 'uncertain', JSON.stringify(h)); // 전제 확인
+    // precheck 모드(Gemini 미설정 환경 → 폴백 uncertain)에선 NEED_CONFIRM
+    const rPre = await resolveOrderIdentity(reviewer, {
+      recipient: '김수만', phone: '010-8592-6325', address: addrJibun,
+      bank: 'KEB하나', account: '33891033003807', depositor: '김수만',
+    }, { mode: 'precheck' });
+    assert.strictEqual(rPre.status, 'NEED_CONFIRM');
+    // submit 모드에선 통과 (uncertain은 precheck에서 이미 처리된 것으로 간주)
+    const rSubmit = await resolveOrderIdentity(reviewer, {
+      recipient: '김수만', phone: '010-8592-6325', address: addrJibun,
+      bank: 'KEB하나', account: '33891033003807', depositor: '김수만',
+    }, { mode: 'submit' });
+    assert.strictEqual(rSubmit.status, 'SELF', JSON.stringify(rSubmit));
+  });
+  await ok('S2: submit 모드에서도 호수 불일치(mismatch)는 NEED_CONFIRM', async () => {
+    const r = await resolveOrderIdentity(reviewer, {
+      recipient: '김수만', phone: '010-8592-6325', address: '서면다인로얄팰리스 999호',
+      bank: 'KEB하나', account: '33891033003807', depositor: '김수만',
+    }, { mode: 'submit' });
+    assert.strictEqual(r.status, 'NEED_CONFIRM');
+  });
+  await ok('★ skipDetailChecks(identityConfirmed): 주소/계좌 상이해도 분류만 수행(SELF)', async () => {
+    const r = await resolveOrderIdentity(reviewer, {
+      recipient: '김수만', phone: '010-8592-6325', address: '완전히 다른 주소 999호',
+      bank: '우리', account: '000', depositor: '아무개',
+    }, { mode: 'submit', skipDetailChecks: true });
+    assert.strictEqual(r.status, 'SELF');
+  });
+
   console.log(`\n${passed} passed`);
 })().catch(err => { console.error('✗ FAIL:', err.message); process.exit(1); });

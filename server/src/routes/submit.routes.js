@@ -722,12 +722,27 @@ router.post('/order', async (req, res, next) => {
             });
           }
 
+          // ★ 서버측 필수필드 검증 (주문번호·비고 제외 전 필드 — 리뷰어 제출에만 적용, 프론트 우회 차단)
+          const _reqFields = [
+            [orderer, '주문자'], [userId, '아이디'], [recipient, '수취인'], [phone, '연락처'],
+            [address, '배송주소'], [bank, '은행'], [account, '계좌'], [depositor, '예금주'], [price, '결제금액'],
+          ];
+          const _emptyFields = _reqFields.filter(([v]) => !String(v || '').trim()).map(([, l]) => l);
+          if (_emptyFields.length > 0) {
+            return res.json({
+              ok: false, code: 'FIELDS_REQUIRED',
+              error: `필수 항목이 비어 있습니다: ${_emptyFields.join(', ')} (주문번호·비고 외 전 항목 필수)`,
+            });
+          }
+
+          // ★ mode:'submit' = Gemini 미사용(핫패스 지연/비결정성 차단 — Gemini는 precheck 전용),
+          //   uncertain은 통과·mismatch만 차단. identityConfirmed면 주소/계좌 상세대조 생략(분류만).
           const _verdict = await resolveOrderIdentity(_rv, {
             recipient, phone, address, bank, account, depositor,
             extractedRecipient: b.extractedRecipient || '',
             extractedPhone: b.extractedPhone || '',
             extractedAddress: b.extractedAddress || '',
-          });
+          }, { mode: 'submit', skipDetailChecks: String(b.identityConfirmed) === 'true' });
 
           if (_verdict.status === 'NEED_SUB_REGISTER') {
             return res.json({
@@ -737,20 +752,19 @@ router.post('/order', async (req, res, next) => {
             });
           }
           if (_verdict.status === 'NEED_CONFIRM') {
-            if (String(b.identityConfirmed) === 'true') {
-              // 리뷰어가 확인하고 제출 — 통과시키되 이상로그로 남겨 관리자 가시성 확보
-              logAbnormal({
-                flow: 'order_submit', step: 'identity_confirm_override', source: 'validation',
-                error: new Error(`신원 유사도 경고 무시 제출: ${_verdict.reasons.join(' / ')}`),
-                context: { sheetId, tabName, loginPhone8: _idPhone8, recipient: recipient || '' },
-              });
-            } else {
-              return res.json({
-                ok: false, code: 'NEED_CONFIRM',
-                identity: _verdict.identity, reasons: _verdict.reasons,
-                error: '등록된 내정보와 달라 보이는 항목이 있습니다: ' + _verdict.reasons.join(' / '),
-              });
-            }
+            return res.json({
+              ok: false, code: 'NEED_CONFIRM',
+              identity: _verdict.identity, reasons: _verdict.reasons,
+              error: '등록된 내정보와 달라 보이는 항목이 있습니다: ' + _verdict.reasons.join(' / '),
+            });
+          }
+          // 리뷰어가 경고 확인 후 제출(identityConfirmed) — 통과시키되 이상로그로 관리자 가시성 확보
+          if (String(b.identityConfirmed) === 'true') {
+            logAbnormal({
+              flow: 'order_submit', step: 'identity_confirm_override', source: 'validation',
+              error: new Error('신원 유사도 경고 확인 후 제출 (리뷰어 확인 완료)'),
+              context: { sheetId, tabName, loginPhone8: _idPhone8, recipient: recipient || '' },
+            });
           }
           // SUB 매칭 시 타계정의 빈 주소/계좌 자동 보강 (best-effort)
           if (_verdict.status === 'SUB' && _verdict.subIndex >= 0) {

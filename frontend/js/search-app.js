@@ -6937,9 +6937,12 @@ async function _runIdentityPrecheck(auth, orders) {
   }
 
   // ② 주문별 신원 판정 처리
+  const _handledIds = new Set(); // 같은 신원 다건 → 다이얼로그/등록 1회만
   for (const r of (pre.results || [])) {
     if (r.status === "NEED_SUB_REGISTER") {
       const idn = r.identity || {};
+      const _idKey = (idn.name || "").replace(/\s+/g, "") + "|" + (idn.phone || "").replace(/[^0-9]/g, "").slice(-8);
+      if (_handledIds.has(_idKey)) continue; // 이미 이번 제출에서 등록 처리됨
       const msg = "⚠️ 내 정보와 다른 정보가 감지되었습니다.\n\n"
         + `이름: ${idn.name || "-"}\n연락처: ${idn.phone || "-"}\n주소: ${idn.address || "-"}\n`
         + `계좌: ${idn.bankName || ""} ${idn.bankAccount || "-"} (${idn.accountHolder || "-"})\n\n`
@@ -6954,6 +6957,7 @@ async function _runIdentityPrecheck(auth, orders) {
         return false;
       }
       showToast(`타계정(${idn.name}) 등록 완료 — 제출을 계속합니다.`, "success");
+      _handledIds.add(_idKey);
     } else if (r.status === "NEED_CONFIRM") {
       const msg = "⚠️ 등록된 내정보와 달라 보이는 항목이 있습니다.\n\n"
         + "- " + (r.reasons || []).join("\n- ")
@@ -6974,6 +6978,13 @@ async function _registerSubAccountFromOrder(auth, idn) {
     const prof = await gasGet({ action: "getReviewerProfile", name: auth.name, phone8: auth.phone8 });
     if (!prof?.ok || !prof.profile) return false;
     const subs = Array.isArray(prof.profile.subAccounts) ? prof.profile.subAccounts : [];
+    // ★ 중복 등록 방지: 같은 이름+전화(뒤8자리) 타계정이 이미 있으면 성공으로 간주
+    const _n = (idn.name || "").replace(/\s+/g, "");
+    const _p8 = (idn.phone || "").replace(/[^0-9]/g, "").slice(-8);
+    if (subs.some(s => (s?.name || "").replace(/\s+/g, "") === _n
+        && (s?.phone || "").replace(/[^0-9]/g, "").slice(-8) === _p8)) {
+      return true;
+    }
     if (subs.length >= 10) { showToast("타계정은 최대 10개까지 등록할 수 있습니다.", "error"); return false; }
     subs.push({
       name: (idn.name || "").trim(),
@@ -7384,6 +7395,42 @@ async function submitOrderForm() {
         } catch(e2) { throw new Error("서버 연결 실패"); }
       }
       if (!res) throw new Error("서버 응답이 없습니다.");
+
+      // ★ 서버 신원게이트 판정 처리 (precheck와 판정이 달라진 경우의 탈출구 —
+      //   예: 앞 주문 제출로 타계정 정보가 자동보강되어 뒤 주문 판정이 바뀐 경우)
+      if (!res.ok && res.code === "NEED_CONFIRM") {
+        const msgC = `⚠️ ${i+1}번째 주문: 등록된 내정보와 달라 보이는 항목이 있습니다.\n\n- `
+          + (res.reasons || []).join("\n- ")
+          + "\n\n입력 정보가 정확한지 확인했으며 그대로 제출할까요?";
+        if (confirm(msgC)) {
+          payload.identityConfirmed = "true";
+          try { res = await gasPost(payload, 30000); } catch(_) { throw new Error("서버 연결 실패 (재확인 제출)"); }
+        } else {
+          showToast(`${i+1}번째 주문은 취소되었습니다. 정보 확인 후 이 주문만 다시 제출해주세요.`, "warning");
+          continue;
+        }
+      } else if (!res.ok && res.code === "NEED_SUB_REGISTER") {
+        const idn = res.identity || {};
+        const msgR = `⚠️ ${i+1}번째 주문: 내 정보와 다른 정보가 감지되었습니다.\n\n`
+          + `이름: ${idn.name || "-"}\n연락처: ${idn.phone || "-"}\n\n현재 입력값을 나의 타계정으로 등록하고 제출할까요?`;
+        if (confirm(msgR)) {
+          const okReg2 = await _registerSubAccountFromOrder(window._slotAuth || {}, idn);
+          if (okReg2) {
+            try { res = await gasPost(payload, 30000); } catch(_) { throw new Error("서버 연결 실패 (타계정 등록 후 재제출)"); }
+          } else {
+            showToast("타계정 등록 실패 — 이 주문은 건너뜁니다. 내정보에서 등록 후 다시 제출해주세요.", "error");
+            continue;
+          }
+        } else {
+          showToast(`${i+1}번째 주문은 취소되었습니다.`, "warning");
+          continue;
+        }
+      } else if (!res.ok && res.code === "PROFILE_INCOMPLETE") {
+        _showProfileGateBanner(res.profileMissing || []);
+        showToast("내정보 미등록으로 제출이 중단되었습니다. 등록 후 다시 제출해주세요.", "error");
+        break; // 이후 주문도 동일하게 막히므로 중단
+      }
+
       if (!res.ok) throw new Error(res.error||"제출 실패");
 
       successCount++;
@@ -7407,7 +7454,8 @@ async function submitOrderForm() {
         })();
       }
     } catch(err) {
-      showCenterAlert(`❌ ${i+1}번째 주문 제출 실패: ${err.message}`);
+      // ★ err.message에 서버/AI 자유텍스트가 포함될 수 있어 escape (innerHTML 주입 방어)
+      showCenterAlert(`❌ ${i+1}번째 주문 제출 실패: ${_safeText(err.message)}`);
       console.error(`[제출 ${i+1}] 오류:`, err);
     }
   }
