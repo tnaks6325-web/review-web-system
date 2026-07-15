@@ -202,15 +202,24 @@ router.post('/advertisers', authMiddleware, internalMiddleware, async (req, res,
   } catch (err) { next(err); }
 });
 
+// ── 업체(거래처) 삭제(soft) — master/admin 전용. 포털 공유 원장이라 status='ended'로 숨김(가역)+소유 매핑 해제. ──
+router.delete('/advertisers/:id', authMiddleware, adminOrMasterMiddleware, async (req, res, next) => {
+  try {
+    const out = await svc.deleteAdvertiser({ advertiserId: req.params.id, by: _by(req) });
+    res.status(out.ok ? 200 : (out.code || 400)).json(out);
+  } catch (err) { next(err); }
+});
+
 // ── 인트라넷 광고주DB 자동완성 프록시(거래처명) — 내부인. 이름·담당자만 반환(민감필드 미노출). ──
 router.get('/intranet/advertisers', authMiddleware, internalMiddleware, async (req, res, next) => {
   try { res.json(await svc.intranetAdvertisers({ q: req.query.q, limit: req.query.limit })); }
   catch (err) { next(err); }
 });
 
-// ── 인트라넷 사용자(AE) 자동완성 프록시 — 담당AE 매칭 전용. 이름·아이디·부서만(민감필드 미노출). ──
+// ── 인트라넷 사용자(AE) 자동완성 프록시 — 담당AE 매칭 전용. 이름·아이디·부서만(민감필드 미노출).
+//   dept=AE 등 부서 필터 지원(담당AE 후보를 AE 부서로 제한). ──
 router.get('/intranet/users', authMiddleware, adminOrMasterMiddleware, async (req, res, next) => {
-  try { res.json(await svc.intranetStaffUsers({ q: req.query.q, limit: req.query.limit })); }
+  try { res.json(await svc.intranetStaffUsers({ q: req.query.q, limit: req.query.limit, dept: req.query.dept })); }
   catch (err) { next(err); }
 });
 

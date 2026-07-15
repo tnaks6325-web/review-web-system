@@ -170,26 +170,51 @@ async function run() {
     if (/SELECT inad_pm FROM advertisers WHERE id/.test(s)) {
       return { rows: vals[0] === 'adv_mine' ? [{ inad_pm: ' 김수만 ' }] : vals[0] === 'adv_other' ? [{ inad_pm: '박세희' }] : [] };
     }
+    if (/UPDATE advertisers SET status = 'ended'/.test(s)) return { rows: vals[0] === 'adv_del' ? [{ id: 'adv_del', name: '삭제업체' }] : [] };
+    if (/UPDATE advertiser_campaigns SET deleted_at/.test(s)) return { rows: [], rowCount: 2 };
     return { rows: [] };
   } });
+  // 거래처 등록검증(인트라넷 광고주DB) 목 — 등록됨/미등록/도달불가 3태를 주입.
+  const okVerify = async () => ({ ok: true, registered: true });
+  const notReg = async () => ({ ok: true, registered: false });
+  const unreach = async () => ({ ok: false, unreachable: true });
 
   // 2a: staff — body inad_pm 무시하고 자기 로그인명 강제
-  let c = await svc.createAdvertiserScoped({ name: '새업체', inadPm: '박세희', role: 'staff', byName: '김수만' });
+  let c = await svc.createAdvertiserScoped({ name: '새업체', inadPm: '박세희', role: 'staff', byName: '김수만', _verify: okVerify });
   assert.equal(c.ok, true, '2a: 생성 성공');
   assert.equal(c.data.inad_pm, '김수만', '2a: staff는 inad_pm=자기 로그인명 강제(타 AE 명의 차단)');
 
   // 2b: admin — body inad_pm 그대로 허용
-  c = await svc.createAdvertiserScoped({ name: '새업체2', inadPm: '박세희', role: 'admin', byName: 'master' });
+  c = await svc.createAdvertiserScoped({ name: '새업체2', inadPm: '박세희', role: 'admin', byName: 'master', _verify: okVerify });
   assert.equal(c.data.inad_pm, '박세희', '2b: admin은 지정 inad_pm 허용');
 
   // 2c: 중복 → 409
-  c = await svc.createAdvertiserScoped({ name: '중복업체', role: 'staff', byName: '김수만' });
+  c = await svc.createAdvertiserScoped({ name: '중복업체', role: 'staff', byName: '김수만', _verify: okVerify });
   assert.equal(c.ok, false, '2c: 중복 거부'); assert.equal(c.code, 409, '2c: 409');
 
-  // 2d: staff인데 로그인명 없음 → 400 (무명 생성 차단)
+  // 2d: staff인데 로그인명 없음 → 400 (무명 생성 차단, 검증 전 반환)
   c = await svc.createAdvertiserScoped({ name: '업체3', role: 'staff', byName: '' });
   assert.equal(c.ok, false, '2d: 로그인명 없는 staff 거부');
-  console.log('  2. createAdvertiserScoped — staff inad_pm 강제·admin 허용·중복 409·무명 staff 400 ✓');
+
+  // 2e: 거래처정보 미등록 광고주 → 422 (인트라넷 광고주DB에 없는 이름 차단)
+  c = await svc.createAdvertiserScoped({ name: '유령업체', role: 'admin', byName: 'master', _verify: notReg });
+  assert.equal(c.ok, false, '2e: 미등록 거부'); assert.equal(c.code, 422, '2e: 422');
+
+  // 2f: 인트라넷 도달 불가 → 503 (검증 못 한 채 유입 금지, fail-closed)
+  c = await svc.createAdvertiserScoped({ name: '아무업체', role: 'admin', byName: 'master', _verify: unreach });
+  assert.equal(c.ok, false, '2f: 도달불가 거부'); assert.equal(c.code, 503, '2f: 503');
+  console.log('  2. createAdvertiserScoped — staff 강제·admin 허용·중복 409·무명 400·미등록 422·도달불가 503 ✓');
+
+  // ═══ 2.5 deleteAdvertiser — 소프트 삭제(status=ended)+소유 해제, 없는 업체 404 ═══
+  let d = await svc.deleteAdvertiser({ advertiserId: 'adv_del', by: 'master' });
+  assert.equal(d.ok, true, '2.5a: 삭제 성공');
+  assert.equal(d.data.ownershipsReleased, 2, '2.5a: 소유 매핑 해제 카운트');
+  assert.ok(q.some(x => /UPDATE advertisers SET status = 'ended'/.test(x.s)), '2.5a: status=ended 소프트삭제(하드삭제 아님)');
+  d = await svc.deleteAdvertiser({ advertiserId: 'adv_none', by: 'master' });
+  assert.equal(d.ok, false, '2.5b: 없는 업체 404'); assert.equal(d.code, 404, '2.5b: 404');
+  d = await svc.deleteAdvertiser({});
+  assert.equal(d.ok, false, '2.5c: advertiserId 누락 400'); assert.equal(d.code, 400, '2.5c: 400');
+  console.log('  2.5 deleteAdvertiser — 소프트삭제(ended)+소유해제·404·400 ✓');
 
   // ═══ 3. staffOwnsAdvertiser ═══
   assert.equal(await svc.staffOwnsAdvertiser({ advertiserId: 'adv_mine', staffName: '김수만' }), true, '3a: TRIM 일치 허용');
@@ -216,7 +241,7 @@ async function run() {
     if (/INSERT INTO advertisers/.test(s)) { const e = new Error('duplicate'); e.code = '23505'; throw e; }
     return { rows: [] };
   } });
-  const race = await svc.createAdvertiserScoped({ name: '레이스업체', role: 'staff', byName: '김수만' });
+  const race = await svc.createAdvertiserScoped({ name: '레이스업체', role: 'staff', byName: '김수만', _verify: async () => ({ ok: true, registered: true }) });
   assert.equal(race.ok, false, '3.6: 레이스 실패');
   assert.equal(race.code, 409, '3.6: 23505 → 409(서버오류 마스킹 방지)');
   console.log('  3.6 createAdvertiserScoped — UNIQUE 레이스 409 ✓');

@@ -202,6 +202,8 @@
   .advitem .ct{font-size:10.5px;font-weight:700;color:var(--faint);background:var(--card2);border-radius:999px;padding:1px 7px} .advitem.on .ct{background:var(--card);color:var(--adv)}
   .advitem .pmn{display:block;font-size:10px;font-style:normal;font-weight:500;color:var(--faint);margin-top:1px}
   .advitem .pmn.noae{color:var(--warn)}
+  .advitem .advdel{flex:none;width:20px;height:20px;border-radius:6px;border:1px solid transparent;background:transparent;color:var(--faint);cursor:pointer;font-size:14px;line-height:1;opacity:0;transition:opacity .12s}
+  .advitem:hover .advdel{opacity:.65} .advitem .advdel:hover{opacity:1;color:var(--bad);border-color:var(--bad);background:var(--bad-soft)}
   .aebox{display:flex;align-items:center;gap:6px;font-size:12px;color:var(--muted);margin-right:8px;white-space:nowrap}
   .aebox b{color:var(--ink)}
   .aebox input{font:inherit;font-size:12px;padding:4px 8px;border:1px solid var(--accent-line);border-radius:7px;background:var(--card);color:var(--ink);outline:none}
@@ -1072,13 +1074,27 @@ async function renderOwnershipView(){
   const r=await api('/api/trackb/advertisers');
   if(!r||!r.ok){ $('#advs').innerHTML=`<div class="empty">업체 목록은 admin/master에서 제공</div>`; return; }
   STATE.advs=r.items||[];
-  $('#advs').innerHTML = STATE.advs.map((a,i)=>`<div class="advitem" data-i="${i}" onclick="selAdv(${i})"><span class="ava">${esc((a.name||'?').slice(0,1))}</span><span class="nm">${esc(a.name)}<i class="pmn ${a.inadPm?'':'noae'}">${a.inadPm?('AE '+esc(a.inadPm)):'AE 미지정'}</i></span><span class="ct">${a.owned}</span></div>`).join('')||`<div class="empty">등록된 업체 없음</div>`;
+  const canDel=(STATE.role==='master'||STATE.role==='admin');
+  $('#advs').innerHTML = STATE.advs.map((a,i)=>`<div class="advitem" data-i="${i}" onclick="selAdv(${i})"><span class="ava">${esc((a.name||'?').slice(0,1))}</span><span class="nm">${esc(a.name)}<i class="pmn ${a.inadPm?'':'noae'}">${a.inadPm?('AE '+esc(a.inadPm)):'AE 미지정'}</i></span><span class="ct">${a.owned}</span>${canDel?`<button class="advdel" title="업체 삭제" onclick="event.stopPropagation();deleteAdv(${i})">×</button>`:''}</div>`).join('')||`<div class="empty">등록된 업체 없음</div>`;
+}
+// 업체(거래처) 삭제 — master/admin. 소프트 삭제(status='ended', 가역) + 소유 매핑 해제. 확인 다이얼로그.
+async function deleteAdv(i){
+  const a=STATE.advs[i]; if(!a) return;
+  const msg = a.owned>0
+    ? `'${a.name}' 업체를 목록에서 삭제할까요?\n연결된 소유 캠페인 ${a.owned}건도 함께 해제됩니다.\n(숨김 처리 — 필요 시 복구 가능)`
+    : `'${a.name}' 업체를 목록에서 삭제할까요?`;
+  if(!confirm(msg)) return;
+  const r=await api('/api/trackb/advertisers/'+encodeURIComponent(a.id),{method:'DELETE'});
+  if(r&&r.ok){ toast('업체 삭제: '+a.name);
+    if(STATE.advCur&&STATE.advCur.id===a.id){ STATE.advCur=null; const p=$('#ownPanel'); if(p) p.innerHTML=`<div class="empty">왼쪽에서 업체를 선택하세요.</div>`; }
+    await renderOwnershipView();
+  } else toast('삭제 실패'+(r&&r.error?': '+r.error:''));
 }
 // 업체(거래처) 추가 — 기존 포털 거래처 원장(POST /api/portal/advertisers, adminOrMaster) 재사용.
 //   흐름: ① 캠페인 시트 먼저 선택(탭 미리보기로 어떤 캠페인인지 확인) → ② 거래처명 검색(인트라넷 자동완성)
 //   → ③ 등록 = 업체 생성 + 선택 시트 전체 소유 자동 지정. 담당AE는 로그인명 자동.
 function showAddAdvertiser(){
-  STATE.advCur=null; document.querySelectorAll('.advitem').forEach(el=>el.classList.remove('on'));
+  STATE.advCur=null; STATE.advNameOk=false; _intraItems=[]; document.querySelectorAll('.advitem').forEach(el=>el.classList.remove('on'));
   const sheetOpts = Object.keys(STATE.sheetMap).map(sid=>`<option value="${esc(sid)}">${esc(sheetTitle(sid))}</option>`).join('');
   $('#ownPanel').innerHTML = `
     <div class="ph2"><span class="big">＋</span><div><h2>업체(거래처) 추가</h2><div class="acc">① 캠페인 시트를 먼저 선택하고 → ② 거래처명을 검색해 등록하세요. 등록하면 선택한 시트 전체가 이 업체 소유로 자동 지정됩니다.</div></div></div>
@@ -1092,16 +1108,17 @@ function showAddAdvertiser(){
           <input id="advName" placeholder="먼저 캠페인 시트를 선택하세요" autocomplete="off" disabled oninput="intraSuggest(this.value)" onkeydown="if(event.key==='Enter')createAdvertiser()">
           <div id="advSug" class="advsug"></div>
         </div>
+        <div id="advNameChk" style="font-size:11.5px;margin-top:5px;min-height:15px"></div>
         <label style="margin-top:11px">담당 AE ${(STATE.role==='master'||STATE.role==='admin')?'<span style="color:var(--faint);font-weight:400">(인트라넷 사용자 자동완성 · 거래처 선택 시 담당자 자동 제안 · 비우면 미지정)</span>':'(로그인 정보 기준 자동 지정)'}</label>
         ${(STATE.role==='master'||STATE.role==='admin')
           ? `<input id="advPm" list="aelist2" placeholder="예: 박세희" autocomplete="off"><datalist id="aelist2"></datalist>`
           : `<input id="advPm" value="" readonly style="background:var(--card2);color:var(--muted);cursor:not-allowed">`}
         <div id="advErr" style="color:var(--bad);font-size:12px;margin-top:9px;min-height:15px"></div>
-        <button class="btn pri assignbtn" onclick="createAdvertiser()">＋ 업체 등록 + 시트 소유 지정</button>
+        <button id="advCreateBtn" class="btn pri assignbtn" disabled onclick="createAdvertiser()">＋ 업체 등록 + 시트 소유 지정</button>
       </div>
     </div>`;
   if(STATE.role==='master'||STATE.role==='admin'){
-    api('/api/trackb/intranet/users').then(r=>{ const dl=$('#aelist2');
+    api('/api/trackb/intranet/users?dept=AE').then(r=>{ const dl=$('#aelist2');   // 담당AE 후보 = AE 부서 직원만
       if(dl&&r&&r.ok) dl.innerHTML=(r.items||[]).map(u=>`<option value="${esc(u.name)}">${esc(u.username)}${u.department?' · '+esc(u.department):''}</option>`).join('');
     }).catch(()=>{});
   } else $('#advPm').value = STATE.name || '';
@@ -1116,30 +1133,50 @@ function onAdvSheet(){
   if(prev){ const names=tabs.map(t=>t.tabName); prev.textContent = tabs.length ? `탭 ${tabs.length}개: `+names.slice(0,5).join(' · ')+(names.length>5?` 외 ${names.length-5}개`:'') : '이 시트에 활성 탭 없음'; }
   if(nameEl){ nameEl.disabled=false; nameEl.placeholder='예: (주)콩고물'; nameEl.focus(); }
 }
-// 인트라넷 광고주DB 자동완성(서버 프록시 경유 — 브라우저는 인트라넷 직접 미호출). 실패 시 조용히 무시(수동 입력 가능).
-let _sugTimer=null;
+// 인트라넷 광고주DB 실시간 자동완성(서버 프록시 경유 — 브라우저는 인트라넷 직접 미호출). 실패 시 조용히 무시.
+//   ★ 등록 게이트: 거래처정보(인트라넷 광고주DB)에 정확히 존재하는 이름만 등록 허용 → 목록에서 선택(또는 정확 입력)해야
+//     [＋등록] 버튼이 활성화된다(미등록/오타 광고주 유입 차단). 서버(createAdvertiserScoped)도 동일 검증(최종 방어).
+let _sugTimer=null, _intraItems=[];
 function intraSuggest(q){
-  clearTimeout(_sugTimer); const box=$('#advSug'); if(!box) return;
-  if(!(q||'').trim()){ box.classList.remove('show'); box.innerHTML=''; return; }
+  clearTimeout(_sugTimer); const box=$('#advSug'); const val=(q||'').trim();
+  _advNameCheck();   // 즉시(직전 후보 기준) 상태 갱신 — 타이핑 중 반응성
+  if(!box) return;
+  if(!val){ box.classList.remove('show'); box.innerHTML=''; return; }
   _sugTimer=setTimeout(async()=>{
-    const r=await api('/api/trackb/intranet/advertisers?q='+encodeURIComponent(q.trim())).catch(()=>null);
-    const items=(r&&r.ok&&r.items)||[];
-    if(!items.length){ box.classList.remove('show'); box.innerHTML=''; return; }
-    box.innerHTML=items.map(it=>`<div class="sugitem" onclick="pickIntra('${esc(it.name).replace(/'/g,'&#39;')}','${esc(it.manager||'').replace(/'/g,'&#39;')}')">${esc(it.name)}${it.manager?`<span class="sugm">${esc(it.manager)}</span>`:''}</div>`).join('');
+    const r=await api('/api/trackb/intranet/advertisers?q='+encodeURIComponent(val)).catch(()=>null);
+    _intraItems=(r&&r.ok&&r.items)||[];
+    _advNameCheck();
+    if(!_intraItems.length){ box.classList.remove('show'); box.innerHTML=''; return; }
+    box.innerHTML=_intraItems.map(it=>`<div class="sugitem" onclick="pickIntra('${esc(it.name).replace(/'/g,'&#39;')}','${esc(it.manager||'').replace(/'/g,'&#39;')}')">${esc(it.name)}${it.manager?`<span class="sugm">${esc(it.manager)}</span>`:''}</div>`).join('');
     box.classList.add('show');
-  },250);
+  },120);
 }
-// 거래처 선택 시: master/admin 이고 담당AE 칸이 비어 있으면 인트라넷 광고주DB의 담당자(manager)를 자동 제안(수정 가능).
+// 현재 입력값이 인트라넷 광고주DB(직전 후보)에 정확히 있는지 판정 → 상태문구 + [＋등록] 버튼 활성/비활성.
+function _advNameCheck(){
+  const el=$('#advName'), chk=$('#advNameChk'), btn=$('#advCreateBtn'); if(!el) return;
+  const val=(el.value||'').trim().toLowerCase();
+  const ok=!!val && _intraItems.some(it=>String(it.name||'').trim().toLowerCase()===val);
+  STATE.advNameOk=ok;
+  if(chk){
+    if(!val){ chk.textContent=''; chk.style.color=''; }
+    else if(ok){ chk.textContent='✓ 인트라넷 광고주DB 등록 확인됨'; chk.style.color='var(--safe)'; }
+    else { chk.textContent='⚠ 거래처정보에 등록되지 않은 광고주입니다 — 목록에서 선택하세요'; chk.style.color='var(--bad)'; }
+  }
+  if(btn) btn.disabled=!ok;
+}
+// 거래처 선택 시: 값 확정 + 검증 통과 + master/admin 이고 담당AE 칸이 비어 있으면 광고주DB 담당자(manager) 자동 제안(수정 가능).
 function pickIntra(name, manager){ const el=$('#advName'); if(el) el.value=name;
   const pm=$('#advPm');
   if(pm&&!pm.readOnly&&!pm.value.trim()&&(manager||'').trim()) pm.value=manager.trim();
-  const box=$('#advSug'); if(box){ box.classList.remove('show'); box.innerHTML=''; } }
+  const box=$('#advSug'); if(box){ box.classList.remove('show'); box.innerHTML=''; }
+  _advNameCheck(); }
 async function createAdvertiser(){
   const sheetId=($('#advSheet')&&$('#advSheet').value)||'';
   const name=($('#advName').value||'').trim(), inad_pm=(($('#advPm')&&$('#advPm').value)||'').trim();
   const err=$('#advErr'); if(err) err.textContent='';
   if(!sheetId){ if(err) err.textContent='캠페인 시트를 먼저 선택하세요.'; return; }
   if(!name){ if(err) err.textContent='거래처명을 입력하세요.'; return; }
+  if(!STATE.advNameOk){ if(err) err.textContent='거래처정보(인트라넷 광고주DB)에 등록된 광고주만 등록할 수 있습니다. 목록에서 선택하세요.'; return; }
   const r=await api('/api/trackb/advertisers',{method:'POST',body:JSON.stringify({ name, inad_pm })});
   if(!(r&&r.ok)){ if(err) err.textContent=(r&&r.error)||'등록 실패'; return; }
   const newId=r.data&&r.data.id;
@@ -1212,7 +1249,7 @@ function editAe(){ const a=STATE.advCur; if(!a) return; const box=$('#aebox'); i
       onkeydown="if(event.key==='Enter')saveAe(); else if(event.key==='Escape')cancelAe()"><datalist id="aelist"></datalist>
     <button class="btn xs pri" onclick="saveAe()">저장</button> <button class="btn xs" onclick="cancelAe()">취소</button>`;
   const inp=$('#aein'); inp.value=a.inadPm||''; inp.focus(); inp.select();
-  api('/api/trackb/intranet/users').then(r=>{ const dl=$('#aelist');
+  api('/api/trackb/intranet/users?dept=AE').then(r=>{ const dl=$('#aelist');   // 담당AE 후보 = AE 부서 직원만
     if(dl&&r&&r.ok) dl.innerHTML=(r.items||[]).map(u=>`<option value="${esc(u.name)}">${esc(u.username)}${u.department?' · '+esc(u.department):''}</option>`).join('');
   }).catch(()=>{});
 }

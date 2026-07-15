@@ -409,13 +409,34 @@ async function setAdvertiserInadPm({ advertiserId, inadPm = '', by = '' } = {}) 
   return { ok: true, advertiser: rows[0] };
 }
 
+// ── 업체(거래처) 삭제 = 소프트 삭제(status='ended') + Track B 소유 매핑 소프트 해제. master/admin 전용(라우트 게이트).
+//   advertisers 는 포털과 공유하는 거래처 원장이라 하드삭제 금지 — 'ended'는 목록 필터(status<>'ended')가
+//   이미 숨김으로 취급하는 설계된 상태(가역: DB에서 status='active' 로 복구 가능). 소유 매핑도 함께 해제해
+//   sheetAssignableByStaff/카운트 등에 잔재가 남지 않게 한다. (Track A·시트 무접촉 — Track B 내부만.)
+async function deleteAdvertiser({ advertiserId, by = '' } = {}) {
+  if (!advertiserId) return { ok: false, code: 400, error: 'advertiserId 필수' };
+  const db = getPool();
+  const { rows } = await db.query(
+    `UPDATE advertisers SET status = 'ended' WHERE id = $1 AND status <> 'ended' RETURNING id, name`, [advertiserId]);
+  if (!rows.length) return { ok: false, code: 404, error: '거래처를 찾을 수 없습니다(이미 삭제되었을 수 있음).' };
+  const own = await db.query(
+    `UPDATE advertiser_campaigns SET deleted_at = NOW() WHERE advertiser_id = $1 AND deleted_at IS NULL`, [advertiserId]);
+  logger.info(`[trackB] 업체 삭제(soft): ${rows[0].name}(${advertiserId}) 소유해제 ${own.rowCount || 0}건 by ${by}`);
+  return { ok: true, data: { id: rows[0].id, name: rows[0].name, ownershipsReleased: own.rowCount || 0 } };
+}
+
 // ── Track B 스코프 업체(거래처) 생성 — workdesk 업체추가 전용(포털 라우트와 동일 시맨틱·테이블).
 //    staff(AE)는 inad_pm 을 자기 로그인명으로 강제(타 AE 명의 생성 차단) — 생성 즉시 자기 스코프에 들어옴.
-async function createAdvertiserScoped({ name, inadPm = '', role = 'admin', byName = '' } = {}) {
+async function createAdvertiserScoped({ name, inadPm = '', role = 'admin', byName = '', _verify = isRegisteredIntranetAdvertiser } = {}) {
   const nm = String(name || '').trim();
   if (!nm) return { ok: false, code: 400, error: '거래처명을 입력하세요.' };
   const pm = role === 'staff' ? String(byName || '').trim() : String(inadPm || '').trim();
   if (role === 'staff' && !pm) return { ok: false, code: 400, error: '로그인 정보에 담당자명이 없습니다.' };
+  // ★ 거래처정보(인트라넷 광고주DB) 등록 검증 — 미등록/오타 광고주 유입 차단.
+  //   인트라넷 도달 불가(unreachable)면 fail-closed(503) — 검증 못 한 채 유입시키지 않음(등록은 저빈도 작업이라 감내 가능).
+  const chk = await _verify(nm);
+  if (!chk || !chk.ok) return { ok: false, code: 503, error: '인트라넷 광고주DB를 확인할 수 없어 등록할 수 없습니다. 잠시 후 다시 시도하세요.' };
+  if (!chk.registered) return { ok: false, code: 422, error: '거래처정보(인트라넷 광고주DB)에 등록되지 않은 광고주입니다. 인트라넷 거래처 관리에 먼저 등록 후 이용하세요.' };
   const db = getPool();
   const dup = await db.query('SELECT 1 FROM advertisers WHERE name = $1', [nm]);
   if (dup.rows.length > 0) return { ok: false, code: 409, error: '이미 존재하는 거래처명입니다.' };
@@ -542,11 +563,22 @@ async function intranetAdvertisers({ q = '', limit = 20 } = {}) {
   return { ok: true, items };
 }
 
+// ── 거래처 등록 검증: 인트라넷 광고주DB(business_name)에 "정확히" 존재하는 이름만 Track B 업체로 등록 허용.
+//   부분일치 유입 방지 위해 정확일치(공백제거·대소문 무시). 인트라넷 도달 불가면 unreachable=true(상위 fail-closed).
+async function isRegisteredIntranetAdvertiser(name) {
+  const nm = String(name || '').trim().toLowerCase();
+  if (!nm) return { ok: true, registered: false };
+  const r = await intranetAdvertisers({ q: name, limit: 50 });
+  if (!r || !r.ok) return { ok: false, unreachable: true };
+  const registered = (r.items || []).some(it => String(it.name || '').trim().toLowerCase() === nm);
+  return { ok: true, registered };
+}
+
 // ══ 인트라넷 사용자(AE) 자동완성 프록시 ══ 담당AE(inad_pm) 매칭용. 스코프 키인 display_name +
 //   username·부서만 추려 반환 — 인트라넷 users 의 비밀번호·생일 등 민감필드는 매핑에서 즉시 폐기(미노출).
 //   60초 캐시·5초 타임아웃·fail-soft(stale 캐시 유지). 소비 라우트는 adminOrMaster 로 제한할 것.
 let _intraUserCache = { at: 0, rows: null };
-async function intranetStaffUsers({ q = '', limit = 20 } = {}) {
+async function intranetStaffUsers({ q = '', limit = 20, dept = '' } = {}) {
   const now = Date.now();
   if (!_intraUserCache.rows || now - _intraUserCache.at > 60 * 1000) {
     try {
@@ -562,8 +594,10 @@ async function intranetStaffUsers({ q = '', limit = 20 } = {}) {
     }
   }
   const needle = String(q || '').trim().toLowerCase();
+  const deptF = String(dept || '').trim().toLowerCase();   // 부서 정확일치 필터(예: 'AE') — 담당AE 후보를 해당 부서로 제한
   const lim = Math.min(Math.max(parseInt(limit, 10) || 20, 1), 50);
   const items = (_intraUserCache.rows || [])
+    .filter(r => !deptF || String(r.department || '').trim().toLowerCase() === deptF)
     .filter(r => !needle || r.name.toLowerCase().includes(needle) || r.username.toLowerCase().includes(needle))
     .slice(0, lim);
   return { ok: true, items };
@@ -2021,6 +2055,8 @@ module.exports = {
   listAdvertisersWithOwnership,
   ownedTabsForAdvertiser,
   createAdvertiserScoped,
+  deleteAdvertiser,
+  isRegisteredIntranetAdvertiser,
   staffOwnsAdvertiser,
   sheetAssignableByStaff,
   intranetAdvertisers, intranetStaffUsers, setAdvertiserInadPm,
