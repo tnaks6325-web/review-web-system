@@ -88,6 +88,26 @@ async function run() {
   delete process.env.INTRANET_SSO_ADMIN_USERS;
   delete process.env.INTRANET_SSO_ALLOWED_GROUPS;
 
+  // 1a5(서버간 인증): INTRANET_API_KEY 설정 시 프록시 호출에 X-Api-Key 헤더를 실어 보낸다
+  //   (인트라넷 API 가드 활성 시 키 없는 서버간 호출은 Unauthorized로 차단됨 — SSO 토큰 발급 실패 재발 방지).
+  let capturedHeaders = null;
+  const captureFetch = (status, body) => async (_url, opts) => {
+    capturedHeaders = (opts && opts.headers) || {};
+    return { ok: status >= 200 && status < 300, status, json: async () => body };
+  };
+  process.env.INTRANET_API_KEY = 'svc-key-xyz';
+  r = await auth.loginIntranet('kim.ae', 'pw123',
+    captureFetch(200, { username: 'kim.ae', display_name: '김수만', role: 'user' }));
+  assert.equal(r.success, true, '1a5: 성공');
+  assert.equal(capturedHeaders['X-Api-Key'], 'svc-key-xyz', '1a5: INTRANET_API_KEY 를 X-Api-Key 로 전송');
+  assert.equal(capturedHeaders['Content-Type'], 'application/json', '1a5: Content-Type 유지');
+  // 미설정이면 헤더 미전송(구버전 인트라넷/가드 비활성 호환)
+  delete process.env.INTRANET_API_KEY;
+  capturedHeaders = null;
+  r = await auth.loginIntranet('kim.ae', 'pw123',
+    captureFetch(200, { username: 'kim.ae', display_name: '김수만', role: 'user' }));
+  assert.ok(!('X-Api-Key' in capturedHeaders), '1a5: INTRANET_API_KEY 미설정 시 X-Api-Key 미전송');
+
   // 1b: 자격 불일치(401) → 실패 + 인트라넷 에러 메시지 전달
   r = await auth.loginIntranet('kim.ae', 'wrong', mockFetch(401, { error: '사용자명 또는 비밀번호가 올바르지 않습니다.' }));
   assert.equal(r.success, false, '1b: 401 거부');
