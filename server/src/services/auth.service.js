@@ -92,13 +92,21 @@ async function loginIntranet(name, pw, _fetch = fetch) {
     return { success: false, error: '이름과 비밀번호를 입력하세요.' };
   }
   const base = (process.env.INTRANET_API_BASE || 'https://inadd-system.pages.dev').trim().replace(/\/$/, '');
+  // 서버간 인증 헤더(X-Api-Key = INTRANET_API_KEY): 인트라넷 API 가드가 활성화되면(INADD_SESSION_SECRET/
+  //   INADD_API_KEY 설정) 키 없는 서버간 호출은 "Unauthorized"로 차단된다. /api/auth/login 은 인트라넷 가드의
+  //   AUTH_BYPASS(내부)지만 외부 공유키 가드는 통과해야 하므로 이 키를 실어 보낸다(trackB 프록시 #282와 동일 채널).
+  //   미설정이면 헤더 미전송(가드 비활성 환경/구버전 인트라넷과의 호환 — 단계적 롤아웃).
+  const svcKey = (process.env.INTRANET_API_KEY || '').trim();
   const ctrl = new AbortController();
   const timer = setTimeout(() => ctrl.abort(), 5000);
   let resp, body;
   try {
     resp = await _fetch(`${base}/api/auth/login`, {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      headers: {
+        'Content-Type': 'application/json',
+        ...(svcKey ? { 'X-Api-Key': svcKey } : {}),
+      },
       body: JSON.stringify({ username: String(name).trim(), password: String(pw) }),
       signal: ctrl.signal,
     });
