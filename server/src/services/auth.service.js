@@ -76,10 +76,15 @@ async function loginStaff(name, pw) {
 }
 
 // ═══════════════════════════════════════════════════════════
-// 인트라넷(inadd-webapp) 계정으로 AE(staff) 로그인 — Track B 통합작업대 SSO.
+// 인트라넷(inadd-webapp) 계정 로그인 — Track B 통합작업대 SSO(세션 이어받기).
 //   자격 검증은 인트라넷 서버(POST /api/auth/login, Cloudflare D1 서버측 대조)에 프록시 —
 //   공유키 불필요(사용자 비밀번호가 결속 비밀). 성공 시 review JWT 발급.
-//   ★ 역할은 항상 'staff'로 고정(인트라넷 role 무시 — 권한 상승 차단). 관리자는 기존 리뷰 계정 사용.
+//   ★ 권한(사용자 확정 정책 1a): 기본 'staff'(담당 업체 스코프). INTRANET_SSO_ADMIN_USERS(csv,
+//     인트라넷 username)에 명시된 지정 계정만 'admin' 승격 — 인트라넷 role 필드는 신뢰하지 않음
+//     (자기신고 필드·계정 탈취 대비). 승격이어도 via:'intranet' 격리(/api/trackb/* 전용)는 유지되어
+//     Track A 파괴 라우트(탭설정·주문정정·드라이브 등)에는 도달 불가.
+//   ★ 진입 조건(2b): INTRANET_SSO_ALLOWED_ROLES(csv) 설정 시 그 인트라넷 role만 진입 허용.
+//     미설정(빈) = 전 직원 허용(현행 유지 — env 설정 시점부터 게이트 활성).
 //   JWT name = 인트라넷 display_name(한글 실명) → advertisers.inad_pm(TRIM) 스코프 매칭과 정합.
 // ═══════════════════════════════════════════════════════════
 async function loginIntranet(name, pw, _fetch = fetch) {
@@ -108,14 +113,24 @@ async function loginIntranet(name, pw, _fetch = fetch) {
   if (!display) {
     return { success: false, error: '인트라넷 계정에 표시 이름이 없습니다. 관리자에게 문의하세요.' };
   }
-  // iu = 인트라넷 username(감사 추적용 원천 식별자). 스코프 키는 display_name(=inad_pm 매칭) —
-  //   인트라넷 직원DB의 실명은 관리자 관할(HR 데이터)이라는 가정을 문서화(부품4/CLAUDE.md).
+  // 진입 게이트(2b): 허용 role 목록이 설정돼 있으면 그 role만 통과.
+  const _csv = v => String(v || '').split(',').map(s => s.trim().toLowerCase()).filter(Boolean);
+  const iRole = String(body.role || 'user').trim().toLowerCase();
+  const allowedRoles = _csv(process.env.INTRANET_SSO_ALLOWED_ROLES);
+  if (allowedRoles.length && !allowedRoles.includes(iRole)) {
+    return { success: false, error: '통합 작업대 사용 권한이 없는 인트라넷 계정입니다. 관리자에게 문의하세요.' };
+  }
+  // 승격(1a): 지정 username 만 admin — 인트라넷 role 필드 불신뢰. 그 외 전원 staff(기존 안전장치 유지).
+  const iUser = String(body.username).trim().toLowerCase();
+  const role = _csv(process.env.INTRANET_SSO_ADMIN_USERS).includes(iUser) ? 'admin' : 'staff';
+  // iu = 인트라넷 username(감사 추적용 원천 식별자), ir = 인트라넷 원천 role(감사).
+  //   스코프 키는 display_name(=inad_pm 매칭) — 인트라넷 직원DB의 실명은 관리자 관할(HR 데이터) 가정(부품4/CLAUDE.md).
   const token = jwt.sign(
-    { name: display, role: 'staff', via: 'intranet', iu: String(body.username) },
+    { name: display, role, via: 'intranet', iu: String(body.username), ir: iRole },
     process.env.JWT_SECRET,
     { expiresIn: process.env.JWT_EXPIRES_IN || '8h' }
   );
-  return { success: true, name: display, role: 'staff', via: 'intranet', token };
+  return { success: true, name: display, role, via: 'intranet', token };
 }
 
 // ═══════════════════════════════════════════════════════════

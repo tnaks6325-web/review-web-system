@@ -1,7 +1,10 @@
 /**
  * 인트라넷 SSO + staff(AE) 초기매핑 스코프 회귀가드.
- *   1. loginIntranet — 인트라넷 서버 프록시 검증: 성공=staff 고정(권한 상승 차단)·display_name 신원,
+ *   1. loginIntranet — 인트라넷 서버 프록시 검증: 기본 staff(인트라넷 role 필드 불신뢰 — role=admin
+ *      이어도 staff), INTRANET_SSO_ADMIN_USERS 지정 username 만 admin 승격(1a),
+ *      INTRANET_SSO_ALLOWED_ROLES 진입 게이트(2b, 미설정=전 직원), display_name 신원,
  *      실패/연결불가/입력누락 = fail-closed. 공유키 없음(비밀번호 결속).
+ *      ★ admin 승격 토큰도 via:'intranet' 격리 유지(/api/trackb/* 전용 — 1.5e).
  *   2. createAdvertiserScoped — staff는 inad_pm=자기 로그인명 강제(타 AE 명의 차단)·중복 409.
  *   3. staffOwnsAdvertiser — inad_pm TRIM 일치만 허용(소유 지정/해제 게이트).
  *   4. scopedActiveTabs forMapping — staff만 전체 개방, advertiser는 무시(스코프 유지 = 교차열람 차단).
@@ -20,16 +23,43 @@ function mockFetch(status, body) {
 
 async function run() {
   // ═══ 1. loginIntranet ═══
-  // 1a: 성공 — role은 인트라넷 응답과 무관하게 'staff' 고정, name=display_name
+  delete process.env.INTRANET_SSO_ADMIN_USERS; delete process.env.INTRANET_SSO_ALLOWED_ROLES;
+  // 1a: 성공 — 인트라넷 role=admin 이어도 기본 staff(role 필드 불신뢰 = 기존 안전장치 유지)
   let r = await auth.loginIntranet('kim.ae', 'pw123',
     mockFetch(200, { id: 'u1', username: 'kim.ae', display_name: '김수만', role: 'admin' }));
   assert.equal(r.success, true, '1a: 성공');
-  assert.equal(r.role, 'staff', '1a: 인트라넷 role=admin 이어도 staff 고정(권한 상승 차단)');
+  assert.equal(r.role, 'staff', '1a: 인트라넷 role=admin 이어도 기본 staff(자기신고 role 불신뢰)');
   assert.equal(r.name, '김수만', '1a: 신원=display_name(한글 실명, inad_pm 매칭 키)');
   const payload = jwt.verify(r.token, process.env.JWT_SECRET);
   assert.equal(payload.role, 'staff', '1a: JWT role=staff');
   assert.equal(payload.name, '김수만', '1a: JWT name=display_name');
   assert.equal(payload.via, 'intranet', '1a: 출처 표기');
+  assert.equal(payload.ir, 'admin', '1a: ir(인트라넷 원천 role) 감사 클레임');
+
+  // 1a2(정책 1a): INTRANET_SSO_ADMIN_USERS 지정 계정만 admin 승격 — username 매칭(대소문·공백 무시)
+  process.env.INTRANET_SSO_ADMIN_USERS = ' Boss , ceo2 ';
+  r = await auth.loginIntranet('boss', 'pw123',
+    mockFetch(200, { username: 'boss', display_name: '대표', role: 'user' }));
+  assert.equal(r.role, 'admin', '1a2: 지정 계정 → admin 승격(인트라넷 role 무관)');
+  const adminIntraToken = r.token;   // 1.5e 격리 검증용
+  r = await auth.loginIntranet('kim.ae', 'pw123',
+    mockFetch(200, { username: 'kim.ae', display_name: '김수만', role: 'admin' }));
+  assert.equal(r.role, 'staff', '1a2: 미지정 계정은 role=admin 이어도 staff');
+  delete process.env.INTRANET_SSO_ADMIN_USERS;
+
+  // 1a3(정책 2b): INTRANET_SSO_ALLOWED_ROLES 설정 시 그 role만 진입, 미설정=전 직원
+  process.env.INTRANET_SSO_ALLOWED_ROLES = 'admin,manager';
+  r = await auth.loginIntranet('kim.ae', 'pw123',
+    mockFetch(200, { username: 'kim.ae', display_name: '김수만', role: 'user' }));
+  assert.equal(r.success, false, '1a3: 허용 role 밖 → 진입 거부');
+  assert.ok(/권한/.test(r.error), '1a3: 안내 메시지');
+  r = await auth.loginIntranet('boss', 'pw123',
+    mockFetch(200, { username: 'boss', display_name: '대표', role: 'Admin' }));
+  assert.equal(r.success, true, '1a3: 허용 role 통과(대소문 무시)');
+  delete process.env.INTRANET_SSO_ALLOWED_ROLES;
+  r = await auth.loginIntranet('kim.ae', 'pw123',
+    mockFetch(200, { username: 'kim.ae', display_name: '김수만', role: 'user' }));
+  assert.equal(r.success, true, '1a3: 미설정 = 전 직원 허용(현행 유지)');
 
   // 1b: 자격 불일치(401) → 실패 + 인트라넷 에러 메시지 전달
   r = await auth.loginIntranet('kim.ae', 'wrong', mockFetch(401, { error: '사용자명 또는 비밀번호가 올바르지 않습니다.' }));
@@ -77,7 +107,12 @@ async function run() {
   assert.equal(mw.code, 403, '1.5c: intranet 토큰 — Track A(메모) 차단');
   mw = await runMw(staffToken, '/api/tab', '/reset-all');
   assert.equal(mw.nexted, true, '1.5d: 자체 staff 토큰(via 없음)은 기존 동작 불변');
-  console.log('  1.5 authMiddleware — via:intranet 토큰 Track B 전용 격리(Track A 차단·기존 토큰 불변) ✓');
+  // 1.5e: 지정계정 admin 승격 토큰도 격리 유지 — Track A 도달 불가(폭발반경 불변)
+  mw = await runMw(adminIntraToken, '/api/trackb', '/overview');
+  assert.equal(mw.nexted, true, '1.5e: intranet admin — /api/trackb/* 통과');
+  mw = await runMw(adminIntraToken, '/api/tab', '/reset-all');
+  assert.equal(mw.code, 403, '1.5e: intranet admin 이어도 Track A 차단(role 무관 격리)');
+  console.log('  1.5 authMiddleware — via:intranet 토큰 Track B 전용 격리(Track A 차단·기존 토큰 불변·admin 승격에도 유지) ✓');
 
   // ═══ 2. createAdvertiserScoped ═══
   const q = [];
