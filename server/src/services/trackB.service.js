@@ -521,7 +521,7 @@ async function intranetAdvertisers({ q = '', limit = 20 } = {}) {
     const ctrl = new AbortController();
     const timer = setTimeout(() => ctrl.abort(), 5000);
     try {
-      const resp = await fetch(`${base}/api/tables/advertisers?limit=2000&sort=business_name&order=ASC`, { signal: ctrl.signal });
+      const resp = await fetch(`${base}/api/tables/advertisers?limit=2000&sort=business_name&order=ASC`, { signal: ctrl.signal, headers: _intranetHeaders() });
       if (!resp.ok) throw new Error(`intranet HTTP ${resp.status}`);
       const j = await resp.json();
       // 실데이터 확인: 거래처명은 business_name(사업자명, 인트라넷 UI 필수 필드) — company_name 은 레거시(전량 공란).
@@ -576,11 +576,17 @@ async function intranetStaffUsers({ q = '', limit = 20 } = {}) {
 //     TRUE(기본)일 때만, 그리고 "그 탭에 링크된 sales" 단건만 프록시(타 업체 계약 도달 불가).
 // ══════════════════════════════════════════════════════════════════════════
 function _intranetBase() { return (process.env.INTRANET_API_BASE || 'https://inadd-system.pages.dev').trim().replace(/\/$/, ''); }
+// 서버간 인증 헤더: 인트라넷 API 가드(INADD_SESSION_SECRET 활성 시) 통과용 X-Api-Key.
+//   INTRANET_API_KEY 미설정이면 헤더 미전송(가드 활성 전까지 기존 동작 그대로 — 단계적 롤아웃).
+function _intranetHeaders() {
+  const k = (process.env.INTRANET_API_KEY || '').trim();
+  return k ? { 'X-Api-Key': k } : {};
+}
 async function _intranetGet(path) {
   const ctrl = new AbortController();
   const timer = setTimeout(() => ctrl.abort(), 5000);
   try {
-    const resp = await fetch(`${_intranetBase()}${path}`, { signal: ctrl.signal });
+    const resp = await fetch(`${_intranetBase()}${path}`, { signal: ctrl.signal, headers: _intranetHeaders() });
     if (!resp.ok) throw new Error(`intranet HTTP ${resp.status}`);
     return await resp.json();
   } finally { clearTimeout(timer); }
