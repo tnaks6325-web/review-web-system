@@ -61,6 +61,33 @@ async function run() {
     mockFetch(200, { username: 'kim.ae', display_name: '김수만', role: 'user' }));
   assert.equal(r.success, true, '1a3: 미설정 = 전 직원 허용(현행 유지)');
 
+  // 1a4(그룹 게이트): INTRANET_SSO_ALLOWED_GROUPS = '부서' 또는 '부서|파트' — 개인 수동등록 없이 그룹 단위 진입
+  process.env.INTRANET_SSO_ALLOWED_GROUPS = ' AE , 콘텐츠운영팀|체험단파트 ';
+  const grp = (dept, part) => mockFetch(200, { username: 'emp1', display_name: '직원', role: 'user', department: dept, part });
+  r = await auth.loginIntranet('emp1', 'pw', grp('AE', '아무파트'));
+  assert.equal(r.success, true, '1a4: AE 부서 전직원 통과(파트 무관)');
+  r = await auth.loginIntranet('emp1', 'pw', grp('ae ', null));
+  assert.equal(r.success, true, '1a4: 대소문/공백 무시 + part 없는 구버전 응답도 부서단독 규칙 통과');
+  r = await auth.loginIntranet('emp1', 'pw', grp('콘텐츠운영팀', '체험단파트'));
+  assert.equal(r.success, true, '1a4: 콘텐츠운영팀|체험단파트 통과');
+  r = await auth.loginIntranet('emp1', 'pw', grp('콘텐츠운영팀', '기획'));
+  assert.equal(r.success, false, '1a4: 같은 부서라도 파트 불일치 거부');
+  r = await auth.loginIntranet('emp1', 'pw', grp('경영지원', null));
+  assert.equal(r.success, false, '1a4: 대상 외 부서 거부');
+  assert.ok(/부서\/파트/.test(r.error), '1a4: 안내 메시지');
+  // 그룹 설정 시 role 규칙은 미적용(그룹이 우선) — role=admin 이어도 그룹 밖이면 거부
+  process.env.INTRANET_SSO_ALLOWED_ROLES = 'admin';
+  r = await auth.loginIntranet('emp1', 'pw', mockFetch(200, { username: 'emp1', display_name: '직원', role: 'admin', department: '경영지원' }));
+  assert.equal(r.success, false, '1a4: 그룹 설정 시 role 규칙 대체(그룹 밖 거부)');
+  delete process.env.INTRANET_SSO_ALLOWED_ROLES;
+  // 지정 admin 계정은 그룹 밖이어도 항상 통과(+admin 승격)
+  process.env.INTRANET_SSO_ADMIN_USERS = 'boss';
+  r = await auth.loginIntranet('boss', 'pw', mockFetch(200, { username: 'boss', display_name: '대표', role: 'user', department: '경영' }));
+  assert.equal(r.success, true, '1a4: 지정 admin 은 그룹 무관 통과');
+  assert.equal(r.role, 'admin', '1a4: 지정 admin 승격 유지');
+  delete process.env.INTRANET_SSO_ADMIN_USERS;
+  delete process.env.INTRANET_SSO_ALLOWED_GROUPS;
+
   // 1b: 자격 불일치(401) → 실패 + 인트라넷 에러 메시지 전달
   r = await auth.loginIntranet('kim.ae', 'wrong', mockFetch(401, { error: '사용자명 또는 비밀번호가 올바르지 않습니다.' }));
   assert.equal(r.success, false, '1b: 401 거부');
