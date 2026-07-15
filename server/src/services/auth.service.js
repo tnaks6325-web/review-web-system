@@ -113,16 +113,36 @@ async function loginIntranet(name, pw, _fetch = fetch) {
   if (!display) {
     return { success: false, error: '인트라넷 계정에 표시 이름이 없습니다. 관리자에게 문의하세요.' };
   }
-  // 진입 게이트(2b): 허용 role 목록이 설정돼 있으면 그 role만 통과.
   const _csv = v => String(v || '').split(',').map(s => s.trim().toLowerCase()).filter(Boolean);
   const iRole = String(body.role || 'user').trim().toLowerCase();
-  const allowedRoles = _csv(process.env.INTRANET_SSO_ALLOWED_ROLES);
-  if (allowedRoles.length && !allowedRoles.includes(iRole)) {
-    return { success: false, error: '통합 작업대 사용 권한이 없는 인트라넷 계정입니다. 관리자에게 문의하세요.' };
-  }
-  // 승격(1a): 지정 username 만 admin — 인트라넷 role 필드 불신뢰. 그 외 전원 staff(기존 안전장치 유지).
   const iUser = String(body.username).trim().toLowerCase();
-  const role = _csv(process.env.INTRANET_SSO_ADMIN_USERS).includes(iUser) ? 'admin' : 'staff';
+  // 승격(1a): 지정 username 만 admin — 인트라넷 role 필드 불신뢰. 그 외 전원 staff(기존 안전장치 유지).
+  const isAdminUser = _csv(process.env.INTRANET_SSO_ADMIN_USERS).includes(iUser);
+  // 진입 게이트 — 우선순위: 지정 admin 은 항상 통과 → ① 그룹(부서|파트) 규칙(설정 시) → ② role 규칙(① 미설정 시) → 둘 다 미설정 = 전 직원.
+  //   ① INTRANET_SSO_ALLOWED_GROUPS: csv 의 각 항목 = '부서' 또는 '부서|파트' (예: "AE,콘텐츠운영팀|체험단파트").
+  //     로그인 시점에 인트라넷 직원DB의 department/part 값으로 판정 — 개인별 수동 등록 불필요, 인사이동 자동 반영.
+  //     매칭 = TRIM + 대소문 무시 정확 일치(부분일치 없음 — '체험단' ≠ '체험단파트').
+  //   ※ part 는 인트라넷 로그인 응답에 포함돼야 판정 가능(inadd-webapp #164 이후) — 부서 단독 규칙은 구버전 응답에서도 동작.
+  if (!isAdminUser) {
+    const groups = String(process.env.INTRANET_SSO_ALLOWED_GROUPS || '').split(',').map(s => s.trim()).filter(Boolean);
+    if (groups.length) {
+      const iDept = String(body.department || '').trim().toLowerCase();
+      const iPart = String(body.part || '').trim().toLowerCase();
+      const okGroup = groups.some(g => {
+        const [d, p] = g.split('|').map(x => String(x || '').trim().toLowerCase());
+        return !!d && d === iDept && (!p || p === iPart);
+      });
+      if (!okGroup) {
+        return { success: false, error: '통합 작업대 사용 대상 부서/파트가 아닙니다. 관리자에게 문의하세요.' };
+      }
+    } else {
+      const allowedRoles = _csv(process.env.INTRANET_SSO_ALLOWED_ROLES);
+      if (allowedRoles.length && !allowedRoles.includes(iRole)) {
+        return { success: false, error: '통합 작업대 사용 권한이 없는 인트라넷 계정입니다. 관리자에게 문의하세요.' };
+      }
+    }
+  }
+  const role = isAdminUser ? 'admin' : 'staff';
   // iu = 인트라넷 username(감사 추적용 원천 식별자), ir = 인트라넷 원천 role(감사).
   //   스코프 키는 display_name(=inad_pm 매칭) — 인트라넷 직원DB의 실명은 관리자 관할(HR 데이터) 가정(부품4/CLAUDE.md).
   const token = jwt.sign(
