@@ -278,12 +278,26 @@ const API_BASE = (function(){ if (window.REVIEW_API_URL) return window.REVIEW_AP
       try{ history.replaceState(null,'',location.pathname+location.search); }catch(_){ }
       if(t){ sessionStorage.setItem('admin_token', t); return; } }
   }catch(_){ }
-  try{   // ② raw_sso(관리자 핸드오프) — 기존 세션 존중
-    const raw=localStorage.getItem('raw_sso'); if(raw){ const sso=JSON.parse(raw); if(sso&&sso.token&&!sessionStorage.getItem('admin_token')) sessionStorage.setItem('admin_token', sso.token); }
+  try{   // ② raw_sso(관리자 핸드오프) — 기존 세션 존중. 만료 토큰은 재주입하지 않고 폐기(유령 세션 방지).
+    const raw=localStorage.getItem('raw_sso'); if(raw){ const sso=JSON.parse(raw);
+      if(sso&&sso.token&&!sessionStorage.getItem('admin_token')){
+        const p=parseJwt(sso.token);
+        if(p&&p.exp&&p.exp*1000<Date.now()) localStorage.removeItem('raw_sso');
+        else sessionStorage.setItem('admin_token', sso.token);
+      } }
   }catch(_){ }
 })();
 function token(){ return sessionStorage.getItem('admin_token') || ''; }
-async function api(path, opts){ const o=Object.assign({headers:{}},opts||{}); o.headers['Authorization']='Bearer '+token(); if(o.body)o.headers['Content-Type']='application/json'; const r=await fetch(API_BASE+path,o); return r.json(); }
+// 만료/거부 토큰 정리 — "만료 배지 + 빈 목록" 유령 화면 대신 로그인으로. raw_sso 재주입 루프도 차단.
+function _dropSession(msg){ sessionStorage.removeItem('admin_token'); try{ localStorage.removeItem('raw_sso'); }catch(_){ }
+  STATE.role=''; STATE.name=''; renderLogin(); if(msg){ const el=$('#lerr'); if(el) el.textContent=msg; } }
+async function api(path, opts){ const o=Object.assign({headers:{}},opts||{}); o.headers['Authorization']='Bearer '+token(); if(o.body)o.headers['Content-Type']='application/json';
+  const r=await fetch(API_BASE+path,o);
+  if(r.status===401 && token() && path.indexOf('login')===-1){   // 서버가 토큰 거부(만료 등) — 재로그인 유도
+    _dropSession('세션이 만료되었습니다. 다시 로그인하세요. (인트라넷에서 "통합 작업대" 버튼으로 오면 자동 로그인)');
+    return new Promise(()=>{});   // 종결 상태: 화면이 로그인으로 교체됐으므로 대기 중이던 렌더 콜백을 영구 보류(사라진 요소 접근 차단)
+  }
+  return r.json(); }
 const $=(s,el)=>(el||document).querySelector(s);
 const esc=s=>String(s==null?'':s).replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
 function toast(m){ const t=$('#toast'); t.textContent=m; t.classList.add('show'); setTimeout(()=>t.classList.remove('show'),1800); }
@@ -325,6 +339,8 @@ let STATE = { role:'', name:'', view:'workdesk', tabs:[], cur:null, wd:null, fre
 async function boot(){
   if (!token()) return renderLogin();
   const me = parseJwt(token()); STATE.role=me.role||''; STATE.name=me.name||'';
+  if(me.exp && me.exp*1000 < Date.now())   // 만료 토큰 → 만료 신원 배지+빈 목록 유령 화면 대신 즉시 재로그인
+    return _dropSession('세션이 만료되었습니다. 다시 로그인하세요. (인트라넷에서 "통합 작업대" 버튼으로 오면 자동 로그인)');
   if(!STATE.role){ sessionStorage.removeItem('admin_token'); return renderLogin(); }   // 깨진/위조 토큰 → 빈 셸 대신 로그인
   renderShell();
 }
