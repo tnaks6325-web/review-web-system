@@ -205,6 +205,30 @@ async function loginAdvertiser(name, pw) {
 }
 
 // ═══════════════════════════════════════════════════════════
+// 광고주 접속 링크(매직 링크) 교환 — 로그인 없이 유효 토큰이면 advertiser JWT 발급.
+//   권한은 loginAdvertiser 와 동일(role='advertiser'+advertiser_id) — 소유 탭만·마스킹·읽기전용 스코프.
+//   토큰 = trackb_advertiser_links(active=TRUE) 매칭 + 업체 status<>'ended'. via:'link' 감사 클레임.
+//   ★ 유출 대비: 이 토큰은 관리자가 즉시 폐기/회전 가능(trackb_advertiser_links.active). 무인증 경로라 라우트에서 레이트리밋.
+// ═══════════════════════════════════════════════════════════
+async function loginByLinkToken(linkToken, _pool = pool) {
+  const tok = String(linkToken || '').trim();
+  if (!tok) return { success: false, error: '유효하지 않은 링크입니다.' };
+  const { rows } = await _pool.query(
+    `SELECT l.advertiser_id, a.name AS advertiser_name, a.status AS advertiser_status
+       FROM trackb_advertiser_links l JOIN advertisers a ON a.id = l.advertiser_id
+      WHERE l.token = $1 AND l.active = TRUE LIMIT 1`, [tok]);
+  if (rows.length === 0) return { success: false, error: '유효하지 않거나 폐기된 링크입니다.' };
+  if (rows[0].advertiser_status === 'ended') return { success: false, error: '종료된 거래처입니다.' };
+  _pool.query('UPDATE trackb_advertiser_links SET last_used_at = NOW() WHERE token = $1', [tok]).catch(() => {});
+  const token = jwt.sign(
+    { name: rows[0].advertiser_name, role: 'advertiser', advertiser_id: rows[0].advertiser_id, via: 'link' },
+    process.env.JWT_SECRET,
+    { expiresIn: process.env.JWT_EXPIRES_IN || '8h' }
+  );
+  return { success: true, name: rows[0].advertiser_name, role: 'advertiser', advertiserId: rows[0].advertiser_id, advertiserName: rows[0].advertiser_name, token };
+}
+
+// ═══════════════════════════════════════════════════════════
 // 광고주(Advertiser) 계정 CRUD — staff CRUD 패턴 미러 + 거래처 연결
 // ═══════════════════════════════════════════════════════════
 async function addAdvertiserUser(name, pw, advertiserId) {
@@ -458,6 +482,7 @@ module.exports = {
   loginStaff,
   loginIntranet,
   loginAdvertiser,
+  loginByLinkToken,
   addAdvertiserUser,
   editAdvertiserUser,
   deleteAdvertiserUser,

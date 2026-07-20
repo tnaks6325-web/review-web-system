@@ -407,6 +407,39 @@ async function ownedSheetIds() {
   return rows.map(r => r.sheet_id).filter(Boolean);
 }
 
+// ── 광고주 접속 링크(매직 링크) 관리 — master/admin(라우트 게이트). 업체당 1토큰(회전=교체)·폐기(active). ──
+//   토큰은 추측불가 랜덤(base64url 24B). 실제 교환(로그인)은 auth.service.loginByLinkToken. Track A 무접촉.
+async function getAdvertiserLink(advertiserId) {
+  if (!advertiserId) return null;
+  const { rows } = await getPool().query(
+    `SELECT advertiser_id AS "advertiserId", token, active, last_used_at AS "lastUsedAt", created_at AS "createdAt"
+       FROM trackb_advertiser_links WHERE advertiser_id = $1`, [advertiserId]);
+  return rows[0] || null;
+}
+async function generateAdvertiserLink({ advertiserId, by = '' } = {}) {
+  if (!advertiserId) return { ok: false, code: 400, error: 'advertiserId 필수' };
+  const exists = await getPool().query('SELECT 1 FROM advertisers WHERE id = $1', [advertiserId]);
+  if (!exists.rows.length) return { ok: false, code: 404, error: '거래처를 찾을 수 없습니다.' };
+  const token = require('crypto').randomBytes(24).toString('base64url');
+  const { rows } = await getPool().query(
+    `INSERT INTO trackb_advertiser_links (advertiser_id, token, active, created_by)
+     VALUES ($1,$2,TRUE,$3)
+     ON CONFLICT (advertiser_id) DO UPDATE
+       SET token = EXCLUDED.token, active = TRUE, created_by = EXCLUDED.created_by, created_at = NOW(), last_used_at = NULL
+     RETURNING token, active`, [advertiserId, token, String(by).slice(0, 100)]);
+  logger.info(`[trackB] 광고주 접속링크 발급/회전: ${advertiserId} by ${by}`);
+  return { ok: true, token: rows[0].token, active: rows[0].active };
+}
+async function setAdvertiserLinkActive({ advertiserId, active, by = '' } = {}) {
+  if (!advertiserId) return { ok: false, code: 400, error: 'advertiserId 필수' };
+  const { rows } = await getPool().query(
+    `UPDATE trackb_advertiser_links SET active = $2 WHERE advertiser_id = $1 RETURNING token, active`,
+    [advertiserId, active !== false]);
+  if (!rows.length) return { ok: false, code: 404, error: '발급된 링크가 없습니다.' };
+  logger.info(`[trackB] 광고주 접속링크 ${active !== false ? '활성' : '폐기'}: ${advertiserId} by ${by}`);
+  return { ok: true, token: rows[0].token, active: rows[0].active };
+}
+
 // ── 담당 AE(inad_pm) 매칭 — master/admin 전용(라우트 게이트). 빈 값 = 담당 해제. ──
 //   inad_pm 은 staff 스코프 키(TRIM 매칭)라 앞뒤 공백을 제거해 저장(표기차 footgun 방지).
 async function setAdvertiserInadPm({ advertiserId, inadPm = '', by = '' } = {}) {
@@ -2069,6 +2102,7 @@ module.exports = {
   createAdvertiserScoped,
   deleteAdvertiser,
   ownedSheetIds,
+  getAdvertiserLink, generateAdvertiserLink, setAdvertiserLinkActive,
   isRegisteredIntranetAdvertiser,
   staffOwnsAdvertiser,
   sheetAssignableByStaff,
