@@ -23,6 +23,14 @@ ok('modal: 프리필 소비 시 참여형 토글 자동 ON + 시간대 파서', 
 ok('modal: 원본 HTML은 미수정 시 그대로 전송(수정하면 평문 전환)', /_useRawInflow \? window\._wdInflowRawHtml/.test(recjs) && /dataset\.rawHtml = ""/.test(recjs));
 ok('modal: 미리보기 변환(_htmlToPlainPreview) 존재', /function _htmlToPlainPreview/.test(recjs));
 
+// ── 상품정보 기본값(작업오더) + 자동수집 성공 항목만 덮어쓰기 ──
+ok('prefill: 작업오더 첫 상품명·결제금액 헬퍼(_woFirstProductInfo)', /function _woFirstProductInfo/.test(app) && /product_options_json/.test(app));
+ok('prefill: product_name/price 프리필 전달', /_woFirstProductInfo\(o\)/.test(app) && /product_name: pi\.name/.test(app));
+ok('modal: 작업오더 기본값을 상품 미리보기에 표시', /prefill\.product_name \|\| prefill\.price/.test(recjs));
+ok('modal: 프리필 시 자동수집 1회 시도', /fetchProductInfo\(\{ auto: true \}\)/.test(recjs));
+ok('fetch: 성공 항목만 덮어씀(누락 항목은 기존 값 유지)', /if \(r\.name\)\s+nEl\.value = r\.name;/.test(recjs) && /if \(r\.price\) pEl\.value = r\.price;/.test(recjs));
+ok('fetch: 실패 시 작업오더 기본값 유지 + 미리보기 미숨김', /작업오더에 입력된 상품명\/가격을 유지합니다/.test(recjs) && /if \(!hasBase\) document\.getElementById\("rf_product_preview"\)\.style\.display = "none"/.test(recjs));
+
 // ── 관제 위젯 ──
 ok('관제: 참여형 카드에만 관제 버튼', /c\.participation_mode \? .*openCampControl/.test(recjs));
 ok('관제: 오늘 집계는 KST + 유효홀드 시각 기준', /kstDay/.test(recjs) && /Date\.parse\(r\.expires_at\) > now/.test(recjs));

@@ -1827,6 +1827,29 @@ function _woProductLines(o) {
   return withUrl.map((l, i) => `${i + 1}.${l}`).join("\n");  // 2개+ → 번호+줄바꿈
 }
 
+// 작업오더의 첫 상품명·결제금액 → 공고 상품정보 기본값 (자동수집 실패해도 폼에 기본 표시)
+function _woFirstProductInfo(o) {
+  // 1) 구조화 JSON 우선
+  try {
+    const p = JSON.parse(o.product_options_json || "[]");
+    if (Array.isArray(p) && p.length) {
+      const prod = p[0] || {};
+      const name = (prod.name || "").trim();
+      const opts = Array.isArray(prod.options) ? prod.options : [];
+      const pay = opts.length ? (Number(opts[0] && opts[0].pay) || 0) : (Number(prod.base && prod.base.pay) || 0);
+      if (name || pay) return { name, price: pay ? pay.toLocaleString("ko-KR") + "원" : "" };
+    }
+  } catch (_) {}
+  // 2) product_option 텍스트 폴백: "1. 상품명" 줄 + 첫 "결제금액 N원"
+  const cleaned = (typeof _woCleanProductOption === "function")
+    ? (_woCleanProductOption(o.product_option, o.product_url) || "")
+    : String(o.product_option || "");
+  const nm = cleaned.match(/^\s*\d+\.\s*(.+)$/m);
+  const name = (nm ? nm[1] : (cleaned.split(/\r?\n/).map(s => s.trim()).find(s => s && !/^[-•]/.test(s)) || "")).trim();
+  const pm = cleaned.match(/결제금액\s*([\d,]+)\s*원/);
+  return { name, price: pm ? pm[1] + "원" : "" };
+}
+
 // inflow_guide 등에서 http(s) URL을 순서대로 추출
 function _woGuideUrls(raw) {
   const urls = [];
@@ -2126,6 +2149,8 @@ async function woCreateCampaign(id) {
     chat_url:      o.chat_room_url || "",
     delivery_type: WO_DELIVERY_MAP[o.delivery_type] || "",
     product_url:   o.product_url || "",
+    // ★ 상품정보 기본값 = 작업오더 입력 상품명·결제금액 (자동수집 성공 시 그 값으로 덮어씀)
+    ...(typeof _woFirstProductInfo === "function" ? (function(){ const pi = _woFirstProductInfo(o); return { product_name: pi.name || "", price: pi.price || "" }; })() : {}),
     notes:         [_INFLOW_LABEL[o.inflow_type] ? ("유입방식: " + _INFLOW_LABEL[o.inflow_type]) : (o.inflow_keyword ? ("유입키워드: " + o.inflow_keyword) : ""), o.review_guide || ""].filter(Boolean).join("\n"),
     // ★ M3: 참여형 자동 프리필 — 작업오더 세부내용을 발행 폼 스냅샷으로 복사
     participation:  true,

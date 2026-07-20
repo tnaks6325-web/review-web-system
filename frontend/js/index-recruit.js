@@ -511,6 +511,22 @@ async function openRecruitModal(id, prefill, woOrderId) {
       if (prefill.delivery_type) document.getElementById("rf_delivery_type").value = prefill.delivery_type;
       if (prefill.product_url)  document.getElementById("rf_product_url").value = prefill.product_url;
 
+      /* ★ 상품정보 기본값 = 작업오더 입력값(상품명·결제금액) — 자동수집(fetchProductInfo) 성공 항목만 이후 덮어씀 */
+      if (prefill.product_name || prefill.price) {
+        const nEl = document.getElementById("rf_product_name"), pEl = document.getElementById("rf_price");
+        if (nEl && prefill.product_name) nEl.value = prefill.product_name;
+        if (pEl && prefill.price)        pEl.value = prefill.price;
+        const ppn = document.getElementById("rf_pp_name"), ppp = document.getElementById("rf_pp_price");
+        if (ppn) ppn.textContent = prefill.product_name || "(상품명 없음)";
+        if (ppp) ppp.textContent = prefill.price || "(가격 미확인)";
+        const img = document.getElementById("rf_pp_img");
+        if (img) { img.removeAttribute("src"); img.style.display = "none"; }
+        const pp = document.getElementById("rf_product_preview");
+        if (pp) pp.style.display = "flex";
+      }
+      /* ★ 상품확인용 URL이 있으면 자동수집 1회 시도 — 성공 항목만 덮어쓰고, 실패하면 위 기본값 유지 */
+      if (prefill.product_url) setTimeout(() => { try { fetchProductInfo({ auto: true }); } catch (_) {} }, 0);
+
       /* ★ M3: 참여형 자동 프리필 — 작업오더 세부내용 → 발행 폼 스냅샷 (관리자는 확인·수정만) */
       if (prefill.participation && document.getElementById("rf_participation")) {
         const pe = document.getElementById("rf_participation");
@@ -550,37 +566,53 @@ async function openRecruitModal(id, prefill, woOrderId) {
 }
 
 // 상품확인용 URL에서 썸네일/상품명/가격 가져오기 (OG/JSON-LD)
-async function fetchProductInfo() {
+// opts.auto=true — 작업오더 프리필 직후 자동 1회 시도(조용한 실패 문구). 성공 "항목만" 덮어쓰고
+// 실패·누락 항목은 기존 값(작업오더 기본값·직접 업로드 썸네일 등)을 유지한다.
+async function fetchProductInfo(opts) {
+  const auto = !!(opts && opts.auto);
   const url = (document.getElementById("rf_product_url").value || "").trim();
-  if (!url) { showToast("상품 URL을 입력하세요.", true); return; }
-  if (!/^https?:\/\//i.test(url)) { showToast("http(s):// 로 시작하는 URL을 입력하세요.", true); return; }
+  if (!url) { if (!auto) showToast("상품 URL을 입력하세요.", true); return; }
+  if (!/^https?:\/\//i.test(url)) { if (!auto) showToast("http(s):// 로 시작하는 URL을 입력하세요.", true); return; }
   showToast("상품 정보 가져오는 중...");
   try {
     const r = await gasPost({ action: "productPreview", url });
     const has = r && (r.thumbnail || r.name || r.price);
+    const nEl = document.getElementById("rf_product_name");
+    const pEl = document.getElementById("rf_price");
     if (has) {
       const img = document.getElementById("rf_pp_img");
-      if (r.thumbnail) { img.src = r.thumbnail; img.style.display = ""; } else { img.style.display = "none"; }
-      document.getElementById("rf_pp_name").textContent = r.name || "(상품명 없음)";
-      document.getElementById("rf_pp_price").textContent = r.price || "(가격 미확인)";
-      document.getElementById("rf_product_preview").style.display = "flex";
+      if (r.thumbnail) { img.src = r.thumbnail; img.style.display = ""; }
+      else if (!img.getAttribute("src")) { img.style.display = "none"; }
       // ★ 리뷰 #10: 자동추출이 빈 값으로 직접 업로드 썸네일을 덮지 않게 + 미리보기 동기화
       if (r.thumbnail) {
         document.getElementById("rf_thumbnail").value = r.thumbnail;
         const _pv = document.getElementById("rf_thumb_preview");
         if (_pv) { _pv.src = r.thumbnail; _pv.style.display = ""; }
       }
-      document.getElementById("rf_product_name").value = r.name || "";
-      document.getElementById("rf_price").value = r.price || "";
+      // ★ 성공 항목만 덮어씀 — 누락 항목은 작업오더 기본값 등 기존 값 유지
+      if (r.name)  nEl.value = r.name;
+      if (r.price) pEl.value = r.price;
+      document.getElementById("rf_pp_name").textContent = nEl.value || "(상품명 없음)";
+      document.getElementById("rf_pp_price").textContent = pEl.value || "(가격 미확인)";
+      document.getElementById("rf_product_preview").style.display = "flex";
       // 공고 제목이 비어 있으면 상품명으로 채움
       const t = document.getElementById("rf_title");
       if (t && !t.value.trim() && r.name) { t.value = r.name; _renderPreview && _renderPreview(); }
       showToast((r.mall || "") + " 상품정보를 가져왔습니다.");
     } else {
-      document.getElementById("rf_product_preview").style.display = "none";
-      showToast((r && r.hint) || "상품 정보를 가져오지 못했습니다. 수동 입력하세요.", true);
+      // 기존 값(작업오더 기본값)이 있으면 미리보기를 유지하고 안내만 — 없을 때만 기존처럼 숨김+수동입력 안내
+      const hasBase = !!((nEl && nEl.value) || (pEl && pEl.value));
+      if (!hasBase) document.getElementById("rf_product_preview").style.display = "none";
+      showToast(hasBase
+        ? "상품정보 자동수집 실패 — 작업오더에 입력된 상품명/가격을 유지합니다."
+        : ((r && r.hint) || "상품 정보를 가져오지 못했습니다. 수동 입력하세요."), true);
     }
-  } catch (e) { showToast("오류: " + e.message, true); }
+  } catch (e) {
+    const nEl = document.getElementById("rf_product_name");
+    const pEl = document.getElementById("rf_price");
+    const hasBase = !!((nEl && nEl.value) || (pEl && pEl.value));
+    showToast(hasBase ? "상품정보 자동수집 실패 — 작업오더에 입력된 상품명/가격을 유지합니다." : ("오류: " + e.message), true);
+  }
 }
 
 function closeRecruitModal() {
