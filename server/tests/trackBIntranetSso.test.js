@@ -236,12 +236,17 @@ async function run() {
   assert.equal(lk.ok, true, '2.7d: 폐기 성공'); assert.equal(lk.active, false, '2.7d: active=false');
   lk = await svc.setAdvertiserLinkActive({ advertiserId: 'adv_nolink', active: false });
   assert.equal(lk.ok, false, '2.7e: 발급 안 된 업체 404'); assert.equal(lk.code, 404, '2.7e: 404');
-  console.log('  2.7 광고주 접속 링크 — 발급/회전·조회·폐기·404 ✓');
+  const ens = await svc.ensureAdvertiserLink({ advertiserId: 'adv_link', by: 'master' });
+  assert.ok(ens && ens.token, '2.7f: ensure — 없으면 생성·있으면 유지 후 링크 반환(업체마다 항상 URL)');
+  console.log('  2.7 광고주 접속 링크 — 발급/회전·조회·폐기·ensure·404 ✓');
 
   // ═══ 2.8 loginByLinkToken — 유효 토큰 → advertiser JWT(via:link), 무효/종료/빈값 거부 ═══
-  const mkPool = row => ({ async query(sql) { return /FROM trackb_advertiser_links l JOIN advertisers a/.test(String(sql)) ? { rows: row ? [row] : [] } : { rows: [] }; } });
+  const mkPool = (row, hasAcct) => ({ async query(sql) { const s = String(sql);
+    if (/FROM trackb_advertiser_links l JOIN advertisers a/.test(s)) return { rows: row ? [row] : [] };
+    if (/FROM advertiser_users WHERE advertiser_id/.test(s)) return { rows: hasAcct ? [{ 1: 1 }] : [] };
+    return { rows: [] }; } });
   let lr = await auth.loginByLinkToken('tok-valid', mkPool({ advertiser_id: 'adv1', advertiser_name: '스마트원', advertiser_status: 'active' }));
-  assert.equal(lr.success, true, '2.8a: 유효 토큰 성공'); assert.equal(lr.role, 'advertiser', '2.8a: advertiser 권한');
+  assert.equal(lr.success, true, '2.8a: 무계정 유효 토큰 → 공개 자동입장'); assert.equal(lr.role, 'advertiser', '2.8a: advertiser 권한');
   assert.equal(lr.advertiserId, 'adv1', '2.8a: advertiser_id');
   const jp = jwt.verify(lr.token, process.env.JWT_SECRET);
   assert.equal(jp.advertiser_id, 'adv1', '2.8a: JWT advertiser_id'); assert.equal(jp.via, 'link', '2.8a: via=link 감사');
@@ -249,7 +254,10 @@ async function run() {
   lr = await auth.loginByLinkToken('tok-x', mkPool({ advertiser_id: 'adv2', advertiser_name: 'X', advertiser_status: 'ended' }));
   assert.equal(lr.success, false, '2.8c: 종료 거래처 거부');
   lr = await auth.loginByLinkToken('', mkPool({})); assert.equal(lr.success, false, '2.8d: 빈 토큰 거부');
-  console.log('  2.8 loginByLinkToken — 유효→advertiser JWT(via:link)·무효/종료/빈값 거부 ✓');
+  // 2.8e: 활성 계정 있는 업체 → 링크만으로 자동입장 불가, 로그인 요구(계정 생성 시 링크가 로그인 게이트로 전환)
+  lr = await auth.loginByLinkToken('tok-acct', mkPool({ advertiser_id: 'adv3', advertiser_name: 'Y', advertiser_status: 'active' }, true));
+  assert.equal(lr.success, false, '2.8e: 계정 있으면 자동입장 불가'); assert.equal(lr.requiresLogin, true, '2.8e: requiresLogin');
+  console.log('  2.8 loginByLinkToken — 무계정 공개·유계정 로그인게이트·무효/종료/빈값 거부 ✓');
 
   // ═══ 3. staffOwnsAdvertiser ═══
   assert.equal(await svc.staffOwnsAdvertiser({ advertiserId: 'adv_mine', staffName: '김수만' }), true, '3a: TRIM 일치 허용');

@@ -416,6 +416,15 @@ async function getAdvertiserLink(advertiserId) {
        FROM trackb_advertiser_links WHERE advertiser_id = $1`, [advertiserId]);
   return rows[0] || null;
 }
+// 링크 자동 존재 보장 — 없으면 생성(있으면 유지). 업체 추가/조회 시 호출 → 모든 업체가 항상 고유 URL 보유.
+async function ensureAdvertiserLink({ advertiserId, by = '' } = {}) {
+  if (!advertiserId) return null;
+  const token = require('crypto').randomBytes(24).toString('base64url');
+  await getPool().query(
+    `INSERT INTO trackb_advertiser_links (advertiser_id, token, active, created_by)
+     VALUES ($1,$2,TRUE,$3) ON CONFLICT (advertiser_id) DO NOTHING`, [advertiserId, token, String(by).slice(0, 100)]);
+  return await getAdvertiserLink(advertiserId);
+}
 async function generateAdvertiserLink({ advertiserId, by = '' } = {}) {
   if (!advertiserId) return { ok: false, code: 400, error: 'advertiserId 필수' };
   const exists = await getPool().query('SELECT 1 FROM advertisers WHERE id = $1', [advertiserId]);
@@ -2102,7 +2111,7 @@ module.exports = {
   createAdvertiserScoped,
   deleteAdvertiser,
   ownedSheetIds,
-  getAdvertiserLink, generateAdvertiserLink, setAdvertiserLinkActive,
+  getAdvertiserLink, ensureAdvertiserLink, generateAdvertiserLink, setAdvertiserLinkActive,
   isRegisteredIntranetAdvertiser,
   staffOwnsAdvertiser,
   sheetAssignableByStaff,

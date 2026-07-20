@@ -215,6 +215,7 @@ router.post('/advertiser-link', authMiddleware, adminOrMasterMiddleware, async (
   try {
     const { action, advertiserId } = req.body || {};
     if (action === 'get') return res.json({ ok: true, link: await svc.getAdvertiserLink(advertiserId) });
+    if (action === 'ensure') return res.json({ ok: true, link: await svc.ensureAdvertiserLink({ advertiserId, by: _by(req) }) });
     if (action === 'generate') { const o = await svc.generateAdvertiserLink({ advertiserId, by: _by(req) }); return res.status(o.ok ? 200 : (o.code || 400)).json(o); }
     if (action === 'revoke') { const o = await svc.setAdvertiserLinkActive({ advertiserId, active: false, by: _by(req) }); return res.status(o.ok ? 200 : (o.code || 400)).json(o); }
     if (action === 'enable') { const o = await svc.setAdvertiserLinkActive({ advertiserId, active: true, by: _by(req) }); return res.status(o.ok ? 200 : (o.code || 400)).json(o); }

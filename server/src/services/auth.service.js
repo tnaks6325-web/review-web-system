@@ -219,6 +219,12 @@ async function loginByLinkToken(linkToken, _pool = pool) {
       WHERE l.token = $1 AND l.active = TRUE LIMIT 1`, [tok]);
   if (rows.length === 0) return { success: false, error: '유효하지 않거나 폐기된 링크입니다.' };
   if (rows[0].advertiser_status === 'ended') return { success: false, error: '종료된 거래처입니다.' };
+  // ★ 계정 게이트: 이 업체에 활성 로그인 계정이 있으면 링크만으로 자동입장 불가 → 로그인 요구(requiresLogin).
+  //   즉 "계정을 만들면 그 업체의 고유 URL이 자동으로 로그인 필요로 전환"된다(무계정=공개 링크, 유계정=로그인 게이트).
+  const acc = await _pool.query('SELECT 1 FROM advertiser_users WHERE advertiser_id = $1 AND active = TRUE LIMIT 1', [rows[0].advertiser_id]);
+  if (acc.rows.length > 0) {
+    return { success: false, requiresLogin: true, advertiserId: rows[0].advertiser_id, advertiserName: rows[0].advertiser_name };
+  }
   _pool.query('UPDATE trackb_advertiser_links SET last_used_at = NOW() WHERE token = $1', [tok]).catch(() => {});
   const token = jwt.sign(
     { name: rows[0].advertiser_name, role: 'advertiser', advertiser_id: rows[0].advertiser_id, via: 'link' },
