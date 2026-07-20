@@ -974,9 +974,11 @@ router.post('/notices', authMiddleware, masterOnlyMiddleware, async (req, res, n
     if (!title || !content) return res.status(400).json({ success: false, error: '제목과 내용을 입력하세요.' });
     const days = Math.max(1, Math.min(365, Number(display_days) || 7));
     const targets = Array.isArray(target_names) ? target_names : [];
+    // ★ $3을 INTEGER(컬럼)와 ::text(interval 조립)로 동시에 쓰면 pg가 파라미터 타입을
+    //   추론 못해 "inconsistent types deduced for parameter $3"로 항상 실패한다 → make_interval로 통일.
     const { rows } = await pool.query(`
       INSERT INTO admin_notices (title, content, display_days, target_names, created_by, expires_at)
-      VALUES ($1, $2, $3, $4::text[], $5, NOW() + ($3::text || ' days')::interval)
+      VALUES ($1, $2, $3::int, $4::text[], $5, NOW() + make_interval(days => $3::int))
       RETURNING *
     `, [title, content, days, targets, req.admin.name]);
     res.json({ success: true, notice: rows[0] });
@@ -993,10 +995,11 @@ router.put('/notices/:id', authMiddleware, masterOnlyMiddleware, async (req, res
     if (!title || !content) return res.status(400).json({ success: false, error: '제목과 내용을 입력하세요.' });
     const days = Math.max(1, Math.min(365, Number(display_days) || 7));
     const targets = Array.isArray(target_names) ? target_names : [];
+    // ★ INSERT와 동일한 $3 타입 추론 충돌 방지(make_interval)
     const { rows } = await pool.query(`
       UPDATE admin_notices
-      SET title = $1, content = $2, display_days = $3, target_names = $4::text[],
-          expires_at = created_at + ($3::text || ' days')::interval
+      SET title = $1, content = $2, display_days = $3::int, target_names = $4::text[],
+          expires_at = created_at + make_interval(days => $3::int)
       WHERE id = $5
       RETURNING *
     `, [title, content, days, targets, id]);
