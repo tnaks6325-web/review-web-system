@@ -173,6 +173,10 @@ async function run() {
     if (/UPDATE advertisers SET status = 'ended'/.test(s)) return { rows: vals[0] === 'adv_del' ? [{ id: 'adv_del', name: '삭제업체' }] : [] };
     if (/UPDATE advertiser_campaigns SET deleted_at/.test(s)) return { rows: [], rowCount: 2 };
     if (/SELECT DISTINCT ac.sheet_id FROM advertiser_campaigns/.test(s)) return { rows: [{ sheet_id: 'S_owned1' }, { sheet_id: 'S_owned2' }, { sheet_id: null }] };
+    if (/SELECT 1 FROM advertisers WHERE id/.test(s)) return { rows: vals[0] === 'adv_missing' ? [] : [{ 1: 1 }] };
+    if (/INSERT INTO trackb_advertiser_links/.test(s)) return { rows: [{ token: vals[1], active: true }] };
+    if (/FROM trackb_advertiser_links WHERE advertiser_id/.test(s)) return { rows: vals[0] === 'adv_link' ? [{ advertiserId: 'adv_link', token: 'TOK', active: true, lastUsedAt: null, createdAt: null }] : [] };
+    if (/UPDATE trackb_advertiser_links SET active/.test(s)) return { rows: vals[0] === 'adv_nolink' ? [] : [{ token: 'TOK', active: vals[1] }] };
     return { rows: [] };
   } });
   // 거래처 등록검증(인트라넷 광고주DB) 목 — 등록됨/미등록/도달불가 3태를 주입.
@@ -221,6 +225,31 @@ async function run() {
   const os = await svc.ownedSheetIds();
   assert.deepEqual(os, ['S_owned1', 'S_owned2'], '2.6: 소유 시트 ID 목록(널 제외 — 업체추가 드롭다운 제외용)');
   console.log('  2.6 ownedSheetIds — 소유 시트 목록·널 제외 ✓');
+
+  // ═══ 2.7 광고주 접속 링크(매직 링크) CRUD — 발급/회전·조회·폐기 ═══
+  let lk = await svc.generateAdvertiserLink({ advertiserId: 'adv_link', by: 'master' });
+  assert.equal(lk.ok, true, '2.7a: 링크 발급 성공'); assert.ok(lk.token && lk.token.length >= 16, '2.7a: 추측불가 토큰 반환');
+  lk = await svc.generateAdvertiserLink({ advertiserId: 'adv_missing', by: 'master' });
+  assert.equal(lk.ok, false, '2.7b: 없는 업체 404'); assert.equal(lk.code, 404, '2.7b: 404');
+  const g = await svc.getAdvertiserLink('adv_link'); assert.ok(g && g.token, '2.7c: 링크 조회');
+  lk = await svc.setAdvertiserLinkActive({ advertiserId: 'adv_link', active: false });
+  assert.equal(lk.ok, true, '2.7d: 폐기 성공'); assert.equal(lk.active, false, '2.7d: active=false');
+  lk = await svc.setAdvertiserLinkActive({ advertiserId: 'adv_nolink', active: false });
+  assert.equal(lk.ok, false, '2.7e: 발급 안 된 업체 404'); assert.equal(lk.code, 404, '2.7e: 404');
+  console.log('  2.7 광고주 접속 링크 — 발급/회전·조회·폐기·404 ✓');
+
+  // ═══ 2.8 loginByLinkToken — 유효 토큰 → advertiser JWT(via:link), 무효/종료/빈값 거부 ═══
+  const mkPool = row => ({ async query(sql) { return /FROM trackb_advertiser_links l JOIN advertisers a/.test(String(sql)) ? { rows: row ? [row] : [] } : { rows: [] }; } });
+  let lr = await auth.loginByLinkToken('tok-valid', mkPool({ advertiser_id: 'adv1', advertiser_name: '스마트원', advertiser_status: 'active' }));
+  assert.equal(lr.success, true, '2.8a: 유효 토큰 성공'); assert.equal(lr.role, 'advertiser', '2.8a: advertiser 권한');
+  assert.equal(lr.advertiserId, 'adv1', '2.8a: advertiser_id');
+  const jp = jwt.verify(lr.token, process.env.JWT_SECRET);
+  assert.equal(jp.advertiser_id, 'adv1', '2.8a: JWT advertiser_id'); assert.equal(jp.via, 'link', '2.8a: via=link 감사');
+  lr = await auth.loginByLinkToken('tok-bad', mkPool(null)); assert.equal(lr.success, false, '2.8b: 무효/폐기 토큰 거부');
+  lr = await auth.loginByLinkToken('tok-x', mkPool({ advertiser_id: 'adv2', advertiser_name: 'X', advertiser_status: 'ended' }));
+  assert.equal(lr.success, false, '2.8c: 종료 거래처 거부');
+  lr = await auth.loginByLinkToken('', mkPool({})); assert.equal(lr.success, false, '2.8d: 빈 토큰 거부');
+  console.log('  2.8 loginByLinkToken — 유효→advertiser JWT(via:link)·무효/종료/빈값 거부 ✓');
 
   // ═══ 3. staffOwnsAdvertiser ═══
   assert.equal(await svc.staffOwnsAdvertiser({ advertiserId: 'adv_mine', staffName: '김수만' }), true, '3a: TRIM 일치 허용');

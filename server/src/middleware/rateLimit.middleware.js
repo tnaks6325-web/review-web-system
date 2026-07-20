@@ -57,4 +57,13 @@ const imageApiLimiter = rateLimit({
   },
 });
 
-module.exports = { rateLimiter, registerLimiter, imageApiLimiter, intranetLoginLimiter };
+// ── 광고주 접속 링크 교환(무인증 공개 경로) 전용 — 토큰 브루트포스 완화. IP당 분당 30회. ──
+const advertiserLinkLimiter = rateLimit({
+  windowMs: 60 * 1000,
+  max: 30,
+  message: { success: false, error: '요청이 너무 잦습니다. 잠시 후 다시 시도하세요.' },
+  standardHeaders: true,
+  legacyHeaders: false,
+});
+
+module.exports = { rateLimiter, registerLimiter, imageApiLimiter, intranetLoginLimiter, advertiserLinkLimiter };

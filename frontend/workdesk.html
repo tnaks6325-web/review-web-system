@@ -222,6 +222,9 @@
   .acctempty{font-size:12.5px;color:var(--muted);padding:9px 2px}
   .acctadd{display:flex;gap:8px;margin-top:8px;flex-wrap:wrap} .acctadd input{flex:1;min-width:120px;padding:7px 10px;border:1px solid var(--line);border-radius:8px;background:var(--card);color:var(--ink);font-size:13px}
   .btn.xs.bad{color:var(--bad)} .btn.xs.bad:hover{border-color:var(--bad);background:var(--bad-soft)}
+  .linkrow{display:flex;gap:8px;align-items:center;margin-bottom:8px} .linkrow input{flex:1;padding:8px 10px;border:1px solid var(--line);border-radius:8px;background:var(--card2);color:var(--ink);font-size:12px;font-family:ui-monospace,Menlo,monospace}
+  .linkmeta{display:flex;align-items:center;gap:8px;flex-wrap:wrap} .linkused{font-size:11.5px;color:var(--muted)}
+  .linkempty{font-size:12.5px;color:var(--muted);padding:6px 2px 10px}
   .own{display:flex;align-items:center;gap:11px;padding:11px 13px;border:1px solid var(--line);border-radius:10px;background:var(--card);margin-bottom:8px}
   .own .ic{width:30px;height:30px;border-radius:8px;background:var(--accent-soft);color:var(--accent);display:grid;place-items:center;flex:none;font-size:15px}
   .own .info{flex:1;min-width:0} .own .info b{font-size:13.5px;display:block;white-space:nowrap;overflow:hidden;text-overflow:ellipsis} .own .info span{font-size:11.5px;color:var(--muted)}
@@ -349,6 +352,13 @@ let STATE = { role:'', name:'', view:'workdesk', tabs:[], cur:null, wd:null, fre
               ownSettle:{}, ownSettleFor:null };              // 연결탭 정산 요약(비동기 필, 업체 전환 경합 가드)
 
 async function boot(){
+  // 광고주 전용 접속 링크(#adv=<token>) — 로그인 없이 유효 토큰을 advertiser JWT 로 교환(프래그먼트라 서버로그·Referer 미유출).
+  const advm=(location.hash||'').match(/[#&]adv=([^&]+)/);
+  if(advm){ let t=null; try{ t=decodeURIComponent(advm[1]); }catch(_){ }
+    try{ history.replaceState(null,'',location.pathname+location.search); }catch(_){ }
+    if(t){ const r=await fetch(API_BASE+'/api/trackb/advertiser-link-login',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({token:t})}).then(x=>x.json()).catch(()=>null);
+      if(r&&r.success&&r.token){ sessionStorage.setItem('admin_token', r.token); }
+      else return renderLogin('접속 링크가 유효하지 않거나 폐기되었습니다. 담당자에게 문의하세요.'); } }
   if (!token()) return renderLogin();
   const me = parseJwt(token()); STATE.role=me.role||''; STATE.name=me.name||'';
   if(me.exp && me.exp*1000 < Date.now())   // 만료 토큰 → 만료 신원 배지+빈 목록 유령 화면 대신 즉시 재로그인
@@ -356,13 +366,13 @@ async function boot(){
   if(!STATE.role){ sessionStorage.removeItem('admin_token'); return renderLogin(); }   // 깨진/위조 토큰 → 빈 셸 대신 로그인
   renderShell();
 }
-function renderLogin(){
+function renderLogin(msg){
   $('#app').innerHTML = `<div class="loginbox"><h2>통합 작업대 로그인</h2>
     <input id="lname" placeholder="아이디 (관리자 / AE / 광고주)" autocomplete="username">
     <input id="lpw" type="password" placeholder="비밀번호" autocomplete="current-password">
     <button class="btn pri" style="width:100%;padding:9px" onclick="doLogin()">로그인</button>
-    <div class="err" id="lerr"></div>
-    <div class="note">Track B 통합 작업대입니다. 관리자(master/admin)는 전체·관측·소유 지정, AE(영업담당)는 담당 업체 탭 열람/편집 + 소유 지정(초기매핑), 광고주(거래처)는 소유 탭을 열람합니다(개인정보 마스킹). <b>인트라넷 계정으로도 로그인 가능</b>(인트라넷에서 "통합 작업대" 버튼으로 오면 자동 로그인).</div></div>`;
+    <div class="err" id="lerr">${msg?esc(msg):''}</div>
+    <div class="note">Track B 통합 작업대입니다. 관리자(master/admin)는 전체·관측·소유 지정, AE(영업담당)는 담당 업체 탭 열람/편집 + 소유 지정(초기매핑), 광고주(거래처)는 소유 탭을 열람합니다(개인정보 마스킹). <b>인트라넷 계정 또는 전용 접속 링크로도 로그인 없이 진입 가능</b>.</div></div>`;
   $('#lpw').addEventListener('keydown',e=>{if(e.key==='Enter')doLogin();});
 }
 async function doLogin(){ const name=$('#lname').value.trim(), pw=$('#lpw').value;
@@ -1223,6 +1233,56 @@ async function createAdvertiser(){
   await renderOwnershipView();
   const idx=(STATE.advs||[]).findIndex(a=>a.id===newId); if(idx>=0) selAdv(idx);
 }
+// ── 광고주 전용 접속 링크(매직 링크) — master/admin 만. 광고주는 이 링크만 열면 로그인 없이
+//   이 업체 뷰(소유 탭·마스킹·읽기전용)로 진입. 유출 대비 회전/폐기 가능. 링크 CRUD = /api/trackb/advertiser-link. ──
+function _advLinkUrl(token){ return location.origin + '/workdesk#adv=' + encodeURIComponent(token); }
+function _advLinkHtml(a){
+  if(!(STATE.role==='master'||STATE.role==='admin')) return '';
+  const lk=STATE.advLink;
+  let body;
+  if(lk && lk.token){
+    const url=_advLinkUrl(lk.token);
+    const used=lk.lastUsedAt?('마지막 접속 '+_fmtTs(lk.lastUsedAt)):'접속 이력 없음';
+    body = `<div class="linkrow">
+        <input id="advLinkUrl" readonly value="${esc(url)}" onclick="this.select()">
+        <button class="btn xs pri" onclick="advLinkCopy()">복사</button>
+      </div>
+      <div class="linkmeta"><span class="acctst ${lk.active?'on':'off'}">${lk.active?'활성':'폐기됨'}</span> <span class="linkused">${esc(used)}</span>
+        <span style="flex:1"></span>
+        ${lk.active
+          ? `<button class="btn xs" onclick="advLinkGen('${esc(a.id)}',true)">링크 회전</button><button class="btn xs bad" onclick="advLinkRevoke('${esc(a.id)}')">폐기</button>`
+          : `<button class="btn xs" onclick="advLinkEnable('${esc(a.id)}')">다시 활성</button><button class="btn xs" onclick="advLinkGen('${esc(a.id)}',true)">새 링크 발급</button>`}
+      </div>`;
+  } else {
+    body = `<div class="linkempty">아직 접속 링크가 없습니다 — 발급해 광고주에게 전달하면 로그인 없이 바로 열람합니다.</div>
+      <button class="btn pri" onclick="advLinkGen('${esc(a.id)}',false)">＋ 접속 링크 생성</button>`;
+  }
+  return `<div class="sect"><div class="st">광고주 접속 링크 <span class="sthint">이 링크만 열면 로그인 없이 이 업체 정보만 열람(마스킹·읽기전용)</span></div>${body}</div>`;
+}
+async function _advLinkReload(){ const cur=STATE.advCur; if(!cur) return;
+  const lk=await api('/api/trackb/advertiser-link',{method:'POST',body:JSON.stringify({action:'get',advertiserId:cur.id})}).catch(()=>null);
+  STATE.advLink=(lk&&lk.ok&&lk.link)||null;
+  const i=(STATE.advs||[]).findIndex(x=>x.id===cur.id); if(i>=0) selAdv(i);
+}
+async function advLinkGen(advertiserId, rotate){
+  if(rotate && !confirm('링크를 새로 발급하면 이전 링크는 즉시 무효화됩니다. 계속할까요?')) return;
+  const r=await api('/api/trackb/advertiser-link',{method:'POST',body:JSON.stringify({action:'generate',advertiserId})});
+  if(r&&r.ok){ toast(rotate?'링크 회전 완료':'접속 링크 발급'); await _advLinkReload(); }
+  else toast('발급 실패'+(r&&r.error?': '+r.error:''));
+}
+async function advLinkRevoke(advertiserId){
+  if(!confirm('이 접속 링크를 폐기할까요?\n광고주는 이 링크로 더 이상 들어올 수 없게 됩니다(계정 로그인은 별개).')) return;
+  const r=await api('/api/trackb/advertiser-link',{method:'POST',body:JSON.stringify({action:'revoke',advertiserId})});
+  if(r&&r.ok){ toast('링크 폐기'); await _advLinkReload(); } else toast('폐기 실패'+(r&&r.error?': '+r.error:''));
+}
+async function advLinkEnable(advertiserId){
+  const r=await api('/api/trackb/advertiser-link',{method:'POST',body:JSON.stringify({action:'enable',advertiserId})});
+  if(r&&r.ok){ toast('링크 다시 활성'); await _advLinkReload(); } else toast('실패'+(r&&r.error?': '+r.error:''));
+}
+function advLinkCopy(){ const el=$('#advLinkUrl'); if(!el) return; el.select();
+  const done=()=>toast('링크 복사됨 — 광고주에게 전달하세요');
+  try{ navigator.clipboard.writeText(el.value).then(done).catch(()=>{ document.execCommand('copy'); done(); }); }
+  catch(_){ try{ document.execCommand('copy'); done(); }catch(e){ toast('복사 실패 — 수동 선택하세요'); } } }
 // ── 광고주 로그인 계정(업체별) — master/admin 만. 광고주는 이 아이디/비번으로 통합작업대에 로그인 →
 //   role='advertiser' → 이 업체 소유 탭만·마스킹·읽기전용으로 열람. 계정 CRUD = /api/trackb/advertiser-account. ──
 function _advAcctHtml(a){
@@ -1284,11 +1344,14 @@ async function selAdv(i){ const a=STATE.advs[i]; STATE.advCur=a; STATE.addSheet=
   STATE.ownSettle={}; STATE.ownSettleFor=a.id;
   document.querySelectorAll('.advitem').forEach(el=>el.classList.toggle('on',+el.dataset.i===i));
   $('#ownPanel').innerHTML=`<div class="empty">불러오는 중…</div>`;
-  const [r, rt]=await Promise.all([
+  const isAdmin2=STATE.role==='master'||STATE.role==='admin';
+  const [r, rt, lk]=await Promise.all([
     api('/api/trackb/ownership?advertiserId='+encodeURIComponent(a.id)),
     api('/api/trackb/ownership/tabs?advertiserId='+encodeURIComponent(a.id)).catch(()=>null),
+    isAdmin2 ? api('/api/trackb/advertiser-link',{method:'POST',body:JSON.stringify({action:'get',advertiserId:a.id})}).catch(()=>null) : Promise.resolve(null),
   ]);
   if(STATE.advCur!==a) return;   // 빠른 업체 전환 경합 — 늦게 온 stale 응답이 현재 패널을 덮지 않게 폐기
+  STATE.advLink=(lk&&lk.ok&&lk.link)||null;   // 이 업체 접속 링크(있으면 token/active)
   STATE.ownTabs=(rt&&rt.ok&&rt.items)||[];
   renderOwnPanel(a, (r&&r.items)||[]);
   if(STATE.ownTabs.some(t=>t.salesId)) loadOwnSettlement(a.id);   // 정산 컬럼 비동기 필(링크 탭 0이면 호출 생략)
@@ -1313,6 +1376,7 @@ function renderOwnPanel(a, items){
     <div class="ph2"><span class="big">${esc((a.name||'?').slice(0,1))}</span><div style="flex:1"><h2>${esc(a.name)}</h2><div class="acc">거래처 ID: ${esc(a.id)} · 소유 ${items.length}</div></div>
       <div class="aebox" id="aebox">${_aeChipHtml(a)}</div>
       <label class="setvis" title="이 거래처가 통합작업대에서 정산(금액·상태)을 볼 수 있는지"><input type="checkbox" id="setvis" ${a.settlementVisible===false?'':'checked'} onchange="toggleSettleVis('${esc(a.id)}',this.checked)"> 정산 노출</label></div>
+    ${_advLinkHtml(a)}
     ${_advAcctHtml(a)}
     <div class="sect"><div class="st">소유 캠페인</div>${owns}</div>
     <div class="sect" id="owntabsSect">${_ownTabsHtml()}</div>

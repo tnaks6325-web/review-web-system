@@ -11,6 +11,7 @@ const { authMiddleware, masterOnlyMiddleware, adminOrMasterMiddleware } = requir
 const svc = require('../services/trackB.service');
 const participants = require('../services/participants.service');
 const authSvc = require('../services/auth.service');
+const { advertiserLinkLimiter } = require('../middleware/rateLimit.middleware');
 
 function _by(req) { return String((req.admin && (req.admin.name || req.admin.role)) || 'admin').slice(0, 100); }
 function _role(req) { return (req.admin && req.admin.role) || ''; }
@@ -206,6 +207,24 @@ router.post('/advertisers', authMiddleware, internalMiddleware, async (req, res,
 // ── 이미 소유 지정된 시트 ID 목록 — 업체추가 폼 시트 드롭다운에서 제외용(내부인). ──
 router.get('/owned-sheets', authMiddleware, internalMiddleware, async (req, res, next) => {
   try { res.json({ ok: true, sheetIds: await svc.ownedSheetIds() }); }
+  catch (err) { next(err); }
+});
+
+// ── 광고주 접속 링크(매직 링크) 관리 — master/admin. 업체당 1토큰 발급/회전/폐기. ──
+router.post('/advertiser-link', authMiddleware, adminOrMasterMiddleware, async (req, res, next) => {
+  try {
+    const { action, advertiserId } = req.body || {};
+    if (action === 'get') return res.json({ ok: true, link: await svc.getAdvertiserLink(advertiserId) });
+    if (action === 'generate') { const o = await svc.generateAdvertiserLink({ advertiserId, by: _by(req) }); return res.status(o.ok ? 200 : (o.code || 400)).json(o); }
+    if (action === 'revoke') { const o = await svc.setAdvertiserLinkActive({ advertiserId, active: false, by: _by(req) }); return res.status(o.ok ? 200 : (o.code || 400)).json(o); }
+    if (action === 'enable') { const o = await svc.setAdvertiserLinkActive({ advertiserId, active: true, by: _by(req) }); return res.status(o.ok ? 200 : (o.code || 400)).json(o); }
+    return res.status(400).json({ ok: false, error: '알 수 없는 action: ' + action });
+  } catch (err) { next(err); }
+});
+
+// ── 광고주 접속 링크 교환(공개·무인증) — 유효 토큰 → advertiser JWT(로그인 없이 진입). 레이트리밋. ──
+router.post('/advertiser-link-login', advertiserLinkLimiter, async (req, res, next) => {
+  try { res.json(await authSvc.loginByLinkToken((req.body || {}).token)); }
   catch (err) { next(err); }
 });
 
