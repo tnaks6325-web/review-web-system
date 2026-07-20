@@ -174,6 +174,39 @@
     }
     .sub-add-btn:hover { background:var(--p-dark); }
 
+    /* ── 내정보 통합 계정 카드 (본인·타계정 동일 구조) ── */
+    .pf-acct { background:var(--card); border:1px solid var(--border); border-radius:15px; overflow:hidden; box-shadow:0 1px 3px rgba(23,43,77,.05); }
+    .pf-acct.self { border-color:#cfe0fd; }
+    .pf-head { display:flex; align-items:center; gap:10px; padding:11px 13px 10px; border-bottom:1px solid #f1f3f7; }
+    .pf-avatar { width:30px; height:30px; border-radius:9px; flex:none; display:grid; place-items:center; background:var(--p-light); color:var(--p-dark); font-weight:500; font-size:.78rem; }
+    .pf-id { flex:1; min-width:0; }
+    .pf-nm { display:flex; align-items:center; gap:7px; flex-wrap:wrap; line-height:1.2; }
+    .pf-who { font-size:.88rem; font-weight:700; color:var(--t1); }        /* 카드에서 유일한 굵은 글씨 */
+    .pf-ph { font-size:.74rem; font-weight:400; color:var(--t2); font-variant-numeric:tabular-nums; }
+    .pf-chip { font-size:.55rem; font-weight:500; padding:2px 7px; border-radius:999px; }
+    .pf-chip-self { background:var(--p); color:#fff; }
+    .pf-chip-idx { background:var(--p-light); color:var(--p-dark); }
+    .pf-acts { display:flex; gap:5px; flex:none; }
+    .pf-mini { font-size:.62rem; font-weight:500; padding:4px 9px; border-radius:7px; border:1px solid var(--border); background:#fff; color:var(--t2); cursor:pointer; font-family:inherit; }
+    .pf-mini-danger { color:#DC2626; border-color:#f3d3d3; background:#fef2f2; }
+    .pf-lines { padding:6px 13px 10px; display:flex; flex-direction:column; }
+    .pf-ln { display:grid; grid-template-columns:42px 1fr; gap:10px; align-items:baseline; padding:5px 0; border-top:1px solid #f1f3f7; }
+    .pf-ln:first-child { border-top:none; }
+    .pf-k { font-size:.62rem; font-weight:400; letter-spacing:.02em; color:var(--t3); }
+    .pf-v { font-size:.76rem; font-weight:400; color:var(--t1); line-height:1.4; font-variant-numeric:tabular-nums; word-break:break-all; }
+    .pf-num { font-variant-numeric:tabular-nums; letter-spacing:.02em; }
+    .pf-dot { color:#d3d8e1; margin:0 6px; }
+    .pf-muted { color:var(--t3); }
+    .pf-edit { font-size:.6rem; font-weight:500; color:var(--p-dark); background:var(--p-light); border:none; border-radius:999px; padding:2px 8px; margin-left:6px; cursor:pointer; font-family:inherit; vertical-align:middle; }
+    .pf-subsec { margin-top:14px; }
+    .pf-subhead { display:flex; align-items:center; justify-content:space-between; margin:0 2px 8px; }
+    .pf-subtitle { font-size:.82rem; font-weight:700; color:var(--t1); }
+    .pf-subcount { font-size:.64rem; font-weight:500; color:var(--t3); margin-left:4px; }
+    .pf-subadd { font-size:.68rem; font-weight:500; color:var(--p-dark); background:var(--p-light); border:none; border-radius:8px; padding:6px 11px; cursor:pointer; font-family:inherit; }
+    .pf-subadd:disabled { opacity:.5; cursor:default; }
+    .pf-sublist { display:flex; flex-direction:column; gap:9px; }
+    .pf-subempty { text-align:center; padding:14px 10px; color:var(--t3); font-size:.76rem; background:var(--card); border:1px dashed var(--border); border-radius:12px; }
+
     /* ─── Result Card (review list) ─── */
     .result-card {
       display:flex; align-items:center; gap:10px; padding:12px 14px;
@@ -629,53 +662,38 @@
     <!-- ★ 내 등록정보 섹션 -->
     <div id="sectionProfile" class="home-section">
       <div id="inlineProfileSection" style="display:none">
-        <!-- 본인 정보 -->
-        <div class="profile-card">
-          <div class="profile-card-title"><i class="fas fa-user"></i> 내 등록정보</div>
-          <div class="profile-grid">
-            <div class="profile-grid-item">
-              <div class="label">사용자명</div>
-              <div class="value" id="inlineSelfName">-</div>
-            </div>
-            <div class="profile-grid-item">
-              <div class="label">전화번호</div>
-              <div class="value" id="inlineSelfPhone" style="font-weight:500">-</div>
-            </div>
-            <div class="profile-grid-item">
-              <div class="label">소득명의</div>
-              <div style="display:flex;align-items:center;gap:4px">
-                <span class="value" id="inlineSelfIncomeName" style="font-weight:500">미등록</span>
-                <button id="btnAddIncomeInfo" onclick="openIncomeInfoForm()" style="display:none;padding:1px 6px;background:#EFF6FF;color:#2563EB;border:1px solid #93C5FD;border-radius:5px;font-size:.62rem;font-weight:700;cursor:pointer">추가+</button>
-              </div>
-            </div>
-            <div class="profile-grid-item">
-              <div class="label">주민번호</div>
-              <div style="display:flex;align-items:center;gap:4px">
-                <span class="value" id="inlineSelfJumin" style="font-weight:500;letter-spacing:.5px">미등록</span>
-                <button id="btnAddJuminInfo" onclick="openIncomeInfoForm()" style="display:none;padding:1px 6px;background:#EFF6FF;color:#2563EB;border:1px solid #93C5FD;border-radius:5px;font-size:.62rem;font-weight:700;cursor:pointer">추가+</button>
-              </div>
-            </div>
+
+        <!-- 본인 통합 카드 (내 등록정보 + 계좌) -->
+        <article class="pf-acct self">
+          <div class="pf-head">
+            <div class="pf-avatar" id="pfSelfAvatar"></div>
+            <div class="pf-id"><div class="pf-nm">
+              <span class="pf-who" id="inlineSelfName">-</span>
+              <span class="pf-ph" id="inlineSelfPhone">-</span>
+              <span class="pf-chip pf-chip-self">본인</span>
+            </div></div>
           </div>
-          <!-- 주소 (본인) -->
-          <div style="margin-top:8px;border-top:1px dashed #E5E7EB;padding-top:8px">
-            <div style="display:flex;align-items:flex-start;justify-content:space-between;gap:8px">
-              <div style="min-width:0;flex:1">
-                <div class="label">주소</div>
-                <div class="value" id="inlineSelfAddress" style="font-weight:500;font-size:.82rem;white-space:normal;word-break:break-all;color:#DC2626">미등록</div>
-              </div>
-              <button id="btnAddAddress" onclick="openAddressForm()" style="flex-shrink:0;margin-top:2px;padding:2px 8px;background:#EFF6FF;color:#2563EB;border:1px solid #93C5FD;border-radius:5px;font-size:.62rem;font-weight:700;cursor:pointer">추가+</button>
-            </div>
-            <div id="inlineAddressForm" style="display:none;margin-top:8px">
-              <input id="inlineAddressInput" type="text" placeholder="배송받을 주소 (도로명/지번 + 상세주소)" maxlength="200" style="width:100%;padding:8px 10px;border:1.5px solid #D1D5DB;border-radius:7px;font-size:.8rem;outline:none;box-sizing:border-box">
-              <div style="display:flex;gap:8px;margin-top:6px">
-                <button onclick="cancelAddressForm()" style="flex:1;padding:7px 0;background:#fff;color:var(--t2);border:1.5px solid #D1D5DB;border-radius:7px;font-size:.75rem;font-weight:600;cursor:pointer">취소</button>
-                <button id="btnSaveAddress" onclick="saveAddressInline()" style="flex:1;padding:7px 0;background:#2563EB;color:#fff;border:none;border-radius:7px;font-size:.75rem;font-weight:700;cursor:pointer">저장</button>
-              </div>
-            </div>
+          <div class="pf-lines">
+            <div class="pf-ln"><span class="pf-k">주소</span>
+              <span class="pf-v"><span id="inlineSelfAddress" class="pf-muted">미등록</span><button id="btnAddAddress" class="pf-edit" onclick="openAddressForm()">추가</button></span></div>
+            <div class="pf-ln"><span class="pf-k">계좌</span>
+              <span class="pf-v"><span id="pfBankLine" class="pf-muted">미등록</span><button id="btnAddBankInfo" class="pf-edit" onclick="openBankForm()">등록</button></span></div>
+            <div class="pf-ln"><span class="pf-k">소득</span>
+              <span class="pf-v"><span id="inlineSelfIncomeName" class="pf-muted">미등록</span><button id="btnAddIncomeInfo" class="pf-edit" onclick="openIncomeInfoForm()">추가</button><span class="pf-dot">·</span><span id="inlineSelfJumin" class="pf-muted">미등록</span><button id="btnAddJuminInfo" class="pf-edit" onclick="openIncomeInfoForm()">추가</button></span></div>
+          </div>
+        </article>
+
+        <!-- 주소 편집 폼 -->
+        <div id="inlineAddressForm" style="display:none;margin:0 2px 10px">
+          <input id="inlineAddressInput" type="text" placeholder="배송받을 주소 (도로명/지번 + 상세주소)" maxlength="200" style="width:100%;padding:8px 10px;border:1.5px solid #D1D5DB;border-radius:7px;font-size:.8rem;outline:none;box-sizing:border-box">
+          <div style="display:flex;gap:8px;margin-top:6px">
+            <button onclick="cancelAddressForm()" style="flex:1;padding:7px 0;background:#fff;color:var(--t2);border:1.5px solid #D1D5DB;border-radius:7px;font-size:.75rem;font-weight:600;cursor:pointer">취소</button>
+            <button id="btnSaveAddress" onclick="saveAddressInline()" style="flex:1;padding:7px 0;background:#2563EB;color:#fff;border:none;border-radius:7px;font-size:.75rem;font-weight:700;cursor:pointer">저장</button>
           </div>
         </div>
-        <!-- 소득명의/주민번호 인라인 입력폼 -->
-        <div id="inlineIncomeForm" style="display:none;background:#FFFBEB;border:1.5px solid #FDE68A;border-radius:10px;padding:12px 14px;margin-bottom:12px">
+
+        <!-- 소득명의/주민번호 편집 폼 -->
+        <div id="inlineIncomeForm" style="display:none;background:#FFFBEB;border:1.5px solid #FDE68A;border-radius:10px;padding:12px 14px;margin:0 2px 12px">
           <div style="font-size:.73rem;font-weight:700;color:#92400E;margin-bottom:8px">📝 소득명의 / 주민번호 등록</div>
           <div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:8px">
             <div style="flex:1;min-width:120px">
@@ -692,16 +710,38 @@
             <button id="btnSaveIncomeInfo" onclick="saveIncomeInfoInline()" style="flex:1;padding:7px 0;background:#D97706;color:#fff;border:none;border-radius:7px;font-size:.75rem;font-weight:700;cursor:pointer">저장</button>
           </div>
         </div>
-        <!-- 타계정 목록 -->
-        <div class="sub-account-card">
-          <div class="sub-header">
-            <div class="sub-header-title">타계정 정보 <span id="inlineSubCount" class="sub-count-badge">0/10</span></div>
-            <button id="btnInlineAddSub" onclick="toggleInlineSubForm()" class="sub-add-btn">
-              <i class="fas fa-plus"></i> 타계정 추가
-            </button>
+
+        <!-- 계좌 편집 폼 -->
+        <div id="inlineBankForm" style="display:none;background:#EFF6FF;border:1.5px solid #BFDBFE;border-radius:10px;padding:12px 14px;margin:0 2px 12px">
+          <div style="font-size:.73rem;font-weight:700;color:#1D4ED8;margin-bottom:8px">💳 입금받을 계좌 등록</div>
+          <div style="display:flex;gap:8px;margin-bottom:8px;flex-wrap:wrap">
+            <div style="flex:1;min-width:110px">
+              <label style="font-size:.68rem;font-weight:600;color:var(--t2)">은행명</label>
+              <input id="inlineBankNameInput" type="text" placeholder="예: 카카오뱅크" maxlength="20" style="width:100%;margin-top:3px;padding:7px 9px;border:1.5px solid #D1D5DB;border-radius:7px;font-size:.8rem;outline:none;box-sizing:border-box">
+            </div>
+            <div style="flex:1;min-width:100px">
+              <label style="font-size:.68rem;font-weight:600;color:var(--t2)">예금주</label>
+              <input id="inlineBankHolderInput" type="text" placeholder="예금주명" maxlength="20" style="width:100%;margin-top:3px;padding:7px 9px;border:1.5px solid #D1D5DB;border-radius:7px;font-size:.8rem;outline:none;box-sizing:border-box">
+            </div>
           </div>
-          <div id="inlineSubList" style="display:flex;flex-direction:column;gap:5px">
-            <div style="text-align:center;padding:10px;color:var(--t3);font-size:.78rem">타계정이 있다면 타계정정보를 반드시 추가하세요.</div>
+          <div style="margin-bottom:8px">
+            <label style="font-size:.68rem;font-weight:600;color:var(--t2)">계좌번호 <span style="color:var(--t3);font-weight:400">(숫자만)</span></label>
+            <input id="inlineBankAccountInput" type="text" inputmode="numeric" placeholder="- 없이 숫자만 입력" maxlength="20" oninput="this.value=this.value.replace(/[^0-9]/g,'')" style="width:100%;margin-top:3px;padding:7px 9px;border:1.5px solid #D1D5DB;border-radius:7px;font-size:.8rem;outline:none;box-sizing:border-box">
+          </div>
+          <div style="display:flex;gap:8px">
+            <button onclick="cancelBankForm()" style="flex:1;padding:7px 0;background:#fff;color:var(--t2);border:1.5px solid #D1D5DB;border-radius:7px;font-size:.75rem;font-weight:600;cursor:pointer">취소</button>
+            <button id="btnSaveBankInfo" onclick="saveBankInfoInline()" style="flex:1;padding:7px 0;background:#2563EB;color:#fff;border:none;border-radius:7px;font-size:.75rem;font-weight:700;cursor:pointer">저장</button>
+          </div>
+        </div>
+
+        <!-- 타계정 섹션 -->
+        <div class="pf-subsec">
+          <div class="pf-subhead">
+            <span class="pf-subtitle">타계정 정보 <span id="inlineSubCount" class="pf-subcount">0/10</span></span>
+            <button id="btnInlineAddSub" onclick="toggleInlineSubForm()" class="pf-subadd">＋ 타계정 추가</button>
+          </div>
+          <div id="inlineSubList" class="pf-sublist">
+            <div class="pf-subempty">타계정이 있다면 타계정정보를 반드시 추가하세요.</div>
           </div>
           <!-- 인라인 타계정 추가/수정 폼 -->
           <div id="inlineSubForm" style="display:none;margin-top:10px;border:1.5px solid #BFDBFE;border-radius:10px;padding:14px;background:#EFF6FF">
@@ -730,7 +770,7 @@
               <label style="font-size:.7rem;font-weight:600;color:var(--t2)">주소 <span style="color:var(--t3);font-weight:400">(선택)</span></label>
               <input id="inlineSubAddr" type="text" placeholder="배송받을 주소" maxlength="200" style="width:100%;margin-top:3px;padding:8px 10px;border:1.5px solid #D1D5DB;border-radius:7px;font-size:.82rem;outline:none;box-sizing:border-box">
             </div>
-            <!-- ★ 타계정별 개별 계좌정보 (리뷰비 입금용 — 미입력 시 본인 공통계좌 사용) -->
+            <!-- 타계정별 개별 계좌정보 (미입력 시 본인 공통계좌 사용) -->
             <div style="margin-bottom:10px;padding:10px;border:1.5px dashed #93C5FD;border-radius:8px;background:#F8FAFF">
               <div style="font-size:.7rem;font-weight:700;color:#1D4ED8;margin-bottom:6px"><i class="fas fa-wallet" style="margin-right:4px"></i>이 타계정 전용 계좌 <span style="color:var(--t3);font-weight:400">(선택 — 미입력 시 본인 계좌로 입금)</span></div>
               <div style="display:flex;gap:6px;margin-bottom:6px">
@@ -745,44 +785,7 @@
             </div>
           </div>
         </div>
-      </div>
-      <!-- 계좌 관리 / 로그아웃 (내정보 탭) -->
-      <div class="profile-card" style="margin-top:12px">
-        <div class="profile-card-title" style="display:flex;align-items:center;justify-content:space-between">
-          <span><i class="fas fa-wallet"></i> 계좌 관리 <span style="font-size:.66rem;font-weight:400;color:var(--t3)">(페이백 입금 계좌)</span></span>
-          <button id="btnAddBankInfo" onclick="openBankForm()" style="padding:3px 10px;background:#EFF6FF;color:#2563EB;border:1px solid #93C5FD;border-radius:6px;font-size:.68rem;font-weight:700;cursor:pointer"><i class="fas fa-plus"></i> 계좌 등록</button>
-        </div>
-        <!-- 등록된 계좌 표시 -->
-        <div class="empty-state" id="bankEmptyState" style="padding:14px 8px">등록된 계좌가 없습니다</div>
-        <div id="bankInfoCard" style="display:none;padding:12px 14px;background:#F8FAFC;border:1px solid #E2E8F0;border-radius:10px">
-          <div style="display:flex;align-items:center;gap:8px;margin-bottom:4px;flex-wrap:wrap">
-            <span id="bankInfoBankName" style="font-weight:700;color:var(--t1);font-size:.9rem"></span>
-            <span style="font-size:.72rem;color:var(--t3)">예금주 <span id="bankInfoHolder" style="color:var(--t2);font-weight:600"></span></span>
-          </div>
-          <div id="bankInfoAccount" style="font-family:monospace;font-size:.92rem;color:var(--t1);letter-spacing:.3px"></div>
-        </div>
-        <!-- 계좌 입력 폼 -->
-        <div id="inlineBankForm" style="display:none;margin-top:10px;background:#EFF6FF;border:1.5px solid #BFDBFE;border-radius:10px;padding:12px 14px">
-          <div style="font-size:.73rem;font-weight:700;color:#1D4ED8;margin-bottom:8px">💳 입금받을 계좌 등록</div>
-          <div style="display:flex;gap:8px;margin-bottom:8px;flex-wrap:wrap">
-            <div style="flex:1;min-width:110px">
-              <label style="font-size:.68rem;font-weight:600;color:var(--t2)">은행명</label>
-              <input id="inlineBankNameInput" type="text" placeholder="예: 카카오뱅크" maxlength="20" style="width:100%;margin-top:3px;padding:7px 9px;border:1.5px solid #D1D5DB;border-radius:7px;font-size:.8rem;outline:none;box-sizing:border-box">
-            </div>
-            <div style="flex:1;min-width:100px">
-              <label style="font-size:.68rem;font-weight:600;color:var(--t2)">예금주</label>
-              <input id="inlineBankHolderInput" type="text" placeholder="예금주명" maxlength="20" style="width:100%;margin-top:3px;padding:7px 9px;border:1.5px solid #D1D5DB;border-radius:7px;font-size:.8rem;outline:none;box-sizing:border-box">
-            </div>
-          </div>
-          <div style="margin-bottom:8px">
-            <label style="font-size:.68rem;font-weight:600;color:var(--t2)">계좌번호 <span style="color:var(--t3);font-weight:400">(숫자만)</span></label>
-            <input id="inlineBankAccountInput" type="text" inputmode="numeric" placeholder="- 없이 숫자만 입력" maxlength="20" oninput="this.value=this.value.replace(/[^0-9]/g,'')" style="width:100%;margin-top:3px;padding:7px 9px;border:1.5px solid #D1D5DB;border-radius:7px;font-size:.8rem;outline:none;box-sizing:border-box">
-          </div>
-          <div style="display:flex;gap:8px">
-            <button onclick="cancelBankForm()" style="flex:1;padding:7px 0;background:#fff;color:var(--t2);border:1.5px solid #D1D5DB;border-radius:7px;font-size:.75rem;font-weight:600;cursor:pointer">취소</button>
-            <button id="btnSaveBankInfo" onclick="saveBankInfoInline()" style="flex:1;padding:7px 0;background:#2563EB;color:#fff;border:none;border-radius:7px;font-size:.75rem;font-weight:700;cursor:pointer">저장</button>
-          </div>
-        </div>
+
       </div>
       <button onclick="doLogout()" style="width:100%;padding:14px;background:#F1F2F6;color:#5B6472;border:none;border-radius:13px;font-weight:700;font-size:.9rem;cursor:pointer"><i class="fas fa-right-from-bracket"></i> 로그아웃</button>
     </div>
@@ -993,6 +996,8 @@ async function loadInlineProfile(user) {
   // 즉시 이름 표시
   const nameEl = document.getElementById("inlineSelfName");
   if (nameEl) nameEl.textContent = name || "-";
+  const avEl0 = document.getElementById("pfSelfAvatar");
+  if (avEl0) avEl0.textContent = ((name || "?").charAt(0)) || "?";
   section.style.display = "";
 
   try {
@@ -1001,7 +1006,8 @@ async function loadInlineProfile(user) {
       const p = res.profile;
       window._reviewerProfile = { ...res, ...p, found: true };
       if (nameEl) nameEl.textContent = p.name || name || "-";
-      
+      if (avEl0) avEl0.textContent = (((p.name || name || "?").trim()).charAt(0)) || "?";
+
       const phoneEl = document.getElementById("inlineSelfPhone");
       if (phoneEl) phoneEl.textContent = p.phone || "-";
       
@@ -1009,7 +1015,7 @@ async function loadInlineProfile(user) {
       if (incomeEl) {
         const incVal = p.incomeType || "";
         incomeEl.textContent = incVal || "미등록";
-        incomeEl.style.color = incVal ? "var(--t2)" : "#DC2626";
+        incomeEl.classList.toggle("pf-muted", !incVal);
         const btnInc = document.getElementById("btnAddIncomeInfo");
         if (btnInc) btnInc.style.display = incVal ? "none" : "";
       }
@@ -1019,13 +1025,13 @@ async function loadInlineProfile(user) {
         const jd = (p.residentNum || "").replace(/[^0-9]/g, "");
         if (jd.length === 13) {
           juminEl.textContent = jd.slice(0,6) + "-" + jd.slice(6,7) + "••••••";
-          juminEl.style.color = "var(--t2)";
+          juminEl.classList.remove("pf-muted");
         } else if (jd) {
           juminEl.textContent = "등록됨";
-          juminEl.style.color = "var(--t2)";
+          juminEl.classList.remove("pf-muted");
         } else {
           juminEl.textContent = "미등록";
-          juminEl.style.color = "#DC2626";
+          juminEl.classList.add("pf-muted");
         }
         const btnJm = document.getElementById("btnAddJuminInfo");
         if (btnJm) btnJm.style.display = jd ? "none" : "";
@@ -1553,26 +1559,43 @@ function renderInlineSubList(subs) {
   if (!listEl) return;
 
   if (subs.length === 0) {
-    listEl.innerHTML = '<div style="text-align:center;padding:10px;color:var(--t3);font-size:.78rem">타계정이 있다면 타계정정보를 반드시 추가하세요.</div>';
+    listEl.innerHTML = '<div class="pf-subempty">타계정이 있다면 타계정정보를 반드시 추가하세요.</div>';
     return;
   }
+  const _dot = '<span class="pf-dot">·</span>';
   listEl.innerHTML = subs.map((sub, idx) => {
     const subJd = (sub.jumin || sub.residentNo || "").replace(/[^0-9]/g, "");
     const jDisplay = subJd.length === 13
       ? subJd.slice(0,6) + "-" + subJd.slice(6,7) + "••••••"
-      : (subJd ? "등록됨" : "-");
-    return `<div style="background:#F9FAFB;border:1px solid #E5E7EB;border-radius:7px;padding:8px 10px;display:flex;align-items:center;gap:8px">
-      <div style="flex:1;min-width:0">
-        <div style="font-size:.8rem;font-weight:700;color:var(--t1);margin-bottom:2px">[${idx+1}] ${escHtml(sub.name)} <span style="font-weight:400;color:var(--t3);font-size:.7rem">${escHtml(sub.phone||'')}</span></div>
-        <div style="font-size:.68rem;color:var(--t3)">소득명의: <span style="color:var(--t2)">${escHtml(sub.incomeName||'-')}</span> | 주민번호: <span style="color:var(--t2)">${jDisplay}</span></div>
-        ${sub.address ? `<div style="font-size:.68rem;color:var(--t3);margin-top:1px">주소: <span style="color:var(--t2)">${escHtml(sub.address)}</span></div>` : ''}
-        ${(sub.bankAccount || sub.bankName) ? `<div style="font-size:.68rem;color:var(--t3);margin-top:1px">전용계좌: <span style="color:var(--t2)">${escHtml([sub.bankName, sub.bankAccount, sub.accountHolder].filter(Boolean).join(' '))}</span></div>` : ''}
+      : (subJd ? "등록됨" : "");
+    const addr = (sub.address || "").trim();
+    const addrHtml = addr ? escHtml(addr) : '<span class="pf-muted">본인과 동일 / 미입력</span>';
+    const bankParts = [sub.bankName, sub.bankAccount, sub.accountHolder].filter(Boolean)
+      .map((b, i) => i === 1 ? '<span class="pf-num">' + escHtml(b) + '</span>' : escHtml(b));
+    const bankHtml = bankParts.length ? bankParts.join(_dot) : '<span class="pf-muted">본인 계좌로 입금</span>';
+    const incName = (sub.incomeName || "").trim();
+    const incHtml = incName ? escHtml(incName) : '<span class="pf-muted">미등록</span>';
+    const jHtml = jDisplay ? '<span class="pf-num">' + escHtml(jDisplay) + '</span>' : '<span class="pf-muted">미등록</span>';
+    const initial = escHtml(((sub.name || '?').trim().charAt(0)) || '?');
+    return `<article class="pf-acct">
+      <div class="pf-head">
+        <div class="pf-avatar">${initial}</div>
+        <div class="pf-id"><div class="pf-nm">
+          <span class="pf-who">${escHtml(sub.name || '-')}</span>
+          <span class="pf-ph">${escHtml(sub.phone || '')}</span>
+          <span class="pf-chip pf-chip-idx">타계정 ${idx+1}</span>
+        </div></div>
+        <div class="pf-acts">
+          <button class="pf-mini" onclick="editInlineSubAccount(${idx})">수정</button>
+          <button class="pf-mini pf-mini-danger" onclick="deleteInlineSubAccount(${idx})">삭제</button>
+        </div>
       </div>
-      <div style="display:flex;gap:4px;flex-shrink:0">
-        <button onclick="editInlineSubAccount(${idx})" style="padding:3px 7px;background:#EFF6FF;color:#2563EB;border:1.5px solid #93C5FD;border-radius:6px;font-size:.65rem;font-weight:700;cursor:pointer">수정</button>
-        <button onclick="deleteInlineSubAccount(${idx})" style="padding:3px 7px;background:#FEF2F2;color:#DC2626;border:1.5px solid #FECACA;border-radius:6px;font-size:.65rem;font-weight:700;cursor:pointer">삭제</button>
+      <div class="pf-lines">
+        <div class="pf-ln"><span class="pf-k">주소</span><span class="pf-v">${addrHtml}</span></div>
+        <div class="pf-ln"><span class="pf-k">계좌</span><span class="pf-v">${bankHtml}</span></div>
+        <div class="pf-ln"><span class="pf-k">소득</span><span class="pf-v">${incHtml}${_dot}${jHtml}</span></div>
       </div>
-    </div>`;
+    </article>`;
   }).join("");
 
   const addBtn = document.getElementById("btnInlineAddSub");
@@ -1587,8 +1610,8 @@ function renderSelfAddress(address) {
   const el = document.getElementById("inlineSelfAddress");
   const btn = document.getElementById("btnAddAddress");
   const v = (address || "").trim();
-  if (el) { el.textContent = v || "미등록"; el.style.color = v ? "var(--t2)" : "#DC2626"; }
-  if (btn) btn.textContent = v ? "수정" : "추가+";
+  if (el) { el.textContent = v || "미등록"; el.classList.toggle("pf-muted", !v); }
+  if (btn) btn.textContent = v ? "수정" : "추가";
 }
 function openAddressForm() {
   const form = document.getElementById("inlineAddressForm");
@@ -1633,24 +1656,22 @@ function _maskAccount(acc) {
   return d.slice(0, d.length - 4).replace(/[0-9]/g, "•") + d.slice(-4);
 }
 function renderBankInfo(bankName, bankAccount, accountHolder) {
-  const empty = document.getElementById("bankEmptyState");
-  const card  = document.getElementById("bankInfoCard");
-  const btn   = document.getElementById("btnAddBankInfo");
+  const line = document.getElementById("pfBankLine");
+  const btn  = document.getElementById("btnAddBankInfo");
   const has = !!((bankName && bankName.trim()) || (bankAccount && bankAccount.trim()));
   if (has) {
-    if (empty) empty.style.display = "none";
-    if (card)  card.style.display = "";
-    const bn = document.getElementById("bankInfoBankName");
-    const hd = document.getElementById("bankInfoHolder");
-    const ac = document.getElementById("bankInfoAccount");
-    if (bn) bn.textContent = bankName || "-";
-    if (hd) hd.textContent = accountHolder || "-";
-    if (ac) ac.textContent = bankAccount || "-";
-    if (btn) btn.innerHTML = '<i class="fas fa-pen"></i> 계좌 수정';
+    if (line) {
+      line.classList.remove("pf-muted");
+      const parts = [];
+      if (bankName) parts.push(escHtml(bankName));
+      if (bankAccount) parts.push('<span class="pf-num">' + escHtml(bankAccount) + '</span>');
+      if (accountHolder) parts.push(escHtml(accountHolder));
+      line.innerHTML = parts.join('<span class="pf-dot">·</span>');
+    }
+    if (btn) btn.textContent = "수정";
   } else {
-    if (empty) empty.style.display = "";
-    if (card)  card.style.display = "none";
-    if (btn) btn.innerHTML = '<i class="fas fa-plus"></i> 계좌 등록';
+    if (line) { line.classList.add("pf-muted"); line.textContent = "미등록"; }
+    if (btn) btn.textContent = "등록";
   }
 }
 function openBankForm() {
