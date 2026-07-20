@@ -1074,7 +1074,11 @@ async function renderOwnershipView(){
   //   작업대 사이드바(STATE.tabs, 스코프 적용)와 분리 보관해 스코프 오염 방지.
   if(!STATE.mapTabs||!STATE.mapTabs.length){ const r=await api('/api/trackb/tabs?limit=500&forMapping=1'); STATE.mapTabs=(r&&r.tabs)||[]; }
   buildTabIndex(STATE.mapTabs);
-  const r=await api('/api/trackb/advertisers');
+  const [r, os]=await Promise.all([
+    api('/api/trackb/advertisers'),
+    api('/api/trackb/owned-sheets').catch(()=>null),
+  ]);
+  STATE.ownedSheetIds = new Set((os&&os.ok&&os.sheetIds)||[]);   // 업체추가 시트 드롭다운 제외용
   if(!r||!r.ok){ $('#advs').innerHTML=`<div class="empty">업체 목록은 admin/master에서 제공</div>`; return; }
   STATE.advs=r.items||[];
   const canDel=(STATE.role==='master'||STATE.role==='admin');
@@ -1098,7 +1102,12 @@ async function deleteAdv(i){
 //   → ③ 등록 = 업체 생성 + 선택 시트 전체 소유 자동 지정. 담당AE는 로그인명 자동.
 function showAddAdvertiser(){
   STATE.advCur=null; STATE.advNameOk=false; _intraItems=[]; _aeItems=[]; document.querySelectorAll('.advitem').forEach(el=>el.classList.remove('on'));
-  const sheetOpts = Object.keys(STATE.sheetMap).map(sid=>`<option value="${esc(sid)}">${esc(sheetTitle(sid))}</option>`).join('');
+  // 이미 소유 지정된 시트는 제외(한 시트 중복 소유 방지) — 남은 시트가 없으면 안내 옵션.
+  const owned=STATE.ownedSheetIds||new Set();
+  const freeSheets=Object.keys(STATE.sheetMap).filter(sid=>!owned.has(sid));
+  const sheetOpts = freeSheets.length
+    ? freeSheets.map(sid=>`<option value="${esc(sid)}">${esc(sheetTitle(sid))}</option>`).join('')
+    : `<option value="" disabled>지정 가능한 시트 없음 (모든 시트가 이미 소유 지정됨)</option>`;
   $('#ownPanel').innerHTML = `
     <div class="ph2"><span class="big">＋</span><div><h2>업체(거래처) 추가</h2><div class="acc">① 캠페인 시트를 먼저 선택하고 → ② 거래처명을 검색해 등록하세요. 등록하면 선택한 시트 전체가 이 업체 소유로 자동 지정됩니다.</div></div></div>
     <div class="sect"><div class="st">새 업체</div>

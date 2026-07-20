@@ -397,6 +397,16 @@ async function listAdvertisersWithOwnership() {
   return rows;
 }
 
+// ── 이미 소유 지정된 시트 ID 집합 — 업체추가 폼의 시트 드롭다운에서 제외용(한 시트 중복 소유 방지). ──
+//   활성 소유(deleted_at IS NULL)만. 시트전체(tab_gid NULL)·특정탭 소유 모두 그 시트를 '지정됨'으로 본다.
+async function ownedSheetIds() {
+  const { rows } = await getPool().query(
+    `SELECT DISTINCT ac.sheet_id FROM advertiser_campaigns ac
+       JOIN advertisers a ON a.id = ac.advertiser_id
+      WHERE ac.deleted_at IS NULL AND a.status <> 'ended'`);
+  return rows.map(r => r.sheet_id).filter(Boolean);
+}
+
 // ── 담당 AE(inad_pm) 매칭 — master/admin 전용(라우트 게이트). 빈 값 = 담당 해제. ──
 //   inad_pm 은 staff 스코프 키(TRIM 매칭)라 앞뒤 공백을 제거해 저장(표기차 footgun 방지).
 async function setAdvertiserInadPm({ advertiserId, inadPm = '', by = '' } = {}) {
@@ -2058,6 +2068,7 @@ module.exports = {
   ownedTabsForAdvertiser,
   createAdvertiserScoped,
   deleteAdvertiser,
+  ownedSheetIds,
   isRegisteredIntranetAdvertiser,
   staffOwnsAdvertiser,
   sheetAssignableByStaff,

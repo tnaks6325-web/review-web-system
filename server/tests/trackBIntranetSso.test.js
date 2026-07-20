@@ -172,6 +172,7 @@ async function run() {
     }
     if (/UPDATE advertisers SET status = 'ended'/.test(s)) return { rows: vals[0] === 'adv_del' ? [{ id: 'adv_del', name: '삭제업체' }] : [] };
     if (/UPDATE advertiser_campaigns SET deleted_at/.test(s)) return { rows: [], rowCount: 2 };
+    if (/SELECT DISTINCT ac.sheet_id FROM advertiser_campaigns/.test(s)) return { rows: [{ sheet_id: 'S_owned1' }, { sheet_id: 'S_owned2' }, { sheet_id: null }] };
     return { rows: [] };
   } });
   // 거래처 등록검증(인트라넷 광고주DB) 목 — 등록됨/미등록/도달불가 3태를 주입.
@@ -215,6 +216,11 @@ async function run() {
   d = await svc.deleteAdvertiser({});
   assert.equal(d.ok, false, '2.5c: advertiserId 누락 400'); assert.equal(d.code, 400, '2.5c: 400');
   console.log('  2.5 deleteAdvertiser — 소프트삭제(ended)+소유해제·404·400 ✓');
+
+  // ═══ 2.6 ownedSheetIds — 이미 소유 지정된 시트 ID(널 제외) ═══
+  const os = await svc.ownedSheetIds();
+  assert.deepEqual(os, ['S_owned1', 'S_owned2'], '2.6: 소유 시트 ID 목록(널 제외 — 업체추가 드롭다운 제외용)');
+  console.log('  2.6 ownedSheetIds — 소유 시트 목록·널 제외 ✓');
 
   // ═══ 3. staffOwnsAdvertiser ═══
   assert.equal(await svc.staffOwnsAdvertiser({ advertiserId: 'adv_mine', staffName: '김수만' }), true, '3a: TRIM 일치 허용');
