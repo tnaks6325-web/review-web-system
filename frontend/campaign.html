@@ -1,0 +1,415 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+  <meta charset="UTF-8"/>
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no"/>
+  <title>캠페인 참여 — 아이에이리뷰</title>
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@fortawesome/fontawesome-free@6.4.0/css/all.min.css"/>
+  <link href="https://fonts.googleapis.com/css2?family=Noto+Sans+KR:wght@300;400;500;600;700;800&display=swap" rel="stylesheet"/>
+  <script src="api.js"></script>
+  <script src="js/campaign-cards.js"></script>
+  <style>
+    :root{ --p:#3182f6; --p-light:#e8f1fe; --p-dark:#1b64da; --ok:#12b886; --ok-light:#D1FAE5;
+      --warn:#F59E0B; --warn-light:#FEF3C7; --err:#EF4444; --err-light:#FEE2E2;
+      --t1:#111827; --t2:#4B5563; --t3:#9CA3AF; --bg:#F0F2FA; --card:#FFFFFF; --border:#E5E7EB; }
+    *{margin:0;padding:0;box-sizing:border-box}
+    body{font-family:'Noto Sans KR',sans-serif;background:var(--bg);color:var(--t1);min-height:100vh;-webkit-font-smoothing:antialiased}
+    .wrap{max-width:600px;margin:0 auto;padding-bottom:60px}
+    .hd{background:linear-gradient(135deg,var(--p) 0%,#3182f6 100%);position:sticky;top:0;z-index:100;box-shadow:0 2px 16px #3182f630}
+    .hd-in{display:flex;align-items:center;gap:10px;padding:14px 16px;max-width:600px;margin:0 auto}
+    .hd-back{background:rgba(255,255,255,.15);border:1px solid rgba(255,255,255,.3);color:#fff;border-radius:10px;
+      width:36px;height:36px;display:flex;align-items:center;justify-content:center;cursor:pointer;flex-shrink:0;text-decoration:none}
+    .hd-tt{color:#fff;font-weight:700;font-size:1rem;flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+    .sec{padding:12px 14px 0}
+    .cardbx{background:var(--card);border:1px solid var(--border);border-radius:14px;padding:14px;margin-bottom:12px;box-shadow:0 2px 12px rgba(0,0,0,.05)}
+    .btn{display:block;width:100%;text-align:center;border:none;cursor:pointer;background:linear-gradient(135deg,var(--p),var(--p-dark));
+      color:#fff;font-size:.95rem;font-weight:800;border-radius:12px;padding:14px;font-family:inherit}
+    .btn.ghost{background:#EEF1F7;color:var(--t2)}
+    .btn.green{background:linear-gradient(135deg,#12b886,#0ca678)}
+    .btn:disabled{background:#EEF1F7;color:var(--t3);cursor:default}
+    .muted{font-size:.76rem;color:var(--t3)}
+    .holdbar{position:sticky;top:64px;z-index:90;display:flex;align-items:center;gap:10px;background:var(--warn-light);
+      border:1.5px solid var(--warn);border-radius:12px;padding:10px 14px;margin:12px 14px 0}
+    .holdbar .l{flex:1;font-size:.78rem;font-weight:700;color:#92400E}
+    .holdbar .v{font-size:1.15rem;font-weight:900;color:#92400E;font-variant-numeric:tabular-nums}
+    .wd-tt{font-size:.78rem;font-weight:800;color:var(--t3);margin-bottom:8px}
+    .wd-body{font-size:.88rem;color:var(--t1);white-space:pre-wrap;word-break:break-word;line-height:1.65}
+    .wd-body img{max-width:100%;border-radius:10px;margin:6px 0}
+    .lockcard{text-align:center;padding:26px 14px}
+    .lockcard .e{font-size:2rem}
+    .lockcard .m{font-weight:800;margin-top:6px}
+    .lockcard .s{font-size:.78rem;color:var(--t3);margin-top:4px;line-height:1.6}
+    .misslist{display:flex;flex-direction:column;gap:6px;margin:12px 0}
+    .miss{display:flex;align-items:center;gap:8px;font-size:.84rem;font-weight:700;border:1.5px solid var(--err);
+      color:var(--err);background:var(--err-light);border-radius:9px;padding:9px 12px}
+    .okitem{border-color:var(--ok);color:#0ca678;background:var(--ok-light)}
+    iframe#orderFrame{width:100%;border:none;border-radius:12px;background:#fff;min-height:560px}
+    .sheet-ovl{position:fixed;inset:0;background:rgba(0,0,0,.5);z-index:1000;display:none;align-items:flex-end;justify-content:center}
+    .sheet{background:#fff;border-radius:20px 20px 0 0;width:100%;max-width:600px;padding:22px 18px 28px}
+    .sheet h3{font-size:1.02rem;margin-bottom:4px}
+    .sheet p{font-size:.78rem;color:var(--t3);margin-bottom:14px}
+    .inp{width:100%;padding:13px;border:1.5px solid var(--border);border-radius:10px;font-size:.95rem;font-family:inherit;margin-bottom:10px}
+    .toast{position:fixed;bottom:28px;left:50%;transform:translateX(-50%);background:#111827;color:#fff;font-size:.82rem;
+      font-weight:600;border-radius:10px;padding:11px 18px;z-index:2000;display:none;max-width:88vw;text-align:center}
+    .statebig{text-align:center;padding:40px 16px}
+    .statebig .e{font-size:2.6rem}
+    .statebig h2{font-size:1.1rem;margin-top:10px}
+    .statebig p{font-size:.82rem;color:var(--t3);margin-top:6px;line-height:1.7}
+  </style>
+</head>
+<body>
+<div class="wrap">
+  <div class="hd"><div class="hd-in">
+    <a class="hd-back" href="/"><i class="fas fa-arrow-left"></i></a>
+    <div class="hd-tt" id="hdTitle">캠페인</div>
+  </div></div>
+
+  <!-- 로딩 -->
+  <div id="vLoading" class="statebig"><div class="e"><i class="fas fa-circle-notch fa-spin" style="color:var(--p)"></i></div><p>불러오는 중…</p></div>
+
+  <!-- 참여 전 -->
+  <div id="vPre" style="display:none">
+    <div class="sec"><div id="preCard"></div>
+      <div class="cardbx lockcard">
+        <div class="e">🔒</div><div class="m">작업내용</div>
+        <div class="s">상품·옵션·결제금액, 유입가이드, 구매양식은<br/>참여 후에 확인할 수 있어요.</div>
+      </div>
+      <div class="cardbx">
+        <div class="wd-tt">⏱ 참여 안내</div>
+        <div class="wd-body" style="font-size:.8rem" id="preNotice"></div>
+      </div>
+      <button class="btn" id="joinBtn" onclick="onJoin()">참여하기</button>
+      <div class="muted" style="text-align:center;margin-top:8px" id="preFootNote"></div>
+    </div>
+  </div>
+
+  <!-- 내정보 미비 안내 (자리 미점유) -->
+  <div id="vMissing" style="display:none">
+    <div class="sec">
+      <div class="cardbx lockcard">
+        <div class="e">🧾</div><div class="m">내 정보를 먼저 등록해주세요</div>
+        <div class="s">참여 후에는 <b id="missTtl">15분</b> 안에 구매와 구매양식 제출까지 끝나야 해서,<br/>지금 미리 등록해두는 거예요. <b>아직 자리는 차지하지 않았어요.</b></div>
+        <div class="misslist" id="missList"></div>
+        <button class="btn" onclick="location.href='/'">리뷰어 홈에서 내 정보 등록하기</button>
+        <button class="btn ghost" style="margin-top:8px" onclick="showPre()">다음에 할게요</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- 참여 후 -->
+  <div id="vJoined" style="display:none">
+    <div class="holdbar"><span class="l">⏳ 구매양식 제출까지</span><span class="v" id="holdCd">--:--</span></div>
+    <div class="sec">
+      <div class="cardbx"><div class="wd-tt">📦 상품 · 옵션 · 결제금액</div><div class="wd-body" id="wdProduct"></div></div>
+      <div class="cardbx" id="wdGuideBox"><div class="wd-tt">🧭 유입가이드</div><div class="wd-body" id="wdGuide"></div>
+        <button class="btn ghost" id="landingBtn" style="margin-top:10px;display:none" onclick="openLanding()">🔗 상품 페이지 열기 (새 탭)</button>
+      </div>
+      <div class="cardbx" id="wdReviewBox" style="display:none"><div class="wd-tt">📝 리뷰 가이드</div><div class="wd-body" id="wdReview"></div></div>
+      <div class="cardbx" id="wdNotesBox" style="display:none"><div class="wd-tt">📌 특이사항</div><div class="wd-body" id="wdNotes"></div></div>
+      <div class="cardbx" id="chatBox" style="display:none">
+        <div class="wd-tt">💬 팀 채팅방</div>
+        <button class="btn ghost" onclick="openChat()">카톡 팀채팅방 입장</button>
+      </div>
+      <div class="cardbx" style="border-color:var(--p)">
+        <div class="wd-tt" style="color:var(--p-dark)">🧾 구매양식 — 구매를 마친 뒤 여기서 바로 제출하세요</div>
+        <iframe id="orderFrame" title="구매양식"></iframe>
+        <button class="btn ghost" id="frameFallback" style="margin-top:8px;display:none" onclick="openFormWindow()">구매양식이 안 보이면 새 창에서 열기</button>
+      </div>
+      <button class="btn ghost" style="margin-top:2px" onclick="onCancel()">참여 취소</button>
+      <div class="muted" style="text-align:center;margin-top:6px">취소해도 오늘은 이 캠페인에 다시 참여할 수 없어요.</div>
+    </div>
+  </div>
+
+  <!-- 만료 -->
+  <div id="vExpired" class="statebig" style="display:none">
+    <div class="e">⌛</div><h2>참여가 만료되었어요</h2>
+    <p>시간 안에 구매양식이 제출되지 않아 자동 취소되었어요.<br/><b>오늘은 이 캠페인에 다시 참여할 수 없어요</b> (내일 가능).</p>
+    <div class="sec">
+      <div class="cardbx lockcard"><div class="e">🛍️</div><div class="m">이미 구매하셨나요?</div>
+        <div class="s">구매 내역은 안전하게 접수돼 있어요.<br/>운영자가 확인 후 참여를 확정해 드립니다 — 팀 채팅방이나 담당자에게 알려주세요.</div>
+      </div>
+      <button class="btn ghost" onclick="location.href='/'">홈으로</button>
+    </div>
+  </div>
+
+  <!-- 제출 완료 -->
+  <div id="vDone" class="statebig" style="display:none">
+    <div class="e">✅</div><h2>참여 확정!</h2>
+    <p>구매양식이 제출되었어요.<br/>진행 상황은 리뷰어 홈의 참여현황에서 확인할 수 있어요.</p>
+    <div class="sec">
+      <button class="btn" onclick="location.href='/'">내 참여현황 보기</button>
+      <button class="btn ghost" id="doneChatBtn" style="margin-top:8px;display:none" onclick="openChat()">💬 팀 채팅방 입장</button>
+    </div>
+  </div>
+</div>
+
+<!-- 본인확인 바텀시트 -->
+<div class="sheet-ovl" id="loginSheet">
+  <div class="sheet">
+    <h3>본인 확인</h3>
+    <p>등록된 리뷰어인지 확인 후 참여할 수 있어요.</p>
+    <input class="inp" id="liName" placeholder="이름 (실명)" autocomplete="name"/>
+    <input class="inp" id="liPhone" placeholder="전화번호 뒤 8자리" inputmode="numeric" maxlength="8"/>
+    <button class="btn" onclick="doVerify()">확인하고 계속하기</button>
+    <button class="btn ghost" style="margin-top:8px" onclick="hideSheet()">취소</button>
+  </div>
+</div>
+
+<div class="toast" id="toast"></div>
+
+<script>
+'use strict';
+/* ═══ 상태 ═══ */
+const CAMP_ID = new URLSearchParams(location.search).get('id') || '';
+const HOLD_KEY = 'camp_hold_' + CAMP_ID;
+let _camp = null;          // /api/campaign/:id 공개 페이로드
+let _detail = null;        // work-detail 응답
+let _holdTick = null;
+let _pollTimer = null;
+let _afterLogin = null;    // 본인확인 성공 후 이어서 할 동작
+
+function $(id){ return document.getElementById(id); }
+function toast(msg){ const t=$('toast'); t.textContent=msg; t.style.display='block';
+  clearTimeout(t._h); t._h=setTimeout(()=>t.style.display='none', 3200); }
+function show(view){ ['vLoading','vPre','vMissing','vJoined','vExpired','vDone'].forEach(v=>$(v).style.display = v===view?'':'none'); }
+function showPre(){ show('vPre'); }
+
+/* ═══ 세션 (index.html·search-app.js와 동일 키·포맷) ═══ */
+function getSession(){
+  try{
+    const raw = localStorage.getItem('rapp_reviewer_auth');
+    if(!raw) return null;
+    const s = JSON.parse(raw);
+    if(!s || Date.now() > (s.expAt||0)) return null;
+    if(!s.phone8 || String(s.phone8).length !== 8) return null;
+    return s;
+  }catch(_){ return null; }
+}
+function saveSession(name, phone8){
+  const session = { name, verified:true, registeredMember:true,
+    phone8:String(phone8).replace(/\D/g,'').slice(-8), expAt: Date.now()+12*60*60*1000 };
+  localStorage.setItem('rapp_reviewer_auth', JSON.stringify(session));
+  try{ localStorage.setItem('iad_reviewer_user', JSON.stringify({name, phone:phone8, phone8:session.phone8})); }catch(_){}
+  return session;
+}
+function needLogin(then){ _afterLogin = then || null; $('loginSheet').style.display='flex'; }
+function hideSheet(){ $('loginSheet').style.display='none'; }
+async function doVerify(){
+  const name = $('liName').value.trim();
+  const p8 = $('liPhone').value.replace(/\D/g,'');
+  if(!name) return toast('이름을 입력해주세요');
+  if(p8.length!==8) return toast('전화번호 뒤 8자리를 입력해주세요');
+  try{
+    const r = await fetch(API_BASE_URL + '/api/reviewer/verify?phone8=' + encodeURIComponent(p8) + '&name=' + encodeURIComponent(name));
+    const j = await r.json();
+    if(!j || !j.ok){ toast(j && j.error ? j.error : '등록된 리뷰어를 찾을 수 없어요'); return; }
+    saveSession(j.name || name, p8);
+    hideSheet();
+    const fn = _afterLogin; _afterLogin = null;
+    if(fn) fn();
+  }catch(e){ toast('확인 중 오류: ' + e.message); }
+}
+
+/* ═══ 홀드 저장 ═══ */
+function getHold(){ try{ return JSON.parse(localStorage.getItem(HOLD_KEY) || 'null'); }catch(_){ return null; } }
+function setHold(h){ localStorage.setItem(HOLD_KEY, JSON.stringify(h)); }
+function clearHold(){ localStorage.removeItem(HOLD_KEY); }
+
+/* ═══ 참여 전 화면 ═══ */
+function renderPre(){
+  const c = _camp;
+  $('hdTitle').textContent = c.title || '캠페인';
+  $('preCard').innerHTML = CampCards.cardHtml({ ...c });
+  // 상세 페이지 안의 카드는 클릭(자기 자신 이동) 비활성
+  const pc = $('preCard').querySelector('.pcard');
+  if(pc){ pc.onclick = null; pc.style.cursor='default';
+    const b = pc.querySelector('.pbtn'); if(b) b.style.display='none'; }
+  const ttl = holdTtlText();
+  $('preNotice').textContent =
+    '지금 참여하면 ' + (c.cutoffAt ? '늦어도 ' + CampCards._fmtHM(c.closesAt) + '까지' : ttl + ' 안에') +
+    ' 구매와 구매양식 제출까지 완료해야 해요. 시간이 지나면 자동 취소되며 오늘은 이 캠페인에 다시 참여할 수 없어요.\n' +
+    '이 캠페인은 상품을 직접 구매(선결제)한 뒤 리뷰비와 함께 환급받는 방식이에요.';
+  const jb = $('joinBtn');
+  const st = c.state;
+  jb.disabled = st !== 'open';
+  jb.textContent = st==='open' ? '참여하기'
+    : st==='preopen' ? CampCards._fmtHM(c.opensAt) + ' 오픈 예정'
+    : st==='cutoff' ? '오늘 참여 마감'
+    : st==='daily_done' ? '오늘은 마감되었어요'
+    : st==='soft_full' ? '잔여 대기 중'
+    : '모집 종료';
+  $('preFootNote').textContent = st==='daily_done' && c.opensAt ? ('내일 ' + CampCards._fmtHM(c.opensAt) + ' 다시 오픈돼요') : '';
+  show('vPre');
+}
+function holdTtlText(){ return '15분'; } // 안내용 기본 문구(정확한 마감시각은 참여 응답의 expiresAt으로 표시)
+
+/* ═══ 참여하기 ═══ */
+async function onJoin(){
+  const s = getSession();
+  if(!s) return needLogin(onJoin);
+  const jb = $('joinBtn'); jb.disabled = true; jb.textContent = '확인 중…';
+  try{
+    const r = await fetch(API_BASE_URL + '/api/campaign/' + encodeURIComponent(CAMP_ID) + '/apply', {
+      method:'POST', headers:{'Content-Type':'application/json'},
+      body: JSON.stringify({ name: s.name, phone: s.phone8, phone8: s.phone8 })
+    });
+    const j = await r.json().catch(()=>({}));
+    if(r.ok && j.ok){
+      setHold({ applicationId: j.applicationId, holdToken: j.holdToken, phone8: j.phone8, expiresAt: j.expiresAt });
+      await enterJoined();
+      return;
+    }
+    if(j.reason === 'profile_missing'){ renderMissing(j.missing || []); return; }
+    if(j.reason === 'not_registered'){ toast('리뷰어 등록 후 참여할 수 있어요'); setTimeout(()=>location.href='/search.html#register', 900); return; }
+    const msg = {
+      preopen:'아직 오픈 전이에요', cutoff:'오늘 참여가 마감됐어요', daily_done:'오늘 인원이 모두 찼어요',
+      soft_full:'잔여 대기 중이에요 — 자리가 나면 열려요', closed:'모집이 종료됐어요',
+      already_today:'오늘은 이 캠페인에 이미 참여 이력이 있어요(내일 가능)',
+      already_submitted:'이미 참여 완료한 캠페인이에요',
+      duplicate_hold:'이미 참여 중이에요', hold_cap:'동시에 참여 가능한 캠페인은 2개까지예요',
+      daily_apply_cap:'오늘 참여 가능한 횟수를 넘었어요', rate_limited:'요청이 너무 많아요. 잠시 후 다시 시도해주세요',
+    }[j.reason] || (j.error || '지금은 참여할 수 없어요');
+    toast(msg);
+    await loadCampaign(); // 카운터/상태 갱신
+  }catch(e){ toast('오류: ' + e.message); }
+  finally{ if($('vPre').style.display !== 'none'){ const c=_camp; $('joinBtn').disabled = !(c && c.state==='open'); $('joinBtn').textContent='참여하기'; } }
+}
+
+function renderMissing(missing){
+  const all = ['사용자명','전화번호','주소','계좌'];
+  $('missList').innerHTML = all.map(k =>
+    missing.includes(k)
+      ? `<div class="miss">✗ ${k} — 미등록</div>`
+      : `<div class="miss okitem">✓ ${k}</div>`
+  ).join('');
+  show('vMissing');
+}
+
+/* ═══ 참여 후 화면 ═══ */
+async function enterJoined(){
+  const h = getHold();
+  if(!h) return renderPre();
+  try{
+    const r = await fetch(API_BASE_URL + '/api/campaign/' + encodeURIComponent(CAMP_ID) +
+      '/work-detail?phone8=' + encodeURIComponent(h.phone8) + '&holdToken=' + encodeURIComponent(h.holdToken));
+    const j = await r.json().catch(()=>({}));
+    if(!r.ok || !j.ok){
+      if(j.reason === 'expired'){ show('vExpired'); return; }
+      clearHold(); renderPre(); return;
+    }
+    _detail = j;
+    if(j.application && j.application.status === 'submitted'){ renderDone(); return; }
+    // 작업내용 렌더
+    const wd = j.workDetail || {};
+    $('wdProduct').textContent = [wd.productLines || '', wd.payAmount ? ('결제금액 ' + Number(wd.payAmount).toLocaleString() + '원') : ''].filter(Boolean).join('\n') || '(등록된 상품 정보가 없어요)';
+    $('wdGuide').innerHTML = wd.inflowGuideHtml || '<span class="muted">유입가이드가 없어요 — 아래 상품 페이지로 이동해 구매를 진행하세요.</span>'; // 서버 sanitize 완료 HTML
+    $('landingBtn').style.display = j.landingUrl ? '' : 'none';
+    if(wd.reviewGuide){ $('wdReviewBox').style.display=''; $('wdReview').textContent = wd.reviewGuide; }
+    if(wd.specialNotes){ $('wdNotesBox').style.display=''; $('wdNotes').textContent = wd.specialNotes; }
+    $('chatBox').style.display = j.chatUrl ? '' : 'none';
+    // 인라인 구매양식 iframe (동일 오리진 — search.html 재사용)
+    const f = j.form || {};
+    const qp = new URLSearchParams({ embed:'1', s:f.sheetId||'', g:f.gid||'', t:f.tabName||'', d:f.displayName||'',
+      app:String(j.application.id), campId:CAMP_ID, holdToken:h.holdToken, holdPhone8:h.phone8 });
+    const frame = $('orderFrame');
+    frame.src = '/search.html?' + qp.toString();
+    frame.onerror = ()=>{ $('frameFallback').style.display=''; };
+    setTimeout(()=>{ $('frameFallback').style.display=''; }, 6000); // 폴백 버튼은 어차피 노출(새 창 경로 보장)
+    startHoldCountdown(j.application.expiresAt || h.expiresAt);
+    startPolling();
+    show('vJoined');
+  }catch(e){ toast('불러오기 오류: ' + e.message); renderPre(); }
+}
+
+function startHoldCountdown(expiresAtIso){
+  clearInterval(_holdTick);
+  const end = Date.parse(expiresAtIso || '');
+  const el = $('holdCd');
+  _holdTick = setInterval(()=>{
+    const remain = end - CampCards.serverNow();
+    if(remain <= 0){ clearInterval(_holdTick); el.textContent = '00 : 00'; pollOnce(); return; }
+    const m = String(Math.floor(remain/60000)).padStart(2,'0');
+    const s2 = String(Math.floor(remain%60000/1000)).padStart(2,'0');
+    el.textContent = m + ' : ' + s2;
+  }, 500);
+}
+
+/* 폴링: 10초(+복귀 시 즉시) — 만료/제출확정 감지 (새 창 제출 폴백 포함) */
+function startPolling(){
+  clearInterval(_pollTimer);
+  _pollTimer = setInterval(pollOnce, 10000);
+}
+async function pollOnce(){
+  const h = getHold(); if(!h) return;
+  if($('vJoined').style.display === 'none') return;
+  try{
+    const r = await fetch(API_BASE_URL + '/api/campaign/' + encodeURIComponent(CAMP_ID) +
+      '/work-detail?phone8=' + encodeURIComponent(h.phone8) + '&holdToken=' + encodeURIComponent(h.holdToken));
+    const j = await r.json().catch(()=>({}));
+    if(r.ok && j.ok){
+      if(j.serverNow) CampCards.setServerNow(j.serverNow);
+      if(j.application && j.application.status === 'submitted'){ renderDone(); }
+    }else if(j.reason === 'expired'){ clearInterval(_pollTimer); clearInterval(_holdTick); show('vExpired'); }
+  }catch(_){ /* 네트워크 오류는 다음 폴링에서 */ }
+}
+document.addEventListener('visibilitychange', ()=>{ if(!document.hidden) pollOnce(); });
+
+function renderDone(){
+  clearInterval(_pollTimer); clearInterval(_holdTick);
+  $('doneChatBtn').style.display = (_detail && _detail.chatUrl) ? '' : 'none';
+  show('vDone');
+}
+
+/* iframe postMessage: 제출완료/높이/로그인 위임 (동일 오리진만 수신) */
+window.addEventListener('message', (ev)=>{
+  if(ev.origin !== location.origin) return;
+  const d = ev.data || {};
+  if(d.type === 'order-submitted'){ renderDone(); }
+  else if(d.type === 'embed-height' && d.height){ $('orderFrame').style.height = Math.min(Math.max(d.height, 400), 4000) + 'px'; }
+  else if(d.type === 'embed-need-login'){ needLogin(()=>{ const f=$('orderFrame'); f.src = f.src; }); }
+});
+
+function openLanding(){ if(_detail && _detail.landingUrl) window.open(_detail.landingUrl, '_blank', 'noopener'); }
+function openChat(){ if(_detail && _detail.chatUrl) window.open(_detail.chatUrl, '_blank', 'noopener'); }
+function openFormWindow(){ const f=$('orderFrame'); if(f.src) window.open(f.src.replace('embed=1','embed=0'), '_blank'); }
+
+/* 참여 취소 */
+async function onCancel(){
+  const h = getHold(); if(!h) return;
+  if(!confirm('참여를 취소할까요?\n취소해도 오늘은 이 캠페인에 다시 참여할 수 없어요.')) return;
+  try{
+    const r = await fetch(API_BASE_URL + '/api/campaign/' + encodeURIComponent(CAMP_ID) + '/cancel', {
+      method:'POST', headers:{'Content-Type':'application/json'},
+      body: JSON.stringify({ phone8: h.phone8, holdToken: h.holdToken })
+    });
+    const j = await r.json().catch(()=>({}));
+    if(r.ok && j.ok){ clearInterval(_pollTimer); clearInterval(_holdTick); clearHold(); toast('참여가 취소되었어요'); await loadCampaign(); }
+    else toast(j.error || '취소할 수 없어요');
+  }catch(e){ toast('오류: ' + e.message); }
+}
+
+/* ═══ 초기 로드 ═══ */
+async function loadCampaign(){
+  const r = await fetch(API_BASE_URL + '/api/campaign/' + encodeURIComponent(CAMP_ID));
+  const j = await r.json();
+  if(!j.ok) throw new Error(j.error || '캠페인을 찾을 수 없어요');
+  if(j.serverNow) CampCards.setServerNow(j.serverNow);
+  _camp = j.data;
+  if(!_camp.participation_mode){ location.replace('/'); return; }
+  renderPre();
+}
+(async function init(){
+  if(!CAMP_ID){ location.replace('/'); return; }
+  try{
+    await loadCampaign();
+    const h = getHold();
+    if(h) await enterJoined();      // 재방문: 홀드 있으면 참여 후 화면 복원(만료면 만료 화면)
+    // 참여 전 화면 카운터 갱신(15초)
+    setInterval(async ()=>{ if($('vPre').style.display !== 'none'){ try{ await loadCampaign(); }catch(_){}} }, 15000);
+  }catch(e){
+    $('vLoading').innerHTML = '<div class="e">😥</div><p>' + (e.message||'불러오지 못했어요') + '</p>';
+  }
+})();
+</script>
+</body>
+</html>

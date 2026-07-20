@@ -268,6 +268,7 @@ body{ background:#F4F5F8 !important; letter-spacing:-.01em; }
 .rc-footer-fixed{ background:#fff !important; border-top:1px solid #EFEFF3 !important; }
 </style>
 <script src="api.js"></script>
+<script src="js/campaign-cards.js"></script>
 <link rel="stylesheet" href="css/toss-theme.css"/>
 </head>
 <body>
@@ -406,8 +407,9 @@ async function loadCampaigns() {
   try {
     const res  = await fetch(API_BASE_URL + "/api/campaign/list");
     const json = await res.json();
-    // ★ 참여형(participation_mode) 공고는 신규 참여 UI(M2) 배포 전까지 레거시 카드에서 숨김
-    //   — 구 신청 폼은 holdToken을 저장하지 못해 신청 즉시 당일 참여권이 소각되는 사고 방지.
+    // ★ M2: 참여형(participation_mode) 공고는 공용 카드 모듈로 렌더(campaign.html 상세로 이동).
+    //   레거시 공고는 기존 카드/신청 흐름 그대로.
+    const parts = (json.data || []).filter(c => c.participation_mode && c.status !== "closed");
     const all  = (json.data || []).filter(c => !c.participation_mode);
 
     document.getElementById("rcLoading").style.display = "none";
@@ -415,13 +417,21 @@ async function loadCampaigns() {
     const activeList = all.filter(c => c.status === "active");
     const closedList = all.filter(c => c.status === "closed");
 
-    if (all.length === 0) {
+    if (all.length === 0 && parts.length === 0) {
       document.getElementById("rcEmpty").style.display = "";
       return;
     }
 
-    document.getElementById("rcActiveCount").textContent = `진행중 ${activeList.length}건`;
+    document.getElementById("rcActiveCount").textContent = `진행중 ${activeList.length + parts.filter(c=>c.state==='open'||c.state==='cutoff').length}건`;
     const container = document.getElementById("rcList");
+
+    if (parts.length && window.CampCards) {
+      CampCards.setServerNow(json.serverNow);
+      const pwrap = document.createElement("div");
+      pwrap.innerHTML = parts.map(c => CampCards.cardHtml(c)).join("");
+      container.appendChild(pwrap);
+      CampCards.startTicker(() => { container.innerHTML = ""; loadCampaigns(); });
+    }
 
     activeList.forEach(c => container.appendChild(_buildCard(c)));
     if (closedList.length > 0) {
