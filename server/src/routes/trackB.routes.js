@@ -210,7 +210,8 @@ router.delete('/advertisers/:id', authMiddleware, adminOrMasterMiddleware, async
   } catch (err) { next(err); }
 });
 
-// ── 인트라넷 광고주DB 자동완성 프록시(거래처명) — 내부인. 이름·담당자만 반환(민감필드 미노출). ──
+// ── 인트라넷 광고주DB 자동완성 프록시(거래처명) — 내부인. 이름·담당자·대표자명·사업자등록번호 반환
+//   (대표자·사업자번호는 사업자등록 공개정보 — 급여·근태 등 인트라넷 민감필드는 미노출). ──
 router.get('/intranet/advertisers', authMiddleware, internalMiddleware, async (req, res, next) => {
   try { res.json(await svc.intranetAdvertisers({ q: req.query.q, limit: req.query.limit })); }
   catch (err) { next(err); }

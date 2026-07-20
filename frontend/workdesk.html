@@ -42,9 +42,12 @@
   .tgc{font-size:10px;font-weight:600;color:var(--faint);background:var(--card2);border-radius:8px;padding:1px 6px}
   .advsug{display:none;position:absolute;top:100%;left:0;right:0;z-index:30;background:var(--card);border:1px solid var(--line);border-radius:8px;margin-top:3px;max-height:220px;overflow-y:auto;box-shadow:0 6px 18px rgba(0,0,0,.12)}
   .advsug.show{display:block}
-  .sugitem{padding:8px 11px;font-size:12.5px;cursor:pointer;display:flex;justify-content:space-between;gap:8px}
+  .sugitem{padding:8px 11px;font-size:12.5px;cursor:pointer;display:flex;justify-content:space-between;gap:8px;align-items:flex-start}
   .sugitem:hover{background:var(--accent-soft)}
-  .sugm{color:var(--faint);font-size:11px}
+  .sugl{display:flex;flex-direction:column;gap:2px;min-width:0}
+  .sugn{font-weight:650;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+  .sugmeta{color:var(--faint);font-size:10.5px}
+  .sugm{color:var(--faint);font-size:11px;white-space:nowrap;flex:none}
   /* 연결탭 목록 — 컬럼형 그리드(헤더·행 동일 템플릿, 정보를 행 전체 폭에 펼침). 좁은 화면은 otwrap 가로 스크롤 */
   .otwrap{overflow-x:auto;padding-bottom:2px}
   .othead,.owntab{display:grid;grid-template-columns:44px minmax(170px,1.5fr) 90px minmax(100px,1fr) 80px 88px 60px 108px 64px 64px 64px 148px 64px minmax(120px,1fr) 44px;gap:10px;align-items:center;min-width:1420px}
@@ -1147,7 +1150,10 @@ function intraSuggest(q){
     _intraItems=(r&&r.ok&&r.items)||[];
     _advNameCheck();
     if(!_intraItems.length){ box.classList.remove('show'); box.innerHTML=''; return; }
-    box.innerHTML=_intraItems.map(it=>`<div class="sugitem" onclick="pickIntra('${esc(it.name).replace(/'/g,'&#39;')}','${esc(it.manager||'').replace(/'/g,'&#39;')}')">${esc(it.name)}${it.manager?`<span class="sugm">${esc(it.manager)}</span>`:''}</div>`).join('');
+    box.innerHTML=_intraItems.map(it=>{
+      const meta=[it.ceo?('대표 '+esc(it.ceo)):'', it.bizNo?('사업자 '+esc(it.bizNo)):''].filter(Boolean).join(' · ');
+      return `<div class="sugitem" onclick="pickIntra('${esc(it.name).replace(/'/g,'&#39;')}','${esc(it.manager||'').replace(/'/g,'&#39;')}')"><span class="sugl"><span class="sugn">${esc(it.name)}</span>${meta?`<span class="sugmeta">${meta}</span>`:''}</span>${it.manager?`<span class="sugm">${esc(it.manager)}</span>`:''}</div>`;
+    }).join('');
     box.classList.add('show');
   },120);
 }
