@@ -45,8 +45,10 @@
     const st = document.createElement('style');
     st.id = 'campCardsCss';
     st.textContent = `
-      /* 참여형 카드 — 모바일 2열 그리드(요구사항) */
-      .pcards-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:10px;margin-bottom:12px}
+      /* 참여형 카드 — 모바일 2열 그리드(요구사항).
+         ★ 부모가 이미 grid(.rc-list.rc-view-card 등)여도 한 칸에 갇혀 짜부라지지 않게
+            전체 폭을 점유(grid-column:1/-1) 후 자체 2열 구성. 부모가 block이면 무해. */
+      .pcards-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:10px;margin-bottom:12px;grid-column:1/-1;width:100%}
       @media(min-width:600px){.pcards-grid{grid-template-columns:repeat(3,minmax(0,1fr))}}
       @media(min-width:900px){.pcards-grid{grid-template-columns:repeat(4,minmax(0,1fr))}}
       .pcard{position:relative;background:#fff;border:1px solid #E5E7EB;border-radius:14px;overflow:hidden;
