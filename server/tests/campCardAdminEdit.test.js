@@ -29,10 +29,17 @@ ok('COALESCE 유지: 모달 밖 필드(channel·work_detail·chat_url 등) 미�
     return !/work_detail/.test(save) && !/chat_url/.test(save) && !/channel_custom/.test(save); })());
 ok('만료토큰 센티널: 공개뷰 응답(sort_order 부재)이면 모달 차단(부분 프리필 오염 방지)',
   /data\.sort_order === undefined/.test(cc));
-ok('썸네일: guide-image imageUrl 분기 재사용(쿠팡 CDN 수집) + 파일 업로드',
-  /\/api\/order\/guide-image/.test(cc) && /imageUrl: url/.test(cc) && /imageBase64: b64/.test(cc));
-ok('시간창 빈값=유지(대시보드 폼과 동일 시맨틱 — 모달에서 자율주문 전환 불가 안내)',
-  /window_start: _caeV\('cae_ws'\) \|\| null/.test(cc) && /시간창 비우기\(자율주문 전환\)는 대시보드에서/.test(cc));
+ok('썸네일 입력란 1개 — 쿠팡 붙여넣기+[가져오기] 행 제거(cae_thumb_url·caeThumbFetch 없음)',
+  !/cae_thumb_url/.test(cc) && !/caeThumbFetch/.test(cc) && !/_caeThumbFromUrl/.test(cc) && /id="cae_thumb"/.test(cc));
+ok('썸네일 미리보기 확대(cae_thumb_prevwrap · max-height 200px)',
+  /cae_thumb_prevwrap/.test(cc) && /max-height:200px/.test(cc));
+ok('파일 업로드는 유지(guide-image imageBase64 재사용)',
+  /\/api\/order\/guide-image/.test(cc) && /imageBase64: b64/.test(cc));
+ok('리뷰비 100원 단위 증감(step="100")', /id="cae_fee"[^>]*step="100"/.test(cc));
+ok('시간표기에 자유/자율 → 구매시간 숨김(_caeToggleWindow)',
+  /function _caeIsAutoOrder\(\) \{ return \/자유\|자율\//.test(cc) && /function _caeToggleWindow/.test(cc));
+ok('자율주문 저장 시 auto_order 플래그 + 구매시간 명시적 비움',
+  /auto_order: auto/.test(cc) && /window_start: auto \? null/.test(cc));
 ok('저장 성공 시 목록 재조회(_onNeedRefresh)',
   /_onNeedRefresh === 'function'/.test(cc));
 // ── 요구사항: 닫기 버튼으로만 닫힘 ──
