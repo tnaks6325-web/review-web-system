@@ -39,9 +39,10 @@ function authMiddleware(req, res, next) {
     //   도달하지 못하게 PUT /api/campaign/admin/:id[/status] 로만 격리(폐쇄 기본). role은 admin이라
     //   masterOnly 라우트는 이미 차단되지만, 방어심층으로 경로+메서드까지 좁힌다.
     //   (프리필용 GET /api/campaign/:id 는 authMiddleware 미경유 공개 라우트라 여기 무관.)
+    //   ★ /status 하위경로는 불허 — 모달은 본 PUT 바디로 status를 보내므로 불필요, 표면 최소화.
     if (decoded && decoded.via === 'reviewer_campaign') {
       const p = (req.baseUrl || '') + (req.path || '');
-      const allowed = req.method === 'PUT' && /^\/api\/campaign\/admin\/[^/]+(\/status)?$/.test(p);
+      const allowed = req.method === 'PUT' && /^\/api\/campaign\/admin\/[^/]+$/.test(p);
       if (!allowed) {
         return res.status(403).json({ error: '리뷰어 공고수정 권한은 공고 수정에만 사용할 수 있습니다.' });
       }

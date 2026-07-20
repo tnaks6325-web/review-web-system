@@ -14,7 +14,6 @@
  */
 const jwt = require('jsonwebtoken');
 const pool = require('../db/pool');
-const { verifyReviewer } = require('./reviewer.service');
 
 const TOKEN_TTL = process.env.REVIEWER_CAMPAIGN_TOKEN_TTL || '2h';
 
@@ -70,27 +69,34 @@ async function setEditorActive(phone8, active) {
 
 /**
  * 리뷰어 신원 확인 + 허용명단 검사 → 통과 시 공고 전용 스코프 토큰 발급.
+ * ★ 레드팀 #1 방어: **직접(메인) 계정 정확 일치만** 인정한다. verifyReviewer의 sub_account
+ *   분기는 무증명 등록(`/register`가 기존 번호에 임의 이름을 sub_account로 추가 허용)으로
+ *   이름 게이트가 "번호 지식"만으로 우회되므로 사용하지 않는다. 이로써 발급 강도는
+ *   "정확한 등록 이름 + phone8"(리뷰어 로그인 본연의 강도)로 복원된다.
+ * ★ 레드팀 #3 방어: 토큰에 phone8을 실어 사용 시점(공고 PUT)에 명단 재검증 → 근실시간 폐기.
  * @returns {ok:true, token, name} | {ok:false, error}
  */
 async function issueCampaignToken(name, phone8) {
   const p8 = _norm8(phone8);
-  // 1) 실제 리뷰어 신원 재검증(리뷰어 로그인과 동일 강도 — 이름+phone8이 reviewers DB와 일치)
-  const v = await verifyReviewer(name, p8);
-  if (!v || !v.ok) {
-    // 신원 불일치는 권한 오라클이 되지 않도록 두루뭉술하게
-    return { ok: false, error: '권한이 없습니다.' };
-  }
+  const n = String(name == null ? '' : name).trim();
+  if (p8.length !== 8 || !n) return { ok: false, error: '권한이 없습니다.' };
+
+  // 1) 직접 메인 계정 정확 일치(sub_account 경로 배제)
+  const { rows } = await pool.query(
+    'SELECT name FROM reviewers WHERE phone8 = $1 AND name = $2 LIMIT 1', [p8, n]
+  );
+  if (rows.length === 0) return { ok: false, error: '권한이 없습니다.' };
+
   // 2) 허용 명단(active)
-  if (!(await isActiveEditor(p8))) {
-    return { ok: false, error: '권한이 없습니다.' };
-  }
-  // 3) 최소권한 스코프 토큰(admin 하향 고정 · via 격리 · 단기)
+  if (!(await isActiveEditor(p8))) return { ok: false, error: '권한이 없습니다.' };
+
+  // 3) 최소권한 스코프 토큰(admin 하향 고정 · via 격리 · phone8 재검증키 · 단기)
   const token = jwt.sign(
-    { name: v.name || name, role: 'admin', via: 'reviewer_campaign' },
+    { name: rows[0].name, role: 'admin', via: 'reviewer_campaign', phone8: p8 },
     process.env.JWT_SECRET,
     { expiresIn: TOKEN_TTL }
   );
-  return { ok: true, token, name: v.name || name };
+  return { ok: true, token, name: rows[0].name };
 }
 
 module.exports = {

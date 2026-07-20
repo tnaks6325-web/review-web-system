@@ -15,6 +15,7 @@ const {
   kstTodayAt,
 } = require('../services/campaignState.service');
 const { sanitizeWorkDetail, sanitizeGuideHtml } = require('../utils/sanitizeGuideHtml');
+const { isActiveEditor } = require('../services/reviewerCampaignEditor.service');
 
 /** work_detail 저장용 정규화(M2 변경②): 발행/수정 시점 sanitize(§03-E 이중 적용의 1차) + JSON 문자열화 */
 function _prepWorkDetail(wd) {
@@ -73,17 +74,86 @@ function _publicView(row, counts, now) {
   };
 }
 
-/** 유효한 admin/master JWT 요청인지 (무인증 라우트에서 관리자에게만 전체 필드 반환할 때) */
-function _isAdminReq(req) {
+/** 요청의 JWT를 검증해 decoded 반환(없거나 무효면 null) */
+function _decodeReq(req) {
   const authHeader = req.headers['authorization'];
   const token = authHeader && authHeader.split(' ')[1];
-  if (!token) return false;
-  try {
-    const decoded = jwt.verify(token, process.env.JWT_SECRET);
-    return ['admin', 'master'].includes(decoded.role);
-  } catch (_) {
-    return false;
+  if (!token) return null;
+  try { return jwt.verify(token, process.env.JWT_SECRET); } catch (_) { return null; }
+}
+
+/** 유효한 admin/master JWT 요청인지 (무인증 라우트에서 관리자에게만 전체 필드 반환할 때) */
+function _isAdminReq(req) {
+  const d = _decodeReq(req);
+  return !!(d && ['admin', 'master'].includes(d.role));
+}
+
+/** 리뷰어앱 공고수정 스코프 토큰이 프리필로 볼 수 있는 필드만 추린 뷰(레드팀 #4 — 전체 SELECT * 노출 차단).
+ *  chat_url·notes·source_work_order_id·work_detail·linked_* 등 민감/구조필드 제외. */
+function _scopedEditorView(row) {
+  return {
+    id: row.id, title: row.title, status: row.status, participation_mode: row.participation_mode,
+    delivery_type: row.delivery_type, review_fee: row.review_fee, time_range: row.time_range,
+    window_start: row.window_start, window_end: row.window_end,
+    daily_limit: row.daily_limit, recruit_total: row.recruit_total,
+    landing_url: row.landing_url, thumbnail_url: row.thumbnail_url,
+    sort_order: row.sort_order, max_slots: row.max_slots,
+  };
+}
+
+/** 리뷰어앱 공고수정(via:'reviewer_campaign') 전용 저장 핸들러.
+ *  레드팀 #2/#6 방어: **안전 필드 화이트리스트만** UPDATE(linked_*·participation_mode·
+ *  source_work_order_id·work_detail·chat_url·notes·deadline 등 절대 미변경 = 교차테넌트
+ *  PII 오배정·participation 플립·deadline 소실 원천 차단). 참여형 공고만 대상.
+ *  레드팀 #3 방어: 사용 시점 isActiveEditor(phone8) 재검증 → 명단 제외 즉시 차단. */
+async function _scopedCampaignEdit(req, res) {
+  const { id } = req.params;
+  const p8 = req.admin && req.admin.phone8;
+  if (!p8 || !(await isActiveEditor(p8))) {
+    return res.status(403).json({ ok: false, error: '공고수정 권한이 없습니다. (허용 명단에서 제외되었을 수 있습니다)' });
   }
+  const { rows: cur } = await pool.query('SELECT * FROM recruit_campaigns WHERE id = $1', [id]);
+  if (!cur.length) return res.status(404).json({ ok: false, error: '캠페인을 찾을 수 없습니다.' });
+  const c = cur[0];
+  // 리뷰어 홈에는 참여형 카드만 노출 → 스코프 편집도 참여형 공고만(레거시 캠페인 미접촉)
+  if (!c.participation_mode) {
+    return res.status(403).json({ ok: false, error: '이 공고는 리뷰어 앱에서 수정할 수 없습니다.' });
+  }
+
+  const b = req.body || {};
+  const keep = (v, curV) => (v === undefined || v === null || v === '') ? curV : v;
+  const numOr = (v, curV) => (v === undefined || v === null || v === '') ? curV : (Number(v) || 0);
+  const title = (b.title !== undefined && String(b.title).trim() !== '') ? String(b.title).trim() : c.title;
+  const status = ['draft', 'active', 'closed'].includes(b.status) ? b.status : c.status;
+  const delivery_type = b.delivery_type !== undefined ? b.delivery_type : c.delivery_type;
+  const time_range = b.time_range !== undefined ? b.time_range : c.time_range;
+  const thumbnail_url = b.thumbnail_url !== undefined ? b.thumbnail_url : c.thumbnail_url;
+  const landing_url = b.landing_url !== undefined ? b.landing_url : c.landing_url;
+  const window_start = keep(b.window_start, c.window_start);
+  const window_end = keep(b.window_end, c.window_end);
+  const review_fee = numOr(b.review_fee, c.review_fee);
+  const daily_limit = numOr(b.daily_limit, c.daily_limit);
+  const recruit_total = numOr(b.recruit_total, c.recruit_total);
+  const sort_order = numOr(b.sort_order, c.sort_order);
+  const max_slots = numOr(b.max_slots, c.max_slots);
+
+  // 참여형 활성화 게이트 재적용(linked_*는 현재값 — 편집 불가라 우회 불가)
+  if (status === 'active') {
+    const errs = _participationActivationErrors({ ...c, window_start, window_end, daily_limit });
+    if (errs.length) return res.status(400).json({ ok: false, error: '참여형 활성화 불가: ' + errs.join(', ') });
+  }
+
+  const { rows } = await pool.query(
+    `UPDATE recruit_campaigns SET
+       title=$2, status=$3, delivery_type=$4, review_fee=$5, time_range=$6,
+       thumbnail_url=$7, landing_url=$8, window_start=$9, window_end=$10,
+       daily_limit=$11, recruit_total=$12, sort_order=$13, max_slots=$14, updated_at=NOW()
+     WHERE id=$1 RETURNING *`,
+    [id, title, status, delivery_type, review_fee, time_range,
+     thumbnail_url, landing_url, window_start || null, window_end || null,
+     daily_limit, recruit_total, sort_order, max_slots]
+  );
+  return res.json({ ok: true, data: rows[0] });
 }
 
 // 오픈 러시 방어: 무인증 참여 엔드포인트 rate limit (신청 가부의 SoT는 서버 재검사)
@@ -227,6 +297,11 @@ router.get('/:id', async (req, res, next) => {
     const { id } = req.params;
     const { rows } = await pool.query('SELECT * FROM recruit_campaigns WHERE id = $1', [id]);
     if (rows.length === 0) return res.status(404).json({ ok: false, error: '캠페인을 찾을 수 없습니다.' });
+    const _d = _decodeReq(req);
+    if (_d && _d.via === 'reviewer_campaign') {
+      // 리뷰어앱 공고수정 스코프 토큰 = 프리필 필요 필드만(민감/구조필드 미노출, 레드팀 #4)
+      return res.json({ ok: true, data: _scopedEditorView(rows[0]) });
+    }
     if (_isAdminReq(req)) {
       return res.json({ ok: true, data: rows[0] });
     }
@@ -677,6 +752,10 @@ router.post('/admin/create', authMiddleware, adminOrMasterMiddleware, async (req
 // PUT /api/campaign/admin/:id — 캠페인 수정
 router.put('/admin/:id', authMiddleware, adminOrMasterMiddleware, async (req, res, next) => {
   try {
+    // ★ 리뷰어앱 공고수정 스코프 토큰은 전용 화이트리스트 핸들러로 격리(레드팀 #2/#3/#6)
+    if (req.admin && req.admin.via === 'reviewer_campaign') {
+      return await _scopedCampaignEdit(req, res);
+    }
     const { id } = req.params;
     const {
       title, channel, channel_custom, manager, time_range,
