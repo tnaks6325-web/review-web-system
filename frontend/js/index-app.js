@@ -16131,17 +16131,32 @@ function _showAdminNoticePopup(notices) {
   overlay.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,.5);z-index:9999;display:flex;align-items:center;justify-content:center;padding:16px';
   overlay.classList.add('toss-overlay');
 
+  // ── 필수열람 게이트: 본문에 [필수열람] 마커 + URL이 있는 공지는
+  //    링크를 열람(클릭)하기 전까지 [확인] 버튼이 비활성화된다(계정별 확인 기록은 기존 read 원장).
+  //    마커 없는 일반 공지는 기존 동작 그대로(opt-in).
+  const gateState = {}; // { noticeId: 열람여부 }
   let noticeHtml = '';
   notices.forEach((n, idx) => {
     const date = new Date(n.created_at).toLocaleDateString('ko-KR');
     const expDate = new Date(n.expires_at).toLocaleDateString('ko-KR');
+    const raw = String(n.content || '');
+    const isRequired = raw.includes('[필수열람]');
+    const bodyText = isRequired ? raw.split('[필수열람]').join('').trim() : raw;
+    // escape 후 URL만 치환 — 따옴표·꺾쇠 미포함 매칭으로 href 속성 breakout 방지(_linkifyMemo와 동일 원칙)
+    const contentHtml = _escNotice(bodyText).replace(/(https?:\/\/[^\s"'<>]+)/g,
+      (u) => `<a href="${u}" target="_blank" rel="noopener" onclick="_noticeDocOpened(${Number(n.id) || 0})" style="color:#1D4ED8;font-weight:600;word-break:break-all">${u}</a>`);
+    if (isRequired && /https?:\/\//.test(bodyText)) gateState[n.id] = false;
+    const reqBadge = isRequired
+      ? '<span style="background:#FEE2E2;color:#B91C1C;font-size:.65rem;font-weight:700;padding:2px 7px;border-radius:4px">필수열람</span>'
+      : '';
     noticeHtml += `
-      <div style="background:#FFF;border:1px solid #E5E7EB;border-radius:10px;padding:14px 16px;margin-bottom:${idx < notices.length-1 ? '10px' : '0'}">
+      <div style="background:#FFF;border:1px solid ${isRequired ? '#FECACA' : '#E5E7EB'};border-radius:10px;padding:14px 16px;margin-bottom:${idx < notices.length-1 ? '10px' : '0'}">
         <div style="display:flex;align-items:center;gap:6px;margin-bottom:6px">
           <span style="background:#DBEAFE;color:#1D4ED8;font-size:.65rem;font-weight:700;padding:2px 7px;border-radius:4px">공지</span>
+          ${reqBadge}
           <span style="font-weight:700;font-size:.85rem;color:#1F2937">${_escNotice(n.title)}</span>
         </div>
-        <div style="font-size:.78rem;color:#374151;line-height:1.6;white-space:pre-wrap;margin-bottom:8px">${_escNotice(n.content)}</div>
+        <div style="font-size:.78rem;color:#374151;line-height:1.6;white-space:pre-wrap;margin-bottom:8px">${contentHtml}</div>
         <div style="font-size:.65rem;color:#9CA3AF;display:flex;gap:10px">
           <span><i class="fas fa-user" style="margin-right:3px"></i>${_escNotice(n.created_by)}</span>
           <span><i class="fas fa-calendar" style="margin-right:3px"></i>${date}</span>
@@ -16153,6 +16168,8 @@ function _showAdminNoticePopup(notices) {
   const noticeIds = notices.map(n => n.id);
   // 전역에 임시 저장 (onclick에서 안전하게 참조)
   window._pendingNoticeIds = noticeIds;
+  window._noticeGateState = gateState;
+  const gated = Object.keys(gateState).length > 0;
   overlay.innerHTML = `
     <div style="background:#fff;border-radius:14px;box-shadow:0 20px 60px rgba(0,0,0,.2);max-width:480px;width:100%;max-height:80vh;display:flex;flex-direction:column;overflow:hidden">
       <div style="padding:16px 20px;border-bottom:1px solid #E5E7EB;display:flex;align-items:center;gap:8px;background:#F8FAFC">
@@ -16163,14 +16180,28 @@ function _showAdminNoticePopup(notices) {
       <div style="padding:16px 20px;overflow-y:auto;flex:1">
         ${noticeHtml}
       </div>
-      <div style="padding:12px 20px;border-top:1px solid #E5E7EB;display:flex;justify-content:flex-end;gap:8px;background:#F8FAFC">
-        <button onclick="_dismissAdminNotices(window._pendingNoticeIds)" style="padding:6px 16px;background:#3B82F6;color:#fff;border:none;border-radius:8px;font-size:.78rem;font-weight:600;cursor:pointer">
+      <div style="padding:12px 20px;border-top:1px solid #E5E7EB;display:flex;align-items:center;justify-content:flex-end;gap:8px;background:#F8FAFC">
+        ${gated ? '<span id="noticeGateHint" style="margin-right:auto;font-size:.68rem;color:#B91C1C;font-weight:600"><i class="fas fa-book-open" style="margin-right:4px"></i>필수열람 문서(링크)를 열면 확인 버튼이 활성화됩니다</span>' : ''}
+        <button id="noticeConfirmBtn" ${gated ? 'disabled' : ''} onclick="_dismissAdminNotices(window._pendingNoticeIds)" style="padding:6px 16px;background:#3B82F6;color:#fff;border:none;border-radius:8px;font-size:.78rem;font-weight:600;cursor:pointer;${gated ? 'opacity:.45;cursor:not-allowed' : ''}">
           <i class="fas fa-check" style="margin-right:4px"></i>확인
         </button>
       </div>
     </div>`;
 
   document.body.appendChild(overlay);
+}
+
+// 필수열람 링크 클릭(새 탭 열람 시작) → 게이트 해제 판정. 링크 기본동작(새 탭 열기)은 그대로 진행된다.
+function _noticeDocOpened(noticeId) {
+  const st = window._noticeGateState;
+  if (!st || !(noticeId in st)) return;
+  st[noticeId] = true;
+  if (Object.values(st).every(Boolean)) {
+    const btn = document.getElementById('noticeConfirmBtn');
+    if (btn) { btn.disabled = false; btn.style.opacity = '1'; btn.style.cursor = 'pointer'; }
+    const hint = document.getElementById('noticeGateHint');
+    if (hint) hint.innerHTML = '<i class="fas fa-check-circle" style="margin-right:4px;color:#059669"></i><span style="color:#059669">열람 완료 — 확인을 눌러주세요</span>';
+  }
 }
 
 async function _dismissAdminNotices(noticeIds) {
@@ -16291,6 +16322,7 @@ function _openNoticeForm(editData) {
     <div style="margin-bottom:10px">
       <label style="font-size:.72rem;font-weight:600;color:#374151;display:block;margin-bottom:3px">내용</label>
       <textarea id="noticeFormContent" rows="5" placeholder="공지 내용을 입력하세요" style="width:100%;padding:8px 10px;border:1px solid #D1D5DB;border-radius:6px;font-size:.8rem;resize:vertical;box-sizing:border-box">${_escNotice(content)}</textarea>
+      <div style="font-size:.65rem;color:#9CA3AF;margin-top:3px;line-height:1.5">💡 내용에 <b>[필수열람]</b> 표시와 문서 URL을 함께 넣으면, 대상자가 링크를 열람해야 [확인]을 누를 수 있습니다. (URL은 팝업에서 자동 링크화)</div>
     </div>
     <div style="display:flex;gap:10px;margin-bottom:10px">
       <div style="flex:1">
