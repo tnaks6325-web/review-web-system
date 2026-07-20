@@ -133,8 +133,8 @@
   /* ── 편집 UI ── */
   .ecell{cursor:text;border-bottom:1px dashed transparent;border-radius:3px;padding:1px 3px} .ecell:hover{border-bottom-color:var(--line2);background:var(--card2)}
   .ecell.edited{background:var(--accent-soft);border-bottom-color:var(--accent)}
-  @keyframes cellsaved{from{box-shadow:0 0 0 2px color-mix(in srgb,var(--safe) 60%,transparent)}to{box-shadow:0 0 0 2px transparent}}
-  .ecell.cellsaved{animation:cellsaved .6s ease-out}   /* 백그라운드 저장 완료 = 초록 링 페이드(엑셀식 즉시감) */
+  @keyframes cellsaved{from{box-shadow:inset 0 0 0 2px color-mix(in srgb,var(--safe) 60%,transparent)}to{box-shadow:inset 0 0 0 2px transparent}}
+  table.sheetgrid td.cellsaved{animation:cellsaved .55s ease-out}   /* 백그라운드 저장 완료 = 초록 링 페이드(엑셀식 즉시감) */
   .chk.clk{cursor:pointer;border-radius:4px;padding:0 4px} .chk.clk:hover{background:var(--card2)} .chk.clk.edited{outline:1px solid var(--accent);outline-offset:1px}
   .einp{font:inherit;font-size:12.5px;width:100%;min-width:60px;padding:2px 5px;border:1px solid var(--accent);border-radius:5px;background:var(--card);color:var(--ink)}
   .revb{cursor:pointer;color:var(--accent);font-size:12px;user-select:none} .revb:hover{color:var(--bad)}
@@ -166,6 +166,10 @@
   .gnum{text-align:center;color:var(--faint);font-weight:700} .gnm{font-weight:600}
   table.sheetgrid .gph{font-family:var(--mono);font-size:11.5px;color:var(--muted)}
   table.sheetgrid tbody tr:hover td{background:#f7faff} table.sheetgrid tbody tr:hover td.gfz{background:#eef4ff}
+  /* 편집 가능 셀 = td 자체(셀당 .ecell 스팬 제거 → DOM 노드 ~40%↓ = 렌더 비용 감소). 클릭=편집, edited=배경 강조. */
+  table.sheetgrid td.gedit{cursor:cell}
+  table.sheetgrid td.gedit:hover{background:var(--card2)}
+  table.sheetgrid td.gedit.edited{background:var(--accent-soft)} table.sheetgrid td.gedit.edited:hover{background:color-mix(in srgb,var(--accent-soft) 82%,var(--card2))}
   .gcell.gempty{color:var(--line2)} .gcell.gok{color:var(--safe);font-weight:600}
   td.gidlock{cursor:default}   /* 참여자·연락처 = 실제 제출 신원(수정 불가) */
   .gridbar{display:flex;align-items:center;gap:8px;margin-bottom:8px;flex-wrap:wrap}
@@ -623,6 +627,7 @@ function renderWorkdesk(wd){
     <div class="setldetail" id="setldetail"${STATE.settleOpen?'':' hidden'}><div id="settlementsec"></div></div>
     ${renderWorkOrderSection(wd)}
     <div id="gridhost">${tableSection}</div>`;
+  _scheduleBodyFlush();   // 청크 렌더: 나머지 행을 프레임마다 append(대형 표 첫 화면 즉시)
   loadSettlement(STATE.cur);
   loadThread(STATE.cur);   // 협업/댓글 → 우측 레일 [협업/댓글] 탭에 렌더
 }
@@ -904,6 +909,20 @@ function gCellDisp(r,h){
   const ed=(h in ceMap); const raw= ed?ceMap[h]:rj[h];
   return ed?(raw==null?'':String(raw)):_gridVal(h, raw);
 }
+// ── 청크 렌더: 첫 화면만 즉시 그리고 나머지 행은 프레임마다 append(대형 표 렌더 프리즈 방지) ──
+const _GRID_CHUNK=60;
+const _raf=(typeof requestAnimationFrame==='function')?(fn=>requestAnimationFrame(fn)):(fn=>setTimeout(fn,16));
+function _scheduleBodyFlush(){
+  const p=STATE._pendingBody; if(!p||!p.rows||!p.rows.length){ STATE._pendingBody=null; return; }
+  const gen=p.gen;
+  const step=()=>{
+    const pp=STATE._pendingBody; if(!pp||pp.gen!==gen||!pp.rows.length){ if(pp&&pp.gen===gen) STATE._pendingBody=null; return; }   // 재렌더로 세대 바뀌면 자동 중단
+    const tb=document.getElementById('gbody'); if(!tb){ STATE._pendingBody=null; return; }
+    tb.insertAdjacentHTML('beforeend', pp.rows.splice(0,_GRID_CHUNK).join(''));
+    if(pp.rows.length) _raf(step); else STATE._pendingBody=null;
+  };
+  _raf(step);
+}
 // 시트형 그리드: 왼쪽 고정 = #·참여자·연락처(DB 리뷰어 신원) + (선택 시)시트 컬럼 수취인까지 · 오른쪽 = 시트 컬럼 전체.
 //   + 컬럼 ▾(필터·정렬·숨기기) · 행 그룹(기준 컬럼 선택, 접기/펼치기) — 모두 클라이언트 뷰 상태(Track B 열람).
 function buildGrid(wd){
@@ -947,7 +966,7 @@ function buildGrid(wd){
     const badge = r.source==='manual'?' <span class="src manual">수동</span>':(r.hasOrder?' <span class="src order">주문</span>':'')
                 + (r.editable===false?' <span class="lock" title="주문/신원 앵커 없음 또는 중복 — 편집 잠금">🔒</span>':'');
     const eCell=(field, disp, edited, extraCls, styleI, editv)=> canE
-      ? `<td ${cls(styleI,'gcell'+(disp?'':' gempty')+(extraCls||''))} style="${cstyle(styleI)}"><span class="ecell${edited?' edited':''}" data-val="${esc(editv!=null?editv:disp)}" data-id="${esc(r.id)}" data-field="${esc(field)}" onclick="beginEditCell(this)">${esc(disp||'—')}</span>${edited?` <span class="revb" title="되돌리기" data-id="${esc(r.id)}" data-field="${esc(field)}" onclick="revertCell(event,this)">↩</span>`:''}</td>`
+      ? `<td ${cls(styleI,'gcell gedit'+(edited?' edited':'')+(disp?'':' gempty')+(extraCls||''))} style="${cstyle(styleI)}" data-id="${esc(r.id)}" data-field="${esc(field)}" data-val="${esc(editv!=null?editv:disp)}" onclick="beginEditCell(this)">${esc(disp||'—')}${edited?` <span class="revb" title="되돌리기" data-id="${esc(r.id)}" data-field="${esc(field)}" onclick="revertCell(event,this)">↩</span>`:''}</td>`
       : `<td ${cls(styleI,'gcell'+(disp?'':' gempty')+(extraCls||''))} style="${cstyle(styleI)}">${esc(disp||'')}</td>`;
     let tds='';
     vcols.forEach((c,i)=>{ const h=c.key;
@@ -966,24 +985,28 @@ function buildGrid(wd){
     });
     return `<tr>${tds}</tr>`;
   };
-  // 본문 — 그룹 여부에 따라
-  let body;
+  // 본문 행 배열(청크 렌더용) — 그룹 여부에 따라
+  let bodyArr=[], emptyBody='';
   const groupOn = STATE.gGroupBy && allCols.includes(STATE.gGroupBy);
   if(!rows.length){
-    body=`<tr><td colspan="${vcols.length}" class="empty" style="height:56px">${Object.keys(STATE.gFilters).length?'조건에 맞는 행이 없습니다 — 필터를 조정하세요.':'명단 없음 — 그림자 투영을 실행하세요.'}</td></tr>`;
+    emptyBody=`<tr><td colspan="${vcols.length}" class="empty" style="height:56px">${Object.keys(STATE.gFilters).length?'조건에 맞는 행이 없습니다 — 필터를 조정하세요.':'명단 없음 — 그림자 투영을 실행하세요.'}</td></tr>`;
   } else if(groupOn){
     const gb=STATE.gGroupBy, groups=new Map();
     rows.forEach(r=>{ const k=gCellDisp(r,gb); if(!groups.has(k))groups.set(k,[]); groups.get(k).push(r); });
-    body='';
     for(const [k,rs] of groups){
       const open=!STATE.gCollapsed.has(k);
       const sub=rs.reduce((n,r)=>n+(r.submitted?1:0),0), paid=rs.reduce((n,r)=>n+(r.paid?1:0),0);
-      body+=`<tr class="grouphd"><td colspan="${vcols.length}"><div class="ghinner" onclick="toggleGGroup('${encodeURIComponent(k).replace(/'/g,'%27')}')"><span class="ghtri${open?' open':''}">▶</span><span class="ghcol">${esc(gb)}</span><span class="ghlbl">${esc(k||'(빈값)')}</span><span class="ghagg"><span class="a">${rs.length}명</span><span class="a s">제출 <b>${sub}</b></span><span class="a p">입금 <b>${paid}</b></span></span></div></td></tr>`;
-      if(open) body+=rs.map(rowHtml).join('');
+      bodyArr.push(`<tr class="grouphd"><td colspan="${vcols.length}"><div class="ghinner" onclick="toggleGGroup('${encodeURIComponent(k).replace(/'/g,'%27')}')"><span class="ghtri${open?' open':''}">▶</span><span class="ghcol">${esc(gb)}</span><span class="ghlbl">${esc(k||'(빈값)')}</span><span class="ghagg"><span class="a">${rs.length}명</span><span class="a s">제출 <b>${sub}</b></span><span class="a p">입금 <b>${paid}</b></span></span></div></td></tr>`);
+      if(open) for(const r of rs) bodyArr.push(rowHtml(r));
     }
   } else {
-    body=rows.map(rowHtml).join('');
+    for(const r of rows) bodyArr.push(rowHtml(r));
   }
+  // 청크 렌더: 첫 _GRID_CHUNK행만 즉시 그리고 나머지는 rAF로 append(대형 표 렌더 프리즈 방지 · 값 잘림 없음).
+  //   세대(gen) 태그로 재렌더 시 이전 플러시 자동 중단. 소형 표(≤CHUNK)는 한 번에 = 지터/오버헤드 없음.
+  const firstBody = emptyBody || bodyArr.slice(0,_GRID_CHUNK).join('');
+  STATE._gridGen=(STATE._gridGen||0)+1;
+  STATE._pendingBody = (bodyArr.length>_GRID_CHUNK) ? { gen:STATE._gridGen, rows:bodyArr.slice(_GRID_CHUNK) } : null;
   // 툴바(고정 열 · 행 그룹 · 접기/펼치기 · 숨긴 열 · 필터 초기화 · 편집 이력)
   const fzOpts=['<option value="">기본(연락처까지)</option>']
     .concat(H.filter(h=>['번호','담당자','구매일자','인애드명단','주문자제출','수취인','주소'].includes(h))
@@ -1001,13 +1024,13 @@ function buildGrid(wd){
       ${hasFilt?`<button class="btn xs" style="color:var(--warn);border-color:color-mix(in srgb,var(--warn) 35%,var(--line))" onclick="clearGFilters()">필터 초기화 ✕</button>`:''}
       <button class="btn xs" onclick="showEditHistory()">편집 이력</button>
       <span class="gnote">시트 동일 컬럼 · <b>컬럼명 클릭</b>=필터·정렬·숨기기 · 헤더 <b>가로 드래그</b>=여러 열 선택 → 숨기기 · <b>행 그룹</b> 접기/펼치기 · <b>셀 클릭=즉시 편집</b>(Enter=아래·Tab=오른쪽·Esc=취소)</span></div>
-    <div class="gridscroll"><table class="sheetgrid"><thead>${thead}</thead><tbody>${body}</tbody></table></div>
+    <div class="gridscroll"><table class="sheetgrid"><thead>${thead}</thead><tbody id="gbody">${firstBody}</tbody></table></div>
     <div id="addbox"></div>
     <button class="btn" style="margin-top:10px" onclick="showAddForm()">＋ 참여자 추가</button>`;
 }
 // 그리드만 가볍게 재렌더(필터/그룹/숨김/정렬 등 뷰 상태 변경 시 — 정산·스레드 재요청 없이)
 function rerenderGrid(){ const wd=STATE.wd; if(!wd) return; const host=$('#gridhost'); if(!host) return;
-  const gridMode=STATE.canEdit&&Array.isArray(wd.headers)&&wd.headers.length; if(gridMode) host.innerHTML=buildGrid(wd); }
+  const gridMode=STATE.canEdit&&Array.isArray(wd.headers)&&wd.headers.length; if(gridMode){ host.innerHTML=buildGrid(wd); _scheduleBodyFlush(); } }
 function setFreeze(v){ STATE.freezeUpto=v||null; rerenderGrid(); }
 // ── 컬럼 ▾ 필터/정렬/숨기기 · 행 그룹 접기/펼치기 (클라이언트 뷰 상태) ──
 function _ensureGMenus(){
@@ -1151,12 +1174,14 @@ function _paintGridCell(r, field, td){
   const disp= ed?(raw==null?'':String(raw)):_gridVal(h, raw);
   const editv= ed?disp:_gridEditVal(h, raw);
   const isOk=(h==='리뷰제출'||h==='입금');
-  td.classList.remove('gempty','gok'); if(!disp) td.classList.add('gempty'); if(isOk&&disp) td.classList.add('gok');
-  td.innerHTML=`<span class="ecell${ed?' edited':''}" data-val="${esc(editv!=null?editv:disp)}" data-id="${esc(r.id)}" data-field="${esc(field)}" onclick="beginEditCell(this)">${esc(disp||'—')}</span>${ed?` <span class="revb" title="되돌리기" data-id="${esc(r.id)}" data-field="${esc(field)}" onclick="revertCell(event,this)">↩</span>`:''}`;
+  td.classList.toggle('edited', ed); td.classList.toggle('gempty', !disp); if(isOk) td.classList.toggle('gok', !!disp);
+  td.setAttribute('data-val', editv!=null?editv:disp);   // 편집 대상 값(다음 클릭 시 입력 초기값)
+  td.innerHTML=`${esc(disp||'—')}${ed?` <span class="revb" title="되돌리기" data-id="${esc(r.id)}" data-field="${esc(field)}" onclick="revertCell(event,this)">↩</span>`:''}`;
 }
-function beginEditCell(el){
-  const td=el&&el.closest?el.closest('td'):null; if(!td||td.querySelector('input')) return;
-  const rowId=el.getAttribute('data-id'), field=el.getAttribute('data-field'), cur=el.getAttribute('data-val')||'';
+function beginEditCell(td){
+  if(!td||!td.getAttribute||td.querySelector('input')) return;
+  const rowId=td.getAttribute('data-id'), field=td.getAttribute('data-field'), cur=td.getAttribute('data-val')||'';
+  if(!field||field.indexOf('col:')!==0) return;   // 편집 가능한 시트열 셀만(참여자·연락처·# 잠금)
   td.innerHTML=`<input class="einp" value="${esc(cur)}">`;
   const inp=td.querySelector('input'); inp.focus(); inp.select();
   let done=false;
@@ -1183,7 +1208,7 @@ function commitCellEdit(rowId, field, value, td){
   const rollback=()=>{ if(r.cellEdits[h]===value){ if(had) r.cellEdits[h]=prev; else delete r.cellEdits[h]; _paintGridCell(r, field, td); } };
   api('/api/trackb/workdesk/edit',{method:'POST',body:JSON.stringify({sheetId:t.sheetId,tabName:t.tabName,rowId,field,value})})
     .then(resp=>{
-      if(resp&&resp.ok){ const s=td.querySelector('.ecell'); if(s){ s.classList.add('cellsaved'); setTimeout(()=>{ s.classList.remove('cellsaved'); },600); } return; }
+      if(resp&&resp.ok){ if(td&&td.classList){ td.classList.add('cellsaved'); setTimeout(()=>{ td.classList.remove('cellsaved'); },600); } return; }
       rollback();
       if(resp&&resp.error==='concurrent_edit_conflict'){ toast('동시 편집 감지 — 최신 상태로 새로고침'); reloadWorkdesk(); }
       else toast(resp&&resp.error?('편집 거부: '+resp.error):'편집 실패');
@@ -1193,7 +1218,7 @@ function commitCellEdit(rowId, field, value, td){
 // 커밋 후 이동(Enter=아래·Tab=오른쪽·Shift+Tab=왼쪽) — 다음 편집 가능한 셀로 이어 편집.
 function _navFromCell(td, dir){
   const tr=td.parentElement; if(!tr) return; const cells=[...tr.children]; const ci=cells.indexOf(td);
-  const open=cell=>{ if(!cell) return false; const s=cell.querySelector('.ecell'); if(s){ setTimeout(()=>beginEditCell(s),0); return true; } return false; };
+  const open=cell=>{ if(cell&&cell.classList&&cell.classList.contains('gedit')){ setTimeout(()=>beginEditCell(cell),0); return true; } return false; };
   if(dir==='right'||dir==='left'){ const step=dir==='right'?1:-1;
     for(let j=ci+step;j>=0&&j<cells.length;j+=step){ if(open(cells[j])) return; } }
   else{ const tbody=tr.parentElement; if(!tbody) return;
