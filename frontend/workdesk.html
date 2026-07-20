@@ -225,6 +225,8 @@
   .linkrow{display:flex;gap:8px;align-items:center;margin-bottom:8px} .linkrow input{flex:1;padding:8px 10px;border:1px solid var(--line);border-radius:8px;background:var(--card2);color:var(--ink);font-size:12px;font-family:ui-monospace,Menlo,monospace}
   .linkmeta{display:flex;align-items:center;gap:8px;flex-wrap:wrap} .linkused{font-size:11.5px;color:var(--muted)}
   .linkempty{font-size:12.5px;color:var(--muted);padding:6px 2px 10px}
+  .lockbadge{font-size:11px;font-weight:750;padding:2px 9px;border-radius:999px} .lockbadge.open{background:var(--warn-soft);color:var(--warn)} .lockbadge.lock{background:var(--safe-soft);color:var(--safe)} .lockbadge.off{background:var(--bad-soft);color:var(--bad)}
+  .linkhint{font-size:11.5px;color:var(--muted);margin-top:7px;line-height:1.5}
   .own{display:flex;align-items:center;gap:11px;padding:11px 13px;border:1px solid var(--line);border-radius:10px;background:var(--card);margin-bottom:8px}
   .own .ic{width:30px;height:30px;border-radius:8px;background:var(--accent-soft);color:var(--accent);display:grid;place-items:center;flex:none;font-size:15px}
   .own .info{flex:1;min-width:0} .own .info b{font-size:13.5px;display:block;white-space:nowrap;overflow:hidden;text-overflow:ellipsis} .own .info span{font-size:11.5px;color:var(--muted)}
@@ -358,6 +360,7 @@ async function boot(){
     try{ history.replaceState(null,'',location.pathname+location.search); }catch(_){ }
     if(t){ const r=await fetch(API_BASE+'/api/trackb/advertiser-link-login',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({token:t})}).then(x=>x.json()).catch(()=>null);
       if(r&&r.success&&r.token){ sessionStorage.setItem('admin_token', r.token); }
+      else if(r&&r.requiresLogin){ return renderLogin('🔒 '+(r.advertiserName||'이 업체')+' 전용 접속 — 발급받은 계정으로 로그인하세요.'); }   // 계정 있는 업체 = 링크가 로그인 게이트
       else return renderLogin('접속 링크가 유효하지 않거나 폐기되었습니다. 담당자에게 문의하세요.'); } }
   if (!token()) return renderLogin();
   const me = parseJwt(token()); STATE.role=me.role||''; STATE.name=me.name||'';
@@ -1239,25 +1242,25 @@ function _advLinkUrl(token){ return location.origin + '/workdesk#adv=' + encodeU
 function _advLinkHtml(a){
   if(!(STATE.role==='master'||STATE.role==='admin')) return '';
   const lk=STATE.advLink;
-  let body;
-  if(lk && lk.token){
-    const url=_advLinkUrl(lk.token);
-    const used=lk.lastUsedAt?('마지막 접속 '+_fmtTs(lk.lastUsedAt)):'접속 이력 없음';
-    body = `<div class="linkrow">
-        <input id="advLinkUrl" readonly value="${esc(url)}" onclick="this.select()">
-        <button class="btn xs pri" onclick="advLinkCopy()">복사</button>
-      </div>
-      <div class="linkmeta"><span class="acctst ${lk.active?'on':'off'}">${lk.active?'활성':'폐기됨'}</span> <span class="linkused">${esc(used)}</span>
-        <span style="flex:1"></span>
-        ${lk.active
-          ? `<button class="btn xs" onclick="advLinkGen('${esc(a.id)}',true)">링크 회전</button><button class="btn xs bad" onclick="advLinkRevoke('${esc(a.id)}')">폐기</button>`
-          : `<button class="btn xs" onclick="advLinkEnable('${esc(a.id)}')">다시 활성</button><button class="btn xs" onclick="advLinkGen('${esc(a.id)}',true)">새 링크 발급</button>`}
-      </div>`;
-  } else {
-    body = `<div class="linkempty">아직 접속 링크가 없습니다 — 발급해 광고주에게 전달하면 로그인 없이 바로 열람합니다.</div>
-      <button class="btn pri" onclick="advLinkGen('${esc(a.id)}',false)">＋ 접속 링크 생성</button>`;
+  const hasAcct=(STATE.advAccts||[]).some(u=>u.advertiserId===a.id && u.active);   // 활성 계정 있으면 링크=로그인 게이트
+  if(!(lk && lk.token)){   // ensure로 항상 생성되나 방어(네트워크 실패 등)
+    return `<div class="sect"><div class="st">광고주 접속 링크</div>
+      <div class="linkempty">링크 준비 중… <button class="btn xs" onclick="advLinkGen('${esc(a.id)}',false)">지금 생성</button></div></div>`;
   }
-  return `<div class="sect"><div class="st">광고주 접속 링크 <span class="sthint">이 링크만 열면 로그인 없이 이 업체 정보만 열람(마스킹·읽기전용)</span></div>${body}</div>`;
+  const url=_advLinkUrl(lk.token);
+  const used=lk.lastUsedAt?('마지막 접속 '+_fmtTs(lk.lastUsedAt)):'접속 이력 없음';
+  const mode = !lk.active ? `<span class="lockbadge off">⛔ 폐기됨 (접근 불가)</span>`
+    : hasAcct ? `<span class="lockbadge lock">🔒 로그인 필요 — 이 업체 계정으로</span>`
+    : `<span class="lockbadge open">🔓 공개 — 로그인 없이 열람</span>`;
+  const hint = !lk.active ? '이 링크는 폐기되어 아무도 접근할 수 없습니다. "다시 활성"으로 복구.'
+    : hasAcct ? '이 업체는 계정이 있어 링크를 열면 로그인 화면이 뜹니다(아래 "광고주 계정"으로 로그인).'
+    : '아래 "광고주 계정"에서 계정을 만들면 이 링크가 자동으로 "로그인 필요"로 바뀝니다.';
+  return `<div class="sect"><div class="st">광고주 접속 링크 <span class="sthint">업체마다 자동 생성된 고유 URL — 광고주에게 전달</span></div>
+    <div class="linkrow"><input id="advLinkUrl" readonly value="${esc(url)}" onclick="this.select()"><button class="btn xs pri" onclick="advLinkCopy()">복사</button></div>
+    <div class="linkmeta">${mode} <span class="linkused">${esc(used)}</span><span style="flex:1"></span>
+      <button class="btn xs" onclick="advLinkGen('${esc(a.id)}',true)">링크 회전</button>
+      ${lk.active?`<button class="btn xs bad" onclick="advLinkRevoke('${esc(a.id)}')">폐기</button>`:`<button class="btn xs" onclick="advLinkEnable('${esc(a.id)}')">다시 활성</button>`}</div>
+    <div class="linkhint">${hint}</div></div>`;
 }
 async function _advLinkReload(){ const cur=STATE.advCur; if(!cur) return;
   const lk=await api('/api/trackb/advertiser-link',{method:'POST',body:JSON.stringify({action:'get',advertiserId:cur.id})}).catch(()=>null);
@@ -1348,7 +1351,7 @@ async function selAdv(i){ const a=STATE.advs[i]; STATE.advCur=a; STATE.addSheet=
   const [r, rt, lk]=await Promise.all([
     api('/api/trackb/ownership?advertiserId='+encodeURIComponent(a.id)),
     api('/api/trackb/ownership/tabs?advertiserId='+encodeURIComponent(a.id)).catch(()=>null),
-    isAdmin2 ? api('/api/trackb/advertiser-link',{method:'POST',body:JSON.stringify({action:'get',advertiserId:a.id})}).catch(()=>null) : Promise.resolve(null),
+    isAdmin2 ? api('/api/trackb/advertiser-link',{method:'POST',body:JSON.stringify({action:'ensure',advertiserId:a.id})}).catch(()=>null) : Promise.resolve(null),   // ensure=없으면 자동생성(모든 업체 항상 고유 URL)
   ]);
   if(STATE.advCur!==a) return;   // 빠른 업체 전환 경합 — 늦게 온 stale 응답이 현재 패널을 덮지 않게 폐기
   STATE.advLink=(lk&&lk.ok&&lk.link)||null;   // 이 업체 접속 링크(있으면 token/active)
