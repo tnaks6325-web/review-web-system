@@ -546,8 +546,10 @@ async function intranetAdvertisers({ q = '', limit = 20 } = {}) {
       if (!resp.ok) throw new Error(`intranet HTTP ${resp.status}`);
       const j = await resp.json();
       // 실데이터 확인: 거래처명은 business_name(사업자명, 인트라넷 UI 필수 필드) — company_name 은 레거시(전량 공란).
+      //   자동완성 표시용으로 대표자명(ceo_name)·사업자등록번호(business_number)도 함께 추림(민감 아님 = 사업자 공개정보).
       _intraAdvCache = { at: now, rows: (j.data || []).map(r => ({
         intranetId: r.id, name: String(r.business_name || r.company_name || '').trim(), manager: String(r.manager || '').trim() || null,
+        ceo: String(r.ceo_name || '').trim() || null, bizNo: String(r.business_number || '').trim() || null,
       })).filter(r => r.name) };
     } catch (e) {
       logger.warn(`[trackB] 인트라넷 광고주DB 조회 실패: ${e.message}`);
