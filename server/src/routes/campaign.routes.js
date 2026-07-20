@@ -14,7 +14,14 @@ const {
   kstDayStartUtc,
   kstTodayAt,
 } = require('../services/campaignState.service');
-const { sanitizeWorkDetail } = require('../utils/sanitizeGuideHtml');
+const { sanitizeWorkDetail, sanitizeGuideHtml } = require('../utils/sanitizeGuideHtml');
+
+/** work_detail 저장용 정규화(M2 변경②): 발행/수정 시점 sanitize(§03-E 이중 적용의 1차) + JSON 문자열화 */
+function _prepWorkDetail(wd) {
+  if (wd === undefined) return undefined;              // 미전달 = 변경 없음(COALESCE 유지)
+  if (!wd || typeof wd !== 'object') return null;      // 명시적 비움
+  return JSON.stringify({ ...wd, inflowGuideHtml: sanitizeGuideHtml(wd.inflowGuideHtml) });
+}
 
 // ID 생성 헬퍼
 function _genCampaignId() {
@@ -375,10 +382,27 @@ async function _applyParticipation(req, res, next, campPre) {
     }
 
     // 등록 리뷰어만(레드 #12 — 스크래핑 비용 상승, 완전 차단은 아님)
-    const reg = await client.query('SELECT 1 FROM reviewers WHERE phone8 = $1 LIMIT 1', [p8]);
+    const reg = await client.query(
+      `SELECT name, phone, phone8, address, bank_name, bank_account, account_holder
+         FROM reviewers WHERE phone8 = $1 LIMIT 1`, [p8]);
     if (!reg.rows.length) {
       await client.query('ROLLBACK');
       return res.status(403).json({ ok: false, reason: 'not_registered', error: '리뷰어 등록 후 참여할 수 있어요.' });
+    }
+
+    // ★ M2 변경①: 내정보 완비 게이트를 "참여 시점"으로 전진 — 구매양식 신원게이트(#272)가 제출 순간
+    //   차단하면 리뷰어는 이미 결제 후 15분 홀드 안에서 막힌다(돈 쓴 뒤 좌절 + 당일 재참여 불가).
+    //   여기서 미리 막으면 홀드 미생성 = 자리 미점유 = 당일 참여권 무손실. 제출 단계 검사는 안전망으로 유지.
+    {
+      const { profileMissing } = require('../services/identity.service');
+      const missing = profileMissing(reg.rows[0]);
+      if (missing.length) {
+        await client.query('ROLLBACK');
+        return res.status(403).json({
+          ok: false, reason: 'profile_missing', missing,
+          error: `내 정보를 먼저 등록해주세요: ${missing.join(', ')} — 참여 후 15분 안에 제출까지 끝나야 해서, 미리 등록이 필요해요.`,
+        });
+      }
     }
 
     const dayStartIso = kstDayStartUtc(now).toISOString();
@@ -576,19 +600,33 @@ router.post('/admin/create', authMiddleware, adminOrMasterMiddleware, async (req
       delivery_type, review_fee, badges, notes, chat_url,
       status, sort_order, max_slots, deadline, description,
       linked_sheet_id, linked_tab_name, linked_tab_gid,
+      // ★ M2 변경②: 참여형 발행 필드
+      participation_mode, thumbnail_url, landing_url, daily_limit, recruit_total,
+      window_start, window_end, close_buffer_min, hold_ttl_min, work_detail, source_work_order_id,
     } = req.body;
 
     if (!title || !title.trim()) {
       return res.status(400).json({ ok: false, error: '공고 제목을 입력해주세요.' });
     }
 
+    // 참여형을 active로 "생성"하는 것도 활성화 게이트 통과 필요(status 라우트 우회 방지)
+    if (participation_mode && (status === 'active')) {
+      const errs = _participationActivationErrors({
+        linked_sheet_id, linked_tab_gid, window_start, window_end, daily_limit,
+      });
+      if (errs.length) return res.status(400).json({ ok: false, error: '참여형 활성화 불가: ' + errs.join(', ') });
+    }
+
     const { rows } = await pool.query(
-      `INSERT INTO recruit_campaigns 
+      `INSERT INTO recruit_campaigns
        (id, title, channel, channel_custom, manager, time_range, delivery_type,
         review_fee, badges, notes, chat_url, status, sort_order,
         max_slots, deadline, description, linked_sheet_id, linked_tab_name, linked_tab_gid,
-        created_by)
-       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20)
+        created_by,
+        participation_mode, thumbnail_url, landing_url, daily_limit, recruit_total,
+        window_start, window_end, close_buffer_min, hold_ttl_min, work_detail, source_work_order_id)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,
+               $21,$22,$23,$24,$25,$26,$27,$28,$29,$30,$31)
        RETURNING *`,
       [
         _genCampaignId(),
@@ -611,6 +649,17 @@ router.post('/admin/create', authMiddleware, adminOrMasterMiddleware, async (req
         linked_tab_name || '',
         linked_tab_gid || '',
         req.admin?.name || '',
+        participation_mode === true,
+        thumbnail_url || '',
+        landing_url || '',
+        Number(daily_limit) || 0,
+        Number(recruit_total) || 0,
+        window_start || null,
+        window_end || null,
+        Number.isFinite(Number(close_buffer_min)) && close_buffer_min !== null && close_buffer_min !== undefined && close_buffer_min !== '' ? Number(close_buffer_min) : 10,
+        Number.isFinite(Number(hold_ttl_min)) && hold_ttl_min !== null && hold_ttl_min !== undefined && hold_ttl_min !== '' ? Number(hold_ttl_min) : 15,
+        _prepWorkDetail(work_detail) ?? null,
+        source_work_order_id || '',
       ]
     );
     res.json({ ok: true, data: rows[0] });
@@ -628,21 +677,31 @@ router.put('/admin/:id', authMiddleware, adminOrMasterMiddleware, async (req, re
       delivery_type, review_fee, badges, notes, chat_url,
       status, sort_order, max_slots, deadline, description,
       linked_sheet_id, linked_tab_name, linked_tab_gid,
+      // ★ M2 변경②: 참여형 발행 필드(전부 optional — 미전달 시 기존값 유지)
+      participation_mode, thumbnail_url, landing_url, daily_limit, recruit_total,
+      window_start, window_end, close_buffer_min, hold_ttl_min, work_detail, source_work_order_id,
     } = req.body;
 
-    // ★ 참여형 활성화 게이트(심판 J7): COALESCE 편집으로 status='active' 우회 방지
+    // ★ 참여형 활성화 게이트(심판 J7): COALESCE 편집으로 status='active' 우회 방지.
+    //   이 라우트가 바꿀 수 있는 게이트 입력(연결탭·시간창·일일건수)을 본문값으로 병합해 판정.
     if (status === 'active') {
       const { rows: cur } = await pool.query('SELECT * FROM recruit_campaigns WHERE id = $1', [id]);
-      if (cur.length && cur[0].participation_mode) {
+      if (cur.length && (cur[0].participation_mode || participation_mode === true)) {
+        const pick = (v, curV) => (v === undefined || v === null) ? curV : v;
         const eff = {
           ...cur[0],
-          linked_sheet_id: (linked_sheet_id === undefined || linked_sheet_id === null) ? cur[0].linked_sheet_id : linked_sheet_id,
-          linked_tab_gid: (linked_tab_gid === undefined || linked_tab_gid === null) ? cur[0].linked_tab_gid : linked_tab_gid,
+          linked_sheet_id: pick(linked_sheet_id, cur[0].linked_sheet_id),
+          linked_tab_gid: pick(linked_tab_gid, cur[0].linked_tab_gid),
+          window_start: pick(window_start, cur[0].window_start),
+          window_end: pick(window_end, cur[0].window_end),
+          daily_limit: pick(daily_limit, cur[0].daily_limit),
         };
         const errs = _participationActivationErrors(eff);
         if (errs.length) return res.status(400).json({ ok: false, error: '참여형 활성화 불가: ' + errs.join(', ') });
       }
     }
+
+    const wdPrepared = _prepWorkDetail(work_detail); // undefined=유지, null=비움, 문자열=교체
 
     const { rows } = await pool.query(
       `UPDATE recruit_campaigns SET
@@ -664,6 +723,17 @@ router.put('/admin/:id', authMiddleware, adminOrMasterMiddleware, async (req, re
         linked_sheet_id = COALESCE($17, linked_sheet_id),
         linked_tab_name = COALESCE($18, linked_tab_name),
         linked_tab_gid = COALESCE($19, linked_tab_gid),
+        participation_mode = COALESCE($20, participation_mode),
+        thumbnail_url = COALESCE($21, thumbnail_url),
+        landing_url = COALESCE($22, landing_url),
+        daily_limit = COALESCE($23, daily_limit),
+        recruit_total = COALESCE($24, recruit_total),
+        window_start = COALESCE($25, window_start),
+        window_end = COALESCE($26, window_end),
+        close_buffer_min = COALESCE($27, close_buffer_min),
+        hold_ttl_min = COALESCE($28, hold_ttl_min),
+        work_detail = CASE WHEN $29::boolean THEN $30::jsonb ELSE work_detail END,
+        source_work_order_id = COALESCE($31, source_work_order_id),
         updated_at = NOW()
        WHERE id = $1
        RETURNING *`,
@@ -675,6 +745,18 @@ router.put('/admin/:id', authMiddleware, adminOrMasterMiddleware, async (req, re
         notes, chat_url, status, sort_order || 0,
         max_slots || 0, deadline || null, description,
         linked_sheet_id, linked_tab_name, linked_tab_gid,
+        (participation_mode === undefined || participation_mode === null) ? null : participation_mode === true,
+        thumbnail_url ?? null,
+        landing_url ?? null,
+        (daily_limit === undefined || daily_limit === null || daily_limit === '') ? null : Number(daily_limit) || 0,
+        (recruit_total === undefined || recruit_total === null || recruit_total === '') ? null : Number(recruit_total) || 0,
+        window_start || null,
+        window_end || null,
+        (close_buffer_min === undefined || close_buffer_min === null || close_buffer_min === '') ? null : Number(close_buffer_min),
+        (hold_ttl_min === undefined || hold_ttl_min === null || hold_ttl_min === '') ? null : Number(hold_ttl_min),
+        wdPrepared !== undefined,          // $29: work_detail 교체 여부(undefined=유지)
+        wdPrepared === undefined ? null : wdPrepared, // $30: 새 값(null=비움)
+        source_work_order_id ?? null,
       ]
     );
 

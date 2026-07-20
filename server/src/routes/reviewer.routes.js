@@ -304,6 +304,43 @@ router.get('/my-status', async (req, res, next) => {
       });
     }
 
+    // ★ M2: 참여형 캠페인 활성 홀드(applied)를 stage:'applied'로 병합 —
+    //   신청 직후에도 참여현황에 즉시 표시(리뷰 내역의 시트 반영 지연 보완, PRD §06-C).
+    //   유효 홀드 판정은 시각 기준(expires_at > NOW()) — 스윕 미실행에도 정확.
+    try {
+      const { rows: holdRows } = await pool.query(`
+        SELECT ca.id, ca.campaign_id AS "campaignId", ca.applicant_name AS "name",
+               ca.applied_at AS "appliedAt", ca.expires_at AS "expiresAt",
+               rc.title, rc.thumbnail_url AS "thumbnailUrl"
+          FROM campaign_applications ca
+          JOIN recruit_campaigns rc ON rc.id = ca.campaign_id
+         WHERE ca.phone8 = $1 AND ca.status = 'applied' AND ca.expires_at > NOW()
+         ORDER BY ca.applied_at DESC
+         LIMIT 20
+      `, [phone8]);
+      for (const h of holdRows) {
+        items.unshift({
+          id: `hold-${h.id}`,
+          name: h.name,
+          tabName: null,
+          campaignName: h.title,
+          displayName: h.title,
+          campaignId: h.campaignId,
+          applicationId: h.id,
+          appliedAt: h.appliedAt,
+          expiresAt: h.expiresAt,
+          thumbnailUrl: h.thumbnailUrl || '',
+          isSubmitted: false,
+          paymentStatus: null,
+          stage: 'applied',           // 참여 확보 — 구매양식 제출 대기(만료 시 자동 제외)
+          source: 'campaign_hold',
+        });
+      }
+    } catch (holdErr) {
+      // 홀드 병합 실패는 기존 my-status를 막지 않는다(가산적 보강)
+      console.warn('[my-status] 캠페인 홀드 병합 실패:', holdErr.message);
+    }
+
     // 통계 (processing은 DB-only 추가분 = 접수됨·처리중/반영대기)
     const stats = {
       total: items.length,
@@ -312,6 +349,7 @@ router.get('/my-status', async (req, res, next) => {
       paid: items.filter(i => i.stage === 'paid').length,
       closed: items.filter(i => i.stage === 'closed').length,
       processing: items.filter(i => i.stage === 'processing' || i.stage === 'submitted_db').length,
+      applied: items.filter(i => i.stage === 'applied').length, // ★ M2: 참여형 활성 홀드(제출 대기)
     };
 
     res.json({ ok: true, items, stats });
