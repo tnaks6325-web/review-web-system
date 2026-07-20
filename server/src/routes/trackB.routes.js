@@ -10,6 +10,7 @@ const router = express.Router();
 const { authMiddleware, masterOnlyMiddleware, adminOrMasterMiddleware } = require('../middleware/auth.middleware');
 const svc = require('../services/trackB.service');
 const participants = require('../services/participants.service');
+const authSvc = require('../services/auth.service');
 
 function _by(req) { return String((req.admin && (req.admin.name || req.admin.role)) || 'admin').slice(0, 100); }
 function _role(req) { return (req.admin && req.admin.role) || ''; }
@@ -206,6 +207,20 @@ router.post('/advertisers', authMiddleware, internalMiddleware, async (req, res,
 router.get('/owned-sheets', authMiddleware, internalMiddleware, async (req, res, next) => {
   try { res.json({ ok: true, sheetIds: await svc.ownedSheetIds() }); }
   catch (err) { next(err); }
+});
+
+// ── 광고주(거래처) 로그인 계정 관리 — master/admin. /api/admin/advertiser-users 와 동일 로직을
+//   Track B 표면(/api/trackb/*)으로도 노출: 인트라넷 SSO 관리자 토큰(via:intranet)은 /api/admin/* 격리라
+//   소유지정 UI에서 계정을 발급하려면 이 경로가 필요하다. 실제 CRUD는 auth.service 재사용(로직 단일). ──
+router.post('/advertiser-account', authMiddleware, adminOrMasterMiddleware, async (req, res, next) => {
+  try {
+    const { action, name, pw, newPw, active, advertiserId } = req.body || {};
+    if (action === 'add') return res.json(await authSvc.addAdvertiserUser(name, pw, advertiserId));
+    if (action === 'edit') return res.json(await authSvc.editAdvertiserUser(name, newPw || pw, active));
+    if (action === 'delete') return res.json(await authSvc.deleteAdvertiserUser(name));
+    if (action === 'list') return res.json({ success: true, users: await authSvc.listAdvertiserUsers() });
+    return res.status(400).json({ error: '알 수 없는 action: ' + action });
+  } catch (err) { res.status(400).json({ error: err.message }); }
 });
 
 // ── 업체(거래처) 삭제(soft) — master/admin 전용. 포털 공유 원장이라 status='ended'로 숨김(가역)+소유 매핑 해제. ──

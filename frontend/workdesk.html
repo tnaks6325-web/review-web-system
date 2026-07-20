@@ -215,6 +215,13 @@
   .ph2 .big{width:40px;height:40px;border-radius:11px;background:var(--adv-soft);color:var(--adv);display:grid;place-items:center;font-weight:800;font-size:16px;flex:none}
   .ph2 h2{margin:0;font-size:18px;font-weight:800} .ph2 .acc{font-size:12px;color:var(--muted)}
   .sect{margin-top:20px} .sect .st{font-size:11px;font-weight:750;letter-spacing:.04em;text-transform:uppercase;color:var(--faint);margin-bottom:10px}
+  .sect .st .sthint{font-weight:500;letter-spacing:0;text-transform:none;color:var(--muted);margin-left:8px;font-size:11px}
+  .acctrow{display:flex;align-items:center;gap:8px;padding:9px 12px;border:1px solid var(--line);border-radius:9px;background:var(--card);margin-bottom:7px}
+  .acctid{font-weight:650;font-size:13px} .acctst{font-size:10.5px;font-weight:700;padding:1px 8px;border-radius:999px}
+  .acctst.on{background:var(--safe-soft);color:var(--safe)} .acctst.off{background:var(--warn-soft);color:var(--warn)}
+  .acctempty{font-size:12.5px;color:var(--muted);padding:9px 2px}
+  .acctadd{display:flex;gap:8px;margin-top:8px;flex-wrap:wrap} .acctadd input{flex:1;min-width:120px;padding:7px 10px;border:1px solid var(--line);border-radius:8px;background:var(--card);color:var(--ink);font-size:13px}
+  .btn.xs.bad{color:var(--bad)} .btn.xs.bad:hover{border-color:var(--bad);background:var(--bad-soft)}
   .own{display:flex;align-items:center;gap:11px;padding:11px 13px;border:1px solid var(--line);border-radius:10px;background:var(--card);margin-bottom:8px}
   .own .ic{width:30px;height:30px;border-radius:8px;background:var(--accent-soft);color:var(--accent);display:grid;place-items:center;flex:none;font-size:15px}
   .own .info{flex:1;min-width:0} .own .info b{font-size:13.5px;display:block;white-space:nowrap;overflow:hidden;text-overflow:ellipsis} .own .info span{font-size:11.5px;color:var(--muted)}
@@ -1074,11 +1081,14 @@ async function renderOwnershipView(){
   //   작업대 사이드바(STATE.tabs, 스코프 적용)와 분리 보관해 스코프 오염 방지.
   if(!STATE.mapTabs||!STATE.mapTabs.length){ const r=await api('/api/trackb/tabs?limit=500&forMapping=1'); STATE.mapTabs=(r&&r.tabs)||[]; }
   buildTabIndex(STATE.mapTabs);
-  const [r, os]=await Promise.all([
+  const isAdminRole = STATE.role==='master'||STATE.role==='admin';
+  const [r, os, ac]=await Promise.all([
     api('/api/trackb/advertisers'),
     api('/api/trackb/owned-sheets').catch(()=>null),
+    isAdminRole ? api('/api/trackb/advertiser-account',{method:'POST',body:JSON.stringify({action:'list'})}).catch(()=>null) : Promise.resolve(null),
   ]);
   STATE.ownedSheetIds = new Set((os&&os.ok&&os.sheetIds)||[]);   // 업체추가 시트 드롭다운 제외용
+  STATE.advAccts = (ac&&ac.success&&ac.users)||[];               // 광고주 로그인 계정(업체별) — master/admin만
   if(!r||!r.ok){ $('#advs').innerHTML=`<div class="empty">업체 목록은 admin/master에서 제공</div>`; return; }
   STATE.advs=r.items||[];
   const canDel=(STATE.role==='master'||STATE.role==='admin');
@@ -1213,6 +1223,59 @@ async function createAdvertiser(){
   await renderOwnershipView();
   const idx=(STATE.advs||[]).findIndex(a=>a.id===newId); if(idx>=0) selAdv(idx);
 }
+// ── 광고주 로그인 계정(업체별) — master/admin 만. 광고주는 이 아이디/비번으로 통합작업대에 로그인 →
+//   role='advertiser' → 이 업체 소유 탭만·마스킹·읽기전용으로 열람. 계정 CRUD = /api/trackb/advertiser-account. ──
+function _advAcctHtml(a){
+  if(!(STATE.role==='master'||STATE.role==='admin')) return '';   // 계정관리는 관리자만
+  const accts=(STATE.advAccts||[]).filter(u=>u.advertiserId===a.id);
+  const rows=accts.map(u=>`<div class="acctrow">
+      <span class="acctid">${esc(u.name)}</span>
+      <span class="acctst ${u.active?'on':'off'}">${u.active?'활성':'비활성'}</span>
+      <span style="flex:1"></span>
+      <button class="btn xs" onclick="advAcctResetPw('${esc(u.name).replace(/'/g,'&#39;')}')">비번 재설정</button>
+      <button class="btn xs" onclick="advAcctToggle('${esc(u.name).replace(/'/g,'&#39;')}',${u.active?'false':'true'})">${u.active?'비활성화':'활성화'}</button>
+      <button class="btn xs bad" onclick="advAcctDelete('${esc(u.name).replace(/'/g,'&#39;')}')">삭제</button>
+    </div>`).join('');
+  // 아이디 기본 제안: 거래처명에서 공백 제거(소문자·영숫자 유지). 관리자가 수정 가능.
+  const suggest = String(a.name||'').trim().replace(/\s+/g,'');
+  return `<div class="sect"><div class="st">광고주 계정 <span class="sthint">이 아이디로 통합작업대 로그인 → 이 업체 정보만 열람(마스킹·읽기전용)</span></div>
+    ${rows||'<div class="acctempty">발급된 계정 없음 — 아래에서 만들어 광고주에게 전달하세요.</div>'}
+    <div class="acctadd">
+      <input id="acctId" placeholder="아이디" autocomplete="off" value="${esc(suggest)}">
+      <input id="acctPw" placeholder="비밀번호(4자 이상)" autocomplete="new-password" type="text">
+      <button class="btn pri" onclick="advAcctAdd('${esc(a.id)}')">＋ 계정 발급</button>
+    </div></div>`;
+}
+async function _advAcctReload(){ const cur=STATE.advCur; if(!cur) return;
+  const ac=await api('/api/trackb/advertiser-account',{method:'POST',body:JSON.stringify({action:'list'})}).catch(()=>null);
+  STATE.advAccts=(ac&&ac.success&&ac.users)||STATE.advAccts;
+  const i=(STATE.advs||[]).findIndex(x=>x.id===cur.id); if(i>=0) selAdv(i);   // 패널 재렌더
+}
+async function advAcctAdd(advertiserId){
+  const id=(($('#acctId')&&$('#acctId').value)||'').trim(), pw=(($('#acctPw')&&$('#acctPw').value)||'').trim();
+  if(!id){ toast('아이디를 입력하세요'); return; }
+  if(pw.length<4){ toast('비밀번호는 4자 이상'); return; }
+  const r=await api('/api/trackb/advertiser-account',{method:'POST',body:JSON.stringify({action:'add',name:id,pw,advertiserId})});
+  if(r&&r.success){ toast('계정 발급: '+id); await _advAcctReload(); }
+  else toast('발급 실패'+(r&&r.error?': '+r.error:''));
+}
+async function advAcctResetPw(name){
+  const pw=prompt('새 비밀번호(4자 이상) — '+name);
+  if(pw===null) return; if(String(pw).trim().length<4){ toast('비밀번호는 4자 이상'); return; }
+  const r=await api('/api/trackb/advertiser-account',{method:'POST',body:JSON.stringify({action:'edit',name,newPw:String(pw).trim()})});
+  if(r&&r.success){ toast('비밀번호 변경: '+name); } else toast('변경 실패'+(r&&r.error?': '+r.error:''));
+}
+async function advAcctToggle(name,active){
+  const r=await api('/api/trackb/advertiser-account',{method:'POST',body:JSON.stringify({action:'edit',name,active})});
+  if(r&&r.success){ toast((active?'활성화':'비활성화')+': '+name); await _advAcctReload(); }
+  else toast('변경 실패'+(r&&r.error?': '+r.error:''));
+}
+async function advAcctDelete(name){
+  if(!confirm(`광고주 계정 '${name}'을(를) 삭제할까요?\n이 계정으로는 더 이상 로그인할 수 없게 됩니다.`)) return;
+  const r=await api('/api/trackb/advertiser-account',{method:'POST',body:JSON.stringify({action:'delete',name})});
+  if(r&&r.success){ toast('계정 삭제: '+name); await _advAcctReload(); }
+  else toast('삭제 실패'+(r&&r.error?': '+r.error:''));
+}
 function buildTabIndex(list){ STATE.sheetMap={}; STATE.tabIndex={};
   for(const t of (list||STATE.tabs)){ if(!STATE.sheetMap[t.sheetId]) STATE.sheetMap[t.sheetId]={title:t.spreadsheetTitle||t.sheetId,tabs:[]};
     STATE.sheetMap[t.sheetId].tabs.push(t); STATE.tabIndex[t.sheetId+'::'+(t.tabGid||'')]=t.tabName; } }
@@ -1250,6 +1313,7 @@ function renderOwnPanel(a, items){
     <div class="ph2"><span class="big">${esc((a.name||'?').slice(0,1))}</span><div style="flex:1"><h2>${esc(a.name)}</h2><div class="acc">거래처 ID: ${esc(a.id)} · 소유 ${items.length}</div></div>
       <div class="aebox" id="aebox">${_aeChipHtml(a)}</div>
       <label class="setvis" title="이 거래처가 통합작업대에서 정산(금액·상태)을 볼 수 있는지"><input type="checkbox" id="setvis" ${a.settlementVisible===false?'':'checked'} onchange="toggleSettleVis('${esc(a.id)}',this.checked)"> 정산 노출</label></div>
+    ${_advAcctHtml(a)}
     <div class="sect"><div class="st">소유 캠페인</div>${owns}</div>
     <div class="sect" id="owntabsSect">${_ownTabsHtml()}</div>
     <div class="sect"><div class="st">소유 추가</div>
