@@ -171,6 +171,24 @@ async function _insertWorkOrder(b, createdBy) {
   return rows[0];
 }
 
+// 신규/재제출 작업오더 SSE 알림 (관리자 대시보드 실시간) — best-effort.
+// 페이로드는 최소 필드만(리뷰가이드/유입가이드 등 본문 미포함 — 상세는 프론트가 admin API로 조회).
+function _emitWorkOrderNew(row, extra) {
+  try {
+    sse.emitWorkOrderNew({
+      id: row.id,
+      title: row.title,
+      created_by: row.created_by,
+      recruit_count: row.recruit_count,
+      start_date: row.start_date,
+      created_at: row.created_at,
+      ...(extra || {}),
+    });
+  } catch (e) {
+    logger.warn(`[order] work_order_new SSE 알림 실패: ${e.message}`);
+  }
+}
+
 // ═══════════════════════════════════════════════════════════
 // 외부(인트라넷) 작업오더 제출 — 공유 시크릿 인증 (JWT 불필요)
 // 인트라넷(inadd-system)에서 직접 POST. created_by 는 페이로드의 requester_name.
@@ -196,6 +214,7 @@ router.post('/intake', async (req, res, next) => {
     }
     const requester = (b.requester_name || b.created_by || '').toString().trim() || '인트라넷';
     const data = await _insertWorkOrder(b, requester);
+    _emitWorkOrderNew(data);
     res.json({ ok: true, data });
   } catch (err) {
     next(err);
@@ -532,6 +551,7 @@ router.post('/submit', authMiddleware, async (req, res, next) => {
     }
 
     const data = await _insertWorkOrder(b, req.admin?.name || '');
+    _emitWorkOrderNew(data);
     res.json({ ok: true, data });
   } catch (err) {
     next(err);
@@ -604,6 +624,10 @@ router.put('/my/update', authMiddleware, async (req, res, next) => {
       `UPDATE work_orders SET ${sets.join(', ')} WHERE id = $${i} RETURNING *`,
       vals
     );
+    // 보완요청(revision) → 재제출(submitted) 복귀 = 관리자 인박스에 다시 알림
+    if (cur[0].status === 'revision') {
+      _emitWorkOrderNew(rows[0], { resubmitted: true });
+    }
     res.json({ ok: true, data: rows[0] });
   } catch (err) {
     next(err);

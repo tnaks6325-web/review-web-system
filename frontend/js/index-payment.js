@@ -1427,6 +1427,7 @@ const _SSE_ICONS = {
   index_build:   { icon: 'fa-database', color: '#F59E0B', label: '인덱스' },
   system:        { icon: 'fa-info-circle', color: '#6B7280', label: '시스템' },
   dirty_detected:{ icon: 'fa-bolt', color: '#D97706', label: '변경 감지' },
+  work_order_new:{ icon: 'fa-clipboard-list', color: '#1b64da', label: '새 작업오더' },
   cs_new_inquiry:{ icon: 'fa-comments', color: '#7C3AED', label: 'C/S 문의' },
   cs_message:    { icon: 'fa-comment-dots', color: '#7C3AED', label: 'C/S 메시지' },
   review_edit_request: { icon: 'fa-images', color: '#3182f6', label: '리뷰 수정요청' },
@@ -1464,7 +1465,7 @@ function connectSSE() {
     };
 
     // 이벤트별 핸들러
-    ['review_submit', 'order_submit', 'order_update', 'image_extract', 'image_upload', 'index_build', 'system', 'dirty_detected', 'smart_build_done', 'dirty_auto_built', 'db_rebuild_progress', 'db_rebuild_done', 'cs_new_inquiry', 'cs_message', 'review_edit_request'].forEach(function(evtType) {
+    ['review_submit', 'order_submit', 'order_update', 'work_order_new', 'image_extract', 'image_upload', 'index_build', 'system', 'dirty_detected', 'smart_build_done', 'dirty_auto_built', 'db_rebuild_progress', 'db_rebuild_done', 'cs_new_inquiry', 'cs_message', 'review_edit_request'].forEach(function(evtType) {
       _sseSource.addEventListener(evtType, function(event) {
         try {
           const data = JSON.parse(event.data);
@@ -1477,6 +1478,12 @@ function connectSSE() {
           _addNotification(data);
           // ★ 인트라넷에서 작업오더 인박스 원본이 수정됨 → 목록/간편보기 즉시 갱신
           if (evtType === 'order_update') {
+            if (typeof loadWorkOrders === 'function') { try { loadWorkOrders(); } catch(_) {} }
+            if (typeof loadDashWorkOrders === 'function') { try { loadDashWorkOrders(); } catch(_) {} }
+          }
+          // ★ 신규/재제출 작업오더 도착 → 우측하단 미확인 카드 + OS 알림 (index-app.js) + 목록 갱신
+          if (evtType === 'work_order_new') {
+            if (typeof _onWorkOrderNewSSE === 'function') { try { _onWorkOrderNewSSE(data); } catch(_) {} }
             if (typeof loadWorkOrders === 'function') { try { loadWorkOrders(); } catch(_) {} }
             if (typeof loadDashWorkOrders === 'function') { try { loadDashWorkOrders(); } catch(_) {} }
           }
