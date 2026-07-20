@@ -227,6 +227,10 @@
   .linkempty{font-size:12.5px;color:var(--muted);padding:6px 2px 10px}
   .lockbadge{font-size:11px;font-weight:750;padding:2px 9px;border-radius:999px} .lockbadge.open{background:var(--warn-soft);color:var(--warn)} .lockbadge.lock{background:var(--safe-soft);color:var(--safe)} .lockbadge.off{background:var(--bad-soft);color:var(--bad)}
   .linkhint{font-size:11.5px;color:var(--muted);margin-top:7px;line-height:1.5}
+  .remainbar{margin:14px 0 4px;padding:11px 14px;border-radius:10px;font-size:13px;font-weight:600;border:1px solid var(--line)}
+  .remainbar.warn{background:var(--warn-soft);color:var(--warn);border-color:color-mix(in srgb,var(--warn) 30%,transparent)}
+  .remainbar.ok{background:var(--safe-soft);color:var(--safe);border-color:color-mix(in srgb,var(--safe) 30%,transparent)}
+  .remainbar b{font-weight:800} .remainbar .rbsub{font-weight:500;opacity:.8}
   .own{display:flex;align-items:center;gap:11px;padding:11px 13px;border:1px solid var(--line);border-radius:10px;background:var(--card);margin-bottom:8px}
   .own .ic{width:30px;height:30px;border-radius:8px;background:var(--accent-soft);color:var(--accent);display:grid;place-items:center;flex:none;font-size:15px}
   .own .info{flex:1;min-width:0} .own .info b{font-size:13.5px;display:block;white-space:nowrap;overflow:hidden;text-overflow:ellipsis} .own .info span{font-size:11.5px;color:var(--muted)}
@@ -397,10 +401,10 @@ function renderShell(){
       ${isAdmin?`<nav class="nav">
         <button class="navb" data-v="workdesk" onclick="switchView('workdesk')">작업대</button>
         <button class="navb" data-v="overview" onclick="switchView('overview')">관측</button>
-        <button class="navb" data-v="ownership" onclick="switchView('ownership')">소유 지정</button></nav>`
+        <button class="navb" data-v="ownership" onclick="switchView('ownership')">업체관리</button></nav>`
       :isStaff?`<nav class="nav">
         <button class="navb" data-v="workdesk" onclick="switchView('workdesk')">작업대</button>
-        <button class="navb" data-v="ownership" onclick="switchView('ownership')">소유 지정</button></nav>`:''}
+        <button class="navb" data-v="ownership" onclick="switchView('ownership')">업체관리</button></nav>`:''}
       <span class="sp"></span>
       <span class="rolebadge">${esc(STATE.role||'?')}${STATE.name?(' · '+esc(STATE.name)):''}</span>
       <button class="btn" onclick="logout()">로그아웃</button>
@@ -1106,6 +1110,7 @@ async function renderOwnershipView(){
   STATE.advs=r.items||[];
   const canDel=(STATE.role==='master'||STATE.role==='admin');
   $('#advs').innerHTML = STATE.advs.map((a,i)=>`<div class="advitem" data-i="${i}" onclick="selAdv(${i})"><span class="ava">${esc((a.name||'?').slice(0,1))}</span><span class="nm">${esc(a.name)}<i class="pmn ${a.inadPm?'':'noae'}">${a.inadPm?('AE '+esc(a.inadPm)):'AE 미지정'}</i></span><span class="ct">${a.owned}</span>${canDel?`<button class="advdel" title="업체 삭제" onclick="event.stopPropagation();deleteAdv(${i})">×</button>`:''}</div>`).join('')||`<div class="empty">등록된 업체 없음</div>`;
+  showAddAdvertiser();   // 기본 화면 = 업체(거래처) 추가(잔여 시트 매칭 유도). 업체 선택/생성 시 selAdv 가 덮어씀.
 }
 // 업체(거래처) 삭제 — master/admin. 소프트 삭제(status='ended', 가역) + 소유 매핑 해제. 확인 다이얼로그.
 async function deleteAdv(i){
@@ -1127,12 +1132,18 @@ function showAddAdvertiser(){
   STATE.advCur=null; STATE.advNameOk=false; _intraItems=[]; _aeItems=[]; document.querySelectorAll('.advitem').forEach(el=>el.classList.remove('on'));
   // 이미 소유 지정된 시트는 제외(한 시트 중복 소유 방지) — 남은 시트가 없으면 안내 옵션.
   const owned=STATE.ownedSheetIds||new Set();
+  const totalSheets=Object.keys(STATE.sheetMap).length;
   const freeSheets=Object.keys(STATE.sheetMap).filter(sid=>!owned.has(sid));
-  const sheetOpts = freeSheets.length
+  const remaining=freeSheets.length;
+  const sheetOpts = remaining
     ? freeSheets.map(sid=>`<option value="${esc(sid)}">${esc(sheetTitle(sid))}</option>`).join('')
     : `<option value="" disabled>지정 가능한 시트 없음 (모든 시트가 이미 소유 지정됨)</option>`;
+  const remainBar = remaining>0
+    ? `<div class="remainbar warn">📋 거래처·담당자 매칭이 필요한 <b>잔여 시트 ${remaining}개</b> <span class="rbsub">(전체 ${totalSheets}개 중)</span></div>`
+    : `<div class="remainbar ok">✅ 모든 시트가 업체에 지정됐습니다 <span class="rbsub">(전체 ${totalSheets}개)</span></div>`;
   $('#ownPanel').innerHTML = `
-    <div class="ph2"><span class="big">＋</span><div><h2>업체(거래처) 추가</h2><div class="acc">① 캠페인 시트를 먼저 선택하고 → ② 거래처명을 검색해 등록하세요. 등록하면 선택한 시트 전체가 이 업체 소유로 자동 지정됩니다.</div></div></div>
+    <div class="ph2"><span class="big">＋</span><div><h2>업체 관리 · 거래처 추가</h2><div class="acc">① 캠페인 시트를 먼저 선택하고 → ② 거래처명을 검색해 등록하세요. 등록하면 선택한 시트 전체가 이 업체 소유로 자동 지정됩니다.</div></div></div>
+    ${remainBar}
     <div class="sect"><div class="st">새 업체</div>
       <div class="add">
         <label>① 캠페인 시트 *</label>
