@@ -641,6 +641,15 @@
   </header>
 
   <div class="content-area">
+    <!-- 관리자 권한모드 배너 (공고수정 허용 명단에 든 리뷰어에게만 표시) -->
+    <div id="adminModeBanner" style="display:none;align-items:center;gap:8px;background:linear-gradient(135deg,#1B64DA,#3182F6);color:#fff;border-radius:12px;padding:10px 14px;margin-bottom:10px;box-shadow:0 2px 10px rgba(27,100,218,.25)">
+      <i class="fas fa-user-shield" style="font-size:1.1rem"></i>
+      <div style="flex:1;line-height:1.35">
+        <div style="font-weight:800;font-size:.9rem">관리자 권한모드입니다</div>
+        <div style="font-size:.72rem;opacity:.92">모집공고 카드의 <b>[✏️ 관리자 수정]</b> 버튼으로 공고를 수정할 수 있어요.</div>
+      </div>
+    </div>
+
     <!-- 로그인 상태 바 -->
     <div class="login-state-bar">
       <i class="fas fa-user-circle name-icon"></i>
@@ -914,20 +923,24 @@ function showHome(user) {
 
 /** 공고수정 스코프 토큰 발급 시도 (마스터 허용명단에 있는 리뷰어만 성공) */
 async function maybeFetchCampEditToken(user) {
+  const setBanner = (on) => {
+    const b = document.getElementById("adminModeBanner");
+    if (b) b.style.display = on ? "flex" : "none";
+  };
   try {
     const phone8 = user && user.phone8;
     const name = user && user.name;
-    if (!phone8 || !name) { sessionStorage.removeItem("rapp_camp_edit_token"); return; }
+    if (!phone8 || !name) { sessionStorage.removeItem("rapp_camp_edit_token"); setBanner(false); return; }
     const r = await fetch(API_BASE_URL + "/api/reviewer/campaign-token", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ name, phone8 }),
     });
-    if (!r.ok) { sessionStorage.removeItem("rapp_camp_edit_token"); return; }  // 비허용자=401 → 조용히
+    if (!r.ok) { sessionStorage.removeItem("rapp_camp_edit_token"); setBanner(false); return; }  // 비허용자=401 → 조용히
     const j = await r.json();
-    if (j && j.ok && j.token) sessionStorage.setItem("rapp_camp_edit_token", j.token);
-    else sessionStorage.removeItem("rapp_camp_edit_token");
-  } catch (_) { /* 네트워크 오류 시 권한 없음으로 취급 */ sessionStorage.removeItem("rapp_camp_edit_token"); }
+    if (j && j.ok && j.token) { sessionStorage.setItem("rapp_camp_edit_token", j.token); setBanner(true); }
+    else { sessionStorage.removeItem("rapp_camp_edit_token"); setBanner(false); }
+  } catch (_) { /* 네트워크 오류 시 권한 없음으로 취급 */ sessionStorage.removeItem("rapp_camp_edit_token"); setBanner(false); }
 }
 
 /** /search 페이지와 세션 동기화 */
