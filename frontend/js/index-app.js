@@ -2212,6 +2212,11 @@ function stopWorkOrderBadgePoll() {
 /* ══════════════════════════════════════════════════════════════
    ★ 컨텍스트 툴바 (탭별 버튼)
    ══════════════════════════════════════════════════════════════ */
+// ★ 탭 등록 단일경로 정책 모드 (GET /api/tab/dashboard 응답 tabRegistrationMode로 갱신)
+//   'order'(기본) = 신규 등록은 작업오더 접수로만 → 수동 '작업시트추가' UI 숨김 (fail-closed)
+let _tabRegMode = 'order';
+function _manualTabAddAllowed() { return _tabRegMode === 'manual' || _tabRegMode === 'auto'; }
+
 // 탭별 버튼 정의
 const _CTX_TOOLBAR_DEFS = {
   dashboard: [
@@ -2246,7 +2251,12 @@ const _CTX_STYLE_MAP = {
 function _updateContextToolbar(tabName) {
   const toolbar = document.getElementById("adminContextToolbar");
   if (!toolbar) return;
-  const defs = _CTX_TOOLBAR_DEFS[tabName] || [];
+  let defs = _CTX_TOOLBAR_DEFS[tabName] || [];
+  // ★ 등록 단일경로: order 모드에선 '작업시트추가' 버튼 숨김 (등록은 작업오더 접수로만)
+  if (!_manualTabAddAllowed()) {
+    defs = defs.filter(d => d.id !== 'ctx-add');
+    while (defs.length && defs[0].sep) defs = defs.slice(1); // 선행 구분선 정리
+  }
   toolbar.innerHTML = '';
 
   defs.forEach(d => {
@@ -8033,9 +8043,10 @@ function _openAdminContextMenu(e, tabKey, campIdx) {
       <hr class="ctx-menu-sep">
     ` : ''}
     <div class="ctx-menu-title">🔧 관리</div>
+    ${_manualTabAddAllowed() ? `
     <button class="ctx-menu-item" onclick="openAddCampaign(); closeAdminContextMenu()">
       <i class="fas fa-plus"></i> 작업시트 추가
-    </button>
+    </button>` : ''}
     <button class="ctx-menu-item" onclick="openBlPanel(); closeAdminContextMenu()">
       <i class="fas fa-ban"></i> 블랙리스트 관리
     </button>
@@ -10439,10 +10450,15 @@ async function submitCreateSheet() {
         `🏷 캠페인: <b>${escHtml(data.campaignName)}</b><br>` +
         (isExisting
           ? `🔗 <a href="${escHtml(data.tabUrl || data.sheetUrl)}" target="_blank" style="color:#0ca678;font-weight:700">해당 탭 바로가기 →</a>`
-          : `🔗 <a href="${escHtml(data.sheetUrl)}" target="_blank" style="color:#0ca678;font-weight:700">구글시트 바로가기 →</a>`);
+          : `🔗 <a href="${escHtml(data.sheetUrl)}" target="_blank" style="color:#0ca678;font-weight:700">구글시트 바로가기 →</a>`) +
+        (data.registrationDeferred
+          ? `<br>📋 <b style="color:#B7791F">목록 등록은 작업오더 접수 시 자동으로 됩니다</b> — 이 탭 URL을 작업오더의 작업시트탭URL로 사용하세요.`
+          : '');
       resultEl.style.display = "block";
       btn.innerHTML = '<i class="fas fa-check"></i> 완료';
-      showToast("✅ 시트 생성 완료! 동기화 후 대시보드에 반영됩니다.", false, 5000);
+      showToast(data.registrationDeferred
+        ? "✅ 시트 생성 완료! 목록 등록은 작업오더 접수 시 반영됩니다."
+        : "✅ 시트 생성 완료! 동기화 후 대시보드에 반영됩니다.", false, 5000);
       // ★ 시트 권한 자동 부여 결과 토스트
       if (data.shareResult) {
         if (data.shareResult.ok !== false) {
@@ -10456,7 +10472,9 @@ async function submitCreateSheet() {
             `⚠️ 시트 쓰기권한 자동 부여 실패 — 수동으로 부여해주세요.`, "error", 5000), 1200);
         }
       }
-      setTimeout(() => showToast("💡 [지금 동기화] 버튼을 눌러 대시보드에 반영하세요.", false, 5000), 3000);
+      if (!data.registrationDeferred) {
+        setTimeout(() => showToast("💡 [지금 동기화] 버튼을 눌러 대시보드에 반영하세요.", false, 5000), 3000);
+      }
     } else {
       throw new Error((data && data.error) ? data.error : "알 수 없는 오류");
     }
@@ -12576,6 +12594,14 @@ async function loadTabDashboard() {
     ]);
     if (res.error) { showToast(res.error, "error"); return; }
     _tabDashData = res;
+
+    // ★ 등록 단일경로 모드 반영 — 'order'가 아니면(manual/auto) 숨겼던 '작업시트추가' 버튼 복원
+    const prevRegMode = _tabRegMode;
+    _tabRegMode = res.tabRegistrationMode || 'order';
+    if (prevRegMode !== _tabRegMode) {
+      const activeTab = document.querySelector('.admin-tab-btn.active')?.dataset?.tab;
+      if (activeTab) { try { _updateContextToolbar(activeTab); } catch(_){} }
+    }
 
     // ★ 제출+입금 모두 100% 완료 탭 팝업 알림
     _checkAllCompleteTabsFromTabDash(res.tabs || []);

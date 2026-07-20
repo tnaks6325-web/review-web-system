@@ -21,6 +21,7 @@ const { readSheet, getSpreadsheetMeta, batchReadSheet, getSheetModifiedTime, sha
 const { computeChecksum } = require('../utils/checksum');
 const { logger } = require('../utils/logger');
 const { throttledCall, driveThrottledCall, getThrottleStatus } = require('../utils/sheetsThrottle');
+const { allowAutoRegister } = require('../utils/tabRegistration');
 
 // ═══════════════════════════════════════════════════════════
 // 상수 및 상태
@@ -496,6 +497,7 @@ async function runSmartBuild({ noYield = false } = {}) {
     tabsScanned: 0,
     tabsUpdated: 0,
     tabsSkipped: 0,
+    tabsSkippedUnregistered: 0,
     errors: 0,
     errorDetails: [],
     elapsed: 0,
@@ -543,9 +545,16 @@ async function runSmartBuild({ noYield = false } = {}) {
       logger.info(`[smartBuild] 첫 실행: 체크섬 캐시 ${masterRows.length}건 + modifiedTime 캐시 ${restored}건 복원`);
     }
 
-    // 마감 탭 목록 로드
-    const { rows: closedRows } = await pool.query('SELECT sheet_id, tab_name FROM tab_configs WHERE is_closed = TRUE');
-    const closedSet = new Set(closedRows.map(r => `${r.sheet_id}||${r.tab_name}`));
+    // 마감 탭 + 등록 탭(단일경로 게이트용) 목록 로드
+    const { rows: tcAllRows } = await pool.query('SELECT sheet_id, tab_name, tab_gid, is_closed FROM tab_configs');
+    const closedSet = new Set(tcAllRows.filter(r => r.is_closed).map(r => `${r.sheet_id}||${r.tab_name}`));
+    // ★ 탭 등록 단일경로(TAB_REGISTRATION_MODE≠auto): tab_configs에 등록된 탭(이름 또는 gid 일치)만 빌드.
+    //   gid 일치 = 등록 탭의 리네임이므로 통과(빌드 유지, 이름 수렴은 04시 전체빌드가 담당).
+    //   미등록 탭은 인덱스/목록에 새로 흘러들지 않음 — 신규 등록은 작업오더 접수로만.
+    const registeredSet = new Set(tcAllRows.map(r => `${r.sheet_id}||${r.tab_name}`));
+    const registeredGidSet = new Set(
+      tcAllRows.filter(r => r.tab_gid).map(r => `${r.sheet_id}||gid:${r.tab_gid}`)
+    );
 
     // ★ 아카이브된 탭 목록 로드 — 스마트빌드에서 완전히 제외
     const { rows: archivedRows } = await pool.query('SELECT sheet_id, tab_name, tab_gid FROM index_master_archive');
@@ -652,6 +661,11 @@ async function runSmartBuild({ noYield = false } = {}) {
           const gidStr = String(t.properties.sheetId);
           const gidKey = `${sheetId}||gid:${gidStr}`;
           if (archivedGidSet && archivedGidSet.has(gidKey)) return false;
+          // ★ 등록 단일경로 게이트: 미등록 탭(이름·gid 모두 불일치)은 빌드/등록하지 않음
+          if (!allowAutoRegister() && !registeredSet.has(key) && !registeredGidSet.has(gidKey)) {
+            result.tabsSkippedUnregistered++;
+            return false;
+          }
           return !closedSet.has(key);
         });
 
@@ -785,7 +799,7 @@ async function runSmartBuild({ noYield = false } = {}) {
     }
 
     result.elapsed = Date.now() - startTime;
-    logger.info(`[smartBuild] #${runNum} 완료: 변경 ${result.sheetsChanged}시트(연기 ${result.sheetsDeferred}), 스캔 ${result.tabsScanned}탭, 갱신 ${result.tabsUpdated}탭, 스킵 ${result.tabsSkipped}, 오류 ${result.errors}, ${result.elapsed}ms`);
+    logger.info(`[smartBuild] #${runNum} 완료: 변경 ${result.sheetsChanged}시트(연기 ${result.sheetsDeferred}), 스캔 ${result.tabsScanned}탭, 갱신 ${result.tabsUpdated}탭, 스킵 ${result.tabsSkipped}, 오류 ${result.errors}, ${result.elapsed}ms${result.tabsSkippedUnregistered ? ` (미등록 ${result.tabsSkippedUnregistered}탭 제외 — 작업오더 접수로만 등록)` : ''}`);
 
     // ★ modifiedTime 캐시 스냅샷 저장 — 다음 재배포의 콜드스타트 전체 스윕 제거(best-effort)
     await _persistModifiedCache(sheetIds);

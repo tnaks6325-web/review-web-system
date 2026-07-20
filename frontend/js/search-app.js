@@ -8756,7 +8756,7 @@ async function debugSingleSheet(mode) {
     // ① 베이스시트 등록 여부
     html += `<b>① 베이스시트 등록</b>: `;
     if (data.registered === true)  html += ok("✅ 등록됨");
-    else if (data.registered === false) html += err("❌ 미등록 → [+작업시트추가]로 먼저 등록하세요");
+    else if (data.registered === false) html += err("❌ 미등록 → 작업오더 접수로 등록하세요 (관리자 작업오더 탭 → 접수하기)");
     else html += warn("⚠ 확인 불가");
     html += `<br>`;
 
@@ -8847,7 +8847,7 @@ async function debugSingleSheet(mode) {
     else if (data.verdict === "tab_not_found") html += err(`❌ gid:${diagGid} 탭을 찾을 수 없음 — URL의 gid 값을 확인하세요`);
     else if (data.verdict === "no_tab" || data.verdict === "no_valid_tab") html += err("❌ 유효 탭 없음 — 탭명 패턴 또는 헤더 확인 필요");
     else if (data.verdict === "no_access") html += err("❌ 접근 불가 — 시트 공유 설정 확인");
-    else if (data.verdict === "not_registered") html += err("❌ 미등록 — [+작업시트추가] 필요");
+    else if (data.verdict === "not_registered") html += err("❌ 미등록 — 작업오더 접수 필요");
     else if (data.verdict)                 html += warn(escHtml(data.verdict));
     else if (data.error)                   html += err(escHtml(data.error));
 
