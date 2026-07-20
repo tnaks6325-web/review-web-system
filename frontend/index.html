@@ -18,6 +18,7 @@
   <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@fortawesome/fontawesome-free@6.4.0/css/all.min.css"/>
   <link href="https://fonts.googleapis.com/css2?family=Noto+Sans+KR:wght@300;400;500;600;700;800&display=swap" rel="stylesheet"/>
   <script src="api.js"></script>
+  <script src="js/campaign-cards.js"></script>
   <style>
     :root {
       --p: #3182f6; --p-light: #e8f1fe; --p-dark: #1b64da; --p-m: #a6c8fb;
@@ -2075,11 +2076,16 @@ async function loadRecruitPreview() {
   try {
     const res = await fetch(API_BASE_URL + "/api/campaign/list");
     const json = await res.json();
-    // ★ 참여형(participation_mode) 공고는 신규 참여 UI(M2) 배포 전까지 레거시 카드에서 숨김
-    //   — 구 신청 폼은 holdToken을 저장하지 못해 신청 즉시 당일 참여권이 소각되는 사고 방지.
+    // ★ M2: 참여형(participation_mode) 공고는 공용 카드 모듈(campaign-cards.js)로 렌더 —
+    //   카드 탭 시 전용 상세(campaign.html)로 이동해 참여·작업내용·인라인 제출 진행.
+    //   레거시 공고는 기존 카드/신청 흐름 그대로.
+    const parts = (json.data || []).filter(c => c.participation_mode && c.status !== "closed");
+    const partHtml = (window.CampCards && parts.length)
+      ? (CampCards.setServerNow(json.serverNow), parts.map(c => CampCards.cardHtml(c)).join(""))
+      : "";
     const list = (json.data || []).filter(c => c.status === "active" && !c.participation_mode);
 
-    const html = list.length === 0
+    const html = partHtml + ((list.length === 0 && !partHtml)
       ? `<div class="empty-state" style="padding:16px"><i class="fas fa-inbox"></i>현재 진행 중인 모집공고가 없습니다</div>`
       : list.map(c => {
           const channel = c.channel === "직접입력" ? (c.channel_custom || "") : (c.channel || "");
@@ -2134,12 +2140,14 @@ async function loadRecruitPreview() {
                 </div>
               </div>
             </div>`;
-        }).join("");
+        }).join(""));
 
     const el1 = document.getElementById("recruitPreviewList");
     const el2 = document.getElementById("recruitPreviewList2");
     if (el1) el1.innerHTML = html;
     if (el2) el2.innerHTML = html;
+    // 참여형 오픈예정 카운트다운 틱 + 0 도달 시 재조회(오픈 전환)
+    if (partHtml && window.CampCards) CampCards.startTicker(loadRecruitPreview);
   } catch(e) {
     const errHtml = `<div class="empty-state"><i class="fas fa-exclamation-circle"></i>모집공고 로드 실패</div>`;
     const el1 = document.getElementById("recruitPreviewList");

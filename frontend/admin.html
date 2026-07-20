@@ -2008,6 +2008,45 @@ body{ letter-spacing:-.01em; }
         </div>
       </div>
 
+      <!-- ── ⚡ 참여형 캠페인 (M2) ── -->
+      <div class="rform-group" style="border:1.5px solid #12b886;border-radius:12px;padding:12px;background:#f6fffb">
+        <label style="display:flex;align-items:center;gap:9px;cursor:pointer;font-weight:800;font-size:.86rem">
+          <input type="checkbox" id="rf_participation" onchange="onParticipationToggle(this.checked)" style="width:17px;height:17px;accent-color:#12b886">
+          ⚡ 참여형 캠페인 <span style="font-weight:600;color:var(--t3);font-size:.72rem">— 리뷰어가 직접 참여 → 작업내용 확인 → 화면 안에서 구매양식 제출</span>
+        </label>
+        <div style="font-size:.7rem;color:var(--t3);margin-top:3px">끄면 기존 공고와 100% 동일하게 동작합니다.</div>
+        <div id="rf_part_section" style="display:none;margin-top:10px">
+          <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px">
+            <div><label class="rform-label">구매시간 시작</label><input id="rf_window_start" type="time" class="rform-input" oninput="renderPartCheck()"></div>
+            <div><label class="rform-label">구매시간 종료</label><input id="rf_window_end" type="time" class="rform-input" oninput="renderPartCheck()"></div>
+            <div><label class="rform-label">하루 진행 인원</label><input id="rf_daily_limit" type="number" min="1" class="rform-input" placeholder="예: 20" oninput="renderPartCheck()"></div>
+            <div><label class="rform-label">총 모집 인원 <span style="color:var(--t4);font-weight:400">(리뷰어 비공개)</span></label><input id="rf_recruit_total" type="number" min="0" class="rform-input" placeholder="0 = 무제한"></div>
+          </div>
+          <div style="margin-top:8px"><label class="rform-label">랜딩(상품) 페이지 URL</label><input id="rf_landing_url" type="text" class="rform-input" placeholder="https:// — 참여자에게 [상품 페이지 열기] 버튼으로 노출"></div>
+          <details style="margin-top:8px"><summary style="font-size:.74rem;font-weight:700;color:var(--t3);cursor:pointer">고급 설정 (참여 제한시간·마감 버퍼)</summary>
+            <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-top:6px">
+              <div><label class="rform-label">참여 제한시간(분)</label><input id="rf_hold_ttl" type="number" min="5" class="rform-input" value="15"></div>
+              <div><label class="rform-label">종료 전 신규참여 마감(분)</label><input id="rf_close_buffer" type="number" min="0" class="rform-input" value="10"></div>
+            </div>
+          </details>
+          <div style="margin-top:10px;padding-top:8px;border-top:1px dashed var(--border)">
+            <div style="font-size:.76rem;font-weight:800;margin-bottom:6px">📦 작업내용 <span style="font-weight:600;color:var(--t3);font-size:.7rem">— 참여한 리뷰어에게만 공개</span></div>
+            <label class="rform-label">상품 · 옵션 · 결제금액</label>
+            <textarea id="rf_wd_product" class="rform-input" rows="2" placeholder="예: 무선 청소기 / 옵션 없음 / 결제금액 26,900원"></textarea>
+            <label class="rform-label" style="margin-top:6px">유입가이드</label>
+            <textarea id="rf_wd_inflow" class="rform-input" rows="3" placeholder="키워드 검색 or 링크 진입 방법 안내"></textarea>
+            <label class="rform-label" style="margin-top:6px">리뷰 가이드</label>
+            <textarea id="rf_wd_review" class="rform-input" rows="2" placeholder="별점/포토 비율 등"></textarea>
+            <label class="rform-label" style="margin-top:6px">특이사항</label>
+            <textarea id="rf_wd_notes" class="rform-input" rows="2" placeholder="선택"></textarea>
+          </div>
+          <div style="margin-top:10px">
+            <div style="font-size:.76rem;font-weight:800;margin-bottom:6px">🧮 게시 전 자동 점검</div>
+            <div id="rf_part_check" style="display:flex;flex-direction:column;gap:5px"></div>
+          </div>
+        </div>
+      </div>
+
     </div>
 
     <!-- ── 실시간 미리보기 패널 ── -->
