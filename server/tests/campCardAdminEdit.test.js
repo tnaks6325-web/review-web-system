@@ -52,6 +52,11 @@ ok('저장해도 팝업 유지(저장 성공 경로에 ovl.remove 없음)',
 // ── 요구사항: 랜딩 URL 바로가기 버튼(썸네일용 상품페이지 열기) ──
 ok('랜딩(상품) URL 바로가기 버튼 → 새 탭으로 상품페이지 열기',
   /id="caeLandingOpen"/.test(cc) && /#caeLandingOpen'\)\.addEventListener\('click'[\s\S]*?window\.open\(u, '_blank'/.test(cc));
+ok('랜딩 URL [가져오기] → 상품명·썸네일 자동수집(/api/product/preview)',
+  /id="caeProdFetch"/.test(cc) && /function _caeFetchProduct/.test(cc) && /\/api\/product\/preview/.test(cc));
+ok('가져오기: 상품명→제목·썸네일→cae_thumb 채움, 가격은 참고용(저장항목 없음)',
+  (() => { const f = cc.split('async function _caeFetchProduct')[1] || '';
+    return /cae_title'\)\.value = j\.name/.test(f) && /cae_thumb'\)\.value = j\.thumbnail/.test(f) && /참고용/.test(f); })());
 ok('모달·토스트 자체 스타일 주입(호출 경로 무관 안전)',
   /function _caeEl\(\) \{\s*_injectStyles\(\);/.test(cc) && /function _toast\(msg, isErr\) \{\s*_injectStyles\(\);/.test(cc));
 

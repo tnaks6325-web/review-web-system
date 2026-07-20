@@ -40,6 +40,22 @@ function _findProduct(nodes) {
   return null;
 }
 
+// SSRF 가드: 사설·루프백·링크로컬 IP 리터럴/localhost 차단(리터럴 기준 — DNS 리바인딩까진 미방어,
+// 엔드포인트는 신뢰 계정 전용·반환값 제한적이라 비례적). 상품 URL은 공개 쇼핑몰만 대상.
+function _isBlockedHost(host) {
+  if (!host) return true;
+  const h = host.toLowerCase().replace(/^\[|\]$/g, '');
+  if (h === 'localhost' || h.endsWith('.localhost') || h === '0.0.0.0') return true;
+  const m = h.match(/^(\d{1,3})\.(\d{1,3})\.(\d{1,3})\.(\d{1,3})$/);
+  if (m) {
+    const a = Number(m[1]), b = Number(m[2]);
+    if (a === 127 || a === 10 || a === 0 || (a === 192 && b === 168) ||
+        (a === 172 && b >= 16 && b <= 31) || (a === 169 && b === 254)) return true;
+  }
+  if (h === '::1' || h.startsWith('fe80:') || h.startsWith('fc') || h.startsWith('fd')) return true;
+  return false;
+}
+
 function _mallOf(host) {
   if (/oliveyoung/i.test(host)) return '올리브영';
   if (/coupang/i.test(host)) return '쿠팡';
@@ -60,6 +76,7 @@ router.post('/preview', authMiddleware, adminOrMasterMiddleware, async (req, res
     if (!/^https?:\/\//i.test(url)) return res.status(400).json({ ok: false, error: '유효한 URL이 아닙니다.' });
     let host = '';
     try { host = new URL(url).hostname; } catch (_) {}
+    if (_isBlockedHost(host)) return res.status(400).json({ ok: false, error: '허용되지 않은 주소입니다.' });
     const mall = _mallOf(host);
 
     let html = '';
