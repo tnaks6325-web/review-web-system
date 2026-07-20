@@ -31,7 +31,10 @@
   .btn.pri{background:var(--accent);color:#fff;border-color:var(--accent);box-shadow:0 1px 2px rgba(37,99,235,.32)} .btn.pri:hover{background:var(--accent-deep);border-color:var(--accent-deep)}
   .btn:disabled{background:var(--card2);color:var(--faint);border-color:var(--card2);cursor:not-allowed;box-shadow:none;transform:none}
   .wrap{display:grid;grid-template-columns:230px 1fr 300px;min-height:calc(100vh - 50px)}
-  @media(max-width:900px){.wrap{grid-template-columns:1fr}.side,.rail{display:none}.wrap.showlist .main{display:none}.wrap.showlist .side{display:block}}
+  .wrap.railhidden{grid-template-columns:230px 1fr}          /* 우측 레일 숨김 → 2열(메인 넓게) */
+  .wrap.railhidden .rail{display:none}
+  @media(max-width:900px){.wrap,.wrap.railhidden{grid-template-columns:1fr}.side,.rail{display:none}.wrap.showlist .main{display:none}.wrap.showlist .side{display:block}}
+  .railtgl{font-size:12px}   /* 우측 상단 사이드바 토글 */
   .side{border-right:1px solid var(--line);background:var(--card);padding:12px 10px;overflow:auto}
   .side .sh{font-size:10px;font-weight:750;letter-spacing:.05em;text-transform:uppercase;color:var(--faint);margin:6px 6px 8px;display:flex;justify-content:space-between}
   .titem{display:flex;align-items:center;gap:6px;font-size:12.5px;padding:8px 10px;border-radius:8px;margin-bottom:3px;color:var(--muted);cursor:pointer;border:1px solid transparent}
@@ -487,6 +490,7 @@ function renderShell(){
         <button class="navb" data-v="workdesk" onclick="switchView('workdesk')">작업대</button>
         <button class="navb" data-v="ownership" onclick="switchView('ownership')">업체관리</button></nav>`:''}
       <span class="sp"></span>
+      <button class="btn railtgl" id="railToggle" onclick="toggleRail()" style="display:none" title="우측 사이드바(협업/댓글·Parity) 숨기기/표시"></button>
       <span class="rolebadge">${esc(STATE.role||'?')}${STATE.name?(' · '+esc(STATE.name)):''}</span>
       <button class="btn" onclick="logout()">로그아웃</button>
     </div>
@@ -494,16 +498,28 @@ function renderShell(){
   switchView(STATE.view||'workdesk');
 }
 function switchView(v){ STATE.view=v; document.querySelectorAll('.navb').forEach(b=>b.classList.toggle('on',b.dataset.v===v));
+  const rt=$('#railToggle'); if(rt) rt.style.display=(v==='workdesk')?'':'none';   // 레일은 작업대 뷰에만 존재
   if(v==='ownership') renderOwnershipView(); else if(v==='overview') renderOverviewView(); else renderWorkdeskView(); }
+
+// ── 우측 사이드바(레일) 숨기기/표시 — 브라우저 로컬 영속(레이아웃 취향, 재접속·탭전환 유지) ──
+function _railHidden(){ try{ return localStorage.getItem('wd_rail_hidden_v1')==='1'; }catch(_){ return false; } }
+function _syncRailToggle(){ const b=$('#railToggle'); if(!b) return; const hidden=_railHidden();
+  b.textContent = hidden ? '◧ 사이드바 표시' : '◨ 사이드바 숨기기';
+  b.setAttribute('aria-pressed', hidden?'true':'false'); }
+function toggleRail(){ const hidden=!_railHidden();
+  try{ localStorage.setItem('wd_rail_hidden_v1', hidden?'1':'0'); }catch(_){}
+  const w=$('#wrap'); if(w) w.classList.toggle('railhidden', hidden);
+  _syncRailToggle(); }
 
 // ══ 작업대 뷰 ══
 function renderWorkdeskView(){
   const isMaster = STATE.role==='master';
-  $('#viewroot').innerHTML = `<div class="wrap showlist" id="wrap">
+  $('#viewroot').innerHTML = `<div class="wrap showlist${_railHidden()?' railhidden':''}" id="wrap">
     <div class="side"><div class="sh"><span>작업 목록</span><span id="tcount"></span></div>
       <div id="tabs"><div class="empty">불러오는 중…</div></div></div>
     <div class="main" id="main"><div class="empty">왼쪽에서 작업을 선택하세요.</div></div>
     <div class="rail" id="rail"></div></div>`;
+  _syncRailToggle();
   loadTabs();
 }
 async function loadTabs(){
