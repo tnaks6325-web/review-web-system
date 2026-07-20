@@ -154,10 +154,37 @@ ok("timeStrToMinutes('24:00') = 1440 (PG TIME 자정 종료 창 — 무신호 cl
   assert.strictEqual(timeStrToMinutes('24:01'), null);
 });
 
-ok('window 미설정 → closed + stateReason=window_invalid (관리자 원인 식별 신호)', () => {
-  const st = computeCampaignState({ ...CAMP, window_start: null, window_end: null }, ZERO, kst('15:00'));
+/* ── 자율주문(종일 오픈) — 시간창 양쪽 미설정 정식 지원 ── */
+ok('자율주문: 시간창 양쪽 미설정 = 종일 open (allDay 신호, 새벽에도 open)', () => {
+  const c = { ...CAMP, window_start: null, window_end: null };
+  const st = computeCampaignState(c, ZERO, kst('15:00'));
+  assert.strictEqual(st.state, 'open');
+  assert.strictEqual(st.allDay, true);
+  assert.strictEqual(st.opensAt, null);
+  assert.strictEqual(st.closesAt, null);
+  assert.strictEqual(computeCampaignState(c, ZERO, kst('02:00')).state, 'open'); // preopen·cutoff 없음
+});
+
+ok('자율주문: 일일한도·총모집 게이트는 동일 작동(daily_done/soft_full)', () => {
+  const c = { ...CAMP, window_start: null, window_end: null };
+  assert.strictEqual(computeCampaignState(c, { ...ZERO, todaySubmitted: 20 }, kst('15:00')).state, 'daily_done');
+  assert.strictEqual(
+    computeCampaignState(c, { ...ZERO, submittedAll: 95, activeHolds: 5, todaySubmitted: 3 }, kst('15:00')).state,
+    'soft_full');
+});
+
+ok('자율주문: closed 영속·비활성은 동일(closed 우선)', () => {
+  const c = { ...CAMP, window_start: null, window_end: null, status: 'closed' };
+  assert.strictEqual(computeCampaignState(c, ZERO, kst('15:00')).state, 'closed');
+});
+
+ok('한쪽만 설정된 시간창은 여전히 closed + window_invalid (설정 오류 방어)', () => {
+  const st = computeCampaignState({ ...CAMP, window_start: null }, ZERO, kst('15:00'));
   assert.strictEqual(st.state, 'closed');
   assert.strictEqual(st.stateReason, 'window_invalid');
+  const st2 = computeCampaignState({ ...CAMP, window_end: null }, ZERO, kst('15:00'));
+  assert.strictEqual(st2.state, 'closed');
+  assert.strictEqual(st2.stateReason, 'window_invalid');
 });
 
 ok('스윕 미실행 계약: 만료 홀드는 counts 집계 조건(expires_at>now)에서 이미 제외', () => {

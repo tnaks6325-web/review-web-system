@@ -80,8 +80,9 @@
         return `<span class="pbtn off">오늘 참여 마감</span>
                 <div class="pnote">진행 중인 분은 ${_fmtHM(c.closesAt)}까지 제출</div>`;
       case 'daily_done':
+        // 자율주문(시간창 없음)은 opensAt이 없음 → 시각 없이 "내일 다시 오픈"
         return `<span class="pbtn off">오늘은 마감되었어요</span>
-                <div class="pnote">내일 ${_fmtHM(c.opensAt)} 다시 오픈</div>`;
+                <div class="pnote">${c.opensAt ? `내일 ${_fmtHM(c.opensAt)} 다시 오픈` : '내일 다시 오픈'}</div>`;
       case 'soft_full':
         return `<span class="pbtn off">잔여 대기 중</span>
                 <div class="pnote">자리가 나면 다시 열려요</div>`;

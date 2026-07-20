@@ -103,13 +103,17 @@ const detailLimiter = rateLimit({
   message: { ok: false, error: '요청이 너무 많습니다. 잠시 후 다시 시도하세요.', reason: 'rate_limited' },
 });
 
-/** 참여형 활성화 게이트(레드 #6·#10): gid·시간창·일일건수 없인 active 불가 */
+/** 참여형 활성화 게이트(레드 #6·#10): gid·일일건수 필수. 시간창은
+ *  "양쪽 설정(start<end)" 또는 "양쪽 미설정(자율주문=종일 오픈)"만 허용 — 한쪽만/역전은 차단. */
 function _participationActivationErrors(c) {
   const errs = [];
   if (!c.linked_sheet_id || !c.linked_tab_gid) errs.push('연결 시트/탭 gid 필수(탭 리네임 내성)');
-  const s = timeStrToMinutes(c.window_start);
-  const e = timeStrToMinutes(c.window_end);
-  if (s === null || e === null || e <= s) errs.push('구매시간창(window_start < window_end) 필수');
+  const allDay = !c.window_start && !c.window_end; // 자율주문(종일 오픈)
+  if (!allDay) {
+    const s = timeStrToMinutes(c.window_start);
+    const e = timeStrToMinutes(c.window_end);
+    if (s === null || e === null || e <= s) errs.push('구매시간창은 시작<종료로 설정하거나, 자율주문이면 양쪽 모두 비워두세요');
+  }
   if (!(Number(c.daily_limit) >= 1)) errs.push('일일진행건수(daily_limit ≥ 1) 필수');
   return errs;
 }
@@ -441,10 +445,11 @@ async function _applyParticipation(req, res, next, campPre) {
       return res.status(429).json({ ok: false, reason: 'daily_apply_cap', error: '오늘 신청 가능한 횟수를 넘었어요.' });
     }
 
-    // 홀드 생성: expires_at = min(now+TTL, 오늘 window_end) — state=open이므로 closesAt는 항상 유효·미래
+    // 홀드 생성: expires_at = min(now+TTL, 오늘 window_end) — state=open이므로 closesAt는 유효·미래.
+    // ★ 자율주문(시간창 미설정)은 closesAt이 null → TTL만 적용(종일 오픈이라 창 마감 상한 없음)
     const ttlMs = (Number(camp.hold_ttl_min) || 15) * 60000;
     const closesAt = kstTodayAt(camp.window_end, now);
-    const expiresAt = new Date(Math.min(now.getTime() + ttlMs, closesAt.getTime()));
+    const expiresAt = new Date(closesAt ? Math.min(now.getTime() + ttlMs, closesAt.getTime()) : now.getTime() + ttlMs);
     const holdToken = crypto.randomBytes(24).toString('base64url');
     const ins = await client.query(
       `INSERT INTO campaign_applications

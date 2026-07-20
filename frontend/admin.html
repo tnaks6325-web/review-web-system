@@ -2017,7 +2017,7 @@ body{ letter-spacing:-.01em; }
         <div style="font-size:.7rem;color:var(--t3);margin-top:3px">끄면 기존 공고와 100% 동일하게 동작합니다.</div>
         <div id="rf_part_section" style="display:none;margin-top:10px">
           <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px">
-            <div><label class="rform-label">구매시간 시작</label><input id="rf_window_start" type="time" class="rform-input" oninput="renderPartCheck()"></div>
+            <div><label class="rform-label">구매시간 시작 <span style="font-weight:400;color:#9CA3AF">(자율주문이면 비움)</span></label><input id="rf_window_start" type="time" class="rform-input" oninput="renderPartCheck()"></div>
             <div><label class="rform-label">구매시간 종료</label><input id="rf_window_end" type="time" class="rform-input" oninput="renderPartCheck()"></div>
             <div><label class="rform-label">하루 진행 인원</label><input id="rf_daily_limit" type="number" min="1" class="rform-input" placeholder="예: 20" oninput="renderPartCheck()"></div>
             <div><label class="rform-label">총 모집 인원 <span style="color:var(--t4);font-weight:400">(리뷰어 비공개)</span></label><input id="rf_recruit_total" type="number" min="0" class="rform-input" placeholder="0 = 무제한"></div>
