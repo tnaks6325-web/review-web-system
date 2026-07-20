@@ -17,7 +17,11 @@ function ok(name, cond) { assert(cond, name); passed++; console.log('  ✓ ' + n
 // ── 작업오더 → 발행 자동 프리필 ──
 ok('prefill: participation 플래그 포함', /participation:\s*true/.test(app));
 ok('prefill: 일일건수·총모집·구매시간대 복사', /daily_limit:\s*o\.daily_count/.test(app) && /recruit_total:\s*o\.recruit_count/.test(app) && /purchase_time:\s*o\.purchase_time/.test(app));
-ok('prefill: 유입가이드 원본 HTML 보존(wd_inflow_html)', /wd_inflow_html:.*o\.inflow_guide/.test(app));
+ok('prefill: 유입가이드 원본 HTML 보존(wd_inflow_html)', /wd_inflow_html:[\s\S]{0,400}o\.inflow_guide/.test(app));
+ok('prefill: 평문 가이드의 첨부이미지 URL → 실제 <img> 변환(_woPlainGuideToHtml)', /function _woPlainGuideToHtml/.test(app) && /_woPlainGuideToHtml\(o\.inflow_guide\)/.test(app));
+ok('변환: guide-image 프록시·Drive URL을 <img>로, 일반 URL은 <a>로', /api\\\/order\\\/guide-image\\\/\[-\\w\]\{20,\}/.test(app) && /drive\.google\.com\/thumbnail\?id=/.test(app));
+ok('변환: 이미지 없으면 ""(평문 경로 유지 — 동작 불변)', /return hasImg \? html : "";/.test(app));
+ok('변환: 메타 라인 제거(_woCleanGuide 재사용)', /_woCleanGuide\(raw\)/.test(app));
 ok('prefill: 링크유입이면 landing_url = 유입링크 우선', /_woGuideUrls\(o\.inflow_guide\)\[0\]/.test(app));
 ok('modal: 프리필 소비 시 참여형 토글 자동 ON + 시간대 파서', /prefill\.participation && document\.getElementById\("rf_participation"\)/.test(recjs) && /_parsePurchaseTime\(prefill\.purchase_time/.test(recjs));
 ok('modal: 원본 HTML은 미수정 시 그대로 전송(수정하면 평문 전환)', /_useRawInflow \? window\._wdInflowRawHtml/.test(recjs) && /dataset\.rawHtml = ""/.test(recjs));

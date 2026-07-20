@@ -1827,6 +1827,31 @@ function _woProductLines(o) {
   return withUrl.map((l, i) => `${i + 1}.${l}`).join("\n");  // 2개+ → 번호+줄바꿈
 }
 
+// 평문 유입가이드 → 리뷰어 노출용 HTML: 첨부 이미지 URL(guide-image 프록시·Drive)을 실제 <img>로,
+// 일반 URL은 <a>로. 이미지가 하나도 없으면 ""(기존 평문 경로 유지 — 동작 불변).
+// "[유입가이드 첨부 이미지]" 헤더·"N. 파일명 (…저장됨)" 메타 라인은 _woCleanGuide로 제거.
+// 서버 sanitize(allowedTags img/a…)와 campaign.html의 .wd-body img 스타일에 맞춘 무스타일 태그만 생성.
+function _woPlainGuideToHtml(raw) {
+  const cleaned = (typeof _woCleanGuide === "function") ? _woCleanGuide(raw) : String(raw || "");
+  if (!cleaned.trim()) return "";
+  const esc = s => String(s).replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
+  const parts = cleaned.split(/(https?:\/\/[^\s<]+)/g);
+  let html = "", hasImg = false;
+  for (let i = 0; i < parts.length; i++) {
+    if (i % 2 === 1) {
+      const url = parts[i];
+      const isProxy = /\/api\/order\/guide-image\/[-\w]{20,}/.test(url);
+      const id = (typeof _driveId === "function") ? _driveId(url) : "";
+      if (isProxy) { html += `<img src="${esc(url)}" alt="유입가이드 이미지">`; hasImg = true; }
+      else if (id) { html += `<img src="https://drive.google.com/thumbnail?id=${id}&sz=w1600" alt="유입가이드 이미지">`; hasImg = true; }
+      else html += `<a href="${esc(url)}">${esc(url)}</a>`;
+    } else {
+      html += esc(parts[i]).replace(/\n/g, "<br>");
+    }
+  }
+  return hasImg ? html : "";
+}
+
 // 작업오더의 첫 상품명·결제금액 → 공고 상품정보 기본값 (자동수집 실패해도 폼에 기본 표시)
 function _woFirstProductInfo(o) {
   // 1) 구조화 JSON 우선
@@ -2160,7 +2185,12 @@ async function woCreateCampaign(id) {
     wd_product:     (typeof _woProductLines === "function" ? (_woProductLines(o) || "") : "") || (o.product_option || ""),
     // ★ 리뷰 #2: inflow_guide는 HTML(에디터)·평문(인트라넷/레거시) 두 형태 실존 —
     //   태그가 실제로 있을 때만 raw HTML 경로(이미지 보존), 평문은 escape 경로(개행·'<옵션>' 안전)
-    wd_inflow_html: (o.inflow_type !== "link" && o.inflow_guide && /<[a-z][^>]*>/i.test(o.inflow_guide)) ? o.inflow_guide : "",
+    //   ★ 평문이라도 첨부 이미지 URL(guide-image/Drive)이 있으면 <img>로 변환해 raw 경로로 —
+    //     리뷰어 참여 화면에서 링크 문자열이 아닌 실제 이미지가 보이게(_woPlainGuideToHtml, 이미지 없으면 "" = 평문 유지)
+    wd_inflow_html: (o.inflow_type !== "link" && o.inflow_guide)
+      ? (/<[a-z][^>]*>/i.test(o.inflow_guide) ? o.inflow_guide
+         : (typeof _woPlainGuideToHtml === "function" ? _woPlainGuideToHtml(o.inflow_guide) : ""))
+      : "",
     wd_inflow_text: o.inflow_type === "link"
       ? "링크유입 — 아래 [상품 페이지 열기] 버튼으로 진입해 구매를 진행하세요."
       : ((o.inflow_guide && !/<[a-z][^>]*>/i.test(o.inflow_guide)) ? o.inflow_guide : ""),
