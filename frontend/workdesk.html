@@ -502,19 +502,31 @@ async function loadTabs(){
   const r = await api('/api/trackb/tabs?limit=300');
   if(!r||!r.ok){ $('#tabs').innerHTML=`<div class="empty">작업 목록은 관리자 로그인에서 제공됩니다.</div>`; return; }
   STATE.tabs=r.tabs||[]; $('#tcount').textContent=STATE.tabs.length;
-  _renderTabList();
+  _renderTabList();          // 계정별 캐시로 즉시 렌더
+  _favSyncFromServer();      // 서버 원본으로 정렬(개인화·기기 무관) — 도착 시 재렌더
   // 관측 대시보드에서 "열기"로 넘어온 탭 자동 선택
   if(STATE.pendingTab){ const pt=STATE.pendingTab; STATE.pendingTab=null;
     const idx=STATE.tabs.findIndex(t=>t.sheetId===pt.sheetId&&t.tabName===pt.tabName);
     if(idx>=0) selTab(idx); else { STATE.tabs.push(pt); selTab(STATE.tabs.length-1); } }
 }
-// ── 작업목록 즐겨찾기(localStorage 영속, 클라이언트 전용) ──
-const FAV_KEY='wd_favs_v1';
-function _favLoad(){ try{ return new Set(JSON.parse(localStorage.getItem(FAV_KEY)||'[]')); }catch(_){ return new Set(); } }
-function _favSave(){ try{ localStorage.setItem(FAV_KEY, JSON.stringify([...(STATE.favs||[])])); }catch(_){ } }
+// ── 작업목록 즐겨찾기(로그인 계정별 개인화·영속) ──
+//   서버 원본(/api/trackb/workdesk/favorites, 계정 귀속) + 계정별 localStorage 캐시(즉시 렌더·오프라인 폴백).
+function _favUser(){ return (STATE.name||'').trim()||'_'; }
+function _favLSKey(){ return 'wd_favs_v2_'+_favUser(); }
+function _favLoad(){ try{ return new Set(JSON.parse(localStorage.getItem(_favLSKey())||'[]')); }catch(_){ return new Set(); } }
+function _favSaveLocal(){ try{ localStorage.setItem(_favLSKey(), JSON.stringify([...(STATE.favs||[])])); }catch(_){ } }
 function _favKey(t){ return (t.sheetId||'')+'␟'+(t.tabName||'')+'␟'+(t.tabGid||''); }
 function isFav(t){ return !!(STATE.favs && STATE.favs.has(_favKey(t))); }
-function toggleFav(ev,i){ if(ev) ev.stopPropagation(); const t=STATE.tabs[i]; if(!t) return; const k=_favKey(t); if(STATE.favs.has(k)) STATE.favs.delete(k); else STATE.favs.add(k); _favSave(); _renderTabList(); }
+async function _favSyncFromServer(){   // 부팅 시 서버 원본으로 정렬 — 개인화·기기 무관 유지
+  try{ const r=await api('/api/trackb/workdesk/favorites');
+    if(r&&r.ok&&Array.isArray(r.favorites)){ STATE.favs=new Set(r.favorites); STATE._favLoaded=true; _favSaveLocal(); _renderTabList(); }
+  }catch(_){ }
+}
+async function _favPushServer(){ try{ await api('/api/trackb/workdesk/favorites',{method:'POST',body:JSON.stringify({favorites:[...(STATE.favs||[])]})}); }catch(_){ } }
+function toggleFav(ev,i){ if(ev) ev.stopPropagation(); const t=STATE.tabs[i]; if(!t) return; const k=_favKey(t);
+  if(STATE.favs.has(k)) STATE.favs.delete(k); else STATE.favs.add(k);
+  _favSaveLocal(); _renderTabList(); _favPushServer();   // 즉시 로컬 캐시+렌더 → 서버에 계정 귀속 영속
+}
 // 소유지정(업체) 그룹 + 즐겨찾기 그룹(최상단). 즐겨찾기 탭은 원 그룹에서 제외해 중복 노출 방지. 인덱스는 STATE.tabs 원본 유지(selTab 계약 불변).
 function _renderTabList(){
   if(!STATE._favLoaded){ STATE.favs=_favLoad(); STATE._favLoaded=true; }
