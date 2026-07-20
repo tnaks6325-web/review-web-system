@@ -45,29 +45,62 @@
     const st = document.createElement('style');
     st.id = 'campCardsCss';
     st.textContent = `
+      /* 참여형 카드 — 모바일 2열 그리드(요구사항) */
+      .pcards-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:10px;margin-bottom:12px}
+      @media(min-width:600px){.pcards-grid{grid-template-columns:repeat(3,minmax(0,1fr))}}
+      @media(min-width:900px){.pcards-grid{grid-template-columns:repeat(4,minmax(0,1fr))}}
       .pcard{position:relative;background:#fff;border:1px solid #E5E7EB;border-radius:14px;overflow:hidden;
-        box-shadow:0 2px 10px rgba(21,40,80,.06);margin-bottom:12px;cursor:pointer}
-      .pcard .pthumb{height:96px;background:#EEF1F7 center/cover no-repeat;display:flex;align-items:center;justify-content:center;color:#94A3B8;font-size:1.4rem}
-      .pcard .pbody{padding:10px 12px;display:flex;flex-direction:column;gap:6px}
-      .pcard .prow{display:flex;align-items:center;gap:6px;flex-wrap:wrap}
-      .pcard .pchip{font-size:.62rem;font-weight:800;background:#FEF3C7;color:#92400E;border-radius:5px;padding:2px 7px;flex-shrink:0}
-      .pcard .plive{font-size:.6rem;font-weight:900;background:#12b886;color:#fff;border-radius:5px;padding:2px 7px;flex-shrink:0}
-      .pcard .ptitle{font-size:.86rem;font-weight:800;color:#111827;flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
-      .pcard .pmeta{display:flex;gap:10px;flex-wrap:wrap;font-size:.7rem;color:#6B7280}
-      .pcard .pcounter{display:inline-flex;align-items:center;gap:5px;font-size:.74rem;font-weight:800;color:#0ca678;background:#D1FAE5;border-radius:12px;padding:2px 10px}
-      .pcard .pcounter.full{color:#B45309;background:#FEF3C7}
-      .pcard .pbtn{display:block;text-align:center;background:linear-gradient(135deg,#3182f6,#1b64da);color:#fff;
-        font-size:.8rem;font-weight:800;border-radius:9px;padding:10px;margin-top:2px}
-      .pcard .pbtn.off{background:#EEF1F7;color:#94A3B8}
-      .pcard .pnote{font-size:.64rem;color:#9CA3AF;text-align:center}
-      .pcard .poverlay{position:absolute;inset:0;background:rgba(38,44,58,.66);backdrop-filter:grayscale(1);
-        display:flex;flex-direction:column;align-items:center;justify-content:center;gap:4px;z-index:2}
-      .pcard .poverlay .ol{font-size:.66rem;font-weight:700;color:rgba(255,255,255,.85);letter-spacing:.08em}
-      .pcard .poverlay .ot{font-size:1.35rem;font-weight:900;color:#fff;letter-spacing:.05em;font-variant-numeric:tabular-nums}
-      .pcard .pribbon{position:absolute;top:10px;right:10px;z-index:3;font-size:.62rem;font-weight:900;border-radius:6px;padding:3px 8px;color:#fff}
-      .pcard .pribbon.done{background:#F59E0B}.pcard .pribbon.closedr{background:#94A3B8}
-      .pcard .peditchip{position:absolute;top:10px;left:10px;z-index:4;font-size:.62rem;font-weight:900;background:#1B64DA;color:#fff;border:none;border-radius:6px;padding:4px 9px;cursor:pointer;box-shadow:0 1px 4px rgba(27,100,218,.4)}
+        box-shadow:0 2px 10px rgba(21,40,80,.06);cursor:pointer;display:flex;flex-direction:column}
+      .pcard.is-closed{opacity:.6;filter:grayscale(1)}
+      .pcard.is-dim .pt-img,.pcard.is-dim .pt-ph{filter:grayscale(.35)}
+      /* 썸네일: 정사각 전체 노출(잘림 없음) */
+      .pcard .pthumb{position:relative;width:100%;aspect-ratio:1/1;background:#F1F4FA;overflow:hidden}
+      .pcard .pt-img{width:100%;height:100%;object-fit:contain;display:block}
+      .pcard .pt-ph{width:100%;height:100%;display:flex;align-items:center;justify-content:center;color:#94A3B8;font-size:1.9rem}
+      /* 우측 상단: 채널·배송 배지 */
+      .pcard .pt-badges{position:absolute;top:8px;right:8px;z-index:6;display:flex;gap:4px;flex-wrap:wrap;justify-content:flex-end;max-width:82%}
+      .pcard .pt-badge{font-size:.6rem;font-weight:800;border-radius:6px;padding:2px 6px;box-shadow:0 1px 3px rgba(0,0,0,.16);white-space:nowrap}
+      .pcard .pt-badge.ch{background:rgba(255,255,255,.95);color:#1550b8}
+      .pcard .pt-badge.dl{background:rgba(21,27,38,.76);color:#fff}
+      /* 좌측 상단: 관리자수정 버튼 + 상태 리본 */
+      .pcard .pt-topleft{position:absolute;top:8px;left:8px;z-index:6;display:flex;flex-direction:column;gap:4px;align-items:flex-start}
+      .pcard .pt-ribbon{font-size:.6rem;font-weight:900;border-radius:6px;padding:2px 7px;color:#fff}
+      .pcard .pt-ribbon.done{background:#F59E0B}
+      .pcard .pt-ribbon.closedr{background:#94A3B8}
+      /* 관리자 수정 버튼: 썸네일 좌하단(상단 배지·리본과 겹치지 않게) */
+      .pcard .peditchip{position:absolute;bottom:8px;left:8px;z-index:7;font-size:.6rem;font-weight:900;background:#1B64DA;color:#fff;border:none;border-radius:6px;padding:3px 8px;cursor:pointer;box-shadow:0 1px 5px rgba(0,0,0,.3)}
       .pcard .peditchip:hover{background:#1550b8}
+      /* 오버레이: 오픈전(회색) / 모집중 시간창(구매마감 카운트다운, 라이브) */
+      .pcard .pt-ovl{position:absolute;inset:0;z-index:4;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:2px;padding:6px;text-align:center}
+      .pcard .pt-ovl.pre{background:rgba(24,30,45,.62);backdrop-filter:grayscale(1)}
+      .pcard .pt-ovl.now{background:linear-gradient(180deg,rgba(10,16,30,.26),rgba(10,16,30,.64))}
+      .pcard .pt-ovl .ol{font-size:.6rem;font-weight:700;color:rgba(255,255,255,.86);letter-spacing:.04em}
+      .pcard .pt-ovl .lab{font-size:.62rem;font-weight:800;color:rgba(255,255,255,.92)}
+      .pcard .pt-ovl .ot{font-size:1.15rem;font-weight:900;color:#fff;font-variant-numeric:tabular-nums;letter-spacing:.02em;text-shadow:0 1px 8px rgba(0,0,0,.4)}
+      .pcard .pt-ovl .live-pill{display:inline-flex;align-items:center;gap:4px;font-size:.56rem;font-weight:800;color:#fff;background:#12b886;border-radius:99px;padding:2px 8px;margin-bottom:1px}
+      .pcard .pt-ovl .live-pill .dot{width:5px;height:5px;border-radius:50%;background:#fff;animation:pcBlink 1.1s ease-in-out infinite}
+      @keyframes pcBlink{0%,100%{opacity:1}50%{opacity:.25}}
+      @media(prefers-reduced-motion:reduce){.pcard .pt-ovl .live-pill .dot{animation:none}}
+      .pcard .pbody{padding:9px 10px 10px;display:flex;flex-direction:column;gap:6px;flex:1}
+      .pcard .ptitle{font-size:.82rem;font-weight:800;color:#111827;margin:0;line-height:1.3;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden}
+      .pcard .pmeta{display:flex;align-items:center;gap:6px;flex-wrap:wrap;font-size:.68rem;color:#6B7280;font-weight:600}
+      /* 바로참여 배지 = 시간 표기 오른쪽 */
+      .pcard .pt-live{font-size:.58rem;font-weight:800;color:#0B7A5B;background:#DDF5EC;border:1px solid rgba(18,184,134,.3);border-radius:5px;padding:1px 6px}
+      .pcard .pt-fee{color:#111827;font-weight:700}
+      /* 참여 인원 = 게이지(시안 A) */
+      .pcard .pgauge{display:flex;flex-direction:column;gap:4px;margin-top:1px}
+      .pcard .pg-row{display:flex;justify-content:space-between;align-items:baseline;font-size:.66rem}
+      .pcard .pg-lb{color:#6B7280;font-weight:700}
+      .pcard .pg-vl{font-weight:800;font-variant-numeric:tabular-nums;color:#111827}
+      .pcard .pg-vl b{color:#1b64da;font-size:.86rem}
+      .pcard .pgauge.full .pg-vl b{color:#B45309}
+      .pcard .pg-track{height:6px;border-radius:99px;background:#EEF1F7;border:1px solid #E5E7EB;overflow:hidden}
+      .pcard .pg-fill{height:100%;border-radius:99px;background:linear-gradient(90deg,#3182f6,#1b64da)}
+      .pcard .pgauge.full .pg-fill{background:linear-gradient(90deg,#F59E0B,#D97706)}
+      .pcard .pbtn{display:block;text-align:center;border:none;width:100%;background:linear-gradient(135deg,#3182f6,#1b64da);color:#fff;
+        font-size:.76rem;font-weight:800;border-radius:9px;padding:9px;margin-top:auto;font-family:inherit;cursor:pointer}
+      .pcard .pbtn.off{background:#EEF1F7;color:#94A3B8;cursor:default}
+      .pcard .pnote{font-size:.6rem;color:#9CA3AF;text-align:center}
       .cae-ovl{position:fixed;inset:0;z-index:100000;background:rgba(0,0,0,.5);display:flex;align-items:center;justify-content:center;padding:16px}
       .cae-box{box-sizing:border-box;background:#fff;border-radius:16px;max-width:480px;width:100%;max-height:88vh;overflow-y:auto;padding:16px 18px;box-shadow:0 8px 30px rgba(0,0,0,.25)}
       .cae-box *{box-sizing:border-box}
@@ -86,84 +119,84 @@
     document.head.appendChild(st);
   }
 
-  /** 상태별 하단 버튼/배지 HTML */
-  function _footer(c) {
-    switch (c.state) {
-      case 'open':
-        return `<span class="pbtn">참여하기</span>
-                ${c.cutoffAt ? `<div class="pnote">오늘 ${_fmtHM(c.cutoffAt)}까지 참여 가능</div>` : ''}`;
-      case 'cutoff':
-        return `<span class="pbtn off">오늘 참여 마감</span>
-                <div class="pnote">진행 중인 분은 ${_fmtHM(c.closesAt)}까지 제출</div>`;
-      case 'daily_done':
-        // 자율주문(시간창 없음)은 opensAt이 없음 → 시각 없이 "내일 다시 오픈"
-        return `<span class="pbtn off">오늘은 마감되었어요</span>
-                <div class="pnote">${c.opensAt ? `내일 ${_fmtHM(c.opensAt)} 다시 오픈` : '내일 다시 오픈'}</div>`;
-      case 'soft_full':
-        return `<span class="pbtn off">잔여 대기 중</span>
-                <div class="pnote">자리가 나면 다시 열려요</div>`;
-      default:
-        return '';
-    }
-  }
-
-  /** 참여형 카드 1장 HTML. c = /api/campaign/list 의 참여형 행 */
+  /** 참여형 카드 1장 HTML. c = /api/campaign/list 의 참여형 행.
+   *  모바일 2열 그리드용 컴팩트 카드 — 썸네일 정사각 전체노출·우상단 채널/배송 배지·
+   *  바로참여는 시간 오른쪽·참여인원 게이지(A)·상태별 오버레이/푸터.
+   *  모집중(시간창 안)은 썸네일 중앙 "오늘 구매마감까지" 카운트다운(cutoffAt), 오픈전은 "오픈까지"(opensAt). */
   function cardHtml(c) {
     const channel = c.channel === '직접입력' ? (c.channel_custom || '') : (c.channel || '');
     const fee = c.review_fee ? Number(c.review_fee).toLocaleString() + '원' : '';
     const isClosed = c.state === 'closed' || c.status === 'closed';
     const isPre = c.state === 'preopen';
-    const counter = (c.dailyQuota > 0)
-      ? `<span class="pcounter${c.todayCount >= c.dailyQuota ? ' full' : ''}">🔥 ${c.todayCount}/${c.dailyQuota} 참여중</span>`
-      : '';
-    const thumb = c.thumbnail_url
-      ? `<div class="pthumb" style="background-image:url('${_esc(c.thumbnail_url)}')"></div>`
-      : `<div class="pthumb">🛍️</div>`;
+    const isDaily = c.state === 'daily_done';
+    const quota = Number(c.dailyQuota) || 0;
+    const today = Number(c.todayCount) || 0;
+    const isFull = quota > 0 && today >= quota;
+    const pct = quota > 0 ? Math.max(3, Math.min(100, Math.round((today / quota) * 100))) : 0;
 
-    let ribbon = '';
-    if (c.state === 'daily_done') ribbon = `<span class="pribbon done">금일 모집완료</span>`;
-    if (isClosed) ribbon = `<span class="pribbon closedr">모집 종료</span>`;
-
-    // preopen: 회색 필터 + 굵은 흰 글씨 실시간 카운트다운(요구사항 원문)
-    const overlay = isPre
-      ? `<div class="poverlay">
-           <div class="ol">오픈까지</div>
-           <div class="ot" data-camp-countdown="${_esc(c.opensAt || '')}">--:--:--</div>
-           <div class="ol">매일 ${_fmtHM(c.opensAt)} 오픈</div>
-         </div>`
+    const thumbInner = c.thumbnail_url
+      ? `<img class="pt-img" src="${_esc(c.thumbnail_url)}" alt="" loading="lazy">`
+      : `<div class="pt-ph">🛍️</div>`;
+    const badges = (channel || c.delivery_type)
+      ? `<div class="pt-badges">${channel ? `<span class="pt-badge ch">${_esc(channel)}</span>` : ''}${c.delivery_type ? `<span class="pt-badge dl">${_esc(c.delivery_type)}</span>` : ''}</div>`
       : '';
+    const ribbon = isDaily ? `<span class="pt-ribbon done">금일 모집완료</span>`
+                 : isClosed ? `<span class="pt-ribbon closedr">모집 종료</span>` : '';
+    const editChip = _adminTok()
+      ? `<button type="button" class="peditchip" onclick="event.stopPropagation();event.preventDefault();CampCards.openAdminEdit('${_esc(c.id)}')">✏️ 관리자 수정</button>`
+      : '';
+    const topleft = ribbon ? `<div class="pt-topleft">${ribbon}</div>` : '';
+
+    // 오버레이: 오픈 전(회색·오픈까지) / 모집 중 시간창(라이브·오늘 구매마감까지)
+    let overlay = '';
+    if (isPre) {
+      overlay = `<div class="pt-ovl pre"><span class="ol">오픈까지</span><span class="ot" data-camp-countdown="${_esc(c.opensAt || '')}">--:--:--</span><span class="ol">${c.opensAt ? '매일 ' + _fmtHM(c.opensAt) + ' 오픈' : ''}</span></div>`;
+    } else if (c.state === 'open' && c.cutoffAt) {
+      overlay = `<div class="pt-ovl now"><span class="live-pill"><span class="dot"></span>지금 구매 가능</span><span class="lab">오늘 구매마감까지</span><span class="ot" data-camp-countdown="${_esc(c.cutoffAt)}">--:--:--</span></div>`;
+    }
+
+    const timeTxt = (c.opensAt && c.closesAt) ? _fmtHM(c.opensAt) + '~' + _fmtHM(c.closesAt)
+                  : (c.time_range ? c.time_range : (c.participation_mode && !c.opensAt ? '자율주문' : ''));
+    const timeIcon = (c.opensAt && c.closesAt) ? '🕑' : '⏱';
+
+    const gauge = (!isPre && !isClosed && quota > 0)
+      ? `<div class="pgauge${isFull ? ' full' : ''}"><div class="pg-row"><span class="pg-lb">${isDaily ? '오늘 모집' : '모집 현황'}</span><span class="pg-vl"><b>${today}</b> / ${quota}명${isDaily ? ' 완료' : ''}</span></div><div class="pg-track"><div class="pg-fill" style="width:${pct}%"></div></div></div>`
+      : '';
+
+    let footer = '';
+    if (c.state === 'open') footer = `<button type="button" class="pbtn go">참여하기</button>`;
+    else if (c.state === 'cutoff') footer = `<button type="button" class="pbtn off">오늘 참여 마감</button><div class="pnote">진행 중인 분은 ${_fmtHM(c.closesAt)}까지 제출</div>`;
+    else if (isDaily) footer = `<button type="button" class="pbtn off">오늘은 마감</button><div class="pnote">${c.opensAt ? '내일 ' + _fmtHM(c.opensAt) + ' 오픈' : '내일 다시 오픈'}</div>`;
+    else if (c.state === 'soft_full') footer = `<button type="button" class="pbtn off">잔여 대기 중</button>`;
 
     return `
-      <div class="pcard" data-camp-id="${_esc(c.id)}" style="${isClosed ? 'opacity:.55;filter:grayscale(1);' : ''}"
+      <article class="pcard${isClosed ? ' is-closed' : ''}${isDaily ? ' is-dim' : ''}" data-camp-id="${_esc(c.id)}"
            onclick="location.href='campaign.html?id=${encodeURIComponent(c.id)}'">
-        ${_adminTok() ? `<button type="button" class="peditchip" onclick="event.stopPropagation();event.preventDefault();CampCards.openAdminEdit('${_esc(c.id)}')">✏️ 관리자 수정</button>` : ''}
-        ${ribbon}${overlay}
-        ${thumb}
+        <div class="pthumb">${thumbInner}${overlay}${badges}${topleft}${editChip}</div>
         <div class="pbody">
-          <div class="prow">
-            ${channel ? `<span class="pchip">${_esc(channel)}</span>` : ''}
-            <span class="plive">바로참여</span>
-            <span class="ptitle">${_esc(c.title || '(제목 없음)')}</span>
-          </div>
-          <div class="pmeta">
-            ${c.delivery_type ? `<span>🚚 ${_esc(c.delivery_type)}</span>` : ''}
-            ${(c.opensAt && c.closesAt) ? `<span>🕑 ${_fmtHM(c.opensAt)}~${_fmtHM(c.closesAt)}</span>` : (c.time_range ? `<span>🕑 ${_esc(c.time_range)}</span>` : '')}
-            ${fee ? `<span>💰 리뷰비 ${fee}</span>` : ''}
-          </div>
-          ${(!isClosed && !isPre) ? `<div class="prow">${counter}</div>` : ''}
-          ${!isClosed ? _footer(c) : ''}
+          <h3 class="ptitle">${_esc(c.title || '(제목 없음)')}</h3>
+          <div class="pmeta">${timeTxt ? `<span>${timeIcon} ${_esc(timeTxt)}</span>` : ''}<span class="pt-live">바로참여</span>${fee ? `<span class="pt-fee">💰 ${_esc(fee)}</span>` : ''}</div>
+          ${gauge}
+          ${footer}
         </div>
-      </div>`;
+      </article>`;
   }
 
-  /** 목록 렌더: 참여형만 골라 컨테이너에 그려넣음. 반환 = 그린 카드 수 */
+  /** 여러 카드를 2열 그리드로 감싼 HTML(호출부에서 partHtml 대신 사용 가능) */
+  function gridHtml(list) {
+    const parts = (list || []).filter(c => c.participation_mode);
+    if (!parts.length) return '';
+    return '<div class="pcards-grid">' + parts.map(cardHtml).join('') + '</div>';
+  }
+
+  /** 목록 렌더: 참여형만 골라 2열 그리드로 그려넣음. 반환 = 그린 카드 수 */
   function renderInto(el, list, serverNowIso, onNeedRefresh) {
     _injectStyles();
     if (serverNowIso) setServerNow(serverNowIso);
     _onNeedRefresh = onNeedRefresh || null;
     const parts = (list || []).filter(c => c.participation_mode);
     if (!el) return 0;
-    el.innerHTML = parts.map(cardHtml).join('');
+    el.innerHTML = parts.length ? '<div class="pcards-grid">' + parts.map(cardHtml).join('') + '</div>' : '';
     _ensureTicker();
     return parts.length;
   }
@@ -445,5 +478,5 @@
     }
   }
 
-  window.CampCards = { renderInto, cardHtml, setServerNow, startTicker, _fmtCountdown, _fmtHM, serverNow: _now, _onCardClick, openAdminEdit };
+  window.CampCards = { renderInto, cardHtml, gridHtml, setServerNow, startTicker, _fmtCountdown, _fmtHM, serverNow: _now, _onCardClick, openAdminEdit };
 })();

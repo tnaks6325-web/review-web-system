@@ -2174,7 +2174,7 @@ async function loadRecruitPreview() {
     //   레거시 공고는 기존 카드/신청 흐름 그대로.
     const parts = (json.data || []).filter(c => c.participation_mode && c.status !== "closed");
     const partHtml = (window.CampCards && parts.length)
-      ? (CampCards.setServerNow(json.serverNow), parts.map(c => CampCards.cardHtml(c)).join(""))
+      ? (CampCards.setServerNow(json.serverNow), '<div class="pcards-grid">' + parts.map(c => CampCards.cardHtml(c)).join("") + '</div>')
       : "";
     const list = (json.data || []).filter(c => c.status === "active" && !c.participation_mode);
 

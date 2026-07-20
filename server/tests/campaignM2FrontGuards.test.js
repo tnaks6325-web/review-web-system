@@ -42,7 +42,12 @@ ok('campaign.html: work-detail 호출에 phone8+holdToken 이중 열쇠', /work-
 
 // ── 공용 카드 모듈 ──
 ok('cards: 서버시간 오프셋 보정(setServerNow) 사용', /serverNow - Date\.now/.test(cards) || /_serverOffsetMs = t - Date\.now\(\)/.test(cards));
-ok('cards: preopen 회색 오버레이 + 흰 굵은 카운트다운', /poverlay/.test(cards) && /data-camp-countdown/.test(cards));
+ok('cards: preopen 회색 오버레이 "오픈까지" 카운트다운(opensAt)', /pt-ovl pre/.test(cards) && /오픈까지/.test(cards) && /data-camp-countdown="\$\{_esc\(c\.opensAt/.test(cards));
+ok('cards: 모집중 시간창 → 썸네일 중앙 "오늘 구매마감까지" 카운트다운(cutoffAt)', /pt-ovl now/.test(cards) && /오늘 구매마감까지/.test(cards) && /c\.state === 'open' && c\.cutoffAt/.test(cards));
+ok('cards: 참여 인원 = 게이지(시안 A)', /class="pgauge/.test(cards) && /pg-fill/.test(cards) && /모집 현황/.test(cards));
+ok('cards: 썸네일 정사각 전체노출(aspect-ratio 1/1 · object-fit contain, 비잘림)', /aspect-ratio:1\/1/.test(cards) && /object-fit:contain/.test(cards));
+ok('cards: 채널·배송 우상단 배지 + 바로참여는 시간 오른쪽', /pt-badges/.test(cards) && /pt-badge ch/.test(cards) && /pt-badge dl/.test(cards) && /class="pt-live"/.test(cards));
+ok('cards: 모바일 2열 그리드(pcards-grid)', /pcards-grid\{display:grid;grid-template-columns:repeat\(2/.test(cards));
 ok('cards: 카드 탭 → campaign.html 이동(목록에서 신청 없음)', /campaign\.html\?id=/.test(cards));
 
 // ── 소비처 분리(레거시 회귀 방지) ──
