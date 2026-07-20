@@ -1,0 +1,399 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+  <meta charset="UTF-8"/>
+  <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+  <title>리뷰어 직접참여 M2 — 착수 전 반영사항 2가지 (유저플로우)</title>
+  <style>
+  :root{
+    --paper:#F4F6FC; --card:#FFFFFF; --ink:#151B26; --mut:#5E6A7C; --faint:#8B96A8;
+    --line:#E2E7F0; --accent:#3182F6; --accent-deep:#1B64DA; --accent-soft:#E9F1FE;
+    --ok:#12B886; --ok-soft:#DDF5EC; --warn:#B45309; --warn-soft:#FDF0D9;
+    --err:#DC2626; --err-soft:#FDE8E8;
+    --wire:#CBD4E1; --wire-soft:#EEF1F7;
+    --shadow:0 2px 14px rgba(21,40,80,.07);
+  }
+  @media (prefers-color-scheme: dark){
+    :root{
+      --paper:#0E131B; --card:#161D29; --ink:#E8EDF5; --mut:#9AA6B8; --faint:#6E7A8C;
+      --line:#2A3444; --accent:#5B9BF8; --accent-deep:#82B4FA; --accent-soft:#1B2A44;
+      --ok:#3DCF9F; --ok-soft:#123528; --warn:#F0B35C; --warn-soft:#3A2B12;
+      --err:#F87171; --err-soft:#3A1515;
+      --wire:#3A4658; --wire-soft:#1D2634;
+      --shadow:0 2px 14px rgba(0,0,0,.35);
+    }
+  }
+  :root[data-theme="dark"]{
+    --paper:#0E131B; --card:#161D29; --ink:#E8EDF5; --mut:#9AA6B8; --faint:#6E7A8C;
+    --line:#2A3444; --accent:#5B9BF8; --accent-deep:#82B4FA; --accent-soft:#1B2A44;
+    --ok:#3DCF9F; --ok-soft:#123528; --warn:#F0B35C; --warn-soft:#3A2B12;
+    --err:#F87171; --err-soft:#3A1515;
+    --wire:#3A4658; --wire-soft:#1D2634;
+    --shadow:0 2px 14px rgba(0,0,0,.35);
+  }
+  :root[data-theme="light"]{
+    --paper:#F4F6FC; --card:#FFFFFF; --ink:#151B26; --mut:#5E6A7C; --faint:#8B96A8;
+    --line:#E2E7F0; --accent:#3182F6; --accent-deep:#1B64DA; --accent-soft:#E9F1FE;
+    --ok:#12B886; --ok-soft:#DDF5EC; --warn:#B45309; --warn-soft:#FDF0D9;
+    --err:#DC2626; --err-soft:#FDE8E8;
+    --wire:#CBD4E1; --wire-soft:#EEF1F7;
+    --shadow:0 2px 14px rgba(21,40,80,.07);
+  }
+  *{box-sizing:border-box;margin:0;padding:0}
+  body{background:var(--paper);color:var(--ink);
+    font-family:"Apple SD Gothic Neo","Pretendard","Noto Sans KR","Malgun Gothic",system-ui,sans-serif;
+    line-height:1.6;-webkit-font-smoothing:antialiased}
+  .wrap{max-width:1000px;margin:0 auto;padding:0 20px 80px}
+
+  .hero{padding:48px 0 26px}
+  .hero .eyebrow{font-size:.76rem;font-weight:700;letter-spacing:.14em;color:var(--accent);text-transform:uppercase}
+  .hero h1{font-size:clamp(1.6rem,4.2vw,2.3rem);font-weight:800;letter-spacing:-.02em;margin:8px 0 8px;text-wrap:balance}
+  .hero p{color:var(--mut);max-width:60ch}
+  .chip{display:inline-flex;align-items:center;gap:6px;font-size:.74rem;font-weight:600;color:var(--mut);
+    background:var(--card);border:1px solid var(--line);border-radius:999px;padding:5px 12px;margin-top:14px;margin-right:6px}
+  .chip b{color:var(--ink)}
+
+  section{padding-top:52px}
+  .sec-label{font-size:.74rem;font-weight:700;letter-spacing:.12em;color:var(--accent);margin-bottom:6px}
+  section>h2{font-size:1.4rem;font-weight:800;letter-spacing:-.015em;margin-bottom:6px;text-wrap:balance}
+  section>p.desc{color:var(--mut);max-width:66ch;margin-bottom:20px}
+  h3{font-size:1rem;font-weight:800;margin:26px 0 12px}
+  .card{background:var(--card);border:1px solid var(--line);border-radius:14px;box-shadow:var(--shadow)}
+
+  /* 요약 카드 2개 */
+  .why{display:grid;grid-template-columns:repeat(auto-fit,minmax(300px,1fr));gap:14px}
+  .why .w{padding:20px 22px;border-top:4px solid var(--accent)}
+  .why .w .num{display:inline-flex;align-items:center;justify-content:center;width:30px;height:30px;border-radius:9px;
+    background:var(--accent);color:#fff;font-weight:900;margin-bottom:10px}
+  .why .w h4{font-size:1rem;font-weight:800;margin-bottom:6px}
+  .why .w p{font-size:.88rem;color:var(--mut)}
+  .why .w .tagline{display:inline-block;margin-top:10px;font-size:.74rem;font-weight:800;
+    background:var(--accent-soft);color:var(--accent-deep);border-radius:8px;padding:4px 10px}
+
+  /* 비교 레인 (문제/개선) */
+  .lane{border-radius:14px;padding:18px;margin-top:14px;border:1.5px solid}
+  .lane.bad{background:var(--err-soft);border-color:var(--err)}
+  .lane.good{background:var(--ok-soft);border-color:var(--ok)}
+  .lane .lane-tt{display:flex;align-items:center;gap:8px;font-weight:900;font-size:.95rem;margin-bottom:12px}
+  .lane.bad .lane-tt{color:var(--err)} .lane.good .lane-tt{color:var(--ok)}
+
+  /* 플로우 스텝 */
+  .flow{display:flex;flex-wrap:wrap;align-items:stretch;gap:10px}
+  .fstep{flex:1 1 140px;min-width:140px;max-width:210px;position:relative;padding:16px 12px 12px;border-radius:12px;
+    background:var(--card);border:1px solid var(--line);box-shadow:var(--shadow);text-align:center}
+  .fstep .n{position:absolute;top:-10px;left:10px;background:var(--accent);color:#fff;font-size:.66rem;font-weight:800;
+    border-radius:999px;padding:2px 8px}
+  .fstep.bad .n{background:var(--err)} .fstep.good .n{background:var(--ok)}
+  .fstep .ico{font-size:1.5rem;line-height:1;margin-bottom:6px}
+  .fstep h5{font-size:.84rem;font-weight:800;margin-bottom:3px}
+  .fstep p{font-size:.72rem;color:var(--mut)}
+  .fstep.crash{border-color:var(--err);border-width:2px}
+  .fstep.win{border-color:var(--ok);border-width:2px}
+
+  /* 타임라인 바 (15분) */
+  .timebar{margin:16px 2px 4px}
+  .timebar .bar{display:flex;height:26px;border-radius:8px;overflow:hidden;border:1px solid var(--line)}
+  .timebar .seg{display:flex;align-items:center;justify-content:center;font-size:.66rem;font-weight:800;color:#fff;white-space:nowrap;overflow:hidden}
+  .timebar .cap{display:flex;justify-content:space-between;font-size:.68rem;color:var(--faint);margin-top:4px;font-weight:700}
+
+  /* 폰 와이어프레임 */
+  .wf-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(250px,1fr));gap:20px;align-items:start;margin-top:14px}
+  .phone-slot h4{font-size:.9rem;font-weight:800;margin-bottom:2px}
+  .phone-slot .cap{font-size:.76rem;color:var(--mut);margin-bottom:10px}
+  .phone{width:100%;max-width:270px;border:2px solid var(--wire);border-radius:24px;background:var(--card);padding:9px;box-shadow:var(--shadow)}
+  .screen{border-radius:16px;overflow:hidden;background:var(--paper);border:1px solid var(--line)}
+  .appbar{background:var(--accent);color:#fff;padding:9px 12px;font-size:.74rem;font-weight:800;display:flex;justify-content:space-between}
+  .appbar .r{font-size:.6rem;opacity:.85;font-weight:600}
+  .scr-body{padding:9px;display:flex;flex-direction:column;gap:7px}
+  .blk{background:var(--card);border:1px solid var(--line);border-radius:10px;padding:9px 10px}
+  .blk .t{font-size:.64rem;font-weight:800;color:var(--faint);margin-bottom:4px}
+  .wl{height:8px;border-radius:4px;background:var(--wire-soft);margin:4px 0}
+  .wl.w60{width:60%} .wl.w80{width:80%} .wl.w40{width:40%}
+  .wbtn{display:block;text-align:center;background:var(--accent);color:#fff;font-size:.72rem;font-weight:800;border-radius:8px;padding:8px;margin-top:4px}
+  .wbtn.ok{background:var(--ok)} .wbtn.ghost{background:var(--wire-soft);color:var(--mut)}
+  .wbtn.disabled{background:var(--wire-soft);color:var(--faint)}
+  .field{border:1.5px solid var(--line);border-radius:7px;padding:6px 9px;font-size:.68rem;color:var(--faint);background:var(--card);margin:3px 0}
+  .field.okf{border-color:var(--ok);color:var(--ok);font-weight:700}
+  .field.badf{border-color:var(--err);color:var(--err);font-weight:700}
+  .pin{display:inline-flex;align-items:center;justify-content:center;width:17px;height:17px;border-radius:50%;
+    background:var(--accent);color:#fff;font-size:.6rem;font-weight:800;line-height:1;flex-shrink:0}
+  .legend{margin-top:10px;display:flex;flex-direction:column;gap:6px}
+  .legend div{display:flex;gap:8px;font-size:.76rem;color:var(--mut);align-items:flex-start}
+  .legend b{color:var(--ink)}
+  .holdbar{display:flex;align-items:center;gap:8px;background:var(--warn-soft);border:1px solid var(--warn);border-radius:9px;padding:6px 10px}
+  .holdbar .ht{flex:1;font-size:.6rem;font-weight:700;color:var(--warn)}
+  .holdbar .hv{font-size:.78rem;font-weight:900;color:var(--warn)}
+  .bigcheck{text-align:center;padding:14px 8px}
+  .bigcheck .e{font-size:1.6rem}
+  .bigcheck .m{font-size:.72rem;font-weight:800;margin-top:4px}
+  .bigcheck .s{font-size:.62rem;color:var(--mut);margin-top:2px}
+
+  /* 데스크톱 프레임 (관리자) */
+  .desk{border:2px solid var(--wire);border-radius:14px;overflow:hidden;background:var(--card);box-shadow:var(--shadow);margin-top:12px}
+  .desk .bar{display:flex;align-items:center;gap:6px;background:var(--wire-soft);padding:8px 12px;border-bottom:1px solid var(--line)}
+  .desk .bar i{width:9px;height:9px;border-radius:50%;background:var(--wire)}
+  .desk .bar .url{flex:1;background:var(--card);border:1px solid var(--line);border-radius:6px;font-size:.62rem;color:var(--faint);padding:3px 10px;font-weight:600}
+  .desk .dbody{padding:14px;display:flex;flex-direction:column;gap:10px}
+  .dgrid2{display:grid;grid-template-columns:1fr 1fr;gap:8px}
+  @media (max-width:640px){.dgrid2{grid-template-columns:1fr}}
+
+  /* 토글 스위치 */
+  .switch{display:inline-flex;align-items:center;gap:8px;font-size:.72rem;font-weight:800}
+  .sw{width:38px;height:20px;border-radius:999px;position:relative;flex-shrink:0}
+  .sw.on{background:var(--ok)} .sw.off{background:var(--wire)}
+  .sw::after{content:"";position:absolute;top:2px;width:16px;height:16px;border-radius:50%;background:#fff}
+  .sw.on::after{right:2px} .sw.off::after{left:2px}
+
+  /* 체크리스트 */
+  .cklist{display:flex;flex-direction:column;gap:6px}
+  .ck{display:flex;align-items:center;gap:8px;font-size:.72rem;font-weight:700;border:1px solid var(--line);border-radius:8px;padding:7px 10px;background:var(--card)}
+  .ck .m{width:18px;height:18px;border-radius:50%;display:flex;align-items:center;justify-content:center;font-size:.6rem;color:#fff;flex-shrink:0}
+  .ck.pass .m{background:var(--ok)} .ck.fail .m{background:var(--err)}
+  .ck.fail{border-color:var(--err);color:var(--err)}
+
+  .callout{border-left:4px solid var(--accent);background:var(--accent-soft);border-radius:0 12px 12px 0;padding:14px 18px;font-size:.88rem;margin:16px 0}
+  .callout b{font-weight:800}
+
+  .tablewrap{overflow-x:auto;border-radius:14px;margin-top:12px}
+  table{width:100%;border-collapse:collapse;background:var(--card);font-size:.85rem;min-width:560px}
+  thead th{text-align:left;font-size:.72rem;letter-spacing:.06em;color:var(--faint);font-weight:700;padding:12px 16px;border-bottom:2px solid var(--line)}
+  tbody td{padding:12px 16px;border-bottom:1px solid var(--line);vertical-align:top}
+  tbody tr:last-child td{border-bottom:none}
+  td.area{font-weight:800;white-space:nowrap;color:var(--accent-deep)}
+
+  footer{margin-top:64px;padding-top:18px;border-top:1px solid var(--line);font-size:.74rem;color:var(--faint)}
+  </style>
+</head>
+<body>
+<div class="wrap">
+
+  <header class="hero">
+    <div class="eyebrow">M2 착수 전 확인 · USER FLOW</div>
+    <h1>M2에서 새로 반영할 변경 2가지</h1>
+    <p>M1을 만든 뒤 시스템에 다른 업데이트가 들어오면서, 리뷰어 참여 화면(M2)을 만들기 전에 맞춰야 할 것이 두 가지 생겼습니다. 그림으로 설명합니다.</p>
+    <div>
+      <span class="chip">기준 문서 <b>참여형 캠페인 PRD v1.2</b></span>
+      <span class="chip">이 문서 <b>M2 반영사항 부록</b></span>
+    </div>
+  </header>
+
+  <!-- ═══════════ 01 한눈에 ═══════════ -->
+  <section id="s1">
+    <div class="sec-label">01 · 한눈에 보기</div>
+    <h2>무엇이, 왜 바뀌나</h2>
+    <div class="why">
+      <div class="card w">
+        <div class="num">1</div>
+        <h4>"내 정보 확인"을 참여 전으로 당깁니다</h4>
+        <p>그 사이 구매양식에 <b>내 정보(이름·전화·주소·계좌) 검사</b>가 새로 생겼습니다. 검사를 지금 위치(제출 순간)에 두면, 리뷰어가 <b>돈을 다 쓰고 나서야</b> 막히는 사고가 납니다.</p>
+        <span class="tagline">검사 시점: 제출할 때 ❌ → 참여할 때 ✅</span>
+      </div>
+      <div class="card w">
+        <div class="num">2</div>
+        <h4>참여형 공고를 "만드는 화면"을 넣습니다</h4>
+        <p>참여형 캠페인의 뼈대(M1)는 완성됐지만, 관리자가 참여형 공고를 <b>만들고 게시할 화면이 아직 없습니다.</b> 공고 등록 화면에 참여형 스위치와 설정을 추가합니다.</p>
+        <span class="tagline">공고 화면에 [참여형] 스위치 + 자동 점검 추가</span>
+      </div>
+    </div>
+  </section>
+
+  <!-- ═══════════ 02 변경 1 ═══════════ -->
+  <section id="s2">
+    <div class="sec-label">02 · 변경 ① 리뷰어 흐름</div>
+    <h2>내 정보 확인, 돈 쓰기 전에</h2>
+    <p class="desc">참여 제한시간은 15분입니다. 그 안에 "내 정보를 등록하고 오세요"라는 말을 들으면 이미 늦습니다.</p>
+
+    <!-- 문제 레인 -->
+    <div class="lane bad">
+      <div class="lane-tt">⚠️ 이대로 두면 — 돈을 쓰고 나서 막히는 사고</div>
+      <div class="flow">
+        <div class="fstep bad"><span class="n">1</span><div class="ico">👆</div><h5>참여하기</h5><p>자리 확보, 15분 시작</p></div>
+        <div class="fstep bad"><span class="n">2</span><div class="ico">📋</div><h5>작업내용 확인</h5><p>상품·금액·가이드</p></div>
+        <div class="fstep bad"><span class="n">3</span><div class="ico">💳</div><h5>상품 구매</h5><p><b>내 돈이 먼저 나감</b></p></div>
+        <div class="fstep bad crash"><span class="n">4</span><div class="ico">🚫</div><h5>제출 차단!</h5><p>"내 정보 미등록 —<br/>등록 후 제출하세요"</p></div>
+        <div class="fstep bad crash"><span class="n">5</span><div class="ico">⏰</div><h5>15분 만료</h5><p>자리 취소 +<br/>오늘 재참여 불가</p></div>
+      </div>
+      <div class="timebar">
+        <div class="bar">
+          <div class="seg" style="flex:4;background:var(--warn)">구매하러 다녀옴 (~10분)</div>
+          <div class="seg" style="flex:2;background:var(--err)">내 정보 등록하다가…</div>
+          <div class="seg" style="flex:1;background:#7f1d1d">만료 💥</div>
+        </div>
+        <div class="cap"><span>참여 0분</span><span>15분</span></div>
+      </div>
+      <p style="font-size:.78rem;color:var(--err);font-weight:700;margin-top:8px">결과: 돈은 썼는데 제출 못 함 → 운영자 문의·수동 처리 → 고객불만 폭증</p>
+    </div>
+
+    <!-- 개선 레인 -->
+    <div class="lane good">
+      <div class="lane-tt">✅ 바꾼 뒤 — 참여 버튼을 누르는 순간 미리 확인</div>
+      <div class="flow">
+        <div class="fstep good"><span class="n">1</span><div class="ico">👆</div><h5>참여하기</h5><p>누르는 순간<br/><b>내 정보 자동 확인</b></p></div>
+        <div class="fstep good"><span class="n">2</span><div class="ico">🧾</div><h5>빠진 게 있으면</h5><p>"먼저 등록해주세요" 안내<br/><b>자리는 안 잡음 = 손해 0</b></p></div>
+        <div class="fstep good"><span class="n">3</span><div class="ico">✍️</div><h5>내 정보 등록</h5><p>여유 있게 완료<br/>(제한시간 아님)</p></div>
+        <div class="fstep good"><span class="n">4</span><div class="ico">👆</div><h5>다시 참여하기</h5><p>이번엔 통과 →<br/>15분 시작</p></div>
+        <div class="fstep good win"><span class="n">5</span><div class="ico">🎉</div><h5>구매·제출 완료</h5><p>중간에 막힐 일 없음</p></div>
+      </div>
+      <div class="timebar">
+        <div class="bar">
+          <div class="seg" style="flex:4;background:var(--ok)">구매하러 다녀옴</div>
+          <div class="seg" style="flex:2;background:var(--accent)">구매양식 제출 ✓</div>
+          <div class="seg" style="flex:1;background:var(--wire)">여유</div>
+        </div>
+        <div class="cap"><span>참여 0분</span><span>15분</span></div>
+      </div>
+    </div>
+
+    <h3>화면으로 보면</h3>
+    <div class="wf-grid">
+      <div class="phone-slot">
+        <h4>참여 버튼을 누르면 자동 확인</h4>
+        <p class="cap">리뷰어는 아무것도 더 하지 않습니다 — 시스템이 알아서 확인.</p>
+        <div class="phone"><div class="screen">
+          <div class="appbar">캠페인 <span class="r">참여 전</span></div>
+          <div class="scr-body">
+            <div class="blk"><div class="t">📦 ○○ 무선 청소기</div><div class="wl w80"></div><div class="wl w60"></div></div>
+            <div class="blk bigcheck">
+              <div class="e">🔎</div>
+              <div class="m">참여 조건 확인 중… <span class="pin">1</span></div>
+              <div class="s">리뷰어 등록 · 내 정보(이름/전화/주소/계좌)</div>
+            </div>
+            <span class="wbtn">참여하기</span>
+          </div>
+        </div></div>
+      </div>
+      <div class="phone-slot">
+        <h4>빠진 항목이 있을 때</h4>
+        <p class="cap">자리를 잡기 <b>전에</b> 안내 — 오늘 참여 기회가 소모되지 않습니다.</p>
+        <div class="phone"><div class="screen">
+          <div class="appbar">캠페인 <span class="r">안내</span></div>
+          <div class="scr-body">
+            <div class="blk bigcheck">
+              <div class="e">🧾</div>
+              <div class="m">내 정보를 먼저 등록해주세요 <span class="pin">2</span></div>
+              <div class="s">참여 후에는 15분 안에 구매·제출까지 끝나야 해서,<br/>지금 미리 등록해두는 거예요.</div>
+            </div>
+            <div class="field okf">✓ 이름 · 전화</div>
+            <div class="field badf">✗ 주소 — 미등록 <span class="pin">3</span></div>
+            <div class="field badf">✗ 계좌(은행/계좌번호/예금주) — 미등록</div>
+            <span class="wbtn">내 정보 등록하러 가기</span>
+            <span class="wbtn ghost">다음에 할게요</span>
+          </div>
+        </div></div>
+      </div>
+      <div class="phone-slot">
+        <h4>완비된 리뷰어는 그대로 통과</h4>
+        <p class="cap">대부분의 기존 리뷰어는 이 화면을 볼 일 없이 바로 참여됩니다.</p>
+        <div class="phone"><div class="screen">
+          <div class="appbar">캠페인 <span class="r">참여 완료</span></div>
+          <div class="scr-body">
+            <div class="holdbar"><span class="ht">⏳ 구매양식 제출까지</span><span class="hv">14 : 58</span></div>
+            <div class="blk"><div class="t">🧭 작업내용 공개 <span class="pin">4</span></div><div class="wl"></div><div class="wl w80"></div></div>
+            <div class="blk"><div class="t">🧾 구매양식 (이 화면에서 바로)</div><div class="field">주문번호</div><span class="wbtn ok">제출</span></div>
+          </div>
+        </div></div>
+      </div>
+    </div>
+    <div class="legend">
+      <div><span class="pin">1</span><span><b>자동 확인</b> — 버튼 누르는 순간 서버가 확인. 통과하면 바로 참여(추가 단계 없음)</span></div>
+      <div><span class="pin">2</span><span><b>자리 미점유 안내</b> — 이 화면이 떠도 오늘 참여 기회는 그대로 남아 있음</span></div>
+      <div><span class="pin">3</span><span><b>무엇이 빠졌는지 명확히</b> — 항목별 ✓/✗ 로 표시, 등록 화면으로 바로 이동</span></div>
+      <div><span class="pin">4</span><span>통과 후에는 기존 설계(PRD v1.2) 흐름 그대로 — 작업내용 공개 → 구매 → 인라인 제출</span></div>
+    </div>
+    <div class="callout"><b>핵심 한 줄:</b> 검사는 그대로 두고, <b>검사받는 시점만 "돈 쓰기 전 · 자리 잡기 전"으로</b> 옮깁니다. 제출 단계의 검사도 안전망으로 계속 유지됩니다.</div>
+  </section>
+
+  <!-- ═══════════ 03 변경 2 ═══════════ -->
+  <section id="s3">
+    <div class="sec-label">03 · 변경 ② 관리자 흐름</div>
+    <h2>참여형 공고, 화면에서 만들 수 있게</h2>
+    <p class="desc">지금은 참여형 공고의 엔진(M1)만 있고 운전대가 없습니다. 관리자 공고 화면에 참여형 설정을 추가해 테스트와 발행이 가능해집니다.</p>
+
+    <div class="lane bad" style="padding-bottom:12px">
+      <div class="lane-tt">⚠️ 지금 — 만들 방법이 없음</div>
+      <div class="flow">
+        <div class="fstep bad"><span class="n">지금</span><div class="ico">🔒</div><h5>공고 등록 화면</h5><p>참여형 옵션 자체가 없음<br/>→ 참여형 공고 0건</p></div>
+        <div class="fstep bad"><span class="n">영향</span><div class="ico">🧪</div><h5>M2 화면 검증 불가</h5><p>테스트할 공고를<br/>만들 수 없음</p></div>
+      </div>
+    </div>
+
+    <div class="lane good">
+      <div class="lane-tt">✅ M2에서 — 공고 화면에 [참여형] 스위치 추가</div>
+      <div class="flow">
+        <div class="fstep good"><span class="n">1</span><div class="ico">📥</div><h5>작업오더 접수</h5><p>지금과 동일</p></div>
+        <div class="fstep good"><span class="n">2</span><div class="ico">🎛️</div><h5>공고 만들기</h5><p>[참여형] 스위치 켬<br/>→ 설정칸 등장</p></div>
+        <div class="fstep good"><span class="n">3</span><div class="ico">🧮</div><h5>자동 점검</h5><p>빠진 설정 있으면<br/>게시 버튼 잠김</p></div>
+        <div class="fstep good win"><span class="n">4</span><div class="ico">📣</div><h5>게시</h5><p>리뷰어 홈에<br/>참여형 카드 등장</p></div>
+      </div>
+    </div>
+
+    <h3>공고 등록 화면 (추가되는 부분만)</h3>
+    <div class="desk" style="max-width:620px">
+      <div class="bar"><i></i><i></i><i></i><span class="url">관리자 · 모집공고 등록/수정</span></div>
+      <div class="dbody">
+        <div class="blk"><div class="t">기존 항목 (제목·채널·담당자·리뷰비·연결 탭…) — 그대로</div><div class="wl w80"></div></div>
+        <div class="blk" style="border-color:var(--ok)">
+          <span class="switch"><span class="sw on"></span> 참여형 캠페인 <span class="pin">1</span></span>
+          <div style="font-size:.64rem;color:var(--mut);margin-top:4px">켜면 아래 설정이 나타납니다 · 끄면 기존 공고와 100% 동일</div>
+        </div>
+        <div class="dgrid2">
+          <div class="blk"><div class="t">🕑 구매시간대 <span class="pin">2</span></div><div class="field">시작 14:00</div><div class="field">종료 16:00</div></div>
+          <div class="blk"><div class="t">👥 인원 <span class="pin">3</span></div><div class="field">하루 진행 20명</div><div class="field">총 모집 100명 (리뷰어에겐 비공개)</div></div>
+        </div>
+        <div class="dgrid2">
+          <div class="blk"><div class="t">🖼 상품 썸네일</div><div class="wl" style="height:24px"></div><div style="font-size:.6rem;color:var(--faint)">자동 가져오기 실패 시 직접 업로드</div></div>
+          <div class="blk"><div class="t">⏳ 참여 제한시간</div><div class="field">15분 (기본값, 고급 설정)</div></div>
+        </div>
+        <div class="blk"><div class="t">📦 작업내용 (참여한 리뷰어에게만 공개) <span class="pin">4</span></div><div class="wl w80"></div><div class="wl w60"></div><div style="font-size:.6rem;color:var(--faint)">상품/옵션/결제금액 · 유입가이드 · 리뷰가이드 · 카톡방 — 작업오더에서 자동으로 채워 옴</div></div>
+        <div class="blk">
+          <div class="t">🧮 게시 전 자동 점검 <span class="pin">5</span></div>
+          <div class="cklist">
+            <div class="ck pass"><span class="m">✓</span> 시트 탭 연결됨</div>
+            <div class="ck pass"><span class="m">✓</span> 구매시간대 입력됨 (시작 &lt; 종료)</div>
+            <div class="ck fail"><span class="m">✗</span> 하루 진행 인원이 비어 있어요</div>
+          </div>
+          <span class="wbtn disabled" style="max-width:200px;margin-top:8px">게시하기 (점검 통과 필요)</span>
+        </div>
+      </div>
+    </div>
+    <div class="legend">
+      <div><span class="pin">1</span><span><b>스위치 하나로 분리</b> — 끄면 기존 공고와 완전히 동일하게 동작(기존 운영 영향 0)</span></div>
+      <div><span class="pin">2</span><span>작업오더의 "2시~4시" 같은 글을 시스템이 시각으로 미리 채워주고, 관리자는 확인만</span></div>
+      <div><span class="pin">3</span><span>총 모집 인원은 관리자 화면에만 — 리뷰어 화면 어디에도 표시되지 않음</span></div>
+      <div><span class="pin">4</span><span>참여(자리 확보) 후에만 공개되는 영역 — 작업오더 내용이 자동으로 들어오고 게시 전 수정 가능</span></div>
+      <div><span class="pin">5</span><span><b>자동 점검</b> — 필수 설정이 빠지면 게시 자체가 안 됨. "게시했는데 리뷰어에게 안 보여요" 문의를 원천 차단</span></div>
+    </div>
+  </section>
+
+  <!-- ═══════════ 04 정리 ═══════════ -->
+  <section id="s4">
+    <div class="sec-label">04 · 정리</div>
+    <h2>바뀌기 전 / 후</h2>
+    <div class="tablewrap card">
+      <table>
+        <thead><tr><th></th><th>바뀌기 전</th><th>바뀐 후 (M2)</th></tr></thead>
+        <tbody>
+          <tr>
+            <td class="area">① 내 정보 확인</td>
+            <td>구매를 마치고 <b>제출하는 순간</b> 막힘 → 15분 낭비 + 돈 쓴 뒤 좌절</td>
+            <td><b>참여 버튼 누를 때</b> 미리 확인 → 자리 잡기 전 안내, 손해 0</td>
+          </tr>
+          <tr>
+            <td class="area">② 참여형 공고 만들기</td>
+            <td>만들 화면이 없음 (엔진만 존재)</td>
+            <td>공고 화면의 <b>[참여형] 스위치</b> + 자동 점검 후 게시</td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+    <div class="callout" style="margin-top:18px">
+      이 2가지를 포함해 M2 범위는: <b>리뷰어 카드(오픈예정 타이머·실시간 카운트) → 캠페인 상세 페이지 → 화면 안 구매양식 제출 → 참여형 공고 만들기 화면</b> 순으로 진행됩니다.
+    </div>
+  </section>
+
+  <footer>
+    아이에이리뷰 · 리뷰어 직접참여 캠페인 — M2 착수 전 반영사항 부록 (PRD v1.2의 추가 문서)
+  </footer>
+</div>
+</body>
+</html>
