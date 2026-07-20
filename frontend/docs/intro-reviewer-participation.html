@@ -182,7 +182,8 @@
     <a href="#s2">리뷰어 화면</a>
     <a href="#s3">자동으로 지켜주는 것</a>
     <a href="#s4">관리자 화면</a>
-    <a href="#s5">이런 경우엔?</a>
+    <a href="#s5">쿠팡 썸네일 세팅</a>
+    <a href="#s6">이런 경우엔?</a>
   </nav>
 
   <!-- ═══ 01 무엇이 달라졌나 ═══ -->
@@ -373,7 +374,7 @@
           <div class="blk"><div class="t">👥 인원</div><div class="field">하루 20명 · 총 100명(비공개)</div></div>
         </div>
         <div class="dgrid2">
-          <div class="blk"><div class="t">🖼 썸네일 <span class="pin">3</span></div><div class="field">자동 추출 or 직접 업로드</div></div>
+          <div class="blk"><div class="t">🖼 썸네일 <span class="pin">3</span></div><div class="field">자동 추출 · 이미지 주소 붙여넣기 · 파일 업로드</div></div>
           <div class="blk"><div class="t">📦 작업내용 <span class="pin">4</span></div><div class="wl w80"></div><div style="font-size:.58rem;color:var(--faint)">이미지 포함 원본 그대로 복사됨</div></div>
         </div>
         <div class="blk"><div class="t">🧮 게시 전 자동 점검</div>
@@ -400,15 +401,92 @@
     <div class="legend">
       <div><span class="pin">1</span><span>참여형 스위치·설정이 작업오더 내용으로 <b>자동으로 채워진 채</b> 열립니다 — 관리자는 확인·수정만</span></div>
       <div><span class="pin">2</span><span>"2시~4시" 같은 글자를 시스템이 시간으로 바꿔 넣어줍니다</span></div>
-      <div><span class="pin">3</span><span>상품 이미지가 자동으로 안 잡히면 파일로 직접 올릴 수 있어요</span></div>
+      <div><span class="pin">3</span><span>상품 이미지가 자동으로 안 잡히면(특히 쿠팡) <b>이미지 주소 붙여넣기</b> 또는 파일 업로드로 — 자세한 단계는 아래 <a href="#s5" style="color:var(--accent-deep);font-weight:700">05 쿠팡 썸네일 세팅</a> 참고</span></div>
       <div><span class="pin">4</span><span>유입 안내의 <b>이미지·서식이 그대로</b> 리뷰어에게 전달됩니다</span></div>
       <div><span class="pin">5</span><span><b>수동확정</b> — 시간을 넘겨 제출한(하지만 실제로 구매한) 리뷰어를 클릭 한 번으로 구제</span></div>
     </div>
   </section>
 
-  <!-- ═══ 05 이런 경우엔? ═══ -->
+  <!-- ═══ 05 쿠팡 썸네일 세팅 ═══ -->
   <section id="s5">
     <div class="sec-label">05</div>
+    <h2>쿠팡 썸네일, 이렇게 세팅해요</h2>
+    <p class="desc">쿠팡 상품만 자동 수집이 차단되어 있어요(봇 차단). 상품명·가격은 작업오더 값이 자동으로 채워지니, <b>썸네일 이미지 하나만</b> 아래 순서대로 잡아주면 됩니다 — 30초면 끝.</p>
+
+    <div class="flow">
+      <div class="fstep"><span class="n">1</span><div class="ico">📥</div><h5>발행 폼 열기</h5><p>작업오더에서 [모집공고 발행] — 상품확인용 URL이 자동으로 채워져 있음</p></div>
+      <div class="fstep"><span class="n">2</span><div class="ico">🔗</div><h5>상품 페이지 열기</h5><p>그 URL을 복사해 새 탭에서 쿠팡 상품 페이지 열기</p></div>
+      <div class="fstep"><span class="n">3</span><div class="ico">🖱️</div><h5>이미지 주소 복사</h5><p>대표 이미지 우클릭 → "이미지 주소 복사"</p></div>
+      <div class="fstep"><span class="n">4</span><div class="ico">📋</div><h5>붙여넣고 가져오기</h5><p>썸네일 칸에 붙여넣고 [가져오기] 클릭</p></div>
+      <div class="fstep"><span class="n">5</span><div class="ico">🖼</div><h5>미리보기 확인 → 게시</h5><p>서버가 이미지를 우리 저장소로 복사해 보관</p></div>
+    </div>
+
+    <div class="desk">
+      <div class="bar"><i></i><i></i><i></i><span class="url">① 관리자 · 모집공고 등록 — 상품확인용 URL 확인</span></div>
+      <div class="dbody">
+        <div class="blk"><div class="t">🔗 상품확인용 URL — 작업오더에서 자동으로 채워짐 <span class="pin">1</span></div>
+          <div style="display:flex;gap:6px;align-items:center">
+            <div class="field" style="flex:1;margin:0">https://www.coupang.com/vp/products/9624495419…</div>
+            <span class="wbtn ghost" style="margin:0;padding:6px 12px;white-space:nowrap">가져오기</span>
+          </div>
+          <div style="font-size:.62rem;color:var(--err);font-weight:700;margin-top:6px;background:var(--err-soft);border-radius:7px;padding:5px 10px">🚫 쿠팡 접근이 차단되었습니다(봇 차단) — 이미지 주소 붙여넣기를 사용하세요 <span class="pin">2</span></div>
+          <div style="font-size:.62rem;color:var(--faint);margin-top:5px">→ 이 URL을 복사해 <b style="color:var(--ink)">새 탭</b>에서 열어주세요</div>
+        </div>
+      </div>
+    </div>
+
+    <div class="desk">
+      <div class="bar"><i></i><i></i><i></i><span class="url">② 쿠팡 · 상품 페이지 — 대표 이미지에서 마우스 우클릭</span></div>
+      <div class="dbody">
+        <div style="display:flex;gap:14px;align-items:flex-start;position:relative;min-height:158px">
+          <div style="width:110px;height:110px;border-radius:10px;background:var(--wire-soft);display:flex;align-items:center;justify-content:center;font-size:2.2rem;flex-shrink:0">🧹</div>
+          <div style="flex:1;padding-top:6px"><div class="wl w80"></div><div class="wl w60"></div><div class="wl w40"></div></div>
+          <div style="position:absolute;left:78px;top:52px;background:var(--card);border:1px solid var(--line);border-radius:9px;box-shadow:var(--shadow);font-size:.64rem;min-width:170px;overflow:hidden;z-index:1">
+            <div style="padding:6px 12px;color:var(--faint)">새 탭에서 이미지 열기</div>
+            <div style="padding:6px 12px;background:var(--accent);color:#fff;font-weight:800">이미지 주소 복사 <span class="pin" style="background:#fff;color:var(--accent)">3</span></div>
+            <div style="padding:6px 12px;color:var(--faint)">이미지를 다른 이름으로 저장…</div>
+          </div>
+        </div>
+        <div style="font-size:.62rem;color:var(--faint);margin-top:8px">복사된 주소는 <b style="color:var(--ink)">…coupangcdn.com…</b> 으로 시작합니다 (모바일: 이미지를 길게 눌러 복사)</div>
+      </div>
+    </div>
+
+    <div class="desk">
+      <div class="bar"><i></i><i></i><i></i><span class="url">③ 관리자 · 모집공고 등록 — 상품 썸네일에 붙여넣기</span></div>
+      <div class="dbody">
+        <div class="blk" style="border-color:var(--accent)"><div class="t" style="color:var(--accent-deep)">🖼 상품 썸네일 — 이미지 주소 붙여넣기 <span class="pin">4</span></div>
+          <div style="display:flex;gap:6px;align-items:center">
+            <div class="field" style="flex:1;margin:0">https://thumbnail6.coupangcdn.com/thumbnails/remote/…jpg</div>
+            <span class="wbtn" style="margin:0;padding:6px 12px;white-space:nowrap">가져오기</span>
+          </div>
+          <div style="display:flex;gap:9px;align-items:center;margin-top:8px">
+            <div style="width:42px;height:42px;border-radius:8px;background:var(--wire-soft);display:flex;align-items:center;justify-content:center;font-size:1.2rem">🧹</div>
+            <span style="font-size:.66rem;color:var(--ok);font-weight:800">✓ 썸네일이 등록되었습니다 <span class="pin">5</span></span>
+          </div>
+        </div>
+        <span class="wbtn" style="max-width:160px">게시하기</span>
+      </div>
+    </div>
+
+    <div class="legend">
+      <div><span class="pin">1</span><span><b>상품확인용 URL은 이미 채워져 있어요</b> — 작업오더 접수 내용에서 자동으로 들어오니 따로 찾아다닐 필요가 없습니다</span></div>
+      <div><span class="pin">2</span><span>이 안내는 <b>고장이 아니라 정상</b>이에요 — 쿠팡만 자동 수집을 막고 있어서, 썸네일만 직접 잡아주는 겁니다 (상품명·가격은 이미 채워져 있음)</span></div>
+      <div><span class="pin">3</span><span>브라우저에 따라 <b>"이미지 링크 복사" · "Copy image address"</b> 등으로 표기됩니다 — 관리자 브라우저는 사람 접속이라 차단되지 않아요</span></div>
+      <div><span class="pin">4</span><span>붙여넣는 것은 상품 <b>페이지</b> 주소가 아니라 <b>이미지</b> 주소(coupangcdn.com)입니다 — 페이지 주소를 넣으면 "허용되지 않은 이미지 URL" 안내가 떠요</span></div>
+      <div><span class="pin">5</span><span>[가져오기]를 누르면 서버가 이미지를 <b>우리 Drive로 복사해 보관</b> — 쿠팡이 원본 주소를 바꾸거나 지워도 공고 카드가 깨지지 않습니다</span></div>
+    </div>
+
+    <h3 style="text-align:center;font-size:1rem;margin:30px 0 4px">막힐 때는</h3>
+    <div class="exc">
+      <div class="card xc"><div class="q">🚫 "허용되지 않은 이미지 URL"이라고 떠요</div><div class="a">상품 <b>페이지</b> 주소(coupang.com/vp/…)를 붙여넣은 경우가 대부분이에요. 페이지 주소가 아니라, 이미지에서 우클릭해 복사한 <b>"이미지 주소"(coupangcdn.com)</b>를 붙여넣어야 합니다.</div></div>
+      <div class="card xc"><div class="q">🖱️ 우클릭해도 "이미지 주소 복사"가 없어요</div><div class="a">이미지가 배경으로 깔린 영역이면 살짝 다른 위치에서 우클릭해 보세요. 그래도 안 되면 이미지를 파일로 저장한 뒤 <b>[파일 선택]으로 직접 업로드</b>해도 결과는 똑같아요(5MB 이하).</div></div>
+      <div class="card xc"><div class="q">🏬 쿠팡이 아닌 다른 쇼핑몰이에요</div><div class="a">올리브영 등 대부분의 몰은 [가져오기] <b>자동 수집이 그대로 동작</b>하므로 이 과정이 필요 없어요. 이미지 주소 붙여넣기 칸은 쿠팡 이미지 주소 전용입니다.</div></div>
+    </div>
+  </section>
+
+  <!-- ═══ 06 이런 경우엔? ═══ -->
+  <section id="s6">
+    <div class="sec-label">06</div>
     <h2>이런 경우엔 어떻게 되나요?</h2>
     <div class="exc">
       <div class="card xc"><div class="q">⌛ 15분 안에 제출을 못 했어요</div><div class="a">자리는 자동으로 다른 분에게 돌아가고, <b>그날은 같은 캠페인에 다시 참여할 수 없어요</b>(다음날 가능). 참여 전에 미리 안내되는 규칙이에요.</div></div>
