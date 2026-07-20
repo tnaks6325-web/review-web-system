@@ -77,6 +77,18 @@ router.get('/tabs', authMiddleware, async (req, res, next) => {
   } catch (err) { next(err); }
 });
 
+// ── 작업목록 즐겨찾기(로그인 계정별 개인화·영속) — 작업대 로그인 사용자 누구나(자기 것만) ──
+router.get('/workdesk/favorites', authMiddleware, async (req, res, next) => {
+  try { res.json({ ok: true, favorites: await svc.getWorkdeskFavorites(_by(req)) }); }
+  catch (err) { next(err); }
+});
+router.post('/workdesk/favorites', authMiddleware, async (req, res, next) => {
+  try {
+    const out = await svc.setWorkdeskFavorites(_by(req), (req.body && req.body.favorites));
+    res.status(out.ok ? 200 : 400).json(out);
+  } catch (err) { next(err); }
+});
+
 // ── 관측 대시보드: 투영된 전 탭 롤업(카운트 대조 + 준비도) — adminOrMaster ──
 router.get('/overview', authMiddleware, adminOrMasterMiddleware, async (req, res, next) => {
   try { res.json({ ok: true, items: await svc.overview() }); }

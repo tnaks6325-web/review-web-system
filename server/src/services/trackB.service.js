@@ -2095,7 +2095,37 @@ async function applyWritebackFull({ sheetId, tabName } = {}) {
   return r.skipped ? r : { applied: true, ...r };
 }
 
+// ── 작업목록 즐겨찾기(로그인 계정별 개인화·영속) — Track B 통합 작업대 사이드바 ──
+//   서버 원본(계정 귀속) → 개인화 + 기기 무관 유지. 계정당 1행 upsert(키 배열). 순수 개인 데이터·격리.
+async function getWorkdeskFavorites(ownerKey) {
+  const k = String(ownerKey || '').trim();
+  if (!k) return [];
+  const db = getPool();
+  const { rows } = await db.query(
+    `SELECT favorites FROM trackb_workdesk_favorites WHERE owner_key=$1 LIMIT 1`, [k]);
+  const f = rows[0] && rows[0].favorites;
+  return Array.isArray(f) ? f : [];
+}
+async function setWorkdeskFavorites(ownerKey, favorites) {
+  const k = String(ownerKey || '').trim();
+  if (!k) return { ok: false, error: 'no_owner' };
+  // 방어: 문자열 키만·중복 제거·상한(계정당 1000개·키 300자)로 남용/오염 차단
+  const seen = new Set();
+  const arr = (Array.isArray(favorites) ? favorites : [])
+    .filter(x => typeof x === 'string' && x.length > 0 && x.length <= 300 && !seen.has(x) && seen.add(x))
+    .slice(0, 1000);
+  const db = getPool();
+  await db.query(
+    `INSERT INTO trackb_workdesk_favorites (owner_key, favorites, updated_at)
+     VALUES ($1, $2::jsonb, NOW())
+     ON CONFLICT (owner_key) DO UPDATE SET favorites=EXCLUDED.favorites, updated_at=NOW()`,
+    [k, JSON.stringify(arr)]);
+  return { ok: true, count: arr.length };
+}
+
 module.exports = {
+  getWorkdeskFavorites,
+  setWorkdeskFavorites,
   identityKey,
   classifyParity,
   projectTab,
