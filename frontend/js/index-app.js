@@ -2122,6 +2122,17 @@ async function woCreateCampaign(id) {
     delivery_type: WO_DELIVERY_MAP[o.delivery_type] || "",
     product_url:   o.product_url || "",
     notes:         [_INFLOW_LABEL[o.inflow_type] ? ("유입방식: " + _INFLOW_LABEL[o.inflow_type]) : (o.inflow_keyword ? ("유입키워드: " + o.inflow_keyword) : ""), o.review_guide || ""].filter(Boolean).join("\n"),
+    // ★ M3: 참여형 자동 프리필 — 작업오더 세부내용을 발행 폼 스냅샷으로 복사
+    participation:  true,
+    daily_limit:    o.daily_count || "",
+    recruit_total:  o.recruit_count || 0,
+    purchase_time:  o.purchase_time || "",
+    wd_product:     (typeof _woProductLines === "function" ? (_woProductLines(o) || "") : "") || (o.product_option || ""),
+    wd_inflow_html: (o.inflow_type !== "link" && o.inflow_guide) ? o.inflow_guide : "",  // 원본 HTML(이미지 포함) 보존
+    wd_inflow_text: o.inflow_type === "link" ? "링크유입 — 아래 [상품 페이지 열기] 버튼으로 진입해 구매를 진행하세요." : "",
+    wd_review:      o.review_guide || "",
+    wd_notes:       o.special_notes || "",
+    landing_url:    (o.inflow_type === "link" ? ((typeof _woGuideUrls === "function" ? _woGuideUrls(o.inflow_guide)[0] : "") || "") : "") || o.product_url || "",
   };
   switchAdminTab("recruit");
   // recruit 탭의 연결 탭 옵션 로드를 보장한 뒤 모달 오픈 (setTimeout race 제거)
