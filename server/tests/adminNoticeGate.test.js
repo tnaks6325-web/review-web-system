@@ -32,4 +32,13 @@ ok('확인(읽음 기록) 흐름은 기존 유지(_dismissAdminNotices → markN
 // ── 작성 폼 안내(컨벤션 발견성) ──
 ok('공지 작성 폼에 [필수열람] 사용법 안내', /\[필수열람\]<\/b> 표시와 문서 URL/.test(app));
 
+// ── 서버: 공지 작성/수정 SQL 파라미터 타입 충돌 회귀 방지 ──
+// $3을 INTEGER 컬럼과 ::text interval 조립에 동시에 쓰면 pg가
+// "inconsistent types deduced for parameter $3"으로 항상 실패한다(실측) → make_interval 고정.
+const adminRoutes = fs.readFileSync(path.join(__dirname, '..', 'src', 'routes', 'admin.routes.js'), 'utf8');
+ok('notices INSERT/UPDATE는 make_interval 사용(타입 추론 충돌 없음)',
+  (adminRoutes.match(/make_interval\(days => \$3::int\)/g) || []).length >= 2);
+ok("구 '($3::text || days)::interval' 패턴 재유입 금지",
+  !/\$3::text \|\| ' days'/.test(adminRoutes));
+
 console.log(`\n✅ adminNoticeGate: ${passed}개 통과`);
