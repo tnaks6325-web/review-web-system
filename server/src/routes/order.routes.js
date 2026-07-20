@@ -10,6 +10,7 @@ const { buildOneSheet } = require('../services/indexBuilder.service');
 const { mirrorOneSheet } = require('../services/rawMirror.service');
 const sse = require('../utils/sse');
 const { logger } = require('../utils/logger');
+const { fetchThumbFromUrl } = require('../utils/thumbFetch');
 
 // ═══════════════════════════════════════════════════════════
 // 작업 오더(work_orders) — AE 제출 → 관리자 인박스 → 상태머신
@@ -472,6 +473,20 @@ router.post('/guide-image', async (req, res, next) => {
     const b = req.body || {};
     if (!_guideImageAuthed(req)) {
       return res.status(401).json({ ok: false, error: '인증에 실패했습니다.' });
+    }
+    // 썸네일 URL 수집: base64 없이 imageUrl만 오면 허용 CDN에서 서버가 직접 받아온다.
+    // 쿠팡 상품 HTML은 봇차단(403)이지만 이미지 CDN(coupangcdn.com)은 미차단 —
+    // 관리자가 브라우저에서 "이미지 주소 복사"한 URL을 붙여넣는 우회 경로(SSRF 가드는 thumbFetch).
+    if ((!b.imageBase64 || !String(b.imageBase64).trim()) && b.imageUrl) {
+      try {
+        const got = await fetchThumbFromUrl(b.imageUrl);
+        b.imageBase64 = got.base64;
+        b.mimeType = got.mimeType;
+        if (!b.fileName) b.fileName = 'campthumb_url_' + Date.now();
+      } catch (e) {
+        logger.warn(`[order] guide-image URL 수집 실패: ${e.message}`);
+        return res.status(400).json({ ok: false, error: e.message });
+      }
     }
     if (!b.imageBase64 || !String(b.imageBase64).trim()) {
       return res.status(400).json({ ok: false, error: '이미지 데이터가 없습니다.' });
