@@ -291,6 +291,50 @@
   .lkrow{display:flex;align-items:center;justify-content:space-between;gap:10px;padding:10px 12px;border:1px solid var(--line);border-radius:10px;margin-bottom:6px;cursor:pointer} .lkrow:hover{background:var(--accent-soft);border-color:var(--accent-line)}
   .lkinfo b{font-size:12.5px;display:block} .lkinfo span{font-size:11px;color:var(--faint)} .lkamt{font-size:12px;font-weight:700;color:var(--accent-deep);white-space:nowrap}
   .setvis{font-size:11.5px;color:var(--muted);font-weight:600;display:flex;align-items:center;gap:5px;cursor:pointer;white-space:nowrap;flex:none;align-self:center}
+  /* ═══ 시안 A · 상단 요약 미니 셀 스트립(참여자·제출·입금·정산 통합) ═══ */
+  .stripA{display:flex;flex-wrap:wrap;gap:7px;margin-bottom:8px}
+  .stripA .mcell{background:var(--card);border:1px solid var(--line);border-radius:10px;padding:8px 12px;min-width:120px;flex:1 1 120px}
+  .stripA .mcell .k{font-size:9.5px;color:var(--faint);text-transform:uppercase;letter-spacing:.04em;font-weight:700}
+  .stripA .mcell .v{font-size:14px;font-weight:700;margin-top:3px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+  .stripA .mcell.kpi .v{font-size:17px;letter-spacing:-.01em}
+  .stripA .mcell .v small{font-size:11px;font-weight:600;color:var(--faint);margin-left:2px}
+  .stripA .spct{font-size:10.5px;font-weight:800;padding:1px 7px;border-radius:999px;margin-left:6px;vertical-align:2px}
+  .spct.safe{background:var(--safe-soft);color:var(--safe)} .spct.acc{background:var(--accent-soft);color:var(--accent-deep)} .spct.warn{background:var(--warn-soft);color:var(--warn)}
+  .stripA .mcell.kpi.s{border-color:color-mix(in srgb,var(--safe) 28%,var(--line))}
+  .stripA .mcell.kpi.p{border-color:color-mix(in srgb,var(--accent) 26%,var(--line))}
+  .stripA .mcell.setl{cursor:pointer;flex:1 1 250px;min-width:230px} .stripA .mcell.setl:hover{border-color:var(--accent-line);background:var(--card2)}
+  .stripA .mcell.setl .v{font-size:12.5px;display:flex;align-items:center;gap:7px;flex-wrap:wrap;font-weight:600}
+  .stripA .mcell.setl .caret{margin-left:auto;color:var(--faint);font-size:9px;transition:transform .2s} .stripA .mcell.setl.open .caret{transform:rotate(180deg)}
+  .schip{display:inline-flex;align-items:center;gap:4px;font-size:10.5px;font-weight:700;padding:1px 8px;border-radius:999px;background:var(--card2);color:var(--muted)}
+  .schip.ok{background:var(--accent-soft);color:var(--accent-deep)} .schip.safe{background:var(--safe-soft);color:var(--safe)} .schip.warn{background:var(--warn-soft);color:var(--warn)}
+  .setldetail{margin-bottom:8px} .setldetail[hidden]{display:none}
+  /* ═══ 그리드 컬럼 ▾ 메뉴 · 행 그룹 헤더 ═══ */
+  .th-in{display:flex;align-items:center;gap:5px} .th-in .lbl{overflow:hidden;text-overflow:ellipsis}
+  .th-in .fdot{width:6px;height:6px;border-radius:50%;background:var(--accent);flex:none}
+  .gcaret{margin-left:auto;flex:none;width:17px;height:17px;border-radius:5px;display:grid;place-items:center;font-size:9px;color:var(--faint);cursor:pointer;border:1px solid transparent;transition:.12s;user-select:none}
+  .gcaret:hover{background:var(--card);border-color:var(--line2);color:var(--accent-deep)} .gcaret.active{background:var(--accent);color:#fff;border-color:var(--accent)}
+  table.sheetgrid tr.grouphd td{position:sticky;left:0;z-index:1;background:color-mix(in srgb,var(--accent-soft) 55%,var(--card));border-bottom:1px solid var(--accent-line);padding:0}
+  .ghinner{display:flex;align-items:center;gap:9px;padding:7px 11px;cursor:pointer;user-select:none} .ghinner:hover{background:color-mix(in srgb,var(--accent-soft) 80%,transparent)}
+  .ghtri{width:12px;color:var(--accent-deep);font-size:10px;transition:transform .15s;flex:none} .ghtri.open{transform:rotate(90deg)}
+  .ghcol{font-size:10.5px;color:var(--faint);font-weight:600} .ghlbl{font-weight:750;font-size:12px;color:var(--ink)}
+  .ghagg{margin-left:16px;display:flex;gap:6px;font-size:10.5px}
+  .ghagg .a{padding:1px 8px;border-radius:999px;background:var(--card);border:1px solid var(--line);font-weight:700;color:var(--muted)}
+  .ghagg .a b{color:var(--ink)} .ghagg .a.s b{color:var(--safe)} .ghagg .a.p b{color:var(--accent-deep)}
+  .gcolmenu,.ghidmenu{position:fixed;z-index:210;background:var(--card);border:1px solid var(--line2);border-radius:12px;box-shadow:0 8px 28px rgba(16,24,40,.16);padding:9px;display:none;flex-direction:column;gap:7px}
+  .gcolmenu{width:252px} .ghidmenu{width:212px;gap:3px}
+  .gcolmenu.show,.ghidmenu.show{display:flex}
+  .gcm-sort{display:flex;gap:6px}
+  .gcm-sort button{flex:1;font:inherit;font-size:11.5px;font-weight:650;padding:6px;border:1px solid var(--line);border-radius:8px;background:var(--card);color:var(--muted);cursor:pointer} .gcm-sort button:hover{background:var(--card2);border-color:var(--accent-line)} .gcm-sort button.on{background:var(--accent-soft);border-color:var(--accent-line);color:var(--accent-deep)}
+  .gcm-search{width:100%;font:inherit;font-size:12px;padding:6px 9px;border:1px solid var(--line2);border-radius:8px;background:var(--card);color:var(--ink)}
+  .gcm-acts{display:flex;justify-content:space-between;font-size:11px} .gcm-acts a{color:var(--accent-deep);cursor:pointer;font-weight:650} .gcm-acts a:hover{text-decoration:underline}
+  .gcm-list{max-height:190px;overflow:auto;display:flex;flex-direction:column;border:1px solid var(--line);border-radius:8px;padding:3px}
+  .gcm-opt{display:flex;align-items:center;gap:8px;padding:5px 7px;border-radius:6px;font-size:12px;cursor:pointer} .gcm-opt:hover{background:var(--card2)}
+  .gcm-opt input{accent-color:var(--accent);width:14px;height:14px;flex:none} .gcm-opt .cv{flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap} .gcm-opt .cn{font-size:10.5px;color:var(--faint)}
+  .gcm-foot{display:flex;gap:7px} .gcm-foot .btn{flex:1;justify-content:center}
+  .gcm-div{height:1px;background:var(--line);margin:1px 0}
+  .gcm-hide{font:inherit;font-size:12px;font-weight:650;padding:7px;border:1px solid var(--line);border-radius:8px;background:var(--card);color:var(--muted);cursor:pointer;display:flex;align-items:center;gap:7px;justify-content:center} .gcm-hide:hover{background:var(--bad-soft);border-color:var(--bad);color:var(--bad)}
+  .gcm-empty{color:var(--faint);font-size:12px;text-align:center;padding:14px;line-height:1.5}
+  .ghid-row{display:flex;align-items:center;gap:8px;padding:6px 8px;border-radius:7px;font-size:12px} .ghid-row:hover{background:var(--card2)} .ghid-row .hn{flex:1;overflow:hidden;text-overflow:ellipsis} .ghid-row .re{color:var(--accent-deep);cursor:pointer;font-weight:700;font-size:11px} .ghid-row .re:hover{text-decoration:underline}
 </style>
 </head>
 <body>
@@ -364,7 +408,10 @@ let STATE = { role:'', name:'', view:'workdesk', tabs:[], cur:null, wd:null, fre
               ov:[], ovq:'', pendingTab:null, lastBatch:null,
               advs:[], advCur:null, tabIndex:{}, sheetMap:{}, addMode:'all', addSheet:null, addTabs:{},
               ownTabs:[], ownBrand:null, ownBrandList:[],     // 연결탭 목록 + 브랜드 필터(null=전체, ''=미분류)
-              ownSettle:{}, ownSettleFor:null };              // 연결탭 정산 요약(비동기 필, 업체 전환 경합 가드)
+              ownSettle:{}, ownSettleFor:null,                // 연결탭 정산 요약(비동기 필, 업체 전환 경합 가드)
+              // ── 작업대 그리드 뷰 상태(클라이언트 전용, 탭 전환 시 초기화) ──
+              gFilters:{}, gHidden:new Set(), gGroupBy:null, gCollapsed:new Set(), gSort:null,
+              settleOpen:false, _gMenuCol:null, _gMenuInit:false };
 
 async function boot(){
   // 광고주 전용 접속 링크(#adv=<token>) — 로그인 없이 유효 토큰을 advertiser JWT 로 교환(프래그먼트라 서버로그·Referer 미유출).
@@ -453,6 +500,8 @@ async function loadTabs(){
     if(idx>=0) selTab(idx); else { STATE.tabs.push(pt); selTab(STATE.tabs.length-1); } }
 }
 async function selTab(i){ const t=STATE.tabs[i]; STATE.cur=t;
+  // 탭 전환 = 헤더 구성이 달라지므로 그리드 뷰 상태(필터/숨김/그룹/정렬/정산펼침) 초기화
+  STATE.gFilters={}; STATE.gHidden=new Set(); STATE.gGroupBy=null; STATE.gCollapsed=new Set(); STATE.gSort=null; STATE.freezeUpto=null; STATE.settleOpen=false; closeGColMenu(); closeGHidMenu();
   document.querySelectorAll('.titem').forEach(el=>el.classList.toggle('on',+el.dataset.i===i));
   $('#wrap').classList.remove('showlist'); $('#main').innerHTML=`<div class="empty">불러오는 중…</div>`;
   const q=`sheetId=${encodeURIComponent(t.sheetId)}&tabName=${encodeURIComponent(t.tabName)}&tabGid=${encodeURIComponent(t.tabGid||'')}`;
@@ -473,7 +522,6 @@ function renderWorkdesk(wd){
   if(!wd||!wd.ok){ $('#main').innerHTML=`<div class="empty">${esc((wd&&wd.error)||'조회 실패')}</div>`; return; }
   STATE.wd=wd; STATE.canEdit=(STATE.role!=='advertiser');   // master/admin/staff(AE) 편집 · 광고주는 열람
   const d=wd.detail||{},m=wd.meta||{},c=wd.counts||{}, isMaster=STATE.role==='master', canEdit=STATE.canEdit;
-  const metaCards=[['상품',d.productOption||m.campaignName||'—'],['모집',(d.recruitCount||'—')+(m.manager?(' · '+m.manager):'')],['구매시간',d.purchaseTime||'자율'],['배송',d.deliveryType||m.deliveryType||'—']].map(([k,v])=>`<div class="mf"><div class="k">${esc(k)}</div><div class="v">${esc(v)}</div></div>`).join('');
   // 시트형 그리드 모드(master/admin, 시트 헤더 순서 수신 시): 시트와 동일한 가로 그리드로 렌더(열람 전용).
   const gridMode = canEdit && Array.isArray(wd.headers) && wd.headers.length;
   const warn=[];
@@ -502,23 +550,46 @@ function renderWorkdesk(wd){
   $('#main').innerHTML=`<div class="mh"><h1>${esc(STATE.cur.tabName)}</h1>
     ${wd.maskPII?'<span class="bd">개인정보 마스킹(광고주)</span>':''}<span class="bd g">참여자 ${c.total||0}</span>${sotBadge}${gridMode?'<span class="bd" title="구글시트와 동일 컬럼·가로 펼침 (열람 전용)">시트 그리드 · 열람</span>':''}${warn.join('')}
     ${isMaster?`<span class="sp" style="flex:1"></span>${flipBtn}<button class="btn" onclick="showWritebackSim()" title="이 탭 편집이 시트에 반영된다면 무엇이 바뀔지 미리보기 (시뮬레이션 · 실제 시트 무접촉)">write-back 시뮬</button><button class="btn" id="projBtn" onclick="projectCur()">그림자 투영(새로고침)</button>`:''}</div>
-    <div class="metagrid">${metaCards}</div>
+    ${summaryStrip(wd,d,m,c)}
+    <div class="setldetail" id="setldetail"${STATE.settleOpen?'':' hidden'}><div id="settlementsec"></div></div>
     ${renderWorkOrderSection(wd)}
-    ${(()=>{ // KPI 게이지 카드(키트): 목표=발주 모집인원 > 탭명 파싱 건수 > 참여자수
-      const target=(d.recruitCount&&+d.recruitCount)||parseTabMeta(STATE.cur.tabName).count||c.total||0;
-      const pT=target?Math.round((c.total||0)/target*100):0, pS=c.total?Math.round((c.submitted||0)/c.total*100):0, pP=c.total?Math.round((c.paid||0)/c.total*100):0;
-      return `<div class="counts">
-        <div class="cc"><div><div class="lb">참여자${target&&target!==c.total?` / 목표 ${target}`:''}</div><div class="big">${c.total||0}${target&&target!==c.total?`<small>/ ${target}</small>`:''}</div></div>${gaugeSvg(pT,null,'')}</div>
-        <div class="cc s"><div><div class="lb">제출완료</div><div class="big">${c.submitted||0}<small>/ ${c.total||0}</small></div></div>${gaugeSvg(pS,null,'g-safe')}</div>
-        <div class="cc p"><div><div class="lb">입금완료</div><div class="big">${c.paid||0}<small>/ ${c.total||0}</small></div></div>${gaugeSvg(pP,null,'')}</div>
-      </div>`; })()}
-    <div id="settlementsec"></div>
-    ${tableSection}
+    <div id="gridhost">${tableSection}</div>
     <div id="threadsec"></div>`;
   loadSettlement(STATE.cur);
   loadThread(STATE.cur);
 }
 
+// ── 시안 A: 상단 요약 미니 셀 스트립(상품/모집/구매시간/배송 + 참여·제출·입금 + 정산 통합) ──
+function summaryStrip(wd,d,m,c){
+  const target=(d.recruitCount&&+d.recruitCount)||parseTabMeta(STATE.cur.tabName).count||c.total||0;
+  const pT=target?Math.round((c.total||0)/target*100):0, pS=c.total?Math.round((c.submitted||0)/c.total*100):0, pP=c.total?Math.round((c.paid||0)/c.total*100):0;
+  const meta=[['상품',d.productOption||m.campaignName||'—'],['모집',(d.recruitCount||'—')+(m.manager?(' · '+m.manager):'')],['구매시간',d.purchaseTime||'자율'],['배송',d.deliveryType||m.deliveryType||'—']]
+    .map(([k,v])=>`<div class="mcell"><div class="k">${esc(k)}</div><div class="v" title="${esc(v)}">${esc(v)}</div></div>`).join('');
+  const kpi=`<div class="mcell kpi"><div class="k">참여자${target&&target!==c.total?` / 목표 ${target}`:''}</div><div class="v">${c.total||0}${target&&target!==c.total?`<small>/ ${target}</small>`:''}<span class="spct acc">${pT}%</span></div></div>`
+    +`<div class="mcell kpi s"><div class="k">제출완료</div><div class="v">${c.submitted||0}<small>/ ${c.total||0}</small><span class="spct safe">${pS}%</span></div></div>`
+    +`<div class="mcell kpi p"><div class="k">입금완료</div><div class="v">${c.paid||0}<small>/ ${c.total||0}</small><span class="spct acc">${pP}%</span></div></div>`;
+  const setl=`<div class="mcell setl${STATE.settleOpen?' open':''}" id="setlCell" onclick="toggleSettleDetail()"><div class="k">정산</div><div class="v"><span class="setlsummary" style="color:var(--faint)">불러오는 중…</span><span class="caret">▼</span></div></div>`;
+  return `<div class="stripA">${meta}${kpi}${setl}</div>`;
+}
+// 정산 미니 셀 클릭 → 하단 상세(스텝퍼) 펼침/접기
+function toggleSettleDetail(){ STATE.settleOpen=!STATE.settleOpen; const dt=$('#setldetail'); if(dt) dt.hidden=!STATE.settleOpen; const c=$('#setlCell'); if(c) c.classList.toggle('open',STATE.settleOpen); }
+// 스트립 정산 셀 요약(로드 상태별) — 상세는 #settlementsec(펼침 시)
+function setlSummaryHtml(d){
+  if(!d) return `<span class="setlsummary" style="color:var(--faint)">불러오는 중…</span>`;
+  if(d.hidden) return `<span class="setlsummary"><span class="schip">비공개</span></span>`;
+  if(!d.linked) return `<span class="setlsummary"><span class="schip warn">미연결</span><span style="color:var(--faint);font-weight:500">계약 연결 필요</span></span>`;
+  const st=_setlStage(d);
+  return `<span class="setlsummary">${d.contractNumber?`<span class="schip ok">${esc(d.contractNumber)}</span>`:''}${d.amount!=null?`<span>${_wonFmt(d.amount)}</span>`:''}<span class="schip ${st.tone}">${esc(st.label)}</span></span>`;
+}
+function _setlStage(d){
+  const q=d.quote,inv=d.invoice,pay=d.payment,co=d.closeout;
+  if(pay&&pay.status==='paid') return {label:'입금완료',tone:'safe'};
+  if(inv&&inv.status==='issued') return {label:'계산서 발행',tone:'ok'};
+  if(q&&q.status==='accepted') return {label:'견적 수락',tone:'ok'};
+  if(q&&q.quoteNumber) return {label:'견적 진행',tone:'warn'};
+  if(co&&co.date) return {label:'견적 대기',tone:'warn'};
+  return {label:'준비중',tone:''};
+}
 // ══ P2 정산 파이프라인 스텝퍼 ══
 const _SETTLE_PAY={unpaid:['미입금','bad'],partial:['부분입금','warn'],paid:['입금완료','safe']};
 const _SETTLE_INV={not_issued:['미발행','warn'],issued:['발행완료','safe'],requested:['발행요청','warn']};
@@ -527,7 +598,7 @@ function _wonFmt(n){ return (Number(n)||0).toLocaleString('ko-KR')+'원'; }
 async function loadSettlement(t){
   if(!t) return; const box=$('#settlementsec'); if(!box) return;
   const r=await api(`/api/trackb/workdesk/settlement?sheetId=${encodeURIComponent(t.sheetId)}&tabName=${encodeURIComponent(t.tabName)}`).catch(()=>null);
-  if(!r||!r.ok){ box.innerHTML=''; return; }
+  if(!r||!r.ok){ box.innerHTML=''; const cs=$('#setlCell .setlsummary'); if(cs) cs.outerHTML='<span class="setlsummary" style="color:var(--faint)">정산 정보 없음</span>'; return; }
   STATE.settle={ data:r, tab:t }; renderSettlement();
 }
 function _step(n,label,state,sub){ // state: 'done'|'wait'|'off'
@@ -536,6 +607,7 @@ function _step(n,label,state,sub){ // state: 'done'|'wait'|'off'
 }
 function renderSettlement(){
   const st=STATE.settle; if(!st) return; const box=$('#settlementsec'); if(!box) return; const d=st.data;
+  const cellS=$('#setlCell .setlsummary'); if(cellS) cellS.outerHTML=setlSummaryHtml(d);   // 스트립 정산 셀 동기화
   const canLink=STATE.role!=='advertiser';
   if(d.hidden){ box.innerHTML=`<div class="sect" style="margin-top:16px"><div class="st">정산</div><div class="stpcard"><div class="empty" style="padding:16px">정산 정보는 비공개로 설정되어 있습니다.</div></div></div>`; return; }
   if(!d.linked){
@@ -716,53 +788,192 @@ function _fmtKDate(v){
   return v;   // 비정형(텍스트 메모 등)은 원본 유지
 }
 
+// 셀 표시값(그리드 렌더·필터·그룹·정렬 공용) — 신원 3열은 그대로, 시트 컬럼은 편집오버레이 반영 + 날짜 표기.
+function gCellDisp(r,h){
+  if(h==='#') return String(r.seq==null?'':r.seq);
+  if(h==='참여자') return r.name||'';
+  if(h==='연락처') return r.phone8||'';
+  const rj=(r.rowJson&&typeof r.rowJson==='object')?r.rowJson:{};
+  const ceMap=(r.cellEdits&&typeof r.cellEdits==='object')?r.cellEdits:{};
+  const ed=(h in ceMap); const raw= ed?ceMap[h]:rj[h];
+  return ed?(raw==null?'':String(raw)):_gridVal(h, raw);
+}
 // 시트형 그리드: 왼쪽 고정 = #·참여자·연락처(DB 리뷰어 신원) + (선택 시)시트 컬럼 수취인까지 · 오른쪽 = 시트 컬럼 전체.
+//   + 컬럼 ▾(필터·정렬·숨기기) · 행 그룹(기준 컬럼 선택, 접기/펼치기) — 모두 클라이언트 뷰 상태(Track B 열람).
 function buildGrid(wd){
   const H=wd.headers||[];
   const revI=H.indexOf('리뷰제출'), payI=H.indexOf('입금');
-  // 전체 컬럼: [#, 참여자, 연락처, ...시트헤더]. 고정 개수 = 3 + (freezeUpto 시트컬럼 인덱스+1)
+  const allCols=['#','참여자','연락처', ...H];
+  const vcols=allCols.filter(c=>!STATE.gHidden.has(c));                       // 숨긴 열 제외 = 표시 컬럼
   const fzIdx = STATE.freezeUpto ? H.indexOf(STATE.freezeUpto) : -1;
-  const frozenN = 3 + (fzIdx>=0 ? fzIdx+1 : 0);
-  const cols = ['#','참여자','연락처', ...H];
-  const lefts=[]; let acc=0; for(let i=0;i<cols.length;i++){ lefts[i]=acc; acc+=_colW(cols[i]); }
-  const cstyle=(i)=>{ const w=_colW(cols[i]); let s=`min-width:${w}px;width:${w}px;`; if(i<frozenN){ s+=`left:${lefts[i]}px;`; if(i===frozenN-1)s+='box-shadow:2px 0 0 var(--line2);'; } return s; };
+  const fset=new Set(['#','참여자','연락처', ...H.slice(0, fzIdx+1)]);         // 고정 대상 집합
+  let frozenN=0; for(const c of vcols){ if(fset.has(c)) frozenN++; else break; } // 표시 컬럼 기준 연속 고정 접두수
+  const lefts=[]; let acc=0; for(let i=0;i<vcols.length;i++){ lefts[i]=acc; acc+=_colW(vcols[i]); }
+  const cstyle=(i)=>{ const w=_colW(vcols[i]); let s=`min-width:${w}px;width:${w}px;`; if(i<frozenN){ s+=`left:${lefts[i]}px;`; if(i===frozenN-1)s+='box-shadow:2px 0 0 var(--line2);'; } return s; };
   const cls=(i,extra)=>`class="${i<frozenN?'gfz ':''}${extra||''}"`;
-  const thead=`<tr>${cols.map((h,i)=>`<th ${cls(i)} style="${cstyle(i)}">${esc(h==='#'?'#':h)}</th>`).join('')}</tr>`;
-  const body=(wd.roster||[]).map(r=>{
+  // 헤더 ▾ 메뉴(필터·정렬·숨기기) — '#' 은 메뉴 없음
+  const thead=`<tr>${vcols.map((h,i)=>{
+    const hasF=STATE.gFilters[h]&&STATE.gFilters[h].size;
+    const sorted=STATE.gSort&&STATE.gSort.col===h;
+    const caret=h==='#'?'':`<span class="gcaret${(hasF||sorted)?' active':''}" title="필터·정렬·숨기기" onclick="openGColMenu(event,'${esc(h)}')">▾</span>`;
+    return `<th ${cls(i)} style="${cstyle(i)}"><div class="th-in"><span class="lbl">${esc(h)}</span>${hasF?'<span class="fdot" title="필터 적용됨"></span>':''}${caret}</div></th>`;
+  }).join('')}</tr>`;
+  // 행 필터(스테일 컬럼은 무시 = 탭 전환 초기화 누락 시에도 그리드 블랭크 방지) → 정렬
+  let rows=(wd.roster||[]).filter(r=>Object.entries(STATE.gFilters).every(([col,set])=>{
+    if(!set||!set.size) return true; if(!allCols.includes(col)) return true; return set.has(gCellDisp(r,col)); }));
+  if(STATE.gSort&&STATE.gSort.col&&allCols.includes(STATE.gSort.col)){
+    const col=STATE.gSort.col, sdir=STATE.gSort.dir==='desc'?-1:1;
+    rows=rows.slice().sort((a,b)=>{ const x=gCellDisp(a,col),y=gCellDisp(b,col);
+      const nx=Number(String(x).replace(/[,\s]/g,'')),ny=Number(String(y).replace(/[,\s]/g,''));
+      const both=x!==''&&y!==''&&!isNaN(nx)&&!isNaN(ny);
+      return (both?nx-ny:String(x).localeCompare(String(y),'ko'))*sdir; });
+  }
+  // 단일 행 렌더(편집 셀 보존 · vcols 순서 · 인덱스로 고정/폭 계산)
+  const rowHtml=(r)=>{
     const rj=(r.rowJson&&typeof r.rowJson==='object')?r.rowJson:{};
     const ceMap=(r.cellEdits&&typeof r.cellEdits==='object')?r.cellEdits:{};
     const canE = STATE.canEdit && r.editable!==false;
     const badge = r.source==='manual'?' <span class="src manual">수동</span>':(r.hasOrder?' <span class="src order">주문</span>':'')
                 + (r.editable===false?' <span class="lock" title="주문/신원 앵커 없음 또는 중복 — 편집 잠금">🔒</span>':'');
-    // 편집 셀 렌더(주입 안전: 헤더는 data-field 속성으로만 전달, onclick 인라인 없음)
-    //   editv = 편집 시작값(생략 시 disp) — 날짜 컬럼은 표시("7/3 (금)")와 별개로 ISO 정본으로 편집 시작.
     const eCell=(field, disp, edited, extraCls, styleI, editv)=> canE
       ? `<td ${cls(styleI,'gcell'+(disp?'':' gempty')+(extraCls||''))} style="${cstyle(styleI)}"><span class="ecell${edited?' edited':''}" data-val="${esc(editv!=null?editv:disp)}" data-id="${esc(r.id)}" data-field="${esc(field)}" onclick="beginEditCell(this)">${esc(disp||'—')}</span>${edited?` <span class="revb" title="되돌리기" data-id="${esc(r.id)}" data-field="${esc(field)}" onclick="revertCell(event,this)">↩</span>`:''}</td>`
       : `<td ${cls(styleI,'gcell'+(disp?'':' gempty')+(extraCls||''))} style="${cstyle(styleI)}">${esc(disp||'')}</td>`;
-    let tds=`<td ${cls(0,'gnum')} style="${cstyle(0)}">${esc(r.seq)}</td>`+
-            (canE
-              ? `<td ${cls(1,'gnm')} style="${cstyle(1)}"><span class="ecell${(r.editedFields||[]).includes('reviewer_name')?' edited':''}" data-val="${esc(r.name||'')}" data-id="${esc(r.id)}" data-field="reviewer_name" onclick="beginEditCell(this)">${esc(r.name||'—')}</span>${badge}<span class="rmx" title="명단에서 제거(숨김)" onclick="hideRow('${esc(r.id)}')">×</span></td>`
-              : `<td ${cls(1,'gnm')} style="${cstyle(1)}">${esc(r.name||'—')}${badge}</td>`)+
-            eCell('phone8', r.phone8||'', (r.editedFields||[]).includes('phone8'), 'gph', 2);
-    H.forEach((h,j)=>{ const i=j+3; const ed=(h in ceMap); const raw= ed?ceMap[h]:rj[h];
-      const disp= ed?(raw==null?'':String(raw)):_gridVal(h, raw);
-      const editv= ed?disp:_gridEditVal(h, raw);   // 편집은 정본값에서 시작(표시 축약값 오염 방지)
-      const ok=((j===revI||j===payI)&&disp)?' gok':'';
-      tds+=eCell('col:'+h, disp, ed, ok, i, editv); });
+    let tds='';
+    vcols.forEach((h,i)=>{
+      if(h==='#'){ tds+=`<td ${cls(i,'gnum')} style="${cstyle(i)}">${esc(r.seq)}</td>`; }
+      else if(h==='참여자'){ tds+= canE
+        ? `<td ${cls(i,'gnm')} style="${cstyle(i)}"><span class="ecell${(r.editedFields||[]).includes('reviewer_name')?' edited':''}" data-val="${esc(r.name||'')}" data-id="${esc(r.id)}" data-field="reviewer_name" onclick="beginEditCell(this)">${esc(r.name||'—')}</span>${badge}<span class="rmx" title="명단에서 제거(숨김)" onclick="hideRow('${esc(r.id)}')">×</span></td>`
+        : `<td ${cls(i,'gnm')} style="${cstyle(i)}">${esc(r.name||'—')}${badge}</td>`; }
+      else if(h==='연락처'){ tds+=eCell('phone8', r.phone8||'', (r.editedFields||[]).includes('phone8'), 'gph', i); }
+      else { const jIdx=H.indexOf(h); const ed=(h in ceMap); const raw= ed?ceMap[h]:rj[h];
+        const disp= ed?(raw==null?'':String(raw)):_gridVal(h, raw);
+        const editv= ed?disp:_gridEditVal(h, raw);
+        const ok=((jIdx===revI||jIdx===payI)&&disp)?' gok':'';
+        tds+=eCell('col:'+h, disp, ed, ok, i, editv); }
+    });
     return `<tr>${tds}</tr>`;
-  }).join('')||`<tr><td colspan="${cols.length}" class="empty">명단 없음 — 그림자 투영을 실행하세요.</td></tr>`;
-  // 고정 열 선택(수취인까지 등) — 시트 컬럼 중 신원계열만 옵션으로.
+  };
+  // 본문 — 그룹 여부에 따라
+  let body;
+  const groupOn = STATE.gGroupBy && allCols.includes(STATE.gGroupBy);
+  if(!rows.length){
+    body=`<tr><td colspan="${vcols.length}" class="empty" style="height:56px">${Object.keys(STATE.gFilters).length?'조건에 맞는 행이 없습니다 — 필터를 조정하세요.':'명단 없음 — 그림자 투영을 실행하세요.'}</td></tr>`;
+  } else if(groupOn){
+    const gb=STATE.gGroupBy, groups=new Map();
+    rows.forEach(r=>{ const k=gCellDisp(r,gb); if(!groups.has(k))groups.set(k,[]); groups.get(k).push(r); });
+    body='';
+    for(const [k,rs] of groups){
+      const open=!STATE.gCollapsed.has(k);
+      const sub=rs.reduce((n,r)=>n+(r.submitted?1:0),0), paid=rs.reduce((n,r)=>n+(r.paid?1:0),0);
+      body+=`<tr class="grouphd"><td colspan="${vcols.length}"><div class="ghinner" onclick="toggleGGroup('${encodeURIComponent(k).replace(/'/g,'%27')}')"><span class="ghtri${open?' open':''}">▶</span><span class="ghcol">${esc(gb)}</span><span class="ghlbl">${esc(k||'(빈값)')}</span><span class="ghagg"><span class="a">${rs.length}명</span><span class="a s">제출 <b>${sub}</b></span><span class="a p">입금 <b>${paid}</b></span></span></div></td></tr>`;
+      if(open) body+=rs.map(rowHtml).join('');
+    }
+  } else {
+    body=rows.map(rowHtml).join('');
+  }
+  // 툴바(고정 열 · 행 그룹 · 접기/펼치기 · 숨긴 열 · 필터 초기화 · 편집 이력)
   const fzOpts=['<option value="">기본(연락처까지)</option>']
     .concat(H.filter(h=>['번호','담당자','구매일자','인애드명단','주문자제출','수취인','주소'].includes(h))
       .map(h=>`<option value="${esc(h)}"${STATE.freezeUpto===h?' selected':''}>${esc(h)}까지 고정</option>`)).join('');
-  return `<div class="gridbar"><label>고정 열</label><select id="fzsel" onchange="setFreeze(this.value)">${fzOpts}</select>
+  const grpOpts=['<option value="">그룹 없음</option>']
+    .concat(H.map(h=>`<option value="${esc(h)}"${STATE.gGroupBy===h?' selected':''}>${esc(h)} 기준</option>`)).join('');
+  const nHid=STATE.gHidden.size, hasFilt=Object.values(STATE.gFilters).some(s=>s&&s.size);
+  return `<div class="gridbar">
+      <label>고정 열</label><select id="fzsel" onchange="setFreeze(this.value)">${fzOpts}</select>
+      <label>행 그룹</label><select id="grpsel" onchange="setGGroup(this.value)">${grpOpts}</select>
+      ${groupOn?`<button class="btn xs" onclick="toggleAllGGroups()">${STATE.gCollapsed.size?'모두 펼치기':'모두 접기'}</button>`:''}
+      <button class="btn xs" onclick="openGHidMenu(event)">숨긴 열${nHid?` <b style="color:var(--accent-deep)">${nHid}</b>`:' 0'}</button>
+      ${hasFilt?`<button class="btn xs" style="color:var(--warn);border-color:color-mix(in srgb,var(--warn) 35%,var(--line))" onclick="clearGFilters()">필터 초기화 ✕</button>`:''}
       <button class="btn xs" onclick="showEditHistory()">편집 이력</button>
-      <span class="gnote">구글시트와 동일 컬럼·가로 배열 · <b>셀 클릭 편집</b>(Track B 전용, 시트·주문 무접촉) · ↩ 되돌리기 · 날짜 자동표시 · 리뷰제출/입금 편집 시 카운트 연동</span></div>
+      <span class="gnote">시트 동일 컬럼 · <b>컬럼 ▾</b> 필터·숨기기·정렬 · <b>행 그룹</b> 접기/펼치기 · <b>셀 클릭 편집</b>(Track B 전용)</span></div>
     <div class="gridscroll"><table class="sheetgrid"><thead>${thead}</thead><tbody>${body}</tbody></table></div>
     <div id="addbox"></div>
     <button class="btn" style="margin-top:10px" onclick="showAddForm()">＋ 참여자 추가</button>`;
 }
-function setFreeze(v){ STATE.freezeUpto=v||null; if(STATE.wd) renderWorkdesk(STATE.wd); }
+// 그리드만 가볍게 재렌더(필터/그룹/숨김/정렬 등 뷰 상태 변경 시 — 정산·스레드 재요청 없이)
+function rerenderGrid(){ const wd=STATE.wd; if(!wd) return; const host=$('#gridhost'); if(!host) return;
+  const gridMode=STATE.canEdit&&Array.isArray(wd.headers)&&wd.headers.length; if(gridMode) host.innerHTML=buildGrid(wd); }
+function setFreeze(v){ STATE.freezeUpto=v||null; rerenderGrid(); }
+// ── 컬럼 ▾ 필터/정렬/숨기기 · 행 그룹 접기/펼치기 (클라이언트 뷰 상태) ──
+function _ensureGMenus(){
+  if(!$('#gcolmenu')){ const m=document.createElement('div'); m.className='gcolmenu'; m.id='gcolmenu'; document.body.appendChild(m); }
+  if(!$('#ghidmenu')){ const m=document.createElement('div'); m.className='ghidmenu'; m.id='ghidmenu'; document.body.appendChild(m); }
+  if(!STATE._gMenuInit){ STATE._gMenuInit=true;
+    document.addEventListener('click',e=>{ if(!e.target.closest('#gcolmenu')&&!e.target.closest('.gcaret')) closeGColMenu();
+      if(!e.target.closest('#ghidmenu')&&!e.target.closest('.ghid-btn')) closeGHidMenu(); });
+    document.addEventListener('keydown',e=>{ if(e.key==='Escape'){ closeGColMenu(); closeGHidMenu(); } });
+  }
+}
+function _placeMenu(m,btn,w,h){ const x=Math.max(8,Math.min(btn.left, window.innerWidth-w-10)); const y=Math.min(btn.bottom+5, window.innerHeight-h-10); m.style.left=x+'px'; m.style.top=Math.max(8,y)+'px'; }
+function openGColMenu(ev,col){
+  ev.stopPropagation(); _ensureGMenus(); closeGHidMenu();
+  const m=$('#gcolmenu');
+  if(STATE._gMenuCol===col && m.classList.contains('show')){ closeGColMenu(); return; }
+  STATE._gMenuCol=col;
+  const roster=(STATE.wd&&STATE.wd.roster)||[]; const cur=STATE.gFilters[col];
+  const counts={}; roster.forEach(r=>{ const v=gCellDisp(r,col); counts[v]=(counts[v]||0)+1; });
+  const vals=Object.keys(counts).sort((a,b)=>a.localeCompare(b,'ko',{numeric:true}));
+  const so=(STATE.gSort&&STATE.gSort.col===col)?STATE.gSort.dir:null;
+  const canHide = col!=='#';
+  m.innerHTML=`
+    <div class="gcm-sort"><button class="${so==='asc'?'on':''}" onclick="gSortCol('asc')">▲ 오름차순</button><button class="${so==='desc'?'on':''}" onclick="gSortCol('desc')">▼ 내림차순</button></div>
+    <input class="gcm-search" placeholder="값 검색…" oninput="gFilterMenuList(this.value)">
+    <div class="gcm-acts"><a onclick="gcmAll(true)">전체 선택</a><a onclick="gcmAll(false)">전체 해제</a></div>
+    <div class="gcm-list" id="gcmlist">${vals.map(v=>{ const on=!cur||cur.has(v);
+      return `<label class="gcm-opt" data-v="${esc(v)}"><input type="checkbox" ${on?'checked':''} value="${esc(v)}"><span class="cv">${esc(v||'(빈값)')}</span><span class="cn">${counts[v]}</span></label>`;
+    }).join('')||'<div class="gcm-empty">값 없음</div>'}</div>
+    <div class="gcm-foot"><button class="btn xs" onclick="closeGColMenu()">취소</button><button class="btn xs pri" onclick="applyGFilter()">적용</button></div>
+    ${canHide?`<div class="gcm-div"></div><button class="gcm-hide" onclick="hideGCol()">⤫ 이 열 숨기기</button>`:''}`;
+  m.classList.add('show');
+  _placeMenu(m, ev.currentTarget.getBoundingClientRect(), 252, 340);
+  rerenderGrid();   // 캐럿 active 표시 갱신
+}
+function closeGColMenu(){ STATE._gMenuCol=null; const m=$('#gcolmenu'); if(m) m.classList.remove('show'); }
+function gFilterMenuList(q){ const ql=(q||'').trim().toLowerCase(); const box=$('#gcmlist'); if(!box) return;
+  box.querySelectorAll('.gcm-opt').forEach(o=>{ const v=(o.getAttribute('data-v')||'').toLowerCase(); o.style.display=(!ql||v.includes(ql))?'':'none'; }); }
+function gcmAll(on){ const box=$('#gcmlist'); if(!box) return; box.querySelectorAll('.gcm-opt').forEach(o=>{ if(o.style.display!=='none') o.querySelector('input').checked=on; }); }
+function applyGFilter(){ const col=STATE._gMenuCol; if(col==null) return;
+  const boxes=[...$('#gcmlist').querySelectorAll('input')];
+  const checked=boxes.filter(b=>b.checked).map(b=>b.value);
+  if(checked.length===boxes.length){ delete STATE.gFilters[col]; }   // 전부 선택 = 필터 해제
+  else{ STATE.gFilters[col]=new Set(checked); }
+  STATE.gCollapsed.clear(); closeGColMenu(); rerenderGrid();
+}
+function gSortCol(dir){ const col=STATE._gMenuCol; if(col==null) return;
+  if(STATE.gSort&&STATE.gSort.col===col&&STATE.gSort.dir===dir) STATE.gSort=null; else STATE.gSort={col,dir};
+  closeGColMenu(); rerenderGrid();
+}
+function hideGCol(){ const col=STATE._gMenuCol; if(col==null||col==='#') return;
+  STATE.gHidden.add(col);
+  if(STATE.gGroupBy===col){ STATE.gGroupBy=null; STATE.gCollapsed.clear(); }
+  if(STATE.freezeUpto===col) STATE.freezeUpto=null;
+  delete STATE.gFilters[col]; if(STATE.gSort&&STATE.gSort.col===col) STATE.gSort=null;
+  closeGColMenu(); rerenderGrid();
+}
+function clearGFilters(){ STATE.gFilters={}; rerenderGrid(); }
+function openGHidMenu(ev){
+  ev.stopPropagation(); _ensureGMenus(); closeGColMenu();
+  const m=$('#ghidmenu');
+  if(m.classList.contains('show')){ closeGHidMenu(); return; }
+  const hid=[...STATE.gHidden];
+  m.innerHTML= hid.length
+    ? `${hid.map(h=>`<div class="ghid-row"><span class="hn">${esc(h)}</span><span class="re" onclick="restoreGCol('${esc(h)}')">표시</span></div>`).join('')}<div class="gcm-div"></div><button class="gcm-hide" style="color:var(--accent-deep);border-color:var(--accent-line)" onclick="restoreAllGCols()">모두 표시</button>`
+    : '<div class="gcm-empty">숨긴 열 없음<br><span style="font-size:10.5px">컬럼 ▾ 메뉴에서 열을 숨길 수 있어요</span></div>';
+  m.classList.add('show');
+  _placeMenu(m, ev.currentTarget.getBoundingClientRect(), 212, Math.min(60+hid.length*34, 320));
+}
+function closeGHidMenu(){ const m=$('#ghidmenu'); if(m) m.classList.remove('show'); }
+function restoreGCol(h){ STATE.gHidden.delete(h); closeGHidMenu(); rerenderGrid(); }
+function restoreAllGCols(){ STATE.gHidden=new Set(); closeGHidMenu(); rerenderGrid(); }
+function setGGroup(v){ STATE.gGroupBy=v||null; STATE.gCollapsed=new Set(); closeGColMenu(); rerenderGrid(); }
+function toggleGGroup(kEnc){ let k=''; try{ k=decodeURIComponent(kEnc); }catch(_){ k=kEnc; }
+  if(STATE.gCollapsed.has(k)) STATE.gCollapsed.delete(k); else STATE.gCollapsed.add(k); rerenderGrid(); }
+function toggleAllGGroups(){ const gb=STATE.gGroupBy; if(!gb) return;
+  if(STATE.gCollapsed.size){ STATE.gCollapsed=new Set(); }
+  else{ const wd=STATE.wd||{}; const filt=(wd.roster||[]).filter(r=>Object.entries(STATE.gFilters).every(([col,set])=>{ if(!set||!set.size)return true; if(!['#','참여자','연락처',...(wd.headers||[])].includes(col))return true; return set.has(gCellDisp(r,col)); }));
+    STATE.gCollapsed=new Set(filt.map(r=>gCellDisp(r,gb))); }
+  rerenderGrid();
+}
 // 그리드 셀 편집: 헤더/필드는 data 속성으로만 전달(주입 안전). beginEdit/revertEdit(기존 오버레이 경로) 재사용.
 function beginEditCell(el){ beginEdit(el, el.getAttribute('data-id'), el.getAttribute('data-field')); }
 function revertCell(ev, el){ if(ev)ev.stopPropagation(); revertEdit(el.getAttribute('data-id'), el.getAttribute('data-field')); }
