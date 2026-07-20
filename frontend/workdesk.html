@@ -211,7 +211,16 @@
   .aebox b{color:var(--ink)}
   .aebox input{font:inherit;font-size:12px;padding:4px 8px;border:1px solid var(--accent-line);border-radius:7px;background:var(--card);color:var(--ink);outline:none}
   .own-panel{padding:18px 20px;overflow:auto}
-  .ph2{display:flex;align-items:center;gap:11px;margin-bottom:4px}
+  /* 시안 A: 패널 내용 가로폭 상한 + 중앙정렬(초광폭 무한확장 방지) */
+  .own-panel > *{max-width:1140px;margin-left:auto;margin-right:auto}
+  /* 접속링크·계정 2열 카드 */
+  .acc2col{display:grid;grid-template-columns:1fr 1fr;gap:14px;margin-top:18px}
+  @media(max-width:860px){.acc2col{grid-template-columns:1fr}}
+  .acc2col > .sect{margin-top:0;border:1px solid var(--line);border-radius:12px;background:var(--card);padding:15px 16px}
+  .acc2col .acctadd{flex-direction:column;align-items:stretch;gap:8px}
+  .acc2col .acctadd > .btn{align-self:flex-start}
+  .own-panel .add{max-width:640px}   /* 거래처추가·소유추가 폼 입력폭 상한(가독성) */
+  .ph2{display:flex;align-items:center;gap:11px;margin-bottom:4px;padding-bottom:15px;border-bottom:1px solid var(--line)}
   .ph2 .big{width:40px;height:40px;border-radius:11px;background:var(--adv-soft);color:var(--adv);display:grid;place-items:center;font-weight:800;font-size:16px;flex:none}
   .ph2 h2{margin:0;font-size:18px;font-weight:800} .ph2 .acc{font-size:12px;color:var(--muted)}
   .sect{margin-top:20px} .sect .st{font-size:11px;font-weight:750;letter-spacing:.04em;text-transform:uppercase;color:var(--faint);margin-bottom:10px}
@@ -1386,12 +1395,13 @@ function renderOwnPanel(a, items){
   }).join('') || `<div class="empty" style="padding:20px">소유 캠페인 없음 — 아래에서 추가하세요.</div>`;
   const sheetOpts = Object.keys(STATE.sheetMap).map(sid=>`<option value="${esc(sid)}">${esc(sheetTitle(sid))}</option>`).join('');
   const ot=STATE.ownTabs||[];
+  const linkH=_advLinkHtml(a), acctH=_advAcctHtml(a);   // 시안 A: 접속링크·계정을 2열 카드로
+  const accessBlock=(linkH||acctH)?`<div class="acc2col">${linkH}${acctH}</div>`:'';
   $('#ownPanel').innerHTML = `
     <div class="ph2"><span class="big">${esc((a.name||'?').slice(0,1))}</span><div style="flex:1"><h2>${esc(a.name)}</h2><div class="acc">거래처 ID: ${esc(a.id)} · 소유 ${items.length}</div></div>
       <div class="aebox" id="aebox">${_aeChipHtml(a)}</div>
       <label class="setvis" title="이 거래처가 통합작업대에서 정산(금액·상태)을 볼 수 있는지"><input type="checkbox" id="setvis" ${a.settlementVisible===false?'':'checked'} onchange="toggleSettleVis('${esc(a.id)}',this.checked)"> 정산 노출</label></div>
-    ${_advLinkHtml(a)}
-    ${_advAcctHtml(a)}
+    ${accessBlock}
     <div class="sect"><div class="st">소유 캠페인</div>${owns}</div>
     <div class="sect" id="owntabsSect">${_ownTabsHtml()}</div>
     <div class="sect"><div class="st">소유 추가</div>
