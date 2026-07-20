@@ -2023,6 +2023,14 @@ body{ letter-spacing:-.01em; }
             <div><label class="rform-label">총 모집 인원 <span style="color:var(--t4);font-weight:400">(리뷰어 비공개)</span></label><input id="rf_recruit_total" type="number" min="0" class="rform-input" placeholder="0 = 무제한"></div>
           </div>
           <div style="margin-top:8px"><label class="rform-label">랜딩(상품) 페이지 URL</label><input id="rf_landing_url" type="text" class="rform-input" placeholder="https:// — 참여자에게 [상품 페이지 열기] 버튼으로 노출"></div>
+          <div style="margin-top:8px">
+            <label class="rform-label">상품 썸네일 <span style="color:var(--t4);font-weight:400">— 직접 업로드(선택)</span></label>
+            <div style="display:flex;gap:10px;align-items:center">
+              <input id="rf_thumb_file" type="file" accept="image/*" style="font-size:.72rem;flex:1" onchange="uploadCampThumb(this)">
+              <img id="rf_thumb_preview" alt="썸네일 미리보기" style="height:42px;border-radius:8px;border:1px solid var(--border);display:none">
+            </div>
+            <div style="font-size:.62rem;color:var(--t4);margin-top:2px">비우면 [상품정보 가져오기]로 자동 추출된 이미지를 사용합니다.</div>
+          </div>
           <details style="margin-top:8px"><summary style="font-size:.74rem;font-weight:700;color:var(--t3);cursor:pointer">고급 설정 (참여 제한시간·마감 버퍼)</summary>
             <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-top:6px">
               <div><label class="rform-label">참여 제한시간(분)</label><input id="rf_hold_ttl" type="number" min="5" class="rform-input" value="15"></div>

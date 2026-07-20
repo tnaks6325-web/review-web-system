@@ -49,6 +49,8 @@ function _buildRecruitCard(c) {
     ? `<span><i class="fas fa-users"></i> ${c.current_slots || 0}/${c.max_slots}명</span>`
     : "";
 
+  window._recruitCardTitles = window._recruitCardTitles || {};
+  window._recruitCardTitles[c.id] = c.title || "";
   const div = document.createElement("div");
   div.className = `recruit-card status-${c.status || "draft"}`;
   div.innerHTML = `
@@ -74,6 +76,7 @@ function _buildRecruitCard(c) {
       <div class="recruit-actions-left">
         <button class="recruit-btn recruit-btn-edit" onclick="openRecruitModal('${escHtml(c.id)}')"><i class="fas fa-pen"></i> 수정</button>
         <button class="recruit-btn recruit-btn-del"  onclick="deleteRecruitPost('${escHtml(c.id)}', \`${escHtml(c.title||'')}\`)"><i class="fas fa-trash"></i> 삭제</button>
+        ${c.participation_mode ? `<button class="recruit-btn" style="background:#EDE9FE;color:#5B21B6" onclick="openCampControlById('${escHtml(c.id)}')"><i class="fas fa-satellite-dish"></i> 관제</button>` : ""}
       </div>
       ${_recruitToggleHtml(c)}
     </div>
@@ -321,6 +324,18 @@ function _parsePurchaseTime(text) {
   return { start: `${pad(h1)}:${pad(m1)}`, end: `${pad(h2 === 24 ? 24 : h2)}:${pad(m2)}` };
 }
 
+/** 유입가이드 HTML → 미리보기 평문 (원본은 _wdInflowRawHtml에 보존, 여긴 관리자 확인용) */
+function _htmlToPlainPreview(html) {
+  const imgCount = (String(html).match(/<img/gi) || []).length;
+  const txt = String(html)
+    .replace(/<br\s*\/?>/gi, "\n").replace(/<\/(p|div|li)>/gi, "\n")
+    .replace(/<img[^>]*>/gi, "[이미지]")
+    .replace(/<[^>]+>/g, "")
+    .replace(/&nbsp;/g, " ").replace(/&lt;/g, "<").replace(/&gt;/g, ">").replace(/&amp;/g, "&")
+    .replace(/\n{3,}/g, "\n\n").trim();
+  return txt + (imgCount ? `\n\n※ 이미지 ${imgCount}장 포함 — 수정하지 않으면 원본 서식(이미지 포함) 그대로 게시됩니다.` : "");
+}
+
 /** 게시 전 자동 점검 — 서버 활성화 게이트와 동일 3항목(빠지면 active 저장이 서버에서 거부됨) */
 function participationCheckErrors() {
   const errs = [];
@@ -387,6 +402,10 @@ async function openRecruitModal(id, prefill, woOrderId) {
   const _bufEl = document.getElementById("rf_close_buffer"); if (_bufEl) _bufEl.value = "10";
   const _partEl = document.getElementById("rf_participation");
   if (_partEl) { _partEl.checked = false; onParticipationToggle(false); }
+  window._wdInflowRawHtml = null;
+  const _ivTa = document.getElementById("rf_wd_inflow"); if (_ivTa) _ivTa.dataset.rawHtml = "";
+  const _tpv = document.getElementById("rf_thumb_preview"); if (_tpv) _tpv.style.display = "none";
+  const _tfi = document.getElementById("rf_thumb_file"); if (_tfi) _tfi.value = "";
 
   if (id) {
     titleEl.innerHTML = `<i class="fas fa-pen"></i> 모집공고 수정`;
@@ -452,10 +471,27 @@ async function openRecruitModal(id, prefill, woOrderId) {
         // 저장 시 escape+<br> 변환의 역변환(S3): <br>→개행, 엔티티 복원 → textarea에 평문으로
         const _fromHtml = s => String(s || "").replace(/<br\s*\/?>/gi, "\n").replace(/&lt;/g, "<").replace(/&gt;/g, ">").replace(/&amp;/g, "&");
         setV("rf_wd_product", wd.productLines || "");
-        setV("rf_wd_inflow", _fromHtml(wd.inflowGuideHtml));
+        // ★ M3 리뷰 #1: 저장본이 리치 HTML(<br> 외 태그 — 프리필 raw로 발행된 이미지 포함 가이드)이면
+        //   편집모드도 raw 모드로 복원 — 아니면 "다른 필드만 고쳐 저장"해도 escape 경로가 태그를 문자로 게시(라운드트립 파괴)
+        {
+          const _rawInflow = String(wd.inflowGuideHtml || "");
+          const _inflowTa2 = document.getElementById("rf_wd_inflow");
+          if (_inflowTa2 && /<(?!br\s*\/?>)[a-z][^>]*>/i.test(_rawInflow)) {
+            window._wdInflowRawHtml = _rawInflow;
+            _inflowTa2.value = _htmlToPlainPreview(_rawInflow);
+            _inflowTa2.dataset.rawHtml = "1";
+            _inflowTa2.addEventListener("input", () => { _inflowTa2.dataset.rawHtml = ""; }, { once: true });
+          } else {
+            setV("rf_wd_inflow", _fromHtml(_rawInflow));
+          }
+        }
         setV("rf_wd_review", wd.reviewGuide || "");
         setV("rf_wd_notes", wd.specialNotes || "");
         setV("rf_thumbnail", c.thumbnail_url || "");
+        if (c.thumbnail_url) {
+          const pv = document.getElementById("rf_thumb_preview");
+          if (pv) { pv.src = c.thumbnail_url; pv.style.display = ""; }
+        }
         renderPartCheck();
       }
     } catch(e) {
@@ -474,6 +510,33 @@ async function openRecruitModal(id, prefill, woOrderId) {
       if (prefill.notes)        document.getElementById("rf_notes").value = prefill.notes;
       if (prefill.delivery_type) document.getElementById("rf_delivery_type").value = prefill.delivery_type;
       if (prefill.product_url)  document.getElementById("rf_product_url").value = prefill.product_url;
+
+      /* ★ M3: 참여형 자동 프리필 — 작업오더 세부내용 → 발행 폼 스냅샷 (관리자는 확인·수정만) */
+      if (prefill.participation && document.getElementById("rf_participation")) {
+        const pe = document.getElementById("rf_participation");
+        pe.checked = true; onParticipationToggle(true);
+        const setV = (i, v) => { const el = document.getElementById(i); if (el && v != null && v !== "") el.value = v; };
+        setV("rf_daily_limit", prefill.daily_limit);
+        setV("rf_recruit_total", prefill.recruit_total);
+        const t = _parsePurchaseTime(prefill.purchase_time || prefill.time_range || "");
+        if (t) { setV("rf_window_start", t.start); setV("rf_window_end", t.end); }
+        setV("rf_landing_url", prefill.landing_url);
+        setV("rf_wd_product", prefill.wd_product);
+        setV("rf_wd_review", prefill.wd_review);
+        setV("rf_wd_notes", prefill.wd_notes);
+        const ta = document.getElementById("rf_wd_inflow");
+        if (prefill.wd_inflow_html && ta) {
+          /* 유입가이드 원본 HTML(이미지 포함) 보존: textarea엔 미리보기 텍스트만, 저장 시 미수정이면 원본 그대로
+             (textarea 경유 escape가 이미지·서식을 파괴하는 것 방지 — 수정하는 순간 평문 모드로 전환) */
+          window._wdInflowRawHtml = prefill.wd_inflow_html;
+          ta.value = _htmlToPlainPreview(prefill.wd_inflow_html);
+          ta.dataset.rawHtml = "1";
+          ta.addEventListener("input", () => { ta.dataset.rawHtml = ""; }, { once: true });
+        } else if (prefill.wd_inflow_text) {
+          setV("rf_wd_inflow", prefill.wd_inflow_text);
+        }
+        renderPartCheck();
+      }
     }
   }
 
@@ -501,7 +564,12 @@ async function fetchProductInfo() {
       document.getElementById("rf_pp_name").textContent = r.name || "(상품명 없음)";
       document.getElementById("rf_pp_price").textContent = r.price || "(가격 미확인)";
       document.getElementById("rf_product_preview").style.display = "flex";
-      document.getElementById("rf_thumbnail").value = r.thumbnail || "";
+      // ★ 리뷰 #10: 자동추출이 빈 값으로 직접 업로드 썸네일을 덮지 않게 + 미리보기 동기화
+      if (r.thumbnail) {
+        document.getElementById("rf_thumbnail").value = r.thumbnail;
+        const _pv = document.getElementById("rf_thumb_preview");
+        if (_pv) { _pv.src = r.thumbnail; _pv.style.display = ""; }
+      }
       document.getElementById("rf_product_name").value = r.name || "";
       document.getElementById("rf_price").value = r.price || "";
       // 공고 제목이 비어 있으면 상품명으로 채움
@@ -592,6 +660,145 @@ function _refreshBadgeWrap() {
 }
 
 /* ═══════════════════════════════════════
+   ⚡ M3: 썸네일 직접 업로드 (유입가이드 이미지 인프라 재사용 — Drive+무인증 프록시)
+═══════════════════════════════════════ */
+async function uploadCampThumb(input) {
+  const file = input.files && input.files[0];
+  if (!file) return;
+  if (file.size > 5 * 1024 * 1024) { showToast("이미지는 5MB 이하로 올려주세요.", "error"); input.value = ""; return; }
+  showToast("썸네일 업로드 중...");
+  try {
+    const b64 = await new Promise((res, rej) => {
+      const r = new FileReader();
+      r.onload = () => res(String(r.result).split(",")[1]);
+      r.onerror = rej;
+      r.readAsDataURL(file);
+    });
+    const resp = await fetch(API_BASE_URL + "/api/order/guide-image", {
+      method: "POST",
+      headers: { "Content-Type": "application/json", ..._getAuthHeaders() },
+      body: JSON.stringify({ imageBase64: b64, mimeType: file.type || "image/jpeg", fileName: "campthumb_" + Date.now() }),
+    });
+    const j = await resp.json();
+    if (!resp.ok || !j.ok || !j.url) throw new Error(j.error || "업로드 실패");
+    // 절대 프록시 URL — 프론트(pages.dev)와 API(railway) 오리진이 달라 절대 URL이어야 카드에 뜬다
+    document.getElementById("rf_thumbnail").value = j.url;
+    const pv = document.getElementById("rf_thumb_preview");
+    if (pv) { pv.src = j.url; pv.style.display = ""; }
+    showToast("썸네일이 업로드되었습니다.", "success");
+    _onPreviewInput();
+  } catch (e) {
+    showToast("썸네일 업로드 실패: " + e.message, "error");
+  } finally {
+    input.value = "";
+  }
+}
+
+/* ═══════════════════════════════════════
+   ⚡ M3: 관제 패널 — 공고별 신청현황(오늘 홀드/제출/만료) + 수동확정
+═══════════════════════════════════════ */
+/* 리뷰 #5: 제목을 onclick 템플릿 리터럴로 넘기지 않는다(백틱·\${ 주입 벡터) — id로만 열고 제목은 캐시 조회 */
+window._recruitCardTitles = window._recruitCardTitles || {};
+function openCampControlById(campId) {
+  return openCampControl(campId, window._recruitCardTitles[campId] || campId);
+}
+async function openCampControl(campId, title) {
+  let ovl = document.getElementById("campControlOvl");
+  if (!ovl) {
+    ovl = document.createElement("div");
+    ovl.id = "campControlOvl";
+    ovl.style.cssText = "position:fixed;inset:0;z-index:100000;background:rgba(0,0,0,.5);display:flex;align-items:center;justify-content:center;padding:16px";
+    ovl.innerHTML = `<div style="background:#fff;border-radius:16px;max-width:680px;width:100%;max-height:86vh;display:flex;flex-direction:column;overflow:hidden">
+      <div style="display:flex;align-items:center;gap:10px;padding:14px 18px;border-bottom:1px solid #E5E7EB">
+        <b style="flex:1;font-size:.95rem" id="ccTitle"></b>
+        <span id="ccStats" style="font-size:.74rem;color:#4B5563;font-weight:700"></span>
+        <button onclick="document.getElementById('campControlOvl').remove()" style="background:none;border:none;font-size:1.1rem;cursor:pointer;color:#9CA3AF"><i class="fas fa-times"></i></button>
+      </div>
+      <div id="ccBody" style="overflow-y:auto;padding:12px 18px"></div>
+    </div>`;
+    ovl.addEventListener("click", e => { if (e.target === ovl) ovl.remove(); });
+    document.body.appendChild(ovl);
+  }
+  document.getElementById("ccTitle").textContent = "📡 관제 — " + (title || campId);
+  document.getElementById("ccBody").innerHTML = `<div style="padding:30px;text-align:center;color:#9CA3AF"><i class="fas fa-circle-notch fa-spin"></i> 불러오는 중...</div>`;
+  await _loadCampControl(campId);
+}
+
+async function _loadCampControl(campId) {
+  const body = document.getElementById("ccBody");
+  const stats = document.getElementById("ccStats");
+  try {
+    const res = await fetch(API_BASE_URL + `/api/campaign/admin/${encodeURIComponent(campId)}/applications`, { headers: _getAuthHeaders() });
+    const j = await res.json();
+    if (!res.ok || !j.ok) throw new Error(j.error || "HTTP " + res.status);
+    const rows = j.data || [];
+    // 오늘(KST) 집계 — 유효홀드는 시각 기준(만료시각 경과분은 만료로 분류)
+    const now = Date.now();
+    const kstDay = ms => new Date(ms + 9 * 3600 * 1000).toISOString().slice(0, 10);
+    const today = kstDay(now);
+    let holds = 0, subs = 0, exps = 0;
+    const items = rows.filter(r => ["applied", "submitted", "expired", "cancelled"].includes(r.status));
+    items.forEach(r => {
+      const isToday = r.applied_at && kstDay(Date.parse(r.applied_at)) === today;
+      const holdValid = r.status === "applied" && r.expires_at && Date.parse(r.expires_at) > now;
+      if (!isToday) return;
+      if (holdValid) holds++;
+      else if (r.status === "submitted") subs++;
+      else if (r.status === "expired" || (r.status === "applied" && !holdValid)) exps++;
+    });
+    if (stats) stats.textContent = `오늘 · 진행중 ${holds} / 제출 ${subs} / 만료 ${exps}`;
+    if (!items.length) {
+      body.innerHTML = `<div style="padding:30px;text-align:center;color:#9CA3AF">참여 이력이 없습니다.</div>`;
+      return;
+    }
+    const chip = (bg, fg, tx) => `<span style="font-size:.66rem;font-weight:800;background:${bg};color:${fg};border-radius:6px;padding:2px 8px;white-space:nowrap">${tx}</span>`;
+    const fmtT = iso => iso ? new Date(iso).toLocaleString("ko-KR", { timeZone: "Asia/Seoul", month: "numeric", day: "numeric", hour: "2-digit", minute: "2-digit" }) : "";
+    body.innerHTML = items.sort((a, b) => new Date(b.applied_at) - new Date(a.applied_at)).map(r => {
+      const holdValid = r.status === "applied" && r.expires_at && Date.parse(r.expires_at) > now;
+      let st;
+      if (r.status === "submitted") st = chip("#D1FAE5", "#065F46", "✓ 제출확정");
+      else if (holdValid) st = chip("#FEF3C7", "#92400E", "⏳ 진행중");
+      else if (r.status === "cancelled") st = chip("#F3F4F6", "#6B7280", "취소");
+      else st = chip("#FEE2E2", "#B91C1C", "만료");
+      const late = r.late_order_id ? chip("#EDE9FE", "#5B21B6", "🛍 기구매 제출 있음") : "";
+      // ★ 리뷰 #4: 수동확정은 만료·취소 건만(서버 의도 = 기구매 구제 경로).
+      //   진행중(applied)은 확정 시 주문 링크가 영구 결번되므로 버튼 미노출(정상 제출 경로로 확정되게 둠).
+      const canConfirm = (r.status === "expired" || r.status === "cancelled");
+      const escT = s => String(s || "").replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+      return `<div style="display:flex;align-items:center;gap:8px;padding:9px 4px;border-bottom:1px solid #F3F4F6;font-size:.8rem">
+        <b style="min-width:64px">${escT(r.applicant_name)}</b>
+        <span style="color:#9CA3AF;font-size:.7rem">***${String(r.phone8 || "").replace(/\D/g, "").slice(-4)}</span>
+        ${st}${late}
+        <span style="margin-left:auto;color:#9CA3AF;font-size:.68rem">신청 ${fmtT(r.applied_at)}${r.expires_at ? " · 마감 " + fmtT(r.expires_at) : ""}</span>
+        ${canConfirm ? `<button onclick="campManualConfirm('${String(campId).replace(/[^a-z0-9_]/gi, "")}',${parseInt(r.id, 10)},${r.late_order_id ? 1 : 0})" style="font-size:.7rem;font-weight:800;background:#e8f1fe;color:#1b64da;border:1px solid #a6c8fb;border-radius:7px;padding:4px 10px;cursor:pointer;white-space:nowrap">수동확정</button>` : ""}
+      </div>`;
+    }).join("");
+  } catch (e) {
+    body.innerHTML = `<div style="padding:24px;text-align:center;color:#DC2626">불러오기 실패: ${String(e.message).replace(/</g, "&lt;")}</div>`;
+  }
+}
+
+async function campManualConfirm(campId, appId, hasLate) {
+  const msg = hasLate
+    ? "이 신청을 수동 확정할까요?\n(만료 후 도착한 구매 제출이 있어요 — 카운터에 즉시 반영됩니다)"
+    : "⚠️ 연결된 구매 제출이 없는 신청이에요.\n실제 구매를 먼저 확인하셨나요? 확정하면 카운터·모집 잔여가 즉시 소진됩니다.";
+  if (!confirm(msg)) return;
+  try {
+    const res = await fetch(API_BASE_URL + `/api/campaign/admin/${encodeURIComponent(campId)}/confirm`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json", ..._getAuthHeaders() },
+      body: JSON.stringify({ applicationId: appId }),
+    });
+    const j = await res.json();
+    if (!res.ok || !j.ok) throw new Error(j.error || "HTTP " + res.status);
+    showToast(j.already ? "이미 확정된 신청입니다." : "수동 확정되었습니다.", "success");
+    await _loadCampControl(campId);
+  } catch (e) {
+    showToast("수동확정 실패: " + e.message, "error");
+  }
+}
+
+/* ═══════════════════════════════════════
    공고 저장 (등록 / 수정)
 ═══════════════════════════════════════ */
 async function saveRecruitPost() {
@@ -648,10 +855,20 @@ async function saveRecruitPost() {
       payload.landing_url    = document.getElementById("rf_landing_url").value.trim();
       payload.thumbnail_url  = document.getElementById("rf_thumbnail")?.value || "";
       // 평문 입력 → HTML 저장: escape 후 개행만 <br> (S3 — sanitize가 '<옵션>' 같은 텍스트를 태그로 오인해 삭제하는 것 방지)
+      // ★ M3: 작업오더 프리필/리치 저장본은 미수정 시 원본 그대로 전송(이미지 보존 — 서버가 sanitize)
       const _escT = s => s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+      const _inflowTa = document.getElementById("rf_wd_inflow");
+      const _useRawInflow = _inflowTa && _inflowTa.dataset.rawHtml === "1" && window._wdInflowRawHtml;
+      // ★ M3 리뷰 #3: escape 모드로 전환된 경우 미리보기 아티팩트("※ 이미지 …", [이미지]) 정리 + 이미지 소실 경고
+      let _inflowPlain = _inflowTa.value.replace(/\n*※ 이미지 \d+장 포함[^\n]*$/m, "").trim();
+      if (!_useRawInflow && window._wdInflowRawHtml && /<img/i.test(window._wdInflowRawHtml)) {
+        if (!confirm("유입가이드를 수정하셨어요 — 원본에 있던 이미지가 빠진 평문으로 게시됩니다. 계속할까요?")) return;
+        _inflowPlain = _inflowPlain.replace(/\[이미지\]/g, "").replace(/\n{3,}/g, "\n\n").trim();
+      }
       payload.work_detail = {
         productLines:    document.getElementById("rf_wd_product").value.trim(),
-        inflowGuideHtml: _escT(document.getElementById("rf_wd_inflow").value.trim()).replace(/\n/g, "<br>"),
+        inflowGuideHtml: _useRawInflow ? window._wdInflowRawHtml
+                                       : _escT(_inflowPlain).replace(/\n/g, "<br>"),
         reviewGuide:     document.getElementById("rf_wd_review").value.trim(),
         specialNotes:    document.getElementById("rf_wd_notes").value.trim(),
       };

@@ -819,9 +819,13 @@ router.put('/admin/:id/status', authMiddleware, adminOrMasterMiddleware, async (
 router.get('/admin/:id/applications', authMiddleware, adminOrMasterMiddleware, async (req, res, next) => {
   try {
     const { id } = req.params;
+    // ★ M3 리뷰 #11: hold_token(열람·취소 열쇠)은 관제에 불필요 — 브라우저로 내리지 않음(컬럼 화이트리스트)
     const { rows } = await pool.query(
-      `SELECT * FROM campaign_applications 
-       WHERE campaign_id = $1 
+      `SELECT id, campaign_id, applicant_name, applicant_phone, applicant_inad,
+              status, sheet_row_added, applied_at, phone8, expires_at, submitted_at,
+              order_submission_id, late_order_id
+       FROM campaign_applications
+       WHERE campaign_id = $1
        ORDER BY applied_at ASC`,
       [id]
     );
