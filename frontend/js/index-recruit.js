@@ -49,6 +49,8 @@ function _buildRecruitCard(c) {
     ? `<span><i class="fas fa-users"></i> ${c.current_slots || 0}/${c.max_slots}명</span>`
     : "";
 
+  window._recruitCardTitles = window._recruitCardTitles || {};
+  window._recruitCardTitles[c.id] = c.title || "";
   const div = document.createElement("div");
   div.className = `recruit-card status-${c.status || "draft"}`;
   div.innerHTML = `
@@ -74,7 +76,7 @@ function _buildRecruitCard(c) {
       <div class="recruit-actions-left">
         <button class="recruit-btn recruit-btn-edit" onclick="openRecruitModal('${escHtml(c.id)}')"><i class="fas fa-pen"></i> 수정</button>
         <button class="recruit-btn recruit-btn-del"  onclick="deleteRecruitPost('${escHtml(c.id)}', \`${escHtml(c.title||'')}\`)"><i class="fas fa-trash"></i> 삭제</button>
-        ${c.participation_mode ? `<button class="recruit-btn" style="background:#EDE9FE;color:#5B21B6" onclick="openCampControl('${escHtml(c.id)}', \`${escHtml(c.title||'')}\`)"><i class="fas fa-satellite-dish"></i> 관제</button>` : ""}
+        ${c.participation_mode ? `<button class="recruit-btn" style="background:#EDE9FE;color:#5B21B6" onclick="openCampControlById('${escHtml(c.id)}')"><i class="fas fa-satellite-dish"></i> 관제</button>` : ""}
       </div>
       ${_recruitToggleHtml(c)}
     </div>
@@ -469,7 +471,20 @@ async function openRecruitModal(id, prefill, woOrderId) {
         // 저장 시 escape+<br> 변환의 역변환(S3): <br>→개행, 엔티티 복원 → textarea에 평문으로
         const _fromHtml = s => String(s || "").replace(/<br\s*\/?>/gi, "\n").replace(/&lt;/g, "<").replace(/&gt;/g, ">").replace(/&amp;/g, "&");
         setV("rf_wd_product", wd.productLines || "");
-        setV("rf_wd_inflow", _fromHtml(wd.inflowGuideHtml));
+        // ★ M3 리뷰 #1: 저장본이 리치 HTML(<br> 외 태그 — 프리필 raw로 발행된 이미지 포함 가이드)이면
+        //   편집모드도 raw 모드로 복원 — 아니면 "다른 필드만 고쳐 저장"해도 escape 경로가 태그를 문자로 게시(라운드트립 파괴)
+        {
+          const _rawInflow = String(wd.inflowGuideHtml || "");
+          const _inflowTa2 = document.getElementById("rf_wd_inflow");
+          if (_inflowTa2 && /<(?!br\s*\/?>)[a-z][^>]*>/i.test(_rawInflow)) {
+            window._wdInflowRawHtml = _rawInflow;
+            _inflowTa2.value = _htmlToPlainPreview(_rawInflow);
+            _inflowTa2.dataset.rawHtml = "1";
+            _inflowTa2.addEventListener("input", () => { _inflowTa2.dataset.rawHtml = ""; }, { once: true });
+          } else {
+            setV("rf_wd_inflow", _fromHtml(_rawInflow));
+          }
+        }
         setV("rf_wd_review", wd.reviewGuide || "");
         setV("rf_wd_notes", wd.specialNotes || "");
         setV("rf_thumbnail", c.thumbnail_url || "");
@@ -549,7 +564,12 @@ async function fetchProductInfo() {
       document.getElementById("rf_pp_name").textContent = r.name || "(상품명 없음)";
       document.getElementById("rf_pp_price").textContent = r.price || "(가격 미확인)";
       document.getElementById("rf_product_preview").style.display = "flex";
-      document.getElementById("rf_thumbnail").value = r.thumbnail || "";
+      // ★ 리뷰 #10: 자동추출이 빈 값으로 직접 업로드 썸네일을 덮지 않게 + 미리보기 동기화
+      if (r.thumbnail) {
+        document.getElementById("rf_thumbnail").value = r.thumbnail;
+        const _pv = document.getElementById("rf_thumb_preview");
+        if (_pv) { _pv.src = r.thumbnail; _pv.style.display = ""; }
+      }
       document.getElementById("rf_product_name").value = r.name || "";
       document.getElementById("rf_price").value = r.price || "";
       // 공고 제목이 비어 있으면 상품명으로 채움
@@ -677,6 +697,11 @@ async function uploadCampThumb(input) {
 /* ═══════════════════════════════════════
    ⚡ M3: 관제 패널 — 공고별 신청현황(오늘 홀드/제출/만료) + 수동확정
 ═══════════════════════════════════════ */
+/* 리뷰 #5: 제목을 onclick 템플릿 리터럴로 넘기지 않는다(백틱·\${ 주입 벡터) — id로만 열고 제목은 캐시 조회 */
+window._recruitCardTitles = window._recruitCardTitles || {};
+function openCampControlById(campId) {
+  return openCampControl(campId, window._recruitCardTitles[campId] || campId);
+}
 async function openCampControl(campId, title) {
   let ovl = document.getElementById("campControlOvl");
   if (!ovl) {
@@ -736,14 +761,16 @@ async function _loadCampControl(campId) {
       else if (r.status === "cancelled") st = chip("#F3F4F6", "#6B7280", "취소");
       else st = chip("#FEE2E2", "#B91C1C", "만료");
       const late = r.late_order_id ? chip("#EDE9FE", "#5B21B6", "🛍 기구매 제출 있음") : "";
-      // 수동확정: 만료·취소(특히 late) + 진행중(운영자 선확정 허용) — submitted는 제외
-      const canConfirm = r.status !== "submitted";
+      // ★ 리뷰 #4: 수동확정은 만료·취소 건만(서버 의도 = 기구매 구제 경로).
+      //   진행중(applied)은 확정 시 주문 링크가 영구 결번되므로 버튼 미노출(정상 제출 경로로 확정되게 둠).
+      const canConfirm = (r.status === "expired" || r.status === "cancelled");
+      const escT = s => String(s || "").replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
       return `<div style="display:flex;align-items:center;gap:8px;padding:9px 4px;border-bottom:1px solid #F3F4F6;font-size:.8rem">
-        <b style="min-width:64px">${(r.applicant_name || "").replace(/</g, "&lt;")}</b>
-        <span style="color:#9CA3AF;font-size:.7rem">***${String(r.phone8 || "").slice(-4)}</span>
+        <b style="min-width:64px">${escT(r.applicant_name)}</b>
+        <span style="color:#9CA3AF;font-size:.7rem">***${String(r.phone8 || "").replace(/\D/g, "").slice(-4)}</span>
         ${st}${late}
         <span style="margin-left:auto;color:#9CA3AF;font-size:.68rem">신청 ${fmtT(r.applied_at)}${r.expires_at ? " · 마감 " + fmtT(r.expires_at) : ""}</span>
-        ${canConfirm ? `<button onclick="campManualConfirm('${campId}',${r.id})" style="font-size:.7rem;font-weight:800;background:#e8f1fe;color:#1b64da;border:1px solid #a6c8fb;border-radius:7px;padding:4px 10px;cursor:pointer;white-space:nowrap">수동확정</button>` : ""}
+        ${canConfirm ? `<button onclick="campManualConfirm('${String(campId).replace(/[^a-z0-9_]/gi, "")}',${parseInt(r.id, 10)},${r.late_order_id ? 1 : 0})" style="font-size:.7rem;font-weight:800;background:#e8f1fe;color:#1b64da;border:1px solid #a6c8fb;border-radius:7px;padding:4px 10px;cursor:pointer;white-space:nowrap">수동확정</button>` : ""}
       </div>`;
     }).join("");
   } catch (e) {
@@ -751,8 +778,11 @@ async function _loadCampControl(campId) {
   }
 }
 
-async function campManualConfirm(campId, appId) {
-  if (!confirm("이 신청을 수동 확정할까요?\n(만료된 기구매 건 구제 — 카운터에 즉시 반영됩니다)")) return;
+async function campManualConfirm(campId, appId, hasLate) {
+  const msg = hasLate
+    ? "이 신청을 수동 확정할까요?\n(만료 후 도착한 구매 제출이 있어요 — 카운터에 즉시 반영됩니다)"
+    : "⚠️ 연결된 구매 제출이 없는 신청이에요.\n실제 구매를 먼저 확인하셨나요? 확정하면 카운터·모집 잔여가 즉시 소진됩니다.";
+  if (!confirm(msg)) return;
   try {
     const res = await fetch(API_BASE_URL + `/api/campaign/admin/${encodeURIComponent(campId)}/confirm`, {
       method: "POST",
@@ -825,14 +855,20 @@ async function saveRecruitPost() {
       payload.landing_url    = document.getElementById("rf_landing_url").value.trim();
       payload.thumbnail_url  = document.getElementById("rf_thumbnail")?.value || "";
       // 평문 입력 → HTML 저장: escape 후 개행만 <br> (S3 — sanitize가 '<옵션>' 같은 텍스트를 태그로 오인해 삭제하는 것 방지)
-      // ★ M3: 작업오더 프리필 원본 HTML은 미수정 시 그대로 전송(이미지 보존 — 서버가 sanitize)
+      // ★ M3: 작업오더 프리필/리치 저장본은 미수정 시 원본 그대로 전송(이미지 보존 — 서버가 sanitize)
       const _escT = s => s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
       const _inflowTa = document.getElementById("rf_wd_inflow");
       const _useRawInflow = _inflowTa && _inflowTa.dataset.rawHtml === "1" && window._wdInflowRawHtml;
+      // ★ M3 리뷰 #3: escape 모드로 전환된 경우 미리보기 아티팩트("※ 이미지 …", [이미지]) 정리 + 이미지 소실 경고
+      let _inflowPlain = _inflowTa.value.replace(/\n*※ 이미지 \d+장 포함[^\n]*$/m, "").trim();
+      if (!_useRawInflow && window._wdInflowRawHtml && /<img/i.test(window._wdInflowRawHtml)) {
+        if (!confirm("유입가이드를 수정하셨어요 — 원본에 있던 이미지가 빠진 평문으로 게시됩니다. 계속할까요?")) return;
+        _inflowPlain = _inflowPlain.replace(/\[이미지\]/g, "").replace(/\n{3,}/g, "\n\n").trim();
+      }
       payload.work_detail = {
         productLines:    document.getElementById("rf_wd_product").value.trim(),
         inflowGuideHtml: _useRawInflow ? window._wdInflowRawHtml
-                                       : _escT(_inflowTa.value.trim()).replace(/\n/g, "<br>"),
+                                       : _escT(_inflowPlain).replace(/\n/g, "<br>"),
         reviewGuide:     document.getElementById("rf_wd_review").value.trim(),
         specialNotes:    document.getElementById("rf_wd_notes").value.trim(),
       };

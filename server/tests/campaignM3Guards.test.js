@@ -27,7 +27,8 @@ ok('modal: 미리보기 변환(_htmlToPlainPreview) 존재', /function _htmlToPl
 ok('관제: 참여형 카드에만 관제 버튼', /c\.participation_mode \? .*openCampControl/.test(recjs));
 ok('관제: 오늘 집계는 KST + 유효홀드 시각 기준', /kstDay/.test(recjs) && /Date\.parse\(r\.expires_at\) > now/.test(recjs));
 ok('관제: 수동확정 → POST admin/:id/confirm', /\/confirm`/.test(recjs) && /applicationId: appId/.test(recjs));
-ok('관제: submitted는 수동확정 제외(멱등 오호출 방지)', /canConfirm = r\.status !== "submitted"/.test(recjs));
+ok('관제: 수동확정은 만료·취소 건만(진행중 확정 = 주문링크 결번 방지, 리뷰 #4)', /canConfirm = \(r\.status === "expired" \|\| r\.status === "cancelled"\)/.test(recjs));
+ok('관제: 무주문 확정은 강한 경고 분기', /연결된 구매 제출이 없는 신청/.test(recjs));
 ok('관제: 기구매(late_order_id) 배지 노출', /late_order_id \? chip/.test(recjs));
 
 // ── 썸네일 업로드 ──

@@ -2124,12 +2124,16 @@ async function woCreateCampaign(id) {
     notes:         [_INFLOW_LABEL[o.inflow_type] ? ("유입방식: " + _INFLOW_LABEL[o.inflow_type]) : (o.inflow_keyword ? ("유입키워드: " + o.inflow_keyword) : ""), o.review_guide || ""].filter(Boolean).join("\n"),
     // ★ M3: 참여형 자동 프리필 — 작업오더 세부내용을 발행 폼 스냅샷으로 복사
     participation:  true,
-    daily_limit:    o.daily_count || "",
+    daily_limit:    o.daily_count || (String(o.daily_count_text || "").match(/\d+/) || [])[0] || "",  // 인트라넷 text형("일 10건") 폴백
     recruit_total:  o.recruit_count || 0,
     purchase_time:  o.purchase_time || "",
     wd_product:     (typeof _woProductLines === "function" ? (_woProductLines(o) || "") : "") || (o.product_option || ""),
-    wd_inflow_html: (o.inflow_type !== "link" && o.inflow_guide) ? o.inflow_guide : "",  // 원본 HTML(이미지 포함) 보존
-    wd_inflow_text: o.inflow_type === "link" ? "링크유입 — 아래 [상품 페이지 열기] 버튼으로 진입해 구매를 진행하세요." : "",
+    // ★ 리뷰 #2: inflow_guide는 HTML(에디터)·평문(인트라넷/레거시) 두 형태 실존 —
+    //   태그가 실제로 있을 때만 raw HTML 경로(이미지 보존), 평문은 escape 경로(개행·'<옵션>' 안전)
+    wd_inflow_html: (o.inflow_type !== "link" && o.inflow_guide && /<[a-z][^>]*>/i.test(o.inflow_guide)) ? o.inflow_guide : "",
+    wd_inflow_text: o.inflow_type === "link"
+      ? "링크유입 — 아래 [상품 페이지 열기] 버튼으로 진입해 구매를 진행하세요."
+      : ((o.inflow_guide && !/<[a-z][^>]*>/i.test(o.inflow_guide)) ? o.inflow_guide : ""),
     wd_review:      o.review_guide || "",
     wd_notes:       o.special_notes || "",
     landing_url:    (o.inflow_type === "link" ? ((typeof _woGuideUrls === "function" ? _woGuideUrls(o.inflow_guide)[0] : "") || "") : "") || o.product_url || "",
