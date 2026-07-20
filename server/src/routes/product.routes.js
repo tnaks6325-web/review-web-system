@@ -79,7 +79,9 @@ router.post('/preview', authMiddleware, adminOrMasterMiddleware, async (req, res
       if (!resp.ok) {
         return res.json({ ok: false, mall, error: 'HTTP ' + resp.status,
           hint: (resp.status === 403 || resp.status === 429)
-            ? `${mall} 접근이 차단되었습니다(봇 차단). 썸네일/상품명/가격을 수동 입력하세요.`
+            ? (mall === '쿠팡'
+              ? '쿠팡 접근이 차단되었습니다(봇 차단). 쿠팡 페이지에서 상품 이미지 우클릭(모바일: 길게 누르기) → "이미지 주소 복사" 후 썸네일의 이미지 주소 붙여넣기를 사용하세요.'
+              : `${mall} 접근이 차단되었습니다(봇 차단). 썸네일/상품명/가격을 수동 입력하세요.`)
             : `${mall} 페이지를 불러오지 못했습니다(HTTP ${resp.status}).` });
       }
       html = await resp.text();
@@ -115,7 +117,7 @@ router.post('/preview', authMiddleware, adminOrMasterMiddleware, async (req, res
       price: _priceText(price),
       priceRaw: price != null ? String(price) : '',
       hint: ok ? undefined : (mall === '쿠팡'
-        ? '쿠팡은 봇 차단으로 자동 수집이 어렵습니다. 수동 입력하세요.'
+        ? '쿠팡은 봇 차단으로 자동 수집이 어렵습니다. 이미지 주소 복사 → 썸네일의 이미지 주소 붙여넣기를 사용하세요.'
         : '상품 정보를 찾지 못했습니다. 수동 입력하세요.'),
     });
   } catch (err) {

@@ -730,6 +730,35 @@ async function uploadCampThumb(input) {
   }
 }
 
+/* 쿠팡 봇차단 우회: 쿠팡 상품 HTML은 서버 fetch가 403이지만 이미지 CDN(coupangcdn.com)은 미차단.
+   관리자가 브라우저에서 "이미지 주소 복사"한 CDN URL을 서버(guide-image imageUrl 분기)가 받아
+   Drive 재저장 → 절대 프록시 URL. 허용 호스트 검증은 서버(utils/thumbFetch)가 강제. */
+async function fetchCampThumbFromUrl() {
+  const inp = document.getElementById("rf_thumb_url");
+  const url = ((inp && inp.value) || "").trim();
+  if (!url) { showToast("이미지 주소를 붙여넣으세요. (쿠팡 상품 이미지 우클릭 → 이미지 주소 복사)", "error"); return; }
+  if (!/^https:\/\//i.test(url)) { showToast("https:// 로 시작하는 이미지 주소만 지원합니다.", "error"); return; }
+  showToast("이미지 가져오는 중...");
+  try {
+    const resp = await fetch(API_BASE_URL + "/api/order/guide-image", {
+      method: "POST",
+      headers: { "Content-Type": "application/json", ..._getAuthHeaders() },
+      body: JSON.stringify({ imageUrl: url, fileName: "campthumb_" + Date.now() }),
+    });
+    const j = await resp.json();
+    if (!resp.ok || !j.ok || !j.url) throw new Error(j.error || "이미지 수집 실패");
+    // 절대 프록시 URL — 프론트(pages.dev)와 API(railway) 오리진이 달라 절대 URL이어야 카드에 뜬다
+    document.getElementById("rf_thumbnail").value = j.url;
+    const pv = document.getElementById("rf_thumb_preview");
+    if (pv) { pv.src = j.url; pv.style.display = ""; }
+    inp.value = "";
+    showToast("썸네일이 등록되었습니다.", "success");
+    _onPreviewInput();
+  } catch (e) {
+    showToast("썸네일 수집 실패: " + e.message, "error");
+  }
+}
+
 /* ═══════════════════════════════════════
    ⚡ M3: 관제 패널 — 공고별 신청현황(오늘 홀드/제출/만료) + 수동확정
 ═══════════════════════════════════════ */
