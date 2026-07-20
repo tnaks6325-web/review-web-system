@@ -2167,15 +2167,18 @@ async function woCreateCampaign(id) {
   const o = (_woCache || []).find(x => x.id === id);
   if (!o) { showToast("오더 정보를 찾을 수 없습니다. 새로고침 후 다시 시도하세요.", "error"); return; }
   if (typeof openRecruitModal !== "function") { showToast("모집공고 모듈을 불러오지 못했습니다.", "error"); return; }
+  const _pi = (typeof _woFirstProductInfo === "function") ? _woFirstProductInfo(o) : { name: "", price: "" };
   const prefill = {
-    title:         o.title || "",
+    // ★ 공고 제목 = 상품명 우선(리뷰어 노출용 — 업체명·건수·배송유형 미노출), 없으면 오더 제목 폴백. 관리자 자유 수정 가능.
+    title:         _pi.name || o.title || "",
     time_range:    o.purchase_time || "",
     max_slots:     o.recruit_count || 0,
     chat_url:      o.chat_room_url || "",
     delivery_type: WO_DELIVERY_MAP[o.delivery_type] || "",
     product_url:   o.product_url || "",
     // ★ 상품정보 기본값 = 작업오더 입력 상품명·결제금액 (자동수집 성공 시 그 값으로 덮어씀)
-    ...(typeof _woFirstProductInfo === "function" ? (function(){ const pi = _woFirstProductInfo(o); return { product_name: pi.name || "", price: pi.price || "" }; })() : {}),
+    product_name:  _pi.name || "",
+    price:         _pi.price || "",
     notes:         [_INFLOW_LABEL[o.inflow_type] ? ("유입방식: " + _INFLOW_LABEL[o.inflow_type]) : (o.inflow_keyword ? ("유입키워드: " + o.inflow_keyword) : ""), o.review_guide || ""].filter(Boolean).join("\n"),
     // ★ M3: 참여형 자동 프리필 — 작업오더 세부내용을 발행 폼 스냅샷으로 복사
     participation:  true,

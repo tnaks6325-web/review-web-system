@@ -84,14 +84,19 @@ function computeCampaignState(c, counts, now = new Date()) {
 
   const startMin = timeStrToMinutes(c.window_start);
   const endMin = timeStrToMinutes(c.window_end);
-  if (startMin === null || endMin === null || endMin <= startMin) {
-    // 시간창 미설정/역전(활성화 게이트가 막지만 SQL 직생성 방어) — 참여 불가 + 원인 신호(관리자 식별용)
+  // ★ 자율주문(종일 오픈): 시간창 양쪽 모두 "명시적 미설정"이면 시간 게이트 없이 운영
+  //   (preopen·cutoff·시간 daily_done 없음 — 일일한도·총모집·closed 게이트는 동일 작동).
+  //   한쪽만 설정/역전은 여전히 설정 오류로 차단(무신호 장애 방지).
+  const allDay = !c.window_start && !c.window_end;
+  payload.allDay = allDay;
+  if (!allDay && (startMin === null || endMin === null || endMin <= startMin)) {
+    // 시간창 오설정/역전(활성화 게이트가 막지만 SQL 직생성 방어) — 참여 불가 + 원인 신호(관리자 식별용)
     return { ...payload, state: 'closed', stateReason: 'window_invalid' };
   }
 
   const t = kstMinutesOfDay(now);
-  if (t < startMin) return { ...payload, state: 'preopen' };
-  if (t >= endMin) return { ...payload, state: 'daily_done' };
+  if (!allDay && t < startMin) return { ...payload, state: 'preopen' };
+  if (!allDay && t >= endMin) return { ...payload, state: 'daily_done' };
 
   if (todayCount >= quota) return { ...payload, state: 'daily_done' }; // 금일완료(홀드 만료 반환 시 open 복귀)
 
@@ -99,7 +104,7 @@ function computeCampaignState(c, counts, now = new Date()) {
   const usedAll = (Number(counts.submittedAll) || 0) + (Number(counts.activeHolds) || 0);
   if (rt > 0 && usedAll >= rt) return { ...payload, state: 'soft_full' }; // 잔여 대기 — 신청만 차단, 종착 아님
 
-  if (t >= endMin - bufferMin) return { ...payload, state: 'cutoff' }; // 신규 신청만 차단
+  if (!allDay && t >= endMin - bufferMin) return { ...payload, state: 'cutoff' }; // 신규 신청만 차단
 
   return { ...payload, state: 'open' };
 }

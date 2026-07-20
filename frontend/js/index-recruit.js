@@ -344,7 +344,8 @@ function participationCheckErrors() {
   if (!tabKey || !(tabMeta && tabMeta.tabGid)) errs.push("시트 탭 연결(gid 포함)이 필요해요");
   const ws = document.getElementById("rf_window_start")?.value || "";
   const we = document.getElementById("rf_window_end")?.value || "";
-  if (!ws || !we || we <= ws) errs.push("구매시간(시작 < 종료)을 입력해주세요");
+  // 자율주문(종일 오픈) = 양쪽 모두 비움 허용. 한쪽만 입력/역전은 오류(서버 게이트와 동일 규칙)
+  if ((ws || we) && (!ws || !we || we <= ws)) errs.push("구매시간은 시작<종료로 입력하거나, 자율주문이면 양쪽 모두 비워주세요");
   const dl = Number(document.getElementById("rf_daily_limit")?.value || 0);
   if (!(dl >= 1)) errs.push("하루 진행 인원(1 이상)을 입력해주세요");
   return errs;
@@ -353,9 +354,12 @@ function renderPartCheck() {
   const box = document.getElementById("rf_part_check");
   if (!box) return;
   const errs = participationCheckErrors();
+  const _ws = document.getElementById("rf_window_start")?.value || "";
+  const _we = document.getElementById("rf_window_end")?.value || "";
   const items = [
     { label: "시트 탭 연결됨 (gid)", fail: errs.some(e => e.includes("탭 연결")) },
-    { label: "구매시간 입력됨 (시작 < 종료)", fail: errs.some(e => e.includes("구매시간")) },
+    { label: (!_ws && !_we) ? "구매시간 미설정 = 자율주문(종일 오픈)" : "구매시간 입력됨 (시작 < 종료)",
+      fail: errs.some(e => e.includes("구매시간")) },
     { label: "하루 진행 인원 입력됨", fail: errs.some(e => e.includes("하루 진행")) },
   ];
   box.innerHTML = items.map(i =>

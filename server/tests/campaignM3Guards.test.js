@@ -29,7 +29,8 @@ ok('modal: 미리보기 변환(_htmlToPlainPreview) 존재', /function _htmlToPl
 
 // ── 상품정보 기본값(작업오더) + 자동수집 성공 항목만 덮어쓰기 ──
 ok('prefill: 작업오더 첫 상품명·결제금액 헬퍼(_woFirstProductInfo)', /function _woFirstProductInfo/.test(app) && /product_options_json/.test(app));
-ok('prefill: product_name/price 프리필 전달', /_woFirstProductInfo\(o\)/.test(app) && /product_name: pi\.name/.test(app));
+ok('prefill: product_name/price 프리필 전달', /_woFirstProductInfo\(o\)/.test(app) && /product_name:\s+_pi\.name/.test(app));
+ok('prefill: 공고 제목 = 상품명 우선(업체명·건수 미노출), 오더 제목 폴백', /title:\s+_pi\.name \|\| o\.title/.test(app));
 ok('modal: 작업오더 기본값을 상품 미리보기에 표시', /prefill\.product_name \|\| prefill\.price/.test(recjs));
 ok('modal: 프리필 시 자동수집 1회 시도', /fetchProductInfo\(\{ auto: true \}\)/.test(recjs));
 ok('fetch: 성공 항목만 덮어씀(누락 항목은 기존 값 유지)', /if \(r\.name\)\s+nEl\.value = r\.name;/.test(recjs) && /if \(r\.price\) pEl\.value = r\.price;/.test(recjs));
