@@ -45,12 +45,11 @@
     const st = document.createElement('style');
     st.id = 'campCardsCss';
     st.textContent = `
-      /* 참여형 카드 — 모바일 2열 그리드(요구사항).
-         ★ 부모가 이미 grid(.rc-list.rc-view-card 등)여도 한 칸에 갇혀 짜부라지지 않게
-            전체 폭을 점유(grid-column:1/-1) 후 자체 2열 구성. 부모가 block이면 무해. */
+      /* 참여형 카드 — 항상 2열(리뷰어 페이지 폭 안에 2개). 리뷰어 앱은 max-width로 폭이
+         고정(index 440px·recruit 560px)이라 뷰포트 media로 열수를 늘리면(넓은 데스크톱에서
+         공고 페이지를 볼 때) 고정폭 안에 3~4열이 욱여넣어져 카드가 짜부라진다 → 열수 고정.
+         ★ 부모가 이미 grid(.rc-list.rc-view-card)여도 한 칸에 갇히지 않게 전체폭 점유(grid-column:1/-1). */
       .pcards-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:10px;margin-bottom:12px;grid-column:1/-1;width:100%}
-      @media(min-width:600px){.pcards-grid{grid-template-columns:repeat(3,minmax(0,1fr))}}
-      @media(min-width:900px){.pcards-grid{grid-template-columns:repeat(4,minmax(0,1fr))}}
       .pcard{position:relative;background:#fff;border:1px solid #E5E7EB;border-radius:14px;overflow:hidden;
         box-shadow:0 2px 10px rgba(21,40,80,.06);cursor:pointer;display:flex;flex-direction:column}
       .pcard.is-closed{opacity:.6;filter:grayscale(1)}
