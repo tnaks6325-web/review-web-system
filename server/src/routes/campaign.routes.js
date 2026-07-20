@@ -129,8 +129,10 @@ async function _scopedCampaignEdit(req, res) {
   const time_range = b.time_range !== undefined ? b.time_range : c.time_range;
   const thumbnail_url = b.thumbnail_url !== undefined ? b.thumbnail_url : c.thumbnail_url;
   const landing_url = b.landing_url !== undefined ? b.landing_url : c.landing_url;
-  const window_start = keep(b.window_start, c.window_start);
-  const window_end = keep(b.window_end, c.window_end);
+  // auto_order=true(시간 표기에 자유/자율) → 구매시간 명시적 비움(자율주문). 아니면 빈값=현재값 유지.
+  const autoOrder = b.auto_order === true;
+  const window_start = autoOrder ? null : keep(b.window_start, c.window_start);
+  const window_end = autoOrder ? null : keep(b.window_end, c.window_end);
   const review_fee = numOr(b.review_fee, c.review_fee);
   const daily_limit = numOr(b.daily_limit, c.daily_limit);
   const recruit_total = numOr(b.recruit_total, c.recruit_total);

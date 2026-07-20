@@ -124,6 +124,8 @@ ok('_norm8: 하이픈·11자리 → 뒤 8자리', svc._norm8('010-8592-6325') ==
   })());
   ok('#3: 스코프 핸들러가 사용 시점 isActiveEditor(phone8) 재검증',
     /_scopedCampaignEdit[\s\S]*?isActiveEditor\(p8\)/.test(camp));
+  ok('자율주문: auto_order=true면 구매시간 명시적 null(전환), 아니면 빈값=현재값 유지',
+    /autoOrder = b\.auto_order === true/.test(camp) && /autoOrder \? null : keep\(b\.window_start/.test(camp));
   ok('#2: 참여형 공고만 스코프 편집 허용(레거시 미접촉)',
     /_scopedCampaignEdit[\s\S]*?!c\.participation_mode/.test(camp));
   ok('#4: GET /:id는 via=reviewer_campaign면 축약 뷰(_scopedEditorView)만 반환',

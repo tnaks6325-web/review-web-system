@@ -267,14 +267,17 @@
             </select></div>
         </div>
         <div class="cae-g2">
-          <div><label class="cae-lb">리뷰비(원)</label><input id="cae_fee" class="cae-in" type="number" min="0"></div>
-          <div><label class="cae-lb">시간 표기(텍스트)</label><input id="cae_time_range" class="cae-in" type="text" placeholder="예: 14~16시"></div>
+          <div><label class="cae-lb">리뷰비(원)</label><input id="cae_fee" class="cae-in" type="number" min="0" step="100"></div>
+          <div><label class="cae-lb">시간 표기(텍스트)</label><input id="cae_time_range" class="cae-in" type="text" placeholder="예: 14~16시 · 자율주문"></div>
         </div>
-        <div class="cae-g2">
-          <div><label class="cae-lb">구매시간 시작</label><input id="cae_ws" class="cae-in" type="time"></div>
-          <div><label class="cae-lb">구매시간 종료</label><input id="cae_we" class="cae-in" type="time"></div>
+        <div id="cae_window_row">
+          <div class="cae-g2">
+            <div><label class="cae-lb">구매시간 시작</label><input id="cae_ws" class="cae-in" type="time"></div>
+            <div><label class="cae-lb">구매시간 종료</label><input id="cae_we" class="cae-in" type="time"></div>
+          </div>
+          <div class="cae-note">비워 두면 기존 설정 유지</div>
         </div>
-        <div class="cae-note">비워 두면 기존 설정 유지 — 시간창 비우기(자율주문 전환)는 대시보드에서</div>
+        <div id="cae_window_auto" class="cae-note" style="display:none;color:#0ca678;font-weight:700">⏱ 자율주문(시간 표기에 "자유/자율" 포함) — 구매시간 지정이 필요 없습니다.</div>
         <div class="cae-g2">
           <div><label class="cae-lb">하루 진행 인원</label><input id="cae_daily" class="cae-in" type="number" min="0"></div>
           <div><label class="cae-lb">총 모집(0=무제한)</label><input id="cae_total" class="cae-in" type="number" min="0"></div>
@@ -286,14 +289,13 @@
         </div>
         <div class="cae-note">상품 페이지를 열어 이미지 우클릭 → "이미지 주소 복사" 후 아래 썸네일 칸에 붙여넣기</div>
         <label class="cae-lb">썸네일 URL <span style="font-weight:400;color:#9CA3AF">(비우면 제거)</span></label>
-        <input id="cae_thumb" class="cae-in" type="text" placeholder="저장된 썸네일 주소">
-        <div style="display:flex;gap:6px;align-items:center;margin-top:6px">
-          <input id="cae_thumb_url" class="cae-in" type="url" style="flex:1;min-width:0" placeholder="쿠팡 이미지 주소 붙여넣기 (우클릭 → 이미지 주소 복사)">
-          <button type="button" id="caeThumbFetch" class="cae-btn gho" style="white-space:nowrap">가져오기</button>
+        <input id="cae_thumb" class="cae-in" type="text" placeholder="상품 이미지 주소(coupangcdn 등) 붙여넣기">
+        <div id="cae_thumb_prevwrap" style="display:none;margin-top:8px;text-align:center;background:#F3F4F6;border-radius:10px;padding:12px">
+          <img id="cae_thumb_prev" alt="썸네일 미리보기" style="max-width:100%;max-height:200px;border-radius:8px;border:1px solid #E5E7EB;object-fit:contain">
         </div>
-        <div style="display:flex;gap:8px;align-items:center;margin-top:6px">
+        <div style="display:flex;gap:8px;align-items:center;margin-top:8px">
+          <span class="cae-lb" style="margin:0;white-space:nowrap">또는 파일 업로드</span>
           <input id="cae_thumb_file" type="file" accept="image/*" style="font-size:.7rem;flex:1;min-width:0">
-          <img id="cae_thumb_prev" alt="" style="height:40px;border-radius:8px;border:1px solid #E5E7EB;display:none">
         </div>
         <div class="cae-note">채널·모집내용·작업내용 등 전체 항목 수정은 관리자 대시보드 → 캠페인 탭에서</div>
         <div style="display:flex;gap:8px;margin-top:14px">
@@ -304,7 +306,6 @@
     // ★ 바깥 클릭으로는 닫히지 않음 — [닫기] 버튼으로만 닫는다(실수 닫힘 방지, 요구사항)
     ovl.querySelector('#caeClose').addEventListener('click', () => ovl.remove());
     ovl.querySelector('#caeSave').addEventListener('click', _caeSave);
-    ovl.querySelector('#caeThumbFetch').addEventListener('click', _caeThumbFromUrl);
     ovl.querySelector('#caeLandingOpen').addEventListener('click', () => {
       const u = _caeV('cae_landing').trim();
       if (/^https?:\/\//i.test(u)) window.open(u, '_blank', 'noopener');
@@ -312,6 +313,7 @@
     });
     ovl.querySelector('#cae_thumb_file').addEventListener('change', _caeThumbFromFile);
     ovl.querySelector('#cae_thumb').addEventListener('input', _caeSyncPreview);
+    ovl.querySelector('#cae_time_range').addEventListener('input', _caeToggleWindow);
     document.body.appendChild(ovl);
     return ovl;
   }
@@ -320,8 +322,19 @@
   function _caeSyncPreview() {
     const url = _caeV('cae_thumb').trim();
     const img = document.getElementById('cae_thumb_prev');
+    const wrap = document.getElementById('cae_thumb_prevwrap');
     if (!img) return;
-    if (url) { img.src = url; img.style.display = ''; } else { img.style.display = 'none'; }
+    if (url) { img.src = url; if (wrap) wrap.style.display = ''; }
+    else if (wrap) { wrap.style.display = 'none'; }
+  }
+  // 시간 표기에 "자유/자율"이 포함되면 구매시간 시작/종료 입력 숨김(자율주문)
+  function _caeIsAutoOrder() { return /자유|자율/.test(_caeV('cae_time_range')); }
+  function _caeToggleWindow() {
+    const auto = _caeIsAutoOrder();
+    const row = document.getElementById('cae_window_row');
+    const note = document.getElementById('cae_window_auto');
+    if (row) row.style.display = auto ? 'none' : '';
+    if (note) note.style.display = auto ? '' : 'none';
   }
 
   async function openAdminEdit(id) {
@@ -358,29 +371,8 @@
     document.getElementById('cae_total').value = data.recruit_total != null ? data.recruit_total : '';
     document.getElementById('cae_landing').value = data.landing_url || '';
     document.getElementById('cae_thumb').value = data.thumbnail_url || '';
-    document.getElementById('cae_thumb_url').value = '';
     _caeSyncPreview();
-  }
-
-  // 쿠팡 CDN 이미지주소 → 서버 재저장(기존 guide-image imageUrl 분기 재사용, 허용목록·5MB는 서버 강제)
-  async function _caeThumbFromUrl() {
-    const url = _caeV('cae_thumb_url').trim();
-    if (!url) { _toast('이미지 주소를 붙여넣으세요. (쿠팡 이미지 우클릭 → 이미지 주소 복사)', true); return; }
-    if (!/^https:\/\//i.test(url)) { _toast('https:// 로 시작하는 이미지 주소만 지원합니다.', true); return; }
-    _toast('이미지 가져오는 중...');
-    try {
-      const r = await fetch(_apiBase() + '/api/order/guide-image', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json', 'Authorization': 'Bearer ' + _adminTok() },
-        body: JSON.stringify({ imageUrl: url, fileName: 'campthumb_' + Date.now() }),
-      });
-      const j = await r.json();
-      if (!r.ok || !j.ok || !j.url) throw new Error(j.error || '수집 실패');
-      document.getElementById('cae_thumb').value = j.url;
-      document.getElementById('cae_thumb_url').value = '';
-      _caeSyncPreview();
-      _toast('썸네일이 등록되었습니다. [저장]을 눌러 반영하세요.');
-    } catch (e) { _toast('썸네일 수집 실패: ' + e.message, true); }
+    _caeToggleWindow();
   }
 
   async function _caeThumbFromFile(ev) {
@@ -414,6 +406,7 @@
     if (!_caeLoaded) return;
     const title = _caeV('cae_title').trim();
     if (!title) { _toast('공고 제목을 입력해주세요.', true); return; }
+    const auto = _caeIsAutoOrder();  // 시간 표기에 자유/자율 → 자율주문(구매시간 비움)
     const payload = {
       title,
       status: _caeV('cae_status'),
@@ -424,8 +417,10 @@
       sort_order: _caeLoaded.sort_order,
       thumbnail_url: _caeV('cae_thumb').trim(),
       landing_url: _caeV('cae_landing').trim(),
-      window_start: _caeV('cae_ws') || null,   // 빈값=null → 서버 COALESCE 유지(대시보드 폼과 동일 시맨틱)
-      window_end: _caeV('cae_we') || null,
+      // 자율주문이면 구매시간 명시적 비움(clear), 아니면 입력값(빈값=서버가 현재값 유지)
+      auto_order: auto,
+      window_start: auto ? null : (_caeV('cae_ws') || null),
+      window_end: auto ? null : (_caeV('cae_we') || null),
       daily_limit: _caeV('cae_daily') === '' ? null : Number(_caeV('cae_daily')) || 0,
       recruit_total: _caeV('cae_total') === '' ? null : Number(_caeV('cae_total')) || 0,
     };
