@@ -202,6 +202,12 @@ router.post('/advertisers', authMiddleware, internalMiddleware, async (req, res,
   } catch (err) { next(err); }
 });
 
+// ── 이미 소유 지정된 시트 ID 목록 — 업체추가 폼 시트 드롭다운에서 제외용(내부인). ──
+router.get('/owned-sheets', authMiddleware, internalMiddleware, async (req, res, next) => {
+  try { res.json({ ok: true, sheetIds: await svc.ownedSheetIds() }); }
+  catch (err) { next(err); }
+});
+
 // ── 업체(거래처) 삭제(soft) — master/admin 전용. 포털 공유 원장이라 status='ended'로 숨김(가역)+소유 매핑 해제. ──
 router.delete('/advertisers/:id', authMiddleware, adminOrMasterMiddleware, async (req, res, next) => {
   try {
