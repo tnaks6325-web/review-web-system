@@ -207,6 +207,8 @@
     .pf-subadd:disabled { opacity:.5; cursor:default; }
     .pf-sublist { display:flex; flex-direction:column; gap:9px; }
     .pf-subempty { text-align:center; padding:14px 10px; color:var(--t3); font-size:.76rem; background:var(--card); border:1px dashed var(--border); border-radius:12px; }
+    .pf-eye { font-size:.66rem; color:var(--t3); background:none; border:none; padding:1px 4px; margin-left:4px; cursor:pointer; vertical-align:middle; line-height:1; }
+    .pf-eye:hover { color:var(--p); }
 
     /* ─── Result Card (review list) ─── */
     .result-card {
@@ -680,7 +682,7 @@
             <div class="pf-ln"><span class="pf-k">계좌</span>
               <span class="pf-v"><span id="pfBankLine" class="pf-muted">미등록</span><button id="btnAddBankInfo" class="pf-edit" onclick="openBankForm()">등록</button></span></div>
             <div class="pf-ln"><span class="pf-k">소득</span>
-              <span class="pf-v"><span id="inlineSelfIncomeName" class="pf-muted">미등록</span><button id="btnAddIncomeInfo" class="pf-edit" onclick="openIncomeInfoForm()">추가</button><span class="pf-dot">·</span><span id="inlineSelfJumin" class="pf-muted">미등록</span><button id="btnAddJuminInfo" class="pf-edit" onclick="openIncomeInfoForm()">추가</button></span></div>
+              <span class="pf-v"><span id="inlineSelfIncomeName" class="pf-muted">미등록</span><button id="btnAddIncomeInfo" class="pf-edit" onclick="openIncomeInfoForm()">추가</button><span class="pf-dot">·</span><span id="inlineSelfJumin" class="pf-muted">미등록</span><button id="btnJuminEye" class="pf-eye" style="display:none" onclick="toggleJumin(this)" aria-label="주민번호 뒷자리 보기"><i class="fas fa-eye"></i></button><button id="btnAddJuminInfo" class="pf-edit" onclick="openIncomeInfoForm()">추가</button></span></div>
           </div>
         </article>
 
@@ -1024,15 +1026,24 @@ async function loadInlineProfile(user) {
       const juminEl = document.getElementById("inlineSelfJumin");
       if (juminEl) {
         const jd = (p.residentNum || "").replace(/[^0-9]/g, "");
+        const eyeBtn = document.getElementById("btnJuminEye");
         if (jd.length === 13) {
-          juminEl.textContent = jd.slice(0,6) + "-" + jd.slice(6,7) + "••••••";
-          juminEl.classList.remove("pf-muted");
+          const full = jd.slice(0,6) + "-" + jd.slice(6);
+          const mask = jd.slice(0,6) + "-" + jd.slice(6,7) + "••••••";
+          juminEl.textContent = mask;
+          juminEl.className = "pf-jumin pf-num";
+          juminEl.setAttribute("data-mask", mask);
+          juminEl.setAttribute("data-full", full);
+          juminEl.setAttribute("data-revealed", "0");
+          if (eyeBtn) { eyeBtn.style.display = ""; eyeBtn.innerHTML = '<i class="fas fa-eye"></i>'; }
         } else if (jd) {
           juminEl.textContent = "등록됨";
-          juminEl.classList.remove("pf-muted");
+          juminEl.className = "";
+          if (eyeBtn) eyeBtn.style.display = "none";
         } else {
           juminEl.textContent = "미등록";
-          juminEl.classList.add("pf-muted");
+          juminEl.className = "pf-muted";
+          if (eyeBtn) eyeBtn.style.display = "none";
         }
         const btnJm = document.getElementById("btnAddJuminInfo");
         if (btnJm) btnJm.style.display = jd ? "none" : "";
@@ -1566,9 +1577,6 @@ function renderInlineSubList(subs) {
   const _dot = '<span class="pf-dot">·</span>';
   listEl.innerHTML = subs.map((sub, idx) => {
     const subJd = (sub.jumin || sub.residentNo || "").replace(/[^0-9]/g, "");
-    const jDisplay = subJd.length === 13
-      ? subJd.slice(0,6) + "-" + subJd.slice(6,7) + "••••••"
-      : (subJd ? "등록됨" : "");
     const addr = (sub.address || "").trim();
     const addrHtml = addr ? escHtml(addr) : '<span class="pf-muted">본인과 동일 / 미입력</span>';
     const bankParts = [sub.bankName, sub.bankAccount, sub.accountHolder].filter(Boolean)
@@ -1576,7 +1584,17 @@ function renderInlineSubList(subs) {
     const bankHtml = bankParts.length ? bankParts.join(_dot) : '<span class="pf-muted">본인 계좌로 입금</span>';
     const incName = (sub.incomeName || "").trim();
     const incHtml = incName ? escHtml(incName) : '<span class="pf-muted">미등록</span>';
-    const jHtml = jDisplay ? '<span class="pf-num">' + escHtml(jDisplay) + '</span>' : '<span class="pf-muted">미등록</span>';
+    let jHtml;
+    if (subJd.length === 13) {
+      const jFull = subJd.slice(0,6) + "-" + subJd.slice(6);
+      const jMask = subJd.slice(0,6) + "-" + subJd.slice(6,7) + "••••••";
+      jHtml = '<span class="pf-jumin pf-num" data-mask="' + jMask + '" data-full="' + jFull + '" data-revealed="0">' + jMask + '</span>'
+            + '<button class="pf-eye" onclick="toggleJumin(this)" aria-label="주민번호 뒷자리 보기"><i class="fas fa-eye"></i></button>';
+    } else if (subJd) {
+      jHtml = '<span class="pf-num">등록됨</span>';
+    } else {
+      jHtml = '<span class="pf-muted">미등록</span>';
+    }
     const initial = escHtml(((sub.name || '?').trim().charAt(0)) || '?');
     return `<article class="pf-acct">
       <div class="pf-head">
@@ -1606,6 +1624,24 @@ function renderInlineSubList(subs) {
 /* ═══════════════════════════════════════
    소득명의/주민번호 폼
 ═══════════════════════════════════════ */
+/* ═══ 주민번호 뒷자리 보기 토글 (본인·타계정 공용) ═══ */
+function toggleJumin(btn) {
+  const span = btn.parentElement ? btn.parentElement.querySelector('.pf-jumin') : null;
+  if (!span) return;
+  const revealed = span.getAttribute('data-revealed') === '1';
+  if (revealed) {
+    span.textContent = span.getAttribute('data-mask') || span.textContent;
+    span.setAttribute('data-revealed', '0');
+    btn.innerHTML = '<i class="fas fa-eye"></i>';
+    btn.setAttribute('aria-label', '주민번호 뒷자리 보기');
+  } else {
+    span.textContent = span.getAttribute('data-full') || span.textContent;
+    span.setAttribute('data-revealed', '1');
+    btn.innerHTML = '<i class="fas fa-eye-slash"></i>';
+    btn.setAttribute('aria-label', '주민번호 뒷자리 숨기기');
+  }
+}
+
 /* ═══ 주소(본인) ═══ */
 function renderSelfAddress(address) {
   const el = document.getElementById("inlineSelfAddress");
