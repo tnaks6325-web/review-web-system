@@ -540,7 +540,7 @@ function renderWorkdesk(wd){
     const rows=(wd.roster||[]).map(r=>`<tr id="row-${esc(r.id)}"${r.ambiguous?' class="amb"':''}><td>${canEdit?`<span class="exp" title="제출 내용·시트 행 펼치기" onclick="toggleDetail('${esc(r.id)}')">▸</span> `:''}${esc(r.seq)}</td>`+
       `<td>${canEdit&&r.editable!==false?`<span class="ecell${(r.editedFields||[]).includes('reviewer_name')?' edited':''}" data-val="${esc(r.name||'')}" onclick="beginEdit(this,'${r.id}','reviewer_name')">${esc(r.name||'—')}</span>`:esc(r.name||'—')}`+
       `${r.source==='manual'?' <span class="src manual">수동</span>':(r.hasOrder?' <span class="src order">주문</span>':'')}${r.ambiguous?' <span class="src" style="background:var(--warn-soft);color:var(--warn)" title="중복 신원">⚠중복</span>':''}${(r.editedFields||[]).includes('reviewer_name')?` <span class="revb" onclick="event.stopPropagation();revertEdit('${r.id}','reviewer_name')">↩</span>`:''}</td>`+
-      `<td class="ph">${esc(r.phone8||'')}</td>`+
+      `<td class="ph">${esc(_fmtPhone(r.phone8))}</td>`+
       _tcell(r,'round',r.round)+_tcell(r,'option_text',r.option)+
       _bcell(r,'is_submitted',r.submitted)+_bcell(r,'is_paid',r.paid)+
       (canEdit?`<td>${r.source==='manual'||r.editable!==false?`<button class="rmrow" title="명단에서 제거(숨김)" onclick="hideRow('${r.id}')">×</button>`:''}</td>`:'')
@@ -784,7 +784,21 @@ function _serialToDate(n){ const ms=Math.round((n-25569)*86400000); const d=new 
 // 편집 시작값(정본): 일련번호는 ISO 로, 그 외는 원본 그대로 — 셀 클릭 편집이 표시용 축약값으로 오염되지 않게 분리.
 function _gridEditVal(h, raw){ const v=(raw==null?'':String(raw)).trim(); if(!v)return ''; if(/일자|날짜|date/i.test(h)&&/^\d{4,6}(\.\d+)?$/.test(v)){ const dt=_serialToDate(parseFloat(v)); if(dt)return dt; } return v; }
 // 표시값: 날짜형 헤더(구매일자 등)는 "월/일 (요일)" 로 통일 — ISO(yyyy-mm-dd)·일련번호는 요일 계산, 시트식 "7 / 3 (금)" 은 표기 정규화.
-function _gridVal(h, raw){ const v=_gridEditVal(h, raw); if(!v)return ''; return /일자|날짜|date/i.test(h) ? _fmtKDate(v) : v; }
+function _gridVal(h, raw){ const v=_gridEditVal(h, raw); if(!v)return '';
+  if(/일자|날짜|date/i.test(h)) return _fmtKDate(v);
+  if(_isPhoneHeader(h)) return _fmtPhone(v);
+  return v; }
+// 연락처 표기 통일: 숫자만 추출 → 010-0000-0000(뒤8자리=phone8) 등 표준 대시 양식. 형식 불명은 원본 유지(오염 방지).
+function _isPhoneHeader(h){ const s=String(h||''); return /(연락처|휴대폰|핸드폰|전화|폰번호)/.test(s) || /^(hp|tel|mobile|phone)$/i.test(s.trim()); }
+function _fmtPhone(v){
+  if(v==null) return ''; const s=String(v).trim(); if(!s) return '';
+  const d=s.replace(/[^0-9]/g,''); if(!d) return s;
+  if(d.length===8) return '010-'+d.slice(0,4)+'-'+d.slice(4);                 // phone8(뒤8자리) → 010-XXXX-XXXX
+  if(d.length===11) return d.slice(0,3)+'-'+d.slice(3,7)+'-'+d.slice(7);       // 01012345678 → 010-1234-5678
+  if(d.length===10) return d.startsWith('02') ? '02-'+d.slice(2,6)+'-'+d.slice(6) : d.slice(0,3)+'-'+d.slice(3,6)+'-'+d.slice(6);
+  if(d.length===9 && d.startsWith('02')) return '02-'+d.slice(2,5)+'-'+d.slice(5);
+  return s;                                                                    // 형식 불명 → 원본 유지
+}
 function _fmtKDate(v){
   const iso=v.match(/^(\d{4})-(\d{2})-(\d{2})/);
   if(iso){ const wd=['일','월','화','수','목','금','토'][new Date(Date.UTC(+iso[1],+iso[2]-1,+iso[3])).getUTCDay()]; return `${+iso[2]}/${+iso[3]} (${wd})`; }
@@ -797,7 +811,7 @@ function _fmtKDate(v){
 function gCellDisp(r,h){
   if(h==='#') return String(r.seq==null?'':r.seq);
   if(h==='참여자') return r.name||'';
-  if(h==='연락처') return r.phone8||'';
+  if(h==='연락처') return _fmtPhone(r.phone8||'');
   const rj=(r.rowJson&&typeof r.rowJson==='object')?r.rowJson:{};
   const ceMap=(r.cellEdits&&typeof r.cellEdits==='object')?r.cellEdits:{};
   const ed=(h in ceMap); const raw= ed?ceMap[h]:rj[h];
@@ -809,19 +823,21 @@ function buildGrid(wd){
   _ensureHeaderDrag();   // 헤더 가로 드래그 일괄 숨김(1회 바인딩, 위임)
   const H=wd.headers||[];
   const revI=H.indexOf('리뷰제출'), payI=H.indexOf('입금');
-  const allCols=['#','참여자','연락처', ...H];
-  const vcols=allCols.filter(c=>!STATE.gHidden.has(c));                       // 숨긴 열 제외 = 표시 컬럼
+  // 컬럼 기술자: 신원 3열(#·참여자·연락처=DB)은 kind 로 렌더 — 동명 시트열(예: 시트 '연락처')이 신원열을 가리지 않게 위치/kind 기반.
+  const cols0=[{key:'#',kind:'seq'},{key:'참여자',kind:'name'},{key:'연락처',kind:'phone'}, ...H.map(h=>({key:h,kind:'col'}))];
+  const allCols=cols0.map(c=>c.key);                                          // 필터/정렬/그룹 가드용 key 목록
+  const vcols=cols0.filter(c=>!STATE.gHidden.has(c.key));                     // 숨긴 열 제외(key 기준) = 표시 컬럼
   const fzIdx = STATE.freezeUpto ? H.indexOf(STATE.freezeUpto) : -1;
-  const fset=new Set(['#','참여자','연락처', ...H.slice(0, fzIdx+1)]);         // 고정 대상 집합
-  let frozenN=0; for(const c of vcols){ if(fset.has(c)) frozenN++; else break; } // 표시 컬럼 기준 연속 고정 접두수
-  const lefts=[]; let acc=0; for(let i=0;i<vcols.length;i++){ lefts[i]=acc; acc+=_colW(vcols[i]); }
-  const cstyle=(i)=>{ const w=_colW(vcols[i]); let s=`min-width:${w}px;width:${w}px;`; if(i<frozenN){ s+=`left:${lefts[i]}px;`; if(i===frozenN-1)s+='box-shadow:2px 0 0 var(--line2);'; } return s; };
+  const fset=new Set(['#','참여자','연락처', ...H.slice(0, fzIdx+1)]);         // 고정 대상 집합(key)
+  let frozenN=0; for(const c of vcols){ if(fset.has(c.key)) frozenN++; else break; } // 표시 컬럼 기준 연속 고정 접두수
+  const lefts=[]; let acc=0; for(let i=0;i<vcols.length;i++){ lefts[i]=acc; acc+=_colW(vcols[i].key); }
+  const cstyle=(i)=>{ const w=_colW(vcols[i].key); let s=`min-width:${w}px;width:${w}px;`; if(i<frozenN){ s+=`left:${lefts[i]}px;`; if(i===frozenN-1)s+='box-shadow:2px 0 0 var(--line2);'; } return s; };
   const cls=(i,extra)=>`class="${i<frozenN?'gfz ':''}${extra||''}"`;
   // 헤더 ▾ 메뉴(필터·정렬·숨기기) — '#' 은 메뉴 없음
-  const thead=`<tr>${vcols.map((h,i)=>{
+  const thead=`<tr>${vcols.map((c,i)=>{ const h=c.key;
     const hasF=STATE.gFilters[h]&&STATE.gFilters[h].size;
     const sorted=STATE.gSort&&STATE.gSort.col===h;
-    const caret=h==='#'?'':`<span class="gcaret${(hasF||sorted)?' active':''}" title="필터·정렬·숨기기" onclick="openGColMenu(event,'${esc(h)}')">▾</span>`;
+    const caret=c.kind==='seq'?'':`<span class="gcaret${(hasF||sorted)?' active':''}" title="필터·정렬·숨기기" onclick="openGColMenu(event,'${esc(h)}')">▾</span>`;
     const sel=(STATE.gSelCols&&STATE.gSelCols.includes(h))?'gsel':'';
     return `<th ${cls(i,sel)} data-col="${esc(h)}" style="${cstyle(i)}"><div class="th-in"><span class="lbl">${esc(h)}</span>${hasF?'<span class="fdot" title="필터 적용됨"></span>':''}${caret}</div></th>`;
   }).join('')}</tr>`;
@@ -846,12 +862,12 @@ function buildGrid(wd){
       ? `<td ${cls(styleI,'gcell'+(disp?'':' gempty')+(extraCls||''))} style="${cstyle(styleI)}"><span class="ecell${edited?' edited':''}" data-val="${esc(editv!=null?editv:disp)}" data-id="${esc(r.id)}" data-field="${esc(field)}" onclick="beginEditCell(this)">${esc(disp||'—')}</span>${edited?` <span class="revb" title="되돌리기" data-id="${esc(r.id)}" data-field="${esc(field)}" onclick="revertCell(event,this)">↩</span>`:''}</td>`
       : `<td ${cls(styleI,'gcell'+(disp?'':' gempty')+(extraCls||''))} style="${cstyle(styleI)}">${esc(disp||'')}</td>`;
     let tds='';
-    vcols.forEach((h,i)=>{
-      if(h==='#'){ tds+=`<td ${cls(i,'gnum')} style="${cstyle(i)}">${esc(r.seq)}</td>`; }
-      else if(h==='참여자'){ tds+= canE
+    vcols.forEach((c,i)=>{ const h=c.key;
+      if(c.kind==='seq'){ tds+=`<td ${cls(i,'gnum')} style="${cstyle(i)}">${esc(r.seq)}</td>`; }
+      else if(c.kind==='name'){ tds+= canE
         ? `<td ${cls(i,'gnm')} style="${cstyle(i)}"><span class="ecell${(r.editedFields||[]).includes('reviewer_name')?' edited':''}" data-val="${esc(r.name||'')}" data-id="${esc(r.id)}" data-field="reviewer_name" onclick="beginEditCell(this)">${esc(r.name||'—')}</span>${badge}<span class="rmx" title="명단에서 제거(숨김)" onclick="hideRow('${esc(r.id)}')">×</span></td>`
         : `<td ${cls(i,'gnm')} style="${cstyle(i)}">${esc(r.name||'—')}${badge}</td>`; }
-      else if(h==='연락처'){ tds+=eCell('phone8', r.phone8||'', (r.editedFields||[]).includes('phone8'), 'gph', i); }
+      else if(c.kind==='phone'){ tds+=eCell('phone8', _fmtPhone(r.phone8), (r.editedFields||[]).includes('phone8'), ' gph', i, r.phone8||''); }
       else { const jIdx=H.indexOf(h); const ed=(h in ceMap); const raw= ed?ceMap[h]:rj[h];
         const disp= ed?(raw==null?'':String(raw)):_gridVal(h, raw);
         const editv= ed?disp:_gridEditVal(h, raw);
