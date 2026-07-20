@@ -172,7 +172,7 @@ function $(id){ return document.getElementById(id); }
 function toast(msg){ const t=$('toast'); t.textContent=msg; t.style.display='block';
   clearTimeout(t._h); t._h=setTimeout(()=>t.style.display='none', 3200); }
 function show(view){ ['vLoading','vPre','vMissing','vJoined','vExpired','vDone'].forEach(v=>$(v).style.display = v===view?'':'none'); }
-function showPre(){ show('vPre'); }
+function showPre(){ if(_camp) renderPre(); else show('vPre'); } // renderPre가 참여 버튼 상태도 복원(N4)
 
 /* ═══ 세션 (index.html·search-app.js와 동일 키·포맷) ═══ */
 function getSession(){
@@ -219,6 +219,7 @@ function clearHold(){ localStorage.removeItem(HOLD_KEY); }
 function renderPre(){
   const c = _camp;
   $('hdTitle').textContent = c.title || '캠페인';
+  CampCards.startTicker(loadCampaign);   // 카드 CSS 주입 + preopen 카운트다운 틱(S2)
   $('preCard').innerHTML = CampCards.cardHtml({ ...c });
   // 상세 페이지 안의 카드는 클릭(자기 자신 이동) 비활성
   const pc = $('preCard').querySelector('.pcard');
@@ -241,7 +242,7 @@ function renderPre(){
   $('preFootNote').textContent = st==='daily_done' && c.opensAt ? ('내일 ' + CampCards._fmtHM(c.opensAt) + ' 다시 오픈돼요') : '';
   show('vPre');
 }
-function holdTtlText(){ return '15분'; } // 안내용 기본 문구(정확한 마감시각은 참여 응답의 expiresAt으로 표시)
+function holdTtlText(){ return ((_camp && Number(_camp.hold_ttl_min)) || 15) + '분'; } // 공개 화이트리스트의 hold_ttl_min 사용
 
 /* ═══ 참여하기 ═══ */
 async function onJoin(){
@@ -276,6 +277,7 @@ async function onJoin(){
 }
 
 function renderMissing(missing){
+  $('missTtl').textContent = holdTtlText();
   const all = ['사용자명','전화번호','주소','계좌'];
   $('missList').innerHTML = all.map(k =>
     missing.includes(k)
@@ -286,6 +288,7 @@ function renderMissing(missing){
 }
 
 /* ═══ 참여 후 화면 ═══ */
+let _detailRetry = 0;
 async function enterJoined(){
   const h = getHold();
   if(!h) return renderPre();
@@ -295,8 +298,19 @@ async function enterJoined(){
     const j = await r.json().catch(()=>({}));
     if(!r.ok || !j.ok){
       if(j.reason === 'expired'){ show('vExpired'); return; }
-      clearHold(); renderPre(); return;
+      if(j.reason === 'no_hold'){ clearHold(); renderPre(); return; } // 확정 무효일 때만 토큰 파기
+      // 일시 장애(429/5xx/배포 중 응답 파싱 실패): holdToken 보존 + 자동 재시도
+      //   — 당일 재신청 0회 정책이라 토큰을 잃으면 참여권이 소각되므로 절대 여기서 지우지 않는다.
+      _detailRetry++;
+      if(_detailRetry <= 6){
+        if(_detailRetry >= 3) toast('서버 연결이 원활하지 않아요 — 자동으로 다시 시도합니다');
+        setTimeout(enterJoined, _detailRetry <= 2 ? 3000 : 8000);
+      } else {
+        toast('연결에 실패했어요. 잠시 후 새로고침해주세요 (참여는 유지돼요)');
+      }
+      return;
     }
+    _detailRetry = 0;
     _detail = j;
     if(j.application && j.application.status === 'submitted'){ renderDone(); return; }
     // 작업내용 렌더
@@ -354,9 +368,14 @@ async function pollOnce(){
 }
 document.addEventListener('visibilitychange', ()=>{ if(!document.hidden) pollOnce(); });
 
-function renderDone(){
+function renderDone(pendingConfirm){
   clearInterval(_pollTimer); clearInterval(_holdTick);
   $('doneChatBtn').style.display = (_detail && _detail.chatUrl) ? '' : 'none';
+  if(pendingConfirm){
+    $('vDone').querySelector('.e').textContent = '📨';
+    $('vDone').querySelector('h2').textContent = '구매양식이 접수됐어요';
+    $('vDone').querySelector('p').innerHTML = '제출이 늦게 도착해 <b>운영자 확인 후</b> 참여가 확정돼요.<br/>주문 내용은 안전하게 저장돼 있으니 다시 제출하지 마세요.';
+  }
   show('vDone');
 }
 
@@ -364,14 +383,21 @@ function renderDone(){
 window.addEventListener('message', (ev)=>{
   if(ev.origin !== location.origin) return;
   const d = ev.data || {};
-  if(d.type === 'order-submitted'){ renderDone(); }
+  if(d.type === 'order-submitted'){
+    // ★ 홀드 확정 결과 분기(S1): confirmed 외(late/tab_mismatch/error 등)는 자동 확정이 아님 —
+    //   주문은 안전히 접수됐고 운영자 수동확정 대상임을 안내(거짓 "참여 확정!" 금지)
+    renderDone(d.campaignHold && d.campaignHold !== 'confirmed');
+  }
   else if(d.type === 'embed-height' && d.height){ $('orderFrame').style.height = Math.min(Math.max(d.height, 400), 4000) + 'px'; }
   else if(d.type === 'embed-need-login'){ needLogin(()=>{ const f=$('orderFrame'); f.src = f.src; }); }
 });
 
 function openLanding(){ if(_detail && _detail.landingUrl) window.open(_detail.landingUrl, '_blank', 'noopener'); }
 function openChat(){ if(_detail && _detail.chatUrl) window.open(_detail.chatUrl, '_blank', 'noopener'); }
-function openFormWindow(){ const f=$('orderFrame'); if(f.src) window.open(f.src.replace('embed=1','embed=0'), '_blank'); }
+// ★ 새 창에서도 embed=1 유지 — 최상위 창에선 postMessage가 no-op일 뿐,
+//   홀드 확정 문맥(campaignHold)은 제출 body에 그대로 실린다(문맥 유실 금지).
+//   새 창 제출의 확정 감지는 이 페이지의 10초 폴링 + 복귀(visibilitychange) 재조회가 담당.
+function openFormWindow(){ const f=$('orderFrame'); if(f.src) window.open(f.src, '_blank'); }
 
 /* 참여 취소 */
 async function onCancel(){
@@ -398,11 +424,18 @@ async function loadCampaign(){
   if(!_camp.participation_mode){ location.replace('/'); return; }
   renderPre();
 }
+/** KST 날짜 문자열(YYYY-MM-DD) */
+function kstDateStr(ms){ return new Date(ms + 9*3600*1000).toISOString().slice(0,10); }
+
 (async function init(){
   if(!CAMP_ID){ location.replace('/'); return; }
   try{
     await loadCampaign();
-    const h = getHold();
+    let h = getHold();
+    // ★ 어제(KST 이전 일자) 홀드는 폐기 — 서버는 익일 재참여를 허용하므로 만료 화면에 영구 잠금되지 않게
+    if(h && h.expiresAt && kstDateStr(Date.parse(h.expiresAt)) < kstDateStr(CampCards.serverNow())){
+      clearHold(); h = null;
+    }
     if(h) await enterJoined();      // 재방문: 홀드 있으면 참여 후 화면 복원(만료면 만료 화면)
     // 참여 전 화면 카운터 갱신(15초)
     setInterval(async ()=>{ if($('vPre').style.display !== 'none'){ try{ await loadCampaign(); }catch(_){}} }, 15000);

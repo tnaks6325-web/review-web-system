@@ -165,7 +165,12 @@
         if (remain <= 0 && !e._campZeroFired) { e._campZeroFired = true; hitZero = true; }
       });
       if (hitZero && typeof _onNeedRefresh === 'function') {
-        try { _onNeedRefresh(); } catch (_) { /* noop */ }
+        // 서버 목록 5초 캐시 동안 preopen이 유지되면 재렌더→플래그 소실→재조회가 반복될 수 있어 5초 스로틀(N1)
+        const nowMs = Date.now();
+        if (!_ensureTicker._lastZeroRefresh || nowMs - _ensureTicker._lastZeroRefresh > 5000) {
+          _ensureTicker._lastZeroRefresh = nowMs;
+          try { _onNeedRefresh(); } catch (_) { /* noop */ }
+        }
       }
     }, 1000);
   }

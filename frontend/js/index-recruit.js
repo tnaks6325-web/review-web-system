@@ -258,6 +258,7 @@ function onLinkedCampaignChange(camSel) {
 
 /* 탭 선택 시 → 연결 정보 표시 */
 function onLinkedTabChange(sel) {
+  if (typeof renderPartCheck === "function") renderPartCheck(); // 참여형 자동점검 즉시 갱신(N6)
   const info = document.getElementById("rf_linked_tab_info");
   const txt  = document.getElementById("rf_linked_tab_text");
   if (sel.value) {
@@ -355,6 +356,7 @@ async function openRecruitModal(id, prefill, woOrderId) {
   _recruitEditId = id || null;
   _woPrefillOrderId = (!id && woOrderId) ? woOrderId : null;
   _recruitBadges = [];
+  window._recruitEditLoadFailed = false;
 
   const modal    = document.getElementById("recruitModal");
   const titleEl  = document.getElementById("recruitModalTitle");
@@ -447,14 +449,18 @@ async function openRecruitModal(id, prefill, woOrderId) {
         setV("rf_hold_ttl", c.hold_ttl_min ?? 15);
         setV("rf_close_buffer", c.close_buffer_min ?? 10);
         const wd = (typeof c.work_detail === "string") ? (() => { try { return JSON.parse(c.work_detail); } catch (_) { return {}; } })() : (c.work_detail || {});
+        // 저장 시 escape+<br> 변환의 역변환(S3): <br>→개행, 엔티티 복원 → textarea에 평문으로
+        const _fromHtml = s => String(s || "").replace(/<br\s*\/?>/gi, "\n").replace(/&lt;/g, "<").replace(/&gt;/g, ">").replace(/&amp;/g, "&");
         setV("rf_wd_product", wd.productLines || "");
-        setV("rf_wd_inflow", wd.inflowGuideHtml || "");
+        setV("rf_wd_inflow", _fromHtml(wd.inflowGuideHtml));
         setV("rf_wd_review", wd.reviewGuide || "");
         setV("rf_wd_notes", wd.specialNotes || "");
         setV("rf_thumbnail", c.thumbnail_url || "");
         renderPartCheck();
       }
     } catch(e) {
+      // ★ B1: 로드 실패 상태에서 저장하면 참여형 필드가 미복원 기본값으로 덮일 수 있음 → 저장 시 참여형 필드 미전송 플래그
+      window._recruitEditLoadFailed = true;
       showToast("공고 데이터 로드 실패: " + e.message, "error");
     }
   } else {
@@ -619,29 +625,37 @@ async function saveRecruitPost() {
     sort_order:     Number(document.getElementById("rf_sort_order").value) || 0
   };
 
-  /* ⚡ 참여형(M2): 설정·작업내용 스냅샷 포함 + 게시 전 자동 점검(서버 게이트와 동일 3항목) */
-  const isPart = !!document.getElementById("rf_participation")?.checked;
-  payload.participation_mode = isPart;
-  if (isPart) {
-    if (payload.status === "active") {
-      const errs = participationCheckErrors();
-      if (errs.length) { showToast("참여형 게시 불가: " + errs[0], "error"); renderPartCheck(); return; }
+  /* ⚡ 참여형(M2): 설정·작업내용 스냅샷 포함 + 게시 전 자동 점검(서버 게이트와 동일 3항목)
+     ★ B1 가드: rf_participation 요소가 "존재하는 화면"에서만 전송 —
+       참여형 UI가 없는 페이지(admin-siand.html 등)나 편집 로드 실패 시엔 미전송(undefined)
+       → 서버 COALESCE가 기존값 유지 = 참여형 공고의 레거시 강등 사고 차단. */
+  const partEl = document.getElementById("rf_participation");
+  if (partEl && !(window._recruitEditLoadFailed && _recruitEditId)) {
+    const isPart = !!partEl.checked;
+    payload.participation_mode = isPart;
+    if (isPart) {
+      if (payload.status === "active") {
+        const errs = participationCheckErrors();
+        if (errs.length) { showToast("참여형 게시 불가: " + errs[0], "error"); renderPartCheck(); return; }
+      }
+      payload.window_start   = document.getElementById("rf_window_start").value || null;
+      payload.window_end     = document.getElementById("rf_window_end").value || null;
+      payload.daily_limit    = Number(document.getElementById("rf_daily_limit").value) || 0;
+      payload.recruit_total  = Number(document.getElementById("rf_recruit_total").value) || 0;
+      payload.hold_ttl_min   = Number(document.getElementById("rf_hold_ttl").value) || 15;
+      const _cbRaw = document.getElementById("rf_close_buffer").value;
+      payload.close_buffer_min = _cbRaw === "" ? 10 : Math.max(0, parseInt(_cbRaw, 10) || 0);
+      payload.landing_url    = document.getElementById("rf_landing_url").value.trim();
+      payload.thumbnail_url  = document.getElementById("rf_thumbnail")?.value || "";
+      // 평문 입력 → HTML 저장: escape 후 개행만 <br> (S3 — sanitize가 '<옵션>' 같은 텍스트를 태그로 오인해 삭제하는 것 방지)
+      const _escT = s => s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+      payload.work_detail = {
+        productLines:    document.getElementById("rf_wd_product").value.trim(),
+        inflowGuideHtml: _escT(document.getElementById("rf_wd_inflow").value.trim()).replace(/\n/g, "<br>"),
+        reviewGuide:     document.getElementById("rf_wd_review").value.trim(),
+        specialNotes:    document.getElementById("rf_wd_notes").value.trim(),
+      };
     }
-    payload.window_start   = document.getElementById("rf_window_start").value || null;
-    payload.window_end     = document.getElementById("rf_window_end").value || null;
-    payload.daily_limit    = Number(document.getElementById("rf_daily_limit").value) || 0;
-    payload.recruit_total  = Number(document.getElementById("rf_recruit_total").value) || 0;
-    payload.hold_ttl_min   = Number(document.getElementById("rf_hold_ttl").value) || 15;
-    payload.close_buffer_min = Number(document.getElementById("rf_close_buffer").value);
-    if (!Number.isFinite(payload.close_buffer_min)) payload.close_buffer_min = 10;
-    payload.landing_url    = document.getElementById("rf_landing_url").value.trim();
-    payload.thumbnail_url  = document.getElementById("rf_thumbnail")?.value || "";
-    payload.work_detail = {
-      productLines:    document.getElementById("rf_wd_product").value.trim(),
-      inflowGuideHtml: document.getElementById("rf_wd_inflow").value.trim().replace(/\n/g, "<br>"),
-      reviewGuide:     document.getElementById("rf_wd_review").value.trim(),
-      specialNotes:    document.getElementById("rf_wd_notes").value.trim(),
-    };
   }
 
   const btn = document.getElementById("recruitSaveBtn");

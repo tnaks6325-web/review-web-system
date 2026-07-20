@@ -53,6 +53,7 @@ function _embedSaveForm() {
     const scr = document.getElementById("screenOrderForm");
     if (!scr) return;
     const vals = [...scr.querySelectorAll("input, select, textarea")]
+      .filter(el => el.type !== "file") // file input은 저장·복원 불가(복원 시 InvalidStateError) — 양쪽에서 동일하게 제외해 인덱스 정렬 유지
       .map(el => (el.type === "checkbox" || el.type === "radio") ? (el.checked ? "1" : "") : (el.value || ""));
     sessionStorage.setItem(_EMBED_FORM_KEY, JSON.stringify(vals));
   } catch (_) { /* noop */ }
@@ -65,11 +66,13 @@ function _embedRestoreForm() {
     const vals = JSON.parse(raw);
     const scr = document.getElementById("screenOrderForm");
     if (!scr || !Array.isArray(vals)) return;
-    const els = [...scr.querySelectorAll("input, select, textarea")];
+    const els = [...scr.querySelectorAll("input, select, textarea")].filter(el => el.type !== "file");
     els.forEach((el, i) => {
-      if (i >= vals.length || vals[i] === "" || el.value) return; // 이미 값 있으면 미덮어씀
-      if (el.type === "checkbox" || el.type === "radio") { if (vals[i] === "1") el.checked = true; }
-      else el.value = vals[i];
+      try {
+        if (i >= vals.length || vals[i] === "" || el.value) return; // 이미 값 있으면 미덮어씀
+        if (el.type === "checkbox" || el.type === "radio") { if (vals[i] === "1") el.checked = true; }
+        else el.value = vals[i];
+      } catch (_) { /* 개별 요소 실패가 나머지 복원을 막지 않게 */ }
     });
   } catch (_) { /* noop */ }
 }
@@ -7529,6 +7532,8 @@ async function submitOrderForm() {
       successCount++;
       // ★ DB-first: 이 시점에 주문은 서버 DB에 확정 저장됨. 시트 반영 상태를 수집(완료화면 안내용).
       mirrorStatuses.push(String(res.mirrorStatus || (res.queued ? "queued" : "")));
+      // ★ 임베드(M2): 홀드 확정 결과 수집 — 'confirmed' 외(late/tab_mismatch/error 등)면 부모가 "운영자 확인 중" 안내
+      if (_EMBED_CTX && res.campaignHold !== undefined) window._embedLastCampaignHold = res.campaignHold;
 
       // ★ 이미지 업로드는 완전 비동기 (사용자 대기 없음)
       if (o.imgThumbSrc && o.imgThumbSrc.startsWith("data:")) {
@@ -7655,10 +7660,10 @@ async function submitOrderForm() {
   }
   if (doneEl) doneEl.style.display = "";
 
-  // ★ 임베드(M2): 부모(campaign.html)에 제출완료 통지 → 확정 화면 전환. 저장해둔 입력값 정리.
+  // ★ 임베드(M2): 부모(campaign.html)에 제출완료 통지 → 확정/운영자확인중 화면 전환. 저장해둔 입력값 정리.
   if (_EMBED_CTX) {
     try { sessionStorage.removeItem(_EMBED_FORM_KEY); } catch (_) { /* noop */ }
-    _embedPost({ type: "order-submitted", successCount });
+    _embedPost({ type: "order-submitted", successCount, campaignHold: window._embedLastCampaignHold ?? null });
   }
 }
 

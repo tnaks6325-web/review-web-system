@@ -44,6 +44,7 @@ const PUBLIC_FIELDS_PARTICIPATION = [
   'id', 'title', 'channel', 'channel_custom', 'manager', 'time_range',
   'delivery_type', 'review_fee', 'badges', 'status', 'sort_order',
   'thumbnail_url', 'created_at',
+  'hold_ttl_min', 'close_buffer_min', // 민감정보 아님 — 프론트 안내문("N분 안에 제출")의 정확성용
 ];
 
 function _pick(row, fields) {
