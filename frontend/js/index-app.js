@@ -1398,8 +1398,13 @@ const WO_COLORS = {
 };
 let _woCache = [];   // 인박스 목록 캐시 (카드 버튼 핸들러에서 조회)
 let _woBadgeTimer = null;     // 신규 오더 배지/알림 폴러
-let _woLastNewCount = null;   // 직전 신규(제출됨) 오더 수
-const _WO_BADGE_POLL_MS = 2 * 60 * 1000; // 2분
+const _WO_BADGE_POLL_MS = 2 * 60 * 1000; // 2분 (SSE 실시간의 폴백)
+const _WO_SEEN_KEY = "wo_notif_seen_v1"; // localStorage {오더id: 확인시각ms} — 미확인 알림은 재접속에도 유지
+const _WO_SEEN_MAX = 500;                // 안전장치 상한 (평시엔 생존 교집합 프루닝이 우선)
+const _WO_STACK_MAX = 5;                 // 우측하단 알림 카드 상한 (초과분은 "외 N건" 요약 카드)
+let _woNotifOsSent = new Set();          // 세션 내 OS 알림 발신 완료 오더 id (재발신 방지)
+let _woNotifLive = [];                   // 최근 조회한 제출됨(submitted) 오더 목록
+let _woCheckInFlight = false;            // _woCheckNewOrders 중복 실행 가드
 const WO_TRANSITIONS = {
   submitted:      ['reviewing', 'rejected', 'revision'],
   reviewing:      ['await_chatroom', 'rejected', 'revision'],
@@ -2153,75 +2158,311 @@ async function woViewCampaign(campId) {
   try { await openRecruitModal(campId); } catch(e) { showToast("모달 열기 실패: " + e.message, "error"); }
 }
 
-// ── 신규 작업 오더 알림 (탭 배지 + 증가 시 토스트/푸시) ──
-async function _refreshWorkOrderBadge(notify) {
+// ── 작업오더 탭 배지 (배지 전용 — 신규 도착 알림은 _woCheckNewOrders 가 담당) ──
+async function _refreshWorkOrderBadge() {
   if (!isAdminLoggedIn()) return;
   try {
     const r = await gasGet({ action: "orderNewCount" });
     if (!r || r.error || typeof r.count !== "number") return;
     const badge = document.getElementById("workOrderBadge");
     if (badge) { badge.textContent = r.count; badge.style.display = r.count > 0 ? "" : "none"; }
-    if (notify && _woLastNewCount !== null && r.count > _woLastNewCount) {
-      const inc = r.count - _woLastNewCount;
-      if (typeof _sendPushNotif === "function") _sendPushNotif("새 작업 오더", `신규 작업 오더 ${inc}건이 인박스에 도착했습니다.`, "wo-new");
-      _showNewOrderPopup(inc);   // ★ 신규요청 팝업
-    }
-    _woLastNewCount = r.count;
   } catch(_) {}
 }
 
-// 신규 작업 오더 도착 팝업 (최신 제출됨 오더 미리보기 + 바로가기)
-async function _showNewOrderPopup(count) {
-  let items = [];
+/* ══════════════════════════════════════════════════════════════
+   ★ 신규 작업오더 알림 — 우측하단 미확인 카드 + OS 알림 + 상세 팝업
+   · 도착 채널: SSE 'work_order_new'(실시간) + 2분 폴링(폴백) → _woCheckNewOrders 단일 진입점
+   · 카드는 자동으로 사라지지 않음(클릭해야만 닫힘). 확인 여부는 localStorage(_WO_SEEN_KEY)에
+     기록되어 새로고침·재접속에도 미확인 카드가 다시 표시된다.
+   · 스택/상세 모달은 JS 동적 생성 — admin.html·admin-siand.html 두 관리자 페이지 공용.
+   · 한계: SSE 단절 중 revision→submitted 재제출은 폴링만으로 구별 불가(이미 확인한 id면 조용).
+     updated_at 비교는 메모 전송 등에도 갱신되어 오탐이라 쓰지 않는다.
+   ══════════════════════════════════════════════════════════════ */
+
+// ── 확인(seen) 기록: localStorage {오더id: 확인시각ms} ──
+function _woSeenLoad() {
+  try {
+    const m = JSON.parse(localStorage.getItem(_WO_SEEN_KEY) || "{}");
+    return (m && typeof m === "object" && !Array.isArray(m)) ? m : {};
+  } catch (_) { return {}; }
+}
+function _woSeenSave(map) {
+  try { localStorage.setItem(_WO_SEEN_KEY, JSON.stringify(map)); } catch (_) {}
+}
+function _woSeenAdd(id) {
+  if (!id) return;
+  const m = _woSeenLoad(); m[id] = Date.now(); _woSeenSave(m);
+}
+function _woSeenRemove(id) {
+  const m = _woSeenLoad();
+  if (Object.prototype.hasOwnProperty.call(m, id)) { delete m[id]; _woSeenSave(m); }
+}
+// 프루닝: 현재 submitted 목록에 없는 id 제거(카드는 submitted에서만 생성되므로 안전).
+// → seen 크기가 현재 제출됨 수로 자연 수렴해 "확인했던 카드 재등장" 결함이 구조적으로 없음.
+//   상한(_WO_SEEN_MAX)은 백스톱(오래된 확인시각부터 제거).
+function _woSeenPrune(liveIds) {
+  const m = _woSeenLoad();
+  const live = new Set(liveIds || []);
+  let changed = false;
+  for (const id of Object.keys(m)) {
+    if (!live.has(id)) { delete m[id]; changed = true; }
+  }
+  const keys = Object.keys(m);
+  if (keys.length > _WO_SEEN_MAX) {
+    keys.sort((a, b) => (m[a] || 0) - (m[b] || 0));
+    for (const id of keys.slice(0, keys.length - _WO_SEEN_MAX)) { delete m[id]; changed = true; }
+  }
+  if (changed) _woSeenSave(m);
+}
+
+// ── 우측하단 알림 스택 (동적 생성 — HTML/CSS 파일 무수정) ──
+function _woEnsureNotifStack() {
+  let stack = document.getElementById("woNotifStack");
+  if (stack) return stack;
+  if (!document.getElementById("woNotifKeyframes")) {
+    const st = document.createElement("style");
+    st.id = "woNotifKeyframes";
+    st.textContent = "@keyframes woNotifIn{from{transform:translateX(24px);opacity:0}to{transform:translateX(0);opacity:1}}";
+    document.head.appendChild(st);
+  }
+  stack = document.createElement("div");
+  stack.id = "woNotifStack";
+  // z-index 9000: 토스트(8000) 위, 로딩(9999)·안내모달(99999+) 아래
+  stack.style.cssText = "position:fixed;right:16px;bottom:16px;z-index:9000;display:flex;flex-direction:column-reverse;gap:10px;width:min(340px,calc(100vw - 32px));pointer-events:none";
+  document.body.appendChild(stack);
+  return stack;
+}
+function _woNotifCardEl(id) {
+  const stack = document.getElementById("woNotifStack");
+  return stack ? stack.querySelector('[data-wo-id="' + id + '"]') : null;
+}
+
+// 알림 카드 1장 — 자동 소멸 타이머 없음(클릭해야만 닫힘)
+function _woRenderNotifCard(o) {
+  const stack = _woEnsureNotifStack();
+  if (_woNotifCardEl(o.id)) return;
+  const date = String(o.created_at || "").replace("T", " ").substring(0, 16);
+  const sub = [
+    o.created_by ? '<i class="fas fa-user"></i> ' + escHtml(o.created_by) : "",
+    o.recruit_count ? "모집 " + escHtml(String(o.recruit_count)) + "명" : "",
+    date ? escHtml(date) : "",
+  ].filter(Boolean).join(" · ");
+  const card = document.createElement("div");
+  card.setAttribute("data-wo-id", o.id);
+  card.style.cssText = "pointer-events:auto;background:#fff;border:1px solid #E5E7EB;border-left:4px solid #3182f6;border-radius:12px;box-shadow:0 8px 24px rgba(15,23,42,.18);padding:12px 14px;cursor:pointer;animation:woNotifIn .22s ease";
+  card.innerHTML =
+    '<div style="display:flex;align-items:flex-start;gap:8px">' +
+      '<span style="flex:none;font-size:1.05rem">📥</span>' +
+      '<div style="flex:1;min-width:0">' +
+        '<span style="font-size:.68rem;font-weight:800;color:#1b64da;background:#e8f1fe;border-radius:6px;padding:1px 7px">작업오더 접수</span>' +
+        '<div style="margin-top:4px;font-size:.85rem;font-weight:700;color:#111827;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">' + escHtml(o.title || "(제목없음)") + "</div>" +
+        (sub ? '<div style="margin-top:2px;font-size:.72rem;color:#6B7280">' + sub + "</div>" : "") +
+        '<div style="margin-top:5px;font-size:.7rem;color:#9CA3AF">클릭하면 상세 내용이 열립니다</div>' +
+      "</div>" +
+      '<button title="닫기(확인)" style="flex:none;border:none;background:none;color:#9CA3AF;font-size:1.05rem;cursor:pointer;padding:0 2px;line-height:1">&times;</button>' +
+    "</div>";
+  card.addEventListener("click", () => _woNotifCardClick(o.id));
+  const xBtn = card.querySelector("button");
+  if (xBtn) xBtn.addEventListener("click", (e) => { e.stopPropagation(); _woNotifCardDismiss(o.id); });
+  stack.appendChild(card);
+}
+
+// "외 N건 미확인" 요약 카드 (스택 상한 초과분) — 스택 최하단 고정
+function _woSyncSummaryCard(overflowCount) {
+  let card = document.getElementById("woNotifMoreCard");
+  if (!overflowCount || overflowCount <= 0) { if (card) card.remove(); return; }
+  const stack = _woEnsureNotifStack();
+  if (!card) {
+    card = document.createElement("div");
+    card.id = "woNotifMoreCard";
+    card.style.cssText = "pointer-events:auto;background:#1f2937;color:#fff;border-radius:12px;box-shadow:0 8px 24px rgba(15,23,42,.25);padding:10px 14px;cursor:pointer;display:flex;align-items:center;gap:8px;animation:woNotifIn .22s ease";
+    card.addEventListener("click", _woNotifSummaryClick);
+    stack.insertBefore(card, stack.firstChild);   // column-reverse → 시각적 맨 아래
+  }
+  card.innerHTML = '<i class="fas fa-layer-group"></i><span style="font-size:.8rem;font-weight:700">미확인 작업오더 외 ' + Number(overflowCount) + '건</span><span style="margin-left:auto;font-size:.7rem;color:#D1D5DB">전체 보기</span>';
+}
+
+// 카드 본문 클릭 = 확인 + 상세 팝업
+function _woNotifCardClick(id) {
+  _woSeenAdd(id);
+  const el = _woNotifCardEl(id);
+  if (el) el.remove();
+  openWoDetailModal(id);
+}
+// × 클릭 = 확인만 (팝업 없이 닫기)
+function _woNotifCardDismiss(id) {
+  _woSeenAdd(id);
+  const el = _woNotifCardEl(id);
+  if (el) el.remove();
+}
+// 요약 카드 클릭 = 인박스 전체 확인 간주 → 전부 seen + 스택 클리어 + 탭 이동
+function _woNotifSummaryClick() {
+  (_woNotifLive || []).forEach(o => _woSeenAdd(o.id));
+  const stack = document.getElementById("woNotifStack");
+  if (stack) stack.innerHTML = "";
+  switchAdminTab("work-orders");
+}
+
+// ── OS(브라우저) 알림 — requireInteraction:true = 사용자가 클릭/닫기 전까지 유지 ──
+function _woSendDesktopNotif(o) {
+  if (!("Notification" in window) || Notification.permission !== "granted") return;
+  try {
+    const n = new Notification("새 작업오더 접수", {
+      body: (o.title || "(제목없음)") + (o.created_by ? " — " + o.created_by : ""),
+      icon: "https://cdn.jsdelivr.net/npm/@fortawesome/fontawesome-free@6.4.0/svgs/solid/clipboard-list.svg",
+      tag: "wo_" + o.id,          // 같은 오더 재발신 시 OS가 교체(중복 방지)
+      requireInteraction: true,   // 클릭 전까지 화면에 유지
+      silent: false,
+    });
+    n.onclick = () => {
+      try { window.focus(); } catch (_) {}
+      _woNotifCardClick(o.id);
+      try { n.close(); } catch (_) {}
+    };
+  } catch (_) { /* Notification 생성자 미지원(모바일 등) — 우측하단 카드가 1차 채널 */ }
+}
+// 4건 이상 동시 도착/복원 시 요약 1건 (재접속 알림 폭탄 방지)
+function _woSendDesktopNotifBatch(count) {
+  if (!("Notification" in window) || Notification.permission !== "granted") return;
+  try {
+    const n = new Notification("미확인 작업오더 " + count + "건", {
+      body: "클릭하면 작업오더 인박스가 열립니다.",
+      icon: "https://cdn.jsdelivr.net/npm/@fortawesome/fontawesome-free@6.4.0/svgs/solid/clipboard-list.svg",
+      tag: "wo_batch",
+      requireInteraction: true,
+      silent: false,
+    });
+    n.onclick = () => {
+      try { window.focus(); } catch (_) {}
+      _woNotifSummaryClick();
+      try { n.close(); } catch (_) {}
+    };
+  } catch (_) {}
+}
+
+// ── 단일 진입점: 로그인 시드 / 2분 폴링 / SSE 수신 모두 여기로 수렴 (이중알림 차단) ──
+async function _woCheckNewOrders() {
+  if (!isAdminLoggedIn()) return;
+  if (_woCheckInFlight) return;
+  _woCheckInFlight = true;
   try {
     const r = await gasGet({ action: "orderAdminList", status: "submitted" });
-    if (r && r.ok && Array.isArray(r.data)) items = r.data.slice(0, 5);
-  } catch(_) {}
-  const old = document.getElementById("woNewOrderPopup");
+    if (!r || !r.ok || !Array.isArray(r.data)) return;   // 조회 실패 시 기존 카드 유지
+    const list = r.data;                                  // created_at DESC (최신순)
+    _woNotifLive = list;
+
+    // 배지 = 제출됨 전체 수 (orderNewCount와 동일 정의)
+    const badge = document.getElementById("workOrderBadge");
+    if (badge) { badge.textContent = list.length; badge.style.display = list.length > 0 ? "" : "none"; }
+
+    _woSeenPrune(list.map(o => o.id));
+
+    // reconcile: 표시 대상(미확인 최신 N장) ↔ DOM 카드 동기화
+    // — 타 관리자가 접수/삭제한 오더의 잔존 카드도 여기서 자동 회수된다.
+    const seen = _woSeenLoad();
+    const unseen = list.filter(o => !Object.prototype.hasOwnProperty.call(seen, o.id));
+    const show = unseen.slice(0, _WO_STACK_MAX);
+    const showIds = new Set(show.map(o => o.id));
+    const stack = _woEnsureNotifStack();
+    stack.querySelectorAll("[data-wo-id]").forEach(el => {
+      if (!showIds.has(el.getAttribute("data-wo-id"))) el.remove();
+    });
+    show.forEach(o => _woRenderNotifCard(o));
+    _woSyncSummaryCard(unseen.length - show.length);
+
+    // OS 알림 — 세션 내 미발신분만
+    const toNotify = unseen.filter(o => !_woNotifOsSent.has(o.id));
+    if (toNotify.length > 3) _woSendDesktopNotifBatch(unseen.length);
+    else toNotify.forEach(o => _woSendDesktopNotif(o));
+    toNotify.forEach(o => _woNotifOsSent.add(o.id));
+  } catch (_) {
+  } finally {
+    _woCheckInFlight = false;
+  }
+}
+
+// SSE 'work_order_new' 수신 훅 (index-payment.js connectSSE 에서 호출)
+function _onWorkOrderNewSSE(data) {
+  try {
+    // 보완 재제출 = 확인 기록을 지워 다시 미확인 알림으로
+    if (data && data.id && data.resubmitted) _woSeenRemove(data.id);
+    _woCheckNewOrders();
+  } catch (_) {}
+}
+
+// ── 작업오더 상세 팝업 (알림 카드/OS 알림 클릭 → 내용 전체 표기) ──
+async function openWoDetailModal(id) {
+  let o = (_woCache || []).find(x => x.id === id) || (_dashWoCache || []).find(x => x.id === id);
+  if (!o) {
+    let fetched = null;
+    try {
+      const r = await gasGet({ action: "orderAdminList" });
+      if (r && r.ok && Array.isArray(r.data)) fetched = r.data;   // 로컬 변수만 — _woCache 미오염
+    } catch (_) {
+      showToast("작업오더 조회 실패 — 잠시 후 다시 시도해주세요.", "error");
+      return;
+    }
+    o = (fetched || []).find(x => x.id === id);
+  }
+  if (!o) {
+    woNotice("이미 삭제되었거나 찾을 수 없는 작업오더입니다.");
+    _woNotifCardDismiss(id);   // 잔존 카드 제거 + 확인 처리 (멱등)
+    return;
+  }
+  const st = o.status || "submitted";
+  const stc = WO_COLORS[st] || ["#F3F4F6", "#374151"];
+  const date = String(o.created_at || "").replace("T", " ").substring(0, 16);
+  const old = document.getElementById("woDetailModal");
   if (old) old.remove();
-  const rows = items.map(o => `
-    <div style="padding:9px 11px;border:1px solid #E5E7EB;border-radius:9px;margin-bottom:7px;background:#F9FAFB">
-      <div style="font-size:.86rem;font-weight:700;color:#111827">${escHtml(o.title || "(제목없음)")}</div>
-      <div style="font-size:.72rem;color:#6B7280;margin-top:2px"><i class="fas fa-user"></i> ${escHtml(o.created_by || "-")}
-        ${o.purchase_time ? " · " + escHtml(o.purchase_time) : ""}${o.recruit_count ? " · 모집 " + escHtml(String(o.recruit_count)) + "명" : ""}</div>
-    </div>`).join("");
+  if (!document.getElementById("woPopInKeyframes")) {
+    const kst = document.createElement("style");
+    kst.id = "woPopInKeyframes";
+    kst.textContent = "@keyframes woPopIn{from{transform:scale(.94);opacity:0}to{transform:scale(1);opacity:1}}";
+    document.head.appendChild(kst);
+  }
   const el = document.createElement("div");
-  el.id = "woNewOrderPopup";
+  el.id = "woDetailModal";
   el.style.cssText = "position:fixed;inset:0;z-index:99999;background:rgba(0,0,0,.45);display:flex;align-items:center;justify-content:center;padding:16px";
   el.classList.add("toss-overlay");
-  el.innerHTML = `
-    <div style="background:#fff;border-radius:16px;max-width:460px;width:100%;padding:22px;box-shadow:0 12px 40px rgba(0,0,0,.25);animation:woPopIn .18s ease">
-      <div style="display:flex;align-items:center;gap:8px;margin-bottom:14px">
-        <span style="font-size:1.4rem">📥</span>
-        <span style="font-size:1.05rem;font-weight:800;color:#1b64da">새 작업 오더 ${count}건 도착</span>
-      </div>
-      <div style="max-height:46vh;overflow-y:auto">${rows || '<div style="color:#9CA3AF;font-size:.85rem">미리보기를 불러오지 못했습니다.</div>'}</div>
-      <div style="display:flex;gap:8px;justify-content:flex-end;margin-top:16px">
-        <button onclick="document.getElementById('woNewOrderPopup').remove()"
-          style="padding:9px 16px;border:1.5px solid #D1D5DB;background:#fff;color:#374151;border-radius:9px;font-weight:600;font-size:.85rem;cursor:pointer">닫기</button>
-        <button onclick="document.getElementById('woNewOrderPopup').remove();switchAdminTab('work-orders')"
-          style="padding:9px 16px;border:none;background:#3182f6;color:#fff;border-radius:9px;font-weight:700;font-size:.85rem;cursor:pointer"><i class="fas fa-clipboard-list"></i> 작업오더 보기</button>
-      </div>
-    </div>`;
-  el.addEventListener("click", e => { if (e.target === el) el.remove(); });
-  if (!document.getElementById("woPopInKeyframes")) {
-    const st = document.createElement("style");
-    st.id = "woPopInKeyframes";
-    st.textContent = "@keyframes woPopIn{from{transform:scale(.94);opacity:0}to{transform:scale(1);opacity:1}}";
-    document.head.appendChild(st);
+  el.innerHTML =
+    '<div style="background:#fff;border-radius:16px;max-width:640px;width:100%;max-height:85vh;display:flex;flex-direction:column;box-shadow:0 12px 40px rgba(0,0,0,.25);animation:woPopIn .18s ease">' +
+      '<div style="padding:16px 20px;border-bottom:1px solid #F1F5F9;display:flex;align-items:center;gap:8px;flex-wrap:wrap">' +
+        '<span style="font-size:1.2rem">📥</span>' +
+        '<span style="font-size:.7rem;font-weight:700;padding:2px 9px;border-radius:20px;background:' + stc[0] + ';color:' + stc[1] + '">' + (WO_LABELS[st] || st) + "</span>" +
+        '<b style="font-size:1rem;color:#111827;word-break:break-all">' + escHtml(o.title || "(제목없음)") + "</b>" +
+        '<span style="font-size:.72rem;color:#9CA3AF;margin-left:auto"><i class="fas fa-user"></i> ' + escHtml(o.created_by || "-") + " · " + escHtml(date) + "</span>" +
+      "</div>" +
+      '<div style="padding:14px 20px;overflow-y:auto;flex:1">' + _woDetailHtml(o) + '<div style="margin-top:6px">' + _woMemoLogInner(o) + "</div></div>" +
+      '<div style="padding:12px 20px;border-top:1px solid #F1F5F9;display:flex;gap:8px;justify-content:flex-end">' +
+        '<button onclick="closeWoDetailModal()" style="padding:9px 16px;border:1.5px solid #D1D5DB;background:#fff;color:#374151;border-radius:9px;font-weight:600;font-size:.85rem;cursor:pointer">닫기</button>' +
+        '<button onclick="closeWoDetailModal();switchAdminTab(\'work-orders\')" style="padding:9px 16px;border:none;background:#3182f6;color:#fff;border-radius:9px;font-weight:700;font-size:.85rem;cursor:pointer"><i class="fas fa-clipboard-list"></i> 작업오더 탭에서 처리</button>' +
+      "</div>" +
+    "</div>";
+  el.addEventListener("click", e => { if (e.target === el) closeWoDetailModal(); });
+  if (!window._woDetailEscBound) {
+    window._woDetailEscBound = true;
+    document.addEventListener("keydown", e => { if (e.key === "Escape") closeWoDetailModal(); });
   }
   document.body.appendChild(el);
 }
+function closeWoDetailModal() {
+  const el = document.getElementById("woDetailModal");
+  if (el) el.remove();
+}
 function startWorkOrderBadgePoll() {
   if (_woBadgeTimer) return;
-  // 브라우저 푸시 권한 best-effort 요청 (실패해도 토스트는 동작)
+  // 브라우저(OS) 알림 권한 best-effort 요청 (거부돼도 우측하단 카드는 동작)
   if (typeof _requestNotifPermission === "function") { try { _requestNotifPermission(); } catch(_) {} }
-  _refreshWorkOrderBadge(false);   // 즉시 1회 시드 (알림 없음)
-  _woBadgeTimer = setInterval(() => _refreshWorkOrderBadge(true), _WO_BADGE_POLL_MS);
+  _woCheckNewOrders();   // 즉시 1회 시드 — 미확인 카드 복원(재접속에도 유지)
+  _woBadgeTimer = setInterval(_woCheckNewOrders, _WO_BADGE_POLL_MS);
 }
 function stopWorkOrderBadgePoll() {
   if (_woBadgeTimer) { clearInterval(_woBadgeTimer); _woBadgeTimer = null; }
-  _woLastNewCount = null;
+  // 로그아웃 시 게이트 화면 위 잔존 알림 카드 제거
+  const stack = document.getElementById("woNotifStack");
+  if (stack) stack.innerHTML = "";
+  _woNotifOsSent.clear();
+  _woNotifLive = [];
 }
 
 /* ══════════════════════════════════════════════════════════════

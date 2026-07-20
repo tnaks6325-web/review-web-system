@@ -6,6 +6,7 @@
  *   - review_submit:   리뷰 제출 완료
  *   - order_submit:    구매양식 제출 완료
  *   - order_update:    작업오더 인박스 수정 (인트라넷 동기화)
+ *   - work_order_new:  작업오더 신규 제출/재제출 (관리자向)
  *   - image_extract:   AI 이미지 분석 완료
  *   - image_upload:    이미지 Drive 업로드 완료
  *   - index_build:     인덱스 빌드 완료
@@ -178,6 +179,14 @@ function emitOrderUpdate(data) {
   });
 }
 
+// 작업오더 신규 제출(AE submit / 인트라넷 intake) + 보완 재제출(revision→submitted)
+function emitWorkOrderNew(data) {
+  broadcast('work_order_new', {
+    message: `새 작업오더: ${data.title || ''} — ${data.created_by || ''}${data.resubmitted ? ' (재제출)' : ''}`,
+    ...data,
+  });
+}
+
 // ── 주문 원장(order ledger) — 편집/취소/수동추가/큐 상태변경 단일 이벤트(PR-B) ──
 //   PII 차단: action/orderSubmissionId/mirror_status/field 만. newValue·oldValue·phone·address 절대 미포함.
 //   ('order_update' 이벤트명은 작업오더가 점유 → 'order_ledger' 신규명 사용)
@@ -239,6 +248,7 @@ module.exports = {
   emitReviewSubmit,
   emitOrderSubmit,
   emitOrderUpdate,
+  emitWorkOrderNew,
   emitOrderLedger,
   emitImageExtract,
   emitImageUpload,
