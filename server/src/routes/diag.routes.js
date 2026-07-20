@@ -14,6 +14,7 @@ const { logger } = require('../utils/logger');
 const { logAbnormal } = require('../services/errorLog.service');
 const { parseTabRows, buildOneSheet } = require('../services/indexBuilder.service');
 const { mirrorOneSheet } = require('../services/rawMirror.service');
+const { allowManualRegister, REGISTER_GUIDE_MSG } = require('../utils/tabRegistration');
 
 // ── Auto-migration: review_submissions.slot_key 컬럼 추가 (제출 파일이 어느 캡처 슬롯인지) ──
 // 기존 행은 DEFAULT 'review'로 채워짐. NULL 없음. (migration 034 와 동일)
@@ -291,6 +292,10 @@ router.get('/preview-campaign', authMiddleware, async (req, res, next) => {
 // ═══════════════════════════════════════════════════════════
 router.post('/add-campaign', authMiddleware, async (req, res, next) => {
   try {
+    // ★ 등록 단일경로 게이트: 신규 등록은 작업오더 접수로만 (TAB_REGISTRATION_MODE=manual로 일시 재개 가능)
+    if (!allowManualRegister()) {
+      return res.json({ ok: false, error: REGISTER_GUIDE_MSG, registrationLocked: true });
+    }
     const { sheetId, campaignName, sheetUrl, url } = req.body;
     const finalSheetId = sheetId || extractSheetId(url);
     const finalCampaignName = campaignName || '';
@@ -648,6 +653,10 @@ router.get('/preview-tab', authMiddleware, async (req, res, next) => {
 // ═══════════════════════════════════════════════════════════
 router.post('/add-tab', authMiddleware, async (req, res, next) => {
   try {
+    // ★ 등록 단일경로 게이트: 신규 등록은 작업오더 접수로만 (TAB_REGISTRATION_MODE=manual로 일시 재개 가능)
+    if (!allowManualRegister()) {
+      return res.json({ ok: false, error: REGISTER_GUIDE_MSG, registrationLocked: true });
+    }
     const { url } = req.body;
     if (!url) return res.json({ error: 'url이 필요합니다.' });
 
@@ -1796,13 +1805,19 @@ router.post('/create-campaign-sheet', authMiddleware, async (req, res, next) => 
       logger.info(`[createSheet] 새 시트 생성: ${copied.name} (${copied.id})`);
 
       // campaigns 테이블에 등록
-      await pool.query(
-        `INSERT INTO campaigns (sheet_id, campaign_name, sheet_url)
-         VALUES ($1, $2, $3)
-         ON CONFLICT (sheet_id, campaign_name) DO UPDATE SET
-           sheet_url = EXCLUDED.sheet_url, updated_at = NOW()`,
-        [copied.id, resolvedCampaignName, copied.url]
-      );
+      // ★ 등록 단일경로: order 모드에선 시트 "생성"만 하고 DB 등록은 작업오더 접수 시점에 수행
+      const registrationDeferred = !allowManualRegister();
+      if (!registrationDeferred) {
+        await pool.query(
+          `INSERT INTO campaigns (sheet_id, campaign_name, sheet_url)
+           VALUES ($1, $2, $3)
+           ON CONFLICT (sheet_id, campaign_name) DO UPDATE SET
+             sheet_url = EXCLUDED.sheet_url, updated_at = NOW()`,
+          [copied.id, resolvedCampaignName, copied.url]
+        );
+      } else {
+        logger.info(`[createSheet:new] 등록 게이트 — campaigns 등록 보류(작업오더 접수 시 등록): ${copied.id}`);
+      }
 
       // ★ 서비스 계정에 시트 편집자 권한 자동 부여 (복사된 시트)
       let shareResult = null;
@@ -1826,6 +1841,7 @@ router.post('/create-campaign-sheet', authMiddleware, async (req, res, next) => 
         sheetUrl: copied.url,
         sheetId: copied.id,
         shareResult,
+        registrationDeferred,
       });
     }
 
@@ -1893,14 +1909,20 @@ router.post('/create-campaign-sheet', authMiddleware, async (req, res, next) => 
       const tabUrl = `${sheetUrl}#gid=${copiedTab.sheetId}`;
 
       // tab_configs에 등록
-      await pool.query(
-        `INSERT INTO tab_configs (sheet_id, tab_name, campaign_name, sheet_url)
-         VALUES ($1, $2, $3, $4)
-         ON CONFLICT (sheet_id, tab_name) DO UPDATE SET
-           campaign_name = COALESCE(NULLIF(tab_configs.campaign_name,''), EXCLUDED.campaign_name),
-           updated_at = NOW()`,
-        [existingSheetId, newTabName, resolvedCampaignName, sheetUrl]
-      );
+      // ★ 등록 단일경로: order 모드에선 탭 "생성"만 하고 목록 등록은 작업오더 접수 시점에 수행
+      const registrationDeferred = !allowManualRegister();
+      if (!registrationDeferred) {
+        await pool.query(
+          `INSERT INTO tab_configs (sheet_id, tab_name, campaign_name, sheet_url)
+           VALUES ($1, $2, $3, $4)
+           ON CONFLICT (sheet_id, tab_name) DO UPDATE SET
+             campaign_name = COALESCE(NULLIF(tab_configs.campaign_name,''), EXCLUDED.campaign_name),
+             updated_at = NOW()`,
+          [existingSheetId, newTabName, resolvedCampaignName, sheetUrl]
+        );
+      } else {
+        logger.info(`[createSheet:existing] 등록 게이트 — tab_configs 등록 보류(작업오더 접수 시 등록): ${existingSheetId} / "${newTabName}"`);
+      }
 
       // ★ 서비스 계정에 시트 편집자 권한 자동 부여 (기존 시트)
       let shareResult = null;
@@ -1925,6 +1947,7 @@ router.post('/create-campaign-sheet', authMiddleware, async (req, res, next) => 
         tabUrl,
         sheetId: existingSheetId,
         shareResult,
+        registrationDeferred,
       });
     }
 

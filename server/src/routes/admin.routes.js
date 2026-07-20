@@ -850,8 +850,9 @@ router.post('/db-rebuild', authMiddleware, masterOnlyMiddleware, async (req, res
     logger.info(`[db-rebuild] Step3a 인덱스 스캔 완료: ${scanResult.sheetsScanned}시트, ${scanResult.totalTabs}탭, 오류 ${scanResult.errors}건 (${scanResult.elapsed})`);
 
     // ── Step 3b: 스캔 캐시를 DB에 반영 (campaigns + tab_configs + index_master 재등록) ──
+    // ★ allowNewTabs:true — DB 재구축은 "현 상태 복원"(재해복구)이므로 등록 단일경로 게이트 예외
     broadcast('db_rebuild_progress', { step: '3b', message: '스캔 결과를 DB에 등록 중...' });
-    const syncResult = await syncTabListToDB({ dryRun: false, fromCache: true });
+    const syncResult = await syncTabListToDB({ dryRun: false, fromCache: true, allowNewTabs: true });
     steps.push({ step: '3b', action: 'SYNC_TAB_LIST', ...syncResult });
     logger.info(`[db-rebuild] Step3b DB 동기화: ${syncResult.message}`);
 

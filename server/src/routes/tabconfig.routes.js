@@ -7,6 +7,7 @@ const { getSpreadsheetMeta, readSheet } = require('../services/sheets.service');
 // import는 유지하되 라우트에서 deprecated 응답 반환
 const { syncMasterSheetToDB, scanAndPopulateMaster, applyCachedScanAndSync, hasScanCache, syncSettingsOnly } = require('../services/masterSheet.service');
 const { runIndexScan, applyCachedIndexScan, hasIndexScanCache, syncTabListToDB } = require('../services/indexScan.service');
+const { getTabRegistrationMode } = require('../utils/tabRegistration');
 const { logger } = require('../utils/logger');
 const { throttledCall, throttledMap } = require('../utils/sheetsThrottle');
 
@@ -1379,6 +1380,8 @@ router.get('/dashboard', authMiddleware, async (req, res, next) => {
       campaigns,
       managers,
       lastSync,
+      // 탭 등록 단일경로 정책 모드 — 'order'면 프론트가 수동 등록 UI(작업시트추가)를 숨김
+      tabRegistrationMode: getTabRegistrationMode(),
       tabs: tabsWithRounds,
     });
   } catch (err) {

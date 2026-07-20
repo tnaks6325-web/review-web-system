@@ -12,6 +12,8 @@ const { throttledCall, driveThrottledCall, concurrentMap, getThrottleStatus } = 
 // 기본 폴백 상수 (DB 로드 실패 시 사용)
 const DEFAULT_SUBMITTED_VALUES = ['TRUE', 'true', '1', '제출', 'O', 'o', '완료', 'Y', 'y'];
 const DEFAULT_NAME_KEYWORDS = ['수취인', '이름', '신청자', '참여자', '수취인명', '주문자', '성함', '예금주', '성명'];
+const { allowAutoRegister } = require('../utils/tabRegistration');
+
 const DEFAULT_SYSTEM_TABS = ['세부목록', '검색인덱스', '인덱스마스터', '인덱스데이터', '마감', '상세목록', '탭설정', '설정', 'detail', 'config'];
 const DEFAULT_DATA_TAB_KEYWORDS = ['번호', '주문자', '수취인', '수취인명', '성함', '이름', '성명', '신청자', '연락처', '전화번호'];
 const DEFAULT_SUBMIT_KEYWORDS = ['리뷰완료', '제출', '완료', 'submit', '제출완료', '리뷰제출', '리뷰'];
@@ -266,7 +268,7 @@ async function buildIndexSmart(forceFullRebuild = false) {
     });
 
     const { rows: tcRows } = await pool.query(
-      'SELECT sheet_id, tab_name, is_closed, closed_rounds, archived_rounds FROM tab_configs'
+      'SELECT sheet_id, tab_name, tab_gid, is_closed, closed_rounds, archived_rounds FROM tab_configs'
     );
     const tcMap = {};
     tcRows.forEach(r => { tcMap[`${r.sheet_id}||${r.tab_name}`] = r; });
@@ -513,6 +515,19 @@ async function _processOneSheet(sheetId, opts) {
     return { rebuilt: 0, skipped: 0, errors: 0, elapsed: Date.now() - sheetStart };
   }
 
+  // ★ 등록 단일경로 게이트(TAB_REGISTRATION_MODE≠auto): tab_configs에 등록된 탭만 빌드.
+  //   gid 일치는 등록 탭의 리네임이므로 통과(아래 리네임 자가치유가 이름을 수렴시킴).
+  //   미등록 탭은 review_index/index_master에 새로 생기지 않음 — 신규 등록은 작업오더 접수로만.
+  const autoRegister = allowAutoRegister();
+  const registeredGids = new Set();
+  if (!autoRegister) {
+    const prefix = `${sheetId}||`;
+    for (const [k, v] of Object.entries(tcMap)) {
+      if (k.startsWith(prefix) && v && v.tab_gid) registeredGids.add(String(v.tab_gid));
+    }
+  }
+  let skippedUnregistered = 0;
+
   // is_closed/아카이브 탭 필터링
   const activeTabs = validTabs.filter(t => {
     const key = `${sheetId}||${t.properties.title}`;
@@ -522,12 +537,19 @@ async function _processOneSheet(sheetId, opts) {
       return false;
     }
     const tc = tcMap[key];
+    if (!autoRegister && !tc && !registeredGids.has(String(t.properties.sheetId))) {
+      skippedUnregistered++;
+      return false;
+    }
     if (tc && tc.is_closed) {
       skipped++;
       return false;
     }
     return true;
   });
+  if (skippedUnregistered > 0) {
+    logger.info(`[buildIndex] 미등록 탭 ${skippedUnregistered}개 제외 (${sheetId.substring(0, 15)}…) — 신규 등록은 작업오더 접수로만`);
+  }
 
   if (activeTabs.length === 0) {
     return { rebuilt: 0, skipped, errors: 0, elapsed: Date.now() - sheetStart };
@@ -1165,7 +1187,7 @@ async function buildOneSheet(sheetId) {
     });
 
     const { rows: tcRows } = await pool.query(
-      'SELECT sheet_id, tab_name, is_closed FROM tab_configs WHERE sheet_id = $1',
+      'SELECT sheet_id, tab_name, tab_gid, is_closed FROM tab_configs WHERE sheet_id = $1',
       [sheetId]
     );
     const tcMap = {};

@@ -15,6 +15,12 @@ GAS(Google Apps Script) 기반 리뷰 관리 시스템을 **Node.js Express + Po
 - `server/migrations/` — DB 마이그레이션
 - `.github/workflows/` — DB/Drive 백업·복구 리허설 (앱 빌드/배포 워크플로 아님)
 
+### 작업탭 등록 단일경로 (작업 중인 탭 목록 = tab_configs)
+- 관리자 대시보드 "작업 중인 탭 목록"은 `tab_configs`를 그대로 표시(`GET /api/tab/dashboard`, 아카이브 탭만 제외). **신규 시트/탭이 `tab_configs`·`campaigns`에 등록되는 경로는 작업오더 접수(`POST /api/order/accept`) 하나로 일원화**(`utils/tabRegistration.js`, env `TAB_REGISTRATION_MODE`: `order` 기본 | `manual`=+관리자 수동 버튼 | `auto`=레거시 전체 허용·롤백용).
+- **게이트 적용점**: ① smartBuild·전체빌드(indexBuilder)는 `tab_configs` 등록 탭(**이름 또는 gid 일치** — gid 일치=리네임이라 빌드 유지)만 읽기/빌드 — **미등록 탭은 인덱스 자체가 안 생겨 목록·검색·제출 모두 접수 후 활성화**(스킵은 `tabsSkippedUnregistered` 로그). ② 동기화(`syncTabListToDB`)는 기본 신규 campaigns/tabs/index INSERT 스킵(gid 보정·리네임만, `registrationGate` 보고) — **`manual` 모드도 자동추가는 차단**(`auto`만 허용). ③ 수동 등록 `diag/add-tab`·`add-campaign`은 order 모드에서 안내 메시지 반환(`registrationLocked`), 프론트 '작업시트추가' 버튼은 `tabRegistrationMode`가 order면 숨김. ④ '새 시트생성'(`create-campaign-sheet`, admin+AE)은 **시트/탭 생성·SA권한부여는 유지, DB 등록만 접수 시점으로 이연**(`registrationDeferred`).
+- **예외(복원 성격, 모드 무관)**: 아카이브 복구, DB 재구축(`syncTabListToDB({allowNewTabs:true})` — 재해복구는 시트 현황 복원이라 게이트 우회), 탭명·gid 교정(`sync-tab-names`/fix-swap). migration 057 = 전환 시 `index_master(active)`에만 있던 탭 1회 백필(app_settings `migration_057_tab_backfill_done` 가드로 재배포 시 재실행 안 함). 회귀가드 `tests/tabRegistrationGate.test.js`.
+- 운영 함의: 접수 전 탭은 리뷰어 검색이 안 되므로 **모집 시작 전에 접수 먼저**. 긴급 복원은 Railway `TAB_REGISTRATION_MODE=auto`.
+
 ### 리뷰 이미지 ↔ 인덱스 연결 (데이터 모델)
 - 리뷰 캡처는 `AI_REVIEW_FOLDER → {시트제목} → {탭명} → [리뷰]` 폴더에 저장(`drive.service.js`의 `ensureReviewFolderPath`). 업로드 시 폴더ID를 못 잡으면 루트로 새므로 `uploadFileBase64`가 빈 `parentFolderId`를 차단한다.
 - `review_index.review_file_*`(031, A-1): 제출 행당 대표 리뷰 이미지 1장(파일ID/URL/이름/개수/시각). `review-upload`가 업로드 즉시 기록.

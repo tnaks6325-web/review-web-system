@@ -12,6 +12,7 @@
 const { readSheet, writeSheet, getSpreadsheetMeta } = require('./sheets.service');
 const { throttledCall, concurrentMap, getThrottleStatus } = require('../utils/sheetsThrottle');
 const { logger } = require('../utils/logger');
+const { allowAutoRegister } = require('../utils/tabRegistration');
 
 // ── 환경변수 ──
 const MASTER_SHEET_ID = process.env.MASTER_SHEET_ID || '';
@@ -415,10 +416,14 @@ const pool = require('../db/pool');
  * @param {object} options
  * @param {boolean} options.dryRun - true면 미리보기만 (DB 변경 안 함)
  * @param {boolean} options.fromCache - true면 스캔 캐시에서, false면 탭목록 시트에서 읽기
+ * @param {boolean|null} options.allowNewTabs - 신규 campaigns/tabs INSERT 허용 여부.
+ *   null(기본)이면 TAB_REGISTRATION_MODE 정책을 따름('auto'만 허용) — 신규 등록은 작업오더 접수로만.
+ *   DB 재구축(재해복구)처럼 "현 상태 복원"이 목적일 때만 true를 명시한다.
  * @returns {object} 동기화 결과 요약
  */
-async function syncTabListToDB({ dryRun = true, fromCache = false } = {}) {
+async function syncTabListToDB({ dryRun = true, fromCache = false, allowNewTabs = null } = {}) {
   const startTime = Date.now();
+  const addsAllowed = allowNewTabs === null ? allowAutoRegister() : !!allowNewTabs;
 
   // ── 데이터 소스 결정 ──
   let rows; // [{ sheet_url, campaign_name, tab_url, tab_name }]
@@ -589,18 +594,40 @@ async function syncTabListToDB({ dryRun = true, fromCache = false } = {}) {
     }
   }
 
+  // ★ 등록 단일경로 게이트: 신규 campaigns/tabs 추가는 작업오더 접수로만.
+  //   동기화는 기존 탭의 gid 보정(tabsToUpdate)·리네임(tabsToRename)만 수행.
+  //   index_master 껍데기(indexToAdd)는 "이미 tab_configs에 등록된 탭"분만 유지.
+  let skippedNewCampaigns = 0, skippedNewTabs = 0, skippedNewIndex = 0;
+  if (!addsAllowed) {
+    skippedNewCampaigns = campaignsToAdd.length;
+    skippedNewTabs = tabsToAdd.length;
+    campaignsToAdd.length = 0;
+    tabsToAdd.length = 0;
+    const keptIndex = indexToAdd.filter(i => dbTabMap.has(`${i.sheetId}||${i.tabName}`));
+    skippedNewIndex = indexToAdd.length - keptIndex.length;
+    indexToAdd.length = 0;
+    indexToAdd.push(...keptIndex);
+    if (skippedNewCampaigns || skippedNewTabs || skippedNewIndex) {
+      logger.info(`[syncTabListToDB] 등록 게이트: 신규 campaigns ${skippedNewCampaigns}·tabs ${skippedNewTabs}·index ${skippedNewIndex} 스킵 — 작업오더 접수로만 등록`);
+    }
+  }
+  const gateSuffix = (!addsAllowed && (skippedNewCampaigns || skippedNewTabs))
+    ? ` · 신규 ${skippedNewTabs}탭/${skippedNewCampaigns}캠페인 스킵(작업오더 접수로만 등록)`
+    : '';
+
   const summary = {
     dryRun,
     totalRows: rows.length,
     campaigns: { existing: dbCampaigns.length, toAdd: campaignsToAdd.length, supplemented },
     tabs: { existing: dbTabs.length, toAdd: tabsToAdd.length, toUpdate: tabsToUpdate.length, toRename: tabsToRename.length },
     index: { existing: dbIndex.length, toAdd: indexToAdd.length },
+    registrationGate: { active: !addsAllowed, skippedNewCampaigns, skippedNewTabs, skippedNewIndex },
   };
 
   // ── 미리보기면 여기서 종료 ──
   if (dryRun) {
     summary.elapsed = ((Date.now() - startTime) / 1000).toFixed(1) + 's';
-    summary.message = `미리보기: campaigns +${campaignsToAdd.length}${supplemented ? ` (시트DB 보충 ${supplemented})` : ''}, tabs +${tabsToAdd.length}/~${tabsToUpdate.length}/rename ${tabsToRename.length}, index +${indexToAdd.length}`;
+    summary.message = `미리보기: campaigns +${campaignsToAdd.length}${supplemented ? ` (시트DB 보충 ${supplemented})` : ''}, tabs +${tabsToAdd.length}/~${tabsToUpdate.length}/rename ${tabsToRename.length}, index +${indexToAdd.length}${gateSuffix}`;
     if (tabsToRename.length > 0) {
       summary.renames = tabsToRename.map(r => ({ old: r.oldTabName, new: r.newTabName, gid: r.tabGid }));
     }
@@ -699,7 +726,7 @@ async function syncTabListToDB({ dryRun = true, fromCache = false } = {}) {
   }
 
   summary.elapsed = ((Date.now() - startTime) / 1000).toFixed(1) + 's';
-  summary.message = `완료: campaigns +${campaignsToAdd.length}, tabs +${tabsToAdd.length}/~${tabsToUpdate.length}/rename ${tabsToRename.length}, index +${indexToAdd.length} (${summary.elapsed})`;
+  summary.message = `완료: campaigns +${campaignsToAdd.length}, tabs +${tabsToAdd.length}/~${tabsToUpdate.length}/rename ${tabsToRename.length}, index +${indexToAdd.length} (${summary.elapsed})${gateSuffix}`;
   return summary;
 }
 
