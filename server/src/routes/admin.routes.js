@@ -8,6 +8,9 @@ const {
   addAdvertiserUser, editAdvertiserUser, deleteAdvertiserUser, listAdvertiserUsers,
   changePw, changeMasterPw,
 } = require('../services/auth.service');
+const {
+  listEditors, addEditor, removeEditor, setEditorActive,
+} = require('../services/reviewerCampaignEditor.service');
 const pool = require('../db/pool');
 
 // ═══════════════════════════════════════════════════════════
@@ -151,6 +154,28 @@ router.post('/users', authMiddleware, masterOnlyMiddleware, async (req, res, nex
     // GAS 호환: error 필드로 반환
     res.json({ error: err.message });
   }
+});
+
+// ═══════════════════════════════════════════════════════════
+// 리뷰어 앱 "공고수정 허용 명단" — 마스터 전용 관리
+//   리뷰어 화면(무비밀번호 로그인)에서 공고를 수정할 수 있는 사람을 phone8로 명시 허용.
+//   /api/admin/* 경로라 via:'reviewer_campaign' 스코프 토큰은 도달 불가(경로 격리) + masterOnly.
+// ═══════════════════════════════════════════════════════════
+router.get('/campaign-editors', authMiddleware, masterOnlyMiddleware, async (req, res, next) => {
+  try {
+    res.json({ ok: true, editors: await listEditors() });
+  } catch (err) { next(err); }
+});
+
+router.post('/campaign-editors', authMiddleware, masterOnlyMiddleware, async (req, res, next) => {
+  try {
+    const { action, phone8, label, active } = req.body || {};
+    const by = (req.admin && req.admin.name) || '';
+    if (action === 'add')    return res.json(await addEditor(phone8, label, by));
+    if (action === 'remove') return res.json(await removeEditor(phone8));
+    if (action === 'toggle') return res.json(await setEditorActive(phone8, active === true));
+    return res.status(400).json({ ok: false, error: '알 수 없는 action: ' + action });
+  } catch (err) { next(err); }
 });
 
 // ═══════════════════════════════════════════════════════════

@@ -209,7 +209,9 @@
 
   function _adminTok() {
     try {
-      return sessionStorage.getItem('admin_token') || localStorage.getItem('admin_token') || '';
+      // 관리자 페이지 토큰(admin_token) 또는 리뷰어 앱 공고수정 스코프 토큰(마스터 허용명단 발급)
+      return sessionStorage.getItem('admin_token') || localStorage.getItem('admin_token')
+        || sessionStorage.getItem('rapp_camp_edit_token') || '';
     } catch (_) { return ''; }
   }
   function _apiBase() {

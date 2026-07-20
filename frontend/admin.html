@@ -1487,6 +1487,30 @@ body{ letter-spacing:-.01em; }
 
         <hr style="margin:28px 0;border:none;border-top:1px solid #E5E7EB">
 
+        <!-- 리뷰어 앱 공고수정 허용 명단 (마스터 전용) -->
+        <div class="admin-section-header">
+          <span style="font-size:.95rem;font-weight:700;color:var(--t1)">
+            <i class="fas fa-user-shield" style="color:#1B64DA;margin-right:6px"></i>리뷰어 앱 공고수정 허용 <span style="font-size:.72rem;color:#DC2626;font-weight:700">(마스터 전용)</span>
+          </span>
+        </div>
+        <p style="font-size:.78rem;color:var(--t3);margin:8px 0 12px">
+          여기 등록한 <b>전화번호 뒤 8자리</b>의 리뷰어는 <b>리뷰어 홈에서 모집공고 카드를 눌러 직접 수정</b>할 수 있습니다(관리자 대시보드와 즉시 동기화).
+          리뷰어 로그인은 비밀번호가 없으므로 <b>믿을 수 있는 담당자 번호만</b> 등록하세요. 권한은 공고 수정에만 적용됩니다.
+        </p>
+        <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center;max-width:560px">
+          <input type="text" id="campEditorPhone" placeholder="전화 뒤 8자리 (예: 85926325)" inputmode="numeric"
+            style="width:180px;padding:8px 12px;border:1.5px solid #D1D5DB;border-radius:8px;font-size:.85rem;outline:none">
+          <input type="text" id="campEditorLabel" placeholder="이름/메모 (예: 김수만)"
+            style="flex:1;min-width:150px;padding:8px 12px;border:1.5px solid #D1D5DB;border-radius:8px;font-size:.85rem;outline:none">
+          <button onclick="addCampEditor()"
+            style="padding:8px 18px;background:#1B64DA;color:#fff;border:none;border-radius:8px;font-size:.82rem;font-weight:600;cursor:pointer">
+            <i class="fas fa-plus"></i> 추가
+          </button>
+        </div>
+        <div id="campEditorList" style="margin-top:12px;max-width:560px"></div>
+
+        <hr style="margin:28px 0;border:none;border-top:1px solid #E5E7EB">
+
         <!-- 인식 실패 탭 진단 -->
         <div class="admin-section-header">
           <span style="font-size:.95rem;font-weight:700;color:var(--t1)">

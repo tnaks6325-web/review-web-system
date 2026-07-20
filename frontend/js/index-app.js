@@ -1377,7 +1377,7 @@ function switchAdminTab(tabName) {
   if (tabName === "payment")   initPaymentPanel();
   if (tabName === "dashboard") { try { loadTabDashboard(); } catch(_){} try { loadSystemMonitor(); } catch(_){} try { loadStatsOverview(); } catch(_){} try { loadDashWorkOrders(); } catch(_){} try { loadReviewerNoticesAdmin(); } catch(_){} }
   if (tabName === "archive")   { try { loadArchiveList(); } catch(_){} try { _loadArchiveHistory(); } catch(_){} }
-  if (tabName === "settings")  { try { loadUnrecognizedTabs(); } catch(_){} try { loadMappingCoverage(); } catch(_){} try { loadKeywordList(); } catch(_){} try { loadCompanyBusinessNo(); } catch(_){} }
+  if (tabName === "settings")  { try { loadUnrecognizedTabs(); } catch(_){} try { loadMappingCoverage(); } catch(_){} try { loadKeywordList(); } catch(_){} try { loadCompanyBusinessNo(); } catch(_){} try { loadCampEditors(); } catch(_){} }
   if (tabName === "errorlogs") { try { loadErrorLogs(); } catch(_){} }
   if (tabName === "order-ledger") { try { loadOrderLedger(); } catch(_){} }
   // ★ 컨텍스트 툴바 업데이트
@@ -11740,6 +11740,89 @@ async function saveCompanyBusinessNo() {
   } catch (e) {
     showToast('❌ 저장 오류: ' + e.message, true);
   }
+}
+
+/* ═══════════════════════════════════════
+   리뷰어 앱 공고수정 허용 명단 (마스터 전용 · 설정 탭)
+   /api/admin/campaign-editors — gas action map 밖이라 직접 fetch(admin 토큰).
+═══════════════════════════════════════ */
+function _campEditorAuthHeaders() {
+  const token = sessionStorage.getItem('admin_token') || localStorage.getItem('admin_token');
+  const h = { 'Content-Type': 'application/json' };
+  if (token) h['Authorization'] = 'Bearer ' + token;
+  return h;
+}
+
+async function loadCampEditors() {
+  const wrap = document.getElementById('campEditorList');
+  if (!wrap) return;
+  wrap.innerHTML = '<div style="color:var(--t3);font-size:.8rem;padding:6px 0"><i class="fas fa-circle-notch fa-spin"></i> 불러오는 중...</div>';
+  try {
+    const resp = await fetch(API_BASE_URL + '/api/admin/campaign-editors', { headers: _campEditorAuthHeaders() });
+    const data = await resp.json();
+    if (!resp.ok || !data.ok) {
+      wrap.innerHTML = `<div style="color:#EF4444;font-size:.8rem">${escHtml(data.error || (resp.status === 403 ? '마스터만 조회할 수 있습니다.' : '조회 실패'))}</div>`;
+      return;
+    }
+    const editors = data.editors || [];
+    if (!editors.length) {
+      wrap.innerHTML = '<div style="color:var(--t3);font-size:.8rem;padding:6px 0">등록된 담당자가 없습니다.</div>';
+      return;
+    }
+    wrap.innerHTML = editors.map(e => {
+      const p8 = escHtml(e.phone8);
+      const label = escHtml(e.label || '');
+      const on = e.active !== false;
+      return `<div style="display:flex;align-items:center;gap:10px;padding:8px 10px;border:1px solid #E5E7EB;border-radius:8px;margin-bottom:6px;background:var(--bg2,#fff)">
+        <span style="font-weight:700;color:var(--t1);font-size:.85rem">${label || '(이름 없음)'}</span>
+        <span style="font-size:.78rem;color:var(--t3)">···${p8}</span>
+        <span style="font-size:.68rem;font-weight:700;border-radius:6px;padding:2px 8px;${on ? 'background:#D1FAE5;color:#0ca678' : 'background:#F3F4F6;color:#9CA3AF'}">${on ? '사용중' : '중지됨'}</span>
+        <span style="flex:1"></span>
+        <button onclick="toggleCampEditor('${p8}', ${on ? 'false' : 'true'})" style="font-size:.72rem;border:1px solid #D1D5DB;background:#fff;border-radius:6px;padding:4px 10px;cursor:pointer">${on ? '중지' : '재개'}</button>
+        <button onclick="removeCampEditor('${p8}')" style="font-size:.72rem;border:1px solid #FCA5A5;color:#DC2626;background:#fff;border-radius:6px;padding:4px 10px;cursor:pointer">삭제</button>
+      </div>`;
+    }).join('');
+  } catch (e) {
+    wrap.innerHTML = `<div style="color:#EF4444;font-size:.8rem">조회 오류: ${escHtml(e.message)}</div>`;
+  }
+}
+
+async function _campEditorAction(body) {
+  const resp = await fetch(API_BASE_URL + '/api/admin/campaign-editors', {
+    method: 'POST', headers: _campEditorAuthHeaders(), body: JSON.stringify(body),
+  });
+  const data = await resp.json().catch(() => ({}));
+  if (!resp.ok || data.ok === false || data.error) throw new Error(data.error || (resp.status === 403 ? '마스터 권한이 필요합니다.' : '요청 실패'));
+  return data;
+}
+
+async function addCampEditor() {
+  const phoneEl = document.getElementById('campEditorPhone');
+  const labelEl = document.getElementById('campEditorLabel');
+  const phone8 = (phoneEl.value || '').replace(/[^0-9]/g, '');
+  if (phone8.length < 8) { showToast('전화번호 뒤 8자리를 입력하세요.', true); return; }
+  try {
+    await _campEditorAction({ action: 'add', phone8, label: (labelEl.value || '').trim() });
+    phoneEl.value = ''; labelEl.value = '';
+    showToast('✅ 공고수정 담당자를 추가했습니다.');
+    loadCampEditors();
+  } catch (e) { showToast('❌ ' + e.message, true); }
+}
+
+async function toggleCampEditor(phone8, active) {
+  try {
+    await _campEditorAction({ action: 'toggle', phone8, active });
+    loadCampEditors();
+  } catch (e) { showToast('❌ ' + e.message, true); }
+}
+
+async function removeCampEditor(phone8) {
+  if (!confirm('이 담당자의 공고수정 권한을 삭제할까요?')) return;
+  try {
+    await _campEditorAction({ action: 'remove', phone8 });
+    showToast('삭제되었습니다.');
+    loadCampEditors();
+  } catch (e) { showToast('❌ ' + e.message, true); }
 }
 
 /* ── 컬럼매핑 현황 (컬럼 판정 DB화 1단계 관측) ──
