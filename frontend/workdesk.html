@@ -30,7 +30,7 @@
   .btn:hover{border-color:var(--accent-line);background:var(--card2)} .btn:active{transform:scale(.97)}
   .btn.pri{background:var(--accent);color:#fff;border-color:var(--accent);box-shadow:0 1px 2px rgba(37,99,235,.32)} .btn.pri:hover{background:var(--accent-deep);border-color:var(--accent-deep)}
   .btn:disabled{background:var(--card2);color:var(--faint);border-color:var(--card2);cursor:not-allowed;box-shadow:none;transform:none}
-  .wrap{display:grid;grid-template-columns:230px 1fr 240px;min-height:calc(100vh - 50px)}
+  .wrap{display:grid;grid-template-columns:230px 1fr 300px;min-height:calc(100vh - 50px)}
   @media(max-width:900px){.wrap{grid-template-columns:1fr}.side,.rail{display:none}.wrap.showlist .main{display:none}.wrap.showlist .side{display:block}}
   .side{border-right:1px solid var(--line);background:var(--card);padding:12px 10px;overflow:auto}
   .side .sh{font-size:10px;font-weight:750;letter-spacing:.05em;text-transform:uppercase;color:var(--faint);margin:6px 6px 8px;display:flex;justify-content:space-between}
@@ -189,6 +189,13 @@
   table.histtable .hts{font-family:var(--mono);font-size:11px;color:var(--muted);white-space:nowrap} .histtable .ok{color:var(--safe);font-weight:700} .histtable .no{color:var(--faint);font-weight:700}
   .rail{border-left:1px solid var(--line);background:var(--card);padding:14px 12px;overflow:auto}
   .rail .sh{font-size:10px;font-weight:750;letter-spacing:.05em;text-transform:uppercase;color:var(--faint);margin:2px 2px 10px}
+  /* 우측 레일 탭(협업/댓글 · Parity) — 기본=협업/댓글 */
+  .railtabs{display:flex;gap:2px;background:var(--card2);border-radius:9px;padding:3px;margin-bottom:12px;position:sticky;top:-14px;z-index:2}
+  .railtab{flex:1;font:inherit;font-size:11.5px;font-weight:700;height:29px;border:none;border-radius:7px;background:none;color:var(--muted);cursor:pointer;transition:color .15s,background .15s;display:inline-flex;align-items:center;justify-content:center;gap:4px}
+  .railtab.on{background:var(--card);color:var(--accent-deep);box-shadow:0 1px 3px rgba(16,24,40,.12)}
+  .railpane[hidden]{display:none}
+  .rtbadge{background:var(--bad);color:#fff;font-size:9px;font-weight:800;border-radius:999px;padding:0 5px;line-height:15px;min-width:15px;text-align:center}
+  .railnote{font-size:11.5px;color:var(--warn);background:var(--warn-soft);border-radius:8px;padding:6px 9px;margin-bottom:10px;font-weight:650}
   .parity{border:1px solid var(--line);border-radius:10px;padding:12px;margin-bottom:14px}
   .pbar{display:flex;height:8px;border-radius:5px;overflow:hidden;margin:8px 0} .pbar i{display:block}.pbar .m{background:var(--safe)}.pbar .b{background:var(--warn)}.pbar .r{background:var(--bad)}
   .plegend{display:flex;flex-direction:column;gap:5px;font-size:11.5px} .plegend .row{display:flex;justify-content:space-between}
@@ -422,6 +429,7 @@ function parseTabMeta(name){ const s=String(name||''); const m={};
 
 let STATE = { role:'', name:'', view:'workdesk', tabs:[], cur:null, wd:null, freezeUpto:null,
               favs:null, _favLoaded:false,   // 작업목록 즐겨찾기(localStorage 영속)
+              railTab:'thread',              // 우측 레일 탭(기본=협업/댓글)
               ov:[], ovq:'', pendingTab:null, lastBatch:null,
               advs:[], advCur:null, tabIndex:{}, sheetMap:{}, addMode:'all', addSheet:null, addTabs:{},
               ownTabs:[], ownBrand:null, ownBrandList:[],     // 연결탭 목록 + 브랜드 필터(null=전체, ''=미분류)
@@ -595,10 +603,9 @@ function renderWorkdesk(wd){
     ${summaryStrip(wd,d,m,c)}
     <div class="setldetail" id="setldetail"${STATE.settleOpen?'':' hidden'}><div id="settlementsec"></div></div>
     ${renderWorkOrderSection(wd)}
-    <div id="gridhost">${tableSection}</div>
-    <div id="threadsec"></div>`;
+    <div id="gridhost">${tableSection}</div>`;
   loadSettlement(STATE.cur);
-  loadThread(STATE.cur);
+  loadThread(STATE.cur);   // 협업/댓글 → 우측 레일 [협업/댓글] 탭에 렌더
 }
 
 // ── 시안 A: 상단 요약 미니 셀 스트립(상품/모집/구매시간/배송 + 참여·제출·입금 + 정산 통합) ──
@@ -739,19 +746,40 @@ async function dlCloseoutCsv(e){ if(e)e.preventDefault();
   a.href=URL.createObjectURL(blob); a.download=`closeout_${t.tabName}.csv`; document.body.appendChild(a); a.click(); a.remove(); URL.revokeObjectURL(a.href);
 }
 
-// ══ P1 탭 스레드(협업 코멘트 + 확인요청 + 내부 메모) ══
+// ══ 우측 레일 탭 — [협업/댓글](기본) · [Parity]. 레일은 셸에 상주(탭 전환 시 재렌더 안 됨)라 1회 구성 ══
+function _ensureRailTabs(){
+  const rail=$('#rail'); if(!rail) return;
+  if(rail.querySelector('.railtabs')) return;   // 이미 구성됨(패널만 각 loader가 채움)
+  rail.innerHTML=`<div class="railtabs">
+      <button class="railtab" data-rt="thread" onclick="railTab('thread')">협업/댓글</button>
+      <button class="railtab" data-rt="parity" onclick="railTab('parity')">Parity</button>
+    </div>
+    <div class="railpane" id="railThread"><div class="empty" style="padding:14px">불러오는 중…</div></div>
+    <div class="railpane" id="railParity"><div class="empty" style="padding:14px">불러오는 중…</div></div>`;
+  railTab(STATE.railTab||'thread');   // 기본 선택 = 협업/댓글
+}
+function railTab(which){
+  STATE.railTab=which;
+  const rail=$('#rail'); if(!rail) return;
+  rail.querySelectorAll('.railtab').forEach(b=>b.classList.toggle('on', b.dataset.rt===which));
+  const th=$('#railThread'), pa=$('#railParity');
+  if(th) th.hidden=(which!=='thread'); if(pa) pa.hidden=(which!=='parity');
+}
+// ══ P1 탭 스레드(협업 코멘트 + 확인요청 + 내부 메모) — 우측 레일 [협업/댓글] 탭 ══
 async function loadThread(t){
-  if(!t) return;
+  if(!t) return; _ensureRailTabs();
+  const lb=$('#railThread'); if(lb) lb.innerHTML='<div class="empty" style="padding:14px">불러오는 중…</div>';   // 탭 전환 시 이전 탭 스레드 잔상 제거
+  const tb0=document.querySelector('.railtab[data-rt="thread"]'); if(tb0) tb0.textContent='협업/댓글';   // 배지 초기화(로드 후 renderThread가 재설정)
   const r=await api(`/api/trackb/workdesk/thread?sheetId=${encodeURIComponent(t.sheetId)}&tabName=${encodeURIComponent(t.tabName)}`).catch(()=>null);
-  const box=$('#threadsec'); if(!box) return;
-  if(!r||!r.ok){ box.innerHTML=''; return; }
+  const box=$('#railThread'); if(!box) return;
+  if(!r||!r.ok){ box.innerHTML='<div class="empty" style="padding:14px">협업/댓글은 준비 중입니다.</div>'; return; }
   STATE.thread={ items:r.items||[], canInternal:!!r.canInternal, tab:t };
   renderThread();
   // 이 탭을 열었으니 목록/헤더 미확인 배지 갱신
   if(typeof refreshUnseen==='function') refreshUnseen();
 }
 function renderThread(){
-  const st=STATE.thread; if(!st) return; const box=$('#threadsec'); if(!box) return;
+  const st=STATE.thread; if(!st) return; const box=$('#railThread'); if(!box) return;
   const items=st.items, ci=st.canInternal;
   const openReq=items.filter(x=>x.kind==='request'&&x.status!=='done').length;
   const rows=items.map(x=>{
@@ -773,17 +801,19 @@ function renderThread(){
       <div class="thbody">${esc(x.body||'')}</div>
       ${statusChip?`<div class="thstatus">${statusChip}</div>`:''}</div>`;
   }).join('')||`<div class="empty" style="padding:18px">아직 글이 없습니다. 첫 코멘트/확인요청을 남겨보세요.</div>`;
-  box.innerHTML=`<div class="sect" style="margin-top:22px"><div class="st">스레드 · 협업/메모 ${openReq?`<span class="bb bad">미완료 확인요청 ${openReq}</span>`:''}</div>
+  box.innerHTML=`${openReq?`<div class="railnote">⚠ 미완료 확인요청 ${openReq}건</div>`:''}
     <div class="thlist">${rows}</div>
     <div class="thform">
       <textarea id="thbody" rows="2" placeholder="코멘트 또는 확인요청 내용… (Ctrl+Enter로 등록)"></textarea>
       <div class="throw">
-        <label class="thopt"><input type="checkbox" id="threq"> 확인요청으로 등록</label>
-        ${ci?`<label class="thopt"><input type="checkbox" id="thint"> 내부만(광고주 미노출)</label>`:''}
+        <label class="thopt"><input type="checkbox" id="threq"> 확인요청</label>
+        ${ci?`<label class="thopt"><input type="checkbox" id="thint"> 내부만</label>`:''}
         <span style="flex:1"></span>
         <button class="btn pri" onclick="postThread()">등록</button>
-      </div></div></div>`;
+      </div></div>`;
   const ta=$('#thbody'); if(ta) ta.addEventListener('keydown',e=>{ if((e.ctrlKey||e.metaKey)&&e.key==='Enter') postThread(); });
+  // 탭 배지: 미완료 확인요청 수를 [협업/댓글] 탭에 표기(다른 탭 보고 있어도 눈에 띄게)
+  const tb=document.querySelector('.railtab[data-rt="thread"]'); if(tb) tb.innerHTML='협업/댓글'+(openReq?` <span class="rtbadge">${openReq}</span>`:'');
 }
 async function postThread(){
   const st=STATE.thread; if(!st) return; const t=st.tab;
@@ -1300,12 +1330,12 @@ function toggleDetail(id){
   tr.innerHTML=`<td colspan="${STATE.canEdit?8:7}">${renderDetail(r)}</td>`;
   rowEl.after(tr); if(arrow)arrow.classList.add('open');
 }
-async function loadParity(t){ const rail=$('#rail'); if(!rail)return;
-  rail.innerHTML=`<div class="sh">Parity (B ↔ 현행)</div><div class="empty" style="padding:14px">확인 중…</div>`;
+async function loadParity(t){ if(!t) return; _ensureRailTabs(); const pane=$('#railParity'); if(!pane)return;
+  pane.innerHTML=`<div class="empty" style="padding:14px">확인 중…</div>`;
   const p=await api(`/api/trackb/parity?sheetId=${encodeURIComponent(t.sheetId)}&tabName=${encodeURIComponent(t.tabName)}`);
-  if(!p||!p.ok){ rail.innerHTML=`<div class="sh">Parity</div><div class="empty" style="padding:14px">master에서 제공</div>`; return; }
+  if(!p||!p.ok){ pane.innerHTML=`<div class="empty" style="padding:14px">master에서 제공</div>`; return; }
   const b=p.buckets||{match:0,benign:0,real:0}, tot=Math.max(1,b.match+b.benign+b.real), pct=n=>(n/tot*100).toFixed(1)+'%';
-  rail.innerHTML=`<div class="sh">Parity (B ↔ 현행)</div><div class="parity">
+  pane.innerHTML=`<div class="sh">Parity (B ↔ 현행)</div><div class="parity">
     <div class="pbar"><i class="m" style="width:${pct(b.match)}"></i><i class="b" style="width:${pct(b.benign)}"></i><i class="r" style="width:${pct(b.real)}"></i></div>
     <div class="plegend"><div class="row"><span><span class="dot" style="background:var(--safe)"></span>일치</span><b>${b.match}</b></div><div class="row"><span><span class="dot" style="background:var(--warn)"></span>의도된차이</span><b>${b.benign}</b></div><div class="row"><span><span class="dot" style="background:var(--bad)"></span>진짜 불일치</span><b>${b.real}</b></div></div>
     <div class="verdict ${p.pass?'pass':'fail'}">${p.pass?'✓ 진짜 불일치 0':('진짜 불일치 '+b.real+'건')}</div></div>
