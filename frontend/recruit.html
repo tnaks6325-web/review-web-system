@@ -428,6 +428,7 @@ async function loadCampaigns() {
     if (parts.length && window.CampCards) {
       CampCards.setServerNow(json.serverNow);
       const pwrap = document.createElement("div");
+      pwrap.className = "pcards-grid";
       pwrap.innerHTML = parts.map(c => CampCards.cardHtml(c)).join("");
       container.appendChild(pwrap);
       CampCards.startTicker(() => { container.innerHTML = ""; loadCampaigns(); });
