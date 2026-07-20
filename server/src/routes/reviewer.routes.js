@@ -1,7 +1,8 @@
 const express = require('express');
 const router = express.Router();
 const { authMiddleware, adminOrMasterMiddleware } = require('../middleware/auth.middleware');
-const { registerLimiter, imageApiLimiter } = require('../middleware/rateLimit.middleware');
+const { registerLimiter, imageApiLimiter, campaignTokenLimiter } = require('../middleware/rateLimit.middleware');
+const { issueCampaignToken } = require('../services/reviewerCampaignEditor.service');
 const {
   registerReviewer,
   verifyReviewer,
@@ -18,6 +19,21 @@ const { addClient, emitCsInquiry } = require('../utils/sse');
 router.post('/register', registerLimiter, async (req, res, next) => {
   try {
     const result = await registerReviewer(req.body);
+    res.json(result);
+  } catch (err) {
+    next(err);
+  }
+});
+
+// POST /api/reviewer/campaign-token — 리뷰어 앱 공고수정 스코프 토큰 발급
+//   허용명단(마스터 관리)에 있는 리뷰어에게만 공고 전용·2h 토큰 발급.
+//   무인증 공개 경로지만 verifyReviewer(이름+phone8) + active 명단 이중 게이트 + 리미터.
+router.post('/campaign-token', campaignTokenLimiter, async (req, res, next) => {
+  try {
+    const { name, phone8 } = req.body || {};
+    const result = await issueCampaignToken(name, phone8);
+    // 미허용/불일치는 401(존재 여부 노출 최소화)
+    if (!result.ok) return res.status(401).json(result);
     res.json(result);
   } catch (err) {
     next(err);

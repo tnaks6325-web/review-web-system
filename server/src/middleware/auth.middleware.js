@@ -34,6 +34,19 @@ function authMiddleware(req, res, next) {
         return res.status(403).json({ error: '인트라넷 연동 계정은 통합 작업대(Track B)에서만 사용할 수 있습니다.' });
       }
     }
+    // ★ 리뷰어 앱 공고수정 스코프 토큰(via:'reviewer_campaign')은 **공고 수정/상태변경만** 허용.
+    //   리뷰어 로그인(무비밀번호)으로 발급된 약한 신원이라, 관리자 API·공고 생성/삭제/확정에
+    //   도달하지 못하게 PUT /api/campaign/admin/:id[/status] 로만 격리(폐쇄 기본). role은 admin이라
+    //   masterOnly 라우트는 이미 차단되지만, 방어심층으로 경로+메서드까지 좁힌다.
+    //   (프리필용 GET /api/campaign/:id 는 authMiddleware 미경유 공개 라우트라 여기 무관.)
+    //   ★ /status 하위경로는 불허 — 모달은 본 PUT 바디로 status를 보내므로 불필요, 표면 최소화.
+    if (decoded && decoded.via === 'reviewer_campaign') {
+      const p = (req.baseUrl || '') + (req.path || '');
+      const allowed = req.method === 'PUT' && /^\/api\/campaign\/admin\/[^/]+$/.test(p);
+      if (!allowed) {
+        return res.status(403).json({ error: '리뷰어 공고수정 권한은 공고 수정에만 사용할 수 있습니다.' });
+      }
+    }
     req.admin = decoded; // { name, role, iat, exp }
     next();
   });

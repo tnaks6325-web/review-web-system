@@ -66,4 +66,14 @@ const advertiserLinkLimiter = rateLimit({
   legacyHeaders: false,
 });
 
-module.exports = { rateLimiter, registerLimiter, imageApiLimiter, intranetLoginLimiter, advertiserLinkLimiter };
+// ── 리뷰어 공고수정 토큰 발급(무인증 공개 경로) 전용 — 허용명단 phone8 브루트포스 완화.
+//    발급 자체가 verifyReviewer(이름+phone8) + active 명단 이중 게이트지만, 오라클/스터핑 억제. ──
+const campaignTokenLimiter = rateLimit({
+  windowMs: 60 * 1000,
+  max: 20,
+  message: { ok: false, error: '요청이 너무 잦습니다. 잠시 후 다시 시도하세요.' },
+  standardHeaders: true,
+  legacyHeaders: false,
+});
+
+module.exports = { rateLimiter, registerLimiter, imageApiLimiter, intranetLoginLimiter, advertiserLinkLimiter, campaignTokenLimiter };
