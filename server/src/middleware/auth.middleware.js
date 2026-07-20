@@ -42,7 +42,9 @@ function authMiddleware(req, res, next) {
     //   ★ /status 하위경로는 불허 — 모달은 본 PUT 바디로 status를 보내므로 불필요, 표면 최소화.
     if (decoded && decoded.via === 'reviewer_campaign') {
       const p = (req.baseUrl || '') + (req.path || '');
-      const allowed = req.method === 'PUT' && /^\/api\/campaign\/admin\/[^/]+$/.test(p);
+      // 공고 수정(PUT) + 상품정보 자동수집(POST /api/product/preview, 읽기전용·SSRF가드) 만 허용.
+      const allowed = (req.method === 'PUT' && /^\/api\/campaign\/admin\/[^/]+$/.test(p))
+                   || (req.method === 'POST' && p === '/api/product/preview');
       if (!allowed) {
         return res.status(403).json({ error: '리뷰어 공고수정 권한은 공고 수정에만 사용할 수 있습니다.' });
       }

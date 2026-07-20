@@ -30,6 +30,10 @@ const campTok = sign({ name: '김수만', role: 'admin', via: 'reviewer_campaign
 
 ok('허용: PUT /api/campaign/admin/:id (공고 수정)',
   runAuth(campTok, 'PUT', '/api/campaign', '/admin/abc123').nexted === true);
+ok('허용: POST /api/product/preview (상품정보 자동수집·읽기전용)',
+  runAuth(campTok, 'POST', '/api/product', '/preview').nexted === true);
+ok('차단: 상품 라우트 타 경로(POST /api/product/other) — preview 정확일치만',
+  runAuth(campTok, 'POST', '/api/product', '/other').status === 403);
 ok('차단: PUT /admin/:id/status (표면 최소화 — 모달은 본 PUT 바디로 status 전송)',
   runAuth(campTok, 'PUT', '/api/campaign', '/admin/abc123/status').status === 403);
 
@@ -109,7 +113,11 @@ ok('_norm8: 하이픈·11자리 → 뒤 8자리', svc._norm8('010-8592-6325') ==
   const rev = read('src/routes/reviewer.routes.js');
   const adm = read('src/routes/admin.routes.js');
   const camp = read('src/routes/campaign.routes.js');
+  const prod = read('src/routes/product.routes.js');
   const cc = readF('js/campaign-cards.js');
+
+  ok('SSRF: product/preview 사설·루프백·링크로컬 IP 차단 가드',
+    /function _isBlockedHost/.test(prod) && /_isBlockedHost\(host\)/.test(prod) && /169.*254/.test(prod));
 
   // 레드팀 방어 배선 (campaign.routes.js)
   ok('#2/#6: PUT /admin/:id가 via=reviewer_campaign면 전용 화이트리스트 핸들러로 분기',

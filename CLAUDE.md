@@ -50,7 +50,7 @@ GAS(Google Apps Script) 기반 리뷰 관리 시스템을 **Node.js Express + Po
 ### 리뷰어 앱 공고수정 권한 (마스터 허용명단 · 스코프 토큰)
 - 리뷰어 홈(`index.html`)은 무비밀번호 로그인(이름+전화 뒤8자리, `verifyReviewer`)이라 관리자 로그인보다 약하다. 그래서 리뷰어 화면에서 공고 카드를 눌러 인라인 수정(`campaign-cards.js` `openAdminEdit`)할 수 있는 사람을 **마스터가 phone8 허용명단(`reviewer_campaign_editors`, migration 059)으로 명시**한 사람만으로 제한한다.
 - **발급 이중 게이트**(`reviewerCampaignEditor.service.js` `issueCampaignToken`): ① `verifyReviewer(name,phone8)` 실 리뷰어 신원 재검증 AND ② active 명단 → 통과 시 **`{role:'admin', via:'reviewer_campaign'}` 2h 토큰** 발급(role은 마스터라도 admin으로 하향=최소권한). `POST /api/reviewer/campaign-token`(무인증 공개, `campaignTokenLimiter` 20/분, 미허용=401 동일문구로 열거 방지).
-- **격리(핵심)**: `authMiddleware`가 `via:'reviewer_campaign'` 토큰을 **`PUT /api/campaign/admin/:id[/status]` 로만** 허용(정규식, `via:'intranet'` 격리 선례와 동일 폐쇄기본) — 공고 생성/삭제/확정·`/api/admin/*`(명단 자기증식 불가)·Track B·주문원장 전부 차단. 프리필용 `GET /api/campaign/:id`는 authMiddleware 미경유 공개라 무관(role로 전체 반환).
+- **격리(핵심)**: `authMiddleware`가 `via:'reviewer_campaign'` 토큰을 **`PUT /api/campaign/admin/:id`(공고 수정) + `POST /api/product/preview`(상품정보 자동수집·읽기전용) 로만** 허용(정규식, `via:'intranet'` 격리 선례와 동일 폐쇄기본) — 공고 생성/삭제/확정·`/status`·`/api/admin/*`(명단 자기증식 불가)·Track B·주문원장 전부 차단. 프리필용 `GET /api/campaign/:id`는 authMiddleware 미경유 공개라 무관(단 via='reviewer_campaign'은 `_scopedEditorView` 축약뷰만). product/preview는 임의 URL 서버 fetch라 `_isBlockedHost`(사설·루프백·링크로컬 IP 리터럴·localhost 차단) SSRF 가드 보강.
 - **관리 UI**: 관리자 설정탭 "리뷰어 앱 공고수정 허용"(마스터 전용, `GET/POST /api/admin/campaign-editors` = authMiddleware+masterOnly). 프론트 = 로그인 시 `maybeFetchCampEditToken`로 토큰 받아 `sessionStorage.rapp_camp_edit_token`(로그아웃 시 제거), `campaign-cards.js` `_adminTok()`가 병합. 회귀가드 `tests/reviewerCampaignEditor.test.js`.
 
 ### 컬럼감지 SoT (컬럼 판정 DB화 1단계) — 매핑 우선 · 키워드는 부트스트랩/폴백

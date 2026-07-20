@@ -319,9 +319,10 @@
         <label class="cae-lb">랜딩(상품) URL</label>
         <div style="display:flex;gap:6px">
           <input id="cae_landing" class="cae-in" type="text" style="flex:1;min-width:0" placeholder="https://">
+          <button type="button" id="caeProdFetch" class="cae-btn gho" style="white-space:nowrap" title="이 URL에서 상품명·가격·썸네일 자동 가져오기 (쿠팡은 봇차단으로 자동 불가)">가져오기</button>
           <button type="button" id="caeLandingOpen" class="cae-btn gho" style="white-space:nowrap" title="상품 페이지를 새 탭에서 열기 — 이미지 우클릭 → 이미지 주소 복사 후 아래 썸네일에 붙여넣기">바로가기 ↗</button>
         </div>
-        <div class="cae-note">상품 페이지를 열어 이미지 우클릭 → "이미지 주소 복사" 후 아래 썸네일 칸에 붙여넣기</div>
+        <div class="cae-note">[가져오기]: 상품명·썸네일 자동 채움(쿠팡 외 몰). 쿠팡은 봇차단이라 썸네일은 페이지 열어 이미지주소 붙여넣기·수동입력.</div>
         <label class="cae-lb">썸네일 URL <span style="font-weight:400;color:#9CA3AF">(비우면 제거)</span></label>
         <input id="cae_thumb" class="cae-in" type="text" placeholder="상품 이미지 주소(coupangcdn 등) 붙여넣기">
         <div id="cae_thumb_prevwrap" style="display:none;margin-top:8px;text-align:center;background:#F3F4F6;border-radius:10px;padding:12px">
@@ -348,6 +349,7 @@
     ovl.querySelector('#cae_thumb_file').addEventListener('change', _caeThumbFromFile);
     ovl.querySelector('#cae_thumb').addEventListener('input', _caeSyncPreview);
     ovl.querySelector('#cae_time_range').addEventListener('input', _caeToggleWindow);
+    ovl.querySelector('#caeProdFetch').addEventListener('click', _caeFetchProduct);
     document.body.appendChild(ovl);
     return ovl;
   }
@@ -369,6 +371,32 @@
     const note = document.getElementById('cae_window_auto');
     if (row) row.style.display = auto ? 'none' : '';
     if (note) note.style.display = auto ? '' : 'none';
+  }
+
+  // 랜딩(상품) URL에서 상품명·가격·썸네일 자동 수집(쿠팡 외 몰). 쿠팡은 봇차단이라 hint 안내.
+  //   상품명 → 공고 제목, 썸네일 → 썸네일 URL 자동 채움. 가격은 저장 항목이 없어 참고용(토스트).
+  async function _caeFetchProduct() {
+    const url = _caeV('cae_landing').trim();
+    if (!url) { _toast('랜딩(상품) URL을 입력하세요.', true); return; }
+    if (!/^https?:\/\//i.test(url)) { _toast('http(s):// 로 시작하는 URL을 입력하세요.', true); return; }
+    _toast('상품 정보 가져오는 중...');
+    try {
+      const r = await fetch(_apiBase() + '/api/product/preview', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'Authorization': 'Bearer ' + _adminTok() },
+        body: JSON.stringify({ url }),
+      });
+      if (r.status === 401 || r.status === 403) { _toast('권한이 없거나 로그인이 만료되었습니다.', true); return; }
+      const j = await r.json();
+      const has = j && (j.name || j.price || j.thumbnail);
+      if (j && j.ok && has) {
+        if (j.name) document.getElementById('cae_title').value = j.name;
+        if (j.thumbnail) { document.getElementById('cae_thumb').value = j.thumbnail; _caeSyncPreview(); }
+        _toast('상품정보를 가져왔습니다' + (j.price ? ' (가격 ' + j.price + ' · 참고용)' : '') + '. [저장]으로 반영하세요.');
+      } else {
+        _toast((j && j.hint) || '상품 정보를 가져오지 못했습니다. 수동 입력하세요.', true);
+      }
+    } catch (e) { _toast('가져오기 실패: ' + e.message, true); }
   }
 
   async function openAdminEdit(id) {
