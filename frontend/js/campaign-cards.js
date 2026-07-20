@@ -66,7 +66,8 @@
       .pcard .poverlay .ot{font-size:1.35rem;font-weight:900;color:#fff;letter-spacing:.05em;font-variant-numeric:tabular-nums}
       .pcard .pribbon{position:absolute;top:10px;right:10px;z-index:3;font-size:.62rem;font-weight:900;border-radius:6px;padding:3px 8px;color:#fff}
       .pcard .pribbon.done{background:#F59E0B}.pcard .pribbon.closedr{background:#94A3B8}
-      .pcard .peditchip{position:absolute;top:10px;left:10px;z-index:4;font-size:.6rem;font-weight:900;background:rgba(17,24,39,.78);color:#fff;border-radius:6px;padding:3px 8px}
+      .pcard .peditchip{position:absolute;top:10px;left:10px;z-index:4;font-size:.62rem;font-weight:900;background:#1B64DA;color:#fff;border:none;border-radius:6px;padding:4px 9px;cursor:pointer;box-shadow:0 1px 4px rgba(27,100,218,.4)}
+      .pcard .peditchip:hover{background:#1550b8}
       .cae-ovl{position:fixed;inset:0;z-index:100000;background:rgba(0,0,0,.5);display:flex;align-items:center;justify-content:center;padding:16px}
       .cae-box{box-sizing:border-box;background:#fff;border-radius:16px;max-width:480px;width:100%;max-height:88vh;overflow-y:auto;padding:16px 18px;box-shadow:0 8px 30px rgba(0,0,0,.25)}
       .cae-box *{box-sizing:border-box}
@@ -134,8 +135,8 @@
 
     return `
       <div class="pcard" data-camp-id="${_esc(c.id)}" style="${isClosed ? 'opacity:.55;filter:grayscale(1);' : ''}"
-           onclick="CampCards._onCardClick(event, '${_esc(c.id)}')">
-        ${_adminTok() ? '<span class="peditchip">✏️ 관리자 수정</span>' : ''}
+           onclick="location.href='campaign.html?id=${encodeURIComponent(c.id)}'">
+        ${_adminTok() ? `<button type="button" class="peditchip" onclick="event.stopPropagation();event.preventDefault();CampCards.openAdminEdit('${_esc(c.id)}')">✏️ 관리자 수정</button>` : ''}
         ${ribbon}${overlay}
         ${thumb}
         <div class="pbody">
@@ -279,7 +280,11 @@
           <div><label class="cae-lb">총 모집(0=무제한)</label><input id="cae_total" class="cae-in" type="number" min="0"></div>
         </div>
         <label class="cae-lb">랜딩(상품) URL</label>
-        <input id="cae_landing" class="cae-in" type="text" placeholder="https://">
+        <div style="display:flex;gap:6px">
+          <input id="cae_landing" class="cae-in" type="text" style="flex:1;min-width:0" placeholder="https://">
+          <button type="button" id="caeLandingOpen" class="cae-btn gho" style="white-space:nowrap" title="상품 페이지를 새 탭에서 열기 — 이미지 우클릭 → 이미지 주소 복사 후 아래 썸네일에 붙여넣기">바로가기 ↗</button>
+        </div>
+        <div class="cae-note">상품 페이지를 열어 이미지 우클릭 → "이미지 주소 복사" 후 아래 썸네일 칸에 붙여넣기</div>
         <label class="cae-lb">썸네일 URL <span style="font-weight:400;color:#9CA3AF">(비우면 제거)</span></label>
         <input id="cae_thumb" class="cae-in" type="text" placeholder="저장된 썸네일 주소">
         <div style="display:flex;gap:6px;align-items:center;margin-top:6px">
@@ -296,10 +301,15 @@
           <button type="button" id="caeClose" class="cae-btn gho">닫기</button>
         </div>
       </div>`;
-    ovl.addEventListener('click', (e) => { if (e.target === ovl) ovl.remove(); });
+    // ★ 바깥 클릭으로는 닫히지 않음 — [닫기] 버튼으로만 닫는다(실수 닫힘 방지, 요구사항)
     ovl.querySelector('#caeClose').addEventListener('click', () => ovl.remove());
     ovl.querySelector('#caeSave').addEventListener('click', _caeSave);
     ovl.querySelector('#caeThumbFetch').addEventListener('click', _caeThumbFromUrl);
+    ovl.querySelector('#caeLandingOpen').addEventListener('click', () => {
+      const u = _caeV('cae_landing').trim();
+      if (/^https?:\/\//i.test(u)) window.open(u, '_blank', 'noopener');
+      else _toast('열 수 있는 상품 URL이 없습니다.', true);
+    });
     ovl.querySelector('#cae_thumb_file').addEventListener('change', _caeThumbFromFile);
     ovl.querySelector('#cae_thumb').addEventListener('input', _caeSyncPreview);
     document.body.appendChild(ovl);
@@ -430,9 +440,8 @@
       const j = await r.json();
       if (r.status === 401 || r.status === 403) throw new Error('관리자 로그인이 만료되었거나 권한이 없습니다. /admin에서 다시 로그인해 주세요.');
       if (!r.ok || !j.ok) throw new Error(j.error || '저장 실패');
-      const ovl = document.getElementById('caeOvl');
-      if (ovl) ovl.remove();
-      _toast('저장되었습니다 — 관리자 대시보드와 동기화 완료');
+      // ★ 저장해도 팝업은 유지 — [닫기] 버튼으로만 닫는다(요구사항). 목록만 갱신.
+      _toast('저장되었습니다 — 관리자 대시보드와 동기화 완료. [닫기]로 닫으세요.');
       if (typeof _onNeedRefresh === 'function') { try { _onNeedRefresh(); } catch (_) { /* noop */ } }
     } catch (e) {
       _toast(e.message, true);
