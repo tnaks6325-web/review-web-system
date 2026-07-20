@@ -133,6 +133,8 @@
   /* ── 편집 UI ── */
   .ecell{cursor:text;border-bottom:1px dashed transparent;border-radius:3px;padding:1px 3px} .ecell:hover{border-bottom-color:var(--line2);background:var(--card2)}
   .ecell.edited{background:var(--accent-soft);border-bottom-color:var(--accent)}
+  @keyframes cellsaved{from{box-shadow:0 0 0 2px color-mix(in srgb,var(--safe) 60%,transparent)}to{box-shadow:0 0 0 2px transparent}}
+  .ecell.cellsaved{animation:cellsaved .6s ease-out}   /* 백그라운드 저장 완료 = 초록 링 페이드(엑셀식 즉시감) */
   .chk.clk{cursor:pointer;border-radius:4px;padding:0 4px} .chk.clk:hover{background:var(--card2)} .chk.clk.edited{outline:1px solid var(--accent);outline-offset:1px}
   .einp{font:inherit;font-size:12.5px;width:100%;min-width:60px;padding:2px 5px;border:1px solid var(--accent);border-radius:5px;background:var(--card);color:var(--ink)}
   .revb{cursor:pointer;color:var(--accent);font-size:12px;user-select:none} .revb:hover{color:var(--bad)}
@@ -998,7 +1000,7 @@ function buildGrid(wd){
       <button class="btn xs" onclick="openGHidMenu(event)">숨긴 열${nHid?` <b style="color:var(--accent-deep)">${nHid}</b>`:' 0'}</button>
       ${hasFilt?`<button class="btn xs" style="color:var(--warn);border-color:color-mix(in srgb,var(--warn) 35%,var(--line))" onclick="clearGFilters()">필터 초기화 ✕</button>`:''}
       <button class="btn xs" onclick="showEditHistory()">편집 이력</button>
-      <span class="gnote">시트 동일 컬럼 · <b>컬럼명 클릭</b>=필터·정렬·숨기기 · 헤더 <b>가로 드래그</b>=여러 열 선택 → 숨기기 · <b>행 그룹</b> 접기/펼치기 · <b>셀 클릭 편집</b></span></div>
+      <span class="gnote">시트 동일 컬럼 · <b>컬럼명 클릭</b>=필터·정렬·숨기기 · 헤더 <b>가로 드래그</b>=여러 열 선택 → 숨기기 · <b>행 그룹</b> 접기/펼치기 · <b>셀 클릭=즉시 편집</b>(Enter=아래·Tab=오른쪽·Esc=취소)</span></div>
     <div class="gridscroll"><table class="sheetgrid"><thead>${thead}</thead><tbody>${body}</tbody></table></div>
     <div id="addbox"></div>
     <button class="btn" style="margin-top:10px" onclick="showAddForm()">＋ 참여자 추가</button>`;
@@ -1135,9 +1137,84 @@ function toggleAllGGroups(){ const gb=STATE.gGroupBy; if(!gb) return;
     STATE.gCollapsed=new Set(filt.map(r=>gCellDisp(r,gb))); }
   rerenderGrid();
 }
-// 그리드 셀 편집: 헤더/필드는 data 속성으로만 전달(주입 안전). beginEdit/revertEdit(기존 오버레이 경로) 재사용.
-function beginEditCell(el){ beginEdit(el, el.getAttribute('data-id'), el.getAttribute('data-field')); }
-function revertCell(ev, el){ if(ev)ev.stopPropagation(); revertEdit(el.getAttribute('data-id'), el.getAttribute('data-field')); }
+// ── 그리드 셀 즉시 편집(엑셀/구글시트식) ──
+//   인라인 입력 → 커밋 시 로컬 모델 즉시 반영 + 해당 셀만 재도색 + 백그라운드 저장(전체 리로드/네트워크 대기 없음 = 딜레이 0).
+//   Enter=아래 셀, Tab=오른쪽, Shift+Tab=왼쪽으로 이어서 편집. Esc=취소(로컬 복원). 저장 실패/충돌 시에만 롤백·리로드.
+function _gridRowById(id){ return ((STATE.wd&&STATE.wd.roster)||[]).find(r=>String(r.id)===String(id)); }
+// 그리드 col 셀 1칸을 로컬 모델 기준으로 재도색(rowHtml의 col 분기와 동일 계산 — 편집표시/되돌리기/gempty/gok 일치).
+function _paintGridCell(r, field, td){
+  if(!td||!field||field.indexOf('col:')!==0) return;
+  const h=field.slice(4);
+  const rj=(r.rowJson&&typeof r.rowJson==='object')?r.rowJson:{};
+  const ce=(r.cellEdits&&typeof r.cellEdits==='object')?r.cellEdits:{};
+  const ed=(h in ce); const raw= ed?ce[h]:rj[h];
+  const disp= ed?(raw==null?'':String(raw)):_gridVal(h, raw);
+  const editv= ed?disp:_gridEditVal(h, raw);
+  const isOk=(h==='리뷰제출'||h==='입금');
+  td.classList.remove('gempty','gok'); if(!disp) td.classList.add('gempty'); if(isOk&&disp) td.classList.add('gok');
+  td.innerHTML=`<span class="ecell${ed?' edited':''}" data-val="${esc(editv!=null?editv:disp)}" data-id="${esc(r.id)}" data-field="${esc(field)}" onclick="beginEditCell(this)">${esc(disp||'—')}</span>${ed?` <span class="revb" title="되돌리기" data-id="${esc(r.id)}" data-field="${esc(field)}" onclick="revertCell(event,this)">↩</span>`:''}`;
+}
+function beginEditCell(el){
+  const td=el&&el.closest?el.closest('td'):null; if(!td||td.querySelector('input')) return;
+  const rowId=el.getAttribute('data-id'), field=el.getAttribute('data-field'), cur=el.getAttribute('data-val')||'';
+  td.innerHTML=`<input class="einp" value="${esc(cur)}">`;
+  const inp=td.querySelector('input'); inp.focus(); inp.select();
+  let done=false;
+  const restore=()=>{ const r=_gridRowById(rowId); if(r) _paintGridCell(r,field,td); else reloadWorkdesk(); };
+  const finish=(nav)=>{ if(done)return; done=true;
+    const val=inp.value;
+    if(val===cur) restore(); else commitCellEdit(rowId, field, val, td);   // 무변경=복원 · 변경=즉시반영+백그라운드 저장
+    if(nav) _navFromCell(td, nav); };
+  const cancel=()=>{ if(done)return; done=true; restore(); };
+  inp.addEventListener('blur',()=>finish(null));
+  inp.addEventListener('keydown',e=>{
+    if(e.key==='Enter'){ e.preventDefault(); finish('down'); }
+    else if(e.key==='Tab'){ e.preventDefault(); finish(e.shiftKey?'left':'right'); }
+    else if(e.key==='Escape'){ e.preventDefault(); cancel(); }
+  });
+}
+// 낙관적 커밋: 로컬 즉시 반영 → 백그라운드 저장. 실패 시 (아직 최신 값일 때만) 롤백해 더 새 편집 보호.
+function commitCellEdit(rowId, field, value, td){
+  const r=_gridRowById(rowId); if(!r||!field||field.indexOf('col:')!==0) return;
+  const h=field.slice(4); r.cellEdits=(r.cellEdits&&typeof r.cellEdits==='object')?r.cellEdits:{};
+  const had=(h in r.cellEdits), prev=r.cellEdits[h];
+  r.cellEdits[h]=value; _paintGridCell(r, field, td);
+  const t=STATE.cur; if(!t) return;
+  const rollback=()=>{ if(r.cellEdits[h]===value){ if(had) r.cellEdits[h]=prev; else delete r.cellEdits[h]; _paintGridCell(r, field, td); } };
+  api('/api/trackb/workdesk/edit',{method:'POST',body:JSON.stringify({sheetId:t.sheetId,tabName:t.tabName,rowId,field,value})})
+    .then(resp=>{
+      if(resp&&resp.ok){ const s=td.querySelector('.ecell'); if(s){ s.classList.add('cellsaved'); setTimeout(()=>{ s.classList.remove('cellsaved'); },600); } return; }
+      rollback();
+      if(resp&&resp.error==='concurrent_edit_conflict'){ toast('동시 편집 감지 — 최신 상태로 새로고침'); reloadWorkdesk(); }
+      else toast(resp&&resp.error?('편집 거부: '+resp.error):'편집 실패');
+    })
+    .catch(()=>{ rollback(); toast('편집 실패 — 네트워크'); });
+}
+// 커밋 후 이동(Enter=아래·Tab=오른쪽·Shift+Tab=왼쪽) — 다음 편집 가능한 셀로 이어 편집.
+function _navFromCell(td, dir){
+  const tr=td.parentElement; if(!tr) return; const cells=[...tr.children]; const ci=cells.indexOf(td);
+  const open=cell=>{ if(!cell) return false; const s=cell.querySelector('.ecell'); if(s){ setTimeout(()=>beginEditCell(s),0); return true; } return false; };
+  if(dir==='right'||dir==='left'){ const step=dir==='right'?1:-1;
+    for(let j=ci+step;j>=0&&j<cells.length;j+=step){ if(open(cells[j])) return; } }
+  else{ const tbody=tr.parentElement; if(!tbody) return;
+    const rows=[...tbody.children].filter(x=>x.tagName==='TR'&&!x.classList.contains('grouphd'));
+    const ri=rows.indexOf(tr); const target=rows[ri+(dir==='down'?1:-1)]; if(target) open(target.children[ci]); }
+}
+// 되돌리기(그리드 col): 로컬 즉시 원복 + 백그라운드 revert. 실패 시 복원.
+function revertCell(ev, el){ if(ev)ev.stopPropagation();
+  const rowId=el.getAttribute('data-id'), field=el.getAttribute('data-field');
+  const td=el&&el.closest?el.closest('td'):null, r=_gridRowById(rowId);
+  if(r&&td&&field&&field.indexOf('col:')===0){
+    const h=field.slice(4), had=!!(r.cellEdits&&(h in r.cellEdits)), prev=had?r.cellEdits[h]:undefined;
+    if(r.cellEdits) delete r.cellEdits[h];
+    _paintGridCell(r, field, td);
+    const t=STATE.cur; if(!t) return;
+    api('/api/trackb/workdesk/revert',{method:'POST',body:JSON.stringify({sheetId:t.sheetId,tabName:t.tabName,rowId,field})})
+      .catch(()=>{ if(had){ r.cellEdits=r.cellEdits||{}; r.cellEdits[h]=prev; _paintGridCell(r,field,td); } toast('되돌리기 실패'); });
+    return;
+  }
+  revertEdit(rowId, field);   // 비그리드(폴백) 경로
+}
 // 편집 이력(감사) 모달
 async function showEditHistory(){
   const t=STATE.cur; if(!t)return;
