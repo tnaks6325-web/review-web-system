@@ -1,0 +1,430 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+  <meta charset="UTF-8"/>
+  <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+  <title>기능 소개 — 리뷰어 직접참여 캠페인</title>
+  <style>
+  :root{
+    --paper:#F4F6FC; --card:#FFFFFF; --ink:#151B26; --mut:#5E6A7C; --faint:#8B96A8;
+    --line:#E2E7F0; --accent:#3182F6; --accent-deep:#1B64DA; --accent-soft:#E9F1FE;
+    --ok:#12B886; --ok-soft:#DDF5EC; --warn:#B45309; --warn-soft:#FDF0D9;
+    --err:#DC2626; --err-soft:#FDE8E8; --vio:#7C3AED; --vio-soft:#EDE9FE;
+    --wire:#CBD4E1; --wire-soft:#EEF1F7;
+    --shadow:0 2px 14px rgba(21,40,80,.07);
+  }
+  @media (prefers-color-scheme: dark){
+    :root{
+      --paper:#0E131B; --card:#161D29; --ink:#E8EDF5; --mut:#9AA6B8; --faint:#6E7A8C;
+      --line:#2A3444; --accent:#5B9BF8; --accent-deep:#82B4FA; --accent-soft:#1B2A44;
+      --ok:#3DCF9F; --ok-soft:#123528; --warn:#F0B35C; --warn-soft:#3A2B12;
+      --err:#F87171; --err-soft:#3A1515; --vio:#A78BFA; --vio-soft:#2A2344;
+      --wire:#3A4658; --wire-soft:#1D2634;
+      --shadow:0 2px 14px rgba(0,0,0,.35);
+    }
+  }
+  :root[data-theme="dark"]{
+    --paper:#0E131B; --card:#161D29; --ink:#E8EDF5; --mut:#9AA6B8; --faint:#6E7A8C;
+    --line:#2A3444; --accent:#5B9BF8; --accent-deep:#82B4FA; --accent-soft:#1B2A44;
+    --ok:#3DCF9F; --ok-soft:#123528; --warn:#F0B35C; --warn-soft:#3A2B12;
+    --err:#F87171; --err-soft:#3A1515; --vio:#A78BFA; --vio-soft:#2A2344;
+    --wire:#3A4658; --wire-soft:#1D2634;
+    --shadow:0 2px 14px rgba(0,0,0,.35);
+  }
+  :root[data-theme="light"]{
+    --paper:#F4F6FC; --card:#FFFFFF; --ink:#151B26; --mut:#5E6A7C; --faint:#8B96A8;
+    --line:#E2E7F0; --accent:#3182F6; --accent-deep:#1B64DA; --accent-soft:#E9F1FE;
+    --ok:#12B886; --ok-soft:#DDF5EC; --warn:#B45309; --warn-soft:#FDF0D9;
+    --err:#DC2626; --err-soft:#FDE8E8; --vio:#7C3AED; --vio-soft:#EDE9FE;
+    --wire:#CBD4E1; --wire-soft:#EEF1F7;
+    --shadow:0 2px 14px rgba(21,40,80,.07);
+  }
+  *{margin:0;padding:0;box-sizing:border-box}
+  body{background:var(--paper);color:var(--ink);
+    font-family:"Apple SD Gothic Neo","Pretendard","Noto Sans KR","Malgun Gothic",system-ui,sans-serif;
+    line-height:1.6;-webkit-font-smoothing:antialiased}
+  .wrap{max-width:1000px;margin:0 auto;padding:0 20px 80px}
+
+  .hero{padding:50px 0 28px;text-align:center}
+  .hero .eyebrow{font-size:.76rem;font-weight:700;letter-spacing:.16em;color:var(--accent);text-transform:uppercase}
+  .hero h1{font-size:clamp(1.7rem,4.5vw,2.5rem);font-weight:800;letter-spacing:-.02em;margin:10px 0 10px;text-wrap:balance}
+  .hero p{color:var(--mut);max-width:56ch;margin:0 auto}
+  .hero .big-emoji{font-size:2.4rem;margin-bottom:6px}
+
+  nav.toc{position:sticky;top:0;z-index:50;background:var(--paper);padding:10px 0;border-bottom:1px solid var(--line);
+    display:flex;gap:6px;overflow-x:auto;justify-content:center}
+  nav.toc a{flex-shrink:0;font-size:.8rem;font-weight:700;color:var(--mut);text-decoration:none;padding:7px 13px;border-radius:999px}
+  nav.toc a:hover{color:var(--accent-deep);background:var(--accent-soft)}
+
+  section{padding-top:54px}
+  .sec-label{font-size:.74rem;font-weight:700;letter-spacing:.12em;color:var(--accent);margin-bottom:6px;text-align:center}
+  section>h2{font-size:1.45rem;font-weight:800;letter-spacing:-.015em;margin-bottom:8px;text-align:center;text-wrap:balance}
+  section>p.desc{color:var(--mut);max-width:62ch;margin:0 auto 22px;text-align:center}
+  .card{background:var(--card);border:1px solid var(--line);border-radius:14px;box-shadow:var(--shadow)}
+
+  /* 전/후 비교 파이프 */
+  .pipe{display:flex;flex-wrap:wrap;align-items:center;gap:8px;justify-content:center;margin:10px 0}
+  .pnode{padding:10px 14px;border-radius:11px;background:var(--card);border:1px solid var(--line);box-shadow:var(--shadow);text-align:center}
+  .pnode .e{font-size:1.2rem}
+  .pnode h6{font-size:.8rem;font-weight:800;margin-top:2px}
+  .pnode span{display:block;font-size:.68rem;color:var(--mut);max-width:150px}
+  .pnode.manual{border-style:dashed;border-color:var(--err);background:var(--err-soft)}
+  .pnode.autoo{border-color:var(--ok);border-width:1.5px}
+  .parrow{color:var(--faint);font-weight:800;flex-shrink:0}
+  .lane-tag{display:inline-block;font-size:.72rem;font-weight:900;border-radius:999px;padding:4px 14px;margin-bottom:8px}
+  .lane-tag.old{background:var(--err-soft);color:var(--err)}
+  .lane-tag.new{background:var(--ok-soft);color:var(--ok)}
+  .lanebox{border-radius:16px;border:1.5px solid var(--line);padding:18px;margin-top:14px;text-align:center}
+  .lanebox.old{border-color:var(--err)}
+  .lanebox.new{border-color:var(--ok)}
+
+  /* 플로우 스텝 */
+  .flow{display:flex;flex-wrap:wrap;align-items:stretch;gap:10px;justify-content:center;margin:16px 0 4px}
+  .fstep{flex:1 1 140px;min-width:140px;max-width:200px;position:relative;padding:16px 12px 12px;border-radius:12px;
+    background:var(--card);border:1px solid var(--line);box-shadow:var(--shadow);text-align:center}
+  .fstep .n{position:absolute;top:-10px;left:10px;background:var(--accent);color:#fff;font-size:.66rem;font-weight:800;border-radius:999px;padding:2px 8px}
+  .fstep .ico{font-size:1.5rem;line-height:1;margin-bottom:6px}
+  .fstep h5{font-size:.84rem;font-weight:800;margin-bottom:3px}
+  .fstep p{font-size:.72rem;color:var(--mut)}
+  .fstep.sys{background:var(--wire-soft);border-style:dashed}
+  .fstep.sys .n{background:var(--mut)}
+
+  /* 폰 와이어프레임 */
+  .wf-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(240px,1fr));gap:20px;align-items:start;margin-top:16px}
+  .phone-slot h4{font-size:.9rem;font-weight:800;margin-bottom:2px;text-align:center}
+  .phone-slot .cap{font-size:.76rem;color:var(--mut);margin-bottom:10px;text-align:center}
+  .phone{width:100%;max-width:260px;margin:0 auto;border:2px solid var(--wire);border-radius:24px;background:var(--card);padding:9px;box-shadow:var(--shadow)}
+  .screen{border-radius:16px;overflow:hidden;background:var(--paper);border:1px solid var(--line)}
+  .appbar{background:var(--accent);color:#fff;padding:9px 12px;font-size:.72rem;font-weight:800;display:flex;justify-content:space-between}
+  .appbar .r{font-size:.6rem;opacity:.85;font-weight:600}
+  .scr-body{padding:9px;display:flex;flex-direction:column;gap:7px}
+  .blk{background:var(--card);border:1px solid var(--line);border-radius:10px;padding:9px 10px}
+  .blk .t{font-size:.62rem;font-weight:800;color:var(--faint);margin-bottom:4px}
+  .wl{height:8px;border-radius:4px;background:var(--wire-soft);margin:4px 0}
+  .wl.w60{width:60%} .wl.w80{width:80%} .wl.w40{width:40%}
+  .wbtn{display:block;text-align:center;background:var(--accent);color:#fff;font-size:.7rem;font-weight:800;border-radius:8px;padding:8px;margin-top:4px}
+  .wbtn.ok{background:var(--ok)} .wbtn.ghost{background:var(--wire-soft);color:var(--mut)} .wbtn.off{background:var(--wire-soft);color:var(--faint)}
+  .field{border:1.5px solid var(--line);border-radius:7px;padding:6px 9px;font-size:.66rem;color:var(--faint);background:var(--card);margin:3px 0}
+  .holdbar{display:flex;align-items:center;gap:8px;background:var(--warn-soft);border:1px solid var(--warn);border-radius:9px;padding:6px 10px}
+  .holdbar .ht{flex:1;font-size:.58rem;font-weight:700;color:var(--warn)}
+  .holdbar .hv{font-size:.8rem;font-weight:900;color:var(--warn)}
+
+  /* 캠페인 카드 미니어처 */
+  .ccard{position:relative;background:var(--card);border:1px solid var(--line);border-radius:12px;overflow:hidden}
+  .ccard .thumb{height:46px;background:var(--wire-soft);display:flex;align-items:center;justify-content:center;font-size:1rem;color:var(--faint)}
+  .ccard .cbody{padding:8px 10px;display:flex;flex-direction:column;gap:5px}
+  .ccard .crow{display:flex;align-items:center;gap:5px;flex-wrap:wrap}
+  .ccard .cchip{font-size:.54rem;font-weight:800;background:var(--warn-soft);color:var(--warn);border-radius:5px;padding:1px 6px}
+  .ccard .clive{font-size:.52rem;font-weight:900;background:var(--ok);color:#fff;border-radius:5px;padding:1px 6px}
+  .ccard .ctitle{font-size:.68rem;font-weight:800}
+  .ccard .cmeta{font-size:.56rem;color:var(--mut);display:flex;gap:7px;flex-wrap:wrap}
+  .ccard .counter{font-size:.6rem;font-weight:800;color:var(--ok);background:var(--ok-soft);border-radius:6px;padding:1px 8px;display:inline-block}
+  .ccard .counter.full{color:var(--warn);background:var(--warn-soft)}
+  .ccard .overlay{position:absolute;inset:0;background:rgba(40,46,60,.62);display:flex;flex-direction:column;align-items:center;justify-content:center;gap:2px;backdrop-filter:grayscale(1)}
+  .ccard .overlay .ol{font-size:.54rem;font-weight:700;color:rgba(255,255,255,.85);letter-spacing:.08em}
+  .ccard .overlay .ot{font-size:.95rem;font-weight:900;color:#fff;font-variant-numeric:tabular-nums}
+  .ccard .ribbon{position:absolute;top:6px;right:6px;font-size:.52rem;font-weight:900;border-radius:5px;padding:2px 6px;color:#fff}
+  .ccard .ribbon.done{background:var(--warn)}
+
+  /* 데스크톱(관리자) */
+  .desk{border:2px solid var(--wire);border-radius:14px;overflow:hidden;background:var(--card);box-shadow:var(--shadow);margin:14px auto 0;max-width:640px}
+  .desk .bar{display:flex;align-items:center;gap:6px;background:var(--wire-soft);padding:8px 12px;border-bottom:1px solid var(--line)}
+  .desk .bar i{width:9px;height:9px;border-radius:50%;background:var(--wire)}
+  .desk .bar .url{flex:1;background:var(--card);border:1px solid var(--line);border-radius:6px;font-size:.62rem;color:var(--faint);padding:3px 10px;font-weight:600}
+  .desk .dbody{padding:14px;display:flex;flex-direction:column;gap:9px}
+  .dgrid2{display:grid;grid-template-columns:1fr 1fr;gap:8px}
+  @media (max-width:640px){.dgrid2{grid-template-columns:1fr}}
+  .ck{display:flex;align-items:center;gap:8px;font-size:.7rem;font-weight:700;border:1px solid var(--line);border-radius:8px;padding:6px 10px;background:var(--card)}
+  .ck.pass{border-color:var(--ok);color:var(--ok);background:var(--ok-soft)}
+  .cchiprow{display:flex;align-items:center;gap:8px;padding:8px 4px;border-bottom:1px solid var(--wire-soft);font-size:.72rem}
+  .schip{font-size:.6rem;font-weight:800;border-radius:6px;padding:2px 8px;white-space:nowrap}
+  .schip.done{background:var(--ok-soft);color:var(--ok)} .schip.run{background:var(--warn-soft);color:var(--warn)}
+  .schip.exp{background:var(--err-soft);color:var(--err)} .schip.late{background:var(--vio-soft);color:var(--vio)}
+  .minibtn{font-size:.62rem;font-weight:800;background:var(--accent-soft);color:var(--accent-deep);border-radius:7px;padding:3px 9px;white-space:nowrap;margin-left:auto}
+
+  /* 지킴이 카드 */
+  .keep{display:grid;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));gap:12px;margin-top:14px}
+  .kp{padding:18px;text-align:center}
+  .kp .e{font-size:1.7rem}
+  .kp h4{font-size:.92rem;font-weight:800;margin:6px 0 4px}
+  .kp p{font-size:.78rem;color:var(--mut)}
+
+  /* 예외 카드 */
+  .exc{display:grid;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));gap:12px;margin-top:14px}
+  .xc{padding:16px;border-top:4px solid var(--warn)}
+  .xc .q{font-size:.86rem;font-weight:800;margin-bottom:6px}
+  .xc .a{font-size:.78rem;color:var(--mut)}
+  .xc .a b{color:var(--ink)}
+
+  .legend{margin-top:10px;display:flex;flex-direction:column;gap:6px;max-width:640px;margin-left:auto;margin-right:auto}
+  .legend div{display:flex;gap:8px;font-size:.76rem;color:var(--mut);align-items:flex-start}
+  .legend b{color:var(--ink)}
+  .pin{display:inline-flex;align-items:center;justify-content:center;width:17px;height:17px;border-radius:50%;
+    background:var(--accent);color:#fff;font-size:.6rem;font-weight:800;line-height:1;flex-shrink:0;margin-top:2px}
+
+  .callout{border-left:4px solid var(--accent);background:var(--accent-soft);border-radius:0 12px 12px 0;padding:14px 18px;font-size:.86rem;margin:18px auto 0;max-width:720px}
+  .callout b{font-weight:800}
+  footer{margin-top:64px;padding-top:18px;border-top:1px solid var(--line);font-size:.74rem;color:var(--faint);text-align:center}
+  </style>
+</head>
+<body>
+<div class="wrap">
+
+  <header class="hero">
+    <div class="big-emoji">⚡</div>
+    <div class="eyebrow">NEW FEATURE</div>
+    <h1>리뷰어 직접참여 캠페인</h1>
+    <p>리뷰어가 공고를 보고 <b>스스로 참여하고, 작업내용을 확인하고, 한 화면에서 제출까지</b> 끝내는 새로운 진행 방식입니다. 시간이 되면 열리고, 정원이 차면 닫히고, 노쇼 자리는 되돌아옵니다 — 전부 자동으로.</p>
+  </header>
+
+  <nav class="toc">
+    <a href="#s1">무엇이 달라졌나</a>
+    <a href="#s2">리뷰어 화면</a>
+    <a href="#s3">자동으로 지켜주는 것</a>
+    <a href="#s4">관리자 화면</a>
+    <a href="#s5">이런 경우엔?</a>
+  </nav>
+
+  <!-- ═══ 01 무엇이 달라졌나 ═══ -->
+  <section id="s1">
+    <div class="sec-label">01</div>
+    <h2>무엇이 달라졌나</h2>
+    <div class="lanebox old">
+      <span class="lane-tag old">지금까지</span>
+      <div class="pipe">
+        <div class="pnode"><div class="e">📢</div><h6>공고</h6></div>
+        <span class="parrow">→</span>
+        <div class="pnode manual"><div class="e">💬</div><h6>카톡으로 신청</h6><span>사람이 접수</span></div>
+        <span class="parrow">→</span>
+        <div class="pnode manual"><div class="e">🙋</div><h6>작업내용 전달</h6><span>사람이 1:1 안내</span></div>
+        <span class="parrow">→</span>
+        <div class="pnode manual"><div class="e">🔗</div><h6>제출 링크 전달</h6><span>사람이 보냄</span></div>
+        <span class="parrow">→</span>
+        <div class="pnode"><div class="e">✅</div><h6>제출</h6></div>
+      </div>
+      <p style="font-size:.78rem;color:var(--err);font-weight:700;margin-top:6px">사람 손을 3번 거침 — 시간대 오픈·마감도 관리자가 직접 켜고 꺼야 함</p>
+    </div>
+    <div class="lanebox new">
+      <span class="lane-tag new">이제부터</span>
+      <div class="pipe">
+        <div class="pnode autoo"><div class="e">📱</div><h6>카드 보고</h6></div>
+        <span class="parrow">→</span>
+        <div class="pnode autoo"><div class="e">👆</div><h6>바로 참여</h6></div>
+        <span class="parrow">→</span>
+        <div class="pnode autoo"><div class="e">📦</div><h6>작업내용 자동 공개</h6></div>
+        <span class="parrow">→</span>
+        <div class="pnode autoo"><div class="e">🧾</div><h6>같은 화면에서 제출</h6></div>
+        <span class="parrow">→</span>
+        <div class="pnode autoo"><div class="e">🎉</div><h6>즉시 확정</h6></div>
+      </div>
+      <p style="font-size:.78rem;color:var(--ok);font-weight:700;margin-top:6px">사람 손 0번 — 오픈·마감·자리 관리까지 시스템이 알아서</p>
+    </div>
+  </section>
+
+  <!-- ═══ 02 리뷰어 화면 ═══ -->
+  <section id="s2">
+    <div class="sec-label">02</div>
+    <h2>리뷰어는 이렇게 참여해요</h2>
+
+    <h3 style="text-align:center;font-size:1rem;margin:18px 0 4px">홈에 뜨는 캠페인 카드 — 시간 따라 모습이 바뀝니다</h3>
+    <div class="wf-grid">
+      <div class="phone-slot">
+        <h4>⏰ 오픈 전</h4>
+        <p class="cap">숨기지 않고 <b>회색 화면 + 실시간 카운트다운</b>으로 예고</p>
+        <div class="phone"><div class="screen">
+          <div class="appbar">아이에이리뷰 <span class="r">홈</span></div>
+          <div class="scr-body">
+            <div class="ccard">
+              <div class="thumb">🛍️</div>
+              <div class="cbody">
+                <div class="crow"><span class="cchip">쿠팡</span><span class="clive">바로참여</span><span class="ctitle">○○ 무선 청소기</span></div>
+                <div class="cmeta"><span>🚚 실배송</span><span>🕑 14:00~16:00</span></div>
+              </div>
+              <div class="overlay"><div class="ol">오픈까지</div><div class="ot">00 : 41 : 23</div><div class="ol">매일 14:00 오픈</div></div>
+            </div>
+          </div>
+        </div></div>
+      </div>
+      <div class="phone-slot">
+        <h4>🔥 모집 중</h4>
+        <p class="cap">지금 참여한 인원이 <b>실시간 숫자</b>로 — 총 모집인원은 비공개</p>
+        <div class="phone"><div class="screen">
+          <div class="appbar">아이에이리뷰 <span class="r">홈</span></div>
+          <div class="scr-body">
+            <div class="ccard">
+              <div class="thumb">🛍️</div>
+              <div class="cbody">
+                <div class="crow"><span class="cchip">쿠팡</span><span class="clive">바로참여</span><span class="ctitle">○○ 무선 청소기</span></div>
+                <div class="cmeta"><span>🚚 실배송</span><span>🕑 14:00~16:00</span><span>💰 5,000</span></div>
+                <div class="crow"><span class="counter">🔥 5/20 참여중</span></div>
+                <span class="wbtn">참여하기</span>
+              </div>
+            </div>
+          </div>
+        </div></div>
+      </div>
+      <div class="phone-slot">
+        <h4>🌙 오늘은 마감</h4>
+        <p class="cap">정원이 차면 자동 마감 — <b>내일 다시 자동 오픈</b></p>
+        <div class="phone"><div class="screen">
+          <div class="appbar">아이에이리뷰 <span class="r">홈</span></div>
+          <div class="scr-body">
+            <div class="ccard" style="opacity:.75">
+              <span class="ribbon done">금일 모집완료</span>
+              <div class="thumb">🛍️</div>
+              <div class="cbody">
+                <div class="crow"><span class="cchip">쿠팡</span><span class="ctitle">○○ 무선 청소기</span></div>
+                <div class="crow"><span class="counter full">20/20 완료</span></div>
+                <span class="wbtn off">내일 14:00 다시 오픈</span>
+              </div>
+            </div>
+          </div>
+        </div></div>
+      </div>
+    </div>
+
+    <h3 style="text-align:center;font-size:1rem;margin:30px 0 4px">카드를 누르면 — 참여부터 제출까지 한 페이지</h3>
+    <div class="flow">
+      <div class="fstep"><span class="n">1</span><div class="ico">👆</div><h5>참여하기</h5><p>내 정보가 준비됐는지 자동 확인 후 자리 확보</p></div>
+      <div class="fstep"><span class="n">2</span><div class="ico">📦</div><h5>작업내용 공개</h5><p>상품·금액·구매 방법이 나에게만 열림</p></div>
+      <div class="fstep"><span class="n">3</span><div class="ico">🛒</div><h5>상품 구매</h5><p>버튼으로 상품 페이지 이동 → 구매</p></div>
+      <div class="fstep"><span class="n">4</span><div class="ico">🧾</div><h5>바로 제출</h5><p>돌아와서 같은 화면 아래 양식 작성</p></div>
+      <div class="fstep"><span class="n">5</span><div class="ico">🎉</div><h5>참여 확정</h5><p>제출 즉시 확정 — 참여현황에 바로 표시</p></div>
+    </div>
+
+    <div class="wf-grid" style="margin-top:22px">
+      <div class="phone-slot">
+        <h4>참여 직후 화면</h4>
+        <p class="cap">위에는 남은 시간, 아래로 내려가며 할 일이 순서대로</p>
+        <div class="phone"><div class="screen">
+          <div class="appbar">← 캠페인 <span class="r">참여중</span></div>
+          <div class="scr-body">
+            <div class="holdbar"><span class="ht">⏳ 제출까지 <span class="pin">1</span></span><span class="hv">14 : 58</span></div>
+            <div class="blk"><div class="t">📦 상품 · 옵션 · 결제금액 <span class="pin">2</span></div><div class="wl w80"></div><div class="wl w60"></div></div>
+            <div class="blk"><div class="t">🧭 구매 방법 (이미지 포함)</div><div class="wl"></div><div class="wl" style="height:26px;border-radius:8px"></div>
+              <span class="wbtn ghost">🔗 상품 페이지 열기 <span class="pin">3</span></span></div>
+            <div class="blk" style="border-color:var(--accent)">
+              <div class="t" style="color:var(--accent-deep)">🧾 구매양식 <span class="pin">4</span></div>
+              <div class="field">주문번호 · 주문자 · 계좌 …</div>
+              <span class="wbtn ok">제출</span>
+            </div>
+          </div>
+        </div></div>
+      </div>
+      <div class="phone-slot">
+        <h4>제출하면 끝!</h4>
+        <p class="cap">확정과 동시에 카운터·참여현황·팀채팅방 안내까지</p>
+        <div class="phone"><div class="screen">
+          <div class="appbar">← 캠페인 <span class="r">완료</span></div>
+          <div class="scr-body">
+            <div class="blk" style="text-align:center;padding:18px">
+              <div style="font-size:1.6rem">🎉</div>
+              <div style="font-size:.76rem;font-weight:800;margin:4px 0">참여 확정!</div>
+              <div style="font-size:.6rem;color:var(--mut)">구매양식이 접수됐어요.<br/>다시 제출하지 않아도 돼요.</div>
+              <span class="wbtn" style="margin-top:8px">내 참여현황 보기 <span class="pin">5</span></span>
+              <span class="wbtn ghost">💬 팀 채팅방 입장</span>
+            </div>
+          </div>
+        </div></div>
+      </div>
+    </div>
+    <div class="legend">
+      <div><span class="pin">1</span><span><b>제한시간 타이머</b> — 참여하면 15분 자리가 확보되고, 그 안에 구매와 제출까지 마치면 됩니다</span></div>
+      <div><span class="pin">2</span><span><b>작업내용</b> — 참여한 사람에게만 보입니다 (구경만 하는 사람에겐 잠김)</span></div>
+      <div><span class="pin">3</span><span>상품 페이지는 새 창으로 — 구매하고 돌아와도 <b>입력하던 내용이 그대로</b> 남아 있어요</span></div>
+      <div><span class="pin">4</span><span><b>구매양식이 페이지 안에</b> — 링크를 따로 받을 필요가 없습니다</span></div>
+      <div><span class="pin">5</span><span>제출 즉시 리뷰어 홈 참여현황에 표시 — "들어갔나?" 걱정 없음</span></div>
+    </div>
+  </section>
+
+  <!-- ═══ 03 자동으로 지켜주는 것 ═══ -->
+  <section id="s3">
+    <div class="sec-label">03</div>
+    <h2>보이지 않는 곳에서 자동으로 지켜주는 것</h2>
+    <p class="desc">참여가 공정하고 안전하게 굴러가도록, 시스템이 뒤에서 하는 일들입니다.</p>
+    <div class="keep">
+      <div class="card kp"><div class="e">🎟️</div><h4>티켓팅 방식 자리 관리</h4><p>참여 = 자리 1개 선점. 15분 안에 제출이 없으면 <b>자리가 자동으로 되돌아와</b> 다른 사람이 참여할 수 있어요. "신청만 하고 사라지는" 허수가 없습니다.</p></div>
+      <div class="card kp"><div class="e">⏰</div><h4>시간표대로 자동 운영</h4><p>구매시간이 되면 열리고, 끝나기 10분 전엔 새 참여를 막고, 정원이 차면 "금일 완료". <b>관리자가 켜고 끌 필요가 없습니다.</b></p></div>
+      <div class="card kp"><div class="e">🧾</div><h4>참여 전 내 정보 확인</h4><p>계좌·주소가 등록 안 된 분은 <b>돈 쓰기 전에</b> 미리 안내합니다. 이때는 자리를 차지하지 않아 손해가 없어요.</p></div>
+      <div class="card kp"><div class="e">🔒</div><h4>작업내용은 참여자에게만</h4><p>결제금액·구매 방법·채팅방은 실제 참여한 리뷰어에게만 열립니다. 총 모집인원도 외부에 공개하지 않습니다.</p></div>
+      <div class="card kp"><div class="e">🚦</div><h4>정원 초과 원천 차단</h4><p>마지막 한 자리에 여러 명이 동시에 눌러도 <b>딱 정원만큼만</b> 들어갑니다. "구매했는데 자리가 없어요"가 생기지 않아요.</p></div>
+      <div class="card kp"><div class="e">📬</div><h4>제출 데이터는 절대 안 잃음</h4><p>어떤 예외 상황에서도 제출된 구매 내용은 안전하게 저장됩니다. 늦게 도착한 제출도 운영자가 확인해 살릴 수 있어요.</p></div>
+    </div>
+  </section>
+
+  <!-- ═══ 04 관리자 화면 ═══ -->
+  <section id="s4">
+    <div class="sec-label">04</div>
+    <h2>관리자는 이렇게 운영해요</h2>
+    <div class="flow">
+      <div class="fstep"><span class="n">1</span><div class="ico">📥</div><h5>작업오더 접수</h5><p>지금과 동일</p></div>
+      <div class="fstep"><span class="n">2</span><div class="ico">✨</div><h5>공고 자동 채움</h5><p>[모집공고생성] 누르면 인원·시간·작업내용이 자동 입력</p></div>
+      <div class="fstep"><span class="n">3</span><div class="ico">🧮</div><h5>자동 점검 → 게시</h5><p>빠진 설정이 있으면 게시 불가</p></div>
+      <div class="fstep sys"><span class="n">4</span><div class="ico">🤖</div><h5>자동 운영</h5><p>오픈·마감·자리 반환 전부 시스템이</p></div>
+      <div class="fstep"><span class="n">5</span><div class="ico">📡</div><h5>관제</h5><p>현황 보고 예외만 클릭 한 번으로 처리</p></div>
+    </div>
+
+    <div class="desk">
+      <div class="bar"><i></i><i></i><i></i><span class="url">관리자 · 모집공고 등록 — 작업오더에서 자동으로 채워진 모습</span></div>
+      <div class="dbody">
+        <div class="blk" style="border-color:var(--ok)"><div class="t">⚡ 참여형 캠페인 — 자동으로 켜짐 <span class="pin">1</span></div></div>
+        <div class="dgrid2">
+          <div class="blk"><div class="t">🕑 구매시간 <span class="pin">2</span></div><div class="field">14:00 ~ 16:00 (자동 변환됨)</div></div>
+          <div class="blk"><div class="t">👥 인원</div><div class="field">하루 20명 · 총 100명(비공개)</div></div>
+        </div>
+        <div class="dgrid2">
+          <div class="blk"><div class="t">🖼 썸네일 <span class="pin">3</span></div><div class="field">자동 추출 or 직접 업로드</div></div>
+          <div class="blk"><div class="t">📦 작업내용 <span class="pin">4</span></div><div class="wl w80"></div><div style="font-size:.58rem;color:var(--faint)">이미지 포함 원본 그대로 복사됨</div></div>
+        </div>
+        <div class="blk"><div class="t">🧮 게시 전 자동 점검</div>
+          <div style="display:flex;flex-direction:column;gap:5px">
+            <div class="ck pass">✓ 시트 탭 연결됨</div>
+            <div class="ck pass">✓ 구매시간 입력됨</div>
+            <div class="ck pass">✓ 하루 진행 인원 입력됨</div>
+          </div>
+          <span class="wbtn" style="max-width:160px;margin-top:8px">게시하기</span>
+        </div>
+      </div>
+    </div>
+
+    <div class="desk">
+      <div class="bar"><i></i><i></i><i></i><span class="url">관리자 · 📡 관제 패널 — 공고 카드의 [관제] 버튼</span></div>
+      <div class="dbody">
+        <div style="font-size:.74rem;font-weight:800">오늘 · 진행중 3 / 제출 15 / 만료 2</div>
+        <div class="cchiprow"><b>김○○</b><span class="schip done">✓ 제출확정</span><span style="margin-left:auto;color:var(--faint);font-size:.62rem">14:12 참여</span></div>
+        <div class="cchiprow"><b>이○○</b><span class="schip run">⏳ 진행중</span><span style="margin-left:auto;color:var(--faint);font-size:.62rem">14:31 참여 · 14:46 마감</span></div>
+        <div class="cchiprow"><b>박○○</b><span class="schip exp">만료</span><span class="schip late">🛍 기구매 제출 있음 <span class="pin">5</span></span><span class="minibtn">수동확정</span></div>
+      </div>
+    </div>
+
+    <div class="legend">
+      <div><span class="pin">1</span><span>참여형 스위치·설정이 작업오더 내용으로 <b>자동으로 채워진 채</b> 열립니다 — 관리자는 확인·수정만</span></div>
+      <div><span class="pin">2</span><span>"2시~4시" 같은 글자를 시스템이 시간으로 바꿔 넣어줍니다</span></div>
+      <div><span class="pin">3</span><span>상품 이미지가 자동으로 안 잡히면 파일로 직접 올릴 수 있어요</span></div>
+      <div><span class="pin">4</span><span>유입 안내의 <b>이미지·서식이 그대로</b> 리뷰어에게 전달됩니다</span></div>
+      <div><span class="pin">5</span><span><b>수동확정</b> — 시간을 넘겨 제출한(하지만 실제로 구매한) 리뷰어를 클릭 한 번으로 구제</span></div>
+    </div>
+  </section>
+
+  <!-- ═══ 05 이런 경우엔? ═══ -->
+  <section id="s5">
+    <div class="sec-label">05</div>
+    <h2>이런 경우엔 어떻게 되나요?</h2>
+    <div class="exc">
+      <div class="card xc"><div class="q">⌛ 15분 안에 제출을 못 했어요</div><div class="a">자리는 자동으로 다른 분에게 돌아가고, <b>그날은 같은 캠페인에 다시 참여할 수 없어요</b>(다음날 가능). 참여 전에 미리 안내되는 규칙이에요.</div></div>
+      <div class="card xc"><div class="q">🛍 시간은 지났는데 이미 구매했어요</div><div class="a">제출하면 <b>구매 내용은 안전하게 접수</b>됩니다. 운영자가 관제 화면에서 확인하고 <b>[수동확정]</b>으로 참여를 살려드려요.</div></div>
+      <div class="card xc"><div class="q">📵 구매하러 갔다가 앱이 새로고침됐어요</div><div class="a">돌아오면 <b>쓰던 양식 내용이 그대로</b> 복원됩니다. 참여 상태도 유지돼요.</div></div>
+      <div class="card xc"><div class="q">❌ 주문이 취소되면 자리는요?</div><div class="a">관리자가 주문을 취소하면 그 <b>자리는 카운트에서 즉시 되돌아옵니다</b> — 숫자가 어긋나지 않아요.</div></div>
+    </div>
+    <div class="callout">
+      <b>기존 공고는 그대로예요.</b> 카톡으로 신청받던 기존 방식의 공고는 지금까지와 똑같이 동작하고,
+      새 참여형 공고에만 <b>"바로참여" 배지</b>가 붙어 구분됩니다. 공고를 만들 때 스위치 하나로 선택하면 됩니다.
+    </div>
+  </section>
+
+  <footer>
+    아이에이리뷰 · 리뷰어 직접참여 캠페인 기능 소개서 — 상세 설계는 「참여형 캠페인 PRD」(prd-reviewer-participation.html) 참고
+  </footer>
+</div>
+</body>
+</html>
