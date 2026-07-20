@@ -1097,7 +1097,7 @@ async function deleteAdv(i){
 //   흐름: ① 캠페인 시트 먼저 선택(탭 미리보기로 어떤 캠페인인지 확인) → ② 거래처명 검색(인트라넷 자동완성)
 //   → ③ 등록 = 업체 생성 + 선택 시트 전체 소유 자동 지정. 담당AE는 로그인명 자동.
 function showAddAdvertiser(){
-  STATE.advCur=null; STATE.advNameOk=false; _intraItems=[]; document.querySelectorAll('.advitem').forEach(el=>el.classList.remove('on'));
+  STATE.advCur=null; STATE.advNameOk=false; _intraItems=[]; _aeItems=[]; document.querySelectorAll('.advitem').forEach(el=>el.classList.remove('on'));
   const sheetOpts = Object.keys(STATE.sheetMap).map(sid=>`<option value="${esc(sid)}">${esc(sheetTitle(sid))}</option>`).join('');
   $('#ownPanel').innerHTML = `
     <div class="ph2"><span class="big">＋</span><div><h2>업체(거래처) 추가</h2><div class="acc">① 캠페인 시트를 먼저 선택하고 → ② 거래처명을 검색해 등록하세요. 등록하면 선택한 시트 전체가 이 업체 소유로 자동 지정됩니다.</div></div></div>
@@ -1114,15 +1114,18 @@ function showAddAdvertiser(){
         <div id="advNameChk" style="font-size:11.5px;margin-top:5px;min-height:15px"></div>
         <label style="margin-top:11px">담당 AE ${(STATE.role==='master'||STATE.role==='admin')?'<span style="color:var(--faint);font-weight:400">(인트라넷 사용자 자동완성 · 거래처 선택 시 담당자 자동 제안 · 비우면 미지정)</span>':'(로그인 정보 기준 자동 지정)'}</label>
         ${(STATE.role==='master'||STATE.role==='admin')
-          ? `<input id="advPm" list="aelist2" placeholder="예: 박세희" autocomplete="off"><datalist id="aelist2"></datalist>`
+          ? `<input id="advPm" list="aelist2" placeholder="예: 박세희" autocomplete="off" oninput="_advPmCheck()"><datalist id="aelist2"></datalist>`
           : `<input id="advPm" value="" readonly style="background:var(--card2);color:var(--muted);cursor:not-allowed">`}
+        <div id="advPmChk" style="font-size:11.5px;margin-top:5px;min-height:15px"></div>
         <div id="advErr" style="color:var(--bad);font-size:12px;margin-top:9px;min-height:15px"></div>
         <button id="advCreateBtn" class="btn pri assignbtn" disabled onclick="createAdvertiser()">＋ 업체 등록 + 시트 소유 지정</button>
       </div>
     </div>`;
   if(STATE.role==='master'||STATE.role==='admin'){
     api('/api/trackb/intranet/users?dept=AE').then(r=>{ const dl=$('#aelist2');   // 담당AE 후보 = AE 부서 직원만
-      if(dl&&r&&r.ok) dl.innerHTML=(r.items||[]).map(u=>`<option value="${esc(u.name)}">${esc(u.username)}${u.department?' · '+esc(u.department):''}</option>`).join('');
+      _aeItems=(r&&r.ok&&r.items)||[];
+      if(dl&&_aeItems.length) dl.innerHTML=_aeItems.map(u=>`<option value="${esc(u.name)}">${esc(u.username)}${u.department?' · '+esc(u.department):''}</option>`).join('');
+      _advPmCheck();   // 거래처 선택 시 manager 자동채움 됐을 수 있으니 목록 도착 후 재판정
     }).catch(()=>{});
   } else $('#advPm').value = STATE.name || '';
   setTimeout(()=>{ const el=$('#advSheet'); if(el) el.focus(); },40);
@@ -1139,7 +1142,7 @@ function onAdvSheet(){
 // 인트라넷 광고주DB 실시간 자동완성(서버 프록시 경유 — 브라우저는 인트라넷 직접 미호출). 실패 시 조용히 무시.
 //   ★ 등록 게이트: 거래처정보(인트라넷 광고주DB)에 정확히 존재하는 이름만 등록 허용 → 목록에서 선택(또는 정확 입력)해야
 //     [＋등록] 버튼이 활성화된다(미등록/오타 광고주 유입 차단). 서버(createAdvertiserScoped)도 동일 검증(최종 방어).
-let _sugTimer=null, _intraItems=[];
+let _sugTimer=null, _intraItems=[], _aeItems=[];
 function intraSuggest(q){
   clearTimeout(_sugTimer); const box=$('#advSug'); const val=(q||'').trim();
   _advNameCheck();   // 즉시(직전 후보 기준) 상태 갱신 — 타이핑 중 반응성
@@ -1175,7 +1178,16 @@ function pickIntra(name, manager){ const el=$('#advName'); if(el) el.value=name;
   const pm=$('#advPm');
   if(pm&&!pm.readOnly&&!pm.value.trim()&&(manager||'').trim()) pm.value=manager.trim();
   const box=$('#advSug'); if(box){ box.classList.remove('show'); box.innerHTML=''; }
-  _advNameCheck(); }
+  _advNameCheck(); _advPmCheck(); }
+// 담당 AE 입력값이 인트라넷 등록 AE(dept=AE 목록)에 있는지 → 확인 배지. 자유입력 허용이라 미매칭도 차단 안 함(회색 안내만).
+function _advPmCheck(){
+  const el=$('#advPm'), chk=$('#advPmChk'); if(!el||!chk) return;
+  const val=(el.value||'').trim().toLowerCase();
+  if(!val){ chk.textContent=''; chk.style.color=''; return; }
+  const ok=_aeItems.some(u=>String(u.name||'').trim().toLowerCase()===val);
+  if(ok){ chk.textContent='✓ 인트라넷 등록 AE 확인됨'; chk.style.color='var(--safe)'; }
+  else { chk.textContent='직접 입력값 (인트라넷 AE 목록에 없음)'; chk.style.color='var(--faint)'; }
+}
 async function createAdvertiser(){
   const sheetId=($('#advSheet')&&$('#advSheet').value)||'';
   const name=($('#advName').value||'').trim(), inad_pm=(($('#advPm')&&$('#advPm').value)||'').trim();
