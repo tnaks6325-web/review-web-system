@@ -1,7 +1,7 @@
 /**
  * 인트라넷 SSO + staff(AE) 초기매핑 스코프 회귀가드.
  *   1. loginIntranet — 인트라넷 서버 프록시 검증: 기본 staff(인트라넷 role 필드 불신뢰 — role=admin
- *      이어도 staff), INTRANET_SSO_ADMIN_USERS 지정 username 만 admin 승격(1a),
+ *      이어도 staff), INTRANET_SSO_ADMIN_USERS(username)·INTRANET_SSO_ADMIN_GROUPS(부서|파트) 지정 시 admin 승격(1a·1a4b),
  *      INTRANET_SSO_ALLOWED_ROLES 진입 게이트(2b, 미설정=전 직원), display_name 신원,
  *      실패/연결불가/입력누락 = fail-closed. 공유키 없음(비밀번호 결속).
  *      ★ admin 승격 토큰도 via:'intranet' 격리 유지(/api/trackb/* 전용 — 1.5e).
@@ -87,6 +87,21 @@ async function run() {
   assert.equal(r.role, 'admin', '1a4: 지정 admin 승격 유지');
   delete process.env.INTRANET_SSO_ADMIN_USERS;
   delete process.env.INTRANET_SSO_ALLOWED_GROUPS;
+
+  // 1a4b(그룹 승격): INTRANET_SSO_ADMIN_GROUPS = '부서|파트' → 그 파트 전원 admin(전체 열람·편집) 승격 + 진입게이트 무관 통과.
+  process.env.INTRANET_SSO_ADMIN_GROUPS = ' 콘텐츠운영팀|체험단파트 ';
+  r = await auth.loginIntranet('emp2', 'pw', mockFetch(200, { username: 'emp2', display_name: '체험단원', role: 'user', department: '콘텐츠운영팀', part: '체험단파트' }));
+  assert.equal(r.success, true, '1a4b: 지정 그룹 로그인 성공');
+  assert.equal(r.role, 'admin', '1a4b: 지정 그룹(부서|파트) → admin 승격');
+  r = await auth.loginIntranet('emp3', 'pw', mockFetch(200, { username: 'emp3', display_name: '기획원', role: 'user', department: '콘텐츠운영팀', part: '기획' }));
+  assert.equal(r.role, 'staff', '1a4b: 같은 부서 다른 파트는 승격 안 됨(staff)');
+  r = await auth.loginIntranet('emp4', 'pw', mockFetch(200, { username: 'emp4', display_name: '구버전', role: 'admin', department: '콘텐츠운영팀' }));
+  assert.equal(r.role, 'staff', '1a4b: part 없는 구버전 응답 + |part 규칙 = 과승격 방지(staff, fail-closed)');
+  process.env.INTRANET_SSO_ALLOWED_GROUPS = 'AE';   // 진입게이트가 다른 부서만 허용이어도 admin 그룹은 통과+승격
+  r = await auth.loginIntranet('emp2', 'pw', mockFetch(200, { username: 'emp2', display_name: '체험단원', role: 'user', department: '콘텐츠운영팀', part: '체험단파트' }));
+  assert.equal(r.success && r.role === 'admin', true, '1a4b: admin 그룹은 ALLOWED_GROUPS 밖이어도 통과+승격');
+  delete process.env.INTRANET_SSO_ALLOWED_GROUPS;
+  delete process.env.INTRANET_SSO_ADMIN_GROUPS;
 
   // 1a5(서버간 인증): INTRANET_API_KEY 설정 시 프록시 호출에 X-Api-Key 헤더를 실어 보낸다
   //   (인트라넷 API 가드 활성 시 키 없는 서버간 호출은 Unauthorized로 차단됨 — SSO 토큰 발급 실패 재발 방지).

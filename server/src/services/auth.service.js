@@ -79,10 +79,10 @@ async function loginStaff(name, pw) {
 // 인트라넷(inadd-webapp) 계정 로그인 — Track B 통합작업대 SSO(세션 이어받기).
 //   자격 검증은 인트라넷 서버(POST /api/auth/login, Cloudflare D1 서버측 대조)에 프록시 —
 //   공유키 불필요(사용자 비밀번호가 결속 비밀). 성공 시 review JWT 발급.
-//   ★ 권한(사용자 확정 정책 1a): 기본 'staff'(담당 업체 스코프). INTRANET_SSO_ADMIN_USERS(csv,
-//     인트라넷 username)에 명시된 지정 계정만 'admin' 승격 — 인트라넷 role 필드는 신뢰하지 않음
-//     (자기신고 필드·계정 탈취 대비). 승격이어도 via:'intranet' 격리(/api/trackb/* 전용)는 유지되어
-//     Track A 파괴 라우트(탭설정·주문정정·드라이브 등)에는 도달 불가.
+//   ★ 권한(사용자 확정 정책 1a): 기본 'staff'(담당 업체 스코프). 'admin'(전체 열람·편집) 승격 = INTRANET_SSO_ADMIN_USERS
+//     (csv, 인트라넷 username) 또는 INTRANET_SSO_ADMIN_GROUPS(csv, '부서' 또는 '부서|파트' — 예 "콘텐츠운영팀|체험단파트").
+//     인트라넷 role 필드는 신뢰하지 않음(자기신고·계정 탈취 대비)이나 department/part 는 인사DB(관리자 관할) 값이라 그룹 승격 근거로 사용.
+//     승격이어도 via:'intranet' 격리(/api/trackb/* 전용)는 유지되어 Track A 파괴 라우트(탭설정·주문정정·드라이브 등)에는 도달 불가.
 //   ★ 진입 조건(2b): INTRANET_SSO_ALLOWED_ROLES(csv) 설정 시 그 인트라넷 role만 진입 허용.
 //     미설정(빈) = 전 직원 허용(현행 유지 — env 설정 시점부터 게이트 활성).
 //   JWT name = 인트라넷 display_name(한글 실명) → advertisers.inad_pm(TRIM) 스코프 매칭과 정합.
@@ -124,23 +124,25 @@ async function loginIntranet(name, pw, _fetch = fetch) {
   const _csv = v => String(v || '').split(',').map(s => s.trim().toLowerCase()).filter(Boolean);
   const iRole = String(body.role || 'user').trim().toLowerCase();
   const iUser = String(body.username).trim().toLowerCase();
-  // 승격(1a): 지정 username 만 admin — 인트라넷 role 필드 불신뢰. 그 외 전원 staff(기존 안전장치 유지).
+  const iDept = String(body.department || '').trim().toLowerCase();
+  const iPart = String(body.part || '').trim().toLowerCase();
+  // 그룹(부서|파트) 매칭 헬퍼 — csv 각 항목 = '부서' 또는 '부서|파트'. TRIM + 대소문 무시 정확 일치(부분일치 없음: '체험단' ≠ '체험단파트').
+  //   part 규칙은 인트라넷 응답에 part 포함 시에만 매칭(inadd-webapp #164 이후) — 미포함이면 매칭 실패 = fail-closed(과승격/과개방 방지).
+  //   부서 단독 규칙(파트 미기재)은 구버전 응답에서도 동작.
+  const _matchGroups = csvVal => String(csvVal || '').split(',').map(s => s.trim()).filter(Boolean)
+    .some(g => { const [d, p] = g.split('|').map(x => String(x || '').trim().toLowerCase()); return !!d && d === iDept && (!p || p === iPart); });
+  // 승격 → 'admin'(전체 탭 열람·편집): ① 지정 username(INTRANET_SSO_ADMIN_USERS) 또는 ② 지정 그룹(INTRANET_SSO_ADMIN_GROUPS,
+  //   부서|파트 csv — 예: "콘텐츠운영팀|체험단파트"). 인트라넷 role 필드는 여전히 불신뢰(자기신고). department/part 는 인사DB(관리자 관할)
+  //   값이라 그룹 승격 근거로 사용. ★ 승격이어도 via:'intranet' 격리(/api/trackb/* 전용)는 유지 — Track A 파괴 라우트엔 도달 불가(폭발반경 한정).
   const isAdminUser = _csv(process.env.INTRANET_SSO_ADMIN_USERS).includes(iUser);
-  // 진입 게이트 — 우선순위: 지정 admin 은 항상 통과 → ① 그룹(부서|파트) 규칙(설정 시) → ② role 규칙(① 미설정 시) → 둘 다 미설정 = 전 직원.
-  //   ① INTRANET_SSO_ALLOWED_GROUPS: csv 의 각 항목 = '부서' 또는 '부서|파트' (예: "AE,콘텐츠운영팀|체험단파트").
-  //     로그인 시점에 인트라넷 직원DB의 department/part 값으로 판정 — 개인별 수동 등록 불필요, 인사이동 자동 반영.
-  //     매칭 = TRIM + 대소문 무시 정확 일치(부분일치 없음 — '체험단' ≠ '체험단파트').
-  //   ※ part 는 인트라넷 로그인 응답에 포함돼야 판정 가능(inadd-webapp #164 이후) — 부서 단독 규칙은 구버전 응답에서도 동작.
-  if (!isAdminUser) {
-    const groups = String(process.env.INTRANET_SSO_ALLOWED_GROUPS || '').split(',').map(s => s.trim()).filter(Boolean);
-    if (groups.length) {
-      const iDept = String(body.department || '').trim().toLowerCase();
-      const iPart = String(body.part || '').trim().toLowerCase();
-      const okGroup = groups.some(g => {
-        const [d, p] = g.split('|').map(x => String(x || '').trim().toLowerCase());
-        return !!d && d === iDept && (!p || p === iPart);
-      });
-      if (!okGroup) {
+  const isAdminGroup = _matchGroups(process.env.INTRANET_SSO_ADMIN_GROUPS);
+  const isAdmin = isAdminUser || isAdminGroup;
+  // 진입 게이트 — 우선순위: 승격(admin) 은 항상 통과 → ① 그룹(부서|파트) 규칙(설정 시) → ② role 규칙(① 미설정 시) → 둘 다 미설정 = 전 직원.
+  //   INTRANET_SSO_ALLOWED_GROUPS: 로그인 시점 인트라넷 직원DB의 department/part 로 판정(개인 수동등록 불필요·인사이동 자동 반영).
+  if (!isAdmin) {
+    const allowGroupsSet = String(process.env.INTRANET_SSO_ALLOWED_GROUPS || '').split(',').map(s => s.trim()).filter(Boolean).length;
+    if (allowGroupsSet) {
+      if (!_matchGroups(process.env.INTRANET_SSO_ALLOWED_GROUPS)) {
         return { success: false, error: '통합 작업대 사용 대상 부서/파트가 아닙니다. 관리자에게 문의하세요.' };
       }
     } else {
@@ -150,7 +152,7 @@ async function loginIntranet(name, pw, _fetch = fetch) {
       }
     }
   }
-  const role = isAdminUser ? 'admin' : 'staff';
+  const role = isAdmin ? 'admin' : 'staff';
   // iu = 인트라넷 username(감사 추적용 원천 식별자), ir = 인트라넷 원천 role(감사).
   //   스코프 키는 display_name(=inad_pm 매칭) — 인트라넷 직원DB의 실명은 관리자 관할(HR 데이터) 가정(부품4/CLAUDE.md).
   const token = jwt.sign(
