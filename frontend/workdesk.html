@@ -166,6 +166,7 @@
   table.sheetgrid .gfz{position:sticky;background:var(--card);z-index:2}
   table.sheetgrid thead th.gfz{z-index:4;background:var(--card2)}
   .gnum{text-align:center;color:var(--faint);font-weight:700} .gnm{font-weight:600}
+  table.sheetgrid td.gctr{text-align:center} table.sheetgrid th.gctr .th-in{justify-content:center}   /* 날짜/연락처 열 = 가운데 정렬(값 길이 달라도 앞여백=뒷여백) */
   table.sheetgrid .gph{font-family:var(--mono);font-size:11.5px;color:var(--muted)}
   table.sheetgrid tbody tr:hover td{background:#f7faff} table.sheetgrid tbody tr:hover td.gfz{background:#eef4ff}
   /* 편집 가능 셀 = td 자체(셀당 .ecell 스팬 제거 → DOM 노드 ~40%↓ = 렌더 비용 감소). 클릭=편집, edited=배경 강조. */
@@ -518,7 +519,8 @@ function _syncRailToggle(){ const b=$('#railToggle'); if(!b) return; const hidde
 function toggleRail(){ const hidden=!_railHidden();
   try{ localStorage.setItem('wd_rail_hidden_v1', hidden?'1':'0'); }catch(_){}
   const w=$('#wrap'); if(w) w.classList.toggle('railhidden', hidden);
-  _syncRailToggle(); }
+  _syncRailToggle(); _fitGrid();   // 레일 토글=그리드 컨테이너 폭 변경 → 주소 유동 재적합
+}
 
 // ══ 작업대 뷰 ══
 function renderWorkdeskView(){
@@ -630,6 +632,9 @@ function renderWorkdesk(wd){
     ${renderWorkOrderSection(wd)}
     <div id="gridhost">${tableSection}</div>`;
   _scheduleBodyFlush();   // 청크 렌더: 나머지 행을 프레임마다 append(대형 표 첫 화면 즉시)
+  if(gridMode) _fitGrid();   // 주소 유동 채움(언더플로 시)
+  if(!STATE._fitResizeBound){ STATE._fitResizeBound=true; let t=null;
+    window.addEventListener('resize',()=>{ clearTimeout(t); t=setTimeout(()=>{ if(STATE.wd&&(STATE.canEdit||STATE.role==='advertiser')) _fitGrid(); },120); }); }
   loadSettlement(STATE.cur);
   loadThread(STATE.cur);   // 협업/댓글 → 우측 레일 [협업/댓글] 탭에 렌더
 }
@@ -872,10 +877,11 @@ async function refreshUnseen(){
 // 컬럼 폭(px) — 고정열 오프셋 계산과 최소폭에 사용. 없으면 기본값.
 // 초밀도 최소폭: 짧은 열은 콘텐츠 기준으로 대폭 축소, 긴 열(주소 등)은 자동 레이아웃이 콘텐츠만큼 확장(무잘림).
 // table-layout:fixed에서 이 값은 '실제 열 너비'(auto 시절엔 최소폭). 신원열(참여자/연락처)은 이름+배지·번호가 안 잘리게 여유, 데이터열은 초밀도 유지(초과분 …+툴팁).
-const _COLW={'#':30,'참여자':116,'연락처':112,'번호':38,'담당자':56,'구매일자':78,'인애드명단':74,'주문자제출':74,'수취인':62,'id':92,'주소':150,'은행':52,'계좌번호':104,'예금주':60,'결제금액':66,'리뷰제출':66,'입금':48,'주문번호':106,'비고(닉네임)':84};
-// 광고주 그리드 전용 폭(초밀도 시안 반영) — 내부 그리드(_COLW)와 분리. 신원열 없는 10열 맞춤 + 연락처·구매일자 15% 축소.
+// 구매일자=73(최장값 "12/31 (월)" 핏)·연락처=110(phone "010-0000-0000" 핏) — 두 열은 값에 딱 맞춘 폭 + 가운데 정렬(앞여백=뒷여백). 주소는 유동(_isFlexCol).
+const _COLW={'#':30,'참여자':116,'연락처':110,'번호':38,'담당자':56,'구매일자':73,'인애드명단':74,'주문자제출':74,'수취인':62,'id':92,'주소':150,'은행':52,'계좌번호':104,'예금주':60,'결제금액':66,'리뷰제출':66,'입금':48,'주문번호':106,'비고(닉네임)':84};
+// 광고주 그리드 전용 폭(초밀도 시안 반영) — 내부 그리드(_COLW)와 분리. 신원열 없는 10열 맞춤. 구매일자/연락처는 값 핏(내부와 동일 폭).
 //   ID열은 시트명 다양(쿠팡id/네이버아이디)이라 키가 아닌 패턴으로.
-const _ADV_COLW={'#':32,'번호':40,'구매일자':70,'주문번호':110,'수취인':60,'연락처':94,'주소':156,'결제금액':66,'리뷰제출':82,'리뷰제출일':82,'입금':54,'입금일':54};
+const _ADV_COLW={'#':32,'번호':40,'구매일자':73,'주문번호':110,'수취인':60,'연락처':110,'주소':156,'결제금액':66,'리뷰제출':82,'리뷰제출일':82,'입금':54,'입금일':54};
 function _colW(h){
   if(STATE.role==='advertiser'){
     if(/아이디|쿠팡\s*id|네이버\s*id|스토어\s*id|^\s*id\s*$/i.test(String(h==null?'':h))) return 92;   // ID열(시트명 다양)
@@ -883,6 +889,11 @@ function _colW(h){
   }
   return _COLW[h]||76;
 }
+// 유동 열(남는 폭 흡수) = 주소. cstyle은 모든 열 고정폭 → 렌더 후 _fitGrid가 언더플로 시 주소만 넓혀 표를 채움(다른 열은 스냅 폭 유지).
+//   ★ table-layout:fixed에서 width:auto는 오버플로 시 0으로 붕괴(min-width 무시)라 CSS 유동 금지 → JS 산출로 대체.
+function _isFlexCol(h){ return h==='주소'; }
+// 가운데 정렬 대상 = 날짜형(구매일자 등)·연락처(전화) → 값 길이가 달라도 앞여백=뒷여백(좌우 대칭). (_isPhoneHeader는 아래 정의, 함수선언 호이스팅)
+function _isCtrCol(h){ return /일자|날짜|date/i.test(String(h==null?'':h)) || _isPhoneHeader(h); }
 // 시트 일련번호(1899-12-30 기준) → YYYY-MM-DD. 날짜형 헤더 + 순수 숫자일 때만 변환(금액 등 오변환 방지).
 function _serialToDate(n){ const ms=Math.round((n-25569)*86400000); const d=new Date(ms); if(isNaN(d.getTime()))return null; const y=d.getUTCFullYear(); if(y<2000||y>2100)return null; const p=x=>String(x).padStart(2,'0'); return `${y}-${p(d.getUTCMonth()+1)}-${p(d.getUTCDate())}`; }
 // 편집 시작값(정본): 일련번호는 ISO 로, 그 외는 원본 그대로 — 셀 클릭 편집이 표시용 축약값으로 오염되지 않게 분리.
@@ -961,7 +972,7 @@ function buildGrid(wd){
     const sorted=STATE.gSort&&STATE.gSort.col===h;
     const sel=(STATE.gSelCols&&STATE.gSelCols.includes(h))?' gsel':'';
     const seq=c.kind==='seq';   // '#' 열은 필터 대상 아님
-    const extra=(hasF?' filtered':'')+(sorted?' sortedc':'')+sel+(seq?' gseq':'');
+    const extra=(hasF?' filtered':'')+(sorted?' sortedc':'')+sel+(seq?' gseq':'')+(_isCtrCol(h)?' gctr':'');   // 날짜/연락처 헤더 가운데 정렬
     return `<th ${cls(i,extra)} data-col="${esc(h)}" style="${cstyle(i)}" title="${esc(h)}${seq?'':' — 클릭: 필터·정렬·숨기기'}"><div class="th-in"><span class="lbl">${esc(h)}</span>${sorted?`<span class="gsort">${STATE.gSort.dir==='desc'?'▼':'▲'}</span>`:''}${seq?'':'<span class="gfnl">▼</span>'}</div></th>`;
   }).join('')}</tr>`;
   // 행 필터(스테일 컬럼은 무시 = 탭 전환 초기화 누락 시에도 그리드 블랭크 방지) → 정렬
@@ -991,13 +1002,14 @@ function buildGrid(wd){
         // 참여자 = 실제 제출 리뷰어 신원 → 값 편집 잠금(표시 전용). 배지는 유지, 제거(×, 명단 큐레이션=행 숨김)는 편집자만.
         tds+=`<td ${cls(i,'gnm gidlock')} style="${cstyle(i)}" title="실제 제출 리뷰어 정보 — 수정 불가">${esc(r.name||'—')}${badge}${canE?`<span class="rmx" title="명단에서 제거(숨김)" onclick="hideRow('${esc(r.id)}')">×</span>`:''}</td>`; }
       else if(c.kind==='phone'){ const _ph=_fmtPhone(r.phone8);
-        // 연락처 = 실제 제출 리뷰어 신원 → 값 편집 잠금(표시 전용).
-        tds+=`<td ${cls(i,'gcell gidlock'+(_ph?'':' gempty')+' gph')} style="${cstyle(i)}" title="실제 제출 리뷰어 정보 — 수정 불가">${esc(_ph||'')}</td>`; }
+        // 연락처 = 실제 제출 리뷰어 신원 → 값 편집 잠금(표시 전용). 가운데 정렬(앞여백=뒷여백).
+        tds+=`<td ${cls(i,'gcell gidlock'+(_ph?'':' gempty')+' gph gctr')} style="${cstyle(i)}" title="실제 제출 리뷰어 정보 — 수정 불가">${esc(_ph||'')}</td>`; }
       else { const jIdx=H.indexOf(h); const ed=(h in ceMap); const raw= ed?ceMap[h]:rj[h];
         const disp= ed?(raw==null?'':String(raw)):_gridVal(h, raw);
         const editv= ed?disp:_gridEditVal(h, raw);
         const ok=((jIdx===revI||jIdx===payI)&&disp)?' gok':'';
-        tds+=eCell('col:'+h, disp, ed, ok, i, editv); }
+        const ctr=_isCtrCol(h)?' gctr':'';   // 시트 날짜/연락처 열 가운데 정렬
+        tds+=eCell('col:'+h, disp, ed, ok+ctr, i, editv); }
     });
     return `<tr>${tds}</tr>`;
   };
@@ -1046,7 +1058,21 @@ function buildGrid(wd){
 }
 // 그리드만 가볍게 재렌더(필터/그룹/숨김/정렬 등 뷰 상태 변경 시 — 정산·스레드 재요청 없이)
 function rerenderGrid(){ const wd=STATE.wd; if(!wd) return; const host=$('#gridhost'); if(!host) return;
-  const gridMode=(STATE.canEdit||STATE.role==='advertiser')&&Array.isArray(wd.headers)&&wd.headers.length; if(gridMode){ host.innerHTML=buildGrid(wd); _scheduleBodyFlush(); } }   // 광고주도 필터/정렬/숨김 재렌더 동작
+  const gridMode=(STATE.canEdit||STATE.role==='advertiser')&&Array.isArray(wd.headers)&&wd.headers.length; if(gridMode){ host.innerHTML=buildGrid(wd); _scheduleBodyFlush(); _fitGrid(); } }   // 광고주도 필터/정렬/숨김 재렌더 동작
+// 주소(유동 열)로 컨테이너 잔여폭 흡수 → 표를 꽉 채우되 다른 열은 스냅(정확) 폭 유지. 언더플로 판정은 _colW 합(레이아웃 측정 안 함 = 스트레치 오판·플래시 없음). 오버플로면 주소=기본(가로 스크롤).
+//   렌더 직후 동기 실행(페인트 전) → 화면엔 채워진 최종본만. 주소 숨김/부재면 미개입(table min-width:100% 폴백).
+function _fitGrid(){ try{
+  const wd=STATE.wd; if(!wd) return;
+  const scroll=$('.gridscroll'); if(!scroll) return;
+  const H=wd.headers||[];
+  const idKeys = STATE.role==='advertiser' ? ['#'] : ['#','참여자','연락처'];   // buildGrid idCols와 동일
+  const keys=[...idKeys, ...H].filter(k=>!STATE.gHidden.has(k));                 // vcols와 동일 규칙(숨긴 열 제외)
+  const flexKey=keys.find(_isFlexCol); if(!flexKey) return;                      // 유동 열(주소)이 표시 중일 때만 개입
+  const th=scroll.querySelector('table.sheetgrid thead th[data-col="'+flexKey+'"]'); if(!th) return;
+  let sum=0; for(const k of keys) sum+=_colW(k);                                 // 스냅 자연 표폭(주소=기본 포함)
+  const base=_colW(flexKey), avail=scroll.clientWidth;
+  th.style.width = (avail>sum ? base+(avail-sum) : base) + 'px';                 // 언더플로: 주소가 잔여폭 흡수 · 오버플로: 기본
+}catch(_){ } }
 function setFreeze(v){ STATE.freezeUpto=v||null; rerenderGrid(); }
 // ── 컬럼 ▾ 필터/정렬/숨기기 · 행 그룹 접기/펼치기 (클라이언트 뷰 상태) ──
 function _ensureGMenus(){
