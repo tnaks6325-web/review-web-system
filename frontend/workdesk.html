@@ -167,6 +167,7 @@
   table.sheetgrid thead th.gfz{z-index:4;background:var(--card2)}
   .gnum{text-align:center;color:var(--faint);font-weight:700} .gnm{font-weight:600}
   table.sheetgrid td.gctr{text-align:center} table.sheetgrid th.gctr .th-in{justify-content:center}   /* 날짜/연락처 열 = 가운데 정렬(값 길이 달라도 앞여백=뒷여백) */
+  table.sheetgrid.advsnug{min-width:0}   /* 광고주 = 스냅(자동채움 안 함) → 100% 스트레치 해제, 열은 고정폭(table-layout:fixed) 유지, 남으면 우측 여백 */
   table.sheetgrid .gph{font-family:var(--mono);font-size:11.5px;color:var(--muted)}
   table.sheetgrid tbody tr:hover td{background:#f7faff} table.sheetgrid tbody tr:hover td.gfz{background:#eef4ff}
   /* 편집 가능 셀 = td 자체(셀당 .ecell 스팬 제거 → DOM 노드 ~40%↓ = 렌더 비용 감소). 클릭=편집, edited=배경 강조. */
@@ -880,8 +881,8 @@ async function refreshUnseen(){
 // 구매일자=73(최장값 "12/31 (월)" 핏)·연락처=110(phone "010-0000-0000" 핏) — 두 열은 값에 딱 맞춘 폭 + 가운데 정렬(앞여백=뒷여백). 주소는 유동(_isFlexCol).
 const _COLW={'#':30,'참여자':116,'연락처':110,'번호':38,'담당자':56,'구매일자':73,'인애드명단':74,'주문자제출':74,'수취인':62,'id':92,'주소':150,'은행':52,'계좌번호':104,'예금주':60,'결제금액':66,'리뷰제출':66,'입금':48,'주문번호':106,'비고(닉네임)':84};
 // 광고주 그리드 전용 폭(초밀도 시안 반영) — 내부 그리드(_COLW)와 분리. 신원열 없는 10열 맞춤. 구매일자/연락처는 값 핏(내부와 동일 폭).
-//   ID열은 시트명 다양(쿠팡id/네이버아이디)이라 키가 아닌 패턴으로.
-const _ADV_COLW={'#':32,'번호':40,'구매일자':73,'주문번호':110,'수취인':60,'연락처':110,'주소':156,'결제금액':66,'리뷰제출':82,'리뷰제출일':82,'입금':54,'입금일':54};
+//   ID열은 시트명 다양(쿠팡id/네이버아이디)이라 키가 아닌 패턴으로. 주소=94(요청: 156에서 40%↓ 고정 — 광고주는 자동채움 미적용, _fitGrid가 표폭을 합으로 고정=advsnug).
+const _ADV_COLW={'#':32,'번호':40,'구매일자':73,'주문번호':110,'수취인':60,'연락처':110,'주소':94,'결제금액':66,'리뷰제출':82,'리뷰제출일':82,'입금':54,'입금일':54};
 function _colW(h){
   if(STATE.role==='advertiser'){
     if(/아이디|쿠팡\s*id|네이버\s*id|스토어\s*id|^\s*id\s*$/i.test(String(h==null?'':h))) return 92;   // ID열(시트명 다양)
@@ -1052,7 +1053,7 @@ function buildGrid(wd){
       ${hasFilt?`<button class="btn xs" style="color:var(--warn);border-color:color-mix(in srgb,var(--warn) 35%,var(--line))" onclick="clearGFilters()">필터 초기화 ✕</button>`:''}
       ${STATE.canEdit?`<button class="btn xs" onclick="showEditHistory()">편집 이력</button>`:''}
       <span class="gnote">시트 동일 컬럼 · <b>컬럼명 클릭</b>=필터·정렬·숨기기 · 헤더 <b>가로 드래그</b>=여러 열 선택 → 숨기기 · <b>행 그룹</b> 접기/펼치기${STATE.canEdit?` · <b>셀 클릭=즉시 편집</b>(Enter=아래·Tab=오른쪽·Esc=취소)`:` · <b>열람 전용</b>`}</span></div>
-    <div class="gridscroll"><table class="sheetgrid"><thead>${thead}</thead><tbody id="gbody">${firstBody}</tbody></table></div>
+    <div class="gridscroll"><table class="sheetgrid${STATE.role==='advertiser'?' advsnug':''}"><thead>${thead}</thead><tbody id="gbody">${firstBody}</tbody></table></div>
     <div id="addbox"></div>
     ${STATE.canEdit?`<button class="btn" style="margin-top:10px" onclick="showAddForm()">＋ 참여자 추가</button>`:''}`;
 }
@@ -1064,12 +1065,16 @@ function rerenderGrid(){ const wd=STATE.wd; if(!wd) return; const host=$('#gridh
 function _fitGrid(){ try{
   const wd=STATE.wd; if(!wd) return;
   const scroll=$('.gridscroll'); if(!scroll) return;
+  const tbl=scroll.querySelector('table.sheetgrid'); if(!tbl) return;
   const H=wd.headers||[];
   const idKeys = STATE.role==='advertiser' ? ['#'] : ['#','참여자','연락처'];   // buildGrid idCols와 동일
   const keys=[...idKeys, ...H].filter(k=>!STATE.gHidden.has(k));                 // vcols와 동일 규칙(숨긴 열 제외)
-  const flexKey=keys.find(_isFlexCol); if(!flexKey) return;                      // 유동 열(주소)이 표시 중일 때만 개입
+  let sum=0; for(const k of keys) sum+=_colW(k);                                 // 스냅 자연 표폭(고정폭 합)
+  if(STATE.role==='advertiser'){                                                 // 광고주 = 스냅 고정(자동채움 안 함): 표폭을 합으로 고정 → 주소 등 고정폭 유지, 남으면 우측 여백
+    tbl.style.width=sum+'px'; return;                                            // advsnug(min-width:0)와 함께 100% 스트레치 차단
+  }
+  const flexKey=keys.find(_isFlexCol); if(!flexKey) return;                      // 내부: 유동 열(주소)이 표시 중일 때만 개입
   const th=scroll.querySelector('table.sheetgrid thead th[data-col="'+flexKey+'"]'); if(!th) return;
-  let sum=0; for(const k of keys) sum+=_colW(k);                                 // 스냅 자연 표폭(주소=기본 포함)
   const base=_colW(flexKey), avail=scroll.clientWidth;
   th.style.width = (avail>sum ? base+(avail-sum) : base) + 'px';                 // 언더플로: 주소가 잔여폭 흡수 · 오버플로: 기본
 }catch(_){ } }
