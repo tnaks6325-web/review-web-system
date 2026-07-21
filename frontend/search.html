@@ -1182,9 +1182,19 @@ if (sessionStorage.getItem("iad_direct_submit_items")) {
       </div>
 
       <!-- 제출 버튼 -->
-      <button id="btnOrderFormSubmit" class="btn-primary" style="width:100%;justify-content:center;font-size:1rem;padding:14px;border-radius:12px" onclick="submitOrderForm()">
+      <button id="btnOrderFormSubmit" class="btn-primary" style="width:100%;justify-content:center;font-size:1rem;padding:14px;border-radius:12px" onclick="confirmOrderSubmit()">
         <i class="fas fa-paper-plane"></i> 제출
       </button>
+
+      <!-- 제출 전 마지막 확인 팝업 (모든 구매양식 제출 공통, [제출완료하기] 단독) -->
+      <div id="orderConfirmModal" style="display:none;position:fixed;inset:0;background:rgba(17,24,39,.5);z-index:9999;align-items:center;justify-content:center;padding:20px" onclick="if(event.target===this)_closeOrderConfirm()">
+        <div style="width:100%;max-width:340px;background:#fff;border-radius:18px;padding:24px 20px 18px;text-align:center;box-shadow:0 20px 50px rgba(0,0,0,.3)">
+          <div style="width:52px;height:52px;border-radius:50%;background:#FEF3C7;color:#F59E0B;display:grid;place-items:center;margin:0 auto 12px;font-size:1.55rem">⚠️</div>
+          <div style="font-size:1.05rem;font-weight:800;color:#B45309;margin-bottom:8px">잠깐만요!</div>
+          <div style="font-size:.9rem;color:#4B5563;line-height:1.65;margin-bottom:18px">구매양식 제출 후,<br><b style="color:#111827">임의 취소하지마세요.</b></div>
+          <button id="btnOrderConfirmProceed" onclick="_proceedOrderSubmit()" style="width:100%;padding:14px;border:none;border-radius:12px;background:#3182f6;color:#fff;font-size:.95rem;font-weight:800;cursor:pointer;font-family:inherit;box-shadow:0 4px 12px rgba(49,130,246,.28)"><i class="fas fa-paper-plane"></i> 제출완료하기</button>
+        </div>
+      </div>
 
       <!-- 완료 화면 (제출 후 전환) -->
       <div id="orderFormDone" style="display:none;text-align:center;padding:40px 20px">
