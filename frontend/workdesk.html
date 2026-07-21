@@ -597,8 +597,8 @@ function renderWorkdesk(wd){
   if(!wd||!wd.ok){ $('#main').innerHTML=`<div class="empty">${esc((wd&&wd.error)||'조회 실패')}</div>`; return; }
   STATE.wd=wd; STATE.canEdit=(STATE.role!=='advertiser');   // master/admin/staff(AE) 편집 · 광고주는 열람
   const d=wd.detail||{},m=wd.meta||{},c=wd.counts||{}, isMaster=STATE.role==='master', canEdit=STATE.canEdit;
-  // 시트형 그리드 모드(master/admin, 시트 헤더 순서 수신 시): 시트와 동일한 가로 그리드로 렌더(열람 전용).
-  const gridMode = canEdit && Array.isArray(wd.headers) && wd.headers.length;
+  // 시트형 그리드 모드: 내부(master/admin/staff)는 시트 전체 컬럼 편집, 광고주는 화이트리스트 컬럼만 열람 전용.
+  const gridMode = (canEdit || STATE.role==='advertiser') && Array.isArray(wd.headers) && wd.headers.length;
   const warn=[];
   if(canEdit && c.hidden>0) warn.push(`<span class="wchip" title="제거(숨김)된 행 — 클릭해 복원" onclick="showHidden()">숨김 ${c.hidden}</span>`);
   if(!gridMode && canEdit && wd.orphanEdits && wd.orphanEdits.count>0) warn.push(`<span class="wchip bad" title="앵커가 현재 명단에 없는 편집">미부착 편집 ${wd.orphanEdits.count}</span>`);
@@ -623,7 +623,7 @@ function renderWorkdesk(wd){
   const sotBadge=`<span class="bd ${sot==='db'?'sot':''}" title="이 탭의 진실원천(원본). 시트=레거시(현행 Track A) · Track B=DB 원본(cutover). 전환해도 쓰기반영 엔진(P2) 전까지 라이브 동작은 불변.">원본: ${sot==='db'?'Track B':'시트'}</span>`;
   const flipBtn=isMaster?`<button class="btn" id="sotBtn" title="진실원천 전환(옵션 A · 되돌리기 가능). 'db' 전환은 진짜불일치 0 게이트를 통과해야 함(force로 우회). 현재는 상태·게이트만 — 시트 쓰기반영은 P2 엔진 예정." onclick="flipSoT('${sot==='db'?'sheet':'db'}')">${sot==='db'?'시트로 되돌리기':'Track B로 전환'}</button>`:'';
   $('#main').innerHTML=`<div class="mh"><h1>${esc(STATE.cur.tabName)}</h1>
-    ${wd.maskPII?'<span class="bd">개인정보 마스킹(광고주)</span>':''}<span class="bd g">참여자 ${c.total||0}</span>${sotBadge}${gridMode?'<span class="bd" title="구글시트와 동일 컬럼·가로 펼침 (열람 전용)">시트 그리드 · 열람</span>':''}${warn.join('')}
+    ${STATE.role==='advertiser'?'<span class="bd">열람 전용(광고주)</span>':''}<span class="bd g">참여자 ${c.total||0}</span>${sotBadge}${gridMode?'<span class="bd" title="구글시트와 동일 컬럼·가로 펼침 (열람 전용)">시트 그리드 · 열람</span>':''}${warn.join('')}
     ${isMaster?`<span class="sp" style="flex:1"></span>${flipBtn}<button class="btn" onclick="showWritebackSim()" title="이 탭 편집이 시트에 반영된다면 무엇이 바뀔지 미리보기 (시뮬레이션 · 실제 시트 무접촉)">write-back 시뮬</button><button class="btn" id="projBtn" onclick="projectCur()">그림자 투영(새로고침)</button>`:''}</div>
     ${summaryStrip(wd,d,m,c)}
     <div class="setldetail" id="setldetail"${STATE.settleOpen?'':' hidden'}><div id="settlementsec"></div></div>
@@ -905,8 +905,10 @@ function _fmtKDate(v){
 // 셀 표시값(그리드 렌더·필터·그룹·정렬 공용) — 신원 3열은 그대로, 시트 컬럼은 편집오버레이 반영 + 날짜 표기.
 function gCellDisp(r,h){
   if(h==='#') return String(r.seq==null?'':r.seq);
-  if(h==='참여자') return r.name||'';
-  if(h==='연락처') return _fmtPhone(r.phone8||'');
+  if(STATE.role!=='advertiser'){   // 광고주 그리드는 신원열(참여자·phone8)이 없음 → 동명 시트열은 rowJson에서 읽음(col 분기로 폴백)
+    if(h==='참여자') return r.name||'';
+    if(h==='연락처') return _fmtPhone(r.phone8||'');
+  }
   const rj=(r.rowJson&&typeof r.rowJson==='object')?r.rowJson:{};
   const ceMap=(r.cellEdits&&typeof r.cellEdits==='object')?r.cellEdits:{};
   const ed=(h in ceMap); const raw= ed?ceMap[h]:rj[h];
@@ -933,7 +935,9 @@ function buildGrid(wd){
   const H=wd.headers||[];
   const revI=H.indexOf('리뷰제출'), payI=H.indexOf('입금');
   // 컬럼 기술자: 신원 3열(#·참여자·연락처=DB)은 kind 로 렌더 — 동명 시트열(예: 시트 '연락처')이 신원열을 가리지 않게 위치/kind 기반.
-  const cols0=[{key:'#',kind:'seq'},{key:'참여자',kind:'name'},{key:'연락처',kind:'phone'}, ...H.map(h=>({key:h,kind:'col'}))];
+  // 광고주 그리드는 신원열(참여자 이름·연락처=phone8) 제외 — 시트 화이트리스트 컬럼만(요청). 내부는 신원 3열 유지.
+  const idCols = STATE.role==='advertiser' ? [{key:'#',kind:'seq'}] : [{key:'#',kind:'seq'},{key:'참여자',kind:'name'},{key:'연락처',kind:'phone'}];
+  const cols0=[...idCols, ...H.map(h=>({key:h,kind:'col'}))];
   const allCols=cols0.map(c=>c.key);                                          // 필터/정렬/그룹 가드용 key 목록
   const vcols=cols0.filter(c=>!STATE.gHidden.has(c.key));                     // 숨긴 열 제외(key 기준) = 표시 컬럼
   const fzIdx = STATE.freezeUpto ? H.indexOf(STATE.freezeUpto) : -1;
@@ -1025,15 +1029,15 @@ function buildGrid(wd){
       ${groupOn?`<button class="btn xs" onclick="toggleAllGGroups()">${STATE.gCollapsed.size?'모두 펼치기':'모두 접기'}</button>`:''}
       <button class="btn xs" onclick="openGHidMenu(event)">숨긴 열${nHid?` <b style="color:var(--accent-deep)">${nHid}</b>`:' 0'}</button>
       ${hasFilt?`<button class="btn xs" style="color:var(--warn);border-color:color-mix(in srgb,var(--warn) 35%,var(--line))" onclick="clearGFilters()">필터 초기화 ✕</button>`:''}
-      <button class="btn xs" onclick="showEditHistory()">편집 이력</button>
-      <span class="gnote">시트 동일 컬럼 · <b>컬럼명 클릭</b>=필터·정렬·숨기기 · 헤더 <b>가로 드래그</b>=여러 열 선택 → 숨기기 · <b>행 그룹</b> 접기/펼치기 · <b>셀 클릭=즉시 편집</b>(Enter=아래·Tab=오른쪽·Esc=취소)</span></div>
+      ${STATE.canEdit?`<button class="btn xs" onclick="showEditHistory()">편집 이력</button>`:''}
+      <span class="gnote">시트 동일 컬럼 · <b>컬럼명 클릭</b>=필터·정렬·숨기기 · 헤더 <b>가로 드래그</b>=여러 열 선택 → 숨기기 · <b>행 그룹</b> 접기/펼치기${STATE.canEdit?` · <b>셀 클릭=즉시 편집</b>(Enter=아래·Tab=오른쪽·Esc=취소)`:` · <b>열람 전용</b>`}</span></div>
     <div class="gridscroll"><table class="sheetgrid"><thead>${thead}</thead><tbody id="gbody">${firstBody}</tbody></table></div>
     <div id="addbox"></div>
-    <button class="btn" style="margin-top:10px" onclick="showAddForm()">＋ 참여자 추가</button>`;
+    ${STATE.canEdit?`<button class="btn" style="margin-top:10px" onclick="showAddForm()">＋ 참여자 추가</button>`:''}`;
 }
 // 그리드만 가볍게 재렌더(필터/그룹/숨김/정렬 등 뷰 상태 변경 시 — 정산·스레드 재요청 없이)
 function rerenderGrid(){ const wd=STATE.wd; if(!wd) return; const host=$('#gridhost'); if(!host) return;
-  const gridMode=STATE.canEdit&&Array.isArray(wd.headers)&&wd.headers.length; if(gridMode){ host.innerHTML=buildGrid(wd); _scheduleBodyFlush(); } }
+  const gridMode=(STATE.canEdit||STATE.role==='advertiser')&&Array.isArray(wd.headers)&&wd.headers.length; if(gridMode){ host.innerHTML=buildGrid(wd); _scheduleBodyFlush(); } }   // 광고주도 필터/정렬/숨김 재렌더 동작
 function setFreeze(v){ STATE.freezeUpto=v||null; rerenderGrid(); }
 // ── 컬럼 ▾ 필터/정렬/숨기기 · 행 그룹 접기/펼치기 (클라이언트 뷰 상태) ──
 function _ensureGMenus(){

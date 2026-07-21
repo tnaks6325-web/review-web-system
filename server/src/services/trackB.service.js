@@ -1406,6 +1406,35 @@ async function scopedActiveTabs({ role, staffName, advertiserId, limit, forMappi
 
 function _akey(type, value) { return type + '\t' + value; }   // 앵커 조합키(정렬무관, 값에 탭 없음)
 
+// 광고주(외부) 노출 화이트리스트 — 주문/배송/정산 컬럼만. 시트 헤더에서 개념별 키워드로 매칭(출력 순서=이 목록 순).
+//   ★ 데이터 최소화: 여기 없는 컬럼(은행/계좌번호/예금주 등)은 rowJson에서도 제외해 전송 → 네트워크 페이로드에도 안 실림.
+//   신원열(참여자 이름·phone8)은 프론트가 광고주 그리드에서 아예 렌더 안 함(별도). 값은 전체 노출(사용자 정책).
+const _ADV_COL_RULES = [
+  ['번호',      /^\s*(번호|no\.?|순번|연번)\s*$/i],
+  ['구매일자',  /구매\s*일자|구매일|주문\s*일자|주문일|결제\s*일|일자|날짜|date/i],
+  ['주문번호',  /주문\s*번호|order\s*num/i],
+  ['수취인',    /수취인|수령인|받는\s*분|받는분|수령자/],
+  ['ID',        /아이디|쿠팡\s*id|네이버\s*id|스토어\s*id|^\s*id\s*$/i],
+  ['연락처',    /연락처|휴대폰|핸드폰|전화|폰\s*번호|^\s*hp\s*$|mobile/i],
+  ['주소',      /주소|배송지/],
+  // 결제금액 = 결제/구매/상품/주문 금액 또는 단독 '금액'만(전체문자열). 바로 '금액' 부분일치 금지 →
+  //   입금액·환급액·수수료금액 등 다른 금액 컬럼을 결제금액으로 오매칭해 노출하는 것 방지(요청 = 결제금액 하나).
+  ['결제금액',  /결제\s*금액|구매\s*금액|상품\s*금액|주문\s*금액|결제액|결제가|^\s*금액\s*$/],
+  ['리뷰제출일', /리뷰\s*제출|리뷰\s*링크|리뷰\s*url|리뷰\s*완료|리뷰\s*인증|제출일/i],
+  // 입금일 = '입금'(단독=시트 관행상 입금일) 또는 입금+날짜/상태 접미만 허용(화이트리스트 접미). 전체문자열 앵커라
+  //   입금자·입금명·입금정보·입금메모·입금주·입금계좌·입금은행·입금자명 등 이름/계좌/자유텍스트 컬럼은 매칭 안 됨(PII 유출 차단).
+  ['입금일',    /^\s*입금\s*(완료|확인|처리)?\s*(일|일자|날짜|여부|상태)?\s*$/],
+];
+function _advertiserColumns(rawHeaders) {
+  const hs = (rawHeaders || []).map(h => String(h == null ? '' : h).trim()).filter(Boolean);
+  const used = new Set(), out = [];
+  for (const [, re] of _ADV_COL_RULES) {
+    const hit = hs.find(h => !used.has(h) && re.test(h));
+    if (hit) { used.add(hit); out.push(hit); }   // 개념당 첫 매칭 헤더 1개, 요청 순서 유지
+  }
+  return out;
+}
+
 // ── 통합 작업대 데이터(읽기): 세부 + 명단 + 상태 + 활성 오버레이 read-time 합성. 역할별 PII 마스킹. ──
 //   ★ 물리행은 순수 투영(review_index 사본) 유지 — 편집은 participant_edits(오버레이)에만 살고 여기서 합성만.
 //     정렬/재투영이 물리행을 덮어도 편집 무손실·무오염(교차노출 근본 차단). staff는 라우트가 이미 차단.
@@ -1476,19 +1505,21 @@ async function workdeskTab({ sheetId, tabName, tabGid, role = 'master', advertis
   }
   // 시트형 그리드용: 시트 실제 헤더 순서(raw_sheet_tabs.detected_headers = 주문원장이 쓰는 열 순서 원본).
   //   내부(master/admin)만. 없으면 폴백(row_json 키 — 길이순이라 시트순 아님, 최후수단).
-  let headers = null;
-  if (showEdits) {
+  let headers = null, advHeaders = null;
+  if (showEdits || role === 'advertiser') {
     const { rows: hh } = await db.query(
       `SELECT detected_headers FROM raw_sheet_tabs
         WHERE sheet_id=$1 AND (($2::text IS NOT NULL AND tab_gid=$2) OR tab_name=$3)
         ORDER BY ($2::text IS NOT NULL AND tab_gid=$2) DESC LIMIT 1`,
       [sheetId, tabGid, tabName]).catch(() => ({ rows: [] }));
     const dh = hh[0] && hh[0].detected_headers;
-    if (Array.isArray(dh)) headers = [...new Set(dh.map(h => String(h == null ? '' : h).trim()).filter(Boolean))];
-    if ((!headers || !headers.length)) {
+    let raw = Array.isArray(dh) ? [...new Set(dh.map(h => String(h == null ? '' : h).trim()).filter(Boolean))] : [];
+    if (!raw.length) {
       const rj = roster.find(r => r.row_json && typeof r.row_json === 'object' && Object.keys(r.row_json).length);
-      headers = rj ? Object.keys(rj.row_json).filter(k => k !== 'id') : [];
+      raw = rj ? Object.keys(rj.row_json).filter(k => k !== 'id') : [];
     }
+    if (showEdits) headers = raw;                                   // 내부: 시트 전체 헤더
+    else { advHeaders = _advertiserColumns(raw); headers = advHeaders; }   // 광고주: 화이트리스트만
   }
   // identity 중복 카운트(ambiguous 게이트, 윈도우 SQL 대신 JS Map)
   const identCount = new Map();
@@ -1539,6 +1570,12 @@ async function workdeskTab({ sheetId, tabName, tabGid, role = 'master', advertis
       // 시트 컬럼 편집(col:<헤더>) 오버레이 → 그리드 셀 합성용 {헤더: 값}. 앵커 게이트(ambiguous면 ov={}이라 자동 미적용).
       const ce = {}; for (const k in ov) { if (k.indexOf('col:') === 0) ce[k.slice(4)] = ov[k]; }
       syn.cellEdits = ce;
+    } else if (role === 'advertiser' && advHeaders) {
+      // 광고주: 화이트리스트 컬럼만 · 전체값(마스킹 없음, 사용자 정책). 미포함 컬럼(은행/계좌 등)은 rowJson에 안 담음(데이터 최소화).
+      const rj = (r.row_json && typeof r.row_json === 'object') ? r.row_json : {};
+      const cur = {}; for (const h of advHeaders) cur[h] = (rj[h] == null ? '' : rj[h]);
+      syn.rowJson = cur;
+      syn.editable = false;   // 읽기전용
     }
     out.push(syn);
   }
@@ -1558,6 +1595,7 @@ async function workdeskTab({ sheetId, tabName, tabGid, role = 'master', advertis
   const res = { role, maskPII, meta: meta[0] || {}, detail: wo[0] || null, counts, roster: out,
     sourceOfTruth: (meta[0] && meta[0].sourceOfTruth) || 'sheet' };   // 진실원천(cutover 상태) 표시용
   if (showEdits) { res.hiddenRows = hiddenList; res.orphanEdits = { count: orphanCount, byType: orphanByType }; res.headers = headers || []; }
+  else if (role === 'advertiser') { res.headers = headers || []; }   // 광고주: 화이트리스트 헤더(그리드 렌더용)
   return res;
 }
 
@@ -2170,6 +2208,7 @@ module.exports = {
   scopedTabsForAdvertiser,
   scopedTabsForStaff,
   scopedActiveTabs,
+  _advertiserColumns,   // 광고주 노출 화이트리스트 매핑(테스트/회귀가드용)
   canAccessTab,
   overview,
   getSourceOfTruth,
