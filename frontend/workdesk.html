@@ -873,7 +873,16 @@ async function refreshUnseen(){
 // 초밀도 최소폭: 짧은 열은 콘텐츠 기준으로 대폭 축소, 긴 열(주소 등)은 자동 레이아웃이 콘텐츠만큼 확장(무잘림).
 // table-layout:fixed에서 이 값은 '실제 열 너비'(auto 시절엔 최소폭). 신원열(참여자/연락처)은 이름+배지·번호가 안 잘리게 여유, 데이터열은 초밀도 유지(초과분 …+툴팁).
 const _COLW={'#':30,'참여자':116,'연락처':112,'번호':38,'담당자':56,'구매일자':78,'인애드명단':74,'주문자제출':74,'수취인':62,'id':92,'주소':150,'은행':52,'계좌번호':104,'예금주':60,'결제금액':66,'리뷰제출':66,'입금':48,'주문번호':106,'비고(닉네임)':84};
-function _colW(h){ return _COLW[h]||76; }
+// 광고주 그리드 전용 폭(초밀도 시안 반영) — 내부 그리드(_COLW)와 분리. 신원열 없는 10열 맞춤 + 연락처·구매일자 15% 축소.
+//   ID열은 시트명 다양(쿠팡id/네이버아이디)이라 키가 아닌 패턴으로.
+const _ADV_COLW={'#':32,'번호':40,'구매일자':70,'주문번호':110,'수취인':60,'연락처':94,'주소':156,'결제금액':66,'리뷰제출':82,'리뷰제출일':82,'입금':54,'입금일':54};
+function _colW(h){
+  if(STATE.role==='advertiser'){
+    if(/아이디|쿠팡\s*id|네이버\s*id|스토어\s*id|^\s*id\s*$/i.test(String(h==null?'':h))) return 92;   // ID열(시트명 다양)
+    return _ADV_COLW[h]!=null?_ADV_COLW[h]:(_COLW[h]||76);
+  }
+  return _COLW[h]||76;
+}
 // 시트 일련번호(1899-12-30 기준) → YYYY-MM-DD. 날짜형 헤더 + 순수 숫자일 때만 변환(금액 등 오변환 방지).
 function _serialToDate(n){ const ms=Math.round((n-25569)*86400000); const d=new Date(ms); if(isNaN(d.getTime()))return null; const y=d.getUTCFullYear(); if(y<2000||y>2100)return null; const p=x=>String(x).padStart(2,'0'); return `${y}-${p(d.getUTCMonth()+1)}-${p(d.getUTCDate())}`; }
 // 편집 시작값(정본): 일련번호는 ISO 로, 그 외는 원본 그대로 — 셀 클릭 편집이 표시용 축약값으로 오염되지 않게 분리.
