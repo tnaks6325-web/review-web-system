@@ -151,6 +151,40 @@ function _publicOptionView(v) {
   };
 }
 
+/** 목록용 배치 옵션 조회(캠페인 N개 → 옵션행+카운트 2쿼리). 5초 리스트 캐시로 비용 상각.
+ *  @returns Map campaignId → [{ row, cnt }]  (정렬 유지) */
+async function _fetchOptionsForCampaigns(db, ids, now = new Date()) {
+  const out = new Map();
+  const list = (ids || []).filter(Boolean);
+  if (!list.length) return out;
+  const dayStart = kstDayStartUtc(now).toISOString();
+  const { rows: optRows } = await db.query(
+    `SELECT campaign_id, opt_key, pay_amount, recruit_total, daily_limit, status
+       FROM campaign_options WHERE campaign_id = ANY($1) ORDER BY campaign_id, (status='closed'), sort_order, id`, [list]);
+  if (!optRows.length) return out;
+  const { rows: cntRows } = await db.query(
+    `SELECT campaign_id, option_key,
+            COUNT(*) FILTER (WHERE status='applied'   AND expires_at > NOW())                      AS active_holds,
+            COUNT(*) FILTER (WHERE status='applied'   AND expires_at > NOW() AND applied_at >= $2)  AS today_active_holds,
+            COUNT(*) FILTER (WHERE status='submitted')                                              AS submitted,
+            COUNT(*) FILTER (WHERE status='submitted' AND submitted_at >= $2)                       AS today_submitted
+       FROM campaign_applications
+      WHERE campaign_id = ANY($1) AND option_key IS NOT NULL
+      GROUP BY campaign_id, option_key`, [list, dayStart]);
+  const cntMap = new Map(); // `${camp} ${optKey}` → cnt
+  for (const r of cntRows) {
+    cntMap.set(r.campaign_id + ' ' + r.option_key, {
+      activeHolds: Number(r.active_holds) || 0, todayActiveHolds: Number(r.today_active_holds) || 0,
+      submitted: Number(r.submitted) || 0, todaySubmitted: Number(r.today_submitted) || 0,
+    });
+  }
+  for (const row of optRows) {
+    if (!out.has(row.campaign_id)) out.set(row.campaign_id, []);
+    out.get(row.campaign_id).push({ row, cnt: cntMap.get(row.campaign_id + ' ' + row.opt_key) });
+  }
+  return out;
+}
+
 /** 관리 편집용 원본 옵션 목록(카운트 없이 설정값 그대로 — 프리필용). */
 async function _loadOptionsRaw(db, campaignId) {
   const { rows } = await db.query(
@@ -395,7 +429,7 @@ router.get('/list', async (req, res, next) => {
   try {
     await _ensureTables();
     const now = new Date();
-    let { rows, countsMap } = _listCache;
+    let { rows, countsMap, optionsMap } = _listCache;
     if (!rows || now.getTime() - _listCache.at > LIST_CACHE_MS) {
       const q = await pool.query(`
         SELECT id, title, channel, channel_custom, manager, time_range,
@@ -414,9 +448,18 @@ router.get('/list', async (req, res, next) => {
       rows = q.rows;
       const partIds = rows.filter(r => r.participation_mode).map(r => r.id);
       countsMap = await fetchCampaignCounts(pool, partIds, now);
-      _listCache = { at: now.getTime(), rows, countsMap };
+      optionsMap = await _fetchOptionsForCampaigns(pool, partIds, now);
+      _listCache = { at: now.getTime(), rows, countsMap, optionsMap };
     }
-    const data = rows.map(r => _publicView(r, countsMap.get(r.id), now));
+    const data = rows.map(r => {
+      const view = _publicView(r, countsMap.get(r.id), now);
+      // 카드 옵션명+잔여(옵션 등록 참여형만). 상태는 매 요청 신선한 view 기준.
+      const opts = optionsMap && optionsMap.get(r.id);
+      if (r.participation_mode && opts && opts.length) {
+        view.options = opts.map(o => _publicOptionView(computeOptionView(o.row, o.cnt, view)));
+      }
+      return view;
+    });
     res.json({ ok: true, data, serverNow: now.toISOString() });
   } catch (err) {
     next(err);

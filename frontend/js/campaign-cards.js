@@ -124,6 +124,20 @@
    *  모바일 2열 그리드용 컴팩트 카드 — 썸네일 정사각 전체노출·우상단 채널/배송 배지·
    *  바로참여는 시간 오른쪽·참여인원 게이지(A)·상태별 오버레이/푸터.
    *  모집중(시간창 안)은 썸네일 중앙 "오늘 구매마감까지" 카운트다운(cutoffAt), 오픈전은 "오픈까지"(opensAt). */
+  // 카드 옵션 요약 칩(061 2단계): 옵션 N종 + 마감/임박 힌트. 상세는 campaign.html에서 옵션별 잔여 표시.
+  function _optChip(c) {
+    const opts = (c && c.options) || [];
+    if (!opts.length) return '';
+    const open = opts.filter(o => o.status === 'open').length;
+    const done = opts.length - open;
+    const imminent = opts.some(o => o.status === 'open' && o.remaining != null && o.remaining <= 3);
+    let hint = '';
+    if (open === 0) hint = '전체 마감';
+    else if (done > 0) hint = done + '종 마감';
+    else if (imminent) hint = '곧 마감';
+    return `<div class="poptchip" style="font-size:.68rem;font-weight:700;color:#4B5563;background:#F3F4F6;border-radius:7px;padding:4px 8px;margin-top:6px;display:inline-block">🧩 옵션 ${opts.length}종${hint ? ` · <b style="color:#B45309">${_esc(hint)}</b>` : ''}</div>`;
+  }
+
   function cardHtml(c) {
     const channel = c.channel === '직접입력' ? (c.channel_custom || '') : (c.channel || '');
     const fee = c.review_fee ? Number(c.review_fee).toLocaleString() + '원' : '';
@@ -177,6 +191,7 @@
         <div class="pbody">
           <h3 class="ptitle">${_esc(c.title || '(제목 없음)')}</h3>
           <div class="pmeta">${timeTxt ? `<span>${timeIcon} ${_esc(timeTxt)}</span>` : ''}<span class="pt-live">바로참여</span>${fee ? `<span class="pt-fee">💰 ${_esc(fee)}</span>` : ''}</div>
+          ${_optChip(c)}
           ${gauge}
           ${footer}
         </div>

@@ -56,6 +56,23 @@
     .statebig .e{font-size:2.6rem}
     .statebig h2{font-size:1.1rem;margin-top:10px}
     .statebig p{font-size:.82rem;color:var(--t3);margin-top:6px;line-height:1.7}
+    /* ── 상품옵션 (061 2단계) ── */
+    .optrow{display:flex;align-items:center;gap:10px;border:1.5px solid var(--border);border-radius:11px;padding:11px 12px;margin-top:8px;cursor:pointer;background:#fff}
+    .optrow.sel{border-color:var(--p);background:var(--p-light)}
+    .optrow.dis{opacity:.55;cursor:default}
+    .optrow .radio{width:16px;height:16px;border-radius:50%;border:2px solid var(--t3);flex-shrink:0}
+    .optrow.sel .radio{border-color:var(--p);background:var(--p);box-shadow:inset 0 0 0 3px #fff}
+    .optrow .oi{flex:1;min-width:0}
+    .optrow .oi .nm{font-size:.9rem;font-weight:800}
+    .optrow .oi .sub{font-size:.72rem;color:var(--t2);margin-top:2px}
+    .optrow .obadge{font-size:.62rem;font-weight:800;border-radius:6px;padding:3px 8px;white-space:nowrap;flex-shrink:0}
+    .obadge.soldout{background:#F3F4F6;color:var(--t3)}
+    .obadge.hot{background:var(--warn-light);color:#92400E}
+    .obadge.cur{background:var(--ok-light);color:#0ca678}
+    .optnote{font-size:.72rem;color:var(--t3);margin:8px 2px 2px;line-height:1.5}
+    .myopt{display:flex;align-items:center;gap:10px}
+    .myopt .oi{flex:1}
+    .myopt .chg{background:#EEF1F7;color:var(--p-dark);border:none;font-size:.74rem;font-weight:800;border-radius:9px;padding:8px 12px;cursor:pointer;font-family:inherit;flex-shrink:0}
   </style>
 </head>
 <body>
@@ -71,6 +88,11 @@
   <!-- 참여 전 -->
   <div id="vPre" style="display:none">
     <div class="sec"><div id="preCard"></div>
+      <div class="cardbx" id="preOptionsBox" style="display:none">
+        <div class="wd-tt">🧩 상품 옵션 · 남은 자리</div>
+        <div id="preOptions"></div>
+        <div class="optnote">참여할 때 옵션을 선택해요. 금액 등 상세는 참여 후 확인할 수 있어요.</div>
+      </div>
       <div class="cardbx lockcard">
         <div class="e">🔒</div><div class="m">작업내용</div>
         <div class="s">상품·옵션·결제금액, 유입가이드, 구매양식은<br/>참여 후에 확인할 수 있어요.</div>
@@ -101,6 +123,10 @@
   <div id="vJoined" style="display:none">
     <div class="holdbar"><span class="l">⏳ 구매양식 제출까지</span><span class="v" id="holdCd">--:--</span></div>
     <div class="sec">
+      <div class="cardbx" id="joinedOptionBox" style="display:none;border-color:var(--p)">
+        <div class="wd-tt" style="color:var(--p-dark)">✅ 내가 참여한 옵션</div>
+        <div class="myopt" id="joinedOption"></div>
+      </div>
       <div class="cardbx"><div class="wd-tt">📦 상품 · 옵션 · 결제금액</div><div class="wd-body" id="wdProduct"></div></div>
       <div class="cardbx" id="wdGuideBox"><div class="wd-tt">🧭 유입가이드</div><div class="wd-body" id="wdGuide"></div>
         <button class="btn ghost" id="landingBtn" style="margin-top:10px;display:none" onclick="openLanding()">🔗 상품 페이지 열기 (새 탭)</button>
@@ -137,6 +163,18 @@
       <button class="btn" onclick="location.href='/'">내 참여현황 보기</button>
       <button class="btn kakao" id="doneChatBtn" style="margin-top:8px;display:none" onclick="openChat()">💬 이 캠페인의 카톡 팀채팅방 입장</button>
     </div>
+  </div>
+</div>
+
+<!-- 옵션 선택/변경 바텀시트 (061 2단계) -->
+<div class="sheet-ovl" id="optSheet">
+  <div class="sheet">
+    <h3 id="optSheetTitle">참여할 옵션 선택</h3>
+    <p id="optSheetDesc">어떤 옵션으로 참여하시겠어요?</p>
+    <div id="optSheetList"></div>
+    <div class="optnote" id="optSheetNote">선택한 옵션으로 자리가 잡혀요. 구매 전까지는 다른 옵션으로 바꿀 수 있어요.</div>
+    <button class="btn" id="optSheetGo" style="margin-top:12px" onclick="onOptSheetConfirm()">이 옵션으로 참여</button>
+    <button class="btn ghost" style="margin-top:8px" onclick="hideOptSheet()">취소</button>
   </div>
 </div>
 
@@ -301,19 +339,127 @@ function renderPre(){
     : st==='soft_full' ? '잔여 대기 중'
     : '모집 종료';
   $('preFootNote').textContent = st==='daily_done' && c.opensAt ? ('내일 ' + CampCards._fmtHM(c.opensAt) + ' 다시 오픈돼요') : '';
+  // 옵션 등록 캠페인인데 선택 가능한 옵션이 0이면 캠페인이 open이어도 마감 표시(리뷰 나잇 #1)
+  const copts = c.options || [];
+  if(st==='open' && copts.length && !copts.some(o=>o.selectable)){ jb.disabled = true; jb.textContent = '옵션 마감'; }
+  renderPreOptions();   // 옵션명+잔여(옵션 등록 캠페인만)
   show('vPre');
 }
 function holdTtlText(){ return ((_camp && Number(_camp.hold_ttl_min)) || 15) + '분'; } // 공개 화이트리스트의 hold_ttl_min 사용
+
+/* ═══ 상품옵션 (061 2단계) ═══ */
+let _optSheetMode = 'join';   // 'join' | 'change'
+let _optSheetSel  = null;     // 시트에서 선택된 optKey
+function _optRemainText(o){
+  if(o.status === 'soldout' || o.status === 'closed') return '마감';
+  if(o.status === 'today_done') return '오늘 마감 (내일 가능)';
+  const parts = [];
+  parts.push(o.remaining == null ? '여유' : (o.remaining + '자리 남음'));
+  if(o.todayRemaining != null) parts.push('오늘 ' + o.todayRemaining + '자리');
+  return parts.join(' · ');
+}
+function _optSubText(o){
+  let t = _optRemainText(o);
+  if(o.payAmount) t += ' · 결제금액 ' + Number(o.payAmount).toLocaleString() + '원';
+  return t;
+}
+function _optBadgeHtml(o, isCur){
+  if(isCur) return '<span class="obadge cur">현재</span>';
+  if(o.status === 'soldout' || o.status === 'closed') return '<span class="obadge soldout">마감</span>';
+  if(o.status === 'today_done') return '<span class="obadge soldout">오늘마감</span>';
+  if(o.remaining != null && o.remaining <= 3) return '<span class="obadge hot">임박</span>';
+  return '';
+}
+// 참여 전: 옵션명+잔여 읽기전용 표시
+function renderPreOptions(){
+  const opts = (_camp && _camp.options) || [];
+  const box = $('preOptionsBox');
+  if(!opts.length){ box.style.display = 'none'; return; }
+  box.style.display = '';
+  const wrap = $('preOptions'); wrap.innerHTML = '';
+  opts.forEach(o => {
+    const dim = o.status !== 'open';   // 마감/오늘마감만 흐리게, 열린 옵션은 정상 표시(읽기전용)
+    const div = document.createElement('div');
+    div.className = 'optrow' + (dim ? ' dis' : '');
+    div.style.cursor = 'default';
+    div.innerHTML = '<div class="oi"><div class="nm">' + _escAttr(o.optKey) + '</div><div class="sub">' + _escAttr(_optRemainText(o)) + '</div></div>' + _optBadgeHtml(o, false);
+    wrap.appendChild(div);
+  });
+}
+// 옵션 선택/변경 시트 렌더
+function _renderOptSheetList(opts, curKey){
+  const list = $('optSheetList'); list.innerHTML = ''; _optSheetSel = null;
+  (opts || []).forEach(o => {
+    const isCur = curKey && o.optKey === curKey;
+    const pickable = o.selectable && !isCur;
+    const div = document.createElement('div');
+    div.className = 'optrow' + (pickable ? '' : ' dis');
+    div.innerHTML = '<span class="radio"></span><div class="oi"><div class="nm">' + _escAttr(o.optKey) +
+      '</div><div class="sub">' + _escAttr(_optSubText(o)) + '</div></div>' + _optBadgeHtml(o, isCur);
+    if(pickable){
+      div.onclick = () => {
+        _optSheetSel = o.optKey;
+        [...list.children].forEach(c => c.classList.remove('sel'));
+        div.classList.add('sel');
+        _updateOptGo();
+      };
+    }
+    list.appendChild(div);
+  });
+  _updateOptGo();
+}
+function _updateOptGo(){ const b = $('optSheetGo'); b.disabled = !_optSheetSel; }
+function openOptSheet(){
+  _optSheetMode = 'join';
+  $('optSheetTitle').textContent = '참여할 옵션 선택';
+  $('optSheetDesc').textContent = '어떤 옵션으로 참여하시겠어요?';
+  $('optSheetNote').textContent = '선택한 옵션으로 자리가 잡혀요. 구매 전까지는 다른 옵션으로 바꿀 수 있어요.';
+  $('optSheetGo').textContent = '이 옵션으로 참여';
+  _renderOptSheetList((_camp && _camp.options) || [], null);
+  $('optSheet').style.display = 'flex';
+}
+function openChangeOptSheet(){
+  if(!_detail) return;
+  _optSheetMode = 'change';
+  $('optSheetTitle').textContent = '옵션 변경';
+  $('optSheetDesc').textContent = '구매 전까지 잔여가 남은 다른 옵션으로 바꿀 수 있어요.';
+  $('optSheetNote').textContent = '이미 구매하셨다면 구매한 옵션과 같은지 꼭 확인 후 변경하세요. 변경하면 구매양식이 새로고침돼요.';
+  $('optSheetGo').textContent = '이 옵션으로 변경';
+  _renderOptSheetList(_detail.options || [], (_detail.application && _detail.application.optionKey) || null);
+  $('optSheet').style.display = 'flex';
+}
+function hideOptSheet(){ $('optSheet').style.display = 'none'; }
+function onOptSheetConfirm(){
+  if(!_optSheetSel) return toast('옵션을 선택해주세요');
+  if(_optSheetMode === 'join') _doApply(_optSheetSel);
+  else _doChangeOption(_optSheetSel);
+}
 
 /* ═══ 참여하기 ═══ */
 async function onJoin(){
   const s = getSession();
   if(!s) return needLogin(onJoin);
-  const jb = $('joinBtn'); jb.disabled = true; jb.textContent = '확인 중…';
+  const opts = (_camp && _camp.options) || [];
+  if(opts.length){
+    // 옵션 등록 캠페인 → 선택 필수(선택 가능 옵션 없으면 안내, 1개면 자동선택)
+    const pickable = opts.filter(o => o.selectable);
+    if(!pickable.length){ toast('지금은 선택 가능한 옵션이 없어요'); await loadCampaign(); return; }
+    if(pickable.length === 1) return _doApply(pickable[0].optKey);
+    return openOptSheet();
+  }
+  return _doApply(null);
+}
+
+async function _doApply(optionKey){
+  const s = getSession();
+  if(!s) return needLogin(onJoin);
+  hideOptSheet();
+  const jb = $('joinBtn'); if(jb){ jb.disabled = true; jb.textContent = '확인 중…'; }
   try{
+    const body = { name: s.name, phone: s.phone8, phone8: s.phone8 };
+    if(optionKey) body.optionKey = optionKey;
     const r = await fetch(API_BASE_URL + '/api/campaign/' + encodeURIComponent(CAMP_ID) + '/apply', {
-      method:'POST', headers:{'Content-Type':'application/json'},
-      body: JSON.stringify({ name: s.name, phone: s.phone8, phone8: s.phone8 })
+      method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify(body)
     });
     const j = await r.json().catch(()=>({}));
     if(r.ok && j.ok){
@@ -323,6 +469,14 @@ async function onJoin(){
     }
     if(j.reason === 'profile_missing'){ renderMissing(j.missing || []); return; }
     if(j.reason === 'not_registered'){ toast('리뷰어 등록 후 참여할 수 있어요'); setTimeout(()=>location.href='/search.html#register', 900); return; }
+    // 옵션 관련 사유 → 옵션 상태 갱신 후 선택 시트 재오픈
+    if(['option_required','option_invalid','option_soldout','option_today_done','option_unavailable'].includes(j.reason)){
+      toast(j.reason === 'option_required' ? '참여할 옵션을 선택해주세요' : '선택한 옵션이 마감됐어요. 다른 옵션을 선택해주세요');
+      await loadCampaign();
+      const pickable = ((_camp && _camp.options) || []).filter(o => o.selectable);
+      if(pickable.length) openOptSheet();
+      return;
+    }
     const msg = {
       preopen:'아직 오픈 전이에요', cutoff:'오늘 참여가 마감됐어요', daily_done:'오늘 인원이 모두 찼어요',
       soft_full:'잔여 대기 중이에요 — 자리가 나면 열려요', closed:'모집이 종료됐어요',
@@ -335,6 +489,29 @@ async function onJoin(){
     await loadCampaign(); // 카운터/상태 갱신
   }catch(e){ toast('오류: ' + e.message); }
   finally{ if($('vPre').style.display !== 'none'){ const c=_camp; $('joinBtn').disabled = !(c && c.state==='open'); $('joinBtn').textContent='참여하기'; } }
+}
+
+async function _doChangeOption(newKey){
+  const h = getHold(); if(!h) return;
+  hideOptSheet();
+  toast('옵션 변경 중…');
+  try{
+    const r = await fetch(API_BASE_URL + '/api/campaign/' + encodeURIComponent(CAMP_ID) + '/change-option', {
+      method:'POST', headers:{'Content-Type':'application/json'},
+      body: JSON.stringify({ phone8: h.phone8, holdToken: h.holdToken, optionKey: newKey })
+    });
+    const j = await r.json().catch(()=>({}));
+    if(r.ok && j.ok){
+      toast(j.unchanged ? '같은 옵션이에요' : '옵션이 변경됐어요');
+      await enterJoined(); // work-detail 재조회 + 구매양식 iframe 재로드(인플라이트 제출 파기 — 서버권위 TOCTOU 봉합)
+      return;
+    }
+    if(['option_soldout','option_today_done','option_closed','option_invalid'].includes(j.reason)){
+      toast('그 옵션은 마감됐어요. 다른 옵션을 선택해주세요'); await enterJoined(); return;
+    }
+    if(j.reason === 'not_changeable'){ toast('지금은 옵션을 변경할 수 없어요'); await enterJoined(); return; } // 만료/제출됨 → 화면 재동기화(리뷰 나잇 #2)
+    toast(j.error || '옵션을 변경할 수 없어요');
+  }catch(e){ toast('오류: ' + e.message); }
 }
 
 function renderMissing(missing){
@@ -374,6 +551,8 @@ async function enterJoined(){
     _detailRetry = 0;
     _detail = j;
     if(j.application && j.application.status === 'submitted'){ renderDone(); return; }
+    // 내가 참여한 옵션 카드(옵션 등록 캠페인만) + 변경 버튼
+    renderJoinedOption(j);
     // 작업내용 렌더 (표시 직전 정규화 — 스냅샷 원문은 불변, 기발행 캠페인도 정상화)
     const wd = j.workDetail || {};
     $('wdProduct').textContent = _fmtProduct(wd);
@@ -392,6 +571,8 @@ async function enterJoined(){
     const f = j.form || {};
     const qp = new URLSearchParams({ embed:'1', s:f.sheetId||'', g:f.gid||'', t:f.tabName||'', d:f.displayName||'',
       app:String(j.application.id), campId:CAMP_ID, holdToken:h.holdToken, holdPhone8:h.phone8 });
+    // 선택 옵션을 embed에 전달 → 구매양식이 옵션 피커 대신 잠금표시(서버가 최종 권위)
+    if(j.application && j.application.optionKey) qp.set('optionKey', j.application.optionKey);
     const frame = $('orderFrame');
     frame.src = '/search.html?' + qp.toString();
     frame.onerror = ()=>{ $('frameFallback').style.display=''; };
@@ -400,6 +581,19 @@ async function enterJoined(){
     startPolling();
     show('vJoined');
   }catch(e){ toast('불러오기 오류: ' + e.message); renderPre(); }
+}
+
+// 참여 후: 내가 고른 옵션 카드(+변경 버튼) — 옵션 미등록 캠페인은 숨김
+function renderJoinedOption(j){
+  const box = $('joinedOptionBox');
+  const so = j && j.selectedOption;
+  if(!(j && j.options && j.options.length && so)){ box.style.display = 'none'; return; }
+  box.style.display = '';
+  const sub = so.payAmount ? ('결제금액 ' + Number(so.payAmount).toLocaleString() + '원') : '';
+  $('joinedOption').innerHTML =
+    '<div class="oi"><div class="nm">' + _escAttr(so.optKey) + '</div>' +
+    (sub ? '<div class="sub">' + _escAttr(sub) + '</div>' : '') + '</div>' +
+    (j.canChangeOption ? '<button class="chg" onclick="openChangeOptSheet()">옵션 변경</button>' : '');
 }
 
 function startHoldCountdown(expiresAtIso){
