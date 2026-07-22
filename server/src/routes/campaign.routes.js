@@ -10,6 +10,8 @@ const { logger } = require('../utils/logger');
 const {
   computeCampaignState,
   fetchCampaignCounts,
+  fetchOptionCounts,
+  computeOptionView,
   timeStrToMinutes,
   kstDayStartUtc,
   kstTodayAt,
@@ -47,6 +49,116 @@ async function _lookupInflowType(campId, sourceWoId) {
   } catch (_) {
     return '';   // 컬럼/테이블 이슈 등은 조용히 폴백(라이브 핫패스 보호)
   }
+}
+
+// ═══════════════════════════════════════════════════════════
+// 상품옵션(campaign_options) 헬퍼 (061, PRD v1.1)
+//   opt_key는 시트 옵션열 기입값(selected_opt_key)과 동일 문자열 → 파이프 '|'(다중옵션 구분자) 제거.
+// ═══════════════════════════════════════════════════════════
+function _normOptKey(s) {
+  return String(s == null ? '' : s).replace(/\|/g, '').trim().slice(0, 200);
+}
+function _optNum(v) { const n = Number(v); return Number.isFinite(n) && n > 0 ? Math.floor(n) : 0; }
+
+/** 입력 옵션 배열 → 정규화·중복제거 행 배열. 배열 아님=null(미전달=변경없음). 빈 optKey 제거. */
+function _normalizeOptionsInput(arr) {
+  if (!Array.isArray(arr)) return null;
+  const seen = new Set();
+  const out = [];
+  for (const o of arr) {
+    if (o == null) continue;
+    const raw = (typeof o === 'string') ? o : (o.optKey ?? o.opt_key ?? o.name ?? o.label);
+    const optKey = _normOptKey(raw);
+    if (!optKey || seen.has(optKey)) continue;
+    seen.add(optKey);
+    const obj = (typeof o === 'object' && o) || {};
+    out.push({
+      optKey,
+      payAmount: _optNum(obj.payAmount ?? obj.pay_amount),
+      recruitTotal: _optNum(obj.recruitTotal ?? obj.recruit_total),
+      dailyLimit: _optNum(obj.dailyLimit ?? obj.daily_limit),
+      sortOrder: out.length,
+      status: (obj.status === 'closed') ? 'closed' : 'active',
+    });
+  }
+  return out;
+}
+
+/** 옵션 저장(replace-set): 제공 옵션 upsert + 목록에서 빠진 기존 옵션은 참여자 있으면 closed, 없으면 삭제.
+ *  ★ 참여자 있는 옵션은 절대 삭제하지 않음(기록·정원 보호).
+ *  ★★ 원자성·상호배제(레드/블루 #2·#7): 자체 트랜잭션 + recruit_campaigns 행 FOR UPDATE로
+ *     apply/change-option과 동일 락 계층 확보 → "사용여부 SELECT→DELETE" 사이 동시 apply가
+ *     끼어들어 방금 참여한 옵션을 삭제하는 TOCTOU를 봉합. 실패 시 전체 롤백(부분 저장 없음). */
+async function _saveCampaignOptions(campaignId, options) {
+  if (!Array.isArray(options)) return; // 미전달=변경 없음
+  const keep = new Set(options.map(o => o.optKey));
+  const client = await pool.connect();
+  try {
+    await client.query('BEGIN');
+    const { rows: lock } = await client.query('SELECT id FROM recruit_campaigns WHERE id=$1 FOR UPDATE', [campaignId]);
+    if (!lock.length) { await client.query('ROLLBACK'); return; }
+    for (const o of options) {
+      await client.query(
+        `INSERT INTO campaign_options (campaign_id, opt_key, pay_amount, recruit_total, daily_limit, sort_order, status, updated_at)
+         VALUES ($1,$2,$3,$4,$5,$6,$7,NOW())
+         ON CONFLICT (campaign_id, opt_key) DO UPDATE SET
+           pay_amount=EXCLUDED.pay_amount, recruit_total=EXCLUDED.recruit_total,
+           daily_limit=EXCLUDED.daily_limit, sort_order=EXCLUDED.sort_order,
+           status=EXCLUDED.status, updated_at=NOW()`,
+        [campaignId, o.optKey, o.payAmount, o.recruitTotal, o.dailyLimit, o.sortOrder, o.status]);
+    }
+    const { rows: existing } = await client.query('SELECT opt_key FROM campaign_options WHERE campaign_id=$1', [campaignId]);
+    for (const e of existing) {
+      if (keep.has(e.opt_key)) continue;
+      const { rows: used } = await client.query(
+        `SELECT 1 FROM campaign_applications
+          WHERE campaign_id=$1 AND option_key=$2 AND status IN ('applied','submitted') LIMIT 1`,
+        [campaignId, e.opt_key]);
+      if (used.length) {
+        await client.query("UPDATE campaign_options SET status='closed', updated_at=NOW() WHERE campaign_id=$1 AND opt_key=$2", [campaignId, e.opt_key]);
+      } else {
+        await client.query('DELETE FROM campaign_options WHERE campaign_id=$1 AND opt_key=$2', [campaignId, e.opt_key]);
+      }
+    }
+    await client.query('COMMIT');
+  } catch (e) {
+    try { await client.query('ROLLBACK'); } catch (_) { /* noop */ }
+    throw e;
+  } finally {
+    client.release();
+  }
+}
+
+/** 캠페인 옵션 뷰 목록(정렬: 활성 먼저, 마감 하단). campState 반영해 selectable 계산. 옵션 없으면 []. */
+async function _loadOptionViews(db, campaignId, campState, now = new Date()) {
+  const { rows } = await db.query(
+    `SELECT opt_key, pay_amount, recruit_total, daily_limit, status
+       FROM campaign_options WHERE campaign_id=$1 ORDER BY (status='closed'), sort_order, id`,
+    [campaignId]);
+  if (!rows.length) return [];
+  const counts = await fetchOptionCounts(db, campaignId, now);
+  return rows.map(r => computeOptionView(r, counts.get(r.opt_key), campState));
+}
+
+/** 참여 전 공개용 옵션 뷰: 옵션명+잔여만(금액은 참여 후 공개 원칙 — payAmount·상세카운트 제외). */
+function _publicOptionView(v) {
+  return {
+    optKey: v.optKey,
+    remaining: v.remaining,           // null=무제한
+    todayRemaining: v.todayRemaining, // null=옵션 일일제한 없음
+    status: v.status,                 // open|soldout|today_done|closed
+    selectable: v.selectable,
+  };
+}
+
+/** 관리 편집용 원본 옵션 목록(카운트 없이 설정값 그대로 — 프리필용). */
+async function _loadOptionsRaw(db, campaignId) {
+  const { rows } = await db.query(
+    `SELECT opt_key AS "optKey", pay_amount AS "payAmount", recruit_total AS "recruitTotal",
+            daily_limit AS "dailyLimit", sort_order AS "sortOrder", status
+       FROM campaign_options WHERE campaign_id=$1 ORDER BY (status='closed'), sort_order, id`,
+    [campaignId]);
+  return rows;
 }
 
 // ═══════════════════════════════════════════════════════════
@@ -325,12 +437,20 @@ router.get('/:id', async (req, res, next) => {
       return res.json({ ok: true, data: _scopedEditorView(rows[0]) });
     }
     if (_isAdminReq(req)) {
-      return res.json({ ok: true, data: rows[0] });
+      // 관리자: 전체 행 + 편집용 원본 옵션 목록(프리필)
+      const options = rows[0].participation_mode ? await _loadOptionsRaw(pool, id) : [];
+      return res.json({ ok: true, data: rows[0], options });
     }
     const now = new Date();
     const row = rows[0];
     const countsMap = row.participation_mode ? await fetchCampaignCounts(pool, [id], now) : null;
-    res.json({ ok: true, data: _publicView(row, countsMap && countsMap.get(id), now), serverNow: now.toISOString() });
+    const view = _publicView(row, countsMap && countsMap.get(id), now);
+    if (row.participation_mode) {
+      // 옵션명+잔여만 공개(금액 등 상세는 참여 후 work-detail에서)
+      const opts = await _loadOptionViews(pool, id, view, now);
+      view.options = opts.map(_publicOptionView);
+    }
+    res.json({ ok: true, data: view, serverNow: now.toISOString() });
   } catch (err) {
     next(err);
   }
@@ -377,7 +497,7 @@ router.get('/:id/work-detail', detailLimiter, async (req, res, next) => {
 
     // holdToken은 신청 시 발급된 1회성 열쇠 — phone8만 아는 제3자의 열람 차단(정확 일치)
     const { rows: apps } = await pool.query(
-      `SELECT id, status, expires_at, applied_at, submitted_at
+      `SELECT id, status, expires_at, applied_at, submitted_at, option_key
          FROM campaign_applications
         WHERE campaign_id = $1 AND phone8 = $2 AND hold_token = $3 AND hold_token <> ''
         ORDER BY applied_at DESC
@@ -402,6 +522,16 @@ router.get('/:id/work-detail', detailLimiter, async (req, res, next) => {
     //   상품 페이지 열기 버튼을 '링크유입'일 때만 노출하기 위한 신호. 실패는 '' 폴백(fail-soft).
     const inflowType = await _lookupInflowType(camp.id, camp.source_work_order_id);
 
+    // 상품옵션(참여 후 공개): 옵션 목록(금액 포함) + 내가 고른 옵션 + 변경 가능 여부
+    let options = [], selectedOption = null;
+    {
+      const st = computeCampaignState(camp, (await fetchCampaignCounts(pool, [id], now)).get(id), now);
+      options = await _loadOptionViews(pool, id, st, now);
+      if (app.option_key) selectedOption = options.find(o => o.optKey === app.option_key) || { optKey: app.option_key, status: 'open' };
+    }
+    // 옵션 변경은 유효 홀드(미제출) + 옵션 2개 이상일 때만 허용
+    const canChangeOption = validHold && options.length >= 2;
+
     res.json({
       ok: true,
       serverNow: now.toISOString(),
@@ -411,7 +541,11 @@ router.get('/:id/work-detail', detailLimiter, async (req, res, next) => {
         appliedAt: app.applied_at,
         expiresAt: app.expires_at,
         submittedAt: app.submitted_at,
+        optionKey: app.option_key || null,
       },
+      options,               // [{ optKey, payAmount, remaining, todayRemaining, status, selectable, ... }]
+      selectedOption,        // 내가 참여한 옵션(잠금표시·구매양식 고정용)
+      canChangeOption,
       workDetail: sanitizeWorkDetail(camp.work_detail),          // HTML은 응답 직전 방어적 재정화
       inflowType,                                                 // 'guide' | 'link' | '' — 랜딩 버튼 게이트
       // 카톡 팀채팅방 URL은 제출확정 후에만 반환(화면 숨김을 API에서도 강제 — DevTools 우회 차단)
@@ -458,6 +592,73 @@ router.post('/:id/cancel', applyLimiter, async (req, res, next) => {
   }
 });
 
+// POST /api/campaign/:id/change-option — 구매(제출) 전 옵션 변경 (phone8+holdToken 이중 열쇠, 061)
+//   ★ 잠금 계층 = apply와 동일(recruit_campaigns 행 FOR UPDATE → 신청 행) → 소진 경합/교착 없음.
+//   ★ 만료시각(expires_at)은 연장하지 않음(자리 갈아타기 악용 방지, PRD §07). 새 옵션 자리 확보 실패 시 기존 유지.
+router.post('/:id/change-option', applyLimiter, async (req, res, next) => {
+  const { id } = req.params;
+  const p8 = String(req.body.phone8 || '').replace(/\D/g, '').slice(-8);
+  const token = String(req.body.holdToken || '').trim();
+  const newKey = _normOptKey(req.body.optionKey);
+  if (p8.length !== 8 || !token) return res.status(400).json({ ok: false, error: 'phone8(8자리)과 holdToken이 필요합니다.' });
+  if (!newKey) return res.status(400).json({ ok: false, error: '변경할 옵션을 선택해주세요.' });
+
+  const client = await pool.connect();
+  try {
+    await client.query('BEGIN');
+    const { rows: cRows } = await client.query('SELECT * FROM recruit_campaigns WHERE id = $1 FOR UPDATE', [id]);
+    if (!cRows.length || !cRows[0].participation_mode) { await client.query('ROLLBACK'); return res.status(404).json({ ok: false, error: '캠페인을 찾을 수 없습니다.' }); }
+    const camp = cRows[0];
+    const now = new Date();
+
+    // 내 유효 홀드(applied·미만료) 확인 — 제출완료면 변경 불가(관리자 정정 대상)
+    const { rows: apps } = await client.query(
+      `SELECT id, status, expires_at, option_key FROM campaign_applications
+        WHERE campaign_id=$1 AND phone8=$2 AND hold_token=$3 AND hold_token<>'' ORDER BY applied_at DESC LIMIT 1 FOR UPDATE`,
+      [id, p8, token]);
+    if (!apps.length) { await client.query('ROLLBACK'); return res.status(404).json({ ok: false, error: '참여 내역이 없습니다.' }); }
+    const app = apps[0];
+    if (app.status !== 'applied' || !app.expires_at || new Date(app.expires_at) <= now) {
+      await client.query('ROLLBACK');
+      return res.status(409).json({ ok: false, reason: 'not_changeable', error: '지금은 옵션을 변경할 수 없어요(제출 완료 또는 만료).' });
+    }
+    if (app.option_key === newKey) { await client.query('COMMIT'); return res.json({ ok: true, optionKey: newKey, unchanged: true }); }
+
+    // 새 옵션: 활성 + 잔여/오늘 확인 (전환 대상은 자기 홀드를 포함하지 않음 = 기존 옵션에 계수돼 있음 → 순증 판정 정확)
+    const { rows: optRows } = await client.query(
+      `SELECT opt_key, pay_amount, recruit_total, daily_limit, status FROM campaign_options WHERE campaign_id=$1 AND opt_key=$2 LIMIT 1`,
+      [id, newKey]);
+    if (!optRows.length || optRows[0].status !== 'active') {
+      await client.query('ROLLBACK');
+      return res.status(400).json({ ok: false, reason: 'option_invalid', error: '선택한 옵션을 찾을 수 없어요.' });
+    }
+    const st = computeCampaignState(camp, (await fetchCampaignCounts(client, [id], now)).get(id), now);
+    const optCounts = await fetchOptionCounts(client, id, now);
+    const ov = computeOptionView(optRows[0], optCounts.get(newKey), { state: 'open' }); // 변경은 캠페인 open 무관(이미 참여중)
+    if (ov.status !== 'open') {
+      await client.query('ROLLBACK');
+      const reason = ov.status === 'soldout' ? 'option_soldout' : (ov.status === 'today_done' ? 'option_today_done' : 'option_closed');
+      return res.status(409).json({ ok: false, reason, option: _publicOptionView(ov), error: '선택한 옵션은 마감되었어요. 다른 옵션을 선택해주세요.' });
+    }
+
+    // 원자 전환: 여전히 내 유효 홀드일 때만(경합 시 0행 → 기존 유지)
+    const upd = await client.query(
+      `UPDATE campaign_applications SET option_key=$4
+        WHERE id=$1 AND campaign_id=$2 AND hold_token=$3 AND status='applied' AND expires_at > NOW()
+        RETURNING id`,
+      [app.id, id, token, newKey]);
+    if (!upd.rows.length) { await client.query('ROLLBACK'); return res.status(409).json({ ok: false, reason: 'not_changeable', error: '옵션 변경에 실패했어요. 다시 시도해주세요.' }); }
+    await client.query('COMMIT');
+    logger.info(`[campaign/change-option] camp=${id} app=${app.id} ${app.option_key || '∅'}→${newKey} phone8=***${p8.slice(-4)}`);
+    return res.json({ ok: true, optionKey: newKey, previousOptionKey: app.option_key || null, option: ov });
+  } catch (err) {
+    try { await client.query('ROLLBACK'); } catch (_) { /* noop */ }
+    return next(err);
+  } finally {
+    client.release();
+  }
+});
+
 // 참여형(홀드) 신청 — 원자 검사+홀드 생성 (레드-블루-심판 최종 구조)
 //   잠금 계층(고정): ① recruit_campaigns 행 FOR UPDATE → ② phone8 advisory(xact) → ③ INSERT.
 //   주문확정(confirmHoldInTx)·수동확정도 ①을 먼저 잡으므로 write-skew(레드 #3)와 교착이 동시에 제거된다.
@@ -487,6 +688,39 @@ async function _applyParticipation(req, res, next, campPre) {
     if (st.state !== 'open') {
       await client.query('ROLLBACK');
       return res.status(409).json({ ok: false, reason: st.state, state: st, error: '지금은 신청할 수 없습니다.' });
+    }
+
+    // ★ 상품옵션 게이트(061): 옵션이 "등록된" 캠페인이면 선택 필수(전부 마감이어도 option_key=NULL 우회 금지, 리뷰 #3).
+    //   옵션 미등록 캠페인만 현행 경로(NULL). 캠페인 행 FOR UPDATE 안이라 옵션 카운트도 직렬화 — 소진 경합 없음.
+    let chosenOpt = null;
+    {
+      const { rows: allOpts } = await client.query(
+        `SELECT opt_key, pay_amount, recruit_total, daily_limit, status
+           FROM campaign_options WHERE campaign_id = $1 ORDER BY (status='closed'), sort_order, id`, [id]);
+      if (allOpts.length) {
+        const activeOpts = allOpts.filter(o => o.status === 'active');
+        if (!activeOpts.length) {
+          await client.query('ROLLBACK');
+          return res.status(409).json({ ok: false, reason: 'option_unavailable', error: '지금은 선택 가능한 옵션이 없어요(모두 마감).' });
+        }
+        const wantKey = _normOptKey(req.body.optionKey);
+        if (!wantKey) {
+          await client.query('ROLLBACK');
+          return res.status(400).json({ ok: false, reason: 'option_required', error: '참여할 옵션을 선택해주세요.', options: activeOpts.map(o => o.opt_key) });
+        }
+        chosenOpt = activeOpts.find(o => o.opt_key === wantKey) || null;
+        if (!chosenOpt) {
+          await client.query('ROLLBACK');
+          return res.status(400).json({ ok: false, reason: 'option_invalid', error: '선택한 옵션을 찾을 수 없어요. 새로고침 후 다시 선택해주세요.' });
+        }
+        const optCounts = await fetchOptionCounts(client, id, now);
+        const ov = computeOptionView(chosenOpt, optCounts.get(chosenOpt.opt_key), st);
+        if (ov.status !== 'open') {
+          await client.query('ROLLBACK');
+          const reason = ov.status === 'soldout' ? 'option_soldout' : (ov.status === 'today_done' ? 'option_today_done' : 'option_closed');
+          return res.status(409).json({ ok: false, reason, option: _publicOptionView(ov), error: '선택한 옵션은 마감되었어요. 다른 옵션을 선택해주세요.' });
+        }
+      }
     }
 
     // 등록 리뷰어만(레드 #12 — 스크래핑 비용 상승, 완전 차단은 아님)
@@ -556,15 +790,16 @@ async function _applyParticipation(req, res, next, campPre) {
     const holdToken = crypto.randomBytes(24).toString('base64url');
     const ins = await client.query(
       `INSERT INTO campaign_applications
-         (campaign_id, applicant_name, applicant_phone, phone8, status, expires_at, hold_token)
-       VALUES ($1,$2,$3,$4,'applied',$5,$6)
-       RETURNING id, expires_at`,
-      [id, name, rawPhone, p8, expiresAt.toISOString(), holdToken]);
+         (campaign_id, applicant_name, applicant_phone, phone8, status, expires_at, hold_token, option_key)
+       VALUES ($1,$2,$3,$4,'applied',$5,$6,$7)
+       RETURNING id, expires_at, option_key`,
+      [id, name, rawPhone, p8, expiresAt.toISOString(), holdToken, chosenOpt ? chosenOpt.opt_key : null]);
     await client.query('COMMIT');
-    logger.info(`[campaign/apply] 홀드 생성 camp=${id} app=${ins.rows[0].id} phone8=***${p8.slice(-4)}`);
+    logger.info(`[campaign/apply] 홀드 생성 camp=${id} app=${ins.rows[0].id} phone8=***${p8.slice(-4)}${chosenOpt ? ' opt=' + chosenOpt.opt_key : ''}`);
     return res.json({
       ok: true, applicationId: ins.rows[0].id, holdToken, phone8: p8,
       expiresAt: ins.rows[0].expires_at, serverNow: now.toISOString(),
+      optionKey: ins.rows[0].option_key || null,
     });
   } catch (err) {
     try { await client.query('ROLLBACK'); } catch (_) { /* noop */ }
@@ -712,6 +947,7 @@ router.post('/admin/create', authMiddleware, adminOrMasterMiddleware, async (req
       // ★ M2 변경②: 참여형 발행 필드
       participation_mode, thumbnail_url, landing_url, daily_limit, recruit_total,
       window_start, window_end, close_buffer_min, hold_ttl_min, work_detail, source_work_order_id,
+      options, // ★ 061: 상품옵션 목록(참여형)
     } = req.body;
 
     if (!title || !title.trim()) {
@@ -771,7 +1007,11 @@ router.post('/admin/create', authMiddleware, adminOrMasterMiddleware, async (req
         source_work_order_id || '',
       ]
     );
-    res.json({ ok: true, data: rows[0] });
+    // ★ 061: 상품옵션 저장(제공 시). 원자 저장(캠페인 락) — 실패 시 응답에 경고 표면화(조용한 정원 오염 방지, 레드 #7).
+    const normOpts = _normalizeOptionsInput(options);
+    let optionsWarning = null;
+    if (normOpts) { try { await _saveCampaignOptions(rows[0].id, normOpts); } catch (e) { optionsWarning = '옵션 저장 실패: ' + e.message; logger.warn('[campaign/create] ' + optionsWarning); } }
+    res.json({ ok: true, data: rows[0], options: await _loadOptionsRaw(pool, rows[0].id), ...(optionsWarning ? { optionsWarning } : {}) });
   } catch (err) {
     next(err);
   }
@@ -781,6 +1021,8 @@ router.post('/admin/create', authMiddleware, adminOrMasterMiddleware, async (req
 router.put('/admin/:id', authMiddleware, adminOrMasterMiddleware, async (req, res, next) => {
   try {
     // ★ 리뷰어앱 공고수정 스코프 토큰은 전용 화이트리스트 핸들러로 격리(레드팀 #2/#3/#6)
+    //   ★ 옵션(정원·금액) 편집도 이 조기 반환으로 차단됨 — _scopedCampaignEdit는 options를 읽지 않는다
+    //     (레드 #4 검토: 약한 신원 리뷰어앱 토큰이 옵션 정원/지급액을 변조하는 파괴표면 차단).
     if (req.admin && req.admin.via === 'reviewer_campaign') {
       return await _scopedCampaignEdit(req, res);
     }
@@ -793,6 +1035,7 @@ router.put('/admin/:id', authMiddleware, adminOrMasterMiddleware, async (req, re
       // ★ M2 변경②: 참여형 발행 필드(전부 optional — 미전달 시 기존값 유지)
       participation_mode, thumbnail_url, landing_url, daily_limit, recruit_total,
       window_start, window_end, close_buffer_min, hold_ttl_min, work_detail, source_work_order_id,
+      options, // ★ 061: 상품옵션 목록(배열 전달 시에만 교체, 미전달=변경 없음)
     } = req.body;
 
     // ★ 참여형 활성화 게이트(심판 J7): COALESCE 편집으로 status='active' 우회 방지.
@@ -876,7 +1119,11 @@ router.put('/admin/:id', authMiddleware, adminOrMasterMiddleware, async (req, re
     if (rows.length === 0) {
       return res.status(404).json({ ok: false, error: '캠페인을 찾을 수 없습니다.' });
     }
-    res.json({ ok: true, data: rows[0] });
+    // ★ 061: 상품옵션 교체(배열 전달 시에만). 원자 저장(캠페인 락), 참여자 있는 옵션은 삭제 대신 closed(기록 보호).
+    const normOpts = _normalizeOptionsInput(options);
+    let optionsWarning = null;
+    if (normOpts) { try { await _saveCampaignOptions(id, normOpts); } catch (e) { optionsWarning = '옵션 저장 실패: ' + e.message; logger.warn('[campaign/update] ' + optionsWarning); } }
+    res.json({ ok: true, data: rows[0], options: await _loadOptionsRaw(pool, id), ...(optionsWarning ? { optionsWarning } : {}) });
   } catch (err) {
     next(err);
   }

@@ -156,9 +156,84 @@ async function fetchCampaignCounts(pool, campaignIds, now = new Date()) {
   return out;
 }
 
+// ═══════════════════════════════════════════════════════════
+// 상품옵션(campaign_options) — 옵션별 자리 계산 (061, PRD v1.1 §07)
+//   ★ 동시성: apply/change-option/confirm 은 모두 recruit_campaigns 행 FOR UPDATE 안에서
+//     옵션 카운트를 재집계하므로(캠페인 단위 직렬화), 옵션별 계산은 write-skew 없이 정확하다.
+//   유효 홀드 = status='applied' AND expires_at>now (시각 기준 — 스윕 미실행 무해, 캠페인 카운트와 동일 계약).
+// ═══════════════════════════════════════════════════════════
+
+/**
+ * 한 캠페인의 옵션별 카운트 집계 (option_key GROUP BY, 1쿼리).
+ * @returns Map optKey → { activeHolds, todayActiveHolds, submitted, todaySubmitted }
+ */
+async function fetchOptionCounts(db, campaignId, now = new Date()) {
+  const out = new Map();
+  if (!campaignId) return out;
+  const dayStart = kstDayStartUtc(now).toISOString();
+  const { rows } = await db.query(
+    `SELECT option_key,
+            COUNT(*) FILTER (WHERE status='applied'   AND expires_at > NOW())                      AS active_holds,
+            COUNT(*) FILTER (WHERE status='applied'   AND expires_at > NOW() AND applied_at >= $2)  AS today_active_holds,
+            COUNT(*) FILTER (WHERE status='submitted')                                              AS submitted,
+            COUNT(*) FILTER (WHERE status='submitted' AND submitted_at >= $2)                       AS today_submitted
+       FROM campaign_applications
+      WHERE campaign_id = $1 AND option_key IS NOT NULL
+      GROUP BY option_key`,
+    [campaignId, dayStart]
+  );
+  for (const r of rows) {
+    out.set(r.option_key, {
+      activeHolds: Number(r.active_holds) || 0,
+      todayActiveHolds: Number(r.today_active_holds) || 0,
+      submitted: Number(r.submitted) || 0,
+      todaySubmitted: Number(r.today_submitted) || 0,
+    });
+  }
+  return out;
+}
+
+/**
+ * 옵션 1개의 표시/판정 뷰 (순수 함수 — DB 없이 테스트 가능).
+ * @param opt   campaign_options 행 { opt_key, pay_amount, recruit_total, daily_limit, status }
+ * @param cnt   fetchOptionCounts 의 해당 옵션 값(없으면 0으로 처리)
+ * @param campState computeCampaignState 결과(캠페인 게이트 반영 — 옵션이 열려도 캠페인이 닫히면 못 뽑음)
+ * @returns { optKey, payAmount, recruitTotal, dailyLimit,
+ *            used, remaining(null=무제한), todayUsed, todayRemaining(null=제한없음),
+ *            status: 'open'|'soldout'|'today_done'|'closed', selectable }
+ */
+function computeOptionView(opt, cnt, campState) {
+  const c = cnt || { activeHolds: 0, todayActiveHolds: 0, submitted: 0, todaySubmitted: 0 };
+  const recruitTotal = Math.max(0, Number(opt.recruit_total) || 0);
+  const dailyLimit = Math.max(0, Number(opt.daily_limit) || 0);
+  const used = (Number(c.submitted) || 0) + (Number(c.activeHolds) || 0);
+  const todayUsed = (Number(c.todaySubmitted) || 0) + (Number(c.todayActiveHolds) || 0);
+  const remaining = recruitTotal > 0 ? Math.max(0, recruitTotal - used) : null;       // null=무제한
+  const todayRemaining = dailyLimit > 0 ? Math.max(0, dailyLimit - todayUsed) : null;  // null=옵션 일일제한 없음
+
+  let status;
+  if (String(opt.status || 'active') === 'closed') status = 'closed';          // 수동 마감
+  else if (remaining !== null && remaining <= 0) status = 'soldout';           // 정원 소진
+  else if (todayRemaining !== null && todayRemaining <= 0) status = 'today_done'; // 오늘 소진(내일 재개)
+  else status = 'open';
+
+  // 실제 선택 가능 = 옵션 open AND 캠페인 상태가 신청 가능(open) — 캠페인이 닫히면 옵션도 못 뽑음
+  const campOpen = !campState || campState.state === 'open';
+  return {
+    optKey: opt.opt_key,
+    payAmount: Math.max(0, Number(opt.pay_amount) || 0),
+    recruitTotal, dailyLimit,
+    used, remaining, todayUsed, todayRemaining,
+    status,
+    selectable: status === 'open' && campOpen,
+  };
+}
+
 module.exports = {
   computeCampaignState,
   fetchCampaignCounts,
+  fetchOptionCounts,
+  computeOptionView,
   dailyQuota,
   timeStrToMinutes,
   kstDayStartUtc,
