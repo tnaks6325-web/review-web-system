@@ -85,32 +85,47 @@ function _normalizeOptionsInput(arr) {
 }
 
 /** 옵션 저장(replace-set): 제공 옵션 upsert + 목록에서 빠진 기존 옵션은 참여자 있으면 closed, 없으면 삭제.
- *  ★ 참여자 있는 옵션은 절대 삭제하지 않음(기록·정원 보호). db=트랜잭션 client 권장. */
-async function _saveCampaignOptions(db, campaignId, options) {
+ *  ★ 참여자 있는 옵션은 절대 삭제하지 않음(기록·정원 보호).
+ *  ★★ 원자성·상호배제(레드/블루 #2·#7): 자체 트랜잭션 + recruit_campaigns 행 FOR UPDATE로
+ *     apply/change-option과 동일 락 계층 확보 → "사용여부 SELECT→DELETE" 사이 동시 apply가
+ *     끼어들어 방금 참여한 옵션을 삭제하는 TOCTOU를 봉합. 실패 시 전체 롤백(부분 저장 없음). */
+async function _saveCampaignOptions(campaignId, options) {
   if (!Array.isArray(options)) return; // 미전달=변경 없음
   const keep = new Set(options.map(o => o.optKey));
-  for (const o of options) {
-    await db.query(
-      `INSERT INTO campaign_options (campaign_id, opt_key, pay_amount, recruit_total, daily_limit, sort_order, status, updated_at)
-       VALUES ($1,$2,$3,$4,$5,$6,$7,NOW())
-       ON CONFLICT (campaign_id, opt_key) DO UPDATE SET
-         pay_amount=EXCLUDED.pay_amount, recruit_total=EXCLUDED.recruit_total,
-         daily_limit=EXCLUDED.daily_limit, sort_order=EXCLUDED.sort_order,
-         status=EXCLUDED.status, updated_at=NOW()`,
-      [campaignId, o.optKey, o.payAmount, o.recruitTotal, o.dailyLimit, o.sortOrder, o.status]);
-  }
-  const { rows: existing } = await db.query('SELECT opt_key FROM campaign_options WHERE campaign_id=$1', [campaignId]);
-  for (const e of existing) {
-    if (keep.has(e.opt_key)) continue;
-    const { rows: used } = await db.query(
-      `SELECT 1 FROM campaign_applications
-        WHERE campaign_id=$1 AND option_key=$2 AND status IN ('applied','submitted') LIMIT 1`,
-      [campaignId, e.opt_key]);
-    if (used.length) {
-      await db.query("UPDATE campaign_options SET status='closed', updated_at=NOW() WHERE campaign_id=$1 AND opt_key=$2", [campaignId, e.opt_key]);
-    } else {
-      await db.query('DELETE FROM campaign_options WHERE campaign_id=$1 AND opt_key=$2', [campaignId, e.opt_key]);
+  const client = await pool.connect();
+  try {
+    await client.query('BEGIN');
+    const { rows: lock } = await client.query('SELECT id FROM recruit_campaigns WHERE id=$1 FOR UPDATE', [campaignId]);
+    if (!lock.length) { await client.query('ROLLBACK'); return; }
+    for (const o of options) {
+      await client.query(
+        `INSERT INTO campaign_options (campaign_id, opt_key, pay_amount, recruit_total, daily_limit, sort_order, status, updated_at)
+         VALUES ($1,$2,$3,$4,$5,$6,$7,NOW())
+         ON CONFLICT (campaign_id, opt_key) DO UPDATE SET
+           pay_amount=EXCLUDED.pay_amount, recruit_total=EXCLUDED.recruit_total,
+           daily_limit=EXCLUDED.daily_limit, sort_order=EXCLUDED.sort_order,
+           status=EXCLUDED.status, updated_at=NOW()`,
+        [campaignId, o.optKey, o.payAmount, o.recruitTotal, o.dailyLimit, o.sortOrder, o.status]);
     }
+    const { rows: existing } = await client.query('SELECT opt_key FROM campaign_options WHERE campaign_id=$1', [campaignId]);
+    for (const e of existing) {
+      if (keep.has(e.opt_key)) continue;
+      const { rows: used } = await client.query(
+        `SELECT 1 FROM campaign_applications
+          WHERE campaign_id=$1 AND option_key=$2 AND status IN ('applied','submitted') LIMIT 1`,
+        [campaignId, e.opt_key]);
+      if (used.length) {
+        await client.query("UPDATE campaign_options SET status='closed', updated_at=NOW() WHERE campaign_id=$1 AND opt_key=$2", [campaignId, e.opt_key]);
+      } else {
+        await client.query('DELETE FROM campaign_options WHERE campaign_id=$1 AND opt_key=$2', [campaignId, e.opt_key]);
+      }
+    }
+    await client.query('COMMIT');
+  } catch (e) {
+    try { await client.query('ROLLBACK'); } catch (_) { /* noop */ }
+    throw e;
+  } finally {
+    client.release();
   }
 }
 
@@ -675,20 +690,25 @@ async function _applyParticipation(req, res, next, campPre) {
       return res.status(409).json({ ok: false, reason: st.state, state: st, error: '지금은 신청할 수 없습니다.' });
     }
 
-    // ★ 상품옵션 게이트(061): 활성 옵션이 있으면 선택 필수 + 잔여/오늘 확인. 옵션 없으면 현행 경로(option_key=NULL).
-    //   캠페인 행 FOR UPDATE 안이라 옵션 카운트도 직렬화 — 소진 경합(write-skew) 없음.
+    // ★ 상품옵션 게이트(061): 옵션이 "등록된" 캠페인이면 선택 필수(전부 마감이어도 option_key=NULL 우회 금지, 리뷰 #3).
+    //   옵션 미등록 캠페인만 현행 경로(NULL). 캠페인 행 FOR UPDATE 안이라 옵션 카운트도 직렬화 — 소진 경합 없음.
     let chosenOpt = null;
     {
-      const { rows: optRows } = await client.query(
+      const { rows: allOpts } = await client.query(
         `SELECT opt_key, pay_amount, recruit_total, daily_limit, status
-           FROM campaign_options WHERE campaign_id = $1 AND status = 'active' ORDER BY sort_order, id`, [id]);
-      if (optRows.length) {
+           FROM campaign_options WHERE campaign_id = $1 ORDER BY (status='closed'), sort_order, id`, [id]);
+      if (allOpts.length) {
+        const activeOpts = allOpts.filter(o => o.status === 'active');
+        if (!activeOpts.length) {
+          await client.query('ROLLBACK');
+          return res.status(409).json({ ok: false, reason: 'option_unavailable', error: '지금은 선택 가능한 옵션이 없어요(모두 마감).' });
+        }
         const wantKey = _normOptKey(req.body.optionKey);
         if (!wantKey) {
           await client.query('ROLLBACK');
-          return res.status(400).json({ ok: false, reason: 'option_required', error: '참여할 옵션을 선택해주세요.', options: optRows.map(o => o.opt_key) });
+          return res.status(400).json({ ok: false, reason: 'option_required', error: '참여할 옵션을 선택해주세요.', options: activeOpts.map(o => o.opt_key) });
         }
-        chosenOpt = optRows.find(o => o.opt_key === wantKey) || null;
+        chosenOpt = activeOpts.find(o => o.opt_key === wantKey) || null;
         if (!chosenOpt) {
           await client.query('ROLLBACK');
           return res.status(400).json({ ok: false, reason: 'option_invalid', error: '선택한 옵션을 찾을 수 없어요. 새로고침 후 다시 선택해주세요.' });
@@ -987,10 +1007,11 @@ router.post('/admin/create', authMiddleware, adminOrMasterMiddleware, async (req
         source_work_order_id || '',
       ]
     );
-    // ★ 061: 상품옵션 저장(제공 시). 신규 캠페인이라 동시성 없음 — best-effort.
+    // ★ 061: 상품옵션 저장(제공 시). 원자 저장(캠페인 락) — 실패 시 응답에 경고 표면화(조용한 정원 오염 방지, 레드 #7).
     const normOpts = _normalizeOptionsInput(options);
-    if (normOpts) { try { await _saveCampaignOptions(pool, rows[0].id, normOpts); } catch (e) { logger.warn('[campaign/create] 옵션 저장 실패: ' + e.message); } }
-    res.json({ ok: true, data: rows[0], options: await _loadOptionsRaw(pool, rows[0].id) });
+    let optionsWarning = null;
+    if (normOpts) { try { await _saveCampaignOptions(rows[0].id, normOpts); } catch (e) { optionsWarning = '옵션 저장 실패: ' + e.message; logger.warn('[campaign/create] ' + optionsWarning); } }
+    res.json({ ok: true, data: rows[0], options: await _loadOptionsRaw(pool, rows[0].id), ...(optionsWarning ? { optionsWarning } : {}) });
   } catch (err) {
     next(err);
   }
@@ -1000,6 +1021,8 @@ router.post('/admin/create', authMiddleware, adminOrMasterMiddleware, async (req
 router.put('/admin/:id', authMiddleware, adminOrMasterMiddleware, async (req, res, next) => {
   try {
     // ★ 리뷰어앱 공고수정 스코프 토큰은 전용 화이트리스트 핸들러로 격리(레드팀 #2/#3/#6)
+    //   ★ 옵션(정원·금액) 편집도 이 조기 반환으로 차단됨 — _scopedCampaignEdit는 options를 읽지 않는다
+    //     (레드 #4 검토: 약한 신원 리뷰어앱 토큰이 옵션 정원/지급액을 변조하는 파괴표면 차단).
     if (req.admin && req.admin.via === 'reviewer_campaign') {
       return await _scopedCampaignEdit(req, res);
     }
@@ -1096,10 +1119,11 @@ router.put('/admin/:id', authMiddleware, adminOrMasterMiddleware, async (req, re
     if (rows.length === 0) {
       return res.status(404).json({ ok: false, error: '캠페인을 찾을 수 없습니다.' });
     }
-    // ★ 061: 상품옵션 교체(배열 전달 시에만). 참여자 있는 옵션은 삭제 대신 closed(기록 보호).
+    // ★ 061: 상품옵션 교체(배열 전달 시에만). 원자 저장(캠페인 락), 참여자 있는 옵션은 삭제 대신 closed(기록 보호).
     const normOpts = _normalizeOptionsInput(options);
-    if (normOpts) { try { await _saveCampaignOptions(pool, id, normOpts); } catch (e) { logger.warn('[campaign/update] 옵션 저장 실패: ' + e.message); } }
-    res.json({ ok: true, data: rows[0], options: await _loadOptionsRaw(pool, id) });
+    let optionsWarning = null;
+    if (normOpts) { try { await _saveCampaignOptions(id, normOpts); } catch (e) { optionsWarning = '옵션 저장 실패: ' + e.message; logger.warn('[campaign/update] ' + optionsWarning); } }
+    res.json({ ok: true, data: rows[0], options: await _loadOptionsRaw(pool, id), ...(optionsWarning ? { optionsWarning } : {}) });
   } catch (err) {
     next(err);
   }

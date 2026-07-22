@@ -806,6 +806,10 @@ router.post('/order', async (req, res, next) => {
     // ★ 참여형 옵션 서버권위(061, PRD §05): 홀드에 저장된 option_key를 selectedOptKey로 강제.
     //   화면 값 조작·낡은 표시로 다른 옵션이 기록되는 것을 차단(행배정·시트기입·dedup 모두 이 값 기준).
     //   fail-open: 조회 실패/미참여/옵션없는 홀드는 클라이언트 값 유지(라이브 핫패스 무영향).
+    //   ※ 잔여 TOCTOU(레드 #1): 이 읽기는 확정 락 밖이라, 제출 처리 중 다른 탭이 change-option으로 옵션을
+    //     바꾸면 시트=옛옵션·DB홀드=새옵션 불일치가 이론상 가능. 2단계 UI 계약으로 봉합 = 옵션변경은
+    //     부모(campaign.html)에서만 가능하고 변경 시 구매양식 iframe을 재로드해 인플라이트 제출을 파기한다
+    //     (같은 페이지라 동시 진행 불가). change-option UI 미연동인 1단계에서는 도달 불가.
     let effectiveOptKey = selectedOptKey;
     if (b.campaignId && b.campaignApplicationId && b.holdToken) {
       try {
