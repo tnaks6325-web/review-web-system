@@ -194,6 +194,74 @@ router.get('/my-files', async (req, res) => {
   }
 });
 
+// GET /api/review-edit/participation-brief?phone8&sheetId&tabName&gid&rowIndex
+//   리뷰 내역 카드 → "참여상품 정보" 시트용. 행 소유권(강한-키) 통과 시에만 그 행의 연결 공고
+//   brief(제목·카톡URL·상품URL·상품정보)를 반환. 카톡 URL은 이름 단독 약한-키론 절대 안 나간다
+//   (참여형 chat_url 게이트와 동일 사상 — my-files 소유권 술어 재사용).
+router.get('/participation-brief', async (req, res) => {
+  try {
+    const p8 = _p8(req.query.phone8);
+    const sheetId = req.query.sheetId;
+    const tabName = req.query.tabName;
+    const gid = String(req.query.gid || '');
+    const rowIndex = parseInt(req.query.rowIndex, 10);
+    if (p8.length !== 8 || !sheetId || !tabName || !Number.isInteger(rowIndex)) {
+      return res.status(400).json({ ok: false, error: '잘못된 요청입니다.' });
+    }
+
+    const phoneList = await _getReviewerPhoneList(p8);
+    if (!(await _verifyRowOwnership(phoneList, sheetId, tabName, rowIndex))) {
+      return res.status(403).json({ ok: false, error: '본인 참여 내역만 조회할 수 있습니다.' });
+    }
+
+    // 이 행(시트/탭)에 연결된 공고 — gid 우선 → 탭명 폴백
+    const { rows: camps } = await pool.query(
+      `SELECT id, title, chat_url, landing_url, source_work_order_id, work_detail
+         FROM recruit_campaigns
+        WHERE linked_sheet_id = $1
+          AND (($2 <> '' AND linked_tab_gid = $2) OR linked_tab_name = $3)
+        ORDER BY ($2 <> '' AND linked_tab_gid = $2) DESC, created_at DESC
+        LIMIT 1`,
+      [sheetId, gid, tabName]
+    );
+    if (!camps.length) return res.json({ ok: true, brief: null });   // 공고 미연결 탭(카톡 없음 → 프론트는 제출 버튼만)
+    const c = camps[0];
+
+    // 상품 URL: 연결 작업오더 product_url → 공고 landing_url 폴백 (읽기만 · fail-soft)
+    let productUrl = '';
+    try {
+      const { rows: wo } = await pool.query(
+        `SELECT product_url FROM work_orders
+          WHERE (linked_campaign_id = $1 AND $1 <> '') OR (id = $2 AND $2 <> '')
+          ORDER BY (linked_campaign_id = $1) DESC, updated_at DESC LIMIT 1`,
+        [c.id, c.source_work_order_id || '']
+      );
+      productUrl = (wo[0] && wo[0].product_url) || '';
+    } catch (_) { /* fail-soft */ }
+    if (!productUrl) productUrl = c.landing_url || '';
+
+    let productLines = '';
+    try {
+      const wd = typeof c.work_detail === 'string' ? JSON.parse(c.work_detail) : (c.work_detail || {});
+      productLines = String((wd && wd.productLines) || '').trim();
+    } catch (_) { /* work_detail 없음/파싱 실패 무시 */ }
+
+    res.json({
+      ok: true,
+      brief: {
+        campaignId: c.id,
+        campaignTitle: c.title || '',
+        chatUrl: c.chat_url || '',
+        productUrl,
+        productLines,
+      },
+    });
+  } catch (err) {
+    logger.error(`[review-edit] participation-brief 실패: ${err.message}`);
+    res.status(500).json({ ok: false, error: '조회 중 오류가 발생했습니다.' });
+  }
+});
+
 // POST /api/review-edit/request
 //   body: { phone8, sheetId, tabName, gid, rowIndex, oldFileId, reason, file:{data,mimeType,name} }
 //   새 파일을 [수정대기]에 스테이징만 하고 요청 원장(pending)에 기록. 실제 교체는 관리자 승인 시.

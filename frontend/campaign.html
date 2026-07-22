@@ -26,6 +26,7 @@
       color:#fff;font-size:.95rem;font-weight:800;border-radius:12px;padding:14px;font-family:inherit}
     .btn.ghost{background:#EEF1F7;color:var(--t2)}
     .btn.green{background:linear-gradient(135deg,#12b886,#0ca678)}
+    .btn.kakao{background:#FEE500;color:#191919;box-shadow:0 3px 10px rgba(250,225,0,.42)}
     .btn:disabled{background:#EEF1F7;color:var(--t3);cursor:default}
     .muted{font-size:.76rem;color:var(--t3)}
     .holdbar{position:sticky;top:64px;z-index:90;display:flex;align-items:center;gap:10px;background:var(--warn-light);
@@ -106,10 +107,6 @@
       </div>
       <div class="cardbx" id="wdReviewBox" style="display:none"><div class="wd-tt">📝 리뷰 가이드</div><div class="wd-body" id="wdReview"></div></div>
       <div class="cardbx" id="wdNotesBox" style="display:none"><div class="wd-tt">📌 특이사항</div><div class="wd-body" id="wdNotes"></div></div>
-      <div class="cardbx" id="chatBox" style="display:none">
-        <div class="wd-tt">💬 팀 채팅방</div>
-        <button class="btn ghost" onclick="openChat()">카톡 팀채팅방 입장</button>
-      </div>
       <div class="cardbx" style="border-color:var(--p)">
         <div class="wd-tt" style="color:var(--p-dark)">🧾 구매양식 — 구매를 마친 뒤 여기서 바로 제출하세요</div>
         <iframe id="orderFrame" title="구매양식"></iframe>
@@ -138,7 +135,7 @@
     <p>구매양식이 제출되었어요.<br/>진행 상황은 리뷰어 홈의 참여현황에서 확인할 수 있어요.</p>
     <div class="sec">
       <button class="btn" onclick="location.href='/'">내 참여현황 보기</button>
-      <button class="btn ghost" id="doneChatBtn" style="margin-top:8px;display:none" onclick="openChat()">💬 팀 채팅방 입장</button>
+      <button class="btn kakao" id="doneChatBtn" style="margin-top:8px;display:none" onclick="openChat()">💬 이 캠페인의 카톡 팀채팅방 입장</button>
     </div>
   </div>
 </div>
@@ -214,6 +211,69 @@ async function doVerify(){
 function getHold(){ try{ return JSON.parse(localStorage.getItem(HOLD_KEY) || 'null'); }catch(_){ return null; } }
 function setHold(h){ localStorage.setItem(HOLD_KEY, JSON.stringify(h)); }
 function clearHold(){ localStorage.removeItem(HOLD_KEY); }
+
+/* ═══ 작업내용 표시 정규화 (표시 직전 · 스냅샷 불변 · 문제 패턴일 때만 개입) ═══ */
+// 상품·옵션·결제금액: 중복 "결제금액 N원" 제거 + 상품명↵금액 줄바꿈. 금액 1종류일 때만 병합(다옵션 상이금액은 원문 보존).
+function _fmtProduct(wd){
+  const base = String((wd && wd.productLines) || '').trim();
+  const payAmt = (wd && wd.payAmount) ? Number(wd.payAmount) : 0;
+  if(!base && !payAmt) return '(등록된 상품 정보가 없어요)';
+  const amtRe = /결제금액\s*([\d,]+)\s*원/g;
+  const amounts = new Set(); let m;
+  while((m = amtRe.exec(base))) amounts.add(m[1].replace(/,/g,''));
+  if(amounts.size === 1){
+    const amt = Number([...amounts][0]);
+    const stripped = base.split(/\n/)
+      .map(ln => ln.replace(/\s*[-·/]?\s*결제금액\s*[\d,]+\s*원/g, '').replace(/[\s\-·/]+$/,'').trim())
+      .filter(Boolean).join('\n');
+    return (stripped ? stripped + '\n' : '') + '결제금액 ' + amt.toLocaleString() + '원';
+  }
+  // 금액이 여럿(다옵션) 또는 라인 내 금액 없음 → payAmount만 별도 줄로
+  if(payAmt && amounts.size === 0) return (base ? base + '\n' : '') + '결제금액 ' + payAmt.toLocaleString() + '원';
+  return base || '(등록된 상품 정보가 없어요)';
+}
+// 리뷰가이드: [리뷰등록 가이드] 계열 섹션만. [라벨] 마커가 없으면 평문 전체 그대로(무변화).
+function _pickReviewOnly(raw){
+  const text = String(raw == null ? '' : raw);
+  if(!text.trim()) return '';
+  if(!/\[[^\]]+\]/.test(text)) return text.trim();
+  const norm = s => s.replace(/\s/g,'');
+  const keep = ['리뷰등록가이드','리뷰가이드'];   // index-app.js _woPickSections 와 동일 규율
+  const out = []; let take = false, buf = [];
+  const flush = () => { const c = buf.join('\n').trim(); if(take && c) out.push(c); buf = []; };
+  for(const ln of text.split(/\r?\n/)){
+    const mm = ln.match(/^\s*\[([^\]]+)\]\s*(.*)$/);
+    if(mm){ flush(); take = keep.some(k => norm(mm[1]).includes(k)); buf = mm[2] ? [mm[2]] : []; }
+    else buf.push(ln);
+  }
+  flush();
+  return out.join('\n').trim();
+}
+// 리뷰가이드 원문에 섞여 온 첨부 이미지(guide-image 프록시·Drive)만 <img>로. 유입 HTML에 이미 있으면 스킵.
+// 중복 판정은 파일ID 토큰 기준 — 같은 이미지가 호스트만 다른 프록시 URL(pages↔railway)이어도 이중노출 방지.
+function _extractGuideImages(raw, existingHtml){
+  const seen = String(existingHtml || '');
+  const re = /https?:\/\/[^\s<)"']+/g;
+  let m, html = ''; const used = {};
+  while((m = re.exec(String(raw || '')))){
+    const u = m[0];
+    let src = '', tok = '';
+    const pm = u.match(/\/api\/order\/guide-image\/([-\w]{20,})/);
+    if(pm){ src = u; tok = pm[1]; }
+    else { const id = _driveId(u); if(id){ src = 'https://drive.google.com/thumbnail?id=' + id + '&sz=w1600'; tok = id; } }
+    if(!src || !tok) continue;
+    if(used[tok] || seen.indexOf(tok) >= 0) continue;   // 이미 뽑았거나 유입 HTML에 같은 파일ID 존재 → 스킵
+    used[tok] = 1;
+    html += '<img src="' + _escAttr(src) + '" alt="유입가이드 이미지">';
+  }
+  return html;
+}
+function _driveId(url){
+  const s = String(url);
+  const m = s.match(/\/file\/d\/([-\w]{20,})/) || s.match(/[?&]id=([-\w]{20,})/) || s.match(/\/d\/([-\w]{20,})/);
+  return m ? m[1] : null;
+}
+function _escAttr(s){ return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;'); }
 
 /* ═══ 참여 전 화면 ═══ */
 function renderPre(){
@@ -313,14 +373,20 @@ async function enterJoined(){
     _detailRetry = 0;
     _detail = j;
     if(j.application && j.application.status === 'submitted'){ renderDone(); return; }
-    // 작업내용 렌더
+    // 작업내용 렌더 (표시 직전 정규화 — 스냅샷 원문은 불변, 기발행 캠페인도 정상화)
     const wd = j.workDetail || {};
-    $('wdProduct').textContent = [wd.productLines || '', wd.payAmount ? ('결제금액 ' + Number(wd.payAmount).toLocaleString() + '원') : ''].filter(Boolean).join('\n') || '(등록된 상품 정보가 없어요)';
-    $('wdGuide').innerHTML = wd.inflowGuideHtml || '<span class="muted">유입가이드가 없어요 — 아래 상품 페이지로 이동해 구매를 진행하세요.</span>'; // 서버 sanitize 완료 HTML
-    $('landingBtn').style.display = j.landingUrl ? '' : 'none';
-    if(wd.reviewGuide){ $('wdReviewBox').style.display=''; $('wdReview').textContent = wd.reviewGuide; }
+    $('wdProduct').textContent = _fmtProduct(wd);
+    // 유입가이드: 서버 sanitize된 HTML + 리뷰가이드 원문에 섞여 온 첨부 이미지(guide-image/Drive)만 <img>로 병합
+    let guideHtml = wd.inflowGuideHtml || '';
+    const extraImgs = _extractGuideImages(wd.reviewGuide || '', guideHtml);
+    if(!guideHtml && !extraImgs){ guideHtml = '<span class="muted">유입가이드가 없어요 — 아래 상품 페이지로 이동해 구매를 진행하세요.</span>'; }
+    $('wdGuide').innerHTML = guideHtml + extraImgs;
+    // 상품 페이지 열기: 링크유입일 때만(유입방식 불명 = 수동공고는 관리자가 넣은 랜딩 URL 의도 존중)
+    $('landingBtn').style.display = (j.landingUrl && (j.inflowType === 'link' || !j.inflowType)) ? '' : 'none';
+    // 리뷰 가이드: [리뷰등록 가이드] 섹션만 (유입 섹션·첨부 이미지 메타 제거)
+    const reviewOnly = _pickReviewOnly(wd.reviewGuide);
+    if(reviewOnly){ $('wdReviewBox').style.display=''; $('wdReview').textContent = reviewOnly; }
     if(wd.specialNotes){ $('wdNotesBox').style.display=''; $('wdNotes').textContent = wd.specialNotes; }
-    $('chatBox').style.display = j.chatUrl ? '' : 'none';
     // 인라인 구매양식 iframe (동일 오리진 — search.html 재사용)
     const f = j.form || {};
     const qp = new URLSearchParams({ embed:'1', s:f.sheetId||'', g:f.gid||'', t:f.tabName||'', d:f.displayName||'',
@@ -370,7 +436,8 @@ document.addEventListener('visibilitychange', ()=>{ if(!document.hidden) pollOnc
 
 function renderDone(pendingConfirm){
   clearInterval(_pollTimer); clearInterval(_holdTick);
-  $('doneChatBtn').style.display = (_detail && _detail.chatUrl) ? '' : 'none';
+  // chatUrl은 제출확정 후에만 서버가 반환 → 제출 직후 _detail(제출 전 응답)엔 비어있어 1회 재조회로 채운다
+  _ensureDoneChat();
   if(pendingConfirm){
     $('vDone').querySelector('.e').textContent = '📨';
     $('vDone').querySelector('h2').textContent = '구매양식이 접수됐어요';
@@ -392,6 +459,19 @@ window.addEventListener('message', (ev)=>{
   else if(d.type === 'embed-need-login'){ needLogin(()=>{ const f=$('orderFrame'); f.src = f.src; }); }
 });
 
+// 제출완료 화면의 카톡 버튼: chatUrl이 이미 있으면 노출, 없으면 work-detail 1회 재조회(제출확정 후 서버가 반환)
+async function _ensureDoneChat(){
+  const btn = $('doneChatBtn'); if(!btn) return;
+  if(_detail && _detail.chatUrl){ btn.style.display = ''; return; }
+  btn.style.display = 'none';
+  const h = getHold(); if(!h) return;
+  try{
+    const r = await fetch(API_BASE_URL + '/api/campaign/' + encodeURIComponent(CAMP_ID) +
+      '/work-detail?phone8=' + encodeURIComponent(h.phone8) + '&holdToken=' + encodeURIComponent(h.holdToken));
+    const j = await r.json().catch(()=>({}));
+    if(r.ok && j.ok && j.chatUrl){ _detail = _detail || {}; _detail.chatUrl = j.chatUrl; btn.style.display = ''; }
+  }catch(_){ /* 실패해도 다음 폴링·재방문에서 자가복구 */ }
+}
 function openLanding(){ if(_detail && _detail.landingUrl) window.open(_detail.landingUrl, '_blank', 'noopener'); }
 function openChat(){ if(_detail && _detail.chatUrl) window.open(_detail.chatUrl, '_blank', 'noopener'); }
 // ★ 새 창에서도 embed=1 유지 — 최상위 창에선 postMessage가 no-op일 뿐,

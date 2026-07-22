@@ -29,6 +29,26 @@ function _genCampaignId() {
   return 'camp_' + crypto.randomBytes(6).toString('hex');
 }
 
+/** 공고에 연결된 작업오더의 유입방식(inflow_type)을 라이브 역조회.
+ *  우선순위: work_orders.linked_campaign_id = campId(발행 시 기록) → source_work_order_id 보조.
+ *  Track A 무접촉(읽기만) · 실패/미연결은 '' 폴백(fail-soft — 홀드/제출 경로에 영향 없음). */
+async function _lookupInflowType(campId, sourceWoId) {
+  try {
+    const { rows } = await pool.query(
+      `SELECT inflow_type
+         FROM work_orders
+        WHERE (linked_campaign_id = $1 AND $1 <> '')
+           OR (id = $2 AND $2 <> '')
+        ORDER BY (linked_campaign_id = $1) DESC, updated_at DESC
+        LIMIT 1`,
+      [campId || '', sourceWoId || '']
+    );
+    return (rows[0] && rows[0].inflow_type) || '';
+  } catch (_) {
+    return '';   // 컬럼/테이블 이슈 등은 조용히 폴백(라이브 핫패스 보호)
+  }
+}
+
 // ═══════════════════════════════════════════════════════════
 // 공개 응답 화이트리스트 (M1 선행 보안 — PRD §08)
 //   레거시(participation_mode=false): 현행 /list 반환 필드 그대로 유지(카톡 신청 플로우 호환).
@@ -378,6 +398,10 @@ router.get('/:id/work-detail', detailLimiter, async (req, res, next) => {
       });
     }
 
+    // 유입방식(inflow_type): 연결 작업오더에서 라이브 역조회(스냅샷·마이그레이션 불필요, 기발행분도 즉시 정확).
+    //   상품 페이지 열기 버튼을 '링크유입'일 때만 노출하기 위한 신호. 실패는 '' 폴백(fail-soft).
+    const inflowType = await _lookupInflowType(camp.id, camp.source_work_order_id);
+
     res.json({
       ok: true,
       serverNow: now.toISOString(),
@@ -389,7 +413,9 @@ router.get('/:id/work-detail', detailLimiter, async (req, res, next) => {
         submittedAt: app.submitted_at,
       },
       workDetail: sanitizeWorkDetail(camp.work_detail),          // HTML은 응답 직전 방어적 재정화
-      chatUrl: camp.chat_url || '',
+      inflowType,                                                 // 'guide' | 'link' | '' — 랜딩 버튼 게이트
+      // 카톡 팀채팅방 URL은 제출확정 후에만 반환(화면 숨김을 API에서도 강제 — DevTools 우회 차단)
+      chatUrl: isSubmitted ? (camp.chat_url || '') : '',
       landingUrl: camp.landing_url || '',
       form: {                                                     // 인라인 구매양식(iframe) 진입 파라미터
         sheetId: camp.linked_sheet_id || '',

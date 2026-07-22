@@ -894,7 +894,10 @@ async function saveRecruitPost() {
     linked_tab_gid:  (tabMeta && tabMeta.tabGid) || "",
     max_slots:      Number(document.getElementById("rf_max_slots").value) || 0,
     status:         document.getElementById("rf_status").value,
-    sort_order:     Number(document.getElementById("rf_sort_order").value) || 0
+    sort_order:     Number(document.getElementById("rf_sort_order").value) || 0,
+    // 작업오더 프리필로 만든 신규 공고면 정방향 링크(source_work_order_id) 즉시 기록 —
+    // work-detail 유입방식 역조회의 보조키(주: linked_campaign_id). 편집 시엔 미전송=COALESCE 유지.
+    source_work_order_id: (!_recruitEditId && _woPrefillOrderId) ? _woPrefillOrderId : undefined,
   };
 
   /* ⚡ 참여형(M2): 설정·작업내용 스냅샷 포함 + 게시 전 자동 점검(서버 게이트와 동일 3항목)

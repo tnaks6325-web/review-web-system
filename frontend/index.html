@@ -1297,14 +1297,16 @@ function renderReviewSubTab() {
         </div>`;
       if (isDone) {
         // 제출완료 카드: 본문(rc-main) + 하단 구분선 액션(이미지 확인·수정요청)을 카드 안 한 몸으로
-        card.innerHTML = `<div class="rc-main">${_rowHtml}</div>`;
+        // rc-main 클릭 → 참여상품 정보 시트(카톡 재입장). 수정요청 버튼은 stopPropagation으로 격리.
+        card.innerHTML = `<div class="rc-main" style="cursor:pointer">${_rowHtml}</div>`;
+        card.querySelector('.rc-main').addEventListener('click', () => openPartInfoSheet([item], { done: true }));
         card.appendChild(_reEditButtonEl(item));
       } else {
         card.innerHTML = _rowHtml;
         if (item.isOrderPending) {
           card.classList.add("is-order-pending");   // 시트반영 전 주문 = 제출 대상 아님(클릭 비활성)
         } else {
-          card.addEventListener("click", () => goToSubmit(items));
+          card.addEventListener("click", () => openPartInfoSheet(items, { done: false }));
         }
       }
       listEl.appendChild(card);
@@ -1344,10 +1346,12 @@ function renderReviewSubTab() {
             ${campLabel ? `<div style="font-size:.68rem;color:var(--t3);margin-top:1px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${escHtml(itemName)}</div>` : ""}
           </div>
           <span class="result-group-badge"><i class="fas fa-layer-group"></i> ${items.length}건</span>
-          ${groupClickable ? '<i class="fas fa-chevron-right" style="color:var(--t3);font-size:.8rem;flex-shrink:0"></i>' : ''}
+          ${(groupClickable || isDone) ? '<i class="fas fa-chevron-right" style="color:var(--t3);font-size:.8rem;flex-shrink:0"></i>' : ''}
         </div>
         <div class="result-group-items">${itemLines}</div>`;
-      if (groupClickable) groupCard.addEventListener("click", () => goToSubmit(groupSubmitItems));
+      // 대기 그룹: 참여상품 정보 시트(→ 리뷰제출) / 완료 그룹: 시트(카톡 재입장). 수정요청 미니버튼은 stopPropagation 격리.
+      if (groupClickable) { groupCard.style.cursor = "pointer"; groupCard.addEventListener("click", () => openPartInfoSheet(groupSubmitItems, { done: false })); }
+      else if (isDone) { groupCard.style.cursor = "pointer"; groupCard.addEventListener("click", () => openPartInfoSheet(items, { done: true })); }
       listEl.appendChild(groupCard);
     }
   });
@@ -1596,6 +1600,111 @@ function goToSubmit(items) {
   }
   window.location.href = '/search';
 }
+
+/* ═══════════════════════════════════════
+   참여상품 정보 시트 (리뷰 내역 카드 클릭 → 상품정보 + 카톡 재입장 + 리뷰제출)
+   — 대기: [카톡 팀채팅방 입장] + [리뷰제출하기] / 완료: [카톡 팀채팅방 입장]만
+   — 카톡 URL·상품 URL은 행 소유권(강한-키) 게이트 뒤 participation-brief 로만 수급(fail-soft)
+═══════════════════════════════════════ */
+let _partInfoSubmitItems = null;   // [리뷰제출하기]가 넘길 대기 항목(완료 시 null)
+let _partInfoChatUrl = '';
+
+function _partInfoEnsure(){
+  if (document.getElementById('partInfoOvl')) return;
+  const ovl = document.createElement('div');
+  ovl.id = 'partInfoOvl';
+  ovl.className = 'ovl';
+  ovl.innerHTML =
+    '<div class="re-edit-sheet" style="max-width:440px">' +
+      '<div class="re-edit-head"><div><i class="fas fa-bag-shopping" style="color:#3182f6"></i> 참여상품 정보</div>' +
+      '<button class="re-edit-x" onclick="closePartInfo()" aria-label="닫기">&times;</button></div>' +
+      '<div id="partInfoBody" style="padding:6px 0 4px"></div>' +
+    '</div>';
+  ovl.addEventListener('click', (e)=>{ if (e.target === ovl) closePartInfo(); });
+  document.body.appendChild(ovl);
+}
+function closePartInfo(){ const o = document.getElementById('partInfoOvl'); if (o) o.classList.remove('on'); document.body.style.overflow=''; }
+
+function _partInfoLabel(it){
+  const d = it.startDate || '';
+  const t = it.displayNameTC || it.tcDisplayName || it.tabName || it.campaignName || '';
+  const o = it.productName ? ('옵션:' + it.productName) : '';
+  return [d, t, o].filter(Boolean).join(' ') || (it.displayName || '참여 작업');
+}
+
+function openPartInfoSheet(items, opts){
+  opts = opts || {};
+  const done = !!opts.done;
+  const list = (items || []).filter(Boolean);
+  if (!list.length) return;
+  _partInfoSubmitItems = done ? null : list;     // 리뷰제출하기는 대기 항목에만
+  _partInfoChatUrl = '';
+  _partInfoEnsure();
+  const it = list[0];
+  const many = list.length > 1;
+  const statusChip = done
+    ? '<span style="font-size:.6rem;font-weight:800;background:#D1FAE5;color:#0ca678;border-radius:8px;padding:2px 7px;margin-left:6px;vertical-align:middle">제출완료</span>'
+    : '<span style="font-size:.6rem;font-weight:800;background:#FEF3C7;color:#B45309;border-radius:8px;padding:2px 7px;margin-left:6px;vertical-align:middle">미제출</span>';
+  const listRows = many
+    ? '<div style="margin-top:8px;display:flex;flex-direction:column;gap:5px">' + list.map(x =>
+        '<div style="font-size:.74rem;color:#374151;display:flex;gap:6px;align-items:center"><i class="fas fa-box" style="color:#3182f6;font-size:.66rem;flex:none"></i><span style="min-width:0">' + escHtml(_partInfoLabel(x)) + '</span></div>').join('') + '</div>'
+    : '';
+  document.getElementById('partInfoBody').innerHTML =
+    '<div style="font-size:.9rem;font-weight:800;color:#111827;line-height:1.4">' + escHtml(_partInfoLabel(it)) + statusChip + '</div>' +
+    '<div style="font-size:.72rem;color:#9CA3AF;margin-top:3px">' + escHtml(it.displayName || '') + (many ? (' · 총 ' + list.length + '건') : '') + '</div>' +
+    listRows +
+    '<div id="partInfoDetail" style="border:1px solid #EEF1F7;border-radius:11px;margin-top:11px;padding:9px 11px;font-size:.74rem;color:#9CA3AF">' +
+      '<i class="fas fa-circle-notch fa-spin"></i> 상품 정보 불러오는 중…</div>' +
+    '<div id="partInfoBtns" style="margin-top:11px"></div>';
+  _partInfoRenderBtns(done, '');
+  document.getElementById('partInfoOvl').classList.add('on');
+  document.body.style.overflow = 'hidden';
+  _partInfoLoadBrief(it, done);
+}
+
+async function _partInfoLoadBrief(it, done){
+  const user = getSavedUser();
+  const phone8 = (user && user.phone8) ? String(user.phone8).replace(/[^0-9]/g,'') : '';
+  const detailEl = document.getElementById('partInfoDetail');
+  const hide = () => { if (detailEl) detailEl.style.display = 'none'; };
+  if (phone8.length !== 8 || !it.sheetId || !it.tabName || it.rowIndex == null){ hide(); _partInfoRenderBtns(done, ''); return; }
+  try{
+    const qs = new URLSearchParams({ phone8, sheetId: it.sheetId, tabName: it.tabName, gid: it.gid || '', rowIndex: String(it.rowIndex) });
+    const r = await fetch(API_BASE_URL + '/api/review-edit/participation-brief?' + qs.toString());
+    const j = await r.json().catch(()=>({}));
+    const brief = (r.ok && j.ok) ? j.brief : null;
+    if (!brief){ hide(); _partInfoRenderBtns(done, ''); return; }
+    const rows = [];
+    if (brief.productLines) rows.push(_partInfoRow('상품', escHtml(brief.productLines).replace(/\n/g,'<br>')));
+    const pu = String(brief.productUrl || '');
+    if (/^https?:\/\//i.test(pu)) rows.push(_partInfoRow('상품 URL',
+      '<a href="' + _escAttrX(pu) + '" target="_blank" rel="noopener noreferrer" style="color:#1b64da;font-weight:700;word-break:break-all">🔗 ' + escHtml(pu) + '</a>'));
+    if (rows.length){ if (detailEl){ detailEl.style.display=''; detailEl.style.color=''; detailEl.innerHTML = rows.join(''); } }
+    else hide();
+    _partInfoRenderBtns(done, brief.chatUrl || '');
+  }catch(_){ hide(); _partInfoRenderBtns(done, ''); }
+}
+function _partInfoRow(k, vHtml){
+  return '<div style="display:flex;gap:8px;margin:3px 0"><span style="color:#9CA3AF;flex:none;width:52px">' + escHtml(k) + '</span><span style="color:#374151;min-width:0">' + vHtml + '</span></div>';
+}
+function _partInfoRenderBtns(done, chatUrl){
+  const box = document.getElementById('partInfoBtns'); if (!box) return;
+  _partInfoChatUrl = chatUrl || '';
+  let html = '';
+  if (chatUrl){
+    html += '<button onclick="_partInfoOpenChat()" style="display:block;width:100%;text-align:center;border:none;cursor:pointer;background:#FEE500;color:#191919;font-size:.85rem;font-weight:800;border-radius:12px;padding:13px;box-shadow:0 3px 10px rgba(250,225,0,.42)">💬 이 캠페인의 카톡 팀채팅방 입장</button>';
+  } else {
+    html += '<div style="text-align:center;font-size:.7rem;color:#9CA3AF;border:1.5px dashed #D1D5DB;border-radius:11px;padding:10px">연결된 팀 채팅방이 없어요</div>';
+  }
+  if (!done){
+    const n = (_partInfoSubmitItems && _partInfoSubmitItems.length > 1) ? (' (' + _partInfoSubmitItems.length + '건)') : '';
+    html += '<button onclick="_partInfoSubmit()" style="display:block;width:100%;text-align:center;border:none;cursor:pointer;background:linear-gradient(135deg,#3182f6,#1b64da);color:#fff;font-size:.85rem;font-weight:800;border-radius:12px;padding:13px;margin-top:8px">📤 리뷰제출하기' + n + '</button>';
+  }
+  box.innerHTML = html;
+}
+function _partInfoOpenChat(){ if (_partInfoChatUrl) window.open(_partInfoChatUrl, '_blank', 'noopener'); }
+function _partInfoSubmit(){ const items = _partInfoSubmitItems; closePartInfo(); if (items && items.length) goToSubmit(items); }
+function _escAttrX(s){ return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;'); }
 
 /* ═══════════════════════════════════════
    타계정 목록 렌더
