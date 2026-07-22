@@ -1852,6 +1852,47 @@ function _woPlainGuideToHtml(raw) {
   return hasImg ? html : "";
 }
 
+// review_guide의 [유입가이드 첨부 이미지] 등에 섞여온 첨부 이미지(guide-image 프록시·Drive)만 <img> HTML로.
+// existingHtml에 이미 있는 URL은 스킵(중복 방지). 텍스트는 무시 — 이미지만 유입가이드로 승격.
+function _woReviewImgHtml(raw, existingHtml) {
+  const urls = (typeof _woGuideUrls === "function") ? _woGuideUrls(raw) : [];
+  const seen = String(existingHtml || "");
+  let out = ""; const used = {};
+  for (const u of urls) {
+    let src = "", tok = "";
+    const pm = String(u).match(/\/api\/order\/guide-image\/([-\w]{20,})/);
+    // 호스트는 신뢰 베이스(API_BASE_URL)로 재구성 — 매칭 URL의 임의 호스트를 그대로 쓰지 않음(Drive 분기와 동일)
+    if (pm) { tok = pm[1]; src = (typeof API_BASE_URL !== "undefined" ? API_BASE_URL : "") + "/api/order/guide-image/" + tok; }
+    else { const id = (typeof _driveId === "function") ? _driveId(u) : null; if (id) { src = "https://drive.google.com/thumbnail?id=" + id + "&sz=w1600"; tok = id; } }
+    if (!src || !tok) continue;
+    // 파일ID 토큰 기준 중복 제거(교차 오리진 프록시 URL 이중노출 방지)
+    if (used[tok] || seen.indexOf(tok) >= 0) continue;
+    used[tok] = 1;
+    const esc = String(src).replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
+    out += `<img src="${esc}" alt="유입가이드 이미지">`;
+  }
+  return out;
+}
+
+// 발행 프리필용 유입가이드 HTML: inflow_guide 본문(이미지 포함) + review_guide에 섞여온 첨부 이미지 승격.
+// 이미지가 하나도 없고 평문 유입가이드면 "" 반환(호출부가 wd_inflow_text 평문 경로 사용 = 기존 동작).
+function _woBuildInflowHtml(o) {
+  if (o.inflow_type === "link") return "";
+  let base = "";
+  if (o.inflow_guide) {
+    base = /<[a-z][^>]*>/i.test(o.inflow_guide) ? o.inflow_guide
+         : (typeof _woPlainGuideToHtml === "function" ? _woPlainGuideToHtml(o.inflow_guide) : "");
+  }
+  const imgs = _woReviewImgHtml(o.review_guide, base);
+  if (!imgs) return base;   // 승격할 이미지 없음 → base 그대로(빈 문자열이면 평문 경로)
+  // 이미지는 있는데 base가 비면(평문 inflow_guide·이미지 없음) 그 텍스트를 escape해 함께 보존
+  if (!base && o.inflow_guide && !/<[a-z][^>]*>/i.test(o.inflow_guide)) {
+    const cleaned = (typeof _woCleanGuide === "function") ? _woCleanGuide(o.inflow_guide) : String(o.inflow_guide || "");
+    if (cleaned) base = cleaned.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/\n/g, "<br>");
+  }
+  return base + imgs;
+}
+
 // 작업오더의 첫 상품명·결제금액 → 공고 상품정보 기본값 (자동수집 실패해도 폼에 기본 표시)
 function _woFirstProductInfo(o) {
   // 1) 구조화 JSON 우선
@@ -2168,6 +2209,8 @@ async function woCreateCampaign(id) {
   if (!o) { showToast("오더 정보를 찾을 수 없습니다. 새로고침 후 다시 시도하세요.", "error"); return; }
   if (typeof openRecruitModal !== "function") { showToast("모집공고 모듈을 불러오지 못했습니다.", "error"); return; }
   const _pi = (typeof _woFirstProductInfo === "function") ? _woFirstProductInfo(o) : { name: "", price: "" };
+  // 유입가이드 HTML(본문 + review_guide에 섞여온 첨부 이미지 승격) — 아래 wd_inflow_html/text 분기에 공용
+  const _wdInflowHtml = (typeof _woBuildInflowHtml === "function") ? _woBuildInflowHtml(o) : "";
   const prefill = {
     // ★ 공고 제목 = 상품명 우선(리뷰어 노출용 — 업체명·건수·배송유형 미노출), 없으면 오더 제목 폴백. 관리자 자유 수정 가능.
     title:         _pi.name || o.title || "",
@@ -2189,17 +2232,20 @@ async function woCreateCampaign(id) {
     // ★ 리뷰 #2: inflow_guide는 HTML(에디터)·평문(인트라넷/레거시) 두 형태 실존 —
     //   태그가 실제로 있을 때만 raw HTML 경로(이미지 보존), 평문은 escape 경로(개행·'<옵션>' 안전)
     //   ★ 평문이라도 첨부 이미지 URL(guide-image/Drive)이 있으면 <img>로 변환해 raw 경로로 —
-    //     리뷰어 참여 화면에서 링크 문자열이 아닌 실제 이미지가 보이게(_woPlainGuideToHtml, 이미지 없으면 "" = 평문 유지)
-    wd_inflow_html: (o.inflow_type !== "link" && o.inflow_guide)
-      ? (/<[a-z][^>]*>/i.test(o.inflow_guide) ? o.inflow_guide
-         : (typeof _woPlainGuideToHtml === "function" ? _woPlainGuideToHtml(o.inflow_guide) : ""))
-      : "",
+    //     + review_guide의 [유입가이드 첨부 이미지]에 섞여온 이미지도 유입가이드로 승격(_woBuildInflowHtml)
+    wd_inflow_html: _wdInflowHtml,
     wd_inflow_text: o.inflow_type === "link"
       ? "링크유입 — 아래 [상품 페이지 열기] 버튼으로 진입해 구매를 진행하세요."
-      : ((o.inflow_guide && !/<[a-z][^>]*>/i.test(o.inflow_guide)) ? o.inflow_guide : ""),
-    wd_review:      o.review_guide || "",
+      : ((!_wdInflowHtml && o.inflow_guide && !/<[a-z][^>]*>/i.test(o.inflow_guide)) ? o.inflow_guide : ""),
+    // ★ 리뷰가이드는 [리뷰등록 가이드] 섹션만 스냅샷(유입방식·유입가이드·첨부 이미지 메타 제외) — 관리자 상세와 동일 규율
+    wd_review:      (typeof _woPickSections === "function"
+                      ? _woPickSections(o.review_guide, ["리뷰등록 가이드", "리뷰가이드", "리뷰 가이드"])
+                      : (o.review_guide || "")),
     wd_notes:       o.special_notes || "",
-    landing_url:    (o.inflow_type === "link" ? ((typeof _woGuideUrls === "function" ? _woGuideUrls(o.inflow_guide)[0] : "") || "") : "") || o.product_url || "",
+    // ★ 상품 페이지 열기 버튼용 랜딩 — 링크유입일 때만(비링크는 product_url 폴백 제거 = 유입가이드형에 버튼 안 뜸)
+    landing_url:    o.inflow_type === "link"
+                      ? (((typeof _woGuideUrls === "function" ? _woGuideUrls(o.inflow_guide)[0] : "") || "") || o.product_url || "")
+                      : "",
   };
   switchAdminTab("recruit");
   // recruit 탭의 연결 탭 옵션 로드를 보장한 뒤 모달 오픈 (setTimeout race 제거)

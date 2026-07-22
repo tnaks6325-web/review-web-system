@@ -1,0 +1,570 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+  <meta charset="UTF-8"/>
+  <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+  <title>참여형 캠페인 작업가이드 화면 정리 — PRD & 구현 목업</title>
+  <style>
+  :root{
+    --paper:#F4F6FC; --card:#FFFFFF; --ink:#151B26; --mut:#5E6A7C; --faint:#8B96A8;
+    --line:#E2E7F0; --accent:#3182F6; --accent-deep:#1B64DA; --accent-soft:#E9F1FE;
+    --ok:#12B886; --ok-soft:#DDF5EC; --warn:#B45309; --warn-soft:#FDF0D9;
+    --err:#DC2626; --err-soft:#FDE8E8;
+    --shadow:0 2px 14px rgba(21,40,80,.07);
+  }
+  @media (prefers-color-scheme: dark){
+    :root{
+      --paper:#0E131B; --card:#161D29; --ink:#E8EDF5; --mut:#9AA6B8; --faint:#6E7A8C;
+      --line:#2A3444; --accent:#5B9BF8; --accent-deep:#82B4FA; --accent-soft:#1B2A44;
+      --ok:#3DCF9F; --ok-soft:#123528; --warn:#F0B35C; --warn-soft:#3A2B12;
+      --err:#F87171; --err-soft:#3A1515;
+      --shadow:0 2px 14px rgba(0,0,0,.35);
+    }
+  }
+  :root[data-theme="dark"]{
+    --paper:#0E131B; --card:#161D29; --ink:#E8EDF5; --mut:#9AA6B8; --faint:#6E7A8C;
+    --line:#2A3444; --accent:#5B9BF8; --accent-deep:#82B4FA; --accent-soft:#1B2A44;
+    --ok:#3DCF9F; --ok-soft:#123528; --warn:#F0B35C; --warn-soft:#3A2B12;
+    --err:#F87171; --err-soft:#3A1515;
+    --shadow:0 2px 14px rgba(0,0,0,.35);
+  }
+  :root[data-theme="light"]{
+    --paper:#F4F6FC; --card:#FFFFFF; --ink:#151B26; --mut:#5E6A7C; --faint:#8B96A8;
+    --line:#E2E7F0; --accent:#3182F6; --accent-deep:#1B64DA; --accent-soft:#E9F1FE;
+    --ok:#12B886; --ok-soft:#DDF5EC; --warn:#B45309; --warn-soft:#FDF0D9;
+    --err:#DC2626; --err-soft:#FDE8E8;
+    --shadow:0 2px 14px rgba(21,40,80,.07);
+  }
+  *{box-sizing:border-box;margin:0;padding:0}
+  body{background:var(--paper);color:var(--ink);
+    font-family:"Apple SD Gothic Neo","Pretendard","Noto Sans KR","Malgun Gothic",system-ui,sans-serif;
+    line-height:1.65;-webkit-font-smoothing:antialiased}
+  .wrap{max-width:1020px;margin:0 auto;padding:0 20px 90px}
+  .hero{padding:46px 0 22px}
+  .hero .eyebrow{font-size:.76rem;font-weight:700;letter-spacing:.14em;color:var(--accent);text-transform:uppercase}
+  .hero h1{font-size:clamp(1.5rem,4vw,2.15rem);font-weight:800;letter-spacing:-.02em;margin:8px 0;text-wrap:balance}
+  .hero p{color:var(--mut);max-width:64ch}
+  .chip{display:inline-flex;align-items:center;gap:6px;font-size:.74rem;font-weight:600;color:var(--mut);
+    background:var(--card);border:1px solid var(--line);border-radius:999px;padding:5px 12px;margin:14px 6px 0 0}
+  .chip b{color:var(--ink)}
+  section{padding-top:50px}
+  .sec-label{font-size:.74rem;font-weight:700;letter-spacing:.12em;color:var(--accent);margin-bottom:6px}
+  section>h2{font-size:1.35rem;font-weight:800;letter-spacing:-.015em;margin-bottom:6px;text-wrap:balance}
+  section>p.desc{color:var(--mut);max-width:70ch;margin-bottom:18px}
+  h3{font-size:1rem;font-weight:800;margin:26px 0 10px}
+  .card{background:var(--card);border:1px solid var(--line);border-radius:14px;padding:18px 20px;box-shadow:var(--shadow);margin-bottom:14px}
+  code{font-family:ui-monospace,'SF Mono',Consolas,monospace;font-size:.82em;background:var(--accent-soft);
+    color:var(--accent-deep);border-radius:5px;padding:1px 6px;word-break:break-all}
+  pre{background:#10141C;color:#D7E0EF;border-radius:12px;padding:14px 16px;font-size:.78rem;line-height:1.6;
+    overflow-x:auto;font-family:ui-monospace,'SF Mono',Consolas,monospace;margin:10px 0}
+  pre .c{color:#7C8AA5}pre .k{color:#82B4FA}pre .s{color:#8CE3C0}
+  table{width:100%;border-collapse:collapse;font-size:.83rem;margin:8px 0}
+  th,td{border:1px solid var(--line);padding:8px 10px;text-align:left;vertical-align:top}
+  th{background:var(--accent-soft);color:var(--accent-deep);font-size:.76rem}
+  .tbl-scroll{overflow-x:auto}
+  .num{display:inline-flex;align-items:center;justify-content:center;width:22px;height:22px;border-radius:50%;
+    background:var(--accent);color:#fff;font-size:.72rem;font-weight:800;flex:none}
+  .prob{display:flex;gap:10px;align-items:flex-start;padding:10px 0;border-bottom:1px dashed var(--line)}
+  .prob:last-child{border-bottom:none}
+  .prob b{display:block}
+  .prob .as-is{color:var(--err);font-size:.8rem}
+  .prob .to-be{color:var(--ok);font-size:.8rem}
+  .tag{display:inline-block;font-size:.68rem;font-weight:700;border-radius:6px;padding:2px 8px;margin-right:4px}
+  .tag.front{background:var(--accent-soft);color:var(--accent-deep)}
+  .tag.server{background:var(--warn-soft);color:var(--warn)}
+  .tag.test{background:var(--ok-soft);color:var(--ok)}
+  .callout{border-left:3px solid var(--accent);background:var(--accent-soft);border-radius:0 10px 10px 0;
+    padding:10px 14px;font-size:.84rem;margin:12px 0}
+  .callout.warn{border-color:var(--warn);background:var(--warn-soft)}
+  .callout.ok{border-color:var(--ok);background:var(--ok-soft)}
+
+  /* ── 목업(폰 프레임) — campaign.html 실톤 고정(라이트) ── */
+  .mockrow{display:flex;gap:22px;flex-wrap:wrap;align-items:flex-start;justify-content:center}
+  .phone{width:340px;flex:none;background:#F0F2FA;border:1px solid #D7DEEB;border-radius:26px;overflow:hidden;
+    box-shadow:0 14px 40px rgba(21,40,80,.16);color:#111827;line-height:1.55}
+  .phone *{font-family:"Apple SD Gothic Neo","Noto Sans KR",sans-serif}
+  .phone .cap{background:transparent;color:var(--mut);text-align:center;font-size:.76rem;font-weight:700;padding:0}
+  .p-hd{background:linear-gradient(135deg,#3182f6,#3182f6);color:#fff;display:flex;align-items:center;gap:9px;padding:12px 14px}
+  .p-hd .bk{width:30px;height:30px;border-radius:9px;background:rgba(255,255,255,.16);border:1px solid rgba(255,255,255,.32);
+    display:flex;align-items:center;justify-content:center;font-size:.8rem}
+  .p-hd .tt{font-weight:700;font-size:.85rem;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+  .p-hold{display:flex;align-items:center;gap:8px;background:#FEF3C7;border:1.5px solid #F59E0B;border-radius:11px;
+    margin:10px 12px 0;padding:8px 12px}
+  .p-hold .l{flex:1;font-size:.7rem;font-weight:700;color:#92400E}
+  .p-hold .v{font-size:1rem;font-weight:900;color:#92400E}
+  .p-body{padding:10px 12px 18px}
+  .p-card{background:#fff;border:1px solid #E5E7EB;border-radius:13px;padding:12px 13px;margin-bottom:10px;position:relative}
+  .p-tt{font-size:.68rem;font-weight:800;color:#9CA3AF;margin-bottom:6px}
+  .p-tx{font-size:.78rem;color:#111827;white-space:pre-wrap;word-break:break-word}
+  .p-btn{display:block;width:100%;text-align:center;border:none;border-radius:11px;padding:11px;font-size:.8rem;font-weight:800;
+    background:#EEF1F7;color:#4B5563}
+  .p-btn.pri{background:linear-gradient(135deg,#3182f6,#1b64da);color:#fff}
+  .p-btn.kakao{background:#FEE500;color:#191919;box-shadow:0 3px 10px rgba(250,225,0,.45)}
+  .p-img{margin-top:8px;border-radius:10px;overflow:hidden;border:1px solid #E5E7EB;background:#fff}
+  .p-img .ph{height:120px;display:flex;align-items:center;justify-content:center;flex-direction:column;gap:4px;
+    background:repeating-linear-gradient(45deg,#F3F6FD,#F3F6FD 12px,#E9F0FB 12px,#E9F0FB 24px);color:#7C8AA5;font-size:.7rem;font-weight:700}
+  .p-iframe{border:1.5px dashed #C7D4EA;border-radius:11px;background:#F8FAFF;color:#8B96A8;text-align:center;
+    font-size:.72rem;padding:26px 10px;margin-top:6px}
+  .p-done{text-align:center;padding:34px 14px 8px}
+  .p-done .e{font-size:2.2rem}
+  .p-done h4{font-size:1rem;margin-top:8px;color:#111827}
+  .p-done p{font-size:.75rem;color:#9CA3AF;margin-top:5px;line-height:1.7}
+  .pin{position:absolute;top:-9px;right:-7px;width:22px;height:22px;border-radius:50%;background:var(--accent);color:#fff;
+    font-size:.72rem;font-weight:800;display:flex;align-items:center;justify-content:center;box-shadow:0 2px 8px rgba(27,100,218,.45)}
+  .pin.ok{background:var(--ok)}
+  .strike{color:#B91C1C;background:#FEE2E2;text-decoration:line-through;border-radius:4px;padding:0 3px}
+  .beforebx{background:var(--err-soft);border:1px solid color-mix(in srgb, var(--err) 30%, transparent);border-radius:11px;
+    padding:10px 13px;font-size:.78rem;margin-bottom:10px;white-space:pre-wrap;word-break:break-word}
+  .beforebx .lb{display:block;font-size:.66rem;font-weight:800;color:var(--err);margin-bottom:4px}
+  .legend{display:flex;flex-direction:column;gap:8px;font-size:.83rem}
+  .legend .row{display:flex;gap:9px;align-items:flex-start}
+  .flow{display:flex;flex-wrap:wrap;gap:8px;align-items:center;font-size:.78rem;font-weight:700;margin:10px 0}
+  .flow .n{background:var(--card);border:1.5px solid var(--line);border-radius:10px;padding:7px 12px}
+  .flow .n.bad{border-color:var(--err);color:var(--err)}
+  .flow .a{color:var(--faint)}
+  @media (max-width:760px){ .phone{width:100%;max-width:360px} }
+  </style>
+</head>
+<body>
+<div class="wrap">
+
+  <div class="hero">
+    <div class="eyebrow">PRD · Reviewer Participation</div>
+    <h1>참여형 캠페인 "작업가이드 화면" 정리<br/>— 표시 문제 5건 + 리뷰 내역 카톡 재입장(v1.1)</h1>
+    <p>리뷰어가 참여 직후 보는 작업내용 화면(<code>campaign.html</code>)에서 유입가이드/리뷰가이드 내용 뒤섞임,
+      결제금액 중복, 상품페이지 버튼 오노출, 카톡 채팅방 버튼 시점 문제를 바로잡고,
+      <b>리뷰 내역 카드 클릭 시 참여상품 정보 + 카톡 팀채팅방 재입장 경로</b>를 추가한다.</p>
+    <span class="chip">문서 <b>v1.1</b> · 2026-07-22</span>
+    <span class="chip">v1.1 추가 <b>리뷰 내역 → 참여상품 정보 시트 (#6)</b></span>
+    <span class="chip" style="background:var(--ok-soft,#DDF5EC);color:var(--ok,#0ca678)">상태 <b>✅ 구현 완료 · 회귀가드 32종 통과</b></span>
+    <span class="chip">상태 <b>구현 착수 전 설계</b></span>
+    <span class="chip">DB 마이그레이션 <b>불필요</b></span>
+    <span class="chip">라이브 핫패스(주문·검색) <b>무접촉</b></span>
+  </div>
+
+  <!-- ═══════════ 01 문제 ═══════════ -->
+  <section id="s1">
+    <div class="sec-label">01 · PROBLEM</div>
+    <h2>무엇이 잘못 보이고 있나 (5건 + v1.1 추가 1건)</h2>
+    <p class="desc">전부 <b>표시 계층</b>의 문제다. 주문 접수·홀드·시트 기록 등 데이터 동작은 정상.</p>
+    <div class="card">
+      <div class="prob"><span class="num">1</span><div>
+        <b>상품 · 옵션 · 결제금액 — 결제금액 2회 표기 + 줄바꿈 없음</b>
+        <span class="as-is">현재: "…워셔블 전기매트 결제금액 78,000원 · 결제금액 78,000원" (한 줄에 이어짐)</span><br/>
+        <span class="to-be">목표: 상품명 ↵ 결제금액 78,000원 (금액은 1회만)</span>
+      </div></div>
+      <div class="prob"><span class="num">2</span><div>
+        <b>유입가이드 — 첨부 이미지가 리뷰가이드 블록에 "링크 문자열"로 노출</b>
+        <span class="as-is">현재: [유입가이드 첨부 이미지] 파일명 + URL 텍스트가 리뷰 가이드 카드에 표시</span><br/>
+        <span class="to-be">목표: 유입가이드 블록 안에서 <b>실제 이미지로 바로 표시</b></span>
+      </div></div>
+      <div class="prob"><span class="num">3</span><div>
+        <b>상품 페이지 열기(새 탭) 버튼 — 유입방식과 무관하게 항상 노출</b>
+        <span class="as-is">현재: 유입가이드(guide)형 캠페인에도 버튼 노출 → 직링크 진입으로 유입방식 위반 유도</span><br/>
+        <span class="to-be">목표: <b>링크유입(link)일 때만</b> 노출</span>
+      </div></div>
+      <div class="prob"><span class="num">4</span><div>
+        <b>리뷰 가이드 — 유입 관련 섹션까지 통째로 노출</b>
+        <span class="as-is">현재: [유입방식]·[유입가이드]·[유입가이드 첨부 이미지]·[리뷰등록 가이드]가 전부 표시</span><br/>
+        <span class="to-be">목표: <b>[리뷰등록 가이드] 내용만</b> — "전체 별점 5건 / 배송이 빠르다 / 겨울맞이 미리 준비했다 등 / 1~2줄 자연스러운 리뷰 작성 희망"</span>
+      </div></div>
+      <div class="prob"><span class="num">5</span><div>
+        <b>카톡 팀채팅방 — 제출 전부터 입장 버튼 제공</b>
+        <span class="as-is">현재: 참여 직후(제출 전) 화면에 회색 "카톡 팀채팅방 입장" 카드 상시 노출</span><br/>
+        <span class="to-be">목표: <b>구매양식 제출 완료 후에만</b> 제공 + 카카오 옐로(#FEE500) 버튼 + 라벨 <b>"이 캠페인의 카톡 팀채팅방 입장"</b></span>
+      </div></div>
+      <div class="prob"><span class="num" style="background:var(--ok)">6</span><div>
+        <b>[v1.1 추가] 리뷰 내역 카드 — 클릭이 리뷰제출로 직행해 상품정보·카톡 재입장 경로가 없음</b>
+        <span class="as-is">현재: 내정보/현황 "리뷰 내역" 제출대기 카드 클릭 → 즉시 /search 이동 + 리뷰제출 모달 자동 오픈</span><br/>
+        <span class="to-be">목표: 클릭 → <b>참여상품 정보 시트</b>(상품 URL 포함) → <b>[이 캠페인의 카톡 팀채팅방 입장]</b>(카카오 옐로) + <b>[리뷰제출하기]</b> 2버튼 제공</span>
+      </div></div>
+    </div>
+  </section>
+
+  <!-- ═══════════ 02 원인 ═══════════ -->
+  <section id="s2">
+    <div class="sec-label">02 · ROOT CAUSE</div>
+    <h2>원인 — 작업오더 원문이 "정제 없이" 스냅샷·화면까지 흘러온다</h2>
+    <p class="desc">인트라넷 작업오더의 <code>review_guide</code>는 실데이터상 [유입방식]·[유입가이드]·[유입가이드 첨부 이미지]·[리뷰등록 가이드]가
+      합쳐진 통짜 텍스트다. 관리자 화면은 이미 섹션 추출로 정제해 보여주는데(<code>_woDetailHtml</code> → <code>_woPickSections</code>),
+      <b>발행 프리필과 리뷰어 화면 렌더에는 그 정제가 빠져 있다.</b></p>
+    <div class="flow">
+      <span class="n">인트라넷 작업오더<br/><small style="font-weight:400">review_guide = 섹션 합본 원문</small></span><span class="a">→</span>
+      <span class="n bad">발행 프리필<br/><small style="font-weight:400">wd_review = 원문 그대로 (index-app.js:2200)</small></span><span class="a">→</span>
+      <span class="n">공고 work_detail 스냅샷 저장</span><span class="a">→</span>
+      <span class="n bad">campaign.html 렌더<br/><small style="font-weight:400">textContent 그대로 (campaign.html:321)</small></span>
+    </div>
+    <div class="card">
+      <h3 style="margin-top:0">문제별 코드 위치</h3>
+      <div class="tbl-scroll"><table>
+        <tr><th style="width:34px">#</th><th>원인</th><th>위치</th></tr>
+        <tr><td>1</td><td>스냅샷 조립이 상품명에 이미 든 "결제금액 N원"을 감지하지 못하고 금액을 또 붙임 + 렌더도 무정규화. (<code>wd.payAmount</code>는 저장 경로가 없어 사실상 미사용 — 중복은 <code>productLines</code> 문자열 안에서 발생)</td>
+          <td><code>index-app.js:1777 _woProductLines</code> · <code>index-app.js:2188</code> · <code>campaign.html:318</code></td></tr>
+        <tr><td>2·4</td><td>프리필이 <code>wd_review = o.review_guide</code> <b>원문 통짜</b>를 스냅샷에 복사 → 첨부 이미지 URL·유입 섹션이 리뷰가이드 카드에 텍스트로 노출. (섹션 추출 유틸 <code>_woPickSections</code>·이미지 임베드 유틸 <code>_woPlainGuideToHtml</code>은 이미 존재하나 프리필에서 미사용)</td>
+          <td><code>index-app.js:2200</code> · 렌더 <code>campaign.html:321</code></td></tr>
+        <tr><td>3</td><td>비링크(guide) 오더도 <code>landing_url = product_url</code> 폴백으로 채워지고, 렌더는 "landingUrl 있으면 무조건 버튼 표시". 유입방식 정보가 화면까지 전달되지 않음</td>
+          <td><code>index-app.js:2202</code> · <code>campaign.html:320</code> · <code>campaign.routes.js:381~400</code>(inflowType 미반환)</td></tr>
+        <tr><td>5</td><td>참여 후 화면(vJoined)에 chatBox 카드가 상시 존재, <code>chatUrl</code>도 제출 전 응답에 포함</td>
+          <td><code>campaign.html:109~112·323</code> · <code>campaign.routes.js:392</code></td></tr>
+        <tr><td>6</td><td>[v1.1] 리뷰 내역 대기 카드 클릭이 <code>goToSubmit()</code>으로 직행(sessionStorage 저장 → /search 이동·제출모달 자동 오픈). 중간 정보 단계가 없고, 행(review_index)→공고(recruit_campaigns) 매핑 정보(카톡 URL·상품 URL)가 리뷰어 화면까지 전달되지 않음</td>
+          <td><code>index.html:1307·1350·1590</code> · 렌더 <code>index.html:1203~1362</code></td></tr>
+      </table></div>
+      <div class="callout">핵심 판단 — <b>렌더 계층에서도 정규화한다.</b> 프리필만 고치면 "이미 발행된 캠페인"(오염 스냅샷 보유)은 그대로 깨져 보인다.
+        렌더 정규화를 함께 넣으면 <b>기발행 캠페인도 배포 즉시 정상화</b>되고, 오염 원문에 들어있는 이미지 URL이 오히려 복구 재료가 된다.</div>
+    </div>
+  </section>
+
+  <!-- ═══════════ 03 수정범위 ═══════════ -->
+  <section id="s3">
+    <div class="sec-label">03 · SCOPE</div>
+    <h2>코드 수정 범위 — 6개 파일 + 회귀가드 1개</h2>
+    <div class="card"><div class="tbl-scroll"><table>
+      <tr><th>파일</th><th>변경</th><th>성격</th></tr>
+      <tr><td><code>frontend/campaign.html</code></td>
+        <td>렌더 정규화 3종(상품 금액 dedupe/줄바꿈 · 리뷰가이드 섹션 필터 · 유입 이미지 재배치) + 랜딩 버튼 게이트 + chatBox 카드 제거 + 완료 화면 카카오 버튼</td>
+        <td><span class="tag front">FRONT</span>기발행 캠페인 즉시 정상화</td></tr>
+      <tr><td><code>frontend/js/index-app.js</code></td>
+        <td>발행 프리필 정화: <code>wd_review</code> 섹션 추출 · 첨부 이미지→유입가이드 HTML 병합 · <code>wd_product</code> 2줄 포맷 · 비링크 <code>landing_url</code> 폴백 제거</td>
+        <td><span class="tag front">FRONT</span>신규 발행분 소스 정화</td></tr>
+      <tr><td><code>server/src/routes/campaign.routes.js</code></td>
+        <td>work-detail 응답에 <code>inflowType</code> 추가(연결 작업오더 역조회, fail-soft) + <b>제출 전 <code>chatUrl</code> 미반환</b>(UI 숨김을 서버에서도 강제)</td>
+        <td><span class="tag server">SERVER</span>DB 변경 없음</td></tr>
+      <tr><td><code>frontend/js/index-recruit.js</code></td>
+        <td>(보강) 발행 저장 시 <code>source_work_order_id</code> 전송 — 공고↔오더 정방향 링크 정합</td>
+        <td><span class="tag front">FRONT</span>1줄</td></tr>
+      <tr><td><code>frontend/index.html</code></td>
+        <td>[v1.1] 리뷰 내역 카드 클릭 → <b>"참여상품 정보" 바텀시트</b>(작업·상품정보·상품 URL·카카오 입장·리뷰제출하기). 기존 <code>goToSubmit()</code>은 시트의 [리뷰제출하기]가 호출</td>
+        <td><span class="tag front">FRONT</span>신규 시트 1개</td></tr>
+      <tr><td><code>server/src/routes/reviewEdit.routes.js</code></td>
+        <td>[v1.1] <code>GET /api/reviewer/participation-brief</code> 신설 — 행 소유권 게이트(<code>_verifyRowOwnership</code> 재사용) 통과 시 그 행의 연결 공고 brief(제목·chat_url·상품 URL·상품정보) 반환</td>
+        <td><span class="tag server">SERVER</span>무인증·소유권 게이트</td></tr>
+      <tr><td><code>server/tests/campaignGuideView.test.js</code> <i>(신규)</i></td>
+        <td>순수함수 유닛(금액 dedupe·섹션 필터·이미지 화이트리스트) + 소스 구조 가드(버튼 게이트·chatBox 부재·카카오 버튼·[v1.1] 브리프 소유권 게이트/시트 흐름)</td>
+        <td><span class="tag test">TEST</span>기존 fs-scan 스타일</td></tr>
+    </table></div>
+    <p style="font-size:.8rem;color:var(--mut)">무접촉: 주문원장(<code>submit/order</code>)·홀드 파이프라인·시트 쓰기·검색·관리자 작업오더 상세(<code>_woDetailHtml</code>, 이미 정상) — 전부 변경 없음.</p>
+    </div>
+  </section>
+
+  <!-- ═══════════ 04 구현방법 ═══════════ -->
+  <section id="s4">
+    <div class="sec-label">04 · HOW</div>
+    <h2>구현 방법</h2>
+
+    <div class="card">
+      <h3 style="margin-top:0">A. campaign.html — 렌더 정규화 (기발행분 커버)</h3>
+      <p style="font-size:.85rem;color:var(--mut)">스냅샷(work_detail)은 손대지 않고 <b>그리기 직전에만</b> 정돈한다. 원문이 이미 깨끗하면 전부 무변화(no-op).</p>
+      <pre><span class="c">// A-1 상품·옵션·결제금액: 결제금액 dedupe + 줄바꿈 (fail-safe)</span>
+<span class="k">function</span> _fmtProduct(wd){
+  <span class="c">// 라인별: "결제금액 [숫자]원" 패턴이 1회 이상 && 금액이 전부 동일할 때만</span>
+  <span class="c">//   → 라인에서 전부 제거(끝의 -·/, 구분자 포함) 후 "결제금액 N원"을 다음 줄로 1회 출력.</span>
+  <span class="c">// 금액이 서로 다른 라인(다옵션 인라인)은 원문 유지 — 정보 손실 0.</span>
+  <span class="c">// wd.payAmount는 같은 금액 줄이 이미 있으면 생략(이중 방어).</span>
+}
+<span class="c">// A-2 리뷰가이드: [리뷰등록 가이드] 섹션만 (관리자 상세와 동일 규칙의 경량판)</span>
+<span class="k">function</span> _pickReviewOnly(raw){ <span class="c">/* [라벨] 없으면 전문 그대로(무변화). 있으면 리뷰등록 계열만 취합 */</span> }
+<span class="c">// A-3 유입 이미지 재배치: 리뷰가이드에서 걷어낸 섹션 속 URL 중</span>
+<span class="c">//     guide-image 프록시(/api/order/guide-image/…)·Drive URL "만" &lt;img&gt;로 유입가이드 카드에 append</span>
+<span class="c">//     (기존 inflowGuideHtml에 같은 src 있으면 스킵 · src는 attribute-escape · 그 외 URL은 무시)</span>
+<span class="c">// A-4 랜딩 버튼 게이트</span>
+$(<span class="s">'landingBtn'</span>).style.display =
+  (j.landingUrl && (j.inflowType === <span class="s">'link'</span> || !j.inflowType)) ? <span class="s">''</span> : <span class="s">'none'</span>;
+<span class="c">// A-5 vJoined의 chatBox 카드 삭제 + vDone 버튼 → class="btn kakao" · "이 캠페인의 카톡 팀채팅방 입장"</span>
+<span class="c">//     .btn.kakao{ background:#FEE500; color:#191919 }  (카카오 브랜드 옐로)</span></pre>
+      <div class="callout warn"><b>버튼 게이트 규칙(합리적 기본값):</b> <code>inflowType==='link'</code> → 표시 ·
+        <code>'guide'</code> 등 명시적 비링크 → 숨김 · <b>정보 없음(작업오더 미연결 수동 공고)</b> → 관리자가 랜딩 URL을 직접
+        넣은 의도를 존중해 기존대로 표시. 이렇게 하면 스크린샷의 guide형 캠페인은 숨겨지고, 수동 공고는 깨지지 않는다.</div>
+    </div>
+
+    <div class="card">
+      <h3 style="margin-top:0">B. index-app.js — 발행 프리필 정화 (신규 발행분 소스 클린)</h3>
+      <pre><span class="c">// woCreateCampaign(id) 프리필 변경 — 기존 유틸 재사용</span>
+wd_review:  _woPickSections(o.review_guide, [<span class="s">"리뷰등록 가이드"</span>,<span class="s">"리뷰가이드"</span>,<span class="s">"리뷰 가이드"</span>]),  <span class="c">// 관리자 상세(:1891)와 동일</span>
+<span class="c">// 유입가이드: review_guide의 [유입가이드 첨부 이미지] 섹션에서 이미지 URL 추출 → 유입 HTML에 &lt;img&gt; 병합</span>
+<span class="c">//   (_woPlainGuideToHtml의 화이트리스트 로직 재사용 — guide-image 프록시·Drive만 이미지화)</span>
+wd_product: _woProductSnapshot(o),   <span class="c">// "상품명 ↵ 결제금액 N원" 2줄 포맷, 이름 속 결제금액 중복 제거</span>
+                                     <span class="c">// (_woProductLines 파서 공유 — 관리자 상세의 인라인 표기는 불변)</span>
+landing_url: o.inflow_type === <span class="s">'link'</span> ? (첫 유입URL || o.product_url || <span class="s">''</span>) : <span class="s">''</span>,  <span class="c">// 비링크 폴백 제거</span></pre>
+      <p style="font-size:.8rem;color:var(--mut)">프리필 결과는 지금처럼 발행 폼 textarea에 그대로 보이므로 관리자가 게시 전 확인·수정하는 흐름은 동일하다.</p>
+    </div>
+
+    <div class="card">
+      <h3 style="margin-top:0">C. campaign.routes.js — work-detail 응답 보강 (DB 변경 없음)</h3>
+      <pre><span class="c">// C-1 유입방식: 공고에 연결된 작업오더에서 라이브 역조회 (스냅샷·마이그레이션 불필요 → 기발행분도 즉시 정확)</span>
+<span class="c">//     work_orders.linked_campaign_id = :campId (발행 시 항상 기록됨, index-recruit.js:972) 우선,</span>
+<span class="c">//     recruit_campaigns.source_work_order_id 보조. 조회 실패는 '' — 화면은 legacy 동작(fail-soft).</span>
+inflowType: wo?.inflow_type || <span class="s">''</span>,     <span class="c">// 'guide' | 'link' | ''</span>
+<span class="c">// C-2 채팅방 URL은 제출확정 후에만 (UI 숨김 + API도 숨김 = DevTools 우회 차단)</span>
+chatUrl: isSubmitted ? (camp.chat_url || <span class="s">''</span>) : <span class="s">''</span>,</pre>
+      <div class="callout"><b>C-2에 따른 프론트 주의 1건:</b> 인라인 제출 직후 <code>order-submitted</code> postMessage 시점의
+        <code>_detail</code>은 제출 "전" 응답이라 chatUrl이 비어 있다 → 완료 화면 진입 시 work-detail을 1회 재조회해 카카오 버튼을 채운다
+        (기존 10초 폴링 로직 재사용, 재조회 실패해도 다음 폴링에서 자가 복구).</div>
+    </div>
+
+    <div class="card">
+      <h3 style="margin-top:0">D. [v1.1] 리뷰 내역 카드 → "참여상품 정보" 시트 + 카톡 재입장</h3>
+      <p style="font-size:.85rem;color:var(--mut)">클릭 즉시 이동하던 흐름에 <b>정보 확인 단계</b>를 끼워 넣는다.
+        시트는 이미 가진 카드 데이터로 즉시 렌더하고, 카톡 URL·상품 URL은 비동기 보강(fail-soft) — <b>리뷰제출 흐름은 어떤 실패에도 막히지 않는다.</b></p>
+      <pre><span class="c">// index.html — 대기 카드 클릭 핸들러 교체 (완료 카드에도 동일 시트: 카톡 버튼만, 제출 버튼 없음)</span>
+card.addEventListener(<span class="s">"click"</span>, () =&gt; openPartInfoSheet(items));   <span class="c">// 기존: goToSubmit(items) 직행</span>
+<span class="c">// ① 시트 즉시 렌더: 작업명·리뷰어·옵션·회차·상태 (카드가 이미 가진 item 필드)</span>
+<span class="c">// ② 비동기 보강: GET /api/reviewer/participation-brief?sheetId&amp;tabName&amp;gid&amp;rowIndex&amp;phone8</span>
+<span class="c">//    → { campaignTitle, chatUrl, productUrl, productLines } — 성공 시 상품정보·URL·카톡 버튼 채움</span>
+<span class="c">// ③ [리뷰제출하기] = 기존 goToSubmit(items) 그대로 (brief 실패·공고 미연결 탭이어도 항상 동작)</span>
+<span class="c">// ④ [이 캠페인의 카톡 팀채팅방 입장] = chatUrl 있을 때만 노출 (.btn.kakao — §04-A와 동일 스타일)</span>
+
+<span class="c">// reviewEdit.routes.js — 무인증이지만 "행 소유권(phone8 정확 일치)" 게이트 뒤에서만 공개</span>
+<span class="c">//   (리뷰이미지 열람 게이트 _verifyRowOwnership 재사용 — 이름 단독 약한 매칭으로는 카톡 URL 수집 불가)</span>
+router.get(<span class="s">'/participation-brief'</span>, <span class="k">async</span> (req, res) =&gt; {
+  <span class="k">const</span> own = <span class="k">await</span> _verifyRowOwnership(sheetId, gid, tabName, rowIndex, phone8);
+  <span class="k">if</span> (!own) <span class="k">return</span> res.status(403).json({ ok:false });
+  <span class="c">// 행 → 공고 매핑: linked_sheet_id = sheetId AND (linked_tab_gid = gid 우선 → linked_tab_name) 최신 1건</span>
+  <span class="c">// 상품 URL: 연결 작업오더 product_url(역조회, §04-C와 동일 JOIN) → 없으면 landing_url 폴백</span>
+  <span class="c">// 응답: campaignTitle · chatUrl · productUrl · work_detail.productLines(금액 dedupe 적용)</span>
+});</pre>
+      <div class="callout ok"><b>정책 정합성:</b> 리뷰 내역의 대기 행 = 구매양식이 이미 시트에 반영된 상태(제출 후)다.
+        따라서 "카톡 입장은 구매양식 제출 후에만"(§04-C) 원칙과 모순 없이, 캠페인 제출완료 화면(§01-5)과 리뷰 내역(§01-6)
+        <b>두 곳에서 같은 카카오 버튼</b>이 제공된다. 구매양식 반영중(<code>isOrderPending</code>) 카드는 기존대로 클릭 비활성 유지.</div>
+    </div>
+
+    <div class="card">
+      <h3 style="margin-top:0">E. 회귀가드 — server/tests/campaignGuideView.test.js (신규)</h3>
+      <ul style="font-size:.84rem;padding-left:18px;line-height:1.9">
+        <li>순수함수 유닛: ① "이름 결제금액 78,000원 · 결제금액 78,000원" → "이름 ↵ 결제금액 78,000원" ② 상이 금액 라인 원문 유지 ③ 섹션 합본 → 리뷰등록만 추출 ④ [라벨] 없는 평문 → 무변화 ⑤ 이미지 화이트리스트 밖 URL은 &lt;img&gt; 미생성</li>
+        <li>소스 구조 가드: vJoined에 chatBox 부재 · vDone 카카오 버튼(#FEE500 + 라벨) · 랜딩 버튼 inflowType 게이트 · 프리필 <code>_woPickSections</code> 경유 · work-detail <code>inflowType</code>/<code>chatUrl</code> 게이트</li>
+      </ul>
+    </div>
+  </section>
+
+  <!-- ═══════════ 05 목업 ═══════════ -->
+  <section id="s5">
+    <div class="sec-label">05 · MOCKUP</div>
+    <h2>실제 구현 모습 (After)</h2>
+    <p class="desc">스크린샷과 동일한 캠페인 데이터("쿠 빈 장수돌침대 전기매트 립비1천", 유입가이드형)를 기준으로 한 구현 후 화면.
+      파란 번호 핀 = §01의 문제 번호.</p>
+
+    <div class="mockrow">
+      <!-- ── 참여 후 화면 (After) ── -->
+      <div>
+        <div class="cap" style="margin-bottom:8px">📱 참여 후 — 작업가이드 화면 (After)</div>
+        <div class="phone">
+          <div class="p-hd"><span class="bk">←</span><span class="tt">쿠 빈 장수돌침대 전기매트 립비1천</span></div>
+          <div class="p-hold"><span class="l">⏳ 구매양식 제출까지</span><span class="v">14 : 49</span></div>
+          <div class="p-body">
+
+            <div class="p-card"><span class="pin">1</span>
+              <div class="p-tt">📦 상품 · 옵션 · 결제금액</div>
+              <div class="p-tx">장수돌침대 26년형 올뉴블랙에디션 카본 탄소매트 전자파없는 워셔블 전기매트
+<b>결제금액 78,000원</b></div>
+            </div>
+
+            <div class="p-card"><span class="pin">2</span>
+              <div class="p-tt">🧭 유입가이드</div>
+              <div class="p-tx">장수돌침대 전기매트 / 택배받을 주소 폰번호 정확하게 입력해주세요 !!</div>
+              <div class="p-img"><div class="ph">🖼️<span>0722 장수산업 유입.png</span><span style="font-weight:400">(첨부 이미지가 여기 실제로 표시됨)</span></div></div>
+              <div style="margin-top:8px;font-size:.68rem;color:#B45309;background:#FEF3C7;border-radius:8px;padding:6px 9px">
+                <span class="pin" style="position:static;display:inline-flex;width:16px;height:16px;font-size:.6rem;vertical-align:middle;margin-right:4px">3</span>
+                이 캠페인은 <b>유입가이드형</b> → [상품 페이지 열기] 버튼 <b>미노출</b> (링크유입일 때만 표시)
+              </div>
+            </div>
+
+            <div class="p-card"><span class="pin">4</span>
+              <div class="p-tt">📝 리뷰 가이드</div>
+              <div class="p-tx">전체 별점 5건
+- 배송이 빠르다
+- 겨울맞이 미리 준비했다 등
+1~2줄 자연스러운 리뷰 작성희망</div>
+            </div>
+
+            <div class="p-card" style="border:1.5px dashed #FCA5A5;background:#FFF7F7"><span class="pin">5</span>
+              <div class="p-tt" style="color:#B91C1C">💬 팀 채팅방 카드 — 이 화면에서 제거</div>
+              <div style="font-size:.7rem;color:#B91C1C">구매양식 <b>제출 완료 후</b>에만 입장 버튼 제공 (오른쪽 화면)</div>
+            </div>
+
+            <div class="p-card" style="border-color:#3182f6">
+              <div class="p-tt" style="color:#1b64da">🧾 구매양식 — 구매를 마친 뒤 여기서 바로 제출하세요</div>
+              <div class="p-iframe">인라인 구매양식 iframe (변경 없음)</div>
+            </div>
+            <button class="p-btn">참여 취소</button>
+          </div>
+        </div>
+      </div>
+
+      <!-- ── 제출 완료 화면 (After) ── -->
+      <div>
+        <div class="cap" style="margin-bottom:8px">📱 구매양식 제출 완료 화면 (After)</div>
+        <div class="phone">
+          <div class="p-hd"><span class="bk">←</span><span class="tt">쿠 빈 장수돌침대 전기매트 립비1천</span></div>
+          <div class="p-done">
+            <div class="e">✅</div>
+            <h4>참여 확정!</h4>
+            <p>구매양식이 제출되었어요.<br/>진행 상황은 리뷰어 홈의 참여현황에서 확인할 수 있어요.</p>
+          </div>
+          <div class="p-body" style="padding-top:6px">
+            <div style="position:relative">
+              <span class="pin ok" style="top:-6px">5</span>
+              <button class="p-btn kakao">💬 이 캠페인의 카톡 팀채팅방 입장</button>
+            </div>
+            <button class="p-btn pri" style="margin-top:8px">내 참여현황 보기</button>
+            <div style="font-size:.66rem;color:#9CA3AF;text-align:center;margin-top:10px">
+              제출 완료 후 이 페이지에 다시 들어와도 입장 버튼이 유지돼요<br/>(만료 후 늦은 제출 = "접수됨" 화면에도 동일 제공)
+            </div>
+          </div>
+        </div>
+
+        <div class="cap" style="margin:18px 0 8px">🔗 참고 — 링크유입형 캠페인의 유입가이드 블록</div>
+        <div class="phone" style="border-radius:16px">
+          <div class="p-body" style="padding:12px">
+            <div class="p-card" style="margin-bottom:0">
+              <div class="p-tt">🧭 유입가이드</div>
+              <div class="p-tx">링크유입 — 아래 [상품 페이지 열기] 버튼으로 진입해 구매를 진행하세요.</div>
+              <button class="p-btn" style="margin-top:9px">🔗 상품 페이지 열기 (새 탭)</button>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <h3>[v1.1] 리뷰 내역 카드 클릭 → "참여상품 정보" 시트</h3>
+    <div class="flow" style="margin-bottom:14px">
+      <span class="n">리뷰 내역 카드 탭</span><span class="a">→</span>
+      <span class="n bad" style="text-decoration:line-through">즉시 /search 리뷰제출 모달 (현재)</span><span class="a">⇒</span>
+      <span class="n" style="border-color:var(--ok);color:var(--ok)">참여상품 정보 시트 (변경)</span><span class="a">→</span>
+      <span class="n">카톡 입장 <span style="color:var(--faint)">또는</span> 리뷰제출하기</span>
+    </div>
+    <div class="mockrow">
+      <!-- ── 리뷰 내역 + 참여상품 정보 시트 (After) ── -->
+      <div>
+        <div class="cap" style="margin-bottom:8px">📱 내정보/현황 · 리뷰 내역 — 카드 탭 직후 (After)</div>
+        <div class="phone" style="position:relative">
+          <div style="filter:grayscale(.15) brightness(.94);pointer-events:none">
+            <div style="padding:14px 14px 8px;font-weight:800;font-size:.95rem;color:#111827">내정보 / 현황</div>
+            <div class="p-body" style="padding-top:2px">
+              <div style="display:flex;gap:6px;margin-bottom:10px">
+                <div style="flex:1;text-align:center;background:#3182f6;color:#fff;border-radius:999px;font-size:.72rem;font-weight:800;padding:7px 0">제출대기 3</div>
+                <div style="flex:1;text-align:center;background:#fff;border:1px solid #E5E7EB;color:#6B7280;border-radius:999px;font-size:.72rem;font-weight:700;padding:7px 0">제출완료 0</div>
+              </div>
+              <div class="p-card" style="display:flex;align-items:center;gap:9px;border-color:#3182f6;box-shadow:0 0 0 3px #3182f622">
+                <span style="width:30px;height:30px;border-radius:50%;background:#E8F1FE;display:flex;align-items:center;justify-content:center;font-size:.72rem">👤</span>
+                <div style="flex:1;min-width:0"><div style="font-size:.78rem;font-weight:800">6 / 26 (금) 레노버노트북_리뷰</div>
+                  <div style="font-size:.66rem;color:#9CA3AF">김수만</div></div>
+                <span style="font-size:.62rem;font-weight:800;background:#FEF3C7;color:#B45309;border-radius:8px;padding:2px 7px">미제출</span>
+              </div>
+              <div class="p-card" style="display:flex;align-items:center;gap:9px;opacity:.65">
+                <span style="width:30px;height:30px;border-radius:50%;background:#E8F1FE;display:flex;align-items:center;justify-content:center;font-size:.72rem">👤</span>
+                <div style="flex:1;min-width:0"><div style="font-size:.78rem;font-weight:800">6 / 26 (금) 레노버노트북_지출증빙</div>
+                  <div style="font-size:.66rem;color:#9CA3AF">김수만</div></div>
+                <span style="font-size:.62rem;font-weight:800;background:#FEF3C7;color:#B45309;border-radius:8px;padding:2px 7px">미제출</span>
+              </div>
+              <div style="height:150px"></div>
+            </div>
+          </div>
+          <!-- 딤 + 바텀시트 -->
+          <div style="position:absolute;inset:0;background:rgba(17,24,39,.45);border-radius:0 0 25px 25px"></div>
+          <div style="position:absolute;left:0;right:0;bottom:0;background:#fff;border-radius:18px 18px 25px 25px;padding:10px 14px 16px;box-shadow:0 -8px 30px rgba(0,0,0,.18)">
+            <div style="width:38px;height:4px;border-radius:99px;background:#E5E7EB;margin:0 auto 10px"></div>
+            <div style="font-size:.68rem;font-weight:800;color:#9CA3AF">🛍️ 참여상품 정보</div>
+            <div style="font-size:.85rem;font-weight:800;margin-top:4px">6 / 26 (금) 레노버노트북_리뷰
+              <span style="font-size:.6rem;font-weight:800;background:#FEF3C7;color:#B45309;border-radius:8px;padding:2px 7px;vertical-align:middle;margin-left:4px">미제출</span></div>
+            <div style="border:1px solid #EEF1F7;border-radius:11px;margin-top:9px;padding:9px 11px;font-size:.72rem;line-height:1.8">
+              <div style="display:flex;gap:8px"><span style="color:#9CA3AF;flex:none;width:44px">상품</span><b>레노버 노트북 슬림3 15.6</b></div>
+              <div style="display:flex;gap:8px"><span style="color:#9CA3AF;flex:none;width:44px">결제금액</span><b>489,000원</b></div>
+              <div style="display:flex;gap:8px"><span style="color:#9CA3AF;flex:none;width:44px">리뷰어</span>김수만 <span style="color:#9CA3AF">· 1차</span></div>
+              <div style="display:flex;gap:8px;align-items:center"><span style="color:#9CA3AF;flex:none;width:44px">상품 URL</span>
+                <span style="color:#1b64da;font-weight:700;text-decoration:underline;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">🔗 smartstore.naver.com/lenovo/…</span></div>
+            </div>
+            <div style="position:relative;margin-top:11px">
+              <span class="pin ok" style="top:-8px">6</span>
+              <button class="p-btn kakao">💬 이 캠페인의 카톡 팀채팅방 입장</button>
+            </div>
+            <button class="p-btn pri" style="margin-top:8px">📤 리뷰제출하기</button>
+            <div style="font-size:.64rem;color:#9CA3AF;text-align:center;margin-top:8px">리뷰제출하기 = 기존 제출 모달로 그대로 이동</div>
+          </div>
+        </div>
+      </div>
+      <!-- ── 변형 케이스 ── -->
+      <div style="max-width:340px">
+        <div class="cap" style="margin-bottom:8px">🧩 변형 케이스</div>
+        <div class="phone" style="border-radius:16px;margin-bottom:14px">
+          <div class="p-body" style="padding:12px">
+            <div style="font-size:.68rem;font-weight:800;color:#9CA3AF;margin-bottom:6px">공고(캠페인) 미연결 작업 — 카톡 버튼 자리</div>
+            <div style="border:1.5px dashed #D1D5DB;border-radius:11px;padding:9px;text-align:center;font-size:.7rem;color:#9CA3AF">연결된 팀 채팅방이 없어요</div>
+            <button class="p-btn pri" style="margin-top:8px">📤 리뷰제출하기</button>
+          </div>
+        </div>
+        <div class="phone" style="border-radius:16px">
+          <div class="p-body" style="padding:12px">
+            <div style="font-size:.68rem;font-weight:800;color:#9CA3AF;margin-bottom:6px">제출완료 카드 탭 — 카톡 재입장만 (제출 버튼 없음)</div>
+            <div style="border:1px solid #EEF1F7;border-radius:11px;padding:9px 11px;font-size:.72rem;line-height:1.8">
+              <div style="display:flex;gap:8px"><span style="color:#9CA3AF;flex:none;width:44px">상품</span><b>레노버 노트북 슬림3 15.6</b></div>
+              <div style="display:flex;gap:8px"><span style="color:#9CA3AF;flex:none;width:44px">상태</span><b style="color:#12b886">제출완료 · 6.27</b></div>
+            </div>
+            <button class="p-btn kakao" style="margin-top:8px">💬 이 캠페인의 카톡 팀채팅방 입장</button>
+          </div>
+        </div>
+        <p style="font-size:.74rem;color:var(--mut);margin-top:12px;line-height:1.7">· 카톡 버튼은 행 소유권(전화 뒤 8자리 정확 일치) 검증을 통과한 본인에게만 채워진다.<br/>
+        · 정보 조회가 실패해도 시트는 열리고 <b>[리뷰제출하기]는 항상 동작</b>(fail-soft).<br/>
+        · 다건 그룹 카드 탭 → 같은 시트에 n건 목록 + 공통 카톡 버튼 1개 + [리뷰제출하기(n건)].</p>
+      </div>
+    </div>
+
+    <h3>Before → 무엇이 사라지나</h3>
+    <div class="card">
+      <div class="beforebx"><span class="lb">BEFORE — 상품 · 옵션 · 결제금액</span>장수돌침대 26년형 올뉴블랙에디션 카본 탄소매트 전자파없는 워셔블 전기매트 결제금액 78,000원 <span class="strike">· 결제금액 78,000원</span></div>
+      <div class="beforebx"><span class="lb">BEFORE — 리뷰 가이드 (아래 취소선 부분이 전부 제거되고 이미지·버튼 정보는 유입가이드 블록으로 이동)</span><span class="strike">[유입방식] 유입가이드</span>
+
+<span class="strike">[유입가이드]
+장수돌침대 전기매트</span>
+
+<span class="strike">[유입가이드 첨부 이미지]
+1. 0722 장수산업 유입.png (29KB, Drive 저장됨)
+https://…railway.app/api/order/guide-image/1mdb2dR2Bz…</span>  →  <b style="color:var(--ok)">유입가이드 블록에 이미지로 표시</b>
+
+[리뷰등록 가이드] <b style="color:var(--ok)">← 이 섹션 내용만 남음</b>
+전체 별점 5건
+- 배송이 빠르다
+- 겨울맞이 미리 준비했다 등
+1~2줄 자연스러운 리뷰 작성희망</div>
+      <div class="beforebx" style="margin-bottom:0"><span class="lb">BEFORE — 참여 후 화면의 회색 "카톡 팀채팅방 입장" 카드</span><span class="strike">💬 팀 채팅방 [카톡 팀채팅방 입장]</span>  →  제출 완료 화면의 <b style="color:var(--ok)">카카오 옐로 버튼</b>으로 이동 (제출 전엔 서버도 URL 미반환)</div>
+    </div>
+  </section>
+
+  <!-- ═══════════ 06 엣지·리스크 ═══════════ -->
+  <section id="s6">
+    <div class="sec-label">06 · EDGE CASES & RISK</div>
+    <h2>엣지케이스 · 안전장치</h2>
+    <div class="card"><div class="legend">
+      <div class="row"><span class="num" style="background:var(--ok)">✓</span><div><b>깨끗한 원문은 무변화</b> — 섹션 라벨이 없는 평문 리뷰가이드는 전문 그대로, 금액 중복 없는 상품줄도 그대로. 정규화는 "문제 패턴이 확실할 때만" 개입한다.</div></div>
+      <div class="row"><span class="num" style="background:var(--ok)">✓</span><div><b>상이 금액 다옵션 라인 보호</b> — 한 줄에 서로 다른 결제금액이 2개면(옵션별 병기) 병합하지 않고 원문 유지. 잘못 합쳐 정보를 잃는 것보다 낫다(fail-safe).</div></div>
+      <div class="row"><span class="num" style="background:var(--ok)">✓</span><div><b>이미지 인젝션 차단</b> — 리뷰가이드 텍스트에서 추출한 URL은 guide-image 프록시·Google Drive 패턴만 <code>&lt;img&gt;</code>화하고 src는 escape. 그 외 URL은 이미지로 만들지 않는다(서버 sanitize 화이트리스트와 동일 사상).</div></div>
+      <div class="row"><span class="num" style="background:var(--ok)">✓</span><div><b>리뷰등록 섹션이 아예 없는 오더</b> — 리뷰 가이드 카드 자체를 숨김(현재도 reviewGuide 공란이면 숨기는 동작과 동일 계열).</div></div>
+      <div class="row"><span class="num" style="background:var(--ok)">✓</span><div><b>inflowType 조회 실패(fail-soft)</b> — work-detail의 오더 역조회가 실패해도 응답은 정상, 버튼은 기존 동작(landingUrl 유무)으로 폴백. 홀드 검증·제출 경로엔 영향 0.</div></div>
+      <div class="row"><span class="num" style="background:var(--ok)">✓</span><div><b>수동 공고(작업오더 미연결) 하위호환</b> — inflowType 정보가 없으므로 랜딩 버튼은 기존처럼 표시. 관리자가 의도적으로 넣은 랜딩 URL이 갑자기 사라지는 회귀 없음.</div></div>
+      <div class="row"><span class="num" style="background:var(--ok)">✓</span><div><b>제출 직후 채팅 버튼 공백 방지</b> — C-2(제출 전 chatUrl 미반환) 때문에 완료 전환 시 1회 재조회로 URL 수급. 실패해도 10초 폴링·재방문에서 자가 복구.</div></div>
+      <div class="row"><span class="num" style="background:var(--ok)">✓</span><div><b>[v1.1] 공고 미연결 탭(시트 단독 작업)·브리프 조회 실패</b> — 카톡 버튼 미노출("연결된 팀 채팅방이 없어요"), <b>[리뷰제출하기]는 항상 동작</b>. 리뷰제출 핫패스는 어떤 실패에도 막히지 않는다(fail-soft).</div></div>
+      <div class="row"><span class="num" style="background:var(--ok)">✓</span><div><b>[v1.1] 카톡 URL 노출 게이트 = 행 소유권</b> — /api/search 약한 매칭(이름 단독)으로 카드 목록이 떠도, 브리프는 <code>_verifyRowOwnership</code>(phone8 정확 일치·stale 링크 fail-closed) 미통과 시 403. 이름만 아는 제3자의 채팅방 URL 수집 차단 — 참여형 chat_url 게이트(§04-C)와 동일 사상.</div></div>
+      <div class="row"><span class="num" style="background:var(--ok)">✓</span><div><b>[v1.1] 구매양식 반영중(<code>isOrderPending</code>) 카드</b> — 아직 시트 행이 없어 브리프 검증 불가 → 기존대로 클릭 비활성 유지(반영 완료 후 자동으로 시트 진입 가능).</div></div>
+      <div class="row"><span class="num" style="background:var(--warn)">!</span><div><b>남는 한계</b> — 발행 폼에서 관리자가 스냅샷 텍스트를 임의 수정해 다시 섞어 넣으면(예: 리뷰가이드에 유입 문구 직접 타이핑) 그대로 노출된다. 라벨 섹션 패턴이면 렌더 정규화가 걸러주지만, 자유 문장은 관리자 재량으로 남긴다.</div></div>
+    </div></div>
+  </section>
+
+  <!-- ═══════════ 07 순서 ═══════════ -->
+  <section id="s7">
+    <div class="sec-label">07 · ROLLOUT</div>
+    <h2>구현 · 배포 순서</h2>
+    <div class="card">
+      <ol style="font-size:.86rem;padding-left:20px;line-height:2">
+        <li>campaign.html 렌더 정규화 + 버튼/채팅 UI 변경 (A) — 배포 즉시 기발행 캠페인 화면 정상화</li>
+        <li>index-app.js 프리필 정화 (B) + index-recruit.js source_work_order_id 1줄 (B-5)</li>
+        <li>campaign.routes.js inflowType·chatUrl 게이트 (C)</li>
+        <li>[v1.1] 리뷰 내역 "참여상품 정보" 시트(index.html) + <code>participation-brief</code> 엔드포인트(reviewEdit.routes.js) (D)</li>
+        <li>회귀가드 테스트 (E) → <code>node --check</code> + 기존 캠페인 테스트 전체 통과 확인</li>
+        <li>PR → main 머지(자동배포) → 확인: ① 스크린샷 캠페인 유형(guide형) 재현 데이터로 참여 화면 5개 항목 육안 확인 ② 링크유입형 발행 1건으로 버튼 노출 확인 ③ 제출 완료 후 카카오 버튼 입장 확인 ④ 리뷰 내역 카드 → 정보 시트 → 카톡 입장/리뷰제출 두 버튼 동작 확인</li>
+      </ol>
+      <p style="font-size:.8rem;color:var(--mut);margin-top:6px">규모: 프론트 ~300줄 내외 + 서버 ~60줄. 마이그레이션·env 변경 없음. 라이브 핫패스(주문 제출·행배정·시트 쓰기) 무접촉이라 레드-블루-심판 풀 프로세스 대신 회귀가드 + code-review로 충분한 수준.</p>
+    </div>
+  </section>
+
+</div>
+</body>
+</html>
