@@ -37,6 +37,7 @@ const _EMBED_CTX = (() => {
       campId: q.get("campId") || "",
       holdToken: q.get("holdToken") || "",
       holdPhone8: q.get("holdPhone8") || "",
+      optionKey: q.get("optionKey") || "", // ★ 061: 참여 시 고른 옵션(잠금표시). 서버가 최종 권위.
     };
   } catch (_) { return null; }
 })();
@@ -76,6 +77,27 @@ function _embedRestoreForm() {
     });
   } catch (_) { /* noop */ }
 }
+/** ★ 061 참여형 옵션 잠금: embed에 optionKey가 오면 시트 옵션 피커 대신 "참여한 옵션" 잠금표시.
+ *   서버가 제출 시 홀드의 option_key로 최종 override하므로 화면값은 표시용(조작 무의미). */
+function _lockEmbedOption() {
+  if (!(_EMBED_CTX && _EMBED_CTX.optionKey)) return false;
+  const key = _EMBED_CTX.optionKey;
+  _selectedOptKey = key;
+  window._preSelectedOptKey = key;
+  _setOrdererDisabled(false);
+  const wrap = document.getElementById("of_option_picker_wrap");
+  if (wrap) {
+    wrap.style.display = "";
+    wrap.innerHTML =
+      '<div class="of-option-picker-title"><i class="fas fa-lock"></i> 참여한 옵션</div>' +
+      '<div style="display:flex;align-items:center;gap:8px;padding:10px 12px;border:1.5px solid #3182f6;border-radius:10px;background:#e8f1fe">' +
+      '<b style="flex:1;font-size:.9rem">' + _safeText(key) + '</b>' +
+      '<span style="font-size:.6rem;font-weight:800;background:#3182f6;color:#fff;border-radius:6px;padding:3px 8px">고정</span></div>' +
+      '<div style="font-size:.62rem;color:#9CA3AF;margin-top:6px">옵션을 바꾸려면 위 참여 화면의 [옵션 변경]을 이용하세요.</div>';
+  }
+  return true;
+}
+
 let _embedHeightTimer = null;
 function _activateEmbedMode() {
   if (!_EMBED_CTX) return;
@@ -4018,10 +4040,13 @@ function initOrderFormMode() {
   } else {
     addOrderCard(); // 첫 번째 카드 추가
     _updateCardCountBadge();
-    // 추가 버튼 표시
+    // 추가 버튼 표시 (★ 참여형 embed는 참여 1건=제출 1건이라 카드 추가 숨김)
     const addBtnEl2 = document.getElementById("btnAddOrderCard");
-    if (addBtnEl2) addBtnEl2.style.display = "";
+    if (addBtnEl2) addBtnEl2.style.display = _EMBED_CTX ? "none" : "";
   }
+
+  // ★ 061 참여형 옵션 잠금: campaign.html에서 고른 옵션이 오면 즉시 잠금표시(피커 렌더 전에 확정)
+  if (_EMBED_CTX && _EMBED_CTX.optionKey) _lockEmbedOption();
 
   // ★ 주문자·아이디 입력란을 즉시 활성화 (GAS 응답 대기 중에도 직접 입력 가능하도록)
   _setOrdererDisabled(false);
@@ -4421,6 +4446,8 @@ window._onPickerDistinctSelect = function(colName, value, btnEl) {
  *  옵션 버튼으로 표시한다. 옵션이 1개 이하이면 피커를 숨긴다.
  */
 function _renderOptionPicker() {
+  // ★ 061 참여형 옵션 잠금: campaign.html에서 고른 옵션이 오면 시트 피커 대신 잠금표시(피커 무시)
+  if (_EMBED_CTX && _EMBED_CTX.optionKey) { _lockEmbedOption(); return; }
   const pickerWrap = document.getElementById("of_option_picker_wrap");
   const tabsEl     = document.getElementById("of_option_tabs");
   if (!pickerWrap || !tabsEl) return;
