@@ -1225,13 +1225,23 @@ router.get('/admin/:id/applications', authMiddleware, adminOrMasterMiddleware, a
     const { rows } = await pool.query(
       `SELECT id, campaign_id, applicant_name, applicant_phone, applicant_inad,
               status, sheet_row_added, applied_at, phone8, expires_at, submitted_at,
-              order_submission_id, late_order_id
+              order_submission_id, late_order_id, option_key
        FROM campaign_applications
        WHERE campaign_id = $1
        ORDER BY applied_at ASC`,
       [id]
     );
-    res.json({ ok: true, data: rows, count: rows.length });
+    // 🧩 옵션별 현황(061 3단계 관제): 옵션 뷰(정원·잔여·상태) + 금액 포함(관리자 전용)
+    let options = [];
+    try {
+      const { rows: camps } = await pool.query('SELECT * FROM recruit_campaigns WHERE id = $1', [id]);
+      if (camps.length && camps[0].participation_mode) {
+        const now = new Date();
+        const st = computeCampaignState(camps[0], (await fetchCampaignCounts(pool, [id], now)).get(id), now);
+        options = await _loadOptionViews(pool, id, st, now);
+      }
+    } catch (optErr) { logger.warn('[campaign/admin/applications] 옵션 집계 실패: ' + optErr.message); }
+    res.json({ ok: true, data: rows, count: rows.length, options });
   } catch (err) {
     next(err);
   }

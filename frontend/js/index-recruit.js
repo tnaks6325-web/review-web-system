@@ -369,6 +369,99 @@ function renderPartCheck() {
 }
 
 /* ═══════════════════════════════════════
+   🧩 상품 옵션표 (061 3단계) — 옵션별 금액·정원·하루건수
+   ═══════════════════════════════════════ */
+function addOptRow(data) {
+  const wrap = document.getElementById("rf_opt_rows");
+  if (!wrap) return;
+  const d = data || {};
+  const status = (d.status === "closed") ? "closed" : "active";   // ★ 마감 상태 보존(리뷰 #1 — 저장 라운드트립에서 재활성화 방지)
+  const row = document.createElement("div");
+  row.className = "rf-opt-row";
+  row.dataset.status = status;
+  row.style.cssText = "display:grid;grid-template-columns:1.5fr 1fr .8fr .8fr auto;gap:6px;align-items:center;margin-bottom:6px" + (status === "closed" ? ";opacity:.68" : "");
+  const lastBtn = status === "closed"
+    ? '<button type="button" class="btn-icon-sm rf-opt-reopen" title="옵션 재개(다시 모집)" style="color:#12b886"><i class="fas fa-rotate-left"></i></button>'
+    : '<button type="button" class="btn-icon-sm rf-opt-del" title="옵션 삭제" style="color:#EF4444"><i class="fas fa-times"></i></button>';
+  row.innerHTML =
+    '<input class="rform-input rf-opt-name" placeholder="옵션명" style="font-size:.74rem;padding:7px 8px">' +
+    '<input class="rform-input rf-opt-pay" type="number" min="0" placeholder="금액" style="font-size:.74rem;padding:7px 8px">' +
+    '<input class="rform-input rf-opt-rt" type="number" min="0" placeholder="정원" style="font-size:.74rem;padding:7px 8px">' +
+    '<input class="rform-input rf-opt-dl" type="number" min="0" placeholder="하루" style="font-size:.74rem;padding:7px 8px">' +
+    lastBtn;
+  const rt = d.recruitTotal ?? d.recruit_total, dl = d.dailyLimit ?? d.daily_limit, pay = d.payAmount ?? d.pay_amount;
+  row.querySelector(".rf-opt-name").value = d.optKey ?? d.opt_key ?? "";
+  row.querySelector(".rf-opt-pay").value  = pay ? pay : "";
+  row.querySelector(".rf-opt-rt").value   = rt ? rt : "";     // 0/무제한은 빈칸으로
+  row.querySelector(".rf-opt-dl").value   = dl ? dl : "";
+  if (status === "closed") row.querySelector(".rf-opt-name").title = "마감된 옵션(참여자 보호로 유지) — 재개 버튼으로 다시 모집할 수 있어요";
+  row.querySelectorAll("input").forEach(i => i.addEventListener("input", () => { _optSummary(); renderPartCheck(); }));
+  const del = row.querySelector(".rf-opt-del");
+  if (del) del.onclick = () => { row.remove(); _optSummary(); renderPartCheck(); };
+  const reopen = row.querySelector(".rf-opt-reopen");
+  if (reopen) reopen.onclick = () => {   // 마감 옵션 재개 → active + 삭제 버튼으로 교체(재개는 명시적 의도로만)
+    row.dataset.status = "active"; row.style.opacity = "";
+    reopen.outerHTML = '<button type="button" class="btn-icon-sm rf-opt-del" title="옵션 삭제" style="color:#EF4444"><i class="fas fa-times"></i></button>';
+    row.querySelector(".rf-opt-del").onclick = () => { row.remove(); _optSummary(); renderPartCheck(); };
+    row.querySelector(".rf-opt-name").title = "";
+    _optSummary(); renderPartCheck();
+  };
+  wrap.appendChild(row);
+  _optSummary();
+}
+function renderOptRows(options) {
+  const wrap = document.getElementById("rf_opt_rows");
+  if (!wrap) return;
+  wrap.innerHTML = "";
+  (options || []).forEach(o => addOptRow(o));
+  _optSummary();
+}
+/** 옵션표 → 저장 payload 배열(빈 옵션명 제거, '|' 정규화, 마감상태 보존) */
+function readOptRows() {
+  const out = [];
+  document.querySelectorAll("#rf_opt_rows .rf-opt-row").forEach(r => {
+    const optKey = String(r.querySelector(".rf-opt-name").value || "").replace(/\|/g, "").trim();
+    if (!optKey) return;
+    out.push({
+      optKey,
+      payAmount:     Math.max(0, parseInt(r.querySelector(".rf-opt-pay").value, 10) || 0),
+      recruitTotal:  Math.max(0, parseInt(r.querySelector(".rf-opt-rt").value, 10) || 0),
+      dailyLimit:    Math.max(0, parseInt(r.querySelector(".rf-opt-dl").value, 10) || 0),
+      status:        r.dataset.status === "closed" ? "closed" : "active",   // ★ 마감상태 보존(리뷰 #1)
+    });
+  });
+  return out;
+}
+/** 옵션표 요약·자동점검(정원합/하루합/중복). 반환: { dup, count } — 저장 시 중복 하드블록용 */
+function _optSummary() {
+  const el = document.getElementById("rf_opt_summary");
+  const opts = readOptRows();
+  const names = opts.map(o => o.optKey.toLowerCase());
+  const dup = names.some((n, i) => names.indexOf(n) !== i);
+  if (!el) return { dup, count: opts.length };
+  if (!opts.length) {
+    el.textContent = "옵션을 추가하면 리뷰어가 참여 시 옵션을 직접 선택합니다(2개 이상일 때 선택창 노출). 옵션 없는 단일상품이면 비워두세요.";
+    el.style.color = "var(--t3)";
+    return { dup, count: 0 };
+  }
+  const active = opts.filter(o => o.status !== "closed");
+  const closedN = opts.length - active.length;
+  const anyUnlimited = active.some(o => o.recruitTotal === 0);
+  const rtSum = anyUnlimited ? 0 : active.reduce((a, o) => a + o.recruitTotal, 0);
+  const allHaveDaily = active.length > 0 && active.every(o => o.dailyLimit > 0);  // 전부 하루한도 있을 때만 합계 비교(공유풀이라 부분캡은 합≠캠페인이 정상)
+  const dlSum = active.reduce((a, o) => a + o.dailyLimit, 0);
+  const camRt = Number(document.getElementById("rf_recruit_total")?.value || 0);
+  const camDl = Number(document.getElementById("rf_daily_limit")?.value || 0);
+  const msgs = ["옵션 " + active.length + "종" + (closedN ? "(+마감 " + closedN + ")" : "") + " · 정원합 " + (anyUnlimited ? "무제한" : rtSum + "명") + (dlSum ? (" · 하루합 " + dlSum + "건") : "")];
+  if (dup) msgs.push("⚠ 옵션명 중복(저장 불가)");
+  if (!anyUnlimited && camRt && camRt !== rtSum) msgs.push("⚠ 총모집(" + camRt + ")≠정원합(" + rtSum + ")");
+  if (allHaveDaily && dlSum && camDl && camDl !== dlSum) msgs.push("⚠ 하루한도(" + camDl + ")≠옵션 하루합(" + dlSum + ")");
+  el.innerHTML = msgs.join(" · ");
+  el.style.color = (msgs.length > 1) ? "#B45309" : "var(--t3)";
+  return { dup, count: opts.length };
+}
+
+/* ═══════════════════════════════════════
    모달 열기/닫기
 ═══════════════════════════════════════ */
 async function openRecruitModal(id, prefill, woOrderId) {
@@ -406,6 +499,7 @@ async function openRecruitModal(id, prefill, woOrderId) {
   const _bufEl = document.getElementById("rf_close_buffer"); if (_bufEl) _bufEl.value = "10";
   const _partEl = document.getElementById("rf_participation");
   if (_partEl) { _partEl.checked = false; onParticipationToggle(false); }
+  if (typeof renderOptRows === "function") renderOptRows([]);   // 🧩 옵션표 초기화(061)
   window._wdInflowRawHtml = null;
   const _ivTa = document.getElementById("rf_wd_inflow"); if (_ivTa) _ivTa.dataset.rawHtml = "";
   const _tpv = document.getElementById("rf_thumb_preview"); if (_tpv) _tpv.style.display = "none";
@@ -496,6 +590,7 @@ async function openRecruitModal(id, prefill, woOrderId) {
           const pv = document.getElementById("rf_thumb_preview");
           if (pv) { pv.src = c.thumbnail_url; pv.style.display = ""; }
         }
+        renderOptRows(json.options || []);   // 🧩 옵션표 프리필(관리자 GET /:id가 반환하는 원본 옵션)
         renderPartCheck();
       }
     } catch(e) {
@@ -555,6 +650,7 @@ async function openRecruitModal(id, prefill, woOrderId) {
         } else if (prefill.wd_inflow_text) {
           setV("rf_wd_inflow", prefill.wd_inflow_text);
         }
+        renderOptRows(prefill.options || []);   // 🧩 작업오더 옵션 프리필(product_options_json → 옵션표)
         renderPartCheck();
       }
     }
@@ -789,6 +885,40 @@ async function openCampControl(campId, title) {
   await _loadCampControl(campId);
 }
 
+/** 🧩 관제 옵션별 현황표(061 3단계): 옵션 뷰(정원·상태) + 신청행 기반 오늘 집계.
+ *  옵션 미등록 캠페인은 빈 문자열(표 미노출). */
+function _campOptionTable(options, rows, now, today, kstDay) {
+  if (!options || !options.length) return "";
+  const agg = {};
+  (rows || []).forEach(r => {
+    const k = r.option_key; if (!k) return;
+    agg[k] = agg[k] || { todayHold: 0, todaySub: 0, cumSub: 0 };
+    const isToday = r.applied_at && kstDay(Date.parse(r.applied_at)) === today;
+    const holdValid = r.status === "applied" && r.expires_at && Date.parse(r.expires_at) > now;
+    if (r.status === "submitted") agg[k].cumSub++;
+    if (isToday && holdValid) agg[k].todayHold++;
+    if (r.status === "submitted" && r.submitted_at && kstDay(Date.parse(r.submitted_at)) === today) agg[k].todaySub++;
+  });
+  const escT = s => String(s || "").replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+  const stTxt = { open: ["진행중", "#065F46", "#D1FAE5"], soldout: ["마감", "#B91C1C", "#FEE2E2"], today_done: ["오늘마감", "#92400E", "#FEF3C7"], closed: ["마감", "#6B7280", "#F3F4F6"] };
+  const th = t => `<th style="text-align:${t.a || "left"};font-weight:800;color:#6B7280;padding:5px 8px;border-bottom:1px solid #E5E7EB;white-space:nowrap">${t.l}</th>`;
+  const td = (v, a) => `<td style="text-align:${a || "left"};padding:5px 8px;border-bottom:1px solid #F3F4F6;white-space:nowrap">${v}</td>`;
+  const body = options.map(o => {
+    const a = agg[o.optKey] || { todayHold: 0, todaySub: 0, cumSub: 0 };
+    const s = stTxt[o.status] || stTxt.open;
+    const rt = o.recruitTotal ? o.recruitTotal + "명" : "무제한";
+    const pay = o.payAmount ? Number(o.payAmount).toLocaleString() + "원" : "-";
+    return `<tr>${td("<b>" + escT(o.optKey) + "</b>")}${td(pay, "right")}${td(String(a.todayHold), "center")}${td(String(a.todaySub), "center")}${td(String(a.cumSub), "center")}${td(rt, "center")}${td(`<span style="font-size:.62rem;font-weight:800;background:${s[2]};color:${s[1]};border-radius:6px;padding:2px 7px">${s[0]}</span>`, "center")}</tr>`;
+  }).join("");
+  return `<div style="margin:2px 0 12px">
+    <div style="font-size:.74rem;font-weight:800;color:#5B21B6;margin-bottom:5px">🧩 옵션별 현황</div>
+    <div style="overflow-x:auto"><table style="width:100%;border-collapse:collapse;font-size:.72rem">
+      <thead><tr>${th({ l: "옵션" })}${th({ l: "금액", a: "right" })}${th({ l: "오늘 진행중", a: "center" })}${th({ l: "오늘 제출", a: "center" })}${th({ l: "누적 확정", a: "center" })}${th({ l: "정원", a: "center" })}${th({ l: "상태", a: "center" })}</tr></thead>
+      <tbody>${body}</tbody>
+    </table></div>
+  </div>`;
+}
+
 async function _loadCampControl(campId) {
   const body = document.getElementById("ccBody");
   const stats = document.getElementById("ccStats");
@@ -812,13 +942,15 @@ async function _loadCampControl(campId) {
       else if (r.status === "expired" || (r.status === "applied" && !holdValid)) exps++;
     });
     if (stats) stats.textContent = `오늘 · 진행중 ${holds} / 제출 ${subs} / 만료 ${exps}`;
+    // 🧩 옵션별 현황표(061 3단계) — 옵션 등록 캠페인만
+    const optTableHtml = _campOptionTable(j.options || [], items, now, today, kstDay);
     if (!items.length) {
-      body.innerHTML = `<div style="padding:30px;text-align:center;color:#9CA3AF">참여 이력이 없습니다.</div>`;
+      body.innerHTML = optTableHtml + `<div style="padding:30px;text-align:center;color:#9CA3AF">참여 이력이 없습니다.</div>`;
       return;
     }
     const chip = (bg, fg, tx) => `<span style="font-size:.66rem;font-weight:800;background:${bg};color:${fg};border-radius:6px;padding:2px 8px;white-space:nowrap">${tx}</span>`;
     const fmtT = iso => iso ? new Date(iso).toLocaleString("ko-KR", { timeZone: "Asia/Seoul", month: "numeric", day: "numeric", hour: "2-digit", minute: "2-digit" }) : "";
-    body.innerHTML = items.sort((a, b) => new Date(b.applied_at) - new Date(a.applied_at)).map(r => {
+    body.innerHTML = optTableHtml + items.sort((a, b) => new Date(b.applied_at) - new Date(a.applied_at)).map(r => {
       const holdValid = r.status === "applied" && r.expires_at && Date.parse(r.expires_at) > now;
       let st;
       if (r.status === "submitted") st = chip("#D1FAE5", "#065F46", "✓ 제출확정");
@@ -940,6 +1072,14 @@ async function saveRecruitPost() {
         reviewGuide:     document.getElementById("rf_wd_review").value.trim(),
         specialNotes:    document.getElementById("rf_wd_notes").value.trim(),
       };
+      // 🧩 상품 옵션(061): 옵션표 전체를 교체 배열로 전송(빈 배열=옵션 없음). 중복 옵션명은 하드블록(서버 유니크).
+      //   ★ 옵션표 UI가 있는 페이지에서만 전송 — 옵션표 없는 페이지(admin-siand 등)는 미전송(undefined)→
+      //     서버가 기존 옵션 유지(옵션 소실 방지, work_detail 가드와 동일 원칙). (이 지점은 저장 버튼 비활성화 전)
+      if (document.getElementById("rf_opt_rows")) {
+        const _optChk = (typeof _optSummary === "function") ? _optSummary() : { dup: false };
+        if (_optChk.dup) { showToast("옵션명이 중복됐어요. 옵션명을 다르게 하거나 삭제해주세요.", "error"); renderPartCheck(); return; }
+        payload.options = readOptRows();
+      }
     }
   }
 
