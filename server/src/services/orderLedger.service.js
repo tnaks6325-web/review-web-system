@@ -3,6 +3,14 @@ const { logger } = require('../utils/logger');
 
 const INAD_COL_KEYWORDS = ['인애드', '인애드명', '인애드제출', '카톡', '카카오', '닉네임'];
 const OPTION_COL_KEYWORDS = ['옵션', 'option'];
+// ★ 캠페인 준비(설정) 컬럼 — 관리자가 모집 전 미리 채워두는 열(주문 데이터가 아님).
+//   "행 점유(채워짐)" 카운트(countFilledForAssignment)에서 제외해야, 이 열들이 채워진 준비행이
+//   '점유됨'으로 오판돼 배정 후보에서 빠지고 주문이 하단(작업범위 밖)에 append되는 사고를 막는다.
+//   (기존 제외: 번호·구매일자·상품명·옵션·인애드명단. 일부 시트가 차수/담당/구매타입/링크/키워드를
+//    추가 준비열로 쓰면서 카운트가 임계값(4)을 넘겨 준비행 전체가 배정에서 제외되던 버그를 해소.)
+//   ※ 주문 데이터 컬럼(주문자·수취인·연락처·주소·은행·계좌·예금주·결제금액·주문번호 등)과
+//     키워드 충돌 없음 → 실주문행은 여전히 4칸↑로 점유 유지(오배정 무영향).
+const PREP_COL_KEYWORDS = ['차수', '담당', '구매타입', '링크', '키워드'];
 const FILLED_THRESHOLD = 4;
 const APPEND_CANDIDATE_COUNT = 20;
 
@@ -104,6 +112,7 @@ function countFilledForAssignment(headers, row) {
     if (INAD_COL_KEYWORDS.some(kw => key.includes(kw))) excluded.add(idx);
     if (key.includes('구매일') || key.includes('상품') || key.includes('product')) excluded.add(idx);
     if (OPTION_COL_KEYWORDS.some(kw => key.includes(kw))) excluded.add(idx);
+    if (PREP_COL_KEYWORDS.some(kw => key.includes(kw))) excluded.add(idx); // ★ 준비열(차수/담당/구매타입/링크/키워드) 제외
   });
   return (row || []).filter((cell, idx) => {
     if (excluded.has(idx)) return false;
