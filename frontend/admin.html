@@ -2065,6 +2065,15 @@ body{ letter-spacing:-.01em; }
               <div><label class="rform-label">종료 전 신규참여 마감(분)</label><input id="rf_close_buffer" type="number" min="0" class="rform-input" value="10"></div>
             </div>
           </details>
+          <!-- 🧩 상품 옵션 (061 3단계) — 옵션별 금액·정원·하루건수. 없으면 비워두면 됨(옵션 없는 단일상품) -->
+          <div id="rf_opt_wrap" style="margin-top:10px;padding-top:8px;border-top:1px dashed var(--border)">
+            <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:6px;flex-wrap:wrap;gap:6px">
+              <div style="font-size:.76rem;font-weight:800">🧩 상품 옵션 <span style="font-weight:600;color:var(--t3);font-size:.7rem">— 옵션별 금액·정원·하루건수 (없으면 비워두세요)</span></div>
+              <button type="button" class="rchan-btn" onclick="addOptRow()" style="font-size:.72rem;white-space:nowrap"><i class="fas fa-plus"></i> 옵션 추가</button>
+            </div>
+            <div id="rf_opt_rows"></div>
+            <div id="rf_opt_summary" style="font-size:.68rem;color:var(--t3);margin-top:4px"></div>
+          </div>
           <div style="margin-top:10px;padding-top:8px;border-top:1px dashed var(--border)">
             <div style="font-size:.76rem;font-weight:800;margin-bottom:6px">📦 작업내용 <span style="font-weight:600;color:var(--t3);font-size:.7rem">— 참여한 리뷰어에게만 공개</span></div>
             <label class="rform-label">상품 · 옵션 · 결제금액</label>

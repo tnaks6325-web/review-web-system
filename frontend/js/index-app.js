@@ -1774,6 +1774,32 @@ function _woCleanGuide(raw) {
 
 // 상품·옵션을 "상품명 - 결제금액" (옵션 있으면 옵션별) 한 줄로 압축
 //  1개 상품·옵션 → 인라인,  2개 이상 → 번호 매겨 줄바꿈
+/** 작업오더 product_options_json → 캠페인 옵션표 행 [{optKey,payAmount,recruitTotal,dailyLimit}].
+ *  옵션 2개 이상일 때만 반환(단일=옵션 없는 상품). 정원·하루건수는 오더에 없어 0(관리자 입력). */
+function _woOptionRows(o) {
+  let arr = null;
+  try { const p = JSON.parse(o.product_options_json || "[]"); if (Array.isArray(p) && p.length) arr = p; } catch (_) {}
+  if (!arr) return [];
+  const rows = [];
+  const multiProduct = arr.length > 1;
+  for (const prod of arr) {
+    const name = String(prod.name || "").trim();
+    const opts = Array.isArray(prod.options) ? prod.options : [];
+    if (opts.length) {
+      for (const op of opts) {
+        const lab = String(op.label || "").trim();
+        const key = ((multiProduct && name ? name + " " : "") + lab).replace(/\|/g, "").trim();
+        if (!key || /^옵션\s*없음$/.test(lab)) continue;
+        rows.push({ optKey: key, payAmount: Number(op.pay) || 0, recruitTotal: 0, dailyLimit: 0 });
+      }
+    } else if (name) {
+      rows.push({ optKey: name.replace(/\|/g, "").trim(), payAmount: Number(prod.base && prod.base.pay) || 0, recruitTotal: 0, dailyLimit: 0 });
+    }
+  }
+  // 옵션이 1개뿐이면 옵션 없는 단일상품 취급(옵션 기능은 2개 이상일 때 opt-in)
+  return rows.length >= 2 ? rows : [];
+}
+
 function _woProductLines(o) {
   const lines = [];
   // 1) 구조화 JSON 우선
@@ -2246,6 +2272,8 @@ async function woCreateCampaign(id) {
     landing_url:    o.inflow_type === "link"
                       ? (((typeof _woGuideUrls === "function" ? _woGuideUrls(o.inflow_guide)[0] : "") || "") || o.product_url || "")
                       : "",
+    // 🧩 상품 옵션 프리필(061): product_options_json → 옵션표(2개 이상일 때만). 정원·하루는 관리자가 입력.
+    options:        (typeof _woOptionRows === "function") ? _woOptionRows(o) : [],
   };
   switchAdminTab("recruit");
   // recruit 탭의 연결 탭 옵션 로드를 보장한 뒤 모달 오픈 (setTimeout race 제거)
