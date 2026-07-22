@@ -34,7 +34,7 @@ assert(fnStart > 0 && fnEnd > fnStart, '정규화 헬퍼 블록을 campaign.html
 const helperSrc = camp.slice(fnStart, fnEnd);
 const H = vm.runInNewContext(
   '(function(){' + helperSrc + ' return {_fmtProduct,_pickReviewOnly,_extractGuideImages,_driveId,_escAttr};})()',
-  {}
+  { API_BASE_URL: 'https://api.example.test' }   // guide-image src는 신뢰 베이스로 재구성됨
 );
 
 // ① 상품·옵션·결제금액
@@ -68,7 +68,9 @@ ok('②-4 리뷰등록 섹션이 없으면 빈 문자열', H._pickReviewOnly('[�
 
 // ③ 유입 첨부 이미지 화이트리스트
 const imgHtml = H._extractGuideImages(combined, '');
-ok('③-1 guide-image 프록시 URL → <img>', /<img src="https:\/\/[^"]*\/api\/order\/guide-image\/1mdb2dR2Bz_4sX-2V251kl3XtdjyT6Q1J" alt="유입가이드 이미지">/.test(imgHtml));
+ok('③-1 guide-image → <img> (src는 신뢰 베이스 API_BASE_URL로 재구성 · 원본 호스트 미신뢰)',
+  /<img src="https:\/\/api\.example\.test\/api\/order\/guide-image\/1mdb2dR2Bz_4sX-2V251kl3XtdjyT6Q1J" alt="유입가이드 이미지">/.test(imgHtml)
+  && !/sublime-magic-production/.test(imgHtml));
 ok('③-2 Drive 파일 URL → thumbnail <img>',
   /drive\.google\.com\/thumbnail\?id=/.test(H._extractGuideImages('https://drive.google.com/file/d/1AbcABCabc0123456789xyz/view', '')));
 ok('③-3 일반(비이미지) URL은 <img> 미생성',
@@ -97,6 +99,9 @@ ok('⑥-3 카카오 입장 버튼(#FEE500) + 지정 라벨', /background:#FEE500
 ok('⑥-4 상품 URL은 https만 링크화(scheme 가드)', /https\?:[\s\S]{0,12}test\(pu\)/.test(idx));
 ok('⑥-5 participation-brief 엔드포인트(행 소유권 게이트 재사용)',
   /router\.get\('\/participation-brief'/.test(reviewEdit) && /_verifyRowOwnership\(phoneList, sheetId, tabName, rowIndex\)/.test(reviewEdit));
+ok('⑥-5b gid는 서버가 tab_configs에서 재도출(클라이언트 gid 미신뢰 = 형제 캠페인 유출 차단)',
+  /SELECT tab_gid FROM tab_configs WHERE sheet_id = \$1 AND tab_name = \$2/.test(reviewEdit)
+  && !/const gid = String\(req\.query\.gid/.test(reviewEdit));
 ok('⑥-6 공고 미연결 탭은 brief:null(카톡 없음 → 프론트 제출 버튼만)', /return res\.json\(\{ ok: true, brief: null \}\)/.test(reviewEdit));
 
 // B: 발행 프리필 정화(신규 스냅샷 클린)

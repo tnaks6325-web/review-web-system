@@ -259,7 +259,8 @@ function _extractGuideImages(raw, existingHtml){
     const u = m[0];
     let src = '', tok = '';
     const pm = u.match(/\/api\/order\/guide-image\/([-\w]{20,})/);
-    if(pm){ src = u; tok = pm[1]; }
+    // 호스트는 신뢰 베이스(API_BASE_URL)로 재구성 — 매칭 URL의 임의 호스트를 그대로 쓰지 않음(Drive 분기와 동일)
+    if(pm){ tok = pm[1]; src = (typeof API_BASE_URL !== 'undefined' ? API_BASE_URL : '') + '/api/order/guide-image/' + tok; }
     else { const id = _driveId(u); if(id){ src = 'https://drive.google.com/thumbnail?id=' + id + '&sz=w1600'; tok = id; } }
     if(!src || !tok) continue;
     if(used[tok] || seen.indexOf(tok) >= 0) continue;   // 이미 뽑았거나 유입 HTML에 같은 파일ID 존재 → 스킵

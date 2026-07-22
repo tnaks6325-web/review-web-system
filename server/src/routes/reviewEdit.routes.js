@@ -203,7 +203,6 @@ router.get('/participation-brief', async (req, res) => {
     const p8 = _p8(req.query.phone8);
     const sheetId = req.query.sheetId;
     const tabName = req.query.tabName;
-    const gid = String(req.query.gid || '');
     const rowIndex = parseInt(req.query.rowIndex, 10);
     if (p8.length !== 8 || !sheetId || !tabName || !Number.isInteger(rowIndex)) {
       return res.status(400).json({ ok: false, error: '잘못된 요청입니다.' });
@@ -214,7 +213,19 @@ router.get('/participation-brief', async (req, res) => {
       return res.status(403).json({ ok: false, error: '본인 참여 내역만 조회할 수 있습니다.' });
     }
 
-    // 이 행(시트/탭)에 연결된 공고 — gid 우선 → 탭명 폴백
+    // ★ gid는 클라이언트를 신뢰하지 않고 소유권 검증된 (sheetId, tabName)로 서버가 재도출.
+    //   클라이언트 gid를 쓰면 같은 시트의 형제 캠페인 gid를 넘겨 그 공고의 chat_url/product_url을
+    //   열람하는 교차 캠페인 유출이 가능하므로(소유권은 tabName으로만 검증됨) tab_configs에서 도출한다.
+    let ownGid = '';
+    try {
+      const { rows: tc } = await pool.query(
+        'SELECT tab_gid FROM tab_configs WHERE sheet_id = $1 AND tab_name = $2 LIMIT 1',
+        [sheetId, tabName]
+      );
+      ownGid = (tc[0] && tc[0].tab_gid) || '';
+    } catch (_) { /* gid 도출 실패 → 탭명 매칭만(fail-soft) */ }
+
+    // 이 행(시트/탭)에 연결된 공고 — 서버도출 gid 우선 → 탭명 폴백
     const { rows: camps } = await pool.query(
       `SELECT id, title, chat_url, landing_url, source_work_order_id, work_detail
          FROM recruit_campaigns
@@ -222,7 +233,7 @@ router.get('/participation-brief', async (req, res) => {
           AND (($2 <> '' AND linked_tab_gid = $2) OR linked_tab_name = $3)
         ORDER BY ($2 <> '' AND linked_tab_gid = $2) DESC, created_at DESC
         LIMIT 1`,
-      [sheetId, gid, tabName]
+      [sheetId, ownGid, tabName]
     );
     if (!camps.length) return res.json({ ok: true, brief: null });   // 공고 미연결 탭(카톡 없음 → 프론트는 제출 버튼만)
     const c = camps[0];

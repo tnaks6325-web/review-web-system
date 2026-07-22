@@ -1861,7 +1861,8 @@ function _woReviewImgHtml(raw, existingHtml) {
   for (const u of urls) {
     let src = "", tok = "";
     const pm = String(u).match(/\/api\/order\/guide-image\/([-\w]{20,})/);
-    if (pm) { src = u; tok = pm[1]; }
+    // 호스트는 신뢰 베이스(API_BASE_URL)로 재구성 — 매칭 URL의 임의 호스트를 그대로 쓰지 않음(Drive 분기와 동일)
+    if (pm) { tok = pm[1]; src = (typeof API_BASE_URL !== "undefined" ? API_BASE_URL : "") + "/api/order/guide-image/" + tok; }
     else { const id = (typeof _driveId === "function") ? _driveId(u) : null; if (id) { src = "https://drive.google.com/thumbnail?id=" + id + "&sz=w1600"; tok = id; } }
     if (!src || !tok) continue;
     // 파일ID 토큰 기준 중복 제거(교차 오리진 프록시 URL 이중노출 방지)
