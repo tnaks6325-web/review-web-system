@@ -84,6 +84,35 @@ async function run() {
   assert(!appendCands.includes(7));         // 인애드 제자리 매칭 제외
   assert(!appendCands.includes(8));         // 기존 데이터행 제외
 
+  // ── 준비열 과다 시트 회귀가드: 사전 컬럼(차수/담당/구매타입/링크/키워드)이 채워진 준비행이
+  //    '점유'로 오판돼 작업범위 밖(하단)에 append되던 버그. 이 열들은 카운트에서 제외되어야
+  //    준비행(연락처·주소 빈칸)이 제자리 배정 후보로 잡힌다. 실주문행(연락처·주소 채움)은 점유 유지. ──
+  {
+    const H = ['번호', '차수', '담당', '구매일자', '구매타입',
+               '상품명', '링크', '키워드', '옵션1', '옵션2', K.inad,
+               '주문자', 'id', K.phone, K.address, K.bank, K.account, K.depositor, K.price, K.orderNum, K.memo];
+    // 준비행(연락처·주소 빈칸, 사전 설정칸만 채움) — 실제 시트의 33~52행에 해당(주문칸 전부 빈칸)
+    const prep = (n, inad) => ['' + n, '1차', '박담당', '6/12', '쿠팡', '상품A',
+                               'http://x', '키워드A', 'A', 'B', inad, '', '', '', '', '', '', '', '', '', ''];
+    // 완료된 실주문행(연락처·주소 채움) — 반드시 점유 유지(후보 아님)
+    const filled = ['1', '1차', '박담당', '6/12', '쿠팡', '상품A', 'http://x', '키워드A',
+                    'A', 'B', '김리뷰', '김리뷰', 'kim1', '010-1111-2222', '서울시',
+                    'KB', '123', '김리뷰', '26900', '20260612001', ''];
+    const dataRows = [
+      { rowIndex: 33, cells: filled },
+      { rowIndex: 34, cells: prep(2, '홍길동') },
+      { rowIndex: 35, cells: prep(3, '이챠수') },
+    ];
+    const cands = buildCandidateRows({
+      headers: H, dataRows, headerRowIndex: 32,
+      orderData: { orderer: '홍길동', selectedOptKey: '' },
+    });
+    assert(cands.includes(34), '준비행34가 제자리 후보여야 함(준비열 제외 후 phone/addr 빈칸)');
+    assert(cands.includes(35), '준비행35도 제자리 후보여야 함');
+    assert(!cands.includes(33), '완료된 실주문행33은 점유 유지(후보 아님)');
+    assert.equal(cands[0], 34, '인애드명(홍길동) 일치 준비행이 최우선 후보');
+  }
+
   const mapped = mapOrderToSheetRow(detected.headers, {
     orderer: 'Yeon',
     recipient: 'Yeon',
