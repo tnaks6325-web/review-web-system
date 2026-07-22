@@ -803,7 +803,24 @@ router.post('/order', async (req, res, next) => {
       }
     }
 
-    const orderData = { orderer, recipient, userId, phone, address, bank, account, depositor, price, dateStr, orderNum, memo, selectedOptKey };
+    // ★ 참여형 옵션 서버권위(061, PRD §05): 홀드에 저장된 option_key를 selectedOptKey로 강제.
+    //   화면 값 조작·낡은 표시로 다른 옵션이 기록되는 것을 차단(행배정·시트기입·dedup 모두 이 값 기준).
+    //   fail-open: 조회 실패/미참여/옵션없는 홀드는 클라이언트 값 유지(라이브 핫패스 무영향).
+    let effectiveOptKey = selectedOptKey;
+    if (b.campaignId && b.campaignApplicationId && b.holdToken) {
+      try {
+        const _ph8 = String(b.holdPhone8 || loginPhone8 || '').replace(/\D/g, '').slice(-8);
+        const { rows: _ar } = await pool.query(
+          `SELECT option_key FROM campaign_applications
+            WHERE id = $1 AND campaign_id = $2 AND phone8 = $3 AND hold_token = $4 AND hold_token <> '' LIMIT 1`,
+          [parseInt(b.campaignApplicationId, 10) || 0, String(b.campaignId), _ph8, String(b.holdToken).trim()]);
+        if (_ar.length && _ar[0].option_key) effectiveOptKey = _ar[0].option_key;
+      } catch (optErr) {
+        logger.warn(`[submit/order] 옵션 서버권위 조회 실패(클라값 유지): ${optErr.message}`);
+      }
+    }
+
+    const orderData = { orderer, recipient, userId, phone, address, bank, account, depositor, price, dateStr, orderNum, memo, selectedOptKey: effectiveOptKey };
     const ledger = await createOrderLedgerEntry({
       sheetId, tabName, gid,
       orderData,
