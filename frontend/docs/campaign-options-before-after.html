@@ -1,0 +1,555 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+  <meta charset="UTF-8"/>
+  <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+  <title>아이에이리뷰 — 상품옵션 변경 전/후 (직원 안내)</title>
+  <style>
+  :root{
+    --paper:#F4F6FC; --card:#FFFFFF; --ink:#151B26; --mut:#5E6A7C; --faint:#8B96A8;
+    --line:#E2E7F0; --accent:#3182F6; --accent-deep:#1B64DA; --accent-soft:#E9F1FE;
+    --ok:#12B886; --ok-soft:#DDF5EC; --warn:#B45309; --warn-soft:#FDF0D9;
+    --err:#DC2626; --err-soft:#FDE8E8;
+    --paid:#3F51B5; --paid-soft:#E4E9FB;
+    --wire:#CBD4E1; --wire-soft:#EEF1F7;
+    --shadow:0 2px 14px rgba(21,40,80,.07);
+  }
+  @media (prefers-color-scheme: dark){
+    :root{
+      --paper:#0E131B; --card:#161D29; --ink:#E8EDF5; --mut:#9AA6B8; --faint:#6E7A8C;
+      --line:#2A3444; --accent:#5B9BF8; --accent-deep:#82B4FA; --accent-soft:#1B2A44;
+      --ok:#3DCF9F; --ok-soft:#123528; --warn:#F0B35C; --warn-soft:#3A2B12;
+      --err:#F87171; --err-soft:#3A1515;
+      --paid:#98A6EE; --paid-soft:#232B4E;
+      --wire:#3A4658; --wire-soft:#1D2634;
+      --shadow:0 2px 14px rgba(0,0,0,.35);
+    }
+  }
+  :root[data-theme="dark"]{
+    --paper:#0E131B; --card:#161D29; --ink:#E8EDF5; --mut:#9AA6B8; --faint:#6E7A8C;
+    --line:#2A3444; --accent:#5B9BF8; --accent-deep:#82B4FA; --accent-soft:#1B2A44;
+    --ok:#3DCF9F; --ok-soft:#123528; --warn:#F0B35C; --warn-soft:#3A2B12;
+    --err:#F87171; --err-soft:#3A1515;
+    --paid:#98A6EE; --paid-soft:#232B4E;
+    --wire:#3A4658; --wire-soft:#1D2634;
+    --shadow:0 2px 14px rgba(0,0,0,.35);
+  }
+  :root[data-theme="light"]{
+    --paper:#F4F6FC; --card:#FFFFFF; --ink:#151B26; --mut:#5E6A7C; --faint:#8B96A8;
+    --line:#E2E7F0; --accent:#3182F6; --accent-deep:#1B64DA; --accent-soft:#E9F1FE;
+    --ok:#12B886; --ok-soft:#DDF5EC; --warn:#B45309; --warn-soft:#FDF0D9;
+    --err:#DC2626; --err-soft:#FDE8E8;
+    --paid:#3F51B5; --paid-soft:#E4E9FB;
+    --wire:#CBD4E1; --wire-soft:#EEF1F7;
+    --shadow:0 2px 14px rgba(21,40,80,.07);
+  }
+  *{box-sizing:border-box;margin:0;padding:0}
+  body{background:var(--paper);color:var(--ink);
+    font-family:"Apple SD Gothic Neo","Pretendard","Noto Sans KR","Malgun Gothic",system-ui,sans-serif;
+    line-height:1.65;-webkit-font-smoothing:antialiased}
+  .wrap{max-width:1060px;margin:0 auto;padding:0 20px 80px}
+
+  .hero{padding:52px 0 26px}
+  .hero .eyebrow{font-size:.78rem;font-weight:700;letter-spacing:.14em;color:var(--accent);text-transform:uppercase}
+  .hero h1{font-size:clamp(1.7rem,4.4vw,2.5rem);font-weight:800;letter-spacing:-.02em;text-wrap:balance;margin:8px 0 10px}
+  .hero p.lead{font-size:1.02rem;color:var(--mut);max-width:64ch}
+  .hero .meta{display:flex;flex-wrap:wrap;gap:8px;margin-top:18px}
+  .chip{display:inline-flex;align-items:center;gap:6px;font-size:.74rem;font-weight:600;color:var(--mut);
+    background:var(--card);border:1px solid var(--line);border-radius:999px;padding:5px 12px}
+  .chip b{color:var(--ink);font-weight:700}
+
+  nav.toc{position:sticky;top:0;z-index:50;background:var(--paper);padding:10px 0;border-bottom:1px solid var(--line);
+    display:flex;gap:6px;overflow-x:auto;-webkit-overflow-scrolling:touch}
+  nav.toc a{flex-shrink:0;font-size:.8rem;font-weight:700;color:var(--mut);text-decoration:none;padding:7px 13px;border-radius:999px;border:1px solid transparent}
+  nav.toc a:hover,nav.toc a:focus-visible{color:var(--accent-deep);background:var(--accent-soft);outline:none}
+
+  section{padding-top:52px}
+  .sec-label{font-size:.74rem;font-weight:700;letter-spacing:.12em;color:var(--accent);margin-bottom:6px}
+  section>h2{font-size:1.4rem;font-weight:800;letter-spacing:-.015em;text-wrap:balance;margin-bottom:8px}
+  section>p.desc{color:var(--mut);max-width:70ch;margin-bottom:18px}
+  .who{display:inline-block;font-size:.66rem;font-weight:800;border-radius:6px;padding:3px 9px;margin-bottom:10px;letter-spacing:.02em}
+  .who.reviewer{background:var(--accent-soft);color:var(--accent-deep)}
+  .who.admin{background:#EDE9FE;color:#6D28D9}
+  @media(prefers-color-scheme:dark){.who.admin{background:#2A2350;color:#C4B5FD}}
+
+  .card{background:var(--card);border:1px solid var(--line);border-radius:14px;box-shadow:var(--shadow)}
+  .plain{padding:18px 20px}
+  .plain ul{list-style:none;display:flex;flex-direction:column;gap:9px}
+  .plain li{padding-left:24px;position:relative;font-size:.92rem}
+  .plain li::before{content:"✓";position:absolute;left:2px;color:var(--ok);font-weight:800}
+
+  .tbl{width:100%;border-collapse:collapse;font-size:.86rem}
+  .tbl th{background:var(--wire-soft);text-align:left;font-weight:800;padding:9px 12px;border:1px solid var(--line);white-space:nowrap}
+  .tbl td{padding:9px 12px;border:1px solid var(--line);vertical-align:top}
+  .tbl-scroll{overflow-x:auto}
+  .tag{display:inline-block;font-size:.6rem;font-weight:800;border-radius:6px;padding:2px 8px;white-space:nowrap}
+  .tag.b{background:var(--wire-soft);color:var(--mut)} .tag.a{background:var(--ok-soft);color:var(--ok)}
+
+  /* ── 비포/애프터 그리드 ── */
+  .ba{display:grid;grid-template-columns:1fr 1fr;gap:18px;align-items:start}
+  @media(max-width:720px){.ba{grid-template-columns:1fr}}
+  .ba-col{border-radius:16px;padding:16px 14px 18px;border:1.5px solid}
+  .ba-col.before{border-color:var(--wire);background:linear-gradient(180deg,var(--wire-soft),transparent 60%)}
+  .ba-col.after{border-color:var(--ok);background:linear-gradient(180deg,var(--ok-soft),transparent 55%)}
+  .ba-head{display:flex;align-items:center;gap:8px;margin-bottom:4px}
+  .ba-badge{font-size:.66rem;font-weight:900;border-radius:7px;padding:3px 10px;letter-spacing:.04em}
+  .ba-badge.before{background:var(--wire);color:#fff}
+  .ba-badge.after{background:var(--ok);color:#fff}
+  .ba-col h4{font-size:.9rem;font-weight:800}
+  .ba-col .cap{font-size:.76rem;color:var(--mut);margin:2px 0 12px;min-height:2.2em}
+  .arrow-row{display:flex;justify-content:center;margin:-6px 0 2px}
+  .arrow-row span{font-size:.72rem;font-weight:800;color:var(--ok);background:var(--ok-soft);border-radius:999px;padding:4px 14px}
+
+  /* ── 폰 목업 ── */
+  .phone{width:100%;max-width:260px;margin:0 auto;border:2px solid var(--wire);border-radius:24px;background:var(--card);padding:9px;box-shadow:var(--shadow)}
+  .screen{border-radius:16px;overflow:hidden;background:var(--paper);border:1px solid var(--line)}
+  .appbar{background:var(--accent);color:#fff;padding:9px 11px;font-size:.74rem;font-weight:800;display:flex;justify-content:space-between;align-items:center}
+  .appbar.gray{background:var(--faint)}
+  .appbar .r{font-size:.58rem;font-weight:600;opacity:.85}
+  .scr-body{padding:9px;display:flex;flex-direction:column;gap:7px}
+  .blk{background:var(--card);border:1px solid var(--line);border-radius:9px;padding:8px 9px}
+  .blk .t{font-size:.62rem;font-weight:800;color:var(--faint);margin-bottom:5px;letter-spacing:.02em}
+  .wl{height:7px;border-radius:4px;background:var(--wire-soft);margin:4px 0}
+  .wl.w80{width:80%}.wl.w60{width:60%}.wl.w40{width:40%}
+  .wbtn{display:block;text-align:center;background:var(--accent);color:#fff;font-size:.72rem;font-weight:800;border-radius:8px;padding:8px;margin-top:3px}
+  .wbtn.ghost{background:var(--wire-soft);color:var(--mut)}
+  .wbtn.ok{background:var(--ok)}
+  .wbtn.dis{background:var(--wire-soft);color:var(--faint)}
+  .wbtn.kakao{background:#FEE500;color:#3B2E00}
+  .field{border:1.4px solid var(--line);border-radius:7px;padding:7px 9px;font-size:.68rem;color:var(--faint);background:var(--card);margin:3px 0}
+  .field.lock{background:var(--wire-soft);display:flex;justify-content:space-between;align-items:center;color:var(--ink);font-weight:700}
+  .bdg{font-size:.56rem;font-weight:800;border-radius:6px;padding:2px 6px;white-space:nowrap;flex-shrink:0}
+  .bdg.paid{background:var(--paid-soft);color:var(--paid)} .bdg.off{background:var(--wire-soft);color:var(--faint)}
+  .bdg.done{background:var(--ok-soft);color:var(--ok)} .bdg.wait{background:var(--warn-soft);color:var(--warn)}
+
+  /* 옵션 행 (폰 목업 안) */
+  .optrow{display:flex;align-items:center;gap:8px;background:var(--card);border:1.4px solid var(--line);border-radius:9px;padding:7px 9px}
+  .optrow+.optrow{margin-top:5px}
+  .optrow.sel{border-color:var(--accent);background:var(--accent-soft)}
+  .optrow.soldout{opacity:.5}
+  .optrow .radio{width:13px;height:13px;border-radius:50%;border:2px solid var(--wire);flex-shrink:0}
+  .optrow.sel .radio{border-color:var(--accent);background:var(--accent)}
+  .optrow .on{flex:1;min-width:0}
+  .optrow .on .nm{font-size:.68rem;font-weight:800}
+  .optrow .on .sub{font-size:.56rem;color:var(--mut);margin-top:1px}
+  .gauge{height:5px;border-radius:3px;background:var(--wire-soft);overflow:hidden;margin-top:4px}
+  .gauge i{display:block;height:100%;border-radius:3px;background:var(--ok)}
+  .gauge i.hot{background:var(--warn)}
+  .optchip{font-size:.56rem;font-weight:800;color:var(--mut);background:var(--wire-soft);border-radius:6px;padding:3px 7px;display:inline-block;margin-top:5px}
+  .lockmini{text-align:center;color:var(--faint);font-size:.6rem;padding:12px 6px}
+  .bsheet{background:var(--card);border:1px solid var(--line);border-radius:12px 12px 8px 8px;padding:9px;box-shadow:0 -4px 12px rgba(21,40,80,.14)}
+  .bsheet .grab{width:30px;height:4px;border-radius:2px;background:var(--wire);margin:0 auto 7px}
+  .bsheet .bt{font-size:.66rem;font-weight:800;margin-bottom:5px}
+  .holdbar{display:flex;align-items:center;gap:7px;background:var(--warn-soft);border:1px solid var(--warn);border-radius:8px;padding:6px 9px}
+  .holdbar .ht{flex:1;font-size:.56rem;font-weight:700;color:var(--warn)}
+  .holdbar .hv{font-size:.72rem;font-weight:900;color:var(--warn);font-variant-numeric:tabular-nums}
+
+  /* ── 데스크톱 목업 (관리자) ── */
+  .desk{border:2px solid var(--wire);border-radius:12px;overflow:hidden;background:var(--card);box-shadow:var(--shadow)}
+  .desk .bar{display:flex;align-items:center;gap:6px;background:var(--wire-soft);padding:7px 11px;border-bottom:1px solid var(--line)}
+  .desk .bar i{width:8px;height:8px;border-radius:50%;background:var(--wire)}
+  .desk .bar .url{flex:1;background:var(--card);border:1px solid var(--line);border-radius:6px;font-size:.58rem;color:var(--faint);padding:3px 9px;font-weight:600}
+  .desk .dbody{padding:12px;display:flex;flex-direction:column;gap:9px}
+  .dlabel{font-size:.68rem;font-weight:800}
+  .dnote{font-size:.6rem;color:var(--mut)}
+  .dtbl{width:100%;border-collapse:collapse;font-size:.6rem}
+  .dtbl th{background:var(--wire-soft);font-weight:800;padding:4px 7px;border:1px solid var(--line);text-align:left;white-space:nowrap}
+  .dtbl td{padding:4px 7px;border:1px solid var(--line);white-space:nowrap}
+  .dta{border:1.3px solid var(--line);border-radius:8px;background:var(--wire-soft);padding:9px 10px;font-size:.62rem;color:var(--mut);min-height:52px}
+  .dcheck{border:1px solid var(--ok);background:var(--ok-soft);border-radius:8px;padding:7px 9px;font-size:.6rem;color:var(--ok);font-weight:600}
+
+  .callout{border-left:4px solid var(--accent);background:var(--accent-soft);border-radius:0 12px 12px 0;padding:13px 16px;font-size:.88rem;margin:14px 0}
+  .callout.ok{border-left-color:var(--ok);background:var(--ok-soft)}
+  .callout b{font-weight:800}
+  .legend{margin-top:12px;display:flex;flex-direction:column;gap:6px}
+  .legend div{display:flex;gap:8px;font-size:.8rem;color:var(--mut);align-items:flex-start}
+  .legend b{color:var(--ink)}
+  .newchip{display:inline-block;font-size:.56rem;font-weight:800;background:var(--ok);color:#fff;border-radius:5px;padding:1px 6px;vertical-align:middle;margin-left:4px}
+  footer{margin-top:64px;padding-top:20px;border-top:1px solid var(--line);font-size:.76rem;color:var(--faint)}
+  </style>
+</head>
+<body>
+<div class="wrap">
+
+  <header class="hero">
+    <div class="eyebrow">직원 안내 · BEFORE / AFTER · 와이어프레임</div>
+    <h1>상품옵션 기능 — 무엇이 바뀌었나</h1>
+    <p class="lead">
+      상품이 하나가 아니라 <b>여러 옵션</b>(예: 힙스 골라담기 / 콰이어트 / 어나더)으로 진행되는 캠페인에서,
+      관리자·리뷰어 화면이 어떻게 달라졌는지 <b>바뀌기 전 → 바뀐 후</b>를 화면 그림으로 비교합니다.
+      개발 용어 없이, 실제 화면 순서대로 봅니다.
+    </p>
+    <div class="meta">
+      <span class="chip">문서 <b>변경 안내 v1.0</b></span>
+      <span class="chip">날짜 <b>2026-07-22</b></span>
+      <span class="chip">적용 <b>참여형(바로참여) 캠페인 전용</b></span>
+      <span class="chip">상태 <b>배포 완료</b></span>
+    </div>
+  </header>
+
+  <nav class="toc">
+    <a href="#sum">한눈에</a>
+    <a href="#s1">① 공고 만들기</a>
+    <a href="#s2">② 공고 카드</a>
+    <a href="#s3">③ 공고 상세</a>
+    <a href="#s4">④ 참여할 때</a>
+    <a href="#s5">⑤ 참여 후</a>
+    <a href="#s6">⑥ 구매양식</a>
+    <a href="#s7">⑦ 관제</a>
+    <a href="#keep">안 바뀐 것</a>
+  </nav>
+
+  <!-- ═══════════ 한눈에 ═══════════ -->
+  <section id="sum">
+    <div class="sec-label">SUMMARY</div>
+    <h2>한눈에 — 바뀐 곳 7군데</h2>
+    <p class="desc">옵션이 <b>정의(관리자) → 노출(리뷰어) → 선택 → 구매·제출 → 관제</b>까지 끊김 없이 이어지도록 7개 화면이 바뀌었습니다. 옵션이 없는 캠페인은 예전과 100% 똑같이 동작합니다.</p>
+    <div class="tbl-scroll card" style="padding:6px">
+    <table class="tbl">
+      <tr><th style="width:16%">화면</th><th style="width:42%">변경 전</th><th style="width:42%">변경 후</th></tr>
+      <tr><td><b>① 공고 만들기</b><br><span class="tag" style="background:#EDE9FE;color:#6D28D9">관리자</span></td>
+        <td>"상품·옵션·결제금액"을 <b>글 한 줄</b>로만 입력</td>
+        <td><b>옵션표</b>로 옵션명·금액·정원·하루건수를 각각 입력 + 게시 전 자동점검</td></tr>
+      <tr><td><b>② 공고 카드</b><br><span class="tag" style="background:#E9F1FE;color:#1B64DA">리뷰어</span></td>
+        <td>옵션 정보 <b>없음</b></td>
+        <td>"🧩 옵션 3종 · 곧 마감" <b>요약칩</b></td></tr>
+      <tr><td><b>③ 공고 상세</b><br><span class="tag" style="background:#E9F1FE;color:#1B64DA">리뷰어</span></td>
+        <td>옵션 안 보임 (참여 후에야 글로 확인)</td>
+        <td>참여 전에 <b>옵션명 + 남은 자리</b> 표시(금액은 참여 후)</td></tr>
+      <tr><td><b>④ 참여할 때</b><br><span class="tag" style="background:#E9F1FE;color:#1B64DA">리뷰어</span></td>
+        <td>바로 참여(옵션 개념 없음)</td>
+        <td><b>옵션 선택창</b>에서 고른 옵션으로 자리 확보</td></tr>
+      <tr><td><b>⑤ 참여 후</b><br><span class="tag" style="background:#E9F1FE;color:#1B64DA">리뷰어</span></td>
+        <td>상품·옵션이 <b>글 한 덩어리</b>로만 표시</td>
+        <td>"내가 참여한 옵션" 카드 + <b>[옵션 변경]</b>(구매 전)</td></tr>
+      <tr><td><b>⑥ 구매양식</b><br><span class="tag" style="background:#E9F1FE;color:#1B64DA">리뷰어</span></td>
+        <td>"본인의 옵션을 선택해주세요" 직접 고르기</td>
+        <td>고른 옵션이 <b>잠금 표시</b>("고정")로 자동 입력</td></tr>
+      <tr><td><b>⑦ 관제</b><br><span class="tag" style="background:#EDE9FE;color:#6D28D9">관리자</span></td>
+        <td>신청자 목록·전체 요약만</td>
+        <td><b>옵션별 현황표</b>(오늘 진행중/제출/누적/정원/상태)</td></tr>
+    </table>
+    </div>
+  </section>
+
+  <!-- ═══════════ ① 공고 만들기 ═══════════ -->
+  <section id="s1">
+    <div class="sec-label">STEP 01</div>
+    <span class="who admin">관리자 · 공고 작성</span>
+    <h2>① 공고 만들기 — 옵션표로 입력</h2>
+    <p class="desc">예전엔 옵션을 글로 적어 리뷰어가 구별하기 어려웠습니다. 이제 옵션마다 금액·정원·하루건수를 표로 입력하고, 게시 전에 합계·중복을 자동으로 점검합니다.</p>
+    <div class="ba">
+      <div class="ba-col before">
+        <div class="ba-head"><span class="ba-badge before">변경 전</span><h4>자유 텍스트 한 줄</h4></div>
+        <div class="cap">옵션·금액이 문장으로만 들어가 리뷰어·시트가 구별하기 어려움</div>
+        <div class="desk">
+          <div class="bar"><i></i><i></i><i></i><span class="url">관리자 — 모집공고 작성</span></div>
+          <div class="dbody">
+            <div class="dlabel">📦 상품 · 옵션 · 결제금액</div>
+            <div class="dta">힙스 골라담기 / 콰이어트 / 어나더 3종 중 택1 · 결제금액 상이 …</div>
+            <div class="dnote">→ 옵션별 인원·금액을 나눠 관리할 방법이 없음</div>
+          </div>
+        </div>
+      </div>
+      <div class="ba-col after">
+        <div class="ba-head"><span class="ba-badge after">변경 후</span><h4>옵션표 + 자동점검 <span class="newchip">NEW</span></h4></div>
+        <div class="cap">옵션명·금액·정원·하루건수를 표로. 오더에서 자동으로 채워지기도 함</div>
+        <div class="desk">
+          <div class="bar"><i></i><i></i><i></i><span class="url">관리자 — 모집공고 작성 (⚡참여형)</span></div>
+          <div class="dbody">
+            <div style="display:flex;justify-content:space-between;align-items:center">
+              <div class="dlabel">🧩 상품 옵션</div><span class="tag a">＋ 옵션 추가</span></div>
+            <table class="dtbl">
+              <tr><th>옵션명</th><th>금액</th><th>정원</th><th>하루</th></tr>
+              <tr><td>힙스 골라담기</td><td>29,900</td><td>20</td><td>2</td></tr>
+              <tr><td>콰이어트</td><td>34,900</td><td>30</td><td>3</td></tr>
+              <tr><td>어나더</td><td>27,500</td><td>20</td><td>2</td></tr>
+            </table>
+            <div class="dcheck">🧮 옵션 3종 · 정원합 70명 · 하루합 7건 · 중복 없음 ✓</div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ═══════════ ② 공고 카드 ═══════════ -->
+  <section id="s2">
+    <div class="sec-label">STEP 02</div>
+    <span class="who reviewer">리뷰어 · 공고 목록</span>
+    <h2>② 공고 카드 — 옵션이 있다는 신호</h2>
+    <p class="desc">목록 카드에 "옵션 몇 종 · 마감 임박" 요약칩이 붙어, 리뷰어가 들어가기 전에 옵션 캠페인임을 알 수 있습니다.</p>
+    <div class="ba">
+      <div class="ba-col before">
+        <div class="ba-head"><span class="ba-badge before">변경 전</span><h4>옵션 표시 없음</h4></div>
+        <div class="cap">카드만 보고는 옵션이 있는지 알 수 없음</div>
+        <div class="phone"><div class="screen">
+          <div class="appbar gray">리뷰 캠페인 <span class="r">목록</span></div>
+          <div class="scr-body">
+            <div class="blk" style="text-align:center;color:var(--faint);font-size:.58rem;padding:14px 8px">상품 썸네일</div>
+            <div class="blk"><b style="font-size:.72rem">슬라이스 치즈 3종</b>
+              <div style="font-size:.56rem;color:var(--mut);margin-top:3px">🕑 14:00~16:00 · 바로참여 · 💰 3,000원</div>
+              <a class="wbtn" style="margin-top:6px">참여하기</a>
+            </div>
+          </div>
+        </div></div>
+      </div>
+      <div class="ba-col after">
+        <div class="ba-head"><span class="ba-badge after">변경 후</span><h4>옵션 요약칩 <span class="newchip">NEW</span></h4></div>
+        <div class="cap">"🧩 옵션 3종 · 곧 마감"으로 한눈에 파악</div>
+        <div class="phone"><div class="screen">
+          <div class="appbar">리뷰 캠페인 <span class="r">목록</span></div>
+          <div class="scr-body">
+            <div class="blk" style="text-align:center;color:var(--faint);font-size:.58rem;padding:14px 8px">상품 썸네일</div>
+            <div class="blk"><b style="font-size:.72rem">슬라이스 치즈 3종</b>
+              <div style="font-size:.56rem;color:var(--mut);margin-top:3px">🕑 14:00~16:00 · 바로참여 · 💰 3,000원</div>
+              <span class="optchip">🧩 옵션 3종 · <b style="color:var(--warn)">곧 마감</b></span>
+              <a class="wbtn" style="margin-top:6px">참여하기</a>
+            </div>
+          </div>
+        </div></div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ═══════════ ③ 공고 상세 ═══════════ -->
+  <section id="s3">
+    <div class="sec-label">STEP 03</div>
+    <span class="who reviewer">리뷰어 · 공고 상세(참여 전)</span>
+    <h2>③ 공고 상세 — 남은 자리 미리 보기</h2>
+    <p class="desc">참여하기 전에 옵션마다 몇 자리 남았는지 보여줍니다. 마감된 옵션은 회색으로 남아 "무슨 옵션이 있었는지"도 알 수 있습니다. 결제금액 등 상세는 지금처럼 참여 후에 공개됩니다.</p>
+    <div class="ba">
+      <div class="ba-col before">
+        <div class="ba-head"><span class="ba-badge before">변경 전</span><h4>작업내용 전부 잠금</h4></div>
+        <div class="cap">옵션 구성·잔여를 알 수 없어 원하는 옵션이 없으면 참여 후 이탈</div>
+        <div class="phone"><div class="screen">
+          <div class="appbar gray">슬라이스 치즈 3종 <span class="r">모집중</span></div>
+          <div class="scr-body">
+            <div class="blk" style="text-align:center;color:var(--faint);font-size:.58rem;padding:14px 8px">상품 썸네일</div>
+            <div class="blk"><div class="t">🔒 작업내용</div>
+              <div class="lockmini">상품·옵션·결제금액은<br>참여 후에 확인할 수 있어요</div></div>
+            <a class="wbtn">참여하기</a>
+          </div>
+        </div></div>
+      </div>
+      <div class="ba-col after">
+        <div class="ba-head"><span class="ba-badge after">변경 후</span><h4>옵션 · 남은 자리 <span class="newchip">NEW</span></h4></div>
+        <div class="cap">옵션명 + 잔여 게이지. 마감 옵션은 회색 "마감" 배지</div>
+        <div class="phone"><div class="screen">
+          <div class="appbar">슬라이스 치즈 3종 <span class="r">모집중</span></div>
+          <div class="scr-body">
+            <div class="blk"><div class="t">🧩 상품 옵션 · 남은 자리</div>
+              <div class="optrow"><div class="on"><div class="nm">힙스 골라담기</div>
+                <div class="gauge"><i class="hot" style="width:85%"></i></div>
+                <div class="sub">3자리 남음 · 오늘 1자리</div></div><span class="bdg wait">임박</span></div>
+              <div class="optrow"><div class="on"><div class="nm">콰이어트</div>
+                <div class="gauge"><i style="width:40%"></i></div>
+                <div class="sub">18자리 남음 · 오늘 3자리</div></div></div>
+              <div class="optrow soldout"><div class="on"><div class="nm">어나더</div>
+                <div class="sub">0자리</div></div><span class="bdg off">마감</span></div>
+            </div>
+            <div class="blk"><div class="t">🔒 작업내용</div><div class="lockmini">금액·유입가이드·구매양식은 참여 후</div></div>
+            <a class="wbtn">참여하기</a>
+          </div>
+        </div></div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ═══════════ ④ 참여할 때 ═══════════ -->
+  <section id="s4">
+    <div class="sec-label">STEP 04</div>
+    <span class="who reviewer">리뷰어 · 참여 순간</span>
+    <h2>④ 참여할 때 — 옵션 선택창</h2>
+    <p class="desc">[참여하기]를 누르면 옵션 선택창이 뜹니다. 여기서 고른 옵션으로 자리(15분 홀드)가 잡히고, 이후 구매양식까지 그 옵션이 따라갑니다. 옵션이 1개뿐이면 창 없이 바로 참여됩니다.</p>
+    <div class="ba">
+      <div class="ba-col before">
+        <div class="ba-head"><span class="ba-badge before">변경 전</span><h4>바로 참여</h4></div>
+        <div class="cap">옵션 개념이 없어 어떤 상품인지 정하지 않고 자리부터 잡음</div>
+        <div class="phone"><div class="screen">
+          <div class="appbar gray">참여하기</div>
+          <div class="scr-body" style="min-height:150px;justify-content:center">
+            <div class="lockmini" style="font-size:.66rem">[참여하기] → 바로 15분 홀드 시작<br><span style="color:var(--faint)">옵션 선택 단계 없음</span></div>
+            <a class="wbtn">참여 확정</a>
+          </div>
+        </div></div>
+      </div>
+      <div class="ba-col after">
+        <div class="ba-head"><span class="ba-badge after">변경 후</span><h4>옵션 선택 바텀시트 <span class="newchip">NEW</span></h4></div>
+        <div class="cap">고른 옵션으로 자리 확보 · 마감 옵션은 선택 불가</div>
+        <div class="phone"><div class="screen">
+          <div class="appbar">참여할 옵션 선택</div>
+          <div class="scr-body" style="background:rgba(40,46,60,.06)">
+            <div style="flex:1;min-height:26px"></div>
+            <div class="bsheet">
+              <div class="grab"></div>
+              <div class="bt">어떤 옵션으로 참여하시겠어요?</div>
+              <div class="optrow sel"><span class="radio"></span><div class="on"><div class="nm">힙스 골라담기</div><div class="sub">3자리 남음 · 오늘 1자리</div></div></div>
+              <div class="optrow"><span class="radio"></span><div class="on"><div class="nm">콰이어트</div><div class="sub">18자리 남음</div></div></div>
+              <div class="optrow soldout"><span class="radio"></span><div class="on"><div class="nm">어나더</div><div class="sub">모집이 끝났어요</div></div><span class="bdg off">마감</span></div>
+              <a class="wbtn" style="margin-top:7px">이 옵션으로 참여</a>
+            </div>
+          </div>
+        </div></div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ═══════════ ⑤ 참여 후 ═══════════ -->
+  <section id="s5">
+    <div class="sec-label">STEP 05</div>
+    <span class="who reviewer">리뷰어 · 참여 후</span>
+    <h2>⑤ 참여 후 — 내 옵션 카드 · 변경</h2>
+    <p class="desc">참여가 확정되면 내가 고른 옵션이 상단에 고정 표시되고, 이때 옵션별 결제금액이 공개됩니다. 품절 등으로 바꿔야 하면 구매 전까지 [옵션 변경]으로 다른 옵션으로 갈아탈 수 있습니다.</p>
+    <div class="ba">
+      <div class="ba-col before">
+        <div class="ba-head"><span class="ba-badge before">변경 전</span><h4>글 한 덩어리</h4></div>
+        <div class="cap">상품·옵션·금액이 문장으로만 표시, 변경 수단 없음</div>
+        <div class="phone"><div class="screen">
+          <div class="appbar gray">슬라이스 치즈 3종 <span class="r">참여중</span></div>
+          <div class="scr-body">
+            <div class="holdbar"><span class="ht">구매양식 제출까지</span><span class="hv">13:42</span></div>
+            <div class="blk"><div class="t">📦 상품·옵션·결제금액</div>
+              <div class="wl w80"></div><div class="wl w60"></div><div class="wl w40"></div></div>
+            <div class="blk"><div class="t">🧾 구매양식</div><div class="wl"></div><div class="wl w80"></div></div>
+          </div>
+        </div></div>
+      </div>
+      <div class="ba-col after">
+        <div class="ba-head"><span class="ba-badge after">변경 후</span><h4>내 옵션 카드 + 변경 <span class="newchip">NEW</span></h4></div>
+        <div class="cap">고른 옵션·금액을 고정 표시, 구매 전 변경 가능</div>
+        <div class="phone"><div class="screen">
+          <div class="appbar">슬라이스 치즈 3종 <span class="r">참여중</span></div>
+          <div class="scr-body">
+            <div class="holdbar"><span class="ht">구매양식 제출까지</span><span class="hv">13:42</span></div>
+            <div class="blk" style="border-color:var(--accent)"><div class="t" style="color:var(--accent-deep)">✅ 내가 참여한 옵션</div>
+              <div style="display:flex;align-items:center;gap:8px">
+                <div style="flex:1"><b style="font-size:.72rem">힙스 골라담기</b>
+                  <div style="font-size:.56rem;color:var(--mut)">결제금액 29,900원</div></div>
+                <span class="wbtn ghost" style="margin:0;padding:5px 9px;font-size:.58rem">옵션 변경</span></div></div>
+            <div class="blk"><div class="t">🧾 구매양식</div><div class="wl"></div><div class="wl w80"></div></div>
+          </div>
+        </div></div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ═══════════ ⑥ 구매양식 ═══════════ -->
+  <section id="s6">
+    <div class="sec-label">STEP 06</div>
+    <span class="who reviewer">리뷰어 · 구매양식 제출</span>
+    <h2>⑥ 구매양식 — 옵션 자동 고정</h2>
+    <p class="desc">예전엔 구매양식 마지막에서 "본인의 옵션을 선택해주세요"로 다시 골라야 해 헷갈렸습니다. 이제 참여 때 고른 옵션이 <b>잠금 표시</b>로 자동 입력되어 실수가 없습니다. (옵션을 바꾸려면 위 참여 화면의 [옵션 변경] 사용)</p>
+    <div class="ba">
+      <div class="ba-col before">
+        <div class="ba-head"><span class="ba-badge before">변경 전</span><h4>직접 다시 선택</h4></div>
+        <div class="cap">노란 피커에서 또 골라야 함 → 참여 옵션과 어긋날 수 있음</div>
+        <div class="phone"><div class="screen">
+          <div class="appbar gray">구매양식 제출</div>
+          <div class="scr-body">
+            <div class="blk" style="border-color:var(--warn);background:var(--warn-soft)">
+              <div class="t" style="color:var(--warn)">본인의 옵션을 선택해주세요</div>
+              <div class="optrow"><div class="on"><div class="nm">힙스 골라담기</div></div></div>
+              <div class="optrow"><div class="on"><div class="nm">콰이어트</div></div></div>
+            </div>
+            <div class="field">주문자 / 수취인 / 연락처 …</div>
+            <a class="wbtn ok">제출하기</a>
+          </div>
+        </div></div>
+      </div>
+      <div class="ba-col after">
+        <div class="ba-head"><span class="ba-badge after">변경 후</span><h4>옵션 잠금 표시 <span class="newchip">NEW</span></h4></div>
+        <div class="cap">참여 옵션이 "고정"으로 자동 입력 · 주문 카드 추가 숨김</div>
+        <div class="phone"><div class="screen">
+          <div class="appbar">구매양식 제출</div>
+          <div class="scr-body">
+            <div class="blk" style="border-color:var(--accent)"><div class="t">🧩 내 옵션 (참여 시 선택)</div>
+              <div class="field lock">힙스 골라담기 <span class="bdg paid">고정</span></div>
+              <div style="font-size:.52rem;color:var(--faint);margin-top:3px">바꾸려면 참여 화면의 [옵션 변경]</div></div>
+            <div class="field">주문자 / 수취인 / 연락처 …</div>
+            <div class="field">결제금액 — 29,900원 기준</div>
+            <a class="wbtn ok">제출하기</a>
+          </div>
+        </div></div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ═══════════ ⑦ 관제 ═══════════ -->
+  <section id="s7">
+    <div class="sec-label">STEP 07</div>
+    <span class="who admin">관리자 · 관제</span>
+    <h2>⑦ 관제 — 옵션별 현황</h2>
+    <p class="desc">관제 패널에 옵션별 집계표가 추가됩니다. 어떤 옵션이 얼마나 진행됐고 몇 자리 남았는지 한눈에 보여, 옵션별 진행 관리가 쉬워집니다.</p>
+    <div class="ba">
+      <div class="ba-col before">
+        <div class="ba-head"><span class="ba-badge before">변경 전</span><h4>전체 요약 · 신청 목록</h4></div>
+        <div class="cap">옵션별로 얼마나 찼는지 알 수 없어 시트를 봐야 함</div>
+        <div class="desk">
+          <div class="bar"><i></i><i></i><i></i><span class="url">관리자 — 캠페인 관제</span></div>
+          <div class="dbody">
+            <div class="dlabel">📡 슬라이스 치즈 3종</div>
+            <div class="dnote">오늘 · 진행중 3 / 제출 29 / 만료 2</div>
+            <table class="dtbl">
+              <tr><th>이름</th><th>상태</th><th>신청</th></tr>
+              <tr><td>양○경</td><td>✓ 제출확정</td><td>14:03</td></tr>
+              <tr><td>박○비</td><td>⏳ 진행중</td><td>14:07</td></tr>
+            </table>
+          </div>
+        </div>
+      </div>
+      <div class="ba-col after">
+        <div class="ba-head"><span class="ba-badge after">변경 후</span><h4>옵션별 현황표 <span class="newchip">NEW</span></h4></div>
+        <div class="cap">옵션마다 오늘 진행중/제출·누적확정·정원·상태</div>
+        <div class="desk">
+          <div class="bar"><i></i><i></i><i></i><span class="url">관리자 — 캠페인 관제</span></div>
+          <div class="dbody">
+            <div class="dlabel" style="color:#6D28D9">🧩 옵션별 현황</div>
+            <table class="dtbl">
+              <tr><th>옵션</th><th>오늘 진행</th><th>오늘 제출</th><th>누적</th><th>정원</th><th>상태</th></tr>
+              <tr><td>힙스 골라담기</td><td>1</td><td>1</td><td>17</td><td>20</td><td><span class="tag" style="background:var(--warn-soft);color:var(--warn)">임박</span></td></tr>
+              <tr><td>콰이어트</td><td>2</td><td>1</td><td>12</td><td>30</td><td><span class="tag a">진행중</span></td></tr>
+              <tr><td>어나더</td><td>0</td><td>0</td><td>20</td><td>20</td><td><span class="tag" style="background:var(--err-soft);color:var(--err)">마감</span></td></tr>
+            </table>
+            <div class="dnote">아래에는 기존처럼 신청자 목록·수동확정도 그대로</div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ═══════════ 안 바뀐 것 ═══════════ -->
+  <section id="keep">
+    <div class="sec-label">SAFE</div>
+    <h2>안 바뀐 것 — 안심 포인트</h2>
+    <p class="desc">이번 변경은 <b>옵션을 등록한 참여형 캠페인에서만</b> 켜지는 추가 기능입니다. 그 외에는 예전과 완전히 동일합니다.</p>
+    <div class="card plain">
+      <ul>
+        <li><b>옵션 없는 단일상품 공고</b> — 옵션 선택창·카드칩이 아예 안 뜨고 예전과 똑같이 참여·제출됩니다.</li>
+        <li><b>기존 카톡 신청형 공고</b> — 전혀 영향 없음(참여형이 아니라 옵션 기능 대상 밖).</li>
+        <li><b>구매양식 시트·행 배정 방식</b> — 그대로. 옵션은 기존 "옵션" 열에 자동 기입됩니다.</li>
+        <li><b>자리 계산·마감·15분 홀드</b> — 검증된 기존 방식을 옵션 단위로 한 겹 더 적용했을 뿐, 새 방식을 만들지 않았습니다.</li>
+        <li><b>참여자가 있는 옵션</b> — 관리자가 목록에서 빼도 삭제되지 않고 "마감"으로만 처리되어 기록이 보존됩니다.</li>
+      </ul>
+    </div>
+    <div class="callout ok">
+      <b>현장 팁.</b> 옵션 캠페인을 만들 땐 <b>모집 시작 전에 옵션표를 먼저 채워두세요.</b>
+      옵션명은 시트의 "옵션" 열 값과 똑같이 적어야 시트에 정확히 기입됩니다(띄어쓰기까지 동일).
+      옵션별 금액이 다르면 옵션표에 각각 입력하면 리뷰어에게 참여 후 그 금액이 보입니다.
+    </div>
+
+    <div class="legend">
+      <div><span>🧩</span><span><b>옵션 요약칩·잔여 게이지</b> — 초록(여유)·주황(임박)·회색(마감)으로 상태를 색으로 구분합니다.</span></div>
+      <div><span>🔒</span><span><b>금액은 참여 후 공개</b> — 공고·선택창에는 옵션명과 남은 자리만, 결제금액은 참여 후 화면에서 보입니다.</span></div>
+      <div><span>🔁</span><span><b>옵션 변경</b> — 구매(제출) 전까지만. 변경하면 구매양식이 자동 새로고침되어 항상 최신 옵션으로 제출됩니다.</span></div>
+    </div>
+  </section>
+
+  <footer>
+    아이에이리뷰 · 상품옵션 변경 전/후 직원 안내 v1.0 · 2026-07-22<br>
+    화면 그림은 이해를 돕기 위한 예시(와이어프레임)이며, 실제 색·문구는 앱 화면과 다를 수 있습니다.
+    설계 상세는 「모집공고 상품옵션 PRD」 문서를 참고하세요.
+  </footer>
+
+</div>
+</body>
+</html>
