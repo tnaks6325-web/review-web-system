@@ -879,7 +879,7 @@ async function refreshUnseen(){
 // 초밀도 최소폭: 짧은 열은 콘텐츠 기준으로 대폭 축소, 긴 열(주소 등)은 자동 레이아웃이 콘텐츠만큼 확장(무잘림).
 // table-layout:fixed에서 이 값은 '실제 열 너비'(auto 시절엔 최소폭). 신원열(참여자/연락처)은 이름+배지·번호가 안 잘리게 여유, 데이터열은 초밀도 유지(초과분 …+툴팁).
 // 구매일자=73("12/31 (월)" 핏)·연락처=120(phone "010-0000-0000" + 좌우 여백, 가운데 정렬)·주소=450(전체표시, 유동 base — 오버플로 시 450 고정) — 요청 반영. 주소는 유동(_isFlexCol).
-const _COLW={'#':35,'참여자':105,'연락처':120,'번호':43,'담당자':56,'구매일자':73,'인애드명단':74,'주문자제출':74,'수취인':62,'id':92,'주소':450,'은행':88,'계좌번호':104,'예금주':60,'결제금액':66,'리뷰제출':92,'입금':48,'주문번호':121,'비고(닉네임)':84};
+const _COLW={'#':35,'참여자':105,'연락처':120,'번호':43,'담당자':56,'구매일자':73,'인애드명단':74,'주문자제출':74,'수취인':62,'id':92,'주소':450,'은행':88,'계좌번호':114,'예금주':60,'결제금액':66,'리뷰제출':92,'입금':48,'주문번호':121,'비고(닉네임)':84};
 // 광고주 그리드 전용 폭(초밀도 시안 반영) — 내부 그리드(_COLW)와 분리. 신원열 없는 10열 맞춤. 구매일자/연락처는 값 핏(내부와 동일 폭).
 //   ID열은 시트명 다양(쿠팡id/네이버아이디)이라 키가 아닌 패턴으로. 주소=450(요청 — 주소 전체표시 우선. 광고주는 자동채움 미적용, _fitGrid가 표폭을 합으로 고정=advsnug → 표가 넓어 우측 열은 가로 스크롤).
 const _ADV_COLW={'#':32,'번호':40,'구매일자':73,'주문번호':110,'수취인':60,'연락처':110,'주소':450,'결제금액':66,'리뷰제출':82,'리뷰제출일':82,'입금':54,'입금일':54};
@@ -894,13 +894,14 @@ function _colW(h){
 //   ★ table-layout:fixed에서 width:auto는 오버플로 시 0으로 붕괴(min-width 무시)라 CSS 유동 금지 → JS 산출로 대체.
 function _isFlexCol(h){ return h==='주소'; }
 // 가운데 정렬 대상 = 날짜형(구매일자 등)·연락처(전화) → 값 길이가 달라도 앞여백=뒷여백(좌우 대칭). (_isPhoneHeader는 아래 정의, 함수선언 호이스팅)
-function _isCtrCol(h){ return /일자|날짜|date/i.test(String(h==null?'':h)) || _isPhoneHeader(h); }
+function _isCtrCol(h){ return /일자|날짜|date/i.test(String(h==null?'':h)) || _isDepositCol(h) || _isPhoneHeader(h); }
 // 시트 일련번호(1899-12-30 기준) → YYYY-MM-DD. 날짜형 헤더 + 순수 숫자일 때만 변환(금액 등 오변환 방지).
 function _serialToDate(n){ const ms=Math.round((n-25569)*86400000); const d=new Date(ms); if(isNaN(d.getTime()))return null; const y=d.getUTCFullYear(); if(y<2000||y>2100)return null; const p=x=>String(x).padStart(2,'0'); return `${y}-${p(d.getUTCMonth()+1)}-${p(d.getUTCDate())}`; }
 // 편집 시작값(정본): 일련번호는 ISO 로, 그 외는 원본 그대로 — 셀 클릭 편집이 표시용 축약값으로 오염되지 않게 분리.
-function _gridEditVal(h, raw){ const v=(raw==null?'':String(raw)).trim(); if(!v)return ''; if(/일자|날짜|date/i.test(h)&&/^\d{4,6}(\.\d+)?$/.test(v)){ const dt=_serialToDate(parseFloat(v)); if(dt)return dt; } return v; }
+function _gridEditVal(h, raw){ const v=(raw==null?'':String(raw)).trim(); if(!v)return ''; if((/일자|날짜|date/i.test(h)||_isDepositCol(h))&&/^\d{4,6}(\.\d+)?$/.test(v)){ const dt=_serialToDate(parseFloat(v)); if(dt)return dt; } return v; }
 // 표시값: 날짜형 헤더(구매일자 등)는 "월/일 (요일)" 로 통일 — ISO(yyyy-mm-dd)·일련번호는 요일 계산, 시트식 "7 / 3 (금)" 은 표기 정규화.
 function _gridVal(h, raw){ const v=_gridEditVal(h, raw); if(!v)return '';
+  if(_isDepositCol(h)) return _fmtMD(v);
   if(/일자|날짜|date/i.test(h)) return _fmtKDate(v);
   if(_isPhoneHeader(h)) return _fmtPhone(v);
   return v; }
@@ -921,6 +922,17 @@ function _fmtKDate(v){
   const md=v.match(/^(\d{1,2})\s*[\/.]\s*(\d{1,2})\s*(?:\(\s*([일월화수목금토])\s*\.?\s*\))?$/);
   if(md) return `${+md[1]}/${+md[2]}`+(md[3]?` (${md[3]})`:'');
   return v;   // 비정형(텍스트 메모 등)은 원본 유지
+}
+// 입금 컬럼: 값을 항상 "월/일"(예 7/22)로 통일 — 입금일자·타임스탬프·일련번호·시트식 표기를 M/D로 정규화(요일 미표기, 폭 48px 핏). '입금액/입금금액'(금액)은 제외.
+function _isDepositCol(h){ const s=String(h==null?'':h); return /입금/.test(s) && !/액|금액/.test(s); }
+function _fmtMD(v){
+  const s=String(v==null?'':v).replace(/\s+\d{1,2}:\d{2}(:\d{2})?\s*$/,'').trim();   // 뒤쪽 시각(HH:MM[:SS]) 제거
+  if(!s) return '';
+  const iso=s.match(/^(\d{4})-(\d{1,2})-(\d{1,2})/);
+  if(iso) return `${+iso[2]}/${+iso[3]}`;
+  const md=s.match(/^(\d{1,2})\s*[\/.]\s*(\d{1,2})/);
+  if(md) return `${+md[1]}/${+md[2]}`;
+  return s;   // 비정형(텍스트·마커 등)은 원본 유지
 }
 
 // 셀 표시값(그리드 렌더·필터·그룹·정렬 공용) — 신원 3열은 그대로, 시트 컬럼은 편집오버레이 반영 + 날짜 표기.
