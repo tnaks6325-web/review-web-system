@@ -33,9 +33,11 @@
   /* ── 작업목록 = 상단 가로바(사이드바 대체). 본문은 1열(+선택적 우측 레일) → 표가 화면 전체폭을 씀 ──
      --tbh = 상단 작업바 실제 높이(tb1 ~49 + tb2 42 + 경계 1). 높이 의존 계산(.wrap/.gridscroll)을 이 한 값에 묶어
      전체화면(작업바 숨김)일 때 body.widemode가 0으로 덮어쓰면 아래 계산들이 함께 따라온다(매직넘버 드리프트 방지). */
-  :root{--tbh:92px}
-  body.widemode{--tbh:0px}
-  .wrap{display:grid;grid-template-columns:1fr 300px;min-height:calc(100vh - 50px - var(--tbh))}
+     --toph = 상단 헤더(.top) 실제 높이. .top은 flex-wrap이라 역할별 버튼 수·화면폭에 따라 한 줄(≈57px)에서
+     두 줄(≈93px+)로 늘어난다 → 상수로 박으면 좁은 화면에서 작업바가 헤더 뒤로 숨는다. 둘 다 _measureChrome()이
+     실측해 덮어쓰고(아래 값은 첫 프레임용 근사치), 전체화면이면 작업바가 display:none이라 측정값이 자연히 0이 된다. */
+  :root{--tbh:92px;--toph:57px}
+  .wrap{display:grid;grid-template-columns:1fr 300px;min-height:calc(100vh - var(--toph) - var(--tbh))}
   .wrap.railhidden{grid-template-columns:1fr}                 /* 우측 레일 숨김 → 1열(메인 전체폭) */
   .wrap.railhidden .rail{display:none}
   .wrap.widemode{grid-template-columns:1fr}                   /* 전체화면(전체폭) 모드 = 우 레일 + 상단 작업바까지 숨김 */
@@ -45,7 +47,7 @@
   .railtgl,.widetgl{font-size:12px}   /* 우측 상단 토글 */
 
   /* 1단: 통합검색 + 업체 세그먼트(맨 앞 ★즐겨찾기) */
-  .taskbar{background:var(--card);border-bottom:1px solid var(--line);position:sticky;top:50px;z-index:4}
+  .taskbar{background:var(--card);border-bottom:1px solid var(--line);position:sticky;top:var(--toph);z-index:4}
   .tb1{display:flex;align-items:center;gap:10px;background:var(--card2);border-bottom:1px solid var(--line);padding:8px 14px;position:relative}
   .wsearch{position:relative;flex:none;width:236px}
   .wsearch input{width:100%;font:inherit;font-size:12.5px;padding:7px 11px 7px 30px;border:1px solid var(--line);border-radius:9px;background:var(--card);color:var(--ink);outline:none;transition:border-color .12s,box-shadow .12s}
@@ -79,12 +81,17 @@
   .wtab{position:relative;display:flex;align-items:center;gap:7px;font-size:12.5px;color:var(--muted);padding:11px 12px 10px;cursor:pointer;white-space:nowrap;border-bottom:2px solid transparent;flex:none;transition:color .12s,background .12s}
   .wtab:hover{color:var(--ink);background:var(--card2)}
   .wtab.on{color:var(--accent-deep);font-weight:700;border-bottom-color:var(--accent)}
-  .wtab .ts{font-size:10px;color:var(--faint);font-weight:400}
+  /* 탭 라벨은 길다(예 "7/3(쿠팡)디아쉬끄_퀵픽싱 헤어틴트 50건" + 시트제목) → 상한 + …축약, 전체값은 title 툴팁.
+     상한이 없으면 탭 4개만으로 화면이 차 나머지가 전부 가로스크롤 뒤로 밀린다. */
+  .wtab .tn{max-width:210px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+  .wtab .ts{font-size:10px;color:var(--faint);font-weight:400;max-width:110px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
   .wtab.on .ts{color:var(--accent)}
   /* 즐겨찾기 별표 — 호버 시 노출, 활성 시 앰버로 항상 표시. 클릭은 selTab 로 전파 안 함 */
   .wtab .tstar{flex:none;font-size:13px;line-height:1;color:var(--faint);opacity:0;cursor:pointer;padding:0 1px;user-select:none;transition:opacity .12s,color .12s,transform .1s}
   .wtab:hover .tstar{opacity:.6} .wtab .tstar:hover{opacity:1;color:var(--warn);transform:scale(1.15)}
   .wtab .tstar.on{opacity:1;color:#f5b301}
+  /* 터치 기기는 hover가 없어 별이 '보이지 않는 탭 영역'이 된다 → 항상 옅게 노출해 오탭을 막는다 */
+  @media(hover:none){.wtab .tstar{opacity:.35}}
   .tb2 .b2empty{color:var(--faint);font-size:12px;display:flex;align-items:center;padding:0 8px}
   .advsug{display:none;position:absolute;top:100%;left:0;right:0;z-index:30;background:var(--card);border:1px solid var(--line);border-radius:8px;margin-top:3px;max-height:220px;overflow-y:auto;box-shadow:0 6px 18px rgba(0,0,0,.12)}
   .advsug.show{display:block}
@@ -550,7 +557,35 @@ function renderShell(){
 function switchView(v){ STATE.view=v; document.querySelectorAll('.navb').forEach(b=>b.classList.toggle('on',b.dataset.v===v));
   const rt=$('#railToggle'); if(rt) rt.style.display=(v==='workdesk')?'':'none';   // 레일은 작업대 뷰에만 존재
   const wt=$('#wideToggle'); if(wt) wt.style.display=(v==='workdesk')?'':'none';   // 전체화면 토글도 작업대 뷰에만
-  if(v==='ownership') renderOwnershipView(); else if(v==='overview') renderOverviewView(); else if(v==='logs') renderLogsView(); else renderWorkdeskView(); }
+  if(v==='ownership') renderOwnershipView(); else if(v==='overview') renderOverviewView(); else if(v==='logs') renderLogsView(); else renderWorkdeskView();
+  if(v!=='workdesk') _measureChrome();   // 작업대를 떠나면 작업바가 사라짐 → --tbh 0으로 회수(다른 뷰 높이 계산 오염 방지)
+}
+
+// ── 헤더/작업바 높이 실측 → CSS 변수(--toph/--tbh) ──
+//   .top은 flex-wrap이라 역할·화면폭에 따라 줄바꿈되고, 작업바 높이도 세그먼트 스크롤바 유무로 달라진다.
+//   상수로 두면 ① 작업바가 헤더 뒤로 숨거나 ② .gridscroll 높이가 어긋난다 → 실제 offsetHeight로 덮어쓴다.
+//   전체화면(작업바 display:none)이면 offsetHeight가 0이라 별도 분기 없이 그대로 0이 된다.
+function _measureChrome(){
+  try{
+    const root=document.documentElement;
+    const top=document.querySelector('.top'), tb=document.getElementById('taskbar');
+    if(top) root.style.setProperty('--toph', (top.offsetHeight||57)+'px');
+    root.style.setProperty('--tbh', ((tb&&tb.offsetHeight)||0)+'px');
+  }catch(_){ }
+}
+let _chromeRO=null;
+function _watchChrome(){
+  _measureChrome();
+  try{
+    if(typeof ResizeObserver!=='function') return;
+    if(_chromeRO) _chromeRO.disconnect();
+    _chromeRO=new ResizeObserver(()=>_measureChrome());
+    const top=document.querySelector('.top'), tb=document.getElementById('taskbar');
+    if(top) _chromeRO.observe(top);
+    if(tb) _chromeRO.observe(tb);
+  }catch(_){ }
+}
+window.addEventListener('resize', _measureChrome);
 
 // ── 우측 사이드바(레일) 숨기기/표시 — 브라우저 로컬 영속(레이아웃 취향, 재접속·탭전환 유지) ──
 function _railHidden(){ try{ return localStorage.getItem('wd_rail_hidden_v1')==='1'; }catch(_){ return false; } }
@@ -575,7 +610,7 @@ function _syncWideToggle(){ const on=_wideMode();
 function _applyWide(on){
   try{ localStorage.setItem('wd_wide_v1', on?'1':'0'); }catch(_){}
   const w=$('#wrap'); if(w) w.classList.toggle('widemode', on);
-  _syncWideToggle(); _fitGrid();   // 패널 숨김=컨테이너 폭 변경 → 주소 유동 재적합
+  _syncWideToggle(); _measureChrome(); _fitGrid();   // 패널 숨김=컨테이너 폭·높이 변경 → 실측 후 주소 유동 재적합
 }
 function toggleWide(){ const on=!_wideMode();
   _applyWide(on);
@@ -612,6 +647,7 @@ function renderWorkdeskView(){
     <div class="main" id="main"><div class="empty">위에서 작업을 선택하세요.</div></div>
     <div class="rail" id="rail"></div></div>`;
   _syncRailToggle(); _syncWideToggle();
+  _watchChrome();   // 헤더·작업바 실측(줄바꿈/스크롤바로 높이가 바뀌면 ResizeObserver가 따라감)
   loadTabs();
 }
 async function loadTabs(){
@@ -648,12 +684,15 @@ function toggleFav(ev,i){ if(ev) ev.stopPropagation(); const t=STATE.tabs[i]; if
 //   인덱스는 STATE.tabs 원본 유지(selTab 계약 불변). 즐겨찾기 탭도 원 업체 그룹에 그대로 남긴다
 //   (사이드바 시절엔 세로 중복이라 제외했지만, 세그먼트는 한 번에 한 그룹만 보이므로 중복 노출이 아니고
 //    "즐겨찾기하면 원래 업체에서 사라진다"는 혼란이 더 큼).
-function _wGroups(){   // → [{key, label, idxs}] · key: 'fav' | 업체명 | '' (미지정)
+// 즐겨찾기 세그먼트 키는 업체명과 절대 겹치지 않는 센티널(업체명에 NUL 문자는 못 들어감).
+//   평문 'fav'로 두면 실제로 'fav'라는 업체가 있을 때 두 칩이 동시에 활성화되고 서로의 목록을 보여준다.
+const W_FAV='\u0000fav';
+function _wGroups(){   // → [{key, label, idxs}] · key: W_FAV | 업체명 | '' (미지정)
   const favIdx=[], groups=new Map();
   STATE.tabs.forEach((t,i)=>{ if(isFav(t)) favIdx.push(i); const k=t.advertiserName||''; if(!groups.has(k)) groups.set(k,[]); groups.get(k).push(i); });
   const gkeys=[...groups.keys()].sort((a,b)=>{ if(!a) return 1; if(!b) return -1; return a.localeCompare(b,'ko'); });
   const out=[];
-  if(favIdx.length) out.push({key:'fav', label:'즐겨찾기', idxs:favIdx});
+  if(favIdx.length) out.push({key:W_FAV, label:'즐겨찾기', idxs:favIdx});
   gkeys.forEach(k=>out.push({key:k||'', label:k||'미지정', idxs:groups.get(k)}));
   return out;
 }
@@ -663,7 +702,7 @@ function _wActiveSeg(gs){
   if(STATE.wSeg!=null && gs.some(g=>g.key===STATE.wSeg)) return STATE.wSeg;
   const cur=STATE.cur;
   if(cur){ const ci=STATE.tabs.findIndex(t=>t.sheetId===cur.sheetId&&t.tabName===cur.tabName);
-    if(ci>=0){ const g=gs.find(g=>g.key!=='fav'&&g.idxs.includes(ci)); if(g) return g.key; } }
+    if(ci>=0){ const g=gs.find(g=>g.key!==W_FAV&&g.idxs.includes(ci)); if(g) return g.key; } }
   return gs.length?gs[0].key:null;
 }
 function _renderTabList(){
@@ -672,9 +711,15 @@ function _renderTabList(){
   const gs=_wGroups();
   if(!STATE.tabs.length){ seghost.innerHTML=''; tabhost.innerHTML=`<span class="b2empty">활성 작업 없음</span>`; return; }
   const seg=_wActiveSeg(gs); STATE.wSeg=seg;
+  // innerHTML 교체는 가로 스크롤 위치를 0으로 되감는다 → 업체가 많으면 방금 고른 칩이 화면 밖으로 사라짐.
+  //   교체 전 위치를 저장했다가 복원하고, "선택이 실제로 바뀐 경우에만" 활성 항목을 시야로 끌어온다
+  //   (매 렌더마다 스크롤하면 사용자가 손으로 밀어둔 위치와 싸운다).
+  const _sx=seghost.scrollLeft, _tx=tabhost.scrollLeft;
+  const _selKey=String(seg)+'␟'+(STATE.cur?(STATE.cur.sheetId+'␟'+STATE.cur.tabName):'');
+  const _selChanged=(STATE._wLastSel!==_selKey); STATE._wLastSel=_selKey;
   // 1단: 세그먼트
   seghost.innerHTML = gs.map(g=>{
-    const un=g.idxs.reduce((n,i)=>n+_wUnseen(i),0), isFavSeg=g.key==='fav';
+    const un=g.idxs.reduce((n,i)=>n+_wUnseen(i),0), isFavSeg=g.key===W_FAV;
     // 키는 data-k(esc 적용)로만 전달 — 업체명에 따옴표·&가 있어도 인라인 onclick 문자열이 깨지지 않음
     return `<div class="seg${isFavSeg?' favseg':''}${g.key===seg?' on':''}" data-k="${esc(g.key)}" onclick="wPickSeg(this.dataset.k)">${isFavSeg?'<span class="fs">★</span>':''}${esc(g.label)}<span class="cnt">${g.idxs.length}</span>${un?`<span class="unbmini">💬${un}</span>`:''}</div>`;
   }).join('');
@@ -683,8 +728,15 @@ function _renderTabList(){
   const cur=STATE.cur;
   tabhost.innerHTML = (g&&g.idxs.length) ? g.idxs.map(i=>{
     const t=STATE.tabs[i], on=cur&&cur.sheetId===t.sheetId&&cur.tabName===t.tabName, f=isFav(t), n=_wUnseen(i);
-    return `<div class="wtab${on?' on':''}" data-i="${i}" onclick="selTab(${i})"><span class="tstar${f?' on':''}" title="${f?'즐겨찾기 해제':'즐겨찾기 추가'}" onclick="toggleFav(event,${i})">${f?'★':'☆'}</span><span>${esc(t.tabName)}</span>${n?`<span class="unb">💬 ${n}</span>`:`<span class="ts">${esc(t.spreadsheetTitle||'')}</span>`}</div>`;
+    // 시트제목(.ts)은 미확인 배지가 있어도 함께 표시 — 동명 탭 구분자가 배지 때문에 사라지면 안 됨
+    return `<div class="wtab${on?' on':''}" data-i="${i}" onclick="selTab(${i})" title="${esc(t.tabName)}${t.spreadsheetTitle?' · '+esc(t.spreadsheetTitle):''}"><span class="tstar${f?' on':''}" title="${f?'즐겨찾기 해제':'즐겨찾기 추가'}" onclick="toggleFav(event,${i})">${f?'★':'☆'}</span><span class="tn">${esc(t.tabName)}</span>${n?`<span class="unb">💬 ${n}</span>`:''}${t.spreadsheetTitle?`<span class="ts">${esc(t.spreadsheetTitle)}</span>`:''}</div>`;
   }).join('') : `<span class="b2empty">이 그룹에 작업이 없습니다.</span>`;
+  // 스크롤 위치 복원 + (선택이 바뀐 경우에만) 활성 항목을 시야로
+  seghost.scrollLeft=_sx; tabhost.scrollLeft=_tx;
+  if(_selChanged){
+    const a=seghost.querySelector('.seg.on'); if(a&&a.scrollIntoView) a.scrollIntoView({inline:'nearest',block:'nearest'});
+    const b=tabhost.querySelector('.wtab.on'); if(b&&b.scrollIntoView) b.scrollIntoView({inline:'nearest',block:'nearest'});
+  }
   // ★ 여기서 refreshUnseen을 부르지 않는다(순수 렌더). 배지는 STATE.unseen 캐시로 그리고, 갱신은
   //   loadTabs(최초)·스레드 열람 후에만 호출 → 탭 전환/즐겨찾기 토글마다 불필요한 조회가 나가지 않고 재귀도 없다.
 }
@@ -697,8 +749,10 @@ function wSearch(q){
   const ql=q.toLowerCase();
   const hits=[]; STATE.tabs.forEach((t,i)=>{ if(`${t.tabName||''} ${t.advertiserName||''} ${t.spreadsheetTitle||''}`.toLowerCase().includes(ql)) hits.push(i); });
   STATE.wRes=hits;
+  // 하이라이트: 세 조각을 각각 esc → <mark>만 리터럴로 삽입(주입 통로 없음).
+  //   길이는 소문자화한 쪽(ql) 기준 — q.length를 쓰면 대소문자 변환이 길이를 바꾸는 문자에서 구간이 어긋난다.
   const hl=txt=>{ const s=String(txt==null?'':txt); const i=s.toLowerCase().indexOf(ql); if(i<0) return esc(s);
-    return esc(s.slice(0,i))+'<mark>'+esc(s.slice(i,i+q.length))+'</mark>'+esc(s.slice(i+q.length)); };
+    return esc(s.slice(0,i))+'<mark>'+esc(s.slice(i,i+ql.length))+'</mark>'+esc(s.slice(i+ql.length)); };
   box.innerHTML = hits.length
     ? `<div class="shd">작업 ${hits.length}건</div>`+hits.map((i,ord)=>{ const t=STATE.tabs[i], n=_wUnseen(i);
         return `<div class="sitem" data-ord="${ord}" onclick="wPickSearch(${i})"><span class="txt"><span class="sn">${isFav(t)?'★ ':''}${hl(t.tabName)}</span><span class="ss">${esc(t.advertiserName||'미지정')} · ${esc(t.spreadsheetTitle||'')}</span></span>${n?`<span class="unb">💬 ${n}</span>`:''}</div>`;
@@ -708,7 +762,7 @@ function wSearch(q){
 }
 function wPickSearch(i){
   const t=STATE.tabs[i]; if(!t) return;
-  STATE.wSeg = isFav(t) && STATE.wSeg==='fav' ? 'fav' : (t.advertiserName||'');   // 즐겨찾기 보던 중이면 그대로, 아니면 그 업체 그룹으로
+  STATE.wSeg = isFav(t) && STATE.wSeg===W_FAV ? W_FAV : (t.advertiserName||'');   // 즐겨찾기 보던 중이면 그대로, 아니면 그 업체 그룹으로 (최종 보정은 selTab)
   const box=$('#sres'); if(box) box.classList.remove('show');
   const q=$('#wq'); if(q) q.value='';
   selTab(i);
@@ -724,7 +778,13 @@ function wSearchKey(e){
 function _wKbPaint(){ document.querySelectorAll('#sres .sitem').forEach(el=>el.classList.toggle('kb',+el.dataset.ord===STATE.wKb));
   const cur=document.querySelector('#sres .sitem.kb'); if(cur) cur.scrollIntoView({block:'nearest'}); }
 document.addEventListener('click', e=>{ if(!e.target.closest('.wsearch')){ const b=$('#sres'); if(b) b.classList.remove('show'); } });
-async function selTab(i){ const t=STATE.tabs[i]; STATE.cur=t;
+async function selTab(i){ const t=STATE.tabs[i]; if(!t) return; STATE.cur=t;
+  // ★ 여는 탭이 현재 세그먼트에 없으면 그 탭의 업체 그룹으로 강제 이동.
+  //   loadTabs가 먼저 _renderTabList로 wSeg를 첫 그룹에 고정하므로, 이 보정이 없으면
+  //   관측·업체관리에서 넘어온 탭(pendingTab/openTabFromOverview/openOwnTab)은 본문만 열리고
+  //   2단엔 엉뚱한 업체 탭이 활성표시 없이 남는다. 즐겨찾기 그룹에 있으면 그대로 둔다(맥락 유지).
+  const _gs=_wGroups();
+  if(!_gs.some(g=>g.key===STATE.wSeg && g.idxs.includes(i))) STATE.wSeg=(t.advertiserName||'');
   // 탭 전환 = 헤더 구성이 달라지므로 그리드 뷰 상태(필터/숨김/그룹/정렬/정산펼침) 초기화
   STATE.gFilters={}; STATE.gHidden=new Set(); STATE.gGroupBy=null; STATE.gCollapsed=new Set(); STATE.gSort=null; STATE.gSelCols=[]; STATE.freezeUpto=null; STATE.settleOpen=false; closeGColMenu(); closeGHidMenu();
   _renderTabList();   // 상단 작업바 활성 표시 갱신(세그먼트가 바뀌었을 수 있어 재렌더)
@@ -1011,7 +1071,7 @@ async function delThread(id){
   const r=await api(`/api/trackb/workdesk/thread/${encodeURIComponent(id)}`,{method:'DELETE',body:JSON.stringify({sheetId:t.sheetId,tabName:t.tabName})});
   if(r&&r.ok){ loadThread(t); } else toast((r&&r.error)||'삭제 실패');
 }
-// 미확인 배지: 현재 작업목록 탭들의 미확인 수를 받아 뱃지 갱신(작업대 사이드바 + 관측/소유엔 미적용).
+// 미확인 배지: 현재 작업목록 탭들의 미확인 수를 받아 뱃지 갱신(상단 작업바 전용 — 관측/소유엔 미적용).
 async function refreshUnseen(){
   const tabs=(STATE.tabs||[]).map(t=>({sheetId:t.sheetId,tabName:t.tabName}));
   if(!tabs.length) return;

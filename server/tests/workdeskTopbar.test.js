@@ -10,12 +10,18 @@ assert.ok(script, 'inline script block not found');
 
 // ── 최소 DOM 스텁 ──────────────────────────────────────────────
 function mkEl(id) {
-  return {
-    id, innerHTML: '', className: '', dataset: {}, value: '',
+  const el = {
+    id, innerHTML: '', className: '', dataset: {}, value: '', scrollLeft: 0, scrolledIntoView: 0,
     classList: { _s: new Set(), add(c){this._s.add(c);}, remove(c){this._s.delete(c);},
                  toggle(c,on){ on ? this._s.add(c) : this._s.delete(c); }, contains(c){return this._s.has(c);} },
-    setAttribute(){}, querySelector(){return null;}, scrollIntoView(){},
+    setAttribute(){}, scrollIntoView(){ el.scrolledIntoView++; },
+    // 활성 항목 자동 스크롤 검증용: innerHTML 안에 해당 클래스가 있으면 스크롤 가능한 엘리먼트를 돌려준다
+    querySelector(sel){
+      const cls = String(sel).replace(/^\./, '').replace(/\./g, ' ');
+      return el.innerHTML.includes('class="' + cls + '"') ? { scrollIntoView(){ el.scrolledIntoView++; } } : null;
+    },
   };
+  return el;
 }
 const els = {};
 const $ = sel => { const id = String(sel).replace(/^#/, ''); return els[id] || null; };
@@ -28,10 +34,16 @@ const document = {
 const localStorage = { _m:{}, getItem(k){return this._m[k]==null?null:this._m[k];}, setItem(k,v){this._m[k]=String(v);} };
 const esc = s => String(s==null?'':s).replace(/[&<>"]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
 
+// 즐겨찾기 세그먼트 센티널은 구현에서 그대로 읽어온다(테스트가 값을 하드코딩하면 구현과 어긋나도 통과함)
+const W_FAV_SRC = (script.match(/const W_FAV='([^']*)';/) || [])[1];
+assert.ok(W_FAV_SRC != null, 'W_FAV 선언을 찾지 못함');
+const W_FAV = W_FAV_SRC.replace(/\\u([0-9a-fA-F]{4})/g, (_, h) => String.fromCharCode(parseInt(h, 16)));
+assert.ok(!/^[\w가-힣]/.test(W_FAV), 'W_FAV가 평범한 문자로 시작하면 업체명과 충돌 가능');
+
 // 검증 대상 함수만 추출(선언 그대로 평가 → 스코프·오타·미정의 참조를 실제로 잡음)
-const WANT = ['_wGroups','_wUnseen','_wActiveSeg','_renderTabList','wPickSeg','wSearch','wPickSearch','_wKbPaint','isFav','_favKey'];
+const WANT = ['_wGroups','_wUnseen','_wActiveSeg','_renderTabList','wPickSeg','wSearch','wPickSearch','_wKbPaint','isFav','_favKey','selTab'];
 const bodies = WANT.map(name => {
-  const re = new RegExp('\\nfunction ' + name.replace(/[$]/g,'\\$') + '\\s*\\(', 'g');
+  const re = new RegExp('\\n(?:async )?function ' + name.replace(/[$]/g,'\\$') + '\\s*\\(', 'g');
   const m = re.exec(script);
   assert.ok(m, 'function not found in workdesk.html: ' + name);
   // 중괄호 균형으로 함수 본문 끝을 찾는다(문자열/템플릿리터럴 내부 중괄호 무시)
@@ -47,19 +59,28 @@ const bodies = WANT.map(name => {
 }).join('\n');
 
 let STATE = { tabs: [], favs: new Set(), _favLoaded: true, unseen: {}, cur: null, wSeg: null, wRes: [], wKb: -1 };
-let selected = [];
-function selTab(i) { selected.push(i); STATE.cur = STATE.tabs[i]; }
+let opened = [];                       // selTab이 실제로 연 탭(본문 로드 요청)
 function refreshUnseen() { /* no-op: 순수 렌더 검증 */ }
 function _favLoad(){ return new Set(); }
+// selTab이 부르는 주변 함수 스텁 — 본문 로드는 관심 밖, 상단바 상태 전이만 본다
+const api = async () => ({ ok: true });
+const renderWorkdesk = wd => { opened.push(STATE.cur && STATE.cur.tabName); };
+const loadParity = () => {};
+const closeGColMenu = () => {}, closeGHidMenu = () => {};
 
 // eslint-disable-next-line no-new-func
-const load = new Function('STATE','$','esc','document','localStorage','selTab','refreshUnseen','_favLoad',
+const load = new Function('STATE','$','esc','document','localStorage','refreshUnseen','_favLoad','W_FAV',
+  'api','renderWorkdesk','loadParity','closeGColMenu','closeGHidMenu',
   bodies + '\n return {' + WANT.join(',') + '};');
-const F = load(STATE, $, esc, document, localStorage, selTab, refreshUnseen, _favLoad);
+const F = load(STATE, $, esc, document, localStorage, refreshUnseen, _favLoad, W_FAV,
+  api, renderWorkdesk, loadParity, closeGColMenu, closeGHidMenu);
+// wPickSearch/selTab 은 서로를 호출하므로 추출본끼리 연결(전역 선언과 동일한 관계 재현)
+const selTab = F.selTab;
 
 // ── 픽스처 ────────────────────────────────────────────────────
 function reset() {
   els.segwrap = mkEl('segwrap'); els.tb2 = mkEl('tb2'); els.sres = mkEl('sres'); els.wq = mkEl('wq');
+  els.main = mkEl('main');   // selTab 이 본문 자리표시자를 쓰므로 필요
   STATE.tabs = [
     { sheetId:'S1', tabName:'탐사수 500ml 100건', tabGid:'1', spreadsheetTitle:'로스터A', advertiserName:'우리회사' },
     { sheetId:'S1', tabName:'탐사수 2L 50건',     tabGid:'2', spreadsheetTitle:'로스터A', advertiserName:'우리회사' },
@@ -67,7 +88,8 @@ function reset() {
     { sheetId:'S3', tabName:'미지정 작업',        tabGid:'4', spreadsheetTitle:'로스터C', advertiserName:'' },
   ];
   STATE.favs = new Set(); STATE.cur = null; STATE.wSeg = null; STATE.unseen = {}; STATE.wRes = []; STATE.wKb = -1;
-  selected = [];
+  STATE._wLastSel = null;
+  opened = [];
 }
 
 let pass = 0;
@@ -85,7 +107,7 @@ t('2. _wGroups: 즐겨찾기는 맨 앞 + 원 업체 그룹에도 그대로 남�
   reset();
   STATE.favs = new Set([F._favKey(STATE.tabs[0])]);
   const gs = F._wGroups();
-  assert.strictEqual(gs[0].key, 'fav');
+  assert.strictEqual(gs[0].key, W_FAV);
   assert.deepStrictEqual(gs[0].idxs, [0]);
   const own = gs.find(g => g.key === '우리회사');
   assert.ok(own.idxs.includes(0), '즐겨찾기 탭이 원 업체 그룹에서 사라지면 안 됨');
@@ -106,7 +128,7 @@ t('4. _wActiveSeg: 현재 열린 탭이 속한 업체 그룹을 따라감(fav �
 
 t('5. _wActiveSeg: 사용자가 고른 세그먼트가 사라지면 유효한 값으로 폴백(빈 화면 방지)', () => {
   reset();
-  STATE.wSeg = 'fav';                       // 즐겨찾기 보던 중
+  STATE.wSeg = W_FAV;                      // 즐겨찾기 보던 중
   const gs = F._wGroups();                  // 즐겨찾기 0개 → fav 그룹 없음
   const seg = F._wActiveSeg(gs);
   assert.ok(gs.some(g => g.key === seg), '존재하지 않는 세그먼트를 반환하면 2단이 영구 빈칸이 됨');
@@ -203,7 +225,7 @@ t('16. wPickSearch: 그 탭의 업체 세그먼트로 이동 + selTab(원본 인
   F.wSearch('물티슈');
   F.wPickSearch(2);
   assert.strictEqual(STATE.wSeg, '리뷰천국');
-  assert.deepStrictEqual(selected, [2]);
+  assert.strictEqual(STATE.cur.tabName, '물티슈 80건');
   assert.strictEqual(els.wq.value, '');
   assert.ok(!els.sres.classList.contains('show'));
 });
@@ -211,16 +233,16 @@ t('16. wPickSearch: 그 탭의 업체 세그먼트로 이동 + selTab(원본 인
 t('17. wPickSearch: 즐겨찾기 세그먼트를 보던 중 즐겨찾기 탭 선택 시 fav 유지', () => {
   reset();
   STATE.favs = new Set([F._favKey(STATE.tabs[0])]);
-  STATE.wSeg = 'fav';
+  STATE.wSeg = W_FAV;
   F.wPickSearch(0);
-  assert.strictEqual(STATE.wSeg, 'fav', '보던 즐겨찾기 그룹이 튕기면 맥락 상실');
-  assert.deepStrictEqual(selected, [0]);
+  assert.strictEqual(STATE.wSeg, W_FAV, '보던 즐겨찾기 그룹이 튕기면 맥락 상실');
+  assert.strictEqual(STATE.cur.tabName, '탐사수 500ml 100건');
 });
 
 t('18. wPickSearch: 잘못된 인덱스는 무시(크래시·오선택 없음)', () => {
   reset();
   F.wPickSearch(999);
-  assert.deepStrictEqual(selected, []);
+  assert.strictEqual(STATE.cur, null);
 });
 
 t('19. wPickSeg: 세그먼트 전환이 STATE.wSeg에 반영되고 2단이 그 그룹으로 다시 그려짐', () => {
@@ -229,6 +251,96 @@ t('19. wPickSeg: 세그먼트 전환이 STATE.wSeg에 반영되고 2단이 그 �
   assert.strictEqual(STATE.wSeg, '리뷰천국');
   const idxs = [...els.tb2.innerHTML.matchAll(/data-i="(\d+)"/g)].map(m => +m[1]);
   assert.deepStrictEqual(idxs, [2]);
+});
+
+// ── 6) 코드리뷰 지적 반영분 회귀가드 ────────────────────────────
+t('20. selTab: 다른 세그먼트의 탭을 열면 활성 세그먼트가 그 업체로 따라온다', () => {
+  reset();
+  // 관측/업체관리에서 넘어온 상황 재현: 목록 렌더가 먼저 wSeg 를 첫 그룹(리뷰천국)에 고정
+  F._renderTabList();
+  assert.strictEqual(STATE.wSeg, '리뷰천국');
+  selTab(0);                                   // '우리회사' 소속 탭을 연다
+  assert.strictEqual(STATE.wSeg, '우리회사', '세그먼트가 안 따라오면 2단에 활성표시가 사라진다');
+  assert.ok(/class="wtab on"/.test(els.tb2.innerHTML), '연 탭이 2단에서 활성으로 보여야 함');
+  const idxs = [...els.tb2.innerHTML.matchAll(/data-i="(\d+)"/g)].map(m => +m[1]);
+  assert.ok(idxs.includes(0), '연 탭이 2단 목록에 없음');
+});
+
+t('21. selTab: 즐겨찾기 그룹에 있는 탭이면 즐겨찾기 세그먼트를 유지(맥락 보존)', () => {
+  reset();
+  STATE.favs = new Set([F._favKey(STATE.tabs[0])]);
+  STATE.wSeg = W_FAV;
+  selTab(0);
+  assert.strictEqual(STATE.wSeg, W_FAV, '즐겨찾기로 보던 탭인데 업체 그룹으로 튕기면 안 됨');
+});
+
+t('22. selTab: 잘못된 인덱스는 조용히 무시(크래시·상태오염 없음)', () => {
+  reset();
+  selTab(999);
+  assert.strictEqual(STATE.cur, null);
+});
+
+t('23. 가로 스크롤 위치가 재렌더로 0으로 되감기지 않는다', () => {
+  reset();
+  STATE.wSeg = '우리회사'; STATE.cur = STATE.tabs[0];
+  F._renderTabList();
+  els.segwrap.scrollLeft = 420; els.tb2.scrollLeft = 260;   // 사용자가 오른쪽으로 밀어둔 상태
+  F._renderTabList();                                        // 배지 도착 등으로 재렌더
+  assert.strictEqual(els.segwrap.scrollLeft, 420, '세그먼트 줄이 맨 왼쪽으로 튕김');
+  assert.strictEqual(els.tb2.scrollLeft, 260, '탭 줄이 맨 왼쪽으로 튕김');
+});
+
+t('24. 선택이 바뀐 경우에만 활성 항목을 시야로 스크롤(사용자 스크롤과 안 싸움)', () => {
+  reset();
+  STATE.wSeg = '우리회사'; STATE.cur = STATE.tabs[0];
+  F._renderTabList();                       // 최초 = 선택 변경으로 간주
+  const first = els.tb2.scrolledIntoView;
+  assert.ok(first > 0, '활성 탭을 시야로 끌어와야 함');
+  F._renderTabList();                       // 같은 선택으로 재렌더
+  assert.strictEqual(els.tb2.scrolledIntoView, first, '선택이 그대로면 스크롤을 건드리지 않아야 함');
+  STATE.cur = STATE.tabs[1];
+  F._renderTabList();                       // 선택 변경
+  assert.ok(els.tb2.scrolledIntoView > first, '선택이 바뀌면 다시 시야로');
+});
+
+t('25. 즐겨찾기 센티널이 "fav"라는 이름의 업체와 충돌하지 않는다', () => {
+  reset();
+  STATE.tabs = [
+    { sheetId:'A', tabName:'가', tabGid:'1', spreadsheetTitle:'s', advertiserName:'fav' },
+    { sheetId:'B', tabName:'나', tabGid:'2', spreadsheetTitle:'s', advertiserName:'다른업체' },
+  ];
+  STATE.favs = new Set([F._favKey(STATE.tabs[1])]);   // '다른업체' 탭을 즐겨찾기
+  const gs = F._wGroups();
+  assert.strictEqual(new Set(gs.map(g => g.key)).size, gs.length, '그룹 키가 중복되면 칩 두 개가 동시에 활성화됨');
+  STATE.wSeg = W_FAV;
+  F._renderTabList();
+  assert.strictEqual((els.segwrap.innerHTML.match(/class="seg[^"]*\bon\b[^"]*"/g) || []).length, 1,
+    '활성 칩은 항상 하나여야 함');
+  const idxs = [...els.tb2.innerHTML.matchAll(/data-i="(\d+)"/g)].map(m => +m[1]);
+  assert.deepStrictEqual(idxs, [1], "즐겨찾기 세그먼트가 'fav' 업체 목록을 보여주면 안 됨");
+});
+
+t('26. 미확인 배지가 있어도 시트제목이 사라지지 않는다(동명 탭 구분자 보존)', () => {
+  reset();
+  STATE.unseen = { 'S1\t탐사수 500ml 100건': 3 };
+  STATE.wSeg = '우리회사';
+  F._renderTabList();
+  assert.ok(/💬 3/.test(els.tb2.innerHTML), '배지 누락');
+  assert.ok(/class="ts">로스터A</.test(els.tb2.innerHTML), '배지가 시트제목을 대체하면 동명 탭을 구분할 수 없음');
+});
+
+t('27. 탭 라벨 전체값이 title 툴팁으로 보존된다(축약돼도 확인 가능)', () => {
+  reset();
+  STATE.wSeg = '우리회사';
+  F._renderTabList();
+  assert.ok(/title="탐사수 500ml 100건 · 로스터A"/.test(els.tb2.innerHTML), 'title 툴팁 누락');
+});
+
+t('28. 검색 하이라이트 구간 길이는 소문자화 기준(ql)이라 대소문자 혼용에서 안 밀린다', () => {
+  reset();
+  STATE.tabs = [{ sheetId:'X', tabName:'ABC물티슈DEF', tabGid:'1', spreadsheetTitle:'s', advertiserName:'a' }];
+  F.wSearch('abc');
+  assert.ok(/<mark>ABC<\/mark>/.test(els.sres.innerHTML), '매칭 구간이 어긋남: ' + els.sres.innerHTML);
 });
 
 console.log('\n' + pass + ' runtime checks passed');
