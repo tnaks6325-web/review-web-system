@@ -59,7 +59,7 @@ async function maybePersistClosed(q, campaignId) {
  * 반환: 'confirmed' | 'late' | 'tab_mismatch' | 'not_found' | 'invalid_params'
  *   — 어떤 반환값이든 주문 저장은 막지 않는다(호출측이 SAVEPOINT로 예외도 격리).
  */
-async function confirmHoldInTx(client, { applicationId, campaignId, phone8, holdToken, orderSubmissionId, sheetId, gid, tabName }) {
+async function confirmHoldInTx(client, { applicationId, campaignId, phone8, holdToken, orderSubmissionId, sheetId, gid, tabName, expectedOptKey }) {
   const appId = parseInt(applicationId, 10);
   if (!appId || !campaignId || !holdToken || !phone8) return 'invalid_params';
 
@@ -89,10 +89,18 @@ async function confirmHoldInTx(client, { applicationId, campaignId, phone8, hold
         AND hold_token = $5 AND hold_token IS NOT NULL AND hold_token <> ''
         AND status = 'applied'
         AND expires_at > NOW() - make_interval(secs => $6)
-      RETURNING id`,
+      RETURNING id, option_key`,
     [appId, orderSubmissionId, campaignId, phone8, holdToken, HOLD_GRACE_SEC]
   );
   if (conf.rows.length) {
+    // ★ 옵션 드리프트 관측(063 · 옵션권위 TOCTOU 백스톱): 시트기입 옵션(제출 시점 서버권위 스냅샷)과 확정 시점
+    //   홀드 옵션이 다르면 경고만(주문·확정 비차단 — 시트=옛옵션·DB=새옵션을 관제가 대조할 신호).
+    //   1차 방어는 UI 단일 iframe 재로드(옵션변경·명의전환 공통), 이것은 백스톱.
+    //   옵션 없는 홀드(option_key NULL)는 비교 무의미(시트 옵션피커 클라값과 상시 상이) — 오탐 방지 위해 제외.
+    const _dbOpt = conf.rows[0].option_key || '';
+    if (_dbOpt && expectedOptKey !== undefined && expectedOptKey !== null && String(expectedOptKey || '') !== _dbOpt) {
+      logger.warn(`[campaignHold] 옵션 드리프트 감지 app=${appId} 시트기입=${expectedOptKey || '∅'} 홀드=${_dbOpt} — 관제 대조 필요`);
+    }
     await maybePersistClosed(client, campaignId);
     return 'confirmed';
   }

@@ -29,7 +29,7 @@ ok('apply: 전부 마감 시 option_unavailable(NULL 우회 금지)', /reason: '
 ok('apply: 미선택 option_required / 잘못된 옵션 option_invalid', /reason: 'option_required'/.test(routes) && /reason: 'option_invalid'/.test(routes));
 ok('apply: 소진 사유코드 option_soldout/option_today_done', /option_soldout/.test(routes) && /option_today_done/.test(routes));
 ok('apply: 옵션게이트는 캠페인 행 FOR UPDATE 안에서 카운트 재집계', /FOR UPDATE', \[id\]\)[\s\S]*?fetchOptionCounts\(client, id, now\)/.test(routes));
-ok('apply INSERT에 option_key 포함($7)', /VALUES \(\$1,\$2,\$3,\$4,'applied',\$5,\$6,\$7\)/.test(routes) && /chosenOpt \? chosenOpt\.opt_key : null/.test(routes));
+ok('apply INSERT에 option_key 포함($8, 063 owner_phone8 포함)', /VALUES \(\$1,\$2,\$3,\$4,\$5,'applied',\$6,\$7,\$8\)/.test(routes) && /chosenOpt \? chosenOpt\.opt_key : null/.test(routes));
 
 // ── change-option ──
 ok('change-option: 캠페인 행 FOR UPDATE 직렬화', /change-option[\s\S]*?SELECT \* FROM recruit_campaigns WHERE id = \$1 FOR UPDATE/.test(routes));
@@ -39,7 +39,7 @@ ok('change-option: 제출완료/만료면 변경불가(not_changeable)', /reason
 // ── submit 서버권위 override ──
 ok('submit: 홀드 option_key로 selectedOptKey override', /effectiveOptKey[\s\S]*?SELECT option_key FROM campaign_applications/.test(submit));
 ok('submit: fail-open(조회실패 클라값 유지)', /옵션 서버권위 조회 실패\(클라값 유지\)/.test(submit));
-ok('submit: override는 campaignHold 문맥(campaignId·app·holdToken) 있을 때만', /if \(b\.campaignId && b\.campaignApplicationId && b\.holdToken\) \{[\s\S]*?effectiveOptKey = _ar\[0\]\.option_key/.test(submit));
+ok('submit: override는 홀드 문맥(_campaignHoldCtx) 있을 때만', /const holdCtx = _campaignHoldCtx\(b, loginPhone8\)/.test(submit) && /if \(holdCtx\) \{[\s\S]*?effectiveOptKey = _ar\[0\]\.option_key/.test(submit));
 
 // ── _saveCampaignOptions TOCTOU 봉합 ──
 ok('saveOptions: 자체 트랜잭션 + 캠페인 행 FOR UPDATE(상호배제)', /_saveCampaignOptions[\s\S]*?BEGIN'\);[\s\S]*?SELECT id FROM recruit_campaigns WHERE id=\$1 FOR UPDATE/.test(routes));

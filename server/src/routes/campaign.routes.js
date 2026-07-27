@@ -79,7 +79,9 @@ function _normalizeOptionsInput(arr) {
       recruitTotal: _optNum(obj.recruitTotal ?? obj.recruit_total),
       dailyLimit: _optNum(obj.dailyLimit ?? obj.daily_limit),
       sortOrder: out.length,
-      status: (obj.status === 'closed') ? 'closed' : 'active',
+      // ★ 063 심층방어(레드 #6): 'closed'|'active'(명시)|null(미지정=기존 상태 유지) 3상태 —
+      //   status를 안 싣는 호출자가 closed 옵션을 조용히 재오픈하지 못하게(자사 UI는 항상 명시 전송이라 동작 불변)
+      status: (obj.status === 'closed') ? 'closed' : (obj.status === 'active' ? 'active' : null),
     });
   }
   return out;
@@ -101,11 +103,11 @@ async function _saveCampaignOptions(campaignId, options) {
     for (const o of options) {
       await client.query(
         `INSERT INTO campaign_options (campaign_id, opt_key, pay_amount, recruit_total, daily_limit, sort_order, status, updated_at)
-         VALUES ($1,$2,$3,$4,$5,$6,$7,NOW())
+         VALUES ($1,$2,$3,$4,$5,$6,COALESCE($7,'active'),NOW())
          ON CONFLICT (campaign_id, opt_key) DO UPDATE SET
            pay_amount=EXCLUDED.pay_amount, recruit_total=EXCLUDED.recruit_total,
            daily_limit=EXCLUDED.daily_limit, sort_order=EXCLUDED.sort_order,
-           status=EXCLUDED.status, updated_at=NOW()`,
+           status=COALESCE($7, campaign_options.status), updated_at=NOW()`,
         [campaignId, o.optKey, o.payAmount, o.recruitTotal, o.dailyLimit, o.sortOrder, o.status]);
     }
     const { rows: existing } = await client.query('SELECT opt_key FROM campaign_options WHERE campaign_id=$1', [campaignId]);
@@ -213,6 +215,7 @@ const PUBLIC_FIELDS_PARTICIPATION = [
   'delivery_type', 'review_fee', 'badges', 'status', 'sort_order',
   'thumbnail_url', 'created_at',
   'hold_ttl_min', 'close_buffer_min', // 민감정보 아님 — 프론트 안내문("N분 안에 제출")의 정확성용
+  'multi_account_mode', 'sub_hold_ttl_min', // ★ 063: 카드 "타계정 가능" 배지(§09-4)+타계정 10분 안내. multi_daily_limit는 비공개(409 사유로만 전달)
 ];
 
 function _pick(row, fields) {
@@ -445,7 +448,8 @@ router.get('/list', async (req, res, next) => {
                status, sort_order, max_slots, current_slots, deadline,
                description, linked_sheet_id, linked_tab_name, linked_tab_gid, created_at,
                participation_mode, thumbnail_url, daily_limit, recruit_total,
-               window_start, window_end, close_buffer_min, hold_ttl_min, start_date
+               window_start, window_end, close_buffer_min, hold_ttl_min, start_date,
+               multi_account_mode, sub_hold_ttl_min
         FROM recruit_campaigns
         WHERE status IN ('active', 'closed')
         ORDER BY
@@ -715,15 +719,24 @@ router.post('/:id/change-option', applyLimiter, async (req, res, next) => {
 });
 
 // 참여형(홀드) 신청 — 원자 검사+홀드 생성 (레드-블루-심판 최종 구조)
-//   잠금 계층(고정): ① recruit_campaigns 행 FOR UPDATE → ② phone8 advisory(xact) → ③ INSERT.
+//   잠금 계층(고정): ① recruit_campaigns 행 FOR UPDATE → ② owner advisory(xact) → ③ 명의 phone8 advisory(xact) → ④ INSERT.
 //   주문확정(confirmHoldInTx)·수동확정도 ①을 먼저 잡으므로 write-skew(레드 #3)와 교착이 동시에 제거된다.
+//   클래스 순서(캠페인 행 < owner < 명의)가 전역 고정 + tx당 클래스별 1락 = 순환 대기 불가.
+// ★ 타계정 추가참여(063, PRD §09): subName/subPhone 존재 = 타계정 명의 참여. 홀드는 계속 "명의 phone8"로
+//   키잉(uq_campaign_apps_active_hold 무변경 = §02 명의당 1건), 소유자 귀속은 owner_phone8 신설 컬럼.
 async function _applyParticipation(req, res, next, campPre) {
   const id = campPre.id;
   const name = String(req.body.name || '').trim().slice(0, 100);
   const rawPhone = String(req.body.phone || '').trim().slice(0, 40);
-  const p8 = rawPhone.replace(/\D/g, '').slice(-8);
+  const p8 = rawPhone.replace(/\D/g, '').slice(-8);          // = 로그인 소유자 p8 (기존 의미 유지)
   if (!name) return res.status(400).json({ ok: false, error: '이름을 입력해주세요.' });
   if (p8.length !== 8) return res.status(400).json({ ok: false, error: '연락처를 정확히 입력해주세요.' });
+
+  // ★ 타계정 참여 요청 신호(063): 서버가 소유자의 sub_accounts로 명의를 재검증(임의 명의 위조 차단)
+  const subName = String(req.body.subName || '').trim().slice(0, 100);
+  const subPhoneRaw = String(req.body.subPhone || '').trim().slice(0, 40);
+  const isSubApply = !!(subName || subPhoneRaw);
+  const subP8 = subPhoneRaw.replace(/\D/g, '').slice(-8);
 
   const client = await pool.connect();
   try {
@@ -734,8 +747,30 @@ async function _applyParticipation(req, res, next, campPre) {
     const camp = cRows[0];
     const now = new Date();
 
-    // ② phone8 advisory(xact) — 교차 캠페인 홀드 상한의 동시성(항상 캠페인 락 뒤 = 교착 불가)
-    await client.query(`SELECT pg_advisory_xact_lock(hashtext('camp_hold_phone:' || $1::text))`, [p8]);
+    // ★ 타계정 게이트 1(063): 공고 토글(§09-1 기본 불가) + 명의 형식 + 같은번호 배제(phone8=시스템 신원키 보호)
+    if (isSubApply) {
+      if (camp.multi_account_mode !== true) {
+        await client.query('ROLLBACK');
+        return res.status(403).json({ ok: false, reason: 'multi_disabled', error: '이 공고는 타계정 참여를 지원하지 않아요.' });
+      }
+      if (subP8.length !== 8 || !subName) {
+        await client.query('ROLLBACK');
+        return res.status(400).json({ ok: false, reason: 'sub_invalid', error: '타계정 이름과 전화번호를 확인해주세요.' });
+      }
+      if (subP8 === p8) {
+        await client.query('ROLLBACK');
+        return res.status(409).json({ ok: false, reason: 'sub_shares_owner_phone', error: '본계정과 같은 번호의 타계정은 별도 참여할 수 없어요.' });
+      }
+    }
+
+    // 명의 신원(홀드 키) = 타계정이면 서브 p8, 아니면 본인 p8 — 이후 모든 명의-키 게이트가 이 값 사용
+    const holdP8 = isSubApply ? subP8 : p8;
+
+    // ② owner advisory(xact) — 소유자 합산 상한(§09-2 동시 10건)의 write-skew 차단.
+    //   교차 캠페인 동시 apply도 소유자 단위로 직렬화(캠페인 행 락은 캠페인별이라 이 락이 필요).
+    await client.query(`SELECT pg_advisory_xact_lock(hashtext('camp_hold_owner:' || $1::text))`, [p8]);
+    // ③ 명의 phone8 advisory(xact) — 교차 캠페인 명의 홀드 상한의 동시성(항상 owner 락 뒤 = 교착 불가)
+    await client.query(`SELECT pg_advisory_xact_lock(hashtext('camp_hold_phone:' || $1::text))`, [holdP8]);
 
     // 잠금 후 신선 재집계 → 상태 게이트(open만 통과; READ COMMITTED 문장별 새 스냅샷이 선행 커밋 반영)
     const countsMap = await fetchCampaignCounts(client, [id], now);
@@ -781,9 +816,9 @@ async function _applyParticipation(req, res, next, campPre) {
       }
     }
 
-    // 등록 리뷰어만(레드 #12 — 스크래핑 비용 상승, 완전 차단은 아님)
+    // 등록 리뷰어만(레드 #12) — 조회 대상은 항상 "소유자"(로그인 p8). ★ 063: sub_accounts 동봉(명의 검증용)
     const reg = await client.query(
-      `SELECT name, phone, phone8, address, bank_name, bank_account, account_holder
+      `SELECT name, phone, phone8, address, bank_name, bank_account, account_holder, sub_accounts
          FROM reviewers WHERE phone8 = $1 LIMIT 1`, [p8]);
     if (!reg.rows.length) {
       await client.query('ROLLBACK');
@@ -793,6 +828,7 @@ async function _applyParticipation(req, res, next, campPre) {
     // ★ M2 변경①: 내정보 완비 게이트를 "참여 시점"으로 전진 — 구매양식 신원게이트(#272)가 제출 순간
     //   차단하면 리뷰어는 이미 결제 후 15분 홀드 안에서 막힌다(돈 쓴 뒤 좌절 + 당일 재참여 불가).
     //   여기서 미리 막으면 홀드 미생성 = 자리 미점유 = 당일 참여권 무손실. 제출 단계 검사는 안전망으로 유지.
+    //   ★ 063: 판정 기준은 항상 "소유자"(타계정 프로필은 제출측 SUB 자동보강이 담당, §02 신원확인 재사용)
     {
       const { profileMissing } = require('../services/identity.service');
       const missing = profileMissing(reg.rows[0]);
@@ -805,32 +841,46 @@ async function _applyParticipation(req, res, next, campPre) {
       }
     }
 
+    // ★ 타계정 게이트 2(063): 명의가 소유자의 sub_accounts에 정확일치(이름+phone8)해야 함 — 서버 검증
+    let subEntry = null;
+    if (isSubApply) {
+      const { findSubAccount } = require('../services/identity.service');
+      const hit = findSubAccount(reg.rows[0].sub_accounts, subName, subP8);
+      if (!hit) {
+        await client.query('ROLLBACK');
+        return res.status(403).json({ ok: false, reason: 'sub_not_registered',
+          error: '등록된 타계정이 아니에요. 내정보 > 타계정에서 먼저 등록해주세요.' });
+      }
+      subEntry = hit.sub;
+    }
+
     const dayStartIso = kstDayStartUtc(now).toISOString();
 
-    // 제출확정 이력 선검사(영구 1인 1참여 — uq_campaign_apps_active_hold 의미론): 23505 대신 명확한 사유(심판 J8)
+    // 제출확정 이력 선검사(영구 1명의 1참여 — uq_campaign_apps_active_hold 의미론): 23505 대신 명확한 사유(심판 J8)
     const done = await client.query(
       `SELECT 1 FROM campaign_applications WHERE campaign_id = $1 AND phone8 = $2 AND status = 'submitted' LIMIT 1`,
-      [id, p8]);
+      [id, holdP8]);
     if (done.rows.length) {
       await client.query('ROLLBACK');
       return res.status(409).json({ ok: false, reason: 'already_submitted', error: '이미 참여 완료한 캠페인이에요.' });
     }
 
-    // 당일(KST) 동일 캠페인 이력 — expired/cancelled 포함 전 상태 차단(재신청 0회, §03-C)
+    // 당일(KST) 동일 캠페인 이력 — expired/cancelled 포함 전 상태 차단(재신청 0회, §03-C). 명의 단위(소유자의 본인
+    // 참여 이력이 타계정 참여를 막지 않음 = PRD §02 명의당 1건)
     const hist = await client.query(
       `SELECT 1 FROM campaign_applications WHERE campaign_id = $1 AND phone8 = $2 AND applied_at >= $3 LIMIT 1`,
-      [id, p8, dayStartIso]);
+      [id, holdP8, dayStartIso]);
     if (hist.rows.length) {
       await client.query('ROLLBACK');
       return res.status(409).json({ ok: false, reason: 'already_today', error: '오늘은 이 캠페인에 이미 참여 이력이 있어요(내일 가능).' });
     }
 
-    // 전역 상한: 활성홀드 2건 + 당일 신청 총량(DB COUNT = 멀티인스턴스 안전, 레드 #12)
+    // 명의별 전역 상한: 활성홀드 2건 + 당일 신청 총량 — ★ 기존 CAMPAIGN_HOLD_CAP=2 불변(레거시 완화 없음)
     const caps = await client.query(
       `SELECT COUNT(*) FILTER (WHERE status = 'applied' AND expires_at > NOW()) AS active_holds,
               COUNT(*) FILTER (WHERE applied_at >= $2) AS today_applies
          FROM campaign_applications WHERE phone8 = $1`,
-      [p8, dayStartIso]);
+      [holdP8, dayStartIso]);
     if (Number(caps.rows[0].active_holds) >= (parseInt(process.env.CAMPAIGN_HOLD_CAP || '2', 10) || 2)) {
       await client.query('ROLLBACK');
       return res.status(409).json({ ok: false, reason: 'hold_cap', error: '동시에 참여 가능한 캠페인은 2개까지예요.' });
@@ -840,22 +890,54 @@ async function _applyParticipation(req, res, next, campPre) {
       return res.status(429).json({ ok: false, reason: 'daily_apply_cap', error: '오늘 신청 가능한 횟수를 넘었어요.' });
     }
 
+    // ★ 소유자 합산 동시홀드 상한(063, §09-2 동시 10건): COALESCE 귀속 — 레거시 NULL 행은 자기 phone8로 귀속
+    const ownerCap = parseInt(process.env.CAMPAIGN_OWNER_HOLD_CAP || '10', 10) || 10;
+    const own = await client.query(
+      `SELECT COUNT(*) AS n FROM campaign_applications
+        WHERE COALESCE(owner_phone8, phone8) = $1 AND status = 'applied' AND expires_at > NOW()`, [p8]);
+    if (Number(own.rows[0].n) >= ownerCap) {
+      await client.query('ROLLBACK');
+      return res.status(409).json({ ok: false, reason: 'owner_hold_cap',
+        error: `본인+타계정 합산 동시 ${ownerCap}건까지만 자리를 잡을 수 있어요.` });
+    }
+
+    // ★ 캠페인별 타계정 하루한도(063, §09-5): 상태 무관 집계(already_today 정책과 동일 — 취소 리트라이 파밍 차단)
+    if (isSubApply && Number(camp.multi_daily_limit) > 0) {
+      const md = await client.query(
+        `SELECT COUNT(*) AS n FROM campaign_applications
+          WHERE campaign_id = $1 AND owner_phone8 = $2 AND phone8 <> owner_phone8 AND applied_at >= $3`,
+        [id, p8, dayStartIso]);
+      if (Number(md.rows[0].n) >= Number(camp.multi_daily_limit)) {
+        await client.query('ROLLBACK');
+        return res.status(409).json({ ok: false, reason: 'sub_daily_limit',
+          error: `타계정 참여는 이 공고에서 하루 ${camp.multi_daily_limit}건까지예요(내일 가능).` });
+      }
+    }
+
     // 홀드 생성: expires_at = min(now+TTL, 오늘 window_end) — state=open이므로 closesAt는 유효·미래.
-    // ★ 자율주문(시간창 미설정)은 closesAt이 null → TTL만 적용(종일 오픈이라 창 마감 상한 없음)
-    const ttlMs = (Number(camp.hold_ttl_min) || 15) * 60000;
+    // ★ 자율주문(시간창 미설정)은 closesAt이 null → TTL만 적용. ★ 063 §09-2: 타계정 건 TTL = sub_hold_ttl_min(기본 10분)
+    const ttlMin = isSubApply ? (Number(camp.sub_hold_ttl_min) || 10) : (Number(camp.hold_ttl_min) || 15);
+    const ttlMs = ttlMin * 60000;
     const closesAt = kstTodayAt(camp.window_end, now);
     const expiresAt = new Date(closesAt ? Math.min(now.getTime() + ttlMs, closesAt.getTime()) : now.getTime() + ttlMs);
     const holdToken = crypto.randomBytes(24).toString('base64url');
+    // 명의 표기값은 서버 권위(등록된 sub_accounts 값 우선 — 요청 오타로 홀드/신원판별 표기가 갈라지는 것 방지)
+    const insName = isSubApply ? String((subEntry && subEntry.name) || subName).trim() : name;
+    const insPhone = isSubApply ? String((subEntry && subEntry.phone) || subPhoneRaw) : rawPhone;
     const ins = await client.query(
       `INSERT INTO campaign_applications
-         (campaign_id, applicant_name, applicant_phone, phone8, status, expires_at, hold_token, option_key)
-       VALUES ($1,$2,$3,$4,'applied',$5,$6,$7)
+         (campaign_id, applicant_name, applicant_phone, phone8, owner_phone8, status, expires_at, hold_token, option_key)
+       VALUES ($1,$2,$3,$4,$5,'applied',$6,$7,$8)
        RETURNING id, expires_at, option_key`,
-      [id, name, rawPhone, p8, expiresAt.toISOString(), holdToken, chosenOpt ? chosenOpt.opt_key : null]);
+      [id, insName, insPhone, holdP8, p8, expiresAt.toISOString(), holdToken, chosenOpt ? chosenOpt.opt_key : null]);
     await client.query('COMMIT');
-    logger.info(`[campaign/apply] 홀드 생성 camp=${id} app=${ins.rows[0].id} phone8=***${p8.slice(-4)}${chosenOpt ? ' opt=' + chosenOpt.opt_key : ''}`);
+    logger.info(`[campaign/apply] 홀드 생성 camp=${id} app=${ins.rows[0].id} phone8=***${holdP8.slice(-4)}` +
+      (isSubApply ? ` sub(owner=***${p8.slice(-4)})` : '') + (chosenOpt ? ' opt=' + chosenOpt.opt_key : ''));
     return res.json({
-      ok: true, applicationId: ins.rows[0].id, holdToken, phone8: p8,
+      ok: true, applicationId: ins.rows[0].id, holdToken,
+      phone8: holdP8,   // ★ 계약(레드 #4): 응답 phone8 = "명의" p8 — 프론트 h.phone8 → work-detail/cancel/change-option/embed holdPhone8 전 경로 무수정 정합
+      ownerPhone8: p8,  // 소유자(요청자 자신 — 유출 아님). 2단계 명의 배지·복원용
+      participant: { type: isSubApply ? 'sub' : 'self', name: insName },
       expiresAt: ins.rows[0].expires_at, serverNow: now.toISOString(),
       optionKey: ins.rows[0].option_key || null,
     });
@@ -1006,6 +1088,7 @@ router.post('/admin/create', authMiddleware, adminOrMasterMiddleware, async (req
       participation_mode, thumbnail_url, landing_url, daily_limit, recruit_total,
       window_start, window_end, close_buffer_min, hold_ttl_min, work_detail, source_work_order_id,
       start_date, // ★ 062: 시작일(YYYY-MM-DD) — 시작일 전 게시 시 오픈예정 카운트다운
+      multi_account_mode, multi_daily_limit, sub_hold_ttl_min, // ★ 063: 타계정 추가참여(§09-1·5·2)
       options, // ★ 061: 상품옵션 목록(참여형)
     } = req.body;
 
@@ -1032,9 +1115,9 @@ router.post('/admin/create', authMiddleware, adminOrMasterMiddleware, async (req
         created_by,
         participation_mode, thumbnail_url, landing_url, daily_limit, recruit_total,
         window_start, window_end, close_buffer_min, hold_ttl_min, work_detail, source_work_order_id,
-        start_date)
+        start_date, multi_account_mode, multi_daily_limit, sub_hold_ttl_min)
        VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,
-               $21,$22,$23,$24,$25,$26,$27,$28,$29,$30,$31,$32)
+               $21,$22,$23,$24,$25,$26,$27,$28,$29,$30,$31,$32,$33,$34,$35)
        RETURNING *`,
       [
         _genCampaignId(),
@@ -1069,6 +1152,10 @@ router.post('/admin/create', authMiddleware, adminOrMasterMiddleware, async (req
         _prepWorkDetail(work_detail) ?? null,
         source_work_order_id || '',
         start_date || null,
+        multi_account_mode === true,                            // ★ 063 §09-1: 기본 [불가]
+        Math.max(0, Number(multi_daily_limit) || 0),            // ★ 063 §09-5: 0=무제한
+        (sub_hold_ttl_min === undefined || sub_hold_ttl_min === null || sub_hold_ttl_min === '')
+          ? 10 : Math.max(1, Number(sub_hold_ttl_min) || 10),   // ★ 063 §09-2: 타계정 10분(≥1 클램프 — 0=즉시만료 footgun 차단)
       ]
     );
     // ★ 061: 상품옵션 저장(제공 시). 원자 저장(캠페인 락) — 실패 시 응답에 경고 표면화(조용한 정원 오염 방지, 레드 #7).
@@ -1172,6 +1259,9 @@ router.put('/admin/:id', authMiddleware, adminOrMasterMiddleware, async (req, re
         start_date = CASE WHEN $32::text IS NULL THEN start_date
                           WHEN $32::text = '' THEN NULL
                           ELSE $32::date END,
+        multi_account_mode = COALESCE($33, multi_account_mode),
+        multi_daily_limit = COALESCE($34, multi_daily_limit),
+        sub_hold_ttl_min = COALESCE($35, sub_hold_ttl_min),
         updated_at = NOW()
        WHERE id = $1
        RETURNING *`,
@@ -1197,6 +1287,9 @@ router.put('/admin/:id', authMiddleware, adminOrMasterMiddleware, async (req, re
         wdPrepared === undefined ? null : wdPrepared, // $30: 새 값(null=비움)
         source_work_order_id ?? null,
         (start_date === undefined || start_date === null) ? null : String(start_date), // $32: null=유지, ''=제거, 날짜=설정
+        (multi_account_mode === undefined || multi_account_mode === null) ? null : multi_account_mode === true, // $33 ★ 063: null=유지
+        (multi_daily_limit === undefined || multi_daily_limit === null || multi_daily_limit === '') ? null : Math.max(0, Number(multi_daily_limit) || 0), // $34
+        (sub_hold_ttl_min === undefined || sub_hold_ttl_min === null || sub_hold_ttl_min === '') ? null : Math.max(1, Number(sub_hold_ttl_min) || 10), // $35
       ]
     );
 
@@ -1266,7 +1359,7 @@ router.get('/admin/:id/applications', authMiddleware, adminOrMasterMiddleware, a
     const { rows } = await pool.query(
       `SELECT id, campaign_id, applicant_name, applicant_phone, applicant_inad,
               status, sheet_row_added, applied_at, phone8, expires_at, submitted_at,
-              order_submission_id, late_order_id, option_key
+              order_submission_id, late_order_id, option_key, owner_phone8
        FROM campaign_applications
        WHERE campaign_id = $1
        ORDER BY applied_at ASC`,

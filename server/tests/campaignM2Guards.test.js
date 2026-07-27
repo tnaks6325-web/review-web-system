@@ -21,8 +21,8 @@ function ok(name, cond) { assert(cond, name); passed++; console.log('  ✓ ' + n
 // ── 변경① apply 내정보 게이트 ──
 ok('apply: profileMissing 재사용(identity.service)', /require\('\.\.\/services\/identity\.service'\)/.test(routes) && /profileMissing\(reg\.rows\[0\]\)/.test(routes));
 ok('apply: profile_missing 403 + missing 목록 반환', /reason: 'profile_missing', missing/.test(routes));
-ok('apply: 게이트는 홀드 INSERT 이전(자리 미점유) — profile_missing이 INSERT보다 앞', routes.indexOf("reason: 'profile_missing'") < routes.indexOf("VALUES ($1,$2,$3,$4,'applied',$5,$6,$7)"));
-ok('apply: 등록 조회가 프로필 필드 포함(name/address/bank_*)', /SELECT name, phone, phone8, address, bank_name, bank_account, account_holder\s+FROM reviewers/.test(routes));
+ok('apply: 게이트는 홀드 INSERT 이전(자리 미점유) — profile_missing이 INSERT보다 앞 (063 owner_phone8 포함)', routes.indexOf("reason: 'profile_missing'") < routes.indexOf("VALUES ($1,$2,$3,$4,$5,'applied',$6,$7,$8)"));
+ok('apply: 등록 조회가 프로필 필드 포함(name/address/bank_*) + 063 sub_accounts', /SELECT name, phone, phone8, address, bank_name, bank_account, account_holder, sub_accounts\s+FROM reviewers/.test(routes));
 
 // ── 변경② 공고 등록/수정 참여형 필드 ──
 for (const f of ['participation_mode', 'thumbnail_url', 'landing_url', 'daily_limit', 'recruit_total', 'window_start', 'window_end', 'close_buffer_min', 'hold_ttl_min', 'work_detail', 'source_work_order_id']) {
