@@ -16,6 +16,7 @@ const {
   kstDayStartUtc,
   kstTodayAt,
 } = require('../services/campaignState.service');
+const { deriveSchedules, tabsOfCampaigns, scheduleFor } = require('../services/campaignSchedule.service');
 const { sanitizeWorkDetail, sanitizeGuideHtml } = require('../utils/sanitizeGuideHtml');
 const { isActiveEditor } = require('../services/reviewerCampaignEditor.service');
 
@@ -224,13 +225,13 @@ function _pick(row, fields) {
 }
 
 /** 공개 뷰: 레거시/참여형 분기 + 참여형은 상태엔진 페이로드 병합 */
-function _publicView(row, counts, now) {
+function _publicView(row, counts, now, schedule) {
   if (!row.participation_mode) {
     return { ..._pick(row, PUBLIC_FIELDS_LEGACY), participation_mode: false };
   }
   const st = computeCampaignState(row, counts || {
     activeHolds: 0, todayActiveHolds: 0, submittedAll: 0, todaySubmitted: 0, submittedBeforeToday: 0,
-  }, now);
+  }, now, schedule);
   return {
     ..._pick(row, PUBLIC_FIELDS_PARTICIPATION),
     participation_mode: true,
@@ -242,6 +243,11 @@ function _publicView(row, counts, now) {
     cutoffAt: st.cutoffAt,
     allDay: st.allDay === true,       // 자율주문(종일 오픈) 신호
     startDate: st.startDate || null,  // 시작일(062) — 시작일 전엔 state=preopen + opensAt=시작일 오픈시각
+    // ★ 시트 일정 파생(063): 마감일·오늘 물량·다음 진행일. 미파생이면 전부 없음(기존 동작).
+    endDate: st.endDate || null,
+    scheduleSource: st.scheduleSource || null,
+    stateReason: st.stateReason || null,
+    nextWorkDate: st.nextWorkDate || null,
   };
 }
 
@@ -440,7 +446,7 @@ router.get('/list', async (req, res, next) => {
         SELECT id, title, channel, channel_custom, manager, time_range,
                delivery_type, review_fee, badges, notes, chat_url,
                status, sort_order, max_slots, current_slots, deadline,
-               description, linked_sheet_id, linked_tab_name, created_at,
+               description, linked_sheet_id, linked_tab_name, linked_tab_gid, created_at,
                participation_mode, thumbnail_url, daily_limit, recruit_total,
                window_start, window_end, close_buffer_min, hold_ttl_min, start_date,
                multi_account_mode, sub_hold_ttl_min
@@ -457,8 +463,10 @@ router.get('/list', async (req, res, next) => {
       optionsMap = await _fetchOptionsForCampaigns(pool, partIds, now);
       _listCache = { at: now.getTime(), rows, countsMap, optionsMap };
     }
+    // ★ 시트 일정 파생(063) — 자체 1분 캐시라 목록 캐시 밖에서 호출해도 저비용. 실패=null(폴백).
+    const schedMap = await deriveSchedules(pool, tabsOfCampaigns(rows), now);
     const data = rows.map(r => {
-      const view = _publicView(r, countsMap.get(r.id), now);
+      const view = _publicView(r, countsMap.get(r.id), now, scheduleFor(schedMap, r));
       // 카드 옵션명+잔여(옵션 등록 참여형만). 상태는 매 요청 신선한 view 기준.
       const opts = optionsMap && optionsMap.get(r.id);
       if (r.participation_mode && opts && opts.length) {
@@ -493,7 +501,8 @@ router.get('/:id', async (req, res, next) => {
     const now = new Date();
     const row = rows[0];
     const countsMap = row.participation_mode ? await fetchCampaignCounts(pool, [id], now) : null;
-    const view = _publicView(row, countsMap && countsMap.get(id), now);
+    const schedMap = row.participation_mode ? await deriveSchedules(pool, tabsOfCampaigns([row]), now) : null;
+    const view = _publicView(row, countsMap && countsMap.get(id), now, schedMap && scheduleFor(schedMap, row));
     if (row.participation_mode) {
       // 옵션명+잔여만 공개(금액 등 상세는 참여 후 work-detail에서)
       const opts = await _loadOptionViews(pool, id, view, now);
@@ -574,7 +583,8 @@ router.get('/:id/work-detail', detailLimiter, async (req, res, next) => {
     // 상품옵션(참여 후 공개): 옵션 목록(금액 포함) + 내가 고른 옵션 + 변경 가능 여부
     let options = [], selectedOption = null;
     {
-      const st = computeCampaignState(camp, (await fetchCampaignCounts(pool, [id], now)).get(id), now);
+      const _sm = await deriveSchedules(pool, tabsOfCampaigns([camp]), now);
+      const st = computeCampaignState(camp, (await fetchCampaignCounts(pool, [id], now)).get(id), now, scheduleFor(_sm, camp));
       options = await _loadOptionViews(pool, id, st, now);
       if (app.option_key) selectedOption = options.find(o => o.optKey === app.option_key) || { optKey: app.option_key, status: 'open' };
     }
@@ -764,7 +774,10 @@ async function _applyParticipation(req, res, next, campPre) {
 
     // 잠금 후 신선 재집계 → 상태 게이트(open만 통과; READ COMMITTED 문장별 새 스냅샷이 선행 커밋 반영)
     const countsMap = await fetchCampaignCounts(client, [id], now);
-    const st = computeCampaignState(camp, countsMap.get(id), now);
+    // ★ 카드 표시와 동일한 일정을 참여 게이트에도 적용(불일치 = 오픈처럼 보이는데 참여 거부 / 그 반대).
+    //   1분 캐시라 보통 추가 쿼리 없음. 잠금 커넥션(client)으로 읽어 커넥션 고갈 교착을 피한다.
+    const schedMap = await deriveSchedules(client, tabsOfCampaigns([camp]), now);
+    const st = computeCampaignState(camp, countsMap.get(id), now, scheduleFor(schedMap, camp));
     if (st.state !== 'open') {
       await client.query('ROLLBACK');
       return res.status(409).json({ ok: false, reason: st.state, state: st, error: '지금은 신청할 수 없습니다.' });
@@ -1358,7 +1371,8 @@ router.get('/admin/:id/applications', authMiddleware, adminOrMasterMiddleware, a
       const { rows: camps } = await pool.query('SELECT * FROM recruit_campaigns WHERE id = $1', [id]);
       if (camps.length && camps[0].participation_mode) {
         const now = new Date();
-        const st = computeCampaignState(camps[0], (await fetchCampaignCounts(pool, [id], now)).get(id), now);
+        const _sm = await deriveSchedules(pool, tabsOfCampaigns([camps[0]]), now);
+        const st = computeCampaignState(camps[0], (await fetchCampaignCounts(pool, [id], now)).get(id), now, scheduleFor(_sm, camps[0]));
         options = await _loadOptionViews(pool, id, st, now);
       }
     } catch (optErr) { logger.warn('[campaign/admin/applications] 옵션 집계 실패: ' + optErr.message); }
