@@ -7588,7 +7588,9 @@ async function submitOrderForm() {
           try {
             const ext = _imgCtx.mime==="image/png"?"png":_imgCtx.mime==="image/webp"?"webp":"jpg";
             const namePart = [_imgCtx.recipient||_imgCtx.orderer, _imgCtx.orderer!==_imgCtx.recipient?_imgCtx.orderer:""].filter(Boolean).join("_")||"주문캡처";
-            const upPayload = { action:"uploadOrderImage", imageBase64:_imgCtx.base64, mimeType:_imgCtx.mime, fileName:namePart+"."+ext, displayName:ctx.displayName||"", tabName:ctx.tabName, round:ctx.round||"", sheetId:ctx.sheetId||"" };
+            // ★ 캡처↔주문 연결(062): 제출 응답의 orderSubmissionId 를 실어 서버가 order_submissions 에
+            //   capture_file_id/capture_uploaded_at 을 기록 → "캡처 미첨부" 자동 감지·중요알림의 근거.
+            const upPayload = { action:"uploadOrderImage", imageBase64:_imgCtx.base64, mimeType:_imgCtx.mime, fileName:namePart+"."+ext, displayName:ctx.displayName||"", tabName:ctx.tabName, round:ctx.round||"", sheetId:ctx.sheetId||"", orderSubmissionId:(res && res.orderSubmissionId) || "" };
             const upJson = await gasPostUpload(upPayload, 180000);
             if (upJson?.ok && upJson.captureFolderUrl && !firstCaptureFolderUrl) {
               firstCaptureFolderUrl = upJson.captureFolderUrl;

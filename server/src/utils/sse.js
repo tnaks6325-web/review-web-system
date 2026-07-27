@@ -224,6 +224,16 @@ function emitSystem(message, level = 'info') {
   broadcast('system', { message, level });
 }
 
+// ── 리뷰어 비정상 이벤트 중요알림(reviewer_event_logs critical) ──
+//   유령 written(시트 소실)·수동입력 필요 등 — 관리자 대시보드 빨간 알림 카드 + 통합작업대 로그 창.
+//   PII 최소: 이름·캠페인 라벨·한글 메시지만(연락처/주소 미포함).
+function emitReviewerAlert(data) {
+  broadcast('reviewer_alert', {
+    message: data.message || '리뷰어 비정상 이벤트가 감지되었습니다.',
+    ...data,
+  });
+}
+
 // ── C/S 문의 ──
 
 /** 리뷰어가 새 메시지/문의를 남김 → 관리자 전원에게 알림 */
@@ -254,6 +264,7 @@ module.exports = {
   emitImageUpload,
   emitIndexBuild,
   emitSystem,
+  emitReviewerAlert,
   emitCsInquiry,
   emitCsReplyToReviewer,
 };

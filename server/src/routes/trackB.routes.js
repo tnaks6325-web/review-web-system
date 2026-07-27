@@ -521,4 +521,31 @@ router.post('/workdesk/add', authMiddleware, async (req, res, next) => {
   } catch (err) { next(err); }
 });
 
+// ═══════════════════════════════════════════════════════════
+// 리뷰어 비정상 로그(한글 자연어, migration 062) — 통합작업대 "리뷰어 로그" 창 + 관리자 중요알림 소스
+//   내부인(master/admin/staff) 전용 — advertiser(외부) 차단. via:'intranet' 토큰도 /api/trackb/*
+//   격리 범위 안이라 인트라넷 SSO 사용자가 통합작업대에서 바로 열람 가능.
+//   확인(resolve)은 서버 상태가 진실원본 — 어느 화면에서 확인해도 전 관리자 화면에서 사라진다.
+// ═══════════════════════════════════════════════════════════
+router.get('/reviewer-logs', authMiddleware, internalMiddleware, async (req, res, next) => {
+  try {
+    const { listReviewerEvents, unresolvedCounts } = require('../services/reviewerEventLog.service');
+    const { sheetId, tabName, severity, eventType, unresolved, limit, offset } = req.query || {};
+    const items = await listReviewerEvents({
+      sheetId: sheetId || '', tabName: tabName || '', severity: severity || '', eventType: eventType || '',
+      unresolvedOnly: unresolved === '1',
+      limit: parseInt(limit, 10) || 100, offset: parseInt(offset, 10) || 0,
+    });
+    res.json({ ok: true, items, counts: await unresolvedCounts() });
+  } catch (err) { next(err); }
+});
+
+router.post('/reviewer-logs/resolve', authMiddleware, internalMiddleware, async (req, res, next) => {
+  try {
+    const { resolveReviewerEvent } = require('../services/reviewerEventLog.service');
+    const { id } = req.body || {};
+    res.json(await resolveReviewerEvent(id, _by(req)));
+  } catch (err) { next(err); }
+});
+
 module.exports = router;

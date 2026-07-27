@@ -164,6 +164,34 @@ function startCronJobs() {
     }, { timezone: 'Asia/Seoul' });
   }
 
+  // ── written 사후검증(유령 written 감지·자가치유 + 캡처미첨부/적체 한글로그): 기본 ON ──
+  //   7/24 이지유 사건 재발방지: written 주문의 기록 행을 RAW 미러와 신원대조 →
+  //   행이동=포인터 보정 / 소실=critical 알림+failed 강등(reconcile 재기록) / 반복소실=stuck_manual.
+  //   전부 DB-only(시트 API 0콜) — RAW 미러(*/5)와 3분 오프셋으로 항상 미러 직후 검증.
+  if (process.env.ORDER_WRITTEN_VERIFY !== '0') {
+    const wvSchedule = process.env.ORDER_WRITTEN_VERIFY_SCHEDULE || '3-59/5 * * * *';
+    let wvRunning = false;
+    cron.schedule(wvSchedule, async () => {
+      if (wvRunning) return;
+      wvRunning = true;
+      try {
+        const { runWrittenVerifyCycle } = require('../services/writtenVerify.service');
+        const { withJobLock } = require('../utils/jobLock');
+        const r = await withJobLock('order_written_verify', () => runWrittenVerifyCycle());
+        const v = (r && r.verify) || {};
+        if (v.shifted || v.lost || v.lostManual || v.ambiguous
+            || (r && r.capture && r.capture.flagged) || (r && r.stuck && r.stuck.flagged)) {
+          logger.info(`[CRON-WrittenVerify] verified=${v.verified || 0}, shifted=${v.shifted || 0}, lost=${v.lost || 0}, lostManual=${v.lostManual || 0}, ambiguous=${v.ambiguous || 0}, noCapture=${(r.capture && r.capture.flagged) || 0}, stuck=${(r.stuck && r.stuck.flagged) || 0}`);
+        }
+      } catch (err) {
+        logger.error(`[CRON-WrittenVerify] error: ${err.message}`);
+        logAbnormal({ flow: 'cron', step: 'order_written_verify', error: err, context: { job: 'order_written_verify' } });
+      } finally {
+        wvRunning = false;
+      }
+    }, { timezone: 'Asia/Seoul' });
+  }
+
   // ── 시트→DB 역동기화 무인 사이클(detect+constrained auto-apply): 기본 OFF ──
   //   REVERSE_SYNC_AUTO=1 에서만 동작(SHEET_REVERSE_SYNC=1·ORDER_LEDGER_WRITE_ENABLED=true 추가게이트는 서비스 내부).
   //   활성탭 라운드로빈 detect → 안전필드만 apply시점 라이브 재검증 후 자동적용(전용 락 reverse_sync_auto).

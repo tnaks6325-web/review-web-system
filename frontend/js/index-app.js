@@ -2522,6 +2522,63 @@ function _onWorkOrderNewSSE(data) {
   } catch (_) {}
 }
 
+/* ═══ 리뷰어 중요알림 (reviewer_event_logs critical, migration 062) ═══
+   유령 written(구매양식 시트 소실)·수동입력 필요 등 critical 한글 로그를 좌측하단 빨간 카드로 표시.
+   서버 미해결(resolved_at IS NULL) 상태가 진실원본 — [확인]하면 DB에서 resolve 되어 모든 관리자
+   화면·통합작업대 로그 창에서 함께 사라진다(로컬 seen 저장 불필요). 도착 채널 = SSE 'reviewer_alert'
+   (실시간) + 2분 폴링(폴백) — wo 알림 스택(우측하단)과 겹치지 않게 좌측하단 사용. */
+let _raTimer = null, _raInFlight = false;
+const _RA_POLL_MS = 2 * 60 * 1000;
+function _raEnsureStack() {
+  let el = document.getElementById("raNotifStack");
+  if (!el) {
+    el = document.createElement("div");
+    el.id = "raNotifStack";
+    el.style.cssText = "position:fixed;left:16px;bottom:16px;z-index:99990;display:flex;flex-direction:column;gap:8px;max-width:400px";
+    document.body.appendChild(el);
+  }
+  return el;
+}
+async function _raCheckAlerts() {
+  if (!isAdminLoggedIn()) return;
+  if (_raInFlight) return;
+  _raInFlight = true;
+  try {
+    const r = await gasGet({ action: "reviewerLogsList", unresolved: "1", severity: "critical", limit: "8" });
+    if (!r || !r.ok || !Array.isArray(r.items)) return;   // 조회 실패 시 기존 카드 유지
+    const stack = _raEnsureStack();
+    const ids = new Set(r.items.map(l => String(l.id)));
+    // reconcile — 타 관리자가 이미 확인한 카드는 자동 회수
+    stack.querySelectorAll("[data-ra-id]").forEach(el => { if (!ids.has(el.getAttribute("data-ra-id"))) el.remove(); });
+    r.items.forEach(l => {
+      if (stack.querySelector('[data-ra-id="' + l.id + '"]')) return;
+      const card = document.createElement("div");
+      card.setAttribute("data-ra-id", String(l.id));
+      card.style.cssText = "background:#FEF2F2;border:1.5px solid #FCA5A5;border-radius:12px;padding:12px 14px;box-shadow:0 6px 20px rgba(220,38,38,.18);font-size:.82rem;color:#7F1D1D;line-height:1.5";
+      card.innerHTML =
+        '<div style="font-weight:800;margin-bottom:4px;color:#DC2626"><i class="fas fa-exclamation-triangle"></i> 리뷰어 중요알림</div>' +
+        '<div style="word-break:break-all">' + escHtml(l.message || "") + "</div>" +
+        '<div style="display:flex;gap:6px;justify-content:flex-end;margin-top:8px">' +
+          '<button onclick="window.open(\'workdesk.html\',\'_blank\')" style="padding:5px 10px;border:1px solid #FCA5A5;background:#fff;color:#B91C1C;border-radius:8px;font-size:.75rem;font-weight:600;cursor:pointer">로그 창 열기</button>' +
+          '<button onclick="_raResolve(' + Number(l.id) + ')" style="padding:5px 12px;border:none;background:#DC2626;color:#fff;border-radius:8px;font-size:.75rem;font-weight:700;cursor:pointer">확인</button>' +
+        "</div>";
+      stack.appendChild(card);
+    });
+  } catch (_) {
+  } finally {
+    _raInFlight = false;
+  }
+}
+async function _raResolve(id) {
+  try { await gasGet({ action: "reviewerLogResolve", id: id }); } catch (_) {}
+  const el = document.querySelector('[data-ra-id="' + id + '"]');
+  if (el) el.remove();
+}
+// SSE 'reviewer_alert' 수신 훅 (index-payment.js connectSSE 에서 호출)
+function _onReviewerAlertSSE() {
+  try { _raCheckAlerts(); } catch (_) {}
+}
+
 // ── 작업오더 상세 팝업 (알림 카드/OS 알림 클릭 → 내용 전체 표기) ──
 async function openWoDetailModal(id) {
   let o = (_woCache || []).find(x => x.id === id) || (_dashWoCache || []).find(x => x.id === id);
@@ -2587,12 +2644,18 @@ function startWorkOrderBadgePoll() {
   if (typeof _requestNotifPermission === "function") { try { _requestNotifPermission(); } catch(_) {} }
   _woCheckNewOrders();   // 즉시 1회 시드 — 미확인 카드 복원(재접속에도 유지)
   _woBadgeTimer = setInterval(_woCheckNewOrders, _WO_BADGE_POLL_MS);
+  // 리뷰어 중요알림(critical 로그)도 같은 시점에 시작 — 즉시 1회 + 2분 폴링(SSE 폴백)
+  _raCheckAlerts();
+  if (!_raTimer) _raTimer = setInterval(_raCheckAlerts, _RA_POLL_MS);
 }
 function stopWorkOrderBadgePoll() {
   if (_woBadgeTimer) { clearInterval(_woBadgeTimer); _woBadgeTimer = null; }
+  if (_raTimer) { clearInterval(_raTimer); _raTimer = null; }
   // 로그아웃 시 게이트 화면 위 잔존 알림 카드 제거
   const stack = document.getElementById("woNotifStack");
   if (stack) stack.innerHTML = "";
+  const raStack = document.getElementById("raNotifStack");
+  if (raStack) raStack.innerHTML = "";
   _woNotifOsSent.clear();
   _woNotifLive = [];
 }
