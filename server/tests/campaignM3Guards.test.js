@@ -36,6 +36,17 @@ ok('modal: 프리필 시 자동수집 1회 시도', /fetchProductInfo\(\{ auto: 
 ok('fetch: 성공 항목만 덮어씀(누락 항목은 기존 값 유지)', /if \(r\.name\)\s+nEl\.value = r\.name;/.test(recjs) && /if \(r\.price\) pEl\.value = r\.price;/.test(recjs));
 ok('fetch: 실패 시 작업오더 기본값 유지 + 미리보기 미숨김', /작업오더에 입력된 상품명\/가격을 유지합니다/.test(recjs) && /if \(!hasBase\) document\.getElementById\("rf_product_preview"\)\.style\.display = "none"/.test(recjs));
 
+// ── 시작일(062): 작업오더 start_date → 발행폼 → 시작일 전 오픈예정 ──
+const routes = fs.readFileSync(path.join(__dirname, '..', 'src', 'routes', 'campaign.routes.js'), 'utf8');
+const stateSvc = fs.readFileSync(path.join(__dirname, '..', 'src', 'services', 'campaignState.service.js'), 'utf8');
+const cards = readF('js/campaign-cards.js');
+ok('시작일: 프리필 전달(작업오더 start_date → rf_start_date)', /start_date:\s+\(o\.start_date \|\| ""\)\.slice\(0, 10\)/.test(app) && /setV\("rf_start_date", prefill\.start_date\)/.test(recjs));
+ok('시작일: 발행폼 입력·저장(""=제거 센티널)·편집 프리필', /rf_start_date/.test(adm) && /payload\.start_date\s+=/.test(recjs) && /setV\("rf_start_date", \(c\.start_date/.test(recjs));
+ok('시작일: 서버 상태엔진 날짜 preopen(KST 오늘 < 시작일)', /kstTodayStr\(now\) < sd/.test(stateSvc));
+ok('시작일: UPDATE는 CASE 센티널(null=유지·\'\'=제거) — COALESCE 비움불가 갭 봉합', /start_date = CASE WHEN \$32::text IS NULL/.test(routes));
+ok('시간창: UPDATE ""=비움(자율주문 전환) + auto_order 강제 비움(인라인 편집기 갭 봉합)', /window_start = CASE WHEN \$25::text IS NULL/.test(routes) && /auto_order === true\) \? '' : window_start/.test(routes));
+ok('카드: D-일수 카운트다운 + 날짜 인지 오픈 라벨', /'D-' \+ days/.test(cards) && /function _fmtOpenLabel/.test(cards));
+
 // ── 관제 위젯 ──
 ok('관제: 참여형 카드에만 관제 버튼', /c\.participation_mode \? .*openCampControl/.test(recjs));
 ok('관제: 오늘 집계는 KST + 유효홀드 시각 기준', /kstDay/.test(recjs) && /Date\.parse\(r\.expires_at\) > now/.test(recjs));

@@ -2251,6 +2251,8 @@ async function woCreateCampaign(id) {
     notes:         [_INFLOW_LABEL[o.inflow_type] ? ("유입방식: " + _INFLOW_LABEL[o.inflow_type]) : (o.inflow_keyword ? ("유입키워드: " + o.inflow_keyword) : ""), o.review_guide || ""].filter(Boolean).join("\n"),
     // ★ M3: 참여형 자동 프리필 — 작업오더 세부내용을 발행 폼 스냅샷으로 복사
     participation:  true,
+    // ★ 062: 작업오더 시작일 → 발행폼 시작일 프리필(시작일 전 게시 시 "오픈 예정" 카운트다운)
+    start_date:     (o.start_date || "").slice(0, 10),
     daily_limit:    o.daily_count || (String(o.daily_count_text || "").match(/\d+/) || [])[0] || "",  // 인트라넷 text형("일 10건") 폴백
     recruit_total:  o.recruit_count || 0,
     purchase_time:  o.purchase_time || "",

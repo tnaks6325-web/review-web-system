@@ -491,7 +491,7 @@ async function openRecruitModal(id, prefill, woOrderId) {
   _populateCampaignSelect();   /* 1단계 캠페인 드롭다운 초기화 */
 
   /* ⚡ 참여형(M2) 필드 초기화 */
-  ["rf_window_start","rf_window_end","rf_daily_limit","rf_recruit_total","rf_landing_url",
+  ["rf_start_date","rf_window_start","rf_window_end","rf_daily_limit","rf_recruit_total","rf_landing_url",
    "rf_wd_product","rf_wd_inflow","rf_wd_review","rf_wd_notes"].forEach(i => {
     const el = document.getElementById(i); if (el) el.value = "";
   });
@@ -558,6 +558,7 @@ async function openRecruitModal(id, prefill, woOrderId) {
         const pe = document.getElementById("rf_participation");
         if (pe) { pe.checked = true; onParticipationToggle(true); }
         const setV = (i, v) => { const el = document.getElementById(i); if (el && v != null && v !== "") el.value = v; };
+        setV("rf_start_date", (c.start_date || "").slice(0, 10));
         setV("rf_window_start", (c.window_start || "").slice(0, 5));
         setV("rf_window_end", (c.window_end || "").slice(0, 5));
         setV("rf_daily_limit", c.daily_limit || "");
@@ -631,6 +632,7 @@ async function openRecruitModal(id, prefill, woOrderId) {
         const pe = document.getElementById("rf_participation");
         pe.checked = true; onParticipationToggle(true);
         const setV = (i, v) => { const el = document.getElementById(i); if (el && v != null && v !== "") el.value = v; };
+        setV("rf_start_date", prefill.start_date);
         setV("rf_daily_limit", prefill.daily_limit);
         setV("rf_recruit_total", prefill.recruit_total);
         const t = _parsePurchaseTime(prefill.purchase_time || prefill.time_range || "");
@@ -1045,8 +1047,10 @@ async function saveRecruitPost() {
         const errs = participationCheckErrors();
         if (errs.length) { showToast("참여형 게시 불가: " + errs[0], "error"); renderPartCheck(); return; }
       }
-      payload.window_start   = document.getElementById("rf_window_start").value || null;
-      payload.window_end     = document.getElementById("rf_window_end").value || null;
+      /* ★ 062: ""=서버에서 비움(자율주문 전환·시작일 제거), 값=설정 — null(유지)은 미전송 화면(admin-siand)만 */
+      payload.start_date     = document.getElementById("rf_start_date")?.value || "";
+      payload.window_start   = document.getElementById("rf_window_start").value || "";
+      payload.window_end     = document.getElementById("rf_window_end").value || "";
       payload.daily_limit    = Number(document.getElementById("rf_daily_limit").value) || 0;
       payload.recruit_total  = Number(document.getElementById("rf_recruit_total").value) || 0;
       payload.hold_ttl_min   = Number(document.getElementById("rf_hold_ttl").value) || 15;

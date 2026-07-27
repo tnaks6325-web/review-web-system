@@ -34,10 +34,25 @@
   function _fmtCountdown(ms) {
     if (ms < 0) ms = 0;
     const s = Math.floor(ms / 1000);
-    const hh = String(Math.floor(s / 3600)).padStart(2, '0');
+    const hh = String(Math.floor((s % 86400) / 3600)).padStart(2, '0');
     const mm = String(Math.floor((s % 3600) / 60)).padStart(2, '0');
     const ss = String(s % 60).padStart(2, '0');
-    return hh + ' : ' + mm + ' : ' + ss;
+    const days = Math.floor(s / 86400);
+    // 24시간 이상(시작일 카운트다운)은 D-일수 병기
+    return (days > 0 ? 'D-' + days + ' ' : '') + hh + ' : ' + mm + ' : ' + ss;
+  }
+
+  /** 오픈 안내 라벨: 오픈 시각이 오늘(KST·서버시간 보정)이면 "매일 HH:MM 오픈",
+   *  미래 날짜(시작일 전 게시)면 "M/D(요일) 오픈"(자정 오픈은 시각 생략) */
+  function _fmtOpenLabel(iso) {
+    if (!iso) return '';
+    const d = new Date(iso);
+    const now = new Date(_now());
+    const sameDay = d.getFullYear() === now.getFullYear() && d.getMonth() === now.getMonth() && d.getDate() === now.getDate();
+    if (sameDay) return '매일 ' + _fmtHM(iso) + ' 오픈';
+    const yo = ['일', '월', '화', '수', '목', '금', '토'][d.getDay()];
+    const hm = _fmtHM(iso);
+    return (d.getMonth() + 1) + '/' + d.getDate() + '(' + yo + ')' + (hm === '00:00' ? '' : ' ' + hm) + ' 오픈';
   }
 
   function _injectStyles() {
@@ -165,7 +180,7 @@
     // 오버레이: 오픈 전(회색·오픈까지) / 모집 중 시간창(라이브·오늘 구매마감까지)
     let overlay = '';
     if (isPre) {
-      overlay = `<div class="pt-ovl pre"><span class="ol">오픈까지</span><span class="ot" data-camp-countdown="${_esc(c.opensAt || '')}">--:--:--</span><span class="ol">${c.opensAt ? '매일 ' + _fmtHM(c.opensAt) + ' 오픈' : ''}</span></div>`;
+      overlay = `<div class="pt-ovl pre"><span class="ol">오픈까지</span><span class="ot" data-camp-countdown="${_esc(c.opensAt || '')}">--:--:--</span><span class="ol">${c.opensAt ? _esc(_fmtOpenLabel(c.opensAt)) : ''}</span></div>`;
     } else if (c.state === 'open' && c.cutoffAt) {
       overlay = `<div class="pt-ovl now"><span class="live-pill"><span class="dot"></span>지금 구매 가능</span><span class="lab">오늘 구매마감까지</span><span class="ot" data-camp-countdown="${_esc(c.cutoffAt)}">--:--:--</span></div>`;
     }
@@ -522,5 +537,5 @@
     }
   }
 
-  window.CampCards = { renderInto, cardHtml, gridHtml, setServerNow, startTicker, _fmtCountdown, _fmtHM, serverNow: _now, _onCardClick, openAdminEdit };
+  window.CampCards = { renderInto, cardHtml, gridHtml, setServerNow, startTicker, _fmtCountdown, _fmtHM, _fmtOpenLabel, serverNow: _now, _onCardClick, openAdminEdit };
 })();

@@ -29,7 +29,7 @@ for (const f of ['participation_mode', 'thumbnail_url', 'landing_url', 'daily_li
   ok(`admin update: ${f} 편집 지원`, new RegExp(`${f} = (COALESCE\\(|CASE WHEN)`).test(routes));
 }
 ok('admin create: 참여형 active 생성도 활성화 게이트 통과 필요', /participation_mode && \(status === 'active'\)/.test(routes));
-ok('admin update 게이트: 시간창·일일건수도 본문값 병합 판정(J7 확장)', /window_start: pick\(window_start/.test(routes) && /daily_limit: pick\(daily_limit/.test(routes));
+ok('admin update 게이트: 시간창·일일건수도 본문값 병합 판정(J7 확장, 062: auto_order 반영 유효값)', /window_start: pick\(_wsEff/.test(routes) && /daily_limit: pick\(daily_limit/.test(routes));
 ok('work_detail 저장 시 sanitize(1차) — _prepWorkDetail', /_prepWorkDetail[\s\S]*?sanitizeGuideHtml\(wd\.inflowGuideHtml\)/.test(routes));
 ok('work_detail: undefined=유지 시맨틱(CASE WHEN $29)', /work_detail = CASE WHEN \$29::boolean THEN \$30::jsonb ELSE work_detail END/.test(routes));
 
