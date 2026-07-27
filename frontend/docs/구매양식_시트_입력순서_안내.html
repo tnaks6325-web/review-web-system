@@ -137,6 +137,19 @@
   .cc p{margin:0; font-size:13.5px; color:var(--muted); line-height:1.55}
   .cc .result{font-size:13px; font-weight:700; color:var(--ink)}
 
+  .minisheet{border:1px solid var(--line); border-radius:8px; overflow:hidden}
+  .minisheet table{border-collapse:collapse; width:100%; font-size:12px}
+  .minisheet td{border-bottom:1px solid var(--line); padding:6px 9px; white-space:nowrap}
+  .minisheet tr:last-child td{border-bottom:none}
+  .minisheet .mrn{
+    width:34px; background:var(--paper); color:var(--muted); font-weight:700; text-align:center;
+    font-family:ui-monospace,SFMono-Regular,Menlo,monospace; font-size:10.5px;
+  }
+  .minisheet .mnote{font-size:10.5px; color:var(--muted); white-space:normal}
+  .minisheet tr.moved .mrn{background:var(--staff-bg); color:var(--staff)}
+  .minisheet tr.moved td{background:var(--staff-bg)}
+  .minisheet tr.cleared td{color:var(--muted)}
+
   .notice{
     background:var(--card); border:1px solid var(--line); border-radius:12px;
     padding:24px 26px; box-shadow:var(--shadow);
@@ -148,7 +161,9 @@
     flex:none; margin-top:6px; width:6px; height:6px; border-radius:2px; background:var(--sys);
   }
   .notice li:nth-child(2) .bullet{background:var(--staff)}
-  .notice li:nth-child(3) .bullet{background:var(--reuse)}
+  .notice li:nth-child(3) .bullet{background:#C0392B}
+  .notice li:nth-child(4) .bullet{background:#C0392B}
+  .notice li:nth-child(5) .bullet{background:var(--reuse)}
   .notice strong{font-weight:750}
 
   @media (max-width:560px){
@@ -239,24 +254,33 @@
   </section>
 
   <section class="scene">
-    <h2>주문을 취소할 때 <span class="tag t-staff">시트에서 지우지 마세요</span></h2>
-    <p class="rule">리뷰어가 구매를 취소해서 그 건을 없애야 할 때는, 시트에서 지우는 대신 <strong>관리자 화면에서 취소</strong>해 주세요.
-      시스템은 시트만 봐서는 <em>일부러 지운 것</em>과 <em>사고로 사라진 것</em>을 구분하지 못합니다.</p>
+    <h2>구매취소 · 중복이 생겼을 때 <span class="tag t-staff">줄은 지우지 마세요</span></h2>
+    <p class="rule">시트에서 지우셔도 됩니다. 다만 <strong>줄(행) 자체를 삭제하지 마시고, 지워야 할 값만 지워주세요.</strong>
+      줄을 통째로 삭제하면 그 아래 모든 기록의 줄 번호가 한 칸씩 밀립니다.</p>
     <div class="compare">
       <div class="cc bad">
-        <div class="cc-hd"><span class="mark x">✕</span>시트에서 행 삭제 · 값 지우기</div>
-        <p>시스템은 “기록했던 주문이 사라졌다”고 판단합니다.</p>
-        <p class="result">→ 시트 아래쪽에 다시 기록됩니다</p>
+        <div class="cc-hd"><span class="mark x">✕</span>줄 삭제 (마우스 우클릭 → 행 삭제)</div>
+        <div class="minisheet"><table>
+          <tr><td class="mrn">13</td><td>박지우</td><td class="mnote"></td></tr>
+          <tr class="moved"><td class="mrn">14</td><td>최민서</td><td class="mnote">← 원래 15번 줄이 올라옴</td></tr>
+          <tr class="moved"><td class="mrn">15</td><td>이하늘</td><td class="mnote">← 아래가 계속 밀림</td></tr>
+        </table></div>
+        <p class="result">→ 아래 기록이 전부 한 칸씩 밀립니다</p>
       </div>
       <div class="cc good">
-        <div class="cc-hd"><span class="mark o">✓</span>관리자 화면에서 [주문취소]</div>
-        <p>서버에서 취소로 확정되고, 시트 행은 자동으로 비워집니다.</p>
-        <p class="result">→ 다시 기록되지 않고 그 자리가 잠깁니다</p>
+        <div class="cc-hd"><span class="mark o">✓</span>값만 지우기 (Delete 키)</div>
+        <div class="minisheet"><table>
+          <tr><td class="mrn">13</td><td>박지우</td><td class="mnote"></td></tr>
+          <tr class="cleared"><td class="mrn">14</td><td>(비어 있음)</td><td class="mnote">← 줄은 그대로</td></tr>
+          <tr><td class="mrn">15</td><td>최민서</td><td class="mnote">← 번호 유지</td></tr>
+        </table></div>
+        <p class="result">→ 줄 번호가 그대로 유지됩니다</p>
       </div>
     </div>
-    <p class="logcard"><b>이미 시트에서 지우셨다면</b>
-      관리자 화면에 “시트에서 사라졌습니다” 알림이 뜹니다. 그 알림의 <strong>[취소 처리]</strong> 버튼을 누르시면
-      다시 기록되지 않고 취소로 정리됩니다.</p>
+    <p class="logcard"><b>값을 지우신 뒤에는 한 번 더</b>
+      관리자 화면 <strong>[주문원장]</strong> 탭에서 그 줄의 <strong>[취소]</strong>를 눌러주세요.
+      값만 지우면 시스템은 “기록했던 주문이 사라졌다”고 보고 시트 아래쪽에 다시 기록합니다.
+      (깜빡하셨다면 관리자 화면 왼쪽 아래에 뜨는 빨간 알림의 <strong>[취소 처리]</strong>를 누르셔도 됩니다.)</p>
   </section>
 
   <section class="notice">
@@ -264,7 +288,8 @@
     <ul>
       <li><span class="bullet"></span><span><strong>직접 입력하신 행은 시스템이 지우지 않습니다.</strong> 입력 중에 시스템이 그 행을 가져가는 일은 없습니다.</span></li>
       <li><span class="bullet"></span><span><strong>시스템은 위로 되돌아가지 않습니다.</strong> 겹치면 아래 빈 행으로 넘어가 기록하고, 그 사실이 관리자 화면에 남습니다.</span></li>
-      <li><span class="bullet"></span><span><strong>취소는 시트에서 지우지 마시고 관리자 화면에서 처리해 주세요.</strong> 지우기만 하면 시스템이 유실로 보고 다시 기록합니다.</span></li>
+      <li><span class="bullet"></span><span><strong>줄(행) 자체는 절대 삭제하지 마세요.</strong> 구매취소든 중복이든, 지워야 할 값만 Delete로 지워주세요. 줄을 삭제하면 아래 기록이 전부 밀립니다.</span></li>
+      <li><span class="bullet"></span><span><strong>값을 지우셨다면 관리자 화면 [주문원장] 탭에서 [취소]까지 눌러주세요.</strong> 값만 지우면 시스템이 유실로 보고 다시 기록합니다.</span></li>
       <li><span class="bullet"></span><span><strong>입력은 아래쪽 빈 행부터 하시면 가장 깔끔합니다.</strong> 위쪽에 입력하셔도 데이터가 사라지지는 않지만, 기록이 아래로 밀려 순서가 섞일 수 있습니다.</span></li>
     </ul>
   </section>

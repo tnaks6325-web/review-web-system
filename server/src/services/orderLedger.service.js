@@ -878,7 +878,7 @@ async function reconcileStuckOrders({ limit = 50, perTabCap = 20, sheetId = null
     `SELECT os.id, os.sheet_id, os.tab_name, os.gid, os.tab_gid, os.dedup_key,
             os.orderer, os.recipient, os.user_id, os.phone, os.address,
             os.order_num, os.date_str, os.selected_opt_key, os.bank, os.account,
-            os.depositor, os.price, os.memo, os.mirror_status, os.sheet_row
+            os.depositor, os.price, os.memo, os.mirror_status, os.sheet_row, os.sheet_error
        FROM order_submissions os
       WHERE os.deleted_at IS NULL
         AND (os.mirror_status IN ('pending','pending_no_row','failed')
@@ -915,6 +915,10 @@ async function reconcileStuckOrders({ limit = 50, perTabCap = 20, sheetId = null
     //   여기서 osid(row.id) 폴백을 넣어 재계산해야 원래 osid 키와 일치(없으면 약한 rcp 키로 떨어져 #5 충돌 재발).
     const dedupKey = row.dedup_key || computeDedupKey({ ...orderData, orderSubmissionId: row.id });
     const gid = row.tab_gid || row.gid || '';
+    // ★ 사고(소실) 복구 표식: 사후검증이 "기록했던 행이 사라졌다"고 강등한 건은 원래 자리가 아닌
+    //   하단에 다시 적히므로, 큐가 비고란에 [시스템 재기록 · 확인요망]으로 남겨 사람이 확인하게 한다.
+    //   (일반 복구는 [시스템 재기록].) sheet_error 는 배정 성공 시 NULL 로 지워지므로 여기서 읽어 전달.
+    const recoverReason = /^ghost written/.test(String(row.sheet_error || '')) ? 'lost' : '';
 
     // 이미 행이 있는 주문(failed/정체 queued) → 재배정 없이 바로 재-enqueue
     if (row.sheet_row) {
@@ -933,7 +937,7 @@ async function reconcileStuckOrders({ limit = 50, perTabCap = 20, sheetId = null
         await enqueue('order_append', {
           sheetId: row.sheet_id, tabName: row.tab_name, gid,
           orderData, orderSubmissionId: row.id, sheetRow: row.sheet_row,
-          dedupKey, loginPhone8: '', loginName: '', recovered: true,
+          dedupKey, loginPhone8: '', loginName: '', recovered: true, recoverReason,
         });
         await markOrderQueued(row.id);
         result.requeued++;
@@ -1034,7 +1038,7 @@ async function reconcileStuckOrders({ limit = 50, perTabCap = 20, sheetId = null
       await enqueue('order_append', {
         sheetId: row.sheet_id, tabName: row.tab_name, gid: tabContext.tabGid || gid,
         orderData, orderSubmissionId: row.id, sheetRow: claim.row,
-        dedupKey, loginPhone8: '', loginName: '', recovered: true,
+        dedupKey, loginPhone8: '', loginName: '', recovered: true, recoverReason,
       });
       await markOrderQueued(row.id);
       result.requeued++;
