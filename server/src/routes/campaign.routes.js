@@ -209,6 +209,7 @@ const PUBLIC_FIELDS_LEGACY = [
   'delivery_type', 'review_fee', 'badges', 'notes', 'chat_url',
   'status', 'sort_order', 'max_slots', 'current_slots', 'deadline',
   'description', 'linked_sheet_id', 'linked_tab_name', 'created_at',
+  'is_popular', // ★ 064: [인기!] 배지(표시용 — 선행참여 게이트는 참여형 apply에서만 판정)
 ];
 const PUBLIC_FIELDS_PARTICIPATION = [
   'id', 'title', 'channel', 'channel_custom', 'manager', 'time_range',
@@ -216,6 +217,7 @@ const PUBLIC_FIELDS_PARTICIPATION = [
   'thumbnail_url', 'created_at',
   'hold_ttl_min', 'close_buffer_min', // 민감정보 아님 — 프론트 안내문("N분 안에 제출")의 정확성용
   'multi_account_mode', 'sub_hold_ttl_min', // ★ 063: 카드 "타계정 가능" 배지(§09-4)+타계정 10분 안내. multi_daily_limit는 비공개(409 사유로만 전달)
+  'is_popular', // ★ 064: [인기!] 배지 + 선행참여 안내(pinned_at은 정렬이 서버 처리라 미노출)
 ];
 
 function _pick(row, fields) {
@@ -449,12 +451,12 @@ router.get('/list', async (req, res, next) => {
                description, linked_sheet_id, linked_tab_name, linked_tab_gid, created_at,
                participation_mode, thumbnail_url, daily_limit, recruit_total,
                window_start, window_end, close_buffer_min, hold_ttl_min, start_date,
-               multi_account_mode, sub_hold_ttl_min
+               multi_account_mode, sub_hold_ttl_min, is_popular, pinned_at
         FROM recruit_campaigns
         WHERE status IN ('active', 'closed')
         ORDER BY
           CASE WHEN status = 'active' THEN 0 ELSE 1 END,
-          sort_order ASC,
+          (pinned_at IS NULL), pinned_at ASC,  -- ★ 064: 별표 고정 우선 — 먼저 별표한 순서대로(구 노출순서 정렬 대체)
           created_at DESC
       `);
       rows = q.rows;
@@ -475,6 +477,29 @@ router.get('/list', async (req, res, next) => {
       return view;
     });
     res.json({ ok: true, data, serverNow: now.toISOString() });
+  } catch (err) {
+    next(err);
+  }
+});
+
+// GET /api/campaign/popular-status?phone8= — 인기상품 참여 가능 여부(무인증 phone8 스코프, 064)
+//   apply의 popular_locked 게이트와 **동일 계산**(명의 기준): 크레딧 = 일반(비인기) 참여형 제출완료 수
+//   − 인기 소비(제출확정 + 유효홀드). 만료·취소된 인기 건은 자동 환불(미계수).
+//   ★ 라우트 등록 순서: GET '/:id' 보다 앞이어야 함 — 뒤에 두면 '/:id'가 'popular-status'를 id로 삼킨다.
+router.get('/popular-status', applyLimiter, async (req, res, next) => {
+  try {
+    const p8 = String(req.query.phone8 || '').replace(/\D/g, '').slice(-8);
+    if (p8.length !== 8) return res.status(400).json({ ok: false, error: 'phone8이 필요합니다.' });
+    const { rows } = await pool.query(
+      `SELECT
+         COUNT(*) FILTER (WHERE rc.is_popular IS NOT TRUE AND ca.status = 'submitted') AS normal_done,
+         COUNT(*) FILTER (WHERE rc.is_popular IS TRUE AND (ca.status = 'submitted' OR (ca.status = 'applied' AND ca.expires_at > NOW()))) AS popular_used
+       FROM campaign_applications ca
+       JOIN recruit_campaigns rc ON rc.id = ca.campaign_id
+      WHERE ca.phone8 = $1 AND rc.participation_mode`, [p8]);
+    const normalDone = Number(rows[0].normal_done) || 0;
+    const popularUsed = Number(rows[0].popular_used) || 0;
+    res.json({ ok: true, normalDone, popularUsed, credits: Math.max(0, normalDone - popularUsed) });
   } catch (err) {
     next(err);
   }
@@ -963,6 +988,27 @@ async function _applyParticipation(req, res, next, campPre) {
       }
     }
 
+    // ★ 인기상품 선행참여 게이트(064, 1:1 교환): 명의별로 "일반(비인기) 참여형 제출완료 수 > 인기 소비 수"여야
+    //   새 인기 참여 가능. 인기 소비 = 인기 공고의 제출확정 + 유효홀드(시각 기준) — 만료·취소는 자동 환불.
+    //   타계정도 명의 단위 판정(타계정 5개 = 각 명의가 일반 1건씩 제출해야 인기 5건, 요구 예시와 동일).
+    //   동시성: 같은 명의의 교차 캠페인 apply는 ③ 명의 advisory 락으로 직렬화 — 크레딧 이중소비 불가.
+    if (camp.is_popular === true) {
+      const cr = await client.query(
+        `SELECT
+           COUNT(*) FILTER (WHERE rc.is_popular IS NOT TRUE AND ca.status = 'submitted') AS normal_done,
+           COUNT(*) FILTER (WHERE rc.is_popular IS TRUE AND (ca.status = 'submitted' OR (ca.status = 'applied' AND ca.expires_at > NOW()))) AS popular_used
+         FROM campaign_applications ca
+         JOIN recruit_campaigns rc ON rc.id = ca.campaign_id
+        WHERE ca.phone8 = $1 AND rc.participation_mode`, [holdP8]);
+      const normalDone = Number(cr.rows[0].normal_done) || 0;
+      const popularUsed = Number(cr.rows[0].popular_used) || 0;
+      if (normalDone <= popularUsed) {
+        await client.query('ROLLBACK');
+        return res.status(403).json({ ok: false, reason: 'popular_locked', normalDone, popularUsed,
+          error: '인기 상품은 일반 모집 1건을 먼저 제출완료해야 참여할 수 있어요. (일반 1건 = 인기 1건)' });
+      }
+    }
+
     // 홀드 생성: expires_at = min(now+TTL, 오늘 window_end) — state=open이므로 closesAt는 유효·미래.
     // ★ 자율주문(시간창 미설정)은 closesAt이 null → TTL만 적용. ★ 063 §09-2: 타계정 건 TTL = sub_hold_ttl_min(기본 10분)
     const ttlMin = isSubApply ? (Number(camp.sub_hold_ttl_min) || 10) : (Number(camp.hold_ttl_min) || 15);
@@ -1114,12 +1160,42 @@ router.get('/admin/list', authMiddleware, adminOrMasterMiddleware, async (req, r
     await _ensureTables();
     const { rows } = await pool.query(`
       SELECT * FROM recruit_campaigns
-      ORDER BY 
+      ORDER BY
         CASE WHEN status = 'active' THEN 0 WHEN status = 'draft' THEN 1 ELSE 2 END,
-        sort_order ASC,
+        (pinned_at IS NULL), pinned_at ASC,  -- ★ 064: 별표 고정 우선(먼저 별표한 순서대로) — 리뷰어 목록과 동일 규칙
         created_at DESC
     `);
     res.json({ ok: true, data: rows });
+  } catch (err) {
+    next(err);
+  }
+});
+
+// POST /api/campaign/admin/:id/flags {pinned?, popular?} — 카드 우측상단 토글(별표 고정·인기, 064)
+//   별표 순서: 먼저 별표한 공고가 위(pinned_at ASC) — 이미 별표된 공고에 pinned:true 재전송해도 원래 자리 유지.
+//   ★ 스코프 토큰(via:'reviewer_campaign')은 authMiddleware가 PUT /api/campaign/admin/:id 끝앵커로만
+//     허용하므로 이 POST에는 도달 불가(약한 신원의 노출순서·게이트 조작 차단).
+router.post('/admin/:id/flags', authMiddleware, adminOrMasterMiddleware, async (req, res, next) => {
+  try {
+    const { id } = req.params;
+    const b = req.body || {};
+    if (b.pinned === undefined && b.popular === undefined) {
+      return res.status(400).json({ ok: false, error: 'pinned 또는 popular 값이 필요합니다.' });
+    }
+    const { rows } = await pool.query(
+      `UPDATE recruit_campaigns SET
+         pinned_at = CASE WHEN $2::boolean IS NULL THEN pinned_at
+                          WHEN $2::boolean THEN COALESCE(pinned_at, NOW())
+                          ELSE NULL END,
+         is_popular = COALESCE($3::boolean, is_popular),
+         updated_at = NOW()
+       WHERE id = $1
+       RETURNING id, pinned_at, is_popular`,
+      [id,
+       b.pinned === undefined ? null : b.pinned === true,
+       b.popular === undefined ? null : b.popular === true]);
+    if (!rows.length) return res.status(404).json({ ok: false, error: '캠페인을 찾을 수 없습니다.' });
+    res.json({ ok: true, pinnedAt: rows[0].pinned_at, isPopular: rows[0].is_popular });
   } catch (err) {
     next(err);
   }
