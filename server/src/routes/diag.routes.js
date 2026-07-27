@@ -1865,6 +1865,12 @@ router.post('/create-campaign-sheet', authMiddleware, async (req, res, next) => 
         shareResult = { ok: false, error: shareErr.message };
       }
 
+      // ★ 상단 강제 공지문 자동 삽입(C1:R1) — 행 삽입 없음(행번호 무영향), best-effort.
+      let noticeResult = null;
+      try {
+        noticeResult = await require('../services/sheetNotice.service').applyNoticeToAllTabs(copied.id);
+      } catch (_) { /* 공지문 실패가 시트 생성을 막지 않는다 */ }
+
       return res.json({
         ok: true,
         mode: 'new',
@@ -1874,6 +1880,7 @@ router.post('/create-campaign-sheet', authMiddleware, async (req, res, next) => 
         sheetId: copied.id,
         shareResult,
         registrationDeferred,
+        noticeResult,
       });
     }
 
@@ -1955,6 +1962,13 @@ router.post('/create-campaign-sheet', authMiddleware, async (req, res, next) => 
       } else {
         logger.info(`[createSheet:existing] 등록 게이트 — tab_configs 등록 보류(작업오더 접수 시 등록): ${existingSheetId} / "${newTabName}"`);
       }
+
+      // ★ 상단 강제 공지문 자동 삽입(C1:R1) — 새로 만든 탭에만, best-effort.
+      let noticeResult = null;
+      try {
+        noticeResult = await require('../services/sheetNotice.service')
+          .applyNoticeOnCreate(existingSheetId, { gid: String(copiedTab.sheetId) });
+      } catch (_) { /* 공지문 실패가 탭 생성을 막지 않는다 */ }
 
       // ★ 서비스 계정에 시트 편집자 권한 자동 부여 (기존 시트)
       let shareResult = null;
@@ -2471,6 +2485,42 @@ router.get('/reverse-sync-auto-status', authMiddleware, adminOrMasterMiddleware,
 });
 
 // POST /api/diag/order-cancel — 주문 소프트삭제(deleted_at) + 시트행 클리어(written이면 큐 order_cancel)
+// ═══════════════════════════════════════════════════════════
+// 시트 상단 강제 공지문 (C1:R1) — 신규 탭은 생성 시 자동 삽입, 기존 탭은 여기로 수동 적용
+//   GET  : 현재 문구 + 안전검사 결과
+//   POST : { sheetId, gid?, tabName?, text?, force?, dryRun? } 로 삽입
+//          { action:'setText', text } 로 기본 문구 교체(app_settings)
+//   ★ 헤더 탐지 키워드 2개 이상인 문구는 서비스가 거부한다(공지 줄이 헤더로 오인되면 탭 파싱이 깨짐).
+// ═══════════════════════════════════════════════════════════
+router.get('/sheet-notice', authMiddleware, adminOrMasterMiddleware, async (req, res, next) => {
+  try {
+    const svc = require('../services/sheetNotice.service');
+    const text = await svc.getNoticeText();
+    res.json({ ok: true, text, isDefault: text === svc.DEFAULT_NOTICE, check: svc.validateNoticeText(text) });
+  } catch (err) { next(err); }
+});
+
+router.post('/sheet-notice', authMiddleware, adminOrMasterMiddleware, async (req, res, next) => {
+  try {
+    const svc = require('../services/sheetNotice.service');
+    const { action, text, sheetId, gid, tabName, force, dryRun } = req.body || {};
+    if (action === 'setText') {
+      const out = await svc.setNoticeText(text);
+      return res.status(out.ok ? 200 : 400).json(out);
+    }
+    if (!sheetId) return res.status(400).json({ ok: false, error: 'sheetId 필요' });
+    if (gid == null && !tabName) return res.status(400).json({ ok: false, error: 'gid 또는 tabName 필요' });
+    const out = await svc.applySheetNotice(sheetId, {
+      gid: gid != null ? String(gid) : undefined,
+      tabName: tabName || undefined,
+      text: text || undefined,
+      force: !!force,
+      dryRun: !!dryRun,
+    });
+    res.status(out.ok ? 200 : 400).json(out);
+  } catch (err) { next(err); }
+});
+
 router.post('/order-cancel', authMiddleware, adminOrMasterMiddleware, async (req, res, next) => {
   try {
     if (process.env.ORDER_LEDGER_WRITE_ENABLED !== 'true') return res.status(503).json({ ok: false, error: 'order ledger 쓰기 비활성' });
