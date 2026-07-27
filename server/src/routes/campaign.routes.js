@@ -1187,6 +1187,9 @@ router.put('/admin/:id', authMiddleware, adminOrMasterMiddleware, async (req, re
       participation_mode, thumbnail_url, landing_url, daily_limit, recruit_total,
       window_start, window_end, close_buffer_min, hold_ttl_min, work_detail, source_work_order_id,
       start_date, // ★ 062: undefined/null=유지, ''=시작일 제거, 'YYYY-MM-DD'=설정
+      // ★ 063: 타계정 추가참여(전부 optional — 미전달 시 COALESCE로 기존값 유지).
+      //   ※ 아래 UPDATE의 $33~$35가 이 이름들을 참조하므로 구조분해 누락 = 수정 저장 전면 ReferenceError(500).
+      multi_account_mode, multi_daily_limit, sub_hold_ttl_min,
       options, // ★ 061: 상품옵션 목록(배열 전달 시에만 교체, 미전달=변경 없음)
     } = req.body;
 
