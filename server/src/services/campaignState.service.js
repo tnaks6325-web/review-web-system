@@ -56,6 +56,27 @@ function kstTodayStr(now = new Date()) {
   return new Date(now.getTime() + KST_OFFSET_MS).toISOString().slice(0, 10);
 }
 
+/** 시트 일정에서 오늘까지(포함) 누적 계획 건수 — 미달분 이월의 분모 */
+function plannedThrough(schedule, isoDate) {
+  let sum = 0;
+  for (const { date, slots } of schedule.dates) {
+    if (date <= isoDate) sum += slots;
+    else break;                       // dates는 오름차순 정렬 계약
+  }
+  return sum;
+}
+
+/** isoDate 다음의 첫 진행일(없으면 null) — 휴무일 안내용 */
+function nextWorkDate(schedule, isoDate) {
+  for (const { date } of schedule.dates) if (date > isoDate) return date;
+  return null;
+}
+
+/** 시트 일정으로 볼 수 있는 값인지(날짜 2종 이상 + 정렬된 dates 보유) */
+function isUsableSchedule(s) {
+  return !!(s && s.ok && Array.isArray(s.dates) && s.dates.length >= 2 && s.byDate);
+}
+
 /** dailyQuota — KST 일 시작 시점 고정 (§03-D). submittedBeforeToday = 전일까지의 누적확정 */
 function dailyQuota(c, submittedBeforeToday) {
   const dl = Number(c.daily_limit) || 0;
@@ -74,11 +95,20 @@ function dailyQuota(c, submittedBeforeToday) {
  * @returns { state, todayCount, dailyQuota, serverNow, opensAt, closesAt, cutoffAt }
  *   state: 'legacy' | 'closed' | 'preopen' | 'open' | 'cutoff' | 'daily_done' | 'soft_full'
  */
-function computeCampaignState(c, counts, now = new Date()) {
+function computeCampaignState(c, counts, now = new Date(), schedule = null) {
   const base = { serverNow: now.toISOString() };
   if (!c || !c.participation_mode) return { ...base, state: 'legacy' };
 
-  const quota = dailyQuota(c, counts.submittedBeforeToday);
+  // ★ 시트 일정(구매일자 컬럼 파생)이 있으면 시작일·마감일·정원의 진실원천이 된다.
+  //   정원 = "오늘까지 누적 계획 − 전일까지 확정" → 못 채운 물량이 다음 진행일로 이월된다.
+  //   일정이 없으면(못 읽으면) 기존 발행폼 값(daily_limit·recruit_total·start_date)으로 동작.
+  const sch = isUsableSchedule(schedule) ? schedule : null;
+  const todayStr = kstTodayStr(now);
+  const submittedBefore = Number(counts.submittedBeforeToday) || 0;
+
+  const quota = sch
+    ? Math.max(0, Math.min(plannedThrough(sch, todayStr), sch.totalSlots) - submittedBefore)
+    : dailyQuota(c, submittedBefore);
   const todayCount = (Number(counts.todaySubmitted) || 0) + (Number(counts.todayActiveHolds) || 0);
   const opensAt = kstTodayAt(c.window_start, now);
   const closesAt = kstTodayAt(c.window_end, now);
@@ -110,20 +140,44 @@ function computeCampaignState(c, counts, now = new Date()) {
   // ★ 시작일(start_date, migration 062): KST 오늘이 시작일 전이면 날짜 preopen(D-day 카운트다운).
   //   opensAt = 시작일의 오픈 시각(시간창 있으면 그날 window_start, 자율주문은 그날 KST 자정).
   //   NULL·과거·오늘 시작일은 이 분기를 타지 않음(기존 동작 불변).
-  const sd = dateOnlyStr(c.start_date);
+  // 시작일: 시트 일정이 있으면 그 최소 날짜가 우선(관리자 입력 start_date는 폴백)
+  const sd = sch ? sch.firstDate : dateOnlyStr(c.start_date);
   payload.startDate = sd;
-  if (sd && kstTodayStr(now) < sd) {
+  if (sch) {
+    payload.scheduleSource = sch.source || 'sheet';
+    payload.endDate = sch.lastDate;
+    payload.totalSlots = sch.totalSlots;
+    payload.todaySlots = sch.byDate[todayStr] || 0;
+  }
+  if (sd && todayStr < sd) {
     const openUtc = new Date(Date.parse(sd + 'T00:00:00+09:00') + (allDay ? 0 : startMin * 60000));
     return { ...payload, state: 'preopen', opensAt: openUtc.toISOString() };
+  }
+  // 마감일 경과 = 종료. ★ status에 영속하지 않는다 — 시트에 날짜가 추가되면 자동 재개.
+  if (sch && todayStr > sch.lastDate) {
+    return { ...payload, state: 'closed', stateReason: 'schedule_ended' };
   }
 
   const t = kstMinutesOfDay(now);
   if (!allDay && t < startMin) return { ...payload, state: 'preopen' };
   if (!allDay && t >= endMin) return { ...payload, state: 'daily_done' };
 
+  // 휴무일(시트에 그 날짜 행이 0개) = 그날은 열지 않음. 못 채운 물량은 사라지지 않고
+  // 다음 진행일 정원에 합산된다(plannedThrough가 휴무일엔 증가하지 않기 때문).
+  if (sch && !sch.byDate[todayStr]) {
+    const nw = nextWorkDate(sch, todayStr);
+    // 다음 진행일까지 카운트다운을 줄 수 있게 opensAt을 그날 오픈 시각으로 —
+    // 주말 하루 공백이든, 종료 후 새 블록이 붙은 긴 공백이든 같은 표기로 "다시 열림"이 보인다.
+    const openUtc = nw ? new Date(Date.parse(nw + 'T00:00:00+09:00') + (allDay ? 0 : startMin * 60000)) : null;
+    return {
+      ...payload, state: 'daily_done', stateReason: 'rest_day', nextWorkDate: nw,
+      opensAt: openUtc ? openUtc.toISOString() : payload.opensAt,
+    };
+  }
+
   if (todayCount >= quota) return { ...payload, state: 'daily_done' }; // 금일완료(홀드 만료 반환 시 open 복귀)
 
-  const rt = Number(c.recruit_total) || 0;
+  const rt = sch ? sch.totalSlots : (Number(c.recruit_total) || 0);
   const usedAll = (Number(counts.submittedAll) || 0) + (Number(counts.activeHolds) || 0);
   if (rt > 0 && usedAll >= rt) return { ...payload, state: 'soft_full' }; // 잔여 대기 — 신청만 차단, 종착 아님
 
@@ -264,6 +318,9 @@ module.exports = {
   kstTodayAt,
   kstTodayStr,
   dateOnlyStr,
+  plannedThrough,
+  nextWorkDate,
+  isUsableSchedule,
   APPLY_BLOCK_REASON,
   KST_OFFSET_MS,
 };
