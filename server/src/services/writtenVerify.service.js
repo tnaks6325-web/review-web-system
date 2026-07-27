@@ -11,7 +11,7 @@
 //   ③ 불일치 + 탭 안 다른 행에서 유일하게 발견 → 행 이동(중간 행 삽입/정렬 등) = DB 포인터만
 //      자가보정(시트 무접촉). sheet_row_claims 도 함께 이동(충돌 시 자기 claim 삭제 폴백).
 //   ④ 불일치 + 어디에도 없음 → 유령 written = critical 한글 로그(중요알림) + failed 강등
-//      → 기존 reconcile 이 하단 재기록(비고 'system'). 같은 주문의 소실이 ORDER_LOST_MAX(2)회
+//      → 기존 reconcile 이 하단 재기록(비고 '[시스템 재기록 · 확인요망]'). 같은 주문의 소실이 ORDER_LOST_MAX(2)회
 //      반복되면 stuck_manual 전환(사람이 의도적으로 지운 행을 무한 재기록하는 루프 차단).
 //   ⑤ 부속 감지: 구매캡쳐 미첨부(제출 20분 후에도 캡처 미연결), 시트 미반영 적체(stuck/failed).
 //
@@ -279,7 +279,7 @@ async function verifyWrittenOrders({ limit = 400, maxTabs = 20 } = {}) {
         await logReviewerEvent({
           sheetId, tabName, tabGid: ctx.tabGid, reviewerName: _who(os), phone8: os.phone8,
           eventType: 'order_lost', severity: 'critical',
-          message: `『${_label(os)}』에 ${_who(os)} 리뷰어가 제출한 구매양식이 시트에서 사라졌습니다(기록됐던 ${os.sheetRow}행이 다른 내용으로 바뀜). 자동 재기록을 진행합니다 — 반영되면 시트 하단 행 비고에 'system' 표기.`,
+          message: `『${_label(os)}』에 ${_who(os)} 리뷰어가 제출한 구매양식이 시트에서 사라졌습니다(기록됐던 ${os.sheetRow}행이 다른 내용으로 바뀜). 자동 재기록을 진행합니다 — 반영되면 시트 하단 행 비고에 [시스템 재기록 · 확인요망]으로 표기됩니다.`,
           context: { row: os.sheetRow, orderNum: os.orderNum || '' }, orderSubmissionId: os.id,
         });
         try {

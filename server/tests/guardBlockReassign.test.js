@@ -57,14 +57,26 @@ async function run() {
   });
   console.log('  상한 경계(rc=4) 통과');
 
-  // ── 복구행 비고 'system' 표기(배경색 대체) — 비파괴·멱등 ──
-  assert.equal(_markSystemMemo(''), 'system', '빈 메모 → system');
-  assert.equal(_markSystemMemo(null), 'system', 'null → system');
-  assert.equal(_markSystemMemo('  '), 'system', '공백 → system');
-  assert.equal(_markSystemMemo('닉네임'), '닉네임 [system]', '기존 메모 보존 + 마커');
-  assert.equal(_markSystemMemo('닉네임 [system]'), '닉네임 [system]', '이미 표기됨 → 멱등(중복 안 함)');
-  assert.equal(_markSystemMemo('system'), 'system', '이미 system → 그대로');
-  console.log('  복구행 비고 system 표기 통과');
+  // ── 복구행 비고 표기(배경색 대체) — 비파괴·멱등 ──
+  //   일반 복구 = [시스템 재기록] / 소실(사고) 복구 = [시스템 재기록 · 확인요망]
+  const SYS = '[시스템 재기록]', LOST = '[시스템 재기록 · 확인요망]';
+  assert.equal(_markSystemMemo(''), SYS, '빈 메모 → 시스템 재기록');
+  assert.equal(_markSystemMemo(null), SYS, 'null → 시스템 재기록');
+  assert.equal(_markSystemMemo('  '), SYS, '공백 → 시스템 재기록');
+  assert.equal(_markSystemMemo('닉네임'), '닉네임 ' + SYS, '기존 메모 보존 + 마커');
+  assert.equal(_markSystemMemo('닉네임 ' + SYS), '닉네임 ' + SYS, '이미 표기됨 → 멱등(중복 안 함)');
+  assert.equal(_markSystemMemo('닉네임 [system]'), '닉네임 [system]', '구 표기(system)도 멱등 인식');
+  console.log('  복구행 비고 [시스템 재기록] 표기 통과');
+
+  // 소실(사고) 복구 — 사람이 확인해야 하므로 '확인요망' 포함
+  assert.equal(_markSystemMemo('', 'lost'), LOST, '빈 메모 + 소실 → 확인요망');
+  assert.equal(_markSystemMemo('닉네임', 'lost'), '닉네임 ' + LOST, '기존 메모 보존 + 확인요망');
+  assert.equal(_markSystemMemo('닉네임 ' + LOST, 'lost'), '닉네임 ' + LOST, '이미 확인요망 → 멱등');
+  assert.equal(_markSystemMemo('닉네임 ' + SYS, 'lost'), '닉네임 ' + LOST, '약한 표기 → 확인요망으로 승격(중복 표기 없음)');
+  assert.equal(_markSystemMemo('닉네임 [system]', 'lost'), '닉네임 ' + LOST, '구 표기(system) → 확인요망으로 승격');
+  assert.equal(_markSystemMemo('system', 'lost'), LOST, '구 표기 단독 → 확인요망으로 치환');
+  assert.ok(!/시스템 재기록.*시스템 재기록/.test(_markSystemMemo('닉네임 ' + SYS, 'lost')), '마커 중복 금지');
+  console.log('  소실 복구 비고 [확인요망] 표기·승격 통과');
 
   console.log('✅ guardBlockReassign 전체 통과');
 }

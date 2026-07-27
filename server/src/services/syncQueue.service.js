@@ -470,7 +470,7 @@ async function _executeBatch(items, sheetId, tabName) {
     const batchData = [];
     for (const x of chunk) {
       // 복구분(재배정 append)은 배경색 대신 비고란에 'system' 표기.
-      const od = x.p.recovered ? { ...x.orderData, memo: _markSystemMemo(x.orderData && x.orderData.memo) } : x.orderData;
+      const od = x.p.recovered ? { ...x.orderData, memo: _markSystemMemo(x.orderData && x.orderData.memo, x.p.recoverReason) } : x.orderData;
       batchData.push(...buildBatchUpdateData({ tabName: ctxTab, headers: tabContext.headers, targetRow: x.sheetRow, orderData: od }));
     }
     try {
@@ -594,7 +594,7 @@ async function _executeItem(item) {
     }
 
     case 'order_append': {
-      let { sheetId, tabName, orderData, loginPhone8, loginName, gid, sheetRow, orderSubmissionId, recovered, dedupKey } = payload;
+      let { sheetId, tabName, orderData, loginPhone8, loginName, gid, sheetRow, orderSubmissionId, recovered, recoverReason, dedupKey } = payload;
       if (!sheetId || !tabName) throw new Error('payload 누락');
       if (!sheetRow) throw new Error('payload 누락: sheetRow');
 
@@ -676,7 +676,7 @@ async function _executeItem(item) {
           }
         }
         // 복구분(재배정 append)은 배경색 대신 비고란에 'system' 표기(수동입력분·실시간분과 구분).
-        const _od = recovered ? { ...orderData, memo: _markSystemMemo(orderData && orderData.memo) } : orderData;
+        const _od = recovered ? { ...orderData, memo: _markSystemMemo(orderData && orderData.memo, recoverReason) } : orderData;
         const batchData = buildBatchUpdateData({
           tabName: tabContext.tabName || tabName,
           headers: tabContext.headers,
@@ -1003,12 +1003,26 @@ async function purgeCompleted(hoursOld = 24) {
 //   일시 write 경합을 영구소실로 오판하지 않음).
 //   ★ 기본 ON: 가드는 남의 데이터를 절대 덮지 않고(차선책) 하단 빈 행 재배정으로 폴백 = 손실 0·수동 0.
 //     끄려면 ORDER_GUARD_REASSIGN=0 (OFF: 비복구는 defer만 = 재배정 안 함, 복구분만 release — 순수 R1/R3 픽스).
-// 복구(재배정 append) 행 표식: 배경색 대신 비고란에 'system' 표기(수동입력분·실시간분과 구분).
+// 복구(재배정 append) 행 표식: 배경색 대신 비고란에 표기(수동입력분·실시간분과 구분).
+//   · 일반 복구(큐 지연·행배정 실패 등) → [시스템 재기록]
+//   · 소실 복구(사후검증이 "기록했던 행이 사라졌다"고 판정한 사고 건) → [시스템 재기록 · 확인요망]
+//     사고 건은 원래 자리가 아닌 하단에 다시 적히므로 사람이 한 번 확인해야 한다.
 //   기존 메모가 있으면 보존하며 마커만 덧붙임(비파괴). 이미 표기돼 있으면 중복 안 함(재시도 멱등).
-function _markSystemMemo(memo) {
+//   구 표기('system')만 있는 행이 뒤늦게 소실 판정을 받으면 확인요망으로 승격한다.
+const MEMO_SYS = '[시스템 재기록]';
+const MEMO_LOST = '[시스템 재기록 · 확인요망]';
+function _markSystemMemo(memo, reason) {
   const s = String(memo == null ? '' : memo).trim();
-  if (!s) return 'system';
-  return /\bsystem\b/i.test(s) ? s : `${s} [system]`;
+  if (reason === 'lost') {
+    if (/확인요망/.test(s)) return s;                                   // 이미 표기됨(멱등)
+    const base = s.replace(/\[시스템 재기록\]/g, '')
+                  .replace(/\[system\]/ig, '')
+                  .replace(/^system$/i, '')
+                  .trim();                                              // 약한/구 표기는 승격 대상
+    return base ? `${base} ${MEMO_LOST}` : MEMO_LOST;
+  }
+  if (/시스템 재기록|\bsystem\b/i.test(s)) return s;                    // 이미 표기됨(멱등)
+  return s ? `${s} ${MEMO_SYS}` : MEMO_SYS;
 }
 
 function _guardBlockDecision({ recovered, submittedAt, reassignCount } = {}) {
