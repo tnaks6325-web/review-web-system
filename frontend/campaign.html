@@ -208,6 +208,18 @@
   </div>
 </div>
 
+<!-- 🔥 인기상품 참여조건: 일반 모집 목록 (064) -->
+<div class="sheet-ovl" id="popGate">
+  <div class="sheet" style="max-height:82vh;overflow-y:auto">
+    <h3>🔥 인기 상품 참여 조건</h3>
+    <p>일반 모집 <b>1건을 먼저 제출완료</b>하면 인기 상품 <b>1건</b>에 참여할 수 있어요 (1:1 교환).<br>
+      아래 일반 모집에 지금 바로 참여해보세요.</p>
+    <div class="muted" id="popGateCount" style="margin-bottom:8px"></div>
+    <div id="popGateBody"></div>
+    <button class="btn ghost" style="margin-top:12px" onclick="hidePopGate()">닫기</button>
+  </div>
+</div>
+
 <!-- 본인확인 바텀시트 -->
 <div class="sheet-ovl" id="loginSheet">
   <div class="sheet">
@@ -395,7 +407,77 @@ function renderPre(){
   //   위 상태·옵션 판정을 모두 끝낸 뒤 마지막에 덮어써야 일관되게 열린 화면이 된다.
   if(PREVIEW && _pvForceOpen){ jb.disabled = false; jb.textContent = '참여하기'; $('preFootNote').textContent = ''; }
   renderPreOptions();   // 옵션명+잔여(옵션 등록 캠페인만)
+  renderPopNotice();    // ★ 064: 인기상품 참여 조건 안내(인기 공고만)
   show('vPre');
+}
+
+/* ═══ 🔥 인기상품 참여 조건 (064) ═══
+   인기 공고 = 일반(비인기) 모집 1건을 "구매양식 제출완료"해야 1건 참여 가능(1:1 교환).
+   서버 게이트(apply 403 popular_locked)가 최종 권위 — 여기 안내·목록은 UX 보조. */
+function renderPopNotice(){
+  let box = $('popNotice');
+  if(!(_camp && _camp.is_popular === true)){ if(box) box.style.display='none'; return; }
+  if(!box){
+    box = document.createElement('div');
+    box.id = 'popNotice';
+    box.className = 'cardbx';
+    box.style.borderColor = '#EF4444';
+    const sec = $('vPre').querySelector('.sec');
+    sec.insertBefore(box, $('preCard').nextSibling);
+  }
+  box.style.display = '';
+  box.innerHTML =
+    '<div class="wd-tt" style="color:#DC2626">🔥 인기 상품 — 참여 조건이 있어요</div>' +
+    '<div style="font-size:.82rem;line-height:1.65">일반 모집 <b>1건을 먼저 제출완료</b>하면 인기 상품 <b>1건</b>에 참여할 수 있어요 (1:1 교환).<br>' +
+    '<span class="muted">타계정으로 참여할 때도 각 계정마다 일반 1건씩 필요해요.</span></div>' +
+    '<button class="btn ghost" style="margin-top:10px;padding:10px" onclick="openPopGate()">📋 지금 참여 가능한 일반 모집 보기</button>';
+}
+
+/* 일반 모집 목록 모달 — 인기상품 잠금 시(또는 안내 버튼) 테이블로 노출, [참여] 클릭 → 해당 공고로 이동.
+   이동 전 sessionStorage에 복귀 캠페인을 기록 → 일반 제출완료 화면에서 "인기 상품으로 돌아가기" 버튼 제공. */
+async function openPopGate(gateInfo){
+  const ovl = $('popGate'); if(!ovl) return;
+  ovl.style.display = 'flex';
+  const body = $('popGateBody');
+  const cnt = $('popGateCount');
+  cnt.textContent = gateInfo ? `현재 제출완료 일반 ${gateInfo.normalDone || 0}건 · 사용한 인기 ${gateInfo.popularUsed || 0}건` : '';
+  body.innerHTML = '<div style="padding:22px;text-align:center;color:var(--t3)"><i class="fas fa-circle-notch fa-spin"></i> 일반 모집을 불러오는 중…</div>';
+  try{
+    const r = await fetch(API_BASE_URL + '/api/campaign/list');
+    const j = await r.json();
+    const rows = (j.data || []).filter(x =>
+      x.participation_mode && x.is_popular !== true && x.state === 'open' && String(x.id) !== String(CAMP_ID));
+    if(!rows.length){
+      body.innerHTML = '<div style="padding:22px;text-align:center;color:var(--t3);font-size:.84rem">지금 참여 가능한 일반 모집이 없어요.<br>일반 모집이 열리면 먼저 참여해주세요.</div>';
+      return;
+    }
+    const esc = _escAttr;
+    body.innerHTML =
+      '<div style="overflow-x:auto"><table style="width:100%;border-collapse:collapse;font-size:.8rem">' +
+      '<thead><tr>' +
+        '<th style="text-align:left;padding:8px 6px;border-bottom:1.5px solid var(--border);color:var(--t3);font-size:.7rem">상품</th>' +
+        '<th style="text-align:center;padding:8px 6px;border-bottom:1.5px solid var(--border);color:var(--t3);font-size:.7rem;white-space:nowrap">구매시간</th>' +
+        '<th style="padding:8px 6px;border-bottom:1.5px solid var(--border)"></th>' +
+      '</tr></thead><tbody>' +
+      rows.map(x => {
+        const t = (x.opensAt && x.closesAt) ? (CampCards._fmtHM(x.opensAt) + '~' + CampCards._fmtHM(x.closesAt)) : '자율주문';
+        return '<tr>' +
+          '<td style="padding:9px 6px;border-bottom:1px solid #F3F4F6"><b>' + esc(x.title || '') + '</b>' +
+            (x.review_fee ? '<div class="muted">리뷰비 ' + Number(x.review_fee).toLocaleString() + '원</div>' : '') + '</td>' +
+          '<td style="padding:9px 6px;border-bottom:1px solid #F3F4F6;text-align:center;white-space:nowrap;font-size:.74rem">' + esc(t) + '</td>' +
+          '<td style="padding:9px 6px;border-bottom:1px solid #F3F4F6;text-align:right">' +
+            '<button class="btn" style="width:auto;padding:9px 14px;font-size:.78rem" onclick="goPopNormal(\'' + esc(x.id) + '\')">참여하기</button></td>' +
+        '</tr>';
+      }).join('') + '</tbody></table></div>' +
+      '<div class="muted" style="margin-top:8px">일반 모집을 <b>구매양식 제출완료</b>까지 마치면, 이 인기 상품에 바로 참여할 수 있어요.</div>';
+  }catch(e){
+    body.innerHTML = '<div style="padding:20px;text-align:center;color:var(--err)">목록을 불러오지 못했어요: ' + _escAttr(e.message) + '</div>';
+  }
+}
+function hidePopGate(){ const o=$('popGate'); if(o) o.style.display='none'; }
+function goPopNormal(id){
+  try{ sessionStorage.setItem('pop_return_camp', CAMP_ID); }catch(_){}
+  location.href = 'campaign.html?id=' + encodeURIComponent(id);
 }
 function holdTtlText(){ return ((_camp && Number(_camp.hold_ttl_min)) || 15) + '분'; } // 공개 화이트리스트의 hold_ttl_min 사용
 
@@ -522,6 +604,8 @@ async function _doApply(optionKey){
       return;
     }
     if(j.reason === 'profile_missing'){ renderMissing(j.missing || []); return; }
+    // ★ 064: 인기상품 선행조건 미충족 → 일반 모집 목록 모달(테이블+참여 CTA)
+    if(j.reason === 'popular_locked'){ toast('일반 모집 1건을 먼저 제출완료해야 참여할 수 있어요'); openPopGate(j); return; }
     if(j.reason === 'not_registered'){ toast('리뷰어 등록 후 참여할 수 있어요'); setTimeout(()=>location.href='/search.html#register', 900); return; }
     // 옵션 관련 사유 → 옵션 상태 갱신 후 선택 시트 재오픈
     if(['option_required','option_invalid','option_soldout','option_today_done','option_unavailable'].includes(j.reason)){
@@ -725,6 +809,20 @@ function renderDone(pendingConfirm){
     $('vDone').querySelector('h2').textContent = '구매양식이 접수됐어요';
     $('vDone').querySelector('p').innerHTML = '제출이 늦게 도착해 <b>운영자 확인 후</b> 참여가 확정돼요.<br/>주문 내용은 안전하게 저장돼 있으니 다시 제출하지 마세요.';
   }
+  // ★ 064: 인기상품 모달에서 넘어와 "일반 모집"을 방금 제출완료한 경우 → 인기 상품 복귀 CTA
+  //   (정상 확정 시에만 — 지각 접수(pendingConfirm)는 아직 크레딧이 아니므로 미노출)
+  try{
+    const back = sessionStorage.getItem('pop_return_camp');
+    if(back && back !== CAMP_ID && !pendingConfirm && !$('popReturnBtn')){
+      const btn = document.createElement('button');
+      btn.id = 'popReturnBtn';
+      btn.className = 'btn';
+      btn.style.cssText = 'margin-top:8px;background:linear-gradient(135deg,#EF4444,#DC2626)';
+      btn.textContent = '🔥 참여하려던 인기 상품으로 돌아가기';
+      btn.onclick = ()=>{ sessionStorage.removeItem('pop_return_camp'); location.href='campaign.html?id='+encodeURIComponent(back); };
+      $('vDone').querySelector('.sec').insertBefore(btn, $('vDone').querySelector('.sec').firstChild);
+    }
+  }catch(_){ /* sessionStorage 불가 환경 무시 */ }
   show('vDone');
 }
 

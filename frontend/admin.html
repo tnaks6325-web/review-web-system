@@ -2006,21 +2006,11 @@ body{ letter-spacing:-.01em; }
         </div>
       </div>
 
-      <!-- 모집인원 / 노출 순서 / 상태 -->
-      <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:10px">
+      <!-- 모집인원 / 상태 — 노출 순서는 제거(064): 우선노출은 공고 카드 우측상단 ⭐ 별표로 관리 -->
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px">
         <div class="rform-group">
           <label class="rform-label">모집인원</label>
           <input id="rf_max_slots" type="number" class="rform-input" placeholder="0=무제한" min="0" value="0">
-        </div>
-        <div class="rform-group">
-          <label class="rform-label">노출 순서</label>
-          <select id="rf_sort_order" class="rform-input">
-            <option value="1">1순위</option>
-            <option value="2">2순위</option>
-            <option value="3">3순위</option>
-            <option value="4">4순위</option>
-            <option value="5">5순위</option>
-          </select>
         </div>
         <div class="rform-group">
           <label class="rform-label">상태</label>

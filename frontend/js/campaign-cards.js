@@ -91,6 +91,9 @@
       .pcard .pt-ribbon{font-size:.6rem;font-weight:900;border-radius:6px;padding:2px 7px;color:#fff}
       .pcard .pt-ribbon.done{background:#F59E0B}
       .pcard .pt-ribbon.closedr{background:#94A3B8}
+      /* ★ 064 인기상품 배지 — 리뷰어 노출용(썸네일 좌상단, 리본과 세로 스택) */
+      .pcard .pt-pop{font-size:.64rem;font-weight:900;border-radius:7px;padding:3px 8px;color:#fff;
+        background:linear-gradient(135deg,#EF4444,#DC2626);box-shadow:0 2px 6px rgba(220,38,38,.4)}
       /* 관리자 수정 버튼: 썸네일 좌하단(상단 배지·리본과 겹치지 않게) */
       .pcard .peditchip{position:absolute;bottom:8px;left:8px;z-index:7;font-size:.6rem;font-weight:900;background:#1B64DA;color:#fff;border:none;border-radius:6px;padding:3px 8px;cursor:pointer;box-shadow:0 1px 5px rgba(0,0,0,.3)}
       .pcard .peditchip:hover{background:#1550b8}
@@ -183,7 +186,9 @@
     const editChip = _adminTok()
       ? `<button type="button" class="peditchip" onclick="event.stopPropagation();event.preventDefault();CampCards.openAdminEdit('${_esc(c.id)}')">✏️ 관리자 수정</button>`
       : '';
-    const topleft = ribbon ? `<div class="pt-topleft">${ribbon}</div>` : '';
+    // ★ 064: [인기!] 배지 — 관리자가 인기 설정한 공고(일반 모집 1건 제출완료당 1건 참여 조건)
+    const popBadge = c.is_popular === true ? `<span class="pt-pop">🔥 인기!</span>` : '';
+    const topleft = (ribbon || popBadge) ? `<div class="pt-topleft">${popBadge}${ribbon}</div>` : '';
 
     // 오버레이: 오픈 전(회색·오픈까지) / 모집 중 시간창(라이브·오늘 구매마감까지)
     let overlay = '';
