@@ -11,6 +11,12 @@
  */
 const assert = require('assert');
 
+// jobLock 은 전용 PG 커넥션으로 advisory lock 을 잡으므로 단위테스트에선 통과시킨다(락 자체는 별도 가드).
+{
+  const p = require.resolve('../src/utils/jobLock');
+  require.cache[p] = { id: p, filename: p, loaded: true, exports: { withJobLock: async (_k, fn) => fn() } };
+}
+
 const wv = require('../src/services/writtenVerify.service');
 const relog = require('../src/services/reviewerEventLog.service');
 
@@ -246,6 +252,58 @@ async function run() {
       message: 'x', orderSubmissionId: '3c3729cb-77b3-49aa-b854-daf1d4007257',
     });
     assert.equal(r.ok, true); assert.equal(r.skipped, true);
+  }
+
+  // ═══ 8. [취소 처리] 1클릭 — 시트에서 지운 게 '의도된 취소'였을 때 재기록을 멈춘다 ═══
+  {
+    const OSID = '3c3729cb-77b3-49aa-b854-daf1d4007257';
+    function cancelPool(scn = {}) {
+      const calls = [];
+      return {
+        calls,
+        async query(sql, params) {
+          const s = String(sql).replace(/\s+/g, ' ').trim();
+          calls.push({ s, params });
+          if (/SELECT id, event_type, order_submission_id FROM reviewer_event_logs/.test(s)) {
+            return { rows: scn.log ? [scn.log] : [] };
+          }
+          if (/UPDATE order_submissions SET deleted_at = NOW\(\)/.test(s)) {
+            return { rows: scn.alreadyCanceled ? [] : [{ sheet_row: scn.sheetRow ?? null, mirror_status: 'failed' }] };
+          }
+          return { rows: [], rowCount: 0 };
+        },
+      };
+    }
+
+    // 8a. 소실 알림 → 주문 소프트삭제(=reconcile·사후검증 대상에서 제외) + 알림 자동 해결
+    const p1 = cancelPool({ log: { id: 9, event_type: 'order_lost', order_submission_id: OSID }, sheetRow: null });
+    relog.__setPoolForTest(p1);
+    const r1 = await relog.cancelOrderFromEvent({ id: 9, by: '만두' });
+    assert.equal(r1.ok, true); assert.equal(r1.canceled, true);
+    assert.ok(p1.calls.some(c => /UPDATE order_submissions SET deleted_at = NOW\(\)/.test(c.s)),
+      'deleted_at 설정 — reconcile/사후검증 둘 다 deleted_at IS NULL 필터라 되살아남이 멈춘다');
+    assert.ok(p1.calls.some(c => /SET mirror_status = 'canceled'/.test(c.s)), '시트행 없으면 DB 상태만 확정');
+    assert.ok(p1.calls.some(c => /resolved_by = \$2 WHERE id = \$1/.test(c.s)), '누른 알림 해결');
+    assert.ok(p1.calls.some(c => /WHERE order_submission_id = \$1 AND resolved_at IS NULL/.test(c.s)),
+      '같은 주문의 다른 미해결 알림도 함께 정리');
+
+    // 8b. 취소 대상이 아닌 알림(캡처 미첨부)은 거부 — 주문이 사라지는 오조작 차단
+    const p2 = cancelPool({ log: { id: 10, event_type: 'order_no_capture', order_submission_id: OSID } });
+    relog.__setPoolForTest(p2);
+    const r2 = await relog.cancelOrderFromEvent({ id: 10, by: '만두' });
+    assert.equal(r2.ok, false, '캡처 미첨부 알림으로는 주문취소 불가');
+    assert.ok(!p2.calls.some(c => /deleted_at = NOW\(\)/.test(c.s)), '취소 UPDATE 미실행');
+
+    // 8c. 주문 연결이 없는 알림도 거부
+    const p3 = cancelPool({ log: { id: 11, event_type: 'order_lost', order_submission_id: null } });
+    relog.__setPoolForTest(p3);
+    assert.equal((await relog.cancelOrderFromEvent({ id: 11 })).ok, false);
+
+    // 8d. 이미 취소된 주문 → 멱등(중복 취소 아님)
+    const p4 = cancelPool({ log: { id: 12, event_type: 'order_lost_manual', order_submission_id: OSID }, alreadyCanceled: true });
+    relog.__setPoolForTest(p4);
+    const r4 = await relog.cancelOrderFromEvent({ id: 12 });
+    assert.equal(r4.ok, true); assert.equal(r4.alreadyCanceled, true);
   }
 
   // 뒷정리 — 다른 테스트에 목 누수 방지

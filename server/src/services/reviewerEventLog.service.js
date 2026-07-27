@@ -142,6 +142,76 @@ async function unresolvedCounts(scopeTabs = null) {
   return rows[0] || { total: 0, critical: 0 };
 }
 
+// ★ "시트에서 지운 게 사실은 취소였다"를 1클릭으로 알려주는 경로의 대상 이벤트.
+//   시스템은 시트만 봐서는 "사람이 의도로 지움" vs "사고로 사라짐"을 구별할 수 없어 기본이 '재기록'이다.
+//   사람이 이 버튼을 누르는 것이 유일하게 신뢰 가능한 의도 신호다.
+const CANCELABLE_EVENTS = new Set(['order_lost', 'order_lost_manual', 'order_unmirrored']);
+
+/**
+ * 알림에 걸린 주문을 취소로 확정 — 재기록(reconcile)·사후검증 대상에서 함께 빠진다
+ * (둘 다 `deleted_at IS NULL` 필터라 소프트삭제만으로 되살아남이 멈춘다).
+ * 시트에 행이 남아 있으면 기존 `order_cancel` 큐로 그 행을 비운다 — 큐의 신원검증이
+ * "그 사이 다른 사람이 쓴 행"은 건드리지 않도록 막아준다(남의 데이터 파괴 불가).
+ */
+async function cancelOrderFromEvent({ id, by = 'admin' } = {}) {
+  const n = parseInt(id, 10);
+  if (!Number.isInteger(n) || n <= 0) return { ok: false, error: 'id 필요' };
+  const db = getPool();
+  const { rows: lg } = await db.query(
+    `SELECT id, event_type, order_submission_id FROM reviewer_event_logs WHERE id = $1`, [n]
+  );
+  if (!lg.length) return { ok: false, error: '알림을 찾을 수 없습니다.' };
+  const log = lg[0];
+  if (!log.order_submission_id) return { ok: false, error: '연결된 주문이 없는 알림입니다.' };
+  if (!CANCELABLE_EVENTS.has(log.event_type)) return { ok: false, error: '이 알림은 주문취소 대상이 아닙니다.' };
+
+  const osId = log.order_submission_id;
+  const canceledBy = String(by || 'admin').slice(0, 100);
+  const { withJobLock } = require('../utils/jobLock');
+  const out = await withJobLock('order_ledger:' + osId, async () => {
+    const { rows } = await db.query(
+      `UPDATE order_submissions SET deleted_at = NOW(), canceled_by = $2, updated_at = NOW()
+        WHERE id = $1 AND deleted_at IS NULL
+      RETURNING sheet_row, mirror_status`,
+      [osId, canceledBy]
+    );
+    if (!rows.length) return { already: true };
+    return { sheetRow: rows[0].sheet_row };
+  });
+  if (out && out.skipped) return { ok: false, error: '다른 편집/취소가 진행 중입니다. 잠시 후 다시 시도해주세요.' };
+
+  if (out && !out.already) {
+    // 시트 행이 남아 있고 시트쓰기가 켜져 있으면 그 행 비우기를 큐에 위임(신원검증은 큐가 수행).
+    // 그 외(행 없음·쓰기 비활성)는 DB 상태만 확정 — 취소 자체는 항상 성립해야 한다(되살아남 중단이 목적).
+    if (out.sheetRow && process.env.ORDER_LEDGER_WRITE_ENABLED === 'true') {
+      try {
+        await require('./syncQueue.service').enqueue('order_cancel', { orderSubmissionId: osId });
+        require('../jobs/queuePump').kickQueuePump();
+      } catch (e) {
+        logger.warn(`[reviewer-log] 취소 시트반영 큐 등록 실패(무시, DB취소는 확정): ${e.message}`);
+      }
+    } else {
+      await db.query(
+        `UPDATE order_submissions SET mirror_status = 'canceled' WHERE id = $1 AND mirror_status <> 'canceled'`,
+        [osId]
+      );
+    }
+  }
+
+  // 이 알림 + 같은 주문의 다른 미해결 알림을 함께 정리(원인이 소멸했으므로).
+  await db.query(
+    `UPDATE reviewer_event_logs SET resolved_at = NOW(), resolved_by = $2
+      WHERE id = $1 AND resolved_at IS NULL`,
+    [n, ('취소처리:' + canceledBy).slice(0, 100)]
+  );
+  await db.query(
+    `UPDATE reviewer_event_logs SET resolved_at = NOW(), resolved_by = 'auto:canceled'
+      WHERE order_submission_id = $1 AND resolved_at IS NULL`,
+    [osId]
+  );
+  return { ok: true, canceled: !(out && out.already), alreadyCanceled: !!(out && out.already) };
+}
+
 /** 확인(해결) 처리 — 이미 해결된 로그는 no-op */
 async function resolveReviewerEvent(id, by = 'admin') {
   const n = parseInt(id, 10);
@@ -191,6 +261,8 @@ module.exports = {
   listReviewerEvents,
   unresolvedCounts,
   resolveReviewerEvent,
+  cancelOrderFromEvent,
+  CANCELABLE_EVENTS,
   autoResolveHealed,
   __setPoolForTest,
 };

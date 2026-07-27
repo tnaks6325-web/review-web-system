@@ -1396,12 +1396,24 @@ function _renderLogsBody(q){
         <div style="font-size:13.5px;line-height:1.5;word-break:break-all">${esc(l.message||'')}</div>
         <div style="font-size:11.5px;color:var(--muted);margin-top:3px">${esc(ts)} · ${esc(l.campaignName||l.tabName||'')}${l.reviewerName?' · '+esc(l.reviewerName):''}${resolved?` · ✔ 확인됨(${esc(l.resolvedBy||'')})`:''}</div>
       </div>
-      ${(resolved||!_canResolveLog())?'':`<button class="btn" style="flex:0 0 auto" onclick="_resolveLog(${l.id})">확인</button>`}
+      ${(resolved||!_canResolveLog())?'':
+        `<div style="display:flex;gap:6px;flex:0 0 auto">
+          ${_LOG_CANCELABLE.has(l.eventType)?`<button class="btn" style="border-color:#FCA5A5;color:#B91C1C" onclick="_cancelLogOrder(${l.id})" title="시트에서 지운 것이 '주문취소'였다면 여기를 누르세요 — 다시 기록되지 않습니다">취소 처리</button>`:''}
+          <button class="btn" onclick="_resolveLog(${l.id})">확인</button>
+        </div>`}
     </div>`;
   }).join('')+`</div>`;
 }
 // 확인(해결)은 전역 상태 변경이라 admin/master 전용(서버도 adminOrMaster로 강제) — staff는 열람만.
 function _canResolveLog(){ return STATE.role==='master' || STATE.role==='admin'; }
+// 「시트에서 지운 게 사실은 취소」인 경우에만 취소 처리 버튼을 노출(서버도 동일 목록으로 검증).
+const _LOG_CANCELABLE = new Set(['order_lost','order_lost_manual','order_unmirrored']);
+async function _cancelLogOrder(id){
+  if(!confirm('이 주문을 취소 처리할까요?\n\n· 시트에 다시 기록되지 않습니다.\n· 시트에 행이 남아 있으면 그 행을 비웁니다(다른 사람이 이미 쓴 행은 건드리지 않습니다).\n· 서버에서 취소 상태로 확정됩니다.')) return;
+  const r=await api('/api/trackb/reviewer-logs/cancel-order',{method:'POST',body:JSON.stringify({id})});
+  if(!r||!r.ok){ alert('취소 처리 실패: '+((r&&r.error)||'')); return; }
+  await _loadLogs();
+}
 async function _resolveLog(id){
   const r=await api('/api/trackb/reviewer-logs/resolve',{method:'POST',body:JSON.stringify({id})});
   if(!r||!r.ok){ alert('확인 처리 실패'); return; }

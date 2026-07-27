@@ -2557,11 +2557,16 @@ async function _raCheckAlerts() {
       const card = document.createElement("div");
       card.setAttribute("data-ra-id", String(l.id));
       card.style.cssText = "background:#FEF2F2;border:1.5px solid #FCA5A5;border-radius:12px;padding:12px 14px;box-shadow:0 6px 20px rgba(220,38,38,.18);font-size:.82rem;color:#7F1D1D;line-height:1.5";
+      // 시트에서 지운 게 '의도된 취소'였던 경우의 1클릭 경로 — 누르면 재기록이 멈춘다.
+      const cancelBtn = _RA_CANCELABLE.has(l.eventType)
+        ? '<button onclick="_raCancelOrder(' + Number(l.id) + ')" title="시트에서 지운 것이 주문취소였다면 여기를 누르세요" style="padding:5px 10px;border:1px solid #FCA5A5;background:#fff;color:#B91C1C;border-radius:8px;font-size:.75rem;font-weight:600;cursor:pointer">취소 처리</button>'
+        : "";
       card.innerHTML =
         '<div style="font-weight:800;margin-bottom:4px;color:#DC2626"><i class="fas fa-exclamation-triangle"></i> 리뷰어 중요알림</div>' +
         '<div style="word-break:break-all">' + escHtml(l.message || "") + "</div>" +
-        '<div style="display:flex;gap:6px;justify-content:flex-end;margin-top:8px">' +
+        '<div style="display:flex;gap:6px;justify-content:flex-end;margin-top:8px;flex-wrap:wrap">' +
           '<button onclick="window.open(\'workdesk.html\',\'_blank\')" style="padding:5px 10px;border:1px solid #FCA5A5;background:#fff;color:#B91C1C;border-radius:8px;font-size:.75rem;font-weight:600;cursor:pointer">로그 창 열기</button>' +
+          cancelBtn +
           '<button onclick="_raResolve(' + Number(l.id) + ')" style="padding:5px 12px;border:none;background:#DC2626;color:#fff;border-radius:8px;font-size:.75rem;font-weight:700;cursor:pointer">확인</button>' +
         "</div>";
       stack.appendChild(card);
@@ -2575,6 +2580,17 @@ async function _raResolve(id) {
   try { await gasGet({ action: "reviewerLogResolve", id: id }); } catch (_) {}
   const el = document.querySelector('[data-ra-id="' + id + '"]');
   if (el) el.remove();
+}
+// 「시트에서 지운 게 사실은 취소」 — 서버도 동일 목록으로 검증(신뢰하지 않고 재확인)
+const _RA_CANCELABLE = new Set(["order_lost", "order_lost_manual", "order_unmirrored"]);
+async function _raCancelOrder(id) {
+  if (!confirm("이 주문을 취소 처리할까요?\n\n· 시트에 다시 기록되지 않습니다.\n· 시트에 행이 남아 있으면 그 행을 비웁니다(다른 사람이 이미 쓴 행은 건드리지 않습니다).\n· 서버에서 취소 상태로 확정됩니다.")) return;
+  let r = null;
+  try { r = await gasGet({ action: "reviewerLogCancelOrder", id: id }); } catch (_) {}
+  if (!r || !r.ok) { showToast("취소 처리 실패" + (r && r.error ? ": " + r.error : ""), "error"); return; }
+  const el = document.querySelector('[data-ra-id="' + id + '"]');
+  if (el) el.remove();
+  showToast("주문이 취소 처리되었습니다. 시트에 다시 기록되지 않습니다.", "success");
 }
 // SSE 'reviewer_alert' 수신 훅 (index-payment.js connectSSE 에서 호출)
 function _onReviewerAlertSSE() {
