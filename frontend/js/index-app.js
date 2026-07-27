@@ -1377,7 +1377,7 @@ function switchAdminTab(tabName) {
   if (tabName === "payment")   initPaymentPanel();
   if (tabName === "dashboard") { try { loadTabDashboard(); } catch(_){} try { loadSystemMonitor(); } catch(_){} try { loadStatsOverview(); } catch(_){} try { loadDashWorkOrders(); } catch(_){} try { loadReviewerNoticesAdmin(); } catch(_){} }
   if (tabName === "archive")   { try { loadArchiveList(); } catch(_){} try { _loadArchiveHistory(); } catch(_){} }
-  if (tabName === "settings")  { try { loadUnrecognizedTabs(); } catch(_){} try { loadMappingCoverage(); } catch(_){} try { loadKeywordList(); } catch(_){} try { loadCompanyBusinessNo(); } catch(_){} try { loadCampEditors(); } catch(_){} }
+  if (tabName === "settings")  { try { loadUnrecognizedTabs(); } catch(_){} try { loadMappingCoverage(); } catch(_){} try { loadKeywordList(); } catch(_){} try { loadCompanyBusinessNo(); } catch(_){} try { loadCampEditors(); } catch(_){} try { loadSheetNotice(); } catch(_){} }
   if (tabName === "errorlogs") { try { loadErrorLogs(); } catch(_){} }
   if (tabName === "order-ledger") { try { loadOrderLedger(); } catch(_){} }
   // ★ 컨텍스트 툴바 업데이트
@@ -11868,6 +11868,69 @@ async function _updateUnrecogBadge() {
 }
 
 // ── 인식 실패 탭 목록 로드 ──
+/* ══ 시트 상단 강제 공지문 (설정 탭) ══
+   C1:R1에 "줄 삭제 금지 · 값만 삭제" 안내를 고정 표시. 신규 탭은 생성 시 자동,
+   기존 탭은 [투입 남은 탭에 일괄 적용]으로. 대상 = 마감 아님 + 아카이브 아님 + 채울 자리 남음. */
+let _noticeBulkPoll = null;
+function _noticeMsg(text, isErr) {
+  const el = document.getElementById('sheetNoticeMsg');
+  if (el) { el.textContent = text || ''; el.style.color = isErr ? '#DC2626' : 'var(--t3)'; }
+}
+async function loadSheetNotice() {
+  const ta = document.getElementById('sheetNoticeText');
+  if (!ta) return;
+  try {
+    const r = await gasGet({ action: 'sheetNoticeGet' });
+    if (r && r.ok) {
+      ta.value = r.text || '';
+      _noticeMsg(r.isDefault ? '기본 문구 사용 중' : '사용자 지정 문구');
+    }
+  } catch (e) { console.warn('[sheetNotice] load 실패:', e.message); }
+}
+async function saveSheetNoticeText() {
+  const ta = document.getElementById('sheetNoticeText');
+  if (!ta) return;
+  const text = (ta.value || '').trim();
+  if (!text) { _noticeMsg('문구를 입력해주세요.', true); return; }
+  const r = await gasGet({ action: 'sheetNoticeSet', actionType: 'setText', text }).catch(() => null);
+  if (r && r.ok) _noticeMsg('저장했습니다. 이후 삽입부터 적용됩니다.');
+  else _noticeMsg('저장 실패: ' + ((r && (r.error || (r.hits || []).join(','))) || '오류'), true);
+}
+async function previewSheetNoticeBulk() {
+  _noticeMsg('대상 조회 중...');
+  const r = await gasGet({ action: 'sheetNoticeBulk', dryRun: true }).catch(() => null);
+  const box = document.getElementById('sheetNoticeList');
+  if (!r || !r.ok) { _noticeMsg('조회 실패', true); return; }
+  _noticeMsg(`대상 ${r.count}개 탭 (투입 남은 탭)`);
+  if (!box) return;
+  if (!r.count) { box.innerHTML = '<div style="font-size:.8rem;color:#6B7280;padding:8px">대상 탭이 없습니다.</div>'; return; }
+  box.innerHTML = '<div style="max-height:260px;overflow:auto;border:1px solid #E5E7EB;border-radius:8px">' +
+    (r.targets || []).map(t =>
+      '<div style="display:flex;gap:8px;padding:6px 10px;border-bottom:1px solid #F3F4F6;font-size:.78rem">' +
+        '<span style="flex:1;color:#111827">' + escHtml(t.tabName || '') + '</span>' +
+        '<span style="color:#9CA3AF">' + escHtml(t.campaignName || '') + '</span>' +
+        '<span style="color:#6B7280;white-space:nowrap">' + (t.submittedCount == null ? '-' : t.submittedCount) + '/' + (t.rowCount == null ? '-' : t.rowCount) + '</span>' +
+      '</div>').join('') + '</div>';
+}
+async function applySheetNoticeBulk() {
+  const r0 = await gasGet({ action: 'sheetNoticeBulk', dryRun: true }).catch(() => null);
+  if (!r0 || !r0.ok) { _noticeMsg('대상 조회 실패', true); return; }
+  if (!r0.count) { _noticeMsg('대상 탭이 없습니다.'); return; }
+  if (!confirm(`투입이 남은 ${r0.count}개 탭의 C1~R1에 공지문을 넣습니다.\n\n· 이미 내용이 있는 칸은 건드리지 않습니다.\n· 행을 새로 넣지 않으므로 행번호는 그대로입니다.\n\n진행할까요?`)) return;
+  const r = await gasGet({ action: 'sheetNoticeBulk', dryRun: false }).catch(() => null);
+  if (!r || !r.ok) { _noticeMsg('실행 실패: ' + ((r && r.error) || '오류'), true); return; }
+  _noticeMsg(`적용 시작 (${r.count}개 탭) — 진행 상황 확인 중...`);
+  if (_noticeBulkPoll) clearInterval(_noticeBulkPoll);
+  _noticeBulkPoll = setInterval(async () => {
+    const s = await gasGet({ action: 'sheetNoticeBulkStat' }).catch(() => null);
+    if (!s || !s.ok) return;
+    const l = s.last || {};
+    const done = (l.applied || 0) + (l.alreadySet || 0) + (l.skipped || 0) + (l.failed || 0);
+    _noticeMsg(`진행 ${done}/${l.total || 0} — 삽입 ${l.applied || 0} · 이미있음 ${l.alreadySet || 0} · 건너뜀 ${l.skipped || 0} · 실패 ${l.failed || 0}`);
+    if (!s.running) { clearInterval(_noticeBulkPoll); _noticeBulkPoll = null; }
+  }, 3000);
+}
+
 /** 회사 공통 사업자번호 불러오기 (설정 탭) */
 async function loadCompanyBusinessNo() {
   const input = document.getElementById('companyBusinessNoInput');

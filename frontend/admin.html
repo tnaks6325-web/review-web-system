@@ -1487,6 +1487,45 @@ body{ letter-spacing:-.01em; }
 
         <hr style="margin:28px 0;border:none;border-top:1px solid #E5E7EB">
 
+        <!-- 시트 상단 강제 공지문 -->
+        <div class="admin-section-header">
+          <span style="font-size:.95rem;font-weight:700;color:var(--t1)">
+            <i class="fas fa-thumbtack" style="color:#D97706;margin-right:6px"></i>시트 상단 공지문
+          </span>
+          <div style="display:flex;gap:6px;margin-left:auto">
+            <button class="btn-sm" onclick="loadSheetNotice()" style="font-size:.78rem">
+              <i class="fas fa-sync"></i> 새로고침
+            </button>
+          </div>
+        </div>
+        <p style="font-size:.78rem;color:var(--t3);margin:8px 0 12px">
+          시트 <b>C1~R1</b>(캠페인명 오른쪽 여백)에 <b>줄 삭제 금지</b> 안내를 고정 표시합니다. 행을 새로 넣지 않으므로 기존 기록의 행번호는 그대로입니다.
+          <b>신규 탭은 만들 때 자동 삽입</b>되고, 아래 버튼으로 <b>투입이 남은 기존 탭</b>에 일괄 적용할 수 있습니다.
+          <span style="color:#B45309">문구에 <b>수취인·연락처·주소</b> 같은 단어가 2개 이상 들어가면 시스템이 헤더로 착각하므로 저장이 거부됩니다.</span>
+        </p>
+        <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:flex-start;max-width:760px">
+          <textarea id="sheetNoticeText" rows="2" placeholder="공지문"
+            style="flex:1;min-width:280px;padding:8px 12px;border:1.5px solid #D1D5DB;border-radius:8px;font-size:.82rem;outline:none;resize:vertical"></textarea>
+          <button onclick="saveSheetNoticeText()"
+            style="padding:8px 16px;background:var(--p);color:#fff;border:none;border-radius:8px;font-size:.82rem;font-weight:600;cursor:pointer">
+            <i class="fas fa-save"></i> 문구 저장
+          </button>
+        </div>
+        <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center;margin-top:10px">
+          <button onclick="previewSheetNoticeBulk()"
+            style="padding:8px 16px;background:#fff;color:#B45309;border:1.5px solid #FCD34D;border-radius:8px;font-size:.82rem;font-weight:600;cursor:pointer">
+            <i class="fas fa-list"></i> 대상 탭 확인
+          </button>
+          <button onclick="applySheetNoticeBulk()"
+            style="padding:8px 16px;background:#D97706;color:#fff;border:none;border-radius:8px;font-size:.82rem;font-weight:700;cursor:pointer">
+            <i class="fas fa-thumbtack"></i> 투입 남은 탭에 일괄 적용
+          </button>
+          <span id="sheetNoticeMsg" style="font-size:.78rem;color:var(--t3)"></span>
+        </div>
+        <div id="sheetNoticeList" style="margin-top:12px;max-width:760px"></div>
+
+        <hr style="margin:28px 0;border:none;border-top:1px solid #E5E7EB">
+
         <!-- 리뷰어 앱 공고수정 허용 명단 (마스터 전용) -->
         <div class="admin-section-header">
           <span style="font-size:.95rem;font-weight:700;color:var(--t1)">

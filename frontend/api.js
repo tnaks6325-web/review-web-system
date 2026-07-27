@@ -190,6 +190,12 @@ const _ACTION_MAP = {
   'reviewerLogResolve': { method: 'POST', path: '/api/trackb/reviewer-logs/resolve' },
   'reviewerLogCancelOrder': { method: 'POST', path: '/api/trackb/reviewer-logs/cancel-order' },
 
+  // 시트 상단 강제 공지문 (C1:R1) — 신규 탭 자동 삽입 + 기존 탭 일괄 적용
+  'sheetNoticeGet':      { method: 'GET',  path: '/api/diag/sheet-notice' },
+  'sheetNoticeSet':      { method: 'POST', path: '/api/diag/sheet-notice' },
+  'sheetNoticeBulk':     { method: 'POST', path: '/api/diag/sheet-notice-bulk' },
+  'sheetNoticeBulkStat': { method: 'GET',  path: '/api/diag/sheet-notice-bulk' },
+
   // 이미지 (Gemini AI + Drive)
   'extractOrderImage':   { method: 'POST', path: '/api/image/image-extract' },
   'uploadOrderImage':    { method: 'POST', path: '/api/image/image-upload' },

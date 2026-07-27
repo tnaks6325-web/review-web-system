@@ -2503,8 +2503,9 @@ router.get('/sheet-notice', authMiddleware, adminOrMasterMiddleware, async (req,
 router.post('/sheet-notice', authMiddleware, adminOrMasterMiddleware, async (req, res, next) => {
   try {
     const svc = require('../services/sheetNotice.service');
-    const { action, text, sheetId, gid, tabName, force, dryRun } = req.body || {};
-    if (action === 'setText') {
+    // ★ 프론트 래퍼(gasGet)가 body의 `action`을 라우팅 키로 소비하므로 `actionType`도 받는다.
+    const { action, actionType, text, sheetId, gid, tabName, force, dryRun } = req.body || {};
+    if (action === 'setText' || actionType === 'setText') {
       const out = await svc.setNoticeText(text);
       return res.status(out.ok ? 200 : 400).json(out);
     }
@@ -2518,6 +2519,81 @@ router.post('/sheet-notice', authMiddleware, adminOrMasterMiddleware, async (req
       dryRun: !!dryRun,
     });
     res.status(out.ok ? 200 : 400).json(out);
+  } catch (err) { next(err); }
+});
+
+// ── 일괄 적용: "투입이 아직 남은 탭"에만 공지문 삽입 ──
+//   대상 = 마감 안 됨(is_closed=false) + 아카이브 아님 + 아직 채울 자리 남음(제출 < 전체행).
+//   dryRun(기본)은 시트를 전혀 건드리지 않고 대상 목록만 돌려준다(미리보기).
+//   실제 적용은 탭당 시트 API 2~3콜이라 백그라운드 실행 후 즉시 응답(HTTP 타임아웃 방지),
+//   진행은 GET /sheet-notice-bulk 로 관찰(queue-drain과 동일 패턴).
+let _noticeBulkRunning = false;
+let _noticeBulkLast = null;
+
+async function _noticeBulkTargets(limit) {
+  const { rows } = await pool.query(
+    `SELECT tc.sheet_id AS "sheetId", tc.tab_name AS "tabName",
+            COALESCE(tc.tab_gid, im.tab_gid) AS "tabGid",
+            tc.campaign_name AS "campaignName",
+            im.row_count AS "rowCount", im.submitted_count AS "submittedCount"
+       FROM tab_configs tc
+       LEFT JOIN index_master im ON tc.sheet_id = im.sheet_id AND tc.tab_name = im.tab_name
+      WHERE COALESCE(tc.is_closed, FALSE) = FALSE
+        AND NOT EXISTS (
+          SELECT 1 FROM index_master_archive ima
+           WHERE ima.sheet_id = tc.sheet_id
+             AND (ima.tab_name = tc.tab_name
+                  OR (ima.tab_gid IS NOT NULL AND ima.tab_gid = COALESCE(tc.tab_gid, im.tab_gid))))
+        AND (im.row_count IS NULL OR COALESCE(im.submitted_count, 0) < im.row_count)
+      ORDER BY tc.campaign_name NULLS LAST, tc.tab_name
+      LIMIT $1`,
+    [Math.min(Math.max(parseInt(limit, 10) || 60, 1), 200)]
+  );
+  return rows;
+}
+
+router.get('/sheet-notice-bulk', authMiddleware, adminOrMasterMiddleware, async (req, res, next) => {
+  try {
+    res.json({ ok: true, running: _noticeBulkRunning, last: _noticeBulkLast });
+  } catch (err) { next(err); }
+});
+
+router.post('/sheet-notice-bulk', authMiddleware, adminOrMasterMiddleware, async (req, res, next) => {
+  try {
+    const { dryRun = true, limit, force = false } = req.body || {};
+    const targets = await _noticeBulkTargets(limit);
+    if (dryRun) {
+      return res.json({ ok: true, dryRun: true, count: targets.length, targets });
+    }
+    if (_noticeBulkRunning) return res.status(409).json({ ok: false, error: '이미 실행 중입니다. 진행상황은 GET 으로 확인하세요.' });
+    if (!targets.length) return res.json({ ok: true, started: false, count: 0, message: '대상 탭이 없습니다.' });
+
+    _noticeBulkRunning = true;
+    _noticeBulkLast = { startedAt: new Date().toISOString(), total: targets.length, applied: 0, alreadySet: 0, skipped: 0, failed: 0, results: [] };
+    // 백그라운드 실행 — 시트 throttle 은 서비스 내부에서 처리
+    (async () => {
+      const svc = require('../services/sheetNotice.service');
+      for (const t of targets) {
+        try {
+          const r = await svc.applySheetNotice(t.sheetId, {
+            gid: t.tabGid ? String(t.tabGid) : undefined,
+            tabName: t.tabGid ? undefined : t.tabName,
+            force: !!force,
+          });
+          if (r.applied) _noticeBulkLast.applied++;
+          else if (r.alreadySet) _noticeBulkLast.alreadySet++;
+          else _noticeBulkLast.skipped++;
+          _noticeBulkLast.results.push({ tab: t.tabName, ...r });
+        } catch (e) {
+          _noticeBulkLast.failed++;
+          _noticeBulkLast.results.push({ tab: t.tabName, ok: false, error: e.message });
+        }
+      }
+      _noticeBulkLast.finishedAt = new Date().toISOString();
+    })().catch(e => { logger.warn(`[sheet-notice-bulk] ${e.message}`); })
+      .finally(() => { _noticeBulkRunning = false; });
+
+    res.json({ ok: true, started: true, count: targets.length });
   } catch (err) { next(err); }
 });
 
