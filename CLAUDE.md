@@ -66,6 +66,9 @@ GAS(Google Apps Script) 기반 리뷰 관리 시스템을 **Node.js Express + Po
 - **3단계 완료(관리자 화면)**: 공고 모달(`admin.html` `#rf_opt_rows`) 옵션표(옵션명·금액·정원·하루건수) — `index-recruit.js` `addOptRow`/`renderOptRows`/`readOptRows`(파이프 제거·빈옵션 제외)·`_optSummary`(정원합/하루합/중복 자동점검), 저장 시 `payload.options`(**옵션표 UI 있는 페이지에서만 전송** — 없으면 미전송=기존 옵션 유지, 옵션 소실 방지)+중복 하드블록, 편집 프리필 `renderOptRows(json.options)`(관리자 `GET /:id`가 원본 옵션 반환). 작업오더→발행 프리필: `index-app.js` `_woOptionRows`(`product_options_json`→옵션행, **2개 이상만**·정원/하루는 관리자 입력)→`prefill.options`. 관제: `GET /admin/:id/applications`가 `option_key`+옵션 뷰(`_loadOptionViews`, 금액 포함=관리자 전용) 반환 → `_campOptionTable`(옵션별 오늘 진행중/제출/누적확정/정원/상태, 신청행 기반 오늘 집계). 회귀가드 `tests/campaignOptionsAdminGuards.test.js`.
 - **다음 단계(선택)**: 게시 전 옵션명↔시트 옵션열 대조(불일치 경고), 다단계 조합옵션, 진짜 옵션 rename 엔드포인트.
 
+### 타계정 추가참여 (기획 문서만 — 미구현)
+- 참여형 공고에서 로그인 리뷰어가 자기 타계정(`sub_accounts`) 명의로 같은 공고에 추가 참여(명의당 1건, 공고별 관리자 [가능/불가] 토글·기본 불가)하는 기능 기획. PRD·유저플로우·와이어프레임 = `frontend/docs/prd-multiaccount-participation.html`(v1.0 검토용, 일반인용 무개발용어). 구현 착수 전 문서 §09 결정 6항목(기본값·동시홀드 상한 확대·타계정 단독참여·카드 배지·총건수 상한·설정 시점) 사용자 확정 필요. 구현 시 영향 지점: apply 게이트(`already_today`/활성홀드 2건 상한 — phone8 단위라 명의별 자연 분리), `campaign_applications` 명의 귀속, campaign.html 명의선택 시트, 신원게이트 SUB 연계는 기존 장치 재사용.
+
 ### 컬럼감지 SoT (컬럼 판정 DB화 1단계) — 매핑 우선 · 키워드는 부트스트랩/폴백
 - 리뷰 인덱스의 컬럼 감지(`columnResolver.parseTabRows`, 두 빌더 공용)는 **DB매핑(`tab_column_mappings`) 우선 → 키워드 폴백**. DB 오버라이드 6필드 = recipient/review_submit/product/phone/round/payment. **name은 PII 가드로 영구 키워드 전용**(테스트 케이스 9). 매핑은 재앵커(저장 헤더==현재 헤더)·범위가드 통과 시만 신뢰.
 - **자동기록(detection snapshot)**: `COLUMN_MAPPING_AUTO_RECORD=1`이면 빌더가 매핑 없는 탭에서 "방금 키워드가 고른 컬럼"을 `recordDetectedMappings`로 기록(원자 `WHERE NOT EXISTS`+`ON CONFLICT DO NOTHING` = **수동 매핑 절대 미덮어씀**, `updated_by='auto:detect'`, **checksum 무효화 없음** — 기록≡키워드 결과라 재파싱 불필요). 전 탭 백필 = 플래그 켜고 `smart-build/run {force:true}` 1회(또는 04:00 전체 리빌드 대기). ★ `autoGuessField`(매핑 UI 추측) 기반 백필 금지 — resolver와 시맨틱 불일치(예: '입금자명').

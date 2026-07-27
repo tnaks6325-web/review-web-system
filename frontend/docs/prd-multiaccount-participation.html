@@ -1,0 +1,803 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+  <meta charset="UTF-8"/>
+  <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+  <title>아이에이리뷰 — 모집공고 타계정 추가참여 PRD &amp; 유저플로우</title>
+  <style>
+  :root{
+    --paper:#F4F6FC; --card:#FFFFFF; --ink:#151B26; --mut:#5E6A7C; --faint:#8B96A8;
+    --line:#E2E7F0; --accent:#3182F6; --accent-deep:#1B64DA; --accent-soft:#E9F1FE;
+    --ok:#12B886; --ok-soft:#DDF5EC; --warn:#B45309; --warn-soft:#FDF0D9;
+    --err:#DC2626; --err-soft:#FDE8E8;
+    --paid:#3F51B5; --paid-soft:#E4E9FB;
+    --sub:#7C3AED; --sub-soft:#F1EAFE;
+    --wire:#CBD4E1; --wire-soft:#EEF1F7;
+    --shadow:0 2px 14px rgba(21,40,80,.07);
+  }
+  @media (prefers-color-scheme: dark){
+    :root{
+      --paper:#0E131B; --card:#161D29; --ink:#E8EDF5; --mut:#9AA6B8; --faint:#6E7A8C;
+      --line:#2A3444; --accent:#5B9BF8; --accent-deep:#82B4FA; --accent-soft:#1B2A44;
+      --ok:#3DCF9F; --ok-soft:#123528; --warn:#F0B35C; --warn-soft:#3A2B12;
+      --err:#F87171; --err-soft:#3A1515;
+      --paid:#98A6EE; --paid-soft:#232B4E;
+      --sub:#B794F6; --sub-soft:#2C1F49;
+      --wire:#3A4658; --wire-soft:#1D2634;
+      --shadow:0 2px 14px rgba(0,0,0,.35);
+    }
+  }
+  :root[data-theme="dark"]{
+    --paper:#0E131B; --card:#161D29; --ink:#E8EDF5; --mut:#9AA6B8; --faint:#6E7A8C;
+    --line:#2A3444; --accent:#5B9BF8; --accent-deep:#82B4FA; --accent-soft:#1B2A44;
+    --ok:#3DCF9F; --ok-soft:#123528; --warn:#F0B35C; --warn-soft:#3A2B12;
+    --err:#F87171; --err-soft:#3A1515;
+    --paid:#98A6EE; --paid-soft:#232B4E;
+    --sub:#B794F6; --sub-soft:#2C1F49;
+    --wire:#3A4658; --wire-soft:#1D2634;
+    --shadow:0 2px 14px rgba(0,0,0,.35);
+  }
+  :root[data-theme="light"]{
+    --paper:#F4F6FC; --card:#FFFFFF; --ink:#151B26; --mut:#5E6A7C; --faint:#8B96A8;
+    --line:#E2E7F0; --accent:#3182F6; --accent-deep:#1B64DA; --accent-soft:#E9F1FE;
+    --ok:#12B886; --ok-soft:#DDF5EC; --warn:#B45309; --warn-soft:#FDF0D9;
+    --err:#DC2626; --err-soft:#FDE8E8;
+    --paid:#3F51B5; --paid-soft:#E4E9FB;
+    --sub:#7C3AED; --sub-soft:#F1EAFE;
+    --wire:#CBD4E1; --wire-soft:#EEF1F7;
+    --shadow:0 2px 14px rgba(21,40,80,.07);
+  }
+  *{box-sizing:border-box;margin:0;padding:0}
+  body{
+    background:var(--paper); color:var(--ink);
+    font-family:"Apple SD Gothic Neo","Pretendard","Noto Sans KR","Malgun Gothic",system-ui,sans-serif;
+    line-height:1.65; -webkit-font-smoothing:antialiased;
+  }
+  .wrap{max-width:1000px;margin:0 auto;padding:0 20px 80px}
+
+  /* ── 헤더 ── */
+  .hero{padding:52px 0 30px}
+  .hero .eyebrow{font-size:.78rem;font-weight:700;letter-spacing:.14em;color:var(--accent);text-transform:uppercase}
+  .hero h1{font-size:clamp(1.7rem,4.4vw,2.5rem);font-weight:800;letter-spacing:-.02em;text-wrap:balance;margin:8px 0 10px}
+  .hero p.lead{font-size:1.02rem;color:var(--mut);max-width:62ch}
+  .hero .meta{display:flex;flex-wrap:wrap;gap:8px;margin-top:18px}
+  .chip{display:inline-flex;align-items:center;gap:6px;font-size:.74rem;font-weight:600;color:var(--mut);
+    background:var(--card);border:1px solid var(--line);border-radius:999px;padding:5px 12px}
+  .chip b{color:var(--ink);font-weight:700}
+
+  /* ── 목차 내비 ── */
+  nav.toc{position:sticky;top:0;z-index:50;background:var(--paper);padding:10px 0;border-bottom:1px solid var(--line);
+    display:flex;gap:6px;overflow-x:auto;-webkit-overflow-scrolling:touch}
+  nav.toc a{flex-shrink:0;font-size:.8rem;font-weight:700;color:var(--mut);text-decoration:none;
+    padding:7px 13px;border-radius:999px;border:1px solid transparent}
+  nav.toc a:hover,nav.toc a:focus-visible{color:var(--accent-deep);background:var(--accent-soft);outline:none}
+
+  /* ── 섹션 공통 ── */
+  section{padding-top:56px}
+  .sec-label{font-size:.74rem;font-weight:700;letter-spacing:.12em;color:var(--accent);margin-bottom:6px}
+  section>h2{font-size:1.45rem;font-weight:800;letter-spacing:-.015em;text-wrap:balance;margin-bottom:8px}
+  section>p.desc{color:var(--mut);max-width:68ch;margin-bottom:22px}
+  h3{font-size:1.02rem;font-weight:800;margin:30px 0 12px}
+  .card{background:var(--card);border:1px solid var(--line);border-radius:14px;box-shadow:var(--shadow)}
+  .plain{padding:20px 22px}
+  .plain ul{list-style:none;display:flex;flex-direction:column;gap:10px}
+  .plain li{padding-left:24px;position:relative;font-size:.94rem}
+  .plain li::before{content:"✓";position:absolute;left:2px;color:var(--ok);font-weight:800}
+  .plain li.x::before{content:"✕";color:var(--err)}
+
+  /* ── 표 ── */
+  .tbl{width:100%;border-collapse:collapse;font-size:.86rem}
+  .tbl th{background:var(--wire-soft);text-align:left;font-weight:800;padding:9px 12px;border:1px solid var(--line);white-space:nowrap}
+  .tbl td{padding:9px 12px;border:1px solid var(--line);vertical-align:top}
+  .tbl td b{font-weight:800}
+  .tbl-scroll{overflow-x:auto}
+  .tag{display:inline-block;font-size:.62rem;font-weight:800;border-radius:6px;padding:2px 8px;white-space:nowrap}
+  .tag.now{background:var(--wire-soft);color:var(--mut)}
+  .tag.new{background:var(--ok-soft);color:var(--ok)}
+  .tag.risk{background:var(--err-soft);color:var(--err)}
+  .tag.def{background:var(--accent-soft);color:var(--accent-deep)}
+
+  /* ── 플로우 ── */
+  .flow{display:flex;flex-wrap:wrap;align-items:stretch;gap:10px;margin:14px 0 6px}
+  .fstep{flex:1 1 150px;min-width:150px;max-width:230px;position:relative;padding:14px 14px 12px;border-radius:12px;
+    background:var(--card);border:1px solid var(--line);box-shadow:var(--shadow)}
+  .fstep .n{position:absolute;top:-10px;left:12px;background:var(--accent);color:#fff;font-size:.68rem;font-weight:800;
+    border-radius:999px;padding:2px 9px;letter-spacing:.04em}
+  .fstep h5{font-size:.88rem;font-weight:800;margin:4px 0 4px}
+  .fstep p{font-size:.76rem;color:var(--mut)}
+  .fstep .where{display:inline-block;margin-top:8px;font-size:.66rem;font-weight:700;color:var(--faint);
+    background:var(--wire-soft);border-radius:6px;padding:2px 7px}
+  .flow-note{font-size:.78rem;color:var(--mut);margin:8px 0 0;padding-left:2px}
+  .flow-note b{color:var(--ink)}
+
+  /* ── 와이어프레임 ── */
+  .wf-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(280px,1fr));gap:22px;align-items:start}
+  .phone-slot h4{font-size:.92rem;font-weight:800;margin-bottom:3px}
+  .phone-slot .cap{font-size:.78rem;color:var(--mut);margin-bottom:12px;max-width:38ch}
+  .phone{width:100%;max-width:290px;border:2px solid var(--wire);border-radius:26px;background:var(--card);
+    padding:10px;box-shadow:var(--shadow)}
+  .screen{border-radius:18px;overflow:hidden;background:var(--paper);border:1px solid var(--line)}
+  .appbar{background:var(--accent);color:#fff;padding:10px 12px;font-size:.78rem;font-weight:800;display:flex;justify-content:space-between;align-items:center}
+  .appbar .r{font-size:.62rem;font-weight:600;opacity:.85}
+  .scr-body{padding:10px;display:flex;flex-direction:column;gap:8px}
+  .blk{background:var(--card);border:1px solid var(--line);border-radius:10px;padding:9px 10px}
+  .blk .t{font-size:.66rem;font-weight:800;color:var(--faint);margin-bottom:5px;letter-spacing:.02em}
+  .wl{height:8px;border-radius:4px;background:var(--wire-soft);margin:4px 0}
+  .wl.w60{width:60%} .wl.w80{width:80%} .wl.w40{width:40%}
+  .wbtn{display:block;text-align:center;background:var(--accent);color:#fff;font-size:.74rem;font-weight:800;
+    border-radius:8px;padding:8px;margin-top:4px}
+  .wbtn.ghost{background:var(--wire-soft);color:var(--mut)}
+  .wbtn.ok{background:var(--ok)}
+  .wbtn.sub{background:var(--sub)}
+  .wbtn.disabled{background:var(--wire-soft);color:var(--faint)}
+  .field{border:1.5px solid var(--line);border-radius:7px;padding:7px 9px;font-size:.7rem;color:var(--faint);background:var(--card);margin:3px 0}
+  .field.lock{background:var(--wire-soft);display:flex;justify-content:space-between;align-items:center;color:var(--ink);font-weight:700}
+  .bdg{font-size:.58rem;font-weight:800;border-radius:6px;padding:2px 6px;white-space:nowrap;flex-shrink:0}
+  .bdg.wait{background:var(--warn-soft);color:var(--warn)}
+  .bdg.done{background:var(--ok-soft);color:var(--ok)}
+  .bdg.paid{background:var(--paid-soft);color:var(--paid)}
+  .bdg.off{background:var(--wire-soft);color:var(--faint)}
+  .bdg.err{background:var(--err-soft);color:var(--err)}
+  .bdg.me{background:var(--accent-soft);color:var(--accent-deep)}
+  .bdg.ta{background:var(--sub-soft);color:var(--sub)}
+  .pin{display:inline-flex;align-items:center;justify-content:center;width:17px;height:17px;border-radius:50%;
+    background:var(--accent);color:#fff;font-size:.62rem;font-weight:800;flex-shrink:0;line-height:1}
+  .legend{margin-top:10px;display:flex;flex-direction:column;gap:6px}
+  .legend div{display:flex;gap:8px;font-size:.76rem;color:var(--mut);align-items:flex-start}
+  .legend .pin{margin-top:2px}
+  .legend b{color:var(--ink)}
+  .newchip{display:inline-block;font-size:.58rem;font-weight:800;background:var(--ok);color:#fff;border-radius:5px;padding:1px 6px;vertical-align:middle;margin-left:4px}
+
+  /* 계정(명의) 행 — 옵션 행과 같은 문법 */
+  .optrow{display:flex;align-items:center;gap:8px;background:var(--card);border:1.5px solid var(--line);
+    border-radius:10px;padding:8px 10px}
+  .optrow.sel{border-color:var(--accent);background:var(--accent-soft)}
+  .optrow.soldout{opacity:.55}
+  .optrow .on{flex:1;min-width:0}
+  .optrow .on .nm{font-size:.72rem;font-weight:800}
+  .optrow .on .sub{font-size:.6rem;color:var(--mut);margin-top:1px}
+  .optrow .radio{width:14px;height:14px;border-radius:50%;border:2px solid var(--wire);flex-shrink:0}
+  .optrow.sel .radio{border-color:var(--accent);background:var(--accent)}
+  .avatar{display:inline-flex;align-items:center;justify-content:center;width:22px;height:22px;border-radius:50%;
+    background:var(--wire-soft);color:var(--mut);font-size:.6rem;font-weight:800;flex-shrink:0}
+  .avatar.me{background:var(--accent-soft);color:var(--accent-deep)}
+  .avatar.ta{background:var(--sub-soft);color:var(--sub)}
+
+  /* 홀드 타이머 배너 */
+  .holdbar{display:flex;align-items:center;gap:8px;background:var(--warn-soft);border:1px solid var(--warn);
+    border-radius:9px;padding:7px 10px}
+  .holdbar .ht{flex:1;font-size:.62rem;font-weight:700;color:var(--warn)}
+  .holdbar .hv{font-size:.8rem;font-weight:900;color:var(--warn);font-variant-numeric:tabular-nums}
+
+  /* 바텀시트 표현 */
+  .bsheet{background:var(--card);border:1px solid var(--line);border-radius:14px 14px 10px 10px;padding:10px;
+    box-shadow:0 -4px 14px rgba(21,40,80,.12)}
+  .bsheet .grab{width:34px;height:4px;border-radius:2px;background:var(--wire);margin:0 auto 8px}
+  .bsheet .bt{font-size:.72rem;font-weight:800;margin-bottom:6px}
+
+  /* 토글(관리자 설정) */
+  .seg{display:inline-flex;border:1.5px solid var(--line);border-radius:8px;overflow:hidden;font-size:.66rem;font-weight:800}
+  .seg span{padding:4px 12px;color:var(--faint);background:var(--card)}
+  .seg span.on{background:var(--accent);color:#fff}
+  .seg.okseg span.on{background:var(--ok)}
+
+  /* 데스크톱 프레임 (관리자) */
+  .desk{border:2px solid var(--wire);border-radius:14px;overflow:hidden;background:var(--card);box-shadow:var(--shadow)}
+  .desk .bar{display:flex;align-items:center;gap:6px;background:var(--wire-soft);padding:8px 12px;border-bottom:1px solid var(--line)}
+  .desk .bar i{width:9px;height:9px;border-radius:50%;background:var(--wire)}
+  .desk .bar .url{flex:1;background:var(--card);border:1px solid var(--line);border-radius:6px;font-size:.62rem;
+    color:var(--faint);padding:3px 10px;font-weight:600}
+  .desk .dbody{padding:14px;display:flex;flex-direction:column;gap:10px}
+  .dtbl{width:100%;border-collapse:collapse;font-size:.66rem}
+  .dtbl th{background:var(--wire-soft);font-weight:800;padding:5px 8px;border:1px solid var(--line);text-align:left;white-space:nowrap}
+  .dtbl td{padding:5px 8px;border:1px solid var(--line);white-space:nowrap}
+  .desk-slot h4{font-size:.92rem;font-weight:800;margin-bottom:3px}
+  .desk-slot .cap{font-size:.78rem;color:var(--mut);margin-bottom:12px}
+
+  /* 정책 카드 */
+  .pol-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(230px,1fr));gap:12px}
+  .pol{padding:16px 18px}
+  .pol .pk{font-size:.72rem;font-weight:800;color:var(--accent-deep);letter-spacing:.04em;margin-bottom:6px}
+  .pol .pv{font-size:.86rem}
+  .pol .pv b{font-weight:800}
+  .pol .pnote{font-size:.74rem;color:var(--mut);margin-top:6px}
+
+  .callout{border-left:4px solid var(--accent);background:var(--accent-soft);border-radius:0 12px 12px 0;
+    padding:14px 18px;font-size:.88rem;margin:16px 0}
+  .callout.warn{border-left-color:var(--warn);background:var(--warn-soft)}
+  .callout.risk{border-left-color:var(--err);background:var(--err-soft)}
+  .callout b{font-weight:800}
+
+  footer{margin-top:70px;padding-top:20px;border-top:1px solid var(--line);font-size:.76rem;color:var(--faint)}
+  footer a{color:var(--accent-deep);font-weight:700;text-decoration:none}
+  </style>
+</head>
+<body>
+<div class="wrap">
+
+  <!-- ═══════════ HERO ═══════════ -->
+  <header class="hero">
+    <div class="eyebrow">PRD · USER FLOW · WIREFRAME</div>
+    <h1>모집공고 타계정 추가참여<br/>— 한 공고에 내 타계정으로 여러 건 참여하기</h1>
+    <p class="lead">
+      로그인한 계정이 <b>김수만</b>이어도, 내가 관리하는 <b>타계정(가족·지인 명의) 정보가 있다면
+      그 명의로도 같은 공고에 추가 참여</b>할 수 있게 하는 기능입니다.
+      타계정 참여를 열지 말지는 <b>공고마다 관리자가 [가능]/[불가]로 결정</b>합니다.
+      이 문서는 그 요구정의(PRD)와 유저플로우·화면 설계를 개발 용어 없이 정리한 검토용 문서입니다.
+    </p>
+    <div class="meta">
+      <span class="chip">문서 버전 <b>v1.0 (검토용 초안)</b></span>
+      <span class="chip">작성일 <b>2026-07-27</b></span>
+      <span class="chip">상태 <b>구현 전 — §09 결정 항목 확정 필요</b></span>
+      <span class="chip">적용 범위 <b>참여형(바로참여) 캠페인 전용</b></span>
+    </div>
+  </header>
+
+  <nav class="toc">
+    <a href="#s1">01 지금은 어떻게 되나</a>
+    <a href="#s2">02 운영 방식 제안</a>
+    <a href="#s3">03 전체 흐름</a>
+    <a href="#s4">04 리뷰어 화면</a>
+    <a href="#s5">05 구매양식·신원확인 연계</a>
+    <a href="#s6">06 관리자 화면</a>
+    <a href="#s7">07 운영 규칙</a>
+    <a href="#s8">08 이런 상황이 생기면</a>
+    <a href="#s9">09 결정해 주세요</a>
+    <a href="#s10">10 개발 순서</a>
+  </nav>
+
+  <!-- ═══════════ 01 현재 방식 ═══════════ -->
+  <section id="s1">
+    <div class="sec-label">SECTION 01</div>
+    <h2>지금은 어떻게 되나</h2>
+    <p class="desc">
+      타계정이라는 개념은 이미 시스템 안에 있습니다. 다만 <b>"공고에 참여(자리 잡기)"하는 단계</b>에서는
+      로그인한 명의로 <b>1건만</b> 참여할 수 있습니다.
+    </p>
+
+    <h3>타계정이 이미 쓰이고 있는 곳</h3>
+    <div class="card plain">
+      <ul>
+        <li><b>내정보에 타계정 등록</b> — 리뷰어 홈 내정보에서 타계정을 최대 10개까지 등록해 둘 수 있습니다(이름·전화번호 필수, 주소·전용 계좌는 선택).</li>
+        <li><b>구매양식의 신원확인</b> — 구매양식을 낼 때 적은 수취인·연락처가 내 타계정 정보와 맞으면 "타계정 명의 제출"로 자동 인정되고, 처음 보는 정보면 "타계정으로 등록할까요?" 안내가 이미 뜹니다.</li>
+        <li><b>리뷰비 입금 분리</b> — 타계정마다 전용 계좌를 두거나, 비워 두면 본인 공통 계좌로 받는 규칙도 이미 있습니다.</li>
+      </ul>
+    </div>
+
+    <h3>그런데 "참여"만은 1건</h3>
+    <div class="flow">
+      <div class="fstep"><span class="n">1</span><h5>김수만으로 로그인</h5><p>리뷰어 앱에 본인 이름·전화번호로 로그인</p><span class="where">리뷰어 앱</span></div>
+      <div class="fstep"><span class="n">2</span><h5>공고 참여</h5><p>[참여하기]를 누르면 <b>김수만 명의로 자리 1건</b>이 잡히고 제한시간 15분 시작</p><span class="where">모집공고</span></div>
+      <div class="fstep"><span class="n">3</span><h5>재참여 불가</h5><p>같은 공고를 다시 누르면 "이미 참여"로 막힘 — 타계정을 5개 갖고 있어도 <b>더 참여시킬 방법이 없음</b></p><span class="where">모집공고</span></div>
+      <div class="fstep"><span class="n">4</span><h5>지금의 우회로</h5><p>로그아웃 → 타계정 이름·전화로 다시 로그인 → 참여 → 또 로그아웃… 반복</p><span class="where">리뷰어 앱</span></div>
+    </div>
+
+    <h3>이 방식의 문제 3가지</h3>
+    <div class="card plain">
+      <ul>
+        <li class="x"><b>번거롭고 실수를 부른다</b> — 명의 수만큼 로그아웃·재로그인을 반복해야 하고, 그 사이 어떤 명의로 참여했는지 헷갈려 구매양식을 다른 명의로 내는 실수가 생깁니다.</li>
+        <li class="x"><b>공고마다 통제할 수 없다</b> — 업체나 캠페인 성격상 "1인 1건"이어야 하는 공고와 "타계정 참여를 열어도 되는" 공고를 구분할 장치가 없습니다.</li>
+        <li class="x"><b>운영자가 묶어 볼 수 없다</b> — 각 명의가 따로 로그인해 참여하면 관제 화면에서는 전부 남남처럼 보여, 한 리뷰어가 실제로 몇 건을 진행 중인지 파악하기 어렵습니다.</li>
+      </ul>
+    </div>
+
+    <div class="callout">
+      <b>핵심 진단:</b> 타계정은 이미 "제출·입금" 단계에서 인정되는데, <b>"참여" 단계만 명의 선택이 없어서</b>
+      리뷰어는 우회하고 운영자는 못 보는 구조입니다. 이번 작업은 <b>참여 단계에 "누구 명의로 참여할지" 선택을 더하고</b>,
+      그 허용 여부를 공고 단위로 관리자가 쥐게 만드는 것입니다.
+    </div>
+  </section>
+
+  <!-- ═══════════ 02 운영 방식 제안 ═══════════ -->
+  <section id="s2">
+    <div class="sec-label">SECTION 02</div>
+    <h2>운영 방식 제안 (10가지 핵심 결정)</h2>
+    <p class="desc">
+      이 문서의 모든 화면·규칙은 아래 결정을 따릅니다. <span class="tag def">제안</span> 표시가 붙은 항목은
+      §09에서 최종 확정이 필요한 값입니다.
+    </p>
+
+    <div class="tbl-scroll card" style="padding:6px">
+    <table class="tbl">
+      <tr><th style="width:30%">질문</th><th>결정</th></tr>
+      <tr><td>누가 켜고 끄나</td><td><b>관리자가 공고마다</b> 타계정 참여 <b>[가능] / [불가]</b>를 설정</td></tr>
+      <tr><td>기본값은</td><td><b>[불가]</b> — 켠 공고만 열림. 기존 공고·새 공고 모두 기본은 지금과 동일하게 동작 <span class="tag def">제안</span></td></tr>
+      <tr><td>몇 건까지 참여 가능</td><td><b>명의(계정)당 1건</b> — 본계정 1건 + 등록한 타계정 각각 1건씩. 예: 타계정 5개면 최대 6건</td></tr>
+      <tr><td>같은 명의 중복</td><td><b>불가</b> — 같은 공고에 같은 이름+전화번호는 한 번만. 누가 등록한 명의든 동일하게 적용</td></tr>
+      <tr><td>참여 순서</td><td><b>자유</b> — 본계정 참여 없이 타계정만 참여시키는 것도 가능 <span class="tag def">제안</span></td></tr>
+      <tr><td>자리 계산</td><td>누구 명의든 <b>참여 1건 = 1자리</b> — 총 모집인원·하루 진행량·옵션 잔여 모두 똑같이 차감</td></tr>
+      <tr><td>타계정이 없으면</td><td>[타계정으로 추가참여하기]를 눌렀을 때 <b>[타계정 정보 먼저 등록하기]</b>로 안내 → 등록을 마치면 <b>참여 화면으로 자동 복귀</b>해 이어서 참여</td></tr>
+      <tr><td>구매·양식 제출</td><td>참여 건마다 <b>제한시간 15분 각각</b> — 구매양식도 건마다 따로, <b>참여시킨 명의의 정보로</b> 제출(기존 신원확인 규칙이 타계정을 자동 인정)</td></tr>
+      <tr><td>옵션 있는 공고</td><td>참여 건마다 <b>옵션도 각각 선택</b> — 명의별로 다른 옵션 가능</td></tr>
+      <tr><td>[불가] 공고에서는</td><td><b>지금과 완전히 동일</b> — 타계정 관련 버튼·화면이 아예 나타나지 않고, 로그인 명의 1건만 참여</td></tr>
+    </table>
+    </div>
+
+    <div class="callout warn">
+      <b>정책 포인트 — 기본값은 [불가]입니다.</b> 이 기능을 배포해도 아무 공고도 저절로 바뀌지 않습니다.
+      관리자가 공고 설정에서 [가능]으로 켠 공고에서만 타계정 참여 버튼이 나타나므로,
+      업체와 협의된 캠페인에만 선별적으로 열 수 있습니다.
+    </div>
+  </section>
+
+  <!-- ═══════════ 03 전체 흐름 ═══════════ -->
+  <section id="s3">
+    <div class="sec-label">SECTION 03</div>
+    <h2>전체 흐름 한눈에</h2>
+    <p class="desc">관리자의 설정에서 출발해 리뷰어의 명의 선택 → 명의별 구매·제출 → 관제 확인까지 한 줄로 이어집니다.</p>
+
+    <div class="flow">
+      <div class="fstep"><span class="n">1</span><h5>관리자가 켬</h5><p>공고 만들기/수정에서 <b>타계정 참여 [가능]</b> 선택</p><span class="where">관리자 대시보드</span></div>
+      <div class="fstep"><span class="n">2</span><h5>공고에 표시</h5><p>리뷰어 공고 상세에 <b>"타계정 참여 가능"</b> 안내가 보임</p><span class="where">리뷰어 앱</span></div>
+      <div class="fstep"><span class="n">3</span><h5>명의 골라 참여</h5><p>[참여하기] → <b>누구 명의로 참여할지 선택</b>(본계정/타계정) → 그 명의로 자리 확보</p><span class="where">리뷰어 앱</span></div>
+      <div class="fstep"><span class="n">4</span><h5>추가 참여</h5><p>참여 후 <b>[타계정으로 추가참여하기]</b>로 다른 명의를 계속 참여시킴 (명의당 1건)</p><span class="where">리뷰어 앱</span></div>
+      <div class="fstep"><span class="n">5</span><h5>건마다 구매·제출</h5><p>각 건 제한시간 15분 안에 구매 + 구매양식 제출 — <b>그 명의의 정보로</b></p><span class="where">구매양식</span></div>
+      <div class="fstep"><span class="n">6</span><h5>관제로 확인</h5><p>관제 패널에서 명의별 현황 + <b>"김수만 외 2건" 묶음</b>으로 한눈에</p><span class="where">관리자 관제</span></div>
+    </div>
+    <p class="flow-note">※ <b>타계정 [불가] 공고</b>는 3·4번 단계가 아예 없고, 지금과 완전히 똑같이 동작합니다.</p>
+  </section>
+
+  <!-- ═══════════ 04 리뷰어 화면 ═══════════ -->
+  <section id="s4">
+    <div class="sec-label">SECTION 04</div>
+    <h2>리뷰어 화면 — 유저플로우와 실제 화면 구성</h2>
+    <p class="desc">
+      예시: <b>김수만</b>이 타계정 5개(이영희·박민준·최지우·정다은·한서준)를 등록해 둔 상태에서
+      타계정 [가능] 공고 <b>"슬라이스 치즈 3종"</b>에 참여하는 흐름입니다.
+    </p>
+
+    <div class="wf-grid">
+
+      <!-- P1 공고 상세 -->
+      <div class="phone-slot">
+        <h4>① 공고 상세 — 타계정 가능 표시 <span class="newchip">NEW</span></h4>
+        <p class="cap">타계정 [가능] 공고에는 참여 전부터 "타계정 참여 가능" 안내가 보입니다. [불가] 공고는 이 표시가 없습니다.</p>
+        <div class="phone"><div class="screen">
+          <div class="appbar">슬라이스 치즈 3종 <span class="r">모집중</span></div>
+          <div class="scr-body">
+            <div class="blk" style="text-align:center;color:var(--faint);font-size:.62rem;padding:16px 10px">상품 썸네일<br/><span style="font-size:.56rem">오늘 구매마감까지 03:12:44</span></div>
+            <div class="blk" style="display:flex;gap:5px;align-items:center;flex-wrap:wrap">
+              <span class="bdg ta">👥 타계정 참여 가능</span>
+              <span style="font-size:.6rem;color:var(--mut)">내 타계정 명의로 여러 건 참여할 수 있어요</span>
+            </div>
+            <div class="blk"><div class="t">🔒 작업내용</div>
+              <div style="font-size:.62rem;color:var(--mut)">상품·금액 상세, 구매양식은 참여 후에 확인할 수 있어요.</div></div>
+            <a class="wbtn">참여하기</a>
+          </div>
+        </div></div>
+      </div>
+
+      <!-- P2 명의 선택 -->
+      <div class="phone-slot">
+        <h4>② 참여 명의 선택 <span class="newchip">NEW</span></h4>
+        <p class="cap">[참여하기]를 누르면 "누구 명의로 참여할까요?" 선택 창이 뜹니다. 본계정이 맨 위에 기본 선택되어 있고, 명의마다 지금 참여할 수 있는지 상태가 보입니다.</p>
+        <div class="phone"><div class="screen">
+          <div class="appbar">참여할 명의 선택</div>
+          <div class="scr-body" style="background:rgba(40,46,60,.06)">
+            <div style="flex:1"></div>
+            <div class="bsheet">
+              <div class="grab"></div>
+              <div class="bt">누구 명의로 참여할까요?</div>
+              <div class="optrow sel">
+                <span class="radio"></span><span class="avatar me">김</span>
+                <div class="on"><div class="nm">김수만</div><div class="sub">본계정 · 참여 가능</div></div>
+              </div>
+              <div class="optrow" style="margin-top:5px">
+                <span class="radio"></span><span class="avatar ta">이</span>
+                <div class="on"><div class="nm">이영희</div><div class="sub">타계정 1 · 참여 가능</div></div>
+              </div>
+              <div class="optrow soldout" style="margin-top:5px">
+                <span class="radio"></span><span class="avatar ta">박</span>
+                <div class="on"><div class="nm">박민준</div><div class="sub">타계정 2 · 이 공고에 참여중</div></div>
+                <span class="bdg done">참여중</span>
+              </div>
+              <div class="optrow soldout" style="margin-top:5px">
+                <span class="radio"></span><span class="avatar ta">최</span>
+                <div class="on"><div class="nm">최지우</div><div class="sub">타계정 3 · 오늘 이력 있음</div></div>
+                <span class="bdg off">내일 가능</span>
+              </div>
+              <a class="wbtn ghost" style="margin-top:7px">＋ 새 타계정 등록</a>
+              <div style="font-size:.58rem;color:var(--mut);margin:7px 2px 3px">한 명의는 이 공고에 1건만 참여할 수 있어요.</div>
+              <a class="wbtn">이 명의로 참여</a>
+            </div>
+          </div>
+        </div></div>
+      </div>
+
+      <!-- P3 참여 후 -->
+      <div class="phone-slot">
+        <h4>③ 참여 완료 — 명의 표시 + 추가참여 버튼 <span class="newchip">NEW</span></h4>
+        <p class="cap">참여가 확정되면 어느 명의의 참여인지 상단에 고정 표시됩니다. 화면 아래에 [타계정으로 추가참여하기] 버튼이 생깁니다.</p>
+        <div class="phone"><div class="screen">
+          <div class="appbar">슬라이스 치즈 3종 <span class="r">참여중</span></div>
+          <div class="scr-body">
+            <div class="holdbar"><span class="ht">제한시간 내 구매+양식 제출까지 완료해주세요</span><span class="hv">13:42</span></div>
+            <div class="blk" style="border-color:var(--sub)">
+              <div class="t">👥 이 건의 참여 명의</div>
+              <div style="display:flex;align-items:center;gap:8px">
+                <span class="avatar ta">이</span>
+                <div style="flex:1"><b style="font-size:.78rem">이영희</b>
+                  <div style="font-size:.6rem;color:var(--mut)">김수만 님의 타계정 1</div></div>
+                <span class="bdg ta">타계정</span>
+              </div>
+            </div>
+            <div class="blk"><div class="t">📦 상품·결제금액</div>
+              <div class="wl w80"></div><div class="wl w60"></div></div>
+            <div class="blk"><div class="t">🧾 구매양식 (아래에서 바로 제출)</div>
+              <div class="wl"></div><div class="wl w80"></div></div>
+            <a class="wbtn sub">＋ 타계정으로 추가참여하기</a>
+          </div>
+        </div></div>
+      </div>
+
+      <!-- P4 타계정 없음 -->
+      <div class="phone-slot">
+        <h4>④ 타계정이 없을 때 — 등록 안내 <span class="newchip">NEW</span></h4>
+        <p class="cap">타계정을 아직 등록하지 않은 리뷰어가 [타계정으로 추가참여하기]를 누르면, 등록부터 하도록 안내합니다.</p>
+        <div class="phone"><div class="screen">
+          <div class="appbar">타계정 추가참여</div>
+          <div class="scr-body" style="background:rgba(40,46,60,.06)">
+            <div style="flex:1"></div>
+            <div class="bsheet">
+              <div class="grab"></div>
+              <div class="bt">등록된 타계정이 없어요</div>
+              <div style="font-size:.62rem;color:var(--mut);margin:2px 2px 8px">
+                타계정(가족·지인 명의)의 이름과 전화번호를 먼저 등록하면,
+                그 명의로 이 공고에 추가 참여할 수 있어요.
+              </div>
+              <a class="wbtn sub">타계정 정보 먼저 등록하기</a>
+              <a class="wbtn ghost">다음에 할게요</a>
+            </div>
+          </div>
+        </div></div>
+      </div>
+
+      <!-- P5 타계정 등록 -->
+      <div class="phone-slot">
+        <h4>⑤ 타계정 등록 — 기존 내정보 폼 그대로</h4>
+        <p class="cap">내정보의 타계정 등록 화면을 그대로 씁니다(새 화면 아님). 저장하면 참여하던 공고로 자동 복귀하고, 방금 등록한 명의가 선택된 상태로 이어집니다.</p>
+        <div class="phone"><div class="screen">
+          <div class="appbar">타계정 추가 <span class="r">내정보</span></div>
+          <div class="scr-body">
+            <div class="blk">
+              <div class="t">필수</div>
+              <div class="field">이름 *</div>
+              <div class="field">전화번호 * (010-)</div>
+            </div>
+            <div class="blk">
+              <div class="t">선택 — 나중에 채워도 돼요</div>
+              <div class="field">배송 주소</div>
+              <div class="field">전용 계좌 (은행/예금주/계좌번호)</div>
+              <div style="font-size:.56rem;color:var(--mut);margin-top:3px">계좌를 비워 두면 리뷰비는 본인 공통 계좌로 입금돼요.</div>
+            </div>
+            <a class="wbtn">저장하고 참여 이어가기</a>
+          </div>
+        </div></div>
+      </div>
+
+      <!-- P6 내 참여현황 -->
+      <div class="phone-slot">
+        <h4>⑥ 내 참여현황 — 명의별로 한눈에 <span class="newchip">NEW</span></h4>
+        <p class="cap">같은 공고의 여러 건이 명의 배지와 함께 각각 보입니다. 제한시간·제출 상태도 건마다 따로 갑니다.</p>
+        <div class="phone"><div class="screen">
+          <div class="appbar">내 참여현황</div>
+          <div class="scr-body">
+            <div class="blk">
+              <div style="display:flex;justify-content:space-between;align-items:center">
+                <b style="font-size:.72rem">슬라이스 치즈 3종</b><span class="bdg done">제출완료</span>
+              </div>
+              <div style="font-size:.6rem;color:var(--mut);margin-top:3px"><span class="bdg me">본계정</span> 김수만 · 7/27 제출</div>
+            </div>
+            <div class="blk">
+              <div style="display:flex;justify-content:space-between;align-items:center">
+                <b style="font-size:.72rem">슬라이스 치즈 3종</b><span class="bdg wait">참여중 12:07</span>
+              </div>
+              <div style="font-size:.6rem;color:var(--mut);margin-top:3px"><span class="bdg ta">타계정</span> 이영희 · 구매양식 제출 전</div>
+            </div>
+            <div class="blk">
+              <div style="display:flex;justify-content:space-between;align-items:center">
+                <b style="font-size:.72rem">슬라이스 치즈 3종</b><span class="bdg wait">참여중 14:31</span>
+              </div>
+              <div style="font-size:.6rem;color:var(--mut);margin-top:3px"><span class="bdg ta">타계정</span> 정다은 · 구매양식 제출 전</div>
+            </div>
+          </div>
+        </div></div>
+      </div>
+
+    </div>
+
+    <div class="legend">
+      <div><span class="pin">1</span><span><b>명의 상태 배지</b> — 명의마다 "참여 가능 / 참여중(이 공고에 이미 참여) / 내일 가능(오늘 이력 있음)"을 선택 창에서 바로 보여줘, 눌러보고 실패하는 일이 없습니다.</span></div>
+      <div><span class="pin">2</span><span><b>본계정·타계정 배지</b> — 참여중 화면·참여현황·구매양식 어디서든 이 건이 누구 명의인지 배지로 구분됩니다(명의 헷갈림 방지).</span></div>
+      <div><span class="pin">3</span><span><b>제출을 마친 뒤에도</b> — 아직 참여 안 한 타계정이 남아 있으면 완료 화면에도 [타계정으로 추가참여하기] 버튼이 유지됩니다.</span></div>
+      <div><span class="pin">4</span><span><b>타계정 [불가] 공고</b> — ①의 배지, ②의 선택 창, ③의 추가참여 버튼이 전부 나타나지 않고 지금과 동일하게 동작합니다.</span></div>
+    </div>
+  </section>
+
+  <!-- ═══════════ 05 구매양식·신원확인 연계 ═══════════ -->
+  <section id="s5">
+    <div class="sec-label">SECTION 05</div>
+    <h2>구매양식·신원확인 연계 — 이미 있는 장치에 그대로 맞물립니다</h2>
+    <p class="desc">
+      제출·입금 단계는 새로 만드는 것이 없습니다. 구매양식에는 이미 "제출 정보가 본인 것인지, 타계정 것인지"를
+      확인하는 장치가 있고, 이번 기능은 <b>참여 때 고른 명의를 그 장치에 미리 알려주는 것</b>뿐입니다.
+    </p>
+
+    <div class="flow">
+      <div class="fstep"><span class="n">1</span><h5>명의 선택(참여)</h5><p>참여할 때 고른 명의(예: 이영희)가 그 건에 기록됨</p><span class="where">모집공고</span></div>
+      <div class="fstep"><span class="n">2</span><h5>구매양식 자동 채움</h5><p>그 명의의 이름·연락처·주소가 <b>구매양식에 자동으로 채워짐</b>(수정 가능)</p><span class="where">구매양식</span></div>
+      <div class="fstep"><span class="n">3</span><h5>신원확인 통과</h5><p>기존 신원확인이 "내 타계정 명의"로 자동 인정 — 별도 확인창 없이 매끄럽게 제출</p><span class="where">구매양식</span></div>
+      <div class="fstep"><span class="n">4</span><h5>리뷰비 입금</h5><p>그 타계정의 전용 계좌가 있으면 그 계좌로, 없으면 본인 공통 계좌로 — <b>기존 규칙 그대로</b></p><span class="where">정산</span></div>
+    </div>
+
+    <h3>참여 명의와 다른 정보로 제출하면?</h3>
+    <div class="tbl-scroll card" style="padding:6px">
+    <table class="tbl">
+      <tr><th style="width:38%">상황</th><th>동작</th></tr>
+      <tr><td>참여 명의 = 제출 정보 (정상)</td><td>그대로 제출 완료 <span class="tag now">현행 규칙</span></td></tr>
+      <tr><td>이영희 건인데 김수만 정보로 제출</td><td>"이 건은 <b>이영희 명의 참여</b>예요. 이대로 제출할까요?" 확인창 — 실수 방지용 안내 후 본인 선택 <span class="tag new">NEW</span></td></tr>
+      <tr><td>등록된 어느 명의와도 다른 정보</td><td>"타계정으로 등록할까요?" 자동 안내 <span class="tag now">현행 규칙</span></td></tr>
+      <tr><td>타계정에 주소·계좌가 비어 있음</td><td>구매양식에서 입력한 값이 그 타계정 정보에 <b>자동 저장</b>되어 다음부터 자동 채움 <span class="tag now">현행 규칙</span></td></tr>
+    </table>
+    </div>
+
+    <div class="callout">
+      <b>왜 안전한가:</b> 신원확인·타계정 자동등록·계좌 분리는 이미 운영 중인 장치입니다.
+      이번 기능은 참여 단계에서 명의를 <b>미리</b> 확정해 주기 때문에, 오히려 지금보다
+      "누구 명의인지 모호한 제출"이 줄어듭니다.
+    </div>
+  </section>
+
+  <!-- ═══════════ 06 관리자 화면 ═══════════ -->
+  <section id="s6">
+    <div class="sec-label">SECTION 06</div>
+    <h2>관리자 화면 — 설정 한 줄, 관제는 묶음으로</h2>
+    <p class="desc">
+      관리자가 새로 배울 것은 공고 설정의 <b>토글 하나</b>입니다. 관제 패널은 명의별 현황에
+      "본계정 묶음"이 더해져 오히려 보기 쉬워집니다.
+    </p>
+
+    <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(300px,1fr));gap:22px;align-items:start">
+
+      <!-- D1 공고 설정 -->
+      <div class="desk-slot">
+        <h4>① 공고 만들기/수정 — 타계정 참여 토글 <span class="newchip">NEW</span></h4>
+        <p class="cap">⚡참여형 설정 묶음 안에 [불가/가능] 선택 하나가 추가됩니다. 기본은 [불가]입니다.</p>
+        <div class="desk">
+          <div class="bar"><i></i><i></i><i></i><span class="url">관리자 대시보드 — 공고 발행</span></div>
+          <div class="dbody">
+            <div style="font-size:.72rem;font-weight:800">⚡ 참여형 캠페인 <span class="bdg done">켜짐</span></div>
+            <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px">
+              <div><div style="font-size:.6rem;font-weight:700;color:var(--faint)">하루 진행 인원</div><div class="field">20</div></div>
+              <div><div style="font-size:.6rem;font-weight:700;color:var(--faint)">총 모집 인원</div><div class="field">70</div></div>
+              <div><div style="font-size:.6rem;font-weight:700;color:var(--faint)">구매 시간</div><div class="field">10:00 ~ 15:00</div></div>
+              <div><div style="font-size:.6rem;font-weight:700;color:var(--faint)">제한시간</div><div class="field">15분</div></div>
+            </div>
+            <div style="display:flex;align-items:center;gap:10px;border:1.5px solid var(--sub);border-radius:9px;padding:8px 10px;background:var(--sub-soft)">
+              <div style="flex:1">
+                <div style="font-size:.68rem;font-weight:800">👥 타계정 참여</div>
+                <div style="font-size:.58rem;color:var(--mut)">가능으로 켜면 리뷰어가 자기 타계정 명의로 이 공고에 여러 건 참여할 수 있어요(명의당 1건).</div>
+              </div>
+              <span class="seg okseg"><span>불가</span><span class="on">가능</span></span>
+            </div>
+            <div style="font-size:.6rem;color:var(--mut)">
+              <b style="color:var(--ok)">✓</b> 게시 전 자동점검: 하루 진행 인원 · 구매 시간 · 연결 탭 ·
+              <b>타계정 참여: 가능(명의당 1건)</b>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- D2 관제 -->
+      <div class="desk-slot">
+        <h4>② 관제 패널 — 명의별 현황 + 본계정 묶음 <span class="newchip">NEW</span></h4>
+        <p class="cap">참여자 목록에 "명의 구분" 열이 생기고, 타계정 건에는 본계정이 함께 표시됩니다. 오늘 집계는 지금처럼 건 수 기준입니다.</p>
+        <div class="desk">
+          <div class="bar"><i></i><i></i><i></i><span class="url">관제 — 슬라이스 치즈 3종</span></div>
+          <div class="dbody">
+            <div style="display:flex;gap:6px;flex-wrap:wrap">
+              <span class="bdg wait">오늘 진행중 3</span>
+              <span class="bdg done">제출 1</span>
+              <span class="bdg off">만료 0</span>
+              <span class="bdg ta">타계정 건 2</span>
+            </div>
+            <div class="tbl-scroll">
+            <table class="dtbl">
+              <tr><th>참여 명의</th><th>구분</th><th>상태</th><th>남은시간</th></tr>
+              <tr><td>김수만</td><td><span class="bdg me">본계정</span></td><td><span class="bdg done">제출완료</span></td><td>—</td></tr>
+              <tr><td>이영희</td><td><span class="bdg ta">타 · 김수만</span></td><td><span class="bdg wait">진행중</span></td><td>12:07</td></tr>
+              <tr><td>정다은</td><td><span class="bdg ta">타 · 김수만</span></td><td><span class="bdg wait">진행중</span></td><td>14:31</td></tr>
+              <tr><td>박선영</td><td><span class="bdg me">본계정</span></td><td><span class="bdg wait">진행중</span></td><td>08:55</td></tr>
+            </table>
+            </div>
+            <div style="font-size:.6rem;color:var(--mut)">묶어보기: <b>김수만 3건</b>(본인 1 + 타계정 2) · 박선영 1건</div>
+          </div>
+        </div>
+      </div>
+
+    </div>
+
+    <div class="legend">
+      <div><span class="pin">1</span><span><b>토글 위치</b> — 이미 쓰고 있는 ⚡참여형 설정 묶음(하루 인원·총 모집·구매 시간) 바로 아래라 새 화면을 배울 필요가 없습니다.</span></div>
+      <div><span class="pin">2</span><span><b>진행 중에 끄면</b> — [가능]→[불가]로 바꿔도 이미 참여한 건은 그대로 유지되고, 그 뒤의 타계정 신규 참여만 막힙니다.</span></div>
+      <div><span class="pin">3</span><span><b>묶음 표시의 쓸모</b> — 한 리뷰어가 실제로 몇 건을 진행하는지 즉시 보이므로, 과도한 참여·이상 패턴을 관제에서 바로 알아챌 수 있습니다.</span></div>
+    </div>
+  </section>
+
+  <!-- ═══════════ 07 운영 규칙 ═══════════ -->
+  <section id="s7">
+    <div class="sec-label">SECTION 07</div>
+    <h2>운영 규칙 — 자리는 이렇게 계산됩니다</h2>
+    <p class="desc">
+      원칙은 하나입니다: <b>누구 명의든 참여 1건은 자리 1개.</b>
+      기존 공고의 자리 규칙은 그대로 두고, "명의당 1건" 규칙만 더합니다.
+    </p>
+
+    <div class="pol-grid">
+      <div class="card pol">
+        <div class="pk">자리 차감</div>
+        <div class="pv">참여 1건 = <b>총 모집 1자리 + 오늘 진행량 1자리</b> 차감</div>
+        <div class="pnote">김수만이 본인+타계정 2명을 참여시키면 자리 3개가 나갑니다. 옵션 공고면 각 건이 고른 옵션의 잔여도 똑같이 차감됩니다.</div>
+      </div>
+      <div class="card pol">
+        <div class="pk">명의당 1건</div>
+        <div class="pv">같은 공고에 <b>같은 이름+전화번호는 1건</b></div>
+        <div class="pnote">누가 등록한 명의든 동일합니다. 이미 참여한 명의는 선택 창에서 "참여중"으로 잠깁니다.</div>
+      </div>
+      <div class="card pol">
+        <div class="pk">하루 1회 규칙</div>
+        <div class="pv">취소·만료해도 <b>그 명의는 그 공고에 오늘 재참여 불가</b></div>
+        <div class="pnote">지금 있는 규칙을 명의 단위로 그대로 적용합니다(선택 창에 "내일 가능"으로 표시).</div>
+      </div>
+      <div class="card pol">
+        <div class="pk">제한시간 15분</div>
+        <div class="pv">참여 건마다 <b>따로</b> 흐르고 따로 만료</div>
+        <div class="pnote">한 건이 만료돼도 다른 건은 영향 없습니다. 만료된 자리는 자동으로 반납됩니다.</div>
+      </div>
+      <div class="card pol">
+        <div class="pk">동시 진행 상한</div>
+        <div class="pv">한 사람이 <b>동시에 잡아둘 수 있는 자리 수 제한</b></div>
+        <div class="pnote">자리 사재기를 막기 위한 안전장치입니다. 구체 숫자는 §09에서 확정합니다(제안: 본인+타계정 합쳐 동시 5건).</div>
+      </div>
+      <div class="card pol">
+        <div class="pk">[불가] 공고</div>
+        <div class="pv">로그인 명의 <b>1건만</b> — 현행과 동일</div>
+        <div class="pnote">화면·규칙 모두 지금과 완전히 같습니다.</div>
+      </div>
+    </div>
+
+    <h3>계산 예시 — 총 모집 70명 · 하루 20건 공고</h3>
+    <div class="tbl-scroll card" style="padding:6px">
+    <table class="tbl">
+      <tr><th>시각</th><th>일어난 일</th><th>오늘 잔여</th><th>총 잔여</th></tr>
+      <tr><td>10:00</td><td>김수만, <b>본인 명의</b>로 참여</td><td>19</td><td>69</td></tr>
+      <tr><td>10:02</td><td>김수만, <b>타계정 이영희</b>로 추가참여</td><td>18</td><td>68</td></tr>
+      <tr><td>10:05</td><td>김수만, <b>타계정 정다은</b>으로 추가참여</td><td>17</td><td>67</td></tr>
+      <tr><td>10:17</td><td>정다은 건 제한시간 만료 — <b>자리 자동 반납</b></td><td>18</td><td>68</td></tr>
+      <tr><td>10:20</td><td>김수만, 정다은으로 재참여 시도 → <b>"내일 가능"</b>(하루 1회 규칙)</td><td>18</td><td>68</td></tr>
+    </table>
+    </div>
+  </section>
+
+  <!-- ═══════════ 08 엣지 케이스 ═══════════ -->
+  <section id="s8">
+    <div class="sec-label">SECTION 08</div>
+    <h2>이런 상황이 생기면? — 미리 검토한 8가지</h2>
+    <p class="desc">운영 중 나올 수 있는 상황과 그때의 동작을 미리 정해 둡니다.</p>
+
+    <div class="tbl-scroll card" style="padding:6px">
+    <table class="tbl">
+      <tr><th style="width:36%">상황</th><th>동작</th></tr>
+      <tr>
+        <td>자리가 1개 남았는데 타계정 2명을 연달아 참여시키려 함</td>
+        <td><b>선착순 1건만</b> 성공하고, 다음 건은 "마감" 안내가 뜹니다. 이미 잡힌 건은 그대로 유효합니다.</td>
+      </tr>
+      <tr>
+        <td>3건 참여 중 1건만 15분을 넘김</td>
+        <td>그 건만 자리가 반납되고 <b>나머지 건은 영향이 없습니다.</b> 만료 전에 이미 구매까지 마쳤다면, 지금처럼 관제의 수동확정으로 구제합니다.</td>
+      </tr>
+      <tr>
+        <td>타계정에 이름·전화만 있고 주소·계좌가 비어 있음</td>
+        <td>참여는 <b>이름·전화만으로 가능</b>합니다. 주소 등은 구매양식에서 입력하면 그 타계정 정보에 자동 저장됩니다.</td>
+      </tr>
+      <tr>
+        <td>다른 리뷰어도 같은 명의를 타계정으로 등록해 둠 (부부가 서로 등록 등)</td>
+        <td>명의 기준으로 봅니다 — <b>누구를 통해서든 같은 이름+전화가 이미 참여했다면</b> 그 명의는 이 공고에 다시 참여할 수 없습니다.</td>
+      </tr>
+      <tr>
+        <td>모집 중에 관리자가 [가능]→[불가]로 변경</td>
+        <td>이미 참여한 건은 <b>그대로 진행</b>되고, 변경 이후의 타계정 신규 참여만 막힙니다. 반대로 [불가]→[가능]도 즉시 반영됩니다.</td>
+      </tr>
+      <tr>
+        <td>옵션 공고에서 명의마다 다른 옵션을 고름</td>
+        <td>정상 동작입니다 — 각 건이 고른 옵션의 잔여를 각각 차감하고, 구매양식에도 건마다 자기 옵션이 고정 표시됩니다.</td>
+      </tr>
+      <tr>
+        <td>참여를 취소하고 싶음</td>
+        <td>건(명의)별로 취소합니다. 취소해도 <b>그 명의는 오늘 이 공고에 재참여할 수 없다</b>는 안내를 확인한 뒤 취소됩니다(현행 규칙 동일).</td>
+      </tr>
+      <tr>
+        <td>자리 사재기가 걱정됨 (타계정 10개로 자리를 쓸어감)</td>
+        <td>4중 장치로 견제합니다 — ① 동시 진행 상한(§09에서 수치 확정) ② 명의당 1건 ③ 15분 미구매 시 자동 반납 ④ 관제의 본계정 묶음 표시로 즉시 발견. 그래도 부족하면 그 공고만 [불가]로 돌리면 됩니다.</td>
+      </tr>
+    </table>
+    </div>
+  </section>
+
+  <!-- ═══════════ 09 결정 필요 ═══════════ -->
+  <section id="s9">
+    <div class="sec-label">SECTION 09</div>
+    <h2>결정해 주세요 — 확정이 필요한 6가지</h2>
+    <p class="desc">
+      아래 항목만 확정되면 개발에 들어갈 수 있습니다. 각 항목에 제안값을 함께 적었습니다
+      (제안대로 진행해도 좋다면 "제안대로"라고만 답해 주세요).
+    </p>
+
+    <div class="tbl-scroll card" style="padding:6px">
+    <table class="tbl">
+      <tr><th style="width:34%">결정 항목</th><th style="width:22%">제안</th><th>이유</th></tr>
+      <tr>
+        <td>1. 새 공고의 기본값</td>
+        <td><b>[불가]</b></td>
+        <td>켠 공고만 열리므로 실수로 열리는 사고가 없습니다. 기존 공고도 전부 [불가]로 시작합니다.</td>
+      </tr>
+      <tr>
+        <td>2. 한 사람의 동시 진행 상한 (본인+타계정 합산)</td>
+        <td><b>동시 5건</b></td>
+        <td>15분 안에 실제로 구매할 수 있는 현실적 건수. 자리 사재기 방지선입니다. (지금은 2건)</td>
+      </tr>
+      <tr>
+        <td>3. 본계정 참여 없이 타계정만 참여</td>
+        <td><b>허용</b></td>
+        <td>"본인은 안 사고 가족 명의만 진행"하는 실제 사례를 지원합니다.</td>
+      </tr>
+      <tr>
+        <td>4. 공고 목록 카드에 "타계정 가능" 배지</td>
+        <td><b>표시</b></td>
+        <td>타계정 보유 리뷰어의 참여 유인이 됩니다. 상세 화면에는 어차피 표시됩니다.</td>
+      </tr>
+      <tr>
+        <td>5. 한 공고에 한 사람이 참여 가능한 총 건수 제한</td>
+        <td><b>제한 없음</b> (명의 수만큼)</td>
+        <td>총 모집·하루 한도·동시 상한이 이미 통제하므로 별도 상한은 두지 않습니다. 필요해지면 나중에 추가.</td>
+      </tr>
+      <tr>
+        <td>6. 설정 시점</td>
+        <td><b>공고 발행 때 관리자가</b></td>
+        <td>작업오더 단계에는 넣지 않고, 발행/수정 화면에서 결정합니다(업체 협의 결과를 아는 사람이 관리자이므로).</td>
+      </tr>
+    </table>
+    </div>
+
+    <div class="callout warn">
+      <b>이 문서의 화면·규칙은 위 제안값 기준으로 그려져 있습니다.</b>
+      다른 값으로 확정되면 해당 부분만 고쳐서 v1.1로 올립니다.
+    </div>
+  </section>
+
+  <!-- ═══════════ 10 개발 순서 ═══════════ -->
+  <section id="s10">
+    <div class="sec-label">SECTION 10</div>
+    <h2>개발 진행 순서</h2>
+    <p class="desc">
+      기존 공고에 영향이 없도록 "규칙 → 리뷰어 화면 → 관리자 화면" 순서로 나눠 진행합니다.
+      각 단계마다 <b>기존 공고가 그대로 동작하는지 자동 검사</b>를 함께 만듭니다.
+    </p>
+
+    <div class="flow">
+      <div class="fstep"><span class="n">1단계</span><h5>규칙 만들기</h5><p>공고에 [가능/불가] 설정 저장 + 명의별 참여·자리 계산 + 동시 상한. 화면 변화 없음 — 안전 확인 단계</p><span class="where">서버</span></div>
+      <div class="fstep"><span class="n">2단계</span><h5>리뷰어 화면</h5><p>명의 선택 창 · [타계정으로 추가참여하기] · 등록 유도 → 복귀 · 참여현황 명의 배지</p><span class="where">리뷰어 앱</span></div>
+      <div class="fstep"><span class="n">3단계</span><h5>관리자 화면</h5><p>공고 설정 토글 · 게시 전 자동점검 문구 · 관제 명의별 현황 + 본계정 묶음</p><span class="where">관리자 대시보드</span></div>
+    </div>
+    <p class="flow-note">※ 1단계가 배포되어도 모든 공고가 [불가] 기본값이므로 <b>리뷰어·관리자 화면에는 아무 변화가 없습니다.</b> 3단계까지 끝난 뒤 원하는 공고부터 켜면 됩니다.</p>
+  </section>
+
+  <footer>
+    아이에이리뷰 · 모집공고 타계정 추가참여 PRD &amp; 유저플로우 v1.0 (2026-07-27, 검토용 초안) ·
+    관련 문서: <a href="prd-reviewer-participation.html">리뷰어 직접참여 캠페인 PRD</a> ·
+    <a href="prd-campaign-options.html">모집공고 상품옵션 PRD</a>
+  </footer>
+
+</div>
+</body>
+</html>
