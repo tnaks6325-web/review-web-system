@@ -852,26 +852,75 @@ async function _applyParticipation(req, res, next, campPre) {
           error: '등록된 타계정이 아니에요. 내정보 > 타계정에서 먼저 등록해주세요.' });
       }
       subEntry = hit.sub;
+
+      // ★★ 방어 D1(사칭 차단): sub_accounts 는 "소유 증명"이 아니다 — 무인증
+      //   POST /api/reviewer/profile{action:'saveSubAccounts'} 가 phone8 만 알면 배열을 통째로 덮어쓴다
+      //   (번호 소유 증명 없음). 그래서 "이미 리뷰어로 직접 등록된 번호"는 타인의 명의로 못 쓰게 한다.
+      //   ─ 피해자 = 자기 계정으로 참여하는 실존 리뷰어이므로 이 한 줄이 강탈 대상 전체를 덮는다.
+      //   ─ 정당 사용자 손실 0: 그 번호의 본인이 자기 계정으로 직접 참여하면 된다.
+      //   ─ reviewers.phone8 은 phone 파생 GENERATED 컬럼이고 유니크는 UNIQUE(phone)(원문)뿐 →
+      //     같은 phone8 행이 복수 존재 가능하므로 행 동일성이 아니라 EXISTS 로 판정(idx_reviewers_phone8).
+      //   ─ 완화: CAMPAIGN_SUB_REGISTERED_POLICY = block(기본) | warn(로그만) | allow(검사 자체 생략)
+      const _subPolicy = String(process.env.CAMPAIGN_SUB_REGISTERED_POLICY || 'block').toLowerCase();
+      if (_subPolicy !== 'allow') {
+        const { rows: regHit } = await client.query(
+          'SELECT 1 FROM reviewers WHERE phone8 = $1 LIMIT 1', [subP8]);
+        if (regHit.length) {
+          logger.warn(`[campaign/apply] 등록번호 명의 시도 camp=${id} owner=***${p8.slice(-4)} ` +
+            `명의=***${subP8.slice(-4)} policy=${_subPolicy}`);
+          if (_subPolicy === 'block') {
+            await client.query('ROLLBACK');
+            return res.status(409).json({ ok: false, reason: 'sub_is_registered_reviewer',
+              error: '이 번호는 이미 리뷰어로 직접 등록되어 있어요. 해당 번호의 본인 계정으로 로그인해서 참여해주세요.' });
+          }
+        }
+      }
     }
 
     const dayStartIso = kstDayStartUtc(now).toISOString();
 
-    // 제출확정 이력 선검사(영구 1명의 1참여 — uq_campaign_apps_active_hold 의미론): 23505 대신 명확한 사유(심판 J8)
-    const done = await client.query(
-      `SELECT 1 FROM campaign_applications WHERE campaign_id = $1 AND phone8 = $2 AND status = 'submitted' LIMIT 1`,
-      [id, holdP8]);
-    if (done.rows.length) {
-      await client.query('ROLLBACK');
-      return res.status(409).json({ ok: false, reason: 'already_submitted', error: '이미 참여 완료한 캠페인이에요.' });
-    }
-
-    // 당일(KST) 동일 캠페인 이력 — expired/cancelled 포함 전 상태 차단(재신청 0회, §03-C). 명의 단위(소유자의 본인
-    // 참여 이력이 타계정 참여를 막지 않음 = PRD §02 명의당 1건)
-    const hist = await client.query(
-      `SELECT 1 FROM campaign_applications WHERE campaign_id = $1 AND phone8 = $2 AND applied_at >= $3 LIMIT 1`,
+    // 이력 선검사(23505 대신 명확한 사유, 심판 J8) — ★ 방어 D1b/D5: 종전 done/hist 2쿼리를 1쿼리로 합치고
+    //   "차단한 행의 귀속"까지 함께 읽는다(왕복 순증 0).
+    //   ① status='submitted' = 영구 1명의 1참여(uq_campaign_apps_active_hold 의미론)
+    //   ② applied_at >= 오늘시작 = 당일 재신청 0회(expired/cancelled 포함 전 상태, §03-C · 명의 단위)
+    //   ORDER BY 로 submitted 를 당일 이력보다 우선 → 기존 검사 순서·사유 코드 그대로 보존.
+    //   신규 사유: blocked_by_other_owner(=남이 이 번호를 명의로 선점 = 사칭/오등록 신호),
+    //             same_phone_other_name(=같은번호 다른명의 A안이 phone8 키잉으로 접힌 경우의 원인 설명).
+    const holdNameCandidate = isSubApply ? String((subEntry && subEntry.name) || subName).trim() : name;
+    const blk = await client.query(
+      `SELECT status, applicant_name, owner_phone8
+         FROM campaign_applications
+        WHERE campaign_id = $1 AND phone8 = $2
+          AND (status = 'submitted' OR applied_at >= $3)
+        ORDER BY (status = 'submitted') DESC, applied_at DESC
+        LIMIT 1`,
       [id, holdP8, dayStartIso]);
-    if (hist.rows.length) {
+    if (blk.rows.length) {
+      const b0 = blk.rows[0];
+      const blockedByOther = !!b0.owner_phone8 && String(b0.owner_phone8) !== p8;
       await client.query('ROLLBACK');
+      if (blockedByOther) {
+        logger.warn(`[campaign/apply] 타소유자 선점 차단 camp=${id} 명의=***${holdP8.slice(-4)} ` +
+          `선점owner=***${String(b0.owner_phone8).slice(-4)} 요청owner=***${p8.slice(-4)} status=${b0.status}`);
+        return res.status(409).json({ ok: false, reason: 'blocked_by_other_owner',
+          error: '이 번호는 다른 계정에서 이미 참여 신청했어요. 본인 번호가 맞다면 고객센터로 알려주세요.' });
+      }
+      if (b0.status === 'submitted') {
+        return res.status(409).json({ ok: false, reason: 'already_submitted', error: '이미 참여 완료한 캠페인이에요.' });
+      }
+      const { normName } = require('../services/identity.service');
+      const usedBy = String(b0.applicant_name || '').trim();
+      if (normName(usedBy) && normName(usedBy) !== normName(holdNameCandidate)) {
+        // ★ 이름 공개는 "요청자가 그 번호에 대한 근거를 가진 경우"로 제한 —
+        //   자기참여(그 번호로 로그인) 또는 내 소유로 귀속된 행. 레거시(owner NULL) 행을 타계정 명의로
+        //   조회하는 경우엔 이름을 숨긴다(무인증 API로 남의 실명을 캐는 통로 차단).
+        const nameSafe = !isSubApply || String(b0.owner_phone8 || '') === p8;
+        return res.status(409).json({ ok: false, reason: 'same_phone_other_name',
+          usedBy: nameSafe ? usedBy : undefined,
+          error: nameSafe
+            ? `같은 번호로 등록된 다른 명의(${usedBy})가 오늘 이미 참여했어요. 번호가 같은 명의는 하루 1건만 가능해요.`
+            : '같은 번호로 등록된 다른 명의가 오늘 이미 참여했어요. 번호가 같은 명의는 하루 1건만 가능해요.' });
+      }
       return res.status(409).json({ ok: false, reason: 'already_today', error: '오늘은 이 캠페인에 이미 참여 이력이 있어요(내일 가능).' });
     }
 

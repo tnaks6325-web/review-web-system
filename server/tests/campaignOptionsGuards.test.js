@@ -37,9 +37,11 @@ ok('change-option: 만료 미연장(UPDATE는 option_key만 SET)', /SET option_k
 ok('change-option: 제출완료/만료면 변경불가(not_changeable)', /reason: 'not_changeable'/.test(routes));
 
 // ── submit 서버권위 override ──
-ok('submit: 홀드 option_key로 selectedOptKey override', /effectiveOptKey[\s\S]*?SELECT option_key FROM campaign_applications/.test(submit));
-ok('submit: fail-open(조회실패 클라값 유지)', /옵션 서버권위 조회 실패\(클라값 유지\)/.test(submit));
-ok('submit: override는 홀드 문맥(_campaignHoldCtx) 있을 때만', /const holdCtx = _campaignHoldCtx\(b, loginPhone8\)/.test(submit) && /if \(holdCtx\) \{[\s\S]*?effectiveOptKey = _ar\[0\]\.option_key/.test(submit));
+// ★ D9: 옵션 서버권위 조회는 _authoritativeHold(hold_token 기준 1회 조회)로 이관됐다 —
+//   판정 자체(홀드 option_key가 클라값을 override)는 불변, 조회 주체만 바뀜(왕복 순증 0).
+ok('submit: 홀드 option_key로 selectedOptKey override', /SELECT phone8, option_key FROM campaign_applications/.test(submit) && /if \(holdCtx && holdCtx\.optionKey\) effectiveOptKey = holdCtx\.optionKey/.test(submit));
+ok('submit: fail-open(조회실패 클라값 유지)', /홀드 서버확정 실패\(클라값 유지\)/.test(submit));
+ok('submit: override는 홀드 문맥(_campaignHoldCtx) 있을 때만', /const holdCtx = await _authoritativeHold\(_campaignHoldCtx\(b, loginPhone8\)\)/.test(submit) && /if \(!ctx \|\| !ctx\.applicationId \|\| !ctx\.holdToken\) return ctx;/.test(submit));
 
 // ── _saveCampaignOptions TOCTOU 봉합 ──
 ok('saveOptions: 자체 트랜잭션 + 캠페인 행 FOR UPDATE(상호배제)', /_saveCampaignOptions[\s\S]*?BEGIN'\);[\s\S]*?SELECT id FROM recruit_campaigns WHERE id=\$1 FOR UPDATE/.test(routes));

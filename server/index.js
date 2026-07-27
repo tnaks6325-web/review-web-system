@@ -8,6 +8,78 @@ const path = require('path');
 
 const PORT = process.env.PORT || 3000;
 
+// ── 마이그레이션 안전장치(방어 D2·D7) ──
+// D2: 종전 에러 "메시지" 부분일치(duplicate/already exists)는 23505(duplicate key = 데이터 마이그레이션 실패)까지
+//     '적용됨'으로 영구 기록해 재시도를 영구 소실시킨다 → 중복 "객체" PG 에러코드로만 판정하고,
+//     그 외 실패는 미기록(= 다음 부팅 재시도) + 아래 프리플라이트가 부팅 가부를 결정한다.
+// D7: 오픈 러시 중 재배포 시 ALTER(ACCESS EXCLUSIVE)가 락 큐 선두에 서면 recruit_campaigns 를 읽는
+//     모든 요청(list·apply·확정)이 동시 정지한다 → 세션 lock_timeout 으로 "기다리지 않고 포기 후 재시도".
+const DUP_OBJECT_CODES = new Set(['42701', '42P07', '42710', '42P06', '42723']); // column/table/object/schema/function
+const MIG_LOCK_TIMEOUT = process.env.MIGRATION_LOCK_TIMEOUT || '5s';
+const MIG_STMT_TIMEOUT = process.env.MIGRATION_STATEMENT_TIMEOUT || '120s';
+const MIG_LOCK_RETRIES = 3;
+
+// 실행 코드가 요구하는 컬럼(없으면 사용자 대면 500). 마이그레이션이 실패해도 listen 하면
+// /health 는 통과하고 해당 기능만 42703 으로 죽어 "무신호 전면장애"가 된다.
+const REQUIRED_SCHEMA = [
+  ['campaign_applications', 'owner_phone8'],       // 063 — apply INSERT·my-status·관제
+  ['recruit_campaigns', 'multi_account_mode'],     // 063 — 공개 /list 명시 SELECT
+  ['recruit_campaigns', 'multi_daily_limit'],      // 063 — apply 게이트·공고 저장
+  ['recruit_campaigns', 'sub_hold_ttl_min'],       // 063 — 공개 /list 명시 SELECT
+];
+
+async function _runOneMigration(pool, sql) {
+  const client = await pool.connect();
+  let broken = false;
+  try {
+    // set_config = 파라미터 바인딩 가능(SET 은 불가) → 문자열 보간 주입면 제거.
+    // is_local=false(세션 단위)라 파일 내부의 명시 BEGIN(025·045)에서도 유효하다.
+    await client.query(`SELECT set_config('lock_timeout', $1, false)`, [MIG_LOCK_TIMEOUT]);
+    await client.query(`SELECT set_config('statement_timeout', $1, false)`, [MIG_STMT_TIMEOUT]);
+    await client.query(sql);
+  } catch (err) {
+    broken = true;                                   // 파일 내부 BEGIN 이 열린 채 실패했을 수 있음
+    throw err;
+  } finally {
+    if (broken) {
+      try { await client.query('ROLLBACK'); } catch (_) { /* 이미 정리됨 */ }
+      client.release(true);                          // 오염 의심 커넥션은 풀에 되돌리지 않고 폐기
+    } else {
+      try { await client.query('RESET ALL'); client.release(); }
+      catch (_) { client.release(true); }
+    }
+  }
+}
+
+/** 필수 스키마 프리플라이트 — 누락이면 부팅 거부.
+ *  ★ 거부가 안전한 이유: Railway 는 새 배포가 기동 실패하면 직전 배포를 유지한다. 구버전 코드는
+ *    이 컬럼들을 참조하지 않으므로 라이브는 정상 동작을 계속한다(진짜 fail-closed).
+ *  ★ "확인 불가"(DB 일시장애)와 "없음"은 구분 — 조회 자체가 실패하면 부팅을 막지 않는다(크래시루프 방지). */
+async function assertSchemaReady() {
+  const pool = require('./src/db/pool');
+  let rows;
+  try {
+    const tuples = REQUIRED_SCHEMA.map((_, i) => `($${i * 2 + 1},$${i * 2 + 2})`).join(',');
+    ({ rows } = await pool.query(
+      `SELECT table_name, column_name FROM information_schema.columns
+        WHERE table_schema = 'public' AND (table_name, column_name) IN (${tuples})`,
+      REQUIRED_SCHEMA.flat()));
+  } catch (err) {
+    logger.warn(`[migrate] 스키마 프리플라이트 조회 실패(부팅 계속): ${err.message}`);
+    return;
+  }
+  const have = new Set(rows.map(r => `${r.table_name}.${r.column_name}`));
+  const missing = REQUIRED_SCHEMA.map(([t, c]) => `${t}.${c}`).filter(k => !have.has(k));
+  if (!missing.length) return;
+  logger.error(`[migrate] ❌ 필수 스키마 누락 → 부팅 거부: ${missing.join(', ')}`);
+  logger.error('[migrate]    조치: 마이그레이션 로그 확인 후 재배포 / 긴급 우회: ALLOW_SCHEMA_DRIFT=1');
+  if (process.env.ALLOW_SCHEMA_DRIFT === '1') {
+    logger.warn('[migrate] ⚠️ ALLOW_SCHEMA_DRIFT=1 — 누락을 무시하고 계속(해당 기능은 500 발생)');
+    return;
+  }
+  process.exit(1);
+}
+
 // ── 서버 시작 전 자동 마이그레이션 (이력 추적) ──
 async function runMigrations() {
   const pool = require('./src/db/pool');
@@ -39,18 +111,28 @@ async function runMigrations() {
 
     const filePath = path.join(migrationsDir, file);
     const sql = fs.readFileSync(filePath, 'utf8');
-    try {
-      await pool.query(sql);
-      await pool.query('INSERT INTO _migrations (filename) VALUES ($1) ON CONFLICT DO NOTHING', [file]);
-      logger.info(`[migrate] ✅ ${file} 적용 완료`);
-      newCount++;
-    } catch (err) {
-      // IF NOT EXISTS 패턴의 무해한 에러는 적용 완료로 처리
-      if (err.message.includes('already exists') || err.message.includes('duplicate')) {
+
+    let applied = false;
+    for (let attempt = 1; attempt <= MIG_LOCK_RETRIES && !applied; attempt++) {
+      try {
+        await _runOneMigration(pool, sql);
         await pool.query('INSERT INTO _migrations (filename) VALUES ($1) ON CONFLICT DO NOTHING', [file]);
-        logger.info(`[migrate] ⏭ ${file} (이미 적용됨)`);
-      } else {
-        logger.warn(`[migrate] ⚠️ ${file}: ${err.message}`);
+        logger.info(`[migrate] ✅ ${file} 적용 완료`);
+        newCount++; applied = true;
+      } catch (err) {
+        if (DUP_OBJECT_CODES.has(err.code)) {
+          // 이미 존재하는 "객체" — IF NOT EXISTS 누락 패턴. 적용 완료로 기록.
+          await pool.query('INSERT INTO _migrations (filename) VALUES ($1) ON CONFLICT DO NOTHING', [file]);
+          logger.info(`[migrate] ⏭ ${file} (이미 적용됨, code=${err.code})`);
+          applied = true;
+        } else if (err.code === '55P03' || err.code === '57014') { // lock_not_available / statement_timeout
+          logger.warn(`[migrate] ⏳ ${file} 락 대기 초과(${attempt}/${MIG_LOCK_RETRIES}) — 미기록, 재시도`);
+          await new Promise(r => setTimeout(r, 2000 * attempt));
+        } else {
+          // ★ 미기록 = 다음 부팅 재시도. 부팅 가부는 assertSchemaReady 가 결정한다.
+          logger.error(`[migrate] ❌ ${file}: [${err.code || 'ERR'}] ${err.message}`);
+          break;
+        }
       }
     }
   }
@@ -67,8 +149,9 @@ async function runMigrations() {
   try {
     await runMigrations();
   } catch (err) {
-    logger.warn(`[migrate] 마이그레이션 오류 (서버는 계속 시작): ${err.message}`);
+    logger.warn(`[migrate] 마이그레이션 오류 (프리플라이트가 부팅 가부 판정): ${err.message}`);
   }
+  await assertSchemaReady();   // ★ 필수 컬럼 누락이면 여기서 종료 — listen 하지 않는다(무신호 500 방지)
 
   const server = app.listen(PORT, '0.0.0.0', () => {
     // ★ 서버 타임아웃 설정 — 이미지 업로드 등 대용량 요청 대응 (3분)

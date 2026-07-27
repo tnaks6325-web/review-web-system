@@ -55,11 +55,29 @@ async function maybePersistClosed(q, campaignId) {
 }
 
 /**
+ * 타계정 홀드 ↔ 주문 연락처 드리프트 판정(순수함수, 방어 D3).
+ *   자리는 "명의"로 소비되는데 시트행·입금·리뷰검색(/api/search 는 phone8 매칭)은 "주문 연락처"로 귀속된다
+ *   → 불일치 = 리뷰 캡처 제출 불가 + 정산 오귀속인데, 종전엔 검증도 로그도 없었다(무신호).
+ * ★ 오탐 0 설계: (a) 타계정 홀드(owner_phone8 존재 & 명의≠소유자)만 판정 —
+ *   자기참여에서 배송용 다른 연락처를 쓰는 것은 정상 패턴이라 신호로 삼지 않는다.
+ *   (b) 양쪽이 확실한 8자리일 때만 판정.
+ * @returns {{kind:'sub_hold_self_order'|'sub_hold_other_order', orderP8:string}|null}
+ */
+function detectIdentityDrift(row, orderIdentity) {
+  if (!row || !orderIdentity) return null;
+  const d = (v) => String(v || '').replace(/\D/g, '').slice(-8);
+  const holdP8 = d(row.phone8), ownerP8 = d(row.owner_phone8), orderP8 = d(orderIdentity.phone);
+  if (holdP8.length !== 8 || orderP8.length !== 8 || holdP8 === orderP8) return null;
+  if (ownerP8.length !== 8 || ownerP8 === holdP8) return null;   // 자기참여·레거시(owner NULL) = 무신호
+  return { kind: orderP8 === ownerP8 ? 'sub_hold_self_order' : 'sub_hold_other_order', orderP8 };
+}
+
+/**
  * 주문 트랜잭션 안에서 홀드 확정. 반드시 orderLedger의 client 트랜잭션 내부에서 호출.
  * 반환: 'confirmed' | 'late' | 'tab_mismatch' | 'not_found' | 'invalid_params'
  *   — 어떤 반환값이든 주문 저장은 막지 않는다(호출측이 SAVEPOINT로 예외도 격리).
  */
-async function confirmHoldInTx(client, { applicationId, campaignId, phone8, holdToken, orderSubmissionId, sheetId, gid, tabName, expectedOptKey }) {
+async function confirmHoldInTx(client, { applicationId, campaignId, phone8, holdToken, orderSubmissionId, sheetId, gid, tabName, expectedOptKey, orderIdentity }) {
   const appId = parseInt(applicationId, 10);
   if (!appId || !campaignId || !holdToken || !phone8) return 'invalid_params';
 
@@ -89,7 +107,7 @@ async function confirmHoldInTx(client, { applicationId, campaignId, phone8, hold
         AND hold_token = $5 AND hold_token IS NOT NULL AND hold_token <> ''
         AND status = 'applied'
         AND expires_at > NOW() - make_interval(secs => $6)
-      RETURNING id, option_key`,
+      RETURNING id, option_key, phone8, owner_phone8`,
     [appId, orderSubmissionId, campaignId, phone8, holdToken, HOLD_GRACE_SEC]
   );
   if (conf.rows.length) {
@@ -100,6 +118,13 @@ async function confirmHoldInTx(client, { applicationId, campaignId, phone8, hold
     const _dbOpt = conf.rows[0].option_key || '';
     if (_dbOpt && expectedOptKey !== undefined && expectedOptKey !== null && String(expectedOptKey || '') !== _dbOpt) {
       logger.warn(`[campaignHold] 옵션 드리프트 감지 app=${appId} 시트기입=${expectedOptKey || '∅'} 홀드=${_dbOpt} — 관제 대조 필요`);
+    }
+    // ★ 방어 D3: 명의 드리프트는 "경고만" — 주문 손실 0 계약(이미 결제한 리뷰어를 막지 않는다)을 지킨다.
+    //   관제가 대조할 신호이며, 오귀속 정정은 수동확정/주문정정 기존 경로가 담당한다.
+    const _drift = detectIdentityDrift(conf.rows[0], orderIdentity);
+    if (_drift) {
+      logger.warn(`[campaignHold] 명의 드리프트 감지 app=${appId} kind=${_drift.kind} ` +
+        `홀드명의=***${String(conf.rows[0].phone8).slice(-4)} 주문연락처=***${_drift.orderP8.slice(-4)} — 관제 대조 필요`);
     }
     await maybePersistClosed(client, campaignId);
     return 'confirmed';
@@ -164,4 +189,4 @@ async function sweepExpiredHolds(pool) {
   return { expired: exp.rowCount, closedPersisted: closedCount };
 }
 
-module.exports = { HOLD_GRACE_SEC, tabMatchesCampaign, maybePersistClosed, confirmHoldInTx, sweepExpiredHolds };
+module.exports = { HOLD_GRACE_SEC, tabMatchesCampaign, maybePersistClosed, confirmHoldInTx, detectIdentityDrift, sweepExpiredHolds };

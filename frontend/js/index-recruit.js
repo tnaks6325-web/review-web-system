@@ -393,18 +393,25 @@ function renderPartCheck() {
     const _ma = document.getElementById("rf_multi_account");
     if (_ma) {
       const _md = Number(document.getElementById("rf_multi_daily")?.value || 0);
+      // ★ 0=무제한은 정책상 허용(PRD §09-5)이지만 "한 사람이 자리를 싹쓸이"할 수 있어 경고로 표시(비차단).
       items.push({
         label: _ma.checked
-          ? ("타계정 참여: 가능 (명의당 1건 · 하루 " + (_md > 0 ? _md + "건" : "무제한") + ")")
+          ? (_md > 0
+              ? ("타계정 참여: 가능 (명의당 1건 · 하루 " + _md + "건)")
+              : "타계정 참여: 가능 — 하루한도 무제한(한 사람이 여러 자리를 가져갈 수 있어요)")
           : "타계정 참여: 불가 (로그인 계정 1건만)",
         fail: false,
+        warn: _ma.checked && !(_md > 0),
       });
     }
   }
+  // ★ 3색: 실패(빨강, 게시 차단) / 경고(호박, 게시는 가능하나 운영 주의) / 통과(초록)
   box.innerHTML = items.map(i =>
     `<div style="display:flex;align-items:center;gap:7px;font-size:.74rem;font-weight:700;border-radius:8px;padding:6px 10px;
-       ${i.fail ? "color:#B91C1C;background:#FEF2F2;border:1px solid #FECACA" : "color:#065F46;background:#ECFDF5;border:1px solid #6EE7B7"}">
-       ${i.fail ? "✗" : "✓"} ${i.label}</div>`).join("");
+       ${i.fail ? "color:#B91C1C;background:#FEF2F2;border:1px solid #FECACA"
+        : (i.warn ? "color:#92400E;background:#FFFBEB;border:1px solid #FCD34D"
+                  : "color:#065F46;background:#ECFDF5;border:1px solid #6EE7B7")}">
+       ${i.fail ? "✗" : (i.warn ? "⚠" : "✓")} ${i.label}</div>`).join("");
 }
 
 /* ═══════════════════════════════════════
@@ -539,7 +546,7 @@ async function openRecruitModal(id, prefill, woOrderId) {
   /* 👥 타계정 참여(063) 초기화 — 신규 공고 기본 [불가] */
   const _maEl = document.getElementById("rf_multi_account");
   if (_maEl) { _maEl.checked = false; onMultiAccountToggle(false); }
-  const _mdEl = document.getElementById("rf_multi_daily"); if (_mdEl) _mdEl.value = "0";
+  const _mdEl = document.getElementById("rf_multi_daily"); if (_mdEl) _mdEl.value = "1";
   const _stEl = document.getElementById("rf_sub_ttl"); if (_stEl) _stEl.value = "10";
   const _partEl = document.getElementById("rf_participation");
   if (_partEl) { _partEl.checked = false; onParticipationToggle(false); }
