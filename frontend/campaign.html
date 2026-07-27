@@ -73,9 +73,38 @@
     .myopt{display:flex;align-items:center;gap:10px}
     .myopt .oi{flex:1}
     .myopt .chg{background:#EEF1F7;color:var(--p-dark);border:none;font-size:.74rem;font-weight:800;border-radius:9px;padding:8px 12px;cursor:pointer;font-family:inherit;flex-shrink:0}
+    /* ── 관리자 미리보기 모드 (리뷰어 화면 확인용 · 실제 참여 아님) ── */
+    #pvBar{position:sticky;top:0;z-index:200;background:#2E1065;color:#EDE9FE;padding:9px 14px 10px;display:none}
+    #pvBar .pv-in{display:flex;align-items:center;gap:8px;flex-wrap:wrap;max-width:600px;margin:0 auto}
+    #pvBar .pv-tag{font-size:.72rem;font-weight:900;background:#7C3AED;color:#fff;border-radius:7px;padding:3px 9px;flex-shrink:0}
+    #pvBar .pv-msg{font-size:.72rem;color:#C4B5FD;flex:1;min-width:0}
+    #pvBar .pv-state{font-size:.68rem;font-weight:800;background:rgba(255,255,255,.14);border-radius:7px;padding:3px 9px}
+    #pvBar .pv-steps{display:flex;gap:6px;max-width:600px;margin:9px auto 0}
+    #pvBar .pv-step{flex:1;font-family:inherit;font-size:.74rem;font-weight:800;border:1px solid rgba(255,255,255,.22);
+      background:rgba(255,255,255,.08);color:#DDD6FE;border-radius:9px;padding:8px 4px;cursor:pointer}
+    #pvBar .pv-step.on{background:#EDE9FE;color:#4C1D95;border-color:#EDE9FE}
+    /* 미리보기 배너가 상단을 차지하므로 리뷰어 화면의 sticky 겹침 해제 */
+    body.pv .hd{position:static}
+    body.pv .holdbar{position:static;top:auto}
+    .pv-note{background:#F5F3FF;border:1.5px dashed #C4B5FD;color:#5B21B6;border-radius:12px;
+      padding:14px;font-size:.78rem;line-height:1.6;text-align:center;margin-bottom:12px}
   </style>
 </head>
 <body>
+<!-- 관리자 미리보기 배너 (preview=1 일 때만 표시 — 리뷰어에겐 절대 노출되지 않음) -->
+<div id="pvBar">
+  <div class="pv-in">
+    <span class="pv-tag">👁 관리자 미리보기</span>
+    <span class="pv-msg">리뷰어에게 보이는 실제 화면이에요 · <b>참여로 기록되지 않습니다</b></span>
+    <span class="pv-state" id="pvState"></span>
+    <button class="pv-step" id="pvForceBtn" style="flex:none;padding:4px 10px" onclick="pvToggleForce()">모집중 가정</button>
+  </div>
+  <div class="pv-steps">
+    <button class="pv-step" id="pvStepPre" onclick="pvGo('pre')">① 참여 전</button>
+    <button class="pv-step" id="pvStepJoined" onclick="pvGo('joined')">② 작업가이드</button>
+    <button class="pv-step" id="pvStepDone" onclick="pvGo('done')">③ 제출 완료</button>
+  </div>
+</div>
 <div class="wrap">
   <div class="hd"><div class="hd-in">
     <a class="hd-back" href="/"><i class="fas fa-arrow-left"></i></a>
@@ -135,6 +164,7 @@
       <div class="cardbx" id="wdNotesBox" style="display:none"><div class="wd-tt">📌 특이사항</div><div class="wd-body" id="wdNotes"></div></div>
       <div class="cardbx" style="border-color:var(--p)">
         <div class="wd-tt" style="color:var(--p-dark)">🧾 구매양식 — 구매를 마친 뒤 여기서 바로 제출하세요</div>
+        <div class="pv-note" id="pvFormNote" style="display:none">이 공고에는 <b>연결된 작업시트 탭이 없어</b> 리뷰어에게도 구매양식이 표시되지 않습니다.<br/>공고 수정에서 작업시트 탭을 연결해주세요.</div>
         <iframe id="orderFrame" title="구매양식"></iframe>
         <button class="btn ghost" id="frameFallback" style="margin-top:8px;display:none" onclick="openFormWindow()">구매양식이 안 보이면 새 창에서 열기</button>
       </div>
@@ -197,11 +227,20 @@
 /* ═══ 상태 ═══ */
 const CAMP_ID = new URLSearchParams(location.search).get('id') || '';
 const HOLD_KEY = 'camp_hold_' + CAMP_ID;
+/* ★ 관리자 미리보기 모드
+   · 요청(?preview=1)만으로는 켜지지 않고 **관리자 토큰이 실제로 확보됐을 때만** true가 된다.
+   · 이유(사고 방지): 관리자가 미리보기 주소를 그대로 공유하면 리뷰어가 그 URL로 들어올 수 있는데,
+     그때 미리보기로 동작하면 참여·작업가이드가 통째로 막힌다(구매 시간창 전체 마비).
+     토큰 없는 방문자는 **평범한 리뷰어 화면으로 폴백**한다. 진입 직후 주소창에서 preview 파라미터도 제거. */
+const PREVIEW_REQ = new URLSearchParams(location.search).get('preview') === '1';
+let PREVIEW = false;   // init에서 토큰 확보 후 확정(그 전에 호출되는 코드 없음)
 let _camp = null;          // /api/campaign/:id 공개 페이로드
 let _detail = null;        // work-detail 응답
 let _holdTick = null;
 let _pollTimer = null;
 let _afterLogin = null;    // 본인확인 성공 후 이어서 할 동작
+let _pvStep = 'pre';       // 미리보기 현재 단계
+let _pvForceOpen = true;   // 미리보기 ①단계를 '모집중'으로 가정해 보여줄지(마감·게시전 공고 확인용)
 
 function $(id){ return document.getElementById(id); }
 function toast(msg){ const t=$('toast'); t.textContent=msg; t.style.display='block';
@@ -246,9 +285,13 @@ async function doVerify(){
 }
 
 /* ═══ 홀드 저장 ═══ */
-function getHold(){ try{ return JSON.parse(localStorage.getItem(HOLD_KEY) || 'null'); }catch(_){ return null; } }
-function setHold(h){ localStorage.setItem(HOLD_KEY, JSON.stringify(h)); }
-function clearHold(){ localStorage.removeItem(HOLD_KEY); }
+function getHold(){
+  if(PREVIEW) return null;                       // ★ 미리보기는 실제 홀드를 절대 읽지 않음(관리자 브라우저에 남은 리뷰어 홀드와 격리)
+  try{ return JSON.parse(localStorage.getItem(HOLD_KEY) || 'null'); }catch(_){ return null; }
+}
+// ★ 미리보기에서는 어떤 경로로도 홀드 상태를 기록하지 않는다(같은 브라우저의 실제 리뷰어 홀드 오염 차단).
+function setHold(h){ if(PREVIEW) return; localStorage.setItem(HOLD_KEY, JSON.stringify(h)); }
+function clearHold(){ if(PREVIEW) return; localStorage.removeItem(HOLD_KEY); }
 
 /* ═══ 작업내용 표시 정규화 (표시 직전 · 스냅샷 불변 · 문제 패턴일 때만 개입) ═══ */
 // 상품·옵션·결제금액: 중복 "결제금액 N원" 제거 + 상품명↵금액 줄바꿈. 금액 1종류일 때만 병합(다옵션 상이금액은 원문 보존).
@@ -347,6 +390,10 @@ function renderPre(){
   // 옵션 등록 캠페인인데 선택 가능한 옵션이 0이면 캠페인이 open이어도 마감 표시(리뷰 나잇 #1)
   const copts = c.options || [];
   if(st==='open' && copts.length && !copts.some(o=>o.selectable)){ jb.disabled = true; jb.textContent = '옵션 마감'; }
+  // ★ 미리보기 '모집중 가정': 마감·휴무일·게시 전 공고는 실제 상태가 잠겨 있어 정작 확인하려는
+  //   "모집중일 때 리뷰어가 보는 화면"을 볼 수 없다 → 관리자에게만 열린 모습으로 보여준다(클릭은 여전히 차단).
+  //   위 상태·옵션 판정을 모두 끝낸 뒤 마지막에 덮어써야 일관되게 열린 화면이 된다.
+  if(PREVIEW && _pvForceOpen){ jb.disabled = false; jb.textContent = '참여하기'; $('preFootNote').textContent = ''; }
   renderPreOptions();   // 옵션명+잔여(옵션 등록 캠페인만)
   show('vPre');
 }
@@ -442,6 +489,7 @@ function onOptSheetConfirm(){
 
 /* ═══ 참여하기 ═══ */
 async function onJoin(){
+  if(PREVIEW) return _pvBlock('참여하기');   // ★ 미리보기: 홀드 생성 요청 자체를 보내지 않음
   const s = getSession();
   if(!s) return needLogin(onJoin);
   const opts = (_camp && _camp.options) || [];
@@ -456,6 +504,7 @@ async function onJoin(){
 }
 
 async function _doApply(optionKey){
+  if(PREVIEW) return _pvBlock('참여하기');   // ★ 어떤 경로로도 apply 요청 금지(옵션 시트 확인 포함)
   const s = getSession();
   if(!s) return needLogin(onJoin);
   hideOptSheet();
@@ -497,6 +546,7 @@ async function _doApply(optionKey){
 }
 
 async function _doChangeOption(newKey){
+  if(PREVIEW) return _pvBlock('옵션 변경');
   const h = getHold(); if(!h) return;
   hideOptSheet();
   toast('옵션 변경 중…');
@@ -556,6 +606,13 @@ async function enterJoined(){
     _detailRetry = 0;
     _detail = j;
     if(j.application && j.application.status === 'submitted'){ renderDone(); return; }
+    _renderJoinedView(j, h);
+  }catch(e){ toast('불러오기 오류: ' + e.message); renderPre(); }
+}
+
+/** 참여 후(작업가이드) 화면 렌더 — 리뷰어(홀드 있음)와 관리자 미리보기(hold=null) 공용.
+ *  ★ 렌더 내용은 양쪽 동일. 다른 것은 구매양식 iframe 파라미터와 폴링 여부뿐. */
+function _renderJoinedView(j, h){
     // 내가 참여한 옵션 카드(옵션 등록 캠페인만) + 변경 버튼
     renderJoinedOption(j);
     // 작업내용 렌더 (표시 직전 정규화 — 스냅샷 원문은 불변, 기발행 캠페인도 정상화)
@@ -574,18 +631,43 @@ async function enterJoined(){
     if(wd.specialNotes){ $('wdNotesBox').style.display=''; $('wdNotes').textContent = wd.specialNotes; }
     // 인라인 구매양식 iframe (동일 오리진 — search.html 재사용)
     const f = j.form || {};
-    const qp = new URLSearchParams({ embed:'1', s:f.sheetId||'', g:f.gid||'', t:f.tabName||'', d:f.displayName||'',
-      app:String(j.application.id), campId:CAMP_ID, holdToken:h.holdToken, holdPhone8:h.phone8 });
-    // 선택 옵션을 embed에 전달 → 구매양식이 옵션 피커 대신 잠금표시(서버가 최종 권위)
-    if(j.application && j.application.optionKey) qp.set('optionKey', j.application.optionKey);
     const frame = $('orderFrame');
-    frame.src = '/search.html?' + qp.toString();
-    frame.onerror = ()=>{ $('frameFallback').style.display=''; };
-    setTimeout(()=>{ $('frameFallback').style.display=''; }, 6000); // 폴백 버튼은 어차피 노출(새 창 경로 보장)
-    startHoldCountdown(j.application.expiresAt || h.expiresAt);
-    startPolling();
+    if(PREVIEW && !f.sheetId){
+      // 연결 탭이 없는 공고 — 리뷰어에게도 구매양식이 안 뜨는 상태임을 관리자에게 그대로 알림
+      frame.style.display = 'none';
+      $('frameFallback').style.display = 'none';
+      $('pvFormNote').style.display = '';
+    }else{
+      frame.style.display = '';
+      if($('pvFormNote')) $('pvFormNote').style.display = 'none';
+      const qp = new URLSearchParams({ embed:'1', s:f.sheetId||'', g:f.gid||'', t:f.tabName||'', d:f.displayName||'',
+        campId:CAMP_ID });
+      // ★ 미리보기: 홀드 문맥(app·holdToken·holdPhone8) 미전달 + preview=1 → 구매양식이 제출을 차단한다.
+      //   리뷰어 경로는 기존과 동일하게 홀드 문맥을 싣는다(preview 파라미터 없음 = 동작 불변).
+      if(PREVIEW){ qp.set('preview','1'); }
+      else { qp.set('app', String(j.application.id)); qp.set('holdToken', h.holdToken); qp.set('holdPhone8', h.phone8); }
+      // 선택 옵션을 embed에 전달 → 구매양식이 옵션 피커 대신 잠금표시(서버가 최종 권위)
+      //   ★ 미리보기는 '선택 가능한' 옵션일 때만 — 마감 옵션을 참여 옵션처럼 고정 표시하면 실제로
+      //     리뷰어가 도달할 수 없는 화면을 보여주게 된다.
+      const _selOpt = j.selectedOption;
+      const _pvOptBlocked = PREVIEW && !(_selOpt && _selOpt.selectable);
+      if(!_pvOptBlocked){
+        if(j.application && j.application.optionKey) qp.set('optionKey', j.application.optionKey);
+      }
+      const _src = '/search.html?' + qp.toString();
+      // ★ 같은 URL 재대입도 iframe 재탐색(=재부팅)이라 시트 읽기가 반복된다.
+      //   미리보기 단계 전환마다 시트 lane을 소모하지 않도록 **미리보기에서만** URL이 바뀔 때만 로드.
+      //   리뷰어 경로는 항상 재대입(기존 동작) — 옵션 변경 시 인플라이트 제출을 파기하는
+      //   TOCTOU 봉합이 이 재로드에 의존하므로 절대 캐싱하지 않는다.
+      if(!PREVIEW || frame.getAttribute('src') !== _src){
+        frame.src = _src;
+        frame.onerror = ()=>{ $('frameFallback').style.display=''; };
+      }
+      setTimeout(()=>{ $('frameFallback').style.display=''; }, 6000); // 폴백 버튼은 어차피 노출(새 창 경로 보장)
+    }
+    startHoldCountdown(j.application.expiresAt || (h && h.expiresAt));
+    if(!PREVIEW) startPolling();   // 미리보기는 서버 상태를 폴링하지 않음(홀드 없음)
     show('vJoined');
-  }catch(e){ toast('불러오기 오류: ' + e.message); renderPre(); }
 }
 
 // 참여 후: 내가 고른 옵션 카드(+변경 버튼) — 옵션 미등록 캠페인은 숨김
@@ -677,10 +759,13 @@ function openChat(){ if(_detail && _detail.chatUrl) window.open(_detail.chatUrl,
 // ★ 새 창에서도 embed=1 유지 — 최상위 창에선 postMessage가 no-op일 뿐,
 //   홀드 확정 문맥(campaignHold)은 제출 body에 그대로 실린다(문맥 유실 금지).
 //   새 창 제출의 확정 감지는 이 페이지의 10초 폴링 + 복귀(visibilitychange) 재조회가 담당.
-function openFormWindow(){ const f=$('orderFrame'); if(f.src) window.open(f.src, '_blank'); }
+// ★ 미리보기에서는 noopener — 새 탭이 sessionStorage(관리자 미리보기 토큰)를 복제하지 않게 한다.
+//   리뷰어 경로는 기존 동작 유지(입력값 복원이 sessionStorage에 의존).
+function openFormWindow(){ const f=$('orderFrame'); if(f.src) window.open(f.src, '_blank', PREVIEW ? 'noopener' : ''); }
 
 /* 참여 취소 */
 async function onCancel(){
+  if(PREVIEW) return _pvBlock('참여 취소');
   const h = getHold(); if(!h) return;
   if(!confirm('참여를 취소할까요?\n취소해도 오늘은 이 캠페인에 다시 참여할 수 없어요.')) return;
   try{
@@ -689,9 +774,105 @@ async function onCancel(){
       body: JSON.stringify({ phone8: h.phone8, holdToken: h.holdToken })
     });
     const j = await r.json().catch(()=>({}));
-    if(r.ok && j.ok){ clearInterval(_pollTimer); clearInterval(_holdTick); clearHold(); toast('참여가 취소되었어요'); await loadCampaign(); }
+    // ★ 취소 성공 = 참여 전 화면으로 돌아가야 한다. loadCampaign은 "참여 전 화면일 때만" 다시 그리므로
+    //   (작업가이드 보던 중 카운트다운 재조회에 튕기지 않게 한 가드) 여기서는 renderPre를 명시 호출한다.
+    if(r.ok && j.ok){ clearInterval(_pollTimer); clearInterval(_holdTick); clearHold(); toast('참여가 취소되었어요'); await loadCampaign(); if(_camp) renderPre(); }
     else toast(j.error || '취소할 수 없어요');
   }catch(e){ toast('오류: ' + e.message); }
+}
+
+/* ═══════════════════════════════════════════════════════════
+   관리자 미리보기 모드 (preview=1)
+   · 목적: 마감된 공고를 포함해 어떤 참여형 공고든 "리뷰어가 실제 진행하는 화면"을 확인
+   · 원칙: 서버 상태 무변경(홀드 생성 0·DB write 0) · 리뷰어 경로 동작 불변(PREVIEW=false면 전 분기 미도달)
+   · 토큰: 새 탭은 sessionStorage를 공유하지 않으므로 #tok= 프래그먼트로 넘겨받아 즉시 주소창에서 제거.
+     프래그먼트는 서버 로그·Referer에 실리지 않는다(workdesk #sso= 선례). 이 탭 한정 저장.
+   ═══════════════════════════════════════════════════════════ */
+const PV_TOK_KEY = 'camp_preview_tok';   // 전용 키 — sessionStorage.admin_token 을 건드리지 않음(타 모듈 동작 불변)
+/** 프래그먼트로 넘어온 관리자 토큰 회수 → 주소창·히스토리 정리.
+ *  ★ 정리(replaceState)는 저장 성공 여부와 무관하게 **항상** 실행한다(finally).
+ *    저장이 실패(프라이빗 모드·용량초과)했을 때 토큰이 주소창에 남는 것이 더 위험하기 때문. */
+function _pvCaptureToken(){
+  let tok = '';
+  try{
+    const m = String(location.hash || '').match(/(?:^#|&)tok=([^&]+)/);
+    if(m && m[1]) tok = decodeURIComponent(m[1]);
+    if(tok) sessionStorage.setItem(PV_TOK_KEY, tok);
+  }catch(_){ /* 저장 실패해도 아래 정리는 수행 */ }
+  finally{
+    try{
+      // preview 파라미터까지 제거 — 이 주소를 복사해 공유해도 평범한 리뷰어 링크가 되게 한다(R1)
+      const q = new URLSearchParams(location.search);
+      q.delete('preview');
+      const qs = q.toString();
+      history.replaceState(null, '', location.pathname + (qs ? '?' + qs : ''));
+    }catch(_){}
+  }
+  return tok;
+}
+function _pvToken(){
+  try{ return sessionStorage.getItem(PV_TOK_KEY) || sessionStorage.getItem('admin_token') || ''; }catch(_){ return ''; }
+}
+/** 미리보기 진입: 관리자 전용 preview 엔드포인트로 화면 데이터 합성(실제 참여 아님) */
+async function _enterPreview(){
+  document.body.classList.add('pv');
+  $('pvBar').style.display = 'block';
+  const tok = _pvToken();
+  if(!tok){ _pvFail('관리자 인증이 없어 미리보기를 열 수 없어요.<br/>관리자 대시보드에서 [리뷰어 화면] 버튼으로 다시 열어주세요.'); return; }
+  try{
+    const r = await fetch(API_BASE_URL + '/api/campaign/admin/' + encodeURIComponent(CAMP_ID) + '/preview',
+      { headers: { 'Authorization': 'Bearer ' + tok } });
+    const j = await r.json().catch(()=>({}));
+    if(!r.ok || !j.ok){
+      _pvFail(r.status === 401 ? '관리자 세션이 만료됐어요. 대시보드에서 다시 열어주세요.'
+            : r.status === 403 ? '관리자 권한이 필요해요.'
+            : ((j.error || '미리보기를 불러오지 못했어요.')));
+      return;
+    }
+    _detail = j;
+    if(j.serverNow) CampCards.setServerNow(j.serverNow);
+    const stLabel = { open:'모집중', preopen:'오픈 전', cutoff:'오늘 마감', daily_done:'오늘 인원 마감',
+                      soft_full:'잔여 대기', closed:'모집 종료', legacy:'레거시' }[j.state] || (j.state || '');
+    $('pvState').textContent = '현재 상태: ' + stLabel;
+    const fb = $('pvForceBtn'); if(fb) fb.classList.toggle('on', _pvForceOpen);
+    pvGo('pre');
+  }catch(e){
+    _pvFail('미리보기 오류: ' + (e.message || ''));
+  }
+}
+/** 미리보기 진입 실패 — 안내를 띄우고 **단계 전환 버튼을 없앤다**.
+ *  데이터가 없는 상태로 ③ 제출완료를 누르면 가짜 "참여 확정!" 화면이 떠 관리자가 정상으로 오판하기 때문. */
+function _pvFail(msgHtml){
+  const steps = document.querySelector('#pvBar .pv-steps');
+  if(steps) steps.style.display = 'none';
+  $('pvState').textContent = '불러오기 실패';
+  $('vLoading').innerHTML = '<div class="e">🔑</div><p>' + msgHtml + '</p>';
+  show('vLoading');
+}
+/** 미리보기 단계 전환 — 참여 전 / 작업가이드 / 제출 완료 */
+function pvGo(step){
+  if(!PREVIEW) return;
+  _pvStep = step;
+  [['pre','pvStepPre'],['joined','pvStepJoined'],['done','pvStepDone']].forEach(([k,id])=>{
+    const el = $(id); if(el) el.classList.toggle('on', k === step);
+  });
+  clearInterval(_holdTick);
+  if(step === 'pre'){ if(_camp) renderPre(); else show('vPre'); return; }
+  if(step === 'joined'){ if(_detail) _renderJoinedView(_detail, null); return; }
+  if(step === 'done'){ renderDone(); }
+}
+/** ①단계 표시 전환: 실제 상태 그대로 ↔ 모집중 가정(마감·게시 전 공고의 진행 화면 확인용) */
+function pvToggleForce(){
+  if(!PREVIEW) return;
+  _pvForceOpen = !_pvForceOpen;
+  const b = $('pvForceBtn');
+  if(b){ b.textContent = _pvForceOpen ? '모집중 가정' : '실제 상태'; b.classList.toggle('on', _pvForceOpen); }
+  if(_pvStep === 'pre' && _camp) renderPre();
+}
+/** 미리보기에서 서버 상태를 바꾸는 동작 차단 — 안내만 하고 아무 요청도 보내지 않는다 */
+function _pvBlock(what){
+  toast('미리보기에서는 ' + what + '이(가) 동작하지 않아요 (실제 참여 아님)');
+  return true;
 }
 
 /* ═══ 초기 로드 ═══ */
@@ -702,6 +883,12 @@ async function loadCampaign(){
   if(j.serverNow) CampCards.setServerNow(j.serverNow);
   _camp = j.data;
   if(!_camp.participation_mode){ location.replace('/'); return; }
+  // ★ 카운트다운 0 도달 시 카드 티커가 이 함수를 재호출한다(CampCards.startTicker).
+  //   그때 무조건 renderPre()를 하면 **작업가이드·제출완료를 보고 있던 화면이 참여 전으로 튕긴다**
+  //   (리뷰어가 구매 진행 중 cutoff를 맞으면 구매양식이 사라지는 기존 버그). 참여 전 화면일 때만 다시 그린다.
+  const onPre = $('vPre').style.display !== 'none' || $('vLoading').style.display !== 'none';
+  if(!onPre) return;                                   // 데이터(_camp)만 갱신하고 화면 전환은 생략
+  if(PREVIEW && _pvStep !== 'pre') return;
   renderPre();
 }
 /** KST 날짜 문자열(YYYY-MM-DD) */
@@ -709,8 +896,13 @@ function kstDateStr(ms){ return new Date(ms + 9*3600*1000).toISOString().slice(0
 
 (async function init(){
   if(!CAMP_ID){ location.replace('/'); return; }
+  // ★ 주소창 토큰·preview 파라미터는 어떤 요청보다 먼저 회수·제거하고, 토큰이 있을 때만 미리보기로 확정.
+  //   토큰 없이 preview 주소로 들어온 방문자(= 링크를 전달받은 리뷰어)는 평범한 리뷰어 화면을 본다.
+  if(PREVIEW_REQ){ _pvCaptureToken(); PREVIEW = !!_pvToken(); }
   try{
     await loadCampaign();
+    // ★ 관리자 미리보기: 홀드 복원·폴링 없이 미리보기 데이터로 단계 전환만(서버 상태 무변경)
+    if(PREVIEW){ await _enterPreview(); return; }
     let h = getHold();
     // ★ 어제(KST 이전 일자) 홀드는 폐기 — 서버는 익일 재참여를 허용하므로 만료 화면에 영구 잠금되지 않게
     if(h && h.expiresAt && kstDateStr(Date.parse(h.expiresAt)) < kstDateStr(CampCards.serverNow())){

@@ -77,11 +77,30 @@ function _buildRecruitCard(c) {
         <button class="recruit-btn recruit-btn-edit" onclick="openRecruitModal('${escHtml(c.id)}')"><i class="fas fa-pen"></i> 수정</button>
         <button class="recruit-btn recruit-btn-del"  onclick="deleteRecruitPost('${escHtml(c.id)}', \`${escHtml(c.title||'')}\`)"><i class="fas fa-trash"></i> 삭제</button>
         ${c.participation_mode ? `<button class="recruit-btn" style="background:#EDE9FE;color:#5B21B6" onclick="openCampControlById('${escHtml(c.id)}')"><i class="fas fa-satellite-dish"></i> 관제</button>` : ""}
+        ${c.participation_mode ? `<button class="recruit-btn" style="background:#E0F2FE;color:#075985" onclick="openReviewerPreview('${escHtml(c.id)}')" title="리뷰어가 실제 보는 참여 화면을 확인합니다 (마감된 공고도 가능 · 실제 참여로 기록되지 않음)"><i class="fas fa-eye"></i> 리뷰어 화면</button>` : ""}
       </div>
       ${_recruitToggleHtml(c)}
     </div>
   `;
   return div;
+}
+
+/* ═══════════════════════════════════════
+   리뷰어 화면 미리보기 (관리자 전용 · 읽기 전용)
+   · 마감된 공고를 포함해 리뷰어가 실제 보는 참여 화면(참여 전/작업가이드/제출완료)을 확인
+   · 실제 참여(홀드)·주문을 만들지 않는다 — campaign.html?preview=1 이 서버의 관리자 전용
+     preview 엔드포인트만 호출하고, 구매양식 iframe은 제출이 차단된다.
+   · 새 탭은 sessionStorage를 공유하지 않으므로 관리자 토큰을 #tok= 프래그먼트로 넘긴다
+     (프래그먼트는 서버 로그·Referer에 실리지 않고, 도착 즉시 주소창에서 제거된다).
+═══════════════════════════════════════ */
+function openReviewerPreview(campId) {
+  const token = sessionStorage.getItem("admin_token") || "";
+  if (!token) { showToast("관리자 로그인이 필요합니다.", "error"); return; }
+  const url = "campaign.html?id=" + encodeURIComponent(campId) + "&preview=1#tok=" + encodeURIComponent(token);
+  // ★ noopener 미사용 의도: 새 탭이 sessionStorage를 이어받아야 토큰 폴백이 동작한다(프래그먼트가 떨어지는
+  //   인앱 브라우저 대비). 팝업 차단 시 무반응이 되지 않도록 반환값을 확인해 안내한다.
+  const w = window.open(url, "_blank");
+  if (!w) showToast("팝업이 차단되었습니다. 브라우저에서 이 사이트의 팝업을 허용해주세요.", "error");
 }
 
 /* 게시/중단 토글 (임시저장↔모집중). 마감(closed) 카드는 토글 미표시 */
@@ -1283,6 +1302,9 @@ function _renderPreview() {
       <button disabled style="display:block;width:100%;padding:12px;background:linear-gradient(135deg,#3182f6,#1b64da);color:#fff;border:none;border-radius:10px;font-size:.88rem;font-weight:800;text-align:center;opacity:.9;cursor:default">
         <i class="fas fa-hand-point-up"></i> 참여 신청하기
       </button>
+      ${(_recruitEditId && document.getElementById("rf_participation") && document.getElementById("rf_participation").checked) ? `<button onclick="openReviewerPreview('${escHtml(_recruitEditId)}')" style="display:block;width:100%;margin-top:6px;padding:10px;background:#E0F2FE;color:#075985;border:1px solid #BAE6FD;border-radius:10px;font-size:.78rem;font-weight:800;cursor:pointer;font-family:inherit">
+        <i class="fas fa-eye"></i> 전체 화면으로 보기 (참여 후 작업가이드까지)
+      </button>` : ""}
     </div>
   `;
 }

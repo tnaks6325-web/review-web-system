@@ -38,18 +38,24 @@ const _EMBED_CTX = (() => {
       holdToken: q.get("holdToken") || "",
       holdPhone8: q.get("holdPhone8") || "",
       optionKey: q.get("optionKey") || "", // ★ 061: 참여 시 고른 옵션(잠금표시). 서버가 최종 권위.
+      // ★ 관리자 미리보기(읽기전용): campaign.html?preview=1 이 iframe에만 실어 보낸다.
+      //   리뷰어 진입 URL에는 이 파라미터가 없으므로 항상 false = 제출 동작 불변.
+      preview: q.get("preview") === "1",
     };
   } catch (_) { return null; }
 })();
+/** 미리보기(제출 차단) 단일 판정 — embed 컨텍스트 안에서만 참이 될 수 있다. */
+const _PREVIEW_MODE = !!(_EMBED_CTX && _EMBED_CTX.preview);
 function _embedPost(msg) {
   if (_EMBED_CTX && window.parent !== window) {
     try { window.parent.postMessage(msg, location.origin); } catch (_) { /* noop */ }
   }
 }
-const _EMBED_FORM_KEY = _EMBED_CTX ? ("embedForm_" + _EMBED_CTX.app) : "";
+// 미리보기는 입력값 저장/복원 안 함(관리자 시연 입력이 리뷰어 세션 저장소에 남지 않게)
+const _EMBED_FORM_KEY = (_EMBED_CTX && !_EMBED_CTX.preview && _EMBED_CTX.app) ? ("embedForm_" + _EMBED_CTX.app) : "";
 /** 외부 쇼핑몰(쿠팡 앱 전환 등) 복귀 시 브라우저가 iframe을 리로드해도 입력값이 살아나도록 저장/복원 */
 function _embedSaveForm() {
-  if (!_EMBED_CTX) return;
+  if (!_EMBED_CTX || !_EMBED_FORM_KEY) return;
   try {
     const scr = document.getElementById("screenOrderForm");
     if (!scr) return;
@@ -60,7 +66,7 @@ function _embedSaveForm() {
   } catch (_) { /* noop */ }
 }
 function _embedRestoreForm() {
-  if (!_EMBED_CTX) return;
+  if (!_EMBED_CTX || !_EMBED_FORM_KEY) return;
   try {
     const raw = sessionStorage.getItem(_EMBED_FORM_KEY);
     if (!raw) return;
@@ -111,9 +117,15 @@ function _activateEmbedMode() {
         body.embed-mode .app-header{display:none!important}
         body.embed-mode #screenOrderForm{padding-top:4px!important}
         body.embed-mode{background:#fff!important}
+        /* 관리자 미리보기: 제출 버튼을 시각·물리적으로 비활성(재렌더돼도 CSS가 유지) */
+        body.embed-preview #btnOrderFormSubmit{opacity:.45!important;pointer-events:none!important;filter:grayscale(1)}
+        body.embed-preview #screenOrderForm::before{content:"👁 관리자 미리보기 — 제출되지 않습니다";
+          display:block;background:#F5F3FF;color:#5B21B6;border:1.5px dashed #C4B5FD;border-radius:10px;
+          padding:9px 12px;margin:6px 0 10px;font-size:.78rem;font-weight:700;text-align:center}
       `;
       document.head.appendChild(st);
     }
+    if (_PREVIEW_MODE) document.body.classList.add("embed-preview");
     // 높이 보고(부모가 iframe height 자동 조정)
     clearInterval(_embedHeightTimer);
     _embedHeightTimer = setInterval(() => {
@@ -3972,7 +3984,14 @@ function initOrderFormMode() {
   window._incomeType = incomeType; // ★ v9.14: 진행방식 전역 플래그
 
   // ★★★ Phase 5: 구매양식 제출 시 리뷰어 로그인 강제 ★★★
-  const authSession = _loadAuthSession();
+  let authSession = _loadAuthSession();
+  // ★ 관리자 미리보기: 리뷰어 세션이 없어도 폼 화면을 그대로 보여준다(제출은 아래에서 차단).
+  //   ★ 세션이 "있어도" 무조건 자리표시자로 대체한다 — 관리자 브라우저에 남아 있던 리뷰어 세션으로
+  //     계좌번호·예금주·실명이 자동 입력되어 화면공유·스크린샷에 타인 PII가 노출되는 것을 막는다.
+  //   리뷰어 진입(preview 없음)에는 이 분기가 도달하지 않아 로그인 강제가 그대로 유지된다.
+  if (_PREVIEW_MODE) {
+    authSession = { name: "미리보기", phone8: "" };
+  }
   if (!authSession || !authSession.name) {
     // 로그인 안 된 상태 → 로그인 화면 표시 후 완료 시 폼으로 복귀
     window._pendingOrderForm = true; // 로그인 완료 후 폼 진입 플래그
@@ -4071,10 +4090,14 @@ function initOrderFormMode() {
   }
 
   // ★ 저장된 계좌정보 자동완성 (모든 탭 공통 — 계좌 오타 방지)
-  _prefillBankFromProfile().catch(e => console.warn("[bank prefill]", e.message));
+  //   ★ 관리자 미리보기 제외: 이 함수는 localStorage의 리뷰어 세션을 직접 읽으므로,
+  //     관리자 브라우저에 남아 있던 세션의 계좌번호·예금주가 미리보기 화면에 찍힐 수 있다(PII 노출).
+  if (!_PREVIEW_MODE) {
+    _prefillBankFromProfile().catch(e => console.warn("[bank prefill]", e.message));
 
-  // ★ 내정보(사용자명/전화/주소/계좌) 미등록 안내 배너 (비차단 — 제출 시 차단)
-  _precheckProfileGateOnEntry(window._slotAuth || {});
+    // ★ 내정보(사용자명/전화/주소/계좌) 미등록 안내 배너 (비차단 — 제출 시 차단)
+    _precheckProfileGateOnEntry(window._slotAuth || {});
+  }
 
   return true;
 }
@@ -7156,6 +7179,7 @@ async function _precheckProfileGateOnEntry(auth) {
    제출 버튼은 confirmOrderSubmit()을 호출 → 팝업 노출 → [제출완료하기] 시 실제 submitOrderForm() 실행.
    (내부 재제출은 submitOrderForm()을 직접 호출하므로 팝업을 거치지 않는다.) */
 function confirmOrderSubmit() {
+  if (_PREVIEW_MODE) { showToast("관리자 미리보기에서는 제출되지 않습니다.", "info"); return; }
   if (window._submitOrderFormInProgress) { console.warn("[confirmOrderSubmit] 제출 진행 중 — 무시"); return; }
   const m = document.getElementById("orderConfirmModal");
   if (!m) { submitOrderForm(); return; }   // 모달 미존재(하위호환) 시 바로 제출
@@ -7171,6 +7195,8 @@ function _proceedOrderSubmit() {
 }
 
 async function submitOrderForm() {
+  // ★ 최종 방어선: 재제출 등 팝업을 건너뛰는 내부 호출까지 포함해 미리보기에서는 주문이 절대 생성되지 않는다.
+  if (_PREVIEW_MODE) { showToast("관리자 미리보기에서는 제출되지 않습니다.", "info"); return; }
   if (window._submitOrderFormInProgress) { console.warn("[submitOrderForm] 진행 중 — 무시"); return; }
   window._submitOrderFormInProgress = true;
   const btn = document.getElementById("btnOrderFormSubmit");
