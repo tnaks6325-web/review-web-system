@@ -551,6 +551,17 @@ router.get('/reviewer-logs', authMiddleware, internalMiddleware, async (req, res
   } catch (err) { next(err); }
 });
 
+// 「이 알림은 사실 내가 취소한 건입니다」 1클릭 처리 — 주문을 취소로 확정해 재기록을 멈춘다.
+//   (시트에서 행을 지우거나 값을 비운 것이 '의도된 취소'였을 때의 정식 경로.
+//    시스템은 시트만 봐서는 의도를 알 수 없어 기본이 '재기록'이므로, 사람이 알려주는 이 신호가 필요하다.)
+router.post('/reviewer-logs/cancel-order', authMiddleware, adminOrMasterMiddleware, async (req, res, next) => {
+  try {
+    const { cancelOrderFromEvent } = require('../services/reviewerEventLog.service');
+    const out = await cancelOrderFromEvent({ id: (req.body || {}).id, by: _by(req) });
+    res.status(out.ok ? 200 : 400).json(out);
+  } catch (err) { next(err); }
+});
+
 // 확인(해결)은 전역 진실원본이라 admin/master 전용 — staff가 타 담당자의 미확인 중요알림을 지우지 못하게.
 router.post('/reviewer-logs/resolve', authMiddleware, adminOrMasterMiddleware, async (req, res, next) => {
   try {

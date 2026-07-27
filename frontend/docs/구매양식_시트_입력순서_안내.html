@@ -1,0 +1,273 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>구매양식 시트 입력 순서 안내</title>
+<style>
+  *,*::before,*::after{box-sizing:border-box}
+  :root{
+    --paper:#F6F7F9; --card:#FFFFFF; --ink:#14171D; --muted:#5B6472; --line:#E2E6EC;
+    --sys:#1F5FA8; --sys-bg:#EAF1FA; --sys-edge:#B9D2EE;
+    --staff:#9A6414; --staff-bg:#FBF2E2; --staff-edge:#E8D2A4;
+    --reuse:#157A6E; --reuse-bg:#E6F3F1; --reuse-edge:#A9D8D0;
+    --shadow:0 1px 2px rgba(20,23,29,.06), 0 8px 24px rgba(20,23,29,.05);
+  }
+  @media (prefers-color-scheme: dark){
+    :root{
+      --paper:#0F1216; --card:#161A20; --ink:#E8ECF2; --muted:#98A2B0; --line:#262C35;
+      --sys:#84B6EF; --sys-bg:#15263C; --sys-edge:#27466B;
+      --staff:#E2B673; --staff-bg:#2C2315; --staff-edge:#4E3D1E;
+      --reuse:#6FC7B9; --reuse-bg:#122B28; --reuse-edge:#245049;
+      --shadow:0 1px 2px rgba(0,0,0,.4), 0 8px 24px rgba(0,0,0,.28);
+    }
+  }
+  html{-webkit-text-size-adjust:100%}
+  body{
+    margin:0; background:var(--paper); color:var(--ink);
+    font-family:"Pretendard Variable",Pretendard,-apple-system,BlinkMacSystemFont,"Apple SD Gothic Neo","Malgun Gothic","Noto Sans KR",system-ui,sans-serif;
+    line-height:1.6; -webkit-font-smoothing:antialiased;
+  }
+  .wrap{max-width:940px; margin:0 auto; padding:44px 20px 64px; display:flex; flex-direction:column; gap:34px}
+
+  .eyebrow{
+    margin:0 0 10px; font-size:11.5px; font-weight:700; letter-spacing:.14em;
+    text-transform:uppercase; color:var(--sys);
+  }
+  h1{
+    margin:0 0 12px; font-size:clamp(28px,4.4vw,40px); font-weight:800;
+    letter-spacing:-.026em; line-height:1.18; text-wrap:balance;
+  }
+  .lede{margin:0; max-width:62ch; color:var(--muted); font-size:16px}
+  .head{border-bottom:1px solid var(--line); padding-bottom:26px}
+
+  .legend{display:flex; flex-wrap:wrap; gap:8px}
+  .key{
+    display:inline-flex; align-items:center; gap:7px; padding:6px 12px 6px 8px;
+    border:1px solid var(--line); border-radius:999px; background:var(--card);
+    font-size:12.5px; font-weight:600; color:var(--muted);
+  }
+  .swatch{width:13px; height:13px; border-radius:4px; flex:none}
+  .sw-sys{background:var(--sys-bg); border:1.5px solid var(--sys)}
+  .sw-staff{background:var(--staff-bg); border:1.5px solid var(--staff)}
+  .sw-reuse{background:var(--reuse-bg); border:1.5px dashed var(--reuse)}
+  .sw-empty{background:var(--card); border:1.5px solid var(--line)}
+
+  .scene{display:flex; flex-direction:column; gap:14px}
+  .scene h2{
+    margin:0; font-size:19px; font-weight:750; letter-spacing:-.015em;
+    display:flex; align-items:center; gap:9px; flex-wrap:wrap;
+  }
+  .tag{
+    font-size:11px; font-weight:700; letter-spacing:.06em; padding:3px 9px;
+    border-radius:6px; background:var(--sys-bg); color:var(--sys); border:1px solid var(--sys-edge);
+  }
+  .tag.t-staff{background:var(--staff-bg); color:var(--staff); border-color:var(--staff-edge)}
+  .tag.t-reuse{background:var(--reuse-bg); color:var(--reuse); border-color:var(--reuse-edge)}
+  .rule{margin:0; color:var(--muted); font-size:14.5px; max-width:64ch}
+
+  .sheetbox{
+    background:var(--card); border:1px solid var(--line); border-radius:12px;
+    box-shadow:var(--shadow); overflow:hidden;
+  }
+  .scroll{overflow-x:auto}
+  table{border-collapse:collapse; width:100%; min-width:660px; font-size:13.5px}
+  caption{
+    caption-side:top; text-align:left; padding:11px 14px; font-size:12px; font-weight:700;
+    color:var(--muted); background:var(--paper); border-bottom:1px solid var(--line);
+    letter-spacing:.01em;
+  }
+  th,td{padding:9px 12px; border-bottom:1px solid var(--line); text-align:left; white-space:nowrap}
+  thead th{
+    font-size:11.5px; font-weight:700; color:var(--muted); background:var(--paper);
+    letter-spacing:.03em; border-bottom:1px solid var(--line);
+  }
+  tbody tr:last-child td, tbody tr:last-child th{border-bottom:none}
+  .rownum{
+    width:60px; font-family:ui-monospace,SFMono-Regular,"SF Mono",Menlo,monospace;
+    font-size:11.5px; font-weight:600; color:var(--muted); background:var(--paper);
+    text-align:right; font-variant-numeric:tabular-nums; position:relative;
+  }
+  .num{font-variant-numeric:tabular-nums}
+  .who{font-weight:650}
+
+  tr.r-sys td, tr.r-sys th.rownum{background:var(--sys-bg)}
+  tr.r-sys td:first-of-type{box-shadow:inset 3px 0 0 var(--sys)}
+  tr.r-staff td, tr.r-staff th.rownum{background:var(--staff-bg)}
+  tr.r-staff td:first-of-type{box-shadow:inset 3px 0 0 var(--staff)}
+  tr.r-reuse td{background:var(--reuse-bg); color:var(--muted)}
+  tr.r-reuse td:first-of-type{box-shadow:inset 3px 0 0 var(--reuse)}
+  tr.r-reuse .who{text-decoration:line-through; text-decoration-thickness:1.5px; opacity:.75}
+  .dim{color:var(--muted)}
+
+  .cursor{
+    display:inline-block; margin-left:6px; padding:2px 7px; border-radius:5px;
+    background:var(--sys); color:#fff; font-size:10.5px; font-weight:700; letter-spacing:.02em;
+  }
+  @media (prefers-color-scheme: dark){ .cursor{color:#0F1216} }
+  .chip{
+    display:inline-block; padding:2px 8px; border-radius:5px; font-size:11px; font-weight:700;
+    border:1px solid transparent;
+  }
+  .c-keep{background:var(--staff-bg); color:var(--staff); border-color:var(--staff-edge)}
+  .c-skip{background:var(--sys-bg); color:var(--sys); border-color:var(--sys-edge)}
+  .c-reuse{background:var(--reuse-bg); color:var(--reuse); border-color:var(--reuse-edge)}
+
+  .logcard{
+    margin:0; padding:13px 16px; background:var(--card); border:1px solid var(--line);
+    border-left:3px solid var(--sys); border-radius:10px; font-size:13.5px; color:var(--ink);
+  }
+  .logcard b{display:block; font-size:11px; letter-spacing:.08em; text-transform:uppercase;
+    color:var(--muted); font-weight:700; margin-bottom:5px}
+
+  .compare{display:grid; grid-template-columns:1fr 1fr; gap:14px}
+  .cc{
+    background:var(--card); border:1px solid var(--line); border-radius:12px;
+    padding:18px 20px; box-shadow:var(--shadow); display:flex; flex-direction:column; gap:8px;
+  }
+  .cc.bad{border-top:3px solid #C0392B}
+  .cc.good{border-top:3px solid var(--reuse)}
+  .cc-hd{font-size:14.5px; font-weight:750; display:flex; align-items:center; gap:8px; letter-spacing:-.01em}
+  .mark{
+    flex:none; width:20px; height:20px; border-radius:50%; display:grid; place-items:center;
+    font-size:12px; font-weight:800; color:#fff;
+  }
+  .mark.x{background:#C0392B}
+  .mark.o{background:var(--reuse)}
+  .cc p{margin:0; font-size:13.5px; color:var(--muted); line-height:1.55}
+  .cc .result{font-size:13px; font-weight:700; color:var(--ink)}
+
+  .notice{
+    background:var(--card); border:1px solid var(--line); border-radius:12px;
+    padding:24px 26px; box-shadow:var(--shadow);
+  }
+  .notice h2{margin:0 0 14px; font-size:17px; font-weight:750; letter-spacing:-.01em}
+  .notice ul{margin:0; padding:0; list-style:none; display:flex; flex-direction:column; gap:11px}
+  .notice li{display:flex; gap:11px; align-items:flex-start; font-size:14.5px}
+  .bullet{
+    flex:none; margin-top:6px; width:6px; height:6px; border-radius:2px; background:var(--sys);
+  }
+  .notice li:nth-child(2) .bullet{background:var(--staff)}
+  .notice li:nth-child(3) .bullet{background:var(--reuse)}
+  .notice strong{font-weight:750}
+
+  @media (max-width:560px){
+    .wrap{padding:32px 14px 48px; gap:28px}
+    .notice{padding:20px 18px}
+    .compare{grid-template-columns:1fr}
+  }
+  @media print{
+    body{background:#fff}
+    .sheetbox,.notice{box-shadow:none}
+    .scene{break-inside:avoid}
+  }
+</style>
+</head>
+<body>
+<main class="wrap">
+  <header class="head">
+    <p class="eyebrow">운영 안내 · 구매양식 시트</p>
+    <h1>시트는 위에서 아래로, 한 방향으로만 채워집니다</h1>
+    <p class="lede">리뷰어가 제출한 구매양식은 시스템이 자동으로 기록합니다.
+      직원이 직접 입력한 행은 <strong>시스템이 지우거나 덮어쓰지 않습니다.</strong></p>
+  </header>
+
+  <div class="legend">
+    <span class="key"><span class="swatch sw-sys"></span>시스템 기록 (리뷰어 제출)</span>
+    <span class="key"><span class="swatch sw-staff"></span>직원 직접 입력</span>
+    <span class="key"><span class="swatch sw-reuse"></span>재사용 가능 자리</span>
+    <span class="key"><span class="swatch sw-empty"></span>빈 행</span>
+  </div>
+
+  <section class="scene">
+    <h2>평상시 <span class="tag">순서대로</span></h2>
+    <p class="rule">리뷰어 제출이 들어오면 시스템이 다음 빈 행에 기록하고, 커서를 한 칸 내립니다.</p>
+    <div class="sheetbox"><div class="scroll">
+      <table>
+        <caption>0721) 탄소매트 900건 · 구매양식 탭</caption>
+        <thead>
+          <tr><th class="rownum">행</th><th>번호</th><th>구매일자</th><th>주문자</th><th>수취인</th><th>연락처</th></tr>
+        </thead>
+        <tbody>
+          <tr class="r-sys"><th class="rownum">12</th><td class="num">12</td><td>7 / 28 (화)</td><td class="who">김서준</td><td>김서준</td><td class="num">010-2841-1180</td></tr>
+          <tr class="r-sys"><th class="rownum">13</th><td class="num">13</td><td>7 / 28 (화)</td><td class="who">박지우</td><td>박지우</td><td class="num">010-5510-2043</td></tr>
+          <tr><th class="rownum">14<span class="cursor">다음</span></th><td class="num dim">14</td><td class="dim">7 / 28 (화)</td><td></td><td></td><td></td></tr>
+          <tr><th class="rownum">15</th><td class="num dim">15</td><td class="dim">7 / 28 (화)</td><td></td><td></td><td></td></tr>
+        </tbody>
+      </table>
+    </div></div>
+  </section>
+
+  <section class="scene">
+    <h2>직원 입력과 겹칠 때 <span class="tag t-staff">건너뜀 · 덮어쓰지 않음</span></h2>
+    <p class="rule">직원이 14행에 먼저 입력하면, 시스템은 그 행을 <strong>그대로 두고</strong> 아래 빈 행(15행)에 기록합니다.
+      기다리거나 위로 되돌아가지 않습니다.</p>
+    <div class="sheetbox"><div class="scroll">
+      <table>
+        <caption>0721) 탄소매트 900건 · 구매양식 탭</caption>
+        <thead>
+          <tr><th class="rownum">행</th><th>번호</th><th>구매일자</th><th>주문자</th><th>수취인</th><th>연락처</th><th>상태</th></tr>
+        </thead>
+        <tbody>
+          <tr class="r-sys"><th class="rownum">13</th><td class="num">13</td><td>7 / 28 (화)</td><td class="who">박지우</td><td>박지우</td><td class="num">010-5510-2043</td><td></td></tr>
+          <tr class="r-staff"><th class="rownum">14</th><td class="num">14</td><td>7 / 28 (화)</td><td class="who">이하늘</td><td>이하늘</td><td class="num">010-3327-9614</td><td><span class="chip c-keep">직원 입력 · 유지</span></td></tr>
+          <tr class="r-sys"><th class="rownum">15</th><td class="num">15</td><td>7 / 28 (화)</td><td class="who">최민서</td><td>최민서</td><td class="num">010-7702-4458</td><td><span class="chip c-skip">건너뛰어 기록</span></td></tr>
+          <tr><th class="rownum">16<span class="cursor">다음</span></th><td class="num dim">16</td><td class="dim">7 / 28 (화)</td><td></td><td></td><td></td><td></td></tr>
+        </tbody>
+      </table>
+    </div></div>
+    <p class="logcard"><b>관리자 화면에 남는 기록</b>
+      『0721) 탄소매트 900건』 14행에 직원 입력이 있어 최민서 리뷰어의 구매양식을 15행에 기록했습니다.</p>
+  </section>
+
+  <section class="scene">
+    <h2>빈 자리 재사용 <span class="tag t-reuse">취소 · 미완 자리만</span></h2>
+    <p class="rule">주문이 취소됐거나 시스템이 쓰다 만 자리는 원본이 서버에 남아 있어 안전하게 다시 씁니다.
+      <strong>직원이 입력한 행은 여기에 해당하지 않습니다.</strong></p>
+    <div class="sheetbox"><div class="scroll">
+      <table>
+        <caption>0721) 탄소매트 900건 · 구매양식 탭</caption>
+        <thead>
+          <tr><th class="rownum">행</th><th>번호</th><th>구매일자</th><th>주문자</th><th>수취인</th><th>연락처</th><th>상태</th></tr>
+        </thead>
+        <tbody>
+          <tr class="r-reuse"><th class="rownum">20</th><td class="num">20</td><td>7 / 28 (화)</td><td class="who">정예린</td><td class="dim">정예린</td><td class="num dim">010-4419-8830</td><td><span class="chip c-reuse">주문취소 · 재사용 가능</span></td></tr>
+          <tr class="r-staff"><th class="rownum">21</th><td class="num">21</td><td>7 / 28 (화)</td><td class="who">한도윤</td><td>한도윤</td><td class="num">010-6650-3172</td><td><span class="chip c-keep">직원 입력 · 유지</span></td></tr>
+        </tbody>
+      </table>
+    </div></div>
+  </section>
+
+  <section class="scene">
+    <h2>주문을 취소할 때 <span class="tag t-staff">시트에서 지우지 마세요</span></h2>
+    <p class="rule">리뷰어가 구매를 취소해서 그 건을 없애야 할 때는, 시트에서 지우는 대신 <strong>관리자 화면에서 취소</strong>해 주세요.
+      시스템은 시트만 봐서는 <em>일부러 지운 것</em>과 <em>사고로 사라진 것</em>을 구분하지 못합니다.</p>
+    <div class="compare">
+      <div class="cc bad">
+        <div class="cc-hd"><span class="mark x">✕</span>시트에서 행 삭제 · 값 지우기</div>
+        <p>시스템은 “기록했던 주문이 사라졌다”고 판단합니다.</p>
+        <p class="result">→ 시트 아래쪽에 다시 기록됩니다</p>
+      </div>
+      <div class="cc good">
+        <div class="cc-hd"><span class="mark o">✓</span>관리자 화면에서 [주문취소]</div>
+        <p>서버에서 취소로 확정되고, 시트 행은 자동으로 비워집니다.</p>
+        <p class="result">→ 다시 기록되지 않고 그 자리가 잠깁니다</p>
+      </div>
+    </div>
+    <p class="logcard"><b>이미 시트에서 지우셨다면</b>
+      관리자 화면에 “시트에서 사라졌습니다” 알림이 뜹니다. 그 알림의 <strong>[취소 처리]</strong> 버튼을 누르시면
+      다시 기록되지 않고 취소로 정리됩니다.</p>
+  </section>
+
+  <section class="notice">
+    <h2>직원분들께</h2>
+    <ul>
+      <li><span class="bullet"></span><span><strong>직접 입력하신 행은 시스템이 지우지 않습니다.</strong> 입력 중에 시스템이 그 행을 가져가는 일은 없습니다.</span></li>
+      <li><span class="bullet"></span><span><strong>시스템은 위로 되돌아가지 않습니다.</strong> 겹치면 아래 빈 행으로 넘어가 기록하고, 그 사실이 관리자 화면에 남습니다.</span></li>
+      <li><span class="bullet"></span><span><strong>취소는 시트에서 지우지 마시고 관리자 화면에서 처리해 주세요.</strong> 지우기만 하면 시스템이 유실로 보고 다시 기록합니다.</span></li>
+      <li><span class="bullet"></span><span><strong>입력은 아래쪽 빈 행부터 하시면 가장 깔끔합니다.</strong> 위쪽에 입력하셔도 데이터가 사라지지는 않지만, 기록이 아래로 밀려 순서가 섞일 수 있습니다.</span></li>
+    </ul>
+  </section>
+</main>
+</body>
+</html>
