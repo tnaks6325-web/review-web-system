@@ -126,8 +126,10 @@ ok('⑦-R4 수정 모달 미리보기 버튼은 참여형일 때만(레거시 �
 ok('⑦-R5 미리보기는 잔여 리뷰어 세션을 쓰지 않음(타인 계좌·실명 노출 차단)',
   /if \(_PREVIEW_MODE\) \{\s*\n\s*authSession = \{ name: "미리보기", phone8: "" \};/.test(sapp)
   && /if \(!_PREVIEW_MODE\) \{\s*\n\s*_prefillBankFromProfile\(\)/.test(sapp));
-ok('⑦-R6 단계 전환 시 iframe 재로드 안 함(시트 쿼터 보호)',
-  /if\(frame\.getAttribute\('src'\) !== _src\)\{/.test(camp));
+ok('⑦-R6 미리보기 단계 전환 시만 iframe 재로드 생략(리뷰어는 항상 재로드 = TOCTOU 봉합 유지)',
+  /if\(!PREVIEW \|\| frame\.getAttribute\('src'\) !== _src\)\{/.test(camp));
+ok('⑦-R8b 참여 취소 후에는 참여 전 화면으로 명시 복귀(가드로 인한 정체 방지)',
+  /참여가 취소되었어요'\); await loadCampaign\(\); if\(_camp\) renderPre\(\);/.test(camp));
 ok('⑦-R7 미리보기 로드 실패 시 단계 버튼 제거(가짜 완료화면 방지)',
   /function _pvFail\(msgHtml\)\{/.test(camp) && /steps\.style\.display = 'none'/.test(camp));
 ok('⑦-R8 카운트다운 0 재조회가 작업가이드·완료 화면을 되돌리지 않음(리뷰어 경로 포함)',

@@ -656,8 +656,10 @@ function _renderJoinedView(j, h){
       }
       const _src = '/search.html?' + qp.toString();
       // ★ 같은 URL 재대입도 iframe 재탐색(=재부팅)이라 시트 읽기가 반복된다.
-      //   미리보기 단계 전환마다 시트 lane을 소모하지 않도록 URL이 바뀔 때만 로드.
-      if(frame.getAttribute('src') !== _src){
+      //   미리보기 단계 전환마다 시트 lane을 소모하지 않도록 **미리보기에서만** URL이 바뀔 때만 로드.
+      //   리뷰어 경로는 항상 재대입(기존 동작) — 옵션 변경 시 인플라이트 제출을 파기하는
+      //   TOCTOU 봉합이 이 재로드에 의존하므로 절대 캐싱하지 않는다.
+      if(!PREVIEW || frame.getAttribute('src') !== _src){
         frame.src = _src;
         frame.onerror = ()=>{ $('frameFallback').style.display=''; };
       }
@@ -772,7 +774,9 @@ async function onCancel(){
       body: JSON.stringify({ phone8: h.phone8, holdToken: h.holdToken })
     });
     const j = await r.json().catch(()=>({}));
-    if(r.ok && j.ok){ clearInterval(_pollTimer); clearInterval(_holdTick); clearHold(); toast('참여가 취소되었어요'); await loadCampaign(); }
+    // ★ 취소 성공 = 참여 전 화면으로 돌아가야 한다. loadCampaign은 "참여 전 화면일 때만" 다시 그리므로
+    //   (작업가이드 보던 중 카운트다운 재조회에 튕기지 않게 한 가드) 여기서는 renderPre를 명시 호출한다.
+    if(r.ok && j.ok){ clearInterval(_pollTimer); clearInterval(_holdTick); clearHold(); toast('참여가 취소되었어요'); await loadCampaign(); if(_camp) renderPre(); }
     else toast(j.error || '취소할 수 없어요');
   }catch(e){ toast('오류: ' + e.message); }
 }
