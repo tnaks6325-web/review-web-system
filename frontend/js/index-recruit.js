@@ -329,6 +329,13 @@ function onParticipationToggle(on) {
   }
 }
 
+/** 👥 타계정 참여(063) 토글 — 하위 설정(하루한도·타계정 제한시간) 표시. 끄면 기본 [불가] 그대로. */
+function onMultiAccountToggle(on) {
+  const sec = document.getElementById("rf_multi_section");
+  if (sec) sec.style.display = on ? "" : "none";
+  renderPartCheck();
+}
+
 /** "2시~4시" / "14:00~16:00" / "17시 오픈 이후~19시까지" → {start:'14:00', end:'16:00'} (실패 시 null)
  *  구매시간대 특성상 1~8시는 오후로 해석(+12). 프리필용 — 최종 확정은 관리자 확인. */
 function _parsePurchaseTime(text) {
@@ -381,6 +388,19 @@ function renderPartCheck() {
       fail: errs.some(e => e.includes("구매시간")) },
     { label: "하루 진행 인원 입력됨", fail: errs.some(e => e.includes("하루 진행")) },
   ];
+  // 👥 타계정 참여(063): 게이트가 아니라 "지금 이 설정으로 게시된다"는 확인 항목(항상 통과 = 초록)
+  {
+    const _ma = document.getElementById("rf_multi_account");
+    if (_ma) {
+      const _md = Number(document.getElementById("rf_multi_daily")?.value || 0);
+      items.push({
+        label: _ma.checked
+          ? ("타계정 참여: 가능 (명의당 1건 · 하루 " + (_md > 0 ? _md + "건" : "무제한") + ")")
+          : "타계정 참여: 불가 (로그인 계정 1건만)",
+        fail: false,
+      });
+    }
+  }
   box.innerHTML = items.map(i =>
     `<div style="display:flex;align-items:center;gap:7px;font-size:.74rem;font-weight:700;border-radius:8px;padding:6px 10px;
        ${i.fail ? "color:#B91C1C;background:#FEF2F2;border:1px solid #FECACA" : "color:#065F46;background:#ECFDF5;border:1px solid #6EE7B7"}">
@@ -516,6 +536,11 @@ async function openRecruitModal(id, prefill, woOrderId) {
   });
   const _ttlEl = document.getElementById("rf_hold_ttl"); if (_ttlEl) _ttlEl.value = "15";
   const _bufEl = document.getElementById("rf_close_buffer"); if (_bufEl) _bufEl.value = "10";
+  /* 👥 타계정 참여(063) 초기화 — 신규 공고 기본 [불가] */
+  const _maEl = document.getElementById("rf_multi_account");
+  if (_maEl) { _maEl.checked = false; onMultiAccountToggle(false); }
+  const _mdEl = document.getElementById("rf_multi_daily"); if (_mdEl) _mdEl.value = "0";
+  const _stEl = document.getElementById("rf_sub_ttl"); if (_stEl) _stEl.value = "10";
   const _partEl = document.getElementById("rf_participation");
   if (_partEl) { _partEl.checked = false; onParticipationToggle(false); }
   if (typeof renderOptRows === "function") renderOptRows([]);   // 🧩 옵션표 초기화(061)
@@ -585,6 +610,13 @@ async function openRecruitModal(id, prefill, woOrderId) {
         setV("rf_landing_url", c.landing_url || "");
         setV("rf_hold_ttl", c.hold_ttl_min ?? 15);
         setV("rf_close_buffer", c.close_buffer_min ?? 10);
+        /* 👥 타계정 참여(063) 복원 */
+        {
+          const _ma = document.getElementById("rf_multi_account");
+          if (_ma) { _ma.checked = c.multi_account_mode === true; onMultiAccountToggle(_ma.checked); }
+          const _md = document.getElementById("rf_multi_daily"); if (_md) _md.value = c.multi_daily_limit ?? 0;
+          const _st = document.getElementById("rf_sub_ttl"); if (_st) _st.value = c.sub_hold_ttl_min ?? 10;
+        }
         const wd = (typeof c.work_detail === "string") ? (() => { try { return JSON.parse(c.work_detail); } catch (_) { return {}; } })() : (c.work_detail || {});
         // 저장 시 escape+<br> 변환의 역변환(S3): <br>→개행, 엔티티 복원 → textarea에 평문으로
         const _fromHtml = s => String(s || "").replace(/<br\s*\/?>/gi, "\n").replace(/&lt;/g, "<").replace(/&gt;/g, ">").replace(/&amp;/g, "&");
@@ -940,6 +972,40 @@ function _campOptionTable(options, rows, now, today, kstDay) {
   </div>`;
 }
 
+/** 👥 소유자별 묶음표(063 3단계): 타계정 건이 있는 소유자만 노출(본계정 단독 참여자는 기존 목록으로 충분).
+ *  묶음 키 = owner_phone8(서버 파생). 이름은 그 소유자의 본계정 행(phone8===owner_phone8)에서 취하고,
+ *  없으면(타계정만 참여) 뒤4자리로 표기. 옵션표와 동일한 표 문법. */
+function _campOwnerTable(rows, now) {
+  const groups = {};
+  (rows || []).forEach(r => {
+    const owner = String(r.owner_phone8 || "");
+    if (!owner) return;                       // 레거시 행(귀속 없음) — 묶음 대상 아님
+    const g = groups[owner] || (groups[owner] = { owner, selfName: "", total: 0, sub: 0, hold: 0, submitted: 0 });
+    const isSub = String(r.phone8) !== owner;
+    if (!isSub && r.applicant_name) g.selfName = r.applicant_name;
+    g.total++;
+    if (isSub) g.sub++;
+    if (r.status === "applied" && r.expires_at && Date.parse(r.expires_at) > now) g.hold++;
+    if (r.status === "submitted") g.submitted++;
+  });
+  const list = Object.values(groups).filter(g => g.sub > 0).sort((a, b) => b.total - a.total);
+  if (!list.length) return "";
+  const escT = s => String(s || "").replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+  const th = t => `<th style="text-align:${t.a || "left"};font-weight:800;color:#6B7280;padding:5px 8px;border-bottom:1px solid #E5E7EB;white-space:nowrap">${t.l}</th>`;
+  const td = (v, a) => `<td style="text-align:${a || "left"};padding:5px 8px;border-bottom:1px solid #F3F4F6;white-space:nowrap">${v}</td>`;
+  const body = list.map(g => {
+    const who = g.selfName ? escT(g.selfName) : "(타계정만)";
+    return `<tr>${td(`<b>${who}</b> <span style="color:#9CA3AF;font-size:.66rem">***${g.owner.slice(-4)}</span>`)}${td(String(g.total), "center")}${td(String(g.sub), "center")}${td(String(g.hold), "center")}${td(String(g.submitted), "center")}</tr>`;
+  }).join("");
+  return `<div style="margin:2px 0 12px">
+    <div style="font-size:.74rem;font-weight:800;color:#7C3AED;margin-bottom:5px">👥 타계정 묶음 (본계정 기준)</div>
+    <div style="overflow-x:auto"><table style="width:100%;border-collapse:collapse;font-size:.72rem">
+      <thead><tr>${th({ l: "본계정" })}${th({ l: "총 건수", a: "center" })}${th({ l: "타계정 건", a: "center" })}${th({ l: "진행중", a: "center" })}${th({ l: "제출확정", a: "center" })}</tr></thead>
+      <tbody>${body}</tbody>
+    </table></div>
+  </div>`;
+}
+
 async function _loadCampControl(campId) {
   const body = document.getElementById("ccBody");
   const stats = document.getElementById("ccStats");
@@ -962,16 +1028,21 @@ async function _loadCampControl(campId) {
       else if (r.status === "submitted") subs++;
       else if (r.status === "expired" || (r.status === "applied" && !holdValid)) exps++;
     });
-    if (stats) stats.textContent = `오늘 · 진행중 ${holds} / 제출 ${subs} / 만료 ${exps}`;
+    // 👥 타계정(063): 명의 phone8 ≠ 소유자 phone8 = 타계정 건. 오늘 타계정 건수도 함께 표기.
+    const _isSubRow = r => !!(r.owner_phone8 && String(r.owner_phone8) !== String(r.phone8));
+    const todaySubCnt = items.filter(r => r.applied_at && kstDay(Date.parse(r.applied_at)) === today && _isSubRow(r)).length;
+    if (stats) stats.textContent = `오늘 · 진행중 ${holds} / 제출 ${subs} / 만료 ${exps}` + (todaySubCnt ? ` / 타계정 ${todaySubCnt}` : "");
     // 🧩 옵션별 현황표(061 3단계) — 옵션 등록 캠페인만
     const optTableHtml = _campOptionTable(j.options || [], items, now, today, kstDay);
+    // 👥 타계정 묶음(063): 소유자별 건수 — "한 리뷰어가 실제 몇 건 진행 중인가"를 즉시 파악(사재기 관측)
+    const ownerTableHtml = _campOwnerTable(items, now);
     if (!items.length) {
       body.innerHTML = optTableHtml + `<div style="padding:30px;text-align:center;color:#9CA3AF">참여 이력이 없습니다.</div>`;
       return;
     }
     const chip = (bg, fg, tx) => `<span style="font-size:.66rem;font-weight:800;background:${bg};color:${fg};border-radius:6px;padding:2px 8px;white-space:nowrap">${tx}</span>`;
     const fmtT = iso => iso ? new Date(iso).toLocaleString("ko-KR", { timeZone: "Asia/Seoul", month: "numeric", day: "numeric", hour: "2-digit", minute: "2-digit" }) : "";
-    body.innerHTML = optTableHtml + items.sort((a, b) => new Date(b.applied_at) - new Date(a.applied_at)).map(r => {
+    body.innerHTML = optTableHtml + ownerTableHtml + items.sort((a, b) => new Date(b.applied_at) - new Date(a.applied_at)).map(r => {
       const holdValid = r.status === "applied" && r.expires_at && Date.parse(r.expires_at) > now;
       let st;
       if (r.status === "submitted") st = chip("#D1FAE5", "#065F46", "✓ 제출확정");
@@ -979,6 +1050,8 @@ async function _loadCampControl(campId) {
       else if (r.status === "cancelled") st = chip("#F3F4F6", "#6B7280", "취소");
       else st = chip("#FEE2E2", "#B91C1C", "만료");
       const late = r.late_order_id ? chip("#EDE9FE", "#5B21B6", "🛍 기구매 제출 있음") : "";
+      // 👥 063: 명의 구분 — 타계정 건은 소유자(본계정) 뒤4자리를 함께 표기(묶음 추적)
+      const acct = _isSubRow(r) ? chip("#F1EAFE", "#7C3AED", "타 · 본계정 ***" + String(r.owner_phone8).slice(-4)) : "";
       // ★ 리뷰 #4: 수동확정은 만료·취소 건만(서버 의도 = 기구매 구제 경로).
       //   진행중(applied)은 확정 시 주문 링크가 영구 결번되므로 버튼 미노출(정상 제출 경로로 확정되게 둠).
       const canConfirm = (r.status === "expired" || r.status === "cancelled");
@@ -986,7 +1059,7 @@ async function _loadCampControl(campId) {
       return `<div style="display:flex;align-items:center;gap:8px;padding:9px 4px;border-bottom:1px solid #F3F4F6;font-size:.8rem">
         <b style="min-width:64px">${escT(r.applicant_name)}</b>
         <span style="color:#9CA3AF;font-size:.7rem">***${String(r.phone8 || "").replace(/\D/g, "").slice(-4)}</span>
-        ${st}${late}
+        ${st}${late}${acct}
         <span style="margin-left:auto;color:#9CA3AF;font-size:.68rem">신청 ${fmtT(r.applied_at)}${r.expires_at ? " · 마감 " + fmtT(r.expires_at) : ""}</span>
         ${canConfirm ? `<button onclick="campManualConfirm('${String(campId).replace(/[^a-z0-9_]/gi, "")}',${parseInt(r.id, 10)},${r.late_order_id ? 1 : 0})" style="font-size:.7rem;font-weight:800;background:#e8f1fe;color:#1b64da;border:1px solid #a6c8fb;border-radius:7px;padding:4px 10px;cursor:pointer;white-space:nowrap">수동확정</button>` : ""}
       </div>`;
@@ -1073,6 +1146,13 @@ async function saveRecruitPost() {
       payload.daily_limit    = Number(document.getElementById("rf_daily_limit").value) || 0;
       payload.recruit_total  = Number(document.getElementById("rf_recruit_total").value) || 0;
       payload.hold_ttl_min   = Number(document.getElementById("rf_hold_ttl").value) || 15;
+      /* 👥 타계정 참여(063) — ★ 토글 UI 있는 페이지에서만 전송(없으면 미전송=서버 COALESCE 기존값 유지,
+         옵션표·work_detail과 동일 원칙: 축약 화면 저장이 설정을 조용히 끄지 않게) */
+      if (document.getElementById("rf_multi_account")) {
+        payload.multi_account_mode = !!document.getElementById("rf_multi_account").checked;
+        payload.multi_daily_limit  = Math.max(0, parseInt(document.getElementById("rf_multi_daily")?.value, 10) || 0);
+        payload.sub_hold_ttl_min   = Math.max(1, parseInt(document.getElementById("rf_sub_ttl")?.value, 10) || 10);
+      }
       const _cbRaw = document.getElementById("rf_close_buffer").value;
       payload.close_buffer_min = _cbRaw === "" ? 10 : Math.max(0, parseInt(_cbRaw, 10) || 0);
       payload.landing_url    = document.getElementById("rf_landing_url").value.trim();

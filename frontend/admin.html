@@ -2060,6 +2060,26 @@ body{ letter-spacing:-.01em; }
             </div>
             <div style="font-size:.62rem;color:var(--t4);margin-top:2px">비우면 [상품정보 가져오기]로 자동 추출된 이미지를 사용합니다. 쿠팡은 자동 추출이 차단되므로 이미지 주소 붙여넣기 또는 파일 업로드를 사용하세요.</div>
           </div>
+          <!-- 👥 타계정 추가참여 (063) — 기본 [불가]. 켜면 리뷰어가 자기 타계정 명의로 여러 건 참여 가능 -->
+          <div style="margin-top:10px;border:1.5px solid #7C3AED;border-radius:10px;padding:10px;background:#F8F5FF">
+            <label style="display:flex;align-items:center;gap:9px;cursor:pointer;font-weight:800;font-size:.8rem">
+              <input type="checkbox" id="rf_multi_account" onchange="onMultiAccountToggle(this.checked)" style="width:16px;height:16px;accent-color:#7C3AED">
+              👥 타계정 참여 <span style="font-weight:600;color:var(--t3);font-size:.7rem">— 리뷰어가 자기 타계정 명의로 이 공고에 여러 건 참여(명의당 1건)</span>
+            </label>
+            <div style="font-size:.68rem;color:var(--t3);margin-top:3px">끄면(기본) 리뷰어는 로그인 계정으로 1건만 참여합니다.</div>
+            <div id="rf_multi_section" style="display:none;margin-top:8px">
+              <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px">
+                <div><label class="rform-label">타계정 하루 한도 <span style="font-weight:400;color:#9CA3AF">(0=무제한)</span></label>
+                  <input id="rf_multi_daily" type="number" min="0" class="rform-input" placeholder="예: 1" value="0" oninput="renderPartCheck()"></div>
+                <div><label class="rform-label">타계정 제한시간(분)</label>
+                  <input id="rf_sub_ttl" type="number" min="1" class="rform-input" value="10"></div>
+              </div>
+              <div style="font-size:.66rem;color:var(--t3);margin-top:4px">
+                한 사람이 이 공고에 <b>타계정으로 하루 몇 건</b>까지 참여할 수 있는지. 예를 들어 <b>1</b>로 두면
+                타계정 5개를 가진 리뷰어는 <b>5일에 걸쳐</b> 참여하게 됩니다. 타계정 건은 본계정보다 짧은 제한시간(기본 10분)이 적용됩니다.
+              </div>
+            </div>
+          </div>
           <details style="margin-top:8px"><summary style="font-size:.74rem;font-weight:700;color:var(--t3);cursor:pointer">고급 설정 (참여 제한시간·마감 버퍼)</summary>
             <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-top:6px">
               <div><label class="rform-label">참여 제한시간(분)</label><input id="rf_hold_ttl" type="number" min="5" class="rform-input" value="15"></div>
