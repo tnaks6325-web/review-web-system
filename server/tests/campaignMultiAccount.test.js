@@ -50,7 +50,8 @@ ok('submit: _campaignHoldCtx 정의 1회', (submit.match(/function _campaignHold
 ok('submit: 인라인 (b.holdPhone8 || loginPhone8) 식은 헬퍼 안에만(1회)', (submit.match(/b\.holdPhone8 \|\| loginPhone8/g) || []).length === 1);
 ok('submit: holdCtx 소비 3곳(신원폴백·옵션권위·확정문맥)', (submit.match(/holdCtx/g) || []).length >= 6);
 ok('submit: owner 폴백 JOIN(소유권 3중검증 + owner_phone8 NOT NULL)', /JOIN reviewers r ON r\.phone8 = ca\.owner_phone8[\s\S]*?ca\.hold_token = \$4 AND ca\.hold_token <> '' AND ca\.owner_phone8 IS NOT NULL/.test(submit));
-ok('submit: 확정 문맥에 expectedOptKey 동봉', /campaignHold: holdCtx \? \{ \.\.\.holdCtx, expectedOptKey: effectiveOptKey \}/.test(submit));
+ok('submit: 확정 문맥에 expectedOptKey 동봉', /campaignHold: holdCtx \? \{ \.\.\.holdCtx, expectedOptKey: effectiveOptKey[,}]/.test(submit));
+ok('submit: 확정 문맥에 orderIdentity 동봉(D3 명의 드리프트 경고 입력)', /orderIdentity: \{ phone \}/.test(submit));
 ok('submit: SUB 자동보강은 게이트 기준 행(_rvRows[0].phone8)에 기록', /_rvRows\[0\]\.phone8 \|\| _idPhone8/.test(submit));
 // ── hold 드리프트 백스톱 ──
 ok('hold: confirm RETURNING id, option_key', /RETURNING id, option_key/.test(hold));

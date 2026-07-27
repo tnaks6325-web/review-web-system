@@ -27,8 +27,10 @@ ok('index-recruit: 자동점검에 타계정 항목(가능/불가 + 하루한도
   /타계정 참여: 가능[\s\S]*?타계정 참여: 불가[\s\S]*?fail: false/.test(recruit));
 
 // ── 초기화(기본 [불가]) ──
-ok('모달 초기화: 신규 공고는 항상 unchecked + 하루한도 0 + 타계정 TTL 10',
-  /_maEl\.checked = false; onMultiAccountToggle\(false\)/.test(recruit) && /_mdEl\.value = "0"/.test(recruit) && /_stEl\.value = "10"/.test(recruit));
+// ★ D4-lite: 하루한도 기본값 0(무제한) → 1. 0은 여전히 저장 가능(PRD §09-5)하지만 "기본"은 아니다
+//   (기본이 무제한이면 토글만 켠 공고에서 한 사람이 자리를 싹쓸이할 수 있음 = 가장 약한 값이 기본인 footgun).
+ok('모달 초기화: 신규 공고는 항상 unchecked + 하루한도 1 + 타계정 TTL 10',
+  /_maEl\.checked = false; onMultiAccountToggle\(false\)/.test(recruit) && /_mdEl\.value = "1"/.test(recruit) && /_stEl\.value = "10"/.test(recruit));
 
 // ── 편집 프리필 ──
 ok('편집 프리필: multi_account_mode/multi_daily_limit/sub_hold_ttl_min 복원',

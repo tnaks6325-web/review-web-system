@@ -690,9 +690,37 @@ function _campaignHoldCtx(b, loginPhone8) {
   return {
     applicationId: parseInt(b.campaignApplicationId, 10) || 0,
     campaignId: String(b.campaignId),
-    phone8: String(b.holdPhone8 || loginPhone8 || '').replace(/\D/g, '').slice(-8),
+    phone8: String(b.holdPhone8 || loginPhone8 || '').replace(/\D/g, '').slice(-8), // 힌트(폴백 유지)
     holdToken: String(b.holdToken).trim(),
+    optionKey: undefined,   // _authoritativeHold 가 채움(옵션 서버권위 쿼리 흡수)
   };
+}
+
+/** ★ 방어 D9: 클라 holdPhone8 은 "힌트"일 뿐 — 명의는 hold_token 으로 서버가 확정한다.
+ *  홀드 확정(confirmHoldInTx)·provenance 링크는 전부 ca.phone8 일치를 요구하므로, 캐시된 구버전 프론트나
+ *  2단계 회귀로 holdPhone8 이 어긋나면 확정도 링크도 실패 → 스윕의 late 백필(campaign_application_id 기반)도
+ *  불가 → "결제했는데 관제에 흔적 0"인 고아 주문이 된다. hold_token(추측불가 24B)+id+campaign_id 일치가 인증이다.
+ *  같은 왕복에서 option_key 도 가져와 아래 옵션 서버권위 쿼리를 대체(왕복 순증 0). fail-open. */
+async function _authoritativeHold(ctx) {
+  if (!ctx || !ctx.applicationId || !ctx.holdToken) return ctx;
+  try {
+    const { rows } = await pool.query(
+      `SELECT phone8, option_key FROM campaign_applications
+        WHERE id = $1 AND campaign_id = $2 AND hold_token = $3 AND hold_token <> '' LIMIT 1`,
+      [ctx.applicationId, ctx.campaignId, ctx.holdToken]);
+    if (!rows.length) return ctx;                     // 미확인 = 기존 late 경로(오확정 없음)
+    const srv = String(rows[0].phone8 || '').replace(/\D/g, '').slice(-8);
+    if (srv.length === 8 && srv !== ctx.phone8) {
+      logger.warn(`[submit/order] holdPhone8 보정 app=${ctx.applicationId} ` +
+        `클라=${ctx.phone8 || '∅'} → 서버=***${srv.slice(-4)} (구버전 프론트/문맥 불일치 의심)`);
+      ctx.phone8 = srv;
+    }
+    ctx.optionKey = rows[0].option_key || null;
+    return ctx;
+  } catch (e) {
+    logger.warn(`[submit/order] 홀드 서버확정 실패(클라값 유지): ${e.message}`);
+    return ctx;                                       // fail-open — 라이브 핫패스 보호
+  }
 }
 
 router.post('/order', async (req, res, next) => {
@@ -714,7 +742,7 @@ router.post('/order', async (req, res, next) => {
     // - ★ fail-open: 게이트 내부 오류는 주문 접수를 막지 않는다 (라이브 핫패스 보호)
     const _idPhone8 = String(loginPhone8 || '').replace(/[^0-9]/g, '').slice(-8);
     // ★ 참여형 홀드 문맥(단일 출처, 063) — 신원게이트 owner 폴백·옵션 서버권위·확정 문맥 공용(1회 계산)
-    const holdCtx = _campaignHoldCtx(b, loginPhone8);
+    const holdCtx = await _authoritativeHold(_campaignHoldCtx(b, loginPhone8));
     if (_idPhone8.length === 8) {
       try {
         const { profileMissing, resolveOrderIdentity } = require('../services/identity.service');
@@ -839,18 +867,9 @@ router.post('/order', async (req, res, next) => {
     //     바꾸면 시트=옛옵션·DB홀드=새옵션 불일치가 이론상 가능. 2단계 UI 계약으로 봉합 = 옵션변경은
     //     부모(campaign.html)에서만 가능하고 변경 시 구매양식 iframe을 재로드해 인플라이트 제출을 파기한다
     //     (같은 페이지라 동시 진행 불가). change-option UI 미연동인 1단계에서는 도달 불가.
+    //   ※ 값 자체는 위 _authoritativeHold(hold_token 기준 1회 조회)가 이미 읽어 왔다 — 왕복 순증 0.
     let effectiveOptKey = selectedOptKey;
-    if (holdCtx) {
-      try {
-        const { rows: _ar } = await pool.query(
-          `SELECT option_key FROM campaign_applications
-            WHERE id = $1 AND campaign_id = $2 AND phone8 = $3 AND hold_token = $4 AND hold_token <> '' LIMIT 1`,
-          [holdCtx.applicationId, holdCtx.campaignId, holdCtx.phone8, holdCtx.holdToken]);
-        if (_ar.length && _ar[0].option_key) effectiveOptKey = _ar[0].option_key;
-      } catch (optErr) {
-        logger.warn(`[submit/order] 옵션 서버권위 조회 실패(클라값 유지): ${optErr.message}`);
-      }
-    }
+    if (holdCtx && holdCtx.optionKey) effectiveOptKey = holdCtx.optionKey;
 
     const orderData = { orderer, recipient, userId, phone, address, bank, account, depositor, price, dateStr, orderNum, memo, selectedOptKey: effectiveOptKey };
     const ledger = await createOrderLedgerEntry({
@@ -862,7 +881,8 @@ router.post('/order', async (req, res, next) => {
       // ★ 참여형 캠페인 홀드 확정 문맥(전부 optional — 비참여 제출 무영향).
       //   확정은 orderLedger 단일 트랜잭션 안에서 소유권 3중검증(applied·phone8·연결탭) 통과 시에만.
       //   ★ 063: expectedOptKey = 시트에 실제 기입되는 옵션 → 확정 시점 홀드 옵션과 다르면 warn(관제 대조 신호).
-      campaignHold: holdCtx ? { ...holdCtx, expectedOptKey: effectiveOptKey } : undefined,
+      //   ★ 방어 D3: orderIdentity = 시트에 실제 기입되는 연락처(정산 귀속 기준) → 명의 드리프트 경고 입력.
+      campaignHold: holdCtx ? { ...holdCtx, expectedOptKey: effectiveOptKey, orderIdentity: { phone } } : undefined,
     });
 
     // ★ 신원 기록(recordParticipationLink/recordReviewIdentity)은 여기서 하지 않는다.
