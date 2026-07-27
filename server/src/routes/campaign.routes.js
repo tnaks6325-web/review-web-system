@@ -1382,6 +1382,64 @@ router.get('/admin/:id/applications', authMiddleware, adminOrMasterMiddleware, a
   }
 });
 
+// GET /api/campaign/admin/:id/preview — 관리자: 리뷰어 참여 화면 미리보기 (읽기 전용)
+//   ★ 격리 원칙: 무인증 리뷰어 경로 `GET /:id/work-detail` 은 **일절 미변경**. 관리자 전용 별도 라우트로
+//     같은 shape을 합성해 돌려준다(리뷰어 게이트에 관리자 분기를 심지 않음 = 폭발반경 0).
+//   ★ 부작용 0: campaign_applications INSERT/UPDATE 없음 — 홀드·정원·일일한도 카운터 무오염.
+//     application 은 화면 렌더용 **가짜 객체**(id:'preview')이며 DB에 존재하지 않는다.
+//   ★ 마감(closed)·오픈전 공고도 열람 가능(관리자가 진행 화면을 확인하는 것이 목적).
+//   ★ 접근 제어: authMiddleware + adminOrMaster. 리뷰어앱 스코프 토큰(via:'reviewer_campaign')은
+//     PUT /api/campaign/admin/:id 끝앵커로만 허용되므로 이 경로(GET + /preview 하위)엔 도달 불가.
+router.get('/admin/:id/preview', authMiddleware, adminOrMasterMiddleware, async (req, res, next) => {
+  try {
+    const { id } = req.params;
+    const { rows: camps } = await pool.query('SELECT * FROM recruit_campaigns WHERE id = $1', [id]);
+    if (camps.length === 0) return res.status(404).json({ ok: false, error: '캠페인을 찾을 수 없습니다.' });
+    const camp = camps[0];
+    if (!camp.participation_mode) {
+      return res.status(400).json({ ok: false, error: '참여형 공고가 아닙니다. (리뷰어 참여 화면이 없는 공고)' });
+    }
+
+    const now = new Date();
+    const st = computeCampaignState(camp, (await fetchCampaignCounts(pool, [id], now)).get(id), now);
+    const options = await _loadOptionViews(pool, id, st, now);
+    // 미리보기용 대표 옵션 — 선택 가능한 첫 옵션(없으면 첫 옵션). 실제 선택이 아니라 화면 예시.
+    const sample = options.find(o => o.selectable) || options[0] || null;
+    const inflowType = await _lookupInflowType(camp.id, camp.source_work_order_id);
+    const ttlMin = Number(camp.hold_ttl_min) || 15;
+
+    res.json({
+      ok: true,
+      preview: true,                        // 프론트 배너·가드의 단일 신호
+      serverNow: now.toISOString(),
+      state: st.state,                      // 실제 캠페인 상태(마감/오픈전 등 — 배너에 표기)
+      application: {                        // ★ 가짜(미저장) — 화면 렌더 전용
+        id: 'preview',
+        status: 'applied',
+        appliedAt: now.toISOString(),
+        expiresAt: new Date(now.getTime() + ttlMin * 60000).toISOString(),
+        submittedAt: null,
+        optionKey: sample ? sample.optKey : null,
+      },
+      options,
+      selectedOption: sample,
+      canChangeOption: false,               // 미리보기에서는 옵션 변경 불가(서버 상태 무변경)
+      workDetail: sanitizeWorkDetail(camp.work_detail),
+      inflowType,
+      chatUrl: camp.chat_url || '',         // 관리자는 원래 카톡 URL을 설정·조회하는 주체
+      landingUrl: camp.landing_url || '',
+      form: {
+        sheetId: camp.linked_sheet_id || '',
+        gid: camp.linked_tab_gid || '',
+        tabName: camp.linked_tab_name || '',
+        displayName: camp.title || '',
+      },
+    });
+  } catch (err) {
+    next(err);
+  }
+});
+
 // POST /api/campaign/admin/:id/confirm {applicationId} — 만료+기구매(late) 구제의 유일 경로 (admin/master)
 //   유예 정책 제거에 따라, 만료 후 도착한 제출(late_order_id)은 이 수동확정으로만 자리 확정된다.
 //   잠금 계층 apply·주문확정과 동일: 캠페인 행 FOR UPDATE → 신청 행 FOR UPDATE. 동일 phone8 applied 선-취소(레드 #7).
