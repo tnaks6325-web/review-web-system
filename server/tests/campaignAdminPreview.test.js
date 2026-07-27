@@ -58,7 +58,10 @@ ok('①b reviewer_campaign 스코프 토큰 허용은 PUT + 끝앵커라 GET /pr
   /req\.method === 'PUT' && \/\^\\\/api\\\/campaign\\\/admin\\\/\[\^\/\]\+\$\//.test(authmw));
 
 // ── ③ campaign.html: 홀드 격리 ──
-ok('③-1 PREVIEW 는 ?preview=1 일 때만 true', /const PREVIEW = new URLSearchParams\(location\.search\)\.get\('preview'\) === '1'/.test(camp));
+ok('③-1 PREVIEW 는 ?preview=1 **그리고 관리자 토큰**이 있을 때만 true(링크 공유 사고 방지)',
+  /const PREVIEW_REQ = new URLSearchParams\(location\.search\)\.get\('preview'\) === '1'/.test(camp)
+  && /let PREVIEW = false;/.test(camp)
+  && /if\(PREVIEW_REQ\)\{ _pvCaptureToken\(\); PREVIEW = !!_pvToken\(\); \}/.test(camp));
 ok('③-2 미리보기는 홀드를 읽지 않음(getHold 조기 null)', /function getHold\(\)\{[\s\S]{0,120}if\(PREVIEW\) return null;/.test(camp));
 ok('③-3 미리보기는 홀드를 쓰지 않음(setHold/clearHold 가드)',
   /function setHold\(h\)\{ if\(PREVIEW\) return;/.test(camp) && /function clearHold\(\)\{ if\(PREVIEW\) return;/.test(camp));
@@ -91,7 +94,7 @@ ok('⑤-5 미리보기는 폼 입력값을 저장/복원하지 않음(_EMBED_FOR
   /!_EMBED_CTX\.preview && _EMBED_CTX\.app\) \? \("embedForm_"/.test(sapp)
   && /if \(!_EMBED_CTX \|\| !_EMBED_FORM_KEY\) return;/.test(sapp));
 ok('⑤-6 로그인 강제 우회는 미리보기 한정(리뷰어는 기존 게이트 유지)',
-  /if \(_PREVIEW_MODE && \(!authSession \|\| !authSession\.name\)\) \{/.test(sapp)
+  /if \(_PREVIEW_MODE\) \{\s*\n\s*authSession = \{ name: "미리보기", phone8: "" \};\s*\n\s*\}/.test(sapp)
   && /if \(!authSession \|\| !authSession\.name\) \{/.test(sapp));
 ok('⑤-7 제출 버튼 비활성 CSS는 preview 전용 body 클래스에만 적용',
   /body\.embed-preview #btnOrderFormSubmit\{opacity/.test(sapp)
@@ -99,12 +102,40 @@ ok('⑤-7 제출 버튼 비활성 CSS는 preview 전용 body 클래스에만 적
 
 // ── ⑥ 진입점 · 토큰 전달 ──
 ok('⑥-1 공고 카드에 [리뷰어 화면] 버튼(참여형만)', /openReviewerPreview\('\$\{escHtml\(c\.id\)\}'\)/.test(recjs));
-ok('⑥-2 수정 모달 미리보기에 전체화면 링크(편집 중인 공고만)', /_recruitEditId \? `<button onclick="openReviewerPreview/.test(recjs));
+ok('⑥-2 수정 모달 미리보기에 전체화면 링크(편집 중 + 참여형일 때만)',
+  /_recruitEditId && document\.getElementById\("rf_participation"\)[\s\S]{0,80}openReviewerPreview/.test(recjs));
 ok('⑥-3 토큰은 프래그먼트(#tok=)로 전달 — 서버 로그·Referer 미유출',
   /preview=1#tok=" \+ encodeURIComponent\(token\)/.test(recjs));
-ok('⑥-4 도착 즉시 주소창·히스토리에서 토큰 제거',
-  /history\.replaceState\(null, '', location\.pathname \+ location\.search\)/.test(camp));
+ok('⑥-4 도착 즉시 주소창·히스토리에서 토큰 제거(fetch보다 먼저)',
+  /history\.replaceState\(null, ''/.test(camp)
+  && /if\(PREVIEW_REQ\)\{ _pvCaptureToken\(\);[\s\S]{0,40}\}\s*\n\s*try\{\s*\n\s*await loadCampaign/.test(camp));
 ok('⑥-5 전용 저장키 사용 — sessionStorage.admin_token 을 덮어쓰지 않음',
   /PV_TOK_KEY = 'camp_preview_tok'/.test(camp) && !/sessionStorage\.setItem\('admin_token'/.test(camp));
+
+// ── ⑦ 레드팀 지적 반영(재발 방지) ──
+ok('⑦-R1 주소창에서 preview 파라미터 제거 — 복사·공유해도 평범한 리뷰어 링크',
+  /q\.delete\('preview'\)/.test(camp) && /history\.replaceState\(null, '', location\.pathname \+ \(qs \? '\?' \+ qs : ''\)\)/.test(camp));
+ok('⑦-R2 토큰 저장 실패해도 주소창 정리는 항상 실행(finally)',
+  /\}catch\(_\)\{ \/\* 저장 실패해도 아래 정리는 수행 \*\/ \}\s*\n\s*finally\{/.test(camp));
+ok('⑦-R2b 미리보기 새 창은 noopener — sessionStorage(관리자 토큰) 미복제',
+  /window\.open\(f\.src, '_blank', PREVIEW \? 'noopener' : ''\)/.test(camp));
+ok('⑦-R3 마감·게시전 공고도 진행 화면 확인 가능(모집중 가정 토글)',
+  /_pvForceOpen/.test(camp) && /if\(PREVIEW && _pvForceOpen\)\{ jb\.disabled = false;/.test(camp) && /function pvToggleForce\(\)/.test(camp));
+ok('⑦-R4 수정 모달 미리보기 버튼은 참여형일 때만(레거시 공고 리다이렉트 방지)',
+  /rf_participation"\)\.checked\) \? `<button onclick="openReviewerPreview/.test(recjs));
+ok('⑦-R5 미리보기는 잔여 리뷰어 세션을 쓰지 않음(타인 계좌·실명 노출 차단)',
+  /if \(_PREVIEW_MODE\) \{\s*\n\s*authSession = \{ name: "미리보기", phone8: "" \};/.test(sapp)
+  && /if \(!_PREVIEW_MODE\) \{\s*\n\s*_prefillBankFromProfile\(\)/.test(sapp));
+ok('⑦-R6 단계 전환 시 iframe 재로드 안 함(시트 쿼터 보호)',
+  /if\(frame\.getAttribute\('src'\) !== _src\)\{/.test(camp));
+ok('⑦-R7 미리보기 로드 실패 시 단계 버튼 제거(가짜 완료화면 방지)',
+  /function _pvFail\(msgHtml\)\{/.test(camp) && /steps\.style\.display = 'none'/.test(camp));
+ok('⑦-R8 카운트다운 0 재조회가 작업가이드·완료 화면을 되돌리지 않음(리뷰어 경로 포함)',
+  /const onPre = \$\('vPre'\)\.style\.display !== 'none' \|\| \$\('vLoading'\)\.style\.display !== 'none';/.test(camp)
+  && /if\(!onPre\) return;/.test(camp));
+ok('⑦-R10 미리보기는 선택 가능한 옵션만 고정표시(마감 옵션 오표시 방지) · 리뷰어 전달 경로는 불변',
+  /const _pvOptBlocked = PREVIEW && !\(_selOpt && _selOpt\.selectable\);/.test(camp)
+  && /if\(j\.application && j\.application\.optionKey\) qp\.set\('optionKey', j\.application\.optionKey\)/.test(camp));
+ok('⑦-R11 팝업 차단 시 안내(무반응 방지)', /if \(!w\) showToast\("팝업이 차단되었습니다/.test(recjs));
 
 console.log(`\n✅ campaignAdminPreview: ${passed}개 통과`);

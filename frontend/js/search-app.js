@@ -3986,8 +3986,10 @@ function initOrderFormMode() {
   // ★★★ Phase 5: 구매양식 제출 시 리뷰어 로그인 강제 ★★★
   let authSession = _loadAuthSession();
   // ★ 관리자 미리보기: 리뷰어 세션이 없어도 폼 화면을 그대로 보여준다(제출은 아래에서 차단).
+  //   ★ 세션이 "있어도" 무조건 자리표시자로 대체한다 — 관리자 브라우저에 남아 있던 리뷰어 세션으로
+  //     계좌번호·예금주·실명이 자동 입력되어 화면공유·스크린샷에 타인 PII가 노출되는 것을 막는다.
   //   리뷰어 진입(preview 없음)에는 이 분기가 도달하지 않아 로그인 강제가 그대로 유지된다.
-  if (_PREVIEW_MODE && (!authSession || !authSession.name)) {
+  if (_PREVIEW_MODE) {
     authSession = { name: "미리보기", phone8: "" };
   }
   if (!authSession || !authSession.name) {
@@ -4088,10 +4090,14 @@ function initOrderFormMode() {
   }
 
   // ★ 저장된 계좌정보 자동완성 (모든 탭 공통 — 계좌 오타 방지)
-  _prefillBankFromProfile().catch(e => console.warn("[bank prefill]", e.message));
+  //   ★ 관리자 미리보기 제외: 이 함수는 localStorage의 리뷰어 세션을 직접 읽으므로,
+  //     관리자 브라우저에 남아 있던 세션의 계좌번호·예금주가 미리보기 화면에 찍힐 수 있다(PII 노출).
+  if (!_PREVIEW_MODE) {
+    _prefillBankFromProfile().catch(e => console.warn("[bank prefill]", e.message));
 
-  // ★ 내정보(사용자명/전화/주소/계좌) 미등록 안내 배너 (비차단 — 제출 시 차단)
-  _precheckProfileGateOnEntry(window._slotAuth || {});
+    // ★ 내정보(사용자명/전화/주소/계좌) 미등록 안내 배너 (비차단 — 제출 시 차단)
+    _precheckProfileGateOnEntry(window._slotAuth || {});
+  }
 
   return true;
 }
