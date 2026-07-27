@@ -82,10 +82,22 @@ async function logReviewerEvent({
   return { ok: true, id: rows[0].id };
 }
 
-/** 로그 목록 — 미해결 우선 + 최신순. 필터: sheetId/tabName/severity/eventType/unresolvedOnly */
+/** (sheetId,tabName) 화이트리스트 → SQL 조건 조각. scopeTabs=null이면 제한 없음(master/admin). */
+function _scopeCond(scopeTabs, cond, params) {
+  if (!Array.isArray(scopeTabs)) return true;
+  if (!scopeTabs.length) return false;                    // 담당 탭 0 = 열람 대상 없음
+  const pairs = scopeTabs.map((t) => {
+    params.push(t.sheetId, t.tabName);
+    return `(sheet_id = $${params.length - 1} AND tab_name = $${params.length})`;
+  });
+  cond.push(`(${pairs.join(' OR ')})`);
+  return true;
+}
+
+/** 로그 목록 — 미해결 우선 + 최신순. 필터: sheetId/tabName/severity/eventType/unresolvedOnly/scopeTabs */
 async function listReviewerEvents({
   sheetId = '', tabName = '', severity = '', eventType = '',
-  unresolvedOnly = false, limit = 100, offset = 0,
+  unresolvedOnly = false, limit = 100, offset = 0, scopeTabs = null,
 } = {}) {
   const cond = ['1=1'];
   const params = [];
@@ -95,6 +107,7 @@ async function listReviewerEvents({
   if (severity) add('severity = ?', severity);
   if (eventType) add('event_type = ?', eventType);
   if (unresolvedOnly) cond.push('resolved_at IS NULL');
+  if (!_scopeCond(scopeTabs, cond, params)) return [];
   params.push(Math.min(Math.max(parseInt(limit, 10) || 100, 1), 500));
   const limIdx = params.length;
   params.push(Math.max(parseInt(offset, 10) || 0, 0));
@@ -115,12 +128,16 @@ async function listReviewerEvents({
   return rows;
 }
 
-/** 미해결 카운트(전체/critical) — 관리자 배지·알림 카드용 */
-async function unresolvedCounts() {
+/** 미해결 카운트(전체/critical) — 관리자 배지·알림 카드용. scopeTabs 지정 시 그 탭들만. */
+async function unresolvedCounts(scopeTabs = null) {
+  const cond = ['resolved_at IS NULL'];
+  const params = [];
+  if (!_scopeCond(scopeTabs, cond, params)) return { total: 0, critical: 0 };
   const { rows } = await getPool().query(
     `SELECT COUNT(*)::int AS total,
             COUNT(*) FILTER (WHERE severity = 'critical')::int AS critical
-       FROM reviewer_event_logs WHERE resolved_at IS NULL`
+       FROM reviewer_event_logs WHERE ${cond.join(' AND ')}`,
+    params
   );
   return rows[0] || { total: 0, critical: 0 };
 }
@@ -158,7 +175,15 @@ async function autoResolveHealed() {
         AND EXISTS (SELECT 1 FROM order_submissions os
                      WHERE os.id = l.order_submission_id AND os.capture_uploaded_at IS NOT NULL)`
   );
-  return { healedWritten: r1.rowCount || 0, healedCapture: r2.rowCount || 0 };
+  // 취소·삭제된 주문의 로그는 원인 자체가 소멸 → 수동 [확인] 없이 정리(잔존 노이즈 방지)
+  const r3 = await db.query(
+    `UPDATE reviewer_event_logs l SET resolved_at = NOW(), resolved_by = 'auto:canceled'
+      WHERE l.resolved_at IS NULL AND l.order_submission_id IS NOT NULL
+        AND EXISTS (SELECT 1 FROM order_submissions os
+                     WHERE os.id = l.order_submission_id
+                       AND (os.deleted_at IS NOT NULL OR os.mirror_status = 'canceled'))`
+  );
+  return { healedWritten: r1.rowCount || 0, healedCapture: r2.rowCount || 0, healedCanceled: r3.rowCount || 0 };
 }
 
 module.exports = {

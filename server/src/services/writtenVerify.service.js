@@ -57,7 +57,26 @@ function _identityCols(headers) {
 }
 
 /**
- * 행이 이 주문의 것인지 판정. 강한 키(주문번호·연락처) 우선, 수취인 단독은 강한 키 열이 없을 때만.
+ * 이 주문을 신원으로 판정할 수 있는가? — 주문 쪽에 강한 키(주문번호 6자리+ / 연락처 끝8자리)가 있고
+ * 시트에 그 열이 있어야 한다. 둘 다 없으면(레거시·관리자 경유 제출 등) **판정 금지**:
+ * 강한 키가 없으면 어떤 행과도 일치할 수 없어 "무조건 소실"로 확정 오판 → 정상 주문 강등 →
+ * 시트 중복 행 + 오경보(이 기능이 막으려던 사고와 같은 급의 부작용)가 된다. (리뷰 치명#1)
+ * 수취인 단독은 시트에 강한 키 열이 아예 없을 때만 대체 키로 인정.
+ */
+function _canVerify(os, cols) {
+  const osNum = _digits(os.orderNum);
+  const osP8 = _digits(os.phone).slice(-8);
+  if (osNum.length >= 6 && cols.orderNumCol >= 0) return true;
+  if (osP8.length === 8 && cols.phoneCol >= 0) return true;
+  if (cols.orderNumCol < 0 && cols.phoneCol < 0 && cols.recipCol >= 0 && _norm(os.recipient)) return true;
+  return false;
+}
+
+/**
+ * 행이 이 주문의 것인지 판정(_canVerify 통과 주문 전용).
+ *   ① 강한 키 일치 = 확정 내 행
+ *   ② 강한 키 충돌(그 행에 '다른 주문'의 주문번호/연락처가 있음) = 확정 타인 행 → 소실 신호
+ *   ③ 충돌 없음 + 수취인 일치 = 내 행(일부 칸이 사람 손에 지워진 상태) — 오탐 방지 안전측
  * @returns 'mine' | 'other'  ('other'=빈 행 포함 — 내 데이터가 그 행에 없음)
  */
 function _rowVerdict(cells, cols, os) {
@@ -68,7 +87,9 @@ function _rowVerdict(cells, cols, os) {
   const cellRcp = cols.recipCol >= 0 ? _norm((cells || [])[cols.recipCol]) : '';
   if (osNum.length >= 6 && cellNum && cellNum === osNum) return 'mine';
   if (osP8.length === 8 && cellP8.length === 8 && cellP8 === osP8) return 'mine';
-  if (cols.phoneCol < 0 && cols.orderNumCol < 0 && cellRcp && _norm(os.recipient) && cellRcp === _norm(os.recipient)) return 'mine';
+  if (osNum.length >= 6 && cellNum && cellNum !== osNum) return 'other';
+  if (osP8.length === 8 && cellP8.length === 8 && cellP8 !== osP8) return 'other';
+  if (cellRcp && _norm(os.recipient) && cellRcp === _norm(os.recipient)) return 'mine';
   return 'other';
 }
 
@@ -93,27 +114,39 @@ const _who = (os) => String(os.recipient || os.orderer || '리뷰어').trim() ||
 async function verifyWrittenOrders({ limit = 400, maxTabs = 20 } = {}) {
   const db = getPool();
   const days = parseInt(process.env.ORDER_WRITTEN_VERIFY_DAYS || '14', 10);
-  const freshSec = parseInt(process.env.ORDER_WRITTEN_VERIFY_FRESH_SEC || '180', 10);
+  // ★ 신선도 여유(리뷰 중요#3): mirrored_at 은 "시트를 읽은 시각"이 아니라 "upsert 완료 시각"이라
+  //   개별읽기 폴백·throttle 혼잡 시 읽기↔기록 간격이 수 분까지 벌어진다. 미러 1사이클 상한(15분)을
+  //   고려해 기본 900s 로 보수 설정(감지는 그만큼 늦어지지만 오탐 0 우선 — 사고 자체가 저빈도).
+  const freshSec = parseInt(process.env.ORDER_WRITTEN_VERIFY_FRESH_SEC || '900', 10);
   const lostMax = parseInt(process.env.ORDER_LOST_MAX || '2', 10);
   const reassignOn = process.env.ORDER_WRITTEN_VERIFY_REASSIGN !== '0';
 
+  // ★ 인플라이트 배제(리뷰 중요#4): 관리자 편집(order_update)·재기록(order_append)이 큐에 남아 있으면
+  //   DB 신원 ≠ 시트 구값이라 판정이 오탐이 된다 → 큐가 빈 주문만 대상(반영 후 다음 사이클에 검증).
+  // ★ 커버리지 회전(리뷰 중요#5): 고정 정렬은 LIMIT 뒤쪽을 영구 미검증으로 남긴다 →
+  //   미검증(NULL) 우선 + 오래 검증된 순으로 회전시켜 전 주문이 순차적으로 검사되게 한다.
   const { rows: orders } = await db.query(
     `SELECT os.id, os.sheet_id AS "sheetId", os.tab_name AS "tabName",
             COALESCE(NULLIF(os.tab_gid, ''), NULLIF(os.gid, '')) AS gid,
             os.sheet_row AS "sheetRow", os.recipient, os.orderer, os.phone,
             os.order_num AS "orderNum", os.sheet_written_at AS "writtenAt",
-            os.row_verified_at AS "verifiedAt",
+            os.row_verified_at AS "verifiedAt", os.updated_at AS "updatedAt",
             RIGHT(regexp_replace(COALESCE(os.phone, ''), '[^0-9]', '', 'g'), 8) AS phone8
        FROM order_submissions os
       WHERE os.mirror_status = 'written' AND os.deleted_at IS NULL
         AND os.sheet_row IS NOT NULL AND os.sheet_written_at IS NOT NULL
         AND os.sheet_written_at > NOW() - ($1 || ' days')::interval
-      ORDER BY os.sheet_id, os.tab_name, os.sheet_row
+        AND NOT EXISTS (
+          SELECT 1 FROM sync_queue sq
+           WHERE sq.status IN ('pending','processing')
+             AND sq.type IN ('order_append','order_update')
+             AND (sq.payload->>'orderSubmissionId') = os.id::text)
+      ORDER BY os.row_verified_at ASC NULLS FIRST, os.sheet_written_at ASC
       LIMIT $2`,
     [days, limit]
   );
 
-  const result = { scanned: orders.length, verified: 0, shifted: 0, lost: 0, lostManual: 0, ambiguous: 0, skippedStale: 0, skippedNoMeta: 0 };
+  const result = { scanned: orders.length, verified: 0, shifted: 0, lost: 0, lostManual: 0, ambiguous: 0, unverifiable: 0, skippedStale: 0, skippedEdited: 0, skippedOutOfRange: 0, skippedNoMeta: 0 };
   if (!orders.length) return result;
 
   // 탭별 그룹핑 — 탭당 컨텍스트 1회 로드
@@ -130,33 +163,52 @@ async function verifyWrittenOrders({ limit = 400, maxTabs = 20 } = {}) {
     tabCount++;
     const { sheetId, tabName, gid } = group[0];
 
-    let ctx = null;
-    try { ctx = await _loadTabContext(sheetId, gid, tabName); } catch (_) {}
-    if (!ctx || !ctx.headers || !ctx.headers.length) { result.skippedNoMeta += group.length; continue; }
-
+    // ★ TOCTOU 방지(리뷰 중요#2): mirrored_at 을 행 데이터보다 **먼저** 읽는다.
+    //   반대 순서면 "옛 스냅샷 행 + 새 mirrored_at" 조합이 되어 신선도 게이트를 통과한 채
+    //   방금 쓴 주문이 안 보이는 false lost 가 난다. 이 순서면 게이트 시각 ≤ 데이터 시각(항상 보수적).
     let mirroredAt = null;
     try {
       const { rows: mt } = await db.query(
-        `SELECT mirrored_at FROM raw_sheet_tabs WHERE sheet_id = $1 AND tab_gid = $2
+        `SELECT mirrored_at FROM raw_sheet_tabs WHERE sheet_id = $1
+            AND ($2::text IS NULL OR tab_gid = $2) AND ($2::text IS NOT NULL OR tab_name = $3)
           ORDER BY mirrored_at DESC NULLS LAST LIMIT 1`,
-        [sheetId, ctx.tabGid]
+        [sheetId, gid || null, tabName]
       );
       mirroredAt = mt[0] && mt[0].mirrored_at ? new Date(mt[0].mirrored_at).getTime() : null;
     } catch (_) {}
     if (!mirroredAt) { result.skippedNoMeta += group.length; continue; }
 
+    let ctx = null;
+    try { ctx = await _loadTabContext(sheetId, gid, tabName); } catch (_) {}
+    if (!ctx || !ctx.headers || !ctx.headers.length) { result.skippedNoMeta += group.length; continue; }
+
     const cols = _identityCols(ctx.headers);
     if (cols.phoneCol < 0 && cols.orderNumCol < 0 && cols.recipCol < 0) { result.skippedNoMeta += group.length; continue; }
 
     const rowByIndex = new Map();
-    for (const r of ctx.dataRows || []) rowByIndex.set(parseInt(r.rowIndex, 10), r);
+    let maxMirroredRow = 0;
+    for (const r of ctx.dataRows || []) {
+      const ri = parseInt(r.rowIndex, 10);
+      rowByIndex.set(ri, r);
+      if (ri > maxMirroredRow) maxMirroredRow = ri;
+    }
 
     const okIds = [];
     for (const os of group) {
       // ① 신선도 게이트: 미러 스냅샷이 이 쓰기 이후여야만 판정(미러가 아직 못 본 쓰기 = 오탐)
       const writtenMs = new Date(os.writtenAt).getTime();
       if (!(mirroredAt > writtenMs + freshSec * 1000)) { result.skippedStale++; continue; }
+      // 관리자 편집이 미러보다 최신 = 시트는 아직 구값(반영 대기) → 판정 보류(리뷰 중요#4)
+      if (os.updatedAt && new Date(os.updatedAt).getTime() > mirroredAt) { result.skippedEdited++; continue; }
       if (os.verifiedAt && new Date(os.verifiedAt).getTime() >= mirroredAt) continue; // 이 스냅샷은 이미 검증함
+
+      // ★ 판정 가능성 게이트(리뷰 치명#1): 강한 키 없는 주문은 "무조건 소실"로 확정 오판되므로 제외.
+      //   스탬프를 찍어 매 사이클 재스캔되지 않게 하되, 상태는 건드리지 않는다(무액션).
+      if (!_canVerify(os, cols)) { result.unverifiable++; okIds.push(os.id); continue; }
+
+      // ★ 스냅샷 커버리지 밖(미러 최대행보다 아래) = "행이 지워짐"이 아니라 "미러가 아직 못 봄" →
+      //   보류(빈 결과를 소실로 오판하면 정상 주문이 중복 append 된다).
+      if (parseInt(os.sheetRow, 10) > maxMirroredRow) { result.skippedOutOfRange++; continue; }
 
       const row = rowByIndex.get(parseInt(os.sheetRow, 10));
       if (_rowVerdict(row && row.cells, cols, os) === 'mine') { okIds.push(os.id); result.verified++; continue; }
@@ -274,6 +326,8 @@ async function verifyWrittenOrders({ limit = 400, maxTabs = 20 } = {}) {
 /** ⑤a 구매캡쳐 미첨부 감지 — 제출 20분 후에도 캡처 미연결(컷오프 이후 제출분만) */
 async function detectMissingCaptures({ limit = 50 } = {}) {
   const db = getPool();
+  // 정당한 무캡처 제출(수기·nc모드 재사용 등)이 많은 운영이면 끌 수 있게(리뷰 사소#10)
+  if (process.env.REVIEWER_LOG_NO_CAPTURE === '0') return { flagged: 0, skipped: 'disabled' };
   let cutoff = null;
   try {
     const { rows } = await db.query(`SELECT value FROM app_settings WHERE key = 'reviewer_log_capture_cutoff'`);
@@ -319,8 +373,8 @@ async function detectStuckOrders({ limit = 50 } = {}) {
       WHERE os.deleted_at IS NULL
         AND os.submitted_at > NOW() - interval '3 days'
         AND ( os.mirror_status = 'stuck_manual'
-           OR (os.mirror_status IN ('failed', 'pending_no_row') AND os.submitted_at < NOW() - interval '15 minutes')
-           OR (os.mirror_status IN ('pending', 'queued') AND os.submitted_at < NOW() - interval '30 minutes') )
+           OR (os.mirror_status IN ('failed', 'pending_no_row') AND os.submitted_at < NOW() - interval '30 minutes')
+           OR (os.mirror_status IN ('pending', 'queued') AND os.submitted_at < NOW() - interval '60 minutes') )
       ORDER BY os.submitted_at DESC
       LIMIT $1`,
     [limit]
@@ -346,7 +400,8 @@ async function detectStuckOrders({ limit = 50 } = {}) {
 /** 크론 진입점 — 자동해결 → 행 검증 → 캡처/적체 감지 */
 async function runWrittenVerifyCycle(opts = {}) {
   const healed = await autoResolveHealed().catch((e) => { logger.warn(`[written-verify] autoResolve 실패(무시): ${e.message}`); return {}; });
-  const verify = await verifyWrittenOrders(opts);
+  // 각 단계 독립 — 한 단계 실패가 나머지 감지를 통째로 건너뛰지 않게(리뷰 사소#9)
+  const verify = await verifyWrittenOrders(opts).catch((e) => { logger.error(`[written-verify] 행검증 실패: ${e.message}`); return { error: e.message }; });
   const capture = await detectMissingCaptures(opts).catch((e) => { logger.warn(`[written-verify] 캡처감지 실패(무시): ${e.message}`); return {}; });
   const stuck = await detectStuckOrders(opts).catch((e) => { logger.warn(`[written-verify] 적체감지 실패(무시): ${e.message}`); return {}; });
   return { healed, verify, capture, stuck };
@@ -360,6 +415,7 @@ module.exports = {
   _rowVerdict,
   _searchRows,
   _identityCols,
+  _canVerify,
   __setPoolForTest,
   __setLoadCtxForTest,
 };

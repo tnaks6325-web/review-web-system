@@ -527,20 +527,32 @@ router.post('/workdesk/add', authMiddleware, async (req, res, next) => {
 //   격리 범위 안이라 인트라넷 SSO 사용자가 통합작업대에서 바로 열람 가능.
 //   확인(resolve)은 서버 상태가 진실원본 — 어느 화면에서 확인해도 전 관리자 화면에서 사라진다.
 // ═══════════════════════════════════════════════════════════
+// ★ staff(AE) 스코프: 담당 업체(inad_pm) 탭의 로그만 열람 — 전 캠페인 리뷰어 PII 전역 열람 차단
+//   (기존 선례와 동일: unseenCounts B2 봉합·advertiser 컬럼 최소화). master/admin은 전체.
+async function _logScopeTabs(req) {
+  if (_role(req) !== 'staff') return null;             // null = 전체
+  const tabs = await svc.scopedActiveTabs({ role: 'staff', staffName: (req.admin && req.admin.name) || '' });
+  return (tabs || []).map(t => ({ sheetId: t.sheetId, tabName: t.tabName }));
+}
+
 router.get('/reviewer-logs', authMiddleware, internalMiddleware, async (req, res, next) => {
   try {
     const { listReviewerEvents, unresolvedCounts } = require('../services/reviewerEventLog.service');
     const { sheetId, tabName, severity, eventType, unresolved, limit, offset } = req.query || {};
-    const items = await listReviewerEvents({
+    const scopeTabs = await _logScopeTabs(req);
+    if (scopeTabs && !scopeTabs.length) return res.json({ ok: true, items: [], counts: { total: 0, critical: 0 } });
+    const opts = {
       sheetId: sheetId || '', tabName: tabName || '', severity: severity || '', eventType: eventType || '',
       unresolvedOnly: unresolved === '1',
       limit: parseInt(limit, 10) || 100, offset: parseInt(offset, 10) || 0,
-    });
-    res.json({ ok: true, items, counts: await unresolvedCounts() });
+      scopeTabs,
+    };
+    res.json({ ok: true, items: await listReviewerEvents(opts), counts: await unresolvedCounts(scopeTabs) });
   } catch (err) { next(err); }
 });
 
-router.post('/reviewer-logs/resolve', authMiddleware, internalMiddleware, async (req, res, next) => {
+// 확인(해결)은 전역 진실원본이라 admin/master 전용 — staff가 타 담당자의 미확인 중요알림을 지우지 못하게.
+router.post('/reviewer-logs/resolve', authMiddleware, adminOrMasterMiddleware, async (req, res, next) => {
   try {
     const { resolveReviewerEvent } = require('../services/reviewerEventLog.service');
     const { id } = req.body || {};

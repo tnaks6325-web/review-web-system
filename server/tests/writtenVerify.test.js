@@ -169,6 +169,74 @@ async function run() {
     assert.ok(log && /구매캡쳐를 첨부하지 않았습니다/.test(JSON.stringify(log.params)), '캡처 미첨부 한글 문장');
   }
 
+  // ═══ 7a. [리뷰 치명#1] 강한 키 없는 주문 = 판정 불가 → 절대 소실로 오판하지 않는다 ═══
+  //   (주문번호 6자리 미만 + 연락처 8자리 미만. 과거 구현은 이런 주문을 "무조건 소실"로 확정해
+  //    정상 주문을 failed 강등 → 시트 중복 행 + critical 오경보를 만들었다.)
+  {
+    const cols = wv._identityCols(HEADERS);
+    assert.equal(wv._canVerify(osRow(), cols), true, '강한 키 있으면 검증 가능');
+    assert.equal(wv._canVerify(osRow({ phone: '', orderNum: '123' }), cols), false, '강한 키 없으면 검증 불가');
+
+    const pool = makePool({ writtenOrders: [osRow({ phone: '', orderNum: '123' })], mirroredAt: FRESH });
+    wv.__setPoolForTest(pool); relog.__setPoolForTest(pool);
+    setCtx([row(75, '김옥선', '010-5384-9851', '30101824728828')]);
+    const r = await wv.verifyWrittenOrders();
+    assert.equal(r.unverifiable, 1, '판정 불가로 분류');
+    assert.equal(r.lost, 0, '소실 판정 금지(오탐 차단)');
+    assert.ok(!pool.calls.some(c => /mirror_status = 'failed'/.test(c.s)), '강등 금지');
+    assert.ok(!pool.calls.some(c => /INSERT INTO reviewer_event_logs/.test(c.s)), '오경보 금지');
+  }
+
+  // ═══ 7b. 강한 키 충돌 없음 + 수취인 일치 = 내 행(사람이 일부 칸을 지운 상태 → 오탐 방지) ═══
+  {
+    const cols = wv._identityCols(HEADERS);
+    const os = osRow();
+    assert.equal(wv._rowVerdict(row(75, '이지유', '', '').cells, cols, os), 'mine', '수취인만 남은 내 행 = mine(강등 금지)');
+    assert.equal(wv._rowVerdict(row(75, '김옥선', '010-5384-9851', '').cells, cols, os), 'other', '전화 충돌 = 타인 행');
+  }
+
+  // ═══ 7c. 스냅샷 커버리지 밖(미러 최대행보다 아래) → 보류(빈 결과를 소실로 오판 금지) ═══
+  {
+    const pool = makePool({ writtenOrders: [osRow({ sheetRow: 268 })], mirroredAt: FRESH });
+    wv.__setPoolForTest(pool); relog.__setPoolForTest(pool);
+    setCtx([row(75, '김옥선', '010-5384-9851', '30101824728828')]); // 미러 최대행 75
+    const r = await wv.verifyWrittenOrders();
+    assert.equal(r.skippedOutOfRange, 1);
+    assert.equal(r.lost, 0, '미러가 못 본 행은 소실 아님');
+  }
+
+  // ═══ 7d. [리뷰 중요#4] 관리자 편집이 미러보다 최신 → 판정 보류(시트는 아직 구값) ═══
+  {
+    const pool = makePool({ writtenOrders: [osRow({ updatedAt: new Date(Date.now() + 60 * 1000) })], mirroredAt: FRESH });
+    wv.__setPoolForTest(pool); relog.__setPoolForTest(pool);
+    setCtx([row(75, '김옥선', '010-5384-9851', '30101824728828')]);
+    const r = await wv.verifyWrittenOrders();
+    assert.equal(r.skippedEdited, 1);
+    assert.equal(r.lost, 0, '편집 반영 대기 중에는 소실 판정 금지');
+  }
+
+  // ═══ 7e. [리뷰 중요#2·#5] 쿼리 구조 고정: 인플라이트 큐 배제 + 검증 회전 정렬 ═══
+  {
+    const pool = makePool({ writtenOrders: [], mirroredAt: FRESH });
+    wv.__setPoolForTest(pool); relog.__setPoolForTest(pool);
+    await wv.verifyWrittenOrders();
+    const sel = pool.calls.find(c => /FROM order_submissions os WHERE os\.mirror_status = 'written'/.test(c.s));
+    assert.ok(sel, '대상 조회 실행');
+    assert.ok(/NOT EXISTS \( SELECT 1 FROM sync_queue/.test(sel.s), '인플라이트(order_append/update) 주문 배제');
+    assert.ok(/ORDER BY os\.row_verified_at ASC NULLS FIRST/.test(sel.s), '미검증 우선 회전(커버리지 기아 방지)');
+  }
+
+  // ═══ 7f. [리뷰 중요#6] staff 스코프: 담당 탭 0이면 로그 미개방 ═══
+  {
+    const pool = makePool({});
+    relog.__setPoolForTest(pool);
+    assert.deepEqual(await relog.listReviewerEvents({ scopeTabs: [] }), [], '담당 탭 0 = 빈 목록(전역 열람 차단)');
+    assert.deepEqual(await relog.unresolvedCounts([]), { total: 0, critical: 0 });
+    await relog.listReviewerEvents({ scopeTabs: [{ sheetId: 'S1', tabName: 'T1' }] });
+    const q = pool.calls.find(c => /FROM reviewer_event_logs/.test(c.s));
+    assert.ok(q && /sheet_id = \$\d+ AND tab_name = \$\d+/.test(q.s), '스코프 탭 조건이 SQL에 적용');
+  }
+
   // ═══ 7. 로그 dedup: 미해결 중복 INSERT는 skipped(도배 방지) ═══
   {
     const pool = makePool({ logDup: true });

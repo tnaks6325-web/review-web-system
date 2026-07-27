@@ -1396,10 +1396,12 @@ function _renderLogsBody(q){
         <div style="font-size:13.5px;line-height:1.5;word-break:break-all">${esc(l.message||'')}</div>
         <div style="font-size:11.5px;color:var(--muted);margin-top:3px">${esc(ts)} · ${esc(l.campaignName||l.tabName||'')}${l.reviewerName?' · '+esc(l.reviewerName):''}${resolved?` · ✔ 확인됨(${esc(l.resolvedBy||'')})`:''}</div>
       </div>
-      ${resolved?'':`<button class="btn" style="flex:0 0 auto" onclick="_resolveLog(${l.id})">확인</button>`}
+      ${(resolved||!_canResolveLog())?'':`<button class="btn" style="flex:0 0 auto" onclick="_resolveLog(${l.id})">확인</button>`}
     </div>`;
   }).join('')+`</div>`;
 }
+// 확인(해결)은 전역 상태 변경이라 admin/master 전용(서버도 adminOrMaster로 강제) — staff는 열람만.
+function _canResolveLog(){ return STATE.role==='master' || STATE.role==='admin'; }
 async function _resolveLog(id){
   const r=await api('/api/trackb/reviewer-logs/resolve',{method:'POST',body:JSON.stringify({id})});
   if(!r||!r.ok){ alert('확인 처리 실패'); return; }
