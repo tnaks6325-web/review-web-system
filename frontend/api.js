@@ -185,6 +185,10 @@ const _ACTION_MAP = {
   // 블랙리스트
   'blacklist':      { method: 'POST', path: '/api/blacklist' },
 
+  // 리뷰어 비정상 로그 (한글 자연어, migration 062 — 중요알림 카드/통합작업대 로그 창)
+  'reviewerLogsList':   { method: 'GET',  path: '/api/trackb/reviewer-logs' },
+  'reviewerLogResolve': { method: 'POST', path: '/api/trackb/reviewer-logs/resolve' },
+
   // 이미지 (Gemini AI + Drive)
   'extractOrderImage':   { method: 'POST', path: '/api/image/image-extract' },
   'uploadOrderImage':    { method: 'POST', path: '/api/image/image-upload' },

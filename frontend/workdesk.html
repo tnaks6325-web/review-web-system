@@ -498,10 +498,12 @@ function renderShell(){
       ${isAdmin?`<nav class="nav">
         <button class="navb" data-v="workdesk" onclick="switchView('workdesk')">작업대</button>
         <button class="navb" data-v="overview" onclick="switchView('overview')">관측</button>
-        <button class="navb" data-v="ownership" onclick="switchView('ownership')">업체관리</button></nav>`
+        <button class="navb" data-v="ownership" onclick="switchView('ownership')">업체관리</button>
+        <button class="navb" data-v="logs" onclick="switchView('logs')">리뷰어 로그<span id="lgNavBadge"></span></button></nav>`
       :isStaff?`<nav class="nav">
         <button class="navb" data-v="workdesk" onclick="switchView('workdesk')">작업대</button>
-        <button class="navb" data-v="ownership" onclick="switchView('ownership')">업체관리</button></nav>`:''}
+        <button class="navb" data-v="ownership" onclick="switchView('ownership')">업체관리</button>
+        <button class="navb" data-v="logs" onclick="switchView('logs')">리뷰어 로그<span id="lgNavBadge"></span></button></nav>`:''}
       <span class="sp"></span>
       <button class="btn railtgl" id="railToggle" onclick="toggleRail()" style="display:none" title="우측 사이드바(협업/댓글·Parity) 숨기기/표시"></button>
       <button class="btn widetgl" id="wideToggle" onclick="toggleWide()" style="display:none" title="작업 목록·우측 레일을 숨겨 표를 화면 전체폭으로 (Esc로 해제)"></button>
@@ -514,7 +516,7 @@ function renderShell(){
 function switchView(v){ STATE.view=v; document.querySelectorAll('.navb').forEach(b=>b.classList.toggle('on',b.dataset.v===v));
   const rt=$('#railToggle'); if(rt) rt.style.display=(v==='workdesk')?'':'none';   // 레일은 작업대 뷰에만 존재
   const wt=$('#wideToggle'); if(wt) wt.style.display=(v==='workdesk')?'':'none';   // 전체화면 토글도 작업대 뷰에만
-  if(v==='ownership') renderOwnershipView(); else if(v==='overview') renderOverviewView(); else renderWorkdeskView(); }
+  if(v==='ownership') renderOwnershipView(); else if(v==='overview') renderOverviewView(); else if(v==='logs') renderLogsView(); else renderWorkdeskView(); }
 
 // ── 우측 사이드바(레일) 숨기기/표시 — 브라우저 로컬 영속(레이아웃 취향, 재접속·탭전환 유지) ──
 function _railHidden(){ try{ return localStorage.getItem('wd_rail_hidden_v1')==='1'; }catch(_){ return false; } }
@@ -1348,6 +1350,64 @@ async function showEditHistory(){
 }
 
 // ══ 관측 대시보드 뷰 ══
+/* ══ 리뷰어 비정상 로그 뷰(migration 062) — 캠페인별 한글 자연어 로그 + 확인 처리 ══
+   예: "『0721)장수돌침대…』에 이지유 리뷰어가 제출한 구매양식이 시트에서 사라졌습니다…"
+   서버 미해결 상태가 진실원본 — [확인]하면 전 관리자 화면·알림에서 함께 사라진다. */
+async function renderLogsView(){
+  $('#viewroot').innerHTML=`<div class="ovwrap"><div id="lghead"></div><div id="lgbody"><div class="empty">불러오는 중…</div></div></div>`;
+  await _loadLogs();
+}
+async function _loadLogs(){
+  const un = STATE.logAll ? '' : '&unresolved=1';
+  const r = await api('/api/trackb/reviewer-logs?limit=200'+un);
+  if(!r || !r.ok){ const b=$('#lgbody'); if(b) b.innerHTML=`<div class="empty">로그를 불러오지 못했습니다.</div>`; return; }
+  STATE.logs = r.items||[]; STATE.logCounts = r.counts||{total:0,critical:0};
+  _renderLogsHead(); _renderLogsBody(STATE.logq||'');
+  const nb=$('#lgNavBadge'); if(nb){ const c=STATE.logCounts.critical|0;
+    nb.textContent = c>0?(' 🔴'+c):''; }
+}
+function _renderLogsHead(){
+  const c = STATE.logCounts||{total:0,critical:0};
+  $('#lghead').innerHTML=`<div class="mh"><h1>리뷰어 비정상 로그</h1>
+    <span class="bd ${c.critical>0?'no':'g'}">중요 ${c.critical|0}</span>
+    <span class="bd g">미해결 ${c.total|0}</span>
+    <span class="sp" style="flex:1"></span>
+    <label style="font-size:12px;color:var(--muted);display:flex;align-items:center;gap:4px;cursor:pointer">
+      <input type="checkbox" ${STATE.logAll?'checked':''} onchange="STATE.logAll=this.checked;_loadLogs()"> 해결된 로그 포함</label>
+    <button class="btn" onclick="_loadLogs()">새로고침</button>
+    <input id="lgq" class="ovsearch" placeholder="캠페인/리뷰어/내용 검색" oninput="STATE.logq=this.value;_renderLogsBody(this.value)" value="${esc(STATE.logq||'')}"></div>
+    <div class="ovnote">구매양식 <b>시트 소실(유령 written)</b>·<b>미반영 적체</b>·<b>구매캡쳐 미첨부</b> 등을 시스템이 자동 감지해 캠페인별 한글 문장으로 기록합니다. 소실 건은 자동 재기록되며(하단 행 비고 'system'), 반복 소실·수동 필요 건은 🔴 중요로 표시됩니다.</div>`;
+}
+function _renderLogsBody(q){
+  const kw=String(q||'').trim().toLowerCase();
+  const items=(STATE.logs||[]).filter(l=>!kw
+    || String(l.campaignName||'').toLowerCase().includes(kw)
+    || String(l.reviewerName||'').toLowerCase().includes(kw)
+    || String(l.message||'').toLowerCase().includes(kw));
+  if(!items.length){ $('#lgbody').innerHTML=`<div class="empty">${kw?'검색 결과가 없습니다.':'표시할 로그가 없습니다. (문제 없음 🎉)'}</div>`; return; }
+  const sevBadge=s=> s==='critical'?'<span class="bd no">중요</span>' : s==='warn'?'<span class="bd" style="background:#FEF3C7;color:#92400E">주의</span>' : '<span class="bd g">정보</span>';
+  $('#lgbody').innerHTML = `<div style="display:flex;flex-direction:column;gap:8px;padding:4px 0">`+items.map(l=>{
+    const t=l.occurredAt?new Date(l.occurredAt):null;
+    const ts=t?`${t.getFullYear()}-${String(t.getMonth()+1).padStart(2,'0')}-${String(t.getDate()).padStart(2,'0')} ${String(t.getHours()).padStart(2,'0')}:${String(t.getMinutes()).padStart(2,'0')}`:'';
+    const resolved=!!l.resolvedAt;
+    return `<div style="background:var(--card);border:1px solid ${l.severity==='critical'&&!resolved?'#FCA5A5':'var(--line)'};border-radius:10px;padding:10px 14px;display:flex;gap:10px;align-items:flex-start;${resolved?'opacity:.55':''}">
+      <div style="flex:0 0 auto;padding-top:1px">${sevBadge(l.severity)}</div>
+      <div style="flex:1;min-width:0">
+        <div style="font-size:13.5px;line-height:1.5;word-break:break-all">${esc(l.message||'')}</div>
+        <div style="font-size:11.5px;color:var(--muted);margin-top:3px">${esc(ts)} · ${esc(l.campaignName||l.tabName||'')}${l.reviewerName?' · '+esc(l.reviewerName):''}${resolved?` · ✔ 확인됨(${esc(l.resolvedBy||'')})`:''}</div>
+      </div>
+      ${(resolved||!_canResolveLog())?'':`<button class="btn" style="flex:0 0 auto" onclick="_resolveLog(${l.id})">확인</button>`}
+    </div>`;
+  }).join('')+`</div>`;
+}
+// 확인(해결)은 전역 상태 변경이라 admin/master 전용(서버도 adminOrMaster로 강제) — staff는 열람만.
+function _canResolveLog(){ return STATE.role==='master' || STATE.role==='admin'; }
+async function _resolveLog(id){
+  const r=await api('/api/trackb/reviewer-logs/resolve',{method:'POST',body:JSON.stringify({id})});
+  if(!r||!r.ok){ alert('확인 처리 실패'); return; }
+  await _loadLogs();
+}
+
 async function renderOverviewView(){
   $('#viewroot').innerHTML=`<div class="ovwrap"><div id="ovhead"></div><div id="ovbody"><div class="empty">불러오는 중…</div></div></div>`;
   const r=await api('/api/trackb/overview');

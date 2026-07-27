@@ -1422,6 +1422,38 @@ router.post('/image-upload', imageApiLimiter, async (req, res, next) => {
 
     logger.info(`[image-upload] 업로드 완료: ${uploaded.name} → ${uploaded.id}`);
 
+    // ── 캡처↔주문 연결(062, best-effort) — "캡처 미첨부" 감지·중요알림의 근거 ──
+    //   ① orderSubmissionId 직접 연결(신형 프론트) ② 없으면 같은 탭 최근 24h 동일 수취인/주문자 폴백.
+    //   실패해도 업로드 자체는 유효(연결은 관측용 메타데이터).
+    try {
+      const osId = String(req.body.orderSubmissionId || '').trim();
+      if (/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(osId)) {
+        await pool.query(
+          `UPDATE order_submissions SET capture_file_id = $2, capture_uploaded_at = NOW()
+            WHERE id = $1 AND capture_uploaded_at IS NULL`,
+          [osId, uploaded.id]
+        );
+      } else if (sheetId && tabName && finalFileName) {
+        // 파일명 규칙: {수취인}.ext 또는 {수취인}_{주문자}.ext (search-app.js) → 첫 토큰이 수취인
+        const nameBase = String(finalFileName).replace(/\.[^.]+$/, '').split('_')[0].replace(/\s+/g, '');
+        if (nameBase) {
+          await pool.query(
+            `UPDATE order_submissions SET capture_file_id = $3, capture_uploaded_at = NOW()
+              WHERE id = (SELECT id FROM order_submissions
+                           WHERE sheet_id = $1 AND tab_name = $2
+                             AND capture_uploaded_at IS NULL AND deleted_at IS NULL
+                             AND submitted_at > NOW() - interval '24 hours'
+                             AND (replace(COALESCE(recipient, ''), ' ', '') = $4
+                                  OR replace(COALESCE(orderer, ''), ' ', '') = $4)
+                           ORDER BY submitted_at DESC LIMIT 1)`,
+            [sheetId, tabName, uploaded.id, nameBase]
+          );
+        }
+      }
+    } catch (linkErr) {
+      logger.warn(`[image-upload] 캡처↔주문 연결 실패(무시): ${linkErr.message}`);
+    }
+
     // ── SSE 알림 ──
     emitImageUpload({
       fileName: uploaded.name,
