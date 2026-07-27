@@ -237,6 +237,8 @@ function _publicView(row, counts, now) {
     opensAt: st.opensAt,
     closesAt: st.closesAt,
     cutoffAt: st.cutoffAt,
+    allDay: st.allDay === true,       // 자율주문(종일 오픈) 신호
+    startDate: st.startDate || null,  // 시작일(062) — 시작일 전엔 state=preopen + opensAt=시작일 오픈시각
   };
 }
 
@@ -437,7 +439,7 @@ router.get('/list', async (req, res, next) => {
                status, sort_order, max_slots, current_slots, deadline,
                description, linked_sheet_id, linked_tab_name, created_at,
                participation_mode, thumbnail_url, daily_limit, recruit_total,
-               window_start, window_end, close_buffer_min, hold_ttl_min
+               window_start, window_end, close_buffer_min, hold_ttl_min, start_date
         FROM recruit_campaigns
         WHERE status IN ('active', 'closed')
         ORDER BY
@@ -990,11 +992,15 @@ router.post('/admin/create', authMiddleware, adminOrMasterMiddleware, async (req
       // ★ M2 변경②: 참여형 발행 필드
       participation_mode, thumbnail_url, landing_url, daily_limit, recruit_total,
       window_start, window_end, close_buffer_min, hold_ttl_min, work_detail, source_work_order_id,
+      start_date, // ★ 062: 시작일(YYYY-MM-DD) — 시작일 전 게시 시 오픈예정 카운트다운
       options, // ★ 061: 상품옵션 목록(참여형)
     } = req.body;
 
     if (!title || !title.trim()) {
       return res.status(400).json({ ok: false, error: '공고 제목을 입력해주세요.' });
+    }
+    if (start_date && !/^\d{4}-\d{2}-\d{2}$/.test(String(start_date))) {
+      return res.status(400).json({ ok: false, error: '시작일 형식이 올바르지 않습니다. (YYYY-MM-DD)' });
     }
 
     // 참여형을 active로 "생성"하는 것도 활성화 게이트 통과 필요(status 라우트 우회 방지)
@@ -1012,9 +1018,10 @@ router.post('/admin/create', authMiddleware, adminOrMasterMiddleware, async (req
         max_slots, deadline, description, linked_sheet_id, linked_tab_name, linked_tab_gid,
         created_by,
         participation_mode, thumbnail_url, landing_url, daily_limit, recruit_total,
-        window_start, window_end, close_buffer_min, hold_ttl_min, work_detail, source_work_order_id)
+        window_start, window_end, close_buffer_min, hold_ttl_min, work_detail, source_work_order_id,
+        start_date)
        VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,
-               $21,$22,$23,$24,$25,$26,$27,$28,$29,$30,$31)
+               $21,$22,$23,$24,$25,$26,$27,$28,$29,$30,$31,$32)
        RETURNING *`,
       [
         _genCampaignId(),
@@ -1048,6 +1055,7 @@ router.post('/admin/create', authMiddleware, adminOrMasterMiddleware, async (req
         Number.isFinite(Number(hold_ttl_min)) && hold_ttl_min !== null && hold_ttl_min !== undefined && hold_ttl_min !== '' ? Number(hold_ttl_min) : 15,
         _prepWorkDetail(work_detail) ?? null,
         source_work_order_id || '',
+        start_date || null,
       ]
     );
     // ★ 061: 상품옵션 저장(제공 시). 원자 저장(캠페인 락) — 실패 시 응답에 경고 표면화(조용한 정원 오염 방지, 레드 #7).
@@ -1078,8 +1086,19 @@ router.put('/admin/:id', authMiddleware, adminOrMasterMiddleware, async (req, re
       // ★ M2 변경②: 참여형 발행 필드(전부 optional — 미전달 시 기존값 유지)
       participation_mode, thumbnail_url, landing_url, daily_limit, recruit_total,
       window_start, window_end, close_buffer_min, hold_ttl_min, work_detail, source_work_order_id,
+      start_date, // ★ 062: undefined/null=유지, ''=시작일 제거, 'YYYY-MM-DD'=설정
       options, // ★ 061: 상품옵션 목록(배열 전달 시에만 교체, 미전달=변경 없음)
     } = req.body;
+
+    if (start_date && !/^\d{4}-\d{2}-\d{2}$/.test(String(start_date))) {
+      return res.status(400).json({ ok: false, error: '시작일 형식이 올바르지 않습니다. (YYYY-MM-DD)' });
+    }
+
+    // ★ 062: 시간창 유효값 — ''=비움(자율주문 전환), null/undefined=유지, 'HH:MM'=설정.
+    //   auto_order=true(카드 인라인 편집기)는 강제 비움 — 종전엔 스코프 라우트만 해석해
+    //   관리자 토큰의 인라인 자율주문 전환이 조용히 무시되던 갭 봉합.
+    const _wsEff = (req.body.auto_order === true) ? '' : window_start;
+    const _weEff = (req.body.auto_order === true) ? '' : window_end;
 
     // ★ 참여형 활성화 게이트(심판 J7): COALESCE 편집으로 status='active' 우회 방지.
     //   이 라우트가 바꿀 수 있는 게이트 입력(연결탭·시간창·일일건수)을 본문값으로 병합해 판정.
@@ -1091,8 +1110,8 @@ router.put('/admin/:id', authMiddleware, adminOrMasterMiddleware, async (req, re
           ...cur[0],
           linked_sheet_id: pick(linked_sheet_id, cur[0].linked_sheet_id),
           linked_tab_gid: pick(linked_tab_gid, cur[0].linked_tab_gid),
-          window_start: pick(window_start, cur[0].window_start),
-          window_end: pick(window_end, cur[0].window_end),
+          window_start: pick(_wsEff, cur[0].window_start),
+          window_end: pick(_weEff, cur[0].window_end),
           daily_limit: pick(daily_limit, cur[0].daily_limit),
         };
         const errs = _participationActivationErrors(eff);
@@ -1127,12 +1146,19 @@ router.put('/admin/:id', authMiddleware, adminOrMasterMiddleware, async (req, re
         landing_url = COALESCE($22, landing_url),
         daily_limit = COALESCE($23, daily_limit),
         recruit_total = COALESCE($24, recruit_total),
-        window_start = COALESCE($25, window_start),
-        window_end = COALESCE($26, window_end),
+        window_start = CASE WHEN $25::text IS NULL THEN window_start
+                            WHEN $25::text = '' THEN NULL
+                            ELSE $25::time END,
+        window_end = CASE WHEN $26::text IS NULL THEN window_end
+                          WHEN $26::text = '' THEN NULL
+                          ELSE $26::time END,
         close_buffer_min = COALESCE($27, close_buffer_min),
         hold_ttl_min = COALESCE($28, hold_ttl_min),
         work_detail = CASE WHEN $29::boolean THEN $30::jsonb ELSE work_detail END,
         source_work_order_id = COALESCE($31, source_work_order_id),
+        start_date = CASE WHEN $32::text IS NULL THEN start_date
+                          WHEN $32::text = '' THEN NULL
+                          ELSE $32::date END,
         updated_at = NOW()
        WHERE id = $1
        RETURNING *`,
@@ -1149,13 +1175,15 @@ router.put('/admin/:id', authMiddleware, adminOrMasterMiddleware, async (req, re
         landing_url ?? null,
         (daily_limit === undefined || daily_limit === null || daily_limit === '') ? null : Number(daily_limit) || 0,
         (recruit_total === undefined || recruit_total === null || recruit_total === '') ? null : Number(recruit_total) || 0,
-        window_start || null,
-        window_end || null,
+        // ★ 062: ''=시간창 비움(자율주문 전환), null/undefined=유지 — 구 COALESCE는 비움 불가였음
+        (_wsEff === undefined || _wsEff === null) ? null : String(_wsEff),
+        (_weEff === undefined || _weEff === null) ? null : String(_weEff),
         (close_buffer_min === undefined || close_buffer_min === null || close_buffer_min === '') ? null : Number(close_buffer_min),
         (hold_ttl_min === undefined || hold_ttl_min === null || hold_ttl_min === '') ? null : Number(hold_ttl_min),
         wdPrepared !== undefined,          // $29: work_detail 교체 여부(undefined=유지)
         wdPrepared === undefined ? null : wdPrepared, // $30: 새 값(null=비움)
         source_work_order_id ?? null,
+        (start_date === undefined || start_date === null) ? null : String(start_date), // $32: null=유지, ''=제거, 날짜=설정
       ]
     );
 

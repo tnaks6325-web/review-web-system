@@ -178,6 +178,29 @@ ok('자율주문: closed 영속·비활성은 동일(closed 우선)', () => {
   assert.strictEqual(computeCampaignState(c, ZERO, kst('15:00')).state, 'closed');
 });
 
+/* ── 시작일(start_date, migration 062) — 시작일 전 게시 = 날짜 preopen ── */
+ok('시작일: KST 오늘 < start_date → preopen + opensAt=시작일의 window_start 시각', () => {
+  const c = { ...CAMP, start_date: '2026-07-12' };
+  const st = computeCampaignState(c, ZERO, kst('15:00')); // 시간창 안 시각이어도 날짜 게이트가 우선
+  assert.strictEqual(st.state, 'preopen');
+  assert.strictEqual(st.opensAt, '2026-07-12T05:00:00.000Z'); // 7/12 KST 14:00
+  assert.strictEqual(st.startDate, '2026-07-12');
+});
+
+ok('시작일: 자율주문 + 미래 시작일 → preopen(그날 KST 자정 오픈), 도달 후 open', () => {
+  const c = { ...CAMP, window_start: null, window_end: null, start_date: '2026-07-12' };
+  const st = computeCampaignState(c, ZERO, kst('15:00'));
+  assert.strictEqual(st.state, 'preopen');
+  assert.strictEqual(st.opensAt, '2026-07-11T15:00:00.000Z'); // 7/12 KST 00:00
+  assert.strictEqual(computeCampaignState(c, ZERO, kst('00:10', '2026-07-12')).state, 'open');
+});
+
+ok('시작일: 오늘/과거 시작일·pg Date 객체 입력은 동작 불변(창 안=open)', () => {
+  assert.strictEqual(computeCampaignState({ ...CAMP, start_date: '2026-07-10' }, ZERO, kst('14:30')).state, 'open');
+  assert.strictEqual(computeCampaignState({ ...CAMP, start_date: new Date('2026-07-01T00:00:00Z') }, ZERO, kst('14:30')).state, 'open');
+  assert.strictEqual(computeCampaignState({ ...CAMP, start_date: new Date('2026-07-12T00:00:00Z') }, ZERO, kst('14:30')).state, 'preopen');
+});
+
 ok('한쪽만 설정된 시간창은 여전히 closed + window_invalid (설정 오류 방어)', () => {
   const st = computeCampaignState({ ...CAMP, window_start: null }, ZERO, kst('15:00'));
   assert.strictEqual(st.state, 'closed');

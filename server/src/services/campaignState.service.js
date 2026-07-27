@@ -43,6 +43,19 @@ function kstTodayAt(timeStr, now = new Date()) {
   return new Date(kstDayStartUtc(now).getTime() + mins * 60 * 1000);
 }
 
+/** DATE 값(문자열 'YYYY-MM-DD' 또는 pg Date 객체) → 'YYYY-MM-DD' 문자열. 무효/없음은 null */
+function dateOnlyStr(v) {
+  if (!v) return null;
+  if (v instanceof Date) return isNaN(v.getTime()) ? null : v.toISOString().slice(0, 10);
+  const m = /^(\d{4}-\d{2}-\d{2})/.exec(String(v).trim());
+  return m ? m[1] : null;
+}
+
+/** now의 KST 날짜 문자열 'YYYY-MM-DD' */
+function kstTodayStr(now = new Date()) {
+  return new Date(now.getTime() + KST_OFFSET_MS).toISOString().slice(0, 10);
+}
+
 /** dailyQuota — KST 일 시작 시점 고정 (§03-D). submittedBeforeToday = 전일까지의 누적확정 */
 function dailyQuota(c, submittedBeforeToday) {
   const dl = Number(c.daily_limit) || 0;
@@ -92,6 +105,16 @@ function computeCampaignState(c, counts, now = new Date()) {
   if (!allDay && (startMin === null || endMin === null || endMin <= startMin)) {
     // 시간창 오설정/역전(활성화 게이트가 막지만 SQL 직생성 방어) — 참여 불가 + 원인 신호(관리자 식별용)
     return { ...payload, state: 'closed', stateReason: 'window_invalid' };
+  }
+
+  // ★ 시작일(start_date, migration 062): KST 오늘이 시작일 전이면 날짜 preopen(D-day 카운트다운).
+  //   opensAt = 시작일의 오픈 시각(시간창 있으면 그날 window_start, 자율주문은 그날 KST 자정).
+  //   NULL·과거·오늘 시작일은 이 분기를 타지 않음(기존 동작 불변).
+  const sd = dateOnlyStr(c.start_date);
+  payload.startDate = sd;
+  if (sd && kstTodayStr(now) < sd) {
+    const openUtc = new Date(Date.parse(sd + 'T00:00:00+09:00') + (allDay ? 0 : startMin * 60000));
+    return { ...payload, state: 'preopen', opensAt: openUtc.toISOString() };
   }
 
   const t = kstMinutesOfDay(now);
@@ -239,6 +262,8 @@ module.exports = {
   kstDayStartUtc,
   kstMinutesOfDay,
   kstTodayAt,
+  kstTodayStr,
+  dateOnlyStr,
   APPLY_BLOCK_REASON,
   KST_OFFSET_MS,
 };
