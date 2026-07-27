@@ -30,28 +30,62 @@
   .btn:hover{border-color:var(--accent-line);background:var(--card2)} .btn:active{transform:scale(.97)}
   .btn.pri{background:var(--accent);color:#fff;border-color:var(--accent);box-shadow:0 1px 2px rgba(37,99,235,.32)} .btn.pri:hover{background:var(--accent-deep);border-color:var(--accent-deep)}
   .btn:disabled{background:var(--card2);color:var(--faint);border-color:var(--card2);cursor:not-allowed;box-shadow:none;transform:none}
-  .wrap{display:grid;grid-template-columns:230px 1fr 300px;min-height:calc(100vh - 50px)}
-  .wrap.railhidden{grid-template-columns:230px 1fr}          /* 우측 레일 숨김 → 2열(메인 넓게) */
+  /* ── 작업목록 = 상단 가로바(사이드바 대체). 본문은 1열(+선택적 우측 레일) → 표가 화면 전체폭을 씀 ──
+     --tbh = 상단 작업바 실제 높이(tb1 ~49 + tb2 42 + 경계 1). 높이 의존 계산(.wrap/.gridscroll)을 이 한 값에 묶어
+     전체화면(작업바 숨김)일 때 body.widemode가 0으로 덮어쓰면 아래 계산들이 함께 따라온다(매직넘버 드리프트 방지). */
+  :root{--tbh:92px}
+  body.widemode{--tbh:0px}
+  .wrap{display:grid;grid-template-columns:1fr 300px;min-height:calc(100vh - 50px - var(--tbh))}
+  .wrap.railhidden{grid-template-columns:1fr}                 /* 우측 레일 숨김 → 1열(메인 전체폭) */
   .wrap.railhidden .rail{display:none}
-  .wrap.widemode{grid-template-columns:1fr}                  /* 전체화면(전체폭) 모드 = 좌 작업목록·우 레일 모두 숨김 → 표를 화면 전체폭으로. railhidden보다 뒤라 둘 다 켜지면 이 규칙이 이김 */
-  .wrap.widemode .side, .wrap.widemode .rail{display:none}
-  @media(max-width:900px){.wrap,.wrap.railhidden{grid-template-columns:1fr}.side,.rail{display:none}.wrap.showlist .main{display:none}.wrap.showlist .side{display:block}}
-  .railtgl{font-size:12px}   /* 우측 상단 사이드바 토글 */
-  .side{border-right:1px solid var(--line);background:var(--card);padding:12px 10px;overflow:auto}
-  .side .sh{font-size:10px;font-weight:750;letter-spacing:.05em;text-transform:uppercase;color:var(--faint);margin:6px 6px 8px;display:flex;justify-content:space-between}
-  .titem{display:flex;align-items:center;gap:6px;font-size:12.5px;padding:8px 10px;border-radius:8px;margin-bottom:3px;color:var(--muted);cursor:pointer;border:1px solid transparent}
-  .titem:hover{background:var(--card2)} .titem.on{background:var(--accent-soft);border-color:color-mix(in srgb,var(--accent) 30%,transparent);color:var(--ink);font-weight:650}
-  .titem .tinfo{flex:1;min-width:0}
-  .titem .tname{white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
-  .titem .sub{font-size:10.5px;color:var(--faint);font-weight:400;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+  .wrap.widemode{grid-template-columns:1fr}                   /* 전체화면(전체폭) 모드 = 우 레일 + 상단 작업바까지 숨김 */
+  .wrap.widemode .rail{display:none}
+  body.widemode .taskbar{display:none}                        /* 전체화면에선 상단 작업바도 숨겨 표에 최대 높이 할애 */
+  @media(max-width:900px){.wrap,.wrap.railhidden{grid-template-columns:1fr}.rail{display:none}}
+  .railtgl,.widetgl{font-size:12px}   /* 우측 상단 토글 */
+
+  /* 1단: 통합검색 + 업체 세그먼트(맨 앞 ★즐겨찾기) */
+  .taskbar{background:var(--card);border-bottom:1px solid var(--line);position:sticky;top:50px;z-index:4}
+  .tb1{display:flex;align-items:center;gap:10px;background:var(--card2);border-bottom:1px solid var(--line);padding:8px 14px;position:relative}
+  .wsearch{position:relative;flex:none;width:236px}
+  .wsearch input{width:100%;font:inherit;font-size:12.5px;padding:7px 11px 7px 30px;border:1px solid var(--line);border-radius:9px;background:var(--card);color:var(--ink);outline:none;transition:border-color .12s,box-shadow .12s}
+  .wsearch input:focus{border-color:var(--accent);box-shadow:0 0 0 3px var(--accent-soft)}
+  .wsearch .ic{position:absolute;left:10px;top:50%;transform:translateY(-50%);color:var(--faint);font-size:12px;pointer-events:none}
+  .sres{display:none;position:absolute;top:calc(100% + 4px);left:0;width:340px;z-index:40;background:var(--card);border:1px solid var(--line2);border-radius:11px;box-shadow:0 16px 38px rgba(16,24,40,.18);padding:5px;max-height:320px;overflow:auto}
+  .sres.show{display:block}
+  .sres .shd{font-size:10px;font-weight:750;color:var(--faint);text-transform:uppercase;letter-spacing:.05em;padding:6px 9px 3px}
+  .sitem{display:flex;align-items:center;gap:9px;padding:8px 10px;border-radius:8px;cursor:pointer}
+  .sitem:hover,.sitem.kb{background:var(--accent-soft)}
+  .sitem .txt{min-width:0;flex:1}
+  .sitem .sn{font-size:12.5px;font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+  .sitem .sn mark{background:#fde68a;color:inherit;border-radius:3px;padding:0 1px}
+  .sitem .ss{font-size:10.5px;color:var(--faint);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+  .sempty{padding:14px 12px;color:var(--faint);font-size:12px;text-align:center}
+  .segdiv{width:1px;align-self:stretch;background:var(--line2);margin:2px 0}
+  .segwrap{display:flex;align-items:center;gap:7px;overflow-x:auto;flex:1;padding-bottom:1px;scrollbar-width:thin}
+  .segwrap::-webkit-scrollbar{height:5px} .segwrap::-webkit-scrollbar-thumb{background:var(--line2);border-radius:6px}
+  .seg{display:flex;align-items:center;gap:7px;font-size:12.5px;font-weight:700;color:var(--muted);background:var(--card);border:1px solid var(--line);border-radius:20px;padding:6px 13px;cursor:pointer;white-space:nowrap;flex:none;transition:background .12s,border-color .12s,color .12s}
+  .seg:hover{border-color:var(--line2)}
+  .seg .cnt{font-size:10px;font-weight:700;color:var(--faint);background:var(--card2);border-radius:8px;padding:1px 6px}
+  .seg .unbmini{font-size:9px;font-weight:800;color:#fff;background:var(--bad);border-radius:20px;padding:0 5px;line-height:1.6}
+  .seg.on{background:var(--ink);border-color:var(--ink);color:#fff}
+  .seg.on .cnt{background:rgba(255,255,255,.18);color:#fff}
+  .seg.favseg .fs{color:#f5b301;font-size:13px}
+  .seg.favseg.on{background:#b8860b;border-color:#b8860b} .seg.favseg.on .fs{color:#fff}
+
+  /* 2단: 선택 그룹의 탭(밑줄 탭) */
+  .tb2{display:flex;align-items:stretch;gap:2px;background:var(--card);padding:0 12px;overflow-x:auto;min-height:42px}
+  .tb2::-webkit-scrollbar{height:5px} .tb2::-webkit-scrollbar-thumb{background:var(--line2);border-radius:6px}
+  .wtab{position:relative;display:flex;align-items:center;gap:7px;font-size:12.5px;color:var(--muted);padding:11px 12px 10px;cursor:pointer;white-space:nowrap;border-bottom:2px solid transparent;flex:none;transition:color .12s,background .12s}
+  .wtab:hover{color:var(--ink);background:var(--card2)}
+  .wtab.on{color:var(--accent-deep);font-weight:700;border-bottom-color:var(--accent)}
+  .wtab .ts{font-size:10px;color:var(--faint);font-weight:400}
+  .wtab.on .ts{color:var(--accent)}
   /* 즐겨찾기 별표 — 호버 시 노출, 활성 시 앰버로 항상 표시. 클릭은 selTab 로 전파 안 함 */
-  .titem .tstar{flex:none;font-size:14px;line-height:1;color:var(--faint);opacity:0;cursor:pointer;padding:1px 2px;user-select:none;transition:opacity .12s,color .12s,transform .1s}
-  .titem:hover .tstar{opacity:.6} .titem .tstar:hover{opacity:1;color:var(--warn);transform:scale(1.15)}
-  .titem .tstar.on{opacity:1;color:#f5b301}
-  .tgh.fav{color:#b8860b}
-  .tgh{display:flex;align-items:center;gap:6px;font-size:11px;font-weight:750;color:var(--ink);padding:10px 6px 4px;border-bottom:1px solid var(--line);margin-bottom:4px}
-  .tgh:first-child{padding-top:2px}
-  .tgc{font-size:10px;font-weight:600;color:var(--faint);background:var(--card2);border-radius:8px;padding:1px 6px}
+  .wtab .tstar{flex:none;font-size:13px;line-height:1;color:var(--faint);opacity:0;cursor:pointer;padding:0 1px;user-select:none;transition:opacity .12s,color .12s,transform .1s}
+  .wtab:hover .tstar{opacity:.6} .wtab .tstar:hover{opacity:1;color:var(--warn);transform:scale(1.15)}
+  .wtab .tstar.on{opacity:1;color:#f5b301}
+  .tb2 .b2empty{color:var(--faint);font-size:12px;display:flex;align-items:center;padding:0 8px}
   .advsug{display:none;position:absolute;top:100%;left:0;right:0;z-index:30;background:var(--card);border:1px solid var(--line);border-radius:8px;margin-top:3px;max-height:220px;overflow-y:auto;box-shadow:0 6px 18px rgba(0,0,0,.12)}
   .advsug.show{display:block}
   .sugitem{padding:8px 11px;font-size:12.5px;cursor:pointer;display:flex;justify-content:space-between;gap:8px;align-items:flex-start}
@@ -157,7 +191,7 @@
   .dpair .dk{flex:none;width:96px;color:var(--faint);font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis} .dpair .dv{flex:1;color:var(--ink);word-break:break-word}
   .dnone{font-size:12px;color:var(--faint);padding:4px 0}
   /* ── 시트형 그리드(열람) ── */
-  .gridscroll{border:1px solid var(--line);border-radius:10px;overflow:auto;max-height:calc(100vh - 300px);background:var(--card)}
+  .gridscroll{border:1px solid var(--line);border-radius:10px;overflow:auto;max-height:calc(100vh - 300px - var(--tbh));background:var(--card)}   /* 상단 작업바 높이만큼 차감(전체화면 시 --tbh=0 → 원래 높이 복귀) */
   table.sheetgrid{border-collapse:separate;border-spacing:0;font-size:12px;white-space:nowrap;min-width:100%;overflow:visible;table-layout:fixed}   /* table-layout:fixed = 열 너비 고정 → 브라우저가 모든 셀 내용을 측정 안 함(렌더 비용 급감). overflow:visible = 상단 table{overflow:hidden} 무효화 → thead sticky 동작 */
   table.sheetgrid th,table.sheetgrid td{border-right:1px solid var(--line);border-bottom:1px solid var(--line);padding:5px 9px;text-align:left;height:30px}
   table.sheetgrid td{overflow:hidden;text-overflow:ellipsis}   /* 고정폭 초과 값은 …로 축약(전체값 = 호버 툴팁 or 클릭 편집) */
@@ -529,16 +563,19 @@ function toggleRail(){ const hidden=!_railHidden();
   _syncRailToggle(); _fitGrid();   // 레일 토글=그리드 컨테이너 폭 변경 → 주소 유동 재적합
 }
 
-// ── 전체화면(전체폭) 모드 — 좌 작업목록·우 레일 모두 숨겨 표를 화면 전체폭으로. 브라우저 전체화면(Fullscreen API)도 함께 요청, Esc로 나가면 레이아웃도 동기 해제. 레이아웃 상태는 로컬 영속(재접속·뷰전환 유지). ──
+// ── 전체화면(전체폭) 모드 — 상단 작업바·우 레일을 숨겨 표에 화면을 모두 할애. 브라우저 전체화면(Fullscreen API)도 함께 요청, Esc로 나가면 레이아웃도 동기 해제. 레이아웃 상태는 로컬 영속(재접속·뷰전환 유지). ──
 let _fsByWide=false;   // 이 전체화면이 '전체모드 버튼'으로 켠 것인지 표시(무관한 브라우저 전체화면 종료가 레이아웃을 끄지 않게)
 function _wideMode(){ try{ return localStorage.getItem('wd_wide_v1')==='1'; }catch(_){ return false; } }
-function _syncWideToggle(){ const b=$('#wideToggle'); if(!b) return; const on=_wideMode();
+function _syncWideToggle(){ const on=_wideMode();
+  document.body.classList.toggle('widemode', on);   // 상단 작업바는 wrap 밖이라 body 클래스로 숨김(버튼 유무와 무관하게 항상 적용)
+  const b=$('#wideToggle'); if(!b) return;
   b.textContent = on ? '⛶ 전체화면 해제' : '⛶ 전체화면';
-  b.setAttribute('aria-pressed', on?'true':'false'); }
+  b.setAttribute('aria-pressed', on?'true':'false');
+}
 function _applyWide(on){
   try{ localStorage.setItem('wd_wide_v1', on?'1':'0'); }catch(_){}
   const w=$('#wrap'); if(w) w.classList.toggle('widemode', on);
-  _syncWideToggle(); _fitGrid();   // 좌/우 패널 숨김=컨테이너 폭 변경 → 주소 유동 재적합
+  _syncWideToggle(); _fitGrid();   // 패널 숨김=컨테이너 폭 변경 → 주소 유동 재적합
 }
 function toggleWide(){ const on=!_wideMode();
   _applyWide(on);
@@ -560,19 +597,29 @@ document.addEventListener('fullscreenchange', ()=>{   // 브라우저 전체화�
 // ══ 작업대 뷰 ══
 function renderWorkdeskView(){
   const isMaster = STATE.role==='master';
-  $('#viewroot').innerHTML = `<div class="wrap showlist${_railHidden()?' railhidden':''}${_wideMode()?' widemode':''}" id="wrap">
-    <div class="side"><div class="sh"><span>작업 목록</span><span id="tcount"></span></div>
-      <div id="tabs"><div class="empty">불러오는 중…</div></div></div>
-    <div class="main" id="main"><div class="empty">왼쪽에서 작업을 선택하세요.</div></div>
+  $('#viewroot').innerHTML = `<div class="taskbar" id="taskbar">
+      <div class="tb1">
+        <div class="wsearch"><span class="ic">🔍</span>
+          <input id="wq" type="text" placeholder="작업·업체·시트 통합검색…" autocomplete="off"
+                 oninput="wSearch(this.value)" onfocus="wSearch(this.value)" onkeydown="wSearchKey(event)">
+          <div class="sres" id="sres"></div></div>
+        <div class="segdiv"></div>
+        <div class="segwrap" id="segwrap"></div>
+      </div>
+      <div class="tb2" id="tb2"><span class="b2empty">불러오는 중…</span></div>
+    </div>
+    <div class="wrap${_railHidden()?' railhidden':''}${_wideMode()?' widemode':''}" id="wrap">
+    <div class="main" id="main"><div class="empty">위에서 작업을 선택하세요.</div></div>
     <div class="rail" id="rail"></div></div>`;
   _syncRailToggle(); _syncWideToggle();
   loadTabs();
 }
 async function loadTabs(){
   const r = await api('/api/trackb/tabs?limit=300');
-  if(!r||!r.ok){ $('#tabs').innerHTML=`<div class="empty">작업 목록은 관리자 로그인에서 제공됩니다.</div>`; return; }
-  STATE.tabs=r.tabs||[]; $('#tcount').textContent=STATE.tabs.length;
+  if(!r||!r.ok){ const b=$('#tb2'); if(b) b.innerHTML=`<span class="b2empty">작업 목록은 관리자 로그인에서 제공됩니다.</span>`; return; }
+  STATE.tabs=r.tabs||[];
   _renderTabList();          // 계정별 캐시로 즉시 렌더
+  refreshUnseen();           // 미확인(스레드) 배지 최초 조회 — 도착 시 재렌더
   _favSyncFromServer();      // 서버 원본으로 정렬(개인화·기기 무관) — 도착 시 재렌더
   // 관측 대시보드에서 "열기"로 넘어온 탭 자동 선택
   if(STATE.pendingTab){ const pt=STATE.pendingTab; STATE.pendingTab=null;
@@ -597,25 +644,91 @@ function toggleFav(ev,i){ if(ev) ev.stopPropagation(); const t=STATE.tabs[i]; if
   if(STATE.favs.has(k)) STATE.favs.delete(k); else STATE.favs.add(k);
   _favSaveLocal(); _renderTabList(); _favPushServer();   // 즉시 로컬 캐시+렌더 → 서버에 계정 귀속 영속
 }
-// 소유지정(업체) 그룹 + 즐겨찾기 그룹(최상단). 즐겨찾기 탭은 원 그룹에서 제외해 중복 노출 방지. 인덱스는 STATE.tabs 원본 유지(selTab 계약 불변).
+// ── 상단 작업바(사이드바 대체) — 1단=업체 세그먼트(맨 앞 ★즐겨찾기) · 2단=선택 그룹의 탭(밑줄 탭) ──
+//   인덱스는 STATE.tabs 원본 유지(selTab 계약 불변). 즐겨찾기 탭도 원 업체 그룹에 그대로 남긴다
+//   (사이드바 시절엔 세로 중복이라 제외했지만, 세그먼트는 한 번에 한 그룹만 보이므로 중복 노출이 아니고
+//    "즐겨찾기하면 원래 업체에서 사라진다"는 혼란이 더 큼).
+function _wGroups(){   // → [{key, label, idxs}] · key: 'fav' | 업체명 | '' (미지정)
+  const favIdx=[], groups=new Map();
+  STATE.tabs.forEach((t,i)=>{ if(isFav(t)) favIdx.push(i); const k=t.advertiserName||''; if(!groups.has(k)) groups.set(k,[]); groups.get(k).push(i); });
+  const gkeys=[...groups.keys()].sort((a,b)=>{ if(!a) return 1; if(!b) return -1; return a.localeCompare(b,'ko'); });
+  const out=[];
+  if(favIdx.length) out.push({key:'fav', label:'즐겨찾기', idxs:favIdx});
+  gkeys.forEach(k=>out.push({key:k||'', label:k||'미지정', idxs:groups.get(k)}));
+  return out;
+}
+function _wUnseen(i){ const t=STATE.tabs[i]; return t?(STATE.unseen&&STATE.unseen[`${t.sheetId}\t${t.tabName}`]||0):0; }
+// 활성 세그먼트 결정: 사용자가 고른 것 우선 → 없거나 사라졌으면 현재 탭이 속한 그룹 → 첫 그룹
+function _wActiveSeg(gs){
+  if(STATE.wSeg!=null && gs.some(g=>g.key===STATE.wSeg)) return STATE.wSeg;
+  const cur=STATE.cur;
+  if(cur){ const ci=STATE.tabs.findIndex(t=>t.sheetId===cur.sheetId&&t.tabName===cur.tabName);
+    if(ci>=0){ const g=gs.find(g=>g.key!=='fav'&&g.idxs.includes(ci)); if(g) return g.key; } }
+  return gs.length?gs[0].key:null;
+}
 function _renderTabList(){
   if(!STATE._favLoaded){ STATE.favs=_favLoad(); STATE._favLoaded=true; }
-  const cur=STATE.cur, favIdx=[], groups=new Map();
-  STATE.tabs.forEach((t,i)=>{ if(isFav(t)){ favIdx.push(i); return; } const k=t.advertiserName||''; if(!groups.has(k)) groups.set(k,[]); groups.get(k).push(i); });
-  const gkeys=[...groups.keys()].sort((a,b)=>{ if(!a) return 1; if(!b) return -1; return a.localeCompare(b,'ko'); });
-  const item=i=>{ const t=STATE.tabs[i]; const on=cur&&cur.sheetId===t.sheetId&&cur.tabName===t.tabName; const f=isFav(t);
-    return `<div class="titem${on?' on':''}" data-i="${i}" onclick="selTab(${i})"><div class="tinfo"><div class="tname">${esc(t.tabName)}</div><div class="sub">${esc(t.spreadsheetTitle||'')}</div></div><span class="tstar${f?' on':''}" title="${f?'즐겨찾기 해제':'즐겨찾기 추가'}" onclick="toggleFav(event,${i})">${f?'★':'☆'}</span></div>`; };
-  const favSec = favIdx.length ? `<div class="tgh fav">⭐ 즐겨찾기<span class="tgc">${favIdx.length}</span></div>`+favIdx.map(item).join('') : '';
-  $('#tabs').innerHTML = STATE.tabs.length
-    ? favSec + gkeys.map(k=>`<div class="tgh">${k?esc(k):'미지정'}<span class="tgc">${groups.get(k).length}</span></div>`+groups.get(k).map(item).join('')).join('')
-    : `<div class="empty">활성 작업 없음</div>`;
-  refreshUnseen();   // 작업목록 미확인(스레드) 배지
+  const seghost=$('#segwrap'), tabhost=$('#tb2'); if(!seghost||!tabhost) return;   // 작업대 뷰가 아닐 때
+  const gs=_wGroups();
+  if(!STATE.tabs.length){ seghost.innerHTML=''; tabhost.innerHTML=`<span class="b2empty">활성 작업 없음</span>`; return; }
+  const seg=_wActiveSeg(gs); STATE.wSeg=seg;
+  // 1단: 세그먼트
+  seghost.innerHTML = gs.map(g=>{
+    const un=g.idxs.reduce((n,i)=>n+_wUnseen(i),0), isFavSeg=g.key==='fav';
+    // 키는 data-k(esc 적용)로만 전달 — 업체명에 따옴표·&가 있어도 인라인 onclick 문자열이 깨지지 않음
+    return `<div class="seg${isFavSeg?' favseg':''}${g.key===seg?' on':''}" data-k="${esc(g.key)}" onclick="wPickSeg(this.dataset.k)">${isFavSeg?'<span class="fs">★</span>':''}${esc(g.label)}<span class="cnt">${g.idxs.length}</span>${un?`<span class="unbmini">💬${un}</span>`:''}</div>`;
+  }).join('');
+  // 2단: 선택 그룹의 탭
+  const g=gs.find(x=>x.key===seg);
+  const cur=STATE.cur;
+  tabhost.innerHTML = (g&&g.idxs.length) ? g.idxs.map(i=>{
+    const t=STATE.tabs[i], on=cur&&cur.sheetId===t.sheetId&&cur.tabName===t.tabName, f=isFav(t), n=_wUnseen(i);
+    return `<div class="wtab${on?' on':''}" data-i="${i}" onclick="selTab(${i})"><span class="tstar${f?' on':''}" title="${f?'즐겨찾기 해제':'즐겨찾기 추가'}" onclick="toggleFav(event,${i})">${f?'★':'☆'}</span><span>${esc(t.tabName)}</span>${n?`<span class="unb">💬 ${n}</span>`:`<span class="ts">${esc(t.spreadsheetTitle||'')}</span>`}</div>`;
+  }).join('') : `<span class="b2empty">이 그룹에 작업이 없습니다.</span>`;
+  // ★ 여기서 refreshUnseen을 부르지 않는다(순수 렌더). 배지는 STATE.unseen 캐시로 그리고, 갱신은
+  //   loadTabs(최초)·스레드 열람 후에만 호출 → 탭 전환/즐겨찾기 토글마다 불필요한 조회가 나가지 않고 재귀도 없다.
 }
+function wPickSeg(k){ STATE.wSeg=k; _renderTabList(); }
+
+// ── 통합검색: 모든 업체의 탭명·업체명·시트제목을 가로질러 검색 → 선택 시 그 업체 세그먼트로 이동 + 탭 열기 ──
+function wSearch(q){
+  q=(q||'').trim(); const box=$('#sres'); if(!box) return; STATE.wKb=-1;
+  if(!q){ box.classList.remove('show'); box.innerHTML=''; STATE.wRes=[]; return; }
+  const ql=q.toLowerCase();
+  const hits=[]; STATE.tabs.forEach((t,i)=>{ if(`${t.tabName||''} ${t.advertiserName||''} ${t.spreadsheetTitle||''}`.toLowerCase().includes(ql)) hits.push(i); });
+  STATE.wRes=hits;
+  const hl=txt=>{ const s=String(txt==null?'':txt); const i=s.toLowerCase().indexOf(ql); if(i<0) return esc(s);
+    return esc(s.slice(0,i))+'<mark>'+esc(s.slice(i,i+q.length))+'</mark>'+esc(s.slice(i+q.length)); };
+  box.innerHTML = hits.length
+    ? `<div class="shd">작업 ${hits.length}건</div>`+hits.map((i,ord)=>{ const t=STATE.tabs[i], n=_wUnseen(i);
+        return `<div class="sitem" data-ord="${ord}" onclick="wPickSearch(${i})"><span class="txt"><span class="sn">${isFav(t)?'★ ':''}${hl(t.tabName)}</span><span class="ss">${esc(t.advertiserName||'미지정')} · ${esc(t.spreadsheetTitle||'')}</span></span>${n?`<span class="unb">💬 ${n}</span>`:''}</div>`;
+      }).join('')
+    : `<div class="sempty">"${esc(q)}" 검색 결과 없음</div>`;
+  box.classList.add('show');
+}
+function wPickSearch(i){
+  const t=STATE.tabs[i]; if(!t) return;
+  STATE.wSeg = isFav(t) && STATE.wSeg==='fav' ? 'fav' : (t.advertiserName||'');   // 즐겨찾기 보던 중이면 그대로, 아니면 그 업체 그룹으로
+  const box=$('#sres'); if(box) box.classList.remove('show');
+  const q=$('#wq'); if(q) q.value='';
+  selTab(i);
+}
+function wSearchKey(e){
+  const box=$('#sres'); if(!box||!box.classList.contains('show')) return;
+  const res=STATE.wRes||[];
+  if(e.key==='ArrowDown'){ e.preventDefault(); STATE.wKb=Math.min((STATE.wKb==null?-1:STATE.wKb)+1, res.length-1); _wKbPaint(); }
+  else if(e.key==='ArrowUp'){ e.preventDefault(); STATE.wKb=Math.max((STATE.wKb==null?0:STATE.wKb)-1, 0); _wKbPaint(); }
+  else if(e.key==='Enter'){ const k=STATE.wKb; if(k>=0&&res[k]!=null){ e.preventDefault(); wPickSearch(res[k]); } else if(res.length){ e.preventDefault(); wPickSearch(res[0]); } }
+  else if(e.key==='Escape'){ box.classList.remove('show'); }
+}
+function _wKbPaint(){ document.querySelectorAll('#sres .sitem').forEach(el=>el.classList.toggle('kb',+el.dataset.ord===STATE.wKb));
+  const cur=document.querySelector('#sres .sitem.kb'); if(cur) cur.scrollIntoView({block:'nearest'}); }
+document.addEventListener('click', e=>{ if(!e.target.closest('.wsearch')){ const b=$('#sres'); if(b) b.classList.remove('show'); } });
 async function selTab(i){ const t=STATE.tabs[i]; STATE.cur=t;
   // 탭 전환 = 헤더 구성이 달라지므로 그리드 뷰 상태(필터/숨김/그룹/정렬/정산펼침) 초기화
   STATE.gFilters={}; STATE.gHidden=new Set(); STATE.gGroupBy=null; STATE.gCollapsed=new Set(); STATE.gSort=null; STATE.gSelCols=[]; STATE.freezeUpto=null; STATE.settleOpen=false; closeGColMenu(); closeGHidMenu();
-  document.querySelectorAll('.titem').forEach(el=>el.classList.toggle('on',+el.dataset.i===i));
-  $('#wrap').classList.remove('showlist'); $('#main').innerHTML=`<div class="empty">불러오는 중…</div>`;
+  _renderTabList();   // 상단 작업바 활성 표시 갱신(세그먼트가 바뀌었을 수 있어 재렌더)
+  $('#main').innerHTML=`<div class="empty">불러오는 중…</div>`;
   const q=`sheetId=${encodeURIComponent(t.sheetId)}&tabName=${encodeURIComponent(t.tabName)}&tabGid=${encodeURIComponent(t.tabGid||'')}`;
   renderWorkdesk(await api('/api/trackb/workdesk?'+q)); loadParity(t); }
 function _tcell(r, field, val){   // 편집 가능 텍스트 셀
@@ -903,11 +1016,11 @@ async function refreshUnseen(){
   const tabs=(STATE.tabs||[]).map(t=>({sheetId:t.sheetId,tabName:t.tabName}));
   if(!tabs.length) return;
   const r=await api('/api/trackb/workdesk/unseen',{method:'POST',body:JSON.stringify({tabs})}).catch(()=>null);
-  if(!r||!r.ok) return; STATE.unseen=r.map||{};
-  document.querySelectorAll('.titem[data-i]').forEach(el=>{ const t=STATE.tabs[+el.dataset.i]; if(!t) return;
-    const n=STATE.unseen[`${t.sheetId}\t${t.tabName}`]||0; let b=el.querySelector('.unb');
-    if(n>0){ if(!b){ b=document.createElement('span'); b.className='unb'; el.insertBefore(b, el.querySelector('.tstar')); } b.textContent='💬 '+n; }
-    else if(b) b.remove(); });
+  if(!r||!r.ok) return;
+  const prev=JSON.stringify(STATE.unseen||{}); STATE.unseen=r.map||{};
+  // 상단 작업바는 탭 배지 + 세그먼트 합계까지 미확인 수에 의존 → 값이 바뀐 경우에만 재렌더.
+  // (_renderTabList는 순수 렌더라 여기서 다시 refreshUnseen을 부르지 않는다 = 재귀 없음)
+  if(prev!==JSON.stringify(STATE.unseen)) _renderTabList();
 }
 // 컬럼 폭(px) — 고정열 오프셋 계산과 최소폭에 사용. 없으면 기본값.
 // 초밀도 최소폭: 짧은 열은 콘텐츠 기준으로 대폭 축소, 긴 열(주소 등)은 자동 레이아웃이 콘텐츠만큼 확장(무잘림).
