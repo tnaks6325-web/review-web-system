@@ -42,7 +42,7 @@ const stateSvc = fs.readFileSync(path.join(__dirname, '..', 'src', 'services', '
 const cards = readF('js/campaign-cards.js');
 ok('시작일: 프리필 전달(작업오더 start_date → rf_start_date)', /start_date:\s+\(o\.start_date \|\| ""\)\.slice\(0, 10\)/.test(app) && /setV\("rf_start_date", prefill\.start_date\)/.test(recjs));
 ok('시작일: 발행폼 입력·저장(""=제거 센티널)·편집 프리필', /rf_start_date/.test(adm) && /payload\.start_date\s+=/.test(recjs) && /setV\("rf_start_date", \(c\.start_date/.test(recjs));
-ok('시작일: 서버 상태엔진 날짜 preopen(KST 오늘 < 시작일)', /kstTodayStr\(now\) < sd/.test(stateSvc));
+ok('시작일: 서버 상태엔진 날짜 preopen(KST 오늘 < 시작일)', /todayStr < sd/.test(stateSvc) && /kstTodayStr\(now\)/.test(stateSvc));
 ok('시작일: UPDATE는 CASE 센티널(null=유지·\'\'=제거) — COALESCE 비움불가 갭 봉합', /start_date = CASE WHEN \$32::text IS NULL/.test(routes));
 ok('시간창: UPDATE ""=비움(자율주문 전환) + auto_order 강제 비움(인라인 편집기 갭 봉합)', /window_start = CASE WHEN \$25::text IS NULL/.test(routes) && /auto_order === true\) \? '' : window_start/.test(routes));
 ok('카드: D-일수 카운트다운 + 날짜 인지 오픈 라벨', /'D-' \+ days/.test(cards) && /function _fmtOpenLabel/.test(cards));

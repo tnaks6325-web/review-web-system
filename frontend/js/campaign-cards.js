@@ -42,6 +42,14 @@
     return (days > 0 ? 'D-' + days + ' ' : '') + hh + ' : ' + mm + ' : ' + ss;
   }
 
+  /** 'YYYY-MM-DD' → 'M/D(요일)' (일정 표기용). 값이 없으면 '' */
+  function _fmtMD(iso) {
+    const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(String(iso || ''));
+    if (!m) return '';
+    const d = new Date(Date.UTC(+m[1], +m[2] - 1, +m[3]));
+    return `${+m[2]}/${+m[3]}(${['일','월','화','수','목','금','토'][d.getUTCDay()]})`;
+  }
+
   /** 오픈 안내 라벨: 오픈 시각이 오늘(KST·서버시간 보정)이면 "매일 HH:MM 오픈",
    *  미래 날짜(시작일 전 게시)면 "M/D(요일) 오픈"(자정 오픈은 시각 생략) */
   function _fmtOpenLabel(iso) {
@@ -179,7 +187,10 @@
 
     // 오버레이: 오픈 전(회색·오픈까지) / 모집 중 시간창(라이브·오늘 구매마감까지)
     let overlay = '';
-    if (isPre) {
+    if (c.stateReason === 'rest_day' && c.opensAt) {
+      // 휴무일(주말·공휴일·다음 블록 대기) — 다음 진행일까지 카운트다운
+      overlay = `<div class="pt-ovl pre"><span class="ol">다음 진행일까지</span><span class="ot" data-camp-countdown="${_esc(c.opensAt)}">--:--:--</span><span class="ol">${_esc(_fmtMD(c.nextWorkDate) || _fmtOpenLabel(c.opensAt))} 오픈</span></div>`;
+    } else if (isPre) {
       overlay = `<div class="pt-ovl pre"><span class="ol">오픈까지</span><span class="ot" data-camp-countdown="${_esc(c.opensAt || '')}">--:--:--</span><span class="ol">${c.opensAt ? _esc(_fmtOpenLabel(c.opensAt)) : ''}</span></div>`;
     } else if (c.state === 'open' && c.cutoffAt) {
       overlay = `<div class="pt-ovl now"><span class="live-pill"><span class="dot"></span>지금 구매 가능</span><span class="lab">오늘 구매마감까지</span><span class="ot" data-camp-countdown="${_esc(c.cutoffAt)}">--:--:--</span></div>`;
@@ -193,9 +204,14 @@
       ? `<div class="pgauge${isFull ? ' full' : ''}"><div class="pg-row"><span class="pg-lb">${isDaily ? '오늘 모집' : '모집 현황'}</span><span class="pg-vl"><b>${today}</b> / ${quota}명${isDaily ? ' 완료' : ''}</span></div><div class="pg-track"><div class="pg-fill" style="width:${pct}%"></div></div></div>`
       : '';
 
+    // 시트 일정(063) 파생 표기: 휴무일이면 다음 진행일, 마감일 경과면 일정 종료
+    const restDay = c.stateReason === 'rest_day';
+    const ended = c.stateReason === 'schedule_ended';
     let footer = '';
     if (c.state === 'open') footer = `<button type="button" class="pbtn go">참여하기</button>`;
     else if (c.state === 'cutoff') footer = `<button type="button" class="pbtn off">오늘 참여 마감</button><div class="pnote">진행 중인 분은 ${_fmtHM(c.closesAt)}까지 제출</div>`;
+    else if (ended) footer = `<button type="button" class="pbtn off">모집 종료</button><div class="pnote">${_esc(_fmtMD(c.endDate))} 일정이 끝났어요</div>`;
+    else if (restDay) footer = `<button type="button" class="pbtn off">오늘은 진행 없음</button><div class="pnote">${c.nextWorkDate ? '다음 진행일 ' + _esc(_fmtMD(c.nextWorkDate)) : '다음 진행일 안내 예정'}</div>`;
     else if (isDaily) footer = `<button type="button" class="pbtn off">오늘은 마감</button><div class="pnote">${c.opensAt ? '내일 ' + _fmtHM(c.opensAt) + ' 오픈' : '내일 다시 오픈'}</div>`;
     else if (c.state === 'soft_full') footer = `<button type="button" class="pbtn off">잔여 대기 중</button>`;
 
@@ -537,5 +553,5 @@
     }
   }
 
-  window.CampCards = { renderInto, cardHtml, gridHtml, setServerNow, startTicker, _fmtCountdown, _fmtHM, _fmtOpenLabel, serverNow: _now, _onCardClick, openAdminEdit };
+  window.CampCards = { renderInto, cardHtml, gridHtml, setServerNow, startTicker, _fmtCountdown, _fmtHM, _fmtOpenLabel, _fmtMD, serverNow: _now, _onCardClick, openAdminEdit };
 })();

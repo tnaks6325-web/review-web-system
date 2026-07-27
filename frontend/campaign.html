@@ -335,10 +335,15 @@ function renderPre(){
   jb.textContent = st==='open' ? '참여하기'
     : st==='preopen' ? ((CampCards._fmtOpenLabel ? CampCards._fmtOpenLabel(c.opensAt).replace(/^매일 /, '').replace(/ 오픈$/, '') : CampCards._fmtHM(c.opensAt)) + ' 오픈 예정')
     : st==='cutoff' ? '오늘 참여 마감'
+    : c.stateReason==='rest_day' ? '오늘은 진행이 없어요'
     : st==='daily_done' ? '오늘은 마감되었어요'
     : st==='soft_full' ? '잔여 대기 중'
     : '모집 종료';
-  $('preFootNote').textContent = st==='daily_done' && c.opensAt ? ('내일 ' + CampCards._fmtHM(c.opensAt) + ' 다시 오픈돼요') : '';
+  const _md = (CampCards._fmtMD ? CampCards._fmtMD : () => '');
+  $('preFootNote').textContent =
+      c.stateReason==='rest_day' ? (c.nextWorkDate ? '다음 진행일은 ' + _md(c.nextWorkDate) + '이에요' : '다음 진행일이 정해지면 다시 열려요')
+    : c.stateReason==='schedule_ended' ? (c.endDate ? _md(c.endDate) + '로 일정이 끝났어요' : '일정이 끝났어요')
+    : (st==='daily_done' && c.opensAt) ? ('내일 ' + CampCards._fmtHM(c.opensAt) + ' 다시 오픈돼요') : '';
   // 옵션 등록 캠페인인데 선택 가능한 옵션이 0이면 캠페인이 open이어도 마감 표시(리뷰 나잇 #1)
   const copts = c.options || [];
   if(st==='open' && copts.length && !copts.some(o=>o.selectable)){ jb.disabled = true; jb.textContent = '옵션 마감'; }

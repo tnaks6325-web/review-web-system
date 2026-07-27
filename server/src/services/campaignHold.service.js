@@ -22,8 +22,29 @@ function tabMatchesCampaign(camp, sheetId, gid, tabName) {
   return !!camp.linked_tab_name && norm(camp.linked_tab_name) === norm(tabName);
 }
 
+/**
+ * 시트 일정(063)이 총 건수의 진실원천인 캠페인인지. 이런 캠페인은 마감을 **영속하지 않는다** —
+ * status='closed'를 저장해 버리면 나중에 시트에 날짜를 추가해도 상태엔진의 status 게이트가
+ * 재개를 막기 때문(자동 재개 보장). 판정 실패는 false(기존 동작 = 영속)로 폴백한다.
+ */
+async function _isScheduleDriven(q, campaignId) {
+  try {
+    const { rows } = await q.query(
+      `SELECT linked_sheet_id, linked_tab_gid FROM recruit_campaigns
+        WHERE id = $1 AND participation_mode LIMIT 1`, [campaignId]);
+    const r = rows[0];
+    if (!r || !r.linked_sheet_id || !r.linked_tab_gid) return false;
+    const { deriveSchedules, scheduleFor } = require('./campaignSchedule.service');
+    const m = await deriveSchedules(q, [{ sheetId: r.linked_sheet_id, tabGid: String(r.linked_tab_gid) }]);
+    return !!scheduleFor(m, r);
+  } catch (_) {
+    return false;
+  }
+}
+
 /** closed 영속 단일 헬퍼 — 자동확정·수동확정·스윕 백스톱 공용. 멱등(WHERE status='active'). */
 async function maybePersistClosed(q, campaignId) {
+  if (await _isScheduleDriven(q, campaignId)) return;
   await q.query(
     `UPDATE recruit_campaigns rc SET status = 'closed', updated_at = NOW()
       WHERE rc.id = $1 AND rc.participation_mode AND rc.status = 'active' AND rc.recruit_total > 0
@@ -105,16 +126,34 @@ async function sweepExpiredHolds(pool) {
       WHERE o.campaign_application_id = a.id AND o.deleted_at IS NULL
         AND a.status = 'expired' AND a.late_order_id IS NULL`
   );
-  // ③ closed 영속 백스톱(soft_full 영구표류 방지) — 활성 참여형 전체 1문장(캠페인 수 소량)
-  const closed = await pool.query(
-    `UPDATE recruit_campaigns rc SET status = 'closed', updated_at = NOW()
+  // ③ closed 영속 백스톱(soft_full 영구표류 방지). ★ 후보를 먼저 뽑고 시트 일정 캠페인은 제외 —
+  //    영속하면 시트에 날짜를 추가해도 재개되지 않기 때문(063 자동 재개 보장).
+  const cand = await pool.query(
+    `SELECT rc.id, rc.linked_sheet_id, rc.linked_tab_gid FROM recruit_campaigns rc
       WHERE rc.participation_mode AND rc.status = 'active' AND rc.recruit_total > 0
         AND (SELECT COUNT(*) FROM campaign_applications ca
-              WHERE ca.campaign_id = rc.id AND ca.status = 'submitted') >= rc.recruit_total
-      RETURNING id`
+              WHERE ca.campaign_id = rc.id AND ca.status = 'submitted') >= rc.recruit_total`
   );
-  if (closed.rowCount) logger.info(`[campaignHold] closed 영속(백스톱): ${closed.rows.map(r => r.id).join(',')}`);
-  return { expired: exp.rowCount, closedPersisted: closed.rowCount };
+  let ids = cand.rows.map(r => r.id);
+  if (ids.length) {
+    try {
+      const { deriveSchedules, scheduleFor } = require('./campaignSchedule.service');
+      const tabs = cand.rows
+        .filter(r => r.linked_sheet_id && r.linked_tab_gid)
+        .map(r => ({ sheetId: r.linked_sheet_id, tabGid: String(r.linked_tab_gid) }));
+      const m = await deriveSchedules(pool, tabs);
+      ids = cand.rows.filter(r => !scheduleFor(m, r)).map(r => r.id);
+    } catch (_) { /* 판정 실패 = 기존 동작(전부 영속)으로 폴백 */ }
+  }
+  let closedCount = 0;
+  if (ids.length) {
+    const closed = await pool.query(
+      `UPDATE recruit_campaigns SET status = 'closed', updated_at = NOW()
+        WHERE id = ANY($1) AND status = 'active' RETURNING id`, [ids]);
+    closedCount = closed.rowCount;
+    if (closedCount) logger.info(`[campaignHold] closed 영속(백스톱): ${closed.rows.map(r => r.id).join(',')}`);
+  }
+  return { expired: exp.rowCount, closedPersisted: closedCount };
 }
 
 module.exports = { HOLD_GRACE_SEC, tabMatchesCampaign, maybePersistClosed, confirmHoldInTx, sweepExpiredHolds };
