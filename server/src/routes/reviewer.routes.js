@@ -327,10 +327,12 @@ router.get('/my-status', async (req, res, next) => {
       const { rows: holdRows } = await pool.query(`
         SELECT ca.id, ca.campaign_id AS "campaignId", ca.applicant_name AS "name",
                ca.applied_at AS "appliedAt", ca.expires_at AS "expiresAt",
+               (ca.owner_phone8 IS NOT NULL AND ca.owner_phone8 <> ca.phone8) AS "isSub",
                rc.title, rc.thumbnail_url AS "thumbnailUrl"
           FROM campaign_applications ca
           JOIN recruit_campaigns rc ON rc.id = ca.campaign_id
-         WHERE ca.phone8 = $1 AND ca.status = 'applied' AND ca.expires_at > NOW()
+         WHERE (ca.phone8 = $1 OR ca.owner_phone8 = $1)
+           AND ca.status = 'applied' AND ca.expires_at > NOW()
          ORDER BY ca.applied_at DESC
          LIMIT 20
       `, [phone8]);
@@ -343,6 +345,7 @@ router.get('/my-status', async (req, res, next) => {
           displayName: h.title,
           campaignId: h.campaignId,
           applicationId: h.id,
+          isSub: h.isSub === true,   // ★ 063: 타계정 홀드(소유자 조회 시 병합 — 명의 이름은 name). ownerPhone8 원문 미노출(무인증 API — PII 역유출 차단)
           appliedAt: h.appliedAt,
           expiresAt: h.expiresAt,
           thumbnailUrl: h.thumbnailUrl || '',

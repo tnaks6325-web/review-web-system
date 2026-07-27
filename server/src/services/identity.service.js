@@ -177,6 +177,24 @@ function profileMissing(reviewer) {
   return missing;
 }
 
+/** 소유자 sub_accounts에서 명의(이름 정확일치 + phone8 정확일치) 탐색 — 타계정 참여(063) apply 게이트용.
+ *  resolveOrderIdentity의 SUB 매칭과 동일 정규화(normName/normPhone8) — apply·submit 판정 드리프트 금지.
+ *  순수함수(DB/네트워크 없음). 문자열(이중 인코딩) sub_accounts도 벨트로 파싱.
+ *  @returns {{index:number, sub:object}|null} */
+function findSubAccount(subs, name, phone8) {
+  const n = normName(name);
+  const p8 = normPhone8(phone8);
+  if (!n || p8.length !== 8) return null;
+  let list = subs;
+  if (typeof list === 'string') { try { list = JSON.parse(list); } catch (_) { return null; } }
+  if (!Array.isArray(list)) return null;
+  for (let i = 0; i < list.length; i++) {
+    const s = list[i] || {};
+    if (normName(s.name) === n && normPhone8(s.phone) === p8) return { index: i, sub: s };
+  }
+  return null;
+}
+
 /* ── 신원 판별 엔진 ─────────────────────────────────────── */
 
 /**
@@ -299,5 +317,5 @@ module.exports = {
   normName, normPhone8, normAccount, normAddress,
   extractHo, extractDong, bigramJaccard,
   addressHeuristic, addressSame, pickIdField,
-  profileMissing, resolveOrderIdentity,
+  profileMissing, resolveOrderIdentity, findSubAccount,
 };

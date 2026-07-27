@@ -682,6 +682,19 @@ router.get('/debug-headers', async (req, res) => {
 //   3. Sheets 실패 시 → sync_queue에 등록
 //   4. 중복 검사 DB 전용 (Phase 4와 동일)
 // ═══════════════════════════════════════════════════════════
+/** 참여형 홀드 문맥(단일 출처, 063): phone8 = 명의(b.holdPhone8) 우선 → loginPhone8(소유자) 폴백.
+ *  신원게이트 owner 폴백·옵션 서버권위·orderLedger 확정 문맥이 전부 이 값을 공유한다(레드 #4 — 인라인 중복 드리프트 봉인).
+ *  타계정 제출은 holdPhone8=명의 p8(campaign.html h.phone8), loginPhone8=소유자 p8 — 역할 분리 계약. */
+function _campaignHoldCtx(b, loginPhone8) {
+  if (!(b && b.campaignId && b.campaignApplicationId && b.holdToken)) return null;
+  return {
+    applicationId: parseInt(b.campaignApplicationId, 10) || 0,
+    campaignId: String(b.campaignId),
+    phone8: String(b.holdPhone8 || loginPhone8 || '').replace(/\D/g, '').slice(-8),
+    holdToken: String(b.holdToken).trim(),
+  };
+}
+
 router.post('/order', async (req, res, next) => {
   try {
     const b = req.body;
@@ -700,13 +713,28 @@ router.post('/order', async (req, res, next) => {
     // - identityConfirmed='true'면 NEED_CONFIRM 단계는 리뷰어가 확인한 것으로 간주(로그만 남김)
     // - ★ fail-open: 게이트 내부 오류는 주문 접수를 막지 않는다 (라이브 핫패스 보호)
     const _idPhone8 = String(loginPhone8 || '').replace(/[^0-9]/g, '').slice(-8);
+    // ★ 참여형 홀드 문맥(단일 출처, 063) — 신원게이트 owner 폴백·옵션 서버권위·확정 문맥 공용(1회 계산)
+    const holdCtx = _campaignHoldCtx(b, loginPhone8);
     if (_idPhone8.length === 8) {
       try {
         const { profileMissing, resolveOrderIdentity } = require('../services/identity.service');
-        const { rows: _rvRows } = await pool.query(
+        let { rows: _rvRows } = await pool.query(
           `SELECT name, phone, phone8, address, bank_name, bank_account, account_holder, sub_accounts
            FROM reviewers WHERE phone8 = $1 LIMIT 1`, [_idPhone8]
         );
+        // ★ 타계정(063): 로그인 p8로 reviewers 행이 없으면(독립번호 타계정의 서브 로그인 세션 — verifyReviewer
+        //   sub 매칭) 홀드의 owner_phone8로 "소유자" 행을 역조회해 게이트를 계속 수행 — 조용한 게이트 스킵 봉합.
+        //   소유권 검증(campaign+명의 phone8+hold_token 정확일치) 통과 홀드에만. fail-open 원칙 유지(try 내부).
+        if (!_rvRows.length && holdCtx) {
+          const owner = await pool.query(
+            `SELECT r.name, r.phone, r.phone8, r.address, r.bank_name, r.bank_account, r.account_holder, r.sub_accounts
+               FROM campaign_applications ca JOIN reviewers r ON r.phone8 = ca.owner_phone8
+              WHERE ca.id = $1 AND ca.campaign_id = $2 AND ca.phone8 = $3
+                AND ca.hold_token = $4 AND ca.hold_token <> '' AND ca.owner_phone8 IS NOT NULL
+              LIMIT 1`,
+            [holdCtx.applicationId, holdCtx.campaignId, holdCtx.phone8, holdCtx.holdToken]);
+          _rvRows = owner.rows; // 소유자 프로필 기준 → 타계정 명의는 SUB 판별·자동보강 경로 그대로
+        }
         if (_rvRows.length > 0) {
           const _rv = _rvRows[0];
           if (typeof _rv.sub_accounts === 'string') {
@@ -788,7 +816,8 @@ router.post('/order', async (req, res, next) => {
                 _rv.sub_accounts[_verdict.subIndex] = _sub;
                 await pool.query(
                   'UPDATE reviewers SET sub_accounts = $1::jsonb WHERE phone8 = $2',
-                  [JSON.stringify(_rv.sub_accounts), _idPhone8]
+                  // ★ 063: owner 폴백 시 _idPhone8은 서브 p8이라 소유자 행에 못 쓴다 — 게이트 기준 행에 기록
+                  [JSON.stringify(_rv.sub_accounts), _rvRows[0].phone8 || _idPhone8]
                 );
                 logger.info(`[order-identity] 타계정 자동보강: ${_idPhone8} sub[${_verdict.subIndex}] ${_sub.name || ''}`);
               }
@@ -811,13 +840,12 @@ router.post('/order', async (req, res, next) => {
     //     부모(campaign.html)에서만 가능하고 변경 시 구매양식 iframe을 재로드해 인플라이트 제출을 파기한다
     //     (같은 페이지라 동시 진행 불가). change-option UI 미연동인 1단계에서는 도달 불가.
     let effectiveOptKey = selectedOptKey;
-    if (b.campaignId && b.campaignApplicationId && b.holdToken) {
+    if (holdCtx) {
       try {
-        const _ph8 = String(b.holdPhone8 || loginPhone8 || '').replace(/\D/g, '').slice(-8);
         const { rows: _ar } = await pool.query(
           `SELECT option_key FROM campaign_applications
             WHERE id = $1 AND campaign_id = $2 AND phone8 = $3 AND hold_token = $4 AND hold_token <> '' LIMIT 1`,
-          [parseInt(b.campaignApplicationId, 10) || 0, String(b.campaignId), _ph8, String(b.holdToken).trim()]);
+          [holdCtx.applicationId, holdCtx.campaignId, holdCtx.phone8, holdCtx.holdToken]);
         if (_ar.length && _ar[0].option_key) effectiveOptKey = _ar[0].option_key;
       } catch (optErr) {
         logger.warn(`[submit/order] 옵션 서버권위 조회 실패(클라값 유지): ${optErr.message}`);
@@ -833,12 +861,8 @@ router.post('/order', async (req, res, next) => {
       loginName: loginName || '',
       // ★ 참여형 캠페인 홀드 확정 문맥(전부 optional — 비참여 제출 무영향).
       //   확정은 orderLedger 단일 트랜잭션 안에서 소유권 3중검증(applied·phone8·연결탭) 통과 시에만.
-      campaignHold: (b.campaignId && b.campaignApplicationId && b.holdToken) ? {
-        applicationId: parseInt(b.campaignApplicationId, 10),
-        campaignId: String(b.campaignId),
-        phone8: String(b.holdPhone8 || loginPhone8 || '').replace(/\D/g, '').slice(-8),
-        holdToken: String(b.holdToken).trim(),
-      } : undefined,
+      //   ★ 063: expectedOptKey = 시트에 실제 기입되는 옵션 → 확정 시점 홀드 옵션과 다르면 warn(관제 대조 신호).
+      campaignHold: holdCtx ? { ...holdCtx, expectedOptKey: effectiveOptKey } : undefined,
     });
 
     // ★ 신원 기록(recordParticipationLink/recordReviewIdentity)은 여기서 하지 않는다.
