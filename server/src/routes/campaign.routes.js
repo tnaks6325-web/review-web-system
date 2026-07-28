@@ -1162,9 +1162,42 @@ router.post('/:id/apply', applyLimiter, async (req, res, next) => {
 // ═══════════════════════════════════════════════════════════
 
 // GET /api/campaign/admin/list — 관리자 전체 목록 (draft 포함)
+/**
+ * 관리자 카드에만 필요한 운영 집계 — **지각 접수(late) 건수**.
+ *   late_order_id = 홀드 만료/취소 뒤에 주문이 도착한 건. 리뷰어는 이미 결제했는데 자리가 없는 상태라
+ *   수동확정(POST /admin/:id/confirm)이 유일한 구제 경로다 → 카드의 빨간 원이 이 수를 가리킨다.
+ *   수동확정되면 status가 'submitted'로 바뀌므로 아래 필터에서 자동으로 빠진다(처리 즉시 원 소멸).
+ *   ※ 만료·취소 자체는 세지 않는다 — 신청만 하고 구매하지 않은 건이라 자리가 이미 반환돼 할 일이 없다.
+ *     매일 숫자가 떠 있으면 정작 급한 지각 건이 묻히므로 의도적으로 제외한다.
+ */
+async function _fetchLateCounts(pool, campaignIds) {
+  const out = new Map();
+  const ids = (campaignIds || []).filter(Boolean);
+  if (!ids.length) return out;
+  const { rows } = await pool.query(
+    `SELECT campaign_id, COUNT(*) AS late
+       FROM campaign_applications
+      WHERE campaign_id = ANY($1)
+        AND late_order_id IS NOT NULL
+        AND status IN ('expired', 'cancelled')
+      GROUP BY campaign_id`,
+    [ids]
+  );
+  for (const r of rows) out.set(r.campaign_id, Number(r.late) || 0);
+  return out;
+}
+
+/**
+ * 관리자 목록. 원본 행 전체 + **리뷰어 목록과 동일한 상태 계산**을 함께 내려준다.
+ *   관리자 카드가 리뷰어 카드와 같은 컴포넌트로 그려지므로 같은 입력(state/dailyQuota/todayCount/
+ *   opensAt/cutoffAt…)이 필요하다. 두 화면이 다른 계산을 쓰면 "카드는 모집중인데 참여는 거부" 같은
+ *   불일치가 생기므로 계산 경로를 하나로 묶는다.
+ *   ops = 관리자 전용 운영 수치(진행중 홀드·오늘 제출·누적 확정·지각) — 리뷰어 응답엔 없다.
+ */
 router.get('/admin/list', authMiddleware, adminOrMasterMiddleware, async (req, res, next) => {
   try {
     await _ensureTables();
+    const now = new Date();
     const { rows } = await pool.query(`
       SELECT * FROM recruit_campaigns
       ORDER BY
@@ -1172,7 +1205,43 @@ router.get('/admin/list', authMiddleware, adminOrMasterMiddleware, async (req, r
         (pinned_at IS NULL), pinned_at ASC,  -- ★ 064: 별표 고정 우선(먼저 별표한 순서대로) — 리뷰어 목록과 동일 규칙
         created_at DESC
     `);
-    res.json({ ok: true, data: rows });
+    const partIds = rows.filter(r => r.participation_mode).map(r => r.id);
+    // 실패해도 목록 자체는 떠야 한다(관리 기능 마비 방지) — 집계만 비우고 진행.
+    let countsMap = new Map(), schedMap = null, lateMap = new Map();
+    try {
+      [countsMap, schedMap, lateMap] = await Promise.all([
+        fetchCampaignCounts(pool, partIds, now),
+        deriveSchedules(pool, tabsOfCampaigns(rows), now),
+        _fetchLateCounts(pool, partIds),
+      ]);
+    } catch (e) {
+      logger.warn(`[campaign] admin/list 집계 실패 — 목록만 반환: ${e.message}`);
+    }
+    const data = rows.map(r => {
+      if (!r.participation_mode) return { ...r };
+      const cnt = countsMap.get(r.id) || {
+        activeHolds: 0, todayActiveHolds: 0, submittedAll: 0, todaySubmitted: 0, submittedBeforeToday: 0,
+      };
+      const st = computeCampaignState(r, cnt, now, schedMap ? scheduleFor(schedMap, r) : null);
+      return {
+        ...r,
+        state: st.state, stateReason: st.stateReason || null,
+        todayCount: st.todayCount, dailyQuota: st.dailyQuota,
+        opensAt: st.opensAt, closesAt: st.closesAt, cutoffAt: st.cutoffAt,
+        allDay: st.allDay === true,
+        startDate: st.startDate || null,
+        endDate: st.endDate || null,
+        nextWorkDate: st.nextWorkDate || null,
+        ops: {
+          holdNow: cnt.activeHolds,
+          todayHold: cnt.todayActiveHolds,
+          todaySubmitted: cnt.todaySubmitted,
+          totalConfirmed: cnt.submittedAll,
+          late: lateMap.get(r.id) || 0,
+        },
+      };
+    });
+    res.json({ ok: true, data, serverNow: now.toISOString() });
   } catch (err) {
     next(err);
   }

@@ -18,8 +18,10 @@ ok('수정은 카드의 [✏️ 관리자 수정] 버튼(openAdminEdit)으로만
   /class="peditchip"[^>]*event\.stopPropagation\(\)[\s\S]*?openAdminEdit\('/.test(cc));
 ok('관리자 게이트: admin_token(세션 → 로컬 폴백)',
   /sessionStorage\.getItem\('admin_token'\) \|\| localStorage\.getItem\('admin_token'\)/.test(cc));
-ok('✏️ 수정 버튼은 토큰 있을 때만 렌더',
-  /const editChip = _adminTok\(\)[\s\S]*?`<button type="button" class="peditchip"/.test(cc));
+// 관리자 페이지(admin:true)는 하단 액션 바에 [수정]이 있어 이 인라인 칩을 그리지 않는다.
+// 보안 조건(토큰 없으면 미렌더)은 그대로 고정한다.
+ok('✏️ 수정 버튼은 토큰 있을 때만 렌더(관리자 페이지는 액션 바로 대체)',
+  /const editChip = \(!admin && _adminTok\(\)\)[\s\S]*?`<button type="button" class="peditchip"/.test(cc));
 ok('저장 = 기존 PUT /api/campaign/admin/:id 재사용(신규 서버 경로 없음)',
   /\/api\/campaign\/admin\/' \+ encodeURIComponent/.test(cc) && /method: 'PUT'/.test(cc));
 ok('0-덮어쓰기 방어: 서버 `||0` 강제 필드(max_slots·sort_order)는 로드값 그대로 재전송',
