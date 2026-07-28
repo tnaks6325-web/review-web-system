@@ -300,6 +300,15 @@
         || sessionStorage.getItem('rapp_camp_edit_token') || '';
     } catch (_) { return ''; }
   }
+  /** 관리자 페이지에서 발급된 **진짜 admin 토큰**만(리뷰어앱 스코프 토큰 제외).
+   *  미리보기 엔드포인트(GET /api/campaign/admin/:id/preview)는 adminOrMaster 라우트라
+   *  via:'reviewer_campaign' 토큰은 authMiddleware에서 403 — 스코프 편집자를 그리로 보내면
+   *  "권한이 필요해요" 막다른 길이 되므로 진짜 관리자일 때만 미리보기로 연결한다. */
+  function _fullAdminTok() {
+    try {
+      return sessionStorage.getItem('admin_token') || localStorage.getItem('admin_token') || '';
+    } catch (_) { return ''; }
+  }
   function _apiBase() {
     return (typeof API_BASE_URL !== 'undefined' && API_BASE_URL) ? API_BASE_URL : '';
   }
@@ -426,7 +435,13 @@
     const has = wd && (wd.productLines || wd.inflowGuideHtml || wd.reviewGuide || wd.specialNotes);
     if (!has || !window.CampWorkDetail) {
       sec.style.display = 'none';
-      none.style.display = window.CampWorkDetail ? '' : 'none';
+      if (!window.CampWorkDetail) { none.style.display = 'none'; return; }
+      // 응답에 필드 자체가 없음 = 권한 축약뷰 또는 구버전 백엔드 / 필드는 있는데 비었음 = 진짜 미등록.
+      // 두 경우를 구분해야 "등록했는데 왜 안 보이지?"를 헛다리 짚지 않는다.
+      none.textContent = (data && data.work_detail === undefined)
+        ? '작업내용을 불러올 수 없습니다 — 권한이 제한된 계정이거나 서버가 갱신 중일 수 있어요.'
+        : '연결된 작업내용이 없습니다 — 관리자 대시보드 → 캠페인 탭에서 등록할 수 있어요.';
+      none.style.display = '';
       return;
     }
     none.style.display = 'none';
@@ -504,7 +519,18 @@
     }
     _caeLoaded = { id: data.id, max_slots: data.max_slots || 0, sort_order: data.sort_order || 0 };
     const ovl = _caeEl();
-    ovl.querySelector('#caeViewLink').href = 'campaign.html?id=' + encodeURIComponent(data.id);
+    /* 👁 리뷰어 화면 — 관리자면 **미리보기 모드**로 연다(마감·오픈전 공고도 참여 전 → 작업가이드 →
+       제출완료 전 과정 확인 가능. 일반 링크로 가면 마감 공고는 잠금 화면만 보인다).
+       토큰은 프래그먼트(#tok=)로만 전달 — 서버 로그·Referer 미유출, 도착 즉시 주소창에서 제거된다.
+       스코프 편집자는 preview 엔드포인트에 도달할 수 없으므로 기존 일반 링크 유지. */
+    const _pvTok = _fullAdminTok();
+    const _viewLink = ovl.querySelector('#caeViewLink');
+    _viewLink.href = 'campaign.html?id=' + encodeURIComponent(data.id)
+      + (_pvTok ? '&preview=1#tok=' + encodeURIComponent(_pvTok) : '');
+    _viewLink.textContent = _pvTok ? '👁 리뷰어 화면 (미리보기)' : '👁 리뷰어 화면';
+    _viewLink.title = _pvTok
+      ? '마감된 공고도 리뷰어가 보는 전 과정을 확인할 수 있어요(읽기 전용 — 참여·제출은 차단)'
+      : '리뷰어가 보는 공고 화면을 새 탭에서 엽니다';
     document.getElementById('cae_title').value = data.title || '';
     document.getElementById('cae_status').value = ['draft', 'active', 'closed'].includes(data.status) ? data.status : 'draft';
     document.getElementById('cae_delivery').value = data.delivery_type || '';
