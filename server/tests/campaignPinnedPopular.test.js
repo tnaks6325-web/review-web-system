@@ -73,8 +73,16 @@ ok('popular-status: 리미터 적용 + 게이트와 동일 계산', /router\.get
   const leg = (routes.match(/PUBLIC_FIELDS_LEGACY = \[[\s\S]*?\];/) || [''])[0];
   const part = (routes.match(/PUBLIC_FIELDS_PARTICIPATION = \[[\s\S]*?\];/) || [''])[0];
   ok('공개필드: is_popular 양쪽 노출(레거시 카드도 배지)', leg.includes("'is_popular'") && part.includes("'is_popular'"));
-  ok('공개필드: pinned_at 미노출(정렬은 서버 처리)', !part.includes("'pinned_at'") && !leg.includes("'pinned_at'"));
+  // ★ 리뷰어 홈 별표 토글이 현재 상태(⭐/☆)를 렌더하려면 pinned_at 노출 필요(정렬 메타 — 민감정보 아님)
+  ok('공개필드: pinned_at 양쪽 노출(관리자 별표 상태 표시용)', part.includes("'pinned_at'") && leg.includes("'pinned_at'"));
 }
+
+// ── 리뷰어 홈 카드 별표 토글(관리자 전용) ──
+ok('cards: 별표는 진짜 admin_token만(_realAdminTok — 스코프 토큰은 서버 403이라 버튼 미노출)',
+  /function _realAdminTok\(\)/.test(cards) && /const starChip = _realAdminTok\(\)/.test(cards) && !/const starChip = _adminTok\(\)/.test(cards));
+ok('cards: 별표 클릭은 카드 이동 차단(stopPropagation+preventDefault)', /pstarchip[\s\S]{0,200}stopPropagation\(\);event\.preventDefault\(\);CampCards\.togglePin/.test(cards));
+ok('cards: togglePin — /flags POST + 홈 재렌더(loadRecruitPreview)', /async function togglePin\(campId, on\)/.test(cards) && /loadRecruitPreview === 'function'/.test(cards));
+ok('flags: 토글 직후 /list 캐시 무효화(5초 stale 순서 방지)', /_listCache = \{ at: 0, rows: null, countsMap: null \};[\s\S]{0,200}pinnedAt/.test(routes));
 
 // ── 관리자 UI ──
 ok('admin.html: 노출 순서(rf_sort_order) 제거', !adminHtml.includes('rf_sort_order'));
