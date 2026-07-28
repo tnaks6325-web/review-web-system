@@ -1377,67 +1377,53 @@ function toggleRecruitPreview() {
 /* 폼 값으로 미리보기 카드 렌더 */
 function _renderPreview() {
   const card = document.getElementById("rf_preview_card");
-  if (!card) return;
+  if (!card || !window.CampWorkDetail) return;
 
-  const title       = document.getElementById("rf_title").value.trim() || "(제목 없음)";
-  const channel     = document.getElementById("rf_channel").value.trim();
-  const channelCustom = document.getElementById("rf_channel_custom").value.trim();
-  const channelText = channel === "직접입력" ? (channelCustom || "직접입력") : channel;
-  const manager     = document.getElementById("rf_manager").value.trim();
-  const timeRange   = document.getElementById("rf_time_range").value.trim();
-  const deliveryType = document.getElementById("rf_delivery_type").value;
-  const reviewFee   = Number(document.getElementById("rf_review_fee").value) || 0;
-  const notes       = document.getElementById("rf_notes").value.trim();
-  const maxSlots    = Number(document.getElementById("rf_max_slots").value) || 0;
-  const badges      = _recruitBadges;
+  /* ★ 리뷰어가 참여 후 실제로 보는 화면을 그대로 그린다 — campaign.html과 같은 공용 렌더러
+     (js/campaign-workdetail.js)를 쓰므로 미리보기와 실제 화면이 어긋날 수 없다.
+     따로 만든 모형 카드는 실물과 계속 달라져서 제거했다. */
+  const _v = (id) => { const e = document.getElementById(id); return e ? e.value.trim() : ""; };
 
-  const managerEmoji = manager === "만두" ? "🥟" : manager === "망고" ? "🥭" : "";
-  const feeText = reviewFee > 0 ? reviewFee.toLocaleString() + "원" : "";
-  const slotsHtml = maxSlots > 0
-    ? `<span style="display:inline-flex;align-items:center;gap:4px;font-size:.73rem;font-weight:600;color:#0ca678;background:#D1FAE5;padding:2px 9px;border-radius:12px"><i class="fas fa-users" style="font-size:.65rem"></i> 0/${maxSlots}명</span>`
-    : "";
+  // 유입가이드: 원본 HTML(이미지 포함)을 보존 중이면 그것을, 아니면 textarea 평문을 escape해서.
+  const inflowTa = document.getElementById("rf_wd_inflow");
+  const useRaw = inflowTa && inflowTa.dataset.rawHtml === "1" && window._wdInflowRawHtml;
+  const inflowHtml = useRaw
+    ? window._wdInflowRawHtml
+    : escHtml(_v("rf_wd_inflow")).replace(/\n/g, "<br>");
 
-  const badgeColors = [
-    {bg:'#D1FAE5',c:'#065F46'},{bg:'#DBEAFE',c:'#1E40AF'},{bg:'#FEF3C7',c:'#92400E'},
-    {bg:'#e8f1fe',c:'#144a9e'},{bg:'#FCE7F3',c:'#831843'},{bg:'#ECFDF5',c:'#064E3B'}
-  ];
+  // 시간 표기가 있으면 홀드 타이머 대신 실제 TTL을 보여준다(참여 후 화면의 상단 바)
+  const ttlEl = document.getElementById("rf_prev_ttl");
+  if (ttlEl) {
+    const ttl = Number(_v("rf_hold_ttl")) || 15;
+    ttlEl.textContent = String(ttl).padStart(2, "0") + ":00";
+  }
 
-  card.innerHTML = `
-    <div style="background:linear-gradient(135deg,#0f2a5e 0%,#1b64da 100%);padding:12px 14px;border-radius:12px 12px 0 0;display:flex;align-items:flex-start;gap:8px">
-      ${channelText ? `<span style="flex-shrink:0;background:#FDE68A;color:#78350F;padding:2px 8px;border-radius:5px;font-size:.65rem;font-weight:800;margin-top:1px">${escHtml(channelText)}</span>` : ""}
-      <span style="font-size:.86rem;font-weight:700;color:#fff;line-height:1.4;flex:1">${escHtml(title)}</span>
-      ${manager ? `<span style="font-size:.68rem;color:#A7F3D0;font-weight:600;flex-shrink:0;white-space:nowrap">${managerEmoji} ${escHtml(manager)}</span>` : ""}
-    </div>
-    <div style="background:#fff;border-radius:0 0 12px 12px;padding:12px 14px;display:flex;flex-direction:column;gap:10px">
-      ${badges.length ? `<div style="display:flex;flex-wrap:wrap;gap:5px">${badges.map((b,i)=>{
-        const clr = badgeColors[i%6];
-        return `<span style="display:inline-flex;padding:3px 10px;border-radius:16px;font-size:.72rem;font-weight:600;background:${clr.bg};color:${clr.c}">${escHtml(b)}</span>`;
-      }).join("")}</div>` : ""}
-      ${(timeRange||deliveryType||feeText||slotsHtml) ? `
-      <div style="display:flex;flex-wrap:wrap;gap:8px;align-items:center">
-        ${feeText ? `<span style="display:inline-flex;align-items:center;gap:4px;font-size:.78rem;font-weight:700;color:#3182f6"><i class="fas fa-won-sign" style="font-size:.65rem"></i> 리뷰비 ${feeText}</span>` : ""}
-        ${deliveryType ? `<span style="font-size:.73rem;color:#6B7280;display:inline-flex;align-items:center;gap:4px"><i class="fas fa-truck" style="font-size:.6rem;color:#9CA3AF"></i>${escHtml(deliveryType)}</span>` : ""}
-        ${timeRange ? `<span style="font-size:.73rem;color:#6B7280;display:inline-flex;align-items:center;gap:4px"><i class="fas fa-clock" style="font-size:.6rem;color:#9CA3AF"></i>${escHtml(timeRange)}</span>` : ""}
-        ${slotsHtml}
-      </div>` : ""}
-      ${notes ? `<div>
-        <div style="font-size:.65rem;font-weight:700;color:#9CA3AF;margin-bottom:3px;display:flex;align-items:center;gap:3px"><i class="fas fa-clipboard-list" style="font-size:.6rem"></i> 유의사항</div>
-        <div style="font-size:.76rem;color:#374151;white-space:pre-line;line-height:1.6">${escHtml(notes)}</div>
-      </div>` : ""}
-      <div style="height:1px;background:#E5E7EB;margin:2px 0"></div>
-      <button disabled style="display:block;width:100%;padding:12px;background:linear-gradient(135deg,#3182f6,#1b64da);color:#fff;border:none;border-radius:10px;font-size:.88rem;font-weight:800;text-align:center;opacity:.9;cursor:default">
-        <i class="fas fa-hand-point-up"></i> 참여 신청하기
-      </button>
-      ${(_recruitEditId && document.getElementById("rf_participation") && document.getElementById("rf_participation").checked) ? `<button onclick="openReviewerPreview('${escHtml(_recruitEditId)}')" style="display:block;width:100%;margin-top:6px;padding:10px;background:#E0F2FE;color:#075985;border:1px solid #BAE6FD;border-radius:10px;font-size:.78rem;font-weight:800;cursor:pointer;font-family:inherit">
-        <i class="fas fa-eye"></i> 전체 화면으로 보기 (참여 후 작업가이드까지)
-      </button>` : ""}
-    </div>
-  `;
+  CampWorkDetail.renderInto(card, {
+    workDetail: {
+      productLines:    _v("rf_wd_product"),
+      inflowGuideHtml: inflowHtml,
+      reviewGuide:     _v("rf_wd_review"),
+      specialNotes:    _v("rf_wd_notes"),
+    },
+    landingUrl: _v("rf_landing_url"),
+    inflowType: "",                 // 불명 = 랜딩 버튼 노출(실제 화면과 동일한 기본값)
+  }, { showOption: false, apiBase: (typeof API_BASE_URL !== "undefined" ? API_BASE_URL : "") });
+
+  /* 전체 흐름(참여 전 → 작업가이드 → 제출완료)은 실제 리뷰어 페이지를 새 탭으로 —
+     campaign.html?preview=1 경로 유지. 편집 중 + 참여형일 때만 노출. */
+  const _pvBtn = document.getElementById("rf_preview_full");
+  if (_pvBtn) {
+    const _part = document.getElementById("rf_participation");
+    _pvBtn.style.display = (_recruitEditId && _part && _part.checked) ? "" : "none";
+    _pvBtn.onclick = () => openReviewerPreview(_recruitEditId);
+  }
 }
 
 /* 입력 이벤트 리스너 (debounce) */
-const _PREVIEW_INPUTS = ["rf_title","rf_channel_custom","rf_time_range","rf_review_fee","rf_notes","rf_max_slots"];
-const _PREVIEW_SELECTS = ["rf_delivery_type","rf_status"];
+/* 미리보기는 "참여 후 작업내용 화면"이므로 작업내용 필드가 바뀔 때 다시 그린다
+   (제목·리뷰비 등 카드용 필드는 이 화면에 안 나오므로 대상에서 제외). */
+const _PREVIEW_INPUTS = ["rf_wd_product","rf_wd_inflow","rf_wd_review","rf_wd_notes","rf_landing_url","rf_hold_ttl"];
+const _PREVIEW_SELECTS = [];
 
 function _onPreviewInput() {
   if (!_previewOpen) return;

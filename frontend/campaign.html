@@ -8,6 +8,7 @@
   <link href="https://fonts.googleapis.com/css2?family=Noto+Sans+KR:wght@300;400;500;600;700;800&display=swap" rel="stylesheet"/>
   <script src="api.js"></script>
   <script src="js/campaign-cards.js"></script>
+  <script src="js/campaign-workdetail.js"></script>
   <style>
     :root{ --p:#3182f6; --p-light:#e8f1fe; --p-dark:#1b64da; --ok:#12b886; --ok-light:#D1FAE5;
       --warn:#F59E0B; --warn-light:#FEF3C7; --err:#EF4444; --err-light:#FEE2E2;
@@ -156,12 +157,9 @@
         <div class="wd-tt" style="color:var(--p-dark)">✅ 내가 참여한 옵션</div>
         <div class="myopt" id="joinedOption"></div>
       </div>
-      <div class="cardbx"><div class="wd-tt">📦 상품 · 옵션 · 결제금액</div><div class="wd-body" id="wdProduct"></div></div>
-      <div class="cardbx" id="wdGuideBox"><div class="wd-tt">🧭 유입가이드</div><div class="wd-body" id="wdGuide"></div>
-        <button class="btn ghost" id="landingBtn" style="margin-top:10px;display:none" onclick="openLanding()">🔗 상품 페이지 열기 (새 탭)</button>
-      </div>
-      <div class="cardbx" id="wdReviewBox" style="display:none"><div class="wd-tt">📝 리뷰 가이드</div><div class="wd-body" id="wdReview"></div></div>
-      <div class="cardbx" id="wdNotesBox" style="display:none"><div class="wd-tt">📌 특이사항</div><div class="wd-body" id="wdNotes"></div></div>
+      <!-- 작업내용 4카드 = js/campaign-workdetail.js 공용 렌더러. 관리자 미리보기가 같은 코드를 써서
+           "미리보기와 실제 화면이 다른" 문제가 구조적으로 생기지 않는다. -->
+      <div id="wdCards"></div>
       <div class="cardbx" style="border-color:var(--p)">
         <div class="wd-tt" style="color:var(--p-dark)">🧾 구매양식 — 구매를 마친 뒤 여기서 바로 제출하세요</div>
         <div class="pv-note" id="pvFormNote" style="display:none">이 공고에는 <b>연결된 작업시트 탭이 없어</b> 리뷰어에게도 구매양식이 표시되지 않습니다.<br/>공고 수정에서 작업시트 탭을 연결해주세요.</div>
@@ -307,66 +305,7 @@ function clearHold(){ if(PREVIEW) return; localStorage.removeItem(HOLD_KEY); }
 
 /* ═══ 작업내용 표시 정규화 (표시 직전 · 스냅샷 불변 · 문제 패턴일 때만 개입) ═══ */
 // 상품·옵션·결제금액: 중복 "결제금액 N원" 제거 + 상품명↵금액 줄바꿈. 금액 1종류일 때만 병합(다옵션 상이금액은 원문 보존).
-function _fmtProduct(wd){
-  const base = String((wd && wd.productLines) || '').trim();
-  const payAmt = (wd && wd.payAmount) ? Number(wd.payAmount) : 0;
-  if(!base && !payAmt) return '(등록된 상품 정보가 없어요)';
-  const amtRe = /결제금액\s*([\d,]+)\s*원/g;
-  const amounts = new Set(); let m;
-  while((m = amtRe.exec(base))) amounts.add(m[1].replace(/,/g,''));
-  if(amounts.size === 1){
-    const amt = Number([...amounts][0]);
-    const stripped = base.split(/\n/)
-      .map(ln => ln.replace(/\s*[-·/]?\s*결제금액\s*[\d,]+\s*원/g, '').replace(/[\s\-·/]+$/,'').trim())
-      .filter(Boolean).join('\n');
-    return (stripped ? stripped + '\n' : '') + '결제금액 ' + amt.toLocaleString() + '원';
-  }
-  // 금액이 여럿(다옵션) 또는 라인 내 금액 없음 → payAmount만 별도 줄로
-  if(payAmt && amounts.size === 0) return (base ? base + '\n' : '') + '결제금액 ' + payAmt.toLocaleString() + '원';
-  return base || '(등록된 상품 정보가 없어요)';
-}
-// 리뷰가이드: [리뷰등록 가이드] 계열 섹션만. [라벨] 마커가 없으면 평문 전체 그대로(무변화).
-function _pickReviewOnly(raw){
-  const text = String(raw == null ? '' : raw);
-  if(!text.trim()) return '';
-  if(!/\[[^\]]+\]/.test(text)) return text.trim();
-  const norm = s => s.replace(/\s/g,'');
-  const keep = ['리뷰등록가이드','리뷰가이드'];   // index-app.js _woPickSections 와 동일 규율
-  const out = []; let take = false, buf = [];
-  const flush = () => { const c = buf.join('\n').trim(); if(take && c) out.push(c); buf = []; };
-  for(const ln of text.split(/\r?\n/)){
-    const mm = ln.match(/^\s*\[([^\]]+)\]\s*(.*)$/);
-    if(mm){ flush(); take = keep.some(k => norm(mm[1]).includes(k)); buf = mm[2] ? [mm[2]] : []; }
-    else buf.push(ln);
-  }
-  flush();
-  return out.join('\n').trim();
-}
-// 리뷰가이드 원문에 섞여 온 첨부 이미지(guide-image 프록시·Drive)만 <img>로. 유입 HTML에 이미 있으면 스킵.
-// 중복 판정은 파일ID 토큰 기준 — 같은 이미지가 호스트만 다른 프록시 URL(pages↔railway)이어도 이중노출 방지.
-function _extractGuideImages(raw, existingHtml){
-  const seen = String(existingHtml || '');
-  const re = /https?:\/\/[^\s<)"']+/g;
-  let m, html = ''; const used = {};
-  while((m = re.exec(String(raw || '')))){
-    const u = m[0];
-    let src = '', tok = '';
-    const pm = u.match(/\/api\/order\/guide-image\/([-\w]{20,})/);
-    // 호스트는 신뢰 베이스(API_BASE_URL)로 재구성 — 매칭 URL의 임의 호스트를 그대로 쓰지 않음(Drive 분기와 동일)
-    if(pm){ tok = pm[1]; src = (typeof API_BASE_URL !== 'undefined' ? API_BASE_URL : '') + '/api/order/guide-image/' + tok; }
-    else { const id = _driveId(u); if(id){ src = 'https://drive.google.com/thumbnail?id=' + id + '&sz=w1600'; tok = id; } }
-    if(!src || !tok) continue;
-    if(used[tok] || seen.indexOf(tok) >= 0) continue;   // 이미 뽑았거나 유입 HTML에 같은 파일ID 존재 → 스킵
-    used[tok] = 1;
-    html += '<img src="' + _escAttr(src) + '" alt="유입가이드 이미지">';
-  }
-  return html;
-}
-function _driveId(url){
-  const s = String(url);
-  const m = s.match(/\/file\/d\/([-\w]{20,})/) || s.match(/[?&]id=([-\w]{20,})/) || s.match(/\/d\/([-\w]{20,})/);
-  return m ? m[1] : null;
-}
+// 상품/리뷰가이드/첨부이미지 정규화는 js/campaign-workdetail.js(공용 렌더러)로 이관 — 관리자 미리보기와 동일 코드 보장.
 function _escAttr(s){ return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;'); }
 
 /* ═══ 참여 전 화면 ═══ */
@@ -699,20 +638,14 @@ async function enterJoined(){
 function _renderJoinedView(j, h){
     // 내가 참여한 옵션 카드(옵션 등록 캠페인만) + 변경 버튼
     renderJoinedOption(j);
-    // 작업내용 렌더 (표시 직전 정규화 — 스냅샷 원문은 불변, 기발행 캠페인도 정상화)
-    const wd = j.workDetail || {};
-    $('wdProduct').textContent = _fmtProduct(wd);
-    // 유입가이드: 서버 sanitize된 HTML + 리뷰가이드 원문에 섞여 온 첨부 이미지(guide-image/Drive)만 <img>로 병합
-    let guideHtml = wd.inflowGuideHtml || '';
-    const extraImgs = _extractGuideImages(wd.reviewGuide || '', guideHtml);
-    if(!guideHtml && !extraImgs){ guideHtml = '<span class="muted">유입가이드가 없어요 — 아래 상품 페이지로 이동해 구매를 진행하세요.</span>'; }
-    $('wdGuide').innerHTML = guideHtml + extraImgs;
-    // 상품 페이지 열기: 링크유입일 때만(유입방식 불명 = 수동공고는 관리자가 넣은 랜딩 URL 의도 존중)
-    $('landingBtn').style.display = (j.landingUrl && (j.inflowType === 'link' || !j.inflowType)) ? '' : 'none';
-    // 리뷰 가이드: [리뷰등록 가이드] 섹션만 (유입 섹션·첨부 이미지 메타 제거)
-    const reviewOnly = _pickReviewOnly(wd.reviewGuide);
-    if(reviewOnly){ $('wdReviewBox').style.display=''; $('wdReview').textContent = reviewOnly; }
-    if(wd.specialNotes){ $('wdNotesBox').style.display=''; $('wdNotes').textContent = wd.specialNotes; }
+    // 작업내용 렌더 — 공용 렌더러(js/campaign-workdetail.js). 관리자 미리보기와 동일 코드.
+    //   표시 직전 정규화(상품 금액 합치기·리뷰가이드 섹션 추출·첨부 이미지 병합)는 모듈이 담당.
+    //   옵션 카드는 아래 renderJoinedOption이 [변경] 버튼과 함께 그리므로 여기선 제외.
+    CampWorkDetail.renderInto($('wdCards'), {
+      workDetail: j.workDetail || {},
+      landingUrl: j.landingUrl,
+      inflowType: j.inflowType,
+    }, { showOption: false, apiBase: API_BASE_URL });
     // 인라인 구매양식 iframe (동일 오리진 — search.html 재사용)
     const f = j.form || {};
     const frame = $('orderFrame');
@@ -852,7 +785,6 @@ async function _ensureDoneChat(){
     if(r.ok && j.ok && j.chatUrl){ _detail = _detail || {}; _detail.chatUrl = j.chatUrl; btn.style.display = ''; }
   }catch(_){ /* 실패해도 다음 폴링·재방문에서 자가복구 */ }
 }
-function openLanding(){ if(_detail && _detail.landingUrl) window.open(_detail.landingUrl, '_blank', 'noopener'); }
 function openChat(){ if(_detail && _detail.chatUrl) window.open(_detail.chatUrl, '_blank', 'noopener'); }
 // ★ 새 창에서도 embed=1 유지 — 최상위 창에선 postMessage가 no-op일 뿐,
 //   홀드 확정 문맥(campaignHold)은 제출 body에 그대로 실린다(문맥 유실 금지).

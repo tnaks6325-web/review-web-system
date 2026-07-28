@@ -27,15 +27,22 @@ const reviewEdit = readS('routes/reviewEdit.routes.js');
 let passed = 0;
 function ok(name, cond) { assert(cond, name); passed++; console.log('  ✓ ' + name); }
 
-// ── campaign.html 정규화 순수함수 추출 → 동작 검증 ──
-const fnStart = camp.indexOf('function _fmtProduct(');
-const fnEnd = camp.indexOf('/* ═══ 참여 전 화면');
-assert(fnStart > 0 && fnEnd > fnStart, '정규화 헬퍼 블록을 campaign.html에서 찾지 못했습니다');
-const helperSrc = camp.slice(fnStart, fnEnd);
-const H = vm.runInNewContext(
-  '(function(){' + helperSrc + ' return {_fmtProduct,_pickReviewOnly,_extractGuideImages,_driveId,_escAttr};})()',
-  { API_BASE_URL: 'https://api.example.test' }   // guide-image src는 신뢰 베이스로 재구성됨
+// ── 정규화 순수함수 검증 ──
+//   이 헬퍼들은 campaign.html 인라인에서 공용 모듈(js/campaign-workdetail.js)로 이관됐다.
+//   실제 리뷰어 화면과 관리자 미리보기가 같은 코드를 쓰게 하기 위함(모형/실물 분리 제거).
+const wdSrc = readF('js/campaign-workdetail.js');
+assert(wdSrc.indexOf('function fmtProduct(') > 0, '공용 렌더러에서 정규화 헬퍼를 찾지 못했습니다');
+const _M = vm.runInNewContext(
+  wdSrc + '; window.CampWorkDetail',
+  { window: {}, document: { getElementById: () => null, createElement: () => ({}), head: { appendChild() {} } } }
 );
+const H = {
+  _fmtProduct: _M.fmtProduct,
+  _pickReviewOnly: _M.pickReviewOnly,
+  _extractGuideImages: (raw, existing) => _M.extractGuideImages(raw, existing, 'https://api.example.test'),
+  _driveId: _M.driveId,
+  _escAttr: _M.escAttr,
+};
 
 // ① 상품·옵션·결제금액
 ok('①-1 중복 결제금액 제거 + 줄바꿈',
@@ -80,8 +87,11 @@ ok('③-4 이미 유입 HTML에 있는 URL은 스킵(중복 방지)',
 ok('③-5 src 속성 escape(따옴표 breakout 차단)', H._escAttr('a"b<c>') === 'a&quot;b&lt;c&gt;');
 
 // ④·⑤ campaign.html 구조 가드
+// 게이트는 공용 렌더러로 이관 — 규칙(링크유입 또는 불명일 때만 노출)은 동일
 ok('④ 상품페이지 열기 버튼은 inflowType 게이트(링크 또는 불명일 때만)',
-  /landingBtn'\)\.style\.display = \(j\.landingUrl && \(j\.inflowType === 'link' \|\| !j\.inflowType\)\)/.test(camp));
+  /d\.landingUrl && \(d\.inflowType === 'link' \|\| !d\.inflowType\)/.test(wdSrc)
+  && _M.cardsHtml({ workDetail: {}, landingUrl: 'https://x/p' }).includes('data-cwd-landing')
+  && !_M.cardsHtml({ workDetail: {}, landingUrl: 'https://x/p', inflowType: 'guide' }).includes('data-cwd-landing'));
 ok('⑤-1 카카오 버튼 스타일(.btn.kakao = #FEE500)', /\.btn\.kakao\{background:#FEE500/.test(camp));
 ok('⑤-2 제출완료 카톡 버튼 라벨 = "이 캠페인의 카톡 팀채팅방 입장"', /이 캠페인의 카톡 팀채팅방 입장/.test(camp));
 ok('⑤-3 참여 후(vJoined) 화면에서 chatBox 카드 제거', !/id="chatBox"/.test(camp));

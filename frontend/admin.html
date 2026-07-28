@@ -2149,15 +2149,31 @@ body{ letter-spacing:-.01em; }
       <div style="padding:10px 0 4px;text-align:center;font-size:.8rem;font-weight:600;color:var(--p)">
         <i class="fas fa-eye"></i> 미리보기
       </div>
-      <div id="rf_preview_area" style="padding:0 0 14px;max-height:420px;overflow-y:auto">
+      <div id="rf_preview_area" style="padding:0 0 14px;max-height:560px;overflow-y:auto">
         <div style="font-size:.68rem;color:var(--t4);text-align:center;margin-bottom:8px">
-          <i class="fas fa-mobile-alt"></i> 리뷰어에게 보여지는 모습 (실시간)
+          <i class="fas fa-mobile-alt"></i> 리뷰어가 참여한 뒤 실제로 보는 화면
         </div>
-        <div id="rf_preview_card" style="
-          background:#f4f8ff;border-radius:16px;padding:14px;
-          max-width:380px;margin:0 auto;
-          box-shadow:inset 0 0 0 1px rgba(49,130,246,.12)
-        "></div>
+        <!-- 실제 리뷰어 페이지(campaign.html)와 동일한 공용 렌더러(js/campaign-workdetail.js)로 그린다.
+             모형이 아니라 같은 코드라서 화면이 어긋나지 않는다. -->
+        <div style="background:#F0F2FA;border-radius:16px;padding:12px;max-width:400px;margin:0 auto">
+          <div style="display:flex;align-items:center;gap:10px;background:#FEF3C7;border:1.5px solid #F59E0B;
+                      border-radius:12px;padding:10px 14px;margin-bottom:12px">
+            <span style="flex:1;font-size:.78rem;font-weight:700;color:#92400E">⏳ 구매양식 제출까지</span>
+            <span style="font-size:1.15rem;font-weight:900;color:#92400E" id="rf_prev_ttl">15:00</span>
+          </div>
+          <div id="rf_preview_card"></div>
+          <button type="button" id="rf_preview_full" style="display:none;width:100%;margin-bottom:12px;padding:10px;
+                  background:#E0F2FE;color:#075985;border:1px solid #BAE6FD;border-radius:10px;font-size:.78rem;
+                  font-weight:800;cursor:pointer;font-family:inherit">
+            <i class="fas fa-eye"></i> 전체 화면으로 보기 (참여 전 → 작업가이드 → 제출완료)
+          </button>
+          <div style="background:#fff;border:1px solid #3182f6;border-radius:14px;padding:14px">
+            <div style="font-size:.78rem;font-weight:800;color:#1b64da;margin-bottom:8px">🧾 구매양식 — 구매를 마친 뒤 여기서 바로 제출</div>
+            <div style="border:1px dashed #C7D2E3;border-radius:10px;padding:18px;text-align:center;font-size:.74rem;color:#9CA3AF">
+              연결된 시트의 구매양식이 이 자리에 표시됩니다
+            </div>
+          </div>
+        </div>
       </div>
     </div>
 
@@ -2944,6 +2960,7 @@ body{ letter-spacing:-.01em; }
 <!-- ══════════════════════════════════════════════════════
      모집공고 관리 (recruit) JS
      ══════════════════════════════════════════════════════ -->
+<script src="js/campaign-workdetail.js"></script>
 <script src="js/index-recruit.js"></script>
 
 <!-- ══════════════════════════════════════════════════════
