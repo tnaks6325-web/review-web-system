@@ -1749,8 +1749,10 @@ async function _csAddFiles(slotKey, newFiles) {
   }
   _csRenderPreview(slotKey);
 }
-/* AI 검수 경고 — 슬롯 카드 안에 인라인 표시(제출은 계속 가능) */
-function _csShowVerdict(slotKey, message) {
+/* AI 검수 경고 — 슬롯 카드 안에 인라인 표시(제출은 계속 가능)
+   sure=true(AI가 확실히 아니라고 판정)면 담당자에게도 알림이 갔다는 사실을 함께 알린다.
+   숨기면 리뷰어는 "경고 무시하고 제출"의 결과를 모른 채 넘어간다 — 재첨부 유도가 목적. */
+function _csShowVerdict(slotKey, message, sure) {
   const slotEl = document.getElementById("csSlot_" + slotKey);
   if (!slotEl) return;
   let el = document.getElementById("csVerdict_" + slotKey);
@@ -1763,7 +1765,8 @@ function _csShowVerdict(slotKey, message) {
   }
   el.innerHTML = "⚠ " + escHtml(message) +
     '<div style="font-size:.72rem;font-weight:500;margin-top:4px;color:#8A93A3">' +
-    "다시 첨부하면 교체됩니다. 맞게 올리셨다면 그대로 제출하셔도 됩니다.</div>";
+    "다시 첨부하면 교체됩니다. 맞게 올리셨다면 그대로 제출하셔도 됩니다." +
+    (sure ? "<br>확인이 필요해 담당자에게도 함께 전달했어요." : "") + "</div>";
 }
 function _csClearVerdict(slotKey) {
   const el = document.getElementById("csVerdict_" + slotKey);
@@ -2214,7 +2217,7 @@ async function _submitReviewSlots(item) {
            업로드는 이미 끝났고 제출도 막지 않는다(오탐으로 정당한 제출이 차단되는 쪽이 더 나쁘다).
            다시 올리면 교체되고, 그대로 두면 관리자 알림에 남아 사람이 확인한다. */
         const bad = (upRes.files || []).find(r => r && r.verdict && r.verdict.status === "mismatch");
-        if (bad) _csShowVerdict(slot.key, bad.verdict.message);
+        if (bad) _csShowVerdict(slot.key, bad.verdict.message, bad.verdict.sure);
         else _csClearVerdict(slot.key);
         if (status) {
           status.textContent = bad ? "⚠ 확인 필요" : "✓ 업로드됨";
