@@ -427,9 +427,67 @@ function _restoreLinkedTab(linkedSheetId, linkedTabName) {
 /* ═══════════════════════════════════════
    ⚡ 참여형 캠페인 (M2) — 토글·자동점검·시간대 파서
 ═══════════════════════════════════════ */
+/* 상품 페이지를 새 탭에서 — 리뷰어 앱 모달의 [바로가기 ↗]와 동일 */
+function openRecruitProductUrl() {
+  const u = (document.getElementById("rf_product_url")?.value || "").trim();
+  if (/^https?:\/\//i.test(u)) window.open(u, "_blank", "noopener");
+  else showToast("열 수 있는 상품 URL이 없습니다.", "error");
+}
+
+/** 시간 표기에 "자유/자율"이 있으면 자율주문 — 구매시간을 비우고 안내한다.
+ *  리뷰어 앱 모달(_caeIsAutoOrder/_caeToggleWindow)과 같은 규율. 관리자가 매번 손으로
+ *  비우던 것을 자동화하되, **값을 지우는 건 사용자가 자율로 적었을 때만**이라 오작동 여지가 없다. */
+function _isRecruitAutoOrder() {
+  return /자유|자율/.test(document.getElementById("rf_time_range")?.value || "");
+}
+function onRecruitTimeRangeInput() {
+  const auto = _isRecruitAutoOrder();
+  const note = document.getElementById("rf_autoorder_note");
+  if (note) note.style.display = auto ? "" : "none";
+  if (auto) {
+    ["rf_window_start", "rf_window_end"].forEach(id => {
+      const el = document.getElementById(id);
+      if (el && el.value) el.value = "";
+    });
+    if (typeof renderPartCheck === "function") renderPartCheck();
+  }
+}
+
+/* ═══════════════════════════════════════
+   공고 수정 모달 — 탭 전환
+   미리보기가 오른쪽에 고정돼 있어, 어느 탭에서 고치든 결과가 바로 보인다.
+═══════════════════════════════════════ */
+function switchRecruitPane(name) {
+  document.querySelectorAll("#recruitModal .rf-tab").forEach(t => {
+    t.classList.toggle("on", t.dataset.pane === name);
+  });
+  document.querySelectorAll("#recruitModal .rf-pane").forEach(p => {
+    p.classList.toggle("on", p.dataset.pane === name);
+  });
+  // 탭을 바꾸면 왼쪽 스크롤은 맨 위로(이전 탭의 스크롤 위치가 남으면 빈 화면처럼 보인다)
+  const body = document.querySelector("#recruitModal .modal-body");
+  if (body) body.scrollTop = 0;
+}
+
+/** 참여형이 꺼져 있으면 모집조건·작업내용 탭은 의미가 없다 — 비활성 + 열려 있으면 기본 탭으로 */
+function _syncRecruitPaneGate(on) {
+  let moved = false;
+  document.querySelectorAll("#recruitModal .rf-tab").forEach(t => {
+    if (t.dataset.pane !== "part" && t.dataset.pane !== "work") return;
+    t.disabled = !on;
+    t.title = on ? "" : "참여형 캠페인을 켜면 사용할 수 있습니다";
+    if (!on && t.classList.contains("on")) moved = true;
+  });
+  if (moved) switchRecruitPane("basic");
+}
+
 function onParticipationToggle(on) {
   const sec = document.getElementById("rf_part_section");
   if (sec) sec.style.display = on ? "" : "none";
+  // 옵션·작업내용은 탭 분리를 위해 참여형 섹션 밖 형제로 뒀다 — 같이 토글해야 한다
+  const work = document.getElementById("rf_work_section");
+  if (work) work.style.display = on ? "" : "none";
+  _syncRecruitPaneGate(on);
   if (on) {
     // 작업오더의 "2시~4시" 같은 진행시간 텍스트를 시각으로 프리필(비어있을 때만 — 관리자는 확인·수정)
     const ws = document.getElementById("rf_window_start");
@@ -632,6 +690,8 @@ async function openRecruitModal(id, prefill, woOrderId) {
 
   const modal    = document.getElementById("recruitModal");
   const titleEl  = document.getElementById("recruitModalTitle");
+
+  switchRecruitPane("basic");   // 열 때는 항상 첫 탭 — 지난번 탭이 남으면 어디를 보는지 헷갈린다
 
   /* 폼 초기화 */
   ["rf_title","rf_channel","rf_channel_custom","rf_time_range",
