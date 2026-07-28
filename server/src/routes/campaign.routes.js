@@ -277,6 +277,11 @@ function _scopedEditorView(row) {
     daily_limit: row.daily_limit, recruit_total: row.recruit_total,
     landing_url: row.landing_url, thumbnail_url: row.thumbnail_url,
     sort_order: row.sort_order, max_slots: row.max_slots,
+    // 작업내용은 **읽기 전용 프리필**로만 포함 — 수정 모달에서 "지금 어떤 유입가이드가 걸려 있는지"를
+    // 육안 확인하는 용도. 저장 경로(_scopedCampaignEdit)는 여전히 work_detail을 화이트리스트에서
+    // 제외하므로 쓰기 표면은 넓어지지 않는다. 내용도 이미 홀드 보유 리뷰어에게 공개되는 값이고
+    // 저장 시 sanitize된 본문이라 새로 노출되는 민감정보가 없다(구조/연결 필드는 계속 미노출).
+    work_detail: row.work_detail,
   };
 }
 

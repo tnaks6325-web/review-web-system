@@ -138,10 +138,14 @@ ok('_norm8: 하이픈·11자리 → 뒤 8자리', svc._norm8('010-8592-6325') ==
     /_scopedCampaignEdit[\s\S]*?!c\.participation_mode/.test(camp));
   ok('#4: GET /:id는 via=reviewer_campaign면 축약 뷰(_scopedEditorView)만 반환',
     /_d\.via === 'reviewer_campaign'[\s\S]{0,120}_scopedEditorView/.test(camp));
-  ok('#4: 축약 뷰에 chat_url·notes·work_detail·linked_* 미포함', (() => {
+  // work_detail은 **의도적으로 포함**(수정 모달의 유입가이드 육안 확인용, 읽기 전용).
+  //   보상통제 = 저장 화이트리스트에 여전히 없음(바로 아래 가드) + 이미 홀드 보유 리뷰어에게
+  //   공개되는 sanitize된 값. 나머지 연결·구조 필드는 종전대로 미노출로 고정한다.
+  ok('#4: 축약 뷰에 chat_url·notes·linked_* 미포함(구조/연결 필드 격리 유지)', (() => {
     const m = camp.match(/function _scopedEditorView\(row\) \{[\s\S]*?\n\}/);
     if (!m) return false;
-    return !/chat_url/.test(m[0]) && !/notes/.test(m[0]) && !/work_detail/.test(m[0]) && !/linked_/.test(m[0]) && !/source_work_order_id/.test(m[0]);
+    const body = m[0].replace(/^\s*\/\/.*$/gm, '');   // 주석 제외 — 실제 반환 필드만 판정
+    return !/chat_url/.test(body) && !/notes/.test(body) && !/linked_/.test(body) && !/source_work_order_id/.test(body);
   })());
   const idx = readF('index.html');
   const app = readF('js/index-app.js');
@@ -152,6 +156,23 @@ ok('_norm8: 하이픈·11자리 → 뒤 8자리', svc._norm8('010-8592-6325') ==
   ok('프론트: 로그인 시 토큰 발급 시도 + 로그아웃 시 제거',
     /maybeFetchCampEditToken/.test(idx) && /removeItem\("rapp_camp_edit_token"\)/.test(idx));
   ok('프론트: 마스터 명단 UI(설정 탭 loadCampEditors)', /function loadCampEditors/.test(app) && /loadCampEditors\(\)/.test(app));
+
+  // ── ④ 리뷰어 앱 모달: 유입가이드 확인 + 마감 공고 진행과정 미리보기 ──
+  ok('축약뷰에 work_detail 포함(읽기전용 프리필) — 수정 모달에서 유입가이드 육안 확인',
+    /work_detail: row\.work_detail/.test(camp));
+  ok('★ 쓰기 표면 불변 — 스코프 저장 UPDATE SET절에 work_detail 없음(노출은 읽기전용)', (() => {
+    const m = /async function _scopedCampaignEdit[\s\S]*?UPDATE recruit_campaigns SET([\s\S]*?)WHERE id=\$1/.exec(camp);
+    return !!m && !/work_detail/.test(m[1]);
+  })());
+  ok('모달 [리뷰어 화면]은 **진짜 admin 토큰**일 때만 preview=1 — 스코프 토큰은 preview 403이라 제외', (() => {
+    const fn = /function _fullAdminTok\(\) \{[\s\S]*?\n  \}/.exec(cc);
+    return !!fn && !/rapp_camp_edit_token/.test(fn[0])
+      && /sessionStorage\.getItem\('admin_token'\) \|\| localStorage\.getItem\('admin_token'\)/.test(fn[0]);
+  })());
+  ok('미리보기 토큰은 프래그먼트(#tok=)로만 전달 — 서버 로그·Referer 미유출',
+    /'&preview=1#tok=' \+ encodeURIComponent\(_pvTok\)/.test(cc));
+  ok('토큰 없으면 기존 일반 링크 그대로(무토큰 동작 불변)',
+    /\(_pvTok \? '&preview=1#tok=' \+ encodeURIComponent\(_pvTok\) : ''\)/.test(cc));
 
   console.log(`\n✅ reviewerCampaignEditor: ${passed}개 통과`);
 })().catch((e) => { console.error('❌ 실패:', e.stack || e.message); process.exit(1); });
