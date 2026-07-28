@@ -94,6 +94,10 @@
       /* ★ 064 인기상품 배지 — 리뷰어 노출용(썸네일 좌상단, 리본과 세로 스택) */
       .pcard .pt-pop{font-size:.64rem;font-weight:900;border-radius:7px;padding:3px 8px;color:#fff;
         background:linear-gradient(135deg,#EF4444,#DC2626);box-shadow:0 2px 6px rgba(220,38,38,.4)}
+      /* ★ 064 관리자 별표 토글 — 우측상단 배지열 맨 앞(관리자 토큰 보유 시에만 렌더) */
+      .pcard .pstarchip{border:1px solid #E5E7EB;background:rgba(255,255,255,.94);color:#9CA3AF;border-radius:7px;
+        padding:2px 7px;font-size:.78rem;line-height:1.2;cursor:pointer;box-shadow:0 1px 4px rgba(0,0,0,.15)}
+      .pcard .pstarchip.on{background:#FEF3C7;border-color:#FCD34D;color:#B45309}
       /* 관리자 수정 버튼: 썸네일 좌하단(상단 배지·리본과 겹치지 않게) */
       .pcard .peditchip{position:absolute;bottom:8px;left:8px;z-index:7;font-size:.6rem;font-weight:900;background:#1B64DA;color:#fff;border:none;border-radius:6px;padding:3px 8px;cursor:pointer;box-shadow:0 1px 5px rgba(0,0,0,.3)}
       .pcard .peditchip:hover{background:#1550b8}
@@ -178,8 +182,14 @@
     const thumbInner = c.thumbnail_url
       ? `<img class="pt-img" src="${_esc(c.thumbnail_url)}" alt="" loading="lazy">`
       : `<div class="pt-ph">🛍️</div>`;
-    const badges = (channel || c.delivery_type)
-      ? `<div class="pt-badges">${channel ? `<span class="pt-badge ch">${_esc(channel)}</span>` : ''}${c.delivery_type ? `<span class="pt-badge dl">${_esc(c.delivery_type)}</span>` : ''}</div>`
+    // ★ 064: 관리자(진짜 admin_token)에게만 카드 우측상단 ⭐ 별표 토글 — 리뷰어 홈에서도 우선노출 즉시 조작.
+    //   별표한 순서대로 최상단(서버 pinned_at ASC 정렬). 리뷰어·스코프 토큰에겐 렌더 자체를 안 함.
+    const starChip = _realAdminTok()
+      ? `<button type="button" class="pstarchip${c.pinned_at ? ' on' : ''}" title="${c.pinned_at ? '별표 해제(우선노출 해제)' : '별표 — 목록 최상단 고정(여러 개면 먼저 별표한 순서대로)'}"
+          onclick="event.stopPropagation();event.preventDefault();CampCards.togglePin('${_esc(c.id)}', ${c.pinned_at ? 'false' : 'true'})">${c.pinned_at ? '⭐' : '☆'}</button>`
+      : '';
+    const badges = (channel || c.delivery_type || starChip)
+      ? `<div class="pt-badges">${starChip}${channel ? `<span class="pt-badge ch">${_esc(channel)}</span>` : ''}${c.delivery_type ? `<span class="pt-badge dl">${_esc(c.delivery_type)}</span>` : ''}</div>`
       : '';
     const ribbon = isDaily ? `<span class="pt-ribbon done">금일 모집완료</span>`
                  : isClosed ? `<span class="pt-ribbon closedr">모집 종료</span>` : '';
@@ -292,6 +302,13 @@
      (recruit_campaigns)에 즉시 동기화. 서버 무변경.
      ★ review_fee/max_slots/sort_order는 서버가 미전송을 0으로 강제(`|| 0`)하므로
        로드값을 그대로 항상 전송해 0-덮어쓰기를 방지한다. */
+
+  /** ★ 064: 진짜 관리자 토큰만(별표 우선노출용) — 스코프 토큰(rapp_camp_edit_token)은
+   *  서버가 /flags 를 차단(PUT 끝앵커 격리)하므로 별표 버튼 자체를 안 보여준다(눌러도 403인 버튼 금지). */
+  function _realAdminTok() {
+    try { return sessionStorage.getItem('admin_token') || localStorage.getItem('admin_token') || ''; }
+    catch (_) { return ''; }
+  }
 
   function _adminTok() {
     try {
@@ -591,5 +608,32 @@
     }
   }
 
-  window.CampCards = { renderInto, cardHtml, gridHtml, setServerNow, startTicker, _fmtCountdown, _fmtHM, _fmtOpenLabel, _fmtMD, serverNow: _now, _onCardClick, openAdminEdit };
+  /** ★ 064: 리뷰어 홈 카드의 관리자 별표 토글 — POST /flags(adminOrMaster) 후 목록 재렌더.
+   *  진짜 admin_token 전용(_realAdminTok — 스코프 토큰은 서버 403이라 버튼 미노출과 짝).
+   *  성공 시: 홈이면 loadRecruitPreview() 재호출(서버가 /list 캐시를 즉시 무효화해 새 순서 반영),
+   *  로더가 없는 화면(campaign.html 상세 등)은 버튼 상태만 제자리 갱신. */
+  async function togglePin(campId, on) {
+    const tok = _realAdminTok();
+    if (!tok) return;
+    try {
+      const res = await fetch(API_BASE_URL + '/api/campaign/admin/' + encodeURIComponent(campId) + '/flags', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'Authorization': 'Bearer ' + tok },
+        body: JSON.stringify({ pinned: on === true }),
+      });
+      const j = await res.json().catch(() => ({}));
+      if (!res.ok || !j.ok) throw new Error(j.error || 'HTTP ' + res.status);
+      if (typeof window.loadRecruitPreview === 'function') {
+        await window.loadRecruitPreview();   // 홈: 새 순서로 재렌더(별표 상태 포함)
+      } else {
+        // 상세 등 로더 없는 화면: 버튼만 제자리 갱신
+        document.querySelectorAll('.pcard[data-camp-id="' + (window.CSS && CSS.escape ? CSS.escape(campId) : campId) + '"] .pstarchip')
+          .forEach(b => { b.classList.toggle('on', on === true); b.textContent = on ? '⭐' : '☆'; });
+      }
+    } catch (e) {
+      alert('별표 설정 실패: ' + (e && e.message ? e.message : e));
+    }
+  }
+
+  window.CampCards = { renderInto, cardHtml, gridHtml, setServerNow, startTicker, _fmtCountdown, _fmtHM, _fmtOpenLabel, _fmtMD, serverNow: _now, _onCardClick, openAdminEdit, togglePin };
 })();

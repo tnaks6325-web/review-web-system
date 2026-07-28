@@ -210,6 +210,7 @@ const PUBLIC_FIELDS_LEGACY = [
   'status', 'sort_order', 'max_slots', 'current_slots', 'deadline',
   'description', 'linked_sheet_id', 'linked_tab_name', 'created_at',
   'is_popular', // ★ 064: [인기!] 배지(표시용 — 선행참여 게이트는 참여형 apply에서만 판정)
+  'pinned_at',  // ★ 064: 관리자 별표 토글의 현재 상태 표시용(정렬 메타 — 민감정보 아님)
 ];
 const PUBLIC_FIELDS_PARTICIPATION = [
   'id', 'title', 'channel', 'channel_custom', 'manager', 'time_range',
@@ -217,7 +218,8 @@ const PUBLIC_FIELDS_PARTICIPATION = [
   'thumbnail_url', 'created_at',
   'hold_ttl_min', 'close_buffer_min', // 민감정보 아님 — 프론트 안내문("N분 안에 제출")의 정확성용
   'multi_account_mode', 'sub_hold_ttl_min', // ★ 063: 카드 "타계정 가능" 배지(§09-4)+타계정 10분 안내. multi_daily_limit는 비공개(409 사유로만 전달)
-  'is_popular', // ★ 064: [인기!] 배지 + 선행참여 안내(pinned_at은 정렬이 서버 처리라 미노출)
+  'is_popular', // ★ 064: [인기!] 배지 + 선행참여 안내
+  'pinned_at',  // ★ 064: 관리자 별표 토글의 현재 상태 표시용(정렬 메타 — 민감정보 아님)
 ];
 
 function _pick(row, fields) {
@@ -1200,6 +1202,8 @@ router.post('/admin/:id/flags', authMiddleware, adminOrMasterMiddleware, async (
        b.pinned === undefined ? null : b.pinned === true,
        b.popular === undefined ? null : b.popular === true]);
     if (!rows.length) return res.status(404).json({ ok: false, error: '캠페인을 찾을 수 없습니다.' });
+    // ★ /list 5초 캐시 즉시 무효화 — 토글 직후 재조회가 옛 순서를 돌려주지 않게(리뷰어 홈 별표 UX)
+    _listCache = { at: 0, rows: null, countsMap: null };
     res.json({ ok: true, pinnedAt: rows[0].pinned_at, isPopular: rows[0].is_popular });
   } catch (err) {
     next(err);
