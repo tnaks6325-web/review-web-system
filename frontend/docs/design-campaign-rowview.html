@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8"/>
 <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
-<title>모집공고 "행으로 보기" 시안 3종 — 아이에이리뷰</title>
+<title>모집공고 "행으로 보기" 모바일 시안 3종 — 아이에이리뷰</title>
 <style>
   :root{
     --paper:#F4F6FC; --card:#fff; --ink:#151B26; --mut:#5E6A7C; --faint:#8B96A8; --line:#E2E7F0;
@@ -11,307 +11,348 @@
     --ok:#12B886; --warn:#B45309; --warn-soft:#FEF3C7; --err:#DC2626;
   }
   *{box-sizing:border-box;margin:0;padding:0}
-  body{background:var(--paper);color:var(--ink);font-family:"Apple SD Gothic Neo","Pretendard","Noto Sans KR","Malgun Gothic",system-ui,sans-serif;line-height:1.6;-webkit-font-smoothing:antialiased}
-  .wrap{max-width:760px;margin:0 auto;padding:0 16px 90px}
-  header{padding:44px 0 10px}
-  .eyebrow{font-size:.74rem;font-weight:800;letter-spacing:.13em;color:var(--accent)}
-  h1{font-size:clamp(1.5rem,4vw,2.1rem);font-weight:800;letter-spacing:-.02em;margin:6px 0 8px}
-  p.lead{color:var(--mut);font-size:.95rem;max-width:60ch}
-  .meta{display:flex;gap:8px;flex-wrap:wrap;margin-top:14px}
-  .chip{font-size:.72rem;font-weight:700;color:var(--mut);background:var(--card);border:1px solid var(--line);border-radius:999px;padding:4px 11px}
+  body{background:#E9EDF6;color:var(--ink);font-family:"Apple SD Gothic Neo","Pretendard","Noto Sans KR","Malgun Gothic",system-ui,sans-serif;line-height:1.55;-webkit-font-smoothing:antialiased}
+  .wrap{max-width:520px;margin:0 auto;padding:0 14px 90px}
+  header.doc{padding:38px 0 6px}
+  .eyebrow{font-size:.72rem;font-weight:800;letter-spacing:.13em;color:var(--accent)}
+  h1{font-size:clamp(1.35rem,4vw,1.8rem);font-weight:800;letter-spacing:-.02em;margin:6px 0 6px}
+  p.lead{color:var(--mut);font-size:.88rem}
+  .meta{display:flex;gap:6px;flex-wrap:wrap;margin-top:12px}
+  .chip{font-size:.7rem;font-weight:700;color:var(--mut);background:var(--card);border:1px solid var(--line);border-radius:999px;padding:4px 10px}
   .chip b{color:var(--ink)}
 
-  section{margin-top:44px}
-  .sec-label{font-size:.72rem;font-weight:800;letter-spacing:.12em;color:var(--accent);margin-bottom:4px}
-  h2{font-size:1.25rem;font-weight:800;letter-spacing:-.015em}
-  .pros{display:flex;gap:6px;flex-wrap:wrap;margin:8px 0 14px}
-  .pros span{font-size:.72rem;font-weight:700;border-radius:7px;padding:3px 9px;background:var(--accent-soft);color:var(--accent-deep)}
+  section{margin-top:40px}
+  .sec-label{font-size:.7rem;font-weight:800;letter-spacing:.12em;color:var(--accent);margin-bottom:3px}
+  h2{font-size:1.12rem;font-weight:800;letter-spacing:-.015em}
+  .pros{display:flex;gap:5px;flex-wrap:wrap;margin:7px 0 14px}
+  .pros span{font-size:.68rem;font-weight:700;border-radius:7px;padding:3px 8px;background:var(--accent-soft);color:var(--accent-deep)}
   .pros span.warn{background:var(--warn-soft);color:var(--warn)}
-  .frame{background:var(--card);border:1px solid var(--line);border-radius:16px;padding:12px;box-shadow:0 2px 14px rgba(21,40,80,.07)}
-  .note{font-size:.78rem;color:var(--mut);margin-top:10px}
+  .note{font-size:.76rem;color:var(--mut);margin-top:10px}
   .note b{color:var(--ink)}
 
+  /* ═══ 폰 프레임 (모바일 390px 실폭 재현) ═══ */
+  .phone{width:min(402px,100%);margin:0 auto;background:#111827;border-radius:38px;padding:10px;box-shadow:0 14px 34px rgba(17,24,39,.28)}
+  .scr{background:var(--paper);border-radius:28px;overflow:hidden;position:relative}
+  .sbar{display:flex;justify-content:space-between;align-items:center;padding:8px 18px 2px;font-size:.62rem;font-weight:700;color:#111827}
+  .appbar{display:flex;justify-content:space-between;align-items:center;padding:10px 16px 8px}
+  .appbar .t{font-size:1.15rem;font-weight:900}
+  .appbar .r{font-size:.66rem;font-weight:700;color:var(--mut)}
+  .shead{display:flex;justify-content:space-between;align-items:center;padding:4px 14px 8px}
+  .shead .l{font-size:.82rem;font-weight:800;color:#1D4ED8}
+  .vt{display:flex;border:1px solid var(--line);border-radius:10px;overflow:hidden;background:#fff}
+  .vt span{padding:5px 11px;font-size:.72rem;color:#9CA3AF}
+  .vt span.on{background:var(--accent-soft);color:var(--accent-deep);font-weight:800}
+  .list{padding:0 10px 8px}
+  .bnav{display:flex;border-top:1px solid var(--line);background:#fff;padding:7px 0 10px}
+  .bnav div{flex:1;text-align:center;font-size:.6rem;font-weight:700;color:#9CA3AF}
+  .bnav div.on{color:var(--accent-deep)}
+  .bnav .ic{font-size:.95rem;display:block;margin-bottom:1px}
+
   /* 공용 부품 */
-  .th{width:100%;height:100%;object-fit:cover;background:#EEF1F7;display:flex;align-items:center;justify-content:center;font-size:1.3rem;border-radius:inherit}
-  .b-pop{font-size:.6rem;font-weight:900;color:#fff;background:linear-gradient(135deg,#EF4444,#DC2626);border-radius:6px;padding:2px 7px}
-  .b-ch{font-size:.6rem;font-weight:800;background:#FCE7F3;color:#BE185D;border-radius:6px;padding:2px 7px}
-  .b-dl{font-size:.6rem;font-weight:800;background:#111827;color:#fff;border-radius:6px;padding:2px 7px}
-  .b-live{font-size:.6rem;font-weight:800;background:#E6FBF3;color:#0CA678;border-radius:6px;padding:2px 7px}
-  .b-star{font-size:.76rem;background:#FEF3C7;border:1px solid #FCD34D;border-radius:7px;padding:1px 6px;cursor:pointer}
-  .gauge{height:6px;border-radius:3px;background:#EEF1F7;overflow:hidden}
+  .th{width:100%;height:100%;object-fit:cover;background:#EEF1F7;display:flex;align-items:center;justify-content:center;font-size:1.15rem}
+  .b-pop{font-size:.56rem;font-weight:900;color:#fff;background:linear-gradient(135deg,#EF4444,#DC2626);border-radius:5px;padding:1px 6px}
+  .b-ch{font-size:.56rem;font-weight:800;background:#FCE7F3;color:#BE185D;border-radius:5px;padding:1px 6px}
+  .b-dl{font-size:.56rem;font-weight:800;background:#111827;color:#fff;border-radius:5px;padding:1px 6px}
+  .b-live{font-size:.56rem;font-weight:800;background:#E6FBF3;color:#0CA678;border-radius:5px;padding:1px 6px}
+  .b-star{font-size:.7rem;background:#FEF3C7;border:1px solid #FCD34D;border-radius:6px;padding:0 5px;line-height:1.35}
+  .b-star.off{background:#fff;border-color:#E5E7EB;color:#C6CBD4}
+  .gauge{height:5px;border-radius:3px;background:#EAEDF4;overflow:hidden}
   .gauge i{display:block;height:100%;background:linear-gradient(90deg,#F59E0B,#F97316)}
   .gauge.live i{background:linear-gradient(90deg,#3182F6,#1B64DA)}
-  .cta{border:none;border-radius:10px;font-weight:800;cursor:pointer;font-family:inherit}
+  .cta{border:none;border-radius:9px;font-weight:800;cursor:pointer;font-family:inherit}
   .cta.go{background:linear-gradient(135deg,#3182F6,#1B64DA);color:#fff}
   .cta.off{background:#EEF1F7;color:#9CA3AF}
   .cd{font-variant-numeric:tabular-nums;font-weight:900;color:#0CA678}
-  .muted{color:var(--faint);font-size:.72rem}
+  .mutx{color:var(--faint);font-size:.62rem}
 
   /* ── 시안 A: 컴팩트 리스트 ── */
-  .rowA{display:flex;align-items:center;gap:10px;padding:9px 6px;border-bottom:1px solid #F1F3F9}
+  .lstA{background:#fff;border:1px solid var(--line);border-radius:14px;overflow:hidden}
+  .rowA{display:flex;align-items:center;gap:9px;padding:9px 10px;border-bottom:1px solid #F1F3F9}
   .rowA:last-child{border-bottom:none}
-  .rowA .thw{width:52px;height:52px;border-radius:10px;overflow:hidden;flex-shrink:0;position:relative}
-  .rowA .tt{font-size:.84rem;font-weight:700;overflow:hidden;text-overflow:ellipsis;display:-webkit-box;-webkit-line-clamp:1;-webkit-box-orient:vertical}
+  .rowA .thw{width:46px;height:46px;border-radius:9px;overflow:hidden;flex-shrink:0}
   .rowA .mid{flex:1;min-width:0}
-  .rowA .sub{display:flex;gap:6px;align-items:center;margin-top:3px;flex-wrap:wrap}
-  .rowA .right{flex-shrink:0;text-align:right;min-width:86px}
-  .rowA .st{font-size:.7rem;font-weight:800}
+  .rowA .tt{font-size:.76rem;font-weight:700;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+  .rowA .sub{display:flex;gap:4px;align-items:center;margin-top:3px;flex-wrap:wrap}
+  .rowA .right{flex-shrink:0;text-align:right;min-width:78px}
+  .rowA .st{font-size:.62rem;font-weight:800}
   .rowA .st.done{color:#B45309}
-  .rowA .cnt{font-size:.72rem;color:var(--mut)}
-  .rowA .cnt b{font-size:.86rem;color:#F59E0B}
+  .rowA .cnt{font-size:.64rem;color:var(--mut)}
+  .rowA .cnt b{font-size:.78rem;color:#F59E0B}
   .rowA.live .cnt b{color:var(--accent-deep)}
-  .rowA .g{margin-top:4px;width:86px;margin-left:auto}
-  .rowA.dim{opacity:.62}
+  .rowA .g{margin-top:3px;width:78px;margin-left:auto}
+  .rowA.dim .thw,.rowA.dim .mid{opacity:.55}
+  .rowA .star{flex-shrink:0;align-self:center}  /* 별도 열 — 카운트다운·인원 표기와 안 겹침 */
 
-  /* ── 시안 B: 정보밀도(2줄)형 ── */
-  .rowB{display:flex;gap:12px;padding:12px 8px;border-bottom:1px solid #F1F3F9;align-items:stretch}
-  .rowB:last-child{border-bottom:none}
-  .rowB .thw{width:74px;height:74px;border-radius:12px;overflow:hidden;flex-shrink:0;position:relative}
-  .rowB .pop{position:absolute;top:4px;left:4px}
-  .rowB .mid{flex:1;min-width:0;display:flex;flex-direction:column;justify-content:space-between}
-  .rowB .tt{font-size:.88rem;font-weight:800;overflow:hidden;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical}
-  .rowB .badges{display:flex;gap:5px;margin-top:4px;flex-wrap:wrap;align-items:center}
-  .rowB .grow{margin-top:7px}
-  .rowB .glabel{display:flex;justify-content:space-between;font-size:.7rem;color:var(--mut);margin-bottom:3px}
+  /* ── 시안 B: 정보밀도형 ── */
+  .rowB{background:#fff;border:1px solid var(--line);border-radius:13px;padding:10px;margin-bottom:8px;position:relative}
+  .rowB .top{display:flex;gap:9px}
+  .rowB .thw{width:62px;height:62px;border-radius:11px;overflow:hidden;flex-shrink:0;position:relative}
+  .rowB .pop{position:absolute;top:3px;left:3px}
+  .rowB .mid{flex:1;min-width:0}
+  .rowB .tt{font-size:.79rem;font-weight:800;overflow:hidden;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;line-height:1.32;padding-right:26px}
+  .rowB .badges{display:flex;gap:4px;margin-top:4px;flex-wrap:wrap;align-items:center}
+  .rowB .foot{display:flex;align-items:center;gap:9px;margin-top:8px}
+  .rowB .gwrap{flex:1;min-width:0}
+  .rowB .glabel{display:flex;justify-content:space-between;font-size:.64rem;color:var(--mut);margin-bottom:3px}
   .rowB .glabel b{color:#F59E0B}
   .rowB.live .glabel b{color:var(--accent-deep)}
-  .rowB .right{flex-shrink:0;display:flex;flex-direction:column;justify-content:center;gap:5px;align-items:flex-end;min-width:96px}
-  .rowB .cta{padding:9px 14px;font-size:.76rem;width:96px}
-  .rowB .cdl{font-size:.66rem;color:var(--mut);text-align:right}
-  .rowB.dim{opacity:.62}
+  .rowB .cta{padding:8px 13px;font-size:.72rem;white-space:nowrap;flex-shrink:0}
+  .rowB .cdl{font-size:.6rem;color:var(--mut);margin-top:3px}
+  .rowB.dim .top,.rowB.dim .gwrap{opacity:.55}
+  .rowB .star{position:absolute;top:8px;right:9px}
 
-  /* ── 시안 C: 티켓(배너)형 ── */
-  .rowC{display:flex;gap:0;border:1px solid var(--line);border-radius:14px;overflow:hidden;margin-bottom:10px;background:#fff;position:relative}
-  .rowC:last-child{margin-bottom:0}
-  .rowC .thw{width:96px;min-height:96px;flex-shrink:0;position:relative}
-  .rowC .thw .ovl{position:absolute;inset:0;background:rgba(17,24,39,.55);display:flex;flex-direction:column;align-items:center;justify-content:center;color:#fff;gap:2px}
-  .rowC .thw .ovl .l{font-size:.56rem;font-weight:700;opacity:.9}
-  .rowC .thw .ovl .t{font-size:.8rem;font-weight:900;font-variant-numeric:tabular-nums}
-  .rowC .mid{flex:1;min-width:0;padding:10px 12px;display:flex;flex-direction:column;gap:5px;justify-content:center}
-  .rowC .tt{font-size:.88rem;font-weight:800;overflow:hidden;display:-webkit-box;-webkit-line-clamp:1;-webkit-box-orient:vertical}
-  .rowC .badges{display:flex;gap:5px;flex-wrap:wrap;align-items:center}
-  .rowC .foot{display:flex;align-items:center;gap:8px}
+  /* ── 시안 C: 티켓형 ── */
+  .rowC{background:#fff;border:1px solid var(--line);border-radius:14px;overflow:hidden;margin-bottom:8px;display:flex;position:relative}
+  .rowC .thw{width:86px;flex-shrink:0;position:relative;min-height:86px}
+  .rowC .thw .ovl{position:absolute;inset:0;background:rgba(17,24,39,.56);display:flex;flex-direction:column;align-items:center;justify-content:center;color:#fff;gap:1px}
+  .rowC .thw .ovl .l{font-size:.52rem;font-weight:700;opacity:.9}
+  .rowC .thw .ovl .t{font-size:.72rem;font-weight:900;font-variant-numeric:tabular-nums}
+  .rowC .mid{flex:1;min-width:0;padding:9px 10px;display:flex;flex-direction:column;gap:4px;justify-content:center}
+  .rowC .badges{display:flex;gap:4px;flex-wrap:wrap;align-items:center;padding-right:24px}
+  .rowC .tt{font-size:.78rem;font-weight:800;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+  .rowC .foot{display:flex;align-items:center;gap:7px}
   .rowC .foot .gauge{flex:1}
-  .rowC .foot .n{font-size:.72rem;color:var(--mut);white-space:nowrap}
+  .rowC .foot .n{font-size:.64rem;color:var(--mut);white-space:nowrap}
   .rowC .foot .n b{color:#F59E0B}
   .rowC.live .foot .n b{color:var(--accent-deep)}
-  .rowC .right{flex-shrink:0;display:flex;align-items:center;padding:0 12px}
-  .rowC .cta{padding:11px 16px;font-size:.8rem;white-space:nowrap}
-  .rowC .star{position:absolute;top:8px;right:10px}
-  .rowC.dim{background:#FAFBFE}
-  .rowC.dim .mid,.rowC.dim .thw{opacity:.62}
+  .rowC .act{display:block;margin-top:2px}
+  .rowC .act .cta{width:100%;padding:8px 0;font-size:.72rem}
+  .rowC.dim .thw,.rowC.dim .tt,.rowC.dim .badges,.rowC.dim .foot{opacity:.55}
+  .rowC .star{position:absolute;top:7px;right:9px}
 
-  .pickbar{position:sticky;bottom:0;background:linear-gradient(180deg,transparent,var(--paper) 30%);padding:20px 0 14px;margin-top:40px}
-  .pickcard{background:var(--card);border:1px solid var(--line);border-radius:14px;padding:14px 16px;font-size:.85rem;box-shadow:0 2px 14px rgba(21,40,80,.1)}
+  .pickbar{margin-top:44px}
+  .pickcard{background:var(--card);border:1px solid var(--line);border-radius:14px;padding:14px 16px;font-size:.82rem;box-shadow:0 2px 14px rgba(21,40,80,.1)}
   .pickcard b{font-weight:800}
+
+  /* 이미지 추출용: ?v=A|B|C 면 해당 시안만 표시 */
+  body.only .wrap>header.doc, body.only .pickbar{display:none}
+  body.only-A #sB, body.only-A #sC{display:none}
+  body.only-B #sA, body.only-B #sC{display:none}
+  body.only-C #sA, body.only-C #sB{display:none}
+  body.only section{margin-top:10px}
 </style>
 </head>
 <body>
 <div class="wrap">
 
-  <header>
-    <div class="eyebrow">DESIGN PROPOSAL</div>
-    <h1>모집공고 "행으로 보기" 시안 3종</h1>
+  <header class="doc">
+    <div class="eyebrow">DESIGN PROPOSAL · MOBILE</div>
+    <h1>"행으로 보기" 모바일 시안 3종</h1>
     <p class="lead">
-      리뷰어 홈의 모집공고에서 <b>≡ 행으로 보기</b>를 눌렀을 때의 화면 시안입니다.
-      같은 4개 공고(모집중 1 · 인기 1 · 금일 마감 2)를 세 가지 방식으로 그렸습니다 —
-      마음에 드는 시안 하나를 골라주시면 그대로 구현합니다.
+      사용자 대부분이 모바일이라, <b>휴대폰 실제 폭(390px) 그대로</b> 리뷰어 홈 화면에 얹어 그렸습니다.
+      같은 4개 공고(모집중+인기 1 · 금일 마감 3)를 세 방식으로 비교해보세요.
     </p>
     <div class="meta">
-      <span class="chip">대상 <b>리뷰어 홈 · 모집공고 목록</b></span>
+      <span class="chip">기준 <b>모바일 390px</b></span>
       <span class="chip">카드 보기는 <b>현행 유지</b></span>
-      <span class="chip">⭐ 별표는 <b>관리자에게만 보임</b></span>
+      <span class="chip">⭐ 별표는 <b>관리자에게만</b></span>
     </div>
   </header>
 
   <!-- ═══════════ 시안 A ═══════════ -->
-  <section>
+  <section id="sA">
     <div class="sec-label">시안 A</div>
     <h2>컴팩트 리스트 — 한 화면에 최대한 많이</h2>
-    <div class="pros">
-      <span>행 높이 최소</span><span>한 화면 8~10개</span><span>스크롤 최소화</span>
-      <span class="warn">썸네일·정보가 작음</span>
-    </div>
-    <div class="frame">
-      <div class="rowA live">
-        <div class="thw"><div class="th">🛍️</div></div>
-        <div class="mid">
-          <div class="tt">한율 어린쑥 수분진정 크림 55ml</div>
-          <div class="sub"><span class="b-pop">🔥 인기!</span><span class="b-ch">쿠팡</span><span class="b-live">바로참여</span><span class="muted">🕑 10:00~15:00</span></div>
+    <div class="pros"><span>행 높이 최소</span><span>스크롤 최소</span><span>버튼 없음(행 탭=상세)</span><span class="warn">정보가 작게 보임</span></div>
+    <div class="phone"><div class="scr">
+      <div class="sbar"><span>9:41</span><span>📶 🔋</span></div>
+      <div class="appbar"><span class="t">홈</span><span class="r">🔒 관리자</span></div>
+      <div class="shead"><span class="l">📣 모집공고</span><span class="vt"><span class="on">≡</span><span>▦</span></span></div>
+      <div class="list"><div class="lstA">
+        <div class="rowA live">
+          <div class="thw"><div class="th">🛍️</div></div>
+          <div class="mid">
+            <div class="tt">한율 어린쑥 수분진정 크림 55ml</div>
+            <div class="sub"><span class="b-pop">🔥 인기!</span><span class="b-ch">쿠팡</span><span class="b-live">바로참여</span><span class="mutx">🕑 10:00~15:00</span></div>
+          </div>
+          <div class="right">
+            <div class="st"><span class="cd">02:31:08</span></div>
+            <div class="cnt"><b>7</b>/20명</div>
+            <div class="g"><div class="gauge live"><i style="width:35%"></i></div></div>
+          </div>
+          <span class="star b-star">⭐</span>
         </div>
-        <div class="right">
-          <div class="st"><span class="cd">02:31:08</span> <span class="muted">남음</span></div>
-          <div class="cnt"><b>7</b> / 20명</div>
-          <div class="g"><div class="gauge live"><i style="width:35%"></i></div></div>
+        <div class="rowA dim">
+          <div class="thw"><div class="th">🧴</div></div>
+          <div class="mid">
+            <div class="tt">넛세린 아로마 넛 슬림핏 바디 2종 셀룰라이트 관리 세트</div>
+            <div class="sub"><span class="b-ch">쿠팡</span><span class="b-dl">실배송</span><span class="mutx">⏱ 자율 · 바로참여</span></div>
+          </div>
+          <div class="right">
+            <div class="st done">오늘은 마감</div>
+            <div class="cnt"><b>10</b>/10명 완료</div>
+            <div class="mutx">내일 다시 오픈</div>
+          </div>
+          <span class="star b-star off">☆</span>
         </div>
-        <span class="b-star">⭐</span>
-      </div>
-      <div class="rowA dim">
-        <div class="thw"><div class="th">🧴</div></div>
-        <div class="mid">
-          <div class="tt">넛세린 아로마 넛 슬림핏 바디 2종 셀룰라이트 관리 세트</div>
-          <div class="sub"><span class="b-ch">쿠팡</span><span class="b-dl">실배송</span><span class="b-live">바로참여</span><span class="muted">⏱ 자율</span></div>
+        <div class="rowA dim">
+          <div class="thw"><div class="th">🧴</div></div>
+          <div class="mid">
+            <div class="tt">1 7 [NEW] 블랑카우 모이스처 리페어 바디로션 500ml</div>
+            <div class="sub"><span class="b-ch">올리브영</span><span class="b-dl">실배송</span><span class="mutx">⏱ 자율</span></div>
+          </div>
+          <div class="right">
+            <div class="st done">오늘은 마감</div>
+            <div class="cnt"><b>20</b>/20명 완료</div>
+            <div class="mutx">내일 다시 오픈</div>
+          </div>
+          <span class="star b-star off">☆</span>
         </div>
-        <div class="right">
-          <div class="st done">오늘은 마감</div>
-          <div class="cnt"><b>10</b> / 10명 완료</div>
-          <div class="muted">내일 다시 오픈</div>
+        <div class="rowA dim">
+          <div class="thw"><div class="th">🍶</div></div>
+          <div class="mid">
+            <div class="tt">[헬스앤헬스]국내산 토종 흑염소진액 자연방목 엑기스</div>
+            <div class="sub"><span class="b-ch">쿠팡</span><span class="b-dl">실배송</span><span class="mutx">⏱ 자율</span></div>
+          </div>
+          <div class="right">
+            <div class="st done">오늘은 마감</div>
+            <div class="cnt"><b>30</b>/30명 완료</div>
+            <div class="mutx">내일 다시 오픈</div>
+          </div>
+          <span class="star b-star off">☆</span>
         </div>
-        <span class="b-star">☆</span>
-      </div>
-      <div class="rowA dim">
-        <div class="thw"><div class="th">🧴</div></div>
-        <div class="mid">
-          <div class="tt">1 7 [NEW] 블랑카우 모이스처 리페어 바디로션 500ml</div>
-          <div class="sub"><span class="b-ch">올리브영</span><span class="b-dl">실배송</span><span class="muted">⏱ 자율</span></div>
-        </div>
-        <div class="right">
-          <div class="st done">오늘은 마감</div>
-          <div class="cnt"><b>20</b> / 20명 완료</div>
-          <div class="muted">내일 다시 오픈</div>
-        </div>
-        <span class="b-star">☆</span>
-      </div>
-      <div class="rowA dim">
-        <div class="thw"><div class="th">🍶</div></div>
-        <div class="mid">
-          <div class="tt">[헬스앤헬스]국내산 토종 흑염소진액 자연방목 흑염소 엑기스</div>
-          <div class="sub"><span class="b-ch">쿠팡</span><span class="b-dl">실배송</span><span class="muted">⏱ 자율</span></div>
-        </div>
-        <div class="right">
-          <div class="st done">오늘은 마감</div>
-          <div class="cnt"><b>30</b> / 30명 완료</div>
-          <div class="muted">내일 다시 오픈</div>
-        </div>
-        <span class="b-star">☆</span>
-      </div>
-    </div>
-    <div class="note">행을 탭하면 상세로 이동합니다. <b>참여 버튼이 따로 없어</b> 목록이 가장 짧아지고,
-      모집중 행은 파란 게이지·카운트다운으로 즉시 구분됩니다. ⭐는 관리자에게만 행 오른쪽 끝에 표시.</div>
+      </div></div>
+      <div class="bnav"><div class="on"><span class="ic">🏠</span>홈</div><div><span class="ic">🪪</span>내정보/현황</div><div><span class="ic">📖</span>가이드</div></div>
+    </div></div>
+    <div class="note"><b>가장 짧은 목록.</b> 참여 버튼 없이 행을 탭하면 상세로 이동합니다.
+      모집중 행만 초록 카운트다운·파란 게이지라 스크롤 중에도 바로 눈에 띕니다.</div>
   </section>
 
   <!-- ═══════════ 시안 B ═══════════ -->
-  <section>
+  <section id="sB">
     <div class="sec-label">시안 B</div>
-    <h2>정보밀도형 — 게이지와 참여 버튼을 행 안에</h2>
-    <div class="pros">
-      <span>행마다 [참여하기] 버튼</span><span>모집 현황 게이지 크게</span><span>카드와 같은 정보량</span>
-      <span class="warn">행 높이 중간</span>
-    </div>
-    <div class="frame">
-      <div class="rowB live">
-        <div class="thw"><div class="th">🛍️</div><span class="pop b-pop">🔥 인기!</span></div>
-        <div class="mid">
-          <div>
-            <div class="tt">한율 어린쑥 수분진정 크림 55ml</div>
-            <div class="badges"><span class="b-ch">쿠팡</span><span class="b-live">바로참여</span><span class="muted">🕑 10:00~15:00 · 💰 1,000원</span></div>
+    <h2>정보밀도형 — 게이지 + 참여 버튼을 행 안에</h2>
+    <div class="pros"><span>행에서 바로 [참여하기]</span><span>모집 게이지 크게</span><span>카드와 정보 1:1</span><span class="warn">행 높이 중간</span></div>
+    <div class="phone"><div class="scr">
+      <div class="sbar"><span>9:41</span><span>📶 🔋</span></div>
+      <div class="appbar"><span class="t">홈</span><span class="r">🔒 관리자</span></div>
+      <div class="shead"><span class="l">📣 모집공고</span><span class="vt"><span class="on">≡</span><span>▦</span></span></div>
+      <div class="list">
+        <div class="rowB live">
+          <div class="top">
+            <div class="thw"><div class="th">🛍️</div><span class="pop b-pop">🔥 인기!</span></div>
+            <div class="mid">
+              <div class="tt">한율 어린쑥 수분진정 크림 55ml</div>
+              <div class="badges"><span class="b-ch">쿠팡</span><span class="b-live">바로참여</span><span class="mutx">🕑 10:00~15:00 · 💰 1,000원</span></div>
+            </div>
           </div>
-          <div class="grow">
-            <div class="glabel"><span>오늘 모집</span><b>7 / 20명</b></div>
-            <div class="gauge live"><i style="width:35%"></i></div>
+          <div class="foot">
+            <div class="gwrap">
+              <div class="glabel"><span>오늘 모집</span><b>7 / 20명</b></div>
+              <div class="gauge live"><i style="width:35%"></i></div>
+              <div class="cdl">마감까지 <span class="cd">02:31:08</span></div>
+            </div>
+            <button class="cta go">참여하기</button>
           </div>
+          <span class="star b-star">⭐</span>
         </div>
-        <div class="right">
-          <span class="b-star">⭐</span>
-          <button class="cta go">참여하기</button>
-          <div class="cdl">마감까지 <span class="cd">02:31:08</span></div>
+        <div class="rowB dim">
+          <div class="top">
+            <div class="thw"><div class="th">🧴</div></div>
+            <div class="mid">
+              <div class="tt">넛세린 아로마 넛 슬림핏 바디 2종 셀룰라이트 관리 세트</div>
+              <div class="badges"><span class="b-ch">쿠팡</span><span class="b-dl">실배송</span><span class="mutx">⏱ 자율</span></div>
+            </div>
+          </div>
+          <div class="foot">
+            <div class="gwrap">
+              <div class="glabel"><span>오늘 모집</span><b>10 / 10명 완료</b></div>
+              <div class="gauge"><i style="width:100%"></i></div>
+              <div class="cdl">내일 다시 오픈</div>
+            </div>
+            <button class="cta off">오늘은 마감</button>
+          </div>
+          <span class="star b-star off">☆</span>
+        </div>
+        <div class="rowB dim">
+          <div class="top">
+            <div class="thw"><div class="th">🧴</div></div>
+            <div class="mid">
+              <div class="tt">1 7 [NEW] 블랑카우 모이스처 리페어 바디로션 500ml</div>
+              <div class="badges"><span class="b-ch">올리브영</span><span class="b-dl">실배송</span><span class="mutx">⏱ 자율</span></div>
+            </div>
+          </div>
+          <div class="foot">
+            <div class="gwrap">
+              <div class="glabel"><span>오늘 모집</span><b>20 / 20명 완료</b></div>
+              <div class="gauge"><i style="width:100%"></i></div>
+              <div class="cdl">내일 다시 오픈</div>
+            </div>
+            <button class="cta off">오늘은 마감</button>
+          </div>
+          <span class="star b-star off">☆</span>
         </div>
       </div>
-      <div class="rowB dim">
-        <div class="thw"><div class="th">🧴</div></div>
-        <div class="mid">
-          <div>
-            <div class="tt">넛세린 아로마 넛 슬림핏 바디 2종 셀룰라이트 관리 세트 바디로션</div>
-            <div class="badges"><span class="b-ch">쿠팡</span><span class="b-dl">실배송</span><span class="muted">⏱ 자율 · 바로참여</span></div>
-          </div>
-          <div class="grow">
-            <div class="glabel"><span>오늘 모집</span><b>10 / 10명 완료</b></div>
-            <div class="gauge"><i style="width:100%"></i></div>
-          </div>
-        </div>
-        <div class="right">
-          <span class="b-star">☆</span>
-          <button class="cta off">오늘은 마감</button>
-          <div class="cdl">내일 다시 오픈</div>
-        </div>
-      </div>
-      <div class="rowB dim">
-        <div class="thw"><div class="th">🧴</div></div>
-        <div class="mid">
-          <div>
-            <div class="tt">1 7 [NEW] 블랑카우 모이스처 리페어 바디로션 500ml</div>
-            <div class="badges"><span class="b-ch">올리브영</span><span class="b-dl">실배송</span><span class="muted">⏱ 자율</span></div>
-          </div>
-          <div class="grow">
-            <div class="glabel"><span>오늘 모집</span><b>20 / 20명 완료</b></div>
-            <div class="gauge"><i style="width:100%"></i></div>
-          </div>
-        </div>
-        <div class="right">
-          <span class="b-star">☆</span>
-          <button class="cta off">오늘은 마감</button>
-          <div class="cdl">내일 다시 오픈</div>
-        </div>
-      </div>
-    </div>
-    <div class="note"><b>지금 화면(카드)과 정보가 1:1로 같아</b> 어색함이 없고, 행에서 바로 참여로 진입합니다.
-      모집중 행만 파란 버튼이라 눈에 띕니다.</div>
+      <div class="bnav"><div class="on"><span class="ic">🏠</span>홈</div><div><span class="ic">🪪</span>내정보/현황</div><div><span class="ic">📖</span>가이드</div></div>
+    </div></div>
+    <div class="note"><b>지금 카드와 정보량이 같아</b> 전환해도 어색함이 없고, 행에서 바로 참여로 진입합니다.
+      모집중 행만 파란 버튼이라 손가락이 갈 곳이 분명합니다.</div>
   </section>
 
   <!-- ═══════════ 시안 C ═══════════ -->
-  <section>
+  <section id="sC">
     <div class="sec-label">시안 C</div>
-    <h2>티켓형 — 썸네일 위 카운트다운, 카드의 축소판</h2>
-    <div class="pros">
-      <span>카운트다운이 썸네일 위(카드와 동일)</span><span>행마다 독립 카드 느낌</span>
-      <span class="warn">행 간격 있어 A·B보다 김</span>
-    </div>
-    <div class="frame" style="background:transparent;border:none;box-shadow:none;padding:0">
-      <div class="rowC live">
-        <div class="thw"><div class="th" style="border-radius:0">🛍️</div>
-          <div class="ovl"><span class="l">구매마감까지</span><span class="t">02:31:08</span></div>
+    <h2>티켓형 — 썸네일 위 카운트다운, 카드의 가로판</h2>
+    <div class="pros"><span>카운트다운 위치 = 카드와 동일</span><span>행마다 독립 카드</span><span class="warn">A·B보다 목록이 김</span></div>
+    <div class="phone"><div class="scr">
+      <div class="sbar"><span>9:41</span><span>📶 🔋</span></div>
+      <div class="appbar"><span class="t">홈</span><span class="r">🔒 관리자</span></div>
+      <div class="shead"><span class="l">📣 모집공고</span><span class="vt"><span class="on">≡</span><span>▦</span></span></div>
+      <div class="list">
+        <div class="rowC live">
+          <div class="thw"><div class="th" style="border-radius:0">🛍️</div>
+            <div class="ovl"><span class="l">구매마감까지</span><span class="t">02:31:08</span></div>
+          </div>
+          <div class="mid">
+            <div class="badges"><span class="b-pop">🔥 인기!</span><span class="b-ch">쿠팡</span><span class="b-live">바로참여</span></div>
+            <div class="tt">한율 어린쑥 수분진정 크림 55ml</div>
+            <div class="foot"><span class="n"><b>7</b>/20명</span><div class="gauge live"><i style="width:35%"></i></div></div>
+            <div class="act"><button class="cta go">참여하기</button></div>
+          </div>
+          <span class="star b-star">⭐</span>
         </div>
-        <div class="mid">
-          <div class="badges"><span class="b-pop">🔥 인기!</span><span class="b-ch">쿠팡</span><span class="b-live">바로참여</span></div>
-          <div class="tt">한율 어린쑥 수분진정 크림 55ml</div>
-          <div class="foot"><span class="n"><b>7</b>/20명</span><div class="gauge live"><i style="width:35%"></i></div></div>
+        <div class="rowC dim">
+          <div class="thw"><div class="th" style="border-radius:0">🧴</div></div>
+          <div class="mid">
+            <div class="badges"><span class="b-ch">쿠팡</span><span class="b-dl">실배송</span><span class="mutx">⏱ 자율</span></div>
+            <div class="tt">넛세린 아로마 넛 슬림핏 바디 2종 세트</div>
+            <div class="foot"><span class="n"><b>10</b>/10명 완료</span><div class="gauge"><i style="width:100%"></i></div></div>
+            <div class="act"><button class="cta off">오늘은 마감 · 내일 오픈</button></div>
+          </div>
+          <span class="star b-star off">☆</span>
         </div>
-        <div class="right"><button class="cta go">참여하기</button></div>
-        <span class="star b-star">⭐</span>
+        <div class="rowC dim">
+          <div class="thw"><div class="th" style="border-radius:0">🧴</div></div>
+          <div class="mid">
+            <div class="badges"><span class="b-ch">올리브영</span><span class="b-dl">실배송</span><span class="mutx">⏱ 자율</span></div>
+            <div class="tt">[NEW] 블랑카우 모이스처 리페어 바디워시 500ml</div>
+            <div class="foot"><span class="n"><b>20</b>/20명 완료</span><div class="gauge"><i style="width:100%"></i></div></div>
+            <div class="act"><button class="cta off">오늘은 마감 · 내일 오픈</button></div>
+          </div>
+          <span class="star b-star off">☆</span>
+        </div>
       </div>
-      <div class="rowC dim">
-        <div class="thw"><div class="th" style="border-radius:0">🧴</div></div>
-        <div class="mid">
-          <div class="badges"><span class="b-ch">쿠팡</span><span class="b-dl">실배송</span><span class="muted">⏱ 자율</span></div>
-          <div class="tt">넛세린 아로마 넛 슬림핏 바디 2종 세트</div>
-          <div class="foot"><span class="n"><b>10</b>/10명 완료</span><div class="gauge"><i style="width:100%"></i></div></div>
-        </div>
-        <div class="right"><button class="cta off">오늘은 마감</button></div>
-        <span class="star b-star">☆</span>
-      </div>
-      <div class="rowC dim">
-        <div class="thw"><div class="th" style="border-radius:0">🧴</div></div>
-        <div class="mid">
-          <div class="badges"><span class="b-ch">올리브영</span><span class="b-dl">실배송</span><span class="muted">⏱ 자율</span></div>
-          <div class="tt">[NEW] 블랑카우 모이스처 리페어 바디워시 500ml</div>
-          <div class="foot"><span class="n"><b>20</b>/20명 완료</span><div class="gauge"><i style="width:100%"></i></div></div>
-        </div>
-        <div class="right"><button class="cta off">오늘은 마감</button></div>
-        <span class="star b-star">☆</span>
-      </div>
-    </div>
-    <div class="note">지금 카드에서 쓰는 요소(썸네일 위 카운트다운·리본·배지)를 그대로 가로로 눕힌 형태라
-      <b>카드 보기 ↔ 행 보기 전환이 가장 자연스럽습니다.</b></div>
+      <div class="bnav"><div class="on"><span class="ic">🏠</span>홈</div><div><span class="ic">🪪</span>내정보/현황</div><div><span class="ic">📖</span>가이드</div></div>
+    </div></div>
+    <div class="note">지금 카드의 요소(썸네일 위 카운트다운·배지·게이지)를 그대로 가로로 눕힌 형태라
+      <b>카드 보기 ↔ 행 보기 전환이 가장 자연스럽습니다.</b> 행마다 버튼이 있어 목록은 A·B보다 깁니다.</div>
   </section>
 
   <div class="pickbar">
     <div class="pickcard">
       ✅ <b>고르는 방법</b> — 채팅으로 "<b>A</b>", "<b>B</b>", "<b>C</b>" 중 하나만 알려주세요.
-      부분 조합(예: "B인데 별표는 A처럼")도 가능합니다. 선택하시면 카드↔행 전환 버튼에 바로 연결해 구현합니다.
-      <div class="muted" style="margin-top:6px">공통: 행을 탭하면 상세(campaign.html) 이동 · [인기!]/타계정 배지·카운트다운·게이지는 카드 보기와 동일 규칙 · ⭐ 별표는 관리자 로그인 시에만 표시되고 리뷰어에게는 안 보입니다.</div>
+      부분 조합(예: "B인데 버튼은 C처럼 아래로")도 가능합니다. 선택하시면 홈의 카드↔행 전환 버튼에 바로 연결해 구현합니다.
+      <div class="mutx" style="margin-top:6px;font-size:.7rem">공통: 행 탭=상세 이동 · [인기!]·카운트다운·게이지는 카드 보기와 동일 규칙 · ⭐ 별표는 관리자 로그인 시에만 보이며 리뷰어에게는 표시되지 않습니다.</div>
     </div>
   </div>
 
 </div>
+<script>
+  // 이미지 추출용: ?v=A|B|C 면 그 시안 폰만 표시(문서 헤더·푸터 숨김)
+  (function(){
+    var v = new URLSearchParams(location.search).get('v');
+    if (v && ['A','B','C'].indexOf(v) >= 0) { document.body.classList.add('only', 'only-' + v); }
+  })();
+</script>
 </body>
 </html>
