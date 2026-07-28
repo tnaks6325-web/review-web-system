@@ -1,0 +1,491 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>현금영수증 발행방법 이미지 등록 안내</title>
+<style>
+  *,*::before,*::after{box-sizing:border-box}
+  :root{
+    --paper:#F6F7F9; --card:#FFFFFF; --ink:#14171D; --muted:#5B6472; --line:#E2E6EC;
+    --sys:#1F5FA8; --sys-bg:#EAF1FA; --sys-edge:#B9D2EE;
+    --staff:#9A6414; --staff-bg:#FBF2E2; --staff-edge:#E8D2A4;
+    --reuse:#157A6E; --reuse-bg:#E6F3F1; --reuse-edge:#A9D8D0;
+    --shadow:0 1px 2px rgba(20,23,29,.06), 0 8px 24px rgba(20,23,29,.05);
+  }
+  @media (prefers-color-scheme: dark){
+    :root{
+      --paper:#0F1216; --card:#161A20; --ink:#E8ECF2; --muted:#98A2B0; --line:#262C35;
+      --sys:#84B6EF; --sys-bg:#15263C; --sys-edge:#27466B;
+      --staff:#E2B673; --staff-bg:#2C2315; --staff-edge:#4E3D1E;
+      --reuse:#6FC7B9; --reuse-bg:#122B28; --reuse-edge:#245049;
+      --shadow:0 1px 2px rgba(0,0,0,.4), 0 8px 24px rgba(0,0,0,.28);
+    }
+  }
+  html{-webkit-text-size-adjust:100%}
+  body{
+    margin:0; background:var(--paper); color:var(--ink);
+    font-family:"Pretendard Variable",Pretendard,-apple-system,BlinkMacSystemFont,"Apple SD Gothic Neo","Malgun Gothic","Noto Sans KR",system-ui,sans-serif;
+    line-height:1.6; -webkit-font-smoothing:antialiased;
+  }
+  .wrap{max-width:940px; margin:0 auto; padding:44px 20px 64px; display:flex; flex-direction:column; gap:34px}
+
+  .eyebrow{
+    margin:0 0 10px; font-size:11.5px; font-weight:700; letter-spacing:.14em;
+    text-transform:uppercase; color:var(--sys);
+  }
+  h1{
+    margin:0 0 12px; font-size:clamp(28px,4.4vw,40px); font-weight:800;
+    letter-spacing:-.026em; line-height:1.18; text-wrap:balance;
+  }
+  .lede{margin:0; max-width:62ch; color:var(--muted); font-size:16px}
+  .head{border-bottom:1px solid var(--line); padding-bottom:26px}
+
+  .scene{display:flex; flex-direction:column; gap:14px}
+  .scene h2{
+    margin:0; font-size:19px; font-weight:750; letter-spacing:-.015em;
+    display:flex; align-items:center; gap:9px; flex-wrap:wrap;
+  }
+  .stepno{
+    flex:none; width:26px; height:26px; border-radius:8px; display:grid; place-items:center;
+    background:var(--sys); color:#fff; font-size:13px; font-weight:800;
+  }
+  @media (prefers-color-scheme: dark){ .stepno{color:#0F1216} }
+  .tag{
+    font-size:11px; font-weight:700; letter-spacing:.06em; padding:3px 9px;
+    border-radius:6px; background:var(--sys-bg); color:var(--sys); border:1px solid var(--sys-edge);
+  }
+  .tag.t-staff{background:var(--staff-bg); color:var(--staff); border-color:var(--staff-edge)}
+  .tag.t-reuse{background:var(--reuse-bg); color:var(--reuse); border-color:var(--reuse-edge)}
+  .rule{margin:0; color:var(--muted); font-size:14.5px; max-width:66ch}
+  .rule strong{color:var(--ink); font-weight:700}
+
+  /* ── 실제 화면 재현(목업) ─────────────────────────────────────────
+     ★ 재현 영역은 라이트 톤으로 고정한다. 실제 관리자·리뷰어 화면이 라이트라
+       다크모드에서 색을 뒤집으면 "실물과 같다"는 이 문서의 목적이 깨진다. */
+  .shot{
+    color-scheme:light; background:#fff; color:#14171D;
+    border:1px solid #E2E6EC; border-radius:12px; box-shadow:var(--shadow); overflow:hidden;
+  }
+  .shot-bar{
+    display:flex; align-items:center; gap:8px; padding:9px 13px;
+    background:#F6F7F9; border-bottom:1px solid #E2E6EC;
+    font-size:11.5px; font-weight:700; color:#5B6472; letter-spacing:.02em;
+  }
+  .shot-bar .dots{display:flex; gap:5px}
+  .shot-bar .dots i{width:9px; height:9px; border-radius:50%; background:#DFE3E9; display:block}
+  .shot-body{padding:18px 20px; display:flex; flex-direction:column; gap:14px}
+  .shot-cap{
+    padding:9px 14px; background:#F6F7F9; border-top:1px solid #E2E6EC;
+    font-size:12px; color:#5B6472;
+  }
+  .shot-cap b{color:#14171D; font-weight:700}
+
+  .navtabs{display:flex; gap:4px; flex-wrap:wrap; border-bottom:1px solid #E2E6EC; padding:0 20px}
+  .navtabs span{
+    padding:9px 13px; font-size:12.5px; font-weight:650; color:#8A93A3;
+    border-bottom:2px solid transparent; white-space:nowrap;
+  }
+  .navtabs span.on{color:#1D4ED8; border-bottom-color:#1D4ED8}
+
+  .adm-h{display:flex; align-items:center; gap:7px; font-size:14px; font-weight:750; color:#14171D}
+  .adm-h .ico{font-size:15px}
+  .adm-sub{margin:0; font-size:12px; color:#5B6472; line-height:1.55}
+  .adm-sub b{color:#14171D}
+  .adm-hint{font-size:11.5px; font-weight:400; color:#8A93A3}
+
+  .fldrow{display:flex; gap:8px; align-items:center; max-width:460px; flex-wrap:wrap}
+  .fld{
+    flex:1; min-width:170px; padding:8px 12px; border:1.5px solid #D1D5DB; border-radius:8px;
+    font-size:13px; background:#fff; color:#14171D;
+  }
+  .fld.ph{color:#9AA3B0}
+  .btn{
+    padding:8px 18px; border-radius:8px; font-size:12.5px; font-weight:700; white-space:nowrap;
+    border:1px solid transparent;
+  }
+  .btn.pri{background:#1D4ED8; color:#fff}
+  .btn.dan{background:#FFF5F5; color:#B42318; border-color:#F7C9C9; padding:6px 10px; font-size:11.5px}
+
+  .crgrid{display:flex; gap:14px; flex-wrap:wrap}
+  .crbox{
+    flex:1; min-width:236px; max-width:330px; border:1px solid #E2E6EC; border-radius:10px; padding:10px;
+    display:flex; flex-direction:column; gap:6px;
+  }
+  .crbox .ch{font-size:12.5px; font-weight:700}
+  .crnone{font-size:11.5px; color:#9AA3B0}
+  .filerow{display:flex; gap:6px; align-items:center}
+  .filebtn{
+    flex:1; min-width:0; display:flex; align-items:center; gap:6px; padding:5px 8px;
+    border:1px solid #D1D5DB; border-radius:7px; background:#F6F7F9; font-size:11px; color:#5B6472;
+  }
+  .filebtn em{
+    font-style:normal; padding:2px 7px; border-radius:5px; background:#fff;
+    border:1px solid #D1D5DB; font-weight:650; color:#14171D; white-space:nowrap;
+  }
+  .filebtn span{overflow:hidden; text-overflow:ellipsis; white-space:nowrap}
+
+  /* 캡처 이미지 자리 — 실제 사진 대신 "무엇을 담아야 하는지"를 그린다 */
+  .imgslot{
+    border:1px dashed #C7CDD6; border-radius:8px; background:#FAFBFC; padding:12px;
+    display:flex; flex-direction:column; gap:7px; min-height:118px; justify-content:center;
+  }
+  .imgslot.filled{border-style:solid; border-color:#CFE0F5; background:#F4F8FD}
+  .imgslot.mini{min-height:0; padding:10px}
+  .imgslot .cap{font-size:10.5px; font-weight:700; letter-spacing:.04em; color:#8A93A3}
+  .imgslot.filled .cap{color:#1F5FA8}
+  .mockline{display:flex; align-items:center; gap:7px; font-size:11.5px; color:#5B6472}
+  .mockline .box{
+    flex:none; width:13px; height:13px; border-radius:3px; border:1.5px solid #B9C2CE; background:#fff;
+  }
+  .mockline .box.on{border-color:#1D4ED8; background:#1D4ED8; position:relative}
+  .mockline .box.on::after{
+    content:"✓"; position:absolute; inset:0; display:grid; place-items:center;
+    font-size:9px; color:#fff; font-weight:800;
+  }
+  .mockline b{color:#14171D; font-weight:700}
+  .toast{
+    align-self:flex-start; padding:7px 13px; border-radius:9px; background:#0F172A; color:#fff;
+    font-size:11.5px; font-weight:650;
+  }
+
+  /* 리뷰어 화면 재현 — 실제 렌더러(campaign-workdetail.js)의 리터럴 색 그대로 */
+  .rvphone{max-width:420px; width:100%}
+  .rvcard{
+    border:1px solid #F59E0B; background:#FFFBF2; border-radius:12px; padding:14px 15px;
+    display:flex; flex-direction:column; gap:8px;
+  }
+  .rvcard .tt{font-size:13.5px; font-weight:750; color:#B45309}
+  .rvcard .bd{font-size:12.5px; color:#14171D; line-height:1.6}
+  .rvcard .bd b{font-weight:750}
+  .rvcard .warn{font-size:11.5px; color:#B45309; font-weight:700; line-height:1.5}
+  .rvcard.plain{border-color:#E2E6EC; background:#fff}
+  .rvcard.plain .tt{color:#B45309}
+
+  /* 제출 화면 슬롯 재현 */
+  .slot{border:1px solid #E2E6EC; border-radius:10px; padding:11px 12px; display:flex; flex-direction:column; gap:8px}
+  .slot-hd{display:flex; align-items:center; gap:8px}
+  .slot-no{
+    flex:none; width:20px; height:20px; border-radius:50%; background:#EAF1FA; color:#1F5FA8;
+    display:grid; place-items:center; font-size:11px; font-weight:800;
+  }
+  .slot-tt{font-size:12.5px; font-weight:700; flex:1}
+  .slot-st{font-size:10.5px; font-weight:700; padding:2px 8px; border-radius:999px}
+  .slot-st.wait{background:#F1F3F6; color:#8A93A3}
+  .slot-st.ok{background:#E6F6EC; color:#16A34A}
+  .dz{
+    border:1.5px dashed #C7CDD6; border-radius:9px; padding:16px; text-align:center;
+    font-size:11.5px; color:#8A93A3; background:#FAFBFC;
+  }
+  .aiwarn{
+    padding:9px 11px; border-radius:9px; background:#FEF0F0; border:1px solid #F7BDBD;
+    color:#B42318; font-size:11.5px; font-weight:650; line-height:1.5;
+  }
+  .aiwarn small{display:block; font-size:10.5px; font-weight:500; margin-top:4px; color:#8A93A3}
+
+  .compare{display:grid; grid-template-columns:1fr 1fr; gap:14px}
+  .cc{
+    background:var(--card); border:1px solid var(--line); border-radius:12px;
+    padding:18px 20px; box-shadow:var(--shadow); display:flex; flex-direction:column; gap:10px;
+  }
+  .cc.bad{border-top:3px solid #C0392B}
+  .cc.good{border-top:3px solid var(--reuse)}
+  .cc-hd{font-size:14.5px; font-weight:750; display:flex; align-items:center; gap:8px; letter-spacing:-.01em}
+  .mark{
+    flex:none; width:20px; height:20px; border-radius:50%; display:grid; place-items:center;
+    font-size:12px; font-weight:800; color:#fff;
+  }
+  .mark.x{background:#C0392B}
+  .mark.o{background:var(--reuse)}
+  .cc .result{margin:0; font-size:13px; font-weight:700; color:var(--ink)}
+
+  .logcard{
+    margin:0; padding:13px 16px; background:var(--card); border:1px solid var(--line);
+    border-left:3px solid var(--sys); border-radius:10px; font-size:13.5px; color:var(--ink);
+  }
+  .logcard.warnline{border-left-color:#C0392B}
+  .logcard b{display:block; font-size:11px; letter-spacing:.08em; text-transform:uppercase;
+    color:var(--muted); font-weight:700; margin-bottom:5px}
+
+  .checks{
+    background:var(--card); border:1px solid var(--line); border-radius:12px;
+    padding:18px 20px; box-shadow:var(--shadow);
+  }
+  .checks h3{margin:0 0 12px; font-size:14.5px; font-weight:750}
+  .checks ul{margin:0; padding:0; list-style:none; display:flex; flex-direction:column; gap:9px}
+  .checks li{display:flex; gap:10px; align-items:flex-start; font-size:13.5px; color:var(--muted)}
+  .checks li b{color:var(--ink); font-weight:700}
+  .cbox{
+    flex:none; margin-top:3px; width:15px; height:15px; border-radius:4px;
+    border:1.5px solid var(--staff); background:var(--staff-bg);
+  }
+
+  .notice{
+    background:var(--card); border:1px solid var(--line); border-radius:12px;
+    padding:24px 26px; box-shadow:var(--shadow);
+  }
+  .notice h2{margin:0 0 14px; font-size:17px; font-weight:750; letter-spacing:-.01em}
+  .notice ul{margin:0; padding:0; list-style:none; display:flex; flex-direction:column; gap:11px}
+  .notice li{display:flex; gap:11px; align-items:flex-start; font-size:14.5px}
+  .bullet{flex:none; margin-top:6px; width:6px; height:6px; border-radius:2px; background:var(--sys)}
+  .notice li:nth-child(2) .bullet{background:var(--staff)}
+  .notice li:nth-child(3) .bullet{background:var(--staff)}
+  .notice li:nth-child(4) .bullet{background:#C0392B}
+  .notice li:nth-child(5) .bullet{background:#C0392B}
+  .notice li:nth-child(6) .bullet{background:var(--reuse)}
+  .notice strong{font-weight:750}
+
+  @media (max-width:620px){
+    .wrap{padding:32px 14px 48px; gap:28px}
+    .notice{padding:20px 18px}
+    .compare{grid-template-columns:1fr}
+    .crbox{max-width:none}
+  }
+  @media print{
+    body{background:#fff}
+    .shot,.notice,.cc,.checks{box-shadow:none}
+    .scene{break-inside:avoid}
+  }
+</style>
+</head>
+<body>
+<main class="wrap">
+  <header class="head">
+    <p class="eyebrow">운영 안내 · 관리자 설정</p>
+    <h1>현금영수증 발행방법 이미지를 등록해 주세요</h1>
+    <p class="lede">진행방식이 <strong>사업자현영</strong>인 탭의 공고는, 리뷰어가 결제하기 전에
+      지출증빙 현금영수증을 직접 발행해야 합니다. 발행방법 이미지를 등록해 두면
+      리뷰어 화면에 <strong>구매채널에 맞는 이미지가 자동으로</strong> 붙습니다.
+      <br>등록 전에는 사업자번호 문구만 나갑니다.</p>
+  </header>
+
+  <section class="scene">
+    <h2>미리 준비할 것 <span class="tag t-staff">이미지 2장</span></h2>
+    <div class="checks">
+      <h3>캡처 준비</h3>
+      <ul>
+        <li><span class="cbox"></span><span><b>네이버 결제 화면 캡처 1장</b> — 현금영수증에서 <b>지출증빙</b>을 고르고
+          사업자번호를 넣는 부분이 보이게</span></li>
+        <li><span class="cbox"></span><span><b>쿠팡 결제 화면 캡처 1장</b> — 같은 기준으로 한 장</span></li>
+        <li><span class="cbox"></span><span><b>JPG · PNG 이미지, 한 장당 5MB 이하</b> — 그보다 크면 업로드가 거부됩니다</span></li>
+        <li><span class="cbox"></span><span><b>회사 사업자번호</b> — 같은 설정 화면에서 함께 저장합니다</span></li>
+      </ul>
+    </div>
+    <p class="rule">한 번만 등록하면 <strong>모든 현영 공고에 공통으로 적용</strong>됩니다.
+      공고를 만들 때마다 다시 올리실 필요는 없습니다.</p>
+  </section>
+
+  <section class="scene">
+    <h2><span class="stepno">1</span>관리자 화면에서 [설정] 탭을 엽니다</h2>
+    <div class="shot">
+      <div class="shot-bar"><span class="dots"><i></i><i></i><i></i></span>리뷰 관리 시스템 · 관리자</div>
+      <div class="navtabs">
+        <span>대시보드</span><span>모집공고</span><span>작업오더</span><span>리뷰어</span>
+        <span>입금관리</span><span class="on">설정</span>
+      </div>
+      <div class="shot-body">
+        <p class="adm-sub">설정 탭을 아래로 내리면 <b>회사 사업자번호 (제공정보)</b> 항목이 나옵니다.</p>
+      </div>
+    </div>
+  </section>
+
+  <section class="scene">
+    <h2><span class="stepno">2</span>회사 사업자번호를 먼저 저장합니다</h2>
+    <p class="rule">리뷰어 안내 문구에 들어가는 번호입니다.
+      <strong>이 번호가 비어 있으면</strong> 리뷰어 화면에 “안내된 사업자번호를 입력하세요”라고만 나가서
+      리뷰어가 어떤 번호를 넣어야 할지 알 수 없습니다.</p>
+    <div class="shot">
+      <div class="shot-body">
+        <div class="adm-h"><span class="ico">🏢</span>회사 사업자번호 (제공정보)</div>
+        <p class="adm-sub">진행방식이 <b>사업자현영</b>인 탭의 구매양식 제출화면에
+          <b>지출증빙용 현금영수증 발행</b> 안내와 함께 표시됩니다. 회사 공통으로 1개만 설정합니다.</p>
+        <div class="fldrow">
+          <span class="fld">311-87-02345</span>
+          <span class="btn pri">저장</span>
+        </div>
+      </div>
+      <div class="shot-cap">번호를 넣고 <b>[저장]</b>까지 눌러주세요. 저장하면 화면 아래에 확인 메시지가 뜹니다.</div>
+    </div>
+  </section>
+
+  <section class="scene">
+    <h2><span class="stepno">3</span>발행방법 이미지를 채널별로 올립니다 <span class="tag t-staff">등록 전</span></h2>
+    <p class="rule">같은 화면 바로 아래에 <strong>🧾 현금영수증 발행방법 이미지</strong> 칸이 있습니다.
+      네이버·쿠팡 각각의 <strong>[파일 선택]</strong>을 눌러 캡처를 고르면 <strong>고르는 즉시 업로드·저장</strong>됩니다.
+      따로 저장 버튼은 없습니다.</p>
+    <div class="shot">
+      <div class="shot-body">
+        <div class="adm-h"><span class="ico">🧾</span>현금영수증 발행방법 이미지
+          <span class="adm-hint">— 현영 탭 공고의 작업내용에서 리뷰어에게 채널에 맞는 이미지가 보입니다</span></div>
+        <div class="crgrid">
+          <div class="crbox">
+            <div class="ch">🟢 네이버</div>
+            <div class="crnone">등록된 이미지가 없습니다</div>
+            <div class="filerow">
+              <span class="filebtn"><em>파일 선택</em><span>선택된 파일 없음</span></span>
+              <span class="btn dan">제거</span>
+            </div>
+          </div>
+          <div class="crbox">
+            <div class="ch">🛒 쿠팡</div>
+            <div class="crnone">등록된 이미지가 없습니다</div>
+            <div class="filerow">
+              <span class="filebtn"><em>파일 선택</em><span>선택된 파일 없음</span></span>
+              <span class="btn dan">제거</span>
+            </div>
+          </div>
+        </div>
+      </div>
+      <div class="shot-cap">아직 아무것도 올리지 않은 상태입니다. <b>두 칸 모두</b> 채워주세요.</div>
+    </div>
+  </section>
+
+  <section class="scene">
+    <h2><span class="stepno">4</span>올리면 그 자리에 미리보기가 뜹니다 <span class="tag t-reuse">등록 완료</span></h2>
+    <div class="shot">
+      <div class="shot-body">
+        <div class="adm-h"><span class="ico">🧾</span>현금영수증 발행방법 이미지
+          <span class="adm-hint">— 현영 탭 공고의 작업내용에서 리뷰어에게 채널에 맞는 이미지가 보입니다</span></div>
+        <div class="crgrid">
+          <div class="crbox">
+            <div class="ch">🟢 네이버</div>
+            <div class="imgslot filled">
+              <div class="cap">등록된 이미지 (미리보기)</div>
+              <div class="mockline"><span class="box on"></span><span>현금영수증 <b>발급</b></span></div>
+              <div class="mockline"><span class="box on"></span><span><b>지출증빙</b> 선택</span></div>
+              <div class="mockline"><span class="box"></span><span>소득공제</span></div>
+              <div class="mockline"><span class="box on"></span><span>사업자번호 <b>311-87-02345</b></span></div>
+            </div>
+            <div class="filerow">
+              <span class="filebtn"><em>파일 선택</em><span>선택된 파일 없음</span></span>
+              <span class="btn dan">제거</span>
+            </div>
+          </div>
+          <div class="crbox">
+            <div class="ch">🛒 쿠팡</div>
+            <div class="imgslot filled">
+              <div class="cap">등록된 이미지 (미리보기)</div>
+              <div class="mockline"><span class="box on"></span><span>현금영수증 <b>신청</b></span></div>
+              <div class="mockline"><span class="box on"></span><span><b>지출증빙용</b> 선택</span></div>
+              <div class="mockline"><span class="box"></span><span>개인 소득공제용</span></div>
+              <div class="mockline"><span class="box on"></span><span>사업자등록번호 <b>311-87-02345</b></span></div>
+            </div>
+            <div class="filerow">
+              <span class="filebtn"><em>파일 선택</em><span>선택된 파일 없음</span></span>
+              <span class="btn dan">제거</span>
+            </div>
+          </div>
+        </div>
+        <div class="toast">✅ 네이버 발행방법 이미지가 등록되었습니다.</div>
+      </div>
+      <div class="shot-cap">위 미리보기 자리에는 <b>실제로 올리신 캡처 이미지</b>가 그대로 들어갑니다
+        (여기서는 어떤 내용이 담겨야 하는지를 그림으로 대신 표시했습니다).</div>
+    </div>
+    <p class="logcard"><b>바꾸고 싶을 때</b>
+      같은 칸에서 <strong>[파일 선택]</strong>으로 다른 이미지를 고르면 바로 교체됩니다.
+      <strong>[제거]</strong>를 누르면 이미지만 사라지고 <strong>사업자번호 안내 문구는 그대로 남습니다.</strong></p>
+  </section>
+
+  <section class="scene">
+    <h2>등록하면 리뷰어에게 이렇게 보입니다 <span class="tag">리뷰어 화면</span></h2>
+    <p class="rule">리뷰어가 공고에 참여한 뒤 보는 <strong>작업내용</strong>에서,
+      상품 · 옵션 · 결제금액 카드 <strong>바로 아래</strong>에 붙습니다.
+      결제 화면으로 넘어가기 전에 보이는 자리입니다.</p>
+    <div class="shot rvphone">
+      <div class="shot-body">
+        <div class="rvcard">
+          <div class="tt">🧾 현금영수증 발행 안내 (필수)</div>
+          <div class="bd">결제 단계에서 <b>지출증빙 현금영수증</b>을 선택하고
+            사업자번호 <b>311-87-02345</b>를 입력하세요.</div>
+          <div class="imgslot filled">
+            <div class="cap">등록하신 발행방법 이미지</div>
+            <div class="mockline"><span class="box on"></span><span>현금영수증 <b>발급</b></span></div>
+            <div class="mockline"><span class="box on"></span><span><b>지출증빙</b> 선택</span></div>
+            <div class="mockline"><span class="box on"></span><span>사업자번호 <b>311-87-02345</b></span></div>
+          </div>
+          <div class="warn">⚠ 리뷰 제출 때 발행 내역 캡처가 필요해요 — 결제 화면을 지나기 전에 꼭 발행해 주세요.</div>
+        </div>
+      </div>
+      <div class="shot-cap">공고의 <b>구매채널</b>이 쿠팡이면 쿠팡 이미지가, 네이버면 네이버 이미지가 자동으로 붙습니다.</div>
+    </div>
+  </section>
+
+  <section class="scene">
+    <h2>등록 전 / 등록 후 <span class="tag t-staff">차이</span></h2>
+    <div class="compare">
+      <div class="cc bad">
+        <div class="cc-hd"><span class="mark x">✕</span>이미지를 등록하지 않으면</div>
+        <div class="rvcard">
+          <div class="tt">🧾 현금영수증 발행 안내 (필수)</div>
+          <div class="bd">결제 단계에서 <b>지출증빙 현금영수증</b>을 선택하고
+            사업자번호 <b>311-87-02345</b>를 입력하세요.</div>
+          <div class="warn">⚠ 리뷰 제출 때 발행 내역 캡처가 필요해요 — 결제 화면을 지나기 전에 꼭 발행해 주세요.</div>
+        </div>
+        <p class="result">→ 글만 나갑니다. 어디를 눌러야 하는지 몰라 문의가 늘고,
+          소득공제용으로 잘못 발행하는 일이 생깁니다.</p>
+      </div>
+      <div class="cc good">
+        <div class="cc-hd"><span class="mark o">✓</span>등록해 두면</div>
+        <div class="rvcard">
+          <div class="tt">🧾 현금영수증 발행 안내 (필수)</div>
+          <div class="bd">결제 단계에서 <b>지출증빙 현금영수증</b>을 선택하고
+            사업자번호 <b>311-87-02345</b>를 입력하세요.</div>
+          <div class="imgslot filled mini">
+            <div class="cap">발행방법 이미지</div>
+            <div class="mockline"><span class="box on"></span><span><b>지출증빙</b> 선택 화면</span></div>
+          </div>
+          <div class="warn">⚠ 리뷰 제출 때 발행 내역 캡처가 필요해요.</div>
+        </div>
+        <p class="result">→ 화면을 보고 그대로 따라 하면 되어, 잘못 발행이 줄어듭니다.</p>
+      </div>
+    </div>
+  </section>
+
+  <section class="scene">
+    <h2>이어지는 변화 — 현영 공고는 캡처를 <b>2장</b> 받습니다 <span class="tag">자동</span></h2>
+    <p class="rule">진행방식이 현영인 탭은 리뷰 제출 화면이 <strong>[1] 리뷰 · [2] 현금영수증</strong> 두 칸으로 나옵니다.
+      <strong>두 칸을 모두 올려야 제출 완료</strong>로 처리됩니다. 따로 설정하실 것은 없습니다.</p>
+    <div class="shot rvphone">
+      <div class="shot-body">
+        <div class="slot">
+          <div class="slot-hd"><span class="slot-no">1</span><span class="slot-tt">리뷰</span>
+            <span class="slot-st ok">✓ 제출됨</span></div>
+          <div class="dz">클릭 또는 드래그 · JPG/PNG/WebP</div>
+        </div>
+        <div class="slot">
+          <div class="slot-hd"><span class="slot-no">2</span><span class="slot-tt">현금영수증</span>
+            <span class="slot-st wait">대기</span></div>
+          <div class="dz">클릭 또는 드래그 · JPG/PNG/WebP</div>
+          <div class="aiwarn">⚠ 현금영수증 캡처 자리에 리뷰 캡처가 올라온 것 같아요. 확인 후 다시 첨부해주세요.
+            <small>다시 첨부하면 교체됩니다. 맞게 올리셨다면 그대로 제출하셔도 됩니다.</small></div>
+        </div>
+      </div>
+      <div class="shot-cap">올린 이미지의 형식이 칸과 다르면 <b>AI가 그 자리에서 알려줍니다.</b>
+        다만 <b>제출을 막지는 않습니다</b> — 잘못 판단해 정상 제출을 막는 쪽이 더 큰 문제이기 때문입니다.</div>
+    </div>
+    <p class="logcard warnline"><b>관리자 화면에 남는 기록</b>
+      AI가 형식이 다르다고 본 건은 <strong>통합 작업대 · 리뷰어 로그</strong>와
+      관리자 화면 왼쪽 아래 알림에 남습니다. 리뷰어가 그대로 제출했더라도
+      <strong>사람이 한 번 더 확인</strong>할 수 있습니다.</p>
+  </section>
+
+  <section class="notice">
+    <h2>직원분들께</h2>
+    <ul>
+      <li><span class="bullet"></span><span><strong>회사 공통 1회 등록입니다.</strong>
+        공고나 탭마다 따로 올리실 필요 없이, 설정 탭에서 네이버·쿠팡 한 장씩만 등록하면 됩니다.</span></li>
+      <li><span class="bullet"></span><span><strong>파일을 고르면 바로 저장됩니다.</strong>
+        따로 [저장] 버튼이 없고, 등록되면 그 자리에 미리보기가 뜹니다.</span></li>
+      <li><span class="bullet"></span><span><strong>바꾸면 즉시 전체 반영됩니다.</strong>
+        이미 진행 중인 현영 공고의 리뷰어 화면에도 새 이미지가 바로 나갑니다.</span></li>
+      <li><span class="bullet"></span><span><strong>사업자번호를 꼭 함께 저장해 주세요.</strong>
+        번호가 비어 있으면 리뷰어 화면에 “안내된 사업자번호를 입력하세요”라고만 나갑니다.</span></li>
+      <li><span class="bullet"></span><span><strong>이미지 한 장당 5MB 이하.</strong>
+        그보다 크면 업로드되지 않습니다. 캡처를 줄이거나 잘라서 올려주세요.</span></li>
+      <li><span class="bullet"></span><span><strong>이 안내가 보이는 공고는 현영 탭뿐입니다.</strong>
+        탭의 진행방식에 ‘현영’이 없으면 리뷰어 화면은 지금과 똑같이 나오고, 캡처도 1장만 받습니다.</span></li>
+    </ul>
+  </section>
+</main>
+</body>
+</html>

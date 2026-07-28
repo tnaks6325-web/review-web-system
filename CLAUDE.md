@@ -108,6 +108,7 @@ GAS(Google Apps Script) 기반 리뷰 관리 시스템을 **Node.js Express + Po
 - **서버**(`_cashReceiptInfo`): work-detail(`GET /:id/work-detail`)과 관리자 미리보기(`/admin/:id/preview`) 응답에 `cashReceipt{required, businessNo, guideImageUrl}` 동봉. 채널(쿠팡/네이버)에 맞는 발행방법 이미지를 `app_settings.cash_receipt_guide_*`에서 고른다. **현영이 아니면 null**(일반 공고 응답·화면 불변), 조회 실패도 null(fail-soft).
 - **설정**: 관리자 설정탭에 채널별 발행방법 이미지 업로드 2칸(`POST /api/tab/cash-receipt-guide`, adminOrMaster). guide-image Drive+프록시 인프라 재사용(신규 저장소 0). ★ `imageUrl`은 **https 절대 URL만** — 리뷰어 화면에 `<img src>`로 나가므로 자유 문자열 금지.
 - **리뷰어 화면**: 공용 렌더러(`campaign-workdetail.js`)가 **상품 카드 바로 뒤**(결제 전 시점)에 🧾 안내 카드 — 지출증빙 + 사업자번호 + 발행방법 이미지 + "제출 때 발행 내역 캡처 필요" 예고. 렌더러가 공용이라 관리자 미리보기에도 자동 반영.
+- **직원 안내서**: `frontend/docs/현금영수증_발행방법_이미지_등록_안내.html`(설정탭 등록 절차 4단계 + 리뷰어 화면·2슬롯 **HTML/CSS 목업**, 외부 리소스 0 = 오프라인 열람 가능). 화면 재현 목업은 `color-scheme:light` 고정 — 다크에서 색이 뒤집히면 "실물과 같다"가 깨진다. ★ 안내서가 가르치는 라벨·문구가 제품 소스에 실제로 있는지 `tests/cashReceiptGuideDoc.test.js`(21케이스)가 대조 — **화면을 고치면 이 테스트가 깨져 안내서 갱신을 상기**시킨다(문서↔제품 드리프트 가드).
 - 회귀가드 `tests/cashReceiptGuide.test.js`(20케이스).
 
 ### 현금영수증 2·3단계 — 이중 슬롯 + AI 검수
