@@ -72,9 +72,11 @@
          고정(index 440px·recruit 560px)이라 뷰포트 media로 열수를 늘리면(넓은 데스크톱에서
          공고 페이지를 볼 때) 고정폭 안에 3~4열이 욱여넣어져 카드가 짜부라진다 → 열수 고정.
          ★ 부모가 이미 grid(.rc-list.rc-view-card)여도 한 칸에 갇히지 않게 전체폭 점유(grid-column:1/-1). */
-      .pcards-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:10px;margin-bottom:12px;grid-column:1/-1;width:100%}
+      .pcards-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:10px;margin-bottom:12px;grid-column:1/-1;width:100%;align-items:stretch}
+      /* 관리자 모집공고 = 폭이 넓으므로 2열 고정이 아니라 너비만큼 채운다(리뷰어는 앱 폭이 고정이라 2열 유지) */
+      .pcards-grid.pc-admin{grid-template-columns:repeat(auto-fill,minmax(258px,1fr));gap:12px}
       .pcard{position:relative;background:#fff;border:1px solid #E5E7EB;border-radius:14px;overflow:hidden;
-        box-shadow:0 2px 10px rgba(21,40,80,.06);cursor:pointer;display:flex;flex-direction:column}
+        box-shadow:0 2px 10px rgba(21,40,80,.06);cursor:pointer;display:flex;flex-direction:column;height:100%}
       .pcard.is-closed{opacity:.6;filter:grayscale(1)}
       .pcard.is-dim .pt-img,.pcard.is-dim .pt-ph{filter:grayscale(.35)}
       /* 썸네일: 정사각 전체 노출(잘림 없음) */
@@ -147,7 +149,9 @@
       @keyframes pcBlink{0%,100%{opacity:1}50%{opacity:.25}}
       @media(prefers-reduced-motion:reduce){.pcard .pt-ovl .live-pill .dot{animation:none}}
       .pcard .pbody{padding:9px 10px 10px;display:flex;flex-direction:column;gap:6px;flex:1}
-      .pcard .ptitle{font-size:.82rem;font-weight:800;color:#111827;margin:0;line-height:1.3;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden}
+      /* ★ 제목은 항상 두 줄 자리(1.3 × 2 = 2.6em). 한 줄짜리 제목만 카드가 짧아져 아래 요소가
+         카드마다 다른 높이에 서던 문제를 막는다 — 고정 슬롯의 핵심. */
+      .pcard .ptitle{font-size:.82rem;font-weight:800;color:#111827;margin:0;line-height:1.3;min-height:2.6em;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden}
       .pcard .pmeta{display:flex;align-items:center;gap:6px;flex-wrap:wrap;font-size:.68rem;color:#6B7280;font-weight:600}
       /* 바로참여 배지 = 시간 표기 오른쪽 */
       .pcard .pt-live{font-size:.58rem;font-weight:800;color:#0B7A5B;background:#DDF5EC;border:1px solid rgba(18,184,134,.3);border-radius:5px;padding:1px 6px}
@@ -162,6 +166,70 @@
       .pcard .pg-track{height:6px;border-radius:99px;background:#EEF1F7;border:1px solid #E5E7EB;overflow:hidden}
       .pcard .pg-fill{height:100%;border-radius:99px;background:linear-gradient(90deg,#3182f6,#1b64da)}
       .pcard .pgauge.full .pg-fill{background:linear-gradient(90deg,#F59E0B,#D97706)}
+      /* ═══ 관리자 전용 레이어 (리뷰어 카드에는 렌더되지 않음) ═══ */
+      /* 게이지 분해: 파랑=제출확정, 빗금 주황=지금 구매 중(유효 홀드) */
+      .pcard .pg-seg{height:100%}
+      .pcard .pg-seg.sub{background:linear-gradient(90deg,#3182f6,#1b64da)}
+      .pcard .pgauge.full .pg-seg.sub{background:linear-gradient(90deg,#F59E0B,#D97706)}
+      .pcard .pg-seg.hold{background:repeating-linear-gradient(45deg,#F59E0B,#F59E0B 4px,#FBBF24 4px,#FBBF24 8px);
+        animation:pcHold 1.6s ease-in-out infinite}
+      @keyframes pcHold{0%,100%{opacity:1}50%{opacity:.55}}
+      .pcard .pg-key{display:flex;gap:10px;font-size:.6rem;font-weight:700;color:#6B7280;font-variant-numeric:tabular-nums}
+      .pcard .pg-key span{display:inline-flex;align-items:center;gap:4px}
+      .pcard .pg-key i{width:7px;height:7px;border-radius:2px;display:inline-block;font-style:normal}
+      .pcard .pg-key i.sub{background:#1b64da}
+      .pcard .pgauge.full .pg-key i.sub{background:#D97706}
+      .pcard .pg-key i.hold{background:#F59E0B}
+      .pcard .pg-key i.zero{background:#CBD5E1}
+      .pcard .pg-key b{color:#111827}
+      /* 스펙 두 줄 고정: 유입방식·결제방식·총 모집 / 연결 탭 */
+      .pcard .pspec{display:flex;flex-direction:column;gap:4px;min-height:38px;border-top:1px solid #F1F4FA;padding-top:7px}
+      .pcard .sp-row{display:flex;align-items:center;gap:4px;min-height:17px}
+      .pcard .sp-chip{font-size:.58rem;font-weight:800;border-radius:5px;padding:2px 6px;white-space:nowrap;flex-shrink:0}
+      .pcard .sp-chip.flow{background:#EEF3FD;color:#1550b8}
+      .pcard .sp-chip.pay{background:#F3F0FE;color:#6D28D9}
+      /* 칩은 접지 않는다(요구). 폭을 넘치면 좌우로 흘러가며 전부 보이게 한다 —
+         단 **넘칠 때만** 움직인다(칩 2~3개인 평상시 카드는 정지 = 시선 분산 방지). */
+      .pcard .sp-chipwrap{flex:1;min-width:0;overflow:hidden}
+      .pcard .sp-chips{display:flex;gap:4px;width:max-content}
+      .pcard .sp-row.ovf .sp-chips{animation:pcMarquee var(--mqd,7s) ease-in-out infinite alternate}
+      @keyframes pcMarquee{0%,14%{transform:translateX(0)}86%,100%{transform:translateX(var(--mqx,0px))}}
+      /* 움직임을 꺼둔 사용자에겐 애니메이션 대신 손으로 밀어볼 수 있게 */
+      @media(prefers-reduced-motion:reduce){
+        .pcard .sp-row.ovf .sp-chips{animation:none}
+        .pcard .sp-chipwrap{overflow-x:auto;scrollbar-width:none}
+        .pcard .sp-chipwrap::-webkit-scrollbar{display:none}
+      }
+      /* 총 모집 숫자는 어떤 경우에도 밀리지 않는다 */
+      .pcard .sp-tot{margin-left:auto;font-size:.61rem;font-weight:800;color:#4B5563;font-variant-numeric:tabular-nums;white-space:nowrap;flex-shrink:0;padding-left:4px}
+      .pcard .sp-tot b{color:#111827}
+      .pcard .sp-link{font-size:.6rem;color:#8A93A3;font-weight:600;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+      .pcard .sp-link.warn{color:#B42318;font-weight:800}
+      /* 액션 바 — 항상 카드 맨 아래(margin-top:auto)라 카드 높이가 달라도 줄이 맞는다 */
+      .pcard .pact{display:flex;align-items:center;gap:4px;border-top:1px solid #F1F4FA;padding-top:8px;margin-top:auto}
+      .pcard .uic{position:relative;flex:1;min-width:0;background:#F5F7FB;border:1px solid #E8ECF4;border-radius:8px;
+        padding:6px 3px;font-size:.62rem;font-weight:800;color:#4B5563;cursor:pointer;font-family:inherit;text-align:center;white-space:nowrap}
+      .pcard .uic:hover{background:#EEF3FD;color:#1b64da;border-color:#CFE0FB}
+      .pcard .uic.ctrl{background:#F3F0FE;border-color:#DED5FB;color:#6D28D9}
+      .pcard .uic.ctrl:hover{background:#E9E2FD;border-color:#C9BAF8;color:#5B21B6}
+      /* 빨간 원 = 지각 접수(결제했는데 자리 없음) 건수. 수동확정하면 사라진다. */
+      .pcard .uic .bdg{position:absolute;top:-7px;right:-6px;min-width:17px;height:17px;border-radius:99px;
+        background:#EF4444;color:#fff;font-size:.58rem;font-weight:900;line-height:17px;padding:0 4px;
+        box-shadow:0 1px 4px rgba(220,38,38,.45);font-variant-numeric:tabular-nums}
+      .pcard .ppub{display:flex;align-items:center;gap:5px;font-size:.61rem;font-weight:800;color:#6B7280;white-space:nowrap;padding-left:2px}
+      .pcard .psw{width:30px;height:17px;border-radius:99px;background:#12b886;position:relative;flex-shrink:0;cursor:pointer}
+      .pcard .psw::after{content:"";position:absolute;top:2px;left:15px;width:13px;height:13px;border-radius:50%;background:#fff;transition:left .15s}
+      .pcard .psw.off{background:#CBD5E1}
+      .pcard .psw.off::after{left:2px}
+      .pcard.pc-draft{border-style:dashed;border-color:#C7CEDB;background:#FCFCFD}
+      /* 삭제 모드 — 켰을 때만 선택 오버레이. 평상시 카드에는 삭제 수단이 없다(오클릭 방지) */
+      .pcard.pc-del{border-color:#F7BDBD}
+      .pcard .pdelpick{position:absolute;inset:0;z-index:20;background:rgba(180,35,24,.06);cursor:pointer;
+        display:flex;align-items:flex-start;justify-content:flex-end;padding:10px}
+      .pcard .pdelpick .box{width:26px;height:26px;border-radius:8px;background:#fff;border:2px solid #E5A9A9;
+        display:flex;align-items:center;justify-content:center;font-size:.8rem;color:transparent;font-weight:900}
+      .pcard.pc-picked .pdelpick{background:rgba(180,35,24,.16)}
+      .pcard.pc-picked .pdelpick .box{background:#B42318;border-color:#B42318;color:#fff}
       .pcard .pbtn{display:block;text-align:center;border:none;width:100%;background:linear-gradient(135deg,#3182f6,#1b64da);color:#fff;
         font-size:.76rem;font-weight:800;border-radius:9px;padding:9px;margin-top:auto;font-family:inherit;cursor:pointer}
       .pcard .pbtn.off{background:#EEF1F7;color:#94A3B8;cursor:default}
@@ -202,7 +270,81 @@
     return `<div class="poptchip" style="font-size:.68rem;font-weight:700;color:#4B5563;background:#F3F4F6;border-radius:7px;padding:4px 8px;margin-top:6px;display:inline-block">🧩 옵션 ${opts.length}종${hint ? ` · <b style="color:#B45309">${_esc(hint)}</b>` : ''}</div>`;
   }
 
-  function cardHtml(c) {
+  /** 관리자 카드 하단 = 스펙 두 줄(유입방식·결제방식·총 모집 / 연결 탭) */
+  function _adminSpec(c) {
+    const chips = [];
+    // 유입방식: 랜딩 URL이 있으면 링크유입, 아니면 가이드유입(작업내용의 유입가이드를 따라 구매)
+    chips.push(c.landing_url
+      ? '<span class="sp-chip flow">링크유입</span>'
+      : '<span class="sp-chip flow">가이드유입</span>');
+    // 결제·리뷰 형태 배지(공고 등록 시 고른 값) — 접지 않고 전부 노출
+    (c.badges || []).forEach(b => {
+      if (b) chips.push('<span class="sp-chip pay">' + _esc(b) + '</span>');
+    });
+    const total = Number(c.recruit_total) || 0;
+    const done = (c.ops && Number(c.ops.totalConfirmed)) || 0;
+    const totTxt = total > 0 ? `총 <b>${done}</b>/${total}명` : (done ? `누적 <b>${done}</b>명` : '총 <b>0</b>명');
+    const tab = c.linked_tab_name
+      ? `<div class="sp-link">🔗 ${_esc(c.linked_tab_name)}</div>`
+      : `<div class="sp-link warn">⚠️ 시트 탭 미연결 — 게시할 수 없습니다</div>`;
+    return `<div class="pspec">
+      <div class="sp-row"><div class="sp-chipwrap"><div class="sp-chips">${chips.join('')}</div></div><span class="sp-tot">${totTxt}</span></div>
+      ${tab}</div>`;
+  }
+
+  /**
+   * 칩이 카드 폭을 넘치는 줄만 골라 흘러가게 한다(넘치지 않으면 정지).
+   * 이동거리를 실측해 CSS 변수로 넘기고, 거리에 비례해 시간을 잡아 속도를 일정하게 유지한다.
+   * 렌더 직후 폭이 0일 수 있어(레이아웃 전) 다음 프레임에 측정한다.
+   */
+  function _initChipMarquee(root) {
+    const scope = root || document;
+    requestAnimationFrame(() => {
+      scope.querySelectorAll('.pcard .sp-row').forEach(row => {
+        const wrap = row.querySelector('.sp-chipwrap');
+        const chips = row.querySelector('.sp-chips');
+        if (!wrap || !chips) return;
+        const over = chips.scrollWidth - wrap.clientWidth;
+        if (over > 2) {
+          row.classList.add('ovf');
+          chips.style.setProperty('--mqx', '-' + over + 'px');
+          // 초당 약 26px + 양끝 정지시간 — 칩이 많을수록 길게 (읽을 시간 확보)
+          chips.style.setProperty('--mqd', Math.min(18, Math.max(4, over / 26 + 2.6)).toFixed(1) + 's');
+        } else {
+          row.classList.remove('ovf');
+        }
+      });
+    });
+  }
+
+  /** 관리자 카드 하단 = 액션 한 줄. 삭제는 없다(헤더 삭제 모드로 분리). */
+  function _adminActions(c) {
+    const id = _esc(c.id);
+    const stop = 'event.stopPropagation();event.preventDefault();';
+    // 빨간 원 = 지각 접수 건수(결제했는데 자리 없음 → 수동확정 필요). 0이면 원 없음.
+    const late = (c.ops && Number(c.ops.late)) || 0;
+    const bdg = late > 0 ? `<span class="bdg" title="지각 접수 ${late}건 — 수동확정이 필요합니다">${late}</span>` : '';
+    const on = (c.status || 'draft') === 'active';
+    const pubToggle = (c.status === 'closed')
+      ? '<span class="ppub">마감</span>'
+      : `<span class="ppub">게시<span class="psw${on ? '' : ' off'}" onclick="${stop}toggleRecruitPublish('${id}',${on ? 'false' : 'true'},this)"></span></span>`;
+    return `<div class="pact">
+      <button type="button" class="uic" onclick="${stop}openRecruitModal('${id}')">✏️ 수정</button>
+      <button type="button" class="uic" onclick="${stop}openReviewerPreview('${id}')">👁 리뷰어</button>
+      <button type="button" class="uic ctrl" onclick="${stop}openCampControlById('${id}')">📡 관제${bdg}</button>
+      ${pubToggle}
+    </div>`;
+  }
+
+  /**
+   * 공고 카드. 리뷰어 홈과 관리자 모집공고가 **이 함수 하나**로 그려진다
+   * (따로 만들면 두 화면이 계속 어긋나므로 단일 출처로 묶는다).
+   * @param {object} c   서버 목록 응답 1건
+   * @param {object} [o] { admin:true } 이면 ⭐·게이지 분해·스펙·액션 레이어가 추가된다.
+   */
+  function cardHtml(c, o) {
+    _injectStyles();   // ★ 카드 HTML만 쓰는 호출부(관리자 목록)도 CSS를 확실히 받게 — 폭 측정(칩 흐름)이 스타일 적용 후 이뤄져야 한다
+    const admin = !!(o && o.admin);
     const channel = c.channel === '직접입력' ? (c.channel_custom || '') : (c.channel || '');
     const fee = c.review_fee ? Number(c.review_fee).toLocaleString() + '원' : '';
     const isClosed = c.state === 'closed' || c.status === 'closed';
@@ -218,16 +360,20 @@
       : `<div class="pt-ph">🛍️</div>`;
     // ★ 064: 관리자(진짜 admin_token)에게만 카드 우측상단 ⭐ 별표 토글 — 리뷰어 홈에서도 우선노출 즉시 조작.
     //   별표한 순서대로 최상단(서버 pinned_at ASC 정렬). 리뷰어·스코프 토큰에겐 렌더 자체를 안 함.
-    const starChip = _realAdminTok()
+    // 관리자 모집공고(admin:true)에서도 같은 별표를 쓴다 — 별표 UI를 둘로 두면 카드에 두 개가 뜬다.
+    const starChip = (admin || _realAdminTok())
       ? `<button type="button" class="pstarchip${c.pinned_at ? ' on' : ''}" title="${c.pinned_at ? '별표 해제(우선노출 해제)' : '별표 — 목록 최상단 고정(여러 개면 먼저 별표한 순서대로)'}"
           onclick="event.stopPropagation();event.preventDefault();CampCards.togglePin('${_esc(c.id)}', ${c.pinned_at ? 'false' : 'true'})">${c.pinned_at ? '⭐' : '☆'}</button>`
       : '';
     const badges = (channel || c.delivery_type || starChip)
       ? `<div class="pt-badges">${starChip}${channel ? `<span class="pt-badge ch">${_esc(channel)}</span>` : ''}${c.delivery_type ? `<span class="pt-badge dl">${_esc(c.delivery_type)}</span>` : ''}</div>`
       : '';
-    const ribbon = isDaily ? `<span class="pt-ribbon done">금일 모집완료</span>`
+    const isDraft = admin && (c.status || 'draft') === 'draft';
+    const ribbon = isDraft ? `<span class="pt-ribbon draftr">임시저장</span>`
+                 : isDaily ? `<span class="pt-ribbon done">금일 모집완료</span>`
                  : isClosed ? `<span class="pt-ribbon closedr">모집 종료</span>` : '';
-    const editChip = _adminTok()
+    // 리뷰어 홈에서만 쓰는 인라인 수정 칩 — 관리자 페이지는 하단 액션 바에 [수정]이 있어 불필요
+    const editChip = (!admin && _adminTok())
       ? `<button type="button" class="peditchip" onclick="event.stopPropagation();event.preventDefault();CampCards.openAdminEdit('${_esc(c.id)}')">✏️ 관리자 수정</button>`
       : '';
     // ★ 064: [인기!] 배지 — 관리자가 인기 설정한 공고(일반 모집 1건 제출완료당 1건 참여 조건)
@@ -249,9 +395,31 @@
                   : (c.time_range ? c.time_range : (c.participation_mode && !c.opensAt ? '자율주문' : ''));
     const timeIcon = (c.opensAt && c.closesAt) ? '🕑' : '⏱';
 
-    const gauge = (!isPre && !isClosed && quota > 0)
+    let gauge = (!isPre && !isClosed && quota > 0)
       ? `<div class="pgauge${isFull ? ' full' : ''}"><div class="pg-row"><span class="pg-lb">${isDaily ? '오늘 모집' : '모집 현황'}</span><span class="pg-vl"><b>${today}</b> / ${quota}명${isDaily ? ' 완료' : ''}</span></div><div class="pg-track"><div class="pg-fill" style="width:${pct}%"></div></div></div>`
       : '';
+    if (admin) {
+      // 관리자 게이지 = 같은 자리에 확정/진행중을 나눠 담는다(리뷰어는 단색 1구간).
+      //   진행중 = 유효 홀드 = 지금 15분 타이머를 안고 구매 중인 사람 → 가장 시간에 민감한 값.
+      const holdNow = (c.ops && Number(c.ops.holdNow)) || 0;
+      if (quota > 0 && !isPre) {
+        const subN = Math.max(0, today - holdNow);          // todayCount = 제출 + 유효홀드
+        const subPct = Math.min(100, Math.round((subN / quota) * 100));
+        const holdPct = Math.min(100 - subPct, Math.round((holdNow / quota) * 100));
+        gauge = `<div class="pgauge${isFull ? ' full' : ''}">
+          <div class="pg-row"><span class="pg-lb">${isDaily ? '오늘 모집' : '오늘 모집'}</span><span class="pg-vl"><b>${today}</b> / ${quota}명${isFull ? ' 완료' : ''}</span></div>
+          <div class="pg-track"><div class="pg-seg sub" style="width:${subPct}%"></div>${holdPct > 0 ? `<div class="pg-seg hold" style="width:${holdPct}%"></div>` : ''}</div>
+          <div class="pg-key"><span><i class="sub"></i>확정 <b>${subN}</b></span><span><i class="${holdNow > 0 ? 'hold' : 'zero'}"></i>진행중 <b>${holdNow}</b></span></div>
+        </div>`;
+      } else {
+        // 게시 전·오픈 전이라 오늘 집계가 없는 공고도 **자리는 지킨다**(카드 높이 일관).
+        gauge = `<div class="pgauge">
+          <div class="pg-row"><span class="pg-lb">오늘 모집</span><span class="pg-vl" style="color:#B6BDC9">${isPre ? '오픈 전' : '게시 전'}</span></div>
+          <div class="pg-track"></div>
+          <div class="pg-key"><span style="color:#B6BDC9">${isPre ? '오픈하면 집계가 시작됩니다' : '게시하면 집계가 시작됩니다'}</span></div>
+        </div>`;
+      }
+    }
 
     // 시트 일정(063) 파생 표기: 휴무일이면 다음 진행일, 마감일 경과면 일정 종료
     const restDay = c.stateReason === 'rest_day';
@@ -264,6 +432,29 @@
     else if (isDaily) footer = `<button type="button" class="pbtn off">오늘은 마감</button><div class="pnote">${c.opensAt ? '내일 ' + _fmtHM(c.opensAt) + ' 오픈' : '내일 다시 오픈'}</div>`;
     else if (c.state === 'soft_full') footer = `<button type="button" class="pbtn off">잔여 대기 중</button>`;
 
+    if (admin) {
+      // 관리자: 카드 본문을 눌러도 이동하지 않는다(작업은 하단 액션 바로 명시적으로).
+      //   삭제 모드일 때만 카드 전체가 선택 대상이 된다.
+      const picked = !!(o && o.picked);
+      const delMode = !!(o && o.delMode);
+      const delOvl = delMode
+        ? `<div class="pdelpick" onclick="event.stopPropagation();toggleRecruitDelPick('${_esc(c.id)}')"><span class="box">✓</span></div>`
+        : '';
+      // 임시저장은 '종료'가 아니라 작업 중인 공고 — 흑백 처리하면 리본·미연결 경고가 안 읽혀 제외한다.
+      return `
+      <article class="pcard${isClosed && !isDraft ? ' is-closed' : ''}${isDaily ? ' is-dim' : ''}${isDraft ? ' pc-draft' : ''}${delMode ? ' pc-del' : ''}${picked ? ' pc-picked' : ''}"
+           data-camp-id="${_esc(c.id)}" style="cursor:default">
+        ${delOvl}
+        <div class="pthumb">${thumbInner}${overlay}${badges}${topleft}</div>
+        <div class="pbody">
+          <h3 class="ptitle">${_esc(c.title || '(제목 없음)')}</h3>
+          <div class="pmeta">${timeTxt ? `<span>${timeIcon} ${_esc(timeTxt)}</span>` : ''}<span class="pt-live">바로참여</span>${fee ? `<span class="pt-fee">💰 ${_esc(fee)}</span>` : ''}</div>
+          ${gauge}
+          ${_adminSpec(c)}
+          ${_adminActions(c)}
+        </div>
+      </article>`;
+    }
     return `
       <article class="pcard${isClosed ? ' is-closed' : ''}${isDaily ? ' is-dim' : ''}" data-camp-id="${_esc(c.id)}"
            onclick="location.href='campaign.html?id=${encodeURIComponent(c.id)}'">
@@ -657,7 +848,9 @@
       });
       const j = await res.json().catch(() => ({}));
       if (!res.ok || !j.ok) throw new Error(j.error || 'HTTP ' + res.status);
-      if (typeof window.loadRecruitPreview === 'function') {
+      if (typeof window.loadRecruitList === 'function') {
+        await window.loadRecruitList();      // 관리자 모집공고: 새 순서로 재렌더
+      } else if (typeof window.loadRecruitPreview === 'function') {
         await window.loadRecruitPreview();   // 홈: 새 순서로 재렌더(별표 상태 포함)
       } else {
         // 상세 등 로더 없는 화면: 버튼만 제자리 갱신
@@ -669,5 +862,5 @@
     }
   }
 
-  window.CampCards = { renderInto, cardHtml, gridHtml, setServerNow, startTicker, _fmtCountdown, _fmtHM, _fmtOpenLabel, _fmtMD, serverNow: _now, _onCardClick, openAdminEdit, togglePin };
+  window.CampCards = { renderInto, cardHtml, gridHtml, setServerNow, startTicker, _fmtCountdown, _fmtHM, _fmtOpenLabel, _fmtMD, serverNow: _now, _onCardClick, openAdminEdit, togglePin, initChipMarquee: _initChipMarquee };
 })();

@@ -78,8 +78,13 @@ ok('popular-status: 리미터 적용 + 게이트와 동일 계산', /router\.get
 }
 
 // ── 리뷰어 홈 카드 별표 토글(관리자 전용) ──
-ok('cards: 별표는 진짜 admin_token만(_realAdminTok — 스코프 토큰은 서버 403이라 버튼 미노출)',
-  /function _realAdminTok\(\)/.test(cards) && /const starChip = _realAdminTok\(\)/.test(cards) && !/const starChip = _adminTok\(\)/.test(cards));
+// 관리자 모집공고 목록(admin:true)도 같은 별표를 쓴다(중복 컨트롤 금지). admin:true는 admin.html
+// 에서만 넘어오므로 스코프 토큰(rapp_camp_edit_token) 보유자에겐 여전히 렌더되지 않는다 —
+// 핵심 방어는 _adminTok()(스코프 토큰 포함)을 쓰지 않는 것.
+ok('cards: 별표는 진짜 admin_token 또는 관리자 목록만(스코프 토큰은 서버 403이라 버튼 미노출)',
+  /function _realAdminTok\(\)/.test(cards)
+  && /const starChip = \(admin \|\| _realAdminTok\(\)\)/.test(cards)
+  && !/const starChip = _adminTok\(\)/.test(cards));
 ok('cards: 별표 클릭은 카드 이동 차단(stopPropagation+preventDefault)', /pstarchip[\s\S]{0,200}stopPropagation\(\);event\.preventDefault\(\);CampCards\.togglePin/.test(cards));
 ok('cards: togglePin — /flags POST + 홈 재렌더(loadRecruitPreview)', /async function togglePin\(campId, on\)/.test(cards) && /loadRecruitPreview === 'function'/.test(cards));
 ok('flags: 토글 직후 /list 캐시 무효화(5초 stale 순서 방지)', /_listCache = \{ at: 0, rows: null, countsMap: null \};[\s\S]{0,200}pinnedAt/.test(routes));

@@ -11,6 +11,11 @@ let _recruitTabList  = [];     // 인덱스 탭 목록 캐시 [{sheetId, tabName
 /* ═══════════════════════════════════════
    공고 목록 로드
 ═══════════════════════════════════════ */
+/* 삭제 모드 상태 — 켰을 때만 카드를 고를 수 있다(평상시 카드에는 삭제 수단이 없음) */
+window._recruitDelMode = false;
+window._recruitDelPicked = window._recruitDelPicked || new Set();
+let _recruitLastList = [];
+
 async function loadRecruitList() {
   const wrap = document.getElementById("recruitListWrap");
   wrap.innerHTML = `<div style="padding:40px;text-align:center;color:var(--t3)"><i class="fas fa-circle-notch fa-spin"></i> 불러오는 중...</div>`;
@@ -20,21 +25,95 @@ async function loadRecruitList() {
     });
     const json = await res.json();
     const list = json.data || [];
+    _recruitLastList = list;
+    if (json.serverNow && window.CampCards) CampCards.setServerNow(json.serverNow);
     if (list.length === 0) {
       wrap.innerHTML = `<div style="padding:40px;text-align:center;color:var(--t4);font-size:.85rem"><i class="fas fa-bullhorn" style="font-size:1.5rem;display:block;margin-bottom:10px;opacity:.3"></i>등록된 공고가 없습니다.<br><small>우측 상단 [공고 등록] 버튼을 눌러 첫 공고를 작성해보세요.</small></div>`;
       return;
     }
-    wrap.innerHTML = "";
-    list.forEach(c => {
-      const card = _buildRecruitCard(c);
-      wrap.appendChild(card);
-    });
+    _renderRecruitCards(list);
   } catch(e) {
     wrap.innerHTML = `<div style="padding:30px;text-align:center;color:var(--err)"><i class="fas fa-exclamation-circle"></i> 불러오기 실패: ${escHtml(e.message)}</div>`;
   }
 }
 
-/* 공고 카드 DOM 생성 */
+/* ═══════════════════════════════════════
+   공고 카드 렌더 — 리뷰어 홈과 **같은 모듈**(campaign-cards.js)로 그린다.
+   따로 만들면 두 화면이 계속 어긋나므로 단일 출처로 묶었다.
+   관리자에게만 ⭐·게이지 분해(확정/진행중)·스펙 줄·액션 바가 더해진다.
+═══════════════════════════════════════ */
+function _renderRecruitCards(list) {
+  const wrap = document.getElementById("recruitListWrap");
+  if (!wrap) return;
+  if (!window.CampCards) {   // 모듈 미로드 시 빈 화면 대신 안내(무음 실패 방지)
+    wrap.innerHTML = `<div style="padding:30px;text-align:center;color:var(--err)">카드 모듈을 불러오지 못했습니다. 새로고침해 주세요.</div>`;
+    return;
+  }
+  const del = window._recruitDelMode;
+  window._recruitCardTitles = window._recruitCardTitles || {};
+  const html = list.map(c => {
+    window._recruitCardTitles[c.id] = c.title || "";
+    return CampCards.cardHtml(c, { admin: true, delMode: del, picked: window._recruitDelPicked.has(String(c.id)) });
+  }).join("");
+  wrap.innerHTML = `<div class="pcards-grid pc-admin">${html}</div>`;
+  CampCards.initChipMarquee(wrap);        // 칩이 넘치는 줄만 좌우로 흐르게
+  // 카운트다운(구매마감·오픈까지) 0 도달 시 목록 재조회 — 단 삭제 모드 중엔 보류(선택 유실 방지)
+  CampCards.startTicker(() => { if (!window._recruitDelMode) loadRecruitList(); });
+  _syncDelBar();
+}
+
+/* 삭제 모드 토글 — 카드에서 삭제를 뺀 대신, 켰을 때만 선택·삭제할 수 있다 */
+function toggleRecruitDelMode() {
+  window._recruitDelMode = !window._recruitDelMode;
+  window._recruitDelPicked.clear();
+  _renderRecruitCards(_recruitLastList);
+}
+function toggleRecruitDelPick(id) {
+  const k = String(id);
+  if (window._recruitDelPicked.has(k)) window._recruitDelPicked.delete(k);
+  else window._recruitDelPicked.add(k);
+  _renderRecruitCards(_recruitLastList);
+}
+/** 헤더의 삭제 모드 버튼·선택 개수 표시를 현재 상태에 맞춘다 */
+function _syncDelBar() {
+  const btn = document.getElementById("recruitDelModeBtn");
+  const bar = document.getElementById("recruitDelBar");
+  const cnt = window._recruitDelPicked.size;
+  if (btn) {
+    btn.textContent = window._recruitDelMode ? "✕ 삭제 모드 끄기" : "🗑 삭제 모드";
+    btn.classList.toggle("on", window._recruitDelMode);
+  }
+  if (bar) {
+    bar.style.display = window._recruitDelMode ? "" : "none";
+    const lb = document.getElementById("recruitDelCount");
+    const go = document.getElementById("recruitDelGo");
+    if (lb) lb.textContent = cnt ? `${cnt}개 선택됨` : "삭제할 공고를 선택하세요";
+    if (go) { go.disabled = cnt === 0; go.textContent = cnt ? `🗑 선택한 ${cnt}개 삭제` : "🗑 삭제"; }
+  }
+}
+/** 선택한 공고 일괄 삭제 — 한 건이라도 실패하면 결과를 알리고 목록을 다시 읽는다 */
+async function deleteRecruitPicked() {
+  const ids = [...window._recruitDelPicked];
+  if (!ids.length) return;
+  const names = ids.map(id => window._recruitCardTitles[id] || id).slice(0, 5).join("\n· ");
+  if (!confirm(`아래 ${ids.length}개 공고를 삭제합니다. 되돌릴 수 없습니다.\n\n· ${names}${ids.length > 5 ? `\n… 외 ${ids.length - 5}개` : ""}`)) return;
+  let ok = 0; const fail = [];
+  for (const id of ids) {
+    try {
+      const r = await fetch(API_BASE_URL + `/api/campaign/admin/${encodeURIComponent(id)}`, {
+        method: "DELETE", headers: _getAuthHeaders(),
+      });
+      const j = await r.json().catch(() => ({}));
+      if (r.ok && j.ok !== false) ok++; else fail.push(window._recruitCardTitles[id] || id);
+    } catch (_) { fail.push(window._recruitCardTitles[id] || id); }
+  }
+  window._recruitDelPicked.clear();
+  window._recruitDelMode = false;
+  showToast(fail.length ? `${ok}개 삭제 · ${fail.length}개 실패` : `${ok}개 공고를 삭제했습니다.`, fail.length ? "error" : "success");
+  loadRecruitList();
+}
+
+/* 공고 카드 DOM 생성 (레거시 — 신규 렌더는 _renderRecruitCards) */
 function _buildRecruitCard(c) {
   const statusLabel = {draft:"임시저장", active:"모집중", closed:"마감"}[c.status] || c.status;
   const channel = c.channel === "직접입력" ? (c.channel_custom || "직접입력") : (c.channel || "");

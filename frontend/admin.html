@@ -1252,6 +1252,11 @@ body{ letter-spacing:-.01em; }
                style="display:inline-flex;align-items:center;gap:5px;padding:6px 13px;background:#F1F6FF;color:#1b64da;border:1.5px solid #C9D8F4;border-radius:8px;font-size:.78rem;font-weight:600;cursor:pointer">
               <i class="fas fa-cog"></i> 공통 설정
             </button>
+            <!-- 삭제는 카드에서 빼고 여기로 — 카드가 조밀해 오클릭으로 공고가 사라지는 것 방지 -->
+            <button id="recruitDelModeBtn" onclick="toggleRecruitDelMode()"
+               style="display:inline-flex;align-items:center;gap:5px;padding:6px 13px;background:#FFF5F5;color:#B42318;border:1.5px solid #F7C9C9;border-radius:8px;font-size:.78rem;font-weight:600;cursor:pointer">
+              🗑 삭제 모드
+            </button>
             <button onclick="openRecruitModal(null)"
                style="display:inline-flex;align-items:center;gap:5px;padding:6px 13px;background:var(--p);color:#fff;border:none;border-radius:8px;font-size:.78rem;font-weight:600;cursor:pointer">
               <i class="fas fa-plus"></i> 공고 등록
@@ -1259,8 +1264,15 @@ body{ letter-spacing:-.01em; }
           </div>
         </div>
 
-        <!-- 공고 목록 -->
-        <div id="recruitListWrap" style="display:grid;grid-template-columns:repeat(auto-fill,minmax(280px,1fr));gap:14px">
+        <!-- 삭제 모드 바 (모드 켤 때만) -->
+        <div id="recruitDelBar" style="display:none;align-items:center;gap:10px;flex-wrap:wrap;background:#FFF5F5;border:1.5px solid #F7C9C9;border-radius:10px;padding:10px 14px;margin-bottom:14px">
+          <span id="recruitDelCount" style="flex:1;font-size:.8rem;font-weight:700;color:#B42318">삭제할 공고를 선택하세요</span>
+          <button onclick="toggleRecruitDelMode()" style="padding:6px 13px;background:#fff;color:#4B5563;border:1px solid #E2E7F0;border-radius:8px;font-size:.76rem;font-weight:700;cursor:pointer">취소</button>
+          <button id="recruitDelGo" onclick="deleteRecruitPicked()" disabled style="padding:6px 13px;background:#B42318;color:#fff;border:none;border-radius:8px;font-size:.76rem;font-weight:800;cursor:pointer">🗑 삭제</button>
+        </div>
+
+        <!-- 공고 목록 (그리드는 카드 모듈이 .pcards-grid.pc-admin 으로 그린다) -->
+        <div id="recruitListWrap">
           <div style="padding:40px;text-align:center;color:var(--t3)">
             <i class="fas fa-circle-notch fa-spin"></i> 불러오는 중...
           </div>
@@ -2960,6 +2972,7 @@ body{ letter-spacing:-.01em; }
 <!-- ══════════════════════════════════════════════════════
      모집공고 관리 (recruit) JS
      ══════════════════════════════════════════════════════ -->
+<script src="js/campaign-cards.js"></script>
 <script src="js/campaign-workdetail.js"></script>
 <script src="js/index-recruit.js"></script>
 
