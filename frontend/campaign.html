@@ -153,6 +153,12 @@
   <div id="vJoined" style="display:none">
     <div class="holdbar"><span class="l">⏳ 구매양식 제출까지</span><span class="v" id="holdCd">--:--</span></div>
     <div class="sec">
+      <!-- 👥 063 2단계: 이 건의 참여 명의 + 여러 건이면 명의 전환 칩 (타계정 참여 시에만 노출) -->
+      <div class="cardbx" id="acctBox" style="display:none;border-color:#7C3AED">
+        <div class="wd-tt" style="color:#6D28D9">👥 이 건의 참여 명의</div>
+        <div id="acctCur" style="display:flex;align-items:center;gap:8px"></div>
+        <div id="acctSwitch" style="display:none;flex-wrap:wrap;gap:6px;margin-top:9px;padding-top:9px;border-top:1px dashed var(--border)"></div>
+      </div>
       <div class="cardbx" id="joinedOptionBox" style="display:none;border-color:var(--p)">
         <div class="wd-tt" style="color:var(--p-dark)">✅ 내가 참여한 옵션</div>
         <div class="myopt" id="joinedOption"></div>
@@ -166,6 +172,8 @@
         <iframe id="orderFrame" title="구매양식"></iframe>
         <button class="btn ghost" id="frameFallback" style="margin-top:8px;display:none" onclick="openFormWindow()">구매양식이 안 보이면 새 창에서 열기</button>
       </div>
+      <!-- 👥 063 2단계: 타계정으로 한 건 더 참여(타계정 가능 공고 + 참여 가능한 명의 있을 때만 노출) -->
+      <button class="btn" id="addSubBtn" style="margin-top:2px;display:none;background:linear-gradient(135deg,#7C3AED,#6D28D9)" onclick="onAddSubJoin()">＋ 타계정으로 추가참여하기</button>
       <button class="btn ghost" style="margin-top:2px" onclick="onCancel()">참여 취소</button>
       <div class="muted" style="text-align:center;margin-top:6px">취소해도 오늘은 이 캠페인에 다시 참여할 수 없어요.</div>
     </div>
@@ -203,6 +211,28 @@
     <div class="optnote" id="optSheetNote">선택한 옵션으로 자리가 잡혀요. 구매 전까지는 다른 옵션으로 바꿀 수 있어요.</div>
     <button class="btn" id="optSheetGo" style="margin-top:12px" onclick="onOptSheetConfirm()">이 옵션으로 참여</button>
     <button class="btn ghost" style="margin-top:8px" onclick="hideOptSheet()">취소</button>
+  </div>
+</div>
+
+<!-- 👥 타계정 추가참여: 명의 선택 (063 2단계) -->
+<div class="sheet-ovl" id="acctSheet">
+  <div class="sheet" style="max-height:84vh;overflow-y:auto">
+    <h3>누구 명의로 참여할까요?</h3>
+    <p>한 명의는 이 공고에 <b>1건만</b> 참여할 수 있어요.</p>
+    <div id="acctSheetList"></div>
+    <div class="optnote" id="acctSheetNote"></div>
+    <button class="btn" id="acctSheetGo" style="margin-top:12px" onclick="onAcctSheetConfirm()">이 명의로 참여</button>
+    <button class="btn ghost" style="margin-top:8px" onclick="hideAcctSheet()">취소</button>
+  </div>
+</div>
+
+<!-- 👥 타계정 미등록 안내 (063 2단계) -->
+<div class="sheet-ovl" id="acctEmpty">
+  <div class="sheet">
+    <h3>등록된 타계정이 없어요</h3>
+    <p>타계정(가족·지인 명의)의 이름과 전화번호를 먼저 등록하면,<br/>그 명의로 이 공고에 추가 참여할 수 있어요.</p>
+    <button class="btn" onclick="goRegisterSub()">타계정 정보 먼저 등록하기</button>
+    <button class="btn ghost" style="margin-top:8px" onclick="hideAcctEmpty()">다음에 할게요</button>
   </div>
 </div>
 
@@ -294,14 +324,66 @@ async function doVerify(){
   }catch(e){ toast('확인 중 오류: ' + e.message); }
 }
 
-/* ═══ 홀드 저장 ═══ */
-function getHold(){
-  if(PREVIEW) return null;                       // ★ 미리보기는 실제 홀드를 절대 읽지 않음(관리자 브라우저에 남은 리뷰어 홀드와 격리)
-  try{ return JSON.parse(localStorage.getItem(HOLD_KEY) || 'null'); }catch(_){ return null; }
+/* ═══ 홀드 저장 (v2 — 명의별 맵) ═══
+   타계정 추가참여(063)로 한 공고에 여러 홀드(본계정 1 + 타계정 N)가 동시에 존재한다.
+   ★ 구키(camp_hold_<id>, 단일 슬롯)는 **읽어서 승격만 하고 절대 파기하지 않는다** —
+     당일 재참여 0회 정책이라 토큰을 잃으면 이미 결제한 참여권이 그대로 소각된다.
+   구조: camp_holds_<id> = { "<명의p8>": {applicationId, holdToken, phone8, expiresAt, name, isSub, ownerPhone8}, ... }
+   활성 명의 포인터: camp_active_<id> (없거나 무효면 첫 홀드) */
+const HOLDS_KEY  = 'camp_holds_'  + CAMP_ID;
+const ACTIVE_KEY = 'camp_active_' + CAMP_ID;
+
+function _allHolds(){
+  if(PREVIEW) return {};                         // ★ 미리보기는 실제 홀드를 절대 읽지 않음(관리자 브라우저의 리뷰어 홀드와 격리)
+  let m = {};
+  try{ m = JSON.parse(localStorage.getItem(HOLDS_KEY) || '{}') || {}; }catch(_){ m = {}; }
+  if(typeof m !== 'object' || Array.isArray(m)) m = {};
+  // 구키 승격(무손실): v1 단일 홀드가 남아 있으면 맵에 편입. 구키는 지우지 않는다.
+  try{
+    const old = JSON.parse(localStorage.getItem(HOLD_KEY) || 'null');
+    if(old && old.holdToken && old.phone8 && !m[String(old.phone8)]){
+      m[String(old.phone8)] = old;
+      localStorage.setItem(HOLDS_KEY, JSON.stringify(m));
+    }
+  }catch(_){ /* 구키 파싱 실패는 무시 — 신규 맵만 사용 */ }
+  return m;
+}
+function _saveHolds(m){ if(PREVIEW) return; localStorage.setItem(HOLDS_KEY, JSON.stringify(m || {})); }
+function activeP8(){
+  const m = _allHolds(); const keys = Object.keys(m);
+  if(!keys.length) return '';
+  let a = '';
+  try{ a = localStorage.getItem(ACTIVE_KEY) || ''; }catch(_){ a = ''; }
+  return (a && m[a]) ? a : keys[0];
+}
+function setActiveP8(p8){ if(PREVIEW) return; try{ localStorage.setItem(ACTIVE_KEY, String(p8||'')); }catch(_){} }
+
+/** 활성 명의의 홀드(인자로 명의 p8 지정 가능) — 기존 호출부는 무인자로 그대로 동작 */
+function getHold(p8){
+  const m = _allHolds();
+  const key = p8 ? String(p8) : activeP8();
+  return (key && m[key]) ? m[key] : null;
 }
 // ★ 미리보기에서는 어떤 경로로도 홀드 상태를 기록하지 않는다(같은 브라우저의 실제 리뷰어 홀드 오염 차단).
-function setHold(h){ if(PREVIEW) return; localStorage.setItem(HOLD_KEY, JSON.stringify(h)); }
-function clearHold(){ if(PREVIEW) return; localStorage.removeItem(HOLD_KEY); }
+function setHold(h){
+  if(PREVIEW || !h || !h.phone8) return;
+  const m = _allHolds(); m[String(h.phone8)] = h; _saveHolds(m); setActiveP8(h.phone8);
+}
+/** 홀드 파기 — 인자 없으면 "활성 홀드만" 제거(취소·no_hold 시맨틱 보존). 다른 명의 홀드는 유지. */
+function clearHold(p8){
+  if(PREVIEW) return;
+  const m = _allHolds();
+  const key = p8 ? String(p8) : activeP8();
+  if(key) delete m[key];
+  _saveHolds(m);
+  const rest = Object.keys(m);
+  setActiveP8(rest.length ? rest[0] : '');
+  // 구키도 같은 명의면 함께 정리(승격된 뒤라 중복 부활 방지)
+  try{
+    const old = JSON.parse(localStorage.getItem(HOLD_KEY) || 'null');
+    if(old && String(old.phone8) === key) localStorage.removeItem(HOLD_KEY);
+  }catch(_){}
+}
 
 /* ═══ 작업내용 표시 정규화 (표시 직전 · 스냅샷 불변 · 문제 패턴일 때만 개입) ═══ */
 // 상품·옵션·결제금액: 중복 "결제금액 N원" 제거 + 상품명↵금액 줄바꿈. 금액 1종류일 때만 병합(다옵션 상이금액은 원문 보존).
@@ -504,8 +586,182 @@ function openChangeOptSheet(){
 function hideOptSheet(){ $('optSheet').style.display = 'none'; }
 function onOptSheetConfirm(){
   if(!_optSheetSel) return toast('옵션을 선택해주세요');
-  if(_optSheetMode === 'join') _doApply(_optSheetSel);
+  if(_optSheetMode === 'join') _joinWithOption(_optSheetSel);          // 타계정 가능 공고면 명의 선택으로 이어짐
+  else if(_optSheetMode === 'join_sub'){ hideOptSheet(); openAcctSheet(_optSheetSel); }  // 추가참여: 옵션 → 명의
   else _doChangeOption(_optSheetSel);
+}
+
+/* ═══ 👥 타계정 추가참여 (063 2단계) ═══
+   서버 계약: apply body에 subName/subPhone 있으면 타계정 참여. 서버가 소유자 sub_accounts로
+   명의를 재검증하고, 응답 phone8 = "명의" p8(= 홀드 키). 화면 상태는 클라 추정이고 최종 권위는 서버 409. */
+let _subs = null;          // 소유자의 타계정 목록(profile get 캐시)
+let _acctSel = null;       // 시트에서 고른 명의 { type:'self'|'sub', name, phone8, phone }
+let _acctOptKey = null;    // 옵션 공고에서 명의 선택 후 이어질 옵션키
+const _acctBlocked = {};   // 서버가 거절한 명의 p8 → 사유문구(재선택 유도용, 세션 한정)
+
+function multiEnabled(){ return !!(_camp && _camp.multi_account_mode === true); }
+
+/** 타계정 목록 로드(무인증 profile API — 본인 phone8 스코프, 내정보 화면과 동일 경로) */
+async function loadSubs(force){
+  if(_subs && !force) return _subs;
+  const s = getSession(); if(!s) return (_subs = []);
+  try{
+    const r = await fetch(API_BASE_URL + '/api/reviewer/profile', {
+      method:'POST', headers:{'Content-Type':'application/json'},
+      body: JSON.stringify({ action:'get', phone8: s.phone8 })
+    });
+    const j = await r.json().catch(()=>({}));
+    let list = (j && j.profile && j.profile.subAccounts) || [];
+    if(typeof list === 'string'){ try{ list = JSON.parse(list); }catch(_){ list = []; } }
+    _subs = Array.isArray(list) ? list.filter(x => x && x.name && x.phone) : [];
+  }catch(_){ _subs = []; }
+  return _subs;
+}
+
+const _p8 = v => String(v || '').replace(/\D/g,'').slice(-8);
+
+/** 명의 목록 = 본계정 + 타계정. 상태는 로컬 홀드 기준 추정(서버가 최종 판정). */
+function _acctRows(){
+  const s = getSession(); if(!s) return [];
+  const held = _allHolds();
+  const rows = [{ type:'self', name: s.name, phone8: s.phone8, phone: s.phone8,
+                  state: held[s.phone8] ? 'joined' : 'ok' }];
+  (_subs || []).forEach((x, i) => {
+    const p8 = _p8(x.phone);
+    rows.push({ type:'sub', idx:i, name:String(x.name||'').trim(), phone8:p8, phone:String(x.phone||''),
+      state: held[p8] ? 'joined' : (p8 === s.phone8 ? 'same_phone' : (p8.length !== 8 ? 'invalid' : 'ok')) });
+  });
+  // 서버가 거절한 명의는 잠금(자리는 점유되지 않았고, 사유를 그대로 보여준다)
+  rows.forEach(r => { if(_acctBlocked[r.phone8] && r.state === 'ok'){ r.state = 'blocked'; r.blockMsg = _acctBlocked[r.phone8]; } });
+  return rows;
+}
+function _acctStateText(r){
+  return r.state === 'joined' ? '이 공고에 참여중'
+    : r.state === 'same_phone' ? '본계정과 같은 번호 — 별도 참여 불가'
+    : r.state === 'invalid' ? '전화번호를 확인해주세요'
+    : (r.blockMsg || (r.type === 'self' ? '본계정 · 참여 가능' : '참여 가능'));
+}
+function renderAcctList(){
+  const box = $('acctSheetList'); box.innerHTML = ''; _acctSel = null;
+  const rows = _acctRows();
+  rows.forEach((r, i) => {
+    const pickable = r.state === 'ok';
+    const div = document.createElement('div');
+    div.className = 'optrow' + (pickable ? '' : ' dis');
+    div.innerHTML = '<span class="radio"></span><div class="oi"><div class="nm">' + _escAttr(r.name) +
+      (r.type === 'self' ? ' <span style="font-size:.62rem;color:var(--p-dark)">본계정</span>' : '') +
+      '</div><div class="sub">' + _escAttr(_acctStateText(r)) + ' · ***' + _escAttr(r.phone8.slice(-4)) + '</div></div>' +
+      (r.state === 'joined' ? '<span class="obadge cur">참여중</span>' : (pickable ? '' : '<span class="obadge soldout">불가</span>'));
+    if(pickable){
+      div.onclick = () => {
+        _acctSel = r;
+        [...box.children].forEach(c => c.classList.remove('sel'));
+        div.classList.add('sel');
+        $('acctSheetGo').disabled = false;
+      };
+    }
+    box.appendChild(div);
+  });
+  $('acctSheetGo').disabled = true;
+  const canAny = rows.some(r => r.state === 'ok');
+  $('acctSheetNote').textContent = canAny
+    ? '선택한 명의로 자리가 잡혀요. 타계정 건은 제한시간이 더 짧아요(기본 10분).'
+    : '지금 참여할 수 있는 명의가 없어요. 타계정을 추가하면 더 참여할 수 있어요.';
+}
+async function openAcctSheet(optionKey){
+  if(PREVIEW) return _pvBlock('참여하기');
+  _acctOptKey = optionKey || null;
+  await loadSubs();
+  // 타계정이 하나도 없고 본계정도 이미 참여중이면 → 등록 유도
+  const rows = _acctRows();
+  if(!(_subs || []).length && !rows.some(r => r.type === 'self' && r.state === 'ok')){
+    return openAcctEmpty();
+  }
+  renderAcctList();
+  $('acctSheet').style.display = 'flex';
+}
+function hideAcctSheet(){ $('acctSheet').style.display = 'none'; }
+function openAcctEmpty(){ $('acctEmpty').style.display = 'flex'; }
+function hideAcctEmpty(){ $('acctEmpty').style.display = 'none'; }
+/** 타계정 등록 화면으로 — 돌아올 공고를 기록해 등록 후 "참여 이어가기" 안내 */
+function goRegisterSub(){
+  try{ sessionStorage.setItem('sub_return_camp', CAMP_ID); }catch(_){}
+  location.href = '/index.html?returnCamp=' + encodeURIComponent(CAMP_ID) + '#my';
+}
+function onAcctSheetConfirm(){
+  if(!_acctSel) return toast('참여할 명의를 선택해주세요');
+  hideAcctSheet();
+  const sel = _acctSel;
+  _doApply(_acctOptKey, sel.type === 'sub' ? { name: sel.name, phone: sel.phone } : null);
+}
+/** 참여 후 화면의 [＋타계정으로 추가참여하기] */
+async function onAddSubJoin(){
+  if(PREVIEW) return _pvBlock('타계정 추가참여');
+  const s = getSession(); if(!s) return needLogin(onAddSubJoin);
+  await loadSubs();
+  if(!(_subs || []).length) return openAcctEmpty();
+  // 옵션 공고면 옵션부터 고르고, 아니면 바로 명의 선택
+  const opts = (_camp && _camp.options) || [];
+  const pickable = opts.filter(o => o.selectable);
+  if(opts.length){
+    if(!pickable.length){ toast('지금은 선택 가능한 옵션이 없어요'); return; }
+    if(pickable.length === 1) return openAcctSheet(pickable[0].optKey);
+    _optSheetMode = 'join_sub';
+    $('optSheetTitle').textContent = '추가참여할 옵션 선택';
+    $('optSheetDesc').textContent = '타계정으로 참여할 옵션을 골라주세요.';
+    $('optSheetNote').textContent = '옵션을 고르면 다음 화면에서 명의를 선택해요.';
+    $('optSheetGo').textContent = '이 옵션으로 계속';
+    _renderOptSheetList(opts, null);
+    $('optSheet').style.display = 'flex';
+    return;
+  }
+  return openAcctSheet(null);
+}
+
+/** 참여 후 화면의 명의 패널 — 타계정 참여가 있을 때만 노출(본계정 단독은 현행과 동일한 화면) */
+function renderAcctPanel(h){
+  const box = $('acctBox'), addBtn = $('addSubBtn');
+  if(PREVIEW || !h){ if(box) box.style.display='none'; if(addBtn) addBtn.style.display='none'; return; }
+  const m = _allHolds();
+  const keys = Object.keys(m);
+  const anySub = keys.some(k => m[k] && m[k].isSub);
+  // 명의 카드: 타계정 건이 하나라도 있을 때만(본계정만 있으면 기존 화면 그대로)
+  if(anySub || keys.length > 1){
+    box.style.display = '';
+    const cur = m[String(h.phone8)] || h;
+    $('acctCur').innerHTML =
+      '<div style="flex:1"><b style="font-size:.92rem">' + _escAttr(cur.name || '본계정') + '</b>' +
+      '<div class="muted">***' + _escAttr(String(cur.phone8||'').slice(-4)) + (cur.isSub ? ' · 타계정' : ' · 본계정') + '</div></div>' +
+      (cur.isSub ? '<span class="obadge" style="background:#F1EAFE;color:#7C3AED">타계정</span>'
+                 : '<span class="obadge cur">본계정</span>');
+    // 전환 칩: 홀드가 2건 이상일 때만
+    const sw = $('acctSwitch');
+    if(keys.length > 1){
+      sw.style.display = 'flex';
+      sw.innerHTML = '<div class="muted" style="width:100%;margin-bottom:2px">진행 중인 다른 명의로 전환</div>' +
+        keys.map(k => {
+          const x = m[k]; const on = String(k) === String(h.phone8);
+          return '<button type="button" onclick="switchAcct(\'' + _escAttr(k) + '\')" ' +
+            'style="border:1.5px solid ' + (on ? 'var(--p)' : 'var(--border)') + ';background:' + (on ? 'var(--p-light)' : '#fff') +
+            ';color:' + (on ? 'var(--p-dark)' : 'var(--t2)') + ';border-radius:9px;padding:7px 11px;font-size:.76rem;font-weight:800;cursor:pointer;font-family:inherit">' +
+            (x.isSub ? '' : '⭐ ') + _escAttr(x.name || ('***' + String(k).slice(-4))) + (on ? ' ·  보는 중' : '') + '</button>';
+        }).join('');
+    } else { sw.style.display = 'none'; }
+  } else {
+    box.style.display = 'none';
+  }
+  // 추가참여 버튼: 타계정 가능 공고 + 아직 참여 안 한 타계정이 있을 때
+  if(addBtn){
+    const remain = (_subs || []).filter(x => { const p = _p8(x.phone); return p.length === 8 && !m[p] && !_acctBlocked[p]; });
+    addBtn.style.display = (multiEnabled() && (remain.length || _subs === null)) ? '' : 'none';
+  }
+}
+/** 명의 전환 — 활성 포인터만 바꾸고 enterJoined() 재실행(= iframe 재로드로 인플라이트 제출 파기) */
+async function switchAcct(p8){
+  if(PREVIEW) return;
+  const m = _allHolds(); if(!m[String(p8)]) return;
+  setActiveP8(p8);
+  await enterJoined();
 }
 
 /* ═══ 참여하기 ═══ */
@@ -518,13 +774,22 @@ async function onJoin(){
     // 옵션 등록 캠페인 → 선택 필수(선택 가능 옵션 없으면 안내, 1개면 자동선택)
     const pickable = opts.filter(o => o.selectable);
     if(!pickable.length){ toast('지금은 선택 가능한 옵션이 없어요'); await loadCampaign(); return; }
-    if(pickable.length === 1) return _doApply(pickable[0].optKey);
+    if(pickable.length === 1) return _joinWithOption(pickable[0].optKey);
     return openOptSheet();
   }
-  return _doApply(null);
+  return _joinWithOption(null);
 }
 
-async function _doApply(optionKey){
+/** 옵션 확정 후 분기: 타계정 가능 공고 + 타계정 보유면 명의 선택, 아니면 본계정 즉시 참여 */
+async function _joinWithOption(optionKey){
+  if(!multiEnabled()) return _doApply(optionKey);
+  await loadSubs();
+  if(!(_subs || []).length) return _doApply(optionKey);   // 타계정 없음 = 기존 흐름 그대로
+  return openAcctSheet(optionKey);
+}
+
+/** @param sub {name,phone}|null — 있으면 타계정 명의로 참여(서버가 sub_accounts로 재검증) */
+async function _doApply(optionKey, sub){
   if(PREVIEW) return _pvBlock('참여하기');   // ★ 어떤 경로로도 apply 요청 금지(옵션 시트 확인 포함)
   const s = getSession();
   if(!s) return needLogin(onJoin);
@@ -533,12 +798,17 @@ async function _doApply(optionKey){
   try{
     const body = { name: s.name, phone: s.phone8, phone8: s.phone8 };
     if(optionKey) body.optionKey = optionKey;
+    if(sub && sub.name && sub.phone){ body.subName = sub.name; body.subPhone = sub.phone; }
     const r = await fetch(API_BASE_URL + '/api/campaign/' + encodeURIComponent(CAMP_ID) + '/apply', {
       method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify(body)
     });
     const j = await r.json().catch(()=>({}));
     if(r.ok && j.ok){
-      setHold({ applicationId: j.applicationId, holdToken: j.holdToken, phone8: j.phone8, expiresAt: j.expiresAt });
+      // ★ j.phone8 = "명의" p8(서버 계약) — 홀드 맵의 키이자 work-detail/cancel/embed의 holdPhone8
+      setHold({ applicationId: j.applicationId, holdToken: j.holdToken, phone8: j.phone8, expiresAt: j.expiresAt,
+                name: (j.participant && j.participant.name) || (sub && sub.name) || s.name,
+                isSub: !!(j.participant && j.participant.type === 'sub'),
+                ownerPhone8: j.ownerPhone8 || s.phone8 });
       await enterJoined();
       return;
     }
@@ -561,7 +831,27 @@ async function _doApply(optionKey){
       already_submitted:'이미 참여 완료한 캠페인이에요',
       duplicate_hold:'이미 참여 중이에요', hold_cap:'동시에 참여 가능한 캠페인은 2개까지예요',
       daily_apply_cap:'오늘 참여 가능한 횟수를 넘었어요', rate_limited:'요청이 너무 많아요. 잠시 후 다시 시도해주세요',
+      // ★ 063 타계정 사유(서버가 최종 권위 — 화면 추정과 다를 수 있어 그대로 안내)
+      multi_disabled:'이 공고는 타계정 참여를 지원하지 않아요',
+      sub_invalid:'타계정 이름과 전화번호를 확인해주세요',
+      sub_shares_owner_phone:'본계정과 같은 번호의 타계정은 별도 참여할 수 없어요',
+      sub_not_registered:'등록된 타계정이 아니에요. 내정보 > 타계정에서 먼저 등록해주세요',
+      sub_is_registered_reviewer:'이 번호는 이미 리뷰어로 등록되어 있어요. 그 번호의 본인 계정으로 참여해주세요',
+      owner_hold_cap:'동시에 잡아둘 수 있는 자리 수를 넘었어요(구매·제출을 먼저 끝내주세요)',
+      sub_daily_limit:'타계정 참여는 이 공고에서 오늘 한도를 다 썼어요(내일 가능)',
+      blocked_by_other_owner:'이 번호는 다른 계정에서 이미 참여 신청했어요',
+      same_phone_other_name:'같은 번호의 다른 명의가 오늘 이미 참여했어요',
     }[j.reason] || (j.error || '지금은 참여할 수 없어요');
+    // 타계정 명의 사유면 그 명의를 시트에서 잠그고 재선택 유도(자리는 점유되지 않았음)
+    if(sub && ['already_today','already_submitted','duplicate_hold','sub_not_registered','sub_is_registered_reviewer',
+               'sub_shares_owner_phone','sub_invalid','blocked_by_other_owner','same_phone_other_name'].includes(j.reason)){
+      toast(msg);
+      const p8 = _p8(sub.phone);
+      _acctBlocked[p8] = msg;
+      renderAcctList();
+      $('acctSheet').style.display = 'flex';
+      return;
+    }
     toast(msg);
     await loadCampaign(); // 카운터/상태 갱신
   }catch(e){ toast('오류: ' + e.message); }
@@ -636,6 +926,8 @@ async function enterJoined(){
 /** 참여 후(작업가이드) 화면 렌더 — 리뷰어(홀드 있음)와 관리자 미리보기(hold=null) 공용.
  *  ★ 렌더 내용은 양쪽 동일. 다른 것은 구매양식 iframe 파라미터와 폴링 여부뿐. */
 function _renderJoinedView(j, h){
+    // 👥 063 2단계: 참여 명의 카드 + 명의 전환 칩 + 추가참여 버튼
+    renderAcctPanel(h);
     // 내가 참여한 옵션 카드(옵션 등록 캠페인만) + 변경 버튼
     renderJoinedOption(j);
     // 작업내용 렌더 — 공용 렌더러(js/campaign-workdetail.js). 관리자 미리보기와 동일 코드.
@@ -737,6 +1029,25 @@ function renderDone(pendingConfirm){
   clearInterval(_pollTimer); clearInterval(_holdTick);
   // chatUrl은 제출확정 후에만 서버가 반환 → 제출 직후 _detail(제출 전 응답)엔 비어있어 1회 재조회로 채운다
   _ensureDoneChat();
+  // 👥 063 2단계: 제출 완료된 명의는 홀드 맵에서 정리하고, 진행 중인 다른 명의가 남아 있으면 이어서 진행 안내
+  if(!PREVIEW){
+    try{
+      const done = getHold();
+      if(done && done.phone8) clearHold(done.phone8);   // 이 명의만 정리(다른 명의 홀드는 보존)
+      const rest = Object.keys(_allHolds());
+      const sec = $('vDone').querySelector('.sec');
+      const old = $('doneNextBtn'); if(old) old.remove();
+      if(rest.length && sec){
+        const nx = _allHolds()[rest[0]];
+        const b = document.createElement('button');
+        b.id = 'doneNextBtn'; b.className = 'btn';
+        b.style.cssText = 'margin-bottom:8px;background:linear-gradient(135deg,#7C3AED,#6D28D9)';
+        b.textContent = '👥 ' + (nx && nx.name ? nx.name : '다른 명의') + ' 건 이어서 진행하기';
+        b.onclick = async () => { setActiveP8(rest[0]); await enterJoined(); };
+        sec.insertBefore(b, sec.firstChild);
+      }
+    }catch(_){ /* 정리 실패는 화면을 막지 않는다 */ }
+  }
   if(pendingConfirm){
     $('vDone').querySelector('.e').textContent = '📨';
     $('vDone').querySelector('h2').textContent = '구매양식이 접수됐어요';
@@ -933,11 +1244,27 @@ function kstDateStr(ms){ return new Date(ms + 9*3600*1000).toISOString().slice(0
     await loadCampaign();
     // ★ 관리자 미리보기: 홀드 복원·폴링 없이 미리보기 데이터로 단계 전환만(서버 상태 무변경)
     if(PREVIEW){ await _enterPreview(); return; }
-    let h = getHold();
-    // ★ 어제(KST 이전 일자) 홀드는 폐기 — 서버는 익일 재참여를 허용하므로 만료 화면에 영구 잠금되지 않게
-    if(h && h.expiresAt && kstDateStr(Date.parse(h.expiresAt)) < kstDateStr(CampCards.serverNow())){
-      clearHold(); h = null;
+    // ★ 어제(KST 이전 일자) 홀드는 폐기 — 서버는 익일 재참여를 허용하므로 만료 화면에 영구 잠금되지 않게.
+    //   v2는 명의별 맵이므로 **전체를 순회**해 지난 날짜 홀드만 골라 버린다(오늘 것은 명의 불문 보존).
+    {
+      const today = kstDateStr(CampCards.serverNow());
+      const m = _allHolds();
+      let dirty = false;
+      for(const k of Object.keys(m)){
+        const e = m[k] && m[k].expiresAt;
+        if(e && kstDateStr(Date.parse(e)) < today){ delete m[k]; dirty = true; }
+      }
+      if(dirty){
+        _saveHolds(m);
+        const rest = Object.keys(m);
+        setActiveP8(rest.length ? rest[0] : '');
+        try{
+          const old = JSON.parse(localStorage.getItem(HOLD_KEY) || 'null');
+          if(old && old.expiresAt && kstDateStr(Date.parse(old.expiresAt)) < today) localStorage.removeItem(HOLD_KEY);
+        }catch(_){}
+      }
     }
+    const h = getHold();
     if(h) await enterJoined();      // 재방문: 홀드 있으면 참여 후 화면 복원(만료면 만료 화면)
     // 참여 전 화면 카운터 갱신(15초)
     setInterval(async ()=>{ if($('vPre').style.display !== 'none'){ try{ await loadCampaign(); }catch(_){}} }, 15000);

@@ -2208,6 +2208,9 @@ document.addEventListener("DOMContentLoaded", () => {
   if (location.hash === "#my" || location.hash === "#info") {
     try { switchTab("my"); } catch (_) {}
   }
+  // ★ 063 2단계: 공고에서 "타계정 정보 먼저 등록하기"로 넘어온 경우 —
+  //   내정보 탭을 열고 상단에 "등록 후 공고로 돌아가기" 안내를 띄운다(파라미터 없으면 동작 불변).
+  try { showSubReturnBanner(); } catch (_) {}
   document.getElementById("loginPhone").addEventListener("keydown", e => {
     if (e.key === "Enter") doLogin();
   });
@@ -2419,6 +2422,27 @@ async function submitInlineApply(campId) {
   } catch(e) {
     showToast('신청 오류: ' + e.message);
   }
+}
+
+/* ═══ 👥 타계정 등록 후 공고 복귀 (063 2단계) ═══
+   campaign.html의 [타계정 정보 먼저 등록하기] → index.html?returnCamp=<id>#my 로 이동.
+   ★ 캠페인 id만 받아 같은 사이트 내부 경로로만 이동한다(외부 URL을 받지 않으므로 오픈 리다이렉트 불가). */
+function showSubReturnBanner(){
+  const id = new URLSearchParams(location.search).get('returnCamp');
+  if (!id || !/^[A-Za-z0-9_-]{1,64}$/.test(id)) return;   // 형식 검증 = 경로 주입 차단
+  try { switchTab('my'); } catch (_) {}
+  const host = document.getElementById('sectionProfile') || document.body;   // 내정보 섹션 상단
+  if (document.getElementById('subReturnBanner')) return;
+  const bar = document.createElement('div');
+  bar.id = 'subReturnBanner';
+  bar.style.cssText = 'background:#F5F3FF;border:1.5px solid #C4B5FD;border-radius:12px;padding:12px 14px;margin:10px 0;display:flex;align-items:center;gap:10px;flex-wrap:wrap';
+  bar.innerHTML =
+    '<div style="flex:1;min-width:180px;font-size:.84rem;font-weight:700;color:#5B21B6">👥 타계정을 추가한 뒤 공고로 돌아가면 그 명의로 바로 참여할 수 있어요.</div>' +
+    '<button type="button" id="subReturnGo" style="background:linear-gradient(135deg,#7C3AED,#6D28D9);color:#fff;border:none;border-radius:9px;padding:9px 14px;font-size:.8rem;font-weight:800;cursor:pointer;font-family:inherit">공고로 돌아가기</button>';
+  host.insertBefore(bar, host.firstChild);
+  document.getElementById('subReturnGo').onclick = () => {
+    location.href = 'campaign.html?id=' + encodeURIComponent(id);
+  };
 }
 
 /* ═══ 모집공고 카드/행 뷰 전환 (선호 형태 localStorage 저장) ═══ */

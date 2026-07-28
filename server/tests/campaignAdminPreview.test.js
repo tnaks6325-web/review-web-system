@@ -62,19 +62,31 @@ ok('③-1 PREVIEW 는 ?preview=1 **그리고 관리자 토큰**이 있을 때만
   /const PREVIEW_REQ = new URLSearchParams\(location\.search\)\.get\('preview'\) === '1'/.test(camp)
   && /let PREVIEW = false;/.test(camp)
   && /if\(PREVIEW_REQ\)\{ _pvCaptureToken\(\); PREVIEW = !!_pvToken\(\); \}/.test(camp));
-ok('③-2 미리보기는 홀드를 읽지 않음(getHold 조기 null)', /function getHold\(\)\{[\s\S]{0,120}if\(PREVIEW\) return null;/.test(camp));
-ok('③-3 미리보기는 홀드를 쓰지 않음(setHold/clearHold 가드)',
-  /function setHold\(h\)\{ if\(PREVIEW\) return;/.test(camp) && /function clearHold\(\)\{ if\(PREVIEW\) return;/.test(camp));
+// ★ 063 2단계에서 홀드 저장이 v2(명의별 맵)로 바뀌며 PREVIEW 차단 지점이 _allHolds로 이동.
+//   getHold()는 _allHolds()를 거치므로 미리보기에서 여전히 null(실행 검증 완료).
+ok('③-2 미리보기는 홀드를 읽지 않음(_allHolds 조기 빈 맵 → getHold null)',
+  /function _allHolds\(\)\{\s*\n?\s*if\(PREVIEW\) return \{\}/.test(camp)
+  && /function getHold\(p8\)\{[\s\S]{0,160}_allHolds\(\)/.test(camp));
+// ★ 063 2단계 v2: 쓰기 경로가 4개(_saveHolds/setHold/clearHold/setActiveP8)로 늘었다 — 전부 PREVIEW 차단.
+ok('③-3 미리보기는 홀드를 쓰지 않음(저장 경로 4곳 전부 PREVIEW 가드)',
+  /function _saveHolds\(m\)\{ if\(PREVIEW\) return;/.test(camp)
+  && /function setHold\(h\)\{\s*\n?\s*if\(PREVIEW \|\| !h/.test(camp)
+  && /function clearHold\(p8\)\{\s*\n?\s*if\(PREVIEW\) return;/.test(camp)
+  && /function setActiveP8\(p8\)\{ if\(PREVIEW\) return;/.test(camp));
 ok('③-4 미리보기는 폴링하지 않음', /if\(!PREVIEW\) startPolling\(\)/.test(camp));
 ok('③-5 미리보기 진입은 관리자 전용 엔드포인트 + Bearer', /\/api\/campaign\/admin\/'[\s\S]{0,80}\/preview'[\s\S]{0,120}Authorization[\s\S]{0,20}Bearer/.test(camp));
 
 // ── ④ 상태 변경 동작 차단 ──
 for (const [label, re] of [
   ['참여하기(onJoin)', /async function onJoin\(\)\{\s*\n\s*if\(PREVIEW\) return _pvBlock/],
-  ['참여신청(_doApply)', /async function _doApply\(optionKey\)\{\s*\n\s*if\(PREVIEW\) return _pvBlock/],
+  ['참여신청(_doApply)', /async function _doApply\(optionKey, sub\)\{\s*\n\s*if\(PREVIEW\) return _pvBlock/],
   ['옵션변경(_doChangeOption)', /async function _doChangeOption\(newKey\)\{\s*\n\s*if\(PREVIEW\) return _pvBlock/],
   ['참여취소(onCancel)', /async function onCancel\(\)\{\s*\n\s*if\(PREVIEW\) return _pvBlock/],
+  // ★ 063 2단계 신규 진입점도 동일 차단(명의 선택·타계정 추가참여)
+  ['명의선택(openAcctSheet)', /async function openAcctSheet\(optionKey\)\{\s*\n\s*if\(PREVIEW\) return _pvBlock/],
+  ['타계정 추가참여(onAddSubJoin)', /async function onAddSubJoin\(\)\{\s*\n\s*if\(PREVIEW\) return _pvBlock/],
 ]) ok('④ 미리보기에서 ' + label + ' 차단', re.test(camp));
+ok('④ 미리보기에서 명의 전환(switchAcct)도 무동작', /async function switchAcct\(p8\)\{\s*\n\s*if\(PREVIEW\) return;/.test(camp));
 
 // ── ⑤ 구매양식 제출 차단 (최악 시나리오 방어) ──
 ok('⑤-1 preview 플래그는 embed 컨텍스트 안에서만 정의(embed=1 없으면 도달 불가)',
