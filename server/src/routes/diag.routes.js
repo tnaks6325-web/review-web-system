@@ -12,7 +12,7 @@ const { isSentryEnabled } = require('../utils/sentry');
 const { addClient, getStatus: getSSEStatus, emitImageExtract, emitImageUpload } = require('../utils/sse');
 const { logger } = require('../utils/logger');
 const { slotLabel: slotLabelOf } = require('../utils/captureSlots');
-const { verifyCapture, logCaptureMismatch } = require('../services/captureVerify.service');
+const { verifyCapture, logCaptureMismatch, resolveCaptureMismatch } = require('../services/captureVerify.service');
 const { logAbnormal } = require('../services/errorLog.service');
 const { parseTabRows, buildOneSheet } = require('../services/indexBuilder.service');
 const { mirrorOneSheet } = require('../services/rawMirror.service');
@@ -1625,12 +1625,19 @@ router.post('/review-upload', imageApiLimiter, async (req, res, next) => {
             base64: file.data, mimeType: file.mimeType || 'image/jpeg',
             slotKey: slot, companyBusinessNo: _companyBizNo,
           });
+        } catch (_) { verdict = null; }   // 검수 실패가 업로드 결과를 뒤집지 않는다
+        // 알림 기록은 판정과 분리한다 — 여기서 실패해도 리뷰어 화면의 재첨부 안내(verdict)는 남아야 한다.
+        try {
           if (verdict && verdict.status === 'mismatch') {
             // 리뷰어가 [그대로 제출]을 눌러도 사람이 볼 수 있게 관리자 알림으로 남긴다
+            // (verdict.sure = AI가 확실히 아니라고 본 경우 → critical 승격 = 대시보드 빨간 알림)
             await logCaptureMismatch({ sheetId, tabName, reviewerName, slotKey: slot,
-                                       verdict, fileId: uploaded.id });
+                                       verdict, fileId: uploaded.id, rowIndex });
+          } else if (verdict && verdict.status === 'ok') {
+            // 같은 자리에 올바른 캡처가 다시 올라옴 → 열려 있던 알림을 자동으로 닫는다
+            await resolveCaptureMismatch({ sheetId, tabName, slotKey: slot, rowIndex });
           }
-        } catch (_) { verdict = null; }   // 검수 실패가 업로드 결과를 뒤집지 않는다
+        } catch (_) { /* 알림 경로 실패는 업로드·판정에 영향 없음 */ }
 
         uploadResults.push({
           index: i + 1,
@@ -1638,7 +1645,7 @@ router.post('/review-upload', imageApiLimiter, async (req, res, next) => {
           fileName: uploaded.name,
           webViewLink: uploaded.webViewLink || '',
           verdict: verdict && verdict.status !== 'skipped'
-            ? { status: verdict.status, message: verdict.message } : null,
+            ? { status: verdict.status, message: verdict.message, sure: !!verdict.sure } : null,
         });
 
         logger.info(`[review-upload] 파일 ${i + 1}/${files.length} 업로드: ${uploaded.name} → ${uploaded.id}` +
