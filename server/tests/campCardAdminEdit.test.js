@@ -33,8 +33,12 @@ ok('썸네일 입력란 1개 — 쿠팡 붙여넣기+[가져오기] 행 제거(c
   !/cae_thumb_url/.test(cc) && !/caeThumbFetch/.test(cc) && !/_caeThumbFromUrl/.test(cc) && /id="cae_thumb"/.test(cc));
 ok('썸네일 미리보기 확대(cae_thumb_prevwrap · max-height 200px)',
   /cae_thumb_prevwrap/.test(cc) && /max-height:200px/.test(cc));
-ok('파일 업로드는 유지(guide-image imageBase64 재사용)',
-  /\/api\/order\/guide-image/.test(cc) && /imageBase64: b64/.test(cc));
+// 요구 변경: 이 모달은 썸네일 URL 입력만 제공(파일 업로드 창구 제거).
+//   관리자 대시보드 모집공고 모달의 직접 업로드는 그대로 유지된다.
+ok('파일 업로드 제거 — 썸네일은 URL 입력만',
+  !/cae_thumb_file/.test(cc) && !/_caeThumbFromFile/.test(cc) && /id="cae_thumb"/.test(cc));
+ok('연결된 유입가이드 미리보기(공용 렌더러) 표시',
+  /_caeRenderWorkDetail/.test(cc) && /CampWorkDetail\.renderInto/.test(cc) && /cae_wd_cards/.test(cc));
 ok('리뷰비 100원 단위 증감(step="100")', /id="cae_fee"[^>]*step="100"/.test(cc));
 ok('시간표기에 자유/자율 → 구매시간 숨김(_caeToggleWindow)',
   /function _caeIsAutoOrder\(\) \{ return \/자유\|자율\//.test(cc) && /function _caeToggleWindow/.test(cc));

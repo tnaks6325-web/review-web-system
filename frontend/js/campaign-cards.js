@@ -129,7 +129,7 @@
       .pcard .pbtn.off{background:#EEF1F7;color:#94A3B8;cursor:default}
       .pcard .pnote{font-size:.6rem;color:#9CA3AF;text-align:center}
       .cae-ovl{position:fixed;inset:0;z-index:100000;background:rgba(0,0,0,.5);display:flex;align-items:center;justify-content:center;padding:16px}
-      .cae-box{box-sizing:border-box;background:#fff;border-radius:16px;max-width:480px;width:100%;max-height:88vh;overflow-y:auto;padding:16px 18px;box-shadow:0 8px 30px rgba(0,0,0,.25)}
+      .cae-box{box-sizing:border-box;background:#fff;border-radius:16px;max-width:520px;width:100%;max-height:94vh;overflow-y:auto;padding:16px 18px;box-shadow:0 8px 30px rgba(0,0,0,.25)}
       .cae-box *{box-sizing:border-box}
       .cae-box h3{font-size:.95rem;font-weight:800;color:#111827;margin:0 0 10px;display:flex;align-items:center;gap:8px}
       .cae-lb{display:block;font-size:.7rem;font-weight:800;color:#4B5563;margin:9px 0 3px}
@@ -379,10 +379,15 @@
         <div id="cae_thumb_prevwrap" style="display:none;margin-top:8px;text-align:center;background:#F3F4F6;border-radius:10px;padding:12px">
           <img id="cae_thumb_prev" alt="썸네일 미리보기" style="max-width:100%;max-height:200px;border-radius:8px;border:1px solid #E5E7EB;object-fit:contain">
         </div>
-        <div style="display:flex;gap:8px;align-items:center;margin-top:8px">
-          <span class="cae-lb" style="margin:0;white-space:nowrap">또는 파일 업로드</span>
-          <input id="cae_thumb_file" type="file" accept="image/*" style="font-size:.7rem;flex:1;min-width:0">
+        <!-- 연결된 유입가이드 미리보기(읽기전용) — 관리자가 어떤 가이드가 걸려 있는지 육안 확인.
+             실제 리뷰어 화면과 같은 공용 렌더러(js/campaign-workdetail.js)를 쓴다. -->
+        <div id="cae_wd_sec" style="display:none;margin-top:14px;border-top:1px dashed #E5E7EB;padding-top:12px">
+          <div class="cae-lb" style="display:flex;align-items:center;gap:6px">
+            🧭 연결된 작업내용 <span style="font-weight:400;color:#9CA3AF">— 리뷰어가 참여 후 보는 내용(읽기전용)</span>
+          </div>
+          <div id="cae_wd_cards" style="max-height:340px;overflow-y:auto;background:#F0F2FA;border-radius:12px;padding:10px;margin-top:6px"></div>
         </div>
+        <div id="cae_wd_none" class="cae-note" style="display:none">연결된 작업내용이 없습니다 — 관리자 대시보드 → 캠페인 탭에서 등록할 수 있어요.</div>
         <div class="cae-note">채널·모집내용·작업내용 등 전체 항목 수정은 관리자 대시보드 → 캠페인 탭에서</div>
         <div style="display:flex;gap:8px;margin-top:14px">
           <button type="button" id="caeSave" class="cae-btn pri">저장</button>
@@ -397,7 +402,6 @@
       if (/^https?:\/\//i.test(u)) window.open(u, '_blank', 'noopener');
       else _toast('열 수 있는 상품 URL이 없습니다.', true);
     });
-    ovl.querySelector('#cae_thumb_file').addEventListener('change', _caeThumbFromFile);
     ovl.querySelector('#cae_thumb').addEventListener('input', _caeSyncPreview);
     ovl.querySelector('#cae_time_range').addEventListener('input', _caeToggleWindow);
     ovl.querySelector('#caeProdFetch').addEventListener('click', _caeFetchProduct);
@@ -406,6 +410,34 @@
   }
 
   function _caeV(id) { const el = document.getElementById(id); return el ? el.value : ''; }
+  /**
+   * 연결된 작업내용(유입가이드 등) 읽기전용 미리보기.
+   * 실제 리뷰어 화면과 같은 공용 렌더러를 써서, 관리자가 "리뷰어에게 무엇이 보이는지"를
+   * 그대로 확인할 수 있다. 응답에 work_detail이 없으면(리뷰어앱 스코프 토큰은 축약뷰라
+   * 미포함) 조용히 안내만 — 저장 동작에는 영향 없음.
+   */
+  function _caeRenderWorkDetail(data) {
+    const sec = document.getElementById('cae_wd_sec');
+    const none = document.getElementById('cae_wd_none');
+    const box = document.getElementById('cae_wd_cards');
+    if (!sec || !box || !none) return;
+    let wd = data && data.work_detail;
+    if (typeof wd === 'string') { try { wd = JSON.parse(wd); } catch (_) { wd = null; } }
+    const has = wd && (wd.productLines || wd.inflowGuideHtml || wd.reviewGuide || wd.specialNotes);
+    if (!has || !window.CampWorkDetail) {
+      sec.style.display = 'none';
+      none.style.display = window.CampWorkDetail ? '' : 'none';
+      return;
+    }
+    none.style.display = 'none';
+    sec.style.display = '';
+    window.CampWorkDetail.renderInto(box, {
+      workDetail: wd,
+      landingUrl: data.landing_url || '',
+      inflowType: '',
+    }, { showOption: false, apiBase: _apiBase() });
+  }
+
   function _caeSyncPreview() {
     const url = _caeV('cae_thumb').trim();
     const img = document.getElementById('cae_thumb_prev');
@@ -485,35 +517,10 @@
     document.getElementById('cae_landing').value = data.landing_url || '';
     document.getElementById('cae_thumb').value = data.thumbnail_url || '';
     _caeSyncPreview();
+    _caeRenderWorkDetail(data);
     _caeToggleWindow();
   }
 
-  async function _caeThumbFromFile(ev) {
-    const input = ev.target;
-    const file = input.files && input.files[0];
-    if (!file) return;
-    if (file.size > 5 * 1024 * 1024) { _toast('이미지는 5MB 이하로 올려주세요.', true); input.value = ''; return; }
-    _toast('썸네일 업로드 중...');
-    try {
-      const b64 = await new Promise((res, rej) => {
-        const rd = new FileReader();
-        rd.onload = () => res(String(rd.result).split(',')[1]);
-        rd.onerror = rej;
-        rd.readAsDataURL(file);
-      });
-      const r = await fetch(_apiBase() + '/api/order/guide-image', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json', 'Authorization': 'Bearer ' + _adminTok() },
-        body: JSON.stringify({ imageBase64: b64, mimeType: file.type || 'image/jpeg', fileName: 'campthumb_' + Date.now() }),
-      });
-      const j = await r.json();
-      if (!r.ok || !j.ok || !j.url) throw new Error(j.error || '업로드 실패');
-      document.getElementById('cae_thumb').value = j.url;
-      _caeSyncPreview();
-      _toast('썸네일이 업로드되었습니다. [저장]을 눌러 반영하세요.');
-    } catch (e) { _toast('썸네일 업로드 실패: ' + e.message, true); }
-    finally { input.value = ''; }
-  }
 
   async function _caeSave() {
     if (!_caeLoaded) return;
