@@ -94,6 +94,40 @@
       /* ★ 064 인기상품 배지 — 리뷰어 노출용(썸네일 좌상단, 리본과 세로 스택) */
       .pcard .pt-pop{font-size:.64rem;font-weight:900;border-radius:7px;padding:3px 8px;color:#fff;
         background:linear-gradient(135deg,#EF4444,#DC2626);box-shadow:0 2px 6px rgba(220,38,38,.4)}
+      /* ═══ 행으로 보기(시안 C 티켓형) — CSS만으로 카드를 가로로 눕힌다 ═══
+         ★ 렌더 경로를 하나로 유지하는 것이 핵심: cardHtml() 출력은 그대로 두고 표현만 바꾼다
+           → 카운트다운 틱(data-camp-countdown)·상태 리본·[인기!]·별표·게이지·버튼이 자동으로 동일 동작.
+           (행 전용 HTML을 따로 만들면 상태 규칙이 두 벌이 되어 반드시 드리프트한다)
+         부모 .rc-list.rc-view-row 가 켜지면 적용 — index.html applyRecruitView()가 토글. */
+      .rc-view-row .pcards-grid{grid-template-columns:minmax(0,1fr);gap:8px}
+      .rc-view-row .pcard{flex-direction:row;align-items:stretch;max-width:100%}
+      /* 썸네일: 좌측 고정폭(정사각 해제). position:static 으로 낮춰 내부 절대배치가 .pcard 기준이 되게 */
+      .rc-view-row .pcard .pthumb{position:static;width:92px;flex:0 0 92px;aspect-ratio:auto;min-height:92px}
+      .rc-view-row .pcard .pt-img{height:100%;object-fit:cover}
+      .rc-view-row .pcard .pt-ph{height:100%;font-size:1.5rem}
+      /* 카운트다운 오버레이는 썸네일 영역에만 (좌측 92px) — 카드와 동일한 "썸네일 위 카운트다운" */
+      .rc-view-row .pcard .pt-ovl{right:auto;width:92px;padding:4px}
+      .rc-view-row .pcard .pt-ovl .ot{font-size:.76rem}
+      .rc-view-row .pcard .pt-ovl .ol,.rc-view-row .pcard .pt-ovl .lab{font-size:.53rem}
+      .rc-view-row .pcard .pt-ovl .live-pill{font-size:.5rem;padding:1px 6px}
+      /* 채널·배송 배지 + 별표: 행 우측 상단 */
+      .rc-view-row .pcard .pt-badges{top:7px;right:8px;max-width:calc(100% - 104px)}
+      /* [인기!]·상태 리본: 본문 시작점(썸네일 오른쪽) 상단 */
+      .rc-view-row .pcard .pt-topleft{top:7px;left:102px;flex-direction:row;flex-wrap:wrap;gap:4px;max-width:calc(100% - 190px)}
+      .rc-view-row .pcard .peditchip{bottom:6px;left:6px;font-size:.55rem;padding:2px 6px}
+      /* 본문: 배지열과 겹치지 않게 상단 여백. ★ min-width:0 필수 —
+         flex 자식 기본값 min-width:auto 라 긴 제목이 줄지 않고 행 전체가 가로로 넘친다(말줄임도 안 먹음) */
+      .rc-view-row .pcard .pbody{padding:26px 10px 9px;gap:4px;justify-content:center;min-width:0;flex:1 1 auto}
+      .rc-view-row .pcard .ptitle{-webkit-line-clamp:1;font-size:.79rem;overflow:hidden}
+      .rc-view-row .pcard .pmeta{font-size:.65rem;gap:5px}
+      /* 게이지: 라벨과 막대를 한 줄로 압축(행 높이 절약) */
+      .rc-view-row .pcard .pgauge{flex-direction:row;align-items:center;gap:7px;margin-top:0}
+      .rc-view-row .pcard .pg-row{flex:0 0 auto;gap:4px}
+      .rc-view-row .pcard .pg-lb{display:none}
+      .rc-view-row .pcard .pg-track{flex:1}
+      .rc-view-row .pcard .pbtn{padding:8px 0;font-size:.74rem;margin-top:2px}
+      .rc-view-row .pcard .pnote{font-size:.6rem}
+      .rc-view-row .pcard .poptchip{margin-top:2px}
       /* ★ 064 관리자 별표 토글 — 우측상단 배지열 맨 앞(관리자 토큰 보유 시에만 렌더) */
       .pcard .pstarchip{border:1px solid #E5E7EB;background:rgba(255,255,255,.94);color:#9CA3AF;border-radius:7px;
         padding:2px 7px;font-size:.78rem;line-height:1.2;cursor:pointer;box-shadow:0 1px 4px rgba(0,0,0,.15)}
