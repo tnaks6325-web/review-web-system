@@ -74,15 +74,37 @@ async function _runModel(parts, label, genConfigOverride) {
   throw lastErr;
 }
 
+/**
+ * 설정된 API 키 목록(값). ★ 키 자체는 이 파일 밖으로 내보내지 않는다 — 개수만 노출.
+ * 멀티 키: GEMINI_API_KEYS (쉼표 구분) 우선, 없으면 GEMINI_API_KEY 단일.
+ */
+function _resolveKeys() {
+  const multiKeys = process.env.GEMINI_API_KEYS;
+  const singleKey = process.env.GEMINI_API_KEY;
+  return multiKeys
+    ? multiKeys.split(',').map(k => k.trim()).filter(Boolean)
+    : (singleKey ? [singleKey] : []);
+}
+
+/**
+ * 헬스체크용 설정 상태 — **키 값은 절대 반환하지 않는다**(개수·모델명만).
+ * 배포 후 "GEMINI_API_KEY가 실제로 들어갔는지"를 브라우저에서 바로 확인하기 위한 신호.
+ */
+function getGeminiStatus() {
+  const n = _resolveKeys().length;
+  return {
+    configured: n > 0,
+    keys: n,
+    source: process.env.GEMINI_API_KEYS ? 'GEMINI_API_KEYS' : (process.env.GEMINI_API_KEY ? 'GEMINI_API_KEY' : null),
+    model: MODEL_NAME,
+    initialized: _modelPool.length > 0,   // 한 번이라도 실제 호출로 초기화됐는지
+  };
+}
+
 function _initGemini() {
   if (_modelPool.length > 0) return true;
 
-  // 멀티 키: GEMINI_API_KEYS (쉼표 구분) 우선, 없으면 GEMINI_API_KEY 단일
-  const multiKeys = process.env.GEMINI_API_KEYS;
-  const singleKey = process.env.GEMINI_API_KEY;
-  const keys = multiKeys
-    ? multiKeys.split(',').map(k => k.trim()).filter(Boolean)
-    : (singleKey ? [singleKey] : []);
+  const keys = _resolveKeys();
 
   if (keys.length === 0) {
     logger.warn('[Gemini] GEMINI_API_KEY(S) 환경변수 미설정 — AI 기능 비활성화');
@@ -494,4 +516,5 @@ module.exports = {
   classifySubmissionImage,
   explainErrorKo,
   analyzeErrorAgents,
+  getGeminiStatus,
 };
