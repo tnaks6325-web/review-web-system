@@ -135,6 +135,26 @@ app.get('/health', async (req, res) => {
   const googleStatus = process.env.GOOGLE_SERVICE_ACCOUNT_EMAIL ? 'configured' : 'not_configured';
   const saEmail = process.env.GOOGLE_SERVICE_ACCOUNT_EMAIL || '(미설정)';
 
+  // AI 설정 상태 — 배포 후 GEMINI_API_KEY 주입 여부를 브라우저에서 바로 확인하기 위한 신호.
+  // ★ 키 값은 절대 싣지 않는다(개수·출처 변수명·모델명만). 이 엔드포인트는 무인증 공개다.
+  let ai = { gemini: 'unknown' };
+  try {
+    const { getGeminiStatus } = require('./services/gemini.service');
+    const g = getGeminiStatus();
+    ai = {
+      gemini: g.configured ? 'configured' : 'not_configured',
+      geminiKeys: g.keys,
+      geminiKeySource: g.source,
+      geminiModel: g.model,
+      geminiInitialized: g.initialized,
+      // 캡처 슬롯 AI 검수(현금영수증 3단계) — 키가 있어도 이게 off면 검수는 돌지 않는다
+      captureVerify: process.env.CAPTURE_VERIFY !== '0' ? 'on' : 'off',
+      captureVerifyMinConfidence: Number(process.env.CAPTURE_VERIFY_MIN_CONFIDENCE || 0.7),
+    };
+  } catch (err) {
+    ai = { gemini: `error: ${err.message}` };   // 헬스체크가 죽지 않게(fail-soft)
+  }
+
   res.json({
     ok: true,
     ts: Date.now(),
@@ -143,6 +163,7 @@ app.get('/health', async (req, res) => {
     dbTime,
     google: googleStatus,
     serviceAccount: saEmail,
+    ai,
     version: '2.26.0-throttle-monitor',
     uptime: Math.floor(process.uptime()),
     memory: Math.round(process.memoryUsage().heapUsed / 1024 / 1024) + 'MB',
