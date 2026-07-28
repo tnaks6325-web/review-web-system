@@ -4,6 +4,7 @@
  * 문제였던 것: 미리보기가 입력란 **아래 같은 스크롤**에 붙어 있어, 미리보기를 보면
  * 입력란이 화면 밖으로 나가 "고치면서 확인"이 불가능했다. 좌우 2단으로 바꿨다.
  * 입력은 탭으로 나누지 않고 **한 화면에 촘촘히**(sticky 섹션 헤더) — 항목을 찾아 탭을 옮겨다니지 않게.
+ * v4: 묶음을 기본정보 / 모집정보 **두 개**로 재편하고 짧은 항목은 가로 표기(.rf-hrow)로 밀도를 높였다.
  *
  * ★ 실측 버그 고정: CSS를 @media(max-width:480px) 안에 넣어 480px 이하에서만 적용되던 것
  *   → .rf-side 폭이 안 먹어 미리보기가 전체 폭을 차지했다. 최상위에 있어야 한다.
@@ -47,10 +48,26 @@ ok('★ 레이아웃 CSS가 미디어쿼리 밖에 있다 — 안에 두면 특�
 ok('좁은 화면에서는 세로로 되돌린다', /@media \(max-width:900px\)[\s\S]{0,220}\.rf-split\{flex-direction:column/.test(adm));
 
 /* ── 한 화면 · 섹션(탭 없음) ── */
-ok('탭 없이 네 묶음이 한 화면에', (() => {
-  const secs = modal.match(/class="rf-sec" data-pane="/g) || [];
-  return secs.length === 4 && !/class="rf-tabs"/.test(modal);
+ok('탭 없이 기본정보 · 모집정보 두 묶음이 한 화면에', (() => {
+  const secs = modal.match(/class="rf-sec" data-pane="(\w+)"/g) || [];
+  return secs.length === 2 && /data-pane="basic"/.test(modal) && /data-pane="part"/.test(modal)
+    && !/class="rf-tabs"/.test(modal);
 })());
+ok('짧은 항목은 가로 표기(라벨 왼쪽) — 시트·탭 / 담당자·채널 / 배송·리뷰비 / 배지 / 팀채팅방',
+  /\.rf-hrow\{display:grid;grid-template-columns:64px 1fr/.test(adm)
+  && (modal.match(/class="rf-hrow/g) || []).length >= 8);
+ok('진행상품 표 = 상품명·옵션명·결제금액·총인원·일건수 5열',
+  /\.rf-prod-head,\.rf-opt-row\{display:grid/.test(adm)
+  && /class="rf-prod-head"/.test(modal)
+  && /rf-opt-prod/.test(rec) && /rf-opt-rt/.test(rec) && /rf-opt-dl/.test(rec));
+ok('캠페인 정원은 표에서 파생(별도 입력칸 없음 — hidden)',
+  /id="rf_daily_limit" type="hidden"/.test(modal) && /id="rf_recruit_total" type="hidden"/.test(modal)
+  && /function _syncPreviewFromOptRows/.test(rec));
+ok('종료일은 시트와 다르면 경고만 — 실제 모집은 시트를 따른다',
+  /id="rf_deadline"/.test(modal) && /실제 모집은 <b>시트를 따릅니다<\/b>/.test(rec));
+ok('현금영수증은 탭 설정 읽기 전용(공고에서 변경 불가)',
+  /id="rf_cashrcpt_ro"/.test(modal) && /function refreshRecruitCashReceipt/.test(rec)
+  && !/id="rf_income_type"/.test(modal));
 ok('섹션 헤더는 스크롤 중에도 붙어 있다(지금 어느 묶음인지)', /\.rf-sech\{position:sticky/.test(adm));
 ok('밀도 — 라벨·입력 간격 축소 + 짧은 항목 2열',
   /\.rf-main \.rform-label\{margin-bottom:2px/.test(adm) && /class="rf-grid2"/.test(modal));
@@ -70,7 +87,7 @@ ok('저장·프리필이 참조하는 필드가 모두 살아있다', (() => {
     'rf_linked_tab', 'rf_status', 'rf_max_slots', 'rf_participation', 'rf_start_date',
     'rf_window_start', 'rf_window_end', 'rf_daily_limit', 'rf_recruit_total', 'rf_landing_url',
     'rf_thumb_file', 'rf_thumb_url', 'rf_multi_account', 'rf_multi_daily', 'rf_sub_ttl',
-    'rf_hold_ttl', 'rf_close_buffer', 'rf_opt_rows', 'rf_part_check',
+    'rf_hold_ttl', 'rf_close_buffer', 'rf_opt_rows', 'rf_part_check', 'rf_deadline', 'rf_notes',
     'rf_wd_product', 'rf_wd_inflow', 'rf_wd_review', 'rf_wd_notes', 'rf_preview_card'];
   return ids.every(id => modal.includes(`id="${id}"`));
 })());
@@ -83,5 +100,19 @@ ok('자율주문 자동 감지 — 시간 표기에 자유/자율이면 구매�
   && /id="rf_autoorder_note"/.test(modal) && /oninput="onRecruitTimeRangeInput\(\)"/.test(modal));
 ok('자율주문 판정은 사용자가 자율로 적었을 때만 값을 지운다(오작동 여지 없음)',
   /if \(auto\) \{[\s\S]{0,200}if \(el && el\.value\) el\.value = ""/.test(rec));
+
+/* ── 작업오더 상품정보 자동 분해(사용자 확정 ②) ── */
+ok('상품정보 텍스트를 줄 단위로 분해하는 파서가 있다',
+  /function parseProductLinesToRows\(text, fallbackProductName\)/.test(rec));
+ok('결제금액 표기(28,900원 / 26900)를 숫자로 뽑는다',
+  /결제금액\\s\*\(\[\\d,\]\+\)/.test(rec) && /replace\(\/,\/g, ""\)/.test(rec));
+ok('둘째 줄 상품명이 생략되면 앞 줄 상품명을 이어 쓴다',
+  /if \(lastProd\) \{ productName = lastProd; optKey = parts\[0\]; \}/.test(rec));
+ok('★ "옵션 없음" 류는 옵션으로 저장하지 않는다(시트 옵션열 오염·가짜 선택지 방지)',
+  /\^\(옵션\\s\*없음\|없음\|단일/.test(rec));
+ok('분해가 애매해도 값을 버리지 않는다(상품명 칸에 통째로)',
+  /parts\.length === 1/.test(rec) && /productName = parts\[0\]/.test(rec));
+ok('옵션 배열이 있으면 분해 없이 그대로 사용',
+  /Array\.isArray\(p\.options\) && p\.options\.length/.test(rec));
 
 console.log(`\n✅ recruitModalLayout: ${n}개 통과`);

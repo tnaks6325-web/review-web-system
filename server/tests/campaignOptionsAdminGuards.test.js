@@ -29,10 +29,21 @@ ok('index-recruit: 자동점검(_optSummary — 정원합/하루합/중복)', /f
 ok('index-recruit: 저장 payload.options(옵션표 있을 때만) + 중복 하드블록', /if \(document\.getElementById\("rf_opt_rows"\)\) \{[\s\S]*?payload\.options = readOptRows\(\)/.test(recruit) && /_optChk\.dup\) \{ showToast\("옵션명이 중복/.test(recruit));
 ok('index-recruit: readOptRows 파이프 정규화·빈옵션 제거', /replace\(\/\\\|\/g, ""\)\.trim\(\)/.test(recruit) && /if \(!optKey\) return;/.test(recruit));
 ok('index-recruit: 마감(closed) 옵션 상태 보존(재활성화 방지, 리뷰 #1)', /row\.dataset\.status = status/.test(recruit) && /status:\s*r\.dataset\.status === "closed" \? "closed" : "active"/.test(recruit) && /rf-opt-reopen/.test(recruit));
-ok('index-recruit: 하루합 오탐 방지(전부 하루한도 있을 때만 비교)', /allHaveDaily = active\.length > 0 && active\.every\(o => o\.dailyLimit > 0\)/.test(recruit));
-ok('index-recruit: 편집 프리필 renderOptRows(json.options)', /renderOptRows\(json\.options \|\| \[\]\)/.test(recruit));
+// v4: 캠페인 정원이 표에서 파생되므로 "총모집≠정원합" 비교 자체가 사라졌다(항상 일치).
+// allHaveDaily는 하루합 '표시' 조건으로만 남는다.
+ok('index-recruit: 하루합은 전부 하루한도 있을 때만 표기',
+  /allHaveDaily = active\.length > 0 && active\.every\(o => o\.dailyLimit > 0\)/.test(recruit));
+// v4: 표가 [상품명·옵션명·결제금액·총인원·일건수] 5열이 되면서 프리필도 상품명을 함께 복원한다
+// (campaign_options에는 상품명이 없어 작업내용 원문에서 되찾음).
+ok('index-recruit: 편집 프리필 renderOptRowsWithProduct(json.options, 상품원문)',
+  /renderOptRowsWithProduct\(json\.options \|\| \[\], wd\.productLines\)/.test(recruit)
+  && /function renderOptRowsWithProduct/.test(recruit));
 ok('index-recruit: 신규 모달 옵션표 초기화 renderOptRows([])', /renderOptRows\(\[\]\);\s*\/\/ .*옵션표 초기화/.test(recruit));
-ok('index-recruit: 작업오더 프리필 renderOptRows(prefill.options)', /renderOptRows\(prefill\.options \|\| \[\]\)/.test(recruit));
+// v4: 작업오더는 옵션 배열이 있으면 그대로, 없으면 상품정보 텍스트를 줄 단위로 분해해 표를 채운다
+ok('index-recruit: 작업오더 프리필 applyProductRowsFromOrder(옵션배열 또는 텍스트 자동분해)',
+  /applyProductRowsFromOrder\(prefill\)/.test(recruit)
+  && /function applyProductRowsFromOrder/.test(recruit)
+  && /function parseProductLinesToRows/.test(recruit));
 
 // ── 작업오더 → 발행 옵션 프리필 ──
 ok('index-app: _woOptionRows(product_options_json → 옵션행)', /function _woOptionRows\(o\)/.test(app) && /product_options_json/.test(app));

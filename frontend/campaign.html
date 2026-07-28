@@ -937,6 +937,7 @@ function _renderJoinedView(j, h){
       workDetail: j.workDetail || {},
       landingUrl: j.landingUrl,
       inflowType: j.inflowType,
+      cashReceipt: j.cashReceipt,   // 현영 탭 공고만 서버가 내려줌(발행 안내 카드)
     }, { showOption: false, apiBase: API_BASE_URL });
     // 인라인 구매양식 iframe (동일 오리진 — search.html 재사용)
     const f = j.form || {};

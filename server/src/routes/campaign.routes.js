@@ -52,6 +52,38 @@ async function _lookupInflowType(campId, sourceWoId) {
   }
 }
 
+/**
+ * 현금영수증 안내(1단계) — 연결 탭의 진행방식(income_type)에 '현영'이 포함된 공고만.
+ *   리뷰어가 결제 단계에서 지출증빙 발행을 놓치지 않도록 work-detail에 사업자번호 +
+ *   채널별(네이버/쿠팡) 발행방법 이미지를 동봉한다. 발행 여부의 진실원본은 탭 설정
+ *   (tab_configs.income_type) 하나 — 공고 폼은 읽기 전용 표시만 한다(이중 관리 방지).
+ *   실패는 null(fail-soft) — 안내 조회 장애가 작업내용 응답을 막지 않는다.
+ */
+async function _cashReceiptInfo(camp) {
+  try {
+    if (!camp || !camp.linked_sheet_id || !camp.linked_tab_name) return null;
+    const { rows } = await pool.query(
+      'SELECT income_type FROM tab_configs WHERE sheet_id = $1 AND tab_name = $2 LIMIT 1',
+      [camp.linked_sheet_id, camp.linked_tab_name]
+    );
+    const incomeType = rows[0]?.income_type || '';
+    if (!incomeType.includes('현영')) return null;
+    const { rows: s } = await pool.query(
+      `SELECT key, value FROM app_settings
+        WHERE key IN ('company_business_no', 'cash_receipt_guide_naver', 'cash_receipt_guide_coupang')`
+    );
+    const map = {};
+    for (const r of s) map[r.key] = r.value || '';
+    const ch = String(camp.channel === '직접입력' ? (camp.channel_custom || '') : (camp.channel || ''));
+    const guideImageUrl = /쿠팡/.test(ch) ? (map.cash_receipt_guide_coupang || '')
+                        : /네이버/.test(ch) ? (map.cash_receipt_guide_naver || '')
+                        : '';   // 기타 채널 = 이미지 없이 문구 안내만
+    return { required: true, incomeType, businessNo: map.company_business_no || '', guideImageUrl };
+  } catch (_) {
+    return null;
+  }
+}
+
 // ═══════════════════════════════════════════════════════════
 // 상품옵션(campaign_options) 헬퍼 (061, PRD v1.1)
 //   opt_key는 시트 옵션열 기입값(selected_opt_key)과 동일 문자열 → 파이프 '|'(다중옵션 구분자) 제거.
@@ -639,6 +671,7 @@ router.get('/:id/work-detail', detailLimiter, async (req, res, next) => {
       canChangeOption,
       workDetail: sanitizeWorkDetail(camp.work_detail),          // HTML은 응답 직전 방어적 재정화
       inflowType,                                                 // 'guide' | 'link' | '' — 랜딩 버튼 게이트
+      cashReceipt: await _cashReceiptInfo(camp),                  // 현영 탭만 {required, businessNo, guideImageUrl} — 아니면 null
       // 카톡 팀채팅방 URL은 제출확정 후에만 반환(화면 숨김을 API에서도 강제 — DevTools 우회 차단)
       chatUrl: isSubmitted ? (camp.chat_url || '') : '',
       landingUrl: camp.landing_url || '',
@@ -1632,6 +1665,7 @@ router.get('/admin/:id/preview', authMiddleware, adminOrMasterMiddleware, async 
       canChangeOption: false,               // 미리보기에서는 옵션 변경 불가(서버 상태 무변경)
       workDetail: sanitizeWorkDetail(camp.work_detail),
       inflowType,
+      cashReceipt: await _cashReceiptInfo(camp),   // 미리보기 = 실제 화면(현영 안내 카드 포함)
       chatUrl: camp.chat_url || '',         // 관리자는 원래 카톡 URL을 설정·조회하는 주체
       landingUrl: camp.landing_url || '',
       form: {

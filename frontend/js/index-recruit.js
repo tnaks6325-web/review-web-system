@@ -401,10 +401,13 @@ function onLinkedTabChange(sel) {
     if (t) {
       txt.textContent = t.sheetName + " > " + t.tabName + " 탭으로 이동";
       info.style.display = "block";
+      window._rfLinkedTabName = t.tabName;      // 현영 판정·시트 일정 조회 키
     }
   } else {
     info.style.display = "none";
+    window._rfLinkedTabName = "";
   }
+  refreshRecruitCashReceipt();   // 탭이 바뀌면 현금영수증 발행 여부 재판정(읽기 전용 표시)
 }
 
 /* 수정 모달 열 때: 저장된 연결 탭 복원 */
@@ -427,6 +430,73 @@ function _restoreLinkedTab(linkedSheetId, linkedTabName) {
 /* ═══════════════════════════════════════
    ⚡ 참여형 캠페인 (M2) — 토글·자동점검·시간대 파서
 ═══════════════════════════════════════ */
+/* ═══════════════════════════════════════
+   종료일 · 현금영수증 (v4)
+═══════════════════════════════════════ */
+const _RF_DOW = ["일", "월", "화", "수", "목", "금", "토"];
+function _rfDow(v) {
+  const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(String(v || ""));
+  if (!m) return "";
+  return "(" + _RF_DOW[new Date(Date.UTC(+m[1], +m[2] - 1, +m[3])).getUTCDay()] + ")";
+}
+
+/**
+ * 시작일·종료일 옆 요일 표기 + 종료일 경고.
+ * ★ 사용자 확정 ③: 시트 일정과 다르면 **경고만 띄우고 시트를 따른다**(입력값은 참고).
+ *   시트 마감일은 서버가 구매일자 컬럼에서 파생하므로(063), 여기서는 마지막으로 조회한
+ *   값(window._rfSheetEndDate)과 비교만 한다 — 없으면 경고 없음(조용한 무동작).
+ */
+function onRecruitDatesChange() {
+  const sd = document.getElementById("rf_start_date");
+  const dl = document.getElementById("rf_deadline");
+  const sDay = document.getElementById("rf_start_day");
+  const dDay = document.getElementById("rf_deadline_day");
+  if (sDay && sd) sDay.textContent = _rfDow(sd.value);
+  if (dDay && dl) dDay.textContent = _rfDow(dl.value);
+  const warn = document.getElementById("rf_deadline_warn");
+  if (!warn || !dl) return;
+  const sheetEnd = window._rfSheetEndDate || "";
+  if (dl.value && sheetEnd && dl.value !== sheetEnd) {
+    warn.style.display = "";
+    warn.style.color = "#B45309";
+    warn.innerHTML = "⚠ 시트 일정은 <b>" + escHtml(sheetEnd) + " " + _rfDow(sheetEnd) +
+      "</b>까지입니다 — 실제 모집은 <b>시트를 따릅니다</b>(입력한 종료일은 참고용).";
+  } else {
+    warn.style.display = "none";
+  }
+}
+
+/**
+ * 연결 탭의 진행방식으로 현금영수증 발행 여부 표시(읽기 전용).
+ * 진실원본은 tab_configs.income_type 하나 — 공고에서 바꾸지 않는다(이중 관리 방지).
+ */
+async function refreshRecruitCashReceipt() {
+  const box = document.getElementById("rf_cashrcpt_ro");
+  if (!box) return;
+  const sheetId = document.getElementById("rf_linked_campaign")?.value || "";
+  const tabName = window._rfLinkedTabName || "";
+  if (!sheetId || !tabName) {
+    box.style.color = "var(--t3)";
+    box.textContent = "탭을 연결하면 진행방식에서 판정합니다";
+    return;
+  }
+  try {
+    const d = await gasGet({ action: "getProviderInfo", sheetId, tabName });
+    const income = (d && d.incomeType) || "";
+    if (income.includes("현영")) {
+      box.style.color = "#0B7A5B";
+      box.innerHTML = "<b>발행 필요</b> — 진행방식 “" + escHtml(income) + "”" +
+        (d.companyBusinessNo ? " · 사업자번호 " + escHtml(d.companyBusinessNo) : "");
+    } else {
+      box.style.color = "var(--t3)";
+      box.textContent = income ? ("발행 없음 — 진행방식 “" + income + "”") : "발행 없음";
+    }
+  } catch (_) {
+    box.style.color = "var(--t3)";
+    box.textContent = "진행방식을 불러오지 못했습니다";
+  }
+}
+
 /* 상품 페이지를 새 탭에서 — 리뷰어 앱 모달의 [바로가기 ↗]와 동일 */
 function openRecruitProductUrl() {
   const u = (document.getElementById("rf_product_url")?.value || "").trim();
@@ -596,49 +666,90 @@ function addOptRow(data) {
   const row = document.createElement("div");
   row.className = "rf-opt-row";
   row.dataset.status = status;
-  row.style.cssText = "display:grid;grid-template-columns:1.5fr 1fr .8fr .8fr auto;gap:6px;align-items:center;margin-bottom:6px" + (status === "closed" ? ";opacity:.68" : "");
+  if (status === "closed") row.style.opacity = ".68";
   const lastBtn = status === "closed"
     ? '<button type="button" class="btn-icon-sm rf-opt-reopen" title="옵션 재개(다시 모집)" style="color:#12b886"><i class="fas fa-rotate-left"></i></button>'
-    : '<button type="button" class="btn-icon-sm rf-opt-del" title="옵션 삭제" style="color:#EF4444"><i class="fas fa-times"></i></button>';
+    : '<button type="button" class="btn-icon-sm rf-opt-del" title="이 옵션 삭제" style="color:#EF4444"><i class="fas fa-times"></i></button>';
   row.innerHTML =
-    '<input class="rform-input rf-opt-name" placeholder="옵션명" style="font-size:.74rem;padding:7px 8px">' +
-    '<input class="rform-input rf-opt-pay" type="number" min="0" placeholder="금액" style="font-size:.74rem;padding:7px 8px">' +
-    '<input class="rform-input rf-opt-rt" type="number" min="0" placeholder="정원" style="font-size:.74rem;padding:7px 8px">' +
-    '<input class="rform-input rf-opt-dl" type="number" min="0" placeholder="하루" style="font-size:.74rem;padding:7px 8px">' +
+    '<input class="rform-input rf-opt-prod" placeholder="상품명">' +
+    '<input class="rform-input rf-opt-name" placeholder="옵션명(없으면 비움)">' +
+    '<input class="rform-input rf-opt-pay" type="number" min="0" placeholder="금액">' +
+    '<input class="rform-input rf-opt-rt" type="number" min="0" placeholder="총">' +
+    '<input class="rform-input rf-opt-dl" type="number" min="0" placeholder="일">' +
     lastBtn;
   const rt = d.recruitTotal ?? d.recruit_total, dl = d.dailyLimit ?? d.daily_limit, pay = d.payAmount ?? d.pay_amount;
+  // 상품명은 옵션 테이블에 없던 값 — 넘겨받지 않았으면 바로 위 행에서 따라온다(반복 입력 제거)
+  row.querySelector(".rf-opt-prod").value = d.productName ?? d.product_name ?? _lastOptProductName();
   row.querySelector(".rf-opt-name").value = d.optKey ?? d.opt_key ?? "";
   row.querySelector(".rf-opt-pay").value  = pay ? pay : "";
   row.querySelector(".rf-opt-rt").value   = rt ? rt : "";     // 0/무제한은 빈칸으로
   row.querySelector(".rf-opt-dl").value   = dl ? dl : "";
   if (status === "closed") row.querySelector(".rf-opt-name").title = "마감된 옵션(참여자 보호로 유지) — 재개 버튼으로 다시 모집할 수 있어요";
-  row.querySelectorAll("input").forEach(i => i.addEventListener("input", () => { _optSummary(); renderPartCheck(); }));
+  row.querySelectorAll("input").forEach(i => i.addEventListener("input", () => { _optSummary(); renderPartCheck(); _syncPreviewFromOptRows(); }));
   const del = row.querySelector(".rf-opt-del");
-  if (del) del.onclick = () => { row.remove(); _optSummary(); renderPartCheck(); };
+  if (del) del.onclick = () => { row.remove(); _optSummary(); renderPartCheck(); _syncPreviewFromOptRows(); };
   const reopen = row.querySelector(".rf-opt-reopen");
   if (reopen) reopen.onclick = () => {   // 마감 옵션 재개 → active + 삭제 버튼으로 교체(재개는 명시적 의도로만)
     row.dataset.status = "active"; row.style.opacity = "";
-    reopen.outerHTML = '<button type="button" class="btn-icon-sm rf-opt-del" title="옵션 삭제" style="color:#EF4444"><i class="fas fa-times"></i></button>';
-    row.querySelector(".rf-opt-del").onclick = () => { row.remove(); _optSummary(); renderPartCheck(); };
+    reopen.outerHTML = '<button type="button" class="btn-icon-sm rf-opt-del" title="이 옵션 삭제" style="color:#EF4444"><i class="fas fa-times"></i></button>';
+    row.querySelector(".rf-opt-del").onclick = () => { row.remove(); _optSummary(); renderPartCheck(); _syncPreviewFromOptRows(); };
     row.querySelector(".rf-opt-name").title = "";
-    _optSummary(); renderPartCheck();
+    _optSummary(); renderPartCheck(); _syncPreviewFromOptRows();
   };
   wrap.appendChild(row);
+  _markDupProductNames();
   _optSummary();
+  _syncPreviewFromOptRows();
 }
+
+/** 마지막 행의 상품명 — 옵션을 추가할 때 자동으로 따라오게(같은 상품의 다른 옵션이 대부분) */
+function _lastOptProductName() {
+  const rows = document.querySelectorAll("#rf_opt_rows .rf-opt-row .rf-opt-prod");
+  return rows.length ? (rows[rows.length - 1].value || "") : "";
+}
+/** 위 행과 같은 상품명은 흐리게 — 자동으로 따라온 값임을 알리되 수정은 자유 */
+function _markDupProductNames() {
+  let prev = null;
+  document.querySelectorAll("#rf_opt_rows .rf-opt-row .rf-opt-prod").forEach(el => {
+    el.classList.toggle("rf-dup", prev !== null && el.value === prev);
+    prev = el.value;
+  });
+}
+
 function renderOptRows(options) {
   const wrap = document.getElementById("rf_opt_rows");
   if (!wrap) return;
   wrap.innerHTML = "";
   (options || []).forEach(o => addOptRow(o));
   _optSummary();
+  _syncPreviewFromOptRows();
 }
+
+/**
+ * 편집 프리필 — 옵션 원장에는 **상품명이 없다**(campaign_options는 옵션 단위).
+ * 그래서 작업내용 원문(productLines)을 분해해 옵션명으로 상품명을 되찾아 표를 채운다.
+ * 옵션이 없는 단일상품 공고는 원문만으로 행을 만든다(표가 비어 보이지 않게).
+ */
+function renderOptRowsWithProduct(options, productLines) {
+  const parsed = parseProductLinesToRows(productLines);
+  const byOpt = new Map();
+  parsed.forEach(r => { if (r.optKey) byOpt.set(r.optKey, r); });
+  const opts = options || [];
+  if (!opts.length) { renderOptRows(parsed.length ? parsed : []); return; }
+  const firstProd = parsed.length ? parsed[0].productName : "";
+  renderOptRows(opts.map(o => {
+    const key = o.optKey || o.opt_key || "";
+    const hit = byOpt.get(key);
+    return { ...o, productName: (hit && hit.productName) || firstProd || "" };
+  }));
+}
+
 /** 옵션표 → 저장 payload 배열(빈 옵션명 제거, '|' 정규화, 마감상태 보존) */
 function readOptRows() {
   const out = [];
   document.querySelectorAll("#rf_opt_rows .rf-opt-row").forEach(r => {
     const optKey = String(r.querySelector(".rf-opt-name").value || "").replace(/\|/g, "").trim();
-    if (!optKey) return;
+    if (!optKey) return;                       // 옵션명 없는 행 = 단일상품 — 옵션 원장에는 넣지 않는다
     out.push({
       optKey,
       payAmount:     Math.max(0, parseInt(r.querySelector(".rf-opt-pay").value, 10) || 0),
@@ -649,6 +760,116 @@ function readOptRows() {
   });
   return out;
 }
+
+/** 표의 모든 행(옵션명 없는 단일상품 포함) — 작업내용 원문·정원 합계 산출용 */
+function _readProdRows() {
+  const out = [];
+  document.querySelectorAll("#rf_opt_rows .rf-opt-row").forEach(r => {
+    const productName = String(r.querySelector(".rf-opt-prod").value || "").trim();
+    const optKey      = String(r.querySelector(".rf-opt-name").value || "").replace(/\|/g, "").trim();
+    const payAmount   = Math.max(0, parseInt(r.querySelector(".rf-opt-pay").value, 10) || 0);
+    const recruitTotal = Math.max(0, parseInt(r.querySelector(".rf-opt-rt").value, 10) || 0);
+    const dailyLimit   = Math.max(0, parseInt(r.querySelector(".rf-opt-dl").value, 10) || 0);
+    if (!productName && !optKey && !payAmount) return;   // 완전 빈 행 제외
+    out.push({ productName, optKey, payAmount, recruitTotal, dailyLimit,
+               closed: r.dataset.status === "closed" });
+  });
+  return out;
+}
+
+/**
+ * 표 → ① 작업내용 상품 원문(rf_wd_product) ② 캠페인 정원(rf_daily_limit·rf_recruit_total) 동기화.
+ * 표가 진실원본이고 저 세 값은 파생이다 — 표를 고치면 리뷰어 화면·정원이 함께 따라온다.
+ * 마감 옵션은 합계에서 제외(모집 가능한 자리만 센다).
+ */
+function _syncPreviewFromOptRows() {
+  const rows = _readProdRows();
+  const wd = document.getElementById("rf_wd_product");
+  if (wd) {
+    wd.value = rows.map(r => {
+      const head = [r.productName, r.optKey].filter(Boolean).join(" - ");
+      return r.payAmount ? (head ? head + " - 결제금액 " + r.payAmount.toLocaleString() + "원"
+                                 : "결제금액 " + r.payAmount.toLocaleString() + "원") : head;
+    }).filter(Boolean).join("\n");
+  }
+  const live = rows.filter(r => !r.closed);
+  const rt = document.getElementById("rf_recruit_total");
+  const dl = document.getElementById("rf_daily_limit");
+  // 하나라도 0(무제한)이면 합계도 0(무제한) — 부분합이 상한처럼 보이면 조기 마감 사고가 난다
+  if (rt) rt.value = live.length && live.every(r => r.recruitTotal > 0) ? live.reduce((a, r) => a + r.recruitTotal, 0) : 0;
+  if (dl) dl.value = live.length && live.every(r => r.dailyLimit > 0)   ? live.reduce((a, r) => a + r.dailyLimit, 0)   : 0;
+  _markDupProductNames();
+  _optSummary();     // 프로그램으로 표를 바꿔도(작업오더 자동 적용 등) 요약이 따라오게
+  if (typeof _renderPreview === "function") _renderPreview();
+}
+
+/**
+ * 작업오더 상품정보 텍스트 → 표 행으로 자동 분해(사용자 확정 ②).
+ * 실측 형식: "멀티싱글 - 결제금액 28,900원" / "상품명 / 옵션 / 26,900원" / "옵션명 28900"
+ * 분해가 애매한 줄은 상품명 칸에 통째로 넣는다(값 유실 없이 관리자가 표에서 정리).
+ */
+function parseProductLinesToRows(text, fallbackProductName) {
+  const lines = String(text || "").split(/\r?\n/).map(l => l.trim()).filter(Boolean);
+  if (!lines.length) return [];
+  const rows = [];
+  let lastProd = String(fallbackProductName || "").trim();
+  for (const line of lines) {
+    // 금액: "결제금액 28,900원" 우선, 없으면 줄 끝의 4자리 이상 숫자
+    let pay = 0;
+    const mPay = line.match(/결제금액\s*([\d,]+)\s*원?/);
+    if (mPay) pay = parseInt(mPay[1].replace(/,/g, ""), 10) || 0;
+    else {
+      const mTail = line.match(/([\d,]{4,})\s*원/) || line.match(/([\d,]{4,})\s*$/);
+      if (mTail) pay = parseInt(mTail[1].replace(/,/g, ""), 10) || 0;
+    }
+    // 금액 표현을 걷어낸 나머지를 구분자로 분해
+    const rest = line
+      .replace(/결제금액\s*[\d,]+\s*원?/g, "")
+      .replace(/[\d,]{4,}\s*원/g, "")
+      .replace(/[\s\-·/|]+$/, "")
+      .trim();
+    const parts = rest.split(/\s*[-–/|·]\s*/).map(p => p.trim()).filter(Boolean);
+    let productName = "", optKey = "";
+    if (parts.length >= 2) { productName = parts[0]; optKey = parts.slice(1).join(" "); }
+    else if (parts.length === 1) {
+      // 한 덩어리 — 앞 줄에 상품명이 있으면 이건 옵션명일 가능성이 높다
+      if (lastProd) { productName = lastProd; optKey = parts[0]; }
+      else { productName = parts[0]; }
+    }
+    // "옵션 없음" 류는 옵션명이 아니라 '옵션이 없다'는 서술 — 실제 옵션으로 저장되면
+    // 리뷰어에게 선택지가 하나 뜨고 시트 옵션열에도 그 문구가 기입된다.
+    if (/^(옵션\s*없음|없음|단일(상품)?|해당\s*없음|-|\.)$/.test(optKey)) optKey = "";
+    if (!productName && !optKey && !pay) continue;
+    if (productName) lastProd = productName;
+    rows.push({ productName: productName || lastProd, optKey, payAmount: pay });
+  }
+  return rows;
+}
+
+/** 작업오더 상품정보를 표에 적용 — 옵션 배열이 있으면 그대로, 없으면 텍스트를 분해 */
+function applyProductRowsFromOrder(prefill) {
+  const wrap = document.getElementById("rf_opt_rows");
+  if (!wrap) return;
+  const p = prefill || {};
+  let rows = [];
+  if (Array.isArray(p.options) && p.options.length) {
+    rows = p.options.map(o => ({
+      productName: o.productName || p.product_name || "",
+      optKey: o.optKey || o.opt_key || "",
+      payAmount: o.payAmount || o.pay_amount || 0,
+      recruitTotal: o.recruitTotal || 0, dailyLimit: o.dailyLimit || 0,
+    }));
+  } else if (p.wd_product) {
+    rows = parseProductLinesToRows(p.wd_product, p.product_name);
+  }
+  if (!rows.length) return;
+  wrap.innerHTML = "";
+  rows.forEach(r => addOptRow(r));
+  _optSummary();
+  _syncPreviewFromOptRows();
+}
+
+/** 옵션표 요약·자동점검(정원합/하루합/중복). 반환: { dup, count } — 저장 시 중복 하드블록용 */
 /** 옵션표 요약·자동점검(정원합/하루합/중복). 반환: { dup, count } — 저장 시 중복 하드블록용 */
 function _optSummary() {
   const el = document.getElementById("rf_opt_summary");
@@ -667,12 +888,10 @@ function _optSummary() {
   const rtSum = anyUnlimited ? 0 : active.reduce((a, o) => a + o.recruitTotal, 0);
   const allHaveDaily = active.length > 0 && active.every(o => o.dailyLimit > 0);  // 전부 하루한도 있을 때만 합계 비교(공유풀이라 부분캡은 합≠캠페인이 정상)
   const dlSum = active.reduce((a, o) => a + o.dailyLimit, 0);
-  const camRt = Number(document.getElementById("rf_recruit_total")?.value || 0);
-  const camDl = Number(document.getElementById("rf_daily_limit")?.value || 0);
-  const msgs = ["옵션 " + active.length + "종" + (closedN ? "(+마감 " + closedN + ")" : "") + " · 정원합 " + (anyUnlimited ? "무제한" : rtSum + "명") + (dlSum ? (" · 하루합 " + dlSum + "건") : "")];
+  // ★ 캠페인 정원(rf_recruit_total·rf_daily_limit)은 이제 표에서 파생되는 값이라
+  //   "총모집≠정원합" 같은 불일치 경고는 성립하지 않는다(항상 일치) → 합계만 알린다.
+  const msgs = ["옵션 " + active.length + "종" + (closedN ? "(+마감 " + closedN + ")" : "") + " · 정원합 " + (anyUnlimited ? "무제한" : rtSum + "명") + (allHaveDaily && dlSum ? (" · 하루합 " + dlSum + "건") : "")];
   if (dup) msgs.push("⚠ 옵션명 중복(저장 불가)");
-  if (!anyUnlimited && camRt && camRt !== rtSum) msgs.push("⚠ 총모집(" + camRt + ")≠정원합(" + rtSum + ")");
-  if (allHaveDaily && dlSum && camDl && camDl !== dlSum) msgs.push("⚠ 하루한도(" + camDl + ")≠옵션 하루합(" + dlSum + ")");
   el.innerHTML = msgs.join(" · ");
   el.style.color = (msgs.length > 1) ? "#B45309" : "var(--t3)";
   return { dup, count: opts.length };
@@ -804,6 +1023,10 @@ async function openRecruitModal(id, prefill, woOrderId) {
         // 저장 시 escape+<br> 변환의 역변환(S3): <br>→개행, 엔티티 복원 → textarea에 평문으로
         const _fromHtml = s => String(s || "").replace(/<br\s*\/?>/gi, "\n").replace(/&lt;/g, "<").replace(/&gt;/g, ">").replace(/&amp;/g, "&");
         setV("rf_wd_product", wd.productLines || "");
+        setV("rf_deadline", c.deadline ? String(c.deadline).slice(0, 10) : "");   // 종료일(deadline)
+        window._rfSheetEndDate = c.endDate || "";      // 시트 파생 마감일 — 다르면 경고(시트 우선)
+        onRecruitDatesChange();
+        refreshRecruitCashReceipt();
         // ★ M3 리뷰 #1: 저장본이 리치 HTML(<br> 외 태그 — 프리필 raw로 발행된 이미지 포함 가이드)이면
         //   편집모드도 raw 모드로 복원 — 아니면 "다른 필드만 고쳐 저장"해도 escape 경로가 태그를 문자로 게시(라운드트립 파괴)
         {
@@ -825,7 +1048,7 @@ async function openRecruitModal(id, prefill, woOrderId) {
           const pv = document.getElementById("rf_thumb_preview");
           if (pv) { pv.src = c.thumbnail_url; pv.style.display = ""; }
         }
-        renderOptRows(json.options || []);   // 🧩 옵션표 프리필(관리자 GET /:id가 반환하는 원본 옵션)
+        renderOptRowsWithProduct(json.options || [], wd.productLines);   // 🧩 옵션표 + 상품명 복원
         renderPartCheck();
       }
     } catch(e) {
@@ -886,7 +1109,10 @@ async function openRecruitModal(id, prefill, woOrderId) {
         } else if (prefill.wd_inflow_text) {
           setV("rf_wd_inflow", prefill.wd_inflow_text);
         }
-        renderOptRows(prefill.options || []);   // 🧩 작업오더 옵션 프리필(product_options_json → 옵션표)
+        /* 🧩 작업오더 상품정보 → 진행상품 표: 옵션 배열이 있으면 그대로, 없으면 텍스트를 줄 단위로 분해 */
+        applyProductRowsFromOrder(prefill);
+        setV("rf_deadline", prefill.end_date || prefill.deadline);
+        onRecruitDatesChange();
         renderPartCheck();
       }
     }
@@ -1303,6 +1529,8 @@ async function saveRecruitPost() {
     linked_tab_gid:  (tabMeta && tabMeta.tabGid) || "",
     max_slots:      Number(document.getElementById("rf_max_slots").value) || 0,
     status:         document.getElementById("rf_status").value,
+    // 종료일 — 시트 일정과 다르면 화면에 경고가 뜨고 실제 모집은 시트를 따른다(참고값으로 보관)
+    deadline:       document.getElementById("rf_deadline")?.value || null,
     // ★ 064: 노출 순서 UI 제거 — 정렬은 별표(pinned_at)가 담당. 서버가 미전송을 0으로 강제하므로
     //   기존값 보존을 위해 편집 모드에선 로드값을 재전송(신규는 0).
     sort_order:     Number(document.getElementById("rf_sort_order")?.value ?? (window._recruitEditLoaded?.sort_order ?? 0)) || 0,
@@ -1328,6 +1556,7 @@ async function saveRecruitPost() {
       payload.start_date     = document.getElementById("rf_start_date")?.value || "";
       payload.window_start   = document.getElementById("rf_window_start").value || "";
       payload.window_end     = document.getElementById("rf_window_end").value || "";
+      _syncPreviewFromOptRows();   // 표가 진실원본 — 저장 직전 파생값(상품 원문·정원) 최신화
       payload.daily_limit    = Number(document.getElementById("rf_daily_limit").value) || 0;
       payload.recruit_total  = Number(document.getElementById("rf_recruit_total").value) || 0;
       payload.hold_ttl_min   = Number(document.getElementById("rf_hold_ttl").value) || 15;

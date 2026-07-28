@@ -79,8 +79,25 @@ body{ letter-spacing:-.01em; }
 .rf-main .rform-label{margin-bottom:2px;font-size:.72rem}
 .rf-main .rform-input{padding:7px 9px;font-size:.82rem}
 .rf-main textarea.rform-input{min-height:52px}
-.rf-grid2{display:grid;grid-template-columns:1fr 1fr;gap:9px 12px;align-items:start}
+.rf-grid2{display:grid;grid-template-columns:1fr 1fr;gap:9px 12px;align-items:start;margin-bottom:9px}
 @media (max-width:1100px){ .rf-grid2{grid-template-columns:1fr} }
+/* 가로 표기 — 라벨을 왼쪽에 붙여 같은 높이에 더 많이 담는다(짧은 항목 전용) */
+.rf-hrow{display:grid;grid-template-columns:64px 1fr;gap:8px;align-items:center;margin-bottom:9px}
+.rf-hrow.rf-hrow-w{grid-template-columns:76px 1fr}
+.rf-hrow.rf-hrow-top{grid-template-columns:76px 1fr;align-items:start}
+.rf-hrow .rf-hl{font-size:.72rem;font-weight:700;color:var(--t2);text-align:right;line-height:1.25}
+.rf-hrow .rform-input{margin:0}
+@media (max-width:1100px){
+  .rf-hrow,.rf-hrow.rf-hrow-w,.rf-hrow.rf-hrow-top{grid-template-columns:1fr;gap:3px}
+  .rf-hrow .rf-hl{text-align:left}
+}
+/* 진행상품 표 — 상품명 · 옵션명 · 결제금액 · 총인원 · 일건수 */
+.rf-prod-head,.rf-opt-row{display:grid;grid-template-columns:1.6fr 1fr .85fr .62fr .62fr 26px;gap:6px;align-items:center}
+.rf-prod-head{font-size:.62rem;font-weight:800;color:var(--t3);padding:0 2px 4px;border-bottom:1px solid var(--border);margin-bottom:5px}
+.rf-opt-row{margin-bottom:6px}
+.rf-opt-row .rform-input{font-size:.74rem;padding:6px 7px;margin:0}
+.rf-opt-row .rf-opt-pay,.rf-opt-row .rf-opt-rt,.rf-opt-row .rf-opt-dl{text-align:right}
+.rf-opt-row .rf-opt-prod.rf-dup{background:#FAFBFD;color:var(--t2)}
 /* 좁은 화면: 세로로 되돌리고 미리보기는 접어 둔다(입력이 우선) */
 @media (max-width:900px){
   .rf-split{flex-direction:column;overflow-y:auto}
@@ -1515,6 +1532,33 @@ body{ letter-spacing:-.01em; }
           </button>
         </div>
 
+        <!-- 현금영수증 발행방법 이미지 (채널별 · 회사 공통 1회) -->
+        <div style="margin-top:18px">
+          <div style="font-size:.85rem;font-weight:700;color:var(--t1);margin-bottom:4px">
+            🧾 현금영수증 발행방법 이미지 <span style="font-weight:400;color:var(--t3);font-size:.74rem">— 현영 탭 공고의 작업내용에서 리뷰어에게 채널에 맞는 이미지가 보입니다</span>
+          </div>
+          <div style="display:flex;gap:14px;flex-wrap:wrap">
+            <div style="flex:1;min-width:230px;max-width:330px;border:1px solid var(--border);border-radius:10px;padding:10px">
+              <div style="font-size:.78rem;font-weight:700;margin-bottom:6px">🟢 네이버</div>
+              <img id="crGuideImgNaver" alt="" style="display:none;max-width:100%;max-height:160px;border-radius:8px;border:1px solid var(--border);object-fit:contain;margin-bottom:6px">
+              <div id="crGuideNoneNaver" style="font-size:.72rem;color:var(--t4);margin-bottom:6px">등록된 이미지가 없습니다</div>
+              <div style="display:flex;gap:6px;align-items:center">
+                <input type="file" id="crGuideFileNaver" accept="image/*" style="font-size:.7rem;flex:1;min-width:0" onchange="uploadCashReceiptGuide('naver', this)">
+                <button onclick="clearCashReceiptGuide('naver')" style="padding:6px 10px;background:#FFF5F5;color:#B42318;border:1px solid #F7C9C9;border-radius:7px;font-size:.72rem;font-weight:700;cursor:pointer">제거</button>
+              </div>
+            </div>
+            <div style="flex:1;min-width:230px;max-width:330px;border:1px solid var(--border);border-radius:10px;padding:10px">
+              <div style="font-size:.78rem;font-weight:700;margin-bottom:6px">🛒 쿠팡</div>
+              <img id="crGuideImgCoupang" alt="" style="display:none;max-width:100%;max-height:160px;border-radius:8px;border:1px solid var(--border);object-fit:contain;margin-bottom:6px">
+              <div id="crGuideNoneCoupang" style="font-size:.72rem;color:var(--t4);margin-bottom:6px">등록된 이미지가 없습니다</div>
+              <div style="display:flex;gap:6px;align-items:center">
+                <input type="file" id="crGuideFileCoupang" accept="image/*" style="font-size:.7rem;flex:1;min-width:0" onchange="uploadCashReceiptGuide('coupang', this)">
+                <button onclick="clearCashReceiptGuide('coupang')" style="padding:6px 10px;background:#FFF5F5;color:#B42318;border:1px solid #F7C9C9;border-radius:7px;font-size:.72rem;font-weight:700;cursor:pointer">제거</button>
+              </div>
+            </div>
+          </div>
+        </div>
+
         <hr style="margin:28px 0;border:none;border-top:1px solid #E5E7EB">
 
         <!-- 시트 상단 강제 공지문 -->
@@ -1945,7 +1989,151 @@ body{ letter-spacing:-.01em; }
     <div class="rf-split">
       <div class="rf-main">
     <div class="modal-body" style="padding:16px 18px;display:flex;flex-direction:column;gap:16px;overflow-y:auto;flex:1;min-height:0">
-        <section class="rf-sec" data-pane="basic"><h4 class="rf-sech">📝 기본 정보</h4>
+        <section class="rf-sec" data-pane="basic"><h4 class="rf-sech">📝 기본정보</h4>
+
+      <!-- 시트명 / 탭명 — 연결이 없으면 공고가 동작하지 않으므로 맨 위 -->
+      <div class="rf-grid2">
+        <div class="rf-hrow"><span class="rf-hl">시트명 <span class="rform-req">*</span></span>
+          <select id="rf_linked_campaign" class="rform-input" onchange="onLinkedCampaignChange(this)">
+            <option value="">① 캠페인(시트) 선택</option>
+          </select></div>
+        <div class="rf-hrow"><span class="rf-hl">탭명 <span class="rform-req">*</span></span>
+          <select id="rf_linked_tab" class="rform-input" onchange="onLinkedTabChange(this)" disabled>
+            <option value="">② 탭 선택 (시트 먼저)</option>
+          </select></div>
+      </div>
+      <div id="rf_linked_tab_info" style="display:none;font-size:.72rem;color:var(--ok);font-weight:600;margin:-4px 0 4px 76px">
+        <i class="fas fa-link"></i> <span id="rf_linked_tab_text"></span>
+      </div>
+
+      <!-- 담당자 / 구매채널 -->
+      <div class="rf-grid2">
+        <div class="rf-hrow"><span class="rf-hl">담당자 <span class="rform-req">*</span></span>
+          <div>
+            <div style="display:flex;gap:6px;flex-wrap:wrap" id="rf_manager_btns">
+              <button class="rchan-btn" data-group="manager" data-val="만두" onclick="selectRfBtn('manager',this)">🥟 만두</button>
+              <button class="rchan-btn" data-group="manager" data-val="망고" onclick="selectRfBtn('manager',this)">🥭 망고</button>
+            </div>
+            <input id="rf_manager" type="hidden">
+          </div></div>
+        <div class="rf-hrow"><span class="rf-hl">구매채널 <span class="rform-req">*</span></span>
+          <div>
+            <div style="display:flex;gap:6px;flex-wrap:wrap" id="rf_channel_btns">
+              <button class="rchan-btn" data-group="channel" data-val="쿠팡" onclick="selectRfBtn('channel',this)">🛒 쿠팡</button>
+              <button class="rchan-btn" data-group="channel" data-val="네이버" onclick="selectRfBtn('channel',this)">🟢 네이버</button>
+              <button class="rchan-btn" data-group="channel" data-val="직접입력" onclick="selectRfBtn('channel',this)">✏️ 직접</button>
+            </div>
+            <input id="rf_channel_custom" type="text" class="rform-input" placeholder="채널명 직접 입력" style="margin-top:6px;display:none" maxlength="30">
+            <input id="rf_channel" type="hidden">
+          </div></div>
+      </div>
+
+      <!-- 배송유형 / 리뷰비 -->
+      <div class="rf-grid2">
+        <div class="rf-hrow"><span class="rf-hl">배송유형</span>
+          <select id="rf_delivery_type" class="rform-input">
+            <option value="">선택 안 함</option>
+            <option value="빈택배">빈택배</option>
+            <option value="실배송">실배송</option>
+            <option value="회수건">회수건</option>
+          </select></div>
+        <div class="rf-hrow"><span class="rf-hl">리뷰비 (원)</span>
+          <input id="rf_review_fee" type="number" class="rform-input" placeholder="예) 2500" min="0" step="100"></div>
+      </div>
+
+      <!-- 안내배지 -->
+      <div class="rf-hrow rf-hrow-top"><span class="rf-hl">안내배지</span>
+        <div>
+          <div style="display:flex;gap:5px;flex-wrap:wrap;margin-bottom:6px" id="rf_badge_presets">
+            <button class="rbadge-preset" onclick="addPresetBadge('현영건')">현영건</button>
+            <button class="rbadge-preset" onclick="addPresetBadge('로켓와우')">로켓와우</button>
+            <button class="rbadge-preset" onclick="addPresetBadge('3.3% 공제')">3.3% 공제</button>
+            <button class="rbadge-preset" onclick="addPresetBadge('텍스트 제공')">텍스트 제공</button>
+            <button class="rbadge-preset" onclick="addPresetBadge('포토리뷰')">포토리뷰</button>
+            <button class="rbadge-preset" onclick="addPresetBadge('옵션지정')">옵션지정</button>
+            <button class="rbadge-preset" onclick="addPresetBadge('와우 필수')">와우 필수</button>
+            <button class="rbadge-preset" onclick="addPresetBadge('사진 5장+')">사진 5장+</button>
+            <button class="rbadge-preset" onclick="addPresetBadge('일반결제')">일반결제</button>
+          </div>
+          <div id="rf_badges_wrap"
+            style="display:flex;flex-wrap:wrap;gap:6px;padding:7px 10px;border:1.5px solid var(--border);border-radius:8px;min-height:40px;cursor:text;align-items:center"
+            onclick="document.getElementById('rf_badge_input').focus()">
+            <input id="rf_badge_input" type="text" placeholder="배지 직접 입력 후 Enter"
+              style="border:none;outline:none;font-size:.78rem;flex:1;min-width:100px;padding:2px 4px;background:transparent"
+              onkeydown="handleBadgeInput(event)">
+          </div>
+        </div>
+      </div>
+
+      <!-- 상품 URL / 썸네일 — 값이 길어 세로 유지 -->
+      <div class="rf-grid2">
+        <div class="rform-group" style="margin:0">
+          <label class="rform-label">상품 URL <span style="font-weight:400;color:var(--t3);font-size:.66rem">— 가져오기: 네이버·올리브영 (쿠팡 제한적)</span></label>
+          <div style="display:flex;gap:5px">
+            <input id="rf_product_url" type="url" class="rform-input" placeholder="상품확인용 URL" style="flex:1;min-width:0">
+            <button type="button" class="rchan-btn" onclick="fetchProductInfo()" style="white-space:nowrap"><i class="fas fa-cloud-download-alt"></i> 가져오기</button>
+            <button type="button" class="rchan-btn" onclick="openRecruitProductUrl()" style="white-space:nowrap" title="상품 페이지를 새 탭에서 엽니다">↗</button>
+          </div>
+          <div id="rf_product_preview" style="display:none;margin-top:6px;align-items:center;gap:10px;border:1px solid var(--border);border-radius:8px;padding:8px;background:var(--bg2,#fafafa)">
+            <img id="rf_pp_img" alt="" style="width:52px;height:52px;object-fit:cover;border-radius:6px;border:1px solid var(--border);background:#fff">
+            <div style="min-width:0;flex:1">
+              <div id="rf_pp_name" style="font-weight:700;font-size:.8rem;word-break:break-word"></div>
+              <div id="rf_pp_price" style="font-size:.8rem;color:var(--p,#3182f6);font-weight:700;margin-top:2px"></div>
+            </div>
+          </div>
+          <input id="rf_thumbnail" type="hidden">
+          <input id="rf_product_name" type="hidden">
+          <input id="rf_price" type="hidden">
+        </div>
+        <div class="rform-group" style="margin:0">
+          <label class="rform-label">상품 썸네일 URL <span style="font-weight:400;color:var(--t3);font-size:.66rem">— 붙여넣기 또는 파일 업로드</span></label>
+          <div style="display:flex;gap:5px">
+            <input id="rf_thumb_url" type="url" class="rform-input" style="flex:1;min-width:0;font-size:.72rem" placeholder="쿠팡 이미지 주소 붙여넣기">
+            <button type="button" class="rchan-btn" onclick="fetchCampThumbFromUrl()" style="white-space:nowrap"><i class="fas fa-image"></i> 가져오기</button>
+          </div>
+          <div style="display:flex;gap:8px;align-items:center;margin-top:6px">
+            <input id="rf_thumb_file" type="file" accept="image/*" style="font-size:.7rem;flex:1;min-width:0" onchange="uploadCampThumb(this)">
+            <img id="rf_thumb_preview" alt="썸네일 미리보기" style="height:38px;border-radius:7px;border:1px solid var(--border);display:none">
+          </div>
+        </div>
+      </div>
+
+      <!-- 팀채팅방 URL -->
+      <div class="rf-hrow rf-hrow-w"><span class="rf-hl">팀채팅방 <span class="rform-req">*</span></span>
+        <input id="rf_chat_url" type="url" class="rform-input" placeholder="https://open.kakao.com/..."></div>
+
+      <!-- ── 진행상품 · 작업내용 — 참여형 공고에서만(스위치는 모집정보에, onParticipationToggle이 함께 토글) ── -->
+      <div id="rf_work_section" style="display:none">
+        <div id="rf_opt_wrap" style="margin-top:4px;padding-top:8px;border-top:1px dashed var(--border)">
+          <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:6px;flex-wrap:wrap;gap:6px">
+            <div style="font-size:.76rem;font-weight:800">📦 진행상품 · 옵션 · 결제금액 · 진행건수
+              <span style="font-weight:600;color:var(--t3);font-size:.68rem">— 작업오더에서 자동 적용 · 옵션마다 한 줄</span></div>
+            <button type="button" class="rchan-btn" onclick="addOptRow()" style="font-size:.72rem;white-space:nowrap"><i class="fas fa-plus"></i> 옵션 추가</button>
+          </div>
+          <div class="rf-prod-head">
+            <span>상품명</span><span>옵션명</span><span style="text-align:right">결제금액</span>
+            <span style="text-align:right">총인원</span><span style="text-align:right">일건수</span><span></span>
+          </div>
+          <div id="rf_opt_rows"></div>
+          <div id="rf_opt_summary" style="font-size:.68rem;color:var(--t3);margin-top:4px"></div>
+          <div style="font-size:.64rem;color:var(--t4);margin-top:2px">옵션이 하나뿐이면 옵션명을 비워도 됩니다 · 총인원/일건수 0 = 제한 없음 · 상품명은 첫 줄에서 따라옵니다</div>
+          <!-- 표에서 자동 생성되는 저장용 값(작업내용 원문·캠페인 정원) — 화면엔 표만 보인다 -->
+          <textarea id="rf_wd_product" style="display:none"></textarea>
+          <input id="rf_daily_limit" type="hidden" value="">
+          <input id="rf_recruit_total" type="hidden" value="">
+        </div>
+        <div style="margin-top:10px;padding-top:8px;border-top:1px dashed var(--border)">
+          <label class="rform-label">유입가이드 <span style="font-weight:400;color:var(--t3);font-size:.68rem">— 있으면 리뷰어 화면에 [상품 페이지 열기]가 뜨지 않습니다(가이드유입)</span></label>
+          <textarea id="rf_wd_inflow" class="rform-input" rows="3" placeholder="키워드 검색 or 링크 진입 방법 안내"></textarea>
+          <label class="rform-label" style="margin-top:6px">리뷰가이드</label>
+          <textarea id="rf_wd_review" class="rform-input" rows="2" placeholder="별점/포토 비율 등"></textarea>
+          <label class="rform-label" style="margin-top:6px">특이사항 <span style="font-weight:400;color:var(--t3);font-size:.68rem">— 참여한 리뷰어에게만 공개</span></label>
+          <textarea id="rf_wd_notes" class="rform-input" rows="2" placeholder="선택"></textarea>
+        </div>
+      </div>
+
+        </section>
+        <section class="rf-sec" data-pane="part"><h4 class="rf-sech">📣 모집정보</h4>
 
       <!-- 공고 제목 -->
       <div class="rform-group">
@@ -1953,158 +2141,7 @@ body{ letter-spacing:-.01em; }
         <input id="rf_title" type="text" class="rform-input" placeholder="예) 쿠팡 립밤 리뷰 모집" maxlength="100">
       </div>
 
-      <!-- 상품 정보 가져오기 -->
-      <div class="rform-group">
-        <label class="rform-label">상품 정보 가져오기
-          <span style="font-weight:400;color:var(--t3);font-size:.68rem">— 네이버·올리브영·카카오메이커스 (쿠팡 제한적)</span>
-        </label>
-        <div style="display:flex;gap:6px">
-          <input id="rf_product_url" type="url" class="rform-input" placeholder="상품확인용 URL" style="flex:1">
-          <button type="button" class="rchan-btn" onclick="fetchProductInfo()" style="white-space:nowrap"><i class="fas fa-cloud-download-alt"></i> 가져오기</button>
-          <button type="button" class="rchan-btn" onclick="openRecruitProductUrl()" style="white-space:nowrap" title="상품 페이지를 새 탭에서 엽니다 — 이미지 우클릭 → 이미지 주소 복사 후 썸네일에 붙여넣기">바로가기 ↗</button>
-        </div>
-        <div id="rf_product_preview" style="display:none;margin-top:8px;align-items:center;gap:10px;border:1px solid var(--border);border-radius:8px;padding:8px;background:var(--bg2,#fafafa)">
-          <img id="rf_pp_img" alt="" style="width:60px;height:60px;object-fit:cover;border-radius:6px;border:1px solid var(--border);background:#fff">
-          <div style="min-width:0;flex:1">
-            <div id="rf_pp_name" style="font-weight:700;font-size:.82rem;word-break:break-word"></div>
-            <div id="rf_pp_price" style="font-size:.82rem;color:var(--p,#3182f6);font-weight:700;margin-top:2px"></div>
-          </div>
-        </div>
-        <input id="rf_thumbnail" type="hidden">
-        <input id="rf_product_name" type="hidden">
-        <input id="rf_price" type="hidden">
-      </div>
-
-      <div class="rf-grid2">
-      <!-- 담당자 -->
-      <div class="rform-group">
-        <label class="rform-label">담당자 <span class="rform-req">*</span></label>
-        <div style="display:flex;gap:6px;flex-wrap:wrap" id="rf_manager_btns">
-          <button class="rchan-btn" data-group="manager" data-val="만두" onclick="selectRfBtn('manager',this)">🥟 만두</button>
-          <button class="rchan-btn" data-group="manager" data-val="망고" onclick="selectRfBtn('manager',this)">🥭 망고</button>
-        </div>
-        <input id="rf_manager" type="hidden">
-      </div>
-
-      <!-- 구매채널 -->
-      <div class="rform-group">
-        <label class="rform-label">구매채널 <span class="rform-req">*</span></label>
-        <div style="display:flex;gap:6px;flex-wrap:wrap" id="rf_channel_btns">
-          <button class="rchan-btn" data-group="channel" data-val="쿠팡" onclick="selectRfBtn('channel',this)">🛒 쿠팡</button>
-          <button class="rchan-btn" data-group="channel" data-val="네이버" onclick="selectRfBtn('channel',this)">🟢 네이버</button>
-          <button class="rchan-btn" data-group="channel" data-val="직접입력" onclick="selectRfBtn('channel',this)">✏️ 직접입력</button>
-        </div>
-        <input id="rf_channel_custom" type="text" class="rform-input"
-          placeholder="채널명 직접 입력" style="margin-top:6px;display:none" maxlength="30">
-        <input id="rf_channel" type="hidden">
-      </div>
-      </div>
-
-      <!-- 주문시간대 / 배송유형 -->
-      <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px">
-        <div class="rform-group">
-          <label class="rform-label">주문시간대</label>
-          <input id="rf_time_range" type="text" class="rform-input" placeholder="예) 두시 ~ 네시 · 자율" maxlength="30" oninput="onRecruitTimeRangeInput()">
-          <div id="rf_autoorder_note" style="display:none;font-size:.68rem;color:#0ca678;font-weight:700;margin-top:4px">⏱ 자율주문 — 구매시간 지정이 필요 없습니다(모집조건 탭에서 비워집니다).</div>
-        </div>
-        <div class="rform-group">
-          <label class="rform-label">배송유형</label>
-          <select id="rf_delivery_type" class="rform-input">
-            <option value="">선택 안 함</option>
-            <option value="빈택배">빈택배</option>
-            <option value="실배송">실배송</option>
-            <option value="회수건">회수건</option>
-          </select>
-        </div>
-      </div>
-
-      <!-- 리뷰비 -->
-      <div class="rform-group">
-        <label class="rform-label">리뷰비 (원)</label>
-        <input id="rf_review_fee" type="number" class="rform-input"
-          placeholder="예) 2500" min="0" step="100" style="max-width:180px">
-      </div>
-
-      <!-- 안내 배지 -->
-      <div class="rform-group">
-        <label class="rform-label" style="display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:6px">
-          <span>안내 배지</span>
-          <span style="font-size:.68rem;color:var(--t3);font-weight:400">추천 클릭하거나 직접 입력 후 Enter</span>
-        </label>
-        <!-- 추천 배지 -->
-        <div style="display:flex;gap:5px;flex-wrap:wrap;margin-bottom:6px" id="rf_badge_presets">
-          <button class="rbadge-preset" onclick="addPresetBadge('현영건')">현영건</button>
-          <button class="rbadge-preset" onclick="addPresetBadge('로켓와우')">로켓와우</button>
-          <button class="rbadge-preset" onclick="addPresetBadge('3.3% 공제')">3.3% 공제</button>
-          <button class="rbadge-preset" onclick="addPresetBadge('텍스트 제공')">텍스트 제공</button>
-          <button class="rbadge-preset" onclick="addPresetBadge('포토리뷰')">포토리뷰</button>
-          <button class="rbadge-preset" onclick="addPresetBadge('옵션지정')">옵션지정</button>
-          <button class="rbadge-preset" onclick="addPresetBadge('와우 필수')">와우 필수</button>
-          <button class="rbadge-preset" onclick="addPresetBadge('사진 5장+')">사진 5장+</button>
-          <button class="rbadge-preset" onclick="addPresetBadge('일반결제')">일반결제</button>
-        </div>
-        <!-- 배지 입력 영역 -->
-        <div id="rf_badges_wrap"
-          style="display:flex;flex-wrap:wrap;gap:6px;padding:8px 10px;border:1.5px solid var(--border);border-radius:8px;min-height:44px;cursor:text;align-items:center"
-          onclick="document.getElementById('rf_badge_input').focus()">
-          <input id="rf_badge_input" type="text" placeholder="배지 직접 입력 후 Enter"
-            style="border:none;outline:none;font-size:.78rem;flex:1;min-width:100px;padding:2px 4px;background:transparent"
-            onkeydown="handleBadgeInput(event)">
-        </div>
-      </div>
-
-      <!-- 특이사항 -->
-      <div class="rform-group">
-        <label class="rform-label">특이사항</label>
-        <textarea id="rf_notes" class="rform-input" rows="3"
-          placeholder="리뷰어에게 전달할 유의사항을 자유롭게 입력하세요" style="resize:vertical"></textarea>
-      </div>
-
-      <!-- 팀채팅방 URL -->
-      <div class="rform-group">
-        <label class="rform-label">팀채팅방 URL <span class="rform-req">*</span></label>
-        <input id="rf_chat_url" type="url" class="rform-input" placeholder="https://open.kakao.com/...">
-      </div>
-
-      <!-- 연결 인덱스 탭 (캠페인 먼저, 탭 다음) -->
-        </section>
-        <section class="rf-sec" data-pane="link"><h4 class="rf-sech">🔗 연결 · 상태</h4>
-      <div class="rform-group">
-        <label class="rform-label">연결 인덱스 탭
-          <span style="font-size:.68rem;color:var(--t3);font-weight:400">— 참여 신청 시 이 탭에 자동 행 추가</span>
-        </label>
-        <!-- 1단계: 캠페인(시트) 선택 -->
-        <select id="rf_linked_campaign" class="rform-input" onchange="onLinkedCampaignChange(this)" style="margin-bottom:6px">
-          <option value="">① 캠페인 선택</option>
-        </select>
-        <!-- 2단계: 탭 선택 (캠페인 선택 후 활성화) -->
-        <select id="rf_linked_tab" class="rform-input" onchange="onLinkedTabChange(this)" disabled>
-          <option value="">② 탭 선택 (캠페인 먼저 선택)</option>
-        </select>
-        <div id="rf_linked_tab_info" style="display:none;margin-top:5px;font-size:.72rem;color:var(--ok);font-weight:600">
-          <i class="fas fa-link"></i> <span id="rf_linked_tab_text"></span>
-        </div>
-      </div>
-
-      <!-- 모집인원 / 상태 — 노출 순서는 제거(064): 우선노출은 공고 카드 우측상단 ⭐ 별표로 관리 -->
-      <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px">
-        <div class="rform-group">
-          <label class="rform-label">모집인원</label>
-          <input id="rf_max_slots" type="number" class="rform-input" placeholder="0=무제한" min="0" value="0">
-        </div>
-        <div class="rform-group">
-          <label class="rform-label">상태</label>
-          <select id="rf_status" class="rform-input">
-            <option value="draft">임시저장</option>
-            <option value="active">모집중</option>
-            <option value="closed">마감</option>
-          </select>
-        </div>
-      </div>
-
-        </section>
-        <section class="rf-sec" data-pane="part"><h4 class="rf-sech">⚡ 모집 조건</h4>
-      <!-- ── ⚡ 참여형 캠페인 (M2) ── -->
+      <!-- ⚡ 참여형 스위치 -->
       <div class="rform-group" style="border:1.5px solid #12b886;border-radius:12px;padding:12px;background:#f6fffb">
         <label style="display:flex;align-items:center;gap:9px;cursor:pointer;font-weight:800;font-size:.86rem">
           <input type="checkbox" id="rf_participation" onchange="onParticipationToggle(this.checked)" style="width:17px;height:17px;accent-color:#12b886">
@@ -2112,44 +2149,53 @@ body{ letter-spacing:-.01em; }
         </label>
         <div style="font-size:.7rem;color:var(--t3);margin-top:3px">끄면 기존 공고와 100% 동일하게 동작합니다.</div>
         <div id="rf_part_section" style="display:none;margin-top:10px">
-          <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px">
-            <div style="grid-column:1/-1"><label class="rform-label">캠페인 시작일 <span style="font-weight:400;color:#9CA3AF">(비우면 게시 즉시 오픈 · 설정하면 시작일까지 "오픈 예정" 카운트다운)</span></label><input id="rf_start_date" type="date" class="rform-input"></div>
-            <div><label class="rform-label">구매시간 시작 <span style="font-weight:400;color:#9CA3AF">(자율주문이면 비움)</span></label><input id="rf_window_start" type="time" class="rform-input" oninput="renderPartCheck()"></div>
-            <div><label class="rform-label">구매시간 종료</label><input id="rf_window_end" type="time" class="rform-input" oninput="renderPartCheck()"></div>
-            <div><label class="rform-label">하루 진행 인원</label><input id="rf_daily_limit" type="number" min="1" class="rform-input" placeholder="예: 20" oninput="renderPartCheck()"></div>
-            <div><label class="rform-label">총 모집 인원 <span style="color:var(--t4);font-weight:400">(리뷰어 비공개)</span></label><input id="rf_recruit_total" type="number" min="0" class="rform-input" placeholder="0 = 무제한"></div>
-          </div>
-          <div style="margin-top:8px"><label class="rform-label">랜딩(상품) 페이지 URL</label><input id="rf_landing_url" type="text" class="rform-input" placeholder="https:// — 참여자에게 [상품 페이지 열기] 버튼으로 노출"></div>
-          <div style="margin-top:8px">
-            <label class="rform-label">상품 썸네일 <span style="color:var(--t4);font-weight:400">— 직접 업로드 또는 이미지 주소(선택)</span></label>
-            <div style="display:flex;gap:10px;align-items:center">
-              <input id="rf_thumb_file" type="file" accept="image/*" style="font-size:.72rem;flex:1" onchange="uploadCampThumb(this)">
-              <img id="rf_thumb_preview" alt="썸네일 미리보기" style="height:42px;border-radius:8px;border:1px solid var(--border);display:none">
+          <!-- 시작일·종료일은 왼쪽에 붙이고, 구매시간대를 같은 행 오른쪽에 -->
+          <div class="rf-grid2">
+            <div style="display:grid;grid-template-columns:1fr 1fr;gap:7px">
+              <div><label class="rform-label">시작일 <span id="rf_start_day" style="font-weight:400;color:#9CA3AF"></span></label>
+                <input id="rf_start_date" type="date" class="rform-input" onchange="onRecruitDatesChange()"></div>
+              <div><label class="rform-label">종료일 <span id="rf_deadline_day" style="font-weight:400;color:#9CA3AF"></span></label>
+                <input id="rf_deadline" type="date" class="rform-input" onchange="onRecruitDatesChange()"></div>
             </div>
-            <div style="display:flex;gap:6px;margin-top:6px">
-              <input id="rf_thumb_url" type="url" class="rform-input" style="flex:1;font-size:.72rem" placeholder="쿠팡 이미지 주소 붙여넣기 (상품 이미지 우클릭 → 이미지 주소 복사)">
-              <button type="button" class="rchan-btn" onclick="fetchCampThumbFromUrl()" style="white-space:nowrap"><i class="fas fa-image"></i> 가져오기</button>
+            <div><label class="rform-label">구매시간대 <span style="font-weight:400;color:#9CA3AF">(비우면 자율주문)</span></label>
+              <div style="display:flex;gap:6px;align-items:center">
+                <input id="rf_window_start" type="time" class="rform-input" oninput="renderPartCheck()" style="flex:1">
+                <span style="color:#9CA3AF;font-weight:800">~</span>
+                <input id="rf_window_end" type="time" class="rform-input" oninput="renderPartCheck()" style="flex:1">
+              </div>
             </div>
-            <div style="font-size:.62rem;color:var(--t4);margin-top:2px">비우면 [상품정보 가져오기]로 자동 추출된 이미지를 사용합니다. 쿠팡은 자동 추출이 차단되므로 이미지 주소 붙여넣기 또는 파일 업로드를 사용하세요.</div>
           </div>
-          <!-- 👥 타계정 추가참여 (063) — 기본 [불가]. 켜면 리뷰어가 자기 타계정 명의로 여러 건 참여 가능 -->
-          <div style="margin-top:10px;border:1.5px solid #7C3AED;border-radius:10px;padding:10px;background:#F8F5FF">
-            <label style="display:flex;align-items:center;gap:9px;cursor:pointer;font-weight:800;font-size:.8rem">
-              <input type="checkbox" id="rf_multi_account" onchange="onMultiAccountToggle(this.checked)" style="width:16px;height:16px;accent-color:#7C3AED">
-              👥 타계정 참여 <span style="font-weight:600;color:var(--t3);font-size:.7rem">— 리뷰어가 자기 타계정 명의로 이 공고에 여러 건 참여(명의당 1건)</span>
-            </label>
-            <div style="font-size:.68rem;color:var(--t3);margin-top:3px">끄면(기본) 리뷰어는 로그인 계정으로 1건만 참여합니다.</div>
-            <div id="rf_multi_section" style="display:none;margin-top:8px">
-              <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px">
-                <div><label class="rform-label">타계정 하루 한도 <span style="font-weight:400;color:#9CA3AF">(0=무제한)</span></label>
-                  <input id="rf_multi_daily" type="number" min="0" class="rform-input" placeholder="예: 1" value="1" oninput="renderPartCheck()"></div>
-                <div><label class="rform-label">타계정 제한시간(분)</label>
-                  <input id="rf_sub_ttl" type="number" min="1" class="rform-input" value="10"></div>
+          <div id="rf_deadline_warn" style="display:none;font-size:.68rem;font-weight:700;margin-top:4px"></div>
+          <div class="rf-grid2" style="margin-top:8px">
+            <div class="rf-hrow" style="margin:0"><span class="rf-hl">시간 표기</span>
+              <div>
+                <input id="rf_time_range" type="text" class="rform-input" placeholder="예) 두시 ~ 네시 · 자율" maxlength="30" oninput="onRecruitTimeRangeInput()">
+                <div id="rf_autoorder_note" style="display:none;font-size:.66rem;color:#0ca678;font-weight:700;margin-top:3px">⏱ 자율주문 — 구매시간이 자동으로 비워집니다.</div>
+              </div></div>
+            <div class="rf-hrow" style="margin:0"><span class="rf-hl">랜딩 URL</span>
+              <input id="rf_landing_url" type="text" class="rform-input" placeholder="https:// — 링크유입일 때 [상품 페이지 열기]로 노출"></div>
+          </div>
+          <!-- 타계정 허용 / 현금영수증(탭 설정 읽기 전용) -->
+          <div class="rf-grid2" style="margin-top:8px;align-items:start">
+            <div style="border:1.5px solid #7C3AED;border-radius:10px;padding:10px;background:#F8F5FF">
+              <label style="display:flex;align-items:center;gap:9px;cursor:pointer;font-weight:800;font-size:.8rem">
+                <input type="checkbox" id="rf_multi_account" onchange="onMultiAccountToggle(this.checked)" style="width:16px;height:16px;accent-color:#7C3AED">
+                👥 타계정 허용 <span style="font-weight:600;color:var(--t3);font-size:.68rem">— 명의당 1건</span>
+              </label>
+              <div id="rf_multi_section" style="display:none;margin-top:8px">
+                <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px">
+                  <div><label class="rform-label">하루 한도 <span style="font-weight:400;color:#9CA3AF">(0=무제한)</span></label>
+                    <input id="rf_multi_daily" type="number" min="0" class="rform-input" placeholder="예: 1" value="1" oninput="renderPartCheck()"></div>
+                  <div><label class="rform-label">제한시간(분)</label>
+                    <input id="rf_sub_ttl" type="number" min="1" class="rform-input" value="10"></div>
+                </div>
+                <div style="font-size:.64rem;color:var(--t3);margin-top:4px">타계정 5개 보유 리뷰어는 하루 한도 1이면 5일에 걸쳐 참여합니다.</div>
               </div>
-              <div style="font-size:.66rem;color:var(--t3);margin-top:4px">
-                한 사람이 이 공고에 <b>타계정으로 하루 몇 건</b>까지 참여할 수 있는지. 예를 들어 <b>1</b>로 두면
-                타계정 5개를 가진 리뷰어는 <b>5일에 걸쳐</b> 참여하게 됩니다. 타계정 건은 본계정보다 짧은 제한시간(기본 10분)이 적용됩니다.
-              </div>
+            </div>
+            <div style="border:1.5px solid #F0B45E;border-radius:10px;padding:10px;background:#FFFBF2">
+              <div style="font-weight:800;font-size:.8rem;color:#B45309">🧾 현금영수증 <span style="font-weight:600;color:var(--t3);font-size:.66rem">— 탭 설정 · 읽기 전용</span></div>
+              <div id="rf_cashrcpt_ro" style="font-size:.74rem;margin-top:6px;color:var(--t3)">탭을 연결하면 진행방식에서 판정합니다</div>
+              <div style="font-size:.64rem;color:var(--t4);margin-top:4px">발행 여부는 대시보드 탭설정(진행방식)에서 바꿉니다</div>
             </div>
           </div>
           <details style="margin-top:8px"><summary style="font-size:.74rem;font-weight:700;color:var(--t3);cursor:pointer">고급 설정 (참여 제한시간·마감 버퍼)</summary>
@@ -2165,31 +2211,21 @@ body{ letter-spacing:-.01em; }
         </div>
       </div>
 
-      <!-- ── 🧩 옵션 · 📦 작업내용 — 참여형 공고에서만 의미가 있어 스위치와 함께 표시된다.
-           탭으로 나누기 위해 참여형 섹션 밖 형제로 두고, onParticipationToggle이 같이 토글한다. -->
-        </section>
-        <section class="rf-sec" data-pane="work"><h4 class="rf-sech">📦 작업내용 · 옵션</h4>
-      <div id="rf_work_section" style="display:none">
-          <!-- 🧩 상품 옵션 (061 3단계) — 옵션별 금액·정원·하루건수. 없으면 비워두면 됨(옵션 없는 단일상품) -->
-          <div id="rf_opt_wrap" style="margin-top:10px;padding-top:8px;border-top:1px dashed var(--border)">
-            <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:6px;flex-wrap:wrap;gap:6px">
-              <div style="font-size:.76rem;font-weight:800">🧩 상품 옵션 <span style="font-weight:600;color:var(--t3);font-size:.7rem">— 옵션별 금액·정원·하루건수 (없으면 비워두세요)</span></div>
-              <button type="button" class="rchan-btn" onclick="addOptRow()" style="font-size:.72rem;white-space:nowrap"><i class="fas fa-plus"></i> 옵션 추가</button>
-            </div>
-            <div id="rf_opt_rows"></div>
-            <div id="rf_opt_summary" style="font-size:.68rem;color:var(--t3);margin-top:4px"></div>
-          </div>
-          <div style="margin-top:10px;padding-top:8px;border-top:1px dashed var(--border)">
-            <div style="font-size:.76rem;font-weight:800;margin-bottom:6px">📦 작업내용 <span style="font-weight:600;color:var(--t3);font-size:.7rem">— 참여한 리뷰어에게만 공개</span></div>
-            <label class="rform-label">상품 · 옵션 · 결제금액</label>
-            <textarea id="rf_wd_product" class="rform-input" rows="2" placeholder="예: 무선 청소기 / 옵션 없음 / 결제금액 26,900원"></textarea>
-            <label class="rform-label" style="margin-top:6px">유입가이드</label>
-            <textarea id="rf_wd_inflow" class="rform-input" rows="3" placeholder="키워드 검색 or 링크 진입 방법 안내"></textarea>
-            <label class="rform-label" style="margin-top:6px">리뷰 가이드</label>
-            <textarea id="rf_wd_review" class="rform-input" rows="2" placeholder="별점/포토 비율 등"></textarea>
-            <label class="rform-label" style="margin-top:6px">특이사항</label>
-            <textarea id="rf_wd_notes" class="rform-input" rows="2" placeholder="선택"></textarea>
-          </div>
+      <!-- 유의사항(공고 카드 노출) / 상태 · 모집인원 -->
+      <div class="rform-group">
+        <label class="rform-label">유의사항 <span style="font-weight:400;color:var(--t3);font-size:.68rem">— 공고 카드에 노출되는 안내문</span></label>
+        <textarea id="rf_notes" class="rform-input" rows="2"
+          placeholder="리뷰어에게 전달할 유의사항을 자유롭게 입력하세요" style="resize:vertical"></textarea>
+      </div>
+      <div class="rf-grid2">
+        <div class="rf-hrow"><span class="rf-hl">상태</span>
+          <select id="rf_status" class="rform-input">
+            <option value="draft">임시저장</option>
+            <option value="active">모집중</option>
+            <option value="closed">마감</option>
+          </select></div>
+        <div class="rf-hrow"><span class="rf-hl">모집인원<br><span style="font-weight:400;font-size:.62rem">(레거시)</span></span>
+          <input id="rf_max_slots" type="number" class="rform-input" placeholder="0=무제한" min="0" value="0"></div>
       </div>
 
     </section>

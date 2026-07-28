@@ -139,6 +139,22 @@
     html += '<div class="cwd-box"><div class="cwd-tt">📦 상품 · 옵션 · 결제금액</div>'
       + '<div class="cwd-body">' + escAttr(fmtProduct(wd)) + '</div></div>';
 
+    // 🧾 현금영수증 발행 안내 — 연결 탭 진행방식이 '현영'인 공고만(d.cashReceipt는 서버가 판정).
+    //   결제 단계를 지나면 발행을 되돌리기 어려우므로 상품 카드 바로 아래(구매 전 시점)에 둔다.
+    //   색상은 리터럴 고정(호스트 CSS 변수 미의존) — 다른 카드들과 같은 규율.
+    var cr = d.cashReceipt;
+    if (cr && cr.required) {
+      html += '<div class="cwd-box" style="border-color:#F59E0B;background:#FFFBF2">'
+        + '<div class="cwd-tt" style="color:#B45309">🧾 현금영수증 발행 안내 (필수)</div>'
+        + '<div class="cwd-body" style="font-size:.82rem">결제 단계에서 <b>지출증빙 현금영수증</b>을 선택하고'
+        + (cr.businessNo ? ' 사업자번호 <b>' + escAttr(cr.businessNo) + '</b>를 입력하세요.' : ' 안내된 사업자번호를 입력하세요.')
+        + '</div>'
+        + (cr.guideImageUrl ? '<img src="' + escAttr(cr.guideImageUrl) + '" alt="현금영수증 발행방법" style="margin-top:8px">' : '')
+        + '<div style="font-size:.72rem;color:#B45309;font-weight:700;margin-top:8px">'
+        + '⚠ 리뷰 제출 때 발행 내역 캡처가 필요해요 — 결제 화면을 지나기 전에 꼭 발행해 주세요.</div>'
+        + '</div>';
+    }
+
     // 유입가이드
     var guideHtml = wd.inflowGuideHtml || '';
     var extraImgs = extractGuideImages(wd.reviewGuide || '', guideHtml, o.apiBase);
