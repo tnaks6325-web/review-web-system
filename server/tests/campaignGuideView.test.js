@@ -87,10 +87,13 @@ ok('③-4 이미 유입 HTML에 있는 URL은 스킵(중복 방지)',
 ok('③-5 src 속성 escape(따옴표 breakout 차단)', H._escAttr('a"b<c>') === 'a&quot;b&lt;c&gt;');
 
 // ④·⑤ campaign.html 구조 가드
-// 게이트는 공용 렌더러로 이관 — 규칙(링크유입 또는 불명일 때만 노출)은 동일
-ok('④ 상품페이지 열기 버튼은 inflowType 게이트(링크 또는 불명일 때만)',
-  /d\.landingUrl && \(d\.inflowType === 'link' \|\| !d\.inflowType\)/.test(wdSrc)
-  && _M.cardsHtml({ workDetail: {}, landingUrl: 'https://x/p' }).includes('data-cwd-landing')
+// ★ 규칙 강화: 링크유입일 때만 노출. 가이드유입 공고에 버튼이 뜨면 리뷰어가 상품 페이지로
+// 바로 들어가 유입가이드(검색어·경유 경로) 자체가 무의미해진다. 유입방식 불명이면 유입가이드
+// 내용 유무로 판정 — 종전의 "불명이면 노출"은 수동 공고를 전부 새어나가게 했다.
+ok('④ 상품페이지 열기 버튼은 링크유입일 때만(가이드유입이면 숨김)',
+  /d\.inflowType === 'link' \|\| \(!d\.inflowType && !hasGuide\)/.test(wdSrc)
+  && _M.cardsHtml({ workDetail: {}, landingUrl: 'https://x/p', inflowType: 'link' }).includes('data-cwd-landing')
+  && !_M.cardsHtml({ workDetail: { inflowGuideHtml: '<b>검색</b>' }, landingUrl: 'https://x/p' }).includes('data-cwd-landing')
   && !_M.cardsHtml({ workDetail: {}, landingUrl: 'https://x/p', inflowType: 'guide' }).includes('data-cwd-landing'));
 ok('⑤-1 카카오 버튼 스타일(.btn.kakao = #FEE500)', /\.btn\.kakao\{background:#FEE500/.test(camp));
 ok('⑤-2 제출완료 카톡 버튼 라벨 = "이 캠페인의 카톡 팀채팅방 입장"', /이 캠페인의 카톡 팀채팅방 입장/.test(camp));

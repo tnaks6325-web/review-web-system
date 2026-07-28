@@ -2,7 +2,8 @@
  * recruitModalLayout.test.js — 관리자 공고 수정 모달 레이아웃 회귀가드.
  *
  * 문제였던 것: 미리보기가 입력란 **아래 같은 스크롤**에 붙어 있어, 미리보기를 보면
- * 입력란이 화면 밖으로 나가 "고치면서 확인"이 불가능했다. 좌우 2단 + 탭 4개로 바꿨다.
+ * 입력란이 화면 밖으로 나가 "고치면서 확인"이 불가능했다. 좌우 2단으로 바꿨다.
+ * 입력은 탭으로 나누지 않고 **한 화면에 촘촘히**(sticky 섹션 헤더) — 항목을 찾아 탭을 옮겨다니지 않게.
  *
  * ★ 실측 버그 고정: CSS를 @media(max-width:480px) 안에 넣어 480px 이하에서만 적용되던 것
  *   → .rf-side 폭이 안 먹어 미리보기가 전체 폭을 차지했다. 최상위에 있어야 한다.
@@ -45,22 +46,23 @@ ok('★ 레이아웃 CSS가 미디어쿼리 밖에 있다 — 안에 두면 특�
 })());
 ok('좁은 화면에서는 세로로 되돌린다', /@media \(max-width:900px\)[\s\S]{0,220}\.rf-split\{flex-direction:column/.test(adm));
 
-/* ── 탭 ── */
-ok('탭 4개(기본·연결·모집조건·작업내용)', (() => {
-  const t = modal.match(/class="rf-tab[^"]*" data-pane="(\w+)"/g) || [];
-  return t.length === 4 && ['basic', 'link', 'part', 'work'].every(k => modal.includes(`data-pane="${k}"`));
+/* ── 한 화면 · 섹션(탭 없음) ── */
+ok('탭 없이 네 묶음이 한 화면에', (() => {
+  const secs = modal.match(/class="rf-sec" data-pane="/g) || [];
+  return secs.length === 4 && !/class="rf-tabs"/.test(modal);
 })());
-ok('패널 4개가 탭과 짝', (modal.match(/class="rf-pane[^"]*" data-pane="/g) || []).length === 4);
-ok('탭 전환 함수', /function switchRecruitPane\(name\)/.test(rec));
-ok('탭을 바꾸면 스크롤을 맨 위로(빈 화면처럼 보이는 것 방지)', /body\.scrollTop = 0/.test(rec));
-ok('모달을 열면 항상 첫 탭', /switchRecruitPane\("basic"\);\s*\/\/ 열 때는 항상 첫 탭/.test(rec));
+ok('섹션 헤더는 스크롤 중에도 붙어 있다(지금 어느 묶음인지)', /\.rf-sech\{position:sticky/.test(adm));
+ok('밀도 — 라벨·입력 간격 축소 + 짧은 항목 2열',
+  /\.rf-main \.rform-label\{margin-bottom:2px/.test(adm) && /class="rf-grid2"/.test(modal));
+ok('미리보기가 모달 세로를 꽉 쓴다(고정 max-height 캡 제거)',
+  /id="rf_preview_area"[^>]*flex:1/.test(modal) && !/id="rf_preview_area"[^>]*max-height:\d+px/.test(modal));
 
 /* ── 참여형 게이트 (옵션·작업내용을 밖으로 뺀 대가) ── */
 ok('옵션·작업내용이 참여형 섹션 밖 형제로 분리', /id="rf_work_section"/.test(modal));
 ok('★ 참여형 스위치가 rf_work_section도 함께 토글 — 안 하면 레거시 공고에 옵션이 보인다',
   /const work = document\.getElementById\("rf_work_section"\)[\s\S]{0,120}work\.style\.display = on \? "" : "none"/.test(rec));
-ok('참여형이 꺼지면 모집조건·작업내용 탭 비활성 + 기본 탭으로 복귀',
-  /function _syncRecruitPaneGate\(on\)/.test(rec) && /switchRecruitPane\("basic"\)/.test(rec));
+ok('참여형이 꺼지면 모집조건 내용이 숨는다',
+  /rf_part_section[\s\S]{0,160}display = on \? "" : "none"/.test(rec));
 
 /* ── 필드 보존 (ID를 건드리지 않았는지) ── */
 ok('저장·프리필이 참조하는 필드가 모두 살아있다', (() => {
