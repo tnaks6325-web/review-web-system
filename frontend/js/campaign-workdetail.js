@@ -139,15 +139,24 @@
     html += '<div class="cwd-box"><div class="cwd-tt">📦 상품 · 옵션 · 결제금액</div>'
       + '<div class="cwd-body">' + escAttr(fmtProduct(wd)) + '</div></div>';
 
-    // 유입가이드 (+ 상품 페이지 열기 — 링크유입일 때만, 유입방식 불명이면 관리자 의도 존중해 노출)
+    // 유입가이드
     var guideHtml = wd.inflowGuideHtml || '';
     var extraImgs = extractGuideImages(wd.reviewGuide || '', guideHtml, o.apiBase);
-    if (!guideHtml && !extraImgs) {
-      guideHtml = '<span class="cwd-muted">유입가이드가 없어요 — 아래 상품 페이지로 이동해 구매를 진행하세요.</span>';
+    var hasGuide = !!(guideHtml || extraImgs);   // 치환 전에 판정(아래에서 안내문으로 바뀜)
+    if (!hasGuide) {
+      guideHtml = '<span class="cwd-muted">등록된 유입가이드가 없어요.</span>';
     }
+    /**
+     * 상품 페이지 열기 = **링크유입일 때만**.
+     * ★ 가이드유입 공고에 이 버튼을 주면 리뷰어가 상품 페이지로 바로 들어가 버려,
+     *   검색어·경유 경로를 지정한 유입가이드 첨부자료가 통째로 무의미해진다(유입 실패).
+     *   그래서 유입방식이 불명일 때는 **유입가이드 내용이 있으면 가이드유입으로 간주**해 버튼을 숨긴다
+     *   (작업오더 연결이 없는 수동 공고가 여기 해당 — 종전엔 불명이면 무조건 노출이었다).
+     */
+    var isLinkInflow = d.inflowType === 'link' || (!d.inflowType && !hasGuide);
     html += '<div class="cwd-box"><div class="cwd-tt">🧭 유입가이드</div>'
       + '<div class="cwd-body">' + guideHtml + extraImgs + '</div>';
-    if (o.showLanding !== false && d.landingUrl && (d.inflowType === 'link' || !d.inflowType)) {
+    if (o.showLanding !== false && d.landingUrl && isLinkInflow) {
       html += '<button type="button" class="cwd-btn" data-cwd-landing="' + escAttr(d.landingUrl) + '">🔗 상품 페이지 열기 (새 탭)</button>';
     }
     html += '</div>';

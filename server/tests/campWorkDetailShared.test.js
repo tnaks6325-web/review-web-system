@@ -51,10 +51,28 @@ ok('카드 HTML — 상품 텍스트는 escape(XSS 차단), 유입 HTML은 서�
   assert.ok(h.includes('&lt;img src=x onerror=alert(1)&gt;'));
   assert.ok(h.includes('<b>굵게</b>'));
 });
-ok('랜딩 버튼 — 링크유입/불명일 때만 노출, 가이드유입이면 숨김', () => {
-  assert.ok(M.cardsHtml({ workDetail:{}, landingUrl:'https://c.kr/p/1' }).includes('data-cwd-landing'));
+/* ★ [상품 페이지 열기]는 **링크유입일 때만**.
+   가이드유입 공고에 이 버튼이 뜨면 리뷰어가 상품 페이지로 바로 들어가, 검색어·경유 경로를
+   지정한 유입가이드 첨부자료가 통째로 무의미해진다(유입 실패). 유입방식이 불명일 때는
+   유입가이드 내용 유무로 판정한다 — 종전엔 불명이면 무조건 노출이라 수동 공고가 전부 새어나갔다. */
+ok('랜딩 버튼 — 링크유입 명시면 노출', () => {
   assert.ok(M.cardsHtml({ workDetail:{}, landingUrl:'https://c.kr/p/1', inflowType:'link' }).includes('data-cwd-landing'));
-  assert.ok(!M.cardsHtml({ workDetail:{}, landingUrl:'https://c.kr/p/1', inflowType:'guide' }).includes('data-cwd-landing'));
+});
+ok('랜딩 버튼 — 가이드유입 명시면 숨김', () => {
+  assert.ok(!M.cardsHtml({ workDetail:{ inflowGuideHtml:'<b>검색</b>' }, landingUrl:'https://c.kr/p/1', inflowType:'guide' }).includes('data-cwd-landing'));
+});
+ok('★ 유입방식 불명 + 유입가이드 있음 → 가이드유입 간주(버튼 숨김)', () => {
+  assert.ok(!M.cardsHtml({ workDetail:{ inflowGuideHtml:'<b>검색어 안내</b>' }, landingUrl:'https://c.kr/p/1' }).includes('data-cwd-landing'));
+});
+ok('★ 유입방식 불명 + 가이드 이미지만 있어도 가이드유입(버튼 숨김)', () => {
+  const raw = 'https://api.example.com/api/order/guide-image/abcdefghijklmnopqrstuvw';
+  assert.ok(!M.cardsHtml({ workDetail:{ reviewGuide: raw }, landingUrl:'https://c.kr/p/1' }, { apiBase:'https://api.example.com' }).includes('data-cwd-landing'));
+});
+ok('랜딩 버튼 — 불명 + 유입가이드 없음 → 링크유입(노출)', () => {
+  assert.ok(M.cardsHtml({ workDetail:{}, landingUrl:'https://c.kr/p/1' }).includes('data-cwd-landing'));
+});
+ok('랜딩 URL 자체가 없으면 어떤 경우에도 미노출', () => {
+  assert.ok(!M.cardsHtml({ workDetail:{}, inflowType:'link' }).includes('data-cwd-landing'));
 });
 ok('옵션 카드 — showOption:false면 미출력(리뷰어 페이지는 별도 렌더)', () => {
   const d = { workDetail:{}, selectedOption:{ optKey:'멀티싱글', payAmount:78000 } };
