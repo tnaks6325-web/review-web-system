@@ -446,13 +446,19 @@ router.get('/provider-info', async (req, res, next) => {
   try {
     const { sheetId, tabName } = req.query;
 
-    // 회사 공통 사업자번호 (항상 반환)
+    // 회사 공통 사업자번호 + 현금영수증 발행방법 이미지 (항상 반환 — 설정탭 프리필·현영 안내 공용)
     let companyBusinessNo = '';
+    const cashReceiptGuides = { naver: '', coupang: '' };
     try {
       const { rows: sRows } = await pool.query(
-        "SELECT value FROM app_settings WHERE key = 'company_business_no'"
+        `SELECT key, value FROM app_settings
+          WHERE key IN ('company_business_no', 'cash_receipt_guide_naver', 'cash_receipt_guide_coupang')`
       );
-      companyBusinessNo = sRows[0]?.value || '';
+      for (const r of sRows) {
+        if (r.key === 'company_business_no') companyBusinessNo = r.value || '';
+        else if (r.key === 'cash_receipt_guide_naver') cashReceiptGuides.naver = r.value || '';
+        else if (r.key === 'cash_receipt_guide_coupang') cashReceiptGuides.coupang = r.value || '';
+      }
     } catch (_) { /* app_settings 없을 수 있음 — 무시 */ }
 
     let providerMemo = '';
@@ -466,7 +472,7 @@ router.get('/provider-info', async (req, res, next) => {
       incomeType   = rows[0]?.income_type   || '';
     }
 
-    res.json({ ok: true, providerMemo, incomeType, companyBusinessNo });
+    res.json({ ok: true, providerMemo, incomeType, companyBusinessNo, cashReceiptGuides });
   } catch (err) {
     next(err);
   }
@@ -487,6 +493,35 @@ router.post('/company-business-no', adminOrMasterMiddleware, async (req, res, ne
     );
     logger.info(`[tabconfig] 회사 사업자번호 설정: ${businessNo || '(공란)'}`);
     res.json({ ok: true, businessNo });
+  } catch (err) {
+    next(err);
+  }
+});
+
+// ═══════════════════════════════════════════════════════════
+// POST /api/tab/cash-receipt-guide — 현금영수증 발행방법 이미지 설정 (관리자)
+// Body: { channel: 'naver'|'coupang', imageUrl }  — ''=제거
+//   회사 공통 1회 등록. 현영 탭 공고의 work-detail(cashReceipt)이 채널에 맞는 이미지를 리뷰어에게 노출.
+//   imageUrl은 guide-image 프록시/https 절대 URL만(자유 문자열 저장 방지 — 리뷰어 화면에 <img src>로 나감).
+// ═══════════════════════════════════════════════════════════
+router.post('/cash-receipt-guide', adminOrMasterMiddleware, async (req, res, next) => {
+  try {
+    const channel = String(req.body?.channel || '');
+    if (channel !== 'naver' && channel !== 'coupang') {
+      return res.status(400).json({ ok: false, error: "channel은 'naver' 또는 'coupang'만 가능합니다." });
+    }
+    const imageUrl = String(req.body?.imageUrl ?? '').trim();
+    if (imageUrl && !/^https:\/\/\S+$/i.test(imageUrl)) {
+      return res.status(400).json({ ok: false, error: 'imageUrl은 https 절대 URL이어야 합니다(비우면 제거).' });
+    }
+    await pool.query(
+      `INSERT INTO app_settings (key, value, updated_at)
+       VALUES ($1, $2, NOW())
+       ON CONFLICT (key) DO UPDATE SET value = $2, updated_at = NOW()`,
+      [`cash_receipt_guide_${channel}`, imageUrl]
+    );
+    logger.info(`[tabconfig] 현금영수증 발행방법 이미지(${channel}): ${imageUrl ? '설정' : '제거'}`);
+    res.json({ ok: true, channel, imageUrl });
   } catch (err) {
     next(err);
   }

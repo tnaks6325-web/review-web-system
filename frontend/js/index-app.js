@@ -11931,15 +11931,81 @@ async function applySheetNoticeBulk() {
   }, 3000);
 }
 
-/** 회사 공통 사업자번호 불러오기 (설정 탭) */
+/** 회사 공통 사업자번호 + 현금영수증 발행방법 이미지 불러오기 (설정 탭) */
 async function loadCompanyBusinessNo() {
   const input = document.getElementById('companyBusinessNoInput');
   if (!input) return;
   try {
     const data = await gasGet({ action: 'getProviderInfo' });
-    if (data && data.ok) input.value = data.companyBusinessNo || '';
+    if (data && data.ok) {
+      input.value = data.companyBusinessNo || '';
+      const g = data.cashReceiptGuides || {};
+      _setCashReceiptGuideDisplay('naver', g.naver || '');
+      _setCashReceiptGuideDisplay('coupang', g.coupang || '');
+    }
   } catch (e) {
     console.warn('[companyBusinessNo] load 실패:', e.message);
+  }
+}
+
+/* ── 현금영수증 발행방법 이미지 (설정 탭 · 채널별 회사 공통 1회) ── */
+function _setCashReceiptGuideDisplay(channel, url) {
+  const cap = channel === 'naver' ? 'Naver' : 'Coupang';
+  const img = document.getElementById('crGuideImg' + cap);
+  const none = document.getElementById('crGuideNone' + cap);
+  if (!img || !none) return;
+  if (url) { img.src = url; img.style.display = ''; none.style.display = 'none'; }
+  else { img.src = ''; img.style.display = 'none'; none.style.display = ''; }
+}
+
+/** 채널별 발행방법 이미지 업로드 — guide-image Drive+프록시 인프라 재사용(썸네일 업로드와 동일 경로) */
+async function uploadCashReceiptGuide(channel, input) {
+  const file = input.files && input.files[0];
+  if (!file) return;
+  if (file.size > 5 * 1024 * 1024) { showToast('이미지는 5MB 이하로 올려주세요.', true); input.value = ''; return; }
+  showToast('발행방법 이미지 업로드 중...');
+  try {
+    const b64 = await new Promise((res, rej) => {
+      const rd = new FileReader();
+      rd.onload = () => res(String(rd.result).split(',')[1]);
+      rd.onerror = rej;
+      rd.readAsDataURL(file);
+    });
+    const up = await fetch(API_BASE_URL + '/api/order/guide-image', {
+      method: 'POST',
+      headers: _campEditorAuthHeaders(),
+      body: JSON.stringify({ imageBase64: b64, mimeType: file.type || 'image/jpeg', fileName: 'cashreceipt_' + channel + '_' + Date.now() }),
+    });
+    const uj = await up.json();
+    if (!up.ok || !uj.ok || !uj.url) throw new Error(uj.error || '업로드 실패');
+    const sv = await fetch(API_BASE_URL + '/api/tab/cash-receipt-guide', {
+      method: 'POST',
+      headers: _campEditorAuthHeaders(),
+      body: JSON.stringify({ channel, imageUrl: uj.url }),
+    });
+    const sj = await sv.json();
+    if (!sv.ok || !sj.ok) throw new Error(sj.error || '저장 실패');
+    _setCashReceiptGuideDisplay(channel, uj.url);
+    showToast('✅ ' + (channel === 'naver' ? '네이버' : '쿠팡') + ' 발행방법 이미지가 등록되었습니다.');
+  } catch (e) {
+    showToast('❌ 등록 실패: ' + e.message, true);
+  } finally { input.value = ''; }
+}
+
+async function clearCashReceiptGuide(channel) {
+  if (!confirm((channel === 'naver' ? '네이버' : '쿠팡') + ' 발행방법 이미지를 제거할까요?\n현영 공고의 리뷰어 안내에서 이미지가 사라집니다(문구 안내는 유지).')) return;
+  try {
+    const sv = await fetch(API_BASE_URL + '/api/tab/cash-receipt-guide', {
+      method: 'POST',
+      headers: _campEditorAuthHeaders(),
+      body: JSON.stringify({ channel, imageUrl: '' }),
+    });
+    const sj = await sv.json();
+    if (!sv.ok || !sj.ok) throw new Error(sj.error || '저장 실패');
+    _setCashReceiptGuideDisplay(channel, '');
+    showToast('제거했습니다.');
+  } catch (e) {
+    showToast('❌ 제거 실패: ' + e.message, true);
   }
 }
 

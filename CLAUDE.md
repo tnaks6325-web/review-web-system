@@ -93,14 +93,22 @@ GAS(Google Apps Script) 기반 리뷰 관리 시스템을 **Node.js Express + Po
 - **행으로 보기(시안 C 티켓형)**: 리뷰어 홈 ≡ 토글(`applyRecruitView`가 `.rc-list`에 `rc-view-row` 부여)이 참여형 카드에도 적용된다. ★**렌더 경로는 `cardHtml()` 하나뿐 — 행 보기는 CSS 표현만 전환**(`.rc-view-row .pcard{flex-direction:row}` + 썸네일 92px 좌측고정·`position:static`으로 낮춰 배지/리본 절대배치를 `.pcard` 기준으로 재기준화·게이지 1줄 압축). 행 전용 HTML 빌더를 만들면 상태 규칙(카운트다운·리본·인기배지·버튼 문구)이 두 벌이 되어 드리프트하므로 **금지**(회귀가드가 `rowHtml`류 부재를 고정). 함정: flex 자식 기본 `min-width:auto` 때문에 `.pbody{min-width:0}` 없으면 긴 제목이 행을 가로로 밀어내고 말줄임도 안 먹는다(실측 확인). 회귀가드 `tests/campaignRowView.test.js`(18케이스). 시안 문서 = `frontend/docs/design-campaign-rowview.html`(모바일 390px 목업 A/B/C, `?v=A|B|C`로 단독 보기).
 - **🔥 인기상품**(`is_popular`, 참여형 카드 토글): 리뷰어 카드 [인기!] 배지(`pt-pop`, 공개필드 레거시/참여형 양쪽) + **선행참여 게이트** — 명의(phone8)별 `일반(비인기) 참여형 submitted 수 > 인기 소비(제출확정+유효홀드)`일 때만 인기 apply 허용(403 `popular_locked`+normalDone/popularUsed, **1:1 교환**·만료/취소 자동 환불·타계정도 명의별 일반 1건씩 필요, 명의 advisory 락이 이중소비 차단). `GET /api/campaign/popular-status?phone8=`(무인증 phone8 스코프, **`/:id`보다 먼저 등록** — 라우트 삼킴 함정). campaign.html = 인기 공고 안내 카드(`renderPopNotice`) + 잠금 시 **일반모집 테이블 모달**(`openPopGate` — open·비인기·자기제외 필터, [참여하기] CTA→`pop_return_camp` 기록) + 일반 제출완료 화면 "인기 상품으로 돌아가기" 버튼(지각접수는 미노출=크레딧 아님). 회귀가드 `tests/campaignPinnedPopular.test.js`(35케이스).
 
-### 관리자 공고 수정 모달 — 좌우 2단 · 한 화면 (리뷰어앱 모달과의 관계)
-- **레이아웃**: 모달 폭 640→1120px, `.rf-split`으로 **좌(입력) / 우(미리보기 `.rf-side` 340px 고정)**. 미리보기를 입력란 아래에 쌓으면 같은 스크롤을 나눠 써서 "고치면서 확인"이 불가능했다(사용자 지적). 900px 이하는 세로 복귀.
-- **입력은 탭으로 나누지 않는다** — 항목을 찾아 탭을 옮겨다니는 비용이 더 컸다. 대신 `.rf-sec` 네 묶음(기본 / 연결·상태 / 모집조건 / 작업내용·옵션)을 한 화면에 이어 놓고 **`.rf-sech` sticky 헤더**로 위치를 알린다. 밀도는 라벨·입력 간격 축소 + 짧은 항목 `.rf-grid2` 2열.
-- **필드 ID는 하나도 안 바꿨다**(기존 프리필·저장 로직 무수정) — 기존 마크업을 `<section>`으로 감싸기만 함.
-- **옵션·작업내용을 `rf_part_section` 밖 형제 `rf_work_section`으로 분리** → ★ `onParticipationToggle`이 **둘 다 토글**해야 한다(안 하면 레거시 공고에 옵션·작업내용이 노출).
-- **미리보기는 모달 세로를 꽉 쓴다** — `#rf_preview_area`의 고정 `max-height` 캡을 제거하고 `flex:1`로 aside가 스크롤 주체가 되게 했다(560px 고정 → 모달 높이만큼).
-- ★★ **레이아웃 CSS는 `@media` 밖 최상위에 둘 것** — `@media (max-width:480px)` 안에 넣었다가 480px 이하에서만 적용돼 `.rf-side` 폭이 안 먹고 미리보기가 전체 폭을 차지한 실측 버그.
-- **리뷰어앱 모달과의 관계(통일 범위)**: 리뷰어앱 `openAdminEdit`의 13개 필드는 서버 `_scopedCampaignEdit`의 **UPDATE 화이트리스트 12컬럼과 1:1**이다 → **필드를 늘리면 "저장했는데 반영 안 되는" 창이 된다. 통일 대상은 필드 개수가 아니라 같은 필드의 동작.** 관리자로 가져온 것: 리뷰비 `step="100"`, 상품 URL 옆 [바로가기 ↗](`openRecruitProductUrl`), **자율주문 자동 감지**(`onRecruitTimeRangeInput`). 관리자 전용으로 남긴 것: 썸네일 파일 업로드, 작업내용 편집, 연결 탭·옵션·참여 정책. 회귀가드 `tests/recruitModalLayout.test.js`(18케이스).
+### 관리자 공고 수정 모달 — 좌우 2단 · 기본정보/모집정보 (v4)
+- **레이아웃**: 폭 1120px, `.rf-split` 좌(입력) / 우(미리보기 `.rf-side` 340px 고정). 미리보기를 아래 쌓으면 같은 스크롤을 나눠 써 "고치면서 확인"이 안 된다. 900px 이하 세로 복귀. ★★ **레이아웃 CSS는 `@media` 밖 최상위**(안에 넣어 480px 이하에서만 먹은 실측 버그).
+- **묶음 2개**(`.rf-sec` + `.rf-sech` sticky): **기본정보**(무슨 상품을 어떻게 사고 어떤 리뷰를 쓰나) / **모집정보**(언제 몇 명을 모으나). 탭은 쓰지 않는다 — 항목을 찾아 옮겨다니는 비용이 더 컸다.
+- **가로 표기**(`.rf-hrow`, 라벨 64px 우측정렬): 시트명·탭명 / 담당자·구매채널 / 배송유형·리뷰비 / 안내배지 / 팀채팅방URL. 값이 긴 상품URL·썸네일URL은 세로 유지. 1100px 이하는 라벨이 위로.
+- **필드 ID 불변** — 기존 프리필·저장 로직 무수정(회귀가드가 33개 ID 생존 확인).
+- **진행상품 표**(`rf_opt_rows`, 5열 = 상품명·옵션명·결제금액·총인원·일건수): 옵션 하나가 한 줄. 옵션 추가 시 상품명이 위 행에서 따라옴(`_lastOptProductName`, 같은 값은 `.rf-dup` 회색). **표가 진실원본** — `_syncPreviewFromOptRows`가 ① 작업내용 상품 원문(`rf_wd_product`) ② 캠페인 정원(`rf_daily_limit`/`rf_recruit_total`, **hidden**)을 파생한다. ★ 하나라도 0이면 합계도 0(무제한) — 부분합을 상한으로 쓰면 조기 마감 사고. 마감 옵션은 합계 제외. 그래서 "총모집≠정원합" 경고는 성립하지 않아 제거(항상 일치).
+- **작업오더 자동 적용**(`applyProductRowsFromOrder`): 옵션 배열(`product_options_json`)이 있으면 그대로, 없으면 **상품정보 텍스트를 줄 단위로 분해**(`parseProductLinesToRows`). 실측 형식 `A - 옵1 - 결제금액 28,900원` / `옵2 - 결제금액 28,900원`(상품명 생략 시 앞 줄 계승) / `상품A / 레드 / 12,000원` / `힙스 31400원` 지원. ★ **"옵션 없음·단일·해당없음"은 옵션명이 아니라 서술**이라 빈 값으로(시트 옵션열 오염·가짜 선택지 방지). 분해 실패는 상품명 칸에 통째로(값 유실 0).
+- **종료일**(`rf_deadline` → `recruit_campaigns.deadline`): 시트 일정 파생 마감일(`endDate`)과 다르면 **경고만 띄우고 시트를 따른다**(`onRecruitDatesChange`, 사용자 확정 ③). 입력값은 참고로 보관. 시작일·종료일은 왼쪽에 붙이고 구매시간대가 같은 행 오른쪽.
+- **리뷰어앱 모달과의 관계**: 그쪽 13개 필드는 서버 `_scopedCampaignEdit` UPDATE 화이트리스트 12컬럼과 1:1 → **필드를 늘리면 "저장했는데 반영 안 되는" 창**이 된다. 통일 대상은 필드 개수가 아니라 같은 필드의 동작(리뷰비 `step="100"`·[바로가기 ↗]·자율주문 자동 감지를 관리자로 가져옴). 회귀가드 `tests/recruitModalLayout.test.js`(29케이스).
+
+### 현금영수증 안내 (1단계 — 발행방법 노출)
+- **판정의 진실원본은 탭 하나**: 연결 탭의 `tab_configs.income_type`에 '현영' 포함 → 발행 필요. 공고에는 컬럼을 만들지 않았고 모달은 **읽기 전용 표시**(`rf_cashrcpt_ro`, `refreshRecruitCashReceipt`)만 — 같은 값을 두 곳에서 관리하지 않는다.
+- **서버**(`_cashReceiptInfo`): work-detail(`GET /:id/work-detail`)과 관리자 미리보기(`/admin/:id/preview`) 응답에 `cashReceipt{required, businessNo, guideImageUrl}` 동봉. 채널(쿠팡/네이버)에 맞는 발행방법 이미지를 `app_settings.cash_receipt_guide_*`에서 고른다. **현영이 아니면 null**(일반 공고 응답·화면 불변), 조회 실패도 null(fail-soft).
+- **설정**: 관리자 설정탭에 채널별 발행방법 이미지 업로드 2칸(`POST /api/tab/cash-receipt-guide`, adminOrMaster). guide-image Drive+프록시 인프라 재사용(신규 저장소 0). ★ `imageUrl`은 **https 절대 URL만** — 리뷰어 화면에 `<img src>`로 나가므로 자유 문자열 금지.
+- **리뷰어 화면**: 공용 렌더러(`campaign-workdetail.js`)가 **상품 카드 바로 뒤**(결제 전 시점)에 🧾 안내 카드 — 지출증빙 + 사업자번호 + 발행방법 이미지 + "제출 때 발행 내역 캡처 필요" 예고. 렌더러가 공용이라 관리자 미리보기에도 자동 반영.
+- **다음 단계(미구현)**: ② 리뷰 제출 시 리뷰 캡처 + 영수증 캡처 **이중 슬롯**(`review_submissions.file_kind` 컬럼 추가) ③ **AI 자동 검수**(`gemini.service.js` 골격 재사용 — 리뷰 캡처 vs 영수증 판별 + 사업자번호 대조, 불일치는 재첨부 유도하되 [그대로 제출] 허용 + 관리자 알림). 2·3단계는 한 PR로 — 슬롯만 있고 검수가 없으면 아무 이미지나 통과한다. 회귀가드 `tests/cashReceiptGuide.test.js`(20케이스).
 
 ### ★ [상품 페이지 열기] = 링크유입 전용 (유입가이드 무력화 방지)
 - 작업내용 카드의 `🔗 상품 페이지 열기` 버튼은 **링크유입일 때만** 노출한다. 가이드유입 공고에 이 버튼이 뜨면 리뷰어가 상품 페이지로 바로 들어가, 검색어·경유 경로를 지정한 **유입가이드 첨부자료가 통째로 무의미해진다**(유입 실패 = 캠페인 목적 훼손).
