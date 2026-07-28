@@ -26,8 +26,13 @@ function ok(name, cond) { assert(cond, name); passed++; console.log('  ✓ ' + n
 // ── campaign.html ──
 ok('campaign.html: 참여 전 옵션 잔여 표시(renderPreOptions)', /function renderPreOptions\(\)/.test(camp) && /renderPreOptions\(\)/.test(camp));
 ok('campaign.html: 옵션 선택/변경 바텀시트 존재', /id="optSheet"/.test(camp) && /openOptSheet/.test(camp) && /openChangeOptSheet/.test(camp));
-ok('campaign.html: 옵션 등록 캠페인은 선택 필수(1개면 자동)', /pickable\.length === 1\) return _doApply\(pickable\[0\]\.optKey\)/.test(camp) && /return openOptSheet\(\)/.test(camp));
-ok('campaign.html: _doApply가 optionKey를 apply body에 실음', /function _doApply\(optionKey\)[\s\S]*?if\(optionKey\) body\.optionKey = optionKey/.test(camp));
+// ★ 063 2단계: 옵션 확정 후 _joinWithOption을 거친다(타계정 가능 공고면 명의 선택, 아니면 _doApply 즉시).
+//   옵션 규칙 자체는 불변 — 1개면 자동, 2개+면 시트.
+ok('campaign.html: 옵션 등록 캠페인은 선택 필수(1개면 자동)',
+  /pickable\.length === 1\) return _joinWithOption\(pickable\[0\]\.optKey\)/.test(camp) && /return openOptSheet\(\)/.test(camp));
+ok('campaign.html: 옵션 확정 → _joinWithOption → (타계정 미사용 시) _doApply 즉시',
+  /function _joinWithOption\(optionKey\)\{[\s\S]{0,200}if\(!multiEnabled\(\)\) return _doApply\(optionKey\);/.test(camp));
+ok('campaign.html: _doApply가 optionKey를 apply body에 실음', /function _doApply\(optionKey, sub\)[\s\S]*?if\(optionKey\) body\.optionKey = optionKey/.test(camp));
 ok('campaign.html: 옵션 소진 사유 처리(재선택 유도)', /option_required','option_invalid','option_soldout','option_today_done','option_unavailable/.test(camp));
 ok('campaign.html: 참여 후 옵션카드+변경(renderJoinedOption)', /function renderJoinedOption\(j\)/.test(camp) && /openChangeOptSheet\(\)/.test(camp));
 ok('campaign.html: 옵션변경은 change-option 호출 + work-detail 재조회(iframe 재로드)', /\/change-option/.test(camp) && /_doChangeOption[\s\S]*?await enterJoined\(\)/.test(camp));
