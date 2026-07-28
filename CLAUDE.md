@@ -108,7 +108,15 @@ GAS(Google Apps Script) 기반 리뷰 관리 시스템을 **Node.js Express + Po
 - **서버**(`_cashReceiptInfo`): work-detail(`GET /:id/work-detail`)과 관리자 미리보기(`/admin/:id/preview`) 응답에 `cashReceipt{required, businessNo, guideImageUrl}` 동봉. 채널(쿠팡/네이버)에 맞는 발행방법 이미지를 `app_settings.cash_receipt_guide_*`에서 고른다. **현영이 아니면 null**(일반 공고 응답·화면 불변), 조회 실패도 null(fail-soft).
 - **설정**: 관리자 설정탭에 채널별 발행방법 이미지 업로드 2칸(`POST /api/tab/cash-receipt-guide`, adminOrMaster). guide-image Drive+프록시 인프라 재사용(신규 저장소 0). ★ `imageUrl`은 **https 절대 URL만** — 리뷰어 화면에 `<img src>`로 나가므로 자유 문자열 금지.
 - **리뷰어 화면**: 공용 렌더러(`campaign-workdetail.js`)가 **상품 카드 바로 뒤**(결제 전 시점)에 🧾 안내 카드 — 지출증빙 + 사업자번호 + 발행방법 이미지 + "제출 때 발행 내역 캡처 필요" 예고. 렌더러가 공용이라 관리자 미리보기에도 자동 반영.
-- **다음 단계(미구현)**: ② 리뷰 제출 시 리뷰 캡처 + 영수증 캡처 **이중 슬롯**(`review_submissions.file_kind` 컬럼 추가) ③ **AI 자동 검수**(`gemini.service.js` 골격 재사용 — 리뷰 캡처 vs 영수증 판별 + 사업자번호 대조, 불일치는 재첨부 유도하되 [그대로 제출] 허용 + 관리자 알림). 2·3단계는 한 PR로 — 슬롯만 있고 검수가 없으면 아무 이미지나 통과한다. 회귀가드 `tests/cashReceiptGuide.test.js`(20케이스).
+- 회귀가드 `tests/cashReceiptGuide.test.js`(20케이스).
+
+### 현금영수증 2·3단계 — 이중 슬롯 + AI 검수
+- **2단계(이중 슬롯)**: 신규 컬럼 없음 — migration 034의 **기존 캡처 슬롯 인프라를 재사용**한다(034 주석이 이미 "리뷰 1건 + 현금영수증 1건"을 예시로 설계). 달라진 건 **현영 탭은 `capture_slots` 수동 설정 없이도 자동 2슬롯**이 된다는 것.
+- ★★ **슬롯 판정의 단일 출처 = `utils/captureSlots.js`**(`effectiveCaptureSlots`/`requiredSlotKeys`/`slotLabel`/`isCashReceiptIncome`). 규칙: `capture_slots` 설정 있으면 그대로(관리자 명시가 최우선) → 없고 `income_type`에 '현영' 있으면 리뷰+현금영수증 2슬롯 → 그 외 단일 `review`(기존 동작). **소비처 4곳이 전부 이 함수만 쓴다** — ① `search.service`(리뷰어가 그릴 슬롯) ② `submit.routes`(완료 판정 = 필요 슬롯 ⊆ 제출 슬롯) ③ `diag.routes` review-upload(슬롯 서브폴더 라벨) ④ `reviewEdit.routes`(교체요청 라벨 2곳). **하나만 어긋나도 "슬롯 2개인데 1장에 완료" 또는 파일이 다른 폴더로 흩어진다** → 각 쿼리가 `income_type`을 함께 읽어야 함(빠뜨리면 현영 자동 슬롯을 못 봄).
+- **3단계(AI 검수)**: `gemini.service.classifySubmissionImage`(기존 캐시·타임아웃·라운드로빈 골격 재사용, 캐시키 `classify:` 접두로 extract와 분리) → `captureVerify.service`가 정책 담당. 리뷰 슬롯엔 리뷰 화면(별점·리뷰본문), 영수증 슬롯엔 영수증(국세청·승인번호·사업자번호)이 와야 통과. 영수증은 **사업자번호가 회사 번호와 다르면 경고**(발행 대상 오류).
+- ★★ **fail-open (완화 금지)**: AI 미설정·오류·확신도 `< CAPTURE_VERIFY_MIN_CONFIDENCE`(0.7)는 **통과**. 오탐으로 정당한 제출이 막히는 쪽이 막으려던 사고보다 나쁘다(구매양식 신원게이트와 같은 규율). 검수 예외가 업로드 결과를 뒤집지 않고(`catch → verdict = null`), 알림 기록 실패도 무시. env `CAPTURE_VERIFY=0`으로 끌 수 있음.
+- **불일치 처리**: 업로드는 **이미 완료된 상태**로 두고 슬롯 자리에 인라인 경고(`_csShowVerdict`) + 상태를 "⚠ 확인 필요"로. 다시 올리면 교체되고, 그대로 두면 `reviewer_event_logs`에 `capture_mismatch`(warn)로 남아 관리자가 확인한다. **제출 차단 없음**.
+- 회귀가드 `tests/captureSlotVerify.test.js`(27케이스 — 슬롯 파생 8 + 소비처 배선 5 + 검수 정책 8(스텁 Gemini로 실제 핸들러 호출) + 배선 6).
 
 ### ★ [상품 페이지 열기] = 링크유입 전용 (유입가이드 무력화 방지)
 - 작업내용 카드의 `🔗 상품 페이지 열기` 버튼은 **링크유입일 때만** 노출한다. 가이드유입 공고에 이 버튼이 뜨면 리뷰어가 상품 페이지로 바로 들어가, 검색어·경유 경로를 지정한 **유입가이드 첨부자료가 통째로 무의미해진다**(유입 실패 = 캠페인 목적 훼손).

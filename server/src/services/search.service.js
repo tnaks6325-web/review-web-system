@@ -1,5 +1,6 @@
 const pool = require('../db/pool');
 const { logger } = require('../utils/logger');
+const { effectiveCaptureSlots } = require('../utils/captureSlots');
 
 /**
  * rowJson (JSON 문자열 또는 객체) → row 객체로 파싱
@@ -230,6 +231,7 @@ async function searchByName(query, phone8, opts = {}) {
     tc.folder_url        AS "folderUrl",
     tc.capture_folder_url AS "captureFolderUrl",
     tc.capture_slots     AS "captureSlots",
+    tc.income_type       AS "incomeType",
     tc.archived_rounds   AS "archivedRounds"
   `;
 
@@ -398,7 +400,8 @@ async function searchByName(query, phone8, opts = {}) {
       ncMode:      row.ncMode,
       folderUrl:   row.folderUrl,
       captureFolderUrl: row.captureFolderUrl,
-      captureSlots: Array.isArray(row.captureSlots) && row.captureSlots.length ? row.captureSlots : null,
+      // 현영 탭은 capture_slots 설정이 없어도 리뷰+현금영수증 2슬롯이 자동 적용된다(공용 유틸)
+      captureSlots: effectiveCaptureSlots(row.captureSlots, row.incomeType),
       submittedSlots: [],   // 아래에서 다중 슬롯 행에 한해 채움
       // ★ 제출완료 행은 행 전체 JSON을 반환하지 않는다(데이터 최소화 — 완료 탭 표시에 불필요)
       row:         row.isSubmitted ? {} : rowObj,
