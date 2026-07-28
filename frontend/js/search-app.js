@@ -1749,6 +1749,27 @@ async function _csAddFiles(slotKey, newFiles) {
   }
   _csRenderPreview(slotKey);
 }
+/* AI 검수 경고 — 슬롯 카드 안에 인라인 표시(제출은 계속 가능) */
+function _csShowVerdict(slotKey, message) {
+  const slotEl = document.getElementById("csSlot_" + slotKey);
+  if (!slotEl) return;
+  let el = document.getElementById("csVerdict_" + slotKey);
+  if (!el) {
+    el = document.createElement("div");
+    el.id = "csVerdict_" + slotKey;
+    el.style.cssText = "margin-top:8px;padding:9px 11px;border-radius:9px;background:#FEF0F0;" +
+      "border:1px solid #F7BDBD;color:#B42318;font-size:.78rem;font-weight:600;line-height:1.5";
+    slotEl.appendChild(el);
+  }
+  el.innerHTML = "⚠ " + escHtml(message) +
+    '<div style="font-size:.72rem;font-weight:500;margin-top:4px;color:#8A93A3">' +
+    "다시 첨부하면 교체됩니다. 맞게 올리셨다면 그대로 제출하셔도 됩니다.</div>";
+}
+function _csClearVerdict(slotKey) {
+  const el = document.getElementById("csVerdict_" + slotKey);
+  if (el) el.remove();
+}
+
 function _csOnFilesSelected(input, slotKey) {
   const files = Array.from(input.files || []);
   _csAddFiles(slotKey, files);
@@ -2189,7 +2210,16 @@ async function _submitReviewSlots(item) {
         if (!upRes || (!upRes.ok && !upRes.success)) {
           throw new Error(upRes?.error || "이미지 업로드 실패");
         }
-        if (status) { status.textContent = "✓ 업로드됨"; status.className = "mr-slot-status ok"; }
+        /* ★ AI 검수 결과(3단계) — 슬롯 형식이 다르면 그 자리에 경고를 띄우고 재첨부를 권한다.
+           업로드는 이미 끝났고 제출도 막지 않는다(오탐으로 정당한 제출이 차단되는 쪽이 더 나쁘다).
+           다시 올리면 교체되고, 그대로 두면 관리자 알림에 남아 사람이 확인한다. */
+        const bad = (upRes.files || []).find(r => r && r.verdict && r.verdict.status === "mismatch");
+        if (bad) _csShowVerdict(slot.key, bad.verdict.message);
+        else _csClearVerdict(slot.key);
+        if (status) {
+          status.textContent = bad ? "⚠ 확인 필요" : "✓ 업로드됨";
+          status.className = bad ? "mr-slot-status wait" : "mr-slot-status ok";
+        }
       } catch (slotErr) {
         uploadErrors.push(`${slot.label || slot.key}: ${slotErr.message || "실패"}`);
         if (status) { status.textContent = "✗ 실패"; status.className = "mr-slot-status wait"; }

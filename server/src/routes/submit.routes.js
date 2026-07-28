@@ -15,14 +15,10 @@ const { emitReviewSubmit, emitOrderSubmit } = require('../utils/sse');
 const { authMiddleware } = require('../middleware/auth.middleware');
 
 // ═══════════════════════════════════════════════════════════
-// 캡처 슬롯 유틸 — 탭의 capture_slots(JSONB)에서 필요 슬롯 key 목록 추출
-//   NULL/[] = 단일 암묵 'review' 슬롯 (기존 동작 그대로)
+// 캡처 슬롯 판정은 utils/captureSlots 하나로 — 검색 응답·완료 판정·업로드 폴더가
+// 같은 답을 봐야 한다(어긋나면 "슬롯 2개인데 1장에 완료" 같은 제출 파손).
 // ═══════════════════════════════════════════════════════════
-function requiredSlotKeys(captureSlots) {
-  if (!Array.isArray(captureSlots) || captureSlots.length === 0) return ['review'];
-  const keys = captureSlots.map(s => s && s.key).filter(Boolean);
-  return keys.length ? keys : ['review'];
-}
+const { requiredSlotKeys } = require('../utils/captureSlots');
 
 // ═══════════════════════════════════════════════════════════
 // 한국 실명 판별 유틸리티
@@ -474,7 +470,7 @@ router.post('/review', async (req, res, next) => {
     try {
       // 탭의 필요 슬롯 + 현재 행의 is_submitted 조회
       const { rows: ctxRows } = await pool.query(
-        `SELECT tc.capture_slots AS capture_slots, ri.is_submitted AS is_submitted
+        `SELECT tc.capture_slots AS capture_slots, tc.income_type AS income_type, ri.is_submitted AS is_submitted
            FROM review_index ri
            LEFT JOIN tab_configs tc
              ON tc.sheet_id = ri.sheet_id AND tc.tab_name = ri.tab_name
@@ -483,7 +479,7 @@ router.post('/review', async (req, res, next) => {
         [sheetId, tabName, rowIndex]
       );
       const wasSubmitted = ctxRows[0]?.is_submitted === true;
-      const required = requiredSlotKeys(ctxRows[0]?.capture_slots);
+      const required = requiredSlotKeys(ctxRows[0]?.capture_slots, ctxRows[0]?.income_type);
       const isMultiSlot = !(required.length === 1 && required[0] === 'review');
 
       if (isMultiSlot) {

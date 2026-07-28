@@ -269,6 +269,58 @@ const VERIFY_PROMPT = `당신은 온라인 쇼핑몰 주문 정보를 비교하�
   "reason": "판단 근거 한 줄 요약"
 }`;
 
+/**
+ * 제출 이미지 형식 판별 — 리뷰 캡처인지 현금영수증인지(3단계 AI 검수).
+ *
+ * 리뷰 슬롯에 영수증을, 영수증 슬롯에 리뷰를 올리는 실수를 제출 시점에 잡는다.
+ * ★ fail-open 원칙: 판별 실패·저확신은 **제출을 막지 않는다**(라이브 핫패스 보호).
+ *   오탐으로 정당한 제출이 차단되는 쪽이 막으려던 사고보다 나쁘다.
+ *
+ * @returns {{kind:'review'|'receipt'|'other', confidence:number, businessNo:string,
+ *            amount:number, reason:string, elapsed:number, cached?:boolean}}
+ */
+async function classifySubmissionImage(base64Data, mimeType = 'image/jpeg') {
+  if (!_initGemini()) throw new Error('Gemini API가 설정되지 않았습니다.');
+  const startTime = Date.now();
+
+  // 같은 파일 재업로드·재시도는 캐시로 상각(extractOrderFromImage와 같은 저장소, 키에 용도 접두)
+  const cacheHash = _getCacheKey('classify:' + base64Data);
+  const cached = _getFromCache(cacheHash);
+  if (cached) return { ...cached, elapsed: Date.now() - startTime, cached: true };
+
+  const cleanBase64 = base64Data.replace(/^data:image\/[a-z]+;base64,/, '');
+  const imagePart = { inlineData: { data: cleanBase64, mimeType: mimeType || 'image/jpeg' } };
+  const prompt = `이 이미지가 무엇인지 판별해 JSON으로만 답하세요.
+
+kind 판정 기준:
+- "review": 쇼핑몰 리뷰 화면. 별점(★), 리뷰 본문, 상품평 목록, "리뷰 작성 완료" 같은 UI가 보임.
+- "receipt": 현금영수증/결제 영수증. 국세청, 현금영수증, 승인번호, 사업자등록번호, 지출증빙, 거래일시 중 하나 이상이 보임.
+- "other": 둘 다 아님(상품 사진, 주문내역, 빈 화면 등).
+
+JSON 형식:
+{"kind":"review|receipt|other","confidence":0.0~1.0,"businessNo":"사업자등록번호(없으면 빈문자)","amount":금액숫자(없으면 0),"reason":"한 문장 근거"}`;
+
+  try {
+    const { text } = await _runModel([prompt, imagePart], 'classify');
+    if (!text || !text.trim()) throw new Error('AI 응답이 비어 있습니다.');
+    const jsonStr = text.replace(/```json\s*/g, '').replace(/```\s*/g, '').trim();
+    const p = JSON.parse(jsonStr);
+    const kind = ['review', 'receipt', 'other'].includes(p.kind) ? p.kind : 'other';
+    const out = {
+      kind,
+      confidence: Math.max(0, Math.min(1, Number(p.confidence) || 0)),
+      businessNo: String(p.businessNo || '').replace(/[^0-9]/g, ''),
+      amount: Math.max(0, parseInt(String(p.amount).replace(/[^0-9]/g, ''), 10) || 0),
+      reason: String(p.reason || '').slice(0, 200),
+    };
+    _putToCache(cacheHash, out);
+    return { ...out, elapsed: Date.now() - startTime };
+  } catch (err) {
+    logger.warn(`[Gemini] classify 실패: ${err.message}`);
+    throw err;
+  }
+}
+
 async function verifyAddressMatch(naverInfo, coupangInfo) {
   if (!_initGemini()) {
     throw new Error('Gemini API가 설정되지 않았습니다.');
@@ -439,6 +491,7 @@ async function analyzeErrorAgents(p = {}) {
 module.exports = {
   extractOrderFromImage,
   verifyAddressMatch,
+  classifySubmissionImage,
   explainErrorKo,
   analyzeErrorAgents,
 };

@@ -19,6 +19,7 @@ const crypto = require('crypto');
 const router = express.Router();
 const pool = require('../db/pool');
 const { logger } = require('../utils/logger');
+const { slotLabel: slotLabelOf } = require('../utils/captureSlots');
 const driveService = require('../services/drive.service');
 const { _getReviewerPhoneList } = require('../services/search.service');
 const { authMiddleware, adminOrMasterMiddleware } = require('../middleware/auth.middleware');
@@ -67,7 +68,7 @@ async function _resolveFolders(sheetId, tabName, slot) {
   if (!rootFolderId) throw new Error('AI_REVIEW_FOLDER_ID 미설정');
 
   const { rows: tc } = await pool.query(
-    'SELECT folder_url, campaign_name, display_name, capture_slots FROM tab_configs WHERE sheet_id = $1 AND tab_name = $2 LIMIT 1',
+    'SELECT folder_url, campaign_name, display_name, capture_slots, income_type FROM tab_configs WHERE sheet_id = $1 AND tab_name = $2 LIMIT 1',
     [sheetId, tabName]
   );
   const cfg = tc[0] || {};
@@ -90,9 +91,9 @@ async function _resolveFolders(sheetId, tabName, slot) {
   // 대상 폴더(구 파일이 사는 곳): 기본 슬롯은 [리뷰], 그 외는 슬롯 라벨 서브폴더
   let targetFolderId = reviewFolderId;
   if (slot && slot !== 'review') {
-    const slotsCfg = Array.isArray(cfg.capture_slots) ? cfg.capture_slots : [];
-    const slotLabel = (slotsCfg.find(s => s && s.key === slot)?.label || slot).toString().trim() || slot;
-    const sf = await driveService.getOrCreateSubFolder(reviewFolderId, slotLabel);
+    // 라벨 판정은 공용 유틸 — 현영 자동 슬롯도 같은 폴더명을 쓰게(업로드 경로와 일치해야 파일이 흩어지지 않음)
+    const label = slotLabelOf(cfg.capture_slots, cfg.income_type, slot);
+    const sf = await driveService.getOrCreateSubFolder(reviewFolderId, label);
     targetFolderId = sf.id;
   }
 
@@ -163,11 +164,10 @@ router.get('/my-files', async (req, res) => {
 
     // 슬롯 라벨
     const { rows: tc } = await pool.query(
-      'SELECT capture_slots FROM tab_configs WHERE sheet_id = $1 AND tab_name = $2 LIMIT 1',
+      'SELECT capture_slots, income_type FROM tab_configs WHERE sheet_id = $1 AND tab_name = $2 LIMIT 1',
       [sheetId, tabName]
     );
-    const slots = Array.isArray(tc[0]?.capture_slots) ? tc[0].capture_slots : [];
-    const slotLabel = (k) => (slots.find(s => s && s.key === k)?.label) || (k === 'review' ? '리뷰' : k);
+    const slotLabel = (k) => slotLabelOf(tc[0]?.capture_slots, tc[0]?.income_type, k);
 
     // 이 행의 대기중 요청(슬롯/파일별 UI 잠금용)
     const { rows: pending } = await pool.query(

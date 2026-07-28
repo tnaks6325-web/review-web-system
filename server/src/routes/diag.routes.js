@@ -11,6 +11,8 @@ const { getMetricsSummary, resetMetrics } = require('../middleware/metrics.middl
 const { isSentryEnabled } = require('../utils/sentry');
 const { addClient, getStatus: getSSEStatus, emitImageExtract, emitImageUpload } = require('../utils/sse');
 const { logger } = require('../utils/logger');
+const { slotLabel: slotLabelOf } = require('../utils/captureSlots');
+const { verifyCapture, logCaptureMismatch } = require('../services/captureVerify.service');
 const { logAbnormal } = require('../services/errorLog.service');
 const { parseTabRows, buildOneSheet } = require('../services/indexBuilder.service');
 const { mirrorOneSheet } = require('../services/rawMirror.service');
@@ -1513,7 +1515,7 @@ router.post('/review-upload', imageApiLimiter, async (req, res, next) => {
 
     // STEP 1: tab_configs.folder_url (DB)
     const { rows: tabRows } = await pool.query(
-      'SELECT folder_url, campaign_name, capture_slots FROM tab_configs WHERE sheet_id = $1 AND tab_name = $2 LIMIT 1',
+      'SELECT folder_url, campaign_name, capture_slots, income_type FROM tab_configs WHERE sheet_id = $1 AND tab_name = $2 LIMIT 1',
       [sheetId, tabName]
     );
 
@@ -1521,9 +1523,9 @@ router.post('/review-upload', imageApiLimiter, async (req, res, next) => {
     //   기본 'review' 슬롯은 하위폴더를 만들지 않아 기존 레이아웃을 그대로 유지한다.
     let slotLabel = null;
     if (slot !== 'review') {
-      const slotsCfg = Array.isArray(tabRows[0]?.capture_slots) ? tabRows[0].capture_slots : [];
-      const matched = slotsCfg.find(s => s && s.key === slot);
-      slotLabel = (matched?.label || slot).toString().trim() || null;
+      // 라벨 판정은 공용 유틸(utils/captureSlots) — 검색·완료판정과 같은 규칙이라
+      // 현영 자동 슬롯(receipt)도 '현금영수증' 서브폴더로 일관되게 들어간다.
+      slotLabel = slotLabelOf(tabRows[0]?.capture_slots, tabRows[0]?.income_type, slot);
     }
     if (tabRows[0]?.folder_url) {
       targetFolderId = driveService.extractFolderIdFromUrl(tabRows[0].folder_url);
@@ -1579,6 +1581,15 @@ router.post('/review-upload', imageApiLimiter, async (req, res, next) => {
       logger.info(`[review-upload] 슬롯 서브폴더: ${slotLabel} → ${slotFolder.id}`);
     }
 
+    // 영수증 슬롯 대조용 회사 사업자번호(없어도 검수는 형식 판별만 수행)
+    let _companyBizNo = '';
+    if (slot === 'receipt') {
+      try {
+        const { rows: bz } = await pool.query("SELECT value FROM app_settings WHERE key = 'company_business_no'");
+        _companyBizNo = bz[0]?.value || '';
+      } catch (_) {}
+    }
+
     // ── 2단계: 옵션 서브폴더 (있으면) ──
     if (optionFolderName) {
       const optFolder = await driveService.getOrCreateSubFolder(targetFolderId, optionFolderName);
@@ -1607,14 +1618,31 @@ router.post('/review-upload', imageApiLimiter, async (req, res, next) => {
           targetFolderId
         );
 
+        // ── 3단계 AI 검수: 이 슬롯에 맞는 형식인지 판별(fail-open — 업로드는 이미 끝났고 막지 않는다) ──
+        let verdict = null;
+        try {
+          verdict = await verifyCapture({
+            base64: file.data, mimeType: file.mimeType || 'image/jpeg',
+            slotKey: slot, companyBusinessNo: _companyBizNo,
+          });
+          if (verdict && verdict.status === 'mismatch') {
+            // 리뷰어가 [그대로 제출]을 눌러도 사람이 볼 수 있게 관리자 알림으로 남긴다
+            await logCaptureMismatch({ sheetId, tabName, reviewerName, slotKey: slot,
+                                       verdict, fileId: uploaded.id });
+          }
+        } catch (_) { verdict = null; }   // 검수 실패가 업로드 결과를 뒤집지 않는다
+
         uploadResults.push({
           index: i + 1,
           fileId: uploaded.id,
           fileName: uploaded.name,
           webViewLink: uploaded.webViewLink || '',
+          verdict: verdict && verdict.status !== 'skipped'
+            ? { status: verdict.status, message: verdict.message } : null,
         });
 
-        logger.info(`[review-upload] 파일 ${i + 1}/${files.length} 업로드: ${uploaded.name} → ${uploaded.id}`);
+        logger.info(`[review-upload] 파일 ${i + 1}/${files.length} 업로드: ${uploaded.name} → ${uploaded.id}` +
+          (verdict && verdict.status === 'mismatch' ? ` ⚠ 형식 불일치(${verdict.expected}≠${verdict.got})` : ''));
       } catch (uploadErr) {
         logger.error(`[review-upload] 파일 ${i + 1} 업로드 실패: ${uploadErr.message}`);
         uploadResults.push({
