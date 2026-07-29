@@ -1774,8 +1774,11 @@ async function _auditNoCapture(){
   try{
     const r=await api('/api/diag/no-capture-audit?days=3&limit=300');
     if(!r||!r.ok){ alert('정밀확인 실패: '+((r&&r.error)||'조회 오류')); return; }
-    const s=r.summary||{}, hi=s.attachedHigh|0, all=s.attachedButUnlinked|0, no=s.notAttached|0, unk=s.unknown|0;
-    const rows=(r.items||[]).filter(x=>x.verdict==='attachedButUnlinked').slice(0,50).map(x=>
+    // ★ 판단은 current(연결기능 배포 이후)만 본다. legacy(배포 이전)는 미링크가 정상이라
+    //   합산하면 "오탐 수백 건"으로 보이지만 알림이 나간 적 없는 과거 데이터다.
+    const s=r.current||r.summary||{}, lg=r.legacy||{};
+    const hi=s.attachedHigh|0, all=s.attachedButUnlinked|0, no=s.notAttached|0, unk=s.unknown|0;
+    const rows=(r.items||[]).filter(x=>x.verdict==='attachedButUnlinked'&&!x.preCutoff).slice(0,50).map(x=>
       `<tr><td>${esc(x.tabName||'')}</td><td>${esc(x.recipient||x.orderer||'')}</td>
         <td>${esc(String(x.submittedAt||'').replace('T',' ').slice(0,16))}</td>
         <td>${esc(x.file||'')}</td>
@@ -1794,8 +1797,10 @@ async function _auditNoCapture(){
           <div class="cc"><div><div class="big">${unk}</div><div class="lb">판정 보류 · 폴더 미연결</div></div></div>
         </div>
         <div class="ovnote">Drive [구매캡처] 폴더에 <b>해당 리뷰어 이름의 이미지가 실제로 있는데</b> 주문에는 미첨부로 기록된 건이 '오탐 확실'입니다.
-          원인은 제출 직후 백그라운드 업로드가 실패·중단돼도 화면엔 성공으로 보이고 재시도가 없기 때문입니다.
-          ${r.tabsSkipped?`<br>※ 탭이 많아 ${r.tabsSkipped}개 탭은 이번 대조에서 제외됐습니다(maxTabs).`:''}</div>
+          위 숫자는 <b>캡처↔주문 연결 기능 배포(${esc(String(r.cutoff||'').replace('T',' ').slice(0,16))}) 이후</b> 주문만 센 것입니다.
+          ${(lg.attachedButUnlinked|0)?`그 이전 <b>${lg.attachedButUnlinked|0}건</b>은 연결 코드가 없던 시절이라 미링크가 정상이며 <b>알림이 나간 적 없습니다</b>(집계 제외).`:''}
+          ${r.tabsSkipped?`<br>※ 탭이 많아 ${r.tabsSkipped}개 탭은 이번 대조에서 제외됐습니다(maxTabs).`:''}
+          ${(s.unknown|0)?`<br>※ 판정 보류 ${s.unknown|0}건은 그 탭에 [구매캡처] 폴더가 연결돼 있지 않아 대조할 수 없었습니다 — 탭설정에서 폴더 연결이 필요합니다.`:''}</div>
         ${rows?`<table class="histtable" style="margin-top:10px"><thead><tr><th>작업명</th><th>이름</th><th>제출시각</th><th>Drive 파일</th><th>판정</th></tr></thead><tbody>${rows}</tbody></table>`
               :`<div class="empty">첨부됐는데 연결만 실패한 건은 없습니다.</div>`}
       </div></div>`;
