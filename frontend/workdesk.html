@@ -265,6 +265,25 @@
   .modalbox{background:var(--card);border-radius:14px;width:900px;max-width:96vw;max-height:86vh;display:flex;flex-direction:column;overflow:hidden;box-shadow:0 14px 44px rgba(0,0,0,.28)}
   .modalhd{display:flex;align-items:center;gap:10px;padding:12px 16px;border-bottom:1px solid var(--line)} .modalhd b{font-size:14px;flex:1}
   .modalbd{overflow:auto;padding:12px 16px}
+  /* ── 리뷰어 비정상 로그 표(컬럼 표기) — 한 줄 문장 대신 항목별 칸으로 ── */
+  .lgwrap{overflow-x:auto;border:1px solid var(--line);border-radius:10px;background:var(--card)}
+  table.lgtable{width:100%;border-collapse:separate;border-spacing:0;font-size:12.5px;min-width:940px}
+  table.lgtable th{position:sticky;top:0;z-index:1;background:var(--card2);text-align:left;padding:8px 10px;
+    font-size:10.5px;color:var(--muted);font-weight:750;white-space:nowrap;border-bottom:1px solid var(--line)}
+  table.lgtable td{padding:9px 10px;border-bottom:1px solid var(--line);vertical-align:top;line-height:1.5}
+  table.lgtable tbody tr:last-child td{border-bottom:none}
+  table.lgtable tbody tr:hover td{background:#f7faff}
+  /* 폭: 짧은 항목은 고정·안 줄바꿈, 긴 설명(오류내용·조치안내)만 줄바꿈해 늘어남 */
+  .lgtable .c-sev{width:64px;white-space:nowrap} .lgtable .c-ts{width:118px;white-space:nowrap;color:var(--muted);font-variant-numeric:tabular-nums}
+  .lgtable .c-tab{width:210px;max-width:210px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-weight:650}
+  .lgtable .c-nm{width:70px;white-space:nowrap} .lgtable .c-ph{width:114px;white-space:nowrap;font-variant-numeric:tabular-nums}
+  .lgtable .c-prob{min-width:240px;word-break:break-word}
+  .lgtable .c-act{min-width:240px;word-break:break-word;color:var(--muted)}
+  .lgtable .c-btn{width:1%;white-space:nowrap}
+  .lgtable .lgbtns{display:flex;gap:5px;justify-content:flex-end}
+  .lgtable .lgby{font-size:10px;color:var(--faint);margin-top:3px;white-space:nowrap}
+  .lgtable tr.lgcrit td:first-child{box-shadow:inset 3px 0 0 var(--bad)}   /* 중요 = 왼쪽 빨간 띠 */
+  .lgtable tr.lgdone td{opacity:.55}
   table.histtable{width:100%;border-collapse:collapse;font-size:12px} table.histtable th{text-align:left;padding:7px 9px;font-size:10.5px;color:var(--muted);font-weight:750;border-bottom:1px solid var(--line);position:sticky;top:0;background:var(--card)}
   table.histtable td{padding:6px 9px;border-bottom:1px solid var(--line)} table.histtable tr.histrev td{color:var(--faint);text-decoration:line-through} table.histtable tr.histrev .hval{text-decoration:none}
   table.histtable .hts{font-family:var(--mono);font-size:11px;color:var(--muted);white-space:nowrap} .histtable .ok{color:var(--safe);font-weight:700} .histtable .no{color:var(--faint);font-weight:700}
@@ -1699,31 +1718,42 @@ function _renderLogsBody(q){
     || String(l.campaignName||'').toLowerCase().includes(kw)
     || String(l.reviewerName||'').toLowerCase().includes(kw)
     || String(l.message||'').toLowerCase().includes(kw)
+    || String(l.problem||'').toLowerCase().includes(kw)
+    || String(l.action||'').toLowerCase().includes(kw)
     || (kwd && String(l.phone8||'').includes(kwd)));
   if(!items.length){ $('#lgbody').innerHTML=`<div class="empty">${kw?'검색 결과가 없습니다.':'표시할 로그가 없습니다. (문제 없음 🎉)'}</div>`; return; }
   const sevBadge=s=> s==='critical'?'<span class="bd no">중요</span>' : s==='warn'?'<span class="bd" style="background:#FEF3C7;color:#92400E">주의</span>' : '<span class="bd g">정보</span>';
-  $('#lgbody').innerHTML = `<div style="display:flex;flex-direction:column;gap:8px;padding:4px 0">`+items.map(l=>{
+  // 표(컬럼) 표기 — 한 줄 문장 대신 발생시점/작업명/이름/전화번호/오류내용/조치안내로 분해.
+  //   오류내용·조치안내는 서버가 event_type+context 로 만들어 내려주고(problem/action),
+  //   모르는 유형이면 message 원문을 오류내용 칸에 그대로 넣어 화면이 비지 않게 한다.
+  $('#lgbody').innerHTML = `<div class="lgwrap"><table class="lgtable">
+    <thead><tr>
+      <th class="c-sev">상태</th><th class="c-ts">발생시점</th><th class="c-tab">작업명</th>
+      <th class="c-nm">이름</th><th class="c-ph">전화번호</th>
+      <th class="c-prob">오류내용</th><th class="c-act">조치안내</th><th class="c-btn"></th>
+    </tr></thead><tbody>`+items.map(l=>{
     const t=l.occurredAt?new Date(l.occurredAt):null;
     const ts=t?`${t.getFullYear()}-${String(t.getMonth()+1).padStart(2,'0')}-${String(t.getDate()).padStart(2,'0')} ${String(t.getHours()).padStart(2,'0')}:${String(t.getMinutes()).padStart(2,'0')}`:'';
     const resolved=!!l.resolvedAt;
-    return `<div style="background:var(--card);border:1px solid ${l.severity==='critical'&&!resolved?'#FCA5A5':'var(--line)'};border-radius:10px;padding:10px 14px;display:flex;gap:10px;align-items:flex-start;${resolved?'opacity:.55':''}">
-      <div style="flex:0 0 auto;padding-top:1px">${sevBadge(l.severity)}</div>
-      <div style="flex:1;min-width:0">
-        <div style="font-size:13.5px;line-height:1.5;word-break:break-all">${esc(l.message||'')}</div>
-        <div style="font-size:11.5px;color:var(--muted);margin-top:3px">${esc(ts)} · ${esc(l.campaignName||l.tabName||'')}${l.reviewerName?' · '+esc(l.reviewerName):''}${_logPhone(l)}${resolved?` · ✔ 확인됨(${esc(l.resolvedBy||'')})`:''}</div>
-      </div>
-      <div style="display:flex;gap:6px;flex:0 0 auto">
-        ${(l.sheetId&&l.tabName)?`<button class="btn" title="이 리뷰어의 행이 있는 작업대를 새 탭으로 엽니다" onclick="_logOpenWorkdesk(${l.id})">작업대 열기 ↗</button>`:''}
+    const problem=l.problem||l.message||'';   // 미지 유형 폴백
+    const ph=_fmtPhone(l.phone8||'');
+    return `<tr class="${resolved?'lgdone':''}${l.severity==='critical'&&!resolved?' lgcrit':''}">
+      <td class="c-sev">${sevBadge(l.severity)}${resolved?`<div class="lgby" title="확인: ${esc(l.resolvedBy||'')}">✔ 확인됨</div>`:''}</td>
+      <td class="c-ts">${esc(ts)}</td>
+      <td class="c-tab" title="${esc(l.campaignName||l.tabName||'')}">${esc(l.campaignName||l.tabName||'')}</td>
+      <td class="c-nm">${esc(l.reviewerName||'')}</td>
+      <td class="c-ph">${esc(ph)}</td>
+      <td class="c-prob">${esc(problem)}</td>
+      <td class="c-act">${esc(l.action||'')}</td>
+      <td class="c-btn"><div class="lgbtns">
+        ${(l.sheetId&&l.tabName)?`<button class="btn xs" title="이 리뷰어의 행이 있는 작업대를 새 탭으로 엽니다" onclick="_logOpenWorkdesk(${l.id})">작업대 ↗</button>`:''}
         ${(resolved||!_canResolveLog())?'':
-          (_LOG_CANCELABLE.has(l.eventType)?`<button class="btn" style="border-color:#FCA5A5;color:#B91C1C" onclick="_cancelLogOrder(${l.id})" title="시트에서 지운 것이 '주문취소'였다면 여기를 누르세요 — 다시 기록되지 않습니다">취소 처리</button>`:'')
-          +`<button class="btn" onclick="_resolveLog(${l.id})">확인</button>`}
-      </div>
-    </div>`;
-  }).join('')+`</div>`;
+          (_LOG_CANCELABLE.has(l.eventType)?`<button class="btn xs" style="border-color:#FCA5A5;color:#B91C1C" onclick="_cancelLogOrder(${l.id})" title="시트에서 지운 것이 '주문취소'였다면 여기를 누르세요 — 다시 기록되지 않습니다">취소</button>`:'')
+          +`<button class="btn xs" onclick="_resolveLog(${l.id})">확인</button>`}
+      </div></td>
+    </tr>`;
+  }).join('')+`</tbody></table></div>`;
 }
-// 로그에 리뷰어 연락처 표기 — phone8(뒤 8자리)을 그리드와 동일한 010-XXXX-XXXX 표기로.
-//   로그 뷰는 내부(master/admin/staff) 전용이고 staff는 담당 탭 로그만 서버가 내려주므로 그리드와 노출 수준이 같다.
-function _logPhone(l){ const p=_fmtPhone(l&&l.phone8||''); return p?` · <span style="font-variant-numeric:tabular-nums">${esc(p)}</span>`:''; }
 // 로그 → 그 리뷰어가 있는 작업대를 새 탭으로. 탭 지정+행 강조 정보를 프래그먼트(#)로 넘긴다
 //   — 프래그먼트는 서버 로그·Referer에 안 실려 연락처가 새지 않고, 도착 즉시 주소창에서 제거된다.
 //   토큰도 함께 넘기는 이유: 새 탭은 sessionStorage를 물려받지 못해(인트라넷 SSO 세션) 로그인 화면으로 떨어진다.

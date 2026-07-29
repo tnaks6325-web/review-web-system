@@ -24,7 +24,7 @@ function grab(name) {
   }
   return script.slice(m.index + 1, i + 1);
 }
-const WANT = ['_logPhone', '_logOpenWorkdesk', '_consumeGo', '_applyPendingFocus', '_fmtPhone', '_toast'];
+const WANT = ['_logOpenWorkdesk', '_consumeGo', '_applyPendingFocus', '_fmtPhone', '_toast'];
 const bodies = WANT.map(grab).join('\n');
 
 // ── 스텁 ──────────────────────────────────────────────────────
@@ -71,21 +71,15 @@ const F = load(STATE, document, window, history, location, esc, token, (fn)=>0, 
 let pass = 0;
 const t = (name, fn) => { fn(); console.log('  ok   ' + name); pass++; };
 
-// ── 1) 연락처 표기 ─────────────────────────────────────────────
-t('1. _logPhone: phone8 → 010-XXXX-XXXX 표기', () => {
-  const out = F._logPhone({ phone8: '12345678' });
-  assert.ok(out.includes('010-1234-5678'), '연락처 표기 누락: ' + out);
+// ── 1) 연락처 표기(표 컬럼) ────────────────────────────────────
+t('1. _fmtPhone: phone8 → 010-XXXX-XXXX (로그 전화번호 칸 표기)', () => {
+  assert.strictEqual(F._fmtPhone('12345678'), '010-1234-5678');
 });
 
-t('2. _logPhone: 연락처 없으면 빈 문자열(빈 구분점 · 안 남김)', () => {
-  assert.strictEqual(F._logPhone({ phone8: '' }), '');
-  assert.strictEqual(F._logPhone({}), '');
-  assert.strictEqual(F._logPhone(null), '');
-});
-
-t('3. _logPhone: 값이 HTML 이스케이프됨(로그 원장 오염 시에도 주입 불가)', () => {
-  const out = F._logPhone({ phone8: '<img src=x>' });
-  assert.ok(!/<img/.test(out), 'XSS 통로: ' + out);
+t('2. _fmtPhone: 빈 값·형식 불명은 원본 유지(가짜 번호 생성 안 함)', () => {
+  assert.strictEqual(F._fmtPhone(''), '');
+  assert.strictEqual(F._fmtPhone(null), '');
+  assert.strictEqual(F._fmtPhone('없음'), '없음');
 });
 
 // ── 2) 딥링크 생성 ─────────────────────────────────────────────

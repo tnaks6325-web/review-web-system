@@ -95,6 +95,67 @@ function _scopeCond(scopeTabs, cond, params) {
 }
 
 /** 로그 목록 — 미해결 우선 + 최신순. 필터: sheetId/tabName/severity/eventType/unresolvedOnly/scopeTabs */
+// ── 로그 한 문장(message) → 표 컬럼용 분해: 오류내용(problem) / 조치안내(action) ──
+// ★ message 컬럼은 그대로 둔다(관리자 대시보드 중요알림·SSE가 그 문장을 그대로 쓴다).
+//   여기서는 문장을 파싱하지 않고 event_type + context 로 다시 만든다 →
+//   ① 과거에 쌓인 로그에도 똑같이 적용되고 ② 문구를 바꿔도 화면이 안 깨진다.
+// 모르는 유형은 빈 값 → 프론트가 message 원문으로 폴백(새 유형이 생겨도 화면이 비지 않음).
+function describeEvent(row = {}) {
+  const t = row.eventType || row.event_type || '';
+  const c = (row.context && typeof row.context === 'object') ? row.context : {};
+  const sev = row.severity || 'warn';
+  const at = (v) => (v === 0 || v ? String(v) : '');
+  switch (t) {
+    case 'order_lost':
+      return {
+        problem: `구매양식이 시트에서 사라짐${at(c.row) ? `(기록됐던 ${at(c.row)}행이 다른 내용으로 바뀜)` : ''}.`,
+        action: '자동 재기록을 진행합니다 — 반영되면 시트 하단 행 비고에 [시스템 재기록 · 확인요망]으로 표기됩니다.',
+      };
+    case 'order_lost_manual':
+      return {
+        problem: `구매양식이 시트에서 반복 소실되어 자동 재기록을 중단함${at(c.row) ? `(마지막 기록 ${at(c.row)}행)` : ''}.`,
+        action: "수동 확인·입력이 필요(관리자 대시보드 '구매주문 시트반영 현황' 참조).",
+      };
+    case 'order_row_shifted':
+      return {
+        problem: `기록 행이 ${at(c.oldRow) || '?'}→${at(c.newRow) || '?'}행으로 이동됨(시트 중간 행 삽입·정렬 감지).`,
+        action: '자동 보정 완료 — 조치 불필요.',
+      };
+    case 'order_row_ambiguous':
+      return {
+        problem: `기록 행(${at(c.row) || '?'}행)이 실제 시트 내용과 달라졌으나, 같은 신원의 행이 여러 개라 자동 보정하지 못함.`,
+        action: '시트 확인 필요.',
+      };
+    case 'order_unmirrored': {
+      const manual = sev === 'critical' || c.mirrorStatus === 'stuck_manual';
+      return manual
+        ? {
+          problem: '구매양식을 제출했으나, 시트에 입력되지 못함.',
+          action: "자동 재기록이 중단되어 수동 입력이 필요(관리자 대시보드 '구매주문 시트반영 현황' 참조).",
+        }
+        : {
+          problem: `구매양식을 제출했으나, 아직 시트에 입력되지 못함${at(c.mirrorStatus) ? `(상태: ${at(c.mirrorStatus)})` : ''}.`,
+          action: '자동복구 대기 중 — 조치 불필요.',
+        };
+    }
+    case 'order_no_capture':
+      return { problem: '구매양식을 제출했으나, 구매캡쳐를 첨부하지 않았음.', action: '구매캡쳐 보완 필요.' };
+    case 'capture_mismatch': {
+      let slot = at(c.slotKey) || '캡처';
+      try { slot = require('../utils/captureSlots').slotLabel(null, '', c.slotKey) || slot; } catch (_) { /* 라벨 실패는 key 그대로 */ }
+      const pct = Number(c.confidence) > 0 ? `(AI 확신 ${Math.round(Number(c.confidence) * 100)}%)` : '';
+      return {
+        problem: `${slot} 캡처 자리에 다른 형식의 이미지가 올라옴${pct}.`,
+        action: c.sure
+          ? '리뷰어 화면에 재첨부 안내가 표시됨 — 확인 필요.'
+          : '캡처 형식 확인 필요(확신도가 낮아 오탐일 수 있음).',
+      };
+    }
+    default:
+      return { problem: '', action: '' };
+  }
+}
+
 async function listReviewerEvents({
   sheetId = '', tabName = '', severity = '', eventType = '',
   unresolvedOnly = false, limit = 100, offset = 0, scopeTabs = null,
@@ -126,7 +187,8 @@ async function listReviewerEvents({
       LIMIT $${limIdx} OFFSET $${offIdx}`,
     params
   );
-  return rows;
+  // 표 컬럼(오류내용/조치안내) 동봉 — message 원문은 그대로 두고 추가만 한다
+  return rows.map(r => Object.assign(r, describeEvent(r)));
 }
 
 /** 미해결 카운트(전체/critical) — 관리자 배지·알림 카드용. scopeTabs 지정 시 그 탭들만. */
@@ -260,6 +322,7 @@ async function autoResolveHealed() {
 module.exports = {
   logReviewerEvent,
   listReviewerEvents,
+  describeEvent,
   unresolvedCounts,
   resolveReviewerEvent,
   cancelOrderFromEvent,
