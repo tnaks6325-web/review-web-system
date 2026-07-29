@@ -7650,9 +7650,22 @@ async function submitOrderForm() {
             // ★ 캡처↔주문 연결(062): 제출 응답의 orderSubmissionId 를 실어 서버가 order_submissions 에
             //   capture_file_id/capture_uploaded_at 을 기록 → "캡처 미첨부" 자동 감지·중요알림의 근거.
             const upPayload = { action:"uploadOrderImage", imageBase64:_imgCtx.base64, mimeType:_imgCtx.mime, fileName:namePart+"."+ext, displayName:ctx.displayName||"", tabName:ctx.tabName, round:ctx.round||"", sheetId:ctx.sheetId||"", orderSubmissionId:(res && res.orderSubmissionId) || "" };
-            const upJson = await gasPostUpload(upPayload, 180000);
+            // ★ 재시도(3회, 지수 백오프): 이 업로드가 실패하면 서버는 capture_uploaded_at 이 비어 있어
+            //   "구매캡쳐 미첨부"로 자동 감지한다 → 실제로는 첨부한 리뷰어에게 잘못된 독촉이 나간다.
+            //   과거엔 1회 실패 시 console.warn 만 하고 조용히 끝나 이 오탐의 주원인이었다.
+            let upJson = null, upErrLast = null;
+            for (let attempt = 0; attempt < 3; attempt++) {
+              try { upJson = await gasPostUpload(upPayload, 180000); if (upJson?.ok) break; upErrLast = new Error(upJson?.error || "업로드 응답 오류"); }
+              catch (e) { upErrLast = e; }
+              if (attempt < 2) await new Promise(r2 => setTimeout(r2, 1500 * Math.pow(2, attempt)));   // 1.5s → 3s
+            }
             if (upJson?.ok && upJson.captureFolderUrl && !firstCaptureFolderUrl) {
               firstCaptureFolderUrl = upJson.captureFolderUrl;
+            }
+            // ★ 끝내 실패하면 조용히 넘어가지 않고 알린다 — 리뷰어는 첨부했다고 믿고 창을 닫아버린다.
+            if (!upJson?.ok) {
+              console.warn(`[이미지 업로드 ${i+1}] 최종 실패:`, upErrLast && upErrLast.message);
+              try { showToast(`${i+1}번째 주문의 구매캡쳐 업로드에 실패했습니다. 네트워크 확인 후 캡처를 다시 첨부해주세요.`, "error"); } catch(_) {}
             }
           } catch(upErr) { console.warn(`[이미지 업로드 ${i+1}] 백그라운드 오류:`, upErr.message); }
         })();
