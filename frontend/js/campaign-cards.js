@@ -163,6 +163,8 @@
       .pcard .pg-vl{font-weight:800;font-variant-numeric:tabular-nums;color:#111827}
       .pcard .pg-vl b{color:#1b64da;font-size:.86rem}
       .pcard .pgauge.full .pg-vl b{color:#B45309}
+      .pcard .pg-carry{display:inline-block;margin-right:5px;padding:1px 5px;border-radius:5px;
+        background:#EEF2FF;color:#4338CA;font-size:.62rem;font-weight:800;vertical-align:1px}
       .pcard .pg-track{height:6px;border-radius:99px;background:#EEF1F7;border:1px solid #E5E7EB;overflow:hidden}
       .pcard .pg-fill{height:100%;border-radius:99px;background:linear-gradient(90deg,#3182f6,#1b64da)}
       .pcard .pgauge.full .pg-fill{background:linear-gradient(90deg,#F59E0B,#D97706)}
@@ -411,8 +413,14 @@
         const subN = Math.max(0, today - holdNow);          // todayCount = 제출 + 유효홀드
         const subPct = Math.min(100, Math.round((subN / quota) * 100));
         const holdPct = Math.min(100 - subPct, Math.round((holdNow / quota) * 100));
+        // ★ 066: 전일 미달분 이월로 오늘 한도가 늘어난 경우 그 사실을 표시한다.
+        //   안 보이면 "일건수를 20으로 저장했는데 25로 뜬다"가 버그로 오해된다.
+        const carry = Number(c.carryAdded) || 0;
+        const carryTip = carry > 0
+          ? `<span class="pg-carry" title="전일까지 못 채운 ${carry}명이 오늘로 이월됐습니다. 오늘 다 채우면 내일은 원래 한도로 돌아갑니다.">+${carry} 이월</span>`
+          : '';
         gauge = `<div class="pgauge${isFull ? ' full' : ''}">
-          <div class="pg-row"><span class="pg-lb">${isDaily ? '오늘 모집' : '오늘 모집'}</span><span class="pg-vl"><b>${today}</b> / ${quota}명${isFull ? ' 완료' : ''}</span></div>
+          <div class="pg-row"><span class="pg-lb">${isDaily ? '오늘 모집' : '오늘 모집'}</span><span class="pg-vl">${carryTip}<b>${today}</b> / ${quota}명${isFull ? ' 완료' : ''}</span></div>
           <div class="pg-track"><div class="pg-seg sub" style="width:${subPct}%"></div>${holdPct > 0 ? `<div class="pg-seg hold" style="width:${holdPct}%"></div>` : ''}</div>
           <div class="pg-key"><span><i class="sub"></i>확정 <b>${subN}</b></span><span><i class="${holdNow > 0 ? 'hold' : 'zero'}"></i>진행중 <b>${holdNow}</b></span></div>
         </div>`;

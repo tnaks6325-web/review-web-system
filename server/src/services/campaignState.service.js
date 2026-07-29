@@ -77,12 +77,53 @@ function isUsableSchedule(s) {
   return !!(s && s.ok && Array.isArray(s.dates) && s.dates.length >= 2 && s.byDate);
 }
 
-/** dailyQuota — KST 일 시작 시점 고정 (§03-D). submittedBeforeToday = 전일까지의 누적확정 */
-function dailyQuota(c, submittedBeforeToday) {
+// ── 일 모집한도 미달분 이월(066) ──
+// 어제 5명 부족하면 오늘 한도를 그만큼 올리고, 다 채우면 내일 원래 한도로 돌아온다
+// (관리자가 손으로 20↔25를 오가던 작업의 자동화).
+const CARRY_ENABLED = process.env.CAMPAIGN_DAILY_CARRY !== '0';
+// ★ 상한 — 이월이 아무리 쌓여도 하루 한도의 이 배수를 넘지 않는다.
+//   상한이 없으면 오래 미달한 캠페인이 어느 날 갑자기 수십 건을 한꺼번에 열어
+//   시트 기입·검수 인력이 감당 못 하는 버스트가 난다.
+const CARRY_CAP_MULT = Math.max(1, Number(process.env.CAMPAIGN_DAILY_CARRY_CAP || 2));
+
+/** 'YYYY-MM-DD' 두 개의 날짜 차이(일). b - a */
+function _dayDiff(a, b) {
+  return Math.round((Date.parse(b + 'T00:00:00Z') - Date.parse(a + 'T00:00:00Z')) / 86400000);
+}
+
+/**
+ * dailyQuota — KST 일 시작 시점 고정 (§03-D). submittedBeforeToday = 전일까지의 누적확정
+ *
+ * carry = { startDate, today, submittedSince } 가 주어지면 미달분 이월을 적용한다.
+ *   기준일 = max(캠페인 시작일, 이월 기준선)  ← 기준선은 066이 배포 시각에 고정(소급 방지)
+ *   그날 정원 = daily_limit × 경과일수 − 기준일 이후 누적확정
+ *
+ * ★★ 두 가지 불변식(완화 금지):
+ *   ① **절대 줄어들지 않는다** — 계산값이 daily_limit 미만이어도 daily_limit을 쓴다.
+ *      이월은 "더 열어주는" 기능이지 한도를 조이는 기능이 아니다(기존 대비 축소 = 회귀).
+ *   ② **총 모집인원은 그대로** — 마지막 clamp(rt - submittedBeforeToday)가 유지되므로
+ *      이월이 총원을 넘겨 모집하는 일은 구조적으로 불가능하다.
+ */
+function dailyQuota(c, submittedBeforeToday, carry) {
   const dl = Number(c.daily_limit) || 0;
   const rt = Number(c.recruit_total) || 0;
-  if (rt <= 0) return dl; // 무제한 캠페인 가드(영구 daily_done 방지)
-  return Math.max(0, Math.min(dl, rt - (Number(submittedBeforeToday) || 0)));
+  const before = Number(submittedBeforeToday) || 0;
+
+  let q = dl;
+  if (CARRY_ENABLED && carry && carry.startDate && carry.today && dl > 0) {
+    const sd = dateOnlyStr(c.start_date);
+    const anchor = (sd && sd > carry.startDate) ? sd : carry.startDate;   // 늦게 시작한 캠페인은 자기 시작일부터
+    const days = _dayDiff(anchor, carry.today) + 1;                        // 오늘 포함 경과일수
+    if (days > 1) {
+      const planned = dl * days;
+      const done = Number(carry.submittedSince) || 0;
+      q = Math.min(planned - done, dl * CARRY_CAP_MULT);
+      if (q < dl) q = dl;   // ★ 불변식 ① — 이월은 한도를 줄이지 않는다
+    }
+  }
+
+  if (rt <= 0) return Math.max(0, q); // 무제한 캠페인 가드(영구 daily_done 방지)
+  return Math.max(0, Math.min(q, rt - before));   // ★ 불변식 ② — 총원 초과 불가
 }
 
 /**
@@ -106,9 +147,10 @@ function computeCampaignState(c, counts, now = new Date(), schedule = null) {
   const todayStr = kstTodayStr(now);
   const submittedBefore = Number(counts.submittedBeforeToday) || 0;
 
+  // 시트 일정이 있으면 그 일정이 이월까지 계산한다(063). 없으면 daily_limit 경로가 이월(066).
   const quota = sch
     ? Math.max(0, Math.min(plannedThrough(sch, todayStr), sch.totalSlots) - submittedBefore)
-    : dailyQuota(c, submittedBefore);
+    : dailyQuota(c, submittedBefore, counts.carry && { ...counts.carry, today: todayStr });
   const todayCount = (Number(counts.todaySubmitted) || 0) + (Number(counts.todayActiveHolds) || 0);
   const opensAt = kstTodayAt(c.window_start, now);
   const closesAt = kstTodayAt(c.window_end, now);
@@ -118,6 +160,9 @@ function computeCampaignState(c, counts, now = new Date(), schedule = null) {
     ...base,
     todayCount,
     dailyQuota: quota,
+    // 이월로 오늘 얼마나 더 열렸는지(관리자 표시용) — 0이면 평소와 같음.
+    // 이 값이 없으면 "일건수를 20으로 설정했는데 25로 보인다"가 버그로 오해된다.
+    carryAdded: Math.max(0, quota - (Number(c.daily_limit) || 0)),
     opensAt: opensAt ? opensAt.toISOString() : null,
     closesAt: closesAt ? closesAt.toISOString() : null,
     cutoffAt: cutoffAt ? cutoffAt.toISOString() : null,
@@ -204,22 +249,30 @@ const APPLY_BLOCK_REASON = {
 async function fetchCampaignCounts(pool, campaignIds, now = new Date()) {
   const out = new Map();
   const ids = (campaignIds || []).filter(Boolean);
-  for (const id of ids) {
-    out.set(id, { activeHolds: 0, todayActiveHolds: 0, submittedAll: 0, todaySubmitted: 0, submittedBeforeToday: 0 });
-  }
+  const carryStart = await _carryStartDate(pool);   // 이월 기준선(066) — 실패 시 null=이월 미적용
+  const blank = () => ({
+    activeHolds: 0, todayActiveHolds: 0, submittedAll: 0, todaySubmitted: 0, submittedBeforeToday: 0,
+    carry: carryStart ? { startDate: carryStart, submittedSince: 0 } : null,
+  });
+  for (const id of ids) out.set(id, blank());
   if (!ids.length) return out;
   const dayStart = kstDayStartUtc(now).toISOString();
+  // 기준선 00:00 KST — 이 시각 이후 ~ 오늘 이전의 확정만 이월 계산에 쓴다.
+  //   ★ 캠페인은 자기 시작일 전에 확정이 있을 수 없으므로, 전역 기준선 하나로 세도
+  //     max(시작일, 기준선) 기준으로 센 것과 같은 값이 나온다(쿼리 1개 유지).
+  const carryFromUtc = carryStart ? new Date(Date.parse(carryStart + 'T00:00:00+09:00')).toISOString() : dayStart;
   const { rows } = await pool.query(
     `SELECT campaign_id,
             COUNT(*) FILTER (WHERE status='applied'   AND expires_at > NOW())                              AS active_holds,
             COUNT(*) FILTER (WHERE status='applied'   AND expires_at > NOW() AND applied_at >= $2)         AS today_active_holds,
             COUNT(*) FILTER (WHERE status='submitted')                                                     AS submitted_all,
             COUNT(*) FILTER (WHERE status='submitted' AND submitted_at >= $2)                              AS today_submitted,
-            COUNT(*) FILTER (WHERE status='submitted' AND (submitted_at < $2 OR submitted_at IS NULL))     AS submitted_before_today
+            COUNT(*) FILTER (WHERE status='submitted' AND (submitted_at < $2 OR submitted_at IS NULL))     AS submitted_before_today,
+            COUNT(*) FILTER (WHERE status='submitted' AND submitted_at >= $3 AND submitted_at < $2)        AS submitted_since_carry
        FROM campaign_applications
       WHERE campaign_id = ANY($1)
       GROUP BY campaign_id`,
-    [ids, dayStart]
+    [ids, dayStart, carryFromUtc]
   );
   for (const r of rows) {
     out.set(r.campaign_id, {
@@ -228,10 +281,34 @@ async function fetchCampaignCounts(pool, campaignIds, now = new Date()) {
       submittedAll: Number(r.submitted_all) || 0,
       todaySubmitted: Number(r.today_submitted) || 0,
       submittedBeforeToday: Number(r.submitted_before_today) || 0,
+      carry: carryStart
+        ? { startDate: carryStart, submittedSince: Number(r.submitted_since_carry) || 0 }
+        : null,
     });
   }
   return out;
 }
+
+/**
+ * 이월 기준선(app_settings.campaign_carry_start, 066) — 프로세스 캐시.
+ * ★ 조회 실패·미설정은 **null = 이월 미적용**(종전 동작). 알 수 없을 때 이월을 켜면
+ *   기준을 모르는 채로 한도를 늘리게 되므로, 모르면 안 늘리는 쪽이 안전하다.
+ */
+let _carryCache = { at: 0, val: null };
+const CARRY_CACHE_MS = 5 * 60 * 1000;
+async function _carryStartDate(pool) {
+  if (!CARRY_ENABLED || !pool || typeof pool.query !== 'function') return null;
+  if (Date.now() - _carryCache.at < CARRY_CACHE_MS) return _carryCache.val;
+  try {
+    const { rows } = await pool.query(`SELECT value FROM app_settings WHERE key = 'campaign_carry_start' LIMIT 1`);
+    const v = rows[0] && /^(\d{4}-\d{2}-\d{2})/.exec(String(rows[0].value || ''));
+    _carryCache = { at: Date.now(), val: v ? v[1] : null };
+  } catch (_) {
+    _carryCache = { at: Date.now(), val: null };
+  }
+  return _carryCache.val;
+}
+function __resetCarryCacheForTest() { _carryCache = { at: 0, val: null }; }
 
 // ═══════════════════════════════════════════════════════════
 // 상품옵션(campaign_options) — 옵션별 자리 계산 (061, PRD v1.1 §07)
@@ -323,4 +400,6 @@ module.exports = {
   isUsableSchedule,
   APPLY_BLOCK_REASON,
   KST_OFFSET_MS,
+  CARRY_CAP_MULT,
+  __resetCarryCacheForTest,
 };
