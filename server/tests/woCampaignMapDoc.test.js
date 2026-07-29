@@ -1,0 +1,107 @@
+/**
+ * woCampaignMapDoc.test.js — 작업오더→모집공고 자동반영 와이어프레임 ↔ 실제 매핑 대조.
+ *
+ * 이 문서는 "어느 칸이 자동으로 채워지는가"를 사람에게 약속한다.
+ * 프리필 코드가 바뀌었는데 문서가 옛말을 하면 관리자가 빈 칸을 채워졌다고 믿고 게시한다.
+ * → 문서가 '자동'이라 표시한 항목은 실제 프리필 코드에 그 배선이 있어야 하고,
+ *   '직접 입력'이라 표시한 항목은 프리필에 없어야 한다.
+ *
+ * 실행: node tests/woCampaignMapDoc.test.js
+ */
+const assert = require('assert');
+const fs = require('fs');
+const path = require('path');
+const readF = (p) => fs.readFileSync(path.join(__dirname, '..', '..', 'frontend', p), 'utf8');
+const readS = (p) => fs.readFileSync(path.join(__dirname, '..', 'src', p), 'utf8');
+
+const doc = readF('docs/작업오더-모집공고_자동반영_와이어프레임.html');
+const app = readF('js/index-app.js');       // woCreateCampaign — prefill 조립
+const rec = readF('js/index-recruit.js');   // openRecruitModal — prefill 적용
+const ord = readS('routes/order.routes.js');// accept — tab_configs 자동기입
+
+let n = 0;
+const ok = (name, cond) => { assert(cond, name); n++; console.log('  ✓ ' + name); };
+
+/* ── 문서 형식 ── */
+ok('완전한 HTML 문서', /^<!DOCTYPE html>/i.test(doc.trim()) && /<\/html>\s*$/.test(doc));
+ok('외부 리소스 0(오프라인 열람)',
+  !/<script/i.test(doc) && !/<img[^>]+src=/i.test(doc) && !/https?:\/\/[^"']*\.(?:css|js)/i.test(doc));
+ok('다크모드·인쇄 대응', /@media \(prefers-color-scheme: dark\)/.test(doc) && /@media print/.test(doc));
+ok('4단계 범례(자동/확인/직접/다른 경로)',
+  /자동 — 작업오더 값이 그대로/.test(doc) && /확인 필요/.test(doc)
+  && /직접 입력 — 비어 있음/.test(doc) && /다른 경로로 반영/.test(doc));
+
+/* ── '자동'이라 약속한 칸이 실제로 프리필되는가 ── */
+ok('공고 제목 = 상품명 우선, 없으면 작업명',
+  /_pi\.name \|\| o\.title/.test(app) && /상품명<\/b> 우선, 없으면 <code>작업명/.test(doc));
+ok('구매시간대 → 시간창 분해',
+  /_parsePurchaseTime\(prefill\.purchase_time/.test(rec) && /시작\/종료로 분해/.test(doc));
+ok('시작일 프리필', /setV\("rf_start_date", prefill\.start_date\)/.test(rec) && /시작일<\/span>/.test(doc));
+ok('하루 진행 건수 — 텍스트형 숫자 폴백까지',
+  /daily_count_text[\s\S]{0,60}match\(\/\\d\+\//.test(app) && /숫자만 추출/.test(doc));
+ok('배송유형 매핑(실배송·빈박스→빈택배)',
+  /WO_DELIVERY_MAP = \{ '실배송':'실배송', '빈박스':'빈택배' \}/.test(app)
+  && /실배송→실배송, 빈박스→빈택배/.test(doc));
+ok('팀채팅방 URL', /chat_url:\s+o\.chat_room_url/.test(app) && /팀채팅방 URL/.test(doc));
+ok('상품 URL + 자동수집 1회',
+  /if \(prefill\.product_url\) setTimeout\(\(\) => \{ try \{ fetchProductInfo\(\{ auto: true \}\)/.test(rec)
+  && /자동수집 1회 시도/.test(doc));
+ok('진행상품 표 = 옵션배열 또는 텍스트 줄 분해',
+  /applyProductRowsFromOrder\(prefill\)/.test(rec) && /줄 단위로 자동 분해/.test(doc));
+ok('유입가이드 원본 HTML 보존', /window\._wdInflowRawHtml = prefill\.wd_inflow_html/.test(rec)
+  && /첨부 이미지까지 원본 보존/.test(doc));
+ok('리뷰 가이드는 [리뷰등록 가이드] 섹션만',
+  /_woPickSections\(o\.review_guide, \["리뷰등록 가이드"/.test(app)
+  && /\[리뷰등록 가이드\] 섹션만<\/b> 추출/.test(doc));
+ok('특이사항', /wd_notes:\s+o\.special_notes/.test(app) && /특이사항<\/span>/.test(doc));
+ok('랜딩 URL은 링크유입일 때만',
+  /landing_url:\s+o\.inflow_type === "link"/.test(app) && /링크유입일 때만<\/b>/.test(doc));
+ok('참여형 스위치는 항상 켜짐', /participation:\s+true/.test(app) && /항상 켜진 상태<\/b>로 열립니다/.test(doc));
+
+/* ── '직접 입력'이라 약속한 칸이 정말 비어 있는가(오약속 = 빈 칸 게시 사고) ── */
+ok('★ 담당자는 프리필하지 않는다', !/setV\("rf_manager"|rf_manager"\)\.value = prefill/.test(rec));
+ok('★ 구매채널은 프리필하지 않는다', !/rf_channel"\)\.value = prefill/.test(rec));
+ok('★ 리뷰비는 프리필하지 않는다(결제금액과 의미가 다름)',
+  !/rf_review_fee"\)\.value = prefill/.test(rec) && /리뷰비와 다릅니다/.test(doc));
+ok('★ 연결 탭은 프리필하지 않는다(신규 분기에 _restoreLinkedTab 없음)',
+  !/else \{[\s\S]{0,3000}_restoreLinkedTab/.test(rec.slice(rec.indexOf('titleEl.innerHTML = `<i class="fas fa-bullhorn"'))));
+ok('★ 타계정 허용은 기본 [불가]',
+  /_maEl\.checked = false; onMultiAccountToggle\(false\)/.test(rec) && /항상 <b>\[불가\]<\/b>로 시작/.test(doc));
+ok('★ 종료일은 작업오더에 없다(프리필 키 부재)',
+  !/deadline:\s+o\./.test(app) && /작업오더에 종료일 항목이 없습니다/.test(doc));
+
+/* ── 다른 경로(접수 → 탭 설정) ── */
+ok('접수가 탭 설정에 담당자·구매시간대·리뷰유형·배송유형을 채운다',
+  /manager, time_range, review_type, delivery_type, taekhap/.test(ord)
+  && /접수 시 자동 기입/.test(doc));
+ok('이미 값이 있으면 덮어쓰지 않는다(COALESCE-fill)',
+  /manager\s+= COALESCE\(NULLIF\(tab_configs\.manager,''\)/.test(ord)
+  && /이미 값이 있으면 덮어쓰지 않습니다/.test(doc));
+ok('택배대행은 신규 등록 때만', /신규 등록 때만/.test(doc) && /taekhap\(BOOLEAN\)은 빈 값 구분이 불가/.test(ord));
+ok('진행방식(현영)은 작업오더에 없다 — 탭에서 지정',
+  /진행방식\(현영 여부\)은 작업오더에 없습니다/.test(doc) && !/income_type/.test(app.slice(0, 0) + '') );
+
+/* ── 저장 후 역연결 ── */
+ok('저장 시 작업오더 ↔ 공고 양방향 링크',
+  /source_work_order_id: \(!_recruitEditId && _woPrefillOrderId\)/.test(rec)
+  && /action: "orderAdminUpdate", id: _woPrefillOrderId, linked_campaign_id: newCampId/.test(rec)
+  && /서로 기록됩니다/.test(doc));
+
+/* ── 운영 중 시트 우선 ── */
+// 문서가 "시트가 우선"이라 약속한 근거 = 상태 계산이 시트 일정을 진실원천으로 삼는 분기.
+// (일정이 없을 때만 발행폼 값 daily_limit·recruit_total·start_date로 폴백)
+ok('시트 일정이 폼 값보다 우선한다는 사실을 명시',
+  /폼에 넣은 값보다 우선<\/b> 적용/.test(doc)
+  && /시작일<\/b>·<b>마감일<\/b>|시작일 · 마감일/.test(doc));
+{
+  const st = readS('services/campaignState.service.js');
+  ok('근거: 상태 계산이 시트 일정을 진실원천으로 삼는다(없을 때만 폼 값 폴백)',
+    /시트 일정\(구매일자 컬럼 파생\)이 있으면 시작일·마감일·정원의 진실원천/.test(st)
+    && /const sd = sch \? sch\.firstDate : dateOnlyStr\(c\.start_date\)/.test(st)
+    && /const quota = sch\s*\?[\s\S]{0,140}: dailyQuota\(c, submittedBefore\)/.test(st));
+  ok('마감일 경과는 영속하지 않는다 = 시트에 날짜 추가 시 자동 재개(문서의 "자동으로 다시 열립니다")',
+    /state: 'closed', stateReason: 'schedule_ended'/.test(st)
+    && /마감된 공고도 자동으로 다시 열립니다/.test(doc));
+}
+
+console.log(`\n✅ woCampaignMapDoc: ${n}개 통과`);
