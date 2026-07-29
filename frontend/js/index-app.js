@@ -1961,7 +1961,9 @@ function _woDetailHtml(o) {
   const urlR = t => _woLinkHtml(t);                          // 단일 URL
   const guideR = t => _woGuideHtml(t);                       // 가이드(이미지 임베드)
   return [
-    _woKv("담당AE", o.created_by),
+    // 담당AE = 인트라넷 표기 실명 우선, 없으면 제출 계정. 작업담당은 매핑 닉네임을 병기(065).
+    _woKv("담당AE", o.manager_name || o.created_by),
+    _woKv("작업담당", _woManagerLabel(o.work_manager)),
     _woSection("상품·옵션", prodText, txtR),
     _woKv("모집인원", o.recruit_count ? Number(o.recruit_count).toLocaleString() + "명" : ""),
     _woKv("일일진행건수", o.daily_count_text || o.daily_count),
@@ -2228,8 +2230,56 @@ async function woTransition(id, toStatus) {
 }
 
 // 작업오더 → 모집공고 등록폼 프리필로 열기 (저장 시 자동 역연결)
-// work_order 값과 recruit 폼 옵션이 다른 항목은 일치할 때만 채움 (의미 다른 review_fee/채널/담당자는 비움)
+// work_order 값과 recruit 폼 옵션이 다른 항목은 일치할 때만 채움 (의미 다른 review_fee 는 비움)
 const WO_DELIVERY_MAP = { '실배송':'실배송', '빈박스':'빈택배' };
+
+/* ★ 구매채널 = 상품 URL의 **호스트**로 판정한다.
+   쿼리스트링까지 보면 `coupang.com/...?src=naver_ad` 같은 광고 링크를 네이버로 오판한다.
+   채널은 현금영수증 발행방법 이미지·리뷰어 안내를 가르는 값이라 오판 비용이 크다.
+   판정되지 않으면 빈 값 = 관리자가 직접 선택(틀린 값보다 빈 값). */
+const WO_CHANNEL_HOSTS = [
+  { re: /(^|\.)coupang\.com$|coupangcdn\.com$/i, val: '쿠팡' },
+  { re: /(^|\.)naver\.com$|(^|\.)naver\.me$/i,   val: '네이버' },
+  { re: /(^|\.)oliveyoung\.co\.kr$/i,            val: '올리브영' },
+];
+function _woChannelFromUrl(url) {
+  const u = String(url || '').trim();
+  if (!u) return '';
+  let host = '';
+  try { host = new URL(/^https?:\/\//i.test(u) ? u : 'https://' + u).hostname; } catch (_) { return ''; }
+  const hit = WO_CHANNEL_HOSTS.find(h => h.re.test(host));
+  return hit ? hit.val : '';
+}
+/** 작업오더에서 채널 추정 — 상품 URL 우선, 없으면 유입가이드의 첫 링크 */
+function _woChannel(o) {
+  return _woChannelFromUrl(o.product_url)
+      || _woChannelFromUrl((typeof _woGuideUrls === "function" ? _woGuideUrls(o.inflow_guide)[0] : "") || "");
+}
+
+/* ★ 작업담당(인트라넷 실명) → 리뷰웹 담당자 닉네임. 서버 utils/workManager.js 와 같은 규칙.
+   랜덤·미매핑은 빈 값 = 관리자가 직접 결정(아무나 자동 배정 금지). */
+const WO_MANAGER_MAP = { '박세희': '만두', '박은비': '망고' };
+const WO_MANAGER_UNDECIDED = ['랜덤', '랜덤배정', '미정'];
+function _woNormName(v) { return String(v || "").replace(/\s+/g, "").replace(/[()（）[\]]/g, ""); }
+function _woManagerNick(raw) {
+  const v = _woNormName(raw);
+  if (!v) return "";
+  for (const [name, nick] of Object.entries(WO_MANAGER_MAP)) if (v.includes(name)) return nick;
+  for (const nick of Object.values(WO_MANAGER_MAP)) if (v.includes(nick)) return nick;
+  return "";
+}
+function _woManagerUndecided(raw) {
+  const v = _woNormName(raw);
+  return !!v && WO_MANAGER_UNDECIDED.some(u => v.includes(u));
+}
+/** 표시용: '박세희 (만두)' · '랜덤 (직접결정)' */
+function _woManagerLabel(raw) {
+  const v = String(raw || "").trim();
+  if (!v) return "";
+  if (_woManagerUndecided(v)) return v + " (직접결정)";
+  const nick = _woManagerNick(v);
+  return nick ? v + " (" + nick + ")" : v;
+}
 async function woCreateCampaign(id) {
   const o = (_woCache || []).find(x => x.id === id);
   if (!o) { showToast("오더 정보를 찾을 수 없습니다. 새로고침 후 다시 시도하세요.", "error"); return; }
@@ -2276,6 +2326,14 @@ async function woCreateCampaign(id) {
                       : "",
     // 🧩 상품 옵션 프리필(061): product_options_json → 옵션표(2개 이상일 때만). 정원·하루는 관리자가 입력.
     options:        (typeof _woOptionRows === "function") ? _woOptionRows(o) : [],
+    // ★ 065: 구매채널 = 상품 URL 호스트 판정 / 담당자 = 작업담당 매핑(랜덤이면 빈 값=직접결정)
+    channel:        _woChannel(o),
+    manager:        _woManagerNick(o.work_manager),
+    // ★ 접수 시 확정된 연결 탭 — work_sheet_url 은 제출 필수라 접수된 오더는 항상 값이 있다.
+    //   탭이 리네임됐을 수 있으므로 gid 도 함께 넘겨 프론트가 gid 우선으로 재매칭한다.
+    linked_sheet_id: o.linked_tab_sheet_id || "",
+    linked_tab_name: o.linked_tab_name || "",
+    linked_tab_gid:  o.linked_tab_gid || "",
   };
   switchAdminTab("recruit");
   // recruit 탭의 연결 탭 옵션 로드를 보장한 뒤 모달 오픈 (setTimeout race 제거)

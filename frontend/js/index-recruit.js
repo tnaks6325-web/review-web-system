@@ -410,6 +410,36 @@ function onLinkedTabChange(sel) {
   refreshRecruitCashReceipt();   // 탭이 바뀌면 현금영수증 발행 여부 재판정(읽기 전용 표시)
 }
 
+/* 채널·담당자 버튼을 값으로 선택 — selectRfBtn(사용자 클릭)과 같은 결과를 만든다.
+   버튼이 없는 값(예: 올리브영이 없는 구버전 화면)은 '직접입력'으로 흡수해 값을 잃지 않는다. */
+function _rfPickBtn(group, val) {
+  const hidden = document.getElementById(group === "channel" ? "rf_channel" : "rf_manager");
+  const btn = document.querySelector(`#rf_${group}_btns .rchan-btn[data-val="${val}"]`);
+  if (btn) { selectRfBtn(group, btn); return true; }
+  if (group !== "channel" || !hidden) return false;
+  const custom = document.querySelector(`#rf_channel_btns .rchan-btn[data-val="직접입력"]`);
+  if (!custom) return false;
+  selectRfBtn("channel", custom);
+  const ci = document.getElementById("rf_channel_custom");
+  if (ci) ci.value = val;
+  return true;
+}
+
+/* 작업오더가 넘겨준 연결 탭을 드롭다운에서 고른다.
+   ★ gid 우선 — 탭 이름은 운영 중 바뀌지만 gid 는 그대로다(이름만 보면 리네임된 탭을 못 찾는다). */
+function _prefillLinkedTab(prefill) {
+  const sid = prefill.linked_sheet_id || "";
+  if (!sid) return false;
+  const gid = String(prefill.linked_tab_gid || "");
+  const byGid = gid && _recruitTabList.find(t => t.sheetId === sid && String(t.tabGid || "") === gid);
+  const tabName = (byGid && byGid.tabName) || prefill.linked_tab_name || "";
+  if (!tabName) return false;
+  // 목록에 없는 탭(아카이브·미등록)이면 선택하지 않는다 — 잘못된 탭이 걸리는 것보다 낫다
+  if (!_recruitTabList.some(t => t.sheetId === sid && t.tabName === tabName)) return false;
+  _restoreLinkedTab(sid, tabName);
+  return true;
+}
+
 /* 수정 모달 열 때: 저장된 연결 탭 복원 */
 function _restoreLinkedTab(linkedSheetId, linkedTabName) {
   if (!linkedSheetId || !linkedTabName) return;
@@ -1067,6 +1097,15 @@ async function openRecruitModal(id, prefill, woOrderId) {
       if (prefill.notes)        document.getElementById("rf_notes").value = prefill.notes;
       if (prefill.delivery_type) document.getElementById("rf_delivery_type").value = prefill.delivery_type;
       if (prefill.product_url)  document.getElementById("rf_product_url").value = prefill.product_url;
+
+      /* ★ 065: 구매채널(상품 URL 호스트 판정) · 담당자(작업담당 매핑) 자동 선택.
+         값이 없으면(판정 불가·랜덤) 아무것도 건드리지 않아 기존처럼 빈 상태로 남는다. */
+      if (prefill.channel) _rfPickBtn("channel", prefill.channel);
+      if (prefill.manager) _rfPickBtn("manager", prefill.manager);
+
+      /* ★ 065: 연결 탭 자동 선택 — 접수 시 확정된 탭(work_sheet_url 은 제출 필수).
+         탭 리네임 대비로 gid 우선 재매칭 후 이름 폴백. 미접수 오더는 값이 없어 그대로 수동. */
+      _prefillLinkedTab(prefill);
 
       /* ★ 상품정보 기본값 = 작업오더 입력값(상품명·결제금액) — 자동수집(fetchProductInfo) 성공 항목만 이후 덮어씀 */
       if (prefill.product_name || prefill.price) {
