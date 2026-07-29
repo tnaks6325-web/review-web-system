@@ -275,14 +275,14 @@
   table.lgtable tbody tr:hover td{background:#f7faff}
   /* 폭: 짧은 항목은 고정·안 줄바꿈, 긴 설명(오류내용·조치안내)만 줄바꿈해 늘어남 */
   .lgtable .c-sev{width:64px;white-space:nowrap} .lgtable .c-ts{width:118px;white-space:nowrap;color:var(--muted);font-variant-numeric:tabular-nums}
-  .lgtable .c-tab{width:210px;max-width:210px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-weight:650}
+  .lgtable .c-tab{width:240px;max-width:240px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-weight:650}
   .lgtable .c-nm{width:70px;white-space:nowrap} .lgtable .c-ph{width:114px;white-space:nowrap;font-variant-numeric:tabular-nums}
   .lgtable .c-prob{min-width:240px;word-break:break-word}
   .lgtable .c-act{min-width:240px;word-break:break-word;color:var(--muted)}
   .lgtable .c-btn{width:1%;white-space:nowrap}
-  .lgtable .lgbtns{display:flex;gap:5px;justify-content:flex-end}
+  .lgtable .lgbtns{display:flex;gap:5px;justify-content:flex-start}
   .lgtable .lgby{font-size:10px;color:var(--faint);margin-top:3px;white-space:nowrap}
-  .lgtable tr.lgcrit td:first-child{box-shadow:inset 3px 0 0 var(--bad)}   /* 중요 = 왼쪽 빨간 띠 */
+  .lgtable tr.lgcrit td:first-child{box-shadow:inset 3px 0 0 var(--bad)}   /* 중요 = 왼쪽 빨간 띠(맨 앞=조치 칸) */
   .lgtable tr.lgdone td{opacity:.55}
   table.histtable{width:100%;border-collapse:collapse;font-size:12px} table.histtable th{text-align:left;padding:7px 9px;font-size:10.5px;color:var(--muted);font-weight:750;border-bottom:1px solid var(--line);position:sticky;top:0;background:var(--card)}
   table.histtable td{padding:6px 9px;border-bottom:1px solid var(--line)} table.histtable tr.histrev td{color:var(--faint);text-decoration:line-through} table.histtable tr.histrev .hval{text-decoration:none}
@@ -1708,6 +1708,7 @@ function _renderLogsHead(){
     <label style="font-size:12px;color:var(--muted);display:flex;align-items:center;gap:4px;cursor:pointer">
       <input type="checkbox" ${STATE.logAll?'checked':''} onchange="STATE.logAll=this.checked;_loadLogs()"> 해결된 로그 포함</label>
     <button class="btn" onclick="_loadLogs()">새로고침</button>
+    ${_canResolveLog()?`<button class="btn" id="ncBtn" onclick="_auditNoCapture()" title="'구매캡쳐 미첨부'로 잡힌 건을 Drive 구매캡처 폴더와 대조해, 실제로 첨부했는데 연결만 실패한 오탐인지 가려냅니다(읽기 전용)">캡처 미첨부 정밀확인</button>`:''}
     <input id="lgq" class="ovsearch" placeholder="캠페인/리뷰어/내용 검색" oninput="STATE.logq=this.value;_renderLogsBody(this.value)" value="${esc(STATE.logq||'')}"></div>
     <div class="ovnote">구매양식 <b>시트 소실(유령 written)</b>·<b>미반영 적체</b>·<b>구매캡쳐 미첨부</b> 등을 시스템이 자동 감지해 캠페인별 한글 문장으로 기록합니다. 소실 건은 자동 재기록되며(하단 행 비고 'system'), 반복 소실·수동 필요 건은 🔴 중요로 표시됩니다.</div>`;
 }
@@ -1728,9 +1729,9 @@ function _renderLogsBody(q){
   //   모르는 유형이면 message 원문을 오류내용 칸에 그대로 넣어 화면이 비지 않게 한다.
   $('#lgbody').innerHTML = `<div class="lgwrap"><table class="lgtable">
     <thead><tr>
-      <th class="c-sev">상태</th><th class="c-ts">발생시점</th><th class="c-tab">작업명</th>
+      <th class="c-btn">조치</th><th class="c-sev">상태</th><th class="c-ts">발생시점</th><th class="c-tab">작업명</th>
       <th class="c-nm">이름</th><th class="c-ph">전화번호</th>
-      <th class="c-prob">오류내용</th><th class="c-act">조치안내</th><th class="c-btn"></th>
+      <th class="c-prob">오류내용</th><th class="c-act">조치안내</th>
     </tr></thead><tbody>`+items.map(l=>{
     const t=l.occurredAt?new Date(l.occurredAt):null;
     const ts=t?`${t.getFullYear()}-${String(t.getMonth()+1).padStart(2,'0')}-${String(t.getDate()).padStart(2,'0')} ${String(t.getHours()).padStart(2,'0')}:${String(t.getMinutes()).padStart(2,'0')}`:'';
@@ -1738,6 +1739,12 @@ function _renderLogsBody(q){
     const problem=l.problem||l.message||'';   // 미지 유형 폴백
     const ph=_fmtPhone(l.phone8||'');
     return `<tr class="${resolved?'lgdone':''}${l.severity==='critical'&&!resolved?' lgcrit':''}">
+      <td class="c-btn"><div class="lgbtns">
+        ${(l.sheetId&&l.tabName)?`<button class="btn xs" title="이 리뷰어의 행이 있는 작업대를 새 탭으로 엽니다" onclick="_logOpenWorkdesk(${l.id})">작업대 ↗</button>`:''}
+        ${(resolved||!_canResolveLog())?'':
+          (_LOG_CANCELABLE.has(l.eventType)?`<button class="btn xs" style="border-color:#FCA5A5;color:#B91C1C" onclick="_cancelLogOrder(${l.id})" title="시트에서 지운 것이 '주문취소'였다면 여기를 누르세요 — 다시 기록되지 않습니다">취소</button>`:'')
+          +`<button class="btn xs" onclick="_resolveLog(${l.id})">확인</button>`}
+      </div></td>
       <td class="c-sev">${sevBadge(l.severity)}${resolved?`<div class="lgby" title="확인: ${esc(l.resolvedBy||'')}">✔ 확인됨</div>`:''}</td>
       <td class="c-ts">${esc(ts)}</td>
       <td class="c-tab" title="${esc(l.campaignName||l.tabName||'')}">${esc(l.campaignName||l.tabName||'')}</td>
@@ -1745,12 +1752,6 @@ function _renderLogsBody(q){
       <td class="c-ph">${esc(ph)}</td>
       <td class="c-prob">${esc(problem)}</td>
       <td class="c-act">${esc(l.action||'')}</td>
-      <td class="c-btn"><div class="lgbtns">
-        ${(l.sheetId&&l.tabName)?`<button class="btn xs" title="이 리뷰어의 행이 있는 작업대를 새 탭으로 엽니다" onclick="_logOpenWorkdesk(${l.id})">작업대 ↗</button>`:''}
-        ${(resolved||!_canResolveLog())?'':
-          (_LOG_CANCELABLE.has(l.eventType)?`<button class="btn xs" style="border-color:#FCA5A5;color:#B91C1C" onclick="_cancelLogOrder(${l.id})" title="시트에서 지운 것이 '주문취소'였다면 여기를 누르세요 — 다시 기록되지 않습니다">취소</button>`:'')
-          +`<button class="btn xs" onclick="_resolveLog(${l.id})">확인</button>`}
-      </div></td>
     </tr>`;
   }).join('')+`</tbody></table></div>`;
 }
@@ -1765,6 +1766,41 @@ function _logOpenWorkdesk(id){
   let url=location.origin+location.pathname+'#go='+encodeURIComponent(JSON.stringify(payload));
   const tk=token(); if(tk) url+='&sso='+encodeURIComponent(tk);
   window.open(url,'_blank','noopener');   // noopener = 새 탭이 이 창을 조작하지 못하게
+}
+// '구매캡쳐 미첨부' 정밀확인 — DB의 미연결 표시만으로는 "안 올림"과 "올렸는데 연결 실패"를 구분할 수 없어
+//   Drive [구매캡처] 폴더 실물과 대조한다(읽기 전용). 결과는 모달로.
+async function _auditNoCapture(){
+  const b=$('#ncBtn'); if(b){ b.disabled=true; b.textContent='대조 중…'; }
+  try{
+    const r=await api('/api/diag/no-capture-audit?days=3&limit=300');
+    if(!r||!r.ok){ alert('정밀확인 실패: '+((r&&r.error)||'조회 오류')); return; }
+    const s=r.summary||{}, hi=s.attachedHigh|0, all=s.attachedButUnlinked|0, no=s.notAttached|0, unk=s.unknown|0;
+    const rows=(r.items||[]).filter(x=>x.verdict==='attachedButUnlinked').slice(0,50).map(x=>
+      `<tr><td>${esc(x.tabName||'')}</td><td>${esc(x.recipient||x.orderer||'')}</td>
+        <td>${esc(String(x.submittedAt||'').replace('T',' ').slice(0,16))}</td>
+        <td>${esc(x.file||'')}</td>
+        <td>${x.confidence==='high'?'<span class="bd no">오탐 확실</span>':'<span class="bd">이름만 일치</span>'}</td></tr>`).join('');
+    let ov=document.getElementById('ncov');
+    if(!ov){ ov=document.createElement('div'); ov.id='ncov'; ov.className='modalov';
+      ov.addEventListener('click',e=>{ if(e.target===ov) ov.remove(); }); document.body.appendChild(ov); }
+    ov.innerHTML=`<div class="modalbox" style="width:860px"><div class="modalhd">
+        <b>구매캡쳐 미첨부 정밀확인 (최근 ${r.days}일 · ${r.scanned}건 대조)</b>
+        <button class="btn xs" onclick="document.getElementById('ncov').remove()">닫기</button></div>
+      <div class="modalbd">
+        <div class="counts" style="margin-bottom:12px">
+          <div class="cc"><div><div class="big" style="color:var(--bad)">${hi}</div><div class="lb">오탐 확실 · 첨부했는데 연결 실패</div></div></div>
+          <div class="cc"><div><div class="big">${all-hi}</div><div class="lb">이름만 일치 · 추가 확인</div></div></div>
+          <div class="cc"><div><div class="big">${no}</div><div class="lb">진짜 미첨부</div></div></div>
+          <div class="cc"><div><div class="big">${unk}</div><div class="lb">판정 보류 · 폴더 미연결</div></div></div>
+        </div>
+        <div class="ovnote">Drive [구매캡처] 폴더에 <b>해당 리뷰어 이름의 이미지가 실제로 있는데</b> 주문에는 미첨부로 기록된 건이 '오탐 확실'입니다.
+          원인은 제출 직후 백그라운드 업로드가 실패·중단돼도 화면엔 성공으로 보이고 재시도가 없기 때문입니다.
+          ${r.tabsSkipped?`<br>※ 탭이 많아 ${r.tabsSkipped}개 탭은 이번 대조에서 제외됐습니다(maxTabs).`:''}</div>
+        ${rows?`<table class="histtable" style="margin-top:10px"><thead><tr><th>작업명</th><th>이름</th><th>제출시각</th><th>Drive 파일</th><th>판정</th></tr></thead><tbody>${rows}</tbody></table>`
+              :`<div class="empty">첨부됐는데 연결만 실패한 건은 없습니다.</div>`}
+      </div></div>`;
+  }catch(e){ alert('정밀확인 실패: '+e.message); }
+  finally{ if(b){ b.disabled=false; b.textContent='캡처 미첨부 정밀확인'; } }
 }
 // 확인(해결)은 전역 상태 변경이라 admin/master 전용(서버도 adminOrMaster로 강제) — staff는 열람만.
 function _canResolveLog(){ return STATE.role==='master' || STATE.role==='admin'; }

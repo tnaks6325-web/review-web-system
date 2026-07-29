@@ -4943,4 +4943,107 @@ router.get('/unpaid-rows', authMiddleware, async (req, res, next) => {
   }
 });
 
+// ═══════════════════════════════════════════════════════════
+// GET /api/diag/no-capture-audit?days=3&limit=200 — "구매캡쳐 미첨부" 판정 실측 검증 (admin/master)
+//
+// 배경: order_no_capture 판정의 근거는 `order_submissions.capture_uploaded_at IS NULL` 하나뿐이고,
+//   이 값을 채우는 유일한 경로가 제출 직후의 **fire-and-forget 비동기 업로드**(search-app.js)다.
+//   그 업로드가 실패하거나(네트워크·타임아웃·Drive 오류 — catch에서 console.warn만 하고 삼킨다)
+//   완료 전에 리뷰어가 창을 닫으면, **실제로는 첨부했는데 미첨부로 기록된다**.
+//   DB만 봐서는 "안 올림"과 "올렸는데 연결 실패"를 구분할 수 없다 → Drive 실물과 대조해야 한다.
+//
+// 판정: 그 탭의 [구매캡처] 폴더(회차 하위폴더 포함)를 훑어 파일명(수취인[_주문자])이 일치하는 파일을 찾는다.
+//   - attachedButUnlinked : 제출 시각 근처에 파일이 실제로 있음 → **오탐**(리뷰어는 첨부했음)
+//   - notAttached         : 파일 없음 → 진짜 미첨부
+//   - unknown             : 폴더 미연결·조회 실패 → 판정 보류(오판 금지)
+// 읽기 전용(DB·Drive 쓰기 0). Drive는 탭당 1회 재귀 조회(drive lane).
+// ═══════════════════════════════════════════════════════════
+router.get('/no-capture-audit', authMiddleware, adminOrMasterMiddleware, async (req, res, next) => {
+  try {
+    const days = Math.min(Math.max(parseInt(req.query.days, 10) || 3, 1), 30);
+    const limit = Math.min(Math.max(parseInt(req.query.limit, 10) || 200, 1), 1000);
+    const maxTabs = Math.min(Math.max(parseInt(req.query.maxTabs, 10) || 20, 1), 60);
+    const norm = (s) => String(s == null ? '' : s).replace(/\s+/g, '').toLowerCase();
+
+    // 감지기와 같은 기준(capture_uploaded_at IS NULL · 제출 20분 경과) + 현재 열린 알림 여부
+    const { rows: orders } = await pool.query(
+      `SELECT os.id, os.sheet_id AS "sheetId", os.tab_name AS "tabName",
+              os.recipient, os.orderer, os.submitted_at AS "submittedAt",
+              EXISTS(SELECT 1 FROM reviewer_event_logs l
+                      WHERE l.order_submission_id = os.id
+                        AND l.event_type = 'order_no_capture' AND l.resolved_at IS NULL) AS "hasOpenLog"
+         FROM order_submissions os
+        WHERE os.deleted_at IS NULL AND os.capture_uploaded_at IS NULL
+          AND os.submitted_at < NOW() - interval '20 minutes'
+          AND os.submitted_at > NOW() - ($1 || ' days')::interval
+        ORDER BY os.submitted_at DESC
+        LIMIT $2`,
+      [String(days), limit]
+    );
+    if (!orders.length) return res.json({ ok: true, days, scanned: 0, summary: {}, items: [] });
+
+    // 탭 단위로 묶어 Drive 조회 횟수를 최소화
+    const byTab = new Map();
+    for (const o of orders) {
+      const k = `${o.sheetId}\t${o.tabName}`;
+      if (!byTab.has(k)) byTab.set(k, []);
+      byTab.get(k).push(o);
+    }
+    const tabKeys = [...byTab.keys()].slice(0, maxTabs);
+    const tabsSkipped = byTab.size - tabKeys.length;
+
+    const items = [];
+    for (const k of tabKeys) {
+      const [sheetId, tabName] = k.split('\t');
+      const group = byTab.get(k);
+      let files = null, folderErr = '';
+      try {
+        const { rows: cfg } = await pool.query(
+          'SELECT capture_folder_url FROM tab_configs WHERE sheet_id = $1 AND tab_name = $2 LIMIT 1',
+          [sheetId, tabName]
+        );
+        const url = cfg[0] && cfg[0].capture_folder_url;
+        const folderId = url ? driveService.extractFolderIdFromUrl(url) : null;
+        if (!folderId) folderErr = 'no_capture_folder';
+        else files = await driveService.listFolderFilesRecursive(folderId);   // 회차 하위폴더 포함
+      } catch (e) { folderErr = e.message || 'drive_error'; }
+
+      // 파일명 → 정규화 인덱스(확장자 제거, '_' 앞 토큰 = 수취인, 공백 제거)
+      const idx = [];
+      for (const f of (files || [])) {
+        if (f.mimeType && String(f.mimeType).indexOf('image/') !== 0) continue;
+        const base = String(f.name || '').replace(/\.[^.]+$/, '');
+        idx.push({ full: norm(base), head: norm(base.split('_')[0]), createdTime: f.createdTime, name: f.name });
+      }
+
+      for (const o of group) {
+        if (!files) { items.push({ ...o, verdict: 'unknown', reason: folderErr }); continue; }
+        const rc = norm(o.recipient), od = norm(o.orderer);
+        const cands = idx.filter(f => (rc && (f.head === rc || f.full === rc))
+                                   || (od && (f.head === od || f.full === od)));
+        if (!cands.length) { items.push({ ...o, verdict: 'notAttached' }); continue; }
+        // 시각 창: 캡처는 제출 직전/직후에 올라간다. 동명이인·재제출 오매칭을 줄이려 창 밖이면 약한 신호로 표기.
+        const t0 = new Date(o.submittedAt).getTime() - 30 * 60 * 1000;
+        const t1 = new Date(o.submittedAt).getTime() + 6 * 60 * 60 * 1000;
+        const inWin = cands.find(f => { const c = Date.parse(f.createdTime); return c >= t0 && c <= t1; });
+        items.push({
+          ...o,
+          verdict: 'attachedButUnlinked',
+          confidence: inWin ? 'high' : 'low',      // low = 이름은 같은데 시각이 멀다(과거 회차 파일일 수 있음)
+          file: (inWin || cands[0]).name,
+          fileCreatedTime: (inWin || cands[0]).createdTime,
+        });
+      }
+    }
+
+    const summary = items.reduce((a, x) => {
+      a[x.verdict] = (a[x.verdict] || 0) + 1;
+      if (x.verdict === 'attachedButUnlinked' && x.confidence === 'high') a.attachedHigh = (a.attachedHigh || 0) + 1;
+      if (x.hasOpenLog) a.openLogs = (a.openLogs || 0) + 1;
+      return a;
+    }, {});
+    res.json({ ok: true, days, scanned: items.length, tabs: tabKeys.length, tabsSkipped, summary, items });
+  } catch (err) { next(err); }
+});
+
 module.exports = router;

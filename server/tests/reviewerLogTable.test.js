@@ -137,4 +137,49 @@ t('17. 조치 버튼(작업대 열기·취소·확인)이 표에서도 유지된
   assert.ok(/_canResolveLog\(\)/.test(lgBody), '확인/취소 권한 게이트 유실(staff가 타 담당 알림을 지움)');
 });
 
+// ── 4) 컬럼 순서·폭 + 캡처 미첨부 정밀확인 ────────────────────
+t('18. 조치 버튼이 가장 왼쪽 컬럼이다', () => {
+  const heads = [...lgBody.matchAll(/<th class="c-([a-z]+)"/g)].map(m => m[1]);
+  assert.strictEqual(heads[0], 'btn', '헤더 첫 칸이 조치가 아님: ' + heads.join(','));
+  const cells = [...lgBody.matchAll(/<td class="c-([a-z]+)"/g)].map(m => m[1]);
+  assert.strictEqual(cells[0], 'btn', '본문 첫 칸이 조치가 아님: ' + cells.join(','));
+  // 헤더와 본문 칸 순서가 어긋나면 값이 다른 컬럼에 들어간다
+  assert.deepStrictEqual(cells.slice(0, heads.length), heads, '헤더와 본문 컬럼 순서 불일치');
+});
+
+t('19. 작업명 컬럼 폭 240px(기존 210 + 30)', () => {
+  const m = HTML.match(/\.lgtable \.c-tab\{width:(\d+)px;max-width:(\d+)px/);
+  assert.ok(m, 'c-tab 폭 규칙을 찾지 못함');
+  assert.strictEqual(m[1], '240');
+  assert.strictEqual(m[2], m[1], 'width와 max-width가 다르면 표가 흔들린다');
+});
+
+t('20. 캡처 미첨부 정밀확인: 버튼·핸들러가 있고 admin/master 에게만 노출', () => {
+  assert.ok(/_auditNoCapture\(\)/.test(script), '정밀확인 핸들러 없음');
+  assert.ok(/no-capture-audit/.test(script), '감사 엔드포인트 호출 없음');
+  const btn = script.slice(script.indexOf('id="ncBtn"') - 200, script.indexOf('id="ncBtn"') + 60);
+  assert.ok(/_canResolveLog\(\)\?/.test(btn), '권한 게이트 없이 노출됨(staff에게 전역 감사 노출)');
+});
+
+t('21. 감사 엔드포인트는 admin/master 전용 · 읽기 전용(DB/Drive 쓰기 없음)', () => {
+  const diag = fs.readFileSync(path.join(__dirname, '../src/routes/diag.routes.js'), 'utf8');
+  const i = diag.indexOf("router.get('/no-capture-audit'");
+  assert.ok(i > 0, '엔드포인트 없음');
+  const body = diag.slice(i, diag.indexOf('module.exports', i));
+  assert.ok(/authMiddleware, adminOrMasterMiddleware/.test(body.slice(0, 200)), '권한 미들웨어 누락');
+  assert.ok(!/\b(UPDATE|INSERT|DELETE)\b/i.test(body), '감사인데 쓰기 쿼리가 있음');
+  assert.ok(/listFolderFilesRecursive/.test(body), 'Drive 실물 대조를 안 함 → DB만 봐선 오탐을 못 가림');
+  assert.ok(/attachedButUnlinked/.test(body) && /notAttached/.test(body) && /unknown/.test(body),
+    '판정 3분류(오탐/진짜 미첨부/보류)가 없음');
+});
+
+t('22. 구매캡쳐 업로드가 재시도 + 실패 시 리뷰어에게 고지(오탐 근본원인)', () => {
+  const sa = fs.readFileSync(path.join(__dirname, '../../frontend/js/search-app.js'), 'utf8');
+  const i = sa.indexOf('uploadOrderImage');
+  const blk = sa.slice(i - 600, i + 2200);
+  assert.ok(/attempt < 3|attempt \+\+|for \(let attempt/.test(blk), '업로드 재시도 없음 — 1회 실패로 미첨부 오탐');
+  assert.ok(/showToast\(/.test(blk), '최종 실패를 리뷰어에게 안 알리면 첨부했다고 믿고 창을 닫는다');
+  assert.ok(/orderSubmissionId/.test(blk), '주문 연결 키 누락 → 폴백 매칭에만 의존');
+});
+
 console.log('\n' + pass + ' runtime checks passed');
