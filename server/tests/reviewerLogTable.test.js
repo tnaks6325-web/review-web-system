@@ -182,4 +182,23 @@ t('22. 구매캡쳐 업로드가 재시도 + 실패 시 리뷰어에게 고지(�
   assert.ok(/orderSubmissionId/.test(blk), '주문 연결 키 누락 → 폴백 매칭에만 의존');
 });
 
+t('23. 감사 결과를 컷오프 기준으로 분리한다(과거 미링크를 오탐으로 오해하지 않게)', () => {
+  const diag = fs.readFileSync(path.join(__dirname, '../src/routes/diag.routes.js'), 'utf8');
+  const i = diag.indexOf("router.get('/no-capture-audit'");
+  const body = diag.slice(i, diag.indexOf('module.exports', i));
+  assert.ok(/reviewer_log_capture_cutoff/.test(body), '컷오프를 읽지 않으면 배포 이전 주문까지 오탐으로 잡힌다');
+  assert.ok(/preCutoff/.test(body), '주문별 구간 표시 없음');
+  assert.ok(/current:/.test(body) && /legacy:/.test(body), '구간별 집계(current/legacy) 없음');
+  // 컷오프 조회 실패가 감사 전체를 죽이면 안 됨(fail-soft)
+  assert.ok(/catch \(_\) \{ \/\* 컷오프/.test(body), '컷오프 조회 실패 시 fail-soft 아님');
+});
+
+t('24. 정밀확인 화면은 current 기준으로 집계하고 legacy 를 따로 고지한다', () => {
+  const i = script.indexOf('function _auditNoCapture');
+  const fn = script.slice(i, script.indexOf('function _canResolveLog', i));
+  assert.ok(/r\.current/.test(fn), '화면이 전체 합산을 쓰면 과거 데이터가 오탐으로 보인다');
+  assert.ok(/preCutoff/.test(fn), '목록에서 배포 이전 건을 걸러내지 않음');
+  assert.ok(/legacy/.test(fn), 'legacy 건수 고지 없음');
+});
+
 console.log('\n' + pass + ' runtime checks passed');

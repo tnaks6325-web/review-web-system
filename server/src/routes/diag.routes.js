@@ -4966,9 +4966,21 @@ router.get('/no-capture-audit', authMiddleware, adminOrMasterMiddleware, async (
     const norm = (s) => String(s == null ? '' : s).replace(/\s+/g, '').toLowerCase();
 
     // 감지기와 같은 기준(capture_uploaded_at IS NULL · 제출 20분 경과) + 현재 열린 알림 여부
+    // ★ 컷오프 = 캡처↔주문 연결 기능이 배포된 시각(app_settings.reviewer_log_capture_cutoff).
+    //   그 이전 주문은 capture_uploaded_at 을 채우는 코드 자체가 없었으므로 링크가 비어 있는 게 정상이고,
+    //   감지기(detectMissingCaptures)도 컷오프로 이들을 제외한다 — 즉 알림이 나간 적이 없다.
+    //   구분하지 않고 합산하면 "오탐 수백 건"으로 보이지만 대부분 과거 데이터라 조치 대상이 아니다.
+    let cutoff = null;
+    try {
+      const { rows: cf } = await pool.query(
+        `SELECT value FROM app_settings WHERE key = 'reviewer_log_capture_cutoff'`);
+      cutoff = (cf[0] && cf[0].value) || null;
+    } catch (_) { /* 컷오프를 못 읽으면 구분 없이 보고(판정은 그대로 유효) */ }
+
     const { rows: orders } = await pool.query(
       `SELECT os.id, os.sheet_id AS "sheetId", os.tab_name AS "tabName",
               os.recipient, os.orderer, os.submitted_at AS "submittedAt",
+              ($3::timestamptz IS NOT NULL AND os.submitted_at <= $3::timestamptz) AS "preCutoff",
               EXISTS(SELECT 1 FROM reviewer_event_logs l
                       WHERE l.order_submission_id = os.id
                         AND l.event_type = 'order_no_capture' AND l.resolved_at IS NULL) AS "hasOpenLog"
@@ -4978,7 +4990,7 @@ router.get('/no-capture-audit', authMiddleware, adminOrMasterMiddleware, async (
           AND os.submitted_at > NOW() - ($1 || ' days')::interval
         ORDER BY os.submitted_at DESC
         LIMIT $2`,
-      [String(days), limit]
+      [String(days), limit, cutoff]
     );
     if (!orders.length) return res.json({ ok: true, days, scanned: 0, summary: {}, items: [] });
 
@@ -5036,13 +5048,25 @@ router.get('/no-capture-audit', authMiddleware, adminOrMasterMiddleware, async (
       }
     }
 
-    const summary = items.reduce((a, x) => {
+    const tally = (arr) => arr.reduce((a, x) => {
       a[x.verdict] = (a[x.verdict] || 0) + 1;
       if (x.verdict === 'attachedButUnlinked' && x.confidence === 'high') a.attachedHigh = (a.attachedHigh || 0) + 1;
       if (x.hasOpenLog) a.openLogs = (a.openLogs || 0) + 1;
       return a;
     }, {});
-    res.json({ ok: true, days, scanned: items.length, tabs: tabKeys.length, tabsSkipped, summary, items });
+    const post = items.filter(x => !x.preCutoff);   // ← 판단은 이쪽만 보면 된다(실제 알림 대상)
+    const pre = items.filter(x => x.preCutoff);
+    res.json({
+      ok: true, days, scanned: items.length, tabs: tabKeys.length, tabsSkipped,
+      cutoff,
+      summary: tally(items),                        // 전체(하위호환)
+      current: tally(post),                         // 연결기능 배포 이후 = 지금도 유효한 신호
+      legacy: tally(pre),                           // 배포 이전 = 링크 코드가 없던 시절, 알림 안 나감
+      note: cutoff
+        ? '판단은 current 기준. legacy 는 캡처↔주문 연결 배포 이전 주문이라 미링크가 정상이며 알림 대상이 아님.'
+        : '컷오프를 읽지 못해 구간 구분 없음(summary 만 유효).',
+      items,
+    });
   } catch (err) { next(err); }
 });
 
