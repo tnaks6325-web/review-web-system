@@ -117,7 +117,8 @@ ok('시트 일정이 폼 값보다 우선한다는 사실을 명시',
   ok('근거: 상태 계산이 시트 일정을 진실원천으로 삼는다(없을 때만 폼 값 폴백)',
     /시트 일정\(구매일자 컬럼 파생\)이 있으면 시작일·마감일·정원의 진실원천/.test(st)
     && /const sd = sch \? sch\.firstDate : dateOnlyStr\(c\.start_date\)/.test(st)
-    && /const quota = sch\s*\?[\s\S]{0,140}: dailyQuota\(c, submittedBefore\)/.test(st));
+    // 시트 일정이 있으면 그쪽, 없으면 daily_limit 경로(066 이월 포함)
+    && /const quota = sch\s*\n?\s*\?[\s\S]{0,180}: dailyQuota\(c, submittedBefore/.test(st));
   ok('마감일 경과는 영속하지 않는다 = 시트에 날짜 추가 시 자동 재개(문서의 "자동으로 다시 열립니다")',
     /state: 'closed', stateReason: 'schedule_ended'/.test(st)
     && /마감된 공고도 자동으로 다시 열립니다/.test(doc));

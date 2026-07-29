@@ -1260,6 +1260,7 @@ router.get('/admin/list', authMiddleware, adminOrMasterMiddleware, async (req, r
         ...r,
         state: st.state, stateReason: st.stateReason || null,
         todayCount: st.todayCount, dailyQuota: st.dailyQuota,
+        carryAdded: st.carryAdded || 0,   // 066: 전일 미달분 이월로 오늘 더 열린 수(관리자 표시용)
         opensAt: st.opensAt, closesAt: st.closesAt, cutoffAt: st.cutoffAt,
         allDay: st.allDay === true,
         startDate: st.startDate || null,
