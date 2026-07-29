@@ -26,10 +26,16 @@ function mkEl(id) {
 const els = {};
 const $ = sel => { const id = String(sel).replace(/^#/, ''); return els[id] || null; };
 
+const WHEEL = {};   // _bindWheelScroll 대상 스텁(핸들러를 붙잡아 직접 호출)
+function mkScroller(){
+  return { scrollLeft:0, scrollWidth:1000, clientWidth:400, _h:null,
+    addEventListener(type, fn, opt){ if(type==='wheel'){ this._h=fn; this._opt=opt; } } };
+}
 const document = {
   body: mkEl('body'),
   addEventListener(){}, querySelector(){return null;}, querySelectorAll(){return [];},
   createElement: () => mkEl('x'),
+  getElementById: id => (WHEEL[id] || els[id] || null),
 };
 const localStorage = { _m:{}, getItem(k){return this._m[k]==null?null:this._m[k];}, setItem(k,v){this._m[k]=String(v);} };
 const esc = s => String(s==null?'':s).replace(/[&<>"]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
@@ -41,7 +47,7 @@ const W_FAV = W_FAV_SRC.replace(/\\u([0-9a-fA-F]{4})/g, (_, h) => String.fromCha
 assert.ok(!/^[\w가-힣]/.test(W_FAV), 'W_FAV가 평범한 문자로 시작하면 업체명과 충돌 가능');
 
 // 검증 대상 함수만 추출(선언 그대로 평가 → 스코프·오타·미정의 참조를 실제로 잡음)
-const WANT = ['_wGroups','_wUnseen','_wActiveSeg','_renderTabList','wPickSeg','wSearch','wPickSearch','_wKbPaint','isFav','_favKey','selTab'];
+const WANT = ['_wGroups','_wUnseen','_wActiveSeg','_renderTabList','wPickSeg','wSearch','wPickSearch','_wKbPaint','isFav','_favKey','selTab','isAdvFav','_advFavKey','toggleAdvFav','_curSheetLabel','_bindWheelScroll'];
 const bodies = WANT.map(name => {
   const re = new RegExp('\\n(?:async )?function ' + name.replace(/[$]/g,'\\$') + '\\s*\\(', 'g');
   const m = re.exec(script);
@@ -67,13 +73,14 @@ const api = async () => ({ ok: true });
 const renderWorkdesk = wd => { opened.push(STATE.cur && STATE.cur.tabName); };
 const loadParity = () => {};
 const closeGColMenu = () => {}, closeGHidMenu = () => {};
+const sheetTitle = sid => (({ S1:'로스터A', S2:'로스터B', S3:'로스터C' })[sid] || sid);
 
 // eslint-disable-next-line no-new-func
 const load = new Function('STATE','$','esc','document','localStorage','refreshUnseen','_favLoad','W_FAV',
-  'api','renderWorkdesk','loadParity','closeGColMenu','closeGHidMenu',
+  'api','renderWorkdesk','loadParity','closeGColMenu','closeGHidMenu','sheetTitle','_favSaveLocal','_favPushServer',
   bodies + '\n return {' + WANT.join(',') + '};');
 const F = load(STATE, $, esc, document, localStorage, refreshUnseen, _favLoad, W_FAV,
-  api, renderWorkdesk, loadParity, closeGColMenu, closeGHidMenu);
+  api, renderWorkdesk, loadParity, closeGColMenu, closeGHidMenu, sheetTitle, ()=>{}, ()=>{});
 // wPickSearch/selTab 은 서로를 호출하므로 추출본끼리 연결(전역 선언과 동일한 관계 재현)
 const selTab = F.selTab;
 
@@ -320,13 +327,14 @@ t('25. 즐겨찾기 센티널이 "fav"라는 이름의 업체와 충돌하지 �
   assert.deepStrictEqual(idxs, [1], "즐겨찾기 세그먼트가 'fav' 업체 목록을 보여주면 안 됨");
 });
 
-t('26. 미확인 배지가 있어도 시트제목이 사라지지 않는다(동명 탭 구분자 보존)', () => {
+t('26. 2단 탭에는 시트제목을 붙이지 않는다(줄 길이 절약) — 툴팁·본문 헤더로만 확인', () => {
   reset();
   STATE.unseen = { 'S1\t탐사수 500ml 100건': 3 };
   STATE.wSeg = '우리회사';
   F._renderTabList();
   assert.ok(/💬 3/.test(els.tb2.innerHTML), '배지 누락');
-  assert.ok(/class="ts">로스터A</.test(els.tb2.innerHTML), '배지가 시트제목을 대체하면 동명 탭을 구분할 수 없음');
+  assert.ok(!/class="ts"/.test(els.tb2.innerHTML), '탭마다 시트제목이 붙으면 탭 몇 개만 보인다');
+  assert.ok(/title="탐사수 500ml 100건 · 로스터A"/.test(els.tb2.innerHTML), '툴팁에서는 확인 가능해야 함');
 });
 
 t('27. 탭 라벨 전체값이 title 툴팁으로 보존된다(축약돼도 확인 가능)', () => {
@@ -341,6 +349,147 @@ t('28. 검색 하이라이트 구간 길이는 소문자화 기준(ql)이라 대
   STATE.tabs = [{ sheetId:'X', tabName:'ABC물티슈DEF', tabGid:'1', spreadsheetTitle:'s', advertiserName:'a' }];
   F.wSearch('abc');
   assert.ok(/<mark>ABC<\/mark>/.test(els.sres.innerHTML), '매칭 구간이 어긋남: ' + els.sres.innerHTML);
+});
+
+// ── 7) 1단 업체 즐겨찾기(왼쪽 우선 정렬) ──────────────────────
+t('29. 업체 즐겨찾기: 즐겨찾기한 업체가 왼쪽 우선(미지정은 그래도 마지막)', () => {
+  reset();
+  assert.deepStrictEqual(F._wGroups().map(g => g.key), ['리뷰천국','우리회사',''], '기본은 가나다순');
+  STATE.favs = new Set([F._advFavKey('우리회사')]);
+  assert.deepStrictEqual(F._wGroups().map(g => g.key), ['우리회사','리뷰천국',''],
+    '즐겨찾기 업체가 앞으로 안 옴');
+});
+
+t('30. 업체 즐겨찾기 키는 탭 즐겨찾기 키와 겹치지 않는다(서로 오염 없음)', () => {
+  reset();
+  STATE.favs = new Set([F._advFavKey('우리회사')]);
+  assert.ok(F.isAdvFav('우리회사'));
+  assert.ok(!F.isFav(STATE.tabs[0]), '업체 즐겨찾기가 탭 즐겨찾기로 잘못 인식됨');
+  const gs = F._wGroups();
+  assert.ok(!gs.some(g => g.key === W_FAV), '업체 즐겨찾기만 했는데 ★탭 그룹이 생기면 안 됨');
+});
+
+t('31. toggleAdvFav: 토글 + 세그먼트 클릭으로 전파되지 않음(별 눌렀는데 이동 방지)', () => {
+  reset();
+  let stopped = 0;
+  const ev = { stopPropagation(){ stopped++; } };
+  const star = { closest: () => ({ dataset: { k: '우리회사' } }) };
+  F.toggleAdvFav(ev, star);
+  assert.strictEqual(stopped, 1, 'stopPropagation 누락 → 별 클릭이 세그먼트 전환을 유발');
+  assert.ok(F.isAdvFav('우리회사'), '추가 안 됨');
+  F.toggleAdvFav(ev, star);
+  assert.ok(!F.isAdvFav('우리회사'), '해제 안 됨');
+});
+
+t('32. toggleAdvFav: 미지정·즐겨찾기 그룹·엘리먼트 없음은 무시(원장 오염 방지)', () => {
+  reset();
+  const ev = { stopPropagation(){} };
+  F.toggleAdvFav(ev, { closest: () => ({ dataset: { k: '' } }) });        // 미지정
+  F.toggleAdvFav(ev, { closest: () => ({ dataset: { k: W_FAV } }) });     // ★즐겨찾기 그룹
+  F.toggleAdvFav(ev, { closest: () => null });                            // 칩 밖
+  F.toggleAdvFav(ev, null);
+  assert.strictEqual(STATE.favs.size, 0, '대상이 아닌 칩에서 즐겨찾기가 저장됨');
+});
+
+t('33. 1단 렌더: 업체 칩에만 별표(미지정·★즐겨찾기 그룹엔 없음) + 활성 표시', () => {
+  reset();
+  STATE.favs = new Set([F._advFavKey('우리회사'), F._favKey(STATE.tabs[2])]);
+  STATE.wSeg = '우리회사';
+  F._renderTabList();
+  const html = els.segwrap.innerHTML;
+  const chips = html.split('<div class="seg').slice(1);
+  const favChip = chips.find(c => c.includes('favseg'));
+  const unassigned = chips.find(c => c.includes('>미지정<'));
+  assert.ok(favChip && !favChip.includes('segstar'), '★즐겨찾기 그룹에 업체 별표가 붙음');
+  assert.ok(unassigned && !unassigned.includes('segstar'), '미지정에 업체 별표가 붙음');
+  assert.ok(/class="segstar on"/.test(html), '즐겨찾기한 업체 별표가 활성으로 안 그려짐');
+  assert.ok(/class="seg advfav/.test(html), '즐겨찾기 업체 칩 강조 클래스 누락');
+});
+
+// ── 8) 선택 작업의 소속 시트 표기 ─────────────────────────────
+t('34. _curSheetLabel: 선택 작업의 시트제목을 본문 헤더용으로 반환', () => {
+  reset();
+  STATE.cur = STATE.tabs[0];
+  const out = F._curSheetLabel();
+  assert.ok(/로스터A/.test(out), '시트제목 누락: ' + out);
+  assert.ok(/mhsheet/.test(out));
+});
+
+t('35. _curSheetLabel: 제목이 없으면 sheetMap 폴백, 그래도 모르면 표기 생략', () => {
+  reset();
+  STATE.cur = { sheetId:'S2', tabName:'물티슈 80건' };            // spreadsheetTitle 없음
+  assert.ok(/로스터B/.test(F._curSheetLabel()), 'sheetMap 폴백 실패');
+  STATE.cur = { sheetId:'UNKNOWN', tabName:'x' };                  // 제목 모름 → 시트ID뿐
+  assert.strictEqual(F._curSheetLabel(), '', '의미 없는 시트ID를 그대로 노출하면 안 됨');
+  STATE.cur = null;
+  assert.strictEqual(F._curSheetLabel(), '');
+});
+
+t('36. _curSheetLabel: 시트제목 XSS 이스케이프', () => {
+  reset();
+  STATE.cur = { sheetId:'X', tabName:'t', spreadsheetTitle:'<img src=x onerror=alert(1)>' };
+  assert.ok(!/<img/.test(F._curSheetLabel()), 'XSS 통로');
+});
+
+// ── 9) 휠 → 좌우 스크롤 ───────────────────────────────────────
+function wheelSetup(){
+  WHEEL.segwrap = mkScroller(); WHEEL.tb2 = mkScroller();
+  F._bindWheelScroll();
+  return WHEEL.segwrap;
+}
+function fire(el, patch){
+  let prevented = 0;
+  el._h(Object.assign({ deltaY:0, deltaX:0, deltaMode:0, ctrlKey:false,
+    preventDefault(){ prevented++; } }, patch));
+  return prevented;
+}
+
+t('37. 휠: 1·2단 모두에 바인딩되고 passive:false(preventDefault 가능)', () => {
+  wheelSetup();
+  assert.ok(typeof WHEEL.segwrap._h === 'function', '1단 미바인딩');
+  assert.ok(typeof WHEEL.tb2._h === 'function', '2단 미바인딩');
+  assert.strictEqual(WHEEL.segwrap._opt && WHEEL.segwrap._opt.passive, false,
+    'passive:true면 preventDefault가 무시돼 페이지가 같이 스크롤된다');
+});
+
+t('38. 휠 아래 → 오른쪽, 위 → 왼쪽 이동', () => {
+  const el = wheelSetup();
+  el.scrollLeft = 200;
+  assert.strictEqual(fire(el, { deltaY: 100 }), 1, '기본동작을 막아야 페이지가 안 밀림');
+  assert.strictEqual(el.scrollLeft, 300, '아래로 굴리면 오른쪽으로 가야 함');
+  assert.strictEqual(fire(el, { deltaY: -100 }), 1);
+  assert.strictEqual(el.scrollLeft, 200, '위로 굴리면 왼쪽으로 가야 함');
+});
+
+t('39. 휠: 양 끝에서는 가로 이동을 멈추고 페이지 스크롤에 양보(가둠 방지)', () => {
+  const el = wheelSetup();
+  el.scrollLeft = 600;                       // scrollWidth 1000 - clientWidth 400 = 최대 600
+  assert.strictEqual(fire(el, { deltaY: 100 }), 0, '오른쪽 끝인데 기본동작을 막으면 페이지가 안 내려감');
+  el.scrollLeft = 0;
+  assert.strictEqual(fire(el, { deltaY: -100 }), 0, '왼쪽 끝인데 기본동작을 막으면 페이지가 안 올라감');
+});
+
+t('40. 휠: 넘칠 게 없으면 양보 · ctrl(확대) · 트랙패드 가로 제스처는 네이티브', () => {
+  const el = wheelSetup();
+  el.scrollWidth = 400;                      // clientWidth와 같음 → 스크롤 불가
+  assert.strictEqual(fire(el, { deltaY: 100 }), 0);
+  el.scrollWidth = 1000;
+  assert.strictEqual(fire(el, { deltaY: 100, ctrlKey: true }), 0, '확대/축소를 가로채면 안 됨');
+  assert.strictEqual(fire(el, { deltaY: 10, deltaX: 100 }), 0, '트랙패드 가로 스크롤은 네이티브에 맡김');
+});
+
+t('41. 휠: 줄/페이지 단위(deltaMode)도 보정해 이동량이 0이 되지 않음', () => {
+  const el = wheelSetup();
+  el.scrollLeft = 0;
+  fire(el, { deltaY: 3, deltaMode: 1 });     // 줄 단위
+  assert.ok(el.scrollLeft > 0, 'deltaMode=1(줄)에서 안 움직임');
+});
+
+t('42. 휠: 같은 엘리먼트에 중복 바인딩하지 않는다(재렌더 시 이동량 배가 방지)', () => {
+  const el = wheelSetup();
+  const first = el._h;
+  F._bindWheelScroll();                      // 다시 호출
+  assert.strictEqual(el._h, first, '핸들러가 덧붙으면 한 번 굴릴 때 두 배로 움직인다');
 });
 
 console.log('\n' + pass + ' runtime checks passed');

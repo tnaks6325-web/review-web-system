@@ -74,6 +74,15 @@
   .seg.on .cnt{background:rgba(255,255,255,.18);color:#fff}
   .seg.favseg .fs{color:#f5b301;font-size:13px}
   .seg.favseg.on{background:#b8860b;border-color:#b8860b} .seg.favseg.on .fs{color:#fff}
+  /* 업체 즐겨찾기 별표 — 평소엔 숨고 호버/활성 시 노출(칩이 조밀해 상시 노출하면 이름이 밀림) */
+  .seg .segstar{flex:none;font-size:12px;line-height:1;color:var(--faint);cursor:pointer;user-select:none;
+    width:0;overflow:hidden;opacity:0;transition:opacity .12s,width .12s,color .12s}
+  .seg:hover .segstar{width:13px;opacity:.55} .seg .segstar:hover{opacity:1;color:var(--warn)}
+  .seg .segstar.on{width:13px;opacity:1;color:#f5b301}
+  .seg.on .segstar{color:rgba(255,255,255,.6)} .seg.on .segstar.on{color:#ffd257}
+  .seg.advfav{border-color:#f0d9a0;background:#fffdf5}
+  .seg.advfav.on{background:var(--ink);border-color:var(--ink)}
+  @media(hover:none){.seg .segstar{width:13px;opacity:.35}}   /* 터치는 hover가 없어 상시 노출 */
 
   /* 2단: 선택 그룹의 탭(밑줄 탭) */
   .tb2{display:flex;align-items:stretch;gap:2px;background:var(--card);padding:0 12px;overflow-x:auto;min-height:42px}
@@ -139,6 +148,9 @@
   .bb.bad{background:var(--bad-soft);color:var(--bad)}
   .main{padding:18px 22px;overflow:auto}
   .mh{display:flex;align-items:center;gap:10px;flex-wrap:wrap;margin-bottom:14px}
+  /* 선택한 작업의 소속 시트 — 2단 탭에서 뺀 정보를 여기서 한 번만 표기 */
+  .mhsheet{font-size:11.5px;color:var(--muted);background:var(--card2);border:1px solid var(--line);
+    border-radius:7px;padding:3px 9px;white-space:nowrap;max-width:340px;overflow:hidden;text-overflow:ellipsis}
   .mh h1{font-size:19px;margin:0;font-weight:800;letter-spacing:-.02em}
   .bd{font-size:10.5px;font-weight:700;padding:3px 9px;border-radius:6px;background:var(--card2);color:var(--muted);border:1px solid var(--line)} .bd.g{background:var(--safe-soft);color:var(--safe);border-color:transparent} .bd.sot{background:var(--accent-soft);color:var(--accent);border-color:transparent}
   .metagrid{display:grid;grid-template-columns:repeat(auto-fill,minmax(150px,1fr));gap:9px;margin-bottom:16px}
@@ -598,6 +610,28 @@ function switchView(v){ STATE.view=v; document.querySelectorAll('.navb').forEach
   if(v!=='workdesk') _measureChrome();   // 작업대를 떠나면 작업바가 사라짐 → --tbh 0으로 회수(다른 뷰 높이 계산 오염 방지)
 }
 
+// ── 상단 작업바 1·2단: 마우스 휠로 좌우 이동 ──
+//   가로 스크롤 영역이라 세로 휠은 원래 아무 일도 안 한다(트랙패드만 가로 제스처 가능) → 휠 아래=오른쪽, 위=왼쪽으로 변환.
+//   ★ 양 끝에 닿았거나 넘칠 게 없으면 preventDefault 하지 않는다 — 그래야 페이지 세로 스크롤이 이 줄에 갇히지 않는다.
+function _bindWheelScroll(){
+  ['segwrap','tb2'].forEach(id=>{
+    const el=document.getElementById(id);
+    if(!el || el._wheelBound) return;   // 컨테이너는 재렌더로 새로 생기므로 엘리먼트 자체에 표시
+    el._wheelBound=true;
+    el.addEventListener('wheel', e=>{
+      if(e.ctrlKey) return;                                   // 확대/축소 제스처는 브라우저에 양보
+      if(Math.abs(e.deltaX)>Math.abs(e.deltaY)) return;       // 트랙패드 가로 스크롤은 네이티브가 처리
+      const max=el.scrollWidth-el.clientWidth;
+      if(max<=1) return;                                      // 넘칠 게 없음 → 페이지 스크롤 양보
+      const unit=(e.deltaMode===1)?16:((e.deltaMode===2)?el.clientWidth:1);   // 줄/페이지 단위 휠 보정
+      const before=el.scrollLeft;
+      const next=Math.max(0, Math.min(max, before + e.deltaY*unit));
+      if(next===before) return;                               // 이미 끝 → 페이지 스크롤 양보(가둠 방지)
+      el.scrollLeft=next; e.preventDefault();
+    }, {passive:false});
+  });
+}
+
 // ── 헤더/작업바 높이 실측 → CSS 변수(--toph/--tbh) ──
 //   .top은 flex-wrap이라 역할·화면폭에 따라 줄바꿈되고, 작업바 높이도 세그먼트 스크롤바 유무로 달라진다.
 //   상수로 두면 ① 작업바가 헤더 뒤로 숨거나 ② .gridscroll 높이가 어긋난다 → 실제 offsetHeight로 덮어쓴다.
@@ -685,6 +719,7 @@ function renderWorkdeskView(){
     <div class="rail" id="rail"></div></div>`;
   _syncRailToggle(); _syncWideToggle();
   _watchChrome();   // 헤더·작업바 실측(줄바꿈/스크롤바로 높이가 바뀌면 ResizeObserver가 따라감)
+  _bindWheelScroll();   // 1·2단 휠 → 좌우 이동
   loadTabs();
 }
 async function loadTabs(){
@@ -717,6 +752,20 @@ function toggleFav(ev,i){ if(ev) ev.stopPropagation(); const t=STATE.tabs[i]; if
   if(STATE.favs.has(k)) STATE.favs.delete(k); else STATE.favs.add(k);
   _favSaveLocal(); _renderTabList(); _favPushServer();   // 즉시 로컬 캐시+렌더 → 서버에 계정 귀속 영속
 }
+// ── 업체(1단 세그먼트) 즐겨찾기 — 즐겨찾기한 업체가 왼쪽 우선 정렬 ──
+//   저장은 탭 즐겨찾기와 같은 원장(서버가 문자열 배열을 그대로 보관)에 '@adv␟' 접두로 넣는다 →
+//   서버 변경 0으로 계정 귀속·기기 무관 영속을 그대로 얻고, 탭 키(sheetId␟탭명␟gid)와는 절대 겹치지 않는다
+//   (시트ID는 '@'로 시작할 수 없음).
+function _advFavKey(name){ return '@adv␟'+String(name==null?'':name); }
+function isAdvFav(name){ return !!(STATE.favs && STATE.favs.has(_advFavKey(name))); }
+function toggleAdvFav(ev, el){
+  if(ev) ev.stopPropagation();   // 별 클릭이 세그먼트 선택으로 번지지 않게
+  const seg=el&&el.closest?el.closest('.seg'):null; if(!seg) return;
+  const name=seg.dataset.k; if(name==null || name==='' || name===W_FAV) return;   // 미지정·즐겨찾기 그룹은 대상 아님
+  const k=_advFavKey(name);
+  if(STATE.favs.has(k)) STATE.favs.delete(k); else STATE.favs.add(k);
+  _favSaveLocal(); _renderTabList(); _favPushServer();
+}
 // ── 상단 작업바(사이드바 대체) — 1단=업체 세그먼트(맨 앞 ★즐겨찾기) · 2단=선택 그룹의 탭(밑줄 탭) ──
 //   인덱스는 STATE.tabs 원본 유지(selTab 계약 불변). 즐겨찾기 탭도 원 업체 그룹에 그대로 남긴다
 //   (사이드바 시절엔 세로 중복이라 제외했지만, 세그먼트는 한 번에 한 그룹만 보이므로 중복 노출이 아니고
@@ -727,7 +776,13 @@ const W_FAV='\u0000fav';
 function _wGroups(){   // → [{key, label, idxs}] · key: W_FAV | 업체명 | '' (미지정)
   const favIdx=[], groups=new Map();
   STATE.tabs.forEach((t,i)=>{ if(isFav(t)) favIdx.push(i); const k=t.advertiserName||''; if(!groups.has(k)) groups.set(k,[]); groups.get(k).push(i); });
-  const gkeys=[...groups.keys()].sort((a,b)=>{ if(!a) return 1; if(!b) return -1; return a.localeCompare(b,'ko'); });
+  // 정렬: 미지정은 항상 마지막 → 즐겨찾기한 업체가 앞 → 나머지 가나다순
+  const gkeys=[...groups.keys()].sort((a,b)=>{
+    if(!a) return 1; if(!b) return -1;
+    const fa=isAdvFav(a), fb=isAdvFav(b);
+    if(fa!==fb) return fa?-1:1;
+    return a.localeCompare(b,'ko');
+  });
   const out=[];
   if(favIdx.length) out.push({key:W_FAV, label:'즐겨찾기', idxs:favIdx});
   gkeys.forEach(k=>out.push({key:k||'', label:k||'미지정', idxs:groups.get(k)}));
@@ -757,16 +812,20 @@ function _renderTabList(){
   // 1단: 세그먼트
   seghost.innerHTML = gs.map(g=>{
     const un=g.idxs.reduce((n,i)=>n+_wUnseen(i),0), isFavSeg=g.key===W_FAV;
-    // 키는 data-k(esc 적용)로만 전달 — 업체명에 따옴표·&가 있어도 인라인 onclick 문자열이 깨지지 않음
-    return `<div class="seg${isFavSeg?' favseg':''}${g.key===seg?' on':''}" data-k="${esc(g.key)}" onclick="wPickSeg(this.dataset.k)">${isFavSeg?'<span class="fs">★</span>':''}${esc(g.label)}<span class="cnt">${g.idxs.length}</span>${un?`<span class="unbmini">💬${un}</span>`:''}</div>`;
+    const af=(!isFavSeg && g.key!=='') && isAdvFav(g.key);   // 업체 즐겨찾기(미지정·즐겨찾기 그룹 제외)
+    // 별표는 업체 칩에만. 키는 data-k(esc 적용)로만 전달 — 업체명에 따옴표·&가 있어도 인라인 onclick 문자열이 안 깨짐
+    const star=(isFavSeg||g.key==='')?'' :
+      `<span class="segstar${af?' on':''}" title="${af?'업체 즐겨찾기 해제':'업체 즐겨찾기 — 왼쪽 우선 정렬'}" onclick="toggleAdvFav(event,this)">${af?'★':'☆'}</span>`;
+    return `<div class="seg${isFavSeg?' favseg':''}${af?' advfav':''}${g.key===seg?' on':''}" data-k="${esc(g.key)}" onclick="wPickSeg(this.dataset.k)">${isFavSeg?'<span class="fs">★</span>':''}${star}${esc(g.label)}<span class="cnt">${g.idxs.length}</span>${un?`<span class="unbmini">💬${un}</span>`:''}</div>`;
   }).join('');
   // 2단: 선택 그룹의 탭
   const g=gs.find(x=>x.key===seg);
   const cur=STATE.cur;
   tabhost.innerHTML = (g&&g.idxs.length) ? g.idxs.map(i=>{
     const t=STATE.tabs[i], on=cur&&cur.sheetId===t.sheetId&&cur.tabName===t.tabName, f=isFav(t), n=_wUnseen(i);
-    // 시트제목(.ts)은 미확인 배지가 있어도 함께 표시 — 동명 탭 구분자가 배지 때문에 사라지면 안 됨
-    return `<div class="wtab${on?' on':''}" data-i="${i}" onclick="selTab(${i})" title="${esc(t.tabName)}${t.spreadsheetTitle?' · '+esc(t.spreadsheetTitle):''}"><span class="tstar${f?' on':''}" title="${f?'즐겨찾기 해제':'즐겨찾기 추가'}" onclick="toggleFav(event,${i})">${f?'★':'☆'}</span><span class="tn">${esc(t.tabName)}</span>${n?`<span class="unb">💬 ${n}</span>`:''}${t.spreadsheetTitle?`<span class="ts">${esc(t.spreadsheetTitle)}</span>`:''}</div>`;
+    // 시트제목은 탭마다 붙이지 않는다(줄이 길어져 탭이 몇 개만 보임) — 선택 시 본문 헤더에 표기.
+    //   여기선 호버 툴팁으로만 확인 가능.
+    return `<div class="wtab${on?' on':''}" data-i="${i}" onclick="selTab(${i})" title="${esc(t.tabName)}${t.spreadsheetTitle?' · '+esc(t.spreadsheetTitle):''}"><span class="tstar${f?' on':''}" title="${f?'즐겨찾기 해제':'즐겨찾기 추가'}" onclick="toggleFav(event,${i})">${f?'★':'☆'}</span><span class="tn">${esc(t.tabName)}</span>${n?`<span class="unb">💬 ${n}</span>`:''}</div>`;
   }).join('') : `<span class="b2empty">이 그룹에 작업이 없습니다.</span>`;
   // 스크롤 위치 복원 + (선택이 바뀐 경우에만) 활성 항목을 시야로
   seghost.scrollLeft=_sx; tabhost.scrollLeft=_tx;
@@ -828,6 +887,15 @@ async function selTab(i){ const t=STATE.tabs[i]; if(!t) return; STATE.cur=t;
   $('#main').innerHTML=`<div class="empty">불러오는 중…</div>`;
   const q=`sheetId=${encodeURIComponent(t.sheetId)}&tabName=${encodeURIComponent(t.tabName)}&tabGid=${encodeURIComponent(t.tabGid||'')}`;
   renderWorkdesk(await api('/api/trackb/workdesk?'+q)); loadParity(t); }
+// 선택된 작업이 소속한 시트제목 — 상단 2단 탭에서 뺀 정보를 여기서 한 번만 보여준다.
+//   탭 객체의 값이 없으면 sheetMap 폴백(관측·업체관리에서 넘어온 탭도 표기되게).
+function _curSheetLabel(){
+  const c=STATE.cur; if(!c) return '';
+  let s=c.spreadsheetTitle||'';
+  if(!s){ try{ s=sheetTitle(c.sheetId)||''; }catch(_){ s=''; } }
+  if(!s || s===c.sheetId) return '';   // 제목을 모르면(시트ID뿐) 표기 생략 — 의미 없는 문자열 노출 방지
+  return `<span class="mhsheet" title="이 작업이 소속한 시트">📄 ${esc(s)}</span>`;
+}
 function _tcell(r, field, val){   // 편집 가능 텍스트 셀
   const v = val==null?'':val;
   if(!STATE.canEdit) return `<td>${esc(v||'')}</td>`;
@@ -870,6 +938,7 @@ function renderWorkdesk(wd){
   const sotBadge=`<span class="bd ${sot==='db'?'sot':''}" title="이 탭의 진실원천(원본). 시트=레거시(현행 Track A) · Track B=DB 원본(cutover). 전환해도 쓰기반영 엔진(P2) 전까지 라이브 동작은 불변.">원본: ${sot==='db'?'Track B':'시트'}</span>`;
   const flipBtn=isMaster?`<button class="btn" id="sotBtn" title="진실원천 전환(옵션 A · 되돌리기 가능). 'db' 전환은 진짜불일치 0 게이트를 통과해야 함(force로 우회). 현재는 상태·게이트만 — 시트 쓰기반영은 P2 엔진 예정." onclick="flipSoT('${sot==='db'?'sheet':'db'}')">${sot==='db'?'시트로 되돌리기':'Track B로 전환'}</button>`:'';
   $('#main').innerHTML=`<div class="mh"><h1>${esc(STATE.cur.tabName)}</h1>
+    ${_curSheetLabel()}
     ${STATE.role==='advertiser'?'<span class="bd">열람 전용(광고주)</span>':''}<span class="bd g">참여자 ${c.total||0}</span>${sotBadge}${gridMode?'<span class="bd" title="구글시트와 동일 컬럼·가로 펼침 (열람 전용)">시트 그리드 · 열람</span>':''}${warn.join('')}
     ${isMaster?`<span class="sp" style="flex:1"></span>${flipBtn}<button class="btn" onclick="showWritebackSim()" title="이 탭 편집이 시트에 반영된다면 무엇이 바뀔지 미리보기 (시뮬레이션 · 실제 시트 무접촉)">write-back 시뮬</button><button class="btn" id="projBtn" onclick="projectCur()">그림자 투영(새로고침)</button>`:''}</div>
     ${summaryStrip(wd,d,m,c)}
