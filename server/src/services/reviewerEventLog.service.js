@@ -115,6 +115,7 @@ async function listReviewerEvents({
 
   const { rows } = await getPool().query(
     `SELECT id, occurred_at AS "occurredAt", sheet_id AS "sheetId", tab_name AS "tabName",
+            tab_gid AS "tabGid",
             campaign_name AS "campaignName", reviewer_name AS "reviewerName", phone8,
             event_type AS "eventType", severity, message, context,
             order_submission_id AS "orderSubmissionId",

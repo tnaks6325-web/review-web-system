@@ -213,6 +213,18 @@
   table.sheetgrid.advsnug{min-width:0}   /* 광고주 = 스냅(자동채움 안 함) → 100% 스트레치 해제, 열은 고정폭(table-layout:fixed) 유지, 남으면 우측 여백 */
   table.sheetgrid .gph{font-family:var(--mono);font-size:11.5px;color:var(--muted)}
   table.sheetgrid tbody tr:hover td{background:#f7faff} table.sheetgrid tbody tr:hover td.gfz{background:#eef4ff}
+  /* 리뷰어 로그 딥링크로 찾아온 행 — 앰버로 잠깐 강조(고정열 포함). 호버보다 우선이라 마우스가 위에 있어도 보인다 */
+  table.sheetgrid tbody tr.rowhit td, table.sheetgrid tbody tr.rowhit:hover td,
+  table.sheetgrid tbody tr.rowhit td.gfz, table.sheetgrid tbody tr.rowhit:hover td.gfz{
+    background:#fef3c7;box-shadow:inset 0 -1px 0 #f5b301,inset 0 1px 0 #f5b301;animation:rowhitpulse 1.1s ease-in-out 2}
+  @keyframes rowhitpulse{0%,100%{background:#fef3c7}50%{background:#fde68a}}
+  @media(prefers-reduced-motion:reduce){table.sheetgrid tbody tr.rowhit td{animation:none}}
+  /* 안내 토스트(하단 중앙) — 흐름을 막지 않는 비모달 고지 */
+  .wdtoast{position:fixed;left:50%;bottom:26px;transform:translateX(-50%) translateY(8px);z-index:60;
+    background:var(--ink);color:#fff;font-size:12.5px;font-weight:600;padding:10px 16px;border-radius:10px;
+    box-shadow:0 10px 30px rgba(16,24,40,.28);max-width:min(560px,92vw);opacity:0;pointer-events:none;
+    transition:opacity .18s var(--ease),transform .18s var(--ease)}
+  .wdtoast.show{opacity:1;transform:translateX(-50%) translateY(0)}
   /* 편집 가능 셀 = td 자체(셀당 .ecell 스팬 제거 → DOM 노드 ~40%↓ = 렌더 비용 감소). 클릭=편집, edited=배경 강조. */
   table.sheetgrid td.gedit{cursor:cell}
   table.sheetgrid td.gedit:hover{background:var(--card2)}
@@ -425,6 +437,19 @@
 const API_BASE = (function(){ if (window.REVIEW_API_URL) return window.REVIEW_API_URL; if (location.hostname==='localhost') return 'http://localhost:3000'; return 'https://sublime-magic-production-790b.up.railway.app'; })();
 // 토큰 핸드오프 2경로: ① 인트라넷 SSO(#sso=<token> 프래그먼트, 크로스오리진이라 URL 경유 — 도착 즉시 저장 후
 //   주소창에서 제거, 새 신원 도착이므로 기존 세션 덮어씀) ② admin.html raw_sso(localStorage, 기존 세션 존중).
+// ── 리뷰어 로그 → 작업대 딥링크(#go=) 수신 ──
+//   ★ initToken 보다 반드시 먼저 읽는다: #sso= 가 함께 오면 initToken이 해시 전체를 지우기 때문.
+//   여기서는 읽기만 하고 지우지 않는다(뒤따르는 #sso=/#adv= 핸들러가 같은 해시를 봐야 함) —
+//   실제 제거는 소비 시점(_consumeGo)에서 한다.
+let _GO=null;
+(function initGoLink(){
+  try{
+    const m=(location.hash||'').match(/[#&]go=([^&]+)/);
+    if(!m) return;
+    const o=JSON.parse(decodeURIComponent(m[1]));
+    if(o && typeof o==='object' && o.s && o.t) _GO=o;   // {s:sheetId, t:tabName, g:tabGid, p:phone8, n:이름}
+  }catch(_){ _GO=null; }
+})();
 (function initToken(){
   try{   // ① #sso — 디코드 실패해도 raw_sso 폴백이 죽지 않게 분리 try
     const m=(location.hash||'').match(/[#&]sso=([^&]+)/);
@@ -509,7 +534,19 @@ async function boot(){
   if(me.exp && me.exp*1000 < Date.now())   // 만료 토큰 → 만료 신원 배지+빈 목록 유령 화면 대신 즉시 재로그인
     return _dropSession('세션이 만료되었습니다. 다시 로그인하세요. (인트라넷에서 "통합 작업대" 버튼으로 오면 자동 로그인)');
   if(!STATE.role){ sessionStorage.removeItem('admin_token'); return renderLogin(); }   // 깨진/위조 토큰 → 빈 셸 대신 로그인
+  _consumeGo();   // 리뷰어 로그 딥링크 → 작업대 탭 + 해당 리뷰어 행 지정(셸 렌더 전에 세팅해야 loadTabs가 집어감)
   renderShell();
+}
+// 딥링크 소비: 열 탭과 강조할 리뷰어를 예약하고 주소창에서 해시를 제거(새로고침 시 재발동·URL 공유로 PII 유출 방지).
+//   ★ 권한은 여기서 판단하지 않는다 — 새 탭도 평소와 똑같이 /api/trackb/tabs·/workdesk 를 호출하고
+//     서버의 canAccessTab 스코프 검증을 그대로 통과해야 하므로, 링크를 손으로 만들어도 권한이 넓어지지 않는다.
+function _consumeGo(){
+  if(!_GO) return;
+  const g=_GO; _GO=null;
+  STATE.view='workdesk';
+  STATE.pendingTab={ sheetId:g.s, tabName:g.t, tabGid:g.g||'', spreadsheetTitle:g.st||'' };
+  STATE.pendingFocus={ phone8:String(g.p||''), name:String(g.n||'') };
+  try{ history.replaceState(null,'',location.pathname+location.search); }catch(_){ }
 }
 function renderLogin(msg){
   $('#app').innerHTML = `<div class="loginbox"><h2>통합 작업대 로그인</h2>
@@ -840,6 +877,9 @@ function renderWorkdesk(wd){
     ${renderWorkOrderSection(wd)}
     <div id="gridhost">${tableSection}</div>`;
   _scheduleBodyFlush();   // 청크 렌더: 나머지 행을 프레임마다 append(대형 표 첫 화면 즉시)
+  // 딥링크 강조: 첫 청크 안에 대상이 있으면 즉시, 없으면 flush 진행/완료 시점에 다시 시도.
+  //   남은 청크가 없을 때(작은 표)는 여기서 바로 '못 찾음'까지 확정한다.
+  _applyPendingFocus(!STATE._pendingBody);
   if(gridMode) _fitGrid();   // 주소 유동 채움(언더플로 시)
   if(!STATE._fitResizeBound){ STATE._fitResizeBound=true; let t=null;
     window.addEventListener('resize',()=>{ clearTimeout(t); t=setTimeout(()=>{ if(STATE.wd&&(STATE.canEdit||STATE.role==='advertiser')) _fitGrid(); },120); }); }
@@ -1164,9 +1204,40 @@ function _scheduleBodyFlush(){
     const pp=STATE._pendingBody; if(!pp||pp.gen!==gen||!pp.rows.length){ if(pp&&pp.gen===gen) STATE._pendingBody=null; return; }   // 재렌더로 세대 바뀌면 자동 중단
     const tb=document.getElementById('gbody'); if(!tb){ STATE._pendingBody=null; return; }
     tb.insertAdjacentHTML('beforeend', pp.rows.splice(0,_GRID_CHUNK).join(''));
-    if(pp.rows.length) _raf(step); else STATE._pendingBody=null;
+    if(pp.rows.length){ _raf(step); _applyPendingFocus(false); }   // 중간에도 시도(대상이 이미 들어왔으면 즉시 강조)
+    else { STATE._pendingBody=null; _applyPendingFocus(true); }    // 마지막 청크까지 끝 → 없으면 '못 찾음' 확정
   };
   _raf(step);
+}
+// ── 리뷰어 로그 딥링크: 해당 리뷰어 행으로 스크롤 + 강조 ──
+//   청크 렌더라 대상 행이 나중에 들어올 수 있어 flush 중간·완료 시점 양쪽에서 시도한다.
+//   final=true(더 그릴 행이 없음)일 때만 "못 찾음"으로 확정 — 아직 안 그려진 행을 없다고 오판하지 않게.
+function _applyPendingFocus(final){
+  const f=STATE.pendingFocus; if(!f) return;
+  const body=document.getElementById('gbody'); if(!body) return;
+  // 속성 선택자 값은 JSON.stringify 로 따옴표+이스케이프(따옴표·역슬래시가 든 값이 와도 선택자가 안 깨짐)
+  const sel=(attr,v)=>'tr['+attr+'='+JSON.stringify(String(v))+']';
+  let tr=null;
+  if(f.phone8) tr=body.querySelector(sel('data-p8',f.phone8));
+  if(!tr && f.name) tr=body.querySelector(sel('data-nm',f.name));   // 연락처가 비었거나 바뀐 행 폴백
+  if(!tr){
+    if(final){ STATE.pendingFocus=null;
+      _toast(`${f.name||'해당 리뷰어'} 행을 이 명단에서 찾지 못했습니다 — 필터가 걸려 있거나 명단에서 제거된 행일 수 있습니다.`); }
+    return;
+  }
+  STATE.pendingFocus=null;
+  try{ tr.scrollIntoView({block:'center', behavior:'smooth'}); }catch(_){ try{ tr.scrollIntoView(); }catch(__){ } }
+  tr.classList.add('rowhit');
+  setTimeout(()=>{ try{ tr.classList.remove('rowhit'); }catch(_){ } }, 6000);
+}
+// 가벼운 안내 토스트(모달 아님 — 작업 흐름을 막지 않음)
+function _toast(msg){
+  try{
+    let el=document.getElementById('wdtoast');
+    if(!el){ el=document.createElement('div'); el.id='wdtoast'; el.className='wdtoast'; document.body.appendChild(el); }
+    el.textContent=msg; el.classList.add('show');
+    clearTimeout(_toast._t); _toast._t=setTimeout(()=>{ el.classList.remove('show'); }, 5200);
+  }catch(_){ }
 }
 // 시트형 그리드: 왼쪽 고정 = #·참여자·연락처(DB 리뷰어 신원) + (선택 시)시트 컬럼 수취인까지 · 오른쪽 = 시트 컬럼 전체.
 //   + 컬럼 ▾(필터·정렬·숨기기) · 행 그룹(기준 컬럼 선택, 접기/펼치기) — 모두 클라이언트 뷰 상태(Track B 열람).
@@ -1231,7 +1302,8 @@ function buildGrid(wd){
         const ctr=_isCtrCol(h)?' gctr':'';   // 시트 날짜/연락처 열 가운데 정렬
         tds+=eCell('col:'+h, disp, ed, ok+ctr, i, editv); }
     });
-    return `<tr>${tds}</tr>`;
+    // data-p8/data-nm = 리뷰어 로그 딥링크가 이 행을 찾아 강조하는 키(표시에는 영향 없음)
+    return `<tr data-p8="${esc(r.phone8||'')}" data-nm="${esc(r.name||'')}">${tds}</tr>`;
   };
   // 본문 행 배열(청크 렌더용) — 그룹 여부에 따라
   let bodyArr=[], emptyBody='';
@@ -1553,10 +1625,12 @@ function _renderLogsHead(){
 }
 function _renderLogsBody(q){
   const kw=String(q||'').trim().toLowerCase();
+  const kwd=kw.replace(/[^0-9]/g,'');   // 숫자만 입력하면 연락처 검색(하이픈 유무 무관)
   const items=(STATE.logs||[]).filter(l=>!kw
     || String(l.campaignName||'').toLowerCase().includes(kw)
     || String(l.reviewerName||'').toLowerCase().includes(kw)
-    || String(l.message||'').toLowerCase().includes(kw));
+    || String(l.message||'').toLowerCase().includes(kw)
+    || (kwd && String(l.phone8||'').includes(kwd)));
   if(!items.length){ $('#lgbody').innerHTML=`<div class="empty">${kw?'검색 결과가 없습니다.':'표시할 로그가 없습니다. (문제 없음 🎉)'}</div>`; return; }
   const sevBadge=s=> s==='critical'?'<span class="bd no">중요</span>' : s==='warn'?'<span class="bd" style="background:#FEF3C7;color:#92400E">주의</span>' : '<span class="bd g">정보</span>';
   $('#lgbody').innerHTML = `<div style="display:flex;flex-direction:column;gap:8px;padding:4px 0">`+items.map(l=>{
@@ -1567,15 +1641,31 @@ function _renderLogsBody(q){
       <div style="flex:0 0 auto;padding-top:1px">${sevBadge(l.severity)}</div>
       <div style="flex:1;min-width:0">
         <div style="font-size:13.5px;line-height:1.5;word-break:break-all">${esc(l.message||'')}</div>
-        <div style="font-size:11.5px;color:var(--muted);margin-top:3px">${esc(ts)} · ${esc(l.campaignName||l.tabName||'')}${l.reviewerName?' · '+esc(l.reviewerName):''}${resolved?` · ✔ 확인됨(${esc(l.resolvedBy||'')})`:''}</div>
+        <div style="font-size:11.5px;color:var(--muted);margin-top:3px">${esc(ts)} · ${esc(l.campaignName||l.tabName||'')}${l.reviewerName?' · '+esc(l.reviewerName):''}${_logPhone(l)}${resolved?` · ✔ 확인됨(${esc(l.resolvedBy||'')})`:''}</div>
       </div>
-      ${(resolved||!_canResolveLog())?'':
-        `<div style="display:flex;gap:6px;flex:0 0 auto">
-          ${_LOG_CANCELABLE.has(l.eventType)?`<button class="btn" style="border-color:#FCA5A5;color:#B91C1C" onclick="_cancelLogOrder(${l.id})" title="시트에서 지운 것이 '주문취소'였다면 여기를 누르세요 — 다시 기록되지 않습니다">취소 처리</button>`:''}
-          <button class="btn" onclick="_resolveLog(${l.id})">확인</button>
-        </div>`}
+      <div style="display:flex;gap:6px;flex:0 0 auto">
+        ${(l.sheetId&&l.tabName)?`<button class="btn" title="이 리뷰어의 행이 있는 작업대를 새 탭으로 엽니다" onclick="_logOpenWorkdesk(${l.id})">작업대 열기 ↗</button>`:''}
+        ${(resolved||!_canResolveLog())?'':
+          (_LOG_CANCELABLE.has(l.eventType)?`<button class="btn" style="border-color:#FCA5A5;color:#B91C1C" onclick="_cancelLogOrder(${l.id})" title="시트에서 지운 것이 '주문취소'였다면 여기를 누르세요 — 다시 기록되지 않습니다">취소 처리</button>`:'')
+          +`<button class="btn" onclick="_resolveLog(${l.id})">확인</button>`}
+      </div>
     </div>`;
   }).join('')+`</div>`;
+}
+// 로그에 리뷰어 연락처 표기 — phone8(뒤 8자리)을 그리드와 동일한 010-XXXX-XXXX 표기로.
+//   로그 뷰는 내부(master/admin/staff) 전용이고 staff는 담당 탭 로그만 서버가 내려주므로 그리드와 노출 수준이 같다.
+function _logPhone(l){ const p=_fmtPhone(l&&l.phone8||''); return p?` · <span style="font-variant-numeric:tabular-nums">${esc(p)}</span>`:''; }
+// 로그 → 그 리뷰어가 있는 작업대를 새 탭으로. 탭 지정+행 강조 정보를 프래그먼트(#)로 넘긴다
+//   — 프래그먼트는 서버 로그·Referer에 안 실려 연락처가 새지 않고, 도착 즉시 주소창에서 제거된다.
+//   토큰도 함께 넘기는 이유: 새 탭은 sessionStorage를 물려받지 못해(인트라넷 SSO 세션) 로그인 화면으로 떨어진다.
+//   ★ 권한 확대 아님 — 새 탭도 서버의 스코프 검증(canAccessTab)을 그대로 거친다.
+function _logOpenWorkdesk(id){
+  const l=(STATE.logs||[]).find(x=>String(x.id)===String(id));
+  if(!l||!l.sheetId||!l.tabName) return;
+  const payload={ s:l.sheetId, t:l.tabName, g:l.tabGid||'', p:l.phone8||'', n:l.reviewerName||'', st:l.campaignName||'' };
+  let url=location.origin+location.pathname+'#go='+encodeURIComponent(JSON.stringify(payload));
+  const tk=token(); if(tk) url+='&sso='+encodeURIComponent(tk);
+  window.open(url,'_blank','noopener');   // noopener = 새 탭이 이 창을 조작하지 못하게
 }
 // 확인(해결)은 전역 상태 변경이라 admin/master 전용(서버도 adminOrMaster로 강제) — staff는 열람만.
 function _canResolveLog(){ return STATE.role==='master' || STATE.role==='admin'; }
