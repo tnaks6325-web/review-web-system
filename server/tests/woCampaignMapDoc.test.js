@@ -58,13 +58,32 @@ ok('랜딩 URL은 링크유입일 때만',
   /landing_url:\s+o\.inflow_type === "link"/.test(app) && /링크유입일 때만<\/b>/.test(doc));
 ok('참여형 스위치는 항상 켜짐', /participation:\s+true/.test(app) && /항상 켜진 상태<\/b>로 열립니다/.test(doc));
 
+/* ── 065: '자동'으로 바뀐 3칸 — 문서와 코드가 함께 움직이는지 ──
+   ★ 이 세 항목은 원래 "직접 입력"으로 문서화돼 있었다. grep 가드가 옛 패턴
+   (`rf_manager").value = prefill`)만 보고 있어서 _rfPickBtn 배선 변경을 놓쳤다.
+   → 이제 **실제 호출 형태**로 고정한다(CLAUDE.md "grep 회귀가드의 맹점"). */
+ok('★ 담당자 = 작업담당 매핑으로 자동 선택',
+  /if \(prefill\.manager\) _rfPickBtn\("manager", prefill\.manager\)/.test(rec)
+  && /manager:\s+_woManagerNick\(o\.work_manager\)/.test(app)
+  && /박세희→<b>만두<\/b>, 박은비→<b>망고<\/b>/.test(doc));
+ok('★ 구매채널 = 상품 URL 호스트 판정으로 자동 선택',
+  /if \(prefill\.channel\) _rfPickBtn\("channel", prefill\.channel\)/.test(rec)
+  && /channel:\s+_woChannel\(o\)/.test(app)
+  && /coupang→쿠팡, naver→네이버, oliveyoung→올리브영/.test(doc));
+ok('★ 연결 탭 = 접수 때 확정된 탭으로 자동 선택',
+  /_prefillLinkedTab\(prefill\)/.test(rec)
+  && /linked_sheet_id: o\.linked_tab_sheet_id/.test(app)
+  && /접수 때 확정된 그 탭<\/b>이 그대로 선택됩니다/.test(doc));
+ok('★★ 확신 없으면 빈 값 — 랜덤·판정불가는 자동 선택하지 않는다(문서도 같은 약속)',
+  /if \(prefill\.manager\)/.test(rec) && /if \(prefill\.channel\)/.test(rec)
+  && /자동으로 아무나 배정하지 않습니다/.test(doc)
+  && /모르는 쇼핑몰이면 비워 둡니다/.test(doc));
+
 /* ── '직접 입력'이라 약속한 칸이 정말 비어 있는가(오약속 = 빈 칸 게시 사고) ── */
-ok('★ 담당자는 프리필하지 않는다', !/setV\("rf_manager"|rf_manager"\)\.value = prefill/.test(rec));
-ok('★ 구매채널은 프리필하지 않는다', !/rf_channel"\)\.value = prefill/.test(rec));
 ok('★ 리뷰비는 프리필하지 않는다(결제금액과 의미가 다름)',
-  !/rf_review_fee"\)\.value = prefill/.test(rec) && /리뷰비와 다릅니다/.test(doc));
-ok('★ 연결 탭은 프리필하지 않는다(신규 분기에 _restoreLinkedTab 없음)',
-  !/else \{[\s\S]{0,3000}_restoreLinkedTab/.test(rec.slice(rec.indexOf('titleEl.innerHTML = `<i class="fas fa-bullhorn"'))));
+  !/rf_review_fee"\)\.value = prefill/.test(rec) && !/_rfPickBtn\("review_fee"/.test(rec)
+  && /리뷰비와 다릅니다/.test(doc));
+ok('★ 안내배지는 프리필하지 않는다', !/_recruitBadges = prefill|badges: *prefill/.test(rec));
 ok('★ 타계정 허용은 기본 [불가]',
   /_maEl\.checked = false; onMultiAccountToggle\(false\)/.test(rec) && /항상 <b>\[불가\]<\/b>로 시작/.test(doc));
 ok('★ 종료일은 작업오더에 없다(프리필 키 부재)',

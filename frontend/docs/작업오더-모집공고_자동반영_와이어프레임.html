@@ -188,13 +188,13 @@
   <section>
     <div class="sum">
       <div class="bar">
-        <span class="s-auto">자동 15</span>
+        <span class="s-auto" style="flex:18">자동 18</span>
         <span class="s-semi">확인 4</span>
-        <span class="s-manual">직접 9</span>
+        <span class="s-manual" style="flex:6">직접 6</span>
       </div>
       <div class="sumfoot">
-        <span><b>28개 항목 중 15개</b>가 손대지 않아도 채워집니다 (약 54%)</span>
-        <span>직접 입력이 필요한 <b>9개</b>는 아래 ⑤ 체크리스트로 모아 뒀습니다</span>
+        <span><b>28개 항목 중 18개</b>가 손대지 않아도 채워집니다 (약 64%)</span>
+        <span>직접 입력이 필요한 <b>6개</b>는 아래 ⑤ 체크리스트로 모아 뒀습니다</span>
       </div>
     </div>
   </section>
@@ -207,8 +207,9 @@
       <div class="fstep">
         <span class="fn">STEP 1</span>
         <div class="ft">📥 작업오더 접수</div>
-        <div class="fd">AE가 올린 오더를 관리자가 접수. 이때 <b>탭이 등록</b>되고 담당자·구매시간대·리뷰유형·배송유형이
-          <b>탭 설정에 자동 기입</b>됩니다(비어 있을 때만).</div>
+        <div class="fd">AE가 올린 오더를 관리자가 접수. 이때 <b>탭이 등록</b>되고 담당자(작업담당→만두/망고)·구매시간대·
+          리뷰유형·배송유형이 <b>탭 설정에 자동 기입</b>됩니다(비어 있을 때만).
+          <b>이 접수가 있어야 공고의 연결 탭도 자동으로 잡힙니다.</b></div>
       </div>
       <div class="fstep on">
         <span class="fn">STEP 2</span>
@@ -243,19 +244,25 @@
         <div class="wf-col">
           <div class="wf-sec">기본정보</div>
 
-          <div class="fld">
-            <div class="fld-h"><span class="fld-n">시트명 · 탭명 (연결 탭)</span><span class="fld-t">직접 입력</span></div>
-            <div class="note">작업오더의 작업시트 URL은 <b>접수 때 탭 등록</b>에만 쓰이고 공고 폼에는 안 옵니다 — 드롭다운에서 직접 고르세요.</div>
+          <div class="fld a">
+            <div class="fld-h"><span class="fld-n">시트명 · 탭명 (연결 탭)</span><span class="fld-t">자동</span></div>
+            <div class="src"><span class="ar">←</span><span>작업오더 <code>작업시트탭URL</code> · <b>접수 때 확정된 그 탭</b>이 그대로 선택됩니다</span></div>
+            <div class="note">작업시트탭URL은 AE 제출 시 <b>필수</b>라 접수된 오더는 항상 값이 있습니다.
+              탭 이름이 바뀌었어도 gid로 다시 찾습니다. <b>접수 전에 공고를 만들면</b> 비어 있습니다(그때만 직접 선택).</div>
           </div>
 
-          <div class="fld">
-            <div class="fld-h"><span class="fld-n">담당자</span><span class="fld-t">직접 입력</span></div>
-            <div class="note">오더의 담당자명은 <b>탭 설정</b>으로만 들어갑니다(공고 담당자와 의미가 달라 폼은 비움).</div>
+          <div class="fld a">
+            <div class="fld-h"><span class="fld-n">담당자</span><span class="fld-t">자동</span></div>
+            <div class="src"><span class="ar">←</span><span>작업오더 <code>작업담당</code> · 박세희→<b>만두</b>, 박은비→<b>망고</b></span></div>
+            <div class="note"><b>랜덤</b>이거나 모르는 이름이면 비워 둡니다 — 자동으로 아무나 배정하지 않습니다(직접결정).
+              같은 값이 <b>탭 설정의 담당자</b>에도 함께 들어갑니다.</div>
           </div>
 
-          <div class="fld">
-            <div class="fld-h"><span class="fld-n">구매채널</span><span class="fld-t">직접 입력</span></div>
-            <div class="note">작업오더에 채널 항목이 없습니다. 쿠팡/네이버 등을 직접 선택하세요.</div>
+          <div class="fld a">
+            <div class="fld-h"><span class="fld-n">구매채널</span><span class="fld-t">자동</span></div>
+            <div class="src"><span class="ar">←</span><span>상품 URL의 <b>주소(호스트)</b>로 판정 · coupang→쿠팡, naver→네이버, oliveyoung→올리브영</span></div>
+            <div class="note">주소만 보고 판정하므로 <code>?src=naver_ad</code> 같은 광고 파라미터에 속지 않습니다.
+              모르는 쇼핑몰이면 비워 둡니다(채널이 틀리면 현금영수증 안내가 잘못 나갑니다).</div>
           </div>
 
           <div class="fld a">
@@ -406,7 +413,7 @@
       <div class="wf-bar"><span class="dots"><i></i><i></i><i></i></span>⚙️ 캠페인 탭 관리 — 접수 시 자동 기입</div>
       <div class="wf-body" style="grid-template-columns:1fr 1fr 1fr">
         <div class="fld a"><div class="fld-h"><span class="fld-n">담당자</span></div>
-          <div class="src"><span class="ar">←</span><span>작업오더 <code>담당자명</code></span></div></div>
+          <div class="src"><span class="ar">←</span><span>작업오더 <code>작업담당</code> → 만두/망고 · 랜덤은 빈 값</span></div></div>
         <div class="fld a"><div class="fld-h"><span class="fld-n">구매시간대</span></div>
           <div class="src"><span class="ar">←</span><span>작업오더 <code>구매시간대</code></span></div></div>
         <div class="fld a"><div class="fld-h"><span class="fld-n">리뷰유형</span></div>
@@ -452,11 +459,8 @@
   <section>
     <h2><span class="num">5</span>공고 생성 후 채워야 하는 것</h2>
     <div class="chk">
-      <h3>📋 직접 입력 체크리스트 (9개)</h3>
+      <h3>📋 직접 입력 체크리스트 (6개)</h3>
       <ul>
-        <li><span class="cbox"></span><span><b>연결 탭</b> — 시트명·탭명 선택 (이걸 골라야 현금영수증·시트 일정이 붙습니다)</span></li>
-        <li><span class="cbox"></span><span><b>담당자</b> 선택</span></li>
-        <li><span class="cbox"></span><span><b>구매채널</b> 선택 (쿠팡/네이버 — 현금영수증 이미지도 이걸로 갈립니다)</span></li>
         <li><span class="cbox"></span><span><b>리뷰비</b> 입력 (상품 결제금액과 다릅니다)</span></li>
         <li><span class="cbox"></span><span><b>안내배지</b> 선택</span></li>
         <li><span class="cbox"></span><span><b>옵션별 총인원 · 일건수</b> 입력</span></li>
@@ -464,6 +468,8 @@
         <li><span class="cbox"></span><span><b>타계정 참여 허용</b> 여부 (기본 불가)</span></li>
         <li><span class="cbox"></span><span><b>썸네일</b> 확인 — 자동수집 실패 시 이미지 주소 붙여넣기 또는 업로드</span></li>
       </ul>
+      <p class="note" style="margin:12px 0 0">자동으로 채워지는 칸이라도 <b>비어 있으면</b> 직접 넣어주세요 —
+        연결 탭(접수 전 생성) · 담당자(작업담당이 랜덤) · 구매채널(모르는 쇼핑몰)은 일부러 비워 둔 것입니다.</p>
     </div>
     <p class="rule">전부 채운 뒤 상태를 <strong>게시</strong>로 바꾸면 자동점검(연결 탭·하루한도·시간창)을 거쳐 리뷰어에게 노출됩니다.</p>
   </section>

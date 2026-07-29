@@ -11,6 +11,7 @@ const { mirrorOneSheet } = require('../services/rawMirror.service');
 const sse = require('../utils/sse');
 const { logger } = require('../utils/logger');
 const { fetchThumbFromUrl } = require('../utils/thumbFetch');
+const { mapWorkManager, pickWorkManager } = require('../utils/workManager');
 
 // ═══════════════════════════════════════════════════════════
 // 작업 오더(work_orders) — AE 제출 → 관리자 인박스 → 상태머신
@@ -36,7 +37,7 @@ const AE_FIELDS = [
   'title', 'start_date', 'product_option', 'product_options_json', 'pay_amount', 'daily_count', 'daily_count_text',
   'purchase_time', 'inflow_type', 'inflow_guide', 'delivery_type', 'courier_proxy',
   'review_type', 'recruit_count', 'review_guide', 'special_notes',
-  'product_url', 'work_sheet_url', 'goods_cost_type',
+  'product_url', 'work_sheet_url', 'goods_cost_type', 'work_manager',
 ];
 
 // 인트라넷 intake 수정 가능 필드 (status/created_by/processed_by/admin_memo 등 내부 상태는 제외)
@@ -47,6 +48,7 @@ const INTAKE_EDITABLE_FIELDS = [
   'inflow_keyword', 'inflow_type', 'inflow_guide',
   'delivery_type', 'courier_proxy', 'review_type', 'recruit_count',
   'review_guide', 'special_notes', 'product_url', 'work_sheet_url', 'goods_cost_type',
+  'work_manager',   // 작업담당(박세희/박은비/랜덤) — 065
 ];
 const INTAKE_INT_FIELDS = new Set(['pay_amount', 'daily_count', 'recruit_count']);
 
@@ -106,6 +108,8 @@ async function _ensureTables() {
     await pool.query(`ALTER TABLE work_orders ADD COLUMN IF NOT EXISTS linked_tab_sheet_id  TEXT DEFAULT ''`);
     await pool.query(`ALTER TABLE work_orders ADD COLUMN IF NOT EXISTS linked_tab_name      TEXT DEFAULT ''`);
     await pool.query(`ALTER TABLE work_orders ADD COLUMN IF NOT EXISTS linked_tab_gid       TEXT DEFAULT ''`);
+    // 065: 작업담당(박세희/박은비/랜덤) — 리뷰웹 담당자(만두/망고) 자동 선택의 원천
+    await pool.query(`ALTER TABLE work_orders ADD COLUMN IF NOT EXISTS work_manager         TEXT DEFAULT ''`);
     await pool.query(`CREATE INDEX IF NOT EXISTS idx_work_orders_status     ON work_orders(status)`);
     await pool.query(`CREATE INDEX IF NOT EXISTS idx_work_orders_created_by ON work_orders(created_by)`);
     await pool.query(`CREATE INDEX IF NOT EXISTS idx_work_orders_created_at ON work_orders(created_at DESC)`);
@@ -140,8 +144,8 @@ async function _insertWorkOrder(b, createdBy) {
       (id, title, start_date, product_option, product_options_json, pay_amount, daily_count, daily_count_text,
        purchase_time, inflow_keyword, inflow_type, inflow_guide, delivery_type, courier_proxy,
        review_type, recruit_count, review_guide, special_notes,
-       product_url, work_sheet_url, goods_cost_type, manager_name, status, created_by)
-     VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21,$22,'submitted',$23)
+       product_url, work_sheet_url, goods_cost_type, manager_name, work_manager, status, created_by)
+     VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21,$22,$23,'submitted',$24)
      RETURNING *`,
     [
       _genOrderId(),
@@ -166,6 +170,7 @@ async function _insertWorkOrder(b, createdBy) {
       String(b.work_sheet_url).trim(),
       b.goods_cost_type || '',
       b.manager_name || '',
+      pickWorkManager(b),   // 작업담당(박세희/박은비/랜덤) — 표준키 work_manager + 별칭·본문 폴백
       createdBy,
     ]
   );
@@ -876,7 +881,10 @@ router.post('/admin/accept', authMiddleware, adminOrMasterMiddleware, async (req
          updated_at    = NOW()`,
       [
         sheetId, tabName, gid, tabSheetUrl, spreadsheetTitle,
-        (o.title || ''), (o.manager_name || ''), (o.purchase_time || ''),
+        // ★ 065: 탭 담당자는 리뷰웹 닉네임(만두/망고)이다 — 담당AE 실명(manager_name)을 넣으면
+        //   탭 설정의 담당자 필터(만두/망고)와 어긋난다. 매핑 실패·랜덤은 빈 값으로 두어
+        //   관리자가 직접 고르게 한다(틀린 값보다 빈 값이 낫다).
+        (o.title || ''), mapWorkManager(o.work_manager), (o.purchase_time || ''),
         (o.review_type || ''), (o.delivery_type || ''), courierProxy,
       ]
     );
