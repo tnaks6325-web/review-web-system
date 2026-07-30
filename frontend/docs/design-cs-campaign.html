@@ -1,0 +1,446 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>C/S 문의창구 — 캠페인별 문의 화면 시안</title>
+<style>
+  /* 시안은 밝은 화면 고정 — 어두운 화면에서 색이 뒤집히면 "실물과 같다"가 깨진다 */
+  :root{ color-scheme: light; }
+  *{ box-sizing:border-box; }
+  body{ margin:0; background:#EEF1F6; color:#191F28;
+        font-family:-apple-system,BlinkMacSystemFont,"Malgun Gothic","Noto Sans KR",sans-serif; }
+  .wrap{ max-width:1560px; margin:0 auto; padding:24px 20px 60px; }
+  h1{ font-size:1.35rem; margin:0 0 4px; }
+  .sub{ font-size:.86rem; color:#6B7280; margin-bottom:6px; line-height:1.6; }
+  .rulebox{ background:#fff; border:1px solid #E5E7EB; border-radius:12px; padding:14px 16px; margin:14px 0 22px; font-size:.84rem; line-height:1.75; }
+  .rulebox b{ color:#1D4ED8; }
+  .rulebox .old{ color:#9CA3AF; text-decoration:line-through; }
+  .secttl{ font-size:1.02rem; font-weight:800; margin:26px 0 10px; display:flex; align-items:center; gap:8px; }
+  .secttl .tag{ font-size:.68rem; font-weight:700; background:#E0EDFF; color:#1D4ED8; padding:2px 8px; border-radius:20px; }
+  .note{ font-size:.78rem; color:#6B7280; margin:6px 0 12px; line-height:1.6; }
+
+  /* ── 리뷰어(모바일) 프레임 ── */
+  .phones{ display:flex; gap:20px; flex-wrap:wrap; }
+  .phone{ width:390px; height:720px; background:#F2F4F8; border:10px solid #111827; border-radius:34px;
+          overflow:hidden; display:flex; flex-direction:column; position:relative; flex-shrink:0; }
+  .phcap{ font-size:.76rem; font-weight:700; color:#374151; margin:0 0 6px 6px; }
+  .ph-head{ padding:14px 16px 8px; background:#F2F4F8; }
+  .ph-head h2{ margin:0; font-size:1.3rem; font-weight:800; }
+  .ph-body{ flex:1; overflow-y:auto; padding:6px 14px 14px; }
+  .ph-tabbar{ display:flex; background:rgba(255,255,255,.97); border-top:1px solid #E7E9EF; padding:7px 0 9px; }
+  .ph-tabbar div{ flex:1; text-align:center; font-size:.64rem; font-weight:700; color:#9CA3AF; line-height:1.5; position:relative; }
+  .ph-tabbar div.on{ color:#3182F6; }
+  .ph-tabbar .ic{ font-size:1.05rem; display:block; }
+  .badge-n{ position:absolute; top:-2px; right:calc(50% - 26px); min-width:16px; height:16px; padding:0 4px;
+            background:#EF4444; color:#fff; font-size:.6rem; font-weight:800; line-height:16px; border-radius:8px; }
+
+  .card{ background:#fff; border:1px solid #EEF0F5; border-radius:14px; padding:12px 14px; margin-bottom:9px; }
+  .row{ display:flex; align-items:center; gap:10px; }
+  .ic-box{ width:38px; height:38px; border-radius:11px; background:#E0EDFF; color:#3182F6;
+           display:flex; align-items:center; justify-content:center; font-size:1.05rem; flex-shrink:0; }
+  .t1{ font-weight:700; font-size:.87rem; }
+  .t2{ font-size:.72rem; color:#9CA3AF; margin-top:2px; }
+  .chev{ color:#CBD5E1; font-size:.8rem; }
+  .dot-n{ min-width:19px; height:19px; padding:0 5px; background:#EF4444; color:#fff; font-size:.68rem;
+          font-weight:800; line-height:19px; text-align:center; border-radius:10px; flex-shrink:0; }
+
+  /* 채팅 */
+  .chat{ background:#F7F8FB; border-radius:12px; padding:12px; display:flex; flex-direction:column; gap:9px; }
+  .msg{ display:flex; flex-direction:column; max-width:82%; }
+  .msg.me{ align-self:flex-end; align-items:flex-end; }
+  .msg .who{ font-size:.64rem; color:#9CA3AF; margin-bottom:2px; }
+  .bub{ padding:9px 12px; border-radius:14px; font-size:.83rem; line-height:1.55; white-space:pre-wrap; }
+  .msg.me .bub{ background:#3182F6; color:#fff; border:1px solid #3182F6; }
+  .msg.you .bub{ background:#fff; color:#191F28; border:1px solid #E5E7EB; }
+  .msg .tm{ font-size:.6rem; color:#CBD5E1; margin-top:2px; }
+  .inputbar{ display:flex; gap:8px; align-items:flex-end; margin-top:10px; }
+  .inputbar .ta{ flex:1; border:1px solid #E5E7EB; border-radius:12px; padding:10px 12px; background:#fff;
+                 font-size:.83rem; color:#9CA3AF; }
+  .inputbar .send{ width:44px; height:42px; border-radius:12px; background:#3182F6; color:#fff;
+                   display:flex; align-items:center; justify-content:center; font-size:1rem; }
+  .ph-topbar{ display:flex; align-items:center; gap:8px; padding:11px 14px; background:#fff; border-bottom:1px solid #EEF0F5; }
+  .ph-topbar .back{ width:28px; height:28px; border-radius:8px; background:#F3F4F6; color:#6B7280;
+                    display:flex; align-items:center; justify-content:center; font-size:.8rem; }
+
+  /* ── 관리자(와이드) ── */
+  .admin{ background:#fff; border:1px solid #E5E7EB; border-radius:14px; overflow:hidden; }
+  .admin-tabs{ display:flex; gap:2px; border-bottom:1px solid #EEF0F5; padding:0 10px; background:#FAFBFD; }
+  .admin-tabs div{ padding:12px 14px; font-size:.82rem; font-weight:600; color:#9CA3AF; }
+  .admin-tabs div.on{ color:#1D4ED8; font-weight:800; border-bottom:2px solid #1D4ED8; background:#fff; }
+  .cs-head{ display:flex; align-items:center; gap:10px; padding:12px 16px; }
+  .cs-head .h{ font-size:.95rem; font-weight:800; }
+  .pill{ font-size:.7rem; padding:3px 9px; border-radius:8px; background:#F3F4F6; color:#374151; font-weight:600; }
+  .pill.b{ background:#E0EDFF; color:#1D4ED8; }
+  .cs-split{ display:flex; gap:0; height:620px; border-top:1px solid #EEF0F5; }
+  .cs-left{ width:330px; flex-shrink:0; border-right:1px solid #EEF0F5; overflow-y:auto; background:#FCFDFF; }
+  .cs-right{ flex:1; min-width:0; display:flex; flex-direction:column; }
+
+  /* 좌: 캠페인 → 리뷰어 트리 */
+  .camp-h{ padding:10px 13px; background:#F1F6FF; border-bottom:1px solid #E3ECFA; }
+  .camp-h .nm{ font-size:.82rem; font-weight:800; color:#1E3A8A; line-height:1.4; }
+  .camp-h .mt{ font-size:.68rem; color:#64748B; margin-top:3px; display:flex; gap:8px; align-items:center; }
+  .rv{ padding:9px 13px 9px 20px; border-bottom:1px solid #F3F4F6; display:flex; align-items:center; gap:9px; cursor:pointer; }
+  .rv:hover{ background:#F9FAFB; }
+  .rv.on{ background:#EEF5FF; box-shadow:inset 3px 0 0 #3182F6; }
+  .rv .av{ width:26px; height:26px; border-radius:50%; background:#E2E8F0; color:#64748B;
+           display:flex; align-items:center; justify-content:center; font-size:.68rem; font-weight:700; flex-shrink:0; }
+  .rv .nm{ font-size:.8rem; font-weight:700; }
+  .rv .pv{ font-size:.7rem; color:#9CA3AF; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+  .rv .tm{ font-size:.66rem; color:#B6BECB; flex-shrink:0; }
+
+  /* 우: 헤더 + 주문정보 + 대화 */
+  .cv-head{ padding:11px 15px; border-bottom:1px solid #EEF0F5; display:flex; align-items:center; gap:9px; }
+  .cv-head .nm{ font-size:.9rem; font-weight:800; }
+  .cv-head .ph{ font-size:.75rem; color:#94A3B8; font-family:monospace; }
+  .cv-head .camp{ font-size:.72rem; color:#64748B; }
+  .btn{ font-size:.72rem; font-weight:700; padding:5px 11px; border-radius:8px; border:1px solid #E5E7EB;
+        background:#fff; color:#374151; }
+  .btn.p{ background:#3182F6; color:#fff; border-color:#3182F6; }
+  .btn.w{ background:#F59E0B; color:#fff; border-color:#F59E0B; }
+
+  .ctx{ display:flex; gap:10px; padding:11px 15px; background:#FBFCFE; border-bottom:1px solid #EEF0F5; }
+  .ctx-card{ flex:1; min-width:0; background:#fff; border:1px solid #E7EBF2; border-radius:10px; padding:10px 12px; }
+  .ctx-card .ct{ font-size:.72rem; font-weight:800; color:#1E3A8A; margin-bottom:7px; display:flex; align-items:center; gap:5px; }
+  .kv{ display:grid; grid-template-columns:66px 1fr; gap:3px 8px; font-size:.74rem; }
+  .kv .k{ color:#94A3B8; }
+  .kv .v{ color:#334155; font-weight:600; word-break:break-all; }
+  .chips{ display:flex; gap:5px; flex-wrap:wrap; margin-top:8px; }
+  .chip{ font-size:.66rem; font-weight:700; padding:2px 7px; border-radius:6px; }
+  .chip.g{ background:#D1FAE5; color:#065F46; }
+  .chip.y{ background:#FEF3C7; color:#92400E; }
+  .chip.r{ background:#FEE2E2; color:#991B1B; }
+  .chip.b{ background:#E0EDFF; color:#1D4ED8; }
+  .memo{ width:230px; flex-shrink:0; background:#FFFDF5; border:1px solid #FDE68A; border-radius:10px; padding:10px 12px; }
+  .memo .ct{ font-size:.72rem; font-weight:800; color:#92400E; }
+  .memo .hint{ font-size:.64rem; color:#B45309; margin-bottom:6px; }
+  .memo .box{ background:#fff; border:1px solid #FDE68A; border-radius:8px; padding:7px 9px; font-size:.74rem;
+              color:#374151; min-height:52px; line-height:1.5; }
+  .cv-body{ flex:1; overflow-y:auto; padding:14px 15px; background:#F7F8FB; display:flex; flex-direction:column; gap:9px; }
+  .cv-foot{ padding:10px 12px; border-top:1px solid #EEF0F5; display:flex; gap:8px; align-items:flex-end; }
+  .daysep{ text-align:center; font-size:.66rem; color:#9CA3AF; margin:2px 0; }
+  .legend{ font-size:.78rem; color:#475569; background:#fff; border:1px solid #E5E7EB; border-left:4px solid #3182F6;
+           border-radius:10px; padding:11px 14px; margin-top:12px; line-height:1.8; }
+  .legend b{ color:#1D4ED8; }
+  @media (max-width:900px){ .cs-split{ height:auto; flex-direction:column; } .cs-left{ width:auto; } .ctx{ flex-direction:column; } .memo{ width:auto; } }
+</style>
+</head>
+<body>
+<div class="wrap">
+
+  <h1>C/S 문의창구 — 캠페인별 문의 화면 시안</h1>
+  <div class="sub">리뷰어 문의를 <b>캠페인(작업) 단위</b>로 묶고, 관리자는 그 캠페인에서 해당 리뷰어의 <b>주문정보를 먼저 보고</b> 응대한다.</div>
+
+  <div class="rulebox">
+    <div><b>문의 기준 변경</b></div>
+    <div>· 기존: <span class="old">리뷰어별 문의 — 김수만의 대화방 1개만 만들어짐</span></div>
+    <div>· 변경: <b>캠페인별 문의</b> — 캠페인(작업) 아래에 <b>문의를 보낸 리뷰어 목록</b>이 만들어짐</div>
+    <div style="margin-top:6px">· 관리자는 대화를 열 때 그 리뷰어가 <b>이 캠페인에서 주문한 내용</b>(주문번호·수취인·연락처·주소·옵션·결제금액·시트 반영 여부·리뷰제출/입금)을 먼저 확인</div>
+  </div>
+
+  <!-- ════════ 리뷰어 화면 ════════ -->
+  <div class="secttl">① 리뷰어 페이지 <span class="tag">휴대폰 화면</span></div>
+  <div class="note">아래쪽 <b>1:1문의</b> 버튼 복구. 문의 목록은 <b>내가 참여한 캠페인</b> 단위이고(상품명으로 표시, 시트 제목은 보이지 않음), 답장이 온 곳은 안 읽은 개수가 숫자로 붙는다.</div>
+
+  <div class="phones">
+    <!-- (1) 문의 목록 -->
+    <div>
+      <div class="phcap">(1) 1:1문의 — 캠페인 선택</div>
+      <div class="phone">
+        <div class="ph-head"><h2>1:1문의</h2>
+          <div style="font-size:.75rem;color:#6B7280;margin-top:3px">문의할 캠페인을 선택하세요</div>
+        </div>
+        <div class="ph-body">
+          <div class="card">
+            <div class="row">
+              <div class="ic-box">📦</div>
+              <div style="flex:1;min-width:0">
+                <div class="t1">[진천블루베리팜] 생블루베리 1kg</div>
+                <div class="t2">진행중 · 이전 문의 2건</div>
+              </div>
+              <span class="dot-n">2</span><span class="chev">›</span>
+            </div>
+          </div>
+          <div class="card">
+            <div class="row">
+              <div class="ic-box">📦</div>
+              <div style="flex:1;min-width:0">
+                <div class="t1">[메디슨벨] 한입 샐러드젤리 골드박스</div>
+                <div class="t2">진행중 · 새 문의</div>
+              </div>
+              <span class="chev">›</span>
+            </div>
+          </div>
+          <div class="card">
+            <div class="row">
+              <div class="ic-box">📦</div>
+              <div style="flex:1;min-width:0">
+                <div class="t1">[레티놀크림] 6/1 쿠팡 100건</div>
+                <div class="t2">종료됨 · 이전 문의 1건</div>
+              </div>
+              <span class="chev">›</span>
+            </div>
+          </div>
+          <div class="card" style="background:#F7F5FF;border-color:#E3DDFF">
+            <div class="row">
+              <div class="ic-box" style="background:#EDE9FE;color:#7C3AED">💬</div>
+              <div style="flex:1;min-width:0">
+                <div class="t1">일반 문의</div>
+                <div class="t2">캠페인과 무관한 문의 (정산·계정 등)</div>
+              </div>
+              <span class="chev">›</span>
+            </div>
+          </div>
+        </div>
+        <div class="ph-tabbar">
+          <div><span class="ic">🏠</span>홈</div>
+          <div class="on"><span class="ic">🎧</span>1:1문의<span class="badge-n">2</span></div>
+          <div><span class="ic">🪪</span>내정보/현황</div>
+          <div><span class="ic">📖</span>가이드</div>
+        </div>
+      </div>
+    </div>
+
+    <!-- (2) 대화방 -->
+    <div>
+      <div class="phcap">(2) 캠페인 대화방 — 관리자와 1:1</div>
+      <div class="phone">
+        <div class="ph-topbar">
+          <div class="back">←</div>
+          <div style="flex:1;min-width:0">
+            <div style="font-weight:800;font-size:.87rem">[진천블루베리팜] 생블루베리 1kg</div>
+            <div style="font-size:.7rem;color:#9CA3AF">관리자에게 문의를 남겨주세요</div>
+          </div>
+          <div style="width:28px;height:28px;border-radius:8px;background:#F3F4F6;color:#6B7280;display:flex;align-items:center;justify-content:center;font-size:.8rem">✕</div>
+        </div>
+        <div class="ph-body" style="background:#F7F8FB">
+          <div class="daysep">2026년 7월 2일</div>
+          <div class="chat" style="background:transparent;padding:0">
+            <div class="msg me">
+              <div class="who">나</div>
+              <div class="bub">구매는 완료했는데 리뷰 등록 기한이 언제까지인가요?</div>
+              <div class="tm">오후 2:29</div>
+            </div>
+            <div class="msg you">
+              <div class="who">관리자 (만두)</div>
+              <div class="bub">안녕하세요 김수만님! 구매 확인했습니다 😊
+배송 완료 후 3일 이내 리뷰 등록 부탁드립니다.</div>
+              <div class="tm">오후 2:35</div>
+            </div>
+            <div class="msg me">
+              <div class="who">나</div>
+              <div class="bub">옵션을 잘못 골라서 주문했는데 그대로 진행해도 되나요?</div>
+              <div class="tm">오후 2:41</div>
+            </div>
+            <div class="msg you">
+              <div class="who">관리자 (만두)</div>
+              <div class="bub">확인해보니 <b>1kg 옵션</b>으로 정상 주문되어 있어요.
+그대로 진행하시면 됩니다!</div>
+              <div class="tm">오후 2:44</div>
+            </div>
+          </div>
+          <div class="inputbar">
+            <div class="ta">메시지를 입력하세요...</div>
+            <div class="send">➤</div>
+          </div>
+        </div>
+        <div class="ph-tabbar">
+          <div><span class="ic">🏠</span>홈</div>
+          <div class="on"><span class="ic">🎧</span>1:1문의</div>
+          <div><span class="ic">🪪</span>내정보/현황</div>
+          <div><span class="ic">📖</span>가이드</div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ════════ 관리자 화면 ════════ -->
+  <div class="secttl">② 관리자 페이지 — C/S문의 탭 <span class="tag">한 화면에서 좌우로</span></div>
+  <div class="note">왼쪽에 <b>캠페인 → 문의한 리뷰어</b>가 차례로 놓입니다. 리뷰어를 고르면 오른쪽에 <b>주문정보 + 관리자 메모</b>가 먼저 보이고 그 아래로 대화가 이어집니다.</div>
+
+  <div class="admin">
+    <div class="admin-tabs">
+      <div>대시보드</div><div>작업 오더</div><div>모집공고</div><div>입금처리</div><div>마감</div><div>리뷰어</div>
+      <div class="on">💬 C/S문의 <span style="background:#EF4444;color:#fff;font-size:.62rem;padding:1px 6px;border-radius:8px;margin-left:3px">5</span></div>
+      <div>설정</div>
+    </div>
+
+    <div class="cs-head">
+      <span class="h">💬 리뷰어 C/S 문의</span>
+      <span class="pill b">캠페인별</span>
+      <span class="pill">미확인 5</span>
+      <div style="margin-left:auto;display:flex;gap:6px;align-items:center">
+        <span class="pill" style="background:#fff;border:1px solid #E5E7EB;color:#9CA3AF">리뷰어/캠페인 검색…</span>
+        <span class="pill" style="background:#fff;border:1px solid #E5E7EB">진행중 ▾</span>
+        <span class="btn p">↻ 새로고침</span>
+      </div>
+    </div>
+
+    <div class="cs-split">
+      <!-- 좌: 캠페인 → 리뷰어 -->
+      <div class="cs-left">
+        <div class="camp-h">
+          <div class="nm">[진천블루베리팜] 생블루베리 1kg</div>
+          <div class="mt"><span>0626 · 네이버 · 14건</span><span style="margin-left:auto;background:#EF4444;color:#fff;font-size:.64rem;font-weight:800;padding:1px 7px;border-radius:9px">미확인 3</span></div>
+        </div>
+        <div class="rv on">
+          <div class="av">김</div>
+          <div style="flex:1;min-width:0">
+            <div class="nm">김수만 <span style="font-size:.68rem;color:#94A3B8;font-family:monospace">85926325</span></div>
+            <div class="pv">옵션을 잘못 골라서 주문했는데…</div>
+          </div>
+          <div class="tm">방금</div><span class="dot-n">2</span>
+        </div>
+        <div class="rv">
+          <div class="av">양</div>
+          <div style="flex:1;min-width:0">
+            <div class="nm">양미경 <span style="font-size:.68rem;color:#94A3B8;font-family:monospace">31447712</span></div>
+            <div class="pv">배송이 아직 안 왔어요</div>
+          </div>
+          <div class="tm">12분 전</div><span class="dot-n">1</span>
+        </div>
+        <div class="rv">
+          <div class="av">박</div>
+          <div style="flex:1;min-width:0">
+            <div class="nm">박은비 <span style="font-size:.68rem;color:#94A3B8;font-family:monospace">77213398</span></div>
+            <div class="pv">리뷰 캡처 다시 올렸습니다</div>
+          </div>
+          <div class="tm">1시간 전</div>
+        </div>
+
+        <div class="camp-h">
+          <div class="nm">[메디슨벨] 한입 샐러드젤리 골드박스</div>
+          <div class="mt"><span>7/3 · 쿠팡 · 100건</span><span style="margin-left:auto;background:#EF4444;color:#fff;font-size:.64rem;font-weight:800;padding:1px 7px;border-radius:9px">미확인 2</span></div>
+        </div>
+        <div class="rv">
+          <div class="av">이</div>
+          <div style="flex:1;min-width:0">
+            <div class="nm">이지유 <span style="font-size:.68rem;color:#94A3B8;font-family:monospace">55010284</span></div>
+            <div class="pv">주문했는데 시트에 안 보여요</div>
+          </div>
+          <div class="tm">32분 전</div><span class="dot-n">2</span>
+        </div>
+        <div class="rv">
+          <div class="av">최</div>
+          <div style="flex:1;min-width:0">
+            <div class="nm">최유진 <span style="font-size:.68rem;color:#94A3B8;font-family:monospace">90118845</span></div>
+            <div class="pv">현금영수증은 어떻게 발행하나요?</div>
+          </div>
+          <div class="tm">3시간 전</div>
+        </div>
+
+        <div class="camp-h" style="background:#F7F5FF;border-color:#E3DDFF">
+          <div class="nm" style="color:#5B21B6">💬 일반 문의 (캠페인 무관)</div>
+          <div class="mt"><span>정산·계정 등</span></div>
+        </div>
+        <div class="rv">
+          <div class="av">한</div>
+          <div style="flex:1;min-width:0">
+            <div class="nm">한서영 <span style="font-size:.68rem;color:#94A3B8;font-family:monospace">62330071</span></div>
+            <div class="pv">계좌를 변경하고 싶어요</div>
+          </div>
+          <div class="tm">어제</div>
+        </div>
+      </div>
+
+      <!-- 우: 대화 + 주문정보 -->
+      <div class="cs-right">
+        <div class="cv-head">
+          <span style="font-size:1rem">💬</span>
+          <div style="min-width:0">
+            <div class="nm">김수만 <span class="ph">85926325</span></div>
+            <div class="camp">🏷 [진천블루베리팜] 생블루베리 1kg <span style="color:#B6BECB">· 시트: 스마트윈_업무시트 (관리자만)</span></div>
+          </div>
+          <div style="margin-left:auto;display:flex;gap:6px">
+            <span class="btn">리뷰어 정보</span>
+            <span class="btn w">문의 종료</span>
+          </div>
+        </div>
+
+        <!-- 먼저 확인: 이 리뷰어가 이 캠페인에서 주문한 내용 -->
+        <div class="ctx">
+          <div class="ctx-card">
+            <div class="ct">🧾 이 캠페인의 주문정보 <span style="font-weight:400;color:#94A3B8">· 시트 12행</span></div>
+            <div class="kv">
+              <div class="k">주문번호</div><div class="v">2026070238119</div>
+              <div class="k">주문자</div><div class="v">김수만</div>
+              <div class="k">수취인</div><div class="v">김수만</div>
+              <div class="k">연락처</div><div class="v">010-8592-6325</div>
+              <div class="k">배송주소</div><div class="v">서울시 강남구 테헤란로 123, 4층 401호</div>
+              <div class="k">옵션</div><div class="v">생블루베리 1kg</div>
+              <div class="k">결제금액</div><div class="v">28,900원</div>
+              <div class="k">구매일자</div><div class="v">2026-07-02</div>
+            </div>
+            <div class="chips">
+              <span class="chip g">시트반영 완료</span>
+              <span class="chip b">리뷰 제출</span>
+              <span class="chip y">입금 대기</span>
+              <span class="chip g">캡처 2장</span>
+            </div>
+          </div>
+          <div class="ctx-card" style="max-width:270px">
+            <div class="ct">📋 참여 이력 <span style="font-weight:400;color:#94A3B8">· 총 7건</span></div>
+            <div class="kv">
+              <div class="k">이 캠페인</div><div class="v">1회 참여 (10차)</div>
+              <div class="k">누적 제출</div><div class="v">6건 / 7건</div>
+              <div class="k">입금 완료</div><div class="v">5건</div>
+              <div class="k">최근 문의</div><div class="v">3건 (2개 캠페인)</div>
+            </div>
+            <div class="chips">
+              <span class="chip g">성실 리뷰어</span>
+              <span class="chip b">타계정 2개</span>
+            </div>
+          </div>
+          <div class="memo">
+            <div class="ct">🔒 관리자 메모</div>
+            <div class="hint">리뷰어 비공개 · 영구저장</div>
+            <div class="box">옵션 혼동 잦음 → 안내 시 옵션명 먼저 확인.
+입금계좌: 카카오뱅크(본인)</div>
+            <div style="margin-top:7px;text-align:right"><span class="btn w" style="padding:4px 10px">메모 저장</span></div>
+          </div>
+        </div>
+
+        <div class="cv-body">
+          <div class="daysep">2026년 7월 2일</div>
+          <div class="msg you">
+            <div class="who">김수만</div>
+            <div class="bub">구매는 완료했는데 리뷰 등록 기한이 언제까지인가요?</div>
+            <div class="tm">오후 2:29</div>
+          </div>
+          <div class="msg me">
+            <div class="who">관리자 (만두)</div>
+            <div class="bub">안녕하세요 김수만님! 구매 확인했습니다 😊
+배송 완료 후 3일 이내 리뷰 등록 부탁드립니다.</div>
+            <div class="tm">오후 2:35</div>
+          </div>
+          <div class="msg you">
+            <div class="who">김수만</div>
+            <div class="bub">옵션을 잘못 골라서 주문했는데 그대로 진행해도 되나요?</div>
+            <div class="tm">오후 2:41</div>
+          </div>
+          <div class="msg me">
+            <div class="who">관리자 (만두)</div>
+            <div class="bub">확인해보니 1kg 옵션으로 정상 주문되어 있어요. 그대로 진행하시면 됩니다!</div>
+            <div class="tm">오후 2:44</div>
+          </div>
+        </div>
+
+        <div class="cv-foot">
+          <div class="ta" style="flex:1;border:1px solid #E5E7EB;border-radius:10px;padding:9px 11px;background:#fff;font-size:.82rem;color:#9CA3AF">답장 입력… (Shift+Enter 줄바꿈)</div>
+          <span class="btn p" style="padding:10px 16px">➤ 전송</span>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <div class="legend">
+    <div><b>정리</b></div>
+    <div>· 문의가 <b>캠페인 안에서 리뷰어별로</b> 나뉘어, 캠페인 아래에 문의한 리뷰어들이 놓입니다 (기존에는 리뷰어 1명당 방 1개)</div>
+    <div>· 왼쪽 캠페인 줄에 <b>안 읽은 문의 합계</b>, 리뷰어 줄에 <b>각자의 안 읽은 개수</b>가 표시됩니다</div>
+    <div>· 오른쪽 주문정보는 <b>리뷰어가 낸 구매양식</b>(주문번호·주문자·수취인·연락처·주소·옵션·결제금액·구매일자)과 <b>시트 반영 결과·작업 시트 명단</b>(시트 줄 위치·반영 여부·차수·리뷰제출·입금)을 모아 보여줍니다 — 그 캠페인의 해당 리뷰어 것만</div>
+    <div>· 리뷰어에게는 <b>시트 제목이 보이지 않습니다</b>(상품명으로 표시) — 시트 이름은 관리자 화면에만 표기</div>
+  </div>
+
+</div>
+</body>
+</html>
