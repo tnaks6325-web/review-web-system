@@ -1697,6 +1697,7 @@ function goToSubmit(items) {
 ═══════════════════════════════════════ */
 let _partInfoSubmitItems = null;   // [리뷰제출하기]가 넘길 대기 항목(완료 시 null)
 let _partInfoChatUrl = '';
+let _partInfoProductUrl = '';      // [상품 바로가기] 버튼용 상품 URL
 
 function _partInfoEnsure(){
   if (document.getElementById('partInfoOvl')) return;
@@ -1728,6 +1729,7 @@ function openPartInfoSheet(items, opts){
   if (!list.length) return;
   _partInfoSubmitItems = done ? null : list;     // 리뷰제출하기는 대기 항목에만
   _partInfoChatUrl = '';
+  _partInfoProductUrl = '';
   _partInfoEnsure();
   const it = list[0];
   const many = list.length > 1;
@@ -1765,21 +1767,32 @@ async function _partInfoLoadBrief(it, done){
     if (!brief){ hide(); _partInfoRenderBtns(done, ''); return; }
     const rows = [];
     if (brief.productLines) rows.push(_partInfoRow('상품', escHtml(brief.productLines).replace(/\n/g,'<br>')));
+    // 📝 리뷰 가이드 (연결 공고 work_detail.reviewGuide) — 길면 스크롤, 줄바꿈 보존
+    const rg = String(brief.reviewGuide || '').trim();
+    if (rg) rows.push(
+      '<div style="margin-top:8px;padding-top:8px;border-top:1px dashed #E5E7EB">' +
+      '<div style="font-weight:800;color:#111827;font-size:.74rem;margin-bottom:5px">📝 리뷰 가이드</div>' +
+      '<div style="color:#374151;font-size:.74rem;line-height:1.6;max-height:220px;overflow:auto;white-space:pre-wrap;word-break:break-word">' + escHtml(rg) + '</div>' +
+      '</div>');
     const pu = String(brief.productUrl || '');
-    if (/^https?:\/\//i.test(pu)) rows.push(_partInfoRow('상품 URL',
-      '<a href="' + _escAttrX(pu) + '" target="_blank" rel="noopener noreferrer" style="color:#1b64da;font-weight:700;word-break:break-all">🔗 ' + escHtml(pu) + '</a>'));
+    _partInfoProductUrl = /^https?:\/\//i.test(pu) ? pu : '';
     if (rows.length){ if (detailEl){ detailEl.style.display=''; detailEl.style.color=''; detailEl.innerHTML = rows.join(''); } }
     else hide();
-    _partInfoRenderBtns(done, brief.chatUrl || '');
+    _partInfoRenderBtns(done, brief.chatUrl || '', _partInfoProductUrl);
   }catch(_){ hide(); _partInfoRenderBtns(done, ''); }
 }
 function _partInfoRow(k, vHtml){
   return '<div style="display:flex;gap:8px;margin:3px 0"><span style="color:#9CA3AF;flex:none;width:52px">' + escHtml(k) + '</span><span style="color:#374151;min-width:0">' + vHtml + '</span></div>';
 }
-function _partInfoRenderBtns(done, chatUrl){
+function _partInfoRenderBtns(done, chatUrl, productUrl){
   const box = document.getElementById('partInfoBtns'); if (!box) return;
   _partInfoChatUrl = chatUrl || '';
+  if (productUrl !== undefined) _partInfoProductUrl = productUrl || '';
   let html = '';
+  // 🛒 상품 바로가기 (상품 페이지 열기)
+  if (_partInfoProductUrl){
+    html += '<button onclick="_partInfoOpenProduct()" style="display:block;width:100%;text-align:center;border:none;cursor:pointer;background:#111827;color:#fff;font-size:.85rem;font-weight:800;border-radius:12px;padding:13px;margin-bottom:8px">🛒 상품 바로가기</button>';
+  }
   if (chatUrl){
     html += '<button onclick="_partInfoOpenChat()" style="display:block;width:100%;text-align:center;border:none;cursor:pointer;background:#FEE500;color:#191919;font-size:.85rem;font-weight:800;border-radius:12px;padding:13px;box-shadow:0 3px 10px rgba(250,225,0,.42)">💬 이 캠페인의 카톡 팀채팅방 입장</button>';
   } else {
@@ -1792,6 +1805,7 @@ function _partInfoRenderBtns(done, chatUrl){
   box.innerHTML = html;
 }
 function _partInfoOpenChat(){ if (_partInfoChatUrl) window.open(_partInfoChatUrl, '_blank', 'noopener'); }
+function _partInfoOpenProduct(){ if (_partInfoProductUrl) window.open(_partInfoProductUrl, '_blank', 'noopener'); }
 function _partInfoSubmit(){ const items = _partInfoSubmitItems; closePartInfo(); if (items && items.length) goToSubmit(items); }
 function _escAttrX(s){ return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;'); }
 
