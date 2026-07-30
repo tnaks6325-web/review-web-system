@@ -14,6 +14,7 @@ const {
 const pool = require('../db/pool');
 const { logger } = require('../utils/logger');
 const { addClient, emitCsInquiry } = require('../utils/sse');
+const { _getReviewerPhoneList } = require('../services/search.service');
 
 // POST /api/reviewer/register — 리뷰어 등록 (GAS: registerReviewer)
 router.post('/register', registerLimiter, async (req, res, next) => {
@@ -374,6 +375,85 @@ router.get('/my-status', async (req, res, next) => {
     res.json({ ok: true, items, stats });
   } catch (err) {
     next(err);
+  }
+});
+
+// GET /api/reviewer/review-earnings?phone8=XX — 리뷰 내역 탭 상단 합계 + 카드별 상품비/리뷰비/썸네일
+//   · 상품비 = order_submissions.price(실제 제출한 결제금액) · 리뷰비 = 연결 공고 review_fee · 썸네일 = thumbnail_url
+//   · 참여중(미제출) review_index 행 기준 합계. 주문 행매칭(sheet_row=row_index) 실패분은 productPrice=null → 프론트 "상품비 조회안됨"
+//   · phone8(본인+타계정) 스코프. 읽기 전용·best-effort(실패해도 목록은 뜸).
+router.get('/review-earnings', async (req, res, next) => {
+  try {
+    const { phone8 } = req.query;
+    if (!phone8 || phone8.length !== 8) {
+      return res.status(400).json({ ok: false, error: 'phone8 필수 (8자리)' });
+    }
+    const phoneList = await _getReviewerPhoneList(phone8);
+
+    // 참여중(미제출) 행
+    const { rows: riRows } = await pool.query(
+      `SELECT sheet_id AS "sheetId", tab_name AS "tabName", row_index AS "rowIndex"
+         FROM review_index
+        WHERE phone8 = ANY($1) AND is_submitted = FALSE AND row_index IS NOT NULL`,
+      [phoneList]
+    );
+    const sheetIds = [...new Set(riRows.map(r => r.sheetId))];
+    const tabNames = [...new Set(riRows.map(r => r.tabName))];
+
+    // 탭별 연결 공고(리뷰비·썸네일) — 탭당 최신 1건
+    const campMap = {};
+    if (sheetIds.length) {
+      const { rows: camps } = await pool.query(
+        `SELECT DISTINCT ON (linked_sheet_id, linked_tab_name)
+                linked_sheet_id AS "sheetId", linked_tab_name AS "tabName",
+                COALESCE(review_fee, 0) AS "reviewFee", thumbnail_url AS "thumbnailUrl"
+           FROM recruit_campaigns
+          WHERE linked_sheet_id = ANY($1) AND linked_tab_name = ANY($2)
+          ORDER BY linked_sheet_id, linked_tab_name, created_at DESC`,
+        [sheetIds, tabNames]
+      );
+      for (const c of camps) campMap[c.sheetId + '||' + c.tabName] = { reviewFee: c.reviewFee || 0, thumbnailUrl: c.thumbnailUrl || '' };
+    }
+
+    // 주문 결제금액(행매칭용) — phone8 스코프, 행 배정된 미삭제 주문
+    const priceMap = {};
+    if (sheetIds.length) {
+      const { rows: orders } = await pool.query(
+        `SELECT sheet_id AS "sheetId", tab_name AS "tabName", sheet_row AS "sheetRow", price
+           FROM order_submissions
+          WHERE RIGHT(regexp_replace(COALESCE(phone, ''), '[^0-9]', '', 'g'), 8) = ANY($1)
+            AND deleted_at IS NULL AND sheet_row IS NOT NULL AND sheet_id = ANY($2)`,
+        [phoneList, sheetIds]
+      );
+      for (const o of orders) {
+        const n = parseInt(String(o.price || '').replace(/[^0-9]/g, ''), 10);
+        if (Number.isFinite(n) && n > 0) priceMap[o.sheetId + '||' + o.tabName + '||' + o.sheetRow] = n;
+      }
+    }
+
+    // 아이템별 맵 + 합계
+    const items = {};
+    let productTotal = 0, reviewTotal = 0, count = 0, productUnknown = 0;
+    for (const r of riRows) {
+      const tk = r.sheetId + '||' + r.tabName;
+      const camp = campMap[tk] || {};
+      const reviewFee = camp.reviewFee || 0;
+      const pk = tk + '||' + r.rowIndex;
+      const price = Object.prototype.hasOwnProperty.call(priceMap, pk) ? priceMap[pk] : null;
+      items[pk] = { reviewFee, productPrice: price, thumbnailUrl: camp.thumbnailUrl || '' };
+      count++;
+      reviewTotal += reviewFee;
+      if (price != null) productTotal += price; else productUnknown++;
+    }
+
+    res.json({
+      ok: true,
+      totals: { productTotal, reviewTotal, grandTotal: productTotal + reviewTotal, count, productUnknown },
+      items,
+    });
+  } catch (err) {
+    logger.warn('[review-earnings] 실패: ' + err.message);
+    res.json({ ok: true, totals: { productTotal: 0, reviewTotal: 0, grandTotal: 0, count: 0, productUnknown: 0 }, items: {} });
   }
 });
 

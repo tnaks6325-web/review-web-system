@@ -239,6 +239,38 @@
     .status-badge-order.reflected { background:#DCFCE7; color:#166534; }
     .result-card.is-order-pending { cursor:default; }
 
+    /* ─── 리뷰 내역 3줄 카드 (참여중): 썸네일 + 날짜·이름 / 상품명 / 상품비·리뷰비 ─── */
+    .camp-thumb {
+      width:46px; height:46px; border-radius:11px; flex-shrink:0; align-self:center;
+      display:flex; align-items:center; justify-content:center; font-size:1.1rem;
+      background:linear-gradient(135deg,#eef2ff,#e0e7ff); border:1px solid #E5E7EB; overflow:hidden;
+    }
+    .camp-thumb img { width:100%; height:100%; object-fit:cover; display:block; }
+    .camp-thumb i { color:var(--p); font-size:1rem; }
+    .c-meta { font-size:.69rem; font-weight:600; color:var(--t3); white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+    .c-meta .c-who { color:var(--t2); font-weight:700; }
+    .c-name { font-size:.83rem; font-weight:700; color:var(--t1); white-space:nowrap; overflow:hidden; text-overflow:ellipsis; margin:2px 0 6px; }
+    .fee-line { display:flex; align-items:center; gap:6px; flex-wrap:nowrap; overflow:hidden; }
+    .fee { font-size:.63rem; font-weight:800; padding:3px 8px; border-radius:7px; white-space:nowrap; font-variant-numeric:tabular-nums; flex:none; }
+    .fee.prod { background:#EEF2FF; color:#3730A3; }
+    .fee.rev  { background:var(--ok-light); color:#065F46; }
+    .fee.unknown { background:#F1F3F6; color:#9199A6; font-weight:700; }
+
+    /* ─── 받을 예정 금액 요약 카드 ─── */
+    .sumcard { background:#fff; border:1px solid #D8E6FA; border-radius:var(--radius); padding:13px 15px; margin-bottom:12px; box-shadow:0 1px 5px rgba(49,130,246,.07); }
+    .sumcard .h { display:flex; align-items:center; justify-content:space-between; margin-bottom:9px; }
+    .sumcard .h .t { font-size:.82rem; font-weight:800; color:var(--t1); }
+    .sumcard .h .cnt { font-size:.64rem; font-weight:700; color:var(--p); background:var(--p-light); padding:3px 9px; border-radius:999px; white-space:nowrap; }
+    .sumrow { display:flex; align-items:center; justify-content:space-between; padding:4px 0; font-size:.8rem; }
+    .sumrow .k { color:var(--t2); font-weight:600; }
+    .sumrow .k small { color:var(--t3); font-weight:500; font-size:.68rem; }
+    .sumrow .v { color:var(--t1); font-weight:700; font-variant-numeric:tabular-nums; }
+    .sumdiv { height:1px; background:#EEF1F7; margin:7px 0; }
+    .sumtot { display:flex; align-items:baseline; justify-content:space-between; }
+    .sumtot .k { font-size:.82rem; font-weight:800; color:var(--t1); }
+    .sumtot .v { font-size:1.28rem; font-weight:800; color:var(--p-dark); font-variant-numeric:tabular-nums; letter-spacing:-.01em; }
+    .sumnote { font-size:.62rem; color:var(--t3); margin-top:7px; line-height:1.5; }
+
     /* ─── Result Group Card ─── */
     .result-group-card {
       background:#fff; border:1px solid var(--border); border-radius:var(--radius);
@@ -846,10 +878,19 @@
         <span class="results-title"><i class="fas fa-clipboard-list" style="color:var(--p)"></i> 리뷰 내역</span>
         <span id="reviewResultsCount" class="results-badge">0건</span>
       </div>
-      <!-- 제출대기 / 제출완료 서브탭 -->
+      <!-- 받을 예정 금액 (참여중 캠페인 기준 상품비 + 리뷰비 자동합계) -->
+      <div class="sumcard" id="reviewEarnings" style="display:none">
+        <div class="h"><div class="t">💰 받을 예정 금액</div><div class="cnt" id="reCnt">참여중 0건</div></div>
+        <div class="sumrow"><span class="k">상품비용 <small>(구매 후 돌려받을 금액)</small></span><span class="v" id="reProd">0원</span></div>
+        <div class="sumrow"><span class="k">리뷰비 <small>(적립)</small></span><span class="v" id="reRev">0원</span></div>
+        <div class="sumdiv"></div>
+        <div class="sumtot"><span class="k">받을 금액 합계</span><span class="v" id="reTot">0원</span></div>
+        <div class="sumnote" id="reNote">※ 참여중 캠페인의 <b>실제 제출한 결제금액 + 리뷰비</b> 자동합계. 정산·입금 상태에 따라 실지급액은 달라질 수 있어요.</div>
+      </div>
+      <!-- 참여중 / 제출완료 서브탭 -->
       <div class="review-subtabs">
         <button type="button" class="review-subtab active" id="subtabPending" onclick="switchReviewSubTab('pending')">
-          제출대기 <span class="cnt" id="subtabPendingCount">0</span>
+          참여중 <span class="cnt" id="subtabPendingCount">0</span>
         </button>
         <button type="button" class="review-subtab" id="subtabDone" onclick="switchReviewSubTab('done')">
           제출완료 <span class="cnt" id="subtabDoneCount">0</span>
@@ -893,6 +934,7 @@
   <!-- 하단 탭바 -->
   <div class="tabbar">
     <button class="tab-home on" onclick="switchTab('home')"><i class="fas fa-house"></i>홈</button>
+    <button class="tab-review" onclick="switchTab('review')"><i class="fas fa-clipboard-list"></i>리뷰내역</button>
     <button id="tabBtnCs" onclick="if(window.ReviewerCS){ReviewerCS.open();}else{try{showToast('잠시 후 다시 시도해주세요');}catch(e){}}" style="position:relative"><i class="fas fa-headset"></i>1:1문의<span id="rcsTabDot" style="display:none;position:absolute;top:0;right:8px;min-width:16px;height:16px;padding:0 4px;background:#EF4444;color:#fff;font-size:.6rem;font-weight:800;line-height:16px;text-align:center;border-radius:8px;box-sizing:border-box"></span></button>
     <button class="tab-my" onclick="switchTab('my')"><i class="fas fa-id-card"></i>내정보/현황</button>
     <button onclick="openOnboard()"><i class="fas fa-book-open"></i>가이드</button>
@@ -1254,6 +1296,50 @@ async function loadReviewList(user, opts = {}) {
   renderReviewSubTab();
   _scheduleOrderPendingRefresh(user);
   _loadMissingCaptures(phone8);   // ⑤ 캡처 빠진 주문 보완 안내(해당 없으면 영역 자체가 숨겨짐)
+  _loadReviewEarnings(phone8);    // ★ 리뷰내역 탭 상단 '받을 예정 금액' + 카드별 상품비/리뷰비(best-effort)
+}
+
+/* ═══ 받을 예정 금액 (참여중 캠페인 기준 상품비 + 리뷰비 자동합계) ═══
+   서버 GET /api/reviewer/review-earnings — 실패해도 목록은 그대로(요약 카드만 숨김). */
+let _reviewEarnings = { totals: null, items: {} };
+function _wonComma(n) { const v = Math.round(Number(n) || 0); return v.toLocaleString('ko-KR') + '원'; }
+function _fnum(n) { return (Math.round(Number(n) || 0)).toLocaleString('ko-KR'); }
+/** 캠페인 썸네일 로드 실패 시 기본 아이콘으로 대체 */
+function _thumbErr(img) { try { img.onerror = null; const p = img.parentNode; if (p) p.innerHTML = '<i class="fas fa-box"></i>'; } catch (_) {} }
+/** 카드 item → 매칭된 상품비/리뷰비/썸네일 (없으면 null) — 키: sheetId||tabName||rowIndex */
+function _feeForItem(item) {
+  if (!item || item.rowIndex == null) return null;
+  const key = (item.sheetId || '') + '||' + (item.tabName || '') + '||' + item.rowIndex;
+  return _reviewEarnings.items[key] || null;
+}
+async function _loadReviewEarnings(phone8) {
+  if (!phone8 || phone8.length !== 8) { _reviewEarnings = { totals: null, items: {} }; renderReviewSummary(); return; }
+  try {
+    const base = (typeof API_BASE_URL !== 'undefined' && API_BASE_URL) ? API_BASE_URL : '';
+    const r = await fetch(base + '/api/reviewer/review-earnings?phone8=' + encodeURIComponent(phone8)).then(x => x.json());
+    if (r && r.ok) _reviewEarnings = { totals: r.totals || null, items: r.items || {} };
+  } catch (_) { /* 조용히 무시 — 요약/배지 없이 목록은 유지 */ }
+  renderReviewSummary();
+  renderReviewSubTab();   // 카드별 상품비/리뷰비 배지 채우기(도착 후 재렌더)
+}
+/** 상단 '받을 예정 금액' 요약 카드 갱신 */
+function renderReviewSummary() {
+  const box = document.getElementById('reviewEarnings');
+  if (!box) return;
+  const t = _reviewEarnings.totals;
+  // 참여중 서브탭에서만, 그리고 집계 대상이 있을 때만 노출
+  if (!t || !t.count || _reviewSubTab === 'done') { box.style.display = 'none'; return; }
+  box.style.display = '';
+  const set = (id, txt) => { const el = document.getElementById(id); if (el) el.textContent = txt; };
+  set('reCnt', '참여중 ' + t.count + '건');
+  set('reProd', _wonComma(t.productTotal));
+  set('reRev', _wonComma(t.reviewTotal));
+  set('reTot', _wonComma(t.grandTotal));
+  const note = document.getElementById('reNote');
+  if (note) {
+    const base = '※ 참여중 캠페인의 <b>실제 제출한 결제금액 + 리뷰비</b> 자동합계. 정산·입금 상태에 따라 실지급액은 달라질 수 있어요.';
+    note.innerHTML = base + (t.productUnknown ? `<br>※ 결제금액이 확인되지 않은 <b>${t.productUnknown}건</b>은 상품비 합계에서 제외됐어요.` : '');
+  }
 }
 
 // ── ⑤ 구매 캡처 보완 ──────────────────────────────────────────
@@ -1353,6 +1439,7 @@ window.addEventListener('pageshow', (e) => {
 function switchReviewSubTab(key) {
   _reviewSubTab = key === 'done' ? 'done' : 'pending';
   renderReviewSubTab();
+  renderReviewSummary();   // 참여중=요약 노출 / 제출완료=숨김
 }
 
 /** yyyy.mm.dd 포맷 (제출완료 카드의 제출일 표시용) */
@@ -1471,21 +1558,49 @@ function renderReviewSubTab() {
 
       const card = document.createElement("div");
       card.className = "result-card" + (isDone ? " done has-editfoot" : "");
-      const _rowHtml = `
-        <div class="result-avatar"><i class="fas ${isDone ? 'fa-check' : 'fa-user'}" style="font-size:.8rem;color:${isDone ? 'var(--ok)' : 'var(--p)'}"></i></div>
+      // 제출완료 카드: 기존 아바타 + 2줄 유지(변경 없음)
+      const _doneRowHtml = `
+        <div class="result-avatar"><i class="fas fa-check" style="font-size:.8rem;color:var(--ok)"></i></div>
         <div class="result-body">${productHtml}</div>
         <div class="result-right">
           ${badgeHtml}
-          ${(isDone || item.isOrderPending) ? '' : '<i class="fas fa-chevron-right result-chevron"></i>'}
         </div>`;
       if (isDone) {
         // 제출완료 카드: 본문(rc-main) + 하단 구분선 액션(이미지 확인·수정요청)을 카드 안 한 몸으로
         // rc-main 클릭 → 참여상품 정보 시트(카톡 재입장). 수정요청 버튼은 stopPropagation으로 격리.
-        card.innerHTML = `<div class="rc-main" style="cursor:pointer">${_rowHtml}</div>`;
+        card.innerHTML = `<div class="rc-main" style="cursor:pointer">${_doneRowHtml}</div>`;
         card.querySelector('.rc-main').addEventListener('click', () => openPartInfoSheet([item], { done: true }));
         card.appendChild(_reEditButtonEl(item));
       } else {
-        card.innerHTML = _rowHtml;
+        // ★ 참여중 카드 = 3줄(날짜·이름 / 상품명 / 상품비·리뷰비) + 캠페인 썸네일
+        const fee = _feeForItem(item);
+        const thumbUrl = (fee && fee.thumbnailUrl) ? fee.thumbnailUrl : '';
+        const thumbHtml = thumbUrl
+          ? `<img src="${_escAttrX(thumbUrl)}" alt="" onerror="_thumbErr(this)">`
+          : '<i class="fas fa-box"></i>';
+        const metaHtml = `<div class="c-meta">${taskDate ? escHtml(taskDate) + ' ' : ''}<span class="c-who">${escHtml(itemName)}</span></div>`;
+        const nameText = taskName || '참여 작업 정보 없음';
+        const optSuffix = optionName ? ` <span style="color:var(--t3);font-weight:600">· 옵션:${escHtml(optionName)}</span>` : '';
+        const nameHtml = `<div class="c-name">${escHtml(nameText)}${roundBadge}${optSuffix}</div>`;
+        let feeLineHtml = '';
+        if (fee) {
+          const prodBadge = (fee.productPrice != null)
+            ? `<span class="fee prod">상품비 ${_fnum(fee.productPrice)}</span>`
+            : `<span class="fee unknown">상품비 조회안됨</span>`;
+          const revBadge = (fee.reviewFee > 0) ? `<span class="fee rev">리뷰비 ${_fnum(fee.reviewFee)}</span>` : '';
+          feeLineHtml = `<div class="fee-line">${prodBadge}${revBadge}</div>`;
+        }
+        card.innerHTML = `
+          <div class="camp-thumb">${thumbHtml}</div>
+          <div class="result-body">
+            ${metaHtml}
+            ${nameHtml}
+            ${feeLineHtml}
+          </div>
+          <div class="result-right">
+            ${badgeHtml}
+            ${item.isOrderPending ? '' : '<i class="fas fa-chevron-right result-chevron"></i>'}
+          </div>`;
         if (item.isOrderPending) {
           card.classList.add("is-order-pending");   // 시트반영 전 주문 = 제출 대상 아님(클릭 비활성)
         } else {
@@ -2419,27 +2534,31 @@ document.addEventListener("DOMContentLoaded", () => {
 let _currentTab = 'all';
 
 function switchTab(tab) {
-  // 신규 2탭 체계로 정규화: home(소식·공지 + 모집공고) / my(내정보 + 참여현황)
+  // 신규 3탭 체계: home(소식·공지 + 모집공고) / review(리뷰 내역) / my(내정보 + 참여현황)
   //   (구 호출 호환: recruit·all→home, status·info→my)
-  const key = (tab === 'my' || tab === 'info' || tab === 'status') ? 'my' : 'home';
+  const key = (tab === 'review') ? 'review'
+            : (tab === 'my' || tab === 'info' || tab === 'status') ? 'my'
+            : 'home';
   _currentTab = key;
   const profile    = document.getElementById('sectionProfile');
   const reviewList = document.getElementById('sectionReviewList');
   const recruit    = document.getElementById('sectionRecruit');
   const news       = document.getElementById('sectionNews');
   const show = (el, on) => { if (el) el.style.display = on ? '' : 'none'; };
-  // 홈: 소식·공지(상) + 모집공고(하) / 내정보·현황: 내정보(상) + 참여현황(하)
+  // 홈: 소식·공지(상) + 모집공고(하) / 리뷰내역: 리뷰 내역(별도 탭) / 내정보·현황: 내정보
   show(news,       key === 'home');
   show(recruit,    key === 'home');
   show(profile,    key === 'my');
-  show(reviewList, key === 'my');
+  show(reviewList, key === 'review');
   // 앱바 타이틀
   const t = document.getElementById('greetingText');
-  if (t) t.textContent = key === 'my' ? '내정보 / 현황' : '홈';
+  if (t) t.textContent = key === 'my' ? '내정보 / 현황' : key === 'review' ? '리뷰 내역' : '홈';
   // 하단 탭 활성 표시
   document.querySelectorAll('.tabbar button').forEach(b => b.classList.remove('on'));
-  const ab = document.querySelector(key === 'my' ? '.tab-my' : '.tab-home');
+  const ab = document.querySelector(key === 'my' ? '.tab-my' : key === 'review' ? '.tab-review' : '.tab-home');
   if (ab) ab.classList.add('on');
+  // 리뷰 내역 탭 진입 시 최신 데이터 재조회(로그인 상태일 때만)
+  if (key === 'review') { try { const u = getSavedUser(); if (u && u.phone8) loadReviewList(u); } catch (_) {} }
   window.scrollTo(0, 0);
 }
 
