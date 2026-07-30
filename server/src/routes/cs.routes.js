@@ -206,6 +206,113 @@ router.post('/status', async (req, res, next) => {
   }
 });
 
+// ── row_json에서 금액류 값 찾아내기(시트마다 헤더명이 달라 키워드 매칭, 표시 전용) ──
+function _pickAmount(rowJson) {
+  if (!rowJson || typeof rowJson !== 'object') return '';
+  for (const [k, v] of Object.entries(rowJson)) {
+    if (!v) continue;
+    const key = String(k);
+    if (!/금액|결제|가격/.test(key)) continue;
+    if (/은행|계좌|예금|입금자/.test(key)) continue;   // 계좌/입금자명 계열 제외
+    const s = String(v).trim();
+    if (s && /[0-9]/.test(s)) return s;
+  }
+  return '';
+}
+
+// GET /api/cs/order-context?threadId= — 문의가 걸린 캠페인에서 그 리뷰어의 주문정보·참여이력
+//   관리자가 대화를 열 때 "미리 보는 정보"용. 기존 원장에서 조립만 하고 새로 쓰는 값은 없음(읽기 전용).
+router.get('/order-context', async (req, res, next) => {
+  try {
+    const threadId = (req.query.threadId || '').toString();
+    if (!threadId) return res.status(400).json({ ok: false, error: 'threadId가 필요합니다.' });
+
+    const { rows: tRows } = await pool.query(
+      `SELECT reviewer_phone8 AS p8, reviewer_name AS nm, campaign_key AS ck
+       FROM cs_threads WHERE id = $1 LIMIT 1`, [threadId]
+    );
+    if (tRows.length === 0) return res.status(404).json({ ok: false, error: '문의방을 찾을 수 없습니다.' });
+    const p8 = tRows[0].p8;
+    const ck = (tRows[0].ck || '').toString();
+
+    // campaign_key = "sheetId||tabName" (일반 문의는 빈 값 → 주문정보 없음)
+    let sheetId = null, tabName = null;
+    const sep = ck.indexOf('||');
+    if (sep > -1) { sheetId = ck.slice(0, sep); tabName = ck.slice(sep + 2); }
+
+    let order = null, sheet = null;
+    if (sheetId && tabName) {
+      // 구매양식 제출 내용 (최근 1건)
+      const { rows: oRows } = await pool.query(
+        `SELECT order_num AS "orderNum", orderer, recipient, phone, address,
+                selected_opt_key AS "option", date_str AS "dateStr",
+                sheet_row AS "sheetRow", mirror_status AS "mirrorStatus",
+                capture_file_id AS "captureFileId", submitted_at AS "submittedAt"
+         FROM order_submissions
+         WHERE sheet_id = $1 AND tab_name = $2 AND deleted_at IS NULL
+           AND RIGHT(regexp_replace(COALESCE(phone, ''), '[^0-9]', '', 'g'), 8) = $3
+         ORDER BY submitted_at DESC LIMIT 1`, [sheetId, tabName, p8]
+      );
+      if (oRows.length) order = oRows[0];
+
+      // 작업 시트 명단 (상품명·차수·리뷰제출·입금 + 금액 표시값)
+      const { rows: rRows } = await pool.query(
+        `SELECT product_name AS "productName", round, is_submitted AS "isSubmitted",
+                is_submitted2 AS "paymentStatus", row_index AS "rowIndex", row_json AS "rowJson"
+         FROM review_index
+         WHERE sheet_id = $1 AND tab_name = $2 AND phone8 = $3
+         ORDER BY built_at DESC LIMIT 1`, [sheetId, tabName, p8]
+      );
+      if (rRows.length) {
+        const r = rRows[0];
+        let rj = r.rowJson;
+        if (typeof rj === 'string') { try { rj = JSON.parse(rj); } catch (_) { rj = null; } }
+        sheet = {
+          productName: r.productName || '',
+          round: r.round || '',
+          isSubmitted: !!r.isSubmitted,
+          isPaid: r.paymentStatus === 'PAID',
+          rowIndex: r.rowIndex,
+          payAmount: _pickAmount(rj),
+        };
+      }
+    }
+
+    // 참여 이력(전체) + 문의 이력
+    const { rows: hRows } = await pool.query(
+      `SELECT COUNT(*)::int AS total,
+              COUNT(*) FILTER (WHERE is_submitted)::int AS submitted,
+              COUNT(*) FILTER (WHERE is_submitted2 = 'PAID')::int AS paid
+       FROM review_index WHERE phone8 = $1`, [p8]
+    );
+    const { rows: iRows } = await pool.query(
+      `SELECT COUNT(*)::int AS threads,
+              COUNT(DISTINCT campaign_key)::int AS campaigns
+       FROM cs_threads WHERE reviewer_phone8 = $1`, [p8]
+    );
+    // 이 캠페인 참여 횟수
+    let campaignJoins = 0;
+    if (sheetId && tabName) {
+      const { rows: cRows } = await pool.query(
+        `SELECT COUNT(*)::int AS n FROM review_index
+         WHERE sheet_id = $1 AND tab_name = $2 AND phone8 = $3`, [sheetId, tabName, p8]
+      );
+      campaignJoins = cRows[0] ? cRows[0].n : 0;
+    }
+
+    res.json({
+      ok: true, order, sheet,
+      history: {
+        total: hRows[0].total, submitted: hRows[0].submitted, paid: hRows[0].paid,
+        campaignJoins,
+        inquiryThreads: iRows[0].threads, inquiryCampaigns: iRows[0].campaigns,
+      },
+    });
+  } catch (err) {
+    next(err);
+  }
+});
+
 // POST /api/cs/memo { phone8, memo } — 리뷰어 관리자 전용 메모 저장(리뷰어정보로 영구 보존)
 router.post('/memo', async (req, res, next) => {
   try {

@@ -870,6 +870,7 @@
   <!-- 하단 탭바 -->
   <div class="tabbar">
     <button class="tab-home on" onclick="switchTab('home')"><i class="fas fa-house"></i>홈</button>
+    <button id="tabBtnCs" onclick="if(window.ReviewerCS){ReviewerCS.open();}else{try{showToast('잠시 후 다시 시도해주세요');}catch(e){}}" style="position:relative"><i class="fas fa-headset"></i>1:1문의<span id="rcsTabDot" style="display:none;position:absolute;top:0;right:8px;min-width:16px;height:16px;padding:0 4px;background:#EF4444;color:#fff;font-size:.6rem;font-weight:800;line-height:16px;text-align:center;border-radius:8px;box-sizing:border-box"></span></button>
     <button class="tab-my" onclick="switchTab('my')"><i class="fas fa-id-card"></i>내정보/현황</button>
     <button onclick="openOnboard()"><i class="fas fa-book-open"></i>가이드</button>
   </div>
@@ -2552,8 +2553,7 @@ function openOnboard(){ const o=document.getElementById('onboard'); if(o) o.clas
 function closeOnboard(){ const o=document.getElementById('onboard'); if(o) o.classList.remove('on'); localStorage.setItem('inad_onboarded','1'); }
 </script>
 <script src="js/pwa.js"></script>
-<!-- 리뷰어 C/S 문의창구 (현재 비활성화)
+<!-- 리뷰어 C/S 문의창구 -->
 <script src="js/reviewer-cs.js"></script>
--->
 </body>
 </html>
