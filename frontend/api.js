@@ -335,6 +335,7 @@ const _ACTION_MAP = {
   'csAdminThreads':        { method: 'GET',  path: '/api/cs/threads' },
   'csAdminUnread':         { method: 'GET',  path: '/api/cs/unread-count' },
   'csAdminMessages':       { method: 'GET',  path: '/api/cs/messages' },
+  'csAdminOrderContext':   { method: 'GET',  path: '/api/cs/order-context' },
   'csAdminReply':          { method: 'POST', path: '/api/cs/reply' },
   'csAdminStatus':         { method: 'POST', path: '/api/cs/status' },
   'csAdminSaveMemo':       { method: 'POST', path: '/api/cs/memo' },

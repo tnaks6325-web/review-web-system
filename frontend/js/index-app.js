@@ -16946,48 +16946,50 @@ function _renderCsRooms(list) {
     wrap.innerHTML = '<div style="padding:40px;text-align:center;color:#9CA3AF;font-size:.85rem"><i class="fas fa-comment-slash" style="font-size:1.6rem;display:block;margin-bottom:8px;opacity:.5"></i>문의가 없습니다.</div>';
     return;
   }
-  // 리뷰어별 그룹핑(이름+phone8 기준), 그룹 내 최근순
+  // ★ 캠페인별 그룹핑 — 캠페인(작업) 아래에 문의를 보낸 리뷰어들이 나열된다.
+  //   (기존 리뷰어별 그룹핑 대체: 같은 작업의 문의를 한자리에서 처리)
+  // ★ campaignKey 자체에 "||"가 들어있어 문자열 합성 키는 쓸 수 없다 → 값에 라벨을 함께 보관
   const groups = new Map();
   list.forEach(r => {
-    const key = (r.reviewerName || "?") + "|" + (r.reviewerPhone8 || "");
-    if (!groups.has(key)) groups.set(key, []);
-    groups.get(key).push(r);
+    const key = r.campaignKey || "";
+    if (!groups.has(key)) groups.set(key, { label: r.campaignLabel || "문의", rows: [] });
+    groups.get(key).rows.push(r);
   });
   let html = "";
-  for (const [key, rooms] of groups) {
-    const [name, phone8] = key.split("|");
+  for (const [campKey, grp] of groups) {
+    const campLabel = grp.label;
+    const rooms = grp.rows;
     const unread = rooms.reduce((s, r) => s + (r.adminUnread || 0), 0);
-    const memo = (rooms.find(r => r.adminMemo) || {}).adminMemo || "";
-    html += `<div style="padding:10px 14px;background:#f7faff;border-bottom:1px solid #eef2f7">
-      <div style="display:flex;align-items:center;gap:8px">
-        <i class="fas fa-user-circle" style="color:#94a3b8"></i>
-        <span style="font-weight:700;color:var(--t1);font-size:.86rem">${escHtml(name)}</span>
-        <span style="color:#94a3b8;font-size:.74rem;font-family:monospace">${escHtml(phone8)}</span>
-        ${unread > 0 ? `<span style="margin-left:auto;background:#EF4444;color:#fff;font-size:.66rem;font-weight:700;padding:1px 7px;border-radius:10px">미확인 ${unread}</span>` : ''}
+    const isGeneral = !campKey;
+    html += `<div style="padding:10px 13px;background:${isGeneral ? '#F7F5FF' : '#f1f6ff'};border-bottom:1px solid ${isGeneral ? '#E3DDFF' : '#e3ecfa'}">
+      <div style="display:flex;align-items:center;gap:7px">
+        <i class="fas ${isGeneral ? 'fa-comment-dots' : 'fa-bullhorn'}" style="color:${isGeneral ? '#7C3AED' : '#3182f6'};font-size:.78rem;flex-shrink:0"></i>
+        <span style="font-weight:800;color:${isGeneral ? '#5B21B6' : '#1E3A8A'};font-size:.82rem;line-height:1.4;flex:1;min-width:0">${escHtml(campLabel)}</span>
+        ${unread > 0 ? `<span style="background:#EF4444;color:#fff;font-size:.64rem;font-weight:800;padding:1px 7px;border-radius:9px;flex-shrink:0">미확인 ${unread}</span>` : ''}
       </div>
-      ${memo ? `<div title="관리자 메모(리뷰어 비공개)" style="margin-top:5px;font-size:.72rem;color:#92400E;background:#FFFBEB;border:1px solid #FDE68A;border-radius:6px;padding:3px 8px;display:flex;gap:5px;align-items:flex-start">
-        <i class="fas fa-lock" style="font-size:.62rem;margin-top:3px;opacity:.7;flex-shrink:0"></i>
-        <span style="white-space:pre-wrap;word-break:break-word">${escHtml(memo)}</span></div>` : ''}
+      <div style="font-size:.68rem;color:#64748B;margin-top:3px">문의 리뷰어 ${rooms.length}명</div>
     </div>`;
     rooms.forEach(r => {
       const nameSafe = (r.reviewerName || "").replace(/'/g, "\\'");
       const phoneSafe = (r.reviewerPhone8 || "").replace(/'/g, "\\'");
-      const statusChip = r.status === 'closed'
-        ? '<span style="background:#F3F4F6;color:#6B7280;font-size:.66rem;padding:1px 7px;border-radius:8px">종료</span>'
-        : '<span style="background:#D1FAE5;color:#065F46;font-size:.66rem;padding:1px 7px;border-radius:8px">진행중</span>';
+      const initial = escHtml((r.reviewerName || "?").trim().charAt(0) || "?");
+      const closedChip = r.status === 'closed'
+        ? '<span style="background:#F3F4F6;color:#6B7280;font-size:.64rem;padding:1px 6px;border-radius:7px;flex-shrink:0">종료</span>' : '';
       html += `<div class="cs-room-row" data-tid="${r.id}" onclick="csOpenConversation('${r.id}','${nameSafe}','${phoneSafe}')"
-        style="padding:11px 16px 11px 30px;border-bottom:1px solid #f3f4f6;display:flex;align-items:center;gap:10px">
+        style="padding:9px 13px 9px 20px;border-bottom:1px solid #f3f4f6;display:flex;align-items:center;gap:9px">
+        <div style="width:26px;height:26px;border-radius:50%;background:#E2E8F0;color:#64748B;display:flex;align-items:center;justify-content:center;font-size:.68rem;font-weight:700;flex-shrink:0">${initial}</div>
         <div style="flex:1;min-width:0">
-          <div style="display:flex;align-items:center;gap:6px;margin-bottom:2px">
-            <i class="fas fa-tag" style="color:#cbd5e1;font-size:.7rem"></i>
-            <span style="font-weight:600;color:var(--t1);font-size:.82rem;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${escHtml(r.campaignLabel || '문의')}</span>
-            ${statusChip}
+          <div style="display:flex;align-items:center;gap:5px">
+            <span style="font-weight:700;color:var(--t1);font-size:.8rem">${escHtml(r.reviewerName || '-')}</span>
+            <span style="color:#94a3b8;font-size:.68rem;font-family:monospace">${escHtml(r.reviewerPhone8 || '')}</span>
+            ${closedChip}
+            ${r.adminMemo ? '<i class="fas fa-lock" title="관리자 메모 있음" style="color:#D97706;font-size:.6rem"></i>' : ''}
           </div>
-          <div style="color:var(--t3);font-size:.76rem;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${escHtml(r.lastMessagePreview || '')}</div>
+          <div style="color:var(--t3);font-size:.7rem;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${escHtml(r.lastMessagePreview || '')}</div>
         </div>
         <div style="text-align:right;flex-shrink:0">
-          <div style="color:#9CA3AF;font-size:.7rem">${_csTimeAgo(r.lastMessageAt)}</div>
-          ${r.adminUnread > 0 ? `<span style="display:inline-block;margin-top:3px;background:#EF4444;color:#fff;font-size:.64rem;font-weight:700;padding:1px 6px;border-radius:9px">${r.adminUnread}</span>` : ''}
+          <div style="color:#B6BECB;font-size:.66rem">${_csTimeAgo(r.lastMessageAt)}</div>
+          ${r.adminUnread > 0 ? `<span style="display:inline-block;margin-top:2px;background:#EF4444;color:#fff;font-size:.64rem;font-weight:800;padding:1px 6px;border-radius:9px">${r.adminUnread}</span>` : ''}
         </div>
       </div>`;
     });
@@ -17018,6 +17020,10 @@ async function csOpenConversation(threadId, reviewerName, reviewerPhone8) {
       </div>
       <button id="csConvStatusBtn" onclick="csToggleStatus()" style="padding:5px 10px;background:#F3F4F6;color:#374151;border:none;border-radius:8px;font-size:.74rem;font-weight:600;cursor:pointer">—</button>
     </div>
+    <!-- ★ 미리 보는 정보: 이 캠페인에서 그 리뷰어의 주문정보 + 참여이력 -->
+    <div id="csCtxWrap" style="display:flex;gap:10px;padding:11px 15px;background:#fbfcfe;border-bottom:1px solid #eef2f7">
+      <div style="flex:1;color:#9CA3AF;font-size:.78rem"><i class="fas fa-circle-notch fa-spin"></i> 주문정보 불러오는 중...</div>
+    </div>
     <div style="display:flex;flex:1;min-height:0">
       <div id="csConvThread" style="flex:1;overflow-y:auto;padding:14px;background:#f9fafb;display:flex;flex-direction:column;gap:8px">
         <div style="text-align:center;color:#9CA3AF;font-size:.82rem"><i class="fas fa-circle-notch fa-spin"></i></div>
@@ -17034,6 +17040,74 @@ async function csOpenConversation(threadId, reviewerName, reviewerPhone8) {
       <button onclick="csSendReply('${threadId}')" style="padding:10px 16px;background:#3182f6;color:#fff;border:none;border-radius:10px;font-weight:700;font-size:.82rem;cursor:pointer;white-space:nowrap"><i class="fas fa-paper-plane"></i></button>
     </div>`;
   await csReloadConversation(threadId);
+  csLoadOrderContext(threadId);
+}
+
+/* ── 미리 보는 정보(주문정보·참여이력) ── */
+async function csLoadOrderContext(threadId) {
+  const wrap = document.getElementById("csCtxWrap");
+  if (!wrap) return;
+  try {
+    const d = await gasGet({ action: "csAdminOrderContext", threadId });
+    if (!d || d.ok === false) throw new Error((d && d.error) || "불러오기 실패");
+    if (_csActiveThreadId !== threadId) return;   // 그새 다른 방으로 이동
+    wrap.innerHTML = _csCtxHtml(d);
+  } catch (err) {
+    if (_csActiveThreadId !== threadId) return;
+    wrap.innerHTML = `<div style="flex:1;color:#9CA3AF;font-size:.76rem">주문정보를 불러오지 못했습니다 (${escHtml(err.message)})</div>`;
+  }
+}
+
+function _csCtxHtml(d) {
+  const o = d.order, s = d.sheet, h = d.history || {};
+  const kv = (k, v) => `<div style="color:#94A3B8">${k}</div><div style="color:#334155;font-weight:600;word-break:break-all">${escHtml(v || '-')}</div>`;
+  const chip = (t, c) => {
+    const col = { g:['#D1FAE5','#065F46'], y:['#FEF3C7','#92400E'], r:['#FEE2E2','#991B1B'], b:['#E0EDFF','#1D4ED8'] }[c] || ['#F3F4F6','#6B7280'];
+    return `<span style="font-size:.66rem;font-weight:700;padding:2px 7px;border-radius:6px;background:${col[0]};color:${col[1]}">${escHtml(t)}</span>`;
+  };
+  // 주문정보 카드
+  let orderCard;
+  if (!o && !s) {
+    orderCard = `<div style="flex:1;min-width:0;background:#fff;border:1px solid #E7EBF2;border-radius:10px;padding:10px 12px">
+      <div style="font-size:.72rem;font-weight:800;color:#1E3A8A;margin-bottom:5px">🧾 이 캠페인의 주문정보</div>
+      <div style="font-size:.76rem;color:#9CA3AF">이 캠페인에서 제출된 구매양식이 없습니다.<br>(일반 문의이거나 아직 주문 전)</div>
+    </div>`;
+  } else {
+    const chips = [];
+    if (o) chips.push(o.mirrorStatus === 'written' ? chip('시트반영 완료','g')
+                     : o.mirrorStatus === 'stuck_manual' ? chip('수동입력 필요','r')
+                     : chip('시트반영 대기','y'));
+    if (s) { chips.push(s.isSubmitted ? chip('리뷰 제출','b') : chip('리뷰 미제출','y'));
+             chips.push(s.isPaid ? chip('입금 완료','g') : chip('입금 대기','y')); }
+    if (o && o.captureFileId) chips.push(chip('캡처 첨부','g'));
+    const rowTxt = (o && o.sheetRow) ? `시트 ${o.sheetRow}행` : (s && s.rowIndex ? `시트 ${s.rowIndex}행` : '');
+    orderCard = `<div style="flex:1;min-width:0;background:#fff;border:1px solid #E7EBF2;border-radius:10px;padding:10px 12px">
+      <div style="font-size:.72rem;font-weight:800;color:#1E3A8A;margin-bottom:7px">🧾 이 캠페인의 주문정보 ${rowTxt ? `<span style="font-weight:400;color:#94A3B8">· ${escHtml(rowTxt)}</span>` : ''}</div>
+      <div style="display:grid;grid-template-columns:66px 1fr;gap:3px 8px;font-size:.74rem">
+        ${o ? kv('주문번호', o.orderNum) : ''}
+        ${o ? kv('주문자', o.orderer) : ''}
+        ${o ? kv('수취인', o.recipient) : ''}
+        ${o ? kv('연락처', o.phone) : ''}
+        ${o ? kv('배송주소', o.address) : ''}
+        ${(o && o.option) ? kv('옵션', o.option) : ''}
+        ${(s && s.payAmount) ? kv('결제금액', s.payAmount) : ''}
+        ${o ? kv('구매일자', o.dateStr) : ''}
+        ${(s && s.productName) ? kv('상품명', s.productName) : ''}
+      </div>
+      <div style="display:flex;gap:5px;flex-wrap:wrap;margin-top:8px">${chips.join('')}</div>
+    </div>`;
+  }
+  // 참여이력 카드
+  const histCard = `<div style="width:250px;flex-shrink:0;background:#fff;border:1px solid #E7EBF2;border-radius:10px;padding:10px 12px">
+    <div style="font-size:.72rem;font-weight:800;color:#1E3A8A;margin-bottom:7px">📋 참여 이력 <span style="font-weight:400;color:#94A3B8">· 총 ${h.total || 0}건</span></div>
+    <div style="display:grid;grid-template-columns:70px 1fr;gap:3px 8px;font-size:.74rem">
+      ${kv('이 캠페인', (h.campaignJoins || 0) + '회 참여' + ((s && s.round) ? ` (${s.round})` : ''))}
+      ${kv('누적 제출', `${h.submitted || 0}건 / ${h.total || 0}건`)}
+      ${kv('입금 완료', `${h.paid || 0}건`)}
+      ${kv('최근 문의', `${h.inquiryThreads || 0}건 (${h.inquiryCampaigns || 0}개 캠페인)`)}
+    </div>
+  </div>`;
+  return orderCard + histCard;
 }
 
 async function csReloadConversation(threadId) {
