@@ -1374,6 +1374,7 @@ async function openCampControl(campId, title) {
       <div style="display:flex;align-items:center;gap:10px;padding:14px 18px;border-bottom:1px solid #E5E7EB">
         <b style="flex:1;font-size:.95rem" id="ccTitle"></b>
         <span id="ccStats" style="font-size:.74rem;color:#4B5563;font-weight:700"></span>
+        <button id="ccMoBtn" title="카톡으로 모집한 외부 리뷰어의 구매양식을 대신 제출합니다" style="font-size:.72rem;font-weight:800;background:#E6FAF6;color:#0F766E;border:1px solid #9EE6D8;border-radius:8px;padding:5px 10px;cursor:pointer;white-space:nowrap">🧾 외부제출</button>
         <button onclick="document.getElementById('campControlOvl').remove()" style="background:none;border:none;font-size:1.1rem;cursor:pointer;color:#9CA3AF"><i class="fas fa-times"></i></button>
       </div>
       <div id="ccBody" style="overflow-y:auto;padding:12px 18px"></div>
@@ -1382,6 +1383,13 @@ async function openCampControl(campId, title) {
     document.body.appendChild(ovl);
   }
   document.getElementById("ccTitle").textContent = "📡 관제 — " + (title || campId);
+  // 🧾 외부참여 수동제출 — 오버레이는 1회만 만들고 재사용하므로 공고가 바뀔 때마다 핸들러를 다시 건다
+  const _moBtn = document.getElementById("ccMoBtn");
+  if (_moBtn) _moBtn.onclick = () => {
+    // 연결 탭 문맥 해석은 campaign-cards.js 한 곳에만 둔다(사본을 두면 화면마다 다른 탭에 쓴다)
+    if (window.CampCards && CampCards.openManualOrder) CampCards.openManualOrder(campId);
+    else showToast("이 화면에서는 외부제출을 열 수 없습니다. 관리자 대시보드에서 진행해 주세요.", "error");
+  };
   document.getElementById("ccBody").innerHTML = `<div style="padding:30px;text-align:center;color:#9CA3AF"><i class="fas fa-circle-notch fa-spin"></i> 불러오는 중...</div>`;
   await _loadCampControl(campId);
 }

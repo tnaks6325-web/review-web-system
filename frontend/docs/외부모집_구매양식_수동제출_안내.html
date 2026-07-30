@@ -1,0 +1,354 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>외부모집 구매양식 · 관리자 수동제출 유저플로우 (목업)</title>
+<style>
+  :root{
+    --blue:#3182f6; --blue-d:#1b64da; --blue-soft:#EBF3FE; --blue-line:#cce0fb;
+    --paper:#F4F5F8; --card:#fff; --ink:#191F28; --muted:#6B7280; --faint:#8B95A1;
+    --line:#EFEFF3; --fill:#F1F2F6;
+    --red:#E5484D; --red-soft:#FEF2F2; --red-line:#FEE2E2;
+    --amber:#B45309; --amber-soft:#FFFBEB; --amber-line:#FDE68A;
+    --green:#15803D; --green-soft:#F0FDF4; --green-line:#BBF7D0;
+    --violet:#6d5ac9; --violet-soft:#efecfa;
+    --sans:'Pretendard',-apple-system,BlinkMacSystemFont,'Segoe UI','Noto Sans KR','Apple SD Gothic Neo',sans-serif;
+    --mono:'SF Mono','JetBrains Mono',ui-monospace,monospace;
+  }
+  *{box-sizing:border-box}
+  body{margin:0;background:#E8EAF0;color:var(--ink);font-family:var(--sans);font-size:14px;line-height:1.6;
+       -webkit-font-smoothing:antialiased;letter-spacing:-.01em;padding:28px 18px 80px}
+  h1{font-size:21px;margin:0 0 6px;letter-spacing:-.02em}
+  .lead{color:#4B5563;font-size:13.5px;margin:0 0 10px;max-width:1200px}
+  .lead b{color:var(--ink)}
+  .now{max-width:1200px;background:var(--red-soft);border:1px solid var(--red-line);border-radius:12px;
+       padding:13px 16px;margin:14px 0 28px;font-size:13px;color:#7F1D1D}
+  .now b{color:#991B1B}
+
+  /* 플로우 레일 */
+  .flow{display:flex;gap:18px;align-items:flex-start;overflow-x:auto;padding:4px 2px 24px;max-width:1400px;margin:0 auto}
+  .step{flex:none;width:370px}
+  .step.narrow{width:320px}
+  .stephd{display:flex;align-items:center;gap:8px;margin-bottom:8px}
+  .stepno{width:23px;height:23px;border-radius:50%;background:var(--ink);color:#fff;font-size:11.5px;font-weight:800;
+          display:flex;align-items:center;justify-content:center;flex:none}
+  .stepttl{font-size:13.5px;font-weight:750}
+  .stepsub{font-size:11.5px;color:var(--muted);margin:-2px 0 10px;min-height:36px}
+  .arrow{flex:none;align-self:center;color:#9CA3AF;font-size:20px;margin-top:110px}
+
+  /* 데스크톱(관리자) 프레임 */
+  .win{background:var(--card);border-radius:14px;border:1px solid var(--line);overflow:hidden;
+       box-shadow:0 2px 4px rgba(17,24,40,.05),0 12px 30px rgba(17,24,40,.10)}
+  .winbar{display:flex;align-items:center;gap:6px;background:#F7F8FB;border-bottom:1px solid var(--line);padding:8px 12px}
+  .dot{width:9px;height:9px;border-radius:50%} .dot.r{background:#FCA5A5}.dot.y{background:#FDE68A}.dot.g{background:#BBF7D0}
+  .wintt{font-size:11px;color:var(--faint);margin-left:6px;font-weight:650}
+  .winbd{padding:13px 14px 15px;background:var(--paper);min-height:330px}
+
+  /* 공용 요소 */
+  .pane{background:#fff;border:1px solid var(--line);border-radius:11px;padding:11px 12px;margin-bottom:9px}
+  .pttl{font-size:12px;font-weight:750;margin-bottom:8px;display:flex;align-items:center;gap:6px}
+  .btn{display:inline-block;border:none;border-radius:9px;font:inherit;font-size:12px;font-weight:750;
+       padding:8px 14px;cursor:default}
+  .btn.pri{background:var(--blue);color:#fff}
+  .btn.ghost{background:var(--fill);color:var(--ink)}
+  .btn.blk{display:block;width:100%;text-align:center;padding:11px;font-size:13px}
+  .bdg{font-size:9.5px;font-weight:800;border-radius:5px;padding:2px 6px;white-space:nowrap}
+  .bdg.red{background:var(--red);color:#fff}
+  .bdg.amb{background:var(--amber-soft);color:var(--amber);border:1px solid var(--amber-line)}
+  .bdg.grn{background:var(--green-soft);color:var(--green);border:1px solid var(--green-line)}
+  .bdg.blu{background:var(--blue-soft);color:var(--blue-d);border:1px solid var(--blue-line)}
+  .bdg.vio{background:var(--violet-soft);color:var(--violet)}
+
+  /* ① 탭 목록 */
+  .trow{display:flex;align-items:center;gap:8px;background:#fff;border:1px solid var(--line);border-radius:10px;
+        padding:10px 12px;margin-bottom:7px;font-size:12px}
+  .trow.sel{border-color:var(--blue);background:var(--blue-soft)}
+  .trow .nm{font-weight:700;flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+  .trow .sub{font-size:10.5px;color:var(--faint)}
+
+  /* ② 붙여넣기 */
+  .ta{background:#fff;border:1.5px dashed var(--blue-line);border-radius:11px;padding:11px 12px;
+      font-family:var(--mono);font-size:10.6px;line-height:1.9;color:var(--ink);word-break:break-all}
+  .ta .ph{color:var(--faint);font-family:var(--sans);font-size:11px}
+
+  /* ③ 분해 표 */
+  .ptable{width:100%;border-collapse:collapse;font-size:10.5px;background:#fff;border-radius:10px;overflow:hidden;
+          border:1px solid var(--line)}
+  .ptable th{background:#F7F8FB;color:var(--muted);font-weight:750;font-size:9.5px;padding:6px 6px;text-align:left;
+             border-bottom:1px solid var(--line);white-space:nowrap}
+  .ptable td{padding:6px 6px;border-bottom:1px solid var(--line);vertical-align:top}
+  .ptable tr:last-child td{border-bottom:none}
+  .ptable td.err{background:var(--red-soft)}
+  .cellfix{color:var(--blue-d);text-decoration:underline dotted;cursor:default}
+
+  /* ④ 캡처 존 */
+  .caprow{display:flex;gap:9px;align-items:stretch;margin-bottom:8px}
+  .capzone{flex:none;width:112px;border:1.5px dashed var(--blue-line);background:#F7FAFF;border-radius:10px;
+           display:flex;flex-direction:column;align-items:center;justify-content:center;padding:10px 6px;text-align:center}
+  .capzone .ic{font-size:17px}
+  .capzone .t{font-size:9.5px;font-weight:700;color:var(--blue-d);margin-top:3px;line-height:1.4}
+  .capdone{flex:none;width:112px;background:var(--green-soft);border:1px solid var(--green-line);border-radius:10px;
+           display:flex;flex-direction:column;align-items:center;justify-content:center;padding:8px 6px;text-align:center}
+  .capdone .th{width:44px;height:34px;border-radius:6px;background:linear-gradient(135deg,#dbeafe,#bfdbfe);
+               display:flex;align-items:center;justify-content:center;font-size:14px;margin-bottom:4px}
+  .capdone .t{font-size:9.5px;font-weight:750;color:var(--green)}
+  .diffbox{flex:1;min-width:0;background:#fff;border:1px solid var(--line);border-radius:10px;padding:8px 10px;font-size:10.5px}
+  .diffrow{display:flex;gap:6px;align-items:center;padding:3px 0}
+  .diffrow .k{flex:none;width:44px;color:var(--faint);font-size:9.5px}
+  .pill{border-radius:6px;padding:1px 7px;font-size:10px}
+  .pill.same{background:var(--fill);color:var(--muted)}
+  .pill.a{background:var(--amber-soft);border:1px solid var(--amber-line);color:var(--amber);font-weight:700}
+  .pill.pick{background:var(--blue-soft);border:1px solid var(--blue-line);color:var(--blue-d);font-weight:700}
+
+  /* ⑤ 결과 */
+  .res{display:flex;align-items:flex-start;gap:9px;background:#fff;border:1px solid var(--line);border-radius:11px;
+       padding:10px 12px;margin-bottom:7px}
+  .res.ok{background:var(--green-soft);border-color:var(--green-line)}
+  .res.no{background:var(--red-soft);border-color:var(--red-line)}
+  .res .ci{width:20px;height:20px;border-radius:50%;flex:none;display:flex;align-items:center;justify-content:center;
+           color:#fff;font-size:11px;font-weight:800;margin-top:1px}
+  .res.ok .ci{background:#22C55E} .res.no .ci{background:var(--red)}
+  .res .t{font-size:12px;font-weight:750}
+  .res .s{font-size:10.5px;color:var(--muted);line-height:1.55}
+
+  /* ⑥ 모바일(리뷰어) 프레임 */
+  .phone{width:100%;background:var(--card);border-radius:20px;box-shadow:0 2px 4px rgba(17,24,40,.05),0 12px 30px rgba(17,24,40,.10);
+         overflow:hidden;border:1px solid var(--line)}
+  .phhd{display:flex;align-items:center;gap:8px;padding:11px 14px;border-bottom:1px solid var(--line)}
+  .phhd .ic{width:26px;height:26px;border-radius:8px;background:linear-gradient(135deg,#3182f6,#3182f6);color:#fff;
+            display:flex;align-items:center;justify-content:center;font-size:12px;flex:none}
+  .phhd .tt{font-size:12.5px;font-weight:750}
+  .phbd{padding:13px 14px 16px;background:var(--paper);min-height:330px}
+  .fld{background:var(--fill);border-radius:10px;padding:9px 11px;font-size:12px;margin-bottom:7px}
+  .fld .lb{font-size:10px;color:var(--faint);display:block}
+
+  /* 하단 요약표 */
+  .why{max-width:1200px;margin:6px auto 0;background:#fff;border:1px solid var(--line);border-radius:13px;padding:16px 18px}
+  .why h2{font-size:14.5px;margin:0 0 10px}
+  .why table{width:100%;border-collapse:collapse;font-size:12.5px}
+  .why th{text-align:left;color:var(--muted);font-weight:700;font-size:11px;padding:6px 9px;border-bottom:1px solid var(--line)}
+  .why td{padding:9px;border-bottom:1px solid var(--line);vertical-align:top}
+  .why tr:last-child td{border-bottom:none}
+  .why .k{font-weight:700;width:150px}
+  code{font-family:var(--mono);font-size:.92em;background:var(--fill);border-radius:5px;padding:1px 5px}
+</style>
+</head>
+<body>
+  <h1>외부모집 구매양식 — 관리자 수동제출 유저플로우 (목업)</h1>
+  <p class="lead">카톡으로 모집한 외부 리뷰어의 구매양식을 <b>구글시트에 손으로 입력하는 대신</b>, 관리자 화면에서 붙여넣기 한 번으로 시스템에 정식 제출하는 흐름입니다. 직원이 실제로 보게 될 화면 순서 그대로입니다.</p>
+
+  <div class="now">
+    <b>지금은 이렇게 하고 있습니다:</b> 카톡에서 슬래시양식을 받아 → 구글시트에 한 칸씩 수기 입력.
+    이 수기 입력이 <b>기록이 덮이는 사고(이지유 사건)</b>의 원인이었고, 모집 인원 집계에도 안 잡히고,
+    외부 리뷰어는 시스템에 없어서 <b>리뷰캡쳐를 우리 시스템으로 제출할 수 없었습니다.</b> 아래 흐름이 이 세 가지를 한 번에 해결합니다.
+  </div>
+
+  <div class="flow">
+
+    <!-- ① 들어가기 -->
+    <div class="step narrow">
+      <div class="stephd"><span class="stepno">1</span><span class="stepttl">들어가기 — 작업 선택</span></div>
+      <div class="stepsub">평소 쓰는 <b>캠페인 탭 관리</b>에서 작업을 고르면 버튼이 있습니다. 들어가는 문은 세 곳이고 <b>화면은 전부 같습니다</b>.</div>
+      <div class="win">
+        <div class="winbar"><span class="dot r"></span><span class="dot y"></span><span class="dot g"></span><span class="wintt">관리자 대시보드 · 캠페인 탭 관리</span></div>
+        <div class="winbd">
+          <div class="trow"><span class="nm">0729)이노크아든_면마스크 200건</span><span class="sub">진행중</span></div>
+          <div class="trow sel"><span class="nm">7/23(쿠팡)우레온_바디미스트 100건</span><span class="bdg blu">선택됨</span></div>
+          <div class="trow"><span class="nm">0721)장수돌침대_탄소매트 900건</span><span class="sub">진행중</span></div>
+          <div class="pane" style="margin-top:12px">
+            <div class="pttl">선택한 작업으로 할 수 있는 일</div>
+            <button class="btn ghost" style="margin-right:6px">탭 설정</button>
+            <button class="btn pri">🧾 외부참여 수동제출</button>
+            <div style="font-size:10.5px;color:var(--faint);margin-top:8px;line-height:1.7">
+              같은 버튼이 있는 다른 두 곳<br>
+              · 모집공고 <b>관제(📡) 창</b> 오른쪽 위 — 그 공고의 진행 현황을 보면서 바로 추가<br>
+              · <b>리뷰어 페이지의 참여형 모집공고 카드</b> 오른쪽 아래 🧾 — 관리자로 로그인한 상태에서만 보입니다
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <div class="arrow">→</div>
+
+    <!-- ② 붙여넣기 -->
+    <div class="step">
+      <div class="stephd"><span class="stepno">2</span><span class="stepttl">카톡 양식 그대로 붙여넣기</span></div>
+      <div class="stepsub">카톡에서 받은 슬래시양식을 <b>통째로 복사해서 붙여넣기</b>. 여러 명이면 여러 줄 — 한 줄이 한 명입니다.</div>
+      <div class="win">
+        <div class="winbar"><span class="dot r"></span><span class="dot y"></span><span class="dot g"></span><span class="wintt">외부참여 수동제출 · 7/23(쿠팡)우레온_바디미스트</span></div>
+        <div class="winbd">
+          <div class="pane">
+            <div class="pttl">구매양식 붙여넣기 <span class="bdg blu">여러 줄 = 여러 건</span></div>
+            <div class="ta">
+              이시현/이시현/kirei223/010-7701-1701/부산시 수영구 광안동 119-3번지, 109호/신한은행/496-04-007701/이시현/15800<br>
+              김수만/이시현/suman_k/010-2233-4455/부산시 수영구 광안동 119-3번지, 109호/신한은행/496-04-007701/이시현/15800<br>
+              박세희/박세희/shp_88/010-9876-5432/서울 마포구 월드컵로 12/3, 302호/국민은행/012-3456-789/박세희/15800
+            </div>
+            <div style="font-size:10.5px;color:var(--faint);margin-top:8px">
+              순서: <b>리뷰어/수취인/아이디/전화번호/주소/은행/계좌번호/예금주/결제금액</b>
+            </div>
+          </div>
+          <button class="btn pri blk">다음 — 자동으로 나누기</button>
+        </div>
+      </div>
+    </div>
+
+    <div class="arrow">→</div>
+
+    <!-- ③ 분해 확인 -->
+    <div class="step" style="width:430px">
+      <div class="stephd"><span class="stepno">3</span><span class="stepttl">자동 분해 — 눈으로 확인만</span></div>
+      <div class="stepsub">시스템이 줄마다 9칸으로 나눠 보여줍니다. <b>주소에 슬래시(/)가 있어도 알아서 주소로 합칩니다.</b> 리뷰어와 수취인이 다르면 <b>타계정</b>으로 표시됩니다.</div>
+      <div class="win">
+        <div class="winbar"><span class="dot r"></span><span class="dot y"></span><span class="dot g"></span><span class="wintt">분해 결과 확인 (칸을 누르면 바로 수정)</span></div>
+        <div class="winbd">
+          <table class="ptable">
+            <thead><tr><th></th><th>리뷰어</th><th>수취인</th><th>전화</th><th>주소</th><th>확인</th></tr></thead>
+            <tbody>
+              <tr>
+                <td>1</td><td>이시현</td><td>이시현</td><td>010-7701-1701</td>
+                <td>부산시 수영구 광안동…</td>
+                <td><span class="bdg grn">본인 참여</span></td>
+              </tr>
+              <tr>
+                <td>2</td><td>김수만</td><td>이시현</td><td>010-2233-4455</td>
+                <td>부산시 수영구 광안동…</td>
+                <td><span class="bdg vio">타계정</span><br><span style="font-size:9px;color:var(--violet)">✓ 기존 리뷰어 김수만에 연결</span></td>
+              </tr>
+              <tr>
+                <td>3</td><td>박세희</td><td>박세희</td><td>010-9876-5432</td>
+                <td>서울 마포구 월드컵로 <b>12/3</b>, 302호</td>
+                <td><span class="bdg amb">신규 등록 예정</span></td>
+              </tr>
+            </tbody>
+          </table>
+          <div style="font-size:10.5px;color:var(--muted);margin-top:8px;line-height:1.6">
+            ✔ 3번 줄: 주소 속 <code>12/3</code>의 슬래시는 <b>자동으로 주소에 합쳐졌습니다</b> — 칸이 밀리지 않습니다.<br>
+            ✔ 2번 줄: 리뷰어≠수취인 → 김수만 리뷰어의 <b>이시현 타계정 참여</b>로 자동 판정.
+              김수만이 미등록이면 <span class="bdg amb">소유자 미확인</span> 경고가 뜹니다.<br>
+            ✔ 잘못된 줄(전화 형식 등)은 <span style="color:#B91C1C;font-weight:700">빨간 표시 + 이유</span>가 뜨고, 칸을 눌러 그 자리에서 고칩니다.
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <div class="arrow">→</div>
+
+    <!-- ④ 캡처 붙여넣기 -->
+    <div class="step" style="width:430px">
+      <div class="stephd"><span class="stepno">4</span><span class="stepttl">구매캡쳐 붙여넣기 (Ctrl+V)</span></div>
+      <div class="stepsub">카톡에서 이미지 <b>복사 → 해당 줄에 붙여넣기</b>만 하면 첨부됩니다. 캡처 속 주문번호는 자동으로 채워집니다.</div>
+      <div class="win">
+        <div class="winbar"><span class="dot r"></span><span class="dot y"></span><span class="dot g"></span><span class="wintt">줄마다 캡처 한 장</span></div>
+        <div class="winbd">
+          <div class="caprow">
+            <div class="capdone">
+              <div class="th">🧾</div>
+              <div class="t">✓ 첨부됨<br>1. 이시현</div>
+            </div>
+            <div class="diffbox">
+              <div class="diffrow"><span class="k">주문번호</span><span class="pill pick">29100077012345 ← 캡처에서 자동 입력</span></div>
+              <div class="diffrow"><span class="k">수취인</span><span class="pill same">이시현 (양식과 일치)</span></div>
+              <div class="diffrow"><span class="k">주소</span><span class="pill a">⚠ 캡처와 다름 — 양식 값 사용 중 (누르면 캡처 값으로 교체)</span></div>
+            </div>
+          </div>
+          <div class="caprow">
+            <div class="capzone">
+              <span class="ic">📋</span>
+              <div class="t">여기에<br>Ctrl+V<br><span style="font-weight:400;color:var(--faint)">2. 김수만(이시현)</span></div>
+            </div>
+            <div class="diffbox" style="display:flex;align-items:center;color:var(--faint);font-size:10.5px">
+              캡처를 붙이면 주문번호·수취인·주소를 자동으로 읽어 양식과 대조합니다
+            </div>
+          </div>
+          <div style="font-size:10.5px;color:var(--faint);line-height:1.6">
+            파일 선택·드래그로도 첨부할 수 있습니다 · 캡처가 없는 줄도 제출은 됩니다(나중에 첨부 가능)
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <div class="arrow">→</div>
+
+    <!-- ⑤ 제출·결과 -->
+    <div class="step">
+      <div class="stephd"><span class="stepno">5</span><span class="stepttl">제출 — 건별 결과 확인</span></div>
+      <div class="stepsub">일부가 실패해도 <b>성공한 건은 그대로 접수</b>됩니다. 실패한 줄만 고쳐서 다시 제출하면 됩니다.</div>
+      <div class="win">
+        <div class="winbar"><span class="dot r"></span><span class="dot y"></span><span class="dot g"></span><span class="wintt">제출 결과 · 3건 중 2건 성공</span></div>
+        <div class="winbd">
+          <div class="res ok"><span class="ci">✓</span>
+            <div><div class="t">1. 이시현 — 접수 완료</div>
+            <div class="s">시트 기록 예약됨 · 리뷰어 자동 등록됨(주소·계좌 포함) · 모집인원 1명 차감</div></div>
+          </div>
+          <div class="res ok"><span class="ci">✓</span>
+            <div><div class="t">2. 김수만(이시현 타계정) — 접수 완료</div>
+            <div class="s">이시현을 김수만 리뷰어의 타계정으로 등록 · 모집인원 1명 차감</div></div>
+          </div>
+          <div class="res no"><span class="ci">!</span>
+            <div><div class="t">3. 박세희 — 실패</div>
+            <div class="s">이 작업에 같은 이름·전화의 참여가 이미 있습니다.<br>
+            <button class="btn ghost" style="margin-top:5px;font-size:10.5px;padding:5px 10px">이 줄 다시 복사</button></div></div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <div class="arrow">→</div>
+
+    <!-- ⑥ 리뷰어 쪽 -->
+    <div class="step narrow">
+      <div class="stephd"><span class="stepno">6</span><span class="stepttl">그 다음 — 리뷰어가 직접</span></div>
+      <div class="stepsub">자동 등록된 외부 리뷰어는 이제 <b>이름+전화번호로 리뷰어 홈에 로그인</b>해서, 리뷰캡쳐를 <b>본인이 직접</b> 제출합니다.</div>
+      <div class="phone">
+        <div class="phhd"><span class="ic">🏠</span><span class="tt">리뷰어 홈 (이시현)</span></div>
+        <div class="phbd">
+          <div class="fld"><span class="lb">로그인</span>이시현 · 010-7701-1701</div>
+          <div class="pane" style="margin-top:10px">
+            <div class="pttl">리뷰 내역 · 제출대기 <span class="bdg blu">1건</span></div>
+            <div style="font-size:12px;font-weight:700">7/23(쿠팡)우레온_바디미스트</div>
+            <div style="font-size:10.5px;color:var(--muted);margin-top:2px">관리자 접수 · 리뷰 작성 후 캡처를 올려주세요</div>
+            <button class="btn pri blk" style="margin-top:9px">📸 리뷰캡쳐 제출하기</button>
+          </div>
+          <div style="font-size:10.5px;color:var(--faint);text-align:center;margin-top:12px;line-height:1.6">
+            주소·계좌가 이미 채워져 있어<br>따로 등록할 것이 없습니다
+          </div>
+        </div>
+      </div>
+    </div>
+
+  </div>
+
+  <div class="why">
+    <h2>각 단계가 해결하는 일</h2>
+    <table>
+      <thead><tr><th>단계</th><th>지금 (시트 수기 입력)</th><th>새 흐름</th></tr></thead>
+      <tbody>
+        <tr><td class="k">② 붙여넣기</td>
+          <td>양식을 보며 시트에 한 칸씩 옮겨 적음 — 오타·칸 밀림</td>
+          <td>카톡 양식 통째로 붙여넣기. 여러 명도 한 번에</td></tr>
+        <tr><td class="k">③ 자동 분해</td>
+          <td>주소에 슬래시가 있으면 사람이 알아서 판단</td>
+          <td>앞 4칸·뒤 4칸을 고정하고 <b>가운데는 전부 주소</b>로 자동 합침 — 칸 밀림 원천 차단</td></tr>
+        <tr><td class="k">③ 타계정 판정</td>
+          <td>리뷰어·수취인 관계를 기억에 의존</td>
+          <td>리뷰어≠수취인이면 자동으로 타계정 처리 + 기존 리뷰어에 연결</td></tr>
+        <tr><td class="k">④ 캡처</td>
+          <td>카톡 사진을 드라이브에 수동 저장하거나 생략</td>
+          <td>Ctrl+V 한 번 — 주문번호 자동 입력 + 양식과 다르면 경고</td></tr>
+        <tr><td class="k">⑤ 정식 접수</td>
+          <td>시트 직접 입력 → <b>기록이 덮이는 사고</b>의 원인, 모집인원 집계 누락</td>
+          <td>리뷰어가 직접 제출한 것과 같은 길로 접수 — 시트 기록·모집인원 차감·관제 표시 전부 자동</td></tr>
+        <tr><td class="k">⑥ 리뷰캡쳐</td>
+          <td>외부 리뷰어는 시스템에 없어 카톡으로 또 받아야 함</td>
+          <td>자동 등록되어 본인이 로그인·제출 — 관리자 손 안 감</td></tr>
+      </tbody>
+    </table>
+    <div style="font-size:11.5px;color:var(--muted);margin-top:12px;line-height:1.6">
+      ※ 흐름이 확정되면 이 목업 그대로 상세 기획(PRD)과 개발로 진행합니다. 단계·문구·배치 모두 조정 가능합니다.
+    </div>
+  </div>
+</body>
+</html>

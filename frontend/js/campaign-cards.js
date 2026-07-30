@@ -117,6 +117,8 @@
       /* [인기!]·상태 리본: 본문 시작점(썸네일 오른쪽) 상단 */
       .rc-view-row .pcard .pt-topleft{top:7px;left:102px;flex-direction:row;flex-wrap:wrap;gap:4px;max-width:calc(100% - 190px)}
       .rc-view-row .pcard .peditchip{bottom:6px;left:6px;font-size:.55rem;padding:2px 6px}
+      /* 행 보기에선 우하단에 [참여하기] 버튼이 와서 겹친다 → 수정 칩 위로 쌓는다 */
+      .rc-view-row .pcard .pmochip{bottom:25px;left:6px;right:auto;font-size:.55rem;padding:2px 6px}
       /* 본문: 배지열과 겹치지 않게 상단 여백. ★ min-width:0 필수 —
          flex 자식 기본값 min-width:auto 라 긴 제목이 줄지 않고 행 전체가 가로로 넘친다(말줄임도 안 먹음) */
       .rc-view-row .pcard .pbody{padding:26px 10px 9px;gap:4px;justify-content:center;min-width:0;flex:1 1 auto}
@@ -137,6 +139,9 @@
       /* 관리자 수정 버튼: 썸네일 좌하단(상단 배지·리본과 겹치지 않게) */
       .pcard .peditchip{position:absolute;bottom:8px;left:8px;z-index:7;font-size:.6rem;font-weight:900;background:#1B64DA;color:#fff;border:none;border-radius:6px;padding:3px 8px;cursor:pointer;box-shadow:0 1px 5px rgba(0,0,0,.3)}
       .pcard .peditchip:hover{background:#1550b8}
+      /* 🧾 외부참여 수동제출(진짜 admin_token 전용) — 수정 칩 반대편에 둬서 서로 안 가린다 */
+      .pcard .pmochip{position:absolute;bottom:8px;right:8px;z-index:7;font-size:.6rem;font-weight:900;background:#0F766E;color:#fff;border:none;border-radius:6px;padding:3px 8px;cursor:pointer;box-shadow:0 1px 5px rgba(0,0,0,.3)}
+      .pcard .pmochip:hover{background:#0c5d57}
       /* 오버레이: 오픈전(회색) / 모집중 시간창(구매마감 카운트다운, 라이브) */
       .pcard .pt-ovl{position:absolute;inset:0;z-index:4;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:2px;padding:6px;text-align:center}
       .pcard .pt-ovl.pre{background:rgba(24,30,45,.62);backdrop-filter:grayscale(1)}
@@ -351,6 +356,7 @@
    */
   function cardHtml(c, o) {
     _injectStyles();   // ★ 카드 HTML만 쓰는 호출부(관리자 목록)도 CSS를 확실히 받게 — 폭 측정(칩 흐름)이 스타일 적용 후 이뤄져야 한다
+    _cacheMoCtx(c);    // 외부제출 문맥(연결 탭) 캐시 — 카드·관제 패널이 같은 값을 본다
     const admin = !!(o && o.admin);
     const channel = c.channel === '직접입력' ? (c.channel_custom || '') : (c.channel || '');
     const fee = c.review_fee ? Number(c.review_fee).toLocaleString() + '원' : '';
@@ -382,6 +388,13 @@
     // 리뷰어 홈에서만 쓰는 인라인 수정 칩 — 관리자 페이지는 하단 액션 바에 [수정]이 있어 불필요
     const editChip = (!admin && _adminTok())
       ? `<button type="button" class="peditchip" onclick="event.stopPropagation();event.preventDefault();CampCards.openAdminEdit('${_esc(c.id)}')">✏️ 관리자 수정</button>`
+      : '';
+    // 🧾 외부참여 수동제출 칩(리뷰어 홈 참여형 카드) — 카톡으로 모집한 외부 리뷰어의 구매양식을
+    //   관리자가 그 자리에서 대리 제출한다. **진짜 admin_token 보유자에게만** 보여준다:
+    //   리뷰어앱 공고수정 스코프 토큰(via:'reviewer_campaign')은 /api/manual-order/* 에 도달할 수
+    //   없어(403) 버튼을 보여주면 막다른 길이 된다(별표 칩과 같은 규율).
+    const moChip = (!admin && c.participation_mode && _realAdminTok())
+      ? `<button type="button" class="pmochip" onclick="event.stopPropagation();event.preventDefault();CampCards.openManualOrder('${_esc(c.id)}')">🧾 외부제출</button>`
       : '';
     // ★ 064: [인기!] 배지 — 관리자가 인기 설정한 공고(일반 모집 1건 제출완료당 1건 참여 조건)
     const popBadge = c.is_popular === true ? `<span class="pt-pop">🔥 인기!</span>` : '';
@@ -471,7 +484,7 @@
     return `
       <article class="pcard${isClosed ? ' is-closed' : ''}${isDaily ? ' is-dim' : ''}" data-camp-id="${_esc(c.id)}"
            onclick="location.href='campaign.html?id=${encodeURIComponent(c.id)}'">
-        <div class="pthumb">${thumbInner}${overlay}${badges}${topleft}${editChip}</div>
+        <div class="pthumb">${thumbInner}${overlay}${badges}${topleft}${editChip}${moChip}</div>
         <div class="pbody">
           <h3 class="ptitle">${_esc(c.title || '(제목 없음)')}</h3>
           <div class="pmeta">${timeTxt ? `<span>${timeIcon} ${_esc(timeTxt)}</span>` : ''}<span class="pt-live">바로참여</span>${fee ? `<span class="pt-fee">💰 ${_esc(fee)}</span>` : ''}</div>
@@ -875,5 +888,60 @@
     }
   }
 
-  window.CampCards = { renderInto, cardHtml, gridHtml, setServerNow, startTicker, _fmtCountdown, _fmtHM, _fmtOpenLabel, _fmtMD, serverNow: _now, _onCardClick, openAdminEdit, togglePin, initChipMarquee: _initChipMarquee };
+  /* ═══════════════════════════════════════════════════════════
+     🧾 외부참여 수동제출 — 진입점 공용 배선
+
+     카톡으로 모집한 외부 리뷰어의 구매양식을 관리자가 대리 제출한다. 실제 화면은
+     `js/manual-order.js`의 공용 모달 하나(ManualOrder)이고, 여기서는 **연결 탭 문맥만**
+     넘긴다. 문맥을 진입점마다 따로 구하면 화면마다 다른 탭에 쓰는 사고가 나므로
+     단일 렌더러(cardHtml)가 캐시하고 여기서만 읽는다.
+
+     ⚠ 리뷰어 홈의 공개 목록 응답에는 linked_* 가 없다(공개 화이트리스트 제외).
+       그래서 캐시가 비면 관리자 조회(GET /api/campaign/:id — admin JWT면 전체 행)로 보충한다.
+     ═══════════════════════════════════════════════════════════ */
+  const _moCtx = {};
+
+  function _cacheMoCtx(c) {
+    if (!c || !c.id) return;
+    const prev = _moCtx[String(c.id)] || {};
+    const sheetId = c.linked_sheet_id || prev.sheetId || '';
+    const tabName = c.linked_tab_name || prev.tabName || '';
+    _moCtx[String(c.id)] = {
+      sheetId, tabName,
+      gid: c.linked_tab_gid || prev.gid || '',
+      title: c.title || prev.title || '',
+      // 정원 차감은 참여형에서만 의미가 있다 — 레거시 공고에 campaignId를 넘기면
+      // 서버가 '참여형 아님'으로 건너뛰며 경고만 남기므로 애초에 안 넘긴다.
+      participation: c.participation_mode === true || prev.participation === true,
+    };
+  }
+
+  /** 공고 id로 외부제출 모달 열기(카드 칩·관제 패널 공용) */
+  async function openManualOrder(id) {
+    if (!window.ManualOrder) { alert('수동제출 모듈을 불러오지 못했습니다. 새로고침해 주세요.'); return; }
+    const tok = _realAdminTok();
+    if (!tok) { alert('관리자 로그인이 필요합니다.'); return; }
+    let ctx = _moCtx[String(id)];
+    if (!ctx || !ctx.sheetId || !ctx.tabName) {
+      // 공개 목록 응답엔 연결 탭이 없다 → 관리자 조회로 보충
+      try {
+        const r = await fetch(_apiBase() + '/api/campaign/' + encodeURIComponent(id), {
+          headers: { 'Authorization': 'Bearer ' + tok },
+        });
+        const j = await r.json();
+        if (j && j.ok && j.data) { _cacheMoCtx(j.data); ctx = _moCtx[String(id)]; }
+      } catch (_) { /* 아래 안내로 수렴 */ }
+    }
+    if (!ctx || !ctx.sheetId || !ctx.tabName) {
+      alert('이 공고에 연결된 작업 탭이 없어 수동제출을 열 수 없습니다.\n공고 수정에서 연결 탭을 먼저 지정해 주세요.');
+      return;
+    }
+    window.ManualOrder.open({
+      sheetId: ctx.sheetId, tabName: ctx.tabName, gid: ctx.gid,
+      campaignId: ctx.participation ? id : null,
+      title: ctx.title || ctx.tabName,
+    });
+  }
+
+  window.CampCards = { renderInto, cardHtml, gridHtml, setServerNow, startTicker, _fmtCountdown, _fmtHM, _fmtOpenLabel, _fmtMD, serverNow: _now, _onCardClick, openAdminEdit, togglePin, openManualOrder, initChipMarquee: _initChipMarquee };
 })();
