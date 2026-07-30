@@ -18,15 +18,55 @@ const MAX_LINES = 50;   // 한 번에 처리할 최대 건수(오붙여넣기로
 
 // ── 파싱 미리보기 (읽기 전용) ────────────────────────────────
 // 제출 전에 9칸 분해 결과를 사람이 확인·수정하게 한다. DB 접근 없음.
-router.post('/preview', authMiddleware, adminOrMasterMiddleware, (req, res) => {
+const AI_REPAIR_MAX = parseInt(process.env.SLASHFORM_AI_REPAIR_MAX || '10', 10);   // 한 요청당 AI 호출 상한
+
+router.post('/preview', authMiddleware, adminOrMasterMiddleware, async (req, res) => {
   const text = String((req.body && req.body.text) || '');
   const all = parseSlashForm(text);
   const items = all.slice(0, MAX_LINES);
+
+  // ── AI 보정 폴백 ────────────────────────────────────────────
+  // 규칙 보정(utils/slashForm.js)이 이미 대부분의 "슬래시 한 칸 누락"을 잡는다.
+  // 여기 오는 건 순서가 뒤섞였거나·라벨이 붙었거나·목록에 없는 은행명 같은 나머지다.
+  // ★ fail-open: AI 미설정·오류·저확신은 **원래 오류 메시지 그대로** 둔다(값을 지어내지 않는다).
+  // ★ 호출 상한 — 잘못 붙여넣은 50줄이 통째로 AI로 가지 않게.
+  if (String(process.env.SLASHFORM_AI_REPAIR || '1') !== '0') {
+    const targets = items.filter(i => !i.ok && /칸이 \d+개뿐/.test(i.errors[0] || '')).slice(0, AI_REPAIR_MAX);
+    if (targets.length) {
+      const { repairSlashFormLine } = require('../services/gemini.service');
+      const { parseSlashLine, FIELD_LABELS } = require('../utils/slashForm');
+      await Promise.all(targets.map(async (it) => {
+        try {
+          const f = await repairSlashFormLine(it.raw);
+          if (!f) return;
+          // AI 결과를 **정규 경로로 재검증**한다 — 9칸을 다시 조립해 같은 파서에 통과시킨다.
+          //   (AI 출력이 파서를 우회해 그대로 접수되는 일이 없게)
+          const rebuilt = [f.reviewerName, f.recipient, f.userId, f.phone, f.address,
+            f.bank, f.account, f.depositor, f.price].map(v => String(v || '').replace(/\//g, ' ')).join('/');
+          const re = parseSlashLine(rebuilt);
+          if (!re.ok) {
+            it.errors = it.errors.concat([`AI 보정도 실패: ${re.errors[0]}`]);
+            return;
+          }
+          Object.assign(it, re, {
+            raw: it.raw,                       // 원문은 보존(사람이 대조)
+            aiRepaired: true,
+            warnings: (re.warnings || []).concat([
+              'AI가 항목을 나눴습니다 — 값이 맞는지 반드시 확인하세요'
+              + (f.confident ? '' : ' (확신이 낮습니다)'),
+            ]),
+          });
+        } catch (_) { /* fail-open — 원래 오류 유지 */ }
+      }));
+    }
+  }
+
   res.json({
     ok: true, items,
     truncated: all.length > MAX_LINES ? all.length - MAX_LINES : 0,
     okCount: items.filter(i => i.ok).length,
     errCount: items.filter(i => !i.ok).length,
+    repairedCount: items.filter(i => (i.repairs || []).length || i.aiRepaired).length,
   });
 });
 

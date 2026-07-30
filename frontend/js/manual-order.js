@@ -78,6 +78,7 @@
 .mo-bdg.vio{background:#efecfa;color:#6d5ac9}
 .mo-bdg.amb{background:#FFFBEB;color:#B45309;border:1px solid #FDE68A}
 .mo-bdg.red{background:#E5484D;color:#fff}
+.mo-bdg.ai{background:#EEF2FF;color:#4338CA;border:1px solid #C7D2FE}
 .mo-cap{width:96px;height:58px;border:1.5px dashed #cce0fb;border-radius:9px;background:#F7FAFF;display:flex;flex-direction:column;
   align-items:center;justify-content:center;cursor:pointer;font-size:9.5px;color:#1b64da;font-weight:700;text-align:center;line-height:1.35;outline:none}
 .mo-cap:focus{border-color:#3182f6;background:#EBF3FE}
@@ -142,7 +143,8 @@
         <div class="mo-hint">
           순서: <b>리뷰어 / 수취인 / 아이디 / 전화번호 / 주소 / 은행 / 계좌번호 / 예금주 / 결제금액</b><br>
           · 주소에 슬래시(/)가 있어도 앞뒤 칸이 밀리지 않게 자동으로 주소로 합칩니다<br>
-          · 리뷰어와 수취인이 다르면 <b>타계정 참여</b>로 처리합니다
+          · 리뷰어와 수취인이 다르면 <b>타계정 참여</b>로 처리합니다<br>
+          · 슬래시(/)가 빠져도 됩니다 — <b>빠진 자리를 자동으로 찾아 나누고</b>, 어떤 항목이 없는지 알려드려요
         </div>
       </div>`,
       `<span class="sp"></span><button class="mo-btn pri" onclick="ManualOrder.parse()">다음 — 자동으로 나누기</button>`);
@@ -160,6 +162,7 @@
     } catch (e) { alert('분해 실패: ' + (e && e.message ? e.message : '서버에 연결하지 못했습니다')); return; }
     if (!r || !r.ok) { alert('분해 실패: ' + ((r && r.error) || '오류')); return; }
     ROWS = (r.items || []).map(it => Object.assign({}, it, { capture: null, extract: null }));
+    if (r.repairedCount) console.info('[ManualOrder] 자동보정 ' + r.repairedCount + '건');
     if (r.truncated) alert(`한 번에 최대 50건까지 처리합니다. ${r.truncated}건은 제외되었습니다.`);
     renderPreview();
   }
@@ -174,13 +177,16 @@
       .join('');
     const inp = (k, w) => `<input class="mo-in" style="${w ? 'min-width:' + w : ''}" value="${esc(f[k] == null ? '' : f[k])}"
         oninput="ManualOrder.edit(${i},'${k}',this.value)">`;
+    // 🔧/🤖 보정 배지 — 자동으로 고친 줄은 반드시 눈에 띄게 표시한다(조용한 수정 금지)
+    const fixBdg = it.aiRepaired ? '<span class="mo-bdg ai">🤖 AI 보정</span>'
+                 : (it.repairs || []).length ? '<span class="mo-bdg amb">🔧 자동보정</span>' : '';
     const capCls = it.capture ? 'mo-cap has' : 'mo-cap';
     const capTxt = it.capture ? '✓ 첨부됨<br>' + (it.extract && it.extract.orderNumber ? '주문번호 인식' : '') : '클릭 후<br>Ctrl+V';
     // 붙여넣기가 안 먹는 브라우저(파이어폭스 등)를 위한 파일 선택 폴백 — 첨부 경로가 하나뿐이면 막힌다
     const capPick = `<label class="mo-pick">파일 선택<input type="file" accept="image/*" hidden
         onchange="ManualOrder.onFile(event,${i})"></label>`;
     return `<tr class="${bad ? 'bad' : ''}">
-      <td style="width:22px;color:#8B95A1">${i + 1}</td>
+      <td style="width:22px;color:#8B95A1">${i + 1}${fixBdg ? '<div style="margin-top:3px">' + fixBdg + '</div>' : ''}</td>
       <td style="width:96px">${inp('reviewerName')}${sub ? '<span class="mo-bdg vio">타계정</span>' : '<span class="mo-bdg grn">본인</span>'}</td>
       <td style="width:86px">${inp('recipient')}</td>
       <td style="width:86px">${inp('userId')}</td>
@@ -201,9 +207,10 @@
   function renderPreview() {
     const okN = ROWS.filter(r => r.ok).length;
     const badN = ROWS.length - okN;
+    const fixN = ROWS.filter(r => (r.repairs || []).length || r.aiRepaired).length;
     shell(`
       <div class="mo-pane">
-        <h4>분해 결과 확인 <span class="mo-bdg grn">정상 ${okN}건</span>${badN ? ` <span class="mo-bdg red">오류 ${badN}건</span>` : ''}</h4>
+        <h4>분해 결과 확인 <span class="mo-bdg grn">정상 ${okN}건</span>${badN ? ` <span class="mo-bdg red">오류 ${badN}건</span>` : ''}${fixN ? ` <span class="mo-bdg amb">자동보정 ${fixN}건</span>` : ''}</h4>
         <div style="overflow-x:auto">
           <table class="mo-tbl">
             <thead><tr>
@@ -215,7 +222,8 @@
         </div>
         <div class="mo-hint">
           · 칸을 눌러 바로 수정할 수 있습니다 · 오류가 있는 줄은 제출에서 제외됩니다<br>
-          · 구매캡쳐 칸을 클릭하고 <b>Ctrl+V</b> 하면 첨부됩니다 — 캡처 속 주문번호를 자동으로 읽습니다
+          · 구매캡쳐 칸을 클릭하고 <b>Ctrl+V</b> 하면 첨부됩니다 — 캡처 속 주문번호를 자동으로 읽습니다<br>
+          · <b>🔧 자동보정 / 🤖 AI 보정</b> 표시가 붙은 줄은 <b>슬래시(/)가 빠진 자리를 시스템이 찾아 나눈 것</b>입니다 — 값이 맞는지 꼭 확인하세요
         </div>
       </div>`,
       `<button class="mo-btn gh" onclick="ManualOrder.back()">← 다시 붙여넣기</button><span class="sp"></span>

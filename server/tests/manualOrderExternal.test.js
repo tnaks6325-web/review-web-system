@@ -487,6 +487,100 @@ console.log('\nG. 홈 관리자 로그인');
     !/reviewer_campaign[\s\S]{0,600}manual-order/.test(auth));
 }
 
+/* ══════════════════════════════════════════════════════════
+   H. 슬래시 누락 자동 보정 (규칙 → AI 폴백)
+   ══════════════════════════════════════════════════════════ */
+console.log('\nH. 슬래시 누락 자동 보정');
+{
+  const SF = require('../src/utils/slashForm');
+  const P = SF.parseSlashLine;
+  const ADDR = '부산시 수영구 광안동 119-3번지, 109호';
+
+  // ★ 사용자가 든 실제 사례 — 예금주와 결제금액 사이 슬래시 누락
+  {
+    const r = P(`이시현/이시현/kirei223/010-7701-1701/${ADDR}/신한은행/496-04-007701/이시현15800`);
+    ok('H1 ★ 예금주+결제금액이 붙어도 보정해 통과', r.ok === true);
+    ok('H2 보정 결과가 제자리에 들어간다', r.fields.depositor === '이시현' && r.fields.price === 15800
+      && r.fields.userId === 'kirei223' && r.fields.account === '496-04-007701');
+    ok('H3 ★ 보정 사실을 경고로 알린다(조용한 자동수정 금지)',
+      (r.repairs || []).length === 1 && r.warnings.some(w => w.includes('예금주와 결제금액')));
+  }
+  ok('H4 은행+계좌번호 붙음', (() => {
+    const r = P(`김하나/김하나/hana1/010-1111-2222/${ADDR}/국민은행123-456-789/김하나/28900`);
+    return r.ok && r.fields.bank === '국민은행' && r.fields.account === '123-456-789';
+  })());
+  ok('H5 아이디+전화번호 붙음', (() => {
+    const r = P(`박서준/박서준/psj010-3333-4444/${ADDR}/신한은행/110-222-333/박서준/12000`);
+    return r.ok && r.fields.userId === 'psj' && r.fields.phone === '010-3333-4444';
+  })());
+  ok('H6 전화번호+주소 붙음', (() => {
+    const r = P(`한지민/한지민/hjm/010-9999-8888${ADDR}/농협/111-222-333/한지민/9000`);
+    return r.ok && r.fields.phone === '010-9999-8888' && r.fields.address === ADDR;
+  })());
+  ok('H7 계좌번호+예금주 붙음', (() => {
+    const r = P(`최유리/최유리/cyr/010-4444-5555/${ADDR}/우리은행/1002-333-444최유리/33000`);
+    return r.ok && r.fields.account === '1002-333-444' && r.fields.depositor === '최유리';
+  })());
+  ok('H8 슬래시 2개가 빠져도 보정', (() => {
+    const r = P(`이시현/이시현/kirei223/010-7701-1701/${ADDR}/신한은행496-04-007701/이시현15800`);
+    return r.ok && r.fields.bank === '신한은행' && r.fields.account === '496-04-007701'
+      && r.fields.depositor === '이시현' && r.fields.price === 15800;
+  })());
+
+  // ★★ 탐욕적 매칭 회귀 방지 — 왼쪽부터 먼저 걸리는 자리를 자르면 `kirei223` 이 kirei/223 으로 갈린다.
+  //    모든 조합을 점수화해 고르는 구조가 아니면 이 케이스가 깨진다(실측 버그).
+  {
+    const r = P(`이시현/이시현/kirei223/010-7701-1701/${ADDR}/신한은행/496-04-007701/이시현15800`);
+    ok('H9 ★★ 아이디 안의 숫자를 잘못 가르지 않는다(탐욕적 매칭 회귀 방지)', r.fields.userId === 'kirei223');
+  }
+
+  ok('H10 정상 9칸은 보정하지 않는다', (() => {
+    const r = P(`이시현/이시현/kirei223/010-7701-1701/${ADDR}/신한은행/496-04-007701/이시현/15800`);
+    return r.ok && (r.repairs || []).length === 0;
+  })());
+  ok('H11 주소 슬래시(칸 초과)는 기존 병합 규칙 그대로 — 보정 아님', (() => {
+    const r = P('김하나/김하나/hana1/010-1111-2222/서울 월드컵로 12/3, 302호/국민은행/123-456-789/김하나/28900');
+    return r.ok && (r.repairs || []).length === 0 && r.fields.address === '서울 월드컵로 12/3, 302호';
+  })());
+
+  // ★ 항목이 통째로 없으면 지어내지 않고 "무엇이 없는지" 짚어 준다
+  {
+    const r = P('한지민/한지민/hjm/010-9999-8888/부산시 해운대구 1로 2/111-222-333/한지민/9000');
+    ok('H12 ★ 은행이 통째로 없으면 보정하지 않고 오류', r.ok === false);
+    ok('H13 어떤 항목이 없는지 알려 준다', (r.missing || []).includes('은행') && /은행/.test(r.errors[0]));
+  }
+  ok('H14 ★ 리뷰어+수취인이 붙은 경우는 자르지 않는다(경계를 알 수 없어 남의 명의 위험)', (() => {
+    const r = P(`김하나이서연/hana1/010-1111-2222/${ADDR}/국민은행/123-456-789/김하나/28900`);
+    return r.ok === false;   // 지어내지 않고 오류로 돌려보낸다
+  })());
+
+  // 앵커가 안 맞으면 보정을 버린다(틀린 값으로 접수 금지)
+  ok('H15 ★ 보정 결과가 말이 안 되면 채택하지 않는다',
+    SF.repairLooksSane(['A', 'A', 'id', '없음', '주소', '은행', '1', 'A', '1000']) === false);
+  ok('H16 형태 판정기 — 전화/금액/계좌/은행/주소',
+    SF.looksPhone('010-1111-2222') && SF.looksPrice('15,800원') && SF.looksAccount('496-04-007701')
+    && !SF.looksAccount('010-1111-2222') && SF.looksBank('카카오뱅크') && SF.looksAddress('서울시 강남구 테헤란로 1'));
+
+  const rt = nc(R('src/routes/manualOrder.routes.js'));
+  ok('H17 AI 폴백은 칸 부족으로 실패한 줄에만 시도(정상 줄은 AI로 안 보냄)',
+    rt.includes('items.filter(i => !i.ok') && rt.includes('칸이 \\d+개뿐'));
+  ok('H18 ★ AI 결과도 같은 파서로 재검증한다(파서 우회 금지)',
+    rt.includes('parseSlashLine(rebuilt)') && rt.includes("re.ok"));
+  ok('H19 ★ AI 호출에 상한이 있다(오붙여넣기가 통째로 AI로 가지 않게)', /AI_REPAIR_MAX/.test(rt));
+  ok('H20 킬스위치', rt.includes('SLASHFORM_AI_REPAIR'));
+  ok('H21 AI 보정 줄은 원문을 보존해 사람이 대조할 수 있다', rt.includes('raw: it.raw'));
+
+  const gs = nc(R('src/services/gemini.service.js'));
+  ok('H22 ★ AI에게 값을 지어내지 말라고 못박는다', /지어내지 마라/.test(gs));
+  ok('H23 이름·전화가 없으면 AI 결과를 버린다(fail-open)',
+    gs.includes("if (!s('phone')) return null;"));
+
+  const mo = F('js/manual-order.js');
+  ok('H24 ★ 보정된 줄은 표에 배지로 드러난다(조용한 수정 금지)',
+    mo.includes('🔧 자동보정') && mo.includes('🤖 AI 보정'));
+  ok('H25 보정 건수를 헤더에 요약', /자동보정 \$\{fixN\}건/.test(mo));
+}
+
 console.log(`\n✅ manualOrderExternal 회귀가드 통과 — ${passed}건\n`);
 }
 
