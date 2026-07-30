@@ -450,6 +450,64 @@ async function explainErrorKo({ flow, step, message, code } = {}) {
 }
 
 // ═══════════════════════════════════════════════════════════
+// 3-b. 슬래시양식 복원 (외부모집 구매양식 관리자 수동제출)
+//   규칙 기반 보정(utils/slashForm.js)이 못 푼 줄만 여기로 온다 — 순서가 뒤섞였거나,
+//   라벨이 붙었거나, 목록에 없는 은행명이거나, 구분자가 슬래시가 아닌 경우 등.
+//   ★ fail-open: 미설정·오류·형식불명은 null → 호출부가 원래 오류 메시지로 되돌아간다.
+//   ★ 값을 **지어내지 않는다** — 없는 칸은 빈 문자열로 두게 해서, 사람이 채우도록 남긴다.
+// ═══════════════════════════════════════════════════════════
+async function repairSlashFormLine(rawLine) {
+  try {
+    if (!_initGemini()) return null;
+    const line = String(rawLine || '').trim().slice(0, 500);
+    if (!line) return null;
+
+    const prompt = `너는 한국 이커머스 리뷰 캠페인의 구매양식 한 줄을 정해진 9개 항목으로 나누는 도우미다.
+
+항목 순서(고정): 리뷰어 / 수취인 / 아이디 / 전화번호 / 주소 / 은행 / 계좌번호 / 예금주 / 결제금액
+
+규칙:
+- 입력에는 구분자(/)가 빠졌거나, 항목 순서가 어긋났거나, 라벨이 섞여 있을 수 있다. 값의 의미로 판단해 제자리에 넣어라.
+- **입력에 없는 값을 지어내지 마라.** 알 수 없는 항목은 반드시 빈 문자열 ""로 둬라.
+- 값은 입력 원문 그대로 옮겨라(맞춤법·주소를 고치지 마라). 전화번호의 하이픈만 정리해도 된다.
+- 리뷰어와 수취인이 같은 사람이면 둘 다 같은 이름을 넣어라. 한쪽만 있으면 나머지는 "".
+- 결제금액은 숫자만(콤마·"원" 제거).
+
+입력: ${line}
+
+반드시 JSON 으로만 답하라:
+{"reviewerName":"","recipient":"","userId":"","phone":"","address":"","bank":"","account":"","depositor":"","price":"","confident":true}
+confident 는 9칸을 자신 있게 나눴으면 true, 추측이 섞였으면 false.`;
+
+    const { text } = await _runModel([{ text: prompt }], '[SlashRepair]');
+    let obj;
+    try { obj = JSON.parse(text); }
+    catch (_) {
+      const m = text && text.match(/\{[\s\S]*\}/);
+      if (!m) return null;
+      try { obj = JSON.parse(m[0]); } catch (_2) { return null; }
+    }
+    if (!obj || typeof obj !== 'object') return null;
+
+    // 최소 신뢰선 — 사람 이름과 전화가 없으면 쓸모가 없다(빈 값으로 접수되면 더 나쁘다)
+    const s = k => String(obj[k] == null ? '' : obj[k]).trim();
+    if (!s('recipient') && !s('reviewerName')) return null;
+    if (!s('phone')) return null;
+    return {
+      reviewerName: s('reviewerName') || s('recipient'),
+      recipient: s('recipient') || s('reviewerName'),
+      userId: s('userId'), phone: s('phone'), address: s('address'),
+      bank: s('bank'), account: s('account'), depositor: s('depositor'),
+      price: s('price'),
+      confident: obj.confident !== false,
+    };
+  } catch (err) {
+    logger.warn(`[Gemini] 슬래시양식 복원 실패(무시): ${err.message}`);
+    return null;
+  }
+}
+
+// ═══════════════════════════════════════════════════════════
 // 4. 오류디버깅 다중 에이전트 분석 — 레드팀/블루팀/감독관/예방가드/결정자
 //    (errorDebug.service 의 "오류검증 및 분석"에서 호출)
 //    ★ 실제 코드를 수정하거나 운영 작업을 재현하지 않는다(정적 분석 + 추론만).
@@ -515,6 +573,7 @@ module.exports = {
   verifyAddressMatch,
   classifySubmissionImage,
   explainErrorKo,
+  repairSlashFormLine,
   analyzeErrorAgents,
   getGeminiStatus,
 };
