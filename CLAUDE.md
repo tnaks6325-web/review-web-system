@@ -141,6 +141,12 @@ GAS(Google Apps Script) 기반 리뷰 관리 시스템을 **Node.js Express + Po
 - 판정(`campaign-workdetail.js`): `inflowType === 'link'` **또는** (`inflowType` 불명 **AND** 유입가이드 내용 없음). `inflowType`은 연결된 `work_orders.inflow_type`에서 오므로 **작업오더 없이 수동 생성한 공고는 항상 불명** — 종전 규칙(`불명이면 노출`)에서 이 공고들이 전부 새어나갔다. 가이드 유무는 `inflowGuideHtml` + 리뷰가이드에서 추출한 첨부 이미지로 판정(안내문 치환 **전에** 계산).
 - 관리자 카드의 유입방식 칩(`campaign-cards.js` `_adminSpec`)도 **같은 기준**으로 판정 — 카드는 링크유입인데 리뷰어 화면엔 버튼이 없는 불일치 차단. 회귀가드 `tests/campWorkDetailShared.test.js`(6케이스)·`tests/campaignGuideView.test.js` ④.
 
+### 오늘 마감 카드 — 아래로 정렬 + 회색 썸네일 + 재오픈 카운트다운
+- 리뷰어 목록에서 **오늘 마감된 공고가 진행 중인 공고 사이에 섞여 있으면** 참여 가능한 공고를 놓친다 → `campaign-cards.js` `sortByAvailability`(공용)로 등급 정렬: 0 지금 참여 가능(open) / 1 곧 열림·잔여 대기(preopen·soft_full) / 2 오늘 마감(cutoff·daily_done) / 3 완전 종료(closed). **안정 정렬**이라 같은 등급 안에서는 서버 순서(⭐ 별표 우선노출·최신순)가 그대로 유지된다. 소비처 = `index.html` 홈 미리보기 · `recruit.html` 목록 · `renderInto`/`gridHtml`. **관리자 모집공고 탭은 미적용**(별표 순서가 관리 의도라 그대로 둔다).
+- **마감 카드 표시**: 썸네일 위에 `.pt-ovl.pre`(반투명 어둠 + `backdrop-filter:grayscale(1)`)를 덮고 가운데에 흰 글씨로 **다시 열릴 때까지 카운트다운**. 같은 말을 하는 `금일 모집완료` 리본은 오버레이가 뜨면 겹치지 않는다(`dailyOverlay`).
+- ★★ **카운트다운 기준은 `reopensAt`이지 `opensAt`이 아니다**: `opensAt`은 **오늘의** window_start(=이미 지난 시각)이고 **자율주문은 아예 null**이라 그대로 쓰면 카운트다운이 0에 붙는다. `computeCampaignState`가 daily_done 세 분기에 `reopensAt`을 따로 실어 준다 — 시트 일정이 있으면 **다음 진행일**, 없으면 내일. 시각은 window_start(자율주문은 KST 자정). 휴무일(rest_day)은 기존 `opensAt`과 같은 값. `opensAt` 시맨틱은 **건드리지 않았다**(카드 시간표기·오픈전 카운트다운·`_fmtHM` 소비처 무영향). 공개 뷰·관리자 목록 양쪽 응답에 실린다.
+- 회귀가드 `tests/manualOrderExternal.test.js` F섹션(상태엔진 실행 + 프론트 배선).
+
 ### 관리자 모집공고 카드 = 리뷰어 카드 (단일 렌더러 · 고정 슬롯)
 - 관리자 모집공고 탭의 카드를 **리뷰어 홈과 같은 함수**(`campaign-cards.js` `cardHtml(c, {admin:true})`)로 그린다 — 사본을 두면 두 화면이 계속 어긋나므로 단일 출처로 묶었다(작업내용 렌더러 공용화와 같은 규율). 리뷰어 응답엔 관리 레이어가 **내려가지 않는다**.
 - **배치**: 리뷰어는 2열 고정(`.pcards-grid`, 앱 폭 고정), 관리자는 `.pcards-grid.pc-admin`으로 `auto-fill minmax(258px,1fr)` = 너비만큼 채움.
@@ -186,8 +192,12 @@ GAS(Google Apps Script) 기반 리뷰 관리 시스템을 **Node.js Express + Po
 - **진입점 3곳 · 공용 모달 1개**(`frontend/js/manual-order.js`, `window.ManualOrder.open({sheetId,tabName,gid,campaignId,title})`): ① 관리자 대시보드 **작업 탭 관리 상세**(`openManualOrderForTab` — 탭 단위라 `campaignId:null`) ② **참여형 관제 패널(📡)** 헤더 `#ccMoBtn` ③ **리뷰어 홈 참여형 카드**의 🧾 칩. 연결 탭 문맥 해석은 **단일 렌더러 `campaign-cards.js`에만**(`_cacheMoCtx`/`openManualOrder`) — 진입점마다 따로 구하면 화면마다 다른 탭에 쓰는 사고가 난다. 공개 목록 응답엔 `linked_*`가 없어(공개 화이트리스트 제외) 캐시가 비면 `GET /api/campaign/:id`(admin JWT=전체 행)로 보충한다.
 - ★ **③의 토큰 게이트**: 리뷰어 홈 칩은 **`_realAdminTok()`(진짜 admin_token)일 때만** 노출한다. 리뷰어앱 공고수정 스코프 토큰(`via:'reviewer_campaign'`)은 `PUT /api/campaign/admin/:id`+`POST /api/product/preview`로만 격리돼 `/api/manual-order/*`에 도달할 수 없으므로(403) 버튼을 보여주면 막다른 길이 된다(⭐ 별표 칩과 같은 규율).
 - **구매캡쳐**: 미리보기 표의 캡처 칸에 **Ctrl+V** → `image-extract`로 주문번호 자동 인식 → 제출 성공 건만 `image-upload`+`orderSubmissionId`로 연결(신규 저장소 0). `imageApiLimiter`는 유효 JWT면 skip이라 일괄 처리에도 안 막힌다.
+- ★★ **빈 값은 시트를 지운다(블로커였던 것)**: `mapOrderToSheetRow`는 날짜·옵션 칸에 `''`를 반환하고 `buildBatchUpdateData`는 `null`만 걸러내므로, `dateStr`/`selectedOptKey`를 비워 보내면 **그 칸을 지우는 쓰기**가 된다. 로스터 행엔 구매일자·옵션이 미리 적혀 있고 **063이 "그 날짜 칸의 값 개수"로 그날 정원을 파생**하므로, 한 건 제출할 때마다 그날 계획 물량이 1 줄어드는 이중 차감이 난다(마감일이 앞당겨져 `schedule_ended`로 뒤집힐 수도). → ① `dateStr`은 리뷰어 제출과 같은 `M / D (요일)`(`todayKstDateStr`) ② 옵션은 화면값→살아있는 홀드→옵션 1종이면 그것, 그래도 못 정하면 **배정된 행의 기존 옵션값을 되쓴다**(`existingOptionKeyAt` — 지우는 대신 원상 복귀, 원장·큐 페이로드 동시 갱신으로 reconcile 재기록까지 일치). ⚠ **공유 매퍼는 고치지 않는다** — `order_cancel`의 칸 비우기와 Track B write-back의 컬럼 disjoint 마스크(`_wbOrderMappedMask`)가 `''` 반환에 의존한다.
+- **오배정·중복 방어**: ① 정원 차감 전 **`tabMatchesCampaign`으로 공고↔탭 결속 검증**(campaignId·sheetId가 독립 입력이라 낡은 화면이면 "A 탭에 쓰면서 B 공고 정원을 깎는다" — 캠페인 행을 이미 잠근 뒤라 비용 0) ② **24시간 내 같은 (시트,탭,연락처) 재접수 차단**(`duplicate`, `force`로만 우회) — 주문번호 없는 건이 대부분이라 dedupKey가 `osid:<uuid>` 폴백으로 매번 새 값이 되어 원장만으로는 못 막고, **재붙여넣기는 결과 화면이 안내하는 예상 복구 동작**이다 ③ 확정 불가한 참여형 건은 **원장 기록 전에** 걸러낸다(시트 행만 생기고 정원은 안 깎이는 어긋난 상태 방지) ④ 서버가 자릿수까지 재검증(phone8 8자리 미만이 원장·정원 키가 되는 것 차단).
+- ★ **사칭 차단**: 타계정 소유자는 **붙여넣은 이름만으로** 찾으므로 이름 한 번 겹치면 실존 리뷰어 신원이 남의 계정에 매달린다 → 063과 같은 `CAMPAIGN_SUB_REGISTERED_POLICY`(block 기본)로 **이미 등록된 번호는 남의 `sub_accounts`에 붙이지 않는다**. 동명이인 2명 이상·미발견도 연결하지 않고 경고(틀린 사람에게 붙이느니 빈 값).
+- **운영 배선**: 큐 등록 후 리뷰어 제출과 같은 `kickOrderBatch`/`kickQueuePump`(없으면 cron까지 시트에 안 뜨고 현황 위젯도 반응 안 함). 오류 메시지는 `/api/manual-order/`를 `isAdminApi`에 넣어 **마스킹하지 않는다**(관리자 도구는 실패 원인이 곧 조치 안내). 캡처는 업로드 전 1920px·JPEG로 축소(본문 10MB 상한 — 전체화면 캡처 413 방지)하고 **업로드 응답을 확인한 뒤에만** "첨부됨"으로 보고.
 - **직원용 유저플로우 목업**: `frontend/docs/외부모집_구매양식_수동제출_안내.html`(개발용어 없는 6단계 와이어프레임).
-- 회귀가드 `tests/manualOrderExternal.test.js`(83케이스 — 파서 순수함수 21 + 스텁 db/client로 **서비스 실제 호출** 29 + 라우터 스택 실검사 8 + 프론트 배선 25).
+- 회귀가드 `tests/manualOrderExternal.test.js`(126케이스 — 파서 순수함수 실행 · 스텁 db/client로 **서비스 실제 호출** · 라우터 스택 실검사 · 프론트 배선 · 데이터 보전(E) · 마감 카드 표시(F)).
 
 ### 구매양식 "제공정보" 추가안내 (제공정보 메모 · 회사 사업자번호)
 - `tab_configs.provider_memo`(034): 탭별 자유 텍스트 "제공정보 메모"(진행방식 안내·특이사항 통합). 관리자 대시보드 탭설정 팝오버에서 편집. 구매양식 제출화면(`search.html`)의 "📦 제공정보" 카드에 표시되며 **공란이면 영역 미노출**.

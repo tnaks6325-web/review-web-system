@@ -154,7 +154,10 @@
     const el = document.getElementById('moText');
     const text = el ? el.value : '';
     if (!text.trim()) { alert('붙여넣은 내용이 없습니다.'); return; }
-    const r = await api('/api/manual-order/preview', { method: 'POST', body: JSON.stringify({ text }) });
+    let r;
+    try {
+      r = await api('/api/manual-order/preview', { method: 'POST', body: JSON.stringify({ text }) });
+    } catch (e) { alert('분해 실패: ' + (e && e.message ? e.message : '서버에 연결하지 못했습니다')); return; }
     if (!r || !r.ok) { alert('분해 실패: ' + ((r && r.error) || '오류')); return; }
     ROWS = (r.items || []).map(it => Object.assign({}, it, { capture: null, extract: null }));
     if (r.truncated) alert(`한 번에 최대 50건까지 처리합니다. ${r.truncated}건은 제외되었습니다.`);
@@ -244,7 +247,18 @@
     if (btn) { const n = ROWS.filter(r => r.ok).length; btn.disabled = !n; btn.textContent = n + '건 제출'; }
     // 오류 여부가 바뀐 줄만 색을 맞춘다(표 재렌더 없이 — 입력 중 포커스 유지)
     const tr = document.querySelectorAll('.mo-tbl tbody tr')[i];
-    if (tr) tr.classList.toggle('bad', bad);
+    if (tr) {
+      tr.classList.toggle('bad', bad);
+      // 고친 줄에 옛 ✕/⚠ 문구가 남아 있으면 "아직 오류"로 읽힌다 → 함께 갱신
+      tr.querySelectorAll('.mo-msg').forEach(el => el.remove());
+      const cell = tr.lastElementChild;
+      if (cell && bad) {
+        const d = document.createElement('div');
+        d.className = 'mo-msg e';
+        d.textContent = '✕ ' + it.errors[0];
+        cell.appendChild(d);
+      }
+    }
   }
 
   // ── 캡처 붙여넣기 → AI 추출 ────────────────────────────────
@@ -261,26 +275,58 @@
     const f = ev.target && ev.target.files && ev.target.files[0];
     if (f) attach(i, f);
   }
+  /**
+   * 붙여넣은 캡처를 1920px·JPEG로 줄인다.
+   * ★ 서버 본문 상한이 10MB라 윈도우 전체화면 캡처를 원본 base64로 보내면 413으로 통째로 실패한다
+   *   (리뷰어 경로도 같은 이유로 compressImage를 거친다). 실패 시 원본으로 폴백.
+   */
+  function shrink(file) {
+    return new Promise(resolve => {
+      const done = (b64, mime) => resolve({ base64: b64, mime });
+      const raw = () => {
+        const rd = new FileReader();
+        rd.onload = () => done(String(rd.result || '').split(',')[1] || '', file.type || 'image/jpeg');
+        rd.onerror = () => resolve(null);
+        rd.readAsDataURL(file);
+      };
+      if (file.size <= 1024 * 1024 && file.type === 'image/jpeg') return raw();
+      const img = new Image();
+      const url = URL.createObjectURL(file);
+      img.onload = () => {
+        URL.revokeObjectURL(url);
+        try {
+          let w = img.width, h = img.height;
+          if (w > 1920) { h = Math.round(h * (1920 / w)); w = 1920; }
+          const cv = document.createElement('canvas');
+          cv.width = w; cv.height = h;
+          cv.getContext('2d').drawImage(img, 0, 0, w, h);
+          const durl = cv.toDataURL('image/jpeg', 0.75);
+          done(durl.split(',')[1] || '', 'image/jpeg');
+        } catch (_) { raw(); }
+      };
+      img.onerror = () => { URL.revokeObjectURL(url); raw(); };
+      img.src = url;
+    });
+  }
+
   function attach(i, file) {
     const row = ROWS[i]; if (!row) return;
-    const rd = new FileReader();
-    rd.onload = async () => {
-      const dataUrl = String(rd.result || '');
-      const b64 = dataUrl.split(',')[1];
-      if (!b64) return;
-      row.capture = { base64: b64, mime: file.type || 'image/jpeg' };
+    (async () => {
+      const shrunk = await shrink(file);
+      if (!shrunk || !shrunk.base64) { alert('이미지를 읽지 못했습니다.'); return; }
+      const b64 = shrunk.base64;
+      row.capture = { base64: b64, mime: shrunk.mime };
       renderPreview();
       // 캡처에서 주문번호 등 자동 인식(실패해도 첨부는 유지)
       try {
-        const r = await api('/api/image/image-extract', { method: 'POST', body: JSON.stringify({ imageBase64: b64, mimeType: file.type || 'image/jpeg' }) });
+        const r = await api('/api/image/image-extract', { method: 'POST', body: JSON.stringify({ imageBase64: b64, mimeType: shrunk.mime }) });
         if (r && r.ok) {
           row.extract = r;
           if (r.orderNumber && !row.fields.orderNum) row.fields.orderNum = r.orderNumber;
           renderPreview();
         }
       } catch (_) { /* 추출 실패는 무시 — 슬래시양식이 정본 */ }
-    };
-    rd.readAsDataURL(file);
+    })();
   }
 
   // ── 3단계: 제출 ────────────────────────────────────────────
@@ -315,10 +361,11 @@
     // 성공 건의 캡처를 주문에 연결(기존 업로드 경로 재사용 — 신규 저장소 0)
     for (let k = 0; k < (out.results || []).length; k++) {
       const res = out.results[k];
-      const src = targets[k] && targets[k].r;
+      const t = (res && typeof res.index === 'number') ? targets[res.index] : targets[k];
+      const src = t && t.r;
       if (!res || !res.ok || !src || !src.capture || !res.orderSubmissionId) continue;
       try {
-        await api('/api/image/image-upload', {
+        const up = await api('/api/image/image-upload', {
           method: 'POST',
           body: JSON.stringify({
             imageBase64: src.capture.base64, mimeType: src.capture.mime,
@@ -327,8 +374,14 @@
             orderSubmissionId: res.orderSubmissionId,
           }),
         });
-        res.captureAttached = true;
-      } catch (_) { res.captureAttached = false; }
+        res.captureAttached = !!(up && up.ok);
+        if (!res.captureAttached) {
+          (res.warnings = res.warnings || []).push('구매캡쳐 첨부 실패: ' + ((up && up.error) || '알 수 없는 오류'));
+        }
+      } catch (e) {
+        res.captureAttached = false;
+        (res.warnings = res.warnings || []).push('구매캡쳐 첨부 실패: ' + (e && e.message ? e.message : '오류'));
+      }
     }
 
     BUSY = false;

@@ -263,19 +263,22 @@ console.log('\nC. 라우트 권한');
     names: l.route.stack.map(s => s.name),
   }));
   const find = p => layers.find(l => l.path === p);
-  ok('C1 세 라우트가 등록돼 있다', layers.length === 3
-    && !!find('/preview') && !!find('/reviewer-search') && !!find('/submit'));
+  ok('C1 라우트가 등록돼 있다(미배선 PII 표면 없음 — reviewer-search 는 제거)',
+    layers.length === 2 && !!find('/preview') && !!find('/submit') && !find('/reviewer-search'));
   ok('C2 ★ 전부 authMiddleware + adminOrMasterMiddleware 뒤에 있다',
     layers.every(l => l.names.includes('authMiddleware') && l.names.includes('adminOrMasterMiddleware')));
   ok('C3 제출은 POST 전용', find('/submit').methods.join() === 'post');
 
   const src = nc(R('src/routes/manualOrder.routes.js'));
   ok('C4 한 번에 처리할 건수에 상한이 있다(오붙여넣기 사고 방지)', /MAX_LINES\s*=\s*\d+/.test(src));
-  ok('C5 ★ 리뷰어 검색은 전화번호를 통째로 반환하지 않는다(뒤 4자리만)',
-    src.includes('tail4:') && !/items:\s*rows\.map\(r => \(\{[^}]*phone:/.test(src));
+  ok('C5 ★ 서버가 자릿수까지 재검증 — phone8 8자리 미만이 원장·정원 키가 되는 것 차단',
+    /pd\.length !== 11 && pd\.length !== 10/.test(src));
+  ok('C5b 필수 항목을 서버가 다시 본다(프론트 우회 직접 호출 방어)',
+    /const missing = \['recipient', 'phone', 'address', 'bank', 'account', 'depositor'\]/.test(src));
   ok('C6 건별 독립 처리 — 한 건 실패가 전체를 되돌리지 않는다',
     /for \(let i = 0; i < items\.length; i\+\+\)/.test(src) && src.includes('try {') && src.includes('results.push'));
-  ok('C7 미리보기는 DB에 손대지 않는다', !/pool\.query/.test(src.slice(src.indexOf("'/preview'"), src.indexOf("'/reviewer-search'"))));
+  ok('C7 미리보기는 DB에 손대지 않는다', !/pool\.query/.test(src.slice(src.indexOf("'/preview'"), src.indexOf("'/submit'"))));
+  ok('C9 파싱을 두 번 하지 않는다', (src.match(/parseSlashForm\(/g) || []).length === 1);
 }
 {
   const app = nc(R('src/app.js'));
@@ -323,7 +326,9 @@ console.log('\nD. 프론트 배선');
   const ir = F('js/index-recruit.js');
   ok('D16 관제 패널에 외부제출 버튼', ir.includes('id="ccMoBtn"'));
   ok('D17 관제 버튼은 열 때마다 현재 공고로 다시 배선(오버레이 재사용 함정)',
-    /_moBtn\.onclick = \(\) => \{/.test(ir) && ir.includes('CampCards.openManualOrder(campId)'));
+    /_moBtn\.onclick = \(\) =>/.test(ir) && ir.includes('CampCards.openManualOrder(campId)'));
+  ok('D17b 모듈이 없는 화면(admin-siand)에서는 버튼을 숨긴다 — 눌러도 안 되는 버튼 금지',
+    /_moBtn\.style\.display = _moReady \? "" : "none"/.test(ir));
   ok('D18 문맥 해석 사본을 index-recruit 에 두지 않는다', !ir.includes('ManualOrder.open('));
 }
 {
@@ -342,6 +347,117 @@ console.log('\nD. 프론트 배선');
   const idx = F('index.html');
   ok('D23 index.html 은 api.js → manual-order.js 순서(오리진 판정 선행)',
     idx.indexOf('src="api.js"') < idx.indexOf('js/manual-order.js'));
+}
+
+/* ══════════════════════════════════════════════════════════
+   E. 코드리뷰 반영분 — 되돌리면 데이터가 상하는 것들
+   ══════════════════════════════════════════════════════════ */
+console.log('\nE. 데이터 보전 가드');
+{
+  // ★★ 블로커였던 것: 빈 dateStr/옵션은 `mapOrderToSheetRow`가 ''로 매핑하고
+  //    `buildBatchUpdateData`는 null만 걸러내므로 **그 칸을 지우는 쓰기**가 된다.
+  //    로스터의 구매일자가 지워지면 063이 그 날짜 칸 개수로 정원을 세므로 그날 물량이 함께 줄어든다.
+  const ol = require('../src/services/orderLedger.service');
+  const headers = ['번호', '구매일자', '수취인', '연락처', '주소', '옵션', '은행'];
+  const blank = ol.mapOrderToSheetRow(headers, { recipient: 'A' });
+  ok('E1 (전제) 매퍼는 빈 날짜·옵션을 null이 아니라 ""로 반환 — 그래서 빈 값은 삭제 쓰기가 된다',
+    blank[1] === '' && blank[5] === '' && blank[0] === null);
+
+  const d = svc.todayKstDateStr(new Date('2026-07-30T01:00:00Z'));  // KST 10:00 목
+  ok('E2 ★ 구매일자를 리뷰어 제출과 같은 형식으로 채운다(빈 값 금지)', d === '7 / 30 (목)');
+  ok('E3 KST 경계 — UTC 전날 늦은 시각도 KST 날짜로', svc.todayKstDateStr(new Date('2026-07-30T15:30:00Z')) === '7 / 31 (금)');
+
+  const src = nc(R('src/services/manualOrder.service.js'));
+  ok('E4 ★ orderData.dateStr 에 빈 문자열을 넣지 않는다', /dateStr: todayKstDateStr\(\)/.test(src) && !/dateStr: ''/.test(src));
+
+  // 옵션 되쓰기 — 배정 행에 이미 적힌 값을 그대로 돌려준다(지우지 않는다)
+  const ctx = { headers, dataRows: [{ rowIndex: 12, cells: ['1', '7 / 30', 'A', '', '', '콰이어트', ''] }] };
+  ok('E5 ★ 옵션 미확정이면 그 행의 기존 옵션값을 되쓴다(지우지 않음)',
+    svc.existingOptionKeyAt(ctx, 12) === '콰이어트');
+  ok('E6 옵션 칸이 비어 있으면 되쓸 것도 없다', svc.existingOptionKeyAt(
+    { headers, dataRows: [{ rowIndex: 12, cells: ['1', '', 'A', '', '', '', ''] }] }, 12) === '');
+  ok('E7 옵션 칸이 없는 탭은 무영향', svc.existingOptionKeyAt({ headers: ['수취인'], dataRows: [{ rowIndex: 1, cells: ['A'] }] }, 1) === '');
+  ok('E8 배정 행을 못 찾으면 되쓰지 않는다', svc.existingOptionKeyAt(ctx, 99) === '');
+  ok('E9 서비스가 실제로 되쓰기를 배선했다', /existingOptionKeyAt\(ledger\.tabContext, ledger\.sheetRow\)/.test(src));
+
+  ok('E10 ★ 공유 매퍼는 건드리지 않았다 — order_cancel의 칸 비우기·TrackB 컬럼 disjoint 마스크가 ""에 의존',
+    /return orderData\.dateStr \|\| '';/.test(R('src/services/orderLedger.service.js')));
+}
+{
+  const src = nc(R('src/services/manualOrder.service.js'));
+  ok('E11 ★ 공고↔탭 결속을 확인한 뒤에만 정원을 깎는다', src.includes('tabMatchesCampaign(cRows[0]'));
+  ok('E12 결속 확인은 캠페인 행을 잠근 뒤(추가 왕복 없음)',
+    src.indexOf('FOR UPDATE') < src.indexOf('tabMatchesCampaign(cRows[0]'));
+  ok('E13 ★ 24시간 내 같은 연락처 재접수는 막는다(재붙여넣기 = 예상되는 복구 동작)',
+    /submitted_at > NOW\(\) - interval '24 hours'/.test(src) && /duplicate: true/.test(src));
+  ok('E14 중복 확인은 force 로만 우회', /if \(!force\) \{/.test(src));
+  ok('E15 ★ 확정 불가한 참여형 건은 원장 기록 **전에** 걸러낸다(시트만 쓰이고 정원은 안 깎이는 상태 방지)',
+    src.indexOf("status = 'submitted' LIMIT 1") < src.indexOf('createOrderLedgerEntry('));
+  ok('E16 ★ 등록된 리뷰어 번호를 남의 타계정으로 붙이지 않는다(063과 같은 정책 스위치)',
+    src.includes('CAMPAIGN_SUB_REGISTERED_POLICY') && src.includes('sub_accounts'));
+  ok('E17 큐 등록 후 kick — cron까지 시트에 안 뜨던 문제', /kickOrderBatch\(sheetId, tabName\)/.test(src));
+}
+{
+  const em = R('src/middleware/error.middleware.js');
+  ok('E18 관리자 전용 도구라 오류 메시지를 마스킹하지 않는다', em.includes("startsWith('/api/manual-order/')"));
+}
+{
+  const mo = F('js/manual-order.js');
+  ok('E19 캡처는 업로드 전에 줄인다(본문 10MB 상한 — 전체화면 캡처 413 방지)',
+    /toDataURL\('image\/jpeg', 0\.75\)/.test(mo));
+  ok('E20 ★ 업로드 응답을 확인한 뒤에만 "첨부됨"으로 보고', /res\.captureAttached = !!\(up && up\.ok\)/.test(mo));
+  ok('E21 분해 요청도 오류를 잡는다(프록시 HTML 응답에 버튼이 죽던 문제)',
+    /try \{\s*r = await api\('\/api\/manual-order\/preview'/.test(mo));
+  ok('E22 결과↔제출건 매칭은 서버가 준 index 로', /res\.index === 'number'\) \? targets\[res\.index\]/.test(mo));
+  ok('E23 셀을 고치면 옛 오류 문구도 지운다', /querySelectorAll\('\.mo-msg'\)\.forEach\(el => el\.remove\(\)\)/.test(mo));
+}
+
+/* ══════════════════════════════════════════════════════════
+   F. 오늘 마감 카드 — 아래로 정렬 + 회색 썸네일 + 재오픈 카운트다운
+   ══════════════════════════════════════════════════════════ */
+console.log('\nF. 마감 카드 표시');
+{
+  const st = require('../src/services/campaignState.service');
+  const base = {
+    participation_mode: true, status: 'active',
+    window_start: null, window_end: null, daily_limit: 20, recruit_total: 0,
+  };
+  const now = new Date('2026-07-30T05:00:00Z');   // KST 14:00
+  const full = st.computeCampaignState(base, { todaySubmitted: 20, todayActiveHolds: 0 }, now);
+  ok('F1 자율주문이 오늘 다 차면 daily_done', full.state === 'daily_done');
+  ok('F2 ★ 재오픈 시각을 준다 — 자율주문은 내일 KST 자정',
+    full.reopensAt === new Date(Date.parse('2026-07-31T00:00:00+09:00')).toISOString());
+  ok('F3 ★ reopensAt 은 미래다(기존 opensAt 은 오늘 시각이라 카운트다운이 0에 붙었다)',
+    Date.parse(full.reopensAt) > now.getTime());
+
+  const timed = st.computeCampaignState(
+    { ...base, window_start: '09:00', window_end: '12:00' },
+    { todaySubmitted: 0, todayActiveHolds: 0 }, now);   // 14:00 = 시간창 종료 후
+  ok('F4 시간창 종료 후에도 daily_done + 내일 오픈 시각', timed.state === 'daily_done'
+    && timed.reopensAt === new Date(Date.parse('2026-07-31T09:00:00+09:00')).toISOString());
+
+  const open = st.computeCampaignState(base, { todaySubmitted: 1, todayActiveHolds: 0 }, now);
+  ok('F5 진행 중인 공고엔 reopensAt 이 없다(오버레이 미표시)', open.state === 'open' && !open.reopensAt);
+
+  const routes = R('src/routes/campaign.routes.js');
+  ok('F6 공개 목록·상세 응답에 reopensAt 이 실린다', /reopensAt: st\.reopensAt \|\| null/.test(routes));
+  ok('F7 관리자 목록에도 같은 값', (routes.match(/reopensAt: st\.reopensAt \|\| null/g) || []).length === 2);
+}
+{
+  const cc = F('js/campaign-cards.js');
+  ok('F8 ★ 마감 카드는 썸네일을 회색으로 덮고 가운데에 흰 카운트다운',
+    /isDaily && c\.reopensAt/.test(cc) && cc.includes('data-camp-countdown="${_esc(c.reopensAt)}"'));
+  ok('F9 카운트다운 기준은 reopensAt(오늘의 opensAt 아님)',
+    !/data-camp-countdown="\$\{_esc\(c\.opensAt\)\}">--:--:--<\/span><span class="ol">\$\{_esc\(_fmtOpenLabel\(c\.reopensAt/.test(cc));
+  ok('F10 오버레이가 뜨면 같은 말을 하는 리본은 겹치지 않는다', /const dailyOverlay = isDaily && !!c\.reopensAt;/.test(cc));
+  ok('F11 ★ 참여 가능한 공고가 위로 오는 공용 정렬', /function sortByAvailability\(list\)/.test(cc)
+    && /_AVAIL_RANK = \{ open: 0/.test(cc));
+  ok('F12 안정 정렬 — 같은 등급이면 서버 순서(별표 우선노출) 유지', /\(a\.r - b\.r\) \|\| \(a\.i - b\.i\)/.test(cc));
+  ok('F13 CampCards 가 정렬을 노출', /sortByAvailability,/.test(cc));
+  const idx = F('index.html');
+  ok('F14 리뷰어 홈이 그 정렬을 쓴다', idx.includes('CampCards.sortByAvailability('));
+  const rc = F('recruit.html');
+  ok('F15 모집공고 목록 화면도 같은 정렬', rc.includes('CampCards.sortByAvailability('));
 }
 
 console.log(`\n✅ manualOrderExternal 회귀가드 통과 — ${passed}건\n`);

@@ -382,8 +382,10 @@
       ? `<div class="pt-badges">${starChip}${channel ? `<span class="pt-badge ch">${_esc(channel)}</span>` : ''}${c.delivery_type ? `<span class="pt-badge dl">${_esc(c.delivery_type)}</span>` : ''}</div>`
       : '';
     const isDraft = admin && (c.status || 'draft') === 'draft';
+    // 오늘 마감 카드는 썸네일 가운데 카운트다운 오버레이가 같은 말을 하므로 리본을 겹치지 않는다
+    const dailyOverlay = isDaily && !!c.reopensAt;
     const ribbon = isDraft ? `<span class="pt-ribbon draftr">임시저장</span>`
-                 : isDaily ? `<span class="pt-ribbon done">금일 모집완료</span>`
+                 : (isDaily && !dailyOverlay) ? `<span class="pt-ribbon done">금일 모집완료</span>`
                  : isClosed ? `<span class="pt-ribbon closedr">모집 종료</span>` : '';
     // 리뷰어 홈에서만 쓰는 인라인 수정 칩 — 관리자 페이지는 하단 액션 바에 [수정]이 있어 불필요
     const editChip = (!admin && _adminTok())
@@ -407,6 +409,10 @@
       overlay = `<div class="pt-ovl pre"><span class="ol">다음 진행일까지</span><span class="ot" data-camp-countdown="${_esc(c.opensAt)}">--:--:--</span><span class="ol">${_esc(_fmtMD(c.nextWorkDate) || _fmtOpenLabel(c.opensAt))} 오픈</span></div>`;
     } else if (isPre) {
       overlay = `<div class="pt-ovl pre"><span class="ol">오픈까지</span><span class="ot" data-camp-countdown="${_esc(c.opensAt || '')}">--:--:--</span><span class="ol">${c.opensAt ? _esc(_fmtOpenLabel(c.opensAt)) : ''}</span></div>`;
+    } else if (isDaily && c.reopensAt) {
+      // 오늘 마감 = 썸네일을 덮어 회색으로 낮추고 가운데에 다시 열릴 때까지를 흰 글씨로 센다.
+      // ★ 기준은 `reopensAt`(다음 오픈) — `opensAt`은 **오늘의** 오픈 시각이라 이미 지났다(카운트다운 0 고착).
+      overlay = `<div class="pt-ovl pre"><span class="ol">오늘 모집 완료</span><span class="ot" data-camp-countdown="${_esc(c.reopensAt)}">--:--:--</span><span class="ol">${_esc(_fmtOpenLabel(c.reopensAt))} 다시 오픈</span></div>`;
     } else if (c.state === 'open' && c.cutoffAt) {
       overlay = `<div class="pt-ovl now"><span class="live-pill"><span class="dot"></span>지금 구매 가능</span><span class="lab">오늘 구매마감까지</span><span class="ot" data-camp-countdown="${_esc(c.cutoffAt)}">--:--:--</span></div>`;
     }
@@ -495,9 +501,26 @@
       </article>`;
   }
 
+  /**
+   * 리뷰어 목록 정렬 — **지금 참여할 수 있는 공고가 위로**.
+   *
+   * 오늘 마감된 카드가 진행 중인 카드 사이에 섞여 있으면 리뷰어가 목록을 훑다가
+   * 참여 가능한 공고를 놓친다. 서버 정렬(별표 → 최신)은 그대로 두고 **그 안에서만**
+   * 상태 등급으로 안정 정렬한다(같은 등급이면 서버가 준 순서 유지 = 별표 우선노출 보존).
+   *
+   * 등급 0 지금 참여 가능 / 1 곧 열림·잔여 대기 / 2 오늘 마감(내일 다시 오픈) / 3 완전 종료
+   */
+  const _AVAIL_RANK = { open: 0, preopen: 1, soft_full: 1, cutoff: 2, daily_done: 2, closed: 3 };
+  function sortByAvailability(list) {
+    return (list || [])
+      .map((c, i) => ({ c, i, r: _AVAIL_RANK[c && c.state] != null ? _AVAIL_RANK[c.state] : 1 }))
+      .sort((a, b) => (a.r - b.r) || (a.i - b.i))   // 안정 정렬(원래 순서를 tie-break로)
+      .map(x => x.c);
+  }
+
   /** 여러 카드를 2열 그리드로 감싼 HTML(호출부에서 partHtml 대신 사용 가능) */
   function gridHtml(list) {
-    const parts = (list || []).filter(c => c.participation_mode);
+    const parts = sortByAvailability((list || []).filter(c => c.participation_mode));
     if (!parts.length) return '';
     return '<div class="pcards-grid">' + parts.map(cardHtml).join('') + '</div>';
   }
@@ -507,7 +530,7 @@
     _injectStyles();
     if (serverNowIso) setServerNow(serverNowIso);
     _onNeedRefresh = onNeedRefresh || null;
-    const parts = (list || []).filter(c => c.participation_mode);
+    const parts = sortByAvailability((list || []).filter(c => c.participation_mode));
     if (!el) return 0;
     el.innerHTML = parts.length ? '<div class="pcards-grid">' + parts.map(cardHtml).join('') + '</div>' : '';
     _ensureTicker();
@@ -943,5 +966,5 @@
     });
   }
 
-  window.CampCards = { renderInto, cardHtml, gridHtml, setServerNow, startTicker, _fmtCountdown, _fmtHM, _fmtOpenLabel, _fmtMD, serverNow: _now, _onCardClick, openAdminEdit, togglePin, openManualOrder, initChipMarquee: _initChipMarquee };
+  window.CampCards = { renderInto, cardHtml, gridHtml, setServerNow, startTicker, _fmtCountdown, _fmtHM, _fmtOpenLabel, _fmtMD, serverNow: _now, _onCardClick, openAdminEdit, togglePin, openManualOrder, sortByAvailability, initChipMarquee: _initChipMarquee };
 })();

@@ -24,12 +24,54 @@ const { registerReviewer } = require('./reviewer.service');
 const { findSubAccount } = require('./identity.service');
 const { digits } = require('../utils/slashForm');
 
-/** 외부 대리제출 건의 출처 표시 — Track B가 특수취급하는 'manual'과 구분한다.
- *  ★ trackB.service.js가 source==='manual'을 "재투영 면역 물리행"으로 다루는데,
- *    이 기능의 건들은 order_submission_id를 가진 정상 원장 건이므로 그 면역에 들어가면 오분류된다. */
+/** 외부 대리제출 건의 출처 표시.
+ *  ★ diag의 `order-manual-add`가 `order_submissions.source='manual'`을 쓰므로 그 값과 겹치면
+ *    두 경로를 목록·집계에서 구분할 수 없다(별도 값으로 둔다). */
 const SOURCE_EXTERNAL = 'admin_external';
 
 const norm = s => String(s == null ? '' : s).replace(/\s+/g, '').toLowerCase();
+
+const KST_OFFSET_MS = 9 * 60 * 60 * 1000;
+const KST_DAYS = ['일', '월', '화', '수', '목', '금', '토'];
+
+/**
+ * 시트 구매일자 칸에 넣을 오늘(KST) 표기 — 리뷰어 제출과 **같은 형식** `M / D (요일)`
+ * (`search-app.js`가 보내는 값, 063 일정 파서가 읽는 값).
+ *
+ * ★★ 빈 문자열을 보내면 안 된다. `mapOrderToSheetRow`는 날짜·옵션 칸에 `''`를 반환하고
+ *   `buildBatchUpdateData`는 `null`만 걸러내므로, 빈 값은 **그 칸을 지우는 쓰기**가 된다.
+ *   로스터 행에는 구매일자가 미리 적혀 있고 063이 "그 날짜 칸의 값 개수"로 그날 정원을
+ *   파생하므로, 한 건 제출할 때마다 그날 계획 물량이 1 줄어드는 이중 차감이 일어난다.
+ */
+function todayKstDateStr(now = new Date()) {
+  const k = new Date(now.getTime() + KST_OFFSET_MS);
+  return `${k.getUTCMonth() + 1} / ${k.getUTCDate()} (${KST_DAYS[k.getUTCDay()]})`;
+}
+
+/** 헤더에서 옵션 칸 인덱스(매퍼와 같은 규칙) */
+function optionColIndexes(headers) {
+  const out = [];
+  (headers || []).forEach((h, i) => {
+    const key = String(h || '').toLowerCase().trim();
+    if (key.includes('옵션') || key.includes('option')) out.push(i);
+  });
+  return out;
+}
+
+/**
+ * 배정된 행에 **이미 적혀 있는 옵션값**을 그대로 되돌려준다(`|` 결합 = 매퍼의 optParts 역순).
+ * 옵션을 못 정한 채 빈 값을 쓰면 로스터의 옵션 칸이 지워지므로, 지우는 대신 원래 값을 되쓴다.
+ */
+function existingOptionKeyAt(tabContext, sheetRow) {
+  if (!tabContext || !sheetRow) return '';
+  const cols = optionColIndexes(tabContext.headers);
+  if (!cols.length) return '';
+  const row = (tabContext.dataRows || []).find(r => Number(r.rowIndex) === Number(sheetRow));
+  if (!row) return '';
+  const cells = row.cells || [];
+  const vals = cols.map(i => String(cells[i] == null ? '' : cells[i]).trim());
+  return vals.some(v => v) ? vals.join('|') : '';
+}
 
 /**
  * 리뷰어 등록·연결.
@@ -68,6 +110,23 @@ async function ensureExternalReviewer(f, { db = pool } = {}) {
     let subs = owner.sub_accounts;
     if (typeof subs === 'string') { try { subs = JSON.parse(subs); } catch (_) { subs = []; } }
     if (!Array.isArray(subs)) subs = [];
+    // ★ 사칭 차단(063과 같은 규율): 이미 리뷰어로 등록된 번호는 남의 타계정으로 붙이지 않는다.
+    //   sub_accounts 는 소유 증명이 없는 자기신고 배열이고, 여기서 소유자는 **붙여넣은 이름**만으로
+    //   찾는다 — 카톡 양식의 이름 한 번 겹치면 실존 리뷰어의 신원이 남의 계정에 매달린다.
+    const policy = String(process.env.CAMPAIGN_SUB_REGISTERED_POLICY || 'block').toLowerCase();
+    let registeredElsewhere = false;
+    if (policy !== 'allow') {
+      try {
+        const { rows: ex } = await db.query(
+          `SELECT 1 FROM reviewers WHERE phone8 = $1 AND status <> 'inactive' LIMIT 1`, [p8]);
+        registeredElsewhere = ex.length > 0;
+      } catch (_) { /* 조회 실패는 기존 동작(연결 진행) */ }
+    }
+    if (registeredElsewhere && policy === 'block') {
+      warnings.push(`'${f.recipient}'(***${p8.slice(-4)})은 이미 등록된 리뷰어라 '${owner.name}'의 타계정으로 연결하지 않았습니다`);
+      return { registered: true, linkedOwner: null, ownerPhone8: null, warnings };
+    }
+    if (registeredElsewhere) warnings.push(`'${f.recipient}'은 이미 등록된 리뷰어입니다 — 타계정 연결을 확인하세요`);
     if (!findSubAccount(subs, f.recipient, p8)) {
       subs.push({
         name: String(f.recipient || '').trim(),
@@ -114,11 +173,25 @@ async function ensureExternalReviewer(f, { db = pool } = {}) {
  * 잠금 계층 준수: recruit_campaigns FOR UPDATE → 신청 행.
  * @returns {{ok:boolean, applicationId?:number, skipped?:string, error?:string}}
  */
-async function confirmExternalApplication(client, { campaignId, name, phone, phone8, optionKey, orderSubmissionId, allowOverCapacity }) {
+async function confirmExternalApplication(client, {
+  campaignId, name, phone, phone8, optionKey, orderSubmissionId, allowOverCapacity,
+  sheetId, gid, tabName,
+}) {
   const { rows: cRows } = await client.query(
-    'SELECT id, participation_mode, recruit_total FROM recruit_campaigns WHERE id = $1 FOR UPDATE', [campaignId]);
+    `SELECT id, participation_mode, recruit_total, linked_sheet_id, linked_tab_gid, linked_tab_name
+       FROM recruit_campaigns WHERE id = $1 FOR UPDATE`, [campaignId]);
   if (!cRows.length) return { ok: false, error: '캠페인을 찾을 수 없습니다' };
   if (!cRows[0].participation_mode) return { ok: false, skipped: 'not_participation' };
+
+  // ★ 공고↔탭 결속 검증 — 리뷰어 홀드 확정과 같은 판정(tabMatchesCampaign).
+  //   campaignId·sheetId·tabName이 각각 독립 입력이라, 화면이 낡았거나 문맥이 어긋나면
+  //   "A 탭에 기록하면서 B 공고의 정원을 깎는" 일이 생긴다. 행은 이미 잠갔으니 비용 0.
+  if (sheetId) {
+    const { tabMatchesCampaign } = require('./campaignHold.service');
+    if (!tabMatchesCampaign(cRows[0], sheetId, gid || '', tabName || '')) {
+      return { ok: false, error: '이 공고에 연결된 작업 탭이 아니어서 정원을 반영하지 않았습니다' };
+    }
+  }
 
   // 같은 (캠페인, 명의)로 이미 확정된 참여가 있으면 중복 차단(리뷰어 apply와 같은 규칙)
   const { rows: dup } = await client.query(
@@ -171,12 +244,68 @@ async function confirmExternalApplication(client, { campaignId, name, phone, pho
  * @returns {{ok:boolean, orderSubmissionId?:string, sheetRow?:number, warnings:string[], error?:string, ...}}
  */
 async function submitExternalOrder({
-  sheetId, tabName, gid, fields, campaignId, optionKey, adminName, allowOverCapacity = true,
+  sheetId, tabName, gid, fields, campaignId, optionKey, adminName, allowOverCapacity = true, force = false,
 }) {
   const warnings = [];
   const f = fields || {};
   const phoneDigits = digits(f.phone);
   const p8 = phoneDigits.slice(-8);
+  if (phoneDigits.length < 10) {
+    // phone8이 8자리 미만이면 검색·행배정·정원 키가 전부 어긋난다 → 접수 자체를 거부
+    return { ok: false, error: `전화번호 자릿수가 이상합니다 (${phoneDigits.length}자리)` };
+  }
+
+  // ⓪ 중복 접수 방지 — 재붙여넣기는 **예상되는 복구 동작**이다(결과 화면이 그렇게 안내하고,
+  //    배치가 끊기면 무엇이 들어갔는지 모른다). 주문번호가 없는 건이 대부분이라 dedupKey가
+  //    `osid:<uuid>` 폴백으로 매번 새 값이 되어 원장 자체로는 중복을 못 막는다.
+  if (!force) {
+    try {
+      const { rows: dupRows } = await pool.query(
+        `SELECT id, submitted_at FROM order_submissions
+          WHERE sheet_id = $1 AND tab_name = $2 AND phone = $3
+            AND deleted_at IS NULL AND submitted_at > NOW() - interval '24 hours'
+          ORDER BY submitted_at DESC LIMIT 1`,
+        [sheetId, tabName, f.phone || '']);
+      if (dupRows.length) {
+        return {
+          ok: false, duplicate: true,
+          error: `같은 연락처의 주문이 24시간 내에 이미 접수돼 있습니다 (제출 ${new Date(dupRows[0].submitted_at).toLocaleString('ko-KR', { timeZone: 'Asia/Seoul' })})`,
+        };
+      }
+    } catch (e) { warnings.push('중복 확인 실패(제출은 계속): ' + e.message); }
+  }
+
+  // ⓪-2 참여형이면 **원장 기록 전에** 확정 가능 여부를 본다 — 나중에 거절되면
+  //     시트 행만 생기고 정원은 안 깎이는 어긋난 상태가 남는다.
+  if (campaignId) {
+    try {
+      const { rows: pre } = await pool.query(
+        `SELECT id FROM campaign_applications
+          WHERE campaign_id = $1 AND phone8 = $2 AND status = 'submitted' LIMIT 1`, [campaignId, p8]);
+      if (pre.length) {
+        return { ok: false, duplicate: true, error: `이 공고에 이미 확정된 참여(#${pre[0].id})가 있습니다` };
+      }
+    } catch (e) { warnings.push('참여 이력 확인 실패(제출은 계속): ' + e.message); }
+  }
+
+  // ①-0 옵션 확정 — 화면 값 → 살아있는 홀드 → 공고에 옵션이 하나뿐이면 그것.
+  //   (셋 다 아니면 배정 행의 기존 값을 되쓴다 — 아래 ② 뒤에서 처리)
+  let resolvedOptKey = String(optionKey || '').trim();
+  if (!resolvedOptKey && campaignId) {
+    try {
+      const { rows: h } = await pool.query(
+        `SELECT option_key FROM campaign_applications
+          WHERE campaign_id = $1 AND phone8 = $2 AND status = 'applied' AND expires_at > NOW()
+          ORDER BY applied_at DESC LIMIT 1`, [campaignId, p8]);
+      if (h.length && h[0].option_key) resolvedOptKey = h[0].option_key;
+      if (!resolvedOptKey) {
+        const { rows: o } = await pool.query(
+          `SELECT opt_key FROM campaign_options WHERE campaign_id = $1 AND status = 'active'`, [campaignId]);
+        if (o.length === 1) resolvedOptKey = o[0].opt_key;
+        else if (o.length > 1) warnings.push(`옵션이 ${o.length}종이라 자동 선택하지 않았습니다 — 시트의 기존 옵션값을 유지합니다`);
+      }
+    } catch (e) { warnings.push('옵션 확인 실패(제출은 계속): ' + e.message); }
+  }
 
   // ① 리뷰어 등록·연결 (실패해도 주문 접수는 계속 — 카톡으로 이미 약속된 구매다)
   let reviewerInfo = { registered: false, linkedOwner: null, ownerPhone8: null, warnings: [] };
@@ -190,9 +319,10 @@ async function submitExternalOrder({
     phone: f.phone || '', address: f.address || '',
     bank: f.bank || '', account: f.account || '', depositor: f.depositor || '',
     price: f.price == null ? '' : String(f.price),
-    dateStr: '', orderNum: f.orderNum || '',
+    // ★ 빈 값 금지 — 매퍼가 날짜 칸에 ''를 쓰면 로스터의 구매일자가 지워진다(위 주석 참조)
+    dateStr: todayKstDateStr(), orderNum: f.orderNum || '',
     memo: `외부모집 수동제출${adminName ? ' · ' + adminName : ''}`,
-    selectedOptKey: optionKey || '',
+    selectedOptKey: resolvedOptKey || '',
   };
   const ledger = await createOrderLedgerEntry({
     sheetId, tabName, gid, orderData,
@@ -200,6 +330,22 @@ async function submitExternalOrder({
     loginPhone8: p8, loginName: f.recipient || '',
     // 신규 신청 행을 우리가 직접 만들어 확정하므로 홀드 문맥은 넘기지 않는다(이중 확정 방지)
   });
+
+  // ★ 옵션을 못 정했으면 **배정된 행에 이미 적힌 옵션값을 그대로 되쓴다**.
+  //   빈 값이면 매퍼가 옵션 칸을 지우는데, 옵션 캠페인 로스터는 옵션이 미리 적혀 있어
+  //   그 행의 옵션 표시가 사라진다(제출 유실은 아니지만 로스터 매칭이 깨진다).
+  //   원장(order_submissions)과 큐 페이로드를 함께 맞춰 reconcile 재기록도 같은 값을 쓰게 한다.
+  if (!resolvedOptKey && ledger.sheetRow) {
+    const keep = existingOptionKeyAt(ledger.tabContext, ledger.sheetRow);
+    if (keep) {
+      orderData.selectedOptKey = keep;
+      resolvedOptKey = keep;
+      try {
+        await pool.query('UPDATE order_submissions SET selected_opt_key = $2 WHERE id = $1',
+          [ledger.orderSubmissionId, keep]);
+      } catch (_) { /* 표시 실패는 접수에 영향 없음 — 큐 페이로드는 이미 맞다 */ }
+    }
+  }
 
   // 출처 표시 — 목록에서 대리제출 건을 구분
   try {
@@ -214,7 +360,8 @@ async function submitExternalOrder({
       await client.query('BEGIN');
       const r = await confirmExternalApplication(client, {
         campaignId, name: f.recipient || '', phone: f.phone || '', phone8: p8,
-        optionKey, orderSubmissionId: ledger.orderSubmissionId, allowOverCapacity,
+        optionKey: resolvedOptKey, orderSubmissionId: ledger.orderSubmissionId, allowOverCapacity,
+        sheetId, gid: ledger.tabGid || gid || '', tabName,
       });
       if (r.ok) { await client.query('COMMIT'); application = r; if (r.overCapacity) warnings.push('모집 정원을 초과해 확정했습니다'); }
       else { await client.query('ROLLBACK'); warnings.push(r.skipped ? '참여형 공고가 아니라 정원 차감은 건너뜁니다' : ('정원 반영 실패: ' + r.error)); }
@@ -236,6 +383,11 @@ async function submitExternalOrder({
       });
       await markOrderQueued(ledger.orderSubmissionId);
       queued = true;
+      // 리뷰어 제출과 같은 kick — 없으면 cron까지 시트에 안 뜨고 현황 위젯도 반응하지 않는다
+      try {
+        if (process.env.ORDER_BATCH_AUTO === '1') require('../jobs/orderBatchScheduler').kickOrderBatch(sheetId, tabName);
+        else require('../jobs/queuePump').kickQueuePump();
+      } catch (e2) { logger.warn(`[manual-order] kick 실패(무시, cron 백스톱): ${e2.message}`); }
     } catch (e) {
       await markOrderMirrorFailed(ledger.orderSubmissionId, e);
       warnings.push('시트 반영 예약 실패(자동복구 대상): ' + e.message);
@@ -264,5 +416,7 @@ module.exports = {
   submitExternalOrder,
   ensureExternalReviewer,
   confirmExternalApplication,
+  todayKstDateStr,
+  existingOptionKeyAt,
   SOURCE_EXTERNAL,
 };

@@ -2374,7 +2374,10 @@ async function loadRecruitPreview() {
     // ★ M2: 참여형(participation_mode) 공고는 공용 카드 모듈(campaign-cards.js)로 렌더 —
     //   카드 탭 시 전용 상세(campaign.html)로 이동해 참여·작업내용·인라인 제출 진행.
     //   레거시 공고는 기존 카드/신청 흐름 그대로.
-    const parts = (json.data || []).filter(c => c.participation_mode && c.status !== "closed");
+    // 정렬 = 지금 참여 가능한 공고가 위(오늘 마감된 건은 아래로) — 공용 규칙(campaign-cards.js)
+    const parts = window.CampCards
+      ? CampCards.sortByAvailability((json.data || []).filter(c => c.participation_mode && c.status !== "closed"))
+      : (json.data || []).filter(c => c.participation_mode && c.status !== "closed");
     const partHtml = (window.CampCards && parts.length)
       ? (CampCards.setServerNow(json.serverNow), '<div class="pcards-grid">' + parts.map(c => CampCards.cardHtml(c)).join("") + '</div>')
       : "";

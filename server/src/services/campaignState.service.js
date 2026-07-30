@@ -43,6 +43,23 @@ function kstTodayAt(timeStr, now = new Date()) {
   return new Date(kstDayStartUtc(now).getTime() + mins * 60 * 1000);
 }
 
+/**
+ * 특정 KST 날짜('YYYY-MM-DD')의 오픈 시각 → UTC ISO. 시간창 없으면(자율주문) 그날 KST 자정.
+ * daily_done 카드의 "다시 열릴 때까지" 카운트다운 기준값을 만드는 데 쓴다.
+ */
+function kstDateAtIso(isoDate, minutesOfDay) {
+  if (!isoDate) return null;
+  const base = Date.parse(isoDate + 'T00:00:00+09:00');
+  if (Number.isNaN(base)) return null;
+  return new Date(base + (minutesOfDay || 0) * 60000).toISOString();
+}
+
+/** 오늘(KST) 기준 내일 날짜 'YYYY-MM-DD' */
+function kstTomorrowStr(now = new Date()) {
+  const k = new Date(now.getTime() + KST_OFFSET_MS + 24 * 3600 * 1000);
+  return k.toISOString().slice(0, 10);
+}
+
 /** DATE 값(문자열 'YYYY-MM-DD' 또는 pg Date 객체) → 'YYYY-MM-DD' 문자열. 무효/없음은 null */
 function dateOnlyStr(v) {
   if (!v) return null;
@@ -203,9 +220,17 @@ function computeCampaignState(c, counts, now = new Date(), schedule = null) {
     return { ...payload, state: 'closed', stateReason: 'schedule_ended' };
   }
 
+  // ★ daily_done 카드의 "다시 열릴 때까지" 카운트다운 기준.
+  //   기존 `opensAt`은 **오늘의** window_start(=이미 지난 시각)이고 자율주문은 아예 null이라
+  //   그대로 쓰면 카운트다운이 0에 붙는다 → 다음 오픈 시각을 별도 필드로 준다.
+  //   다음 오픈일 = 시트 일정이 있으면 다음 진행일, 없으면 내일. 시각 = window_start(자율주문은 자정).
+  const _reopenIso = () => kstDateAtIso(
+    sch ? nextWorkDate(sch, todayStr) : kstTomorrowStr(now),
+    allDay ? 0 : startMin);
+
   const t = kstMinutesOfDay(now);
   if (!allDay && t < startMin) return { ...payload, state: 'preopen' };
-  if (!allDay && t >= endMin) return { ...payload, state: 'daily_done' };
+  if (!allDay && t >= endMin) return { ...payload, state: 'daily_done', reopensAt: _reopenIso() };
 
   // 휴무일(시트에 그 날짜 행이 0개) = 그날은 열지 않음. 못 채운 물량은 사라지지 않고
   // 다음 진행일 정원에 합산된다(plannedThrough가 휴무일엔 증가하지 않기 때문).
@@ -217,10 +242,12 @@ function computeCampaignState(c, counts, now = new Date(), schedule = null) {
     return {
       ...payload, state: 'daily_done', stateReason: 'rest_day', nextWorkDate: nw,
       opensAt: openUtc ? openUtc.toISOString() : payload.opensAt,
+      reopensAt: openUtc ? openUtc.toISOString() : null,
     };
   }
 
-  if (todayCount >= quota) return { ...payload, state: 'daily_done' }; // 금일완료(홀드 만료 반환 시 open 복귀)
+  // 금일완료(홀드 만료 반환 시 open 복귀)
+  if (todayCount >= quota) return { ...payload, state: 'daily_done', reopensAt: _reopenIso() };
 
   const rt = sch ? sch.totalSlots : (Number(c.recruit_total) || 0);
   const usedAll = (Number(counts.submittedAll) || 0) + (Number(counts.activeHolds) || 0);

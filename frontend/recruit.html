@@ -410,7 +410,9 @@ async function loadCampaigns() {
     const json = await res.json();
     // ★ M2: 참여형(participation_mode) 공고는 공용 카드 모듈로 렌더(campaign.html 상세로 이동).
     //   레거시 공고는 기존 카드/신청 흐름 그대로.
-    const parts = (json.data || []).filter(c => c.participation_mode && c.status !== "closed");
+    // 정렬 = 지금 참여 가능한 공고가 위(오늘 마감된 건은 아래로) — 공용 규칙(campaign-cards.js)
+    const _partsRaw = (json.data || []).filter(c => c.participation_mode && c.status !== "closed");
+    const parts = window.CampCards ? CampCards.sortByAvailability(_partsRaw) : _partsRaw;
     const all  = (json.data || []).filter(c => !c.participation_mode);
 
     document.getElementById("rcLoading").style.display = "none";

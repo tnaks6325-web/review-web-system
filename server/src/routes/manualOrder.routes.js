@@ -20,31 +20,14 @@ const MAX_LINES = 50;   // 한 번에 처리할 최대 건수(오붙여넣기로
 // 제출 전에 9칸 분해 결과를 사람이 확인·수정하게 한다. DB 접근 없음.
 router.post('/preview', authMiddleware, adminOrMasterMiddleware, (req, res) => {
   const text = String((req.body && req.body.text) || '');
-  const items = parseSlashForm(text).slice(0, MAX_LINES);
-  const total = parseSlashForm(text).length;
+  const all = parseSlashForm(text);
+  const items = all.slice(0, MAX_LINES);
   res.json({
     ok: true, items,
-    truncated: total > MAX_LINES ? total - MAX_LINES : 0,
+    truncated: all.length > MAX_LINES ? all.length - MAX_LINES : 0,
     okCount: items.filter(i => i.ok).length,
     errCount: items.filter(i => !i.ok).length,
   });
-});
-
-// ── 리뷰어 이름 자동완성 (타계정 소유자 연결용) ───────────────
-// PII라 admin 전용. 이름 앞부분 일치, 최대 8명, 연락처는 뒤 4자리만.
-router.get('/reviewer-search', authMiddleware, adminOrMasterMiddleware, async (req, res, next) => {
-  try {
-    const q = String(req.query.q || '').trim();
-    if (q.length < 2) return res.json({ ok: true, items: [] });
-    const { rows } = await pool.query(
-      `SELECT name, phone8, phone FROM reviewers
-        WHERE name ILIKE $1 AND status <> 'inactive'
-        ORDER BY registered_at DESC LIMIT 8`, [q + '%']);
-    res.json({
-      ok: true,
-      items: rows.map(r => ({ name: r.name, tail4: String(r.phone8 || '').slice(-4) })),
-    });
-  } catch (err) { next(err); }
 });
 
 // ── 제출 ─────────────────────────────────────────────────────
@@ -64,9 +47,17 @@ router.post('/submit', authMiddleware, adminOrMasterMiddleware, async (req, res,
     for (let i = 0; i < items.length; i++) {
       const it = items[i] || {};
       const f = it.fields || {};
-      // 최소 검증(프론트 미리보기를 우회한 직접 호출 방어)
-      if (!String(f.recipient || '').trim() || !String(f.phone || '').trim()) {
-        results.push({ index: i, ok: false, error: '수취인·전화번호는 필수입니다', name: f.recipient || '' });
+      // 서버측 재검증 — 프론트 미리보기를 우회한 직접 호출 방어.
+      // ★ 자릿수까지 본다: phone8이 8자리가 안 되면 검색·행배정·정원 키가 전부 어긋난다.
+      const missing = ['recipient', 'phone', 'address', 'bank', 'account', 'depositor']
+        .filter(k => !String(f[k] == null ? '' : f[k]).trim());
+      if (missing.length) {
+        results.push({ index: i, ok: false, error: '필수 항목이 비어 있습니다: ' + missing.join(', '), name: f.recipient || '' });
+        continue;
+      }
+      const pd = String(f.phone).replace(/[^0-9]/g, '');
+      if (pd.length !== 11 && pd.length !== 10) {
+        results.push({ index: i, ok: false, error: `전화번호 자릿수가 이상합니다 (${pd.length}자리)`, name: f.recipient || '' });
         continue;
       }
       try {
@@ -76,6 +67,7 @@ router.post('/submit', authMiddleware, adminOrMasterMiddleware, async (req, res,
           campaignId: campaignId || null,
           optionKey: it.optionKey || '',
           adminName,
+          force: b.force === true,   // 중복 경고를 확인한 뒤 재시도할 때만
         });
         results.push({ index: i, name: f.recipient || '', ...r });
       } catch (e) {
