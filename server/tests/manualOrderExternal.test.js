@@ -460,6 +460,33 @@ console.log('\nF. 마감 카드 표시');
   ok('F15 모집공고 목록 화면도 같은 정렬', rc.includes('CampCards.sortByAvailability('));
 }
 
+/* ══════════════════════════════════════════════════════════
+   G. 홈 화면 관리자 로그인 — 🧾·⭐ 를 홈에서 바로 쓰게 하는 경로
+      (서버 권한은 그대로. 스코프 토큰을 넓히지 않고 진짜 토큰을 받게 한다)
+   ══════════════════════════════════════════════════════════ */
+console.log('\nG. 홈 관리자 로그인');
+{
+  const idx = F('index.html');
+  ok('G1 배너에 [관리자 로그인] 진입점', idx.includes('id="adminModeLoginBtn"') && idx.includes('openHomeAdminLogin()'));
+  ok('G2 비밀번호는 인라인 모달로 받는다(prompt 평문 노출 금지)',
+    idx.includes('id="halPw"') && idx.includes('type="password"') && !/prompt\(\s*['"]비밀번호/.test(idx));
+  ok('G3 ★ 기존 관리자 로그인 API 재사용 — 서버 변경 0', idx.includes("'/api/admin/login'") || idx.includes('"/api/admin/login"'));
+  ok('G4 성공 시 진짜 관리자 토큰으로 저장', /sessionStorage\.setItem\("admin_token", j\.token\)/.test(idx));
+  ok('G5 ★ 로그인 후 목록을 다시 그려 ⭐·🧾 가 즉시 나타난다', /closeHomeAdminLogin\(\);[\s\S]{0,200}loadRecruitPreview\(\)/.test(idx));
+  ok('G6 이미 토큰이 있으면 버튼을 숨긴다', /btn\.style\.display = has \? "none" : ""/.test(idx));
+  ok('G7 판정은 진짜 admin_token 만(스코프 토큰 제외 — 카드 게이트와 같은 규칙)',
+    /function _homeRealAdminTok\(\)/.test(idx) && !/_homeRealAdminTok[\s\S]{0,200}rapp_camp_edit_token/.test(idx));
+  ok('G8 ★ 로그아웃하면 관리자 토큰도 지운다(공용 PC에 권한 잔류 금지)',
+    /function doLogout\(\)[\s\S]{0,400}sessionStorage\.removeItem\("admin_token"\)/.test(idx));
+  ok('G9 로그인 실패가 리뷰어 세션을 건드리지 않는다',
+    !/function doHomeAdminLogin[\s\S]{0,1600}removeItem\("rapp_reviewer_auth"\)/.test(idx));
+
+  // 서버 표면이 늘지 않았는지 — 스코프 토큰을 manual-order 로 넓히지 않았다
+  const auth = nc(R('src/middleware/auth.middleware.js'));
+  ok('G10 ★ 스코프 토큰(via:reviewer_campaign)은 여전히 manual-order 에 도달 불가',
+    !/reviewer_campaign[\s\S]{0,600}manual-order/.test(auth));
+}
+
 console.log(`\n✅ manualOrderExternal 회귀가드 통과 — ${passed}건\n`);
 }
 

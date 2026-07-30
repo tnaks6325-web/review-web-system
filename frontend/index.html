@@ -649,7 +649,28 @@
       <i class="fas fa-user-shield" style="font-size:1.1rem"></i>
       <div style="flex:1;line-height:1.35">
         <div style="font-weight:800;font-size:.9rem">관리자 권한모드입니다</div>
-        <div style="font-size:.72rem;opacity:.92">모집공고 카드의 <b>[✏️ 관리자 수정]</b> 버튼으로 공고를 수정할 수 있어요.</div>
+        <div style="font-size:.72rem;opacity:.92" id="adminModeMsg">모집공고 카드의 <b>[✏️ 관리자 수정]</b> 버튼으로 공고를 수정할 수 있어요.</div>
+      </div>
+      <!-- 🔑 외부참여 수동제출·⭐ 별표는 **진짜 관리자 토큰**이 있어야 서버에 도달한다
+           (공고수정 스코프 토큰은 그 API에 403). 여기서 한 번 로그인하면 카드에 함께 나타난다. -->
+      <button id="adminModeLoginBtn" onclick="openHomeAdminLogin()" style="display:none;flex:none;background:rgba(255,255,255,.18);border:1px solid rgba(255,255,255,.5);color:#fff;font-weight:800;font-size:.74rem;border-radius:9px;padding:7px 11px;cursor:pointer;white-space:nowrap">🔑 관리자 로그인</button>
+    </div>
+
+    <!-- 홈 관리자 로그인 모달 (서버 변경 0 — 기존 POST /api/admin/login 재사용) -->
+    <div id="homeAdminLoginOvl" style="display:none;position:fixed;inset:0;z-index:100002;background:rgba(17,24,39,.5);align-items:center;justify-content:center;padding:20px">
+      <div style="background:#fff;border-radius:16px;width:320px;max-width:94vw;padding:18px 18px 16px;box-shadow:0 20px 50px rgba(0,0,0,.3)">
+        <div style="font-weight:800;font-size:.95rem;margin-bottom:4px">🔑 관리자 로그인</div>
+        <div style="font-size:.72rem;color:#6B7280;line-height:1.5;margin-bottom:12px">로그인하면 이 화면의 모집공고 카드에서 <b>⭐ 우선노출</b>과 <b>🧾 외부제출</b>을 바로 쓸 수 있어요.</div>
+        <input id="halId" placeholder="아이디" autocomplete="username"
+               style="width:100%;font:inherit;font-size:.85rem;border:1px solid #E5E7EB;border-radius:9px;padding:9px 11px;margin-bottom:7px;outline:none">
+        <input id="halPw" type="password" placeholder="비밀번호" autocomplete="current-password"
+               onkeydown="if(event.key==='Enter')doHomeAdminLogin()"
+               style="width:100%;font:inherit;font-size:.85rem;border:1px solid #E5E7EB;border-radius:9px;padding:9px 11px;outline:none">
+        <div id="halErr" style="display:none;font-size:.72rem;color:#DC2626;margin-top:7px;line-height:1.45"></div>
+        <div style="display:flex;gap:7px;margin-top:13px">
+          <button onclick="closeHomeAdminLogin()" style="flex:1;font:inherit;font-size:.82rem;font-weight:750;background:#F1F2F6;color:#191F28;border:none;border-radius:9px;padding:9px 0;cursor:pointer">취소</button>
+          <button id="halGo" onclick="doHomeAdminLogin()" style="flex:1;font:inherit;font-size:.82rem;font-weight:750;background:#1B64DA;color:#fff;border:none;border-radius:9px;padding:9px 0;cursor:pointer">로그인</button>
+        </div>
       </div>
     </div>
 
@@ -939,10 +960,78 @@ function showHome(user) {
 }
 
 /** 공고수정 스코프 토큰 발급 시도 (마스터 허용명단에 있는 리뷰어만 성공) */
+/** 진짜 관리자 토큰(스코프 토큰 제외) — campaign-cards.js `_realAdminTok()`과 같은 판정 */
+function _homeRealAdminTok() {
+  try { return sessionStorage.getItem("admin_token") || localStorage.getItem("admin_token") || ""; }
+  catch (_) { return ""; }
+}
+
+/** 배너 안내문·[관리자 로그인] 버튼을 현재 토큰 상태에 맞춘다 */
+function refreshAdminModeBanner() {
+  const has = !!_homeRealAdminTok();
+  const btn = document.getElementById("adminModeLoginBtn");
+  const msg = document.getElementById("adminModeMsg");
+  if (btn) btn.style.display = has ? "none" : "";
+  if (msg) {
+    msg.innerHTML = has
+      ? "카드에서 <b>[✏️ 관리자 수정]</b>·<b>[⭐ 우선노출]</b>·<b>[🧾 외부제출]</b>을 쓸 수 있어요."
+      : "카드의 <b>[✏️ 관리자 수정]</b>으로 공고를 고칠 수 있어요. <b>외부참여 수동제출</b>은 관리자 로그인이 필요해요.";
+  }
+}
+
+function openHomeAdminLogin() {
+  const o = document.getElementById("homeAdminLoginOvl");
+  if (!o) return;
+  const e = document.getElementById("halErr");
+  if (e) e.style.display = "none";
+  o.style.display = "flex";
+  setTimeout(() => { const i = document.getElementById("halId"); if (i) i.focus(); }, 40);
+}
+function closeHomeAdminLogin() {
+  const o = document.getElementById("homeAdminLoginOvl");
+  if (o) o.style.display = "none";
+}
+
+/**
+ * 홈에서 관리자 로그인 — 기존 `POST /api/admin/login` 그대로(서버 변경 0).
+ * 성공하면 sessionStorage.admin_token 에 담고 공고 목록만 다시 그린다
+ * (⭐·🧾 는 둘 다 `_realAdminTok()` 게이트라 한 번에 나타난다).
+ * ★ 리뷰어 세션은 건드리지 않는다 — 실패해도 보던 화면 그대로.
+ */
+async function doHomeAdminLogin() {
+  const id = (document.getElementById("halId").value || "").trim();
+  const pw = document.getElementById("halPw").value || "";
+  const err = document.getElementById("halErr");
+  const go = document.getElementById("halGo");
+  const fail = (m) => { if (err) { err.textContent = m; err.style.display = "block"; } };
+  if (!id || !pw) { fail("아이디와 비밀번호를 입력해주세요."); return; }
+  go.disabled = true; go.textContent = "확인 중…";
+  try {
+    const r = await fetch(API_BASE_URL + "/api/admin/login", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ name: id, pw }),
+    });
+    const j = await r.json();
+    if (!j || !j.success || !j.token) throw new Error((j && (j.error || j.message)) || "로그인에 실패했습니다.");
+    sessionStorage.setItem("admin_token", j.token);
+    document.getElementById("halPw").value = "";
+    closeHomeAdminLogin();
+    refreshAdminModeBanner();
+    showToast("관리자로 로그인되었습니다.");
+    if (typeof loadRecruitPreview === "function") loadRecruitPreview();   // ⭐·🧾 표시 반영
+  } catch (e) {
+    fail(e && e.message ? e.message : "로그인에 실패했습니다.");
+  } finally {
+    go.disabled = false; go.textContent = "로그인";
+  }
+}
+
 async function maybeFetchCampEditToken(user) {
   const setBanner = (on) => {
     const b = document.getElementById("adminModeBanner");
     if (b) b.style.display = on ? "flex" : "none";
+    if (on) refreshAdminModeBanner();
   };
   try {
     const phone8 = user && user.phone8;
@@ -1035,6 +1124,9 @@ function doLogout() {
   localStorage.removeItem(USER_KEY);
   localStorage.removeItem("rapp_reviewer_auth");
   sessionStorage.removeItem("rapp_camp_edit_token");
+  // ★ 홈에서 받은 관리자 토큰도 함께 정리 — 공용 PC에서 리뷰어만 로그아웃하고
+  //   관리자 권한이 남아 있는 상태를 만들지 않는다.
+  sessionStorage.removeItem("admin_token");
   window._reviewerProfile = null;
   location.reload();
 }
