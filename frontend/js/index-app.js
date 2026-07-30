@@ -15121,7 +15121,15 @@ function openTabDashDetail(idx) {
     ]},
   ];
 
-  let html = "";
+  // 🧾 외부참여 수동제출 — 카톡으로 모집한 외부 리뷰어의 구매양식을 이 탭에 대리 제출한다.
+  //   값을 onclick 문자열에 심지 않고 인덱스로만 넘긴다(탭명·시트명 주입 벡터 차단).
+  let html = `<div style="display:flex;align-items:center;gap:8px;background:#F0FDFA;border:1px solid #99E6D8;border-radius:10px;padding:9px 12px;margin-bottom:14px">
+      <div style="flex:1;min-width:0">
+        <div style="font-size:.78rem;font-weight:800;color:#0F766E">외부모집 리뷰어 구매양식</div>
+        <div style="font-size:.68rem;color:#6B7280;margin-top:1px">카톡으로 받은 슬래시양식을 붙여넣으면 리뷰어 등록·시트 기록까지 한 번에 처리됩니다</div>
+      </div>
+      <button onclick="openManualOrderForTab(${idx})" style="font-size:.74rem;font-weight:800;background:#0F766E;color:#fff;border:none;border-radius:8px;padding:7px 12px;cursor:pointer;white-space:nowrap">🧾 수동제출</button>
+    </div>`;
   groups.forEach(g => {
     html += `<div style="margin-bottom:14px">
       <div style="font-size:.82rem;font-weight:700;color:${g.color};margin-bottom:6px"><i class="fas ${g.icon}" style="margin-right:5px"></i>${g.title}</div>
@@ -15143,6 +15151,20 @@ function openTabDashDetail(idx) {
 function closeTabDashDetail() {
   const modal = document.getElementById("tabDashDetailModal");
   if (modal) modal.style.display = "none";
+}
+
+/** 🧾 작업 탭 관리 상세 → 외부참여 수동제출 (탭 단위 — 참여형 공고가 없는 탭도 대상) */
+function openManualOrderForTab(idx) {
+  const t = _filterTabDashData()[idx];
+  if (!t) return;
+  if (!window.ManualOrder) { showToast("수동제출 모듈을 불러오지 못했습니다. 새로고침해 주세요.", "error"); return; }
+  window.ManualOrder.open({
+    sheetId: t.sheet_id || "",
+    tabName: t.tab_name || "",
+    gid: t.tab_gid ? String(t.tab_gid) : "",
+    campaignId: null,          // 탭 단위 진입 — 참여형 정원 차감은 공고 카드·관제 패널 경로에서만
+    title: t.display_name || t.tab_name || "",
+  });
 }
 
 // ── CSV 내보내기 ──

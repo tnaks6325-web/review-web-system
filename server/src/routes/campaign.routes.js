@@ -284,6 +284,8 @@ function _publicView(row, counts, now, schedule) {
     scheduleSource: st.scheduleSource || null,
     stateReason: st.stateReason || null,
     nextWorkDate: st.nextWorkDate || null,
+    // daily_done 카드의 "다시 열릴 때까지" 카운트다운 기준(오늘의 opensAt은 이미 지난 시각)
+    reopensAt: st.reopensAt || null,
   };
 }
 
@@ -1266,6 +1268,7 @@ router.get('/admin/list', authMiddleware, adminOrMasterMiddleware, async (req, r
         startDate: st.startDate || null,
         endDate: st.endDate || null,
         nextWorkDate: st.nextWorkDate || null,
+        reopensAt: st.reopensAt || null,
         ops: {
           holdNow: cnt.activeHolds,
           todayHold: cnt.todayActiveHolds,
