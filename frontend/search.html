@@ -1187,6 +1187,19 @@ if (sessionStorage.getItem("iad_direct_submit_items")) {
       </button>
 
       <!-- 제출 전 마지막 확인 팝업 (모든 구매양식 제출 공통, [제출완료하기] 단독) -->
+      <!-- 구매캡쳐 미첨부 게이트 — 제출을 붙잡되 [지금 올리기]를 기본으로. ★[캡처 없이 제출]을 없애면
+           정당한 무캡처 제출(수기·재제출)까지 막혀 주문이 유실되므로 반드시 남긴다(완료화면·리뷰어홈에서 회수). -->
+      <div id="captureGateModal" style="display:none;position:fixed;inset:0;background:rgba(17,24,39,.5);z-index:9999;align-items:center;justify-content:center;padding:20px" onclick="if(event.target===this)_closeCaptureGate()">
+        <div style="width:100%;max-width:340px;background:#fff;border-radius:18px;padding:24px 20px 18px;text-align:center;box-shadow:0 20px 50px rgba(0,0,0,.3)">
+          <div style="width:52px;height:52px;border-radius:50%;background:#FFFBEB;display:grid;place-items:center;margin:0 auto 12px;font-size:1.55rem">📷</div>
+          <div style="font-size:1.05rem;font-weight:800;color:#B45309;margin-bottom:8px">구매 캡처가 없습니다</div>
+          <div id="captureGateMsg" style="font-size:.9rem;color:#4B5563;line-height:1.65;margin-bottom:18px">주문완료 화면 캡처는 <b style="color:#111827">구매 확인과 리뷰비 정산</b>에 쓰입니다.<br>지금 올리시면 한 번에 끝납니다.</div>
+          <button onclick="_captureGateAttach()" style="width:100%;padding:14px;border:none;border-radius:12px;background:#3182f6;color:#fff;font-size:.95rem;font-weight:800;cursor:pointer;font-family:inherit;box-shadow:0 4px 12px rgba(49,130,246,.28);margin-bottom:8px">📷 지금 캡처 올리기</button>
+          <button onclick="_captureGateSkip()" style="width:100%;padding:11px;border:none;border-radius:11px;background:#F1F2F6;color:#191F28;font-size:.86rem;font-weight:700;cursor:pointer;font-family:inherit">캡처 없이 제출 (나중에 첨부)</button>
+          <div style="font-size:.7rem;color:#8B95A1;margin-top:9px;line-height:1.5">나중에 첨부는 <b>리뷰어 홈 → 내 참여</b>에서 가능합니다</div>
+        </div>
+      </div>
+
       <div id="orderConfirmModal" style="display:none;position:fixed;inset:0;background:rgba(17,24,39,.5);z-index:9999;align-items:center;justify-content:center;padding:20px" onclick="if(event.target===this)_closeOrderConfirm()">
         <div style="width:100%;max-width:340px;background:#fff;border-radius:18px;padding:24px 20px 18px;text-align:center;box-shadow:0 20px 50px rgba(0,0,0,.3)">
           <div style="width:52px;height:52px;border-radius:50%;background:#FEF3C7;color:#F59E0B;display:grid;place-items:center;margin:0 auto 12px;font-size:1.55rem">⚠️</div>

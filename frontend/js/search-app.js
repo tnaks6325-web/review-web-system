@@ -5006,15 +5006,16 @@ function _buildCoupangCardHtml(cid) {
 
     <!-- AI 캡처 추출 섹션 -->
     <div class="ofc-ai-section">
-      <div class="ofc-ai-section-title">📸 쿠팡 주문 캡처 자동추출 <span style="font-weight:400;color:#a6c8fb;font-size:.65rem">(업로드 시 동일인 자동 검증)</span></div>
+      <div class="ofc-ai-section-title">📸 쿠팡 구매 캡처 <span style="font-weight:800;color:#fff;background:#E5484D;border-radius:4px;padding:1px 5px;font-size:.6rem;vertical-align:middle">필수</span></div>
       <div class="of-img-zone" id="${cid}_imgZone"
            ondragover="event.preventDefault();this.classList.add('drag-over')"
            ondragleave="this.classList.remove('drag-over')"
            ondrop="onCardImgDrop(event,'${cid}')">
         <input type="file" accept="image/*" id="${cid}_imgInput" onchange="onCardImgSelected(this,'${cid}')">
         <span class="oiz-icon">📷</span>
-        <div class="oiz-title" style="font-size:.82rem">쿠팡 주문캡처 업로드 (AI 자동추출 + 동일인 검증)</div>
-        <div class="oiz-sub">클릭하거나 드래그 · JPG/PNG/WEBP</div>
+        <div class="oiz-title" style="font-size:.82rem">주문완료 화면을 캡처해 올려주세요</div>
+        <div class="oiz-sub">구매 확인·리뷰비 정산의 <b>증빙 자료</b>입니다 · 동일인 자동 검증</div>
+        <div class="oiz-sub" style="margin-top:3px;color:#3182f6">💡 올리시면 주문번호·결제금액이 자동 입력됩니다</div>
       </div>
       <div class="of-img-preview" id="${cid}_imgPreview" style="display:none;align-items:center;gap:10px;margin-bottom:8px">
         <div style="position:relative;flex-shrink:0">
@@ -5302,15 +5303,16 @@ function _buildOrderCardHtml(cid, idx, type) {
 
     <!-- AI 캡처 추출 섹션 -->
     <div class="ofc-ai-section">
-      <div class="ofc-ai-section-title">📸 주문 캡처 자동추출 <span style="font-weight:400;color:#a6c8fb;font-size:.65rem">(선택)</span></div>
+      <div class="ofc-ai-section-title">📸 구매 캡처 <span style="font-weight:800;color:#fff;background:#E5484D;border-radius:4px;padding:1px 5px;font-size:.6rem;vertical-align:middle">필수</span></div>
       <div class="of-img-zone" id="${cid}_imgZone"
            ondragover="event.preventDefault();this.classList.add('drag-over')"
            ondragleave="this.classList.remove('drag-over')"
            ondrop="onCardImgDrop(event,'${cid}')">
         <input type="file" accept="image/*" id="${cid}_imgInput" onchange="onCardImgSelected(this,'${cid}')">
         <span class="oiz-icon">📷</span>
-        <div class="oiz-title" style="font-size:.82rem">주문캡처본 업로드 (AI 자동추출)</div>
-        <div class="oiz-sub">클릭하거나 드래그 · JPG/PNG/WEBP</div>
+        <div class="oiz-title" style="font-size:.82rem">주문완료 화면을 캡처해 올려주세요</div>
+        <div class="oiz-sub">구매 확인·리뷰비 정산의 <b>증빙 자료</b>입니다</div>
+        <div class="oiz-sub" style="margin-top:3px;color:#3182f6">💡 올리시면 주문번호·결제금액이 자동 입력됩니다</div>
       </div>
       <div class="of-img-preview" id="${cid}_imgPreview" style="display:none;align-items:center;gap:10px;margin-bottom:8px">
         <div style="position:relative;flex-shrink:0">
@@ -7211,12 +7213,56 @@ async function _precheckProfileGateOnEntry(auth) {
 /* ═══ 구매양식 제출 전 마지막 확인 팝업 (모든 제출 공통, [제출완료하기] 단독) ═══
    제출 버튼은 confirmOrderSubmit()을 호출 → 팝업 노출 → [제출완료하기] 시 실제 submitOrderForm() 실행.
    (내부 재제출은 submitOrderForm()을 직접 호출하므로 팝업을 거치지 않는다.) */
-function confirmOrderSubmit() {
-  if (_PREVIEW_MODE) { showToast("관리자 미리보기에서는 제출되지 않습니다.", "info"); return; }
-  if (window._submitOrderFormInProgress) { console.warn("[confirmOrderSubmit] 제출 진행 중 — 무시"); return; }
+// ── 구매캡쳐 미첨부 게이트 ──
+//   실측상 "캡처 미첨부" 알림의 85%가 진짜 미첨부였고, 원인은 화면이 캡처를 "(선택) 자동추출"로
+//   보여줘 안 올려도 되는 줄 알았기 때문. 문구를 필수로 바꾸고(①) 제출 직전 한 번 더 붙잡는다.
+//   ★ 강제 차단이 아니다 — 수기·재제출 등 정당한 무캡처 제출을 막으면 주문 자체가 유실된다.
+function _cardsMissingCapture() {
+  const out = [];
+  for (const cid of (_orderCardIds || [])) {
+    if (!document.getElementById(cid)) continue;            // 삭제된 카드 제외
+    const src = document.getElementById(cid + "_imgThumb")?.src || "";
+    if (!src.startsWith("data:")) out.push(cid);
+  }
+  return out;
+}
+function _closeCaptureGate() {
+  const m = document.getElementById("captureGateModal"); if (m) m.style.display = "none";
+}
+function _captureGateAttach() {   // [지금 캡처 올리기] — 첫 미첨부 카드로 스크롤 + 파일 선택 열기
+  _closeCaptureGate();
+  const cid = (window._captureGateCids || [])[0]; if (!cid) return;
+  const zone = document.getElementById(cid + "_imgZone");
+  if (zone) { try { zone.scrollIntoView({ behavior: "smooth", block: "center" }); } catch (_) { zone.scrollIntoView(); } }
+  setTimeout(() => { try { document.getElementById(cid + "_imgInput")?.click(); } catch (_) {} }, 320);
+}
+function _captureGateSkip() {     // [캡처 없이 제출] — 기존 확인 모달로 진행(완료화면·리뷰어홈에서 회수)
+  _closeCaptureGate();
+  window._captureSkipped = true;
+  _openOrderConfirm();
+}
+function _openOrderConfirm() {
   const m = document.getElementById("orderConfirmModal");
   if (!m) { submitOrderForm(); return; }   // 모달 미존재(하위호환) 시 바로 제출
   m.style.display = "flex";
+}
+function confirmOrderSubmit() {
+  if (_PREVIEW_MODE) { showToast("관리자 미리보기에서는 제출되지 않습니다.", "info"); return; }
+  if (window._submitOrderFormInProgress) { console.warn("[confirmOrderSubmit] 제출 진행 중 — 무시"); return; }
+  const missing = _cardsMissingCapture();
+  const gate = document.getElementById("captureGateModal");
+  if (missing.length && gate) {                 // 게이트 모달이 없는 구버전은 기존 흐름 그대로(동작 불변)
+    window._captureGateCids = missing;
+    const msg = document.getElementById("captureGateMsg");
+    if (msg && missing.length > 1) {
+      msg.innerHTML = `주문 <b style="color:#111827">${missing.length}건</b>에 구매 캡처가 없습니다.<br>`
+        + `캡처는 <b style="color:#111827">구매 확인과 리뷰비 정산</b>에 쓰입니다.`;
+    }
+    gate.style.display = "flex";
+    return;
+  }
+  window._captureSkipped = false;
+  _openOrderConfirm();
 }
 function _closeOrderConfirm() {
   const m = document.getElementById("orderConfirmModal");
@@ -7230,6 +7276,7 @@ function _proceedOrderSubmit() {
 async function submitOrderForm() {
   // ★ 최종 방어선: 재제출 등 팝업을 건너뛰는 내부 호출까지 포함해 미리보기에서는 주문이 절대 생성되지 않는다.
   if (_PREVIEW_MODE) { showToast("관리자 미리보기에서는 제출되지 않습니다.", "info"); return; }
+  window._capUploads = [];   // 캡처 첨부/업로드 추적 초기화(재제출 시 이전 결과 잔존 방지)
   if (window._submitOrderFormInProgress) { console.warn("[submitOrderForm] 진행 중 — 무시"); return; }
   window._submitOrderFormInProgress = true;
   const btn = document.getElementById("btnOrderFormSubmit");
@@ -7639,8 +7686,14 @@ async function submitOrderForm() {
       // ★ 임베드(M2): 홀드 확정 결과 수집 — 'confirmed' 외(late/tab_mismatch/error 등)면 부모가 "운영자 확인 중" 안내
       if (_EMBED_CTX && res.campaignHold !== undefined) window._embedLastCampaignHold = res.campaignHold;
 
-      // ★ 이미지 업로드는 완전 비동기 (사용자 대기 없음)
+      // ★ 이미지 업로드는 완전 비동기 (사용자 대기 없음) — 단, 진행/결과는 추적해 완료화면에 표시(③④).
+      //   과거엔 실패해도 화면이 '성공'이라 리뷰어가 첨부됐다고 믿고 창을 닫았다.
+      const _capSlot = { idx: i + 1, recipient: o.recipient || o.orderer || "",
+                         has: !!(o.imgThumbSrc && o.imgThumbSrc.startsWith("data:")),
+                         status: "none", osId: (res && res.orderSubmissionId) || "" };
+      (window._capUploads = window._capUploads || []).push(_capSlot);
       if (o.imgThumbSrc && o.imgThumbSrc.startsWith("data:")) {
+        _capSlot.status = "uploading";
         const _imgCtx = { base64: o.imgThumbSrc.split(",")[1], mime: o.mimeType || "image/jpeg", recipient: o.recipient, orderer: o.orderer };
         // 비동기 처리 — await 없이 실행 (제출 성공 여부와 무관)
         (async () => {
@@ -7665,9 +7718,11 @@ async function submitOrderForm() {
             // ★ 끝내 실패하면 조용히 넘어가지 않고 알린다 — 리뷰어는 첨부했다고 믿고 창을 닫아버린다.
             if (!upJson?.ok) {
               console.warn(`[이미지 업로드 ${i+1}] 최종 실패:`, upErrLast && upErrLast.message);
+              _capSlot.status = "fail";
               try { showToast(`${i+1}번째 주문의 구매캡쳐 업로드에 실패했습니다. 네트워크 확인 후 캡처를 다시 첨부해주세요.`, "error"); } catch(_) {}
-            }
-          } catch(upErr) { console.warn(`[이미지 업로드 ${i+1}] 백그라운드 오류:`, upErr.message); }
+            } else { _capSlot.status = "ok"; }
+          } catch(upErr) { _capSlot.status = "fail"; console.warn(`[이미지 업로드 ${i+1}] 백그라운드 오류:`, upErr.message); }
+          try { _renderCaptureChecklist(); } catch(_) {}   // 완료화면이 떠 있으면 즉시 반영
         })();
       }
     } catch(err) {
@@ -7774,15 +7829,50 @@ async function submitOrderForm() {
       + `<div style="display:inline-flex;align-items:center;gap:5px;font-weight:800;color:#065F46;font-size:.72rem;background:#D1FAE5;border:1px solid #A7F3D0;padding:3px 9px;border-radius:999px;margin-bottom:8px"><i class="fas fa-hard-drive"></i> 서버 저장 성공!</div>`
       + `<div style="font-size:.82rem;color:#334155"><b>내정보 / 현황</b>에서 참여한 내역을 확인하세요. 구글시트·리뷰 내역 반영은 <b>몇 분</b> 걸릴 수 있으며 "구매양식 반영중"으로 먼저 표시됩니다.<br><b style="color:#B91C1C">이미 제출됐으니 다시 제출하지 마세요.</b></div>`
       + `</div>`;
-    doneMsgEl.innerHTML = `${headline}${reflectNote}`;
+    doneMsgEl.innerHTML = `${headline}${reflectNote}<div id="capChecklist" style="margin-top:12px"></div>`;
   }
   if (doneEl) doneEl.style.display = "";
+  try { _renderCaptureChecklist(); } catch (_) {}   // ④ 캡처 첨부 여부를 완료화면에 못 박는다
 
   // ★ 임베드(M2): 부모(campaign.html)에 제출완료 통지 → 확정/운영자확인중 화면 전환. 저장해둔 입력값 정리.
   if (_EMBED_CTX) {
     try { sessionStorage.removeItem(_EMBED_FORM_KEY); } catch (_) { /* noop */ }
     _embedPost({ type: "order-submitted", successCount, campaignHold: window._embedLastCampaignHold ?? null });
   }
+}
+
+// ── ④ 완료화면 캡처 체크리스트 ──
+//   "제출 완료"만 뜨면 캡처가 빠진 걸 리뷰어가 모른 채 창을 닫는다. 첨부/업로드 상태를 못 박고,
+//   빠졌으면 그 자리에서 보완 경로를 준다. 업로드가 진행 중이면 "창을 닫지 마세요"를 함께 노출.
+function _renderCaptureChecklist() {
+  const host = document.getElementById("capChecklist");
+  if (!host) return;                                  // 완료화면이 아직 안 떴으면 무시(업로드 콜백에서 재호출됨)
+  const list = window._capUploads || [];
+  if (!list.length) { host.innerHTML = ""; return; }
+
+  const row = (icon, color, bg, line, title, sub) =>
+    `<div style="display:flex;align-items:flex-start;gap:9px;background:${bg};border:1px solid ${line};border-radius:11px;padding:10px 12px;margin-bottom:6px;text-align:left">`
+    + `<span style="width:20px;height:20px;border-radius:50%;background:${color};color:#fff;font-size:.68rem;font-weight:800;display:grid;place-items:center;flex:none;margin-top:1px">${icon}</span>`
+    + `<span style="flex:1;min-width:0"><span style="font-size:.82rem;font-weight:700;display:block">${_safeText(title)}</span>`
+    + `<span style="font-size:.72rem;color:#6B7280">${sub}</span></span></div>`;
+
+  const uploading = list.filter(x => x.status === "uploading").length;
+  const failed    = list.filter(x => x.status === "fail").length;
+  const missing   = list.filter(x => !x.has).length;
+  const okCount   = list.filter(x => x.status === "ok").length;
+  const many      = list.length > 1;
+
+  let html = "";
+  if (okCount)   html += row("✓", "#22C55E", "#F0FDF4", "#BBF7D0", `구매 캡처 첨부 완료${many ? ` (${okCount}건)` : ""}`, "증빙이 정상 보관되었습니다");
+  if (uploading) html += row("↑", "#3182f6", "#EBF3FE", "#cce0fb", `구매 캡처 업로드 중${many ? ` (${uploading}건)` : ""}`, "<b>업로드가 끝날 때까지 창을 닫지 말아주세요</b>");
+  if (failed)    html += row("!", "#E5484D", "#FEF2F2", "#FEE2E2", `구매 캡처 업로드 실패${many ? ` (${failed}건)` : ""}`, "네트워크 확인 후 아래에서 다시 첨부해주세요");
+  if (missing)   html += row("!", "#E5484D", "#FEF2F2", "#FEE2E2", `구매 캡처 미첨부${many ? ` (${missing}건)` : ""}`, "증빙이 없으면 <b>정산이 지연될 수 있어요</b>");
+
+  if (missing || failed) {
+    html += `<div style="font-size:.75rem;color:#6B7280;text-align:center;margin-top:9px;line-height:1.6">`
+      + `📷 캡처는 <b style="color:#191F28">리뷰어 홈 → 내 참여</b>에서 언제든 첨부할 수 있습니다</div>`;
+  }
+  host.innerHTML = html;
 }
 
 /** ★ 제출 완료/실패 후 → 구매양식 입력 화면으로 복귀 */

@@ -732,4 +732,45 @@ router.post('/notices/delete', authMiddleware, adminOrMasterMiddleware, async (r
   } catch (err) { next(err); }
 });
 
+// ═══════════════════════════════════════════════════════════
+// GET /api/reviewer/my-missing-captures?phone8=XX — 구매캡쳐가 빠진 내 주문 (무인증·phone8 스코프)
+//
+// 배경: 구매캡쳐 미첨부의 85%가 "리뷰어가 실제로 안 올린 것"(운영 실측). 지금은 리뷰어가
+//   자기 주문에 캡처가 빠졌다는 걸 알 방법이 없어 관리자가 개별 독촉해야 한다.
+//   리뷰어 홈에서 스스로 보완하게 하면 그 왕복이 사라진다.
+// 노출은 my-status 와 같은 수준(phone8 = 연락처 끝 8자리 소유자만 자기 건 조회) + 필드 최소화.
+//   첨부는 기존 업로드 경로(/api/image/image-upload + orderSubmissionId) 재사용 — 신규 쓰기 표면 0.
+// ═══════════════════════════════════════════════════════════
+router.get('/my-missing-captures', async (req, res, next) => {
+  try {
+    const phone8 = String(req.query.phone8 || '').trim();
+    if (phone8.length !== 8) return res.status(400).json({ ok: false, error: 'phone8 필수 (8자리)' });
+    const days = Math.min(Math.max(parseInt(req.query.days, 10) || 30, 1), 90);
+
+    // 캡처 연결 기능 배포 이전 주문은 링크가 없는 게 정상 → 보완 요청 대상이 아니다(과거분 독촉 방지).
+    let cutoff = null;
+    try {
+      const { rows: cf } = await pool.query(
+        `SELECT value FROM app_settings WHERE key = 'reviewer_log_capture_cutoff'`);
+      cutoff = (cf[0] && cf[0].value) || null;
+    } catch (_) { /* 못 읽으면 기간 조건만 적용 */ }
+
+    const { rows } = await pool.query(`
+      SELECT os.id, os.tab_name AS "tabName", os.recipient, os.orderer,
+             os.submitted_at AS "submittedAt", os.sheet_id AS "sheetId",
+             tc.display_name AS "displayName", tc.campaign_name AS "campaignName"
+        FROM order_submissions os
+        LEFT JOIN tab_configs tc ON tc.sheet_id = os.sheet_id AND tc.tab_name = os.tab_name
+       WHERE RIGHT(regexp_replace(COALESCE(os.phone, ''), '[^0-9]', '', 'g'), 8) = $1
+         AND os.deleted_at IS NULL
+         AND os.capture_uploaded_at IS NULL
+         AND os.submitted_at > NOW() - ($2 || ' days')::interval
+         AND ($3::timestamptz IS NULL OR os.submitted_at > $3::timestamptz)
+       ORDER BY os.submitted_at DESC
+       LIMIT 30`, [phone8, String(days), cutoff]);
+
+    res.json({ ok: true, count: rows.length, items: rows });
+  } catch (err) { next(err); }
+});
+
 module.exports = router;

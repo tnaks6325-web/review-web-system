@@ -803,6 +803,20 @@
       <button onclick="doLogout()" style="width:100%;padding:14px;background:#F1F2F6;color:#5B6472;border:none;border-radius:13px;font-weight:700;font-size:.9rem;cursor:pointer"><i class="fas fa-right-from-bracket"></i> 로그아웃</button>
     </div>
 
+    <!-- ★ 구매캡쳐 보완 알림 — 캡처가 빠진 내 주문을 스스로 채우게(관리자 독촉 왕복 제거).
+         해당 건이 없으면 통째로 숨김(평상시 화면 불변). 첨부는 기존 업로드 경로 재사용. -->
+    <div class="home-section" id="sectionMissingCapture" style="display:none">
+      <div class="results-header">
+        <span class="results-title"><i class="fas fa-camera" style="color:#E5484D"></i> 구매 캡처 보완 필요</span>
+        <span id="mcCount" class="results-badge" style="background:#FEE2E2;color:#B91C1C">0건</span>
+      </div>
+      <div style="font-size:.78rem;color:#6B7280;line-height:1.6;margin:-2px 0 10px">
+        아래 주문은 <b style="color:#191F28">구매 캡처가 없습니다.</b> 증빙이 없으면 정산이 지연될 수 있어요.
+      </div>
+      <div id="mcList"></div>
+      <input type="file" accept="image/*" id="mcFileInput" style="display:none" onchange="_mcOnFile(this)">
+    </div>
+
     <!-- ★ 리뷰 내역 섹션 -->
     <div class="home-section" id="sectionReviewList">
       <div class="results-header">
@@ -1144,6 +1158,79 @@ async function loadReviewList(user, opts = {}) {
   _reviewListLoading = false;
   renderReviewSubTab();
   _scheduleOrderPendingRefresh(user);
+  _loadMissingCaptures(phone8);   // ⑤ 캡처 빠진 주문 보완 안내(해당 없으면 영역 자체가 숨겨짐)
+}
+
+// ── ⑤ 구매 캡처 보완 ──────────────────────────────────────────
+//   실측상 '캡처 미첨부' 알림의 85%가 진짜 미첨부인데, 리뷰어는 자기 주문에 캡처가 빠진 걸
+//   알 방법이 없었다. 홈에 남겨 스스로 채우게 하면 관리자 독촉 왕복이 사라진다.
+//   첨부는 기존 업로드 경로(/api/image/image-upload + orderSubmissionId) 재사용 = 신규 쓰기 표면 0.
+let _mcItems = [], _mcTargetId = '';
+async function _loadMissingCaptures(phone8) {
+  const sec = document.getElementById('sectionMissingCapture');
+  if (!sec || !phone8) return;
+  try {
+    const base = (typeof API_BASE_URL !== 'undefined' && API_BASE_URL) ? API_BASE_URL : '';
+    const r = await fetch(base + '/api/reviewer/my-missing-captures?phone8=' + encodeURIComponent(phone8)).then(x => x.json());
+    _mcItems = (r && r.ok && Array.isArray(r.items)) ? r.items : [];
+  } catch (_) { _mcItems = []; }   // 실패는 조용히(평상시 화면을 방해하지 않음)
+  _renderMissingCaptures();
+}
+function _renderMissingCaptures() {
+  const sec = document.getElementById('sectionMissingCapture');
+  const list = document.getElementById('mcList');
+  const cnt = document.getElementById('mcCount');
+  if (!sec || !list) return;
+  if (!_mcItems.length) { sec.style.display = 'none'; return; }
+  sec.style.display = '';
+  if (cnt) cnt.textContent = _mcItems.length + '건';
+  const esc2 = s => String(s == null ? '' : s).replace(/[&<>"]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
+  list.innerHTML = _mcItems.map(it => {
+    const when = String(it.submittedAt || '').slice(5, 10).replace('-', '/');
+    return `<div style="background:#FFFBEB;border:1px solid #FDE68A;border-radius:12px;padding:11px 12px;margin-bottom:8px">
+      <div style="font-size:.8rem;font-weight:700;color:#191F28;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${esc2(it.displayName || it.campaignName || it.tabName || '')}</div>
+      <div style="font-size:.7rem;color:#92400E;margin-top:3px">${esc2(when)} 제출 · 구매 캡처가 아직 없습니다</div>
+      <button type="button" onclick="_mcPick('${esc2(it.id)}')" style="margin-top:8px;width:100%;padding:9px;border:none;border-radius:10px;background:#3182f6;color:#fff;font-size:.8rem;font-weight:750;cursor:pointer;font-family:inherit">📷 캡처 첨부하기</button>
+    </div>`;
+  }).join('');
+}
+function _mcPick(id) {
+  _mcTargetId = id;
+  const inp = document.getElementById('mcFileInput');
+  if (inp) { inp.value = ''; inp.click(); }
+}
+function _mcOnFile(input) {
+  const f = input && input.files && input.files[0];
+  if (!f || !_mcTargetId) return;
+  const it = _mcItems.find(x => String(x.id) === String(_mcTargetId));
+  if (!it) return;
+  if (f.size > 12 * 1024 * 1024) { alert('이미지가 너무 큽니다(12MB 이하).'); return; }
+  const rd = new FileReader();
+  rd.onload = async () => {
+    const dataUrl = String(rd.result || '');
+    const b64 = dataUrl.split(',')[1];
+    if (!b64) { alert('이미지를 읽지 못했습니다.'); return; }
+    const ext = f.type === 'image/png' ? 'png' : (f.type === 'image/webp' ? 'webp' : 'jpg');
+    const nameBase = (it.recipient || it.orderer || '주문캡처');
+    try {
+      const base = (typeof API_BASE_URL !== 'undefined' && API_BASE_URL) ? API_BASE_URL : '';
+      const r = await fetch(base + '/api/image/image-upload', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          imageBase64: b64, mimeType: f.type || 'image/jpeg', fileName: nameBase + '.' + ext,
+          displayName: it.displayName || '', tabName: it.tabName || '', sheetId: it.sheetId || '',
+          orderSubmissionId: it.id,        // ← 이 키로 서버가 capture_uploaded_at 을 채운다
+        }),
+      }).then(x => x.json());
+      if (!r || !r.ok) throw new Error((r && r.error) || '업로드 실패');
+      _mcItems = _mcItems.filter(x => String(x.id) !== String(it.id));   // 목록에서 제거(즉시 반영)
+      _renderMissingCaptures();
+      alert('구매 캡처가 첨부되었습니다. 감사합니다!');
+    } catch (e) {
+      alert('업로드에 실패했습니다. 네트워크 확인 후 다시 시도해주세요.');
+    } finally { _mcTargetId = ''; }
+  };
+  rd.readAsDataURL(f);
 }
 
 // '구매양식 반영중' 주문이 남아있을 때만 가벼운 자동 재조회(가시상태 한정·상한 6회≈3분).
