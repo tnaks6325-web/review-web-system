@@ -1,0 +1,688 @@
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>1:1문의 시작 창구 개선 — 비포/애프터 시안</title>
+<style>
+  :root{ color-scheme:light; }
+  *{ box-sizing:border-box; }
+  body{
+    margin:0; background:#F4F6FA; color:#1B1F27;
+    font-family:-apple-system,BlinkMacSystemFont,"Apple SD Gothic Neo","Malgun Gothic",sans-serif;
+    -webkit-font-smoothing:antialiased;
+  }
+  .wrap{ max-width:1180px; margin:0 auto; padding:34px 20px 80px; }
+
+  /* ── 문서 헤더 ── */
+  .doc-head{ background:#fff; border:1px solid #E4E8EF; border-radius:18px; padding:26px 28px; margin-bottom:26px; }
+  .doc-head h1{ margin:0 0 8px; font-size:1.5rem; letter-spacing:-.02em; }
+  .doc-head p{ margin:0; font-size:.9rem; color:#5B6472; line-height:1.65; }
+  .doc-meta{ margin-top:14px; display:flex; flex-wrap:wrap; gap:8px; }
+  .doc-meta span{ font-size:.72rem; font-weight:700; padding:5px 11px; border-radius:999px; background:#EEF3FB; color:#1B4F9C; }
+
+  /* ── 요청사항 요약 ── */
+  .asks{ display:grid; grid-template-columns:repeat(3,1fr); gap:12px; margin-bottom:32px; }
+  .ask{ background:#fff; border:1px solid #E4E8EF; border-radius:14px; padding:16px 18px; }
+  .ask b{ display:block; font-size:.68rem; font-weight:800; color:#3182F6; letter-spacing:.04em; margin-bottom:6px; }
+  .ask p{ margin:0; font-size:.85rem; line-height:1.6; color:#2B313C; }
+
+  /* ── 섹션 ── */
+  section{ margin-bottom:44px; }
+  .sec-head{ display:flex; align-items:flex-start; gap:12px; margin-bottom:16px; }
+  .sec-no{
+    flex:none; width:30px; height:30px; border-radius:10px; background:#1B1F27; color:#fff;
+    display:grid; place-items:center; font-size:.85rem; font-weight:800;
+  }
+  .sec-head h2{ margin:0 0 4px; font-size:1.12rem; letter-spacing:-.02em; }
+  .sec-head p{ margin:0; font-size:.85rem; color:#5B6472; line-height:1.6; }
+
+  .compare{ display:grid; grid-template-columns:1fr 1fr; gap:16px; align-items:start; }
+  .pane{ background:#fff; border:1px solid #E4E8EF; border-radius:16px; overflow:hidden; }
+  .pane-head{ padding:12px 16px; font-size:.78rem; font-weight:800; display:flex; align-items:center; gap:7px; }
+  .pane.before .pane-head{ background:#FEF2F2; color:#B42318; border-bottom:1px solid #FBDCDC; }
+  .pane.after  .pane-head{ background:#ECFDF3; color:#0A7040; border-bottom:1px solid #CFF0DE; }
+  .pane-head .tagdot{ width:7px; height:7px; border-radius:50%; background:currentColor; }
+  .pane-body{ padding:18px 16px 20px; display:flex; justify-content:center; background:#F8FAFC; }
+  .pane-note{ padding:13px 16px 16px; border-top:1px solid #EEF1F6; }
+  .pane-note li{ font-size:.8rem; line-height:1.65; color:#3A414D; margin-bottom:4px; }
+  .pane-note li:last-child{ margin-bottom:0; }
+  .pane-note ul{ margin:0; padding-left:17px; }
+  .pane.before .pane-note li::marker{ color:#E5605A; }
+  .pane.after  .pane-note li::marker{ color:#12A05F; }
+
+  /* ── 목업 폰 프레임 ── */
+  .phone{
+    width:330px; background:#fff; border:1px solid #DCE1E9; border-radius:24px;
+    overflow:hidden; box-shadow:0 6px 22px rgba(23,43,77,.09);
+    display:flex; flex-direction:column; position:relative;
+  }
+  .ph-status{
+    height:26px; display:flex; align-items:center; justify-content:space-between;
+    padding:0 14px; font-size:.6rem; font-weight:700; color:#98A0AC; background:#fff;
+  }
+  .ph-top{
+    padding:11px 15px 10px; border-bottom:1px solid #F1F3F7;
+    display:flex; align-items:center; gap:8px;
+  }
+  .ph-top b{ font-size:.92rem; letter-spacing:-.02em; }
+  .ph-top .sub{ font-size:.68rem; color:#98A0AC; margin-top:1px; }
+  .ph-scroll{ padding:12px 13px 14px; background:#F7F9FC; min-height:352px; }
+  .ph-tabbar{
+    display:flex; border-top:1px solid #EFEFF3; background:#fff; padding:7px 0 9px; margin-top:auto;
+  }
+  .ph-tabbar div{
+    flex:1; text-align:center; font-size:.6rem; font-weight:700; color:#A6ADB8; position:relative;
+  }
+  .ph-tabbar div .ic{ display:block; font-size:.95rem; margin-bottom:2px; filter:grayscale(1) opacity(.55); }
+  .ph-tabbar div.on{ color:#3182F6; }
+  .ph-tabbar div.on .ic{ filter:none; }
+  .ph-tabbar .nbadge{
+    position:absolute; top:-2px; right:22%; min-width:15px; height:15px; padding:0 4px;
+    background:#EF4444; color:#fff; font-size:.55rem; font-weight:800; line-height:15px;
+    border-radius:8px; box-sizing:border-box;
+  }
+
+  /* ── 서브탭 ── */
+  .subtabs{ display:flex; gap:0; background:#fff; border:1px solid #E7EBF1; border-radius:10px; padding:3px; margin-bottom:10px; }
+  .subtabs b{
+    flex:1; text-align:center; padding:7px; border-radius:8px; font-size:.74rem;
+    font-weight:700; color:#8A929E;
+  }
+  .subtabs b.on{ background:#3182F6; color:#fff; }
+  .subtabs .cnt{
+    font-size:.6rem; font-weight:800; background:#EEF2F7; color:#5B6472;
+    border-radius:9px; padding:1px 6px; margin-left:5px;
+  }
+  .subtabs b.on .cnt{ background:rgba(255,255,255,.3); color:#fff; }
+
+  /* ── 리뷰 내역 카드 ── */
+  .rcard{ background:#fff; border:1px solid #E7EBF1; border-radius:14px; margin-bottom:8px; overflow:hidden; }
+  .rcard-main{ display:flex; align-items:center; gap:9px; padding:11px 13px; }
+  .rav{
+    width:33px; height:33px; border-radius:50%; flex:none; display:grid; place-items:center;
+    background:linear-gradient(135deg,#E8F1FE,#EEF4FE); color:#3182F6; font-size:.78rem;
+  }
+  .rav.ok{ background:linear-gradient(135deg,#DCFCE7,#E9FBF0); color:#12A05F; }
+  .rbody{ flex:1; min-width:0; }
+  .rname{ font-size:.79rem; font-weight:700; color:#1B1F27; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+  .rsub{ font-size:.68rem; color:#98A0AC; margin-top:2px; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+  .rround{
+    display:inline-block; font-size:.57rem; font-weight:800; padding:1px 5px; border-radius:9px;
+    background:#E8F1FE; color:#1B64DA; border:1px solid #CCE0FB; margin-left:4px; vertical-align:middle;
+  }
+  .rright{ display:flex; align-items:center; gap:5px; flex:none; }
+  .bdg{ font-size:.58rem; font-weight:800; padding:3px 7px; border-radius:6px; }
+  .bdg.wait{ background:#FEF3C7; color:#92400E; }
+  .bdg.done{ background:#D1FAE5; color:#065F46; }
+  .bdg.paid{ background:#E0E7FF; color:#3730A3; }
+  .chev{ color:#C4CAD4; font-size:.7rem; }
+  .rfoot{ display:flex; border-top:1px solid #F0F2F6; }
+  .rfoot button{
+    flex:1; border:none; background:none; padding:10px 6px; font-size:.72rem; font-weight:800;
+    color:#1B64DA; cursor:default; font-family:inherit; display:flex; align-items:center;
+    justify-content:center; gap:5px;
+  }
+  .rfoot button + button{ border-left:1px solid #F0F2F6; }
+  .rfoot button.cs{ color:#1B64DA; }
+  .rfoot button.sub{ color:#5B6472; }
+  .rfoot .nbdg{
+    min-width:15px; height:15px; padding:0 4px; background:#EF4444; color:#fff;
+    font-size:.55rem; font-weight:800; line-height:15px; border-radius:8px; box-sizing:border-box;
+  }
+  .rfoot-old button{ width:100%; }
+
+  /* ── 팝업(비포) ── */
+  .ph-dim{
+    position:absolute; inset:0; background:rgba(15,23,42,.5); display:flex;
+    align-items:flex-end; justify-content:center; border-radius:24px; overflow:hidden;
+  }
+  .sheet{ width:100%; background:#fff; border-radius:16px 16px 0 0; height:80%; display:flex; flex-direction:column; }
+  .sheet-head{ padding:12px 14px; border-bottom:1px solid #EEF2F7; display:flex; align-items:center; gap:7px; font-weight:800; font-size:.9rem; }
+  .sheet-x{ margin-left:auto; width:24px; height:24px; border-radius:7px; background:#F3F4F6; color:#6B7280; display:grid; place-items:center; font-size:.75rem; }
+  .sheet-desc{ padding:8px 14px; font-size:.72rem; color:#6B7280; background:#F9FAFB; border-bottom:1px solid #F3F4F6; }
+  .sheet-list{ flex:1; overflow:hidden; }
+  .pick{ padding:11px 14px; border-bottom:1px solid #F3F4F6; display:flex; align-items:center; gap:9px; }
+  .pick .ic{ width:32px; height:32px; border-radius:9px; background:#E0EDFF; color:#3182F6; display:grid; place-items:center; font-size:.8rem; flex:none; }
+  .pick .ic.gen{ background:#EDE9FE; color:#7C3AED; }
+  .pick .t{ flex:1; min-width:0; }
+  .pick .t b{ display:block; font-size:.8rem; font-weight:700; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+  .pick .t span{ font-size:.66rem; color:#9CA3AF; }
+  .pick .chev{ font-size:.72rem; }
+
+  /* ── 내 문의함 목록(애프터) ── */
+  .inq{ background:#fff; border:1px solid #E7EBF1; border-radius:13px; padding:11px 12px; margin-bottom:8px; display:flex; gap:9px; align-items:flex-start; }
+  .inq .ic{ width:34px; height:34px; border-radius:10px; background:#E0EDFF; color:#3182F6; display:grid; place-items:center; font-size:.8rem; flex:none; }
+  .inq .ic.gen{ background:#EDE9FE; color:#7C3AED; }
+  .inq .t{ flex:1; min-width:0; }
+  .inq .t .r1{ display:flex; align-items:baseline; gap:6px; }
+  .inq .t b{ font-size:.79rem; font-weight:700; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+  .inq .t .tm{ font-size:.62rem; color:#B0B7C2; margin-left:auto; flex:none; }
+  .inq .t .msg{ font-size:.7rem; color:#8A929E; margin-top:3px; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+  .inq .nbdg{
+    min-width:17px; height:17px; padding:0 5px; background:#EF4444; color:#fff; font-size:.6rem;
+    font-weight:800; line-height:17px; text-align:center; border-radius:9px; flex:none; box-sizing:border-box;
+  }
+  .inq .closed{ font-size:.58rem; font-weight:800; color:#8A929E; background:#F1F3F7; border-radius:6px; padding:2px 6px; flex:none; }
+  .empty{ text-align:center; padding:34px 18px; color:#98A0AC; }
+  .empty .big{ font-size:1.5rem; opacity:.45; display:block; margin-bottom:9px; }
+  .empty p{ margin:0 0 4px; font-size:.82rem; font-weight:700; color:#5B6472; }
+  .empty small{ font-size:.7rem; color:#A6ADB8; }
+  .empty .go{
+    display:inline-block; margin-top:14px; background:#3182F6; color:#fff; font-size:.76rem;
+    font-weight:800; padding:9px 16px; border-radius:10px;
+  }
+  .sec-title{ font-size:.72rem; font-weight:800; color:#8A929E; margin:2px 2px 8px; letter-spacing:.02em; }
+
+  /* ── 흐름 비교 ── */
+  .flow{ display:flex; align-items:center; gap:7px; flex-wrap:wrap; padding:14px 16px; }
+  .flow span{
+    font-size:.74rem; font-weight:700; background:#fff; border:1px solid #E4E8EF;
+    border-radius:9px; padding:7px 11px; color:#2B313C;
+  }
+  .flow .arw{ color:#B0B7C2; font-weight:800; border:none; background:none; padding:0 1px; }
+  .flow .hi{ background:#EEF3FB; border-color:#CFE0FD; color:#1B4F9C; }
+
+  /* ── 변경 요약표 ── */
+  table{ width:100%; border-collapse:collapse; background:#fff; border:1px solid #E4E8EF; border-radius:14px; overflow:hidden; }
+  th,td{ padding:11px 14px; text-align:left; font-size:.83rem; border-bottom:1px solid #EEF1F6; vertical-align:top; line-height:1.55; }
+  th{ background:#F7F9FC; font-size:.74rem; font-weight:800; color:#5B6472; }
+  tr:last-child td{ border-bottom:none; }
+  td.k{ font-weight:700; width:170px; }
+  .tag-b{ display:inline-block; font-size:.68rem; font-weight:800; color:#B42318; background:#FEF2F2; border-radius:6px; padding:2px 7px; margin-right:5px; }
+  .tag-a{ display:inline-block; font-size:.68rem; font-weight:800; color:#0A7040; background:#ECFDF3; border-radius:6px; padding:2px 7px; margin-right:5px; }
+
+  .callout{ background:#FFF9EC; border:1px solid #FBE6BC; border-radius:14px; padding:16px 18px; }
+  .callout b{ display:block; font-size:.85rem; margin-bottom:7px; color:#8A5A08; }
+  .callout li{ font-size:.83rem; line-height:1.7; color:#4A3D24; }
+  .callout ul{ margin:0; padding-left:18px; }
+
+  @media (max-width:900px){
+    .compare{ grid-template-columns:1fr; }
+    .asks{ grid-template-columns:1fr; }
+    .phone{ width:100%; max-width:330px; }
+  }
+</style>
+
+<div class="wrap">
+
+  <div class="doc-head">
+    <h1>1:1문의 시작 창구 개선 — 비포 / 애프터 시안</h1>
+    <p>
+      문의를 <b>시작하는 곳</b>과 문의를 <b>확인하는 곳</b>을 나눕니다.<br>
+      시작은 <b>리뷰 내역 카드</b>에서, 확인은 <b>1:1문의 탭(내 문의함)</b>에서 하도록 바꾸고,
+      제출완료 탭 카드를 참여중 탭 카드와 같은 모양으로 맞춥니다.
+    </p>
+    <div class="doc-meta">
+      <span>리뷰어 화면</span><span>구현 전 시안</span><span>화면 3곳 변경</span>
+    </div>
+  </div>
+
+  <div class="asks">
+    <div class="ask">
+      <b>요청 ①</b>
+      <p>1:1문의는 리뷰 내역의 <b>참여중 / 제출완료 카드</b>에서 시작할 수 있어야 한다.</p>
+    </div>
+    <div class="ask">
+      <b>요청 ②</b>
+      <p>1:1문의 탭을 누르면 팝업 없이 <b>문의한 목록만</b> 화면 안에 바로 보여야 한다.</p>
+    </div>
+    <div class="ask">
+      <b>요청 ③</b>
+      <p>제출완료 탭 카드를 <b>참여중 탭 카드와 같은 디자인</b>으로 맞춘다.</p>
+    </div>
+  </div>
+
+  <!-- ════════ ① 1:1문의 탭 ════════ -->
+  <section>
+    <div class="sec-head">
+      <div class="sec-no">1</div>
+      <div>
+        <h2>1:1문의 탭을 눌렀을 때</h2>
+        <p>지금은 참여한 작업이 전부 팝업으로 올라옵니다. 앞으로는 팝업 없이 <b>내가 문의한 대화방만</b> 화면 안에 보입니다.</p>
+      </div>
+    </div>
+
+    <div class="compare">
+      <!-- BEFORE -->
+      <div class="pane before">
+        <div class="pane-head"><i class="tagdot"></i> 지금 (BEFORE)</div>
+        <div class="pane-body">
+          <div class="phone">
+            <div class="ph-status"><span>9:41</span><span>▮▮▮</span></div>
+            <div class="ph-top"><div><b>1:1 문의</b><div class="sub">아이에이리뷰</div></div></div>
+            <div class="ph-scroll" style="min-height:352px"></div>
+            <div class="ph-tabbar">
+              <div><span class="ic">🏠</span>홈</div>
+              <div class="on"><span class="ic">🎧</span>1:1문의<span class="nbadge">3</span></div>
+              <div><span class="ic">🪪</span>내정보/현황</div>
+              <div><span class="ic">📘</span>가이드</div>
+            </div>
+
+            <div class="ph-dim">
+              <div class="sheet">
+                <div class="sheet-head">🎧 1:1 문의하기 <span class="sheet-x">✕</span></div>
+                <div class="sheet-desc">진행하신 탭을 선택해 문의하세요</div>
+                <div class="sheet-list">
+                  <div class="pick">
+                    <div class="ic">📦</div>
+                    <div class="t"><b>힙스 콜라겐 스틱 30포</b><span>새 문의</span></div>
+                    <div class="chev">›</div>
+                  </div>
+                  <div class="pick">
+                    <div class="ic">📦</div>
+                    <div class="t"><b>콰이어트 수면안대</b><span>이전 문의 있음</span></div>
+                    <span class="nbdg" style="min-width:17px;height:17px;padding:0 5px;background:#EF4444;color:#fff;font-size:.6rem;font-weight:800;line-height:17px;text-align:center;border-radius:9px">2</span>
+                    <div class="chev">›</div>
+                  </div>
+                  <div class="pick">
+                    <div class="ic">📦</div>
+                    <div class="t"><b>어나더 비타민C 앰플</b><span>새 문의</span></div>
+                    <div class="chev">›</div>
+                  </div>
+                  <div class="pick">
+                    <div class="ic">📦</div>
+                    <div class="t"><b>데일리 클렌징폼 200ml</b><span>새 문의</span></div>
+                    <div class="chev">›</div>
+                  </div>
+                  <div class="pick">
+                    <div class="ic gen">💬</div>
+                    <div class="t"><b>일반 문의</b><span>새 문의</span></div>
+                    <div class="chev">›</div>
+                  </div>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+        <div class="pane-note">
+          <ul>
+            <li>참여한 작업이 <b>문의 여부와 상관없이 전부</b> 올라와, 어디까지가 “내가 문의한 건”인지 알 수 없습니다.</li>
+            <li>팝업이 화면을 덮어 다른 정보를 함께 볼 수 없습니다.</li>
+            <li>답장이 온 방을 찾으려면 목록을 끝까지 훑어야 합니다.</li>
+          </ul>
+        </div>
+      </div>
+
+      <!-- AFTER -->
+      <div class="pane after">
+        <div class="pane-head"><i class="tagdot"></i> 변경안 (AFTER)</div>
+        <div class="pane-body">
+          <div class="phone">
+            <div class="ph-status"><span>9:41</span><span>▮▮▮</span></div>
+            <div class="ph-top"><div><b>내 문의함</b><div class="sub">문의한 내역이 여기에 모입니다</div></div></div>
+            <div class="ph-scroll">
+              <div class="sec-title">진행 중인 문의</div>
+
+              <div class="inq">
+                <div class="ic">📦</div>
+                <div class="t">
+                  <div class="r1"><b>콰이어트 수면안대</b><span class="tm">오후 2:31</span></div>
+                  <div class="msg">주문번호 확인해드렸습니다. 배송은…</div>
+                </div>
+                <span class="nbdg">2</span>
+              </div>
+
+              <div class="inq">
+                <div class="ic">📦</div>
+                <div class="t">
+                  <div class="r1"><b>힙스 콜라겐 스틱 30포</b><span class="tm">어제</span></div>
+                  <div class="msg">사진 첨부드립니다 📷</div>
+                </div>
+                <span class="nbdg">1</span>
+              </div>
+
+              <div class="sec-title" style="margin-top:14px">종료된 문의</div>
+
+              <div class="inq">
+                <div class="ic gen">💬</div>
+                <div class="t">
+                  <div class="r1"><b>일반 문의</b><span class="tm">7/22</span></div>
+                  <div class="msg">확인 감사합니다!</div>
+                </div>
+                <span class="closed">종료</span>
+              </div>
+            </div>
+            <div class="ph-tabbar">
+              <div><span class="ic">🏠</span>홈</div>
+              <div class="on"><span class="ic">🎧</span>1:1문의<span class="nbadge">3</span></div>
+              <div><span class="ic">🪪</span>내정보/현황</div>
+              <div><span class="ic">📘</span>가이드</div>
+            </div>
+          </div>
+        </div>
+        <div class="pane-note">
+          <ul>
+            <li>팝업이 사라지고 <b>화면 안에 바로</b> 목록이 뜹니다.</li>
+            <li><b>실제로 문의한 건만</b> 보이고, 마지막 메시지·시각·안 읽은 개수가 한눈에 들어옵니다.</li>
+            <li>진행 중 / 종료된 문의로 나눠 답장이 온 방을 바로 찾습니다.</li>
+            <li>목록을 눌러 대화창으로 들어가는 동작은 지금과 같습니다.</li>
+          </ul>
+        </div>
+      </div>
+    </div>
+
+    <div style="margin-top:14px" class="compare">
+      <div class="pane before">
+        <div class="pane-head"><i class="tagdot"></i> 문의가 하나도 없을 때 (지금)</div>
+        <div class="pane-body" style="padding:16px">
+          <div class="phone" style="min-height:auto">
+            <div class="ph-top"><div><b>1:1 문의</b></div></div>
+            <div class="ph-scroll" style="min-height:150px;position:relative">
+              <div class="empty"><span class="big">🎧</span><p>진행한 탭이 없습니다.</p><small>일반 문의로 남겨주세요.</small></div>
+            </div>
+          </div>
+        </div>
+        <div class="pane-note"><ul><li>다음에 무엇을 해야 하는지 안내가 없습니다.</li></ul></div>
+      </div>
+      <div class="pane after">
+        <div class="pane-head"><i class="tagdot"></i> 문의가 하나도 없을 때 (변경안)</div>
+        <div class="pane-body" style="padding:16px">
+          <div class="phone" style="min-height:auto">
+            <div class="ph-top"><div><b>내 문의함</b></div></div>
+            <div class="ph-scroll" style="min-height:150px">
+              <div class="empty">
+                <span class="big">💬</span>
+                <p>아직 남긴 문의가 없습니다</p>
+                <small>리뷰 내역에서 문의할 작업을 선택해 주세요</small>
+                <div class="go">리뷰 내역으로 가기 →</div>
+              </div>
+            </div>
+          </div>
+        </div>
+        <div class="pane-note"><ul><li>비어 있어도 <b>다음 행동(리뷰 내역으로 이동)</b>을 바로 안내합니다.</li></ul></div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ════════ ② 문의 시작 지점 ════════ -->
+  <section>
+    <div class="sec-head">
+      <div class="sec-no">2</div>
+      <div>
+        <h2>문의를 시작하는 곳 — 리뷰 내역 카드</h2>
+        <p>내정보/현황 → 리뷰 내역의 <b>참여중 · 제출완료 카드에서 바로</b> 그 작업의 문의를 시작합니다.</p>
+      </div>
+    </div>
+
+    <div class="compare">
+      <!-- BEFORE -->
+      <div class="pane before">
+        <div class="pane-head"><i class="tagdot"></i> 지금 (BEFORE)</div>
+        <div class="flow">
+          <span>1:1문의 탭</span><span class="arw">→</span>
+          <span>팝업 열림</span><span class="arw">→</span>
+          <span>참여 작업 목록에서 찾기</span><span class="arw">→</span>
+          <span>대화창</span>
+        </div>
+        <div class="pane-body">
+          <div class="phone">
+            <div class="ph-status"><span>9:41</span><span>▮▮▮</span></div>
+            <div class="ph-top"><div><b>내정보/현황</b><div class="sub">리뷰 내역</div></div></div>
+            <div class="ph-scroll">
+              <div class="subtabs"><b class="on">참여중 <span class="cnt">2</span></b><b>제출완료 <span class="cnt">3</span></b></div>
+
+              <div class="rcard">
+                <div class="rcard-main">
+                  <div class="rav">👤</div>
+                  <div class="rbody">
+                    <div class="rname">7/28 힙스 콜라겐 스틱 옵션:30포<span class="rround">1차</span></div>
+                    <div class="rsub">김수만</div>
+                  </div>
+                  <div class="rright"><span class="bdg wait">제출대기</span><span class="chev">›</span></div>
+                </div>
+              </div>
+
+              <div class="rcard">
+                <div class="rcard-main">
+                  <div class="rav">👤</div>
+                  <div class="rbody">
+                    <div class="rname">7/29 콰이어트 수면안대 옵션:블랙</div>
+                    <div class="rsub">김수만</div>
+                  </div>
+                  <div class="rright"><span class="bdg wait">제출대기</span><span class="chev">›</span></div>
+                </div>
+              </div>
+            </div>
+            <div class="ph-tabbar">
+              <div><span class="ic">🏠</span>홈</div>
+              <div><span class="ic">🎧</span>1:1문의<span class="nbadge">3</span></div>
+              <div class="on"><span class="ic">🪪</span>내정보/현황</div>
+              <div><span class="ic">📘</span>가이드</div>
+            </div>
+          </div>
+        </div>
+        <div class="pane-note">
+          <ul>
+            <li>카드에서 문의를 시작할 방법이 <b>없습니다</b>.</li>
+            <li>다른 탭으로 옮겨가 같은 작업을 이름으로 다시 찾아야 합니다.</li>
+          </ul>
+        </div>
+      </div>
+
+      <!-- AFTER -->
+      <div class="pane after">
+        <div class="pane-head"><i class="tagdot"></i> 변경안 (AFTER)</div>
+        <div class="flow">
+          <span>내정보/현황</span><span class="arw">→</span>
+          <span class="hi">카드의 [1:1 문의]</span><span class="arw">→</span>
+          <span>대화창</span>
+          <span style="background:none;border:none;color:#8A929E;font-weight:700">· 팝업 없음</span>
+        </div>
+        <div class="pane-body">
+          <div class="phone">
+            <div class="ph-status"><span>9:41</span><span>▮▮▮</span></div>
+            <div class="ph-top"><div><b>내정보/현황</b><div class="sub">리뷰 내역</div></div></div>
+            <div class="ph-scroll">
+              <div class="subtabs"><b class="on">참여중 <span class="cnt">2</span></b><b>제출완료 <span class="cnt">3</span></b></div>
+
+              <div class="rcard">
+                <div class="rcard-main">
+                  <div class="rav">👤</div>
+                  <div class="rbody">
+                    <div class="rname">7/28 힙스 콜라겐 스틱 옵션:30포<span class="rround">1차</span></div>
+                    <div class="rsub">김수만</div>
+                  </div>
+                  <div class="rright"><span class="bdg wait">제출대기</span><span class="chev">›</span></div>
+                </div>
+                <div class="rfoot">
+                  <button class="cs">💬 1:1 문의 <span class="nbdg">1</span></button>
+                </div>
+              </div>
+
+              <div class="rcard">
+                <div class="rcard-main">
+                  <div class="rav">👤</div>
+                  <div class="rbody">
+                    <div class="rname">7/29 콰이어트 수면안대 옵션:블랙</div>
+                    <div class="rsub">김수만</div>
+                  </div>
+                  <div class="rright"><span class="bdg wait">제출대기</span><span class="chev">›</span></div>
+                </div>
+                <div class="rfoot">
+                  <button class="cs">💬 1:1 문의</button>
+                </div>
+              </div>
+            </div>
+            <div class="ph-tabbar">
+              <div><span class="ic">🏠</span>홈</div>
+              <div><span class="ic">🎧</span>1:1문의<span class="nbadge">3</span></div>
+              <div class="on"><span class="ic">🪪</span>내정보/현황</div>
+              <div><span class="ic">📘</span>가이드</div>
+            </div>
+          </div>
+        </div>
+        <div class="pane-note">
+          <ul>
+            <li>카드 아래 <b>[1:1 문의]</b> 한 번으로 그 작업의 대화창이 바로 열립니다.</li>
+            <li>이미 주고받은 문의가 있으면 <b>같은 방으로 이어지고</b>, 답장이 와 있으면 카드에 숫자가 붙습니다.</li>
+            <li>카드 본문(윗줄)을 누르는 기존 동작(참여 상품 정보 / 리뷰 제출)은 <b>그대로</b>입니다.</li>
+          </ul>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ════════ ③ 카드 디자인 통일 ════════ -->
+  <section>
+    <div class="sec-head">
+      <div class="sec-no">3</div>
+      <div>
+        <h2>제출완료 카드 = 참여중 카드 (디자인 통일)</h2>
+        <p>지금은 제출완료 카드만 아래에 통짜 버튼이 붙어 모양·높이가 다릅니다. 두 탭 카드를 <b>같은 뼈대 + 같은 아래 버튼줄</b>로 맞춥니다.</p>
+      </div>
+    </div>
+
+    <div class="compare">
+      <!-- BEFORE -->
+      <div class="pane before">
+        <div class="pane-head"><i class="tagdot"></i> 지금 (BEFORE) — 두 탭 카드가 다름</div>
+        <div class="pane-body" style="flex-direction:column; gap:14px; align-items:center">
+          <div class="phone" style="min-height:auto">
+            <div class="ph-top"><div><b>참여중 탭</b></div></div>
+            <div class="ph-scroll" style="min-height:auto">
+              <div class="rcard">
+                <div class="rcard-main">
+                  <div class="rav">👤</div>
+                  <div class="rbody">
+                    <div class="rname">7/28 힙스 콜라겐 스틱 옵션:30포</div>
+                    <div class="rsub">김수만</div>
+                  </div>
+                  <div class="rright"><span class="bdg wait">제출대기</span><span class="chev">›</span></div>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <div class="phone" style="min-height:auto">
+            <div class="ph-top"><div><b>제출완료 탭</b></div></div>
+            <div class="ph-scroll" style="min-height:auto">
+              <div class="rcard">
+                <div class="rcard-main">
+                  <div class="rav ok">✓</div>
+                  <div class="rbody">
+                    <div class="rname">7/20 어나더 비타민C 앰플 옵션:2개입</div>
+                    <div class="rsub">김수만 · 제출 2026.07.22</div>
+                  </div>
+                  <div class="rright"><span class="bdg paid">입금완료</span><span class="bdg done">제출완료</span></div>
+                </div>
+                <div class="rfoot rfoot-old">
+                  <button class="sub">🖼 리뷰 이미지 확인 · 수정요청</button>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+        <div class="pane-note">
+          <ul>
+            <li>제출완료 카드만 <b>아래에 통짜 버튼</b>이 붙어 카드 높이와 인상이 다릅니다.</li>
+            <li>완료 카드에는 오른쪽 화살표가 없어 눌러도 되는지 헷갈립니다.</li>
+            <li>배지가 두 개(입금완료·제출완료) 붙으면 오른쪽이 좁아져 제목이 더 잘립니다.</li>
+          </ul>
+        </div>
+      </div>
+
+      <!-- AFTER -->
+      <div class="pane after">
+        <div class="pane-head"><i class="tagdot"></i> 변경안 (AFTER) — 같은 뼈대 + 같은 버튼줄</div>
+        <div class="pane-body" style="flex-direction:column; gap:14px; align-items:center">
+          <div class="phone" style="min-height:auto">
+            <div class="ph-top"><div><b>참여중 탭</b></div></div>
+            <div class="ph-scroll" style="min-height:auto">
+              <div class="rcard">
+                <div class="rcard-main">
+                  <div class="rav">👤</div>
+                  <div class="rbody">
+                    <div class="rname">7/28 힙스 콜라겐 스틱 옵션:30포</div>
+                    <div class="rsub">김수만</div>
+                  </div>
+                  <div class="rright"><span class="bdg wait">제출대기</span><span class="chev">›</span></div>
+                </div>
+                <div class="rfoot"><button class="cs">💬 1:1 문의</button></div>
+              </div>
+            </div>
+          </div>
+
+          <div class="phone" style="min-height:auto">
+            <div class="ph-top"><div><b>제출완료 탭</b></div></div>
+            <div class="ph-scroll" style="min-height:auto">
+              <div class="rcard">
+                <div class="rcard-main">
+                  <div class="rav ok">✓</div>
+                  <div class="rbody">
+                    <div class="rname">7/20 어나더 비타민C 앰플 옵션:2개입</div>
+                    <div class="rsub"><span class="bdg paid" style="padding:1px 5px;font-size:.55rem">입금완료</span> 김수만 · 제출 2026.07.22</div>
+                  </div>
+                  <div class="rright"><span class="bdg done">제출완료</span><span class="chev">›</span></div>
+                </div>
+                <div class="rfoot">
+                  <button class="cs">💬 1:1 문의 <span class="nbdg">1</span></button>
+                  <button class="sub">🖼 이미지 확인·수정</button>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+        <div class="pane-note">
+          <ul>
+            <li>두 탭 모두 <b>윗줄(본문) + 아랫줄(버튼)</b> 같은 구조 — 높이·여백·글자 크기 동일.</li>
+            <li>완료 카드에도 <b>화살표</b>를 넣어 “눌러서 볼 수 있다”를 똑같이 표시.</li>
+            <li>아래 버튼줄은 <b>참여중 = 1칸 / 제출완료 = 2칸</b>으로 같은 규격을 나눠 씁니다.</li>
+            <li>배지가 겹치지 않도록 <b>입금완료는 제목 아래줄</b>로 내려 제목 잘림을 줄입니다.</li>
+          </ul>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ════════ 요약 ════════ -->
+  <section>
+    <div class="sec-head">
+      <div class="sec-no">✓</div>
+      <div><h2>바뀌는 것 / 그대로인 것</h2></div>
+    </div>
+    <table>
+      <tr><th style="width:170px">항목</th><th>지금</th><th>변경안</th></tr>
+      <tr>
+        <td class="k">1:1문의 탭</td>
+        <td><span class="tag-b">지금</span>참여한 작업 전체가 팝업으로 올라옴</td>
+        <td><span class="tag-a">변경</span>팝업 없이 <b>문의한 대화방 목록</b>만 화면 안에 표시</td>
+      </tr>
+      <tr>
+        <td class="k">문의 시작</td>
+        <td><span class="tag-b">지금</span>1:1문의 탭 → 팝업에서 작업 선택</td>
+        <td><span class="tag-a">변경</span>리뷰 내역 <b>카드의 [1:1 문의]</b> 버튼</td>
+      </tr>
+      <tr>
+        <td class="k">일반 문의</td>
+        <td><span class="tag-b">지금</span>팝업 목록 맨 아래 항목</td>
+        <td><span class="tag-a">변경</span>내 문의함 화면 상단의 <b>[일반 문의하기]</b>로 유지</td>
+      </tr>
+      <tr>
+        <td class="k">제출완료 카드</td>
+        <td><span class="tag-b">지금</span>아래 통짜 버튼 1개, 화살표 없음</td>
+        <td><span class="tag-a">변경</span>참여중 카드와 <b>같은 뼈대</b>, 아래 버튼 2칸</td>
+      </tr>
+      <tr>
+        <td class="k">안 읽은 표시</td>
+        <td><span class="tag-b">지금</span>탭 숫자 + 팝업 목록 줄별 숫자</td>
+        <td><span class="tag-a">변경</span>탭 숫자 + 문의함 줄별 숫자 + <b>리뷰 내역 카드 숫자</b></td>
+      </tr>
+      <tr>
+        <td class="k">대화창 · 사진첨부</td>
+        <td colspan="2">그대로 (지금 화면·동작 변경 없음)</td>
+      </tr>
+      <tr>
+        <td class="k">관리자 화면</td>
+        <td colspan="2">그대로 (작업별 문의 목록 · 주문정보 · 관리자 메모 변경 없음)</td>
+      </tr>
+    </table>
+  </section>
+
+  <div class="callout">
+    <b>구현 전 확인 부탁드리는 점</b>
+    <ul>
+      <li><b>일반 문의</b> 자리 — 내 문의함 화면 위쪽의 [일반 문의하기] 버튼으로 두는 안을 넣었습니다. 이대로 진행할지요?</li>
+      <li><b>여러 건이 묶인 카드</b>(한 작업에 2건 이상) — 카드 아래 [1:1 문의]는 <b>그 작업 기준 한 방</b>으로 열립니다(작업 단위 문의 기준 유지).</li>
+      <li><b>종료된 문의</b> — 목록 아래쪽에 따로 모아 두되 눌러서 다시 볼 수 있게 했습니다.</li>
+    </ul>
+  </div>
+
+</div>
