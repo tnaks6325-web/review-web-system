@@ -2411,6 +2411,10 @@ body::after{ content:"시안 D"; position:fixed; left:8px; bottom:8px; z-index:9
 
 <script src="js/config.js"></script>
 
+<!-- 작업오더 상세 렌더러 — 통합 작업대와 한 벌로 쓰는 공유 모듈. index-app.js 앞에 둔다
+     (호출부·onclick 문자열이 전역 이름으로 참조하므로 먼저 정의돼 있어야 한다). -->
+<script src="js/work-order-detail.js"></script>
+
 <script src="js/index-app.js"></script>
 
 <!-- ★ 파일 존재 확인 모달 -->

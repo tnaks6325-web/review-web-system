@@ -295,6 +295,23 @@
   .lgcap img{max-width:280px;max-height:240px;border-radius:8px;border:1px solid var(--line);cursor:zoom-in;display:block;background:#fff}
   .lgcaphint{font-size:11px;color:var(--muted);margin-top:5px}
   .lgexpacts{display:flex;gap:8px;align-items:center;flex-wrap:wrap;width:100%;margin-top:2px}
+  /* 작업오더 목록 펼침행 — 팝업 대신 행 아래에서 펼친다(리뷰어 로그와 같은 방식).
+     ★ 클래스는 전부 `wol`(work-order list) 접두 — `.worow`/`.wodetail`/`.wochip` 은
+       이미 작업대 탭의 '작업세부' 패널이 쓰고 있어(위 161~167줄) 이름이 겹치면
+       그쪽 그리드 규칙(display:grid)이 이 표의 <tr> 에 걸려 표가 통째로 무너진다(실측). */
+  .lgtable tr.wolrow{cursor:pointer}
+  .lgtable tr.wolrow.wolopen td{background:var(--accent-soft)}
+  .lgtable .wolchev{display:inline-block;color:var(--muted);font-size:12px;width:13px}
+  .lgtable tr.woldetail>td{background:#fbfdff;padding:0}
+  .wolexpand{padding:12px 16px 14px}
+  .wolmeta{display:flex;gap:6px;align-items:center;flex-wrap:wrap;margin-bottom:9px;padding-bottom:9px;border-bottom:1px solid var(--line)}
+  .wolchip{font-size:11px;color:var(--muted);background:var(--card2);border-radius:6px;padding:2px 8px}
+  .wolchip b{color:var(--ink);font-weight:700}
+  /* 본문은 공유 렌더러(_woDetailHtml)가 자체 인라인 스타일로 그린다 — 여기서는 폭·여백만 잡는다.
+     ★ 색·글자크기를 덮어쓰지 않는다: 관리자 대시보드와 같은 모양이어야 사본 드리프트를 못 만든다. */
+  .woldoc{max-width:900px;line-height:1.7}
+  .woldoc img{max-width:min(100%,360px)}
+  .wolnote{margin-top:10px;font-size:11.5px;color:var(--muted)}
   table.histtable{width:100%;border-collapse:collapse;font-size:12px} table.histtable th{text-align:left;padding:7px 9px;font-size:10.5px;color:var(--muted);font-weight:750;border-bottom:1px solid var(--line);position:sticky;top:0;background:var(--card)}
   table.histtable td{padding:6px 9px;border-bottom:1px solid var(--line)} table.histtable tr.histrev td{color:var(--faint);text-decoration:line-through} table.histtable tr.histrev .hval{text-decoration:none}
   table.histtable .hts{font-family:var(--mono);font-size:11px;color:var(--muted);white-space:nowrap} .histtable .ok{color:var(--safe);font-weight:700} .histtable .no{color:var(--faint);font-weight:700}
@@ -1780,39 +1797,64 @@ function _renderWoBody(){
   const b=$('#wobody');
   if(!rows.length){ b.innerHTML=`<div class="empty">해당하는 작업오더가 없습니다.</div>`; return; }
   const fmt=iso=>iso?new Date(iso).toLocaleString('ko-KR',{timeZone:'Asia/Seoul',month:'2-digit',day:'2-digit',hour:'2-digit',minute:'2-digit'}):'';
+  // 행 클릭 = 아래로 펼침(팝업 아님) — 리뷰어 로그 탭과 같은 방식.
+  //   ★ 상세는 **열 때 한 번만** 그린다(_woFillDetail) — 30건이 한꺼번에 첨부 이미지를 받으면 목록이 무거워진다.
   b.innerHTML=`<div class="lgwrap"><table class="lgtable">
-    <thead><tr><th style="width:96px">상태</th><th>작업명</th><th style="width:92px">담당AE</th>
+    <thead><tr><th style="width:26px"></th><th style="width:96px">상태</th><th>작업명</th><th style="width:92px">담당AE</th>
       <th style="width:70px">모집</th><th style="width:70px">일건수</th><th style="width:120px">제출</th>
-      <th style="width:150px">처리</th></tr></thead><tbody>${rows.map((o,i)=>`
-      <tr>
+      <th style="width:178px">처리</th></tr></thead><tbody>${rows.map((o,i)=>`
+      <tr class="wolrow" id="wolrow-${i}" onclick="_woToggle(${i})" title="클릭하면 상세가 아래로 펼쳐집니다">
+        <td><span class="wolchev" id="wolchev-${i}">▾</span></td>
         <td><span class="bd ${o.status==='submitted'?'':'g'}">${esc(WO_STATUS[o.status]||o.status)}</span></td>
-        <td style="font-weight:700;cursor:pointer" onclick="_woOpen(${i})" title="상세 보기">${esc(o.title||'')}</td>
+        <td style="font-weight:700">${esc(o.title||'')}</td>
         <td>${esc(o.manager_name||o.created_by||'')}</td>
         <td style="text-align:right">${o.recruit_count||0}</td>
         <td style="text-align:right">${o.daily_count||0}</td>
         <td style="color:var(--muted);font-variant-numeric:tabular-nums">${fmt(o.created_at)}</td>
-        <td>${_woActions(o,i)}</td>
-      </tr>`).join('')}</tbody></table></div>`;
+        <td style="white-space:nowrap" onclick="event.stopPropagation()">${_woActions(o,i)}</td>
+      </tr>
+      <tr class="woldetail" id="woldetail-${i}" style="display:none"><td colspan="8">
+        <div class="wolexpand" id="wolbox-${i}"></div></td></tr>`).join('')}</tbody></table></div>`;
 }
 function _woActions(o,i){
-  const btn=`<button class="btn xs" onclick="_woOpen(${i})">상세</button>`;
-  if(!STATE.canEdit) return btn;
-  const acceptable=['submitted','revision','rejected'].includes(o.status);
-  return btn+(acceptable?` <button class="btn xs pri" onclick="_woAccept('${esc(o.id)}')">접수</button>`:'')
-    +` <button class="btn xs" onclick="_woStatus('${esc(o.id)}')">상태변경</button>`;
+  const btn=`<button class="btn xs" onclick="_woToggle(${i})">상세</button>`;
+  return btn+_woEditActions(o);
 }
-function _woOpen(i){
+/** 접수·상태변경 — 편집 허용명단만. 표 셀과 펼침 패널이 같은 것을 쓴다(사본 금지). */
+function _woEditActions(o){
+  if(!STATE.canEdit) return '';
+  const acceptable=['submitted','revision','rejected'].includes(o.status);
+  return (acceptable?` <button class="btn xs pri" onclick="event.stopPropagation();_woAccept('${esc(o.id)}')">접수</button>`:'')
+    +` <button class="btn xs" onclick="event.stopPropagation();_woStatus('${esc(o.id)}')">상태변경</button>`;
+}
+function _woToggle(i){
+  const d=document.getElementById('woldetail-'+i); if(!d) return;
+  const open=d.style.display==='none';
+  d.style.display=open?'':'none';
+  const ch=document.getElementById('wolchev-'+i); if(ch) ch.textContent=open?'▴':'▾';
+  const r=document.getElementById('wolrow-'+i); if(r) r.classList.toggle('wolopen',open);
+  if(open) _woFillDetail(i);
+}
+/** 펼침 내용 = **관리자 대시보드와 같은 렌더러**(js/work-order-detail.js `_woDetailHtml`).
+ *  사본을 만들면 "관리자 화면엔 첨부 이미지가 뜨는데 작업대엔 URL만 뜬다"로 갈라진다.
+ *  첨부 이미지(guide-image 프록시·Drive)는 그 렌더러가 <img>로 임베드하고 클릭하면 라이트박스로 크게 본다. */
+function _woFillDetail(i){
+  const box=document.getElementById('wolbox-'+i); if(!box||box.dataset.filled) return;
   const o=(STATE.wo||[])[i]; if(!o) return;
-  const row=(k,v)=>v?`<div style="display:flex;gap:8px;padding:4px 0;border-bottom:1px solid var(--line)">
-    <span style="flex:0 0 100px;color:var(--muted);font-size:12px">${k}</span><span style="flex:1;white-space:pre-wrap">${esc(v)}</span></div>`:'';
-  _modal(`작업오더 — ${esc(o.title||'')}`,
-    row('상태',WO_STATUS[o.status]||o.status)+row('담당AE',o.manager_name||o.created_by)
-    +row('작업담당',o.work_manager)+row('시작일',o.start_date?String(o.start_date).slice(0,10):'')
-    +row('모집인원',o.recruit_count)+row('일일건수',o.daily_count)+row('구매시간대',o.purchase_time)
-    +row('상품/옵션',o.product_option)+row('결제금액',o.pay_amount)+row('배송유형',o.delivery_type)
-    +row('리뷰유형',o.review_type)+row('유입키워드',o.inflow_keyword)+row('상품URL',o.product_url)
-    +row('작업시트탭URL',o.work_sheet_url)+row('리뷰가이드',o.review_guide)+row('특이사항',o.special_notes)
-    +row('관리자메모',o.admin_memo));
+  box.dataset.filled='1';
+  if(typeof _woDetailHtml!=='function'){
+    box.innerHTML=`<div class="empty">상세 렌더러(js/work-order-detail.js)를 불러오지 못했습니다.</div>`; return;
+  }
+  const fmt=iso=>iso?new Date(iso).toLocaleString('ko-KR',{timeZone:'Asia/Seoul',year:'numeric',month:'2-digit',day:'2-digit',hour:'2-digit',minute:'2-digit'}):'';
+  const chips=[
+    `<span class="bd ${o.status==='submitted'?'':'g'}">${esc(WO_STATUS[o.status]||o.status||'')}</span>`,
+    o.start_date?`<span class="wolchip">시작일 <b>${esc(String(o.start_date).slice(0,10))}</b></span>`:'',
+    o.created_at?`<span class="wolchip">제출 <b>${esc(fmt(o.created_at))}</b></span>`:'',
+  ].filter(Boolean).join('');
+  const acts=_woEditActions(o);
+  box.innerHTML=`<div class="wolmeta">${chips}<span style="flex:1"></span>${acts}</div>
+    <div class="woldoc">${_woDetailHtml(o)}${o.admin_memo?_woKv('관리자메모',o.admin_memo):''}</div>
+    ${acts?'':'<div class="wolnote">열람 전용 계정입니다 — 접수·상태변경은 편집 허용명단에 있는 담당자만 할 수 있습니다.</div>'}`;
 }
 async function _woAccept(id){
   if(!confirm('이 작업오더를 접수할까요?\n\n· 작업시트의 탭이 시스템에 등록되고 인덱스가 만들어집니다.\n· 등록 후에는 리뷰어 검색·제출이 열립니다.')) return;
@@ -2979,6 +3021,9 @@ boot();
 
 <script>window.CAMPAIGN_ADMIN_API = '/api/trackb/campaigns';</script>
 <script src="api.js"></script>
+<!-- 작업오더 상세 렌더러 — 관리자 대시보드(index-app.js)에서 이관한 공유 모듈.
+     첨부 이미지 임베드·라이트박스·섹션 추출이 전부 여기 한 벌뿐이다. -->
+<script src="js/work-order-detail.js"></script>
 <script src="js/campaign-cards.js"></script>
 <script src="js/recruit-modal.js"></script>
 <script src="js/manual-order.js"></script>
