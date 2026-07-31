@@ -683,7 +683,7 @@
         <div style="font-weight:800;font-size:.9rem">관리자 권한모드입니다</div>
         <div style="font-size:.72rem;opacity:.92" id="adminModeMsg">모집공고 카드의 <b>[✏️ 관리자 수정]</b> 버튼으로 공고를 수정할 수 있어요.</div>
       </div>
-      <!-- 🔑 외부참여 수동제출·⭐ 별표는 **진짜 관리자 토큰**이 있어야 서버에 도달한다
+      <!-- 🔑 외부모집 수동제출·⭐ 별표는 **진짜 관리자 토큰**이 있어야 서버에 도달한다
            (공고수정 스코프 토큰은 그 API에 403). 여기서 한 번 로그인하면 카드에 함께 나타난다. -->
       <button id="adminModeLoginBtn" onclick="openHomeAdminLogin()" style="display:none;flex:none;background:rgba(255,255,255,.18);border:1px solid rgba(255,255,255,.5);color:#fff;font-weight:800;font-size:.74rem;border-radius:9px;padding:7px 11px;cursor:pointer;white-space:nowrap">🔑 관리자 로그인</button>
     </div>
@@ -1018,7 +1018,7 @@ function refreshAdminModeBanner() {
   if (msg) {
     msg.innerHTML = has
       ? "카드에서 <b>[✏️ 관리자 수정]</b>·<b>[⭐ 우선노출]</b>·<b>[🧾 외부제출]</b>을 쓸 수 있어요."
-      : "카드의 <b>[✏️ 관리자 수정]</b>으로 공고를 고칠 수 있어요. <b>외부참여 수동제출</b>은 관리자 로그인이 필요해요.";
+      : "카드의 <b>[✏️ 관리자 수정]</b>으로 공고를 고칠 수 있어요. <b>외부모집 수동제출</b>은 관리자 로그인이 필요해요.";
   }
 }
 

@@ -139,7 +139,7 @@
       /* 관리자 수정 버튼: 썸네일 좌하단(상단 배지·리본과 겹치지 않게) */
       .pcard .peditchip{position:absolute;bottom:8px;left:8px;z-index:7;font-size:.6rem;font-weight:900;background:#1B64DA;color:#fff;border:none;border-radius:6px;padding:3px 8px;cursor:pointer;box-shadow:0 1px 5px rgba(0,0,0,.3)}
       .pcard .peditchip:hover{background:#1550b8}
-      /* 🧾 외부참여 수동제출(진짜 admin_token 전용) — 수정 칩 반대편에 둬서 서로 안 가린다 */
+      /* 🧾 외부모집 수동제출(진짜 admin_token 전용) — 수정 칩 반대편에 둬서 서로 안 가린다 */
       .pcard .pmochip{position:absolute;bottom:8px;right:8px;z-index:7;font-size:.6rem;font-weight:900;background:#0F766E;color:#fff;border:none;border-radius:6px;padding:3px 8px;cursor:pointer;box-shadow:0 1px 5px rgba(0,0,0,.3)}
       .pcard .pmochip:hover{background:#0c5d57}
       /* 오버레이: 오픈전(회색) / 모집중 시간창(구매마감 카운트다운, 라이브) */
@@ -391,7 +391,7 @@
     const editChip = (!admin && _adminTok())
       ? `<button type="button" class="peditchip" onclick="event.stopPropagation();event.preventDefault();CampCards.openAdminEdit('${_esc(c.id)}')">✏️ 관리자 수정</button>`
       : '';
-    // 🧾 외부참여 수동제출 칩(리뷰어 홈 참여형 카드) — 카톡으로 모집한 외부 리뷰어의 구매양식을
+    // 🧾 외부모집 수동제출 칩(리뷰어 홈 참여형 카드) — 카톡으로 모집한 외부 리뷰어의 구매양식을
     //   관리자가 그 자리에서 대리 제출한다. **진짜 admin_token 보유자에게만** 보여준다:
     //   리뷰어앱 공고수정 스코프 토큰(via:'reviewer_campaign')은 /api/manual-order/* 에 도달할 수
     //   없어(403) 버튼을 보여주면 막다른 길이 된다(별표 칩과 같은 규율).
@@ -912,7 +912,7 @@
   }
 
   /* ═══════════════════════════════════════════════════════════
-     🧾 외부참여 수동제출 — 진입점 공용 배선
+     🧾 외부모집 수동제출 — 진입점 공용 배선
 
      카톡으로 모집한 외부 리뷰어의 구매양식을 관리자가 대리 제출한다. 실제 화면은
      `js/manual-order.js`의 공용 모달 하나(ManualOrder)이고, 여기서는 **연결 탭 문맥만**
