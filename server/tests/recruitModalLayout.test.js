@@ -15,7 +15,11 @@ const fs = require('fs');
 const path = require('path');
 const readF = (p) => fs.readFileSync(path.join(__dirname, '..', '..', 'frontend', p), 'utf8');
 
-const adm = readF('admin.html');
+// ★ 모달 마크업·CSS는 admin.html 인라인에서 **공유 모듈**(js/recruit-modal.js)로 옮겼다 —
+//   통합 작업대가 같은 모달로 발행·수정하기 위함(사본 금지). 이 가드가 보던 내용은
+//   전부 그 모듈 안에 있으므로 읽는 대상만 바꾼다(검사 항목은 그대로).
+const modalSrc = readF('js/recruit-modal.js');
+const adm = modalSrc + '\n' + readF('admin.html');
 const rec = readF('js/index-recruit.js');
 
 let n = 0;

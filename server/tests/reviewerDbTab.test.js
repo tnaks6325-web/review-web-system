@@ -182,8 +182,11 @@ if (process.env.PGTEST_URL) {
       }
       console.log(`\n${pass} checks passed`);
     } finally { await c.end(); }
+    process.exit(0);   // 열린 핸들(트랙B 라우트의 DB 풀) 때문에 자연 종료가 안 됨
   })().catch(e => { console.error('❌ ' + e.message); process.exit(1); });
 } else {
   console.log('\n(PGTEST_URL 미설정 — SQL 실행 검증은 건너뜀)');
   console.log(`\n${pass} checks passed`);
+  // trackB.routes 를 require 하면 DB 풀·타이머 핸들이 열려 프로세스가 스스로 안 끝난다
+  process.exit(0);
 }

@@ -9,7 +9,7 @@ const readF = (p) => fs.readFileSync(path.join(__dirname, '..', '..', 'frontend'
 
 const app = readF('js/index-app.js');
 const recjs = readF('js/index-recruit.js');
-const adm = readF('admin.html');
+const adm = readF('js/recruit-modal.js') + '\n' + readF('admin.html');
 
 let passed = 0;
 function ok(name, cond) { assert(cond, name); passed++; console.log('  ✓ ' + name); }

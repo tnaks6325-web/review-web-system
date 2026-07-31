@@ -1,3 +1,15 @@
+/**
+ * 공고 관리 API 베이스 — 화면마다 도달 가능한 경로가 다르다.
+ *   · 관리자 대시보드 : /api/campaign/admin      (adminOrMaster)
+ *   · 통합 작업대     : /api/trackb/campaigns    (내부인 열람 + 편집명단 게이트, 같은 핸들러에 위임)
+ * ★ 두 네임스페이스는 **경로 모양이 동일**해서 베이스 문자열만 갈아끼우면 된다 —
+ *   이 파일을 포크하지 않고 두 화면이 같은 발행·수정 로직을 쓰는 유일한 방법.
+ */
+function _campApi(path) {
+  const base = (typeof window !== 'undefined' && window.CAMPAIGN_ADMIN_API) || '/api/campaign/admin';
+  return API_BASE_URL + base + (path || '');
+}
+
 /* ═══════════════════════════════════════
    모집공고 관리 — 전역 상태
 ═══════════════════════════════════════ */
@@ -20,7 +32,7 @@ async function loadRecruitList() {
   const wrap = document.getElementById("recruitListWrap");
   wrap.innerHTML = `<div style="padding:40px;text-align:center;color:var(--t3)"><i class="fas fa-circle-notch fa-spin"></i> 불러오는 중...</div>`;
   try {
-    const res  = await fetch(API_BASE_URL + "/api/campaign/admin/list", {
+    const res  = await fetch(_campApi("/list"), {
       headers: _getAuthHeaders()
     });
     const json = await res.json();
@@ -100,7 +112,7 @@ async function deleteRecruitPicked() {
   let ok = 0; const fail = [];
   for (const id of ids) {
     try {
-      const r = await fetch(API_BASE_URL + `/api/campaign/admin/${encodeURIComponent(id)}`, {
+      const r = await fetch(_campApi(`/${encodeURIComponent(id)}`), {
         method: "DELETE", headers: _getAuthHeaders(),
       });
       const j = await r.json().catch(() => ({}));
@@ -181,7 +193,7 @@ function _buildRecruitCard(c) {
 async function toggleCampFlag(campId, kind, on) {
   try {
     const body = kind === "pinned" ? { pinned: on } : { popular: on };
-    const res = await fetch(API_BASE_URL + `/api/campaign/admin/${encodeURIComponent(campId)}/flags`, {
+    const res = await fetch(_campApi(`/${encodeURIComponent(campId)}/flags`), {
       method: "POST",
       headers: { "Content-Type": "application/json", ..._getAuthHeaders() },
       body: JSON.stringify(body),
@@ -234,7 +246,7 @@ async function toggleRecruitPublish(id, checked, inputEl) {
   const newStatus = checked ? "active" : "draft";
   if (inputEl) inputEl.disabled = true;
   try {
-    const res = await fetch(API_BASE_URL + "/api/campaign/admin/" + encodeURIComponent(id) + "/status", {
+    const res = await fetch(_campApi("/" + encodeURIComponent(id) + "/status"), {
       method: "PUT",
       headers: { "Content-Type": "application/json", ..._getAuthHeaders() },
       body: JSON.stringify({ status: newStatus })
@@ -1534,7 +1546,7 @@ async function _loadCampControl(campId) {
   const body = document.getElementById("ccBody");
   const stats = document.getElementById("ccStats");
   try {
-    const res = await fetch(API_BASE_URL + `/api/campaign/admin/${encodeURIComponent(campId)}/applications`, { headers: _getAuthHeaders() });
+    const res = await fetch(_campApi(`/${encodeURIComponent(campId)}/applications`), { headers: _getAuthHeaders() });
     const j = await res.json();
     if (!res.ok || !j.ok) throw new Error(j.error || "HTTP " + res.status);
     const rows = j.data || [];
@@ -1611,7 +1623,7 @@ async function campManualConfirm(campId, appId, hasLate) {
     : "⚠️ 연결된 구매 제출이 없는 신청이에요.\n실제 구매를 먼저 확인하셨나요? 확정하면 카운터·모집 잔여가 즉시 소진됩니다.";
   if (!confirm(msg)) return;
   try {
-    const res = await fetch(API_BASE_URL + `/api/campaign/admin/${encodeURIComponent(campId)}/confirm`, {
+    const res = await fetch(_campApi(`/${encodeURIComponent(campId)}/confirm`), {
       method: "POST",
       headers: { "Content-Type": "application/json", ..._getAuthHeaders() },
       body: JSON.stringify({ applicationId: appId }),
@@ -1629,7 +1641,7 @@ async function campManualConfirm(campId, appId, hasLate) {
 async function campDismiss(campId, appId) {
   if (!confirm("이 참여를 '미참여'로 취소 확정할까요?\n확정하면 이후 관제·알림에서 숨겨집니다. (실제로 구매한 건이면 대신 [제출확정]을 누르세요.)")) return;
   try {
-    const res = await fetch(API_BASE_URL + `/api/campaign/admin/${encodeURIComponent(campId)}/dismiss`, {
+    const res = await fetch(_campApi(`/${encodeURIComponent(campId)}/dismiss`), {
       method: "POST",
       headers: { "Content-Type": "application/json", ..._getAuthHeaders() },
       body: JSON.stringify({ applicationId: appId }),
@@ -1752,13 +1764,13 @@ async function saveRecruitPost() {
   try {
     let res;
     if (_recruitEditId) {
-      res = await fetch(API_BASE_URL + `/api/campaign/admin/${_recruitEditId}`, {
+      res = await fetch(_campApi(`/${_recruitEditId}`), {
         method: "PUT",
         headers: {"Content-Type":"application/json", ..._getAuthHeaders()},
         body: JSON.stringify(payload)
       });
     } else {
-      res = await fetch(API_BASE_URL + "/api/campaign/admin/create", {
+      res = await fetch(_campApi("/create"), {
         method: "POST",
         headers: {"Content-Type":"application/json", ..._getAuthHeaders()},
         body: JSON.stringify(payload)
@@ -1801,7 +1813,7 @@ async function saveRecruitPost() {
 async function deleteRecruitPost(id, title) {
   if (!confirm(`"${title}" 공고를 삭제할까요?`)) return;
   try {
-    const res = await fetch(API_BASE_URL + `/api/campaign/admin/${id}`, {
+    const res = await fetch(_campApi(`/${id}`), {
       method: "DELETE",
       headers: _getAuthHeaders()
     });

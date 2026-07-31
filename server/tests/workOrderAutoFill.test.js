@@ -86,7 +86,7 @@ ok('★ 접수 시 탭 담당자는 매핑된 닉네임 — 담당AE 실명을 �
 
 /* ═══ 프론트 배선 ═══ */
 const rec = readF('js/index-recruit.js');
-const adm = readF('admin.html');
+const adm = readF('js/recruit-modal.js') + '\n' + readF('admin.html');   // 모달 마크업은 공유 모듈로 이관
 const siand = readF('admin-siand.html');
 
 ok('프리필에 채널·담당자·연결탭이 실린다',

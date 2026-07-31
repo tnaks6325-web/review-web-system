@@ -83,7 +83,7 @@ function stubResp({ status = 200, ctype = 'image/jpeg', clen, body = Buffer.from
   const ord = read('src/routes/order.routes.js');
   const prod = read('src/routes/product.routes.js');
   const recjs = readF('js/index-recruit.js');
-  const adm = readF('admin.html');
+  const adm = readF('js/recruit-modal.js') + '\n' + readF('admin.html');
 
   ok('배선: guide-image imageUrl 분기가 thumbFetch 사용', /fetchThumbFromUrl/.test(ord) && /b\.imageUrl/.test(ord));
   ok('배선: base64가 오면 URL 분기 미진입(기존 계약 불변)', /\(!b\.imageBase64 \|\| !String\(b\.imageBase64\)\.trim\(\)\) && b\.imageUrl/.test(ord));

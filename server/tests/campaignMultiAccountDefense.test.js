@@ -18,7 +18,7 @@ const read = (p) => fs.readFileSync(path.join(__dirname, '..', p), 'utf8');
 const routes = read('src/routes/campaign.routes.js');
 const submit = read('src/routes/submit.routes.js');
 const index = read('index.js');
-const adminHtml = read('../frontend/admin.html');
+const adminHtml = read('../frontend/js/recruit-modal.js') + '\n' + read('../frontend/admin.html');
 const recruitJs = read('../frontend/js/index-recruit.js');
 
 let passed = 0;
