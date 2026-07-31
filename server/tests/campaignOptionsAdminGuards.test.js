@@ -14,7 +14,7 @@ const path = require('path');
 const read = (p) => fs.readFileSync(path.join(__dirname, '..', '..', p), 'utf8');
 const readSrv = (p) => fs.readFileSync(path.join(__dirname, '..', p), 'utf8');
 
-const adminHtml = read('frontend/admin.html');
+const adminHtml = read('frontend/js/recruit-modal.js') + '\n' + read('frontend/admin.html');
 const recruit = read('frontend/js/index-recruit.js');
 const app = read('frontend/js/index-app.js');
 const routes = readSrv('src/routes/campaign.routes.js');

@@ -624,11 +624,15 @@ function renderShell(){
         <button class="navb" data-v="overview" onclick="switchView('overview')">관측</button>
         <button class="navb" data-v="ownership" onclick="switchView('ownership')">업체관리</button>
         <button class="navb" data-v="logs" onclick="switchView('logs')">리뷰어 로그<span id="lgNavBadge"></span></button>
+        <button class="navb" data-v="orders" onclick="switchView('orders')">작업오더<span id="woNavBadge"></span></button>
+        <button class="navb" data-v="campaigns" onclick="switchView('campaigns')">모집공고</button>
         <button class="navb" data-v="reviewers" onclick="switchView('reviewers')">등록리뷰어DB</button></nav>`
       :isStaff?`<nav class="nav">
         <button class="navb" data-v="workdesk" onclick="switchView('workdesk')">작업대</button>
         <button class="navb" data-v="ownership" onclick="switchView('ownership')">업체관리</button>
-        <button class="navb" data-v="logs" onclick="switchView('logs')">리뷰어 로그<span id="lgNavBadge"></span></button></nav>`:''}
+        <button class="navb" data-v="logs" onclick="switchView('logs')">리뷰어 로그<span id="lgNavBadge"></span></button>
+        <button class="navb" data-v="orders" onclick="switchView('orders')">작업오더<span id="woNavBadge"></span></button>
+        <button class="navb" data-v="campaigns" onclick="switchView('campaigns')">모집공고</button></nav>`:''}
       <span class="sp"></span>
       <button class="btn railtgl" id="railToggle" onclick="toggleRail()" style="display:none" title="우측 사이드바(협업/댓글·Parity) 숨기기/표시"></button>
       <button class="btn widetgl" id="wideToggle" onclick="toggleWide()" style="display:none" title="작업 목록·우측 레일을 숨겨 표를 화면 전체폭으로 (Esc로 해제)"></button>
@@ -641,7 +645,7 @@ function renderShell(){
 function switchView(v){ STATE.view=v; document.querySelectorAll('.navb').forEach(b=>b.classList.toggle('on',b.dataset.v===v));
   const rt=$('#railToggle'); if(rt) rt.style.display=(v==='workdesk')?'':'none';   // 레일은 작업대 뷰에만 존재
   const wt=$('#wideToggle'); if(wt) wt.style.display=(v==='workdesk')?'':'none';   // 전체화면 토글도 작업대 뷰에만
-  if(v==='ownership') renderOwnershipView(); else if(v==='overview') renderOverviewView(); else if(v==='logs') renderLogsView(); else if(v==='reviewers') renderReviewersView(); else renderWorkdeskView();
+  if(v==='ownership') renderOwnershipView(); else if(v==='overview') renderOverviewView(); else if(v==='logs') renderLogsView(); else if(v==='reviewers') renderReviewersView(); else if(v==='orders') renderOrdersView(); else if(v==='campaigns') renderCampaignsView(); else renderWorkdeskView();
   if(v!=='workdesk') _measureChrome();   // 작업대를 떠나면 작업바가 사라짐 → --tbh 0으로 회수(다른 뷰 높이 계산 오염 방지)
 }
 
@@ -1702,6 +1706,213 @@ async function showEditHistory(){
 /* ══ 리뷰어 비정상 로그 뷰(migration 062) — 캠페인별 한글 자연어 로그 + 확인 처리 ══
    예: "『0721)장수돌침대…』에 이지유 리뷰어가 제출한 구매양식이 시트에서 사라졌습니다…"
    서버 미해결 상태가 진실원본 — [확인]하면 전 관리자 화면·알림에서 함께 사라진다. */
+
+
+/** 통합 작업대 범용 모달(작업오더 상세 등) — 가벼운 오버레이 하나 */
+function _modal(title, bodyHtml){
+  let o=document.getElementById('wdModal');
+  if(!o){ o=document.createElement('div'); o.id='wdModal';
+    o.style.cssText='position:fixed;inset:0;z-index:100000;background:rgba(17,24,39,.5);display:flex;align-items:center;justify-content:center;padding:20px';
+    o.addEventListener('click',e=>{ if(e.target===o) o.remove(); });
+    document.body.appendChild(o); }
+  o.innerHTML=`<div style="background:var(--card);border-radius:14px;width:720px;max-width:96vw;max-height:88vh;display:flex;flex-direction:column;overflow:hidden">
+    <div style="display:flex;align-items:center;gap:10px;padding:13px 17px;border-bottom:1px solid var(--line)">
+      <b style="flex:1;font-size:14px">${esc(title)}</b>
+      <button class="btn" onclick="document.getElementById('wdModal').remove()">닫기</button></div>
+    <div style="overflow:auto;padding:14px 17px">${bodyHtml}</div></div>`;
+}
+
+/* ══════════════════════════════════════════════════════════════
+   작업오더 · 모집공고 (상단탭)
+
+   ★ 열람은 내부인 전원(관리자·AE), **편집은 이름 명단**(서버 `workdesk_editors`)만.
+     작업오더 접수는 시트/탭을 tab_configs·campaigns 에 등록하는 단일 관문이고
+     공고 발행·수정은 정원·금액을 바꾸므로 보는 사람 전부에게 열 수 없다.
+     프론트는 버튼만 감추고 **최종 판정은 서버**(editorOnlyMiddleware)가 한다.
+   ★ 공고 카드는 `campaign-cards.js`, 발행·수정 모달은 `recruit-modal.js`+`index-recruit.js`
+     로 **관리자 대시보드와 같은 코드**를 쓴다(사본 금지 — 두 화면이 어긋날 수 없다).
+   ══════════════════════════════════════════════════════════════ */
+const WO_STATUS = { submitted:'접수대기', reviewing:'검토중', await_chatroom:'채팅방대기',
+  published:'발행완료', done:'완료', rejected:'반려', revision:'보완요청' };
+
+async function _loadPerm(){
+  if(STATE.canEdit!=null) return STATE.canEdit;
+  const r=await api('/api/trackb/perm');
+  STATE.canEdit = !!(r && r.ok && r.canEdit);
+  return STATE.canEdit;
+}
+
+/* ── 작업오더 ─────────────────────────────────────────────── */
+async function renderOrdersView(){
+  $('#viewroot').innerHTML=`<div class="ovwrap"><div id="wohead"></div><div id="wobody"><div class="empty">불러오는 중…</div></div></div>`;
+  await _loadPerm();
+  await _loadOrders();
+}
+async function _loadOrders(){
+  const qs=new URLSearchParams();
+  if(STATE.woStatus) qs.set('status',STATE.woStatus);
+  if(STATE.woq) qs.set('q',STATE.woq);
+  const r=await api('/api/trackb/work-orders/list'+(qs.toString()?'?'+qs:''));
+  const b=$('#wobody');
+  if(!r||!r.ok){ if(b) b.innerHTML=`<div class="empty">작업오더를 불러오지 못했습니다.</div>`; return; }
+  STATE.wo=r.data||[]; STATE.woCounts=r.counts||{};
+  if(typeof r.canEdit==='boolean') STATE.canEdit=r.canEdit;
+  _renderWoHead(); _renderWoBody();
+  const nb=$('#woNavBadge'); if(nb){ const n=STATE.woCounts.submitted|0; nb.textContent=n>0?(' 🔵'+n):''; }
+}
+function _renderWoHead(){
+  const c=STATE.woCounts||{};
+  const chip=(k,l)=>`<button class="btn${STATE.woStatus===k?' pri':''}" onclick="STATE.woStatus='${k}';_loadOrders()">${l}${c[k]?' '+c[k]:''}</button>`;
+  $('#wohead').innerHTML=`<div class="mh"><h1>작업오더</h1>
+    <span class="sp" style="flex:1"></span>
+    <button class="btn${!STATE.woStatus?' pri':''}" onclick="STATE.woStatus='';_loadOrders()">전체</button>
+    ${chip('submitted','접수대기')}${chip('reviewing','검토중')}${chip('published','발행완료')}${chip('revision','보완요청')}
+    <input class="ovsearch" placeholder="작업명/담당 검색 후 Enter" value="${esc(STATE.woq||'')}"
+      onkeydown="if(event.key==='Enter'){STATE.woq=this.value.trim();_loadOrders();}">
+    <button class="btn" onclick="_loadOrders()">새로고침</button>
+    ${(STATE.role==='master'||STATE.role==='admin')?'<button class="btn" onclick="openEditorList()" title="접수·발행·수정을 할 수 있는 담당자를 지정합니다">👥 편집 허용명단</button>':''}</div>
+    <div class="ovnote">AE가 제출한 작업오더입니다. <b>접수</b>하면 시트·탭이 시스템에 등록되고 인덱스가 만들어집니다 —
+      신규 탭이 등록되는 유일한 경로라 <b>편집 허용명단</b>에 있는 담당자만 누를 수 있습니다.
+      ${STATE.canEdit?'':'<b style="color:var(--muted)">(현재 계정은 열람 전용)</b>'}</div>`;
+}
+function _renderWoBody(){
+  const rows=STATE.wo||[];
+  const b=$('#wobody');
+  if(!rows.length){ b.innerHTML=`<div class="empty">해당하는 작업오더가 없습니다.</div>`; return; }
+  const fmt=iso=>iso?new Date(iso).toLocaleString('ko-KR',{timeZone:'Asia/Seoul',month:'2-digit',day:'2-digit',hour:'2-digit',minute:'2-digit'}):'';
+  b.innerHTML=`<div class="lgwrap"><table class="lgtable">
+    <thead><tr><th style="width:96px">상태</th><th>작업명</th><th style="width:92px">담당AE</th>
+      <th style="width:70px">모집</th><th style="width:70px">일건수</th><th style="width:120px">제출</th>
+      <th style="width:150px">처리</th></tr></thead><tbody>${rows.map((o,i)=>`
+      <tr>
+        <td><span class="bd ${o.status==='submitted'?'':'g'}">${esc(WO_STATUS[o.status]||o.status)}</span></td>
+        <td style="font-weight:700;cursor:pointer" onclick="_woOpen(${i})" title="상세 보기">${esc(o.title||'')}</td>
+        <td>${esc(o.manager_name||o.created_by||'')}</td>
+        <td style="text-align:right">${o.recruit_count||0}</td>
+        <td style="text-align:right">${o.daily_count||0}</td>
+        <td style="color:var(--muted);font-variant-numeric:tabular-nums">${fmt(o.created_at)}</td>
+        <td>${_woActions(o,i)}</td>
+      </tr>`).join('')}</tbody></table></div>`;
+}
+function _woActions(o,i){
+  const btn=`<button class="btn xs" onclick="_woOpen(${i})">상세</button>`;
+  if(!STATE.canEdit) return btn;
+  const acceptable=['submitted','revision','rejected'].includes(o.status);
+  return btn+(acceptable?` <button class="btn xs pri" onclick="_woAccept('${esc(o.id)}')">접수</button>`:'')
+    +` <button class="btn xs" onclick="_woStatus('${esc(o.id)}')">상태변경</button>`;
+}
+function _woOpen(i){
+  const o=(STATE.wo||[])[i]; if(!o) return;
+  const row=(k,v)=>v?`<div style="display:flex;gap:8px;padding:4px 0;border-bottom:1px solid var(--line)">
+    <span style="flex:0 0 100px;color:var(--muted);font-size:12px">${k}</span><span style="flex:1;white-space:pre-wrap">${esc(v)}</span></div>`:'';
+  _modal(`작업오더 — ${esc(o.title||'')}`,
+    row('상태',WO_STATUS[o.status]||o.status)+row('담당AE',o.manager_name||o.created_by)
+    +row('작업담당',o.work_manager)+row('시작일',o.start_date?String(o.start_date).slice(0,10):'')
+    +row('모집인원',o.recruit_count)+row('일일건수',o.daily_count)+row('구매시간대',o.purchase_time)
+    +row('상품/옵션',o.product_option)+row('결제금액',o.pay_amount)+row('배송유형',o.delivery_type)
+    +row('리뷰유형',o.review_type)+row('유입키워드',o.inflow_keyword)+row('상품URL',o.product_url)
+    +row('작업시트탭URL',o.work_sheet_url)+row('리뷰가이드',o.review_guide)+row('특이사항',o.special_notes)
+    +row('관리자메모',o.admin_memo));
+}
+async function _woAccept(id){
+  if(!confirm('이 작업오더를 접수할까요?\n\n· 작업시트의 탭이 시스템에 등록되고 인덱스가 만들어집니다.\n· 등록 후에는 리뷰어 검색·제출이 열립니다.')) return;
+  const r=await api('/api/trackb/work-orders/accept',{method:'POST',body:JSON.stringify({id})});
+  if(r&&r.ok){ _toast(r.skipped?'이미 등록된 오더입니다.':('접수 완료'+(r.tabName?' — '+r.tabName:''))); _loadOrders(); }
+  else _toast('⚠ 접수 실패'+(r&&r.error?': '+r.error:''));
+}
+async function _woStatus(id){
+  const st=prompt('바꿀 상태를 입력하세요\n(submitted / reviewing / await_chatroom / published / done / rejected / revision)');
+  if(!st) return;
+  const memo=prompt('메모(반려·보완 사유 등, 없으면 비워두세요)')||'';
+  const r=await api('/api/trackb/work-orders/status',{method:'PUT',body:JSON.stringify({id,status:st.trim(),admin_memo:memo})});
+  if(r&&r.ok){ _toast('상태를 바꿨습니다.'); _loadOrders(); }
+  else _toast('⚠ 변경 실패'+(r&&r.error?': '+r.error:''));
+}
+
+/* ── 모집공고 ─────────────────────────────────────────────── */
+async function renderCampaignsView(){
+  $('#viewroot').innerHTML=`<div class="ovwrap"><div id="rchead"></div><div id="recruitListWrap"><div class="empty">불러오는 중…</div></div>
+    <div id="recruitModalMount"></div></div>`;
+  if(window.RecruitModal) RecruitModal.mount('recruitModalMount');   // 관리자와 같은 모달 마크업
+  await _loadPerm();
+  await loadRecruitList();     // index-recruit.js — 관리자 대시보드와 같은 로더
+}
+/** index-recruit.js 가 기대하는 컨테이너·전역을 통합 작업대에 맞춰 채운다(사본 금지) */
+function _rcRenderHead(total){
+  $('#rchead').innerHTML=`<div class="mh"><h1>모집공고</h1>
+    <span class="bd g">${total|0}건</span><span class="sp" style="flex:1"></span>
+    ${STATE.canEdit?'<button class="btn pri" onclick="openRecruitModal()">＋ 새 공고</button>':''}
+    <button class="btn" onclick="loadRecruitList()">새로고침</button></div>
+    <div class="ovnote">관리자 대시보드와 <b>같은 카드·같은 모달</b>을 씁니다(한쪽만 바뀌는 일이 없게).
+      ${STATE.canEdit?'':'<b style="color:var(--muted)">현재 계정은 열람 전용 — 발행·수정은 편집 허용명단에 있는 담당자만 가능합니다.</b>'}</div>`;
+}
+
+
+/* ── 편집 허용명단 관리(master/admin 전용) ─────────────────────
+   후보는 **인트라넷 직원DB**에서 고른다(담당AE 자동완성과 같은 프록시 재사용).
+   자유 입력도 허용 — 인트라넷에 없는 계정(관리자 로그인 등)도 넣을 수 있어야 한다. */
+async function openEditorList(){
+  _modal('👥 편집 허용명단',
+    `<div style="font-size:12px;color:var(--muted);line-height:1.6;margin-bottom:11px">
+       여기 있는 담당자만 <b>작업오더 접수</b>·<b>모집공고 발행/수정</b>을 할 수 있습니다.
+       나머지는 열람만 됩니다(마스터는 명단과 무관하게 항상 가능).</div>
+     <div style="display:flex;gap:6px;margin-bottom:12px">
+       <input id="edName" class="ovsearch" style="flex:1" placeholder="이름 입력 — 인트라넷 직원에서 자동완성"
+              list="edCands" oninput="_edSuggest(this.value)"
+              onkeydown="if(event.key==='Enter')_edAdd()">
+       <datalist id="edCands"></datalist>
+       <button class="btn pri" onclick="_edAdd()">추가</button>
+     </div>
+     <div id="edList"><div class="empty">불러오는 중…</div></div>`);
+  _edLoad();
+}
+async function _edLoad(){
+  const r=await api('/api/trackb/workdesk-editors');
+  const el=document.getElementById('edList'); if(!el) return;
+  if(!r||!r.ok){ el.innerHTML=`<div class="empty">명단을 불러오지 못했습니다.</div>`; return; }
+  const act=(r.items||[]).filter(x=>x.active);
+  el.innerHTML = act.length ? `<table class="lgtable"><thead><tr>
+      <th>이름</th><th style="width:120px">부서</th><th style="width:110px">등록자</th><th style="width:60px"></th>
+    </tr></thead><tbody>${act.map(x=>`<tr>
+      <td style="font-weight:700">${esc(x.name)}</td>
+      <td style="color:var(--muted)">${esc(x.dept||'')}</td>
+      <td style="color:var(--muted);font-size:11.5px">${esc(x.addedBy||'')}</td>
+      <td><button class="btn xs" onclick="_edRemove('${esc(x.id)}','${esc(x.name)}')">제거</button></td>
+    </tr>`).join('')}</tbody></table>` : `<div class="empty">명단이 비어 있습니다 — 마스터만 편집할 수 있는 상태입니다.</div>`;
+}
+let _edSuggestT=null, _edCandMap={};
+function _edSuggest(q){
+  clearTimeout(_edSuggestT);
+  if(!q || q.trim().length<1) return;
+  _edSuggestT=setTimeout(async ()=>{
+    const r=await api('/api/trackb/intranet/users?q='+encodeURIComponent(q.trim()));
+    const dl=document.getElementById('edCands'); if(!dl) return;
+    const items=(r&&(r.items||r.users))||[];
+    _edCandMap={};
+    dl.innerHTML=items.map(u=>{
+      const nm=u.display_name||u.name||u.username||'';
+      _edCandMap[nm]={ username:u.username||'', dept:[u.department,u.part].filter(Boolean).join(' · ') };
+      return `<option value="${esc(nm)}">${esc([u.department,u.part].filter(Boolean).join(' · '))}</option>`;
+    }).join('');
+  }, 150);
+}
+async function _edAdd(){
+  const el=document.getElementById('edName');
+  const name=(el.value||'').trim();
+  if(!name){ _toast('이름을 입력하세요.'); return; }
+  const meta=_edCandMap[name]||{};
+  const r=await api('/api/trackb/workdesk-editors',{method:'POST',
+    body:JSON.stringify({ name, username:meta.username||'', dept:meta.dept||'' })});
+  if(r&&r.ok){ el.value=''; _toast(`'${name}' 을(를) 명단에 추가했습니다.`); _edLoad(); STATE.canEdit=null; }
+  else _toast('⚠ 추가 실패'+(r&&r.error?': '+r.error:''));
+}
+async function _edRemove(id,name){
+  if(!confirm(`'${name}' 을(를) 명단에서 뺄까요?\n\n· 이후 접수·발행·수정을 할 수 없고 열람만 됩니다.`)) return;
+  const r=await api('/api/trackb/workdesk-editors/'+encodeURIComponent(id),{method:'DELETE'});
+  if(r&&r.ok){ _toast('명단에서 제외했습니다.'); _edLoad(); STATE.canEdit=null; }
+  else _toast('⚠ 제외 실패'+(r&&r.error?': '+r.error:''));
+}
+
 /* ══════════════════════════════════════════════════════════════
    등록리뷰어DB (상단탭) — master/admin 전용
 
@@ -2750,5 +2961,46 @@ async function refreshAdvCounts(){ const r=await api('/api/trackb/advertisers');
 
 boot();
 </script>
+
+<!-- ══════════════════════════════════════════════════════════════
+     모집공고 탭 — 관리자 대시보드와 **같은 코드**를 재사용한다(사본 금지).
+       api.js          : gasGet/gasPost/API_BASE_URL
+       campaign-cards.js: 공고 카드 단일 렌더러
+       recruit-modal.js : 발행·수정 모달 마크업+CSS(admin.html 에서 이관한 공유 모듈)
+       index-recruit.js : 목록 로드·프리필·저장 로직
+     ★ index-recruit.js 는 경로 베이스만 갈아끼우면 그대로 동작한다 —
+       통합 작업대는 AE 도 쓰므로 admin 전용 경로 대신 Track B 네임스페이스로 보낸다.
+     ══════════════════════════════════════════════════════════════ -->
+<script>window.CAMPAIGN_ADMIN_API = '/api/trackb/campaigns';</script>
+<script src="api.js"></script>
+<script src="js/campaign-cards.js"></script>
+<script src="js/recruit-modal.js"></script>
+<script src="js/manual-order.js"></script>
+<script src="js/index-recruit.js"></script>
+<script>
+/* index-recruit.js 가 admin.html 전역으로 기대하는 6개를 통합 작업대 것으로 잇는다.
+   ★ 함수를 베끼지 않고 **이름만 연결**한다 — 로직은 여전히 한 벌이다. */
+(function () {
+  var W = window;
+  if (typeof W.escHtml !== 'function') W.escHtml = function (v) { return esc(v); };
+  if (typeof W.showToast !== 'function') W.showToast = function (m) { _toast(String(m || '')); };
+  if (typeof W._getAuthHeaders !== 'function') {
+    W._getAuthHeaders = function () { return { Authorization: 'Bearer ' + token() }; };
+  }
+  // 작업오더 목록 갱신 훅 — 공고 발행이 오더 상태를 바꾸면 오더 탭도 최신화
+  if (typeof W.loadWorkOrders !== 'function') {
+    W.loadWorkOrders = function () { try { if (STATE.view === 'orders') _loadOrders(); } catch (_) {} };
+  }
+  // 카드 렌더 후 머리말(건수·새 공고 버튼) 갱신 — index-recruit.js 는 목록만 그린다
+  var _origRender = W._renderRecruitCards;
+  if (typeof _origRender === 'function') {
+    W._renderRecruitCards = function (list) {
+      _origRender(list);
+      try { if (STATE.view === 'campaigns') _rcRenderHead((list || []).length); } catch (_) {}
+    };
+  }
+})();
+</script>
+
 </body>
 </html>

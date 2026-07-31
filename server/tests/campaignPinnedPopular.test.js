@@ -15,7 +15,7 @@ const readF = (p) => fs.readFileSync(path.join(__dirname, '..', '..', p), 'utf8'
 const mig = readS('migrations/064_campaign_pin_popular.sql');
 const routes = readS('src/routes/campaign.routes.js');
 const auth = readS('src/middleware/auth.middleware.js');
-const adminHtml = readF('frontend/admin.html');
+const adminHtml = readF('frontend/js/recruit-modal.js') + '\n' + readF('frontend/admin.html');
 const siandHtml = readF('frontend/admin-siand.html');
 const recruit = readF('frontend/js/index-recruit.js');
 const cards = readF('frontend/js/campaign-cards.js');

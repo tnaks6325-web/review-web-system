@@ -14,7 +14,7 @@ const readS = (p) => fs.readFileSync(path.join(__dirname, '..', 'src', p), 'utf8
 const camp = readS('routes/campaign.routes.js');
 const tabc = readS('routes/tabconfig.routes.js');
 const wd = readF('js/campaign-workdetail.js');
-const adm = readF('admin.html');
+const adm = readF('js/recruit-modal.js') + '\n' + readF('admin.html');
 const app = readF('js/index-app.js');
 const rec = readF('js/index-recruit.js');
 const campHtml = readF('campaign.html');
