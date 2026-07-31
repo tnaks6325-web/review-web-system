@@ -2588,7 +2588,39 @@ function _onWorkOrderNewSSE(data) {
    화면·통합작업대 로그 창에서 함께 사라진다(로컬 seen 저장 불필요). 도착 채널 = SSE 'reviewer_alert'
    (실시간) + 2분 폴링(폴백) — wo 알림 스택(우측하단)과 겹치지 않게 좌측하단 사용. */
 let _raTimer = null, _raInFlight = false;
+let _raCache = [];   // 알림 원본(딥링크 문맥) — onclick 문자열에 값을 심지 않으려고 id 로만 참조한다
 const _RA_POLL_MS = 2 * 60 * 1000;
+
+/**
+ * 중요알림 → **그 리뷰어의 행이 있는 작업대**를 새 탭으로 연다.
+ *
+ * 종전에는 `window.open('workdesk.html')` 뿐이라 통합작업대가 "위에서 작업을 선택하세요"
+ * 상태로만 열렸다 — 알림에 적힌 탭을 관리자가 상단바에서 다시 찾아야 했다.
+ * ★ 딥링크는 workdesk 의 리뷰어 로그 탭이 쓰는 것과 **같은 `#go=` 계약**을 쓴다
+ *   (`_logOpenWorkdesk`). 사본을 만들면 한쪽만 고쳐져 두 경로가 어긋난다.
+ * ★ 토큰은 URL에 싣지 않는다 — 기존 `openWorkdesk()`와 같은 `raw_sso` 핸드오프 +
+ *   같은 오리진 새 탭의 sessionStorage 승계로 충분하다.
+ * 문맥(sheetId·tabName)이 없는 옛 로그는 평소대로 목록만 연다(막다른 길 방지).
+ */
+function _raOpenWorkdesk(id) {
+  const token = sessionStorage.getItem("admin_token") || "";
+  if (!token || !isAdminLoggedIn()) { showToast("관리자 로그인이 필요합니다.", "warning"); return; }
+  const l = (_raCache || []).find(x => String(x.id) === String(id));
+  if (!l || !l.sheetId || !l.tabName) { openWorkdesk(); return; }
+  try {
+    localStorage.setItem("raw_sso", JSON.stringify({
+      token, name: getAdminName(), role: getAdminRole(), ts: Date.now(),
+    }));
+  } catch (_) { /* localStorage 불가 시에도 페이지 자체 로그인으로 폴백 */ }
+  const payload = {
+    s: l.sheetId, t: l.tabName, g: l.tabGid || "",
+    p: l.phone8 || "", n: l.reviewerName || "", st: l.campaignName || "",
+  };
+  // 연락처·이름은 프래그먼트(#)로만 — 서버 로그·Referer에 안 실리고 도착 즉시 주소창에서 제거된다
+  const url = new URL("workdesk.html", location.href);
+  url.hash = "go=" + encodeURIComponent(JSON.stringify(payload));
+  window.open(url.toString(), "_blank");
+}
 function _raEnsureStack() {
   let el = document.getElementById("raNotifStack");
   if (!el) {
@@ -2606,6 +2638,7 @@ async function _raCheckAlerts() {
   try {
     const r = await gasGet({ action: "reviewerLogsList", unresolved: "1", severity: "critical", limit: "8" });
     if (!r || !r.ok || !Array.isArray(r.items)) return;   // 조회 실패 시 기존 카드 유지
+    _raCache = r.items;                                   // 딥링크 문맥(시트·탭·리뷰어) 보관
     const stack = _raEnsureStack();
     const ids = new Set(r.items.map(l => String(l.id)));
     // reconcile — 타 관리자가 이미 확인한 카드는 자동 회수
@@ -2616,6 +2649,8 @@ async function _raCheckAlerts() {
       card.setAttribute("data-ra-id", String(l.id));
       card.style.cssText = "background:#FEF2F2;border:1.5px solid #FCA5A5;border-radius:12px;padding:12px 14px;box-shadow:0 6px 20px rgba(220,38,38,.18);font-size:.82rem;color:#7F1D1D;line-height:1.5";
       // 시트에서 지운 게 '의도된 취소'였던 경우의 1클릭 경로 — 누르면 재기록이 멈춘다.
+      // 알림에 적힌 탭으로 바로 들어갈 수 있는지 — 옛 로그엔 시트·탭 문맥이 없다
+      const canGo = !!(l.sheetId && l.tabName);
       const cancelBtn = _RA_CANCELABLE.has(l.eventType)
         ? '<button onclick="_raCancelOrder(' + Number(l.id) + ')" title="시트에서 지운 것이 주문취소였다면 여기를 누르세요" style="padding:5px 10px;border:1px solid #FCA5A5;background:#fff;color:#B91C1C;border-radius:8px;font-size:.75rem;font-weight:600;cursor:pointer">취소 처리</button>'
         : "";
@@ -2623,7 +2658,7 @@ async function _raCheckAlerts() {
         '<div style="font-weight:800;margin-bottom:4px;color:#DC2626"><i class="fas fa-exclamation-triangle"></i> 리뷰어 중요알림</div>' +
         '<div style="word-break:break-all">' + escHtml(l.message || "") + "</div>" +
         '<div style="display:flex;gap:6px;justify-content:flex-end;margin-top:8px;flex-wrap:wrap">' +
-          '<button onclick="window.open(\'workdesk.html\',\'_blank\')" style="padding:5px 10px;border:1px solid #FCA5A5;background:#fff;color:#B91C1C;border-radius:8px;font-size:.75rem;font-weight:600;cursor:pointer">로그 창 열기</button>' +
+          '<button onclick="_raOpenWorkdesk(' + Number(l.id) + ')" title="' + (canGo ? '이 리뷰어의 행이 있는 작업대를 새 탭으로 엽니다' : '통합 작업대를 새 탭으로 엽니다') + '" style="padding:5px 10px;border:1px solid #FCA5A5;background:#fff;color:#B91C1C;border-radius:8px;font-size:.75rem;font-weight:600;cursor:pointer">' + (canGo ? '작업대 열기 ↗' : '로그 창 열기') + '</button>' +
           cancelBtn +
           '<button onclick="_raResolve(' + Number(l.id) + ')" style="padding:5px 12px;border:none;background:#DC2626;color:#fff;border-radius:8px;font-size:.75rem;font-weight:700;cursor:pointer">확인</button>' +
         "</div>";
@@ -15121,7 +15156,15 @@ function openTabDashDetail(idx) {
     ]},
   ];
 
-  let html = "";
+  // 🧾 외부참여 수동제출 — 카톡으로 모집한 외부 리뷰어의 구매양식을 이 탭에 대리 제출한다.
+  //   값을 onclick 문자열에 심지 않고 인덱스로만 넘긴다(탭명·시트명 주입 벡터 차단).
+  let html = `<div style="display:flex;align-items:center;gap:8px;background:#F0FDFA;border:1px solid #99E6D8;border-radius:10px;padding:9px 12px;margin-bottom:14px">
+      <div style="flex:1;min-width:0">
+        <div style="font-size:.78rem;font-weight:800;color:#0F766E">외부모집 리뷰어 구매양식</div>
+        <div style="font-size:.68rem;color:#6B7280;margin-top:1px">카톡으로 받은 슬래시양식을 붙여넣으면 리뷰어 등록·시트 기록까지 한 번에 처리됩니다</div>
+      </div>
+      <button onclick="openManualOrderForTab(${idx})" style="font-size:.74rem;font-weight:800;background:#0F766E;color:#fff;border:none;border-radius:8px;padding:7px 12px;cursor:pointer;white-space:nowrap">🧾 수동제출</button>
+    </div>`;
   groups.forEach(g => {
     html += `<div style="margin-bottom:14px">
       <div style="font-size:.82rem;font-weight:700;color:${g.color};margin-bottom:6px"><i class="fas ${g.icon}" style="margin-right:5px"></i>${g.title}</div>
@@ -15143,6 +15186,20 @@ function openTabDashDetail(idx) {
 function closeTabDashDetail() {
   const modal = document.getElementById("tabDashDetailModal");
   if (modal) modal.style.display = "none";
+}
+
+/** 🧾 작업 탭 관리 상세 → 외부참여 수동제출 (탭 단위 — 참여형 공고가 없는 탭도 대상) */
+function openManualOrderForTab(idx) {
+  const t = _filterTabDashData()[idx];
+  if (!t) return;
+  if (!window.ManualOrder) { showToast("수동제출 모듈을 불러오지 못했습니다. 새로고침해 주세요.", "error"); return; }
+  window.ManualOrder.open({
+    sheetId: t.sheet_id || "",
+    tabName: t.tab_name || "",
+    gid: t.tab_gid ? String(t.tab_gid) : "",
+    campaignId: null,          // 탭 단위 진입 — 참여형 정원 차감은 공고 카드·관제 패널 경로에서만
+    title: t.display_name || t.tab_name || "",
+  });
 }
 
 // ── CSV 내보내기 ──

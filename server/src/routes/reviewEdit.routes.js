@@ -194,9 +194,28 @@ router.get('/my-files', async (req, res) => {
   }
 });
 
+// ── 리뷰가이드 추출: work_detail.reviewGuide에서 [리뷰등록 가이드]/[리뷰가이드] 섹션만.
+//    [라벨] 마커가 없으면 평문 전체 그대로. (campaign-workdetail.js pickReviewOnly 서버 포팅 — 표시 규율 일치)
+function _pickReviewGuide(raw) {
+  const text = String(raw == null ? '' : raw);
+  if (!text.trim()) return '';
+  if (!/\[[^\]]+\]/.test(text)) return text.trim();
+  const norm = (s) => s.replace(/\s/g, '');
+  const keep = ['리뷰등록가이드', '리뷰가이드'];
+  const out = []; let take = false; let buf = [];
+  const flush = () => { const c = buf.join('\n').trim(); if (take && c) out.push(c); buf = []; };
+  text.split(/\r?\n/).forEach((ln) => {
+    const mm = ln.match(/^\s*\[([^\]]+)\]\s*(.*)$/);
+    if (mm) { flush(); take = keep.some((k) => norm(mm[1]).indexOf(k) >= 0); buf = mm[2] ? [mm[2]] : []; }
+    else buf.push(ln);
+  });
+  flush();
+  return out.join('\n').trim();
+}
+
 // GET /api/review-edit/participation-brief?phone8&sheetId&tabName&gid&rowIndex
 //   리뷰 내역 카드 → "참여상품 정보" 시트용. 행 소유권(강한-키) 통과 시에만 그 행의 연결 공고
-//   brief(제목·카톡URL·상품URL·상품정보)를 반환. 카톡 URL은 이름 단독 약한-키론 절대 안 나간다
+//   brief(제목·카톡URL·상품URL·상품정보·리뷰가이드)를 반환. 카톡 URL은 이름 단독 약한-키론 절대 안 나간다
 //   (참여형 chat_url 게이트와 동일 사상 — my-files 소유권 술어 재사용).
 router.get('/participation-brief', async (req, res) => {
   try {
@@ -251,10 +270,11 @@ router.get('/participation-brief', async (req, res) => {
     } catch (_) { /* fail-soft */ }
     if (!productUrl) productUrl = c.landing_url || '';
 
-    let productLines = '';
+    let productLines = '', reviewGuide = '';
     try {
       const wd = typeof c.work_detail === 'string' ? JSON.parse(c.work_detail) : (c.work_detail || {});
       productLines = String((wd && wd.productLines) || '').trim();
+      reviewGuide = _pickReviewGuide(String((wd && wd.reviewGuide) || ''));
     } catch (_) { /* work_detail 없음/파싱 실패 무시 */ }
 
     res.json({
@@ -265,6 +285,7 @@ router.get('/participation-brief', async (req, res) => {
         chatUrl: c.chat_url || '',
         productUrl,
         productLines,
+        reviewGuide,
       },
     });
   } catch (err) {

@@ -43,6 +43,23 @@ function kstTodayAt(timeStr, now = new Date()) {
   return new Date(kstDayStartUtc(now).getTime() + mins * 60 * 1000);
 }
 
+/**
+ * 특정 KST 날짜('YYYY-MM-DD')의 오픈 시각 → UTC ISO. 시간창 없으면(자율주문) 그날 KST 자정.
+ * daily_done 카드의 "다시 열릴 때까지" 카운트다운 기준값을 만드는 데 쓴다.
+ */
+function kstDateAtIso(isoDate, minutesOfDay) {
+  if (!isoDate) return null;
+  const base = Date.parse(isoDate + 'T00:00:00+09:00');
+  if (Number.isNaN(base)) return null;
+  return new Date(base + (minutesOfDay || 0) * 60000).toISOString();
+}
+
+/** 오늘(KST) 기준 내일 날짜 'YYYY-MM-DD' */
+function kstTomorrowStr(now = new Date()) {
+  const k = new Date(now.getTime() + KST_OFFSET_MS + 24 * 3600 * 1000);
+  return k.toISOString().slice(0, 10);
+}
+
 /** DATE 값(문자열 'YYYY-MM-DD' 또는 pg Date 객체) → 'YYYY-MM-DD' 문자열. 무효/없음은 null */
 function dateOnlyStr(v) {
   if (!v) return null;
@@ -203,9 +220,17 @@ function computeCampaignState(c, counts, now = new Date(), schedule = null) {
     return { ...payload, state: 'closed', stateReason: 'schedule_ended' };
   }
 
+  // ★ daily_done 카드의 "다시 열릴 때까지" 카운트다운 기준.
+  //   기존 `opensAt`은 **오늘의** window_start(=이미 지난 시각)이고 자율주문은 아예 null이라
+  //   그대로 쓰면 카운트다운이 0에 붙는다 → 다음 오픈 시각을 별도 필드로 준다.
+  //   다음 오픈일 = 시트 일정이 있으면 다음 진행일, 없으면 내일. 시각 = window_start(자율주문은 자정).
+  const _reopenIso = () => kstDateAtIso(
+    sch ? nextWorkDate(sch, todayStr) : kstTomorrowStr(now),
+    allDay ? 0 : startMin);
+
   const t = kstMinutesOfDay(now);
   if (!allDay && t < startMin) return { ...payload, state: 'preopen' };
-  if (!allDay && t >= endMin) return { ...payload, state: 'daily_done' };
+  if (!allDay && t >= endMin) return { ...payload, state: 'daily_done', reopensAt: _reopenIso() };
 
   // 휴무일(시트에 그 날짜 행이 0개) = 그날은 열지 않음. 못 채운 물량은 사라지지 않고
   // 다음 진행일 정원에 합산된다(plannedThrough가 휴무일엔 증가하지 않기 때문).
@@ -217,14 +242,22 @@ function computeCampaignState(c, counts, now = new Date(), schedule = null) {
     return {
       ...payload, state: 'daily_done', stateReason: 'rest_day', nextWorkDate: nw,
       opensAt: openUtc ? openUtc.toISOString() : payload.opensAt,
+      reopensAt: openUtc ? openUtc.toISOString() : null,
     };
   }
 
-  if (todayCount >= quota) return { ...payload, state: 'daily_done' }; // 금일완료(홀드 만료 반환 시 open 복귀)
-
+  // ★★ 총 모집 충족을 **일일 마감보다 먼저** 본다(순서 고정).
+  //   반대로 두면 총원이 차는 순간 dailyQuota가 0이 되어 `todayCount(0) >= quota(0)`이
+  //   먼저 참이 되고, 다 모집한 캠페인이 매일 daily_done("내일 다시 오픈")으로 보인다.
+  //   apply 게이트는 soft_full·daily_done 둘 다 차단이라 **참여 동작은 이 순서와 무관**하다
+  //   (바뀌는 것은 관리자·리뷰어에게 보이는 상태 문구뿐).
+  //   ★ soft_full 에는 reopensAt 을 싣지 않는다 — 총원이 찼으니 "다시 열림"이 아니다.
   const rt = sch ? sch.totalSlots : (Number(c.recruit_total) || 0);
   const usedAll = (Number(counts.submittedAll) || 0) + (Number(counts.activeHolds) || 0);
-  if (rt > 0 && usedAll >= rt) return { ...payload, state: 'soft_full' }; // 잔여 대기 — 신청만 차단, 종착 아님
+  if (rt > 0 && usedAll >= rt) return { ...payload, state: 'soft_full' }; // 총원 충족 — 신청 차단
+
+  // 금일완료(홀드 만료 반환 시 open 복귀)
+  if (todayCount >= quota) return { ...payload, state: 'daily_done', reopensAt: _reopenIso() };
 
   if (!allDay && t >= endMin - bufferMin) return { ...payload, state: 'cutoff' }; // 신규 신청만 차단
 

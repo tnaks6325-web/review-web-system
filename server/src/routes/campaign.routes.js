@@ -16,7 +16,7 @@ const {
   kstDayStartUtc,
   kstTodayAt,
 } = require('../services/campaignState.service');
-const { deriveSchedules, tabsOfCampaigns, scheduleFor } = require('../services/campaignSchedule.service');
+const { deriveSchedules, tabsOfCampaigns, scheduleFor, describeTabDates } = require('../services/campaignSchedule.service');
 const { sanitizeWorkDetail, sanitizeGuideHtml } = require('../utils/sanitizeGuideHtml');
 const { isActiveEditor } = require('../services/reviewerCampaignEditor.service');
 
@@ -284,6 +284,8 @@ function _publicView(row, counts, now, schedule) {
     scheduleSource: st.scheduleSource || null,
     stateReason: st.stateReason || null,
     nextWorkDate: st.nextWorkDate || null,
+    // daily_done 카드의 "다시 열릴 때까지" 카운트다운 기준(오늘의 opensAt은 이미 지난 시각)
+    reopensAt: st.reopensAt || null,
   };
 }
 
@@ -1266,6 +1268,7 @@ router.get('/admin/list', authMiddleware, adminOrMasterMiddleware, async (req, r
         startDate: st.startDate || null,
         endDate: st.endDate || null,
         nextWorkDate: st.nextWorkDate || null,
+        reopensAt: st.reopensAt || null,
         ops: {
           holdNow: cnt.activeHolds,
           todayHold: cnt.todayActiveHolds,
@@ -1616,7 +1619,34 @@ router.get('/admin/:id/applications', authMiddleware, adminOrMasterMiddleware, a
         options = await _loadOptionViews(pool, id, st, now);
       }
     } catch (optErr) { logger.warn('[campaign/admin/applications] 옵션 집계 실패: ' + optErr.message); }
-    res.json({ ok: true, data: rows, count: rows.length, options });
+
+    // 📋 시트 대조(관제 진단) — "시트엔 100행인데 확정은 99" 같은 누락을 그 자리에서 보이게.
+    //   ★ 읽기 전용·fail-soft. 상태 계산·참여 흐름에 일절 영향 없음(관제 창에서만 호출).
+    let sheetInfo = null;
+    try {
+      const { rows: cs } = await pool.query(
+        `SELECT linked_sheet_id, linked_tab_name, linked_tab_gid FROM recruit_campaigns WHERE id = $1`, [id]
+      );
+      const c0 = cs[0];
+      if (c0 && c0.linked_sheet_id && c0.linked_tab_name) {
+        // 로스터 = 인덱스에 잡힌 행(이름이 있는 행). 시트의 실제 참여자 자리 수와 같다.
+        const { rows: ri } = await pool.query(
+          `SELECT COUNT(*)::int AS n FROM review_index WHERE sheet_id = $1 AND tab_name = $2`,
+          [c0.linked_sheet_id, c0.linked_tab_name]
+        );
+        const confirmed = rows.filter(r => r.status === 'submitted').length;
+        const rosterRows = Number(ri[0]?.n) || 0;
+        sheetInfo = {
+          tabName: c0.linked_tab_name,
+          rosterRows,
+          confirmed,
+          diff: rosterRows > 0 ? rosterRows - confirmed : null,
+          schedule: await describeTabDates(pool, c0.linked_sheet_id, c0.linked_tab_gid, new Date()),
+        };
+      }
+    } catch (siErr) { logger.warn('[campaign/admin/applications] 시트 대조 실패: ' + siErr.message); }
+
+    res.json({ ok: true, data: rows, count: rows.length, options, sheetInfo });
   } catch (err) {
     next(err);
   }

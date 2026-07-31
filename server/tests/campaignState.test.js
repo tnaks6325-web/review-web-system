@@ -118,9 +118,18 @@ ok('recruit_total=0(무제한) 가드: quota = daily_limit (영구 daily_done �
   assert.strictEqual(computeCampaignState(c, ZERO, kst('14:30')).state, 'open');
 });
 
-ok('전량 소진 후 quota 0 → daily_done', () => {
+// ★ 총원 소진은 **soft_full**(총 모집 마감)이지 daily_done(오늘만 마감)이 아니다.
+//   순서가 반대였을 때 quota 0 → todayCount(0) >= quota(0) 이 먼저 참이 되어
+//   다 모집한 캠페인이 매일 "내일 다시 오픈"으로 표시됐다(7/31 올리브영 건).
+//   두 상태 모두 apply 차단이라 참여 동작은 동일 — 바뀌는 건 표시 문구뿐.
+ok('전량 소진 → soft_full (quota 0에서도 "내일 다시 오픈"으로 보이지 않는다)', () => {
   assert.strictEqual(dailyQuota(CAMP, 100), 0);
   const counts = { ...ZERO, submittedBeforeToday: 100, submittedAll: 100 };
+  assert.strictEqual(computeCampaignState(CAMP, counts, kst('14:30')).state, 'soft_full');
+});
+
+ok('총원 미달이면 종전대로 오늘 한도로 판정(daily_done)', () => {
+  const counts = { ...ZERO, submittedBeforeToday: 79, submittedAll: 99, todaySubmitted: 20 };
   assert.strictEqual(computeCampaignState(CAMP, counts, kst('14:30')).state, 'daily_done');
 });
 
