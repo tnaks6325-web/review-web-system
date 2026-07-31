@@ -17169,13 +17169,32 @@ function _csRenderMessages(messages) {
   box.innerHTML = messages.map(m => {
     const isAdmin = m.senderRole === 'admin';
     const ts = m.createdAt ? new Date(m.createdAt).toLocaleString("ko-KR", { month:'numeric', day:'numeric', hour:'2-digit', minute:'2-digit' }) : "";
+    const imgs = Array.isArray(m.imageUrls) ? m.imageUrls : [];
+    const imgHtml = imgs.length ? `<div style="display:flex;flex-wrap:wrap;gap:5px;max-width:78%;margin-top:${m.content ? '4px' : '0'}">` +
+      imgs.map(u => `<img src="${escHtml(u)}" alt="첨부 사진" onclick="csViewImage('${escHtml(u)}')"
+        style="width:120px;height:120px;object-fit:cover;border-radius:10px;border:1px solid #e5e7eb;cursor:zoom-in;background:#fff">`).join('') + `</div>` : '';
+    const textHtml = m.content ? `<div style="max-width:78%;background:${isAdmin ? '#3182f6' : '#fff'};color:${isAdmin ? '#fff' : '#111827'};border:1px solid ${isAdmin ? '#3182f6' : '#e5e7eb'};padding:8px 11px;border-radius:12px;font-size:.83rem;line-height:1.45;white-space:pre-wrap;word-break:break-word">${escHtml(m.content)}</div>` : '';
     return `<div style="display:flex;flex-direction:column;align-items:${isAdmin ? 'flex-end' : 'flex-start'}">
       <div style="font-size:.66rem;color:#9CA3AF;margin-bottom:2px">${escHtml(m.senderName || (isAdmin ? '관리자' : '리뷰어'))}</div>
-      <div style="max-width:78%;background:${isAdmin ? '#3182f6' : '#fff'};color:${isAdmin ? '#fff' : '#111827'};border:1px solid ${isAdmin ? '#3182f6' : '#e5e7eb'};padding:8px 11px;border-radius:12px;font-size:.83rem;line-height:1.45;white-space:pre-wrap;word-break:break-word">${escHtml(m.content || '')}</div>
+      ${textHtml}${imgHtml}
       <div style="font-size:.62rem;color:#cbd5e1;margin-top:2px">${ts}</div>
     </div>`;
   }).join("");
   box.scrollTop = box.scrollHeight;
+}
+
+/* 첨부 사진 크게 보기 */
+function csViewImage(url) {
+  let v = document.getElementById("csImgView");
+  if (!v) {
+    v = document.createElement("div");
+    v.id = "csImgView";
+    v.style.cssText = "position:fixed;inset:0;background:rgba(0,0,0,.88);z-index:10800;display:flex;align-items:center;justify-content:center;padding:20px";
+    v.onclick = () => { v.style.display = "none"; };
+    document.body.appendChild(v);
+  }
+  v.innerHTML = `<img src="${escHtml(url)}" style="max-width:100%;max-height:100%;border-radius:10px">`;
+  v.style.display = "flex";
 }
 
 async function csSendReply(threadId) {

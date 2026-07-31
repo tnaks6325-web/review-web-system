@@ -330,6 +330,7 @@ const _ACTION_MAP = {
   'csReviewerUnread':      { method: 'GET',  path: '/api/reviewer/cs/unread' },
   'csReviewerMessages':    { method: 'GET',  path: '/api/reviewer/cs/messages' },
   'csReviewerSend':        { method: 'POST', path: '/api/reviewer/cs/message' },
+  'csReviewerUpload':      { method: 'POST', path: '/api/reviewer/cs/upload' },
 
   // ★ C/S 문의창구 — 관리자 (JWT + admin/master)
   'csAdminThreads':        { method: 'GET',  path: '/api/cs/threads' },

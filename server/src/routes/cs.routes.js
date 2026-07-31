@@ -15,6 +15,19 @@ const { emitCsReplyToReviewer, broadcast } = require('../utils/sse');
 // 이하 모든 라우트 보호
 router.use(authMiddleware, adminOrMasterMiddleware);
 
+// ── 첨부 이미지 URL 검증: 우리 서버의 guide-image 프록시 URL만 허용 ──
+//   화면에 <img src>로 나가므로 자유 문자열 금지(외부 URL·스킴 주입 차단). 메시지당 최대 5장.
+function _sanitizeCsImageUrls(v) {
+  const arr = Array.isArray(v) ? v : (v ? [v] : []);
+  const out = [];
+  for (const raw of arr.slice(0, 5)) {
+    const s = String(raw || '').trim();
+    if (!/^https?:\/\/[^\s"'<>]+\/api\/order\/guide-image\/[-\w]{20,}$/.test(s)) continue;
+    out.push(s);
+  }
+  return out;
+}
+
 // GET /api/cs/threads?status=open|closed|all&q=검색어 — 문의방 목록(리뷰어별 그룹은 프론트에서)
 router.get('/threads', async (req, res, next) => {
   try {
@@ -123,7 +136,7 @@ router.get('/messages', async (req, res, next) => {
 
     const { rows: messages } = await pool.query(
       `SELECT id, sender_role AS "senderRole", sender_name AS "senderName", content,
-              created_at AS "createdAt"
+              image_urls AS "imageUrls", created_at AS "createdAt"
        FROM cs_messages WHERE thread_id = $1 ORDER BY created_at ASC LIMIT 1000`,
       [threadId]
     );
@@ -143,8 +156,9 @@ router.post('/reply', async (req, res, next) => {
     const b = req.body || {};
     const threadId = (b.threadId || '').toString();
     const content = (b.content || '').toString().trim();
+    const imageUrls = _sanitizeCsImageUrls(b.imageUrls);
     if (!threadId) return res.status(400).json({ ok: false, error: 'threadId가 필요합니다.' });
-    if (!content) return res.status(400).json({ ok: false, error: '메시지 내용이 비어 있습니다.' });
+    if (!content && imageUrls.length === 0) return res.status(400).json({ ok: false, error: '메시지 내용이 비어 있습니다.' });
 
     const { rows: tRows } = await pool.query(
       `SELECT id, reviewer_phone8 AS "reviewerPhone8", campaign_label AS "campaignLabel"
@@ -155,12 +169,12 @@ router.post('/reply', async (req, res, next) => {
     const senderName = req.admin?.name || '관리자';
 
     const { rows: mRows } = await pool.query(
-      `INSERT INTO cs_messages (thread_id, sender_role, sender_name, content)
-       VALUES ($1, 'admin', $2, $3) RETURNING id, created_at AS "createdAt"`,
-      [threadId, senderName, content]
+      `INSERT INTO cs_messages (thread_id, sender_role, sender_name, content, image_urls)
+       VALUES ($1, 'admin', $2, $3, $4::jsonb) RETURNING id, created_at AS "createdAt"`,
+      [threadId, senderName, content, JSON.stringify(imageUrls)]
     );
     const message = {
-      id: mRows[0].id, threadId, senderRole: 'admin', senderName, content,
+      id: mRows[0].id, threadId, senderRole: 'admin', senderName, content, imageUrls,
       createdAt: mRows[0].createdAt,
     };
 
@@ -172,7 +186,7 @@ router.post('/reply', async (req, res, next) => {
              last_message_preview = $2,
              updated_at = NOW()
        WHERE id = $1`,
-      [threadId, content.slice(0, 120)]
+      [threadId, (content || `사진 ${imageUrls.length}장`).slice(0, 120)]
     );
 
     // 해당 리뷰어에게만 실시간 푸시 + 다른 관리자 세션 갱신용 브로드캐스트
