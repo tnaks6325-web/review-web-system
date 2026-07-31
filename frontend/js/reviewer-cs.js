@@ -1,8 +1,8 @@
 /* ═══════════════════════════════════════════════════════════
    리뷰어 C/S 문의창구 — 리뷰어 측 UI (index.html 전용)
-   - 로그인 시 "1:1 문의" 플로팅 버튼 노출
-   - 참여 캠페인 선택 → 메신저형 대화창
-   - 관리자 답장 실시간(SSE) 수신
+   - 문의 시작 = 리뷰 내역 카드 → 참여상품 정보 팝업의 [1:1 문의하기] (index.html)
+   - 1:1문의 탭 = 이미 문의한 목록(내 문의함, index.html의 #sectionCsInbox) — 팝업 없음
+   - 이 파일은 대화창 + 미확인 뱃지 + 관리자 답장 실시간(SSE) 담당
    의존: api.js(gasGet/gasPost, API_BASE_URL), localStorage "iad_reviewer_user"
    ═══════════════════════════════════════════════════════════ */
 (function () {
@@ -72,54 +72,16 @@
 
   const SHEET = "background:#fff;width:560px;max-width:100vw;height:84vh;border-radius:18px 18px 0 0;display:flex;flex-direction:column;overflow:hidden;box-shadow:0 -6px 30px rgba(0,0,0,.2)";
 
-  // ── 캠페인 선택 ──
-  async function openPicker() {
-    const user = getUser();
-    if (!user || !user.phone8) { toast("로그인이 필요합니다"); return; }
-    const ov = overlay();
-    ov.innerHTML = `<div style="${SHEET}">
-      <div style="padding:14px 16px;border-bottom:1px solid #eef2f7;display:flex;align-items:center;gap:8px">
-        <i class="fas fa-headset" style="color:#3182f6"></i>
-        <span style="font-weight:800;font-size:1rem;color:#111827">1:1 문의하기</span>
-        <button onclick="ReviewerCS.close()" style="margin-left:auto;width:30px;height:30px;border:none;background:#F3F4F6;border-radius:8px;color:#6B7280;cursor:pointer"><i class="fas fa-times"></i></button>
-      </div>
-      <div style="padding:10px 16px;font-size:.8rem;color:#6B7280;background:#f9fafb;border-bottom:1px solid #f3f4f6">진행하신 탭을 선택해 문의하세요</div>
-      <div id="rcsPickerList" style="flex:1;overflow-y:auto;padding:8px 0">
-        <div style="text-align:center;padding:30px;color:#9CA3AF"><i class="fas fa-circle-notch fa-spin"></i> 불러오는 중...</div>
-      </div>
-    </div>`;
-    try {
-      const data = await gasGet({ action: "csReviewerCampaigns", phone8: user.phone8 });
-      if (!data || data.ok === false) throw new Error((data && data.error) || "불러오기 실패");
-      const items = (data.campaigns || []).slice();
-      if (data.general) items.push(data.general);
-      renderPicker(items);
-    } catch (err) {
-      const el = document.getElementById("rcsPickerList");
-      if (el) el.innerHTML = `<div style="text-align:center;padding:30px;color:#EF4444;font-size:.85rem">오류: ${esc(err.message)}</div>`;
-    }
+  // 문의 목록(내 문의함)은 index.html의 1:1문의 탭이 인라인으로 그린다.
+  //   여기서 팝업 목록을 다시 만들면 진입 경로가 둘이 되어 어긋나므로 만들지 않는다.
+  function openInbox() {
+    if (typeof switchTab === "function") { try { switchTab("cs"); return; } catch (_) {} }
+    toast("리뷰 내역에서 문의할 작업을 선택해 주세요");
   }
-  function renderPicker(items) {
-    const el = document.getElementById("rcsPickerList");
-    if (!el) return;
-    if (!items.length) { el.innerHTML = '<div style="text-align:center;padding:30px;color:#9CA3AF;font-size:.85rem">진행한 탭이 없습니다.<br>일반 문의로 남겨주세요.</div>'; return; }
-    el.innerHTML = items.map(c => {
-      const isGeneral = c.campaignSource === 'general';
-      const labelSafe = (c.campaignLabel || '').replace(/'/g, "\\'");
-      const n = c.reviewerUnread || 0;
-      // 부제는 상태만 (시트제목 등 업체정보는 리뷰어에게 노출하지 않음)
-      const sub = (c.threadId ? '이전 문의 있음' : '새 문의') + (c.status === 'closed' ? ' · 종료됨' : '');
-      return `<div onclick="ReviewerCS.openChat('${(c.campaignKey || '').replace(/'/g,"\\'")}','${labelSafe}','${c.campaignSource || 'general'}')"
-        style="padding:13px 16px;border-bottom:1px solid #f3f4f6;cursor:pointer;display:flex;align-items:center;gap:10px" onmouseover="this.style.background='#f9fafb'" onmouseout="this.style.background='#fff'">
-        <div style="width:38px;height:38px;border-radius:10px;background:${isGeneral ? '#EDE9FE' : '#E0EDFF'};color:${isGeneral ? '#7C3AED' : '#3182f6'};display:flex;align-items:center;justify-content:center;flex-shrink:0"><i class="fas ${isGeneral ? 'fa-comment-dots' : 'fa-box-open'}"></i></div>
-        <div style="flex:1;min-width:0">
-          <div style="font-weight:600;font-size:.88rem;color:#111827;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${esc(c.campaignLabel)}</div>
-          <div style="font-size:.72rem;color:#9CA3AF;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${sub}</div>
-        </div>
-        ${n > 0 ? `<span style="min-width:19px;height:19px;padding:0 5px;background:#EF4444;color:#fff;font-size:.68rem;font-weight:800;line-height:19px;text-align:center;border-radius:10px;flex-shrink:0;box-sizing:border-box">${n > 99 ? '99+' : n}</span>` : ''}
-        <i class="fas fa-chevron-right" style="color:#cbd5e1;font-size:.8rem"></i>
-      </div>`;
-    }).join("");
+  // 대화창 닫기(뒤로) → 내 문의함 목록 갱신
+  function backToInbox() {
+    closeAll();
+    if (typeof window.loadCsInbox === "function") { try { window.loadCsInbox(); } catch (_) {} }
   }
 
   // ── 대화창 ──
@@ -277,6 +239,7 @@
       if (!data || data.ok === false) throw new Error((data && data.error) || "전송 실패");
       _open.threadId = data.threadId || _open.threadId;
       await reloadChat();
+      if (typeof window.loadCsInbox === "function") { try { window.loadCsInbox(); } catch (_) {} }
     } catch (err) {
       toast("전송 오류: " + err.message, true);
       ta.value = content;
@@ -298,9 +261,10 @@
         if (_open && _open.threadId && data.threadId === _open.threadId) {
           // 지금 보고 있는 방 → 새 메시지 즉시 표시(열람 처리됨)
           reloadChat();
-        } else if (document.getElementById("rcsPickerList")) {
-          // 문의 목록(피커)이 열려 있으면 방별 미확인 숫자 갱신 위해 목록 새로고침
-          openPicker();
+        } else if (typeof window.loadCsInbox === "function") {
+          // 내 문의함(1:1문의 탭)이 열려 있으면 방별 미확인 숫자 갱신
+          try { window.loadCsInbox(); } catch (_) {}
+          toast("관리자 답변이 도착했습니다");
         } else {
           toast("관리자 답변이 도착했습니다");
         }
@@ -320,6 +284,6 @@
   if (document.readyState === "loading") document.addEventListener("DOMContentLoaded", init);
   else init();
 
-  window.ReviewerCS = { open: openPicker, openChat, send, back: openPicker, close: closeAll,
-                        pickFiles, removeAttach, viewImage };
+  window.ReviewerCS = { open: openInbox, openChat, send, back: backToInbox, close: closeAll,
+                        pickFiles, removeAttach, viewImage, refreshUnread };
 })();

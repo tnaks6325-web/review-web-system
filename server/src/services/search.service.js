@@ -643,4 +643,4 @@ async function searchByNameDebug(query) {
   }
 }
 
-module.exports = { searchByName, searchByNameDebug, _getReviewerPhoneList };
+module.exports = { searchByName, searchByNameDebug, _getReviewerPhoneList, PAYMENT_COL_KEYWORDS };

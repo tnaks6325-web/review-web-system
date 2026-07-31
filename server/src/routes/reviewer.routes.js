@@ -14,7 +14,7 @@ const {
 const pool = require('../db/pool');
 const { logger } = require('../utils/logger');
 const { addClient, emitCsInquiry } = require('../utils/sse');
-const { _getReviewerPhoneList } = require('../services/search.service');
+const { _getReviewerPhoneList, PAYMENT_COL_KEYWORDS } = require('../services/search.service');
 
 // POST /api/reviewer/register — 리뷰어 등록 (GAS: registerReviewer)
 router.post('/register', registerLimiter, async (req, res, next) => {
@@ -380,7 +380,8 @@ router.get('/my-status', async (req, res, next) => {
 
 // GET /api/reviewer/review-earnings?phone8=XX — 리뷰 내역 탭 상단 합계 + 카드별 상품비/리뷰비/썸네일
 //   · 상품비 = order_submissions.price(실제 제출한 결제금액) · 리뷰비 = 연결 공고 review_fee · 썸네일 = thumbnail_url
-//   · 참여중(미제출) review_index 행 기준 합계. 주문 행매칭(sheet_row=row_index) 실패분은 productPrice=null → 프론트 "상품비 조회안됨"
+//   · totals(받을 예정) = 참여중(미제출) 행 / doneTotals(누적) = 제출완료 중 **입금완료된 건만**
+//   · 주문 행매칭(sheet_row=row_index) 실패분은 productPrice=null → 프론트 "상품비 조회안됨"
 //   · phone8(본인+타계정) 스코프. 읽기 전용·best-effort(실패해도 목록은 뜸).
 router.get('/review-earnings', async (req, res, next) => {
   try {
@@ -390,12 +391,21 @@ router.get('/review-earnings', async (req, res, next) => {
     }
     const phoneList = await _getReviewerPhoneList(phone8);
 
-    // 참여중(미제출) 행
+    // 참여중(미제출) + 제출완료 행을 한 번에.
+    //   ★ 입금완료 판정은 search.service의 _isPaid와 동일 규칙을 SQL로 옮긴 것 —
+    //     is_submitted2='PAID' 또는 row_json의 입금 키워드 컬럼에 값이 있으면 완료.
+    //     키워드 배열을 그대로 패턴화해 판정이 갈라지지 않게 한다(row_json은 서버로 안 끌어옴 = 메모리 안전).
+    const payPatterns = PAYMENT_COL_KEYWORDS.map(k => '%' + k + '%');
     const { rows: riRows } = await pool.query(
-      `SELECT sheet_id AS "sheetId", tab_name AS "tabName", row_index AS "rowIndex"
+      `SELECT sheet_id AS "sheetId", tab_name AS "tabName", row_index AS "rowIndex",
+              is_submitted AS "isSubmitted",
+              (is_submitted2 = 'PAID' OR EXISTS (
+                 SELECT 1 FROM jsonb_each_text(COALESCE(row_json, '{}'::jsonb)) kv
+                  WHERE kv.key ILIKE ANY($2) AND btrim(kv.value) <> ''
+               )) AS "isPaid"
          FROM review_index
-        WHERE phone8 = ANY($1) AND is_submitted = FALSE AND row_index IS NOT NULL`,
-      [phoneList]
+        WHERE phone8 = ANY($1) AND row_index IS NOT NULL`,
+      [phoneList, payPatterns]
     );
     const sheetIds = [...new Set(riRows.map(r => r.sheetId))];
     const tabNames = [...new Set(riRows.map(r => r.tabName))];
@@ -431,9 +441,10 @@ router.get('/review-earnings', async (req, res, next) => {
       }
     }
 
-    // 아이템별 맵 + 합계
+    // 아이템별 맵 + 합계 (참여중=받을 예정 / 제출완료 중 입금완료=누적)
     const items = {};
     let productTotal = 0, reviewTotal = 0, count = 0, productUnknown = 0;
+    let dProductTotal = 0, dReviewTotal = 0, dCount = 0, dProductUnknown = 0, dUnpaidCount = 0;
     for (const r of riRows) {
       const tk = r.sheetId + '||' + r.tabName;
       const camp = campMap[tk] || {};
@@ -441,19 +452,37 @@ router.get('/review-earnings', async (req, res, next) => {
       const pk = tk + '||' + r.rowIndex;
       const price = Object.prototype.hasOwnProperty.call(priceMap, pk) ? priceMap[pk] : null;
       items[pk] = { reviewFee, productPrice: price, thumbnailUrl: camp.thumbnailUrl || '' };
-      count++;
-      reviewTotal += reviewFee;
-      if (price != null) productTotal += price; else productUnknown++;
+      if (!r.isSubmitted) {
+        count++;
+        reviewTotal += reviewFee;
+        if (price != null) productTotal += price; else productUnknown++;
+      } else if (r.isPaid) {
+        dCount++;
+        dReviewTotal += reviewFee;
+        if (price != null) dProductTotal += price; else dProductUnknown++;
+      } else {
+        dUnpaidCount++;   // 제출완료지만 아직 입금 전 — 누적 합계에서 제외(사용자 확정 기준)
+      }
     }
 
     res.json({
       ok: true,
       totals: { productTotal, reviewTotal, grandTotal: productTotal + reviewTotal, count, productUnknown },
+      doneTotals: {
+        productTotal: dProductTotal, reviewTotal: dReviewTotal,
+        grandTotal: dProductTotal + dReviewTotal,
+        count: dCount, productUnknown: dProductUnknown, unpaidCount: dUnpaidCount,
+      },
       items,
     });
   } catch (err) {
     logger.warn('[review-earnings] 실패: ' + err.message);
-    res.json({ ok: true, totals: { productTotal: 0, reviewTotal: 0, grandTotal: 0, count: 0, productUnknown: 0 }, items: {} });
+    res.json({
+      ok: true,
+      totals: { productTotal: 0, reviewTotal: 0, grandTotal: 0, count: 0, productUnknown: 0 },
+      doneTotals: { productTotal: 0, reviewTotal: 0, grandTotal: 0, count: 0, productUnknown: 0, unpaidCount: 0 },
+      items: {},
+    });
   }
 });
 

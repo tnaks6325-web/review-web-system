@@ -1,0 +1,713 @@
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>1:1문의 창구 · 리뷰내역 카드 개선 — 비포/애프터 (반영 완료)</title>
+<style>
+  :root{ color-scheme:light; }
+  *{ box-sizing:border-box; }
+  body{
+    margin:0; background:#F4F6FA; color:#1B1F27;
+    font-family:-apple-system,BlinkMacSystemFont,"Apple SD Gothic Neo","Malgun Gothic",sans-serif;
+    -webkit-font-smoothing:antialiased;
+  }
+  .wrap{ max-width:1180px; margin:0 auto; padding:34px 20px 80px; }
+
+  .doc-head{ background:#fff; border:1px solid #E4E8EF; border-radius:18px; padding:26px 28px; margin-bottom:24px; }
+  .doc-head h1{ margin:0 0 8px; font-size:1.5rem; letter-spacing:-.02em; }
+  .doc-head p{ margin:0; font-size:.9rem; color:#5B6472; line-height:1.7; }
+  .doc-meta{ margin-top:14px; display:flex; flex-wrap:wrap; gap:8px; }
+  .doc-meta span{ font-size:.72rem; font-weight:700; padding:5px 11px; border-radius:999px; background:#EEF3FB; color:#1B4F9C; }
+  .v2{ background:#FFF1E8 !important; color:#B45309 !important; }
+
+  .asks{ display:grid; grid-template-columns:repeat(4,1fr); gap:11px; margin-bottom:32px; }
+  .ask{ background:#fff; border:1px solid #E4E8EF; border-radius:14px; padding:15px 16px; }
+  .ask b{ display:block; font-size:.67rem; font-weight:800; color:#3182F6; letter-spacing:.04em; margin-bottom:6px; }
+  .ask p{ margin:0; font-size:.82rem; line-height:1.6; color:#2B313C; }
+
+  section{ margin-bottom:44px; }
+  .sec-head{ display:flex; align-items:flex-start; gap:12px; margin-bottom:16px; }
+  .sec-no{ flex:none; width:30px; height:30px; border-radius:10px; background:#1B1F27; color:#fff; display:grid; place-items:center; font-size:.85rem; font-weight:800; }
+  .sec-head h2{ margin:0 0 4px; font-size:1.12rem; letter-spacing:-.02em; }
+  .sec-head p{ margin:0; font-size:.85rem; color:#5B6472; line-height:1.6; }
+
+  .compare{ display:grid; grid-template-columns:1fr 1fr; gap:16px; align-items:start; }
+  .pane{ background:#fff; border:1px solid #E4E8EF; border-radius:16px; overflow:hidden; }
+  .pane-head{ padding:12px 16px; font-size:.78rem; font-weight:800; display:flex; align-items:center; gap:7px; }
+  .pane.before .pane-head{ background:#FEF2F2; color:#B42318; border-bottom:1px solid #FBDCDC; }
+  .pane.after  .pane-head{ background:#ECFDF3; color:#0A7040; border-bottom:1px solid #CFF0DE; }
+  .pane-head .tagdot{ width:7px; height:7px; border-radius:50%; background:currentColor; }
+  .pane-body{ padding:18px 16px 20px; display:flex; justify-content:center; background:#F8FAFC; }
+  .pane-note{ padding:13px 16px 16px; border-top:1px solid #EEF1F6; }
+  .pane-note li{ font-size:.8rem; line-height:1.65; color:#3A414D; margin-bottom:4px; }
+  .pane-note li:last-child{ margin-bottom:0; }
+  .pane-note ul{ margin:0; padding-left:17px; }
+  .pane.before .pane-note li::marker{ color:#E5605A; }
+  .pane.after  .pane-note li::marker{ color:#12A05F; }
+
+  /* ── 폰 프레임 ── */
+  .phone{
+    width:330px; background:#fff; border:1px solid #DCE1E9; border-radius:24px;
+    overflow:hidden; box-shadow:0 6px 22px rgba(23,43,77,.09);
+    display:flex; flex-direction:column; position:relative;
+  }
+  .ph-status{ height:24px; display:flex; align-items:center; justify-content:space-between; padding:0 14px; font-size:.58rem; font-weight:700; color:#98A0AC; }
+  .ph-top{ padding:10px 15px 9px; border-bottom:1px solid #F1F3F7; }
+  .ph-top b{ font-size:.9rem; letter-spacing:-.02em; }
+  .ph-top .sub{ font-size:.66rem; color:#98A0AC; margin-top:1px; }
+  .ph-scroll{ padding:11px 12px 13px; background:#F7F9FC; }
+  .ph-tabbar{ display:flex; border-top:1px solid #EFEFF3; background:#fff; padding:6px 0 8px; margin-top:auto; }
+  .ph-tabbar div{ flex:1; text-align:center; font-size:.58rem; font-weight:700; color:#A6ADB8; position:relative; }
+  .ph-tabbar div .ic{ display:block; font-size:.9rem; margin-bottom:2px; filter:grayscale(1) opacity(.55); }
+  .ph-tabbar div.on{ color:#3182F6; } .ph-tabbar div.on .ic{ filter:none; }
+  .ph-tabbar .nbadge{ position:absolute; top:-2px; right:22%; min-width:15px; height:15px; padding:0 4px; background:#EF4444; color:#fff; font-size:.55rem; font-weight:800; line-height:15px; border-radius:8px; box-sizing:border-box; }
+
+  /* ── 서브탭 ── */
+  .subtabs{ display:flex; background:#fff; border:1px solid #E7EBF1; border-radius:10px; padding:3px; margin-bottom:9px; }
+  .subtabs b{ flex:1; text-align:center; padding:7px; border-radius:8px; font-size:.73rem; font-weight:700; color:#8A929E; }
+  .subtabs b.on{ background:#3182F6; color:#fff; }
+  .subtabs .cnt{ font-size:.59rem; font-weight:800; background:#EEF2F7; color:#5B6472; border-radius:9px; padding:1px 6px; margin-left:5px; }
+  .subtabs b.on .cnt{ background:rgba(255,255,255,.3); color:#fff; }
+
+  /* ── 금액 요약 카드 ── */
+  .sumcard{ background:#fff; border:1px solid #D8E6FA; border-radius:14px; padding:12px 13px; margin-bottom:10px; box-shadow:0 1px 5px rgba(49,130,246,.07); }
+  .sumcard.done{ border-color:#CDEBD9; box-shadow:0 1px 5px rgba(18,160,95,.08); }
+  .sumcard .h{ display:flex; align-items:center; justify-content:space-between; margin-bottom:8px; }
+  .sumcard .h .t{ font-size:.8rem; font-weight:800; }
+  .sumcard .h .cnt{ font-size:.61rem; font-weight:700; color:#3182F6; background:#E8F1FE; padding:3px 9px; border-radius:999px; }
+  .sumcard.done .h .cnt{ color:#0A7040; background:#E4F7EC; }
+  .sumrow{ display:flex; align-items:center; justify-content:space-between; padding:3px 0; font-size:.76rem; }
+  .sumrow .k{ color:#5B6472; font-weight:600; }
+  .sumrow .k small{ color:#98A0AC; font-weight:500; font-size:.65rem; }
+  .sumrow .v{ font-weight:700; }
+  .sumdiv{ height:1px; background:#EEF1F7; margin:6px 0; }
+  .sumtot{ display:flex; align-items:baseline; justify-content:space-between; }
+  .sumtot .k{ font-size:.79rem; font-weight:800; }
+  .sumtot .v{ font-size:1.18rem; font-weight:800; color:#1B64DA; letter-spacing:-.01em; }
+  .sumcard.done .sumtot .v{ color:#0A7040; }
+  .sumnote{ font-size:.6rem; color:#98A0AC; margin-top:6px; line-height:1.5; }
+
+  /* ── 리뷰내역 카드 (3줄 + 썸네일) ── */
+  .rcard{ display:flex; align-items:center; gap:9px; padding:11px 12px; background:#fff; border:1px solid #E7EBF1; border-radius:14px; margin-bottom:8px; }
+  .cthumb{
+    width:46px; height:46px; border-radius:11px; flex:none; display:grid; place-items:center;
+    font-size:1.15rem; background:linear-gradient(135deg,#EEF2FF,#E0E7FF); border:1px solid #E5E7EB; overflow:hidden;
+  }
+  .cthumb.oy{ background:linear-gradient(135deg,#E6F6EC,#D6F0E1); }
+  .cthumb.cp{ background:linear-gradient(135deg,#FDECEA,#FBDBD6); }
+  .rbody{ flex:1; min-width:0; }
+  .c-meta{ font-size:.68rem; font-weight:600; color:#98A0AC; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+  .c-meta .c-who{ color:#5B6472; font-weight:800; }
+  .c-meta .c-tail{ color:#B0B7C2; font-weight:600; }
+  .c-name{ font-size:.81rem; font-weight:700; color:#1B1F27; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; margin:2px 0 6px; }
+  .fee-line{ display:flex; align-items:center; gap:6px; }
+  .fee{ font-size:.62rem; font-weight:800; padding:3px 8px; border-radius:7px; white-space:nowrap; flex:none; }
+  .fee.prod{ background:#EEF2FF; color:#3730A3; }
+  .fee.rev{ background:#D1FAE5; color:#065F46; }
+  .rright{ display:flex; flex-direction:column; align-items:flex-end; gap:4px; flex:none; }
+  .rrow{ display:flex; align-items:center; gap:5px; }
+  .bdg{ font-size:.57rem; font-weight:800; padding:3px 7px; border-radius:6px; }
+  .bdg.wait{ background:#FEF3C7; color:#92400E; }
+  .bdg.done{ background:#D1FAE5; color:#065F46; }
+  .bdg.paid{ background:#E0E7FF; color:#3730A3; }
+  .chev{ color:#C4CAD4; font-size:.72rem; }
+
+  /* 구(舊) 완료 카드 */
+  .oldcard{ background:#fff; border:1px solid #E7EBF1; border-radius:14px; margin-bottom:8px; overflow:hidden; }
+  .oldmain{ display:flex; align-items:center; gap:9px; padding:11px 12px; }
+  .oldav{ width:34px; height:34px; border-radius:50%; flex:none; display:grid; place-items:center; background:linear-gradient(135deg,#DCFCE7,#E9FBF0); color:#12A05F; font-size:.8rem; }
+  .oldname{ font-size:.79rem; font-weight:700; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+  .oldsub{ font-size:.67rem; color:#98A0AC; margin-top:2px; }
+  .oldfoot{ border-top:1px solid #F0F2F6; padding:10px; text-align:center; font-size:.72rem; font-weight:800; color:#1B64DA; }
+
+  /* ── 하단 팝업(참여상품 정보 시트) ── */
+  .ph-dim{ position:absolute; inset:0; background:rgba(15,23,42,.5); display:flex; align-items:flex-end; justify-content:center; border-radius:24px; overflow:hidden; }
+  .sheet{ width:100%; background:#fff; border-radius:18px 18px 0 0; padding:8px 15px 16px; max-height:88%; overflow:hidden; }
+  .shandle{ width:36px; height:4px; border-radius:4px; background:#E6E6EC; margin:4px auto 12px; }
+  .stitle{ font-size:.87rem; font-weight:800; line-height:1.4; }
+  .schip{ font-size:.57rem; font-weight:800; border-radius:8px; padding:2px 7px; margin-left:5px; vertical-align:middle; }
+  .schip.w{ background:#FEF3C7; color:#B45309; } .schip.d{ background:#D1FAE5; color:#0CA678; }
+  .ssub{ font-size:.68rem; color:#9CA3AF; margin-top:3px; }
+  .sdetail{ border:1px solid #EEF1F7; border-radius:11px; margin-top:10px; padding:8px 10px; font-size:.7rem; color:#374151; line-height:1.6; }
+  .sdetail .k{ color:#9CA3AF; display:inline-block; width:38px; }
+  .sbtn{ display:block; width:100%; text-align:center; border:none; border-radius:12px; padding:11px; font-size:.8rem; font-weight:800; margin-top:7px; }
+  .sbtn.dark{ background:#111827; color:#fff; }
+  .sbtn.kakao{ background:#FEE500; color:#191919; }
+  .sbtn.blue{ background:linear-gradient(135deg,#3182F6,#1B64DA); color:#fff; }
+  .sbtn.line{ background:#fff; color:#1B64DA; border:1.5px solid #CFE0FD; }
+  .sbtn.cs{ background:#EEF3FB; color:#1B4F9C; border:1.5px solid #CFE0FD; }
+  .sbtn .nbdg{ display:inline-block; min-width:15px; height:15px; padding:0 4px; background:#EF4444; color:#fff; font-size:.55rem; font-weight:800; line-height:15px; border-radius:8px; margin-left:5px; vertical-align:middle; box-sizing:border-box; }
+  .newmark{ position:relative; }
+  .newmark::after{
+    content:'NEW'; position:absolute; top:-8px; right:-6px; background:#EF4444; color:#fff;
+    font-size:.5rem; font-weight:800; padding:1px 5px; border-radius:6px; letter-spacing:.03em;
+  }
+
+  /* ── 문의 팝업(비포) ── */
+  .sheet-full{ width:100%; background:#fff; border-radius:16px 16px 0 0; height:80%; display:flex; flex-direction:column; }
+  .sheet-head{ padding:11px 13px; border-bottom:1px solid #EEF2F7; display:flex; align-items:center; gap:7px; font-weight:800; font-size:.87rem; }
+  .sheet-x{ margin-left:auto; width:23px; height:23px; border-radius:7px; background:#F3F4F6; color:#6B7280; display:grid; place-items:center; font-size:.72rem; }
+  .sheet-desc{ padding:7px 13px; font-size:.7rem; color:#6B7280; background:#F9FAFB; border-bottom:1px solid #F3F4F6; }
+  .pick{ padding:10px 13px; border-bottom:1px solid #F3F4F6; display:flex; align-items:center; gap:9px; }
+  .pick .ic{ width:31px; height:31px; border-radius:9px; background:#E0EDFF; color:#3182F6; display:grid; place-items:center; font-size:.78rem; flex:none; }
+  .pick .ic.gen{ background:#EDE9FE; color:#7C3AED; }
+  .pick .t{ flex:1; min-width:0; }
+  .pick .t b{ display:block; font-size:.78rem; font-weight:700; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+  .pick .t span{ font-size:.64rem; color:#9CA3AF; }
+
+  /* ── 내 문의함 ── */
+  .inq{ background:#fff; border:1px solid #E7EBF1; border-radius:13px; padding:10px 11px; margin-bottom:8px; display:flex; gap:9px; align-items:flex-start; }
+  .inq .ic{ width:33px; height:33px; border-radius:10px; background:#E0EDFF; color:#3182F6; display:grid; place-items:center; font-size:.78rem; flex:none; }
+  .inq .ic.gen{ background:#EDE9FE; color:#7C3AED; }
+  .inq .t{ flex:1; min-width:0; }
+  .inq .t .r1{ display:flex; align-items:baseline; gap:6px; }
+  .inq .t b{ font-size:.78rem; font-weight:700; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+  .inq .t .tm{ font-size:.61rem; color:#B0B7C2; margin-left:auto; flex:none; }
+  .inq .t .msg{ font-size:.69rem; color:#8A929E; margin-top:3px; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+  .inq .nbdg{ min-width:17px; height:17px; padding:0 5px; background:#EF4444; color:#fff; font-size:.6rem; font-weight:800; line-height:17px; text-align:center; border-radius:9px; flex:none; box-sizing:border-box; }
+  .inq .closed{ font-size:.57rem; font-weight:800; color:#8A929E; background:#F1F3F7; border-radius:6px; padding:2px 6px; flex:none; }
+  .sec-title{ font-size:.7rem; font-weight:800; color:#8A929E; margin:2px 2px 7px; }
+  .empty{ text-align:center; padding:30px 16px; color:#98A0AC; }
+  .empty .big{ font-size:1.4rem; opacity:.45; display:block; margin-bottom:8px; }
+  .empty p{ margin:0 0 4px; font-size:.8rem; font-weight:700; color:#5B6472; }
+  .empty small{ font-size:.68rem; color:#A6ADB8; }
+  .empty .go{ display:inline-block; margin-top:13px; background:#3182F6; color:#fff; font-size:.74rem; font-weight:800; padding:9px 15px; border-radius:10px; }
+
+  .flow{ display:flex; align-items:center; gap:6px; flex-wrap:wrap; padding:13px 16px; }
+  .flow span{ font-size:.73rem; font-weight:700; background:#fff; border:1px solid #E4E8EF; border-radius:9px; padding:6px 10px; }
+  .flow .arw{ color:#B0B7C2; font-weight:800; border:none; background:none; padding:0; }
+  .flow .hi{ background:#EEF3FB; border-color:#CFE0FD; color:#1B4F9C; }
+
+  table{ width:100%; border-collapse:collapse; background:#fff; border:1px solid #E4E8EF; border-radius:14px; overflow:hidden; }
+  th,td{ padding:11px 14px; text-align:left; font-size:.83rem; border-bottom:1px solid #EEF1F6; vertical-align:top; line-height:1.55; }
+  th{ background:#F7F9FC; font-size:.73rem; font-weight:800; color:#5B6472; }
+  tr:last-child td{ border-bottom:none; }
+  td.k{ font-weight:700; width:160px; }
+  .tag-b{ display:inline-block; font-size:.67rem; font-weight:800; color:#B42318; background:#FEF2F2; border-radius:6px; padding:2px 7px; margin-right:5px; }
+  .tag-a{ display:inline-block; font-size:.67rem; font-weight:800; color:#0A7040; background:#ECFDF3; border-radius:6px; padding:2px 7px; margin-right:5px; }
+
+  .callout{ background:#FFF9EC; border:1px solid #FBE6BC; border-radius:14px; padding:16px 18px; }
+  .callout b.h{ display:block; font-size:.85rem; margin-bottom:7px; color:#8A5A08; }
+  .callout li{ font-size:.83rem; line-height:1.75; color:#4A3D24; }
+  .callout ul{ margin:0; padding-left:18px; }
+
+  @media (max-width:980px){
+    .compare{ grid-template-columns:1fr; }
+    .asks{ grid-template-columns:1fr 1fr; }
+    .phone{ width:100%; max-width:330px; }
+  }
+</style>
+
+<div class="wrap">
+
+  <div class="doc-head">
+    <h1>1:1문의 창구 · 리뷰내역 카드 개선 — 비포 / 애프터</h1>
+    <p>
+      ① 1:1문의 탭은 <b>내가 문의한 목록만</b> 화면 안에 표시 (팝업 없음)<br>
+      ② 문의 시작은 <b>리뷰내역 카드를 눌렀을 때 올라오는 하단 팝업</b> 안의 버튼으로<br>
+      ③ 제출완료 카드를 <b>참여중 카드와 똑같은 3줄 + 썸네일</b>로 통일<br>
+      ④ 제출완료 탭으로 바꾸면 상단 금액 블록이 <b>받을 예정 금액 → 누적 금액</b>으로 전환
+    </p>
+    <div class="doc-meta">
+      <span>리뷰어 화면</span><span class="v2">구현 반영 완료</span>
+    </div>
+  </div>
+
+  <div class="asks">
+    <div class="ask"><b>요청 ①</b><p>1:1문의 탭 = 팝업 없이 <b>문의한 목록만</b> 화면 안에.</p></div>
+    <div class="ask"><b>요청 ②</b><p>1:1문의 버튼은 <b>카드 클릭 시 올라오는 하단 팝업</b> 안에 배치 (참여중·제출완료 공통).</p></div>
+    <div class="ask"><b>요청 ③</b><p>제출완료 카드 = 체크 아이콘 대신 <b>상품 썸네일</b> + 참여중과 같은 3줄 구성.</p></div>
+    <div class="ask"><b>요청 ④</b><p>제출완료 탭 전환 시 상단 블록을 <b>누적 금액</b>으로 전환.</p></div>
+  </div>
+
+  <!-- ════════ ① 1:1문의 탭 ════════ -->
+  <section>
+    <div class="sec-head">
+      <div class="sec-no">1</div>
+      <div>
+        <h2>1:1문의 탭 — 팝업 제거, 문의한 목록만</h2>
+        <p>지금은 참여한 작업이 전부 팝업으로 올라옵니다. 앞으로는 팝업 없이 <b>내가 문의한 대화방만</b> 화면 안에 보입니다.</p>
+      </div>
+    </div>
+
+    <div class="compare">
+      <!-- BEFORE -->
+      <div class="pane before">
+        <div class="pane-head"><i class="tagdot"></i> 지금 (BEFORE)</div>
+        <div class="pane-body">
+          <div class="phone">
+            <div class="ph-status"><span>9:41</span><span>▮▮▮</span></div>
+            <div class="ph-top"><b>1:1 문의</b><div class="sub">아이에이리뷰</div></div>
+            <div class="ph-scroll" style="min-height:330px"></div>
+            <div class="ph-tabbar">
+              <div><span class="ic">🏠</span>홈</div>
+              <div class="on"><span class="ic">🎧</span>1:1문의<span class="nbadge">3</span></div>
+              <div><span class="ic">🪪</span>내정보/현황</div>
+              <div><span class="ic">📘</span>가이드</div>
+            </div>
+            <div class="ph-dim">
+              <div class="sheet-full">
+                <div class="sheet-head">🎧 1:1 문의하기 <span class="sheet-x">✕</span></div>
+                <div class="sheet-desc">진행하신 탭을 선택해 문의하세요</div>
+                <div style="flex:1;overflow:hidden">
+                  <div class="pick"><div class="ic">📦</div><div class="t"><b>0727(올리브영)블랑카우 바디로션</b><span>새 문의</span></div><span class="chev">›</span></div>
+                  <div class="pick"><div class="ic">📦</div><div class="t"><b>0724(쿠팡)콰이어트 수면안대</b><span>이전 문의 있음</span></div><span class="nbdg" style="min-width:17px;height:17px;padding:0 5px;background:#EF4444;color:#fff;font-size:.6rem;font-weight:800;line-height:17px;text-align:center;border-radius:9px">2</span><span class="chev">›</span></div>
+                  <div class="pick"><div class="ic">📦</div><div class="t"><b>0721(올리브영)어나더 비타민C 앰플</b><span>새 문의</span></div><span class="chev">›</span></div>
+                  <div class="pick"><div class="ic">📦</div><div class="t"><b>0718(쿠팡)데일리 클렌징폼 200ml</b><span>새 문의</span></div><span class="chev">›</span></div>
+                  <div class="pick"><div class="ic gen">💬</div><div class="t"><b>일반 문의</b><span>새 문의</span></div><span class="chev">›</span></div>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+        <div class="pane-note">
+          <ul>
+            <li>참여한 작업이 <b>문의 여부와 상관없이 전부</b> 올라와, 어디까지가 “내가 문의한 건”인지 알 수 없습니다.</li>
+            <li>팝업이 화면을 덮어 다른 정보를 함께 볼 수 없습니다.</li>
+            <li>답장이 온 방을 찾으려면 목록을 끝까지 훑어야 합니다.</li>
+          </ul>
+        </div>
+      </div>
+
+      <!-- AFTER -->
+      <div class="pane after">
+        <div class="pane-head"><i class="tagdot"></i> 변경안 (AFTER)</div>
+        <div class="pane-body">
+          <div class="phone">
+            <div class="ph-status"><span>9:41</span><span>▮▮▮</span></div>
+            <div class="ph-top"><b>내 문의함</b><div class="sub">문의한 내역이 여기에 모입니다</div></div>
+            <div class="ph-scroll" style="min-height:330px">
+              <div class="sec-title">진행 중인 문의</div>
+              <div class="inq">
+                <div class="ic">📦</div>
+                <div class="t">
+                  <div class="r1"><b>0724(쿠팡)콰이어트 수면안대</b><span class="tm">오후 2:31</span></div>
+                  <div class="msg">주문번호 확인해드렸습니다. 배송은…</div>
+                </div>
+                <span class="nbdg">2</span>
+              </div>
+              <div class="inq">
+                <div class="ic">📦</div>
+                <div class="t">
+                  <div class="r1"><b>0727(올리브영)블랑카우 바디로션</b><span class="tm">어제</span></div>
+                  <div class="msg">사진 첨부드립니다 📷</div>
+                </div>
+                <span class="nbdg">1</span>
+              </div>
+              <div class="sec-title" style="margin-top:13px">종료된 문의</div>
+              <div class="inq">
+                <div class="ic gen">💬</div>
+                <div class="t">
+                  <div class="r1"><b>일반 문의</b><span class="tm">7/22</span></div>
+                  <div class="msg">확인 감사합니다!</div>
+                </div>
+                <span class="closed">종료</span>
+              </div>
+              <div style="text-align:center;font-size:.66rem;color:#A6ADB8;padding:10px 4px 2px">
+                새 문의는 <b style="color:#5B6472">내정보/현황 → 리뷰 내역</b>에서 시작해요
+              </div>
+            </div>
+            <div class="ph-tabbar">
+              <div><span class="ic">🏠</span>홈</div>
+              <div class="on"><span class="ic">🎧</span>1:1문의<span class="nbadge">3</span></div>
+              <div><span class="ic">🪪</span>내정보/현황</div>
+              <div><span class="ic">📘</span>가이드</div>
+            </div>
+          </div>
+        </div>
+        <div class="pane-note">
+          <ul>
+            <li>팝업이 사라지고 <b>화면 안에 바로</b> 목록이 뜹니다.</li>
+            <li><b>실제로 문의한 건만</b> 보이고, 마지막 메시지·시각·안 읽은 개수가 한눈에.</li>
+            <li>진행 중 / 종료된 문의로 나눠 답장 온 방을 바로 찾습니다.</li>
+            <li>목록을 눌러 대화창으로 들어가는 동작은 지금과 같습니다.</li>
+          </ul>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ════════ ② 문의 시작 = 카드 팝업 안 ════════ -->
+  <section>
+    <div class="sec-head">
+      <div class="sec-no">2</div>
+      <div>
+        <h2>문의 시작 — 카드를 누르면 올라오는 하단 팝업 안에</h2>
+        <p>카드 겉면은 그대로 두고, <b>지금도 카드를 누르면 뜨는 참여상품 정보 팝업</b> 안에 [1:1 문의하기] 버튼을 추가합니다. 참여중·제출완료 공통.</p>
+      </div>
+    </div>
+
+    <div class="compare">
+      <!-- BEFORE -->
+      <div class="pane before">
+        <div class="pane-head"><i class="tagdot"></i> 지금 (BEFORE) — 참여중 카드 팝업</div>
+        <div class="flow">
+          <span>1:1문의 탭</span><span class="arw">→</span><span>팝업</span><span class="arw">→</span><span>작업 찾기</span><span class="arw">→</span><span>대화창</span>
+        </div>
+        <div class="pane-body">
+          <div class="phone">
+            <div class="ph-status"><span>9:41</span><span>▮▮▮</span></div>
+            <div class="ph-top"><b>내정보/현황</b><div class="sub">리뷰 내역</div></div>
+            <div class="ph-scroll" style="min-height:340px"></div>
+            <div class="ph-tabbar">
+              <div><span class="ic">🏠</span>홈</div><div><span class="ic">🎧</span>1:1문의<span class="nbadge">3</span></div>
+              <div class="on"><span class="ic">🪪</span>내정보/현황</div><div><span class="ic">📘</span>가이드</div>
+            </div>
+            <div class="ph-dim">
+              <div class="sheet">
+                <div class="shandle"></div>
+                <div class="stitle">0727(올리브영)블랑카우 바디로션 100건<span class="schip w">미제출</span></div>
+                <div class="ssub">김리아</div>
+                <div class="sdetail">
+                  <div><span class="k">상품</span>블랑카우 바디로션 100ml · 결제금액 20,300원</div>
+                  <div style="margin-top:7px;padding-top:7px;border-top:1px dashed #E5E7EB"><b>📝 리뷰 가이드</b><br>사용 3일차 후기 · 사진 2장 이상</div>
+                </div>
+                <div class="sbtn dark">🛒 상품 바로가기</div>
+                <div class="sbtn kakao">💬 이 캠페인의 카톡 팀채팅방 입장</div>
+                <div class="sbtn blue">📤 리뷰제출하기</div>
+              </div>
+            </div>
+          </div>
+        </div>
+        <div class="pane-note">
+          <ul>
+            <li>이 팝업에서 문의를 남길 방법이 <b>없습니다</b>.</li>
+            <li>문의하려면 화면을 나가 1:1문의 탭에서 같은 작업을 이름으로 다시 찾아야 합니다.</li>
+          </ul>
+        </div>
+      </div>
+
+      <!-- AFTER -->
+      <div class="pane after">
+        <div class="pane-head"><i class="tagdot"></i> 변경안 (AFTER) — 팝업 안에 [1:1 문의하기]</div>
+        <div class="flow">
+          <span>리뷰 내역 카드 탭</span><span class="arw">→</span><span class="hi">팝업의 [1:1 문의하기]</span><span class="arw">→</span><span>대화창</span>
+        </div>
+        <div class="pane-body">
+          <div class="phone">
+            <div class="ph-status"><span>9:41</span><span>▮▮▮</span></div>
+            <div class="ph-top"><b>내정보/현황</b><div class="sub">리뷰 내역</div></div>
+            <div class="ph-scroll" style="min-height:340px"></div>
+            <div class="ph-tabbar">
+              <div><span class="ic">🏠</span>홈</div><div><span class="ic">🎧</span>1:1문의<span class="nbadge">3</span></div>
+              <div class="on"><span class="ic">🪪</span>내정보/현황</div><div><span class="ic">📘</span>가이드</div>
+            </div>
+            <div class="ph-dim">
+              <div class="sheet">
+                <div class="shandle"></div>
+                <div class="stitle">0727(올리브영)블랑카우 바디로션 100건<span class="schip w">미제출</span></div>
+                <div class="ssub">김리아</div>
+                <div class="sdetail">
+                  <div><span class="k">상품</span>블랑카우 바디로션 100ml · 결제금액 20,300원</div>
+                  <div style="margin-top:7px;padding-top:7px;border-top:1px dashed #E5E7EB"><b>📝 리뷰 가이드</b><br>사용 3일차 후기 · 사진 2장 이상</div>
+                </div>
+                <div class="sbtn dark">🛒 상품 바로가기</div>
+                <div class="sbtn kakao">💬 이 캠페인의 카톡 팀채팅방 입장</div>
+                <div class="sbtn blue">📤 리뷰제출하기</div>
+                <div class="sbtn cs newmark">🎧 1:1 문의하기 <span class="nbdg">1</span></div>
+              </div>
+            </div>
+          </div>
+        </div>
+        <div class="pane-note">
+          <ul>
+            <li>보던 <b>그 작업의 상품 정보·가이드를 그대로 두고</b> 바로 문의를 남깁니다.</li>
+            <li>이미 주고받은 문의가 있으면 <b>같은 방으로 이어지고</b>, 답장이 와 있으면 버튼에 숫자가 붙습니다.</li>
+            <li>카드 겉면(목록)은 <b>지금 모양 그대로</b> — 버튼이 늘지 않아 목록이 길어지지 않습니다.</li>
+            <li>제출완료 팝업도 같은 자리에 같은 버튼이 들어갑니다(아래 ③ 참고).</li>
+          </ul>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ════════ ③ 제출완료 카드 통일 ════════ -->
+  <section>
+    <div class="sec-head">
+      <div class="sec-no">3</div>
+      <div>
+        <h2>제출완료 카드 = 참여중 카드 (썸네일 + 3줄)</h2>
+        <p>체크 아이콘 대신 <b>상품 썸네일</b>, 그리고 참여중과 똑같이 <b>날짜·이름 / 작업명 / 상품비·리뷰비</b> 3줄로 맞춥니다.</p>
+      </div>
+    </div>
+
+    <div class="compare">
+      <!-- BEFORE -->
+      <div class="pane before">
+        <div class="pane-head"><i class="tagdot"></i> 지금 (BEFORE) — 두 탭 카드가 다름</div>
+        <div class="pane-body" style="flex-direction:column;gap:13px;align-items:center">
+          <div class="phone">
+            <div class="ph-top"><b>참여중 탭</b></div>
+            <div class="ph-scroll">
+              <div class="rcard">
+                <div class="cthumb oy">🧴</div>
+                <div class="rbody">
+                  <div class="c-meta">7/30(목) <span class="c-who">김리아</span></div>
+                  <div class="c-name">0727(올리브영)블랑카우 바디로션 100건</div>
+                  <div class="fee-line"><span class="fee prod">상품비 20,300</span><span class="fee rev">리뷰비 1,000</span></div>
+                </div>
+                <div class="rright"><div class="rrow"><span class="bdg wait">제출대기</span><span class="chev">›</span></div></div>
+              </div>
+            </div>
+          </div>
+          <div class="phone">
+            <div class="ph-top"><b>제출완료 탭</b></div>
+            <div class="ph-scroll">
+              <div class="oldcard">
+                <div class="oldmain">
+                  <div class="oldav">✓</div>
+                  <div style="flex:1;min-width:0">
+                    <div class="oldname">7/20 0721(올리브영)어나더 비타민C 앰플 옵션:2개입</div>
+                    <div class="oldsub">김리아 · 제출 2026.07.22</div>
+                  </div>
+                  <div style="display:flex;gap:4px;flex:none"><span class="bdg paid">입금완료</span><span class="bdg done">제출완료</span></div>
+                </div>
+                <div class="oldfoot">🖼 리뷰 이미지 확인 · 수정요청</div>
+              </div>
+            </div>
+          </div>
+        </div>
+        <div class="pane-note">
+          <ul>
+            <li>왼쪽이 <b>초록 체크 아이콘</b>이라 어떤 상품인지 알 수 없습니다.</li>
+            <li>2줄 구성 + 한 줄에 몰아쓴 제목이라 참여중 카드와 인상이 다릅니다.</li>
+            <li>아래 통짜 버튼 때문에 카드 높이도 다릅니다.</li>
+            <li>상품비·리뷰비가 없어 얼마짜리 건이었는지 안 보입니다.</li>
+          </ul>
+        </div>
+      </div>
+
+      <!-- AFTER -->
+      <div class="pane after">
+        <div class="pane-head"><i class="tagdot"></i> 변경안 (AFTER) — 두 탭 카드 동일</div>
+        <div class="pane-body" style="flex-direction:column;gap:13px;align-items:center">
+          <div class="phone">
+            <div class="ph-top"><b>참여중 탭</b></div>
+            <div class="ph-scroll">
+              <div class="rcard">
+                <div class="cthumb oy">🧴</div>
+                <div class="rbody">
+                  <div class="c-meta">7/30(목) <span class="c-who">김리아</span></div>
+                  <div class="c-name">0727(올리브영)블랑카우 바디로션 100건</div>
+                  <div class="fee-line"><span class="fee prod">상품비 20,300</span><span class="fee rev">리뷰비 1,000</span></div>
+                </div>
+                <div class="rright"><div class="rrow"><span class="bdg wait">제출대기</span><span class="chev">›</span></div></div>
+              </div>
+            </div>
+          </div>
+          <div class="phone">
+            <div class="ph-top"><b>제출완료 탭</b></div>
+            <div class="ph-scroll">
+              <div class="rcard">
+                <div class="cthumb oy">💊</div>
+                <div class="rbody">
+                  <div class="c-meta">7/20(일) <span class="c-who">김리아</span> <span class="c-tail">· 제출 07.22</span></div>
+                  <div class="c-name">0721(올리브영)어나더 비타민C 앰플 100건</div>
+                  <div class="fee-line"><span class="fee prod">상품비 18,900</span><span class="fee rev">리뷰비 1,000</span></div>
+                </div>
+                <div class="rright">
+                  <div class="rrow"><span class="bdg done">제출완료</span><span class="chev">›</span></div>
+                  <span class="bdg paid">입금완료</span>
+                </div>
+              </div>
+              <div class="rcard">
+                <div class="cthumb cp">🧼</div>
+                <div class="rbody">
+                  <div class="c-meta">7/18(금) <span class="c-who">김리아</span> <span class="c-tail">· 제출 07.19</span></div>
+                  <div class="c-name">0718(쿠팡)데일리 클렌징폼 200ml 80건</div>
+                  <div class="fee-line"><span class="fee prod">상품비 12,400</span><span class="fee rev">리뷰비 1,000</span></div>
+                </div>
+                <div class="rright"><div class="rrow"><span class="bdg done">제출완료</span><span class="chev">›</span></div></div>
+              </div>
+            </div>
+          </div>
+        </div>
+        <div class="pane-note">
+          <ul>
+            <li>왼쪽이 <b>상품 썸네일</b>(참여중과 동일 규격)로 바뀌어 무슨 상품인지 바로 보입니다.</li>
+            <li><b>날짜·이름 / 작업명 / 상품비·리뷰비</b> 3줄 — 참여중과 완전히 같은 구성.</li>
+            <li>제출일은 첫 줄 이름 뒤에 옅게(<b>· 제출 07.22</b>) 붙여 줄 수를 늘리지 않았습니다.</li>
+            <li><b>[리뷰 이미지 확인·수정요청]도 팝업 안으로</b> 옮겨 카드 겉면을 참여중과 완전히 같게 했습니다.</li>
+            <li>입금완료는 배지 아래줄로 내려 제목이 덜 잘립니다.</li>
+          </ul>
+        </div>
+      </div>
+    </div>
+
+    <div style="margin-top:14px" class="compare">
+      <div class="pane before"><div class="pane-head"><i class="tagdot"></i> 제출완료 카드 팝업 (지금)</div>
+        <div class="pane-body" style="padding:14px">
+          <div class="phone" style="width:300px">
+            <div class="sheet" style="border-radius:18px">
+              <div class="shandle"></div>
+              <div class="stitle">0721(올리브영)어나더 비타민C 앰플<span class="schip d">제출완료</span></div>
+              <div class="ssub">김리아</div>
+              <div class="sdetail"><div><span class="k">상품</span>어나더 비타민C 앰플 30ml · 결제금액 18,900원</div></div>
+              <div class="sbtn dark">🛒 상품 바로가기</div>
+              <div class="sbtn kakao">💬 이 캠페인의 카톡 팀채팅방 입장</div>
+            </div>
+          </div>
+        </div>
+        <div class="pane-note"><ul><li>이미지 확인·수정요청은 <b>카드 아래 버튼</b>에 따로 있습니다(카드 모양이 달라지는 원인).</li></ul></div>
+      </div>
+      <div class="pane after"><div class="pane-head"><i class="tagdot"></i> 제출완료 카드 팝업 (변경안)</div>
+        <div class="pane-body" style="padding:14px">
+          <div class="phone" style="width:300px">
+            <div class="sheet" style="border-radius:18px">
+              <div class="shandle"></div>
+              <div class="stitle">0721(올리브영)어나더 비타민C 앰플<span class="schip d">제출완료</span></div>
+              <div class="ssub">김리아 · 제출 2026.07.22</div>
+              <div class="sdetail"><div><span class="k">상품</span>어나더 비타민C 앰플 30ml · 결제금액 18,900원</div></div>
+              <div class="sbtn dark">🛒 상품 바로가기</div>
+              <div class="sbtn kakao">💬 이 캠페인의 카톡 팀채팅방 입장</div>
+              <div class="sbtn line newmark">🖼 리뷰 이미지 확인 · 수정요청</div>
+              <div class="sbtn cs newmark">🎧 1:1 문의하기</div>
+            </div>
+          </div>
+        </div>
+        <div class="pane-note"><ul><li>완료 건의 액션 2개가 모두 팝업 안으로 — <b>카드 겉면은 참여중과 동일</b>.</li></ul></div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ════════ ④ 금액 블록 전환 ════════ -->
+  <section>
+    <div class="sec-head">
+      <div class="sec-no">4</div>
+      <div>
+        <h2>탭 전환 시 금액 블록 — 받을 예정 금액 ↔ 누적 금액</h2>
+        <p>지금은 제출완료 탭에서 금액 블록이 <b>사라집니다</b>. 앞으로는 같은 자리에서 <b>누적 금액</b>으로 바뀝니다.</p>
+      </div>
+    </div>
+
+    <div class="compare">
+      <!-- BEFORE -->
+      <div class="pane before">
+        <div class="pane-head"><i class="tagdot"></i> 지금 (BEFORE)</div>
+        <div class="pane-body" style="flex-direction:column;gap:13px;align-items:center">
+          <div class="phone">
+            <div class="ph-top"><b>참여중 탭</b></div>
+            <div class="ph-scroll">
+              <div class="sumcard">
+                <div class="h"><div class="t">💰 받을 예정 금액</div><div class="cnt">참여중 2건</div></div>
+                <div class="sumrow"><span class="k">상품비용 <small>(구매 후 돌려받을 금액)</small></span><span class="v">32,700원</span></div>
+                <div class="sumrow"><span class="k">리뷰비 <small>(적립)</small></span><span class="v">2,000원</span></div>
+                <div class="sumdiv"></div>
+                <div class="sumtot"><span class="k">받을 금액 합계</span><span class="v">34,700원</span></div>
+              </div>
+              <div class="subtabs"><b class="on">참여중 <span class="cnt">2</span></b><b>제출완료 <span class="cnt">12</span></b></div>
+            </div>
+          </div>
+          <div class="phone">
+            <div class="ph-top"><b>제출완료 탭</b></div>
+            <div class="ph-scroll">
+              <div style="border:1.5px dashed #E0C7C7;border-radius:12px;padding:20px 12px;text-align:center;color:#B98A8A;font-size:.74rem;font-weight:700;margin-bottom:9px;background:#FFF7F7">
+                금액 블록 없음 — 자리만 비어 있음
+              </div>
+              <div class="subtabs"><b>참여중 <span class="cnt">2</span></b><b class="on">제출완료 <span class="cnt">12</span></b></div>
+            </div>
+          </div>
+        </div>
+        <div class="pane-note">
+          <ul>
+            <li>제출완료 탭에서는 금액 블록이 통째로 사라져 <b>지금까지 얼마를 벌었는지</b> 알 수 없습니다.</li>
+            <li>화면이 위로 튀어 탭을 오갈 때 흔들립니다.</li>
+          </ul>
+        </div>
+      </div>
+
+      <!-- AFTER -->
+      <div class="pane after">
+        <div class="pane-head"><i class="tagdot"></i> 변경안 (AFTER)</div>
+        <div class="pane-body" style="flex-direction:column;gap:13px;align-items:center">
+          <div class="phone">
+            <div class="ph-top"><b>참여중 탭</b></div>
+            <div class="ph-scroll">
+              <div class="sumcard">
+                <div class="h"><div class="t">💰 받을 예정 금액</div><div class="cnt">참여중 2건</div></div>
+                <div class="sumrow"><span class="k">상품비용 <small>(구매 후 돌려받을 금액)</small></span><span class="v">32,700원</span></div>
+                <div class="sumrow"><span class="k">리뷰비 <small>(적립)</small></span><span class="v">2,000원</span></div>
+                <div class="sumdiv"></div>
+                <div class="sumtot"><span class="k">받을 금액 합계</span><span class="v">34,700원</span></div>
+              </div>
+              <div class="subtabs"><b class="on">참여중 <span class="cnt">2</span></b><b>제출완료 <span class="cnt">12</span></b></div>
+            </div>
+          </div>
+          <div class="phone">
+            <div class="ph-top"><b>제출완료 탭</b></div>
+            <div class="ph-scroll">
+              <div class="sumcard done">
+                <div class="h"><div class="t">🏆 누적 금액</div><div class="cnt">입금완료 9건</div></div>
+                <div class="sumrow"><span class="k">상품비용 <small>(구매 후 돌려받은 금액)</small></span><span class="v">182,700원</span></div>
+                <div class="sumrow"><span class="k">리뷰비 <small>(적립)</small></span><span class="v">9,000원</span></div>
+                <div class="sumdiv"></div>
+                <div class="sumtot"><span class="k">누적 금액 합계</span><span class="v">191,700원</span></div>
+                <div class="sumnote">※ <b>입금완료된 건</b>의 결제금액 + 리뷰비 누적합계예요.<br>※ 아직 입금되지 않은 <b>3건</b>은 누적 합계에 포함되지 않았어요.</div>
+              </div>
+              <div class="subtabs"><b>참여중 <span class="cnt">2</span></b><b class="on">제출완료 <span class="cnt">12</span></b></div>
+            </div>
+          </div>
+        </div>
+        <div class="pane-note">
+          <ul>
+            <li>같은 자리·같은 모양에서 <b>제목과 숫자만</b> 바뀝니다(초록 계열로 구분).</li>
+            <li>“구매 후 돌려받<b>을</b>” → “돌려받<b>은</b>” 처럼 문구만 완료형으로.</li>
+            <li><b>입금완료된 건만</b> 합산하고, 빠진 <b>입금대기 건수</b>를 아래 줄에 고지합니다(조용한 누락 없음).</li>
+            <li>탭을 오가도 블록이 사라지지 않아 화면이 흔들리지 않습니다.</li>
+          </ul>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ════════ 요약 ════════ -->
+  <section>
+    <div class="sec-head"><div class="sec-no">✓</div><div><h2>바뀌는 것 / 그대로인 것</h2></div></div>
+    <table>
+      <tr><th style="width:160px">항목</th><th>지금</th><th>변경안</th></tr>
+      <tr>
+        <td class="k">1:1문의 탭</td>
+        <td><span class="tag-b">지금</span>참여한 작업 전체가 팝업으로 올라옴</td>
+        <td><span class="tag-a">변경</span>팝업 없이 <b>문의한 대화방 목록</b>만 화면 안에</td>
+      </tr>
+      <tr>
+        <td class="k">문의 시작 위치</td>
+        <td><span class="tag-b">지금</span>1:1문의 탭 → 팝업에서 작업 선택</td>
+        <td><span class="tag-a">변경</span>리뷰내역 <b>카드 → 하단 팝업의 [1:1 문의하기]</b></td>
+      </tr>
+      <tr>
+        <td class="k">카드 겉면</td>
+        <td><span class="tag-b">지금</span>참여중=썸네일 3줄 / 완료=체크 2줄+아래 버튼</td>
+        <td><span class="tag-a">변경</span>두 탭 <b>모두 썸네일 3줄</b>, 아래 버튼 없음</td>
+      </tr>
+      <tr>
+        <td class="k">이미지 확인·수정요청</td>
+        <td><span class="tag-b">지금</span>완료 카드 아래 통짜 버튼</td>
+        <td><span class="tag-a">변경</span>완료 카드 <b>팝업 안</b>으로 이동</td>
+      </tr>
+      <tr>
+        <td class="k">상단 금액 블록</td>
+        <td><span class="tag-b">지금</span>참여중만 표시, 완료 탭에선 사라짐</td>
+        <td><span class="tag-a">변경</span>완료 탭에선 <b>누적 금액</b>으로 전환</td>
+      </tr>
+      <tr>
+        <td class="k">안 읽은 표시</td>
+        <td><span class="tag-b">지금</span>탭 숫자 + 팝업 목록 줄별 숫자</td>
+        <td><span class="tag-a">변경</span>탭 숫자 + 문의함 줄별 숫자 + <b>팝업 버튼 숫자</b></td>
+      </tr>
+      <tr><td class="k">대화창 · 사진첨부</td><td colspan="2">그대로 (동작 변경 없음)</td></tr>
+      <tr><td class="k">일반 문의</td><td colspan="2">내 문의함 화면의 [일반 문의하기]로 유지</td></tr>
+      <tr><td class="k">관리자 화면</td><td colspan="2">그대로 (작업별 문의 목록 · 주문정보 · 관리자 메모 변경 없음)</td></tr>
+    </table>
+  </section>
+
+  <div class="callout">
+    <b class="h">확정된 기준 (구현 반영 완료)</b>
+    <ul>
+      <li><b>누적 금액 = 입금완료된 건만</b> 합산합니다. 아직 입금되지 않은 제출완료 건은 합계에서 빼고, 그 건수를 블록 아래 줄에 적어 둡니다.</li>
+      <li><b>입금완료 판정</b>은 제출완료 카드의 [입금완료] 배지와 같은 기준을 씁니다 — 두 곳이 서로 다른 숫자를 말하지 않습니다.</li>
+      <li><b>결제금액이 확인되지 않는 옛 건</b>은 참여중 카드와 같이 상품비 합계에서 빠지고, 그 건수도 아래 줄에 표시됩니다.</li>
+      <li><b>여러 건이 묶인 카드</b>(한 작업 2건 이상)의 [1:1 문의하기]는 그 작업 기준 한 방으로 열립니다. 완료 건의 [이미지 확인·수정요청]은 행 단위 작업이라 묶음 카드에서는 종전대로 줄별 버튼을 씁니다.</li>
+      <li><b>일반 문의</b>는 내 문의함 화면 오른쪽 위 [＋ 일반 문의] 버튼으로 남깁니다.</li>
+    </ul>
+  </div>
+
+</div>
