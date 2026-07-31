@@ -443,6 +443,63 @@ function _normPhone8(v) {
   return (v || '').toString().replace(/[^0-9]/g, '');
 }
 
+// ── 문의 첨부 이미지 URL 검증 ──
+//   화면에 <img src>로 나가므로 자유 문자열 금지 — 우리 서버의 guide-image 프록시 URL만 허용.
+//   (외부 URL 주입·트래킹 픽셀 차단)
+function _sanitizeCsImageUrls(v) {
+  const arr = Array.isArray(v) ? v : (v ? [v] : []);
+  const out = [];
+  for (const raw of arr.slice(0, 5)) {          // 메시지당 최대 5장
+    const s = String(raw || '').trim();
+    if (!/^https?:\/\/[^\s"'<>]+\/api\/order\/guide-image\/[-\w]{20,}$/.test(s)) continue;
+    out.push(s);
+  }
+  return out;
+}
+
+// POST /api/reviewer/cs/upload — 문의 첨부 이미지 업로드(무인증, phone8 스코프)
+//   body: { phone8, imageBase64, mimeType?, fileName? } → { ok, url }
+//   저장은 기존 guide-image Drive 인프라 재사용 → 무인증 프록시 URL 반환(<img src> 가능).
+router.post('/cs/upload', imageApiLimiter, async (req, res, next) => {
+  try {
+    const b = req.body || {};
+    const phone8 = _normPhone8(b.phone8);
+    if (phone8.length !== 8) return res.status(400).json({ ok: false, error: 'phone8 필수 (8자리)' });
+
+    let data = String(b.imageBase64 || '');
+    if (!data.trim()) return res.status(400).json({ ok: false, error: '이미지 데이터가 없습니다.' });
+    // data URL로 오면 헤더 제거 + mime 추출
+    let mime = (b.mimeType || '').toString();
+    const m = data.match(/^data:([^;]+);base64,(.*)$/s);
+    if (m) { mime = mime || m[1]; data = m[2]; }
+    if (!/^image\/(png|jpe?g|gif|webp|heic|heif)$/i.test(mime || 'image/png')) {
+      return res.status(400).json({ ok: false, error: '이미지 파일만 첨부할 수 있습니다.' });
+    }
+    // 용량 제한 8MB (base64 → 원본 약 3/4)
+    if (data.length * 0.75 > 8 * 1024 * 1024) {
+      return res.status(413).json({ ok: false, error: '이미지가 너무 큽니다 (8MB 이하).' });
+    }
+
+    const drive = require('../services/drive.service');
+    let folderId = process.env.CS_UPLOAD_FOLDER_ID || process.env.GUIDE_FOLDER_ID;
+    if (!folderId) {
+      const root = process.env.AI_REVIEW_FOLDER_ID || process.env.DRIVE_ROOT_FOLDER_ID;
+      if (!root) return res.status(503).json({ ok: false, error: '저장 폴더가 설정되지 않았습니다.' });
+      const folder = await drive.ensureFolderPath(root, ['[문의첨부]']);
+      folderId = folder.id;
+    }
+    const ext = ((mime || 'image/png').split('/')[1] || 'png').split('+')[0];
+    let name = (b.fileName || `cs_${phone8}_${Date.now()}`).toString().replace(/[\\/:*?"<>|]/g, '_');
+    if (!/\.[a-z0-9]+$/i.test(name)) name += '.' + ext;
+
+    const up = await drive.uploadFileBase64(data, name, mime || 'image/png', folderId, { shareAnyone: true });
+    const base = (process.env.PUBLIC_API_URL || ('https://' + req.get('host'))).replace(/\/+$/, '');
+    res.json({ ok: true, url: `${base}/api/order/guide-image/${up.id}` });
+  } catch (err) {
+    next(err);
+  }
+});
+
 // GET /api/reviewer/cs/campaigns?phone8= — 문의 가능 캠페인 목록(참여 캠페인 + 일반문의)
 router.get('/cs/campaigns', async (req, res, next) => {
   try {
@@ -553,7 +610,8 @@ router.get('/cs/messages', async (req, res, next) => {
     const thread = tRows[0];
 
     const { rows: messages } = await pool.query(
-      `SELECT id, sender_role AS "senderRole", sender_name AS "senderName", content, created_at AS "createdAt"
+      `SELECT id, sender_role AS "senderRole", sender_name AS "senderName", content,
+              image_urls AS "imageUrls", created_at AS "createdAt"
        FROM cs_messages WHERE thread_id = $1 ORDER BY created_at ASC LIMIT 1000`, [thread.id]
     );
     await pool.query(`UPDATE cs_threads SET reviewer_unread_count = 0, updated_at = NOW() WHERE id = $1`, [thread.id]);
@@ -565,14 +623,16 @@ router.get('/cs/messages', async (req, res, next) => {
 });
 
 // POST /api/reviewer/cs/message — 문의 메시지 전송(스레드 upsert + 관리자 알림 + 웹훅)
-// body: { phone8, name, campaignKey, campaignLabel, campaignSource, content }
+// body: { phone8, name, campaignKey, campaignLabel, campaignSource, content, imageUrls? }
 router.post('/cs/message', async (req, res, next) => {
   try {
     const b = req.body || {};
     const phone8 = _normPhone8(b.phone8);
     if (phone8.length !== 8) return res.status(400).json({ ok: false, error: 'phone8 필수 (8자리)' });
     const content = (b.content || '').toString().trim();
-    if (!content) return res.status(400).json({ ok: false, error: '메시지 내용을 입력해주세요.' });
+    const imageUrls = _sanitizeCsImageUrls(b.imageUrls);
+    // 사진만 보내는 것도 허용 — 둘 다 없을 때만 거부
+    if (!content && imageUrls.length === 0) return res.status(400).json({ ok: false, error: '메시지 내용을 입력해주세요.' });
     if (content.length > 4000) return res.status(400).json({ ok: false, error: '메시지가 너무 깁니다.' });
 
     let source = (b.campaignSource || 'general').toString();
@@ -602,18 +662,19 @@ router.post('/cs/message', async (req, res, next) => {
         admin_unread_count = cs_threads.admin_unread_count + 1,
         updated_at = NOW()
       RETURNING id, (xmax = 0) AS "isNew"
-    `, [phone8, reviewerName, campaignKey, campaignLabel, source, content.slice(0, 120)]);
+    `, [phone8, reviewerName, campaignKey, campaignLabel, source,
+        (content || `사진 ${imageUrls.length}장`).slice(0, 120)]);
     const threadId = tRows[0].id;
     const isNew = tRows[0].isNew;
 
     const { rows: mRows } = await pool.query(
-      `INSERT INTO cs_messages (thread_id, sender_role, sender_name, content)
-       VALUES ($1, 'reviewer', $2, $3) RETURNING id, created_at AS "createdAt"`,
-      [threadId, reviewerName, content]
+      `INSERT INTO cs_messages (thread_id, sender_role, sender_name, content, image_urls)
+       VALUES ($1, 'reviewer', $2, $3, $4::jsonb) RETURNING id, created_at AS "createdAt"`,
+      [threadId, reviewerName, content, JSON.stringify(imageUrls)]
     );
     const message = {
       id: mRows[0].id, threadId, senderRole: 'reviewer', senderName: reviewerName,
-      content, createdAt: mRows[0].createdAt,
+      content, imageUrls, createdAt: mRows[0].createdAt,
     };
 
     // 관리자 실시간 알림 (대시보드 뱃지/토스트/목록 갱신)
