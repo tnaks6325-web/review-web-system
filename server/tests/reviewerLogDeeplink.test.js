@@ -213,4 +213,55 @@ t('17. listReviewerEvents가 phone8·tabGid를 내려준다(프론트 계약)', 
   assert.ok(/tab_gid AS "tabGid"/.test(sel), 'tabGid 미반환 → 딥링크 탭 지정 폴백 불가');
 });
 
+// ── 6) 관리자 대시보드 중요알림 → 작업대 딥링크 ────────────────
+//   좌측하단 빨간 알림의 버튼이 통합작업대를 "작업 미선택" 상태로만 열던 문제.
+//   ★ workdesk 의 리뷰어 로그 탭과 **같은 #go= 계약**을 써야 한다(사본을 두면 한쪽만 고쳐진다).
+const APP = fs.readFileSync(path.join(__dirname, '../../frontend/js/index-app.js'), 'utf8');
+const RA_FN = APP.slice(APP.indexOf('function _raOpenWorkdesk'), APP.indexOf('async function _raCheckAlerts'));
+
+t('18. 중요알림 버튼이 딥링크 함수를 호출한다(맨 목록 열기 금지)', () => {
+  const card = APP.slice(APP.indexOf('async function _raCheckAlerts'), APP.indexOf('async function _raResolve'));
+  assert.ok(/onclick="_raOpenWorkdesk\(/.test(card), '알림 카드가 _raOpenWorkdesk 를 호출해야 함');
+  assert.ok(!/window\.open\(/.test(card), '문맥 없이 workdesk.html 만 여는 옛 배선이 남아 있으면 안 됨');
+});
+
+t('19. 딥링크 문맥을 알림 목록에서 캐시한다', () => {
+  assert.ok(/_raCache = r\.items;/.test(APP), '알림 원본을 보관해야 id 로 문맥을 찾을 수 있다');
+  assert.ok(/const canGo = !!\(l\.sheetId && l\.tabName\)/.test(APP),
+    '문맥 유무로 버튼 문구·동작을 갈라야 한다(옛 로그는 막다른 길 금지)');
+});
+
+t('20. ★ admin 이 만든 #go= URL 을 workdesk 파서가 그대로 읽는다(계약 왕복)', () => {
+  assert.ok(/s: l\.sheetId, t: l\.tabName, g: l\.tabGid/.test(RA_FN), 'payload 키가 #go= 계약과 달라짐');
+  assert.ok(/p: l\.phone8 \|\| "", n: l\.reviewerName/.test(RA_FN), 'phone8·이름 키가 계약과 달라짐');
+
+  const l = { sheetId: 'sheet1', tabName: '0721)장수돌침대_쿠팡_탄소매트 900건', tabGid: '123',
+              phone8: '81121348', reviewerName: '손아리', campaignName: '장수산업' };
+  const payload = { s: l.sheetId, t: l.tabName, g: l.tabGid, p: l.phone8, n: l.reviewerName, st: l.campaignName };
+  const url = new URL('workdesk.html', 'https://x.pages.dev/admin.html');
+  url.hash = 'go=' + encodeURIComponent(JSON.stringify(payload));
+  assert.strictEqual(url.pathname, '/workdesk.html', 'admin.html 기준 상대경로가 어긋남');
+  assert.strictEqual(new URL('workdesk.html', 'https://x.pages.dev/admin').pathname, '/workdesk.html',
+    '확장자 없는 /admin 경로에서도 같은 곳을 가리켜야 함');
+
+  // workdesk 의 initGoLink 정규식 원문으로 되읽기
+  const href = url.toString();
+  const m = href.slice(href.indexOf('#')).match(/[#&]go=([^&]+)/);
+  assert.ok(m, 'workdesk 파서가 #go= 를 못 찾음');
+  const got = JSON.parse(decodeURIComponent(m[1]));
+  assert.strictEqual(got.t, l.tabName, '한글·괄호 탭명이 왕복에서 깨짐');
+  assert.strictEqual(got.s, l.sheetId);
+  assert.strictEqual(got.p, l.phone8);
+  assert.ok(got && got.s && got.t, '_consumeGo 가 채택하지 않는 payload');
+});
+
+t('21. 토큰을 URL 에 싣지 않는다(기존 raw_sso 핸드오프 재사용)', () => {
+  assert.ok(/localStorage\.setItem\("raw_sso"/.test(RA_FN), 'raw_sso 핸드오프가 있어야 새 탭이 로그인 화면으로 안 떨어진다');
+  assert.ok(!/sso=/.test(RA_FN), 'admin 경로에선 토큰을 URL 로 넘길 필요가 없다');
+});
+
+t('22. 문맥 없는 옛 로그는 평소대로 목록만 연다(막다른 길 방지)', () => {
+  assert.ok(/openWorkdesk\(\); return;/.test(RA_FN), '문맥이 없으면 openWorkdesk() 폴백이어야 함');
+});
+
 console.log('\n' + pass + ' runtime checks passed');
