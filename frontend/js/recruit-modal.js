@@ -38,7 +38,7 @@
             <option value="">② 탭 선택 (시트 먼저)</option>
           </select></div>
       </div>
-      <div id="rf_linked_tab_info" style="display:none;font-size:.72rem;color:var(--ok);font-weight:600;margin:-4px 0 4px 76px">
+      <div id="rf_linked_tab_info" style="display:none;font-size:.72rem;color:var(--ok,#12b886);font-weight:600;margin:-4px 0 4px 76px">
         <i class="fas fa-link"></i> <span id="rf_linked_tab_text"></span>
       </div>
 
@@ -93,7 +93,7 @@
             <button class="rbadge-preset" onclick="addPresetBadge('일반결제')">일반결제</button>
           </div>
           <div id="rf_badges_wrap"
-            style="display:flex;flex-wrap:wrap;gap:6px;padding:7px 10px;border:1.5px solid var(--border);border-radius:8px;min-height:40px;cursor:text;align-items:center"
+            style="display:flex;flex-wrap:wrap;gap:6px;padding:7px 10px;border:1.5px solid var(--border,#E2E8F0);border-radius:8px;min-height:40px;cursor:text;align-items:center"
             onclick="document.getElementById('rf_badge_input').focus()">
             <input id="rf_badge_input" type="text" placeholder="배지 직접 입력 후 Enter"
               style="border:none;outline:none;font-size:.78rem;flex:1;min-width:100px;padding:2px 4px;background:transparent"
@@ -105,14 +105,14 @@
       <!-- 상품 URL / 썸네일 — 값이 길어 세로 유지 -->
       <div class="rf-grid2">
         <div class="rform-group" style="margin:0">
-          <label class="rform-label">상품 URL <span style="font-weight:400;color:var(--t3);font-size:.66rem">— 가져오기: 네이버·올리브영 (쿠팡 제한적)</span></label>
+          <label class="rform-label">상품 URL <span style="font-weight:400;color:var(--t3,#94A3B8);font-size:.66rem">— 가져오기: 네이버·올리브영 (쿠팡 제한적)</span></label>
           <div style="display:flex;gap:5px">
             <input id="rf_product_url" type="url" class="rform-input" placeholder="상품확인용 URL" style="flex:1;min-width:0">
             <button type="button" class="rchan-btn" onclick="fetchProductInfo()" style="white-space:nowrap"><i class="fas fa-cloud-download-alt"></i> 가져오기</button>
             <button type="button" class="rchan-btn" onclick="openRecruitProductUrl()" style="white-space:nowrap" title="상품 페이지를 새 탭에서 엽니다">↗</button>
           </div>
-          <div id="rf_product_preview" style="display:none;margin-top:6px;align-items:center;gap:10px;border:1px solid var(--border);border-radius:8px;padding:8px;background:var(--bg2,#fafafa)">
-            <img id="rf_pp_img" alt="" style="width:52px;height:52px;object-fit:cover;border-radius:6px;border:1px solid var(--border);background:#fff">
+          <div id="rf_product_preview" style="display:none;margin-top:6px;align-items:center;gap:10px;border:1px solid var(--border,#E2E8F0);border-radius:8px;padding:8px;background:var(--bg2,#fafafa)">
+            <img id="rf_pp_img" alt="" style="width:52px;height:52px;object-fit:cover;border-radius:6px;border:1px solid var(--border,#E2E8F0);background:#fff">
             <div style="min-width:0;flex:1">
               <div id="rf_pp_name" style="font-weight:700;font-size:.8rem;word-break:break-word"></div>
               <div id="rf_pp_price" style="font-size:.8rem;color:var(--p,#3182f6);font-weight:700;margin-top:2px"></div>
@@ -123,14 +123,14 @@
           <input id="rf_price" type="hidden">
         </div>
         <div class="rform-group" style="margin:0">
-          <label class="rform-label">상품 썸네일 URL <span style="font-weight:400;color:var(--t3);font-size:.66rem">— 붙여넣기 또는 파일 업로드</span></label>
+          <label class="rform-label">상품 썸네일 URL <span style="font-weight:400;color:var(--t3,#94A3B8);font-size:.66rem">— 붙여넣기 또는 파일 업로드</span></label>
           <div style="display:flex;gap:5px">
             <input id="rf_thumb_url" type="url" class="rform-input" style="flex:1;min-width:0;font-size:.72rem" placeholder="쿠팡 이미지 주소 붙여넣기">
             <button type="button" class="rchan-btn" onclick="fetchCampThumbFromUrl()" style="white-space:nowrap"><i class="fas fa-image"></i> 가져오기</button>
           </div>
           <div style="display:flex;gap:8px;align-items:center;margin-top:6px">
             <input id="rf_thumb_file" type="file" accept="image/*" style="font-size:.7rem;flex:1;min-width:0" onchange="uploadCampThumb(this)">
-            <img id="rf_thumb_preview" alt="썸네일 미리보기" style="height:38px;border-radius:7px;border:1px solid var(--border);display:none">
+            <img id="rf_thumb_preview" alt="썸네일 미리보기" style="height:38px;border-radius:7px;border:1px solid var(--border,#E2E8F0);display:none">
           </div>
         </div>
       </div>
@@ -141,10 +141,10 @@
 
       <!-- ── 진행상품 · 작업내용 — 참여형 공고에서만(스위치는 모집정보에, onParticipationToggle이 함께 토글) ── -->
       <div id="rf_work_section" style="display:none">
-        <div id="rf_opt_wrap" style="margin-top:4px;padding-top:8px;border-top:1px dashed var(--border)">
+        <div id="rf_opt_wrap" style="margin-top:4px;padding-top:8px;border-top:1px dashed var(--border,#E2E8F0)">
           <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:6px;flex-wrap:wrap;gap:6px">
             <div style="font-size:.76rem;font-weight:800">📦 진행상품 · 옵션 · 결제금액 · 진행건수
-              <span style="font-weight:600;color:var(--t3);font-size:.68rem">— 작업오더에서 자동 적용 · 옵션마다 한 줄</span></div>
+              <span style="font-weight:600;color:var(--t3,#94A3B8);font-size:.68rem">— 작업오더에서 자동 적용 · 옵션마다 한 줄</span></div>
             <button type="button" class="rchan-btn" onclick="addOptRow()" style="font-size:.72rem;white-space:nowrap"><i class="fas fa-plus"></i> 옵션 추가</button>
           </div>
           <div class="rf-prod-head">
@@ -152,19 +152,19 @@
             <span style="text-align:right">총인원</span><span style="text-align:right">일건수</span><span></span>
           </div>
           <div id="rf_opt_rows"></div>
-          <div id="rf_opt_summary" style="font-size:.68rem;color:var(--t3);margin-top:4px"></div>
-          <div style="font-size:.64rem;color:var(--t4);margin-top:2px">옵션이 하나뿐이면 옵션명을 비워도 됩니다 · 총인원/일건수 0 = 제한 없음 · 상품명은 첫 줄에서 따라옵니다</div>
+          <div id="rf_opt_summary" style="font-size:.68rem;color:var(--t3,#94A3B8);margin-top:4px"></div>
+          <div style="font-size:.64rem;color:var(--t4,#94A3B8);margin-top:2px">옵션이 하나뿐이면 옵션명을 비워도 됩니다 · 총인원/일건수 0 = 제한 없음 · 상품명은 첫 줄에서 따라옵니다</div>
           <!-- 표에서 자동 생성되는 저장용 값(작업내용 원문·캠페인 정원) — 화면엔 표만 보인다 -->
           <textarea id="rf_wd_product" style="display:none"></textarea>
           <input id="rf_daily_limit" type="hidden" value="">
           <input id="rf_recruit_total" type="hidden" value="">
         </div>
-        <div style="margin-top:10px;padding-top:8px;border-top:1px dashed var(--border)">
-          <label class="rform-label">유입가이드 <span style="font-weight:400;color:var(--t3);font-size:.68rem">— 있으면 리뷰어 화면에 [상품 페이지 열기]가 뜨지 않습니다(가이드유입)</span></label>
+        <div style="margin-top:10px;padding-top:8px;border-top:1px dashed var(--border,#E2E8F0)">
+          <label class="rform-label">유입가이드 <span style="font-weight:400;color:var(--t3,#94A3B8);font-size:.68rem">— 있으면 리뷰어 화면에 [상품 페이지 열기]가 뜨지 않습니다(가이드유입)</span></label>
           <textarea id="rf_wd_inflow" class="rform-input" rows="3" placeholder="키워드 검색 or 링크 진입 방법 안내"></textarea>
           <label class="rform-label" style="margin-top:6px">리뷰가이드</label>
           <textarea id="rf_wd_review" class="rform-input" rows="2" placeholder="별점/포토 비율 등"></textarea>
-          <label class="rform-label" style="margin-top:6px">특이사항 <span style="font-weight:400;color:var(--t3);font-size:.68rem">— 참여한 리뷰어에게만 공개</span></label>
+          <label class="rform-label" style="margin-top:6px">특이사항 <span style="font-weight:400;color:var(--t3,#94A3B8);font-size:.68rem">— 참여한 리뷰어에게만 공개</span></label>
           <textarea id="rf_wd_notes" class="rform-input" rows="2" placeholder="선택"></textarea>
         </div>
       </div>
@@ -182,9 +182,9 @@
       <div class="rform-group" style="border:1.5px solid #12b886;border-radius:12px;padding:12px;background:#f6fffb">
         <label style="display:flex;align-items:center;gap:9px;cursor:pointer;font-weight:800;font-size:.86rem">
           <input type="checkbox" id="rf_participation" onchange="onParticipationToggle(this.checked)" style="width:17px;height:17px;accent-color:#12b886">
-          ⚡ 참여형 캠페인 <span style="font-weight:600;color:var(--t3);font-size:.72rem">— 리뷰어가 직접 참여 → 작업내용 확인 → 화면 안에서 구매양식 제출</span>
+          ⚡ 참여형 캠페인 <span style="font-weight:600;color:var(--t3,#94A3B8);font-size:.72rem">— 리뷰어가 직접 참여 → 작업내용 확인 → 화면 안에서 구매양식 제출</span>
         </label>
-        <div style="font-size:.7rem;color:var(--t3);margin-top:3px">끄면 기존 공고와 100% 동일하게 동작합니다.</div>
+        <div style="font-size:.7rem;color:var(--t3,#94A3B8);margin-top:3px">끄면 기존 공고와 100% 동일하게 동작합니다.</div>
         <div id="rf_part_section" style="display:none;margin-top:10px">
           <!-- 시작일·종료일은 왼쪽에 붙이고, 구매시간대를 같은 행 오른쪽에 -->
           <div class="rf-grid2">
@@ -217,7 +217,7 @@
             <div style="border:1.5px solid #7C3AED;border-radius:10px;padding:10px;background:#F8F5FF">
               <label style="display:flex;align-items:center;gap:9px;cursor:pointer;font-weight:800;font-size:.8rem">
                 <input type="checkbox" id="rf_multi_account" onchange="onMultiAccountToggle(this.checked)" style="width:16px;height:16px;accent-color:#7C3AED">
-                👥 타계정 허용 <span style="font-weight:600;color:var(--t3);font-size:.68rem">— 명의당 1건</span>
+                👥 타계정 허용 <span style="font-weight:600;color:var(--t3,#94A3B8);font-size:.68rem">— 명의당 1건</span>
               </label>
               <div id="rf_multi_section" style="display:none;margin-top:8px">
                 <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px">
@@ -226,16 +226,16 @@
                   <div><label class="rform-label">제한시간(분)</label>
                     <input id="rf_sub_ttl" type="number" min="1" class="rform-input" value="10"></div>
                 </div>
-                <div style="font-size:.64rem;color:var(--t3);margin-top:4px">타계정 5개 보유 리뷰어는 하루 한도 1이면 5일에 걸쳐 참여합니다.</div>
+                <div style="font-size:.64rem;color:var(--t3,#94A3B8);margin-top:4px">타계정 5개 보유 리뷰어는 하루 한도 1이면 5일에 걸쳐 참여합니다.</div>
               </div>
             </div>
             <div style="border:1.5px solid #F0B45E;border-radius:10px;padding:10px;background:#FFFBF2">
-              <div style="font-weight:800;font-size:.8rem;color:#B45309">🧾 현금영수증 <span style="font-weight:600;color:var(--t3);font-size:.66rem">— 탭 설정 · 읽기 전용</span></div>
-              <div id="rf_cashrcpt_ro" style="font-size:.74rem;margin-top:6px;color:var(--t3)">탭을 연결하면 진행방식에서 판정합니다</div>
-              <div style="font-size:.64rem;color:var(--t4);margin-top:4px">발행 여부는 대시보드 탭설정(진행방식)에서 바꿉니다</div>
+              <div style="font-weight:800;font-size:.8rem;color:#B45309">🧾 현금영수증 <span style="font-weight:600;color:var(--t3,#94A3B8);font-size:.66rem">— 탭 설정 · 읽기 전용</span></div>
+              <div id="rf_cashrcpt_ro" style="font-size:.74rem;margin-top:6px;color:var(--t3,#94A3B8)">탭을 연결하면 진행방식에서 판정합니다</div>
+              <div style="font-size:.64rem;color:var(--t4,#94A3B8);margin-top:4px">발행 여부는 대시보드 탭설정(진행방식)에서 바꿉니다</div>
             </div>
           </div>
-          <details style="margin-top:8px"><summary style="font-size:.74rem;font-weight:700;color:var(--t3);cursor:pointer">고급 설정 (참여 제한시간·마감 버퍼)</summary>
+          <details style="margin-top:8px"><summary style="font-size:.74rem;font-weight:700;color:var(--t3,#94A3B8);cursor:pointer">고급 설정 (참여 제한시간·마감 버퍼)</summary>
             <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-top:6px">
               <div><label class="rform-label">참여 제한시간(분)</label><input id="rf_hold_ttl" type="number" min="5" class="rform-input" value="15"></div>
               <div><label class="rform-label">종료 전 신규참여 마감(분)</label><input id="rf_close_buffer" type="number" min="0" class="rform-input" value="10"></div>
@@ -250,7 +250,7 @@
 
       <!-- 유의사항(공고 카드 노출) / 상태 · 모집인원 -->
       <div class="rform-group">
-        <label class="rform-label">유의사항 <span style="font-weight:400;color:var(--t3);font-size:.68rem">— 공고 카드에 노출되는 안내문</span></label>
+        <label class="rform-label">유의사항 <span style="font-weight:400;color:var(--t3,#94A3B8);font-size:.68rem">— 공고 카드에 노출되는 안내문</span></label>
         <textarea id="rf_notes" class="rform-input" rows="2"
           placeholder="리뷰어에게 전달할 유의사항을 자유롭게 입력하세요" style="resize:vertical"></textarea>
       </div>
@@ -273,11 +273,11 @@
       <aside class="rf-side">
     <!-- ── 실시간 미리보기 패널 ── -->
     <div id="rf_preview_section" style="display:flex;flex-direction:column;flex:1;min-height:0;margin:0 14px">
-      <div style="padding:10px 0 4px;text-align:center;font-size:.8rem;font-weight:600;color:var(--p)">
+      <div style="padding:10px 0 4px;text-align:center;font-size:.8rem;font-weight:600;color:var(--p,#3182F6)">
         <i class="fas fa-eye"></i> 미리보기
       </div>
       <div id="rf_preview_area" style="padding:0 0 14px;flex:1;min-height:0;overflow-y:auto">
-        <div style="font-size:.68rem;color:var(--t4);text-align:center;margin-bottom:8px">
+        <div style="font-size:.68rem;color:var(--t4,#94A3B8);text-align:center;margin-bottom:8px">
           <i class="fas fa-mobile-alt"></i> 리뷰어가 참여한 뒤 실제로 보는 화면
         </div>
         <!-- 실제 리뷰어 페이지(campaign.html)와 동일한 공용 렌더러(js/campaign-workdetail.js)로 그린다.
@@ -305,11 +305,11 @@
     </div>
       </aside>
     </div><!-- /rf-split -->
-    <div class="modal-footer" style="padding:12px 18px;display:flex;justify-content:flex-end;gap:8px;border-top:1px solid var(--border)">
+    <div class="modal-footer" style="padding:12px 18px;display:flex;justify-content:flex-end;gap:8px;border-top:1px solid var(--border,#E2E8F0)">
       <button onclick="closeRecruitModal()"
-        style="padding:8px 18px;border:1.5px solid var(--border);border-radius:8px;background:#fff;color:var(--t2);font-size:.82rem;cursor:pointer;font-weight:600">취소</button>
+        style="padding:8px 18px;border:1.5px solid var(--border,#E2E8F0);border-radius:8px;background:#fff;color:var(--t2,#475569);font-size:.82rem;cursor:pointer;font-weight:600">취소</button>
       <button id="recruitSaveBtn" onclick="saveRecruitPost()"
-        style="padding:8px 18px;background:var(--p);color:#fff;border:none;border-radius:8px;font-size:.82rem;font-weight:600;cursor:pointer;display:flex;align-items:center;gap:5px">
+        style="padding:8px 18px;background:var(--p,#3182F6);color:#fff;border:none;border-radius:8px;font-size:.82rem;font-weight:600;cursor:pointer;display:flex;align-items:center;gap:5px">
         <i class="fas fa-save"></i> 저장
       </button>
     </div>
@@ -318,16 +318,81 @@
 
   // 모달 전용 CSS — 마크업과 한 벌이라 같이 옮겼다(admin.html 에 남겨두면
   //   통합 작업대에서 모달이 스타일 없이 뜬다). 1회만 주입한다.
-  var CSS = `   입력은 탭으로 나누지 않고 **한 화면에 촘촘히** 둔다(탭 전환으로 항목을 찾아다니지 않게).
-   ★ 이 블록은 @media 밖 최상위에 있어야 한다 — 안에 넣으면 특정 폭에서만 적용된다(실측 버그). */
-.rf-split{display:flex;flex:1;min-height:0;overflow:hidden}
+  // ★ 모달 '껍데기' CSS(.modal-overlay/.modal-box/.rform-* 등)는 원래 admin.html 이
+  //   링크하는 css/index.css 에만 있었다 — 통합 작업대는 그 테마를 안 쓰므로 모달이
+  //   오버레이가 아니라 **페이지 하단에 일반 블록으로 흘렀다**(실측).
+  //   → 필요한 규칙만 `#recruitModal` 로 **스코프해서** 모듈에 동봉한다.
+  //     · 스코프 = 호스트 페이지의 다른 모달·폼을 건드리지 않는다
+  //     · CSS 변수는 폴백 값을 넣어 admin 테마 변수가 없는 화면에서도 제대로 보인다
+  var SHELL_CSS = `#recruitModal.modal-overlay{position:fixed;inset:0;background:rgba(15,23,42,.55);display:flex;align-items:center;justify-content:center;padding:20px;z-index:5000;backdrop-filter:blur(8px);-webkit-backdrop-filter:blur(8px);animation:fadeIn .2s ease}
+#recruitModal .modal-box{background:var(--card,#FFFFFF);border-radius:24px;width:100%;max-width:460px;max-height:calc(100vh - 40px);box-shadow:0 8px 48px rgba(15,23,42,.18),0 2px 12px rgba(15,23,42,.10);overflow:hidden;display:flex;flex-direction:column;animation:slideUp .22s ease}
+#recruitModal .modal-header{display:flex;align-items:center;justify-content:space-between;padding:18px 22px;border-bottom:1px solid var(--border,#E2E8F0);background:linear-gradient(135deg,#f8faff 0%,#f0f4ff 100%)}
+#recruitModal .modal-header h3{font-size:1rem;font-weight:700}
+#recruitModal .modal-header .btn-icon-sm{background:rgba(15,23,42,.06);color:var(--t2,#475569);border:1px solid var(--border,#E2E8F0)}
+#recruitModal .modal-header .btn-icon-sm:hover{background:rgba(15,23,42,.12);color:var(--t1,#0F172A)}
+#recruitModal .modal-body{padding:20px;overflow-y:auto;flex:1;min-height:0}
+#recruitModal .rform-input{padding:8px 11px;border:1.5px solid var(--border,#E2E8F0);border-radius:8px;font-size:.82rem;color:var(--t1,#0F172A);outline:none;transition:border-color .15s;font-family:inherit;width:100%;box-sizing:border-box}
+#recruitModal .rform-input:focus{border-color:var(--p,#3182F6)}
+#recruitModal textarea.rform-input{line-height:1.5}
+#recruitModal .rform-label{font-size:.78rem;font-weight:700;color:var(--t2,#475569)}
+#recruitModal .rform-group{display:flex;flex-direction:column;gap:5px}
+#recruitModal .rform-req{color:var(--err,#EF4444)}
+#recruitModal .rchan-btn{padding:5px 13px;border:1.5px solid var(--border,#E2E8F0);border-radius:20px;background:#fff;font-size:.75rem;font-weight:600;color:var(--t2,#475569);cursor:pointer;transition:all .12s}
+#recruitModal .rchan-btn:hover{border-color:var(--p,#3182F6);color:var(--p,#3182F6)}
+#recruitModal .rchan-btn.active{background:var(--p,#3182F6);border-color:var(--p,#3182F6);color:#fff}
+#recruitModal .rbadge-preset{ display:inline-flex;align-items:center;gap:4px; padding:3px 10px;border-radius:20px; border:1.5px dashed #a6c8fb; background:#f5f9ff;color:#1b64da; font-size:.72rem;font-weight:600; cursor:pointer;transition:all .15s; white-space:nowrap; }
+#recruitModal .rbadge-preset::before{content:"+";font-weight:700;opacity:.7}
+#recruitModal .rbadge-preset:hover{background:#e8f1fe;border-color:#3182f6;border-style:solid;transform:translateY(-1px)}
+#recruitModal .rbadge-preset:active{transform:translateY(0);background:#cce0fb}
+#recruitModal .admin-header .btn-icon-sm{color:rgba(255,255,255,.8)}
+#recruitModal .btn-icon-sm{width:34px;height:34px;background:rgba(255,255,255,.18);border:none;border-radius:50%;color:#fff;font-size:.9rem;cursor:pointer;display:flex;align-items:center;justify-content:center;transition:var(--tr,all .15s);flex-shrink:0}
+#recruitModal .btn-icon-sm:hover{background:rgba(255,255,255,.3)}
+#recruitModal.hidden{display:none!important}
+/* 폰트어썸이 없는 화면에서도 아이콘 자리가 레이아웃을 밀지 않게 */
+#recruitModal .fas:not([class*="fa-"]){display:none}
+@keyframes fadeIn{from{opacity:0}to{opacity:1}}
+@keyframes slideUp{from{opacity:0;transform:translateY(16px)}to{opacity:1;transform:translateY(0)}}`;
+
+  /* 폰트어썸이 없는 호스트(통합 작업대)에서는 아이콘이 **빈 자리**로 뜬다 —
+     닫기(×)가 보이지 않으면 모달을 못 닫는다. CSS만으로는 폰트 유무를 알 수 없어
+     마운트 시 1회 탐지해 글리프 폴백을 넣는다(폰트어썸이 있으면 아무 것도 안 한다). */
+  var ICON_FALLBACK = {
+    'fa-times': '\\2715', 'fa-bullhorn': '\\1F4E2', 'fa-link': '\\1F517',
+    'fa-cloud-download-alt': '\\2B07', 'fa-image': '\\1F5BC', 'fa-eye': '\\1F441',
+    'fa-mobile-alt': '\\1F4F1', 'fa-plus': '\\FF0B', 'fa-save': '\\1F4BE',
+  };
+  function injectIconFallback() {
+    if (document.getElementById('recruit-modal-iconfb')) return;
+    var probe = document.createElement('i');
+    probe.className = 'fas fa-times';
+    probe.style.cssText = 'position:absolute;left:-9999px';
+    document.body.appendChild(probe);
+    var fam = (getComputedStyle(probe).fontFamily || '');
+    document.body.removeChild(probe);
+    if (/font\s*awesome/i.test(fam)) return;          // 폰트어썸 있음 — 폴백 불필요
+    var rules = Object.keys(ICON_FALLBACK).map(function (k) {
+      return '#recruitModal .' + k + '::before{content:"' + ICON_FALLBACK[k] + '"}';
+    });
+    var st = document.createElement('style');
+    st.id = 'recruit-modal-iconfb';
+    st.textContent = '#recruitModal .fas{font-style:normal;line-height:1}\n' + rules.join('\n');
+    document.head.appendChild(st);
+  }
+
+  /* ═══ 모집공고 수정 모달 — 좌(입력) / 우(미리보기 고정) ═══
+     미리보기를 입력란 아래에 쌓으면 같은 스크롤을 나눠 써서 "고치면서 확인"이 안 된다 → 옆으로 뺐다.
+     입력은 탭으로 나누지 않고 **한 화면에 촘촘히** 둔다(탭 전환으로 항목을 찾아다니지 않게).
+     ★ 이 블록은 @media 밖 최상위에 있어야 한다 — 안에 넣으면 특정 폭에서만 적용된다(실측 버그).
+     ★ 변수는 전부 폴백을 단다 — admin 테마(css/index.css)가 없는 화면(통합 작업대)에서
+       var(--border) 가 무효값이 되면 테두리·색이 통째로 날아간다. */
+  var CSS = `.rf-split{display:flex;flex:1;min-height:0;overflow:hidden}
 .rf-main{flex:1;min-width:0;display:flex;flex-direction:column;min-height:0}
-.rf-side{width:340px;flex-shrink:0;border-left:1px solid var(--border);background:#F7F9FC;
+.rf-side{width:340px;flex-shrink:0;border-left:1px solid var(--border,#E2E8F0);background:#F7F9FC;
          display:flex;flex-direction:column;min-height:0}
 /* 섹션 — 헤더가 스크롤 중에도 붙어 있어 지금 어느 묶음인지 보인다 */
 .rf-sec{display:flex;flex-direction:column;gap:9px}
 .rf-sech{position:sticky;top:0;z-index:3;margin:0 -18px;padding:7px 18px;background:#fff;
-         font-size:.76rem;font-weight:800;color:var(--p);border-bottom:1px solid var(--border)}
+         font-size:.76rem;font-weight:800;color:var(--p,#3182F6);border-bottom:1px solid var(--border,#E2E8F0)}
 /* 밀도 — 라벨·입력 간격을 좁혀 한 화면에 더 담는다 */
 .rf-main .rform-label{margin-bottom:2px;font-size:.72rem}
 .rf-main .rform-input{padding:7px 9px;font-size:.82rem}
@@ -338,7 +403,7 @@
 .rf-hrow{display:grid;grid-template-columns:64px 1fr;gap:8px;align-items:center;margin-bottom:9px}
 .rf-hrow.rf-hrow-w{grid-template-columns:76px 1fr}
 .rf-hrow.rf-hrow-top{grid-template-columns:76px 1fr;align-items:start}
-.rf-hrow .rf-hl{font-size:.72rem;font-weight:700;color:var(--t2);text-align:right;line-height:1.25}
+.rf-hrow .rf-hl{font-size:.72rem;font-weight:700;color:var(--t2,#475569);text-align:right;line-height:1.25}
 .rf-hrow .rform-input{margin:0}
 @media (max-width:1100px){
   .rf-hrow,.rf-hrow.rf-hrow-w,.rf-hrow.rf-hrow-top{grid-template-columns:1fr;gap:3px}
@@ -346,37 +411,41 @@
 }
 /* 진행상품 표 — 상품명 · 옵션명 · 결제금액 · 총인원 · 일건수 */
 .rf-prod-head,.rf-opt-row{display:grid;grid-template-columns:1.6fr 1fr .85fr .62fr .62fr 26px;gap:6px;align-items:center}
-.rf-prod-head{font-size:.62rem;font-weight:800;color:var(--t3);padding:0 2px 4px;border-bottom:1px solid var(--border);margin-bottom:5px}
+.rf-prod-head{font-size:.62rem;font-weight:800;color:var(--t3,#94A3B8);padding:0 2px 4px;border-bottom:1px solid var(--border,#E2E8F0);margin-bottom:5px}
 .rf-opt-row{margin-bottom:6px}
 .rf-opt-row .rform-input{font-size:.74rem;padding:6px 7px;margin:0}
 .rf-opt-row .rf-opt-pay,.rf-opt-row .rf-opt-rt,.rf-opt-row .rf-opt-dl{text-align:right}
-.rf-opt-row .rf-opt-prod.rf-dup{background:#FAFBFD;color:var(--t2)}
+.rf-opt-row .rf-opt-prod.rf-dup{background:#FAFBFD;color:var(--t2,#475569)}
 /* 좁은 화면: 세로로 되돌리고 미리보기는 접어 둔다(입력이 우선) */
 @media (max-width:900px){
   .rf-split{flex-direction:column;overflow-y:auto}
-  .rf-side{width:auto;border-left:none;border-top:2px dashed var(--border)}
+  .rf-side{width:auto;border-left:none;border-top:2px dashed var(--border,#E2E8F0)}
   .rf-side.collapsed{display:none}
   .rf-pvtoggle{display:block}
 }
-.rf-pvtoggle{display:none;width:100%;margin:0;padding:9px;background:#EEF3FD;color:var(--p);
-             border:none;border-top:1px solid var(--border);font-size:.76rem;font-weight:800;cursor:pointer;font-family:inherit}
-  .dash-filter-btn{ min-height:40px; }
-}
-/* ── 모달 토스 정리 (헤더·여백·버튼 정렬) ── */`;
+.rf-pvtoggle{display:none;width:100%;margin:0;padding:9px;background:#EEF3FD;color:var(--p,#3182F6);
+             border:none;border-top:1px solid var(--border,#E2E8F0);font-size:.76rem;font-weight:800;cursor:pointer;font-family:inherit}`;
   function injectCss() {
     if (document.getElementById('recruit-modal-css')) return;
     var st = document.createElement('style');
     st.id = 'recruit-modal-css';
-    st.textContent = CSS;
+    st.textContent = SHELL_CSS + '\n' + CSS;
     document.head.appendChild(st);
   }
 
   function mount(id) {
     injectCss();
     var host = document.getElementById(id || 'recruitModalMount');
-    if (!host) return false;
-    if (document.getElementById('recruitModal')) return true;   // 이미 마운트됨(멱등)
-    host.innerHTML = HTML;
+    if (!host) {
+      // 마운트 지점이 없으면 **body 직속**으로 만든다 — 스크롤 컨테이너(.ovwrap 등)
+      // 안에 두면 화면 흐름에 섞여 보이거나 조상 transform 에 갇힌다.
+      if (!document.body) return false;    // <head> 에서 로드된 경우 — DOM 준비 후 재시도
+      host = document.createElement('div');
+      host.id = 'recruitModalMount';
+      document.body.appendChild(host);
+    }
+    if (!document.getElementById('recruitModal')) host.innerHTML = HTML;   // 멱등
+    injectIconFallback();
     return true;
   }
 
