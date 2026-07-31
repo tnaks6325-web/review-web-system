@@ -55,6 +55,13 @@ ok('서버가 지각 건수를 집계한다(수동확정되면 submitted라 자�
   /late_order_id IS NOT NULL/.test(routes) && /status IN \('expired', 'cancelled'\)/.test(routes));
 ok('만료·취소 자체는 뱃지로 세지 않는다(할 일이 없어 늑대소년 방지)',
   !/ops\.expired|ops\.cancelled/.test(cc));
+// ── 취소확정(dismiss): 지각 배지·수동확정에서 제외 ──
+ok('취소확정 라우트 존재(POST admin/:id/dismiss)',
+  /'\/admin\/:id\/dismiss'/.test(routes) && /dismissed_at = NOW\(\)/.test(routes));
+ok('지각(late) 배지는 취소확정(dismissed) 건 제외',
+  /late_order_id IS NOT NULL[\s\S]{0,120}dismissed_at IS NULL/.test(routes));
+ok('제출확정 시 dismissed_at 해제(confirm↔dismiss 정합)',
+  /status = 'submitted',\s*\n\s*dismissed_at = NULL/.test(routes));
 
 /* ── 게이지 분해 ── */
 ok('관리자 게이지는 확정 + 진행중 2구간', /pg-seg sub/.test(cc) && /pg-seg hold/.test(cc));
