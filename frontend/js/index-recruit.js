@@ -1570,24 +1570,34 @@ async function _loadCampControl(campId) {
     const fmtT = iso => iso ? new Date(iso).toLocaleString("ko-KR", { timeZone: "Asia/Seoul", month: "numeric", day: "numeric", hour: "2-digit", minute: "2-digit" }) : "";
     body.innerHTML = sheetHtml + optTableHtml + ownerTableHtml + items.sort((a, b) => new Date(b.applied_at) - new Date(a.applied_at)).map(r => {
       const holdValid = r.status === "applied" && r.expires_at && Date.parse(r.expires_at) > now;
+      const dismissed = !!r.dismissed_at;   // 취소확정(미참여) — 종료 마커
       let st;
       if (r.status === "submitted") st = chip("#D1FAE5", "#065F46", "✓ 제출확정");
       else if (holdValid) st = chip("#FEF3C7", "#92400E", "⏳ 진행중");
+      else if (dismissed) st = chip("#E5E7EB", "#4B5563", "🚫 취소확정");
       else if (r.status === "cancelled") st = chip("#F3F4F6", "#6B7280", "취소");
-      else st = chip("#FEE2E2", "#B91C1C", "만료");
+      else st = chip("#FEE2E2", "#B91C1C", "구매시간만료");
       const late = r.late_order_id ? chip("#EDE9FE", "#5B21B6", "🛍 기구매 제출 있음") : "";
       // 👥 063: 명의 구분 — 타계정 건은 소유자(본계정) 뒤4자리를 함께 표기(묶음 추적)
       const acct = _isSubRow(r) ? chip("#F1EAFE", "#7C3AED", "타 · 본계정 ***" + String(r.owner_phone8).slice(-4)) : "";
-      // ★ 리뷰 #4: 수동확정은 만료·취소 건만(서버 의도 = 기구매 구제 경로).
+      // ★ 리뷰 #4: 확정 버튼은 만료·취소 건만(서버 의도 = 기구매 구제 경로).
       //   진행중(applied)은 확정 시 주문 링크가 영구 결번되므로 버튼 미노출(정상 제출 경로로 확정되게 둠).
-      const canConfirm = (r.status === "expired" || r.status === "cancelled");
+      //   취소확정(dismissed)된 건은 종료 처리라 버튼을 다시 띄우지 않는다("다시 알림 안 뜸").
+      const canConfirm = (r.status === "expired" || r.status === "cancelled") && !dismissed;
       const escT = s => String(s || "").replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
-      return `<div style="display:flex;align-items:center;gap:8px;padding:9px 4px;border-bottom:1px solid #F3F4F6;font-size:.8rem">
+      const cid = String(campId).replace(/[^a-z0-9_]/gi, "");
+      const aid = parseInt(r.id, 10);
+      // 제출확정(구매완) = 실제 구매 확인 → 자리 확정 / 취소확정(미참여) = 종료 처리(이후 숨김)
+      const actions = canConfirm ? `<span style="display:inline-flex;gap:6px;flex-shrink:0">
+          <button onclick="campManualConfirm('${cid}',${aid},${r.late_order_id ? 1 : 0})" title="구매 완료 확인 → 자리 확정(카운터·모집 잔여 즉시 반영)" style="font-size:.7rem;font-weight:800;background:#e8f1fe;color:#1b64da;border:1px solid #a6c8fb;border-radius:7px;padding:4px 9px;cursor:pointer;white-space:nowrap">✅ 제출확정<span style="font-weight:600;opacity:.72"> ·구매완</span></button>
+          <button onclick="campDismiss('${cid}',${aid})" title="미참여로 취소 확정 → 이후 관제·알림에서 숨김" style="font-size:.7rem;font-weight:800;background:#FEF2F2;color:#DC2626;border:1px solid #FECACA;border-radius:7px;padding:4px 9px;cursor:pointer;white-space:nowrap">🚫 취소확정<span style="font-weight:600;opacity:.72"> ·미참여</span></button>
+        </span>` : "";
+      return `<div style="display:flex;align-items:center;flex-wrap:wrap;gap:8px;padding:9px 4px;border-bottom:1px solid #F3F4F6;font-size:.8rem">
         <b style="min-width:64px">${escT(r.applicant_name)}</b>
         <span style="color:#9CA3AF;font-size:.7rem">***${String(r.phone8 || "").replace(/\D/g, "").slice(-4)}</span>
         ${st}${late}${acct}
         <span style="margin-left:auto;color:#9CA3AF;font-size:.68rem">신청 ${fmtT(r.applied_at)}${r.expires_at ? " · 마감 " + fmtT(r.expires_at) : ""}</span>
-        ${canConfirm ? `<button onclick="campManualConfirm('${String(campId).replace(/[^a-z0-9_]/gi, "")}',${parseInt(r.id, 10)},${r.late_order_id ? 1 : 0})" style="font-size:.7rem;font-weight:800;background:#e8f1fe;color:#1b64da;border:1px solid #a6c8fb;border-radius:7px;padding:4px 10px;cursor:pointer;white-space:nowrap">수동확정</button>` : ""}
+        ${actions}
       </div>`;
     }).join("");
   } catch (e) {
@@ -1608,10 +1618,28 @@ async function campManualConfirm(campId, appId, hasLate) {
     });
     const j = await res.json();
     if (!res.ok || !j.ok) throw new Error(j.error || "HTTP " + res.status);
-    showToast(j.already ? "이미 확정된 신청입니다." : "수동 확정되었습니다.", "success");
+    showToast(j.already ? "이미 확정된 신청입니다." : "제출확정되었습니다.", "success");
     await _loadCampControl(campId);
   } catch (e) {
-    showToast("수동확정 실패: " + e.message, "error");
+    showToast("제출확정 실패: " + e.message, "error");
+  }
+}
+
+// 취소확정(미참여) — 만료·취소 건을 종료 처리. 이후 관제 버튼·지각 배지·만료 집계에서 숨겨진다.
+async function campDismiss(campId, appId) {
+  if (!confirm("이 참여를 '미참여'로 취소 확정할까요?\n확정하면 이후 관제·알림에서 숨겨집니다. (실제로 구매한 건이면 대신 [제출확정]을 누르세요.)")) return;
+  try {
+    const res = await fetch(API_BASE_URL + `/api/campaign/admin/${encodeURIComponent(campId)}/dismiss`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json", ..._getAuthHeaders() },
+      body: JSON.stringify({ applicationId: appId }),
+    });
+    const j = await res.json();
+    if (!res.ok || !j.ok) throw new Error(j.error || "HTTP " + res.status);
+    showToast(j.already ? "이미 취소확정된 신청입니다." : "취소 확정되었습니다.", "success");
+    await _loadCampControl(campId);
+  } catch (e) {
+    showToast("취소확정 실패: " + e.message, "error");
   }
 }
 
