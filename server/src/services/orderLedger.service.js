@@ -267,6 +267,36 @@ function mapOrderToSheetRow(headers, orderData = {}) {
   });
 }
 
+/** 헤더에서 옵션 칸 인덱스(매퍼와 같은 규칙 — 여기가 단일 출처) */
+function optionColIndexes(headers) {
+  const out = [];
+  (headers || []).forEach((h, i) => {
+    const key = String(h || '').toLowerCase().trim();
+    if (key.includes('옵션') || key.includes('option')) out.push(i);
+  });
+  return out;
+}
+
+/**
+ * 배정된 행에 **이미 적혀 있는 옵션값**을 그대로 돌려준다(`|` 결합 = 매퍼의 optParts 역순).
+ *
+ * ★★ 왜 필요한가: `mapOrderToSheetRow`는 옵션 칸에 `''`를 반환하고 `buildBatchUpdateData`는
+ *   `null`만 걸러낸다 → 빈 옵션은 "쓰지 않음"이 아니라 **그 칸을 지우는 쓰기**가 된다.
+ *   로스터에 미리 적힌 값(예: '포토리뷰')이 제출과 동시에 사라지는 원인이었다.
+ *   ⚠ 공유 매퍼는 고치지 않는다 — `order_cancel`의 칸 비우기와 Track B write-back의
+ *   컬럼 disjoint 마스크가 `''` 반환에 의존한다. 그래서 **호출부에서 값을 되쓴다.**
+ */
+function existingOptionKeyAt(tabContext, sheetRow) {
+  if (!tabContext || !sheetRow) return '';
+  const cols = optionColIndexes(tabContext.headers);
+  if (!cols.length) return '';
+  const row = (tabContext.dataRows || []).find(r => Number(r.rowIndex) === Number(sheetRow));
+  if (!row) return '';
+  const cells = row.cells || [];
+  const vals = cols.map(i => String(cells[i] == null ? '' : cells[i]).trim());
+  return vals.some(v => v) ? vals.join('|') : '';
+}
+
 function buildBatchUpdateData({ tabName, headers, targetRow, orderData }) {
   const rowData = mapOrderToSheetRow(headers, orderData);
   return rowData
@@ -763,6 +793,24 @@ async function createOrderLedgerEntry(input) {
   } catch (err) {
     claimError = err;
     claim = { row: null, error: 'row_assignment_failed', message: err.message };
+  }
+
+  // ★★ 옵션 칸 보존 — 선택된 옵션이 없으면 배정된 행의 **기존 옵션값을 되쓴다**.
+  //   빈 값을 그대로 두면 시트의 그 칸을 지우는 쓰기가 나간다(existingOptionKeyAt 주석 참조).
+  //   orderData는 호출부가 큐 페이로드로 그대로 넘기는 **같은 객체**라, 재기록(reconcile)까지 일치한다.
+  //   ★ 값이 있을 때는 절대 건드리지 않는다(옵션 선택 결과 우선) = 기존 동작 무회귀.
+  if (claim.row && !String(orderData.selectedOptKey || '').trim()) {
+    try {
+      const keep = existingOptionKeyAt(tabContext, claim.row);
+      if (keep) {
+        orderData.selectedOptKey = keep;
+        await db.query(`UPDATE order_submissions SET selected_opt_key = $2 WHERE id = $1`,
+          [orderSubmissionId, keep]);
+        logger.info(`[orderLedger] 옵션 칸 보존: os=${orderSubmissionId} row=${claim.row} "${keep}"`);
+      }
+    } catch (e) {
+      logger.warn(`[orderLedger] 옵션 보존 실패(무시): ${e.message}`);
+    }
   }
 
   if (!claim.row) {
@@ -1598,6 +1646,8 @@ module.exports = {
   unmappedSubmittedFields,
   rowIdentityMatches,
   mapOrderToSheetRow,
+  optionColIndexes,
+  existingOptionKeyAt,
   buildBatchUpdateData,
   buildMirrorGuardRange,
   buildMirrorGuardRanges,
