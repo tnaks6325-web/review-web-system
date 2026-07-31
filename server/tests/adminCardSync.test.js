@@ -85,8 +85,14 @@ ok('별표 토글은 관리자 목록도 새로고침한다',
   /typeof window\.loadRecruitList === 'function'[\s\S]{0,120}loadRecruitList\(\)/.test(cc));
 
 /* ── 삭제 모드 ── */
-ok('카드에는 삭제 버튼이 없다(액션 = 수정·리뷰어·관제·게시)',
+ok('카드에는 삭제 버튼이 없다(액션 = 수정·시트·관제·게시)',
   !/deleteRecruitPost/.test(cc));
+// 하단 액션의 [👁 리뷰어] 미리보기 버튼은 [📄 시트](연결 구글시트 열기)로 대체됐다.
+ok('관리자 카드 액션 = 연결 시트 열기 버튼(리뷰어 미리보기 버튼 제거)',
+  /📄 시트/.test(cc)
+  && /window\.open\('\$\{_esc\(sheetUrl\)\}'/.test(cc)
+  && /docs\.google\.com\/spreadsheets\/d\//.test(cc)
+  && !/openReviewerPreview/.test(cc));
 ok('삭제는 헤더 삭제 모드로 분리', /toggleRecruitDelMode/.test(rec) && /recruitDelModeBtn/.test(adm));
 ok('삭제 모드일 때만 선택 오버레이', /delMode\s*\n?\s*\? `<div class="pdelpick"/.test(cc));
 ok('일괄 삭제는 확인 후 실행', /function deleteRecruitPicked/.test(rec) && /confirm\(/.test(rec));
