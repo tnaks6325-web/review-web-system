@@ -184,7 +184,12 @@ t('switchView 가 두 뷰를 그린다', () => {
 });
 t('★ 편집 버튼은 서버 판정(canEdit)으로만 노출', () => {
   assert.ok(/api\('\/api\/trackb\/perm'\)/.test(HTML), '권한을 서버에 물어야 한다');
-  assert.ok(/if\(!STATE\.canEdit\) return btn;/.test(HTML), '작업오더 편집 버튼 게이트 없음');
+  // 접수·상태변경은 _woEditActions 한 곳에서만 만든다(표 셀과 펼침 패널이 같은 것을 쓴다)
+  //   → 게이트도 한 곳뿐이라 "표에는 안 뜨는데 패널에는 뜬다"가 생길 수 없다.
+  assert.ok(/function _woEditActions\(o\)\{\s*\n\s*if\(!STATE\.canEdit\) return '';/.test(HTML),
+    '작업오더 편집 버튼 게이트 없음');
+  assert.strictEqual((HTML.match(/_woAccept\('\$\{esc\(o\.id\)\}'\)/g) || []).length, 1,
+    '접수 버튼을 두 곳에서 만들면 게이트가 갈라진다');
   assert.ok(/\$\{STATE\.canEdit\?'<button class="btn pri" onclick="openRecruitModal\(\)/.test(HTML),
     '공고 발행 버튼 게이트 없음');
 });
@@ -205,6 +210,84 @@ t('명단 관리 UI — 관리자에게만, 인트라넷 자동완성 재사용'
 });
 t('명단에서 빼는 것은 되돌리기 어려우니 확인을 받는다', () => {
   assert.ok(/명단에서 뺄까요\?/.test(HTML));
+});
+
+/* ── 5) 작업오더 상세 = 팝업 아닌 펼침행 · 상세 렌더러는 한 벌 ─────── */
+console.log('\n5) 작업오더 상세(펼침행 · 공유 렌더러)');
+const WOD = F('js/work-order-detail.js');
+const APP = F('js/index-app.js');
+
+t('★ 팝업(_modal)이 아니라 표 안에서 펼친다', () => {
+  assert.ok(/<tr class="wolrow" id="wolrow-\$\{i\}" onclick="_woToggle\(\$\{i\}\)"/.test(HTML),
+    '행 클릭이 펼침 토글이어야 한다');
+  assert.ok(/<tr class="woldetail" id="woldetail-\$\{i\}" style="display:none"><td colspan="8">/.test(HTML),
+    '상세는 바로 아래 행(colspan)으로 들어가야 한다');
+  assert.ok(!/_modal\(`작업오더/.test(HTML), '작업오더 상세를 다시 팝업으로 되돌리면 안 된다');
+});
+t('펼칠 때 한 번만 그린다(목록 30건이 한꺼번에 첨부 이미지를 받지 않게)', () => {
+  assert.ok(/if\(open\) _woFillDetail\(i\);/.test(HTML));
+  assert.ok(/if\(!box\|\|box\.dataset\.filled\) return;/.test(HTML), '재렌더 방지 플래그가 없다');
+});
+t('처리 버튼 클릭이 행 토글로 번지지 않는다', () => {
+  assert.ok(/<td style="white-space:nowrap" onclick="event\.stopPropagation\(\)">\$\{_woActions\(o,i\)\}<\/td>/.test(HTML));
+  assert.ok(/onclick="event\.stopPropagation\(\);_woAccept\(/.test(HTML)
+    && /onclick="event\.stopPropagation\(\);_woStatus\(/.test(HTML));
+});
+t('★★ 펼침행 클래스는 `wol` 접두 — 작업대 탭의 .worow/.wodetail/.wochip 과 겹치면 표가 무너진다', () => {
+  // 실측 사고: `.worow{display:grid}`(작업세부 패널용)가 이 표의 <tr> 에 걸려
+  //   8칸이 2열 그리드로 접혔고, `.wochip` 재정의는 그쪽 옵션 칩 색을 바꿔버렸다.
+  ['worow', 'wodetail', 'wochip'].forEach(c => {
+    assert.ok(!new RegExp('class="' + c + '" id="' + c).test(HTML), c + ' 이름 재사용');
+  });
+  assert.ok(/\.lgtable tr\.wolrow\{/.test(HTML) && /\.lgtable tr\.woldetail>td\{/.test(HTML));
+  // 기존 소유자 규칙이 그대로 살아 있어야 한다(내가 덮어쓰지 않았다는 증거)
+  assert.ok(/\n  \.worow\{display:grid;/.test(HTML), '작업세부 패널의 .worow 규칙이 사라졌다');
+  assert.ok(/\n  \.wochip\{display:inline-block;/.test(HTML), '작업세부 패널의 .wochip 규칙이 사라졌다');
+  assert.strictEqual((HTML.match(/\n  \.wochip\{/g) || []).length, 1, '.wochip 을 두 번 정의하면 뒤엣것이 이긴다');
+});
+
+t('★ 상세 본문은 관리자 대시보드와 **같은 렌더러**(사본 금지)', () => {
+  assert.ok(/_woDetailHtml\(o\)/.test(HTML), '통합 작업대가 공유 렌더러를 호출해야 한다');
+  assert.ok(/function _woDetailHtml\(o\) \{/.test(WOD), '렌더러는 모듈에 있어야 한다');
+  assert.ok(!/function _woDetailHtml/.test(APP), 'index-app.js 에 사본이 남아 있다');
+  assert.ok(!/function _woDetailHtml/.test(HTML), 'workdesk.html 에 사본을 만들면 안 된다');
+});
+t('두 화면이 같은 모듈을 로드한다(admin·admin-siand·workdesk)', () => {
+  ['admin.html', 'admin-siand.html'].forEach(p => {
+    const s = F(p);
+    assert.ok(/<script src="js\/work-order-detail\.js"><\/script>/.test(s), p + ' 미로드');
+    assert.ok(s.indexOf('js/work-order-detail.js') < s.indexOf('js/index-app.js'),
+      p + ': 렌더러가 index-app.js 뒤에 있으면 호출 시점에 없다');
+  });
+  assert.ok(/<script src="js\/work-order-detail\.js"><\/script>/.test(HTML), 'workdesk 미로드');
+});
+t('★ 모듈은 호스트 전역에 기대지 않는다(통합 작업대엔 escHtml 이 없다)', () => {
+  assert.ok(/typeof window\.escHtml === "function"/.test(WOD) && /\.replace\(\/&\/g, "&amp;"\)/.test(WOD),
+    'escHtml 폴백이 없으면 통합 작업대에서 상세가 통째로 터진다');
+  // 모듈이 정의하지 않은 _wo* 를 참조하면 통합 작업대에서만 죽는다 → 정적으로 막는다
+  const defined = new Set([...WOD.matchAll(/^function (_?\w+)\s*\(/gm)].map(m => m[1])
+    .concat([...WOD.matchAll(/^const (\w+)\s*=/gm)].map(m => m[1])));
+  const used = new Set([...WOD.matchAll(/\b(_wo\w+|_driveId|woImageModal)\s*\(/g)].map(m => m[1]));
+  const missing = [...used].filter(n => !defined.has(n));
+  assert.deepStrictEqual(missing, [], '모듈 안에서 정의되지 않은 참조: ' + missing.join(', '));
+  // ★ 반대 방향 — 관리자 대시보드 전용 전역이 모듈로 딸려오면 통합 작업대에서 죽는다.
+  //   실측: 함수 범위를 잘못 잡아 woCreateCampaign(showToast·openRecruitModal·_woCache 사용)이
+  //   통째로 딸려왔고, 공개 목록에 없어 **admin 의 '공고 발행' 버튼이 조용히 고장**났다.
+  const bare = WOD.replace(/\/\*[\s\S]*?\*\//g, '').replace(/^\s*\/\/.*$/gm, '');
+  ['showToast', 'openRecruitModal', '_woCache', 'loadWorkOrders', 'API_BASE_URL']
+    .forEach(n => assert.ok(!new RegExp('\\b' + n + '\\b').test(bare),
+      '관리자 대시보드 전용 전역이 모듈에 섞였다: ' + n));
+});
+t('★ 전역 공개 — index-app.js 의 기존 호출부·onclick 문자열이 이름 그대로 쓴다', () => {
+  ['_woDetailHtml', 'woImageModal', '_woImgError', '_woKv', '_woGuideUrls', '_woManagerNick']
+    .forEach(n => assert.ok(new RegExp(n + ': ' + n + '[,\\s]').test(WOD), '미공개: ' + n));
+  assert.ok(/window\[k\] = EXPORTS\[k\]/.test(WOD));
+  // onclick/onerror 문자열은 전역이어야 동작한다(모듈 스코프면 조용히 죽는다)
+  assert.ok(/onclick="woImageModal\(this\.dataset\.openurl\|\|this\.src\)" onerror="_woImgError\(this\)"/.test(WOD));
+});
+t('첨부 이미지는 클릭하면 크게 본다(라이트박스)', () => {
+  assert.ok(/function woImageModal\(url\)/.test(WOD) && /woImgModal/.test(WOD));
+  assert.ok(/\.woldoc img\{max-width:min\(100%,360px\)\}/.test(HTML), '펼침행에서 이미지 폭 제한이 없다');
 });
 
 console.log(`\n✅ ${pass} checks passed\n`);
