@@ -1,6 +1,6 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>1:1문의 창구 · 리뷰내역 카드 개선 — 비포/애프터 시안 (v2)</title>
+<title>1:1문의 창구 · 리뷰내역 카드 개선 — 비포/애프터 (반영 완료)</title>
 <style>
   :root{ color-scheme:light; }
   *{ box-sizing:border-box; }
@@ -199,7 +199,7 @@
 <div class="wrap">
 
   <div class="doc-head">
-    <h1>1:1문의 창구 · 리뷰내역 카드 개선 — 비포 / 애프터 시안</h1>
+    <h1>1:1문의 창구 · 리뷰내역 카드 개선 — 비포 / 애프터</h1>
     <p>
       ① 1:1문의 탭은 <b>내가 문의한 목록만</b> 화면 안에 표시 (팝업 없음)<br>
       ② 문의 시작은 <b>리뷰내역 카드를 눌렀을 때 올라오는 하단 팝업</b> 안의 버튼으로<br>
@@ -207,7 +207,7 @@
       ④ 제출완료 탭으로 바꾸면 상단 금액 블록이 <b>받을 예정 금액 → 누적 금액</b>으로 전환
     </p>
     <div class="doc-meta">
-      <span>리뷰어 화면</span><span>구현 전 시안</span><span class="v2">v2 · 요청 반영</span>
+      <span>리뷰어 화면</span><span class="v2">구현 반영 완료</span>
     </div>
   </div>
 
@@ -635,12 +635,12 @@
             <div class="ph-top"><b>제출완료 탭</b></div>
             <div class="ph-scroll">
               <div class="sumcard done">
-                <div class="h"><div class="t">🏆 누적 금액</div><div class="cnt">제출완료 12건</div></div>
-                <div class="sumrow"><span class="k">상품비용 <small>(구매 후 돌려받은 금액)</small></span><span class="v">243,600원</span></div>
-                <div class="sumrow"><span class="k">리뷰비 <small>(적립)</small></span><span class="v">12,000원</span></div>
+                <div class="h"><div class="t">🏆 누적 금액</div><div class="cnt">입금완료 9건</div></div>
+                <div class="sumrow"><span class="k">상품비용 <small>(구매 후 돌려받은 금액)</small></span><span class="v">182,700원</span></div>
+                <div class="sumrow"><span class="k">리뷰비 <small>(적립)</small></span><span class="v">9,000원</span></div>
                 <div class="sumdiv"></div>
-                <div class="sumtot"><span class="k">누적 금액 합계</span><span class="v">255,600원</span></div>
-                <div class="sumnote">※ 입금완료 <b>9건</b> · 입금대기 <b>3건</b>. 정산·입금 상태에 따라 실지급액은 달라질 수 있어요.</div>
+                <div class="sumtot"><span class="k">누적 금액 합계</span><span class="v">191,700원</span></div>
+                <div class="sumnote">※ <b>입금완료된 건</b>의 결제금액 + 리뷰비 누적합계예요.<br>※ 아직 입금되지 않은 <b>3건</b>은 누적 합계에 포함되지 않았어요.</div>
               </div>
               <div class="subtabs"><b>참여중 <span class="cnt">2</span></b><b class="on">제출완료 <span class="cnt">12</span></b></div>
             </div>
@@ -650,7 +650,7 @@
           <ul>
             <li>같은 자리·같은 모양에서 <b>제목과 숫자만</b> 바뀝니다(초록 계열로 구분).</li>
             <li>“구매 후 돌려받<b>을</b>” → “돌려받<b>은</b>” 처럼 문구만 완료형으로.</li>
-            <li>아래 한 줄에 <b>입금완료 / 입금대기 건수</b>를 함께 보여 정산 상태를 알 수 있습니다.</li>
+            <li><b>입금완료된 건만</b> 합산하고, 빠진 <b>입금대기 건수</b>를 아래 줄에 고지합니다(조용한 누락 없음).</li>
             <li>탭을 오가도 블록이 사라지지 않아 화면이 흔들리지 않습니다.</li>
           </ul>
         </div>
@@ -700,12 +700,13 @@
   </section>
 
   <div class="callout">
-    <b class="h">구현 시 참고 / 확인 부탁드리는 점</b>
+    <b class="h">확정된 기준 (구현 반영 완료)</b>
     <ul>
-      <li><b>누적 금액은 서버 계산이 새로 필요합니다.</b> 지금 금액 집계는 참여중(미제출) 건만 대상이라, 제출완료 건 합계를 내는 계산을 추가해야 합니다. 표시 위치·모양은 위 시안대로면 됩니다.</li>
-      <li><b>누적 금액의 기준</b> — 시안은 <u>제출완료 전체</u>(입금 여부 무관) 합계로 두고 아래 줄에 입금완료/대기 건수를 적었습니다. 혹시 <u>입금완료된 건만</u> 합산하길 원하시면 말씀해 주세요.</li>
-      <li><b>제출완료 카드의 상품비</b>는 참여중과 같은 방식(제출한 결제금액)으로 표시합니다. 옛 건 중 결제금액이 확인되지 않으면 참여중과 동일하게 <b>“상품비 조회안됨”</b>으로 나옵니다.</li>
-      <li><b>여러 건이 묶인 카드</b>(한 작업 2건 이상)의 [1:1 문의하기]는 <b>그 작업 기준 한 방</b>으로 열립니다.</li>
+      <li><b>누적 금액 = 입금완료된 건만</b> 합산합니다. 아직 입금되지 않은 제출완료 건은 합계에서 빼고, 그 건수를 블록 아래 줄에 적어 둡니다.</li>
+      <li><b>입금완료 판정</b>은 제출완료 카드의 [입금완료] 배지와 같은 기준을 씁니다 — 두 곳이 서로 다른 숫자를 말하지 않습니다.</li>
+      <li><b>결제금액이 확인되지 않는 옛 건</b>은 참여중 카드와 같이 상품비 합계에서 빠지고, 그 건수도 아래 줄에 표시됩니다.</li>
+      <li><b>여러 건이 묶인 카드</b>(한 작업 2건 이상)의 [1:1 문의하기]는 그 작업 기준 한 방으로 열립니다. 완료 건의 [이미지 확인·수정요청]은 행 단위 작업이라 묶음 카드에서는 종전대로 줄별 버튼을 씁니다.</li>
+      <li><b>일반 문의</b>는 내 문의함 화면 오른쪽 위 [＋ 일반 문의] 버튼으로 남깁니다.</li>
     </ul>
   </div>
 

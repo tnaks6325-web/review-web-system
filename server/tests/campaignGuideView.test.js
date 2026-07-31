@@ -105,8 +105,10 @@ ok('④ work-detail 응답에 inflowType(연결 작업오더 역조회)', /_look
 ok('⑤ chatUrl은 제출확정(isSubmitted) 후에만 반환', /chatUrl: isSubmitted \? \(camp\.chat_url \|\| ''\) : ''/.test(campRoutes));
 
 // ⑥ [v1.1] 리뷰 내역 카드 → 참여상품 정보 시트 + participation-brief
+// (배선 형태 갱신: 참여중·제출완료 카드가 한 코드로 통일되면서 done 여부를 인자로 넘긴다.
+//  대기 건은 여전히 그룹 items 전체를, 완료 건은 그 행 1건만 시트에 전달한다.)
 ok('⑥-1 리뷰 내역 대기 카드 클릭 → 참여상품 정보 시트(즉시 제출 직행 아님)',
-  /openPartInfoSheet\(items, \{ done: false \}\)/.test(idx) && !/card\.addEventListener\("click", \(\) => goToSubmit\(items\)\)/.test(idx));
+  /openPartInfoSheet\(isDone \? \[item\] : items, \{ done: isDone \}\)/.test(idx) && !/card\.addEventListener\("click", \(\) => goToSubmit\(items\)\)/.test(idx));
 ok('⑥-2 시트의 [리뷰제출하기]는 기존 goToSubmit 경유', /_partInfoSubmit[\s\S]{0,120}goToSubmit\(items\)/.test(idx));
 ok('⑥-3 카카오 입장 버튼(#FEE500) + 지정 라벨', /background:#FEE500[\s\S]{0,220}이 캠페인의 카톡 팀채팅방 입장/.test(idx));
 ok('⑥-4 상품 URL은 https만 링크화(scheme 가드)', /https\?:[\s\S]{0,12}test\(pu\)/.test(idx));
