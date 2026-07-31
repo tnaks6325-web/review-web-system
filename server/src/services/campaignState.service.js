@@ -246,12 +246,18 @@ function computeCampaignState(c, counts, now = new Date(), schedule = null) {
     };
   }
 
-  // 금일완료(홀드 만료 반환 시 open 복귀)
-  if (todayCount >= quota) return { ...payload, state: 'daily_done', reopensAt: _reopenIso() };
-
+  // ★★ 총 모집 충족을 **일일 마감보다 먼저** 본다(순서 고정).
+  //   반대로 두면 총원이 차는 순간 dailyQuota가 0이 되어 `todayCount(0) >= quota(0)`이
+  //   먼저 참이 되고, 다 모집한 캠페인이 매일 daily_done("내일 다시 오픈")으로 보인다.
+  //   apply 게이트는 soft_full·daily_done 둘 다 차단이라 **참여 동작은 이 순서와 무관**하다
+  //   (바뀌는 것은 관리자·리뷰어에게 보이는 상태 문구뿐).
+  //   ★ soft_full 에는 reopensAt 을 싣지 않는다 — 총원이 찼으니 "다시 열림"이 아니다.
   const rt = sch ? sch.totalSlots : (Number(c.recruit_total) || 0);
   const usedAll = (Number(counts.submittedAll) || 0) + (Number(counts.activeHolds) || 0);
-  if (rt > 0 && usedAll >= rt) return { ...payload, state: 'soft_full' }; // 잔여 대기 — 신청만 차단, 종착 아님
+  if (rt > 0 && usedAll >= rt) return { ...payload, state: 'soft_full' }; // 총원 충족 — 신청 차단
+
+  // 금일완료(홀드 만료 반환 시 open 복귀)
+  if (todayCount >= quota) return { ...payload, state: 'daily_done', reopensAt: _reopenIso() };
 
   if (!allDay && t >= endMin - bufferMin) return { ...payload, state: 'cutoff' }; // 신규 신청만 차단
 

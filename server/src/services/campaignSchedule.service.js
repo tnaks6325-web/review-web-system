@@ -154,6 +154,70 @@ async function deriveSchedules(db, tabs, now = new Date()) {
   return out;
 }
 
+/**
+ * 관제 진단용 — 연결 탭의 날짜 분포를 **게이트 없이 그대로** 돌려준다.
+ *
+ * ★ deriveSchedules 와 일부러 분리했다. 저쪽은 "신뢰 조건(날짜 2종·파싱 60%)을 통과한 것만"
+ *   반환하므로, 조건 미달일 때 **왜 일정이 안 잡혔는지**를 설명할 수가 없다.
+ *   하루에 끝나는 캠페인(날짜 1종)이 바로 그 경우다 — 관리자에게는 "미적용 + 사유"가 필요하다.
+ * ★ 읽기 전용·캐시 없음(관제 창을 열 때만 호출). 상태 계산에는 일절 쓰이지 않는다.
+ *
+ * @returns {{ok, applied, reason, dateColumn, distinctDates, totalDated, rowsScanned, dates:[{date,rows}]}}
+ */
+async function describeTabDates(db, sheetId, tabGid, now = new Date()) {
+  const fail = (reason) => ({ ok: false, applied: false, reason, distinctDates: 0, totalDated: 0, rowsScanned: 0, dates: [] });
+  if (!db || !sheetId || !tabGid) return fail('no_tab');
+  try {
+    const head = await db.query(
+      `SELECT row_index, cells FROM raw_sheet_rows
+        WHERE sheet_id = $1 AND tab_gid = $2 AND row_index <= ${HEADER_SCAN_ROWS}
+        ORDER BY row_index`,
+      [sheetId, String(tabGid)]
+    );
+    if (!head.rows.length) return fail('no_mirror');       // RAW 미러가 아직 이 탭을 못 봄
+    const det = detectSheetHeader(head.rows.map(r => (Array.isArray(r.cells) ? r.cells : [])));
+    const headers = det.headers || [];
+    const colIdx = findDateColumnIndex(headers);
+    if (colIdx < 0 || det.headerRowIndex == null) return fail('no_date_column');
+    const headerRowNo = head.rows[det.headerRowIndex - 1].row_index;
+
+    const col = await db.query(
+      `SELECT cells->>$3 AS v FROM raw_sheet_rows
+        WHERE sheet_id = $1 AND tab_gid = $2 AND row_index > $4
+        ORDER BY row_index`,
+      [sheetId, String(tabGid), String(colIdx), headerRowNo]
+    );
+    const raw = col.rows.map(r => (r.v == null ? '' : String(r.v)));
+    const nonEmpty = raw.filter(v => v.trim()).length;
+    const kstToday = new Date(now.getTime() + 9 * 3600 * 1000);
+    const parsed = parseDateColumn(raw, {
+      fallbackAnchor: { y: kstToday.getUTCFullYear(), m: kstToday.getUTCMonth() + 1 },
+    });
+    const byDate = {};
+    let totalDated = 0;
+    for (const d of parsed) { if (!d) continue; byDate[d] = (byDate[d] || 0) + 1; totalDated++; }
+    const dates = Object.keys(byDate).sort().map(d => ({ date: d, rows: byDate[d] }));
+
+    const ratioOk = !(nonEmpty > 0 && totalDated / nonEmpty < MIN_PARSE_RATIO);
+    const applied = dates.length >= MIN_DISTINCT_DATES && ratioOk;
+    const reason = applied ? 'applied'
+      : dates.length === 0 ? 'no_parsable_date'
+      : dates.length < MIN_DISTINCT_DATES ? 'single_date'   // 하루 완결 캠페인 — 일정 미적용
+      : 'low_parse_ratio';
+    return {
+      ok: true, applied, reason,
+      dateColumn: headers[colIdx] || '',
+      distinctDates: dates.length, totalDated, rowsScanned: nonEmpty,
+      firstDate: dates[0] ? dates[0].date : null,
+      lastDate: dates.length ? dates[dates.length - 1].date : null,
+      dates: dates.slice(0, 20),   // 표시용 상한(긴 캠페인 대비)
+    };
+  } catch (e) {
+    logger.warn(`[campaignSchedule] 진단 실패(${sheetId}/${tabGid}): ${e.message}`);
+    return fail('error');
+  }
+}
+
 /** 캠페인 행 배열 → 탭 목록(참여형 + 연결 gid 있는 것만) */
 function tabsOfCampaigns(rows) {
   return (rows || [])
@@ -175,6 +239,8 @@ module.exports = {
   scheduleFor,
   summarizeDates,
   findDateColumnIndex,
+  describeTabDates,
   DATE_HEADER_KEYWORDS,
+  MIN_DISTINCT_DATES,
   _clearCache,
 };

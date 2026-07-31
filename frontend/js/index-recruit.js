@@ -1464,6 +1464,53 @@ function _campOwnerTable(rows, now) {
   </div>`;
 }
 
+/** 📋 시트 대조 카드(관제) — 연결 탭의 로스터 행 수 vs 확정 수, 그리고 시트 일정 적용 여부·사유.
+ *  ★ 관측 전용이다. 여기 표시된 값이 캠페인 상태를 바꾸지 않는다(자동 종료 없음). */
+function _campSheetInfo(si) {
+  if (!si) return "";
+  const esc = s => String(s == null ? "" : s).replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+  const box = (bg, bd, html) => `<div style="margin:2px 0 12px;background:${bg};border:1px solid ${bd};border-radius:10px;padding:10px 12px;font-size:.74rem;line-height:1.65">${html}</div>`;
+  const md = d => { const m = /^\d{4}-(\d{2})-(\d{2})$/.exec(d || ""); return m ? `${+m[1]}/${+m[2]}` : (d || ""); };
+
+  const parts = [];
+  // ① 로스터 대조 — 차이가 있으면 그 수만큼 "시트엔 있는데 확정이 아닌 자리"다
+  if (si.rosterRows > 0) {
+    const diff = Number(si.diff) || 0;
+    parts.push(`<b>시트 로스터</b> ${si.rosterRows}행 · <b>확정</b> ${si.confirmed}건`
+      + (diff > 0
+        ? ` → <span style="color:#B45309;font-weight:800">차이 ${diff}건</span>`
+          + `<div style="color:#6B7280;font-size:.7rem">시트에는 자리가 있는데 확정으로 안 잡힌 건입니다. 만료·취소 목록에서 기구매(🛍) 건을 찾아 [수동확정]하거나, 직원이 직접 입력한 행인지 확인하세요.</div>`
+        : diff < 0
+          ? ` → <span style="color:#B45309;font-weight:800">확정이 ${-diff}건 더 많음</span>`
+            + `<div style="color:#6B7280;font-size:.7rem">시트 반영이 아직 안 됐거나(큐 대기) 로스터 행이 지워졌을 수 있습니다.</div>`
+          : ` <span style="color:#065F46;font-weight:800">✓ 일치</span>`));
+  }
+  // ② 시트 일정 적용 여부 — 미적용이면 왜인지(하루 완결·미러 미도달 등)
+  const s = si.schedule;
+  if (s) {
+    const why = {
+      applied: null,
+      single_date: `시트 날짜가 <b>${esc(md(s.firstDate))} 하루</b>뿐이라 <b>시트 일정이 적용되지 않습니다</b>(날짜 2종 이상일 때만 인식). 마감은 발행폼의 총 모집인원으로 판정됩니다.`,
+      no_parsable_date: "날짜 컬럼의 값을 해석하지 못해 시트 일정이 적용되지 않습니다.",
+      low_parse_ratio: "날짜 컬럼에 해석 불가한 값이 많아 시트 일정이 적용되지 않습니다.",
+      no_date_column: "연결 탭에서 날짜 컬럼(구매일자·시작일 등)을 찾지 못했습니다.",
+      no_mirror: "이 탭이 아직 미러링되지 않았습니다(최대 5분). 잠시 후 다시 확인하세요.",
+      no_tab: "연결된 탭 정보가 없습니다.",
+      error: "시트 일정 조회 중 오류가 발생했습니다.",
+    }[s.reason];
+    if (s.applied) {
+      parts.push(`<b>시트 일정</b> 적용 중 · ${esc(md(s.firstDate))} ~ ${esc(md(s.lastDate))} · 날짜 ${s.distinctDates}종 / ${s.totalDated}행`);
+    } else if (why) {
+      parts.push(`<b>시트 일정</b> <span style="color:#B45309;font-weight:800">미적용</span> — ${why}`
+        + (s.distinctDates ? `<div style="color:#6B7280;font-size:.7rem">인식된 날짜: ${s.dates.map(d => esc(md(d.date)) + "(" + d.rows + "행)").join(" · ")}</div>` : ""));
+    }
+  }
+  if (!parts.length) return "";
+  const warn = (Number(si.diff) || 0) !== 0 || (s && !s.applied);
+  return box(warn ? "#FFFBEB" : "#F0FDF4", warn ? "#FDE68A" : "#BBF7D0",
+    `<div style="font-weight:800;color:${warn ? "#92400E" : "#065F46"};margin-bottom:4px">📋 시트 대조 — ${esc(si.tabName)}</div>` + parts.join('<div style="height:6px"></div>'));
+}
+
 async function _loadCampControl(campId) {
   const body = document.getElementById("ccBody");
   const stats = document.getElementById("ccStats");
@@ -1494,13 +1541,15 @@ async function _loadCampControl(campId) {
     const optTableHtml = _campOptionTable(j.options || [], items, now, today, kstDay);
     // 👥 타계정 묶음(063): 소유자별 건수 — "한 리뷰어가 실제 몇 건 진행 중인가"를 즉시 파악(사재기 관측)
     const ownerTableHtml = _campOwnerTable(items, now);
+    // 📋 시트 대조 — "시트엔 100행인데 확정 99" / "하루 완결이라 시트 일정 미적용"을 여기서 확인
+    const sheetHtml = _campSheetInfo(j.sheetInfo);
     if (!items.length) {
-      body.innerHTML = optTableHtml + `<div style="padding:30px;text-align:center;color:#9CA3AF">참여 이력이 없습니다.</div>`;
+      body.innerHTML = sheetHtml + optTableHtml + `<div style="padding:30px;text-align:center;color:#9CA3AF">참여 이력이 없습니다.</div>`;
       return;
     }
     const chip = (bg, fg, tx) => `<span style="font-size:.66rem;font-weight:800;background:${bg};color:${fg};border-radius:6px;padding:2px 8px;white-space:nowrap">${tx}</span>`;
     const fmtT = iso => iso ? new Date(iso).toLocaleString("ko-KR", { timeZone: "Asia/Seoul", month: "numeric", day: "numeric", hour: "2-digit", minute: "2-digit" }) : "";
-    body.innerHTML = optTableHtml + ownerTableHtml + items.sort((a, b) => new Date(b.applied_at) - new Date(a.applied_at)).map(r => {
+    body.innerHTML = sheetHtml + optTableHtml + ownerTableHtml + items.sort((a, b) => new Date(b.applied_at) - new Date(a.applied_at)).map(r => {
       const holdValid = r.status === "applied" && r.expires_at && Date.parse(r.expires_at) > now;
       let st;
       if (r.status === "submitted") st = chip("#D1FAE5", "#065F46", "✓ 제출확정");
