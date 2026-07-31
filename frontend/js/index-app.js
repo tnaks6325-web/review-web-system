@@ -2621,6 +2621,42 @@ function _raOpenWorkdesk(id) {
   url.hash = "go=" + encodeURIComponent(JSON.stringify(payload));
   window.open(url.toString(), "_blank");
 }
+/* ═══ 캡처 형식오류 알림 — 제출 사진 바로 확인 ═══
+   capture_mismatch(다른 형식의 이미지) 로그는 context.fileId에 리뷰어가 올린 Drive 파일ID를 담는다.
+   그 이미지를 알림 카드에 인라인 썸네일로 띄우고, 클릭하면 라이트박스로 크게 본다
+   (작업대를 열지 않고도 "정말 다른 형식인지"를 즉시 확인). 이미지 프록시는 무인증·추측불가 fileId. */
+function _raImgUrl(fileId) {
+  const base = (typeof API_BASE_URL !== "undefined" && API_BASE_URL) ? API_BASE_URL : "";
+  return base + "/api/drive/image/" + encodeURIComponent(fileId);
+}
+/** 알림 로그에서 표시 가능한 캡처 파일ID(유효 Drive id만) — 없으면 빈 문자열 */
+function _raCaptureFileId(l) {
+  try {
+    const ctx = l && l.context;
+    const fid = ctx && typeof ctx === "object" ? ctx.fileId : "";
+    return /^[-\w]{20,}$/.test(String(fid || "")) ? String(fid) : "";
+  } catch (_) { return ""; }
+}
+/** 제출 캡처 라이트박스(크게 보기) — 카드 썸네일 클릭 시 */
+function _raViewImage(fileId) {
+  if (!/^[-\w]{20,}$/.test(String(fileId || ""))) return;
+  const url = _raImgUrl(fileId);
+  let ovl = document.getElementById("raImgOvl");
+  if (!ovl) {
+    ovl = document.createElement("div");
+    ovl.id = "raImgOvl";
+    ovl.style.cssText = "position:fixed;inset:0;z-index:100010;background:rgba(0,0,0,.82);display:flex;align-items:center;justify-content:center;padding:20px";
+    ovl.addEventListener("click", e => { if (e.target === ovl) ovl.remove(); });
+    document.body.appendChild(ovl);
+  }
+  ovl.innerHTML =
+    '<div style="position:relative;max-width:96vw;max-height:92vh;display:flex;flex-direction:column;align-items:center;gap:12px">'
+    + '<img src="' + url + '" style="max-width:96vw;max-height:80vh;border-radius:10px;box-shadow:0 8px 40px rgba(0,0,0,.5);background:#fff">'
+    + '<div style="display:flex;gap:8px">'
+    + '<a href="' + url + '" target="_blank" rel="noopener" style="padding:8px 16px;background:#fff;color:#111827;border-radius:8px;font-size:.82rem;font-weight:700;text-decoration:none">새 탭에서 열기 ↗</a>'
+    + '<button onclick="document.getElementById(\'raImgOvl\').remove()" style="padding:8px 16px;background:#DC2626;color:#fff;border:none;border-radius:8px;font-size:.82rem;font-weight:700;cursor:pointer">닫기</button>'
+    + "</div></div>";
+}
 function _raEnsureStack() {
   let el = document.getElementById("raNotifStack");
   if (!el) {
@@ -2654,9 +2690,18 @@ async function _raCheckAlerts() {
       const cancelBtn = _RA_CANCELABLE.has(l.eventType)
         ? '<button onclick="_raCancelOrder(' + Number(l.id) + ')" title="시트에서 지운 것이 주문취소였다면 여기를 누르세요" style="padding:5px 10px;border:1px solid #FCA5A5;background:#fff;color:#B91C1C;border-radius:8px;font-size:.75rem;font-weight:600;cursor:pointer">취소 처리</button>'
         : "";
+      // 📷 형식오류 캡처 인라인 미리보기 — 제출 사진을 바로 확인(작업대 안 열어도 됨). 없으면 미노출.
+      const capFileId = _raCaptureFileId(l);
+      const imgHtml = capFileId
+        ? '<div style="margin-top:8px">'
+          + '<img src="' + _raImgUrl(capFileId) + '" loading="lazy" onclick="_raViewImage(\'' + capFileId + '\')" onerror="this.parentNode.style.display=\'none\'" style="max-width:100%;max-height:190px;border-radius:8px;border:1px solid #FCA5A5;cursor:zoom-in;display:block" title="클릭하면 크게 봅니다">'
+          + '<div style="font-size:.68rem;color:#B91C1C;margin-top:3px">📷 리뷰어가 제출한 캡처 — 클릭하면 크게 보기</div>'
+          + '</div>'
+        : "";
       card.innerHTML =
         '<div style="font-weight:800;margin-bottom:4px;color:#DC2626"><i class="fas fa-exclamation-triangle"></i> 리뷰어 중요알림</div>' +
         '<div style="word-break:break-all">' + escHtml(l.message || "") + "</div>" +
+        imgHtml +
         '<div style="display:flex;gap:6px;justify-content:flex-end;margin-top:8px;flex-wrap:wrap">' +
           '<button onclick="_raOpenWorkdesk(' + Number(l.id) + ')" title="' + (canGo ? '이 리뷰어의 행이 있는 작업대를 새 탭으로 엽니다' : '통합 작업대를 새 탭으로 엽니다') + '" style="padding:5px 10px;border:1px solid #FCA5A5;background:#fff;color:#B91C1C;border-radius:8px;font-size:.75rem;font-weight:600;cursor:pointer">' + (canGo ? '작업대 열기 ↗' : '로그 창 열기') + '</button>' +
           cancelBtn +

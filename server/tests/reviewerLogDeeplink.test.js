@@ -264,4 +264,18 @@ t('22. 문맥 없는 옛 로그는 평소대로 목록만 연다(막다른 길 �
   assert.ok(/openWorkdesk\(\); return;/.test(RA_FN), '문맥이 없으면 openWorkdesk() 폴백이어야 함');
 });
 
+// ── 7) 형식오류 캡처 — 제출 사진 바로 확인 ──────────────────
+t('23. 캡처 형식오류 알림에 제출 사진 인라인 미리보기 + 라이트박스', () => {
+  // context.fileId(리뷰어 업로드 Drive 파일)를 카드에 썸네일로 렌더하고 클릭 시 크게 본다
+  assert.ok(/function _raCaptureFileId/.test(APP), '캡처 fileId 추출 헬퍼가 있어야 함');
+  assert.ok(/ctx\.fileId/.test(APP), 'context.fileId 를 읽어야 함');
+  assert.ok(/\/api\/drive\/image\//.test(APP), '무인증 Drive 이미지 프록시로 표시해야 함');
+  const card = APP.slice(APP.indexOf('async function _raCheckAlerts'), APP.indexOf('async function _raResolve'));
+  assert.ok(/_raCaptureFileId\(l\)/.test(card), '카드가 캡처 fileId 를 조회해야 함');
+  assert.ok(/onclick="_raViewImage\(/.test(card), '썸네일 클릭이 라이트박스를 열어야 함');
+  assert.ok(/function _raViewImage/.test(APP), '라이트박스 함수가 있어야 함');
+  // 유효 Drive id(추측불가 20+)만 렌더 — 임의 문자열 img src 주입 방지
+  assert.ok(/\/\^\[-\\w\]\{20,\}\$\//.test(APP), 'fileId 는 Drive id 형식 검증 후에만 렌더해야 함');
+});
+
 console.log('\n' + pass + ' runtime checks passed');
