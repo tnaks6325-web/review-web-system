@@ -22,6 +22,10 @@ const HEADER_SCAN_ROWS = 60;
 // 일정으로 인정하는 최소 조건 — 날짜 2종 이상 + 값 있는 칸의 과반이 파싱돼야 신뢰
 const MIN_DISTINCT_DATES = 2;
 const MIN_PARSE_RATIO = 0.6;
+// ★ 킬스위치 — 시트 일정으로 정원·마감일을 정하는 동작을 끈다(끄면 발행폼 값으로만 운영).
+//   `cells->>$3` 캐스트 누락으로 이 기능이 오래 무음 상태였다가 되살아나는 배포라,
+//   예기치 못한 정원 변동이 보이면 즉시 되돌릴 수단이 필요하다.
+const SHEET_SCHEDULE_ENABLED = process.env.CAMPAIGN_SHEET_SCHEDULE !== '0';
 
 const _cache = new Map();               // key → { at, value }
 const CACHE_TTL_MS = 60 * 1000;         // RAW 미러가 5분 주기라 1분 캐시로 충분
@@ -74,6 +78,7 @@ function summarizeDates(isoDates, nonEmptyCount) {
  */
 async function deriveSchedules(db, tabs, now = new Date()) {
   const out = new Map();
+  if (!SHEET_SCHEDULE_ENABLED) return out;   // 킬스위치 — 빈 맵 = 전부 미적용(발행폼 값으로 운영)
   const wanted = [];
   const seen = new Set();
   for (const t of tabs || []) {
@@ -122,8 +127,13 @@ async function deriveSchedules(db, tabs, now = new Date()) {
           const headerRowNo = det.headerRowIndex ? rows[det.headerRowIndex - 1].row_index : null;
           if (colIdx >= 0 && headerRowNo != null) {
             // 2단계: 날짜 컬럼 한 칸씩만 순서대로 읽는다(넓은 시트에서도 전송량 일정)
+            // ★★ `cells->>$3::int` 의 `::int` 를 절대 빼지 말 것.
+            //   cells 는 JSONB **배열**인데, 파라미터를 캐스트하지 않으면 PostgreSQL이
+            //   `jsonb ->> text`(객체 키 조회)로 해석해 **모든 행이 NULL** 이 된다.
+            //   에러가 아니라 조용한 빈 값이라, 일정이 "해석 불가"로 보이며 기능 전체가
+            //   무음으로 꺼진다(실측: PG16에서 배열에 텍스트 키 조회 → NULL).
             const col = await db.query(
-              `SELECT cells->>$3 AS v
+              `SELECT cells->>$3::int AS v
                  FROM raw_sheet_rows
                 WHERE sheet_id = $1 AND tab_gid = $2 AND row_index > $4
                 ORDER BY row_index`,
@@ -181,8 +191,9 @@ async function describeTabDates(db, sheetId, tabGid, now = new Date()) {
     if (colIdx < 0 || det.headerRowIndex == null) return fail('no_date_column');
     const headerRowNo = head.rows[det.headerRowIndex - 1].row_index;
 
+    // ★★ `::int` 필수 — 빼면 jsonb 배열에 텍스트 키 조회가 되어 전 행 NULL(위 주석 참조)
     const col = await db.query(
-      `SELECT cells->>$3 AS v FROM raw_sheet_rows
+      `SELECT cells->>$3::int AS v FROM raw_sheet_rows
         WHERE sheet_id = $1 AND tab_gid = $2 AND row_index > $4
         ORDER BY row_index`,
       [sheetId, String(tabGid), String(colIdx), headerRowNo]

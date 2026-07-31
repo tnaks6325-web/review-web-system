@@ -1636,11 +1636,35 @@ router.get('/admin/:id/applications', authMiddleware, adminOrMasterMiddleware, a
         );
         const confirmed = rows.filter(r => r.status === 'submitted').length;
         const rosterRows = Number(ri[0]?.n) || 0;
+        // ★ 차이가 있을 때만 "어느 행이 확정에 없는지"를 찾는다(평상시 쿼리 0).
+        //   대조 키 = phone8(연락처 끝 8자리). 시스템의 신원키와 같아야 오탐이 없다.
+        let unmatched = [];
+        if (rosterRows > confirmed) {
+          const { rows: um } = await pool.query(
+            `SELECT ri.row_index AS row, ri.reviewer_name AS name, ri.phone8
+               FROM review_index ri
+              WHERE ri.sheet_id = $1 AND ri.tab_name = $2
+                AND NOT EXISTS (
+                  SELECT 1 FROM campaign_applications ca
+                   WHERE ca.campaign_id = $3 AND ca.status = 'submitted'
+                     AND ca.phone8 <> '' AND ca.phone8 = ri.phone8
+                )
+              ORDER BY ri.row_index
+              LIMIT 30`,
+            [c0.linked_sheet_id, c0.linked_tab_name, id]
+          );
+          unmatched = um.map(r => ({
+            row: r.row, name: r.name || '',
+            phone4: String(r.phone8 || '').replace(/\D/g, '').slice(-4),
+            noPhone: !String(r.phone8 || '').trim(),
+          }));
+        }
         sheetInfo = {
           tabName: c0.linked_tab_name,
           rosterRows,
           confirmed,
           diff: rosterRows > 0 ? rosterRows - confirmed : null,
+          unmatched,
           schedule: await describeTabDates(pool, c0.linked_sheet_id, c0.linked_tab_gid, new Date()),
         };
       }
