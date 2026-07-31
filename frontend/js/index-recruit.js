@@ -1464,6 +1464,24 @@ function _campOwnerTable(rows, now) {
   </div>`;
 }
 
+/** 확정으로 안 잡힌 시트 행 목록 — "몇 행의 누구"인지 바로 짚어준다.
+ *  ★ 캠페인 정원은 '위치'가 아니라 '숫자'(총원 − 확정)로 계산된다. 이 목록은 그 차이가
+ *    시트의 어느 줄에서 비롯됐는지 찾아주는 것이지, 시스템이 그 줄을 비었다고 보는 게 아니다. */
+function _campUnmatchedRows(list) {
+  if (!Array.isArray(list) || !list.length) return "";
+  const esc = s => String(s == null ? "" : s).replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+  const items = list.slice(0, 30).map(u =>
+    `<span style="display:inline-block;background:#fff;border:1px solid #FDE68A;border-radius:6px;padding:2px 7px;margin:2px 3px 0 0;font-size:.7rem">`
+    + `<b>${u.row != null ? u.row + "행" : "행?"}</b> ${esc(u.name) || "(이름 없음)"}`
+    + (u.noPhone ? ` <span style="color:#B45309">연락처 없음</span>` : ` <span style="color:#9CA3AF">***${esc(u.phone4)}</span>`)
+    + `</span>`).join("");
+  return `<div style="margin-top:5px">`
+    + `<div style="font-size:.7rem;color:#92400E;font-weight:800;margin-bottom:2px">확정으로 안 잡힌 시트 행</div>`
+    + items
+    + `<div style="color:#9CA3AF;font-size:.66rem;margin-top:3px">연락처(끝 8자리)로 대조합니다. 연락처가 비어 있는 행은 대조가 불가능해 항상 여기에 나옵니다.</div>`
+    + `</div>`;
+}
+
 /** 📋 시트 대조 카드(관제) — 연결 탭의 로스터 행 수 vs 확정 수, 그리고 시트 일정 적용 여부·사유.
  *  ★ 관측 전용이다. 여기 표시된 값이 캠페인 상태를 바꾸지 않는다(자동 종료 없음). */
 function _campSheetInfo(si) {
@@ -1480,6 +1498,7 @@ function _campSheetInfo(si) {
       + (diff > 0
         ? ` → <span style="color:#B45309;font-weight:800">차이 ${diff}건</span>`
           + `<div style="color:#6B7280;font-size:.7rem">시트에는 자리가 있는데 확정으로 안 잡힌 건입니다. 만료·취소 목록에서 기구매(🛍) 건을 찾아 [수동확정]하거나, 직원이 직접 입력한 행인지 확인하세요.</div>`
+          + _campUnmatchedRows(si.unmatched)
         : diff < 0
           ? ` → <span style="color:#B45309;font-weight:800">확정이 ${-diff}건 더 많음</span>`
             + `<div style="color:#6B7280;font-size:.7rem">시트 반영이 아직 안 됐거나(큐 대기) 로스터 행이 지워졌을 수 있습니다.</div>`
