@@ -2588,74 +2588,31 @@ function _onWorkOrderNewSSE(data) {
    화면·통합작업대 로그 창에서 함께 사라진다(로컬 seen 저장 불필요). 도착 채널 = SSE 'reviewer_alert'
    (실시간) + 2분 폴링(폴백) — wo 알림 스택(우측하단)과 겹치지 않게 좌측하단 사용. */
 let _raTimer = null, _raInFlight = false;
-let _raCache = [];   // 알림 원본(딥링크 문맥) — onclick 문자열에 값을 심지 않으려고 id 로만 참조한다
 const _RA_POLL_MS = 2 * 60 * 1000;
 
+// 유형 → 요약 카테고리 매핑. 여기 없는 event_type 은 '기타'로 합산(조용한 누락 방지).
+const _RA_CATS = [
+  { icon: "🖼", label: "리뷰에 다른 형식 이미지 제출", types: ["capture_mismatch"] },
+  { icon: "📄", label: "양식 제출했으나 시트입력 안됨", types: ["order_lost", "order_lost_manual", "order_unmirrored"] },
+  { icon: "📷", label: "구매캡처 미첨부", types: ["order_no_capture"] },
+];
+
 /**
- * 중요알림 → **그 리뷰어의 행이 있는 작업대**를 새 탭으로 연다.
- *
- * 종전에는 `window.open('workdesk.html')` 뿐이라 통합작업대가 "위에서 작업을 선택하세요"
- * 상태로만 열렸다 — 알림에 적힌 탭을 관리자가 상단바에서 다시 찾아야 했다.
- * ★ 딥링크는 workdesk 의 리뷰어 로그 탭이 쓰는 것과 **같은 `#go=` 계약**을 쓴다
- *   (`_logOpenWorkdesk`). 사본을 만들면 한쪽만 고쳐져 두 경로가 어긋난다.
- * ★ 토큰은 URL에 싣지 않는다 — 기존 `openWorkdesk()`와 같은 `raw_sso` 핸드오프 +
- *   같은 오리진 새 탭의 sessionStorage 승계로 충분하다.
- * 문맥(sheetId·tabName)이 없는 옛 로그는 평소대로 목록만 연다(막다른 길 방지).
+ * 중요알림 요약 카드 → 통합작업대 **리뷰어 로그 뷰**를 새 탭으로 연다(#view=logs).
+ * 개별 확인·처리·이미지 미리보기는 전부 그 화면에서 한다(대시보드는 유형별 건수만 요약).
+ * ★ 토큰은 URL에 안 싣고 기존 `openWorkdesk()`와 같은 `raw_sso` 핸드오프를 재사용한다.
  */
-function _raOpenWorkdesk(id) {
+function openWorkdeskLogs() {
   const token = sessionStorage.getItem("admin_token") || "";
   if (!token || !isAdminLoggedIn()) { showToast("관리자 로그인이 필요합니다.", "warning"); return; }
-  const l = (_raCache || []).find(x => String(x.id) === String(id));
-  if (!l || !l.sheetId || !l.tabName) { openWorkdesk(); return; }
   try {
     localStorage.setItem("raw_sso", JSON.stringify({
       token, name: getAdminName(), role: getAdminRole(), ts: Date.now(),
     }));
   } catch (_) { /* localStorage 불가 시에도 페이지 자체 로그인으로 폴백 */ }
-  const payload = {
-    s: l.sheetId, t: l.tabName, g: l.tabGid || "",
-    p: l.phone8 || "", n: l.reviewerName || "", st: l.campaignName || "",
-  };
-  // 연락처·이름은 프래그먼트(#)로만 — 서버 로그·Referer에 안 실리고 도착 즉시 주소창에서 제거된다
   const url = new URL("workdesk.html", location.href);
-  url.hash = "go=" + encodeURIComponent(JSON.stringify(payload));
+  url.hash = "view=logs";
   window.open(url.toString(), "_blank");
-}
-/* ═══ 캡처 형식오류 알림 — 제출 사진 바로 확인 ═══
-   capture_mismatch(다른 형식의 이미지) 로그는 context.fileId에 리뷰어가 올린 Drive 파일ID를 담는다.
-   그 이미지를 알림 카드에 인라인 썸네일로 띄우고, 클릭하면 라이트박스로 크게 본다
-   (작업대를 열지 않고도 "정말 다른 형식인지"를 즉시 확인). 이미지 프록시는 무인증·추측불가 fileId. */
-function _raImgUrl(fileId) {
-  const base = (typeof API_BASE_URL !== "undefined" && API_BASE_URL) ? API_BASE_URL : "";
-  return base + "/api/drive/image/" + encodeURIComponent(fileId);
-}
-/** 알림 로그에서 표시 가능한 캡처 파일ID(유효 Drive id만) — 없으면 빈 문자열 */
-function _raCaptureFileId(l) {
-  try {
-    const ctx = l && l.context;
-    const fid = ctx && typeof ctx === "object" ? ctx.fileId : "";
-    return /^[-\w]{20,}$/.test(String(fid || "")) ? String(fid) : "";
-  } catch (_) { return ""; }
-}
-/** 제출 캡처 라이트박스(크게 보기) — 카드 썸네일 클릭 시 */
-function _raViewImage(fileId) {
-  if (!/^[-\w]{20,}$/.test(String(fileId || ""))) return;
-  const url = _raImgUrl(fileId);
-  let ovl = document.getElementById("raImgOvl");
-  if (!ovl) {
-    ovl = document.createElement("div");
-    ovl.id = "raImgOvl";
-    ovl.style.cssText = "position:fixed;inset:0;z-index:100010;background:rgba(0,0,0,.82);display:flex;align-items:center;justify-content:center;padding:20px";
-    ovl.addEventListener("click", e => { if (e.target === ovl) ovl.remove(); });
-    document.body.appendChild(ovl);
-  }
-  ovl.innerHTML =
-    '<div style="position:relative;max-width:96vw;max-height:92vh;display:flex;flex-direction:column;align-items:center;gap:12px">'
-    + '<img src="' + url + '" style="max-width:96vw;max-height:80vh;border-radius:10px;box-shadow:0 8px 40px rgba(0,0,0,.5);background:#fff">'
-    + '<div style="display:flex;gap:8px">'
-    + '<a href="' + url + '" target="_blank" rel="noopener" style="padding:8px 16px;background:#fff;color:#111827;border-radius:8px;font-size:.82rem;font-weight:700;text-decoration:none">새 탭에서 열기 ↗</a>'
-    + '<button onclick="document.getElementById(\'raImgOvl\').remove()" style="padding:8px 16px;background:#DC2626;color:#fff;border:none;border-radius:8px;font-size:.82rem;font-weight:700;cursor:pointer">닫기</button>'
-    + "</div></div>";
 }
 function _raEnsureStack() {
   let el = document.getElementById("raNotifStack");
@@ -2672,63 +2629,46 @@ async function _raCheckAlerts() {
   if (_raInFlight) return;
   _raInFlight = true;
   try {
-    const r = await gasGet({ action: "reviewerLogsList", unresolved: "1", severity: "critical", limit: "8" });
-    if (!r || !r.ok || !Array.isArray(r.items)) return;   // 조회 실패 시 기존 카드 유지
-    _raCache = r.items;                                   // 딥링크 문맥(시트·탭·리뷰어) 보관
-    const stack = _raEnsureStack();
-    const ids = new Set(r.items.map(l => String(l.id)));
-    // reconcile — 타 관리자가 이미 확인한 카드는 자동 회수
-    stack.querySelectorAll("[data-ra-id]").forEach(el => { if (!ids.has(el.getAttribute("data-ra-id"))) el.remove(); });
-    r.items.forEach(l => {
-      if (stack.querySelector('[data-ra-id="' + l.id + '"]')) return;
-      const card = document.createElement("div");
-      card.setAttribute("data-ra-id", String(l.id));
-      card.style.cssText = "background:#FEF2F2;border:1.5px solid #FCA5A5;border-radius:12px;padding:12px 14px;box-shadow:0 6px 20px rgba(220,38,38,.18);font-size:.82rem;color:#7F1D1D;line-height:1.5";
-      // 시트에서 지운 게 '의도된 취소'였던 경우의 1클릭 경로 — 누르면 재기록이 멈춘다.
-      // 알림에 적힌 탭으로 바로 들어갈 수 있는지 — 옛 로그엔 시트·탭 문맥이 없다
-      const canGo = !!(l.sheetId && l.tabName);
-      const cancelBtn = _RA_CANCELABLE.has(l.eventType)
-        ? '<button onclick="_raCancelOrder(' + Number(l.id) + ')" title="시트에서 지운 것이 주문취소였다면 여기를 누르세요" style="padding:5px 10px;border:1px solid #FCA5A5;background:#fff;color:#B91C1C;border-radius:8px;font-size:.75rem;font-weight:600;cursor:pointer">취소 처리</button>'
-        : "";
-      // 📷 형식오류 캡처 인라인 미리보기 — 제출 사진을 바로 확인(작업대 안 열어도 됨). 없으면 미노출.
-      const capFileId = _raCaptureFileId(l);
-      const imgHtml = capFileId
-        ? '<div style="margin-top:8px">'
-          + '<img src="' + _raImgUrl(capFileId) + '" loading="lazy" onclick="_raViewImage(\'' + capFileId + '\')" onerror="this.parentNode.style.display=\'none\'" style="max-width:100%;max-height:190px;border-radius:8px;border:1px solid #FCA5A5;cursor:zoom-in;display:block" title="클릭하면 크게 봅니다">'
-          + '<div style="font-size:.68rem;color:#B91C1C;margin-top:3px">📷 리뷰어가 제출한 캡처 — 클릭하면 크게 보기</div>'
-          + '</div>'
-        : "";
-      card.innerHTML =
-        '<div style="font-weight:800;margin-bottom:4px;color:#DC2626"><i class="fas fa-exclamation-triangle"></i> 리뷰어 중요알림</div>' +
-        '<div style="word-break:break-all">' + escHtml(l.message || "") + "</div>" +
-        imgHtml +
-        '<div style="display:flex;gap:6px;justify-content:flex-end;margin-top:8px;flex-wrap:wrap">' +
-          '<button onclick="_raOpenWorkdesk(' + Number(l.id) + ')" title="' + (canGo ? '이 리뷰어의 행이 있는 작업대를 새 탭으로 엽니다' : '통합 작업대를 새 탭으로 엽니다') + '" style="padding:5px 10px;border:1px solid #FCA5A5;background:#fff;color:#B91C1C;border-radius:8px;font-size:.75rem;font-weight:600;cursor:pointer">' + (canGo ? '작업대 열기 ↗' : '로그 창 열기') + '</button>' +
-          cancelBtn +
-          '<button onclick="_raResolve(' + Number(l.id) + ')" style="padding:5px 12px;border:none;background:#DC2626;color:#fff;border-radius:8px;font-size:.75rem;font-weight:700;cursor:pointer">확인</button>' +
-        "</div>";
-      stack.appendChild(card);
-    });
+    // 개수만 필요하다 — 항목 본문은 안 받고(limit 1) 서버 집계(byTypeCritical)로 유형별 요약
+    const r = await gasGet({ action: "reviewerLogsList", unresolved: "1", severity: "critical", limit: "1" });
+    if (!r || !r.ok || !r.counts) return;   // 조회 실패 시 기존 카드 유지
+    _raRenderSummary(r.counts.byTypeCritical || {}, Number(r.counts.critical) || 0);
   } catch (_) {
   } finally {
     _raInFlight = false;
   }
 }
-async function _raResolve(id) {
-  try { await gasGet({ action: "reviewerLogResolve", id: id }); } catch (_) {}
-  const el = document.querySelector('[data-ra-id="' + id + '"]');
-  if (el) el.remove();
-}
-// 「시트에서 지운 게 사실은 취소」 — 서버도 동일 목록으로 검증(신뢰하지 않고 재확인)
-const _RA_CANCELABLE = new Set(["order_lost", "order_lost_manual", "order_unmirrored"]);
-async function _raCancelOrder(id) {
-  if (!confirm("이 주문을 취소 처리할까요?\n\n· 시트에 다시 기록되지 않습니다.\n· 시트에 행이 남아 있으면 그 행을 비웁니다(다른 사람이 이미 쓴 행은 건드리지 않습니다).\n· 서버에서 취소 상태로 확정됩니다.")) return;
-  let r = null;
-  try { r = await gasGet({ action: "reviewerLogCancelOrder", id: id }); } catch (_) {}
-  if (!r || !r.ok) { showToast("취소 처리 실패" + (r && r.error ? ": " + r.error : ""), "error"); return; }
-  const el = document.querySelector('[data-ra-id="' + id + '"]');
-  if (el) el.remove();
-  showToast("주문이 취소 처리되었습니다. 시트에 다시 기록되지 않습니다.", "success");
+/** 유형별 미해결 critical 건수를 좌측하단 단일 요약 카드로 렌더(0건이면 카드 제거). */
+function _raRenderSummary(byType, totalCritical) {
+  const stack = _raEnsureStack();
+  let card = document.getElementById("raSummaryCard");
+  if (!totalCritical) { if (card) card.remove(); return; }
+  const known = new Set();
+  const rows = [];
+  _RA_CATS.forEach(cat => {
+    let n = 0; cat.types.forEach(t => { n += Number(byType[t]) || 0; known.add(t); });
+    if (n > 0) rows.push({ icon: cat.icon, label: cat.label, n });
+  });
+  let etc = 0; Object.keys(byType || {}).forEach(t => { if (!known.has(t)) etc += Number(byType[t]) || 0; });
+  if (etc > 0) rows.push({ icon: "⚠", label: "기타 중요알림", n: etc });
+  if (!card) {
+    card = document.createElement("div");
+    card.id = "raSummaryCard";
+    card.style.cssText = "background:#FEF2F2;border:1.5px solid #FCA5A5;border-radius:12px;padding:12px 14px;box-shadow:0 6px 20px rgba(220,38,38,.18);font-size:.82rem;color:#7F1D1D;line-height:1.5;max-width:360px";
+    stack.appendChild(card);
+  }
+  const lines = rows.map(x =>
+    '<div onclick="openWorkdeskLogs()" title="통합작업대 리뷰어 로그에서 확인·처리" style="display:flex;align-items:center;gap:8px;padding:7px 9px;border-radius:8px;cursor:pointer;background:#fff;border:1px solid #FECACA;margin-top:6px">'
+    + '<span style="font-size:1rem;flex-shrink:0">' + x.icon + '</span>'
+    + '<span style="flex:1;min-width:0;font-weight:600">' + escHtml(x.label) + '</span>'
+    + '<b style="color:#DC2626;font-size:.92rem;white-space:nowrap">' + x.n + '건 발생</b>'
+    + '<span style="color:#B91C1C">›</span>'
+    + "</div>").join("");
+  card.innerHTML =
+    '<div style="display:flex;align-items:center;gap:6px;font-weight:800;color:#DC2626"><i class="fas fa-exclamation-triangle"></i> 리뷰어 중요알림'
+    + '<span style="margin-left:auto;font-size:.72rem;background:#DC2626;color:#fff;border-radius:999px;padding:1px 9px">총 ' + totalCritical + '건</span></div>'
+    + lines
+    + '<button onclick="openWorkdeskLogs()" style="width:100%;margin-top:9px;padding:7px;border:none;background:#DC2626;color:#fff;border-radius:8px;font-size:.78rem;font-weight:700;cursor:pointer">통합작업대에서 처리 ↗</button>';
 }
 // SSE 'reviewer_alert' 수신 훅 (index-payment.js connectSSE 에서 호출)
 function _onReviewerAlertSSE() {

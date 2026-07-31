@@ -284,6 +284,17 @@
   .lgtable .lgby{font-size:10px;color:var(--faint);margin-top:3px;white-space:nowrap}
   .lgtable tr.lgcrit td:first-child{box-shadow:inset 3px 0 0 var(--bad)}   /* 중요 = 왼쪽 빨간 띠(맨 앞=조치 칸) */
   .lgtable tr.lgdone td{opacity:.55}
+  /* 펼침행(행 클릭 → 상세·제출 캡처) */
+  .lgtable tr.lgrow{cursor:pointer}
+  .lgtable .lgchev{display:inline-block;color:var(--muted);font-size:12px;width:13px}
+  .lgtable .lgcapdot{font-size:12px;margin-left:2px}
+  .lgtable tr.lgdetail>td{background:#fbfdff;padding:0}
+  .lgexpand{display:flex;flex-wrap:wrap;gap:14px;align-items:flex-start;padding:12px 14px}
+  .lgexptext{flex:1;min-width:240px;font-size:12.5px;line-height:1.75}
+  .lgexptext b{color:var(--muted);font-weight:750;margin-right:4px}
+  .lgcap img{max-width:280px;max-height:240px;border-radius:8px;border:1px solid var(--line);cursor:zoom-in;display:block;background:#fff}
+  .lgcaphint{font-size:11px;color:var(--muted);margin-top:5px}
+  .lgexpacts{display:flex;gap:8px;align-items:center;flex-wrap:wrap;width:100%;margin-top:2px}
   table.histtable{width:100%;border-collapse:collapse;font-size:12px} table.histtable th{text-align:left;padding:7px 9px;font-size:10.5px;color:var(--muted);font-weight:750;border-bottom:1px solid var(--line);position:sticky;top:0;background:var(--card)}
   table.histtable td{padding:6px 9px;border-bottom:1px solid var(--line)} table.histtable tr.histrev td{color:var(--faint);text-decoration:line-through} table.histtable tr.histrev .hval{text-decoration:none}
   table.histtable .hts{font-family:var(--mono);font-size:11px;color:var(--muted);white-space:nowrap} .histtable .ok{color:var(--safe);font-weight:700} .histtable .no{color:var(--faint);font-weight:700}
@@ -472,14 +483,15 @@ const API_BASE = (function(){ if (window.REVIEW_API_URL) return window.REVIEW_AP
 //   ★ initToken 보다 반드시 먼저 읽는다: #sso= 가 함께 오면 initToken이 해시 전체를 지우기 때문.
 //   여기서는 읽기만 하고 지우지 않는다(뒤따르는 #sso=/#adv= 핸들러가 같은 해시를 봐야 함) —
 //   실제 제거는 소비 시점(_consumeGo)에서 한다.
-let _GO=null;
+let _GO=null, _VIEW='';
 (function initGoLink(){
   try{
     const m=(location.hash||'').match(/[#&]go=([^&]+)/);
-    if(!m) return;
-    const o=JSON.parse(decodeURIComponent(m[1]));
-    if(o && typeof o==='object' && o.s && o.t) _GO=o;   // {s:sheetId, t:tabName, g:tabGid, p:phone8, n:이름}
+    if(m){ const o=JSON.parse(decodeURIComponent(m[1]));
+      if(o && typeof o==='object' && o.s && o.t) _GO=o; }   // {s:sheetId, t:tabName, g:tabGid, p:phone8, n:이름}
   }catch(_){ _GO=null; }
+  // #view=logs — 대시보드 중요알림 요약 카드에서 '리뷰어 로그' 뷰로 바로 진입(초기 뷰 지정만)
+  try{ const vm=(location.hash||'').match(/[#&]view=(\w+)/); if(vm) _VIEW=vm[1]; }catch(_){ }
 })();
 (function initToken(){
   try{   // ① #sso — 디코드 실패해도 raw_sso 폴백이 죽지 않게 분리 try
@@ -566,6 +578,9 @@ async function boot(){
     return _dropSession('세션이 만료되었습니다. 다시 로그인하세요. (인트라넷에서 "통합 작업대" 버튼으로 오면 자동 로그인)');
   if(!STATE.role){ sessionStorage.removeItem('admin_token'); return renderLogin(); }   // 깨진/위조 토큰 → 빈 셸 대신 로그인
   _consumeGo();   // 리뷰어 로그 딥링크 → 작업대 탭 + 해당 리뷰어 행 지정(셸 렌더 전에 세팅해야 loadTabs가 집어감)
+  // #view=logs(대시보드 요약 카드에서 진입) — admin/staff만 로그 뷰 노출. 그 외/미지정은 기존 기본 뷰.
+  if(_VIEW==='logs' && (STATE.role==='master'||STATE.role==='admin'||STATE.role==='staff')){ STATE.view='logs';
+    try{ history.replaceState(null,'',location.pathname+location.search); }catch(_){ } }
   renderShell();
 }
 // 딥링크 소비: 열 탭과 강조할 리뷰어를 예약하고 주소창에서 해시를 제거(새로고침 시 재발동·URL 공유로 PII 유출 방지).
@@ -1727,9 +1742,10 @@ function _renderLogsBody(q){
   // 표(컬럼) 표기 — 한 줄 문장 대신 발생시점/작업명/이름/전화번호/오류내용/조치안내로 분해.
   //   오류내용·조치안내는 서버가 event_type+context 로 만들어 내려주고(problem/action),
   //   모르는 유형이면 message 원문을 오류내용 칸에 그대로 넣어 화면이 비지 않게 한다.
-  $('#lgbody').innerHTML = `<div class="lgwrap"><table class="lgtable">
+  $('#lgbody').innerHTML = `<div class="ovnote" style="margin-bottom:8px">행을 클릭하면 아래로 <b>펼쳐져 상세·제출 캡처</b>를 보고 그 자리에서 <b>해결</b> 처리할 수 있습니다. 리뷰어가 올바른 캡처를 다시 올리면 <b>자동 해결</b>되며, 해결된 로그는 위 <b>‘해결된 로그 포함’</b>으로 다시 볼 수 있습니다.</div>
+    <div class="lgwrap"><table class="lgtable">
     <thead><tr>
-      <th class="c-btn">조치</th><th class="c-sev">상태</th><th class="c-ts">발생시점</th><th class="c-tab">작업명</th>
+      <th class="c-btn"></th><th class="c-sev">상태</th><th class="c-ts">발생시점</th><th class="c-tab">작업명</th>
       <th class="c-nm">이름</th><th class="c-ph">전화번호</th>
       <th class="c-prob">오류내용</th><th class="c-act">조치안내</th>
     </tr></thead><tbody>`+items.map(l=>{
@@ -1738,22 +1754,42 @@ function _renderLogsBody(q){
     const resolved=!!l.resolvedAt;
     const problem=l.problem||l.message||'';   // 미지 유형 폴백
     const ph=_fmtPhone(l.phone8||'');
-    return `<tr class="${resolved?'lgdone':''}${l.severity==='critical'&&!resolved?' lgcrit':''}">
-      <td class="c-btn"><div class="lgbtns">
-        ${(l.sheetId&&l.tabName)?`<button class="btn xs" title="이 리뷰어의 행이 있는 작업대를 새 탭으로 엽니다" onclick="_logOpenWorkdesk(${l.id})">작업대 ↗</button>`:''}
-        ${(resolved||!_canResolveLog())?'':
-          (_LOG_CANCELABLE.has(l.eventType)?`<button class="btn xs" style="border-color:#FCA5A5;color:#B91C1C" onclick="_cancelLogOrder(${l.id})" title="시트에서 지운 것이 '주문취소'였다면 여기를 누르세요 — 다시 기록되지 않습니다">취소</button>`:'')
-          +`<button class="btn xs" onclick="_resolveLog(${l.id})">확인</button>`}
-      </div></td>
-      <td class="c-sev">${sevBadge(l.severity)}${resolved?`<div class="lgby" title="확인: ${esc(l.resolvedBy||'')}">✔ 확인됨</div>`:''}</td>
+    const cap=_logCapFileId(l);   // capture_mismatch 로그의 제출 캡처 파일ID(있을 때만)
+    // 조치 버튼은 표에서 제거하고 펼침 패널로 이동한다([확인] 버튼 제거 요청).
+    //   여기서 _logOpenWorkdesk/_cancelLogOrder/_resolveLog/_canResolveLog 를 참조 = 회귀가드 대상.
+    const acts=[];
+    if(l.sheetId&&l.tabName) acts.push(`<button class="btn xs" onclick="event.stopPropagation();_logOpenWorkdesk(${l.id})" title="이 리뷰어의 행이 있는 작업대를 새 탭으로 엽니다">작업대 ↗</button>`);
+    if(!resolved && _canResolveLog()){
+      if(_LOG_CANCELABLE.has(l.eventType)) acts.push(`<button class="btn xs" style="border-color:#FCA5A5;color:#B91C1C" onclick="event.stopPropagation();_cancelLogOrder(${l.id})" title="시트에서 지운 것이 '주문취소'였다면 — 다시 기록되지 않습니다">취소 처리</button>`);
+      acts.push(`<button class="btn xs" style="background:#16a34a;color:#fff;border-color:#16a34a" onclick="event.stopPropagation();_resolveLog(${l.id})" title="이 알림을 해결 처리 — 모든 관리자 화면에서 사라집니다">✔ 해결</button>`);
+    }
+    const imgBlock=cap?`<div class="lgcap"><img src="${_logImgUrl(cap)}" loading="lazy" onclick="event.stopPropagation();_logViewImage('${cap}')" onerror="this.style.display='none'" title="클릭하면 크게 보기"><div class="lgcaphint">📷 리뷰어가 제출한 캡처 — 클릭하면 크게 보기</div></div>`:'';
+    const detail=`<tr class="lgdetail" id="lgdetail-${l.id}" style="display:none"><td colspan="8"><div class="lgexpand">
+        <div class="lgexptext"><b>오류내용</b> ${esc(problem)}${l.action?`<br><b>조치안내</b> ${esc(l.action)}`:''}${resolved?`<br><span style="color:var(--faint)">✔ 확인: ${esc(l.resolvedBy||'')}</span>`:''}</div>
+        ${imgBlock}
+        <div class="lgexpacts">${acts.join('')||'<span style="color:var(--muted);font-size:11.5px">열람 권한만 있습니다(해결은 담당 관리자).</span>'}</div>
+      </div></td></tr>`;
+    return `<tr class="lgrow ${resolved?'lgdone':''}${l.severity==='critical'&&!resolved?' lgcrit':''}" onclick="_toggleLogRow(${l.id})">
+      <td class="c-btn"><span class="lgchev" id="lgchev-${l.id}">▾</span>${cap?'<span class="lgcapdot" title="제출 캡처 있음">🖼</span>':''}</td>
+      <td class="c-sev">${sevBadge(l.severity)}${resolved?`<div class="lgby" title="확인: ${esc(l.resolvedBy||'')}">✔ 해결됨</div>`:''}</td>
       <td class="c-ts">${esc(ts)}</td>
       <td class="c-tab" title="${esc(l.campaignName||l.tabName||'')}">${esc(l.campaignName||l.tabName||'')}</td>
       <td class="c-nm">${esc(l.reviewerName||'')}</td>
       <td class="c-ph">${esc(ph)}</td>
       <td class="c-prob">${esc(problem)}</td>
       <td class="c-act">${esc(l.action||'')}</td>
-    </tr>`;
+    </tr>${detail}`;
   }).join('')+`</tbody></table></div>`;
+}
+// 리뷰어 로그 펼침행 헬퍼 — 행 클릭 시 상세+제출 캡처를 아래로 펼친다. 이미지 프록시는 무인증·추측불가 fileId.
+function _logImgUrl(fileId){ return API_BASE+'/api/drive/image/'+encodeURIComponent(fileId); }
+function _logCapFileId(l){ try{ const c=l&&l.context; const f=c&&typeof c==='object'?c.fileId:''; return /^[-\w]{20,}$/.test(String(f||''))?String(f):''; }catch(_){ return ''; } }
+function _toggleLogRow(id){ const d=document.getElementById('lgdetail-'+id); if(!d) return;
+  const open=d.style.display==='none'; d.style.display=open?'':'none';
+  const ch=document.getElementById('lgchev-'+id); if(ch) ch.textContent=open?'▴':'▾'; }
+function _logViewImage(fileId){ if(!/^[-\w]{20,}$/.test(String(fileId||'')))return; const url=_logImgUrl(fileId);
+  let ov=document.getElementById('lgimgov'); if(!ov){ ov=document.createElement('div'); ov.id='lgimgov'; ov.className='modalov'; ov.addEventListener('click',e=>{ if(e.target===ov) ov.remove(); }); document.body.appendChild(ov); }
+  ov.innerHTML=`<div class="modalbox" style="width:auto;max-width:96vw"><div class="modalhd"><b>제출 캡처</b> <a class="btn xs" href="${url}" target="_blank" rel="noopener">새 탭 ↗</a> <button class="btn xs" onclick="document.getElementById('lgimgov').remove()">닫기</button></div><div class="modalbd" style="text-align:center"><img src="${url}" style="max-width:92vw;max-height:80vh;border-radius:8px"></div></div>`;
 }
 // 로그 → 그 리뷰어가 있는 작업대를 새 탭으로. 탭 지정+행 강조 정보를 프래그먼트(#)로 넘긴다
 //   — 프래그먼트는 서버 로그·Referer에 안 실려 연락처가 새지 않고, 도착 즉시 주소창에서 제거된다.

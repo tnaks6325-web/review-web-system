@@ -195,14 +195,26 @@ async function listReviewerEvents({
 async function unresolvedCounts(scopeTabs = null) {
   const cond = ['resolved_at IS NULL'];
   const params = [];
-  if (!_scopeCond(scopeTabs, cond, params)) return { total: 0, critical: 0 };
+  if (!_scopeCond(scopeTabs, cond, params)) return { total: 0, critical: 0, byTypeCritical: {} };
   const { rows } = await getPool().query(
     `SELECT COUNT(*)::int AS total,
             COUNT(*) FILTER (WHERE severity = 'critical')::int AS critical
        FROM reviewer_event_logs WHERE ${cond.join(' AND ')}`,
     params
   );
-  return rows[0] || { total: 0, critical: 0 };
+  // 미해결 critical을 event_type별로 집계 — 대시보드 유형별 요약 카드용(라이브 개수, 스코프 동일)
+  const byTypeCritical = {};
+  try {
+    const { rows: t } = await getPool().query(
+      `SELECT event_type AS "eventType", COUNT(*)::int AS n
+         FROM reviewer_event_logs
+        WHERE ${cond.join(' AND ')} AND severity = 'critical'
+        GROUP BY event_type`,
+      params
+    );
+    for (const r of t) byTypeCritical[r.eventType] = r.n;
+  } catch (_) { /* 집계 실패는 요약만 비고 total/critical은 유지 */ }
+  return Object.assign(rows[0] || { total: 0, critical: 0 }, { byTypeCritical });
 }
 
 // ★ "시트에서 지운 게 사실은 취소였다"를 1클릭으로 알려주는 경로의 대상 이벤트.

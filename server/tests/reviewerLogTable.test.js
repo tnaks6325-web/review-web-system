@@ -130,11 +130,20 @@ t('16. 표 셀 값은 전부 이스케이프된다(로그 원장 오염 시에�
   }
 });
 
-t('17. 조치 버튼(작업대 열기·취소·확인)이 표에서도 유지된다', () => {
-  assert.ok(/_logOpenWorkdesk\(/.test(lgBody), '작업대 열기 버튼 유실');
-  assert.ok(/_cancelLogOrder\(/.test(lgBody), '취소 처리 버튼 유실');
-  assert.ok(/_resolveLog\(/.test(lgBody), '확인 버튼 유실');
-  assert.ok(/_canResolveLog\(\)/.test(lgBody), '확인/취소 권한 게이트 유실(staff가 타 담당 알림을 지움)');
+t('17. 조치는 펼침 패널로 이동 — 표의 [확인] 버튼 제거, 행 클릭 펼침 + [해결]', () => {
+  assert.ok(/onclick="_toggleLogRow\(/.test(lgBody), '행 클릭 시 펼쳐져야 함');
+  assert.ok(/class="lgdetail"/.test(lgBody), '펼침 상세행이 있어야 함');
+  assert.ok(!/>확인<\/button>/.test(lgBody), '표 행의 [확인] 버튼은 제거돼야 함');
+  assert.ok(/_logOpenWorkdesk\(/.test(lgBody), '작업대 열기(펼침 패널) 유실');
+  assert.ok(/_cancelLogOrder\(/.test(lgBody), '취소 처리(펼침 패널) 유실');
+  assert.ok(/_resolveLog\(/.test(lgBody) && /✔ 해결/.test(lgBody), '해결 버튼(펼침 패널) 유실');
+  assert.ok(/_canResolveLog\(\)/.test(lgBody), '해결/취소 권한 게이트 유실(staff가 타 담당 알림을 지움)');
+});
+
+t('17b. 캡처 형식오류 행은 펼치면 제출 이미지 미리보기(행 펼침과 이미지 클릭 분리)', () => {
+  assert.ok(/_logCapFileId\(l\)/.test(lgBody), '행이 캡처 fileId 를 조회해야 함');
+  assert.ok(/_logImgUrl\(cap\)/.test(lgBody), '무인증 이미지 프록시 URL 로 렌더');
+  assert.ok(/onclick="event\.stopPropagation\(\);_logViewImage\(/.test(lgBody), '이미지 클릭은 stopPropagation 으로 행 토글과 분리');
 });
 
 // ── 4) 컬럼 순서·폭 + 캡처 미첨부 정밀확인 ────────────────────

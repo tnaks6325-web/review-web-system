@@ -213,69 +213,55 @@ t('17. listReviewerEvents가 phone8·tabGid를 내려준다(프론트 계약)', 
   assert.ok(/tab_gid AS "tabGid"/.test(sel), 'tabGid 미반환 → 딥링크 탭 지정 폴백 불가');
 });
 
-// ── 6) 관리자 대시보드 중요알림 → 작업대 딥링크 ────────────────
-//   좌측하단 빨간 알림의 버튼이 통합작업대를 "작업 미선택" 상태로만 열던 문제.
-//   ★ workdesk 의 리뷰어 로그 탭과 **같은 #go= 계약**을 써야 한다(사본을 두면 한쪽만 고쳐진다).
+// ── 6) 관리자 대시보드 중요알림 = 유형별 요약 카드 ────────────────
+//   알림이 너무 많이 쌓여 관리가 안 되던 문제 → per-alert 스택 대신 유형별 건수 요약 1장.
+//   개별 확인·처리·이미지는 통합작업대 리뷰어 로그 뷰에서 한다.
 const APP = fs.readFileSync(path.join(__dirname, '../../frontend/js/index-app.js'), 'utf8');
-const RA_FN = APP.slice(APP.indexOf('function _raOpenWorkdesk'), APP.indexOf('async function _raCheckAlerts'));
 
-t('18. 중요알림 버튼이 딥링크 함수를 호출한다(맨 목록 열기 금지)', () => {
-  const card = APP.slice(APP.indexOf('async function _raCheckAlerts'), APP.indexOf('async function _raResolve'));
-  assert.ok(/onclick="_raOpenWorkdesk\(/.test(card), '알림 카드가 _raOpenWorkdesk 를 호출해야 함');
-  assert.ok(!/window\.open\(/.test(card), '문맥 없이 workdesk.html 만 여는 옛 배선이 남아 있으면 안 됨');
+t('18. 대시보드는 유형별 요약 카드로 그린다(per-alert 스택 제거)', () => {
+  assert.ok(/function _raRenderSummary/.test(APP), '요약 렌더 함수가 있어야 함');
+  assert.ok(/byTypeCritical/.test(APP), '서버 유형별 집계(byTypeCritical)를 사용해야 함');
+  assert.ok(!/_raOpenWorkdesk/.test(APP), 'per-alert 딥링크 카드는 제거돼야 함');
+  assert.ok(!/_raResolve\b/.test(APP) && !/_raCancelOrder/.test(APP), '개별 확인·취소 버튼은 대시보드에서 제거(처리는 작업대)');
 });
 
-t('19. 딥링크 문맥을 알림 목록에서 캐시한다', () => {
-  assert.ok(/_raCache = r\.items;/.test(APP), '알림 원본을 보관해야 id 로 문맥을 찾을 수 있다');
-  assert.ok(/const canGo = !!\(l\.sheetId && l\.tabName\)/.test(APP),
-    '문맥 유무로 버튼 문구·동작을 갈라야 한다(옛 로그는 막다른 길 금지)');
+t('19. 요약은 카테고리로 묶고 미지 유형도 기타로 합산(조용한 누락 금지)', () => {
+  assert.ok(/const _RA_CATS =/.test(APP), '카테고리 매핑이 있어야 함');
+  assert.ok(/capture_mismatch/.test(APP) && /order_lost/.test(APP) && /order_no_capture/.test(APP), '주요 유형 매핑 누락');
+  assert.ok(/기타 중요알림/.test(APP), '매핑에 없는 유형은 기타로 합산해야 함');
+  assert.ok(/if \(!totalCritical\) \{ if \(card\) card\.remove\(\); return; \}/.test(APP), '0건이면 요약 카드를 제거해야 함');
 });
 
-t('20. ★ admin 이 만든 #go= URL 을 workdesk 파서가 그대로 읽는다(계약 왕복)', () => {
-  assert.ok(/s: l\.sheetId, t: l\.tabName, g: l\.tabGid/.test(RA_FN), 'payload 키가 #go= 계약과 달라짐');
-  assert.ok(/p: l\.phone8 \|\| "", n: l\.reviewerName/.test(RA_FN), 'phone8·이름 키가 계약과 달라짐');
-
-  const l = { sheetId: 'sheet1', tabName: '0721)장수돌침대_쿠팡_탄소매트 900건', tabGid: '123',
-              phone8: '81121348', reviewerName: '손아리', campaignName: '장수산업' };
-  const payload = { s: l.sheetId, t: l.tabName, g: l.tabGid, p: l.phone8, n: l.reviewerName, st: l.campaignName };
-  const url = new URL('workdesk.html', 'https://x.pages.dev/admin.html');
-  url.hash = 'go=' + encodeURIComponent(JSON.stringify(payload));
-  assert.strictEqual(url.pathname, '/workdesk.html', 'admin.html 기준 상대경로가 어긋남');
-  assert.strictEqual(new URL('workdesk.html', 'https://x.pages.dev/admin').pathname, '/workdesk.html',
-    '확장자 없는 /admin 경로에서도 같은 곳을 가리켜야 함');
-
-  // workdesk 의 initGoLink 정규식 원문으로 되읽기
-  const href = url.toString();
-  const m = href.slice(href.indexOf('#')).match(/[#&]go=([^&]+)/);
-  assert.ok(m, 'workdesk 파서가 #go= 를 못 찾음');
-  const got = JSON.parse(decodeURIComponent(m[1]));
-  assert.strictEqual(got.t, l.tabName, '한글·괄호 탭명이 왕복에서 깨짐');
-  assert.strictEqual(got.s, l.sheetId);
-  assert.strictEqual(got.p, l.phone8);
-  assert.ok(got && got.s && got.t, '_consumeGo 가 채택하지 않는 payload');
+t('20. 요약 카드는 통합작업대 리뷰어 로그 뷰(#view=logs)를 연다(계약 왕복)', () => {
+  assert.ok(/function openWorkdeskLogs/.test(APP), '로그 뷰 오프너가 있어야 함');
+  assert.ok(/hash = "view=logs"/.test(APP), '#view=logs 딥링크여야 함');
+  assert.ok(/onclick="openWorkdeskLogs\(\)"/.test(APP), '카테고리·버튼이 로그 뷰를 열어야 함');
+  // workdesk boot 이 #view=logs 를 실제로 소비한다
+  assert.ok(/_VIEW==='logs'/.test(HTML) && /STATE\.view='logs'/.test(HTML), 'workdesk 가 #view=logs 를 소비해야 함');
 });
 
-t('21. 토큰을 URL 에 싣지 않는다(기존 raw_sso 핸드오프 재사용)', () => {
-  assert.ok(/localStorage\.setItem\("raw_sso"/.test(RA_FN), 'raw_sso 핸드오프가 있어야 새 탭이 로그인 화면으로 안 떨어진다');
-  assert.ok(!/sso=/.test(RA_FN), 'admin 경로에선 토큰을 URL 로 넘길 필요가 없다');
+t('21. 요약 카드도 토큰을 URL 에 싣지 않는다(raw_sso 핸드오프)', () => {
+  const fn = APP.slice(APP.indexOf('function openWorkdeskLogs'), APP.indexOf('function _raEnsureStack'));
+  assert.ok(/localStorage\.setItem\("raw_sso"/.test(fn), 'raw_sso 핸드오프가 있어야 새 탭이 로그인 화면으로 안 떨어진다');
+  assert.ok(!/sso=/.test(fn), 'admin 경로에선 토큰을 URL 로 넘길 필요가 없다');
 });
 
-t('22. 문맥 없는 옛 로그는 평소대로 목록만 연다(막다른 길 방지)', () => {
-  assert.ok(/openWorkdesk\(\); return;/.test(RA_FN), '문맥이 없으면 openWorkdesk() 폴백이어야 함');
+// ── 7) 통합작업대 리뷰어 로그 — [확인] 제거 + 펼침행 이미지 미리보기 ──
+t('22. 로그 표에서 [확인] 버튼 제거 + 행 클릭 펼침(actions는 펼침 패널)', () => {
+  const lgBody = HTML.slice(HTML.indexOf('function _renderLogsBody'), HTML.indexOf('function _logImgUrl'));
+  assert.ok(/onclick="_toggleLogRow\(/.test(lgBody), '행 클릭 시 펼쳐져야 함');
+  assert.ok(/class="lgdetail"/.test(lgBody), '펼침 상세행이 있어야 함');
+  assert.ok(!/>확인<\/button>/.test(lgBody), '표 행의 [확인] 버튼은 제거돼야 함');
+  assert.ok(/_resolveLog\(/.test(lgBody) && /✔ 해결/.test(lgBody), '해결(resolve)은 펼침 패널에 남아야 함');
+  assert.ok(/_canResolveLog\(\)/.test(lgBody), '해결/취소 권한 게이트 유지(staff가 타 담당 알림을 지움 방지)');
 });
 
-// ── 7) 형식오류 캡처 — 제출 사진 바로 확인 ──────────────────
-t('23. 캡처 형식오류 알림에 제출 사진 인라인 미리보기 + 라이트박스', () => {
-  // context.fileId(리뷰어 업로드 Drive 파일)를 카드에 썸네일로 렌더하고 클릭 시 크게 본다
-  assert.ok(/function _raCaptureFileId/.test(APP), '캡처 fileId 추출 헬퍼가 있어야 함');
-  assert.ok(/ctx\.fileId/.test(APP), 'context.fileId 를 읽어야 함');
-  assert.ok(/\/api\/drive\/image\//.test(APP), '무인증 Drive 이미지 프록시로 표시해야 함');
-  const card = APP.slice(APP.indexOf('async function _raCheckAlerts'), APP.indexOf('async function _raResolve'));
-  assert.ok(/_raCaptureFileId\(l\)/.test(card), '카드가 캡처 fileId 를 조회해야 함');
-  assert.ok(/onclick="_raViewImage\(/.test(card), '썸네일 클릭이 라이트박스를 열어야 함');
-  assert.ok(/function _raViewImage/.test(APP), '라이트박스 함수가 있어야 함');
-  // 유효 Drive id(추측불가 20+)만 렌더 — 임의 문자열 img src 주입 방지
-  assert.ok(/\/\^\[-\\w\]\{20,\}\$\//.test(APP), 'fileId 는 Drive id 형식 검증 후에만 렌더해야 함');
+t('23. 캡처 형식오류 행은 펼치면 제출 이미지 미리보기(무인증 프록시·형식검증)', () => {
+  assert.ok(/function _logCapFileId/.test(HTML), '캡처 fileId 추출 헬퍼');
+  assert.ok(/c\.fileId/.test(HTML), 'context.fileId 를 읽어야 함');
+  assert.ok(/\/api\/drive\/image\//.test(HTML), '무인증 Drive 이미지 프록시');
+  assert.ok(/function _logViewImage/.test(HTML), '크게보기 함수');
+  assert.ok(/\/\^\[-\\w\]\{20,\}\$\//.test(HTML), 'fileId 는 Drive id 형식 검증 후에만 렌더');
 });
 
 console.log('\n' + pass + ' runtime checks passed');
