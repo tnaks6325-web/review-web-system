@@ -1383,7 +1383,7 @@ async function openCampControl(campId, title) {
     document.body.appendChild(ovl);
   }
   document.getElementById("ccTitle").textContent = "📡 관제 — " + (title || campId);
-  // 🧾 외부참여 수동제출 — 오버레이는 1회만 만들고 재사용하므로 공고가 바뀔 때마다 핸들러를 다시 건다
+  // 🧾 외부모집 수동제출 — 오버레이는 1회만 만들고 재사용하므로 공고가 바뀔 때마다 핸들러를 다시 건다
   // 연결 탭 문맥 해석은 campaign-cards.js 한 곳에만 둔다(사본을 두면 화면마다 다른 탭에 쓴다).
   // 그 모듈이 없는 화면(admin-siand)에서는 **버튼을 숨긴다** — 눌러도 안 되는 버튼보다 없는 게 낫다.
   const _moBtn = document.getElementById("ccMoBtn");

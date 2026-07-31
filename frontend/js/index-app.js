@@ -15156,7 +15156,7 @@ function openTabDashDetail(idx) {
     ]},
   ];
 
-  // 🧾 외부참여 수동제출 — 카톡으로 모집한 외부 리뷰어의 구매양식을 이 탭에 대리 제출한다.
+  // 🧾 외부모집 수동제출 — 카톡으로 모집한 외부 리뷰어의 구매양식을 이 탭에 대리 제출한다.
   //   값을 onclick 문자열에 심지 않고 인덱스로만 넘긴다(탭명·시트명 주입 벡터 차단).
   let html = `<div style="display:flex;align-items:center;gap:8px;background:#F0FDFA;border:1px solid #99E6D8;border-radius:10px;padding:9px 12px;margin-bottom:14px">
       <div style="flex:1;min-width:0">
@@ -15188,7 +15188,7 @@ function closeTabDashDetail() {
   if (modal) modal.style.display = "none";
 }
 
-/** 🧾 작업 탭 관리 상세 → 외부참여 수동제출 (탭 단위 — 참여형 공고가 없는 탭도 대상) */
+/** 🧾 작업 탭 관리 상세 → 외부모집 수동제출 (탭 단위 — 참여형 공고가 없는 탭도 대상) */
 function openManualOrderForTab(idx) {
   const t = _filterTabDashData()[idx];
   if (!t) return;

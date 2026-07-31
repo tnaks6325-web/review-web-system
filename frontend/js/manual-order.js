@@ -40,6 +40,7 @@
 
   let CTX = null;      // { sheetId, tabName, gid, campaignId, title }
   let ROWS = [];       // 파싱 결과 + 캡처 상태
+  let STAGED = [];     // 1단계에서 먼저 받아 둔 구매캡쳐(줄이 나뉜 뒤 수취인 이름으로 배정)
   let BUSY = false;
 
   // ── 스타일(1회 주입) ───────────────────────────────────────
@@ -84,6 +85,19 @@
 .mo-cap:focus{border-color:#3182f6;background:#EBF3FE}
 .mo-cap.has{border-style:solid;border-color:#BBF7D0;background:#F0FDF4;color:#15803D}
 .mo-pick{display:inline-block;margin-top:3px;font-size:9.5px;font-weight:700;color:#6B7280;text-decoration:underline;cursor:pointer}
+.mo-drop{border:1.5px dashed #cce0fb;border-radius:11px;background:#F7FAFF;padding:14px 12px;text-align:center;cursor:pointer;outline:none}
+.mo-drop:focus,.mo-drop.over{border-color:#3182f6;background:#EBF3FE}
+.mo-drop .ic{font-size:19px;line-height:1}
+.mo-drop .t{font-size:11.5px;color:#4B5563;margin-top:4px}
+.mo-stage{display:flex;flex-wrap:wrap;gap:7px;margin-top:9px}
+.mo-chip{display:flex;align-items:center;gap:6px;background:#F0FDF4;border:1px solid #BBF7D0;border-radius:9px;padding:4px 7px 4px 4px}
+.mo-chip.warn{background:#FFFBEB;border-color:#FDE68A}
+.mo-chip img{width:34px;height:26px;object-fit:cover;border-radius:5px;display:block}
+.mo-chip .ph{width:34px;height:26px;display:flex;align-items:center;justify-content:center;font-size:12px}
+.mo-chip .nm{font-size:10.5px;font-weight:750;color:#15803D;max-width:90px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.mo-chip.warn .nm{color:#B45309}
+.mo-chip button{border:none;background:none;color:#9CA3AF;font-size:13px;line-height:1;cursor:pointer;padding:0 2px}
+.mo-chip button:hover{color:#DC2626}
 .mo-pick:hover{color:#1b64da}
 .mo-msg{font-size:10.5px;line-height:1.5;margin-top:3px}
 .mo-msg.e{color:#B91C1C} .mo-msg.w{color:#B45309}
@@ -102,7 +116,7 @@
     styles();
     CTX = Object.assign({ sheetId: '', tabName: '', gid: '', campaignId: null, title: '' }, ctx || {});
     if (!CTX.sheetId || !CTX.tabName) { alert('연결된 작업(시트·탭) 정보가 없어 수동제출을 열 수 없습니다.'); return; }
-    ROWS = [];
+    ROWS = []; STAGED = [];
     let ovl = document.getElementById('moOvl');
     if (!ovl) {
       ovl = document.createElement('div');
@@ -116,7 +130,7 @@
   function close() {
     const o = document.getElementById('moOvl');
     if (o) o.remove();
-    CTX = null; ROWS = []; BUSY = false;
+    CTX = null; ROWS = []; STAGED = []; BUSY = false;
   }
 
   function shell(bodyHtml, footHtml) {
@@ -124,7 +138,7 @@
     if (!o) return;
     o.innerHTML = `<div class="mo-box">
       <div class="mo-hd">
-        <b>🧾 외부참여 수동제출</b>
+        <b>🧾 외부모집 수동제출</b>
         <span class="sub">${esc(CTX.title || CTX.tabName)}${CTX.campaignId ? ' · 참여형(정원 차감)' : ''}</span>
         <span class="sp"></span>
         <button class="mo-btn gh xs" onclick="ManualOrder.close()">닫기</button>
@@ -139,16 +153,145 @@
     shell(`
       <div class="mo-pane">
         <h4>구매양식 붙여넣기 <span class="mo-bdg grn">여러 줄 = 여러 건</span></h4>
-        <textarea class="mo-ta" id="moText" placeholder="카톡에서 받은 슬래시양식을 그대로 붙여넣으세요 (한 줄 = 한 명)&#10;예) 이시현/이시현/kirei223/010-7701-1701/부산시 수영구 광안동 119-3번지, 109호/신한은행/496-04-007701/이시현/15800"></textarea>
+        <textarea class="mo-ta" id="moText" onpaste="ManualOrder.onTextPaste(event)" placeholder="카톡에서 받은 슬래시양식을 그대로 붙여넣으세요 (한 줄 = 한 명)&#10;예) 이시현/이시현/kirei223/010-7701-1701/부산시 수영구 광안동 119-3번지, 109호/신한은행/496-04-007701/이시현/15800"></textarea>
         <div class="mo-hint">
           순서: <b>리뷰어 / 수취인 / 아이디 / 전화번호 / 주소 / 은행 / 계좌번호 / 예금주 / 결제금액</b><br>
           · 주소에 슬래시(/)가 있어도 앞뒤 칸이 밀리지 않게 자동으로 주소로 합칩니다<br>
           · 리뷰어와 수취인이 다르면 <b>타계정 참여</b>로 처리합니다<br>
           · 슬래시(/)가 빠져도 됩니다 — <b>빠진 자리를 자동으로 찾아 나누고</b>, 어떤 항목이 없는지 알려드려요
         </div>
+      </div>
+      <div class="mo-pane">
+        <h4>구매캡쳐 붙여넣기 <span class="mo-bdg amb">선택</span></h4>
+        <div class="mo-drop" id="moDrop" tabindex="0"
+             onpaste="ManualOrder.onStagePaste(event)" onclick="this.focus()"
+             ondragover="event.preventDefault();this.classList.add('over')"
+             ondragleave="this.classList.remove('over')"
+             ondrop="ManualOrder.onDrop(event)">
+          <div class="ic">🧾</div>
+          <div class="t">여기에 <b>Ctrl+V</b> 하거나 이미지를 끌어다 놓으세요 · 여러 장 가능</div>
+          <label class="mo-pick">파일 선택<input type="file" accept="image/*" multiple hidden onchange="ManualOrder.onStageFiles(event)"></label>
+        </div>
+        <div class="mo-stage" id="moStage"></div>
+        <div class="mo-hint">
+          · 캡처 속 <b>수취인 이름</b>을 읽어 다음 단계에서 <b>같은 사람의 줄에 자동으로 붙습니다</b> (이름이 안 맞으면 붙인 순서대로)<br>
+          · 지금 안 넣어도 됩니다 — 다음 단계 표에서 줄마다 따로 넣을 수도 있어요
+        </div>
       </div>`,
       `<span class="sp"></span><button class="mo-btn pri" onclick="ManualOrder.parse()">다음 — 자동으로 나누기</button>`);
+    renderStage();
     setTimeout(() => { const t = document.getElementById('moText'); if (t) t.focus(); }, 40);
+  }
+
+  /* ── 1단계 캡처 보관함 ───────────────────────────────────────
+     아직 줄이 나뉘기 전이라 어느 행에 속하는지 모른다 → 일단 모아 두고,
+     `parse()` 뒤에 **캡처에서 읽은 수취인 이름**으로 각 줄에 배정한다(이름 실패 시 순서).
+     카톡에서 캡처 여러 장을 연달아 복사하는 실제 흐름에 맞춘 자리다. */
+  function stageImage(file) {
+    const idx = STAGED.length;
+    STAGED.push({ base64: '', mime: '', extract: null, thumb: '', busy: true });
+    renderStage();
+    (async () => {
+      const shrunk = await shrink(file);
+      if (!shrunk || !shrunk.base64) { STAGED.splice(idx, 1); renderStage(); return; }
+      const s = STAGED[idx];
+      if (!s) return;
+      s.base64 = shrunk.base64; s.mime = shrunk.mime;
+      s.thumb = 'data:' + shrunk.mime + ';base64,' + shrunk.base64;
+      renderStage();
+      // 수취인·주문번호 자동 인식(실패해도 첨부는 유지 — 순서로 배정된다)
+      try {
+        const r = await api('/api/image/image-extract', {
+          method: 'POST', body: JSON.stringify({ imageBase64: s.base64, mimeType: s.mime }),
+        });
+        if (r && r.ok) s.extract = r;
+      } catch (_) { /* 인식 실패는 무시 */ }
+      s.busy = false;
+      renderStage();
+    })();
+  }
+  function renderStage() {
+    const el = document.getElementById('moStage');
+    if (!el) return;
+    if (!STAGED.length) { el.innerHTML = ''; return; }
+    el.innerHTML = STAGED.map((s, i) => {
+      const who = s.busy ? '읽는 중…'
+        : (s.extract && s.extract.recipient) ? esc(s.extract.recipient)
+        : '이름 못 읽음';
+      const cls = (!s.busy && !(s.extract && s.extract.recipient)) ? 'mo-chip warn' : 'mo-chip';
+      return `<div class="${cls}">
+        ${s.thumb ? `<img src="${s.thumb}" alt="">` : '<span class="ph">⏳</span>'}
+        <span class="nm">${who}</span>
+        <button type="button" title="빼기" onclick="ManualOrder.unstage(${i})">×</button>
+      </div>`;
+    }).join('');
+  }
+  function unstage(i) { STAGED.splice(i, 1); renderStage(); }
+
+  /** 텍스트 칸에 이미지가 붙여넣어지면 캡처로 받는다(관리자는 그냥 Ctrl+V만 한다) */
+  function onTextPaste(ev) {
+    const imgs = _imagesFrom(ev.clipboardData);
+    if (!imgs.length) return;          // 평범한 텍스트 붙여넣기는 그대로
+    ev.preventDefault();
+    imgs.forEach(stageImage);
+  }
+  function onStagePaste(ev) {
+    const imgs = _imagesFrom(ev.clipboardData);
+    if (!imgs.length) return;
+    ev.preventDefault();
+    imgs.forEach(stageImage);
+  }
+  function onDrop(ev) {
+    ev.preventDefault();
+    const el = document.getElementById('moDrop');
+    if (el) el.classList.remove('over');
+    Array.from((ev.dataTransfer && ev.dataTransfer.files) || [])
+      .filter(f => f.type && f.type.indexOf('image/') === 0).forEach(stageImage);
+  }
+  function onStageFiles(ev) {
+    Array.from((ev.target && ev.target.files) || []).forEach(stageImage);
+    ev.target.value = '';
+  }
+  function _imagesFrom(cd) {
+    const out = [];
+    for (const it of ((cd && cd.items) || [])) {
+      if (it.type && it.type.indexOf('image/') === 0) { const f = it.getAsFile(); if (f) out.push(f); }
+    }
+    return out;
+  }
+
+  /**
+   * 보관함의 캡처를 각 줄에 배정한다.
+   * ① 캡처에서 읽은 수취인 == 그 줄의 수취인(공백 무시) → 확실한 매칭
+   * ② 캡처에서 읽은 연락처 뒤 4자리 일치
+   * ③ 남은 것은 **붙인 순서대로** 남은 줄에 — 이름을 못 읽어도 첨부가 버려지지 않게
+   */
+  function distributeStaged() {
+    if (!STAGED.length) return;
+    const norm = s => String(s || '').replace(/\s+/g, '');
+    const tail4 = s => String(s || '').replace(/[^0-9]/g, '').slice(-4);
+    const left = STAGED.filter(s => s.base64);
+    const take = (row, s) => {
+      row.capture = { base64: s.base64, mime: s.mime };
+      if (s.extract) {
+        row.extract = s.extract;
+        if (s.extract.orderNumber && !row.fields.orderNum) row.fields.orderNum = s.extract.orderNumber;
+      }
+      left.splice(left.indexOf(s), 1);
+    };
+    ROWS.forEach(r => {
+      if (r.capture || !r.fields) return;
+      const nm = norm(r.fields.recipient);
+      const hit = nm && left.find(s => s.extract && norm(s.extract.recipient) === nm);
+      if (hit) take(r, hit);
+    });
+    ROWS.forEach(r => {
+      if (r.capture || !r.fields) return;
+      const t = tail4(r.fields.phone);
+      const hit = t && left.find(s => s.extract && tail4(s.extract.phone) === t);
+      if (hit) take(r, hit);
+    });
+    ROWS.forEach(r => { if (!r.capture && left.length) take(r, left[0]); });
   }
 
   // ── 2단계: 파싱 미리보기 ───────────────────────────────────
@@ -162,6 +305,7 @@
     } catch (e) { alert('분해 실패: ' + (e && e.message ? e.message : '서버에 연결하지 못했습니다')); return; }
     if (!r || !r.ok) { alert('분해 실패: ' + ((r && r.error) || '오류')); return; }
     ROWS = (r.items || []).map(it => Object.assign({}, it, { capture: null, extract: null }));
+    distributeStaged();   // 1단계에서 먼저 받아 둔 캡처를 수취인 이름으로 각 줄에 붙인다
     if (r.repairedCount) console.info('[ManualOrder] 자동보정 ' + r.repairedCount + '건');
     if (r.truncated) alert(`한 번에 최대 50건까지 처리합니다. ${r.truncated}건은 제외되었습니다.`);
     renderPreview();
@@ -428,5 +572,9 @@
     try { if (CTX && CTX.campaignId && typeof _loadCampControl === 'function') _loadCampControl(CTX.campaignId); } catch (_) {}
   }
 
-  window.ManualOrder = { open, close, parse, back, edit, onPaste, onFile, submit };
+  window.ManualOrder = {
+    open, close, parse, back, edit, submit,
+    onPaste, onFile,                                    // 2단계 표의 줄별 첨부
+    onTextPaste, onStagePaste, onDrop, onStageFiles, unstage,   // 1단계 보관함
+  };
 })();
