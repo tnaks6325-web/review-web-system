@@ -623,7 +623,8 @@ function renderShell(){
         <button class="navb" data-v="workdesk" onclick="switchView('workdesk')">작업대</button>
         <button class="navb" data-v="overview" onclick="switchView('overview')">관측</button>
         <button class="navb" data-v="ownership" onclick="switchView('ownership')">업체관리</button>
-        <button class="navb" data-v="logs" onclick="switchView('logs')">리뷰어 로그<span id="lgNavBadge"></span></button></nav>`
+        <button class="navb" data-v="logs" onclick="switchView('logs')">리뷰어 로그<span id="lgNavBadge"></span></button>
+        <button class="navb" data-v="reviewers" onclick="switchView('reviewers')">등록리뷰어DB</button></nav>`
       :isStaff?`<nav class="nav">
         <button class="navb" data-v="workdesk" onclick="switchView('workdesk')">작업대</button>
         <button class="navb" data-v="ownership" onclick="switchView('ownership')">업체관리</button>
@@ -640,7 +641,7 @@ function renderShell(){
 function switchView(v){ STATE.view=v; document.querySelectorAll('.navb').forEach(b=>b.classList.toggle('on',b.dataset.v===v));
   const rt=$('#railToggle'); if(rt) rt.style.display=(v==='workdesk')?'':'none';   // 레일은 작업대 뷰에만 존재
   const wt=$('#wideToggle'); if(wt) wt.style.display=(v==='workdesk')?'':'none';   // 전체화면 토글도 작업대 뷰에만
-  if(v==='ownership') renderOwnershipView(); else if(v==='overview') renderOverviewView(); else if(v==='logs') renderLogsView(); else renderWorkdeskView();
+  if(v==='ownership') renderOwnershipView(); else if(v==='overview') renderOverviewView(); else if(v==='logs') renderLogsView(); else if(v==='reviewers') renderReviewersView(); else renderWorkdeskView();
   if(v!=='workdesk') _measureChrome();   // 작업대를 떠나면 작업바가 사라짐 → --tbh 0으로 회수(다른 뷰 높이 계산 오염 방지)
 }
 
@@ -1701,6 +1702,105 @@ async function showEditHistory(){
 /* ══ 리뷰어 비정상 로그 뷰(migration 062) — 캠페인별 한글 자연어 로그 + 확인 처리 ══
    예: "『0721)장수돌침대…』에 이지유 리뷰어가 제출한 구매양식이 시트에서 사라졌습니다…"
    서버 미해결 상태가 진실원본 — [확인]하면 전 관리자 화면·알림에서 함께 사라진다. */
+/* ══════════════════════════════════════════════════════════════
+   등록리뷰어DB (상단탭) — master/admin 전용
+
+   서버가 `GET /api/trackb/reviewers` 를 adminOrMaster 로 막고 있고, nav 버튼도
+   관리자에게만 렌더한다(AE·광고주는 버튼도 요청도 도달 못 함).
+   ★ 주민번호·계좌까지 표에 그대로 보인다(사용자 확정) — 화면공유·스크린샷 주의 문구를
+     상단에 상시 노출한다. 수정은 **관리자 메모만**(정산·신원 필드는 조회 전용).
+   ★ 리뷰어 수가 수만 건일 수 있어 서버 페이지네이션 + 서버 검색을 쓴다
+     (기존 /api/reviewer/list 는 전 행을 한 번에 반환해 이 화면엔 못 쓴다).
+   ══════════════════════════════════════════════════════════════ */
+const RV_PAGE = 50;
+async function renderReviewersView(){
+  $('#viewroot').innerHTML=`<div class="ovwrap"><div id="rvhead"></div><div id="rvbody"><div class="empty">불러오는 중…</div></div></div>`;
+  STATE.rvOffset = STATE.rvOffset||0;
+  await _loadReviewers();
+}
+async function _loadReviewers(){
+  const qs = new URLSearchParams({ limit:String(RV_PAGE), offset:String(STATE.rvOffset||0) });
+  if(STATE.rvq) qs.set('q', STATE.rvq);
+  if(STATE.rvStatus) qs.set('status', STATE.rvStatus);
+  const r = await api('/api/trackb/reviewers?'+qs.toString());
+  const b=$('#rvbody');
+  if(!r || !r.ok){ if(b) b.innerHTML=`<div class="empty">리뷰어 목록을 불러오지 못했습니다.${r&&r.error?' ('+esc(r.error)+')':''}</div>`; _renderRvHead(0); return; }
+  STATE.rv = r.items||[]; STATE.rvTotal = r.total|0;
+  _renderRvHead(r.total|0);
+  _renderRvBody();
+}
+function _renderRvHead(total){
+  const from=(STATE.rvOffset|0)+1, to=Math.min((STATE.rvOffset|0)+RV_PAGE, total);
+  $('#rvhead').innerHTML=`<div class="mh"><h1>등록리뷰어DB</h1>
+    <span class="bd g">${total.toLocaleString()}명</span>
+    ${total?`<span class="bd">${from}–${to}</span>`:''}
+    <span class="sp" style="flex:1"></span>
+    <select class="ovsearch" style="width:110px" onchange="STATE.rvStatus=this.value;STATE.rvOffset=0;_loadReviewers()">
+      <option value=""${!STATE.rvStatus?' selected':''}>상태 전체</option>
+      <option value="active"${STATE.rvStatus==='active'?' selected':''}>활성</option>
+      <option value="inactive"${STATE.rvStatus==='inactive'?' selected':''}>비활성</option>
+    </select>
+    <input id="rvq" class="ovsearch" style="width:220px" placeholder="이름 또는 연락처 검색 후 Enter"
+           value="${esc(STATE.rvq||'')}"
+           onkeydown="if(event.key==='Enter'){STATE.rvq=this.value.trim();STATE.rvOffset=0;_loadReviewers();}">
+    <button class="btn" onclick="STATE.rvOffset=0;_loadReviewers()">새로고침</button></div>
+    <div class="ovnote">리뷰어 등록 원장입니다. <b>주민등록번호·계좌번호가 그대로 표시</b>되니 화면공유·스크린샷에 주의하세요.
+      수정은 <b>관리자 메모</b>만 가능합니다(이름·연락처·계좌 등은 조회 전용).</div>`;
+}
+function _renderRvBody(){
+  const rows = STATE.rv||[];
+  const b=$('#rvbody');
+  if(!rows.length){ b.innerHTML=`<div class="empty">${STATE.rvq?'검색 결과가 없습니다.':'등록된 리뷰어가 없습니다.'}</div>`; return; }
+  const dash = v => (v==null||v==='')?'<span style="color:var(--muted)">—</span>':esc(v);
+  const fmtD = iso => iso? new Date(iso).toLocaleDateString('ko-KR',{timeZone:'Asia/Seoul',year:'2-digit',month:'2-digit',day:'2-digit'}):'';
+  b.innerHTML=`<div class="lgwrap"><table class="lgtable">
+    <thead><tr>
+      <th class="c-nm">이름</th><th class="c-ph">연락처</th><th style="width:118px">주민번호</th>
+      <th style="width:90px">소득유형</th><th>주소</th>
+      <th style="width:80px">은행</th><th style="width:130px">계좌번호</th><th style="width:80px">예금주</th>
+      <th style="width:56px">타계정</th><th style="width:64px">상태</th><th style="width:84px">등록일</th>
+      <th style="width:180px">관리자 메모</th>
+    </tr></thead><tbody>${rows.map(r=>`
+      <tr>
+        <td class="c-nm" style="font-weight:700">${esc(r.name||'')}</td>
+        <td class="c-ph">${dash(r.phone)}</td>
+        <td style="font-variant-numeric:tabular-nums">${dash(r.residentNum)}</td>
+        <td>${dash(r.incomeType)}</td>
+        <td style="max-width:220px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="${esc(r.address||'')}">${dash(r.address)}</td>
+        <td>${dash(r.bankName)}</td>
+        <td style="font-variant-numeric:tabular-nums">${dash(r.bankAccount)}</td>
+        <td>${dash(r.accountHolder)}</td>
+        <td style="text-align:center">${(r.subCount|0)>0?`<span class="bd">${r.subCount}</span>`:'<span style="color:var(--muted)">0</span>'}</td>
+        <td>${r.status==='inactive'?'<span class="bd">비활성</span>':'<span class="bd g">활성</span>'}</td>
+        <td style="color:var(--muted);font-variant-numeric:tabular-nums">${fmtD(r.registeredAt)}</td>
+        <td><input class="ovsearch" style="width:100%;font-size:11.5px;padding:4px 7px" value="${esc(r.memo||'')}"
+              placeholder="메모…" data-rvid="${esc(r.id)}"
+              onchange="_rvSaveMemo(this)" onkeydown="if(event.key==='Enter')this.blur()"></td>
+      </tr>`).join('')}</tbody></table></div>
+    ${_rvPager()}`;
+}
+function _rvPager(){
+  const total=STATE.rvTotal|0, off=STATE.rvOffset|0;
+  if(total<=RV_PAGE) return '';
+  const prev=off>0, next=off+RV_PAGE<total;
+  return `<div style="display:flex;gap:8px;justify-content:center;align-items:center;padding:14px 0;font-size:12.5px">
+    <button class="btn" ${prev?'':'disabled'} onclick="STATE.rvOffset=Math.max(0,(STATE.rvOffset|0)-${RV_PAGE});_loadReviewers()">← 이전</button>
+    <span style="color:var(--muted)">${Math.floor(off/RV_PAGE)+1} / ${Math.ceil(total/RV_PAGE)}</span>
+    <button class="btn" ${next?'':'disabled'} onclick="STATE.rvOffset=(STATE.rvOffset|0)+${RV_PAGE};_loadReviewers()">다음 →</button></div>`;
+}
+/** 관리자 메모 저장 — 값이 안 바뀌었으면 요청하지 않는다(포커스 이동마다 쓰기 금지) */
+async function _rvSaveMemo(el){
+  const id=el.getAttribute('data-rvid');
+  const row=(STATE.rv||[]).find(x=>String(x.id)===String(id));
+  const memo=el.value;
+  if(!row || String(row.memo||'')===String(memo)) return;
+  el.disabled=true;
+  const r=await api('/api/trackb/reviewers/memo',{method:'POST',body:JSON.stringify({id,memo})});
+  el.disabled=false;
+  if(r&&r.ok){ row.memo=memo; _toast('메모를 저장했습니다.'); }
+  else { el.value=row.memo||''; _toast('⚠ 메모 저장 실패'+(r&&r.error?': '+r.error:'')); }   // 실패 시 화면값을 원래대로 되돌린다
+}
+
 async function renderLogsView(){
   $('#viewroot').innerHTML=`<div class="ovwrap"><div id="lghead"></div><div id="lgbody"><div class="empty">불러오는 중…</div></div></div>`;
   await _loadLogs();

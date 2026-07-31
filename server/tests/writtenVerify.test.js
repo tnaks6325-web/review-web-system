@@ -237,7 +237,11 @@ async function run() {
     const pool = makePool({});
     relog.__setPoolForTest(pool);
     assert.deepEqual(await relog.listReviewerEvents({ scopeTabs: [] }), [], '담당 탭 0 = 빈 목록(전역 열람 차단)');
-    assert.deepEqual(await relog.unresolvedCounts([]), { total: 0, critical: 0 });
+    // ★ 전체 shape 을 고정하지 않는다 — 요약 필드가 추가될 때마다(byTypeCritical 등)
+    //   이 단정이 깨져 main 이 빨개진다. 여기서 중요한 건 "담당 탭 0이면 0건"뿐이다.
+    const zc = await relog.unresolvedCounts([]);
+    assert.strictEqual(zc.total, 0, '담당 탭 0 = total 0');
+    assert.strictEqual(zc.critical, 0, '담당 탭 0 = critical 0');
     await relog.listReviewerEvents({ scopeTabs: [{ sheetId: 'S1', tabName: 'T1' }] });
     const q = pool.calls.find(c => /FROM reviewer_event_logs/.test(c.s));
     assert.ok(q && /sheet_id = \$\d+ AND tab_name = \$\d+/.test(q.s), '스코프 탭 조건이 SQL에 적용');

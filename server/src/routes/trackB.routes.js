@@ -8,6 +8,7 @@
 const express = require('express');
 const router = express.Router();
 const { authMiddleware, masterOnlyMiddleware, adminOrMasterMiddleware } = require('../middleware/auth.middleware');
+const pool = require('../db/pool');
 const svc = require('../services/trackB.service');
 const participants = require('../services/participants.service');
 const authSvc = require('../services/auth.service');
@@ -534,6 +535,75 @@ async function _logScopeTabs(req) {
   const tabs = await svc.scopedActiveTabs({ role: 'staff', staffName: (req.admin && req.admin.name) || '' });
   return (tabs || []).map(t => ({ sheetId: t.sheetId, tabName: t.tabName }));
 }
+
+/* ══════════════════════════════════════════════════════════════
+   등록리뷰어DB — 통합 작업대 상단탭
+
+   ★ **master/admin 전용**(`adminOrMasterMiddleware`). AE(staff)·광고주는 못 본다.
+     AE는 "담당 업체 탭"으로만 스코프되는데 리뷰어DB는 담당과 무관한 전사 개인정보라,
+     여기만 전체 공개하면 그 스코프 원칙이 깨진다(사용자 확정).
+   ★ Track B 라우트에 두는 이유: 통합 작업대는 `/api/trackb/*` 하고만 통신하고,
+     인트라넷 SSO 토큰(`via:'intranet'`)도 authMiddleware가 그 경로로만 격리한다.
+     기존 `/api/reviewer/list`는 전 행을 한 번에 반환(검색·페이지 없음)이라 그대로 쓸 수 없다.
+   ══════════════════════════════════════════════════════════════ */
+router.get('/reviewers', authMiddleware, adminOrMasterMiddleware, async (req, res, next) => {
+  try {
+    const q = String(req.query.q || '').trim();
+    const limit = Math.min(200, Math.max(1, parseInt(req.query.limit, 10) || 50));
+    const offset = Math.max(0, parseInt(req.query.offset, 10) || 0);
+    const status = String(req.query.status || '').trim();
+
+    const where = [];
+    const params = [];
+    if (q) {
+      // 이름 부분일치 또는 연락처 숫자 부분일치(하이픈 유무 무관).
+      // ★ 자리표시자를 안 쓸 파라미터는 push 하지 않는다 — 숫자 없는 이름 검색에서
+      //   "bind message supplies N parameters" 로 통째로 500 난다.
+      const d = q.replace(/[^0-9]/g, '');
+      const ors = [];
+      params.push('%' + q + '%');
+      ors.push(`name ILIKE $${params.length}`);
+      if (d) {
+        params.push('%' + d + '%');
+        ors.push(`REGEXP_REPLACE(phone,'[^0-9]','','g') LIKE $${params.length}`);
+      }
+      where.push('(' + ors.join(' OR ') + ')');
+    }
+    if (status) { params.push(status); where.push(`status = $${params.length}`); }
+    const w = where.length ? 'WHERE ' + where.join(' AND ') : '';
+
+    const { rows: cnt } = await pool.query(`SELECT COUNT(*)::int AS n FROM reviewers ${w}`, params);
+    params.push(limit); params.push(offset);
+    const { rows } = await pool.query(
+      `SELECT id, name, phone, phone8, status, consent,
+              income_type AS "incomeType", resident_num AS "residentNum",
+              address, bank_name AS "bankName", bank_account AS "bankAccount",
+              account_holder AS "accountHolder",
+              COALESCE(jsonb_array_length(CASE WHEN jsonb_typeof(sub_accounts)='array'
+                       THEN sub_accounts ELSE '[]'::jsonb END), 0) AS "subCount",
+              sub_accounts AS "subAccounts",
+              admin_memo AS "memo", registered_at AS "registeredAt"
+         FROM reviewers ${w}
+        ORDER BY registered_at DESC
+        LIMIT $${params.length - 1} OFFSET $${params.length}`, params);
+
+    res.json({ ok: true, items: rows, total: cnt[0].n, limit, offset });
+  } catch (err) { next(err); }
+});
+
+// 관리자 메모만 수정(사용자 확정: 다른 필드는 조회 전용 — 정산·신원 필드를 여기서 고치지 않는다)
+router.post('/reviewers/memo', authMiddleware, adminOrMasterMiddleware, async (req, res, next) => {
+  try {
+    const id = String((req.body && req.body.id) || '').trim();
+    if (!/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(id)) {
+      return res.status(400).json({ ok: false, error: 'id(UUID)가 필요합니다.' });
+    }
+    const memo = String((req.body && req.body.memo) || '').slice(0, 2000);
+    const { rowCount } = await pool.query('UPDATE reviewers SET admin_memo = $2 WHERE id = $1', [id, memo]);
+    if (!rowCount) return res.status(404).json({ ok: false, error: '해당 리뷰어를 찾을 수 없습니다.' });
+    res.json({ ok: true });
+  } catch (err) { next(err); }
+});
 
 router.get('/reviewer-logs', authMiddleware, internalMiddleware, async (req, res, next) => {
   try {
