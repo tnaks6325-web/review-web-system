@@ -42,8 +42,10 @@ ok('관리자 미리보기도 같은 값 — 미리보기 = 실제 화면',
   /cashReceipt: await _cashReceiptInfo\(camp\),\s*\/\/ 미리보기/.test(camp));
 
 /* ── 설정: 채널별 이미지 등록 ── */
-ok('발행방법 이미지 저장 엔드포인트(adminOrMaster)',
-  /router\.post\('\/cash-receipt-guide', adminOrMasterMiddleware/.test(tabc));
+// ★ authMiddleware 가 반드시 앞에 와야 한다 — 빠지면 req.admin 이 undefined 라 전원 403.
+//   (실측 사고: 이 라우트와 company-business-no 가 authMiddleware 없이 등록돼 아무도 저장 못 했다)
+ok('발행방법 이미지 저장 엔드포인트(authMiddleware + adminOrMaster)',
+  /router\.post\('\/cash-receipt-guide', authMiddleware, adminOrMasterMiddleware/.test(tabc));
 ok('채널 화이트리스트(naver|coupang)만 허용',
   /channel !== 'naver' && channel !== 'coupang'/.test(tabc));
 ok('★ imageUrl은 https 절대 URL만 — 리뷰어 화면에 <img src>로 나가므로 자유 문자열 금지',

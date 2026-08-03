@@ -155,6 +155,7 @@ GAS(Google Apps Script) 기반 리뷰 관리 시스템을 **Node.js Express + Po
 - **설정**: 관리자 설정탭에 채널별 발행방법 이미지 업로드 2칸(`POST /api/tab/cash-receipt-guide`, adminOrMaster). guide-image Drive+프록시 인프라 재사용(신규 저장소 0). ★ `imageUrl`은 **https 절대 URL만** — 리뷰어 화면에 `<img src>`로 나가므로 자유 문자열 금지.
 - **리뷰어 화면**: 공용 렌더러(`campaign-workdetail.js`)가 **상품 카드 바로 뒤**(결제 전 시점)에 🧾 안내 카드 — 지출증빙 + 사업자번호 + 발행방법 이미지 + "제출 때 발행 내역 캡처 필요" 예고. 렌더러가 공용이라 관리자 미리보기에도 자동 반영.
 - **직원 안내서**: `frontend/docs/현금영수증_발행방법_이미지_등록_안내.html`(설정탭 등록 절차 4단계 + 리뷰어 화면·2슬롯 **HTML/CSS 목업**, 외부 리소스 0 = 오프라인 열람 가능). 화면 재현 목업은 `color-scheme:light` 고정 — 다크에서 색이 뒤집히면 "실물과 같다"가 깨진다. ★ 안내서가 가르치는 라벨·문구가 제품 소스에 실제로 있는지 `tests/cashReceiptGuideDoc.test.js`(21케이스)가 대조 — **화면을 고치면 이 테스트가 깨져 안내서 갱신을 상기**시킨다(문서↔제품 드리프트 가드).
+- ★★ **역할 미들웨어 앞에 `authMiddleware` 필수**: `adminOrMasterMiddleware`는 `authMiddleware`가 세팅한 `req.admin`을 읽으므로, 빠뜨리면 **마스터 포함 전원 403**("관리자 권한이 필요합니다")이 된다. 실제로 `company-business-no`·`cash-receipt-guide` 두 라우트가 `authMiddleware` 없이 등록돼 **아무도 현금영수증 설정을 저장할 수 없었다**(토큰이 유효해도 거부되어 "권한 설정 문제"로 오인하기 쉬움). 전 라우트 파일 스캔 + 실제 서버 기동 권한별 검증 가드 `tests/authMiddlewareChain.test.js`(8케이스). ⚠ 이 API의 errorHandler는 DB 오류를 **200 + `{error}`** 로 돌려주므로(GAS 호환) 상태코드만으로 성공을 판정하지 말 것.
 - 회귀가드 `tests/cashReceiptGuide.test.js`(20케이스).
 
 ### 현금영수증 2·3단계 — 이중 슬롯 + AI 검수
