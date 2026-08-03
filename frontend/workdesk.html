@@ -4,6 +4,10 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>통합 작업대 (Track B · 그림자)</title>
+<!-- 관리자 대시보드에서 가져온 공유 모듈(cs-inquiry.js 등)이 <i class="fas fa-*"> 아이콘을 쓴다.
+     admin.html 과 **같은 CDN·같은 버전**을 쓰므로 두 화면의 아이콘이 어긋나지 않는다.
+     못 불러와도 글자만 빠질 뿐 동작은 그대로(모듈은 아이콘에 기능을 걸지 않는다). -->
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@fortawesome/fontawesome-free@6.4.0/css/all.min.css"/>
 <style>
   /* ═══ Clarity Console 공용 UI 키트 토큰 — 단일 블루 액센트 + 쿨그레이 뉴트럴, tabular-nums ═══ */
   :root{
@@ -643,6 +647,7 @@ function renderShell(){
         <button class="navb" data-v="logs" onclick="switchView('logs')">리뷰어 로그<span id="lgNavBadge"></span></button>
         <button class="navb" data-v="orders" onclick="switchView('orders')">작업오더<span id="woNavBadge"></span></button>
         <button class="navb" data-v="campaigns" onclick="switchView('campaigns')">모집공고</button>
+        <button class="navb" data-v="cs" onclick="switchView('cs')">C/S 문의<span id="csNavBadge"></span></button>
         <button class="navb" data-v="reviewers" onclick="switchView('reviewers')">등록리뷰어DB</button></nav>`
       :isStaff?`<nav class="nav">
         <button class="navb" data-v="workdesk" onclick="switchView('workdesk')">작업대</button>
@@ -658,11 +663,21 @@ function renderShell(){
     </div>
     <div id="viewroot"></div>`;
   switchView(STATE.view||'workdesk');
+  if(isAdmin) _csBootBadge();   // 탭을 열지 않아도 미확인 문의 수가 보이게(집계는 서버가 준 값 그대로)
+}
+/** 부팅 시 1회 — 미확인 문의 수만 받아 nav 뱃지에 표시. 실패는 무시(뱃지 없음). */
+async function _csBootBadge(){
+  try{
+    const r=await api('/api/trackb/cs/unread-count');
+    const nb=$('#csNavBadge'); if(!nb) return;
+    const n=(r&&r.ok!==false)?(r.totalUnread|0):0;
+    nb.textContent=n>0?(' 🔴'+n):'';
+  }catch(_){ }
 }
 function switchView(v){ STATE.view=v; document.querySelectorAll('.navb').forEach(b=>b.classList.toggle('on',b.dataset.v===v));
   const rt=$('#railToggle'); if(rt) rt.style.display=(v==='workdesk')?'':'none';   // 레일은 작업대 뷰에만 존재
   const wt=$('#wideToggle'); if(wt) wt.style.display=(v==='workdesk')?'':'none';   // 전체화면 토글도 작업대 뷰에만
-  if(v==='ownership') renderOwnershipView(); else if(v==='overview') renderOverviewView(); else if(v==='logs') renderLogsView(); else if(v==='reviewers') renderReviewersView(); else if(v==='orders') renderOrdersView(); else if(v==='campaigns') renderCampaignsView(); else renderWorkdeskView();
+  if(v==='ownership') renderOwnershipView(); else if(v==='overview') renderOverviewView(); else if(v==='logs') renderLogsView(); else if(v==='reviewers') renderReviewersView(); else if(v==='cs') renderCsView(); else if(v==='orders') renderOrdersView(); else if(v==='campaigns') renderCampaignsView(); else renderWorkdeskView();
   if(v!=='workdesk') _measureChrome();   // 작업대를 떠나면 작업바가 사라짐 → --tbh 0으로 회수(다른 뷰 높이 계산 오염 방지)
 }
 
@@ -1966,6 +1981,30 @@ async function _edRemove(id,name){
    ★ 리뷰어 수가 수만 건일 수 있어 서버 페이지네이션 + 서버 검색을 쓴다
      (기존 /api/reviewer/list 는 전 행을 한 번에 반환해 이 화면엔 못 쓴다).
    ══════════════════════════════════════════════════════════════ */
+/* ── C/S 문의창구 ───────────────────────────────────────────
+   화면은 **관리자 대시보드와 같은 모듈**(js/cs-inquiry.js) 하나뿐이다 — 여기서는
+   마운트만 하고 목록 로드는 그 모듈의 loadCsRooms() 를 그대로 부른다(사본 금지).
+   서버 경로는 window.CS_API_BASE 로 /api/trackb/cs/* 를 가리킨다(SSO 토큰 격리 때문).
+   ★ 관리자(master/admin) 전용 — 문의 본문에 리뷰어 실명·연락처·주소·주문정보가 그대로
+     실려 있어 AE의 "담당 탭" 스코프로 나눌 수 있는 데이터가 아니다(등록리뷰어DB와 같은 판단). */
+async function renderCsView(){
+  $('#viewroot').innerHTML=`<div class="ovwrap"><div id="csInquiryMount"></div></div>`;
+  if(!window.CsInquiry){ $('#viewroot').innerHTML=`<div class="ovwrap"><div class="empty">문의창구 모듈(js/cs-inquiry.js)을 불러오지 못했습니다.</div></div>`; return; }
+  CsInquiry.mount('csInquiryMount');
+  // 모듈 마크업은 관리자 대시보드의 탭 판(.admin-tab-pane = 기본 display:none)이다.
+  //   여기선 탭 전환이 없으므로 active 를 직접 준다(그 CSS가 없는 화면에서도 무해).
+  const pane=document.getElementById('tab-cs-inquiry'); if(pane) pane.classList.add('active');
+  try{ await loadCsRooms(); }catch(_){ }   // 뱃지는 csUpdateBadge 래퍼가 알아서 따라온다
+}
+/** nav 뱃지 — 모듈이 계산한 미확인 수를 그대로 표시한다(집계 로직 복제 0).
+    ★ #csInquiryBadge 를 읽지 않는다: 그 엘리먼트는 관리자 대시보드 탭 버튼에만 있고
+      통합 작업대엔 없다 → DOM 에서 읽으면 늘 0이 되어 뱃지가 지워진다(실측). */
+function _csSyncNavBadge(n){
+  const nb=$('#csNavBadge');
+  if(!nb || !Number.isFinite(n)) return;    // 값이 없으면 그대로 둔다(지우지 않는다)
+  nb.textContent=n>0?(' 🔴'+n):'';
+}
+
 const RV_PAGE = 50;
 async function renderReviewersView(){
   $('#viewroot').innerHTML=`<div class="ovwrap"><div id="rvhead"></div><div id="rvbody"><div class="empty">불러오는 중…</div></div></div>`;
@@ -3024,6 +3063,10 @@ boot();
 <!-- 작업오더 상세 렌더러 — 관리자 대시보드(index-app.js)에서 이관한 공유 모듈.
      첨부 이미지 임베드·라이트박스·섹션 추출이 전부 여기 한 벌뿐이다. -->
 <script src="js/work-order-detail.js"></script>
+<!-- C/S 문의창구 — 관리자 대시보드와 같은 화면 코드. 서버 경로만 Track B 네임스페이스로 돌린다
+     (인트라넷 SSO 토큰은 /api/cs/* 에 도달 자체가 불가능 → /api/trackb/cs/* 프록시). -->
+<script>window.CS_API_BASE = '/api/trackb/cs';</script>
+<script src="js/cs-inquiry.js"></script>
 <script src="js/campaign-cards.js"></script>
 <script src="js/recruit-modal.js"></script>
 <script src="js/manual-order.js"></script>
@@ -3034,6 +3077,12 @@ boot();
 (function () {
   var W = window;
   if (typeof W.escHtml !== 'function') W.escHtml = function (v) { return esc(v); };
+  // C/S 문의창구 뱃지 — 모듈이 갱신할 때 nav 뱃지도 같이 따라가게 감싼다(집계 복제 0)
+  if (typeof W.csUpdateBadge === 'function' && !W.csUpdateBadge._wrapped) {
+    var _cub = W.csUpdateBadge;
+    W.csUpdateBadge = function (n) { _cub(n); try { _csSyncNavBadge(Number(n) || 0); } catch (_) {} };
+    W.csUpdateBadge._wrapped = true;
+  }
   if (typeof W.showToast !== 'function') W.showToast = function (m) { _toast(String(m || '')); };
   if (typeof W._getAuthHeaders !== 'function') {
     W._getAuthHeaders = function () { return { Authorization: 'Bearer ' + token() }; };
