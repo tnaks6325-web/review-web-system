@@ -310,21 +310,10 @@ async function submitExternalOrder({
     // 신규 신청 행을 우리가 직접 만들어 확정하므로 홀드 문맥은 넘기지 않는다(이중 확정 방지)
   });
 
-  // ★ 옵션을 못 정했으면 **배정된 행에 이미 적힌 옵션값을 그대로 되쓴다**.
-  //   빈 값이면 매퍼가 옵션 칸을 지우는데, 옵션 캠페인 로스터는 옵션이 미리 적혀 있어
-  //   그 행의 옵션 표시가 사라진다(제출 유실은 아니지만 로스터 매칭이 깨진다).
-  //   원장(order_submissions)과 큐 페이로드를 함께 맞춰 reconcile 재기록도 같은 값을 쓰게 한다.
-  if (!resolvedOptKey && ledger.sheetRow) {
-    const keep = existingOptionKeyAt(ledger.tabContext, ledger.sheetRow);
-    if (keep) {
-      orderData.selectedOptKey = keep;
-      resolvedOptKey = keep;
-      try {
-        await pool.query('UPDATE order_submissions SET selected_opt_key = $2 WHERE id = $1',
-          [ledger.orderSubmissionId, keep]);
-      } catch (_) { /* 표시 실패는 접수에 영향 없음 — 큐 페이로드는 이미 맞다 */ }
-    }
-  }
+  // ★ C′: 옵션 칸 보호는 쓰기 시점(syncQueue blank-only 필터)이 담당한다. 시트에 적힌 값을
+  //   원장(selected_opt_key)이나 신청(option_key)으로 역주입하지 않는다 —
+  //   관리자 작업지시값이 "리뷰어가 고른 옵션"으로 굳어 정원·CS·정산이 오독한다.
+  //   (역주입은 리뷰어 제출 경로와도 갈려 "수동제출만 다르게 동작"하는 드리프트를 만든다.)
 
   // 출처 표시 — 목록에서 대리제출 건을 구분
   try {

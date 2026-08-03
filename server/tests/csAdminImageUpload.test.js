@@ -6,6 +6,10 @@
  * 이 변경은 리뷰어측(POST /api/reviewer/cs/upload)과 **같은 Drive 업로드 인프라**를 관리자
  * 인증 계층으로 재사용한다 — 신규 저장소 0, 검증 규칙(mime·8MB·URL 화이트리스트) 동일.
  *
+ * ★ 화면 코드는 공유 모듈 `js/cs-inquiry.js`에 있다(admin.html·admin-siand.html·workdesk.html
+ *   세 화면이 사본 없이 같은 모듈을 마운트 — csInquiryTab.test.js가 "사본 없음"을 별도로 고정).
+ *   여기서는 그 모듈 안의 사진 첨부 배선만 검사한다.
+ *
  * 고정하는 불변식
  *  ① 업로드 라우트는 authMiddleware+adminOrMaster 보호 아래(router.use 상속) 위치한다.
  *  ② 업로드 검증 규칙(mime 화이트리스트·8MB 상한)이 리뷰어측과 동일 — 갈라지면 한쪽만
@@ -15,6 +19,8 @@
  *  ④ 프론트: 첨부 3경로(파일선택 버튼·Ctrl+V·드래그앤드롭)가 전부 같은 업로드 함수로 수렴
  *     (사본을 두면 한쪽만 8MB·5장 제한이 걸리는 드리프트가 난다).
  *  ⑤ 전송은 업로드 완료된 첨부만 대상(인플라이트 업로드 중 전송 차단) — 리뷰어측과 동일 규칙.
+ *  ⑥ 통합 작업대(Track B) 프록시도 `/upload`를 위임한다 — 관리자 화면에만 넣으면 워크데스크만
+ *     이 기능이 조용히 빠진 채로 남는다(다른 6개 경로와 같은 1:1 대칭 유지).
  */
 const assert = require('assert');
 const fs = require('fs');
@@ -23,7 +29,8 @@ const read = (p) => fs.readFileSync(path.join(__dirname, '..', p), 'utf8');
 
 const csRoutes = read('src/routes/cs.routes.js');
 const revRoutes = read('src/routes/reviewer.routes.js');
-const appJs = read('../frontend/js/index-app.js');
+const trackBRoutes = read('src/routes/trackB.routes.js');
+const appJs = read('../frontend/js/cs-inquiry.js');
 const apiJs = read('../frontend/api.js');
 
 let passed = 0;
@@ -78,5 +85,11 @@ ok('방 전환 시 이전 첨부 폐기(다른 방에 잘못 붙는 사고 방�
 ok('api.js 액션 매핑(csAdminUpload)', /'csAdminUpload':\s*\{ method: 'POST', path: '\/api\/cs\/upload' \}/.test(apiJs));
 ok('최대 5장 제한(리뷰어측과 동일)', /_csPending\.length >= 5/.test(appJs));
 ok('8MB 초과 파일 차단(프론트 사전 검증)', /f\.size > 8 \* 1024 \* 1024/.test(appJs));
+
+console.log('\n⑤ 통합 작업대(Track B) 프록시 대칭');
+ok('trackB가 /cs/upload도 위임(다른 6개 경로와 동일 패턴)',
+  /upload:\s*_delegate\(_csRoutes, 'post', '\/upload'\)/.test(trackBRoutes));
+ok('trackB 마운트 경로도 authMiddleware+adminOrMaster로 보호',
+  /router\.post\('\/cs\/upload', authMiddleware, adminOrMasterMiddleware/.test(trackBRoutes));
 
 console.log(`\n✅ csAdminImageUpload: ${passed}개 통과\n`);

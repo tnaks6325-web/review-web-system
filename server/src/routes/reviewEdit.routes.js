@@ -244,6 +244,28 @@ router.get('/participation-brief', async (req, res) => {
       ownGid = (tc[0] && tc[0].tab_gid) || '';
     } catch (_) { /* gid 도출 실패 → 탭명 매칭만(fail-soft) */ }
 
+    // ★ D: 이 행의 **작업 옵션(리뷰 형태)** — 관리자가 로스터에 미리 적어둔 '텍스트'·'포토리뷰' 같은
+    //   작업지시다. 지금까지 관리자만 보고 리뷰어는 자기 행의 지시를 확인할 방법이 없었다.
+    //   ★ 판정은 `optionWriteColumns`(매퍼 파생, C′ 단일 출처) — '옵션금액'(=결제금액 칸)·
+    //     '비고(옵션확인)'을 옵션으로 오분류하면 금액·메모가 리뷰어 화면에 새어 나간다.
+    //   ★ row_json 은 헤더명→값 맵(columnResolver)이라 키 순서 = 헤더 순서. 읽기 전용·fail-soft.
+    let workOptions = [];
+    try {
+      const { rows: ri } = await pool.query(
+        `SELECT row_json FROM review_index
+          WHERE sheet_id = $1 AND tab_name = $2 AND row_index = $3 LIMIT 1`,
+        [sheetId, tabName, rowIndex]
+      );
+      const rj = ri[0] && ri[0].row_json;
+      if (rj && typeof rj === 'object') {
+        const { optionWriteColumns } = require('../services/orderLedger.service');
+        const headers = Object.keys(rj);
+        workOptions = optionWriteColumns(headers)
+          .map(i => ({ label: headers[i], value: String(rj[headers[i]] == null ? '' : rj[headers[i]]).trim() }))
+          .filter(o => o.label && o.value);
+      }
+    } catch (_) { /* 표시용 — 실패해도 나머지 brief 는 그대로 나간다 */ }
+
     // 이 행(시트/탭)에 연결된 공고 — 서버도출 gid 우선 → 탭명 폴백
     const { rows: camps } = await pool.query(
       `SELECT id, title, chat_url, landing_url, source_work_order_id, work_detail
@@ -254,7 +276,9 @@ router.get('/participation-brief', async (req, res) => {
         LIMIT 1`,
       [sheetId, ownGid, tabName]
     );
-    if (!camps.length) return res.json({ ok: true, brief: null });   // 공고 미연결 탭(카톡 없음 → 프론트는 제출 버튼만)
+    // 공고 미연결 탭(카톡 없음 → 프론트는 제출 버튼만). ★ D: 그래도 작업 옵션은 알려준다
+    //   — 리뷰 형태는 공고가 아니라 **그 행**에 적힌 지시라 공고 유무와 무관하다.
+    if (!camps.length) return res.json({ ok: true, brief: workOptions.length ? { workOptions } : null });
     const c = camps[0];
 
     // 상품 URL: 연결 작업오더 product_url → 공고 landing_url 폴백 (읽기만 · fail-soft)
@@ -286,6 +310,7 @@ router.get('/participation-brief', async (req, res) => {
         productUrl,
         productLines,
         reviewGuide,
+        workOptions,          // ★ D: [{label:'리뷰옵션', value:'텍스트'}] — 그 행의 작업지시
       },
     });
   } catch (err) {

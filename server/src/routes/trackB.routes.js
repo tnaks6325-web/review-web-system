@@ -661,6 +661,45 @@ router.post('/campaigns/:id/dismiss', authMiddleware, internalMiddleware, editor
   _campHandlers.dismiss(req, res, next));
 
 /* ══════════════════════════════════════════════════════════════
+   C/S 문의창구 — 통합 작업대 상단탭
+
+   ★ **master/admin 전용**(`adminOrMasterMiddleware`) — 기존 `/api/cs/*` 정책을 그대로 옮겼다
+     (cs.routes.js 머리말: "staff(영업담당자)·리뷰어는 접근 불가"). 문의 본문에는
+     리뷰어 실명·연락처·주소·주문정보가 그대로 실려 담당 스코프로 나눌 수 있는 데이터가 아니다.
+   ★ Track B 경로에 두는 이유: 인트라넷 SSO 토큰(`via:'intranet'`)은 authMiddleware가
+     `/api/trackb/*` 로만 격리해 `/api/cs/*` 에 **도달 자체가 불가능**하다.
+     로직은 한 줄도 베끼지 않고 기존 cs 라우트 핸들러에 그대로 위임한다.
+   ══════════════════════════════════════════════════════════════ */
+const _csRoutes = require('./cs.routes');
+const _csHandlers = {
+  threads:      _delegate(_csRoutes, 'get',  '/threads'),
+  unread:       _delegate(_csRoutes, 'get',  '/unread-count'),
+  messages:     _delegate(_csRoutes, 'get',  '/messages'),
+  orderContext: _delegate(_csRoutes, 'get',  '/order-context'),
+  reply:        _delegate(_csRoutes, 'post', '/reply'),
+  upload:       _delegate(_csRoutes, 'post', '/upload'),
+  status:       _delegate(_csRoutes, 'post', '/status'),
+  memo:         _delegate(_csRoutes, 'post', '/memo'),
+};
+// 경로 모양은 `/api/cs/*` 와 1:1 — 프론트가 베이스 문자열만 갈아끼워 같은 모듈을 쓴다.
+router.get('/cs/threads', authMiddleware, adminOrMasterMiddleware, (req, res, next) =>
+  _csHandlers.threads(req, res, next));
+router.get('/cs/unread-count', authMiddleware, adminOrMasterMiddleware, (req, res, next) =>
+  _csHandlers.unread(req, res, next));
+router.get('/cs/messages', authMiddleware, adminOrMasterMiddleware, (req, res, next) =>
+  _csHandlers.messages(req, res, next));
+router.get('/cs/order-context', authMiddleware, adminOrMasterMiddleware, (req, res, next) =>
+  _csHandlers.orderContext(req, res, next));
+router.post('/cs/reply', authMiddleware, adminOrMasterMiddleware, (req, res, next) =>
+  _csHandlers.reply(req, res, next));
+router.post('/cs/upload', authMiddleware, adminOrMasterMiddleware, (req, res, next) =>
+  _csHandlers.upload(req, res, next));
+router.post('/cs/status', authMiddleware, adminOrMasterMiddleware, (req, res, next) =>
+  _csHandlers.status(req, res, next));
+router.post('/cs/memo', authMiddleware, adminOrMasterMiddleware, (req, res, next) =>
+  _csHandlers.memo(req, res, next));
+
+/* ══════════════════════════════════════════════════════════════
    등록리뷰어DB — 통합 작업대 상단탭
 
    ★ **master/admin 전용**(`adminOrMasterMiddleware`). AE(staff)·광고주는 못 본다.

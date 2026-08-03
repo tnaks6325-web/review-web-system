@@ -4,6 +4,10 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>통합 작업대 (Track B · 그림자)</title>
+<!-- 관리자 대시보드에서 가져온 공유 모듈(cs-inquiry.js 등)이 <i class="fas fa-*"> 아이콘을 쓴다.
+     admin.html 과 **같은 CDN·같은 버전**을 쓰므로 두 화면의 아이콘이 어긋나지 않는다.
+     못 불러와도 글자만 빠질 뿐 동작은 그대로(모듈은 아이콘에 기능을 걸지 않는다). -->
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@fortawesome/fontawesome-free@6.4.0/css/all.min.css"/>
 <style>
   /* ═══ Clarity Console 공용 UI 키트 토큰 — 단일 블루 액센트 + 쿨그레이 뉴트럴, tabular-nums ═══ */
   :root{
@@ -32,11 +36,11 @@
   .btn:disabled{background:var(--card2);color:var(--faint);border-color:var(--card2);cursor:not-allowed;box-shadow:none;transform:none}
   /* ── 작업목록 = 상단 가로바(사이드바 대체). 본문은 1열(+선택적 우측 레일) → 표가 화면 전체폭을 씀 ──
      --tbh = 상단 작업바 실제 높이(tb1 ~49 + tb2 42 + 경계 1). 높이 의존 계산(.wrap/.gridscroll)을 이 한 값에 묶어
-     전체화면(작업바 숨김)일 때 body.widemode가 0으로 덮어쓰면 아래 계산들이 함께 따라온다(매직넘버 드리프트 방지). */
+     전체화면(작업바 숨김)일 때 body.widemode가 0으로 덮어쓰면 아래 계산들이 함께 따라온다(매직넘버 드리프트 방지).
      --toph = 상단 헤더(.top) 실제 높이. .top은 flex-wrap이라 역할별 버튼 수·화면폭에 따라 한 줄(≈57px)에서
      두 줄(≈93px+)로 늘어난다 → 상수로 박으면 좁은 화면에서 작업바가 헤더 뒤로 숨는다. 둘 다 _measureChrome()이
      실측해 덮어쓰고(아래 값은 첫 프레임용 근사치), 전체화면이면 작업바가 display:none이라 측정값이 자연히 0이 된다. */
-  :root{--tbh:92px;--toph:57px}
+  :root{--tbh:92px;--toph:57px;--app-max:1920px}
   .wrap{display:grid;grid-template-columns:1fr 300px;min-height:calc(100vh - var(--toph) - var(--tbh))}
   .wrap.railhidden{grid-template-columns:1fr}                 /* 우측 레일 숨김 → 1열(메인 전체폭) */
   .wrap.railhidden .rail{display:none}
@@ -211,7 +215,11 @@
   .dnone{font-size:12px;color:var(--faint);padding:4px 0}
   /* ── 시트형 그리드(열람) ── */
   .gridscroll{border:1px solid var(--line);border-radius:10px;overflow:auto;max-height:calc(100vh - 300px - var(--tbh));background:var(--card)}   /* 상단 작업바 높이만큼 차감(전체화면 시 --tbh=0 → 원래 높이 복귀) */
-  table.sheetgrid{border-collapse:separate;border-spacing:0;font-size:12px;white-space:nowrap;min-width:100%;overflow:visible;table-layout:fixed}   /* table-layout:fixed = 열 너비 고정 → 브라우저가 모든 셀 내용을 측정 안 함(렌더 비용 급감). overflow:visible = 상단 table{overflow:hidden} 무효화 → thead sticky 동작 */
+  /* table-layout:fixed = 열 너비 고정 → 브라우저가 모든 셀 내용을 측정 안 함(렌더 비용 급감). overflow:visible = 상단 table{overflow:hidden} 무효화 → thead sticky 동작.
+     ★ min-width:0 = 컨테이너 100% 스트레치 해제. 표폭은 _fitGrid 가 '보이는 열 고정폭의 합'으로 못박는다 →
+       창을 아무리 넓혀도 열 너비가 변하지 않고(같은 자리에 같은 데이터), 남는 공간은 우측 여백으로 남는다.
+       열이 더 많은 작업(탭)일수록 합이 커져 표만 그만큼 넓어진다. */
+  table.sheetgrid{border-collapse:separate;border-spacing:0;font-size:12px;white-space:nowrap;min-width:0;overflow:visible;table-layout:fixed}
   table.sheetgrid th,table.sheetgrid td{border-right:1px solid var(--line);border-bottom:1px solid var(--line);padding:5px 9px;text-align:left;height:30px}
   table.sheetgrid td{overflow:hidden;text-overflow:ellipsis}   /* 고정폭 초과 값은 …로 축약(전체값 = 호버 툴팁 or 클릭 편집) */
   table.sheetgrid th{overflow:hidden}
@@ -222,7 +230,7 @@
   table.sheetgrid thead th.gfz{z-index:4;background:var(--card2)}
   .gnum{text-align:center;color:var(--faint);font-weight:700} .gnm{font-weight:600}
   table.sheetgrid td.gctr{text-align:center} table.sheetgrid th.gctr .th-in{justify-content:center}   /* 날짜/연락처 열 = 가운데 정렬(값 길이 달라도 앞여백=뒷여백) */
-  table.sheetgrid.advsnug{min-width:0}   /* 광고주 = 스냅(자동채움 안 함) → 100% 스트레치 해제, 열은 고정폭(table-layout:fixed) 유지, 남으면 우측 여백 */
+  table.sheetgrid.advsnug{min-width:0}   /* (역할 무관 기본이 된 규칙 — 광고주 그리드 식별용으로 클래스는 유지) */
   table.sheetgrid .gph{font-family:var(--mono);font-size:11.5px;color:var(--muted)}
   table.sheetgrid tbody tr:hover td{background:#f7faff} table.sheetgrid tbody tr:hover td.gfz{background:#eef4ff}
   /* 리뷰어 로그 딥링크로 찾아온 행 — 앰버로 잠깐 강조(고정열 포함). 호버보다 우선이라 마우스가 위에 있어도 보인다 */
@@ -249,6 +257,36 @@
   .gnote{font-size:11px;color:var(--faint)} .gnote b{color:var(--muted)}
   /* ── 관측 대시보드 ── */
   .ovwrap{padding:18px 22px;overflow:auto;height:calc(100vh - 50px)}
+
+  /* ── 화면 폭 상한 (우측 상단 FHD/QHD 토글) ────────────────────────────────────────
+     창을 넓힐수록 헤더·업체 칩·탭·본문이 끝없이 따라 늘어나던 것을 --app-max 에서 멈춘다.
+     ★ 래퍼를 새로 넣지 않고 padding-inline 한 줄로 처리한다 — .top/.taskbar 는 sticky 배경이라
+       요소 자체에 max-width 를 걸면 넓은 화면에서 배경 띠가 화면 중앙만 덮어 스크롤 시 끊긴다.
+       바깥은 화면 전폭(배경 유지) · 안쪽 내용만 상한 안에서 가운데 정렬.
+     ★ 이 블록은 각 바의 자체 padding 선언보다 뒤에 와야 한다(동일 특이성 → 나중 선언이 이김).
+     전체화면 모드는 표에 최대 폭을 주는 모드라 상한을 푼다(none 은 calc 에서 못 쓰므로 100vw). */
+  .top    {padding-inline:max(18px, calc((100% - var(--app-max)) / 2))}
+  .tb1    {padding-inline:max(14px, calc((100% - var(--app-max)) / 2))}
+  .tb2    {padding-inline:max(12px, calc((100% - var(--app-max)) / 2))}
+  .wrap   {padding-inline:max( 0px, calc((100% - var(--app-max)) / 2))}
+  .ovwrap {padding-inline:max(22px, calc((100% - var(--app-max)) / 2))}
+  body[data-vw="fhd"]{--app-max:1920px}   /* :root 기본값과 같은 값을 body 에도 명시 — 상한이 :root 한 줄에만 매달리지 않게 */
+  body[data-vw="qhd"]{--app-max:2560px}
+  body.widemode{--app-max:100vw}
+
+  /* 좌우 슬라이딩 2단 스위치(FHD ↔ QHD). 라벨 폭을 44px 로 고정해야 노브 이동거리가 정확히 한 칸 */
+  .vwsw{position:relative;display:inline-flex;align-items:center;background:var(--card2);border:1px solid var(--line);
+    border-radius:9px;padding:3px;cursor:pointer;user-select:none;flex:none}
+  .vwsw b{position:relative;z-index:1;width:44px;text-align:center;line-height:26px;
+    font-size:11px;font-weight:800;letter-spacing:.04em;color:var(--faint);transition:color .16s}
+  .vwsw .vwknob{position:absolute;top:3px;left:3px;width:44px;height:26px;border-radius:7px;background:var(--accent);
+    box-shadow:0 1px 3px rgba(37,99,235,.34);transition:transform .18s cubic-bezier(.4,0,.2,1)}
+  .vwsw[data-on="qhd"] .vwknob{transform:translateX(44px)}
+  .vwsw[data-on="fhd"] b:nth-of-type(1),
+  .vwsw[data-on="qhd"] b:nth-of-type(2){color:#fff}
+  .vwsw:hover{border-color:var(--accent-line)}
+  .vwsw:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
+  @media(prefers-reduced-motion:reduce){.vwsw .vwknob{transition:none}}
   .ovnote{font-size:11.5px;color:var(--faint);margin:-4px 0 14px;line-height:1.5} .ovnote b{color:var(--muted)}
   .ovsearch{font:inherit;font-size:12.5px;padding:6px 11px;border:1px solid var(--line2);border-radius:8px;background:var(--card);color:var(--ink);width:180px}
   .tablewrap{overflow-x:auto;border:1px solid var(--line);border-radius:10px;background:var(--card)}
@@ -581,6 +619,7 @@ let STATE = { role:'', name:'', view:'workdesk', tabs:[], cur:null, wd:null, fre
               settleOpen:false, _gMenuCol:null, _gMenuInit:false, _gDragInit:false };
 
 async function boot(){
+  _applyVwMode();   // 로그인 화면부터 상한 적용(셸 렌더 전에도 body[data-vw] 세팅 — 스위치는 셸에서 다시 동기화)
   // 광고주 전용 접속 링크(#adv=<token>) — 로그인 없이 유효 토큰을 advertiser JWT 로 교환(프래그먼트라 서버로그·Referer 미유출).
   const advm=(location.hash||'').match(/[#&]adv=([^&]+)/);
   if(advm){ let t=null; try{ t=decodeURIComponent(advm[1]); }catch(_){ }
@@ -643,6 +682,7 @@ function renderShell(){
         <button class="navb" data-v="logs" onclick="switchView('logs')">리뷰어 로그<span id="lgNavBadge"></span></button>
         <button class="navb" data-v="orders" onclick="switchView('orders')">작업오더<span id="woNavBadge"></span></button>
         <button class="navb" data-v="campaigns" onclick="switchView('campaigns')">모집공고</button>
+        <button class="navb" data-v="cs" onclick="switchView('cs')">C/S 문의<span id="csNavBadge"></span></button>
         <button class="navb" data-v="reviewers" onclick="switchView('reviewers')">등록리뷰어DB</button></nav>`
       :isStaff?`<nav class="nav">
         <button class="navb" data-v="workdesk" onclick="switchView('workdesk')">작업대</button>
@@ -651,18 +691,51 @@ function renderShell(){
         <button class="navb" data-v="orders" onclick="switchView('orders')">작업오더<span id="woNavBadge"></span></button>
         <button class="navb" data-v="campaigns" onclick="switchView('campaigns')">모집공고</button></nav>`:''}
       <span class="sp"></span>
+      <div class="vwsw" id="vwToggle" role="switch" aria-checked="false" tabindex="0"
+           aria-label="화면 폭 상한 전환" title="화면 폭 상한 — FHD 1920px / QHD 2560px (열 너비는 어느 쪽이든 고정)"
+           onclick="toggleVwMode()"
+           onkeydown="if(event.key===' '||event.key==='Enter'){event.preventDefault();toggleVwMode();}"><span class="vwknob"></span><b>FHD</b><b>QHD</b></div>
       <button class="btn railtgl" id="railToggle" onclick="toggleRail()" style="display:none" title="우측 사이드바(협업/댓글·Parity) 숨기기/표시"></button>
       <button class="btn widetgl" id="wideToggle" onclick="toggleWide()" style="display:none" title="작업 목록·우측 레일을 숨겨 표를 화면 전체폭으로 (Esc로 해제)"></button>
       <span class="rolebadge">${esc(STATE.role||'?')}${STATE.name?(' · '+esc(STATE.name)):''}</span>
       <button class="btn" onclick="logout()">로그아웃</button>
     </div>
     <div id="viewroot"></div>`;
+  _applyVwMode();               // 저장된 FHD/QHD 모드를 스위치·body에 반영(셸을 다시 그릴 때마다)
   switchView(STATE.view||'workdesk');
+  if(isAdmin) _csBootBadge();   // 탭을 열지 않아도 미확인 문의 수가 보이게(집계는 서버가 준 값 그대로)
 }
+/** 부팅 시 1회 — 미확인 문의 수만 받아 nav 뱃지에 표시. 실패는 무시(뱃지 없음). */
+async function _csBootBadge(){
+  try{
+    const r=await api('/api/trackb/cs/unread-count');
+    const nb=$('#csNavBadge'); if(!nb) return;
+    const n=(r&&r.ok!==false)?(r.totalUnread|0):0;
+    nb.textContent=n>0?(' 🔴'+n):'';
+  }catch(_){ }
+}
+
+// ── 화면 폭 상한 모드 (FHD 1920 / QHD 2560) ──────────────────────────────────────
+//   순수 표시 설정이라 서버·계정과 무관하게 localStorage 로만 저장한다(브라우저=모니터 1:1 대응).
+//   저장값이 없거나 읽기 실패면 FHD — 좁은 쪽이 안전한 기본값(QHD 기본이면 FHD 모니터에서 상한이 무의미해진다).
+const VW_KEY='wd_viewport_mode';
+function _vwMode(){ try{ return localStorage.getItem(VW_KEY)==='qhd' ? 'qhd' : 'fhd'; }catch(_){ return 'fhd'; } }
+function _applyVwMode(){
+  const m=_vwMode();
+  document.body.dataset.vw=m;
+  const sw=document.getElementById('vwToggle');
+  if(sw){ sw.dataset.on=m; sw.setAttribute('aria-checked', m==='qhd'?'true':'false'); }
+}
+function setVwMode(m){
+  try{ localStorage.setItem(VW_KEY, m==='qhd'?'qhd':'fhd'); }catch(_){ }
+  _applyVwMode();
+  _measureChrome();   // 상한 변경 → .top 줄바꿈이 달라질 수 있음(--toph 재실측). 표폭은 고정이라 _fitGrid 불필요
+}
+function toggleVwMode(){ setVwMode(_vwMode()==='qhd' ? 'fhd' : 'qhd'); }
 function switchView(v){ STATE.view=v; document.querySelectorAll('.navb').forEach(b=>b.classList.toggle('on',b.dataset.v===v));
   const rt=$('#railToggle'); if(rt) rt.style.display=(v==='workdesk')?'':'none';   // 레일은 작업대 뷰에만 존재
   const wt=$('#wideToggle'); if(wt) wt.style.display=(v==='workdesk')?'':'none';   // 전체화면 토글도 작업대 뷰에만
-  if(v==='ownership') renderOwnershipView(); else if(v==='overview') renderOverviewView(); else if(v==='logs') renderLogsView(); else if(v==='reviewers') renderReviewersView(); else if(v==='orders') renderOrdersView(); else if(v==='campaigns') renderCampaignsView(); else renderWorkdeskView();
+  if(v==='ownership') renderOwnershipView(); else if(v==='overview') renderOverviewView(); else if(v==='logs') renderLogsView(); else if(v==='reviewers') renderReviewersView(); else if(v==='cs') renderCsView(); else if(v==='orders') renderOrdersView(); else if(v==='campaigns') renderCampaignsView(); else renderWorkdeskView();
   if(v!=='workdesk') _measureChrome();   // 작업대를 떠나면 작업바가 사라짐 → --tbh 0으로 회수(다른 뷰 높이 계산 오염 방지)
 }
 
@@ -722,7 +795,7 @@ function _syncRailToggle(){ const b=$('#railToggle'); if(!b) return; const hidde
 function toggleRail(){ const hidden=!_railHidden();
   try{ localStorage.setItem('wd_rail_hidden_v1', hidden?'1':'0'); }catch(_){}
   const w=$('#wrap'); if(w) w.classList.toggle('railhidden', hidden);
-  _syncRailToggle(); _fitGrid();   // 레일 토글=그리드 컨테이너 폭 변경 → 주소 유동 재적합
+  _syncRailToggle(); _fitGrid();   // 레일 토글=그리드 컨테이너 폭 변경 → 표폭 재계산
 }
 
 // ── 전체화면(전체폭) 모드 — 상단 작업바·우 레일을 숨겨 표에 화면을 모두 할애. 브라우저 전체화면(Fullscreen API)도 함께 요청, Esc로 나가면 레이아웃도 동기 해제. 레이아웃 상태는 로컬 영속(재접속·뷰전환 유지). ──
@@ -737,7 +810,7 @@ function _syncWideToggle(){ const on=_wideMode();
 function _applyWide(on){
   try{ localStorage.setItem('wd_wide_v1', on?'1':'0'); }catch(_){}
   const w=$('#wrap'); if(w) w.classList.toggle('widemode', on);
-  _syncWideToggle(); _measureChrome(); _fitGrid();   // 패널 숨김=컨테이너 폭·높이 변경 → 실측 후 주소 유동 재적합
+  _syncWideToggle(); _measureChrome(); _fitGrid();   // 패널 숨김=컨테이너 폭·높이 변경 → 실측 후 표폭 재계산
 }
 function toggleWide(){ const on=!_wideMode();
   _applyWide(on);
@@ -1005,7 +1078,7 @@ function renderWorkdesk(wd){
   // 딥링크 강조: 첫 청크 안에 대상이 있으면 즉시, 없으면 flush 진행/완료 시점에 다시 시도.
   //   남은 청크가 없을 때(작은 표)는 여기서 바로 '못 찾음'까지 확정한다.
   _applyPendingFocus(!STATE._pendingBody);
-  if(gridMode) _fitGrid();   // 주소 유동 채움(언더플로 시)
+  if(gridMode) _fitGrid();   // 표폭 = 고정폭 합
   if(!STATE._fitResizeBound){ STATE._fitResizeBound=true; let t=null;
     window.addEventListener('resize',()=>{ clearTimeout(t); t=setTimeout(()=>{ if(STATE.wd&&(STATE.canEdit||STATE.role==='advertiser')) _fitGrid(); },120); }); }
   loadSettlement(STATE.cur);
@@ -1250,10 +1323,10 @@ async function refreshUnseen(){
 // 컬럼 폭(px) — 고정열 오프셋 계산과 최소폭에 사용. 없으면 기본값.
 // 초밀도 최소폭: 짧은 열은 콘텐츠 기준으로 대폭 축소, 긴 열(주소 등)은 자동 레이아웃이 콘텐츠만큼 확장(무잘림).
 // table-layout:fixed에서 이 값은 '실제 열 너비'(auto 시절엔 최소폭). 신원열(참여자/연락처)은 이름+배지·번호가 안 잘리게 여유, 데이터열은 초밀도 유지(초과분 …+툴팁).
-// 구매일자=73("12/31 (월)" 핏)·연락처=120(phone "010-0000-0000" + 좌우 여백, 가운데 정렬)·주소=450(전체표시, 유동 base — 오버플로 시 450 고정) — 요청 반영. 주소는 유동(_isFlexCol).
+// 구매일자=73("12/31 (월)" 핏)·연락처=120(phone "010-0000-0000" + 좌우 여백, 가운데 정렬)·주소=450(전체표시) — 요청 반영. 모든 열이 고정폭(유동 열 없음).
 const _COLW={'#':35,'참여자':105,'연락처':120,'번호':43,'담당자':56,'구매일자':73,'인애드명단':74,'주문자제출':74,'수취인':62,'id':102,'주소':450,'은행':88,'계좌번호':114,'예금주':60,'결제금액':66,'리뷰제출':102,'입금':48,'주문번호':121,'비고(닉네임)':84};
 // 광고주 그리드 전용 폭(초밀도 시안 반영) — 내부 그리드(_COLW)와 분리. 신원열 없는 10열 맞춤. 구매일자/연락처는 값 핏(내부와 동일 폭).
-//   ID열은 시트명 다양(쿠팡id/네이버아이디)이라 키가 아닌 패턴으로. 주소=450(요청 — 주소 전체표시 우선. 광고주는 자동채움 미적용, _fitGrid가 표폭을 합으로 고정=advsnug → 표가 넓어 우측 열은 가로 스크롤).
+//   ID열은 시트명 다양(쿠팡id/네이버아이디)이라 키가 아닌 패턴으로. 주소=450(요청 — 주소 전체표시 우선). _fitGrid가 표폭을 이 합으로 고정 → 넓으면 우측 여백, 좁으면 가로 스크롤.
 const _ADV_COLW={'#':32,'번호':40,'구매일자':73,'주문번호':110,'수취인':60,'연락처':110,'주소':450,'결제금액':66,'리뷰제출':82,'리뷰제출일':82,'입금':54,'입금일':54};
 function _colW(h){
   if(STATE.role==='advertiser'){
@@ -1262,9 +1335,6 @@ function _colW(h){
   }
   return _COLW[h]||76;
 }
-// 유동 열(남는 폭 흡수) = 주소. cstyle은 모든 열 고정폭 → 렌더 후 _fitGrid가 언더플로 시 주소만 넓혀 표를 채움(다른 열은 스냅 폭 유지).
-//   ★ table-layout:fixed에서 width:auto는 오버플로 시 0으로 붕괴(min-width 무시)라 CSS 유동 금지 → JS 산출로 대체.
-function _isFlexCol(h){ return h==='주소'; }
 // 가운데 정렬 대상 = 날짜형(구매일자 등)·연락처(전화) → 값 길이가 달라도 앞여백=뒷여백(좌우 대칭). (_isPhoneHeader는 아래 정의, 함수선언 호이스팅)
 function _isCtrCol(h){ return /일자|날짜|date/i.test(String(h==null?'':h)) || _isDepositCol(h) || _isPhoneHeader(h); }
 // 시트 일련번호(1899-12-30 기준) → YYYY-MM-DD. 날짜형 헤더 + 순수 숫자일 때만 변환(금액 등 오변환 방지).
@@ -1476,8 +1546,11 @@ function buildGrid(wd){
 // 그리드만 가볍게 재렌더(필터/그룹/숨김/정렬 등 뷰 상태 변경 시 — 정산·스레드 재요청 없이)
 function rerenderGrid(){ const wd=STATE.wd; if(!wd) return; const host=$('#gridhost'); if(!host) return;
   const gridMode=(STATE.canEdit||STATE.role==='advertiser')&&Array.isArray(wd.headers)&&wd.headers.length; if(gridMode){ host.innerHTML=buildGrid(wd); _scheduleBodyFlush(); _fitGrid(); } }   // 광고주도 필터/정렬/숨김 재렌더 동작
-// 주소(유동 열)로 컨테이너 잔여폭 흡수 → 표를 꽉 채우되 다른 열은 스냅(정확) 폭 유지. 언더플로 판정은 _colW 합(레이아웃 측정 안 함 = 스트레치 오판·플래시 없음). 오버플로면 주소=기본(가로 스크롤).
-//   렌더 직후 동기 실행(페인트 전) → 화면엔 채워진 최종본만. 주소 숨김/부재면 미개입(table min-width:100% 폴백).
+// ★★ 표폭 = '보이는 열 고정폭의 합' 못박기 (역할 무관·창 크기 무관)
+//   과거엔 언더플로 시 주소 열이 잔여폭을 흡수해 표를 꽉 채웠다 → 같은 열이 창 크기·숨긴 열 수에 따라
+//   매번 다른 너비가 되어, 여러 작업을 오가며 데이터를 훑는 실사용자가 열 위치를 다시 찾아야 했다.
+//   이제 창을 아무리 넓혀도 열 너비는 고정이고 남는 공간은 우측 여백. 열이 많은 작업일수록 합이 커져 표만 넓어진다.
+//   합 > 컨테이너면 종전대로 .gridscroll 가로 스크롤. 레이아웃 측정 없이 _colW 합만 쓰므로 스트레치 플래시도 없다.
 function _fitGrid(){ try{
   const wd=STATE.wd; if(!wd) return;
   const scroll=$('.gridscroll'); if(!scroll) return;
@@ -1485,14 +1558,8 @@ function _fitGrid(){ try{
   const H=wd.headers||[];
   const idKeys = STATE.role==='advertiser' ? ['#'] : ['#','참여자','연락처'];   // buildGrid idCols와 동일
   const keys=[...idKeys, ...H].filter(k=>!STATE.gHidden.has(k));                 // vcols와 동일 규칙(숨긴 열 제외)
-  let sum=0; for(const k of keys) sum+=_colW(k);                                 // 스냅 자연 표폭(고정폭 합)
-  if(STATE.role==='advertiser'){                                                 // 광고주 = 스냅 고정(자동채움 안 함): 표폭을 합으로 고정 → 주소 등 고정폭 유지, 남으면 우측 여백
-    tbl.style.width=sum+'px'; return;                                            // advsnug(min-width:0)와 함께 100% 스트레치 차단
-  }
-  const flexKey=keys.find(_isFlexCol); if(!flexKey) return;                      // 내부: 유동 열(주소)이 표시 중일 때만 개입
-  const th=scroll.querySelector('table.sheetgrid thead th[data-col="'+flexKey+'"]'); if(!th) return;
-  const base=_colW(flexKey), avail=scroll.clientWidth;
-  th.style.width = (avail>sum ? base+(avail-sum) : base) + 'px';                 // 언더플로: 주소가 잔여폭 흡수 · 오버플로: 기본
+  let sum=0; for(const k of keys) sum+=_colW(k);
+  tbl.style.width=sum+'px';                                                      // min-width:0 과 함께 100% 스트레치 차단
 }catch(_){ } }
 function setFreeze(v){ STATE.freezeUpto=v||null; rerenderGrid(); }
 // ── 컬럼 ▾ 필터/정렬/숨기기 · 행 그룹 접기/펼치기 (클라이언트 뷰 상태) ──
@@ -1966,6 +2033,30 @@ async function _edRemove(id,name){
    ★ 리뷰어 수가 수만 건일 수 있어 서버 페이지네이션 + 서버 검색을 쓴다
      (기존 /api/reviewer/list 는 전 행을 한 번에 반환해 이 화면엔 못 쓴다).
    ══════════════════════════════════════════════════════════════ */
+/* ── C/S 문의창구 ───────────────────────────────────────────
+   화면은 **관리자 대시보드와 같은 모듈**(js/cs-inquiry.js) 하나뿐이다 — 여기서는
+   마운트만 하고 목록 로드는 그 모듈의 loadCsRooms() 를 그대로 부른다(사본 금지).
+   서버 경로는 window.CS_API_BASE 로 /api/trackb/cs/* 를 가리킨다(SSO 토큰 격리 때문).
+   ★ 관리자(master/admin) 전용 — 문의 본문에 리뷰어 실명·연락처·주소·주문정보가 그대로
+     실려 있어 AE의 "담당 탭" 스코프로 나눌 수 있는 데이터가 아니다(등록리뷰어DB와 같은 판단). */
+async function renderCsView(){
+  $('#viewroot').innerHTML=`<div class="ovwrap"><div id="csInquiryMount"></div></div>`;
+  if(!window.CsInquiry){ $('#viewroot').innerHTML=`<div class="ovwrap"><div class="empty">문의창구 모듈(js/cs-inquiry.js)을 불러오지 못했습니다.</div></div>`; return; }
+  CsInquiry.mount('csInquiryMount');
+  // 모듈 마크업은 관리자 대시보드의 탭 판(.admin-tab-pane = 기본 display:none)이다.
+  //   여기선 탭 전환이 없으므로 active 를 직접 준다(그 CSS가 없는 화면에서도 무해).
+  const pane=document.getElementById('tab-cs-inquiry'); if(pane) pane.classList.add('active');
+  try{ await loadCsRooms(); }catch(_){ }   // 뱃지는 csUpdateBadge 래퍼가 알아서 따라온다
+}
+/** nav 뱃지 — 모듈이 계산한 미확인 수를 그대로 표시한다(집계 로직 복제 0).
+    ★ #csInquiryBadge 를 읽지 않는다: 그 엘리먼트는 관리자 대시보드 탭 버튼에만 있고
+      통합 작업대엔 없다 → DOM 에서 읽으면 늘 0이 되어 뱃지가 지워진다(실측). */
+function _csSyncNavBadge(n){
+  const nb=$('#csNavBadge');
+  if(!nb || !Number.isFinite(n)) return;    // 값이 없으면 그대로 둔다(지우지 않는다)
+  nb.textContent=n>0?(' 🔴'+n):'';
+}
+
 const RV_PAGE = 50;
 async function renderReviewersView(){
   $('#viewroot').innerHTML=`<div class="ovwrap"><div id="rvhead"></div><div id="rvbody"><div class="empty">불러오는 중…</div></div></div>`;
@@ -3024,6 +3115,10 @@ boot();
 <!-- 작업오더 상세 렌더러 — 관리자 대시보드(index-app.js)에서 이관한 공유 모듈.
      첨부 이미지 임베드·라이트박스·섹션 추출이 전부 여기 한 벌뿐이다. -->
 <script src="js/work-order-detail.js"></script>
+<!-- C/S 문의창구 — 관리자 대시보드와 같은 화면 코드. 서버 경로만 Track B 네임스페이스로 돌린다
+     (인트라넷 SSO 토큰은 /api/cs/* 에 도달 자체가 불가능 → /api/trackb/cs/* 프록시). -->
+<script>window.CS_API_BASE = '/api/trackb/cs';</script>
+<script src="js/cs-inquiry.js"></script>
 <script src="js/campaign-cards.js"></script>
 <script src="js/recruit-modal.js"></script>
 <script src="js/manual-order.js"></script>
@@ -3034,6 +3129,12 @@ boot();
 (function () {
   var W = window;
   if (typeof W.escHtml !== 'function') W.escHtml = function (v) { return esc(v); };
+  // C/S 문의창구 뱃지 — 모듈이 갱신할 때 nav 뱃지도 같이 따라가게 감싼다(집계 복제 0)
+  if (typeof W.csUpdateBadge === 'function' && !W.csUpdateBadge._wrapped) {
+    var _cub = W.csUpdateBadge;
+    W.csUpdateBadge = function (n) { _cub(n); try { _csSyncNavBadge(Number(n) || 0); } catch (_) {} };
+    W.csUpdateBadge._wrapped = true;
+  }
   if (typeof W.showToast !== 'function') W.showToast = function (m) { _toast(String(m || '')); };
   if (typeof W._getAuthHeaders !== 'function') {
     W._getAuthHeaders = function () { return { Authorization: 'Bearer ' + token() }; };

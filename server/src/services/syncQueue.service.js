@@ -18,6 +18,8 @@ const { recordParticipationLink } = require('./participation.service');
 const {
   loadRawTabContext,
   buildBatchUpdateData,
+  optionWriteColumns,
+  filterOptionWritesBlankOnly,
   buildMirrorGuardRange,
   buildMirrorGuardRanges,
   guardBlocksWrite,
@@ -403,10 +405,12 @@ async function _executeBatch(items, sheetId, tabName) {
 
   // ── 가드 1콜 (R-B3): 모든 가드 col union을 minCol..maxCol 한 사각형으로. ──
   const allCols = new Set();
+  const _optCols = optionWriteColumns(tabContext.headers);      // ★ C′: 같은 사각형에 합류(콜 순증 0)
   for (const x of live) {
     x.guards = buildMirrorGuardRanges({ tabName: ctxTab, headers: tabContext.headers, targetRow: x.sheetRow, orderData: x.orderData });
     for (const g of x.guards) allCols.add(g.col);
   }
+  for (const c of _optCols) allCols.add(c);
   invalidateSheetMeta(sheetId);                                 // D3b: stale 그리드 무효화
   if (allCols.size) {
     const cols = [...allCols];
@@ -421,6 +425,7 @@ async function _executeBatch(items, sheetId, tabName) {
     }
     for (const x of live) {
       const cells = guardMap.get(x.sheetRow) || [];
+      x.optProbe = (col) => ({ known: true, value: String(cells[col - minCol] || '') });
       x.blocked = x.guards.some(g => guardBlocksWrite(String(cells[g.col - minCol] || '').trim(), g));
     }
   }
@@ -471,7 +476,13 @@ async function _executeBatch(items, sheetId, tabName) {
     for (const x of chunk) {
       // 복구분(재배정 append)은 배경색 대신 비고란에 'system' 표기.
       const od = x.p.recovered ? { ...x.orderData, memo: _markSystemMemo(x.orderData && x.orderData.memo, x.p.recoverReason) } : x.orderData;
-      batchData.push(...buildBatchUpdateData({ tabName: ctxTab, headers: tabContext.headers, targetRow: x.sheetRow, orderData: od }));
+      const _bd = buildBatchUpdateData({ tabName: ctxTab, headers: tabContext.headers, targetRow: x.sheetRow, orderData: od });
+      // ★ C′: optProbe 없으면(가드 읽기 미수행) 옵션 칸은 쓰지 않는다(fail-closed)
+      const _optFilt = filterOptionWritesBlankOnly({ batchData: _bd, headers: tabContext.headers,
+        tabName: ctxTab, targetRow: x.sheetRow, probe: x.optProbe });
+      batchData.push(..._optFilt.data);
+      _reportOptionSuppressed(_optFilt.suppressed, { sheetId, tabName: ctxTab, gid: ctxGid,
+        sheetRow: x.sheetRow, orderSubmissionId: x.p.orderSubmissionId });
     }
     try {
       if (batchData.length) {
@@ -644,15 +655,20 @@ async function _executeItem(item) {
           targetRow: parseInt(sheetRow, 10),
           orderData,
         });
-        if (guards.length) {
+        // ★ C′: 옵션 칸 blank-only 판정을 위해 **같은 사각형**에 옵션 열을 합류(콜 순증 0).
+        const _optCols = optionWriteColumns(tabContext.headers);
+        const _probeCols = [...new Set([...guards.map(g => g.col), ..._optCols])];
+        let _optProbe = null;                    // null = 미확인 → 옵션 칸 쓰기 생략(fail-closed)
+        if (_probeCols.length) {
           invalidateSheetMeta(sheetId);
-          const colsIdx = guards.map(g => g.col);
-          const minC = Math.min(...colsIdx), maxC = Math.max(...colsIdx);
+          const minC = Math.min(..._probeCols), maxC = Math.max(..._probeCols);
           const rowRange = `'${tabContext.tabName || tabName}'!${_getColLetter(minC)}${sheetRow}:${_getColLetter(maxC)}${sheetRow}`;
           const read = await throttledCall(() =>
             readSheet(sheetId, rowRange, tabContext.tabGid ? { gid: tabContext.tabGid } : (gid ? { gid } : {}))
           );
           const cells = (read && read[0]) || [];
+          // 그리드밖 행은 read=[] → cells[]=undefined → '' (빈칸=기입 허용). 단건/배치 시맨틱 동일.
+          _optProbe = (col) => ({ known: true, value: String(cells[col - minC] || '') });
           // 내가 쓴 값이면(재시도 멱등) 통과, 어느 칸이든 외부/타 주문 값이면 덮어쓰기 차단
           const blocked = guards.some(g => guardBlocksWrite(String(cells[g.col - minC] || '').trim(), g));
           if (blocked) {
@@ -677,11 +693,21 @@ async function _executeItem(item) {
         }
         // 복구분(재배정 append)은 배경색 대신 비고란에 'system' 표기(수동입력분·실시간분과 구분).
         const _od = recovered ? { ...orderData, memo: _markSystemMemo(orderData && orderData.memo, recoverReason) } : orderData;
-        const batchData = buildBatchUpdateData({
+        const _bd = buildBatchUpdateData({
           tabName: tabContext.tabName || tabName,
           headers: tabContext.headers,
           targetRow: parseInt(sheetRow, 10),
           orderData: _od,
+        });
+        // ★ C′: 옵션 칸은 라이브 셀이 비어 있을 때만 기입(확인 불가 = 기입 생략).
+        const _optFilt = filterOptionWritesBlankOnly({
+          batchData: _bd, headers: tabContext.headers,
+          tabName: tabContext.tabName || tabName, targetRow: parseInt(sheetRow, 10), probe: _optProbe,
+        });
+        const batchData = _optFilt.data;
+        _reportOptionSuppressed(_optFilt.suppressed, {
+          sheetId, tabName: tabContext.tabName || tabName,
+          gid: tabContext.tabGid || gid, sheetRow, orderSubmissionId,
         });
         if (batchData.length > 0) {
           await throttledCall(() => batchUpdateSheet(
@@ -793,10 +819,15 @@ async function _executeItem(item) {
         await pool.query(`UPDATE order_submissions SET mirror_status='canceled_sheet_dirty' WHERE id=$1`, [orderSubmissionId]);
         return;                                                                  // R1: 사람 재사용행 → 클리어 금지(R11 가시화)
       }
-      const blank = buildBatchUpdateData({
+      const _blankAll = buildBatchUpdateData({
         tabName: tabContext.tabName, headers: tabContext.headers,
         targetRow: parseInt(os.sheet_row, 10), orderData: {},                    // 매핑칸만 ''(입금칸·관리자칸은 매핑밖=보존)
       });
+      // ★ C′: 옵션 칸은 관리자 작업지시(리뷰형태)일 수 있어 **취소로도 지우지 않는다**.
+      const _cancelOptCols = new Set(optionWriteColumns(tabContext.headers)
+        .map(c => `'${tabContext.tabName}'!${_getColLetter(c)}${parseInt(os.sheet_row, 10)}`));
+      const blank = (process.env.ORDER_OPTION_BLANK_ONLY === '0')
+        ? _blankAll : _blankAll.filter(u => !_cancelOptCols.has(u.range));
       if (blank.length) {
         await throttledCall(() => batchUpdateSheet(os.sheet_id, blank, 'RAW',
           tabContext.tabGid ? { gid: tabContext.tabGid } : {}));
@@ -1079,6 +1110,26 @@ function _getColLetter(colIdx) {
     idx = Math.floor(idx / 26) - 1;
   }
   return letter;
+}
+
+// ★ C′ 관측: "빈 칸이라 그냥 썼다"·"선택 없음"은 무음. 리뷰어가 고른 값이 있는데 셀에
+//   다른 값이 있어 못 쓴 경우(=사람이 봐야 하는 케이스)만 warn. reviewer_event_logs 미사용(도배 방지).
+function _reportOptionSuppressed(list, ctx) {
+  try {
+    for (const s of (list || [])) {
+      if (s.reason === 'unverified') {
+        logger.warn(`[order_append] 옵션칸 라이브 확인 불가 → 기입 생략(보수적) col=${s.col} os=${ctx.orderSubmissionId}`);
+        continue;
+      }
+      if (!s.want || s.want === s.cur) continue;              // 선택 없음 = 정상(로스터 값 보존)
+      logger.warn(`[order_append] ⚠️ 옵션칸 기존값 보존 — 기입 생략: col=${s.col} 기존="${s.cur}" 선택="${s.want}" row=${ctx.sheetRow} os=${ctx.orderSubmissionId}`);
+      logAbnormal({
+        flow: 'order_mirror', step: 'option_cell_occupied', severity: 'warn',
+        error: new Error(`option cell occupied: "${s.cur}" != "${s.want}"`),
+        context: { ...ctx, col: s.col },
+      });
+    }
+  } catch (_) { /* 관측 실패가 쓰기를 막지 않는다 */ }
 }
 
 // ── 헬퍼: 주문 데이터를 헤더에 맞게 매핑 ──
