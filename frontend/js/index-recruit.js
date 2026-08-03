@@ -1993,7 +1993,35 @@ function toggleRecruitPreview() {
 }
 
 /* 폼 값으로 미리보기 카드 렌더 */
+/** 홈·목록 카드 미리보기 — 실제 카드(campaign-cards.js cardHtml)가 읽는 필드만 모은다.
+ *  모형 카드를 새로 그리지 않고 **같은 렌더러**를 쓴다(리뷰어 화면과 어긋나지 않게).
+ *  클릭은 컨테이너 pointer-events:none 로 막아 미리보기 안의 버튼(⭐·수정 등)이 동작하지 않는다. */
+function _buildCardPreviewData() {
+  const v = id => (document.getElementById(id)?.value || "").trim();
+  const status = v("rf_status") || "active";
+  return {
+    id: _recruitEditId || "preview",
+    title: v("rf_title"),
+    channel: v("rf_channel"),
+    channel_custom: v("rf_channel_custom"),
+    delivery_type: v("rf_delivery_type"),
+    review_fee: Number(v("rf_review_fee")) || 0,
+    time_range: v("rf_time_range"),
+    badges: _recruitBadges.slice(),
+    thumbnail_url: v("rf_thumbnail"),
+    participation_mode: true,
+    status,
+    state: status === "closed" ? "closed" : "open",
+  };
+}
+function _renderCardPreview() {
+  const el = document.getElementById("rf_preview_listcard");
+  if (!el || !window.CampCards) return;
+  el.innerHTML = CampCards.cardHtml(_buildCardPreviewData(), { admin: false });
+}
+
 function _renderPreview() {
+  _renderCardPreview();   // 목록 카드는 CampWorkDetail 유무와 무관하게 항상 최신 반영
   const card = document.getElementById("rf_preview_card");
   if (!card || !window.CampWorkDetail) return;
 
@@ -2038,10 +2066,13 @@ function _renderPreview() {
 }
 
 /* 입력 이벤트 리스너 (debounce) */
-/* 미리보기는 "참여 후 작업내용 화면"이므로 작업내용 필드가 바뀔 때 다시 그린다
-   (제목·리뷰비 등 카드용 필드는 이 화면에 안 나오므로 대상에서 제외). */
-const _PREVIEW_INPUTS = ["rf_wd_product","rf_wd_inflow","rf_wd_review","rf_wd_notes","rf_landing_url","rf_hold_ttl"];
-const _PREVIEW_SELECTS = [];
+/* "참여 후 작업내용 화면"은 작업내용 필드가 바뀔 때, "홈·목록 카드"는 카드에 실제
+   노출되는 필드(제목·채널·배송유형·리뷰비·구매시간대·상태)가 바뀔 때 다시 그린다.
+   안내배지(_refreshBadgeWrap)·채널/담당자 버튼(selectRfBtn)·썸네일(upload/fetch)은
+   이미 각자 _onPreviewInput()을 호출하도록 아래에서 감싼다. */
+const _PREVIEW_INPUTS = ["rf_wd_product","rf_wd_inflow","rf_wd_review","rf_wd_notes","rf_landing_url","rf_hold_ttl",
+  "rf_title","rf_channel_custom","rf_review_fee","rf_time_range"];
+const _PREVIEW_SELECTS = ["rf_delivery_type","rf_status"];
 
 function _onPreviewInput() {
   if (!_previewOpen) return;
