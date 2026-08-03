@@ -1377,7 +1377,7 @@ function switchAdminTab(tabName) {
   if (tabName === "payment")   initPaymentPanel();
   if (tabName === "dashboard") { try { loadTabDashboard(); } catch(_){} try { loadSystemMonitor(); } catch(_){} try { loadStatsOverview(); } catch(_){} try { loadDashWorkOrders(); } catch(_){} try { loadReviewerNoticesAdmin(); } catch(_){} }
   if (tabName === "archive")   { try { loadArchiveList(); } catch(_){} try { _loadArchiveHistory(); } catch(_){} }
-  if (tabName === "settings")  { try { loadUnrecognizedTabs(); } catch(_){} try { loadMappingCoverage(); } catch(_){} try { loadKeywordList(); } catch(_){} try { loadCompanyBusinessNo(); } catch(_){} try { loadCampEditors(); } catch(_){} try { loadSheetNotice(); } catch(_){} }
+  if (tabName === "settings")  { try { loadUnrecognizedTabs(); } catch(_){} try { loadMappingCoverage(); } catch(_){} try { loadKeywordList(); } catch(_){} try { loadCompanyBusinessNo(); } catch(_){} try { loadMyNickname(); } catch(_){} try { loadCampEditors(); } catch(_){} try { loadSheetNotice(); } catch(_){} }
   if (tabName === "errorlogs") { try { loadErrorLogs(); } catch(_){} }
   if (tabName === "order-ledger") { try { loadOrderLedger(); } catch(_){} }
   // ★ 컨텍스트 툴바 업데이트
@@ -11675,6 +11675,45 @@ async function applySheetNoticeBulk() {
     _noticeMsg(`진행 ${done}/${l.total || 0} — 삽입 ${l.applied || 0} · 이미있음 ${l.alreadySet || 0} · 건너뜀 ${l.skipped || 0} · 실패 ${l.failed || 0}`);
     if (!s.running) { clearInterval(_noticeBulkPoll); _noticeBulkPoll = null; }
   }, 3000);
+}
+
+/* ── 내 닉네임 (1:1문의 표시 이름) ─────────────────────────────
+   리뷰어 대화창에 로그인 계정명(=실명)이 그대로 나가던 것을 막는다.
+   미설정이면 리뷰어 화면엔 '관리자'로만 표시된다(서버가 강제 — 여기서 안 정해도 실명은 안 나감). */
+async function loadMyNickname() {
+  const input = document.getElementById('myNicknameInput');
+  if (!input) return;
+  const who = document.getElementById('myNickLogin');
+  const hint = document.getElementById('myNickHint');
+  try {
+    const d = await gasGet({ action: 'adminMyNickname' });
+    if (!d || d.ok === false) throw new Error((d && d.error) || '조회 실패');
+    input.value = d.nickname || '';
+    if (who) who.textContent = '내 계정: ' + (d.loginName || '-');
+    if (hint) {
+      hint.innerHTML = d.nickname
+        ? `리뷰어에게는 <b style="color:#1B64DA">${escHtml(d.nickname)}</b> 이름으로 보입니다.`
+        : `아직 닉네임이 없어 리뷰어에게는 <b>관리자</b>로만 보입니다.`;
+    }
+  } catch (e) {
+    if (hint) hint.textContent = '닉네임을 불러오지 못했습니다: ' + e.message;
+  }
+}
+
+async function saveMyNickname() {
+  const input = document.getElementById('myNicknameInput');
+  if (!input) return;
+  const nickname = (input.value || '').trim();
+  try {
+    const d = await gasPost({ action: 'adminSaveNickname', nickname });
+    if (!d || d.ok === false) throw new Error((d && d.error) || '저장 실패');
+    showToast(d.nickname ? `닉네임을 "${d.nickname}"(으)로 저장했습니다` : '닉네임을 해제했습니다 (리뷰어에게 "관리자"로 표시)');
+    loadMyNickname();
+    // 열려 있는 문의방이 있으면 바뀐 이름으로 다시 그린다
+    try { if (typeof _csActiveThreadId !== 'undefined' && _csActiveThreadId) csReloadConversation(_csActiveThreadId); } catch (_) {}
+  } catch (e) {
+    showToast('저장 실패: ' + e.message, true);
+  }
 }
 
 /** 회사 공통 사업자번호 + 현금영수증 발행방법 이미지 불러오기 (설정 탭) */

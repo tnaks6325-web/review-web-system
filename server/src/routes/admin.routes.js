@@ -8,6 +8,7 @@ const {
   addAdvertiserUser, editAdvertiserUser, deleteAdvertiserUser, listAdvertiserUsers,
   changePw, changeMasterPw,
 } = require('../services/auth.service');
+const adminNickname = require('../services/adminNickname.service');
 const {
   listEditors, addEditor, removeEditor, setEditorActive,
 } = require('../services/reviewerCampaignEditor.service');
@@ -103,6 +104,40 @@ router.post('/change-pw', authMiddleware, async (req, res, next) => {
     const { currentPw, newPw } = req.body;
     const result = await changePw(req.admin.name, currentPw, newPw);
     res.json(result);
+  } catch (err) {
+    next(err);
+  }
+});
+
+// ═══════════════════════════════════════════════════════════
+// 내 닉네임 (1:1문의에서 리뷰어에게 보일 이름) — migration 078
+//   · 본인 것만 조회/저장(로그인 계정 기준). 마스터·인트라넷 SSO 계정도 같은 경로를 쓴다.
+//   · 미설정이면 리뷰어 화면엔 '관리자'로 나간다(실명 노출 없음) — 설정은 "누가 답했는지
+//     리뷰어가 구분하게" 하려는 용도이지, 실명 차단의 전제조건이 아니다.
+//   · /api/admin/* 경로라 via:'intranet'·'reviewer_campaign' 스코프 토큰은 도달 불가.
+// ═══════════════════════════════════════════════════════════
+router.get('/my-nickname', authMiddleware, async (req, res, next) => {
+  try {
+    const loginName = req.admin?.name || '';
+    const nickname = await adminNickname.getNickname(loginName);
+    res.json({ ok: true, loginName, nickname });
+  } catch (err) {
+    next(err);
+  }
+});
+
+router.post('/my-nickname', authMiddleware, async (req, res, next) => {
+  try {
+    const loginName = req.admin?.name || '';
+    if (!loginName) return res.status(400).json({ ok: false, error: '로그인 계정을 확인할 수 없습니다.' });
+    const raw = String((req.body || {}).nickname || '').trim();
+    // 실명을 그대로 닉네임으로 쓰면 기능의 목적(실명 비노출)이 사라진다 → 막고 안내
+    if (raw && raw === loginName) {
+      return res.status(400).json({ ok: false, error: '로그인 계정명과 다른 닉네임을 사용해주세요.' });
+    }
+    if (raw.length > 20) return res.status(400).json({ ok: false, error: '닉네임은 20자 이내로 입력해주세요.' });
+    const nickname = await adminNickname.setNickname(loginName, raw, loginName);
+    res.json({ ok: true, loginName, nickname });
   } catch (err) {
     next(err);
   }

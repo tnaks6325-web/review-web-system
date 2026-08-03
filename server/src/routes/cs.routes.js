@@ -8,6 +8,7 @@
 const express = require('express');
 const router = express.Router();
 const pool = require('../db/pool');
+const adminNickname = require('../services/adminNickname.service');
 const { logger } = require('../utils/logger');
 const { authMiddleware, adminOrMasterMiddleware } = require('../middleware/auth.middleware');
 const { emitCsReplyToReviewer, broadcast } = require('../utils/sse');
@@ -144,7 +145,9 @@ router.get('/messages', async (req, res, next) => {
     // 관리자가 열람 → 미확인(admin) 리셋
     await pool.query(`UPDATE cs_threads SET admin_unread_count = 0, updated_at = NOW() WHERE id = $1`, [threadId]);
 
-    res.json({ ok: true, thread, messages });
+    // 관리자 화면 = 닉네임 || 로그인명(내부 책임추적 유지)
+    const shown = await adminNickname.maskMessages(messages, 'admin');
+    res.json({ ok: true, thread, messages: shown });
   } catch (err) {
     next(err);
   }
@@ -166,7 +169,9 @@ router.post('/reply', async (req, res, next) => {
     );
     if (tRows.length === 0) return res.status(404).json({ ok: false, error: '문의방을 찾을 수 없습니다.' });
     const thread = tRows[0];
+    // ★ 저장은 로그인명 그대로 — 닉네임은 읽는 시점에 붙인다(닉네임을 바꾸면 과거 답장까지 함께 바뀜)
     const senderName = req.admin?.name || '관리자';
+    const nickMap = await adminNickname.getNicknameMap();
 
     const { rows: mRows } = await pool.query(
       `INSERT INTO cs_messages (thread_id, sender_role, sender_name, content, image_urls)
@@ -174,8 +179,9 @@ router.post('/reply', async (req, res, next) => {
       [threadId, senderName, content, JSON.stringify(imageUrls)]
     );
     const message = {
-      id: mRows[0].id, threadId, senderRole: 'admin', senderName, content, imageUrls,
-      createdAt: mRows[0].createdAt,
+      id: mRows[0].id, threadId, senderRole: 'admin',
+      senderName: adminNickname.toAdminName(senderName, nickMap),   // 관리자 화면
+      content, imageUrls, createdAt: mRows[0].createdAt,
     };
 
     // 관리자 답장 → 리뷰어 미확인 +1, 방 갱신(닫혀있었어도 last_message는 갱신)
@@ -190,7 +196,14 @@ router.post('/reply', async (req, res, next) => {
     );
 
     // 해당 리뷰어에게만 실시간 푸시 + 다른 관리자 세션 갱신용 브로드캐스트
-    try { emitCsReplyToReviewer(thread.reviewerPhone8, { ...message, campaignLabel: thread.campaignLabel }); } catch (_) {}
+    // ★ 리뷰어에게 가는 실시간 푸시는 반드시 리뷰어용 이름으로(실명 유출 경로가 여기에도 있다)
+    try {
+      emitCsReplyToReviewer(thread.reviewerPhone8, {
+        ...message,
+        senderName: adminNickname.toReviewerName(senderName, nickMap),
+        campaignLabel: thread.campaignLabel,
+      });
+    } catch (_) {}
     try { broadcast('cs_message', { threadId, senderRole: 'admin', reviewerPhone8: thread.reviewerPhone8 }); } catch (_) {}
 
     res.json({ ok: true, message });

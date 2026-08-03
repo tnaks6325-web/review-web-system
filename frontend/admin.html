@@ -1472,6 +1472,30 @@ body{ letter-spacing:-.01em; }
 
         <hr style="margin:28px 0;border:none;border-top:1px solid #E5E7EB">
 
+        <!-- 내 닉네임 (1:1문의 표시 이름) -->
+        <div class="admin-section-header">
+          <span style="font-size:.95rem;font-weight:700;color:var(--t1)">
+            <i class="fas fa-user-tag" style="color:#7C3AED;margin-right:6px"></i>내 닉네임 (1:1문의 표시 이름)
+          </span>
+        </div>
+        <p style="font-size:.78rem;color:var(--t3);margin:8px 0 12px;line-height:1.6">
+          1:1문의 답장에서 <b>리뷰어에게 보이는 이름</b>입니다. 설정하지 않으면 <b>관리자</b>로만 표시되며,
+          <b style="color:#B91C1C">로그인 계정명(실명)은 리뷰어에게 노출되지 않습니다.</b>
+          바꾸면 이전에 보낸 답장의 이름도 함께 바뀝니다.
+        </p>
+        <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center;max-width:520px">
+          <span id="myNickLogin" style="font-size:.78rem;color:var(--t3);white-space:nowrap"></span>
+          <input type="text" id="myNicknameInput" maxlength="20" placeholder="예: 만두"
+            style="flex:1;min-width:140px;padding:8px 12px;border:1.5px solid #D1D5DB;border-radius:8px;font-size:.85rem;outline:none">
+          <button onclick="saveMyNickname()"
+            style="padding:8px 18px;background:var(--p);color:#fff;border:none;border-radius:8px;font-size:.82rem;font-weight:600;cursor:pointer">
+            <i class="fas fa-save"></i> 저장
+          </button>
+        </div>
+        <div id="myNickHint" style="font-size:.74rem;color:var(--t3);margin-top:7px"></div>
+
+        <hr style="margin:28px 0;border:none;border-top:1px solid #E5E7EB">
+
         <!-- 회사 공통 사업자번호 설정 -->
         <div class="admin-section-header">
           <span style="font-size:.95rem;font-weight:700;color:var(--t1)">
