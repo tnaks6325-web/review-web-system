@@ -154,7 +154,24 @@ t('★ nav 뱃지는 DOM 이 아니라 값으로 받는다(#csInquiryBadge 는 �
   assert.ok(/!Number\.isFinite\(n\)\) return/.test(WD), '값이 없을 때 뱃지를 지우면 안 된다');
   assert.ok(!/_csSyncNavBadge[\s\S]{0,200}getElementById\('csInquiryBadge'\)/.test(WD),
     '#csInquiryBadge 를 읽으면 통합 작업대에선 늘 0이 된다(실측)');
-  assert.ok(/_csSyncNavBadge\(Number\(n\) \|\| 0\)/.test(WD), '모듈 뱃지 갱신과 이어져 있지 않다');
+});
+t('★★ 모듈 뱃지 갱신은 **훅**으로 받는다 — window 함수를 감싸는 방식은 동작하지 않는다', () => {
+  // 실측(코드리뷰 지적): loadCsRooms·csRefreshBadge 는 렉시컬 스코프의 csUpdateBadge 를
+  //   직접 부르므로 밖에서 window.csUpdateBadge 를 감싸도 **절대 호출되지 않는다**.
+  //   → 뱃지가 부팅 시각 값에 영영 머무른다. 훅은 모듈 안에서 부른다.
+  assert.ok(/window\.CS_ON_BADGE === "function"\) window\.CS_ON_BADGE\(Number\(count\) \|\| 0\)/.test(MOD),
+    '모듈이 호스트 훅을 부르지 않는다');
+  assert.ok(/window\.CS_ON_BADGE = function \(n\)/.test(WD), '통합 작업대가 훅을 등록하지 않는다');
+  assert.ok(!/W\.csUpdateBadge = function/.test(WD), '동작하지 않는 래퍼 방식이 되살아났다');
+  // #csInquiryBadge 가 없어도 훅은 불려야 한다 → early return 을 되살리면 안 됨
+  assert.ok(!/const b = document\.getElementById\("csInquiryBadge"\);\s*\n\s*if \(!b\) return;/.test(MOD),
+    'early return 이 돌아오면 통합 작업대에서 훅이 안 불린다');
+});
+t('★ 부팅 1회로 끝내지 않는다 — 주기 갱신 + 화면 가려지면 쉼', () => {
+  assert.ok(/CS_BADGE_POLL_MS/.test(WD) && /setInterval\(/.test(WD), '주기 갱신이 없다');
+  assert.ok(/document\.visibilityState==='visible'/.test(WD), '백그라운드 탭에서도 계속 두드린다');
+  assert.ok(/addEventListener\('visibilitychange'/.test(WD), '복귀 시 즉시 갱신이 없다');
+  assert.ok(/if\(isAdmin\) _csStartBadgePoll\(\)/.test(WD), '관리자에게만 돌아야 한다');
 });
 t('모듈 아이콘이 보이도록 폰트어썸을 admin 과 같은 CDN 으로 로드', () => {
   const fa = /fontawesome-free@6\.4\.0\/css\/all\.min\.css/;

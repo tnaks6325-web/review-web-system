@@ -663,15 +663,28 @@ function renderShell(){
     </div>
     <div id="viewroot"></div>`;
   switchView(STATE.view||'workdesk');
-  if(isAdmin) _csBootBadge();   // 탭을 열지 않아도 미확인 문의 수가 보이게(집계는 서버가 준 값 그대로)
+  if(isAdmin) _csStartBadgePoll();   // 탭을 열지 않아도 미확인 문의 수가 보이게(집계는 서버가 준 값 그대로)
 }
-/** 부팅 시 1회 — 미확인 문의 수만 받아 nav 뱃지에 표시. 실패는 무시(뱃지 없음). */
-async function _csBootBadge(){
+/* ── C/S 미확인 뱃지 ────────────────────────────────────────
+   통합 작업대에는 SSE 가 없어 부팅 1회만 받으면 그 뒤 들어온 문의가 영영 안 보인다
+   (코드리뷰 지적) → 가벼운 주기 갱신. 쿼리 1개짜리 count 라 부담이 없고,
+   ★ 화면이 가려져 있으면 쉰다(백그라운드 탭이 종일 두드리지 않게) + 복귀 즉시 1회 갱신. */
+const CS_BADGE_POLL_MS = 60000;
+let _csBadgeTimer = null;
+function _csStartBadgePoll(){
+  _csBadgeRefresh();
+  if(_csBadgeTimer) clearInterval(_csBadgeTimer);
+  _csBadgeTimer = setInterval(()=>{ if(document.visibilityState==='visible') _csBadgeRefresh(); }, CS_BADGE_POLL_MS);
+  if(!_csStartBadgePoll._bound){
+    _csStartBadgePoll._bound = true;
+    document.addEventListener('visibilitychange', ()=>{ if(document.visibilityState==='visible') _csBadgeRefresh(); });
+  }
+}
+/** 미확인 문의 수만 받아 nav 뱃지에 표시. 실패는 무시(직전 값 유지). */
+async function _csBadgeRefresh(){
   try{
     const r=await api('/api/trackb/cs/unread-count');
-    const nb=$('#csNavBadge'); if(!nb) return;
-    const n=(r&&r.ok!==false)?(r.totalUnread|0):0;
-    nb.textContent=n>0?(' 🔴'+n):'';
+    if(r&&r.ok!==false) _csSyncNavBadge(r.totalUnread|0);
   }catch(_){ }
 }
 function switchView(v){ STATE.view=v; document.querySelectorAll('.navb').forEach(b=>b.classList.toggle('on',b.dataset.v===v));
@@ -1994,7 +2007,7 @@ async function renderCsView(){
   // 모듈 마크업은 관리자 대시보드의 탭 판(.admin-tab-pane = 기본 display:none)이다.
   //   여기선 탭 전환이 없으므로 active 를 직접 준다(그 CSS가 없는 화면에서도 무해).
   const pane=document.getElementById('tab-cs-inquiry'); if(pane) pane.classList.add('active');
-  try{ await loadCsRooms(); }catch(_){ }   // 뱃지는 csUpdateBadge 래퍼가 알아서 따라온다
+  try{ await loadCsRooms(); }catch(_){ }   // nav 뱃지는 모듈의 CS_ON_BADGE 훅이 따라온다
 }
 /** nav 뱃지 — 모듈이 계산한 미확인 수를 그대로 표시한다(집계 로직 복제 0).
     ★ #csInquiryBadge 를 읽지 않는다: 그 엘리먼트는 관리자 대시보드 탭 버튼에만 있고
@@ -3065,7 +3078,10 @@ boot();
 <script src="js/work-order-detail.js"></script>
 <!-- C/S 문의창구 — 관리자 대시보드와 같은 화면 코드. 서버 경로만 Track B 네임스페이스로 돌린다
      (인트라넷 SSO 토큰은 /api/cs/* 에 도달 자체가 불가능 → /api/trackb/cs/* 프록시). -->
-<script>window.CS_API_BASE = '/api/trackb/cs';</script>
+<script>window.CS_API_BASE = '/api/trackb/cs';
+  /* 모듈이 미확인 수를 갱신할 때마다 nav 뱃지도 따라간다(집계 복제 0).
+     ★ window.csUpdateBadge 를 감싸는 방식은 안 된다 — 모듈 내부 호출이 래퍼를 안 거친다. */
+  window.CS_ON_BADGE = function (n) { try { _csSyncNavBadge(n); } catch (_) {} };</script>
 <script src="js/cs-inquiry.js"></script>
 <script src="js/campaign-cards.js"></script>
 <script src="js/recruit-modal.js"></script>
@@ -3077,12 +3093,6 @@ boot();
 (function () {
   var W = window;
   if (typeof W.escHtml !== 'function') W.escHtml = function (v) { return esc(v); };
-  // C/S 문의창구 뱃지 — 모듈이 갱신할 때 nav 뱃지도 같이 따라가게 감싼다(집계 복제 0)
-  if (typeof W.csUpdateBadge === 'function' && !W.csUpdateBadge._wrapped) {
-    var _cub = W.csUpdateBadge;
-    W.csUpdateBadge = function (n) { _cub(n); try { _csSyncNavBadge(Number(n) || 0); } catch (_) {} };
-    W.csUpdateBadge._wrapped = true;
-  }
   if (typeof W.showToast !== 'function') W.showToast = function (m) { _toast(String(m || '')); };
   if (typeof W._getAuthHeaders !== 'function') {
     W._getAuthHeaders = function () { return { Authorization: 'Bearer ' + token() }; };
