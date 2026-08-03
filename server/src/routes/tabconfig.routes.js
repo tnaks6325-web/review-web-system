@@ -482,7 +482,9 @@ router.get('/provider-info', async (req, res, next) => {
 // POST /api/tab/company-business-no — 회사 공통 사업자번호 설정 (관리자)
 // Body: { businessNo }
 // ═══════════════════════════════════════════════════════════
-router.post('/company-business-no', adminOrMasterMiddleware, async (req, res, next) => {
+// ★ authMiddleware 필수 — adminOrMasterMiddleware는 authMiddleware가 세팅한 req.admin을 읽는다.
+//   빠뜨리면 req.admin이 undefined라 **마스터를 포함해 아무도** 저장할 수 없다(전원 403).
+router.post('/company-business-no', authMiddleware, adminOrMasterMiddleware, async (req, res, next) => {
   try {
     const businessNo = String(req.body?.businessNo ?? '').trim();
     await pool.query(
@@ -504,7 +506,8 @@ router.post('/company-business-no', adminOrMasterMiddleware, async (req, res, ne
 //   회사 공통 1회 등록. 현영 탭 공고의 work-detail(cashReceipt)이 채널에 맞는 이미지를 리뷰어에게 노출.
 //   imageUrl은 guide-image 프록시/https 절대 URL만(자유 문자열 저장 방지 — 리뷰어 화면에 <img src>로 나감).
 // ═══════════════════════════════════════════════════════════
-router.post('/cash-receipt-guide', adminOrMasterMiddleware, async (req, res, next) => {
+// ★ authMiddleware 필수 — 위 company-business-no 주석과 같은 이유(빠지면 전원 403)
+router.post('/cash-receipt-guide', authMiddleware, adminOrMasterMiddleware, async (req, res, next) => {
   try {
     const channel = String(req.body?.channel || '');
     if (channel !== 'naver' && channel !== 'coupang') {
