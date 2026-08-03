@@ -91,6 +91,7 @@
             <button class="rbadge-preset" onclick="addPresetBadge('와우 필수')">와우 필수</button>
             <button class="rbadge-preset" onclick="addPresetBadge('사진 5장+')">사진 5장+</button>
             <button class="rbadge-preset" onclick="addPresetBadge('일반결제')">일반결제</button>
+            <button class="rbadge-preset" onclick="addPresetBadge('구매확정')">구매확정</button>
           </div>
           <div id="rf_badges_wrap"
             style="display:flex;flex-wrap:wrap;gap:6px;padding:7px 10px;border:1.5px solid var(--border,#E2E8F0);border-radius:8px;min-height:40px;cursor:text;align-items:center"
@@ -277,6 +278,12 @@
         <i class="fas fa-eye"></i> 미리보기
       </div>
       <div id="rf_preview_area" style="padding:0 0 14px;flex:1;min-height:0;overflow-y:auto">
+        <!-- 홈·목록에서 리뷰어가 실제로 보는 카드 — campaign-cards.js의 같은 렌더러(cardHtml)로 그려
+             제목·채널·배송유형·리뷰비·안내배지·구매시간대·썸네일을 고치면 여기가 바로 따라 그려진다. -->
+        <div style="font-size:.68rem;color:var(--t4,#94A3B8);text-align:center;margin-bottom:6px">
+          <i class="fas fa-th-large"></i> 홈·목록에서 보이는 카드
+        </div>
+        <div id="rf_preview_listcard" style="max-width:340px;margin:0 auto 16px;pointer-events:none"></div>
         <div style="font-size:.68rem;color:var(--t4,#94A3B8);text-align:center;margin-bottom:8px">
           <i class="fas fa-mobile-alt"></i> 리뷰어가 참여한 뒤 실제로 보는 화면
         </div>
