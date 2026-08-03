@@ -134,4 +134,16 @@ ok('★ 공유 클래스 .lgwrap 자체(단독 셀렉터)에는 max-width 를 �
 ok('표 자체(table.lgtable)는 width:100% 그대로 — 감싸는 폭만 좁아진다(C/S 대화창과 같은 원리)',
   /table\.lgtable\{width:100%/.test(cssNoComment));
 
+/* ── H. 헤더 버튼바(.mh)를 그 아래 데이터 폭에 맞춰 정렬 ──
+   .mh 는 h1 + <span class="sp" style="flex:1"> + 버튼들 구조라, .mh 자체가 캡되지 않으면
+   .sp 가 .ovwrap 전체 폭(1920/2560)을 먹어 버튼이 "페이지 오른쪽 끝"에 붙는다(실측 — 작업오더
+   스크린샷에서 상태 필터·검색 버튼이 표보다 훨씬 오른쪽에 떠 있었다). 아래 넷은 위에서 정한
+   데이터 폭과 정확히 같은 값이어야 버튼이 "그 데이터의 오른쪽 끝"에 붙는다. */
+ok('작업오더 헤더(#wohead .mh)가 표와 같은 1120px', /#wohead \.mh\{max-width:1120px\}/.test(cssNoComment));
+ok('모집공고 헤더(#rchead .mh)가 카드 컨테이너와 같은 1380px', /#rchead \.mh\{max-width:1380px\}/.test(cssNoComment));
+ok('등록리뷰어DB 헤더(#rvhead .mh)가 표와 같은 1400px', /#rvhead \.mh\{max-width:1400px\}/.test(cssNoComment));
+ok('리뷰어 로그 헤더(#lghead .mh)가 표와 같은 1300px', /#lghead \.mh\{max-width:1300px\}/.test(cssNoComment));
+ok('★ 공유 클래스 .mh 자체(단독 셀렉터)에는 max-width 를 걸지 않았다(다른 뷰까지 캡되면 안 된다)',
+  !/(^|\})\s*\.mh\{[^}]*max-width/.test(cssNoComment.replace(/\n/g, ' ')));
+
 console.log(`\n✅ workdeskWidthCap: ${n} cases passed`);
