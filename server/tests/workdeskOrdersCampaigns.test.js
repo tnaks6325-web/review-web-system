@@ -262,8 +262,13 @@ t('두 화면이 같은 모듈을 로드한다(admin·admin-siand·workdesk)', (
   assert.ok(/<script src="js\/work-order-detail\.js"><\/script>/.test(HTML), 'workdesk 미로드');
 });
 t('★ 모듈은 호스트 전역에 기대지 않는다(통합 작업대엔 escHtml 이 없다)', () => {
-  assert.ok(/typeof window\.escHtml === "function"/.test(WOD) && /\.replace\(\/&\/g, "&amp;"\)/.test(WOD),
+  assert.ok(/function _escFallback\(s\)/.test(WOD) && /function escHtml\(s\)/.test(WOD),
     'escHtml 폴백이 없으면 통합 작업대에서 상세가 통째로 터진다');
+  // ★ 로드 시점 캡처 금지 — 이 모듈은 index-app.js **앞에** 로드되므로 그때는 window.escHtml 이 없다.
+  //   캡처하면 admin 에서도 폴백이 쓰여 원본과 출력이 조용히 달라진다(실측).
+  assert.ok(!/var escHtml = \(typeof window/.test(WOD), 'escHtml 을 로드 시점에 캡처하고 있다');
+  assert.ok(/\.replace\(\/&\/g, "&amp;"\)\.replace\(\/<\/g, "&lt;"\)\.replace\(\/>\/g, "&gt;"\)\.replace\(\/"\/g, "&quot;"\)/.test(WOD),
+    '폴백이 index-app.js 의 escHtml 과 다른 구현이면 출력이 갈라진다');
   // 모듈이 정의하지 않은 _wo* 를 참조하면 통합 작업대에서만 죽는다 → 정적으로 막는다
   const defined = new Set([...WOD.matchAll(/^function (_?\w+)\s*\(/gm)].map(m => m[1])
     .concat([...WOD.matchAll(/^const (\w+)\s*=/gm)].map(m => m[1])));

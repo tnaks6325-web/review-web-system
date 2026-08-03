@@ -95,7 +95,7 @@ console.log('\n② 메시지 마스킹(리뷰어 메시지는 손대지 않음)'
     ok('설정 탭 UI(admin.html)', /id="myNicknameInput"/.test(adminHtml) && /saveMyNickname\(\)/.test(adminHtml));
     ok('설정 탭 UI(admin-siand.html) — 두 화면 동일', /id="myNicknameInput"/.test(siandHtml) && /saveMyNickname\(\)/.test(siandHtml));
     ok('설정 탭 진입 시 로드', /loadMyNickname\(\);/.test(appJs) && /tabName === "settings"[\s\S]{0,400}loadMyNickname/.test(appJs));
-    ok('미설정 안내 문구(리뷰어에겐 "관리자"로 보임)', /관리자<\/b>로 보입니다/.test(appJs));
+    ok('미설정 안내 문구(리뷰어에겐 "관리자"로 보임)', /관리자<\/b>로만? 보입니다/.test(appJs));
 
     console.log(`\n✅ adminNickname: ${passed}개 통과\n`);
     process.exit(0);

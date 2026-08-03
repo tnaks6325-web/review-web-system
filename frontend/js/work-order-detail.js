@@ -18,15 +18,18 @@
 (function () {
   "use strict";
 
-  // 호스트에 escHtml 이 있으면 그것을, 없으면 같은 구현을 쓴다(통합 작업대).
-  //   ★ 전역을 덮어쓰지 않는다 — 호스트의 다른 코드가 쓰는 함수를 바꾸지 않기 위해.
-  var escHtml = (typeof window !== "undefined" && typeof window.escHtml === "function")
-    ? window.escHtml
-    : function (s) {
-        return String(s == null ? "" : s)
-          .replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;")
-          .replace(/"/g, "&quot;").replace(/'/g, "&#39;");
-      };
+  /* escHtml — 호스트(index-app.js)의 것을 쓰되 **호출 시점에** 찾는다.
+     ★ 로드 시점에 캡처하면 안 된다: 이 모듈은 index-app.js **앞에** 로드되므로
+       그때는 window.escHtml 이 아직 없어 늘 폴백이 잡힌다. 폴백이 원본과 한 글자라도
+       다르면(예: null 처리, 작은따옴표 이스케이프) 관리자 화면 출력이 조용히 달라진다.
+     ★ 폴백은 index-app.js 의 escHtml 과 **동일 구현**(String(s) · & < > " 만). */
+  function _escFallback(s) {
+    return String(s).replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
+  }
+  function escHtml(s) {
+    var h = (typeof window !== "undefined") && window.escHtml;
+    return (typeof h === "function" && h !== escHtml) ? h(s) : _escFallback(s);
+  }
 
 // 텍스트 escape 후 http(s) URL만 링크화 (javascript: 등 차단)
 function _woLinkify(text) {

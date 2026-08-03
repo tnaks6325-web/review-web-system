@@ -365,6 +365,21 @@ function _getAuthHeaders() {
   return token ? { 'Authorization': 'Bearer ' + token } : {};
 }
 
+/**
+ * 라우트 경로 재기준 — 같은 화면 모듈을 다른 네임스페이스로 재사용하기 위한 최소 장치.
+ *
+ * 통합 작업대(workdesk.html)는 인트라넷 SSO 토큰(`via:'intranet'`)을 쓰는데,
+ * authMiddleware 가 그 토큰을 **`/api/trackb/*` 로만 격리**하므로 `/api/cs/*` 에는
+ * 도달 자체가 불가능하다. 그래서 서버에 같은 모양의 프록시(`/api/trackb/cs/*`)를 두고
+ * 프론트는 **베이스 문자열만** 갈아끼운다 — C/S 화면 코드는 한 벌 그대로다.
+ *
+ * ★ 전역을 설정한 페이지에서만 동작한다 — admin.html 은 설정하지 않으므로 동작 불변.
+ */
+function _resolveApiPath(p) {
+  const base = (typeof window !== 'undefined') && window.CS_API_BASE;
+  return (base && p.indexOf('/api/cs/') === 0) ? base + p.slice('/api/cs'.length) : p;
+}
+
 // ═══════════════════════════════════════════════════════════
 // gasGet — GAS doGet 대체 (GET 요청)
 // 기존 호출: gasGet({ action: "searchAll", query: "홍길동" })
@@ -390,7 +405,7 @@ async function gasGet(params, timeout) {
     // ★ POST/DELETE/PUT/PATCH 매핑된 action은 body로 전송
     // ★ remap이 있으면 백엔드가 기대하는 action 필드를 복원 (멀티-액션 라우트용)
     if (route.remap) queryParams.action = route.remap;
-    url = API_BASE_URL + route.path;
+    url = API_BASE_URL + _resolveApiPath(route.path);
     fetchOpts = {
       method: actualMethod,
       headers: { 'Content-Type': 'application/json', ..._getAuthHeaders() },
@@ -402,7 +417,7 @@ async function gasGet(params, timeout) {
     Object.entries(queryParams).forEach(([k, v]) => {
       if (v !== undefined && v !== null && v !== '') qs.set(k, v);
     });
-    url = API_BASE_URL + route.path + (qs.toString() ? '?' + qs.toString() : '');
+    url = API_BASE_URL + _resolveApiPath(route.path) + (qs.toString() ? '?' + qs.toString() : '');
     fetchOpts = {
       method: 'GET',
       headers: { ..._getAuthHeaders() },
@@ -450,7 +465,7 @@ async function gasPost(body, timeout) {
     payload.action = route.remap;
   }
 
-  const url = API_BASE_URL + route.path;
+  const url = API_BASE_URL + _resolveApiPath(route.path);
   const timeoutMs = timeout || 60000;
 
   try {
