@@ -522,6 +522,41 @@ router.post('/workdesk/add', authMiddleware, async (req, res, next) => {
   } catch (err) { next(err); }
 });
 
+// ── 커스텀 열(행별 자유메모) + 셀 배경색(migration 080) — master/admin 전체 · staff 담당 탭만 · advertiser 차단. ──
+//   시트/write-back 무접촉(Track B 전용 오버레이) — _ensureEditScope 로 편집 스코프와 동일하게 가드.
+router.post('/workdesk/custom-column', authMiddleware, async (req, res, next) => {
+  try {
+    const { sheetId, tabName, colName } = req.body || {};
+    if (!sheetId || !tabName || !colName) return res.status(400).json({ ok: false, error: 'sheetId, tabName, colName 필수' });
+    const g = await _ensureEditScope(req, sheetId, tabName); if (!g.ok) return res.status(g.code).json({ ok: false, error: g.error });
+    res.json(await svc.addCustomColumn({ sheetId, tabName, colName, by: _by(req) }));
+  } catch (err) { next(err); }
+});
+router.delete('/workdesk/custom-column', authMiddleware, async (req, res, next) => {
+  try {
+    const { sheetId, tabName, columnId } = req.body || {};
+    if (!sheetId || !tabName || !columnId) return res.status(400).json({ ok: false, error: 'sheetId, tabName, columnId 필수' });
+    const g = await _ensureEditScope(req, sheetId, tabName); if (!g.ok) return res.status(g.code).json({ ok: false, error: g.error });
+    res.json(await svc.deleteCustomColumn({ sheetId, tabName, columnId }));
+  } catch (err) { next(err); }
+});
+router.post('/workdesk/custom-value', authMiddleware, async (req, res, next) => {
+  try {
+    const { sheetId, tabName, rowId, columnId, value } = req.body || {};
+    if (!sheetId || !tabName || !rowId || !columnId) return res.status(400).json({ ok: false, error: 'sheetId, tabName, rowId, columnId 필수' });
+    const g = await _ensureEditScope(req, sheetId, tabName); if (!g.ok) return res.status(g.code).json({ ok: false, error: g.error });
+    res.json(await svc.setCustomColumnValue({ sheetId, tabName, rowId, columnId, value, by: _by(req) }));
+  } catch (err) { next(err); }
+});
+router.post('/workdesk/cell-color', authMiddleware, async (req, res, next) => {
+  try {
+    const { sheetId, tabName, cells, color } = req.body || {};
+    if (!sheetId || !tabName) return res.status(400).json({ ok: false, error: 'sheetId, tabName 필수' });
+    const g = await _ensureEditScope(req, sheetId, tabName); if (!g.ok) return res.status(g.code).json({ ok: false, error: g.error });
+    res.json(await svc.setCellColors({ sheetId, tabName, cells, color, by: _by(req) }));
+  } catch (err) { next(err); }
+});
+
 // ═══════════════════════════════════════════════════════════
 // 리뷰어 비정상 로그(한글 자연어, migration 062) — 통합작업대 "리뷰어 로그" 창 + 관리자 중요알림 소스
 //   내부인(master/admin/staff) 전용 — advertiser(외부) 차단. via:'intranet' 토큰도 /api/trackb/*

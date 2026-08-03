@@ -567,6 +567,15 @@
   table.sheetgrid thead th.gsel{background:var(--accent-soft)!important;box-shadow:inset 0 0 0 2px var(--accent)}
   .gdragbadge{position:fixed;z-index:220;display:none;background:var(--accent);color:#fff;font-size:11px;font-weight:750;padding:3px 10px;border-radius:999px;box-shadow:0 4px 12px rgba(16,24,40,.22);pointer-events:none;white-space:nowrap}
   .gselact{display:inline-flex;align-items:center;gap:7px;padding:3px 5px 3px 11px;border-radius:9px;background:var(--accent-soft);border:1px solid var(--accent-line)} .gselact b{font-size:12px;color:var(--accent-deep);font-weight:800}
+  /* ── 셀 범위 드래그 선택 + 배경색 팔레트(엑셀식) ── */
+  table.sheetgrid td.gselrange{box-shadow:inset 0 0 0 2px var(--accent);background-color:color-mix(in srgb,var(--accent) 14%,transparent)!important}
+  .gcolorpop{position:fixed;z-index:230;display:none;align-items:center;gap:5px;background:var(--card);border:1px solid var(--line2);border-radius:10px;box-shadow:0 8px 24px rgba(16,24,40,.2);padding:6px}
+  .gcolorpop.show{display:flex}
+  .gcswatch{width:22px;height:22px;border-radius:6px;cursor:pointer;border:1px solid rgba(16,24,40,.15)}
+  .gcswatch:hover{transform:scale(1.12)}
+  .gcswatch.gcclear{background:var(--card);display:flex;align-items:center;justify-content:center;font-size:12px;color:var(--muted);font-weight:800}
+  /* ── 커스텀 열(자유 메모) — 헤더 라벨을 강조해 시트 원본 컬럼과 구분(삭제는 컬럼 ▾ 메뉴 안에) ── */
+  th[data-col^="ccol:"] .lbl{color:var(--accent-deep)}
 </style>
 </head>
 <body>
@@ -1388,11 +1397,20 @@ const _COLW={'#':35,'참여자':105,'연락처':120,'번호':43,'담당자':56,'
 //   ID열은 시트명 다양(쿠팡id/네이버아이디)이라 키가 아닌 패턴으로. 주소=450(요청 — 주소 전체표시 우선). _fitGrid가 표폭을 이 합으로 고정 → 넓으면 우측 여백, 좁으면 가로 스크롤.
 const _ADV_COLW={'#':32,'번호':40,'구매일자':73,'주문번호':110,'수취인':60,'연락처':110,'주소':450,'결제금액':66,'리뷰제출':82,'리뷰제출일':82,'입금':54,'입금일':54};
 function _colW(h){
+  if(typeof h==='string' && h.indexOf('ccol:')===0) return 130;   // 커스텀 열(자유메모) 고정폭 — 역할 무관
   if(STATE.role==='advertiser'){
     if(/아이디|쿠팡\s*id|네이버\s*id|스토어\s*id|^\s*id\s*$/i.test(String(h==null?'':h))) return 92;   // ID열(시트명 다양)
     return _ADV_COLW[h]!=null?_ADV_COLW[h]:(_COLW[h]||76);
   }
   return _COLW[h]||76;
+}
+// 커스텀 열 표시명(원본 시트 헤더는 그대로 key=label, 커스텀 열은 id 대신 사용자가 지은 이름을 보여준다).
+function _colLabel(key){
+  if(typeof key==='string' && key.indexOf('ccol:')===0){
+    const id=key.slice(5); const c=((STATE.wd&&STATE.wd.customColumns)||[]).find(x=>String(x.id)===id);
+    return c?c.colName:'(삭제된 열)';
+  }
+  return key;
 }
 // 가운데 정렬 대상 = 날짜형(구매일자 등)·연락처(전화) → 값 길이가 달라도 앞여백=뒷여백(좌우 대칭). (_isPhoneHeader는 아래 정의, 함수선언 호이스팅)
 function _isCtrCol(h){ return /일자|날짜|date/i.test(String(h==null?'':h)) || _isDepositCol(h) || _isPhoneHeader(h); }
@@ -1407,10 +1425,14 @@ function _gridVal(h, raw){ const v=_gridEditVal(h, raw); if(!v)return '';
   if(_isPhoneHeader(h)) return _fmtPhone(v);
   return v; }
 // 연락처 표기 통일: 숫자만 추출 → 010-0000-0000(뒤8자리=phone8) 등 표준 대시 양식. 형식 불명은 원본 유지(오염 방지).
+//   ★ 실측(8/3): 시트/엑셀이 숫자화하며 앞자리 0을 흔히 떨어뜨린다 — "1093748442"(10자리, 0으로 시작 안 함)는
+//   "010-9374-8442"에서 0이 빠진 값. 0이 없는 10자리는 항상 010 휴대폰 번호이므로(유효 국내 유선은 반드시 0으로
+//   시작) 0을 복원해 11자리 휴대폰 포맷(3-4-4)으로 통일한다 — "항상 010-0000-0000 형태" 요구사항의 핵심 보정.
 function _isPhoneHeader(h){ const s=String(h||''); return /(연락처|휴대폰|핸드폰|전화|폰번호)/.test(s) || /^(hp|tel|mobile|phone)$/i.test(s.trim()); }
 function _fmtPhone(v){
   if(v==null) return ''; const s=String(v).trim(); if(!s) return '';
-  const d=s.replace(/[^0-9]/g,''); if(!d) return s;
+  let d=s.replace(/[^0-9]/g,''); if(!d) return s;
+  if(d.length===10 && d[0]!=='0') d='0'+d;                                     // 앞자리 0 소실 보정(엑셀/시트 숫자화 흔적)
   if(d.length===8) return '010-'+d.slice(0,4)+'-'+d.slice(4);                 // phone8(뒤8자리) → 010-XXXX-XXXX
   if(d.length===11) return d.slice(0,3)+'-'+d.slice(3,7)+'-'+d.slice(7);       // 01012345678 → 010-1234-5678
   if(d.length===10) return d.startsWith('02') ? '02-'+d.slice(2,6)+'-'+d.slice(6) : d.slice(0,3)+'-'+d.slice(3,6)+'-'+d.slice(6);
@@ -1439,6 +1461,7 @@ function _fmtMD(v){
 // 셀 표시값(그리드 렌더·필터·그룹·정렬 공용) — 신원 3열은 그대로, 시트 컬럼은 편집오버레이 반영 + 날짜 표기.
 function gCellDisp(r,h){
   if(h==='#') return String(r.seq==null?'':r.seq);
+  if(typeof h==='string' && h.indexOf('ccol:')===0) return (r.customValues&&r.customValues[h.slice(5)])||'';
   if(STATE.role!=='advertiser'){   // 광고주 그리드는 신원열(참여자·phone8)이 없음 → 동명 시트열은 rowJson에서 읽음(col 분기로 폴백)
     if(h==='참여자') return r.name||'';
     if(h==='연락처') return _fmtPhone(r.phone8||'');
@@ -1497,12 +1520,15 @@ function _toast(msg){
 //   + 컬럼 ▾(필터·정렬·숨기기) · 행 그룹(기준 컬럼 선택, 접기/펼치기) — 모두 클라이언트 뷰 상태(Track B 열람).
 function buildGrid(wd){
   _ensureHeaderDrag();   // 헤더 가로 드래그 일괄 숨김(1회 바인딩, 위임)
+  _ensureCellColorUI();  // 셀 범위 드래그 → 배경색 팔레트(1회 바인딩, 위임)
   const H=wd.headers||[];
   const revI=H.indexOf('리뷰제출'), payI=H.indexOf('입금');
   // 컬럼 기술자: 신원 3열(#·참여자·연락처=DB)은 kind 로 렌더 — 동명 시트열(예: 시트 '연락처')이 신원열을 가리지 않게 위치/kind 기반.
   // 광고주 그리드는 신원열(참여자 이름·연락처=phone8) 제외 — 시트 화이트리스트 컬럼만(요청). 내부는 신원 3열 유지.
   const idCols = STATE.role==='advertiser' ? [{key:'#',kind:'seq'}] : [{key:'#',kind:'seq'},{key:'참여자',kind:'name'},{key:'연락처',kind:'phone'}];
-  const cols0=[...idCols, ...H.map(h=>({key:h,kind:'col'}))];
+  // 커스텀 열(행별 자유메모, migration 080) — 시트 헤더 뒤에 이어붙임. 광고주 그리드는 서버가 애초에 내려주지 않음.
+  const customCols=(wd.customColumns||[]).map(c=>({key:'ccol:'+c.id, kind:'custom', colId:c.id}));
+  const cols0=[...idCols, ...H.map(h=>({key:h,kind:'col'})), ...customCols];
   const allCols=cols0.map(c=>c.key);                                          // 필터/정렬/그룹 가드용 key 목록
   const vcols=cols0.filter(c=>!STATE.gHidden.has(c.key));                     // 숨긴 열 제외(key 기준) = 표시 컬럼
   const fzIdx = STATE.freezeUpto ? H.indexOf(STATE.freezeUpto) : -1;
@@ -1512,13 +1538,13 @@ function buildGrid(wd){
   const cstyle=(i)=>{ const w=_colW(vcols[i].key); let s=`min-width:${w}px;width:${w}px;`; if(i<frozenN){ s+=`left:${lefts[i]}px;`; if(i===frozenN-1)s+='box-shadow:2px 0 0 var(--line2);'; } return s; };
   const cls=(i,extra)=>`class="${i<frozenN?'gfz ':''}${extra||''}"`;
   // 헤더 ▾ 메뉴(필터·정렬·숨기기) — '#' 은 메뉴 없음
-  const thead=`<tr>${vcols.map((c,i)=>{ const h=c.key;
+  const thead=`<tr>${vcols.map((c,i)=>{ const h=c.key, lbl=_colLabel(h);
     const hasF=STATE.gFilters[h]&&STATE.gFilters[h].size;
     const sorted=STATE.gSort&&STATE.gSort.col===h;
     const sel=(STATE.gSelCols&&STATE.gSelCols.includes(h))?' gsel':'';
     const seq=c.kind==='seq';   // '#' 열은 필터 대상 아님
     const extra=(hasF?' filtered':'')+(sorted?' sortedc':'')+sel+(seq?' gseq':'')+(_isCtrCol(h)?' gctr':'');   // 날짜/연락처 헤더 가운데 정렬
-    return `<th ${cls(i,extra)} data-col="${esc(h)}" style="${cstyle(i)}" title="${esc(h)}${seq?'':' — 클릭: 필터·정렬·숨기기'}"><div class="th-in"><span class="lbl">${esc(h)}</span>${sorted?`<span class="gsort">${STATE.gSort.dir==='desc'?'▼':'▲'}</span>`:''}${seq?'':'<span class="gfnl">▼</span>'}</div></th>`;
+    return `<th ${cls(i,extra)} data-col="${esc(h)}" style="${cstyle(i)}" title="${esc(lbl)}${seq?'':' — 클릭: 필터·정렬·숨기기'}"><div class="th-in"><span class="lbl">${esc(lbl)}</span>${sorted?`<span class="gsort">${STATE.gSort.dir==='desc'?'▼':'▲'}</span>`:''}${seq?'':'<span class="gfnl">▼</span>'}</div></th>`;
   }).join('')}</tr>`;
   // 행 필터(스테일 컬럼은 무시 = 탭 전환 초기화 누락 시에도 그리드 블랭크 방지) → 정렬
   let rows=(wd.roster||[]).filter(r=>Object.entries(STATE.gFilters).every(([col,set])=>{
@@ -1537,18 +1563,25 @@ function buildGrid(wd){
     const canE = STATE.canEdit && r.editable!==false;
     const badge = r.source==='manual'?' <span class="src manual">수동</span>':(r.hasOrder?' <span class="src order">주문</span>':'')
                 + (r.editable===false?' <span class="lock" title="주문/신원 앵커 없음 또는 중복 — 편집 잠금">🔒</span>':'');
+    // 배경색 오버레이(migration 080, 드래그 범위 지정) — field 별 저장색을 인라인 style로(클래스 배경보다 우선).
+    const cc=(r.cellColors&&typeof r.cellColors==='object')?r.cellColors:{};
+    const bgStyle=(field)=>{ const c=cc[field]; return c?`background-color:${esc(c)};`:''; };
     const eCell=(field, disp, edited, extraCls, styleI, editv)=> canE
-      ? `<td ${cls(styleI,'gcell gedit'+(edited?' edited':'')+(disp?'':' gempty')+(extraCls||''))} style="${cstyle(styleI)}" title="${esc(disp||'')}" data-id="${esc(r.id)}" data-field="${esc(field)}" data-val="${esc(editv!=null?editv:disp)}" onclick="beginEditCell(this)">${esc(disp||'—')}${edited?` <span class="revb" title="되돌리기" data-id="${esc(r.id)}" data-field="${esc(field)}" onclick="revertCell(event,this)">↩</span>`:''}</td>`
-      : `<td ${cls(styleI,'gcell'+(disp?'':' gempty')+(extraCls||''))} style="${cstyle(styleI)}" title="${esc(disp||'')}">${esc(disp||'')}</td>`;
+      ? `<td ${cls(styleI,'gcell gedit'+(edited?' edited':'')+(disp?'':' gempty')+(extraCls||''))} style="${cstyle(styleI)}${bgStyle(field)}" title="${esc(disp||'')}" data-id="${esc(r.id)}" data-field="${esc(field)}" data-val="${esc(editv!=null?editv:disp)}" onclick="beginEditCell(this)">${esc(disp||'—')}${edited?` <span class="revb" title="되돌리기" data-id="${esc(r.id)}" data-field="${esc(field)}" onclick="revertCell(event,this)">↩</span>`:''}</td>`
+      : `<td ${cls(styleI,'gcell'+(disp?'':' gempty')+(extraCls||''))} style="${cstyle(styleI)}${bgStyle(field)}" title="${esc(disp||'')}" data-rid="${esc(r.id)}" data-cfield="${esc(field)}">${esc(disp||'')}</td>`;
     let tds='';
     vcols.forEach((c,i)=>{ const h=c.key;
-      if(c.kind==='seq'){ tds+=`<td ${cls(i,'gnum')} style="${cstyle(i)}">${esc(r.seq)}</td>`; }
+      if(c.kind==='seq'){ tds+=`<td ${cls(i,'gnum')} style="${cstyle(i)}${bgStyle('seq')}" data-rid="${esc(r.id)}" data-cfield="seq">${esc(r.seq)}</td>`; }
       else if(c.kind==='name'){
         // 참여자 = 실제 제출 리뷰어 신원 → 값 편집 잠금(표시 전용). 배지는 유지, 제거(×, 명단 큐레이션=행 숨김)는 편집자만.
-        tds+=`<td ${cls(i,'gnm gidlock')} style="${cstyle(i)}" title="실제 제출 리뷰어 정보 — 수정 불가">${esc(r.name||'—')}${badge}${canE?`<span class="rmx" title="명단에서 제거(숨김)" onclick="hideRow('${esc(r.id)}')">×</span>`:''}</td>`; }
+        tds+=`<td ${cls(i,'gnm gidlock')} style="${cstyle(i)}${bgStyle('idname')}" title="실제 제출 리뷰어 정보 — 수정 불가" data-rid="${esc(r.id)}" data-cfield="idname">${esc(r.name||'—')}${badge}${canE?`<span class="rmx" title="명단에서 제거(숨김)" onclick="hideRow('${esc(r.id)}')">×</span>`:''}</td>`; }
       else if(c.kind==='phone'){ const _ph=_fmtPhone(r.phone8);
         // 연락처 = 실제 제출 리뷰어 신원 → 값 편집 잠금(표시 전용). 가운데 정렬(앞여백=뒷여백).
-        tds+=`<td ${cls(i,'gcell gidlock'+(_ph?'':' gempty')+' gph gctr')} style="${cstyle(i)}" title="실제 제출 리뷰어 정보 — 수정 불가">${esc(_ph||'')}</td>`; }
+        tds+=`<td ${cls(i,'gcell gidlock'+(_ph?'':' gempty')+' gph gctr')} style="${cstyle(i)}${bgStyle('idphone')}" title="실제 제출 리뷰어 정보 — 수정 불가" data-rid="${esc(r.id)}" data-cfield="idphone">${esc(_ph||'')}</td>`; }
+      else if(c.kind==='custom'){
+        // 커스텀 열(행별 자유메모) — 시트 오버레이(col:)와 같은 eCell 경로 재사용, revert(↩) 없음(원본 개념이 없어 되돌릴 대상이 없음).
+        const cv=(r.customValues&&r.customValues[c.colId])||'';
+        tds+=eCell(h, cv, false, '', i, cv); }
       else { const jIdx=H.indexOf(h); const ed=(h in ceMap); const raw= ed?ceMap[h]:rj[h];
         const disp= ed?(raw==null?'':String(raw)):_gridVal(h, raw);
         const editv= ed?disp:_gridEditVal(h, raw);
@@ -1597,7 +1630,8 @@ function buildGrid(wd){
       <button class="btn xs" onclick="openGHidMenu(event)">숨긴 열${nHid?` <b style="color:var(--accent-deep)">${nHid}</b>`:' 0'}</button>
       ${hasFilt?`<button class="btn xs" style="color:var(--warn);border-color:color-mix(in srgb,var(--warn) 35%,var(--line))" onclick="clearGFilters()">필터 초기화 ✕</button>`:''}
       ${STATE.canEdit?`<button class="btn xs" onclick="showEditHistory()">편집 이력</button>`:''}
-      <span class="gnote">시트 동일 컬럼 · <b>컬럼명 클릭</b>=필터·정렬·숨기기 · 헤더 <b>가로 드래그</b>=여러 열 선택 → 숨기기 · <b>행 그룹</b> 접기/펼치기${STATE.canEdit?` · <b>셀 클릭=즉시 편집</b>(Enter=아래·Tab=오른쪽·Esc=취소)`:` · <b>열람 전용</b>`}</span></div>
+      ${STATE.canEdit?`<button class="btn xs" onclick="addCustomColumnPrompt()">＋ 열 추가</button>`:''}
+      <span class="gnote">시트 동일 컬럼 · <b>컬럼명 클릭</b>=필터·정렬·숨기기 · 헤더 <b>가로 드래그</b>=여러 열 선택 → 숨기기 · <b>행 그룹</b> 접기/펼치기${STATE.canEdit?` · <b>셀 클릭=즉시 편집</b>(Enter=아래·Tab=오른쪽·Esc=취소) · <b>셀 드래그</b>=범위 선택 → 배경색`:` · <b>열람 전용</b>`}</span></div>
     <div class="gridscroll"><table class="sheetgrid${STATE.role==='advertiser'?' advsnug':''}"><thead>${thead}</thead><tbody id="gbody">${firstBody}</tbody></table></div>
     <div id="addbox"></div>
     ${STATE.canEdit?`<button class="btn" style="margin-top:10px" onclick="showAddForm()">＋ 참여자 추가</button>`:''}`;
@@ -1616,7 +1650,8 @@ function _fitGrid(){ try{
   const tbl=scroll.querySelector('table.sheetgrid'); if(!tbl) return;
   const H=wd.headers||[];
   const idKeys = STATE.role==='advertiser' ? ['#'] : ['#','참여자','연락처'];   // buildGrid idCols와 동일
-  const keys=[...idKeys, ...H].filter(k=>!STATE.gHidden.has(k));                 // vcols와 동일 규칙(숨긴 열 제외)
+  const ccolKeys = (wd.customColumns||[]).map(c=>'ccol:'+c.id);                // buildGrid customCols와 동일
+  const keys=[...idKeys, ...H, ...ccolKeys].filter(k=>!STATE.gHidden.has(k));   // vcols와 동일 규칙(숨긴 열 제외)
   let sum=0; for(const k of keys) sum+=_colW(k);
   tbl.style.width=sum+'px';                                                      // min-width:0 과 함께 100% 스트레치 차단
 }catch(_){ } }
@@ -1691,6 +1726,7 @@ function openGColMenu(col, rect){   // 컬럼명(헤더) 클릭으로 호출 —
   const vals=Object.keys(counts).sort((a,b)=>a.localeCompare(b,'ko',{numeric:true}));
   const so=(STATE.gSort&&STATE.gSort.col===col)?STATE.gSort.dir:null;
   const canHide = col!=='#';
+  const isCustom = col.indexOf('ccol:')===0;
   m.innerHTML=`
     <div class="gcm-sort"><button class="${so==='asc'?'on':''}" onclick="gSortCol('asc')">▲ 오름차순</button><button class="${so==='desc'?'on':''}" onclick="gSortCol('desc')">▼ 내림차순</button></div>
     <input class="gcm-search" placeholder="값 검색…" oninput="gFilterMenuList(this.value)">
@@ -1699,7 +1735,8 @@ function openGColMenu(col, rect){   // 컬럼명(헤더) 클릭으로 호출 —
       return `<label class="gcm-opt" data-v="${esc(v)}"><input type="checkbox" ${on?'checked':''} value="${esc(v)}"><span class="cv">${esc(v||'(빈값)')}</span><span class="cn">${counts[v]}</span></label>`;
     }).join('')||'<div class="gcm-empty">값 없음</div>'}</div>
     <div class="gcm-foot"><button class="btn xs" onclick="closeGColMenu()">취소</button><button class="btn xs pri" onclick="applyGFilter()">적용</button></div>
-    ${canHide?`<div class="gcm-div"></div><button class="gcm-hide" onclick="hideGCol()">⤫ 이 열 숨기기</button>`:''}`;
+    ${canHide?`<div class="gcm-div"></div><button class="gcm-hide" onclick="hideGCol()">⤫ 이 열 숨기기</button>`:''}
+    ${(isCustom&&STATE.canEdit)?`<button class="gcm-hide" onclick="deleteCustomColumnPrompt('${esc(col)}')">🗑 이 열 삭제(모든 메모 삭제)</button>`:''}`;
   m.classList.add('show');
   _placeMenu(m, rect, 252, 340);
 }
@@ -1732,7 +1769,7 @@ function openGHidMenu(ev){
   if(m.classList.contains('show')){ closeGHidMenu(); return; }
   const hid=[...STATE.gHidden];
   m.innerHTML= hid.length
-    ? `${hid.map(h=>`<div class="ghid-row"><span class="hn">${esc(h)}</span><span class="re" onclick="restoreGCol('${esc(h)}')">표시</span></div>`).join('')}<div class="gcm-div"></div><button class="gcm-hide" style="color:var(--accent-deep);border-color:var(--accent-line)" onclick="restoreAllGCols()">모두 표시</button>`
+    ? `${hid.map(h=>`<div class="ghid-row"><span class="hn">${esc(_colLabel(h))}</span><span class="re" onclick="restoreGCol('${esc(h)}')">표시</span></div>`).join('')}<div class="gcm-div"></div><button class="gcm-hide" style="color:var(--accent-deep);border-color:var(--accent-line)" onclick="restoreAllGCols()">모두 표시</button>`
     : '<div class="gcm-empty">숨긴 열 없음<br><span style="font-size:10.5px">컬럼 ▾ 메뉴에서 열을 숨길 수 있어요</span></div>';
   m.classList.add('show');
   _placeMenu(m, ev.currentTarget.getBoundingClientRect(), 212, Math.min(60+hid.length*34, 320));
@@ -1755,7 +1792,15 @@ function toggleAllGGroups(){ const gb=STATE.gGroupBy; if(!gb) return;
 function _gridRowById(id){ return ((STATE.wd&&STATE.wd.roster)||[]).find(r=>String(r.id)===String(id)); }
 // 그리드 col 셀 1칸을 로컬 모델 기준으로 재도색(rowHtml의 col 분기와 동일 계산 — 편집표시/되돌리기/gempty/gok 일치).
 function _paintGridCell(r, field, td){
-  if(!td||!field||field.indexOf('col:')!==0) return;
+  if(!td||!field) return;
+  if(field.indexOf('ccol:')===0){   // 커스텀 열(자유메모) — 원본 개념이 없어 edited/되돌리기 없음
+    const disp=(r.customValues&&r.customValues[field.slice(5)])||'';
+    td.classList.remove('edited'); td.classList.toggle('gempty', !disp);
+    td.setAttribute('data-val', disp); td.setAttribute('title', disp||'');
+    td.innerHTML=esc(disp||'—');
+    return;
+  }
+  if(field.indexOf('col:')!==0) return;
   const h=field.slice(4);
   const rj=(r.rowJson&&typeof r.rowJson==='object')?r.rowJson:{};
   const ce=(r.cellEdits&&typeof r.cellEdits==='object')?r.cellEdits:{};
@@ -1771,7 +1816,7 @@ function _paintGridCell(r, field, td){
 function beginEditCell(td){
   if(!td||!td.getAttribute||td.querySelector('input')) return;
   const rowId=td.getAttribute('data-id'), field=td.getAttribute('data-field'), cur=td.getAttribute('data-val')||'';
-  if(!field||field.indexOf('col:')!==0) return;   // 편집 가능한 시트열 셀만(참여자·연락처·# 잠금)
+  if(!field||!(field.indexOf('col:')===0||field.indexOf('ccol:')===0)) return;   // 편집 가능한 시트열·커스텀열 셀만(참여자·연락처·# 잠금)
   td.innerHTML=`<input class="einp" value="${esc(cur)}">`;
   const inp=td.querySelector('input'); inp.focus(); inp.select();
   let done=false;
@@ -1790,11 +1835,26 @@ function beginEditCell(td){
 }
 // 낙관적 커밋: 로컬 즉시 반영 → 백그라운드 저장. 실패 시 (아직 최신 값일 때만) 롤백해 더 새 편집 보호.
 function commitCellEdit(rowId, field, value, td){
-  const r=_gridRowById(rowId); if(!r||!field||field.indexOf('col:')!==0) return;
+  const r=_gridRowById(rowId); if(!r||!field) return;
+  const t=STATE.cur; if(!t) return;
+  if(field.indexOf('ccol:')===0){   // 커스텀 열(자유메모) — 전용 엔드포인트(시트 무접촉)
+    const cid=field.slice(5);
+    r.customValues=(r.customValues&&typeof r.customValues==='object')?r.customValues:{};
+    const had=(cid in r.customValues), prev=r.customValues[cid];
+    r.customValues[cid]=value; _paintGridCell(r, field, td);
+    const rollback=()=>{ if(r.customValues[cid]===value){ if(had) r.customValues[cid]=prev; else delete r.customValues[cid]; _paintGridCell(r, field, td); } };
+    api('/api/trackb/workdesk/custom-value',{method:'POST',body:JSON.stringify({sheetId:t.sheetId,tabName:t.tabName,rowId,columnId:cid,value})})
+      .then(resp=>{
+        if(resp&&resp.ok){ if(td&&td.classList){ td.classList.add('cellsaved'); setTimeout(()=>{ td.classList.remove('cellsaved'); },600); } return; }
+        rollback(); toast(resp&&resp.error?('저장 거부: '+resp.error):'저장 실패');
+      })
+      .catch(()=>{ rollback(); toast('저장 실패 — 네트워크'); });
+    return;
+  }
+  if(field.indexOf('col:')!==0) return;
   const h=field.slice(4); r.cellEdits=(r.cellEdits&&typeof r.cellEdits==='object')?r.cellEdits:{};
   const had=(h in r.cellEdits), prev=r.cellEdits[h];
   r.cellEdits[h]=value; _paintGridCell(r, field, td);
-  const t=STATE.cur; if(!t) return;
   const rollback=()=>{ if(r.cellEdits[h]===value){ if(had) r.cellEdits[h]=prev; else delete r.cellEdits[h]; _paintGridCell(r, field, td); } };
   api('/api/trackb/workdesk/edit',{method:'POST',body:JSON.stringify({sheetId:t.sheetId,tabName:t.tabName,rowId,field,value})})
     .then(resp=>{
@@ -1829,6 +1889,101 @@ function revertCell(ev, el){ if(ev)ev.stopPropagation();
     return;
   }
   revertEdit(rowId, field);   // 비그리드(폴백) 경로
+}
+// ── 커스텀 열(행별 자유메모, migration 080) — 탭 공용 저장, 시트/write-back 무접촉 ──
+function addCustomColumnPrompt(){
+  const t=STATE.cur; if(!t) return;
+  const name=(prompt('추가할 열 이름을 입력하세요 (예: 특이사항 메모)')||'').trim();
+  if(!name) return;
+  api('/api/trackb/workdesk/custom-column',{method:'POST',body:JSON.stringify({sheetId:t.sheetId,tabName:t.tabName,colName:name})})
+    .then(resp=>{
+      if(resp&&resp.ok&&resp.column){
+        STATE.wd.customColumns=(STATE.wd.customColumns||[]).concat([resp.column]);
+        (STATE.wd.roster||[]).forEach(r=>{ r.customValues=r.customValues||{}; });
+        rerenderGrid(); toast(`'${name}' 열이 추가되었습니다`);
+      } else toast(resp&&resp.error?('열 추가 실패: '+resp.error):'열 추가 실패');
+    }).catch(()=>toast('열 추가 실패 — 네트워크'));
+}
+function deleteCustomColumnPrompt(colKey){
+  const t=STATE.cur; if(!t||!colKey||colKey.indexOf('ccol:')!==0) return;
+  const columnId=colKey.slice(5), label=_colLabel(colKey);
+  if(!confirm(`'${label}' 열을 삭제할까요?\n이 열에 입력된 모든 메모가 함께 삭제되며 되돌릴 수 없습니다.`)) return;
+  closeGColMenu();
+  api('/api/trackb/workdesk/custom-column',{method:'DELETE',body:JSON.stringify({sheetId:t.sheetId,tabName:t.tabName,columnId})})
+    .then(resp=>{
+      if(resp&&resp.ok){
+        STATE.wd.customColumns=(STATE.wd.customColumns||[]).filter(c=>String(c.id)!==columnId);
+        (STATE.wd.roster||[]).forEach(r=>{ if(r.customValues) delete r.customValues[columnId]; });
+        STATE.gHidden.delete(colKey); delete STATE.gFilters[colKey];
+        if(STATE.gSort&&STATE.gSort.col===colKey) STATE.gSort=null;
+        rerenderGrid(); toast('열이 삭제되었습니다');
+      } else toast(resp&&resp.error?('삭제 실패: '+resp.error):'삭제 실패');
+    }).catch(()=>toast('삭제 실패 — 네트워크'));
+}
+// ── 셀 배경색: 드래그로 셀 범위(직사각형)를 잡아 색상 팔레트로 칠한다(migration 080, 탭 공용 저장). ──
+//   단순 클릭(이동 없음)은 기존 셀 편집(onclick=beginEditCell)이 그대로 처리 — 여기선 아무것도 하지 않는다.
+const _CELL_COLORS=['#ffe9a8','#ffd0d0','#ffdcb0','#c9f2c0','#c7e3ff','#e6d3ff','#d9d9d9'];
+function _ensureCellColorUI(){
+  if(STATE._gColorInit) return; STATE._gColorInit=true;
+  if(!$('#gcolorpop')){ const p=document.createElement('div'); p.className='gcolorpop'; p.id='gcolorpop'; document.body.appendChild(p); }
+  let drag=null;   // { r0,c0,r1,c1,moved }
+  const clearVis=()=>document.querySelectorAll('#gbody td.gselrange').forEach(td=>td.classList.remove('gselrange'));
+  const posOf=(td)=>{ const tr=td.closest('tr'); const tbody=td.closest('tbody'); if(!tr||!tbody) return null;
+    return { ri:[...tbody.children].indexOf(tr), ci:[...tr.children].indexOf(td) }; };
+  const paint=()=>{ if(!drag) return; clearVis();
+    const tbody=$('#gbody'); if(!tbody) return; const trs=[...tbody.children];
+    const rlo=Math.min(drag.r0,drag.r1), rhi=Math.max(drag.r0,drag.r1);
+    const clo=Math.min(drag.c0,drag.c1), chi=Math.max(drag.c0,drag.c1);
+    for(let ri=rlo; ri<=rhi; ri++){ const tr=trs[ri]; if(!tr||tr.classList.contains('grouphd')) continue;
+      const tds=[...tr.children]; for(let ci=clo; ci<=chi; ci++){ const td=tds[ci]; if(td) td.classList.add('gselrange'); } }
+  };
+  document.addEventListener('mousedown',e=>{
+    if(e.button!==0 || !STATE.canEdit) return;
+    const td=e.target.closest('#gbody td'); if(!td || td.querySelector('input') || td.closest('tr.grouphd')) return;
+    const pos=posOf(td); if(!pos) return;
+    drag={ r0:pos.ri, c0:pos.ci, r1:pos.ri, c1:pos.ci, moved:false };
+  });
+  document.addEventListener('mousemove',e=>{
+    if(!drag) return; const td=e.target.closest('#gbody td'); if(!td) return;
+    const pos=posOf(td); if(!pos) return;
+    if(pos.ri!==drag.r1 || pos.ci!==drag.c1){ drag.r1=pos.ri; drag.c1=pos.ci; drag.moved=true; paint(); }
+  });
+  document.addEventListener('mouseup',e=>{
+    if(!drag) return; const d=drag; drag=null;
+    if(!d.moved){ clearVis(); return; }   // 이동 없음(단순 클릭)=기존 셀 편집 그대로, 범위선택 UI는 관여하지 않음
+    _openColorPopover(e.clientX, e.clientY);
+  });
+  document.addEventListener('keydown',e=>{ if(e.key==='Escape' && $('#gcolorpop').classList.contains('show')){ clearVis(); _closeColorPopover(); } });
+  document.addEventListener('click',e=>{ if(!e.target.closest('#gcolorpop')) _closeColorPopover(); });
+}
+function _openColorPopover(x,y){
+  const p=$('#gcolorpop'); if(!p) return;
+  p.innerHTML=_CELL_COLORS.map(c=>`<span class="gcswatch" style="background:${c}" onclick="_applyRangeColor('${c}')" title="이 색으로 칠하기"></span>`).join('')
+    + `<span class="gcswatch gcclear" onclick="_applyRangeColor('')" title="배경색 지우기">✕</span>`;
+  p.style.left=Math.max(8,Math.min(x, window.innerWidth-8-(_CELL_COLORS.length+1)*30))+'px';
+  p.style.top=Math.max(8,Math.min(y+8, window.innerHeight-46))+'px';
+  p.classList.add('show');
+}
+function _closeColorPopover(){
+  const p=$('#gcolorpop'); if(p) p.classList.remove('show');
+  document.querySelectorAll('#gbody td.gselrange').forEach(td=>td.classList.remove('gselrange'));
+}
+function _applyRangeColor(color){
+  const t=STATE.cur; const tds=[...document.querySelectorAll('#gbody td.gselrange')];
+  _closeColorPopover();
+  if(!t || !tds.length) return;
+  const cells=[]; const byId={}; ((STATE.wd&&STATE.wd.roster)||[]).forEach(r=>{ byId[String(r.id)]=r; });
+  for(const td of tds){
+    const rid=td.dataset.id||td.dataset.rid, field=td.dataset.field||td.dataset.cfield;
+    if(!rid||!field) continue;
+    cells.push({rowId:rid, field});
+    const r=byId[String(rid)]; if(r){ r.cellColors=r.cellColors||{}; if(color) r.cellColors[field]=color; else delete r.cellColors[field]; }
+    td.style.backgroundColor=color||'';   // 낙관적 반영(딜레이 0)
+  }
+  if(!cells.length) return;
+  api('/api/trackb/workdesk/cell-color',{method:'POST',body:JSON.stringify({sheetId:t.sheetId,tabName:t.tabName,cells,color})})
+    .then(resp=>{ if(!resp||!resp.ok) toast(resp&&resp.error?('배경색 저장 실패: '+resp.error):'배경색 저장 실패'); })
+    .catch(()=>toast('배경색 저장 실패 — 네트워크(새로고침 시 되돌아갈 수 있음)'));
 }
 // 편집 이력(감사) 모달
 async function showEditHistory(){

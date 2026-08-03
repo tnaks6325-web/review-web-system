@@ -1489,6 +1489,34 @@ async function workdeskTab({ sheetId, tabName, tabGid, role = 'master', advertis
     if (!editMap.has(k)) editMap.set(k, {});
     editMap.get(k)[e.field] = e.kind === 'bool' ? !!e.value_bool : (e.value_text == null ? '' : e.value_text);
   }
+  // 커스텀 열(행별 자유메모) + 셀 배경색(migration 080) — 내부(master/admin/staff)만, 시트/write-back 무접촉.
+  let customCols = [], customValMap = new Map(), cellColorMap = new Map();
+  if (showEdits) {
+    const { rows: cc } = await db.query(
+      `SELECT id, col_name AS "colName", sort_order AS "sortOrder"
+         FROM trackb_custom_columns WHERE sheet_id=$1 AND tab_name=$2 AND deleted_at IS NULL
+        ORDER BY sort_order, created_at`, [sheetId, tabName]).catch(() => ({ rows: [] }));
+    customCols = cc;
+    if (cc.length) {
+      const { rows: cv } = await db.query(
+        `SELECT column_id AS "columnId", anchor_type AS "anchorType", anchor_value AS "anchorValue", value_text AS "valueText"
+           FROM trackb_custom_column_values WHERE column_id = ANY($1::uuid[])`,
+        [cc.map(c => c.id)]).catch(() => ({ rows: [] }));
+      for (const v of cv) {
+        const k = _akey(v.anchorType, v.anchorValue);
+        if (!customValMap.has(k)) customValMap.set(k, {});
+        customValMap.get(k)[v.columnId] = v.valueText || '';
+      }
+    }
+    const { rows: ccl } = await db.query(
+      `SELECT anchor_type AS "anchorType", anchor_value AS "anchorValue", field, color
+         FROM trackb_cell_colors WHERE sheet_id=$1 AND tab_name=$2`, [sheetId, tabName]).catch(() => ({ rows: [] }));
+    for (const c of ccl) {
+      const k = _akey(c.anchorType, c.anchorValue);
+      if (!cellColorMap.has(k)) cellColorMap.set(k, {});
+      cellColorMap.get(k)[c.field] = c.color;
+    }
+  }
   // 제출한 구매양식 원본(order_submissions) — 링크된 주문의 실제 제출 내용. 내부(master/admin)만 PII 상세 노출.
   let ordMap = new Map();
   if (showEdits) {
@@ -1570,6 +1598,11 @@ async function workdeskTab({ sheetId, tabName, tabGid, role = 'master', advertis
       // 시트 컬럼 편집(col:<헤더>) 오버레이 → 그리드 셀 합성용 {헤더: 값}. 앵커 게이트(ambiguous면 ov={}이라 자동 미적용).
       const ce = {}; for (const k in ov) { if (k.indexOf('col:') === 0) ce[k.slice(4)] = ov[k]; }
       syn.cellEdits = ce;
+      // 커스텀 열 값 + 셀 배경색(migration 080) — 같은 앵커키로 합성. ★ ambiguous(중복 identity)면 미적용(ov와 동일 게이트) —
+      //   그렇지 않으면 서로 다른 물리행 여러 개가 같은 identity 앵커를 공유해 한 사람의 메모/색이 남에게도 보인다.
+      const ak = (anchor && !ambiguous) ? _akey(anchor.type, anchor.value) : null;
+      syn.customValues = (ak && customValMap.get(ak)) || {};
+      syn.cellColors = (ak && cellColorMap.get(ak)) || {};
     } else if (role === 'advertiser' && advHeaders) {
       // 광고주: 화이트리스트 컬럼만 · 전체값(마스킹 없음, 사용자 정책). 미포함 컬럼(은행/계좌 등)은 rowJson에 안 담음(데이터 최소화).
       const rj = (r.row_json && typeof r.row_json === 'object') ? r.row_json : {};
@@ -1594,7 +1627,7 @@ async function workdeskTab({ sheetId, tabName, tabGid, role = 'master', advertis
   };
   const res = { role, maskPII, meta: meta[0] || {}, detail: wo[0] || null, counts, roster: out,
     sourceOfTruth: (meta[0] && meta[0].sourceOfTruth) || 'sheet' };   // 진실원천(cutover 상태) 표시용
-  if (showEdits) { res.hiddenRows = hiddenList; res.orphanEdits = { count: orphanCount, byType: orphanByType }; res.headers = headers || []; }
+  if (showEdits) { res.hiddenRows = hiddenList; res.orphanEdits = { count: orphanCount, byType: orphanByType }; res.headers = headers || []; res.customColumns = customCols; }
   else if (role === 'advertiser') { res.headers = headers || []; }   // 광고주: 화이트리스트 헤더(그리드 렌더용)
   return res;
 }
@@ -1774,6 +1807,141 @@ async function listEdits({ sheetId, tabName, limit = 200 } = {}) {
     by: r.createdBy || '', at: r.createdAt,
     reverted: !!r.revertedAt, revertedBy: r.revertedBy || null, revertedAt: r.revertedAt,
   }));
+}
+
+// ══ 통합 작업대 커스텀 열(행별 자유메모) + 셀 배경색(드래그 범위, migration 080) ══
+//   ★ 격리: participant_edits/write-back 무접촉 신규 테이블만 사용 — 시트에 절대 쓰지 않는다.
+//   ★ 앵커는 편집 오버레이와 동일 철학(order > manual > identity) — 재투영에도 값이 같은 행을 따라간다.
+async function listCustomColumns({ sheetId, tabName } = {}) {
+  if (!sheetId || !tabName) throw new Error('listCustomColumns: sheetId, tabName 필수');
+  const db = getPool();
+  const { rows } = await db.query(
+    `SELECT id, col_name AS "colName", sort_order AS "sortOrder"
+       FROM trackb_custom_columns WHERE sheet_id=$1 AND tab_name=$2 AND deleted_at IS NULL
+      ORDER BY sort_order, created_at`, [sheetId, tabName]);
+  return rows;
+}
+async function addCustomColumn({ sheetId, tabName, colName, by = 'admin' } = {}) {
+  const name = String(colName || '').trim().slice(0, 60);
+  if (!sheetId || !tabName || !name) return { ok: false, error: 'sheetId, tabName, colName 필수' };
+  const db = getPool();
+  const { rows: mx } = await db.query(
+    `SELECT COALESCE(MAX(sort_order), -1) + 1 AS n FROM trackb_custom_columns
+      WHERE sheet_id=$1 AND tab_name=$2 AND deleted_at IS NULL`, [sheetId, tabName]);
+  const { rows } = await db.query(
+    `INSERT INTO trackb_custom_columns (sheet_id, tab_name, col_name, sort_order, created_by)
+     VALUES ($1,$2,$3,$4,$5) RETURNING id, col_name AS "colName", sort_order AS "sortOrder"`,
+    [sheetId, tabName, name, mx[0].n, String(by).slice(0, 100)]);
+  return { ok: true, column: rows[0] };
+}
+async function deleteCustomColumn({ sheetId, tabName, columnId } = {}) {
+  if (!sheetId || !tabName || !columnId) return { ok: false, error: 'sheetId, tabName, columnId 필수' };
+  const db = getPool();
+  const { rowCount } = await db.query(
+    `UPDATE trackb_custom_columns SET deleted_at=NOW()
+      WHERE id=$1 AND sheet_id=$2 AND tab_name=$3 AND deleted_at IS NULL`,
+    [columnId, sheetId, tabName]);
+  return { ok: rowCount > 0 };
+}
+// 쓰기용 앵커 도출(editWorkdeskRow과 동형) — identity 앵커는 중복 카운트까지 재검증해 ambiguous면 거부.
+//   ★ 같은 검증을 안 하면 서로 다른 물리행(동명이인 등)이 같은 identity 키를 공유할 때 한 사람의 메모/색이
+//     엉뚱한 다른 행에도 나타난다(workdeskTab 합성측 ambiguous 게이트와 대칭 — 쓰기측에도 반드시 필요).
+async function _resolveAnchorForWrite(client, sheetId, tabName, row) {
+  if (row.order_submission_id) return { type: 'order', value: String(row.order_submission_id) };
+  if (row.source === 'manual') return { type: 'manual', value: String(row.id) };
+  let ik = row.identity_key;
+  if (!ik) {
+    ik = identityKey(_ikFromRow(row));
+    if (ik) await client.query(`UPDATE campaign_participants SET identity_key=$2 WHERE id=$1 AND identity_key IS NULL`, [row.id, ik]);
+  }
+  if (!ik) return null;
+  const { rows: dup } = await client.query(
+    `SELECT COUNT(*)::int AS n FROM campaign_participants
+      WHERE sheet_id=$1 AND tab_name=$2 AND deleted_at IS NULL AND active=TRUE
+        AND order_submission_id IS NULL AND source<>'manual' AND identity_key=$3`,
+    [sheetId, tabName, ik]);
+  if ((dup[0].n || 0) > 1) return { ambiguous: true };
+  return { type: 'identity', value: ik };
+}
+async function setCustomColumnValue({ sheetId, tabName, rowId, columnId, value, by = 'admin' } = {}) {
+  if (!sheetId || !tabName || !rowId || !columnId) return { ok: false, error: 'sheetId, tabName, rowId, columnId 필수' };
+  const db = getPool();
+  const { rows: cc } = await db.query(
+    `SELECT id FROM trackb_custom_columns WHERE id=$1 AND sheet_id=$2 AND tab_name=$3 AND deleted_at IS NULL`,
+    [columnId, sheetId, tabName]);
+  if (!cc.length) return { ok: false, error: 'column_not_found' };
+  const client = await db.connect();
+  try {
+    await client.query('BEGIN');
+    const { rows: pr } = await client.query(
+      `SELECT id, source, order_submission_id, identity_key, phone8, recipient_name, option_text, row_json
+         FROM campaign_participants WHERE id=$1 AND sheet_id=$2 AND tab_name=$3 AND deleted_at IS NULL FOR UPDATE`,
+      [rowId, sheetId, tabName]);
+    if (!pr.length) { await client.query('ROLLBACK'); return { ok: false, error: 'row_not_found' }; }
+    const anchor = await _resolveAnchorForWrite(client, sheetId, tabName, pr[0]);
+    if (!anchor) { await client.query('ROLLBACK'); return { ok: false, error: 'no_stable_anchor' }; }
+    if (anchor.ambiguous) { await client.query('ROLLBACK'); return { ok: false, error: 'ambiguous_identity' }; }
+    const text = value == null ? '' : String(value).slice(0, 2000);
+    await client.query(
+      `INSERT INTO trackb_custom_column_values (column_id, anchor_type, anchor_value, value_text, updated_by)
+         VALUES ($1,$2,$3,$4,$5)
+       ON CONFLICT (column_id, anchor_type, anchor_value)
+         DO UPDATE SET value_text=$4, updated_by=$5, updated_at=NOW()`,
+      [columnId, anchor.type, anchor.value, text, String(by).slice(0, 100)]);
+    await client.query('COMMIT');
+    return { ok: true };
+  } catch (e) { try { await client.query('ROLLBACK'); } catch (_) {} throw e; }
+  finally { client.release(); }
+}
+
+// 셀 배경색 일괄 저장/해제 — 드래그로 잡은 (rowId, field) 목록에 한 색을 적용(color=''는 해제).
+//   field: 'col:<시트헤더>' | 'ccol:<커스텀열id>' | 'idname' | 'idphone'(신원 3열 중 색 지정 가능한 2개, '#'은 대상 제외).
+//   행별 FOR UPDATE 트랜잭션(editWorkdeskRow과 동형) — 같은 행의 여러 필드는 한 트랜잭션에 묶어 왕복을 줄인다.
+async function setCellColors({ sheetId, tabName, cells, color, by = 'admin' } = {}) {
+  if (!sheetId || !tabName || !Array.isArray(cells) || !cells.length) return { ok: false, error: 'sheetId, tabName, cells 필수' };
+  if (cells.length > 3000) return { ok: false, error: 'too_many_cells' };
+  const db = getPool();
+  const byRow = new Map();
+  for (const c of cells) {
+    const rid = String((c && c.rowId) || ''), field = String((c && c.field) || '').trim();
+    if (!rid || !field) continue;
+    if (!byRow.has(rid)) byRow.set(rid, []);
+    byRow.get(rid).push(field);
+  }
+  if (!byRow.size) return { ok: false, error: 'cells 필수' };
+  const col = String(color == null ? '' : color).trim().slice(0, 32);
+  let applied = 0, skipped = 0;
+  for (const [rowId, fields] of byRow) {
+    const client = await db.connect();
+    try {
+      await client.query('BEGIN');
+      const { rows: pr } = await client.query(
+        `SELECT id, source, order_submission_id, identity_key, phone8, recipient_name, option_text, row_json
+           FROM campaign_participants WHERE id=$1 AND sheet_id=$2 AND tab_name=$3 AND deleted_at IS NULL FOR UPDATE`,
+        [rowId, sheetId, tabName]);
+      if (!pr.length) { await client.query('ROLLBACK'); skipped += fields.length; continue; }
+      const anchor = await _resolveAnchorForWrite(client, sheetId, tabName, pr[0]);
+      if (!anchor || anchor.ambiguous) { await client.query('ROLLBACK'); skipped += fields.length; continue; }
+      for (const field of fields) {
+        if (!col) {
+          await client.query(
+            `DELETE FROM trackb_cell_colors WHERE sheet_id=$1 AND tab_name=$2 AND anchor_type=$3 AND anchor_value=$4 AND field=$5`,
+            [sheetId, tabName, anchor.type, anchor.value, field]);
+        } else {
+          await client.query(
+            `INSERT INTO trackb_cell_colors (sheet_id, tab_name, anchor_type, anchor_value, field, color, created_by)
+               VALUES ($1,$2,$3,$4,$5,$6,$7)
+             ON CONFLICT (sheet_id, tab_name, anchor_type, anchor_value, field)
+               DO UPDATE SET color=$6, created_by=$7, created_at=NOW()`,
+            [sheetId, tabName, anchor.type, anchor.value, field, col, String(by).slice(0, 100)]);
+        }
+        applied++;
+      }
+      await client.query('COMMIT');
+    } catch (e) { try { await client.query('ROLLBACK'); } catch (_) {} skipped += fields.length; }
+    finally { client.release(); }
+  }
+  return { ok: true, applied, skipped };
 }
 
 // ══════════════════════════════════════════════════════════════════════════
@@ -2229,5 +2397,10 @@ module.exports = {
   hideWorkdeskRow,
   addWorkdeskRow,
   listEdits,
+  listCustomColumns,
+  addCustomColumn,
+  deleteCustomColumn,
+  setCustomColumnValue,
+  setCellColors,
   __setPoolForTest,
 };
