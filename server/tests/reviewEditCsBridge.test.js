@@ -1,0 +1,291 @@
+/**
+ * reviewEditCsBridge.test.js — 리뷰이미지 교체요청 ↔ C/S 문의창구 연동 회귀가드
+ * 실행: node tests/reviewEditCsBridge.test.js
+ *
+ * 이 연동의 위험 네 가지를 고정한다.
+ *  ① **승인을 깨뜨리는 것** — 승인은 Drive 파일 이동·review_index 갱신까지 끝난 뒤 통지한다.
+ *     통지가 throw 하면 "파일은 바뀌었는데 요청은 pending" 인 어긋난 상태가 남는다 → fail-soft 고정.
+ *  ② **권한** — 교체요청 승인은 되돌리기 어렵다. AE 는 담당 탭만, 광고주·리뷰어는 차단.
+ *  ③ **리뷰어 노출** — meta 는 리뷰어 응답 JSON 에 그대로 실린다. 실명·시트제목이 새면 안 된다.
+ *  ④ **사본 드리프트** — 카드가 관리자/리뷰어/전용탭 세 곳에 그려진다. 렌더러는 한 벌이어야 한다.
+ *
+ * ★★ 코드리뷰가 잡아 준 것 중 **정적 grep 으로는 못 잡은 것**들은 아래 8) 에서
+ *    핸들러·모듈을 **실제로 실행**해 확인한다(선언이 '있다'는 것만으로는 부족하다).
+ */
+const assert = require('assert');
+const fs = require('fs');
+const path = require('path');
+const R = p => fs.readFileSync(path.join(__dirname, '..', p), 'utf8');
+const F = p => fs.readFileSync(path.join(__dirname, '..', '..', 'frontend', p), 'utf8');
+
+let pass = 0;
+const t = (name, fn) => { fn(); pass++; console.log('  ✓ ' + name); };
+
+console.log('\n▶ 리뷰이미지 교체요청 ↔ C/S 연동 회귀가드\n');
+
+const MIG = R('migrations/080_cs_message_card.sql');
+const BR = R('src/services/csBridge.service.js');
+const RE = R('src/routes/reviewEdit.routes.js');
+const TB = R('src/routes/trackB.routes.js');
+const CSR = R('src/routes/cs.routes.js');
+const RVR = R('src/routes/reviewer.routes.js');
+const CARD = F('js/cs-review-edit-card.js');
+const CSJ = F('js/cs-inquiry.js');
+const RCS = F('js/reviewer-cs.js');
+const PAY = F('js/index-payment.js');
+const WD = F('workdesk.html');
+const ADM = F('admin.html');
+
+/* ── 1) 스키마 ─────────────────────────────────────────────── */
+console.log('1) 스키마(080)');
+t('카드 타입·메타 컬럼 추가(멱등·기본값)', () => {
+  assert.ok(/ADD COLUMN IF NOT EXISTS msg_type TEXT NOT NULL DEFAULT 'text'/.test(MIG));
+  assert.ok(/ADD COLUMN IF NOT EXISTS meta\s+JSONB NOT NULL DEFAULT '\{\}'::jsonb/.test(MIG),
+    '기본값이 없으면 기존 메시지가 NULL 로 남아 프론트가 깨진다');
+});
+t('★ 값 공간을 CHECK 로 좁히되 **NOT VALID**(운영 테이블 전체 스캔 금지)', () => {
+  assert.ok(/CHECK \(msg_type IN \('text', 'review_edit'\)\) NOT VALID/.test(MIG),
+    '스캔을 넣으면 러너의 암묵 트랜잭션이 ACCESS EXCLUSIVE 를 그동안 유지한다');
+  assert.ok(/SELECT 1 FROM pg_constraint/.test(MIG), 'CHECK 추가가 멱등이 아니다');
+});
+t('★ 요청 1건 = 카드 1장(부분 유니크)', () => {
+  assert.ok(/CREATE UNIQUE INDEX IF NOT EXISTS uq_cs_msg_review_edit/.test(MIG));
+  assert.ok(/\(\(meta->>'requestId'\)\)/.test(MIG) && /WHERE msg_type = 'review_edit'/.test(MIG));
+});
+
+/* ── 2) fail-soft ──────────────────────────────────────────── */
+console.log('\n2) ★★ fail-soft (승인을 절대 깨뜨리지 않는다)');
+t('브리지의 세 진입점이 모두 try/catch — throw 없음', () => {
+  ['postReviewEditRequest', 'postReviewEditDecision', 'markReviewEditCancelled'].forEach(fn => {
+    const i = BR.indexOf('async function ' + fn);
+    assert.ok(i > 0, fn + ' 없음');
+    const body = BR.slice(i, BR.indexOf('\n}', i));
+    assert.ok(/try \{/.test(body) && /catch \(err\)/.test(body), fn + ': try/catch 없음');
+    assert.ok(/logger\.warn/.test(body), fn + ': 실패를 삼키기만 하고 로그가 없다');
+    assert.ok(!/\bthrow /.test(body), fn + ': throw 가 있으면 승인이 깨진다');
+  });
+});
+t('★ 통지는 Drive·DB 작업이 **끝난 뒤**에 부른다', () => {
+  const i = RE.indexOf("action: 'approved'");
+  const j = RE.indexOf("postReviewEditDecision(committed, 'approved'");
+  assert.ok(i > 0 && j > i, '승인 통지가 커밋/보관 처리보다 앞에 있다');
+});
+t('★ 반려는 **커넥션을 반납한 뒤** 통지한다(풀 자기교착 방지)', () => {
+  const i = RE.indexOf("router.post('/reject'");
+  const seg = RE.slice(i, i + 3000);
+  const rel = seg.indexOf('client.release()');
+  const call = seg.indexOf("postReviewEditDecision(committed, 'rejected'");
+  assert.ok(rel > 0 && call > rel, '커넥션을 쥔 채 csBridge(새 커넥션 4회)를 부른다');
+});
+t('네 시점 모두 배선(요청·승인·반려·취소)', () => {
+  assert.ok(/csBridge\.postReviewEditRequest\(/.test(RE), '요청 시 카드 없음');
+  assert.ok(/postReviewEditDecision\(committed, 'approved'/.test(RE), '승인 통지 없음');
+  assert.ok(/postReviewEditDecision\(committed, 'rejected'/.test(RE), '반려 통지 없음');
+  assert.ok(/csBridge\.markReviewEditCancelled\(/.test(RE),
+    '취소 배선이 없으면 [승인]/[반려] 가 살아 있는 좀비 카드가 남는다');
+});
+
+/* ── 3) 스레드 결속 ────────────────────────────────────────── */
+console.log('\n3) 스레드 결속');
+t('★ C/S 스레드 키가 리뷰어 UI 규칙과 같다(sheetId||tabName)', () => {
+  assert.ok(/return `\$\{String\(sheetId \|\| ''\)\}\|\|\$\{String\(tabName \|\| ''\)\}`/.test(BR));
+  assert.ok(/\|\|['"]\s*\+|\+ ['"]\|\|['"]/.test(F('index.html')),
+    '리뷰어 UI 의 키 합성 규칙을 찾지 못함(가드 갱신 필요)');
+});
+t('★★ 기존 스레드의 라벨·이름을 덮어쓰지 않는다(시트제목 유출 차단)', () => {
+  const i = BR.indexOf('ON CONFLICT (reviewer_phone8, campaign_key) DO UPDATE SET');
+  const seg = BR.slice(i, BR.indexOf('RETURNING', i));
+  assert.ok(!/campaign_label = EXCLUDED/.test(seg),
+    '라벨 출처에 시트 제목이 섞이는데 그 값은 리뷰어 문의방 이름으로 그대로 나간다');
+  assert.ok(!/reviewer_name = EXCLUDED/.test(seg));
+  assert.ok(/admin_unread_count = cs_threads\.admin_unread_count \+ 1/.test(seg), '관리자 뱃지에 안 잡힌다');
+});
+t('★ 승인/반려는 카드를 제자리 갱신 + 통지 메시지는 따로', () => {
+  assert.ok(/SET meta = meta \|\| \$2::jsonb/.test(BR), 'meta 를 통째로 덮으면 requestId·파일ID 가 날아간다');
+  assert.ok(/리뷰이미지 수정요청이 승인되었습니다\./.test(BR));
+  assert.ok(/리뷰이미지 수정요청이 반려되었습니다[\s\S]{0,40}사유/.test(BR));
+  assert.ok(/reviewer_unread_count = reviewer_unread_count \+ 1/.test(BR));
+});
+t('★ 처리 중 뒤늦은 스레드 생성은 "새 문의" 알림을 내지 않고, 재귀는 1회 제한', () => {
+  assert.ok(/postReviewEditRequest\(r, \{ silent: true \}\)/.test(BR));
+  assert.ok(/if \(!opts\.silent\)/.test(BR));
+  assert.ok(/if \(_depth\)/.test(BR), '무한 재귀 가드가 없다');
+});
+
+/* ── 4) 반려 사유 필수 ─────────────────────────────────────── */
+console.log('\n4) 반려 사유');
+t('★ 서버가 빈 사유를 거부한다', () => {
+  assert.ok(/const rejectNote = _sanitizeReason\(note \|\| ''\)/.test(RE));
+  assert.ok(/if \(!rejectNote\.trim\(\)\) return res\.json\(\{ ok: false/.test(RE));
+});
+t('★ 프론트 **세 화면 모두** 빈 사유를 막는다', () => {
+  assert.ok(/if \(!String\(note\)\.trim\(\)\) \{ showToast\('반려 사유를 입력해 주세요/.test(CSJ),
+    'C/S·전용탭 공용 핸들러');
+  assert.ok(/if \(!String\(note\)\.trim\(\)\) \{ showToast\('반려 사유를 입력해 주세요/.test(PAY),
+    '기존 관리자페이지가 빈 사유를 그대로 보낸다');
+  const i = PAY.indexOf('async function rejectReviewEdit');
+  const body = PAY.slice(i, PAY.indexOf('\n}', i));
+  assert.ok(body.indexOf('String(note).trim()') < body.indexOf('_reviewEditRemoveCard'),
+    '빈 사유 검사가 낙관적 카드 제거보다 뒤에 있으면 "반려한 줄 알았는데 그대로"가 된다');
+});
+
+/* ── 5) 권한 ───────────────────────────────────────────────── */
+console.log('\n5) 권한');
+process.env.DATABASE_URL = process.env.DATABASE_URL || 'postgres://u:p@127.0.0.1:1/none';
+const router = require('../src/routes/trackB.routes');
+const L = {};
+router.stack.filter(l => l.route).forEach(l => {
+  const m = Object.keys(l.route.methods)[0];
+  L[m.toUpperCase() + ' ' + l.route.path] = l.route.stack.map(s => s.name);
+});
+t('Track B 프록시 3경로 + 내부인 게이트', () => {
+  ['GET /review-edit/list', 'POST /review-edit/approve', 'POST /review-edit/reject'].forEach(k => {
+    assert.ok(L[k], '없는 라우트: ' + k);
+    assert.ok(L[k].includes('authMiddleware') && L[k].includes('_reInternal'), k + ': 게이트 부족');
+  });
+});
+t('★ AE 는 담당 탭만 — 승인/반려는 **위임 전에** 확인', () => {
+  assert.ok(/async function _reCanTouch\(req, id\)/.test(TB));
+  ['approve', 'reject'].forEach(a => {
+    const re = new RegExp("router\\.post\\('/review-edit/" + a + "'[\\s\\S]{0,300}?_reCanTouch\\(req[\\s\\S]{0,200}?_reHandlers\\." + a);
+    assert.ok(re.test(TB), a + ': 스코프 확인 없이 위임한다');
+  });
+});
+t('★★ _reCanTouch 는 throw 하지 않는다(Express4 async rejection = 응답 영구 미전송)', () => {
+  const i = TB.indexOf('async function _reCanTouch');
+  const body = TB.slice(i, TB.indexOf('\n}', i));
+  assert.ok(/_UUID_RE\.test\(rid\)/.test(body), 'UUID 형식 선검사가 없으면 22P02 로 hang 한다');
+  assert.ok(/try \{/.test(body) && /catch \(err\)/.test(body), 'DB 오류를 잡지 않는다');
+});
+t('★ 스코프 판정 실패 = fail-closed', () => {
+  assert.ok(/담당 범위를 확인하지 못했습니다/.test(TB));
+});
+t('스코프 조회가 행마다 돌지 않는다((시트,탭)당 1회) + 키를 쪼개지 않는다', () => {
+  assert.ok(/const uniq = new Map\(\)/.test(TB) && /\[\.\.\.uniq\.entries\(\)\]/.test(TB));
+  assert.ok(/JSON\.stringify\(\[/.test(TB), '키를 문자열로 이어 붙이면 탭명 구분자에 갈린다');
+});
+t('로직 복제 0 — 기존 reviewEdit 핸들러에 위임', () => {
+  assert.ok(/const _reRoutes = require\('\.\/reviewEdit\.routes'\)/.test(TB));
+  ['/list', '/approve', '/reject'].forEach(p =>
+    assert.ok(new RegExp("_delegate\\(_reRoutes, '(get|post)', '" + p + "'\\)").test(TB), '위임 아님: ' + p));
+  assert.ok(!/FROM review_edit_requests\s+WHERE status/.test(TB), 'trackB 에 목록 쿼리 사본이 있다');
+});
+t('원본 /api/review-edit/* 정책 불변(admin/master)', () => {
+  ['/list', '/approve', '/reject'].forEach(p =>
+    assert.ok(new RegExp("router\\.(get|post)\\('" + p + "', authMiddleware, adminOrMasterMiddleware").test(RE),
+      '원본 게이트가 바뀌었다: ' + p));
+});
+
+/* ── 6) 리뷰어 노출 ────────────────────────────────────────── */
+console.log('\n6) 리뷰어 노출');
+t('★★ meta 에 관리자 실명을 담지 않는다 — meta 는 리뷰어 응답에 그대로 실린다', () => {
+  // adminNickname.maskMessages 는 senderName 만 치환한다(meta 는 손대지 않는다)
+  assert.ok(!/resolvedBy:/.test(BR), 'meta 에 resolvedBy 를 넣으면 리뷰어 JSON 으로 샌다');
+  assert.ok(!/meta\.resolvedBy/.test(CARD), '카드가 실명을 그린다');
+});
+t('★★ 리뷰어 SSE 푸시도 리뷰어용 이름으로 치환', () => {
+  assert.ok(/senderName: adminNickname\.toReviewerName\(senderName, nickMap\)/.test(BR),
+    '화면이 안 그려도 페이로드로는 샌다(cs.routes 답장과 같은 규칙)');
+  assert.ok(/sender_name, content\)\s*\n\s*VALUES \(\$1,'admin',\$2,\$3\)/.test(BR),
+    'DB 에는 로그인명을 남겨 책임추적을 유지해야 한다');
+});
+t('두 조회 엔드포인트가 msgType·meta 를 내려준다', () => {
+  [['cs.routes.js', CSR], ['reviewer.routes.js', RVR]].forEach(([n, s]) =>
+    assert.ok(/msg_type AS "msgType", meta/.test(s), n + ': msgType/meta 미반환'));
+});
+t('★ 기존 CS 이미지 허용목록을 넓히지 않았다(파일ID로 그린다)', () => {
+  assert.ok(/\/api\/drive\/image\/' \+ encodeURIComponent\(id\)/.test(CARD));
+  assert.ok(/\/\^\[-\\w\]\{20,\}\$\/\.test\(id\)/.test(CARD), '파일ID 형식 검증 없이 <img src> 에 넣는다');
+  [['cs.routes.js', CSR], ['reviewer.routes.js', RVR]].forEach(([n, s]) =>
+    assert.ok(/\/api\\\/order\\\/guide-image\\\/\[-\\w\]\{20,\}\$/.test(s), n + ': 이미지 허용목록이 바뀌었다'));
+});
+
+/* ── 7) 사본 금지 · 배선 ───────────────────────────────────── */
+console.log('\n7) 사본 금지 · 배선');
+t('★ 카드 렌더러는 공유 모듈 하나뿐', () => {
+  assert.ok(/window\.CsReviewEditCard = \{/.test(CARD));
+  [['cs-inquiry.js', CSJ], ['reviewer-cs.js', RCS], ['workdesk.html', WD]].forEach(([n, s]) => {
+    assert.ok(/CsReviewEditCard\.html\(/.test(s), n + ' 가 공용 렌더러를 안 쓴다');
+    assert.ok(!/리뷰이미지 교체요청<\/span>/.test(s), n + ' 에 카드 마크업 사본이 있다');
+  });
+});
+t('네 화면이 같은 모듈을 로드한다', () => {
+  [['admin.html', ADM], ['admin-siand.html', F('admin-siand.html')],
+   ['workdesk.html', WD], ['index.html', F('index.html')]].forEach(([n, s]) =>
+    assert.ok(/<script src="js\/cs-review-edit-card\.js"><\/script>/.test(s), n + ' 미로드'));
+});
+t('★ 리뷰어 화면은 읽기 전용', () => {
+  assert.ok(/if \(isAdmin && opts\.canAct !== false && meta\.status === 'pending' && rid\)/.test(CARD));
+  assert.ok(/CsReviewEditCard\.html\(m\.meta \|\| \{\}, \{ admin: false \}\)/.test(RCS));
+});
+t('★★ API 베이스는 bare 식별자 — window.API_BASE_URL 은 존재하지 않는다', () => {
+  assert.ok(/typeof API_BASE_URL !== 'undefined' && API_BASE_URL/.test(CARD),
+    'api.js 의 최상위 const 는 window 프로퍼티가 아니다 → 상대경로가 되어 이미지가 전부 404');
+  // ★ 주석은 제외하고 본다 — "window.API_BASE_URL 로 읽지 말라"는 설명 자체가 파일에 있다
+  const cardCode = CARD.replace(/\/\*[\s\S]*?\*\//g, '').replace(/^\s*\/\/.*$/gm, '');
+  assert.ok(!/window\.API_BASE_URL/.test(cardCode), '코드에서 window.API_BASE_URL 을 읽고 있다');
+  assert.ok(/typeof API_BASE_URL !== 'undefined' && API_BASE_URL/.test(CSJ), 'cs-inquiry 의 _reCall 도 동일');
+});
+t('★ 전용 탭은 관리자·AE 양쪽 nav 에 / C/S 문의 탭은 관리자만', () => {
+  const adminNav = WD.slice(WD.indexOf('${isAdmin?`<nav'), WD.indexOf(':isStaff?`<nav'));
+  const staffNav = WD.slice(WD.indexOf(':isStaff?`<nav'), WD.indexOf("</nav>`:''}"));
+  assert.ok(/data-v="reedit"/.test(adminNav) && /data-v="reedit"/.test(staffNav));
+  assert.ok(/data-v="cs"/.test(adminNav) && !/data-v="cs"/.test(staffNav),
+    'C/S 문의 탭이 AE 에게 열렸다 — 문의 본문에는 리뷰어 PII 가 그대로 실린다');
+});
+t('경로 재기준 — 통합 작업대만 Track B', () => {
+  assert.ok(/window\.REVIEW_EDIT_API_BASE = '\/api\/trackb\/review-edit'/.test(WD));
+  assert.ok(!/REVIEW_EDIT_API_BASE\s*=/.test(ADM), 'admin 이 베이스를 바꾸면 기존 경로가 죽는다');
+  assert.ok(/'\/api\/review-edit'/.test(CSJ), '기본값이 기존 경로가 아니다');
+});
+t('★ 목록 새로고침은 C/S 화면이 있을 때만(AE 403·unhandled rejection 방지)', () => {
+  assert.ok(/if \(document\.getElementById\('csRoomListWrap'\)\)/.test(CSJ));
+  assert.ok(/p\.catch\(\(\) => \{\}\)/.test(CSJ));
+});
+t('전용 탭 뱃지는 부팅 때도 채운다 + 클래스가 기존 이름과 안 겹친다', () => {
+  assert.ok(/async function _reBootBadge\(\)/.test(WD) && /_reBootBadge\(\);/.test(WD));
+  assert.ok(/\.recards\{display:grid/.test(WD) && /\.recard\{/.test(WD));
+});
+
+/* ── 8) ★★ 런타임 — 정적 grep 이 못 잡는 것 ────────────────── */
+console.log('\n8) ★★ 런타임 확인(선언만으로는 부족한 것들)');
+t('★★ 잘못된 id 로 승인/반려해도 **응답이 온다**(Express4 hang 재발 방지)', async () => {
+  // 동기 t() 안에서 즉시 확인하기 위해 핸들러 스택만 검사 + 아래 별도 실행으로 보강
+  assert.ok(/const _UUID_RE = /.test(TB));
+});
+(async () => {
+  const svc = require('../src/services/trackB.service');
+  const pool = require('../src/db/pool');
+  svc.canAccessTab = async () => true;
+  pool.query = async () => ({ rows: [] });
+  const layer = router.stack.find(l => l.route && l.route.path === '/review-edit/approve' && l.route.methods.post);
+  const run = (body) => new Promise((resolve) => {
+    const res = { statusCode: 200, status(c) { this.statusCode = c; return this; }, json(b) { resolve({ code: this.statusCode, body: b }); } };
+    const stack = layer.route.stack.map(s => s.handle).filter(h => h.name !== 'authMiddleware');
+    let i = 0; const next = () => { const h = stack[i++]; if (!h) return resolve({ code: 0 }); h({ admin: { role: 'master', name: 'm' }, body, query: {}, headers: {} }, res, next); };
+    next();
+  });
+  const timeout = (ms) => new Promise(r => setTimeout(() => r({ code: -1 }), ms));
+  const bad = await Promise.race([run({ id: 'not-a-uuid' }), timeout(1500)]);
+  assert.strictEqual(bad.code, 400, '잘못된 id 에 응답이 오지 않는다(hang) 또는 상태코드가 다르다');
+  pass++; console.log('  ✓ ★★ 잘못된 id → 400 즉시 응답(hang 없음)');
+
+  // 카드 렌더러를 실제로 실행 — 리뷰어에게 실명이 그려지지 않는지 확인
+  const vm = require('vm');
+  const ctx = { window: {}, document: { getElementById: () => null, createElement: () => ({ style: {}, addEventListener() {} }), body: { appendChild() {} } } };
+  ctx.window = ctx; ctx.API_BASE_URL = 'https://api.example.com';
+  vm.createContext(ctx);
+  vm.runInContext(CARD, ctx);
+  const html = ctx.window.CsReviewEditCard.html(
+    { requestId: 'r1', status: 'approved', resolvedBy: '김수만', oldFileId: 'A'.repeat(22), newFileId: 'B'.repeat(22) },
+    { admin: true });
+  assert.ok(!/김수만/.test(html), '★ 관리자 실명이 카드에 그려진다(리뷰어 화면에도 같은 렌더러가 쓰인다)');
+  assert.ok(/https:\/\/api\.example\.com\/api\/drive\/image\//.test(html), '★ 이미지가 절대 URL 이 아니다');
+  assert.ok(!/src="\/api\//.test(html), '상대경로면 프론트(Pages)에서 API(Railway) 이미지를 못 부른다');
+  const ro = ctx.window.CsReviewEditCard.html({ requestId: 'r1', status: 'pending' }, { admin: false });
+  assert.ok(!/<button/.test(ro), '★ 리뷰어 카드에 버튼이 있다');
+  pass += 1; console.log('  ✓ ★★ 카드 실제 렌더 — 실명 미노출 · 절대 URL · 리뷰어 버튼 없음');
+
+  console.log(`\n✅ ${pass} checks passed\n`);
+  process.exit(0);
+})();

@@ -385,6 +385,23 @@ function _csRenderMessages(messages) {
     const imgHtml = imgs.length ? `<div style="display:flex;flex-wrap:wrap;gap:5px;max-width:78%;margin-top:${m.content ? '4px' : '0'}">` +
       imgs.map(u => `<img src="${escHtml(u)}" alt="첨부 사진" onclick="csViewImage('${escHtml(u)}')"
         style="width:120px;height:120px;object-fit:cover;border-radius:10px;border:1px solid #e5e7eb;cursor:zoom-in;background:#fff">`).join('') + `</div>` : '';
+    // 리뷰이미지 교체요청은 **카드**로 — 기존↔변경 이미지와 승인/반려를 대화 안에서 바로.
+    //   렌더러는 리뷰어 화면·전용 탭과 공용(js/cs-review-edit-card.js) — 사본 금지.
+    if (m.msgType === 'review_edit' && window.CsReviewEditCard) {
+      const meta = m.meta || {};
+      const rid = String(meta.requestId || '').replace(/\\/g, '').replace(/'/g, '');
+      const card = window.CsReviewEditCard.html(meta, {
+        admin: true, canAct: csCanActOnReviewEdit(),
+        onApprove: `csApproveReviewEdit('${rid}')`,
+        onReject: `csRejectReviewEdit('${rid}')`,
+      });
+      const ts0 = m.createdAt ? new Date(m.createdAt).toLocaleString("ko-KR", { month:'numeric', day:'numeric', hour:'2-digit', minute:'2-digit' }) : "";
+      return `<div style="display:flex;flex-direction:column;align-items:flex-start">
+        <div style="font-size:.66rem;color:#9CA3AF;margin-bottom:2px">${escHtml(m.senderName || '리뷰어')}</div>
+        ${card}
+        <div style="font-size:.62rem;color:#cbd5e1;margin-top:2px">${ts0}</div>
+      </div>`;
+    }
     const textHtml = m.content ? `<div style="max-width:78%;background:${isAdmin ? '#3182f6' : '#fff'};color:${isAdmin ? '#fff' : '#111827'};border:1px solid ${isAdmin ? '#3182f6' : '#e5e7eb'};padding:8px 11px;border-radius:12px;font-size:.83rem;line-height:1.45;white-space:pre-wrap;word-break:break-word">${escHtml(m.content)}</div>` : '';
     return `<div style="display:flex;flex-direction:column;align-items:${isAdmin ? 'flex-end' : 'flex-start'}">
       <div style="font-size:.66rem;color:#9CA3AF;margin-bottom:2px">${escHtml(m.senderName || (isAdmin ? '관리자' : '리뷰어'))}</div>
@@ -504,6 +521,56 @@ function csOnSSE(evtType, data) {
   }
 }
 
+/* ── 리뷰이미지 교체요청 — 대화창·전용 탭에서 바로 처리 ──────────
+   ★ 경로는 C/S 와 같은 방식으로 재기준한다(window.REVIEW_EDIT_API_BASE):
+     관리자 대시보드 = /api/review-edit, 통합 작업대 = /api/trackb/review-edit
+     (인트라넷 SSO 토큰은 /api/review-edit/* 에 도달 자체가 불가능하다).
+   ★ 처리 후 **서버 값으로 다시 읽는다** — 프론트에서 낙관적으로 그리면 서버가 거부했을 때
+     화면만 승인된 것처럼 남는다. */
+function _reApiBase() { return (typeof window !== 'undefined' && window.REVIEW_EDIT_API_BASE) || '/api/review-edit'; }
+/** 버튼 노출 여부 — 호스트가 알려준다(미설정이면 노출) */
+function csCanActOnReviewEdit() {
+  return (typeof window.CS_REVIEW_EDIT_CAN_ACT === 'function') ? !!window.CS_REVIEW_EDIT_CAN_ACT() : true;
+}
+async function _reCall(path, body) {
+  const headers = { 'Content-Type': 'application/json' };
+  const tok = (typeof sessionStorage !== 'undefined' && sessionStorage.getItem('admin_token')) || '';
+  if (tok) headers.Authorization = 'Bearer ' + tok;
+  const base = (typeof API_BASE_URL !== 'undefined' && API_BASE_URL) ? API_BASE_URL : '';
+  const res = await fetch(base + _reApiBase() + path, { method: 'POST', headers, body: JSON.stringify(body) });
+  return res.json().catch(() => ({ ok: false, error: '응답을 읽지 못했습니다.' }));
+}
+async function csApproveReviewEdit(requestId) {
+  if (!requestId) return;
+  if (!confirm('이 교체요청을 승인할까요?\n\n· 리뷰 이미지가 새 파일로 교체됩니다(기존 파일은 보관 폴더로).\n· 리뷰어 채팅에 승인 안내가 자동으로 전송됩니다.')) return;
+  const r = await _reCall('/approve', { id: requestId });
+  if (r && r.ok) { showToast('승인했습니다. 리뷰어에게 안내가 전송되었습니다.'); csReloadAfterReviewEdit(); }
+  else showToast('승인 실패: ' + ((r && r.error) || '알 수 없는 오류'), true);
+}
+async function csRejectReviewEdit(requestId) {
+  if (!requestId) return;
+  // 사유는 필수 — 그대로 리뷰어에게 전송되므로 비우면 "왜 반려됐는지" 알 수 없다(서버도 거부).
+  const note = prompt('반려 사유를 입력하세요.\n(리뷰어 채팅에 그대로 전송됩니다)');
+  if (note === null) return;
+  if (!String(note).trim()) { showToast('반려 사유를 입력해 주세요.', true); return; }
+  const r = await _reCall('/reject', { id: requestId, note: String(note).trim() });
+  if (r && r.ok) { showToast('반려했습니다. 사유가 리뷰어에게 전송되었습니다.'); csReloadAfterReviewEdit(); }
+  else showToast('반려 실패: ' + ((r && r.error) || '알 수 없는 오류'), true);
+}
+function csReloadAfterReviewEdit() {
+  try { if (_csActiveThreadId) csReloadConversation(_csActiveThreadId); } catch (_) {}
+  // ★ 문의방 목록은 **C/S 화면이 실제로 떠 있을 때만** 다시 읽는다.
+  //   전용 탭(AE)에서 처리한 경우 AE 는 /cs/threads(adminOrMaster)에 403 이고,
+  //   async 함수의 rejection 은 sync try 로 안 잡혀 콘솔에 unhandled rejection 이 남는다.
+  try {
+    if (document.getElementById('csRoomListWrap')) {
+      const p = loadCsRooms();
+      if (p && typeof p.catch === 'function') p.catch(() => {});
+    }
+  } catch (_) {}
+  try { if (typeof window.CS_REVIEW_EDIT_ON_RESOLVED === 'function') window.CS_REVIEW_EDIT_ON_RESOLVED(); } catch (_) {}
+}
+
   /* ── 마운트 ────────────────────────────────────────────────
      마크업도 모듈이 들고 있다 — admin.html 에 남겨두면 통합 작업대에 같은 화면을
      띄우려고 사본을 만들게 된다. id 는 그대로라 기존 JS 가 전부 그대로 동작한다.
@@ -531,6 +598,8 @@ function csOnSSE(evtType, data) {
     csSendReply: csSendReply, csSaveMemo: csSaveMemo, csToggleStatus: csToggleStatus,
     csCloseConversation: csCloseConversation, csUpdateBadge: csUpdateBadge,
     csRefreshBadge: csRefreshBadge, csOnSSE: csOnSSE,
+    csApproveReviewEdit: csApproveReviewEdit, csRejectReviewEdit: csRejectReviewEdit,
+    csCanActOnReviewEdit: csCanActOnReviewEdit, csReloadAfterReviewEdit: csReloadAfterReviewEdit,
     // 사진 첨부(파일선택·Ctrl+V·드래그앤드롭) — 생성 HTML의 onclick/onchange/onpaste 문자열이 이름으로 찾는다
     csPickFiles: csPickFiles, csRemoveAttach: csRemoveAttach, csHandlePaste: csHandlePaste,
   };

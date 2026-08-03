@@ -661,6 +661,103 @@ router.post('/campaigns/:id/dismiss', authMiddleware, internalMiddleware, editor
   _campHandlers.dismiss(req, res, next));
 
 /* ══════════════════════════════════════════════════════════════
+   리뷰이미지 교체요청 — 통합 작업대 전용 탭 + C/S 대화창 카드
+
+   ★ **AE(staff)도 담당 탭만** 처리할 수 있다(사용자 확정) — C/S 문의 탭은 여전히
+     master/admin 전용이므로, AE 는 문의 본문을 보지 못한 채 이 경로로만 교체요청을 처리한다.
+   ★ 로직 복제 0: 목록·승인·반려는 기존 reviewEdit 핸들러에 위임한다.
+     승인은 Drive 파일 이동·review_index 갱신·C/S 자동통지까지 하는 무거운 흐름이라
+     사본을 만들면 두 화면의 결과가 갈라진다.
+   ★ 스코프는 두 겹: 목록은 결과 필터(staff), 승인/반려는 **위임 전에** 대상 행의
+     (sheet, tab) 로 canAccessTab — 클라가 보낸 값을 신뢰하지 않는 기존 규율과 같다.
+   ══════════════════════════════════════════════════════════════ */
+const _reRoutes = require('./reviewEdit.routes');
+const _reHandlers = {
+  list: _delegate(_reRoutes, 'get', '/list'),
+  approve: _delegate(_reRoutes, 'post', '/approve'),
+  reject: _delegate(_reRoutes, 'post', '/reject'),
+};
+
+/** 내부인(master/admin/staff)만 — 광고주·리뷰어 차단 */
+function _reInternal(req, res, next) {
+  const role = _role(req);
+  if (role === 'master' || role === 'admin' || role === 'staff') return next();
+  return res.status(403).json({ ok: false, error: '권한이 없습니다.' });
+}
+
+/** 이 요청 건이 내 스코프인가 — master/admin=전체, staff=담당 탭만.
+ *  ★★ 절대 throw 하지 않는다 — Express 4 는 async 핸들러의 rejection 을 잡지 않아
+ *    **응답이 영영 나가지 않는다**(클라이언트가 서버 타임아웃까지 대기). 실제 유발 경로:
+ *    id 가 UUID 형식이 아니면 `WHERE id = $1` 이 22P02 로 실패한다(review_edit_requests.id 는 UUID).
+ *    판정 불가는 전부 **거절**(fail-closed) — 모르면 열지 않는다. */
+const _UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+async function _reCanTouch(req, id) {
+  const rid = String(id || '');
+  if (!_UUID_RE.test(rid)) return { ok: false, code: 400, error: '요청 id 형식이 올바르지 않습니다.' };
+  try {
+    const role = _role(req);
+    const { rows } = await pool.query(
+      'SELECT sheet_id, tab_name FROM review_edit_requests WHERE id = $1', [rid]
+    );
+    if (!rows.length) return { ok: false, code: 404, error: '요청을 찾을 수 없습니다.' };
+    if (role === 'master' || role === 'admin') return { ok: true };
+    const okc = await svc.canAccessTab({
+      role: 'staff', staffName: req.admin && req.admin.name,
+      sheetId: rows[0].sheet_id, tabName: rows[0].tab_name,
+    });
+    return okc ? { ok: true } : { ok: false, code: 403, error: '담당하지 않은 작업(스코프 밖)' };
+  } catch (err) {
+    return { ok: false, code: 503, error: '담당 범위를 확인하지 못했습니다. 잠시 후 다시 시도하세요.' };
+  }
+}
+
+router.get('/review-edit/list', authMiddleware, _reInternal, async (req, res, next) => {
+  const role = _role(req);
+  if (role === 'master' || role === 'admin') return _reHandlers.list(req, res, next);
+  // staff — 기존 핸들러의 결과를 담당 탭으로 거른다(쿼리 복제 없이 스코프만 적용)
+  const _json = res.json.bind(res);
+  res.json = (body) => {
+    if (!body || !Array.isArray(body.requests)) return _json(body);
+    // ★ 행마다 canAccessTab 을 부르면 최대 200행 × 2쿼리다 — **서로 다른 (시트,탭)당 1회**로 접는다.
+    //   ★ 키를 문자열로 이어 붙였다가 쪼개지 않는다 — 탭명에 구분자가 들어가면 잘못 갈린다
+    //     (슬래시양식 주소 병합과 같은 함정). 쌍을 그대로 들고 다닌다.
+    const memo = new Map();
+    const keyOf = (it) => JSON.stringify([it.sheet_id || it.sheetId, it.tab_name || it.tabName]);
+    const uniq = new Map();
+    body.requests.forEach((it) => {
+      const k = keyOf(it);
+      if (!uniq.has(k)) uniq.set(k, { sheetId: it.sheet_id || it.sheetId, tabName: it.tab_name || it.tabName });
+    });
+    Promise.all([...uniq.entries()].map(async ([k, p]) => {
+      memo.set(k, await svc.canAccessTab({
+        role: 'staff', staffName: req.admin && req.admin.name, sheetId: p.sheetId, tabName: p.tabName,
+      }));
+    })).then(() => {
+      const keep = body.requests.filter(it => memo.get(keyOf(it)));
+      // pendingCount 는 **대기 건수**라는 이름값을 지킨다 — status 필터가 approved 여도
+      //   승인 건수를 대기 자리에 넣지 않는다(필드 의미가 어긋나면 나중 소비처가 오해한다).
+      const pend = keep.filter(x => (x.status || 'pending') === 'pending').length;
+      _json({ ...body, requests: keep, pendingCount: pend, scoped: true });
+    }).catch(() => {
+      // 스코프 판정 실패 = 넓게 보여주지 않는다(fail-closed)
+      _json({ ok: false, error: '담당 범위를 확인하지 못했습니다.' });
+    });
+    return res;   // 원본 res.json 은 this 를 돌려준다 — 체이닝이 조용히 깨지지 않게
+  };
+  return _reHandlers.list(req, res, next);
+});
+router.post('/review-edit/approve', authMiddleware, _reInternal, async (req, res, next) => {
+  const g = await _reCanTouch(req, (req.body || {}).id);
+  if (!g.ok) return res.status(g.code).json({ ok: false, error: g.error });
+  return _reHandlers.approve(req, res, next);
+});
+router.post('/review-edit/reject', authMiddleware, _reInternal, async (req, res, next) => {
+  const g = await _reCanTouch(req, (req.body || {}).id);
+  if (!g.ok) return res.status(g.code).json({ ok: false, error: g.error });
+  return _reHandlers.reject(req, res, next);
+});
+
+/* ══════════════════════════════════════════════════════════════
    C/S 문의창구 — 통합 작업대 상단탭
 
    ★ **master/admin 전용**(`adminOrMasterMiddleware`) — 기존 `/api/cs/*` 정책을 그대로 옮겼다

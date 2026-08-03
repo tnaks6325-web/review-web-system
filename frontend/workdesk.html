@@ -387,6 +387,12 @@
   .woldoc{max-width:900px;line-height:1.7}
   .woldoc img{max-width:min(100%,360px)}
   .wolnote{margin-top:10px;font-size:11.5px;color:var(--muted)}
+  /* 이미지 교체요청 전용 탭 — 카드 격자. ★ 클래스는 're' 접두(기존 .worow/.wodetail 충돌 전례) */
+  .recards{display:grid;grid-template-columns:repeat(auto-fill,minmax(460px,1fr));gap:12px}
+  .recard{border:1px solid var(--line);border-radius:12px;background:var(--card);padding:12px 14px;box-shadow:var(--shadow-card)}
+  .recard .rehd{display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin-bottom:9px;font-size:12.5px}
+  .recard .remeta{font-size:11px;color:var(--muted);font-variant-numeric:tabular-nums}
+  @media (max-width:900px){ .recards{grid-template-columns:1fr} }
   table.histtable{width:100%;border-collapse:collapse;font-size:12px} table.histtable th{text-align:left;padding:7px 9px;font-size:10.5px;color:var(--muted);font-weight:750;border-bottom:1px solid var(--line);position:sticky;top:0;background:var(--card)}
   table.histtable td{padding:6px 9px;border-bottom:1px solid var(--line)} table.histtable tr.histrev td{color:var(--faint);text-decoration:line-through} table.histtable tr.histrev .hval{text-decoration:none}
   table.histtable .hts{font-family:var(--mono);font-size:11px;color:var(--muted);white-space:nowrap} .histtable .ok{color:var(--safe);font-weight:700} .histtable .no{color:var(--faint);font-weight:700}
@@ -720,13 +726,15 @@ function renderShell(){
         <button class="navb" data-v="orders" onclick="switchView('orders')">작업오더<span id="woNavBadge"></span></button>
         <button class="navb" data-v="campaigns" onclick="switchView('campaigns')">모집공고</button>
         <button class="navb" data-v="cs" onclick="switchView('cs')">C/S 문의<span id="csNavBadge"></span></button>
+        <button class="navb" data-v="reedit" onclick="switchView('reedit')">이미지 교체요청<span id="reNavBadge"></span></button>
         <button class="navb" data-v="reviewers" onclick="switchView('reviewers')">등록리뷰어DB</button></nav>`
       :isStaff?`<nav class="nav">
         <button class="navb" data-v="workdesk" onclick="switchView('workdesk')">작업대</button>
         <button class="navb" data-v="ownership" onclick="switchView('ownership')">업체관리</button>
         <button class="navb" data-v="logs" onclick="switchView('logs')">리뷰어 로그<span id="lgNavBadge"></span></button>
         <button class="navb" data-v="orders" onclick="switchView('orders')">작업오더<span id="woNavBadge"></span></button>
-        <button class="navb" data-v="campaigns" onclick="switchView('campaigns')">모집공고</button></nav>`:''}
+        <button class="navb" data-v="campaigns" onclick="switchView('campaigns')">모집공고</button>
+        <button class="navb" data-v="reedit" onclick="switchView('reedit')">이미지 교체요청<span id="reNavBadge"></span></button></nav>`:''}
       <span class="sp"></span>
       <div class="vwsw" id="vwToggle" role="switch" aria-checked="false" tabindex="0"
            aria-label="화면 폭 상한 전환" title="화면 폭 상한 — FHD 1920px / QHD 2560px (열 너비는 어느 쪽이든 고정)"
@@ -740,7 +748,8 @@ function renderShell(){
     <div id="viewroot"></div>`;
   _applyVwMode();               // 저장된 FHD/QHD 모드를 스위치·body에 반영(셸을 다시 그릴 때마다)
   switchView(STATE.view||'workdesk');
-  if(isAdmin) _csStartBadgePoll();   // 탭을 열지 않아도 미확인 문의 수가 보이게(집계는 서버가 준 값 그대로)
+  if(isAdmin) _csStartBadgePoll();
+  if(isAdmin || isStaff) _reBootBadge();   // 교체요청 대기 건수(AE 는 담당 탭만 서버가 센다)   // 탭을 열지 않아도 미확인 문의 수가 보이게(집계는 서버가 준 값 그대로)
 }
 /* ── C/S 미확인 뱃지 ────────────────────────────────────────
    통합 작업대에는 SSE 가 없어 부팅 1회만 받으면 그 뒤 들어온 문의가 영영 안 보인다
@@ -785,7 +794,7 @@ function toggleVwMode(){ setVwMode(_vwMode()==='qhd' ? 'fhd' : 'qhd'); }
 function switchView(v){ STATE.view=v; document.querySelectorAll('.navb').forEach(b=>b.classList.toggle('on',b.dataset.v===v));
   const rt=$('#railToggle'); if(rt) rt.style.display=(v==='workdesk')?'':'none';   // 레일은 작업대 뷰에만 존재
   const wt=$('#wideToggle'); if(wt) wt.style.display=(v==='workdesk')?'':'none';   // 전체화면 토글도 작업대 뷰에만
-  if(v==='ownership') renderOwnershipView(); else if(v==='overview') renderOverviewView(); else if(v==='logs') renderLogsView(); else if(v==='reviewers') renderReviewersView(); else if(v==='cs') renderCsView(); else if(v==='orders') renderOrdersView(); else if(v==='campaigns') renderCampaignsView(); else renderWorkdeskView();
+  if(v==='ownership') renderOwnershipView(); else if(v==='overview') renderOverviewView(); else if(v==='logs') renderLogsView(); else if(v==='reviewers') renderReviewersView(); else if(v==='cs') renderCsView(); else if(v==='reedit') renderReeditView(); else if(v==='orders') renderOrdersView(); else if(v==='campaigns') renderCampaignsView(); else renderWorkdeskView();
   if(v!=='workdesk') _measureChrome();   // 작업대를 떠나면 작업바가 사라짐 → --tbh 0으로 회수(다른 뷰 높이 계산 오염 방지)
 }
 
@@ -2101,6 +2110,72 @@ async function renderCsView(){
 /** nav 뱃지 — 모듈이 계산한 미확인 수를 그대로 표시한다(집계 로직 복제 0).
     ★ #csInquiryBadge 를 읽지 않는다: 그 엘리먼트는 관리자 대시보드 탭 버튼에만 있고
       통합 작업대엔 없다 → DOM 에서 읽으면 늘 0이 되어 뱃지가 지워진다(실측). */
+/* ── 이미지 교체요청 전용 탭 ─────────────────────────────────
+   C/S 대화창에서도 처리할 수 있지만(사용자 확정), 목록으로 몰아 보는 창구를 따로 둔다.
+   ★ **AE(staff)에게도 열려 있다** — 단 서버(`/api/trackb/review-edit/list`)가 담당 탭으로 거른다.
+     C/S 문의 탭은 여전히 master/admin 전용이라, AE 는 문의 본문을 보지 않고 이 탭으로만 처리한다.
+   ★ 카드·승인·반려는 **C/S 대화창과 같은 코드**(cs-review-edit-card.js + cs-inquiry.js 핸들러). */
+async function renderReeditView(){
+  $('#viewroot').innerHTML=`<div class="ovwrap"><div id="rehead"></div><div id="rebody"><div class="empty">불러오는 중…</div></div></div>`;
+  await _loadReedit();
+}
+async function _loadReedit(){
+  const st = STATE.reStatus || 'pending';
+  const r = await api('/api/trackb/review-edit/list?status='+encodeURIComponent(st));
+  const b = $('#rebody');
+  if(!r || !r.ok){ if(b) b.innerHTML=`<div class="empty">교체요청을 불러오지 못했습니다.${r&&r.error?' ('+esc(r.error)+')':''}</div>`; _reRenderHead(0); return; }
+  STATE.re = r.requests || [];
+  STATE.reScoped = !!r.scoped;              // staff = 담당 탭만 걸러진 목록
+  _reRenderHead(STATE.re.length);
+  _reRenderBody();
+  _reSyncNavBadge(Number.isFinite(r.pendingCount) ? r.pendingCount : null);
+}
+function _reRenderHead(n){
+  const st = STATE.reStatus || 'pending';
+  const chip=(k,l)=>`<button class="btn${st===k?' pri':''}" onclick="STATE.reStatus='${k}';_loadReedit()">${l}</button>`;
+  $('#rehead').innerHTML=`<div class="mh"><h1>이미지 교체요청</h1>
+    <span class="sp" style="flex:1"></span>
+    ${chip('pending','처리 대기')}${chip('approved','승인')}${chip('rejected','반려')}${chip('cancelled','취소')}
+    <button class="btn" onclick="_loadReedit()">새로고침</button></div>
+    <div class="ovnote">리뷰어가 올린 교체 이미지를 확인하고 승인·반려합니다. <b>처리하면 리뷰어 채팅(C/S 문의)에 자동으로 안내가 전송</b>되므로 따로 연락하지 않아도 됩니다.
+      ${STATE.reScoped?'<b style="color:var(--muted)">(담당 업체 작업만 표시됩니다)</b>':''}
+      <span style="color:var(--muted)">· ${n}건</span></div>`;
+}
+function _reRenderBody(){
+  const rows = STATE.re || [];
+  const b = $('#rebody');
+  if(!rows.length){ b.innerHTML=`<div class="empty">해당하는 교체요청이 없습니다.</div>`; return; }
+  if(!window.CsReviewEditCard){ b.innerHTML=`<div class="empty">카드 렌더러(js/cs-review-edit-card.js)를 불러오지 못했습니다.</div>`; return; }
+  const fmt=iso=>iso?new Date(iso).toLocaleString('ko-KR',{timeZone:'Asia/Seoul',month:'2-digit',day:'2-digit',hour:'2-digit',minute:'2-digit'}):'';
+  b.innerHTML = `<div class="recards">` + rows.map(r=>{
+    // 목록 행 → 카드 meta 로 맞춘다(카드는 C/S 대화창과 같은 렌더러라 모양이 어긋날 수 없다)
+    const meta = { requestId:r.id, status:r.status, oldFileId:r.old_file_id, newFileId:r.new_file_id,
+                   reason:r.reason, adminNote:r.admin_note, rowIndex:r.row_index, slotKey:r.slot_key };
+    const rid = String(r.id||'').replace(/[^\w-]/g,'');
+    return `<div class="recard">
+      <div class="rehd"><b>${esc(r.campaign_label||r.tab_name||'')}</b>
+        <span class="remeta">${esc(r.reviewer_name||'')} · ${esc(_fmtPhone(r.phone8||''))}</span>
+        <span class="sp" style="flex:1"></span>
+        <span class="remeta">${esc(fmt(r.created_at))}</span></div>
+      ${window.CsReviewEditCard.html(meta,{admin:true,
+         onApprove:`csApproveReviewEdit('${rid}')`, onReject:`csRejectReviewEdit('${rid}')`})}
+    </div>`;
+  }).join('') + `</div>`;
+}
+function _reSyncNavBadge(n){
+  const nb=$('#reNavBadge'); if(!nb || !Number.isFinite(n)) return;
+  nb.textContent = n>0 ? (' 🟠'+n) : '';
+}
+/** 부팅 시 1회 — 탭을 열지 않아도 대기 건수가 보이게(C/S 뱃지와 같은 규율) */
+async function _reBootBadge(){
+  try{
+    const r=await api('/api/trackb/review-edit/list?status=pending');
+    if(r && r.ok) _reSyncNavBadge(Number.isFinite(r.pendingCount) ? r.pendingCount : (r.requests||[]).length);
+  }catch(_){ }
+}
+/* 대화창·전용 탭 어느 쪽에서 처리하든 목록을 최신화한다(cs-inquiry.js 가 부르는 훅) */
+window.CS_REVIEW_EDIT_ON_RESOLVED = function(){ try{ if(STATE.view==='reedit') _loadReedit(); else _reBootBadge(); }catch(_){ } };
+
 function _csSyncNavBadge(n){
   const nb=$('#csNavBadge');
   if(!nb || !Number.isFinite(n)) return;    // 값이 없으면 그대로 둔다(지우지 않는다)
@@ -3170,7 +3245,13 @@ boot();
 <script>window.CS_API_BASE = '/api/trackb/cs';
   /* 모듈이 미확인 수를 갱신할 때마다 nav 뱃지도 따라간다(집계 복제 0).
      ★ window.csUpdateBadge 를 감싸는 방식은 안 된다 — 모듈 내부 호출이 래퍼를 안 거친다. */
-  window.CS_ON_BADGE = function (n) { try { _csSyncNavBadge(n); } catch (_) {} };</script>
+  window.CS_ON_BADGE = function (n) { try { _csSyncNavBadge(n); } catch (_) {} };
+  /* 리뷰이미지 교체요청도 같은 이유로 Track B 네임스페이스(AE 담당 탭 스코프는 서버가 건다).
+     ★ 버튼 노출은 true — 최종 판정은 서버(_reCanTouch). AE 는 애초에 담당 탭 건만 받는다. */
+  window.REVIEW_EDIT_API_BASE = '/api/trackb/review-edit';
+  window.CS_REVIEW_EDIT_CAN_ACT = function () { return true; };</script>
+<!-- C/S 대화 안의 리뷰이미지 교체요청 카드 — 관리자·리뷰어 화면 공용 렌더러 -->
+<script src="js/cs-review-edit-card.js"></script>
 <script src="js/cs-inquiry.js"></script>
 <script src="js/campaign-cards.js"></script>
 <script src="js/recruit-modal.js"></script>

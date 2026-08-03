@@ -751,11 +751,15 @@ async function approveReviewEdit(id) {
 }
 
 async function rejectReviewEdit(id) {
-  const note = prompt('반려 사유를 입력하세요 (리뷰어에게 표시됩니다):', '');
+  // ★ 사유는 **필수** — 이 문구가 그대로 리뷰어 C/S 채팅으로 자동 전송된다(서버도 빈 값을 거부).
+  //   검사가 낙관적 카드 제거보다 **앞에** 있어야 한다: 뒤에 있으면 카드만 사라지고 서버에서
+  //   튕겨 "반려한 줄 알았는데 그대로"가 된다.
+  const note = prompt('반려 사유를 입력하세요.\n(리뷰어 채팅에 그대로 전송됩니다)', '');
   if (note === null) return;
+  if (!String(note).trim()) { showToast('반려 사유를 입력해 주세요.', 'error'); return; }
   _reviewEditRemoveCard(id);   // 즉시 목록에서 제거(새로고침 불필요)
   try {
-    const r = await gasPost({ action: "reviewEditReject", id: id, note: note });
+    const r = await gasPost({ action: "reviewEditReject", id: id, note: String(note).trim() });
     if (!r || r.ok === false) throw new Error((r && r.error) || '반려 실패');
     showToast('반려 처리되었습니다', 'success');
   } catch (e) {
