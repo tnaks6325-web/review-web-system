@@ -109,4 +109,19 @@ ok('모드 변경 시 헤더 높이를 재실측한다(--toph 드리프트 방�
 ok('reduced-motion 이면 노브 애니메이션을 끈다',
   /prefers-reduced-motion:reduce\)\{\.vwsw \.vwknob\{transition:none\}\}/.test(cssNoComment));
 
+/* ── F. 모집공고 카드 컨테이너 상한 (카드 자체가 아니라 카드를 품는 공간) ── */
+ok('#recruitListWrap 가 max-width:1380px 를 받는다(5열 고정 — 6열 문턱 1608px 미만)',
+  /#recruitListWrap\{max-width:1380px\}/.test(cssNoComment));
+ok('★ 1380px 는 5열 문턱(1338px) 이상 · 6열 문턱(1608px) 미만 — 화면이 아무리 넓어도 5장/줄 고정',
+  1380 >= (5 * 258 + 4 * 12) && 1380 < (6 * 258 + 5 * 12));
+ok('★ 카드 자체 CSS(js/campaign-cards.js 의 .pcards-grid.pc-admin)는 건드리지 않는다 — ' +
+   '건드리면 admin.html 의 모집공고 탭도 같이 바뀐다(사본 없이 공유하는 셀렉터)',
+  !/\.pcards-grid\.pc-admin\{/.test(cssNoComment));
+ok('★ 상한이 카드 컨테이너에 걸린다(카드 자체 min-width 등을 재정의하지 않는다)', (() => {
+  const i = cssNoComment.indexOf('#recruitListWrap{');
+  if (i < 0) return false;
+  const decl = cssNoComment.slice(i, i + 60);
+  return /max-width:1380px/.test(decl) && !/min-width|grid-template-columns/.test(decl);
+})());
+
 console.log(`\n✅ workdeskWidthCap: ${n} cases passed`);
