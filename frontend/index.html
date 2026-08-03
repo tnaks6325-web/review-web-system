@@ -2032,6 +2032,18 @@ async function _partInfoLoadBrief(it, done){
     const brief = (r.ok && j.ok) ? j.brief : null;
     if (!brief){ hide(); _partInfoRenderBtns(done, ''); return; }
     const rows = [];
+    // ★ D: 이 행의 작업 옵션(리뷰 형태 — '텍스트'/'포토리뷰' 등). 관리자가 로스터에 미리 적어둔
+    //   작업지시이고 "어떻게 써야 하는가"라 **상품정보보다 위**에, 눈에 띄게 둔다.
+    //   라벨은 시트 헤더명을 그대로 쓴다(탭마다 '리뷰옵션'·'작업옵션' 등으로 달라 우리가 고쳐 부르면 어긋난다).
+    const wopts = Array.isArray(brief.workOptions) ? brief.workOptions.filter(o => o && o.value) : [];
+    if (wopts.length) rows.push(
+      '<div style="display:flex;gap:7px;align-items:flex-start;background:#EFF6FF;border:1px solid #CFE0FD;border-radius:9px;padding:8px 10px;margin-bottom:8px">' +
+      '<span style="flex:none;font-size:.78rem">📝</span><div style="min-width:0">' +
+      wopts.map(o =>
+        '<div style="font-size:.76rem;color:#1b64da;font-weight:800;line-height:1.5">' +
+        escHtml(o.label) + ' · <span style="color:#111827">' + escHtml(o.value) + '</span></div>').join('') +
+      '<div style="font-size:.66rem;color:#6B7280;margin-top:2px">이 형태로 리뷰를 작성해 주세요</div>' +
+      '</div></div>');
     if (brief.productLines) rows.push(_partInfoRow('상품', escHtml(brief.productLines).replace(/\n/g,'<br>')));
     // 📝 리뷰 가이드 (연결 공고 work_detail.reviewGuide) — 길면 스크롤, 줄바꿈 보존
     const rg = String(brief.reviewGuide || '').trim();

@@ -117,7 +117,14 @@ ok('⑥-5 participation-brief 엔드포인트(행 소유권 게이트 재사용)
 ok('⑥-5b gid는 서버가 tab_configs에서 재도출(클라이언트 gid 미신뢰 = 형제 캠페인 유출 차단)',
   /SELECT tab_gid FROM tab_configs WHERE sheet_id = \$1 AND tab_name = \$2/.test(reviewEdit)
   && !/const gid = String\(req\.query\.gid/.test(reviewEdit));
-ok('⑥-6 공고 미연결 탭은 brief:null(카톡 없음 → 프론트 제출 버튼만)', /return res\.json\(\{ ok: true, brief: null \}\)/.test(reviewEdit));
+// ★ D(2026-08): 공고 미연결 탭도 **그 행의 작업 옵션(리뷰 형태)만은** 알려준다 —
+//   리뷰 형태는 공고가 아니라 그 행에 적힌 지시다. 공고 필드(카톡·상품·가이드)는 여전히 안 나간다.
+ok('⑥-6 공고 미연결 탭은 공고 정보를 주지 않는다(작업 옵션만·없으면 null)',
+  /return res\.json\(\{ ok: true, brief: workOptions\.length \? \{ workOptions \} : null \}\)/.test(reviewEdit));
+ok('⑥-6b 그 응답에 카톡·상품·가이드 필드가 섞이지 않는다', (() => {
+  const m = /brief: workOptions\.length \? \{ ([^}]*) \} : null/.exec(reviewEdit);
+  return m && m[1].trim() === 'workOptions';
+})());
 
 // B: 발행 프리필 정화(신규 스냅샷 클린)
 ok('B-1 프리필 wd_review는 _woPickSections로 리뷰등록만',
