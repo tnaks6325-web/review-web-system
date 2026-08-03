@@ -212,6 +212,46 @@ router.post('/reply', async (req, res, next) => {
   }
 });
 
+// POST /api/cs/upload { imageBase64, mimeType?, fileName? } — 관리자 답장 첨부 이미지 업로드
+//   리뷰어측 POST /api/reviewer/cs/upload와 동일 인프라(guide-image Drive+무인증 프록시) 재사용,
+//   신규 저장소 0. 인증 계층만 다름(여긴 authMiddleware+adminOrMaster, 그쪽은 phone8 스코프).
+router.post('/upload', async (req, res, next) => {
+  try {
+    const b = req.body || {};
+    let data = String(b.imageBase64 || '');
+    if (!data.trim()) return res.status(400).json({ ok: false, error: '이미지 데이터가 없습니다.' });
+    let mime = (b.mimeType || '').toString();
+    const m = data.match(/^data:([^;]+);base64,(.*)$/s);
+    if (m) { mime = mime || m[1]; data = m[2]; }
+    if (!/^image\/(png|jpe?g|gif|webp|heic|heif)$/i.test(mime || 'image/png')) {
+      return res.status(400).json({ ok: false, error: '이미지 파일만 첨부할 수 있습니다.' });
+    }
+    // 용량 제한 8MB (base64 → 원본 약 3/4) — 리뷰어측과 동일 상한
+    if (data.length * 0.75 > 8 * 1024 * 1024) {
+      return res.status(413).json({ ok: false, error: '이미지가 너무 큽니다 (8MB 이하).' });
+    }
+
+    const drive = require('../services/drive.service');
+    let folderId = process.env.CS_UPLOAD_FOLDER_ID || process.env.GUIDE_FOLDER_ID;
+    if (!folderId) {
+      const root = process.env.AI_REVIEW_FOLDER_ID || process.env.DRIVE_ROOT_FOLDER_ID;
+      if (!root) return res.status(503).json({ ok: false, error: '저장 폴더가 설정되지 않았습니다.' });
+      const folder = await drive.ensureFolderPath(root, ['[문의첨부]']);
+      folderId = folder.id;
+    }
+    const ext = ((mime || 'image/png').split('/')[1] || 'png').split('+')[0];
+    const who = (req.admin?.name || 'admin').replace(/[^\w가-힣-]/g, '');
+    let name = (b.fileName || `cs_admin_${who}_${Date.now()}`).toString().replace(/[\\/:*?"<>|]/g, '_');
+    if (!/\.[a-z0-9]+$/i.test(name)) name += '.' + ext;
+
+    const up = await drive.uploadFileBase64(data, name, mime || 'image/png', folderId, { shareAnyone: true });
+    const base = (process.env.PUBLIC_API_URL || ('https://' + req.get('host'))).replace(/\/+$/, '');
+    res.json({ ok: true, url: `${base}/api/order/guide-image/${up.id}` });
+  } catch (err) {
+    next(err);
+  }
+});
+
 // POST /api/cs/status { threadId, status } — 방 상태(open/closed)
 router.post('/status', async (req, res, next) => {
   try {

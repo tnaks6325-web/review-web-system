@@ -16780,13 +16780,104 @@ async function csOpenConversation(threadId, reviewerName, reviewerPhone8) {
         <button onclick="csSaveMemo('${(reviewerPhone8||'').replace(/'/g,"\\'")}')" style="margin-top:8px;padding:6px;background:#F59E0B;color:#fff;border:none;border-radius:8px;font-size:.76rem;font-weight:700;cursor:pointer">메모 저장</button>
       </div>
     </div>
-    <div style="padding:10px 12px;border-top:1px solid #eef2f7;display:flex;gap:8px;align-items:flex-end">
-      <textarea id="csReplyText" rows="2" placeholder="답장 입력... (Shift+Enter 줄바꿈)" style="flex:1;resize:none;border:1px solid #e5e7eb;border-radius:10px;padding:9px;font-size:.82rem;font-family:inherit;outline:none"
-        onkeydown="if(event.key==='Enter'&&!event.shiftKey){event.preventDefault();csSendReply('${threadId}');}"></textarea>
+    <div id="csAttachBar" style="display:none;padding:8px 12px 0;gap:6px;flex-wrap:wrap"></div>
+    <div id="csReplyDropZone" style="padding:10px 12px;border-top:1px solid #eef2f7;display:flex;gap:8px;align-items:flex-end;position:relative">
+      <input type="file" id="csAttachFile" accept="image/*" multiple style="display:none" onchange="csPickFiles(this)">
+      <button onclick="document.getElementById('csAttachFile').click()" title="사진 첨부"
+        style="width:40px;height:40px;border:1px solid #e5e7eb;background:#fff;color:#6B7280;border-radius:10px;font-size:1rem;cursor:pointer;flex-shrink:0"><i class="fas fa-image"></i></button>
+      <textarea id="csReplyText" rows="2" placeholder="답장 입력... (Shift+Enter 줄바꿈, 사진 붙여넣기·드래그 가능)" style="flex:1;resize:none;border:1px solid #e5e7eb;border-radius:10px;padding:9px;font-size:.82rem;font-family:inherit;outline:none"
+        onkeydown="if(event.key==='Enter'&&!event.shiftKey){event.preventDefault();csSendReply('${threadId}');}"
+        onpaste="csHandlePaste(event)"></textarea>
       <button onclick="csSendReply('${threadId}')" style="padding:10px 16px;background:#3182f6;color:#fff;border:none;border-radius:10px;font-weight:700;font-size:.82rem;cursor:pointer;white-space:nowrap"><i class="fas fa-paper-plane"></i></button>
+      <div id="csDropOverlay" style="display:none;position:absolute;inset:0;background:rgba(49,130,246,.08);border:2px dashed #3182f6;border-radius:10px;align-items:center;justify-content:center;color:#1B64DA;font-size:.82rem;font-weight:700;pointer-events:none">
+        <i class="fas fa-image" style="margin-right:6px"></i> 여기에 이미지를 놓으세요
+      </div>
     </div>`;
+  _csPending = [];   // 방을 바꾸면 이전 첨부는 버린다
+  csRenderAttachBar();
+  _csBindDropZone();
   await csReloadConversation(threadId);
   csLoadOrderContext(threadId);
+}
+
+/* ── 관리자 답장 사진 첨부: 파일선택 · Ctrl+V 붙여넣기 · 드래그앤드롭 공통 처리 ──
+   업로드 인프라는 리뷰어측(csReviewerUpload)과 동일한 guide-image Drive+프록시 재사용. */
+let _csPending = [];   // [{name, dataUrl, url}] — url은 업로드 완료 후 채워짐
+
+function csRenderAttachBar() {
+  const bar = document.getElementById("csAttachBar");
+  if (!bar) return;
+  if (!_csPending.length) { bar.style.display = "none"; bar.innerHTML = ""; return; }
+  bar.style.display = "flex";
+  bar.innerHTML = _csPending.map((p, i) => `
+    <div style="position:relative;width:58px;height:58px;border-radius:9px;overflow:hidden;border:1px solid #E5E7EB;background:#F3F4F6">
+      <img src="${escHtml(p.dataUrl)}" style="width:100%;height:100%;object-fit:cover;${p.url ? '' : 'opacity:.5'}">
+      ${p.url ? '' : '<div style="position:absolute;inset:0;display:flex;align-items:center;justify-content:center;color:#3182f6"><i class="fas fa-circle-notch fa-spin"></i></div>'}
+      <button onclick="csRemoveAttach(${i})" style="position:absolute;top:2px;right:2px;width:17px;height:17px;border:none;border-radius:50%;background:rgba(17,24,39,.65);color:#fff;font-size:.58rem;cursor:pointer;line-height:1">✕</button>
+    </div>`).join("");
+}
+
+function csRemoveAttach(i) { _csPending.splice(i, 1); csRenderAttachBar(); }
+
+async function _csUploadFile(f) {
+  if (_csPending.length >= 5) { showToast("사진은 최대 5장까지 첨부할 수 있어요"); return; }
+  if (!/^image\//.test(f.type)) { showToast("사진 파일만 첨부할 수 있어요"); return; }
+  if (f.size > 8 * 1024 * 1024) { showToast("8MB 이하 사진만 첨부할 수 있어요"); return; }
+  const dataUrl = await new Promise(res => { const r = new FileReader(); r.onload = () => res(r.result); r.readAsDataURL(f); });
+  const item = { name: f.name || `paste_${Date.now()}.png`, dataUrl, url: "" };
+  _csPending.push(item);
+  csRenderAttachBar();
+  try {
+    const d = await gasPost({ action: "csAdminUpload", fileName: item.name, mimeType: f.type || "image/png", imageBase64: dataUrl }, 120000);
+    if (!d || d.ok === false || !d.url) throw new Error((d && d.error) || "업로드 실패");
+    item.url = d.url;
+  } catch (e) {
+    showToast("사진 업로드 실패: " + e.message, true);
+    const idx = _csPending.indexOf(item);
+    if (idx > -1) _csPending.splice(idx, 1);
+  }
+  csRenderAttachBar();
+}
+
+async function csPickFiles(input) {
+  const files = [...(input.files || [])];
+  input.value = "";   // 같은 파일 다시 고를 수 있게
+  for (const f of files) await _csUploadFile(f);
+}
+
+/** Ctrl+V로 클립보드 이미지 붙여넣기(캡처 도구·복사한 이미지 모두 지원) */
+async function csHandlePaste(event) {
+  const items = [...((event.clipboardData && event.clipboardData.items) || [])];
+  const imgItems = items.filter(it => it.kind === 'file' && /^image\//.test(it.type));
+  if (!imgItems.length) return;   // 텍스트 붙여넣기는 기본 동작 유지
+  event.preventDefault();
+  for (const it of imgItems) {
+    const f = it.getAsFile();
+    if (f) await _csUploadFile(f);
+  }
+}
+
+/** 답장 입력창 주변에 이미지를 드래그해서 놓으면 첨부(입력창 자체의 드롭도 동일 처리) */
+function _csBindDropZone() {
+  const zone = document.getElementById("csReplyDropZone");
+  const overlay = document.getElementById("csDropOverlay");
+  if (!zone) return;
+  const isFileDrag = (e) => [...(e.dataTransfer?.types || [])].includes('Files');
+  zone.addEventListener('dragover', (e) => {
+    if (!isFileDrag(e)) return;
+    e.preventDefault();
+    if (overlay) overlay.style.display = 'flex';
+  });
+  zone.addEventListener('dragleave', (e) => {
+    if (e.target === zone && overlay) overlay.style.display = 'none';
+  });
+  zone.addEventListener('drop', async (e) => {
+    if (!isFileDrag(e)) return;
+    e.preventDefault();
+    if (overlay) overlay.style.display = 'none';
+    const files = [...(e.dataTransfer.files || [])];
+    for (const f of files) await _csUploadFile(f);
+  });
 }
 
 /* ── 미리 보는 정보(주문정보·참여이력) ── */
@@ -16925,16 +17016,22 @@ async function csSendReply(threadId) {
   const ta = document.getElementById("csReplyText");
   if (!ta) return;
   const content = ta.value.trim();
-  if (!content) return;
+  // 업로드가 끝난 첨부만 전송 대상(업로드 중이면 잠시 대기 안내) — 리뷰어측과 동일 규칙
+  if (_csPending.some(p => !p.url)) { showToast("사진 업로드가 끝나면 전송할 수 있어요"); return; }
+  const imageUrls = _csPending.map(p => p.url).filter(Boolean);
+  if (!content && imageUrls.length === 0) return;
   ta.value = "";
+  const sentAttach = _csPending.slice();
+  _csPending = []; csRenderAttachBar();
   try {
-    const data = await gasPost({ action: "csAdminReply", threadId, content });
+    const data = await gasPost({ action: "csAdminReply", threadId, content, imageUrls });
     if (!data || data.ok === false) throw new Error((data && data.error) || "전송 실패");
     await csReloadConversation(threadId);
     loadCsRooms();
   } catch (err) {
     showToast("전송 오류: " + err.message, true);
     ta.value = content;
+    _csPending = sentAttach; csRenderAttachBar();   // 실패 시 첨부 복구
   }
 }
 

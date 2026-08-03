@@ -46,6 +46,7 @@ GAS(Google Apps Script) 기반 리뷰 관리 시스템을 **Node.js Express + Po
 - **1:1문의 탭 = 내 문의함**(`#sectionCsInbox`, `switchTab('cs')`): 팝업 없이 인라인, **이미 문의한 방만** 표시(진행 중 / 종료된 문의 분리, 마지막 메시지·시각·미확인 숫자). 목록은 기존 무인증 phone8 스코프 `GET /api/reviewer/cs/threads` 재사용(**신규 엔드포인트 0**), 방 열기는 배열 인덱스 전달(따옴표 이스케이프 사고 차단). 빈 상태는 [리뷰 내역으로 가기 →]로 다음 행동 안내. 문의함 화면에서는 구매 캡처 보완 블록을 숨긴다.
 - **캠페인 선택 팝업(피커)은 제거**(`reviewer-cs.js`) — 남겨두면 "문의 시작"과 "문의 확인"이 한 창에 다시 섞이고 진입 경로가 둘이 된다. 대화창·SSE·탭 뱃지는 종전대로 `reviewer-cs.js` 담당이며, 전송·뒤로가기 시 `window.loadCsInbox()`로 목록을 갱신한다.
 - 회귀가드 `tests/csEntryRework.test.js`(38케이스 — 배선 grep + **스텁 pool로 `/review-earnings` 실제 실행**해 누적 집계 검증).
+- **관리자 답장 사진 첨부**: 리뷰어(PR #398)와 대칭으로 관리자도 첨부 가능. `POST /api/cs/upload`(리뷰어측 `POST /api/reviewer/cs/upload`와 **동일 인프라 재사용** — guide-image Drive `[문의첨부]` 폴더 + 무인증 프록시 URL, mime/8MB/5장 제한 동일, 인증 계층만 다름: `authMiddleware`+`adminOrMaster`). 첨부 3경로(**파일선택 버튼 · Ctrl+V 붙여넣기 · 드래그앤드롭**)가 전부 `_csUploadFile` 한 함수로 수렴(사본 두면 한쪽만 제한이 풀리는 드리프트가 난다) — 붙여넣기는 이미지일 때만 가로채(텍스트 붙여넣기 기본 동작 보존), 드래그오버는 파일 드래그일 때만 오버레이 표시. 전송은 업로드 완료된 첨부만 대상(인플라이트 중 전송 차단), 실패 시 첨부 복구, 방 전환 시 이전 첨부 폐기. 회귀가드 `tests/csAdminImageUpload.test.js`(20케이스).
 
 ### 관리자 닉네임 — 1:1문의 실명 노출 차단 (migration 078)
 - **문제**: 답장은 `cs_messages.sender_name`에 **로그인 계정명(=관리자 실명)** 을 기록해 왔고 그 값이 리뷰어 대화창에 그대로 나갔다(박세희·박은비·master).

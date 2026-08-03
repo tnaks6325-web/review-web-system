@@ -340,6 +340,7 @@ const _ACTION_MAP = {
   'csAdminMessages':       { method: 'GET',  path: '/api/cs/messages' },
   'csAdminOrderContext':   { method: 'GET',  path: '/api/cs/order-context' },
   'csAdminReply':          { method: 'POST', path: '/api/cs/reply' },
+  'csAdminUpload':         { method: 'POST', path: '/api/cs/upload' },
   'csAdminStatus':         { method: 'POST', path: '/api/cs/status' },
   'csAdminSaveMemo':       { method: 'POST', path: '/api/cs/memo' },
 
