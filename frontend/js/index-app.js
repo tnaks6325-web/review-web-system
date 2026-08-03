@@ -1557,24 +1557,40 @@ function _woOptionRows(o) {
   let arr = null;
   try { const p = JSON.parse(o.product_options_json || "[]"); if (Array.isArray(p) && p.length) arr = p; } catch (_) {}
   if (!arr) return [];
+  const clean = s => String(s || "").replace(/\|/g, "").trim();
   const rows = [];
-  const multiProduct = arr.length > 1;
   for (const prod of arr) {
-    const name = String(prod.name || "").trim();
+    const name = clean(prod.name);
     const opts = Array.isArray(prod.options) ? prod.options : [];
+    const basePay = Number(prod.base && prod.base.pay) || 0;
     if (opts.length) {
       for (const op of opts) {
-        const lab = String(op.label || "").trim();
-        const key = ((multiProduct && name ? name + " " : "") + lab).replace(/\|/g, "").trim();
-        if (!key || /^옵션\s*없음$/.test(lab)) continue;
-        rows.push({ optKey: key, payAmount: Number(op.pay) || 0, recruitTotal: 0, dailyLimit: 0 });
+        const lab = clean(op.label);
+        // "옵션 없음"류는 옵션명이 아니라 '옵션이 없다'는 서술 — 옵션 없는 상품 행으로 떨군다.
+        const isNone = !lab || /^(옵션\s*없음|없음|단일(상품)?|해당\s*없음)$/.test(lab);
+        rows.push({
+          productName: name,
+          // ★ 옵션명에 상품명을 붙이지 않는다 — opt_key 는 시트 옵션열에 그대로 기입되므로
+          //   상품명이 섞이면 리뷰형태(텍스트/포토리뷰) 칸이 상품명으로 덮이는 사고가 난다.
+          optKey: isNone ? "" : lab,
+          payAmount: Number(op.pay) || basePay,
+          recruitTotal: 0, dailyLimit: 0,
+        });
       }
     } else if (name) {
-      rows.push({ optKey: name.replace(/\|/g, "").trim(), payAmount: Number(prod.base && prod.base.pay) || 0, recruitTotal: 0, dailyLimit: 0 });
+      // ★ 옵션이 없는 상품 — 상품명을 옵션명으로 승격시키지 않는다(상품명 칸으로만 간다).
+      rows.push({ productName: name, optKey: "", payAmount: basePay, recruitTotal: 0, dailyLimit: 0 });
     }
   }
+  // 서로 다른 상품에 같은 옵션명이 있을 때만 상품명을 붙여 구분(옵션명은 공고 안에서 유일해야 한다).
+  const dup = new Map();
+  rows.forEach(r => { if (r.optKey) dup.set(r.optKey, (dup.get(r.optKey) || 0) + 1); });
+  rows.forEach(r => {
+    if (r.optKey && dup.get(r.optKey) > 1 && r.productName) r.optKey = clean(r.productName + " " + r.optKey);
+  });
   // 옵션이 1개뿐이면 옵션 없는 단일상품 취급(옵션 기능은 2개 이상일 때 opt-in)
-  return rows.length >= 2 ? rows : [];
+  //  → 종전대로 빈 배열을 돌려 텍스트 분해 경로(parseProductLinesToRows)로 넘긴다(동작 불변).
+  return rows.filter(r => r.optKey).length >= 2 ? rows : [];
 }
 
 

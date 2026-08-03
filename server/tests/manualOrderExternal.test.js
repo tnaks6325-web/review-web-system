@@ -370,15 +370,20 @@ console.log('\nE. 데이터 보전 가드');
   const src = nc(R('src/services/manualOrder.service.js'));
   ok('E4 ★ orderData.dateStr 에 빈 문자열을 넣지 않는다', /dateStr: todayKstDateStr\(\)/.test(src) && !/dateStr: ''/.test(src));
 
-  // 옵션 되쓰기 — 배정 행에 이미 적힌 값을 그대로 돌려준다(지우지 않는다)
+  // 옵션 칸 읽기(관측용 순수함수) — 값을 돌려주기만 하고, 어디에도 역주입하지 않는다.
   const ctx = { headers, dataRows: [{ rowIndex: 12, cells: ['1', '7 / 30', 'A', '', '', '콰이어트', ''] }] };
-  ok('E5 ★ 옵션 미확정이면 그 행의 기존 옵션값을 되쓴다(지우지 않음)',
+  ok('E5 배정 행의 기존 옵션값을 그대로 읽는다(관측용)',
     svc.existingOptionKeyAt(ctx, 12) === '콰이어트');
-  ok('E6 옵션 칸이 비어 있으면 되쓸 것도 없다', svc.existingOptionKeyAt(
+  ok('E6 옵션 칸이 비어 있으면 빈 값', svc.existingOptionKeyAt(
     { headers, dataRows: [{ rowIndex: 12, cells: ['1', '', 'A', '', '', '', ''] }] }, 12) === '');
   ok('E7 옵션 칸이 없는 탭은 무영향', svc.existingOptionKeyAt({ headers: ['수취인'], dataRows: [{ rowIndex: 1, cells: ['A'] }] }, 1) === '');
-  ok('E8 배정 행을 못 찾으면 되쓰지 않는다', svc.existingOptionKeyAt(ctx, 99) === '');
-  ok('E9 서비스가 실제로 되쓰기를 배선했다', /existingOptionKeyAt\(ledger\.tabContext, ledger\.sheetRow\)/.test(src));
+  ok('E8 배정 행을 못 찾으면 빈 값', svc.existingOptionKeyAt(ctx, 99) === '');
+  // ★ C′(2026-08) 의미 반전: 수동제출도 시트값을 원장·신청에 역주입하지 않는다.
+  //   역주입하면 관리자 작업지시('포토리뷰')가 "리뷰어가 고른 옵션"으로 굳어 정원·CS·정산이 오독하고,
+  //   리뷰어 제출 경로와 결과가 갈린다(경로 드리프트). 옵션 칸 보호는 쓰기 시점 blank-only 필터 담당.
+  ok('E9 ★★ 수동제출이 시트 옵션값을 원장에 역주입하지 않는다(경로 드리프트·오독 차단)',
+    !/existingOptionKeyAt\(ledger\.tabContext, ledger\.sheetRow\)/.test(src)
+    && !/UPDATE order_submissions SET selected_opt_key = \$2 WHERE id = \$1/.test(src));
 
   ok('E10 ★ 공유 매퍼는 건드리지 않았다 — order_cancel의 칸 비우기·TrackB 컬럼 disjoint 마스크가 ""에 의존',
     /return orderData\.dateStr \|\| '';/.test(R('src/services/orderLedger.service.js')));

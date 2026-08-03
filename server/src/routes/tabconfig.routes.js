@@ -2242,6 +2242,81 @@ router.get('/option-data', authMiddleware, async (req, res, next) => {
   }
 });
 
+// ═══════════════════════════════════════════════════════════
+// GET /api/tab/option-column-audit — 연결 탭의 옵션 컬럼 실태 (모집공고 게시 전 자동점검용)
+//
+// 왜: 시트의 '옵션' 컬럼은 두 종류다.
+//   ㉮ 상품옵션 — 리뷰어 선택값을 기입해야 하는 칸(관리자가 tab_configs.option_columns 로 지정)
+//   ㉯ 작업옵션(리뷰형태) — 관리자가 미리 적어둔 '텍스트/포토리뷰' 작업지시. 시스템이 쓰면 안 되는 칸.
+//   공고 옵션명이 ㉯ 칸의 값과 어긋나면 제출 때 그 칸이 덮이는 사고가 났다(#417 배경).
+//   여기서는 **경고 재료만** 돌려주고 판단·표시는 프론트가 한다(차단 아님).
+//
+// ★ 시트 재읽기 0 — RAW 미러(raw_sheet_rows)만 조회한다(쿼터 무영향, describeTabDates 선례).
+// ★ 읽기 전용·fail-soft — 실패해도 공고 발행은 막지 않는다({ ok:false, reason }).
+// ═══════════════════════════════════════════════════════════
+const _OPT_AUDIT_HEADER_SCAN_ROWS = 30;
+const _OPT_AUDIT_MAX_VALUES = 30;
+
+router.get('/option-column-audit', authMiddleware, adminOrMasterMiddleware, async (req, res) => {
+  const { sheetId, tabName } = req.query;
+  const gid = String(req.query.gid || '');
+  const bail = (reason) => res.json({ ok: false, reason, columns: [] });
+  try {
+    if (!sheetId || !gid) return bail('no_tab');   // gid 없으면 동명탭 오조회 위험 → 판정 포기
+
+    const { detectSheetHeader } = require('../utils/sheetHeader');
+    const head = await pool.query(
+      `SELECT row_index, cells FROM raw_sheet_rows
+        WHERE sheet_id = $1 AND tab_gid = $2 AND row_index <= ${_OPT_AUDIT_HEADER_SCAN_ROWS}
+        ORDER BY row_index`,
+      [sheetId, gid]
+    );
+    if (!head.rows.length) return bail('no_mirror');   // RAW 미러가 아직 이 탭을 못 봄
+    const det = detectSheetHeader(head.rows.map(r => (Array.isArray(r.cells) ? r.cells : [])));
+    const headers = det.headers || [];
+    if (!headers.length || det.headerRowIndex == null) return bail('no_header');
+    const headerRowNo = head.rows[det.headerRowIndex - 1].row_index;
+
+    // 기입 대상 판정은 orderLedger 매퍼와 **같은 규칙**이어야 한다(점검과 실제 쓰기가 갈리면 무의미).
+    const optCols = [];
+    headers.forEach((h, i) => {
+      const key = String(h || '').toLowerCase().trim();
+      if (key.includes('옵션') || key.includes('option')) optCols.push({ name: headers[i], colIndex: i });
+    });
+    if (!optCols.length) return res.json({ ok: true, reason: 'no_option_column', columns: [] });
+
+    // 관리자가 '상품옵션'으로 지정한 컬럼(리뷰어 옵션 피커용 설정) — 지정 = ㉮ 로 본다.
+    const { rows: tcRows } = await pool.query(
+      'SELECT option_columns, option_columns_map FROM tab_configs WHERE sheet_id = $1 AND tab_name = $2',
+      [sheetId, tabName || '']
+    );
+    const designated = new Set();
+    const addDesignated = (list) => (list || []).forEach(c => { if (c && c.name) designated.add(String(c.name).trim()); });
+    addDesignated(tcRows[0] && tcRows[0].option_columns);
+    Object.values((tcRows[0] && tcRows[0].option_columns_map) || {}).forEach(addDesignated);
+
+    for (const col of optCols) {
+      // ★★ `::int` 필수 — 빼면 jsonb 배열에 텍스트 키 조회가 되어 전 행 NULL(CLAUDE.md 참조).
+      const { rows } = await pool.query(
+        `SELECT cells->>$3::int AS v FROM raw_sheet_rows
+          WHERE sheet_id = $1 AND tab_gid = $2 AND row_index > $4
+          ORDER BY row_index`,
+        [sheetId, gid, String(col.colIndex), headerRowNo]
+      );
+      const vals = rows.map(r => String(r.v == null ? '' : r.v).trim()).filter(Boolean);
+      const uniq = [...new Set(vals)];
+      col.filledRows = vals.length;
+      col.distinctCount = uniq.length;
+      col.values = uniq.slice(0, _OPT_AUDIT_MAX_VALUES);
+      col.designated = designated.has(String(col.name).trim());
+    }
+    return res.json({ ok: true, reason: 'ok', columns: optCols });
+  } catch (err) {
+    logger.warn(`[option-column-audit] 실패(무시): ${err.message}`);
+    return bail('error');
+  }
+});
+
 // GET /api/tab/reviewer-options — 리뷰어용 옵션 데이터 조회 (인증 불필요)
 // Query: sheetId, tabName, (optional) name, (optional) gid, (optional) round
 // ★ name 없이 호출 시 → 옵션 컬럼 헤더만 반환 (headersOnly 모드)
