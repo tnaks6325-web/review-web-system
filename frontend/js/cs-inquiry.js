@@ -370,9 +370,19 @@ function csCloseConversation() {
 
 function csUpdateBadge(count) {
   const b = document.getElementById("csInquiryBadge");
-  if (!b) return;
-  if (count > 0) { b.textContent = count; b.style.display = "inline-block"; }
-  else b.style.display = "none";
+  if (b) {
+    if (count > 0) { b.textContent = count; b.style.display = "inline-block"; }
+    else b.style.display = "none";
+  }
+  /* 호스트 훅 — 이 모듈의 미확인 수를 자기 UI(통합 작업대 nav 뱃지)에도 반영하게 한다.
+     ★ 밖에서 window.csUpdateBadge 를 감싸는 방식은 **동작하지 않는다**: 모듈 내부 호출
+       (loadCsRooms·csRefreshBadge)은 렉시컬 스코프의 이 함수를 직접 부르므로 래퍼를
+       거치지 않는다(코드리뷰 지적 · 실측). 그래서 훅을 안에서 부른다.
+     ★ #csInquiryBadge 가 없어도(=통합 작업대) 훅은 호출된다 — 위 early return 을 없앤 이유.
+     ★ 훅 미설정(관리자 대시보드)이면 아무 일도 안 한다 = 기존 동작 불변. */
+  try {
+    if (typeof window.CS_ON_BADGE === "function") window.CS_ON_BADGE(Number(count) || 0);
+  } catch (_) {}
 }
 
 async function csRefreshBadge() {
