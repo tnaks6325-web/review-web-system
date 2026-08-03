@@ -183,6 +183,35 @@ async function runMigrations() {
         .then(() => logger.info('✅ 스마트 빌드 스케줄러 시작됨 (5분 주기, Drive+Sheets API)'))
         .catch(err => logger.error(`[smartBuild] 시작 실패: ${err.message}`));
     }
+
+    // ★ 8/3 제출열 오탐지 핫픽스(#427) 배포 직후 1회성 강제 전체 재빌드.
+    //   원인: 'SUBMIT_KEYWORDS'의 넓은 catch-all '리뷰'가 우선탐지를 무력화해 '리뷰가이드' 같은
+    //   작업지시 열이 실제 '리뷰제출'열보다 먼저 잡혀 그 탭 참여자 전원이 제출완료로 오판정됐다.
+    //   코드 수정은 "다음에 새로 파싱할 때"만 적용되는데, review_index는 시트 checksum이 그대로면
+    //   정기 빌드(스마트/09·15시/04시)가 그 탭을 계속 건너뛰므로(변경 없음=재파싱 불필요 최적화)
+    //   코드만 배포해서는 이미 저장된 잘못된 is_submitted 값이 저절로 정정되지 않는다.
+    //   → forceFullRebuild=true(체크섬 무시)로 전 탭 1회 강제 재파싱해 즉시 정정한다.
+    //   ★ 1회성 가드(app_settings 'submitcol_fix_20260803_rebuilt', 057과 동일 패턴): 재배포마다
+    //     반복 실행되면 Sheets API 쿼터를 불필요하게 소모하므로 최초 1회만 수행한다.
+    if (process.env.NODE_ENV === 'production') {
+      (async () => {
+        const pool = require('./src/db/pool');
+        try {
+          const { rows } = await pool.query(
+            "SELECT 1 FROM app_settings WHERE key = 'submitcol_fix_20260803_rebuilt'");
+          if (rows.length) return;
+          logger.info('[boot] 제출열 오탐지 핫픽스 — 강제 전체 재빌드 시작(1회성, #427)');
+          const { buildIndexSmart } = require('./src/services/indexBuilder.service');
+          const result = await buildIndexSmart(true);
+          logger.info(`[boot] 강제 전체 재빌드 완료: ${JSON.stringify(result)}`);
+          await pool.query(
+            `INSERT INTO app_settings (key, value, updated_at) VALUES ('submitcol_fix_20260803_rebuilt', NOW()::text, NOW())
+             ON CONFLICT (key) DO NOTHING`);
+        } catch (err) {
+          logger.error(`[boot] 제출열 오탐지 핫픽스 강제 재빌드 실패(무시, 다음 재배포에 재시도): ${err.message}`);
+        }
+      })();
+    }
   });
 
   // ── Graceful Shutdown (Railway / Docker 대응) ──
