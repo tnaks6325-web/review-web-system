@@ -56,6 +56,14 @@ const _chan = new Function(chanSrc + '\n return _woChannelFromUrl;')();
 ok('쿠팡 상품 URL → 쿠팡', _chan('https://www.coupang.com/vp/products/123') === '쿠팡');
 ok('네이버 스마트스토어 → 네이버', _chan('https://smartstore.naver.com/abc/products/1') === '네이버');
 ok('올리브영 → 올리브영', _chan('https://www.oliveyoung.co.kr/store/goods/getGoodsDetail.do?goodsNo=A1') === '올리브영');
+ok('카카오메이커스 → 카카오메이커스', _chan('https://makers.kakao.com/product/12345') === '카카오메이커스');
+ok('카카오메이커스 모바일 서브도메인도 판정', _chan('https://m.makers.kakao.com/product/1') === '카카오메이커스');
+/* ★ kakao.com 전체를 잡으면 진행 방식이 다른 카카오 서비스까지 메이커스로 오판한다.
+   판정 못 하는 편이 틀린 채널보다 낫다(현금영수증 안내·리뷰어 가이드가 채널로 갈린다). */
+ok('★★ 다른 카카오 서비스는 빈 값 — makers 만 잡는다',
+  _chan('https://store.kakao.com/x/products/1') === '' && _chan('https://gift.kakao.com/product/1') === ''
+  && _chan('https://www.kakao.com') === '');
+ok('★★ 카카오 유사 도메인 사칭 차단', _chan('https://makers.kakao.com.evil.kr/x') === '');
 ok('★★ 광고 파라미터에 속지 않는다 — 호스트만 본다',
   _chan('https://www.coupang.com/vp/products/1?src=naver_ad&utm=oliveyoung') === '쿠팡');
 ok('★★ 유사 도메인 사칭 차단(coupang.com.evil.kr)', _chan('https://coupang.com.evil.kr/x') === '');
@@ -105,6 +113,13 @@ ok('★ 목록에 없는 탭은 선택하지 않는다(잘못된 탭 연결 방�
   /if \(!_recruitTabList\.some\(t => t\.sheetId === sid && t\.tabName === tabName\)\) return false;/.test(rec));
 ok('올리브영 채널 버튼(관리자 화면 2종)',
   /data-val="올리브영"/.test(adm) && /data-val="올리브영"/.test(siand));
+/* ★ 판정값에 대응하는 버튼이 없으면 _rfPickBtn 이 '직접입력'으로 흡수해 값은 살지만,
+   관리자가 매번 채널명을 손으로 확인해야 한다 — 판정하는 채널은 버튼도 함께 둔다. */
+ok('카카오메이커스 채널 버튼(관리자 화면 2종)',
+  /data-val="카카오메이커스"/.test(adm) && /data-val="카카오메이커스"/.test(siand));
+ok('★ WO_CHANNEL_HOSTS 가 판정하는 채널은 전부 버튼이 있다(직접입력 흡수에 기대지 않는다)',
+  ['쿠팡', '네이버', '올리브영', '카카오메이커스'].every(v =>
+    new RegExp(`data-val="${v}"`).test(adm) && new RegExp(`data-val="${v}"`).test(siand)));
 ok('버튼 없는 채널은 직접입력으로 흡수(값 유실 방지)',
   /selectRfBtn\("channel", custom\);[\s\S]{0,120}ci\.value = val;/.test(rec));
 ok('작업오더 카드에 담당AE·작업담당 표시',

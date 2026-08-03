@@ -69,7 +69,7 @@ ok('★ 담당자 = 작업담당 매핑으로 자동 선택',
 ok('★ 구매채널 = 상품 URL 호스트 판정으로 자동 선택',
   /if \(prefill\.channel\) _rfPickBtn\("channel", prefill\.channel\)/.test(rec)
   && /channel:\s+_woChannel\(o\)/.test(app)
-  && /coupang→쿠팡, naver→네이버, oliveyoung→올리브영/.test(doc));
+  && /coupang→쿠팡, naver→네이버, oliveyoung→올리브영, makers\.kakao→카카오메이커스/.test(doc));
 ok('★ 연결 탭 = 접수 때 확정된 탭으로 자동 선택',
   /_prefillLinkedTab\(prefill\)/.test(rec)
   && /linked_sheet_id: o\.linked_tab_sheet_id/.test(app)

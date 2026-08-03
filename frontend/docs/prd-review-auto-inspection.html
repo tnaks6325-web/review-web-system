@@ -291,30 +291,39 @@
           <tr><td><b>네이버쇼핑</b> · PC</td><td>빨강 ★×5 <b>+ 숫자</b></td>
             <td><code>[스마트스토어]</code> · <code>수량: N</code> · <code>수정</code> 버튼 · <code>더보기 ∨</code> · 이미지 <code>+N</code> 겹침 · <b>상태바·탭바 없음</b></td>
             <td><span class="pill bad">가능</span></td></tr>
-          <tr><td><b>카카오메이커스</b> · 모바일</td><td>빨강 ★</td>
+          <tr style="background:var(--susp-bg)"><td><b>카카오메이커스</b> · 모바일</td><td>빨강 ★</td>
             <td>헤더 <code>후기</code> + <b>← ⌂ 🔍 🛍 ✕</b> 5아이콘 · <code>작성 목록 / 작성 대기 목록</code> 탭 · 날짜가 <b>초 단위</b>(<code>2026-07-16 22:10:11</code>) · 별점 우측 <code>⋮</code> · <b>판매자 표기 없음</b></td>
-            <td><span class="pill bad">가능</span></td></tr>
-          <tr><td><b>올리브영</b> · 모바일</td><td>빨강 ★×5</td>
-            <td>하단 탭바에 <code>올영매장</code>(채널 고유) · <b>회원등급 뱃지</b>(<code>BABY/PINK/GOLD/BLACK OLIVE</code>) · <b>속성 평가 박스</b>(보습력·끈적임·향 등) · <code>도움이 돼요 👍</code> · <code>신고하기</code> · 헤더 <code>리뷰 상세 보기</code></td>
-            <td><span class="pill bad">가능</span></td></tr>
-          <tr style="background:var(--susp-bg)"><td><b>별점 없는 피드형</b> · 모바일<br><span class="note">채널 미확정</span></td><td><b>없음</b></td>
+            <td><span class="pill warn">경고만</span></td></tr>
+          <tr style="background:var(--susp-bg)"><td><b>카카오메이커스</b> · PC</td><td>빨강 ★</td>
+            <td>모바일과 같은 <code>후기</code> / <code>작성 목록</code> 구조인데 <b>여러 건이 세로 리스트로 나열</b> · 폭이 넓음 · <b>✕ 아이콘 없음</b></td>
+            <td><span class="pill warn">경고만</span></td></tr>
+          <tr style="background:var(--susp-bg)"><td><b>카카오메이커스</b> · 피드형</td><td><b>없음</b></td>
             <td><code>♡ 좋아요 N명</code> · 이름 + <b>상대시각</b>(“방금 전”) · 우상단 <code>⋮</code> · 우하단 <code>↑</code><br>
               <b>⚠ 별점·상품명·판매자가 전부 없어 SNS 게시물과 구별 불가</b></td>
             <td><span class="pill warn">경고만</span></td></tr>
+          <tr><td><b>올리브영</b> · 모바일</td><td>빨강 ★×5</td>
+            <td>하단 탭바에 <code>올영매장</code>(채널 고유) · <b>회원등급 뱃지</b>(<code>BABY/PINK/GOLD/BLACK OLIVE</code>) · <b>속성 평가 박스</b>(보습력·끈적임·향 등) · <code>도움이 돼요 👍</code> · <code>신고하기</code> · 헤더 <code>리뷰 상세 보기</code></td>
+            <td><span class="pill bad">가능</span></td></tr>
+          <tr><td><b>올리브영</b> · PC</td><td>빨강 ★×5</td>
+            <td>닉네임 아래 <b>피부타입 태그</b>(<code>지성 · 콜톤 · 미백 · 주름</code>) · <code>[옵션]</code> 표기 줄 · 좌하단 <code>신고하기</code> + 우하단 <code>👍 N</code> 알약버튼 · <b>회원등급 뱃지·탭바 없음</b></td>
+            <td><span class="pill bad">가능</span></td></tr>
         </tbody>
       </table></div>
 
       <ul style="margin-top:10px">
         <li><b>프롬프트 확장</b>: 기존 <code>classifySubmissionImage</code>의 <code>kind(review/receipt/other)</code>에 <code>channel(coupang/naver/kakao/oliveyoung/etc)</code> · <code>device(pc/mobile)</code> · <code>signals[]</code>(위 표의 어떤 단서가 보였는지) 필드를 추가한 <b>종합검수 응답 스키마</b>로 교체. 리뷰 슬롯 업로드는 현재도 이 콜을 타므로 <b>콜 수 순증 없음</b>. ★ <code>signals[]</code>를 받아 두면 오판 시 "AI가 무엇을 보고 그렇게 판단했는지"를 관리자 화면에서 확인해 프롬프트를 교정할 수 있다(블랙박스 방지).</li>
-        <li><b>예시이미지 등록 — 화면 유형별</b>: <code>app_settings.review_inspect_sample_{coupang_pc, coupang_mo, naver_pc, naver_mo, kakao_mo, kakao_pc, oy_mo, oy_pc}</code>. 현금영수증 가이드 이미지와 완전 동일 패턴(guide-image Drive 업로드 + https 프록시 URL만 허용). ★ <b>같은 채널이라도 PC/모바일 레이아웃이 전혀 다르므로 각각 등록</b>한다. 미등록 칸이 있어도 판별은 동작(정확도만 하락).</li>
+        <li><b>예시이미지 등록 — 화면 유형별 9칸</b>: <code>app_settings.review_inspect_sample_{coupang_pc, coupang_mo, naver_pc, naver_mo, kakao_mo, kakao_pc, kakao_feed, oy_mo, oy_pc}</code>. 현금영수증 가이드 이미지와 완전 동일 패턴(guide-image Drive 업로드 + https 프록시 URL만 허용). ★ <b>같은 채널이라도 PC/모바일 레이아웃이 전혀 다르므로 각각 등록</b>한다. 미등록 칸이 있어도 판별은 동작(정확도만 하락). ★ <code>kakao_feed</code>는 별점이 없어 <b>특히 중요</b>하다 — 이 예시가 없으면 정상 카카오 리뷰가 <code>other</code>로 오판된다.</li>
         <li><b>채널 판정은 4종, 기기는 참고값</b>: 작업에 필요한 것은 "쿠팡이냐 네이버냐"이므로 <code>device</code>는 대조에 쓰지 않고 기록만 한다(예시이미지 선택·오판 분석용).</li>
-        <li><b>탭 채널과 대조</b>: 탭/공고의 구매채널(작업오더 URL 호스트 판정 — 기존 <code>WO_CHANNEL_HOSTS</code>)과 판별 채널이 다르면 <span class="pill warn">채널 불일치</span>(경고만, 차단 아님). 채널 정보가 없는 탭은 대조 생략. ★ <code>WO_CHANNEL_HOSTS</code>는 이미 <b>oliveyoung을 포함</b>하나 <b>카카오메이커스 호스트는 추가 필요</b>.</li>
+        <li><b>탭 채널과 대조</b>: 탭/공고의 구매채널(작업오더 URL 호스트 판정 — 기존 <code>WO_CHANNEL_HOSTS</code>)과 판별 채널이 다르면 <span class="pill warn">채널 불일치</span>(경고만, 차단 아님). 채널 정보가 없는 탭은 대조 생략.
+          <span class="pill ok">적용 완료</span> <code>WO_CHANNEL_HOSTS</code>에 <code>makers.kakao.com → 카카오메이커스</code> 추가 + 관리자 화면 2종에 채널 버튼 추가(<code>tests/workOrderAutoFill.test.js</code> 44케이스).
+          ★ <code>kakao.com</code> 전체가 아니라 <code>makers.kakao.com</code>만 잡는다 — 톡스토어·선물하기 등 진행 방식이 다른 서비스를 메이커스로 오판하면 현금영수증 안내·리뷰어 가이드가 통째로 어긋난다.</li>
       </ul>
       <div class="callout warn">
-        ★ <b>차단 제외는 “별점 없는 피드형” 하나뿐</b> — 그 화면은 별점·상품명·판매자가 모두 없어 <code>other</code> 확신도가 높게 나와도
-        <b>정상 리뷰를 막는 오탐</b>이 곧바로 발생한다. 판단은 2차(관리자 검수 탭)로 넘긴다.
-        <br><span class="note">※ 초기 설계에서 “카카오메이커스는 별점이 없으니 차단하지 말자”고 적었던 것은 <b>피드형 화면 하나만 보고 내린 판단이라 취소</b>했다 —
-        카카오메이커스 후기 화면에는 별점이 있고, 다른 채널과 같은 기준으로 차단 가능하다.</span>
+        ★★ <b>차단 제외 = 카카오메이커스 채널 전체</b>(경고까지만). 이 채널은 <b>별점 있는 후기 화면</b>과 <b>별점 없는 피드형</b>이 <b>공존</b>하는데,
+        리뷰어가 어느 화면을 캡처할지 통제할 수 없다. 피드형이 <code>other</code>로 오판되면 <b>정상 제출이 잠긴다</b>.
+        구현 = 탭 채널이 카카오메이커스면 <code>PRECHECK_BLOCK</code> 적용 제외.
+        <br><span class="note">※ 이 판단은 두 번 뒤집혔다 — ① 피드형만 보고 “카카오엔 별점이 없으니 제외” → ② 후기 화면에 별점이 있음을 확인하고 “차단 가능”으로 정정 →
+        ③ <b>두 화면이 모두 카카오메이커스임이 확인</b>되어 다시 제외. 최종 근거는 ③이다. 예시 이미지(<code>kakao_feed</code> 포함) 등록 후 오탐률을 관측해 잠금 여부를 재결정할 수 있다.</span>
       </div>
       <p class="note">예시이미지가 등록되지 않아도 판별은 동작한다(프롬프트 기술만으로) — 예시는 정확도를 올리는 opt-in. 미등록 시 전송 페이로드도 가벼워진다.</p>
     </div>
