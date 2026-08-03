@@ -1,0 +1,592 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>리뷰 자동검수 시스템 — 구현계획서</title>
+<style>
+  *,*::before,*::after{box-sizing:border-box}
+  :root{
+    --paper:#F6F7F9; --card:#FFFFFF; --ink:#14171D; --muted:#5B6472; --line:#E2E6EC;
+    --sys:#1F5FA8; --sys-bg:#EAF1FA; --sys-edge:#B9D2EE;
+    --warn:#9A6414; --warn-bg:#FBF2E2; --warn-edge:#E8D2A4;
+    --ok:#157A6E; --ok-bg:#E6F3F1; --ok-edge:#A9D8D0;
+    --bad:#B3382E; --bad-bg:#FBEAE8; --bad-edge:#EBB7B1;
+    --code-bg:#14171D; --code-ink:#D7DEE8;
+    --shadow:0 1px 2px rgba(20,23,29,.06), 0 8px 24px rgba(20,23,29,.05);
+  }
+  @media (prefers-color-scheme: dark){
+    :root{
+      --paper:#0F1216; --card:#161A20; --ink:#E8ECF2; --muted:#98A2B0; --line:#262C35;
+      --sys:#84B6EF; --sys-bg:#15263C; --sys-edge:#27466B;
+      --warn:#E2B673; --warn-bg:#2C2315; --warn-edge:#4E3D1E;
+      --ok:#6FC7B9; --ok-bg:#122B28; --ok-edge:#245049;
+      --bad:#E89A92; --bad-bg:#331B18; --bad-edge:#5C2E28;
+      --code-bg:#0B0E12; --code-ink:#C4CDD8;
+      --shadow:0 1px 2px rgba(0,0,0,.4), 0 8px 24px rgba(0,0,0,.28);
+    }
+  }
+  html{-webkit-text-size-adjust:100%}
+  body{
+    margin:0; background:var(--paper); color:var(--ink);
+    font-family:"Pretendard Variable",Pretendard,-apple-system,BlinkMacSystemFont,"Apple SD Gothic Neo","Malgun Gothic","Noto Sans KR",system-ui,sans-serif;
+    line-height:1.65; -webkit-font-smoothing:antialiased;
+  }
+  .wrap{max-width:980px; margin:0 auto; padding:44px 20px 80px; display:flex; flex-direction:column; gap:40px}
+
+  .eyebrow{margin:0 0 10px; font-size:11.5px; font-weight:700; letter-spacing:.14em; text-transform:uppercase; color:var(--sys)}
+  h1{margin:0 0 12px; font-size:clamp(27px,4.4vw,38px); font-weight:800; letter-spacing:-.026em; line-height:1.18; text-wrap:balance}
+  .lede{margin:0; max-width:64ch; color:var(--muted); font-size:16px}
+  .head{border-bottom:1px solid var(--line); padding-bottom:26px}
+  .metachips{display:flex; gap:8px; flex-wrap:wrap; margin-top:16px}
+  .mc{font-size:12px; font-weight:650; padding:4px 10px; border-radius:999px; border:1px solid var(--line); background:var(--card); color:var(--muted)}
+  .mc.b{border-color:var(--sys-edge); background:var(--sys-bg); color:var(--sys)}
+
+  section{display:flex; flex-direction:column; gap:14px}
+  section > h2{margin:0; font-size:21px; font-weight:760; letter-spacing:-.015em; display:flex; align-items:center; gap:10px}
+  .secno{flex:none; min-width:28px; height:28px; padding:0 8px; border-radius:9px; display:grid; place-items:center;
+         background:var(--sys-bg); color:var(--sys); border:1px solid var(--sys-edge); font-size:14px; font-weight:800}
+  h3{margin:18px 0 4px; font-size:16.5px; font-weight:730; letter-spacing:-.01em}
+  p{margin:6px 0}
+  .note{color:var(--muted); font-size:13.5px}
+
+  .card{background:var(--card); border:1px solid var(--line); border-radius:14px; padding:18px 20px; box-shadow:var(--shadow)}
+  .card + .card{margin-top:12px}
+  .grid2{display:grid; grid-template-columns:1fr 1fr; gap:12px}
+  @media (max-width:760px){ .grid2{grid-template-columns:1fr} }
+
+  table{width:100%; border-collapse:collapse; font-size:13.5px; background:var(--card); border-radius:12px; overflow:hidden; box-shadow:var(--shadow)}
+  .tblwrap{overflow-x:auto; border-radius:12px; border:1px solid var(--line)}
+  th,td{padding:9px 12px; border-bottom:1px solid var(--line); text-align:left; vertical-align:top}
+  th{background:color-mix(in srgb, var(--card) 84%, var(--sys) 16%); font-weight:700; font-size:12.5px; white-space:nowrap}
+  tr:last-child td{border-bottom:0}
+  td b{font-weight:700}
+
+  .pill{display:inline-block; font-size:11.5px; font-weight:750; padding:2px 9px; border-radius:999px; border:1px solid; white-space:nowrap}
+  .pill.ok{color:var(--ok); background:var(--ok-bg); border-color:var(--ok-edge)}
+  .pill.warn{color:var(--warn); background:var(--warn-bg); border-color:var(--warn-edge)}
+  .pill.bad{color:var(--bad); background:var(--bad-bg); border-color:var(--bad-edge)}
+  .pill.sys{color:var(--sys); background:var(--sys-bg); border-color:var(--sys-edge)}
+  .pill.mut{color:var(--muted); background:transparent; border-color:var(--line)}
+
+  pre.code{
+    margin:10px 0 0; padding:14px 16px; border-radius:12px; overflow-x:auto;
+    background:var(--code-bg); color:var(--code-ink);
+    font:12.5px/1.62 ui-monospace,SFMono-Regular,Menlo,Consolas,"D2Coding",monospace;
+  }
+  code{font:inherit; font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,"D2Coding",monospace; font-size:.92em;
+       background:color-mix(in srgb, var(--card) 60%, var(--line) 40%); padding:1px 5px; border-radius:5px}
+  pre.code code{background:none; padding:0}
+
+  .callout{border:1px solid; border-radius:12px; padding:12px 16px; font-size:13.5px}
+  .callout.warn{border-color:var(--warn-edge); background:var(--warn-bg); color:var(--ink)}
+  .callout.ok{border-color:var(--ok-edge); background:var(--ok-bg)}
+  .callout.sys{border-color:var(--sys-edge); background:var(--sys-bg)}
+  .callout.bad{border-color:var(--bad-edge); background:var(--bad-bg)}
+  .callout b{font-weight:750}
+
+  /* 흐름 다이어그램 */
+  .flow{display:flex; flex-direction:column; gap:0; margin-top:8px}
+  .fstep{display:flex; gap:12px; align-items:flex-start}
+  .fdot{flex:none; width:26px; height:26px; border-radius:50%; display:grid; place-items:center; font-size:12px; font-weight:800;
+        background:var(--sys-bg); color:var(--sys); border:1px solid var(--sys-edge); margin-top:2px}
+  .fbody{padding-bottom:16px; border-left:2px dashed var(--line); margin-left:-19px; padding-left:30px; flex:1}
+  .fstep:last-child .fbody{border-left-color:transparent; padding-bottom:0}
+  .fbody b{font-weight:730}
+  .fbody .note{margin-top:2px}
+
+  ul,ol{margin:6px 0 6px 2px; padding-left:20px}
+  li{margin:3px 0}
+  li::marker{color:var(--muted)}
+
+  /* 목업(관리자 화면 재현) — 라이트 고정: 실물과 같아 보여야 한다 */
+  .mock{color-scheme:light; background:#EEF1F5; border:1px solid #D6DBE3; border-radius:14px; padding:16px; overflow-x:auto}
+  .mock, .mock *{color:#1C2027; font-size:12.5px}
+  .mock .mtop{display:flex; gap:6px; align-items:center; margin-bottom:12px; flex-wrap:wrap}
+  .mock .mtab{padding:5px 11px; border-radius:8px; background:#fff; border:1px solid #D6DBE3; font-weight:650; white-space:nowrap}
+  .mock .mtab.on{background:#1F5FA8; color:#fff; border-color:#1F5FA8}
+  .mock .mbar{display:flex; gap:8px; margin-bottom:12px; flex-wrap:wrap; align-items:center}
+  .mock .msel{background:#fff; border:1px solid #C9D0DA; border-radius:8px; padding:5px 10px; color:#4A5261}
+  .mock .mcards{display:grid; grid-template-columns:repeat(auto-fill,minmax(200px,1fr)); gap:10px}
+  .mock .mcard{background:#fff; border:1px solid #D6DBE3; border-radius:11px; overflow:hidden}
+  .mock .mthumb{height:88px; background:linear-gradient(135deg,#DEE5EE,#CBD5E3); display:grid; place-items:center; color:#8A93A3; font-weight:700}
+  .mock .mbody{padding:9px 11px; display:flex; flex-direction:column; gap:5px}
+  .mock .mrow{display:flex; justify-content:space-between; gap:6px; align-items:center}
+  .mock .mb{font-size:10.5px; font-weight:800; padding:2px 7px; border-radius:999px}
+  .mock .mb.ok{background:#E6F3F1; color:#157A6E; border:1px solid #A9D8D0}
+  .mock .mb.warn{background:#FBF2E2; color:#9A6414; border:1px solid #E8D2A4}
+  .mock .mb.bad{background:#FBEAE8; color:#B3382E; border:1px solid #EBB7B1}
+  .mock .mb.mut{background:#F1F3F6; color:#6A7383; border:1px solid #D6DBE3}
+  .mock .mname{font-weight:730}
+  .mock .msub{color:#6A7383; font-size:11px}
+  .mock .mfoot{display:flex; gap:6px; padding:8px 11px; border-top:1px solid #ECEFF3}
+  .mock .mbtn{flex:1; text-align:center; padding:5px 0; border-radius:7px; border:1px solid #C9D0DA; background:#F7F9FB; font-weight:650; font-size:11px}
+  .mock .mbtn.p{background:#1F5FA8; border-color:#1F5FA8; color:#fff}
+
+  .tree{font:12.5px/1.7 ui-monospace,SFMono-Regular,Menlo,Consolas,"D2Coding",monospace; white-space:pre; overflow-x:auto;
+        background:var(--card); border:1px solid var(--line); border-radius:12px; padding:14px 18px}
+
+  .roadmap{display:flex; flex-direction:column; gap:10px}
+  .ms{display:flex; gap:14px; align-items:flex-start; background:var(--card); border:1px solid var(--line); border-radius:12px; padding:14px 16px; box-shadow:var(--shadow)}
+  .msno{flex:none; width:44px; height:28px; border-radius:8px; display:grid; place-items:center; font-weight:800; font-size:13px;
+        background:var(--sys-bg); color:var(--sys); border:1px solid var(--sys-edge)}
+  .ms h4{margin:0 0 4px; font-size:14.5px; font-weight:740}
+  .ms p{margin:0; font-size:13px; color:var(--muted)}
+  .ms ul{font-size:13px; margin-top:4px}
+
+  footer{border-top:1px solid var(--line); padding-top:18px; color:var(--muted); font-size:12.5px}
+</style>
+</head>
+<body>
+<div class="wrap">
+
+  <header class="head">
+    <p class="eyebrow">Review Web System · 통합작업대</p>
+    <h1>리뷰 자동검수 시스템 구현계획서</h1>
+    <p class="lede">리뷰어가 제출한 리뷰 캡처가 업체(광고주)에게 전달되기 전에, 시스템이 <b>진짜 리뷰인지 · 우리 상품 리뷰인지 · 재탕/중복이 아닌지</b>를 자동으로 검수한다.
+    현재 리뷰이미지 제출 로직과 구글드라이브 폴더 구조를 그대로 활용하며, 이미 운영 중인 AI 검수(3단계 캡처 검수) 인프라를 확장하는 방식으로 설계했다.</p>
+    <div class="metachips">
+      <span class="mc b">v1.0 계획(구현 전)</span>
+      <span class="mc">작성일 2026-08-03</span>
+      <span class="mc">화면: 통합작업대(workdesk) 신규 탭</span>
+      <span class="mc">신규 마이그레이션 081</span>
+    </div>
+  </header>
+
+  <!-- ══════════════════ 0. 한눈에 보기 ══════════════════ -->
+  <section>
+    <h2><span class="secno">0</span>한눈에 보기 — 요구한 검수 조건 5개와 구현 방식</h2>
+    <div class="tblwrap"><table>
+      <thead><tr><th>#</th><th>검수 조건(요구)</th><th>구현 방식</th><th>판정 재료</th><th>비용</th></tr></thead>
+      <tbody>
+        <tr>
+          <td><b>1</b></td>
+          <td><b>실제 리뷰파일 여부</b><br><span class="note">네이버 빨강별점 / 쿠팡 노란별점 예시이미지 첨부 저장</span></td>
+          <td>기존 AI 판별(<code>classifySubmissionImage</code>)을 <b>종합검수 프롬프트로 확장</b> — 리뷰화면 여부 + <b>채널(네이버/쿠팡/기타)</b> 판별. 관리자 설정탭에서 채널별 <b>별점 예시이미지</b>를 등록(현금영수증 발행방법 이미지와 동일 패턴)하면 판정 시 참조 이미지로 함께 전송(few-shot).</td>
+          <td>AI 비전 1콜<br><span class="note">(기존 콜 대체 = 순증 최소)</span></td>
+          <td><span class="pill ok">낮음</span></td>
+        </tr>
+        <tr>
+          <td><b>2</b></td>
+          <td><b>상품명 대조</b><br><span class="note">작업오더 상품명 vs 리뷰이미지 속 상품명 OCR</span></td>
+          <td>같은 AI 콜에서 이미지 속 <b>상품명 텍스트를 OCR 추출</b> → 기대 상품명과 정규화 유사도 비교. 기대 상품명 우선순위: <b>① 탭 검수설정 수동입력 → ② 연결된 작업오더(<code>work_orders</code>)의 상품정보</b>. 작업오더가 없으면 관리자 UI에서 직접 입력.</td>
+          <td>AI 비전(동일 콜) + 텍스트 매칭</td>
+          <td><span class="pill ok">낮음</span></td>
+        </tr>
+        <tr>
+          <td><b>3</b></td>
+          <td><b>제출자명 ↔ 리뷰어명</b><br><span class="note">(사용자도 필요성 불확실)</span></td>
+          <td><b>1단계에서는 판정 제외 권고.</b> 리뷰 화면의 작성자 표시는 마스킹(홍**, a***1)·닉네임이라 실명과 정확 대조가 불가능하고 오탐이 크다. 다만 OCR로 작성자 표시 텍스트는 <b>수집만</b> 해 두고, 데이터가 쌓인 뒤 유용성을 재평가한다.</td>
+          <td>OCR 수집만(판정 OFF)</td>
+          <td><span class="pill mut">보류</span></td>
+        </tr>
+        <tr>
+          <td><b>4</b></td>
+          <td><b>동일 파일 검사(중복)</b></td>
+          <td>업로드 시점에 <b>SHA-256 파일 해시</b>를 계산·저장(base64를 이미 쥔 시점 = 추가 비용 0). 같은 해시가 <b>다른 행·다른 리뷰어·다른 탭</b>에서 재등장하면 중복 판정. 과거 파일은 배치로 Drive에서 내려받아 해시 백필.</td>
+          <td>파일 해시(DB 대조, AI 불필요)</td>
+          <td><span class="pill ok">낮음</span></td>
+        </tr>
+        <tr>
+          <td><b>5</b></td>
+          <td><b>텍스트 유사도 90%+</b><br><span class="note">중복의심/불량리뷰 분류</span></td>
+          <td>같은 AI 콜에서 <b>리뷰 본문 텍스트를 OCR 추출·저장</b> → PostgreSQL <b>pg_trgm</b>(이미 설치·검색에서 사용 중)으로 기존 제출 본문과 3-gram 유사도 계산. <b>0.9 이상 = 중복의심</b> 분류(비교 범위는 같은 탭 우선, 전역은 옵션).</td>
+          <td>OCR(동일 콜) + SQL 유사도</td>
+          <td><span class="pill warn">중간</span></td>
+        </tr>
+      </tbody>
+    </table></div>
+    <div class="callout sys" style="margin-top:10px">
+      <b>설계 원칙 3줄 요약</b> — ① 판정 재료(채널·상품명·본문·작성자)는 <b>업로드당 AI 1콜</b>로 한 번에 뽑는다(기존 형식판별 콜을 확장·대체).
+      ② 중복·유사도는 저장된 해시·텍스트만으로 <b>DB에서</b> 계산한다(이미지 재다운로드 0).
+      ③ 기존 규율 그대로 — <b>제출은 절대 막지 않고(fail-open)</b>, 결과는 통합작업대 검수 탭 + 기존 알림 체계로 사람에게 보인다.
+    </div>
+  </section>
+
+  <!-- ══════════════════ 1. 현재 구조 분석 ══════════════════ -->
+  <section>
+    <h2><span class="secno">1</span>현재 구조 분석 (As-Is)</h2>
+
+    <h3>1-1. 리뷰이미지 제출 흐름</h3>
+    <div class="card"><div class="flow">
+      <div class="fstep"><div class="fdot">1</div><div class="fbody">
+        <b>리뷰어 제출</b> — 리뷰어 홈/구매양식 화면(<code>search-app.js</code>)에서 캡처 첨부 → <code>POST /api/image/review-upload</code>(<code>diag.routes.js</code>)로 base64 전송. 페이로드에 <code>sheetId · tabName · reviewerName · rowIndex · slotKey</code>(리뷰/현금영수증 슬롯) 포함.
+      </div></div>
+      <div class="fstep"><div class="fdot">2</div><div class="fbody">
+        <b>폴더 확보</b> — <code>tab_configs.folder_url</code>이 있으면 그대로, 없으면 <code>ensureReviewFolderPath</code>가 <b>시트제목 → 탭명 → [리뷰]</b> 경로를 자동 생성 후 DB에 저장. 폴더 확보 실패 시 업로드 중단(루트로 새는 것 방지 가드).
+      </div></div>
+      <div class="fstep"><div class="fdot">3</div><div class="fbody">
+        <b>Drive 업로드</b> — 파일명 <code>{리뷰어명}_{순번}_{yyyyMMdd_HHmmss}.{확장자}</code>로 업로드(OAuth 우선 → SA 폴백, 소유자 tnaks 보정).
+      </div></div>
+      <div class="fstep"><div class="fdot">4</div><div class="fbody">
+        <b>기존 AI 검수(3단계)</b> — <code>captureVerify.verifyCapture</code> → Gemini <code>classifySubmissionImage</code>가 <b>리뷰/영수증/기타</b> 형식만 판별. 불일치면 리뷰어 인라인 경고 + <code>reviewer_event_logs</code>(<code>capture_mismatch</code>, 확신도 0.9+는 critical 빨간 알림). <b>fail-open: AI 장애·저확신은 통과, 제출 차단 없음.</b>
+      </div></div>
+      <div class="fstep"><div class="fdot">5</div><div class="fbody">
+        <b>DB 기록</b> — 대표 1장은 <code>review_index.review_file_*</code>(031, 'review' 슬롯만), 모든 파일은 <code>review_submissions</code> 원장(032, <code>file_id</code> 유니크 업서트, <code>slot_key</code> 포함)에 적재. 주문 원장(<code>order_submissions.capture_file_id</code>)과도 연결.
+      </div></div>
+    </div></div>
+
+    <h3>1-2. 구글드라이브 폴더 구조</h3>
+    <div class="tree">AI_REVIEW_FOLDER  (env AI_REVIEW_FOLDER_ID — 루트)
+└─ {시트제목}                      예: 7월 ○○브랜드
+   └─ {탭명}                       예: ○○상품 100건
+      └─ [리뷰]                    ← tab_configs.folder_url 로 연결
+         ├─ 김리뷰_1_20260803_101512.jpg     (기본 review 슬롯 — 서브폴더 없음)
+         ├─ 현금영수증/                       (receipt 슬롯 서브폴더 — 현영 탭)
+         │   └─ 김리뷰_1_20260803_101533.jpg
+         └─ {옵션명}/                         (옵션 서브폴더 — 옵션 캠페인)
+             └─ 박제출_1_20260803_113001.jpg</div>
+    <p class="note">※ [구매캡처] 폴더(구매 인증)는 별도 경로. 과거 루트로 샌 파일은 "리뷰 캡처 정리"(<code>relocate-orphan-reviews</code>)로 이동·백필하는 운영 도구가 이미 있다.
+    신규 활성 탭은 스마트빌드가 폴더를 선생성(<code>reviewFolders.service</code>)하므로 폴더 부재 케이스는 드물다.</p>
+
+    <h3>1-3. 재사용할 기존 인프라 (신규 개발을 줄이는 자산)</h3>
+    <div class="tblwrap"><table>
+      <thead><tr><th>인프라</th><th>현재 용도</th><th>자동검수에서의 재사용</th></tr></thead>
+      <tbody>
+        <tr><td><code>gemini.service.js</code></td><td>키 라운드로빈 · 10분/200건 캐시 · 9초 타임아웃 · <code>classifySubmissionImage</code>(형식 판별)</td><td>판별 프롬프트를 <b>종합검수 프롬프트로 확장</b>(채널·상품명·본문 OCR 동시 추출). 캐시·타임아웃 골격 그대로.</td></tr>
+        <tr><td><code>captureVerify.service.js</code></td><td>슬롯 형식 검수 + 알림(도배 방지 · 재캡처 자동해결)</td><td>fail-open 규율·알림 2단계(warn/critical)·도배 방지 패턴을 그대로 승계.</td></tr>
+        <tr><td><code>drive.service.downloadFile</code> + <code>GET /api/drive/image/:id</code></td><td>이미지 프록시 스트리밍(무인증, 추측불가 fileId)</td><td>배치 백필 시 이미지 다운로드 / 검수 UI 썸네일·원본 표시.</td></tr>
+        <tr><td><code>cash_receipt_guide_*</code> 패턴 (app_settings + guide-image 업로드)</td><td>채널별 발행방법 이미지 등록(관리자 설정탭)</td><td><b>채널별 별점 예시이미지 등록</b>을 같은 패턴으로(네이버 빨강별점 / 쿠팡 노란별점).</td></tr>
+        <tr><td><code>pg_trgm</code> (migration 004에서 설치)</td><td>한글 이름 유사검색</td><td><b>리뷰 본문 텍스트 유사도</b>(3-gram similarity) 계산 — 별도 엔진 불필요.</td></tr>
+        <tr><td>탭 ↔ 작업오더 링크 (<code>trackb_work_order_links</code> 우선 → <code>work_orders.linked_tab_*</code> 폴백)</td><td>통합작업대 작업세부 표시</td><td><b>기대 상품명 자동 소스</b> — 연결 오더의 <code>title / product_option / product_options_json</code>.</td></tr>
+        <tr><td><code>reviewer_event_logs</code> + SSE</td><td>통합작업대 "리뷰어 로그" + 관리자 빨간 알림</td><td>확실한 불량(critical)만 실시간 알림, 의심(warn)은 로그·검수 탭에만(늑대소년 방지).</td></tr>
+        <tr><td>이미지 교체요청 + C/S 브리지 (<code>/api/trackb/review-edit/*</code>, <code>csBridge</code>)</td><td>관리자→리뷰어 교체요청·승인/반려 통지</td><td>검수 탭에서 불량 확정 시 <b>기존 교체요청 흐름으로 그대로 연결</b>(신규 통지 채널 0).</td></tr>
+      </tbody>
+    </table></div>
+
+    <div class="callout warn" style="margin-top:10px">
+      <b>현재의 공백(이 계획이 메우는 것)</b> — 지금 AI 검수는 "리뷰 캡처인가 영수증인가"라는 <b>형식(슬롯) 판별만</b> 한다.
+      ① 진짜 우리 상품 리뷰인지(타 상품 리뷰·아무 화면이나 제출) ② 같은 파일 재탕 ③ 복붙 본문은 <b>아무도 검사하지 않으며</b>,
+      업체에 전달된 뒤 사람이 발견하는 구조다.
+    </div>
+  </section>
+
+  <!-- ══════════════════ 2. 검수 조건별 상세 설계 ══════════════════ -->
+  <section>
+    <h2><span class="secno">2</span>검수 조건별 상세 설계</h2>
+
+    <h3>① 실제 리뷰파일 판별 (채널 인식 + 예시이미지)</h3>
+    <div class="card">
+      <p><b>판정 목표</b>: 제출 이미지가 쇼핑몰 리뷰 화면인지, 어느 채널인지(네이버=빨강 별점 / 쿠팡=노란 별점 / 기타), 리뷰가 실제 "등록된" 상태 화면인지.</p>
+      <ul>
+        <li><b>프롬프트 확장</b>: 기존 <code>classifySubmissionImage</code>의 <code>kind(review/receipt/other)</code> 판정에 <code>channel(naver/coupang/etc)</code> · <code>starColor</code> · <code>isPosted</code>(리뷰 등록 완료 화면 여부) 필드를 추가한 <b>종합검수 응답 스키마</b>로 교체. 리뷰 슬롯 업로드는 현재도 이 콜을 타므로 <b>콜 수 순증 없음</b>.</li>
+        <li><b>예시이미지 등록</b>: 관리자 설정탭에 "리뷰 판별 예시이미지" 2칸(네이버/쿠팡) — <code>app_settings.review_inspect_sample_naver / _coupang</code>에 저장(현금영수증 가이드 이미지와 완전 동일 패턴: guide-image Drive 업로드 + https 프록시 URL만 허용). 판정 시 예시이미지를 <b>참조 이미지(few-shot)</b>로 프롬프트에 동봉해 "이런 화면이 정상 리뷰"의 기준을 준다.</li>
+        <li><b>탭 채널과 대조</b>: 탭/공고의 구매채널(작업오더 URL 호스트 판정 — 기존 <code>WO_CHANNEL_HOSTS</code> 로직)과 판별된 채널이 다르면 <span class="pill warn">채널 불일치 의심</span>. 채널 정보가 없는 탭은 대조 생략(오탐 방지).</li>
+      </ul>
+      <p class="note">예시이미지가 등록되지 않아도 판별은 동작한다(프롬프트 기술만으로) — 예시는 정확도를 올리는 opt-in. 미등록 시 전송 페이로드도 가벼워진다.</p>
+    </div>
+
+    <h3>② 상품명 대조 (OCR ↔ 작업오더)</h3>
+    <div class="card">
+      <p><b>판정 목표</b>: 리뷰이미지에 표기된 상품명이 이 탭(작업)의 상품과 일치하는가 — 타 상품 리뷰 제출을 잡는다.</p>
+      <ul>
+        <li><b>OCR 추출</b>: 같은 AI 콜 응답에 <code>productName</code>(이미지에 보이는 상품명 표기, 없으면 빈 값) 필드 추가.</li>
+        <li><b>기대 상품명 소스(우선순위)</b>:
+          <ol>
+            <li><b>탭 검수설정 수동 입력</b> — 신규 <code>tab_configs.inspect_product_names</code>(TEXT, 줄바꿈 구분 복수 허용). "작업오더에 상품명이 없다면 별도로 입력"하는 요구를 이 칸이 담당. 검수 탭 UI에서 바로 입력.</li>
+            <li><b>연결된 작업오더</b> — 탭 ↔ 오더 링크로 <code>work_orders.title / product_option / product_options_json</code>에서 상품명 후보 파생(공고 프리필 파서 <code>parseProductLinesToRows</code> 재사용 — "옵션 없음/단일" 서술어 제외 규칙 포함).</li>
+          </ol>
+        </li>
+        <li><b>매칭 규칙</b>: 정규화(공백·특수문자·괄호 제거, 소문자화) 후 ⓐ 포함 관계 ⓑ 토큰(브랜드·모델명 단위) 일치율로 1차 판정, 애매하면(부분 일치) Gemini에 "같은 상품인가" 텍스트 질의 보조(주소 유사도 검증 <code>verifyAddressMatch</code>와 같은 패턴). 쇼핑몰 화면의 상품명 축약·말줄임(…)을 감안해 <b>부분 포함도 일치로 인정</b>.</li>
+        <li><b>기대값이 아예 없으면</b>: <span class="pill mut">대조 안 함(unverified)</span> — 오탐으로 막는 것보다 "설정하면 검사해 준다"를 UI에서 유도. 판정 불가를 불량으로 취급하지 않는다(fail-open).</li>
+      </ul>
+    </div>
+
+    <h3>③ 제출자명 ↔ 리뷰어명 검수 — 1단계 보류 권고</h3>
+    <div class="card">
+      <p><b>보류 이유</b>(요구사항에도 "필요한지 잘 모르겠음"으로 명시):</p>
+      <ul>
+        <li>네이버/쿠팡 리뷰 화면의 작성자 표시는 <b>마스킹</b>(홍**, a***1) 또는 <b>닉네임</b>이라 시스템의 리뷰어 실명과 정확 대조가 구조적으로 불가능하다.</li>
+        <li>가능한 검사는 "첫 글자·길이가 아예 다르면 타인 계정 의심" 정도인데, 닉네임 사용자가 많아 <b>오탐(정상 제출을 의심 처리)이 크다</b> — 오탐은 막으려던 사고보다 나쁘다는 이 시스템의 규율(캡처 검수·신원게이트와 동일)에 어긋난다.</li>
+      </ul>
+      <p><b>대신 이렇게</b>: OCR로 작성자 표시 텍스트(<code>authorMask</code>)를 <b>수집·저장만</b> 해 둔다(같은 콜, 비용 0). 데이터가 쌓이면 "같은 작성자 마스킹이 여러 리뷰어의 제출에 반복 등장" 같은 <b>계정 재사용 패턴</b> 분석에 쓸 수 있다 — 판정 ON 여부는 그때 다시 결정(설정 <code>REVIEW_INSPECT_AUTHOR=0</code> 기본 OFF).</p>
+    </div>
+
+    <h3>④ 동일 파일 검사 (중복파일)</h3>
+    <div class="card">
+      <ul>
+        <li><b>해시 계산 시점</b>: 업로드 핸들러가 base64를 이미 쥐고 있는 시점에 SHA-256 1회 — <b>추가 다운로드·AI 비용 0</b>. <code>review_submissions.file_hash</code>(신규 컬럼)에 저장.</li>
+        <li><b>중복 판정(전부 DB 대조)</b>: 같은 해시의 기존 행이
+          <ul>
+            <li>같은 (시트·탭·행·리뷰어) → <b>재제출/교체</b>로 정상 처리(중복 아님 — Drive는 재업로드마다 새 file_id를 만들므로 이 케이스가 흔하다).</li>
+            <li>다른 행·다른 리뷰어·다른 탭 → <span class="pill bad">중복 제출</span>. 상대 파일(어느 탭 누구의 제출인지)을 판정 근거에 함께 저장해 UI에서 나란히 보여준다.</li>
+          </ul>
+        </li>
+        <li><b>과거분 백필</b>: 기존 <code>review_submissions</code>에는 해시가 없다 → 배치 스윕이 Drive에서 파일을 내려받아(<code>downloadFile</code>) 해시를 채운다. 사이클당 건수 제한(§4)으로 Drive 부하 통제, 최근 제출분부터 역순.</li>
+        <li><b>2단계(선택)</b>: 완전 동일 파일이 아니라 <b>살짝 수정한 재사용</b>(크롭·밝기 조정)은 지각 해시(dHash 64bit + 해밍거리)로 확장 가능 — 로드맵 M4.</li>
+      </ul>
+    </div>
+
+    <h3>⑤ 리뷰 본문 텍스트 유사도 (중복의심 / 불량리뷰)</h3>
+    <div class="card">
+      <ul>
+        <li><b>본문 추출</b>: 같은 AI 콜 응답의 <code>reviewText</code>(이미지 속 리뷰 본문 전문) — 별도 OCR 엔진 없이 Gemini 비전이 담당.</li>
+        <li><b>유사도 계산</b>: PostgreSQL <code>pg_trgm</code>의 <code>similarity()</code>(3-gram) — 한글에서 이미 검색용으로 검증된 확장. <b>0.90 이상 = 중복의심</b>(env <code>REVIEW_INSPECT_SIM_THRESHOLD</code>, 기본 0.9).</li>
+        <li><b>비교 범위</b>: 기본 = <b>같은 탭 내 기존 제출 본문</b>(같은 상품에 같은 글 복붙이 가장 흔한 불량). 전역(리뷰어가 여러 캠페인에 같은 글 돌려쓰기) 비교는 GIN 인덱스 + <code>%</code> 연산자로 가능하나 비용이 커 <b>옵션</b>(§8 확정 필요 ②).</li>
+        <li><b>가드</b>: 본문이 너무 짧으면(기본 30자 미만) 유사도 판정 제외 — "맛있어요 재구매의사 있습니다" 같은 관용구는 누구나 비슷해 오탐이 된다. 같은 리뷰어의 같은 행 재제출은 비교 대상에서 제외(자기 자신과의 유사도).</li>
+      </ul>
+    </div>
+  </section>
+
+  <!-- ══════════════════ 3. 데이터 모델 ══════════════════ -->
+  <section>
+    <h2><span class="secno">3</span>데이터 모델 (migration 081 · 비파괴)</h2>
+    <p>기존 테이블은 컬럼 추가만, 판정 결과는 신규 테이블 1개에 격리한다(라이브 핫패스 무접촉 — Track B와 같은 "추가만" 원칙).</p>
+    <pre class="code"><code>-- 081_review_inspections.sql (전부 idempotent)
+
+-- ① 제출 원장에 파일 해시 (업로드 시 즉시 계산, 과거분은 배치 백필)
+ALTER TABLE review_submissions ADD COLUMN IF NOT EXISTS file_hash TEXT;
+CREATE INDEX IF NOT EXISTS idx_review_sub_hash ON review_submissions(file_hash);
+
+-- ② 탭별 기대 상품명 수동 입력 (작업오더에 상품명이 없을 때)
+ALTER TABLE tab_configs ADD COLUMN IF NOT EXISTS inspect_product_names TEXT DEFAULT '';
+
+-- ③ 검수 결과 원장 (파일 1장 = 1행, review_submissions.file_id 기준)
+CREATE TABLE IF NOT EXISTS review_inspections (
+  id              UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  file_id         TEXT NOT NULL,            -- review_submissions.file_id (유니크)
+  sheet_id        TEXT NOT NULL,
+  tab_name        TEXT NOT NULL,
+  row_index       INTEGER,
+  reviewer_name   TEXT,
+  status          TEXT NOT NULL DEFAULT 'pending',
+                  -- pending(미검수) | pass | suspect(의심) | fail(확실 불량)
+                  -- | unverifiable(판정 불가) | resolved(관리자 확인 종결)
+  checks          JSONB DEFAULT '{}'::jsonb, -- 항목별 판정 상세(§아래)
+  channel         TEXT,                      -- naver | coupang | etc (판별 결과)
+  ocr_product     TEXT,                      -- 이미지 속 상품명 표기
+  ocr_text        TEXT,                      -- 리뷰 본문 전문 (유사도 재료)
+  ocr_author      TEXT,                      -- 작성자 마스킹 표기 (수집만)
+  ai_confidence   REAL,
+  ai_model        TEXT,
+  inspected_at    TIMESTAMPTZ,               -- AI 판정 완료 시각
+  resolved_at     TIMESTAMPTZ,               -- 관리자 확인 시각
+  resolved_by     TEXT,
+  created_at      TIMESTAMPTZ DEFAULT NOW()
+);
+CREATE UNIQUE INDEX IF NOT EXISTS uq_review_inspect_file ON review_inspections(file_id);
+CREATE INDEX IF NOT EXISTS idx_review_inspect_tab
+  ON review_inspections(sheet_id, tab_name, status);
+CREATE INDEX IF NOT EXISTS idx_review_inspect_status
+  ON review_inspections(status) WHERE status IN ('pending','suspect','fail');
+
+-- ④ 예시이미지·설정은 app_settings 키로 (테이블 불필요)
+--    review_inspect_sample_naver / review_inspect_sample_coupang = 이미지 프록시 URL</code></pre>
+
+    <h3>checks JSONB 구조 (항목별 판정 상세)</h3>
+    <pre class="code"><code>{
+  "format":     { "verdict": "pass|warn|fail|skip", "kind": "review", "channel": "coupang",
+                  "expectedChannel": "coupang", "confidence": 0.94 },
+  "product":    { "verdict": "pass|warn|fail|skip", "ocr": "히말라야 핑크솔트 400g",
+                  "expected": ["히말라야 핑크솔트"], "source": "work_order|manual|none" },
+  "duplicate":  { "verdict": "pass|fail|skip", "matchFileId": "…", "matchTab": "…",
+                  "matchReviewer": "…" },
+  "similarity": { "verdict": "pass|warn|skip", "score": 0.93, "matchFileId": "…",
+                  "matchReviewer": "…", "scope": "tab" },
+  "author":     { "verdict": "skip", "ocr": "김**" }          // 1단계는 항상 skip
+}</code></pre>
+    <p class="note">종합 <code>status</code> 산출 규칙: 하나라도 <code>fail</code> → <b>fail</b> / <code>fail</code> 없이 <code>warn</code> 있음 → <b>suspect</b> / 전부 <code>pass·skip</code> → <b>pass</b> / AI 판정 자체를 못 함 → <b>unverifiable</b>(제출엔 영향 없음). 관리자가 [확인] 처리하면 <code>resolved</code>로 종결(원판정은 checks에 보존).</p>
+  </section>
+
+  <!-- ══════════════════ 4. 검수 파이프라인 ══════════════════ -->
+  <section>
+    <h2><span class="secno">4</span>검수 파이프라인 — 인라인 + 배치 2경로</h2>
+
+    <div class="grid2">
+      <div class="card">
+        <h3 style="margin-top:0">경로 A — 업로드 인라인 (신규 제출)</h3>
+        <ul>
+          <li><code>review-upload</code> 핸들러에서 ① SHA-256 해시 계산·저장 ② 기존 <code>verifyCapture</code> 콜을 <b>종합검수 콜로 교체</b>(응답에서 슬롯 형식 판정 + 검수 재료를 동시에 얻음 — <b>콜 수 순증 0</b>) ③ <code>review_inspections</code>에 결과 upsert.</li>
+          <li>중복·유사도는 이 시점에 <b>DB 대조만</b>(해시 equality + 같은 탭 trgm) — 수 ms 수준.</li>
+          <li>AI 실패·타임아웃 → <code>status='pending'</code>으로만 남기고 업로드는 정상 완료(fail-open). 배치가 재시도.</li>
+          <li>리뷰어 화면: 기존 슬롯 불일치 인라인 경고는 그대로. <b>신규 판정(상품 불일치 등)은 리뷰어에게 즉시 표시하지 않고 관리자 검수 탭으로만</b> — 오탐으로 리뷰어를 붙잡는 사고 방지(§8 확정사항 ③에서 조정 가능).</li>
+        </ul>
+      </div>
+      <div class="card">
+        <h3 style="margin-top:0">경로 B — 배치 스윕 (재시도 + 과거 백필)</h3>
+        <ul>
+          <li>cron 주기(기본 <code>*/5</code>) + <code>withJobLock('review_inspect_sweep')</code>(멀티 인스턴스 직렬화 — 기존 락 유틸 재사용).</li>
+          <li>대상: <code>pending</code> 건 + 검수 이력이 없는 과거 <code>review_submissions</code>(최근분부터 역순).</li>
+          <li>사이클당 <code>REVIEW_INSPECT_BATCH</code>(기본 20)건 — 건당 Drive <code>downloadFile</code> 1회 + AI 1콜. <b>시트 API lane 무접촉</b>(쿼터 영향 0), Drive·Gemini 부하는 캡으로 통제.</li>
+          <li>연속 실패 건은 재시도 상한 후 <code>unverifiable</code>로 종결(무한 재시도 금지 — 스마트빌드 실패 시트 처리와 같은 규율).</li>
+        </ul>
+      </div>
+    </div>
+
+    <h3>알림 연계 (기존 체계 승계 — 새 채널 없음)</h3>
+    <div class="tblwrap"><table>
+      <thead><tr><th>판정</th><th>노출</th><th>근거(기존 규율)</th></tr></thead>
+      <tbody>
+        <tr><td><span class="pill bad">fail</span> 확실 불량(중복 파일, 확신도 0.9+ 비리뷰 화면)</td><td><code>reviewer_event_logs</code> <b>critical</b> → 관리자 대시보드 빨간 알림 + SSE + 검수 탭</td><td>capture_mismatch의 sure 승격과 동일 기준</td></tr>
+        <tr><td><span class="pill warn">suspect</span> 의심(유사도 90%+, 상품명 부분 불일치, 채널 불일치)</td><td>검수 탭 + 리뷰어 로그(warn)만 — 빨간 알림 없음</td><td>애매한 판정까지 알리면 급한 건이 묻힌다(늑대소년 방지)</td></tr>
+        <tr><td><span class="pill ok">pass</span> / <span class="pill mut">skip·unverifiable</span></td><td>검수 탭 집계에만 반영</td><td>조용한 정상(도배 금지)</td></tr>
+      </tbody>
+    </table></div>
+    <p class="note">도배 방지: 같은 (탭·행·파일)의 미해결 알림이 있으면 새로 쌓지 않고, 교체 업로드로 판정이 pass가 되면 자동 해결(<code>auto:reinspected</code>) — captureVerify의 도배 방지·자동해결 패턴 그대로.</p>
+  </section>
+
+  <!-- ══════════════════ 5. 관리자 UI ══════════════════ -->
+  <section>
+    <h2><span class="secno">5</span>관리자 UI — 통합작업대 "리뷰검수" 탭</h2>
+    <p>통합작업대(workdesk.html) 상단 nav에 신규 탭. 위치는 <b>"이미지 교체요청" 옆</b>(리뷰 이미지 관련 업무 인접 배치). API는 인트라넷 SSO 토큰이 도달 가능한 <code>/api/trackb/review-inspect/*</code> 네임스페이스.</p>
+
+    <div class="mock" role="img" aria-label="통합작업대 리뷰검수 탭 화면 목업">
+      <div class="mtop">
+        <span class="mtab">작업대</span><span class="mtab">업체관리</span><span class="mtab">리뷰어 로그</span>
+        <span class="mtab">작업오더</span><span class="mtab">모집공고</span><span class="mtab">C/S 문의</span>
+        <span class="mtab">이미지 교체요청</span><span class="mtab on">리뷰검수 <b style="color:#FFD9D4">4</b></span><span class="mtab">등록리뷰어DB</span>
+      </div>
+      <div class="mbar">
+        <span class="msel">탭: ○○상품 100건 ▾</span>
+        <span class="msel">상태: 의심+불량 ▾</span>
+        <span class="msel">사유: 전체 ▾</span>
+        <span class="msel" style="margin-left:auto">🔍 검수현황: 통과 61 · 의심 3 · 불량 1 · 미검수 12</span>
+        <span class="msel">⚙ 검수설정</span>
+      </div>
+      <div class="mcards">
+        <div class="mcard">
+          <div class="mthumb">리뷰 캡처</div>
+          <div class="mbody">
+            <div class="mrow"><span class="mname">김리뷰 · 12행</span><span class="mb bad">중복 파일</span></div>
+            <div class="msub">동일 파일이 "△△탭 · 박제출 8행"에 이미 제출됨 (7/29)</div>
+          </div>
+          <div class="mfoot"><span class="mbtn">나란히 보기</span><span class="mbtn p">교체요청</span></div>
+        </div>
+        <div class="mcard">
+          <div class="mthumb">리뷰 캡처</div>
+          <div class="mbody">
+            <div class="mrow"><span class="mname">이참여 · 27행</span><span class="mb warn">본문 유사 93%</span></div>
+            <div class="msub">최유사: 같은 탭 정리뷰 19행 제출본과 93% 일치</div>
+          </div>
+          <div class="mfoot"><span class="mbtn">본문 대조</span><span class="mbtn">통과 처리</span></div>
+        </div>
+        <div class="mcard">
+          <div class="mthumb">리뷰 캡처</div>
+          <div class="mbody">
+            <div class="mrow"><span class="mname">박제출 · 31행</span><span class="mb warn">상품명 불일치</span></div>
+            <div class="msub">OCR "□□보조배터리" ≠ 기대 "히말라야 핑크솔트"</div>
+          </div>
+          <div class="mfoot"><span class="mbtn">원본 보기</span><span class="mbtn p">교체요청</span></div>
+        </div>
+        <div class="mcard">
+          <div class="mthumb">리뷰 캡처</div>
+          <div class="mbody">
+            <div class="mrow"><span class="mname">최후기 · 5행</span><span class="mb ok">통과</span></div>
+            <div class="msub">쿠팡 리뷰 · 상품명 일치 · 중복 없음</div>
+          </div>
+          <div class="mfoot"><span class="mbtn">상세</span></div>
+        </div>
+      </div>
+    </div>
+
+    <h3>화면 구성 요소</h3>
+    <ul>
+      <li><b>필터 바</b>: 탭 선택(작업 목록 — staff는 담당 탭만) · 상태(의심+불량 기본) · 사유별 칩. 상단에 탭별 검수현황 요약(통과/의심/불량/미검수).</li>
+      <li><b>카드</b>: 썸네일(<code>/api/drive/image/:id</code> 프록시) + 리뷰어·행 + 판정 배지 + 근거 한 줄. 클릭 → 상세 패널.</li>
+      <li><b>상세 패널</b>: 원본 이미지 + OCR 본문 + 판정 항목별 상세(checks). 중복/유사 건은 <b>상대 파일과 나란히 보기</b>(두 이미지 + 본문 diff 하이라이트).</li>
+      <li><b>액션</b>:
+        <ul>
+          <li><b>[통과 처리]</b> — 오탐 확인 시 <code>resolved</code> 종결(원판정 보존, 열려 있던 알림 자동 정리).</li>
+          <li><b>[교체요청]</b> — <b>기존 이미지 교체요청 + C/S 카드 통지 흐름으로 연결</b>(리뷰어에게 사유와 함께 재제출 안내 — 신규 통지 채널을 만들지 않는다).</li>
+          <li><b>[⚙ 검수설정]</b> — 탭별 기대 상품명 입력(<code>inspect_product_names</code>) + 채널별 별점 예시이미지 등록(관리자 설정탭과 동일 위젯 재사용).</li>
+        </ul>
+      </li>
+    </ul>
+
+    <h3>권한 (기존 스코프 규율 승계)</h3>
+    <div class="tblwrap"><table>
+      <thead><tr><th>역할</th><th>접근</th><th>근거</th></tr></thead>
+      <tbody>
+        <tr><td>master / admin</td><td>전체 탭 열람 + 통과/교체요청 처리</td><td>이미지 교체요청 탭과 동일</td></tr>
+        <tr><td>staff (AE)</td><td><b>담당 업체 탭만</b> 열람·처리 (<code>scopedActiveTabs</code> 서버 강제)</td><td>리뷰어 로그·교체요청 탭과 동일 스코프</td></tr>
+        <tr><td>advertiser (광고주)</td><td><b>차단</b> (1단계)</td><td>검수 근거에 리뷰어 실명·본문 OCR 포함 — 노출 여부는 §8 확정 필요 ④</td></tr>
+      </tbody>
+    </table></div>
+  </section>
+
+  <!-- ══════════════════ 6. 구현 로드맵 ══════════════════ -->
+  <section>
+    <h2><span class="secno">6</span>구현 로드맵 (4 마일스톤 · 각각 독립 배포 가능)</h2>
+    <div class="roadmap">
+      <div class="ms"><div class="msno">M1</div><div>
+        <h4>데이터 기반 + 인라인 검수 (신규 제출부터 쌓기 시작)</h4>
+        <p>이 단계만 배포해도 신규 제출은 전부 검수 재료가 쌓인다. 화면 없이도 DB로 확인 가능.</p>
+        <ul>
+          <li>migration 081 (review_inspections + file_hash + inspect_product_names)</li>
+          <li>업로드 핸들러: 해시 계산 + 종합검수 프롬프트(기존 classify 확장) + 판정 upsert + 중복/유사도 DB 대조</li>
+          <li>신규 서비스 <code>reviewInspect.service.js</code> (판정 규칙·상태 산출·알림 연계 — captureVerify 규율 승계)</li>
+          <li>회귀가드 <code>tests/reviewInspect.test.js</code> (판정 순수함수 + 스텁 pool 핸들러 실행 + fail-open 고정)</li>
+        </ul>
+      </div></div>
+      <div class="ms"><div class="msno">M2</div><div>
+        <h4>배치 스윕 + 과거분 백필</h4>
+        <ul>
+          <li>cron 스윕(<code>withJobLock</code>, 사이클 캡, 재시도 상한) — pending 재시도 + 과거 review_submissions 해시/OCR 백필</li>
+          <li>백필 범위 기본: 최근 30일(§8 확정 필요 ⑤) — 전량 백필은 Drive·AI 비용 산정 후</li>
+          <li>알림 배선(critical/warn 2단 + 도배 방지 + 자동 해결)</li>
+        </ul>
+      </div></div>
+      <div class="ms"><div class="msno">M3</div><div>
+        <h4>통합작업대 "리뷰검수" 탭 UI</h4>
+        <ul>
+          <li>workdesk nav 탭 + 필터/카드/상세/나란히 보기 + 미확인 뱃지(폴링 — workdesk엔 SSE 없음)</li>
+          <li>[교체요청] → 기존 reviewEdit + csBridge 연동 / [통과 처리] → resolved 종결</li>
+          <li>검수설정: 탭별 기대 상품명 + 채널별 별점 예시이미지 등록(관리자 설정탭 위젯 재사용)</li>
+          <li>회귀가드: 라우터 스택 실검사(권한 미들웨어 체인 — <code>authMiddlewareChain</code> 패턴) + 프론트 배선</li>
+        </ul>
+      </div></div>
+      <div class="ms"><div class="msno">M4</div><div>
+        <h4>선택 확장 (운영 데이터 본 뒤 결정)</h4>
+        <ul>
+          <li>지각 해시(dHash)로 "수정한 재사용" 탐지 / 전역 텍스트 유사도(GIN 인덱스)</li>
+          <li>제출자명 검수 ON(수집 데이터 유용성 검토 후) / 광고주 화면 검수 요약 노출</li>
+          <li>탭 마감 시 검수 리포트(통과율·불량 목록) 자동 생성 — 마감자료(closeout) 파이프라인에 합류</li>
+        </ul>
+      </div></div>
+    </div>
+  </section>
+
+  <!-- ══════════════════ 7. 운영·보안 원칙 ══════════════════ -->
+  <section>
+    <h2><span class="secno">7</span>운영·보안 원칙 (완화 금지선)</h2>
+    <div class="tblwrap"><table>
+      <thead><tr><th>원칙</th><th>내용</th></tr></thead>
+      <tbody>
+        <tr><td><b>fail-open — 제출 불차단</b></td><td>검수는 <b>사후 분류</b>다. AI 장애·저확신·판정 불가가 리뷰어의 업로드·제출을 막는 일은 없다(captureVerify·신원게이트와 동일 규율). 자동 반려도 없다 — 불량 확정은 항상 사람이 누른다.</td></tr>
+        <tr><td><b>API 비용 통제</b></td><td>인라인은 기존 형식판별 콜을 확장·대체(순증 0), 배치는 사이클 캡(기본 20건). Gemini 캐시(동일 파일 재업로드 상각)·타임아웃 9초 골격 재사용. <b>시트 API lane 무접촉</b>(검수는 시트를 한 번도 읽지 않는다).</td></tr>
+        <tr><td><b>Drive 부하</b></td><td>다운로드는 배치 백필에서만(신규 제출은 base64를 이미 쥐고 있음). 사이클 캡 + 최근분 우선. 이미지 재업로드·이동 없음(읽기 전용).</td></tr>
+        <tr><td><b>PII</b></td><td>OCR 본문·작성자 표기는 내부 전용(광고주 미노출, 1단계). 검수 API는 전부 인증 + 역할 스코프(staff 담당 탭 강제). 이미지 접근은 기존 무인증 프록시의 추측불가 fileId 모델 유지.</td></tr>
+        <tr><td><b>킬스위치</b></td><td><code>REVIEW_INSPECT=0</code>(인라인+배치 전체 OFF — 업로드는 기존 형식판별만으로 동작), <code>REVIEW_INSPECT_SWEEP=0</code>(배치만 OFF). 판정 임계 env: <code>REVIEW_INSPECT_SIM_THRESHOLD</code>(0.9) · <code>REVIEW_INSPECT_MIN_TEXT</code>(30자) · <code>REVIEW_INSPECT_BATCH</code>(20).</td></tr>
+        <tr><td><b>기존 동작 불변</b></td><td>슬롯 형식 검수(capture_mismatch)의 판정·알림 시맨틱은 그대로 유지 — 종합 프롬프트는 기존 응답 필드(kind/confidence/businessNo/amount)를 포함하는 <b>상위 호환</b>으로 설계하고, 회귀가드가 기존 필드 계약을 고정한다.</td></tr>
+        <tr><td><b>롤백 용이</b></td><td>신규 테이블 + 컬럼 추가만(비파괴). 되돌리기 = env OFF + (원하면) 081 드롭. 라이브 핫패스(주문 원장·시트 쓰기·검색)는 한 줄도 건드리지 않는다.</td></tr>
+      </tbody>
+    </table></div>
+  </section>
+
+  <!-- ══════════════════ 8. 확정 필요 사항 ══════════════════ -->
+  <section>
+    <h2><span class="secno">8</span>구현 착수 전 확정 필요 사항</h2>
+    <div class="card">
+      <ol>
+        <li><b>제출자명 검수(조건 ③)</b> — 본 계획은 "1단계 보류 + OCR 수집만"을 권고. 이대로 진행해도 되는지? <span class="note">(마스킹·닉네임 때문에 오탐이 크다는 판단 — §2-③)</span></li>
+        <li><b>텍스트 유사도 비교 범위</b> — 기본 "같은 탭 내"로 시작 권고. 리뷰어가 <b>다른 캠페인에 같은 글을 돌려쓰는 것</b>까지 잡으려면 전역 비교가 필요(비용↑) — 어느 범위로 시작할지?</li>
+        <li><b>불량/의심 시 리뷰어 통지</b> — 권고안: 자동 통지 없음, 관리자가 [교체요청] 버튼으로 확정한 건만 기존 C/S 카드로 통지. <span class="note">의심 단계에서 리뷰어에게 바로 보이게 하면 오탐 마찰이 크다.</span></li>
+        <li><b>광고주(업체) 노출</b> — 1단계는 내부 전용 권고. 이후 "검수 통과율" 같은 요약만 광고주 작업대에 노출할지?</li>
+        <li><b>과거분 백필 범위</b> — 최근 30일 권고(그 이전은 이미 업체 전달이 끝난 작업이 대부분). 전량 백필이 필요하면 Drive 다운로드·AI 콜 비용을 별도 산정.</li>
+      </ol>
+    </div>
+    <div class="callout ok">
+      확정되면 <b>M1(마이그레이션 + 인라인 검수)</b>부터 착수한다. M1은 화면 없이도 배포 가능하고, 배포 즉시 신규 제출부터 검수 데이터가 쌓이기 시작한다 —
+      M3 UI가 열리는 시점에는 이미 판정 이력이 차 있는 상태가 된다.
+    </div>
+  </section>
+
+  <footer>
+    리뷰 자동검수 시스템 구현계획서 v1.0 · 2026-08-03 · 이 문서는 <code>frontend/docs/prd-review-auto-inspection.html</code>로 저장되어 있습니다.<br>
+    참고한 실제 코드: <code>diag.routes.js</code>(review-upload) · <code>captureVerify.service.js</code> · <code>gemini.service.js</code> · <code>drive.service.js</code> ·
+    <code>reviewFolders.service.js</code> · migrations 031/032/034 · <code>reviewer_event_logs</code>(062) · <code>reviewEdit</code>+<code>csBridge</code>(080)
+  </footer>
+
+</div>
+</body>
+</html>
