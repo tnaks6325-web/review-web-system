@@ -440,9 +440,17 @@ function _rfPickBtn(group, val) {
 /* 작업오더가 넘겨준 연결 탭을 드롭다운에서 고른다.
    ★ gid 우선 — 탭 이름은 운영 중 바뀌지만 gid 는 그대로다(이름만 보면 리네임된 탭을 못 찾는다). */
 function _prefillLinkedTab(prefill) {
-  const sid = prefill.linked_sheet_id || "";
+  // 접수 전 오더는 linked_tab_*가 비어 있다 → 작업시트탭URL에서 시트ID·gid를 뽑아 대신 쓴다.
+  //   (그 탭이 앞선 오더로 이미 등록돼 있으면 여기서 잡히고, 아니면 아래 목록 검사에서 걸러진다)
+  let sid = prefill.linked_sheet_id || "";
+  let gidFromUrl = "";
+  if (!sid && prefill.work_sheet_url) {
+    const sm = /\/spreadsheets\/d\/([a-zA-Z0-9-_]+)/.exec(prefill.work_sheet_url);
+    const gm = /[#?&]gid=(\d+)/.exec(prefill.work_sheet_url);
+    if (sm && gm) { sid = sm[1]; gidFromUrl = gm[1]; }
+  }
   if (!sid) return false;
-  const gid = String(prefill.linked_tab_gid || "");
+  const gid = String(prefill.linked_tab_gid || gidFromUrl || "");
   const byGid = gid && _recruitTabList.find(t => t.sheetId === sid && String(t.tabGid || "") === gid);
   const tabName = (byGid && byGid.tabName) || prefill.linked_tab_name || "";
   if (!tabName) return false;

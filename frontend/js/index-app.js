@@ -1931,6 +1931,9 @@ async function woCreateCampaign(id) {
     linked_sheet_id: o.linked_tab_sheet_id || "",
     linked_tab_name: o.linked_tab_name || "",
     linked_tab_gid:  o.linked_tab_gid || "",
+    // ★ 미접수 오더 폴백 — 접수 전이라 linked_tab_*가 비어도 URL의 시트ID·gid로 찾아본다
+    //   (같은 탭이 앞선 오더로 이미 등록돼 있으면 여기서 잡힌다)
+    work_sheet_url:  o.work_sheet_url || "",
   };
   switchAdminTab("recruit");
   // recruit 탭의 연결 탭 옵션 로드를 보장한 뒤 모달 오픈 (setTimeout race 제거)
