@@ -146,6 +146,10 @@ GAS(Google Apps Script) 기반 리뷰 관리 시스템을 **Node.js Express + Po
 - **행으로 보기(시안 C 티켓형)**: 리뷰어 홈 ≡ 토글(`applyRecruitView`가 `.rc-list`에 `rc-view-row` 부여)이 참여형 카드에도 적용된다. ★**렌더 경로는 `cardHtml()` 하나뿐 — 행 보기는 CSS 표현만 전환**(`.rc-view-row .pcard{flex-direction:row}` + 썸네일 92px 좌측고정·`position:static`으로 낮춰 배지/리본 절대배치를 `.pcard` 기준으로 재기준화·게이지 1줄 압축). 행 전용 HTML 빌더를 만들면 상태 규칙(카운트다운·리본·인기배지·버튼 문구)이 두 벌이 되어 드리프트하므로 **금지**(회귀가드가 `rowHtml`류 부재를 고정). 함정: flex 자식 기본 `min-width:auto` 때문에 `.pbody{min-width:0}` 없으면 긴 제목이 행을 가로로 밀어내고 말줄임도 안 먹는다(실측 확인). 회귀가드 `tests/campaignRowView.test.js`(18케이스). 시안 문서 = `frontend/docs/design-campaign-rowview.html`(모바일 390px 목업 A/B/C, `?v=A|B|C`로 단독 보기).
 - **🔥 인기상품**(`is_popular`, 참여형 카드 토글): 리뷰어 카드 [인기!] 배지(`pt-pop`, 공개필드 레거시/참여형 양쪽) + **선행참여 게이트** — 명의(phone8)별 `일반(비인기) 참여형 submitted 수 > 인기 소비(제출확정+유효홀드)`일 때만 인기 apply 허용(403 `popular_locked`+normalDone/popularUsed, **1:1 교환**·만료/취소 자동 환불·타계정도 명의별 일반 1건씩 필요, 명의 advisory 락이 이중소비 차단). `GET /api/campaign/popular-status?phone8=`(무인증 phone8 스코프, **`/:id`보다 먼저 등록** — 라우트 삼킴 함정). campaign.html = 인기 공고 안내 카드(`renderPopNotice`) + 잠금 시 **일반모집 테이블 모달**(`openPopGate` — open·비인기·자기제외 필터, [참여하기] CTA→`pop_return_camp` 기록) + 일반 제출완료 화면 "인기 상품으로 돌아가기" 버튼(지각접수는 미노출=크레딧 아님). 회귀가드 `tests/campaignPinnedPopular.test.js`(35케이스).
 
+### C/S 문의창구 대화창 너비 상한
+- 좌측 문의방 목록(`#csRoomListWrap`, 360px 고정)을 뺀 나머지 폭을 대화창이 전부 차지해, 넓은 화면에서 말풍선 사이 여백만 벌어지던 것을 `#csConvPane{max-width:860px}` 로 고정(`js/cs-inquiry.js`, admin·통합작업대 공용 모듈이라 한 곳만 고치면 양쪽 반영).
+- **목록 옆에 붙이고 남는 폭은 오른쪽 여백으로 흘려보내는 방식**(사용자 확정) — `flex:1;min-width:0` 은 유지하고 `max-width` 만 추가했으므로 별도 스페이서 없이 flex 성장이 상한에서 멈추는 것만으로 동작. 회귀가드 `server/tests/csConvWidthCap.test.js`.
+
 ### 통합 작업대 화면 폭 상한 (FHD/QHD 토글) · 열 너비 고정
 - **문제 2개**: ① 창을 넓힐수록 헤더·업체 칩바·탭바·본문이 끝없이 따라 늘어났다. ② 시트 그리드가 컨테이너를 꽉 채우려고 **주소 열이 잔여폭을 흡수**해, 같은 열이 창 크기·숨긴 열 수마다 다른 너비가 됐다(작업을 오갈 때마다 열 위치를 다시 찾음).
 - **상한**: `--app-max` 토큰 하나(`:root` 기본 1920 + `body[data-vw="fhd"|"qhd"]` = 1920/2560), 우측 상단 좌우 슬라이딩 스위치(`.vwsw` `#vwToggle`, `localStorage.wd_viewport_mode`, **기본 FHD**=좁은 쪽). 적용은 `.top`·`.tb1`·`.tb2`·`.wrap`·`.ovwrap` 5곳.
