@@ -395,6 +395,48 @@ const detailLimiter = rateLimit({
   message: { ok: false, error: '요청이 너무 많습니다. 잠시 후 다시 시도하세요.', reason: 'rate_limited' },
 });
 
+/**
+ * 작업오더의 작업시트탭 → 공고 연결 탭 자동 보정.
+ *
+ * 작업시트탭URL은 AE 제출 **필수**라 오더에는 항상 값이 있는데, 발행 폼에서 탭을 못 고르면
+ * (접수 전 발행·드롭다운 미로딩 등) 공고가 "시트 탭 미연결"로 남아 **게시 자체가 막힌다.**
+ * 그래서 저장 시점에 서버가 한 번 더 채운다 — 프론트 프리필이 놓쳐도 복구되는 안전망.
+ *
+ * ★ **비어 있을 때만** 채운다(관리자가 고른 탭을 절대 덮지 않는다).
+ * ★ 해석 순서: 접수 때 확정된 `linked_tab_*` → 없으면 `work_sheet_url`의 sheetId·gid로
+ *   `tab_configs`에서 탭명을 역조회(미접수 오더 구제). 어느 쪽도 못 찾으면 그대로 둔다.
+ *
+ * @returns {{sheetId, tabName, tabGid}|null}
+ */
+async function _linkedTabFromWorkOrder(workOrderId) {
+  const id = String(workOrderId || '').trim();
+  if (!id) return null;
+  try {
+    const { rows } = await pool.query(
+      `SELECT linked_tab_sheet_id, linked_tab_name, linked_tab_gid, work_sheet_url
+         FROM work_orders WHERE id = $1 LIMIT 1`, [id]
+    );
+    const o = rows[0];
+    if (!o) return null;
+    if (o.linked_tab_sheet_id && o.linked_tab_name) {
+      return { sheetId: o.linked_tab_sheet_id, tabName: o.linked_tab_name, tabGid: String(o.linked_tab_gid || '') };
+    }
+    // 미접수 오더 폴백 — URL에서 시트ID·gid를 뽑아 등록된 탭에서 이름을 찾는다
+    const url = String(o.work_sheet_url || '');
+    const sm = /\/spreadsheets\/d\/([a-zA-Z0-9-_]+)/.exec(url);
+    const gm = /[#?&]gid=(\d+)/.exec(url);
+    if (!sm || !gm) return null;
+    const { rows: tc } = await pool.query(
+      `SELECT tab_name FROM tab_configs WHERE sheet_id = $1 AND tab_gid = $2 LIMIT 1`, [sm[1], gm[1]]
+    );
+    if (!tc.length) return null;   // 아직 등록 안 된 탭 — 접수하면 해결된다
+    return { sheetId: sm[1], tabName: tc[0].tab_name, tabGid: gm[1] };
+  } catch (e) {
+    logger.warn(`[campaign] 작업오더 연결탭 조회 실패(무시): ${e.message}`);
+    return null;   // fail-soft — 보정 실패가 공고 저장을 막지 않는다
+  }
+}
+
 /** 참여형 활성화 게이트(레드 #6·#10): gid·일일건수 필수. 시간창은
  *  "양쪽 설정(start<end)" 또는 "양쪽 미설정(자율주문=종일 오픈)"만 허용 — 한쪽만/역전은 차단. */
 function _participationActivationErrors(c) {
@@ -1340,10 +1382,21 @@ router.post('/admin/create', authMiddleware, adminOrMasterMiddleware, async (req
       return res.status(400).json({ ok: false, error: '시작일 형식이 올바르지 않습니다. (YYYY-MM-DD)' });
     }
 
+    // ★ 연결 탭 자동 보정 — 폼에서 못 골랐어도 작업오더의 작업시트탭으로 채운다(빈 값일 때만).
+    //   게이트 판정 **전에** 채워야 "탭 미연결"로 게시가 막히는 것을 실제로 막을 수 있다.
+    let lSheet = linked_sheet_id, lTab = linked_tab_name, lGid = linked_tab_gid;
+    if (!lSheet || !lTab) {
+      const wo = await _linkedTabFromWorkOrder(source_work_order_id);
+      if (wo) {
+        lSheet = lSheet || wo.sheetId; lTab = lTab || wo.tabName; lGid = lGid || wo.tabGid;
+        logger.info(`[campaign] 연결탭 자동 보정(생성): wo=${source_work_order_id} → ${wo.tabName}`);
+      }
+    }
+
     // 참여형을 active로 "생성"하는 것도 활성화 게이트 통과 필요(status 라우트 우회 방지)
     if (participation_mode && (status === 'active')) {
       const errs = _participationActivationErrors({
-        linked_sheet_id, linked_tab_gid, window_start, window_end, daily_limit,
+        linked_sheet_id: lSheet, linked_tab_gid: lGid, window_start, window_end, daily_limit,
       });
       if (errs.length) return res.status(400).json({ ok: false, error: '참여형 활성화 불가: ' + errs.join(', ') });
     }
@@ -1377,9 +1430,9 @@ router.post('/admin/create', authMiddleware, adminOrMasterMiddleware, async (req
         max_slots || 0,
         deadline || null,
         description || '',
-        linked_sheet_id || '',
-        linked_tab_name || '',
-        linked_tab_gid || '',
+        lSheet || '',
+        lTab || '',
+        lGid || '',
         req.admin?.name || '',
         participation_mode === true,
         thumbnail_url || '',
@@ -1444,6 +1497,40 @@ router.put('/admin/:id', authMiddleware, adminOrMasterMiddleware, async (req, re
     const _wsEff = (req.body.auto_order === true) ? '' : window_start;
     const _weEff = (req.body.auto_order === true) ? '' : window_end;
 
+    // ★ 연결 탭 자동 보정(수정) — 이미 저장된 공고가 "시트 탭 미연결"이면 작업오더 값으로 채운다.
+    //   공고를 열어 저장하기만 하면 복구되는 경로(관리자가 탭을 직접 고르면 그 값이 우선).
+    //   ★ 비어 있을 때만 — 본문에 값이 있거나 DB에 이미 연결돼 있으면 건드리지 않는다.
+    let lSheet = linked_sheet_id, lTab = linked_tab_name, lGid = linked_tab_gid;
+    if (!lSheet || !lTab) {
+      try {
+        const { rows: cur0 } = await pool.query(
+          'SELECT linked_sheet_id, linked_tab_name, linked_tab_gid, source_work_order_id FROM recruit_campaigns WHERE id = $1',
+          [id]
+        );
+        const c0 = cur0[0];
+        if (c0 && !c0.linked_sheet_id && !c0.linked_tab_name) {
+          // 정방향 링크가 없으면 역방향(work_orders.linked_campaign_id)으로도 찾는다 —
+          // 옛 경로로 만든 공고는 source_work_order_id 가 비어 있을 수 있다.
+          let woId = source_work_order_id || c0.source_work_order_id || '';
+          if (!woId) {
+            const { rows: back } = await pool.query(
+              `SELECT id FROM work_orders
+                WHERE linked_campaign_id = $1 AND deleted_at IS NULL
+                ORDER BY created_at ASC LIMIT 1`, [id]
+            );
+            woId = back[0]?.id || '';
+          }
+          const wo = await _linkedTabFromWorkOrder(woId);
+          if (wo) {
+            lSheet = lSheet || wo.sheetId; lTab = lTab || wo.tabName; lGid = lGid || wo.tabGid;
+            logger.info(`[campaign] 연결탭 자동 보정(수정): camp=${id} → ${wo.tabName}`);
+          }
+        }
+      } catch (e) {
+        logger.warn(`[campaign] 연결탭 보정 조회 실패(무시): ${e.message}`);
+      }
+    }
+
     // ★ 참여형 활성화 게이트(심판 J7): COALESCE 편집으로 status='active' 우회 방지.
     //   이 라우트가 바꿀 수 있는 게이트 입력(연결탭·시간창·일일건수)을 본문값으로 병합해 판정.
     if (status === 'active') {
@@ -1452,8 +1539,8 @@ router.put('/admin/:id', authMiddleware, adminOrMasterMiddleware, async (req, re
         const pick = (v, curV) => (v === undefined || v === null) ? curV : v;
         const eff = {
           ...cur[0],
-          linked_sheet_id: pick(linked_sheet_id, cur[0].linked_sheet_id),
-          linked_tab_gid: pick(linked_tab_gid, cur[0].linked_tab_gid),
+          linked_sheet_id: pick(lSheet, cur[0].linked_sheet_id),   // ★ 자동 보정값 반영
+          linked_tab_gid: pick(lGid, cur[0].linked_tab_gid),
           window_start: pick(_wsEff, cur[0].window_start),
           window_end: pick(_weEff, cur[0].window_end),
           daily_limit: pick(daily_limit, cur[0].daily_limit),
@@ -1516,7 +1603,7 @@ router.put('/admin/:id', authMiddleware, adminOrMasterMiddleware, async (req, re
         badges ? JSON.stringify(badges) : null,
         notes, chat_url, status, sort_order || 0,
         max_slots || 0, deadline || null, description,
-        linked_sheet_id, linked_tab_name, linked_tab_gid,
+        lSheet, lTab, lGid,   // ★ 자동 보정값(빈 값이면 COALESCE로 기존값 유지 — 종전과 동일)
         (participation_mode === undefined || participation_mode === null) ? null : participation_mode === true,
         thumbnail_url ?? null,
         landing_url ?? null,
