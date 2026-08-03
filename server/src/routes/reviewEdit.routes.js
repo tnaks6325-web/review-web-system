@@ -25,6 +25,7 @@ const { _getReviewerPhoneList } = require('../services/search.service');
 const { authMiddleware, adminOrMasterMiddleware } = require('../middleware/auth.middleware');
 const { imageApiLimiter } = require('../middleware/rateLimit.middleware');
 const sse = require('../utils/sse');
+const csBridge = require('../services/csBridge.service');
 
 // ── 공통 헬퍼 ──
 
@@ -400,6 +401,14 @@ router.post('/request', imageApiLimiter, async (req, res) => {
       });
     } catch (_) {}
 
+    // C/S 문의창구에 카드로 남긴다 — 관리자가 한 곳(문의)만 봐도 놓치지 않게(사용자 확정).
+    //   ★ fail-soft: 실패해도 요청 접수는 이미 끝났다(csBridge 가 throw 하지 않는다).
+    await csBridge.postReviewEditRequest({
+      id: ins[0].id, phone8: p8, reviewer_name: reviewerName, campaign_label: campaignLabel,
+      sheet_id: sheetId, tab_name: tabName, row_index: rowIndex, slot_key: slot,
+      old_file_id: oldFileId, new_file_id: uploaded.id, reason: reason || '',
+    });
+
     res.json({ ok: true, requestId: ins[0].id });
   } catch (err) {
     logger.error(`[review-edit] request 실패: ${err.message}`);
@@ -458,6 +467,10 @@ router.post('/cancel', async (req, res) => {
     // 스테이징 파일 회수(커밋 후, 비치명적)
     try { if (r.new_file_id) await driveService.trashFiles([{ id: r.new_file_id, name: r.new_file_name || '' }]); } catch (_) {}
     try { sse.broadcast('review_edit_request', { message: '리뷰 수정요청 취소', requestId, action: 'cancelled' }); } catch (_) {}
+
+    // C/S 카드도 내린다 — 안 그러면 관리자 화면에 [승인]/[반려] 가 살아 있는 좀비 카드가 남고,
+    //   재요청 시 같은 행에 "처리 대기" 카드가 두 장 보인다(부분 유니크는 pending 만 막는다).
+    await csBridge.markReviewEditCancelled(r);
 
     res.json({ ok: true });
   } catch (err) {
@@ -594,6 +607,11 @@ router.post('/approve', authMiddleware, adminOrMasterMiddleware, async (req, res
     // 5) 관리자 위젯 실시간 갱신
     try { sse.broadcast('review_edit_request', { message: '리뷰 수정요청 승인 완료', requestId: id, action: 'approved' }); } catch (_) {}
 
+    // 6) 리뷰어 채팅에 자동 통지 + C/S 카드 상태 갱신 — 관리자가 따로 타이핑하지 않게.
+    //    ★ 여기(서비스 호출)라서 **어느 화면에서 눌렀든** 똑같이 간다(기존 관리자페이지 포함).
+    //    ★ 커넥션을 반납한 뒤에 부른다(csBridge 는 같은 풀에서 새 커넥션을 얻는다).
+    await csBridge.postReviewEditDecision(committed, 'approved', note ? _sanitizeReason(note) : '', req.admin?.name || '관리자');
+
     res.json({ ok: true });
   } catch (err) {
     logger.error(`[review-edit] approve 실패: ${err.message}`);
@@ -602,10 +620,15 @@ router.post('/approve', authMiddleware, adminOrMasterMiddleware, async (req, res
 });
 
 // POST /api/review-edit/reject  body: { id, note? }
+//   ★ note(반려 사유) **필수**(사용자 확정) — 이 사유가 그대로 리뷰어 채팅에 자동 전송되므로,
+//     비워 두면 리뷰어는 "반려됐다"만 알고 무엇을 고쳐야 하는지 모른 채 다시 요청하게 된다.
 router.post('/reject', authMiddleware, adminOrMasterMiddleware, async (req, res) => {
   const { id, note } = req.body;
   if (!id) return res.json({ ok: false, error: 'id가 필요합니다.' });
+  const rejectNote = _sanitizeReason(note || '');
+  if (!rejectNote.trim()) return res.json({ ok: false, error: '반려 사유를 입력해 주세요. (리뷰어에게 그대로 전달됩니다)' });
 
+  let committed = null;
   const client = await pool.connect();
   try {
     await client.query('BEGIN');
@@ -622,23 +645,30 @@ router.post('/reject', authMiddleware, adminOrMasterMiddleware, async (req, res)
           SET status = 'rejected', resolved_by = $1, resolved_at = NOW(), updated_at = NOW(),
               admin_note = $2
         WHERE id = $3`,
-      [req.admin?.name || '', note ? _sanitizeReason(note) : null, id]
+      [req.admin?.name || '', rejectNote, id]
     );
     await client.query('COMMIT');
-
-    // 스테이징 새 파일 회수(커밋 후, 비치명적)
-    try { if (r.new_file_id) await driveService.trashFiles([{ id: r.new_file_id, name: r.new_file_name || '' }]); } catch (_) {}
-
-    try { sse.broadcast('review_edit_request', { message: '리뷰 수정요청 반려', requestId: id, action: 'rejected' }); } catch (_) {}
-
-    res.json({ ok: true });
+    committed = r;
   } catch (err) {
     try { await client.query('ROLLBACK'); } catch (_) {}
     logger.error(`[review-edit] reject 실패: ${err.message}`);
-    res.json({ ok: false, error: err.message });
+    return res.json({ ok: false, error: err.message });
   } finally {
     client.release();
   }
+
+  // ★★ 커밋·커넥션 반납 **뒤에** 후처리한다.
+  //   ① csBridge 는 같은 풀에서 커넥션을 새로 얻는다 — 쥔 채로 부르면 동시 반려가 풀 크기만큼
+  //      겹칠 때 서로를 기다리는 자기교착이 된다(승인 경로와 같은 규율).
+  //   ② 이미 커밋된 뒤이므로 여기서 실패해도 ROLLBACK 하지 않는다 — "반려됐는데 실패 표시" 금지.
+  try {
+    try { if (committed.new_file_id) await driveService.trashFiles([{ id: committed.new_file_id, name: committed.new_file_name || '' }]); } catch (_) {}
+    try { sse.broadcast('review_edit_request', { message: '리뷰 수정요청 반려', requestId: id, action: 'rejected' }); } catch (_) {}
+    await csBridge.postReviewEditDecision(committed, 'rejected', rejectNote, req.admin?.name || '관리자');
+  } catch (e) {
+    logger.warn(`[review-edit] reject 후처리 실패(무시): ${e.message}`);
+  }
+  res.json({ ok: true });
 });
 
 module.exports = router;

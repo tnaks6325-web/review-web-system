@@ -143,6 +143,15 @@
     }
     box.innerHTML = messages.map(m => {
       const mine = m.senderRole === 'reviewer';
+      // 리뷰이미지 교체요청 = 카드(관리자 화면과 **같은 렌더러**, 여기선 읽기 전용).
+      //   리뷰어가 자기 요청의 진행 상태를 채팅 안에서 그대로 확인한다.
+      if (m.msgType === 'review_edit' && window.CsReviewEditCard) {
+        return `<div style="display:flex;flex-direction:column;align-items:${mine ? 'flex-end' : 'flex-start'}">
+          <div style="font-size:.66rem;color:#9CA3AF;margin-bottom:2px">${mine ? '나' : esc(m.senderName || '관리자')}</div>
+          ${window.CsReviewEditCard.html(m.meta || {}, { admin: false })}
+          <div style="font-size:.62rem;color:#cbd5e1;margin-top:2px">${timeFmt(m.createdAt)}</div>
+        </div>`;
+      }
       const imgs = Array.isArray(m.imageUrls) ? m.imageUrls : [];
       const imgHtml = imgs.length ? `<div style="display:flex;flex-wrap:wrap;gap:5px;max-width:80%;margin-top:${m.content ? '4px' : '0'}">` +
         imgs.map(u => `<img src="${esc(u)}" alt="첨부 사진" onclick="ReviewerCS.viewImage('${esc(u)}')"

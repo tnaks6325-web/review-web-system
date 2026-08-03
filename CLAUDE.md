@@ -194,6 +194,17 @@ GAS(Google Apps Script) 기반 리뷰 관리 시스템을 **Node.js Express + Po
 - ★★ **실측 사고(조용한 파싱 포기)**: `:root{--tbh:…}` 위 주석에 닫는 표시가 하나 더 있어 주석이 일찍 닫혔고, 뒤 설명 텍스트가 top-level 셀렉터로 파싱되며 **`:root` 규칙을 통째로 삼켰다** → `--app-max` 기본값이 아예 적용 안 됨(FHD 모드 상한 없음). 브라우저는 에러 없이 넘어가고 **선언은 멀쩡히 '있어서' grep 가드로는 못 잡는다** → 회귀가드가 주석/중괄호 **토큰을 센다**. 회귀가드 `server/tests/workdeskWidthCap.test.js`(30케이스).
 - **미적용(문서화)**: 업체관리 연결탭 표(`.othead`/`.owntab`)는 여전히 `fr` 스트레치 — 상한 안에서만 늘어나므로 방치. 필요해지면 fr→고정폭.
 
+### 리뷰이미지 교체요청 ↔ C/S 문의창구 연동 (migration 080)
+- **목적**: 교체요청의 승인·반려 결과가 리뷰어에게 **전혀 통지되지 않던 것**(SSE 는 관리자 위젯용뿐, 리뷰어는 '내 요청함'을 다시 열어야 알았다)을 메운다. 요청이 오면 그 리뷰어의 C/S 스레드에 **카드 메시지**가 자동으로 생기고(스레드 없으면 생성 — 사용자 확정), 관리자가 대화창·전용탭·기존 관리자페이지 어디서 처리하든 리뷰어 채팅에 **"승인/반려되었습니다"가 자동 전송**된다(반려는 사유 필수, 그 사유가 그대로 전달).
+- **데이터**: `cs_messages.msg_type`(`text`|`review_edit`) + `meta jsonb`. 요청 1건 = 카드 1장(`uq_cs_msg_review_edit` 부분유니크), 승인/반려는 **제자리 갱신**(meta 병합) + 별도 text 통지. 스레드 키는 리뷰어 UI 와 같은 `sheetId||tabName`(다르면 같은 탭에 방이 두 개 생긴다). CHECK 는 **NOT VALID**(러너가 파일을 암묵 트랜잭션으로 돌려 스캔 중 ACCESS EXCLUSIVE 가 유지된다).
+- **단일 출처** `csBridge.service.js` — 라우트가 아니라 **서비스 레벨**에서 부르므로 어느 화면에서 눌러도 결과가 같다. ★★ **절대 throw 하지 않는다**: 승인은 Drive 이동·rename·`review_index` 갱신까지 끝난 뒤의 후처리라, 통지 실패로 예외가 오르면 "파일은 바뀌었는데 요청은 pending"이 된다. 반려도 **커넥션 반납 뒤** 호출(같은 풀에서 새 커넥션을 얻으므로 쥔 채 부르면 자기교착).
+- **권한**: 전용 탭 `/api/trackb/review-edit/*` 는 **AE(staff)도 담당 탭만**(목록=결과 필터, 승인/반려=위임 **전** `canAccessTab`), 광고주·리뷰어 차단. **C/S 문의 탭은 여전히 master/admin 전용** — 문의 본문에 리뷰어 실명·연락처·주소·주문정보가 그대로 실려 담당 스코프로 나눌 수 없다. 원본 `/api/review-edit/*` 정책은 무변경.
+- ★★ **리뷰어에게 나가는 값의 규율**(코드리뷰로 잡힌 것): ① `meta` 는 `/api/reviewer/cs/messages` 응답에 **그대로 실린다** — `adminNickname.maskMessages` 는 `senderName` 만 치환하므로 **관리자 실명을 meta 에 넣으면 안 된다**(화면에서만 감추는 건 devtools 에 보이는 보안연극). ② SSE 푸시도 페이로드로 새므로 `toReviewerName` 으로 치환해 보낸다. ③ 기존 스레드의 `campaign_label` 을 **덮어쓰지 않는다** — 그 값 출처에 **시트 제목**이 섞이는데 시트 제목은 리뷰어 응답에 넣지 않는다는 규칙이 `reviewer.routes` 에 있다.
+- ★ **이미지는 파일ID로 넘긴다** — `image_urls`(guide-image 만 허용하는 sanitize) 를 넓히지 않고 `meta.oldFileId/newFileId` 만 저장, 프론트가 `/api/drive/image/<id>` 를 **신뢰 베이스로 재구성**한다. 반려 시 `newFileId` 를 비운다(그 파일은 휴지통으로 가 썸네일이 깨진다). 취소도 카드를 `cancelled` 로 내린다(안 그러면 [승인]/[반려] 가 살아 있는 좀비 카드).
+- ★★ **`window.API_BASE_URL` 은 존재하지 않는다**(실측 블로커): `api.js` 의 `const API_BASE_URL` 은 최상위 const 라 window 프로퍼티가 **아니다**. `window.` 로 읽으면 항상 undefined → 상대경로가 되어 프론트(Pages)에서 API(Railway) 이미지를 전부 못 부른다. 레포 관용구는 bare 식별자(`campaign-cards.js` `_apiBase()`). ⚠ **`file://` 로 여는 브라우저 테스트는 이 버그를 가린다** — 상대경로도 스텁에 걸린다. 이런 검증은 **실제 http 오리진**에서 할 것.
+- ★ **Express 4 는 async 핸들러 rejection 을 안 잡는다** — `_reCanTouch` 가 UUID 아닌 id 로 22P02 를 맞으면 **응답이 영영 안 나간다**(클라이언트는 서버 타임아웃까지 대기). 형식 선검사 + try/catch 로 전부 fail-closed 응답.
+- 카드 렌더러는 `js/cs-review-edit-card.js` **한 벌** — 관리자 대화창·전용 탭·리뷰어 채팅이 같은 것을 그린다(리뷰어는 `admin:false` 로 버튼 없음). 회귀가드 `tests/reviewEditCsBridge.test.js`(35케이스 — 정적 + **런타임 실행**: hang 재발·실명 미노출·절대 URL·리뷰어 버튼 없음).
+
 ### 관리자 공고 수정 모달 — 좌우 2단 · 기본정보/모집정보 (v4)
 - **레이아웃**: 폭 1120px, `.rf-split` 좌(입력) / 우(미리보기 `.rf-side` 340px 고정). 미리보기를 아래 쌓으면 같은 스크롤을 나눠 써 "고치면서 확인"이 안 된다. 900px 이하 세로 복귀. ★★ **레이아웃 CSS는 `@media` 밖 최상위**(안에 넣어 480px 이하에서만 먹은 실측 버그).
 - **묶음 2개**(`.rf-sec` + `.rf-sech` sticky): **기본정보**(무슨 상품을 어떻게 사고 어떤 리뷰를 쓰나) / **모집정보**(언제 몇 명을 모으나). 탭은 쓰지 않는다 — 항목을 찾아 옮겨다니는 비용이 더 컸다.

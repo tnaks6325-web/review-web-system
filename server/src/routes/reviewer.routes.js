@@ -721,7 +721,8 @@ router.get('/cs/messages', async (req, res, next) => {
 
     const { rows: messages } = await pool.query(
       `SELECT id, sender_role AS "senderRole", sender_name AS "senderName", content,
-              image_urls AS "imageUrls", created_at AS "createdAt"
+              image_urls AS "imageUrls", created_at AS "createdAt",
+              msg_type AS "msgType", meta
        FROM cs_messages WHERE thread_id = $1 ORDER BY created_at ASC LIMIT 1000`, [thread.id]
     );
     await pool.query(`UPDATE cs_threads SET reviewer_unread_count = 0, updated_at = NOW() WHERE id = $1`, [thread.id]);
