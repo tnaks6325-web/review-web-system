@@ -115,6 +115,8 @@ const _ACTION_MAP = {
   'adminLogin':         { method: 'POST', path: '/api/admin/login' },
   'adminLoginV2':       { method: 'POST', path: '/api/admin/login' },
   'adminChangePw':      { method: 'POST', path: '/api/admin/change-pw' },
+  'adminMyNickname':    { method: 'GET',  path: '/api/admin/my-nickname' },
+  'adminSaveNickname':  { method: 'POST', path: '/api/admin/my-nickname' },
   'changeMasterPw':     { method: 'POST', path: '/api/admin/change-master-pw' },
   'addAdminUser':       { method: 'POST', path: '/api/admin/users', remap: 'add' },
   'editAdminUser':      { method: 'POST', path: '/api/admin/users', remap: 'edit' },

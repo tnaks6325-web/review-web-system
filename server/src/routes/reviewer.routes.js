@@ -15,6 +15,7 @@ const pool = require('../db/pool');
 const { logger } = require('../utils/logger');
 const { addClient, emitCsInquiry } = require('../utils/sse');
 const { _getReviewerPhoneList, PAYMENT_COL_KEYWORDS } = require('../services/search.service');
+const adminNickname = require('../services/adminNickname.service');
 
 // POST /api/reviewer/register — 리뷰어 등록 (GAS: registerReviewer)
 router.post('/register', registerLimiter, async (req, res, next) => {
@@ -725,7 +726,10 @@ router.get('/cs/messages', async (req, res, next) => {
     );
     await pool.query(`UPDATE cs_threads SET reviewer_unread_count = 0, updated_at = NOW() WHERE id = $1`, [thread.id]);
 
-    res.json({ ok: true, threadId: thread.id, campaignLabel: thread.campaignLabel, status: thread.status, messages });
+    // ★ 리뷰어 화면 = 닉네임 || '관리자' — 관리자 실명(로그인 계정명)은 절대 내보내지 않는다.
+    //   읽는 시점 치환이라 과거에 실명으로 쌓인 답장도 함께 가려진다.
+    const shown = await adminNickname.maskMessages(messages, 'reviewer');
+    res.json({ ok: true, threadId: thread.id, campaignLabel: thread.campaignLabel, status: thread.status, messages: shown });
   } catch (err) {
     next(err);
   }
