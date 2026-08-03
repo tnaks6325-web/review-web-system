@@ -196,6 +196,36 @@
   ol.q b{font-weight:730}
   ol.q .why{display:block; color:var(--muted); font-size:12.5px}
 
+  /* 2층 흐름 밴드 */
+  .band{background:var(--card); border:1px solid var(--line); border-radius:13px; padding:14px 16px 16px;
+        box-shadow:var(--shadow); display:flex; flex-direction:column; gap:11px}
+  .band + .band{margin-top:11px}
+  .bhead{display:flex; align-items:center; gap:9px; flex-wrap:wrap}
+  .btag{font-family:var(--mono); font-size:10.5px; font-weight:700; letter-spacing:.08em; padding:3px 8px; border-radius:6px; flex:none}
+  .btag.one{background:var(--acc); color:#fff}
+  .btag.two{background:var(--line-soft); color:var(--muted); border:1px solid var(--line)}
+  .bhead .bt2{font-size:14px; font-weight:750; letter-spacing:-.01em}
+  .bhead .bwhen{margin-left:auto; font-size:12px; color:var(--muted)}
+  .zrow{display:grid; grid-template-columns:repeat(3,1fr); gap:8px}
+  @media (max-width:700px){ .zrow{grid-template-columns:1fr} }
+  .zone{border:1px solid var(--line); border-radius:10px; padding:11px 12px; display:flex; flex-direction:column; gap:4px; background:var(--paper)}
+  .zone .zt{font-size:12.5px; font-weight:730}
+  .zone .zd{font-size:11.5px; color:var(--muted); line-height:1.5}
+  .zone.hot{border-color:var(--acc-edge); background:var(--acc-bg)}
+
+  /* 슬롯 상태 3종 비교 */
+  .slots3{display:grid; grid-template-columns:repeat(3,1fr); gap:10px}
+  @media (max-width:700px){ .slots3{grid-template-columns:1fr} }
+  .sl{background:#fff; border:1px solid #D5DBE3; border-radius:10px; padding:10px; display:flex; flex-direction:column; gap:7px}
+  .sl.warnb{border-color:#E7D2A3}
+  .sl.blockb{border-color:#EAB6B0}
+  .sl .sh{display:flex; align-items:center; gap:6px; font-size:11px; font-weight:720}
+  .sl .msg{font-size:10.5px; line-height:1.5; border-radius:7px; padding:7px 8px}
+  .sl .msg.ok{background:#E5F3EE; color:#0E5C48; border:1px solid #A6D6C6}
+  .sl .msg.wn{background:#FBF2E1; color:#7A4E0F; border:1px solid #E7D2A3}
+  .sl .msg.bk{background:#FAE9E7; color:#8E2C24; border:1px solid #EAB6B0}
+  .sl .act{display:flex; gap:5px}
+
   footer{border-top:1px solid var(--line); padding-top:18px; color:var(--faint); font-size:12px; font-family:var(--mono)}
 
   @media (prefers-reduced-motion:no-preference){
@@ -213,9 +243,9 @@
     회색 빗금은 이미지가 들어갈 자리, 파란 번호는 오른쪽 설명과 짝입니다.</p>
     <div class="chips">
       <span class="chip a">화면 7개</span>
+      <span class="chip a">1차 = 첨부 즉시 · 2차 = 제출 후</span>
       <span class="chip">통합작업대 신규 탭</span>
-      <span class="chip">리뷰어 화면 변화 없음</span>
-      <span class="chip">제출 차단 없음</span>
+      <span class="chip">AI 호출 순증 0</span>
     </div>
   </header>
 
@@ -229,69 +259,118 @@
 
   <!-- ══════════ 흐름 한 장 ══════════ -->
   <section>
-    <div class="shead"><span class="snum">흐름</span><h2>제출 한 건이 지나는 길</h2></div>
-    <p class="sdesc">파란 칸이 이번에 <b>새로 생기는 부분</b>, 회색 칸은 <b>이미 돌아가는 기존 동작</b>입니다. 리뷰어가 겪는 과정은 하나도 바뀌지 않습니다.</p>
-    <div class="pipe">
-      <div class="pz"><span class="stamp keep">그대로</span>
-        <span class="ptag">1 · 리뷰어</span>
-        <span class="pt">캡처 첨부·제출</span>
-        <span class="pd">리뷰 화면을 캡처해 올린다. 화면·버튼·안내문 전부 현행 유지.</span></div>
-      <div class="pz"><span class="stamp keep">그대로</span>
-        <span class="ptag">2 · 저장</span>
-        <span class="pt">드라이브 저장</span>
-        <span class="pd">시트제목 → 탭명 → [리뷰] 폴더에 저장되고 제출 원장에 기록.</span></div>
-      <div class="pz new"><span class="stamp">신규</span>
-        <span class="ptag">3 · 검수</span>
-        <span class="pt">자동 검수</span>
-        <span class="pd">올라온 그 순간 5가지를 본다. 이미 돌던 AI 확인에 항목만 얹어 <b>추가 비용 거의 없음</b>.</span></div>
-      <div class="pz new"><span class="stamp">신규</span>
-        <span class="ptag">4 · 분류</span>
-        <span class="pt">통과 / 의심 / 불량</span>
-        <span class="pd">결과만 기록한다. <b>제출을 되돌리거나 막지 않는다.</b></span></div>
-      <div class="pz new"><span class="stamp">신규</span>
-        <span class="ptag">5 · 사람</span>
-        <span class="pt">검수 탭에서 확인</span>
-        <span class="pd">관리자·담당AE가 걸러진 것만 보고 통과 처리하거나 다시 받는다.</span></div>
+    <div class="shead"><span class="snum">흐름</span><h2>검수는 두 번 일어난다</h2></div>
+    <p class="sdesc">잘못 올린 파일을 <b>나중에 다시 받는 일</b>이 가장 번거롭다. 그래서 눈으로 바로 판별되는 것은 <b>첨부하는 순간</b> 걸러내고,
+    시간이 걸리는 대조는 제출 이후에 돌린다.</p>
+
+    <div class="band">
+      <div class="bhead">
+        <span class="btag one">1차</span>
+        <span class="bt2">리뷰어 화면에서 즉시 — 이게 리뷰 캡처가 맞나</span>
+        <span class="bwhen">캡처를 고른 직후 · 제출 버튼 누르기 전</span>
+      </div>
+      <div class="zrow">
+        <div class="zone hot">
+          <span class="zt">캡처를 고른다</span>
+          <span class="zd">아직 <b>저장된 것도 제출된 것도 없다.</b> 화면에만 담겨 있는 상태.</span></div>
+        <div class="zone hot">
+          <span class="zt">그 자리에서 판별</span>
+          <span class="zd">리뷰 화면인가 / <b>쿠팡인가 네이버인가</b> / 아예 다른 이미지인가.</span></div>
+        <div class="zone hot">
+          <span class="zt">아니면 되돌린다</span>
+          <span class="zd">리뷰 캡처가 아닌 게 확실하면 <b>그 자리에서 다시 고르게</b> 한다. 파일만 바꾸면 끝.</span></div>
+      </div>
+      <div class="call" style="font-size:12.5px">
+        여기서 잡으면 <b>드라이브에 저장되지도, 제출로 기록되지도 않는다</b> — 나중에 연락해서 다시 받는 과정 자체가 사라진다.
+      </div>
+    </div>
+
+    <div class="band">
+      <div class="bhead">
+        <span class="btag two">2차</span>
+        <span class="bt2">제출 이후 관리자 화면에서 — 우리 상품이 맞나, 재탕은 아닌가</span>
+        <span class="bwhen">제출 직후 자동 · 결과는 검수 탭에</span>
+      </div>
+      <div class="zrow">
+        <div class="zone">
+          <span class="zt">드라이브 저장</span>
+          <span class="zd">시트제목 → 탭명 → [리뷰] 폴더. 저장 위치는 현행 그대로.</span></div>
+        <div class="zone">
+          <span class="zt">상품명 · 같은 파일 · 글 겹침</span>
+          <span class="zd">1차에서 볼 수 없는 것들. 다른 제출과 <b>대조해야</b> 알 수 있다.</span></div>
+        <div class="zone">
+          <span class="zt">통과 / 의심 / 불량</span>
+          <span class="zd">기록만 한다. <b>제출을 되돌리지 않는다</b> — 판단은 사람이.</span></div>
+      </div>
+      <p class="sdesc" style="font-size:12.5px; margin:0">
+        상품명·중복·글 겹침을 1차로 올리지 않는 이유: 상품명 기준이 등록되지 않은 작업이 많아 <b>멀쩡한 제출을 막을 위험이 크고</b>,
+        중복·겹침은 <b>저장된 다른 제출과 비교해야</b> 나오는 판정이라 첨부 시점에는 비교 대상 자체가 없다.
+      </p>
     </div>
   </section>
 
   <!-- ══════════ 화면 1 ══════════ -->
   <section>
-    <div class="shead"><span class="snum">화면 1</span><h2>리뷰어 제출 화면 — 바뀌는 것 없음</h2></div>
-    <p class="sdesc">검수는 <b>제출이 끝난 뒤</b> 뒤에서 돈다. 리뷰어는 검수가 생겼다는 사실조차 모르고, 판정이 나빠도 그 자리에서 반려당하지 않는다.</p>
+    <div class="shead"><span class="snum">화면 1</span><h2>첨부하는 순간 — 1차 필터</h2></div>
+    <p class="sdesc">캡처를 고르면 <b>제출 버튼을 누르기 전에</b> 그 자리에서 판별한다. 슬롯 카드가 아래 셋 중 하나로 바뀐다.</p>
     <div class="scene">
       <div class="frame">
         <div class="fbar"><span class="fdots"><i></i><i></i><i></i></span>
-          <span class="fname">리뷰어 홈 › 리뷰 제출</span><span class="fkind">MOBILE</span></div>
+          <span class="fname">리뷰어 홈 › 리뷰 제출 › 리뷰 캡처 슬롯</span><span class="fkind">MOBILE</span></div>
         <div class="ui">
-          <div style="max-width:290px; margin:0 auto; display:flex; flex-direction:column; gap:9px">
-            <div class="box" style="padding:10px 12px">
-              <div class="lbl" style="margin-bottom:6px">진행 작업</div>
-              <div style="font-size:12.5px; font-weight:700">히말라야 핑크솔트 400g</div>
-              <div style="font-size:11px; color:#69727F">7월 ○○브랜드 · 12행</div>
-            </div>
+          <div class="slots3">
 
-            <div class="box" style="padding:11px 12px; display:flex; flex-direction:column; gap:8px; position:relative">
-              <span class="pin pinabs" style="top:-7px; left:-7px">1</span>
-              <div class="lbl">리뷰 캡처</div>
-              <div style="display:flex; gap:7px">
-                <div class="ph" style="width:74px; height:88px">캡처<br>1장</div>
-                <div class="ph" style="width:74px; height:88px; border-style:solid; border-color:#D5DBE3; background:#FAFBFC">＋ 추가</div>
+            <div class="sl">
+              <div class="sh"><span class="bdg2 p">통과</span><span>쿠팡 리뷰 확인됨</span></div>
+              <div style="display:flex; gap:6px">
+                <div class="ph" style="width:60px; height:76px; border-color:#A6D6C6">쿠팡<br>리뷰</div>
+                <div class="ph" style="width:60px; height:76px; border-style:solid; border-color:#D5DBE3; background:#FAFBFC">＋</div>
               </div>
-              <div style="font-size:10.5px; color:#69727F">별점과 리뷰 내용이 함께 보이게 캡처해 주세요.</div>
+              <div class="msg ok">✓ 쿠팡 리뷰 화면으로 확인했어요.</div>
+              <div class="act"><span class="bt p" style="padding:6px 0">제출하기</span></div>
+              <div style="font-size:10px; color:#8B94A1">평소와 똑같이 진행된다.</div>
             </div>
 
-            <div class="box" style="padding:11px 12px; display:flex; flex-direction:column; gap:7px">
-              <div class="lbl">현금영수증 캡처</div>
-              <div class="ph" style="width:74px; height:88px">캡처<br>1장</div>
+            <div class="sl warnb" style="position:relative">
+              <span class="pin pinabs" style="top:-8px; left:-8px">1</span>
+              <div class="sh"><span class="bdg2 s">확인 필요</span><span>채널이 다름</span></div>
+              <div style="display:flex; gap:6px">
+                <div class="ph" style="width:60px; height:76px; border-color:#E7D2A3">네이버<br>리뷰</div>
+                <div class="ph" style="width:60px; height:76px; border-style:solid; border-color:#D5DBE3; background:#FAFBFC">＋</div>
+              </div>
+              <div class="msg wn">이 작업은 <b>쿠팡</b> 리뷰인데 <b>네이버</b> 리뷰 화면으로 보여요.
+                <div style="margin-top:5px; display:flex; align-items:center; gap:5px; font-weight:600">
+                  <span style="width:11px;height:11px;border:1.5px solid #9A6414;border-radius:3px;display:inline-block"></span>
+                  맞게 올린 게 확실해요
+                </div>
+              </div>
+              <div class="act"><span class="bt" style="padding:6px 0">다시 고르기</span><span class="bt p" style="padding:6px 0">제출하기</span></div>
+              <div style="font-size:10px; color:#8B94A1">체크하면 그대로 제출된다.</div>
             </div>
 
-            <div style="background:#2563A8; color:#fff; text-align:center; padding:10px; border-radius:9px;
-                        font-size:12.5px; font-weight:730; position:relative">
-              제출하기
-              <span class="pin pinabs" style="top:-7px; right:-7px">2</span>
+            <div class="sl blockb" style="position:relative">
+              <span class="pin pinabs" style="top:-8px; left:-8px">2</span>
+              <div class="sh"><span class="bdg2 f">다시 첨부</span><span>리뷰 화면이 아님</span></div>
+              <div style="display:flex; gap:6px">
+                <div class="ph" style="width:60px; height:76px; border-color:#EAB6B0">주문내역<br>화면</div>
+                <div class="ph" style="width:60px; height:76px; border-style:solid; border-color:#D5DBE3; background:#FAFBFC">＋</div>
+              </div>
+              <div class="msg bk">리뷰 화면이 아닌 것 같아요.<br>
+                <b>별점과 리뷰 내용이 함께 보이는 화면</b>을 캡처해 주세요.</div>
+              <div class="act"><span class="bt p" style="padding:6px 0">다시 고르기</span>
+                <span class="bt" style="padding:6px 0; opacity:.45">제출하기</span></div>
+              <div style="font-size:10px; color:#8B94A1">제출 버튼이 잠긴다.</div>
             </div>
-            <div style="font-size:10.5px; color:#69727F; text-align:center">제출 후 검수 결과로 되돌아오는 안내는 없습니다.</div>
+
+          </div>
+
+          <div style="margin-top:11px; background:#fff; border:1px solid #D5DBE3; border-radius:10px; padding:10px 12px;
+                      position:relative">
+            <span class="pin pinabs" style="top:-8px; left:-8px">3</span>
+            <div class="lbl" style="margin-bottom:5px">같은 파일을 두 번 거부당하면</div>
+            <div style="font-size:11px; color:#3E4753; line-height:1.55">
+              “<b>제가 올린 게 맞습니다</b>”를 체크해 그대로 제출할 수 있다. 대신 담당자에게 함께 전달된다.
+            </div>
           </div>
         </div>
       </div>
@@ -299,14 +378,20 @@
       <div class="notes">
         <h4>이 화면에서 정해 둔 것</h4>
         <div class="nt"><span class="pin">1</span><div>
-          캡처를 올리는 <b>바로 그 순간</b> 서버가 파일 지문(중복 확인용)과 이미지 속 글자를 뽑아 둔다.
-          <span class="why">리뷰어는 기다림을 느끼지 않는다 — 이미 돌고 있던 확인 과정에 항목만 얹기 때문.</span></div></div>
+          <b>채널이 다른 것은 막지 않는다</b> — 경고하고 체크 한 번을 받는다.
+          <span class="why">작업의 채널 정보는 상품 주소로 짐작한 값이라 <b>우리 쪽이 틀렸을 수 있다</b>. 우리 데이터가 틀렸는데 리뷰어를 막으면 안 된다.</span></div></div>
         <div class="nt"><span class="pin">2</span><div>
-          검수 결과가 나쁘게 나와도 <b>제출은 그대로 접수</b>된다.
-          <span class="why">AI가 틀려서 멀쩡한 제출이 막히는 쪽이, 불량 하나를 놓치는 것보다 훨씬 큰 사고다. 다시 받을지는 사람이 정한다.</span></div></div>
+          <b>리뷰 화면이 아예 아닐 때만</b> 제출을 잠근다. 그것도 AI가 확신할 때만.
+          <span class="why">주문내역·상품사진·빈 화면처럼 <b>누가 봐도 리뷰가 아닌 것</b>만 해당된다. 이건 사람이 봐도 100% 다시 받아야 하는 건이라, 그 자리에서 막는 편이 서로 낫다.</span></div></div>
+        <div class="nt"><span class="pin">3</span><div>
+          <b>영구히 막히는 길은 만들지 않는다</b> — 두 번 거부되면 우회 체크가 열린다.
+          <span class="why">AI가 틀려서 리뷰어가 제출 자체를 못 하게 되는 것은, 불량 하나를 놓치는 것과 비교가 안 되는 사고다(참여 소각). 우회로 넘어간 건은 관리자 알림에 남는다.</span></div></div>
         <div class="nt"><span class="pin">·</span><div>
-          기존에 있던 <b>"리뷰 자리에 영수증을 올렸어요" 경고</b>는 지금처럼 그대로 뜬다.
-          <span class="why">이건 오래 돌며 검증된 판정이라 유지. 새로 생긴 판정(상품 불일치 등)만 리뷰어에게 감춘다.</span></div></div>
+          AI가 <b>꺼져 있거나 응답이 없거나 애매하면 아무것도 뜨지 않는다</b>.
+          <span class="why">판별이 안 되는 상황이 제출을 막는 사유가 되면 안 된다 — 기존 검수와 같은 원칙.</span></div></div>
+        <div class="nt"><span class="pin">·</span><div>
+          <b>AI 호출 총량은 늘지 않는다.</b>
+          <span class="why">첨부 때 판정한 결과가 제출 때 그대로 재사용된다(같은 이미지 캐시). 첨부에서 한 번 쓰고 제출에서 아끼는 구조.</span></div></div>
       </div>
     </div>
   </section>
@@ -373,8 +458,8 @@
             <div class="ic s">
               <div class="th"><div class="ph" style="height:100%; border:0; border-radius:0">리뷰 캡처</div></div>
               <div class="bd">
-                <div class="who"><span>최후기 · 44행</span><span class="bdg2 s">채널 다름</span></div>
-                <div class="rsn">쿠팡 작업인데 <b>네이버 리뷰 화면</b>으로 보임</div>
+                <div class="who"><span>최후기 · 44행</span><span class="bdg2 s">본인 확인 후 진행</span></div>
+                <div class="rsn">쿠팡 작업인데 네이버 화면 — <b>1차에서 경고했고 리뷰어가 확인함</b></div>
               </div>
               <div class="ft"><span class="bt">원본 보기</span><span class="bt">통과 처리</span></div>
             </div>
@@ -705,6 +790,9 @@
           <b>"의심"은 로그와 검수 탭에만</b> 조용히 쌓인다.
           <span class="why">상품명·글 겹침은 사람이 봐야 확정되는 판정이라, 울리는 순간 신뢰를 잃는다.</span></div></div>
         <div class="nt"><span class="pin">·</span><div>
+          1차 필터를 <b>“제가 올린 게 맞습니다”로 통과시킨 건</b>도 빨간 알림으로 온다.
+          <span class="why">두 번 거부된 파일을 리뷰어가 밀고 들어온 상황 — AI가 틀렸거나, 리뷰어가 잘못 알고 있거나 둘 중 하나라 사람이 반드시 봐야 한다.</span></div></div>
+        <div class="nt"><span class="pin">·</span><div>
           같은 자리에 <b>알림이 이미 있으면 또 쌓지 않고</b>, 리뷰어가 제대로 다시 올리면 <b>알림이 저절로 닫힌다</b>.
           <span class="why">기존 캡처 검수 알림이 쓰고 있는 방식 그대로.</span></div></div>
       </div>
@@ -751,37 +839,37 @@
   <section>
     <div class="shead"><span class="snum">정리</span><h2>요청하신 검수 조건 5개 ↔ 화면 대응</h2></div>
     <div class="tblwrap"><table>
-      <thead><tr><th>요청하신 조건</th><th>어떻게 판정하나</th><th>어디서 보이나</th><th>비용</th></tr></thead>
+      <thead><tr><th>요청하신 조건</th><th>언제</th><th>어떻게 판정하나</th><th>어디서 보이나</th></tr></thead>
       <tbody>
         <tr>
           <td><b>1 · 진짜 리뷰파일인가</b><br><span style="color:var(--muted);font-size:12px">네이버 빨강 / 쿠팡 노랑 별점, 예시이미지 저장</span></td>
-          <td>이미 돌고 있는 AI 확인에 <b>채널 판별을 추가</b>. 예시이미지를 등록하면 그것을 기준 삼아 정확도 상승</td>
-          <td>화면 5(예시 등록) → 화면 2·3(판정)</td>
-          <td>거의 없음<br><span style="color:var(--muted);font-size:12px">기존 호출에 얹음</span></td>
+          <td><span class="bdg2 f" style="background:var(--acc-bg);color:var(--acc);border-color:var(--acc-edge)">1차 · 첨부 즉시</span></td>
+          <td>그 자리에서 리뷰 화면 여부와 <b>채널을 판별</b>. 리뷰가 아닌 게 확실하면 <b>제출 잠금</b>, 채널만 다르면 경고+확인. 예시이미지를 등록하면 정확도 상승</td>
+          <td>화면 1(즉시) · 화면 5(예시 등록)</td>
         </tr>
         <tr>
           <td><b>2 · 상품명 대조</b><br><span style="color:var(--muted);font-size:12px">작업오더 상품명 vs 캡처 속 상품명</span></td>
+          <td><span class="bdg2 n">2차 · 제출 후</span></td>
           <td>캡처에서 상품명을 읽어 <b>작업오더 상품명</b>과 비교. 오더에 없으면 <b>직접 입력한 값</b>과 비교</td>
-          <td>화면 5(기준 입력) → 화면 3(대조 결과)</td>
-          <td>거의 없음</td>
+          <td>화면 5(기준 입력) · 화면 3(결과)</td>
         </tr>
         <tr>
           <td><b>3 · 제출자명 ↔ 리뷰어명</b><br><span style="color:var(--muted);font-size:12px">(필요한지 확실치 않다고 하신 항목)</span></td>
+          <td><span class="bdg2 n">안 함</span></td>
           <td><b>판정하지 않기를 권합니다</b> — 화면에 “김**”처럼만 보여 대조 불가. 글자는 모아 두고 나중에 판단</td>
           <td>화면 3에 “안 함”으로 표시</td>
-          <td>없음</td>
         </tr>
         <tr>
           <td><b>4 · 같은 파일 검사</b></td>
+          <td><span class="bdg2 n">2차 · 제출 후</span></td>
           <td>올라오는 순간 <b>파일 지문</b>을 남겨 두고, 다른 사람·다른 작업에서 같은 지문이 나오면 잡는다</td>
-          <td>화면 2(카드) · 화면 4(나란히) · 화면 6(빨간 알림)</td>
-          <td>없음<br><span style="color:var(--muted);font-size:12px">AI 불필요</span></td>
+          <td>화면 2 · 4 · 6(빨간 알림)</td>
         </tr>
         <tr>
           <td><b>5 · 글 90% 이상 겹침</b></td>
+          <td><span class="bdg2 n">2차 · 제출 후</span></td>
           <td>캡처에서 읽은 리뷰 글을 저장해 두고 <b>이미 쓰고 있는 한글 비교 기능</b>으로 대조</td>
-          <td>화면 2(카드) · 화면 4(형광펜 대조)</td>
-          <td>보통<br><span style="color:var(--muted);font-size:12px">저장·비교만</span></td>
+          <td>화면 2 · 화면 4(형광펜 대조)</td>
         </tr>
       </tbody>
     </table></div>
@@ -795,6 +883,10 @@
     </div>
     <div class="notes">
       <ol class="q">
+        <li><b>1차에서 제출을 잠그는 것은 “리뷰 화면이 아예 아닐 때”뿐</b>입니다. 채널이 다른 것은 경고만 하고 통과시킵니다.
+          <span class="why">채널을 막지 않는 이유는 그 정보가 상품 주소로 짐작한 값이라 우리 쪽이 틀렸을 수 있어서입니다. 채널까지 막기를 원하시면 말씀해 주세요.</span></li>
+        <li>같은 파일이 <b>두 번 거부되면 “제가 올린 게 맞습니다”로 통과</b>할 수 있게 열어 둡니다.
+          <span class="why">AI 오판으로 리뷰어가 제출을 영영 못 하는 상황을 막는 안전장치입니다. 이 우회는 관리자에게 알림으로 전달됩니다.</span></li>
         <li><b>제출자명 검수(3번)는 하지 않는 것</b>으로 시작합니다.
           <span class="why">리뷰 화면에 이름이 가려져 나와 오탐이 큽니다. 글자는 모아 두니 나중에 켤 수 있습니다.</span></li>
         <li>글 겹침 비교는 <b>같은 작업 안에서만</b> 시작합니다.
@@ -808,8 +900,9 @@
       </ol>
     </div>
     <div class="call warn">
-      <b>만드는 순서</b> — ① 검수 기능부터(화면 없이도 배포 가능, 배포 즉시 신규 제출부터 판정이 쌓임) → ② 과거분 따라잡기 → ③ 검수 탭 화면 → ④ 운영해 보고 기준 조정.
-      화면(③)이 열릴 때쯤이면 이미 볼 데이터가 차 있습니다.
+      <b>만드는 순서</b> — ① <b>1차 필터부터</b>(화면 1 · 잘못된 제출을 애초에 줄이는 효과가 가장 크고, 판정 기준 등록 없이도 바로 동작) →
+      ② 2차 검수 기록(화면 없이도 배포 가능, 배포 즉시 판정이 쌓임) → ③ 과거분 따라잡기 → ④ 검수 탭 화면(2~4) → ⑤ 운영해 보고 기준 조정.
+      검수 탭이 열릴 때쯤이면 이미 볼 데이터가 차 있습니다.
     </div>
   </section>
 

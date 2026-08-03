@@ -162,7 +162,7 @@
         <tr>
           <td><b>1</b></td>
           <td><b>실제 리뷰파일 여부</b><br><span class="note">네이버 빨강별점 / 쿠팡 노란별점 예시이미지 첨부 저장</span></td>
-          <td>기존 AI 판별(<code>classifySubmissionImage</code>)을 <b>종합검수 프롬프트로 확장</b> — 리뷰화면 여부 + <b>채널(네이버/쿠팡/기타)</b> 판별. 관리자 설정탭에서 채널별 <b>별점 예시이미지</b>를 등록(현금영수증 발행방법 이미지와 동일 패턴)하면 판정 시 참조 이미지로 함께 전송(few-shot).</td>
+          <td><b>★ 1차 = 첨부 즉시</b>(§4 경로 0) — 제출 전에 그 자리에서 판별해 잘못된 파일을 되돌린다. 기존 AI 판별(<code>classifySubmissionImage</code>)을 <b>종합검수 프롬프트로 확장</b> — 리뷰화면 여부 + <b>채널(네이버/쿠팡/기타)</b> 판별. 관리자 설정탭에서 채널별 <b>별점 예시이미지</b>를 등록(현금영수증 발행방법 이미지와 동일 패턴)하면 판정 시 참조 이미지로 함께 전송(few-shot).</td>
           <td>AI 비전 1콜<br><span class="note">(기존 콜 대체 = 순증 최소)</span></td>
           <td><span class="pill ok">낮음</span></td>
         </tr>
@@ -197,9 +197,10 @@
       </tbody>
     </table></div>
     <div class="callout sys" style="margin-top:10px">
-      <b>설계 원칙 3줄 요약</b> — ① 판정 재료(채널·상품명·본문·작성자)는 <b>업로드당 AI 1콜</b>로 한 번에 뽑는다(기존 형식판별 콜을 확장·대체).
-      ② 중복·유사도는 저장된 해시·텍스트만으로 <b>DB에서</b> 계산한다(이미지 재다운로드 0).
-      ③ 기존 규율 그대로 — <b>제출은 절대 막지 않고(fail-open)</b>, 결과는 통합작업대 검수 탭 + 기존 알림 체계로 사람에게 보인다.
+      <b>설계 원칙 4줄 요약</b> — ① <b>검수는 두 층</b>: 1차 = 첨부 즉시 리뷰어 화면에서(리뷰 화면인가·어느 채널인가), 2차 = 제출 후 관리자 화면에서(상품명·중복·글 겹침).
+      ② 판정 재료는 <b>AI 1콜</b>로 한 번에 뽑고, 이미지 해시 캐시 덕에 1차에서 쓴 결과가 2차에서 재사용된다(<b>콜 순증 0</b>).
+      ③ 중복·유사도는 저장된 해시·텍스트만으로 <b>DB에서</b> 계산한다(이미지 재다운로드 0).
+      ④ <b>차단은 “리뷰 화면이 아님”이 확실할 때 하나뿐</b>이고, 그마저 2회 후 우회로가 열린다. 판정 불가는 언제나 통과(fail-open).
     </div>
   </section>
 
@@ -390,16 +391,54 @@ CREATE INDEX IF NOT EXISTS idx_review_inspect_status
 
   <!-- ══════════════════ 4. 검수 파이프라인 ══════════════════ -->
   <section>
-    <h2><span class="secno">4</span>검수 파이프라인 — 인라인 + 배치 2경로</h2>
+    <h2><span class="secno">4</span>검수 파이프라인 — 사전 필터 + 인라인 + 배치 3경로</h2>
 
-    <div class="grid2">
+    <div class="card" style="border-color:var(--sys-edge); background:var(--sys-bg)">
+      <h3 style="margin-top:0">경로 0 — 첨부 시점 사전 필터 <span class="pill sys">1차 · 리뷰어 화면</span></h3>
+      <p style="margin-top:2px"><b>목적</b>: 잘못된 파일이 <b>Drive에 올라가고 제출로 기록되기 전에</b> 되돌린다. 사후 보완 요청(교체요청 → 리뷰어 재제출)은 왕복 비용이 커서, 그 자리에서 바꾸게 하는 편이 양쪽 모두 싸다.</p>
+      <ul>
+        <li><b>삽입 지점</b>: <code>search-app.js</code>의 <code>_csAddFiles()</code> — 지금은 base64로 읽어 <code>S.filesBySlot</code>에 담기만 하고 <b>서버를 부르지 않는다</b>. 여기에 신규 <code>POST /api/image/review-precheck</code>(무인증, <code>imageApiLimiter</code>) 호출을 얹는다. <b>Drive 업로드 0 · DB 쓰기 0</b> — 순수 판정만 반환.</li>
+        <li><b>판정 범위(1차 한정)</b>: <code>kind</code>(review/receipt/other) + <code>channel</code>(naver/coupang/etc) + 탭 기대 채널과의 일치 여부. <b>상품명·중복·유사도는 넣지 않는다</b> — 상품명은 기준 미등록 탭이 많아 오탐 위험이 크고, 중복·유사도는 <b>저장된 다른 제출과 대조</b>해야 나오는 판정이라 첨부 시점에는 비교 대상이 없다.</li>
+        <li>★ <b>AI 콜 순증 0</b>: <code>gemini.service</code>의 캐시 키가 <b>이미지 해시</b>(<code>_getCacheKey('classify:' + base64)</code>)라, 첨부 때 판정한 결과가 제출 시 <code>review-upload</code>에서 <b>캐시 히트</b>된다(TTL 10분, 첨부→제출 간격은 통상 그 안). 첨부에서 한 번 쓰고 제출에서 아끼는 구조.</li>
+      </ul>
+      <h4 style="margin:14px 0 4px; font-size:14px; font-weight:730">차단 강도 — 3단 (완화·강화 모두 신중히)</h4>
+      <div class="tblwrap"><table>
+        <thead><tr><th>판정</th><th>동작</th><th>근거</th></tr></thead>
+        <tbody>
+          <tr>
+            <td><code>kind='other'</code> AND 확신 ≥ <code>PRECHECK_BLOCK_CONFIDENCE</code>(0.9)</td>
+            <td><span class="pill bad">제출 잠금</span> 슬롯에 재첨부 안내 + 제출 버튼 비활성</td>
+            <td>주문내역·상품사진·빈 화면 = 사람이 봐도 100% 재요청 대상. 그 자리에서 막는 편이 서로 싸다.</td>
+          </tr>
+          <tr>
+            <td>채널 불일치 (탭 기대 채널 ≠ 판별 채널)</td>
+            <td><span class="pill warn">경고 + 확인 체크</span> 체크하면 그대로 제출</td>
+            <td>★ <b>탭 채널은 상품 URL 호스트로 추정한 값</b>(<code>WO_CHANNEL_HOSTS</code>)이라 <b>우리 데이터가 틀릴 수 있다</b>. 우리 오류로 리뷰어를 막지 않는다. 채널 정보가 없는 탭은 대조 자체를 생략.</td>
+          </tr>
+          <tr>
+            <td>AI 미설정·오류·타임아웃·확신 &lt; 0.9</td>
+            <td><span class="pill ok">무판정 통과</span> 화면에 아무것도 표시하지 않음</td>
+            <td>기존 <code>captureVerify</code> fail-open 규율 그대로 — 판별 불가가 제출을 막는 사유가 되면 안 된다.</td>
+          </tr>
+        </tbody>
+      </table></div>
+      <div class="callout warn" style="margin-top:12px">
+        ★★ <b>탈출구는 반드시 유지(제거 금지)</b> — 같은 슬롯에서 <b>2회 연속</b> 차단되면 “제가 올린 게 맞습니다” 체크가 열리고 제출이 통과된다.
+        AI 오판으로 리뷰어가 <b>제출 자체를 못 하는 상태</b>는 참여 소각이라, 불량 1건을 놓치는 것과 비교가 안 되는 사고다.
+        우회 통과 건은 <code>reviewer_event_logs</code> <b>critical</b>로 남겨 관리자가 반드시 본다(우회가 조용해지면 차단이 무의미해진다).
+      </div>
+      <p class="note" style="margin-top:10px">킬스위치 <code>REVIEW_PRECHECK=0</code>(사전 필터 전체 OFF — 첨부 동작이 현행으로 복귀) · <code>REVIEW_PRECHECK_BLOCK=0</code>(판정은 하되 <b>잠그지 않고 경고만</b> — 운영 초기 관측 모드 권장).</p>
+    </div>
+
+    <div class="grid2" style="margin-top:12px">
       <div class="card">
-        <h3 style="margin-top:0">경로 A — 업로드 인라인 (신규 제출)</h3>
+        <h3 style="margin-top:0">경로 A — 업로드 인라인 (신규 제출) <span class="pill mut">2차</span></h3>
         <ul>
           <li><code>review-upload</code> 핸들러에서 ① SHA-256 해시 계산·저장 ② 기존 <code>verifyCapture</code> 콜을 <b>종합검수 콜로 교체</b>(응답에서 슬롯 형식 판정 + 검수 재료를 동시에 얻음 — <b>콜 수 순증 0</b>) ③ <code>review_inspections</code>에 결과 upsert.</li>
           <li>중복·유사도는 이 시점에 <b>DB 대조만</b>(해시 equality + 같은 탭 trgm) — 수 ms 수준.</li>
           <li>AI 실패·타임아웃 → <code>status='pending'</code>으로만 남기고 업로드는 정상 완료(fail-open). 배치가 재시도.</li>
-          <li>리뷰어 화면: 기존 슬롯 불일치 인라인 경고는 그대로. <b>신규 판정(상품 불일치 등)은 리뷰어에게 즉시 표시하지 않고 관리자 검수 탭으로만</b> — 오탐으로 리뷰어를 붙잡는 사고 방지(§8 확정사항 ③에서 조정 가능).</li>
+          <li>리뷰어 화면: 기존 슬롯 불일치 인라인 경고는 그대로(경로 0이 죽어 있었을 때의 <b>백스톱</b>). <b>2차에서 새로 나온 판정(상품 불일치·중복·유사)은 리뷰어에게 표시하지 않고 관리자 검수 탭으로만</b> — 이 판정들은 사람이 봐야 확정되므로, 리뷰어를 붙잡는 대신 관리자가 [다시 받기]를 눌렀을 때만 통지한다.</li>
+          <li>★ 경로 0에서 <b>우회 통과된 건</b>(2회 차단 후 리뷰어가 밀고 들어온 건)은 여기서 <code>checks.format.overridden=true</code>로 기록하고 <b>critical 알림</b>을 남긴다.</li>
         </ul>
       </div>
       <div class="card">
@@ -508,12 +547,22 @@ CREATE INDEX IF NOT EXISTS idx_review_inspect_status
   <section>
     <h2><span class="secno">6</span>구현 로드맵 (4 마일스톤 · 각각 독립 배포 가능)</h2>
     <div class="roadmap">
+      <div class="ms"><div class="msno">M0</div><div>
+        <h4>1차 사전 필터 — 첨부 시점 채널·리뷰 판별 <span class="pill sys">최우선</span></h4>
+        <p>잘못된 제출을 <b>애초에 줄이는</b> 단계라 효과가 가장 크고, 기준 등록(상품명 등) 없이도 바로 동작한다. 신규 테이블 없이 배포 가능.</p>
+        <ul>
+          <li><code>gemini.service.classifySubmissionImage</code>에 <code>channel</code> 판별 추가(기존 응답 필드는 <b>상위 호환 유지</b> — 기존 슬롯 검수 시맨틱 불변)</li>
+          <li>신규 <code>POST /api/image/review-precheck</code> — Drive·DB 무접촉 순수 판정, <code>imageApiLimiter</code></li>
+          <li>프론트 <code>_csAddFiles</code>에 판별 호출 + 슬롯 상태 3종(통과/경고+확인/차단) + 2회 차단 시 우회 체크</li>
+          <li>회귀가드: <b>차단 조건이 'other'+확신 0.9로 한정</b>되는지 · <b>AI 실패 시 통과</b>인지 · <b>우회로가 살아 있는지</b>를 고정(이 셋이 풀리면 참여 소각 사고)</li>
+        </ul>
+      </div></div>
       <div class="ms"><div class="msno">M1</div><div>
-        <h4>데이터 기반 + 인라인 검수 (신규 제출부터 쌓기 시작)</h4>
+        <h4>데이터 기반 + 2차 인라인 검수 (신규 제출부터 쌓기 시작)</h4>
         <p>이 단계만 배포해도 신규 제출은 전부 검수 재료가 쌓인다. 화면 없이도 DB로 확인 가능.</p>
         <ul>
           <li>migration 081 (review_inspections + file_hash + inspect_product_names)</li>
-          <li>업로드 핸들러: 해시 계산 + 종합검수 프롬프트(기존 classify 확장) + 판정 upsert + 중복/유사도 DB 대조</li>
+          <li>업로드 핸들러: 해시 계산 + 종합검수 프롬프트(M0의 확장 콜 재사용 — 캐시 히트) + 판정 upsert + 중복/유사도 DB 대조</li>
           <li>신규 서비스 <code>reviewInspect.service.js</code> (판정 규칙·상태 산출·알림 연계 — captureVerify 규율 승계)</li>
           <li>회귀가드 <code>tests/reviewInspect.test.js</code> (판정 순수함수 + 스텁 pool 핸들러 실행 + fail-open 고정)</li>
         </ul>
@@ -552,7 +601,9 @@ CREATE INDEX IF NOT EXISTS idx_review_inspect_status
     <div class="tblwrap"><table>
       <thead><tr><th>원칙</th><th>내용</th></tr></thead>
       <tbody>
-        <tr><td><b>fail-open — 제출 불차단</b></td><td>검수는 <b>사후 분류</b>다. AI 장애·저확신·판정 불가가 리뷰어의 업로드·제출을 막는 일은 없다(captureVerify·신원게이트와 동일 규율). 자동 반려도 없다 — 불량 확정은 항상 사람이 누른다.</td></tr>
+        <tr><td><b>fail-open — 판정 불가는 통과</b></td><td>AI 장애·미설정·타임아웃·저확신이 업로드·제출을 막는 일은 <b>없다</b>(captureVerify·신원게이트와 동일 규율). <b>모르면 통과</b>가 원칙.</td></tr>
+        <tr><td><b>차단은 1차의 한 갈래뿐</b></td><td>제출을 잠그는 경우는 <b>“리뷰 화면이 아님”을 AI가 확신(≥0.9)할 때 하나</b>다. 채널 불일치·상품명 불일치·중복·유사도는 <b>절대 차단하지 않는다</b>(경고 또는 사후 분류). ★ 차단 조건을 넓히면 오탐이 곧바로 참여 소각이 되므로, 확대는 운영 데이터로 오탐률을 확인한 뒤에만.</td></tr>
+        <tr><td><b>탈출구 상시 유지</b></td><td>2회 차단 시 “제가 올린 게 맞습니다” 우회가 열린다(제거 금지). 우회 건은 critical 알림으로 관리자에게 전달 — <b>막는 길과 뚫는 길을 함께</b> 둔다. 자동 반려는 여전히 없다 — 불량 확정은 항상 사람이 누른다.</td></tr>
         <tr><td><b>API 비용 통제</b></td><td>인라인은 기존 형식판별 콜을 확장·대체(순증 0), 배치는 사이클 캡(기본 20건). Gemini 캐시(동일 파일 재업로드 상각)·타임아웃 9초 골격 재사용. <b>시트 API lane 무접촉</b>(검수는 시트를 한 번도 읽지 않는다).</td></tr>
         <tr><td><b>Drive 부하</b></td><td>다운로드는 배치 백필에서만(신규 제출은 base64를 이미 쥐고 있음). 사이클 캡 + 최근분 우선. 이미지 재업로드·이동 없음(읽기 전용).</td></tr>
         <tr><td><b>PII</b></td><td>OCR 본문·작성자 표기는 내부 전용(광고주 미노출, 1단계). 검수 API는 전부 인증 + 역할 스코프(staff 담당 탭 강제). 이미지 접근은 기존 무인증 프록시의 추측불가 fileId 모델 유지.</td></tr>
@@ -568,6 +619,8 @@ CREATE INDEX IF NOT EXISTS idx_review_inspect_status
     <h2><span class="secno">8</span>구현 착수 전 확정 필요 사항</h2>
     <div class="card">
       <ol>
+        <li><b>1차 차단 범위</b> — 권고안: <b>“리뷰 화면이 아님”(확신 0.9+)만 제출 잠금</b>, 채널 불일치는 경고+확인 체크로 통과. <span class="note">채널까지 잠그면 탭 채널 정보(URL 호스트 추정)가 틀렸을 때 정상 제출이 막힌다.</span></li>
+        <li><b>1차 우회로</b> — 권고안: 2회 차단 후 “제가 올린 게 맞습니다” 체크로 통과 + critical 알림. <span class="note">우회로를 없애면 AI 오판 시 리뷰어가 제출을 못 해 참여가 소각된다.</span></li>
         <li><b>제출자명 검수(조건 ③)</b> — 본 계획은 "1단계 보류 + OCR 수집만"을 권고. 이대로 진행해도 되는지? <span class="note">(마스킹·닉네임 때문에 오탐이 크다는 판단 — §2-③)</span></li>
         <li><b>텍스트 유사도 비교 범위</b> — 기본 "같은 탭 내"로 시작 권고. 리뷰어가 <b>다른 캠페인에 같은 글을 돌려쓰는 것</b>까지 잡으려면 전역 비교가 필요(비용↑) — 어느 범위로 시작할지?</li>
         <li><b>불량/의심 시 리뷰어 통지</b> — 권고안: 자동 통지 없음, 관리자가 [교체요청] 버튼으로 확정한 건만 기존 C/S 카드로 통지. <span class="note">의심 단계에서 리뷰어에게 바로 보이게 하면 오탐 마찰이 크다.</span></li>
