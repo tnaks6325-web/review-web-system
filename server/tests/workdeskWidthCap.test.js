@@ -124,4 +124,14 @@ ok('★ 상한이 카드 컨테이너에 걸린다(카드 자체 min-width 등�
   return /max-width:1380px/.test(decl) && !/min-width|grid-template-columns/.test(decl);
 })());
 
+/* ── G. 작업오더·등록리뷰어DB·리뷰어 로그 — 뷰별 표 폭 상한 ── */
+ok('★ 셋 다 같은 클래스(.lgwrap)를 공유하지만 필요 폭이 달라 뷰 컨테이너 id 로 스코프했다',
+  /#wobody \.lgwrap\{max-width:1120px\}/.test(cssNoComment)
+  && /#rvbody \.lgwrap\{max-width:1400px\}/.test(cssNoComment)
+  && /#lgbody \.lgwrap\{max-width:1300px\}/.test(cssNoComment));
+ok('★ 공유 클래스 .lgwrap 자체(단독 셀렉터)에는 max-width 를 걸지 않았다(걸면 세 값이 서로 충돌한다)',
+  !/(^|\})\s*\.lgwrap\{[^}]*max-width/.test(cssNoComment.replace(/\n/g, ' ')));
+ok('표 자체(table.lgtable)는 width:100% 그대로 — 감싸는 폭만 좁아진다(C/S 대화창과 같은 원리)',
+  /table\.lgtable\{width:100%/.test(cssNoComment));
+
 console.log(`\n✅ workdeskWidthCap: ${n} cases passed`);
