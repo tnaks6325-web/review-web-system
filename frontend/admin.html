@@ -1482,7 +1482,18 @@ body{ letter-spacing:-.01em; }
           <div style="font-size:.85rem;font-weight:700;color:var(--t1);margin-bottom:4px">
             🧾 현금영수증 발행방법 이미지 <span style="font-weight:400;color:var(--t3);font-size:.74rem">— 현영 탭 공고의 작업내용에서 리뷰어에게 채널에 맞는 이미지가 보입니다</span>
           </div>
+          <!-- ★ 채널 목록은 서버 utils/cashReceiptChannels.js 가 단일 출처 —
+               슬롯을 늘릴 땐 그쪽 표에 먼저 추가한다(회귀가드가 일치를 고정). -->
           <div style="display:flex;gap:14px;flex-wrap:wrap">
+            <div style="flex:1;min-width:230px;max-width:330px;border:1px solid var(--border);border-radius:10px;padding:10px">
+              <div style="font-size:.78rem;font-weight:700;margin-bottom:6px">🛒 쿠팡</div>
+              <img id="crGuideImgCoupang" alt="" style="display:none;max-width:100%;max-height:160px;border-radius:8px;border:1px solid var(--border);object-fit:contain;margin-bottom:6px">
+              <div id="crGuideNoneCoupang" style="font-size:.72rem;color:var(--t4);margin-bottom:6px">등록된 이미지가 없습니다</div>
+              <div style="display:flex;gap:6px;align-items:center">
+                <input type="file" id="crGuideFileCoupang" accept="image/*" style="font-size:.7rem;flex:1;min-width:0" onchange="uploadCashReceiptGuide('coupang', this)">
+                <button onclick="clearCashReceiptGuide('coupang')" style="padding:6px 10px;background:#FFF5F5;color:#B42318;border:1px solid #F7C9C9;border-radius:7px;font-size:.72rem;font-weight:700;cursor:pointer">제거</button>
+              </div>
+            </div>
             <div style="flex:1;min-width:230px;max-width:330px;border:1px solid var(--border);border-radius:10px;padding:10px">
               <div style="font-size:.78rem;font-weight:700;margin-bottom:6px">🟢 네이버</div>
               <img id="crGuideImgNaver" alt="" style="display:none;max-width:100%;max-height:160px;border-radius:8px;border:1px solid var(--border);object-fit:contain;margin-bottom:6px">
@@ -1493,12 +1504,21 @@ body{ letter-spacing:-.01em; }
               </div>
             </div>
             <div style="flex:1;min-width:230px;max-width:330px;border:1px solid var(--border);border-radius:10px;padding:10px">
-              <div style="font-size:.78rem;font-weight:700;margin-bottom:6px">🛒 쿠팡</div>
-              <img id="crGuideImgCoupang" alt="" style="display:none;max-width:100%;max-height:160px;border-radius:8px;border:1px solid var(--border);object-fit:contain;margin-bottom:6px">
-              <div id="crGuideNoneCoupang" style="font-size:.72rem;color:var(--t4);margin-bottom:6px">등록된 이미지가 없습니다</div>
+              <div style="font-size:.78rem;font-weight:700;margin-bottom:6px">🫒 올리브영</div>
+              <img id="crGuideImgOliveyoung" alt="" style="display:none;max-width:100%;max-height:160px;border-radius:8px;border:1px solid var(--border);object-fit:contain;margin-bottom:6px">
+              <div id="crGuideNoneOliveyoung" style="font-size:.72rem;color:var(--t4);margin-bottom:6px">등록된 이미지가 없습니다</div>
               <div style="display:flex;gap:6px;align-items:center">
-                <input type="file" id="crGuideFileCoupang" accept="image/*" style="font-size:.7rem;flex:1;min-width:0" onchange="uploadCashReceiptGuide('coupang', this)">
-                <button onclick="clearCashReceiptGuide('coupang')" style="padding:6px 10px;background:#FFF5F5;color:#B42318;border:1px solid #F7C9C9;border-radius:7px;font-size:.72rem;font-weight:700;cursor:pointer">제거</button>
+                <input type="file" id="crGuideFileOliveyoung" accept="image/*" style="font-size:.7rem;flex:1;min-width:0" onchange="uploadCashReceiptGuide('oliveyoung', this)">
+                <button onclick="clearCashReceiptGuide('oliveyoung')" style="padding:6px 10px;background:#FFF5F5;color:#B42318;border:1px solid #F7C9C9;border-radius:7px;font-size:.72rem;font-weight:700;cursor:pointer">제거</button>
+              </div>
+            </div>
+            <div style="flex:1;min-width:230px;max-width:330px;border:1px solid var(--border);border-radius:10px;padding:10px">
+              <div style="font-size:.78rem;font-weight:700;margin-bottom:6px">💛 카카오메이커스</div>
+              <img id="crGuideImgKakao" alt="" style="display:none;max-width:100%;max-height:160px;border-radius:8px;border:1px solid var(--border);object-fit:contain;margin-bottom:6px">
+              <div id="crGuideNoneKakao" style="font-size:.72rem;color:var(--t4);margin-bottom:6px">등록된 이미지가 없습니다</div>
+              <div style="display:flex;gap:6px;align-items:center">
+                <input type="file" id="crGuideFileKakao" accept="image/*" style="font-size:.7rem;flex:1;min-width:0" onchange="uploadCashReceiptGuide('kakao', this)">
+                <button onclick="clearCashReceiptGuide('kakao')" style="padding:6px 10px;background:#FFF5F5;color:#B42318;border:1px solid #F7C9C9;border-radius:7px;font-size:.72rem;font-weight:700;cursor:pointer">제거</button>
               </div>
             </div>
           </div>

@@ -40,10 +40,20 @@ ok('발행방법 이미지 섹션명이 실제와 일치',
   /현금영수증 발행방법 이미지/.test(doc) && /현금영수증 발행방법 이미지/.test(adm));
 ok('빈 상태 문구가 실제와 일치',
   /등록된 이미지가 없습니다/.test(doc) && /등록된 이미지가 없습니다/.test(adm));
-ok('채널 2칸(네이버·쿠팡)과 [제거] 버튼이 실제로 있다',
-  /🟢 네이버/.test(doc) && /🛒 쿠팡/.test(doc)
-  && /crGuideFileNaver/.test(adm) && /crGuideFileCoupang/.test(adm)
-  && /clearCashReceiptGuide/.test(adm));
+/* ★ 안내서가 가르치는 채널 칸이 실제 설정 화면에 전부 있어야 한다.
+   채널을 늘리면서 안내서를 안 고치면 직원이 "칸이 두 개뿐"이라고 알고 지나간다. */
+const crChans = require('../src/utils/cashReceiptChannels');
+ok('안내서의 채널 칸이 서버 단일 출처와 일치(라벨·아이콘)',
+  crChans.CASH_RECEIPT_CHANNELS.every(c => doc.includes(`${c.icon} ${c.label}`)));
+ok('그 채널들이 실제 설정 화면에도 전부 있다',
+  crChans.CASH_RECEIPT_CHANNELS.every(c => {
+    const cap = c.key.charAt(0).toUpperCase() + c.key.slice(1);
+    return new RegExp(`crGuideFile${cap}`).test(adm);
+  }) && /clearCashReceiptGuide/.test(adm));
+ok('★ "두 칸" 같은 옛 개수 표현이 남아 있지 않다(채널이 늘면 개수를 못 박지 않는다)',
+  !/두 칸 모두/.test(doc) && !/이미지 2장/.test(doc));
+ok('진행하지 않는 채널은 비워도 된다는 안내(문구만 나간다)',
+  /비워 두셔도 됩니다/.test(doc) && /사업자번호 문구만/.test(doc));
 ok('"고르면 즉시 저장"이 사실 — onchange 업로드라 별도 저장 버튼이 없다',
   /고르는 즉시 업로드·저장/.test(doc) && /onchange="uploadCashReceiptGuide/.test(adm));
 ok('5MB 상한이 실제 코드와 일치',
