@@ -21,9 +21,13 @@ const csRoutes = read('src/routes/cs.routes.js');
 const revRoutes = read('src/routes/reviewer.routes.js');
 const adminRoutes = read('src/routes/admin.routes.js');
 const migration = read('migrations/078_admin_nicknames.sql');
-const adminHtml = read('../frontend/admin.html');
-const siandHtml = read('../frontend/admin-siand.html');
-const appJs = read('../frontend/js/index-app.js');
+/* ★ 닉네임 칸의 마크업·로직은 공유 모듈(js/admin-settings.js)로 이관됐다(통합 작업대와 한 벌).
+   admin.html·admin-siand.html 은 마운트 지점만 들고 있으므로 "모듈 + 그 화면"으로 함께 본다
+   (recruit-modal.js 를 뺐을 때 cashReceiptGuide 가드를 넓힌 것과 같은 방식 — 검사 의미는 불변). */
+const settingsJs = read('../frontend/js/admin-settings.js');
+const adminHtml = settingsJs + '\n' + read('../frontend/admin.html');
+const siandHtml = settingsJs + '\n' + read('../frontend/admin-siand.html');
+const appJs = settingsJs + '\n' + read('../frontend/js/index-app.js');
 const apiJs = read('../frontend/api.js');
 
 let passed = 0;
@@ -95,6 +99,16 @@ console.log('\n② 메시지 마스킹(리뷰어 메시지는 손대지 않음)'
     ok('설정 탭 UI(admin.html)', /id="myNicknameInput"/.test(adminHtml) && /saveMyNickname\(\)/.test(adminHtml));
     ok('설정 탭 UI(admin-siand.html) — 두 화면 동일', /id="myNicknameInput"/.test(siandHtml) && /saveMyNickname\(\)/.test(siandHtml));
     ok('설정 탭 진입 시 로드', /loadMyNickname\(\);/.test(appJs) && /tabName === "settings"[\s\S]{0,400}loadMyNickname/.test(appJs));
+    ok('★ 마크업·로직은 공유 모듈 한 벌 — admin.html·admin-siand.html 은 마운트만(사본 금지)',
+      /id="adminSettingsMount"/.test(read('../frontend/admin.html'))
+      && /id="adminSettingsMount"/.test(read('../frontend/admin-siand.html'))
+      && !/id="myNicknameInput"/.test(read('../frontend/admin.html'))
+      && !/id="myNicknameInput"/.test(read('../frontend/admin-siand.html'))
+      && !/function saveMyNickname/.test(read('../frontend/js/index-app.js')));
+    ok('★ 통합 작업대도 같은 모듈 — 서버 경로만 Track B 네임스페이스로 재기준',
+      (() => { const w = read('../frontend/workdesk.html');
+        return /js\/admin-settings\.js/.test(w)
+          && /window\.ADMIN_SETTINGS_API\s*=\s*'\/api\/trackb\/settings'/.test(w); })());
     ok('미설정 안내 문구(리뷰어에겐 "관리자"로 보임)', /관리자<\/b>로만? 보입니다/.test(appJs));
 
     console.log(`\n✅ adminNickname: ${passed}개 통과\n`);

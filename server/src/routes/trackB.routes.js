@@ -832,6 +832,54 @@ router.post('/cs/memo', authMiddleware, adminOrMasterMiddleware, (req, res, next
   _csHandlers.memo(req, res, next));
 
 /* ══════════════════════════════════════════════════════════════
+   설정 — 통합 작업대 상단탭 (내 닉네임 · 회사 사업자번호(제공정보) · 리뷰어 소식·공지)
+
+   ★ Track B 경로에 두는 이유 = C/S 문의와 같다: 인트라넷 SSO 토큰(`via:'intranet'`)은
+     authMiddleware 가 `/api/trackb/*` 로만 격리하므로 `/api/admin/*`·`/api/tab/*`·
+     `/api/reviewer/*` 에는 **도달 자체가 불가능**하다. 화면은 공유 모듈
+     (js/admin-settings.js) 한 벌이고 프론트는 베이스 문자열만 갈아끼운다(사본 0).
+   ★ 로직은 한 줄도 베끼지 않고 기존 핸들러에 위임한다.
+   ★ 권한은 **원본 라우트와 1:1**로 다시 씌운다(느슨해지지 않게):
+       · 내 닉네임      = 본인 것만 다루므로 내부인 전원(master/admin/staff). 광고주는 차단.
+         (원본은 authMiddleware 만이지만 광고주 토큰까지 열 이유가 없어 internal 로 좁혔다)
+       · 사업자번호·현영 이미지·리뷰어 공지 = adminOrMaster (원본과 동일).
+   ★ `/guide-image` 원본은 무인증이지만 여기서는 adminOrMaster 로 좁힌다 —
+     이 경로의 용도가 현영 발행방법 이미지 업로드 하나뿐이라 넓게 열 이유가 없다.
+   ══════════════════════════════════════════════════════════════ */
+const _adminRoutes = require('./admin.routes');
+const _tabRoutes = require('./tabconfig.routes');
+const _reviewerRoutes = require('./reviewer.routes');
+const _setHandlers = {
+  nicknameGet:  _delegate(_adminRoutes, 'get', '/my-nickname'),
+  nicknameSet:  _delegate(_adminRoutes, 'post', '/my-nickname'),
+  providerInfo: _delegate(_tabRoutes, 'get', '/provider-info'),
+  businessNo:   _delegate(_tabRoutes, 'post', '/company-business-no'),
+  cashGuide:    _delegate(_tabRoutes, 'post', '/cash-receipt-guide'),
+  guideImage:   _delegate(_orderRoutes, 'post', '/guide-image'),
+  notices:      _delegate(_reviewerRoutes, 'get', '/notices/all'),
+  noticeSave:   _delegate(_reviewerRoutes, 'post', '/notices/save'),
+  noticeDelete: _delegate(_reviewerRoutes, 'post', '/notices/delete'),
+};
+router.get('/settings/my-nickname', authMiddleware, internalMiddleware, (req, res, next) =>
+  _setHandlers.nicknameGet(req, res, next));
+router.post('/settings/my-nickname', authMiddleware, internalMiddleware, (req, res, next) =>
+  _setHandlers.nicknameSet(req, res, next));
+router.get('/settings/provider-info', authMiddleware, adminOrMasterMiddleware, (req, res, next) =>
+  _setHandlers.providerInfo(req, res, next));
+router.post('/settings/company-business-no', authMiddleware, adminOrMasterMiddleware, (req, res, next) =>
+  _setHandlers.businessNo(req, res, next));
+router.post('/settings/cash-receipt-guide', authMiddleware, adminOrMasterMiddleware, (req, res, next) =>
+  _setHandlers.cashGuide(req, res, next));
+router.post('/settings/guide-image', authMiddleware, adminOrMasterMiddleware, (req, res, next) =>
+  _setHandlers.guideImage(req, res, next));
+router.get('/settings/notices', authMiddleware, adminOrMasterMiddleware, (req, res, next) =>
+  _setHandlers.notices(req, res, next));
+router.post('/settings/notices/save', authMiddleware, adminOrMasterMiddleware, (req, res, next) =>
+  _setHandlers.noticeSave(req, res, next));
+router.post('/settings/notices/delete', authMiddleware, adminOrMasterMiddleware, (req, res, next) =>
+  _setHandlers.noticeDelete(req, res, next));
+
+/* ══════════════════════════════════════════════════════════════
    등록리뷰어DB — 통합 작업대 상단탭
 
    ★ **master/admin 전용**(`adminOrMasterMiddleware`). AE(staff)·광고주는 못 본다.

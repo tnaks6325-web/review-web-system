@@ -14,8 +14,11 @@ const readS = (p) => fs.readFileSync(path.join(__dirname, '..', 'src', p), 'utf8
 const camp = readS('routes/campaign.routes.js');
 const tabc = readS('routes/tabconfig.routes.js');
 const wd = readF('js/campaign-workdetail.js');
-const adm = readF('js/recruit-modal.js') + '\n' + readF('admin.html');
-const app = readF('js/index-app.js');
+/* 설정탭 슬롯·업로드 로직은 공유 모듈(js/admin-settings.js)로 이관 — 통합 작업대와 한 벌.
+   admin.html 은 마운트 지점만 들고 있으므로 함께 읽는다(검사 의미 불변). */
+const set = readF('js/admin-settings.js');
+const adm = readF('js/recruit-modal.js') + '\n' + readF('admin.html') + '\n' + set;
+const app = readF('js/index-app.js') + '\n' + set;
 const rec = readF('js/index-recruit.js');
 const campHtml = readF('campaign.html');
 
@@ -103,18 +106,26 @@ ok('★ 프론트 사본(CR_GUIDE_CHANNELS)이 서버 목록과 key·순서까�
     const keys = [...m[1].matchAll(/key:\s*'([a-z]+)'/g)].map(x => x[1]);
     return keys.join(',') === chans.CASH_RECEIPT_CHANNELS.map(c => c.key).join(',');
   })());
-ok('★ 서버 목록의 모든 채널에 admin.html 슬롯이 있다(등록 창구 누락 차단)',
+/* ★ 등록 슬롯은 이제 CR_GUIDE_CHANNELS 표에서 **생성**된다 — 손으로 4칸을 적어 두면
+   채널을 늘릴 때 한 칸을 빠뜨리고도 조용히 통과한다(실측: 올리브영·카카오메이커스가 그렇게 빠졌다).
+   그래서 "리터럴 id 4개"가 아니라 **표가 슬롯을 만든다**는 구조를 고정한다
+   (표 ≡ 서버 목록은 바로 위 케이스가 이미 고정 → 슬롯 존재가 따라온다). */
+ok('★ 등록 슬롯을 채널 표에서 생성(하드코딩 4칸 금지 = 채널 추가 시 누락 불가)',
+  /crGuideImg\$\{c\.cap\}/.test(set) && /crGuideNone\$\{c\.cap\}/.test(set)
+  && /crGuideFile\$\{c\.cap\}/.test(set)
+  && /uploadCashReceiptGuide\('\$\{c\.key\}', this\)/.test(set)
+  && /clearCashReceiptGuide\('\$\{c\.key\}'\)/.test(set)
+  && /CR_GUIDE_CHANNELS\.map\(c =>/.test(set));
+ok('★ 채널 표의 모든 항목이 cap(id 접미사)·label·emoji 를 갖는다(생성 시 빈 슬롯 방지)',
   chans.CASH_RECEIPT_CHANNELS.every(c => {
     const cap = c.key.charAt(0).toUpperCase() + c.key.slice(1);
-    return new RegExp(`crGuideFile${cap}`).test(adm)
-        && new RegExp(`crGuideImg${cap}`).test(adm)
-        && new RegExp(`crGuideNone${cap}`).test(adm)
-        && new RegExp(`uploadCashReceiptGuide\\('${c.key}'`).test(adm)
-        && new RegExp(`clearCashReceiptGuide\\('${c.key}'\\)`).test(adm);
+    return new RegExp(`key: '${c.key}',\\s*cap: '${cap}',\\s*label: '[^']+',\\s*emoji: '[^']+'`).test(set);
   }));
-ok('설정탭에 채널별 발행방법 이미지 업로드 칸',
-  /crGuideFileNaver/.test(adm) && /crGuideFileCoupang/.test(adm)
-  && /function uploadCashReceiptGuide/.test(app));
+ok('설정탭에 채널별 발행방법 이미지 업로드 칸(공유 모듈이 그리고, 두 화면이 마운트한다)',
+  /function uploadCashReceiptGuide/.test(app)
+  && /id="adminSettingsMount"/.test(readF('admin.html'))
+  && /AdminSettings\.mount\('adminSettingsMount'[\s\S]{0,120}'business'/.test(readF('admin.html'))
+  && /AdminSettings\.mount\('adminSettingsMount'[\s\S]{0,140}'business'/.test(readF('workdesk.html')));
 ok('업로드는 guide-image 인프라 재사용(신규 저장소 없음)',
   /\/api\/order\/guide-image/.test(app) && /cashreceipt_/.test(app));
 ok('공고 모달의 현금영수증은 읽기 전용 — 입력 필드가 아니다',

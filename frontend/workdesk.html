@@ -324,6 +324,11 @@
   #wobody .lgwrap{max-width:1120px}
   #rvbody .lgwrap{max-width:1400px}
   #lgbody .lgwrap{max-width:1300px}
+  /* 설정 — 입력 칸이 대부분 자체 max-width 를 갖는 폼이라 표보다 좁아도 된다.
+     넓은 화면에서 설명 문장이 한 줄로 길게 늘어나 읽기 어려워지는 것만 막는다.
+     헤더(.mh)도 **같은 값**으로 캡한다(위 규칙 — 어긋나면 제목만 화면 끝으로 밀린다). */
+  #sthead .mh{max-width:1120px}
+  #adminSettingsMount{max-width:1120px}
   .ovnote{font-size:11.5px;color:var(--faint);margin:-4px 0 14px;line-height:1.5} .ovnote b{color:var(--muted)}
   .ovsearch{font:inherit;font-size:12.5px;padding:6px 11px;border:1px solid var(--line2);border-radius:8px;background:var(--card);color:var(--ink);width:180px}
   .tablewrap{overflow-x:auto;border:1px solid var(--line);border-radius:10px;background:var(--card)}
@@ -736,14 +741,16 @@ function renderShell(){
         <button class="navb" data-v="campaigns" onclick="switchView('campaigns')">모집공고</button>
         <button class="navb" data-v="cs" onclick="switchView('cs')">C/S 문의<span id="csNavBadge"></span></button>
         <button class="navb" data-v="reedit" onclick="switchView('reedit')">이미지 교체요청<span id="reNavBadge"></span></button>
-        <button class="navb" data-v="reviewers" onclick="switchView('reviewers')">등록리뷰어DB</button></nav>`
+        <button class="navb" data-v="reviewers" onclick="switchView('reviewers')">등록리뷰어DB</button>
+        <button class="navb" data-v="settings" onclick="switchView('settings')">설정</button></nav>`
       :isStaff?`<nav class="nav">
         <button class="navb" data-v="workdesk" onclick="switchView('workdesk')">작업대</button>
         <button class="navb" data-v="ownership" onclick="switchView('ownership')">업체관리</button>
         <button class="navb" data-v="logs" onclick="switchView('logs')">리뷰어 로그<span id="lgNavBadge"></span></button>
         <button class="navb" data-v="orders" onclick="switchView('orders')">작업오더<span id="woNavBadge"></span></button>
         <button class="navb" data-v="campaigns" onclick="switchView('campaigns')">모집공고</button>
-        <button class="navb" data-v="reedit" onclick="switchView('reedit')">이미지 교체요청<span id="reNavBadge"></span></button></nav>`:''}
+        <button class="navb" data-v="reedit" onclick="switchView('reedit')">이미지 교체요청<span id="reNavBadge"></span></button>
+        <button class="navb" data-v="settings" onclick="switchView('settings')">설정</button></nav>`:''}
       <span class="sp"></span>
       <div class="vwsw" id="vwToggle" role="switch" aria-checked="false" tabindex="0"
            aria-label="화면 폭 상한 전환" title="화면 폭 상한 — FHD 1920px / QHD 2560px (열 너비는 어느 쪽이든 고정)"
@@ -803,7 +810,7 @@ function toggleVwMode(){ setVwMode(_vwMode()==='qhd' ? 'fhd' : 'qhd'); }
 function switchView(v){ STATE.view=v; document.querySelectorAll('.navb').forEach(b=>b.classList.toggle('on',b.dataset.v===v));
   const rt=$('#railToggle'); if(rt) rt.style.display=(v==='workdesk')?'':'none';   // 레일은 작업대 뷰에만 존재
   const wt=$('#wideToggle'); if(wt) wt.style.display=(v==='workdesk')?'':'none';   // 전체화면 토글도 작업대 뷰에만
-  if(v==='ownership') renderOwnershipView(); else if(v==='overview') renderOverviewView(); else if(v==='logs') renderLogsView(); else if(v==='reviewers') renderReviewersView(); else if(v==='cs') renderCsView(); else if(v==='reedit') renderReeditView(); else if(v==='orders') renderOrdersView(); else if(v==='campaigns') renderCampaignsView(); else renderWorkdeskView();
+  if(v==='ownership') renderOwnershipView(); else if(v==='overview') renderOverviewView(); else if(v==='logs') renderLogsView(); else if(v==='reviewers') renderReviewersView(); else if(v==='cs') renderCsView(); else if(v==='reedit') renderReeditView(); else if(v==='orders') renderOrdersView(); else if(v==='campaigns') renderCampaignsView(); else if(v==='settings') renderSettingsView(); else renderWorkdeskView();
   if(v!=='workdesk') _measureChrome();   // 작업대를 떠나면 작업바가 사라짐 → --tbh 0으로 회수(다른 뷰 높이 계산 오염 방지)
 }
 
@@ -2262,6 +2269,25 @@ async function renderCsView(){
   const pane=document.getElementById('tab-cs-inquiry'); if(pane) pane.classList.add('active');
   try{ await loadCsRooms(); }catch(_){ }   // nav 뱃지는 모듈의 CS_ON_BADGE 훅이 따라온다
 }
+/* ── 설정 탭 ────────────────────────────────────────────────
+   화면은 **관리자 대시보드와 같은 모듈**(js/admin-settings.js) 하나뿐이다 — 마운트만 한다.
+   서버 경로는 window.ADMIN_SETTINGS_API 로 /api/trackb/settings/* 를 가리킨다
+   (인트라넷 SSO 토큰은 /api/admin/*·/api/tab/*·/api/reviewer/* 에 도달 자체가 불가능).
+
+   ★ 패널 노출 = **서버 게이트와 1:1**:
+       · 내 닉네임 = 본인 계정 설정이라 내부인 전원(master/admin/AE).
+         AE 도 이미지 교체요청을 처리하면 리뷰어 채팅에 메시지를 남기므로 표시 이름이 필요하다.
+       · 회사 사업자번호·리뷰어 소식·공지 = master/admin 전용(전사 설정 · 리뷰어 홈 노출).
+     프론트에서 감추는 것은 안내일 뿐이고 최종 방어는 서버다(AE 가 직접 호출해도 403). */
+async function renderSettingsView(){
+  const isAdmin = STATE.role==='master' || STATE.role==='admin';
+  $('#viewroot').innerHTML=`<div class="ovwrap"><div id="sthead"></div><div id="adminSettingsMount"></div></div>`;
+  $('#sthead').innerHTML=`<div class="mh"><h1>설정</h1><span class="sp" style="flex:1"></span></div>
+    <div class="ovnote">관리자 대시보드의 설정과 <b>같은 화면·같은 저장소</b>입니다 — 어느 쪽에서 바꿔도 결과가 같습니다.
+      ${isAdmin?'':'<b style="color:var(--muted)">(AE 는 본인 닉네임만 설정합니다)</b>'}</div>`;
+  if(!window.AdminSettings){ $('#adminSettingsMount').innerHTML=`<div class="empty">설정 모듈(js/admin-settings.js)을 불러오지 못했습니다.</div>`; return; }
+  AdminSettings.mount('adminSettingsMount', { panels: isAdmin ? ['nickname','business','notice'] : ['nickname'] });
+}
 /** nav 뱃지 — 모듈이 계산한 미확인 수를 그대로 표시한다(집계 로직 복제 0).
     ★ #csInquiryBadge 를 읽지 않는다: 그 엘리먼트는 관리자 대시보드 탭 버튼에만 있고
       통합 작업대엔 없다 → DOM 에서 읽으면 늘 0이 되어 뱃지가 지워진다(실측). */
@@ -3408,6 +3434,11 @@ boot();
 <!-- C/S 대화 안의 리뷰이미지 교체요청 카드 — 관리자·리뷰어 화면 공용 렌더러 -->
 <script src="js/cs-review-edit-card.js"></script>
 <script src="js/cs-inquiry.js"></script>
+<!-- 설정 탭(내 닉네임·회사 사업자번호·리뷰어 소식·공지) — 관리자 대시보드와 같은 화면 코드.
+     서버 경로만 Track B 네임스페이스로 돌린다(인트라넷 SSO 토큰은 /api/admin/*·/api/tab/*·
+     /api/reviewer/* 에 도달 자체가 불가능 → /api/trackb/settings/* 프록시). -->
+<script>window.ADMIN_SETTINGS_API = '/api/trackb/settings';</script>
+<script src="js/admin-settings.js"></script>
 <script src="js/campaign-cards.js"></script>
 <script src="js/recruit-modal.js"></script>
 <script src="js/manual-order.js"></script>

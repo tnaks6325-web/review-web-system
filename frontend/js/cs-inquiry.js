@@ -595,6 +595,10 @@ function csReloadAfterReviewEdit() {
     loadCsRooms: loadCsRooms, csFilterRooms: csFilterRooms,
     csOpenConversation: csOpenConversation, csLoadOrderContext: csLoadOrderContext,
     csReloadConversation: csReloadConversation, csViewImage: csViewImage,
+    // 열려 있는 방을 다시 그린다 — 닉네임을 바꾸면 이미 보낸 답장의 표시 이름까지 바뀌므로
+    // 설정 화면(admin-settings.js)이 저장 직후 부른다. _csActiveThreadId 는 모듈 스코프라
+    // 바깥에서 읽을 수 없어 **훅으로 노출**한다(전역 사본을 두면 두 값이 갈라진다).
+    csReloadActiveConversation: function () { if (_csActiveThreadId) csReloadConversation(_csActiveThreadId); },
     csSendReply: csSendReply, csSaveMemo: csSaveMemo, csToggleStatus: csToggleStatus,
     csCloseConversation: csCloseConversation, csUpdateBadge: csUpdateBadge,
     csRefreshBadge: csRefreshBadge, csOnSSE: csOnSSE,
