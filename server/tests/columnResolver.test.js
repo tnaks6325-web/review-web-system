@@ -84,6 +84,19 @@ function run() {
   const v4 = [['컬럼A', '컬럼B'], ['x', 'y']];
   assert.deepEqual(parseTabRows(v4, 's4', 'tabD', 'gidD', 'D', KW), [], '헤더 미검출 → 빈 배열');
 
+  // ── 케이스4b(회귀가드, 8/3 박은비 탭 실측 사고): '리뷰가이드'(작업지시, 항상 값 있음)가
+  //   '리뷰제출'(실제 완료열)보다 왼쪽이어도 완료열이 우선돼야 한다. SUBMIT_KEYWORDS에 섞인
+  //   bare '리뷰'가 우선탐지 AND조건을 무력화해 '리뷰가이드'를 제출열로 오판정하던 버그.
+  const v4b = [
+    ['번호', '담당자', '구매일자', '리뷰가이드', '주문자제출', '수취인', '연락처', '리뷰제출', '입금'],
+    ['1', '', '8 / 3 (월)', '텍스트', '박은비', '박은비', '010-8221-7191', '', ''],   // 미제출: 리뷰가이드만 값 있음
+    ['2', '', '8 / 3 (월)', '텍스트', '조혜진', '조혜진', '010-2299-9096', 'O', ''],  // 제출완료: 리뷰제출='O'
+  ];
+  const r4b = parseTabRows(v4b, 's4b', 'tabD2', 'gidD2', 'D2', KW);
+  assert.equal(r4b[0].submitCol, '리뷰제출', "★ 제출열이 '리뷰가이드'가 아니라 '리뷰제출'로 잡혀야 함");
+  assert.equal(r4b[0].isSubmitted, false, "★ 리뷰가이드만 값이 있고 리뷰제출은 공란 → 미제출");
+  assert.equal(r4b[1].isSubmitted, true, "리뷰제출='O' → 제출완료");
+
   // ════════════ P2b: DB컬럼매핑 우선 케이스 ════════════
 
   // ── 케이스5: DB매핑이 제출/입금 컬럼을 키워드와 다르게 강제(재앵커 통과) ──
@@ -195,7 +208,7 @@ function run() {
     assert.deepEqual(metaB.drift, [], '재앵커 전부 통과 → drift 없음');
   }
 
-  console.log('  케이스1~12 통과 (P2a 슈퍼셋 + P2b DB매핑 우선/재앵커/범위가드/PII가드 + meta/drift/무변경정리)');
+  console.log('  케이스1~12(+4b 제출열 오탐 회귀가드) 통과 (P2a 슈퍼셋 + P2b DB매핑 우선/재앵커/범위가드/PII가드 + meta/drift/무변경정리)');
 }
 
 try { run(); console.log('columnResolver tests passed'); }
