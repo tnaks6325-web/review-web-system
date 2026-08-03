@@ -46,6 +46,15 @@ GAS(Google Apps Script) 기반 리뷰 관리 시스템을 **Node.js Express + Po
 - **1:1문의 탭 = 내 문의함**(`#sectionCsInbox`, `switchTab('cs')`): 팝업 없이 인라인, **이미 문의한 방만** 표시(진행 중 / 종료된 문의 분리, 마지막 메시지·시각·미확인 숫자). 목록은 기존 무인증 phone8 스코프 `GET /api/reviewer/cs/threads` 재사용(**신규 엔드포인트 0**), 방 열기는 배열 인덱스 전달(따옴표 이스케이프 사고 차단). 빈 상태는 [리뷰 내역으로 가기 →]로 다음 행동 안내. 문의함 화면에서는 구매 캡처 보완 블록을 숨긴다.
 - **캠페인 선택 팝업(피커)은 제거**(`reviewer-cs.js`) — 남겨두면 "문의 시작"과 "문의 확인"이 한 창에 다시 섞이고 진입 경로가 둘이 된다. 대화창·SSE·탭 뱃지는 종전대로 `reviewer-cs.js` 담당이며, 전송·뒤로가기 시 `window.loadCsInbox()`로 목록을 갱신한다.
 - 회귀가드 `tests/csEntryRework.test.js`(38케이스 — 배선 grep + **스텁 pool로 `/review-earnings` 실제 실행**해 누적 집계 검증).
+- **관리자 답장 사진 첨부**: 리뷰어(PR #398)와 대칭으로 관리자도 첨부 가능. `POST /api/cs/upload`(리뷰어측 `POST /api/reviewer/cs/upload`와 **동일 인프라 재사용** — guide-image Drive `[문의첨부]` 폴더 + 무인증 프록시 URL, mime/8MB/5장 제한 동일, 인증 계층만 다름: `authMiddleware`+`adminOrMaster`). 첨부 3경로(**파일선택 버튼 · Ctrl+V 붙여넣기 · 드래그앤드롭**)가 전부 `_csUploadFile` 한 함수로 수렴(사본 두면 한쪽만 제한이 풀리는 드리프트가 난다) — 붙여넣기는 이미지일 때만 가로채(텍스트 붙여넣기 기본 동작 보존), 드래그오버는 파일 드래그일 때만 오버레이 표시. 전송은 업로드 완료된 첨부만 대상(인플라이트 중 전송 차단), 실패 시 첨부 복구, 방 전환 시 이전 첨부 폐기. 회귀가드 `tests/csAdminImageUpload.test.js`(20케이스).
+
+### 관리자 닉네임 — 1:1문의 실명 노출 차단 (migration 078)
+- **문제**: 답장은 `cs_messages.sender_name`에 **로그인 계정명(=관리자 실명)** 을 기록해 왔고 그 값이 리뷰어 대화창에 그대로 나갔다(박세희·박은비·master).
+- **모델**: 계정 테이블에 컬럼을 붙이지 않고 **`admin_nicknames(login_name PK, nickname)`** 매핑 하나로 둔다 — 마스터(env 계정)·staff·인트라넷 SSO는 `admin_users` 행이 없어 로그인명 키만이 전 로그인 경로를 덮는다. 시드 = `박세희→만두`·`박은비→망고`(`utils/workManager.js`의 작업담당 닉네임과 같은 값, `ON CONFLICT DO NOTHING`으로 기존 값 보존).
+- ★★ **표시 규칙(완화 금지)**: 리뷰어 화면 = `닉네임 || '관리자'` **fail-closed**(맵에 없는 값은 실명인지 판단할 수 없으므로 무조건 가림 — "설정 전까지 실명 노출"로 두면 막으려던 사고가 그대로 남는다) / 관리자 화면 = `닉네임 || 로그인명`(내부 책임추적 유지).
+- ★ **저장은 로그인명 그대로, 치환은 읽는 시점**(`adminNickname.service.maskMessages`) — 그래서 **닉네임을 바꾸면 이미 보낸 답장의 이름까지 함께 바뀐다**(이미 노출된 이름을 되돌릴 유일한 방법). 소비처 3곳: `/api/cs/messages`(admin) · `/api/reviewer/cs/messages`(reviewer) · **`emitCsReplyToReviewer` SSE 푸시**(목록 API만 막으면 실시간 푸시로 샌다).
+- **설정**: 관리자 설정탭 "내 닉네임" → `GET/POST /api/admin/my-nickname`(authMiddleware, **대상은 항상 `req.admin.name` = 본인**, body로 남의 닉네임 변경 불가). 로그인명과 같은 닉네임은 거부(실명 우회 저장 차단), 20자 상한, 빈 값 저장 = 해제(리뷰어에겐 '관리자'). `/api/admin/*` 경로라 `via:'intranet'`·`'reviewer_campaign'` 스코프 토큰은 도달 불가. 맵은 60초 캐시(저장 시 무효화), 조회 실패는 fail-soft(대화는 계속 뜬다).
+- 회귀가드 `tests/adminNickname.test.js`(31케이스).
 
 ### 관리자 닉네임 — 1:1문의 실명 노출 차단 (migration 078)
 - **문제**: 답장은 `cs_messages.sender_name`에 **로그인 계정명(=관리자 실명)** 을 기록해 왔고 그 값이 리뷰어 대화창에 그대로 나갔다(박세희·박은비·master).

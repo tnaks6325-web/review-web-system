@@ -677,6 +677,7 @@ const _csHandlers = {
   messages:     _delegate(_csRoutes, 'get',  '/messages'),
   orderContext: _delegate(_csRoutes, 'get',  '/order-context'),
   reply:        _delegate(_csRoutes, 'post', '/reply'),
+  upload:       _delegate(_csRoutes, 'post', '/upload'),
   status:       _delegate(_csRoutes, 'post', '/status'),
   memo:         _delegate(_csRoutes, 'post', '/memo'),
 };
@@ -691,6 +692,8 @@ router.get('/cs/order-context', authMiddleware, adminOrMasterMiddleware, (req, r
   _csHandlers.orderContext(req, res, next));
 router.post('/cs/reply', authMiddleware, adminOrMasterMiddleware, (req, res, next) =>
   _csHandlers.reply(req, res, next));
+router.post('/cs/upload', authMiddleware, adminOrMasterMiddleware, (req, res, next) =>
+  _csHandlers.upload(req, res, next));
 router.post('/cs/status', authMiddleware, adminOrMasterMiddleware, (req, res, next) =>
   _csHandlers.status(req, res, next));
 router.post('/cs/memo', authMiddleware, adminOrMasterMiddleware, (req, res, next) =>
