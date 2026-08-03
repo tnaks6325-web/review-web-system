@@ -285,6 +285,12 @@ function optionColIndexes(headers) {
  *   로스터에 미리 적힌 값(예: '포토리뷰')이 제출과 동시에 사라지는 원인이었다.
  *   ⚠ 공유 매퍼는 고치지 않는다 — `order_cancel`의 칸 비우기와 Track B write-back의
  *   컬럼 disjoint 마스크가 `''` 반환에 의존한다. 그래서 **호출부에서 값을 되쓴다.**
+ *
+ * ★★ 2026-08 C′ 이후: 이 함수는 **관측/진단용으로만** 남는다. 여기서 읽은 시트값을
+ *   `orderData.selectedOptKey` 나 `order_submissions.selected_opt_key` 로 **역주입하지 말 것**.
+ *   역주입하면 ① 재배정(reconcile)이 옛 행의 관리자 작업지시값('포토리뷰')을 새 행으로 옮기고
+ *   ② CS 표시·Track B identityKey·홀드 옵션검증이 그 값을 "리뷰어 선택"으로 오독한다.
+ *   옵션 칸 보호는 쓰기 시점의 `filterOptionWritesBlankOnly`(blank-only)가 담당한다.
  */
 function existingOptionKeyAt(tabContext, sheetRow) {
   if (!tabContext || !sheetRow) return '';
@@ -306,6 +312,75 @@ function buildBatchUpdateData({ tabName, headers, targetRow, orderData }) {
       range: `'${tabName}'!${getColLetter(pair.col)}${targetRow}`,
       values: [[pair.val]],
     }));
+}
+
+// ════════════════════════════════════════════════════════════════════════
+// C′ 옵션 칸 blank-only — "시스템은 옵션 칸의 기존 값을 절대 덮지 않는다".
+//   왜 호출부 필터인가: 공유 매퍼는 order_cancel(칸 비우기)·Track B `_wbOrderMappedMask`가
+//   ''반환에 의존하므로 고칠 수 없다 → **쓰기 목록에서 뺀다**.
+//   판정 기준은 RAW 미러가 아니라 **쓰기 직전 라이브 셀**(미러 stale이 곧 사고 타이밍이었다).
+// ════════════════════════════════════════════════════════════════════════
+const _optionBlankOnlyOn = () => process.env.ORDER_OPTION_BLANK_ONLY !== '0';
+
+/**
+ * ★ "매퍼가 실제로 optParts를 기입하는 열"만 반환 — 매퍼에서 **파생**한다.
+ *   `optionColIndexes`(헤더 '옵션' 포함)와 다르다: 헤더 '옵션금액'은 매퍼에서 금액 규칙이
+ *   먼저 이겨 **결제금액 칸**이다. 그걸 옵션 칸으로 오분류하면 blank-only 필터가
+ *   금액 쓰기를 조용히 삭제한다(막으려던 것보다 큰 손실). 센티널 주입으로 정확히 판정.
+ */
+//   ※ 센티널에 공백·NUL을 쓰지 않는다 — 매퍼가 `split('|').map(v => v.trim())` 로 파트를 다듬고,
+//     소스에 박힌 NUL은 git·에디터가 바이너리로 취급한다(둘 다 실측으로 밟은 함정).
+const _OPT_SENTINEL_RE = /^__OPT\d+__$/;
+function optionWriteColumns(headers) {
+  const n = (headers || []).length;
+  if (!n) return [];
+  const key = Array.from({ length: n }, (_, i) => `__OPT${i}__`).join('|');
+  const mapped = mapOrderToSheetRow(headers, { selectedOptKey: key });
+  const out = [];
+  mapped.forEach((v, i) => { if (typeof v === 'string' && _OPT_SENTINEL_RE.test(v)) out.push(i); });
+  return out;
+}
+
+/** "'탭'!C12" → {col:2(0-based), row:12}. 실패 시 {col:-1,row:-1}. */
+function _colIdxFromRange(range) {
+  const m = /!([A-Z]+)(\d+)$/.exec(String(range || ''));
+  if (!m) return { col: -1, row: -1 };
+  let col = 0;
+  for (const ch of m[1]) col = col * 26 + (ch.charCodeAt(0) - 64);
+  return { col: col - 1, row: parseInt(m[2], 10) };
+}
+
+/**
+ * batchData에서 **옵션 칸 쓰기만** blank-only로 걸러낸다(다른 칸은 절대 무영향).
+ * @param {(col:number)=>{known:boolean,value:string}} probe 라이브 셀 조회기.
+ *        probe 없음/known!==true = 확인 불가 → **쓰지 않는다**(fail-closed).
+ * @returns {{data:Array, suppressed:Array<{col,want,cur,reason}>}}
+ */
+function filterOptionWritesBlankOnly({ batchData, headers, tabName, targetRow, probe }) {
+  const out = { data: batchData, suppressed: [] };
+  if (!_optionBlankOnlyOn() || !Array.isArray(batchData) || !batchData.length) return out;
+  const cols = optionWriteColumns(headers);
+  if (!cols.length) return out;
+  const row = parseInt(targetRow, 10);
+  const colSet = new Set(cols);
+  // 판정 = range 문자열 ∪ 열 인덱스(보수적 합집합). 문자열만 보면 탭명 표기차에서 fail-open.
+  const byRange = new Map(cols.map(c => [`'${tabName}'!${getColLetter(c)}${row}`, c]));
+  out.data = batchData.filter(u => {
+    const p = _colIdxFromRange(u.range);
+    const col = byRange.has(u.range) ? byRange.get(u.range)
+      : ((colSet.has(p.col) && p.row === row) ? p.col : -1);
+    if (col < 0) return true;                                   // 옵션 칸 아님 → 그대로 통과
+    const want = String((((u.values || [])[0] || [])[0]) == null ? '' : (u.values[0][0])).trim();
+    let pr = null;
+    try { pr = probe ? probe(col) : null; } catch (_) { pr = null; }
+    if (!pr || pr.known !== true) { out.suppressed.push({ col, want, cur: null, reason: 'unverified' }); return false; }
+    const cur = String(pr.value == null ? '' : pr.value).trim();
+    if (!cur) return true;                                      // 빈 칸 → 기입(하단 신규 append 포함)
+    if (cur === want) return false;                             // 같은 값 → 쓰기 생략(멱등)
+    out.suppressed.push({ col, want, cur, reason: 'occupied' });
+    return false;                                               // ★ 기존 값 보존 — 어떤 경우에도 안 덮는다
+  });
+  return out;
 }
 
 function buildMirrorGuardRange({ tabName, headers, targetRow, orderData = {} }) {
@@ -795,23 +870,11 @@ async function createOrderLedgerEntry(input) {
     claim = { row: null, error: 'row_assignment_failed', message: err.message };
   }
 
-  // ★★ 옵션 칸 보존 — 선택된 옵션이 없으면 배정된 행의 **기존 옵션값을 되쓴다**.
-  //   빈 값을 그대로 두면 시트의 그 칸을 지우는 쓰기가 나간다(existingOptionKeyAt 주석 참조).
-  //   orderData는 호출부가 큐 페이로드로 그대로 넘기는 **같은 객체**라, 재기록(reconcile)까지 일치한다.
-  //   ★ 값이 있을 때는 절대 건드리지 않는다(옵션 선택 결과 우선) = 기존 동작 무회귀.
-  if (claim.row && !String(orderData.selectedOptKey || '').trim()) {
-    try {
-      const keep = existingOptionKeyAt(tabContext, claim.row);
-      if (keep) {
-        orderData.selectedOptKey = keep;
-        await db.query(`UPDATE order_submissions SET selected_opt_key = $2 WHERE id = $1`,
-          [orderSubmissionId, keep]);
-        logger.info(`[orderLedger] 옵션 칸 보존: os=${orderSubmissionId} row=${claim.row} "${keep}"`);
-      }
-    } catch (e) {
-      logger.warn(`[orderLedger] 옵션 보존 실패(무시): ${e.message}`);
-    }
-  }
+  // ★★ C′: 옵션 칸 보호는 **시트 쓰기 직전**(syncQueue의 filterOptionWritesBlankOnly)이
+  //   라이브 셀 기준 blank-only로 수행한다. 시트값을 orderData/selected_opt_key로 되쓰던
+  //   옛 방식은 폐기 — 재배정 시 옛 행의 관리자 작업지시값이 새 행으로 전이하고,
+  //   원장이 리뷰어 선택을 잃어 CS·TrackB·홀드검증이 전부 오독한다.
+  //   원장은 "리뷰어가 고른 값(없으면 빈 값)"이 진실이다.
 
   if (!claim.row) {
     try {
@@ -1648,6 +1711,9 @@ module.exports = {
   mapOrderToSheetRow,
   optionColIndexes,
   existingOptionKeyAt,
+  optionWriteColumns,
+  filterOptionWritesBlankOnly,
+  _colIdxFromRange,
   buildBatchUpdateData,
   buildMirrorGuardRange,
   buildMirrorGuardRanges,

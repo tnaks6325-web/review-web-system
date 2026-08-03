@@ -72,6 +72,18 @@ GAS(Google Apps Script) 기반 리뷰 관리 시스템을 **Node.js Express + Po
 - ⚠ **공유 매퍼는 고치지 않는다** — `order_cancel`의 칸 비우기와 Track B write-back의 컬럼 disjoint 마스크가 `''` 반환에 의존한다. 그래서 **호출부에서 되쓴다**(외부모집 수동제출이 이미 쓰던 방식과 동일).
 - ★ `optionColIndexes`/`existingOptionKeyAt`는 **orderLedger가 단일 출처** — manualOrder의 사본 제거(사본을 두면 "리뷰어 제출은 보존, 수동제출은 삭제" 드리프트). 회귀가드 `tests/optionColumnPreserve.test.js`(18케이스 — 지우는 쓰기 메커니즘 자체를 고정 + 보존 시뮬레이션).
 
+### ★★ 옵션 칸은 두 종류다 — 시스템은 **빈 칸에만** 쓴다 (C′ blank-only, 8/3 상품명 오기입 건)
+- **사고**: 리뷰어가 구매양식을 제출하자 시트 `리뷰옵션` 칸의 `텍스트`(관리자 작업지시)가 **상품명으로 덮였다**. 원인 두 겹 = ① 작업오더→공고 발행 프리필이 **상품명을 옵션명(`opt_key`)으로 승격**(옵션 없는 상품 / 다상품 접두) ② 제출 시 매퍼가 헤더에 '옵션'만 있으면 **값이 있어도 덮어썼다**.
+- ★★ **모델**: 시트 '옵션' 칸은 ㉮ **상품옵션**(리뷰어 선택값 기입 대상) / ㉯ **작업옵션=리뷰형태**(`텍스트`·`포토리뷰` — 관리자가 모집 전 적어두는 **작업지시**, 시스템이 절대 쓰면 안 됨)의 두 종류인데 **헤더 문자열로는 구분되지 않는다**. 그래서 구분하지 말고 **"값이 있으면 안 쓴다"**(blank-only)로 해결한다.
+- **적용 지점 = 시트 쓰기 직전**(`syncQueue` 단건·배치 양쪽). `orderLedger.filterOptionWritesBlankOnly`가 `buildBatchUpdateData` 결과에서 **옵션 칸 range만** 골라 라이브 셀이 비어있지 않으면 그 쓰기를 버린다. **확인 불가(probe 없음)=쓰지 않음**(fail-closed). 킬스위치 `ORDER_OPTION_BLANK_ONLY=0`.
+- ★★ **원장에 시트값을 역주입하지 말 것**(옛 방식 폐기): `selected_opt_key`에 시트값을 되쓰면 ① 큐가 실행 시 `order_submissions`를 **재조회**하므로(`_osRowToOrderData`) 그 값이 시트로 나가고 ② **재배정(reconcile)이 옛 행의 작업지시값을 새 행으로 전이**시키며 ③ CS 표시·Track B `identityKey`·홀드 옵션검증이 그것을 "리뷰어 선택"으로 오독한다. **원장은 리뷰어가 고른 값(없으면 빈 값)이 진실.** manualOrder의 사본도 같은 이유로 제거.
+- ★★ **옵션 칸 판정은 `optionWriteColumns`(매퍼 파생)로** — `optionColIndexes`(헤더에 '옵션' 포함)를 쓰면 **`옵션금액`(=결제금액 칸)·`비고(옵션확인)`(=비고 칸)을 오분류**해 금액·비고 쓰기가 조용히 삭제된다(막으려던 것보다 큰 손실). 센티널 주입으로 "매퍼가 실제로 optParts를 넣는 열"만 뽑는다. 센티널에 **공백·NUL 금지**(매퍼가 `trim()`하고, NUL은 git이 바이너리 취급 — 둘 다 실측으로 밟음).
+- 라이브 판정 비용 0: **기존 다중컬럼 가드 사각형에 옵션 열을 합류**시켜 읽는다(콜 순증 0, RAW 미러 stale 판정 문제도 함께 해소). probe 오프셋은 가드와 **같은 minCol** 기준(어긋나면 가드 오판).
+- **취소(order_cancel)도 옵션 칸은 비우지 않는다** — 작업지시일 수 있다. **경고는 `logAbnormal(warn)`만**(`reviewer_event_logs` 금지 — 선기입 탭은 모든 제출이 조건 참이라 알림 도배 = 늑대소년).
+- **발행 단계 방어**: 상품명이 옵션명이 되던 프리필 교정(`_woOptionRows`·`parseProductLinesToRows`) + 게시 전 **경고 전용** 자동점검(`GET /api/tab/option-column-audit`, RAW 미러만 조회·시트 재읽기 0). ★ **하드블록 금지** — ㉯ 탭은 정상이어도 옵션명이 절대 일치하지 않아 멀쩡한 공고 발행이 전부 막힌다. `tab_configs.option_columns`로 ㉮ 지정된 칸에서만 값 대조.
+- 잔여(문서화): ㉯ 선기입 탭에서는 **리뷰어 선택 옵션이 시트에 안 나타난다**(원장·관제·CSV엔 남고 warn으로 노출) / 취소해도 옵션 칸은 잔류 / `order_update`(관리자 명시 편집)는 여전히 옵션 칸에 쓸 수 있다(의도적 교정 수단, `cur===''||cur===wantOld` 가드로 클로버 불가).
+- 회귀가드 `tests/optionColumnPreserve.test.js`(33케이스 — 역주입 부재 + 필터 실행 + 오분류 차단 + 배선)·`tests/optionColumnAudit.test.js`(23케이스).
+
 ### ★★ jsonb 배열 인덱싱 — `cells->>$n::int` 캐스트 필수 (063이 무음으로 꺼져 있던 원인)
 - **실측 사고**: `SELECT cells->>$3`(파라미터=텍스트)는 PostgreSQL이 `jsonb ->> text`(**객체 키 조회**)로 해석한다. `raw_sheet_rows.cells`는 **JSONB 배열**이라 객체 키 조회는 **에러가 아니라 전 행 NULL**을 돌려준다 → 날짜 컬럼이 통째로 빈 값 → `summarizeDates`가 null → **시트 일정 자동 인식(063)이 배포 이래 한 번도 작동하지 않았다.** 모든 캠페인이 조용히 발행폼 `daily_limit`/`recruit_total` 경로로만 돌아갔다.
 - **수정**: `cells->>$3::int`(`::`가 `->>`보다 강하게 결합 → `jsonb ->> integer` = 배열 원소). 로컬 PG16으로 재현·검증.

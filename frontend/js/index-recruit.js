@@ -420,6 +420,80 @@ function onLinkedTabChange(sel) {
     window._rfLinkedTabName = "";
   }
   refreshRecruitCashReceipt();   // 탭이 바뀌면 현금영수증 발행 여부 재판정(읽기 전용 표시)
+  refreshOptColumnAudit();       // 탭이 바뀌면 옵션 칸 실태 재조회(자동점검 경고용)
+}
+
+/* ═══════════════════════════════════════
+   🔎 연결 탭 옵션 칸 실태 — 게시 전 자동점검 재료 (경고 전용, 차단 아님)
+
+   시트의 '옵션' 칸은 ㉮ 상품옵션(리뷰어 선택값 기입) / ㉯ 작업옵션=리뷰형태('텍스트'·'포토리뷰'
+   작업지시)의 두 종류인데, 공고 옵션명이 ㉯ 칸 값과 어긋난 채 게시되면 제출 때 사고가 났다.
+   ★ 서버는 RAW 미러만 읽는다(시트 재읽기 0) · 실패는 조용히 생략(발행을 막지 않는다).
+   ═══════════════════════════════════════ */
+let _rfOptAudit = null;          // { ok, reason, columns:[{name, designated, values, distinctCount}] }
+let _rfOptAuditKey = "";         // 중복 조회 방지(같은 탭 재조회 안 함)
+
+async function refreshOptColumnAudit() {
+  const sheetId = document.getElementById("rf_linked_campaign")?.value || "";
+  const tabKey  = document.getElementById("rf_linked_tab")?.value || "";
+  const tabMeta = _recruitTabList.find(x => x.key === tabKey);
+  const gid     = (tabMeta && tabMeta.tabGid) ? String(tabMeta.tabGid) : "";
+  const tabName = (tabMeta && tabMeta.tabName) || "";
+  const key = sheetId + "||" + gid;
+  if (!sheetId || !gid) { _rfOptAudit = null; _rfOptAuditKey = ""; renderPartCheck(); return; }
+  if (key === _rfOptAuditKey) return;                 // 같은 탭 — 이미 받아둠
+  _rfOptAuditKey = key;
+  _rfOptAudit = null;
+  try {
+    const token = sessionStorage.getItem("admin_token") || "";
+    const qs = `?sheetId=${encodeURIComponent(sheetId)}&gid=${encodeURIComponent(gid)}&tabName=${encodeURIComponent(tabName)}`;
+    const res = await fetch(API_BASE_URL + "/api/tab/option-column-audit" + qs, {
+      headers: { Authorization: "Bearer " + token },
+    });
+    const d = await res.json();
+    // 탭을 그 사이 또 바꿨으면 늦게 온 응답은 버린다(경합 가드)
+    if (_rfOptAuditKey !== key) return;
+    _rfOptAudit = (d && d.ok) ? d : null;
+  } catch (_) {
+    _rfOptAudit = null;                                // fail-soft — 점검 항목만 생략
+  }
+  renderPartCheck();
+}
+
+/** 옵션표 옵션명 ↔ 연결 탭 옵션 칸 대조 → 자동점검 항목(0~2개). 경고만, 게시 차단 없음. */
+function _optColumnCheckItems() {
+  const a = _rfOptAudit;
+  if (!a || !Array.isArray(a.columns) || !a.columns.length) return [];
+  const optKeys = (typeof readOptRows === "function" ? readOptRows() : [])
+    .filter(o => o.status !== "closed").map(o => o.optKey);
+  if (!optKeys.length) return [];                      // 옵션 없는 단일상품 공고 — 대조할 것이 없다
+  const items = [];
+
+  // ㉮ 상품옵션으로 지정된 칸이 있으면 값 대조 — 불일치는 시트 기입·행매칭이 어긋난다는 신호
+  const product = a.columns.filter(c => c.designated);
+  for (const col of product) {
+    const have = new Set((col.values || []).map(v => String(v).trim()));
+    const miss = optKeys.filter(k => !have.has(k));
+    if (miss.length) {
+      items.push({
+        warn: true,
+        label: "옵션명 " + miss.length + "개가 시트 「" + escHtml(col.name) + "」 칸 값과 다릅니다 — "
+             + escHtml(miss.slice(0, 3).join(", ")) + (miss.length > 3 ? " 외" : ""),
+      });
+    }
+  }
+
+  // ㉯ 미지정 칸 = 작업지시(리뷰형태)로 본다. 값이 이미 채워져 있으면 시스템은 그 칸을 건드리지 않는다.
+  const work = a.columns.filter(c => !c.designated && (c.filledRows || 0) > 0);
+  if (work.length && !product.length) {
+    items.push({
+      warn: false,
+      label: "시트 「" + escHtml(work.map(c => c.name).join(", ")) + "」 칸은 작업지시(예: "
+           + escHtml((work[0].values || []).slice(0, 2).join(", ") || "텍스트")
+           + ")로 보입니다 — 공고 옵션명은 이 칸에 기입되지 않고 기존 값이 보존됩니다",
+    });
+  }
+  return items;
 }
 
 /* 채널·담당자 버튼을 값으로 선택 — selectRfBtn(사용자 클릭)과 같은 결과를 만든다.
@@ -688,6 +762,8 @@ function renderPartCheck() {
       });
     }
   }
+  // 🔎 연결 탭 옵션 칸 대조(경고 전용 — 게시는 막지 않는다)
+  try { (_optColumnCheckItems() || []).forEach(i => items.push(i)); } catch (_) { /* fail-soft */ }
   // ★ 3색: 실패(빨강, 게시 차단) / 경고(호박, 게시는 가능하나 운영 주의) / 통과(초록)
   box.innerHTML = items.map(i =>
     `<div style="display:flex;align-items:center;gap:7px;font-size:.74rem;font-weight:700;border-radius:8px;padding:6px 10px;
@@ -881,6 +957,15 @@ function parseProductLinesToRows(text, fallbackProductName) {
     // "옵션 없음" 류는 옵션명이 아니라 '옵션이 없다'는 서술 — 실제 옵션으로 저장되면
     // 리뷰어에게 선택지가 하나 뜨고 시트 옵션열에도 그 문구가 기입된다.
     if (/^(옵션\s*없음|없음|단일(상품)?|해당\s*없음|-|\.)$/.test(optKey)) optKey = "";
+    // ★ 옵션명 자리에 상품명이 그대로(또는 접두로) 들어온 줄 — 이건 옵션이 아니라 상품명이다.
+    //   opt_key 는 시트 옵션열에 그대로 기입되므로, 상품명이 섞이면 미리 적어둔 리뷰형태
+    //   (텍스트/포토리뷰)가 상품명으로 덮인다.
+    if (optKey && productName) {
+      if (optKey === productName) optKey = "";
+      else if (optKey.startsWith(productName)) {
+        optKey = optKey.slice(productName.length).replace(/^[\s\-–/|·]+/, "").trim();
+      }
+    }
     if (!productName && !optKey && !pay) continue;
     if (productName) lastProd = productName;
     rows.push({ productName: productName || lastProd, optKey, payAmount: pay });
