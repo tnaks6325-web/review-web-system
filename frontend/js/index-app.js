@@ -2007,6 +2007,9 @@ const WO_CHANNEL_HOSTS = [
   { re: /(^|\.)coupang\.com$|coupangcdn\.com$/i, val: '쿠팡' },
   { re: /(^|\.)naver\.com$|(^|\.)naver\.me$/i,   val: '네이버' },
   { re: /(^|\.)oliveyoung\.co\.kr$/i,            val: '올리브영' },
+  /* ★ 카카오는 `makers.kakao.com` 만 잡는다 — `kakao.com` 전체를 잡으면
+     톡스토어·선물하기 등 진행 방식이 다른 서비스까지 '카카오메이커스'로 오판한다. */
+  { re: /(^|\.)makers\.kakao\.com$/i,            val: '카카오메이커스' },
 ];
 function _woChannelFromUrl(url) {
   const u = String(url || '').trim();
