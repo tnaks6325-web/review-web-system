@@ -581,6 +581,75 @@ console.log('\nH. 슬래시 누락 자동 보정');
   ok('H25 보정 건수를 헤더에 요약', /자동보정 \$\{fixN\}건/.test(mo));
 }
 
+/* ══════════════════════════════════════════════════════════
+   I. 1단계 구매캡쳐 첨부(보관함) + 명칭
+   ══════════════════════════════════════════════════════════ */
+console.log('\nI. 1단계 캡처 첨부');
+{
+  const mo = F('js/manual-order.js');
+
+  ok('I1 명칭이 "외부모집 수동제출" 로 통일', mo.includes('외부모집 수동제출') && !mo.includes('외부참여 수동제출'));
+  ['js/campaign-cards.js', 'js/index-app.js', 'js/index-recruit.js', 'index.html'].forEach(f => {
+    ok(`I1-${f} 옛 명칭 잔여 없음`, !F(f).includes('외부참여 수동제출'));
+  });
+
+  ok('I2 1단계에 캡처 보관함이 있다', mo.includes('id="moDrop"') && mo.includes('id="moStage"'));
+  ok('I3 텍스트 칸에 이미지를 붙여도 캡처로 받는다(관리자는 그냥 Ctrl+V)',
+    mo.includes('onpaste="ManualOrder.onTextPaste(event)"') && /function onTextPaste\(ev\)/.test(mo));
+  ok('I4 붙여넣기·드래그·파일선택 3경로 — 하나만 두면 브라우저에 따라 막힌다',
+    /function onStagePaste/.test(mo) && /function onDrop/.test(mo) && /function onStageFiles/.test(mo));
+  ok('I5 여러 장을 한 번에 받는다', /_imagesFrom\(ev\.clipboardData\)/.test(mo) && /\.forEach\(stageImage\)/.test(mo));
+  ok('I6 잘못 넣은 캡처는 뺄 수 있다', /function unstage\(i\)/.test(mo) && mo.includes('ManualOrder.unstage('));
+  ok('I7 보관 캡처도 업로드 전에 줄인다(413 방지 — 줄별 첨부와 같은 경로)', /await shrink\(file\)/.test(mo));
+  ok('I8 계약에 1단계 핸들러가 노출된다',
+    ['onTextPaste', 'onStagePaste', 'onDrop', 'onStageFiles', 'unstage']
+      .every(k => new RegExp('window\\.ManualOrder[\\s\\S]{0,400}\\b' + k + '\\b').test(mo)));
+  ok('I9 파싱 직후 보관 캡처를 각 줄에 배정한다', /distributeStaged\(\);/.test(mo)
+    && mo.indexOf('ROWS = (r.items') < mo.indexOf('distributeStaged();'));
+  ok('I10 2단계 줄별 첨부도 그대로 남아 있다(보완 경로)',
+    mo.includes('ManualOrder.onPaste(event,') && mo.includes('ManualOrder.onFile(event,'));
+  ok('I11 모달을 새로 열면 보관함이 비워진다(다른 탭 캡처 혼입 금지)', /ROWS = \[\]; STAGED = \[\];/.test(mo));
+
+  // ★ 배정 규칙을 실제로 실행 — 이름 → 전화 → 순서
+  const src = mo.slice(mo.indexOf('function distributeStaged()'));
+  let d = 0, k = src.indexOf('{');
+  for (; k < src.length; k++) { const c = src[k]; if (c === '{') d++; else if (c === '}') { d--; if (!d) break; } }
+  const body = src.slice(0, k + 1);
+  let ROWS = [], STAGED = [];
+  eval(body);   // eslint-disable-line no-eval — 가드 전용(브라우저 코드를 그대로 실행해 규칙 고정)
+
+  ROWS = [
+    { fields: { recipient: '이시현', phone: '010-7701-1701' }, capture: null, extract: null },
+    { fields: { recipient: '김하나', phone: '010-1111-2222' }, capture: null, extract: null },
+    { fields: { recipient: '박서준', phone: '010-3333-4444' }, capture: null, extract: null },
+  ];
+  STAGED = [
+    { base64: 'B', mime: 'i', extract: { recipient: '김 하나', orderNumber: 'ORD-B' } },
+    { base64: 'C', mime: 'i', extract: { recipient: '', phone: '010-3333-4444' } },
+    { base64: 'A', mime: 'i', extract: null },
+  ];
+  distributeStaged();
+  ok('I12 ★ 수취인 이름으로 붙는다(공백 차이 무시)', ROWS[1].capture.base64 === 'B');
+  ok('I13 이름을 못 읽으면 연락처 뒤 4자리로', ROWS[2].capture.base64 === 'C');
+  ok('I14 그래도 못 맞추면 붙인 순서대로(첨부를 버리지 않는다)', ROWS[0].capture.base64 === 'A');
+  ok('I15 캡처에서 읽은 주문번호가 빈 칸에 채워진다', ROWS[1].fields.orderNum === 'ORD-B');
+
+  ROWS = [{ fields: { recipient: 'A' }, capture: null }, { fields: { recipient: 'B' }, capture: null }];
+  STAGED = [{ base64: 'X', mime: 'i', extract: null }];
+  distributeStaged();
+  ok('I16 캡처가 줄보다 적으면 남는 줄은 빈 채로', !!ROWS[0].capture && !ROWS[1].capture);
+
+  ROWS = [{ fields: { recipient: 'A' }, capture: null }];
+  STAGED = [];
+  distributeStaged();
+  ok('I17 캡처가 없으면 무동작(기존 동작 불변)', ROWS[0].capture === null);
+
+  ROWS = [{ fields: { recipient: 'A' }, capture: { base64: 'KEEP' } }];
+  STAGED = [{ base64: 'NEW', mime: 'i', extract: { recipient: 'A' } }];
+  distributeStaged();
+  ok('I18 이미 붙은 캡처를 덮어쓰지 않는다', ROWS[0].capture.base64 === 'KEEP');
+}
+
 console.log(`\n✅ manualOrderExternal 회귀가드 통과 — ${passed}건\n`);
 }
 

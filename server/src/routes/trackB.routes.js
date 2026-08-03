@@ -8,6 +8,7 @@
 const express = require('express');
 const router = express.Router();
 const { authMiddleware, masterOnlyMiddleware, adminOrMasterMiddleware } = require('../middleware/auth.middleware');
+const pool = require('../db/pool');
 const svc = require('../services/trackB.service');
 const participants = require('../services/participants.service');
 const authSvc = require('../services/auth.service');
@@ -534,6 +535,199 @@ async function _logScopeTabs(req) {
   const tabs = await svc.scopedActiveTabs({ role: 'staff', staffName: (req.admin && req.admin.name) || '' });
   return (tabs || []).map(t => ({ sheetId: t.sheetId, tabName: t.tabName }));
 }
+
+/* ══════════════════════════════════════════════════════════════
+   작업오더 · 모집공고 — 통합 작업대 상단탭
+
+   ★ **열람은 내부인 전원**(master/admin/staff — 광고주 차단), **편집은 이름 명단**
+     (`utils/workdeskEditors.js`, env `WORKDESK_EDITORS`)만. 사용자 확정 정책이다.
+     작업오더 접수는 시트/탭을 tab_configs·campaigns 에 등록하는 단일 관문이고
+     공고 발행·수정은 정원·금액을 바꾸므로, 보는 사람 전부에게 열 수 없다.
+   ★ 라우트는 **기존 서비스·핸들러를 그대로 호출**한다(로직 복제 금지) — 여기서는
+     Track B 경로로 노출하면서 권한만 다시 씌운다. 통합 작업대는 /api/trackb/* 하고만
+     통신하고 인트라넷 SSO 토큰도 그 경로로만 격리되기 때문이다.
+   ══════════════════════════════════════════════════════════════ */
+const wdEditors = require('../utils/workdeskEditors');
+const { canEdit, editorOnlyMiddleware } = wdEditors;
+
+// 이 계정이 편집 가능한지 — 프론트가 버튼 노출을 정하는 데 쓴다(서버 게이트가 최종 방어)
+router.get('/perm', authMiddleware, internalMiddleware, async (req, res, next) => {
+  try {
+    res.json({ ok: true, canEdit: await canEdit(req.admin), role: _role(req), name: (req.admin && req.admin.name) || '' });
+  } catch (err) { next(err); }
+});
+
+// ── 편집 허용명단 관리 — master/admin 전용(후보는 인트라넷 직원DB에서 고른다) ──
+router.get('/workdesk-editors', authMiddleware, adminOrMasterMiddleware, async (req, res, next) => {
+  try { res.json({ ok: true, items: await wdEditors.listEditors() }); } catch (err) { next(err); }
+});
+router.post('/workdesk-editors', authMiddleware, adminOrMasterMiddleware, async (req, res, next) => {
+  try {
+    const b = req.body || {};
+    const out = await wdEditors.addEditor({ name: b.name, username: b.username, dept: b.dept, by: _by(req) });
+    res.status(out.ok ? 200 : 400).json(out);
+  } catch (err) { next(err); }
+});
+router.delete('/workdesk-editors/:id', authMiddleware, adminOrMasterMiddleware, async (req, res, next) => {
+  try {
+    const out = await wdEditors.removeEditor(req.params.id);
+    res.status(out.ok ? 200 : 404).json(out);
+  } catch (err) { next(err); }
+});
+
+// ── 작업오더 ────────────────────────────────────────────────
+router.get('/work-orders/list', authMiddleware, internalMiddleware, async (req, res, next) => {
+  try {
+    const status = String(req.query.status || '').trim();
+    const q = String(req.query.q || '').trim();
+    const where = ['deleted_at IS NULL'];
+    const params = [];
+    if (status) { params.push(status); where.push(`status = $${params.length}`); }
+    if (q) {
+      params.push('%' + q + '%');
+      where.push(`(title ILIKE $${params.length} OR created_by ILIKE $${params.length}`
+        + ` OR COALESCE(manager_name,'') ILIKE $${params.length})`);
+    }
+    const { rows } = await pool.query(
+      `SELECT * FROM work_orders WHERE ${where.join(' AND ')} ORDER BY created_at DESC LIMIT 300`, params);
+    // 상태별 건수(배지) — 필터와 무관하게 전체 기준
+    const { rows: c } = await pool.query(
+      `SELECT status, COUNT(*)::int AS n FROM work_orders WHERE deleted_at IS NULL GROUP BY status`);
+    const counts = {};
+    for (const r of c) counts[r.status] = r.n;
+    res.json({ ok: true, data: rows, counts, canEdit: await canEdit(req.admin) });
+  } catch (err) { next(err); }
+});
+
+/** 편집 계열은 기존 order 라우트 핸들러를 그대로 태운다(로직 복제 금지) */
+function _delegate(routerRef, method, path) {
+  const layer = routerRef.stack.find(l => l.route && l.route.path === path && l.route.methods[method]);
+  if (!layer) throw new Error(`[trackB] 위임 대상 라우트를 찾지 못함: ${method.toUpperCase()} ${path}`);
+  // 마지막 스택 = 실제 핸들러(앞은 authMiddleware 등 — 여기선 우리 게이트를 이미 통과했다)
+  return layer.route.stack[layer.route.stack.length - 1].handle;
+}
+const _orderRoutes = require('./order.routes');
+const _acceptHandler = _delegate(_orderRoutes, 'post', '/admin/accept');
+const _statusHandler = _delegate(_orderRoutes, 'put', '/admin/status');
+
+router.post('/work-orders/accept', authMiddleware, internalMiddleware, editorOnlyMiddleware, (req, res, next) =>
+  _acceptHandler(req, res, next));
+router.put('/work-orders/status', authMiddleware, internalMiddleware, editorOnlyMiddleware, (req, res, next) =>
+  _statusHandler(req, res, next));
+
+// ── 모집공고 ────────────────────────────────────────────────
+//   목록·상세·발행·수정·플래그·삭제·관제 — 전부 기존 campaign 라우트 핸들러에 위임한다.
+//   ★ 카드는 프론트에서 **공용 렌더러(campaign-cards.js)** 로 그린다 — 관리자 대시보드와
+//     같은 함수라 두 화면이 어긋날 수 없다(사본 금지 규율).
+const _campRoutes = require('./campaign.routes');
+const _campHandlers = {
+  list: _delegate(_campRoutes, 'get', '/admin/list'),
+  create: _delegate(_campRoutes, 'post', '/admin/create'),
+  update: _delegate(_campRoutes, 'put', '/admin/:id'),
+  flags: _delegate(_campRoutes, 'post', '/admin/:id/flags'),
+  del: _delegate(_campRoutes, 'delete', '/admin/:id'),
+  apps: _delegate(_campRoutes, 'get', '/admin/:id/applications'),
+  confirm: _delegate(_campRoutes, 'post', '/admin/:id/confirm'),
+  status: _delegate(_campRoutes, 'put', '/admin/:id/status'),     // 게시/마감 토글
+  preview: _delegate(_campRoutes, 'get', '/admin/:id/preview'),   // 리뷰어 화면 미리보기
+  dismiss: _delegate(_campRoutes, 'post', '/admin/:id/dismiss'),
+};
+router.get('/campaigns/list', authMiddleware, internalMiddleware, async (req, res, next) => {
+  // 편집 가능 여부를 함께 실어 준다 — 프론트가 버튼 노출을 정한다(서버 게이트가 최종 방어)
+  const _json = res.json.bind(res);
+  try {
+    const ce = await canEdit(req.admin);
+    res.json = (body) => _json(body && typeof body === 'object' ? { ...body, canEdit: ce } : body);
+  } catch (_) { /* 판정 실패는 canEdit 미표기 → 프론트는 읽기 전용으로 취급 */ }
+  return _campHandlers.list(req, res, next);
+});
+router.get('/campaigns/:id/applications', authMiddleware, internalMiddleware, (req, res, next) =>
+  _campHandlers.apps(req, res, next));
+router.post('/campaigns/create', authMiddleware, internalMiddleware, editorOnlyMiddleware, (req, res, next) =>
+  _campHandlers.create(req, res, next));
+router.put('/campaigns/:id', authMiddleware, internalMiddleware, editorOnlyMiddleware, (req, res, next) =>
+  _campHandlers.update(req, res, next));
+router.post('/campaigns/:id/flags', authMiddleware, internalMiddleware, editorOnlyMiddleware, (req, res, next) =>
+  _campHandlers.flags(req, res, next));
+router.delete('/campaigns/:id', authMiddleware, internalMiddleware, editorOnlyMiddleware, (req, res, next) =>
+  _campHandlers.del(req, res, next));
+router.post('/campaigns/:id/confirm', authMiddleware, internalMiddleware, editorOnlyMiddleware, (req, res, next) =>
+  _campHandlers.confirm(req, res, next));
+router.put('/campaigns/:id/status', authMiddleware, internalMiddleware, editorOnlyMiddleware, (req, res, next) =>
+  _campHandlers.status(req, res, next));
+router.get('/campaigns/:id/preview', authMiddleware, internalMiddleware, (req, res, next) =>
+  _campHandlers.preview(req, res, next));
+router.post('/campaigns/:id/dismiss', authMiddleware, internalMiddleware, editorOnlyMiddleware, (req, res, next) =>
+  _campHandlers.dismiss(req, res, next));
+
+/* ══════════════════════════════════════════════════════════════
+   등록리뷰어DB — 통합 작업대 상단탭
+
+   ★ **master/admin 전용**(`adminOrMasterMiddleware`). AE(staff)·광고주는 못 본다.
+     AE는 "담당 업체 탭"으로만 스코프되는데 리뷰어DB는 담당과 무관한 전사 개인정보라,
+     여기만 전체 공개하면 그 스코프 원칙이 깨진다(사용자 확정).
+   ★ Track B 라우트에 두는 이유: 통합 작업대는 `/api/trackb/*` 하고만 통신하고,
+     인트라넷 SSO 토큰(`via:'intranet'`)도 authMiddleware가 그 경로로만 격리한다.
+     기존 `/api/reviewer/list`는 전 행을 한 번에 반환(검색·페이지 없음)이라 그대로 쓸 수 없다.
+   ══════════════════════════════════════════════════════════════ */
+router.get('/reviewers', authMiddleware, adminOrMasterMiddleware, async (req, res, next) => {
+  try {
+    const q = String(req.query.q || '').trim();
+    const limit = Math.min(200, Math.max(1, parseInt(req.query.limit, 10) || 50));
+    const offset = Math.max(0, parseInt(req.query.offset, 10) || 0);
+    const status = String(req.query.status || '').trim();
+
+    const where = [];
+    const params = [];
+    if (q) {
+      // 이름 부분일치 또는 연락처 숫자 부분일치(하이픈 유무 무관).
+      // ★ 자리표시자를 안 쓸 파라미터는 push 하지 않는다 — 숫자 없는 이름 검색에서
+      //   "bind message supplies N parameters" 로 통째로 500 난다.
+      const d = q.replace(/[^0-9]/g, '');
+      const ors = [];
+      params.push('%' + q + '%');
+      ors.push(`name ILIKE $${params.length}`);
+      if (d) {
+        params.push('%' + d + '%');
+        ors.push(`REGEXP_REPLACE(phone,'[^0-9]','','g') LIKE $${params.length}`);
+      }
+      where.push('(' + ors.join(' OR ') + ')');
+    }
+    if (status) { params.push(status); where.push(`status = $${params.length}`); }
+    const w = where.length ? 'WHERE ' + where.join(' AND ') : '';
+
+    const { rows: cnt } = await pool.query(`SELECT COUNT(*)::int AS n FROM reviewers ${w}`, params);
+    params.push(limit); params.push(offset);
+    const { rows } = await pool.query(
+      `SELECT id, name, phone, phone8, status, consent,
+              income_type AS "incomeType", resident_num AS "residentNum",
+              address, bank_name AS "bankName", bank_account AS "bankAccount",
+              account_holder AS "accountHolder",
+              COALESCE(jsonb_array_length(CASE WHEN jsonb_typeof(sub_accounts)='array'
+                       THEN sub_accounts ELSE '[]'::jsonb END), 0) AS "subCount",
+              sub_accounts AS "subAccounts",
+              admin_memo AS "memo", registered_at AS "registeredAt"
+         FROM reviewers ${w}
+        ORDER BY registered_at DESC
+        LIMIT $${params.length - 1} OFFSET $${params.length}`, params);
+
+    res.json({ ok: true, items: rows, total: cnt[0].n, limit, offset });
+  } catch (err) { next(err); }
+});
+
+// 관리자 메모만 수정(사용자 확정: 다른 필드는 조회 전용 — 정산·신원 필드를 여기서 고치지 않는다)
+router.post('/reviewers/memo', authMiddleware, adminOrMasterMiddleware, async (req, res, next) => {
+  try {
+    const id = String((req.body && req.body.id) || '').trim();
+    if (!/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(id)) {
+      return res.status(400).json({ ok: false, error: 'id(UUID)가 필요합니다.' });
+    }
+    const memo = String((req.body && req.body.memo) || '').slice(0, 2000);
+    const { rowCount } = await pool.query('UPDATE reviewers SET admin_memo = $2 WHERE id = $1', [id, memo]);
+    if (!rowCount) return res.status(404).json({ ok: false, error: '해당 리뷰어를 찾을 수 없습니다.' });
+    res.json({ ok: true });
+  } catch (err) { next(err); }
+});
 
 router.get('/reviewer-logs', authMiddleware, internalMiddleware, async (req, res, next) => {
   try {

@@ -1215,6 +1215,7 @@ async function _fetchLateCounts(pool, campaignIds) {
       WHERE campaign_id = ANY($1)
         AND late_order_id IS NOT NULL
         AND status IN ('expired', 'cancelled')
+        AND dismissed_at IS NULL
       GROUP BY campaign_id`,
     [ids]
   );
@@ -1602,7 +1603,7 @@ router.get('/admin/:id/applications', authMiddleware, adminOrMasterMiddleware, a
     const { rows } = await pool.query(
       `SELECT id, campaign_id, applicant_name, applicant_phone, applicant_inad,
               status, sheet_row_added, applied_at, phone8, expires_at, submitted_at,
-              order_submission_id, late_order_id, option_key, owner_phone8
+              order_submission_id, late_order_id, option_key, owner_phone8, dismissed_at
        FROM campaign_applications
        WHERE campaign_id = $1
        ORDER BY applied_at ASC`,
@@ -1636,11 +1637,35 @@ router.get('/admin/:id/applications', authMiddleware, adminOrMasterMiddleware, a
         );
         const confirmed = rows.filter(r => r.status === 'submitted').length;
         const rosterRows = Number(ri[0]?.n) || 0;
+        // ★ 차이가 있을 때만 "어느 행이 확정에 없는지"를 찾는다(평상시 쿼리 0).
+        //   대조 키 = phone8(연락처 끝 8자리). 시스템의 신원키와 같아야 오탐이 없다.
+        let unmatched = [];
+        if (rosterRows > confirmed) {
+          const { rows: um } = await pool.query(
+            `SELECT ri.row_index AS row, ri.reviewer_name AS name, ri.phone8
+               FROM review_index ri
+              WHERE ri.sheet_id = $1 AND ri.tab_name = $2
+                AND NOT EXISTS (
+                  SELECT 1 FROM campaign_applications ca
+                   WHERE ca.campaign_id = $3 AND ca.status = 'submitted'
+                     AND ca.phone8 <> '' AND ca.phone8 = ri.phone8
+                )
+              ORDER BY ri.row_index
+              LIMIT 30`,
+            [c0.linked_sheet_id, c0.linked_tab_name, id]
+          );
+          unmatched = um.map(r => ({
+            row: r.row, name: r.name || '',
+            phone4: String(r.phone8 || '').replace(/\D/g, '').slice(-4),
+            noPhone: !String(r.phone8 || '').trim(),
+          }));
+        }
         sheetInfo = {
           tabName: c0.linked_tab_name,
           rosterRows,
           confirmed,
           diff: rosterRows > 0 ? rosterRows - confirmed : null,
+          unmatched,
           schedule: await describeTabDates(pool, c0.linked_sheet_id, c0.linked_tab_gid, new Date()),
         };
       }
@@ -1746,6 +1771,7 @@ router.post('/admin/:id/confirm', authMiddleware, adminOrMasterMiddleware, async
     await client.query(
       `UPDATE campaign_applications ca
           SET status = 'submitted',
+              dismissed_at = NULL,
               submitted_at = COALESCE(
                 (SELECT os.submitted_at FROM order_submissions os WHERE os.id = ca.late_order_id),
                 ca.applied_at, NOW()),
@@ -1759,6 +1785,49 @@ router.post('/admin/:id/confirm', authMiddleware, adminOrMasterMiddleware, async
   } catch (err) {
     try { await client.query('ROLLBACK'); } catch (_) { /* noop */ }
     if (err.code === '23505') return res.status(409).json({ ok: false, error: '동일 리뷰어의 활성 참여와 충돌 — 새로고침 후 재시도하세요.' });
+    next(err);
+  } finally {
+    client.release();
+  }
+});
+
+// POST /api/campaign/admin/:id/dismiss {applicationId} — 취소확정(미참여) (admin/master)
+//   만료·취소된 참여를 관리자가 "미참여로 취소 확정" → dismissed_at 기록.
+//   이후 관제 수동확정 버튼·지각(late) 빨간 배지·만료 집계에서 제외돼 "다시 알림이 뜨지 않는다".
+//   ★ 이미 자리를 반환한 종료 상태(expired/cancelled)에만 붙는 마커라 quota/유효홀드 불변.
+//     order_submissions·시트는 건드리지 않는다(주문 취소는 별도 [주문취소] 경로).
+//   잠금 계층은 confirm과 동일: 캠페인 행 FOR UPDATE → 신청 행 FOR UPDATE(동일행 confirm↔dismiss 직렬화).
+router.post('/admin/:id/dismiss', authMiddleware, adminOrMasterMiddleware, async (req, res, next) => {
+  const { id } = req.params;
+  const appId = parseInt(req.body.applicationId, 10);
+  if (!appId) return res.status(400).json({ ok: false, error: 'applicationId 필수' });
+  const client = await pool.connect();
+  try {
+    await client.query('BEGIN');
+    const { rows: cRows } = await client.query('SELECT id, participation_mode FROM recruit_campaigns WHERE id = $1 FOR UPDATE', [id]);
+    if (!cRows.length) { await client.query('ROLLBACK'); return res.status(404).json({ ok: false, error: '캠페인을 찾을 수 없습니다.' }); }
+    if (!cRows[0].participation_mode) { await client.query('ROLLBACK'); return res.status(400).json({ ok: false, error: '참여형 공고가 아닙니다.' }); }
+    const { rows: t } = await client.query(
+      `SELECT id, status, dismissed_at FROM campaign_applications WHERE id = $1 AND campaign_id = $2 FOR UPDATE`, [appId, id]);
+    if (!t.length) { await client.query('ROLLBACK'); return res.status(404).json({ ok: false, error: '신청을 찾을 수 없습니다.' }); }
+    const a = t[0];
+    if (a.dismissed_at) { await client.query('ROLLBACK'); return res.json({ ok: true, already: true }); } // 멱등
+    if (a.status === 'submitted') {
+      await client.query('ROLLBACK');
+      return res.status(400).json({ ok: false, error: '이미 제출확정된 참여입니다(취소는 [주문취소]로 처리하세요).' });
+    }
+    if (!['expired', 'cancelled'].includes(a.status)) {
+      await client.query('ROLLBACK');
+      return res.status(400).json({ ok: false, error: `'${a.status}' 상태는 취소확정 대상이 아닙니다(만료·취소 건만).` });
+    }
+    // status='cancelled'로 통일 + dismissed_at 기록. quota/유효홀드 불변(종료 상태 마커).
+    await client.query(
+      `UPDATE campaign_applications SET status = 'cancelled', dismissed_at = NOW() WHERE id = $1`, [appId]);
+    await client.query('COMMIT');
+    logger.info(`[campaign/dismiss] 취소확정 camp=${id} app=${appId} by=${req.admin && req.admin.name}`);
+    res.json({ ok: true });
+  } catch (err) {
+    try { await client.query('ROLLBACK'); } catch (_) { /* noop */ }
     next(err);
   } finally {
     client.release();

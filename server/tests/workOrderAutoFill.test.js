@@ -47,7 +47,9 @@ ok('구조화 필드가 없으면 본문 "작업담당 : X" 에서 찾는다',
 ok('어디에도 없으면 빈 값', wm.pickWorkManager({ title: '7월 진행' }) === '');
 
 /* ═══ ② 구매채널 판정(프론트 순수함수를 실제로 실행) ═══ */
-const appSrc = readF('js/index-app.js');
+// 작업오더 상세 렌더·담당자 매핑은 공유 모듈(js/work-order-detail.js)로 이관 —
+//   통합 작업대가 같은 상세를 쓰기 위함. 검사 의미는 그대로, 읽는 대상만 넓힌다.
+const appSrc = readF('js/index-app.js') + '\n' + readF('js/work-order-detail.js');
 const chanSrc = appSrc.slice(appSrc.indexOf('const WO_CHANNEL_HOSTS'), appSrc.indexOf('/** 작업오더에서 채널 추정'));
 const _chan = new Function(chanSrc + '\n return _woChannelFromUrl;')();
 
@@ -86,7 +88,7 @@ ok('★ 접수 시 탭 담당자는 매핑된 닉네임 — 담당AE 실명을 �
 
 /* ═══ 프론트 배선 ═══ */
 const rec = readF('js/index-recruit.js');
-const adm = readF('admin.html');
+const adm = readF('js/recruit-modal.js') + '\n' + readF('admin.html');   // 모달 마크업은 공유 모듈로 이관
 const siand = readF('admin-siand.html');
 
 ok('프리필에 채널·담당자·연결탭이 실린다',

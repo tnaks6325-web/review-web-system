@@ -118,5 +118,22 @@ ok('최소 날짜 종수 상수는 2 유지', SCH.MIN_DISTINCT_DATES === 2);
     /single_date:/.test(rec) && /시트 일정이 적용되지 않습니다/.test(rec)
     && /no_mirror:/.test(rec));
 
+  /* ═══ 차이가 난 **행**을 짚어준다 ═══ */
+  ok('차이가 있을 때만 불일치 행을 조회한다(평상시 쿼리 0)',
+    /if \(rosterRows > confirmed\) \{[\s\S]{0,400}NOT EXISTS/.test(rt));
+  ok('대조 키는 phone8 — 시스템 신원키와 같아야 오탐이 없다',
+    /ca\.phone8 <> '' AND ca\.phone8 = ri\.phone8/.test(rt));
+  ok('행 번호·이름과 함께 돌려준다(어느 줄인지 짚기)',
+    /ri\.row_index AS row, ri\.reviewer_name AS name/.test(rt) && /LIMIT 30/.test(rt));
+  ok('★ 연락처 뒤 4자리만 내려준다(관제 화면 PII 최소화)',
+    /phone4: String\(r\.phone8 \|\| ''\)\.replace\(\/\\D\/g, ''\)\.slice\(-4\)/.test(rt)
+    && !/phone8: r\.phone8/.test(rt));
+  ok('관제가 불일치 행을 나열한다',
+    /function _campUnmatchedRows/.test(rec) && /확정으로 안 잡힌 시트 행/.test(rec));
+  ok('★ "정원은 위치가 아니라 숫자"임을 코드에 남긴다(오해 방지)',
+    /캠페인 정원은 '위치'가 아니라 '숫자'/.test(rec));
+  ok('연락처 없는 행은 대조 불가임을 안내(영구 오탐 오해 방지)',
+    /연락처가 비어 있는 행은 대조가 불가능해/.test(rec));
+
   console.log(`\n✅ campaignFullState: ${n}개 통과`);
 })();

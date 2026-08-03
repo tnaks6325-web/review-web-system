@@ -1506,41 +1506,7 @@ function _woField(label, val, isLink) {
   </div>`;
 }
 
-// 텍스트 escape 후 http(s) URL만 링크화 (javascript: 등 차단)
-function _woLinkify(text) {
-  return escHtml(String(text == null ? "" : text))
-    .replace(/(https?:\/\/[^\s<]+)/g,
-      '<a href="$1" target="_blank" rel="noopener noreferrer" style="color:#1b64da;word-break:break-all">$1</a>');
-}
 
-// 상품·옵션 요약에서 아래 개별 필드와 중복되는 값 제거:
-//  - [합계]/합계 라인(모집인원·총구입비), 구분선
-//  - 상품 URL(= 상품확인용URL 필드와 중복) 및 바레 URL
-function _woCleanProductOption(raw, productUrl) {
-  if (!raw || !String(raw).trim()) return "";
-  const pu = (productUrl || "").trim();
-  const esc = s => s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
-  const out = [];
-  for (let ln of String(raw).split(/\r?\n/)) {
-    const t = ln.trim();
-    if (/^\[?\s*합계/.test(t)) continue;            // [합계]/합계 라인 제거
-    if (/^소계\s*[:：]/.test(t)) continue;           // 독립 '소계:' 라인 제거(키트 형식)
-    if (/^\[\s*상품/.test(t)) continue;              // [상품/옵션/건수] 헤더 제거(상위 라벨과 중복)
-    if (/^[─—\-]{3,}$/.test(t)) continue;            // 구분선 제거
-    ln = ln.replace(/\(\s*https?:\/\/[^)]*\)/g, "");  // (http URL) 제거
-    if (pu) ln = ln.replace(new RegExp("\\(\\s*" + esc(pu) + "\\s*\\)", "g"), ""); // (상품URL) 제거
-    ln = ln.replace(/\s*https?:\/\/\S+/g, "");        // 바레 URL 제거
-    // 건수(N명/N건)·소계·라인합계 제거 — 옵션명+결제금액만 남김 (모집인원/총구입비는 아래 필드와 중복)
-    ln = ln.replace(/\s*\/\s*소계\s*[\d,]+\s*원/g, "")
-           .replace(/\s*\/\s*\d[\d,]*\s*[명건]/g, "")
-           .replace(/\s*[×x]\s*\d[\d,]*\s*[명건]/g, "")
-           .replace(/\s*=\s*[\d,]+\s*원/g, "")
-           .replace(/\s*\/\s*$/, "");
-    ln = ln.replace(/\(\s*\)/g, "").replace(/[ \t]{2,}/g, " ").replace(/[ \t]+$/, "");
-    out.push(ln);
-  }
-  return out.join("\n").replace(/\n{3,}/g, "\n\n").trim();
-}
 
 // 항목명 정렬 + 여러 줄 값 (상품·옵션처럼 멀티라인 값을 같은 목록에 통합)
 function _woMultiField(label, val) {
@@ -1552,136 +1518,10 @@ function _woMultiField(label, val) {
   </div>`;
 }
 
-// Drive URL에서 fileId 추출 (/file/d/ID, ?id=ID, /d/ID)
-function _driveId(url) {
-  const s = String(url);
-  const m = s.match(/\/file\/d\/([-\w]{20,})/) || s.match(/[?&]id=([-\w]{20,})/) || s.match(/\/d\/([-\w]{20,})/);
-  return m ? m[1] : null;
-}
 
-// 이미지 라이트박스(화면 내 팝업) — 화면맞춤으로 열고 [원본크기보기] 토글 제공
-function woImageModal(url) {
-  let ov = document.getElementById("woImgModal");
-  if (!ov) {
-    ov = document.createElement("div");
-    ov.id = "woImgModal";
-    ov.style.cssText = "position:fixed;inset:0;z-index:99999;background:rgba(0,0,0,.82);display:none;align-items:center;justify-content:center;padding:24px;cursor:zoom-out;overflow:auto";
-    ov.innerHTML =
-      '<button id="woImgOrig" style="position:fixed;top:14px;right:60px;z-index:2;background:rgba(255,255,255,.16);color:#fff;border:1px solid rgba(255,255,255,.35);border-radius:8px;padding:6px 12px;font-size:13px;font-weight:600;cursor:pointer;backdrop-filter:blur(4px);-webkit-backdrop-filter:blur(4px)">원본크기보기</button>'
-      + '<span id="woImgClose" style="position:fixed;top:9px;right:18px;z-index:2;color:#fff;font-size:32px;line-height:1;cursor:pointer">&times;</span>'
-      + '<img id="woImgModalImg" style="border-radius:8px;box-shadow:0 12px 48px rgba(0,0,0,.5);display:block;margin:auto">'
-      + '<div id="woImgModalErr" style="display:none;color:#fff;font-size:14px;text-align:center;max-width:90vw;word-break:break-all"></div>';
-    document.body.appendChild(ov);
-    const im = ov.querySelector("#woImgModalImg");
-    const er = ov.querySelector("#woImgModalErr");
-    const btn = ov.querySelector("#woImgOrig");
-    const fit = () => {
-      im.style.maxWidth = "92vw"; im.style.maxHeight = "88vh"; im.style.width = "auto"; im.style.height = "auto"; im.style.cursor = "zoom-in";
-      ov.style.alignItems = "center"; ov.style.justifyContent = "center"; ov.scrollTop = 0;
-      btn.textContent = "원본크기보기"; ov._orig = false;
-    };
-    const orig = () => {
-      im.style.maxWidth = "none"; im.style.maxHeight = "none"; im.style.cursor = "zoom-out";
-      ov.style.alignItems = "flex-start"; ov.style.justifyContent = "flex-start";
-      btn.textContent = "화면맞춤"; ov._orig = true;
-    };
-    ov._fit = fit; ov._toggle = () => { ov._orig ? fit() : orig(); };
-    ov.addEventListener("click", () => { ov.style.display = "none"; });
-    btn.addEventListener("click", e => { e.stopPropagation(); ov._toggle(); });
-    ov.querySelector("#woImgClose").addEventListener("click", e => { e.stopPropagation(); ov.style.display = "none"; });
-    im.addEventListener("click", e => { e.stopPropagation(); ov._toggle(); });
-    er.addEventListener("click", e => e.stopPropagation());
-    im.addEventListener("error", () => {
-      im.style.display = "none"; btn.style.display = "none";
-      const u = ov._lastUrl || im.src;
-      const dbg = u + (u.indexOf("?") >= 0 ? "&" : "?") + "debug=1";
-      er.innerHTML = "이미지를 불러올 수 없습니다.<br><span style='font-size:12px;opacity:.7'>" + u + "</span><br>"
-        + "<a href='" + dbg + "' target='_blank' rel='noopener' style='color:#93c5fd'>🔧 진단 정보 보기</a>";
-      er.style.display = "block";
-    });
-    im.addEventListener("load", () => { im.style.display = "block"; btn.style.display = "block"; er.style.display = "none"; });
-    document.addEventListener("keydown", e => { if (e.key === "Escape") ov.style.display = "none"; });
-  }
-  ov._lastUrl = url;
-  ov.querySelector("#woImgModalErr").style.display = "none";
-  const im = ov.querySelector("#woImgModalImg");
-  ov._fit();                       // 항상 화면맞춤으로 시작
-  im.style.display = "block";
-  im.src = url;
-  ov.style.display = "flex";
-}
-// 이미지 로드 실패 시 → 팝업으로 여는 링크로 대체
-function _woImgError(img) {
-  const a = document.createElement("a");
-  a.href = "#"; a.textContent = "📎 첨부 이미지 보기";
-  a.style.cssText = "color:#1b64da;cursor:pointer";
-  const u = img.dataset.openurl || img.src;
-  a.addEventListener("click", e => { e.preventDefault(); woImageModal(u); });
-  img.replaceWith(a);
-}
-// 팝업으로 열리는 이미지 태그 (카드 내 미리보기 크기 제한)
-function _woImgTag(src, openUrl) {
-  return `<img src="${escHtml(src)}" data-openurl="${escHtml(openUrl || src)}" style="max-width:min(100%,360px);max-height:240px;width:auto;height:auto;border-radius:8px;margin:4px 0;cursor:zoom-in;border:1px solid #E5E7EB" loading="lazy" title="클릭하면 크게 보기" onclick="woImageModal(this.dataset.openurl||this.src)" onerror="_woImgError(this)">`;
-}
 
-// 평문 → 안전 HTML: 줄바꿈 보존, URL 링크화, Drive 파일 URL은 이미지로 자동 임베드
-function _woTextToHtml(text) {
-  const parts = String(text == null ? "" : text).split(/(https?:\/\/[^\s<]+)/g);
-  let html = "";
-  for (let i = 0; i < parts.length; i++) {
-    if (i % 2 === 1) {
-      const url = parts[i];
-      const isProxy = /\/api\/order\/guide-image\/[-\w]{20,}/.test(url);
-      const id = _driveId(url);
-      if (isProxy) {
-        html += _woImgTag(url, url);
-      } else if (id) {
-        html += _woImgTag(`https://drive.google.com/thumbnail?id=${id}&sz=w1600`, url);
-      } else {
-        html += `<a href="${escHtml(url)}" target="_blank" rel="noopener noreferrer" style="color:#1b64da;word-break:break-all">${escHtml(url)}</a>`;
-      }
-    } else {
-      html += escHtml(parts[i]).replace(/\n/g, "<br>");
-    }
-  }
-  return html;
-}
 
-// 유입가이드 본문 안전 렌더 — 평문(Drive URL 자동 임베드) / HTML(<img>) 양쪽 처리
-function _woGuideHtml(raw) {
-  if (!raw) return "";
-  // HTML 태그가 없으면 평문으로 보고 Drive URL을 이미지로 임베드
-  if (!/<[a-z][\s\S]*?>/i.test(raw)) return _woTextToHtml(raw);
-  const tmp = document.createElement("div");
-  tmp.innerHTML = raw;
-  tmp.querySelectorAll("script,style,iframe,object,embed,link").forEach(n => n.remove());
-  tmp.querySelectorAll("*").forEach(el => {
-    [...el.attributes].forEach(a => {
-      const n = a.name.toLowerCase();
-      if (n.startsWith("on")) el.removeAttribute(a.name);
-      if ((n === "href" || n === "src") && /^\s*javascript:/i.test(a.value)) el.removeAttribute(a.name);
-    });
-  });
-  tmp.querySelectorAll("img").forEach(img => {
-    img.style.maxWidth = "min(100%,360px)";
-    img.style.maxHeight = "240px";
-    img.style.width = "auto";
-    img.style.height = "auto";
-    img.style.borderRadius = "8px";
-    img.style.margin = "4px 0";
-    img.style.border = "1px solid #E5E7EB";
-    img.style.cursor = "zoom-in";
-    img.loading = "lazy";
-    img.title = "클릭하면 크게 보기";
-    // 새 탭 대신 팝업으로 열기 (부모 <a> 링크는 무력화)
-    img.setAttribute("onclick", "woImageModal(this.src);return false;");
-    const a = img.closest("a");
-    if (a) { a.removeAttribute("target"); a.setAttribute("href", "javascript:void(0)"); }
-  });
-  return tmp.innerHTML;
-}
 
-const _INFLOW_LABEL = { guide: "유입가이드", link: "링크유입" };
 
 // 처리메모 누적 로그 렌더 (전송됨/미전송 + 전송시점, 최신순)
 function _woMemoLogInner(o) {
@@ -1706,71 +1546,8 @@ function _woMemoLogInner(o) {
   return `<b style="color:#6B7280;font-size:.74rem">처리메모 로그 (${log.length})</b><div style="margin-top:2px;font-size:.76rem">${rows}</div>`;
 }
 
-// 인트라넷이 review_guide/special_notes에 [헤더] 섹션으로 모든 항목을 중복 포함시켜 보내므로,
-// 개별 필드로 이미 표시되는 섹션은 버리고 지정한 라벨의 섹션 내용만 추출한다.
-// 섹션 헤더가 전혀 없으면(우리 키트/스태프의 평문) 원문 그대로 반환.
-function _woPickSections(raw, keepLabels) {
-  const text = String(raw == null ? "" : raw);
-  if (!text.trim()) return "";
-  if (!/\[[^\]]+\]/.test(text)) return text.trim();
-  const norm = s => s.replace(/\s/g, "");
-  const keep = keepLabels.map(norm);
-  const lines = text.split(/\r?\n/);
-  const out = [];
-  let take = false, buf = [];
-  const flush = () => { const c = buf.join("\n").trim(); if (take && c) out.push(c); buf = []; };
-  for (const ln of lines) {
-    const m = ln.match(/^\s*\[([^\]]+)\]\s*(.*)$/);
-    if (m) {
-      flush();
-      take = keep.some(k => norm(m[1]).includes(k));
-      buf = m[2] ? [m[2]] : [];
-    } else {
-      buf.push(ln);
-    }
-  }
-  flush();
-  return out.join("\n\n").trim();
-}
 
-// ── 카톡 ▶형식 렌더 (팀채팅방 게시 가독성) ──
-function _woLinkHtml(url) {
-  const u = (url == null) ? "" : String(url).trim();
-  if (!u) return "";
-  return /^https?:\/\//i.test(u)
-    ? `<a href="${escHtml(u)}" target="_blank" rel="noopener noreferrer" style="color:#1b64da;word-break:break-all">${escHtml(u)}</a>`
-    : escHtml(u);
-}
-// 한 줄 항목:  ▶ 라벨 : 값
-function _woKv(label, val) {
-  if (val == null || val === "") return "";
-  return `<div style="font-size:.8rem;color:#1F2937;margin:2px 0;line-height:1.65;word-break:break-word"><span style="color:#3182f6;font-weight:700">▶</span> <b>${escHtml(label)}</b> : ${escHtml(String(val))}</div>`;
-}
-// 멀티라인 섹션:  ▶ 라벨 ◀  (다음 줄에 내용)
-// 멀티라인/단일라인 자동: 1줄이면 '▶ 라벨 : 값', 2줄+면 '▶ 라벨 :' 후 줄바꿈
-function _woSection(label, rawText, renderFn) {
-  const txt = (rawText == null ? "" : String(rawText)).replace(/\s+$/, "");
-  if (!txt.trim()) return "";
-  const multi = /\n/.test(txt.trim());
-  const inner = renderFn(txt);
-  const lab = `<span style="color:#3182f6;font-weight:700">▶</span> <b>${escHtml(label)}</b> :`;
-  if (!multi) {
-    return `<div style="font-size:.8rem;color:#1F2937;margin:2px 0;line-height:1.65;word-break:break-word">${lab} ${inner}</div>`;
-  }
-  return `<div style="margin-top:4px"><div style="font-size:.8rem;color:#1F2937;line-height:1.6">${lab}</div><div style="font-size:.79rem;color:#374151;margin-top:1px;line-height:1.6;word-break:break-word">${inner}</div></div>`;
-}
 
-// 유입가이드 본문 정리: "[유입가이드 첨부 이미지]" 헤더, "1. xxx.png (..저장됨)" 파일정보 라인 제거
-function _woCleanGuide(raw) {
-  if (!raw || !String(raw).trim()) return "";
-  return String(raw).split(/\r?\n/)
-    .filter(ln => !/^\s*\[유입가이드\s*첨부\s*이미지\]\s*$/.test(ln))
-    .filter(ln => !/^\s*\d+\.\s.*\(.*저장됨\)\s*$/.test(ln))
-    .join("\n")
-    .replace(/\n{2,}/g, "\n")
-    .replace(/^\n+|\n+$/g, "")
-    .trim();
-}
 
 // 상품·옵션을 "상품명 - 결제금액" (옵션 있으면 옵션별) 한 줄로 압축
 //  1개 상품·옵션 → 인라인,  2개 이상 → 번호 매겨 줄바꿈
@@ -1800,58 +1577,6 @@ function _woOptionRows(o) {
   return rows.length >= 2 ? rows : [];
 }
 
-function _woProductLines(o) {
-  const lines = [];
-  // 1) 구조화 JSON 우선
-  let arr = null;
-  try { const p = JSON.parse(o.product_options_json || "[]"); if (Array.isArray(p) && p.length) arr = p; } catch (_) {}
-  if (arr) {
-    for (const prod of arr) {
-      const name = (prod.name || "").trim();
-      const opts = Array.isArray(prod.options) ? prod.options : [];
-      if (opts.length) {
-        for (const op of opts) {
-          const lab = (op.label || "").trim();
-          const pay = Number(op.pay) || 0;
-          lines.push(`${name}${lab ? " " + lab : ""}${pay ? " - 결제금액 " + pay.toLocaleString() + "원" : ""}`.trim());
-        }
-      } else {
-        const pay = Number(prod.base && prod.base.pay) || 0;
-        lines.push(`${name}${pay ? " - 결제금액 " + pay.toLocaleString() + "원" : ""}`.trim());
-      }
-    }
-  } else {
-    // 2) product_option 텍스트 파싱: "1. 상품명" + "- [옵션] / 결제금액 N원"
-    const cleaned = _woCleanProductOption(o.product_option, o.product_url);
-    if (!cleaned) return "";
-    let curName = "", curHadOpt = false;
-    const flushNameOnly = () => { if (curName && !curHadOpt) lines.push(curName); };
-    for (const raw of cleaned.split(/\r?\n/)) {
-      const t = raw.trim();
-      if (!t) continue;
-      const mName = t.match(/^\d+\.\s*(.+)$/);            // "1. 멀티비타민"
-      if (mName) { flushNameOnly(); curName = mName[1].trim(); curHadOpt = false; continue; }
-      const opt = t.replace(/^[-•]\s*/, "");              // "옵션 없음 / 결제금액 26,900원"
-      const payM = opt.match(/결제금액\s*([\d,]+)\s*원/);
-      const pay = payM ? payM[1] : "";
-      let optLabel = opt.split("/")[0].trim();
-      if (/^옵션\s*없음$/.test(optLabel)) optLabel = "";   // "옵션 없음" 생략
-      lines.push(`${curName}${optLabel ? " " + optLabel : ""}${pay ? " - 결제금액 " + pay + "원" : ""}`.trim());
-      curHadOpt = true;
-    }
-    flushNameOnly();
-  }
-  const clean = lines.filter(Boolean);
-  if (!clean.length) return "";
-  // 링크유입이면 상품 순서대로 유입링크를 같은 줄에 붙임
-  let withUrl = clean;
-  if (o.inflow_type === "link") {
-    const urls = _woGuideUrls(o.inflow_guide);
-    withUrl = clean.map((l, i) => urls[i] ? `${l} ${urls[i]}` : l);
-  }
-  if (withUrl.length === 1) return withUrl[0];               // 1개 → 인라인
-  return withUrl.map((l, i) => `${i + 1}.${l}`).join("\n");  // 2개+ → 번호+줄바꿈
-}
 
 // 평문 유입가이드 → 리뷰어 노출용 HTML: 첨부 이미지 URL(guide-image 프록시·Drive)을 실제 <img>로,
 // 일반 URL은 <a>로. 이미지가 하나도 없으면 ""(기존 평문 경로 유지 — 동작 불변).
@@ -1942,46 +1667,7 @@ function _woFirstProductInfo(o) {
   return { name, price: pm ? pm[1] + "원" : "" };
 }
 
-// inflow_guide 등에서 http(s) URL을 순서대로 추출
-function _woGuideUrls(raw) {
-  const urls = [];
-  const re = /https?:\/\/[^\s<]+/g;
-  let m;
-  while ((m = re.exec(String(raw == null ? "" : raw)))) urls.push(m[0]);
-  return urls;
-}
 
-// 작업오더 상세 본문 (카드/간편보기 공용) — 카톡 ▶형식
-function _woDetailHtml(o) {
-  const prodText = _woProductLines(o);
-  const guide = _woCleanGuide(o.inflow_guide);
-  const rg = _woPickSections(o.review_guide, ["리뷰등록 가이드", "리뷰가이드", "리뷰 가이드"]);
-  const sn = _woPickSections(o.special_notes, ["특이사항"]);
-  const txtR = t => _woLinkify(t).replace(/\n/g, "<br>");   // 텍스트(줄바꿈 보존)
-  const urlR = t => _woLinkHtml(t);                          // 단일 URL
-  const guideR = t => _woGuideHtml(t);                       // 가이드(이미지 임베드)
-  return [
-    // 담당AE = 인트라넷 표기 실명 우선, 없으면 제출 계정. 작업담당은 매핑 닉네임을 병기(065).
-    _woKv("담당AE", o.manager_name || o.created_by),
-    _woKv("작업담당", _woManagerLabel(o.work_manager)),
-    _woSection("상품·옵션", prodText, txtR),
-    _woKv("모집인원", o.recruit_count ? Number(o.recruit_count).toLocaleString() + "명" : ""),
-    _woKv("일일진행건수", o.daily_count_text || o.daily_count),
-    _woKv("구매시간대", o.purchase_time),
-    _woKv("유입방식", _INFLOW_LABEL[o.inflow_type] || o.inflow_keyword || ""),
-    _woKv("배송유형", o.delivery_type),
-    _woKv("택배대행", o.courier_proxy ? "예" : ""),
-    _woKv("리뷰유형", o.review_type),
-    _woKv("물건비", o.goods_cost_type),
-    _woSection("상품확인용URL", o.product_url, urlR),
-    _woSection("작업시트탭URL", o.work_sheet_url, urlR),
-    rg ? _woSection("리뷰가이드", rg, txtR) : "",
-    sn ? _woSection("특이사항", sn, txtR) : "",
-    o.inflow_type === "link"
-      ? _woKv("유입방법", "링크유입")
-      : (guide ? _woSection("유입가이드", guide, guideR) : ""),
-  ].join("");
-}
 
 function _renderWorkOrderCard(o) {
   const st = o.status || "submitted";
@@ -2191,6 +1877,67 @@ async function woDelete(id) {
 }
 
 // 모집공고생성 — 카톡 URL 등록 확인 후 진행
+async function woCreateCampaign(id) {
+  const o = (_woCache || []).find(x => x.id === id);
+  if (!o) { showToast("오더 정보를 찾을 수 없습니다. 새로고침 후 다시 시도하세요.", "error"); return; }
+  if (typeof openRecruitModal !== "function") { showToast("모집공고 모듈을 불러오지 못했습니다.", "error"); return; }
+  const _pi = (typeof _woFirstProductInfo === "function") ? _woFirstProductInfo(o) : { name: "", price: "" };
+  // 유입가이드 HTML(본문 + review_guide에 섞여온 첨부 이미지 승격) — 아래 wd_inflow_html/text 분기에 공용
+  const _wdInflowHtml = (typeof _woBuildInflowHtml === "function") ? _woBuildInflowHtml(o) : "";
+  const prefill = {
+    // ★ 공고 제목 = 상품명 우선(리뷰어 노출용 — 업체명·건수·배송유형 미노출), 없으면 오더 제목 폴백. 관리자 자유 수정 가능.
+    title:         _pi.name || o.title || "",
+    time_range:    o.purchase_time || "",
+    max_slots:     o.recruit_count || 0,
+    chat_url:      o.chat_room_url || "",
+    delivery_type: WO_DELIVERY_MAP[o.delivery_type] || "",
+    product_url:   o.product_url || "",
+    // ★ 상품정보 기본값 = 작업오더 입력 상품명·결제금액 (자동수집 성공 시 그 값으로 덮어씀)
+    product_name:  _pi.name || "",
+    price:         _pi.price || "",
+    notes:         [_INFLOW_LABEL[o.inflow_type] ? ("유입방식: " + _INFLOW_LABEL[o.inflow_type]) : (o.inflow_keyword ? ("유입키워드: " + o.inflow_keyword) : ""), o.review_guide || ""].filter(Boolean).join("\n"),
+    // ★ M3: 참여형 자동 프리필 — 작업오더 세부내용을 발행 폼 스냅샷으로 복사
+    participation:  true,
+    // ★ 062: 작업오더 시작일 → 발행폼 시작일 프리필(시작일 전 게시 시 "오픈 예정" 카운트다운)
+    start_date:     (o.start_date || "").slice(0, 10),
+    daily_limit:    o.daily_count || (String(o.daily_count_text || "").match(/\d+/) || [])[0] || "",  // 인트라넷 text형("일 10건") 폴백
+    recruit_total:  o.recruit_count || 0,
+    purchase_time:  o.purchase_time || "",
+    wd_product:     (typeof _woProductLines === "function" ? (_woProductLines(o) || "") : "") || (o.product_option || ""),
+    // ★ 리뷰 #2: inflow_guide는 HTML(에디터)·평문(인트라넷/레거시) 두 형태 실존 —
+    //   태그가 실제로 있을 때만 raw HTML 경로(이미지 보존), 평문은 escape 경로(개행·'<옵션>' 안전)
+    //   ★ 평문이라도 첨부 이미지 URL(guide-image/Drive)이 있으면 <img>로 변환해 raw 경로로 —
+    //     + review_guide의 [유입가이드 첨부 이미지]에 섞여온 이미지도 유입가이드로 승격(_woBuildInflowHtml)
+    wd_inflow_html: _wdInflowHtml,
+    wd_inflow_text: o.inflow_type === "link"
+      ? "링크유입 — 아래 [상품 페이지 열기] 버튼으로 진입해 구매를 진행하세요."
+      : ((!_wdInflowHtml && o.inflow_guide && !/<[a-z][^>]*>/i.test(o.inflow_guide)) ? o.inflow_guide : ""),
+    // ★ 리뷰가이드는 [리뷰등록 가이드] 섹션만 스냅샷(유입방식·유입가이드·첨부 이미지 메타 제외) — 관리자 상세와 동일 규율
+    wd_review:      (typeof _woPickSections === "function"
+                      ? _woPickSections(o.review_guide, ["리뷰등록 가이드", "리뷰가이드", "리뷰 가이드"])
+                      : (o.review_guide || "")),
+    wd_notes:       o.special_notes || "",
+    // ★ 상품 페이지 열기 버튼용 랜딩 — 링크유입일 때만(비링크는 product_url 폴백 제거 = 유입가이드형에 버튼 안 뜸)
+    landing_url:    o.inflow_type === "link"
+                      ? (((typeof _woGuideUrls === "function" ? _woGuideUrls(o.inflow_guide)[0] : "") || "") || o.product_url || "")
+                      : "",
+    // 🧩 상품 옵션 프리필(061): product_options_json → 옵션표(2개 이상일 때만). 정원·하루는 관리자가 입력.
+    options:        (typeof _woOptionRows === "function") ? _woOptionRows(o) : [],
+    // ★ 065: 구매채널 = 상품 URL 호스트 판정 / 담당자 = 작업담당 매핑(랜덤이면 빈 값=직접결정)
+    channel:        _woChannel(o),
+    manager:        _woManagerNick(o.work_manager),
+    // ★ 접수 시 확정된 연결 탭 — work_sheet_url 은 제출 필수라 접수된 오더는 항상 값이 있다.
+    //   탭이 리네임됐을 수 있으므로 gid 도 함께 넘겨 프론트가 gid 우선으로 재매칭한다.
+    linked_sheet_id: o.linked_tab_sheet_id || "",
+    linked_tab_name: o.linked_tab_name || "",
+    linked_tab_gid:  o.linked_tab_gid || "",
+  };
+  switchAdminTab("recruit");
+  // recruit 탭의 연결 탭 옵션 로드를 보장한 뒤 모달 오픈 (setTimeout race 제거)
+  try { if (typeof loadRecruitTabOptions === "function") await loadRecruitTabOptions(); } catch(_) {}
+  try { await openRecruitModal(null, prefill, id); } catch(e) { showToast("모달 열기 실패: " + e.message, "error"); }
+}
+
 function woCreateCampaignGuarded(id) {
   const inp = document.getElementById("woChat_" + id);
   const o = (_woCache || []).find(x => x.id === id);
@@ -2258,88 +2005,6 @@ function _woChannel(o) {
 
 /* ★ 작업담당(인트라넷 실명) → 리뷰웹 담당자 닉네임. 서버 utils/workManager.js 와 같은 규칙.
    랜덤·미매핑은 빈 값 = 관리자가 직접 결정(아무나 자동 배정 금지). */
-const WO_MANAGER_MAP = { '박세희': '만두', '박은비': '망고' };
-const WO_MANAGER_UNDECIDED = ['랜덤', '랜덤배정', '미정'];
-function _woNormName(v) { return String(v || "").replace(/\s+/g, "").replace(/[()（）[\]]/g, ""); }
-function _woManagerNick(raw) {
-  const v = _woNormName(raw);
-  if (!v) return "";
-  for (const [name, nick] of Object.entries(WO_MANAGER_MAP)) if (v.includes(name)) return nick;
-  for (const nick of Object.values(WO_MANAGER_MAP)) if (v.includes(nick)) return nick;
-  return "";
-}
-function _woManagerUndecided(raw) {
-  const v = _woNormName(raw);
-  return !!v && WO_MANAGER_UNDECIDED.some(u => v.includes(u));
-}
-/** 표시용: '박세희 (만두)' · '랜덤 (직접결정)' */
-function _woManagerLabel(raw) {
-  const v = String(raw || "").trim();
-  if (!v) return "";
-  if (_woManagerUndecided(v)) return v + " (직접결정)";
-  const nick = _woManagerNick(v);
-  return nick ? v + " (" + nick + ")" : v;
-}
-async function woCreateCampaign(id) {
-  const o = (_woCache || []).find(x => x.id === id);
-  if (!o) { showToast("오더 정보를 찾을 수 없습니다. 새로고침 후 다시 시도하세요.", "error"); return; }
-  if (typeof openRecruitModal !== "function") { showToast("모집공고 모듈을 불러오지 못했습니다.", "error"); return; }
-  const _pi = (typeof _woFirstProductInfo === "function") ? _woFirstProductInfo(o) : { name: "", price: "" };
-  // 유입가이드 HTML(본문 + review_guide에 섞여온 첨부 이미지 승격) — 아래 wd_inflow_html/text 분기에 공용
-  const _wdInflowHtml = (typeof _woBuildInflowHtml === "function") ? _woBuildInflowHtml(o) : "";
-  const prefill = {
-    // ★ 공고 제목 = 상품명 우선(리뷰어 노출용 — 업체명·건수·배송유형 미노출), 없으면 오더 제목 폴백. 관리자 자유 수정 가능.
-    title:         _pi.name || o.title || "",
-    time_range:    o.purchase_time || "",
-    max_slots:     o.recruit_count || 0,
-    chat_url:      o.chat_room_url || "",
-    delivery_type: WO_DELIVERY_MAP[o.delivery_type] || "",
-    product_url:   o.product_url || "",
-    // ★ 상품정보 기본값 = 작업오더 입력 상품명·결제금액 (자동수집 성공 시 그 값으로 덮어씀)
-    product_name:  _pi.name || "",
-    price:         _pi.price || "",
-    notes:         [_INFLOW_LABEL[o.inflow_type] ? ("유입방식: " + _INFLOW_LABEL[o.inflow_type]) : (o.inflow_keyword ? ("유입키워드: " + o.inflow_keyword) : ""), o.review_guide || ""].filter(Boolean).join("\n"),
-    // ★ M3: 참여형 자동 프리필 — 작업오더 세부내용을 발행 폼 스냅샷으로 복사
-    participation:  true,
-    // ★ 062: 작업오더 시작일 → 발행폼 시작일 프리필(시작일 전 게시 시 "오픈 예정" 카운트다운)
-    start_date:     (o.start_date || "").slice(0, 10),
-    daily_limit:    o.daily_count || (String(o.daily_count_text || "").match(/\d+/) || [])[0] || "",  // 인트라넷 text형("일 10건") 폴백
-    recruit_total:  o.recruit_count || 0,
-    purchase_time:  o.purchase_time || "",
-    wd_product:     (typeof _woProductLines === "function" ? (_woProductLines(o) || "") : "") || (o.product_option || ""),
-    // ★ 리뷰 #2: inflow_guide는 HTML(에디터)·평문(인트라넷/레거시) 두 형태 실존 —
-    //   태그가 실제로 있을 때만 raw HTML 경로(이미지 보존), 평문은 escape 경로(개행·'<옵션>' 안전)
-    //   ★ 평문이라도 첨부 이미지 URL(guide-image/Drive)이 있으면 <img>로 변환해 raw 경로로 —
-    //     + review_guide의 [유입가이드 첨부 이미지]에 섞여온 이미지도 유입가이드로 승격(_woBuildInflowHtml)
-    wd_inflow_html: _wdInflowHtml,
-    wd_inflow_text: o.inflow_type === "link"
-      ? "링크유입 — 아래 [상품 페이지 열기] 버튼으로 진입해 구매를 진행하세요."
-      : ((!_wdInflowHtml && o.inflow_guide && !/<[a-z][^>]*>/i.test(o.inflow_guide)) ? o.inflow_guide : ""),
-    // ★ 리뷰가이드는 [리뷰등록 가이드] 섹션만 스냅샷(유입방식·유입가이드·첨부 이미지 메타 제외) — 관리자 상세와 동일 규율
-    wd_review:      (typeof _woPickSections === "function"
-                      ? _woPickSections(o.review_guide, ["리뷰등록 가이드", "리뷰가이드", "리뷰 가이드"])
-                      : (o.review_guide || "")),
-    wd_notes:       o.special_notes || "",
-    // ★ 상품 페이지 열기 버튼용 랜딩 — 링크유입일 때만(비링크는 product_url 폴백 제거 = 유입가이드형에 버튼 안 뜸)
-    landing_url:    o.inflow_type === "link"
-                      ? (((typeof _woGuideUrls === "function" ? _woGuideUrls(o.inflow_guide)[0] : "") || "") || o.product_url || "")
-                      : "",
-    // 🧩 상품 옵션 프리필(061): product_options_json → 옵션표(2개 이상일 때만). 정원·하루는 관리자가 입력.
-    options:        (typeof _woOptionRows === "function") ? _woOptionRows(o) : [],
-    // ★ 065: 구매채널 = 상품 URL 호스트 판정 / 담당자 = 작업담당 매핑(랜덤이면 빈 값=직접결정)
-    channel:        _woChannel(o),
-    manager:        _woManagerNick(o.work_manager),
-    // ★ 접수 시 확정된 연결 탭 — work_sheet_url 은 제출 필수라 접수된 오더는 항상 값이 있다.
-    //   탭이 리네임됐을 수 있으므로 gid 도 함께 넘겨 프론트가 gid 우선으로 재매칭한다.
-    linked_sheet_id: o.linked_tab_sheet_id || "",
-    linked_tab_name: o.linked_tab_name || "",
-    linked_tab_gid:  o.linked_tab_gid || "",
-  };
-  switchAdminTab("recruit");
-  // recruit 탭의 연결 탭 옵션 로드를 보장한 뒤 모달 오픈 (setTimeout race 제거)
-  try { if (typeof loadRecruitTabOptions === "function") await loadRecruitTabOptions(); } catch(_) {}
-  try { await openRecruitModal(null, prefill, id); } catch(e) { showToast("모달 열기 실패: " + e.message, "error"); }
-}
 
 // 이미 연결된 공고를 수정 모드로 열기
 async function woViewCampaign(campId) {
@@ -2588,37 +2253,30 @@ function _onWorkOrderNewSSE(data) {
    화면·통합작업대 로그 창에서 함께 사라진다(로컬 seen 저장 불필요). 도착 채널 = SSE 'reviewer_alert'
    (실시간) + 2분 폴링(폴백) — wo 알림 스택(우측하단)과 겹치지 않게 좌측하단 사용. */
 let _raTimer = null, _raInFlight = false;
-let _raCache = [];   // 알림 원본(딥링크 문맥) — onclick 문자열에 값을 심지 않으려고 id 로만 참조한다
 const _RA_POLL_MS = 2 * 60 * 1000;
 
+// 유형 → 요약 카테고리 매핑. 여기 없는 event_type 은 '기타'로 합산(조용한 누락 방지).
+const _RA_CATS = [
+  { icon: "🖼", label: "리뷰에 다른 형식 이미지 제출", types: ["capture_mismatch"] },
+  { icon: "📄", label: "양식 제출했으나 시트입력 안됨", types: ["order_lost", "order_lost_manual", "order_unmirrored"] },
+  { icon: "📷", label: "구매캡처 미첨부", types: ["order_no_capture"] },
+];
+
 /**
- * 중요알림 → **그 리뷰어의 행이 있는 작업대**를 새 탭으로 연다.
- *
- * 종전에는 `window.open('workdesk.html')` 뿐이라 통합작업대가 "위에서 작업을 선택하세요"
- * 상태로만 열렸다 — 알림에 적힌 탭을 관리자가 상단바에서 다시 찾아야 했다.
- * ★ 딥링크는 workdesk 의 리뷰어 로그 탭이 쓰는 것과 **같은 `#go=` 계약**을 쓴다
- *   (`_logOpenWorkdesk`). 사본을 만들면 한쪽만 고쳐져 두 경로가 어긋난다.
- * ★ 토큰은 URL에 싣지 않는다 — 기존 `openWorkdesk()`와 같은 `raw_sso` 핸드오프 +
- *   같은 오리진 새 탭의 sessionStorage 승계로 충분하다.
- * 문맥(sheetId·tabName)이 없는 옛 로그는 평소대로 목록만 연다(막다른 길 방지).
+ * 중요알림 요약 카드 → 통합작업대 **리뷰어 로그 뷰**를 새 탭으로 연다(#view=logs).
+ * 개별 확인·처리·이미지 미리보기는 전부 그 화면에서 한다(대시보드는 유형별 건수만 요약).
+ * ★ 토큰은 URL에 안 싣고 기존 `openWorkdesk()`와 같은 `raw_sso` 핸드오프를 재사용한다.
  */
-function _raOpenWorkdesk(id) {
+function openWorkdeskLogs() {
   const token = sessionStorage.getItem("admin_token") || "";
   if (!token || !isAdminLoggedIn()) { showToast("관리자 로그인이 필요합니다.", "warning"); return; }
-  const l = (_raCache || []).find(x => String(x.id) === String(id));
-  if (!l || !l.sheetId || !l.tabName) { openWorkdesk(); return; }
   try {
     localStorage.setItem("raw_sso", JSON.stringify({
       token, name: getAdminName(), role: getAdminRole(), ts: Date.now(),
     }));
   } catch (_) { /* localStorage 불가 시에도 페이지 자체 로그인으로 폴백 */ }
-  const payload = {
-    s: l.sheetId, t: l.tabName, g: l.tabGid || "",
-    p: l.phone8 || "", n: l.reviewerName || "", st: l.campaignName || "",
-  };
-  // 연락처·이름은 프래그먼트(#)로만 — 서버 로그·Referer에 안 실리고 도착 즉시 주소창에서 제거된다
   const url = new URL("workdesk.html", location.href);
-  url.hash = "go=" + encodeURIComponent(JSON.stringify(payload));
+  url.hash = "view=logs";
   window.open(url.toString(), "_blank");
 }
 function _raEnsureStack() {
@@ -2636,54 +2294,46 @@ async function _raCheckAlerts() {
   if (_raInFlight) return;
   _raInFlight = true;
   try {
-    const r = await gasGet({ action: "reviewerLogsList", unresolved: "1", severity: "critical", limit: "8" });
-    if (!r || !r.ok || !Array.isArray(r.items)) return;   // 조회 실패 시 기존 카드 유지
-    _raCache = r.items;                                   // 딥링크 문맥(시트·탭·리뷰어) 보관
-    const stack = _raEnsureStack();
-    const ids = new Set(r.items.map(l => String(l.id)));
-    // reconcile — 타 관리자가 이미 확인한 카드는 자동 회수
-    stack.querySelectorAll("[data-ra-id]").forEach(el => { if (!ids.has(el.getAttribute("data-ra-id"))) el.remove(); });
-    r.items.forEach(l => {
-      if (stack.querySelector('[data-ra-id="' + l.id + '"]')) return;
-      const card = document.createElement("div");
-      card.setAttribute("data-ra-id", String(l.id));
-      card.style.cssText = "background:#FEF2F2;border:1.5px solid #FCA5A5;border-radius:12px;padding:12px 14px;box-shadow:0 6px 20px rgba(220,38,38,.18);font-size:.82rem;color:#7F1D1D;line-height:1.5";
-      // 시트에서 지운 게 '의도된 취소'였던 경우의 1클릭 경로 — 누르면 재기록이 멈춘다.
-      // 알림에 적힌 탭으로 바로 들어갈 수 있는지 — 옛 로그엔 시트·탭 문맥이 없다
-      const canGo = !!(l.sheetId && l.tabName);
-      const cancelBtn = _RA_CANCELABLE.has(l.eventType)
-        ? '<button onclick="_raCancelOrder(' + Number(l.id) + ')" title="시트에서 지운 것이 주문취소였다면 여기를 누르세요" style="padding:5px 10px;border:1px solid #FCA5A5;background:#fff;color:#B91C1C;border-radius:8px;font-size:.75rem;font-weight:600;cursor:pointer">취소 처리</button>'
-        : "";
-      card.innerHTML =
-        '<div style="font-weight:800;margin-bottom:4px;color:#DC2626"><i class="fas fa-exclamation-triangle"></i> 리뷰어 중요알림</div>' +
-        '<div style="word-break:break-all">' + escHtml(l.message || "") + "</div>" +
-        '<div style="display:flex;gap:6px;justify-content:flex-end;margin-top:8px;flex-wrap:wrap">' +
-          '<button onclick="_raOpenWorkdesk(' + Number(l.id) + ')" title="' + (canGo ? '이 리뷰어의 행이 있는 작업대를 새 탭으로 엽니다' : '통합 작업대를 새 탭으로 엽니다') + '" style="padding:5px 10px;border:1px solid #FCA5A5;background:#fff;color:#B91C1C;border-radius:8px;font-size:.75rem;font-weight:600;cursor:pointer">' + (canGo ? '작업대 열기 ↗' : '로그 창 열기') + '</button>' +
-          cancelBtn +
-          '<button onclick="_raResolve(' + Number(l.id) + ')" style="padding:5px 12px;border:none;background:#DC2626;color:#fff;border-radius:8px;font-size:.75rem;font-weight:700;cursor:pointer">확인</button>' +
-        "</div>";
-      stack.appendChild(card);
-    });
+    // 개수만 필요하다 — 항목 본문은 안 받고(limit 1) 서버 집계(byTypeCritical)로 유형별 요약
+    const r = await gasGet({ action: "reviewerLogsList", unresolved: "1", severity: "critical", limit: "1" });
+    if (!r || !r.ok || !r.counts) return;   // 조회 실패 시 기존 카드 유지
+    _raRenderSummary(r.counts.byTypeCritical || {}, Number(r.counts.critical) || 0);
   } catch (_) {
   } finally {
     _raInFlight = false;
   }
 }
-async function _raResolve(id) {
-  try { await gasGet({ action: "reviewerLogResolve", id: id }); } catch (_) {}
-  const el = document.querySelector('[data-ra-id="' + id + '"]');
-  if (el) el.remove();
-}
-// 「시트에서 지운 게 사실은 취소」 — 서버도 동일 목록으로 검증(신뢰하지 않고 재확인)
-const _RA_CANCELABLE = new Set(["order_lost", "order_lost_manual", "order_unmirrored"]);
-async function _raCancelOrder(id) {
-  if (!confirm("이 주문을 취소 처리할까요?\n\n· 시트에 다시 기록되지 않습니다.\n· 시트에 행이 남아 있으면 그 행을 비웁니다(다른 사람이 이미 쓴 행은 건드리지 않습니다).\n· 서버에서 취소 상태로 확정됩니다.")) return;
-  let r = null;
-  try { r = await gasGet({ action: "reviewerLogCancelOrder", id: id }); } catch (_) {}
-  if (!r || !r.ok) { showToast("취소 처리 실패" + (r && r.error ? ": " + r.error : ""), "error"); return; }
-  const el = document.querySelector('[data-ra-id="' + id + '"]');
-  if (el) el.remove();
-  showToast("주문이 취소 처리되었습니다. 시트에 다시 기록되지 않습니다.", "success");
+/** 유형별 미해결 critical 건수를 좌측하단 단일 요약 카드로 렌더(0건이면 카드 제거). */
+function _raRenderSummary(byType, totalCritical) {
+  const stack = _raEnsureStack();
+  let card = document.getElementById("raSummaryCard");
+  if (!totalCritical) { if (card) card.remove(); return; }
+  const known = new Set();
+  const rows = [];
+  _RA_CATS.forEach(cat => {
+    let n = 0; cat.types.forEach(t => { n += Number(byType[t]) || 0; known.add(t); });
+    if (n > 0) rows.push({ icon: cat.icon, label: cat.label, n });
+  });
+  let etc = 0; Object.keys(byType || {}).forEach(t => { if (!known.has(t)) etc += Number(byType[t]) || 0; });
+  if (etc > 0) rows.push({ icon: "⚠", label: "기타 중요알림", n: etc });
+  if (!card) {
+    card = document.createElement("div");
+    card.id = "raSummaryCard";
+    card.style.cssText = "background:#FEF2F2;border:1.5px solid #FCA5A5;border-radius:12px;padding:12px 14px;box-shadow:0 6px 20px rgba(220,38,38,.18);font-size:.82rem;color:#7F1D1D;line-height:1.5;max-width:360px";
+    stack.appendChild(card);
+  }
+  const lines = rows.map(x =>
+    '<div onclick="openWorkdeskLogs()" title="통합작업대 리뷰어 로그에서 확인·처리" style="display:flex;align-items:center;gap:8px;padding:7px 9px;border-radius:8px;cursor:pointer;background:#fff;border:1px solid #FECACA;margin-top:6px">'
+    + '<span style="font-size:1rem;flex-shrink:0">' + x.icon + '</span>'
+    + '<span style="flex:1;min-width:0;font-weight:600">' + escHtml(x.label) + '</span>'
+    + '<b style="color:#DC2626;font-size:.92rem;white-space:nowrap">' + x.n + '건 발생</b>'
+    + '<span style="color:#B91C1C">›</span>'
+    + "</div>").join("");
+  card.innerHTML =
+    '<div style="display:flex;align-items:center;gap:6px;font-weight:800;color:#DC2626"><i class="fas fa-exclamation-triangle"></i> 리뷰어 중요알림'
+    + '<span style="margin-left:auto;font-size:.72rem;background:#DC2626;color:#fff;border-radius:999px;padding:1px 9px">총 ' + totalCritical + '건</span></div>'
+    + lines
+    + '<button onclick="openWorkdeskLogs()" style="width:100%;margin-top:9px;padding:7px;border:none;background:#DC2626;color:#fff;border-radius:8px;font-size:.78rem;font-weight:700;cursor:pointer">통합작업대에서 처리 ↗</button>';
 }
 // SSE 'reviewer_alert' 수신 훅 (index-payment.js connectSSE 에서 호출)
 function _onReviewerAlertSSE() {
@@ -15156,7 +14806,7 @@ function openTabDashDetail(idx) {
     ]},
   ];
 
-  // 🧾 외부참여 수동제출 — 카톡으로 모집한 외부 리뷰어의 구매양식을 이 탭에 대리 제출한다.
+  // 🧾 외부모집 수동제출 — 카톡으로 모집한 외부 리뷰어의 구매양식을 이 탭에 대리 제출한다.
   //   값을 onclick 문자열에 심지 않고 인덱스로만 넘긴다(탭명·시트명 주입 벡터 차단).
   let html = `<div style="display:flex;align-items:center;gap:8px;background:#F0FDFA;border:1px solid #99E6D8;border-radius:10px;padding:9px 12px;margin-bottom:14px">
       <div style="flex:1;min-width:0">
@@ -15188,7 +14838,7 @@ function closeTabDashDetail() {
   if (modal) modal.style.display = "none";
 }
 
-/** 🧾 작업 탭 관리 상세 → 외부참여 수동제출 (탭 단위 — 참여형 공고가 없는 탭도 대상) */
+/** 🧾 작업 탭 관리 상세 → 외부모집 수동제출 (탭 단위 — 참여형 공고가 없는 탭도 대상) */
 function openManualOrderForTab(idx) {
   const t = _filterTabDashData()[idx];
   if (!t) return;

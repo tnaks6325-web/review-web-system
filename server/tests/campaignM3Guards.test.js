@@ -9,7 +9,7 @@ const readF = (p) => fs.readFileSync(path.join(__dirname, '..', '..', 'frontend'
 
 const app = readF('js/index-app.js');
 const recjs = readF('js/index-recruit.js');
-const adm = readF('admin.html');
+const adm = readF('js/recruit-modal.js') + '\n' + readF('admin.html');
 
 let passed = 0;
 function ok(name, cond) { assert(cond, name); passed++; console.log('  ✓ ' + name); }
@@ -54,6 +54,12 @@ ok('관제: 수동확정 → POST admin/:id/confirm', /\/confirm`/.test(recjs) &
 ok('관제: 수동확정은 만료·취소 건만(진행중 확정 = 주문링크 결번 방지, 리뷰 #4)', /canConfirm = \(r\.status === "expired" \|\| r\.status === "cancelled"\)/.test(recjs));
 ok('관제: 무주문 확정은 강한 경고 분기', /연결된 구매 제출이 없는 신청/.test(recjs));
 ok('관제: 기구매(late_order_id) 배지 노출', /late_order_id \? chip/.test(recjs));
+// ── 확정 분리: 수동확정 → 제출확정(구매완) / 취소확정(미참여) ──
+ok('관제: 만료 배지 문구 = "구매시간만료"', /chip\("#FEE2E2", "#B91C1C", "구매시간만료"\)/.test(recjs));
+ok('관제: 제출확정·취소확정 두 버튼으로 분리', /✅ 제출확정/.test(recjs) && /🚫 취소확정/.test(recjs));
+ok('관제: 취소확정 → POST admin/:id/dismiss + campDismiss()', /\/dismiss`/.test(recjs) && /function campDismiss/.test(recjs));
+ok('관제: 취소확정(dismissed)된 건은 버튼 미노출(다시 알림 안 뜸)',
+  /const dismissed = !!r\.dismissed_at/.test(recjs) && /&& !dismissed/.test(recjs));
 
 // ── 썸네일 업로드 ──
 ok('썸네일: guide-image 인프라 재사용(신규 업로드 API 없음)', /\/api\/order\/guide-image/.test(recjs));

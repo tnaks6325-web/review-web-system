@@ -120,7 +120,7 @@ ok('⑥-2 수정 모달 미리보기에 전체화면 링크(편집 중 + 참여�
   /rf_preview_full/.test(recjs)
   && /_recruitEditId && _part && _part\.checked/.test(recjs)
   && /_pvBtn\.onclick = \(\) => openReviewerPreview\(_recruitEditId\)/.test(recjs)
-  && /id="rf_preview_full"/.test(readF('admin.html')));
+  && /id="rf_preview_full"/.test((readF('js/recruit-modal.js') + readF('admin.html'))));
 ok('⑥-3 토큰은 프래그먼트(#tok=)로 전달 — 서버 로그·Referer 미유출',
   /preview=1#tok=" \+ encodeURIComponent\(token\)/.test(recjs));
 ok('⑥-4 도착 즉시 주소창·히스토리에서 토큰 제거(fetch보다 먼저)',
@@ -142,7 +142,7 @@ ok('⑦-R3 마감·게시전 공고도 진행 화면 확인 가능(모집중 가
 // 참여형(rf_participation 체크)이 아니면 display:none 이라 레거시 공고에선 눌릴 수 없다.
 ok('⑦-R4 수정 모달 미리보기 버튼은 참여형일 때만(레거시 공고 리다이렉트 방지)',
   /_pvBtn\.style\.display = \(_recruitEditId && _part && _part\.checked\) \? "" : "none"/.test(recjs)
-  && /id="rf_preview_full"[\s\S]{0,240}display:none/.test(readF('admin.html')));
+  && /id="rf_preview_full"[\s\S]{0,240}display:none/.test((readF('js/recruit-modal.js') + readF('admin.html'))));
 ok('⑦-R5 미리보기는 잔여 리뷰어 세션을 쓰지 않음(타인 계좌·실명 노출 차단)',
   /if \(_PREVIEW_MODE\) \{\s*\n\s*authSession = \{ name: "미리보기", phone8: "" \};/.test(sapp)
   && /if \(!_PREVIEW_MODE\) \{\s*\n\s*_prefillBankFromProfile\(\)/.test(sapp));

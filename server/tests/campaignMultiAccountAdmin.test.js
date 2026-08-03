@@ -9,7 +9,7 @@ const fs = require('fs');
 const path = require('path');
 const read = (p) => fs.readFileSync(path.join(__dirname, '..', '..', p), 'utf8');
 
-const adminHtml = read('frontend/admin.html');
+const adminHtml = read('frontend/js/recruit-modal.js') + '\n' + read('frontend/admin.html');
 const recruit = read('frontend/js/index-recruit.js');
 
 let passed = 0;

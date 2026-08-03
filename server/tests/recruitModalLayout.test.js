@@ -15,7 +15,11 @@ const fs = require('fs');
 const path = require('path');
 const readF = (p) => fs.readFileSync(path.join(__dirname, '..', '..', 'frontend', p), 'utf8');
 
-const adm = readF('admin.html');
+// ★ 모달 마크업·CSS는 admin.html 인라인에서 **공유 모듈**(js/recruit-modal.js)로 옮겼다 —
+//   통합 작업대가 같은 모달로 발행·수정하기 위함(사본 금지). 이 가드가 보던 내용은
+//   전부 그 모듈 안에 있으므로 읽는 대상만 바꾼다(검사 항목은 그대로).
+const modalSrc = readF('js/recruit-modal.js');
+const adm = modalSrc + '\n' + readF('admin.html');
 const rec = readF('js/index-recruit.js');
 
 let n = 0;
@@ -114,5 +118,68 @@ ok('분해가 애매해도 값을 버리지 않는다(상품명 칸에 통째로
   /parts\.length === 1/.test(rec) && /productName = parts\[0\]/.test(rec));
 ok('옵션 배열이 있으면 분해 없이 그대로 사용',
   /Array\.isArray\(p\.options\) && p\.options\.length/.test(rec));
+
+/* ── ★★ 모듈 CSS 무결성 (실측 사고 고정) ───────────────────────────
+   admin.html 인라인 CSS를 모듈로 옮길 때 **범위를 한 줄 어긋나게 잘라**
+   ① 주석 한가운데서 시작해 짝 없는 `*​/` 가 생기고
+   ② 뒷 줄의 남의 규칙(.dash-filter-btn)과 여분 `}` 까지 딸려와
+   중괄호가 32 대 33이 됐다. 브라우저는 조용히 파싱을 포기했고 결과는
+   **`.rf-split{display:flex}` 가 통째로 안 먹어 모달이 페이지 하단에 일반 블록으로 흘렀다**.
+   문자열 존재만 보는 grep 가드는 이걸 못 잡는다(선언은 멀쩡히 '있다') →
+   실제로 **토큰을 세어** 균형과 최상위 선택자 소속을 확인한다. */
+function cssOf(varName) {
+  const i = modalSrc.indexOf('var ' + varName + ' = `');
+  assert(i >= 0, varName + ' 를 찾지 못함');
+  const s = i + ('var ' + varName + ' = `').length;
+  const e = modalSrc.indexOf('`;', s);
+  assert(e > s, varName + ' 의 템플릿 리터럴이 닫히지 않음');
+  return modalSrc.slice(s, e);
+}
+const stripComments = (css) => css.replace(/\/\*[\s\S]*?\*\//g, '');
+['SHELL_CSS', 'CSS'].forEach((name) => {
+  const raw = cssOf(name);
+  ok(`★ ${name} 주석 짝이 맞는다(범위를 어긋나게 잘라 붙인 흔적 없음)`,
+    (raw.match(/\/\*/g) || []).length === (raw.match(/\*\//g) || []).length);
+  const body = stripComments(raw);
+  ok(`★ ${name} 중괄호 균형 — 하나만 어긋나도 뒤 규칙이 통째로 무시된다`,
+    (body.match(/\{/g) || []).length === (body.match(/\}/g) || []).length);
+  ok(`★ ${name} 은 남의 규칙을 품지 않는다(#recruitModal · .rf-* · @media/@keyframes 만)`, (() => {
+    // 최상위(중첩깊이 0)에서 여는 `{` 앞의 선택자만 본다
+    let depth = 0, sel = '', bad = [];
+    for (const ch of body) {
+      if (ch === '{') {
+        if (depth === 0) {
+          const s = sel.trim();
+          if (s && !/^(#recruitModal|\.rf-|@media|@keyframes|from|to)/.test(s)) bad.push(s);
+        }
+        depth++; sel = '';
+      } else if (ch === '}') { depth = Math.max(0, depth - 1); sel = ''; }
+      else if (depth === 0) sel += ch;
+    }
+    if (bad.length) console.error('    ↳ 외부 선택자 혼입:', bad);
+    return bad.length === 0;
+  })());
+  ok(`★ ${name} 은 var() 에 폴백을 단다 — admin 테마 없는 화면(통합 작업대)에서 색·테두리가 날아간다`,
+    (body.match(/var\(--[a-zA-Z0-9-]+\)/g) || []).length === 0);
+});
+ok('★ 모달 마크업의 인라인 style 도 var() 폴백을 단다', (() => {
+  const html = cssOf('HTML');
+  return (html.match(/var\(--[a-zA-Z0-9-]+\)/g) || []).length === 0;
+})());
+ok('★ 레이아웃의 핵심 선언이 살아 있다(.rf-split=flex / .rf-side=340px)', (() => {
+  const body = stripComments(cssOf('CSS'));
+  return /\.rf-split\{[^}]*display:flex/.test(body) && /\.rf-side\{[^}]*width:340px/.test(body);
+})());
+ok('★ 오버레이 껍데기 CSS를 모듈이 스스로 들고 있다(호스트 테마 의존 금지)', (() => {
+  const shell = stripComments(cssOf('SHELL_CSS'));
+  return /#recruitModal\.modal-overlay\{[^}]*position:fixed/.test(shell)
+    && /#recruitModal \.modal-box\{/.test(shell) && /#recruitModal \.rform-input\{/.test(shell);
+})());
+ok('★ 마운트 지점이 없으면 body 직속으로 만든다(스크롤 컨테이너에 갇히지 않게)',
+  /host\.id = 'recruitModalMount';[\s\S]{0,80}document\.body\.appendChild\(host\)/.test(modalSrc)
+  && /if \(!document\.body\) return false/.test(modalSrc));
+ok('폰트어썸 없는 화면에서도 닫기(×)가 보인다(글리프 폴백)',
+  /function injectIconFallback/.test(modalSrc) && /'fa-times':/.test(modalSrc)
+  && /font\\s\*awesome/i.test(modalSrc));
 
 console.log(`\n✅ recruitModalLayout: ${n}개 통과`);

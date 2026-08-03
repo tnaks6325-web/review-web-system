@@ -48,30 +48,9 @@ function todayKstDateStr(now = new Date()) {
   return `${k.getUTCMonth() + 1} / ${k.getUTCDate()} (${KST_DAYS[k.getUTCDay()]})`;
 }
 
-/** 헤더에서 옵션 칸 인덱스(매퍼와 같은 규칙) */
-function optionColIndexes(headers) {
-  const out = [];
-  (headers || []).forEach((h, i) => {
-    const key = String(h || '').toLowerCase().trim();
-    if (key.includes('옵션') || key.includes('option')) out.push(i);
-  });
-  return out;
-}
-
-/**
- * 배정된 행에 **이미 적혀 있는 옵션값**을 그대로 되돌려준다(`|` 결합 = 매퍼의 optParts 역순).
- * 옵션을 못 정한 채 빈 값을 쓰면 로스터의 옵션 칸이 지워지므로, 지우는 대신 원래 값을 되쓴다.
- */
-function existingOptionKeyAt(tabContext, sheetRow) {
-  if (!tabContext || !sheetRow) return '';
-  const cols = optionColIndexes(tabContext.headers);
-  if (!cols.length) return '';
-  const row = (tabContext.dataRows || []).find(r => Number(r.rowIndex) === Number(sheetRow));
-  if (!row) return '';
-  const cells = row.cells || [];
-  const vals = cols.map(i => String(cells[i] == null ? '' : cells[i]).trim());
-  return vals.some(v => v) ? vals.join('|') : '';
-}
+// 옵션 칸 인덱스·기존값 되쓰기는 **원장(orderLedger)이 단일 출처**다.
+//   사본을 두면 "리뷰어 제출은 보존하는데 수동제출은 지운다" 같은 드리프트가 난다.
+const { optionColIndexes, existingOptionKeyAt } = require('./orderLedger.service');
 
 /**
  * 리뷰어 등록·연결.

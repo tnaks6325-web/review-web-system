@@ -284,6 +284,34 @@
   .lgtable .lgby{font-size:10px;color:var(--faint);margin-top:3px;white-space:nowrap}
   .lgtable tr.lgcrit td:first-child{box-shadow:inset 3px 0 0 var(--bad)}   /* 중요 = 왼쪽 빨간 띠(맨 앞=조치 칸) */
   .lgtable tr.lgdone td{opacity:.55}
+  /* 펼침행(행 클릭 → 상세·제출 캡처) */
+  .lgtable tr.lgrow{cursor:pointer}
+  .lgtable .lgchev{display:inline-block;color:var(--muted);font-size:12px;width:13px}
+  .lgtable .lgcapdot{font-size:12px;margin-left:2px}
+  .lgtable tr.lgdetail>td{background:#fbfdff;padding:0}
+  .lgexpand{display:flex;flex-wrap:wrap;gap:14px;align-items:flex-start;padding:12px 14px}
+  .lgexptext{flex:1;min-width:240px;font-size:12.5px;line-height:1.75}
+  .lgexptext b{color:var(--muted);font-weight:750;margin-right:4px}
+  .lgcap img{max-width:280px;max-height:240px;border-radius:8px;border:1px solid var(--line);cursor:zoom-in;display:block;background:#fff}
+  .lgcaphint{font-size:11px;color:var(--muted);margin-top:5px}
+  .lgexpacts{display:flex;gap:8px;align-items:center;flex-wrap:wrap;width:100%;margin-top:2px}
+  /* 작업오더 목록 펼침행 — 팝업 대신 행 아래에서 펼친다(리뷰어 로그와 같은 방식).
+     ★ 클래스는 전부 `wol`(work-order list) 접두 — `.worow`/`.wodetail`/`.wochip` 은
+       이미 작업대 탭의 '작업세부' 패널이 쓰고 있어(위 161~167줄) 이름이 겹치면
+       그쪽 그리드 규칙(display:grid)이 이 표의 <tr> 에 걸려 표가 통째로 무너진다(실측). */
+  .lgtable tr.wolrow{cursor:pointer}
+  .lgtable tr.wolrow.wolopen td{background:var(--accent-soft)}
+  .lgtable .wolchev{display:inline-block;color:var(--muted);font-size:12px;width:13px}
+  .lgtable tr.woldetail>td{background:#fbfdff;padding:0}
+  .wolexpand{padding:12px 16px 14px}
+  .wolmeta{display:flex;gap:6px;align-items:center;flex-wrap:wrap;margin-bottom:9px;padding-bottom:9px;border-bottom:1px solid var(--line)}
+  .wolchip{font-size:11px;color:var(--muted);background:var(--card2);border-radius:6px;padding:2px 8px}
+  .wolchip b{color:var(--ink);font-weight:700}
+  /* 본문은 공유 렌더러(_woDetailHtml)가 자체 인라인 스타일로 그린다 — 여기서는 폭·여백만 잡는다.
+     ★ 색·글자크기를 덮어쓰지 않는다: 관리자 대시보드와 같은 모양이어야 사본 드리프트를 못 만든다. */
+  .woldoc{max-width:900px;line-height:1.7}
+  .woldoc img{max-width:min(100%,360px)}
+  .wolnote{margin-top:10px;font-size:11.5px;color:var(--muted)}
   table.histtable{width:100%;border-collapse:collapse;font-size:12px} table.histtable th{text-align:left;padding:7px 9px;font-size:10.5px;color:var(--muted);font-weight:750;border-bottom:1px solid var(--line);position:sticky;top:0;background:var(--card)}
   table.histtable td{padding:6px 9px;border-bottom:1px solid var(--line)} table.histtable tr.histrev td{color:var(--faint);text-decoration:line-through} table.histtable tr.histrev .hval{text-decoration:none}
   table.histtable .hts{font-family:var(--mono);font-size:11px;color:var(--muted);white-space:nowrap} .histtable .ok{color:var(--safe);font-weight:700} .histtable .no{color:var(--faint);font-weight:700}
@@ -472,14 +500,15 @@ const API_BASE = (function(){ if (window.REVIEW_API_URL) return window.REVIEW_AP
 //   ★ initToken 보다 반드시 먼저 읽는다: #sso= 가 함께 오면 initToken이 해시 전체를 지우기 때문.
 //   여기서는 읽기만 하고 지우지 않는다(뒤따르는 #sso=/#adv= 핸들러가 같은 해시를 봐야 함) —
 //   실제 제거는 소비 시점(_consumeGo)에서 한다.
-let _GO=null;
+let _GO=null, _VIEW='';
 (function initGoLink(){
   try{
     const m=(location.hash||'').match(/[#&]go=([^&]+)/);
-    if(!m) return;
-    const o=JSON.parse(decodeURIComponent(m[1]));
-    if(o && typeof o==='object' && o.s && o.t) _GO=o;   // {s:sheetId, t:tabName, g:tabGid, p:phone8, n:이름}
+    if(m){ const o=JSON.parse(decodeURIComponent(m[1]));
+      if(o && typeof o==='object' && o.s && o.t) _GO=o; }   // {s:sheetId, t:tabName, g:tabGid, p:phone8, n:이름}
   }catch(_){ _GO=null; }
+  // #view=logs — 대시보드 중요알림 요약 카드에서 '리뷰어 로그' 뷰로 바로 진입(초기 뷰 지정만)
+  try{ const vm=(location.hash||'').match(/[#&]view=(\w+)/); if(vm) _VIEW=vm[1]; }catch(_){ }
 })();
 (function initToken(){
   try{   // ① #sso — 디코드 실패해도 raw_sso 폴백이 죽지 않게 분리 try
@@ -566,6 +595,9 @@ async function boot(){
     return _dropSession('세션이 만료되었습니다. 다시 로그인하세요. (인트라넷에서 "통합 작업대" 버튼으로 오면 자동 로그인)');
   if(!STATE.role){ sessionStorage.removeItem('admin_token'); return renderLogin(); }   // 깨진/위조 토큰 → 빈 셸 대신 로그인
   _consumeGo();   // 리뷰어 로그 딥링크 → 작업대 탭 + 해당 리뷰어 행 지정(셸 렌더 전에 세팅해야 loadTabs가 집어감)
+  // #view=logs(대시보드 요약 카드에서 진입) — admin/staff만 로그 뷰 노출. 그 외/미지정은 기존 기본 뷰.
+  if(_VIEW==='logs' && (STATE.role==='master'||STATE.role==='admin'||STATE.role==='staff')){ STATE.view='logs';
+    try{ history.replaceState(null,'',location.pathname+location.search); }catch(_){ } }
   renderShell();
 }
 // 딥링크 소비: 열 탭과 강조할 리뷰어를 예약하고 주소창에서 해시를 제거(새로고침 시 재발동·URL 공유로 PII 유출 방지).
@@ -608,11 +640,16 @@ function renderShell(){
         <button class="navb" data-v="workdesk" onclick="switchView('workdesk')">작업대</button>
         <button class="navb" data-v="overview" onclick="switchView('overview')">관측</button>
         <button class="navb" data-v="ownership" onclick="switchView('ownership')">업체관리</button>
-        <button class="navb" data-v="logs" onclick="switchView('logs')">리뷰어 로그<span id="lgNavBadge"></span></button></nav>`
+        <button class="navb" data-v="logs" onclick="switchView('logs')">리뷰어 로그<span id="lgNavBadge"></span></button>
+        <button class="navb" data-v="orders" onclick="switchView('orders')">작업오더<span id="woNavBadge"></span></button>
+        <button class="navb" data-v="campaigns" onclick="switchView('campaigns')">모집공고</button>
+        <button class="navb" data-v="reviewers" onclick="switchView('reviewers')">등록리뷰어DB</button></nav>`
       :isStaff?`<nav class="nav">
         <button class="navb" data-v="workdesk" onclick="switchView('workdesk')">작업대</button>
         <button class="navb" data-v="ownership" onclick="switchView('ownership')">업체관리</button>
-        <button class="navb" data-v="logs" onclick="switchView('logs')">리뷰어 로그<span id="lgNavBadge"></span></button></nav>`:''}
+        <button class="navb" data-v="logs" onclick="switchView('logs')">리뷰어 로그<span id="lgNavBadge"></span></button>
+        <button class="navb" data-v="orders" onclick="switchView('orders')">작업오더<span id="woNavBadge"></span></button>
+        <button class="navb" data-v="campaigns" onclick="switchView('campaigns')">모집공고</button></nav>`:''}
       <span class="sp"></span>
       <button class="btn railtgl" id="railToggle" onclick="toggleRail()" style="display:none" title="우측 사이드바(협업/댓글·Parity) 숨기기/표시"></button>
       <button class="btn widetgl" id="wideToggle" onclick="toggleWide()" style="display:none" title="작업 목록·우측 레일을 숨겨 표를 화면 전체폭으로 (Esc로 해제)"></button>
@@ -625,7 +662,7 @@ function renderShell(){
 function switchView(v){ STATE.view=v; document.querySelectorAll('.navb').forEach(b=>b.classList.toggle('on',b.dataset.v===v));
   const rt=$('#railToggle'); if(rt) rt.style.display=(v==='workdesk')?'':'none';   // 레일은 작업대 뷰에만 존재
   const wt=$('#wideToggle'); if(wt) wt.style.display=(v==='workdesk')?'':'none';   // 전체화면 토글도 작업대 뷰에만
-  if(v==='ownership') renderOwnershipView(); else if(v==='overview') renderOverviewView(); else if(v==='logs') renderLogsView(); else renderWorkdeskView();
+  if(v==='ownership') renderOwnershipView(); else if(v==='overview') renderOverviewView(); else if(v==='logs') renderLogsView(); else if(v==='reviewers') renderReviewersView(); else if(v==='orders') renderOrdersView(); else if(v==='campaigns') renderCampaignsView(); else renderWorkdeskView();
   if(v!=='workdesk') _measureChrome();   // 작업대를 떠나면 작업바가 사라짐 → --tbh 0으로 회수(다른 뷰 높이 계산 오염 방지)
 }
 
@@ -1686,6 +1723,338 @@ async function showEditHistory(){
 /* ══ 리뷰어 비정상 로그 뷰(migration 062) — 캠페인별 한글 자연어 로그 + 확인 처리 ══
    예: "『0721)장수돌침대…』에 이지유 리뷰어가 제출한 구매양식이 시트에서 사라졌습니다…"
    서버 미해결 상태가 진실원본 — [확인]하면 전 관리자 화면·알림에서 함께 사라진다. */
+
+
+/** 통합 작업대 범용 모달(작업오더 상세 등) — 가벼운 오버레이 하나 */
+function _modal(title, bodyHtml){
+  let o=document.getElementById('wdModal');
+  if(!o){ o=document.createElement('div'); o.id='wdModal';
+    o.style.cssText='position:fixed;inset:0;z-index:100000;background:rgba(17,24,39,.5);display:flex;align-items:center;justify-content:center;padding:20px';
+    o.addEventListener('click',e=>{ if(e.target===o) o.remove(); });
+    document.body.appendChild(o); }
+  o.innerHTML=`<div style="background:var(--card);border-radius:14px;width:720px;max-width:96vw;max-height:88vh;display:flex;flex-direction:column;overflow:hidden">
+    <div style="display:flex;align-items:center;gap:10px;padding:13px 17px;border-bottom:1px solid var(--line)">
+      <b style="flex:1;font-size:14px">${esc(title)}</b>
+      <button class="btn" onclick="document.getElementById('wdModal').remove()">닫기</button></div>
+    <div style="overflow:auto;padding:14px 17px">${bodyHtml}</div></div>`;
+}
+
+/* ══════════════════════════════════════════════════════════════
+   작업오더 · 모집공고 (상단탭)
+
+   ★ 열람은 내부인 전원(관리자·AE), **편집은 이름 명단**(서버 `workdesk_editors`)만.
+     작업오더 접수는 시트/탭을 tab_configs·campaigns 에 등록하는 단일 관문이고
+     공고 발행·수정은 정원·금액을 바꾸므로 보는 사람 전부에게 열 수 없다.
+     프론트는 버튼만 감추고 **최종 판정은 서버**(editorOnlyMiddleware)가 한다.
+   ★ 공고 카드는 `campaign-cards.js`, 발행·수정 모달은 `recruit-modal.js`+`index-recruit.js`
+     로 **관리자 대시보드와 같은 코드**를 쓴다(사본 금지 — 두 화면이 어긋날 수 없다).
+   ══════════════════════════════════════════════════════════════ */
+const WO_STATUS = { submitted:'접수대기', reviewing:'검토중', await_chatroom:'채팅방대기',
+  published:'발행완료', done:'완료', rejected:'반려', revision:'보완요청' };
+
+async function _loadPerm(){
+  if(STATE.canEdit!=null) return STATE.canEdit;
+  const r=await api('/api/trackb/perm');
+  STATE.canEdit = !!(r && r.ok && r.canEdit);
+  return STATE.canEdit;
+}
+
+/* ── 작업오더 ─────────────────────────────────────────────── */
+async function renderOrdersView(){
+  $('#viewroot').innerHTML=`<div class="ovwrap"><div id="wohead"></div><div id="wobody"><div class="empty">불러오는 중…</div></div></div>`;
+  await _loadPerm();
+  await _loadOrders();
+}
+async function _loadOrders(){
+  const qs=new URLSearchParams();
+  if(STATE.woStatus) qs.set('status',STATE.woStatus);
+  if(STATE.woq) qs.set('q',STATE.woq);
+  const r=await api('/api/trackb/work-orders/list'+(qs.toString()?'?'+qs:''));
+  const b=$('#wobody');
+  if(!r||!r.ok){ if(b) b.innerHTML=`<div class="empty">작업오더를 불러오지 못했습니다.</div>`; return; }
+  STATE.wo=r.data||[]; STATE.woCounts=r.counts||{};
+  if(typeof r.canEdit==='boolean') STATE.canEdit=r.canEdit;
+  _renderWoHead(); _renderWoBody();
+  const nb=$('#woNavBadge'); if(nb){ const n=STATE.woCounts.submitted|0; nb.textContent=n>0?(' 🔵'+n):''; }
+}
+function _renderWoHead(){
+  const c=STATE.woCounts||{};
+  const chip=(k,l)=>`<button class="btn${STATE.woStatus===k?' pri':''}" onclick="STATE.woStatus='${k}';_loadOrders()">${l}${c[k]?' '+c[k]:''}</button>`;
+  $('#wohead').innerHTML=`<div class="mh"><h1>작업오더</h1>
+    <span class="sp" style="flex:1"></span>
+    <button class="btn${!STATE.woStatus?' pri':''}" onclick="STATE.woStatus='';_loadOrders()">전체</button>
+    ${chip('submitted','접수대기')}${chip('reviewing','검토중')}${chip('published','발행완료')}${chip('revision','보완요청')}
+    <input class="ovsearch" placeholder="작업명/담당 검색 후 Enter" value="${esc(STATE.woq||'')}"
+      onkeydown="if(event.key==='Enter'){STATE.woq=this.value.trim();_loadOrders();}">
+    <button class="btn" onclick="_loadOrders()">새로고침</button>
+    ${(STATE.role==='master'||STATE.role==='admin')?'<button class="btn" onclick="openEditorList()" title="접수·발행·수정을 할 수 있는 담당자를 지정합니다">👥 편집 허용명단</button>':''}</div>
+    <div class="ovnote">AE가 제출한 작업오더입니다. <b>접수</b>하면 시트·탭이 시스템에 등록되고 인덱스가 만들어집니다 —
+      신규 탭이 등록되는 유일한 경로라 <b>편집 허용명단</b>에 있는 담당자만 누를 수 있습니다.
+      ${STATE.canEdit?'':'<b style="color:var(--muted)">(현재 계정은 열람 전용)</b>'}</div>`;
+}
+function _renderWoBody(){
+  const rows=STATE.wo||[];
+  const b=$('#wobody');
+  if(!rows.length){ b.innerHTML=`<div class="empty">해당하는 작업오더가 없습니다.</div>`; return; }
+  const fmt=iso=>iso?new Date(iso).toLocaleString('ko-KR',{timeZone:'Asia/Seoul',month:'2-digit',day:'2-digit',hour:'2-digit',minute:'2-digit'}):'';
+  // 행 클릭 = 아래로 펼침(팝업 아님) — 리뷰어 로그 탭과 같은 방식.
+  //   ★ 상세는 **열 때 한 번만** 그린다(_woFillDetail) — 30건이 한꺼번에 첨부 이미지를 받으면 목록이 무거워진다.
+  b.innerHTML=`<div class="lgwrap"><table class="lgtable">
+    <thead><tr><th style="width:26px"></th><th style="width:96px">상태</th><th>작업명</th><th style="width:92px">담당AE</th>
+      <th style="width:70px">모집</th><th style="width:70px">일건수</th><th style="width:120px">제출</th>
+      <th style="width:178px">처리</th></tr></thead><tbody>${rows.map((o,i)=>`
+      <tr class="wolrow" id="wolrow-${i}" onclick="_woToggle(${i})" title="클릭하면 상세가 아래로 펼쳐집니다">
+        <td><span class="wolchev" id="wolchev-${i}">▾</span></td>
+        <td><span class="bd ${o.status==='submitted'?'':'g'}">${esc(WO_STATUS[o.status]||o.status)}</span></td>
+        <td style="font-weight:700">${esc(o.title||'')}</td>
+        <td>${esc(o.manager_name||o.created_by||'')}</td>
+        <td style="text-align:right">${o.recruit_count||0}</td>
+        <td style="text-align:right">${o.daily_count||0}</td>
+        <td style="color:var(--muted);font-variant-numeric:tabular-nums">${fmt(o.created_at)}</td>
+        <td style="white-space:nowrap" onclick="event.stopPropagation()">${_woActions(o,i)}</td>
+      </tr>
+      <tr class="woldetail" id="woldetail-${i}" style="display:none"><td colspan="8">
+        <div class="wolexpand" id="wolbox-${i}"></div></td></tr>`).join('')}</tbody></table></div>`;
+}
+function _woActions(o,i){
+  const btn=`<button class="btn xs" onclick="_woToggle(${i})">상세</button>`;
+  return btn+_woEditActions(o);
+}
+/** 접수·상태변경 — 편집 허용명단만. 표 셀과 펼침 패널이 같은 것을 쓴다(사본 금지). */
+function _woEditActions(o){
+  if(!STATE.canEdit) return '';
+  const acceptable=['submitted','revision','rejected'].includes(o.status);
+  return (acceptable?` <button class="btn xs pri" onclick="event.stopPropagation();_woAccept('${esc(o.id)}')">접수</button>`:'')
+    +` <button class="btn xs" onclick="event.stopPropagation();_woStatus('${esc(o.id)}')">상태변경</button>`;
+}
+function _woToggle(i){
+  const d=document.getElementById('woldetail-'+i); if(!d) return;
+  const open=d.style.display==='none';
+  d.style.display=open?'':'none';
+  const ch=document.getElementById('wolchev-'+i); if(ch) ch.textContent=open?'▴':'▾';
+  const r=document.getElementById('wolrow-'+i); if(r) r.classList.toggle('wolopen',open);
+  if(open) _woFillDetail(i);
+}
+/** 펼침 내용 = **관리자 대시보드와 같은 렌더러**(js/work-order-detail.js `_woDetailHtml`).
+ *  사본을 만들면 "관리자 화면엔 첨부 이미지가 뜨는데 작업대엔 URL만 뜬다"로 갈라진다.
+ *  첨부 이미지(guide-image 프록시·Drive)는 그 렌더러가 <img>로 임베드하고 클릭하면 라이트박스로 크게 본다. */
+function _woFillDetail(i){
+  const box=document.getElementById('wolbox-'+i); if(!box||box.dataset.filled) return;
+  const o=(STATE.wo||[])[i]; if(!o) return;
+  box.dataset.filled='1';
+  if(typeof _woDetailHtml!=='function'){
+    box.innerHTML=`<div class="empty">상세 렌더러(js/work-order-detail.js)를 불러오지 못했습니다.</div>`; return;
+  }
+  const fmt=iso=>iso?new Date(iso).toLocaleString('ko-KR',{timeZone:'Asia/Seoul',year:'numeric',month:'2-digit',day:'2-digit',hour:'2-digit',minute:'2-digit'}):'';
+  const chips=[
+    `<span class="bd ${o.status==='submitted'?'':'g'}">${esc(WO_STATUS[o.status]||o.status||'')}</span>`,
+    o.start_date?`<span class="wolchip">시작일 <b>${esc(String(o.start_date).slice(0,10))}</b></span>`:'',
+    o.created_at?`<span class="wolchip">제출 <b>${esc(fmt(o.created_at))}</b></span>`:'',
+  ].filter(Boolean).join('');
+  const acts=_woEditActions(o);
+  box.innerHTML=`<div class="wolmeta">${chips}<span style="flex:1"></span>${acts}</div>
+    <div class="woldoc">${_woDetailHtml(o)}${o.admin_memo?_woKv('관리자메모',o.admin_memo):''}</div>
+    ${acts?'':'<div class="wolnote">열람 전용 계정입니다 — 접수·상태변경은 편집 허용명단에 있는 담당자만 할 수 있습니다.</div>'}`;
+}
+async function _woAccept(id){
+  if(!confirm('이 작업오더를 접수할까요?\n\n· 작업시트의 탭이 시스템에 등록되고 인덱스가 만들어집니다.\n· 등록 후에는 리뷰어 검색·제출이 열립니다.')) return;
+  const r=await api('/api/trackb/work-orders/accept',{method:'POST',body:JSON.stringify({id})});
+  if(r&&r.ok){ _toast(r.skipped?'이미 등록된 오더입니다.':('접수 완료'+(r.tabName?' — '+r.tabName:''))); _loadOrders(); }
+  else _toast('⚠ 접수 실패'+(r&&r.error?': '+r.error:''));
+}
+async function _woStatus(id){
+  const st=prompt('바꿀 상태를 입력하세요\n(submitted / reviewing / await_chatroom / published / done / rejected / revision)');
+  if(!st) return;
+  const memo=prompt('메모(반려·보완 사유 등, 없으면 비워두세요)')||'';
+  const r=await api('/api/trackb/work-orders/status',{method:'PUT',body:JSON.stringify({id,status:st.trim(),admin_memo:memo})});
+  if(r&&r.ok){ _toast('상태를 바꿨습니다.'); _loadOrders(); }
+  else _toast('⚠ 변경 실패'+(r&&r.error?': '+r.error:''));
+}
+
+/* ── 모집공고 ─────────────────────────────────────────────── */
+async function renderCampaignsView(){
+  $('#viewroot').innerHTML=`<div class="ovwrap"><div id="rchead"></div><div id="recruitListWrap"><div class="empty">불러오는 중…</div></div></div>`;
+  // ★ 모달은 **body 직속**으로 마운트한다(모듈이 알아서) — 뷰 안(.ovwrap)에 넣으면
+  //   스크롤 컨테이너에 섞여 팝업이 아니라 페이지 하단 블록으로 보인다(실측).
+  if(window.RecruitModal) RecruitModal.mount();
+  await _loadPerm();
+  await loadRecruitList();     // index-recruit.js — 관리자 대시보드와 같은 로더
+}
+/** index-recruit.js 가 기대하는 컨테이너·전역을 통합 작업대에 맞춰 채운다(사본 금지) */
+function _rcRenderHead(total){
+  $('#rchead').innerHTML=`<div class="mh"><h1>모집공고</h1>
+    <span class="bd g">${total|0}건</span><span class="sp" style="flex:1"></span>
+    ${STATE.canEdit?'<button class="btn pri" onclick="openRecruitModal()">＋ 새 공고</button>':''}
+    <button class="btn" onclick="loadRecruitList()">새로고침</button></div>
+    <div class="ovnote">관리자 대시보드와 <b>같은 카드·같은 모달</b>을 씁니다(한쪽만 바뀌는 일이 없게).
+      ${STATE.canEdit?'':'<b style="color:var(--muted)">현재 계정은 열람 전용 — 발행·수정은 편집 허용명단에 있는 담당자만 가능합니다.</b>'}</div>`;
+}
+
+
+/* ── 편집 허용명단 관리(master/admin 전용) ─────────────────────
+   후보는 **인트라넷 직원DB**에서 고른다(담당AE 자동완성과 같은 프록시 재사용).
+   자유 입력도 허용 — 인트라넷에 없는 계정(관리자 로그인 등)도 넣을 수 있어야 한다. */
+async function openEditorList(){
+  _modal('👥 편집 허용명단',
+    `<div style="font-size:12px;color:var(--muted);line-height:1.6;margin-bottom:11px">
+       여기 있는 담당자만 <b>작업오더 접수</b>·<b>모집공고 발행/수정</b>을 할 수 있습니다.
+       나머지는 열람만 됩니다(마스터는 명단과 무관하게 항상 가능).</div>
+     <div style="display:flex;gap:6px;margin-bottom:12px">
+       <input id="edName" class="ovsearch" style="flex:1" placeholder="이름 입력 — 인트라넷 직원에서 자동완성"
+              list="edCands" oninput="_edSuggest(this.value)"
+              onkeydown="if(event.key==='Enter')_edAdd()">
+       <datalist id="edCands"></datalist>
+       <button class="btn pri" onclick="_edAdd()">추가</button>
+     </div>
+     <div id="edList"><div class="empty">불러오는 중…</div></div>`);
+  _edLoad();
+}
+async function _edLoad(){
+  const r=await api('/api/trackb/workdesk-editors');
+  const el=document.getElementById('edList'); if(!el) return;
+  if(!r||!r.ok){ el.innerHTML=`<div class="empty">명단을 불러오지 못했습니다.</div>`; return; }
+  const act=(r.items||[]).filter(x=>x.active);
+  el.innerHTML = act.length ? `<table class="lgtable"><thead><tr>
+      <th>이름</th><th style="width:120px">부서</th><th style="width:110px">등록자</th><th style="width:60px"></th>
+    </tr></thead><tbody>${act.map(x=>`<tr>
+      <td style="font-weight:700">${esc(x.name)}</td>
+      <td style="color:var(--muted)">${esc(x.dept||'')}</td>
+      <td style="color:var(--muted);font-size:11.5px">${esc(x.addedBy||'')}</td>
+      <td><button class="btn xs" onclick="_edRemove('${esc(x.id)}','${esc(x.name)}')">제거</button></td>
+    </tr>`).join('')}</tbody></table>` : `<div class="empty">명단이 비어 있습니다 — 마스터만 편집할 수 있는 상태입니다.</div>`;
+}
+let _edSuggestT=null, _edCandMap={};
+function _edSuggest(q){
+  clearTimeout(_edSuggestT);
+  if(!q || q.trim().length<1) return;
+  _edSuggestT=setTimeout(async ()=>{
+    const r=await api('/api/trackb/intranet/users?q='+encodeURIComponent(q.trim()));
+    const dl=document.getElementById('edCands'); if(!dl) return;
+    const items=(r&&(r.items||r.users))||[];
+    _edCandMap={};
+    dl.innerHTML=items.map(u=>{
+      const nm=u.display_name||u.name||u.username||'';
+      _edCandMap[nm]={ username:u.username||'', dept:[u.department,u.part].filter(Boolean).join(' · ') };
+      return `<option value="${esc(nm)}">${esc([u.department,u.part].filter(Boolean).join(' · '))}</option>`;
+    }).join('');
+  }, 150);
+}
+async function _edAdd(){
+  const el=document.getElementById('edName');
+  const name=(el.value||'').trim();
+  if(!name){ _toast('이름을 입력하세요.'); return; }
+  const meta=_edCandMap[name]||{};
+  const r=await api('/api/trackb/workdesk-editors',{method:'POST',
+    body:JSON.stringify({ name, username:meta.username||'', dept:meta.dept||'' })});
+  if(r&&r.ok){ el.value=''; _toast(`'${name}' 을(를) 명단에 추가했습니다.`); _edLoad(); STATE.canEdit=null; }
+  else _toast('⚠ 추가 실패'+(r&&r.error?': '+r.error:''));
+}
+async function _edRemove(id,name){
+  if(!confirm(`'${name}' 을(를) 명단에서 뺄까요?\n\n· 이후 접수·발행·수정을 할 수 없고 열람만 됩니다.`)) return;
+  const r=await api('/api/trackb/workdesk-editors/'+encodeURIComponent(id),{method:'DELETE'});
+  if(r&&r.ok){ _toast('명단에서 제외했습니다.'); _edLoad(); STATE.canEdit=null; }
+  else _toast('⚠ 제외 실패'+(r&&r.error?': '+r.error:''));
+}
+
+/* ══════════════════════════════════════════════════════════════
+   등록리뷰어DB (상단탭) — master/admin 전용
+
+   서버가 `GET /api/trackb/reviewers` 를 adminOrMaster 로 막고 있고, nav 버튼도
+   관리자에게만 렌더한다(AE·광고주는 버튼도 요청도 도달 못 함).
+   ★ 주민번호·계좌까지 표에 그대로 보인다(사용자 확정) — 화면공유·스크린샷 주의 문구를
+     상단에 상시 노출한다. 수정은 **관리자 메모만**(정산·신원 필드는 조회 전용).
+   ★ 리뷰어 수가 수만 건일 수 있어 서버 페이지네이션 + 서버 검색을 쓴다
+     (기존 /api/reviewer/list 는 전 행을 한 번에 반환해 이 화면엔 못 쓴다).
+   ══════════════════════════════════════════════════════════════ */
+const RV_PAGE = 50;
+async function renderReviewersView(){
+  $('#viewroot').innerHTML=`<div class="ovwrap"><div id="rvhead"></div><div id="rvbody"><div class="empty">불러오는 중…</div></div></div>`;
+  STATE.rvOffset = STATE.rvOffset||0;
+  await _loadReviewers();
+}
+async function _loadReviewers(){
+  const qs = new URLSearchParams({ limit:String(RV_PAGE), offset:String(STATE.rvOffset||0) });
+  if(STATE.rvq) qs.set('q', STATE.rvq);
+  if(STATE.rvStatus) qs.set('status', STATE.rvStatus);
+  const r = await api('/api/trackb/reviewers?'+qs.toString());
+  const b=$('#rvbody');
+  if(!r || !r.ok){ if(b) b.innerHTML=`<div class="empty">리뷰어 목록을 불러오지 못했습니다.${r&&r.error?' ('+esc(r.error)+')':''}</div>`; _renderRvHead(0); return; }
+  STATE.rv = r.items||[]; STATE.rvTotal = r.total|0;
+  _renderRvHead(r.total|0);
+  _renderRvBody();
+}
+function _renderRvHead(total){
+  const from=(STATE.rvOffset|0)+1, to=Math.min((STATE.rvOffset|0)+RV_PAGE, total);
+  $('#rvhead').innerHTML=`<div class="mh"><h1>등록리뷰어DB</h1>
+    <span class="bd g">${total.toLocaleString()}명</span>
+    ${total?`<span class="bd">${from}–${to}</span>`:''}
+    <span class="sp" style="flex:1"></span>
+    <select class="ovsearch" style="width:110px" onchange="STATE.rvStatus=this.value;STATE.rvOffset=0;_loadReviewers()">
+      <option value=""${!STATE.rvStatus?' selected':''}>상태 전체</option>
+      <option value="active"${STATE.rvStatus==='active'?' selected':''}>활성</option>
+      <option value="inactive"${STATE.rvStatus==='inactive'?' selected':''}>비활성</option>
+    </select>
+    <input id="rvq" class="ovsearch" style="width:220px" placeholder="이름 또는 연락처 검색 후 Enter"
+           value="${esc(STATE.rvq||'')}"
+           onkeydown="if(event.key==='Enter'){STATE.rvq=this.value.trim();STATE.rvOffset=0;_loadReviewers();}">
+    <button class="btn" onclick="STATE.rvOffset=0;_loadReviewers()">새로고침</button></div>
+    <div class="ovnote">리뷰어 등록 원장입니다. <b>주민등록번호·계좌번호가 그대로 표시</b>되니 화면공유·스크린샷에 주의하세요.
+      수정은 <b>관리자 메모</b>만 가능합니다(이름·연락처·계좌 등은 조회 전용).</div>`;
+}
+function _renderRvBody(){
+  const rows = STATE.rv||[];
+  const b=$('#rvbody');
+  if(!rows.length){ b.innerHTML=`<div class="empty">${STATE.rvq?'검색 결과가 없습니다.':'등록된 리뷰어가 없습니다.'}</div>`; return; }
+  const dash = v => (v==null||v==='')?'<span style="color:var(--muted)">—</span>':esc(v);
+  const fmtD = iso => iso? new Date(iso).toLocaleDateString('ko-KR',{timeZone:'Asia/Seoul',year:'2-digit',month:'2-digit',day:'2-digit'}):'';
+  b.innerHTML=`<div class="lgwrap"><table class="lgtable">
+    <thead><tr>
+      <th class="c-nm">이름</th><th class="c-ph">연락처</th><th style="width:118px">주민번호</th>
+      <th style="width:90px">소득유형</th><th>주소</th>
+      <th style="width:80px">은행</th><th style="width:130px">계좌번호</th><th style="width:80px">예금주</th>
+      <th style="width:56px">타계정</th><th style="width:64px">상태</th><th style="width:84px">등록일</th>
+      <th style="width:180px">관리자 메모</th>
+    </tr></thead><tbody>${rows.map(r=>`
+      <tr>
+        <td class="c-nm" style="font-weight:700">${esc(r.name||'')}</td>
+        <td class="c-ph">${dash(r.phone)}</td>
+        <td style="font-variant-numeric:tabular-nums">${dash(r.residentNum)}</td>
+        <td>${dash(r.incomeType)}</td>
+        <td style="max-width:220px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="${esc(r.address||'')}">${dash(r.address)}</td>
+        <td>${dash(r.bankName)}</td>
+        <td style="font-variant-numeric:tabular-nums">${dash(r.bankAccount)}</td>
+        <td>${dash(r.accountHolder)}</td>
+        <td style="text-align:center">${(r.subCount|0)>0?`<span class="bd">${r.subCount}</span>`:'<span style="color:var(--muted)">0</span>'}</td>
+        <td>${r.status==='inactive'?'<span class="bd">비활성</span>':'<span class="bd g">활성</span>'}</td>
+        <td style="color:var(--muted);font-variant-numeric:tabular-nums">${fmtD(r.registeredAt)}</td>
+        <td><input class="ovsearch" style="width:100%;font-size:11.5px;padding:4px 7px" value="${esc(r.memo||'')}"
+              placeholder="메모…" data-rvid="${esc(r.id)}"
+              onchange="_rvSaveMemo(this)" onkeydown="if(event.key==='Enter')this.blur()"></td>
+      </tr>`).join('')}</tbody></table></div>
+    ${_rvPager()}`;
+}
+function _rvPager(){
+  const total=STATE.rvTotal|0, off=STATE.rvOffset|0;
+  if(total<=RV_PAGE) return '';
+  const prev=off>0, next=off+RV_PAGE<total;
+  return `<div style="display:flex;gap:8px;justify-content:center;align-items:center;padding:14px 0;font-size:12.5px">
+    <button class="btn" ${prev?'':'disabled'} onclick="STATE.rvOffset=Math.max(0,(STATE.rvOffset|0)-${RV_PAGE});_loadReviewers()">← 이전</button>
+    <span style="color:var(--muted)">${Math.floor(off/RV_PAGE)+1} / ${Math.ceil(total/RV_PAGE)}</span>
+    <button class="btn" ${next?'':'disabled'} onclick="STATE.rvOffset=(STATE.rvOffset|0)+${RV_PAGE};_loadReviewers()">다음 →</button></div>`;
+}
+/** 관리자 메모 저장 — 값이 안 바뀌었으면 요청하지 않는다(포커스 이동마다 쓰기 금지) */
+async function _rvSaveMemo(el){
+  const id=el.getAttribute('data-rvid');
+  const row=(STATE.rv||[]).find(x=>String(x.id)===String(id));
+  const memo=el.value;
+  if(!row || String(row.memo||'')===String(memo)) return;
+  el.disabled=true;
+  const r=await api('/api/trackb/reviewers/memo',{method:'POST',body:JSON.stringify({id,memo})});
+  el.disabled=false;
+  if(r&&r.ok){ row.memo=memo; _toast('메모를 저장했습니다.'); }
+  else { el.value=row.memo||''; _toast('⚠ 메모 저장 실패'+(r&&r.error?': '+r.error:'')); }   // 실패 시 화면값을 원래대로 되돌린다
+}
+
 async function renderLogsView(){
   $('#viewroot').innerHTML=`<div class="ovwrap"><div id="lghead"></div><div id="lgbody"><div class="empty">불러오는 중…</div></div></div>`;
   await _loadLogs();
@@ -1727,9 +2096,10 @@ function _renderLogsBody(q){
   // 표(컬럼) 표기 — 한 줄 문장 대신 발생시점/작업명/이름/전화번호/오류내용/조치안내로 분해.
   //   오류내용·조치안내는 서버가 event_type+context 로 만들어 내려주고(problem/action),
   //   모르는 유형이면 message 원문을 오류내용 칸에 그대로 넣어 화면이 비지 않게 한다.
-  $('#lgbody').innerHTML = `<div class="lgwrap"><table class="lgtable">
+  $('#lgbody').innerHTML = `<div class="ovnote" style="margin-bottom:8px">행을 클릭하면 아래로 <b>펼쳐져 상세·제출 캡처</b>를 보고 그 자리에서 <b>해결</b> 처리할 수 있습니다. 리뷰어가 올바른 캡처를 다시 올리면 <b>자동 해결</b>되며, 해결된 로그는 위 <b>‘해결된 로그 포함’</b>으로 다시 볼 수 있습니다.</div>
+    <div class="lgwrap"><table class="lgtable">
     <thead><tr>
-      <th class="c-btn">조치</th><th class="c-sev">상태</th><th class="c-ts">발생시점</th><th class="c-tab">작업명</th>
+      <th class="c-btn"></th><th class="c-sev">상태</th><th class="c-ts">발생시점</th><th class="c-tab">작업명</th>
       <th class="c-nm">이름</th><th class="c-ph">전화번호</th>
       <th class="c-prob">오류내용</th><th class="c-act">조치안내</th>
     </tr></thead><tbody>`+items.map(l=>{
@@ -1738,22 +2108,42 @@ function _renderLogsBody(q){
     const resolved=!!l.resolvedAt;
     const problem=l.problem||l.message||'';   // 미지 유형 폴백
     const ph=_fmtPhone(l.phone8||'');
-    return `<tr class="${resolved?'lgdone':''}${l.severity==='critical'&&!resolved?' lgcrit':''}">
-      <td class="c-btn"><div class="lgbtns">
-        ${(l.sheetId&&l.tabName)?`<button class="btn xs" title="이 리뷰어의 행이 있는 작업대를 새 탭으로 엽니다" onclick="_logOpenWorkdesk(${l.id})">작업대 ↗</button>`:''}
-        ${(resolved||!_canResolveLog())?'':
-          (_LOG_CANCELABLE.has(l.eventType)?`<button class="btn xs" style="border-color:#FCA5A5;color:#B91C1C" onclick="_cancelLogOrder(${l.id})" title="시트에서 지운 것이 '주문취소'였다면 여기를 누르세요 — 다시 기록되지 않습니다">취소</button>`:'')
-          +`<button class="btn xs" onclick="_resolveLog(${l.id})">확인</button>`}
-      </div></td>
-      <td class="c-sev">${sevBadge(l.severity)}${resolved?`<div class="lgby" title="확인: ${esc(l.resolvedBy||'')}">✔ 확인됨</div>`:''}</td>
+    const cap=_logCapFileId(l);   // capture_mismatch 로그의 제출 캡처 파일ID(있을 때만)
+    // 조치 버튼은 표에서 제거하고 펼침 패널로 이동한다([확인] 버튼 제거 요청).
+    //   여기서 _logOpenWorkdesk/_cancelLogOrder/_resolveLog/_canResolveLog 를 참조 = 회귀가드 대상.
+    const acts=[];
+    if(l.sheetId&&l.tabName) acts.push(`<button class="btn xs" onclick="event.stopPropagation();_logOpenWorkdesk(${l.id})" title="이 리뷰어의 행이 있는 작업대를 새 탭으로 엽니다">작업대 ↗</button>`);
+    if(!resolved && _canResolveLog()){
+      if(_LOG_CANCELABLE.has(l.eventType)) acts.push(`<button class="btn xs" style="border-color:#FCA5A5;color:#B91C1C" onclick="event.stopPropagation();_cancelLogOrder(${l.id})" title="시트에서 지운 것이 '주문취소'였다면 — 다시 기록되지 않습니다">취소 처리</button>`);
+      acts.push(`<button class="btn xs" style="background:#16a34a;color:#fff;border-color:#16a34a" onclick="event.stopPropagation();_resolveLog(${l.id})" title="이 알림을 해결 처리 — 모든 관리자 화면에서 사라집니다">✔ 해결</button>`);
+    }
+    const imgBlock=cap?`<div class="lgcap"><img src="${_logImgUrl(cap)}" loading="lazy" onclick="event.stopPropagation();_logViewImage('${cap}')" onerror="this.style.display='none'" title="클릭하면 크게 보기"><div class="lgcaphint">📷 리뷰어가 제출한 캡처 — 클릭하면 크게 보기</div></div>`:'';
+    const detail=`<tr class="lgdetail" id="lgdetail-${l.id}" style="display:none"><td colspan="8"><div class="lgexpand">
+        <div class="lgexptext"><b>오류내용</b> ${esc(problem)}${l.action?`<br><b>조치안내</b> ${esc(l.action)}`:''}${resolved?`<br><span style="color:var(--faint)">✔ 확인: ${esc(l.resolvedBy||'')}</span>`:''}</div>
+        ${imgBlock}
+        <div class="lgexpacts">${acts.join('')||'<span style="color:var(--muted);font-size:11.5px">열람 권한만 있습니다(해결은 담당 관리자).</span>'}</div>
+      </div></td></tr>`;
+    return `<tr class="lgrow ${resolved?'lgdone':''}${l.severity==='critical'&&!resolved?' lgcrit':''}" onclick="_toggleLogRow(${l.id})">
+      <td class="c-btn"><span class="lgchev" id="lgchev-${l.id}">▾</span>${cap?'<span class="lgcapdot" title="제출 캡처 있음">🖼</span>':''}</td>
+      <td class="c-sev">${sevBadge(l.severity)}${resolved?`<div class="lgby" title="확인: ${esc(l.resolvedBy||'')}">✔ 해결됨</div>`:''}</td>
       <td class="c-ts">${esc(ts)}</td>
       <td class="c-tab" title="${esc(l.campaignName||l.tabName||'')}">${esc(l.campaignName||l.tabName||'')}</td>
       <td class="c-nm">${esc(l.reviewerName||'')}</td>
       <td class="c-ph">${esc(ph)}</td>
       <td class="c-prob">${esc(problem)}</td>
       <td class="c-act">${esc(l.action||'')}</td>
-    </tr>`;
+    </tr>${detail}`;
   }).join('')+`</tbody></table></div>`;
+}
+// 리뷰어 로그 펼침행 헬퍼 — 행 클릭 시 상세+제출 캡처를 아래로 펼친다. 이미지 프록시는 무인증·추측불가 fileId.
+function _logImgUrl(fileId){ return API_BASE+'/api/drive/image/'+encodeURIComponent(fileId); }
+function _logCapFileId(l){ try{ const c=l&&l.context; const f=c&&typeof c==='object'?c.fileId:''; return /^[-\w]{20,}$/.test(String(f||''))?String(f):''; }catch(_){ return ''; } }
+function _toggleLogRow(id){ const d=document.getElementById('lgdetail-'+id); if(!d) return;
+  const open=d.style.display==='none'; d.style.display=open?'':'none';
+  const ch=document.getElementById('lgchev-'+id); if(ch) ch.textContent=open?'▴':'▾'; }
+function _logViewImage(fileId){ if(!/^[-\w]{20,}$/.test(String(fileId||'')))return; const url=_logImgUrl(fileId);
+  let ov=document.getElementById('lgimgov'); if(!ov){ ov=document.createElement('div'); ov.id='lgimgov'; ov.className='modalov'; ov.addEventListener('click',e=>{ if(e.target===ov) ov.remove(); }); document.body.appendChild(ov); }
+  ov.innerHTML=`<div class="modalbox" style="width:auto;max-width:96vw"><div class="modalhd"><b>제출 캡처</b> <a class="btn xs" href="${url}" target="_blank" rel="noopener">새 탭 ↗</a> <button class="btn xs" onclick="document.getElementById('lgimgov').remove()">닫기</button></div><div class="modalbd" style="text-align:center"><img src="${url}" style="max-width:92vw;max-height:80vh;border-radius:8px"></div></div>`;
 }
 // 로그 → 그 리뷰어가 있는 작업대를 새 탭으로. 탭 지정+행 강조 정보를 프래그먼트(#)로 넘긴다
 //   — 프래그먼트는 서버 로그·Referer에 안 실려 연락처가 새지 않고, 도착 즉시 주소창에서 제거된다.
@@ -2614,5 +3004,54 @@ async function refreshAdvCounts(){ const r=await api('/api/trackb/advertisers');
 
 boot();
 </script>
+
+<!-- ══════════════════════════════════════════════════════════════
+     모집공고 탭 — 관리자 대시보드와 **같은 코드**를 재사용한다(사본 금지).
+       api.js          : gasGet/gasPost/API_BASE_URL
+       campaign-cards.js: 공고 카드 단일 렌더러
+       recruit-modal.js : 발행·수정 모달 마크업+CSS(admin.html 에서 이관한 공유 모듈)
+       index-recruit.js : 목록 로드·프리필·저장 로직
+     ★ index-recruit.js 는 경로 베이스만 갈아끼우면 그대로 동작한다 —
+       통합 작업대는 AE 도 쓰므로 admin 전용 경로 대신 Track B 네임스페이스로 보낸다.
+     ══════════════════════════════════════════════════════════════ -->
+<!-- 모집공고 발행·수정 모달 — 공유 마크업(js/recruit-modal.js)에서 마운트.
+     ★ body 직속이어야 한다 — 뷰 안(.ovwrap 스크롤 컨테이너)에 두면 오버레이가
+       화면 흐름에 섞여 페이지 하단에 일반 블록으로 흐른다(실측 버그). -->
+<div id="recruitModalMount"></div>
+
+<script>window.CAMPAIGN_ADMIN_API = '/api/trackb/campaigns';</script>
+<script src="api.js"></script>
+<!-- 작업오더 상세 렌더러 — 관리자 대시보드(index-app.js)에서 이관한 공유 모듈.
+     첨부 이미지 임베드·라이트박스·섹션 추출이 전부 여기 한 벌뿐이다. -->
+<script src="js/work-order-detail.js"></script>
+<script src="js/campaign-cards.js"></script>
+<script src="js/recruit-modal.js"></script>
+<script src="js/manual-order.js"></script>
+<script src="js/index-recruit.js"></script>
+<script>
+/* index-recruit.js 가 admin.html 전역으로 기대하는 6개를 통합 작업대 것으로 잇는다.
+   ★ 함수를 베끼지 않고 **이름만 연결**한다 — 로직은 여전히 한 벌이다. */
+(function () {
+  var W = window;
+  if (typeof W.escHtml !== 'function') W.escHtml = function (v) { return esc(v); };
+  if (typeof W.showToast !== 'function') W.showToast = function (m) { _toast(String(m || '')); };
+  if (typeof W._getAuthHeaders !== 'function') {
+    W._getAuthHeaders = function () { return { Authorization: 'Bearer ' + token() }; };
+  }
+  // 작업오더 목록 갱신 훅 — 공고 발행이 오더 상태를 바꾸면 오더 탭도 최신화
+  if (typeof W.loadWorkOrders !== 'function') {
+    W.loadWorkOrders = function () { try { if (STATE.view === 'orders') _loadOrders(); } catch (_) {} };
+  }
+  // 카드 렌더 후 머리말(건수·새 공고 버튼) 갱신 — index-recruit.js 는 목록만 그린다
+  var _origRender = W._renderRecruitCards;
+  if (typeof _origRender === 'function') {
+    W._renderRecruitCards = function (list) {
+      _origRender(list);
+      try { if (STATE.view === 'campaigns') _rcRenderHead((list || []).length); } catch (_) {}
+    };
+  }
+})();
+</script>
+
 </body>
 </html>

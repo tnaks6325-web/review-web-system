@@ -1,3 +1,15 @@
+/**
+ * 공고 관리 API 베이스 — 화면마다 도달 가능한 경로가 다르다.
+ *   · 관리자 대시보드 : /api/campaign/admin      (adminOrMaster)
+ *   · 통합 작업대     : /api/trackb/campaigns    (내부인 열람 + 편집명단 게이트, 같은 핸들러에 위임)
+ * ★ 두 네임스페이스는 **경로 모양이 동일**해서 베이스 문자열만 갈아끼우면 된다 —
+ *   이 파일을 포크하지 않고 두 화면이 같은 발행·수정 로직을 쓰는 유일한 방법.
+ */
+function _campApi(path) {
+  const base = (typeof window !== 'undefined' && window.CAMPAIGN_ADMIN_API) || '/api/campaign/admin';
+  return API_BASE_URL + base + (path || '');
+}
+
 /* ═══════════════════════════════════════
    모집공고 관리 — 전역 상태
 ═══════════════════════════════════════ */
@@ -20,7 +32,7 @@ async function loadRecruitList() {
   const wrap = document.getElementById("recruitListWrap");
   wrap.innerHTML = `<div style="padding:40px;text-align:center;color:var(--t3)"><i class="fas fa-circle-notch fa-spin"></i> 불러오는 중...</div>`;
   try {
-    const res  = await fetch(API_BASE_URL + "/api/campaign/admin/list", {
+    const res  = await fetch(_campApi("/list"), {
       headers: _getAuthHeaders()
     });
     const json = await res.json();
@@ -100,7 +112,7 @@ async function deleteRecruitPicked() {
   let ok = 0; const fail = [];
   for (const id of ids) {
     try {
-      const r = await fetch(API_BASE_URL + `/api/campaign/admin/${encodeURIComponent(id)}`, {
+      const r = await fetch(_campApi(`/${encodeURIComponent(id)}`), {
         method: "DELETE", headers: _getAuthHeaders(),
       });
       const j = await r.json().catch(() => ({}));
@@ -181,7 +193,7 @@ function _buildRecruitCard(c) {
 async function toggleCampFlag(campId, kind, on) {
   try {
     const body = kind === "pinned" ? { pinned: on } : { popular: on };
-    const res = await fetch(API_BASE_URL + `/api/campaign/admin/${encodeURIComponent(campId)}/flags`, {
+    const res = await fetch(_campApi(`/${encodeURIComponent(campId)}/flags`), {
       method: "POST",
       headers: { "Content-Type": "application/json", ..._getAuthHeaders() },
       body: JSON.stringify(body),
@@ -234,7 +246,7 @@ async function toggleRecruitPublish(id, checked, inputEl) {
   const newStatus = checked ? "active" : "draft";
   if (inputEl) inputEl.disabled = true;
   try {
-    const res = await fetch(API_BASE_URL + "/api/campaign/admin/" + encodeURIComponent(id) + "/status", {
+    const res = await fetch(_campApi("/" + encodeURIComponent(id) + "/status"), {
       method: "PUT",
       headers: { "Content-Type": "application/json", ..._getAuthHeaders() },
       body: JSON.stringify({ status: newStatus })
@@ -1383,7 +1395,7 @@ async function openCampControl(campId, title) {
     document.body.appendChild(ovl);
   }
   document.getElementById("ccTitle").textContent = "📡 관제 — " + (title || campId);
-  // 🧾 외부참여 수동제출 — 오버레이는 1회만 만들고 재사용하므로 공고가 바뀔 때마다 핸들러를 다시 건다
+  // 🧾 외부모집 수동제출 — 오버레이는 1회만 만들고 재사용하므로 공고가 바뀔 때마다 핸들러를 다시 건다
   // 연결 탭 문맥 해석은 campaign-cards.js 한 곳에만 둔다(사본을 두면 화면마다 다른 탭에 쓴다).
   // 그 모듈이 없는 화면(admin-siand)에서는 **버튼을 숨긴다** — 눌러도 안 되는 버튼보다 없는 게 낫다.
   const _moBtn = document.getElementById("ccMoBtn");
@@ -1464,6 +1476,24 @@ function _campOwnerTable(rows, now) {
   </div>`;
 }
 
+/** 확정으로 안 잡힌 시트 행 목록 — "몇 행의 누구"인지 바로 짚어준다.
+ *  ★ 캠페인 정원은 '위치'가 아니라 '숫자'(총원 − 확정)로 계산된다. 이 목록은 그 차이가
+ *    시트의 어느 줄에서 비롯됐는지 찾아주는 것이지, 시스템이 그 줄을 비었다고 보는 게 아니다. */
+function _campUnmatchedRows(list) {
+  if (!Array.isArray(list) || !list.length) return "";
+  const esc = s => String(s == null ? "" : s).replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+  const items = list.slice(0, 30).map(u =>
+    `<span style="display:inline-block;background:#fff;border:1px solid #FDE68A;border-radius:6px;padding:2px 7px;margin:2px 3px 0 0;font-size:.7rem">`
+    + `<b>${u.row != null ? u.row + "행" : "행?"}</b> ${esc(u.name) || "(이름 없음)"}`
+    + (u.noPhone ? ` <span style="color:#B45309">연락처 없음</span>` : ` <span style="color:#9CA3AF">***${esc(u.phone4)}</span>`)
+    + `</span>`).join("");
+  return `<div style="margin-top:5px">`
+    + `<div style="font-size:.7rem;color:#92400E;font-weight:800;margin-bottom:2px">확정으로 안 잡힌 시트 행</div>`
+    + items
+    + `<div style="color:#9CA3AF;font-size:.66rem;margin-top:3px">연락처(끝 8자리)로 대조합니다. 연락처가 비어 있는 행은 대조가 불가능해 항상 여기에 나옵니다.</div>`
+    + `</div>`;
+}
+
 /** 📋 시트 대조 카드(관제) — 연결 탭의 로스터 행 수 vs 확정 수, 그리고 시트 일정 적용 여부·사유.
  *  ★ 관측 전용이다. 여기 표시된 값이 캠페인 상태를 바꾸지 않는다(자동 종료 없음). */
 function _campSheetInfo(si) {
@@ -1480,6 +1510,7 @@ function _campSheetInfo(si) {
       + (diff > 0
         ? ` → <span style="color:#B45309;font-weight:800">차이 ${diff}건</span>`
           + `<div style="color:#6B7280;font-size:.7rem">시트에는 자리가 있는데 확정으로 안 잡힌 건입니다. 만료·취소 목록에서 기구매(🛍) 건을 찾아 [수동확정]하거나, 직원이 직접 입력한 행인지 확인하세요.</div>`
+          + _campUnmatchedRows(si.unmatched)
         : diff < 0
           ? ` → <span style="color:#B45309;font-weight:800">확정이 ${-diff}건 더 많음</span>`
             + `<div style="color:#6B7280;font-size:.7rem">시트 반영이 아직 안 됐거나(큐 대기) 로스터 행이 지워졌을 수 있습니다.</div>`
@@ -1515,7 +1546,7 @@ async function _loadCampControl(campId) {
   const body = document.getElementById("ccBody");
   const stats = document.getElementById("ccStats");
   try {
-    const res = await fetch(API_BASE_URL + `/api/campaign/admin/${encodeURIComponent(campId)}/applications`, { headers: _getAuthHeaders() });
+    const res = await fetch(_campApi(`/${encodeURIComponent(campId)}/applications`), { headers: _getAuthHeaders() });
     const j = await res.json();
     if (!res.ok || !j.ok) throw new Error(j.error || "HTTP " + res.status);
     const rows = j.data || [];
@@ -1551,24 +1582,34 @@ async function _loadCampControl(campId) {
     const fmtT = iso => iso ? new Date(iso).toLocaleString("ko-KR", { timeZone: "Asia/Seoul", month: "numeric", day: "numeric", hour: "2-digit", minute: "2-digit" }) : "";
     body.innerHTML = sheetHtml + optTableHtml + ownerTableHtml + items.sort((a, b) => new Date(b.applied_at) - new Date(a.applied_at)).map(r => {
       const holdValid = r.status === "applied" && r.expires_at && Date.parse(r.expires_at) > now;
+      const dismissed = !!r.dismissed_at;   // 취소확정(미참여) — 종료 마커
       let st;
       if (r.status === "submitted") st = chip("#D1FAE5", "#065F46", "✓ 제출확정");
       else if (holdValid) st = chip("#FEF3C7", "#92400E", "⏳ 진행중");
+      else if (dismissed) st = chip("#E5E7EB", "#4B5563", "🚫 취소확정");
       else if (r.status === "cancelled") st = chip("#F3F4F6", "#6B7280", "취소");
-      else st = chip("#FEE2E2", "#B91C1C", "만료");
+      else st = chip("#FEE2E2", "#B91C1C", "구매시간만료");
       const late = r.late_order_id ? chip("#EDE9FE", "#5B21B6", "🛍 기구매 제출 있음") : "";
       // 👥 063: 명의 구분 — 타계정 건은 소유자(본계정) 뒤4자리를 함께 표기(묶음 추적)
       const acct = _isSubRow(r) ? chip("#F1EAFE", "#7C3AED", "타 · 본계정 ***" + String(r.owner_phone8).slice(-4)) : "";
-      // ★ 리뷰 #4: 수동확정은 만료·취소 건만(서버 의도 = 기구매 구제 경로).
+      // ★ 리뷰 #4: 확정 버튼은 만료·취소 건만(서버 의도 = 기구매 구제 경로).
       //   진행중(applied)은 확정 시 주문 링크가 영구 결번되므로 버튼 미노출(정상 제출 경로로 확정되게 둠).
-      const canConfirm = (r.status === "expired" || r.status === "cancelled");
+      //   취소확정(dismissed)된 건은 종료 처리라 버튼을 다시 띄우지 않는다("다시 알림 안 뜸").
+      const canConfirm = (r.status === "expired" || r.status === "cancelled") && !dismissed;
       const escT = s => String(s || "").replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
-      return `<div style="display:flex;align-items:center;gap:8px;padding:9px 4px;border-bottom:1px solid #F3F4F6;font-size:.8rem">
+      const cid = String(campId).replace(/[^a-z0-9_]/gi, "");
+      const aid = parseInt(r.id, 10);
+      // 제출확정(구매완) = 실제 구매 확인 → 자리 확정 / 취소확정(미참여) = 종료 처리(이후 숨김)
+      const actions = canConfirm ? `<span style="display:inline-flex;gap:6px;flex-shrink:0">
+          <button onclick="campManualConfirm('${cid}',${aid},${r.late_order_id ? 1 : 0})" title="구매 완료 확인 → 자리 확정(카운터·모집 잔여 즉시 반영)" style="font-size:.7rem;font-weight:800;background:#e8f1fe;color:#1b64da;border:1px solid #a6c8fb;border-radius:7px;padding:4px 9px;cursor:pointer;white-space:nowrap">✅ 제출확정<span style="font-weight:600;opacity:.72"> ·구매완</span></button>
+          <button onclick="campDismiss('${cid}',${aid})" title="미참여로 취소 확정 → 이후 관제·알림에서 숨김" style="font-size:.7rem;font-weight:800;background:#FEF2F2;color:#DC2626;border:1px solid #FECACA;border-radius:7px;padding:4px 9px;cursor:pointer;white-space:nowrap">🚫 취소확정<span style="font-weight:600;opacity:.72"> ·미참여</span></button>
+        </span>` : "";
+      return `<div style="display:flex;align-items:center;flex-wrap:wrap;gap:8px;padding:9px 4px;border-bottom:1px solid #F3F4F6;font-size:.8rem">
         <b style="min-width:64px">${escT(r.applicant_name)}</b>
         <span style="color:#9CA3AF;font-size:.7rem">***${String(r.phone8 || "").replace(/\D/g, "").slice(-4)}</span>
         ${st}${late}${acct}
         <span style="margin-left:auto;color:#9CA3AF;font-size:.68rem">신청 ${fmtT(r.applied_at)}${r.expires_at ? " · 마감 " + fmtT(r.expires_at) : ""}</span>
-        ${canConfirm ? `<button onclick="campManualConfirm('${String(campId).replace(/[^a-z0-9_]/gi, "")}',${parseInt(r.id, 10)},${r.late_order_id ? 1 : 0})" style="font-size:.7rem;font-weight:800;background:#e8f1fe;color:#1b64da;border:1px solid #a6c8fb;border-radius:7px;padding:4px 10px;cursor:pointer;white-space:nowrap">수동확정</button>` : ""}
+        ${actions}
       </div>`;
     }).join("");
   } catch (e) {
@@ -1582,17 +1623,35 @@ async function campManualConfirm(campId, appId, hasLate) {
     : "⚠️ 연결된 구매 제출이 없는 신청이에요.\n실제 구매를 먼저 확인하셨나요? 확정하면 카운터·모집 잔여가 즉시 소진됩니다.";
   if (!confirm(msg)) return;
   try {
-    const res = await fetch(API_BASE_URL + `/api/campaign/admin/${encodeURIComponent(campId)}/confirm`, {
+    const res = await fetch(_campApi(`/${encodeURIComponent(campId)}/confirm`), {
       method: "POST",
       headers: { "Content-Type": "application/json", ..._getAuthHeaders() },
       body: JSON.stringify({ applicationId: appId }),
     });
     const j = await res.json();
     if (!res.ok || !j.ok) throw new Error(j.error || "HTTP " + res.status);
-    showToast(j.already ? "이미 확정된 신청입니다." : "수동 확정되었습니다.", "success");
+    showToast(j.already ? "이미 확정된 신청입니다." : "제출확정되었습니다.", "success");
     await _loadCampControl(campId);
   } catch (e) {
-    showToast("수동확정 실패: " + e.message, "error");
+    showToast("제출확정 실패: " + e.message, "error");
+  }
+}
+
+// 취소확정(미참여) — 만료·취소 건을 종료 처리. 이후 관제 버튼·지각 배지·만료 집계에서 숨겨진다.
+async function campDismiss(campId, appId) {
+  if (!confirm("이 참여를 '미참여'로 취소 확정할까요?\n확정하면 이후 관제·알림에서 숨겨집니다. (실제로 구매한 건이면 대신 [제출확정]을 누르세요.)")) return;
+  try {
+    const res = await fetch(_campApi(`/${encodeURIComponent(campId)}/dismiss`), {
+      method: "POST",
+      headers: { "Content-Type": "application/json", ..._getAuthHeaders() },
+      body: JSON.stringify({ applicationId: appId }),
+    });
+    const j = await res.json();
+    if (!res.ok || !j.ok) throw new Error(j.error || "HTTP " + res.status);
+    showToast(j.already ? "이미 취소확정된 신청입니다." : "취소 확정되었습니다.", "success");
+    await _loadCampControl(campId);
+  } catch (e) {
+    showToast("취소확정 실패: " + e.message, "error");
   }
 }
 
@@ -1705,13 +1764,13 @@ async function saveRecruitPost() {
   try {
     let res;
     if (_recruitEditId) {
-      res = await fetch(API_BASE_URL + `/api/campaign/admin/${_recruitEditId}`, {
+      res = await fetch(_campApi(`/${_recruitEditId}`), {
         method: "PUT",
         headers: {"Content-Type":"application/json", ..._getAuthHeaders()},
         body: JSON.stringify(payload)
       });
     } else {
-      res = await fetch(API_BASE_URL + "/api/campaign/admin/create", {
+      res = await fetch(_campApi("/create"), {
         method: "POST",
         headers: {"Content-Type":"application/json", ..._getAuthHeaders()},
         body: JSON.stringify(payload)
@@ -1754,7 +1813,7 @@ async function saveRecruitPost() {
 async function deleteRecruitPost(id, title) {
   if (!confirm(`"${title}" 공고를 삭제할까요?`)) return;
   try {
-    const res = await fetch(API_BASE_URL + `/api/campaign/admin/${id}`, {
+    const res = await fetch(_campApi(`/${id}`), {
       method: "DELETE",
       headers: _getAuthHeaders()
     });
