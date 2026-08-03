@@ -14,9 +14,12 @@ const path = require('path');
 const readF = (p) => fs.readFileSync(path.join(__dirname, '..', '..', 'frontend', p), 'utf8');
 
 const doc = readF('docs/현금영수증_발행방법_이미지_등록_안내.html');
-const adm = readF('admin.html');
+/* 설정탭 마크업·로직은 공유 모듈(js/admin-settings.js)로 이관 — admin.html 은 마운트만.
+   안내서가 가르치는 라벨·문구가 제품에 실제로 있는지 보는 검사이므로 함께 읽는다. */
+const set = readF('js/admin-settings.js');
+const adm = readF('admin.html') + '\n' + set;
 const wd = readF('js/campaign-workdetail.js');
-const app = readF('js/index-app.js');
+const app = readF('js/index-app.js') + '\n' + set;
 const sapp = readF('js/search-app.js');
 
 let n = 0;
@@ -48,7 +51,7 @@ ok('안내서의 채널 칸이 서버 단일 출처와 일치(라벨·아이콘)
 ok('그 채널들이 실제 설정 화면에도 전부 있다',
   crChans.CASH_RECEIPT_CHANNELS.every(c => {
     const cap = c.key.charAt(0).toUpperCase() + c.key.slice(1);
-    return new RegExp(`crGuideFile${cap}`).test(adm);
+    return new RegExp(`crGuideFile${cap}`).test(adm) || /crGuideFile\$\{c\.cap\}/.test(set);
   }) && /clearCashReceiptGuide/.test(adm));
 ok('★ "두 칸" 같은 옛 개수 표현이 남아 있지 않다(채널이 늘면 개수를 못 박지 않는다)',
   !/두 칸 모두/.test(doc) && !/이미지 2장/.test(doc));

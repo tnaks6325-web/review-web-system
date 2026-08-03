@@ -739,29 +739,9 @@ body{ letter-spacing:-.01em; }
           <div id="noticeContent" style="font-size:.8rem;color:#1F2937;line-height:1.7;max-height:134px;overflow-y:auto"></div>
         </div>
 
-        <!-- 리뷰어 소식·공지 관리 (리뷰어 홈 상단 노출) -->
-        <div style="min-width:0;border:1px solid #E5E7EB;border-radius:12px;background:#fff;padding:16px 18px">
-          <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:10px">
-            <span style="font-size:.88rem;font-weight:700;color:var(--t1)"><i class="fas fa-bullhorn" style="color:#7C3AED;margin-right:6px"></i>리뷰어 소식·공지 <span style="font-size:.65rem;font-weight:400;color:#6B7280">(리뷰어 홈 상단 노출)</span></span>
-            <div style="display:flex;gap:6px">
-              <button id="rvNoticeWriteBtn" onclick="toggleReviewerNoticeForm()" style="padding:4px 12px;background:#7C3AED;color:#fff;border:none;border-radius:7px;font-size:.72rem;font-weight:700;cursor:pointer"><i class="fas fa-pen"></i> 작성</button>
-              <button onclick="loadReviewerNoticesAdmin()" style="padding:4px 10px;background:#F3F4F6;color:#374151;border:none;border-radius:7px;font-size:.72rem;font-weight:600;cursor:pointer"><i class="fas fa-sync-alt"></i> 새로고침</button>
-            </div>
-          </div>
-          <div id="rvNoticeFormWrap" style="display:none;background:#FAFAFB;border:1px solid #EEF0F5;border-radius:10px;padding:12px;margin-bottom:12px">
-            <input type="hidden" id="rvNoticeEditId" value="">
-            <input id="rvNoticeTitle" type="text" placeholder="공지 제목" maxlength="100" style="width:100%;padding:8px 10px;border:1px solid #D1D5DB;border-radius:7px;font-size:.82rem;outline:none;box-sizing:border-box;margin-bottom:8px">
-            <textarea id="rvNoticeBody" rows="3" placeholder="공지 내용 (리뷰어에게 보여집니다)" maxlength="2000" style="width:100%;padding:8px 10px;border:1px solid #D1D5DB;border-radius:7px;font-size:.82rem;font-family:inherit;outline:none;box-sizing:border-box;resize:vertical;margin-bottom:8px"></textarea>
-            <div style="display:flex;align-items:center;gap:10px">
-              <label style="display:flex;align-items:center;gap:5px;font-size:.76rem;color:var(--t2);cursor:pointer"><input type="checkbox" id="rvNoticePinned"> 상단 고정</label>
-              <div style="margin-left:auto;display:flex;gap:6px">
-                <button id="rvNoticeCancelBtn" onclick="cancelReviewerNoticeEdit()" style="display:none;padding:7px 14px;background:#fff;color:var(--t2);border:1px solid #D1D5DB;border-radius:7px;font-size:.78rem;font-weight:600;cursor:pointer">취소</button>
-                <button id="rvNoticeSaveBtn" onclick="saveReviewerNotice()" style="padding:7px 16px;background:#7C3AED;color:#fff;border:none;border-radius:7px;font-size:.78rem;font-weight:700;cursor:pointer"><i class="fas fa-paper-plane"></i> 게시</button>
-              </div>
-            </div>
-          </div>
-          <div id="rvNoticeList" style="max-height:220px;overflow-y:auto"><div style="text-align:center;color:#9CA3AF;font-size:.8rem;padding:10px">불러오는 중...</div></div>
-        </div>
+        <!-- 리뷰어 소식·공지 관리 — 마크업·로직은 공유 모듈(js/admin-settings.js).
+             통합 작업대 설정 탭과 한 벌로 쓴다(사본 금지). -->
+        <div id="rvNoticeMount" style="min-width:0"></div>
 
         <!-- 작업오더 간편보기 (최신 4건) -->
         <div id="dashWoSection" style="min-width:0;border:1px solid #E5E7EB;border-radius:12px;background:#fff;padding:14px 16px">
@@ -1435,94 +1415,9 @@ body{ letter-spacing:-.01em; }
 
         <hr style="margin:28px 0;border:none;border-top:1px solid #E5E7EB">
 
-        <!-- 내 닉네임 (1:1문의 표시 이름) -->
-        <div class="admin-section-header">
-          <span style="font-size:.95rem;font-weight:700;color:var(--t1)">
-            <i class="fas fa-user-tag" style="color:#7C3AED;margin-right:6px"></i>내 닉네임 (1:1문의 표시 이름)
-          </span>
-        </div>
-        <p style="font-size:.78rem;color:var(--t3);margin:8px 0 12px;line-height:1.6">
-          1:1문의 답장에서 <b>리뷰어에게 보이는 이름</b>입니다. 설정하지 않으면 <b>관리자</b>로만 표시되며,
-          <b style="color:#B91C1C">로그인 계정명(실명)은 리뷰어에게 노출되지 않습니다.</b>
-          바꾸면 이전에 보낸 답장의 이름도 함께 바뀝니다.
-        </p>
-        <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center;max-width:520px">
-          <span id="myNickLogin" style="font-size:.78rem;color:var(--t3);white-space:nowrap"></span>
-          <input type="text" id="myNicknameInput" maxlength="20" placeholder="예: 만두"
-            style="flex:1;min-width:140px;padding:8px 12px;border:1.5px solid #D1D5DB;border-radius:8px;font-size:.85rem;outline:none">
-          <button onclick="saveMyNickname()"
-            style="padding:8px 18px;background:var(--p);color:#fff;border:none;border-radius:8px;font-size:.82rem;font-weight:600;cursor:pointer">
-            <i class="fas fa-save"></i> 저장
-          </button>
-        </div>
-        <div id="myNickHint" style="font-size:.74rem;color:var(--t3);margin-top:7px"></div>
-
-        <hr style="margin:28px 0;border:none;border-top:1px solid #E5E7EB">
-
-        <!-- 회사 공통 사업자번호 설정 -->
-        <div class="admin-section-header">
-          <span style="font-size:.95rem;font-weight:700;color:var(--t1)">
-            <i class="fas fa-building" style="color:#B45309;margin-right:6px"></i>회사 사업자번호 (제공정보)
-          </span>
-        </div>
-        <p style="font-size:.78rem;color:var(--t3);margin:8px 0 12px">
-          진행방식이 <b>사업자현영</b>인 탭의 구매양식 제출화면에 <b>지출증빙용 현금영수증 발행</b> 안내와 함께 표시됩니다. 회사 공통으로 1개만 설정합니다.
-        </p>
-        <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center;max-width:480px">
-          <input type="text" id="companyBusinessNoInput" placeholder="예: 311-87-02345"
-            style="flex:1;min-width:180px;padding:8px 12px;border:1.5px solid #D1D5DB;border-radius:8px;font-size:.85rem;outline:none">
-          <button onclick="saveCompanyBusinessNo()"
-            style="padding:8px 18px;background:var(--p);color:#fff;border:none;border-radius:8px;font-size:.82rem;font-weight:600;cursor:pointer">
-            <i class="fas fa-save"></i> 저장
-          </button>
-        </div>
-
-        <!-- 현금영수증 발행방법 이미지 (채널별 · 회사 공통 1회) -->
-        <div style="margin-top:18px">
-          <div style="font-size:.85rem;font-weight:700;color:var(--t1);margin-bottom:4px">
-            🧾 현금영수증 발행방법 이미지 <span style="font-weight:400;color:var(--t3);font-size:.74rem">— 현영 탭 공고의 작업내용에서 리뷰어에게 채널에 맞는 이미지가 보입니다</span>
-          </div>
-          <!-- ★ 채널 목록은 서버 utils/cashReceiptChannels.js 가 단일 출처 —
-               슬롯을 늘릴 땐 그쪽 표에 먼저 추가한다(회귀가드가 일치를 고정). -->
-          <div style="display:flex;gap:14px;flex-wrap:wrap">
-            <div style="flex:1;min-width:230px;max-width:330px;border:1px solid var(--border);border-radius:10px;padding:10px">
-              <div style="font-size:.78rem;font-weight:700;margin-bottom:6px">🛒 쿠팡</div>
-              <img id="crGuideImgCoupang" alt="" style="display:none;max-width:100%;max-height:160px;border-radius:8px;border:1px solid var(--border);object-fit:contain;margin-bottom:6px">
-              <div id="crGuideNoneCoupang" style="font-size:.72rem;color:var(--t4);margin-bottom:6px">등록된 이미지가 없습니다</div>
-              <div style="display:flex;gap:6px;align-items:center">
-                <input type="file" id="crGuideFileCoupang" accept="image/*" style="font-size:.7rem;flex:1;min-width:0" onchange="uploadCashReceiptGuide('coupang', this)">
-                <button onclick="clearCashReceiptGuide('coupang')" style="padding:6px 10px;background:#FFF5F5;color:#B42318;border:1px solid #F7C9C9;border-radius:7px;font-size:.72rem;font-weight:700;cursor:pointer">제거</button>
-              </div>
-            </div>
-            <div style="flex:1;min-width:230px;max-width:330px;border:1px solid var(--border);border-radius:10px;padding:10px">
-              <div style="font-size:.78rem;font-weight:700;margin-bottom:6px">🟢 네이버</div>
-              <img id="crGuideImgNaver" alt="" style="display:none;max-width:100%;max-height:160px;border-radius:8px;border:1px solid var(--border);object-fit:contain;margin-bottom:6px">
-              <div id="crGuideNoneNaver" style="font-size:.72rem;color:var(--t4);margin-bottom:6px">등록된 이미지가 없습니다</div>
-              <div style="display:flex;gap:6px;align-items:center">
-                <input type="file" id="crGuideFileNaver" accept="image/*" style="font-size:.7rem;flex:1;min-width:0" onchange="uploadCashReceiptGuide('naver', this)">
-                <button onclick="clearCashReceiptGuide('naver')" style="padding:6px 10px;background:#FFF5F5;color:#B42318;border:1px solid #F7C9C9;border-radius:7px;font-size:.72rem;font-weight:700;cursor:pointer">제거</button>
-              </div>
-            </div>
-            <div style="flex:1;min-width:230px;max-width:330px;border:1px solid var(--border);border-radius:10px;padding:10px">
-              <div style="font-size:.78rem;font-weight:700;margin-bottom:6px">🫒 올리브영</div>
-              <img id="crGuideImgOliveyoung" alt="" style="display:none;max-width:100%;max-height:160px;border-radius:8px;border:1px solid var(--border);object-fit:contain;margin-bottom:6px">
-              <div id="crGuideNoneOliveyoung" style="font-size:.72rem;color:var(--t4);margin-bottom:6px">등록된 이미지가 없습니다</div>
-              <div style="display:flex;gap:6px;align-items:center">
-                <input type="file" id="crGuideFileOliveyoung" accept="image/*" style="font-size:.7rem;flex:1;min-width:0" onchange="uploadCashReceiptGuide('oliveyoung', this)">
-                <button onclick="clearCashReceiptGuide('oliveyoung')" style="padding:6px 10px;background:#FFF5F5;color:#B42318;border:1px solid #F7C9C9;border-radius:7px;font-size:.72rem;font-weight:700;cursor:pointer">제거</button>
-              </div>
-            </div>
-            <div style="flex:1;min-width:230px;max-width:330px;border:1px solid var(--border);border-radius:10px;padding:10px">
-              <div style="font-size:.78rem;font-weight:700;margin-bottom:6px">💛 카카오메이커스</div>
-              <img id="crGuideImgKakao" alt="" style="display:none;max-width:100%;max-height:160px;border-radius:8px;border:1px solid var(--border);object-fit:contain;margin-bottom:6px">
-              <div id="crGuideNoneKakao" style="font-size:.72rem;color:var(--t4);margin-bottom:6px">등록된 이미지가 없습니다</div>
-              <div style="display:flex;gap:6px;align-items:center">
-                <input type="file" id="crGuideFileKakao" accept="image/*" style="font-size:.7rem;flex:1;min-width:0" onchange="uploadCashReceiptGuide('kakao', this)">
-                <button onclick="clearCashReceiptGuide('kakao')" style="padding:6px 10px;background:#FFF5F5;color:#B42318;border:1px solid #F7C9C9;border-radius:7px;font-size:.72rem;font-weight:700;cursor:pointer">제거</button>
-              </div>
-            </div>
-          </div>
-        </div>
+        <!-- 내 닉네임 · 회사 사업자번호(제공정보) · 현금영수증 발행방법 이미지 —
+             마크업·로직은 공유 모듈(js/admin-settings.js). 통합 작업대 설정 탭과 한 벌로 쓴다(사본 금지). -->
+        <div id="adminSettingsMount"></div>
 
         <hr style="margin:28px 0;border:none;border-top:1px solid #E5E7EB">
 
@@ -2590,6 +2485,9 @@ body{ letter-spacing:-.01em; }
 <!-- C/S 대화 안의 리뷰이미지 교체요청 카드 — 관리자·리뷰어 화면 공용 렌더러 -->
 <script src="js/cs-review-edit-card.js"></script>
 <script src="js/cs-inquiry.js"></script>
+<!-- 관리자 설정 패널(내 닉네임 · 회사 사업자번호 · 리뷰어 소식·공지) — 통합 작업대와 한 벌로 쓰는 공유 모듈.
+     ★ index-app.js **앞**에 둔다: 전역 이름을 여기서 노출하므로 순서가 바뀌면 뒤에 오는 선언이 덮는다. -->
+<script src="js/admin-settings.js"></script>
 
 <script src="js/index-app.js"></script>
 
@@ -2747,6 +2645,21 @@ body{ letter-spacing:-.01em; }
      📒 주문 원장(DB 주체) 인라인 뷰어/편집 JavaScript
      ══════════════════════════════════════════════════════ -->
 <script src="js/index-order-ledger.js"></script>
+
+<!-- 관리자 설정 패널 마운트 — 마크업은 js/admin-settings.js 한 벌(통합 작업대와 공용).
+     ★ autoload:false — 값 불러오기는 종전대로 **탭 전환 시점**(index-app.js 의 switchAdminTab)에
+       한다. 여기서 바로 부르면 로그인 전에도 요청이 나가 로드 타이밍이 달라진다. -->
+<script>
+  (function () {
+    function _mountAdminSettings() {
+      if (!window.AdminSettings) return;
+      AdminSettings.mount('rvNoticeMount', { panels: ['notice'], autoload: false });
+      AdminSettings.mount('adminSettingsMount', { panels: ['nickname', 'business'], autoload: false });
+    }
+    if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', _mountAdminSettings);
+    else _mountAdminSettings();
+  })();
+</script>
 
 </body>
 </html>
