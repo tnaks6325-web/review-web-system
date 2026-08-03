@@ -1,0 +1,823 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>리뷰 자동검수 — 화면 와이어프레임</title>
+<style>
+  *,*::before,*::after{box-sizing:border-box}
+
+  :root{
+    --paper:#F4F5F7; --card:#FFFFFF; --ink:#12151A; --muted:#59626F; --faint:#8B94A1;
+    --line:#E1E5EB; --line-soft:#EDF0F4;
+    --acc:#2563A8; --acc-bg:#E9F0F9; --acc-edge:#B7CFE9;
+    --pass:#127A5E; --pass-bg:#E5F3EE; --pass-edge:#A6D6C6;
+    --susp:#9A6414; --susp-bg:#FBF2E1; --susp-edge:#E7D2A3;
+    --fail:#B3382E; --fail-bg:#FAE9E7; --fail-edge:#EAB6B0;
+    --shadow:0 1px 2px rgba(18,21,26,.05), 0 10px 30px rgba(18,21,26,.06);
+    --mono:ui-monospace,SFMono-Regular,"SF Mono",Menlo,Consolas,"D2Coding",monospace;
+    --sans:"Pretendard Variable",Pretendard,-apple-system,BlinkMacSystemFont,"Apple SD Gothic Neo","Malgun Gothic","Noto Sans KR",system-ui,sans-serif;
+  }
+  @media (prefers-color-scheme: dark){
+    :root{
+      --paper:#101317; --card:#171B21; --ink:#E7EBF1; --muted:#98A1AE; --faint:#6E7885;
+      --line:#252B33; --line-soft:#1E232A;
+      --acc:#7FB2E8; --acc-bg:#14263A; --acc-edge:#28486B;
+      --pass:#61C4A4; --pass-bg:#102822; --pass-edge:#22493D;
+      --susp:#E0B571; --susp-bg:#2B2214; --susp-edge:#4C3C1E;
+      --fail:#E79A92; --fail-bg:#321B18; --fail-edge:#5A2E28;
+      --shadow:0 1px 2px rgba(0,0,0,.45), 0 10px 30px rgba(0,0,0,.3);
+    }
+  }
+  :root[data-theme="dark"]{
+    --paper:#101317; --card:#171B21; --ink:#E7EBF1; --muted:#98A1AE; --faint:#6E7885;
+    --line:#252B33; --line-soft:#1E232A;
+    --acc:#7FB2E8; --acc-bg:#14263A; --acc-edge:#28486B;
+    --pass:#61C4A4; --pass-bg:#102822; --pass-edge:#22493D;
+    --susp:#E0B571; --susp-bg:#2B2214; --susp-edge:#4C3C1E;
+    --fail:#E79A92; --fail-bg:#321B18; --fail-edge:#5A2E28;
+    --shadow:0 1px 2px rgba(0,0,0,.45), 0 10px 30px rgba(0,0,0,.3);
+  }
+  :root[data-theme="light"]{
+    --paper:#F4F5F7; --card:#FFFFFF; --ink:#12151A; --muted:#59626F; --faint:#8B94A1;
+    --line:#E1E5EB; --line-soft:#EDF0F4;
+    --acc:#2563A8; --acc-bg:#E9F0F9; --acc-edge:#B7CFE9;
+    --pass:#127A5E; --pass-bg:#E5F3EE; --pass-edge:#A6D6C6;
+    --susp:#9A6414; --susp-bg:#FBF2E1; --susp-edge:#E7D2A3;
+    --fail:#B3382E; --fail-bg:#FAE9E7; --fail-edge:#EAB6B0;
+    --shadow:0 1px 2px rgba(18,21,26,.05), 0 10px 30px rgba(18,21,26,.06);
+  }
+
+  html{-webkit-text-size-adjust:100%}
+  body{
+    margin:0; background:var(--paper); color:var(--ink);
+    font-family:var(--sans); line-height:1.62; -webkit-font-smoothing:antialiased;
+  }
+  .wrap{max-width:1140px; margin:0 auto; padding:40px 20px 80px; display:flex; flex-direction:column; gap:44px}
+
+  /* ── 문서 헤더 ── */
+  .head{border-bottom:1px solid var(--line); padding-bottom:26px; display:flex; flex-direction:column; gap:14px}
+  .eyebrow{margin:0; font-family:var(--mono); font-size:11px; font-weight:600; letter-spacing:.16em; text-transform:uppercase; color:var(--acc)}
+  h1{margin:0; font-size:clamp(26px,4vw,37px); font-weight:800; letter-spacing:-.028em; line-height:1.16; text-wrap:balance}
+  .lede{margin:0; max-width:64ch; color:var(--muted); font-size:15.5px}
+  .chips{display:flex; gap:7px; flex-wrap:wrap}
+  .chip{font-family:var(--mono); font-size:11.5px; font-weight:550; padding:4px 10px; border-radius:7px;
+        border:1px solid var(--line); background:var(--card); color:var(--muted)}
+  .chip.a{border-color:var(--acc-edge); background:var(--acc-bg); color:var(--acc)}
+
+  /* ── 섹션 ── */
+  section{display:flex; flex-direction:column; gap:16px}
+  .shead{display:flex; align-items:baseline; gap:11px; flex-wrap:wrap}
+  .snum{font-family:var(--mono); font-size:12px; font-weight:650; color:var(--acc); letter-spacing:.08em;
+        border:1px solid var(--acc-edge); background:var(--acc-bg); border-radius:6px; padding:2px 8px; flex:none}
+  h2{margin:0; font-size:20px; font-weight:760; letter-spacing:-.018em}
+  .sdesc{margin:0; color:var(--muted); font-size:14px; max-width:74ch}
+  .sdesc b{color:var(--ink); font-weight:700}
+
+  /* ── 판정 범례 ── */
+  .legend{display:flex; gap:9px; flex-wrap:wrap; background:var(--card); border:1px solid var(--line);
+          border-radius:13px; padding:15px 17px; box-shadow:var(--shadow)}
+  .lg{display:inline-flex; align-items:center; gap:8px; font-size:13px}
+  .lg .sw{width:11px; height:11px; border-radius:3.5px; flex:none; border:1px solid}
+  .lg .sw.p{background:var(--pass); border-color:var(--pass)}
+  .lg .sw.s{background:var(--susp); border-color:var(--susp)}
+  .lg .sw.f{background:var(--fail); border-color:var(--fail)}
+  .lg .sw.n{background:transparent; border-color:var(--faint); border-style:dashed}
+  .lg b{font-weight:700}
+  .lg span{color:var(--muted)}
+
+  /* ══════════ 화면 카드 ══════════ */
+  .scene{display:grid; grid-template-columns:minmax(0,1.55fr) minmax(0,1fr); gap:20px; align-items:start}
+  @media (max-width:900px){ .scene{grid-template-columns:1fr} }
+
+  .frame{background:var(--card); border:1px solid var(--line); border-radius:14px; overflow:hidden; box-shadow:var(--shadow)}
+  .fbar{display:flex; align-items:center; gap:9px; padding:9px 13px; border-bottom:1px solid var(--line); background:var(--line-soft)}
+  .fdots{display:flex; gap:5px; flex:none}
+  .fdots i{width:9px; height:9px; border-radius:50%; background:var(--line); display:block}
+  .fname{font-family:var(--mono); font-size:11.5px; color:var(--muted); overflow:hidden; text-overflow:ellipsis; white-space:nowrap}
+  .fkind{margin-left:auto; font-family:var(--mono); font-size:10.5px; font-weight:650; letter-spacing:.06em;
+         padding:2px 7px; border-radius:5px; border:1px solid var(--line); color:var(--faint); flex:none}
+
+  /* ── 목업 내부: 라이트 고정 (실제 관리자 화면이 라이트 — 다크에서 뒤집히면 실물과 어긋난다) ── */
+  .ui{color-scheme:light; background:#EFF1F4; padding:14px; overflow-x:auto}
+  .ui, .ui *{font-family:var(--sans); color:#1A1E25}
+  .ui .mono{font-family:var(--mono)}
+
+  /* 와이어프레임 원소 */
+  .ph{border:1.5px dashed #B9C1CC; border-radius:8px; background:
+      repeating-linear-gradient(135deg,#F5F7F9 0 7px,#EBEEF2 7px 14px);
+      display:grid; place-items:center; color:#7B8593; font-size:11px; font-weight:600; text-align:center; padding:6px}
+  .box{background:#fff; border:1px solid #D5DBE3; border-radius:10px}
+  .lbl{font-size:10.5px; font-weight:700; letter-spacing:.05em; color:#78828F; text-transform:uppercase}
+
+  /* nav */
+  .nav{display:flex; gap:5px; flex-wrap:wrap; margin-bottom:11px}
+  .nv{padding:5px 10px; border-radius:8px; background:#fff; border:1px solid #D5DBE3; font-size:11.5px; font-weight:620; white-space:nowrap; color:#4C5563}
+  .nv.on{background:#2563A8; border-color:#2563A8; color:#fff}
+  .nv .bdg{display:inline-block; margin-left:5px; background:#B3382E; color:#fff; border-radius:999px; padding:0 5px; font-size:9.5px; font-weight:800}
+
+  /* filter bar */
+  .fbr{display:flex; gap:6px; flex-wrap:wrap; align-items:center; margin-bottom:11px}
+  .sel{background:#fff; border:1px solid #CFD6DF; border-radius:8px; padding:5px 10px; font-size:11.5px; color:#4C5563; white-space:nowrap}
+  .sel.k{border-color:#B7CFE9; background:#E9F0F9; color:#2563A8; font-weight:650}
+  .tally{margin-left:auto; display:flex; gap:6px; flex-wrap:wrap}
+  .tl{font-size:11px; font-weight:700; padding:4px 9px; border-radius:7px; border:1px solid; font-variant-numeric:tabular-nums}
+  .tl.p{color:#127A5E; background:#E5F3EE; border-color:#A6D6C6}
+  .tl.s{color:#9A6414; background:#FBF2E1; border-color:#E7D2A3}
+  .tl.f{color:#B3382E; background:#FAE9E7; border-color:#EAB6B0}
+  .tl.n{color:#68717E; background:#F2F4F7; border-color:#D5DBE3}
+
+  /* 검수 카드 그리드 */
+  .cards{display:grid; grid-template-columns:repeat(auto-fill,minmax(178px,1fr)); gap:9px}
+  .ic{background:#fff; border:1px solid #D5DBE3; border-radius:11px; overflow:hidden; display:flex; flex-direction:column}
+  .ic.f{border-color:#EAB6B0; box-shadow:inset 3px 0 0 #B3382E}
+  .ic.s{border-color:#E7D2A3; box-shadow:inset 3px 0 0 #9A6414}
+  .ic.p{box-shadow:inset 3px 0 0 #A6D6C6}
+  .ic .th{height:74px; border-bottom:1px solid #ECEFF3}
+  .ic .bd{padding:8px 10px; display:flex; flex-direction:column; gap:4px; flex:1}
+  .ic .who{display:flex; justify-content:space-between; gap:6px; align-items:center; font-size:11.5px; font-weight:730}
+  .ic .rsn{font-size:10.5px; color:#69727F; line-height:1.45}
+  .ic .ft{display:flex; gap:5px; padding:7px 10px; border-top:1px solid #ECEFF3}
+  .bt{flex:1; text-align:center; padding:5px 0; border-radius:7px; border:1px solid #CFD6DF; background:#F6F8FA; font-size:10.5px; font-weight:650; color:#3E4753}
+  .bt.p{background:#2563A8; border-color:#2563A8; color:#fff}
+
+  .bdg2{font-size:9.5px; font-weight:800; padding:2px 6px; border-radius:999px; border:1px solid; white-space:nowrap; flex:none}
+  .bdg2.p{color:#127A5E; background:#E5F3EE; border-color:#A6D6C6}
+  .bdg2.s{color:#9A6414; background:#FBF2E1; border-color:#E7D2A3}
+  .bdg2.f{color:#B3382E; background:#FAE9E7; border-color:#EAB6B0}
+  .bdg2.n{color:#68717E; background:#F2F4F7; border-color:#D5DBE3}
+
+  /* 핀 */
+  .pin{display:inline-grid; place-items:center; width:17px; height:17px; border-radius:50%; flex:none;
+       background:#2563A8; color:#fff; font-family:var(--mono); font-size:10px; font-weight:700; line-height:1}
+  .pinabs{position:absolute; z-index:2; box-shadow:0 0 0 2.5px #fff}
+
+  /* 주석 리스트 */
+  .notes{background:var(--card); border:1px solid var(--line); border-radius:13px; padding:15px 17px; box-shadow:var(--shadow);
+         display:flex; flex-direction:column; gap:11px}
+  .notes h4{margin:0 0 2px; font-size:13px; font-weight:750; letter-spacing:-.01em}
+  .nt{display:flex; gap:9px; align-items:flex-start; font-size:13px; line-height:1.55}
+  .nt .pin{margin-top:3px; background:var(--acc); color:var(--card)}
+  .nt b{font-weight:700}
+  .nt code{font-family:var(--mono); font-size:11.5px; background:var(--line-soft); border:1px solid var(--line);
+           padding:0 4px; border-radius:4px; color:var(--muted)}
+  .nt .why{display:block; color:var(--muted); font-size:12.5px; margin-top:1px}
+
+  /* 파이프라인 */
+  .pipe{display:grid; grid-template-columns:repeat(5,1fr); gap:8px}
+  @media (max-width:820px){ .pipe{grid-template-columns:1fr 1fr} }
+  @media (max-width:520px){ .pipe{grid-template-columns:1fr} }
+  .pz{background:var(--card); border:1px solid var(--line); border-radius:12px; padding:13px 14px; position:relative;
+      display:flex; flex-direction:column; gap:5px; box-shadow:var(--shadow)}
+  .pz .pt{font-size:13px; font-weight:740; display:flex; align-items:center; gap:6px}
+  .pz .pd{font-size:12px; color:var(--muted); line-height:1.5}
+  .pz .ptag{font-family:var(--mono); font-size:10px; letter-spacing:.08em; color:var(--faint); text-transform:uppercase}
+  .pz.new{border-color:var(--acc-edge); background:var(--acc-bg)}
+  .pz.new .pd{color:var(--ink); opacity:.82}
+  .pz .stamp{position:absolute; top:-8px; right:11px; font-family:var(--mono); font-size:9.5px; font-weight:700;
+             letter-spacing:.06em; padding:1px 6px; border-radius:5px; background:var(--acc); color:#fff}
+  .pz .stamp.keep{background:var(--faint)}
+
+  /* 표 */
+  .tblwrap{overflow-x:auto; border:1px solid var(--line); border-radius:12px; background:var(--card); box-shadow:var(--shadow)}
+  table{width:100%; border-collapse:collapse; font-size:13px}
+  th,td{padding:9px 13px; text-align:left; border-bottom:1px solid var(--line-soft); vertical-align:top}
+  th{background:var(--line-soft); font-size:11.5px; font-weight:720; letter-spacing:.02em; white-space:nowrap; color:var(--muted)}
+  tr:last-child td{border-bottom:0}
+  td code{font-family:var(--mono); font-size:11.5px; color:var(--muted)}
+
+  /* 콜아웃 */
+  .call{border:1px solid var(--acc-edge); background:var(--acc-bg); border-radius:12px; padding:13px 16px; font-size:13.5px}
+  .call b{font-weight:750}
+  .call.warn{border-color:var(--susp-edge); background:var(--susp-bg)}
+
+  ol.q{margin:0; padding-left:20px; display:flex; flex-direction:column; gap:7px; font-size:13.5px}
+  ol.q li::marker{font-family:var(--mono); font-size:12px; color:var(--acc); font-weight:700}
+  ol.q b{font-weight:730}
+  ol.q .why{display:block; color:var(--muted); font-size:12.5px}
+
+  footer{border-top:1px solid var(--line); padding-top:18px; color:var(--faint); font-size:12px; font-family:var(--mono)}
+
+  @media (prefers-reduced-motion:no-preference){
+    .frame{transition:box-shadow .2s ease}
+  }
+</style>
+</head>
+<body>
+<div class="wrap">
+
+  <header class="head">
+    <p class="eyebrow">Review Web System · Wireframe</p>
+    <h1>리뷰 자동검수 — 화면 와이어프레임</h1>
+    <p class="lede">리뷰어가 낸 리뷰 캡처가 업체에 전달되기 전에 시스템이 먼저 걸러내는 과정을, <b>사람이 실제로 보게 될 화면 순서대로</b> 그렸습니다.
+    회색 빗금은 이미지가 들어갈 자리, 파란 번호는 오른쪽 설명과 짝입니다.</p>
+    <div class="chips">
+      <span class="chip a">화면 7개</span>
+      <span class="chip">통합작업대 신규 탭</span>
+      <span class="chip">리뷰어 화면 변화 없음</span>
+      <span class="chip">제출 차단 없음</span>
+    </div>
+  </header>
+
+  <!-- 범례 -->
+  <div class="legend">
+    <span class="lg"><i class="sw p"></i><b>통과</b><span>조용히 넘어감</span></span>
+    <span class="lg"><i class="sw s"></i><b>의심</b><span>검수 탭에만 표시</span></span>
+    <span class="lg"><i class="sw f"></i><b>불량</b><span>관리자 빨간 알림까지</span></span>
+    <span class="lg"><i class="sw n"></i><b>판정 안 함</b><span>재료 부족·AI 실패 = 통과 취급</span></span>
+  </div>
+
+  <!-- ══════════ 흐름 한 장 ══════════ -->
+  <section>
+    <div class="shead"><span class="snum">흐름</span><h2>제출 한 건이 지나는 길</h2></div>
+    <p class="sdesc">파란 칸이 이번에 <b>새로 생기는 부분</b>, 회색 칸은 <b>이미 돌아가는 기존 동작</b>입니다. 리뷰어가 겪는 과정은 하나도 바뀌지 않습니다.</p>
+    <div class="pipe">
+      <div class="pz"><span class="stamp keep">그대로</span>
+        <span class="ptag">1 · 리뷰어</span>
+        <span class="pt">캡처 첨부·제출</span>
+        <span class="pd">리뷰 화면을 캡처해 올린다. 화면·버튼·안내문 전부 현행 유지.</span></div>
+      <div class="pz"><span class="stamp keep">그대로</span>
+        <span class="ptag">2 · 저장</span>
+        <span class="pt">드라이브 저장</span>
+        <span class="pd">시트제목 → 탭명 → [리뷰] 폴더에 저장되고 제출 원장에 기록.</span></div>
+      <div class="pz new"><span class="stamp">신규</span>
+        <span class="ptag">3 · 검수</span>
+        <span class="pt">자동 검수</span>
+        <span class="pd">올라온 그 순간 5가지를 본다. 이미 돌던 AI 확인에 항목만 얹어 <b>추가 비용 거의 없음</b>.</span></div>
+      <div class="pz new"><span class="stamp">신규</span>
+        <span class="ptag">4 · 분류</span>
+        <span class="pt">통과 / 의심 / 불량</span>
+        <span class="pd">결과만 기록한다. <b>제출을 되돌리거나 막지 않는다.</b></span></div>
+      <div class="pz new"><span class="stamp">신규</span>
+        <span class="ptag">5 · 사람</span>
+        <span class="pt">검수 탭에서 확인</span>
+        <span class="pd">관리자·담당AE가 걸러진 것만 보고 통과 처리하거나 다시 받는다.</span></div>
+    </div>
+  </section>
+
+  <!-- ══════════ 화면 1 ══════════ -->
+  <section>
+    <div class="shead"><span class="snum">화면 1</span><h2>리뷰어 제출 화면 — 바뀌는 것 없음</h2></div>
+    <p class="sdesc">검수는 <b>제출이 끝난 뒤</b> 뒤에서 돈다. 리뷰어는 검수가 생겼다는 사실조차 모르고, 판정이 나빠도 그 자리에서 반려당하지 않는다.</p>
+    <div class="scene">
+      <div class="frame">
+        <div class="fbar"><span class="fdots"><i></i><i></i><i></i></span>
+          <span class="fname">리뷰어 홈 › 리뷰 제출</span><span class="fkind">MOBILE</span></div>
+        <div class="ui">
+          <div style="max-width:290px; margin:0 auto; display:flex; flex-direction:column; gap:9px">
+            <div class="box" style="padding:10px 12px">
+              <div class="lbl" style="margin-bottom:6px">진행 작업</div>
+              <div style="font-size:12.5px; font-weight:700">히말라야 핑크솔트 400g</div>
+              <div style="font-size:11px; color:#69727F">7월 ○○브랜드 · 12행</div>
+            </div>
+
+            <div class="box" style="padding:11px 12px; display:flex; flex-direction:column; gap:8px; position:relative">
+              <span class="pin pinabs" style="top:-7px; left:-7px">1</span>
+              <div class="lbl">리뷰 캡처</div>
+              <div style="display:flex; gap:7px">
+                <div class="ph" style="width:74px; height:88px">캡처<br>1장</div>
+                <div class="ph" style="width:74px; height:88px; border-style:solid; border-color:#D5DBE3; background:#FAFBFC">＋ 추가</div>
+              </div>
+              <div style="font-size:10.5px; color:#69727F">별점과 리뷰 내용이 함께 보이게 캡처해 주세요.</div>
+            </div>
+
+            <div class="box" style="padding:11px 12px; display:flex; flex-direction:column; gap:7px">
+              <div class="lbl">현금영수증 캡처</div>
+              <div class="ph" style="width:74px; height:88px">캡처<br>1장</div>
+            </div>
+
+            <div style="background:#2563A8; color:#fff; text-align:center; padding:10px; border-radius:9px;
+                        font-size:12.5px; font-weight:730; position:relative">
+              제출하기
+              <span class="pin pinabs" style="top:-7px; right:-7px">2</span>
+            </div>
+            <div style="font-size:10.5px; color:#69727F; text-align:center">제출 후 검수 결과로 되돌아오는 안내는 없습니다.</div>
+          </div>
+        </div>
+      </div>
+
+      <div class="notes">
+        <h4>이 화면에서 정해 둔 것</h4>
+        <div class="nt"><span class="pin">1</span><div>
+          캡처를 올리는 <b>바로 그 순간</b> 서버가 파일 지문(중복 확인용)과 이미지 속 글자를 뽑아 둔다.
+          <span class="why">리뷰어는 기다림을 느끼지 않는다 — 이미 돌고 있던 확인 과정에 항목만 얹기 때문.</span></div></div>
+        <div class="nt"><span class="pin">2</span><div>
+          검수 결과가 나쁘게 나와도 <b>제출은 그대로 접수</b>된다.
+          <span class="why">AI가 틀려서 멀쩡한 제출이 막히는 쪽이, 불량 하나를 놓치는 것보다 훨씬 큰 사고다. 다시 받을지는 사람이 정한다.</span></div></div>
+        <div class="nt"><span class="pin">·</span><div>
+          기존에 있던 <b>"리뷰 자리에 영수증을 올렸어요" 경고</b>는 지금처럼 그대로 뜬다.
+          <span class="why">이건 오래 돌며 검증된 판정이라 유지. 새로 생긴 판정(상품 불일치 등)만 리뷰어에게 감춘다.</span></div></div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ══════════ 화면 2 ══════════ -->
+  <section>
+    <div class="shead"><span class="snum">화면 2</span><h2>통합작업대 › 리뷰검수 탭 — 걸러진 것만 모아 보기</h2></div>
+    <p class="sdesc">이 시스템의 <b>메인 화면</b>. 통과한 건은 기본으로 숨기고 <b>손볼 것만</b> 남긴다. 담당AE는 자기 업체 탭만 보인다.</p>
+    <div class="scene">
+      <div class="frame">
+        <div class="fbar"><span class="fdots"><i></i><i></i><i></i></span>
+          <span class="fname">통합작업대 › 리뷰검수</span><span class="fkind">DESKTOP</span></div>
+        <div class="ui">
+          <div class="nav">
+            <span class="nv">작업대</span><span class="nv">업체관리</span><span class="nv">리뷰어 로그</span>
+            <span class="nv">작업오더</span><span class="nv">모집공고</span><span class="nv">C/S 문의</span>
+            <span class="nv">이미지 교체요청</span>
+            <span class="nv on" style="position:relative">리뷰검수<span class="bdg">4</span>
+              <span class="pin pinabs" style="top:-8px; right:-8px">1</span></span>
+            <span class="nv">등록리뷰어DB</span>
+          </div>
+
+          <div class="fbr" style="position:relative">
+            <span class="sel">탭 · 히말라야 핑크솔트 100건 ▾</span>
+            <span class="sel k">상태 · 의심＋불량 ▾</span>
+            <span class="sel">사유 · 전체 ▾</span>
+            <span class="sel">⚙ 검수 기준 설정<span class="pin pinabs" style="top:-8px; right:-8px">3</span></span>
+            <span class="tally">
+              <span class="tl p">통과 61</span><span class="tl s">의심 3</span>
+              <span class="tl f">불량 1</span><span class="tl n">미검수 12</span>
+            </span>
+            <span class="pin pinabs" style="top:-9px; left:150px">2</span>
+          </div>
+
+          <div class="cards">
+            <div class="ic f" style="position:relative">
+              <span class="pin pinabs" style="top:-7px; left:-7px">4</span>
+              <div class="th"><div class="ph" style="height:100%; border:0; border-radius:0">리뷰 캡처</div></div>
+              <div class="bd">
+                <div class="who"><span>김리뷰 · 12행</span><span class="bdg2 f">같은 파일</span></div>
+                <div class="rsn">7/29 <b>△△탭 박제출 8행</b>에 올라온 파일과 완전히 동일</div>
+              </div>
+              <div class="ft"><span class="bt">나란히 보기</span><span class="bt p">다시 받기</span></div>
+            </div>
+
+            <div class="ic s">
+              <div class="th"><div class="ph" style="height:100%; border:0; border-radius:0">리뷰 캡처</div></div>
+              <div class="bd">
+                <div class="who"><span>이참여 · 27행</span><span class="bdg2 s">글 93% 같음</span></div>
+                <div class="rsn">같은 탭 <b>정리뷰 19행</b> 리뷰 글과 거의 같은 문장</div>
+              </div>
+              <div class="ft"><span class="bt">글 대조</span><span class="bt">통과 처리</span></div>
+            </div>
+
+            <div class="ic s">
+              <div class="th"><div class="ph" style="height:100%; border:0; border-radius:0">리뷰 캡처</div></div>
+              <div class="bd">
+                <div class="who"><span>박제출 · 31행</span><span class="bdg2 s">상품 다름</span></div>
+                <div class="rsn">캡처 속 상품명 <b>□□보조배터리</b> ≠ 이 작업 상품</div>
+              </div>
+              <div class="ft"><span class="bt">원본 보기</span><span class="bt p">다시 받기</span></div>
+            </div>
+
+            <div class="ic s">
+              <div class="th"><div class="ph" style="height:100%; border:0; border-radius:0">리뷰 캡처</div></div>
+              <div class="bd">
+                <div class="who"><span>최후기 · 44행</span><span class="bdg2 s">채널 다름</span></div>
+                <div class="rsn">쿠팡 작업인데 <b>네이버 리뷰 화면</b>으로 보임</div>
+              </div>
+              <div class="ft"><span class="bt">원본 보기</span><span class="bt">통과 처리</span></div>
+            </div>
+
+            <div class="ic p">
+              <div class="th"><div class="ph" style="height:100%; border:0; border-radius:0">리뷰 캡처</div></div>
+              <div class="bd">
+                <div class="who"><span>정정상 · 5행</span><span class="bdg2 p">통과</span></div>
+                <div class="rsn">쿠팡 리뷰 · 상품명 일치 · 중복 없음</div>
+              </div>
+              <div class="ft"><span class="bt">상세</span></div>
+            </div>
+
+            <div class="ic">
+              <div class="th"><div class="ph" style="height:100%; border:0; border-radius:0">리뷰 캡처</div></div>
+              <div class="bd">
+                <div class="who"><span>한대기 · 51행</span><span class="bdg2 n">판정 안 함</span></div>
+                <div class="rsn">비교할 상품명이 등록돼 있지 않음 → <b>설정 필요</b></div>
+              </div>
+              <div class="ft"><span class="bt">기준 설정</span></div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <div class="notes">
+        <h4>이 화면에서 정해 둔 것</h4>
+        <div class="nt"><span class="pin">1</span><div>
+          탭 위치는 <b>이미지 교체요청 옆</b>. 숫자 뱃지는 <b>아직 안 본 의심·불량 건수</b>.
+          <span class="why">리뷰 이미지를 다루는 업무끼리 붙여 둔다. 불량 확정 시 바로 옆 교체요청으로 넘어간다.</span></div></div>
+        <div class="nt"><span class="pin">2</span><div>
+          기본 필터가 <b>"의심＋불량"</b>. 통과 61건은 숫자로만 보인다.
+          <span class="why">전부 나열하면 정작 볼 것이 묻힌다 — 걸러 주는 게 이 화면의 존재 이유.</span></div></div>
+        <div class="nt"><span class="pin">3</span><div>
+          <b>검수 기준 설정</b>(화면 5)로 가는 입구. 기준이 없으면 검사도 못 한다.
+          <span class="why">"판정 안 함" 카드가 많으면 여기를 채우라는 신호다.</span></div></div>
+        <div class="nt"><span class="pin">4</span><div>
+          카드 왼쪽 <b>색 띠</b>로 심각도를 구분하고, 사유는 <b>한 줄로 근거까지</b> 적는다.
+          <span class="why">"불량"만 뜨면 관리자가 매번 열어 봐야 한다. 어느 탭 누구 것과 겹쳤는지를 카드에서 바로 읽게 한다.</span></div></div>
+        <div class="nt"><span class="pin">·</span><div>
+          담당AE(staff)는 <b>자기 업체 탭만</b> 보이고, 광고주는 이 탭에 <b>들어올 수 없다</b>.
+          <span class="why">검수 근거에 리뷰어 실명과 리뷰 글 원문이 들어가기 때문.</span></div></div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ══════════ 화면 3 ══════════ -->
+  <section>
+    <div class="shead"><span class="snum">화면 3</span><h2>판정 상세 — 왜 걸렸는지 항목별로</h2></div>
+    <p class="sdesc">카드를 누르면 열린다. <b>다섯 항목을 전부 보여 준다</b> — 통과한 항목까지 함께 보여야 "이건 왜 안 걸렸지"를 사람이 판단할 수 있다.</p>
+    <div class="scene">
+      <div class="frame">
+        <div class="fbar"><span class="fdots"><i></i><i></i><i></i></span>
+          <span class="fname">리뷰검수 › 박제출 · 31행</span><span class="fkind">PANEL</span></div>
+        <div class="ui">
+          <div style="display:grid; grid-template-columns:150px 1fr; gap:12px">
+            <div style="display:flex; flex-direction:column; gap:7px">
+              <div class="ph" style="height:190px">제출된<br>리뷰 캡처<br>원본</div>
+              <div style="font-size:10px; color:#69727F; line-height:1.5" class="mono">
+                박제출_1_20260803_101512.jpg<br>2026-08-03 10:15
+              </div>
+            </div>
+
+            <div style="display:flex; flex-direction:column; gap:8px">
+              <div style="display:flex; align-items:center; gap:7px">
+                <span style="font-size:13px; font-weight:760">박제출 · 31행</span>
+                <span class="bdg2 s">의심</span>
+                <span style="margin-left:auto; font-size:10.5px; color:#69727F" class="mono">AI 확신 91%</span>
+              </div>
+
+              <div class="box" style="padding:0; overflow:hidden; position:relative">
+                <span class="pin pinabs" style="top:-7px; left:-7px">1</span>
+                <table style="font-size:11.5px">
+                  <tr style="border-bottom:1px solid #ECEFF3">
+                    <td style="padding:7px 10px; width:96px"><span class="bdg2 p">통과</span></td>
+                    <td style="padding:7px 10px"><b>리뷰 화면 맞음</b> · 쿠팡(노란 별점) 인식</td></tr>
+                  <tr style="border-bottom:1px solid #ECEFF3">
+                    <td style="padding:7px 10px"><span class="bdg2 s">의심</span></td>
+                    <td style="padding:7px 10px"><b>상품명 다름</b><br>
+                      <span style="color:#69727F">캡처 속 “□□보조배터리 10000mAh”</span><br>
+                      <span style="color:#69727F">이 작업 “히말라야 핑크솔트 400g”</span></td></tr>
+                  <tr style="border-bottom:1px solid #ECEFF3">
+                    <td style="padding:7px 10px"><span class="bdg2 p">통과</span></td>
+                    <td style="padding:7px 10px"><b>같은 파일 없음</b></td></tr>
+                  <tr style="border-bottom:1px solid #ECEFF3">
+                    <td style="padding:7px 10px"><span class="bdg2 p">통과</span></td>
+                    <td style="padding:7px 10px"><b>글 겹침 없음</b> · 가장 비슷한 글도 31%</td></tr>
+                  <tr>
+                    <td style="padding:7px 10px"><span class="bdg2 n">안 함</span></td>
+                    <td style="padding:7px 10px"><b>작성자 이름</b> · 화면에 “김**”로만 보여 대조 불가
+                      <span class="pin pinabs" style="top:6px; right:8px">2</span></td></tr>
+                </table>
+              </div>
+
+              <div class="box" style="padding:9px 11px; position:relative">
+                <span class="pin pinabs" style="top:-7px; left:-7px">3</span>
+                <div class="lbl" style="margin-bottom:4px">캡처에서 읽어낸 리뷰 글</div>
+                <div style="font-size:11px; color:#3E4753; line-height:1.55">
+                  “배송이 빨라서 좋았어요. 충전 속도도 생각보다 빠르고 무게도 가벼워서 들고 다니기 편합니다. 재구매 의사 있어요.”
+                </div>
+              </div>
+
+              <div style="display:flex; gap:6px">
+                <span class="bt" style="flex:0 0 auto; padding:6px 14px">원본 크게 보기</span>
+                <span class="bt" style="flex:0 0 auto; padding:6px 14px">통과 처리</span>
+                <span class="bt p" style="flex:0 0 auto; padding:6px 14px; position:relative">다시 받기 요청
+                  <span class="pin pinabs" style="top:-7px; right:-7px">4</span></span>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <div class="notes">
+        <h4>이 화면에서 정해 둔 것</h4>
+        <div class="nt"><span class="pin">1</span><div>
+          <b>다섯 항목을 항상 전부</b> 보여 준다(통과 항목 포함).
+          <span class="why">걸린 것만 보여 주면 "나머지는 검사한 건가, 못 한 건가"를 알 수 없다.</span></div></div>
+        <div class="nt"><span class="pin">2</span><div>
+          작성자 이름 대조는 <b>처음부터 "안 함"</b>으로 둔다.
+          <span class="why">리뷰 화면 작성자는 김**·닉네임으로만 보여 실명과 맞출 방법이 없다. 억지로 판정하면 멀쩡한 제출이 무더기로 의심 처리된다. 글자는 모아만 두고, 쓸모가 보이면 그때 켠다.</span></div></div>
+        <div class="nt"><span class="pin">3</span><div>
+          읽어낸 리뷰 글을 <b>그대로 보여 준다</b>.
+          <span class="why">글 겹침 판정은 이 글을 근거로 하므로, 잘못 읽었으면 사람이 바로 알아챌 수 있어야 한다.</span></div></div>
+        <div class="nt"><span class="pin">4</span><div>
+          <b>다시 받기 요청</b>은 이미 쓰고 있는 <b>이미지 교체요청 + 1:1 문의 통지</b>를 그대로 탄다.
+          <span class="why">리뷰어에게 알리는 새 통로를 또 만들지 않는다 — 리뷰어는 익숙한 자리에서 사유와 함께 받는다.</span></div></div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ══════════ 화면 4 ══════════ -->
+  <section>
+    <div class="shead"><span class="snum">화면 4</span><h2>나란히 보기 — 중복·글 겹침은 눈으로 확인시킨다</h2></div>
+    <p class="sdesc">"겹쳤다"는 말만 믿고 리뷰어에게 다시 받으라고 할 수는 없다. <b>무엇과 겹쳤는지</b>를 두 장 나란히 놓고 사람이 눈으로 확정한다.</p>
+    <div class="scene">
+      <div class="frame">
+        <div class="fbar"><span class="fdots"><i></i><i></i><i></i></span>
+          <span class="fname">리뷰검수 › 나란히 보기</span><span class="fkind">MODAL</span></div>
+        <div class="ui">
+          <div style="display:grid; grid-template-columns:1fr 1fr; gap:10px; position:relative">
+            <div class="box" style="padding:10px; display:flex; flex-direction:column; gap:7px; border-color:#EAB6B0">
+              <div style="display:flex; align-items:center; gap:6px">
+                <span class="bdg2 f">지금 제출</span>
+                <span style="font-size:11.5px; font-weight:700">김리뷰 · 12행</span>
+              </div>
+              <div class="ph" style="height:132px">리뷰 캡처</div>
+              <div style="font-size:10px; color:#69727F" class="mono">8/3 10:15 · 히말라야 핑크솔트 100건</div>
+              <div style="font-size:10.5px; color:#3E4753; background:#F6F8FA; border-radius:6px; padding:6px 8px; line-height:1.5">
+                “생각보다 입자가 곱고 짠맛이 부드러워요. <mark style="background:#FBE3A8">고기 구울 때 뿌려 먹으니 훨씬 맛있네요.</mark> 재구매 의사 있습니다.”
+              </div>
+            </div>
+
+            <div class="box" style="padding:10px; display:flex; flex-direction:column; gap:7px">
+              <div style="display:flex; align-items:center; gap:6px">
+                <span class="bdg2 n">이전 제출</span>
+                <span style="font-size:11.5px; font-weight:700">박제출 · 8행</span>
+              </div>
+              <div class="ph" style="height:132px">리뷰 캡처</div>
+              <div style="font-size:10px; color:#69727F" class="mono">7/29 14:02 · △△탭 (다른 작업)</div>
+              <div style="font-size:10.5px; color:#3E4753; background:#F6F8FA; border-radius:6px; padding:6px 8px; line-height:1.5">
+                “생각보다 입자가 곱고 짠맛이 부드러워요. <mark style="background:#FBE3A8">고기 구울 때 뿌려 먹으니 훨씬 맛있네요.</mark> 잘 쓰겠습니다.”
+              </div>
+            </div>
+            <span class="pin pinabs" style="top:118px; left:calc(50% - 8px)">1</span>
+          </div>
+
+          <div style="display:flex; align-items:center; gap:8px; margin-top:10px; background:#FAE9E7; border:1px solid #EAB6B0;
+                      border-radius:9px; padding:8px 11px; position:relative">
+            <span style="font-size:11.5px; font-weight:730; color:#B3382E">파일이 완전히 동일 · 글 일치율 93%</span>
+            <span style="margin-left:auto; display:flex; gap:6px">
+              <span class="bt" style="flex:0 0 auto; padding:5px 12px">오탐이다 · 통과</span>
+              <span class="bt p" style="flex:0 0 auto; padding:5px 12px">다시 받기 요청</span>
+            </span>
+            <span class="pin pinabs" style="top:-8px; left:-8px">2</span>
+          </div>
+        </div>
+      </div>
+
+      <div class="notes">
+        <h4>이 화면에서 정해 둔 것</h4>
+        <div class="nt"><span class="pin">1</span><div>
+          두 리뷰 글에서 <b>겹치는 문장에 형광펜</b>을 칠한다.
+          <span class="why">숫자(93%)만으로는 판단이 안 선다. 어디가 같은지 보이면 3초 만에 확정된다.</span></div></div>
+        <div class="nt"><span class="pin">2</span><div>
+          <b>[오탐이다 · 통과]</b>를 같은 자리에 둔다.
+          <span class="why">기계 판정을 사람이 되돌리는 길이 항상 한 번의 클릭 거리에 있어야 한다. 되돌린 기록은 남겨 두고 나중에 기준을 조정하는 근거로 쓴다.</span></div></div>
+        <div class="nt"><span class="pin">·</span><div>
+          같은 사람이 <b>같은 행에 다시 올린 것</b>은 겹침으로 세지 않는다.
+          <span class="why">캡처를 다시 올리면 파일이 새로 생기므로, 이걸 중복으로 잡으면 정상적인 재제출이 전부 불량이 된다.</span></div></div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ══════════ 화면 5 ══════════ -->
+  <section>
+    <div class="shead"><span class="snum">화면 5</span><h2>검수 기준 설정 — 무엇과 비교할지 알려 주는 곳</h2></div>
+    <p class="sdesc">상품명 대조와 별점 판별은 <b>기준이 있어야</b> 돌아간다. 요구하신 "예시이미지 첨부 저장"과 "상품명 직접 입력"이 여기 들어간다.</p>
+    <div class="scene">
+      <div class="frame">
+        <div class="fbar"><span class="fdots"><i></i><i></i><i></i></span>
+          <span class="fname">리뷰검수 › 검수 기준 설정</span><span class="fkind">MODAL</span></div>
+        <div class="ui">
+          <div style="display:flex; flex-direction:column; gap:11px; max-width:560px">
+
+            <div class="box" style="padding:12px 14px; display:flex; flex-direction:column; gap:8px; position:relative">
+              <span class="pin pinabs" style="top:-7px; left:-7px">1</span>
+              <div class="lbl">이 작업의 상품명 (탭별)</div>
+              <div style="background:#F2F4F7; border:1px solid #D5DBE3; border-radius:7px; padding:7px 9px;
+                          font-size:11.5px; display:flex; align-items:center; gap:7px">
+                <span style="font-weight:700">히말라야 핑크솔트 400g</span>
+                <span class="bdg2 p" style="margin-left:auto">작업오더에서 자동</span>
+              </div>
+              <div style="background:#fff; border:1px dashed #B9C1CC; border-radius:7px; padding:7px 9px;
+                          font-size:11.5px; color:#8B94A1">＋ 직접 추가 (작업오더에 상품명이 없거나 다르게 표기될 때)</div>
+              <div style="font-size:10.5px; color:#69727F">여러 줄 입력 가능 · 하나라도 맞으면 통과</div>
+            </div>
+
+            <div class="box" style="padding:12px 14px; display:flex; flex-direction:column; gap:9px; position:relative">
+              <span class="pin pinabs" style="top:-7px; left:-7px">2</span>
+              <div class="lbl">리뷰 화면 예시 이미지 (회사 공통 · 1회 등록)</div>
+              <div style="display:grid; grid-template-columns:1fr 1fr; gap:9px">
+                <div style="display:flex; flex-direction:column; gap:5px">
+                  <div style="font-size:11px; font-weight:700; display:flex; align-items:center; gap:5px">
+                    <i style="width:9px;height:9px;border-radius:2px;background:#E03A34;display:inline-block"></i>네이버 (빨강 별점)</div>
+                  <div class="ph" style="height:96px">등록된 예시<br>이미지</div>
+                  <div class="bt" style="padding:4px 0">교체</div>
+                </div>
+                <div style="display:flex; flex-direction:column; gap:5px">
+                  <div style="font-size:11px; font-weight:700; display:flex; align-items:center; gap:5px">
+                    <i style="width:9px;height:9px;border-radius:2px;background:#F0A500;display:inline-block"></i>쿠팡 (노랑 별점)</div>
+                  <div class="ph" style="height:96px; border-style:solid; border-color:#D5DBE3; background:#FAFBFC">＋ 이미지 올리기</div>
+                  <div class="bt" style="padding:4px 0">등록</div>
+                </div>
+              </div>
+              <div style="font-size:10.5px; color:#69727F">현금영수증 발행방법 이미지와 같은 방식으로 저장됩니다.</div>
+            </div>
+
+            <div class="box" style="padding:12px 14px; display:flex; flex-direction:column; gap:8px; position:relative">
+              <span class="pin pinabs" style="top:-7px; left:-7px">3</span>
+              <div class="lbl">판정 기준</div>
+              <div style="display:flex; align-items:center; gap:9px; font-size:11.5px">
+                <span style="width:112px">글 겹침 의심 기준</span>
+                <span style="background:#F2F4F7; border:1px solid #D5DBE3; border-radius:6px; padding:4px 10px; font-weight:700" class="mono">90%</span>
+                <span style="color:#69727F; font-size:10.5px">이상이면 의심으로 분류</span>
+              </div>
+              <div style="display:flex; align-items:center; gap:9px; font-size:11.5px">
+                <span style="width:112px">비교 범위</span>
+                <span class="sel k">같은 작업 안에서만 ▾</span>
+                <span style="color:#69727F; font-size:10.5px">전체 작업 비교는 비용이 큼</span>
+              </div>
+              <div style="display:flex; align-items:center; gap:9px; font-size:11.5px">
+                <span style="width:112px">짧은 글 제외</span>
+                <span style="background:#F2F4F7; border:1px solid #D5DBE3; border-radius:6px; padding:4px 10px; font-weight:700" class="mono">30자 미만</span>
+                <span style="color:#69727F; font-size:10.5px">“맛있어요 재구매” 같은 관용구 오탐 방지</span>
+              </div>
+            </div>
+
+          </div>
+        </div>
+      </div>
+
+      <div class="notes">
+        <h4>이 화면에서 정해 둔 것</h4>
+        <div class="nt"><span class="pin">1</span><div>
+          상품명은 <b>작업오더에서 자동으로 가져오고</b>, 없거나 표기가 다르면 <b>직접 추가</b>한다.
+          <span class="why">요구하신 "작업오더에 상품명이 없다면 별도 입력"이 이 칸이다. 쇼핑몰 화면은 상품명을 줄여 쓰는 경우가 많아 여러 줄 등록을 허용한다.</span></div></div>
+        <div class="nt"><span class="pin">2</span><div>
+          별점 예시 이미지는 <b>회사 공통 1회 등록</b>(작업마다 등록하지 않는다).
+          <span class="why">네이버 빨강·쿠팡 노랑은 채널마다 고정된 화면이라 작업별로 다를 이유가 없다. 현금영수증 발행방법 이미지와 완전히 같은 저장 방식을 쓴다.</span></div></div>
+        <div class="nt"><span class="pin">3</span><div>
+          기준은 <b>화면에서 조정</b>할 수 있게 둔다.
+          <span class="why">90%가 실제로 맞는 선인지는 운영해 봐야 안다. 코드를 고쳐야 바뀌는 값으로 두면 아무도 조정하지 않는다.</span></div></div>
+        <div class="nt"><span class="pin">·</span><div>
+          예시 이미지를 <b>안 올려도 검수는 돈다</b>.
+          <span class="why">등록하면 정확도가 올라가는 선택 항목 — 없다고 기능이 멈추면 안 된다.</span></div></div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ══════════ 화면 6 ══════════ -->
+  <section>
+    <div class="shead"><span class="snum">화면 6</span><h2>알림 — 확실한 것만 울린다</h2></div>
+    <p class="sdesc">의심까지 전부 빨간 알림을 띄우면 <b>정말 급한 건(주문 소실 등)이 묻힌다</b>. 그래서 알림은 두 단으로 나눈다.</p>
+    <div class="scene">
+      <div class="frame">
+        <div class="fbar"><span class="fdots"><i></i><i></i><i></i></span>
+          <span class="fname">관리자 대시보드 (좌측 하단)</span><span class="fkind">ALERT</span></div>
+        <div class="ui" style="min-height:210px; position:relative">
+          <div style="position:absolute; left:14px; bottom:14px; width:270px; background:#fff; border:1px solid #EAB6B0;
+                      border-left:4px solid #B3382E; border-radius:11px; padding:11px 13px; box-shadow:0 8px 22px rgba(18,21,26,.12)">
+            <div style="display:flex; align-items:center; gap:6px; margin-bottom:5px">
+              <span style="font-size:11.5px; font-weight:800; color:#B3382E">리뷰 검수 · 확인 필요</span>
+              <span style="margin-left:auto; font-size:10px; color:#8B94A1" class="mono">방금</span>
+            </div>
+            <div style="font-size:11.5px; line-height:1.55; color:#3E4753">
+              <b>히말라야 핑크솔트 100건</b> 탭에서 김리뷰님이 올린 리뷰 캡처가
+              <b>다른 작업에 이미 제출된 파일과 동일</b>합니다.
+            </div>
+            <div style="display:flex; gap:6px; margin-top:9px">
+              <span class="bt" style="padding:5px 0">확인</span>
+              <span class="bt p" style="padding:5px 0">검수 탭에서 보기</span>
+            </div>
+          </div>
+          <span class="pin pinabs" style="left:8px; bottom:200px">1</span>
+
+          <div style="max-width:330px; margin-left:auto; background:#fff; border:1px solid #D5DBE3; border-radius:11px; padding:11px 13px; position:relative">
+            <div class="lbl" style="margin-bottom:7px">통합작업대 › 리뷰어 로그</div>
+            <div style="display:flex; flex-direction:column; gap:6px; font-size:11px; color:#3E4753">
+              <div style="display:flex; gap:6px; align-items:flex-start">
+                <span class="bdg2 s">의심</span>
+                <span>이참여님 리뷰 글이 같은 작업 다른 리뷰와 93% 일치합니다.</span></div>
+              <div style="display:flex; gap:6px; align-items:flex-start">
+                <span class="bdg2 s">의심</span>
+                <span>박제출님 캡처의 상품명이 이 작업 상품과 다릅니다.</span></div>
+            </div>
+            <span class="pin pinabs" style="top:-8px; right:-8px">2</span>
+          </div>
+        </div>
+      </div>
+
+      <div class="notes">
+        <h4>이 화면에서 정해 둔 것</h4>
+        <div class="nt"><span class="pin">1</span><div>
+          <b>빨간 알림은 "불량"만</b> — 같은 파일 재사용, 또는 리뷰 화면이 아닌 것이 확실한 경우.
+          <span class="why">이미 쓰고 있는 관리자 알림 카드에 얹는다. 새 알림 창을 만들지 않는다.</span></div></div>
+        <div class="nt"><span class="pin">2</span><div>
+          <b>"의심"은 로그와 검수 탭에만</b> 조용히 쌓인다.
+          <span class="why">상품명·글 겹침은 사람이 봐야 확정되는 판정이라, 울리는 순간 신뢰를 잃는다.</span></div></div>
+        <div class="nt"><span class="pin">·</span><div>
+          같은 자리에 <b>알림이 이미 있으면 또 쌓지 않고</b>, 리뷰어가 제대로 다시 올리면 <b>알림이 저절로 닫힌다</b>.
+          <span class="why">기존 캡처 검수 알림이 쓰고 있는 방식 그대로.</span></div></div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ══════════ 화면 7 ══════════ -->
+  <section>
+    <div class="shead"><span class="snum">화면 7</span><h2>드라이브 폴더 — 저장 위치는 그대로</h2></div>
+    <p class="sdesc">검수는 <b>파일을 읽기만</b> 한다. 옮기지도, 이름을 바꾸지도, 지우지도 않는다.</p>
+    <div class="scene">
+      <div class="frame">
+        <div class="fbar"><span class="fdots"><i></i><i></i><i></i></span>
+          <span class="fname">Google Drive › AI_REVIEW_FOLDER</span><span class="fkind">STORAGE</span></div>
+        <div class="ui">
+          <div style="font-family:var(--mono); font-size:11.5px; line-height:1.95; color:#3E4753; white-space:pre; overflow-x:auto">📁 AI_REVIEW_FOLDER  <span style="color:#8B94A1">(루트)</span>
+└─ 📁 7월 ○○브랜드  <span style="color:#8B94A1">(시트 제목)</span>
+   └─ 📁 히말라야 핑크솔트 100건  <span style="color:#8B94A1">(탭 이름)</span>
+      └─ 📁 [리뷰]  <span style="color:#8B94A1">← 검수는 여기 파일을 읽기만 한다</span>
+         ├─ 📄 김리뷰_1_20260803_101512.jpg   <span style="color:#B3382E">● 같은 파일</span>
+         ├─ 📄 이참여_1_20260803_113004.jpg   <span style="color:#9A6414">● 글 겹침</span>
+         ├─ 📄 정정상_1_20260803_121130.jpg   <span style="color:#127A5E">● 통과</span>
+         ├─ 📁 현금영수증/  <span style="color:#8B94A1">(현영 작업의 영수증 캡처)</span>
+         └─ 📁 (옵션명)/   <span style="color:#8B94A1">(옵션이 있는 작업)</span></div>
+        </div>
+      </div>
+
+      <div class="notes">
+        <h4>이 화면에서 정해 둔 것</h4>
+        <div class="nt"><span class="pin">·</span><div>
+          <b>폴더 구조·파일 이름 전부 현행 유지.</b>
+          <span class="why">검수 결과는 파일이 아니라 데이터베이스에만 기록된다. 드라이브를 건드리면 이미 돌고 있는 리뷰 폴더 정리·소유권 관리와 충돌한다.</span></div></div>
+        <div class="nt"><span class="pin">·</span><div>
+          과거에 올라온 파일도 <b>천천히 뒤에서 검수</b>한다(최근 것부터).
+          <span class="why">한꺼번에 다 내려받으면 드라이브에 부담이 간다. 5분마다 조금씩 처리한다.</span></div></div>
+        <div class="nt"><span class="pin">·</span><div>
+          <b>구글시트는 한 번도 읽지 않는다.</b>
+          <span class="why">시트 호출 한도는 주문 기록에 써야 하는 자원이다. 검수가 그것을 나눠 쓰면 안 된다.</span></div></div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ══════════ 조건 대응표 ══════════ -->
+  <section>
+    <div class="shead"><span class="snum">정리</span><h2>요청하신 검수 조건 5개 ↔ 화면 대응</h2></div>
+    <div class="tblwrap"><table>
+      <thead><tr><th>요청하신 조건</th><th>어떻게 판정하나</th><th>어디서 보이나</th><th>비용</th></tr></thead>
+      <tbody>
+        <tr>
+          <td><b>1 · 진짜 리뷰파일인가</b><br><span style="color:var(--muted);font-size:12px">네이버 빨강 / 쿠팡 노랑 별점, 예시이미지 저장</span></td>
+          <td>이미 돌고 있는 AI 확인에 <b>채널 판별을 추가</b>. 예시이미지를 등록하면 그것을 기준 삼아 정확도 상승</td>
+          <td>화면 5(예시 등록) → 화면 2·3(판정)</td>
+          <td>거의 없음<br><span style="color:var(--muted);font-size:12px">기존 호출에 얹음</span></td>
+        </tr>
+        <tr>
+          <td><b>2 · 상품명 대조</b><br><span style="color:var(--muted);font-size:12px">작업오더 상품명 vs 캡처 속 상품명</span></td>
+          <td>캡처에서 상품명을 읽어 <b>작업오더 상품명</b>과 비교. 오더에 없으면 <b>직접 입력한 값</b>과 비교</td>
+          <td>화면 5(기준 입력) → 화면 3(대조 결과)</td>
+          <td>거의 없음</td>
+        </tr>
+        <tr>
+          <td><b>3 · 제출자명 ↔ 리뷰어명</b><br><span style="color:var(--muted);font-size:12px">(필요한지 확실치 않다고 하신 항목)</span></td>
+          <td><b>판정하지 않기를 권합니다</b> — 화면에 “김**”처럼만 보여 대조 불가. 글자는 모아 두고 나중에 판단</td>
+          <td>화면 3에 “안 함”으로 표시</td>
+          <td>없음</td>
+        </tr>
+        <tr>
+          <td><b>4 · 같은 파일 검사</b></td>
+          <td>올라오는 순간 <b>파일 지문</b>을 남겨 두고, 다른 사람·다른 작업에서 같은 지문이 나오면 잡는다</td>
+          <td>화면 2(카드) · 화면 4(나란히) · 화면 6(빨간 알림)</td>
+          <td>없음<br><span style="color:var(--muted);font-size:12px">AI 불필요</span></td>
+        </tr>
+        <tr>
+          <td><b>5 · 글 90% 이상 겹침</b></td>
+          <td>캡처에서 읽은 리뷰 글을 저장해 두고 <b>이미 쓰고 있는 한글 비교 기능</b>으로 대조</td>
+          <td>화면 2(카드) · 화면 4(형광펜 대조)</td>
+          <td>보통<br><span style="color:var(--muted);font-size:12px">저장·비교만</span></td>
+        </tr>
+      </tbody>
+    </table></div>
+  </section>
+
+  <!-- ══════════ 확정 필요 ══════════ -->
+  <section>
+    <div class="shead"><span class="snum">확인</span><h2>만들기 전에 정해 주셔야 하는 것</h2></div>
+    <div class="call">
+      <b>기본값은 이미 정해 두었습니다.</b> 그대로 좋으시면 답 없이 진행해도 되고, 바꾸고 싶은 번호만 말씀해 주세요.
+    </div>
+    <div class="notes">
+      <ol class="q">
+        <li><b>제출자명 검수(3번)는 하지 않는 것</b>으로 시작합니다.
+          <span class="why">리뷰 화면에 이름이 가려져 나와 오탐이 큽니다. 글자는 모아 두니 나중에 켤 수 있습니다.</span></li>
+        <li>글 겹침 비교는 <b>같은 작업 안에서만</b> 시작합니다.
+          <span class="why">한 리뷰어가 여러 작업에 같은 글을 돌려쓰는 것까지 잡으려면 전체 비교가 필요한데 비용이 커집니다.</span></li>
+        <li>의심 단계에서는 <b>리뷰어에게 알리지 않습니다</b>. 관리자가 [다시 받기]를 누른 건만 통지됩니다.
+          <span class="why">기계 판정만으로 리뷰어를 붙잡으면 마찰이 큽니다.</span></li>
+        <li>검수 화면은 <b>내부 전용</b>(광고주 접근 불가)으로 시작합니다.
+          <span class="why">검수 근거에 리뷰어 실명과 리뷰 글이 들어갑니다. 나중에 "통과율" 같은 요약만 열 수 있습니다.</span></li>
+        <li>과거 제출분은 <b>최근 30일치</b>만 거슬러 검수합니다.
+          <span class="why">그 이전은 이미 업체 전달이 끝난 작업이 대부분입니다. 전량이 필요하면 비용을 따로 계산하겠습니다.</span></li>
+      </ol>
+    </div>
+    <div class="call warn">
+      <b>만드는 순서</b> — ① 검수 기능부터(화면 없이도 배포 가능, 배포 즉시 신규 제출부터 판정이 쌓임) → ② 과거분 따라잡기 → ③ 검수 탭 화면 → ④ 운영해 보고 기준 조정.
+      화면(③)이 열릴 때쯤이면 이미 볼 데이터가 차 있습니다.
+    </div>
+  </section>
+
+  <footer>
+    리뷰 자동검수 와이어프레임 v1 · 2026-08-03 · frontend/docs/리뷰자동검수_와이어프레임.html<br>
+    상세 기술 설계는 prd-review-auto-inspection.html 참조
+  </footer>
+
+</div>
+</body>
+</html>
