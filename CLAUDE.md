@@ -146,6 +146,15 @@ GAS(Google Apps Script) 기반 리뷰 관리 시스템을 **Node.js Express + Po
 - **행으로 보기(시안 C 티켓형)**: 리뷰어 홈 ≡ 토글(`applyRecruitView`가 `.rc-list`에 `rc-view-row` 부여)이 참여형 카드에도 적용된다. ★**렌더 경로는 `cardHtml()` 하나뿐 — 행 보기는 CSS 표현만 전환**(`.rc-view-row .pcard{flex-direction:row}` + 썸네일 92px 좌측고정·`position:static`으로 낮춰 배지/리본 절대배치를 `.pcard` 기준으로 재기준화·게이지 1줄 압축). 행 전용 HTML 빌더를 만들면 상태 규칙(카운트다운·리본·인기배지·버튼 문구)이 두 벌이 되어 드리프트하므로 **금지**(회귀가드가 `rowHtml`류 부재를 고정). 함정: flex 자식 기본 `min-width:auto` 때문에 `.pbody{min-width:0}` 없으면 긴 제목이 행을 가로로 밀어내고 말줄임도 안 먹는다(실측 확인). 회귀가드 `tests/campaignRowView.test.js`(18케이스). 시안 문서 = `frontend/docs/design-campaign-rowview.html`(모바일 390px 목업 A/B/C, `?v=A|B|C`로 단독 보기).
 - **🔥 인기상품**(`is_popular`, 참여형 카드 토글): 리뷰어 카드 [인기!] 배지(`pt-pop`, 공개필드 레거시/참여형 양쪽) + **선행참여 게이트** — 명의(phone8)별 `일반(비인기) 참여형 submitted 수 > 인기 소비(제출확정+유효홀드)`일 때만 인기 apply 허용(403 `popular_locked`+normalDone/popularUsed, **1:1 교환**·만료/취소 자동 환불·타계정도 명의별 일반 1건씩 필요, 명의 advisory 락이 이중소비 차단). `GET /api/campaign/popular-status?phone8=`(무인증 phone8 스코프, **`/:id`보다 먼저 등록** — 라우트 삼킴 함정). campaign.html = 인기 공고 안내 카드(`renderPopNotice`) + 잠금 시 **일반모집 테이블 모달**(`openPopGate` — open·비인기·자기제외 필터, [참여하기] CTA→`pop_return_camp` 기록) + 일반 제출완료 화면 "인기 상품으로 돌아가기" 버튼(지각접수는 미노출=크레딧 아님). 회귀가드 `tests/campaignPinnedPopular.test.js`(35케이스).
 
+### 통합 작업대 화면 폭 상한 (FHD/QHD 토글) · 열 너비 고정
+- **문제 2개**: ① 창을 넓힐수록 헤더·업체 칩바·탭바·본문이 끝없이 따라 늘어났다. ② 시트 그리드가 컨테이너를 꽉 채우려고 **주소 열이 잔여폭을 흡수**해, 같은 열이 창 크기·숨긴 열 수마다 다른 너비가 됐다(작업을 오갈 때마다 열 위치를 다시 찾음).
+- **상한**: `--app-max` 토큰 하나(`:root` 기본 1920 + `body[data-vw="fhd"|"qhd"]` = 1920/2560), 우측 상단 좌우 슬라이딩 스위치(`.vwsw` `#vwToggle`, `localStorage.wd_viewport_mode`, **기본 FHD**=좁은 쪽). 적용은 `.top`·`.tb1`·`.tb2`·`.wrap`·`.ovwrap` 5곳.
+- ★ **max-width 가 아니라 `padding-inline:max(기본, calc((100% - var(--app-max))/2))`** — `.top`/`.taskbar` 는 sticky 배경이라 요소에 max-width 를 걸면 넓은 화면에서 배경 띠가 가운데만 덮여 스크롤 시 끊긴다. 바깥은 전폭(배경) · 안쪽만 상한. 이 규칙 블록은 **각 바의 자체 padding 선언보다 뒤**에 와야 한다(동일 특이성).
+- ★ **전체화면(widemode)은 상한 해제**(`--app-max:100vw`) — 표에 최대 폭을 주는 모드라 상한이 오히려 방해. `none` 은 `calc()` 안에서 무효라 쓰면 상한이 통째로 죽는다.
+- ★★ **표폭 = 보이는 열 고정폭의 합**(`_fitGrid` 가 `tbl.style.width` 로 못박음 · `table.sheetgrid{min-width:0}`): 창을 아무리 넓혀도 열 너비 불변, 남는 공간은 우측 여백. **열이 많은 작업일수록 합이 커져 표만 그만큼 넓어진다.** 유동 열(`_isFlexCol`=주소) 개념은 제거 — 부활시키면 열 너비가 다시 창 크기를 탄다. `_fitGrid` 는 역할 분기 없음(광고주=내부 동일 규칙, 종전 `advsnug` 동작이 기본이 됨).
+- ★★ **실측 사고(조용한 파싱 포기)**: `:root{--tbh:…}` 위 주석에 닫는 표시가 하나 더 있어 주석이 일찍 닫혔고, 뒤 설명 텍스트가 top-level 셀렉터로 파싱되며 **`:root` 규칙을 통째로 삼켰다** → `--app-max` 기본값이 아예 적용 안 됨(FHD 모드 상한 없음). 브라우저는 에러 없이 넘어가고 **선언은 멀쩡히 '있어서' grep 가드로는 못 잡는다** → 회귀가드가 주석/중괄호 **토큰을 센다**. 회귀가드 `server/tests/workdeskWidthCap.test.js`(30케이스).
+- **미적용(문서화)**: 업체관리 연결탭 표(`.othead`/`.owntab`)는 여전히 `fr` 스트레치 — 상한 안에서만 늘어나므로 방치. 필요해지면 fr→고정폭.
+
 ### 관리자 공고 수정 모달 — 좌우 2단 · 기본정보/모집정보 (v4)
 - **레이아웃**: 폭 1120px, `.rf-split` 좌(입력) / 우(미리보기 `.rf-side` 340px 고정). 미리보기를 아래 쌓으면 같은 스크롤을 나눠 써 "고치면서 확인"이 안 된다. 900px 이하 세로 복귀. ★★ **레이아웃 CSS는 `@media` 밖 최상위**(안에 넣어 480px 이하에서만 먹은 실측 버그).
 - **묶음 2개**(`.rf-sec` + `.rf-sech` sticky): **기본정보**(무슨 상품을 어떻게 사고 어떤 리뷰를 쓰나) / **모집정보**(언제 몇 명을 모으나). 탭은 쓰지 않는다 — 항목을 찾아 옮겨다니는 비용이 더 컸다.
