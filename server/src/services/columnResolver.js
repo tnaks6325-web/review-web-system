@@ -124,13 +124,21 @@ function parseTabRows(values, sheetId, tabName, tabGid, campaignTitle, kw, dbCol
   // ── 제출열 (P2b: DB매핑 'review_submit' 우선 → 3단계 키워드 폴백) ──
   const SUBMIT_PRIORITY_PREFIXES = ['리뷰'];
   const SUBMIT_EXCLUDE_PATTERNS = ['주문자', '수취인', '이름', '성함', '예금주'];
+  // ★★ 8/3 실측 사고(박은비 탭): SUBMIT_KEYWORDS에 완료신호 단어(제출/완료/submit)와 함께
+  //   넓은 catch-all인 '리뷰' 단독도 섞여 있다. 1·2단계(우선탐지)에서 '리뷰'를 그대로 매칭에
+  //   쓰면 그 자체가 SUBMIT_PRIORITY_PREFIXES('리뷰')와 항상 동시에 참이 되어 AND 조건이
+  //   무력화된다 — '리뷰가이드'(작업지시 열, 항상 값이 차 있음) 같은 열이 실제 '리뷰제출'열보다
+  //   먼저 잡혀 참여자 전원이 제출완료로 오판정됐다(2단계도 같은 이유로 동일 오탐).
+  //   → 1·2단계(우선탐지)는 완료신호 키워드만 쓰고, '리뷰' 단독 매칭은 완료신호 열이 전혀
+  //   없을 때의 최후수단(3단계, 기존 동작 그대로)에만 남긴다.
+  const SUBMIT_COMPLETION_KEYWORDS = SUBMIT_KEYWORDS.filter(k => k !== '리뷰');
   let submitColIdx = _dbCol(dbColMap, 'review_submit', headers, drift);
   const submitFromDb = submitColIdx >= 0;
   if (submitColIdx < 0) {
     for (let hi = 0; hi < headers.length && submitColIdx < 0; hi++) {
       const hl = headers[hi].toLowerCase();
       if (SUBMIT_PRIORITY_PREFIXES.some(p => hl.includes(p)) &&
-          SUBMIT_KEYWORDS.some(k => hl.includes(k.toLowerCase()))) {
+          SUBMIT_COMPLETION_KEYWORDS.some(k => hl.includes(k.toLowerCase()))) {
         submitColIdx = hi;
       }
     }
@@ -138,7 +146,7 @@ function parseTabRows(values, sheetId, tabName, tabGid, campaignTitle, kw, dbCol
       for (let hi = 0; hi < headers.length && submitColIdx < 0; hi++) {
         const hl = headers[hi].toLowerCase();
         if (SUBMIT_EXCLUDE_PATTERNS.some(p => hl.includes(p))) continue;
-        if (SUBMIT_KEYWORDS.some(k => hl.includes(k.toLowerCase()))) submitColIdx = hi;
+        if (SUBMIT_COMPLETION_KEYWORDS.some(k => hl.includes(k.toLowerCase()))) submitColIdx = hi;
       }
     }
     if (submitColIdx < 0) {
