@@ -68,16 +68,19 @@ async function _cashReceiptInfo(camp) {
     );
     const incomeType = rows[0]?.income_type || '';
     if (!incomeType.includes('현영')) return null;
+    // 채널 목록·판정은 utils/cashReceiptChannels 단일 출처 — 저장 라우트·설정 화면과 같은 표를 본다.
+    const { CASH_RECEIPT_SETTING_KEYS, cashReceiptSettingKey, cashReceiptChannelKey } =
+      require('../utils/cashReceiptChannels');
     const { rows: s } = await pool.query(
-      `SELECT key, value FROM app_settings
-        WHERE key IN ('company_business_no', 'cash_receipt_guide_naver', 'cash_receipt_guide_coupang')`
+      `SELECT key, value FROM app_settings WHERE key = ANY($1::text[])`,
+      [['company_business_no', ...CASH_RECEIPT_SETTING_KEYS]]
     );
     const map = {};
     for (const r of s) map[r.key] = r.value || '';
     const ch = String(camp.channel === '직접입력' ? (camp.channel_custom || '') : (camp.channel || ''));
-    const guideImageUrl = /쿠팡/.test(ch) ? (map.cash_receipt_guide_coupang || '')
-                        : /네이버/.test(ch) ? (map.cash_receipt_guide_naver || '')
-                        : '';   // 기타 채널 = 이미지 없이 문구 안내만
+    const chKey = cashReceiptChannelKey(ch);
+    // 판정 안 되는 채널 = 이미지 없이 문구 안내만(틀린 발행방법을 보여주는 것보다 낫다)
+    const guideImageUrl = chKey ? (map[cashReceiptSettingKey(chKey)] || '') : '';
     return { required: true, incomeType, businessNo: map.company_business_no || '', guideImageUrl };
   } catch (_) {
     return null;

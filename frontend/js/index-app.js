@@ -11744,17 +11744,30 @@ async function loadCompanyBusinessNo() {
     if (data && data.ok) {
       input.value = data.companyBusinessNo || '';
       const g = data.cashReceiptGuides || {};
-      _setCashReceiptGuideDisplay('naver', g.naver || '');
-      _setCashReceiptGuideDisplay('coupang', g.coupang || '');
+      for (const c of CR_GUIDE_CHANNELS) _setCashReceiptGuideDisplay(c.key, g[c.key] || '');
     }
   } catch (e) {
     console.warn('[companyBusinessNo] load 실패:', e.message);
   }
 }
 
-/* ── 현금영수증 발행방법 이미지 (설정 탭 · 채널별 회사 공통 1회) ── */
+/* ── 현금영수증 발행방법 이미지 (설정 탭 · 채널별 회사 공통 1회) ──
+   ★ 이 표는 서버 utils/cashReceiptChannels.js 의 사본이다 — key·label 이 어긋나면
+     "등록은 되는데 리뷰어에겐 안 보이는" 조용한 사고가 난다.
+     회귀가드(tests/cashReceiptGuide.test.js)가 두 목록의 일치를 고정한다.
+   ★ cap = DOM id 접미사(crGuideImg<Cap>) — key 의 첫 글자만 대문자로. */
+const CR_GUIDE_CHANNELS = [
+  { key: 'coupang',    cap: 'Coupang',    label: '쿠팡' },
+  { key: 'naver',      cap: 'Naver',      label: '네이버' },
+  { key: 'oliveyoung', cap: 'Oliveyoung', label: '올리브영' },
+  { key: 'kakao',      cap: 'Kakao',      label: '카카오메이커스' },
+];
+function _crGuideChannel(key) {
+  return CR_GUIDE_CHANNELS.find(c => c.key === key) || { key, cap: '', label: key };
+}
 function _setCashReceiptGuideDisplay(channel, url) {
-  const cap = channel === 'naver' ? 'Naver' : 'Coupang';
+  const cap = _crGuideChannel(channel).cap;
+  if (!cap) return;
   const img = document.getElementById('crGuideImg' + cap);
   const none = document.getElementById('crGuideNone' + cap);
   if (!img || !none) return;
@@ -11790,14 +11803,14 @@ async function uploadCashReceiptGuide(channel, input) {
     const sj = await sv.json();
     if (!sv.ok || !sj.ok) throw new Error(sj.error || '저장 실패');
     _setCashReceiptGuideDisplay(channel, uj.url);
-    showToast('✅ ' + (channel === 'naver' ? '네이버' : '쿠팡') + ' 발행방법 이미지가 등록되었습니다.');
+    showToast('✅ ' + _crGuideChannel(channel).label + ' 발행방법 이미지가 등록되었습니다.');
   } catch (e) {
     showToast('❌ 등록 실패: ' + e.message, true);
   } finally { input.value = ''; }
 }
 
 async function clearCashReceiptGuide(channel) {
-  if (!confirm((channel === 'naver' ? '네이버' : '쿠팡') + ' 발행방법 이미지를 제거할까요?\n현영 공고의 리뷰어 안내에서 이미지가 사라집니다(문구 안내는 유지).')) return;
+  if (!confirm(_crGuideChannel(channel).label + ' 발행방법 이미지를 제거할까요?\n현영 공고의 리뷰어 안내에서 이미지가 사라집니다(문구 안내는 유지).')) return;
   try {
     const sv = await fetch(API_BASE_URL + '/api/tab/cash-receipt-guide', {
       method: 'POST',
