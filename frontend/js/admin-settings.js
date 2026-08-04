@@ -694,6 +694,9 @@ function _worktableHtml() {
      공통 행이 편집하는 값은 위 목록(표준 열)과 **같은 한 벌**이다(별도 개념을 만들지 않는다):
      작업표의 열 = 공통 + 그 채널 행. 채널마다 15열을 반복해 넣지 않아도 된다. */
   var rows = _wtRowHtml('core', '🌐 공통 <i>모든 채널</i>', '열 이름 (예: 수취인)', '공통 열 추가') +
+    /* ★ 공통 블록 바로 아래 = 작업표 열 구성 한 줄 미리보기(_wtRenderPreview 가 채운다).
+       채널 행보다 위에 둔다 — 공통이 모든 채널의 앞머리라 순서가 곧 실제 표의 앞부분이다. */
+    '<div class="as-wtpv" id="wtPreview"></div>' +
     CR_GUIDE_CHANNELS.map(function (c) {
       return _wtRowHtml(c.key, c.emoji + ' ' + c.label, '열 이름', '이 채널에만 열 추가');
     }).join('');
@@ -749,9 +752,39 @@ function _worktableHtml() {
 }
 
 /* ── 코어 열 목록 렌더 ── */
+/* ── 열 구성 한 줄 미리보기 ──────────────────────────────────
+   "이름 블록"만 보면 작업표가 실제로 어떤 표가 되는지 안 그려진다 → 공통 행 바로 아래에
+   **표 머리 축소판**을 한 줄로 깐다(칸 = 열 하나, 순서 = 실제 생성 순서).
+   ★ 한 줄에 전부 들어오게 한다: 칸은 `flex:1 1 0 + min-width:0`으로 균등 압축되고 넘치는
+     이름은 말줄임 + title 에 전체 이름을 남긴다(가로 스크롤·줄바꿈 없음 = 한눈에).
+   ★ 데이터 출처는 _wtTpl.columns 하나 — 아래 '공통 열 상세'와 **같은 배열**을 본다
+     (사본을 만들면 미리보기와 목록이 서로 다른 순서를 보여준다).
+   ★ 채널 열은 채널마다 달라 특정 채널을 고를 수 없다 → 끝에 점선 '＋채널' 칸으로 "여기에
+     그 채널 열이 덧붙는다"만 알린다(틀린 채널을 그리느니 자리만 표시). */
+function _wtRenderPreview() {
+  var box = document.getElementById('wtPreview');
+  if (!box) return;
+  var cols = (_wtTpl && _wtTpl.columns) || [];
+  if (!cols.length) {
+    box.innerHTML = '<div class="as-wtpvempty">공통 열을 담으면 여기에 작업표 모양이 한 줄로 보입니다.</div>';
+    return;
+  }
+  var cells = cols.map(function (c, i) {
+    var tier = String(c.tier || '') || (c.role ? 'core' : '');
+    var tip = c.name + (c.role ? ' · 시스템 인식: ' + (c.label || c.role) : ' · 제출이 값을 쓰지 않는 열');
+    return '<span class="as-wtpvc' + (tier ? ' ' + tier : '') + (c.duplicateRole ? ' dup' : '') + '" title="' +
+      escHtml(String(i + 1) + '. ' + tip) + '">' + escHtml(c.name) + '</span>';
+  }).join('');
+  box.innerHTML =
+    '<div class="as-wtpvh">작업표 미리보기 <span>— 공통 ' + cols.length + '열' +
+      ' · 칸 순서가 실제 생성 순서입니다(채널 열은 아래 채널 행이 뒤에 덧붙습니다)</span></div>' +
+    '<div class="as-wtpvrow">' + cells + '<span class="as-wtpvc add" title="채널 행에 담은 열이 여기에 덧붙습니다">＋채널</span></div>';
+}
+
 function _wtRenderCols() {
   /* 목차 배지는 여기서 갱신한다 — 로더에만 두면 열을 더하거나 뺀 뒤 숫자가 옛값에 머문다. */
   if (_wtTpl && _wtTpl.core) _setNavBadge('worktable', _wtTpl.core.length + '열', _wtTpl.core.length ? '' : 'warn');
+  _wtRenderPreview();
   var box = document.getElementById('wtColList');
   if (!box) return;
   var cols = (_wtTpl && _wtTpl.columns) || [];
@@ -1284,6 +1317,26 @@ function _wtRenderReport(d) {
       '@media (max-width:640px){.as-wtchlabel{width:100%}.as-wtchadd{margin-left:0}}' +
       /* 지금 쓰는 열에서 고르기 — 후보 패널 */
       '.as-wtchgroup{display:flex;flex-direction:column;gap:5px}' +
+      /* 열 구성 한 줄 미리보기 — 공통 행 바로 아래(표 머리 축소판) */
+      '.as-wtpv{margin:-1px 0 3px;padding:8px 11px 9px;border:1px solid #E5E7EB;border-radius:9px;background:#FCFDFE}' +
+      '.as-wtpvh{font-size:.71rem;font-weight:750;color:#4B5563;margin-bottom:6px}' +
+      '.as-wtpvh span{font-weight:400;color:#9CA3AF}' +
+      '.as-wtpvempty{font-size:.73rem;color:#9CA3AF}' +
+      /* ★ 한 줄 고정: 칸은 균등 압축(flex:1 1 0 + min-width:0), 넘치는 이름만 말줄임.
+           줄바꿈·가로 스크롤을 쓰면 "한눈에"가 깨진다(제목이 잘려도 title 에 전체가 남는다). */
+      '.as-wtpvrow{display:flex;align-items:stretch;border:1px solid #DCE3EC;border-radius:7px;overflow:hidden;background:#fff}' +
+      /* ★ flex:0 1 auto — 칸을 **내용 너비**로 두고 넘칠 때만 줄인다. `1 1 0`(균등)으로 두면
+           열이 15개만 돼도 짧은 이름까지 같이 좁아져 "구매...·계좌...·결제..."로 전부 잘린다(실측). */
+      '.as-wtpvc{flex:0 1 auto;min-width:0;padding:5px 7px;font-size:.68rem;font-weight:650;color:#374151;text-align:center;' +
+        'white-space:nowrap;overflow:hidden;text-overflow:ellipsis;border-right:1px solid #EDF0F4;background:#F8FAFC}' +
+      '.as-wtpvc:last-child{border-right:none}' +
+      '.as-wtpvc.core{background:#E9F0F9;color:#2563A8}' +
+      '.as-wtpvc.auto{background:#E5F3EE;color:#127A5E}' +
+      '.as-wtpvc.channel{background:#FBF2E1;color:#9A6414}' +
+      '.as-wtpvc.work{background:#F3E9F9;color:#7A3FA8}' +
+      '.as-wtpvc.status{background:#EEF0F3;color:#59626F}' +
+      '.as-wtpvc.dup{box-shadow:inset 0 -2px 0 #F59E0B}' +
+      '.as-wtpvc.add{flex:0 0 auto;padding:5px 8px;background:#fff;color:#9CA3AF;font-weight:600;border-left:1px dashed #CBD5E1}' +
       /* 공통 행 — 채널 행보다 한 단계 강조(모든 채널에 들어가는 열이라 성격이 다르다) */
       '.as-wtchgroup.common .as-wtchrow{border-color:#BFDBFE;background:#F8FBFF}' +
       '.as-wtchgroup.common .as-wtchlabel{color:#1D4ED8}' +
