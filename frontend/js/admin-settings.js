@@ -1219,9 +1219,23 @@ function _wtRenderTypeModal() {
   var e = _wtTypeEdit;
   if (!e) return;
   var el = _wtTypeMount();
-  var trigOpts = _wtTriggers().map(function (t) {
-    return '<option value="' + escHtml(t.key) + '"' + (e.autoTrigger === t.key ? ' selected' : '') + '>' + escHtml(t.label) + '</option>';
-  }).join('');
+  /* ★★ 조건 목록은 서버가 내려 준다(규칙 사본 금지). 그런데 **못 받았을 때 그냥 그리면
+     옵션 0개짜리 빈 드롭다운**이 되어 화면이 고장난 것처럼 보인다(백엔드 배포가 프론트보다
+     늦으면 바로 이 상태 — 실제로 밟았다). → 조용히 비우지 말고 **말하고, 되살릴 길을 준다**:
+     지금 값은 그대로 지키고(저장해도 조건이 날아가지 않는다) 셀렉트는 잠근 뒤 [다시 불러오기]. */
+  var trigs = _wtTriggers();
+  var trigMissing = !trigs.length;
+  var trigOpts = trigMissing
+    ? '<option value="' + escHtml(e.autoTrigger || 'auto') + '" selected>' +
+        escHtml(_wtTriggerLabel(e.autoTrigger) || '지금 설정된 조건') + '</option>'
+    : trigs.map(function (t) {
+        return '<option value="' + escHtml(t.key) + '"' + (e.autoTrigger === t.key ? ' selected' : '') + '>' + escHtml(t.label) + '</option>';
+      }).join('');
+  var trigWarn = trigMissing
+    ? '<span class="as-wtmodalwarn">조건 목록을 불러오지 못했습니다 — 서버가 아직 준비되지 않았을 수 있습니다(배포 직후). ' +
+        '지금 설정은 그대로 유지되며, 나머지 항목은 정상 저장됩니다. ' +
+        '<button type="button" onclick="wtReloadTriggers()">다시 불러오기</button></span>'
+    : '';
   var cols = e.columns.length
     ? e.columns.map(function (n, i) {
         return '<span class="as-wtchip">' + escHtml(n) +
@@ -1246,7 +1260,8 @@ function _wtRenderTypeModal() {
           '</div>' +
           '<span class="hint">옵션·리뷰형태처럼 작업지시는 앞쪽, 송장번호처럼 기록용은 뒤쪽이 보기 좋습니다</span></div>' +
         '<div class="fld"><label>자동 선택 조건 <i>— 작업오더가 이 조건이면 체크가 미리 켜집니다</i></label>' +
-          '<select id="wtTypeTrig" onchange="_wtTypeSync()">' + trigOpts + '</select>' +
+          '<select id="wtTypeTrig" onchange="_wtTypeSync()"' + (trigMissing ? ' disabled' : '') + '>' + trigOpts + '</select>' +
+          trigWarn +
           '<span class="hint">예) 작업오더에 <b>쿠팡 + 상품옵션 2가지</b>면 채널은 쿠팡, 이 유형은 “상품옵션이 2가지 이상일 때”로 자동 선택됩니다. ' +
             '<b>확정은 작업표를 만드는 담당자</b>가 합니다.</span></div>' +
         '<div class="fld"><label>이 유형에 담을 열</label>' +
@@ -1264,13 +1279,28 @@ function _wtRenderTypeModal() {
   var f = document.getElementById('wtTypeName');
   if (f && !e.label) f.focus();
 }
+/** 조건 목록만 다시 받아 온다 — ★ 모달의 편집 중 값(`_wtTypeEdit`)은 건드리지 않는다.
+    ★ 저장하지 않은 다른 변경이 있으면 먼저 알린다(설정을 다시 받으면 그 변경이 사라진다). */
+async function wtReloadTriggers() {
+  var hint = document.getElementById('wtSaveHint');
+  var dirty = !!(hint && hint.textContent);
+  if (dirty && !confirm('설정을 다시 불러옵니다.\n저장하지 않은 다른 변경(열 담기 등)은 사라집니다.\n계속할까요?')) return;
+  try {
+    await loadWorktableTemplate();
+    _wtRenderTypeModal();
+    showToast(_wtTriggers().length ? '조건 목록을 불러왔습니다' : '아직 불러오지 못했습니다 — 잠시 후 다시 시도해 주세요', !_wtTriggers().length);
+  } catch (err) { showToast('불러오기 실패: ' + err.message, true); }
+}
+
 /** 입력값을 편집 중 객체에 담는다(다시 그릴 때 값이 날아가지 않게 — 한 벌로 읽는다). */
 function _wtTypeSync() {
   if (!_wtTypeEdit) return;
   var g = function (id) { return document.getElementById(id); };
   if (g('wtTypeName')) _wtTypeEdit.label = String(g('wtTypeName').value || '').trim();
   if (g('wtTypeDesc')) _wtTypeEdit.desc = String(g('wtTypeDesc').value || '').trim();
-  if (g('wtTypeTrig')) _wtTypeEdit.autoTrigger = g('wtTypeTrig').value;
+  // ★ 목록을 못 받아 잠긴 상태에서는 읽지 않는다 — 읽으면 지금 설정이 그대로 다시 쓰이긴 하나,
+  //   의도치 않게 값을 건드리는 경로를 아예 만들지 않는다.
+  if (g('wtTypeTrig') && !g('wtTypeTrig').disabled) _wtTypeEdit.autoTrigger = g('wtTypeTrig').value;
 }
 function wtTypePos(p) { if (!_wtTypeEdit) return; _wtTypeSync(); _wtTypeEdit.position = (p === 'front' ? 'front' : 'back'); _wtRenderTypeModal(); }
 function wtTypeColAdd() {
@@ -1945,6 +1975,10 @@ function loadReviewTypeCleanup() { _setNavBadge('reviewtype', '점검'); }
       '.as-wtmodal .fld input,.as-wtmodal .fld select{padding:7px 10px;border:1.5px solid #D1D5DB;border-radius:8px;' +
         'font-size:.82rem;outline:none;background:#fff;color:#111827}' +
       '.as-wtmodal .hint{font-size:.7rem;color:#9CA3AF;line-height:1.6}' +
+      '.as-wtmodalwarn{display:block;font-size:.72rem;color:#92400E;background:#FFFBEB;border:1px solid #FDE68A;' +
+        'border-radius:7px;padding:6px 9px;margin-top:5px;line-height:1.6}' +
+      '.as-wtmodalwarn button{margin-left:6px;border:1px solid #FDE68A;background:#fff;color:#92400E;' +
+        'border-radius:6px;font-size:.7rem;font-weight:700;padding:2px 9px;cursor:pointer}' +
       '.as-wtmodal .hint b{color:#4B5563}' +
       '.as-wtseg{display:inline-flex;border:1.5px solid #D1D5DB;border-radius:8px;overflow:hidden;align-self:flex-start}' +
       '.as-wtseg button{border:none;border-right:1px solid #E5E7EB;background:#fff;color:#6B7280;' +
@@ -2102,6 +2136,7 @@ function loadReviewTypeCleanup() { _setNavBadge('reviewtype', '점검'); }
   window.wtTypeColAdd = wtTypeColAdd;
   window.wtTypeColDel = wtTypeColDel;
   window.wtTypeSave = wtTypeSave;
+  window.wtReloadTriggers = wtReloadTriggers;
   window._wtTypeSync = _wtTypeSync;
   window.wtOpenChanMgr = wtOpenChanMgr;
   window.wtOpenTypeMgr = wtOpenTypeMgr;
