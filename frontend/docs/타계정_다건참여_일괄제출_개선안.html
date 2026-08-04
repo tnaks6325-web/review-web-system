@@ -1,0 +1,454 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>타계정 여러 건 참여 — 일괄 제출 개선안 (유저플로우 &amp; 화면 목업)</title>
+<style>
+  /* 오프라인 열람 가능하도록 외부 리소스 0 · 화면 재현 목업이므로 라이트 고정 */
+  :root { color-scheme: light; }
+  * { margin:0; padding:0; box-sizing:border-box; }
+  body { font-family:'Apple SD Gothic Neo','Malgun Gothic','Noto Sans KR',sans-serif; background:#F3F4F6; color:#1F2937; line-height:1.65; }
+  .wrap { max-width:1080px; margin:0 auto; padding:32px 20px 80px; }
+
+  /* ── 헤더 ── */
+  .hero { background:linear-gradient(135deg,#1E3A8A,#3B82F6); border-radius:20px; padding:36px 32px; color:#fff; margin-bottom:28px; }
+  .hero .tag { display:inline-block; background:rgba(255,255,255,.18); border:1px solid rgba(255,255,255,.35); border-radius:999px; font-size:.75rem; font-weight:700; padding:4px 12px; margin-bottom:12px; }
+  .hero h1 { font-size:1.7rem; font-weight:800; letter-spacing:-.5px; margin-bottom:10px; }
+  .hero p { font-size:.95rem; opacity:.92; max-width:720px; }
+
+  /* ── 섹션 공통 ── */
+  section { background:#fff; border:1px solid #E5E7EB; border-radius:16px; padding:28px 28px 32px; margin-bottom:24px; }
+  h2 { font-size:1.25rem; font-weight:800; letter-spacing:-.3px; margin-bottom:6px; display:flex; align-items:center; gap:10px; }
+  h2 .num { display:inline-flex; align-items:center; justify-content:center; width:28px; height:28px; border-radius:8px; background:#1E3A8A; color:#fff; font-size:.85rem; flex-shrink:0; }
+  .sub { font-size:.85rem; color:#6B7280; margin-bottom:20px; }
+  h3 { font-size:1rem; font-weight:800; margin:22px 0 10px; }
+
+  /* ── 카톡 피드백 재현 ── */
+  .kakao { background:#BACEE0; border-radius:14px; padding:18px 16px; max-width:420px; }
+  .kk-name { font-size:.72rem; color:#4B5563; margin:0 0 4px 44px; }
+  .kk-row { display:flex; gap:8px; margin-bottom:10px; }
+  .kk-avatar { width:36px; height:36px; border-radius:12px; background:#9CA3AF; flex-shrink:0; display:flex; align-items:center; justify-content:center; color:#fff; font-size:1rem; }
+  .kk-bubbles { display:flex; flex-direction:column; gap:5px; }
+  .kk-bubble { background:#fff; border-radius:4px 14px 14px 14px; padding:8px 12px; font-size:.83rem; width:fit-content; max-width:280px; box-shadow:0 1px 1px rgba(0,0,0,.08); }
+
+  .problem-cards { display:grid; grid-template-columns:1fr 1fr; gap:14px; margin-top:20px; }
+  .pcard { border:1.5px solid #FCA5A5; background:#FEF2F2; border-radius:14px; padding:18px; }
+  .pcard b.t { display:block; font-size:.95rem; color:#B91C1C; margin-bottom:6px; }
+  .pcard p { font-size:.83rem; color:#7F1D1D; }
+
+  /* ── 플로우 다이어그램 ── */
+  .flow { display:flex; flex-wrap:wrap; align-items:stretch; gap:0; margin:14px 0 6px; }
+  .fstep { background:#F9FAFB; border:1.5px solid #D1D5DB; border-radius:12px; padding:12px 14px; min-width:128px; max-width:170px; text-align:center; position:relative; }
+  .fstep .ic { font-size:1.3rem; display:block; margin-bottom:4px; }
+  .fstep b { display:block; font-size:.8rem; margin-bottom:2px; }
+  .fstep span { font-size:.7rem; color:#6B7280; display:block; }
+  .farrow { display:flex; align-items:center; padding:0 8px; color:#9CA3AF; font-weight:800; font-size:1.05rem; }
+  .floop { width:100%; margin-top:10px; border:1.5px dashed #F87171; background:#FFF1F2; color:#B91C1C; border-radius:12px; padding:10px 16px; font-size:.82rem; font-weight:700; text-align:center; }
+  .fstep.good { border-color:#6EE7B7; background:#ECFDF5; }
+  .fstep.hl { border-color:#3B82F6; background:#EFF6FF; }
+  .timebar { display:flex; gap:14px; margin-top:16px; }
+  .timebox { flex:1; border-radius:12px; padding:14px 18px; font-size:.85rem; }
+  .timebox.bad { background:#FEF2F2; border:1.5px solid #FCA5A5; color:#991B1B; }
+  .timebox.good { background:#ECFDF5; border:1.5px solid #6EE7B7; color:#065F46; }
+  .timebox b { font-size:1.15rem; display:block; margin-bottom:2px; }
+
+  /* ── 폰 목업 ── */
+  .mockrow { display:flex; flex-wrap:wrap; gap:26px; justify-content:center; margin-top:18px; }
+  .mockcol { width:330px; }
+  .mocklabel { text-align:center; font-size:.83rem; font-weight:800; margin-bottom:10px; }
+  .mocklabel small { display:block; font-weight:500; color:#6B7280; font-size:.73rem; margin-top:2px; }
+  .phone { width:330px; background:#111827; border-radius:28px; padding:10px; box-shadow:0 12px 30px rgba(0,0,0,.18); }
+  .screen { background:#F8FAFC; border-radius:20px; overflow:hidden; min-height:520px; display:flex; flex-direction:column; }
+  .appbar { background:#fff; border-bottom:1px solid #E5E7EB; padding:12px 14px; font-size:.85rem; font-weight:800; display:flex; align-items:center; gap:8px; }
+  .appbar .back { color:#9CA3AF; }
+  .body { padding:14px; flex:1; display:flex; flex-direction:column; gap:10px; }
+
+  .dropzone { border:2px dashed #93C5FD; background:#EFF6FF; border-radius:14px; padding:22px 14px; text-align:center; }
+  .dropzone .big { font-size:1.6rem; display:block; margin-bottom:6px; }
+  .dropzone b { font-size:.85rem; color:#1D4ED8; display:block; }
+  .dropzone span { font-size:.72rem; color:#60A5FA; }
+  .thumbs { display:flex; gap:8px; flex-wrap:wrap; }
+  .thumb { width:54px; height:54px; border-radius:10px; background:linear-gradient(135deg,#DBEAFE,#BFDBFE); border:1.5px solid #93C5FD; display:flex; align-items:center; justify-content:center; font-size:1.1rem; position:relative; }
+  .thumb .x { position:absolute; top:-6px; right:-6px; width:16px; height:16px; background:#111827; color:#fff; border-radius:50%; font-size:.6rem; display:flex; align-items:center; justify-content:center; }
+  .ai-banner { background:linear-gradient(135deg,#7C3AED,#6D28D9); color:#fff; border-radius:12px; padding:12px 14px; font-size:.8rem; font-weight:700; display:flex; align-items:center; gap:10px; }
+  .spinner { width:16px; height:16px; border:2.5px solid rgba(255,255,255,.35); border-top-color:#fff; border-radius:50%; flex-shrink:0; }
+
+  .ordercard { background:#fff; border:1.5px solid #E5E7EB; border-radius:14px; padding:12px; }
+  .ordercard .oc-head { display:flex; align-items:center; gap:8px; margin-bottom:8px; }
+  .oc-badge { font-size:.62rem; font-weight:800; border-radius:6px; padding:2px 8px; }
+  .oc-badge.acct { background:#EDE9FE; color:#6D28D9; }
+  .oc-badge.done { background:#ECFDF5; color:#059669; }
+  .oc-badge.need { background:#FEF3C7; color:#B45309; }
+  .oc-head b { font-size:.82rem; }
+  .oc-grid { display:grid; grid-template-columns:1fr 1fr; gap:4px 10px; }
+  .oc-item { font-size:.7rem; color:#374151; display:flex; align-items:center; gap:5px; }
+  .oc-item .ok { color:#10B981; font-weight:800; }
+  .oc-item .miss { color:#D97706; font-weight:800; }
+  .oc-input { margin-top:8px; border:1.5px solid #FBBF24; background:#FFFBEB; border-radius:10px; padding:8px 10px; font-size:.74rem; display:flex; align-items:center; gap:8px; }
+  .oc-input input { border:none; background:transparent; outline:none; font-size:.74rem; flex:1; color:#92400E; }
+  .cta { margin-top:auto; background:linear-gradient(135deg,#2563EB,#1D4ED8); color:#fff; border-radius:12px; padding:13px; text-align:center; font-size:.88rem; font-weight:800; }
+  .cta.gray { background:#E5E7EB; color:#9CA3AF; }
+  .restore-banner { background:#ECFDF5; border:1.5px solid #6EE7B7; border-radius:12px; padding:12px 14px; font-size:.78rem; color:#065F46; }
+  .restore-banner b { display:block; margin-bottom:2px; font-size:.82rem; }
+  .rb-btns { display:flex; gap:8px; margin-top:8px; }
+  .rb-btn { flex:1; border-radius:8px; padding:7px 0; text-align:center; font-size:.74rem; font-weight:800; }
+  .rb-btn.primary { background:#059669; color:#fff; }
+  .rb-btn.ghost { background:#fff; border:1px solid #A7F3D0; color:#059669; }
+  .formline { background:#fff; border:1px solid #E5E7EB; border-radius:10px; padding:9px 12px; font-size:.75rem; color:#374151; display:flex; justify-content:space-between; align-items:center; }
+  .formline .val { color:#111827; font-weight:700; }
+  .formline .autofill { font-size:.6rem; font-weight:800; color:#059669; background:#ECFDF5; border-radius:5px; padding:1px 6px; }
+
+  /* ── 점검표 ── */
+  table { width:100%; border-collapse:collapse; font-size:.83rem; }
+  th { background:#F3F4F6; text-align:left; padding:10px 12px; border-bottom:2px solid #E5E7EB; font-size:.78rem; }
+  td { padding:10px 12px; border-bottom:1px solid #F3F4F6; vertical-align:top; }
+  .tbl-wrap { overflow-x:auto; }
+  .chip { display:inline-block; font-size:.68rem; font-weight:800; border-radius:6px; padding:2px 8px; white-space:nowrap; }
+  .chip.auto { background:#ECFDF5; color:#059669; }
+  .chip.semi { background:#EFF6FF; color:#1D4ED8; }
+  .chip.manual { background:#FEF3C7; color:#B45309; }
+  .chip.check { background:#FCE7F3; color:#BE185D; }
+
+  .note { background:#F9FAFB; border:1px solid #E5E7EB; border-left:4px solid #3B82F6; border-radius:10px; padding:12px 16px; font-size:.82rem; color:#374151; margin-top:14px; }
+  .note.warn { border-left-color:#F59E0B; }
+
+  /* ── 기대 효과 ── */
+  .effects { display:grid; grid-template-columns:repeat(3,1fr); gap:14px; }
+  .effect { border:1px solid #E5E7EB; border-radius:14px; padding:18px; text-align:center; background:#F9FAFB; }
+  .effect b { display:block; font-size:1.4rem; color:#1D4ED8; margin-bottom:4px; }
+  .effect span { font-size:.78rem; color:#6B7280; }
+
+  /* ── 적용 순서 ── */
+  .phases { display:flex; flex-direction:column; gap:12px; }
+  .phase { display:flex; gap:14px; border:1px solid #E5E7EB; border-radius:14px; padding:16px 18px; align-items:flex-start; }
+  .phase .pn { width:34px; height:34px; border-radius:10px; display:flex; align-items:center; justify-content:center; font-weight:800; color:#fff; flex-shrink:0; }
+  .phase b.t { display:block; font-size:.92rem; margin-bottom:3px; }
+  .phase p { font-size:.8rem; color:#4B5563; }
+  .phase .eta { margin-left:auto; flex-shrink:0; font-size:.7rem; font-weight:800; color:#6B7280; background:#F3F4F6; border-radius:999px; padding:4px 12px; align-self:center; white-space:nowrap; }
+
+  footer { text-align:center; font-size:.75rem; color:#9CA3AF; margin-top:10px; }
+  @media (max-width:860px){ .problem-cards{grid-template-columns:1fr} .effects{grid-template-columns:1fr} .timebar{flex-direction:column} }
+</style>
+</head>
+<body>
+<div class="wrap">
+
+  <div class="hero">
+    <span class="tag">개선 제안서 · 리뷰어 화면</span>
+    <h1>타계정 여러 건 참여, 5번 반복 대신 한 번에</h1>
+    <p>여러 명의(타계정)로 참여하는 리뷰어가 구매양식을 <b>1건씩 5번</b> 작성하느라 30분 가까이 걸리고,
+    새로고침하면 작성하던 화면에서 튕겨 나가는 문제를 확인했습니다.
+    이 문서는 현재 방식의 문제, 개선안 유저플로우, 실제 화면 목업을 담고 있습니다.</p>
+  </div>
+
+  <!-- ══════════ 1. 접수된 피드백 ══════════ -->
+  <section>
+    <h2><span class="num">1</span>실제로 접수된 리뷰어 피드백</h2>
+    <p class="sub">2026. 8. 4. — 탄소매트 5건 진행을 시도한 리뷰어의 카카오톡 피드백 그대로입니다.</p>
+
+    <div class="kakao">
+      <div class="kk-row">
+        <div class="kk-avatar">👤</div>
+        <div>
+          <div class="kk-name" style="margin-left:0">리뷰어 최○순</div>
+          <div class="kk-bubbles">
+            <div class="kk-bubble">탄소매트 5개 하다 <b>포기했어요</b></div>
+            <div class="kk-bubble">폼이 넘 힘들어서</div>
+            <div class="kk-bubble">그래서 5건 구매 안 했어요</div>
+            <div class="kk-bubble">이거 5개 하는데 거의 <b>30분 걸림</b></div>
+            <div class="kk-bubble">폼이 한 개씩 들어가고 <b>새로고침하면 나가기 되고</b> 난리라서 ㅠ</div>
+            <div class="kk-bubble">일 줄줄이 다 밀림..</div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <div class="problem-cards">
+      <div class="pcard">
+        <b class="t">문제 ① — 같은 작업을 5번 반복</b>
+        <p>명의 1개당 <b>참여 → 구매 → 캡처 1장 첨부 → 양식 입력 → 제출</b>을 처음부터 끝까지 반복해야 합니다.
+        5건이면 같은 화면을 5바퀴 도는 셈이라 약 30분이 걸리고, 결국 <b>참여 자체를 포기</b>하는 사례가 나왔습니다.
+        모집 정원이 비는 것은 회사 손해로 이어집니다.</p>
+      </div>
+      <div class="pcard">
+        <b class="t">문제 ② — 새로고침하면 작성 화면 이탈</b>
+        <p>작성 도중 새로고침되면(실수, 앱 전환, 브라우저 새로 열림 등) <b>화면이 처음 단계로 돌아가</b> 양식까지 다시 들어가야 합니다.
+        입력한 글자는 일부 되살아나지만 <b>첨부해 둔 구매 캡처는 사라지고</b>, "이어서 작성 중"이라는 안내도 없어
+        리뷰어는 처음부터 다시 쓰는 것으로 느낍니다.</p>
+      </div>
+    </div>
+  </section>
+
+  <!-- ══════════ 2. 현재 방식 ══════════ -->
+  <section>
+    <h2><span class="num">2</span>현재 방식 — 1건씩 5바퀴</h2>
+    <p class="sub">타계정 5건을 참여하려면 아래 과정을 명의마다 반복합니다.</p>
+
+    <div class="flow">
+      <div class="fstep"><span class="ic">🙋</span><b>명의 선택·참여</b><span>본계정/타계정 중 1명 선택</span></div>
+      <div class="farrow">→</div>
+      <div class="fstep"><span class="ic">🛒</span><b>쇼핑몰에서 구매</b><span>그 명의로 1건 구매</span></div>
+      <div class="farrow">→</div>
+      <div class="fstep"><span class="ic">📸</span><b>캡처 1장 첨부</b><span>자동 인식 1건</span></div>
+      <div class="farrow">→</div>
+      <div class="fstep"><span class="ic">⌨️</span><b>양식 입력</b><span>아이디·확인 포함 전 항목</span></div>
+      <div class="farrow">→</div>
+      <div class="fstep"><span class="ic">✅</span><b>제출</b><span>1건 완료</span></div>
+      <div class="floop">↺ 이 전체를 명의를 바꿔가며 <b>5번 반복</b> — 중간에 새로고침되면 해당 건은 처음부터</div>
+    </div>
+
+    <div class="timebar">
+      <div class="timebox bad"><b>약 30분 / 5건</b>같은 화면 5바퀴 + 새로고침 시 재작성 위험</div>
+    </div>
+  </section>
+
+  <!-- ══════════ 3. 개선안 플로우 ══════════ -->
+  <section>
+    <h2><span class="num">3</span>개선안 — "먼저 다 사고, 캡처를 한꺼번에"</h2>
+    <p class="sub">리뷰어가 실제로 일하는 순서(5개 먼저 구매 → 캡처 일괄 정리)에 화면을 맞춥니다.
+    관리자 화면에서 이미 쓰고 있는 <b>캡처 자동 인식·자동 분배 기술</b>을 리뷰어 화면으로 가져오는 것이라, 완전히 새로운 기술이 아닙니다.</p>
+
+    <div class="flow">
+      <div class="fstep good"><span class="ic">👥</span><b>명의 5개 한 번에 참여</b><span>참여할 명의를 체크박스로 일괄 선택</span></div>
+      <div class="farrow">→</div>
+      <div class="fstep good"><span class="ic">🛒</span><b>5건 몰아서 구매</b><span>쇼핑몰에서 편하게 연달아 구매</span></div>
+      <div class="farrow">→</div>
+      <div class="fstep hl"><span class="ic">📸</span><b>캡처 5장 일괄 첨부</b><span>AI가 5건을 자동으로 나눠 인식</span></div>
+      <div class="farrow">→</div>
+      <div class="fstep hl"><span class="ic">🪄</span><b>자동 정리 확인</b><span>명의별로 자동 배정·자동 입력</span></div>
+      <div class="farrow">→</div>
+      <div class="fstep good"><span class="ic">✅</span><b>부족한 것만 채우고 일괄 제출</b><span>대부분 아이디만 입력</span></div>
+    </div>
+
+    <div class="timebar">
+      <div class="timebox good"><b>약 5~8분 / 5건</b>양식 작성은 사실상 1번 + 작성 내용 자동 보관</div>
+    </div>
+  </section>
+
+  <!-- ══════════ 4. 화면 목업 ══════════ -->
+  <section>
+    <h2><span class="num">4</span>화면 목업 — 리뷰어가 보게 될 화면</h2>
+    <p class="sub">실제 색감·구성으로 만든 목업입니다. (화면 속 이름·값은 예시)</p>
+
+    <div class="mockrow">
+      <!-- M1 일괄 첨부 -->
+      <div class="mockcol">
+        <div class="mocklabel">① 캡처 일괄 첨부<small>5건 구매를 마친 뒤, 캡처를 한꺼번에 올립니다</small></div>
+        <div class="phone"><div class="screen">
+          <div class="appbar"><span class="back">‹</span> 탄소매트 — 일괄 제출 (5건 참여 중)</div>
+          <div class="body">
+            <div class="dropzone">
+              <span class="big">📸</span>
+              <b>구매 캡처를 한꺼번에 올려주세요</b>
+              <span>여러 장 선택 · 붙여넣기 · 끌어다놓기 모두 가능</span>
+            </div>
+            <div class="thumbs">
+              <div class="thumb">🧾<span class="x">×</span></div>
+              <div class="thumb">🧾<span class="x">×</span></div>
+              <div class="thumb">🧾<span class="x">×</span></div>
+              <div class="thumb">🧾<span class="x">×</span></div>
+              <div class="thumb">🧾<span class="x">×</span></div>
+            </div>
+            <div class="ai-banner"><div class="spinner"></div>AI가 캡처 5장에서 주문 정보를 읽고 있어요… (3/5)</div>
+            <div class="restore-banner" style="background:#EFF6FF;border-color:#93C5FD;color:#1D4ED8">
+              <b style="color:#1D4ED8">💾 올린 캡처와 입력 내용은 자동 보관됩니다</b>
+              화면이 꺼지거나 새로고침돼도 사라지지 않아요.
+            </div>
+            <div class="cta gray">분석이 끝나면 다음으로</div>
+          </div>
+        </div></div>
+      </div>
+
+      <!-- M2 자동 분류 -->
+      <div class="mockcol">
+        <div class="mocklabel">② 자동 정리 결과<small>캡처 속 수취인·연락처로 명의별 자동 배정</small></div>
+        <div class="phone"><div class="screen">
+          <div class="appbar"><span class="back">‹</span> 자동 정리 결과 — 5건</div>
+          <div class="body" style="gap:8px">
+            <div class="ordercard">
+              <div class="oc-head"><span class="oc-badge acct">본계정</span><b>최○순</b><span class="oc-badge done">자동입력 완료</span></div>
+              <div class="oc-grid">
+                <div class="oc-item"><span class="ok">✓</span>수취인 최○순</div>
+                <div class="oc-item"><span class="ok">✓</span>연락처 010-****-1234</div>
+                <div class="oc-item"><span class="ok">✓</span>주소 서울 ○○구…</div>
+                <div class="oc-item"><span class="ok">✓</span>결제금액 31,400원</div>
+                <div class="oc-item"><span class="ok">✓</span>주문번호 2026080…</div>
+                <div class="oc-item"><span class="ok">✓</span>계좌 국민 ****-01</div>
+              </div>
+              <div class="oc-input">🆔 <input placeholder="쇼핑몰 아이디만 입력해주세요" value="choi_sun22"></div>
+            </div>
+            <div class="ordercard">
+              <div class="oc-head"><span class="oc-badge acct">타계정</span><b>김○희</b><span class="oc-badge need">아이디 입력 필요</span></div>
+              <div class="oc-grid">
+                <div class="oc-item"><span class="ok">✓</span>수취인 김○희</div>
+                <div class="oc-item"><span class="ok">✓</span>연락처 010-****-5678</div>
+                <div class="oc-item"><span class="ok">✓</span>주소 서울 ○○구…</div>
+                <div class="oc-item"><span class="ok">✓</span>결제금액 31,400원</div>
+                <div class="oc-item"><span class="ok">✓</span>주문번호 2026080…</div>
+                <div class="oc-item"><span class="ok">✓</span>계좌 신한 ****-77</div>
+              </div>
+              <div class="oc-input">🆔 <input placeholder="쇼핑몰 아이디만 입력해주세요"></div>
+            </div>
+            <div class="ordercard">
+              <div class="oc-head"><span class="oc-badge acct">타계정</span><b>박○지</b><span class="oc-badge need">확인 필요</span></div>
+              <div class="oc-grid">
+                <div class="oc-item"><span class="ok">✓</span>수취인 박○지</div>
+                <div class="oc-item"><span class="miss">!</span>주소 — 캡처에서 안 보임</div>
+              </div>
+              <div class="oc-input">📍 <input placeholder="캡처에 잘린 주소만 직접 입력"></div>
+            </div>
+            <div style="font-size:.68rem;color:#9CA3AF;text-align:center">…외 2건 (모두 자동입력 완료)</div>
+            <div class="cta">확인했어요 — 다음</div>
+          </div>
+        </div></div>
+      </div>
+    </div>
+
+    <div class="mockrow" style="margin-top:30px">
+      <!-- M3 일괄 제출 -->
+      <div class="mockcol">
+        <div class="mocklabel">③ 한 번에 제출<small>5건을 최종 확인하고 버튼 한 번으로 제출</small></div>
+        <div class="phone"><div class="screen">
+          <div class="appbar"><span class="back">‹</span> 최종 확인 — 5건 일괄 제출</div>
+          <div class="body">
+            <div class="formline"><span>최○순 (본계정)</span><span class="val">준비 완료 ✓</span></div>
+            <div class="formline"><span>김○희 (타계정)</span><span class="val">준비 완료 ✓</span></div>
+            <div class="formline"><span>박○지 (타계정)</span><span class="val">준비 완료 ✓</span></div>
+            <div class="formline"><span>이○아 (타계정)</span><span class="val">준비 완료 ✓</span></div>
+            <div class="formline"><span>정○빈 (타계정)</span><span class="val">준비 완료 ✓</span></div>
+            <div class="formline"><span>은행/계좌/예금주</span><span class="autofill">내 정보에서 자동입력</span></div>
+            <div class="formline"><span>옵션</span><span class="autofill">참여할 때 고른 옵션 자동</span></div>
+            <div class="note" style="margin-top:4px;font-size:.72rem">1건이 잘못돼도 나머지 4건은 정상 접수됩니다. 잘못된 건만 다시 확인하면 돼요.</div>
+            <div class="cta">🚀 5건 한 번에 제출하기</div>
+          </div>
+        </div></div>
+      </div>
+
+      <!-- M4 새로고침 복원 -->
+      <div class="mockcol">
+        <div class="mocklabel">④ 새로고침 되어도 이어서 작성<small>문제 ②의 해결 — 어떤 화면에서든 복원</small></div>
+        <div class="phone"><div class="screen">
+          <div class="appbar"><span class="back">‹</span> 탄소매트 — 구매양식</div>
+          <div class="body">
+            <div class="restore-banner">
+              <b>✍️ 작성하던 내용을 되살렸어요</b>
+              3분 전까지 작성한 내용과 <b>첨부한 캡처 2장</b>을 그대로 불러왔습니다.
+              <div class="rb-btns">
+                <div class="rb-btn primary">이어서 작성하기</div>
+                <div class="rb-btn ghost">새로 작성</div>
+              </div>
+            </div>
+            <div class="formline"><span>수취인</span><span class="val">김○희</span></div>
+            <div class="formline"><span>연락처</span><span class="val">010-****-5678</span></div>
+            <div class="formline"><span>배송주소</span><span class="val">서울 ○○구 …</span></div>
+            <div class="thumbs" style="margin-top:2px"><div class="thumb">🧾</div><div class="thumb">🧾</div></div>
+            <div style="font-size:.68rem;color:#059669;font-weight:700">📎 첨부 캡처 2장도 복원됨</div>
+            <div class="cta">제출하기</div>
+          </div>
+        </div></div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ══════════ 5. 자동/직접 점검표 ══════════ -->
+  <section>
+    <h2><span class="num">5</span>점검 결과 — 캡처로 자동 인식되는 것 vs 직접 입력할 것</h2>
+    <p class="sub">현재 시스템의 캡처 자동 인식(AI)과 구매양식 필수 항목을 전부 대조한 결과입니다.
+    결론: <b>캡처 5장을 올리면 대부분 자동으로 채워지고, 리뷰어가 항상 직접 입력해야 하는 항목은 사실상 "쇼핑몰 아이디" 하나</b>입니다.</p>
+
+    <div class="tbl-wrap">
+    <table>
+      <thead><tr><th style="width:130px">양식 항목</th><th style="width:150px">채워지는 방법</th><th>설명</th></tr></thead>
+      <tbody>
+        <tr><td><b>수취인</b></td><td><span class="chip auto">캡처에서 자동</span></td><td>캡처 속 받는분 이름을 AI가 읽어 자동 입력. 이 이름으로 <b>어느 명의의 주문인지도 자동 배정</b>합니다.</td></tr>
+        <tr><td><b>연락처</b></td><td><span class="chip auto">캡처에서 자동</span></td><td>캡처 속 전화번호 자동 입력. 이름이 가려진 캡처는 연락처로 명의를 배정합니다.</td></tr>
+        <tr><td><b>배송주소</b></td><td><span class="chip auto">캡처에서 자동</span></td><td>캡처 속 배송지 전체 주소 자동 입력.</td></tr>
+        <tr><td><b>결제금액</b></td><td><span class="chip auto">캡처에서 자동</span></td><td>캡처 속 결제금액 자동 입력. 참여 옵션의 금액과 다르면 확인 표시만 띄웁니다.</td></tr>
+        <tr><td><b>주문번호</b></td><td><span class="chip auto">캡처에서 자동</span></td><td>캡처에 보이면 자동 입력. 원래 필수 항목이 아니라 캡처에 없어도 제출에 지장 없습니다.</td></tr>
+        <tr><td><b>주문자</b></td><td><span class="chip auto">캡처에서 자동</span></td><td>캡처 속 주문자 이름 자동 입력. 캡처에 없으면 배정된 명의 이름으로 채우고 확인만 받습니다.</td></tr>
+        <tr><td><b>은행 / 계좌번호 / 예금주</b></td><td><span class="chip semi">내 정보에서 자동</span></td><td>구매 캡처에는 계좌 정보가 없습니다. 대신 <b>내 정보(본계정 공통계좌) 또는 타계정별 전용계좌</b>에서 자동으로 채웁니다. 타계정에 계좌를 등록해 두지 않았다면 그 건만 직접 입력.</td></tr>
+        <tr><td><b>옵션</b></td><td><span class="chip semi">참여 정보에서 자동</span></td><td>참여할 때 고른 옵션이 자동으로 고정됩니다(현재도 동일). 입력 불필요.</td></tr>
+        <tr><td><b>쇼핑몰 아이디</b></td><td><span class="chip manual">직접 입력</span></td><td><b>구매 캡처 화면에는 로그인 아이디가 나오지 않아</b> 자동 인식이 불가능합니다. 유일하게 항상 직접 입력이 필요한 항목. 다만 <b>같은 명의로 이전에 제출한 아이디를 기억해 두었다가 미리 채워주면</b> 재참여부터는 확인만 하면 됩니다.</td></tr>
+        <tr><td><b>비고</b></td><td><span class="chip manual">직접 입력 (선택)</span></td><td>필수 아님. 필요할 때만 적습니다.</td></tr>
+      </tbody>
+    </table>
+    </div>
+
+    <h3>추가로 "확인"이 필요해지는 경우 (입력이 아니라 확인)</h3>
+    <div class="tbl-wrap">
+    <table>
+      <thead><tr><th style="width:220px">경우</th><th>동작</th></tr></thead>
+      <tbody>
+        <tr><td><span class="chip check">캡처가 잘리거나 흐린 경우</span></td><td>AI가 못 읽은 칸만 노란색으로 표시하고 그 칸만 직접 입력받습니다. 나머지 자동 입력분은 그대로 유지.</td></tr>
+        <tr><td><span class="chip check">명의 자동 배정 실패</span></td><td>캡처 속 이름·연락처가 등록된 명의와 하나도 안 맞으면, 그 캡처만 "어느 명의의 주문인가요?" 선택을 받습니다. (잘못 배정하는 것보다 물어보는 것이 안전)</td></tr>
+        <tr><td><span class="chip check">내 정보와 다른 배송지·계좌</span></td><td>현재와 동일하게 확인창을 띄우고, 새 정보면 타계정으로 등록을 제안합니다(기존 동작 유지).</td></tr>
+      </tbody>
+    </table>
+    </div>
+
+    <div class="note">
+      💡 <b>정리하면</b> — 5건 일괄 첨부 시 리뷰어가 하는 일은 ① 캡처 5장 올리기 ② 건별로 쇼핑몰 아이디 입력(또는 확인) ③ 노랗게 표시된 못 읽은 칸 보완 ④ 제출 버튼 1번. 지금처럼 5건 × 9개 항목을 손으로 쓰는 일이 없어집니다.
+    </div>
+  </section>
+
+  <!-- ══════════ 6. 새로고침 문제 ══════════ -->
+  <section>
+    <h2><span class="num">6</span>새로고침 문제 — 지금 상태와 해결안</h2>
+    <p class="sub">"새로고침하면 나가기 되고"의 원인을 확인했습니다.</p>
+
+    <div class="tbl-wrap">
+    <table>
+      <thead><tr><th style="width:200px">항목</th><th style="width:180px">지금</th><th>개선 후</th></tr></thead>
+      <tbody>
+        <tr><td>입력하던 글자</td><td>일부 되살아남 (안내 없음)</td><td>전부 되살리고 <b>"작성하던 내용을 되살렸어요" 안내 배너</b> 표시</td></tr>
+        <tr><td>첨부해 둔 구매 캡처</td><td><b style="color:#B91C1C">사라짐</b> — 다시 첨부해야 함</td><td>올린 즉시 서버에 임시 보관 → <b>새로고침해도 그대로 복원</b></td></tr>
+        <tr><td>보고 있던 화면(단계)</td><td>처음 화면으로 돌아감</td><td><b>작성하던 화면으로 바로 복귀</b></td></tr>
+        <tr><td>참여 자격(자리)</td><td>유지됨 (문제 없음)</td><td>동일 — 유지</td></tr>
+      </tbody>
+    </table>
+    </div>
+    <div class="note warn">⚠️ 캡처가 사라지는 것이 "처음부터 다시"라고 느끼게 하는 가장 큰 원인입니다. 캡처 임시 보관만 먼저 적용해도 체감이 크게 나아집니다.</div>
+  </section>
+
+  <!-- ══════════ 7. 기대 효과 ══════════ -->
+  <section>
+    <h2><span class="num">7</span>기대 효과</h2>
+    <div class="effects">
+      <div class="effect"><b>30분 → 5~8분</b><span>5건 기준 제출 소요 시간</span></div>
+      <div class="effect"><b>45칸 → 약 5칸</b><span>직접 입력 항목 수 (5건 × 9항목 → 아이디 위주)</span></div>
+      <div class="effect"><b>참여 포기 감소</b><span>"힘들어서 5건 구매 안 했어요" 재발 방지 → 모집 정원 채움</span></div>
+    </div>
+  </section>
+
+  <!-- ══════════ 8. 적용 순서 제안 ══════════ -->
+  <section>
+    <h2><span class="num">8</span>적용 순서 제안</h2>
+    <p class="sub">한 번에 다 바꾸지 않고, 효과 대비 안전한 순서로 나눠서 적용하는 것을 제안합니다.</p>
+    <div class="phases">
+      <div class="phase">
+        <div class="pn" style="background:#059669">1</div>
+        <div><b class="t">새로고침 복원 보강 (먼저·빠르게)</b>
+        <p>작성 내용·첨부 캡처 자동 보관 + "이어서 작성" 배너 + 작성하던 화면으로 복귀. 화면 구조 변경이 없어 위험이 가장 작고, 문제 ②를 바로 해결합니다.</p></div>
+        <div class="eta">작게·먼저</div>
+      </div>
+      <div class="phase">
+        <div class="pn" style="background:#2563EB">2</div>
+        <div><b class="t">캡처 일괄 첨부 + 자동 정리 (핵심)</b>
+        <p>여러 장 첨부 → AI 자동 인식 → 명의별 자동 배정 → 부족한 칸만 입력 → 일괄 제출. 관리자 외부모집 수동제출 화면에서 <b>이미 운영 중인 자동 인식·자동 분배 방식과 같은 원리</b>라 검증된 길을 따라갑니다. 1건씩 제출하는 기존 방식도 그대로 남겨 두어(선택지 추가) 익숙한 리뷰어는 기존대로 쓸 수 있습니다.</p></div>
+        <div class="eta">핵심 개선</div>
+      </div>
+      <div class="phase">
+        <div class="pn" style="background:#7C3AED">3</div>
+        <div><b class="t">참여도 한 번에 (마무리)</b>
+        <p>참여 단계에서 명의 여러 개를 체크박스로 한 번에 선택. 명의당 1건·하루 한도 등 <b>기존 참여 규칙은 그대로 지키면서</b> 화면 이동 횟수만 줄입니다.</p></div>
+        <div class="eta">마무리</div>
+      </div>
+    </div>
+    <div class="note">🔒 <b>바뀌지 않는 것</b> — 명의당 1건 규칙, 하루 참여 한도, 본인 확인(수취인·연락처 대조), 옵션별 정원 관리는 지금과 동일하게 유지됩니다. 화면 편의만 개선하고 참여 질서는 그대로입니다.</div>
+  </section>
+
+  <footer>리뷰 관리 시스템 · 타계정 다건 참여 일괄 제출 개선안 · 2026-08-04</footer>
+</div>
+</body>
+</html>
