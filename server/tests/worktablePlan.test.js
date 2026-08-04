@@ -226,8 +226,9 @@ ok('깨진 options 쿼리는 작업오더 파생으로 폴백(fail-soft)',
 console.log('\nH. 프론트 배선');
 const wdesk = readF('workdesk.html');
 ok('작업오더 행에 [작업표] 버튼(접수·상태변경과 같은 편집 게이트)',
-  /openWtPlan\('\$\{esc\(o\.id\)\}'\)/.test(wdesk)
-  && /function _woEditActions\(o\)\{[\s\S]{0,400}openWtPlan/.test(wdesk));
+  // ★ id 는 `const id=esc(o.id)` 로 한 번만 escape 해 네 버튼이 나눠 쓴다(배선 형태 변경 — 검사 의미 불변)
+  /openWtPlan\('\$\{id\}'\)/.test(wdesk)
+  && /function _woEditActions\(o\)\{[\s\S]{0,900}openWtPlan/.test(wdesk));
 ok('★★ 프론트가 날짜·옵션을 다시 계산하지 않는다(서버 계획을 그대로 렌더 — 미리보기 ≡ 실제 표)',
   (() => {
     const i = wdesk.indexOf('function _wtpRender()');

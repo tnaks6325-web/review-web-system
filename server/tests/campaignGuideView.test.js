@@ -19,7 +19,9 @@ const readS = (p) => fs.readFileSync(path.join(__dirname, '..', 'src', p), 'utf8
 
 const camp = readF('campaign.html');
 const idx = readF('index.html');
-const app = readF('js/index-app.js');
+// 프리필 조립(_woCampaignPrefill)은 공유 모듈(js/work-order-detail.js)로 이관 —
+// 통합 작업대의 작업오더 탭이 같은 함수를 쓴다(사본 금지). 두 파일을 합쳐서 본다.
+const app = readF('js/index-app.js') + '\n' + readF('js/work-order-detail.js');
 const rec = readF('js/index-recruit.js');
 const campRoutes = readS('routes/campaign.routes.js');
 const reviewEdit = readS('routes/reviewEdit.routes.js');

@@ -24,7 +24,9 @@ const ok = (name, cond) => { assert(cond, name); n++; console.log('  ✓ ' + nam
 
 const rt = readS('routes/campaign.routes.js');
 const mig = fs.readFileSync(path.join(__dirname, '..', 'migrations', '067_campaign_linked_tab_backfill.sql'), 'utf8');
-const app = readF('js/index-app.js');
+// 프리필 조립(_woCampaignPrefill)은 공유 모듈(js/work-order-detail.js)로 이관 —
+// 통합 작업대의 작업오더 탭이 같은 함수를 쓴다(사본 금지). 두 파일을 합쳐서 본다.
+const app = readF('js/index-app.js') + '\n' + readF('js/work-order-detail.js');
 const rec = readF('js/index-recruit.js');
 
 /* ═══ 서버 보정 헬퍼 ═══ */

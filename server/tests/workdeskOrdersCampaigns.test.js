@@ -188,7 +188,7 @@ t('★ 편집 버튼은 서버 판정(canEdit)으로만 노출', () => {
   //   → 게이트도 한 곳뿐이라 "표에는 안 뜨는데 패널에는 뜬다"가 생길 수 없다.
   assert.ok(/function _woEditActions\(o\)\{\s*\n\s*if\(!STATE\.canEdit\) return '';/.test(HTML),
     '작업오더 편집 버튼 게이트 없음');
-  assert.strictEqual((HTML.match(/_woAccept\('\$\{esc\(o\.id\)\}'\)/g) || []).length, 1,
+  assert.strictEqual((HTML.match(/_woAccept\('\$\{id\}'\)/g) || []).length, 1,
     '접수 버튼을 두 곳에서 만들면 게이트가 갈라진다');
   assert.ok(/\$\{STATE\.canEdit\?'<button class="btn pri" onclick="openRecruitModal\(\)/.test(HTML),
     '공고 발행 버튼 게이트 없음');
@@ -229,7 +229,9 @@ t('펼칠 때 한 번만 그린다(목록 30건이 한꺼번에 첨부 이미지
   assert.ok(/if\(!box\|\|box\.dataset\.filled\) return;/.test(HTML), '재렌더 방지 플래그가 없다');
 });
 t('처리 버튼 클릭이 행 토글로 번지지 않는다', () => {
-  assert.ok(/<td style="white-space:nowrap" onclick="event\.stopPropagation\(\)">\$\{_woActions\(o,i\)\}<\/td>/.test(HTML));
+  // ★ '상세' 버튼은 제거됐다(행을 누르면 펼쳐지므로 하는 일이 겹쳤다) → 처리 셀 = _woEditActions 하나뿐
+  assert.ok(/<td style="white-space:nowrap" onclick="event\.stopPropagation\(\)">\$\{_woEditActions\(o\)\}<\/td>/.test(HTML));
+  assert.ok(!/function _woActions\s*\(/.test(HTML), "'상세' 버튼 래퍼(_woActions)가 되살아났다 — 행 클릭과 중복");
   assert.ok(/onclick="event\.stopPropagation\(\);_woAccept\(/.test(HTML)
     && /onclick="event\.stopPropagation\(\);_woStatus\(/.test(HTML));
 });
@@ -279,9 +281,15 @@ t('★ 모듈은 호스트 전역에 기대지 않는다(통합 작업대엔 esc
   //   실측: 함수 범위를 잘못 잡아 woCreateCampaign(showToast·openRecruitModal·_woCache 사용)이
   //   통째로 딸려왔고, 공개 목록에 없어 **admin 의 '공고 발행' 버튼이 조용히 고장**났다.
   const bare = WOD.replace(/\/\*[\s\S]*?\*\//g, '').replace(/^\s*\/\/.*$/gm, '');
-  ['showToast', 'openRecruitModal', '_woCache', 'loadWorkOrders', 'API_BASE_URL']
+  ['showToast', 'openRecruitModal', '_woCache', 'loadWorkOrders', 'switchAdminTab']
     .forEach(n => assert.ok(!new RegExp('\\b' + n + '\\b').test(bare),
       '관리자 대시보드 전용 전역이 모듈에 섞였다: ' + n));
+  // ★ API_BASE_URL(api.js) 은 두 호스트 모두 로드하지만 **최상위 const 라 window 프로퍼티가 아니다** —
+  //   모듈이 쓰려면 반드시 `typeof` 가드 뒤에서만(로드 순서가 어긋난 화면에서 ReferenceError 로 죽지 않게).
+  const apiUses = (bare.match(/\bAPI_BASE_URL\b/g) || []).length;
+  const apiGuarded = (bare.match(/typeof API_BASE_URL !== "undefined" \? API_BASE_URL : ""/g) || []).length;
+  assert.strictEqual(apiUses, apiGuarded * 2,
+    'API_BASE_URL 을 typeof 가드 없이 쓰면 로드 순서가 다른 화면에서 ReferenceError 로 죽는다');
 });
 t('★ 전역 공개 — index-app.js 의 기존 호출부·onclick 문자열이 이름 그대로 쓴다', () => {
   ['_woDetailHtml', 'woImageModal', '_woImgError', '_woKv', '_woGuideUrls', '_woManagerNick']

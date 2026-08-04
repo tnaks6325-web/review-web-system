@@ -16,7 +16,8 @@ const readSrv = (p) => fs.readFileSync(path.join(__dirname, '..', p), 'utf8');
 
 const adminHtml = read('frontend/js/recruit-modal.js') + '\n' + read('frontend/admin.html');
 const recruit = read('frontend/js/index-recruit.js');
-const app = read('frontend/js/index-app.js');
+// _woOptionRows 는 공유 모듈(js/work-order-detail.js)로 이관 — 두 파일을 합쳐서 본다
+const app = read('frontend/js/index-app.js') + '\n' + read('frontend/js/work-order-detail.js');
 const routes = readSrv('src/routes/campaign.routes.js');
 
 let passed = 0;

@@ -7,7 +7,8 @@ const fs = require('fs');
 const path = require('path');
 const readF = (p) => fs.readFileSync(path.join(__dirname, '..', '..', 'frontend', p), 'utf8');
 
-const app = readF('js/index-app.js');
+// 프리필 헬퍼는 공유 모듈(js/work-order-detail.js)로 이관 — 두 파일을 합쳐서 본다
+const app = readF('js/index-app.js') + '\n' + readF('js/work-order-detail.js');
 const recjs = readF('js/index-recruit.js');
 const adm = readF('js/recruit-modal.js') + '\n' + readF('admin.html');
 

@@ -576,6 +576,21 @@
   .woldoc{max-width:900px;line-height:1.7}
   .woldoc img{max-width:min(100%,360px)}
   .wolnote{margin-top:10px;font-size:11.5px;color:var(--muted)}
+  /* 접수하기(파랑 .pri) ↔ 접수완료(초록·비활성) — 한눈에 갈리게. 눌러도 아무 일 없는 버튼은 두지 않는다. */
+  .btn.xs.wodone{background:#ECFDF5;color:#065F46;border-color:#6EE7B7;cursor:default;opacity:1}
+  .btn.xs.wolink{background:#D1FAE5;color:#065F46;border-color:#6EE7B7}
+  /* 상태 변경 모달 — 영문 상태값을 타이핑시키지 않고, 지금 고를 수 있는 것만 한국어 버튼으로. */
+  .wostnow{font-size:12.5px;color:var(--muted);margin-bottom:10px}
+  .wostlist{display:flex;flex-direction:column;gap:7px;margin-bottom:14px}
+  .wostbtn{display:block;width:100%;text-align:left;padding:10px 13px;line-height:1.45}
+  .wostbtn b{display:block;font-size:13px;font-weight:750;color:var(--ink)}
+  .wostbtn span{display:block;font-size:11.5px;color:var(--muted);margin-top:2px}
+  .wostmemo{border-top:1px solid var(--line);padding-top:12px}
+  .wostmemo label{display:block;font-size:11.5px;color:var(--muted);margin:0 0 4px}
+  .wostmemo label+label{margin-top:10px}
+  .wostmemo textarea,.wostmemo input{width:100%;box-sizing:border-box;padding:7px 9px;border:1px solid var(--line);
+    border-radius:7px;font-size:12.5px;font-family:inherit;background:var(--card)}
+  .wostreq{color:#92400E;background:#FFFBEB;border:1px solid #FDE68A;border-radius:5px;padding:0 5px;font-size:10.5px}
   /* 이미지 교체요청 — C/S 문의 화면 위의 "처리 대기 큐" 띠(시안 C).
      ★ 클래스는 're' 접두(기존 .worow/.wodetail 충돌 전례).
      ★ 폭은 아래 문의 화면(목록 360 + gap 12 + 대화창 860 + 좌우 패딩 16×2)과 같은 값으로 맞춘다 —
@@ -2739,8 +2754,10 @@ function _modal(title, bodyHtml){
    ★ 공고 카드는 `campaign-cards.js`, 발행·수정 모달은 `recruit-modal.js`+`index-recruit.js`
      로 **관리자 대시보드와 같은 코드**를 쓴다(사본 금지 — 두 화면이 어긋날 수 없다).
    ══════════════════════════════════════════════════════════════ */
-const WO_STATUS = { submitted:'접수대기', reviewing:'검토중', await_chatroom:'채팅방대기',
-  published:'발행완료', done:'완료', rejected:'반려', revision:'보완요청' };
+/* ★ 상태 이름·전이표·접수 판정은 **공유 모듈**(js/work-order-detail.js) 하나가 갖는다 —
+   여기에 사본을 두면 관리자 대시보드와 이름이 갈라지고("검토중" vs "접수됨"),
+   전이표가 서버(ORDER_TRANSITIONS)와 어긋나면 화면이 통과시킨 버튼이 400 으로 튕긴다. */
+function _woLabel(st){ return (window.WO_LABELS && window.WO_LABELS[st]) || st || ''; }
 
 async function _loadPerm(){
   if(STATE.canEdit!=null) return STATE.canEdit;
@@ -2773,7 +2790,7 @@ function _renderWoHead(){
   $('#wohead').innerHTML=`<div class="mh"><h1>작업오더</h1>
     <span class="sp" style="flex:1"></span>
     <button class="btn${!STATE.woStatus?' pri':''}" onclick="STATE.woStatus='';_loadOrders()">전체</button>
-    ${chip('submitted','접수대기')}${chip('reviewing','검토중')}${chip('published','발행완료')}${chip('revision','보완요청')}
+    ${chip('submitted',_woLabel('submitted'))}${chip('reviewing',_woLabel('reviewing'))}${chip('published',_woLabel('published'))}${chip('revision',_woLabel('revision'))}
     <input class="ovsearch" placeholder="작업명/담당 검색 후 Enter" value="${esc(STATE.woq||'')}"
       onkeydown="if(event.key==='Enter'){STATE.woq=this.value.trim();_loadOrders();}">
     <button class="btn" onclick="_loadOrders()">새로고침</button>
@@ -2792,31 +2809,37 @@ function _renderWoBody(){
   b.innerHTML=`<div class="lgwrap"><table class="lgtable">
     <thead><tr><th style="width:26px"></th><th style="width:96px">상태</th><th>작업명</th><th style="width:92px">담당AE</th>
       <th style="width:70px">모집</th><th style="width:70px">일건수</th><th style="width:120px">제출</th>
-      <th style="width:178px">처리</th></tr></thead><tbody>${rows.map((o,i)=>`
+      <th style="width:320px">처리</th></tr></thead><tbody>${rows.map((o,i)=>`
       <tr class="wolrow" id="wolrow-${i}" onclick="_woToggle(${i})" title="클릭하면 상세가 아래로 펼쳐집니다">
         <td><span class="wolchev" id="wolchev-${i}">▾</span></td>
-        <td><span class="bd ${o.status==='submitted'?'':'g'}">${esc(WO_STATUS[o.status]||o.status)}</span></td>
+        <td><span class="bd ${o.status==='submitted'?'':'g'}">${esc(_woLabel(o.status))}</span></td>
         <td style="font-weight:700">${esc(o.title||'')}</td>
         <td>${esc(o.manager_name||o.created_by||'')}</td>
         <td style="text-align:right">${o.recruit_count||0}</td>
         <td style="text-align:right">${o.daily_count||0}</td>
         <td style="color:var(--muted);font-variant-numeric:tabular-nums">${fmt(o.created_at)}</td>
-        <td style="white-space:nowrap" onclick="event.stopPropagation()">${_woActions(o,i)}</td>
+        <td style="white-space:nowrap" onclick="event.stopPropagation()">${_woEditActions(o)}</td>
       </tr>
       <tr class="woldetail" id="woldetail-${i}" style="display:none"><td colspan="8">
         <div class="wolexpand" id="wolbox-${i}"></div></td></tr>`).join('')}</tbody></table></div>`;
 }
-function _woActions(o,i){
-  const btn=`<button class="btn xs" onclick="_woToggle(${i})">상세</button>`;
-  return btn+_woEditActions(o);
-}
-/** 접수·상태변경 — 편집 허용명단만. 표 셀과 펼침 패널이 같은 것을 쓴다(사본 금지). */
+/** 접수·작업표·모집공고·상태변경 — 편집 허용명단만. 표 셀과 펼침 패널이 같은 것을 쓴다(사본 금지).
+ *  ★ '상세' 버튼은 두지 않는다 — 행을 누르면 상세가 아래로 펼쳐지므로 하는 일이 겹친다.
+ *  ★ 접수는 **하기/완료를 눈으로 가른다**: 접수 가능 상태면 파란 [접수하기],
+ *    이미 접수된 오더는 초록 [✓ 접수완료](비활성 + 등록된 탭 이름을 툴팁으로).
+ *    판정은 공유 모듈 `_woAcceptable`(서버 ACCEPT_ELIGIBLE 과 같은 표) — 여기서 다시 세지 않는다. */
 function _woEditActions(o){
   if(!STATE.canEdit) return '';
-  const acceptable=['submitted','revision','rejected'].includes(o.status);
-  return (acceptable?` <button class="btn xs pri" onclick="event.stopPropagation();_woAccept('${esc(o.id)}')">접수</button>`:'')
-    +` <button class="btn xs" onclick="event.stopPropagation();openWtPlan('${esc(o.id)}')" title="작업표 생성 미리보기">📋 작업표</button>`
-    +` <button class="btn xs" onclick="event.stopPropagation();_woStatus('${esc(o.id)}')">상태변경</button>`;
+  const id=esc(o.id);
+  const wt=` <button class="btn xs" onclick="event.stopPropagation();openWtPlan('${id}')" title="작업표 생성 미리보기">📋 작업표</button>`;
+  const acc = (typeof _woAcceptable==='function' ? _woAcceptable(o) : ['submitted','revision','rejected'].includes(o.status))
+    ? `<button class="btn xs pri" onclick="event.stopPropagation();_woAccept('${id}')" title="작업시트의 탭을 시스템에 등록하고 인덱스를 만듭니다">접수하기</button>`
+    : `<button class="btn xs wodone" disabled title="${esc(o.linked_tab_name?('등록된 탭 — '+o.linked_tab_name):'이미 접수된 작업오더입니다')}">✓ 접수완료</button>`;
+  const camp = o.linked_campaign_id
+    ? ` <button class="btn xs wolink" onclick="event.stopPropagation();_woCampaign('${id}')" title="연결된 모집공고를 열어 리뷰어 화면을 바로 확인합니다">👁 모집공고</button>`
+    : ` <button class="btn xs" onclick="event.stopPropagation();_woCampaign('${id}')" title="이 작업오더 내용으로 모집공고를 채워 열고, 리뷰어가 볼 화면을 바로 미리 봅니다">📢 모집공고</button>`;
+  return acc+wt+camp
+    +` <button class="btn xs" onclick="event.stopPropagation();_woStatus('${id}')" title="진행 상태를 바꿉니다">상태변경</button>`;
 }
 function _woToggle(i){
   const d=document.getElementById('woldetail-'+i); if(!d) return;
@@ -2838,7 +2861,7 @@ function _woFillDetail(i){
   }
   const fmt=iso=>iso?new Date(iso).toLocaleString('ko-KR',{timeZone:'Asia/Seoul',year:'numeric',month:'2-digit',day:'2-digit',hour:'2-digit',minute:'2-digit'}):'';
   const chips=[
-    `<span class="bd ${o.status==='submitted'?'':'g'}">${esc(WO_STATUS[o.status]||o.status||'')}</span>`,
+    `<span class="bd ${o.status==='submitted'?'':'g'}">${esc(_woLabel(o.status))}</span>`,
     o.start_date?`<span class="wolchip">시작일 <b>${esc(String(o.start_date).slice(0,10))}</b></span>`:'',
     o.created_at?`<span class="wolchip">제출 <b>${esc(fmt(o.created_at))}</b></span>`:'',
   ].filter(Boolean).join('');
@@ -2961,13 +2984,73 @@ async function _woAccept(id){
   if(r&&r.ok){ _toast(r.skipped?'이미 등록된 오더입니다.':('접수 완료'+(r.tabName?' — '+r.tabName:''))); _loadOrders(); }
   else _toast('⚠ 접수 실패'+(r&&r.error?': '+r.error:''));
 }
-async function _woStatus(id){
-  const st=prompt('바꿀 상태를 입력하세요\n(submitted / reviewing / await_chatroom / published / done / rejected / revision)');
-  if(!st) return;
-  const memo=prompt('메모(반려·보완 사유 등, 없으면 비워두세요)')||'';
-  const r=await api('/api/trackb/work-orders/status',{method:'PUT',body:JSON.stringify({id,status:st.trim(),admin_memo:memo})});
-  if(r&&r.ok){ _toast('상태를 바꿨습니다.'); _loadOrders(); }
+/* ══════════════════════════════════════════════════════════════
+   상태 변경 — **고를 수 있는 상태만 한국어 버튼으로** 보여준다.
+
+   ★ 종전엔 `prompt()` 로 영문 상태값(submitted/reviewing/…)을 직접 타이핑하게 했다.
+     비개발자는 그 이름의 뜻도, 지금 상태에서 무엇이 가능한지도 알 수 없고,
+     서버 전이표(ORDER_TRANSITIONS)에 없는 값을 적으면 400 으로 튕겼다.
+   ★ 그래서 화면은 **공유 전이표(WO_TRANSITIONS)** 가 허용한 상태만 버튼으로 내고,
+     각 버튼 아래에 "이걸 누르면 무슨 일이 일어나는가"(WO_STATUS_HINTS)를 한 줄 붙인다.
+     전이표는 서버와 같은 표라 화면이 통과시킨 버튼이 서버에서 거절되지 않는다.
+   ★ 서버가 요구하는 두 조건도 **누르기 전에** 화면에서 받는다:
+     발행(published)=카톡 팀채팅방URL 필수 / 반려·보완요청=사유(메모) 확인.
+   ══════════════════════════════════════════════════════════════ */
+function _woStatus(id){
+  const o=(STATE.wo||[]).find(x=>x.id===id);
+  if(!o){ _toast('오더 정보를 찾을 수 없습니다. 새로고침 후 다시 시도하세요.'); return; }
+  const cur=o.status||'submitted';
+  const nexts=((window.WO_TRANSITIONS||{})[cur])||[];
+  const hint=st=>((window.WO_STATUS_HINTS||{})[st])||'';
+  const body = nexts.length
+    ? nexts.map(ns=>`<button class="btn wostbtn" onclick="_woStatusPick('${esc(id)}','${esc(ns)}')">
+         <b>${esc(_woLabel(ns))}(으)로 변경</b><span>${esc(hint(ns))}</span></button>`).join('')
+    : `<div class="empty">더 바꿀 수 있는 상태가 없습니다. (${esc(_woLabel(cur))} = 종착)</div>`;
+  _modal('상태 변경 — '+(o.title||''),
+    `<div class="wostnow">지금 상태 <span class="bd g">${esc(_woLabel(cur))}</span></div>
+     <div class="wostlist">${body}</div>
+     <div class="wostmemo">
+       <label>메모 (반려·보완요청은 이 내용이 AE에게 전달됩니다)</label>
+       <textarea id="woStMemo" rows="2" placeholder="예) 상품 URL이 빠져 있습니다. 채워서 다시 제출해주세요.">${esc(o.admin_memo||'')}</textarea>
+       <label>카톡 팀채팅방URL <span class="wostreq">공고발행에 필요</span></label>
+       <input id="woStChat" type="text" placeholder="https://open.kakao.com/..." value="${esc(o.chat_room_url||'')}">
+     </div>`);
+}
+async function _woStatusPick(id, to){
+  const memo=(($('#woStMemo')||{}).value||'').trim();
+  const chat=(($('#woStChat')||{}).value||'').trim();
+  if(to==='published' && !chat){ _toast('⚠ 카톡 팀채팅방URL을 입력해야 공고발행으로 바꿀 수 있습니다.'); const c=$('#woStChat'); if(c)c.focus(); return; }
+  if((to==='rejected'||to==='revision') && !memo
+     && !confirm((to==='rejected'?'반려':'보완요청')+' 사유를 적지 않고 진행할까요?\nAE는 무엇을 고쳐야 할지 알 수 없습니다.')) return;
+  const r=await api('/api/trackb/work-orders/status',
+    {method:'PUT',body:JSON.stringify({id,status:to,admin_memo:memo,chat_room_url:chat})});
+  if(r&&r.ok){ const m=document.getElementById('wdModal'); if(m)m.remove(); _toast(_woLabel(to)+'(으)로 바꿨습니다.'); _loadOrders(); }
   else _toast('⚠ 변경 실패'+(r&&r.error?': '+r.error:''));
+}
+
+/* ══════════════════════════════════════════════════════════════
+   작업오더 → 모집공고 (즉시 미리보기)
+
+   ★ 프리필 조립은 **공유 모듈 `_woCampaignPrefill`** 이 한다 — 관리자 대시보드의
+     [모집공고생성]과 **같은 함수**라 두 화면의 프리필이 갈라질 수 없다(사본 금지).
+   ★ 모달을 열면 오른쪽에 **리뷰어가 참여 후 보는 실제 화면**이 그대로 그려진다
+     (campaign-workdetail.js 공용 렌더러 — 모형이 아니다). 이미 발행된 오더는
+     연결된 공고를 수정 모드로 열어 같은 미리보기를 보여준다.
+   ══════════════════════════════════════════════════════════════ */
+async function _woCampaign(id){
+  const o=(STATE.wo||[]).find(x=>x.id===id);
+  if(!o){ _toast('오더 정보를 찾을 수 없습니다. 새로고침 후 다시 시도하세요.'); return; }
+  if(typeof openRecruitModal!=='function'||typeof _woCampaignPrefill!=='function'){
+    _toast('모집공고 모듈을 불러오지 못했습니다.'); return; }
+  // 모집공고 화면으로 옮겨 놓고 연다 — 저장하면 그 자리에서 목록이 갱신된다.
+  if(STATE.view!=='campaigns'){ switchView('campaigns'); }
+  if(window.RecruitModal) RecruitModal.mount();
+  // 연결 탭 드롭다운은 _recruitTabList 에 의존한다 — 모달을 열기 전에 반드시 채운다(await).
+  try{ if(typeof loadRecruitTabOptions==='function') await loadRecruitTabOptions(); }catch(_){ }
+  try{
+    if(o.linked_campaign_id) await openRecruitModal(o.linked_campaign_id);
+    else await openRecruitModal(null, _woCampaignPrefill(o), id);
+  }catch(e){ _toast('모달 열기 실패: '+(e&&e.message||'')); }
 }
 
 /* ── 모집공고 ─────────────────────────────────────────────── */
@@ -4735,7 +4818,11 @@ boot();
        화면 흐름에 섞여 페이지 하단에 일반 블록으로 흐른다(실측 버그). -->
 <div id="recruitModalMount"></div>
 
-<script>window.CAMPAIGN_ADMIN_API = '/api/trackb/campaigns';</script>
+<script>window.CAMPAIGN_ADMIN_API = '/api/trackb/campaigns';
+  /* 연결 탭 드롭다운의 탭 목록 — 관리자 대시보드는 `/api/tab/dashboard`(admin_token) 이지만
+     인트라넷 SSO 토큰(via:'intranet')은 그 경로에 도달 자체가 불가능하다.
+     `/api/trackb/tabs` 는 양쪽에서 닿는 유일한 목록이라 여기서만 재기준한다(목록 사본 0). */
+  window.RECRUIT_TABS_API = '/api/trackb/tabs';</script>
 <script src="api.js"></script>
 <!-- 작업오더 상세 렌더러 — 관리자 대시보드(index-app.js)에서 이관한 공유 모듈.
      첨부 이미지 임베드·라이트박스·섹션 추출이 전부 여기 한 벌뿐이다. -->
@@ -4759,6 +4846,10 @@ boot();
 <script>window.ADMIN_SETTINGS_API = '/api/trackb/settings';</script>
 <script src="js/admin-settings.js"></script>
 <script src="js/campaign-cards.js"></script>
+<!-- 참여 후 작업내용 4카드 공용 렌더러 — 발행 모달 오른쪽 "리뷰어가 보는 실제 화면" 미리보기가
+     이것으로 그려진다. 없으면 `_renderPreview` 가 조용히 그 카드를 건너뛰어(window.CampWorkDetail 체크)
+     통합 작업대에서만 미리보기가 비어 보인다(실측). -->
+<script src="js/campaign-workdetail.js"></script>
 <script src="js/recruit-modal.js"></script>
 <script src="js/manual-order.js"></script>
 <script src="js/index-recruit.js"></script>

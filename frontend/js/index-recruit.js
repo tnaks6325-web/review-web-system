@@ -268,11 +268,18 @@ async function toggleRecruitPublish(id, checked, inputEl) {
    1단계: 캠페인(시트) 선택
    2단계: 해당 캠페인의 탭 목록 표시
 ═══════════════════════════════════════ */
+/* ★ 탭 목록 경로는 호스트가 재기준한다(`CAMPAIGN_ADMIN_API` 와 같은 장치).
+   관리자 대시보드는 `/api/tab/dashboard`(admin_token) 그대로, 통합 작업대는
+   `/api/trackb/tabs` — 인트라넷 SSO 토큰(via:'intranet')은 `/api/trackb/*` 밖으로
+   나갈 수 없어 그 경로가 **양쪽에서 닿는 유일한 목록**이다. 전역 미설정이면 동작 불변. */
+function _recruitTabsApi() {
+  return (typeof window !== "undefined" && window.RECRUIT_TABS_API) || "/api/tab/dashboard";
+}
 async function loadRecruitTabOptions() {
   try {
     /* ── API에서 직접 탭 목록을 가져옴 (DOM 의존 제거) ── */
     const token = sessionStorage.getItem("admin_token") || "";
-    const res = await fetch(API_BASE_URL + "/api/tab/dashboard", {
+    const res = await fetch(API_BASE_URL + _recruitTabsApi(), {
       headers: { Authorization: "Bearer " + token }
     });
     if (!res.ok) throw new Error("dashboard API " + res.status);
@@ -287,7 +294,8 @@ async function loadRecruitTabOptions() {
       const key = sid + "||" + tab;
       if (!sid || !tab || seen.has(key)) return;
       seen.add(key);
-      const sheetName = r.campaignName || r.campaign_name || r.tcCampaignName || sid.slice(-6);
+      // spreadsheetTitle = /api/trackb/tabs(통합 작업대) 의 시트 제목 필드 — 없으면 종전 폴백 그대로
+      const sheetName = r.campaignName || r.campaign_name || r.tcCampaignName || r.spreadsheetTitle || sid.slice(-6);
       const display   = r.displayName  || r.display_name  || tab;
       const tabGid    = r.tabGid || r.tab_gid || "";
       _recruitTabList.push({ sheetId: sid, sheetName, tabName: tab, displayName: display, key, tabGid });
@@ -1276,7 +1284,14 @@ async function openRecruitModal(id, prefill, woOrderId) {
     titleEl.innerHTML = `<i class="fas fa-pen"></i> 모집공고 수정`;
     /* 기존 데이터 로드 */
     try {
-      const res  = await fetch(API_BASE_URL + `/api/campaign/${id}`, {
+      /* ★ 경로는 호스트가 재기준한다(_campApi) — 관리자 대시보드는 종전 그대로 무인증 공개
+         `/api/campaign/:id`(admin JWT 면 전체 행), 통합 작업대는 `/api/trackb/campaigns/:id`.
+         인트라넷 SSO 토큰은 원본 경로에서 **무시**되어 공개 화이트리스트 뷰가 오므로
+         수정 모달이 조용히 빈 칸으로 열린다 — 같은 핸들러를 Track B 로 태워야 전체 행이 온다. */
+      const _detailUrl = (typeof window !== "undefined" && window.CAMPAIGN_ADMIN_API)
+        ? _campApi(`/${encodeURIComponent(id)}`)
+        : API_BASE_URL + `/api/campaign/${id}`;
+      const res  = await fetch(_detailUrl, {
         headers: _getAuthHeaders()
       });
       const json = await res.json();
