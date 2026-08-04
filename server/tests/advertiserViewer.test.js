@@ -144,8 +144,8 @@ async function run() {
   ok('광고주 작업대 = awside 사이드바 + advwrap 그리드(가로 탭바 없음)',
     src.includes('class="wrap advwrap') && src.includes('id="awside"') );
   ok('advwrap 3열 그리드(사이드바 224px + 본문 + 레일)', /\.wrap\.advwrap\{grid-template-columns:224px minmax\(0,1fr\) 300px\}/.test(css));
-  ok('_renderTabList 광고주 분기 → _renderAdvSidebar(세그먼트/탭바 미참조)',
-    /_renderTabList\(\)\{\s*\n?\s*if\(STATE\.role==='advertiser'\)\{ _renderAdvSidebar\(\); return; \}/.test(src));
+  ok('_renderTabList 광고주 분기 → _renderAdvSidebar(세그먼트/탭바 미참조) + 첫 화면 갱신',
+    /if\(STATE\.role==='advertiser'\)\{ _renderAdvSidebar\(\); if\(!STATE\.cur\) _renderAdvHome\(\); return; \}/.test(src));
   ok('loadTabs 가 광고주면 /my-work-summary 를 함께 받는다', src.includes("api('/api/trackb/my-work-summary')"));
 
   // ── 화면 A: 내 작업 목록 표 ──
@@ -165,6 +165,45 @@ async function run() {
   ok('정산 카드 금액 4칸(_advSettleMoney): 총비용/입금액/입금일/남은 입금액', /_advSettleMoney/.test(src) && src.includes('남은 입금액') && src.includes('완납 ✓'));
   ok('발주 작업세부의 담당(내부 실명)은 광고주 미노출', /\.\.\.\(STATE\.role!=='advertiser'\?\[\['담당',d\.managerName\]\]:\[\]\)/.test(src));
   ok('Parity(내부 관측 도구) 레일탭은 광고주에게 안 그린다', /\$\{isAdv\?'':`<button class="railtab" data-rt="parity"/.test(src));
+
+  /* ═══ 5. 첫 화면 대시보드(시안 design-advertiser-dashboard.html) ═══ */
+  ok('첫 화면 기본값 = 대시보드(STATE.advView:\'dash\')', /advView:'dash'/.test(src));
+  ok('_renderAdvHome 이 advView 로 대시보드/전체 작업을 분기한다',
+    /if\(\(STATE\.advView\|\|'dash'\)==='list'\) _renderAdvList\(\); else _renderAdvDash\(\);/.test(src));
+  ok('사이드바 상단 = [대시보드] · [전체 작업] 2줄', /onclick="advHome\('dash'\)"[\s\S]{0,120}대시보드/.test(src) && /onclick="advHome\('list'\)"[\s\S]{0,120}전체 작업/.test(src));
+  ok('사이드바 작업 목록을 진행 중 / 완료 그룹으로 나눈다',
+    /grp\(items\.filter\(it=>!_awDone\(it\)\),'진행 중'\)[\s\S]{0,80}grp\(items\.filter\(_awDone\),'완료'\)/.test(src));
+  ok('★ 진행/완료 판정 단일 출처 _awDone(=_awStatus) — 사이드바·KPI·게이지가 같은 함수를 본다',
+    /function _awDone\(it\)\{ return _awStatus\(it\)\.label==='완료'; \}/.test(src));
+  ok('★ 정산 파생(남은 입금액=총비용−입금액) 단일 출처 _awSetl',
+    /function _awSetl\(it\)\{[\s\S]{0,320}Math\.max\(tc-\(pa\|\|0\),0\)/.test(src));
+  ok('★ 표 행 빌더는 한 벌(_awRowHtml) — 대시보드 최근 작업은 limit 만 달리해 재사용(사본 금지)',
+    /function _awRowHtml\(it\)/.test(src)
+    && /function _awListHtml\(items, limit\)/.test(src)
+    && /_awListHtml\(items, RECENT\)/.test(src)
+    && (src.match(/class="awlhead"/g) || []).length === 1);
+  ok('KPI 4칸: 진행 중 작업 · 참여 진척 · 총 계약금액 · 미입금 잔액',
+    /진행 중 작업<\/div>/.test(src) && /참여 진척 \(진행 중\)/.test(src) && /총 계약금액/.test(src) && /미입금 잔액/.test(src));
+  ok('★ 정산 노출 OFF 업체는 금액 KPI·정산 패널을 통째로 뺀다(빈 0원 표시 금지)',
+    /\+\(setlOn\?`<div class="adkpi"><div class="k">총 계약금액/.test(src) && /const pipe=setlOn\?/.test(src));
+  ok('참여 진척은 진행 중 작업만 집계(끝난 숫자가 진척을 희석하지 않게)',
+    /running\.forEach\(it=>\{ rTot\+=\+it\.total\|\|0; rSub\+=\+it\.submitted\|\|0;/.test(src));
+  ok('총 계약금액 KPI 가 정산 미연결 건수를 부제로 고지한다(조용한 누락 금지)', /미연결 \$\{unlinked\}건/.test(src));
+  ok('확인 필요 = 잔액(큰 순) → 계산서 미발행 → 미확인 코멘트, 최대 5건',
+    /\.filter\(x=>x\.rest>0\)\.sort\(\(a,b\)=>b\.rest-a\.rest\)/.test(src)
+    && /invoiceStatus!=='issued'/.test(src) && /_wUnseen\(i\); if\(!n\) return;/.test(src)
+    && /todos\.slice\(0,5\)/.test(src));
+  ok('확인 필요가 비면 안내 문구(빈 패널 금지)', src.includes('확인할 항목이 없습니다'));
+  ok('★ 대시보드 클래스는 ad* 접두 — 기존 .gauge/.dgrid/.kpi 와 충돌 금지',
+    /\.adkpis\{/.test(css) && /\.adgrid\{/.test(css) && /\.adgauge\{/.test(css)
+    && !/(^|\})\s*\.gauge\{width:168px/.test(css) && /\.gauge\{width:44px/.test(css) && /\.dgrid\{display:grid;grid-template-columns:1fr;/.test(css));
+  ok('대시보드 컨테이너 폭 상한(1380px — 목록 표와 같은 값)', /#advDash\{max-width:1380px\}/.test(css));
+  ok('★ 미확인 코멘트 갱신이 대시보드까지 재렌더(확인 필요 위젯이 stale 로 남지 않게)',
+    /_renderAdvSidebar\(\); if\(!STATE\.cur\) _renderAdvHome\(\);/.test(src));
+  ok('★ 뒤로/앞으로가 대시보드↔전체 작업 전환을 되짚는다(히스토리 항목에 advView)',
+    /e\.advView=STATE\.advView\|\|'dash'/.test(src)
+    && /if\(\(a\.advView\|\|''\)!==\(b\.advView\|\|''\)\) return false;/.test(src)
+    && /if\(st\.advView\) STATE\.advView=st\.advView;/.test(src));
 
   console.log(`\n✅ advertiserViewer: ${n} cases passed`);
 }

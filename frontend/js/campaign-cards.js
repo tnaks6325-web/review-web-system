@@ -408,7 +408,11 @@
       : '';
     // ★ 064: [인기!] 배지 — 관리자가 인기 설정한 공고(일반 모집 1건 제출완료당 1건 참여 조건)
     const popBadge = c.is_popular === true ? `<span class="pt-pop">🔥 인기!</span>` : '';
-    const topleft = (ribbon || popBadge) ? `<div class="pt-topleft">${popBadge}${ribbon}</div>` : '';
+    // ★ 085: 리뷰어 미노출(내부 테스트) 배지 — 관리자 화면에서만. 리뷰어 응답엔 이 필드가 없어
+    //   렌더될 일이 없지만, admin 분기로 한 번 더 못 박는다(공개 뷰에 관리 레이어 유출 금지 규율).
+    const hidBadge = (admin && c.reviewer_hidden === true)
+      ? `<span class="pt-pop" style="background:#475569">🧪 리뷰어 숨김</span>` : '';
+    const topleft = (ribbon || popBadge || hidBadge) ? `<div class="pt-topleft">${hidBadge}${popBadge}${ribbon}</div>` : '';
 
     // 오버레이: 오픈 전(회색·오픈까지) / 모집 중 시간창(라이브·오늘 구매마감까지)
     let overlay = '';

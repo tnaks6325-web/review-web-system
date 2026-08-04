@@ -59,8 +59,6 @@
   .wrap.advwrap.widemode .awside{display:none}
   @media(max-width:900px){.wrap.advwrap,.wrap.advwrap.railhidden{grid-template-columns:1fr}.wrap.advwrap .awside{display:none}}
   .awside{border-right:1px solid var(--line);background:var(--card);padding:12px 10px;overflow:auto}
-  .awside .awsh{font-size:10px;font-weight:750;letter-spacing:.05em;text-transform:uppercase;color:var(--faint);margin:2px 6px 9px;display:flex;align-items:center;gap:6px}
-  .awside .awsh .cnt{font-weight:700;background:var(--card2);border-radius:999px;padding:1px 7px;font-size:10px;color:var(--muted)}
   .awitem{display:flex;align-items:center;gap:8px;padding:8px 9px;border-radius:9px;margin-bottom:4px;cursor:pointer;border:1px solid transparent}
   .awitem:hover{background:var(--card2)}
   .awitem.on{background:var(--accent-soft);border-color:var(--accent-line)}
@@ -97,6 +95,73 @@
   .ambox.rest{border-color:color-mix(in srgb,var(--warn) 35%,var(--line));background:var(--warn-soft)} .ambox.rest .v{color:var(--warn)}
   .ambox.rest.zero{border-color:color-mix(in srgb,var(--safe) 30%,var(--line));background:var(--safe-soft)} .ambox.rest.zero .v{color:var(--safe)}
   .ambox.paidamt{border-color:color-mix(in srgb,var(--safe) 30%,var(--line))} .ambox.paidamt .v{color:var(--safe)}
+  /* ── 업체 첫 화면 대시보드(시안 design-advertiser-dashboard.html) ──
+     ★ 클래스는 전부 ad* 접두 — .gauge(원형 게이지)·.dgrid(관측 뷰)·.kpi(.stripA 하위) 등
+       기존 소유 클래스와 겹치면 남의 화면이 조용히 무너진다(실측 사고 전례). */
+  #advDash{max-width:1380px}
+  .adkpis{display:grid;grid-template-columns:repeat(auto-fit,minmax(210px,1fr));gap:9px;margin-bottom:11px}
+  .adkpi{background:var(--card);border:1px solid var(--line);border-radius:12px;padding:11px 13px;position:relative;overflow:hidden}
+  .adkpi .k{font-size:9.5px;font-weight:750;letter-spacing:.04em;text-transform:uppercase;color:var(--faint)}
+  .adkpi .v{font-size:22px;font-weight:800;letter-spacing:-.02em;margin-top:4px;line-height:1.15;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+  .adkpi .v small{font-size:11.5px;font-weight:650;color:var(--faint);margin-left:3px}
+  .adkpi .s{font-size:10.5px;color:var(--muted);margin-top:3px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+  .adkpi .ic{position:absolute;right:11px;top:10px;font-size:15px;opacity:.45}
+  .adkpi.acc{border-color:var(--accent-line)} .adkpi.acc .v{color:var(--accent-deep)}
+  .adkpi.rest{border-color:color-mix(in srgb,var(--warn) 34%,var(--line));background:var(--warn-soft)} .adkpi.rest .v{color:var(--warn)}
+  .adkpi.rest.zero{border-color:color-mix(in srgb,var(--safe) 30%,var(--line));background:var(--safe-soft)} .adkpi.rest.zero .v{color:var(--safe)}
+  .adgrid{display:grid;grid-template-columns:minmax(0,1.35fr) minmax(0,1fr);gap:11px;margin-bottom:11px}
+  @media(max-width:1100px){.adgrid{grid-template-columns:minmax(0,1fr)}}
+  .adpanel{background:var(--card);border:1px solid var(--line);border-radius:13px;padding:13px 15px;margin-bottom:11px}
+  .adgrid .adpanel{margin-bottom:0}
+  .adpanel .pt{font-size:11px;font-weight:750;letter-spacing:.04em;text-transform:uppercase;color:var(--faint);margin-bottom:11px;display:flex;align-items:center;gap:7px}
+  .adpanel .pt .more{margin-left:auto;font-size:10.5px;font-weight:700;color:var(--accent);text-transform:none;letter-spacing:0;cursor:pointer}
+  .adpanel .pt .more:hover{text-decoration:underline}
+  .adprow{display:flex;align-items:center;gap:11px;padding:10px 2px;border-bottom:1px solid var(--line);cursor:pointer}
+  .adprow:last-child{border-bottom:none}
+  .adprow:hover .pn b{color:var(--accent-deep)}
+  .adprow .pd{font-size:10.5px;font-weight:700;color:var(--muted);background:var(--card2);border-radius:7px;padding:4px 7px;flex:none;min-width:42px;text-align:center}
+  .adprow .pn{flex:1;min-width:0}
+  .adprow .pn b{font-size:12.5px;display:block;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+  .adprow .pn i{font-size:10px;color:var(--faint);margin-top:2px;display:block;font-style:normal;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+  .adgauge{width:168px;flex:none}
+  @media(max-width:900px){.adgauge{width:110px}}
+  .adbar{height:7px;border-radius:99px;background:var(--card2);overflow:hidden;display:flex}
+  .adbar i{display:block;height:100%}
+  .adbar .b1{background:var(--accent)} .adbar .b2{background:color-mix(in srgb,var(--accent) 32%,#fff)}
+  .adglab{display:flex;justify-content:space-between;gap:6px;font-size:9.5px;color:var(--faint);margin-top:4px;font-weight:650}
+  .adglab b{color:var(--ink)}
+  .adprow .ppct{font-size:13px;font-weight:800;color:var(--accent-deep);min-width:40px;text-align:right;flex:none}
+  .adpipe{display:flex;flex-direction:column;gap:7px}
+  .adstep{display:flex;align-items:center;gap:9px;padding:8px 10px;border:1px solid var(--line);border-radius:10px;background:var(--card2)}
+  .adstep .si{width:22px;height:22px;border-radius:50%;display:grid;place-items:center;font-size:11px;font-weight:800;flex:none;background:var(--line2);color:var(--muted)}
+  .adstep.done .si{background:var(--safe);color:#fff}
+  .adstep.wait{border-color:color-mix(in srgb,var(--warn) 32%,var(--line));background:var(--warn-soft)} .adstep.wait .si{background:var(--warn);color:#fff}
+  .adstep .sk{font-size:11.5px;font-weight:700;flex:1}
+  .adstep .sn{font-size:11px;color:var(--muted);white-space:nowrap} .adstep .sn b{color:var(--ink);font-weight:750}
+  .admoney{display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-top:11px}
+  .admb{border:1px solid var(--line);border-radius:10px;padding:8px 11px;background:var(--card)}
+  .admb .k{font-size:9.5px;font-weight:750;color:var(--faint);text-transform:uppercase;letter-spacing:.03em}
+  .admb .v{font-size:14.5px;font-weight:800;margin-top:2px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+  .admb.paid .v{color:var(--safe)}
+  .admb.rest{border-color:color-mix(in srgb,var(--warn) 34%,var(--line));background:var(--warn-soft)} .admb.rest .v{color:var(--warn)}
+  .admb.rest.zero{border-color:color-mix(in srgb,var(--safe) 30%,var(--line));background:var(--safe-soft)} .admb.rest.zero .v{color:var(--safe)}
+  .adtodo{display:flex;align-items:center;gap:9px;padding:9px 11px;border:1px solid var(--line);border-radius:10px;margin-bottom:7px;background:var(--card);cursor:pointer}
+  .adtodo:last-child{margin-bottom:0}
+  .adtodo:hover{border-color:var(--accent-line);background:var(--card2)}
+  .adtodo .ti{width:24px;height:24px;border-radius:8px;display:grid;place-items:center;font-size:12px;font-weight:800;flex:none}
+  .adtodo.pay .ti{background:var(--warn-soft);color:var(--warn)}
+  .adtodo.doc .ti{background:var(--adv-soft);color:var(--adv)}
+  .adtodo.cs .ti{background:var(--accent-soft);color:var(--accent-deep)}
+  .adtodo .tt{flex:1;min-width:0;font-size:12px}
+  .adtodo .tt b{display:block;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+  .adtodo .tt span{font-size:10.5px;color:var(--faint);display:block;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+  .adtodo .tgo{font-size:10.5px;color:var(--accent);font-weight:700;flex:none}
+  .adtodo.none{cursor:default;justify-content:center;color:var(--muted);font-size:12px;background:var(--card2)}
+  .adtodo.none:hover{border-color:var(--line);background:var(--card2)}
+  /* 사이드바 그룹(진행 중 / 완료) 구분 */
+  .awside .awdiv{height:1px;background:var(--line);margin:9px 4px}
+  .awside .awgh{font-size:9.5px;font-weight:750;letter-spacing:.05em;text-transform:uppercase;color:var(--faint);margin:9px 6px 6px;display:flex;align-items:center;justify-content:space-between}
+  .awside .awgh .cnt{font-weight:700;background:var(--card2);border-radius:999px;padding:1px 7px;font-size:10px;color:var(--muted)}
 
   /* 1단: 통합검색 + 업체 세그먼트(맨 앞 ★즐겨찾기) */
   .taskbar{background:var(--card);border-bottom:1px solid var(--line);position:sticky;top:var(--toph);z-index:4}
@@ -855,6 +920,7 @@ let STATE = { role:'', name:'', view:'workdesk', tabs:[], cur:null, wd:null, fre
               favs:null, _favLoaded:false,   // 작업목록 즐겨찾기(localStorage 영속)
               railTab:'thread',              // 우측 레일 탭(기본=협업/댓글)
               ov:[], ovq:'', pendingTab:null, pendingAdv:null, lastBatch:null,
+              advWork:null, advView:'dash',   // 업체(광고주) 뷰어 — 작업 요약 + 첫 화면(대시보드 기본 | 전체 작업 표)
               advs:[], advCur:null, tabIndex:{}, sheetMap:{}, addMode:'all', addSheet:null, addTabs:{},
               ownTabs:[], ownBrand:null, ownBrandList:[],     // 연결탭 목록 + 브랜드 필터(null=전체, ''=미분류)
               ownSettle:{}, ownSettleFor:null,                // 연결탭 정산 요약(비동기 필, 업체 전환 경합 가드)
@@ -1032,6 +1098,8 @@ let _navBooted=false;    // 첫 항목은 push 가 아니라 replace — 브라�
 function _navEntry(){
   const e={ __wd:1, view:STATE.view||'workdesk' };
   if(e.view==='workdesk' && STATE.cur) e.tab={ sheetId:STATE.cur.sheetId, tabName:STATE.cur.tabName, tabGid:STATE.cur.tabGid||'', spreadsheetTitle:STATE.cur.spreadsheetTitle||'' };
+  // 업체 첫 화면은 대시보드/전체 작업 두 상태라 어느 쪽이었는지도 항목에 남긴다(뒤로가기가 되짚어야 할 화면 전환).
+  if(e.view==='workdesk' && !STATE.cur && STATE.role==='advertiser') e.advView=STATE.advView||'dash';
   if(e.view==='ownership' && STATE.advCur) e.advId=STATE.advCur.id;
   return e;
 }
@@ -1041,6 +1109,7 @@ function _navSame(a,b){
   const t1=a.tab||null, t2=b.tab||null;
   if(!!t1!==!!t2) return false;
   if(t1&&t2&&(t1.sheetId!==t2.sheetId||t1.tabName!==t2.tabName)) return false;
+  if((a.advView||'')!==(b.advView||'')) return false;
   return (a.advId||'')===(b.advId||'');
 }
 function _navPush(){
@@ -1057,7 +1126,8 @@ function _navApply(st){
   try{
     const v=st.view||'workdesk';
     if(v==='workdesk'){ STATE.pendingTab = st.tab ? Object.assign({__nav:true}, st.tab) : null;
-      if(!st.tab) STATE.cur=null; }        // "탭 없는 작업대"로 되돌아간 상태 — 열린 작업도 함께 비운다
+      if(!st.tab) STATE.cur=null;          // "탭 없는 작업대"로 되돌아간 상태 — 열린 작업도 함께 비운다
+      if(st.advView) STATE.advView=st.advView; }   // 업체 첫 화면(대시보드/전체 작업) 복원
     if(v==='ownership') STATE.pendingAdv = st.advId ? {id:st.advId,__nav:true} : null;
     switchView(v);
   }finally{ _navLock=false; }
@@ -1169,7 +1239,6 @@ function renderWorkdeskView(){
   if(STATE.role==='advertiser'){
     $('#viewroot').innerHTML = `<div class="wrap advwrap${_railHidden()?' railhidden':''}${_wideMode()?' widemode':''}" id="wrap">
       <aside class="awside" id="awside">
-        <div class="awsh">내 작업 <span class="cnt" id="awCnt">…</span></div>
         <div id="awlist"><div class="empty" style="padding:10px">불러오는 중…</div></div>
       </aside>
       <div class="main" id="main"><div class="empty">불러오는 중…</div></div>
@@ -1247,56 +1316,165 @@ function _awStatus(it){   // 진행상황 칩 {label, tone}
   const pct=target?Math.round(total/target*100):null;
   return {label:pct!=null?`진행중 ${pct}%`:'진행중',tone:'ok'};
 }
-function _renderAdvSidebar(){
-  const host=$('#awlist'), cnt=$('#awCnt'); if(!host) return;
-  const items=_awItems();
-  if(cnt) cnt.textContent=String(items.length);
-  if(!items.length){ host.innerHTML=`<div class="empty" style="padding:10px">${STATE.advWork&&STATE.advWork.failed?'작업 목록을 불러오지 못했습니다.':'진행 중인 작업이 없습니다.'}</div>`; return; }
-  const cur=STATE.cur;
-  host.innerHTML = `<div class="awitem${cur?'':' on'}" onclick="advHome()"><span class="ava">≡</span><span class="nm">전체 현황<i>내 작업 목록으로</i></span></div>`
-    + items.map(it=>{
-      const i=_awTabIdx(it); if(i<0) return '';
-      const on=cur&&cur.sheetId===it.sheetId&&cur.tabName===it.tabName, st=_awStatus(it), n=_wUnseen(i);
-      return `<div class="awitem${on?' on':''}" onclick="selTab(${i})" title="${esc(it.tabName)}${it.spreadsheetTitle?' · '+esc(it.spreadsheetTitle):''}">
-        <span class="ava">${esc(_awDate(it))}</span>
-        <span class="nm">${esc(it.tabName)}<i>${esc(st.label)}</i></span>
-        ${n?`<span class="unb">💬${n}</span>`:''}<span class="bb ${st.tone}">${st.label==='완료'?'완료':'진행'}</span></div>`;
-    }).join('');
+// ★ 진행/완료 판정 단일 출처 — 사이드바 그룹·KPI·게이지·표 칩이 전부 이 함수를 본다(갈리면 화면끼리 어긋난다).
+function _awDone(it){ return _awStatus(it).label==='완료'; }
+function _awSetlOn(){ return !(STATE.advWork&&STATE.advWork.settlementHidden); }
+// ★ 정산 파생값 단일 출처 — 남은 입금액 = 총비용 − 입금액(화면 파생, 서버 저장 없음).
+//   표 행·KPI·파이프라인·확인필요가 같은 식을 봐야 "표는 3,250,000인데 KPI는 다른 값"이 안 생긴다.
+function _awSetl(it){
+  const s=(_awSetlOn()&&it&&it.settlement)||null;
+  const tc=s&&s.totalCost!=null?+s.totalCost:null, pa=s&&s.paidAmount!=null?+s.paidAmount:null;
+  return { s, tc, pa, rest: tc!=null?Math.max(tc-(pa||0),0):null };
 }
-function advHome(){ STATE.cur=null; _navPush(); _renderAdvSidebar(); _renderAdvHome(); }
+function _renderAdvSidebar(){
+  const host=$('#awlist'); if(!host) return;
+  const items=_awItems(), cur=STATE.cur, view=STATE.advView||'dash';
+  // 상단 2줄 = [대시보드](기본) · [전체 작업]. 아래는 진행 중 / 완료 그룹(진행 중이 항상 위).
+  const nav=`<div class="awitem${!cur&&view==='dash'?' on':''}" onclick="advHome('dash')"><span class="ava">📊</span><span class="nm">대시보드<i>전체 현황</i></span></div>`
+    +`<div class="awitem${!cur&&view==='list'?' on':''}" onclick="advHome('list')"><span class="ava">📋</span><span class="nm">전체 작업<i>목록 표${items.length?' · '+items.length+'건':''}</i></span></div>`;
+  if(!items.length){
+    host.innerHTML=nav+`<div class="awdiv"></div><div class="empty" style="padding:10px">${STATE.advWork&&STATE.advWork.failed?'작업 목록을 불러오지 못했습니다.':'진행 중인 작업이 없습니다.'}</div>`;
+    return;
+  }
+  const itemHtml=it=>{
+    const i=_awTabIdx(it); if(i<0) return '';
+    const on=cur&&cur.sheetId===it.sheetId&&cur.tabName===it.tabName, st=_awStatus(it), n=_wUnseen(i);
+    return `<div class="awitem${on?' on':''}" onclick="selTab(${i})" title="${esc(it.tabName)}${it.spreadsheetTitle?' · '+esc(it.spreadsheetTitle):''}">
+      <span class="ava">${esc(_awDate(it))}</span>
+      <span class="nm">${esc(it.tabName)}<i>${esc(st.label)}</i></span>
+      ${n?`<span class="unb">💬${n}</span>`:''}<span class="bb ${st.tone}">${st.label==='완료'?'완료':'진행'}</span></div>`;
+  };
+  const grp=(list,label)=> list.length?`<div class="awgh">${label} <span class="cnt">${list.length}</span></div>`+list.map(itemHtml).join(''):'';
+  host.innerHTML = nav+`<div class="awdiv"></div>`
+    + grp(items.filter(it=>!_awDone(it)),'진행 중')
+    + grp(items.filter(_awDone),'완료');
+}
+// 첫 화면 전환: 'dash'(대시보드·기본) | 'list'(전체 작업 표). 작업 선택은 selTab 이 그대로 담당.
+function advHome(view){
+  STATE.cur=null; STATE.advView=(view==='list')?'list':'dash';
+  _navPush(); _renderAdvSidebar(); _renderAdvHome();
+}
 function _renderAdvHome(){
   const host=$('#main'); if(!host) return;
   const aw=STATE.advWork;
   if(!aw){ host.innerHTML=`<div class="empty">불러오는 중…</div>`; return; }
-  const items=_awItems();
-  if(!items.length){ host.innerHTML=`<div class="empty">${aw.failed?'작업 목록을 불러오지 못했습니다. 새로고침해 주세요.':'진행 중인 작업이 없습니다.'}</div>`; return; }
-  const paidDone=items.filter(it=>{ const s=it.settlement; const tc=s&&s.totalCost; return tc!=null&&tc>0&&(s.paidAmount||0)>=tc; }).length;
-  const rows=items.map(it=>{
-    const i=_awTabIdx(it); if(i<0) return '';
-    const st=_awStatus(it), s=it.settlement;
-    const qs=s&&s.quoteStatus?(_SETTLE_Q[s.quoteStatus]||[s.quoteStatus,''])[0]:null, qt=s&&s.quoteStatus?(_SETTLE_Q[s.quoteStatus]||['',''])[1]:'';
-    const iv=s&&s.invoiceStatus?(_SETTLE_INV[s.invoiceStatus]||[s.invoiceStatus,''])[0]:null, ivt=s&&s.invoiceStatus?(_SETTLE_INV[s.invoiceStatus]||['','neutral'])[1]:'';
-    const tc=s&&s.totalCost!=null?+s.totalCost:null, pa=s&&s.paidAmount!=null?+s.paidAmount:null;
-    const rest=tc!=null?Math.max(tc-(pa||0),0):null;
-    const paidDate=s&&s.paidDate?String(s.paidDate).slice(5).replace('-','/').replace(/^0/,'').replace(/\/0/,'/'):'—';
-    return `<div class="awlrow" onclick="selTab(${i})" title="${esc(it.tabName)}">
-      <span class="adate">${esc(_awDate(it))}</span>
-      <span class="anm"><b>${esc(it.tabName)}</b><span class="asub">${esc(it.spreadsheetTitle||'')}</span></span>
-      <span><span class="bb ${st.tone}">${esc(st.label)}</span></span>
-      <span class="acnt"><b>${it.total||0}</b>${it.target?`/${it.target}`:''} · <b class="c-sub">${it.submitted||0}</b> · <b class="c-paid">${it.paid||0}</b></span>
-      <span>${qs?`<span class="bb ${qt}">${esc(qs)}</span>`:'<span class="bb">—</span>'}</span>
-      <span>${iv?`<span class="bb ${ivt||''}">${esc(iv)}</span>`:'<span class="bb">—</span>'}</span>
-      <span class="amoney"><b>${_awMoney(tc)}</b></span>
-      <span class="amoney"><b>${_awMoney(pa)}</b></span>
-      <span class="adate">${esc(paidDate)}</span>
-      <span class="amoney rest${rest===0?' zero':''}"><b>${rest==null?'—':(rest===0?'0 ✓':_awMoney(rest))}</b></span>
-      <span class="aopen">열람 ›</span></div>`;
-  }).join('');
-  host.innerHTML=`<div id="advHome"><div class="mh"><h1>${esc(STATE.name||'업체')} — 진행 업무 현황</h1>
+  if(!_awItems().length){ host.innerHTML=`<div class="empty">${aw.failed?'작업 목록을 불러오지 못했습니다. 새로고침해 주세요.':'진행 중인 작업이 없습니다.'}</div>`; return; }
+  if((STATE.advView||'dash')==='list') _renderAdvList(); else _renderAdvDash();
+}
+// ★ 표 행 빌더는 한 벌 — 대시보드 "최근 작업"은 이걸 limit 만 달리해 호출한다(사본을 두면 두 화면의 컬럼·판정이 어긋난다).
+function _awRowHtml(it){
+  const i=_awTabIdx(it); if(i<0) return '';
+  const st=_awStatus(it), { s, tc, pa, rest }=_awSetl(it);
+  const qs=s&&s.quoteStatus?(_SETTLE_Q[s.quoteStatus]||[s.quoteStatus,''])[0]:null, qt=s&&s.quoteStatus?(_SETTLE_Q[s.quoteStatus]||['',''])[1]:'';
+  const iv=s&&s.invoiceStatus?(_SETTLE_INV[s.invoiceStatus]||[s.invoiceStatus,''])[0]:null, ivt=s&&s.invoiceStatus?(_SETTLE_INV[s.invoiceStatus]||['','neutral'])[1]:'';
+  const paidDate=s&&s.paidDate?_awMD(s.paidDate):'—';
+  return `<div class="awlrow" onclick="selTab(${i})" title="${esc(it.tabName)}">
+    <span class="adate">${esc(_awDate(it))}</span>
+    <span class="anm"><b>${esc(it.tabName)}</b><span class="asub">${esc(it.spreadsheetTitle||'')}</span></span>
+    <span><span class="bb ${st.tone}">${esc(st.label)}</span></span>
+    <span class="acnt"><b>${it.total||0}</b>${it.target?`/${it.target}`:''} · <b class="c-sub">${it.submitted||0}</b> · <b class="c-paid">${it.paid||0}</b></span>
+    <span>${qs?`<span class="bb ${qt}">${esc(qs)}</span>`:'<span class="bb">—</span>'}</span>
+    <span>${iv?`<span class="bb ${ivt||''}">${esc(iv)}</span>`:'<span class="bb">—</span>'}</span>
+    <span class="amoney"><b>${_awMoney(tc)}</b></span>
+    <span class="amoney"><b>${_awMoney(pa)}</b></span>
+    <span class="adate">${esc(paidDate)}</span>
+    <span class="amoney rest${rest===0?' zero':''}"><b>${rest==null?'—':(rest===0?'0 ✓':_awMoney(rest))}</b></span>
+    <span class="aopen">열람 ›</span></div>`;
+}
+function _awMD(d){ const m=String(d||'').match(/^(\d{4})-(\d{2})-(\d{2})/); return m?`${+m[2]}/${+m[3]}`:String(d||'').slice(0,10); }
+function _awListHtml(items, limit){
+  const rows=(limit?items.slice(0,limit):items).map(_awRowHtml).join('');
+  return `<div class="awlwrap"><div class="awlhead"><span>시작일</span><span>작업명</span><span>진행상황</span><span>참여·제출·입금</span><span>견적서</span><span>계산서</span><span>총비용</span><span>입금액</span><span>입금일</span><span>남은 입금액</span><span></span></div>${rows}</div>`;
+}
+// ── 화면 A-2: 전체 작업(목록 표) ──
+function _renderAdvList(){
+  const items=_awItems(), aw=STATE.advWork;
+  const paidDone=items.filter(it=>{ const {tc,pa}=_awSetl(it); return tc!=null&&tc>0&&(pa||0)>=tc; }).length;
+  $('#main').innerHTML=`<div id="advHome"><div class="mh"><h1>${esc(STATE.name||'업체')} — 전체 작업</h1>
       <span class="bd">작업 ${items.length}건</span>${paidDone?`<span class="bd g">입금 완료 ${paidDone}건</span>`:''}
       ${aw.settlementHidden?'<span class="bd" title="정산 정보 표시가 꺼져 있습니다. 필요 시 담당자에게 문의하세요.">정산 정보 준비 중</span>':''}</div>
-    <div class="awlwrap"><div class="awlhead"><span>시작일</span><span>작업명</span><span>진행상황</span><span>참여·제출·입금</span><span>견적서</span><span>계산서</span><span>총비용</span><span>입금액</span><span>입금일</span><span>남은 입금액</span><span></span></div>
-    ${rows}</div></div>`;
+    ${_awListHtml(items)}</div>`;
+}
+// ── 화면 A-1(기본): 대시보드 ── KPI · 진행 게이지 · 정산 파이프라인 · 확인 필요 · 최근 작업
+//   ★ 신규 API 0 — 전부 /my-work-summary + 기존 unseen 응답에서 파생.
+function _renderAdvDash(){
+  const items=_awItems(), aw=STATE.advWork, setlOn=_awSetlOn();
+  const running=items.filter(it=>!_awDone(it)), doneList=items.filter(_awDone);
+  // 참여 진척은 "진행 중" 작업만 — 끝난 숫자가 섞이면 진척이 희석된다.
+  let rTot=0,rTgt=0,rSub=0;
+  running.forEach(it=>{ rTot+=+it.total||0; rSub+=+it.submitted||0; rTgt+=(+it.target||+it.total||0); });
+  const rPct=rTgt?Math.round(rTot/rTgt*100):0, sPct=rTot?Math.round(rSub/rTot*100):0;
+  // 정산 집계(연결된 건만) — 미연결 건수는 조용히 빼지 않고 부제로 고지한다.
+  const linked=setlOn?items.filter(it=>it.settlement):[];
+  let totalCost=0,paidSum=0,restSum=0,restCnt=0,qAcc=0,invIssued=0,payDone=0;
+  linked.forEach(it=>{ const {s,tc,pa,rest}=_awSetl(it);
+    if(tc!=null) totalCost+=tc;
+    if(pa!=null) paidSum+=pa;
+    if(rest!=null){ restSum+=rest; if(rest>0) restCnt++; else if(tc>0) payDone++; }
+    if(s&&s.quoteStatus==='accepted') qAcc++;
+    if(s&&s.invoiceStatus==='issued') invIssued++;
+  });
+  const unlinked=setlOn?(items.length-linked.length):0;
+  // ① KPI — 정산 노출 OFF 업체는 금액 2칸을 통째로 뺀다(빈 0원 표시 금지).
+  const kpis=`<div class="adkpi acc"><div class="k">진행 중 작업</div><div class="v">${running.length}<small>건</small></div><div class="s">완료 ${doneList.length}건 · 전체 ${items.length}건</div><span class="ic">🚀</span></div>`
+    +`<div class="adkpi"><div class="k">참여 진척 (진행 중)</div><div class="v">${running.length?`${rTot}<small>/ ${rTgt||'—'}</small>`:'—'}</div><div class="s">${running.length?`리뷰 제출 ${rSub}건 (${sPct}%)`:'진행 중인 작업 없음'}</div><span class="ic">📈</span></div>`
+    +(setlOn?`<div class="adkpi"><div class="k">총 계약금액</div><div class="v">${_awMoney(totalCost)}<small>원</small></div><div class="s">정산 연결 ${linked.length}건${unlinked?` · 미연결 ${unlinked}건`:''}</div><span class="ic">🧾</span></div>`
+      +`<div class="adkpi rest${restSum===0?' zero':''}"><div class="k">미입금 잔액</div><div class="v">${_awMoney(restSum)}<small>원</small></div><div class="s">${restCnt?`${restCnt}건 — 아래 [확인 필요] 참조`:'남은 입금액이 없습니다'}</div><span class="ic">⏳</span></div>`:'');
+  // ② 진행 중 작업 게이지 — 진한 막대=제출, 연한=참여했지만 미제출. 합계 폭 = 참여율.
+  const prog=running.length?running.map(it=>{
+    const i=_awTabIdx(it); if(i<0) return '';
+    const tgt=+it.target||+it.total||0, tot=+it.total||0, sub=+it.submitted||0;
+    const pct=tgt?Math.round(tot/tgt*100):0;
+    const w1=tgt?Math.min(sub/tgt*100,100):0, w2=tgt?Math.max(Math.min((tot-sub)/tgt*100,100-w1),0):0;
+    return `<div class="adprow" onclick="selTab(${i})" title="${esc(it.tabName)}">
+      <span class="pd">${esc(_awDate(it))}</span>
+      <span class="pn"><b>${esc(it.tabName)}</b><i>${esc(it.spreadsheetTitle||'')}${tgt?` · 목표 ${tgt}명`:''}</i></span>
+      <span class="adgauge"><span class="adbar"><i class="b1" style="width:${w1.toFixed(1)}%"></i><i class="b2" style="width:${w2.toFixed(1)}%"></i></span>
+        <span class="adglab"><span>참여 <b>${tot}</b> · 제출 <b>${sub}</b></span><span>${tgt?`목표 ${tgt}`:''}</span></span></span>
+      <span class="ppct">${pct}%</span></div>`;
+  }).join(''):`<div class="empty" style="padding:14px">진행 중인 작업이 없습니다.</div>`;
+  // ③ 정산 파이프라인(견적→계산서→입금) — 연결된 건 기준
+  const pipe=setlOn?`<div class="adpanel"><div class="pt">정산 현황</div>
+    ${linked.length?`<div class="adpipe">
+      <div class="adstep ${qAcc>=linked.length?'done':'wait'}"><span class="si">${qAcc>=linked.length?'✓':'!'}</span><span class="sk">견적서</span><span class="sn"><b>${qAcc}</b>건 수락${qAcc<linked.length?` · <b>${linked.length-qAcc}</b>건 진행`:''}</span></div>
+      <div class="adstep ${invIssued>=linked.length?'done':'wait'}"><span class="si">${invIssued>=linked.length?'✓':'!'}</span><span class="sk">세금계산서</span><span class="sn"><b>${invIssued}</b>건 발행${invIssued<linked.length?` · <b>${linked.length-invIssued}</b>건 대기`:''}</span></div>
+      <div class="adstep ${restCnt?'wait':'done'}"><span class="si">${restCnt?'!':'✓'}</span><span class="sk">입금</span><span class="sn"><b>${payDone}</b>건 완납${restCnt?` · <b>${restCnt}</b>건 미입금`:''}</span></div>
+    </div>
+    <div class="admoney"><div class="admb paid"><div class="k">입금 완료</div><div class="v">${_awMoney(paidSum)}원</div></div>
+      <div class="admb rest${restSum===0?' zero':''}"><div class="k">남은 입금액</div><div class="v">${restSum===0?'완납 ✓':_awMoney(restSum)+'원'}</div></div></div>`
+    :`<div class="empty" style="padding:14px">정산 정보가 아직 준비되지 않았습니다.</div>`}</div>`:'';
+  // ④ 확인 필요 — 잔액(큰 순) → 계산서 미발행 → 미확인 코멘트. 최대 5건.
+  const todos=[];
+  if(setlOn){
+    linked.map(it=>({it,...(_awSetl(it))})).filter(x=>x.rest>0).sort((a,b)=>b.rest-a.rest).forEach(x=>{
+      const i=_awTabIdx(x.it); if(i<0) return;
+      todos.push({cls:'pay',ic:'₩',i,t:`${x.it.tabName} — 잔금 ${_awMoney(x.rest)}원`,
+        s:`총비용 ${_awMoney(x.tc)}원 · 입금 ${_awMoney(x.pa||0)}원${x.s&&x.s.paidDate?` (최근 ${_awMD(x.s.paidDate)})`:''}`,go:'작업 열기 ›'});
+    });
+    linked.filter(it=>{ const {s}=_awSetl(it); return s&&s.invoiceStatus!=='issued'; }).forEach(it=>{
+      const i=_awTabIdx(it); if(i<0) return; const {tc}=_awSetl(it);
+      todos.push({cls:'doc',ic:'🧾',i,t:`${it.tabName} — 세금계산서 발행 대기`,s:`총비용 ${_awMoney(tc)}원`,go:'작업 열기 ›'});
+    });
+  }
+  items.forEach(it=>{ const i=_awTabIdx(it); if(i<0) return; const n=_wUnseen(i); if(!n) return;
+    todos.push({cls:'cs',ic:'💬',i,t:`${it.tabName} — 새 답변 ${n}건`,s:'담당자가 남긴 코멘트를 확인하세요',go:'확인 ›'});
+  });
+  const todoHtml=todos.length?todos.slice(0,5).map(x=>`<div class="adtodo ${x.cls}" onclick="selTab(${x.i})">
+      <span class="ti">${x.ic}</span><span class="tt"><b>${esc(x.t)}</b><span>${esc(x.s)}</span></span><span class="tgo">${esc(x.go)}</span></div>`).join('')
+    :`<div class="adtodo none">확인할 항목이 없습니다 — 모두 정상 진행 중입니다.</div>`;
+  // ⑤ 최근 작업 = 화면 A 표 그대로 상위 4건(렌더러 공용)
+  const RECENT=4;
+  $('#main').innerHTML=`<div id="advDash">
+    <div class="mh"><h1>${esc(STATE.name||'업체')} — 업무 현황</h1><span class="bd a">업체 전용 열람</span>
+      ${aw.settlementHidden?'<span class="bd" title="정산 정보 표시가 꺼져 있습니다. 필요 시 담당자에게 문의하세요.">정산 정보 준비 중</span>':''}</div>
+    <div class="adkpis">${kpis}</div>
+    <div class="adgrid">
+      <div class="adpanel"><div class="pt">진행 중 작업 <span class="more" onclick="advHome('list')">전체 작업 보기 →</span></div>${prog}</div>
+      ${pipe}
+    </div>
+    <div class="adpanel"><div class="pt">확인 필요 ${todos.length?`<span class="bd" style="text-transform:none;letter-spacing:0">${todos.length}</span>`:''}</div>${todoHtml}</div>
+    <div class="adpanel"><div class="pt">최근 작업 <span class="more" onclick="advHome('list')">전체 ${items.length}건 보기 →</span></div>
+      ${_awListHtml(items, RECENT)}</div></div>`;
 }
 // ── 작업목록 즐겨찾기(로그인 계정별 개인화·영속) ──
 //   서버 원본(/api/trackb/workdesk/favorites, 계정 귀속) + 계정별 localStorage 캐시(즉시 렌더·오프라인 폴백).
@@ -1362,7 +1540,9 @@ function _wActiveSeg(gs){
   return gs.length?gs[0].key:null;
 }
 function _renderTabList(){
-  if(STATE.role==='advertiser'){ _renderAdvSidebar(); return; }   // 광고주 = 좌측 사이드바(세그먼트/탭바 없음)
+  // 광고주 = 좌측 사이드바(세그먼트/탭바 없음). 첫 화면(대시보드)이 떠 있으면 함께 갱신 —
+  //   미확인 코멘트 수(refreshUnseen)가 [확인 필요] 위젯의 재료라 사이드바만 다시 그리면 그 항목이 stale 로 남는다.
+  if(STATE.role==='advertiser'){ _renderAdvSidebar(); if(!STATE.cur) _renderAdvHome(); return; }
   if(!STATE._favLoaded){ STATE.favs=_favLoad(); STATE._favLoaded=true; }
   const seghost=$('#segwrap'), tabhost=$('#tb2'); if(!seghost||!tabhost) return;   // 작업대 뷰가 아닐 때
   const gs=_wGroups();
@@ -2564,6 +2744,7 @@ async function renderCampaignsView(){
 function _rcRenderHead(total){
   $('#rchead').innerHTML=`<div class="mh"><h1>모집공고</h1>
     <span class="bd g">${total|0}건</span><span class="sp" style="flex:1"></span>
+    ${STATE.canEdit?'<button class="btn" onclick="openTestCampaignModal()" title="리뷰어에게 보이지 않는 내부 테스트 공고를 미리 채워서 엽니다">🧪 테스트 공고</button>':''}
     ${STATE.canEdit?'<button class="btn pri" onclick="openRecruitModal()">＋ 새 공고</button>':''}
     <button class="btn" onclick="loadRecruitList()">새로고침</button></div>
     <div class="ovnote">관리자 대시보드와 <b>같은 카드·같은 모달</b>을 씁니다(한쪽만 바뀌는 일이 없게).

@@ -488,12 +488,17 @@ async function _wtFetch(url, body) {
 }
 
 function _worktableHtml() {
+  /* 채널별 추가 열 — ★ 채널당 **한 줄**(라벨 + 열 블록들 + 추가 입력).
+     쉼표 구분 텍스트가 아니라 블록 단위 추가·제거·◀▶ 이동(사용자 확정 — 더 직관적으로). */
   var chans = CR_GUIDE_CHANNELS.map(function (c) {
-    return '<div style="flex:1;min-width:210px;max-width:300px">' +
-      '<div style="font-size:.76rem;font-weight:700;margin-bottom:5px">' + c.emoji + ' ' + c.label + '</div>' +
-      '<input type="text" id="wtCh_' + c.key + '" placeholder="예: 쿠팡ID (쉼표로 구분)" ' +
-      'style="width:100%;padding:7px 10px;border:1.5px solid #D1D5DB;border-radius:8px;font-size:.82rem;outline:none">' +
-      '</div>';
+    return '<div class="as-wtchrow">' +
+      '<span class="as-wtchlabel">' + c.emoji + ' ' + c.label + '</span>' +
+      '<span class="as-wtchips" id="wtChips_' + c.key + '"></span>' +
+      '<span class="as-wtchadd">' +
+        '<input type="text" id="wtCh_' + c.key + '" maxlength="40" placeholder="열 이름" ' +
+          'onkeydown="if(event.key===\'Enter\'){event.preventDefault();wtChAdd(\'' + c.key + '\');}">' +
+        '<button onclick="wtChAdd(\'' + c.key + '\')" title="이 채널에 열 추가">＋</button>' +
+      '</span></div>';
   }).join('');
   return `
         <!-- 작업표 표준 열 -->
@@ -524,9 +529,10 @@ function _worktableHtml() {
         <div style="margin-top:16px">
           <div style="font-size:.82rem;font-weight:700;margin-bottom:4px">채널별 추가 열</div>
           <p style="font-size:.75rem;color:var(--t3);margin:0 0 8px;line-height:1.6">
-            그 채널일 때만 붙는 열입니다(예: 쿠팡 작업엔 쿠팡ID). 비워두면 추가 열 없이 코어 열만 만듭니다.
+            그 채널일 때만 붙는 열입니다(예: 쿠팡 작업엔 쿠팡ID). 오른쪽 칸에 이름을 넣고 [＋]로 추가하고,
+            블록의 ◀▶로 순서를 바꾸고 ✕로 뺍니다. 비워두면 추가 열 없이 코어 열만 만듭니다.
           </p>
-          <div style="display:flex;gap:10px;flex-wrap:wrap">${chans}</div>
+          <div class="as-wtchbox">${chans}</div>
         </div>
 
         <div style="display:flex;gap:8px;align-items:center;margin-top:14px">
@@ -614,6 +620,54 @@ function wtMoveCol(i, dir) {
   _wtSyncColumns();
 }
 
+/* ── 채널별 추가 열 — 블록 편집 ──
+   편집은 _wtTpl.channels[key] 배열에 직접 하고 저장 때 그대로 보낸다(쉼표 파싱 없음 —
+   열 이름에 쉼표가 들어가도 안전하고, 화면에 보이는 블록이 곧 저장되는 값이다). */
+function _wtRenderChans() {
+  if (!_wtTpl) return;
+  CR_GUIDE_CHANNELS.forEach(function (c) {
+    var box = document.getElementById('wtChips_' + c.key);
+    if (!box) return;
+    var arr = (_wtTpl.channels && _wtTpl.channels[c.key]) || [];
+    box.innerHTML = arr.length ? arr.map(function (n, i) {
+      return '<span class="as-wtchip">' +
+        '<button onclick="wtChMove(\'' + c.key + '\',' + i + ',-1)" title="왼쪽으로"' + (i === 0 ? ' disabled' : '') + '>◀</button>' +
+        '<b>' + escHtml(n) + '</b>' +
+        '<button onclick="wtChMove(\'' + c.key + '\',' + i + ',1)" title="오른쪽으로"' + (i === arr.length - 1 ? ' disabled' : '') + '>▶</button>' +
+        '<button class="x" onclick="wtChDel(\'' + c.key + '\',' + i + ')" title="빼기">✕</button>' +
+        '</span>';
+    }).join('') : '<span class="as-wtchnone">추가 열 없음</span>';
+  });
+}
+function wtChAdd(key) {
+  if (!_wtTpl) return;
+  var inp = document.getElementById('wtCh_' + key);
+  var name = inp ? String(inp.value || '').trim() : '';
+  if (!name) return;
+  if (!_wtTpl.channels) _wtTpl.channels = {};
+  var arr = _wtTpl.channels[key] || (_wtTpl.channels[key] = []);
+  if (arr.some(function (n) { return n.toLowerCase() === name.toLowerCase(); })) { showToast('이미 있는 열입니다', true); return; }
+  arr.push(name);
+  if (inp) inp.value = '';
+  _wtRenderChans();
+  _wtDirty(true);
+}
+function wtChDel(key, i) {
+  if (!_wtTpl || !_wtTpl.channels || !_wtTpl.channels[key]) return;
+  _wtTpl.channels[key].splice(i, 1);
+  _wtRenderChans();
+  _wtDirty(true);
+}
+function wtChMove(key, i, dir) {
+  if (!_wtTpl || !_wtTpl.channels) return;
+  var arr = _wtTpl.channels[key] || [];
+  var j = i + dir;
+  if (j < 0 || j >= arr.length) return;
+  var t = arr[i]; arr[i] = arr[j]; arr[j] = t;
+  _wtRenderChans();
+  _wtDirty(true);
+}
+
 /** 통계에서 불러오기 — 서버가 고른 "역할별 가장 흔한 실제 헤더 이름"으로 채운다. */
 async function wtLoadSuggested() {
   try {
@@ -635,10 +689,7 @@ async function loadWorktableTemplate() {
     if (!_wtTpl.core) _wtTpl.core = [];
     if (!_wtTpl.channels) _wtTpl.channels = {};
     _wtRenderCols();
-    CR_GUIDE_CHANNELS.forEach(function (c) {
-      var el = document.getElementById('wtCh_' + c.key);
-      if (el) el.value = (_wtTpl.channels[c.key] || []).join(', ');
-    });
+    _wtRenderChans();
     var at = document.getElementById('wtSavedAt');
     if (at) {
       at.textContent = _wtTpl.updatedAt
@@ -654,19 +705,16 @@ async function loadWorktableTemplate() {
 
 async function wtSaveTemplate() {
   if (!_wtTpl) return;
+  // ★ 블록이 곧 저장값 — 배열 그대로 보낸다(쉼표 파싱 없음).
   var channels = {};
   CR_GUIDE_CHANNELS.forEach(function (c) {
-    var el = document.getElementById('wtCh_' + c.key);
-    channels[c.key] = el ? String(el.value || '').split(',') : [];
+    channels[c.key] = ((_wtTpl.channels || {})[c.key] || []).slice();
   });
   try {
     var j = await _wtFetch(WT_EP.template, { core: _wtTpl.core, channels: channels });
     _wtTpl = j.data;
     _wtRenderCols();
-    CR_GUIDE_CHANNELS.forEach(function (c) {
-      var el = document.getElementById('wtCh_' + c.key);
-      if (el) el.value = (_wtTpl.channels[c.key] || []).join(', ');
-    });
+    _wtRenderChans();
     var at = document.getElementById('wtSavedAt');
     if (at) at.textContent = '최근 저장: ' + String(_wtTpl.updatedAt || '').slice(0, 10) + (_wtTpl.updatedBy ? ' · ' + _wtTpl.updatedBy : '');
     _wtDirty(false);
@@ -798,7 +846,24 @@ function _wtRenderReport(d) {
       '.as-wtfreq.common{background:#FBF2E1;color:#9A6414}' +
       '.as-wtfreq.rare{background:#FAE9E7;color:#B3382E}' +
       '.as-wtbar{height:4px;border-radius:2px;background:#E5E7EB;margin-top:6px;overflow:hidden}' +
-      '.as-wtbar i{display:block;height:100%;background:#2563A8}';
+      '.as-wtbar i{display:block;height:100%;background:#2563A8}' +
+      /* 채널별 추가 열 — 채널 한 줄 = 라벨 + 블록들 + 추가 입력 */
+      '.as-wtchbox{display:flex;flex-direction:column;gap:7px}' +
+      '.as-wtchrow{display:flex;align-items:center;gap:10px;flex-wrap:wrap;border:1px solid #E5E7EB;border-radius:9px;padding:8px 12px;background:#fff}' +
+      '.as-wtchlabel{flex:none;width:110px;font-size:.8rem;font-weight:700;color:#111827}' +
+      '.as-wtchips{display:flex;align-items:center;gap:6px;flex-wrap:wrap;flex:1;min-width:200px}' +
+      '.as-wtchnone{font-size:.74rem;color:#9CA3AF}' +
+      '.as-wtchip{display:inline-flex;align-items:center;gap:3px;border:1px solid #BFDBFE;background:#EFF6FF;border-radius:7px;padding:3px 6px}' +
+      '.as-wtchip b{font-size:.79rem;font-weight:650;color:#1D4ED8;padding:0 3px}' +
+      '.as-wtchip button{width:20px;height:20px;border:none;background:transparent;border-radius:5px;cursor:pointer;font-size:.62rem;color:#60A5FA;line-height:1;padding:0}' +
+      '.as-wtchip button:hover:not(:disabled){background:#DBEAFE;color:#1D4ED8}' +
+      '.as-wtchip button:disabled{opacity:.25;cursor:default}' +
+      '.as-wtchip button.x{color:#F87171;font-size:.68rem}' +
+      '.as-wtchip button.x:hover{background:#FEE2E2;color:#B91C1C}' +
+      '.as-wtchadd{flex:none;display:inline-flex;gap:5px;margin-left:auto}' +
+      '.as-wtchadd input{width:130px;padding:5px 9px;border:1.5px solid #D1D5DB;border-radius:7px;font-size:.78rem;outline:none;background:#fff;color:#111827}' +
+      '.as-wtchadd button{width:29px;height:29px;border:1.5px solid #BFDBFE;background:#EFF6FF;color:#1D4ED8;border-radius:7px;cursor:pointer;font-size:.85rem;font-weight:700;line-height:1}' +
+      '@media (max-width:640px){.as-wtchlabel{width:100%}.as-wtchadd{margin-left:0}}';
     document.head.appendChild(st);
   }
   function _hostHasTheme() {
@@ -843,6 +908,9 @@ function _wtRenderReport(d) {
   window.wtAddCol = wtAddCol;
   window.wtDelCol = wtDelCol;
   window.wtMoveCol = wtMoveCol;
+  window.wtChAdd = wtChAdd;
+  window.wtChDel = wtChDel;
+  window.wtChMove = wtChMove;
   window.wtLoadSuggested = wtLoadSuggested;
   window.wtSaveTemplate = wtSaveTemplate;
   window.wtToggleReport = wtToggleReport;

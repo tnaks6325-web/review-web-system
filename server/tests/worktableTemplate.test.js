@@ -262,6 +262,22 @@ ok('출력은 전부 escHtml() 통과(헤더명·열이름은 사용자·시트�
   && /escHtml\(c\.name\)/.test(setJs) && /escHtml\(u\.name\)/.test(setJs));
 ok('채널별 추가 열은 현영 4채널 표를 재사용한다(채널 목록 사본 금지)',
   /CR_GUIDE_CHANNELS\.map/.test(setJs) && /wtCh_/.test(setJs));
+ok('★ 채널 열은 블록 편집(추가·✕제거·◀▶이동) — 채널당 한 줄(라벨+블록) 레이아웃',
+  /function wtChAdd/.test(setJs) && /function wtChDel/.test(setJs) && /function wtChMove/.test(setJs)
+  && /as-wtchrow/.test(setJs) && /as-wtchlabel/.test(setJs) && /wtChips_/.test(setJs));
+ok('★ 저장은 배열 그대로 — 쉼표 구분 파싱이 없다(열 이름에 쉼표가 들어가도 안전)',
+  (() => {
+    // wtSaveTemplate 본문에 split(',') 가 없어야 한다(이미지 dataURL split 은 다른 함수라 무관)
+    const i = setJs.indexOf('async function wtSaveTemplate');
+    const j = setJs.indexOf('\nasync function', i + 10);
+    const body = setJs.slice(i, j > i ? j : i + 2000);
+    return i > -1 && !/split\(','\)/.test(body) && /channels\[c\.key\] = \(\(_wtTpl\.channels \|\| \{\}\)\[c\.key\] \|\| \[\]\)\.slice\(\)/.test(setJs);
+  })());
+ok('블록 렌더도 escHtml 통과 + 편집 시 dirty 표시(조용한 유실 방지)',
+  /escHtml\(n\)/.test(setJs)
+  && /function wtChAdd[\s\S]{0,600}_wtDirty\(true\)/.test(setJs)
+  && /function wtChDel[\s\S]{0,300}_wtDirty\(true\)/.test(setJs)
+  && /function wtChMove[\s\S]{0,400}_wtDirty\(true\)/.test(setJs));
 ok('리포트는 펼칠 때 1회만 로드(설정 열 때마다 무거운 집계 금지)',
   /_wtStats\) return _wtRenderReport/.test(setJs));
 ok('편집 중 저장 안 함 경고가 뜬다(조용한 유실 방지)',
