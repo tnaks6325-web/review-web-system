@@ -60,7 +60,10 @@ ok('활성화 게이트: 2개 라우트 적용', (routes.match(/_participationAc
 // 레드 #7: 수동확정 선-취소 + 이중확정 거부
 ok('수동확정: applied 선-취소', /admin\/:id\/confirm[\s\S]*?SET status = 'cancelled'\s+WHERE campaign_id = \$1 AND phone8 = \$2 AND id <> \$3 AND status = 'applied'/.test(routes));
 // 코드리뷰 #1: provenance 링크는 소유권(campaign+phone8+holdToken) 검증 통과 신청에만 — 위조 applicationId 오염 차단
-ok('provenance: 소유권 EXISTS 서브쿼리', /SET campaign_application_id = \$2[\s\S]*?EXISTS \(SELECT 1 FROM campaign_applications ca[\s\S]*?ca\.hold_token = \$5/.test(hold));
+// ★ 082: 참여 시점 리뷰비 스냅샷을 함께 전파하려고 EXISTS 서브쿼리 → FROM 조인으로 바꿨다.
+//   검사 의미는 그대로 — **소유권 3조건(campaign_id·phone8·hold_token)** 이 링크의 전제여야 한다.
+ok('provenance: 소유권(campaign+phone8+holdToken) 검증 통과 신청에만 링크',
+  /SET campaign_application_id = ca\.id[\s\S]*?FROM campaign_applications ca[\s\S]*?ca\.campaign_id = \$3 AND ca\.phone8 = \$4[\s\S]*?ca\.hold_token = \$5/.test(hold));
 // 코드리뷰 #6: env NaN 가드
 ok('grace: NaN 폴백 30', /Number\.isFinite\(_grace\)/.test(hold));
 // 레드 #8③: closed 영속 3소비처(자동확정·수동확정·스윕)

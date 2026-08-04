@@ -16,6 +16,8 @@ const { logger } = require('../utils/logger');
 const { addClient, emitCsInquiry } = require('../utils/sse');
 const { _getReviewerPhoneList, PAYMENT_COL_KEYWORDS } = require('../services/search.service');
 const adminNickname = require('../services/adminNickname.service');
+// ★ 082: 기간별 리뷰비 — 판정은 utils/campaignFee 가 단일 출처(화면마다 규칙을 만들면 합계가 갈라진다)
+const { resolveReviewFee, sheetDateToIso, toKstDate } = require('../utils/campaignFee');
 
 // POST /api/reviewer/register — 리뷰어 등록 (GAS: registerReviewer)
 router.post('/register', registerLimiter, async (req, res, next) => {
@@ -198,7 +200,7 @@ router.get('/my-applications', async (req, res, next) => {
         rc.channel,
         rc.channel_custom AS "channelCustom",
         rc.manager,
-        rc.review_fee AS "reviewFee",
+        COALESCE(ca.review_fee_snapshot, rc.review_fee) AS "reviewFee", -- ★ 082: 참여 시점 금액 우선
         rc.status AS "campaignStatus"
       FROM campaign_applications ca
       LEFT JOIN recruit_campaigns rc ON ca.campaign_id = rc.id
@@ -399,7 +401,7 @@ router.get('/review-earnings', async (req, res, next) => {
     const payPatterns = PAYMENT_COL_KEYWORDS.map(k => '%' + k + '%');
     const { rows: riRows } = await pool.query(
       `SELECT sheet_id AS "sheetId", tab_name AS "tabName", row_index AS "rowIndex",
-              is_submitted AS "isSubmitted",
+              is_submitted AS "isSubmitted", start_date AS "startDate",
               (is_submitted2 = 'PAID' OR EXISTS (
                  SELECT 1 FROM jsonb_each_text(COALESCE(row_json, '{}'::jsonb)) kv
                   WHERE kv.key ILIKE ANY($2) AND btrim(kv.value) <> ''
@@ -416,29 +418,56 @@ router.get('/review-earnings', async (req, res, next) => {
     if (sheetIds.length) {
       const { rows: camps } = await pool.query(
         `SELECT DISTINCT ON (linked_sheet_id, linked_tab_name)
-                linked_sheet_id AS "sheetId", linked_tab_name AS "tabName",
-                COALESCE(review_fee, 0) AS "reviewFee", thumbnail_url AS "thumbnailUrl"
+                id, linked_sheet_id AS "sheetId", linked_tab_name AS "tabName",
+                COALESCE(review_fee, 0) AS "reviewFee", thumbnail_url AS "thumbnailUrl",
+                to_char(start_date,'YYYY-MM-DD') AS "campStartDate"
            FROM recruit_campaigns
           WHERE linked_sheet_id = ANY($1) AND linked_tab_name = ANY($2)
           ORDER BY linked_sheet_id, linked_tab_name, created_at DESC`,
         [sheetIds, tabNames]
       );
-      for (const c of camps) campMap[c.sheetId + '||' + c.tabName] = { reviewFee: c.reviewFee || 0, thumbnailUrl: c.thumbnailUrl || '' };
+      for (const c of camps) campMap[c.sheetId + '||' + c.tabName] = {
+        id: c.id, reviewFee: c.reviewFee || 0, thumbnailUrl: c.thumbnailUrl || '',
+        campStartDate: c.campStartDate || null, schedules: [],
+      };
+      // ★ 082: 기간별 리뷰비 구간(1쿼리). 구간이 없는 공고는 종전대로 review_fee 하나만 쓴다.
+      //   조회 실패는 fail-soft — 구간 없이 기존 값으로 계산된다(리뷰 내역은 계속 뜬다).
+      try {
+        const campIds = camps.map(c => c.id).filter(Boolean);
+        if (campIds.length) {
+          const { rows: fsRows } = await pool.query(
+            `SELECT campaign_id AS "campaignId", to_char(effective_from,'YYYY-MM-DD') AS "effectiveFrom",
+                    review_fee AS "reviewFee"
+               FROM campaign_fee_schedules WHERE campaign_id = ANY($1) ORDER BY campaign_id, effective_from`,
+            [campIds]);
+          const byCamp = new Map();
+          for (const f of fsRows) {
+            if (!byCamp.has(f.campaignId)) byCamp.set(f.campaignId, []);
+            byCamp.get(f.campaignId).push({ effectiveFrom: f.effectiveFrom, reviewFee: f.reviewFee });
+          }
+          for (const k of Object.keys(campMap)) campMap[k].schedules = byCamp.get(campMap[k].id) || [];
+        }
+      } catch (e) { logger.warn('[review-earnings] 리뷰비 구간 조회 실패(기존 값 사용): ' + e.message); }
     }
 
     // 주문 결제금액(행매칭용) — phone8 스코프, 행 배정된 미삭제 주문
     const priceMap = {};
+    const orderFeeMap = {};   // ★ 082: 행별 리뷰비 근거(참여시점 스냅샷 · 주문 제출일)
     if (sheetIds.length) {
       const { rows: orders } = await pool.query(
-        `SELECT sheet_id AS "sheetId", tab_name AS "tabName", sheet_row AS "sheetRow", price
+        `SELECT sheet_id AS "sheetId", tab_name AS "tabName", sheet_row AS "sheetRow", price,
+                review_fee_snapshot AS "feeSnapshot", created_at AS "orderedAt"
            FROM order_submissions
           WHERE RIGHT(regexp_replace(COALESCE(phone, ''), '[^0-9]', '', 'g'), 8) = ANY($1)
             AND deleted_at IS NULL AND sheet_row IS NOT NULL AND sheet_id = ANY($2)`,
         [phoneList, sheetIds]
       );
       for (const o of orders) {
+        const key = o.sheetId + '||' + o.tabName + '||' + o.sheetRow;
         const n = parseInt(String(o.price || '').replace(/[^0-9]/g, ''), 10);
-        if (Number.isFinite(n) && n > 0) priceMap[o.sheetId + '||' + o.tabName + '||' + o.sheetRow] = n;
+        if (Number.isFinite(n) && n > 0) priceMap[key] = n;
+        // ★ 082: 그 행의 참여 근거(스냅샷·구매일) — 리뷰비 판정에 쓴다.
+        orderFeeMap[key] = { snapshot: o.feeSnapshot, orderDate: toKstDate(o.orderedAt) };
       }
     }
 
@@ -449,9 +478,19 @@ router.get('/review-earnings', async (req, res, next) => {
     for (const r of riRows) {
       const tk = r.sheetId + '||' + r.tabName;
       const camp = campMap[tk] || {};
-      const reviewFee = camp.reviewFee || 0;
       const pk = tk + '||' + r.rowIndex;
       const price = Object.prototype.hasOwnProperty.call(priceMap, pk) ? priceMap[pk] : null;
+      // ★★ 082: 리뷰비는 **그 건의 참여 시점** 기준 — 공고의 현재 값을 그대로 쓰면
+      //   금액을 올리는 순간 과거 참여자의 카드·누적 합계까지 바뀐다(2026-08 사고).
+      //   순서: 참여시점 스냅샷 → 주문 제출일 → 시트 구매일자 → 오늘 → 기존 review_fee 폴백.
+      const of = orderFeeMap[pk] || {};
+      const reviewFee = resolveReviewFee({
+        schedules: camp.schedules,
+        fallback: camp.reviewFee || 0,
+        snapshot: of.snapshot,
+        orderDate: of.orderDate,
+        sheetDate: sheetDateToIso(r.startDate, camp.campStartDate),
+      }).fee;
       items[pk] = { reviewFee, productPrice: price, thumbnailUrl: camp.thumbnailUrl || '' };
       if (!r.isSubmitted) {
         count++;
