@@ -111,12 +111,59 @@ ok('★ 공고의 현재 review_fee 를 전건에 일괄 적용하던 코드가 
 ok('건별 근거를 전부 넘긴다(스냅샷·주문일·시트 구매일자)',
   /snapshot: of\.snapshot/.test(rev) && /orderDate: of\.orderDate/.test(rev)
   && /sheetDate: sheetDateToIso\(r\.startDate/.test(rev));
+/* ★★ 제출 시각 컬럼은 `submitted_at` 이다 — `order_submissions` 에는 created_at 컬럼이
+   **아예 없다**(001:179~192). 옛 가드는 `created_at AS "orderedAt"` 를 고정하고 있었는데,
+   그건 42703 으로 이 쿼리를 통째로 죽이던 **버그 쪽 컬럼명**이었다(#488 에서 수정).
+   그 쿼리 실패는 fail-soft catch 에 삼켜져 리뷰어 카드 상품비·누적 금액이 **조용히 비었다**.
+   가드가 낡은 채로 남으면 다음 사람이 "테스트를 통과시키려고" 코드를 버그로 되돌린다. */
 ok('주문 조회가 스냅샷·제출일을 함께 읽는다(행별 근거 확보)',
-  /review_fee_snapshot AS "feeSnapshot"/.test(rev) && /created_at AS "orderedAt"/.test(rev));
+  /review_fee_snapshot AS "feeSnapshot"/.test(rev) && /submitted_at AS "orderedAt"/.test(rev));
 ok('review_index 에서 시트 구매일자(start_date)를 읽는다',
   /start_date AS "startDate"/.test(rev));
 ok('구간 조회 실패는 fail-soft — 리뷰 내역이 통째로 안 뜨는 일은 없다',
   /catch \(e\) \{ logger\.warn\('\[review-earnings\] 리뷰비 구간 조회 실패/.test(rev));
+/* ── created_at 재발 차단(#488 사고) ─────────────────────────
+   패턴만 고치면 "그 한 줄"만 지켜진다 → **전제와 전 소스**를 함께 고정한다:
+     ① order_submissions 에 created_at 컬럼이 없다(마이그레이션에서 직접 읽어 확인)
+     ② 그 테이블을 지목하는 SQL 어디에서도 created_at 을 쓰지 않는다(src 전체 스캔)
+   ②는 별칭(os.created_at)과 단일 테이블 쿼리의 무수식 created_at 을 잡는다.
+   다중 조인에서 **다른 테이블의** created_at 은 정상이므로 건드리지 않는다(오탐 회피). */
+ok('★★ order_submissions 에는 created_at 컬럼이 없다 — 시각은 submitted_at 하나(전제 고정)',
+  (() => {
+    const init = fs.readFileSync(path.join(__dirname, '..', 'migrations', '001_create_tables.sql'), 'utf8');
+    const m = /CREATE TABLE IF NOT EXISTS order_submissions \(([\s\S]*?)\n\);/.exec(init);
+    if (!m || !/\bsubmitted_at\b/.test(m[1]) || /\bcreated_at\b/.test(m[1])) return false;
+    // 뒤 마이그레이션이 ALTER 로 몰래 추가하지도 않았는지
+    const dir = path.join(__dirname, '..', 'migrations');
+    return !fs.readdirSync(dir).filter(f => f.endsWith('.sql')).some(f =>
+      /ALTER TABLE\s+order_submissions[\s\S]{0,300}?ADD COLUMN[^;]*\bcreated_at\b/i
+        .test(fs.readFileSync(path.join(dir, f), 'utf8')));
+  })());
+ok('★★ order_submissions 를 읽는 SQL 어디에도 created_at 이 없다(전 소스 스캔 — 같은 사고 재발 차단)',
+  (() => {
+    const KW = new Set(['set', 'where', 'values', 'on', 'using', 'as', 'order', 'group', 'limit',
+      'left', 'right', 'inner', 'join', 'select', 'returning']);
+    const NUL = String.fromCharCode(0);   // NUL 이 있는 파일도 읽어 검사한다(grep 과 달리 안 막힌다)
+    const walk = (d, a = []) => {
+      for (const e of fs.readdirSync(d, { withFileTypes: true })) {
+        const q = path.join(d, e.name);
+        e.isDirectory() ? walk(q, a) : (q.endsWith('.js') && a.push(q));
+      }
+      return a;
+    };
+    return walk(path.join(__dirname, '..', 'src')).every(f => {
+      const src = fs.readFileSync(f, 'utf8').split(NUL).join('');
+      return (src.match(/`[^`]*`/g) || []).every(lit => {
+        if (!/\border_submissions\b/i.test(lit)) return true;
+        const m = /order_submissions\s+(?:AS\s+)?([a-zA-Z]\w*)/i.exec(lit);
+        const alias = m && !KW.has(m[1].toLowerCase()) ? m[1] : null;
+        if (alias && new RegExp('\\b' + alias + '\\.created_at\\b', 'i').test(lit)) return false;
+        const tables = (lit.match(/\b(?:FROM|JOIN)\s+\w+/gi) || []).length;
+        return !(tables <= 1 && /(?<![.\w])created_at\b/.test(lit));
+      });
+    });
+  })());
+
 ok('신청 이력 API 도 참여 시점 금액 우선',
   /COALESCE\(ca\.review_fee_snapshot, rc\.review_fee\) AS "reviewFee"/.test(rev));
 
