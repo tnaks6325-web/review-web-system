@@ -18,6 +18,7 @@
 
 const { classifyHeaders } = require('./worktableTemplate');
 const { CASH_RECEIPT_CHANNELS } = require('./cashReceiptChannels');
+const { isSheetHeaderRow } = require('./sheetHeader');
 
 const MAX_ROWS = 2000;          // prepareRosterSlots 상한과 같은 값(폭주 방지)
 const MAX_DAYS = 400;           // 날짜 분배 무한루프 백스톱
@@ -214,6 +215,17 @@ function buildWorktablePlan({ workOrder, template, options: o = {} } = {}) {
   if (buckets.length && optSum !== total) {
     blockers.push({ code: 'option_sum', message: `옵션 배분 합계(${optSum})가 총 건수(${total})와 다릅니다.` });
   }
+  /* ★★ 시스템이 이 줄을 **헤더로 인식하지 못하면 그 탭은 통째로 파싱되지 않는다**
+     (인덱스가 안 만들어져 리뷰어 검색·제출·행배정이 전부 죽는다). 게다가 헤더 줄을 못 찾으면
+     행 번호가 어긋나 작업대 표와 시트가 따로 논다. 그래서 이건 경고가 아니라 **잠금**이다.
+     판정은 인덱스 빌더와 **같은 함수**(isSheetHeaderRow) — 사본을 두면 판정이 갈린다. */
+  if (columns.length && !isSheetHeaderRow(columns.map(c => c.name))) {
+    blockers.push({
+      code: 'header_unrecognizable',
+      message: '이 열 구성은 시스템이 "열 이름 줄"로 인식하지 못합니다 — 수취인·연락처·주소·결제금액처럼 시스템이 아는 열을 2개 이상 넣어 주세요.',
+    });
+  }
+
   const dup = {};
   columns.forEach(c => { if (c.role) dup[c.role] = (dup[c.role] || 0) + 1; });
   const dupRoles = Object.keys(dup).filter(r => dup[r] > 1);

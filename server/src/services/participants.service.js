@@ -69,8 +69,12 @@ async function importTabFromIndex({ sheetId, tabName, dryRun = false, by = 'test
          --   campaign_participants.* = 갱신 전(기존행) 값(EXCLUDED=새 행). 기존행 source='import'면 새 상태로,
          --   'manual'(직접 토글/추가)이면 보존. 한 번 손대면 그 행은 통째로 수동관리(컬럼별 provenance 없음).
          --   manual 추가행(seq 900000+)은 애초에 seq 충돌이 없어 여기 안 걸림.
-         is_submitted = CASE WHEN campaign_participants.source='import' THEN EXCLUDED.is_submitted ELSE campaign_participants.is_submitted END,
-         is_paid      = CASE WHEN campaign_participants.source='import' THEN EXCLUDED.is_paid      ELSE campaign_participants.is_paid END,
+         -- ★★ 'worktable'(작업표가 미리 만든 빈 줄)도 import 처럼 상태를 따라가야 한다 —
+         --   'manual' 로 두면 리뷰어가 리뷰를 내도 **리뷰제출·입금 표시가 영영 안 켜진다**
+         --   (담당자 눈엔 아무도 리뷰를 안 낸 것처럼 보인다). 사람이 만든 게 아니라
+         --   시스템이 자리만 잡아둔 줄이므로 '보존' 대상이 아니다.
+         is_submitted = CASE WHEN campaign_participants.source IN ('import','worktable') THEN EXCLUDED.is_submitted ELSE campaign_participants.is_submitted END,
+         is_paid      = CASE WHEN campaign_participants.source IN ('import','worktable') THEN EXCLUDED.is_paid      ELSE campaign_participants.is_paid END,
          deleted_at = NULL, imported_at = NOW()
        RETURNING (xmax = 0) AS inserted`,
       [sheetId, r.tab_gid, tabName, r.campaign_name, r.row_index, r.reviewer_name, r.recipient_name, r.phone8, r.round,
@@ -203,6 +207,69 @@ async function addParticipant({ sheetId, tabName, reviewerName, recipientName, p
 // 발주 기준 명단 골격(빈 슬롯) 벌크 생성 — 부족분(target − 현재 활성)만큼 manual 슬롯을 원자 배정.
 //   ★ B 내부 전용(구글시트·주문 무접촉), gap-fill·멱등(이미 target 충족이면 0개). seq 레이스는 23505 재시도.
 //   슬롯 = reviewer 공란 + option_text(옵션 라운드로빈)·product_name(발주 상품) 프리필. 재투영에 면역(source='manual').
+/**
+ * 작업표 스켈레톤 행 — 시트에 만든 빈 줄을 작업대 표에도 미리 보이게 한다. (M2b-2)
+ *
+ * ★★ **seq = 시트의 실제 행 번호**여야 한다. 이게 어긋나면 주문이 들어올 때
+ *   `importTabFromIndex` 의 `ON CONFLICT (sheet_id, tab_name, seq)` 가 제자리 갱신을 못 하고
+ *   **새 행을 만들어** 빈 100줄 + 채워진 30줄 = 130줄로 표가 두 겹이 된다.
+ *   그래서 `prepareRosterSlots` 의 900000+ 대역을 쓰지 않는다(그건 시트 행을 모를 때용).
+ * ★ `source='worktable'` — 투영 업서트가 이 값을 import 처럼 다뤄 리뷰제출·입금 상태를 따라간다.
+ *   `_reconcileSeen` 은 'import' 만 비활성화하므로 이 빈 줄들은 투영에도 살아남는다.
+ * ★ **ON CONFLICT DO NOTHING** — 같은 작업표를 두 번 만들거나 이미 주문이 들어온 줄이 있으면
+ *   기존 행을 절대 건드리지 않는다(멱등·비파괴).
+ */
+async function createWorktableSlots({ sheetId, tabName, tabGid = null, headerRow, rows = [], productName = null, by = 'system' } = {}) {
+  if (!sheetId || !tabName) throw new Error('createWorktableSlots: sheetId, tabName 필수');
+  const hr = parseInt(headerRow, 10);
+  if (!Number.isInteger(hr) || hr < 1) throw new Error('createWorktableSlots: headerRow 필수(시트 행 번호)');
+  const list = (Array.isArray(rows) ? rows : []).slice(0, 2000);
+  if (!list.length) return { created: 0 };
+
+  const db = getPool();
+  const ph = [], vals = [];
+  list.forEach((r, i) => {
+    const seq = hr + i + 1;                       // 헤더 바로 아래부터 = 시트 실제 행 번호
+    const b = i * 3;
+    ph.push(`($1,$2,$3,${seq},NULL,NULL,NULL,NULL,$${b + 4},$${b + 5},'worktable',$${b + 6},NOW())`);
+    vals.push(r && r.optionKey ? String(r.optionKey).slice(0, 200) : null, productName || null, String(by).slice(0, 100));
+  });
+  const { rowCount } = await db.query(
+    `INSERT INTO campaign_participants
+       (sheet_id, tab_gid, tab_name, seq, reviewer_name, recipient_name, phone8, round, option_text, product_name, source, updated_by, updated_at)
+     VALUES ${ph.join(',')}
+     ON CONFLICT (sheet_id, tab_name, seq) DO NOTHING`,
+    [sheetId, tabGid, tabName, ...vals]);
+  return { created: rowCount, firstSeq: hr + 1, lastSeq: hr + list.length };
+}
+
+/**
+ * 작업표 되돌리기 — 작업대 표에서 그 탭의 줄을 내린다. (시트는 건드리지 않는다)
+ *
+ * ★ 주문이 들어온 줄이 있으면 **바로 지우지 않고 목록을 돌려준다**(사용자 확정):
+ *   담당자가 "내부에서 진행한 테스트건"임을 확인한 뒤 `confirmed:true` 로 다시 부르면 최종 삭제.
+ * ★ 삭제는 **소프트**(`deleted_at`) — 이력이 남는다. 그리고 **주문 원장은 건드리지 않는다**
+ *   (여기서 지우는 것은 작업대 표의 줄일 뿐, 실제 주문 기록·시트는 그대로다).
+ */
+async function deleteWorktableRows({ sheetId, tabName, confirmed = false, by = 'admin' } = {}) {
+  if (!sheetId || !tabName) throw new Error('deleteWorktableRows: sheetId, tabName 필수');
+  const db = getPool();
+  const { rows: withOrder } = await db.query(
+    `SELECT seq, recipient_name AS "recipient", phone8, order_submission_id IS NOT NULL AS "hasOrder"
+       FROM campaign_participants
+      WHERE sheet_id=$1 AND tab_name=$2 AND deleted_at IS NULL
+        AND (order_submission_id IS NOT NULL OR phone8 IS NOT NULL)
+      ORDER BY seq LIMIT 200`, [sheetId, tabName]);
+  if (withOrder.length && !confirmed) {
+    return { ok: false, needsConfirm: true, filledCount: withOrder.length, filled: withOrder };
+  }
+  const { rowCount } = await db.query(
+    `UPDATE campaign_participants
+        SET deleted_at = NOW(), active = FALSE, updated_by = $3, updated_at = NOW()
+      WHERE sheet_id=$1 AND tab_name=$2 AND deleted_at IS NULL`, [sheetId, tabName, String(by).slice(0, 100)]);
+  return { ok: true, deleted: rowCount, hadFilled: withOrder.length };
+}
+
 async function prepareRosterSlots({ sheetId, tabName, target, options = [], productName = null, by = 'system' } = {}) {
   if (!sheetId || !tabName) throw new Error('prepareRosterSlots: sheetId, tabName 필수');
   const tgt = Math.max(0, Math.min(parseInt(target, 10) || 0, 2000));   // 상한(폭주 방지)
@@ -291,6 +358,7 @@ async function listActiveTabs({ limit = 500 } = {}) {
 }
 
 module.exports = {
+  createWorktableSlots, deleteWorktableRows,
   importTabFromIndex,
   syncImportedTabs,
   listParticipants,

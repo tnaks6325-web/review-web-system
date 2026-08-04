@@ -3059,9 +3059,14 @@ async function wtpCreate(){
                   skipWeekends:f.skipWeekends!==false, holidays:f.holidays||[] },
   })});
   if(r&&r.ok){
+    _WTP.made={sheetId:r.sheetId,tabName:r.tabName};
+    const slotNote=(r.slots&&r.slots.error)
+      ? ` <b style="color:#B45309">작업대 표에는 반영하지 못했습니다(${esc(r.slots.error)}) — 시트는 정상입니다.</b>`
+      : (r.slots?` 작업대 표에도 ${r.slots.created}줄이 준비됐습니다.`:'');
     if(msg) msg.innerHTML=`✅ <b>${esc(r.tabName)}</b> 탭을 만들었습니다 (${r.rowsWritten}행). `
       +`<a href="${esc(r.tabUrl)}" target="_blank" rel="noopener" style="color:#1D4ED8">시트 열기 ↗</a>`
-      +` · 작업오더에 URL을 연결했습니다. <b>접수는 확인 후 직접</b> 눌러 주세요.`;
+      +` · 작업오더에 URL을 연결했습니다.${slotNote} <b>접수는 확인 후 직접</b> 눌러 주세요.`
+      +` <button class="btn xs" onclick="wtpDelete()" style="margin-left:6px">작업표 삭제</button>`;
     btn.textContent='만들어짐'; _toast('작업표를 만들었습니다');
     try{ _loadOrders(); }catch(_){}
   }else{
@@ -3069,6 +3074,27 @@ async function wtpCreate(){
     const why=(r&&r.blockers&&r.blockers.length)?r.blockers.map(b=>b.message).join(' / '):((r&&r.error)||'오류');
     if(msg) msg.innerHTML=`<b style="color:#B91C1C">만들지 못했습니다: ${esc(why)}</b>`;
   }
+}
+
+/* 작업표 되돌리기 — **작업대 표의 줄만** 내린다(시트 탭·주문 기록은 그대로).
+   ★ 주문이 들어온 줄이 있으면 그 목록을 보여주고 "내부 테스트건" 확인을 받은 뒤에만 최종 삭제.
+   ★ 시트 탭은 시스템이 지우지 않는다 — 되돌리기 어려운 파괴는 사람 손에 남긴다. */
+async function wtpDelete(){
+  const m=_WTP&&_WTP.made; if(!m){ _toast('삭제할 작업표 정보가 없습니다'); return; }
+  const send=async(confirmed)=>api('/api/trackb/worktable/delete',{method:'POST',
+    body:JSON.stringify({sheetId:m.sheetId,tabName:m.tabName,confirmed:!!confirmed})});
+  if(!confirm(`"${m.tabName}" 작업표를 작업대 표에서 내립니다.\n\n· 구글시트 탭은 지워지지 않습니다(필요하면 직접 삭제).\n· 주문 기록도 지워지지 않습니다.\n\n계속할까요?`)) return;
+  let r=await send(false);
+  if(r&&r.needsConfirm){
+    const list=(r.filled||[]).slice(0,10)
+      .map(f=>`  · ${f.seq}번 줄 ${f.recipient||'(이름 없음)'}${f.hasOrder?' — 주문 있음':''}`).join('\n');
+    if(!confirm(`⚠ 이미 사람이 들어온 줄이 ${r.filledCount}건 있습니다.\n\n${list}${r.filledCount>10?'\n  …':''}\n\n`
+      +`내부에서 진행한 테스트건이 맞습니까?\n확인을 누르면 이 줄들도 함께 표에서 내려갑니다(주문 기록 자체는 남습니다).`)) return;
+    r=await send(true);
+  }
+  if(r&&r.ok){ _toast(`작업표를 내렸습니다 (${r.deleted}줄)`); const msg=document.getElementById('wtpCreateMsg');
+    if(msg) msg.innerHTML=`작업대 표에서 <b>${r.deleted}줄</b>을 내렸습니다. 구글시트 탭은 그대로이니 필요하면 직접 삭제하세요.`; }
+  else _toast('⚠ 삭제 실패'+(r&&r.error?': '+r.error:''));
 }
 
 function _wtpRender(){
