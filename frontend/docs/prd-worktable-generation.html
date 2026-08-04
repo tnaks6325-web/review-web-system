@@ -1,0 +1,588 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>작업표 생성 — 통합작업대 업체별 작업생성 PRD·구현방식 시안</title>
+<style>
+  *,*::before,*::after{box-sizing:border-box}
+
+  :root{
+    --paper:#F4F5F7; --card:#FFFFFF; --ink:#12151A; --muted:#59626F; --faint:#8B94A1;
+    --line:#E1E5EB; --line-soft:#EDF0F4;
+    --acc:#2563A8; --acc-bg:#E9F0F9; --acc-edge:#B7CFE9;
+    --pass:#127A5E; --pass-bg:#E5F3EE; --pass-edge:#A6D6C6;
+    --susp:#9A6414; --susp-bg:#FBF2E1; --susp-edge:#E7D2A3;
+    --fail:#B3382E; --fail-bg:#FAE9E7; --fail-edge:#EAB6B0;
+    --shadow:0 1px 2px rgba(18,21,26,.05), 0 10px 30px rgba(18,21,26,.06);
+    --mono:ui-monospace,SFMono-Regular,"SF Mono",Menlo,Consolas,"D2Coding",monospace;
+    --sans:"Pretendard Variable",Pretendard,-apple-system,BlinkMacSystemFont,"Apple SD Gothic Neo","Malgun Gothic","Noto Sans KR",system-ui,sans-serif;
+  }
+  @media (prefers-color-scheme: dark){
+    :root{
+      --paper:#101317; --card:#171B21; --ink:#E7EBF1; --muted:#98A1AE; --faint:#6E7885;
+      --line:#252B33; --line-soft:#1E232A;
+      --acc:#7FB2E8; --acc-bg:#14263A; --acc-edge:#28486B;
+      --pass:#61C4A4; --pass-bg:#102822; --pass-edge:#22493D;
+      --susp:#E0B571; --susp-bg:#2B2214; --susp-edge:#4C3C1E;
+      --fail:#E79A92; --fail-bg:#321B18; --fail-edge:#5A2E28;
+      --shadow:0 1px 2px rgba(0,0,0,.45), 0 10px 30px rgba(0,0,0,.3);
+    }
+  }
+  :root[data-theme="dark"]{
+    --paper:#101317; --card:#171B21; --ink:#E7EBF1; --muted:#98A1AE; --faint:#6E7885;
+    --line:#252B33; --line-soft:#1E232A;
+    --acc:#7FB2E8; --acc-bg:#14263A; --acc-edge:#28486B;
+    --pass:#61C4A4; --pass-bg:#102822; --pass-edge:#22493D;
+    --susp:#E0B571; --susp-bg:#2B2214; --susp-edge:#4C3C1E;
+    --fail:#E79A92; --fail-bg:#321B18; --fail-edge:#5A2E28;
+    --shadow:0 1px 2px rgba(0,0,0,.45), 0 10px 30px rgba(0,0,0,.3);
+  }
+  :root[data-theme="light"]{
+    --paper:#F4F5F7; --card:#FFFFFF; --ink:#12151A; --muted:#59626F; --faint:#8B94A1;
+    --line:#E1E5EB; --line-soft:#EDF0F4;
+    --acc:#2563A8; --acc-bg:#E9F0F9; --acc-edge:#B7CFE9;
+    --pass:#127A5E; --pass-bg:#E5F3EE; --pass-edge:#A6D6C6;
+    --susp:#9A6414; --susp-bg:#FBF2E1; --susp-edge:#E7D2A3;
+    --fail:#B3382E; --fail-bg:#FAE9E7; --fail-edge:#EAB6B0;
+    --shadow:0 1px 2px rgba(18,21,26,.05), 0 10px 30px rgba(18,21,26,.06);
+  }
+
+  html{-webkit-text-size-adjust:100%}
+  body{margin:0; background:var(--paper); color:var(--ink); font-family:var(--sans); line-height:1.62; -webkit-font-smoothing:antialiased}
+  .wrap{max-width:1140px; margin:0 auto; padding:40px 20px 90px; display:flex; flex-direction:column; gap:46px}
+
+  /* ── 문서 헤더 ── */
+  .head{border-bottom:1px solid var(--line); padding-bottom:26px; display:flex; flex-direction:column; gap:14px}
+  .eyebrow{margin:0; font-family:var(--mono); font-size:11px; font-weight:600; letter-spacing:.16em; text-transform:uppercase; color:var(--acc)}
+  h1{margin:0; font-size:clamp(26px,4vw,37px); font-weight:800; letter-spacing:-.028em; line-height:1.16; text-wrap:balance}
+  .lede{margin:0; max-width:66ch; color:var(--muted); font-size:15.5px}
+  .lede b{color:var(--ink)}
+  .chips{display:flex; gap:7px; flex-wrap:wrap}
+  .chip{font-family:var(--mono); font-size:11.5px; font-weight:550; padding:4px 10px; border-radius:7px; border:1px solid var(--line); background:var(--card); color:var(--muted)}
+  .chip.a{border-color:var(--acc-edge); background:var(--acc-bg); color:var(--acc)}
+
+  /* ── 섹션 ── */
+  section{display:flex; flex-direction:column; gap:16px}
+  .shead{display:flex; align-items:baseline; gap:11px; flex-wrap:wrap}
+  .snum{font-family:var(--mono); font-size:12px; font-weight:650; color:var(--acc); letter-spacing:.08em; border:1px solid var(--acc-edge); background:var(--acc-bg); border-radius:6px; padding:2px 8px; flex:none}
+  h2{margin:0; font-size:20px; font-weight:760; letter-spacing:-.018em}
+  h3{margin:0; font-size:15.5px; font-weight:720}
+  .sdesc{margin:0; color:var(--muted); font-size:14px; max-width:78ch}
+  .sdesc b, .card b{color:var(--ink); font-weight:700}
+
+  .card{background:var(--card); border:1px solid var(--line); border-radius:13px; padding:18px 20px; box-shadow:var(--shadow); display:flex; flex-direction:column; gap:12px}
+  .grid2{display:grid; grid-template-columns:1fr 1fr; gap:14px}
+  @media (max-width:820px){.grid2{grid-template-columns:1fr}}
+
+  /* 흐름 다이어그램 */
+  .flow{display:flex; align-items:stretch; gap:8px; flex-wrap:wrap}
+  .fstep{flex:1 1 150px; min-width:140px; border:1px solid var(--line); border-radius:11px; padding:11px 13px; background:var(--paper); font-size:13px}
+  .fstep .t{font-weight:700; font-size:13px; margin-bottom:3px}
+  .fstep .d{color:var(--muted); font-size:12px; line-height:1.5}
+  .fstep.bad{border-color:var(--fail-edge); background:var(--fail-bg)}
+  .fstep.bad .t{color:var(--fail)}
+  .fstep.good{border-color:var(--pass-edge); background:var(--pass-bg)}
+  .fstep.good .t{color:var(--pass)}
+  .farrow{align-self:center; color:var(--faint); font-weight:700; flex:none}
+
+  ul.list{margin:0; padding-left:19px; display:flex; flex-direction:column; gap:7px; font-size:13.8px}
+  ul.list li{color:var(--muted)}
+  ul.list li b{color:var(--ink)}
+  ul.list li .why{display:block; font-size:12.5px; color:var(--faint)}
+
+  /* 컬럼 칩 (고정/자동/추가) */
+  .colchips{display:flex; flex-wrap:wrap; gap:7px}
+  .cc{font-size:12.5px; font-weight:600; padding:5px 11px; border-radius:8px; border:1px solid var(--line); background:var(--paper)}
+  .cc.fix{border-color:var(--acc-edge); background:var(--acc-bg); color:var(--acc)}
+  .cc.auto{border-color:var(--pass-edge); background:var(--pass-bg); color:var(--pass)}
+  .cc.var{border-color:var(--susp-edge); background:var(--susp-bg); color:var(--susp)}
+  .legend{display:flex; gap:14px; flex-wrap:wrap; font-size:12.5px; color:var(--muted); align-items:center}
+  .dot{display:inline-block; width:10px; height:10px; border-radius:3px; margin-right:5px; vertical-align:-1px}
+  .dot.fix{background:var(--acc)} .dot.auto{background:var(--pass)} .dot.var{background:var(--susp)}
+
+  /* 표 */
+  .tbl{width:100%; border-collapse:collapse; font-size:13px}
+  .tbl th{background:var(--line-soft); border:1px solid var(--line); padding:7px 10px; text-align:left; font-size:12.3px; white-space:nowrap}
+  .tbl td{border:1px solid var(--line); padding:7px 10px; color:var(--muted); vertical-align:top}
+  .tbl td b{color:var(--ink)}
+  .tblwrap{overflow-x:auto}
+
+  /* 와이어프레임 공통 */
+  .wf{border:1px solid var(--line); border-radius:13px; background:var(--card); box-shadow:var(--shadow); overflow:hidden}
+  .wf-bar{display:flex; align-items:center; gap:8px; background:var(--line-soft); border-bottom:1px solid var(--line); padding:9px 14px; font-size:12.5px; color:var(--muted)}
+  .wf-bar .dots{display:inline-flex; gap:5px}
+  .wf-bar .dots i{width:9px; height:9px; border-radius:50%; background:var(--line); display:inline-block}
+  .wf-body{padding:16px 18px; display:flex; flex-direction:column; gap:12px}
+  .wf-note{font-size:12.5px; color:var(--faint); padding:0 4px}
+
+  .btn{display:inline-flex; align-items:center; gap:6px; font-size:12.8px; font-weight:650; padding:7px 13px; border-radius:8px; border:1px solid var(--line); background:var(--paper); color:var(--ink); white-space:nowrap}
+  .btn.pri{background:var(--acc); border-color:var(--acc); color:#fff}
+  .btn.ghost{color:var(--muted)}
+
+  .field{display:flex; flex-direction:column; gap:4px; font-size:12.5px}
+  .field label{font-weight:650; color:var(--muted); font-size:12px}
+  .field .in{border:1px solid var(--line); border-radius:8px; background:var(--paper); padding:7px 10px; color:var(--ink); font-size:13px}
+  .fieldrow{display:flex; gap:10px; flex-wrap:wrap}
+  .fieldrow .field{flex:1 1 130px}
+
+  /* 미니 그리드(작업표 미리보기) */
+  .mini{overflow-x:auto}
+  .mini table{border-collapse:collapse; font-size:12px; min-width:860px}
+  .mini th{border:1px solid var(--line); background:var(--line-soft); padding:5px 9px; white-space:nowrap; font-size:11.5px}
+  .mini td{border:1px solid var(--line); padding:5px 9px; white-space:nowrap; color:var(--muted)}
+  .mini th.fix{background:var(--acc-bg); color:var(--acc); border-color:var(--acc-edge)}
+  .mini th.auto{background:var(--pass-bg); color:var(--pass); border-color:var(--pass-edge)}
+  .mini th.var{background:var(--susp-bg); color:var(--susp); border-color:var(--susp-edge)}
+  .mini td.pre{color:var(--ink); font-weight:600}
+  .mini td.empty{background:var(--paper); color:var(--faint); font-style:italic}
+
+  .callout{border-left:3px solid var(--acc); background:var(--acc-bg); border-radius:0 10px 10px 0; padding:12px 15px; font-size:13.3px; color:var(--ink)}
+  .callout.warn{border-left-color:var(--susp); background:var(--susp-bg)}
+  .callout.risk{border-left-color:var(--fail); background:var(--fail-bg)}
+  .callout .tt{font-weight:750; margin-bottom:3px}
+  .callout p{margin:0; color:var(--muted); font-size:13px}
+  .callout p b{color:var(--ink)}
+
+  /* 로드맵 */
+  .mile{display:flex; flex-direction:column; gap:10px}
+  .m{display:flex; gap:13px; align-items:flex-start; background:var(--card); border:1px solid var(--line); border-radius:11px; padding:13px 16px; box-shadow:var(--shadow)}
+  .m .no{flex:none; font-family:var(--mono); font-weight:700; font-size:12px; color:var(--acc); border:1px solid var(--acc-edge); background:var(--acc-bg); border-radius:7px; padding:3px 9px; margin-top:1px}
+  .m .bd{display:flex; flex-direction:column; gap:3px}
+  .m .bd .t{font-weight:720; font-size:14.2px}
+  .m .bd .d{font-size:13px; color:var(--muted)}
+  .m .bd .done{font-size:12.3px; color:var(--pass); font-weight:600}
+
+  .foot{border-top:1px solid var(--line); padding-top:18px; font-size:12.5px; color:var(--faint)}
+  .tech{font-size:12px; color:var(--faint); font-family:var(--mono); background:var(--paper); border:1px solid var(--line-soft); border-radius:7px; padding:8px 11px; line-height:1.7}
+</style>
+</head>
+<body>
+<div class="wrap">
+
+  <!-- ══════════ 헤더 ══════════ -->
+  <header class="head">
+    <p class="eyebrow">PRD · Implementation Draft — v1.0 (시안)</p>
+    <h1>작업표 생성<br>통합작업대에서 업체별 작업을 바로 만든다</h1>
+    <p class="lede">
+      지금은 100건짜리 작업을 시작하려면 <b>1번부터 100번까지 행이 미리 준비된 구글시트</b>를 만들어
+      작업오더에 첨부해야 합니다. 이 문서는 그 시트 준비를 없애고,
+      <b>통합작업대가 100건짜리 작업표를 자동으로 만들어 주는 방식</b>의 기획(PRD)과 구현 방법을 담은 시안입니다.
+      비개발자도 읽을 수 있게 썼고, 개발 참고용 각주는 회색 상자로 분리했습니다.
+    </p>
+    <div class="chips">
+      <span class="chip a">통합작업대 (workdesk)</span>
+      <span class="chip">작업오더 연동</span>
+      <span class="chip">시트 의존 축소</span>
+      <span class="chip">Track B 확장</span>
+      <span class="chip">2026-08-04</span>
+    </div>
+  </header>
+
+  <!-- ══════════ 01 현재 ══════════ -->
+  <section>
+    <div class="shead"><span class="snum">01</span><h2>지금은 어떻게 일하고 있나</h2></div>
+    <p class="sdesc">
+      작업 하나를 시작하는 데 <b>구글시트 준비가 항상 먼저</b>입니다.
+      100건짜리 작업이면 누군가 시트에 100줄을 만들고, 날짜를 나눠 적고, 옵션을 줄마다 배정한 뒤
+      그 URL을 작업오더에 붙여야 시스템이 일을 시작할 수 있습니다.
+    </p>
+    <div class="card">
+      <div class="flow">
+        <div class="fstep bad"><div class="t">① 시트 수작업 준비</div><div class="d">100행 생성 · 날짜 분배 · 옵션 배정 · 서식 복사 (사람 손)</div></div>
+        <span class="farrow">→</span>
+        <div class="fstep"><div class="t">② 작업오더 제출</div><div class="d">AE가 시트 URL 첨부 (URL 없으면 제출 불가)</div></div>
+        <span class="farrow">→</span>
+        <div class="fstep"><div class="t">③ 관리자 접수</div><div class="d">접수 시점에 탭이 시스템에 등록됨</div></div>
+        <span class="farrow">→</span>
+        <div class="fstep"><div class="t">④ 시스템이 시트를 읽음</div><div class="d">읽은 내용으로 검색·제출·모집공고가 활성화</div></div>
+      </div>
+      <ul class="list">
+        <li><b>준비 시간이 든다</b> — 작업마다 시트 100줄을 만들고 날짜·옵션을 손으로 나눈다.<span class="why">같은 일을 매번 반복. 서식이 담당자마다 조금씩 달라 시스템 인식률도 흔들린다.</span></li>
+        <li><b>시트가 단일 장애점</b> — 직원이 행을 삭제하면 아래 기록이 전부 밀리고, 수기 입력과 시스템 기록이 경합해 "유령 기록" 사고가 났던 이력이 있다.<span class="why">이를 막으려고 시트 상단 경고문, 사후검증, 자동복구 같은 방어 장치를 계속 덧대 왔다.</span></li>
+        <li><b>구글 읽기/쓰기 한도(쿼터)를 계속 관리해야 한다</b> — 분당 호출 수를 나눠 쓰는 장치가 이미 여러 겹이다.<span class="why">작업이 늘수록 이 한도가 성장의 상한이 된다.</span></li>
+      </ul>
+    </div>
+  </section>
+
+  <!-- ══════════ 02 목표 ══════════ -->
+  <section>
+    <div class="shead"><span class="snum">02</span><h2>무엇으로 바꾸나 — 한 문장 요약</h2></div>
+    <p class="sdesc">
+      <b>"100건 작업이면, 통합작업대가 100건짜리 작업표를 미리 만들어 준다."</b>
+      작업오더에 적힌 모집인원·일건수·옵션만으로 표의 뼈대가 자동으로 완성되고,
+      담당자는 미리보기에서 확인·조정만 하면 됩니다.
+    </p>
+    <div class="card">
+      <div class="flow">
+        <div class="fstep"><div class="t">① 작업오더 제출</div><div class="d">시트 URL 없이도 제출 가능 (인원·일건수·옵션이 재료)</div></div>
+        <span class="farrow">→</span>
+        <div class="fstep good"><div class="t">② 작업표 자동 생성</div><div class="d">100행 + 날짜 분배 + 옵션 배정 + 표준 컬럼이 자동 완성</div></div>
+        <span class="farrow">→</span>
+        <div class="fstep"><div class="t">③ 미리보기 · 확인</div><div class="d">담당자가 열/행/날짜를 눈으로 확인, 필요하면 수정 후 [생성]</div></div>
+        <span class="farrow">→</span>
+        <div class="fstep good"><div class="t">④ 즉시 작업 시작</div><div class="d">모집공고 발행·리뷰어 제출·정산이 이 표 위에서 진행</div></div>
+      </div>
+      <div class="callout">
+        <div class="tt">핵심 원칙 — 새로 짓지 않고, 이미 있는 것을 잇는다</div>
+        <p>통합작업대에는 이미 <b>작업별 명단 표(참여자 원장)</b>, <b>발주 기준 빈 슬롯 생성 기능</b>,
+        <b>행별 메모·커스텀 열</b>, <b>편집 기록 원장</b>이 돌아가고 있습니다.
+        작업표 생성은 이 부품들을 "작업 시작 시점"으로 앞당겨 꿰는 일이지, 별도 시스템을 새로 만드는 일이 아닙니다.</p>
+      </div>
+      <div class="tech">참고(개발): campaign_participants(명단 원장) · prepareRosterFromWorkOrder/prepareRosterSlots(발주 기준 gap-fill 빈 슬롯 생성 — 이미 구현) · participant_edits(오버레이 편집) · trackb_custom_columns(커스텀 열) · trackb_work_order_links(발주↔탭 링크)</div>
+    </div>
+  </section>
+
+  <!-- ══════════ 03 학습 데이터 ══════════ -->
+  <section>
+    <div class="shead"><span class="snum">03</span><h2>어떤 항목이 고정이고, 어떤 항목이 변칙인가 — 근거 데이터</h2></div>
+    <p class="sdesc">
+      "표에 어떤 열이 필요한가"는 추측할 필요가 없습니다. 시스템에는 이미
+      <b>운영 중인 모든 시트 탭의 열 구성 스냅샷</b>과 <b>열 의미 판정 기록</b>이 쌓여 있어,
+      실제 데이터로 고정/변칙을 분류할 수 있습니다.
+    </p>
+    <div class="card">
+      <h3>이미 쌓여 있는 학습 재료 3가지</h3>
+      <ul class="list">
+        <li><b>전 탭 열 구성 스냅샷</b> — 5분마다 모든 시트를 복제해 두는 장치(RAW 미러)가 탭마다 "감지된 헤더 목록"을 보관 중.<span class="why">수십 개 탭의 헤더를 집계하면 "거의 모든 탭에 있는 열"과 "일부 탭에만 있는 열"이 통계로 갈린다.</span></li>
+        <li><b>열 의미 판정 기록</b> — 어떤 헤더가 수취인·연락처·결제금액 등으로 판정됐는지의 매핑 원장과 판정 근거 기록.<span class="why">헤더 이름이 탭마다 달라도("연락처"/"전화번호"/"핸드폰") 같은 의미로 묶을 수 있다.</span></li>
+        <li><b>제출·기입 실적</b> — 어떤 열이 리뷰어 제출로 채워지고, 어떤 열은 관리자가 미리 적어 두는지(작업지시)의 실사용 기록.<span class="why">"시스템이 쓰는 칸 / 사람이 미리 적는 칸 / 끝까지 비는 칸"을 구분하는 근거.</span></li>
+      </ul>
+      <div class="tech">참고(개발): raw_sheet_tabs.detected_headers(탭별 헤더 스냅샷) · tab_column_mappings + index_master.detect_source(컬럼 판정 SoT/관측) · mapOrderToSheetRow 키워드 표(제출이 채우는 칸의 단일 출처) · optionWriteColumns(작업지시 칸 판정)</div>
+    </div>
+
+    <div class="card">
+      <h3>분류 결과 — 3계층 템플릿</h3>
+      <div class="legend">
+        <span><i class="dot fix"></i><b>코어(고정)</b> — 거의 모든 작업에 공통</span>
+        <span><i class="dot auto"></i><b>자동 채움</b> — 생성 시 시스템이 값까지 넣는 열</span>
+        <span><i class="dot var"></i><b>작업별(변칙)</b> — 채널·작업 유형에 따라 붙는 열</span>
+      </div>
+      <div class="colchips">
+        <span class="cc auto">번호</span>
+        <span class="cc auto">구매일자</span>
+        <span class="cc var">옵션 / 리뷰옵션</span>
+        <span class="cc fix">주문자</span>
+        <span class="cc fix">수취인</span>
+        <span class="cc var">쿠팡ID · 네이버ID</span>
+        <span class="cc fix">연락처</span>
+        <span class="cc fix">배송주소</span>
+        <span class="cc fix">은행</span>
+        <span class="cc fix">계좌번호</span>
+        <span class="cc fix">예금주</span>
+        <span class="cc fix">결제금액</span>
+        <span class="cc fix">주문번호</span>
+        <span class="cc fix">리뷰제출</span>
+        <span class="cc fix">입금</span>
+        <span class="cc fix">비고</span>
+        <span class="cc var">회차/차수</span>
+        <span class="cc var">현금영수증 관련</span>
+        <span class="cc var">커스텀 메모 열</span>
+      </div>
+      <div class="tblwrap"><table class="tbl">
+        <tr><th>계층</th><th>무엇이 결정하나</th><th>예시</th><th>생성 시 동작</th></tr>
+        <tr>
+          <td><b>① 코어(고정)</b></td>
+          <td>없음 — 항상 포함</td>
+          <td>주문자·수취인·연락처·주소·은행·계좌·예금주·결제금액·주문번호·리뷰제출·입금·비고</td>
+          <td>빈 칸으로 준비. 리뷰어 구매양식 제출이 채운다.</td>
+        </tr>
+        <tr>
+          <td><b>② 채널 레이어</b></td>
+          <td>구매채널 (상품 URL로 자동 판정 — 이미 있는 기능)</td>
+          <td>쿠팡→쿠팡ID열, 네이버→네이버ID열, 동시진행(NC)→두 열, 현영 탭→현금영수증 슬롯</td>
+          <td>채널에 맞는 열만 자동 추가.</td>
+        </tr>
+        <tr>
+          <td><b>③ 작업 레이어</b></td>
+          <td>작업오더 내용 + 담당자 추가</td>
+          <td>옵션열(옵션 2종 이상일 때), 리뷰형태(포토리뷰/텍스트 — 작업지시 선기입), 회차, 자유 메모 열</td>
+          <td>작업오더에서 자동 제안 → 미리보기에서 담당자가 추가·삭제.</td>
+        </tr>
+      </table></div>
+      <div class="callout warn">
+        <div class="tt">학습은 "제안"까지만, 확정은 사람이</div>
+        <p>헤더 통계로 만든 템플릿은 <b>미리보기의 기본값</b>일 뿐입니다. 실제 표 생성은 담당자가 미리보기에서
+        확인하고 누른 뒤에만 일어납니다. 자동 분류가 틀려도 잘못된 표가 조용히 만들어지는 일이 없게 하는 안전장치입니다.
+        (옵션 칸이 "상품옵션"인지 "작업지시"인지 헤더만으로 구분되지 않는다는 운영 교훈이 이미 문서화되어 있습니다.)</p>
+      </div>
+    </div>
+  </section>
+
+  <!-- ══════════ 04 생성 규칙 ══════════ -->
+  <section>
+    <div class="shead"><span class="snum">04</span><h2>작업표는 이렇게 만들어진다 — 행 자동 채움 규칙</h2></div>
+    <p class="sdesc">
+      열(템플릿)이 정해지면, 행은 작업오더의 숫자 3개(<b>모집인원 · 일건수 · 옵션표</b>)로 자동 완성됩니다.
+      지금까지 사람이 시트에 손으로 하던 배분을 규칙으로 옮긴 것입니다.
+    </p>
+    <div class="grid2">
+      <div class="card">
+        <h3>행 수 · 번호</h3>
+        <p class="sdesc">모집인원이 100이면 <b>1~100번 행 100줄</b>이 생성됩니다. 번호는 시스템이 매기고 바뀌지 않습니다.</p>
+        <h3 style="margin-top:6px">구매일자 자동 분배</h3>
+        <p class="sdesc">일건수가 20이면 <b>1~20행 = 1일차, 21~40행 = 2일차 …</b> 식으로 날짜가 자동 배정됩니다.
+        시작일·휴무 요일(예: 주말 제외)을 미리보기에서 고르면 실제 달력 날짜로 환산됩니다.</p>
+        <div class="callout">
+          <div class="tt">모집 일정과 자동으로 한 몸이 된다</div>
+          <p>지금도 시스템은 "시트의 날짜 칸"을 읽어 그날 모집 정원을 정합니다(시트 일정 자동 인식).
+          작업표가 날짜를 직접 만들면 그 규칙이 <b>역방향으로 그대로 재사용</b>되어,
+          날짜별 정원·이월·휴무일 처리가 별도 개발 없이 이어집니다.</p>
+        </div>
+      </div>
+      <div class="card">
+        <h3>옵션 배정</h3>
+        <p class="sdesc">작업오더의 옵션표(옵션명·수량)가 있으면 <b>옵션별 수량만큼 행에 나눠 적습니다</b>.
+        예: 골라담기 40 / 콰이어트 30 / 어나더 30 → 해당 행의 옵션 칸에 미리 기입.</p>
+        <h3 style="margin-top:6px">작업지시 선기입</h3>
+        <p class="sdesc">"포토리뷰" 같은 리뷰형태(작업지시)는 전 행에 미리 적어 둘 수 있습니다.
+        시스템은 <b>값이 있는 옵션 칸은 절대 덮어쓰지 않는다</b>는 기존 규칙(blank-only)을 그대로 따르므로,
+        선기입 값이 제출 과정에서 지워지는 사고는 구조적으로 차단됩니다.</p>
+        <h3 style="margin-top:6px">나머지 칸</h3>
+        <p class="sdesc">주문자·수취인·연락처 등 코어 열은 빈 칸으로 두고, <b>리뷰어의 구매양식 제출이 실시간으로 채웁니다</b>(지금과 동일한 경로).</p>
+      </div>
+    </div>
+    <div class="tech">참고(개발): 날짜 분배는 campaignSchedule.service(063)의 파생 규칙("그 날짜의 행 수 = 그날 정원")을 생성 방향으로 재사용 · 옵션 배정은 prepareRosterSlots의 라운드로빈 로직 확장 · 선기입 보호는 orderLedger.filterOptionWritesBlankOnly 기존 불변식 그대로</div>
+  </section>
+
+  <!-- ══════════ 05 화면 시안 ══════════ -->
+  <section>
+    <div class="shead"><span class="snum">05</span><h2>화면 시안 (와이어프레임)</h2></div>
+    <p class="sdesc">통합작업대의 기존 화면 구조(작업오더 탭 · 작업대 그리드)에 그대로 얹습니다. 새 화면은 "생성 미리보기" 하나뿐입니다.</p>
+
+    <!-- ① 진입 -->
+    <div class="wf">
+      <div class="wf-bar"><span class="dots"><i></i><i></i><i></i></span> 통합작업대 › 작업오더 탭 — 오더 펼침행 (진입 지점)</div>
+      <div class="wf-body">
+        <div style="border:1px solid var(--line); border-radius:10px; padding:12px 14px; background:var(--paper)">
+          <div style="display:flex; justify-content:space-between; align-items:center; gap:10px; flex-wrap:wrap">
+            <div>
+              <b>[뷰티] ○○브랜드 쿠션 리뷰 100건</b>
+              <span style="font-size:12px; color:var(--muted)"> · 담당 AE 김민수 · 모집 100명 · 일 20건 · 옵션 3종</span>
+            </div>
+            <div style="display:flex; gap:7px">
+              <span class="btn ghost">접수</span>
+              <span class="btn pri">📋 작업표 생성</span>
+            </div>
+          </div>
+          <div style="font-size:12.3px; color:var(--faint); margin-top:7px">
+            시트 URL: <i>(첨부 없음)</i> — 작업표 생성으로 시트 없이 시작하거나, 기존처럼 시트 URL을 첨부할 수도 있습니다 (병행 지원)
+          </div>
+        </div>
+        <p class="wf-note">· [작업표 생성] 버튼은 편집 권한 명단에 있는 사람에게만 보입니다(기존 작업오더 접수와 같은 권한 게이트).<br>
+        · 시트 URL이 이미 첨부된 오더는 기존 접수 흐름이 그대로 우선 — 이 기능은 <b>추가 선택지</b>이지 대체 강제가 아닙니다.</p>
+      </div>
+    </div>
+
+    <!-- ② 미리보기 모달 -->
+    <div class="wf">
+      <div class="wf-bar"><span class="dots"><i></i><i></i><i></i></span> 작업표 생성 — 미리보기 (생성 전 확인 화면)</div>
+      <div class="wf-body">
+        <div class="fieldrow">
+          <div class="field"><label>작업명 (자동)</label><div class="in">○○브랜드 쿠션 리뷰 100건</div></div>
+          <div class="field"><label>총 건수</label><div class="in">100</div></div>
+          <div class="field"><label>일건수</label><div class="in">20</div></div>
+          <div class="field"><label>시작일</label><div class="in">2026-08-10 (월)</div></div>
+          <div class="field"><label>휴무</label><div class="in">토 · 일 제외</div></div>
+        </div>
+        <div>
+          <label style="font-size:12px; font-weight:650; color:var(--muted)">표 구성 (열) — 칩을 눌러 빼거나, [＋열 추가]로 넣습니다</label>
+          <div class="colchips" style="margin-top:6px">
+            <span class="cc auto">번호</span><span class="cc auto">구매일자</span><span class="cc var">옵션</span>
+            <span class="cc fix">주문자</span><span class="cc fix">수취인</span><span class="cc var">쿠팡ID</span>
+            <span class="cc fix">연락처</span><span class="cc fix">배송주소</span><span class="cc fix">은행</span>
+            <span class="cc fix">계좌번호</span><span class="cc fix">예금주</span><span class="cc fix">결제금액</span>
+            <span class="cc fix">주문번호</span><span class="cc fix">리뷰제출</span><span class="cc fix">입금</span>
+            <span class="cc fix">비고</span><span class="cc" style="border-style:dashed">＋ 열 추가</span>
+          </div>
+          <div class="legend" style="margin-top:6px">
+            <span><i class="dot fix"></i>고정 — 제출이 채움</span>
+            <span><i class="dot auto"></i>자동 — 생성 시 값까지 기입</span>
+            <span><i class="dot var"></i>작업별 — 오더에서 자동 제안됨 (채널: 쿠팡 → 쿠팡ID열)</span>
+          </div>
+        </div>
+        <div style="border:1px solid var(--line); border-radius:10px; padding:11px 14px; background:var(--paper); font-size:13px">
+          <b>날짜 분배 미리보기</b>
+          <div style="color:var(--muted); margin-top:4px; line-height:1.8">
+            8/10(월) 20건 · 8/11(화) 20건 · 8/12(수) 20건 · 8/13(목) 20건 · 8/14(금) 20건 &nbsp;
+            <span style="color:var(--pass); font-weight:600">= 총 100건 ✓</span><br>
+            옵션 배분: 골라담기 40 · 콰이어트 30 · 어나더 30 &nbsp;<span style="color:var(--pass); font-weight:600">= 100 ✓</span>
+            &nbsp;·&nbsp; 리뷰형태 선기입: <b>포토리뷰</b> (전 행)
+          </div>
+        </div>
+        <div style="display:flex; justify-content:flex-end; gap:8px">
+          <span class="btn ghost">취소</span>
+          <span class="btn pri">✓ 이 구성으로 100행 생성</span>
+        </div>
+        <p class="wf-note">· 합계가 안 맞으면(옵션 합 ≠ 총 건수) 생성 버튼이 잠기고 이유가 표시됩니다.<br>
+        · 열 구성 기본값은 "이 업체·이 채널의 과거 작업 표"에서 학습된 것 — 처음 보는 유형이면 표준 코어만 제안됩니다.</p>
+      </div>
+    </div>
+
+    <!-- ③ 생성 결과 그리드 -->
+    <div class="wf">
+      <div class="wf-bar"><span class="dots"><i></i><i></i><i></i></span> 생성 결과 — 통합작업대 작업 그리드 (발췌)</div>
+      <div class="wf-body">
+        <div class="mini">
+          <table>
+            <tr>
+              <th class="auto">번호</th><th class="auto">구매일자</th><th class="var">옵션</th><th class="var">리뷰형태</th>
+              <th>주문자</th><th>수취인</th><th class="var">쿠팡ID</th><th>연락처</th><th>배송주소</th><th>결제금액</th><th>리뷰제출</th><th>입금</th>
+            </tr>
+            <tr><td class="pre">1</td><td class="pre">8/10 (월)</td><td class="pre">골라담기</td><td class="pre">포토리뷰</td><td class="empty">제출 대기</td><td class="empty"></td><td class="empty"></td><td class="empty"></td><td class="empty"></td><td class="empty"></td><td class="empty"></td><td class="empty"></td></tr>
+            <tr><td class="pre">2</td><td class="pre">8/10 (월)</td><td class="pre">골라담기</td><td class="pre">포토리뷰</td><td>김○○</td><td>김○○</td><td>kim***</td><td>010-****-1234</td><td>서울 ○○구 …</td><td>31,400</td><td class="empty"></td><td class="empty"></td></tr>
+            <tr><td class="pre">⋮</td><td class="pre">⋮</td><td class="pre">⋮</td><td class="pre">⋮</td><td class="empty" colspan="8" style="text-align:center">… 3 ~ 99행 …</td></tr>
+            <tr><td class="pre">100</td><td class="pre">8/14 (금)</td><td class="pre">어나더</td><td class="pre">포토리뷰</td><td class="empty">제출 대기</td><td class="empty"></td><td class="empty"></td><td class="empty"></td><td class="empty"></td><td class="empty"></td><td class="empty"></td><td class="empty"></td></tr>
+          </table>
+        </div>
+        <p class="wf-note">· 색이 있는 열 머리 = 생성 시 미리 채워진 열(번호·날짜·옵션·작업지시). 흰 열 = 리뷰어 제출이 실시간으로 채우는 열.<br>
+        · 2행은 제출이 이미 들어온 모습 — 지금의 작업대 그리드·행 메모·셀 색·편집 기능이 그대로 적용됩니다.</p>
+      </div>
+    </div>
+  </section>
+
+  <!-- ══════════ 06 구현 방식 ══════════ -->
+  <section>
+    <div class="shead"><span class="snum">06</span><h2>구현 방식 — 기존 시스템과 어떻게 이어지나</h2></div>
+    <p class="sdesc">
+      가장 중요한 설계 결정은 <b>"시트를 언제까지, 어떻게 두는가"</b>입니다.
+      한 번에 끊지 않고, 작업 단위로 안전하게 넘어가는 3개 모드를 둡니다.
+    </p>
+    <div class="tblwrap"><table class="tbl">
+      <tr><th>모드</th><th>작업표(작업대)</th><th>구글시트</th><th>언제 쓰나</th></tr>
+      <tr>
+        <td><b>A. 하이브리드</b><br><span style="font-size:12px">(출시 기본값)</span></td>
+        <td>작업표가 먼저 생성됨 (화면·편집의 기준)</td>
+        <td><b>시스템이 같은 구성의 시트를 자동 생성</b>해 뒤에서 동기화 — 주문 기록·정산 등 기존 파이프라인은 시트 경유 그대로</td>
+        <td>전환기 전체. 기존 파이프라인(행 배정·사후검증·백업)을 한 줄도 안 바꾸고 "시트 준비 수작업"만 없앤다.</td>
+      </tr>
+      <tr>
+        <td><b>B. DB 원본</b></td>
+        <td>작업표가 유일한 원본</td>
+        <td>보기용 사본 (시스템이 써 주기만 함)</td>
+        <td>Track B 전환 스위치(source_of_truth)가 'db'로 플립된 작업 — 이미 만들어진 게이트(불일치 0 검증)를 그대로 통과해야 한다.</td>
+      </tr>
+      <tr>
+        <td><b>C. 시트 없음</b></td>
+        <td>작업표만 존재</td>
+        <td>생성 안 함</td>
+        <td>최종 단계. 광고주 열람도 통합작업대 광고주 링크로 대체된 뒤.</td>
+      </tr>
+    </table></div>
+
+    <div class="grid2">
+      <div class="card">
+        <h3>하이브리드(A)가 기본값인 이유</h3>
+        <ul class="list">
+          <li><b>주문 기록 경로가 시트 복제본(RAW 미러)을 기준으로 행을 배정</b>한다 — 시트가 있는 한 이 검증된 경로를 그대로 쓴다.<span class="why">라이브 핫패스를 건드리지 않는 것이 이 저장소의 제1 원칙.</span></li>
+          <li><b>백업·재해복구 리허설이 시트/Drive 기준</b>으로 이미 구축돼 있다.</li>
+          <li><b>광고주·외부 공유가 아직 시트 습관</b>이다 — 습관 전환은 강제하지 않고 광고주 링크 기능이 흡수한다.</li>
+        </ul>
+      </div>
+      <div class="card">
+        <h3>새로 만드는 것 (최소 구성)</h3>
+        <ul class="list">
+          <li><b>템플릿 원장</b> — 작업표의 열 구성을 저장하는 표 1개 (업체·채널별 기본값 + 작업별 확정본).<span class="why">신규 테이블 1~2개. 기존 테이블 변경 없음(추가만 — Track B 3원칙).</span></li>
+          <li><b>헤더 학습 리포트</b> — 미러된 전 탭 헤더를 집계해 고정/변칙 통계를 내는 조회 기능 (읽기 전용).</li>
+          <li><b>생성 API + 미리보기 화면</b> — 발주 기준 빈 슬롯 생성(이미 있음)에 날짜 분배·옵션 배분·선기입을 얹은 확장판.</li>
+          <li><b>시트 자동 생성(모드 A)</b> — '새 시트생성' 기능(이미 있음)에 템플릿 헤더 + 행 선기입을 추가.</li>
+        </ul>
+      </div>
+    </div>
+    <div class="tech">참고(개발): 모드 A의 시트 생성은 기존 create-campaign-sheet 경로 재사용(시트/탭 생성·SA 권한부여 유지, DB 등록은 접수 시점 이연 규칙 그대로) · 선기입 행 쓰기는 배치 1회(쿼터 계산: 100행 ≈ 쓰기 1~2콜) · 날짜 칸 선기입은 063 시트 일정 인식이 그대로 읽어 모집 일정으로 파생 — 즉 시트를 받아 쓰던 기존 규칙과 완전 호환 · 모드 B 게이트는 부품6 source_of_truth + parity real=0 기존 장치 재사용</div>
+
+    <div class="callout risk">
+      <div class="tt">건드리지 않는 것 (안전선)</div>
+      <p>① 구매양식 제출 경로(주문원장 → 행 배정 → 시트 기록)는 <b>무변경</b> — 작업표는 그 결과를 "보여주는 표"에서 출발한다.
+      ② 기존 작업(이미 시트로 진행 중)은 <b>아무 영향 없음</b> — 이 기능은 신규 작업의 선택지다.
+      ③ 옵션 칸 blank-only, 행 배정 신원 가드, 사후검증 등 사고 재발방지 장치는 전부 그대로 살아 있다.</p>
+    </div>
+  </section>
+
+  <!-- ══════════ 07 로드맵 ══════════ -->
+  <section>
+    <div class="shead"><span class="snum">07</span><h2>단계별 로드맵</h2></div>
+    <p class="sdesc">각 단계는 독립적으로 배포·검증 가능하며, 앞 단계가 끝나야 다음이 의미를 갖습니다.</p>
+    <div class="mile">
+      <div class="m"><span class="no">M1</span><div class="bd">
+        <div class="t">헤더 학습 리포트 (읽기 전용)</div>
+        <div class="d">미러된 전 탭의 열 구성을 집계해 고정/변칙 통계 화면을 만든다. 이 문서의 3계층 분류를 실데이터로 확정.</div>
+        <div class="done">완료 기준: 관리자가 "우리 표준 코어 열"을 통계 근거와 함께 승인</div>
+      </div></div>
+      <div class="m"><span class="no">M2</span><div class="bd">
+        <div class="t">템플릿 원장 + 생성 미리보기 + 작업표 생성 (모드 A)</div>
+        <div class="d">작업오더 펼침행 [작업표 생성] → 미리보기 → 100행 생성 + 동일 구성 시트 자동 생성·동기화. 신규 작업 1~2건으로 파일럿.</div>
+        <div class="done">완료 기준: 시트 수작업 0으로 작업 1건이 모집→제출→정산까지 완주</div>
+      </div></div>
+      <div class="m"><span class="no">M3</span><div class="bd">
+        <div class="t">운영 확대 + 학습 고도화</div>
+        <div class="d">업체·채널별 기본 템플릿 자동 추천(직전 작업 복사 포함), 인원 변경 시 증설(gap-fill)·축소 처리, 작업오더 폼에서 시트 URL을 선택 항목으로 완화.</div>
+        <div class="done">완료 기준: 신규 작업의 절반 이상이 작업표 생성으로 시작</div>
+      </div></div>
+      <div class="m"><span class="no">M4</span><div class="bd">
+        <div class="t">시트 축소 (모드 B → C)</div>
+        <div class="d">Track B 전환 게이트(불일치 0)를 통과한 작업부터 DB 원본 플립. 광고주 열람은 광고주 링크로 대체. 시트는 보기용 → 생성 안 함 순으로 축소.</div>
+        <div class="done">완료 기준: 신규 작업 기본값이 "시트 없음"</div>
+      </div></div>
+    </div>
+  </section>
+
+  <!-- ══════════ 08 리스크 ══════════ -->
+  <section>
+    <div class="shead"><span class="snum">08</span><h2>리스크와 방어</h2></div>
+    <div class="tblwrap"><table class="tbl">
+      <tr><th>위험</th><th>무슨 일이 생기나</th><th>방어</th></tr>
+      <tr>
+        <td><b>템플릿 오분류</b></td>
+        <td>학습이 "옵션" 칸을 잘못 읽어 필요한 열이 빠지거나 불필요한 열이 생김</td>
+        <td>학습은 <b>제안까지만</b> — 생성은 항상 미리보기에서 사람이 확정. 생성 후에도 커스텀 열 추가/숨김으로 교정 가능.</td>
+      </tr>
+      <tr>
+        <td><b>인원 변경</b></td>
+        <td>100건으로 생성했는데 120건으로 증액, 또는 80건으로 축소</td>
+        <td>증액 = 부족분만 추가 생성(이미 있는 gap-fill 방식·중복 없음). 축소 = 빈 행만 숨김 처리(제출 있는 행은 보호), 이력 보존.</td>
+      </tr>
+      <tr>
+        <td><b>이중 관리 혼선 (모드 A)</b></td>
+        <td>작업표와 시트가 어긋난 걸 늦게 발견</td>
+        <td>이미 운영 중인 <b>대조 검증(parity)·사후검증</b>이 그대로 감시. 어긋나면 관측 대시보드에 불일치로 표시.</td>
+      </tr>
+      <tr>
+        <td><b>날짜 분배 실수</b></td>
+        <td>휴무일 설정을 빼먹어 주말에 모집이 열림</td>
+        <td>미리보기에 날짜 분배 전체를 보여주고 합계 검증(≠ 총건수면 생성 잠금). 생성 후에도 날짜 칸 수정 = 즉시 일정 반영(기존 시트 일정 규칙과 동일).</td>
+      </tr>
+      <tr>
+        <td><b>권한</b></td>
+        <td>아무나 표를 만들거나 지움</td>
+        <td>생성·수정은 <b>작업오더 편집 명단과 같은 권한</b>(마스터는 항상 허용, 명단 조회 실패 시 읽기 전용 — 기존 fail-closed 규칙). 광고주는 읽기 전용 그대로.</td>
+      </tr>
+      <tr>
+        <td><b>기존 파이프라인 회귀</b></td>
+        <td>주문 기록·검색 등 라이브 경로가 영향받음</td>
+        <td>모드 A에서 라이브 경로 무변경(시트 병행). 회귀가드 테스트 신설 + 레드-블루-심판 검증을 거쳐 배포(저장소 표준 절차).</td>
+      </tr>
+    </table></div>
+  </section>
+
+  <!-- ══════════ 09 열린 질문 ══════════ -->
+  <section>
+    <div class="shead"><span class="snum">09</span><h2>확정이 필요한 질문 (착수 전 결정 사항)</h2></div>
+    <div class="card">
+      <ul class="list">
+        <li><b>Q1. 출시 모드</b> — 제안대로 하이브리드(A: 시트 자동 생성·병행)로 시작할까요, 아니면 파일럿부터 DB 원본(B)으로 갈까요? <span class="why">제안 기본값: A. 라이브 경로 무변경이 가장 안전.</span></li>
+        <li><b>Q2. 작업오더 시트 URL 필수 해제 시점</b> — 지금은 URL이 필수 입력입니다. M2(파일럿)부터 선택으로 풀까요, M3(확대)부터 풀까요? <span class="why">제안 기본값: M2에서는 "작업표 생성 시 자동 면제"로만 풀고, 폼 자체의 필수 해제는 M3.</span></li>
+        <li><b>Q3. 템플릿의 소유 단위</b> — 업체별 기본 템플릿으로 관리할까요, 채널별(쿠팡/네이버…) 기본 + 업체 예외로 관리할까요? <span class="why">제안 기본값: 채널별 기본 + "직전 작업 복사" 버튼. 업체별 원장은 데이터가 쌓인 뒤 M3에서.</span></li>
+        <li><b>Q4. 광고주 열람</b> — 하이브리드 기간에 광고주에게는 시트를 계속 공유할까요, 광고주 링크(통합작업대)로 즉시 전환을 시도할까요?</li>
+      </ul>
+    </div>
+  </section>
+
+  <footer class="foot">
+    작업표 생성 PRD·구현방식 시안 v1.0 · 2026-08-04 · 이 문서는 제안 단계이며, 09의 질문이 확정되면 M1부터 착수합니다.<br>
+    근거가 된 기존 기능: 발주 기준 명단 골격 생성 · RAW 미러 헤더 스냅샷 · 컬럼 판정 원장 · 시트 일정 자동 인식(063) · Track B 전환 스위치(부품6) · 새 시트생성(create-campaign-sheet)
+  </footer>
+
+</div>
+</body>
+</html>
