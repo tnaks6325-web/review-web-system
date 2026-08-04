@@ -154,14 +154,18 @@ t('민감정보 상시 노출 경고를 띄운다', () => {
   assert.ok(/주민등록번호·계좌번호가 그대로 표시/.test(HTML), '화면공유 주의 문구 없음');
 });
 t('메모만 편집 가능(다른 칸은 입력창이 아니다)', () => {
-  const body = HTML.slice(HTML.indexOf('function _renderRvBody()'), HTML.indexOf('function _rvPager()'));
+  const body = HTML.slice(HTML.indexOf('function _renderRvBody()'), HTML.indexOf('/* 타계정 펼침'));
   const inputs = body.match(/<input/g) || [];
   assert.strictEqual(inputs.length, 1, '표에 입력창은 메모 하나뿐이어야 함(현재 ' + inputs.length + '개)');
-  assert.ok(body.includes('_rvSaveMemo(this)'), '메모 저장 배선 없음');
+  assert.ok(body.includes('_rvSaveMemo('), '메모 저장 배선 없음');
 });
 t('값이 안 바뀌면 저장 요청을 보내지 않는다', () => {
-  const fn = HTML.slice(HTML.indexOf('async function _rvSaveMemo'), HTML.indexOf('async function renderLogsView'));
-  assert.ok(/String\(row\.memo\|\|''\)===String\(memo\)\) return;/.test(fn), '무변경 조기 return 없음');
+  const fn = HTML.slice(HTML.indexOf('async function _rvSaveMemo'), HTML.indexOf('async function _rvDelete'));
+  // ★ 저장은 이제 [저장] 버튼/Enter 로만 일어나지만(사용자 확정), "무변경이면 요청 0" 은 그대로여야 한다.
+  //   버튼 상태를 함께 되돌리느라 `) return;` 이 `){ … return; }` 로 바뀌었을 뿐 — 조건과 위치를 확인한다.
+  assert.ok(/String\(row\.memo\|\|''\)===String\(memo\)\)\{[\s\S]{0,120}?return;/.test(fn), '무변경 조기 return 없음');
+  assert.ok(fn.indexOf('return;') < fn.indexOf("api('/api/trackb/reviewers/memo'"),
+    '무변경 return 이 저장 요청보다 뒤에 있다(=요청이 먼저 나간다)');
   assert.ok(/el\.value=row\.memo\|\|'';/.test(fn), '저장 실패 시 화면값 되돌리기 없음');
 });
 

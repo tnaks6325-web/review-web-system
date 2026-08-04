@@ -379,6 +379,19 @@
   .lgtable .c-sev{width:64px;white-space:nowrap} .lgtable .c-ts{width:118px;white-space:nowrap;color:var(--muted);font-variant-numeric:tabular-nums}
   .lgtable .c-tab{width:240px;max-width:240px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-weight:650}
   .lgtable .c-nm{width:70px;white-space:nowrap} .lgtable .c-ph{width:114px;white-space:nowrap;font-variant-numeric:tabular-nums}
+  /* ★★ 등록리뷰어DB 표는 **주소 말고는 전부 한 줄**로 못박는다.
+     `table-layout:auto` 에서 th 의 width 는 *희망값*일 뿐이라, 열이 13개로 늘어 폭이 빠듯해지면
+     브라우저가 마음대로 아무 칸이나 접는다 — 실측으로 예금주("김하늘/가람")·계좌번호("123456-01-/789012")·
+     은행("국민은/행")·소득유형("사업소/득")·상태(세로로 선 "활/성")가 차례로 접혔고, **한 칸만 접혀도
+     그 행 전체가 10px 이상 높아져** 목록 밀도가 무너진다. 칸을 하나씩 넓히는 두더지잡기 대신
+     여기서 통째로 막고, 남는/모자란 폭은 **주소 칸 하나가 흡수**한다(거긴 max-width + ellipsis 라
+     좁아져도 "…" 로 끝나고 title 에 전체 주소가 남는다).
+     ⚠ 중첩된 타계정표(table.rvsubtbl)는 .lgtable 이 아니라서 이 규칙에 안 걸린다(주소가 온전히 보인다). */
+  #rvbody table.lgtable th, #rvbody table.lgtable td{white-space:nowrap}
+  #rvbody table.lgtable td.c-addr{white-space:nowrap;max-width:220px;overflow:hidden;text-overflow:ellipsis}
+  .lgtable .c-hold{width:104px}                       /* 예금주 — 한글 6~7자(남궁하늘가람)까지 한 줄 */
+  .lgtable .c-num{font-variant-numeric:tabular-nums}  /* 계좌번호·주민번호·등록일 */
+  .lgtable .c-bank{width:90px}                        /* 은행 — "카카오뱅크"(5자) 기준 */
   .lgtable .c-prob{min-width:240px;word-break:break-word}
   .lgtable .c-act{min-width:240px;word-break:break-word;color:var(--muted)}
   .lgtable .c-btn{width:1%;white-space:nowrap}
@@ -386,6 +399,33 @@
   .lgtable .lgby{font-size:10px;color:var(--faint);margin-top:3px;white-space:nowrap}
   .lgtable tr.lgcrit td:first-child{box-shadow:inset 3px 0 0 var(--bad)}   /* 중요 = 왼쪽 빨간 띠(맨 앞=조치 칸) */
   .lgtable tr.lgdone td{opacity:.55}
+  /* ── 등록리뷰어DB 전용(rv 접두) ──
+     ★ 접두를 나눠 쓰는 이유: 작업대 '작업세부' 패널이 .worow/.wodetail 같은 이름을 이미 쓰고 있어
+       클래스가 겹치면 그쪽 규칙(display:grid 등)이 이 표의 <tr> 에 걸려 표가 통째로 무너진다(실측). */
+  .rvsubbtn{font:inherit;font-size:11.5px;font-weight:750;line-height:1;padding:3px 7px;border-radius:999px;
+    border:1px solid var(--accent-line);background:var(--accent-soft);color:var(--accent-deep);cursor:pointer}
+  .rvsubbtn:hover{filter:brightness(.97)}
+  .rvsubbtn .rvcar{margin-left:3px;font-size:9px;display:inline-block;transition:transform .15s}
+  .rvsubbtn.on .rvcar{transform:rotate(180deg)}
+  .lgtable tr.rvsubrow td{background:var(--card2);padding:0}
+  .rvsubbox{padding:11px 14px 13px}
+  .rvsubttl{font-size:11.5px;font-weight:700;color:var(--muted);margin-bottom:7px}
+  .rvsubempty{font-size:12px;color:var(--muted)}
+  table.rvsubtbl{width:100%;border-collapse:separate;border-spacing:0;font-size:12px;background:var(--card);
+    border:1px solid var(--line);border-radius:8px;overflow:hidden}
+  table.rvsubtbl th{text-align:left;padding:6px 9px;background:var(--card2);color:var(--muted);
+    font-size:11px;font-weight:700;border-bottom:1px solid var(--line)}
+  table.rvsubtbl td{padding:7px 9px;border-bottom:1px solid var(--line);vertical-align:top}
+  table.rvsubtbl tbody tr:last-child td{border-bottom:none}
+  .rvmemo{display:flex;gap:5px;align-items:center}
+  .rvmemo .ovsearch{flex:1;min-width:0;font-size:11.5px;padding:4px 7px}
+  .rvmemosave{font-size:11px;padding:4px 9px;height:auto;flex-shrink:0;white-space:nowrap}
+  .rvmemosave:disabled{opacity:.4;cursor:default}
+  /* ★ nowrap 없으면 "삭제" 두 글자가 좁은 칸에서 두 줄로 접혀 **그 행 전체가 16px 높아진다**
+     (실측 47→63px — 목록 밀도가 눈에 띄게 떨어진다). 저장 버튼도 같은 이유로 nowrap. */
+  .rvdel{font:inherit;font-size:11px;font-weight:700;padding:4px 8px;border-radius:7px;cursor:pointer;
+    white-space:nowrap;border:1px solid var(--line2);background:var(--card);color:var(--muted)}
+  .rvdel:hover{border-color:var(--bad);background:#fef2f2;color:var(--bad)}
   /* 펼침행(행 클릭 → 상세·제출 캡처) */
   .lgtable tr.lgrow{cursor:pointer}
   .lgtable .lgchev{display:inline-block;color:var(--muted);font-size:12px;width:13px}
@@ -2853,6 +2893,9 @@ function _renderRvHead(total){
     <div class="ovnote">리뷰어 등록 원장입니다. <b>주민등록번호·계좌번호가 그대로 표시</b>되니 화면공유·스크린샷에 주의하세요.
       수정은 <b>관리자 메모</b>만 가능합니다(이름·연락처·계좌 등은 조회 전용).</div>`;
 }
+/* 컬럼 순서는 **사용자 확정**: 이름·연락처·주소·은행·계좌번호·예금주·주민번호·소득유형·타계정·등록일.
+   상태·관리자메모·삭제는 그 뒤에 붙인다(요청에 없던 기존 열이라 지우지 않고 뒤로 보냈다). */
+const RV_COLSPAN = 13;
 function _renderRvBody(){
   const rows = STATE.rv||[];
   const b=$('#rvbody');
@@ -2861,29 +2904,75 @@ function _renderRvBody(){
   const fmtD = iso => iso? new Date(iso).toLocaleDateString('ko-KR',{timeZone:'Asia/Seoul',year:'2-digit',month:'2-digit',day:'2-digit'}):'';
   b.innerHTML=`<div class="lgwrap"><table class="lgtable">
     <thead><tr>
-      <th class="c-nm">이름</th><th class="c-ph">연락처</th><th style="width:118px">주민번호</th>
-      <th style="width:90px">소득유형</th><th>주소</th>
-      <th style="width:80px">은행</th><th style="width:130px">계좌번호</th><th style="width:80px">예금주</th>
-      <th style="width:56px">타계정</th><th style="width:64px">상태</th><th style="width:84px">등록일</th>
-      <th style="width:180px">관리자 메모</th>
-    </tr></thead><tbody>${rows.map(r=>`
+      <th class="c-nm">이름</th><th class="c-ph">연락처</th><th>주소</th>
+      <th class="c-bank">은행</th><th class="c-num" style="width:126px">계좌번호</th><th class="c-hold">예금주</th>
+      <th class="c-num" style="width:112px">주민번호</th><th style="width:86px">소득유형</th>
+      <th style="width:58px">타계정</th><th class="c-num" style="width:78px">등록일</th>
+      <th style="width:58px">상태</th><th style="width:176px">관리자 메모</th><th style="width:56px"></th>
+    </tr></thead><tbody>${rows.map((r,i)=>`
       <tr>
         <td class="c-nm" style="font-weight:700">${esc(r.name||'')}</td>
         <td class="c-ph">${dash(r.phone)}</td>
-        <td style="font-variant-numeric:tabular-nums">${dash(r.residentNum)}</td>
+        <td class="c-addr" title="${esc(r.address||'')}">${dash(r.address)}</td>
+        <td class="c-bank">${dash(r.bankName)}</td>
+        <td class="c-num">${dash(r.bankAccount)}</td>
+        <td class="c-hold">${dash(r.accountHolder)}</td>
+        <td class="c-num">${dash(r.residentNum)}</td>
         <td>${dash(r.incomeType)}</td>
-        <td style="max-width:220px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="${esc(r.address||'')}">${dash(r.address)}</td>
-        <td>${dash(r.bankName)}</td>
-        <td style="font-variant-numeric:tabular-nums">${dash(r.bankAccount)}</td>
-        <td>${dash(r.accountHolder)}</td>
-        <td style="text-align:center">${(r.subCount|0)>0?`<span class="bd">${r.subCount}</span>`:'<span style="color:var(--muted)">0</span>'}</td>
+        <td style="text-align:center">${(r.subCount|0)>0
+            ? `<button type="button" class="rvsubbtn" data-rvi="${i}" onclick="_rvToggleSub(${i},this)"
+                 title="타계정 정보 펼치기">${r.subCount}<span class="rvcar">▾</span></button>`
+            : '<span style="color:var(--muted)">0</span>'}</td>
+        <td class="c-num" style="color:var(--muted)">${fmtD(r.registeredAt)}</td>
         <td>${r.status==='inactive'?'<span class="bd">비활성</span>':'<span class="bd g">활성</span>'}</td>
-        <td style="color:var(--muted);font-variant-numeric:tabular-nums">${fmtD(r.registeredAt)}</td>
-        <td><input class="ovsearch" style="width:100%;font-size:11.5px;padding:4px 7px" value="${esc(r.memo||'')}"
-              placeholder="메모…" data-rvid="${esc(r.id)}"
-              onchange="_rvSaveMemo(this)" onkeydown="if(event.key==='Enter')this.blur()"></td>
-      </tr>`).join('')}</tbody></table></div>
+        <td><div class="rvmemo">
+              <input class="ovsearch" value="${esc(r.memo||'')}" placeholder="메모…" data-rvid="${esc(r.id)}"
+                     oninput="_rvMemoDirty(this)"
+                     onkeydown="if(event.key==='Enter'){event.preventDefault();_rvSaveMemo(this);}">
+              <button type="button" class="btn rvmemosave" disabled onclick="_rvSaveMemo(this.previousElementSibling)"
+                      title="메모를 저장합니다(Enter 로도 저장)">저장</button>
+            </div></td>
+        <td style="text-align:center"><button type="button" class="rvdel" onclick="_rvDelete(${i})"
+              title="이 리뷰어를 삭제합니다">삭제</button></td>
+      </tr>
+      <tr class="rvsubrow" data-rvsub="${i}" hidden><td colspan="${RV_COLSPAN}"></td></tr>`).join('')}</tbody></table></div>
     ${_rvPager()}`;
+}
+/* 타계정 펼침 — 그 리뷰어 행 **바로 아래**에 상세를 편다(작업오더 펼침행과 같은 방식).
+   ★ 클래스는 rv 접두로 분리한다 — 작업대 '작업세부' 패널이 .worow/.wodetail 을 이미 쓰고 있어
+     이름이 겹치면 그쪽 display:grid 가 <tr> 에 걸려 표가 통째로 무너진다(이 저장소 실측 사고). */
+function _rvToggleSub(i, btn){
+  const tr=document.querySelector(`tr.rvsubrow[data-rvsub="${i}"]`);
+  if(!tr) return;
+  const open = tr.hasAttribute('hidden');
+  if(open && !tr.dataset.filled){ tr.firstElementChild.innerHTML=_rvSubHtml((STATE.rv||[])[i]); tr.dataset.filled='1'; }
+  tr.toggleAttribute('hidden', !open);
+  if(btn) btn.classList.toggle('on', open);
+}
+function _rvSubHtml(r){
+  if(!r) return '';
+  let subs=[];
+  try{ subs = typeof r.subAccounts==='string' ? JSON.parse(r.subAccounts||'[]') : (r.subAccounts||[]); }catch(_){ subs=[]; }
+  if(!Array.isArray(subs)||!subs.length)
+    return `<div class="rvsubbox"><div class="rvsubempty">등록된 타계정이 없습니다.</div></div>`;
+  const dash = v => (v==null||String(v).trim()==='')?'<span style="color:var(--muted)">—</span>':esc(v);
+  // 계좌 3종이 비어 있으면 "본인 공통계좌 사용"이 정상 — 빈칸으로 두면 누락으로 오해한다.
+  const acct = s => (s.bankName||s.bankAccount||s.accountHolder)
+    ? `${dash(s.bankName)} <b style="font-variant-numeric:tabular-nums">${esc(s.bankAccount||'')}</b> ${dash(s.accountHolder)}`
+    : `<span style="color:var(--muted)">본인 공통계좌 사용</span>`;
+  return `<div class="rvsubbox">
+    <div class="rvsubttl">타계정 ${subs.length}개 — <b>${esc(r.name||'')}</b> 님이 등록한 명의</div>
+    <table class="rvsubtbl"><thead><tr>
+      <th style="width:80px">이름</th><th style="width:124px">연락처</th><th style="width:118px">주민번호</th>
+      <th style="width:90px">소득자명</th><th>주소</th><th style="width:230px">계좌</th>
+    </tr></thead><tbody>${subs.map(s=>`<tr>
+      <td style="font-weight:700">${dash(s.name)}</td>
+      <td style="font-variant-numeric:tabular-nums">${dash(s.phone)}</td>
+      <td style="font-variant-numeric:tabular-nums">${dash(s.jumin)}</td>
+      <td>${dash(s.incomeName)}</td>
+      <td>${dash(s.address)}</td>
+      <td>${acct(s)}</td>
+    </tr>`).join('')}</tbody></table></div>`;
 }
 function _rvPager(){
   const total=STATE.rvTotal|0, off=STATE.rvOffset|0;
@@ -2894,17 +2983,60 @@ function _rvPager(){
     <span style="color:var(--muted)">${Math.floor(off/RV_PAGE)+1} / ${Math.ceil(total/RV_PAGE)}</span>
     <button class="btn" ${next?'':'disabled'} onclick="STATE.rvOffset=(STATE.rvOffset|0)+${RV_PAGE};_loadReviewers()">다음 →</button></div>`;
 }
-/** 관리자 메모 저장 — 값이 안 바뀌었으면 요청하지 않는다(포커스 이동마다 쓰기 금지) */
+/* 관리자 메모는 **[저장] 을 눌러야 반영된다**(사용자 확정).
+   종전에는 onchange(=포커스가 빠지는 순간)에 저장돼, 옆 칸을 누르거나 탭을 옮기기만 해도
+   고치던 중간 문구가 그대로 저장됐다. 이제 입력 중에는 아무것도 보내지 않고, 값이 원래와
+   달라졌을 때만 [저장] 이 살아난다(Enter 로도 저장). */
+function _rvMemoDirty(el){
+  const row=(STATE.rv||[]).find(x=>String(x.id)===String(el.getAttribute('data-rvid')));
+  const btn=el.nextElementSibling;
+  if(!btn) return;
+  const dirty = !!row && String(row.memo||'')!==String(el.value);
+  btn.disabled=!dirty;
+  btn.classList.toggle('pri', dirty);
+}
 async function _rvSaveMemo(el){
   const id=el.getAttribute('data-rvid');
   const row=(STATE.rv||[]).find(x=>String(x.id)===String(id));
   const memo=el.value;
-  if(!row || String(row.memo||'')===String(memo)) return;
-  el.disabled=true;
+  const btn=el.nextElementSibling;
+  if(!row || String(row.memo||'')===String(memo)){ if(btn){btn.disabled=true;btn.classList.remove('pri');} return; }
+  el.disabled=true; if(btn){ btn.disabled=true; btn.textContent='저장 중'; }
   const r=await api('/api/trackb/reviewers/memo',{method:'POST',body:JSON.stringify({id,memo})});
-  el.disabled=false;
-  if(r&&r.ok){ row.memo=memo; _toast('메모를 저장했습니다.'); }
+  el.disabled=false; if(btn) btn.textContent='저장';
+  if(r&&r.ok){ row.memo=memo; if(btn) btn.classList.remove('pri'); _toast('메모를 저장했습니다.'); }
   else { el.value=row.memo||''; _toast('⚠ 메모 저장 실패'+(r&&r.error?': '+r.error:'')); }   // 실패 시 화면값을 원래대로 되돌린다
+  _rvMemoDirty(el);
+}
+
+/* 리뷰어 삭제(완전삭제) — 서버가 2단으로 막는다.
+   ★ 1차 호출은 **아무것도 지우지 않고** 이력 건수만 돌려준다(needConfirm) → 그 숫자를 보여주고
+     다시 물은 뒤에야 force 로 지운다. 이력이 0이면 서버가 1차에서 바로 지운다.
+   ★ 지워도 그 사람의 주문·참여·문의 기록은 연락처 뒤 8자리로 남는다(FK 없음) — 확인창에 그대로 적는다.
+     "지웠으니 기록도 없어졌겠지"로 오해하면 나중에 로그를 보고 버그로 신고한다. */
+async function _rvDelete(i){
+  const row=(STATE.rv||[])[i];
+  if(!row) return;
+  const who=`${row.name||''} ${row.phone||''}`.trim();
+  if(!confirm(`${who} 리뷰어를 삭제할까요?\n\n· 등록 정보(주민번호·계좌 등)가 완전히 지워집니다.\n· 되돌릴 수 없습니다.`)) return;
+
+  let r=await api('/api/trackb/reviewers/delete',{method:'POST',body:JSON.stringify({id:row.id})});
+  if(r && r.ok===false && r.needConfirm){
+    const c=r.counts||{};
+    const lines=[`${who} 리뷰어에게는 아래 기록이 남아 있습니다.`,'',
+      `· 구매양식 제출  ${c.orders|0}건`,
+      `· 공고 참여      ${c.applications|0}건`,
+      `· 1:1 문의       ${c.inquiries|0}건`,
+      r.countsPartial?'· (일부 항목은 세지 못했습니다 — 실제로는 더 있을 수 있습니다)':'',
+      '',
+      '이 기록들은 연락처 뒤 8자리에 매달려 있어 리뷰어를 지워도 함께 지워지지 않습니다.',
+      '즉 "등록만 취소"되어 이 사람은 앞으로 로그인·참여를 할 수 없게 됩니다.','',
+      '그래도 삭제할까요?'].filter(x=>x!=='');
+    if(!confirm(lines.join('\n'))) return;
+    r=await api('/api/trackb/reviewers/delete',{method:'POST',body:JSON.stringify({id:row.id,force:true})});
+  }
+  if(r && r.ok){ _toast(`${who} 리뷰어를 삭제했습니다.`); _loadReviewers(); }
+  else _toast('⚠ 삭제 실패'+(r&&r.error?': '+r.error:''));
 }
 
 async function renderLogsView(){
