@@ -89,12 +89,17 @@ async function confirmHoldInTx(client, { applicationId, campaignId, phone8, hold
   // provenance 링크: 확정 성패와 무관하게 기록 → 만료건은 스윕이 late_order_id 백필(관제 수동확정 목록 입력).
   //   ★ 소유권 검증을 통과한 신청에만 링크(코드리뷰 #1): applicationId는 클라이언트 입력(SERIAL 추측 가능)이라
   //     무검증 링크는 타인 신청 오염 → 스윕 백필 → 수동확정 오염으로 전파된다.
+  // ★ 082: 참여 시점 리뷰비 스냅샷을 주문 원장에도 전파 — 리뷰 내역 화면은 (시트행 ↔ 주문)으로
+  //   조회하므로 신청 행에만 있으면 닿지 않는다. COALESCE 로 **이미 있는 값은 안 덮는다**.
+  //   (EXISTS → FROM 조인으로 바꿨을 뿐 소유권 검증 조건은 그대로다.)
   await client.query(
-    `UPDATE order_submissions os SET campaign_application_id = $2
+    `UPDATE order_submissions os
+        SET campaign_application_id = ca.id,
+            review_fee_snapshot = COALESCE(os.review_fee_snapshot, ca.review_fee_snapshot)
+       FROM campaign_applications ca
       WHERE os.id = $1 AND os.campaign_application_id IS NULL
-        AND EXISTS (SELECT 1 FROM campaign_applications ca
-                     WHERE ca.id = $2 AND ca.campaign_id = $3 AND ca.phone8 = $4
-                       AND ca.hold_token = $5 AND ca.hold_token <> '')`,
+        AND ca.id = $2 AND ca.campaign_id = $3 AND ca.phone8 = $4
+        AND ca.hold_token = $5 AND ca.hold_token <> ''`,
     [orderSubmissionId, appId, campaignId, phone8, holdToken]
   );
 

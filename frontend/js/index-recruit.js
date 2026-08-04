@@ -1033,6 +1033,141 @@ function _optSummary() {
 }
 
 /* ═══════════════════════════════════════
+   📅 기간별 리뷰비(082) — 구간표
+
+   같은 캠페인이라도 7월 참여자는 1,000원, 8월 참여자는 1,500원처럼 날짜별로 금액이 다를 때 쓴다.
+   ★ 구간 0개 = 기능 끔 = 위 '리뷰비' 한 값으로 **종전과 100% 동일** 동작(opt-in).
+   ★ 종료일은 받지 않는다 — 시작일만 받으면 "다음 구간 시작 전날까지"가 자동이라
+     빈틈(그날 금액 없음)·겹침(어느 쪽인지 모름)이 구조적으로 불가능하다.
+   ★ 이미 참여한 건은 서버가 참여 시점 금액을 새겨 두므로(review_fee_snapshot)
+     여기서 구간을 고쳐도 과거 참여자의 리뷰 내역·누적 합계는 바뀌지 않는다.
+═══════════════════════════════════════ */
+function _feeToday() {
+  const d = new Date(Date.now() + 9 * 3600 * 1000);   // KST
+  return d.toISOString().slice(0, 10);
+}
+
+/** 미리보기 카드용 "오늘 적용 리뷰비". 구간이 없거나 스위치가 꺼져 있으면 입력값 그대로. */
+function _feePreviewToday(fallback) {
+  try {
+    if (!document.getElementById("rf_fee_rows")) return fallback;
+    if (!document.getElementById("rf_fee_sched_on")?.checked) return fallback;
+    const today = _feeToday();
+    let cur = null;
+    readFeeRows().forEach(r => { if (r.effectiveFrom <= today) cur = r; });
+    return cur ? cur.reviewFee : fallback;
+  } catch (_) { return fallback; }
+}
+
+function addFeeRow(data) {
+  const wrap = document.getElementById("rf_fee_rows");
+  if (!wrap) return;
+  const d = data || {};
+  const div = document.createElement("div");
+  div.className = "rf-fee-row";
+  div.innerHTML =
+    '<input type="date" class="rform-input rf-fee-from" value="' + (d.effectiveFrom || d.effective_from || "") + '" oninput="renderFeeSchedule()">' +
+    '<input type="number" min="0" step="100" class="rform-input rf-fee-amt" placeholder="예) 1000" value="' +
+      (d.reviewFee != null ? d.reviewFee : (d.review_fee != null ? d.review_fee : "")) + '" oninput="renderFeeSchedule()">' +
+    '<input type="text" class="rform-input rf-fee-memo" maxlength="200" placeholder="예) 8월 단가 인상" value="' +
+      String(d.memo || "").replace(/"/g, "&quot;") + '">' +
+    '<button type="button" class="rf-fee-del" title="구간 삭제" onclick="this.parentNode.remove();renderFeeSchedule()">×</button>';
+  wrap.appendChild(div);
+  renderFeeSchedule();
+}
+
+/** 구간 목록 렌더(프리필·초기화 공용). 구간이 있으면 스위치를 자동으로 켠다. */
+function renderFeeRows(list) {
+  const wrap = document.getElementById("rf_fee_rows");
+  if (!wrap) return;
+  wrap.innerHTML = "";
+  const rows = Array.isArray(list) ? list : [];
+  rows.forEach(r => addFeeRow(r));
+  const sw = document.getElementById("rf_fee_sched_on");
+  if (sw) { sw.checked = rows.length > 0; onFeeScheduleToggle(sw.checked); }
+  renderFeeSchedule();
+}
+
+function onFeeScheduleToggle(on) {
+  const sec = document.getElementById("rf_fee_sched_section");
+  if (sec) sec.style.display = on ? "" : "none";
+  // 켤 때 비어 있으면 첫 줄을 오늘 날짜·현재 리뷰비로 깔아준다(빈 표를 마주하지 않게)
+  if (on) {
+    const wrap = document.getElementById("rf_fee_rows");
+    if (wrap && !wrap.children.length) {
+      addFeeRow({ effectiveFrom: _feeToday(), reviewFee: document.getElementById("rf_review_fee")?.value || "" });
+    }
+  }
+  renderFeeSchedule();
+}
+
+/** 표 → 저장 payload 배열. 날짜·금액이 비면 그 줄은 제외(부분 입력 중 저장 방해 금지). */
+function readFeeRows() {
+  const out = [];
+  document.querySelectorAll("#rf_fee_rows .rf-fee-row").forEach(r => {
+    const from = String(r.querySelector(".rf-fee-from").value || "").trim();
+    const amtRaw = r.querySelector(".rf-fee-amt").value;
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(from) || amtRaw === "") return;
+    out.push({
+      effectiveFrom: from,
+      reviewFee: Math.max(0, parseInt(amtRaw, 10) || 0),
+      memo: String(r.querySelector(".rf-fee-memo").value || "").trim(),
+    });
+  });
+  return out.sort((a, b) => (a.effectiveFrom < b.effectiveFrom ? -1 : 1));
+}
+
+/** 요약 + 자동점검(경고 위주 — 하드블록은 '같은 날짜 중복' 하나뿐: 어느 금액인지 정할 수 없다) */
+function renderFeeSchedule() {
+  const wrap = document.getElementById("rf_fee_rows");
+  if (!wrap) return { dup: false, count: 0 };
+  const on = !!document.getElementById("rf_fee_sched_on")?.checked;
+  const rows = readFeeRows();
+  const today = _feeToday();
+
+  // 오늘 적용 구간 표시(시작일 ≤ 오늘 중 가장 늦은 것) — 서버 판정과 같은 규칙
+  let curFrom = null;
+  rows.forEach(r => { if (r.effectiveFrom <= today) curFrom = r.effectiveFrom; });
+  document.querySelectorAll("#rf_fee_rows .rf-fee-row").forEach(el => {
+    const v = el.querySelector(".rf-fee-from").value;
+    el.classList.toggle("rf-fee-now", !!curFrom && v === curFrom);
+  });
+
+  const froms = rows.map(r => r.effectiveFrom);
+  const dup = froms.some((f, i) => froms.indexOf(f) !== i);
+  const cur = curFrom ? rows.filter(r => r.effectiveFrom === curFrom).pop() : null;
+
+  const sum = document.getElementById("rf_fee_summary");
+  if (sum) {
+    sum.innerHTML = !on || !rows.length ? ""
+      : ("구간 " + rows.length + "개 · 오늘 적용 <b style='color:#0ca678'>" +
+         (cur ? Number(cur.reviewFee).toLocaleString() + "원" : "기본 리뷰비") + "</b>");
+  }
+
+  const chk = [];
+  if (on) {
+    if (dup) chk.push(["err", "같은 시작일이 두 번 있어요 — 어느 금액인지 정할 수 없습니다(저장 불가)"]);
+    if (!rows.length) chk.push(["warn", "구간이 없어 위 <b>리뷰비</b> 한 값이 그대로 쓰입니다(현재 동작과 동일)"]);
+    const startEl = document.getElementById("rf_start_date");
+    const campStart = startEl && startEl.value;
+    if (rows.length && campStart && rows[0].effectiveFrom > campStart) {
+      chk.push(["warn", "첫 구간(" + rows[0].effectiveFrom + ")이 공고 시작일(" + campStart +
+        ")보다 늦어요 — 그 사이 참여 건에는 기본 리뷰비가 적용됩니다"]);
+    }
+    if (rows.length && !dup) {
+      chk.push(["ok", "참여한 날짜의 금액이 그 리뷰어에게 <b>영구 고정</b>됩니다 — 나중에 금액을 올려도 과거 참여자 화면은 안 바뀝니다"]);
+    }
+  }
+  const box = document.getElementById("rf_fee_check");
+  if (box) {
+    box.innerHTML = chk.map(c =>
+      '<div class="rf-fee-chk ' + c[0] + '">' + (c[0] === "ok" ? "✅" : c[0] === "warn" ? "⚠️" : "⛔") +
+      "<span>" + c[1] + "</span></div>").join("");
+  }
+  return { dup, count: rows.length };
+}
+
+/* ═══════════════════════════════════════
    모달 열기/닫기
 ═══════════════════════════════════════ */
 async function openRecruitModal(id, prefill, woOrderId) {
@@ -1079,6 +1214,7 @@ async function openRecruitModal(id, prefill, woOrderId) {
   const _partEl = document.getElementById("rf_participation");
   if (_partEl) { _partEl.checked = false; onParticipationToggle(false); }
   if (typeof renderOptRows === "function") renderOptRows([]);   // 🧩 옵션표 초기화(061)
+  if (typeof renderFeeRows === "function") renderFeeRows([]);   // 📅 기간별 리뷰비 초기화(082) — 신규 공고는 항상 꺼짐
   window._wdInflowRawHtml = null;
   const _ivTa = document.getElementById("rf_wd_inflow"); if (_ivTa) _ivTa.dataset.rawHtml = "";
   const _tpv = document.getElementById("rf_thumb_preview"); if (_tpv) _tpv.style.display = "none";
@@ -1097,6 +1233,8 @@ async function openRecruitModal(id, prefill, woOrderId) {
       document.getElementById("rf_title").value        = c.title || "";
       document.getElementById("rf_time_range").value   = c.time_range || "";
       document.getElementById("rf_review_fee").value   = c.review_fee || "";
+      // 📅 082: 리뷰비 구간 프리필 — 구간이 있으면 스위치가 자동으로 켜진다(없으면 종전 화면 그대로)
+      if (typeof renderFeeRows === "function") renderFeeRows(json.feeSchedules || []);
       document.getElementById("rf_notes").value        = c.notes || "";
       document.getElementById("rf_chat_url").value     = c.chat_url || "";
       // ★ 064: 노출 순서 UI 제거 — 요소가 남아있는 구버전 화면만 프리필(null-safe)
@@ -1850,6 +1988,15 @@ async function saveRecruitPost() {
     }
   }
 
+  /* 📅 기간별 리뷰비(082) — ★ 구간표 UI가 있는 페이지에서만 전송(없으면 미전송=서버가 기존 구간 유지).
+     옵션표·work_detail과 같은 원칙: 축약 화면의 저장이 설정을 조용히 지우지 않게 한다.
+     스위치를 끄면 빈 배열을 보내 구간을 제거한다(= 기본 리뷰비 한 값으로 복귀). */
+  if (document.getElementById("rf_fee_rows")) {
+    const _feeChk = renderFeeSchedule();
+    if (_feeChk.dup) { showToast("리뷰비 구간의 시작일이 중복됐어요. 날짜를 다르게 하거나 삭제해주세요.", "error"); return; }
+    payload.fee_schedules = document.getElementById("rf_fee_sched_on")?.checked ? readFeeRows() : [];
+  }
+
   const btn = document.getElementById("recruitSaveBtn");
   btn.disabled = true;
   btn.innerHTML = '<i class="fas fa-circle-notch fa-spin"></i> 저장 중...';
@@ -2005,7 +2152,8 @@ function _buildCardPreviewData() {
     channel: v("rf_channel"),
     channel_custom: v("rf_channel_custom"),
     delivery_type: v("rf_delivery_type"),
-    review_fee: Number(v("rf_review_fee")) || 0,
+    // ★ 082: 구간을 켰으면 카드 미리보기도 **오늘 적용 금액**을 보여준다(서버 목록 응답과 같은 규칙)
+    review_fee: _feePreviewToday(Number(v("rf_review_fee")) || 0),
     time_range: v("rf_time_range"),
     badges: _recruitBadges.slice(),
     thumbnail_url: v("rf_thumbnail"),

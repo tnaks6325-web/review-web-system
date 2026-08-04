@@ -1,0 +1,682 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="UTF-8"/>
+<meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+<title>모집공고 수정 UI 리디자인 시안 3종 — 통합 작업대</title>
+<style>
+/* ══════════════════════════════════════════════════════════════
+   모집공고 발행·수정 모달 리디자인 시안 (목업 전용 · 제품 코드 아님)
+   ?v=A|B|C 로 한 시안만 단독 열람. 외부 리소스 0(오프라인 열람 가능).
+   화면 재현 목업이라 color-scheme 고정 — 다크에서 색이 뒤집히면 "실물과 같다"가 깨진다.
+   ══════════════════════════════════════════════════════════════ */
+:root{
+  color-scheme:light;
+  --paper:#EDF1F8; --card:#fff; --ink:#0F172A; --t2:#475569; --t3:#94A3B8; --t4:#B0BAC9;
+  --line:#E2E8F0; --line2:#EDF1F6;
+  --p:#3182F6; --p-deep:#1B64DA; --p-soft:#EEF4FE;
+  --g:#12B886; --g-soft:#F0FBF6; --g-deep:#0B8A64;
+  --v:#7C3AED; --v-soft:#F7F4FE;
+  --w:#B45309; --w-soft:#FFF8ED;
+  --err:#DC2626;
+  --r:12px;
+}
+*{box-sizing:border-box;margin:0;padding:0}
+body{background:var(--paper);color:var(--ink);line-height:1.5;-webkit-font-smoothing:antialiased;
+  font-family:"Apple SD Gothic Neo","Pretendard","Noto Sans KR","Malgun Gothic",system-ui,sans-serif}
+.doc{max-width:1240px;margin:0 auto;padding:34px 18px 90px}
+
+/* ── 문서 헤더 ── */
+.eyebrow{font-size:.7rem;font-weight:800;letter-spacing:.13em;color:var(--p)}
+h1{font-size:1.6rem;font-weight:800;letter-spacing:-.02em;margin:7px 0}
+.lead{color:var(--t2);font-size:.88rem;max-width:840px}
+.chips{display:flex;gap:6px;flex-wrap:wrap;margin-top:13px}
+.chip{font-size:.7rem;font-weight:700;color:var(--t2);background:#fff;border:1px solid var(--line);border-radius:999px;padding:4px 11px}
+.chip b{color:var(--ink)}
+
+/* ── 진단 표 ── */
+.diag{margin-top:26px;background:#fff;border:1px solid var(--line);border-radius:14px;overflow:hidden}
+.diag h2{font-size:.86rem;font-weight:800;padding:13px 16px;border-bottom:1px solid var(--line);background:#F8FAFD}
+table{width:100%;border-collapse:collapse;font-size:.78rem}
+td,th{padding:9px 16px;border-bottom:1px solid var(--line2);text-align:left;vertical-align:top}
+th{font-size:.68rem;font-weight:800;color:var(--t3);background:#FCFDFF}
+tr:last-child td{border-bottom:none}
+td.bad{color:var(--err);font-weight:700}
+td b{font-weight:800}
+
+/* ── 시안 스위처 ── */
+.switcher{position:sticky;top:0;z-index:60;background:rgba(237,241,248,.93);backdrop-filter:blur(8px);
+  padding:14px 0 10px;margin-top:30px;display:flex;gap:7px;flex-wrap:wrap;align-items:center}
+.switcher a{font-size:.76rem;font-weight:800;text-decoration:none;color:var(--t2);background:#fff;
+  border:1.5px solid var(--line);border-radius:999px;padding:6px 15px}
+.switcher a.on{background:var(--p);border-color:var(--p);color:#fff}
+.switcher span{font-size:.7rem;color:var(--t3);margin-left:4px}
+
+/* ── 시안 블록 ── */
+section.variant{margin-top:26px}
+.vhead{margin-bottom:14px}
+.vtag{font-size:.68rem;font-weight:800;letter-spacing:.11em;color:var(--p)}
+.vhead h2{font-size:1.18rem;font-weight:800;letter-spacing:-.015em;margin:4px 0 6px}
+.vhead p{font-size:.83rem;color:var(--t2);max-width:900px}
+.pros{display:flex;gap:5px;flex-wrap:wrap;margin-top:10px}
+.pros i{font-style:normal;font-size:.68rem;font-weight:700;border-radius:7px;padding:3px 9px;background:var(--p-soft);color:var(--p-deep)}
+.pros i.warn{background:var(--w-soft);color:var(--w)}
+.pros i.ok{background:var(--g-soft);color:var(--g-deep)}
+
+/* ══ 모달 껍데기(공통) ══ */
+.stage{background:#5B6478;border-radius:18px;padding:20px;overflow-x:auto}
+.modal{background:#fff;border-radius:18px;width:1120px;min-width:1120px;box-shadow:0 10px 40px rgba(15,23,42,.22);
+  overflow:hidden;display:flex;flex-direction:column;height:660px}
+.mhead{display:flex;align-items:center;gap:10px;padding:14px 18px;border-bottom:1px solid var(--line);
+  background:linear-gradient(135deg,#F8FAFF,#F0F4FF)}
+.mhead h3{font-size:.96rem;font-weight:800;flex:1}
+.mhead .x{width:30px;height:30px;border-radius:50%;background:rgba(15,23,42,.06);border:1px solid var(--line);
+  color:var(--t2);font-size:.85rem;display:flex;align-items:center;justify-content:center;cursor:pointer}
+.mbody{display:flex;flex:1;min-height:0}
+.mmain{flex:1;min-width:0;overflow-y:auto;padding:14px 18px 20px}
+.mside{width:328px;flex-shrink:0;border-left:1px solid var(--line);background:#F7F9FC;overflow-y:auto;padding:12px 14px 18px}
+.mfoot{display:flex;justify-content:space-between;align-items:center;gap:8px;padding:11px 18px;border-top:1px solid var(--line);background:#FCFDFF}
+.mfoot .hint{font-size:.7rem;color:var(--t3);font-weight:600}
+.btn{padding:8px 17px;border-radius:9px;font-size:.8rem;font-weight:700;cursor:pointer;border:1.5px solid var(--line);background:#fff;color:var(--t2);font-family:inherit}
+.btn.pri{background:var(--p);border-color:var(--p);color:#fff}
+.btn.gho{background:transparent}
+
+/* ══ 폼 원자(공통 · 세 시안이 같은 것을 쓴다 = 일관성의 실체) ══ */
+.fld{display:grid;grid-template-columns:82px 1fr;gap:10px;align-items:center;padding:6px 0}
+.fld.top{align-items:start}
+.fld>label{font-size:.73rem;font-weight:700;color:var(--t2);text-align:right;line-height:1.3}
+.fld>label .req{color:var(--err)}
+.fld .sub{font-size:.65rem;color:var(--t3);font-weight:600;display:block;margin-top:1px}
+.in{width:100%;padding:7px 10px;border:1.5px solid var(--line);border-radius:8px;font-size:.79rem;
+  font-family:inherit;color:var(--ink);background:#fff}
+.in::placeholder{color:var(--t4)}
+.in:focus{outline:none;border-color:var(--p)}
+select.in{appearance:none;background-image:linear-gradient(45deg,transparent 50%,var(--t3) 50%),linear-gradient(135deg,var(--t3) 50%,transparent 50%);
+  background-position:calc(100% - 15px) 50%,calc(100% - 10px) 50%;background-size:5px 5px,5px 5px;background-repeat:no-repeat}
+.g2{display:grid;grid-template-columns:1fr 1fr;gap:6px 18px}
+.row{display:flex;gap:6px;align-items:center}
+.row .in{flex:1;min-width:0}
+.pill{padding:5px 12px;border:1.5px solid var(--line);border-radius:999px;background:#fff;font-size:.73rem;
+  font-weight:700;color:var(--t2);cursor:pointer;white-space:nowrap;font-family:inherit}
+.pill.on{background:var(--p);border-color:var(--p);color:#fff}
+.pills{display:flex;gap:5px;flex-wrap:wrap}
+.mini{padding:5px 11px;border-radius:8px;border:1.5px solid var(--line);background:#fff;font-size:.71rem;font-weight:700;color:var(--t2);cursor:pointer;font-family:inherit;white-space:nowrap}
+.hintline{font-size:.65rem;color:var(--t3);font-weight:600;margin-top:4px}
+
+/* 섹션 카드 — 세 시안이 공유하는 "한 벌" 컨테이너 */
+.card{border:1px solid var(--line);border-radius:var(--r);background:#fff;margin-bottom:12px;overflow:hidden}
+.card>.ch{display:flex;align-items:center;gap:8px;padding:9px 13px;background:#F8FAFD;border-bottom:1px solid var(--line)}
+.card>.ch .t{font-size:.78rem;font-weight:800;flex:1}
+.card>.ch .n{font-size:.65rem;font-weight:700;color:var(--t3)}
+.card>.cb{padding:11px 13px}
+.card.accent{border-left:3px solid var(--p)}
+.card.accent-g{border-left:3px solid var(--g)}
+.card.off>.cb{display:none}
+.card.off{opacity:.62}
+
+/* 스위치(공통 토글) */
+.sw{position:relative;width:38px;height:21px;border-radius:999px;background:#CBD5E1;cursor:pointer;flex-shrink:0;transition:background .15s}
+.sw::after{content:"";position:absolute;top:2px;left:2px;width:17px;height:17px;border-radius:50%;background:#fff;transition:transform .15s;box-shadow:0 1px 3px rgba(0,0,0,.2)}
+.sw.on{background:var(--g)}
+.sw.on::after{transform:translateX(17px)}
+
+/* 표(진행상품·기간별 리뷰비) — 두 표가 같은 문법 */
+.thead,.trow{display:grid;gap:6px;align-items:center}
+.thead{font-size:.62rem;font-weight:800;color:var(--t3);padding:0 2px 5px;border-bottom:1px solid var(--line);margin-bottom:6px}
+.trow{margin-bottom:6px}
+.trow .in{font-size:.73rem;padding:6px 8px}
+.t-prod .thead,.t-prod .trow{grid-template-columns:1.5fr 1fr .85fr .6fr .6fr 24px}
+.t-fee .thead,.t-fee .trow{grid-template-columns:1.05fr .8fr 1.3fr 24px}
+.num{text-align:right}
+.del{border:none;background:none;color:#CBD5E1;font-size:.95rem;font-weight:800;cursor:pointer}
+.dim{background:#FAFBFD;color:var(--t2)}
+
+/* 점검 리스트 */
+.chk{display:flex;gap:7px;align-items:flex-start;font-size:.71rem;font-weight:700;padding:3px 0}
+.chk.ok{color:var(--g-deep)} .chk.warn{color:var(--w)} .chk.err{color:var(--err)}
+
+/* 미리보기(우측) */
+.pv-t{font-size:.72rem;font-weight:800;color:var(--p);text-align:center;padding:4px 0 9px}
+.pv-lab{font-size:.65rem;color:var(--t4);text-align:center;margin:0 0 6px;font-weight:600}
+.pvcard{border:1px solid var(--line);border-radius:14px;background:#fff;overflow:hidden;margin-bottom:14px;box-shadow:0 1px 5px rgba(15,23,42,.05)}
+.pvcard .th{height:96px;background:linear-gradient(135deg,#DCE7F8,#EDF2FB);display:flex;align-items:center;justify-content:center;color:#A9B7CC;font-size:.7rem;font-weight:700;position:relative}
+.pvcard .th .bd{position:absolute;top:7px;right:7px;display:flex;gap:4px}
+.pvcard .th .bd i{font-style:normal;font-size:.6rem;font-weight:800;background:rgba(15,23,42,.66);color:#fff;border-radius:6px;padding:2px 6px}
+.pvcard .bd2{padding:9px 11px}
+.pvcard h5{font-size:.79rem;font-weight:800;line-height:1.3}
+.pvcard .m{font-size:.67rem;color:var(--t3);font-weight:600;margin-top:3px}
+.gauge{height:6px;border-radius:999px;background:#EDF1F6;margin:8px 0 5px;overflow:hidden}
+.gauge>i{display:block;height:100%;width:38%;background:var(--p)}
+.pvphone{background:#F0F2FA;border-radius:14px;padding:10px}
+.pvttl{display:flex;align-items:center;gap:8px;background:#FEF3C7;border:1.5px solid #F59E0B;border-radius:11px;padding:8px 11px;margin-bottom:9px}
+.pvttl span{flex:1;font-size:.72rem;font-weight:800;color:#92400E}
+.pvttl b{font-size:1rem;font-weight:900;color:#92400E}
+.pvbox{background:#fff;border:1px solid var(--line);border-radius:11px;padding:10px;margin-bottom:8px}
+.pvbox .h{font-size:.71rem;font-weight:800;margin-bottom:5px}
+.pvbox .l{font-size:.67rem;color:var(--t2);line-height:1.7}
+.pvghost{border:1px dashed #C7D2E3;border-radius:9px;padding:14px;text-align:center;font-size:.68rem;color:var(--t4);font-weight:600}
+
+/* ── 시안 B: 좌측 네비 레일 ── */
+.rail{width:158px;flex-shrink:0;border-right:1px solid var(--line);background:#FAFCFF;padding:12px 8px;overflow-y:auto}
+.rail a{display:flex;gap:8px;align-items:center;padding:8px 10px;border-radius:9px;font-size:.75rem;
+  font-weight:700;color:var(--t2);text-decoration:none;margin-bottom:2px;cursor:pointer}
+.rail a .no{width:18px;height:18px;border-radius:50%;background:#E7EDF6;color:var(--t3);font-size:.62rem;
+  font-weight:800;display:flex;align-items:center;justify-content:center;flex-shrink:0}
+.rail a.on{background:var(--p-soft);color:var(--p-deep)}
+.rail a.on .no{background:var(--p);color:#fff}
+.rail .rl{font-size:.6rem;font-weight:800;color:var(--t4);letter-spacing:.1em;padding:10px 10px 5px}
+.seg{display:inline-flex;padding:3px;background:#EDF1F6;border-radius:10px;gap:3px}
+.seg button{border:none;background:transparent;font-family:inherit;font-size:.75rem;font-weight:800;
+  color:var(--t2);padding:6px 15px;border-radius:8px;cursor:pointer}
+.seg button.on{background:#fff;color:var(--p-deep);box-shadow:0 1px 3px rgba(15,23,42,.12)}
+.modehead{display:flex;align-items:center;gap:12px;padding:10px 13px;border:1px solid var(--line);
+  border-radius:var(--r);background:#FBFCFE;margin-bottom:12px}
+.modehead .d{font-size:.68rem;color:var(--t3);font-weight:600;flex:1}
+
+/* ── 시안 C: 스텝 ── */
+.steps{display:flex;align-items:center;gap:0;padding:11px 18px;border-bottom:1px solid var(--line);background:#FBFCFE}
+.step{display:flex;align-items:center;gap:7px;font-size:.75rem;font-weight:700;color:var(--t3)}
+.step .no{width:21px;height:21px;border-radius:50%;background:#E7EDF6;color:var(--t3);font-size:.66rem;
+  font-weight:800;display:flex;align-items:center;justify-content:center}
+.step.on{color:var(--p-deep)} .step.on .no{background:var(--p);color:#fff}
+.step.done{color:var(--g-deep)} .step.done .no{background:var(--g);color:#fff}
+.sbar{flex:1;height:2px;background:#E7EDF6;margin:0 11px}
+.sbar.done{background:var(--g)}
+.paneT{font-size:.95rem;font-weight:800;margin-bottom:3px}
+.paneD{font-size:.72rem;color:var(--t3);font-weight:600;margin-bottom:13px}
+.summary{border:1px solid var(--line);border-radius:var(--r);overflow:hidden;margin-bottom:12px}
+.summary .sr{display:grid;grid-template-columns:96px 1fr auto;gap:10px;padding:8px 13px;border-bottom:1px solid var(--line2);font-size:.75rem;align-items:center}
+.summary .sr:last-child{border-bottom:none}
+.summary .sr b{font-weight:700;color:var(--t3);font-size:.7rem}
+.summary .sr a{font-size:.68rem;font-weight:800;color:var(--p);text-decoration:none;cursor:pointer}
+
+.note{font-size:.78rem;color:var(--t2);margin-top:14px;background:#fff;border:1px solid var(--line);
+  border-left:3px solid var(--p);border-radius:10px;padding:12px 14px}
+.note b{font-weight:800;color:var(--ink)}
+.note ul{margin:6px 0 0 17px} .note li{margin-bottom:3px}
+@media (max-width:900px){ .doc{padding:22px 12px 60px} }
+</style>
+</head>
+<body>
+<div class="doc">
+
+<div class="eyebrow">DESIGN PROPOSAL</div>
+<h1>모집공고 발행·수정 UI 리디자인 — 시안 3종</h1>
+<p class="lead">
+  통합 작업대(<code>workdesk.html</code>)와 관리자 대시보드가 공유하는 <b>모집공고 모달</b>(<code>js/recruit-modal.js</code>)의
+  리디자인 시안입니다. 세 시안 모두 <b>필드 ID·저장 로직은 그대로</b>이고 바뀌는 것은 배치와 컨테이너 문법뿐입니다.
+</p>
+<div class="chips">
+  <span class="chip">대상 <b>#recruitModal</b></span>
+  <span class="chip">필드 <b>65개 · ID 불변</b></span>
+  <span class="chip">공유 <b>admin.html · workdesk.html</b></span>
+  <span class="chip">미리보기 <b>우측 고정 유지</b></span>
+</div>
+
+<div class="diag">
+  <h2>지금 무엇이 들쭉날쭉한가 (현재 모달 실측)</h2>
+  <table>
+    <tr><th style="width:150px">축</th><th style="width:290px">현재</th><th>결과</th></tr>
+    <tr><td><b>라벨 배치</b></td>
+      <td class="bad">3종 혼재 — 가로 64px(<code>.rf-hrow</code>) · 가로 76px(<code>-w</code>/<code>-top</code>) · 세로(<code>.rform-group</code>)</td>
+      <td>입력칸 시작선이 항목마다 달라 세로로 훑을 기준선이 없다</td></tr>
+    <tr><td><b>강조 박스</b></td>
+      <td class="bad">4종 — 참여형 녹색 · 기간별 리뷰비 녹색 · 타계정 보라 · 현금영수증 주황<br><span style="color:var(--t3);font-weight:600">테두리 1.5px, 반경 10/12px, 배경 제각각 · 전부 인라인 스타일</span></td>
+      <td>색이 <b>중요도</b>가 아니라 <b>기능 구분</b>으로 쓰여 시선이 4갈래로 찢어진다</td></tr>
+    <tr><td><b>참여형 영역</b></td>
+      <td class="bad">녹색 박스 하나가 날짜·시간창·타계정·현영·고급설정·자동점검을 <b>통째로 품음</b></td>
+      <td>박스 안에 또 색 박스가 중첩 → “다른 화면”처럼 보임 (사용자 지적 지점)</td></tr>
+    <tr><td><b>섹션 리듬</b></td>
+      <td class="bad">묶음 헤더는 2개(기본정보·모집정보)뿐인데, 진행상품·작업내용은 <code>border-top:dashed</code>로만 구분</td>
+      <td>같은 위계인데 표기가 달라 어디까지가 한 묶음인지 모른다</td></tr>
+    <tr><td><b>보조 문구</b></td>
+      <td class="bad">폰트 크기 .62 / .64 / .66 / .68 / .70 / .72rem 6단</td>
+      <td>중요도 차이 없이 크기만 흔들려 “정리 안 된” 인상</td></tr>
+  </table>
+</div>
+
+<div class="switcher">
+  <a href="?v=A" id="tA">시안 A — 카드 스택</a>
+  <a href="?v=B" id="tB">시안 B — 네비 레일 + 모드</a>
+  <a href="?v=C" id="tC">시안 C — 4단계 스텝</a>
+  <a href="?" id="tAll">전체 보기</a>
+  <span>세 시안 모두 폼 원자(라벨 82px · 입력 8px 반경 · 카드 1px)는 <b>같은 한 벌</b>을 씁니다</span>
+</div>
+
+<!-- ══════════════════════════════════════════════════════════════
+     시안 A — 카드 스택
+     ══════════════════════════════════════════════════════════════ -->
+<section class="variant" id="vA">
+  <div class="vhead">
+    <div class="vtag">시안 A</div>
+    <h2>카드 스택 — 모든 묶음이 같은 카드, 참여형은 “카드 헤더의 스위치”</h2>
+    <p>색 박스를 전부 없애고 <b>동일한 흰 카드 + 회색 헤더바</b> 하나로 통일합니다. 참여형·기간별 리뷰비처럼
+      켜고 끄는 묶음은 <b>카드 헤더 우측 스위치</b>로 표현하고, 색은 카드 <b>왼쪽 3px 액센트 선</b>으로만 남깁니다
+      — 켜져 있으면 본문이 펼쳐지고 꺼져 있으면 헤더만 남아 접힙니다. 타계정·현금영수증은 자기 색 박스를 버리고
+      같은 카드 안의 평범한 필드행이 됩니다.</p>
+    <div class="pros">
+      <i class="ok">현재 구조 유지 · 변경량 최소</i><i class="ok">스크롤 한 줄기</i><i>색 4종 → 액센트 2종</i><i class="warn">긴 스크롤은 그대로</i>
+    </div>
+  </div>
+
+  <div class="stage"><div class="modal">
+    <div class="mhead"><h3>📣 모집공고 수정 — 쿠팡 립밤 리뷰 모집</h3><div class="x">✕</div></div>
+    <div class="mbody">
+      <div class="mmain">
+
+        <div class="card accent">
+          <div class="ch"><span class="t">🔗 연결</span><span class="n">시트·탭이 없으면 공고가 동작하지 않습니다</span></div>
+          <div class="cb">
+            <div class="g2">
+              <div class="fld"><label>시트명 <span class="req">*</span></label><select class="in"><option>2026 상반기 체험단 · A시트</option></select></div>
+              <div class="fld"><label>탭명 <span class="req">*</span></label><select class="in"><option>0804 립밤 100건</option></select></div>
+              <div class="fld"><label>담당자 <span class="req">*</span></label><div class="pills"><span class="pill on">🥟 만두</span><span class="pill">🥭 망고</span></div></div>
+              <div class="fld"><label>구매채널 <span class="req">*</span></label><div class="pills"><span class="pill on">🛒 쿠팡</span><span class="pill">🟢 네이버</span><span class="pill">🫒 올리브영</span><span class="pill">＋</span></div></div>
+              <div class="fld"><label>배송유형</label><select class="in"><option>빈택배</option></select></div>
+              <div class="fld"><label>팀채팅방 <span class="req">*</span></label><input class="in" value="https://open.kakao.com/o/gX8..."></div>
+            </div>
+          </div>
+        </div>
+
+        <div class="card accent">
+          <div class="ch"><span class="t">🛍 상품</span><span class="n">URL·썸네일·안내배지</span></div>
+          <div class="cb">
+            <div class="fld top"><label>상품 URL</label>
+              <div><div class="row"><input class="in" value="https://www.coupang.com/vp/products/8412..."><span class="mini">가져오기</span><span class="mini">↗</span></div>
+                <div class="hintline">네이버·올리브영 지원 · 쿠팡은 제한적</div></div></div>
+            <div class="fld top"><label>썸네일</label>
+              <div><div class="row"><input class="in" placeholder="이미지 주소 붙여넣기"><span class="mini">가져오기</span><span class="mini">파일</span></div></div></div>
+            <div class="fld top"><label>안내배지</label>
+              <div>
+                <div class="pills" style="margin-bottom:6px"><span class="mini">＋현영건</span><span class="mini">＋로켓와우</span><span class="mini">＋포토리뷰</span><span class="mini">＋3.3% 공제</span><span class="mini">＋옵션지정</span></div>
+                <div style="border:1.5px solid var(--line);border-radius:8px;padding:6px 9px;display:flex;gap:5px;flex-wrap:wrap;align-items:center;min-height:36px">
+                  <span class="pill on" style="font-size:.7rem;padding:3px 10px">현영건 ✕</span>
+                  <span class="pill on" style="font-size:.7rem;padding:3px 10px">포토리뷰 ✕</span>
+                  <span style="font-size:.72rem;color:var(--t4)">배지 입력 후 Enter</span>
+                </div>
+              </div></div>
+          </div>
+        </div>
+
+        <div class="card accent-g">
+          <div class="ch"><span class="t">💰 리뷰비</span><span class="n">기간별 지급</span><div class="sw on"></div></div>
+          <div class="cb">
+            <div class="fld"><label>기본 리뷰비</label><div class="row" style="max-width:200px"><input class="in num" value="1000"><span style="font-size:.73rem;color:var(--t3);font-weight:700">원</span></div></div>
+            <div style="margin-top:8px" class="t-fee">
+              <div class="thead"><span>적용 시작일</span><span class="num">리뷰비(원)</span><span>메모(관리자만)</span><span></span></div>
+              <div class="trow"><input class="in" type="date" value="2026-07-01"><input class="in num" value="1000"><input class="in" placeholder="선택"><button class="del">✕</button></div>
+              <div class="trow" style="background:#ECFDF5;border-radius:8px;padding:3px;margin:0 -3px 6px">
+                <input class="in" type="date" value="2026-08-01"><input class="in num" value="1500"><input class="in" value="8월 인상분"><button class="del">✕</button></div>
+              <div style="display:flex;justify-content:space-between;align-items:center;margin-top:2px">
+                <span class="mini">＋ 구간 추가</span><span class="hintline">오늘(8/4) 적용 = <b>1,500원</b> · 참여 시점 금액으로 영구 고정</span></div>
+            </div>
+          </div>
+        </div>
+
+        <div class="card accent-g" id="aPart">
+          <div class="ch"><span class="t">⚡ 참여형 캠페인</span><span class="n">리뷰어가 직접 참여 → 화면 안에서 제출</span><div class="sw on"></div></div>
+          <div class="cb">
+            <div class="g2">
+              <div class="fld"><label>시작일</label><input class="in" type="date" value="2026-08-04"></div>
+              <div class="fld"><label>종료일</label><input class="in" type="date" value="2026-08-20"></div>
+              <div class="fld"><label>구매시간대<span class="sub">비우면 자율</span></label><div class="row"><input class="in" type="time" value="14:00"><span style="color:var(--t4);font-weight:800">~</span><input class="in" type="time" value="16:00"></div></div>
+              <div class="fld"><label>시간 표기</label><input class="in" value="두시 ~ 네시"></div>
+              <div class="fld"><label>랜딩 URL</label><input class="in" placeholder="https:// — 링크유입일 때만"></div>
+              <div class="fld"><label>타계정 허용</label><div class="row"><div class="sw on"></div><span style="font-size:.72rem;color:var(--t2);font-weight:700">하루</span><input class="in num" value="1" style="max-width:56px"><span style="font-size:.72rem;color:var(--t2);font-weight:700">건 · 제한</span><input class="in num" value="10" style="max-width:56px"><span style="font-size:.72rem;color:var(--t2);font-weight:700">분</span></div></div>
+              <div class="fld"><label>현금영수증<span class="sub">탭 설정</span></label><div style="font-size:.74rem;font-weight:700;color:var(--w)">🧾 발행 필요 <span style="font-weight:600;color:var(--t3);font-size:.68rem">— 탭설정(진행방식)에서 변경</span></div></div>
+              <div class="fld"><label>고급</label><div class="row"><span style="font-size:.72rem;color:var(--t2);font-weight:700">참여 제한</span><input class="in num" value="15" style="max-width:56px"><span style="font-size:.72rem;color:var(--t2);font-weight:700">분 · 마감 버퍼</span><input class="in num" value="10" style="max-width:56px"><span style="font-size:.72rem;color:var(--t2);font-weight:700">분</span></div></div>
+            </div>
+          </div>
+        </div>
+
+        <div class="card accent">
+          <div class="ch"><span class="t">📦 진행상품 · 작업내용</span><span class="n">작업오더에서 자동 적용 · 옵션마다 한 줄</span></div>
+          <div class="cb">
+            <div class="t-prod">
+              <div class="thead"><span>상품명</span><span>옵션명</span><span class="num">결제금액</span><span class="num">총인원</span><span class="num">일건수</span><span></span></div>
+              <div class="trow"><input class="in" value="힙스 골라담기"><input class="in" value="콰이어트"><input class="in num" value="28900"><input class="in num" value="60"><input class="in num" value="20"><button class="del">✕</button></div>
+              <div class="trow"><input class="in dim" value="힙스 골라담기"><input class="in" value="어나더"><input class="in num" value="28900"><input class="in num" value="40"><input class="in num" value="10"><button class="del">✕</button></div>
+              <div style="display:flex;justify-content:space-between;align-items:center"><span class="mini">＋ 옵션 추가</span>
+                <span class="hintline">총인원 100 · 일건수 30 <b>(캠페인 정원 자동 산출)</b></span></div>
+            </div>
+            <div style="margin-top:11px">
+              <div class="fld top"><label>유입가이드</label><div><textarea class="in" rows="2" placeholder="키워드 검색 or 링크 진입 방법">‘립밤 보습’ 검색 → 2번째 상품</textarea><div class="hintline">입력하면 리뷰어 화면에 [상품 페이지 열기]가 뜨지 않습니다(가이드유입)</div></div></div>
+              <div class="fld top"><label>리뷰가이드</label><textarea class="in" rows="2" placeholder="별점/포토 비율 등"></textarea></div>
+              <div class="fld top"><label>특이사항<span class="sub">참여자만</span></label><textarea class="in" rows="2" placeholder="선택"></textarea></div>
+            </div>
+          </div>
+        </div>
+
+        <div class="card accent">
+          <div class="ch"><span class="t">📣 게시</span><span class="n">제목·유의사항·상태</span></div>
+          <div class="cb">
+            <div class="fld"><label>공고 제목 <span class="req">*</span></label><input class="in" value="쿠팡 립밤 리뷰 모집"></div>
+            <div class="fld top"><label>유의사항</label><div><textarea class="in" rows="2" placeholder="공고 카드에 노출되는 안내문"></textarea></div></div>
+            <div class="g2">
+              <div class="fld"><label>상태</label><select class="in"><option>모집중</option></select></div>
+              <div class="fld"><label>모집인원<span class="sub">레거시</span></label><input class="in num" value="0"></div>
+            </div>
+            <div style="margin-top:9px;border-top:1px solid var(--line2);padding-top:9px">
+              <div style="font-size:.74rem;font-weight:800;margin-bottom:5px">🧮 게시 전 자동 점검</div>
+              <div class="chk ok">✓ 연결 탭 gid 확인됨 (0804 립밤 100건)</div>
+              <div class="chk ok">✓ 구매시간대 14:00 ~ 16:00 · 일건수 30건</div>
+              <div class="chk warn">⚠ 첫 리뷰비 구간(7/1)이 공고 시작일(8/4)보다 빠릅니다 — 게시는 가능</div>
+            </div>
+          </div>
+        </div>
+
+      </div>
+      <aside class="mside">
+        <div class="pv-t">👁 미리보기</div>
+        <div class="pv-lab">홈·목록에서 보이는 카드</div>
+        <div class="pvcard">
+          <div class="th">썸네일<div class="bd"><i>쿠팡</i><i>빈택배</i></div></div>
+          <div class="bd2"><h5>쿠팡 립밤 리뷰 모집</h5>
+            <div class="m">14:00~16:00 · 리뷰비 1,500원</div>
+            <div class="gauge"><i></i></div>
+            <div class="m">오늘 11 / 30명</div></div>
+        </div>
+        <div class="pv-lab">리뷰어가 참여한 뒤 보는 화면</div>
+        <div class="pvphone">
+          <div class="pvttl"><span>⏳ 구매양식 제출까지</span><b>15:00</b></div>
+          <div class="pvbox"><div class="h">📦 상품 · 옵션 · 결제금액</div><div class="l">힙스 골라담기 / 콰이어트<br>28,900원</div></div>
+          <div class="pvbox"><div class="h">🧾 현금영수증</div><div class="l">지출증빙 · 사업자번호 000-00-00000</div></div>
+          <div class="pvbox"><div class="h">🔎 유입가이드</div><div class="l">‘립밤 보습’ 검색 → 2번째 상품</div></div>
+          <div class="pvbox"><div class="h">🧾 구매양식</div><div class="pvghost">연결된 시트의 구매양식이 여기에 표시됩니다</div></div>
+        </div>
+      </aside>
+    </div>
+    <div class="mfoot"><span class="hint">필수 7개 중 7개 입력됨</span>
+      <div style="display:flex;gap:8px"><span class="btn">취소</span><span class="btn pri">💾 저장</span></div></div>
+  </div></div>
+
+  <div class="note"><b>A가 해결하는 것</b>
+    <ul>
+      <li>색 박스 4종 → <b>카드 1종 + 좌측 액센트 2색</b>(파랑=상시, 녹색=스위치로 켜는 묶음). 참여형이 “다른 앱”처럼 보이던 원인이 사라진다.</li>
+      <li>참여형 안에 중첩돼 있던 타계정·현금영수증이 <b>같은 82px 라벨의 평범한 필드행</b>이 된다.</li>
+      <li>자동 점검이 참여형 박스 안이 아니라 <b>[게시] 카드 맨 아래</b> = 저장 버튼 바로 위로 이동 — 읽는 순서와 누르는 순서가 일치.</li>
+    </ul>
+  </div>
+</section>
+
+<!-- ══════════════════════════════════════════════════════════════
+     시안 B — 네비 레일 + 모드 세그먼트
+     ══════════════════════════════════════════════════════════════ -->
+<section class="variant" id="vB">
+  <div class="vhead">
+    <div class="vtag">시안 B</div>
+    <h2>네비 레일 + 모드 세그먼트 — 참여형을 “박스”가 아니라 “공고 종류”로</h2>
+    <p>왼쪽에 <b>섹션 레일</b>을 두어 지금 어디를 보는지·무엇이 남았는지 항상 보이게 하고,
+      참여형은 초록 박스를 없애고 최상단 <b>[일반 공고 | 참여형 캠페인] 세그먼트</b>로 승격합니다.
+      참여형을 고르면 레일에 <b>‘모집 조건’ 항목이 추가</b>되고, 끄면 그 항목이 사라집니다 —
+      켜고 끄는 것이 박스의 펼침이 아니라 <b>폼의 구성</b>이 되어 “왜 여기만 초록인가”라는 질문 자체가 없어집니다.</p>
+    <div class="pros">
+      <i class="ok">스크롤 없이 이동</i><i class="ok">남은 필수 항목이 레일에 보임</i><i>참여형 = 모드</i><i class="warn">가로폭 158px 소모</i>
+    </div>
+  </div>
+
+  <div class="stage"><div class="modal">
+    <div class="mhead"><h3>📣 모집공고 수정 — 쿠팡 립밤 리뷰 모집</h3><div class="x">✕</div></div>
+    <div class="mbody">
+      <nav class="rail">
+        <div class="rl">기본</div>
+        <a><span class="no">1</span>연결</a>
+        <a><span class="no">2</span>상품</a>
+        <a><span class="no">3</span>리뷰비</a>
+        <div class="rl">참여형</div>
+        <a class="on"><span class="no">4</span>모집 조건</a>
+        <a><span class="no">5</span>작업내용</a>
+        <div class="rl">게시</div>
+        <a><span class="no">6</span>공고문</a>
+        <a><span class="no">✓</span>자동 점검</a>
+      </nav>
+      <div class="mmain">
+        <div class="modehead">
+          <div class="seg"><button>일반 공고</button><button class="on">⚡ 참여형 캠페인</button></div>
+          <div class="d">참여형 = 리뷰어가 직접 참여 → 작업내용 확인 → 화면 안에서 구매양식 제출.<br>일반으로 바꾸면 ④⑤ 항목이 폼에서 빠집니다.</div>
+        </div>
+
+        <div class="card">
+          <div class="ch"><span class="t">④ 모집 조건</span><span class="n">언제 · 몇 명을 모으나</span></div>
+          <div class="cb">
+            <div class="g2">
+              <div class="fld"><label>시작일 <span class="req">*</span></label><input class="in" type="date" value="2026-08-04"></div>
+              <div class="fld"><label>종료일</label><input class="in" type="date" value="2026-08-20"></div>
+              <div class="fld"><label>구매시간대<span class="sub">비우면 자율</span></label><div class="row"><input class="in" type="time" value="14:00"><span style="color:var(--t4);font-weight:800">~</span><input class="in" type="time" value="16:00"></div></div>
+              <div class="fld"><label>시간 표기</label><input class="in" value="두시 ~ 네시"></div>
+              <div class="fld"><label>총 모집<span class="sub">표에서 자동</span></label><input class="in num dim" value="100" readonly></div>
+              <div class="fld"><label>일 건수<span class="sub">표에서 자동</span></label><input class="in num dim" value="30" readonly></div>
+              <div class="fld"><label>랜딩 URL</label><input class="in" placeholder="https:// — 링크유입일 때만"></div>
+              <div class="fld"><label>참여 제한<span class="sub">고급</span></label><div class="row"><input class="in num" value="15" style="max-width:64px"><span style="font-size:.72rem;font-weight:700;color:var(--t2)">분 · 마감버퍼</span><input class="in num" value="10" style="max-width:64px"><span style="font-size:.72rem;font-weight:700;color:var(--t2)">분</span></div></div>
+            </div>
+            <div style="border-top:1px solid var(--line2);margin-top:8px;padding-top:9px">
+              <div class="fld"><label>타계정 허용</label>
+                <div class="row"><div class="sw on"></div>
+                  <span style="font-size:.72rem;font-weight:700;color:var(--t2)">하루</span><input class="in num" value="1" style="max-width:56px">
+                  <span style="font-size:.72rem;font-weight:700;color:var(--t2)">건 · 제한</span><input class="in num" value="10" style="max-width:56px">
+                  <span style="font-size:.72rem;font-weight:700;color:var(--t2)">분</span>
+                  <span class="hintline" style="margin:0 0 0 4px">명의당 1건</span></div></div>
+              <div class="fld"><label>현금영수증<span class="sub">읽기 전용</span></label>
+                <div style="font-size:.74rem;font-weight:700;color:var(--w)">🧾 발행 필요 <span style="font-weight:600;color:var(--t3);font-size:.68rem">— 연결 탭의 진행방식에서 판정 · 탭설정에서 변경</span></div></div>
+            </div>
+          </div>
+        </div>
+
+        <div class="card">
+          <div class="ch"><span class="t">⑤ 작업내용</span><span class="n">참여한 리뷰어에게만 공개</span></div>
+          <div class="cb">
+            <div class="t-prod">
+              <div class="thead"><span>상품명</span><span>옵션명</span><span class="num">결제금액</span><span class="num">총인원</span><span class="num">일건수</span><span></span></div>
+              <div class="trow"><input class="in" value="힙스 골라담기"><input class="in" value="콰이어트"><input class="in num" value="28900"><input class="in num" value="60"><input class="in num" value="20"><button class="del">✕</button></div>
+              <div class="trow"><input class="in dim" value="힙스 골라담기"><input class="in" value="어나더"><input class="in num" value="28900"><input class="in num" value="40"><input class="in num" value="10"><button class="del">✕</button></div>
+              <div><span class="mini">＋ 옵션 추가</span></div>
+            </div>
+            <div style="margin-top:10px">
+              <div class="fld top"><label>유입가이드</label><textarea class="in" rows="2">‘립밤 보습’ 검색 → 2번째 상품</textarea></div>
+              <div class="fld top"><label>리뷰가이드</label><textarea class="in" rows="2" placeholder="별점/포토 비율 등"></textarea></div>
+              <div class="fld top"><label>특이사항</label><textarea class="in" rows="2" placeholder="선택"></textarea></div>
+            </div>
+          </div>
+        </div>
+      </div>
+      <aside class="mside">
+        <div class="pv-t">👁 미리보기</div>
+        <div class="pv-lab">홈·목록에서 보이는 카드</div>
+        <div class="pvcard">
+          <div class="th">썸네일<div class="bd"><i>쿠팡</i><i>빈택배</i></div></div>
+          <div class="bd2"><h5>쿠팡 립밤 리뷰 모집</h5>
+            <div class="m">14:00~16:00 · 리뷰비 1,500원</div>
+            <div class="gauge"><i></i></div><div class="m">오늘 11 / 30명</div></div>
+        </div>
+        <div class="pv-lab">리뷰어가 참여한 뒤 보는 화면</div>
+        <div class="pvphone">
+          <div class="pvttl"><span>⏳ 구매양식 제출까지</span><b>15:00</b></div>
+          <div class="pvbox"><div class="h">📦 상품 · 옵션 · 결제금액</div><div class="l">힙스 골라담기 / 콰이어트<br>28,900원</div></div>
+          <div class="pvbox"><div class="h">🔎 유입가이드</div><div class="l">‘립밤 보습’ 검색 → 2번째 상품</div></div>
+          <div class="pvbox"><div class="h">🧾 구매양식</div><div class="pvghost">연결된 시트의 구매양식이 여기에 표시됩니다</div></div>
+        </div>
+      </aside>
+    </div>
+    <div class="mfoot"><span class="hint">④ 모집 조건 — 남은 필수 0개 · 다음: ⑤ 작업내용</span>
+      <div style="display:flex;gap:8px"><span class="btn">취소</span><span class="btn pri">💾 저장</span></div></div>
+  </div></div>
+
+  <div class="note"><b>B가 해결하는 것</b>
+    <ul>
+      <li>참여형이 <b>색 박스가 아니라 폼의 종류</b>가 된다 — 초록 영역이 통째로 사라지고, 대신 레일에 ④⑤ 항목이 생겼다 없어진다.</li>
+      <li>총모집·일건수처럼 <b>표에서 자동 산출되는 값은 회색 읽기 전용 칸</b>으로 드러낸다(지금은 hidden이라 “왜 25로 뜨지”가 생김).</li>
+      <li>65개 필드를 한 스크롤에 늘어놓지 않고 <b>7묶음</b>으로 나눠, 수정할 항목만 찍어서 간다.</li>
+    </ul>
+  </div>
+</section>
+
+<!-- ══════════════════════════════════════════════════════════════
+     시안 C — 4단계 스텝
+     ══════════════════════════════════════════════════════════════ -->
+<section class="variant" id="vC">
+  <div class="vhead">
+    <div class="vtag">시안 C</div>
+    <h2>4단계 스텝 — 한 화면 한 묶음, 마지막은 확인·게시</h2>
+    <p>발행은 <b>① 연결·기본 → ② 상품·작업내용 → ③ 모집 조건 → ④ 확인·게시</b> 순서가 이미 정해져 있습니다.
+      그 순서를 화면으로 만들어 한 번에 한 묶음만 보여줍니다. 스크롤이 짧아져 <b>밀도가 항상 균일</b>하고,
+      참여형은 ③에서 스텝 전체가 그 내용이 되므로 색 박스가 필요 없습니다(끄면 ③이 아예 건너뛰어짐).
+      마지막 ④에서 전체 요약과 자동 점검을 함께 보고 게시합니다.</p>
+    <div class="pros">
+      <i class="ok">밀도 균일 · 스크롤 최소</i><i class="ok">게시 전 요약 확인</i><i>신규 발행에 특히 강함</i><i class="warn">한 칸만 고칠 때 클릭 증가</i>
+    </div>
+  </div>
+
+  <div class="stage"><div class="modal">
+    <div class="mhead"><h3>📣 모집공고 수정 — 쿠팡 립밤 리뷰 모집</h3><div class="x">✕</div></div>
+    <div class="steps">
+      <div class="step done"><span class="no">✓</span>연결·기본</div><div class="sbar done"></div>
+      <div class="step done"><span class="no">✓</span>상품·작업내용</div><div class="sbar done"></div>
+      <div class="step on"><span class="no">3</span>모집 조건</div><div class="sbar"></div>
+      <div class="step"><span class="no">4</span>확인·게시</div>
+    </div>
+    <div class="mbody">
+      <div class="mmain">
+        <div class="paneT">③ 모집 조건 — 언제, 몇 명을 모으나</div>
+        <div class="paneD">이 공고는 <b>참여형</b>입니다. ①에서 일반 공고로 바꾸면 이 단계는 건너뜁니다.</div>
+
+        <div class="card">
+          <div class="ch"><span class="t">📅 기간 · 시간</span></div>
+          <div class="cb"><div class="g2">
+            <div class="fld"><label>시작일 <span class="req">*</span></label><input class="in" type="date" value="2026-08-04"></div>
+            <div class="fld"><label>종료일</label><input class="in" type="date" value="2026-08-20"></div>
+            <div class="fld"><label>구매시간대<span class="sub">비우면 자율</span></label><div class="row"><input class="in" type="time" value="14:00"><span style="color:var(--t4);font-weight:800">~</span><input class="in" type="time" value="16:00"></div></div>
+            <div class="fld"><label>시간 표기</label><input class="in" value="두시 ~ 네시"></div>
+          </div></div>
+        </div>
+
+        <div class="card">
+          <div class="ch"><span class="t">👥 인원</span><span class="n">②의 진행상품 표에서 자동 산출</span></div>
+          <div class="cb"><div class="g2">
+            <div class="fld"><label>총 모집</label><input class="in num dim" value="100" readonly></div>
+            <div class="fld"><label>일 건수</label><input class="in num dim" value="30" readonly></div>
+            <div class="fld"><label>타계정 허용</label><div class="row"><div class="sw on"></div><span style="font-size:.72rem;font-weight:700;color:var(--t2)">하루</span><input class="in num" value="1" style="max-width:56px"><span style="font-size:.72rem;font-weight:700;color:var(--t2)">건</span></div></div>
+            <div class="fld"><label>타계정 제한</label><div class="row"><input class="in num" value="10" style="max-width:64px"><span style="font-size:.72rem;font-weight:700;color:var(--t2)">분 (본계정 15분)</span></div></div>
+          </div>
+          <div class="hintline">시트에 진행일 날짜가 2종 이상 있으면 <b>시트 일정이 우선</b>합니다 — 이 값은 시트 일정이 없을 때만 쓰입니다.</div>
+          </div>
+        </div>
+
+        <div class="card">
+          <div class="ch"><span class="t">⚙️ 고급</span><span class="n">기본값 권장</span></div>
+          <div class="cb"><div class="g2">
+            <div class="fld"><label>참여 제한</label><div class="row"><input class="in num" value="15" style="max-width:64px"><span style="font-size:.72rem;font-weight:700;color:var(--t2)">분</span></div></div>
+            <div class="fld"><label>마감 버퍼</label><div class="row"><input class="in num" value="10" style="max-width:64px"><span style="font-size:.72rem;font-weight:700;color:var(--t2)">분</span></div></div>
+            <div class="fld"><label>랜딩 URL</label><input class="in" placeholder="https:// — 링크유입일 때만"></div>
+            <div class="fld"><label>현금영수증<span class="sub">읽기 전용</span></label><div style="font-size:.74rem;font-weight:700;color:var(--w)">🧾 발행 필요</div></div>
+          </div></div>
+        </div>
+      </div>
+      <aside class="mside">
+        <div class="pv-t">👁 미리보기</div>
+        <div class="pv-lab">이 단계에서 바뀌는 부분</div>
+        <div class="pvcard">
+          <div class="th">썸네일<div class="bd"><i>쿠팡</i><i>빈택배</i></div></div>
+          <div class="bd2"><h5>쿠팡 립밤 리뷰 모집</h5>
+            <div class="m" style="color:var(--p);font-weight:800">14:00~16:00 · 오늘 구매마감까지 01:47:12</div>
+            <div class="gauge"><i></i></div><div class="m">오늘 11 / 30명 · 총 100명</div></div>
+        </div>
+        <div class="pv-lab">리뷰어가 참여한 뒤 보는 화면</div>
+        <div class="pvphone">
+          <div class="pvttl"><span>⏳ 구매양식 제출까지</span><b>15:00</b></div>
+          <div class="pvbox"><div class="h">📦 상품 · 옵션 · 결제금액</div><div class="l">힙스 골라담기 / 콰이어트<br>28,900원</div></div>
+          <div class="pvbox"><div class="h">🧾 구매양식</div><div class="pvghost">연결된 시트의 구매양식</div></div>
+        </div>
+      </aside>
+    </div>
+    <div class="mfoot"><span class="hint">3 / 4 단계 · 남은 필수 0개</span>
+      <div style="display:flex;gap:8px"><span class="btn gho">← 이전</span><span class="btn">임시저장</span><span class="btn pri">다음 → 확인·게시</span></div></div>
+  </div></div>
+
+  <div style="height:14px"></div>
+
+  <!-- C의 마지막 단계 -->
+  <div class="stage"><div class="modal" style="height:520px">
+    <div class="mhead"><h3>📣 모집공고 수정 — 쿠팡 립밤 리뷰 모집</h3><div class="x">✕</div></div>
+    <div class="steps">
+      <div class="step done"><span class="no">✓</span>연결·기본</div><div class="sbar done"></div>
+      <div class="step done"><span class="no">✓</span>상품·작업내용</div><div class="sbar done"></div>
+      <div class="step done"><span class="no">✓</span>모집 조건</div><div class="sbar done"></div>
+      <div class="step on"><span class="no">4</span>확인·게시</div>
+    </div>
+    <div class="mbody">
+      <div class="mmain">
+        <div class="paneT">④ 확인 · 게시</div>
+        <div class="paneD">아래 내용으로 리뷰어에게 공개됩니다. 고칠 항목은 오른쪽 [수정]을 누르면 그 단계로 돌아갑니다.</div>
+        <div class="summary">
+          <div class="sr"><b>연결</b><span>2026 상반기 체험단 · A시트 <span style="color:var(--t3)">›</span> 0804 립밤 100건 <span style="color:var(--g-deep);font-weight:800">gid 확인됨</span></span><a>수정</a></div>
+          <div class="sr"><b>채널·담당</b><span>🛒 쿠팡 · 빈택배 · 🥟 만두</span><a>수정</a></div>
+          <div class="sr"><b>진행상품</b><span>힙스 골라담기 — 콰이어트 60명 / 어나더 40명 · 28,900원</span><a>수정</a></div>
+          <div class="sr"><b>리뷰비</b><span>8/1부터 <b>1,500원</b> <span style="color:var(--t3)">(7/1~7/31 1,000원)</span></span><a>수정</a></div>
+          <div class="sr"><b>모집</b><span>8/4 ~ 8/20 · 14:00~16:00 · 하루 30명 / 총 100명 · 타계정 하루 1건</span><a>수정</a></div>
+          <div class="sr"><b>유입</b><span>가이드유입 — ‘립밤 보습’ 검색 → 2번째 상품 <span style="color:var(--t3)">([상품 페이지 열기] 미노출)</span></span><a>수정</a></div>
+          <div class="sr"><b>현금영수증</b><span>🧾 발행 필요 · 발행방법 이미지 <span style="color:var(--g-deep);font-weight:800">쿠팡 등록됨</span></span><a>탭설정</a></div>
+        </div>
+        <div class="card"><div class="ch"><span class="t">🧮 자동 점검</span></div><div class="cb">
+          <div class="chk ok">✓ 연결 탭 gid · 일건수 · 시간창 — 활성화 조건 충족</div>
+          <div class="chk ok">✓ 옵션명 중복 없음 · 시트 옵션열과 일치</div>
+          <div class="chk warn">⚠ 첫 리뷰비 구간(7/1)이 공고 시작일(8/4)보다 빠릅니다 — 게시는 가능합니다</div>
+          <div class="chk warn">⚠ 시트 일정 마감일(8/18)이 입력한 종료일(8/20)과 다릅니다 — <b>시트를 따릅니다</b></div>
+        </div></div>
+      </div>
+      <aside class="mside">
+        <div class="pv-t">👁 게시 후 모습</div>
+        <div class="pvcard">
+          <div class="th">썸네일<div class="bd"><i>쿠팡</i><i>빈택배</i></div></div>
+          <div class="bd2"><h5>쿠팡 립밤 리뷰 모집</h5>
+            <div class="m">14:00~16:00 · 리뷰비 1,500원</div>
+            <div class="gauge"><i></i></div><div class="m">오늘 11 / 30명</div></div>
+        </div>
+        <div class="pvbox" style="background:#fff"><div class="h">공개 범위</div>
+          <div class="l">· 카드: 제목 · 채널 · 배송 · 리뷰비 · 배지<br>· 참여 후: 상품 · 금액 · 유입가이드 · 특이사항<br>· <b>비공개</b>: 팀채팅방 · 유의사항 메모 · 총원</div></div>
+      </aside>
+    </div>
+    <div class="mfoot"><span class="hint">경고 2건 — 게시 가능</span>
+      <div style="display:flex;gap:8px"><span class="btn gho">← 이전</span><span class="btn">임시저장</span><span class="btn pri">🚀 게시하기</span></div></div>
+  </div></div>
+
+  <div class="note"><b>C가 해결하는 것</b>
+    <ul>
+      <li>한 화면에 한 묶음만 → <b>밀도가 구조적으로 균일</b>해진다(들쭉날쭉이 되돌아올 자리가 없음).</li>
+      <li>참여형이 <b>단계 하나</b>가 되어 색 박스가 아예 필요 없다. 일반 공고면 ③이 건너뛰어진다.</li>
+      <li>게시 전에 <b>“리뷰어가 무엇을 보게 되는가”를 한 화면 요약</b>으로 확인 — 옵션·리뷰비·유입방식 오설정을 마지막에 잡는다.</li>
+    </ul>
+  </div>
+</section>
+
+<div class="note" style="margin-top:34px;border-left-color:var(--g)">
+  <b>세 시안 공통 — 무엇을 통일했나(이것이 “일관성”의 실체)</b>
+  <ul>
+    <li><b>라벨 한 종</b> — 우측정렬 82px 고정 1열. 지금의 64/76/세로 3종 혼재를 없앤다(1100px 이하에서만 위로 접힘).</li>
+    <li><b>컨테이너 한 종</b> — 흰 카드 + 회색 헤더바. 색 박스(녹·보라·주황) 전부 폐기, 색은 <b>좌측 3px 액센트</b>와 <b>글자색</b>으로만.</li>
+    <li><b>보조 문구 두 단</b> — 라벨 아래 <code>.sub</code>(.65rem) / 필드 아래 <code>.hintline</code>(.65rem). 6단 → 1크기 2위치.</li>
+    <li><b>켜고 끄는 것은 스위치 한 종</b> — 참여형·기간별 리뷰비·타계정이 같은 토글 모양을 쓴다(지금은 체크박스 3종 + accent-color 3색).</li>
+    <li><b>자동 산출 값은 숨기지 않고 회색 읽기전용</b> — 총모집·일건수(현재 hidden)를 드러내 “저장값과 다르게 뜬다”는 오해를 없앤다.</li>
+  </ul>
+</div>
+
+<div class="note" style="margin-top:12px">
+  <b>구현 관점 메모</b>
+  <ul>
+    <li>세 시안 모두 <b>필드 ID 65개 불변</b> → <code>index-recruit.js</code>의 프리필·저장·자동점검 로직 <b>무수정</b>.
+      바뀌는 것은 <code>js/recruit-modal.js</code>의 마크업/CSS와 회귀가드(<code>tests/recruitModalLayout.test.js</code>)의 레이아웃 단언뿐.</li>
+    <li>인라인 <code>style=</code>로 흩어진 색·간격을 <b>클래스 + 폴백 붙은 CSS 변수</b>로 모은다 — 통합 작업대(admin 테마 없음)에서도 같은 모양이 나오는 현행 원칙 유지.</li>
+    <li>A는 현행 DOM 순서를 거의 그대로 쓰므로 가장 빠르고, B·C는 섹션 컨테이너 재배치가 필요하다(필드는 그대로 이동).</li>
+  </ul>
+</div>
+
+</div>
+<script>
+(function(){
+  var v=(new URLSearchParams(location.search).get('v')||'').toUpperCase();
+  var ids={A:'vA',B:'vB',C:'vC'};
+  if(ids[v]){ ['A','B','C'].forEach(function(k){ if(k!==v) document.getElementById(ids[k]).style.display='none'; }); }
+  var t=document.getElementById('t'+(ids[v]?v:'All')); if(t) t.className='on';
+})();
+</script>
+</body>
+</html>

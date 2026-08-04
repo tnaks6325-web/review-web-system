@@ -532,7 +532,27 @@
   .linkmeta{display:flex;align-items:center;gap:8px;flex-wrap:wrap} .linkused{font-size:11.5px;color:var(--muted)}
   .linkempty{font-size:12.5px;color:var(--muted);padding:6px 2px 10px}
   .lockbadge{font-size:11px;font-weight:750;padding:2px 9px;border-radius:999px} .lockbadge.open{background:var(--warn-soft);color:var(--warn)} .lockbadge.lock{background:var(--safe-soft);color:var(--safe)} .lockbadge.off{background:var(--bad-soft);color:var(--bad)}
-  .linkhint{font-size:11.5px;color:var(--muted);margin-top:7px;line-height:1.5}
+  .linkhint{font-size:11.5px;color:var(--muted);margin-top:7px;line-height:1.5;min-height:35px}
+  /* ★ 광고주 계정 사용/미사용 토글(083). 켜고 끌 때 카드 높이가 흔들리지 않도록 안내문 블록에
+     2줄분 min-height 를 예약한다(문구 길이가 달라도 레이아웃이 안 튄다 — .linkhint 도 동일). */
+  /* .st 는 여러 섹션 공용이라 flex 로 바꾸지 않고, 토글이 있는 헤더만 .sthead 로 스코프한다. */
+  .sect .st.sthead{display:flex;align-items:center;gap:8px;flex-wrap:wrap;min-height:23px}
+  .sect .st.sthead .sthint{margin-left:0}
+  .swrap{display:flex;align-items:center;gap:9px;margin-left:auto}
+  .swrap .slabel{font-size:11.5px;font-weight:750;letter-spacing:0;text-transform:none}
+  .swrap .slabel.on{color:var(--safe)} .swrap .slabel.off{color:var(--faint)}
+  .sw{position:relative;width:42px;height:23px;flex:none;border:none;padding:0;border-radius:999px;background:var(--line2);cursor:pointer;transition:background .18s}
+  .sw::after{content:"";position:absolute;top:2.5px;left:2.5px;width:18px;height:18px;border-radius:50%;background:#fff;box-shadow:0 1px 3px rgba(16,24,40,.3);transition:transform .18s}
+  .sw[aria-checked="true"]{background:var(--safe)}
+  .sw[aria-checked="true"]::after{transform:translateX(19px)}
+  .sw:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
+  .sw[disabled]{opacity:.5;cursor:not-allowed}
+  .acctnote{font-size:11.5px;color:var(--muted);background:var(--card2);border:1px dashed var(--line2);border-radius:9px;padding:9px 11px;margin-bottom:10px;line-height:1.5;min-height:55px}
+  .acctnote b{color:var(--ink)}
+  /* 미사용일 때는 "지금 로그인에 쓰이지 않는다"를 흐리게만 표시한다. ★ 클릭은 막지 않는다 —
+     토글을 켜려면 활성 계정이 먼저 있어야 하는데, 여기서 입력을 막으면 계정을 만들 길이 없어진다(교착). */
+  .acctbody.dim{opacity:.5;filter:grayscale(.4);transition:opacity .15s,filter .15s}
+  .acctbody.dim:hover,.acctbody.dim:focus-within{opacity:1;filter:none}
   .remainbar{margin:14px 0 4px;padding:11px 14px;border-radius:10px;font-size:13px;font-weight:600;border:1px solid var(--line)}
   .remainbar.warn{background:var(--warn-soft);color:var(--warn);border-color:color-mix(in srgb,var(--warn) 30%,transparent)}
   .remainbar.ok{background:var(--safe-soft);color:var(--safe);border-color:color-mix(in srgb,var(--safe) 30%,transparent)}
@@ -557,7 +577,13 @@
   .tchip.on{border-color:var(--accent);background:var(--accent-soft);color:var(--accent)}
   .tchip .cb{width:13px;height:13px;border-radius:3px;border:1.5px solid var(--line2);display:grid;place-items:center;font-size:9px;color:#fff} .tchip.on .cb{background:var(--accent);border-color:var(--accent)}
   .assignbtn{margin-top:12px}
-  .toast{position:fixed;top:16px;left:50%;transform:translateX(-50%);background:var(--ink);color:var(--paper);padding:9px 18px;border-radius:10px;font-size:13px;z-index:99;opacity:0;transition:opacity .25s} .toast.show{opacity:1}
+  /* ★★ pointer-events:none 필수 — #toast 는 항상 DOM 에 있고 숨김이 opacity:0 뿐이라(display/visibility 아님)
+     제거하면 화면 중앙 상단(top:16px, left:50%)의 투명한 상자가 상단 메뉴(.nav) 위에 그대로 얹혀
+     그 자리에 오는 메뉴 버튼의 클릭을 삼킨다. 게다가 textContent 가 남아 상자 폭이 문구 길이만큼
+     유지되므로(토스트 1회 이후 영구) 긴 오류 문구가 뜬 뒤엔 등록리뷰어DB·설정까지 통째로 안 눌린다.
+     실측: 2560px 에서 "저장 실패…" 토스트 후 이미지 교체요청·리뷰검수·등록리뷰어DB·설정 4개 전부 9/9 지점 차단.
+     같은 화면의 .wdtoast 는 처음부터 pointer-events:none 이라 무사했다 — 이쪽만 빠져 있었다. */
+  .toast{position:fixed;top:16px;left:50%;transform:translateX(-50%);background:var(--ink);color:var(--paper);padding:9px 18px;border-radius:10px;font-size:13px;z-index:99;opacity:0;pointer-events:none;transition:opacity .25s} .toast.show{opacity:1}
   /* ── P1 탭 스레드 ── */
   .thlist{display:flex;flex-direction:column;gap:8px;margin-bottom:12px}
   .thitem{border:1px solid var(--line);border-radius:11px;padding:10px 13px;background:var(--card)}
@@ -734,7 +760,7 @@ function parseTabMeta(name){ const s=String(name||''); const m={};
 let STATE = { role:'', name:'', view:'workdesk', tabs:[], cur:null, wd:null, freezeUpto:null,
               favs:null, _favLoaded:false,   // 작업목록 즐겨찾기(localStorage 영속)
               railTab:'thread',              // 우측 레일 탭(기본=협업/댓글)
-              ov:[], ovq:'', pendingTab:null, lastBatch:null,
+              ov:[], ovq:'', pendingTab:null, pendingAdv:null, lastBatch:null,
               advs:[], advCur:null, tabIndex:{}, sheetMap:{}, addMode:'all', addSheet:null, addTabs:{},
               ownTabs:[], ownBrand:null, ownBrandList:[],     // 연결탭 목록 + 브랜드 필터(null=전체, ''=미분류)
               ownSettle:{}, ownSettleFor:null,                // 연결탭 정산 요약(비동기 필, 업체 전환 경합 가드)
@@ -883,7 +909,61 @@ function switchView(v){ STATE.view=v; document.querySelectorAll('.navb').forEach
   const wt=$('#wideToggle'); if(wt) wt.style.display=(v==='workdesk')?'':'none';   // 전체화면 토글도 작업대 뷰에만
   if(v==='ownership') renderOwnershipView(); else if(v==='overview') renderOverviewView(); else if(v==='logs') renderLogsView(); else if(v==='reviewers') renderReviewersView(); else if(v==='cs') renderCsView(); else if(v==='reedit') renderReeditView(); else if(v==='inspect') renderInspectView(); else if(v==='orders') renderOrdersView(); else if(v==='worktable') renderWorktableView(); else if(v==='campaigns') renderCampaignsView(); else if(v==='settings') renderSettingsView(); else renderWorkdeskView();
   if(v!=='workdesk') _measureChrome();   // 작업대를 떠나면 작업바가 사라짐 → --tbh 0으로 회수(다른 뷰 높이 계산 오염 방지)
+  // ★ 히스토리 적재는 렌더 뒤. pendingTab/pendingAdv 가 예약돼 있으면 여기서 쌓지 않는다 —
+  //   그 흐름(업체관리 연결탭 클릭·관측 열기·딥링크)은 곧 selTab/selAdv 가 "최종 상태" 1건으로 쌓는다.
+  //   여기서도 쌓으면 뒤로가기가 "탭 없는 작업대"를 한 번 더 거쳐 두 번 눌러야 돌아온다.
+  if(!STATE.pendingTab && !STATE.pendingAdv) _navPush();
 }
+
+// ══ 브라우저 뒤로/앞으로 (SPA 히스토리) ═══════════════════════════════════════
+//   업체관리에서 작업을 열면 작업대로 화면이 통째로 바뀌는데 히스토리에 아무것도 안 쌓여
+//   뒤로가기가 통합 작업대를 벗어나(또는 아무 반응 없이) 버렸다. 뷰·연 작업·선택 업체를
+//   history state 로 쌓아 뒤로/앞으로가 화면 전환을 되짚게 한다.
+// ★ URL 은 건드리지 않는다(같은 URL 로도 pushState 는 별개 항목을 만든다) — #sso=/#adv=/#go=
+//   프래그먼트 계약과 충돌하지 않고, 주소를 공유해도 딥링크·PII 가 새지 않는다.
+// ★ 되살리는 것은 "어느 화면·어느 작업"까지. 그리드 필터·숨김열 같은 표 상태는 탭 전환 시
+//   초기화되는 클라이언트 상태라 복원 대상이 아니다(selTab 의 기존 계약 유지).
+let _navLock=false;      // popstate 복원 중 = 재푸시 금지(무한 적재 차단)
+let _navBooted=false;    // 첫 항목은 push 가 아니라 replace — 브라우저 최초 항목(state:null)을 낭비하지 않는다
+function _navEntry(){
+  const e={ __wd:1, view:STATE.view||'workdesk' };
+  if(e.view==='workdesk' && STATE.cur) e.tab={ sheetId:STATE.cur.sheetId, tabName:STATE.cur.tabName, tabGid:STATE.cur.tabGid||'', spreadsheetTitle:STATE.cur.spreadsheetTitle||'' };
+  if(e.view==='ownership' && STATE.advCur) e.advId=STATE.advCur.id;
+  return e;
+}
+function _navSame(a,b){
+  if(!a||!b||!b.__wd) return false;
+  if(a.view!==b.view) return false;
+  const t1=a.tab||null, t2=b.tab||null;
+  if(!!t1!==!!t2) return false;
+  if(t1&&t2&&(t1.sheetId!==t2.sheetId||t1.tabName!==t2.tabName)) return false;
+  return (a.advId||'')===(b.advId||'');
+}
+function _navPush(){
+  if(_navLock) return;
+  try{
+    const e=_navEntry(), url=location.pathname+location.search;
+    if(!_navBooted){ _navBooted=true; history.replaceState(e,'',url); return; }
+    if(_navSame(e, history.state)) { history.replaceState(e,'',url); return; }   // 같은 화면 재진입 = 항목 낭비 금지
+    history.pushState(e,'',url);
+  }catch(_){ }
+}
+function _navApply(st){
+  _navLock=true;
+  try{
+    const v=st.view||'workdesk';
+    if(v==='workdesk'){ STATE.pendingTab = st.tab ? Object.assign({__nav:true}, st.tab) : null;
+      if(!st.tab) STATE.cur=null; }        // "탭 없는 작업대"로 되돌아간 상태 — 열린 작업도 함께 비운다
+    if(v==='ownership') STATE.pendingAdv = st.advId ? {id:st.advId,__nav:true} : null;
+    switchView(v);
+  }finally{ _navLock=false; }
+}
+window.addEventListener('popstate', e=>{
+  const st=e&&e.state;
+  if(!st||!st.__wd) return;      // 우리가 쌓은 항목이 아니면(외부 진입 등) 브라우저 기본 동작에 맡긴다
+  if(!STATE.role) return;        // 로그인 화면 — 복원할 셸이 없다
+  _navApply(st);
+});
 
 // ── 상단 작업바 1·2단: 마우스 휠로 좌우 이동 ──
 //   가로 스크롤 영역이라 세로 휠은 원래 아무 일도 안 한다(트랙패드만 가로 제스처 가능) → 휠 아래=오른쪽, 위=왼쪽으로 변환.
@@ -977,6 +1057,9 @@ document.addEventListener('fullscreenchange', ()=>{   // 브라우저 전체화�
 
 // ══ 작업대 뷰 ══
 function renderWorkdeskView(){
+  // 열 작업이 예약되지 않았으면(=본문이 "위에서 작업을 선택하세요"로 뜬다) 열린 작업도 비운다.
+  //   ★ 첫 await 전이라 switchView 의 _navPush 가 이 값을 보고, 히스토리 항목이 실제 화면과 어긋나지 않는다.
+  if(!STATE.pendingTab) STATE.cur=null;
   const isMaster = STATE.role==='master';
   $('#viewroot').innerHTML = `<div class="taskbar" id="taskbar">
       <div class="tb1">
@@ -1005,9 +1088,9 @@ async function loadTabs(){
   refreshUnseen();           // 미확인(스레드) 배지 최초 조회 — 도착 시 재렌더
   _favSyncFromServer();      // 서버 원본으로 정렬(개인화·기기 무관) — 도착 시 재렌더
   // 관측 대시보드에서 "열기"로 넘어온 탭 자동 선택
-  if(STATE.pendingTab){ const pt=STATE.pendingTab; STATE.pendingTab=null;
+  if(STATE.pendingTab){ const pt=STATE.pendingTab; STATE.pendingTab=null; const o={nav:!!pt.__nav};
     const idx=STATE.tabs.findIndex(t=>t.sheetId===pt.sheetId&&t.tabName===pt.tabName);
-    if(idx>=0) selTab(idx); else { STATE.tabs.push(pt); selTab(STATE.tabs.length-1); } }
+    if(idx>=0) selTab(idx,o); else { STATE.tabs.push(pt); selTab(STATE.tabs.length-1,o); } }
 }
 // ── 작업목록 즐겨찾기(로그인 계정별 개인화·영속) ──
 //   서버 원본(/api/trackb/workdesk/favorites, 계정 귀속) + 계정별 localStorage 캐시(즉시 렌더·오프라인 폴백).
@@ -1149,7 +1232,9 @@ function wSearchKey(e){
 function _wKbPaint(){ document.querySelectorAll('#sres .sitem').forEach(el=>el.classList.toggle('kb',+el.dataset.ord===STATE.wKb));
   const cur=document.querySelector('#sres .sitem.kb'); if(cur) cur.scrollIntoView({block:'nearest'}); }
 document.addEventListener('click', e=>{ if(!e.target.closest('.wsearch')){ const b=$('#sres'); if(b) b.classList.remove('show'); } });
-async function selTab(i){ const t=STATE.tabs[i]; if(!t) return; STATE.cur=t;
+async function selTab(i, opt){ const t=STATE.tabs[i]; if(!t) return; STATE.cur=t;
+  // opt.nav = 뒤로/앞으로 복원으로 열린 것 → 히스토리에 다시 쌓지 않는다(그 항목이 이미 이 상태다)
+  if(!(opt&&opt.nav)) _navPush();
   // ★ 여는 탭이 현재 세그먼트에 없으면 그 탭의 업체 그룹으로 강제 이동.
   //   loadTabs가 먼저 _renderTabList로 wSeg를 첫 그룹에 고정하므로, 이 보정이 없으면
   //   관측·업체관리에서 넘어온 탭(pendingTab/openTabFromOverview/openOwnTab)은 본문만 열리고
@@ -3288,6 +3373,9 @@ async function showWritebackSim(){
 
 // ══ 소유 지정 뷰 ══
 async function renderOwnershipView(){
+  // 복원 진입이 아니면 선택 업체를 여기서 비운다(화면은 곧 '업체 추가'로 뜬다) —
+  //   ★ 첫 await 전이라 switchView 의 _navPush 가 이 값을 보고, 히스토리 항목이 실제 화면과 어긋나지 않는다.
+  if(!STATE.pendingAdv) STATE.advCur=null;
   $('#viewroot').innerHTML = `<div class="own-wrap">
     <div class="advlist"><div class="sh row" style="font-size:10px;font-weight:750;letter-spacing:.05em;text-transform:uppercase;color:var(--faint);margin:4px 6px 9px">업체(광고주)<button class="addadv" onclick="showAddAdvertiser()">＋ 업체 추가</button></div><div id="advs"><div class="empty">불러오는 중…</div></div></div>
     <div class="own-panel" id="ownPanel"><div class="empty">왼쪽에서 업체를 선택하세요.</div></div></div>`;
@@ -3307,6 +3395,10 @@ async function renderOwnershipView(){
   STATE.advs=r.items||[];
   const canDel=(STATE.role==='master'||STATE.role==='admin');
   $('#advs').innerHTML = STATE.advs.map((a,i)=>`<div class="advitem" data-i="${i}" onclick="selAdv(${i})"><span class="ava">${esc((a.name||'?').slice(0,1))}</span><span class="nm">${esc(a.name)}<i class="pmn ${a.inadPm?'':'noae'}">${a.inadPm?('AE '+esc(a.inadPm)):'AE 미지정'}</i></span><span class="ct">${a.owned}</span>${canDel?`<button class="advdel" title="업체 삭제" onclick="event.stopPropagation();deleteAdv(${i})">×</button>`:''}</div>`).join('')||`<div class="empty">등록된 업체 없음</div>`;
+  // 뒤로/앞으로로 돌아온 경우엔 보던 업체 패널을 그대로 복원(기본 화면=업체추가 로 덮지 않는다)
+  if(STATE.pendingAdv){ const pa=STATE.pendingAdv; STATE.pendingAdv=null;
+    const ix=STATE.advs.findIndex(a=>a.id===pa.id);
+    if(ix>=0){ selAdv(ix,{nav:!!pa.__nav}); return; } }
   showAddAdvertiser();   // 기본 화면 = 업체(거래처) 추가(잔여 시트 매칭 유도). 업체 선택/생성 시 selAdv 가 덮어씀.
 }
 // 업체(거래처) 삭제 — master/admin. 소프트 삭제(status='ended', 가역) + 소유 매핑 해제. 확인 다이얼로그.
@@ -3450,7 +3542,9 @@ function _advLinkUrl(token){ return location.origin + '/workdesk#adv=' + encodeU
 function _advLinkHtml(a){
   if(!(STATE.role==='master'||STATE.role==='admin')) return '';
   const lk=STATE.advLink;
-  const hasAcct=(STATE.advAccts||[]).some(u=>u.advertiserId===a.id && u.active);   // 활성 계정 있으면 링크=로그인 게이트
+  // ★ 로그인 요구 여부는 **명시 플래그**(083 login_required) — 계정 존재로 자동 판정하지 않는다.
+  //   계정을 발급해 두고도 링크는 공개로 둘 수 있다(계정 = 선택적 보안). 서버 판정과 같은 값을 본다.
+  const lockOn=!!(lk && lk.loginRequired);
   if(!(lk && lk.token)){   // ensure로 항상 생성되나 방어(네트워크 실패 등)
     return `<div class="sect"><div class="st">광고주 접속 링크</div>
       <div class="linkempty">링크 준비 중… <button class="btn xs" onclick="advLinkGen('${esc(a.id)}',false)">지금 생성</button></div></div>`;
@@ -3458,11 +3552,11 @@ function _advLinkHtml(a){
   const url=_advLinkUrl(lk.token);
   const used=lk.lastUsedAt?('마지막 접속 '+_fmtTs(lk.lastUsedAt)):'접속 이력 없음';
   const mode = !lk.active ? `<span class="lockbadge off">⛔ 폐기됨 (접근 불가)</span>`
-    : hasAcct ? `<span class="lockbadge lock">🔒 로그인 필요 — 이 업체 계정으로</span>`
+    : lockOn ? `<span class="lockbadge lock">🔒 로그인 필요 — 이 업체 계정으로</span>`
     : `<span class="lockbadge open">🔓 공개 — 로그인 없이 열람</span>`;
   const hint = !lk.active ? '이 링크는 폐기되어 아무도 접근할 수 없습니다. "다시 활성"으로 복구.'
-    : hasAcct ? '이 업체는 계정이 있어 링크를 열면 로그인 화면이 뜹니다(아래 "광고주 계정"으로 로그인).'
-    : '아래 "광고주 계정"에서 계정을 만들면 이 링크가 자동으로 "로그인 필요"로 바뀝니다.';
+    : lockOn ? '이 링크를 열면 로그인 화면이 먼저 뜹니다. 링크만으로는 들어갈 수 없습니다.'
+    : '이 링크를 아는 사람은 누구나 이 업체 뷰(소유 탭·마스킹·읽기전용)를 볼 수 있습니다. 오른쪽 <b>광고주 계정</b>을 켜면 로그인 화면이 먼저 뜹니다.';
   return `<div class="sect"><div class="st">광고주 접속 링크 <span class="sthint">업체마다 자동 생성된 고유 URL — 광고주에게 전달</span></div>
     <div class="linkrow"><input id="advLinkUrl" readonly value="${esc(url)}" onclick="this.select()"><button class="btn xs pri" onclick="advLinkCopy()">복사</button></div>
     <div class="linkmeta">${mode} <span class="linkused">${esc(used)}</span><span style="flex:1"></span>
@@ -3509,13 +3603,36 @@ function _advAcctHtml(a){
     </div>`).join('');
   // 아이디 기본 제안: 거래처명에서 공백 제거(소문자·영숫자 유지). 관리자가 수정 가능.
   const suggest = String(a.name||'').trim().replace(/\s+/g,'');
-  return `<div class="sect"><div class="st">광고주 계정 <span class="sthint">이 아이디로 통합작업대 로그인 → 이 업체 정보만 열람(마스킹·읽기전용)</span></div>
+  // ★ 사용/미사용 토글 = 접속 링크가 로그인을 요구하는지(083). 끄면 계정은 **지우지 않고 잠그기만** 하므로
+  //   다시 켤 때 그대로 쓸 수 있다. 켜기는 활성 계정이 있어야 가능(없으면 아무도 못 들어감) — 서버도 재검증.
+  const lockOn=!!(STATE.advLink && STATE.advLink.loginRequired);
+  const hasActive=accts.some(u=>u.active);
+  const note = lockOn
+    ? '<b>사용 중</b> — 링크를 열면 로그인 화면이 먼저 뜹니다. 아래 계정의 아이디·비밀번호를 광고주에게 전달하세요.'
+    : '<b>미사용</b> — 접속 링크만으로 들어갑니다. 아이디·비밀번호를 요구하려면 위 스위치를 켜세요.';
+  return `<div class="sect"><div class="st sthead">광고주 계정
+      <span class="swrap">
+        <span class="slabel ${lockOn?'on':'off'}">${lockOn?'사용 중':'미사용'}</span>
+        <button class="sw" role="switch" aria-checked="${lockOn?'true':'false'}" aria-label="광고주 계정 사용"
+          title="${lockOn?'끄면 링크만으로 입장합니다(계정은 보존)':(hasActive?'켜면 링크를 열 때 로그인 화면이 뜹니다':'활성 계정을 먼저 발급하세요')}"
+          ${(!lockOn && !hasActive)?'disabled':''} onclick="advAcctLoginToggle('${esc(a.id)}',${lockOn?'false':'true'})"></button>
+      </span></div>
+    <div class="acctnote">${note}</div>
+    <div class="acctbody${lockOn?'':' dim'}">
     ${rows||'<div class="acctempty">발급된 계정 없음 — 아래에서 만들어 광고주에게 전달하세요.</div>'}
     <div class="acctadd">
       <input id="acctId" placeholder="아이디" autocomplete="off" value="${esc(suggest)}">
       <input id="acctPw" placeholder="비밀번호(4자 이상)" autocomplete="new-password" type="text">
       <button class="btn pri" onclick="advAcctAdd('${esc(a.id)}')">＋ 계정 발급</button>
-    </div></div>`;
+    </div></div></div>`;
+}
+// 광고주 계정 사용/미사용 토글 — 접속 링크의 로그인 요구를 켜고 끈다(083). 계정은 지우지 않는다.
+//   ★ 보안이 풀리는 방향(ON→OFF)에서만 확인을 받는다 — 끄는 순간 링크를 아는 사람이 바로 들어온다.
+async function advAcctLoginToggle(advertiserId, on){
+  if(!on && !confirm('광고주 계정 로그인을 끌까요?\n이 업체의 접속 링크를 아는 사람은 로그인 없이 바로 들어오게 됩니다.\n(발급된 계정은 지워지지 않습니다.)')) return;
+  const r=await api('/api/trackb/advertiser-link',{method:'POST',body:JSON.stringify({action:'login-required',advertiserId,required:!!on})});
+  if(r&&r.ok){ toast(on?'광고주 계정 사용 — 링크에 로그인 필요':'광고주 계정 미사용 — 링크만으로 입장'); await _advLinkReload(); }
+  else toast('변경 실패'+(r&&r.error?': '+r.error:''));
 }
 async function _advAcctReload(){ const cur=STATE.advCur; if(!cur) return;
   const ac=await api('/api/trackb/advertiser-account',{method:'POST',body:JSON.stringify({action:'list'})}).catch(()=>null);
@@ -3536,13 +3653,24 @@ async function advAcctResetPw(name){
   const r=await api('/api/trackb/advertiser-account',{method:'POST',body:JSON.stringify({action:'edit',name,newPw:String(pw).trim()})});
   if(r&&r.success){ toast('비밀번호 변경: '+name); } else toast('변경 실패'+(r&&r.error?': '+r.error:''));
 }
+// 마지막 활성 계정을 비활성/삭제하는데 "계정 사용"이 켜져 있으면 아무도 못 들어간다(링크도 로그인 화면).
+//   막지는 않되(관리자 의도일 수 있다) 반드시 사전에 알린다 — 조용한 잠금은 금지.
+function _advAcctLockoutOk(name){
+  if(!(STATE.advLink && STATE.advLink.loginRequired)) return true;
+  const cur=STATE.advCur; if(!cur) return true;
+  const others=(STATE.advAccts||[]).filter(u=>u.advertiserId===cur.id && u.active && u.name!==name);
+  if(others.length) return true;
+  return confirm('이 업체의 마지막 활성 계정입니다.\n"광고주 계정 사용"이 켜져 있어, 진행하면 접속 링크로도 로그인으로도 아무도 들어올 수 없게 됩니다.\n\n계속할까요? (스위치를 끄면 링크는 다시 열립니다)');
+}
 async function advAcctToggle(name,active){
+  if(!active && !_advAcctLockoutOk(name)) return;
   const r=await api('/api/trackb/advertiser-account',{method:'POST',body:JSON.stringify({action:'edit',name,active})});
   if(r&&r.success){ toast((active?'활성화':'비활성화')+': '+name); await _advAcctReload(); }
   else toast('변경 실패'+(r&&r.error?': '+r.error:''));
 }
 async function advAcctDelete(name){
   if(!confirm(`광고주 계정 '${name}'을(를) 삭제할까요?\n이 계정으로는 더 이상 로그인할 수 없게 됩니다.`)) return;
+  if(!_advAcctLockoutOk(name)) return;
   const r=await api('/api/trackb/advertiser-account',{method:'POST',body:JSON.stringify({action:'delete',name})});
   if(r&&r.success){ toast('계정 삭제: '+name); await _advAcctReload(); }
   else toast('삭제 실패'+(r&&r.error?': '+r.error:''));
@@ -3551,7 +3679,8 @@ function buildTabIndex(list){ STATE.sheetMap={}; STATE.tabIndex={};
   for(const t of (list||STATE.tabs)){ if(!STATE.sheetMap[t.sheetId]) STATE.sheetMap[t.sheetId]={title:t.spreadsheetTitle||t.sheetId,tabs:[]};
     STATE.sheetMap[t.sheetId].tabs.push(t); STATE.tabIndex[t.sheetId+'::'+(t.tabGid||'')]=t.tabName; } }
 
-async function selAdv(i){ const a=STATE.advs[i]; STATE.advCur=a; STATE.addSheet=null; STATE.addMode='all'; STATE.addTabs={}; STATE.ownBrand=null;
+async function selAdv(i, opt){ const a=STATE.advs[i]; if(!a) return; STATE.advCur=a; STATE.addSheet=null; STATE.addMode='all'; STATE.addTabs={}; STATE.ownBrand=null;
+  if(!(opt&&opt.nav)) _navPush();   // 업체 선택도 히스토리 1칸 — 작업대에서 뒤로가면 보던 업체 패널로 돌아온다
   STATE.ownSettle={}; STATE.ownSettleFor=a.id;
   document.querySelectorAll('.advitem').forEach(el=>el.classList.toggle('on',+el.dataset.i===i));
   $('#ownPanel').innerHTML=`<div class="empty">불러오는 중…</div>`;
