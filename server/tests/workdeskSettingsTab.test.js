@@ -173,6 +173,50 @@ t('★ 채널 4칸이 표에서 생성된다(하드코딩 아님)', (() => {
 t('★ 테마 없는 호스트엔 as-standalone 이 붙는다(admin.html 은 테마가 있어 안 붙음 = 렌더 불변)',
   doc._els.adminSettingsMount.classList.contains('as-standalone')
   && /--t1:#0F172A/.test(captured.css || ''));
+/* ── 5b) 화면 구조(시안 B — 좌측 목차) ────────────────────────
+   설계 문서 = frontend/docs/design-admin-settings-wireframe.html (?v=B)
+   ★ 여기서 고정하는 것은 "보기 좋다"가 아니라 **값이 조용히 비지 않는다**는 불변식이다:
+     패널을 안 그리면 그 패널의 id 가 DOM 에 없어 로더가 조용히 no-op 이 되고
+     (admin.html 은 탭 전환 때 한 번만 부른다) 나중에 그 묶음을 열면 빈 값이 뜬다. */
+t('★ 목차는 패널 2개 이상일 때만 — 한 개(대시보드 공지 카드·AE 닉네임)는 종전대로 그대로 그린다', (() => {
+  const el = doc._els.adminSettingsMount;
+  el.innerHTML = '';
+  sandbox.window.AdminSettings.mount('adminSettingsMount', { panels: ['nickname', 'business'], autoload: false });
+  const many = el.innerHTML;
+  el.innerHTML = '';
+  sandbox.window.AdminSettings.mount('adminSettingsMount', { panels: ['notice'], autoload: false });
+  const one = el.innerHTML;
+  return /class="as-bnav"/.test(many) && /id="asNav_nickname"/.test(many) && /id="asNav_business"/.test(many)
+    && !/as-bnav/.test(one) && /id="rvNoticeList"/.test(one);
+})());
+t('★★ 고른 묶음만 보이되 **패널은 전부 DOM 에 남는다**(안 그리면 그 설정 값이 조용히 빈다)', (() => {
+  const el = doc._els.adminSettingsMount;
+  el.innerHTML = '';
+  sandbox.window.AdminSettings.mount('adminSettingsMount', { panels: ['nickname', 'business', 'notice'], autoload: false });
+  const h = el.innerHTML;
+  return /id="asSec_nickname"/.test(h) && /id="asSec_business"/.test(h) && /id="asSec_notice"/.test(h)
+    && /id="myNicknameInput"/.test(h) && /id="companyBusinessNoInput"/.test(h) && /id="rvNoticeList"/.test(h)
+    && (h.match(/class="as-bsec on"/g) || []).length === 1;      // 펼친 것은 하나
+})());
+t('★ 목차 배지 자리(등록 현황)가 패널마다 있고, 전환 함수가 전역에 노출된다', (() => {
+  const h = doc._els.adminSettingsMount.innerHTML;
+  return /id="asBadge_nickname"/.test(h) && /id="asBadge_business"/.test(h)
+    && /onclick="asSelectPanel\('business'\)"/.test(h)
+    && typeof sandbox.window.asSelectPanel === 'function';
+})());
+t('★ 파일 입력은 숨기고 label 로 누른다 — id·onchange 경로는 그대로', (() => {
+  const h = doc._els.adminSettingsMount.innerHTML;
+  return /id="crGuideFileCoupang" accept="image\/\*" class="as-file"/.test(h)
+    && /for="crGuideFileCoupang"/.test(h)
+    && /onchange="uploadCashReceiptGuide\('coupang', this\)"/.test(h);
+})());
+t('★ 목차 라벨 키 ≡ 패널 키(둘이 갈리면 목차에 빈 칸이 생긴다)',
+  (() => {
+    const keys = sandbox.window.AdminSettings.panels;
+    const navKeys = [...mod.matchAll(/^\s{4}(\w+):\s+\{ ic:/gm)].map(m => m[1]);
+    return keys.length === navKeys.length && keys.every(k => navKeys.includes(k));
+  })());
+
 t('AE 용 부분 마운트 — 닉네임만 그린다', (() => {
   const el = doc._els.adminSettingsMount;
   el.innerHTML = ''; el.classList._s.clear();
