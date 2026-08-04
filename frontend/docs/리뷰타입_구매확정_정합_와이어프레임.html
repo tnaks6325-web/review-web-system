@@ -1,0 +1,564 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>리뷰타입(구매확정) 정합 와이어프레임</title>
+<style>
+  *,*::before,*::after{box-sizing:border-box}
+  :root{
+    --paper:#F6F7F9; --card:#FFFFFF; --ink:#14171D; --muted:#5B6472; --faint:#8A93A3; --line:#E2E6EC;
+    --ok:#0F7B4F;    --ok-bg:#EAF7F0;    --ok-edge:#A9DCC3;
+    --fix:#9A6414;   --fix-bg:#FBF3E3;   --fix-edge:#E8D3A6;
+    --new:#4F46E5;   --new-bg:#EEEDFC;   --new-edge:#C7C3F2;
+    --bad:#B42318;   --bad-bg:#FDECEA;   --bad-edge:#F3B7B0;
+    --shadow:0 1px 2px rgba(20,23,29,.06), 0 8px 24px rgba(20,23,29,.05);
+    --mono:ui-monospace,SFMono-Regular,"SF Mono",Menlo,Consolas,monospace;
+  }
+  @media (prefers-color-scheme: dark){
+    :root{
+      --paper:#0F1216; --card:#161A20; --ink:#E8ECF2; --muted:#98A2B0; --faint:#727C8B; --line:#262C35;
+      --ok:#5FC896;    --ok-bg:#122A20;    --ok-edge:#245040;
+      --fix:#E2B673;   --fix-bg:#2C2315;   --fix-edge:#4E3D1E;
+      --new:#A7A2F5;   --new-bg:#1E1B3A;   --new-edge:#3B357A;
+      --bad:#F6A9A0;   --bad-bg:#2E1815;   --bad-edge:#5C2A24;
+      --shadow:0 1px 2px rgba(0,0,0,.4), 0 8px 24px rgba(0,0,0,.28);
+    }
+  }
+  html{-webkit-text-size-adjust:100%}
+  body{
+    margin:0; background:var(--paper); color:var(--ink);
+    font-family:"Pretendard Variable",Pretendard,-apple-system,BlinkMacSystemFont,"Apple SD Gothic Neo","Malgun Gothic","Noto Sans KR",system-ui,sans-serif;
+    line-height:1.6; -webkit-font-smoothing:antialiased;
+  }
+  .wrap{max-width:1180px; margin:0 auto; padding:44px 20px 72px; display:flex; flex-direction:column; gap:38px}
+
+  .eyebrow{margin:0 0 10px; font-size:11.5px; font-weight:700; letter-spacing:.14em; text-transform:uppercase; color:var(--new)}
+  h1{margin:0 0 12px; font-size:clamp(27px,4vw,38px); font-weight:800; letter-spacing:-.026em; line-height:1.18}
+  .lede{margin:0; max-width:72ch; color:var(--muted); font-size:15.5px}
+  .lede b{color:var(--ink); font-weight:700}
+  .head{border-bottom:1px solid var(--line); padding-bottom:26px}
+
+  section{display:flex; flex-direction:column; gap:15px}
+  h2{margin:0; font-size:19px; font-weight:750; letter-spacing:-.015em; display:flex; align-items:center; gap:9px; flex-wrap:wrap}
+  .num{flex:none; width:25px; height:25px; border-radius:7px; display:grid; place-items:center;
+       background:var(--ink); color:var(--paper); font-size:12.5px; font-weight:800}
+  .rule{margin:0; color:var(--muted); font-size:14px; max-width:78ch}
+  .rule strong{color:var(--ink); font-weight:700}
+  code{font-family:var(--mono); font-size:.88em; background:var(--paper); border:1px solid var(--line);
+       border-radius:5px; padding:1px 5px}
+
+  /* ── 범례 ── */
+  .legend{display:flex; gap:8px; flex-wrap:wrap}
+  .key{display:inline-flex; align-items:center; gap:7px; padding:6px 12px; border-radius:999px;
+       font-size:12.5px; font-weight:650; border:1px solid var(--line); background:var(--card)}
+  .dot{width:9px; height:9px; border-radius:3px; flex:none}
+  .d-ok{background:var(--ok)} .d-fix{background:var(--fix)} .d-new{background:var(--new)}
+
+  /* ── 경고 박스 ── */
+  .alarm{background:var(--bad-bg); border:1.5px solid var(--bad-edge); border-radius:14px; padding:20px 22px}
+  .alarm .at{margin:0 0 8px; font-size:15px; font-weight:800; color:var(--bad); display:flex; align-items:center; gap:8px}
+  .alarm p{margin:0 0 8px; font-size:13.5px; color:var(--ink)}
+  .alarm p:last-child{margin-bottom:0}
+  .alarm .esc{margin-top:12px; padding:10px 13px; background:var(--card); border:1px solid var(--bad-edge);
+              border-radius:9px; font-size:12.5px; color:var(--muted)}
+
+  /* ── 흐름도 ── */
+  .flow{display:grid; grid-template-columns:repeat(6,1fr); gap:9px}
+  .fstep{background:var(--card); border:1.5px solid var(--line); border-radius:12px; padding:14px 13px 13px;
+         display:flex; flex-direction:column; gap:6px; position:relative}
+  .fstep .fn{position:absolute; top:-9px; left:12px; background:var(--paper); padding:0 6px;
+             font-size:10.5px; font-weight:800; color:var(--faint); letter-spacing:.1em}
+  .fstep .ft{font-size:12.5px; font-weight:750; line-height:1.35}
+  .fstep .fd{font-size:11.5px; color:var(--muted); line-height:1.5}
+  .fstep .fv{font-family:var(--mono); font-size:10.5px; color:var(--faint); word-break:break-all}
+  .fstep.s-ok{border-color:var(--ok-edge); background:var(--ok-bg)}
+  .fstep.s-fix{border-color:var(--fix-edge); background:var(--fix-bg)}
+  .fstep.s-new{border-color:var(--new-edge); background:var(--new-bg)}
+  .fstep .badge{align-self:flex-start; font-size:10px; font-weight:800; padding:2px 7px; border-radius:999px;
+                border:1px solid currentColor; letter-spacing:.02em}
+  .s-ok .badge{color:var(--ok)} .s-fix .badge{color:var(--fix)} .s-new .badge{color:var(--new)}
+  @media (max-width:900px){ .flow{grid-template-columns:repeat(2,1fr)} }
+
+  /* ── 정합 항목 표 ── */
+  .grp{background:var(--card); border:1px solid var(--line); border-radius:14px; box-shadow:var(--shadow); overflow:hidden}
+  .grph{padding:13px 18px; border-bottom:1px solid var(--line); display:flex; align-items:center;
+        justify-content:space-between; gap:12px; flex-wrap:wrap}
+  .grph .gt{font-size:14.5px; font-weight:780}
+  .grph .gc{font-size:12px; color:var(--faint); font-weight:650}
+  .tw{overflow-x:auto}
+  table{width:100%; border-collapse:collapse; min-width:820px}
+  th{text-align:left; font-size:11.5px; font-weight:750; color:var(--faint); letter-spacing:.03em;
+     padding:10px 14px; border-bottom:1px solid var(--line); background:var(--paper); white-space:nowrap}
+  td{padding:12px 14px; border-bottom:1px solid var(--line); font-size:13px; vertical-align:top}
+  tr:last-child td{border-bottom:none}
+  td.n{font-family:var(--mono); font-size:11.5px; color:var(--faint); white-space:nowrap; width:44px}
+  td.what{font-weight:700; width:24%}
+  td.what .loc{display:block; margin-top:4px; font-family:var(--mono); font-size:10.5px;
+                font-weight:400; color:var(--faint); word-break:break-all}
+  td.now{color:var(--muted); width:26%}
+  td.to{width:26%}
+  td.why{color:var(--muted); width:24%}
+  .st{display:inline-flex; align-items:center; gap:5px; font-size:10.5px; font-weight:800;
+      padding:3px 8px; border-radius:999px; white-space:nowrap}
+  .st-ok{color:var(--ok); background:var(--ok-bg); border:1px solid var(--ok-edge)}
+  .st-fix{color:var(--fix); background:var(--fix-bg); border:1px solid var(--fix-edge)}
+  .st-new{color:var(--new); background:var(--new-bg); border:1px solid var(--new-edge)}
+  .star{color:var(--bad); font-weight:800}
+
+  /* ── 값 대조 ── */
+  .cmp{display:grid; grid-template-columns:1fr 1fr; gap:14px}
+  @media (max-width:760px){ .cmp{grid-template-columns:1fr} }
+  .cmpbox{background:var(--card); border:1px solid var(--line); border-radius:13px; padding:16px 18px}
+  .cmpbox h3{margin:0 0 4px; font-size:13.5px; font-weight:780}
+  .cmpbox .sub{margin:0 0 11px; font-size:11.5px; color:var(--faint); font-family:var(--mono)}
+  .vals{display:flex; gap:6px; flex-wrap:wrap}
+  .v{font-size:12px; font-weight:700; padding:4px 11px; border-radius:8px; border:1.5px solid var(--line); background:var(--paper)}
+  .v.hit{border-color:var(--ok-edge); background:var(--ok-bg); color:var(--ok)}
+  .v.move{border-color:var(--fix-edge); background:var(--fix-bg); color:var(--fix); text-decoration:line-through}
+  .v.keep{border-color:var(--new-edge); background:var(--new-bg); color:var(--new)}
+  .cmpnote{margin:11px 0 0; font-size:12px; color:var(--muted); line-height:1.55}
+
+  /* ── 화면 목업 (실화면 재현 — 다크에서 색 뒤집힘 방지) ── */
+  .mocks{display:grid; grid-template-columns:1fr 1fr; gap:16px}
+  @media (max-width:860px){ .mocks{grid-template-columns:1fr} }
+  .mock{color-scheme:light; background:#fff; border:1px solid #E2E6EC; border-radius:13px; overflow:hidden;
+        box-shadow:var(--shadow); color:#14171D}
+  .mockh{padding:9px 14px; background:#F6F7F9; border-bottom:1px solid #E2E6EC; font-size:11.5px;
+         font-weight:750; color:#5B6472; display:flex; align-items:center; gap:7px}
+  .mockh .tagn{font-size:9.5px; font-weight:800; color:#4F46E5; background:#EEEDFC; border:1px solid #C7C3F2;
+               border-radius:999px; padding:1px 7px}
+  .mockb{padding:16px 16px 18px}
+  .mrow{display:flex; align-items:flex-start; gap:10px; margin-bottom:12px}
+  .mrow:last-child{margin-bottom:0}
+  .mlb{flex:none; width:64px; text-align:right; font-size:11.5px; font-weight:700; color:#5B6472; padding-top:6px}
+  .mbtns{display:flex; gap:5px; flex-wrap:wrap}
+  .mbtn{font-size:11.5px; font-weight:700; padding:5px 11px; border-radius:7px; border:1.5px solid #E2E6EC;
+        background:#fff; color:#5B6472}
+  .mbtn.on{border-color:#4F46E5; background:#EEEDFC; color:#4F46E5}
+  .mnote{margin:9px 0 0 74px; font-size:11px; color:#8A93A3; line-height:1.5}
+  .mslot{border:1.5px dashed #C7C3F2; background:#F8F8FE; border-radius:10px; padding:14px; text-align:center}
+  .mslot .sk{font-size:12.5px; font-weight:800; color:#4F46E5; margin-bottom:3px}
+  .mslot .sd{font-size:11px; color:#5B6472}
+  .mslot.gone{border-color:#E2E6EC; background:#F6F7F9; opacity:.55}
+  .mslot.gone .sk{color:#8A93A3}
+  .mgrid{display:grid; grid-template-columns:1fr 1fr; gap:9px}
+  .mwarn{margin-top:11px; padding:9px 11px; background:#FBF3E3; border:1px solid #E8D3A6; border-radius:8px;
+         font-size:11px; color:#9A6414; line-height:1.5}
+  .msample{display:flex; align-items:center; gap:9px; padding:8px 10px; border:1px solid #E2E6EC;
+           border-radius:8px; margin-bottom:6px; font-size:11.5px}
+  .msample:last-child{margin-bottom:0}
+  .msample .th{flex:none; width:34px; height:34px; border-radius:6px; background:#F0F2F5; border:1px solid #E2E6EC;
+               display:grid; place-items:center; font-size:14px}
+  .msample .nm{flex:1; font-weight:650}
+  .msample .cs{font-size:10px; font-weight:800; color:#8A93A3; background:#F6F7F9; border:1px solid #E2E6EC;
+               border-radius:999px; padding:2px 7px}
+  .msample .cs.done{color:#0F7B4F; background:#EAF7F0; border-color:#A9DCC3}
+
+  /* ── 순서 ── */
+  .steps{display:flex; flex-direction:column; gap:8px}
+  .stp{display:flex; gap:12px; align-items:flex-start; background:var(--card); border:1px solid var(--line);
+       border-radius:11px; padding:13px 16px}
+  .stp .sn{flex:none; width:24px; height:24px; border-radius:7px; display:grid; place-items:center;
+           font-size:11.5px; font-weight:800; background:var(--paper); border:1px solid var(--line); color:var(--muted)}
+  .stp.first .sn{background:var(--bad-bg); border-color:var(--bad-edge); color:var(--bad)}
+  .stp .sb{font-size:13px}
+  .stp .sb b{font-weight:750}
+  .stp .sb span{color:var(--muted)}
+
+  footer{border-top:1px solid var(--line); padding-top:20px; font-size:12px; color:var(--faint)}
+</style>
+</head>
+<body>
+<div class="wrap">
+
+  <header class="head">
+    <p class="eyebrow">리뷰웹시스템[3버전] · 정합 와이어프레임</p>
+    <h1>리뷰타입 &ldquo;구매확정&rdquo;<br>맞춰야 하는 항목</h1>
+    <p class="lede">인트라넷에서 <b>리뷰타입 = 구매확정</b>으로 오더를 넣으면, 그 값이 작업오더 → 모집공고 → 리뷰어 제출 → AI 검수까지
+      <b>끊기지 않고 이어져야</b> 합니다. 지금은 <b>작업오더까지만</b> 도착하고 그 뒤가 비어 있습니다.
+      아래는 그 사이를 잇기 위해 손대야 하는 항목 전부입니다.</p>
+  </header>
+
+  <!-- ══ 지금 이대로면 ══ -->
+  <div class="alarm">
+    <p class="at">⚠ 지금 이대로 구매확정 오더를 받으면 &mdash; 리뷰어가 캡처를 못 붙입니다</p>
+    <p>구매확정 완료 화면은 AI가 <code>kind='other'</code>(리뷰도 영수증도 아님)로 판정합니다.
+      첨부 즉시 도는 1차 필터가 확신 0.9 이상이면 <b>첨부를 잠급니다</b>
+      &mdash; <code>reviewInspect.service.js</code> 의 <code>precheckPolicy</code>.</p>
+    <p>2번 잠기면 &ldquo;제가 올린 게 맞습니다&rdquo; 우회 체크가 열리긴 하지만, <b>정상 제출이 매번 경고를 맞는 상태</b>입니다.</p>
+    <div class="esc">🚑 <b>급할 때 즉시 회피</b> &mdash; Railway 환경변수 <code>REVIEW_PRECHECK_BLOCK=0</code>
+      (판정은 하되 잠그지 않는 관측 모드). 배포 없이 지금 바로 적용 가능합니다.</div>
+  </div>
+
+  <!-- ══ 1. 흐름 ══ -->
+  <section>
+    <h2><span class="num">1</span>값이 지나가는 길 &mdash; 어디가 끊겨 있나</h2>
+    <div class="legend">
+      <span class="key"><i class="dot d-ok"></i> 이미 됨 &mdash; 손 안 댐</span>
+      <span class="key"><i class="dot d-fix"></i> 고쳐야 함 &mdash; 기존 코드 수정</span>
+      <span class="key"><i class="dot d-new"></i> 새로 만듦</span>
+    </div>
+    <div class="flow">
+      <div class="fstep s-ok"><span class="fn">STEP 1</span><span class="badge">이미 됨</span>
+        <span class="ft">인트라넷 리뷰타입</span>
+        <span class="fd">발주 폼에서 선택</span>
+        <span class="fv">포토·텍스트·구매확정·별점·혼합</span></div>
+      <div class="fstep s-ok"><span class="fn">STEP 2</span><span class="badge">이미 됨</span>
+        <span class="ft">작업오더 수신</span>
+        <span class="fd">그대로 저장</span>
+        <span class="fv">work_orders.review_type</span></div>
+      <div class="fstep s-fix"><span class="fn">STEP 3</span><span class="badge">고쳐야</span>
+        <span class="ft">탭 설정</span>
+        <span class="fd">접수가 복사하지만 <b>선택지 어휘가 다름</b></span>
+        <span class="fv">tab_configs.review_type</span></div>
+      <div class="fstep s-new"><span class="fn">STEP 4</span><span class="badge">새로</span>
+        <span class="ft">모집공고</span>
+        <span class="fd">리뷰타입 개념 자체가 없음</span>
+        <span class="fv">recruit_campaigns.review_type</span></div>
+      <div class="fstep s-new"><span class="fn">STEP 5</span><span class="badge">새로</span>
+        <span class="ft">리뷰어 제출 슬롯</span>
+        <span class="fd">리뷰 슬롯 → 구매확정 슬롯 치환</span>
+        <span class="fv">utils/captureSlots.js</span></div>
+      <div class="fstep s-new"><span class="fn">STEP 6</span><span class="badge">새로</span>
+        <span class="ft">AI 판별</span>
+        <span class="fd">구매확정 화면을 아는 종류 추가</span>
+        <span class="fv">kind: purchase_confirm</span></div>
+    </div>
+    <p class="rule">STEP 1~2는 <strong>이미 동작합니다</strong>. 실제로 막혀 있는 곳은 STEP 3의 어휘 충돌과,
+      STEP 4~6이 통째로 비어 있다는 점입니다.</p>
+  </section>
+
+  <!-- ══ 2. 값 대조 ══ -->
+  <section>
+    <h2><span class="num">2</span>맞춰야 할 값 &mdash; 같은 칸에 두 어휘가 들어와 있다</h2>
+    <p class="rule">같은 <code>review_type</code> 컬럼을 두 목록이 나눠 쓰고 있고, 겹치는 값은 <strong>구매확정 하나뿐</strong>입니다.
+      그래서 이 컬럼을 판정 근거로 쓰면 <strong>포토</strong>가 들어온 탭에서 탭 설정 화면이 깨집니다.</p>
+    <div class="cmp">
+      <div class="cmpbox">
+        <h3>인트라넷 발주 폼</h3>
+        <p class="sub">review-orders.js:234</p>
+        <div class="vals">
+          <span class="v keep">포토</span><span class="v keep">텍스트</span>
+          <span class="v hit">구매확정</span><span class="v keep">별점</span><span class="v keep">혼합</span>
+        </div>
+        <p class="cmpnote">리뷰 <b>결과물의 형태</b>. 혼합이면
+          <code>혼합(포토 10건, 텍스트 20건, 구매확정 0건, 별점 0건)</code> 문자열 한 줄로 조립돼 옵니다.</p>
+      </div>
+      <div class="cmpbox">
+        <h3>탭 설정 팝오버 &ldquo;리뷰타입&rdquo;</h3>
+        <p class="sub">admin.html:1985 · search.html:1328</p>
+        <div class="vals">
+          <span class="v move">실배송</span><span class="v move">빈박스</span>
+          <span class="v hit">구매확정</span><span class="v move">믹스</span>
+        </div>
+        <p class="cmpnote">실배송·빈박스는 사실 <b>배송유형</b>입니다. 같은 팝오버에서 배송유형은
+          <code>&lt;!-- 진행차수/배송유형 제거됨 (자동화) --&gt;</code> 로 <b>이미 빠져 있고</b>,
+          <code>tab_configs.delivery_type</code> 이 접수 때 자동으로 채워집니다 &mdash; 즉 <b>자동화 이후 남은 잔재</b>입니다.</p>
+      </div>
+    </div>
+    <div class="grp">
+      <div class="grph"><span class="gt">→ 통일 결과 &mdash; 전 화면 한 목록</span>
+        <span class="gc">명칭도 &ldquo;리뷰타입&rdquo; 하나로</span></div>
+      <div style="padding:16px 18px">
+        <div class="vals" style="margin-bottom:11px">
+          <span class="v keep">포토</span><span class="v keep">텍스트</span>
+          <span class="v hit">구매확정</span><span class="v keep">별점</span><span class="v keep">혼합</span>
+        </div>
+        <p class="cmpnote" style="margin:0">
+          · <b>실배송 / 빈박스</b> → 배송유형(<code>delivery_type</code>)으로 이동 &mdash; 컬럼이 이미 있어 새로 만들 것 없음<br>
+          · <b>믹스</b> → <b>혼합</b>으로 표기 통일<br>
+          · <b>리뷰유형</b>이라는 라벨은 전부 <b>리뷰타입</b>으로 (인트라넷 폼 포함)<br>
+          · <span class="star">★</span> 목록에 없는 옛 값은 <b>화면에 그대로 표시</b>합니다 &mdash; 조용히 사라지면 안 됩니다
+        </p>
+      </div>
+    </div>
+  </section>
+
+  <!-- ══ 3. 정합 항목 ══ -->
+  <section>
+    <h2><span class="num">3</span>맞춰야 하는 항목 &mdash; 전체 목록</h2>
+    <div class="legend">
+      <span class="key"><i class="dot d-ok"></i> 이미 됨 6</span>
+      <span class="key"><i class="dot d-fix"></i> 고쳐야 함 9</span>
+      <span class="key"><i class="dot d-new"></i> 새로 만듦 11</span>
+      <span class="key"><span class="star">★</span> 어기면 사고나는 항목</span>
+    </div>
+
+    <!-- A -->
+    <div class="grp">
+      <div class="grph"><span class="gt">A. 용어와 값</span><span class="gc">5항목 · 위험 낮음 · 먼저 끝낼 것</span></div>
+      <div class="tw"><table>
+        <thead><tr><th></th><th>항목</th><th>지금</th><th>맞출 값</th><th>안 맞추면</th></tr></thead>
+        <tbody>
+          <tr><td class="n">A1</td>
+            <td class="what">라벨 이름<span class="loc">work-order-detail.js:315 · staff.html:468 · admin.html:822 · workdesk.html:4993 · (인트라넷) review-orders.js:234</span></td>
+            <td class="now">화면마다 <b>리뷰유형</b> / <b>리뷰타입</b> 혼용</td>
+            <td class="to"><span class="st st-fix">고쳐야</span> 전부 <b>리뷰타입</b></td>
+            <td class="why">직원이 두 이름을 다른 항목으로 읽습니다</td></tr>
+          <tr><td class="n">A2</td>
+            <td class="what">탭 설정 선택지<span class="loc">admin.html:1985~1991 · search.html:1328~1334</span></td>
+            <td class="now">실배송·빈박스·구매확정·믹스</td>
+            <td class="to"><span class="st st-fix">고쳐야</span> 포토·텍스트·구매확정·별점·혼합</td>
+            <td class="why">인트라넷이 넣은 <code>포토</code>가 목록 밖 값이 됩니다</td></tr>
+          <tr><td class="n">A3</td>
+            <td class="what">실배송·빈박스 이사<span class="loc">tab_configs.delivery_type (컬럼 존재)</span></td>
+            <td class="now">리뷰타입 칸에 배송 정보가 들어 있음</td>
+            <td class="to"><span class="st st-fix">고쳐야</span> 배송유형으로 이관 <span class="star">★</span> <b>빈 칸일 때만</b></td>
+            <td class="why">덮어쓰면 접수가 채운 배송유형이 지워집니다</td></tr>
+          <tr><td class="n">A4</td>
+            <td class="what">믹스 → 혼합<span class="loc">migration 087</span></td>
+            <td class="now">같은 뜻 두 표기</td>
+            <td class="to"><span class="st st-fix">고쳐야</span> 혼합</td>
+            <td class="why">혼합 판정이 &ldquo;믹스&rdquo; 탭을 못 알아봅니다</td></tr>
+          <tr><td class="n">A5</td>
+            <td class="what">배지 색 맵<span class="loc">index-app.js:3589~3594 · CSS tc-review-*</span></td>
+            <td class="now">실배송/빈박스/구매확정/믹스 4색</td>
+            <td class="to"><span class="st st-fix">고쳐야</span> 새 5값 + 모르는 값 무색 표시</td>
+            <td class="why">배지가 통째로 안 뜹니다(값은 있는데 빈칸으로 보임)</td></tr>
+        </tbody>
+      </table></div>
+    </div>
+
+    <!-- B -->
+    <div class="grp">
+      <div class="grph"><span class="gt">B. 값이 흘러가는 통로</span><span class="gc">5항목 · 3개는 이미 동작</span></div>
+      <div class="tw"><table>
+        <thead><tr><th></th><th>항목</th><th>지금</th><th>맞출 값</th><th>안 맞추면</th></tr></thead>
+        <tbody>
+          <tr><td class="n">B1</td>
+            <td class="what">인트라넷 전송<span class="loc">review-orders.js:1048</span></td>
+            <td class="now"><code>review_type</code> 로 POST</td>
+            <td class="to"><span class="st st-ok">이미 됨</span> 그대로</td>
+            <td class="why">&mdash;</td></tr>
+          <tr><td class="n">B2</td>
+            <td class="what">작업오더 저장<span class="loc">migrations/019_work_orders.sql:16</span></td>
+            <td class="now"><code>work_orders.review_type TEXT</code></td>
+            <td class="to"><span class="st st-ok">이미 됨</span> 그대로</td>
+            <td class="why">&mdash;</td></tr>
+          <tr><td class="n">B3</td>
+            <td class="what">접수 → 탭 설정 복사<span class="loc">order.routes.js:874~892</span></td>
+            <td class="now">빈 칸일 때만 복사</td>
+            <td class="to"><span class="st st-ok">이미 됨</span> 그대로</td>
+            <td class="why">&mdash;</td></tr>
+          <tr><td class="n">B4</td>
+            <td class="what">작업오더 → 공고 프리필<span class="loc">work-order-detail.js `_woCampaignPrefill`</span></td>
+            <td class="now"><b>없음</b> &mdash; 리뷰타입을 안 넘김</td>
+            <td class="to"><span class="st st-new">새로</span> 프리필에 추가 <span class="star">★</span> <b>공유 모듈 1벌</b></td>
+            <td class="why">사본을 두면 관리자·작업보드가 서로 다른 공고를 만듭니다</td></tr>
+          <tr><td class="n">B5</td>
+            <td class="what">공고 컬럼<span class="loc">migration 087 · recruit_campaigns</span></td>
+            <td class="now"><b>없음</b></td>
+            <td class="to"><span class="st st-new">새로</span> <code>review_type TEXT</code>
+              <span class="star">★</span> 부팅 프리플라이트 등록</td>
+            <td class="why">컬럼 없이 배포되면 <b>공고 발행·수정이 전면 오류</b></td></tr>
+        </tbody>
+      </table></div>
+    </div>
+
+    <!-- C -->
+    <div class="grp">
+      <div class="grph"><span class="gt">C. 사람이 고르고 보는 화면</span><span class="gc">4항목</span></div>
+      <div class="tw"><table>
+        <thead><tr><th></th><th>항목</th><th>지금</th><th>맞출 값</th><th>안 맞추면</th></tr></thead>
+        <tbody>
+          <tr><td class="n">C1</td>
+            <td class="what">공고 모달 리뷰타입<span class="loc">js/recruit-modal.js (공유 모듈)</span></td>
+            <td class="now">안내배지에 <code>구매확정</code> 프리셋만 &mdash; <b>자유 텍스트라 판정 불가</b></td>
+            <td class="to"><span class="st st-new">새로</span> <code>rf_review_type</code> 버튼군</td>
+            <td class="why">담당자가 공고에서 유형을 지정할 방법이 없습니다</td></tr>
+          <tr><td class="n">C2</td>
+            <td class="what">저장 전송 규칙<span class="loc">js/index-recruit.js</span></td>
+            <td class="now">&mdash;</td>
+            <td class="to"><span class="st st-new">새로</span> <span class="star">★</span> <b>UI 있는 화면에서만 전송</b></td>
+            <td class="why">미전송을 &ldquo;해제&rdquo;로 읽으면 옛 화면이 저장할 때 값이 지워집니다</td></tr>
+          <tr><td class="n">C3</td>
+            <td class="what">권한 화이트리스트<span class="loc">`_scopedCampaignEdit`</span></td>
+            <td class="now">&mdash;</td>
+            <td class="to"><span class="st st-new">새로</span> <span class="star">★</span> <b>포함하지 않음</b></td>
+            <td class="why">리뷰어앱 스코프 토큰이 검수 정책을 바꾸게 됩니다</td></tr>
+          <tr><td class="n">C4</td>
+            <td class="what">리뷰어 작업내용 표시<span class="loc">js/campaign-workdetail.js (공용 렌더러)</span></td>
+            <td class="now">&mdash;</td>
+            <td class="to"><span class="st st-new">새로</span> 리뷰타입 표기</td>
+            <td class="why">리뷰어가 무엇을 캡처해야 하는지 모릅니다</td></tr>
+        </tbody>
+      </table></div>
+    </div>
+
+    <!-- D -->
+    <div class="grp">
+      <div class="grph"><span class="gt">D. 제출 슬롯 &mdash; 구매확정 1장으로 대체</span>
+        <span class="gc">6항목 · <span class="star">★</span> 소비처 4곳 동시 수정</span></div>
+      <div class="tw"><table>
+        <thead><tr><th></th><th>항목</th><th>지금</th><th>맞출 값</th><th>안 맞추면</th></tr></thead>
+        <tbody>
+          <tr><td class="n">D1</td>
+            <td class="what">슬롯 파생 규칙<span class="loc">utils/captureSlots.js</span></td>
+            <td class="now">설정값 &gt; 현영 2슬롯 &gt; 단일 리뷰</td>
+            <td class="to"><span class="st st-new">새로</span> 구매확정이면 리뷰 슬롯을 <b>치환</b></td>
+            <td class="why">리뷰 슬롯이 남으면 리뷰어가 올릴 게 없어 <b>영영 미완료</b></td></tr>
+          <tr><td class="n">D2</td>
+            <td class="what">행별 우선순위<span class="loc">utils/reviewType.js (신규)</span></td>
+            <td class="now">&mdash;</td>
+            <td class="to"><span class="st st-new">새로</span> <b>행 작업옵션 칸 &gt; 공고 &gt; 탭</b></td>
+            <td class="why">혼합 오더에서 전원이 같은 유형으로 판정됩니다</td></tr>
+          <tr><td class="n">D3</td>
+            <td class="what">리뷰어 화면 슬롯<span class="loc">search.service.js:404</span></td>
+            <td class="now">리뷰 슬롯만 그림</td>
+            <td class="to"><span class="st st-fix">고쳐야</span> <code>review_type</code> 함께 조회</td>
+            <td rowspan="4" class="why"><span class="star">★★</span> 넷 중 <b>하나만 빠져도</b>
+              &ldquo;슬롯은 2개인데 1장에 완료&rdquo; 또는 그 반대가 되어 제출이 깨집니다.
+              현영 슬롯 때 <code>income_type</code> 을 같이 안 읽어 밟았던 함정과 같은 자리입니다.</td></tr>
+          <tr><td class="n">D4</td>
+            <td class="what">완료 판정<span class="loc">submit.routes.js</span></td>
+            <td class="now">필요 슬롯 ⊆ 제출 슬롯</td>
+            <td class="to"><span class="st st-fix">고쳐야</span> 동일</td></tr>
+          <tr><td class="n">D5</td>
+            <td class="what">업로드 폴더 라벨<span class="loc">diag.routes.js review-upload</span></td>
+            <td class="now">슬롯별 서브폴더</td>
+            <td class="to"><span class="st st-fix">고쳐야</span> 동일</td></tr>
+          <tr><td class="n">D6</td>
+            <td class="what">교체요청 라벨<span class="loc">reviewEdit.routes.js (2곳)</span></td>
+            <td class="now">리뷰/현금영수증</td>
+            <td class="to"><span class="st st-fix">고쳐야</span> 동일</td></tr>
+        </tbody>
+      </table></div>
+    </div>
+
+    <!-- E -->
+    <div class="grp">
+      <div class="grph"><span class="gt">E. AI 판별</span><span class="gc">6항목 · 가장 위험 · 레드-블루-심판 권장</span></div>
+      <div class="tw"><table>
+        <thead><tr><th></th><th>항목</th><th>지금</th><th>맞출 값</th><th>안 맞추면</th></tr></thead>
+        <tbody>
+          <tr><td class="n">E1</td>
+            <td class="what">역방향 안전핀<span class="loc">reviewInspect.service.js `precheckPolicy`</span></td>
+            <td class="now">리뷰 슬롯에 구매확정 화면 → <b>차단</b></td>
+            <td class="to"><span class="st st-new">새로</span> <span class="star">★★</span> 별도 코드로 <b>경고</b> 처리</td>
+            <td class="why">새 종류를 넣는 순간 <b>기존 리뷰 탭의 판정이 갑자기 세집니다</b></td></tr>
+          <tr><td class="n">E2</td>
+            <td class="what">판별 종류 추가<span class="loc">gemini.service.js:332~352</span></td>
+            <td class="now"><code>review · receipt · other</code> 3종</td>
+            <td class="to"><span class="st st-fix">고쳐야</span> <code>purchase_confirm</code> 추가
+              <span class="star">★★</span> <b>기존 3줄은 한 글자도 안 바꿈</b></td>
+            <td class="why">오래 검증된 슬롯 검수 판정이 조용히 달라집니다</td></tr>
+          <tr><td class="n">E3</td>
+            <td class="what">캐시 접두<span class="loc">gemini.service.js:323</span></td>
+            <td class="now"><code>classify2:</code></td>
+            <td class="to"><span class="st st-fix">고쳐야</span> <code>classify3:</code></td>
+            <td class="why">옛 캐시가 새 종류 없이 히트해 판정이 되돌아갑니다</td></tr>
+          <tr><td class="n">E4</td>
+            <td class="what">슬롯 검수 기대값<span class="loc">captureVerify.service.js `_expectedKind`</span></td>
+            <td class="now"><code>review · receipt</code></td>
+            <td class="to"><span class="st st-fix">고쳐야</span> <code>confirm → purchase_confirm</code></td>
+            <td class="why">구매확정 슬롯이 검수 대상에서 빠집니다</td></tr>
+          <tr><td class="n">E5</td>
+            <td class="what">판별 예시이미지<span class="loc">utils/purchaseConfirmChannels.js (신규)</span></td>
+            <td class="now">리뷰 9칸 · 현영 4칸</td>
+            <td class="to"><span class="st st-new">새로</span> 구매확정 칸
+              <span class="star">★</span> 캐시 지문 <code>pc_</code> 접두</td>
+            <td class="why">접두 없이 두면 리뷰 예시와 같은 지문이 나와 <b>남의 판정이 히트</b></td></tr>
+          <tr><td class="n">E6</td>
+            <td class="what">차단 강도<span class="loc">env</span></td>
+            <td class="now">&mdash;</td>
+            <td class="to"><span class="st st-new">새로</span> <b>경고만</b>(<code>REVIEW_CONFIRM_BLOCK=0</code> 기본)
+              + 킬스위치</td>
+            <td class="why">예시 등록 전 오탐이 정상 제출을 막습니다</td></tr>
+        </tbody>
+      </table></div>
+    </div>
+  </section>
+
+  <!-- ══ 4. 화면 목업 ══ -->
+  <section>
+    <h2><span class="num">4</span>바뀌는 화면</h2>
+    <p class="rule">실제 화면에서 무엇이 달라 보이는지입니다. 나머지 칸은 <strong>지금 그대로</strong>입니다.</p>
+    <div class="mocks">
+
+      <div class="mock">
+        <div class="mockh">모집공고 발행·수정 &rsaquo; 기본정보 <span class="tagn">C1 · 새 줄</span></div>
+        <div class="mockb">
+          <div class="mrow"><div class="mlb">담당자</div>
+            <div class="mbtns"><span class="mbtn">미지정</span><span class="mbtn on">만두</span><span class="mbtn">망고</span></div></div>
+          <div class="mrow"><div class="mlb">리뷰타입</div>
+            <div class="mbtns"><span class="mbtn">미지정</span><span class="mbtn">포토</span><span class="mbtn">텍스트</span>
+              <span class="mbtn on">구매확정</span><span class="mbtn">별점</span><span class="mbtn">혼합</span></div></div>
+          <p class="mnote">작업오더에서 자동으로 채워집니다. 혼합이면 시트 작업옵션 칸의 행별 값이 우선합니다.</p>
+          <div class="mrow"><div class="mlb">구매채널</div>
+            <div class="mbtns"><span class="mbtn on">쿠팡</span><span class="mbtn">네이버</span><span class="mbtn">올리브영</span></div></div>
+        </div>
+      </div>
+
+      <div class="mock">
+        <div class="mockh">탭 설정 팝오버 <span class="tagn">A2 · 선택지 교체</span></div>
+        <div class="mockb">
+          <div class="mrow"><div class="mlb">리뷰타입</div>
+            <div class="mbtns"><span class="mbtn">미지정</span><span class="mbtn">포토</span><span class="mbtn">텍스트</span>
+              <span class="mbtn on">구매확정</span><span class="mbtn">별점</span><span class="mbtn">혼합</span></div></div>
+          <p class="mnote">실배송 · 빈박스는 <b>배송유형</b>으로 이사합니다 &mdash; 이 팝오버에서 배송유형은
+            이미 자동화로 빠져 있어 새로 만들 칸이 없습니다.</p>
+          <div class="mwarn">⚠ 옛 값(<b>실배송</b> 등)이 남은 탭은 그 값을 <b>그대로 표시</b>합니다.
+            목록에 없다고 화면에서 지우지 않습니다.</div>
+        </div>
+      </div>
+
+      <div class="mock">
+        <div class="mockh">리뷰어 제출 화면 &rsaquo; 캡처 슬롯 <span class="tagn">D1 · 치환</span></div>
+        <div class="mockb">
+          <div class="mgrid">
+            <div class="mslot gone"><div class="sk">리뷰</div><div class="sd">구매확정건은 없음</div></div>
+            <div class="mslot"><div class="sk">🧾 구매확정</div><div class="sd">구매확정 완료 화면 1장</div></div>
+          </div>
+          <p class="mnote" style="margin-left:0">구매확정은 리뷰를 쓰지 않는 작업이라 <b>리뷰 슬롯을 남기면 리뷰어가
+            올릴 게 없어 영영 미완료</b>로 남습니다. 그래서 추가가 아니라 <b>치환</b>입니다.</p>
+        </div>
+      </div>
+
+      <div class="mock">
+        <div class="mockh">설정 &rsaquo; AI 판별 예시이미지 <span class="tagn">E5 · 묶음 추가</span></div>
+        <div class="mockb">
+          <div class="msample"><span class="th">🛒</span><span class="nm">쿠팡 · 구매확정 완료</span><span class="cs">미등록</span></div>
+          <div class="msample"><span class="th">🟢</span><span class="nm">네이버 · 구매확정 완료</span><span class="cs">미등록</span></div>
+          <div class="msample"><span class="th">🫒</span><span class="nm">올리브영 · 구매확정 완료</span><span class="cs">미등록</span></div>
+          <div class="msample"><span class="th">💛</span><span class="nm">카카오메이커스 · 구매확정 완료</span><span class="cs done">등록됨</span></div>
+          <div class="mwarn">⚠ <b>예시가 등록되기 전에는 판별 정확도가 낮습니다.</b> 그래서 초기에는 경고만 하고
+            잠그지 않습니다. 채널별로 2장씩만 올려주시면 그때부터 제 역할을 합니다.</div>
+        </div>
+      </div>
+
+    </div>
+  </section>
+
+  <!-- ══ 5. 순서 ══ -->
+  <section>
+    <h2><span class="num">5</span>손대는 순서</h2>
+    <div class="steps">
+      <div class="stp first"><span class="sn">0</span><span class="sb"><b>역방향 안전핀 (E1)</b>
+        <span>&mdash; 지금 리뷰어가 잠기는 경로부터 막습니다. 이것만 먼저 나가도 사고는 멈춥니다.</span></span></div>
+      <div class="stp"><span class="sn">1</span><span class="sb"><b>용어·값 통일 (A1~A5)</b>
+        <span>&mdash; 라벨과 선택지. 위험 낮고 화면만 바뀝니다.</span></span></div>
+      <div class="stp"><span class="sn">2</span><span class="sb"><b>판정 단일 출처 + 스키마 (D2 · B5 · A3 데이터 이관)</b>
+        <span>&mdash; <code>utils/reviewType.js</code> 와 migration 087. 기존 행을 건드리는 유일한 단계라
+        미리보기 건수를 먼저 확인하고 진행합니다.</span></span></div>
+      <div class="stp"><span class="sn">3</span><span class="sb"><b>입력 경로 (B4 · C1~C4)</b>
+        <span>&mdash; 작업오더 프리필과 공고 모달 선택지.</span></span></div>
+      <div class="stp"><span class="sn">4</span><span class="sb"><b>제출 슬롯 (D1 · D3~D6)</b>
+        <span>&mdash; 소비처 4곳을 <b>한 커밋에서 함께</b>.</span></span></div>
+      <div class="stp"><span class="sn">5</span><span class="sb"><b>AI 판별 나머지 (E2~E6)</b>
+        <span>&mdash; 예시이미지 등록 후 경고 → 잠금 전환 검토.</span></span></div>
+      <div class="stp"><span class="sn">6</span><span class="sb"><b>회귀가드</b>
+        <span>&mdash; 인트라넷 실측 문자열 파싱 · 소비처 4곳 배선 · 역방향 비차단 · 캐시 지문 분리.</span></span></div>
+    </div>
+    <p class="rule">1차 PR = 0~2단계(안전핀 + 용어 통일 + 스키마) · 2차 PR = 3~6단계를 권합니다.</p>
+  </section>
+
+  <footer>
+    리뷰웹시스템[3버전] · 리뷰타입(구매확정) 정합 와이어프레임 &mdash;
+    확정 사항: 구매확정은 <b>캡처 1장으로 대체</b> · 혼합은 <b>시트 작업옵션 칸이 진실</b> ·
+    1차 필터는 <b>초기 경고만</b> · 명칭은 <b>리뷰타입으로 통일</b>
+  </footer>
+
+</div>
+</body>
+</html>
