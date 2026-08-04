@@ -312,7 +312,16 @@ GAS(Google Apps Script) 기반 리뷰 관리 시스템을 **Node.js Express + Po
 - ★★ **쓰기 표면 = 시트 + `work_orders.work_sheet_url` 뿐**. 주문원장·투영·큐·행배정 무접촉, **`tab_configs` 등록은 여전히 접수(accept)가 유일한 관문**(등록 게이트 불변식 유지 — 화면도 "접수는 확인 후 직접" 이라고 말한다). **시트 탭을 시스템이 지우지 않는다**(되돌리기 어려운 파괴는 사람 손에).
 - 대상 시트 목록은 기존 `/api/trackb/tabs` 재사용(신규 엔드포인트 0, 1회 로드). `POST /worktable/create`(auth + internal + editorOnly).
 - 회귀가드 `tests/worktablePlan.test.js`(71케이스 — 계획 재계산·잠금 게이트·gid 지정·라이브 무접촉·쓰기 표면 1곳·행 생성 실행). ⚠ 실제 구글시트 쓰기는 자격증명이 필요해 **배포 후 실물 1건으로 확인**해야 한다.
-- **다음(M2b-2)**: DB 스켈레톤 행(작업대에 미리 보이게) — 실제 생성 — 동일 구성 시트 생성(`create-campaign-sheet` 재사용) + DB 스켈레톤 행. ★★ 스켈레톤은 **seq를 시트 실제 행번호에 맞춰야** 주문이 들어올 때 `importTabFromIndex`의 `ON CONFLICT (sheet_id,tab_name,seq)`가 **제자리 갱신**한다(어긋나면 100행 + 유입행이 겹쳐 보인다). `prepareRosterSlots`는 `_MANUAL_SEQ_BASE=900000` 별도 대역이라 그대로는 못 쓴다. 또 `source='manual'` 이면 `is_submitted/is_paid`가 그 CASE에서 **동결**되므로 상태 칸이 영영 갱신 안 된다 — 새 source 값(예 `worktable`)을 그 CASE에 합류시키되 `_reconcileSeen`(source='import'만 비활성)은 건드리지 않는 설계가 필요하다.
+### 작업표 생성 M2b-2 — 작업대 표에 미리 보이게 (스켈레톤 행)
+- 시트를 만든 직후 같은 줄을 `campaign_participants` 에 넣어 **주문 0건이어도 통합작업대 표에 N줄이 보인다**(`participants.createWorktableSlots`). `review_index` 는 이름 없는 행을 버려(`if (!name) return null`) 시트만으로는 빈 줄이 표에 안 나온다.
+- ★★ **seq = 시트 실제 행 번호**(`headerRow + i + 1`). 어긋나면 주문이 들어올 때 `importTabFromIndex` 의 `ON CONFLICT (sheet_id, tab_name, seq)` 가 제자리 갱신을 못 하고 **새 행을 만들어** 빈 100줄 + 채워진 30줄 = **130줄로 표가 두 겹**이 된다. `prepareRosterSlots` 의 `_MANUAL_SEQ_BASE=900000` 대역은 **시트 행을 모를 때용**이라 여기선 쓰지 않는다.
+- ★★ **`source='worktable'`** (CHECK 제약 없어 마이그레이션 0). 투영 업서트의 상태 CASE 를 `source IN ('import','worktable')` 로 넓혔다 — `'manual'` 로 두면 **리뷰어가 리뷰를 내도 리뷰제출·입금 표시가 영영 안 켜진다**(사람이 만든 행이 아니라 시스템이 자리만 잡아둔 줄이므로 '보존' 대상이 아니다). ★ `_reconcileSeen` 은 **건드리지 않는다**(`source='import'` 만 비활성화 → 빈 줄이 투영에 살아남는다). ★ parity 는 `filter(r => r.p8)` 로 phone8 없는 행을 걸러내므로 **진짜불일치(real)에 안 잡힌다**(cutover 게이트 무영향). ⚠ `overview.b_total` 은 늘어 카운트 일치가 깨질 수 있다(채워지면 해소 — `prepareRosterSlots` 와 같은 성질).
+- ★ **멱등·비파괴**: `ON CONFLICT DO NOTHING` — 같은 작업표를 두 번 만들거나 이미 주문이 들어온 줄이 있어도 기존 행을 건드리지 않는다.
+- ★★ **헤더 인식 불가 = 잠금**(경고 아님): 열 구성이 `isSheetHeaderRow`(인덱스 빌더와 **같은 함수**) 판정을 통과 못 하면 **그 탭이 통째로 파싱되지 않아** 검색·제출·행배정이 전부 죽고 행 번호도 어긋난다 → `header_unrecognizable` blocker.
+- **되돌리기**(`POST /worktable/delete`, `deleteWorktableRows`): **작업대 표의 줄만** 내린다(소프트 `deleted_at`). 시트 탭·주문 원장 무접촉 — 시트는 사람이 지운다. ★ 주문·연락처가 들어온 줄이 있으면 **바로 지우지 않고 목록을 돌려주고**, 담당자가 "내부에서 진행한 테스트건" 임을 확인(`confirmed:true`)한 뒤에만 최종 삭제(사용자 확정).
+- ★ **시트가 1순위 산출물** — 스켈레톤 생성이 실패해도 시트 생성을 되돌리지 않는다(되돌리면 사람이 다시 만들어 중복 탭이 생긴다). 사유를 응답에 실어 화면이 알린다. 킬스위치 `WORKTABLE_DB_ROWS=0` = 시트만 생성(종전 동작).
+- 회귀가드 `tests/worktablePlan.test.js`(86케이스). 기존 `tests/participants.test.js` 의 상태 CASE 단언도 함께 갱신(`manual` 보존은 그대로 고정).
+- **다음**: 실제 생성 — 동일 구성 시트 생성(`create-campaign-sheet` 재사용) + DB 스켈레톤 행. ★★ 스켈레톤은 **seq를 시트 실제 행번호에 맞춰야** 주문이 들어올 때 `importTabFromIndex`의 `ON CONFLICT (sheet_id,tab_name,seq)`가 **제자리 갱신**한다(어긋나면 100행 + 유입행이 겹쳐 보인다). `prepareRosterSlots`는 `_MANUAL_SEQ_BASE=900000` 별도 대역이라 그대로는 못 쓴다. 또 `source='manual'` 이면 `is_submitted/is_paid`가 그 CASE에서 **동결**되므로 상태 칸이 영영 갱신 안 된다 — 새 source 값(예 `worktable`)을 그 CASE에 합류시키되 `_reconcileSeen`(source='import'만 비활성)은 건드리지 않는 설계가 필요하다.
 - 회귀가드 `tests/worktableTemplate.test.js`(39케이스 — 분류기 **실행** 검증(별칭 헤더 추종=사본이면 실패, 분류 ≡ 쓰기 표면 교차확인) + 집계 읽기전용/시트무접촉 + **라우터 스택 실검사** + 시트URL 해제·접수게이트 생존 + 프론트 배선).
 
 ### 업무가이드 메뉴 (리뷰웹시스템[3버전] — 직원용 안내서 모음)

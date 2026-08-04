@@ -55,8 +55,11 @@ async function run() {
   assert.ok(/ON CONFLICT \(sheet_id, tab_name, seq\) DO UPDATE/.test(ins.s), '멱등 upsert 키');
   // Phase 4: conflict update가 is_submitted/is_paid를 CASE로 갱신하되 source='import'일 때만(수동 보존).
   const doUpdate = ins.s.split('DO UPDATE SET')[1] || '';
-  assert.ok(/is_submitted = CASE WHEN campaign_participants.source='import'/.test(doUpdate), 'import행만 상태 최신화');
-  assert.ok(/is_paid\s*=\s*CASE WHEN campaign_participants.source='import'/.test(doUpdate), 'import행만 입금 최신화');
+  // ★ 'worktable'(작업표가 미리 만든 빈 줄)도 import 처럼 따라간다 — 'manual'(사람이 손댄 행)만 보존.
+  //   worktable 을 manual 로 두면 리뷰어가 리뷰를 내도 표시가 영영 안 켜진다(M2b-2).
+  assert.ok(/is_submitted = CASE WHEN campaign_participants\.source IN \('import','worktable'\)/.test(doUpdate), 'import·worktable 행만 상태 최신화');
+  assert.ok(/is_paid\s*=\s*CASE WHEN campaign_participants\.source IN \('import','worktable'\)/.test(doUpdate), 'import·worktable 행만 입금 최신화');
+  assert.ok(!/IN \('import','worktable','manual'\)/.test(doUpdate), "manual(사람이 손댄 행)은 여전히 보존");
   // source 컬럼은 SET 대상이 아님(수동표시 보존): campaign_participants.source(조건참조) 외에 'source =' 할당 없음.
   assert.ok(!/source\s*=\s*(EXCLUDED|'manual')/.test(doUpdate), 'source 컬럼 미갱신(수동표시 보존)');
   assert.ok(/deleted_at = NULL/.test(doUpdate), '재임포트 시 소프트삭제 해제');

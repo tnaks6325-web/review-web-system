@@ -180,10 +180,27 @@ async function createWorktable({ workOrderId, mode = 'existing', sheetId = '', f
       logger.warn(`[worktable/create] 작업오더 URL 연결 실패(시트는 생성됨): ${e.message}`);
     }
 
+    /* ── 작업대 표에도 같은 줄을 미리 보이게(M2b-2) ────────────────────────
+       ★ **시트가 1순위 산출물**이다 — 여기서 실패해도 시트는 이미 만들어졌으므로
+         전체를 실패로 되돌리지 않고 사유만 실어 보낸다(사람이 다시 만들면 중복 탭이 생긴다).
+       ★ 끌 수 있게 둔다: WORKTABLE_DB_ROWS=0 이면 시트만 만든다(스켈레톤 없이 종전 동작). */
+    let slots = null;
+    if (process.env.WORKTABLE_DB_ROWS !== '0') {
+      try {
+        slots = await require('./participants.service').createWorktableSlots({
+          sheetId: targetSheetId, tabName: title, tabGid: newGid,
+          headerRow, rows: plan.rows, productName: wo.title || null, by,
+        });
+      } catch (e) {
+        logger.warn(`[worktable/create] 작업대 표 행 생성 실패(시트는 만들어짐): ${e.message}`);
+        slots = { error: e.message };
+      }
+    }
+
     logger.info(`[worktable/create] ${wo.id} → ${title} (${body.length}행, 헤더 ${headerRow}행) by ${by}`);
     return {
       ok: true, sheetId: targetSheetId, gid: newGid, tabName: title, tabUrl, createdFile,
-      headerRow, columns: header, rowsWritten: body.length, filled,
+      headerRow, columns: header, rowsWritten: body.length, filled, slots,
       warnings: plan.warnings,
     };
   } catch (err) {

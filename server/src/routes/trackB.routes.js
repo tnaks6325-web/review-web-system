@@ -1391,6 +1391,22 @@ router.post('/worktable/create', authMiddleware, internalMiddleware, editorOnlyM
   } catch (err) { next(err); }
 });
 
+// 작업표 되돌리기 — 작업대 표의 줄만 내린다(시트·주문 원장 무접촉).
+//   ★ 주문이 들어온 줄이 있으면 목록을 돌려주고, 담당자가 "내부 테스트건" 확인 후
+//     confirmed:true 로 다시 부를 때만 최종 삭제(사용자 확정).
+router.post('/worktable/delete', authMiddleware, internalMiddleware, editorOnlyMiddleware, async (req, res, next) => {
+  try {
+    const { deleteWorktableRows } = require('../services/participants.service');
+    const b = req.body || {};
+    if (!b.sheetId || !b.tabName) return res.json({ ok: false, error: 'sheetId, tabName 이 필요합니다.' });
+    const r2 = await deleteWorktableRows({
+      sheetId: String(b.sheetId), tabName: String(b.tabName),
+      confirmed: b.confirmed === true, by: _by(req),
+    });
+    res.json(r2);
+  } catch (err) { next(err); }
+});
+
 router.post('/worktable/template', authMiddleware, adminOrMasterMiddleware, async (req, res, next) => {
   try {
     const { saveTemplate } = require('../services/worktable.service');

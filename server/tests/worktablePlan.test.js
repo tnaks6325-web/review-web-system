@@ -357,5 +357,67 @@ ok('★ 생성 후 접수는 사람이 누른다고 화면이 말한다(등록 �
 ok('★ 대상 시트 목록은 기존 /tabs 재사용(신규 엔드포인트 0) · 1회만 로드',
   /api\('\/api\/trackb\/tabs'\)/.test(wdesk) && /_WTP\.sheetsLoaded/.test(wdesk));
 
+/* ══════════════════════════════════════════════════════════
+   J. 작업대 표 스켈레톤(M2b-2) — 줄 번호 정합·상태 추종·되돌리기
+   ══════════════════════════════════════════════════════════ */
+console.log('\nJ. 작업대 표 스켈레톤');
+const partSrc = readS('services/participants.service.js');
+
+ok('★★ 열 구성이 헤더로 인식 안 되면 **잠금** — 그 탭은 통째로 파싱되지 않는다(검색·제출 전면 중단)',
+  (() => {
+    const bad = P.buildWorktablePlan({ workOrder: { recruit_count: 10 }, template: { core: ['번호', '메모A', '메모B'], channels: {} } });
+    const good = P.buildWorktablePlan({ workOrder: { recruit_count: 10 }, template: { core: ['번호', '수취인', '연락처'], channels: {} } });
+    return !bad.canCreate && bad.blockers.some(b => b.code === 'header_unrecognizable') && good.canCreate;
+  })());
+ok('★ 헤더 인식 판정은 인덱스 빌더와 같은 함수(isSheetHeaderRow) — 사본 금지',
+  /require\('\.\/sheetHeader'\)/.test(planSrc) && /isSheetHeaderRow\(columns\.map/.test(planSrc));
+
+ok('★★ 스켈레톤 seq = 시트 실제 행 번호(헤더 바로 아래부터) — 어긋나면 표가 두 겹이 된다',
+  /const seq = hr \+ i \+ 1;/.test(partSrc)
+  && /createWorktableSlots: headerRow 필수/.test(partSrc));
+ok('★ 900000+ 대역(prepareRosterSlots)을 쓰지 않는다 — 그건 시트 행을 모를 때용',
+  (() => {
+    const i = partSrc.indexOf('async function createWorktableSlots');
+    const j = partSrc.indexOf('async function deleteWorktableRows');
+    return !/_MANUAL_SEQ_BASE/.test(partSrc.slice(i, j));
+  })());
+ok('★ 멱등·비파괴 — ON CONFLICT DO NOTHING(이미 주문이 들어온 줄을 덮지 않는다)',
+  /VALUES \$\{ph\.join\(','\)\}\s*\n\s*ON CONFLICT \(sheet_id, tab_name, seq\) DO NOTHING/.test(partSrc));
+ok("★★ source='worktable' 은 import 처럼 상태를 따라간다 — 'manual' 이면 리뷰제출·입금이 영영 안 켜진다",
+  /is_submitted = CASE WHEN campaign_participants\.source IN \('import','worktable'\)/.test(partSrc)
+  && /is_paid\s+= CASE WHEN campaign_participants\.source IN \('import','worktable'\)/.test(partSrc));
+ok("★ _reconcileSeen 은 그대로 'import' 만 비활성화 — 빈 줄이 투영에 살아남는다",
+  /AND source = 'import' AND active = TRUE/.test(readS('services/trackB.service.js')));
+ok('★ parity 는 phone8 없는 행을 걸러내므로 빈 줄이 진짜불일치로 잡히지 않는다',
+  /const A = aRows\.map\(norm\)\.filter\(r => r\.p8\)/.test(readS('services/trackB.service.js')));
+
+ok('되돌리기: 주문 있는 줄은 목록을 돌려주고 확인 뒤에만 삭제(사용자 확정)',
+  /needsConfirm: true, filledCount/.test(partSrc)
+  && /confirmed = false/.test(partSrc));
+ok('★ 삭제는 소프트(deleted_at) — 이력이 남는다',
+  /SET deleted_at = NOW\(\), active = FALSE/.test(partSrc));
+ok('★★ 삭제가 주문 원장·시트를 건드리지 않는다',
+  (() => {
+    const i = partSrc.indexOf('async function deleteWorktableRows');
+    const body = partSrc.slice(i, i + 2200);
+    return !/order_submissions|sheets\.|deleteSheet/.test(body);
+  })());
+ok('POST /worktable/delete 권한(내부인 + 편집 명단)',
+  (() => {
+    const l = layers.find(x => x.route.path === '/worktable/delete' && x.route.methods.post);
+    if (!l) return false;
+    const names = l.route.stack.map(s => s.handle.name);
+    return names[0] === 'authMiddleware' && names.includes('internalMiddleware') && names.includes('editorOnlyMiddleware');
+  })());
+ok('★ 스켈레톤 생성 실패가 시트 생성을 되돌리지 않는다(시트가 1순위 산출물)',
+  /작업대 표 행 생성 실패\(시트는 만들어짐\)/.test(createSrc)
+  && /slots = \{ error: e\.message \}/.test(createSrc));
+ok('킬스위치 WORKTABLE_DB_ROWS=0 이면 시트만 만든다',
+  /process\.env\.WORKTABLE_DB_ROWS !== '0'/.test(createSrc));
+ok('프론트: 되돌리기 버튼 + "시트는 안 지워진다"를 화면이 말한다',
+  /onclick="wtpDelete\(\)"/.test(wdesk)
+  && /구글시트 탭은 지워지지 않습니다/.test(wdesk)
+  && /내부에서 진행한 테스트건이 맞습니까/.test(wdesk));
+
 console.log(`\n✅ worktablePlan: ${n}개 통과`);
 process.exit(0);   // trackB.routes 가 DB 풀 핸들을 열어 프로세스가 안 끝난다(레포 관용구)
