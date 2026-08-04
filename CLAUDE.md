@@ -199,6 +199,15 @@ GAS(Google Apps Script) 기반 리뷰 관리 시스템을 **Node.js Express + Po
 - 좌측 문의방 목록(`#csRoomListWrap`, 360px 고정)을 뺀 나머지 폭을 대화창이 전부 차지해, 넓은 화면에서 말풍선 사이 여백만 벌어지던 것을 `#csConvPane{max-width:860px}` 로 고정(`js/cs-inquiry.js`, admin·통합작업대 공용 모듈이라 한 곳만 고치면 양쪽 반영).
 - **목록 옆에 붙이고 남는 폭은 오른쪽 여백으로 흘려보내는 방식**(사용자 확정) — `flex:1;min-width:0` 은 유지하고 `max-width` 만 추가했으므로 별도 스페이서 없이 flex 성장이 상한에서 멈추는 것만으로 동작. 회귀가드 `server/tests/csConvWidthCap.test.js`.
 
+### 통합 작업대 뒤로/앞으로 (SPA 히스토리)
+- **문제**: 업체관리에서 업체→작업을 클릭하면 화면이 통째로 작업대로 바뀌는데 히스토리에 아무것도 안 쌓여 **브라우저 뒤로가기가 통합 작업대를 벗어났다**. 뷰 전환(nav 탭)·작업 열기(`selTab`)·업체 선택(`selAdv`) 3종을 히스토리 항목으로 쌓아 뒤로/앞으로가 화면 전환을 되짚는다.
+- ★★ **URL 은 건드리지 않는다** — `history.pushState(state,'',pathname+search)`(같은 URL 로도 별개 항목이 생긴다). 해시를 쓰면 `#sso=`·`#adv=`·`#go=` 프래그먼트 계약과 충돌하고, 주소 공유로 딥링크·PII 가 샌다(그 코드들이 도착 즉시 해시를 지우는 이유와 같다). 대신 새로고침으로는 복원되지 않는다(종전과 동일).
+- ★ **첫 항목은 replace**(`_navBooted`) — 브라우저 최초 항목(state:null)을 낭비하면 뒤로가기 한 번이 "아무 일도 안 일어나는" 헛클릭이 된다. 같은 화면 재적재(`_navSame`)도 replace(nav 버튼 연타 = 뒤로가기 낭비 방지).
+- ★★ **중간 항목 금지**: 업체관리 연결탭 클릭·관측 '열기'·`#go=` 딥링크는 `pendingTab`/`pendingAdv` 를 예약한 뒤 `switchView` 하므로, **switchView 는 예약이 있으면 쌓지 않고** 곧 이어지는 `selTab`/`selAdv` 가 최종 상태 1건만 쌓는다. 둘 다 쌓으면 "탭 없는 작업대"를 한 번 더 거쳐 **뒤로가기를 두 번 눌러야** 업체관리로 돌아간다(신고된 증상의 재발).
+- ★ **복원 중 재적재 금지**: `_navApply` 가 `_navLock` 을 잡고, 비동기로 이어지는 `selTab`/`selAdv` 에는 `pendingTab.__nav`/`pendingAdv.__nav` 표식으로 `{nav:true}` 를 전달한다(락은 동기 구간만 덮는다).
+- ★ **항목 ↔ 화면 일치**: `renderWorkdeskView` 는 예약 없으면 `STATE.cur=null`, `renderOwnershipView` 는 복원이 아니면 `STATE.advCur=null` 로 **첫 await 전에** 비운다 — 안 그러면 "본문은 작업 선택 안내인데 항목엔 옛 작업"이 남아 뒤로/앞으로가 없던 화면을 되살린다.
+- 복원 범위 = **어느 화면·어느 작업·어느 업체**까지. 그리드 필터·숨김열 등 표 상태는 탭 전환 시 초기화되는 클라이언트 상태라 대상 아님(`selTab` 기존 계약 유지). 회귀가드 `server/tests/workdeskHistoryNav.test.js`(27케이스 — 배선 + **나브 함수를 vm 으로 꺼내 실제 실행**해 적재 순서·중복 억제·lock 검증). 실제 http 오리진 + 스텁 API 브라우저 실행으로 업체관리→작업→뒤로×3→앞으로×3 왕복 확인.
+
 ### 통합 작업대 화면 폭 상한 (FHD/QHD 토글) · 열 너비 고정
 - **문제 2개**: ① 창을 넓힐수록 헤더·업체 칩바·탭바·본문이 끝없이 따라 늘어났다. ② 시트 그리드가 컨테이너를 꽉 채우려고 **주소 열이 잔여폭을 흡수**해, 같은 열이 창 크기·숨긴 열 수마다 다른 너비가 됐다(작업을 오갈 때마다 열 위치를 다시 찾음).
 - **상한**: `--app-max` 토큰 하나(`:root` 기본 1920 + `body[data-vw="fhd"|"qhd"]` = 1920/2560), 우측 상단 좌우 슬라이딩 스위치(`.vwsw` `#vwToggle`, `localStorage.wd_viewport_mode`, **기본 FHD**=좁은 쪽). 적용은 `.top`·`.tb1`·`.tb2`·`.wrap`·`.ovwrap` 5곳.
