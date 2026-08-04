@@ -100,6 +100,35 @@ ok('★ 그럼에도 매퍼는 NC 에서 두 id 열을 비운다(쓰기 표면 �
 ok('관리자 보호열(상품명)은 미분류로 남아 "미분류 헤더"로 보고된다',
   wt.classifyHeaders(['상품명'], {})[0].role === null);
 
+/* ── 코드리뷰 반영분(#449 후속) — 이 4가지를 되돌리지 말 것 ── */
+ok('★★ 상태 칸은 탭 설정이 매퍼 판정을 이긴다 — submit_col2=\'입금일자\' 가 구매일자로 뒤바뀌지 않는다',
+  (() => {
+    const c = wt.classifyHeaders(['입금일자'], { submitCol2: '입금일자' })[0];
+    return c.role === 'paid' && c.tier === 'status';
+  })());
+ok('★ 그 겹침은 신호로 남는다(conflict) — 제출이 상태 칸을 덮어쓸 수 있다는 뜻이라 조용히 삼키지 않는다',
+  wt.classifyHeaders(['입금일자'], { submitCol2: '입금일자' })[0].conflict === 'dateStr');
+ok('겹치지 않는 정상 상태 칸은 conflict 없음(경고 도배 방지)',
+  wt.classifyHeaders(['리뷰제출'], { submitCol: '리뷰제출' })[0].conflict === null);
+ok('★★ 관리자 보호열 \'상품아이디\' 는 채널 열로 오분류되지 않는다(id 규칙이 지는 열)',
+  wt.classifyHeaders(['상품아이디'], {})[0].role === null);
+ok('★ 메모열 \'비고(아이디확인)\' 도 채널이 아니라 비고',
+  wt.classifyHeaders(['비고(아이디확인)'], {})[0].role === 'memo');
+ok('★ 채널 열 판정은 저수준 _isIdHeader 가 아니라 _idColIndices(이기는 열)를 쓴다',
+  /_idColIndices,/.test(utilSrc) && /_idColIndices\(list\)/.test(utilSrc)
+  && !/_isIdHeader\(/.test(utilSrc));   // 주석의 언급은 허용, **호출**이 없어야 한다
+ok('★ 이 파일에 NUL 바이트가 없다(git 이 바이너리 취급 → diff·grep 무력화. 실제로 한 번 밟았다)',
+  !utilSrc.includes('\u0000') && !svcSrc.includes('\u0000'));
+ok('★ 그래도 정상 id 열은 그대로 channel',
+  wt.classifyHeaders(['쿠팡ID'], {})[0].role === 'userId');
+ok('★★ logger 는 구조분해로 받는다 — 통째로 받으면 fail-soft catch 안에서 TypeError(500)',
+  /const \{ logger \} = require\('\.\.\/utils\/logger'\)/.test(svcSrc));
+ok('★★ 시트URL 생략 시 문자열 "undefined" 가 저장되지 않는다(선택 항목화의 필수 짝)',
+  /String\(b\.work_sheet_url \|\| ''\)\.trim\(\)/.test(order)
+  && !/String\(b\.work_sheet_url\)\.trim\(\)/.test(order));
+ok('상태 칸 겹침은 리포트에 실려 화면에 뜬다(서버·프론트 배선)',
+  /statusConflicts/.test(svcSrc) && /statusConflicts/.test(wdesk));
+
 /* 채널 추정 */
 ok('채널 추정 — 쿠팡/네이버/동시/미상', (() => {
   const f = wt.inferChannelFromHeaders;

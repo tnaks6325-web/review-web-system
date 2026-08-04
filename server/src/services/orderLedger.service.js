@@ -1705,6 +1705,10 @@ module.exports = {
   _osRowToOrderData,
   _fieldToCol,
   _isIdHeader,
+  // id 규칙이 **실제로 이기는** 열 인덱스(관리자 보호열·주문자/수취인·비고 선점분 제외).
+  //   작업표 템플릿 분류기가 "채널 id 열"을 판정할 때 이것을 쓴다 — 저수준 `_isIdHeader` 를
+  //   쓰면 '상품아이디' 같은 보호열이 채널 열로 오분류된다.
+  _idColIndices,
   _singleIdCol,
   unmappedSubmittedFields,
   rowIdentityMatches,

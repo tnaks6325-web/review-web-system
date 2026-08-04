@@ -2570,6 +2570,17 @@ function _wtRender(d){
       <b>${pct(d.thresholds&&d.thresholds.rare)}</b> 미만이면 "일부만"(변칙 후보)로 봅니다.
       이 분류는 <b>작업표 생성 시 기본값 제안</b>에만 쓰이며, 실제 생성은 미리보기에서 사람이 확정합니다.</div>
 
+    ${(d.statusConflicts||[]).length ? `<div class="sect"><div class="st">⚠ 확인 필요 — 상태 칸에 제출이 겹쳐 쓸 수 있는 열</div>
+      <div class="ovnote" style="margin-top:0">아래 열은 그 탭에서 <b>리뷰제출·입금 상태 칸</b>으로 쓰이는데,
+        구매양식 제출도 같은 열에 값을 씁니다(헤더 이름이 두 규칙에 모두 걸림). 제출이 상태 표시를 덮어쓸 수 있으니
+        <b>헤더 이름을 바꾸는 편이 안전</b>합니다. 작업표를 새로 만들 때는 이 이름을 피해 주세요.</div>
+      <div class="wtgrid">${(d.statusConflicts||[]).map(c=>`<div class="wtcard" style="border-color:#E7D2A3">
+        <div class="wth"><span class="wtn">${esc(c.header)}</span>
+          <span class="wtlayer status">${esc(c.roleLabel)}</span>
+          <span class="wtfreq common">제출도 씀: ${esc(c.mapperLabel)}</span>
+          <span class="wtr">${c.tabCount}개 탭</span></div>
+      </div>`).join('')}</div></div>` : ''}
+
     <div class="sect"><div class="st">코어 후보 — 거의 모든 작업에 있는 열</div>
       ${core.length?`<div class="wtgrid">${core.map(card).join('')}</div>`:'<div class="empty">아직 집계된 열이 없습니다.</div>'}</div>
 
