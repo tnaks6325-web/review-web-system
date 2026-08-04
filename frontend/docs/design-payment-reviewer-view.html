@@ -1,0 +1,496 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>입금 정보 표시 — 리뷰어 화면 시안</title>
+<style>
+  *,*::before,*::after{box-sizing:border-box}
+
+  :root{
+    --paper:#F4F5F7; --card:#FFFFFF; --ink:#12151A; --muted:#59626F; --faint:#8B94A1;
+    --line:#E1E5EB; --line-soft:#EDF0F4;
+    --acc:#2563A8; --acc-bg:#E9F0F9; --acc-edge:#B7CFE9;
+    --pass:#127A5E; --pass-bg:#E5F3EE; --pass-edge:#A6D6C6;
+    --susp:#9A6414; --susp-bg:#FBF2E1; --susp-edge:#E7D2A3;
+    --fail:#B3382E; --fail-bg:#FAE9E7; --fail-edge:#EAB6B0;
+    --shadow:0 1px 2px rgba(18,21,26,.05), 0 10px 30px rgba(18,21,26,.06);
+    --mono:ui-monospace,SFMono-Regular,"SF Mono",Menlo,Consolas,"D2Coding",monospace;
+    --sans:"Pretendard Variable",Pretendard,-apple-system,BlinkMacSystemFont,"Apple SD Gothic Neo","Malgun Gothic","Noto Sans KR",system-ui,sans-serif;
+  }
+  @media (prefers-color-scheme: dark){
+    :root{
+      --paper:#101317; --card:#171B21; --ink:#E7EBF1; --muted:#98A1AE; --faint:#6E7885;
+      --line:#252B33; --line-soft:#1E232A;
+      --acc:#7FB2E8; --acc-bg:#14263A; --acc-edge:#28486B;
+      --pass:#61C4A4; --pass-bg:#102822; --pass-edge:#22493D;
+      --susp:#E0B571; --susp-bg:#2B2214; --susp-edge:#4C3C1E;
+      --fail:#E79A92; --fail-bg:#321B18; --fail-edge:#5A2E28;
+      --shadow:0 1px 2px rgba(0,0,0,.45), 0 10px 30px rgba(0,0,0,.3);
+    }
+  }
+  :root[data-theme="dark"]{
+    --paper:#101317; --card:#171B21; --ink:#E7EBF1; --muted:#98A1AE; --faint:#6E7885;
+    --line:#252B33; --line-soft:#1E232A;
+    --acc:#7FB2E8; --acc-bg:#14263A; --acc-edge:#28486B;
+    --pass:#61C4A4; --pass-bg:#102822; --pass-edge:#22493D;
+    --susp:#E0B571; --susp-bg:#2B2214; --susp-edge:#4C3C1E;
+    --fail:#E79A92; --fail-bg:#321B18; --fail-edge:#5A2E28;
+    --shadow:0 1px 2px rgba(0,0,0,.45), 0 10px 30px rgba(0,0,0,.3);
+  }
+  :root[data-theme="light"]{
+    --paper:#F4F5F7; --card:#FFFFFF; --ink:#12151A; --muted:#59626F; --faint:#8B94A1;
+    --line:#E1E5EB; --line-soft:#EDF0F4;
+    --acc:#2563A8; --acc-bg:#E9F0F9; --acc-edge:#B7CFE9;
+    --pass:#127A5E; --pass-bg:#E5F3EE; --pass-edge:#A6D6C6;
+    --susp:#9A6414; --susp-bg:#FBF2E1; --susp-edge:#E7D2A3;
+    --fail:#B3382E; --fail-bg:#FAE9E7; --fail-edge:#EAB6B0;
+    --shadow:0 1px 2px rgba(18,21,26,.05), 0 10px 30px rgba(18,21,26,.06);
+  }
+
+  html{-webkit-text-size-adjust:100%}
+  body{margin:0; background:var(--paper); color:var(--ink); font-family:var(--sans); line-height:1.62; -webkit-font-smoothing:antialiased}
+  .wrap{max-width:1180px; margin:0 auto; padding:40px 20px 90px; display:flex; flex-direction:column; gap:44px}
+
+  .head{border-bottom:1px solid var(--line); padding-bottom:26px; display:flex; flex-direction:column; gap:13px}
+  .eyebrow{margin:0; font-family:var(--mono); font-size:11px; font-weight:600; letter-spacing:.16em; text-transform:uppercase; color:var(--acc)}
+  h1{margin:0; font-size:clamp(25px,4vw,35px); font-weight:800; letter-spacing:-.028em; line-height:1.16; text-wrap:balance}
+  .lede{margin:0; max-width:70ch; color:var(--muted); font-size:15.5px}
+  .lede b{color:var(--ink)}
+  .chips{display:flex; gap:7px; flex-wrap:wrap}
+  .chip{font-family:var(--mono); font-size:11.5px; font-weight:550; padding:4px 10px; border-radius:7px; border:1px solid var(--line); background:var(--card); color:var(--muted)}
+  .chip.a{border-color:var(--acc-edge); background:var(--acc-bg); color:var(--acc)}
+
+  section{display:flex; flex-direction:column; gap:15px}
+  .shead{display:flex; align-items:baseline; gap:11px; flex-wrap:wrap}
+  .snum{font-family:var(--mono); font-size:12px; font-weight:650; color:var(--acc); letter-spacing:.08em; border:1px solid var(--acc-edge); background:var(--acc-bg); border-radius:6px; padding:2px 8px; flex:none}
+  h2{margin:0; font-size:20px; font-weight:760; letter-spacing:-.018em}
+  h3{margin:0; font-size:15px; font-weight:720}
+  .sdesc{margin:0; color:var(--muted); font-size:14px; max-width:80ch}
+  .sdesc b, .card b, li b, td b{color:var(--ink); font-weight:700}
+
+  .card{background:var(--card); border:1px solid var(--line); border-radius:13px; padding:18px 20px; box-shadow:var(--shadow); display:flex; flex-direction:column; gap:12px}
+  ul{margin:0; padding-left:20px; display:flex; flex-direction:column; gap:6px; font-size:14px}
+  li{color:var(--muted)} li::marker{color:var(--faint)}
+
+  .tblwrap{overflow-x:auto; border:1px solid var(--line); border-radius:11px}
+  table{border-collapse:collapse; width:100%; font-size:13px; background:var(--card)}
+  th{font-size:11.5px; font-weight:650; text-align:left; color:var(--muted); background:var(--paper); padding:8px 12px; border-bottom:1px solid var(--line); white-space:nowrap}
+  td{padding:8px 12px; border-bottom:1px solid var(--line-soft); color:var(--muted); vertical-align:top}
+  tr:last-child td{border-bottom:none}
+  td.mono{font-family:var(--mono); font-size:12px}
+
+  .callout{border-left:3px solid var(--acc); background:var(--acc-bg); border-radius:0 10px 10px 0; padding:12px 16px; font-size:13.5px; color:var(--muted)}
+  .callout.warn{border-left-color:var(--susp); background:var(--susp-bg)}
+  .callout b{color:var(--ink)}
+
+  /* ── 데모 레이아웃: 좌 폰 / 우 설명 ── */
+  .demo{display:grid; grid-template-columns:390px 1fr; gap:26px; align-items:start}
+  @media (max-width:900px){.demo{grid-template-columns:1fr}}
+  .statebar{display:flex; gap:7px; flex-wrap:wrap; margin-bottom:12px}
+  .sbtn{font-size:12.5px; font-weight:650; padding:7px 13px; border-radius:9px; border:1px solid var(--line); background:var(--card); color:var(--muted); cursor:pointer; font-family:var(--sans)}
+  .sbtn.on{background:var(--acc); border-color:var(--acc); color:#fff}
+  .note{font-size:12.5px; color:var(--faint); margin:8px 0 0}
+
+  /* ══════════════════════════════════════════════════════
+     아래는 리뷰어 앱(index.html)의 실제 스타일을 그대로 옮긴 것.
+     실물과 같아야 하므로 다크모드에서 색이 뒤집히지 않게 light 고정.
+     ══════════════════════════════════════════════════════ */
+  .phone{
+    color-scheme:light;
+    width:390px; max-width:100%; height:760px; border-radius:30px; overflow:hidden;
+    border:1px solid #D9DDE4; background:#F4F5F8; position:relative;
+    box-shadow:0 10px 40px rgba(18,21,26,.16);
+    font-family:var(--sans); color:#191F28; letter-spacing:-.01em;
+  }
+  .phone *{box-sizing:border-box}
+  .ph-top{background:#fff; border-bottom:1px solid #EFEFF3; padding:13px 16px 11px; display:flex; align-items:center; gap:9px}
+  .ph-top .ic{width:30px; height:30px; border-radius:9px; background:linear-gradient(135deg,#3182f6,#3182f6); color:#fff; display:grid; place-items:center; font-size:.8rem; font-weight:800}
+  .ph-top .tt{font-size:.95rem; font-weight:800; color:#191F28}
+  .ph-top .ts{font-size:.68rem; color:#A8AEBA; margin-top:-2px}
+  .ph-scroll{height:calc(100% - 55px); overflow-y:auto; padding:14px 16px 30px}
+
+  /* 서브탭 */
+  .subtabs{display:flex; background:#ECEDF2; border-radius:13px; padding:4px; margin-bottom:12px}
+  .subtab{flex:1; text-align:center; font-size:.78rem; font-weight:700; color:#5B6472; padding:7px 0; border-radius:10px; cursor:pointer; border:none; background:transparent; font-family:inherit}
+  .subtab.active{background:#fff; color:#191F28; box-shadow:0 1px 4px rgba(17,24,40,.08)}
+  .subtab .cnt{font-size:.66rem; color:#A8AEBA; font-weight:700; margin-left:3px}
+
+  /* 누적 금액 요약 카드 */
+  .sumcard{background:#fff; border:1px solid #D8E6FA; border-radius:16px; padding:13px 15px; margin-bottom:12px; box-shadow:0 1px 5px rgba(49,130,246,.07)}
+  .sumcard .h{display:flex; align-items:center; justify-content:space-between; margin-bottom:8px}
+  .sumcard .h .t{font-size:.82rem; font-weight:800; color:#191F28}
+  .sumcard .h .cnt{font-size:.64rem; font-weight:700; color:#3182f6; background:#e8f1fe; padding:3px 9px; border-radius:999px}
+  .sumtot{display:flex; align-items:center; justify-content:space-between; border-top:1px dashed #E5E7EB; padding-top:8px; margin-top:4px}
+  .sumtot .k{font-size:.8rem; font-weight:700; color:#4B5563}
+  .sumtot .v{font-size:1.06rem; font-weight:800; color:#0ca678; font-variant-numeric:tabular-nums}
+
+  /* 리뷰 내역 카드 (실제 .result-card) */
+  .rcard{display:flex; align-items:center; gap:11px; background:#fff; border:1px solid #EFEFF3; border-radius:16px; box-shadow:0 1px 6px rgba(17,24,40,.04); padding:12px 13px; margin-bottom:9px; cursor:pointer; transition:transform .12s}
+  .rcard:active{transform:scale(.99)}
+  .rcard.sel{border-color:#A6C8FB; box-shadow:0 0 0 2px rgba(49,130,246,.16)}
+  .camp-thumb{width:46px; height:46px; border-radius:11px; flex-shrink:0; display:flex; align-items:center; justify-content:center; font-size:1.1rem; background:linear-gradient(135deg,#eef2ff,#e0e7ff); border:1px solid #E5E7EB}
+  .camp-thumb span{font-size:1.15rem}
+  .rbody{flex:1; min-width:0}
+  .c-meta{font-size:.69rem; font-weight:600; color:#9CA3AF; white-space:nowrap; overflow:hidden; text-overflow:ellipsis}
+  .c-meta .c-who{color:#4B5563; font-weight:700}
+  .c-meta .c-tail{color:#94A3B8; font-weight:600}
+  .c-name{font-size:.83rem; font-weight:700; color:#111827; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; margin:2px 0 6px}
+  .fee-line{display:flex; align-items:center; gap:6px}
+  .fee{font-size:.63rem; font-weight:800; padding:3px 8px; border-radius:7px; white-space:nowrap; font-variant-numeric:tabular-nums}
+  .fee.prod{background:#EEF2FF; color:#3730A3}
+  .fee.rev{background:#D1FAE5; color:#065F46}
+  .rright{display:flex; flex-direction:column; align-items:flex-end; gap:4px; flex-shrink:0}
+  .rrow{display:flex; align-items:center; gap:6px}
+  .badge-submitted{font-size:.62rem; font-weight:700; padding:3px 8px; border-radius:6px; background:#D1FAE5; color:#065F46}
+  .badge-paid{font-size:.62rem; font-weight:700; padding:3px 8px; border-radius:6px; background:#E0E7FF; color:#3730A3}
+  .chev{color:#9CA3AF; font-size:.75rem}
+
+  /* 바텀시트 (실제 .ovl / .re-edit-sheet) */
+  .ovl{position:absolute; inset:0; background:rgba(25,31,40,.45); z-index:40; display:none; align-items:flex-end; justify-content:center}
+  .ovl.on{display:flex}
+  .sheet{background:#fff; border-radius:24px 24px 0 0; width:100%; max-height:88%; overflow-y:auto; padding:8px 20px 22px; animation:shIn .3s cubic-bezier(.2,.8,.2,1)}
+  @keyframes shIn{from{transform:translateY(24px); opacity:.4} to{transform:none; opacity:1}}
+  .sh-head{display:flex; align-items:center; justify-content:space-between; font-size:1rem; font-weight:800; letter-spacing:-.02em; padding:14px 0 4px; position:sticky; top:0; background:#fff}
+  .sh-head .hl{color:#191F28}
+  .sh-x{background:none; border:none; font-size:1.6rem; line-height:1; color:#98A0AC; cursor:pointer}
+  .sh-title{font-size:.9rem; font-weight:800; color:#111827; line-height:1.4}
+  .sh-sub{font-size:.72rem; color:#9CA3AF; margin-top:3px}
+  .sh-chip{display:inline-block; white-space:nowrap; font-size:.6rem; font-weight:800; border-radius:8px; padding:2px 7px; margin-left:6px; vertical-align:middle}
+  .sh-chip.done{background:#D1FAE5; color:#0ca678}
+  .sh-chip.paid{background:#E0E7FF; color:#3730A3}
+  .detail{border:1px solid #EEF1F7; border-radius:11px; margin-top:11px; padding:9px 11px; font-size:.74rem}
+  .drow{display:flex; gap:8px; margin:3px 0}
+  .drow .k{color:#9CA3AF; flex:none; width:52px}
+  .drow .v{color:#374151; min-width:0}
+  .optblk{display:flex; gap:7px; align-items:flex-start; background:#EFF6FF; border:1px solid #CFE0FD; border-radius:9px; padding:8px 10px; margin-bottom:8px}
+  .optblk .t{font-size:.76rem; color:#1b64da; font-weight:800; line-height:1.5}
+  .optblk .t .vv{color:#111827}
+  .optblk .h{font-size:.66rem; color:#6B7280; margin-top:2px}
+
+  /* ★ 신규 — 입금 정보 블록 */
+  .payblk{border-radius:11px; padding:10px 12px; margin-top:11px}
+  .payblk.ok{background:#EEF2FF; border:1px solid #C7D2FE}
+  .payblk.wait{background:#F7F8FB; border:1px solid #E5E7EB}
+  .payblk.fail{background:#FEF2F2; border:1px solid #FECACA}
+  .payblk .ph{display:flex; align-items:center; gap:6px; font-size:.78rem; font-weight:800; margin-bottom:7px}
+  .payblk.ok .ph{color:#3730A3}
+  .payblk.wait .ph{color:#5B6472}
+  .payblk.fail .ph{color:#B91C1C}
+  .payrow{display:flex; gap:8px; align-items:baseline; margin:4px 0; font-size:.75rem}
+  .payrow .k{color:#8A91A0; flex:none; width:64px; font-weight:600}
+  .payrow .v{color:#111827; font-weight:700; min-width:0}
+  .payrow .v.big{font-size:.86rem; font-weight:800; font-variant-numeric:tabular-nums}
+  .payrow .v .sub{color:#8A91A0; font-weight:600; font-size:.68rem}
+  .paynote{font-size:.67rem; color:#6B7280; margin-top:7px; padding-top:7px; border-top:1px dashed #D6DAE3; line-height:1.55}
+  .paybank{display:inline-flex; align-items:center; gap:4px; background:#fff; border:1px solid #C7D2FE; border-radius:7px; padding:2px 8px; font-size:.72rem; font-weight:800; color:#3730A3; font-family:var(--mono)}
+
+  .sbtns{margin-top:11px; display:flex; flex-direction:column; gap:8px}
+  .sbtn2{display:block; width:100%; text-align:center; border:none; cursor:pointer; font-size:.85rem; font-weight:800; border-radius:12px; padding:13px; font-family:inherit}
+  .sbtn2.dark{background:#111827; color:#fff}
+  .sbtn2.kakao{background:#FEE500; color:#191919; box-shadow:0 3px 10px rgba(250,225,0,.42)}
+  .sbtn2.line{background:#fff; color:#1b64da; border:1.5px solid #CFE0FD; padding:12px}
+  .sbtn2.cs{background:#EEF3FB; color:#1B4F9C; border:1.5px solid #CFE0FD; padding:12px}
+
+  .new-tag{display:inline-block; font-size:.58rem; font-weight:800; background:#FF6B35; color:#fff; border-radius:5px; padding:1px 6px; margin-left:6px; vertical-align:middle; letter-spacing:.02em}
+
+  footer{border-top:1px solid var(--line); padding-top:18px; color:var(--faint); font-size:12.5px}
+</style>
+</head>
+<body>
+<div class="wrap">
+
+  <header class="head">
+    <p class="eyebrow">Design Draft · Reviewer View</p>
+    <h1>입금 정보 표시<br>리뷰어 화면 시안</h1>
+    <p class="lede">
+      입금 처리가 끝나면 리뷰어가 <b>리뷰 내역 → 제출완료 → 카드 클릭 → 참여상품 정보</b> 팝업에서
+      <b>언제 입금됐는지</b>와 <b>통장에 찍힌 입금명</b>을 직접 확인할 수 있게 합니다.
+      "돈 들어왔나요? 이 입금이 어느 작업 건인가요?" 문의를 화면이 대신 답합니다.
+    </p>
+    <div class="chips">
+      <span class="chip a">대상 독자: 운영 직원 (비개발자)</span>
+      <span class="chip">2026-08-04</span>
+      <span class="chip">이체 방식 A안(건별) 확정 기준</span>
+    </div>
+  </header>
+
+  <!-- ═══════════ 01 인터랙티브 목업 ═══════════ -->
+  <section>
+    <div class="shead"><span class="snum">01</span><h2>실제 화면 목업 (눌러서 확인해 보세요)</h2></div>
+    <p class="sdesc">아래는 리뷰어 앱의 실제 스타일을 그대로 쓴 목업입니다. 카드를 누르면 참여상품 정보 팝업이 올라옵니다. 세 가지 상태를 모두 준비했습니다.</p>
+
+    <div class="demo">
+      <div>
+        <div class="statebar">
+          <button class="sbtn on" onclick="setState('paid',this)">입금완료</button>
+          <button class="sbtn" onclick="setState('wait',this)">아직 입금 전</button>
+          <button class="sbtn" onclick="setState('fail',this)">이체 실패</button>
+        </div>
+
+        <div class="phone">
+          <div class="ph-top">
+            <div class="ic">아</div>
+            <div>
+              <div class="tt">내 정보 / 현황</div>
+              <div class="ts">김리뷰님</div>
+            </div>
+          </div>
+          <div class="ph-scroll">
+            <div class="subtabs">
+              <button class="subtab">제출대기 <span class="cnt">2</span></button>
+              <button class="subtab active">제출완료 <span class="cnt">3</span></button>
+            </div>
+
+            <div class="sumcard">
+              <div class="h">
+                <div class="t">🏆 누적 금액</div>
+                <div class="cnt">입금완료 1건</div>
+              </div>
+              <div class="sumtot"><div class="k">총 누적</div><div class="v">26,900원</div></div>
+            </div>
+
+            <div id="cards"></div>
+          </div>
+
+          <div class="ovl" id="ovl" onclick="if(event.target===this)closeSheet()">
+            <div class="sheet" id="sheet"></div>
+          </div>
+        </div>
+        <p class="note">※ 표시된 이름·계좌·금액·날짜는 모두 설명용 가짜 예시입니다.</p>
+      </div>
+
+      <div style="display:flex; flex-direction:column; gap:14px">
+        <div class="card">
+          <h3>무엇이 새로 생기나요</h3>
+          <ul>
+            <li><b>참여상품 정보 팝업 맨 위에 "입금 정보" 블록</b>이 생깁니다 — 제출완료 건에만 나타납니다</li>
+            <li><b>입금 시점</b> — 은행 이체결과 파일에 기록된 <b>실제 이체 시각</b>(우리가 업로드한 시각이 아님)</li>
+            <li><b>입금명</b> — 리뷰어 통장에 실제로 찍힌 이름(받는분 통장표시). 통장 내역과 눈으로 대조할 수 있습니다</li>
+            <li><b>입금액</b> — 그 건의 상품비 + 리뷰비 합계. 카드에 보이던 두 배지의 합과 같습니다</li>
+          </ul>
+        </div>
+        <div class="card">
+          <h3>기존 화면에서 바뀌지 않는 것</h3>
+          <ul>
+            <li>카드 모양·"입금완료" 남색 배지·누적 금액 카드는 <b>지금 그대로</b>입니다 (이미 있는 기능)</li>
+            <li>상품 정보·리뷰 가이드·카톡 입장·이미지 수정요청·1:1 문의 버튼도 그대로 — 블록만 위에 추가됩니다</li>
+            <li>제출대기(참여중) 건의 팝업은 <b>전혀 바뀌지 않습니다</b></li>
+          </ul>
+        </div>
+        <div class="callout">
+          <b>왜 맨 위인가?</b> 제출을 마친 리뷰어가 그 화면에서 가장 궁금해하는 것은 "입금됐나"입니다.
+          작업 옵션(리뷰 형태)은 <b>쓰기 전에</b> 필요한 정보라 제출대기 건에서 맨 위에 있고,
+          제출완료 건에서는 그 자리를 입금 정보가 대신합니다.
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ═══════════ 02 상태별 정리 ═══════════ -->
+  <section>
+    <div class="shead"><span class="snum">02</span><h2>상태별로 무엇을 보여주나</h2></div>
+    <div class="tblwrap"><table>
+      <tr><th>상태</th><th>언제</th><th>리뷰어에게 보이는 것</th></tr>
+      <tr>
+        <td><b>입금완료</b></td>
+        <td>이체결과 파일 업로드 → 성공으로 반영된 뒤</td>
+        <td>입금 시점 · 입금명 · 입금액(상품비+리뷰비). 카드에는 기존대로 "입금완료" 배지</td>
+      </tr>
+      <tr>
+        <td><b>아직 입금 전</b></td>
+        <td>리뷰는 제출했지만 아직 이체하지 않은 건 / 이체 후 결과 반영 전</td>
+        <td>"입금 준비 중입니다" 안내 한 줄. <b>입금 예정일은 약속하지 않습니다</b>(작업·정산 일정이 건마다 달라 어기면 문의가 늘어남)</td>
+      </tr>
+      <tr>
+        <td><b>이체 실패</b> <span class="chip" style="font-size:10.5px">확정 필요</span></td>
+        <td>은행에서 계좌 오류 등으로 실패 처리된 건</td>
+        <td>"계좌 정보를 확인해 주세요" 안내 + 내 정보 계좌 수정 유도. <b>은행이 준 실패 사유 원문은 노출하지 않습니다</b></td>
+      </tr>
+    </table></div>
+    <div class="callout warn">
+      <b>세 번째(이체 실패 노출)는 확정이 필요합니다.</b> 알려주면 리뷰어가 스스로 계좌를 고쳐 다음 회차에 성공하므로
+      "왜 입금이 안 되나요" 문의가 줄어듭니다. 다만 <b>계좌가 아니라 우리 쪽 사정</b>(예: 은행 점검, 회차 누락)으로 실패한 경우에도
+      같은 문구가 나가면 리뷰어를 헷갈리게 합니다. <b>노출함 / 노출 안 함(관리자만 보고 개별 안내)</b> 중 정해주세요.
+      기본값은 <b>노출 안 함</b>으로 두고, 정하시면 켜는 방식을 제안합니다.
+    </div>
+  </section>
+
+  <!-- ═══════════ 03 데이터 규칙 ═══════════ -->
+  <section>
+    <div class="shead"><span class="snum">03</span><h2>표시되는 값은 어디서 오나 (중요한 규칙)</h2></div>
+    <div class="card">
+      <div class="tblwrap"><table>
+        <tr><th>표시 항목</th><th>값의 출처</th><th>규칙</th></tr>
+        <tr>
+          <td><b>입금 시점</b></td>
+          <td>업로드한 은행 이체결과 파일의 이체 시각<br><span class="mono" style="font-size:11.5px">케이뱅크 "이체일시" · 하나은행 "이체처리일"</span></td>
+          <td>업로드한 날짜가 아니라 <b>은행이 기록한 시각</b>을 그대로 씁니다</td>
+        </tr>
+        <tr>
+          <td><b>입금명</b></td>
+          <td>그 회차에 <b>실제로 보낸</b> "받는분 통장표시" 값</td>
+          <td>★ 이체할 때 그 값을 <b>건별로 함께 저장</b>해 둡니다. 나중에 작업 설정의 통장표시를 바꿔도 <b>과거 입금 내역의 표기는 바뀌지 않습니다</b></td>
+        </tr>
+        <tr>
+          <td><b>입금액</b></td>
+          <td>그 회차에 실제로 보낸 이체금액</td>
+          <td>상품비+리뷰비를 매번 다시 계산하지 않고 <b>보낸 금액을 그대로</b> 보여줍니다 (금액 규칙이 바뀌어도 과거 표기 불변)</td>
+        </tr>
+      </table></div>
+      <div class="callout">
+        <b>왜 "그때 보낸 값"을 저장해 두나?</b> 리뷰비를 나중에 올렸더니 지난달 참여자의 화면 금액까지 같이 바뀌어
+        문의가 발생한 적이 있습니다(기간별 리뷰비 사고). 입금 표기도 같은 함정이 있어,
+        <b>화면에 보여줄 때 다시 계산하지 않고 이체 시점의 값을 그대로 남겨</b> 두는 방식으로 만듭니다.
+      </div>
+    </div>
+  </section>
+
+  <!-- ═══════════ 04 A안 확정 ═══════════ -->
+  <section>
+    <div class="shead"><span class="snum">04</span><h2>A안(건별 이체) 확정 — 이 화면에 미치는 영향</h2></div>
+    <div class="card">
+      <ul>
+        <li>이체는 <b>작업(참여 건)별로 한 줄씩</b> 나갑니다 → 참여상품 정보 팝업의 입금 정보도 <b>그 건 하나에 대한 값</b>이라 항상 명확합니다</li>
+        <li>통장표시가 작업별로 유지되므로(파우더망고 / 쉐이크만두) 리뷰어가 <b>통장 내역과 이 화면을 1:1로 대조</b>할 수 있습니다</li>
+        <li>같은 날 여러 건에 참여했다면 <b>통장에도 여러 줄</b>로 들어오고, 화면에서도 각 카드마다 자기 입금 정보가 보입니다</li>
+        <li>한 건이 실패해도 나머지는 정상 입금 — 카드별로 상태가 갈려 표시됩니다 (합산 방식이었다면 전부 한 덩어리로 실패)</li>
+      </ul>
+    </div>
+  </section>
+
+  <footer>
+    입금 정보 표시 — 리뷰어 화면 시안 v1.0 · 2026-08-04 · 화면 속 이름·계좌·금액·날짜는 모두 설명용 가짜 예시입니다.
+    본 문서는 <b>화면 시안</b>이며, 전체 기능 설계는 「리뷰비 입금 자동화 PRD」 문서를 참조하세요.
+  </footer>
+</div>
+
+<script>
+/* ── 목업 데이터 ── */
+var STATE = 'paid';
+
+var ITEMS = [
+  {
+    id:'a', thumb:'🧴', date:'8/1', who:'김리뷰', doneDate:'08.02',
+    name:'파우더 100건', opt:'쿨링 파우더', prod:'25,000', rev:'1,900',
+    product:'[파우더] 쿨링 세팅파우더 8g\n옵션: 쿨링 파우더 / 결제금액 25,000원'
+  },
+  {
+    id:'b', thumb:'🥤', date:'7/30', who:'김리뷰', doneDate:'07.31',
+    name:'쉐이크 50건', opt:'', prod:'21,500', rev:'1,900',
+    product:'[쉐이크] 프로틴 쉐이크 750ml\n결제금액 21,500원'
+  },
+  {
+    id:'c', thumb:'☀️', date:'7/28', who:'김리뷰', doneDate:'07.29',
+    name:'선크림 30건', opt:'', prod:'15,900', rev:'1,900',
+    product:'[선크림] 마일드 선크림 50ml\n결제금액 15,900원'
+  }
+];
+
+/* 상태별 첫 카드(파우더 100건)의 입금 상태 */
+var PAYS = {
+  paid: {
+    kind:'ok', head:'💰 입금 완료',
+    rows:[
+      ['입금 시점','2026. 8. 4 (월) 10:31'],
+      ['입금명','<span class="paybank">파우더망고</span>'],
+      ['입금액','<span class="big">26,900원</span> <span class="sub">(상품비 25,000 + 리뷰비 1,900)</span>']
+    ],
+    note:'통장 거래내역에 <b>파우더망고</b>로 표시돼요. 입금이 확인되지 않으면 아래 [1:1 문의하기]로 알려주세요.'
+  },
+  wait: {
+    kind:'wait', head:'💰 입금 준비 중',
+    rows:[
+      ['진행 상태','리뷰 제출이 확인되었어요'],
+      ['입금 예정액','<span class="big">26,900원</span> <span class="sub">(상품비 25,000 + 리뷰비 1,900)</span>']
+    ],
+    note:'입금이 완료되면 이 자리에 <b>입금 시점과 통장에 찍히는 입금명</b>이 표시돼요.'
+  },
+  fail: {
+    kind:'fail', head:'⚠️ 입금이 처리되지 않았어요',
+    rows:[
+      ['상태','계좌 정보 확인이 필요해요'],
+      ['입금 예정액','<span class="big">26,900원</span> <span class="sub">(상품비 25,000 + 리뷰비 1,900)</span>']
+    ],
+    note:'<b>내 정보 → 계좌 정보</b>에서 예금주·은행·계좌번호를 확인해 주세요. 수정하시면 다음 입금 때 다시 처리돼요.'
+  }
+};
+
+function setState(s, btn){
+  STATE = s;
+  document.querySelectorAll('.statebar .sbtn').forEach(function(b){ b.classList.remove('on'); });
+  btn.classList.add('on');
+  renderCards();
+  closeSheet();
+}
+
+function renderCards(){
+  var host = document.getElementById('cards');
+  host.innerHTML = ITEMS.map(function(it, i){
+    /* 첫 카드만 선택된 상태를 따르고, 나머지 2건은 항상 입금완료로 둔다(비교용) */
+    var paid = (i === 0) ? (STATE === 'paid') : true;
+    var optSuffix = it.opt ? ' <span style="color:#A8AEBA;font-weight:600">· 옵션:' + it.opt + '</span>' : '';
+    return '<div class="rcard' + (i===0 ? ' sel' : '') + '" onclick="openSheet(' + i + ')">' +
+      '<div class="camp-thumb"><span>' + it.thumb + '</span></div>' +
+      '<div class="rbody">' +
+        '<div class="c-meta">' + it.date + ' <span class="c-who">' + it.who + '</span> <span class="c-tail">· 제출 ' + it.doneDate + '</span></div>' +
+        '<div class="c-name">' + it.name + optSuffix + '</div>' +
+        '<div class="fee-line"><span class="fee prod">상품비 ' + it.prod + '</span><span class="fee rev">리뷰비 ' + it.rev + '</span></div>' +
+      '</div>' +
+      '<div class="rright">' +
+        '<div class="rrow"><span class="badge-submitted">제출완료</span><span class="chev">›</span></div>' +
+        (paid ? '<span class="badge-paid">입금완료</span>' : '') +
+      '</div>' +
+    '</div>';
+  }).join('');
+}
+
+function openSheet(i){
+  var it = ITEMS[i];
+  /* 첫 카드는 선택한 상태, 나머지는 입금완료 예시 */
+  var pay = (i === 0) ? PAYS[STATE] : PAYS.paid;
+  var paidChip = (pay.kind === 'ok')
+    ? '<span class="sh-chip paid">입금완료</span>' : '';
+
+  var payRows = pay.rows.map(function(r){
+    return '<div class="payrow"><span class="k">' + r[0] + '</span><span class="v">' + r[1] + '</span></div>';
+  }).join('');
+
+  var payBlk =
+    '<div class="payblk ' + pay.kind + '">' +
+      '<div class="ph">' + pay.head + '<span class="new-tag">NEW</span></div>' +
+      payRows +
+      '<div class="paynote">' + pay.note + '</div>' +
+    '</div>';
+
+  var titleOpt = it.opt ? (' 옵션:' + it.opt) : '';
+
+  document.getElementById('sheet').innerHTML =
+    '<div class="sh-head"><div class="hl">🛍 참여상품 정보</div>' +
+      '<button class="sh-x" onclick="closeSheet()">&times;</button></div>' +
+    '<div class="sh-title">' + it.date + ' ' + it.name + titleOpt +
+      '<span class="sh-chip done">제출완료</span>' + paidChip + '</div>' +
+    '<div class="sh-sub">' + it.who + '</div>' +
+
+    payBlk +
+
+    '<div class="detail">' +
+      '<div class="drow"><span class="k">상품</span><span class="v">' + it.product.replace(/\n/g,'<br>') + '</span></div>' +
+    '</div>' +
+
+    '<div class="sbtns">' +
+      '<button class="sbtn2 dark">🛒 상품 바로가기</button>' +
+      '<button class="sbtn2 kakao">💬 이 캠페인의 카톡 팀채팅방 입장</button>' +
+      '<button class="sbtn2 line">🖼 제출 이미지 확인 · 수정요청</button>' +
+      '<button class="sbtn2 cs">🎧 1:1 문의하기</button>' +
+    '</div>';
+
+  document.getElementById('ovl').classList.add('on');
+}
+function closeSheet(){ document.getElementById('ovl').classList.remove('on'); }
+
+renderCards();
+openSheet(0);
+</script>
+</body>
+</html>
