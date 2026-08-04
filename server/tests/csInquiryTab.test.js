@@ -54,8 +54,15 @@ t('★ 로직 복제 0 — 기존 cs 핸들러에 위임한다', () => {
   ['/threads', '/unread-count', '/messages', '/order-context', '/reply', '/status', '/memo']
     .forEach(p => assert.ok(new RegExp("_delegate\\(_csRoutes, '(get|post)',\\s*'" + p + "'\\)").test(src),
       '위임이 아닌 경로: ' + p));
-  // 위임 대신 SQL 을 베끼면 원본과 갈라진다
-  assert.ok(!/FROM\s+cs_threads/i.test(src), 'trackB.routes 에 CS 쿼리 사본이 있다');
+  // 위임 대신 SQL 을 베끼면 원본과 갈라진다.
+  // ★ 금지 대상은 **문의 목록·대화를 재현하는 조회**다. 다른 기능이 "이 리뷰어에게 문의가 몇 건인가"를
+  //   세는 COUNT 는 CS 로직의 사본이 아니라 교차 참조라 허용한다(등록리뷰어DB 삭제 경고 = reviewers/delete).
+  //   그래서 규칙을 "cs_threads 금지"가 아니라 **"COUNT 외의 cs_threads 조회 금지 + cs_messages 전면 금지"**로 좁힌다
+  //   — 목록·대화 사본은 여전히 한 글자도 못 들어온다.
+  assert.ok(!/FROM\s+cs_messages/i.test(src), 'trackB.routes 에 CS 대화(cs_messages) 쿼리 사본이 있다');
+  [...src.matchAll(/SELECT[\s\S]{0,300}?FROM\s+cs_threads/gi)].forEach(m =>
+    assert.ok(/^SELECT\s+COUNT\(\*\)/i.test(m[0].trim()),
+      'cs_threads 를 COUNT 외의 방식으로 조회한다(=목록/상세 사본): ' + m[0].replace(/\s+/g, ' ').slice(0, 90)));
 });
 
 /* ── 2) 프론트 — 화면 코드 한 벌 ───────────────────────────── */
