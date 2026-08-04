@@ -3007,7 +3007,7 @@ async function renderSettingsView(){
     <div class="ovnote">관리자 대시보드의 설정과 <b>같은 화면·같은 저장소</b>입니다 — 어느 쪽에서 바꿔도 결과가 같습니다.
       ${isAdmin?'':'<b style="color:var(--muted)">(AE 는 본인 닉네임만 설정합니다)</b>'}</div>`;
   if(!window.AdminSettings){ $('#adminSettingsMount').innerHTML=`<div class="empty">설정 모듈(js/admin-settings.js)을 불러오지 못했습니다.</div>`; return; }
-  AdminSettings.mount('adminSettingsMount', { panels: isAdmin ? ['nickname','business','worktable','notice'] : ['nickname'] });
+  AdminSettings.mount('adminSettingsMount', { panels: isAdmin ? ['nickname','business','aisamples','worktable','notice'] : ['nickname'] });
 }
 /** nav 뱃지 — 모듈이 계산한 미확인 수를 그대로 표시한다(집계 로직 복제 0).
     ★ #csInquiryBadge 를 읽지 않는다: 그 엘리먼트는 관리자 대시보드 탭 버튼에만 있고

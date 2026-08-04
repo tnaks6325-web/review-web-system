@@ -356,7 +356,16 @@ JSON 형식:
     // 순서가 뒤섞이면 모델이 어느 것이 판별 대상인지 헷갈린다.
     const parts = [];
     if (samples.length) {
-      parts.push('아래는 정상 리뷰 화면의 예시입니다. 이 생김새를 참고해 판별하세요.');
+      // ★ 예시의 종류에 맞는 안내문을 준다 — 현금영수증 예시를 "정상 리뷰 화면의 예시"라고
+      //   소개하면 모델이 그 화면을 review 로 몰아 판정한다(막으려던 것보다 큰 오판).
+      //   ★ 리뷰 예시만 있는 경우의 문장은 **한 글자도 바꾸지 않는다**(기존 판정 보존).
+      const _kinds = new Set(samples.map(s => s.kind || 'review'));
+      parts.push(
+        _kinds.has('receipt') && _kinds.size === 1
+          ? '아래는 정상 현금영수증 화면의 예시입니다. 이 생김새를 참고해 판별하세요.'
+          : _kinds.size > 1
+            ? '아래는 정상 화면의 예시입니다(라벨에 종류가 적혀 있습니다). 이 생김새를 참고해 판별하세요.'
+            : '아래는 정상 리뷰 화면의 예시입니다. 이 생김새를 참고해 판별하세요.');
       for (const s of samples) {
         parts.push(`[예시] ${s.label || s.key || ''}`);
         parts.push({ inlineData: { data: String(s.data).replace(/^data:image\/[a-z]+;base64,/, ''), mimeType: s.mimeType || 'image/jpeg' } });

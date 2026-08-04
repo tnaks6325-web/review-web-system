@@ -155,6 +155,39 @@ async function _fetchSample(url) {
 }
 
 /**
+ * 슬롯 목록 → few-shot 예시 배열. **리뷰 예시와 현금영수증 예시가 같은 경로를 쓴다**
+ * (사본을 두면 한쪽만 캐시·URL 검증이 달라진다).
+ * @param {Array<{key:string,label:string,settingKey:string,kind:string}>} slots
+ */
+async function _loadSampleSlots(slots) {
+  if (!SAMPLES_ENABLED || !slots || !slots.length) return [];
+  const keys = slots.map(s => s.settingKey);
+  const { rows } = await _db().query(
+    'SELECT key, value FROM app_settings WHERE key = ANY($1::text[])', [keys]
+  );
+  const urlOf = {};
+  for (const r of rows) if (r.value) urlOf[r.key] = r.value;
+
+  const out = [];
+  const now = Date.now();
+  for (const s of slots) {
+    const k = s.settingKey;
+    const url = urlOf[k];
+    if (!url) continue;
+    const hit = _sampleCache.get(k);
+    if (hit && hit.url === url && (now - hit.ts) < SAMPLE_TTL) {
+      out.push({ key: s.key, label: s.label, kind: s.kind, data: hit.data, mimeType: hit.mimeType });
+      continue;
+    }
+    const f = await _fetchSample(url);
+    if (!f) continue;
+    _sampleCache.set(k, { ...f, url, ts: now });
+    out.push({ key: s.key, label: s.label, kind: s.kind, data: f.data, mimeType: f.mimeType });
+  }
+  return out;
+}
+
+/**
  * 기대 채널에 해당하는 예시이미지들. 등록된 게 없으면 빈 배열 =
  * **오늘과 완전히 같은 동작**(예시를 안 올리면 아무것도 안 바뀐다).
  */
@@ -162,36 +195,74 @@ async function loadSamplesFor(expectedChannel) {
   if (!SAMPLES_ENABLED || !expectedChannel) return [];
   try {
     const { samplesForChannel, sampleSettingKey } = require('../utils/reviewSampleChannels');
-    const slots = samplesForChannel(expectedChannel);
-    if (!slots.length) return [];
-    const keys = slots.map(s => sampleSettingKey(s.key));
-    const { rows } = await _db().query(
-      'SELECT key, value FROM app_settings WHERE key = ANY($1::text[])', [keys]
-    );
-    const urlOf = {};
-    for (const r of rows) if (r.value) urlOf[r.key] = r.value;
-
-    const out = [];
-    const now = Date.now();
-    for (const s of slots) {
-      const k = sampleSettingKey(s.key);
-      const url = urlOf[k];
-      if (!url) continue;
-      const hit = _sampleCache.get(k);
-      if (hit && hit.url === url && (now - hit.ts) < SAMPLE_TTL) {
-        out.push({ key: s.key, label: s.label, data: hit.data, mimeType: hit.mimeType });
-        continue;
-      }
-      const f = await _fetchSample(url);
-      if (!f) continue;
-      _sampleCache.set(k, { ...f, url, ts: now });
-      out.push({ key: s.key, label: s.label, data: f.data, mimeType: f.mimeType });
-    }
-    return out;
+    const slots = samplesForChannel(expectedChannel)
+      .map(s => ({ key: s.key, label: s.label, settingKey: sampleSettingKey(s.key), kind: 'review' }));
+    return await _loadSampleSlots(slots);
   } catch (e) {
     logger.warn(`[reviewInspect] 예시이미지 준비 실패(미동봉): ${e.message}`);
     return [];
   }
+}
+
+/**
+ * 그 채널의 **현금영수증** 판별 예시(receipt 슬롯 검수용). 리뷰 예시와 같은 규율:
+ * ★ 채널을 모르면 빈 배열(미동봉), 등록 전이면 빈 배열 = 오늘과 동작 동일.
+ * ★ `key` 에 `receipt_` 접두를 붙인다 — classify 캐시 지문이 슬롯 key 로 만들어지므로
+ *   리뷰 예시(`coupang_pc`…)와 **절대 겹치면 안 된다**(겹치면 다른 예시로 판정한 결과가 히트).
+ */
+async function loadReceiptSamplesFor(expectedChannel) {
+  if (!SAMPLES_ENABLED || !expectedChannel) return [];
+  try {
+    const { CASH_RECEIPT_CHANNELS, cashReceiptSampleSettingKey } = require('../utils/cashReceiptChannels');
+    const hit = CASH_RECEIPT_CHANNELS.find(c => c.key === expectedChannel);
+    if (!hit) return [];
+    return await _loadSampleSlots([{
+      key: 'receipt_' + hit.key,
+      label: hit.label + ' 현금영수증',
+      settingKey: cashReceiptSampleSettingKey(hit.key),
+      kind: 'receipt',
+    }]);
+  } catch (e) {
+    logger.warn(`[reviewInspect] 현금영수증 예시 준비 실패(미동봉): ${e.message}`);
+    return [];
+  }
+}
+
+/** 관리자 화면용 — 현금영수증 예시 슬롯별 등록 여부(채널 표는 서버 단일 출처). */
+async function receiptSampleSettings() {
+  const { CASH_RECEIPT_CHANNELS, CASH_RECEIPT_SAMPLE_SETTING_KEYS, cashReceiptSampleSettingKey } =
+    require('../utils/cashReceiptChannels');
+  const out = CASH_RECEIPT_CHANNELS.map(c => ({
+    key: c.key, label: c.label, emoji: c.icon || '🧾', imageUrl: '',
+  }));
+  try {
+    const { rows } = await _db().query(
+      'SELECT key, value FROM app_settings WHERE key = ANY($1::text[])', [CASH_RECEIPT_SAMPLE_SETTING_KEYS]
+    );
+    const m = {};
+    for (const r of rows) m[r.key] = r.value || '';
+    for (const s of out) s.imageUrl = m[cashReceiptSampleSettingKey(s.key)] || '';
+  } catch (e) {
+    logger.warn(`[reviewInspect] 현금영수증 예시 조회 실패: ${e.message}`);
+  }
+  return out;
+}
+
+/** 현금영수증 예시 저장(''=제거). 채널 화이트리스트는 utils/cashReceiptChannels 단일 출처. */
+async function saveReceiptSample({ channel, imageUrl } = {}) {
+  const { isCashReceiptChannelKey, cashReceiptSampleSettingKey } = require('../utils/cashReceiptChannels');
+  const ch = String(channel || '');
+  // ★ 화이트리스트 — 목록에 없는 키를 받으면 임의 app_settings 키가 생성된다.
+  if (!isCashReceiptChannelKey(ch)) throw new Error('알 수 없는 채널입니다.');
+  const url = String(imageUrl ?? '').trim();
+  if (url && !/^https:\/\/\S+$/i.test(url)) throw new Error('imageUrl은 https 절대 URL이어야 합니다.');
+  await _db().query(
+    `INSERT INTO app_settings (key, value, updated_at) VALUES ($1, $2, NOW())
+     ON CONFLICT (key) DO UPDATE SET value = $2, updated_at = NOW()`,
+    [cashReceiptSampleSettingKey(ch), url]
+  );
+  _sampleCache.delete(cashReceiptSampleSettingKey(ch));   // 교체 즉시 반영
+  return url;
 }
 
 /** 관리자 화면용 — 슬롯별 등록 여부. */
@@ -875,6 +946,7 @@ module.exports = {
   precheckPolicy, expectedChannelKey, channelLabel,
   productNamesFromWorkOrder, productNameSettings, saveProductNames,
   loadSamplesFor, sampleSettings, saveSample,
+  loadReceiptSamplesFor, receiptSampleSettings, saveReceiptSample,
   findAuthorReuse, runInspectSweep, inspectionsCsv,
   listInspections, inspectionSummary, resolveInspection, inspectionScope,
   hashBase64, matchProductName, computeStatus,

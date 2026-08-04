@@ -304,6 +304,16 @@ GAS(Google Apps Script) 기반 리뷰 관리 시스템을 **Node.js Express + Po
 - ★★ **역할 미들웨어 앞에 `authMiddleware` 필수**: `adminOrMasterMiddleware`는 `authMiddleware`가 세팅한 `req.admin`을 읽으므로, 빠뜨리면 **마스터 포함 전원 403**("관리자 권한이 필요합니다")이 된다. 실제로 `company-business-no`·`cash-receipt-guide` 두 라우트가 `authMiddleware` 없이 등록돼 **아무도 현금영수증 설정을 저장할 수 없었다**(토큰이 유효해도 거부되어 "권한 설정 문제"로 오인하기 쉬움). 전 라우트 파일 스캔 + 실제 서버 기동 권한별 검증 가드 `tests/authMiddlewareChain.test.js`(8케이스). ⚠ 이 API의 errorHandler는 DB 오류를 **200 + `{error}`** 로 돌려주므로(GAS 호환) 상태코드만으로 성공을 판정하지 말 것.
 - 회귀가드 `tests/cashReceiptGuide.test.js`(20케이스).
 
+### AI 판별 예시이미지 (현금영수증 · 리뷰) — 설정탭 한 창구
+- **두 종류의 이미지를 구분한다**: ㉮ **발행방법**(`cash_receipt_guide_*`) = **리뷰어에게 보여주는 안내**(결제 전 "이렇게 발행하세요") ㉯ **판별 예시**(`cash_receipt_sample_*` · `review_inspect_sample_*`) = **AI 판정의 기준**(few-shot, **리뷰어에게 안 나간다**). 한 칸에 합치면 "리뷰어 안내를 바꿨더니 AI 판정이 흔들리는" 결합이 생긴다 — 그래서 채널 표는 하나(`utils/cashReceiptChannels.js`)로 두고 **키만 갈랐다**(채널을 늘리면 두 슬롯이 함께 따라온다).
+- **현금영수증 예시의 소비처 = `captureVerify`(영수증 슬롯)**: `review-upload` 가 슬롯에 맞는 예시를 고른다(`slot==='review'` → `loadSamplesFor` / `'receipt'` → `loadReceiptSamplesFor`). ★ **슬롯 검수와 2차 검수가 같은 배열을 쓴다**(같은 이미지에 AI 콜 2번 금지 — 기존 규율 그대로). ★ 1차 필터(precheck)는 여전히 리뷰 슬롯 전용.
+- ★★ **캐시 지문 충돌 금지** — classify 캐시 키는 예시 **슬롯 key** 로 만들어지므로 현금영수증 예시 key 에 **`receipt_` 접두**를 붙인다. 안 붙이면 `coupang`(영수증)과 리뷰 예시가 같은 지문을 만들어 **다른 예시로 낸 판정이 히트**한다.
+- ★★ **예시 종류에 맞는 안내문** — 프롬프트 앞머리의 "아래는 정상 리뷰 화면의 예시입니다"를 현금영수증 예시에 그대로 쓰면 모델이 그 화면을 `review` 로 몬다(막으려던 것보다 큰 오판). `kind` 로 문장을 가르되 **리뷰 예시만 있을 때의 문장은 한 글자도 바꾸지 않는다**(기존 판정 보존). `kind` 판정 기준 3줄도 불변.
+- **로더는 한 벌**(`_loadSampleSlots`) — 리뷰·현금영수증 예시가 같은 캐시·URL 검증을 쓴다(사본을 두면 한쪽만 TTL·https 검증이 달라진다). 채널 모르면 빈 배열(미동봉), 등록 전이면 빈 배열 = **오늘과 동작 동일**(fail-open).
+- **창구 = `/api/trackb/review-inspect/samples` 하나**(GET 내부인 / POST adminOrMaster): GET 이 `samples`(리뷰 9) + `receiptSamples`(현영 4)를 함께 반환, POST 는 `kind:'receipt'` 면 채널 저장. ★ **kind 미지정 = 리뷰**라 통합작업대 리뷰검수 탭의 [🖼 판별 예시] 모달은 동작 불변(같은 저장소라 어디서 올려도 결과가 같다).
+- **화면 = 설정탭 `aisamples` 패널**(`js/admin-settings.js` 공유 모듈 — 관리자 대시보드·통합 작업대 한 벌, 관리자 전용). ★ **슬롯 목록의 프론트 사본을 만들지 않는다** — 서버 응답을 그대로 그리므로 채널을 늘려도 한 칸이 조용히 빠지지 않는다(현영 안내가 2슬롯에 머물렀던 실측 사고의 교훈). ★ 경로는 재기준(`ADMIN_SETTINGS_API`)하지 않는다 — 이 경로가 양쪽 호스트에서 닿는다(작업표 표준열과 같은 판단). 업로드는 guide-image Drive+프록시 재사용(신규 저장소 0).
+- 회귀가드 `tests/aiSampleImages.test.js`(40케이스 — 스텁 pool 로 서비스 실행 + 라우터 스택 실검사 + 배선 + 사본 부재) + **실제 http 오리진 브라우저 실행검증**(테마 없는 호스트 렌더·기존 등록분 프리필·업로드/제거 페이로드). 직원 안내서 = `frontend/docs/현금영수증_발행방법_이미지_등록_안내.html` 의 "AI 판별 예시이미지와 헷갈리지 마세요" 절.
+
 ### 현금영수증 2·3단계 — 이중 슬롯 + AI 검수
 - **2단계(이중 슬롯)**: 신규 컬럼 없음 — migration 034의 **기존 캡처 슬롯 인프라를 재사용**한다(034 주석이 이미 "리뷰 1건 + 현금영수증 1건"을 예시로 설계). 달라진 건 **현영 탭은 `capture_slots` 수동 설정 없이도 자동 2슬롯**이 된다는 것.
 - ★★ **슬롯 판정의 단일 출처 = `utils/captureSlots.js`**(`effectiveCaptureSlots`/`requiredSlotKeys`/`slotLabel`/`isCashReceiptIncome`). 규칙: `capture_slots` 설정 있으면 그대로(관리자 명시가 최우선) → 없고 `income_type`에 '현영' 있으면 리뷰+현금영수증 2슬롯 → 그 외 단일 `review`(기존 동작). **소비처 4곳이 전부 이 함수만 쓴다** — ① `search.service`(리뷰어가 그릴 슬롯) ② `submit.routes`(완료 판정 = 필요 슬롯 ⊆ 제출 슬롯) ③ `diag.routes` review-upload(슬롯 서브폴더 라벨) ④ `reviewEdit.routes`(교체요청 라벨 2곳). **하나만 어긋나도 "슬롯 2개인데 1장에 완료" 또는 파일이 다른 폴더로 흩어진다** → 각 쿼리가 `income_type`을 함께 읽어야 함(빠뜨리면 현영 자동 슬롯을 못 봄).
