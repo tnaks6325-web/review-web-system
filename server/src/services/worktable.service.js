@@ -13,7 +13,10 @@
 
 const getPool = () => require('../db/pool');
 const { classifyHeaders, inferChannelFromHeaders, ROLE_META, roleOrder } = require('../utils/worktableTemplate');
-const logger = require('../utils/logger');
+// ★ 구조분해 필수 — 이 모듈은 `{ logger }` 를 내보낸다. 통째로 받으면 `logger.warn` 이
+//   undefined 라 fail-soft catch 안에서 TypeError 가 나고, 빈 리포트 대신 500 이 나간다
+//   (방어하려던 지점이 오히려 터지는 자리라 더 나쁘다).
+const { logger } = require('../utils/logger');
 
 /** 고정(코어) 판정 문턱 — 이 비율 이상의 탭에 등장하면 "거의 모든 작업에 공통". */
 const CORE_RATIO = 0.8;
@@ -36,7 +39,8 @@ async function headerStats({ limit = 500 } = {}) {
   const empty = {
     tabsAnalyzed: 0, tabsWithoutHeaders: 0,
     channels: { coupang: 0, naver: 0, both: 0, unknown: 0 },
-    roles: [], unmapped: [], suggestedTemplate: { core: [], channel: {}, work: [] },
+    roles: [], unmapped: [], statusConflicts: [],
+    suggestedTemplate: { core: [], channel: {}, work: [] },
     thresholds: { core: CORE_RATIO, rare: RARE_RATIO },
   };
   let rows;
@@ -82,6 +86,8 @@ async function headerStats({ limit = 500 } = {}) {
   const byRole = new Map();
   // 미분류 헤더 → { tabs:count, sample:원본 표기 }
   const byUnmapped = new Map();
+  // ★ 상태 칸(리뷰제출·입금)인데 매퍼도 그 열에 쓰는 탭 — 컬럼 disjoint 위반 신호(조용히 삼키지 않는다).
+  const byConflict = new Map();
   let analyzed = 0;
   let noHeaders = 0;
 
@@ -106,6 +112,13 @@ async function headerStats({ limit = 500 } = {}) {
     const seenRoles = new Set();
     for (const c of cls) {
       if (!c.header) continue;
+      if (c.conflict) {
+        const ck = `${c.header.toLowerCase()}\t${c.role}\t${c.conflict}`;
+        if (!byConflict.has(ck)) {
+          byConflict.set(ck, { header: c.header, role: c.role, mapperRole: c.conflict, tabs: new Set() });
+        }
+        byConflict.get(ck).tabs.add(`${r.tabName}`);
+      }
       if (c.role) {
         if (!byRole.has(c.role)) byRole.set(c.role, { tabs: new Set(), variants: new Map() });
         const e = byRole.get(c.role);
@@ -158,12 +171,25 @@ async function headerStats({ limit = 500 } = {}) {
     work: roles.filter(r => r.layer === 'work').map(r => ({ role: r.role, label: r.label, layer: r.layer })),
   };
 
+  const statusConflicts = [...byConflict.values()]
+    .map(c => ({
+      header: c.header,
+      role: c.role,
+      roleLabel: (ROLE_META[c.role] || {}).label || c.role,
+      mapperRole: c.mapperRole,
+      mapperLabel: (ROLE_META[c.mapperRole] || {}).label || c.mapperRole,
+      tabCount: c.tabs.size,
+    }))
+    .sort((a, b) => b.tabCount - a.tabCount)
+    .slice(0, 20);
+
   return {
     tabsAnalyzed: analyzed,
     tabsWithoutHeaders: noHeaders,
     channels,
     roles,
     unmapped,
+    statusConflicts,
     suggestedTemplate,
     thresholds: { core: CORE_RATIO, rare: RARE_RATIO },
   };

@@ -167,7 +167,10 @@ async function _insertWorkOrder(b, createdBy) {
       b.review_guide || '',
       b.special_notes || '',
       b.product_url || '',
-      String(b.work_sheet_url).trim(),
+      // ★ 선택 항목이라 **생략될 수 있다** — `|| ''` 폴백이 없으면 String(undefined)='undefined' 가
+      //   그대로 저장되어 ① 목록에 시트가 붙은 것처럼 보이고 ② 접수는 "유효한 URL이 아닙니다"로
+      //   막혀 시트 미첨부 안내 흐름을 타지 못한다(필수 해제와 함께 반드시 필요).
+      String(b.work_sheet_url || '').trim(),
       b.goods_cost_type || '',
       b.manager_name || '',
       pickWorkManager(b),   // 작업담당(박세희/박은비/랜덤) — 표준키 work_manager + 별칭·본문 폴백
