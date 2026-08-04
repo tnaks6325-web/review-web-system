@@ -340,6 +340,34 @@ ok('리포트는 펼칠 때 1회만 로드(설정 열 때마다 무거운 집계
 ok('편집 중 저장 안 함 경고가 뜬다(조용한 유실 방지)',
   /저장하지 않은 변경이 있습니다/.test(setJs));
 
+/* ── 열 구성 한 줄 미리보기(공통 블록 바로 아래) ────────────────
+   이름 블록만으로는 "작업표가 실제로 어떤 표가 되는지"가 안 그려져 표 머리 축소판을 깐다.
+   고정할 것은 모양이 아니라 ① 자리(공통 아래·채널 위) ② 편집 즉시 따라 갱신
+   ③ 데이터 사본 없음 ④ **한 줄** 유지(줄바꿈·가로 스크롤 금지) 넷이다. */
+ok('★ 미리보기는 공통 블록 바로 아래 — 채널 행보다 먼저 온다(순서가 곧 실제 표의 앞부분)',
+  (() => {
+    const i = setJs.indexOf("_wtRowHtml('core'");
+    const p = setJs.indexOf('id="wtPreview"');
+    const c = setJs.indexOf('CR_GUIDE_CHANNELS.map(function (c) {', i);
+    return i > -1 && p > i && c > p;
+  })());
+ok('★ 편집할 때마다 따라 갱신 — _wtRenderCols 가 미리보기를 부른다(로더에만 두면 옛 순서가 남는다)',
+  /function _wtRenderCols\(\)[\s\S]{0,400}_wtRenderPreview\(\)/.test(setJs));
+ok('★★ 데이터 사본 없음 — 미리보기도 아래 목록과 같은 _wtTpl.columns 를 본다',
+  /function _wtRenderPreview[\s\S]{0,600}_wtTpl && _wtTpl\.columns/.test(setJs));
+ok('★★ 한 줄 유지 — 줄바꿈·가로 스크롤 없이 칸만 줄인다(넘치면 말줄임 + title 에 전체 이름)',
+  (() => {
+    const row = /'\.as-wtpvrow\{([^']*)\}'/.exec(setJs);
+    const cell = setJs.slice(setJs.indexOf("'.as-wtpvc{"), setJs.indexOf("'.as-wtpvc:last-child"));
+    return !!row && !/flex-wrap/.test(row[1]) && !/overflow-x\s*:\s*auto|scroll/.test(row[1])
+      && /white-space:nowrap/.test(cell) && /text-overflow:ellipsis/.test(cell)
+      && /min-width:0/.test(cell)
+      && /flex:0 1 auto/.test(cell)              // 균등(1 1 0)이면 짧은 이름까지 잘린다(실측)
+      && /title="/.test(setJs.slice(setJs.indexOf('function _wtRenderPreview'), setJs.indexOf('function _wtRenderCols')));
+  })());
+ok('★ 채널 열은 특정 채널을 그리지 않고 자리만 알린다(틀린 채널을 그리느니 자리 표시)',
+  /as-wtpvc add[\s\S]{0,120}＋채널/.test(setJs));
+
 console.log(`\n✅ worktableTemplate: ${n}개 통과`);
 // orderLedger.service 를 require 하면 DB 풀 핸들이 열려 프로세스가 안 끝난다(레포 관용구).
 process.exit(0);
