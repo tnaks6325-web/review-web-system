@@ -226,12 +226,45 @@ t('★★ API 베이스는 bare 식별자 — window.API_BASE_URL 은 존재하�
   assert.ok(!/window\.API_BASE_URL/.test(cardCode), '코드에서 window.API_BASE_URL 을 읽고 있다');
   assert.ok(/typeof API_BASE_URL !== 'undefined' && API_BASE_URL/.test(CSJ), 'cs-inquiry 의 _reCall 도 동일');
 });
-t('★ 전용 탭은 관리자·AE 양쪽 nav 에 / C/S 문의 탭은 관리자만', () => {
+/* ★★ 교체요청은 전용 탭에서 **C/S 문의 화면 위의 대기 큐 띠**로 옮겼다(시안 C).
+   그래서 nav 는 양쪽 다 'cs' 하나뿐이고, **AE 에게 무엇을 안 그리는지**가 보안 경계가 된다.
+   시안 문서 = frontend/docs/design-cs-review-edit-merge.html */
+t('★ C/S 메뉴는 관리자·AE 양쪽 / 옛 전용 탭 버튼은 없다', () => {
   const adminNav = WD.slice(WD.indexOf('${isAdmin?`<nav'), WD.indexOf(':isStaff?`<nav'));
   const staffNav = WD.slice(WD.indexOf(':isStaff?`<nav'), WD.indexOf("</nav>`:''}"));
-  assert.ok(/data-v="reedit"/.test(adminNav) && /data-v="reedit"/.test(staffNav));
-  assert.ok(/data-v="cs"/.test(adminNav) && !/data-v="cs"/.test(staffNav),
-    'C/S 문의 탭이 AE 에게 열렸다 — 문의 본문에는 리뷰어 PII 가 그대로 실린다');
+  assert.ok(/data-v="cs"/.test(adminNav) && /data-v="cs"/.test(staffNav),
+    '교체요청을 C/S 안에 넣었으면 AE 에게도 그 메뉴가 보여야 한다(안 그러면 AE 가 처리 못 함)');
+  assert.ok(!/data-v="reedit"/.test(adminNav) && !/data-v="reedit"/.test(staffNav),
+    '옛 전용 탭 버튼이 남아 있다 — 같은 화면으로 가는 문이 둘이 되면 다시 갈라진다');
+  // ★ 뱃지는 **한 숫자**(문의 미확인 + 교체요청 대기 합계, 사용자 확정) — span 도 하나뿐이어야 한다
+  assert.ok(/id="csNavBadge"/.test(adminNav) && /id="csNavBadge"/.test(staffNav), '건수 뱃지가 없다');
+  assert.ok(!/reNavBadge/.test(WD), '뱃지 span 이 둘로 갈라졌다 — 합계 하나로 보여주기로 확정했다');
+  assert.ok(/const _NAVCS = \{ cs:null, re:null \}/.test(WD) && /_NAVCS\.cs\|\|0\)\+\(_NAVCS\.re\|\|0\)/.test(WD),
+    '★ 두 값을 각각 기억해 합치지 않으면, 한쪽만 도착할 때 다른 쪽이 0으로 접혀 숫자가 들쭉날쭉해진다');
+  assert.ok(/if\(_NAVCS\.cs===null && _NAVCS\.re===null\) return/.test(WD),
+    '아직 아무 값도 못 받았는데 뱃지를 지운다 — 조회 실패가 "손볼 것 없음"으로 오독된다');
+  assert.ok(/if\(v==='reedit'\)\{ v='cs'/.test(WD), "옛 'reedit' 뷰 이름이 빈 화면으로 떨어진다");
+});
+t('★ 대기 큐 — 세 모드 + 공용 카드 렌더러 + 문의 화면 높이 보정', () => {
+  assert.ok(/const _RE_MODES = \{ rail:1, full:1, collapsed:1 \}/.test(WD), '큐 모드 정의가 없다');
+  assert.ok(/function _reRailHtml/.test(WD) && /function _reFullHtml/.test(WD));
+  // full 모드는 옛 전용 탭 화면 그대로 — 이미지 대조 폭이 필요한 작업이라 격자를 유지한다
+  const full = WD.slice(WD.indexOf('function _reFullHtml'), WD.indexOf('function _reSyncNavBadge'));
+  assert.ok(/class="recards"/.test(full) && /CsReviewEditCard\.html\(_reMeta\(r\)/.test(full),
+    'full 모드가 공용 카드 격자를 안 쓴다(사본 드리프트)');
+  // rail 에서도 승인·반려는 **대화창과 같은 핸들러**여야 한다
+  const rail = WD.slice(WD.indexOf('function _reRailHtml'), WD.indexOf('function _reFullHtml'));
+  assert.ok(/csApproveReviewEdit\(/.test(rail) && /csRejectReviewEdit\(/.test(rail));
+  assert.ok(/CsReviewEditCard\.zoomPair\(/.test(rail), 'rail 썸네일이 기존↔변경 대조로 안 열린다');
+  // ★ 띠가 먹은 높이만큼 아래 문의 화면을 줄인다 — 안 하면 답장 입력칸이 화면 밖으로 밀린다
+  assert.ok(/function _reFitCsHeight/.test(WD) && /calc\(100vh - 250px - \$\{h\}px\)/.test(WD));
+  // ★ 공유 모듈(cs-inquiry.js)은 이 통합으로 바뀌지 않는다 — 관리자 대시보드엔 이 띠가 없다
+  assert.ok(!/reQueueMount|requeue|_reFitCsHeight/.test(CSJ),
+    '공유 문의창구 모듈이 통합 작업대 전용 띠를 알고 있다(관리자 대시보드까지 같이 바뀐다)');
+});
+t('★ 처리 후 갱신은 뷰 이름이 아니라 **띠의 존재**로 판정', () => {
+  assert.ok(/CS_REVIEW_EDIT_ON_RESOLVED = function\(\)\{ try\{ if\(document\.getElementById\('reQueueMount'\)\)/.test(WD),
+    "뷰 이름으로 판정하면 'reedit'→'cs' 같은 이름 변경 때 갱신이 조용히 멈춘다");
 });
 t('경로 재기준 — 통합 작업대만 Track B', () => {
   assert.ok(/window\.REVIEW_EDIT_API_BASE = '\/api\/trackb\/review-edit'/.test(WD));
@@ -304,6 +337,102 @@ t('★★ 잘못된 id 로 승인/반려해도 **응답이 온다**(Express4 han
     { requestId: 'r2', status: 'pending', oldFileId: OLD + '", alert(1), "', newFileId: NEW }, { admin: true });
   assert.ok(!/alert\(1\)/.test(evil), '★ 파일ID 를 통한 onclick 문자열 탈출이 가능하다');
   pass += 1; console.log('  ✓ ★ 이미지 클릭 → 기존·변경 동시 보기(단일 위임 없음 · onclick 탈출 차단)');
+
+  /* ★★ 두 장이 **같은 순간에** 떠야 한다(실측 신고): 클릭한 쪽은 카드 썸네일로 캐시돼 즉시 뜨고
+     '기존'은 그 자리에서 처음 받으므로, 감췄다 한꺼번에 드러내지 않으면 한 장이 뒤늦게 끼어든다.
+     ★ 정적 grep 으로는 "먼저 뜨는 것"을 못 잡는다 → 가짜 img 로 **load 를 한 쪽만 발생**시켜
+       그때까지 아무것도 안 보이는지 확인한다. */
+  {
+    const flush = () => new Promise(r => setImmediate(r));
+    const mkImg = () => ({
+      style: { opacity: '0' }, complete: false, naturalWidth: 0, _h: {},
+      addEventListener(t, f) { (this._h[t] = this._h[t] || []).push(f); },
+      decode() { return Promise.resolve(); },
+      fire(t) { this.complete = true; this.naturalWidth = 10; (this._h[t] || []).forEach(f => f()); },
+    });
+    const mkOv = (imgs) => {
+      const wait = { style: {} };
+      return {
+        _wait: wait, style: {}, innerHTML: '', addEventListener() {},
+        querySelectorAll: (s) => (String(s).indexOf('img') >= 0 ? imgs : []),
+        querySelector: (s) => (s === '#csReCardZoomWait' ? wait : null),
+      };
+    };
+    const runPair = async (drive) => {
+      const imgs = [mkImg(), mkImg()];
+      const ov = mkOv(imgs);
+      const c = {
+        window: {}, API_BASE_URL: 'https://api.example.com',
+        setTimeout, clearTimeout, Promise,
+        document: { getElementById: () => ov, createElement: () => ov, body: { appendChild() {} }, addEventListener() {} },
+      };
+      c.window = c; vm.createContext(c); vm.runInContext(CARD, c);
+      c.window.CsReviewEditCard.zoomPair(OLD, NEW, 'new');
+      await drive(imgs, ov);
+      return { imgs, ov };
+    };
+
+    // ① 한 장만 준비돼도 **아직 아무것도 안 보인다**
+    const one = await runPair(async (imgs) => { imgs[1].fire('load'); await flush(); await flush(); });
+    assert.strictEqual(one.imgs[0].style.opacity, '0', '★★ 느린 쪽이 아직인데 화면에 드러났다');
+    assert.strictEqual(one.imgs[1].style.opacity, '0',
+      '★★ 빠른 쪽이 먼저 떴다 — 두 장이 어긋나 떠서 대조 시작 시점이 달라진다(신고된 증상)');
+    assert.ok(one.ov._wait.style.display !== 'none', '기다리는 동안 안내가 사라졌다');
+
+    // ② 둘 다 준비되면 **동시에** 드러난다
+    const both = await runPair(async (imgs) => {
+      imgs[1].fire('load'); await flush();
+      imgs[0].fire('load'); await flush(); await flush(); await flush();
+    });
+    assert.strictEqual(both.imgs[0].style.opacity, '1', '둘 다 준비됐는데 안 뜬다');
+    assert.strictEqual(both.imgs[1].style.opacity, '1', '둘 다 준비됐는데 안 뜬다');
+    assert.strictEqual(both.ov._wait.style.display, 'none', '"불러오는 중" 안내가 안 사라진다');
+
+    // ③ 한 장이 **실패**해도 나머지는 뜬다(fail-open — 검은 화면으로 남으면 안 된다)
+    const err = await runPair(async (imgs) => {
+      imgs[0].fire('error'); imgs[1].fire('load'); await flush(); await flush(); await flush();
+    });
+    assert.strictEqual(err.imgs[1].style.opacity, '1', '★ 한 장이 깨졌다고 나머지까지 영영 안 뜬다');
+
+    // ④ 마크업이 감춘 상태로 시작하고, 최대 대기 후엔 무조건 보여준다
+    assert.ok(/opacity:0;transition:opacity/.test(CARD), '감춘 상태로 시작하지 않는다');
+    assert.ok(/setTimeout\(show, _PAIR_WAIT_MS\)/.test(CARD), '네트워크가 막히면 화면이 영영 검은 채로 남는다');
+    pass += 1; console.log('  ✓ ★★ 확대 보기 — 두 장이 준비될 때까지 감췄다 **동시에** 표시(실패·지연은 fail-open)');
+  }
+
+  /* ★★ AE 화면에는 문의창구를 **마운트조차 하지 않는다**
+     교체요청이 C/S 문의 안으로 들어가면서 그 메뉴가 AE 에게도 열렸다. 보안 경계는 이제
+     "메뉴가 보이나"가 아니라 **"AE 화면에 문의 본문을 그리나"** 다.
+     ★ grep 으로 "isAdmin 분기가 있다"만 보면 스코프·실행경로를 못 본다(레포에서 이미 밟은 맹점)
+       → renderCsView 를 꺼내 **역할별로 실제 호출**하고 mount/목록조회 횟수를 센다. */
+  {
+    const src = WD.slice(WD.indexOf('async function renderCsView()'));
+    const body = src.slice(0, src.indexOf('\n}\n') + 3);
+    const run = async (role) => {
+      const calls = { mount: 0, rooms: 0, queue: 0, load: 0 };
+      const els = {};
+      const el = (id) => (els[id] = els[id] || { innerHTML: '', classList: { add() {} } });
+      const win = { CsInquiry: { mount: () => { calls.mount++; } } };
+      const fn = new Function('STATE', '$', 'document', 'window', 'CsInquiry', 'loadCsRooms',
+        '_reRenderQueue', '_loadReedit', body + '\nreturn renderCsView();');
+      await fn({ role }, (sel) => el(String(sel).replace('#', '')),
+        { getElementById: (id) => (id === 'tab-cs-inquiry' ? null : el(id)) },
+        win, win.CsInquiry,
+        async () => { calls.rooms++; }, () => { calls.queue++; }, async () => { calls.load++; });
+      return { calls, els };
+    };
+    const s = await run('staff'), a = await run('admin');
+    assert.strictEqual(s.calls.mount, 0, '★★ AE 화면에 문의창구가 마운트됐다 — 리뷰어 실명·연락처·주소가 그려진다');
+    assert.strictEqual(s.calls.rooms, 0, '★★ AE 인데 문의 목록을 조회한다(서버 403 이어도 그리려는 시도 자체가 회귀)');
+    assert.ok(/관리자만 열람/.test(s.els.csTopNote.innerHTML), 'AE 에게 "왜 문의가 없는지" 안내가 없다(고장으로 오해)');
+    assert.strictEqual(a.calls.mount, 1, '관리자 화면에 문의창구가 안 뜬다');
+    assert.strictEqual(a.calls.rooms, 1, '관리자 문의 목록을 안 읽는다');
+    assert.ok(!(a.els.csTopNote && a.els.csTopNote.innerHTML), '관리자 화면에 AE 안내가 뜬다');
+    // 교체요청 큐는 **양쪽 다** — AE 가 이 화면에서 하는 일이 그것뿐이다
+    assert.ok(s.calls.queue >= 1 && s.calls.load === 1 && a.calls.queue >= 1 && a.calls.load === 1,
+      '역할에 따라 교체요청 큐가 안 뜬다');
+    pass += 1; console.log('  ✓ ★★ 역할별 renderCsView 실행 — AE 는 문의 미마운트·미조회 / 교체요청 큐는 양쪽');
+  }
 
   console.log(`\n✅ ${pass} checks passed\n`);
   process.exit(0);

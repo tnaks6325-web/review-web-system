@@ -141,18 +141,32 @@ t('통합 작업대만 Track B 네임스페이스를 가리킨다', () => {
 
 /* ── 4) 통합 작업대 배선 ────────────────────────────────────── */
 console.log('\n4) 통합 작업대 배선');
-t('★ 상단탭 버튼은 관리자 nav 에만 — AE nav 에는 없다', () => {
+/* ★★ 이미지 교체요청이 이 탭 안으로 들어오면서(시안 C = 문의 화면 위의 대기 큐 띠)
+   AE 에게도 **메뉴는** 열렸다 — AE 가 그 화면에서 하는 일이 교체요청 처리다.
+   보안 경계는 "메뉴가 보이나"가 아니라 **"AE 화면에 문의 본문을 그리나"** 로 옮겼고,
+   그 실행 검증은 reviewEditCsBridge.test.js §8(역할별 renderCsView 실행)에 있다. */
+t('★ 상단탭 버튼 — 관리자·AE 양쪽 / AE 는 문의창구를 마운트하지 않는다', () => {
   const adminNav = WD.slice(WD.indexOf('${isAdmin?`<nav'), WD.indexOf(':isStaff?`<nav'));
-  const staffNav = WD.slice(WD.indexOf(':isStaff?`<nav'), WD.indexOf(':\'\'}'));
+  // ★ 끝 표지는 `</nav>`:''}` — 그냥 `:''}` 로 찾으면 파일 앞쪽의 다른 삼항이 먼저 걸려 빈 슬라이스가 된다
+  const staffNav = WD.slice(WD.indexOf(':isStaff?`<nav'), WD.indexOf('</nav>`:\'\'}'));
   assert.ok(/data-v="cs"/.test(adminNav), '관리자 nav 에 버튼이 없다');
-  assert.ok(!/data-v="cs"/.test(staffNav), 'AE nav 에 버튼이 있으면 눌러도 403 인 막다른 길');
+  assert.ok(/data-v="cs"/.test(staffNav), 'AE nav 에 버튼이 없다 — AE 가 이미지 교체요청을 처리할 문이 사라진다');
+  // 문의창구 마운트·목록조회는 **관리자 분기 안**에서만 일어난다(AE 는 그리려는 시도조차 안 함)
+  const view = WD.slice(WD.indexOf('async function renderCsView()'));
+  const body = view.slice(0, view.indexOf('\n}\n'));
+  const gate = body.indexOf('if(isAdmin){'), mount = body.indexOf('CsInquiry.mount('), other = body.indexOf('}else{');
+  assert.ok(gate > -1 && mount > gate && other > mount,
+    '★★ 문의창구 마운트가 isAdmin 분기 밖으로 나왔다 — AE 화면에 리뷰어 실명·연락처·주소가 그려진다');
+  assert.ok(body.indexOf('loadCsRooms()') > gate && body.indexOf('loadCsRooms()') < other,
+    '★★ AE 도 문의 목록을 조회한다');
 });
 t('switchView 가 CS 뷰를 그린다', () => {
   assert.ok(/else if\(v==='cs'\) renderCsView\(\)/.test(WD));
   assert.ok(/async function renderCsView\(\)/.test(WD));
 });
 t('탭 안(#viewroot)에 그린다 — 팝업·새 창 아님', () => {
-  assert.ok(/\$\('#viewroot'\)\.innerHTML=`<div class="ovwrap"><div id="csInquiryMount"><\/div><\/div>`/.test(WD));
+  // 위 = 교체요청 대기 큐(시안 C) / 아래 = 문의창구. 순서가 바뀌면 띠가 문의 화면에 묻힌다.
+  assert.ok(/\$\('#viewroot'\)\.innerHTML=`<div class="ovwrap"><div id="csTopNote"><\/div><div id="reQueueMount"><\/div><div id="csInquiryMount"><\/div><\/div>`/.test(WD));
   // 모듈 마크업은 .admin-tab-pane(기본 display:none) — active 를 줘야 보인다
   assert.ok(/getElementById\('tab-cs-inquiry'\); if\(pane\) pane\.classList\.add\('active'\)/.test(WD));
 });

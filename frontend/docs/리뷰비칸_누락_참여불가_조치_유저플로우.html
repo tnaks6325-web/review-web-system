@@ -1,0 +1,473 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>리뷰비 칸 누락으로 "참여하기"가 안 되는 문제 — 조치 유저플로우</title>
+<style>
+  :root{
+    color-scheme: light;   /* ★ 화면 재현 목업이라 다크에서 색이 뒤집히면 "실물과 같다"가 깨진다 */
+    --blue:#3182f6; --blue-d:#1b64da; --blue-soft:#EBF3FE; --blue-line:#cce0fb;
+    --paper:#F4F5F8; --card:#fff; --ink:#191F28; --muted:#6B7280; --faint:#8B95A1;
+    --line:#EFEFF3; --fill:#F1F2F6;
+    --red:#E5484D; --red-soft:#FEF2F2; --red-line:#FEE2E2; --red-d:#991B1B;
+    --amber:#B45309; --amber-soft:#FFFBEB; --amber-line:#FDE68A;
+    --green:#15803D; --green-soft:#F0FDF4; --green-line:#BBF7D0;
+    --violet:#6d5ac9; --violet-soft:#efecfa; --violet-line:#ded7f7;
+    --sans:'Pretendard',-apple-system,BlinkMacSystemFont,'Segoe UI','Noto Sans KR','Apple SD Gothic Neo',sans-serif;
+    --mono:'SF Mono','JetBrains Mono',ui-monospace,monospace;
+  }
+  *{box-sizing:border-box}
+  body{margin:0;background:#E8EAF0;color:var(--ink);font-family:var(--sans);font-size:14px;line-height:1.62;
+       -webkit-font-smoothing:antialiased;letter-spacing:-.01em;padding:28px 18px 90px}
+  .wrap{max-width:1240px;margin:0 auto}
+  h1{font-size:22px;margin:0 0 6px;letter-spacing:-.02em}
+  h2{font-size:16px;margin:36px 0 12px;letter-spacing:-.02em;display:flex;align-items:center;gap:8px}
+  h2 .n{width:22px;height:22px;border-radius:6px;background:var(--ink);color:#fff;font-size:12px;font-weight:800;
+        display:flex;align-items:center;justify-content:center;flex:none}
+  .lead{color:#4B5563;font-size:13.5px;margin:0 0 4px}
+  .lead b{color:var(--ink)}
+  .meta{color:var(--faint);font-size:12px;margin:0 0 18px}
+
+  .now{background:var(--red-soft);border:1px solid var(--red-line);border-radius:12px;
+       padding:14px 16px;margin:16px 0 6px;font-size:13px;color:#7F1D1D}
+  .now b{color:var(--red-d)}
+  .ok-box{background:var(--green-soft);border:1px solid var(--green-line);border-radius:12px;
+          padding:14px 16px;font-size:13px;color:#14532D;margin:16px 0 6px}
+  .ok-box b{color:var(--green)}
+
+  .cards{display:grid;grid-template-columns:repeat(auto-fit,minmax(280px,1fr));gap:14px}
+  .card{background:var(--card);border:1px solid var(--line);border-radius:14px;padding:15px 16px;
+        box-shadow:0 1px 2px rgba(17,24,40,.04)}
+  .card h3{font-size:13.5px;margin:0 0 8px;display:flex;align-items:center;gap:7px}
+  .card p{margin:0 0 8px;font-size:12.8px;color:#4B5563}
+  .card p:last-child{margin-bottom:0}
+
+  /* ── 화면 목업(휴대폰/데스크톱) ── */
+  .screens{display:flex;gap:20px;flex-wrap:wrap;align-items:flex-start}
+  .phone{width:290px;flex:none;background:#fff;border-radius:20px;border:1px solid #D8DCE5;overflow:hidden;
+         box-shadow:0 2px 4px rgba(17,24,40,.05),0 14px 34px rgba(17,24,40,.13)}
+  .phhd{background:var(--blue);color:#fff;padding:11px 12px;display:flex;align-items:center;gap:8px;font-size:12px;font-weight:700}
+  .phhd .bk{width:22px;height:22px;border-radius:7px;background:rgba(255,255,255,.24);display:flex;align-items:center;
+            justify-content:center;font-size:12px;flex:none}
+  .phbd{background:var(--paper);padding:11px;min-height:300px}
+  .thumb{height:120px;border-radius:11px;background:linear-gradient(135deg,#6d4b8f,#3c2a52);position:relative;
+         display:flex;align-items:center;justify-content:center;color:#EADCF7;font-size:11px;font-weight:700}
+  .pcard{background:#fff;border:1px solid var(--line);border-radius:12px;padding:11px 12px;margin-top:9px}
+  .ptitle{font-size:12.5px;font-weight:700;line-height:1.45}
+  .pmeta{display:flex;gap:6px;align-items:center;margin-top:7px;font-size:10.5px;color:var(--muted);flex-wrap:wrap}
+  .gauge{height:6px;border-radius:99px;background:#E5E8EF;margin-top:9px;overflow:hidden}
+  .gauge i{display:block;height:100%;width:75%;background:var(--blue)}
+  .joinbtn{margin-top:10px;background:var(--blue);color:#fff;border-radius:11px;text-align:center;padding:12px;
+           font-size:13px;font-weight:750}
+  .errbar{margin-top:8px;background:#111827;color:#fff;border-radius:10px;padding:11px 12px;font-size:10.5px;
+          font-family:var(--mono);line-height:1.5;word-break:break-all}
+  .capt{font-size:11.5px;color:var(--muted);text-align:center;margin-top:9px;width:290px}
+  .capt b{color:var(--ink)}
+
+  /* ── 유저플로우 레일 ── */
+  /* ★ 5단계가 화면 밖으로 밀려 마지막 단계(확인)를 못 보는 일이 없도록 줄바꿈시킨다
+        (가로 스크롤로 두면 "다음 칸이 더 있다"는 것을 인쇄본·캡처에서 알 수 없다) */
+  .flow{display:flex;gap:16px;align-items:stretch;flex-wrap:wrap;padding:6px 2px 22px}
+  .step{flex:none;width:275px;display:flex;flex-direction:column}
+  .stephd{display:flex;align-items:center;gap:8px;margin-bottom:7px}
+  .stepno{width:23px;height:23px;border-radius:50%;background:var(--ink);color:#fff;font-size:11.5px;font-weight:800;
+          display:flex;align-items:center;justify-content:center;flex:none}
+  .stepttl{font-size:13.5px;font-weight:750}
+  .who{font-size:10.5px;font-weight:800;border-radius:5px;padding:2px 7px;white-space:nowrap}
+  .who.dev{background:var(--violet-soft);color:var(--violet);border:1px solid var(--violet-line)}
+  .who.auto{background:var(--blue-soft);color:var(--blue-d);border:1px solid var(--blue-line)}
+  .who.you{background:var(--amber-soft);color:var(--amber);border:1px solid var(--amber-line)}
+  .stepbd{background:#fff;border:1px solid var(--line);border-radius:13px;padding:12px 13px;flex:1;
+          box-shadow:0 1px 2px rgba(17,24,40,.04)}
+  .stepbd .q{font-size:10.5px;font-weight:800;color:var(--faint);letter-spacing:.02em;margin:10px 0 3px}
+  .stepbd .q:first-child{margin-top:0}
+  .stepbd .a{font-size:12.5px;color:#374151}
+  .arrow{flex:none;align-self:center;color:#9CA3AF;font-size:19px;padding-top:26px}
+
+  /* ── 표 ── */
+  table{width:100%;border-collapse:collapse;background:#fff;border:1px solid var(--line);border-radius:12px;
+        overflow:hidden;font-size:12.8px}
+  th,td{padding:10px 12px;border-bottom:1px solid var(--line);text-align:left;vertical-align:top}
+  th{background:#F7F8FB;font-size:11.5px;font-weight:750;color:var(--muted)}
+  tr:last-child td{border-bottom:none}
+  td.c{text-align:center;white-space:nowrap}
+  .scroll{overflow-x:auto}
+
+  .bdg{font-size:10px;font-weight:800;border-radius:5px;padding:2px 7px;white-space:nowrap;display:inline-block}
+  .bdg.red{background:var(--red);color:#fff}
+  .bdg.amb{background:var(--amber-soft);color:var(--amber);border:1px solid var(--amber-line)}
+  .bdg.grn{background:var(--green-soft);color:var(--green);border:1px solid var(--green-line)}
+  .bdg.blu{background:var(--blue-soft);color:var(--blue-d);border:1px solid var(--blue-line)}
+  .bdg.gry{background:var(--fill);color:var(--muted)}
+
+  code{font-family:var(--mono);font-size:11.5px;background:var(--fill);border-radius:5px;padding:1px 5px}
+  /* ★ white-space 를 안 주면 로그 여러 줄이 한 줄로 붙어버린다(실측) */
+  .log{background:#111827;color:#D1D5DB;border-radius:11px;padding:13px 15px;font-family:var(--mono);
+       font-size:11.5px;line-height:1.75;overflow-x:auto;white-space:pre-wrap;word-break:break-word}
+  .log .g{color:#86EFAC}.log .r{color:#FCA5A5}.log .y{color:#FDE68A}.log .c{color:#93C5FD}.log .m{color:#6B7280}
+
+  .split{display:grid;grid-template-columns:1fr 1fr;gap:14px}
+  @media(max-width:860px){.split{grid-template-columns:1fr}}
+
+  details{background:#fff;border:1px solid var(--line);border-radius:12px;padding:0;margin-bottom:8px;overflow:hidden}
+  summary{cursor:pointer;padding:12px 15px;font-size:13px;font-weight:700;list-style:none;display:flex;
+          align-items:center;gap:8px}
+  summary::-webkit-details-marker{display:none}
+  summary::before{content:'▸';color:var(--faint);font-size:12px}
+  details[open] summary::before{content:'▾'}
+  details .body{padding:0 15px 14px;font-size:12.8px;color:#4B5563}
+  details .body p{margin:0 0 8px}details .body p:last-child{margin:0}
+
+  .note{background:var(--amber-soft);border:1px solid var(--amber-line);border-radius:11px;padding:12px 14px;
+        font-size:12.5px;color:#78350F;margin-top:12px}
+  .note b{color:var(--amber)}
+  .foot{color:var(--faint);font-size:11.5px;margin-top:40px;text-align:center}
+  ul.tight{margin:6px 0 0;padding-left:18px}
+  ul.tight li{margin-bottom:5px;font-size:12.8px;color:#4B5563}
+</style>
+</head>
+<body>
+<div class="wrap">
+
+  <h1>리뷰어가 "참여하기"를 못 누르는 문제 — 무엇을 어떻게 조치하나</h1>
+  <p class="lead">비개발자용 안내서입니다. <b>지금 무슨 일이 벌어지고 있는지</b>, <b>고치려면 무엇을 해야 하는지</b>,
+     <b>고치는 동안·고친 뒤에 무엇이 달라지는지</b>를 화면과 순서로 정리했습니다.</p>
+  <p class="meta">작성 2026-08-04 · 대상: 운영 담당자·관리자 · 조치 승인이 필요한 문서</p>
+
+  <div class="now">
+    <b>지금 상태 — 리뷰어가 캠페인에 참여할 수 없습니다.</b><br>
+    참여형 공고에서 [참여하기]를 누르면 검은 오류 문구가 뜨고 참여가 되지 않습니다.
+    이 상태는 <b>일부 리뷰어가 아니라 전원</b>에게 발생하며, 시간이 지나도 저절로 낫지 않습니다.
+  </div>
+
+  <!-- ══════════════ 1. 지금 화면 ══════════════ -->
+  <h2><span class="n">1</span> 지금 리뷰어에게 보이는 화면</h2>
+  <div class="screens">
+
+    <div>
+      <div class="phone">
+        <div class="phhd"><span class="bk">←</span> 메디슨벨 파라다이스 그레인 미토 버닝…</div>
+        <div class="phbd">
+          <div class="thumb">상품 이미지</div>
+          <div class="pcard">
+            <div class="ptitle">메디슨벨 파라다이스 그레인 미토 버닝 15g 체지방관리 컷팅제 60정, 1개</div>
+            <div class="pmeta"><span>⏱ 자율</span><span class="bdg blu">바로참여</span><span>🪙 1,500원</span></div>
+            <div class="pmeta" style="justify-content:space-between"><span>모집 현황</span><span><b>9</b> / 12명</span></div>
+            <div class="gauge"><i></i></div>
+          </div>
+          <div class="joinbtn">참여하기</div>
+          <div class="errbar">column "review_fee_snapshot" of relation "campaign_applications" does not exist</div>
+        </div>
+      </div>
+      <div class="capt"><b>현재</b> — 버튼을 눌러도 참여가 되지 않고<br>영문 오류 문구만 뜹니다</div>
+    </div>
+
+    <div>
+      <div class="phone">
+        <div class="phhd"><span class="bk">←</span> 메디슨벨 파라다이스 그레인 미토 버닝…</div>
+        <div class="phbd">
+          <div class="thumb">상품 이미지</div>
+          <div class="pcard">
+            <div class="ptitle">메디슨벨 파라다이스 그레인 미토 버닝 15g 체지방관리 컷팅제 60정, 1개</div>
+            <div class="pmeta"><span>⏱ 자율</span><span class="bdg blu">바로참여</span><span>🪙 1,500원</span></div>
+            <div class="pmeta" style="justify-content:space-between"><span>모집 현황</span><span><b>10</b> / 12명</span></div>
+            <div class="gauge"><i style="width:83%"></i></div>
+          </div>
+          <div class="joinbtn" style="background:var(--green)">✓ 참여 확정 · 15:00 남음</div>
+          <div class="pcard" style="margin-top:9px">
+            <div style="font-size:11.5px;font-weight:750;margin-bottom:5px">작업내용</div>
+            <div style="font-size:11px;color:var(--muted)">상품 · 옵션 · 결제금액 · 유입가이드 · 구매양식</div>
+          </div>
+        </div>
+      </div>
+      <div class="capt"><b>조치 후</b> — 참여가 되고<br>작업내용·구매양식이 열립니다</div>
+    </div>
+
+    <div class="card" style="flex:1;min-width:290px">
+      <h3>🩺 같이 고장나 있는 것 (조치하면 함께 정상화)</h3>
+      <p>리뷰어에게 <b>보이지 않게</b> 고장난 부분이 더 있습니다.</p>
+      <ul class="tight">
+        <li><b>참여 전면 불가</b> — 눈에 보이는 증상</li>
+        <li><b>내 참여내역 조회 오류</b> — 목록이 안 뜸</li>
+        <li><b>받을 예정 금액 · 누적 금액이 0원으로 표시</b> — 오류 문구조차 안 뜨고 조용히 0원 (제일 위험)</li>
+        <li><b>결제한 뒤 자리 확정이 안 됨</b> — 관제에서 수동으로 확정해줘야 하는 건이 늘어남</li>
+      </ul>
+      <p style="margin-top:9px">주문 기록 자체가 사라지지는 않습니다. 접수된 주문은 안전하게 남습니다.</p>
+    </div>
+  </div>
+
+  <!-- ══════════════ 2. 원인 ══════════════ -->
+  <h2><span class="n">2</span> 왜 이렇게 됐나 — 한 문장과 비유</h2>
+
+  <div class="ok-box" style="background:#fff;border-color:var(--line);color:#374151">
+    <b style="color:var(--ink)">한 문장:</b> 장부에 <b style="color:var(--ink)">"이 사람에게 약속한 리뷰비"를 적을 새 칸</b>을 만들라는
+    작업지시서에 오탈자가 있어 <b style="color:var(--ink)">그 지시서가 매번 반려</b>됐는데,
+    프로그램은 이미 그 칸에 적으려 하고 있어서 <b style="color:var(--ink)">적을 칸이 없다</b>며 멈춘 것입니다.
+  </div>
+
+  <div class="cards" style="margin-top:14px">
+    <div class="card">
+      <h3>📋 새 칸이 왜 필요했나</h3>
+      <p>7월에 1,000원이던 리뷰비를 8월에 1,500원으로 올리자, <b>7월에 참여한 사람의 화면까지 1,500원</b>으로 바뀌어
+         문의가 들어왔습니다.</p>
+      <p>그래서 "참여하는 그 순간의 금액을 그 건에 도장처럼 찍어두는 칸"을 새로 만들기로 했습니다. 그 칸 이름이
+         <code>review_fee_snapshot</code>(참여 시점 리뷰비)입니다.</p>
+    </div>
+    <div class="card">
+      <h3>✏️ 지시서의 오탈자</h3>
+      <p>작업지시서에는 새 칸을 만드는 내용과 함께 "리뷰비 구간표"라는 새 장부도 만들라고 적혀 있습니다.</p>
+      <p>그 구간표에서 <b>캠페인 번호의 형식을 잘못 적었습니다</b>. 기존 장부의 캠페인 번호는 <b>글자(TEXT)</b> 형식인데
+         지시서에는 <b>숫자ID(UUID)</b> 형식으로 적혀 있어, 두 장부를 연결할 수 없다며 거절당합니다.</p>
+    </div>
+    <div class="card">
+      <h3>🔁 그래서 매번 실패</h3>
+      <p>지시서 하나는 <b>전부 성공 아니면 전부 취소</b>입니다. 뒷부분의 오탈자 때문에 <b>앞부분(새 칸 만들기)까지 같이 취소</b>됩니다.</p>
+      <p>실패한 지시서는 "완료"로 기록되지 않아 배포할 때마다 다시 시도하지만, <b>원인이 그대로라 매번 같은 자리에서 실패</b>합니다.
+         그동안 서버는 정상적으로 떠 있어서 아무도 몰랐습니다.</p>
+    </div>
+  </div>
+
+  <div class="note">
+    <b>확인 완료:</b> 실제 데이터베이스(PostgreSQL 16)를 임시로 띄워 이 실패를 그대로 재현했고,
+    오탈자를 고친 지시서는 <b>1회차·2회차(중복 실행) 모두 정상 적용</b>되는 것까지 확인했습니다. 추측이 아닙니다.
+  </div>
+
+  <!-- ══════════════ 3. 유저플로우 ══════════════ -->
+  <h2><span class="n">3</span> 조치 유저플로우 — 누가 · 무엇을 · 어떤 순서로</h2>
+  <p class="lead" style="margin-bottom:12px">
+    <span class="who dev">개발</span> 코드 수정 &nbsp;·&nbsp;
+    <span class="who auto">자동</span> 사람 개입 없음 &nbsp;·&nbsp;
+    <span class="who you">운영</span> 담당자가 직접 확인
+  </p>
+
+  <div class="flow">
+
+    <div class="step">
+      <div class="stephd"><span class="stepno">1</span><span class="stepttl">지시서 오탈자 수정</span></div>
+      <div class="stepbd">
+        <div class="q">누가</div><div class="a"><span class="who dev">개발</span> 코드 1줄 수정</div>
+        <div class="q">무엇을</div>
+        <div class="a">구간표의 캠페인 번호 형식을 <code>UUID</code> → <code>TEXT</code>로 바꿉니다.
+          (기존 장부와 같은 형식으로 맞추는 것)</div>
+        <div class="q">왜 안전한가</div>
+        <div class="a">이 지시서는 <b>한 번도 성공한 적이 없어서</b> 실제 데이터베이스에 아무 흔적이 없습니다.
+          이미 반영된 것을 되돌리는 게 아니라 <b>반려된 서류를 고쳐 다시 내는 것</b>입니다.</div>
+        <div class="q">걸리는 시간</div><div class="a">수정 자체는 수 분</div>
+      </div>
+    </div>
+    <div class="arrow">→</div>
+
+    <div class="step">
+      <div class="stephd"><span class="stepno">2</span><span class="stepttl">재발 방지 장치 추가</span></div>
+      <div class="stepbd">
+        <div class="q">누가</div><div class="a"><span class="who dev">개발</span> 안전장치 2개</div>
+        <div class="q">무엇을</div>
+        <div class="a">① <b>필수 항목 점검표에 등록</b> — 이 칸이 없으면 서버가 아예 켜지지 않게 합니다.
+          지금처럼 "서버는 멀쩡한데 참여만 조용히 안 되는" 상태를 원천 차단합니다.<br>
+          ② <b>자동 검사 보강</b> — 앞으로 같은 형식 오탈자가 들어오면 배포 전에 걸리게 합니다.</div>
+        <div class="q">왜 중요한가</div>
+        <div class="a">이번 사고는 <b>고장을 아무도 몰랐던 것</b>이 본질입니다. 고치는 것보다 <b>다음에 바로 알아채는 것</b>이 더 중요합니다.</div>
+      </div>
+    </div>
+    <div class="arrow">→</div>
+
+    <div class="step">
+      <div class="stephd"><span class="stepno">3</span><span class="stepttl">승인 &amp; 배포 시간 정하기</span></div>
+      <div class="stepbd">
+        <div class="q">누가</div><div class="a"><span class="who you">운영</span> 담당자 결정</div>
+        <div class="q">무엇을</div>
+        <div class="a">언제 배포할지만 정해주시면 됩니다. <b>구매가 몰리는 오픈 시간대를 피한 한산한 시간</b>을 권합니다.</div>
+        <div class="q">왜 시간대가 중요한가</div>
+        <div class="a">장부에 새 칸을 추가하는 순간 아주 짧게 <b>장부를 잠급니다</b>. 참여가 폭주하는 중이면
+          잠금을 못 잡고 실패할 수 있습니다(실패해도 데이터는 안전하고, 다음 배포에 다시 시도합니다).</div>
+        <div class="q">권장</div><div class="a">모집 시간대 밖 · 야간</div>
+      </div>
+    </div>
+    <div class="arrow">→</div>
+
+    <div class="step">
+      <div class="stephd"><span class="stepno">4</span><span class="stepttl">배포 (자동)</span></div>
+      <div class="stepbd">
+        <div class="q">누가</div><div class="a"><span class="who auto">자동</span> 사람 개입 없음</div>
+        <div class="q">무엇이 일어나나</div>
+        <div class="a">코드가 반영되면 서버가 다시 시작하면서 <b>고쳐진 지시서를 스스로 실행</b>합니다.
+          그 안에서 새 칸 2개와 구간표 장부가 만들어집니다.</div>
+        <div class="q">데이터베이스에 사람이 직접 손대나</div>
+        <div class="a"><b>아니오.</b> 수동으로 명령어를 치는 작업은 없습니다. 배포만 하면 됩니다.</div>
+        <div class="q">서비스가 멈추나</div>
+        <div class="a">평소 배포와 같습니다. 새 칸 추가는 <b>내용을 다시 쓰는 게 아니라 칸만 늘리는 것</b>이라 즉시 끝납니다.</div>
+      </div>
+    </div>
+    <div class="arrow">→</div>
+
+    <div class="step">
+      <div class="stephd"><span class="stepno">5</span><span class="stepttl">확인</span></div>
+      <div class="stepbd">
+        <div class="q">누가</div><div class="a"><span class="who you">운영</span> + <span class="who dev">개발</span></div>
+        <div class="q">눈으로 확인</div>
+        <div class="a">참여형 공고에서 <b>[참여하기]가 정상 동작</b>하는지 (테스트 공고 사용 권장).</div>
+        <div class="q">함께 확인</div>
+        <div class="a">리뷰어 홈에서 <b>받을 예정 금액 · 누적 금액이 0원이 아닌지</b>.</div>
+        <div class="q">기록 확인</div>
+        <div class="a">배포 로그에 <code>✅ 082 … 적용 완료</code>가 찍혔는지 (개발이 확인).</div>
+      </div>
+    </div>
+
+  </div>
+
+  <!-- ══════════════ 4. 결과 판정 ══════════════ -->
+  <h2><span class="n">4</span> 배포 후 판정 — 이 두 가지 중 하나입니다</h2>
+  <div class="split">
+    <div>
+      <div class="card" style="border-color:var(--green-line)">
+        <h3><span class="bdg grn">성공</span> 이렇게 나오면 끝입니다</h3>
+        <div class="log" style="margin:6px 0 10px">
+<span class="m">[migrate]</span> <span class="g">✅ 082_campaign_fee_schedules.sql 적용 완료</span>
+<span class="m">[migrate]</span> 🎉 1개 마이그레이션 새로 적용
+<span class="g">✅ 리뷰웹시스템 API 서버 시작</span></div>
+        <p style="font-size:12.8px;color:#4B5563;margin:0">참여·참여내역·금액 표시가 모두 즉시 정상으로 돌아옵니다.
+          추가 작업 없습니다.</p>
+      </div>
+    </div>
+    <div>
+      <div class="card" style="border-color:var(--amber-line)">
+        <h3><span class="bdg amb">잠금 실패</span> 이렇게 나오면 (드묾)</h3>
+        <div class="log" style="margin:6px 0 10px">
+<span class="m">[migrate]</span> <span class="y">⏳ 082 … 락 대기 초과(3/3) — 재시도</span>
+<span class="m">[migrate]</span> <span class="r">❌ 필수 스키마 누락 → 부팅 거부</span></div>
+        <p style="font-size:12.8px;color:#4B5563;margin:0 0 8px">참여가 몰리는 시간에 배포하면 장부 잠금을 못 잡아 이렇게 될 수 있습니다.
+          이때는 <b>새 배포가 올라가지 않고 직전 버전이 그대로 유지</b>됩니다(= 지금과 같은 상태, 더 나빠지지 않음).</p>
+        <p style="font-size:12.8px;color:#4B5563;margin:0"><b>조치:</b> 한산한 시간에 재배포 한 번이면 끝입니다.</p>
+      </div>
+    </div>
+  </div>
+
+  <div class="note">
+    <b>운영 담당자가 알아야 할 딱 하나:</b> 위 "잠금 실패"가 계속되면 <b>이 수정뿐 아니라 다른 수정도 배포가 막힙니다</b>(안전장치가 의도적으로 막습니다).
+    그럴 땐 개발에게 알려주세요 — 긴급 우회 스위치가 준비돼 있습니다.
+  </div>
+
+  <!-- ══════════════ 5. 영향 범위 ══════════════ -->
+  <h2><span class="n">5</span> 조치 전후 비교</h2>
+  <div class="scroll">
+    <table>
+      <thead><tr>
+        <th style="width:26%">항목</th><th style="width:32%">지금</th><th style="width:32%">조치 후</th><th style="width:10%">비고</th>
+      </tr></thead>
+      <tbody>
+        <tr><td><b>캠페인 참여하기</b></td>
+            <td><span class="bdg red">불가</span> 오류 문구 노출</td>
+            <td><span class="bdg grn">정상</span></td><td class="c">즉시</td></tr>
+        <tr><td><b>내 참여내역</b></td>
+            <td><span class="bdg red">오류</span> 목록이 안 뜸</td>
+            <td><span class="bdg grn">정상</span></td><td class="c">즉시</td></tr>
+        <tr><td><b>받을 예정 · 누적 금액</b></td>
+            <td><span class="bdg amb">0원</span> 오류 없이 조용히 0</td>
+            <td><span class="bdg grn">정상</span></td><td class="c">즉시</td></tr>
+        <tr><td><b>결제 후 자리 확정</b></td>
+            <td><span class="bdg amb">수동</span> 관제에서 확정 필요</td>
+            <td><span class="bdg grn">자동</span></td><td class="c">즉시</td></tr>
+        <tr><td><b>이미 접수된 주문</b></td>
+            <td><span class="bdg gry">안전</span> 손실 없음</td>
+            <td><span class="bdg gry">그대로</span></td><td class="c">변화 없음</td></tr>
+        <tr><td><b>과거 참여자의 리뷰비 표시 금액</b></td>
+            <td><span class="bdg gry">현재 금액 기준</span></td>
+            <td><span class="bdg gry">그대로</span> (변하지 않음)</td><td class="c">변화 없음</td></tr>
+        <tr><td><b>리뷰비 구간표 기능</b></td>
+            <td><span class="bdg red">꺼져 있음</span> 등록 자체가 안 됨</td>
+            <td><span class="bdg blu">사용 가능</span> 등록해야 동작</td><td class="c">선택</td></tr>
+        <tr><td><b>공고 · 시트 · 리뷰 이미지</b></td>
+            <td><span class="bdg gry">무관</span></td>
+            <td><span class="bdg gry">무관</span></td><td class="c">건드리지 않음</td></tr>
+      </tbody>
+    </table>
+  </div>
+
+  <!-- ══════════════ 6. FAQ ══════════════ -->
+  <h2><span class="n">6</span> 자주 나올 질문</h2>
+
+  <details open>
+    <summary>데이터가 사라지거나 덮어써지나요?</summary>
+    <div class="body">
+      <p>아니오. 이번 조치는 <b>장부에 빈 칸을 추가하고, 새 장부(구간표)를 하나 만드는 것</b>뿐입니다.
+        기존 값을 고치거나 지우는 작업은 전혀 없습니다.</p>
+      <p>추가된 칸은 기존 참여 건에 대해 <b>비어 있는 상태</b>로 남고, 프로그램은 비어 있으면 예전처럼 공고에 적힌 리뷰비를 사용합니다.</p>
+    </div>
+  </details>
+
+  <details>
+    <summary>이미 참여한 리뷰어의 금액이 바뀌나요?</summary>
+    <div class="body">
+      <p>바뀌지 않습니다. 구간표를 <b>등록하기 전까지는 지금과 100% 같은 금액</b>이 표시됩니다.</p>
+      <p>7월 참여자에게 7월 금액을 보여주고 싶다면, 조치 후에 공고 수정 화면에서 구간표(예: 7/1부터 1,000원 · 8/1부터 1,500원)를
+        등록하시면 됩니다. 그때 과거 건이 자동으로 정정됩니다.</p>
+    </div>
+  </details>
+
+  <details>
+    <summary>지금 당장 급한데, 배포 말고 더 빠른 방법은 없나요?</summary>
+    <div class="body">
+      <p>데이터베이스에 사람이 직접 명령어를 실행하는 방법도 가능하지만 <b>권하지 않습니다.</b> 그렇게 하면 새 칸만 생기고
+        구간표 장부는 여전히 없는 <b>어중간한 상태</b>가 되어, 나중에 "칸은 있는데 기능은 안 되는" 원인 추적이 어려워집니다.</p>
+      <p>고친 지시서를 배포하는 것이 <b>가장 빠르고(배포 1회) 가장 안전한</b> 경로입니다.</p>
+    </div>
+  </details>
+
+  <details>
+    <summary>왜 지금까지 아무도 몰랐나요?</summary>
+    <div class="body">
+      <p>서버가 <b>정상적으로 켜졌기</b> 때문입니다. 상태 점검(헬스체크)도 통과했고, 관리자 화면도 멀쩡했습니다.
+        오직 "참여하기"를 누른 리뷰어에게만 오류가 보였습니다.</p>
+      <p>그래서 이번 조치에 <b>"이 칸이 없으면 서버를 켜지 않는다"</b>는 안전장치를 함께 넣습니다.
+        다음부터는 같은 일이 생기면 <b>배포 단계에서 즉시 드러납니다.</b></p>
+    </div>
+  </details>
+
+  <details>
+    <summary>되돌릴 수 있나요?</summary>
+    <div class="body">
+      <p>가능합니다. 추가된 칸은 비어 있고 아무도 값을 쓰지 않으면 없는 것과 같습니다.
+        구간표 기능도 <b>구간을 0개로 두면 기존 동작 그대로</b>이고, 별도의 끄는 스위치도 있습니다.</p>
+      <p>다만 되돌리면 <b>참여하기가 다시 안 되는 상태로 돌아갑니다.</b> 되돌릴 이유는 사실상 없습니다.</p>
+    </div>
+  </details>
+
+  <details>
+    <summary>리뷰어에게 따로 공지해야 하나요?</summary>
+    <div class="body">
+      <p>참여를 시도했다가 실패한 리뷰어가 있다면 <b>"다시 참여해 주세요"</b> 안내가 필요합니다.
+        실패한 시도는 자리를 차지하지 않으므로 정원에는 영향이 없습니다.</p>
+      <p>"오늘 이미 참여했다"는 이유로 막히는 경우는 <b>실제로 참여가 성사된 경우에만</b> 해당하므로,
+        오류로 실패한 리뷰어는 그대로 다시 참여할 수 있습니다.</p>
+    </div>
+  </details>
+
+  <!-- ══════════════ 7. 체크리스트 ══════════════ -->
+  <h2><span class="n">7</span> 담당자 체크리스트</h2>
+  <div class="scroll">
+    <table>
+      <thead><tr><th style="width:6%">순서</th><th style="width:16%">누가</th><th style="width:46%">할 일</th><th style="width:32%">완료 판단</th></tr></thead>
+      <tbody>
+        <tr><td class="c">1</td><td><span class="who you">운영</span></td>
+            <td>조치 진행 승인 + <b>배포 시간대 지정</b>(한산한 시간 권장)</td><td>개발에게 시간 전달</td></tr>
+        <tr><td class="c">2</td><td><span class="who dev">개발</span></td>
+            <td>지시서 오탈자 수정 + 안전장치 2종 추가 → 검토 요청</td><td>PR 생성</td></tr>
+        <tr><td class="c">3</td><td><span class="who auto">자동</span></td>
+            <td>배포 및 새 칸 · 구간표 장부 생성</td><td>로그에 <code>✅ 082 적용 완료</code></td></tr>
+        <tr><td class="c">4</td><td><span class="who you">운영</span></td>
+            <td>테스트 공고에서 <b>참여하기</b> 눌러 보기</td><td>작업내용 화면까지 진입되면 성공</td></tr>
+        <tr><td class="c">5</td><td><span class="who you">운영</span></td>
+            <td>리뷰어 홈에서 <b>받을 예정 · 누적 금액</b> 확인</td><td>0원이 아니면 성공</td></tr>
+        <tr><td class="c">6</td><td><span class="who you">운영</span></td>
+            <td>참여 실패했던 리뷰어에게 <b>재참여 안내</b></td><td>문의 대응 완료</td></tr>
+        <tr><td class="c">7</td><td><span class="who you">운영</span></td>
+            <td>(선택) 리뷰비 구간표 등록 — 7월/8월 금액 분리가 필요하면</td><td>공고 수정 화면에서 등록</td></tr>
+      </tbody>
+    </table>
+  </div>
+
+  <p class="foot">리뷰웹시스템 · 조치 안내 · 이 문서는 외부 인터넷 연결 없이도 열립니다</p>
+</div>
+</body>
+</html>

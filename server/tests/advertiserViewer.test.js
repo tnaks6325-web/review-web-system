@@ -144,8 +144,8 @@ async function run() {
   ok('광고주 작업대 = awside 사이드바 + advwrap 그리드(가로 탭바 없음)',
     src.includes('class="wrap advwrap') && src.includes('id="awside"') );
   ok('advwrap 3열 그리드(사이드바 224px + 본문 + 레일)', /\.wrap\.advwrap\{grid-template-columns:224px minmax\(0,1fr\) 300px\}/.test(css));
-  ok('_renderTabList 광고주 분기 → _renderAdvSidebar(세그먼트/탭바 미참조)',
-    /_renderTabList\(\)\{\s*\n?\s*if\(STATE\.role==='advertiser'\)\{ _renderAdvSidebar\(\); return; \}/.test(src));
+  ok('_renderTabList 광고주 분기 → _renderAdvSidebar(세그먼트/탭바 미참조) + 첫 화면 갱신',
+    /if\(STATE\.role==='advertiser'\)\{ _renderAdvSidebar\(\); if\(!STATE\.cur\) _renderAdvHome\(\); return; \}/.test(src));
   ok('loadTabs 가 광고주면 /my-work-summary 를 함께 받는다', src.includes("api('/api/trackb/my-work-summary')"));
 
   // ── 화면 A: 내 작업 목록 표 ──
@@ -162,9 +162,131 @@ async function run() {
   ok('요약 스트립 광고주 = 시작일 칸(담당자 표기 없음)', /\[\['상품',d\.productOption\|\|m\.campaignName\|\|'—'\],\['시작일'/.test(src));
   ok('★ 정산 비공개·미연결은 광고주에게 같은 안내 한 줄(계약 연결·토글 용어 미노출)',
     src.includes('정산 정보가 아직 준비되지 않았습니다'));
-  ok('정산 카드 금액 4칸(_advSettleMoney): 총비용/입금액/입금일/남은 입금액', /_advSettleMoney/.test(src) && src.includes('남은 입금액') && src.includes('완납 ✓'));
+  ok('정산 카드 6칸(_advSettleFields): 견적서/계산서/총비용/입금액/입금일/남은 입금액',
+    /_advSettleFields\(d,q,inv,pay\)/.test(src)
+    && /<div class="k">견적서<\/div>/.test(src) && /<div class="k">계산서<\/div>/.test(src)
+    && /<div class="k">총비용/.test(src) && /<div class="k">입금액<\/div>/.test(src)
+    && /<div class="k">입금일 \(최근\)<\/div>/.test(src) && /<div class="k">남은 입금액<\/div>/.test(src)
+    && src.includes('완납 ✓'));
+  ok('★ 광고주 정산 카드에는 내부 스텝퍼·계약 변경/해제 버튼이 없다(6칸으로 대체)',
+    /if\(!canLink\)\{[\s\S]{0,700}_advSettleFields\(d,q,inv,pay\)[\s\S]{0,80}return;\s*\}/.test(src));
   ok('발주 작업세부의 담당(내부 실명)은 광고주 미노출', /\.\.\.\(STATE\.role!=='advertiser'\?\[\['담당',d\.managerName\]\]:\[\]\)/.test(src));
   ok('Parity(내부 관측 도구) 레일탭은 광고주에게 안 그린다', /\$\{isAdv\?'':`<button class="railtab" data-rt="parity"/.test(src));
+
+  /* ═══ 5. 첫 화면 대시보드(시안 design-advertiser-dashboard.html) ═══ */
+  ok('첫 화면 기본값 = 대시보드(STATE.advView:\'dash\')', /advView:'dash'/.test(src));
+  ok('_renderAdvHome 이 advView 로 대시보드/전체 작업을 분기한다',
+    /if\(\(STATE\.advView\|\|'dash'\)==='list'\) _renderAdvList\(\); else _renderAdvDash\(\);/.test(src));
+  ok('사이드바 상단 = [대시보드] · [전체 작업] 2줄', /onclick="advHome\('dash'\)"[\s\S]{0,120}대시보드/.test(src) && /onclick="advHome\('list'\)"[\s\S]{0,120}전체 작업/.test(src));
+  ok('사이드바 작업 목록을 진행 중 / 완료 그룹으로 나눈다',
+    /grp\(items\.filter\(it=>!_awDone\(it\)\),'진행 중'\)[\s\S]{0,80}grp\(items\.filter\(_awDone\),'완료'\)/.test(src));
+  ok('★ 진행/완료 판정 단일 출처 _awDone(=_awStatus) — 사이드바·KPI·게이지가 같은 함수를 본다',
+    /function _awDone\(it\)\{ return _awStatus\(it\)\.label==='완료'; \}/.test(src));
+  ok('★ 정산 파생(남은 입금액=총비용−입금액) 단일 출처 _awSetl',
+    /function _awSetl\(it\)\{[\s\S]{0,320}Math\.max\(tc-\(pa\|\|0\),0\)/.test(src));
+  ok('★ 표 행 빌더는 한 벌(_awRowHtml) — 대시보드 최근 작업은 limit 만 달리해 재사용(사본 금지)',
+    /function _awRowHtml\(it\)/.test(src)
+    && /function _awListHtml\(items, limit\)/.test(src)
+    && /_awListHtml\(items, RECENT\)/.test(src)
+    && (src.match(/class="awlhead"/g) || []).length === 1);
+  ok('KPI 4칸: 진행 중 작업 · 참여 진척 · 총 계약금액 · 미입금 잔액',
+    /진행 중 작업<\/div>/.test(src) && /참여 진척 \(진행 중\)/.test(src) && /총 계약금액/.test(src) && /미입금 잔액/.test(src));
+  ok('★ 정산 노출 OFF 업체는 금액 KPI·정산 패널을 통째로 뺀다(빈 0원 표시 금지)',
+    /\+\(setlOn\?`<div class="adkpi"><div class="k">총 계약금액/.test(src) && /const pipe=setlOn\?/.test(src));
+  ok('참여 진척은 진행 중 작업만 집계(끝난 숫자가 진척을 희석하지 않게)',
+    /running\.forEach\(it=>\{ rTot\+=\+it\.total\|\|0; rSub\+=\+it\.submitted\|\|0;/.test(src));
+  ok('총 계약금액 KPI 가 정산 미연결 건수를 부제로 고지한다(조용한 누락 금지)', /미연결 \$\{unlinked\}건/.test(src));
+  ok('확인 필요 = 잔액(큰 순) → 계산서 미발행 → 미확인 코멘트, 최대 5건',
+    /\.filter\(x=>x\.rest>0\)\.sort\(\(a,b\)=>b\.rest-a\.rest\)/.test(src)
+    && /invoiceStatus!=='issued'/.test(src) && /_wUnseen\(i\); if\(!n\) return;/.test(src)
+    && /todos\.slice\(0,5\)/.test(src));
+  ok('확인 필요가 비면 안내 문구(빈 패널 금지)', src.includes('확인할 항목이 없습니다'));
+  ok('★ 대시보드 클래스는 ad* 접두 — 기존 .gauge/.dgrid/.kpi 와 충돌 금지',
+    /\.adkpis\{/.test(css) && /\.adgrid\{/.test(css) && /\.adgauge\{/.test(css)
+    && !/(^|\})\s*\.gauge\{width:168px/.test(css) && /\.gauge\{width:44px/.test(css) && /\.dgrid\{display:grid;grid-template-columns:1fr;/.test(css));
+  ok('대시보드 컨테이너 폭 상한(1380px — 목록 표와 같은 값)', /#advDash\{max-width:1380px\}/.test(css));
+  ok('★ 미확인 코멘트 갱신이 대시보드까지 재렌더(확인 필요 위젯이 stale 로 남지 않게)',
+    /_renderAdvSidebar\(\); if\(!STATE\.cur\) _renderAdvHome\(\);/.test(src));
+  ok('★ 뒤로/앞으로가 대시보드↔전체 작업 전환을 되짚는다(히스토리 항목에 advView)',
+    /e\.advView=STATE\.advView\|\|'dash'/.test(src)
+    && /if\(\(a\.advView\|\|''\)!==\(b\.advView\|\|''\)\) return false;/.test(src)
+    && /if\(st\.advView\) STATE\.advView=st\.advView;/.test(src));
+
+  /* ═══ 6. 리뷰제출 컬럼 선점(_advertiserColumns) ═══ */
+  const advCols = svc.__advertiserColumnsForTest;
+  ok('_advertiserColumns 가 테스트로 노출돼 있다', typeof advCols === 'function');
+  {
+    // 실측 신고: 리뷰제출 열 헤더가 키워드에 안 걸리는 탭(카페/블로그 발행)에서 그 열이 통째로 빠졌다.
+    const hs = ['번호', '구매날짜', '수취인', '연락처', '주소', '결제금액', '카페/블로그 발행', '입금'];
+    ok('★ 상태 칸(submit_col)이 키워드에 안 걸려도 리뷰제출 열이 나온다',
+      advCols(hs, { submitCol: '카페/블로그 발행', submitCol2: '입금' }).includes('카페/블로그 발행'));
+    ok('★ 출력 순서 = 결제금액 → 리뷰제출 → 입금(사용자 요청 위치)', (() => {
+      const o = advCols(hs, { submitCol: '카페/블로그 발행', submitCol2: '입금' });
+      return o.indexOf('결제금액') < o.indexOf('카페/블로그 발행') && o.indexOf('카페/블로그 발행') < o.indexOf('입금');
+    })());
+    ok('선점 없이(기존 동작) 호출하면 그 열은 여전히 빠진다 = 이 선점이 실제 원인 해소',
+      !advCols(hs).includes('카페/블로그 발행'));
+    // 두 번째 사고: '입금일자'는 위쪽 구매일자 규칙(/일자|날짜/)이 먼저 삼켜 오배치가 났다.
+    const hs2 = ['번호', '구매일자', '수취인', '연락처', '주소', '결제금액', '리뷰제출일', '입금일자'];
+    ok('★ 상태 칸 선점이 구매일자 규칙의 입금일자 삼킴을 막는다', (() => {
+      const o = advCols(hs2, { submitCol: '리뷰제출일', submitCol2: '입금일자' });
+      return o.includes('입금일자') && o.includes('구매일자') && o.indexOf('구매일자') < o.indexOf('입금일자');
+    })());
+    ok('실재하지 않는 헤더를 submit_col 로 줘도 무시(빈 열 생성 금지)',
+      !advCols(hs, { submitCol: '없는열' }).includes('없는열'));
+    ok('opts 없이 호출한 결과는 종전과 동일(무회귀)',
+      JSON.stringify(advCols(hs2)) === JSON.stringify(advCols(hs2, {})));
+    ok('★ 화이트리스트 밖 컬럼(은행·계좌)은 여전히 안 나온다',
+      !advCols(['수취인', '은행', '계좌번호', '예금주'], { submitCol: '계좌번호' }).includes('은행'));
+  }
+  ok('workdeskTab 이 roster 의 submit_col/submit_col2 를 광고주 헤더 산출에 넘긴다',
+    /_advertiserColumns\(raw, \{ submitCol: sc\.submit_col, submitCol2: sc2\.submit_col2 \}\)/.test(
+      fs.readFileSync(path.join(__dirname, '..', 'src', 'services', 'trackB.service.js'), 'utf8')));
+
+  /* ═══ 7. 리뷰 이미지 미리보기(행별) ═══ */
+  const rvLayer = layers.find(l => l.path === '/workdesk/review-images');
+  ok('GET /workdesk/review-images 라우트가 authMiddleware 뒤에 있다',
+    rvLayer && rvLayer.methods.includes('get') && rvLayer.mw.includes('authMiddleware'));
+  ok('★ 스코프 게이트(_ensureThreadScope) — 소유/담당 탭만(교차 열람 차단)',
+    /'\/workdesk\/review-images'[\s\S]{0,420}_ensureThreadScope\(req, sheetId, tabName\)/.test(routeSrc));
+  {
+    svc.__setPoolForTest(pool([
+      [/FROM review_submissions/, () => ({ rows: [
+        { row_index: 3, file_id: 'FILEAAAAAAAAAAAAAAAAAAAA', slot_key: 'review', at: '2026-07-01T00:00:00Z' },
+        { row_index: 3, file_id: 'FILEBBBBBBBBBBBBBBBBBBBB', slot_key: 'cash_receipt', at: '2026-07-01T00:01:00Z' },
+        { row_index: 3, file_id: 'FILEAAAAAAAAAAAAAAAAAAAA', slot_key: 'review', at: '2026-07-02T00:00:00Z' },   // 중복 파일
+        { row_index: 5, file_id: null, slot_key: 'review', at: null },                                            // 빈 파일ID
+      ] })],
+      [/FROM review_index/, () => ({ rows: [
+        { row_index: 3, review_file_id: 'FILEAAAAAAAAAAAAAAAAAAAA', review_file_at: null },   // 이미 있는 건 중복 안 됨
+        { row_index: 9, review_file_id: 'FILECCCCCCCCCCCCCCCCCCCC', review_file_at: '2026-06-01T00:00:00Z' },
+      ] })],
+    ]));
+    const rv = await svc.reviewImagesForTab({ sheetId: 'S1', tabName: 'T' });
+    ok('행별 파일 목록을 row_index 키로 반환(= 참여자 seq)', Array.isArray(rv['3']) && rv['3'].length === 2);
+    ok('같은 파일ID 중복 제거', rv['3'].filter(f => f.fileId === 'FILEAAAAAAAAAAAAAAAAAAAA').length === 1);
+    ok('빈 file_id 행은 키 자체가 안 생긴다', !('5' in rv));
+    ok('원장(032)에 없고 대표 이미지(031)만 있는 과거 행도 폴백으로 합류', rv['9'] && rv['9'][0].fileId === 'FILECCCCCCCCCCCCCCCCCCCC');
+    ok('슬롯 라벨(현금영수증 등) 동봉', rv['3'].some(f => f.slot === 'cash_receipt'));
+  }
+  ok('프론트: 그리드 행에 data-rid(선택 키)가 실린다', /<tr data-rid="\$\{esc\(r\.id\)\}"/.test(src));
+  ok('프론트: 광고주 상세에 미리보기 패널(#rvPane)이 그리드 오른쪽에 붙는다',
+    /<div class="advgw"><div id="gridhost">\$\{tableSection\}<\/div><aside class="rvpane" id="rvPane">/.test(src));
+  ok('★ 이미지 URL 은 bare API_BASE 로 만든다(window.API_BASE_URL 은 최상위 const 라 항상 undefined)', (() => {
+    const i = src.indexOf('function _rvUrl(');
+    const body = src.slice(i, i + 260);
+    return /API_BASE\+'\/api\/drive\/image\/'/.test(body) && !/window\.API_BASE_URL/.test(body);
+  })());
+  ok('파일ID 형식 검증 후에만 URL 생성(임의 문자열 주입 차단)', /\/\^\[-\\w\]\{20,\}\$\/\.test\(String\(id\|\|''\)\)/.test(src));
+  ok('↑↓ 키로 선택 행 이동 + 입력 중·모달 위에서는 가로채지 않는다',
+    /e\.key!=='ArrowUp'&&e\.key!=='ArrowDown'/.test(src)
+    && /INPUT\|SELECT\|TEXTAREA/.test(src) && /querySelector\('\.modalov,#woImgOv'\)/.test(src));
+  ok('행 클릭·키 이동이 위임 1회 바인딩(재렌더로 tbody 가 갈려도 유지)', /if\(STATE\._rvBound\) return; STATE\._rvBound=true;/.test(src));
+  ok('★ 미제출 행은 패널 가운데에 "리뷰 미작성 · 미제출" 표기', /리뷰 미작성 · 미제출/.test(src));
+  ok('제출 표시는 있는데 이미지가 없는 행은 다르게 안내(사실대로)', /리뷰 이미지 미등록/.test(src));
+  ok('필터·정렬 재렌더 후 선택 복원(_rvReapply)', /_fitGrid\(\); _rvReapply\(\); \} \}/.test(src));
+  ok('미리보기 패널 CSS(sticky · 340px · 미제출 안내 박스)',
+    /\.rvpane\{flex:0 0 340px/.test(css) && /\.rvnone\{/.test(css) && /\.sheetgrid tbody tr\.rvon>td\{/.test(css));
 
   console.log(`\n✅ advertiserViewer: ${n} cases passed`);
 }
