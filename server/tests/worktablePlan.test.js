@@ -137,6 +137,31 @@ ok('★ 시작일이 없으면 날짜를 만들지 않는다(추측 금지) + �
     const p = P.buildWorktablePlan({ workOrder: { recruit_count: 5, daily_count: 2 }, template: TPL });
     return p.rows.every(r => r.date === null) && p.warnings.some(w => w.code === 'no_start_date') && p.canCreate;
   })());
+ok('★★ DB의 DATE 컬럼(Date 객체)도 받는다 — 프로덕션 실데이터로 잡은 버그',
+  (() => {
+    // node-pg 는 DATE 를 Date 객체로 준다. String(date).slice(0,10) 은 'Mon Aug 03' 이 되어 조용히 실패했다.
+    const d = P.buildWorktablePlan({
+      workOrder: { recruit_count: 10, daily_count: 5, start_date: new Date('2026-08-03T00:00:00.000Z') },
+      template: { core: ['번호', '구매일자', '수취인'], channels: {} } });
+    const str = P.buildWorktablePlan({
+      workOrder: { recruit_count: 10, daily_count: 5, start_date: '2026-08-03' },
+      template: { core: ['번호', '구매일자', '수취인'], channels: {} } });
+    return d.startDate === '2026-08-03' && d.totals.days === 2 && d.rows[0].dateLabel === '8 / 3 (월)'
+      && JSON.stringify(d.dates) === JSON.stringify(str.dates);   // 두 형태가 같은 결과
+  })());
+ok('★ Date 는 UTC 로 읽는다 — pg 가 DATE 를 UTC 자정으로 주므로 로컬로 읽으면 하루 밀린다',
+  /getUTCFullYear\(\), m: v\.getUTCMonth\(\) \+ 1, d: v\.getUTCDate\(\)/.test(planSrc));
+ok('★ 날짜를 나눴는데 구매일자 열이 없으면 경고(조용한 누락 + 정원 파생 실패 방지)',
+  (() => {
+    const p2 = P.buildWorktablePlan({
+      workOrder: { recruit_count: 10, daily_count: 5, start_date: '2026-08-03' },
+      template: { core: ['번호', '수취인'], channels: {} } });
+    return p2.warnings.some(w => w.code === 'no_date_column');
+  })());
+ok('구매일자 열이 있으면 그 경고는 안 뜬다(도배 방지)',
+  !P.buildWorktablePlan({
+    workOrder: { recruit_count: 10, daily_count: 5, start_date: '2026-08-03' },
+    template: { core: ['번호', '구매일자', '수취인'], channels: {} } }).warnings.some(w => w.code === 'no_date_column'));
 ok('★ 타임존 무관 — Date 산술이 아니라 Y-M-D 문자열로 다룬다',
   !/getFullYear\(\)|getMonth\(\)|getDate\(\)|new Date\(\)/.test(planSrc)
   && /Date\.UTC/.test(planSrc));
