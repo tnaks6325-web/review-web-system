@@ -273,6 +273,33 @@ ok('★ 저장은 배열 그대로 — 쉼표 구분 파싱이 없다(열 이름
     const body = setJs.slice(i, j > i ? j : i + 2000);
     return i > -1 && !/split\(','\)/.test(body) && /channels\[c\.key\] = \(\(_wtTpl\.channels \|\| \{\}\)\[c\.key\] \|\| \[\]\)\.slice\(\)/.test(setJs);
   })());
+ok('★ 열 추가 후보 = 헤더 학습 리포트의 열들(역할 변형 + 미분류) — 별도 목록을 만들지 않는다',
+  /function _wtBuildCandidates/.test(setJs)
+  && /_wtStats \|\| \{\}\)\.roles[\s\S]{0,220}headerVariants/.test(setJs)
+  && /_wtStats \|\| \{\}\)\.unmapped/.test(setJs));
+ok('★ 고르기는 코어·채널 양쪽에 있다(같은 함수 한 벌 — key 로 분기)',
+  /function wtPickToggle/.test(setJs) && /function wtPickAdd/.test(setJs) && /function wtPickFilter/.test(setJs)
+  && setJs.includes("wtPickToggle('core')")            // 코어 열 [목록에서]
+  && setJs.includes("wtPickToggle(\\'' + c.key")       // 채널 [▼] (생성 HTML 의 onclick)
+  && setJs.includes("wtPick_' + c.key")                // 채널마다 패널
+  && setJs.includes('id="wtPick_core"'));
+ok('★★ 후보 클릭은 **인덱스**로 넘긴다 — onclick 문자열에 열 이름을 넣지 않는다(따옴표 탈출 차단)',
+  (() => {
+    const m = /onclick="wtPickAdd\([^"]*"/.exec(setJs);
+    // h.i(인덱스)만 들어가고 c.name/h.c.name 같은 이름 참조가 없어야 한다
+    return !!m && /h\.i/.test(m[0]) && !/name/.test(m[0]);
+  })());
+ok('통계는 지연 로드 + 캐시 한 벌(_wtEnsureStats) — 고르기·리포트·불러오기가 같은 것을 쓴다',
+  /async function _wtEnsureStats/.test(setJs)
+  && (setJs.match(/_wtFetch\(WT_EP\.stats\)/g) || []).length === 1);
+ok('★ 자유 입력은 그대로 — 새 이름도 만들 수 있다(고르기는 보조 수단)',
+  /id="wtNewCol"/.test(setJs) && /onclick="wtAddCol\(\)"/.test(setJs)
+  && /function wtChAdd/.test(setJs) && /id="wtCh_/.test(setJs)
+  && /placeholder="열 이름"/.test(setJs));
+ok('이미 담긴 후보는 비활성(중복 추가 클릭 자체가 불가)',
+  /dup \? ' disabled' : ''/.test(setJs) && /as-wtpickchip.*dup/.test(setJs));
+ok('한 번에 한 목록만 열린다(어느 채널에 넣는지 헷갈리지 않게)',
+  /\['core'\]\.concat\(CR_GUIDE_CHANNELS\.map/.test(setJs));
 ok('블록 렌더도 escHtml 통과 + 편집 시 dirty 표시(조용한 유실 방지)',
   /escHtml\(n\)/.test(setJs)
   && /function wtChAdd[\s\S]{0,600}_wtDirty\(true\)/.test(setJs)

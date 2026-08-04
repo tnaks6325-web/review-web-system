@@ -491,14 +491,20 @@ function _worktableHtml() {
   /* 채널별 추가 열 — ★ 채널당 **한 줄**(라벨 + 열 블록들 + 추가 입력).
      쉼표 구분 텍스트가 아니라 블록 단위 추가·제거·◀▶ 이동(사용자 확정 — 더 직관적으로). */
   var chans = CR_GUIDE_CHANNELS.map(function (c) {
-    return '<div class="as-wtchrow">' +
-      '<span class="as-wtchlabel">' + c.emoji + ' ' + c.label + '</span>' +
-      '<span class="as-wtchips" id="wtChips_' + c.key + '"></span>' +
-      '<span class="as-wtchadd">' +
-        '<input type="text" id="wtCh_' + c.key + '" maxlength="40" placeholder="열 이름" ' +
-          'onkeydown="if(event.key===\'Enter\'){event.preventDefault();wtChAdd(\'' + c.key + '\');}">' +
-        '<button onclick="wtChAdd(\'' + c.key + '\')" title="이 채널에 열 추가">＋</button>' +
-      '</span></div>';
+    return '<div class="as-wtchgroup">' +
+      '<div class="as-wtchrow">' +
+        '<span class="as-wtchlabel">' + c.emoji + ' ' + c.label + '</span>' +
+        '<span class="as-wtchips" id="wtChips_' + c.key + '"></span>' +
+        '<span class="as-wtchadd">' +
+          '<input type="text" id="wtCh_' + c.key + '" maxlength="40" placeholder="열 이름" ' +
+            'oninput="wtPickFilter(\'' + c.key + '\')" ' +
+            'onkeydown="if(event.key===\'Enter\'){event.preventDefault();wtChAdd(\'' + c.key + '\');}">' +
+          '<button onclick="wtPickToggle(\'' + c.key + '\')" title="지금 쓰는 열에서 고르기" class="pick">▼</button>' +
+          '<button onclick="wtChAdd(\'' + c.key + '\')" title="이 채널에 열 추가">＋</button>' +
+        '</span>' +
+      '</div>' +
+      '<div class="as-wtpick" id="wtPick_' + c.key + '" style="display:none"></div>' +
+      '</div>';
   }).join('');
   return `
         <!-- 작업표 표준 열 -->
@@ -515,8 +521,13 @@ function _worktableHtml() {
 
         <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center;margin-bottom:10px">
           <input type="text" id="wtNewCol" maxlength="40" placeholder="열 이름 (예: 수취인)"
+            oninput="wtPickFilter('core')"
             onkeydown="if(event.key==='Enter'){event.preventDefault();wtAddCol();}"
             style="flex:1;min-width:160px;max-width:280px;padding:8px 12px;border:1.5px solid #D1D5DB;border-radius:8px;font-size:.85rem;outline:none">
+          <button onclick="wtPickToggle('core')" title="지금 쓰는 열에서 고르기"
+            style="padding:8px 12px;background:#fff;color:#374151;border:1.5px solid #D1D5DB;border-radius:8px;font-size:.82rem;font-weight:600;cursor:pointer">
+            <i class="fas fa-list-ul"></i> 목록에서
+          </button>
           <button onclick="wtAddCol()" style="padding:8px 14px;background:#fff;color:#374151;border:1.5px solid #D1D5DB;border-radius:8px;font-size:.82rem;font-weight:600;cursor:pointer">
             <i class="fas fa-plus"></i> 추가
           </button>
@@ -524,6 +535,7 @@ function _worktableHtml() {
             <i class="fas fa-wand-magic-sparkles"></i> 통계에서 불러오기
           </button>
         </div>
+        <div class="as-wtpick" id="wtPick_core" style="display:none"></div>
         <div id="wtColList" class="as-wtlist"><div class="as-wtempty">불러오는 중…</div></div>
 
         <div style="margin-top:16px">
@@ -668,10 +680,125 @@ function wtChMove(key, i, dir) {
   _wtDirty(true);
 }
 
+/* ══════════════════════════════════════════════════════════════
+   ★ "지금 쓰는 열에서 고르기" — 후보는 헤더 학습 리포트의 열들(사용자 확정)
+   ──────────────────────────────────────────────────────────────
+   손으로 타이핑하면 같은 뜻의 열이 조금씩 다른 이름으로 늘어난다('연락처'/'전화번호'/'핸드폰').
+   실제로 우리 시트들이 쓰는 이름을 그대로 고르게 해서 표기를 모은다.
+   ★ 자유 입력은 그대로 남긴다 — 새 열은 여전히 만들 수 있어야 한다(고르기는 보조 수단).
+   ══════════════════════════════════════════════════════════════ */
+var _wtCand = null;   // 후보 목록 캐시(사용 탭 수 내림차순) — 인덱스로 참조해 onclick 문자열 이스케이프를 피한다
+
+async function _wtEnsureStats() {
+  if (!_wtStats) { var j = await _wtFetch(WT_EP.stats); _wtStats = j.data || {}; }
+  return _wtStats;
+}
+
+/** 리포트의 열들을 후보 한 벌로 모은다(역할 열 변형 + 미분류 열, 이름 기준 중복 제거). */
+function _wtBuildCandidates() {
+  var map = {};
+  var put = function (name, count, meta) {
+    if (!name) return;
+    var k = String(name).toLowerCase();
+    if (!map[k] || count > map[k].count) map[k] = { name: String(name), count: count || 0, role: meta.role, label: meta.label, freq: meta.freq };
+  };
+  ((_wtStats || {}).roles || []).forEach(function (r) {
+    (r.headerVariants || []).forEach(function (v) {
+      put(v.name, v.count, { role: r.role, label: r.label, freq: r.frequency });
+    });
+  });
+  ((_wtStats || {}).unmapped || []).forEach(function (u) {
+    put(u.name, u.tabCount, { role: null, label: null, freq: u.frequency });
+  });
+  _wtCand = Object.keys(map).map(function (k) { return map[k]; })
+    .sort(function (a, b) { return b.count - a.count || a.name.localeCompare(b.name); });
+  return _wtCand;
+}
+
+/** key = 'core' 또는 채널키. 이미 담긴 이름 목록(중복 표시용). */
+function _wtHaveFor(key) {
+  if (!_wtTpl) return [];
+  return key === 'core' ? (_wtTpl.core || []) : ((_wtTpl.channels || {})[key] || []);
+}
+function _wtPickInput(key) {
+  return document.getElementById(key === 'core' ? 'wtNewCol' : 'wtCh_' + key);
+}
+
+function _wtPickRender(key) {
+  var box = document.getElementById('wtPick_' + key);
+  if (!box || !_wtCand) return;
+  var inp = _wtPickInput(key);
+  var q = inp ? String(inp.value || '').trim().toLowerCase() : '';
+  var have = {};
+  _wtHaveFor(key).forEach(function (n) { have[String(n).toLowerCase()] = 1; });
+  var hits = [];
+  _wtCand.forEach(function (c, i) {
+    if (!q || c.name.toLowerCase().indexOf(q) >= 0) hits.push({ c: c, i: i });
+  });
+  var shown = hits.slice(0, 60);
+  var head = '<div class="as-wtpickhead">우리 시트에서 <b>지금 쓰는 열 이름</b>입니다. 숫자 = 그 이름을 쓰는 탭 수.' +
+    (q ? ' <b>"' + escHtml(q) + '"</b> 검색 ' + hits.length + '건' : ' 전체 ' + _wtCand.length + '개') +
+    (hits.length > shown.length ? ' · 상위 ' + shown.length + '개만 표시(검색해 좁히세요)' : '') +
+    '<button class="as-wtpickx" onclick="wtPickToggle(\'' + key + '\')">닫기</button></div>';
+  if (!shown.length) {
+    box.innerHTML = head + '<div class="as-wtpicknone">일치하는 열이 없습니다. 새 이름이면 [＋]로 그대로 추가하세요.</div>';
+    return;
+  }
+  box.innerHTML = head + '<div class="as-wtpicklist">' + shown.map(function (h) {
+    var dup = !!have[h.c.name.toLowerCase()];
+    return '<button class="as-wtpickchip' + (dup ? ' dup' : '') + '"' + (dup ? ' disabled' : '') +
+      ' onclick="wtPickAdd(\'' + key + '\',' + h.i + ')"' +
+      ' title="' + escHtml(h.c.label ? '시스템 인식: ' + h.c.label : '시스템이 값을 쓰지 않는 열') + '">' +
+      (dup ? '<i class="as-wtpickok">✓</i>' : '') +
+      escHtml(h.c.name) + '<i class="as-wtpickn">' + h.c.count + '</i></button>';
+  }).join('') + '</div>';
+}
+
+async function wtPickToggle(key) {
+  var box = document.getElementById('wtPick_' + key);
+  if (!box) return;
+  if (box.style.display !== 'none') { box.style.display = 'none'; return; }
+  // 한 번에 하나만 열어 둔다(패널이 여러 개 펼쳐지면 어느 채널에 넣는지 헷갈린다)
+  ['core'].concat(CR_GUIDE_CHANNELS.map(function (c) { return c.key; })).forEach(function (k) {
+    var b = document.getElementById('wtPick_' + k);
+    if (b && k !== key) b.style.display = 'none';
+  });
+  box.style.display = '';
+  box.innerHTML = '<div class="as-wtpicknone">불러오는 중…</div>';
+  try {
+    await _wtEnsureStats();
+    _wtBuildCandidates();
+    if (!_wtCand.length) {
+      box.innerHTML = '<div class="as-wtpicknone">분석된 열이 없습니다(미러 대기 중일 수 있습니다). 이름을 직접 입력해 추가하세요.</div>';
+      return;
+    }
+    _wtPickRender(key);
+  } catch (e) {
+    box.innerHTML = '<div class="as-wtpicknone">목록을 불러오지 못했습니다: ' + escHtml(e.message) + '</div>';
+  }
+}
+
+/** 입력칸 타이핑 = 열려 있는 목록의 검색어(패널이 닫혀 있으면 아무 일도 안 한다). */
+function wtPickFilter(key) {
+  var box = document.getElementById('wtPick_' + key);
+  if (box && box.style.display !== 'none' && _wtCand) _wtPickRender(key);
+}
+
+/** 후보 클릭 → 그 자리에 추가. 이름은 인덱스로 찾아온다(onclick 문자열에 이름을 넣지 않는다). */
+function wtPickAdd(key, idx) {
+  if (!_wtCand || !_wtCand[idx] || !_wtTpl) return;
+  var name = _wtCand[idx].name;
+  var inp = _wtPickInput(key);
+  if (inp) inp.value = name;
+  if (key === 'core') wtAddCol(); else wtChAdd(key);
+  if (inp) inp.value = '';
+  _wtPickRender(key);   // 방금 담은 것이 ✓ 로 바뀐다
+}
+
 /** 통계에서 불러오기 — 서버가 고른 "역할별 가장 흔한 실제 헤더 이름"으로 채운다. */
 async function wtLoadSuggested() {
   try {
-    if (!_wtStats) { var j = await _wtFetch(WT_EP.stats); _wtStats = j.data || {}; }
+    await _wtEnsureStats();
     var s = (_wtStats && _wtStats.suggestedCore) || [];
     if (!s.length) { showToast('통계에서 코어 열을 찾지 못했습니다 (분석된 탭이 없을 수 있습니다)', true); return; }
     if ((_wtTpl.core || []).length && !confirm('지금 목록을 통계 기반 ' + s.length + '개 열로 바꿉니다. 계속할까요?')) return;
@@ -736,8 +863,7 @@ async function wtToggleReport() {
   if (_wtStats) return _wtRenderReport(_wtStats);
   box.innerHTML = '<div class="as-wtempty">불러오는 중…</div>';
   try {
-    var j = await _wtFetch(WT_EP.stats);
-    _wtStats = j.data || {};
+    await _wtEnsureStats();
     _wtRenderReport(_wtStats);
   } catch (e) {
     box.innerHTML = '<div class="as-wtempty">리포트를 불러오지 못했습니다: ' + escHtml(e.message) + '</div>';
@@ -863,7 +989,22 @@ function _wtRenderReport(d) {
       '.as-wtchadd{flex:none;display:inline-flex;gap:5px;margin-left:auto}' +
       '.as-wtchadd input{width:130px;padding:5px 9px;border:1.5px solid #D1D5DB;border-radius:7px;font-size:.78rem;outline:none;background:#fff;color:#111827}' +
       '.as-wtchadd button{width:29px;height:29px;border:1.5px solid #BFDBFE;background:#EFF6FF;color:#1D4ED8;border-radius:7px;cursor:pointer;font-size:.85rem;font-weight:700;line-height:1}' +
-      '@media (max-width:640px){.as-wtchlabel{width:100%}.as-wtchadd{margin-left:0}}';
+      '.as-wtchadd button.pick{width:auto;padding:0 8px;font-size:.68rem;border-color:#D1D5DB;background:#fff;color:#6B7280}' +
+      '@media (max-width:640px){.as-wtchlabel{width:100%}.as-wtchadd{margin-left:0}}' +
+      /* 지금 쓰는 열에서 고르기 — 후보 패널 */
+      '.as-wtchgroup{display:flex;flex-direction:column;gap:5px}' +
+      '.as-wtpick{border:1px solid #BFDBFE;background:#F8FBFF;border-radius:9px;padding:9px 11px;margin:2px 0 4px}' +
+      '.as-wtpickhead{font-size:.73rem;color:#6B7280;line-height:1.6;margin-bottom:7px;display:flex;gap:8px;align-items:baseline;flex-wrap:wrap}' +
+      '.as-wtpickhead b{color:#1D4ED8}' +
+      '.as-wtpickx{margin-left:auto;border:1px solid #D1D5DB;background:#fff;color:#6B7280;border-radius:6px;font-size:.7rem;padding:2px 8px;cursor:pointer}' +
+      '.as-wtpicknone{font-size:.74rem;color:#9CA3AF;padding:4px 2px}' +
+      '.as-wtpicklist{display:flex;flex-wrap:wrap;gap:5px;max-height:190px;overflow-y:auto}' +
+      '.as-wtpickchip{display:inline-flex;align-items:center;gap:4px;border:1px solid #D1D5DB;background:#fff;color:#111827;' +
+        'border-radius:7px;padding:4px 8px;font-size:.78rem;cursor:pointer;line-height:1.2}' +
+      '.as-wtpickchip:hover:not(:disabled){border-color:#60A5FA;background:#EFF6FF;color:#1D4ED8}' +
+      '.as-wtpickchip.dup{opacity:.5;cursor:default;background:#F3F4F6}' +
+      '.as-wtpickn{font-style:normal;font-size:.68rem;color:#9CA3AF;background:#F3F4F6;border-radius:4px;padding:1px 4px}' +
+      '.as-wtpickok{font-style:normal;color:#127A5E;font-size:.72rem}';
     document.head.appendChild(st);
   }
   function _hostHasTheme() {
@@ -908,6 +1049,9 @@ function _wtRenderReport(d) {
   window.wtAddCol = wtAddCol;
   window.wtDelCol = wtDelCol;
   window.wtMoveCol = wtMoveCol;
+  window.wtPickToggle = wtPickToggle;
+  window.wtPickFilter = wtPickFilter;
+  window.wtPickAdd = wtPickAdd;
   window.wtChAdd = wtChAdd;
   window.wtChDel = wtChDel;
   window.wtChMove = wtChMove;
