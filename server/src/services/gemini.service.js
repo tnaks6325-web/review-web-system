@@ -306,12 +306,19 @@ async function classifySubmissionImage(base64Data, mimeType = 'image/jpeg') {
   const startTime = Date.now();
 
   // 같은 파일 재업로드·재시도는 캐시로 상각(extractOrderFromImage와 같은 저장소, 키에 용도 접두)
-  const cacheHash = _getCacheKey('classify:' + base64Data);
+  // ★ 접두가 'classify2:' 인 이유: 응답에 channel/reviewText 등이 추가됐다. 옛 접두를 그대로 쓰면
+  //   배포 직후 옛 캐시(새 필드 없음)가 히트해 채널이 undefined 인 판정이 나간다.
+  //   이 캐시는 **첨부 시점 1차 필터 → 제출 시점 2차 검수** 사이의 재사용이 핵심이라
+  //   (같은 이미지 = 같은 해시) AI 콜이 사실상 늘지 않는다.
+  const cacheHash = _getCacheKey('classify2:' + base64Data);
   const cached = _getFromCache(cacheHash);
   if (cached) return { ...cached, elapsed: Date.now() - startTime, cached: true };
 
   const cleanBase64 = base64Data.replace(/^data:image\/[a-z]+;base64,/, '');
   const imagePart = { inlineData: { data: cleanBase64, mimeType: mimeType || 'image/jpeg' } };
+  // ★★ kind 판정 기준 3줄은 **한 글자도 바꾸지 않는다** — 이 콜은 기존 슬롯 검수
+  //   (captureVerify.verifyCapture → capture_mismatch 알림)가 그대로 쓰고 있어,
+  //   기준을 손대면 오래 검증된 판정이 조용히 달라진다. 아래는 **필드 추가만**.
   const prompt = `이 이미지가 무엇인지 판별해 JSON으로만 답하세요.
 
 kind 판정 기준:
@@ -319,8 +326,20 @@ kind 판정 기준:
 - "receipt": 현금영수증/결제 영수증. 국세청, 현금영수증, 승인번호, 사업자등록번호, 지출증빙, 거래일시 중 하나 이상이 보임.
 - "other": 둘 다 아님(상품 사진, 주문내역, 빈 화면 등).
 
+channel 판정 기준 (kind가 "review"일 때만, 확실하지 않으면 빈 문자):
+- "coupang": 주황색 별점 · "판매자:" 표기 · "도움 N | 랭킹 N등" · "리뷰 작성/작성한 리뷰" 탭 · 사이즈·색상·평소 사이즈·키 속성표
+- "naver": 빨간 별점 옆에 숫자 · "[스마트스토어]" · "수량: N" · 우측 "수정" 버튼 · 하단 네이버 탭바(홈·카테고리·검색·마이쇼핑)
+- "kakao": 헤더 "후기" · "작성 목록 / 작성 대기 목록" 탭 · 초 단위 날짜(2026-07-16 22:10:11) · "♡ 좋아요 N명"
+- "oliveyoung": 하단 탭바의 "올영매장" · 회원등급 뱃지(BABY/PINK/GOLD/BLACK OLIVE) · 속성 평가표(보습력·끈적임·향) · "도움이 돼요" · "신고하기"
+
+이미지에서 읽히는 대로 함께 채우세요(없으면 빈 값):
+- productName: 화면에 보이는 상품명 (최대 200자)
+- reviewText: 리뷰 본문 전문 (최대 500자)
+- authorMask: 작성자 표시 이름 (예 "김**")
+- signals: 위 판정의 근거가 된 화면 속 문구·요소 (최대 5개 문자열)
+
 JSON 형식:
-{"kind":"review|receipt|other","confidence":0.0~1.0,"businessNo":"사업자등록번호(없으면 빈문자)","amount":금액숫자(없으면 0),"reason":"한 문장 근거"}`;
+{"kind":"review|receipt|other","confidence":0.0~1.0,"channel":"coupang|naver|kakao|oliveyoung 또는 빈문자","device":"pc|mobile 또는 빈문자","productName":"","reviewText":"","authorMask":"","signals":[],"businessNo":"사업자등록번호(없으면 빈문자)","amount":금액숫자(없으면 0),"reason":"한 문장 근거"}`;
 
   try {
     const { text } = await _runModel([prompt, imagePart], 'classify');
@@ -328,12 +347,20 @@ JSON 형식:
     const jsonStr = text.replace(/```json\s*/g, '').replace(/```\s*/g, '').trim();
     const p = JSON.parse(jsonStr);
     const kind = ['review', 'receipt', 'other'].includes(p.kind) ? p.kind : 'other';
+    const CH = ['coupang', 'naver', 'kakao', 'oliveyoung'];
     const out = {
       kind,
       confidence: Math.max(0, Math.min(1, Number(p.confidence) || 0)),
       businessNo: String(p.businessNo || '').replace(/[^0-9]/g, ''),
       amount: Math.max(0, parseInt(String(p.amount).replace(/[^0-9]/g, ''), 10) || 0),
       reason: String(p.reason || '').slice(0, 200),
+      // ── 이하 추가 필드(기존 소비처는 읽지 않으므로 동작 불변) ──
+      channel: CH.includes(p.channel) ? p.channel : '',
+      device: ['pc', 'mobile'].includes(p.device) ? p.device : '',
+      productName: String(p.productName || '').slice(0, 200),
+      reviewText: String(p.reviewText || '').slice(0, 500),
+      authorMask: String(p.authorMask || '').slice(0, 60),
+      signals: Array.isArray(p.signals) ? p.signals.slice(0, 5).map(s => String(s).slice(0, 80)) : [],
     };
     _putToCache(cacheHash, out);
     return { ...out, elapsed: Date.now() - startTime };

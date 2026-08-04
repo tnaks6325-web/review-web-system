@@ -98,8 +98,11 @@ const cv = require('../src/services/captureVerify.service');
   /* ═══ 배선 ═══ */
   const gem = readS('services/gemini.service.js');
   const app = readF('js/search-app.js');
+  // ★ 캐시 접두는 **버전이 올라갈 수 있다**(응답에 필드를 추가하면 옛 캐시가 히트하면 안 되므로
+  //   classify: → classify2: 처럼 올린다). 검사의 의도는 "extract 와 다른 용도 접두를 쓴다"이지
+  //   특정 문자열이 아니므로, 숫자 접미를 허용해 고정한다.
   ok('Gemini에 이미지 형식 판별 함수 추가(기존 캐시·타임아웃 골격 재사용)',
-    /async function classifySubmissionImage/.test(gem) && /_getCacheKey\('classify:'/.test(gem)
+    /async function classifySubmissionImage/.test(gem) && /_getCacheKey\('classify\d*:'/.test(gem)
     && /classifySubmissionImage,/.test(gem));
   ok('업로드 경로가 검수를 호출하되 결과가 업로드를 뒤집지 않는다',
     /verdict = await verifyCapture\(/.test(diag)

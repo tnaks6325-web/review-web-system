@@ -1748,6 +1748,9 @@ async function _csAddFiles(slotKey, newFiles) {
     }
   }
   _csRenderPreview(slotKey);
+  // 1차 필터 — 미리보기는 먼저 그리고(사용자가 기다리지 않게) 판별은 뒤따라 붙인다
+  _preCheckFiles('slot:' + slotKey, 'csSlot_' + slotKey, S.filesBySlot[slotKey],
+    { ..._preCtx(0), slotKey });
 }
 /* AI 검수 경고 — 슬롯 카드 안에 인라인 표시(제출은 계속 가능)
    sure=true(AI가 확실히 아니라고 판정)면 담당자에게도 알림이 갔다는 사실을 함께 알린다.
@@ -1788,6 +1791,8 @@ function _csOnDrop(e, slotKey) {
 function _csRemoveFile(slotKey, fileIdx) {
   if (S.filesBySlot[slotKey]) S.filesBySlot[slotKey].splice(fileIdx, 1);
   _csRenderPreview(slotKey);
+  _preCheckFiles('slot:' + slotKey, 'csSlot_' + slotKey, S.filesBySlot[slotKey],
+    { ..._preCtx(0), slotKey });
 }
 function _csRenderPreview(slotKey) {
   const files = S.filesBySlot[slotKey] || [];
@@ -1813,6 +1818,144 @@ function _csRenderPreview(slotKey) {
     </div>`;
   }).join("");
   if (status) { status.textContent = `${files.length}장`; status.className = "mr-slot-status ok"; }
+}
+
+/* ══════════════════════════════════════════════════════════════════
+ * 1차 필터(M0) — 캡처를 **첨부하는 순간** 리뷰 화면인지·어느 채널인지 판별한다.
+ *
+ * 왜 여기인가: 제출 버튼을 누르면 Drive 업로드와 제출 기록이 한꺼번에 끝나므로,
+ *   그 뒤에 잘못을 알아도 교체요청 → 리뷰어 재제출이라는 왕복이 생긴다.
+ *   첨부 직후에는 **아직 아무것도 저장되지 않아** 파일만 바꾸면 끝난다.
+ *
+ * ★★ 완화 금지
+ *   ① 잠금은 "리뷰 화면이 아님"이 확실할 때 하나뿐. 채널 불일치는 경고만.
+ *   ② 판정 실패·네트워크 오류·AI 미설정은 **아무것도 표시하지 않고 통과**.
+ *   ③ 같은 자리에서 2번 잠기면 "제가 올린 게 맞습니다" 우회가 열린다 —
+ *      오판으로 리뷰어가 제출 자체를 못 하는 상태(참여 소각)를 만들지 않는다.
+ * ════════════════════════════════════════════════════════════════ */
+const _PRE_BLOCK_LIMIT = 2;          // 이 횟수만큼 잠기면 우회 체크 노출
+const _preState = {};                // scope → { blocked, count, overridden, message, verdict }
+
+/** 판별에 필요한 행 컨텍스트(시트·탭). 세 첨부 경로가 같은 출처를 본다. */
+function _preCtx(idx) {
+  const rows = (S.selectedRows && S.selectedRows.length) ? S.selectedRows : (S.selectedRow ? [S.selectedRow] : []);
+  const it = rows[idx || 0] || rows[0] || {};
+  return { sheetId: it.sheetId || '', tabName: it.tabName || '' };
+}
+
+function _preGet(scope) {
+  if (!_preState[scope]) _preState[scope] = { blocked: false, count: 0, overridden: false, message: '', verdict: '' };
+  return _preState[scope];
+}
+function _preReset(scope) { delete _preState[scope]; }
+/** 잠긴 슬롯이 하나라도 있으면 제출을 막는다(우회 체크한 것은 제외). */
+function _preHasBlock() {
+  return Object.values(_preState).some(s => s.blocked && !s.overridden);
+}
+function _preBlockedMessage() {
+  const s = Object.values(_preState).find(x => x.blocked && !x.overridden);
+  return s ? s.message : '';
+}
+function _preOverride(scope) {
+  const s = _preGet(scope);
+  s.overridden = true;
+  _preRender(scope);
+}
+
+/** 판정 결과를 앵커 요소 아래에 그린다. 앵커가 없으면 조용히 넘어간다. */
+function _preRender(scope, anchorId) {
+  const s = _preGet(scope);
+  const anchor = document.getElementById(anchorId || s._anchorId || '');
+  if (anchorId) s._anchorId = anchorId;
+  if (!anchor) return;
+  const id = 'pre_' + scope.replace(/[^A-Za-z0-9_]/g, '_');
+  let el = document.getElementById(id);
+  if (!s.verdict || s.verdict === 'skip') { if (el) el.remove(); return; }
+  if (!el) {
+    el = document.createElement('div');
+    el.id = id;
+    // ★ 앵커(드롭존)에 onclick 으로 파일 선택창이 걸려 있다 — 안내문·우회 체크를 누를 때
+    //   파일 선택창이 같이 열리면 우회 체크를 아예 켤 수 없다.
+    el.addEventListener('click', (e) => e.stopPropagation());
+    anchor.appendChild(el);
+  }
+  const blocking = s.blocked && !s.overridden;
+  const tone = blocking ? { bg: '#FEF0F0', bd: '#F7BDBD', fg: '#B42318' }
+             : s.verdict === 'warn' ? { bg: '#FDF6E3', bd: '#EBD9A6', fg: '#8A5A0B' }
+             : { bg: '#EDF7F2', bd: '#B8DFCB', fg: '#0E6B45' };
+  el.style.cssText = `margin-top:8px;padding:9px 11px;border-radius:9px;background:${tone.bg};`
+    + `border:1px solid ${tone.bd};color:${tone.fg};font-size:.78rem;font-weight:600;line-height:1.5`;
+
+  let html = (s.verdict === 'pass' ? '✓ ' : '⚠ ') + escHtml(s.message);
+  if (blocking) {
+    html += '<div style="font-size:.72rem;font-weight:500;margin-top:4px;color:#8A93A3">'
+          + '파일을 다시 골라주세요. 이 상태로는 제출되지 않습니다.</div>';
+    if (s.count >= _PRE_BLOCK_LIMIT) {
+      // ★ 우회로 — 이걸 없애면 AI 오판 시 리뷰어가 제출을 영영 못 한다.
+      html += `<label style="display:flex;align-items:center;gap:6px;margin-top:7px;font-size:.74rem;font-weight:600;cursor:pointer">`
+            + `<input type="checkbox" onchange="_preOverride('${scope}')" style="width:14px;height:14px">`
+            + `제가 올린 게 맞습니다 — 이대로 제출할게요</label>`
+            + '<div style="font-size:.7rem;font-weight:500;margin-top:3px;color:#8A93A3">'
+            + '확인이 필요해 담당자에게도 함께 전달됩니다.</div>';
+    }
+  } else if (s.overridden) {
+    html = '✓ 확인하셨습니다 — 이대로 제출됩니다.';
+    el.style.background = '#F3F4F6'; el.style.borderColor = '#D9DCE1'; el.style.color = '#4B5563';
+  } else if (s.verdict === 'warn') {
+    html += '<div style="font-size:.72rem;font-weight:500;margin-top:4px;color:#8A93A3">'
+          + '맞게 올리셨다면 그대로 제출하셔도 됩니다.</div>';
+  }
+  el.innerHTML = html;
+}
+
+/**
+ * 파일 1장을 서버에 물어본다. 실패는 전부 '통과'로 흡수한다.
+ * @returns {Promise<{verdict:string,message:string,blocked:boolean}|null>}
+ */
+async function _preCheckOne(fileObj, ctx) {
+  try {
+    const r = await fetch(API_BASE_URL + '/api/image/review-precheck', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        base64: fileObj.b64, mimeType: fileObj.type || 'image/jpeg',
+        sheetId: ctx.sheetId, tabName: ctx.tabName, slotKey: ctx.slotKey || 'review',
+      }),
+    });
+    if (!r.ok) return null;
+    const j = await r.json();
+    return (j && j.ok) ? j : null;
+  } catch (_) { return null; }   // 네트워크 실패 = 무판정 통과
+}
+
+/**
+ * 첨부된 파일들을 판별해 상태를 갱신한다. 세 첨부 경로(단일·다건·슬롯)가 모두 이걸 부른다.
+ * ★ 미리보기 모드(관리자)에서는 돌리지 않는다 — 제출 자체가 막혀 있어 의미가 없다.
+ */
+async function _preCheckFiles(scope, anchorId, fileObjs, ctx) {
+  const s = _preGet(scope);
+  s._anchorId = anchorId;
+  if (_PREVIEW_MODE || !Array.isArray(fileObjs) || fileObjs.length === 0) {
+    _preReset(scope); _preRender(scope, anchorId); return;
+  }
+  // 여러 장이면 가장 나쁜 판정을 그 슬롯의 상태로 삼는다(한 장이라도 이상하면 확인이 필요하다)
+  const results = await Promise.all(fileObjs.slice(0, 5).map(fo => _preCheckOne(fo, ctx)));
+  const rank = { block: 3, warn: 2, pass: 1, skip: 0 };
+  let worst = null;
+  for (const r of results) {
+    if (!r || !r.verdict) continue;
+    if (!worst || (rank[r.verdict] || 0) > (rank[worst.verdict] || 0)) worst = r;
+  }
+  const cur = _preGet(scope);
+  if (!worst) { cur.verdict = ''; cur.blocked = false; cur.message = ''; _preRender(scope, anchorId); return; }
+
+  const wasBlocked = cur.blocked;
+  cur.verdict = worst.verdict;
+  cur.message = worst.message || '';
+  cur.blocked = !!worst.blocked;
+  // 새로 잠긴 경우에만 카운트를 올린다(같은 상태 재렌더로 우회 체크가 앞당겨지지 않게)
+  if (cur.blocked && !wasBlocked) cur.count += 1;
+  if (!cur.blocked) cur.overridden = false;   // 정상 파일로 바꾸면 우회 표시도 걷는다
+  _preRender(scope, anchorId);
 }
 
 /* ─── 다건 슬롯 파일 핸들러 ─── */
@@ -1847,10 +1990,14 @@ async function _mrAddFiles(idx, newFiles) {
     }
   }
   _mrRenderPreview(idx);
+  _preCheckFiles('idx:' + idx, 'mrSlot_' + idx, S.filesByIdx[idx],
+    { ..._preCtx(idx), slotKey: 'review' });
 }
 function _mrRemoveFile(idx, fileIdx) {
   if (S.filesByIdx[idx]) S.filesByIdx[idx].splice(fileIdx, 1);
   _mrRenderPreview(idx);
+  _preCheckFiles('idx:' + idx, 'mrSlot_' + idx, S.filesByIdx[idx],
+    { ..._preCtx(idx), slotKey: 'review' });
 }
 function _mrRenderPreview(idx) {
   const files = S.filesByIdx[idx] || [];
@@ -2127,8 +2274,13 @@ async function addFiles(files) {
     }
   }
   renderPreviews();
+  _preCheckFiles('single', 'dropZone', S.files, { ..._preCtx(0), slotKey: 'review' });
 }
-function removeFile(i) { S.files.splice(i, 1); renderPreviews(); }
+function removeFile(i) {
+  S.files.splice(i, 1);
+  renderPreviews();
+  _preCheckFiles('single', 'dropZone', S.files, { ..._preCtx(0), slotKey: 'review' });
+}
 function renderPreviews() {
   const ph   = document.getElementById("dzPlaceholder");
   const prev = document.getElementById("dzPreview");
@@ -2160,6 +2312,12 @@ async function _submitReviewSlots(item) {
   const slotsToUpload = slots.filter(s => (S.filesBySlot[s.key] || []).length > 0);
   if (slotsToUpload.length === 0) {
     showToast("제출할 캡처 이미지를 1장 이상 첨부해주세요.", "warning");
+    return;
+  }
+
+  // ★ 1차 필터에 잠긴 슬롯이 남아 있으면 제출하지 않는다(우회 체크한 것은 통과).
+  if (_preHasBlock()) {
+    showToast(_preBlockedMessage() || "리뷰 화면이 아닌 것 같아요. 파일을 다시 골라주세요.", "warning");
     return;
   }
 
@@ -2310,6 +2468,12 @@ async function submitReview() {
 
   // ── 캡처 슬롯 모드 (단일 행, 여러 종류 캡처) → 전용 핸들러 ──
   if (S.captureSlots) { return _submitReviewSlots(items[0]); }
+
+  // ★ 1차 필터에 잠긴 첨부가 남아 있으면 제출하지 않는다(우회 체크한 것은 통과).
+  if (_preHasBlock()) {
+    showToast(_preBlockedMessage() || "리뷰 화면이 아닌 것 같아요. 파일을 다시 골라주세요.", "warning");
+    return;
+  }
 
   const isMulti = items.length > 1;
 
@@ -2477,6 +2641,8 @@ function resetApp() {
   hide("successModal");
   S.files = []; S.selectedRow = null; S.selectedRows = []; S.filesByIdx = {}; S.memoByIdx = {};
   S.filesBySlot = {}; S.captureSlots = null;
+  // ★ 1차 필터 상태도 함께 비운다 — 남겨두면 다음 제출이 지난 판정 때문에 잠긴다.
+  Object.keys(_preState).forEach(k => delete _preState[k]);
   const nameEl = document.getElementById("nameInput");
   const memoEl = document.getElementById("memoTxt");
   if (nameEl) nameEl.value = "";
