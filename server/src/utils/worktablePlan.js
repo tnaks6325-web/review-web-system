@@ -46,9 +46,16 @@ function channelFromUrl(url) {
   }
   return 'unknown';
 }
-function channelLabel(key) {
+/**
+ * 채널 라벨 — 기본 4채널 + **템플릿에 직접 추가한 채널**까지 본다.
+ * ★ 자동 판정(`channelFromUrl`)은 여전히 기본 4채널만 한다 — 커스텀 채널은 주소로 알아낼
+ *   규칙이 없어 담당자가 직접 고른다(틀린 자동 추측보다 안전, 와이어프레임 C 확정).
+ */
+function channelLabel(key, template) {
   const c = CASH_RECEIPT_CHANNELS.find(x => x.key === key);
-  return c ? c.label : '미상';
+  if (c) return c.label;
+  const custom = (((template || {}).customChannels) || []).find(x => x && x.key === key);
+  return custom ? custom.label : '미상';
 }
 
 /* ── 날짜 ────────────────────────────────────────────────────────────────
@@ -157,18 +164,52 @@ function distributeOptions({ total, options = [] } = {}) {
 }
 
 /* ── 열 구성 ─────────────────────────────────────────────────────────────
-   작업표의 열 = **공통 + 그 채널 행**. 공통에 있는 이름은 채널에서 건너뛴다(같은 열 2번 방지). */
-function buildColumns({ template, channel, tabOpts = {} } = {}) {
-  const core = ((template && template.core) || []).map(s => String(s || '').trim()).filter(Boolean);
-  const chan = (((template && template.channels) || {})[channel] || []).map(s => String(s || '').trim()).filter(Boolean);
+   작업표의 열 = **공통 + 그 채널 행 + 켠 작업유형**. 이미 담긴 이름은 건너뛴다(같은 열 2번 방지).
+
+   ★ 순서(와이어프레임 D 확정): `[번호·구매일자 등 자동 열] + [앞쪽 유형] + [나머지 공통] +
+     [채널] + [뒤쪽 유형]`. 옵션·리뷰옵션처럼 작업지시 칸은 앞쪽(front), 택배송장번호처럼
+     기록용 칸은 뒤쪽(back)에 붙인다.
+   ★ **유형을 하나도 안 켜면 종전과 완전히 같은 순서**(공통 → 채널) — 안 쓰면 무변화. */
+function buildColumns({ template, channel, workTypes, tabOpts = {} } = {}) {
+  const norm = (arr) => (arr || []).map(s => String(s || '').trim()).filter(Boolean);
+  const core = norm((template && template.core));
+  const chan = norm((((template && template.channels) || {})[channel]));
+
+  /* 켠 작업유형 = 템플릿의 유형 중 `workTypes`(키 배열)에 포함된 것. 순서는 템플릿 순서 그대로. */
+  const wantedKeys = new Set((Array.isArray(workTypes) ? workTypes : []).map(k => String(k || '').trim()).filter(Boolean));
+  const types = ((template && template.workTypes) || []).filter(t => t && wantedKeys.has(t.key));
+  const frontCols = [];
+  const backCols = [];
+  types.forEach(t => {
+    const target = t.position === 'front' ? frontCols : backCols;
+    norm(t.columns).forEach(n => target.push({ name: n, typeKey: t.key }));
+  });
+
+  /* 공통의 **앞머리 자동 열**(번호·구매일자)을 찾는다 — 앞쪽 유형은 그 뒤에 온다.
+     ★ 분류는 매퍼 파생 단일 출처를 그대로 쓴다(여기서 '번호'·'일자' 규칙을 다시 만들지 않는다). */
+  const coreCls = classifyHeaders(core, tabOpts);
+  let autoPrefix = 0;
+  while (autoPrefix < coreCls.length && coreCls[autoPrefix].tier === 'auto') autoPrefix++;
+
   const seen = new Set();
   const names = [];
   const origin = [];
-  core.forEach(n => { const k = n.toLowerCase(); if (!seen.has(k)) { seen.add(k); names.push(n); origin.push('common'); } });
-  chan.forEach(n => { const k = n.toLowerCase(); if (!seen.has(k)) { seen.add(k); names.push(n); origin.push('channel'); } });
+  const typeKeys = [];
+  const push = (n, org, tk) => {
+    const k = String(n).toLowerCase();
+    if (seen.has(k)) return;                 // 이미 담긴 열 = 작업표에 같은 열 2번 생성 차단
+    seen.add(k); names.push(n); origin.push(org); typeKeys.push(tk || null);
+  };
+  core.slice(0, autoPrefix).forEach(n => push(n, 'common'));
+  frontCols.forEach(c => push(c.name, 'worktype', c.typeKey));
+  core.slice(autoPrefix).forEach(n => push(n, 'common'));
+  chan.forEach(n => push(n, 'channel'));
+  backCols.forEach(c => push(c.name, 'worktype', c.typeKey));
+
   const cls = classifyHeaders(names, tabOpts);
   return cls.map((c, i) => ({
-    name: c.header, role: c.role, label: c.label, tier: c.tier, conflict: c.conflict || null, origin: origin[i],
+    name: c.header, role: c.role, label: c.label, tier: c.tier, conflict: c.conflict || null,
+    origin: origin[i], typeKey: typeKeys[i],
   }));
 }
 
@@ -183,7 +224,11 @@ function buildColumns({ template, channel, tabOpts = {} } = {}) {
 function buildWorktablePlan({ workOrder, template, options: o = {} } = {}) {
   const wo = workOrder || {};
   const channel = (o.channel && String(o.channel)) || channelFromUrl(wo.product_url);
-  const columns = buildColumns({ template, channel });
+  /* ★★ 작업유형은 **명시적으로 켠 것만** 반영한다(미전송 = 없음).
+     제안(`suggestedWorkTypes`)은 화면이 체크를 미리 해 주는 재료일 뿐, 여기서 조용히 적용하면
+     "정하지 않았는데 정해진" 표가 만들어진다(설정 프리셋과 같은 규율). */
+  const workTypes = (Array.isArray(o.workTypes) ? o.workTypes : []).map(k => String(k || '').trim()).filter(Boolean);
+  const columns = buildColumns({ template, channel, workTypes });
 
   const rawTotal = o.total != null ? o.total : wo.recruit_count;
   const total = Math.max(0, Math.min(parseInt(rawTotal, 10) || 0, MAX_ROWS));
@@ -264,17 +309,54 @@ function buildWorktablePlan({ workOrder, template, options: o = {} } = {}) {
     warnings.push({ code: 'no_date_column', message: '날짜를 나눴지만 표에 구매일자 열이 없어 기입되지 않습니다 — 그날 모집 정원도 시트에서 파생되지 않습니다. 공통 열에 구매일자 칸을 추가하세요.' });
   }
 
+  /* ── 작업유형 목록 + 자동 제안 ────────────────────────────────────────
+     ★ 제안 근거는 **열 역할에서 파생**한다 — 유형 이름이 자유 문자열이라 이름으로 맞추면
+       '상품옵션'을 '옵션종류'로 바꾼 순간 제안이 조용히 죽는다. 옵션 열(role='option')을 가진
+       유형은 작업오더 옵션이 2종 이상일 때 제안한다(옵션 1종 이하는 배분 자체를 안 한다).
+     ★ 제안은 **체크를 미리 해 주는 것까지** — 확정은 담당자가 한다(학습은 제안까지 규율). */
+  const allTypes = ((template && template.workTypes) || []).map(t => {
+    const cols = classifyHeaders((t.columns || []).map(s => String(s || '').trim()).filter(Boolean), {});
+    const hasOption = cols.some(c => c.role === 'option');
+    return {
+      key: t.key, label: t.label, desc: t.desc || '', position: t.position === 'front' ? 'front' : 'back',
+      columns: cols.map(c => ({ name: c.header, role: c.role, label: c.label, tier: c.tier })),
+      suggested: hasOption && buckets.length >= 2,
+      suggestReason: (hasOption && buckets.length >= 2) ? `작업오더에 옵션 ${buckets.length}종` : '',
+      enabled: workTypes.includes(t.key),
+    };
+  });
+  const suggestedWorkTypes = allTypes.filter(t => t.suggested).map(t => t.key);
+
+  /* 켠 유형인데 그 열이 하나도 안 붙었다면(전부 이미 있는 이름) 조용히 사라진 것처럼 보인다. */
+  const emptyTypes = allTypes.filter(t => t.enabled && !columns.some(c => c.typeKey === t.key));
+  if (emptyTypes.length) {
+    warnings.push({
+      code: 'worktype_no_column',
+      message: `켠 작업유형에 새로 붙은 열이 없습니다(${emptyTypes.map(t => t.label).join(', ')}) — 이미 공통·채널에 같은 이름의 열이 있습니다.`,
+    });
+  }
+
   return {
-    channel, channelLabel: channelLabel(channel),
+    channel, channelLabel: channelLabel(channel, template),
+    channels: (typeof template === 'object' && template) ? _channelChoices(template) : [],
     columns,
     rows,
     dates: days,
     optionBuckets: buckets,
+    workTypes: allTypes,
+    enabledWorkTypes: workTypes,
+    suggestedWorkTypes,
     totals: { rows: total, days: days.length, daily, columns: columns.length },
     startDate, skipWeekends, holidays,
     blockers, warnings,
     canCreate: blockers.length === 0,
   };
+}
+
+/** 고를 수 있는 채널 목록(기본 4 + 직접 추가) — 미리보기 드롭다운이 그대로 쓴다. */
+function _channelChoices(template) {
+  const custom = ((template.customChannels) || []).map(c => ({ key: c.key, label: c.label, custom: true }));
+  return CASH_RECEIPT_CHANNELS.map(c => ({ key: c.key, label: c.label, custom: false })).concat(custom);
 }
 
 module.exports = {

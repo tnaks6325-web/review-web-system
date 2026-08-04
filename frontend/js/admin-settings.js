@@ -675,36 +675,79 @@ async function _wtFetch(url, body) {
   return j;
 }
 
-/* 열 구성 한 줄(공통 또는 채널) — ★ 공통 행과 채널 행은 **같은 빌더**로 그린다.
-   따로 만들면 한쪽에만 [▼]가 생기거나 버튼 동작이 갈린다(사본 금지 규율). */
-function _wtRowHtml(key, label, placeholder, hint) {
-  return '<div class="as-wtchgroup' + (key === 'core' ? ' common' : '') + '">' +
+/* 열 구성 한 줄(공통·채널·작업유형) — ★ 셋이 **같은 빌더**를 쓴다.
+   따로 만들면 한쪽에만 [▼]가 생기거나 버튼 동작이 갈린다(사본 금지 규율).
+   ★ 조절(순서·빼기)은 여기 없다 — 창구는 '작업표 미리보기' 하나(사용자 확정). 이 행이 하는 일은
+     **담기([＋]/[▼])와 현재 개수 요약**뿐이다. `extra` = 행 성격별 추가 버튼(유형 위치·삭제). */
+function _wtRowHtml(key, label, placeholder, hint, extra, cls) {
+  var id = _wtDomKey(key);
+  return '<div class="as-wtchgroup' + (key === 'core' ? ' common' : '') + (cls ? ' ' + cls : '') + '">' +
     '<div class="as-wtchrow">' +
       '<span class="as-wtchlabel">' + label + '</span>' +
-      '<span class="as-wtchips" id="wtChips_' + key + '"></span>' +
+      '<span class="as-wtchips" id="wtChips_' + id + '"></span>' +
       '<span class="as-wtchadd">' +
-        '<input type="text" id="wtCh_' + key + '" maxlength="40" placeholder="' + placeholder + '" ' +
+        '<input type="text" id="wtCh_' + id + '" maxlength="40" placeholder="' + placeholder + '" ' +
           'oninput="wtPickFilter(\'' + key + '\')" ' +
           'onkeydown="if(event.key===\'Enter\'){event.preventDefault();wtChAdd(\'' + key + '\');}">' +
         '<button onclick="wtPickToggle(\'' + key + '\')" title="지금 쓰는 열에서 고르기" class="pick">▼</button>' +
         '<button onclick="wtChAdd(\'' + key + '\')" title="' + hint + '">＋</button>' +
+        (extra || '') +
       '</span>' +
     '</div>' +
-    '<div class="as-wtpick" id="wtPick_' + key + '" style="display:none"></div>' +
+    '<div class="as-wtpick" id="wtPick_' + id + '" style="display:none"></div>' +
     '</div>';
 }
 
+/* 행 키 → DOM id 조각. 작업유형 키는 `wt:t1` 이라 그대로 id 에 넣으면 CSS 선택자에서 콜론이
+   의사클래스로 읽힌다 → `wt-t1` 로 바꾼다(값 자체는 서버 발급 `[a-z][a-z0-9_]*` 라 안전). */
+function _wtDomKey(key) { return String(key).replace(':', '-'); }
+
+/** 채널 목록 = 기본 4채널 + 직접 추가 채널. ★ 기본 4채널 표(CR_GUIDE_CHANNELS)는 그대로 재사용. */
+function _wtChannels() {
+  var custom = ((_wtTpl && _wtTpl.customChannels) || []).map(function (c) {
+    return { key: c.key, label: c.label, emoji: '🏷', custom: true };
+  });
+  return CR_GUIDE_CHANNELS.map(function (c) {
+    return { key: c.key, label: c.label, emoji: c.emoji, custom: false };
+  }).concat(custom);
+}
+/** 작업유형 목록(저장된 것 그대로). */
+function _wtTypes() { return (_wtTpl && _wtTpl.workTypes) || []; }
+
+/** 채널·유형 행 묶음 — 저장값이 바뀌면 다시 그린다(채널/유형 추가·삭제 즉시 반영). */
+function _wtRowsHtml() {
+  var chan = _wtChannels().map(function (c) {
+    var del = c.custom
+      ? '<button onclick="wtDelChannel(\'' + c.key + '\')" title="이 채널 삭제" class="rm">채널 삭제</button>' : '';
+    return _wtRowHtml(c.key, c.emoji + ' ' + escHtml(c.label) + (c.custom ? ' <i>직접 추가한 채널</i>' : ''),
+      '열 이름', '이 채널에만 열 추가', del);
+  }).join('');
+  var types = _wtTypes().map(function (t) {
+    var pos = t.position === 'front' ? '앞쪽' : '뒤쪽';
+    var extra =
+      '<button onclick="wtToggleTypePos(\'' + t.key + '\')" title="열이 붙는 위치(앞쪽=구매일자 뒤 · 뒤쪽=맨 뒤)" class="pos">' + pos + '</button>' +
+      '<button onclick="wtDelType(\'' + t.key + '\')" title="이 작업유형 삭제" class="rm">유형 삭제</button>';
+    return _wtRowHtml('wt:' + t.key, '🎛 ' + escHtml(t.label) + (t.desc ? ' <i>' + escHtml(t.desc) + '</i>' : ''),
+      '열 이름', '이 유형에만 열 추가', extra, 'wtype');
+  }).join('');
+  return chan +
+    '<div class="as-wtaddrow"><button onclick="wtAddChannel()">＋ 작업채널 추가</button>' +
+      '<span>지마켓처럼 목록에 없는 채널을 직접 만듭니다</span></div>' +
+    '<div class="as-wtsecline">작업유형별 열 <span>— 채널과 별개로, 상황에 따라 붙는 열</span></div>' +
+    types +
+    '<div class="as-wtaddrow"><button onclick="wtAddType()">＋ 작업유형 추가</button>' +
+      '<span>상품옵션·리뷰유형·택배발송대행처럼 그 작업일 때만 붙는 열 묶음</span></div>';
+}
+
 function _worktableHtml() {
-  /* 열 구성 — ★ 맨 위 **공통(모든 채널)** 행 + 채널 4행.
-     공통 행이 편집하는 값은 위 목록(표준 열)과 **같은 한 벌**이다(별도 개념을 만들지 않는다):
-     작업표의 열 = 공통 + 그 채널 행. 채널마다 15열을 반복해 넣지 않아도 된다. */
+  /* 열 구성 — ★ 맨 위 **🌐 공통(모든 채널)** 행 + 미리보기 + 채널 행 + 작업유형 행.
+     공통 행이 편집하는 값은 아래 '공통 열 상세'와 **같은 한 벌**이다(별도 개념을 만들지 않는다):
+     작업표의 열 = 공통 + 그 채널 행 + 켠 작업유형. */
   var rows = _wtRowHtml('core', '🌐 공통 <i>모든 채널</i>', '열 이름 (예: 수취인)', '공통 열 추가') +
     /* ★ 공통 블록 바로 아래 = 작업표 열 구성 한 줄 미리보기(_wtRenderPreview 가 채운다).
        채널 행보다 위에 둔다 — 공통이 모든 채널의 앞머리라 순서가 곧 실제 표의 앞부분이다. */
     '<div class="as-wtpv" id="wtPreview"></div>' +
-    CR_GUIDE_CHANNELS.map(function (c) {
-      return _wtRowHtml(c.key, c.emoji + ' ' + c.label, '열 이름', '이 채널에만 열 추가');
-    }).join('');
+    '<div id="wtRows"></div>';
   return `
         <!-- 작업표 표준 열 -->
         <div class="admin-section-header">
@@ -714,16 +757,15 @@ function _worktableHtml() {
           <span id="wtSavedAt" style="font-size:.72rem;color:var(--t3)"></span>
         </div>
         <p style="font-size:.78rem;color:var(--t3);margin:8px 0 12px;line-height:1.6">
-          작업표를 만들 때 들어갈 열을 정합니다. <b>공통</b> 행은 모든 채널에 들어가고,
-          <b>채널</b> 행은 그 채널일 때만 덧붙습니다 — 그래서 채널마다 같은 열을 반복해 넣을 필요가 없습니다.
+          작업표를 만들 때 들어갈 열을 정합니다. <b>작업표의 열 = 공통 + 그 채널 + 켠 작업유형</b>이라
+          채널·유형마다 같은 열을 반복해 넣을 필요가 없습니다.
           아래 <b>헤더 학습 리포트</b>는 우리 시트들이 실제로 쓰는 열 통계이니, 정할 때 근거로 보세요.
         </p>
 
         <div style="font-size:.82rem;font-weight:700;margin-bottom:4px">열 구성</div>
         <p style="font-size:.75rem;color:var(--t3);margin:0 0 8px;line-height:1.6">
-          오른쪽 칸에 이름을 넣고 [＋]로 추가하거나 [▼]로 <b>지금 쓰는 열</b>에서 고릅니다.
-          공통 열의 순서·빼기는 <b>작업표 미리보기</b> 칸을 눌러 조절하고,
-          채널 열은 블록의 ◀▶✕로 조절합니다.
+          각 행의 칸에 이름을 넣고 [＋]로 담거나 [▼]로 <b>지금 쓰는 열</b>에서 고릅니다.
+          <b>순서·빼기는 아래 작업표 미리보기</b>에서 칸을 눌러 조절합니다(조절 창구는 한 곳).
         </p>
         <div class="as-wtchbox">${rows}</div>
 
@@ -782,62 +824,238 @@ function _worktableHtml() {
    ★ 칸 클릭은 **인덱스만** 넘긴다(onclick 문자열에 열 이름 금지 — 따옴표 탈출 차단).
    ★ 채널 열은 채널마다 달라 특정 채널을 고를 수 없다 → 끝에 점선 '＋채널' 칸으로 "여기에
      그 채널 열이 덧붙는다"만 알린다(틀린 채널을 그리느니 자리만 표시). */
-var _wtPvSel = null;   // 미리보기에서 선택된 공통 열 인덱스(null=선택 없음)
+var _wtPvSel = null;    // 미리보기에서 선택된 칸 인덱스(합성 목록 기준, null=선택 없음)
+var _wtPvChan = '';     // 미리보기에 얹은 채널('' = 공통만)
+var _wtPvTypes = [];    // 미리보기에 켠 작업유형 키들
+
+/* ══════════════════════════════════════════════════════════════
+   ★★ 합성 규칙 = 서버 `worktablePlan.buildColumns` 와 **같은 순서**여야 한다
+   ──────────────────────────────────────────────────────────────
+   순서 = [공통 앞머리 자동 열] + [앞쪽 유형] + [나머지 공통] + [채널] + [뒤쪽 유형],
+   이미 담긴 이름(대소문자 무시)은 건너뛴다. 화면이 즉시(저장 전에도) 그려야 해서 여기서
+   계산하지만, **회귀가드가 서버 buildColumns 와 결과 순서를 대조**해 드리프트를 막는다.
+   ★ 저장 전 새로 담은 열은 아직 분류(tier)가 없어 자동 열 앞머리 판정만 잠깐 달라질 수 있다
+     — 저장하면 서버 분류가 내려와 일치한다(그 외 순서 규칙은 동일).
+   ══════════════════════════════════════════════════════════════ */
+function _wtMergeCols(chanKey, typeKeys) {
+  var colsByName = {};
+  ((_wtTpl && _wtTpl.columns) || []).forEach(function (c) { colsByName[c.name.toLowerCase()] = c; });
+  Object.keys((_wtTpl && _wtTpl.channelColumns) || {}).forEach(function (k) {
+    (_wtTpl.channelColumns[k] || []).forEach(function (c) { if (!colsByName[c.name.toLowerCase()]) colsByName[c.name.toLowerCase()] = c; });
+  });
+  Object.keys((_wtTpl && _wtTpl.workTypeColumns) || {}).forEach(function (k) {
+    (_wtTpl.workTypeColumns[k] || []).forEach(function (c) { if (!colsByName[c.name.toLowerCase()]) colsByName[c.name.toLowerCase()] = c; });
+  });
+
+  var core = (_wtTpl && _wtTpl.core) || [];
+  var coreCols = (_wtTpl && _wtTpl.columns) || [];
+  var chan = chanKey ? _wtListFor(chanKey) : [];
+  var wanted = {};
+  (typeKeys || []).forEach(function (k) { wanted[k] = 1; });
+  var front = [], back = [];
+  _wtTypes().forEach(function (t) {
+    if (!wanted[t.key]) return;
+    (t.columns || []).forEach(function (n) {
+      (t.position === 'front' ? front : back).push({ name: n, list: 'wt:' + t.key });
+    });
+  });
+
+  // 공통의 앞머리 자동 열(번호·구매일자) 개수 — 앞쪽 유형은 그 뒤에 온다.
+  var autoPrefix = 0;
+  while (autoPrefix < coreCols.length && coreCols[autoPrefix] && coreCols[autoPrefix].tier === 'auto') autoPrefix++;
+
+  var seen = {}, out = [];
+  var push = function (name, list, origin) {
+    var k = String(name).toLowerCase();
+    if (seen[k]) return;
+    seen[k] = 1;
+    var meta = colsByName[k] || { name: name, role: null, label: null, tier: null };
+    out.push({ name: name, role: meta.role, label: meta.label, tier: meta.tier,
+      duplicateRole: !!meta.duplicateRole, pending: !!meta.pending, list: list, origin: origin,
+      idx: _wtListFor(list).indexOf(name) });
+  };
+  core.slice(0, autoPrefix).forEach(function (n) { push(n, 'core', 'common'); });
+  front.forEach(function (c) { push(c.name, c.list, 'worktype'); });
+  core.slice(autoPrefix).forEach(function (n) { push(n, 'core', 'common'); });
+  chan.forEach(function (n) { push(n, chanKey, 'channel'); });
+  back.forEach(function (c) { push(c.name, c.list, 'worktype'); });
+  return out;
+}
+
+/** 미리보기 알약 — 채널 1택 + 작업유형 다중 토글. */
+function _wtPvPills() {
+  var ch = '<span class="as-wtpvpg"><b>채널</b>' +
+    '<button class="as-wtpvp' + (_wtPvChan ? '' : ' on') + '" onclick="wtPvChan(\'\')">기본(공통만)</button>' +
+    _wtChannels().map(function (c) {
+      return '<button class="as-wtpvp' + (_wtPvChan === c.key ? ' on' : '') + '" onclick="wtPvChan(\'' + c.key + '\')">' +
+        c.emoji + ' ' + escHtml(c.label) + '</button>';
+    }).join('') + '</span>';
+  var types = _wtTypes();
+  if (!types.length) return ch;
+  var tp = '<span class="as-wtpvpg"><b>작업유형</b>' + types.map(function (t) {
+    return '<button class="as-wtpvp t' + (_wtPvTypes.indexOf(t.key) >= 0 ? ' on' : '') +
+      '" onclick="wtPvType(\'' + t.key + '\')">' + escHtml(t.label) + '</button>';
+  }).join('') + '</span>';
+  return ch + tp;
+}
+
 function _wtRenderPreview() {
   var box = document.getElementById('wtPreview');
   if (!box) return;
-  var cols = (_wtTpl && _wtTpl.columns) || [];
+  // 지워진 채널·유형을 보고 있었으면 기본으로 되돌린다(없는 것을 그리지 않는다).
+  if (_wtPvChan && !_wtChannels().some(function (c) { return c.key === _wtPvChan; })) _wtPvChan = '';
+  _wtPvTypes = _wtPvTypes.filter(function (k) { return _wtTypes().some(function (t) { return t.key === k; }); });
+
+  var cols = _wtMergeCols(_wtPvChan, _wtPvTypes);
   if (_wtPvSel != null && (_wtPvSel < 0 || _wtPvSel >= cols.length)) _wtPvSel = null;
+  var pills = '<div class="as-wtpvpills">' + _wtPvPills() + '</div>';
   if (!cols.length) {
     _wtPvSel = null;
-    box.innerHTML = '<div class="as-wtpvempty">공통 열을 담으면 여기에 작업표 모양이 한 줄로 보입니다.</div>';
+    box.innerHTML = pills + '<div class="as-wtpvempty">공통 열을 담으면 여기에 작업표 모양이 한 줄로 보입니다.</div>';
     return;
   }
+  var ORIGIN = { common: '공통 열', channel: '채널 열', worktype: '작업유형 열' };
   var cells = cols.map(function (c, i) {
     var tier = String(c.tier || '') || (c.role ? 'core' : '');
-    var tip = c.name + (c.role ? ' · 시스템 인식: ' + (c.label || c.role) : ' · 제출이 값을 쓰지 않는 열');
-    return '<span class="as-wtpvc' + (tier ? ' ' + tier : '') + (c.duplicateRole ? ' dup' : '') +
+    var tip = c.name + ' · ' + ORIGIN[c.origin] +
+      (c.role ? ' · 시스템 인식: ' + (c.label || c.role) : ' · 제출이 값을 쓰지 않는 열');
+    return '<span class="as-wtpvc' + (tier ? ' ' + tier : '') + ' o-' + c.origin + (c.duplicateRole ? ' dup' : '') +
       (i === _wtPvSel ? ' sel' : '') + '" onclick="wtPvSel(' + i + ')" title="' +
       escHtml(String(i + 1) + '. ' + tip + ' · 클릭하면 순서·빼기 조절') + '">' + escHtml(c.name) + '</span>';
   }).join('');
   var tool = '';
   if (_wtPvSel != null) {
     var s = cols[_wtPvSel];
+    // ★ 이동은 **같은 묶음 안에서만** — 공통 열을 채널 자리로 옮길 수는 없다(묶음이 곧 소속).
+    var sib = cols.map(function (c, i) { return c.list === s.list ? i : -1; }).filter(function (i) { return i >= 0; });
+    var first = sib[0] === _wtPvSel, last = sib[sib.length - 1] === _wtPvSel;
     tool = '<div class="as-wtpvtool">' +
       '<b>' + (_wtPvSel + 1) + '. ' + escHtml(s.name) + '</b>' +
-      '<span class="m">' + (s.role ? '시스템 인식: ' + escHtml(s.label || s.role) : '제출이 값을 쓰지 않는 열') + '</span>' +
-      '<button onclick="wtPvMove(-1)" title="왼쪽으로"' + (_wtPvSel === 0 ? ' disabled' : '') + '>◀ 왼쪽</button>' +
-      '<button onclick="wtPvMove(1)" title="오른쪽으로"' + (_wtPvSel === cols.length - 1 ? ' disabled' : '') + '>오른쪽 ▶</button>' +
-      '<button class="x" onclick="wtPvDel()" title="공통 열에서 빼기">✕ 빼기</button>' +
+      '<span class="m">' + ORIGIN[s.origin] + ' · ' +
+        (s.role ? '시스템 인식: ' + escHtml(s.label || s.role) : '제출이 값을 쓰지 않는 열') + '</span>' +
+      '<button onclick="wtPvMove(-1)" title="왼쪽으로"' + (first ? ' disabled' : '') + '>◀ 왼쪽</button>' +
+      '<button onclick="wtPvMove(1)" title="오른쪽으로"' + (last ? ' disabled' : '') + '>오른쪽 ▶</button>' +
+      '<button class="x" onclick="wtPvDel()" title="이 묶음에서 빼기">✕ 빼기</button>' +
       '<button class="c" onclick="wtPvSel(-1)" title="선택 해제">닫기</button>' +
       '</div>';
   }
-  box.innerHTML =
-    '<div class="as-wtpvh">작업표 미리보기 <span>— 공통 ' + cols.length + '열' +
-      ' · 칸 순서가 실제 생성 순서 · 칸을 누르면 순서·빼기 조절(채널 열은 아래 채널 행이 뒤에 덧붙습니다)</span></div>' +
-    '<div class="as-wtpvrow">' + cells + '<span class="as-wtpvc add" title="채널 행에 담은 열이 여기에 덧붙습니다">＋채널</span></div>' +
-    tool;
+  var chanName = _wtPvChan ? (_wtChannels().filter(function (c) { return c.key === _wtPvChan; })[0] || {}).label : '';
+  var sum = '공통 ' + ((_wtTpl && _wtTpl.core) || []).length + '열' +
+    (chanName ? ' + ' + escHtml(chanName) : '') +
+    (_wtPvTypes.length ? ' + 유형 ' + _wtPvTypes.length + '종' : '') +
+    ' = 모두 ' + cols.length + '열';
+  box.innerHTML = pills +
+    '<div class="as-wtpvh">작업표 미리보기 <span>— ' + sum + ' · 칸 순서가 실제 생성 순서 · 칸을 누르면 순서·빼기 조절</span></div>' +
+    '<div class="as-wtpvrow">' + cells +
+      (_wtPvChan ? '' : '<span class="as-wtpvc add" title="위 채널 알약을 누르면 그 채널 열이 합쳐진 모습을 봅니다">＋채널</span>') +
+    '</div>' + tool;
 }
 /** 미리보기 칸 선택 토글(-1 또는 같은 칸 재클릭 = 해제). 조절은 아래 wtPvMove/wtPvDel. */
 function wtPvSel(i) {
   _wtPvSel = (i == null || i < 0 || i === _wtPvSel) ? null : i;
   _wtRenderPreview();
 }
-/** 선택 열 이동 — 기존 단일 편집 경로(wtChMove)로 위임, 선택은 이동한 열을 따라간다. */
+/** 채널 알약 — 그 채널 열이 합쳐진 완성 양식을 보여준다(같은 알약 재클릭 = 기본으로). */
+function wtPvChan(key) {
+  _wtPvChan = (_wtPvChan === key) ? '' : String(key || '');
+  _wtPvSel = null;
+  _wtRenderPreview();
+}
+/** 작업유형 알약 — 다중 토글(켠 유형의 열이 합쳐진다). */
+function wtPvType(key) {
+  var i = _wtPvTypes.indexOf(key);
+  if (i >= 0) _wtPvTypes.splice(i, 1); else _wtPvTypes.push(key);
+  _wtPvSel = null;
+  _wtRenderPreview();
+}
+/** 선택 열 이동 — 기존 단일 편집 경로(wtChMove)로 위임, 선택은 이동한 열을 따라간다.
+    ★ 합성 목록의 인덱스가 아니라 **그 묶음 안의 인덱스**로 옮긴다(묶음이 곧 저장 배열). */
 function wtPvMove(dir) {
   if (_wtPvSel == null || !_wtTpl) return;
-  var arr = _wtListFor('core');
-  var i = _wtPvSel, j = i + dir;
-  if (j < 0 || j >= arr.length) return;
-  _wtPvSel = j;
-  wtChMove('core', i, dir);
+  var cols = _wtMergeCols(_wtPvChan, _wtPvTypes);
+  var s = cols[_wtPvSel];
+  if (!s) return;
+  var arr = _wtListFor(s.list);
+  var j = s.idx + dir;
+  if (s.idx < 0 || j < 0 || j >= arr.length) return;
+  wtChMove(s.list, s.idx, dir);
+  // 옮긴 뒤 그 열이 있는 자리를 다시 찾아 선택을 따라가게 한다(합성 위치는 묶음마다 달라진다).
+  var after = _wtMergeCols(_wtPvChan, _wtPvTypes);
+  for (var i = 0; i < after.length; i++) if (after[i].name === s.name) { _wtPvSel = i; break; }
+  _wtRenderPreview();
 }
 /** 선택 열 빼기 — 기존 단일 편집 경로(wtChDel)로 위임. */
 function wtPvDel() {
   if (_wtPvSel == null) return;
-  var i = _wtPvSel;
+  var cols = _wtMergeCols(_wtPvChan, _wtPvTypes);
+  var s = cols[_wtPvSel];
   _wtPvSel = null;
-  wtChDel('core', i);
+  if (!s || s.idx < 0) { _wtRenderPreview(); return; }
+  wtChDel(s.list, s.idx);
+}
+
+/* ── 작업채널·작업유형 추가/삭제 ─────────────────────────────
+   ★ 키는 **서버가 발급**한다(저장 시) — 화면은 키 없이 라벨만 보내고, 저장 응답의 키를 받는다.
+     임시 키를 화면이 지어내면 저장 전후로 키가 달라져 그 행에 담은 열이 고아가 된다. */
+function wtAddChannel() {
+  if (!_wtTpl) return;
+  var name = (prompt('추가할 작업채널 이름을 입력하세요 (예: 지마켓)') || '').trim();
+  if (!name) return;
+  var dup = _wtChannels().some(function (c) { return c.label.toLowerCase() === name.toLowerCase(); });
+  if (dup) { showToast('이미 있는 채널입니다', true); return; }
+  if (!_wtTpl.customChannels) _wtTpl.customChannels = [];
+  // 화면 임시 키(`new1`…) — 저장하면 서버가 정식 키를 발급해 되돌려준다.
+  _wtTpl.customChannels.push({ key: 'new' + (_wtTpl.customChannels.length + 1), label: name });
+  _wtRenderRows(); _wtDirty(true);
+  showToast('"' + name + '" 채널을 추가했습니다 — 열을 담고 저장하세요');
+}
+function wtDelChannel(key) {
+  if (!_wtTpl) return;
+  var c = _wtChannels().filter(function (x) { return x.key === key; })[0];
+  if (!c || !c.custom) return;   // ★ 기본 4채널은 삭제 불가(다른 기능과 짝을 이룬다)
+  var n = (_wtListFor(key) || []).length;
+  if (!confirm('"' + c.label + '" 채널' + (n ? '과 그 열 ' + n + '개 구성' : '') + '을 삭제할까요?\n이미 만들어진 시트에는 영향이 없습니다(설정만 지워집니다).')) return;
+  _wtTpl.customChannels = (_wtTpl.customChannels || []).filter(function (x) { return x.key !== key; });
+  if (_wtTpl.channels) delete _wtTpl.channels[key];
+  if (_wtPvChan === key) _wtPvChan = '';
+  _wtRenderRows(); _wtDirty(true);
+}
+function wtAddType() {
+  if (!_wtTpl) return;
+  var name = (prompt('추가할 작업유형 이름을 입력하세요 (예: 택배발송대행)') || '').trim();
+  if (!name) return;
+  if (_wtTypes().some(function (t) { return t.label.toLowerCase() === name.toLowerCase(); })) {
+    showToast('이미 있는 작업유형입니다', true); return;
+  }
+  var desc = (prompt('언제 쓰는 유형인지 한 줄 설명(선택)', '') || '').trim();
+  if (!_wtTpl.workTypes) _wtTpl.workTypes = [];
+  _wtTpl.workTypes.push({ key: 'new' + (_wtTpl.workTypes.length + 1), label: name, desc: desc, position: 'back', columns: [] });
+  _wtRenderRows(); _wtDirty(true);
+  showToast('"' + name + '" 유형을 추가했습니다 — 열을 담고 저장하세요');
+}
+function wtDelType(key) {
+  if (!_wtTpl) return;
+  var t = _wtTypes().filter(function (x) { return x.key === key; })[0];
+  if (!t) return;
+  var n = (t.columns || []).length;
+  if (!confirm('"' + t.label + '" 작업유형' + (n ? '과 그 열 ' + n + '개 구성' : '') + '을 삭제할까요?\n이미 만들어진 시트에는 영향이 없습니다(설정만 지워집니다).')) return;
+  _wtTpl.workTypes = _wtTypes().filter(function (x) { return x.key !== key; });
+  _wtPvTypes = _wtPvTypes.filter(function (k) { return k !== key; });
+  _wtRenderRows(); _wtDirty(true);
+}
+/** 유형 열이 붙는 위치(앞쪽=구매일자 뒤 / 뒤쪽=맨 뒤) 토글. */
+function wtToggleTypePos(key) {
+  var t = _wtTypes().filter(function (x) { return x.key === key; })[0];
+  if (!t) return;
+  t.position = t.position === 'front' ? 'back' : 'front';
+  _wtRenderRows(); _wtDirty(true);
+}
+/** 채널·유형 행 묶음 다시 그리기(행 개수가 바뀌었을 때) + 칩·미리보기 갱신. */
+function _wtRenderRows() {
+  var box = document.getElementById('wtRows');
+  if (box) box.innerHTML = _wtRowsHtml();
+  _wtRenderChans();
+  _wtRenderPreview();
 }
 
 function _wtRenderCols() {
@@ -910,54 +1128,57 @@ function wtMoveCol(i, dir) { return wtChMove('core', i, dir); }
 function _wtListFor(key) {
   if (!_wtTpl) return [];
   if (key === 'core') return (_wtTpl.core || (_wtTpl.core = []));
+  // 작업유형 행 — 키는 `wt:<유형키>`. 저장 배열은 그 유형의 columns 다.
+  if (String(key).indexOf('wt:') === 0) {
+    var t = _wtTypes().filter(function (x) { return x.key === String(key).slice(3); })[0];
+    if (!t) return [];
+    return (t.columns || (t.columns = []));
+  }
   if (!_wtTpl.channels) _wtTpl.channels = {};
   return (_wtTpl.channels[key] || (_wtTpl.channels[key] = []));
 }
 /** 편집 뒤 갱신 — 공통은 상세 목록(역할·경고)까지 다시 그린다. */
 function _wtAfterEdit(key) {
-  if (key === 'core') _wtSyncColumns();   // 내부에서 _wtRenderChans + dirty 까지 수행
-  else { _wtRenderChans(); _wtDirty(true); }
+  if (key === 'core') _wtSyncColumns();   // 내부에서 _wtRenderChans + 미리보기 + dirty 까지 수행
+  else { _wtRenderChans(); _wtRenderPreview(); _wtDirty(true); }
 }
 function _wtAllRowKeys() {
-  return ['core'].concat(CR_GUIDE_CHANNELS.map(function (c) { return c.key; }));
+  return ['core']
+    .concat(_wtChannels().map(function (c) { return c.key; }))
+    .concat(_wtTypes().map(function (t) { return 'wt:' + t.key; }));
 }
 
+/* ★★ 모든 행(공통·채널·작업유형)은 **개수 요약만** 그린다 — 조절 창구는 '작업표 미리보기' 하나.
+   칩에 ◀▶✕ 를 두면 같은 열이 두 곳에서 편집돼(칩 · 미리보기) 곧 어긋난다(창구 단일화 규율). */
 function _wtRenderChans() {
   if (!_wtTpl) return;
   _wtAllRowKeys().forEach(function (key) {
-    var box = document.getElementById('wtChips_' + key);
+    var box = document.getElementById('wtChips_' + _wtDomKey(key));
     if (!box) return;
     var arr = _wtListFor(key);
-    /* ★ 공통 행은 칩을 그리지 않는다 — 바로 아래 '작업표 미리보기'가 같은 배열을 이미 그리고
-       거기서 조절까지 하므로(창구 하나), 칩을 또 두면 같은 정보 두 벌 + 편집 경로 두 개가 된다.
-       이 행에 남는 것은 추가 창구([＋]/[▼])와 현재 개수 요약뿐. */
     if (key === 'core') {
       box.innerHTML = arr.length
         ? '<span class="as-wtchnone">공통 ' + arr.length + '열 — 순서·빼기는 아래 <b>작업표 미리보기</b> 칸을 눌러 조절합니다</span>'
         : '<span class="as-wtchnone">공통 열이 없습니다 — [공통을 기본 열로] 를 눌러보세요</span>';
       return;
     }
-    var none = '추가 열 없음';
-    box.innerHTML = arr.length ? arr.map(function (n, i) {
-      return '<span class="as-wtchip">' +
-        '<button onclick="wtChMove(\'' + key + '\',' + i + ',-1)" title="왼쪽으로"' + (i === 0 ? ' disabled' : '') + '>◀</button>' +
-        '<b>' + escHtml(n) + '</b>' +
-        '<button onclick="wtChMove(\'' + key + '\',' + i + ',1)" title="오른쪽으로"' + (i === arr.length - 1 ? ' disabled' : '') + '>▶</button>' +
-        '<button class="x" onclick="wtChDel(\'' + key + '\',' + i + ')" title="빼기">✕</button>' +
-        '</span>';
-    }).join('') : '<span class="as-wtchnone">' + none + '</span>';
+    box.innerHTML = arr.length
+      ? '<span class="as-wtchsum">' + arr.map(function (n) {
+          return '<span class="as-wtchip">' + escHtml(n) + '</span>';
+        }).join('') + '</span>'
+      : '<span class="as-wtchnone">추가 열 없음</span>';
   });
 }
 function wtChAdd(key) {
   if (!_wtTpl) return;
-  var inp = document.getElementById('wtCh_' + key);
+  var inp = document.getElementById('wtCh_' + _wtDomKey(key));
   var name = inp ? String(inp.value || '').trim() : '';
   if (!name) return;
   var arr = _wtListFor(key);
   if (arr.some(function (n) { return n.toLowerCase() === name.toLowerCase(); })) { showToast('이미 있는 열입니다', true); return; }
-  // ★ 공통에 이미 있는 열을 채널에 또 넣으면 작업표에 같은 열이 두 번 생긴다.
+  // ★ 공통에 이미 있는 열을 채널·유형에 또 넣으면 작업표에 같은 열이 두 번 생긴다.
   if (key !== 'core' && (_wtTpl.core || []).some(function (n) { return n.toLowerCase() === name.toLowerCase(); })) {
-    showToast('"' + name + '" 은(는) 이미 공통 열입니다 — 모든 채널에 들어갑니다', true); return;
+    showToast('"' + name + '" 은(는) 이미 공통 열입니다 — 모든 작업표에 들어갑니다', true); return;
   }
   arr.push(name);
   if (inp) inp.value = '';
@@ -1023,17 +1244,17 @@ function _wtBuildCandidates() {
   return _wtCand;
 }
 
-/** key = 'core' 또는 채널키. 이미 담긴 이름 목록(중복 표시용). */
+/** key = 'core' · 채널키 · 'wt:<유형키>'. 이미 담긴 이름 목록(중복 표시용).
+    ★ 저장 배열 접근은 `_wtListFor` 하나로 수렴한다(사본을 두면 유형 행에서만 ✓ 가 안 뜬다). */
 function _wtHaveFor(key) {
-  if (!_wtTpl) return [];
-  return key === 'core' ? (_wtTpl.core || []) : ((_wtTpl.channels || {})[key] || []);
+  return _wtListFor(key) || [];
 }
 function _wtPickInput(key) {
-  return document.getElementById('wtCh_' + key);   // 공통·채널 모두 같은 규칙(특례 없음)
+  return document.getElementById('wtCh_' + _wtDomKey(key));   // 공통·채널·유형 모두 같은 규칙(특례 없음)
 }
 
 function _wtPickRender(key) {
-  var box = document.getElementById('wtPick_' + key);
+  var box = document.getElementById('wtPick_' + _wtDomKey(key));
   if (!box || !_wtCand) return;
   var inp = _wtPickInput(key);
   var q = inp ? String(inp.value || '').trim().toLowerCase() : '';
@@ -1063,12 +1284,12 @@ function _wtPickRender(key) {
 }
 
 async function wtPickToggle(key) {
-  var box = document.getElementById('wtPick_' + key);
+  var box = document.getElementById('wtPick_' + _wtDomKey(key));
   if (!box) return;
   if (box.style.display !== 'none') { box.style.display = 'none'; return; }
-  // 한 번에 하나만 열어 둔다(패널이 여러 개 펼쳐지면 어느 채널에 넣는지 헷갈린다)
+  // 한 번에 하나만 열어 둔다(패널이 여러 개 펼쳐지면 어느 행에 넣는지 헷갈린다)
   _wtAllRowKeys().forEach(function (k) {
-    var b = document.getElementById('wtPick_' + k);
+    var b = document.getElementById('wtPick_' + _wtDomKey(k));
     if (b && k !== key) b.style.display = 'none';
   });
   box.style.display = '';
@@ -1088,7 +1309,7 @@ async function wtPickToggle(key) {
 
 /** 입력칸 타이핑 = 열려 있는 목록의 검색어(패널이 닫혀 있으면 아무 일도 안 한다). */
 function wtPickFilter(key) {
-  var box = document.getElementById('wtPick_' + key);
+  var box = document.getElementById('wtPick_' + _wtDomKey(key));
   if (box && box.style.display !== 'none' && _wtCand) _wtPickRender(key);
 }
 
@@ -1123,8 +1344,10 @@ async function loadWorktableTemplate() {
     _wtTpl = j.data || { core: [], channels: {}, columns: [] };
     if (!_wtTpl.core) _wtTpl.core = [];
     if (!_wtTpl.channels) _wtTpl.channels = {};
+    if (!_wtTpl.customChannels) _wtTpl.customChannels = [];
+    if (!_wtTpl.workTypes) _wtTpl.workTypes = [];
+    _wtRenderRows();   // 채널·유형 행(개수가 저장값에 따라 달라진다) → 칩·미리보기까지 갱신
     _wtRenderCols();
-    _wtRenderChans();
     var tpl = document.getElementById('wtTplSheet');
     if (tpl) tpl.value = _wtTpl.templateSheetId || '';
     var at = document.getElementById('wtSavedAt');
@@ -1142,20 +1365,26 @@ async function loadWorktableTemplate() {
 
 async function wtSaveTemplate() {
   if (!_wtTpl) return;
-  // ★ 블록이 곧 저장값 — 배열 그대로 보낸다(쉼표 파싱 없음).
+  // ★ 화면이 곧 저장값 — 배열 그대로 보낸다(쉼표 파싱 없음).
+  //   채널은 기본 4채널 + 직접 추가 채널 모두(_wtChannels 단일 출처).
   var channels = {};
-  CR_GUIDE_CHANNELS.forEach(function (c) {
+  _wtChannels().forEach(function (c) {
     channels[c.key] = ((_wtTpl.channels || {})[c.key] || []).slice();
   });
   try {
     var tplEl = document.getElementById('wtTplSheet');
     var j = await _wtFetch(WT_EP.template, {
       core: _wtTpl.core, channels: channels,
+      customChannels: (_wtTpl.customChannels || []).map(function (c) { return { key: c.key, label: c.label }; }),
+      workTypes: _wtTypes().map(function (t) {
+        return { key: t.key, label: t.label, desc: t.desc || '', position: t.position, columns: (t.columns || []).slice() };
+      }),
       templateSheetId: tplEl ? tplEl.value : (_wtTpl.templateSheetId || ''),
     });
     _wtTpl = j.data;
+    // ★ 서버가 정식 키를 발급할 수 있으므로(임시 `new1` → `c1`) 행을 통째로 다시 그린다.
+    _wtRenderRows();
     _wtRenderCols();
-    _wtRenderChans();
     var tpl = document.getElementById('wtTplSheet');
     if (tpl) tpl.value = _wtTpl.templateSheetId || '';
     var at = document.getElementById('wtSavedAt');
@@ -1479,11 +1708,34 @@ function loadReviewTypeCleanup() { _setNavBadge('reviewtype', '점검'); }
       '.as-wtchadd input{width:130px;padding:5px 9px;border:1.5px solid #D1D5DB;border-radius:7px;font-size:.78rem;outline:none;background:#fff;color:#111827}' +
       '.as-wtchadd button{width:29px;height:29px;border:1.5px solid #BFDBFE;background:#EFF6FF;color:#1D4ED8;border-radius:7px;cursor:pointer;font-size:.85rem;font-weight:700;line-height:1}' +
       '.as-wtchadd button.pick{width:auto;padding:0 8px;font-size:.68rem;border-color:#D1D5DB;background:#fff;color:#6B7280}' +
+      '.as-wtchadd button.rm{width:auto;padding:0 8px;font-size:.68rem;border-color:#FECACA;background:#FEF2F2;color:#B91C1C}' +
+      '.as-wtchadd button.pos{width:auto;padding:0 9px;font-size:.68rem;border-color:#D8BCE9;background:#F3E9F9;color:#7A3FA8}' +
+      /* 담긴 열 요약(읽기 전용) — 조절은 미리보기에서 한다 */
+      '.as-wtchsum{display:flex;gap:5px;flex-wrap:wrap;align-items:center}' +
+      '.as-wtchsum .as-wtchip{font-size:.76rem;font-weight:650;color:#1D4ED8;padding:2px 8px}' +
+      '.as-wtchgroup.wtype .as-wtchrow{border-color:#D8BCE9;background:#FDFBFF}' +
+      '.as-wtchgroup.wtype .as-wtchlabel{color:#7A3FA8}' +
+      '.as-wtaddrow{display:flex;align-items:center;gap:9px;flex-wrap:wrap;margin:2px 0 3px}' +
+      '.as-wtaddrow button{border:1.5px dashed #BFDBFE;background:#F8FBFF;color:#1D4ED8;border-radius:8px;' +
+        'font-size:.76rem;font-weight:700;padding:5px 12px;cursor:pointer}' +
+      '.as-wtaddrow button:hover{background:#EFF6FF}' +
+      '.as-wtaddrow span{font-size:.72rem;color:#9CA3AF}' +
+      '.as-wtsecline{font-size:.78rem;font-weight:750;color:#374151;margin:12px 0 3px}' +
+      '.as-wtsecline span{font-weight:400;color:#9CA3AF;font-size:.72rem}' +
       '@media (max-width:640px){.as-wtchlabel{width:100%}.as-wtchadd{margin-left:0}}' +
       /* 지금 쓰는 열에서 고르기 — 후보 패널 */
       '.as-wtchgroup{display:flex;flex-direction:column;gap:5px}' +
       /* 열 구성 한 줄 미리보기 — 공통 행 바로 아래(표 머리 축소판) */
       '.as-wtpv{margin:-1px 0 3px;padding:8px 11px 9px;border:1px solid #E5E7EB;border-radius:9px;background:#FCFDFE}' +
+      /* 채널·작업유형 알약 — 누르면 그 구성이 합쳐진 완성 양식이 보인다(보기·조절 전환일 뿐 저장과 무관) */
+      '.as-wtpvpills{display:flex;gap:12px;flex-wrap:wrap;align-items:center;margin-bottom:8px}' +
+      '.as-wtpvpg{display:inline-flex;gap:5px;flex-wrap:wrap;align-items:center}' +
+      '.as-wtpvpg b{font-size:.68rem;font-weight:750;color:#9CA3AF;margin-right:2px}' +
+      '.as-wtpvp{border:1.5px solid #D1D5DB;background:#fff;color:#6B7280;border-radius:999px;' +
+        'font-size:.71rem;font-weight:700;padding:3px 11px;cursor:pointer;line-height:1.4}' +
+      '.as-wtpvp:hover{background:#F9FAFB}' +
+      '.as-wtpvp.on{border-color:#2563EB;background:#EFF6FF;color:#1D4ED8}' +
+      '.as-wtpvp.t.on{border-color:#A855F7;background:#F3E9F9;color:#7A3FA8}' +
       '.as-wtpvh{font-size:.71rem;font-weight:750;color:#4B5563;margin-bottom:6px}' +
       '.as-wtpvh span{font-weight:400;color:#9CA3AF}' +
       '.as-wtpvempty{font-size:.73rem;color:#9CA3AF}' +
@@ -1503,6 +1755,9 @@ function loadReviewTypeCleanup() { _setNavBadge('reviewtype', '점검'); }
       '.as-wtpvc.work{background:#F3E9F9;color:#7A3FA8}' +
       '.as-wtpvc.status{background:#EEF0F3;color:#59626F}' +
       '.as-wtpvc.dup{box-shadow:inset 0 -2px 0 #F59E0B}' +
+      /* 어느 묶음에서 온 칸인지 — 아래 테두리 색으로 구분(채널=황색·유형=보라) */
+      '.as-wtpvc.o-channel{border-bottom:2px solid #E7D2A3}' +
+      '.as-wtpvc.o-worktype{border-bottom:2px solid #D8BCE9}' +
       '.as-wtpvc.add{flex:0 0 auto;padding:5px 8px;background:#fff;color:#9CA3AF;font-weight:600;border-left:1px dashed #CBD5E1;cursor:default}' +
       /* 선택 열 조절 툴바 — 미리보기 줄 아래 별도 행(줄 자체는 계속 한 줄 유지) */
       '.as-wtpvtool{display:flex;align-items:center;gap:6px;flex-wrap:wrap;margin-top:7px;padding:6px 9px;' +
@@ -1614,6 +1869,13 @@ function loadReviewTypeCleanup() { _setNavBadge('reviewtype', '점검'); }
   window.wtPvSel = wtPvSel;
   window.wtPvMove = wtPvMove;
   window.wtPvDel = wtPvDel;
+  window.wtPvChan = wtPvChan;
+  window.wtPvType = wtPvType;
+  window.wtAddChannel = wtAddChannel;
+  window.wtDelChannel = wtDelChannel;
+  window.wtAddType = wtAddType;
+  window.wtDelType = wtDelType;
+  window.wtToggleTypePos = wtToggleTypePos;
   window.wtPickToggle = wtPickToggle;
   window.wtPickFilter = wtPickFilter;
   window.wtPickAdd = wtPickAdd;

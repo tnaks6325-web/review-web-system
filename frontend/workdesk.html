@@ -3098,9 +3098,21 @@ async function _wtpLoad(){
   ['total','daily','startDate'].forEach(k=>{ if(f[k]!=null && f[k]!=='') q.set(k,f[k]); });
   if(f.skipWeekends===false) q.set('skipWeekends','0');
   if(Array.isArray(f.holidays)&&f.holidays.length) q.set('holidays',f.holidays.join(','));
+  if(f.channel) q.set('channel',f.channel);
+  /* ★ 작업유형은 **켠 것만** 보낸다. 하나도 안 켠 상태(빈 배열)와 "아직 안 정함"(undefined)을
+     구분해야 첫 열림에서 제안을 한 번만 반영할 수 있다 → 빈 값도 명시적으로 보낸다. */
+  if(Array.isArray(f.workTypes)) q.set('workTypes',f.workTypes.join(','));
   const r=await api('/api/trackb/worktable/plan?'+q.toString());
   if(!r||!r.ok){ document.getElementById('wtPlanBox').innerHTML=`<div style="padding:28px;color:#B91C1C;font-size:13px">불러오지 못했습니다: ${esc((r&&r.error)||'오류')}<div style="margin-top:14px"><button class="btn" onclick="closeWtPlan()">닫기</button></div></div>`; return; }
   _WTP.plan=r.data.plan; _WTP.workOrder=r.data.workOrder; _WTP.templateConfigured=r.data.templateConfigured;
+  /* ★★ 자동 제안은 **체크를 미리 해 주는 것까지** — 서버는 켠 것만 반영하므로 여기서 한 번
+     체크에 반영하고 다시 불러온다(확정은 담당자, 학습은 제안까지 규율). 한 번만 한다. */
+  if(!_WTP.suggestApplied && !Array.isArray((_WTP.form||{}).workTypes)){
+    _WTP.suggestApplied=1;
+    const sg=(_WTP.plan.suggestedWorkTypes||[]);
+    _WTP.form=_WTP.form||{}; _WTP.form.workTypes=sg.slice();
+    if(sg.length) return _wtpLoad();
+  }
   _wtpRender();
   if(!_WTP.sheetsLoaded){ _WTP.sheetsLoaded=1; _wtpFillSheets(); }   // 대상 시트 목록은 1회만
 }
@@ -3131,6 +3143,10 @@ function _wtpSyncForm(){
   if(g('wtpDaily')) f.daily=g('wtpDaily').value;
   if(g('wtpStart')) f.startDate=g('wtpStart').value;
   if(g('wtpSkipWe')) f.skipWeekends=g('wtpSkipWe').checked;
+  if(g('wtpChannel')) f.channel=g('wtpChannel').value;
+  // 작업유형 체크 — 화면에 체크박스가 있을 때만 읽는다(없는 화면이 설정을 지우지 않게).
+  const tb=document.querySelectorAll('.wtpType');
+  if(tb.length) f.workTypes=Array.prototype.filter.call(tb,x=>x.checked).map(x=>x.value);
   if(f.holidays==null) f.holidays=((_WTP.plan&&_WTP.plan.holidays)||[]).slice();
 }
 
@@ -3174,7 +3190,8 @@ async function wtpCreate(){
   const r=await api('/api/trackb/worktable/create',{method:'POST',body:JSON.stringify({
     workOrderId:_WTP.id, mode, sheetId, tabName, templateSheetId:_tpl,
     planOptions:{ total:f.total, daily:f.daily, startDate:f.startDate,
-                  skipWeekends:f.skipWeekends!==false, holidays:f.holidays||[] },
+                  skipWeekends:f.skipWeekends!==false, holidays:f.holidays||[],
+                  channel:f.channel||'', workTypes:f.workTypes||[] },
   })});
   if(r&&r.ok){
     _WTP.made={sheetId:r.sheetId,tabName:r.tabName};
@@ -3230,11 +3247,28 @@ async function wtpDeleteTab(){
 
 function _wtpRender(){
   const p=_WTP.plan, wo=_WTP.workOrder;
+  /* 열 칩 — 어느 묶음(공통·채널·작업유형)에서 왔는지 색과 꼬리표로 구분한다. */
+  const ORG={ channel:{e:'#FDE68A',b:'#FFFBEB',c:'#92400E',t:'채널'},
+              worktype:{e:'#D8BCE9',b:'#F9F1FD',c:'#7A3FA8',t:'유형'},
+              common:{e:'#BFDBFE',b:'#EFF6FF',c:'#1D4ED8',t:''} };
   const cols=p.columns.map(c=>{
-    const ch=c.origin==='channel';
+    const o=ORG[c.origin]||ORG.common;
     const role=c.label?('시스템 인식: '+c.label):'제출이 값을 쓰지 않는 열';
-    return `<span title="${esc(role)}" style="display:inline-flex;align-items:center;gap:4px;font-size:12px;padding:3px 8px;border-radius:6px;border:1px solid ${ch?'#FDE68A':'#BFDBFE'};background:${ch?'#FFFBEB':'#EFF6FF'};color:${ch?'#92400E':'#1D4ED8'}">${esc(c.name)}${ch?'<i style="font-style:normal;font-size:10px;opacity:.7">채널</i>':''}</span>`;
+    return `<span title="${esc(role)}" style="display:inline-flex;align-items:center;gap:4px;font-size:12px;padding:3px 8px;border-radius:6px;border:1px solid ${o.e};background:${o.b};color:${o.c}">${esc(c.name)}${o.t?`<i style="font-style:normal;font-size:10px;opacity:.7">${o.t}</i>`:''}</span>`;
   }).join(' ');
+  /* 구매채널 — 자동 판정(상품 URL 호스트)이 기본, 직접 추가한 채널은 담당자가 고른다. */
+  const chOpts=[`<option value="">자동 판정 (${esc(p.channelLabel)})</option>`]
+    .concat((p.channels||[]).map(c=>`<option value="${esc(c.key)}"${p.channel===c.key&&(_WTP.form&&_WTP.form.channel)?' selected':''}>${esc(c.label)}${c.custom?' (직접 추가)':''}</option>`)).join('');
+  /* 작업유형 — 그 작업일 때만 붙는 열 묶음. ★ 제안은 체크를 미리 해 줄 뿐 확정은 담당자가 한다. */
+  const types=(p.workTypes||[]);
+  const typeHtml=types.length
+    ? types.map(t=>`<label style="display:flex;align-items:flex-start;gap:8px;border:1px solid ${t.enabled?'#D8BCE9':'#E5E7EB'};background:${t.enabled?'#FDFBFF':'#fff'};border-radius:9px;padding:8px 11px;font-size:13px;cursor:pointer">
+        <input type="checkbox" class="wtpType" value="${esc(t.key)}" ${t.enabled?'checked':''} onchange="_wtpOnEdit()" style="margin-top:3px">
+        <span><b>${esc(t.label)}</b>${t.desc?`<span style="display:block;font-size:11.5px;color:#6B7280">${esc(t.desc)}</span>`:''}
+          <span style="display:block;font-size:11.5px;color:#9CA3AF">${t.columns.length?('붙는 열: '+t.columns.map(c=>esc(c.name)).join(', ')+' · '+(t.position==='front'?'앞쪽':'뒤쪽')):'담긴 열 없음'}</span></span>
+        ${t.suggested?`<span style="margin-left:auto;flex:none;font-size:10.5px;font-weight:750;color:#127A5E;background:#E5F3EE;border:1px solid #A6D6C6;border-radius:999px;padding:1px 8px">자동 제안 — ${esc(t.suggestReason)}</span>`:''}
+      </label>`).join('')
+    : '<span style="font-size:12.5px;color:#9CA3AF">등록된 작업유형이 없습니다 — <b>설정 › 작업표 표준 열</b>에서 만들 수 있습니다.</span>';
   const days=p.dates.length
     ? p.dates.map(d=>`<span style="font-size:12px;padding:3px 8px;border-radius:6px;background:#F3F4F6;color:#374151">${esc(d.label)} <b>${d.count}</b></span>`).join(' ')
     : '<span style="font-size:12.5px;color:#9CA3AF">날짜를 나누지 않았습니다(시작일·일건수 확인)</span>';
@@ -3262,8 +3296,12 @@ function _wtpRender(){
         <label style="font-size:12px;color:#6B7280">시작일<br><input id="wtpStart" type="date" value="${esc(p.startDate||'')}" onchange="_wtpOnEdit()" style="padding:6px 9px;border:1.5px solid #D1D5DB;border-radius:7px;font-size:13px"></label>
         <label style="font-size:12.5px;color:#374151;display:flex;align-items:center;gap:5px;padding-bottom:7px"><input id="wtpSkipWe" type="checkbox" ${p.skipWeekends?'checked':''} onchange="_wtpOnEdit()"> 주말 제외</label>
         <span style="flex:1"></span>
-        <span style="font-size:12.5px;color:#6B7280;padding-bottom:7px">구매채널 <b>${esc(p.channelLabel)}</b></span>
+        <label style="font-size:12px;color:#6B7280">구매채널<br>
+          <select id="wtpChannel" onchange="_wtpOnEdit()" style="padding:6px 9px;border:1.5px solid #D1D5DB;border-radius:7px;font-size:13px">${chOpts}</select></label>
       </div>
+
+      <div><div style="font-size:12.5px;font-weight:700;margin-bottom:5px">작업유형 <span style="font-weight:400;color:#9CA3AF">— 켜면 그 열이 덧붙습니다</span></div>
+        <div style="display:flex;flex-direction:column;gap:6px">${typeHtml}</div></div>
 
       <div><div style="font-size:12.5px;font-weight:700;margin-bottom:5px">표 구성 (${p.columns.length}열)</div>${cols||'<span style="font-size:12.5px;color:#9CA3AF">열이 없습니다</span>'}</div>
       <div><div style="font-size:12.5px;font-weight:700;margin-bottom:5px">날짜 분배 (${p.totals.days}일)</div>${days}

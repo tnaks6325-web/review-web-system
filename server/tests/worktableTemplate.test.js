@@ -265,6 +265,11 @@ ok('출력은 전부 escHtml() 통과(헤더명·열이름은 사용자·시트�
   && /escHtml\(c\.name\)/.test(setJs) && /escHtml\(u\.name\)/.test(setJs));
 ok('채널별 추가 열은 현영 4채널 표를 재사용한다(채널 목록 사본 금지)',
   /CR_GUIDE_CHANNELS\.map/.test(setJs) && /wtCh_/.test(setJs));
+ok('★ 기본 4채널 + 직접 추가 채널 = _wtChannels() 한 벌(목록 사본 금지)',
+  /function _wtChannels\(\)[\s\S]{0,400}CR_GUIDE_CHANNELS\.map/.test(setJs)
+  && /_wtTpl && _wtTpl\.customChannels/.test(setJs)
+  // 저장 페이로드도 같은 목록을 쓴다 — 하드코딩 4채널이면 지마켓 열이 저장에서 빠진다
+  && /_wtChannels\(\)\.forEach\(function \(c\) \{\s*channels\[c\.key\]/.test(setJs));
 ok('★ 채널 열은 블록 편집(추가·✕제거·◀▶이동) — 채널당 한 줄(라벨+블록) 레이아웃',
   /function wtChAdd/.test(setJs) && /function wtChDel/.test(setJs) && /function wtChMove/.test(setJs)
   && /as-wtchrow/.test(setJs) && /as-wtchlabel/.test(setJs) && /wtChips_/.test(setJs));
@@ -280,10 +285,11 @@ ok('★ 열 추가 후보 = 헤더 학습 리포트의 열들(역할 변형 + �
   /function _wtBuildCandidates/.test(setJs)
   && /_wtStats \|\| \{\}\)\.roles[\s\S]{0,220}headerVariants/.test(setJs)
   && /_wtStats \|\| \{\}\)\.unmapped/.test(setJs));
-ok('★ 공통 행과 채널 행은 **같은 빌더** 한 벌(_wtRowHtml) — 사본을 두면 버튼 동작이 갈린다',
+ok('★ 공통·채널·작업유형 행은 **같은 빌더** 한 벌(_wtRowHtml) — 사본을 두면 버튼 동작이 갈린다',
   /function _wtRowHtml\(key, label/.test(setJs)
   && setJs.includes("_wtRowHtml('core'")                       // 공통(모든 채널) 행
-  && /CR_GUIDE_CHANNELS\.map\(function \(c\) \{\s*return _wtRowHtml\(c\.key/.test(setJs)
+  && /_wtChannels\(\)\.map\(function \(c\) \{[\s\S]{0,400}_wtRowHtml\(c\.key/.test(setJs)   // 채널 행
+  && /_wtTypes\(\)\.map\(function \(t\) \{[\s\S]{0,700}_wtRowHtml\('wt:' \+ t\.key/.test(setJs) // 유형 행
   && setJs.includes("wtPickToggle(\\'' + key")                 // [▼] 는 빌더 안에 한 번만
   && (setJs.match(/id="wtChips_/g) || []).length === 1
   && (setJs.match(/id="wtPick_/g) || []).length === 1);
@@ -324,8 +330,9 @@ ok('★ 자유 입력은 그대로 — 새 이름도 만들 수 있다(고르기
   && /placeholder="' \+ placeholder \+ '"/.test(setJs));
 ok('이미 담긴 후보는 비활성(중복 추가 클릭 자체가 불가)',
   /dup \? ' disabled' : ''/.test(setJs) && /as-wtpickchip.*dup/.test(setJs));
-ok('한 번에 한 목록만 열린다(어느 채널에 넣는지 헷갈리지 않게)',
-  /\['core'\]\.concat\(CR_GUIDE_CHANNELS\.map/.test(setJs));
+ok('한 번에 한 목록만 열린다(어느 행에 넣는지 헷갈리지 않게)',
+  /function _wtAllRowKeys[\s\S]{0,300}\['core'\][\s\S]{0,200}_wtChannels\(\)[\s\S]{0,200}_wtTypes\(\)/.test(setJs)
+  && /_wtAllRowKeys\(\)\.forEach\(function \(k\) \{[\s\S]{0,220}display = 'none'/.test(setJs));
 ok('블록 렌더도 escHtml 통과 + 편집 시 dirty 표시(조용한 유실 방지)',
   /escHtml\(n\)/.test(setJs)
   // 공통·채널 모든 편집이 _wtAfterEdit 로 수렴하고, 거기서 dirty 가 켜진다
@@ -345,17 +352,19 @@ ok('편집 중 저장 안 함 경고가 뜬다(조용한 유실 방지)',
    이름 블록만으로는 "작업표가 실제로 어떤 표가 되는지"가 안 그려져 표 머리 축소판을 깐다.
    고정할 것은 모양이 아니라 ① 자리(공통 아래·채널 위) ② 편집 즉시 따라 갱신
    ③ 데이터 사본 없음 ④ **한 줄** 유지(줄바꿈·가로 스크롤 금지) 넷이다. */
-ok('★ 미리보기는 공통 블록 바로 아래 — 채널 행보다 먼저 온다(순서가 곧 실제 표의 앞부분)',
+ok('★ 미리보기는 공통 블록 바로 아래 — 채널·유형 행보다 먼저 온다(순서가 곧 실제 표의 앞부분)',
   (() => {
     const i = setJs.indexOf("_wtRowHtml('core'");
     const p = setJs.indexOf('id="wtPreview"');
-    const c = setJs.indexOf('CR_GUIDE_CHANNELS.map(function (c) {', i);
+    const c = setJs.indexOf('id="wtRows"', i);     // 채널·유형 행 묶음이 들어가는 자리
     return i > -1 && p > i && c > p;
   })());
 ok('★ 편집할 때마다 따라 갱신 — _wtRenderCols 가 미리보기를 부른다(로더에만 두면 옛 순서가 남는다)',
   /function _wtRenderCols\(\)[\s\S]{0,400}_wtRenderPreview\(\)/.test(setJs));
-ok('★★ 데이터 사본 없음 — 미리보기도 아래 목록과 같은 _wtTpl.columns 를 본다',
-  /function _wtRenderPreview[\s\S]{0,600}_wtTpl && _wtTpl\.columns/.test(setJs));
+ok('★★ 데이터 사본 없음 — 미리보기 합성도 저장 배열(_wtListFor)과 서버 분류(_wtTpl.columns)만 본다',
+  /function _wtMergeCols[\s\S]{0,2000}_wtTpl\.columns/.test(setJs)
+  && /function _wtMergeCols[\s\S]{0,2600}_wtListFor\(/.test(setJs)
+  && /function _wtRenderPreview[\s\S]{0,400}_wtMergeCols\(_wtPvChan, _wtPvTypes\)/.test(setJs));
 ok('★★ 한 줄 유지 — 줄바꿈·가로 스크롤 없이 칸만 줄인다(넘치면 말줄임 + title 에 전체 이름)',
   (() => {
     const row = /'\.as-wtpvrow\{([^']*)\}'/.exec(setJs);
@@ -389,8 +398,15 @@ ok('★★ 미리보기 칸 클릭 = 조절(선택 → ◀▶✕) — onclick �
       && /function wtPvSel/.test(setJs) && /as-wtpvc\.sel/.test(setJs);
   })());
 ok('★ 툴바 이동·빼기는 기존 단일 편집 경로(wtChMove/wtChDel)로 위임 — 편집 경로 사본 없음',
-  /function wtPvMove[\s\S]{0,400}wtChMove\('core', i, dir\)/.test(setJs)
-  && /function wtPvDel[\s\S]{0,200}wtChDel\('core', i\)/.test(setJs));
+  /function wtPvMove[\s\S]{0,700}wtChMove\(s\.list, s\.idx, dir\)/.test(setJs)
+  && /function wtPvDel[\s\S]{0,500}wtChDel\(s\.list, s\.idx\)/.test(setJs));
+ok('★★ 미리보기가 조절하는 대상은 **그 묶음의 저장 배열** — 합성 인덱스로 직접 splice 하지 않는다',
+  (() => {
+    const i = setJs.indexOf('function wtPvMove');
+    const j = setJs.indexOf('function _wtRenderCols');
+    const body = setJs.slice(i, j > i ? j : i + 3000);
+    return i > -1 && !/\.splice\(/.test(body) && /_wtListFor\(s\.list\)/.test(body);
+  })());
 ok('★ onclick 함수 3종은 window 에 노출된다(IIFE 스코프 — 빠지면 클릭이 ReferenceError 로 조용히 죽는다)',
   ['wtPvSel', 'wtPvMove', 'wtPvDel'].every(f => setJs.includes('window.' + f + ' = ' + f)));
 ok('★★ 공통 열 상세는 읽기 전용 — 행에 조절 버튼이 없다(조절 창구는 미리보기 하나)',
@@ -424,6 +440,165 @@ ok('★ 템플릿 주석(_annotate)도 fill 을 통과시켜 화면까지 닿는
   /fill: c\.fill/.test(svcSrc));
 ok('저장 전 임시 열은 "저장하면 판정" 안내 — 매칭 없음과 구분(추측 금지)',
   /pending: true/.test(setJs) && /저장하면 시스템 인식이 판정됩니다/.test(setJs));
+
+
+/* ══════════════════════════════════════════════════════════════
+   F. 확장 — 채널 적용 미리보기(B) · 커스텀 작업채널(C) · 작업유형(D)
+   ══════════════════════════════════════════════════════════════ */
+const vm = require('vm');
+/** setJs 에서 함수 하나를 이름으로 꺼낸다(중괄호 균형). 런타임 실행 가드용. */
+function grabFn(src, name) {
+  const i = src.indexOf('function ' + name + '(');
+  assert(i > -1, 'grabFn: ' + name);
+  let d = 0, started = false;
+  for (let k = i; k < src.length; k++) {
+    if (src[k] === '{') { d++; started = true; }
+    else if (src[k] === '}') { d--; if (started && d === 0) return src.slice(i, k + 1); }
+  }
+  throw new Error('grabFn 균형 실패: ' + name);
+}
+
+ok('★★ 미리보기 합성 순서 = 서버 buildColumns 와 **같다**(사본 드리프트 차단 — 실행 대조)',
+  (() => {
+    // 프론트 합성 함수 3개를 실제로 실행해 서버 결과와 열 이름 순서를 비교한다.
+    const sb = { _wtTpl: null };
+    vm.createContext(sb);
+    vm.runInContext(
+      grabFn(setJs, '_wtListFor') + '\n' + grabFn(setJs, '_wtTypes') + '\n' + grabFn(setJs, '_wtMergeCols'), sb);
+
+    const tpl = {
+      core: ['번호', '구매일자', '주문자', '수취인', '연락처', '비고'],
+      channels: { coupang: ['쿠팡ID'], c1: ['지마켓ID'] },
+      customChannels: [{ key: 'c1', label: '지마켓' }],
+      workTypes: [
+        { key: 't1', label: '상품옵션', position: 'front', columns: ['옵션'] },
+        { key: 't2', label: '택배발송대행', position: 'back', columns: ['택배송장번호'] },
+        { key: 't3', label: '겹침시험', position: 'front', columns: ['수취인'] },   // 이미 있는 이름
+      ],
+    };
+    // 프론트는 서버가 준 분류(columns)를 함께 본다 — 서버 _annotate 대신 classifyHeaders 로 만든다.
+    tpl.columns = wt.classifyHeaders(tpl.core, {}).map(c => ({ name: c.header, role: c.role, label: c.label, tier: c.tier }));
+    tpl.channelColumns = {}; tpl.workTypeColumns = {};
+
+    const { buildColumns } = require('../src/utils/worktablePlan');
+    const cases = [
+      ['', []], ['coupang', []], ['c1', []],
+      ['coupang', ['t1']], ['coupang', ['t2']], ['coupang', ['t1', 't2']],
+      ['c1', ['t2', 't1']], ['', ['t1', 't2', 't3']], ['coupang', ['t3']],
+    ];
+    return cases.every(([ch, types]) => {
+      sb._wtTpl = tpl;
+      const front = vm.runInContext('_wtMergeCols(' + JSON.stringify(ch) + ',' + JSON.stringify(types) + ')', sb)
+        .map(c => c.name).join('|');
+      const server = buildColumns({ template: tpl, channel: ch, workTypes: types }).map(c => c.name).join('|');
+      if (front !== server) console.log('   ↳ 불일치', ch, types, '\n     front :', front, '\n     server:', server);
+      return front === server;
+    });
+  })());
+
+ok('★ 미리보기 채널 알약 — 누르면 그 채널이 합쳐진 완성 양식을 본다(보기·조절 전환, 저장과 무관)',
+  /function wtPvChan\(key\)[\s\S]{0,300}_wtRenderPreview\(\)/.test(setJs)
+  && /_wtPvPills[\s\S]{0,900}onclick="wtPvChan/.test(setJs)
+  && !/wtPvChan[\s\S]{0,200}_wtFetch|wtPvChan[\s\S]{0,200}wtSaveTemplate/.test(setJs));
+ok('★ 작업유형 알약은 다중 토글(켠 유형 열이 합쳐진다)',
+  /function wtPvType\(key\)[\s\S]{0,300}_wtPvTypes\.splice/.test(setJs)
+  && /onclick="wtPvType/.test(setJs));
+ok('★ 지워진 채널·유형을 보고 있었으면 기본으로 되돌린다(없는 것을 그리지 않는다)',
+  /_wtPvChan && !_wtChannels\(\)\.some/.test(setJs)
+  && /_wtPvTypes = _wtPvTypes\.filter/.test(setJs));
+
+/* ── C. 커스텀 작업채널 ── */
+const wsvc = require('../src/services/worktable.service');
+ok('★★ 기본 4채널은 삭제 불가 — 커스텀만 [채널 삭제] 가 보이고, 서버도 기본 키를 커스텀으로 안 받는다',
+  /function wtDelChannel[\s\S]{0,300}if \(!c \|\| !c\.custom\) return;/.test(setJs)
+  && /BUILTIN_CHANNEL_KEYS/.test(svcSrc)
+  && /!BUILTIN_CHANNEL_KEYS\.has\(k\)/.test(svcSrc));
+ok('★ 열이 담긴 채널·유형 삭제는 한 번 더 묻는다(시트 무영향도 함께 안내)',
+  /function wtDelChannel[\s\S]{0,500}confirm\([\s\S]{0,200}이미 만들어진 시트에는 영향이 없습니다/.test(setJs)
+  && /function wtDelType[\s\S]{0,500}confirm\([\s\S]{0,200}이미 만들어진 시트에는 영향이 없습니다/.test(setJs));
+ok('★★ 채널 키는 **서버가 발급**한다 — 화면 임시 키는 저장 응답으로 교체된다(고아 방지)',
+  /_keyMinter\('c', keys\)/.test(svcSrc) && /_keyMinter\('t', keys\)/.test(svcSrc)
+  && /function wtSaveTemplate[\s\S]{0,900}_wtRenderRows\(\)/.test(setJs));
+ok('★ 같은 이름 채널·유형 중복 추가 차단(화면·서버 양쪽)',
+  /이미 있는 채널입니다/.test(setJs) && /이미 있는 작업유형입니다/.test(setJs)
+  && /seenLabel\.has\(label\.toLowerCase\(\)\)/.test(svcSrc));
+ok('★ 상한이 있다(폭주 방지) — 채널·유형 각각',
+  /MAX_CUSTOM_CHANNELS/.test(svcSrc) && /MAX_WORK_TYPES/.test(svcSrc)
+  && wsvc.MAX_CUSTOM_CHANNELS > 0 && wsvc.MAX_WORK_TYPES > 0);
+ok('★ 자동 채널 판정(URL 호스트)은 여전히 기본 4채널만 — 커스텀은 담당자가 고른다',
+  (() => {
+    const plan = require('../src/utils/worktablePlan');
+    return plan.channelFromUrl('https://www.gmarket.co.kr/x') === 'unknown'
+      && plan.channelFromUrl('https://www.coupang.com/x') === 'coupang'
+      && plan.channelLabel('c1', { customChannels: [{ key: 'c1', label: '지마켓' }] }) === '지마켓';
+  })());
+
+/* ── D. 작업유형 ── */
+const planMod = require('../src/utils/worktablePlan');
+const _tplD = {
+  core: ['번호', '구매일자', '수취인', '연락처', '결제금액', '비고'],
+  channels: {}, customChannels: [],
+  workTypes: [{ key: 't1', label: '상품옵션', position: 'front', columns: ['옵션'] },
+              { key: 't2', label: '택배발송대행', position: 'back', columns: ['택배송장번호'] }],
+};
+const _woD = { recruit_count: 4, daily_count: 2, start_date: '2026-08-10',
+  product_options_json: JSON.stringify([{ name: 'A', options: [{ label: '레드' }, { label: '블루' }] }]) };
+ok('★★ 작업유형은 **켠 것만** 반영된다 — 미전송이면 종전과 완전히 같은 표(안 쓰면 무변화)',
+  (() => {
+    const off = planMod.buildWorktablePlan({ workOrder: _woD, template: _tplD, options: {} });
+    const base = planMod.buildColumns({ template: _tplD, channel: 'unknown' });
+    return off.columns.map(c => c.name).join('|') === base.map(c => c.name).join('|');
+  })());
+ok('★★ 제안(suggestedWorkTypes)은 계산만 하고 **자동 적용하지 않는다**(확정은 사람)',
+  (() => {
+    const p = planMod.buildWorktablePlan({ workOrder: _woD, template: _tplD, options: {} });
+    return p.suggestedWorkTypes.join(',') === 't1'          // 옵션 2종 → 상품옵션 제안
+      && !p.columns.some(c => c.name === '옵션')            // 그런데 열은 안 붙었다
+      && p.enabledWorkTypes.length === 0;
+  })());
+ok('★ 제안 근거는 **열 역할 파생**(이름 매칭 아님) — 유형 이름을 바꿔도 따라온다',
+  (() => {
+    const t2 = JSON.parse(JSON.stringify(_tplD));
+    t2.workTypes[0].label = '전혀 다른 이름';
+    const p = planMod.buildWorktablePlan({ workOrder: _woD, template: t2, options: {} });
+    return p.suggestedWorkTypes.join(',') === 't1';
+  })());
+ok('★ 유형 열 위치 — front 는 자동 열(번호·구매일자) 뒤, back 은 맨 뒤',
+  (() => {
+    const p = planMod.buildWorktablePlan({ workOrder: _woD, template: _tplD, options: { workTypes: ['t1', 't2'] } });
+    const names = p.columns.map(c => c.name);
+    return names[2] === '옵션' && names[names.length - 1] === '택배송장번호';
+  })());
+ok('★ 켠 유형의 열이 이미 있어 하나도 안 붙으면 조용히 넘기지 않고 알린다',
+  (() => {
+    const t3 = JSON.parse(JSON.stringify(_tplD));
+    t3.workTypes.push({ key: 't9', label: '겹침', position: 'back', columns: ['비고'] });
+    const p = planMod.buildWorktablePlan({ workOrder: _woD, template: t3, options: { workTypes: ['t9'] } });
+    return p.warnings.some(w => w.code === 'worktype_no_column');
+  })());
+ok('★ 유형 열이 옵션 역할이면 생성 시 값도 채워진다(planToSheetValues 는 role 로 판정 — 사본 없음)',
+  (() => {
+    const create = readS('services/worktableCreate.service.js');
+    return /idxOpt = plan\.columns\.findIndex\(c => c\.role === 'option'\)/.test(create);
+  })());
+
+/* ── 배선: 작업오더 [📋 작업표] 미리보기 ── */
+ok('★ 작업표 미리보기가 채널·작업유형을 서버에 보낸다(계획은 서버가 최종 계산)',
+  /q\.set\('channel',f\.channel\)/.test(wdesk)
+  && /q\.set\('workTypes',f\.workTypes\.join\(','\)\)/.test(wdesk)
+  && /channel:f\.channel\|\|'', workTypes:f\.workTypes\|\|\[\]/.test(wdesk));
+ok('★ 값 읽기는 _wtpSyncForm 한 벌(사본 금지) — 체크박스가 있는 화면에서만 읽는다',
+  /function _wtpSyncForm[\s\S]{0,700}querySelectorAll\('\.wtpType'\)/.test(wdesk)
+  && /if\(tb\.length\) f\.workTypes=/.test(wdesk));
+ok('★★ 제안 반영은 **첫 열림 1회**(무한 재조회 금지) + 체크로 보인다',
+  /_WTP\.suggestApplied/.test(wdesk) && /suggestedWorkTypes/.test(wdesk)
+  && /class="wtpType"[\s\S]{0,120}\$\{t\.enabled\?'checked':''\}/.test(wdesk));
+ok('★ 서버 라우트가 workTypes 를 받는다(미전송 = 없음)',
+  /q\.workTypes != null\) opt\.workTypes = String\(q\.workTypes\)\.split\(','\)/.test(routes)
+  && /customChannels: b\.customChannels, workTypes: b\.workTypes/.test(routes));
+ok('★ onclick 함수는 전부 window 에 노출된다(IIFE — 빠지면 클릭이 조용히 죽는다)',
+  ['wtPvChan', 'wtPvType', 'wtAddChannel', 'wtDelChannel', 'wtAddType', 'wtDelType', 'wtToggleTypePos']
+    .every(f => setJs.includes('window.' + f + ' = ' + f)));
 
 console.log(`\n✅ worktableTemplate: ${n}개 통과`);
 // orderLedger.service 를 require 하면 DB 풀 핸들이 열려 프로세스가 안 끝난다(레포 관용구).
