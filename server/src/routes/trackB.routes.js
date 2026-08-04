@@ -1293,6 +1293,8 @@ router.get('/worktable/plan', authMiddleware, internalMiddleware, editorOnlyMidd
     if (q.skipWeekends != null && q.skipWeekends !== '') opt.skipWeekends = q.skipWeekends !== '0' && q.skipWeekends !== 'false';
     if (q.channel) opt.channel = String(q.channel);
     if (q.options) { try { opt.options = JSON.parse(q.options); } catch (_) { /* 깨진 값은 작업오더 파생으로 */ } }
+    // 제외 날짜(공휴일·업체 휴무) — 쉼표 구분 YYYY-MM-DD. 형식 검증은 plan 이 최종 판정한다.
+    if (q.holidays) opt.holidays = String(q.holidays).split(',').map(v => v.trim()).filter(Boolean);
 
     const template = await getTemplate();
     const plan = buildWorktablePlan({ workOrder: wo, template, options: opt });

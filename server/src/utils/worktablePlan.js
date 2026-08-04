@@ -184,9 +184,16 @@ function buildWorktablePlan({ workOrder, template, options: o = {} } = {}) {
     : (wo.start_date ? String(wo.start_date).slice(0, 10) : '');
   const skipWeekends = o.skipWeekends !== false;   // 기본 주말 제외
 
+  /* 제외 날짜(공휴일·업체 휴무) — 작업오더에 날짜 필드가 없어 담당자가 미리보기에서 지정한다.
+     ★ 형식이 맞는 값만 받는다(잘못된 값은 조용히 무시 — 날짜 분배가 통째로 깨지는 것보다 낫다). */
+  const holidays = [...new Set((Array.isArray(o.holidays) ? o.holidays : [])
+    .map(h => String(h == null ? '' : h).trim())
+    .filter(h => !!parseYmd(h))
+    .map(h => ymdStr(parseYmd(h))))].sort();
+
   const optKeys = o.options != null ? o.options : optionKeysFromWorkOrder(wo);
   const { buckets, rowOptions } = distributeOptions({ total, options: optKeys });
-  const { days, rowDates } = distributeDates({ total, daily, startDate, skipWeekends, holidays: o.holidays });
+  const { days, rowDates } = distributeDates({ total, daily, startDate, skipWeekends, holidays });
 
   const rows = [];
   for (let i = 0; i < total; i++) {
@@ -220,6 +227,13 @@ function buildWorktablePlan({ workOrder, template, options: o = {} } = {}) {
   if (dupRoles.length) warnings.push({ code: 'duplicate_role', message: `같은 역할의 열이 둘 이상입니다(${dupRoles.join(', ')}) — 리뷰어 제출이 두 칸에 같은 값을 씁니다.` });
   const conflicts = columns.filter(c => c.conflict);
   if (conflicts.length) warnings.push({ code: 'status_conflict', message: `상태 칸과 제출 기입이 겹치는 열이 있습니다: ${conflicts.map(c => c.name).join(', ')}` });
+  /* 진행 기간 밖의 제외 날짜는 아무 영향이 없다 — 오타·잘못 고른 날일 수 있어 알려 준다.
+     (기간 안의 제외일은 그날이 빠진 것 = 정상 동작이라 알릴 것이 없다.) */
+  if (holidays.length && days.length) {
+    const first = days[0].date, last = days[days.length - 1].date;
+    const outside = holidays.filter(h => h < first || h > last);
+    if (outside.length) warnings.push({ code: 'holiday_outside', message: `제외 날짜 중 진행 기간 밖이라 영향이 없는 날: ${outside.join(', ')}` });
+  }
   if (buckets.length && !columns.some(c => c.role === 'option')) {
     warnings.push({ code: 'no_option_column', message: '옵션을 나눴지만 표에 옵션 열이 없어 기입되지 않습니다. 공통 열에 옵션 칸을 추가하세요.' });
   }
@@ -231,7 +245,7 @@ function buildWorktablePlan({ workOrder, template, options: o = {} } = {}) {
     dates: days,
     optionBuckets: buckets,
     totals: { rows: total, days: days.length, daily, columns: columns.length },
-    startDate, skipWeekends,
+    startDate, skipWeekends, holidays,
     blockers, warnings,
     canCreate: blockers.length === 0,
   };

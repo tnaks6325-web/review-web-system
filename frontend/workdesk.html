@@ -2904,20 +2904,42 @@ async function _wtpLoad(){
   const f=_WTP.form||{};
   ['total','daily','startDate'].forEach(k=>{ if(f[k]!=null && f[k]!=='') q.set(k,f[k]); });
   if(f.skipWeekends===false) q.set('skipWeekends','0');
+  if(Array.isArray(f.holidays)&&f.holidays.length) q.set('holidays',f.holidays.join(','));
   const r=await api('/api/trackb/worktable/plan?'+q.toString());
   if(!r||!r.ok){ document.getElementById('wtPlanBox').innerHTML=`<div style="padding:28px;color:#B91C1C;font-size:13px">불러오지 못했습니다: ${esc((r&&r.error)||'오류')}<div style="margin-top:14px"><button class="btn" onclick="closeWtPlan()">닫기</button></div></div>`; return; }
   _WTP.plan=r.data.plan; _WTP.workOrder=r.data.workOrder; _WTP.templateConfigured=r.data.templateConfigured;
   _wtpRender();
 }
-function _wtpOnEdit(){
-  _WTP.form={
-    total:document.getElementById('wtpTotal').value,
-    daily:document.getElementById('wtpDaily').value,
-    startDate:document.getElementById('wtpStart').value,
-    skipWeekends:document.getElementById('wtpSkipWe').checked,
-  };
+function _wtpOnEdit(){ _wtpSyncForm(); _wtpLoad(); }   // 값 읽기는 _wtpSyncForm 한 벌(사본 금지)
+/* 제외 날짜(공휴일·업체 휴무) — 작업오더에 날짜 필드가 없어 담당자가 여기서 지정한다.
+   ★ 서버가 형식·중복·정렬을 최종 판정하므로 여기서는 넘기기만 한다(판정 사본 금지). */
+function wtpHolAdd(){
+  const el=document.getElementById('wtpHolDate'); const v=(el&&el.value||'').trim();
+  if(!v) return;
+  const f=_WTP.form||(_WTP.form={});
+  const cur=Array.isArray(f.holidays)?f.holidays:((_WTP.plan&&_WTP.plan.holidays)||[]);
+  if(cur.includes(v)){ _toast('이미 제외한 날짜입니다'); return; }
+  _wtpSyncForm(); _WTP.form.holidays=cur.concat(v);
+  if(el) el.value='';
   _wtpLoad();
 }
+function wtpHolDel(d){
+  _wtpSyncForm();
+  const cur=Array.isArray(_WTP.form.holidays)?_WTP.form.holidays:((_WTP.plan&&_WTP.plan.holidays)||[]);
+  _WTP.form.holidays=cur.filter(x=>x!==d);
+  _wtpLoad();
+}
+/** 화면의 조정값을 form 에 담는다(제외 날짜 편집 중 다른 칸 값이 날아가지 않게). */
+function _wtpSyncForm(){
+  const g=id=>document.getElementById(id);
+  const f=_WTP.form||(_WTP.form={});
+  if(g('wtpTotal')) f.total=g('wtpTotal').value;
+  if(g('wtpDaily')) f.daily=g('wtpDaily').value;
+  if(g('wtpStart')) f.startDate=g('wtpStart').value;
+  if(g('wtpSkipWe')) f.skipWeekends=g('wtpSkipWe').checked;
+  if(f.holidays==null) f.holidays=((_WTP.plan&&_WTP.plan.holidays)||[]).slice();
+}
+
 function _wtpRender(){
   const p=_WTP.plan, wo=_WTP.workOrder;
   const cols=p.columns.map(c=>{
@@ -2956,7 +2978,16 @@ function _wtpRender(){
       </div>
 
       <div><div style="font-size:12.5px;font-weight:700;margin-bottom:5px">표 구성 (${p.columns.length}열)</div>${cols||'<span style="font-size:12.5px;color:#9CA3AF">열이 없습니다</span>'}</div>
-      <div><div style="font-size:12.5px;font-weight:700;margin-bottom:5px">날짜 분배 (${p.totals.days}일)</div>${days}</div>
+      <div><div style="font-size:12.5px;font-weight:700;margin-bottom:5px">날짜 분배 (${p.totals.days}일)</div>${days}
+        <div style="margin-top:8px;display:flex;gap:6px;flex-wrap:wrap;align-items:center">
+          <span style="font-size:12px;color:#6B7280">제외 날짜</span>
+          ${(p.holidays||[]).map(d=>`<span style="display:inline-flex;align-items:center;gap:4px;font-size:12px;padding:3px 7px;border-radius:6px;border:1px solid #FECACA;background:#FEF2F2;color:#B91C1C">${esc(d)}<button onclick="wtpHolDel('${esc(d)}')" title="빼기" style="border:none;background:transparent;color:#F87171;cursor:pointer;font-size:11px;padding:0 2px">✕</button></span>`).join('')}
+          ${(p.holidays||[]).length?'':'<span style="font-size:12px;color:#9CA3AF">없음</span>'}
+          <input id="wtpHolDate" type="date" style="padding:4px 8px;border:1.5px solid #D1D5DB;border-radius:7px;font-size:12px">
+          <button class="btn xs" onclick="wtpHolAdd()">＋ 제외</button>
+        </div>
+        <div style="font-size:11.5px;color:#9CA3AF;margin-top:4px">공휴일·업체 휴무처럼 그날 진행하지 않는 날을 빼면 그만큼 뒤로 밀립니다.</div>
+      </div>
       <div><div style="font-size:12.5px;font-weight:700;margin-bottom:5px">옵션 배분</div>${opts}</div>
 
       <div><div style="font-size:12.5px;font-weight:700;margin-bottom:5px">만들어질 표 (${p.totals.rows}행)</div>
