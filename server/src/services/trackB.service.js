@@ -2538,9 +2538,103 @@ async function setWorkdeskFavorites(ownerKey, favorites) {
   return { ok: true, count: arr.length };
 }
 
+// ══ 작업 "마감"(전사 공통) + 작업목록 통계 — 리뷰웹시스템[3버전] 작업보드/홈 ══════════════
+//   PRD: frontend/docs/prd-workboard-worktabs.html (v1.2). migration 088.
+//   ★★ 화면 분류 전용 — 시트·리뷰어 화면·검색·인덱스·주문 경로 무접촉. 쓰기 표면 = trackb_tab_finished 하나뿐.
+//   ★ 마감 여부는 목록에 **주석으로만** 실린다(서버가 거르지 않는다) — 작업보드는 진행 중만 그리고
+//     홈 "마감 보관함"은 같은 응답에서 마감분을 골라 그리므로, 서버가 걸러버리면 보관함이 영원히 빈다.
+const _FIN_KEY = (sheetId, tabName) => `${sheetId}\t${tabName}`;
+
+/** 활성 마감 맵 { 'sheetId\ttabName': {finishedAt, finishedBy} }.
+ *  ★ fail-soft: 테이블이 아직 없거나(배포 스큐) 조회가 실패하면 **빈 맵** = "아무것도 마감되지 않음" =
+ *    오늘과 똑같은 화면. 마감 조회 실패로 작업 목록 전체가 죽는 쪽이 훨씬 나쁘다. */
+async function finishedTabsMap() {
+  try {
+    const { rows } = await getPool().query(
+      `SELECT sheet_id AS "sheetId", tab_name AS "tabName", finished_at AS "finishedAt", finished_by AS "finishedBy"
+         FROM trackb_tab_finished WHERE deleted_at IS NULL`);
+    const map = {};
+    for (const r of rows) map[_FIN_KEY(r.sheetId, r.tabName)] = { finishedAt: r.finishedAt, finishedBy: r.finishedBy || '' };
+    return map;
+  } catch (err) {
+    logger.warn(`[trackB] finishedTabsMap 실패(빈 맵으로 계속): ${err.message}`);
+    return {};
+  }
+}
+
+/** 마감/복귀. finish=true 는 **검수 확인(inspected)** 없이는 거부한다(사용자 확정 ㉠ — 서버가 최종 방어).
+ *  멱등: 이미 마감된 탭 재마감·마감 아닌 탭 복귀 모두 no-op 성공. 활성 1건은 부분 유니크가 보장. */
+async function setTabFinished({ sheetId, tabName, tabGid = null, finish = true, inspected = false, by = '' } = {}) {
+  const s = String(sheetId || '').trim(), t = String(tabName || '').trim();
+  if (!s || !t) return { ok: false, error: 'sheetId, tabName 필수' };
+  const who = String(by || '').slice(0, 100);
+  const db = getPool();
+  if (finish) {
+    // ★ 프론트 체크만 믿지 않는다 — 확인창을 우회한 요청은 여기서 막힌다(필수열람 게이트와 같은 규율).
+    if (!inspected) return { ok: false, error: '리뷰폴더 마감자료 검수 확인이 필요합니다.', code: 'inspect_required' };
+    const { rows } = await db.query(
+      `INSERT INTO trackb_tab_finished (sheet_id, tab_name, tab_gid, finished_by, inspect_confirmed_at)
+       VALUES ($1,$2,$3,$4,NOW())
+       ON CONFLICT (sheet_id, tab_name) WHERE deleted_at IS NULL DO NOTHING
+       RETURNING id, finished_at AS "finishedAt"`,
+      [s, t, tabGid == null ? null : String(tabGid), who]);
+    return { ok: true, finished: true, created: rows.length > 0, finishedAt: rows[0] ? rows[0].finishedAt : null };
+  }
+  const { rowCount } = await db.query(
+    `UPDATE trackb_tab_finished SET deleted_at=NOW(), reopened_by=$3
+      WHERE sheet_id=$1 AND tab_name=$2 AND deleted_at IS NULL`, [s, t, who]);
+  return { ok: true, finished: false, reopened: rowCount };
+}
+
+/** 작업목록 표의 재료(담당자·캠페인명·인원/제출/입금) 맵 — 홈 작업 목록 전용(`?stats=1`).
+ *  ★ 관리자 대시보드(/api/tab/dashboard)를 프록시하지 않는다: 그 응답은 **스코프가 없어** staff 에게
+ *    담당 밖 데이터가 새고, 폐기 예정 표면에 새 의존이 생긴다. 여기서 읽고 스코프는 호출부가 건다.
+ *  ★ 읽기 전용 + fail-soft(실패 시 빈 맵 = 표에 '—'). 30초 프로세스 캐시로 홈 왕복을 상각. */
+let _tabStatsCache = { at: 0, map: null };
+const _TAB_STATS_TTL_MS = 30 * 1000;
+async function tabStatsMap({ force = false } = {}) {
+  if (!force && _tabStatsCache.map && (Date.now() - _tabStatsCache.at) < _TAB_STATS_TTL_MS) return _tabStatsCache.map;
+  try {
+    const { rows } = await getPool().query(
+      `SELECT tc.sheet_id AS "sheetId", tc.tab_name AS "tabName",
+              tc.manager, tc.campaign_name AS "campaignName", tc.display_name AS "displayName",
+              im.row_count AS "rowCount", im.submitted_count AS "submittedCount",
+              COALESCE(paid.paid_count, 0)::int AS "paidCount",
+              co.closed_date AS "closeoutDate", co.row_count AS "closeoutRows"
+         FROM tab_configs tc
+         LEFT JOIN index_master im ON im.sheet_id = tc.sheet_id AND im.tab_name = tc.tab_name
+         LEFT JOIN (SELECT sheet_id, tab_name, COUNT(*) FILTER (WHERE is_submitted2 = 'PAID') AS paid_count
+                      FROM review_index GROUP BY sheet_id, tab_name) paid
+           ON paid.sheet_id = tc.sheet_id AND paid.tab_name = tc.tab_name
+         -- 마감 확인창의 "마감자료 생성됨/미생성" 표시 재료(기존 정산 원장 재사용 — 신규 엔드포인트 0).
+         --   ★ LATERAL LIMIT 1 = 행 곱증식 없음(레포 관용구). 미생성이면 NULL → 화면이 경고만 띄운다(하드블록 아님).
+         LEFT JOIN LATERAL (SELECT c.closed_date, c.row_count FROM trackb_tab_closeouts c
+                             WHERE c.sheet_id = tc.sheet_id AND c.tab_name = tc.tab_name AND c.deleted_at IS NULL
+                             ORDER BY c.created_at DESC LIMIT 1) co ON TRUE`);
+    const map = {};
+    for (const r of rows) {
+      map[_FIN_KEY(r.sheetId, r.tabName)] = {
+        manager: r.manager || '', campaignName: r.campaignName || '', displayName: r.displayName || '',
+        total: Number.isFinite(+r.rowCount) ? +r.rowCount : null,
+        submitted: Number.isFinite(+r.submittedCount) ? +r.submittedCount : null,
+        paid: +r.paidCount || 0,
+        closeoutDate: r.closeoutDate || null, closeoutRows: r.closeoutRows == null ? null : +r.closeoutRows,
+      };
+    }
+    _tabStatsCache = { at: Date.now(), map };
+    return map;
+  } catch (err) {
+    logger.warn(`[trackB] tabStatsMap 실패(통계 없이 계속): ${err.message}`);
+    return {};
+  }
+}
+
 module.exports = {
   getWorkdeskFavorites,
   setWorkdeskFavorites,
+  finishedTabsMap,
+  setTabFinished,
+  tabStatsMap,
   identityKey,
   classifyParity,
   projectTab,

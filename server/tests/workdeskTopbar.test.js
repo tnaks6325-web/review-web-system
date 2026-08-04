@@ -47,7 +47,9 @@ const W_FAV = W_FAV_SRC.replace(/\\u([0-9a-fA-F]{4})/g, (_, h) => String.fromCha
 assert.ok(!/^[\w가-힣]/.test(W_FAV), 'W_FAV가 평범한 문자로 시작하면 업체명과 충돌 가능');
 
 // 검증 대상 함수만 추출(선언 그대로 평가 → 스코프·오타·미정의 참조를 실제로 잡음)
-const WANT = ['_wGroups','_wUnseen','_wActiveSeg','_renderTabList','wPickSeg','wSearch','wPickSearch','_wKbPaint','isFav','_favKey','selTab','isAdvFav','_advFavKey','toggleAdvFav','_curSheetLabel','_bindWheelScroll'];
+// ★ isFinished 는 스텁이 아니라 **구현을 그대로 추출**한다 — 작업보드가 "진행 중만" 보여주는 규칙(088)이
+//   이 파일의 그룹핑 검증과 같은 코드로 확인되게(스텁을 두면 구현이 바뀌어도 테스트가 통과한다).
+const WANT = ['_wGroups','_wUnseen','_wActiveSeg','_renderTabList','wPickSeg','wSearch','wPickSearch','_wKbPaint','isFav','_favKey','selTab','isAdvFav','_advFavKey','toggleAdvFav','_curSheetLabel','_bindWheelScroll','isFinished'];
 const bodies = WANT.map(name => {
   const re = new RegExp('\\n(?:async )?function ' + name.replace(/[$]/g,'\\$') + '\\s*\\(', 'g');
   const m = re.exec(script);
@@ -113,6 +115,28 @@ t('1. _wGroups: 업체 정렬 + 미지정 마지막, fav 없으면 fav 그룹 �
   const gs = F._wGroups();
   assert.deepStrictEqual(gs.map(g => g.key), ['리뷰천국','우리회사','']);
   assert.strictEqual(gs[gs.length-1].label, '미지정');
+});
+
+// ★ 마감(전사 공통, migration 088) — "작업보드에는 진행 중만". 인덱스는 원본을 유지해야 selTab(i) 계약이 안 깨진다.
+t('1b. _wGroups: 마감 작업은 상단 작업바에서 빠지고, 남은 탭의 인덱스는 원본 그대로', () => {
+  reset();
+  STATE.tabs[0].finished = true;                       // 우리회사 탭 하나를 마감
+  const gs = F._wGroups();
+  const woori = gs.find(g => g.key === '우리회사');
+  assert.deepStrictEqual(woori.idxs, [1], '마감 탭(0)은 빠지고 남은 탭의 STATE.tabs 인덱스(1)는 보존');
+  assert.ok(!gs.some(g => g.idxs.includes(0)), '마감 탭이 어느 그룹에도 없어야');
+});
+t('1c. _wGroups: 업체의 탭이 전부 마감이면 그 업체 칩 자체가 사라진다', () => {
+  reset();
+  STATE.tabs[2].finished = true;                       // 리뷰천국은 탭이 하나뿐
+  assert.ok(!F._wGroups().some(g => g.key === '리뷰천국'));
+});
+t('1d. _wGroups: 마감 탭은 즐겨찾기여도 작업바에 남지 않는다(즐겨찾기가 마감을 이기지 않는다)', () => {
+  reset();
+  STATE.tabs[2].finished = true;
+  STATE.favs = new Set([F._favKey(STATE.tabs[2])]);
+  const gs = F._wGroups();
+  assert.ok(!gs.some(g => g.idxs.includes(2)), '마감 탭이 즐겨찾기 그룹으로 되살아나면 안 됨');
 });
 
 t('2. _wGroups: 즐겨찾기는 맨 앞 + 원 업체 그룹에도 그대로 남음(중복 제거 안 함)', () => {

@@ -77,7 +77,39 @@ router.get('/tabs', authMiddleware, async (req, res, next) => {
     // 역할 스코프: master/admin=전체 · staff=담당(inad_pm) · advertiser=소유 탭만.
     //   forMapping=1(소유지정 초기매핑): staff에 한해 전체 탭명 목록(서비스에서 advertiser는 무시 — 스코프 유지).
     const tabs = await svc.scopedActiveTabs({ role, staffName: req.admin && req.admin.name, advertiserId: (req.admin && req.admin.advertiser_id) || null, limit: req.query.limit, forMapping: req.query.forMapping === '1' });
+    // ── 마감(전사 공통) 주석 + 작업목록 통계(?stats=1) ── migration 088 · PRD prd-workboard-worktabs.html
+    //   ★ 스코프 단일 출처는 위 scopedActiveTabs 하나 — 여기서는 그 결과에 **주석만** 얹는다.
+    //     서버가 마감 탭을 거르지 않는 이유 = 홈 "마감 보관함"이 같은 응답에서 마감분을 골라 그린다.
+    //   ★ 광고주(외부)에게는 주석을 붙이지 않는다 — 마감자(직원 이름)·담당자·캠페인명은 내부 정보다.
+    if (role !== 'advertiser') {
+      const fin = await svc.finishedTabsMap();
+      // stats=1 은 홈 작업 목록 전용(담당자·인원/제출/입금). 실패해도 목록 자체는 그대로 뜬다(fail-soft).
+      const stats = req.query.stats === '1' ? await svc.tabStatsMap() : null;
+      for (const t of tabs) {
+        const k = `${t.sheetId}\t${t.tabName}`;
+        const f = fin[k];
+        if (f) { t.finished = true; t.finishedAt = f.finishedAt; t.finishedBy = f.finishedBy; }
+        if (stats && stats[k]) t.stats = stats[k];
+      }
+    }
     res.json({ ok: true, count: tabs.length, tabs });
+  } catch (err) { next(err); }
+});
+
+// ── 작업 마감/복귀(전사 공통) — master/admin 전체 · staff 담당 탭만 · advertiser 차단 ──
+//   ★ finish=true 는 body.inspected(리뷰폴더 마감자료 검수 확인) 없이는 서비스가 거부한다 —
+//     확인창 체크를 우회한 요청을 서버가 막는다(프론트만 믿지 않는다).
+router.post('/workdesk/tab-finish', authMiddleware, async (req, res, next) => {
+  try {
+    const { sheetId, tabName, tabGid, finish, inspected } = req.body || {};
+    if (!sheetId || !tabName) return res.status(400).json({ ok: false, error: 'sheetId, tabName 필수' });
+    const scope = await _ensureEditScope(req, sheetId, tabName);
+    if (!scope.ok) return res.status(scope.code || 403).json({ ok: false, error: scope.error });
+    const out = await svc.setTabFinished({
+      sheetId, tabName, tabGid,
+      finish: finish !== false, inspected: inspected === true, by: _by(req),
+    });
+    res.status(out.ok ? 200 : 400).json(out);
   } catch (err) { next(err); }
 });
 
