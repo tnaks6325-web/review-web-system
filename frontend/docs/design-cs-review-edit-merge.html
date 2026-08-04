@@ -1,0 +1,706 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="UTF-8"/>
+<meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+<title>이미지 교체요청 → C/S 문의 메뉴 통합 시안 3종 — 통합 작업대</title>
+<style>
+  /* 통합 작업대(workdesk.html)의 토큰을 그대로 가져와 "실물과 같은 화면"으로 보이게 한다.
+     ★ color-scheme:light 고정 — 다크에서 색이 뒤집히면 "실물과 같다"가 깨진다. */
+  :root{
+    color-scheme:light;
+    --paper:#f4f6f9;--card:#ffffff;--card2:#f1f4f8;--ink:#101828;--muted:#667085;--faint:#98a2b3;
+    --line:#e6eaf0;--line2:#d0d9e4;--accent:#2563eb;--accent-soft:#eff4ff;--accent-deep:#1d4ed8;--accent-line:#d7e3fd;
+    --safe:#16a34a;--safe-soft:#e9f7ee;--warn:#b45309;--warn-soft:#fdf6ec;--bad:#e5484d;--bad-soft:#fdf0f0;
+    --re:#d97706;--re-soft:#fff7ed;--re-line:#fed7aa;   /* 교체요청 계열 = 주황(기존 🟠 뱃지와 같은 톤) */
+    --sans:'Pretendard',-apple-system,BlinkMacSystemFont,'Segoe UI','Noto Sans KR','Apple SD Gothic Neo',sans-serif;
+    --mono:'SF Mono','JetBrains Mono',ui-monospace,monospace;
+  }
+  *{box-sizing:border-box;margin:0;padding:0}
+  body{background:#e8ecf3;color:var(--ink);font-family:var(--sans);font-size:14px;line-height:1.55;-webkit-font-smoothing:antialiased}
+  .doc{max-width:1240px;margin:0 auto;padding:0 18px 100px}
+
+  header.hd{padding:42px 0 8px}
+  .eyebrow{font-size:11px;font-weight:800;letter-spacing:.14em;color:var(--accent)}
+  h1{font-size:26px;font-weight:800;letter-spacing:-.02em;margin:8px 0 8px}
+  p.lead{color:var(--muted);font-size:14px;max-width:860px}
+  .metachips{display:flex;gap:6px;flex-wrap:wrap;margin-top:14px}
+  .mchip{font-size:11.5px;font-weight:700;color:var(--muted);background:#fff;border:1px solid var(--line);border-radius:999px;padding:4px 11px}
+  .mchip b{color:var(--ink)}
+
+  section{margin-top:46px}
+  .sec-label{font-size:11px;font-weight:800;letter-spacing:.13em;color:var(--accent);margin-bottom:4px}
+  h2{font-size:19px;font-weight:800;letter-spacing:-.02em}
+  h2 .tag{font-size:11px;font-weight:800;vertical-align:middle;margin-left:8px;padding:3px 9px;border-radius:999px;
+    background:var(--card2);border:1px solid var(--line);color:var(--muted)}
+  h2 .tag.rec{background:var(--safe-soft);border-color:#bfe7cd;color:#166534}
+  h3{font-size:14.5px;font-weight:800;margin:22px 0 8px}
+  p.desc{color:var(--muted);font-size:13px;max-width:900px;margin-top:7px}
+  p.desc b{color:var(--ink)}
+  .pros{display:flex;gap:6px;flex-wrap:wrap;margin:11px 0 16px}
+  .pros span{font-size:11.5px;font-weight:700;border-radius:7px;padding:4px 9px;background:var(--accent-soft);color:var(--accent-deep)}
+  .pros span.warn{background:var(--warn-soft);color:var(--warn)}
+  .pros span.bad{background:var(--bad-soft);color:#b42318}
+
+  /* 경고/확정 카드 */
+  .callout{border:1px solid var(--line);background:#fff;border-radius:12px;padding:15px 17px;margin-top:16px}
+  .callout.warn{background:var(--warn-soft);border-color:#f3ddb8}
+  .callout.bad{background:var(--bad-soft);border-color:#f4cfd0}
+  .callout.ok{background:var(--safe-soft);border-color:#c6e8d3}
+  .callout .ct{font-size:13px;font-weight:800;margin-bottom:6px}
+  .callout p{font-size:12.5px;color:var(--muted);line-height:1.62}
+  .callout p + p{margin-top:7px}
+  .callout b{color:var(--ink)}
+  .callout ul{margin:7px 0 0 17px;font-size:12.5px;color:var(--muted);line-height:1.7}
+  .callout li b{color:var(--ink)}
+
+  /* ═══ 브라우저 프레임 (통합 작업대 실화면 재현 — 폭만 1180px로 축약) ═══ */
+  .frame{border:1px solid var(--line2);border-radius:14px;overflow:hidden;background:var(--paper);
+    box-shadow:0 10px 34px rgba(16,24,40,.13)}
+  .fbar{display:flex;align-items:center;gap:7px;padding:9px 13px;background:#e9edf3;border-bottom:1px solid var(--line2)}
+  .fbar i{width:10px;height:10px;border-radius:50%;background:#d2d7e0;display:block}
+  .fbar .url{margin-left:8px;font-size:11px;color:var(--faint);font-family:var(--mono);background:#fff;
+    border:1px solid var(--line);border-radius:6px;padding:3px 10px}
+
+  /* 상단 헤더 (.top 재현) */
+  .top{display:flex;align-items:center;gap:11px;padding:9px 16px;background:var(--card);border-bottom:1px solid var(--line);flex-wrap:wrap}
+  .logo{font-weight:800;letter-spacing:-.02em;font-size:14px}
+  .logo .tg{font-size:9.5px;font-weight:800;color:var(--accent-deep);background:var(--accent-soft);border:1px solid var(--accent-line);
+    padding:2px 8px;border-radius:999px;margin-left:7px;letter-spacing:.05em}
+  .nav{display:flex;background:var(--card2);border-radius:10px;padding:3px}
+  .navb{font-size:11.5px;font-weight:700;height:28px;padding:0 11px;border-radius:8px;border:none;background:none;color:var(--muted);
+    display:flex;align-items:center;white-space:nowrap}
+  .navb.on{background:var(--card);color:var(--accent-deep);box-shadow:0 1px 3px rgba(16,24,40,.12)}
+  .navb .bdg{color:#e5484d;font-weight:800;margin-left:4px}
+  .navb.gone{text-decoration:line-through;opacity:.4}
+  .sp{flex:1}
+  .rolebadge{font-size:10.5px;font-weight:750;padding:3px 10px;border-radius:999px;background:var(--accent-soft);
+    border:1px solid var(--accent-line);color:var(--accent-deep)}
+  .btn{font-size:11.5px;font-weight:700;padding:0 11px;height:28px;display:inline-flex;align-items:center;gap:5px;border-radius:9px;
+    border:1px solid var(--line);background:var(--card);color:var(--ink);white-space:nowrap}
+  .btn.pri{background:var(--accent);color:#fff;border-color:var(--accent)}
+  .btn.sm{height:24px;font-size:11px;padding:0 9px;border-radius:7px}
+  .btn.re{background:var(--re);border-color:var(--re);color:#fff}
+  .btn.ghost{background:#fff;color:var(--muted)}
+
+  .body{padding:15px 17px 20px}
+  .mh{display:flex;align-items:center;gap:9px;flex-wrap:wrap;margin-bottom:11px}
+  .mh h1{font-size:17px;font-weight:800;letter-spacing:-.02em;margin:0}
+  .ovnote{font-size:11px;color:var(--faint);margin:-4px 0 13px;line-height:1.55}
+  .ovnote b{color:var(--muted)}
+
+  /* 세그먼트(서브탭) */
+  .seg{display:inline-flex;background:var(--card2);border:1px solid var(--line);border-radius:11px;padding:3px;gap:2px}
+  .seg button{font-size:12px;font-weight:750;height:30px;padding:0 15px;border-radius:8px;border:none;background:none;color:var(--muted);
+    display:flex;align-items:center;gap:6px}
+  .seg button.on{background:#fff;color:var(--accent-deep);box-shadow:0 1px 3px rgba(16,24,40,.13)}
+  .seg button.on.re{color:#9a3412;box-shadow:0 1px 3px rgba(217,119,6,.2)}
+  .seg .cnt{font-size:10.5px;font-weight:800;background:#e5484d;color:#fff;border-radius:999px;padding:1px 6px;min-width:17px;text-align:center}
+  .seg .cnt.mut{background:var(--line2);color:#fff}
+  .seg button.lock{opacity:.45}
+
+  /* ── C/S 화면 재현 (좌 목록 360 + 우 대화창 860 상한) ── */
+  .csrow{display:flex;gap:12px;align-items:stretch;height:454px}
+  .csleft{width:326px;flex-shrink:0;overflow:hidden;background:#fff;border-radius:14px;border:1px solid var(--line);
+    box-shadow:0 1px 4px rgba(15,23,42,.07);display:flex;flex-direction:column}
+  .csright{flex:1;min-width:0;max-width:700px;display:flex;flex-direction:column;background:#fff;border-radius:14px;
+    border:1px solid var(--line);box-shadow:0 1px 4px rgba(15,23,42,.07);overflow:hidden}
+  .grphd{padding:9px 12px;background:#f1f6ff;border-bottom:1px solid #e3ecfa}
+  .grphd.gen{background:#f7f5ff;border-bottom-color:#e3ddff}
+  .grphd .t{display:flex;align-items:center;gap:6px}
+  .grphd .t span.nm{font-weight:800;color:#1e3a8a;font-size:12px;flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+  .grphd.gen .t span.nm{color:#5b21b6}
+  .grphd .sub{font-size:10px;color:#64748b;margin-top:2px}
+  .unread{background:#ef4444;color:#fff;font-size:9.5px;font-weight:800;padding:1px 7px;border-radius:9px}
+  .room{padding:9px 12px 9px 18px;border-bottom:1px solid #f3f4f6;display:flex;align-items:center;gap:9px;position:relative}
+  .room.act{background:#eef5ff;box-shadow:inset 3px 0 0 #3182f6}
+  .room .av{width:25px;height:25px;border-radius:50%;background:#e2e8f0;color:#64748b;display:flex;align-items:center;justify-content:center;
+    font-size:10.5px;font-weight:700;flex-shrink:0}
+  .room .mid{flex:1;min-width:0}
+  .room .nm{font-weight:700;font-size:12px;display:flex;align-items:center;gap:5px}
+  .room .ph{color:#94a3b8;font-size:10px;font-family:var(--mono);font-weight:400}
+  .room .pv{color:#94a3b8;font-size:10.5px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+  .room .rt{text-align:right;flex-shrink:0;color:#b6becb;font-size:10px}
+  .room .rt .n{display:inline-block;margin-top:2px;background:#ef4444;color:#fff;font-size:9.5px;font-weight:800;padding:1px 6px;border-radius:9px}
+  .kind{font-size:9.5px;font-weight:800;border-radius:5px;padding:1px 6px;white-space:nowrap}
+  .kind.re{background:#ffedd5;color:#9a3412}
+  .kind.cs{background:#e0edff;color:#1e40af}
+  .room.rekind{background:var(--re-soft)}
+  .room.rekind.act{background:#ffedd5;box-shadow:inset 3px 0 0 var(--re)}
+  .room.rekind::before{content:'';position:absolute;left:0;top:0;bottom:0;width:3px;background:var(--re)}
+
+  .convhd{padding:11px 14px;border-bottom:1px solid #eef2f7;display:flex;align-items:center;gap:8px}
+  .convhd .nm{font-weight:700;font-size:13px}
+  .convhd .cap{font-size:10.5px;color:#94a3b8}
+  .ctx{display:flex;gap:9px;padding:9px 13px;background:#fbfcfe;border-bottom:1px solid #eef2f7;font-size:10.5px;color:var(--muted)}
+  .ctx div{background:#fff;border:1px solid var(--line);border-radius:8px;padding:5px 9px}
+  .ctx b{color:var(--ink)}
+  .thread{flex:1;overflow:hidden;padding:12px;background:#f9fafb;display:flex;flex-direction:column;gap:8px}
+  .bub{max-width:74%;font-size:11.5px;padding:8px 11px;border-radius:12px;line-height:1.5}
+  .bub.you{background:#fff;border:1px solid var(--line);border-bottom-left-radius:4px}
+  .bub.me{background:#3182f6;color:#fff;align-self:flex-end;border-bottom-right-radius:4px}
+  .bub .who{font-size:9.5px;font-weight:800;opacity:.72;display:block;margin-bottom:2px}
+  .replybar{padding:9px 11px;border-top:1px solid #eef2f7;display:flex;gap:7px;align-items:center}
+  .replybar .ta{flex:1;border:1px solid var(--line);border-radius:10px;padding:8px 10px;font-size:11.5px;color:var(--faint);background:#fff}
+
+  /* 교체요청 카드 (cs-review-edit-card.js 재현) */
+  .recard{border:1.5px solid var(--re-line);background:var(--re-soft);border-radius:12px;padding:11px 12px;max-width:96%}
+  .recard .hd{display:flex;align-items:center;gap:7px;margin-bottom:8px}
+  .recard .hd .ti{font-size:11.5px;font-weight:800;color:#9a3412}
+  .stbadge{font-size:10px;font-weight:800;border-radius:7px;padding:2px 8px}
+  .st-pending{background:#fef3c7;color:#92400e}
+  .st-approved{background:#d1fae5;color:#065f46}
+  .st-rejected{background:#fee2e2;color:#991b1b}
+  .pair{display:flex;gap:10px;align-items:flex-start}
+  .thumb{width:96px;flex:0 0 96px}
+  .thumb .im{height:96px;border-radius:9px;border:1.5px solid #cbd5e1;background:linear-gradient(135deg,#eef2f7,#dde5f0);
+    display:flex;align-items:center;justify-content:center;font-size:20px;color:#94a3b8}
+  .thumb.new .im{border-color:var(--re);background:linear-gradient(135deg,#fff7ed,#ffedd5);color:#c2410c}
+  .thumb .cap{font-size:10px;font-weight:700;text-align:center;margin-top:4px;color:#64748b}
+  .thumb.new .cap{color:#c2410c}
+  .rebody{flex:1;min-width:0;font-size:11px;color:var(--muted);line-height:1.6}
+  .rebody b{color:var(--ink)}
+  .reacts{display:flex;gap:6px;margin-top:9px}
+
+  /* 카드 격자 (전용 탭 재현) */
+  .recards{display:grid;grid-template-columns:repeat(3,1fr);gap:11px}
+  .gcard{border:1px solid var(--line);background:#fff;border-radius:12px;overflow:hidden}
+  .gcard .gh{display:flex;align-items:center;gap:7px;padding:8px 11px;border-bottom:1px solid var(--line);background:var(--card2);font-size:11.5px}
+  .gcard .gh b{font-weight:800}
+  .gcard .gh .mt{color:var(--faint);font-size:10px}
+  .gcard .gin{padding:10px 11px}
+
+  /* 큐 스트립 (시안 C) */
+  .queue{border:1px solid var(--re-line);background:var(--re-soft);border-radius:12px;margin-bottom:12px;overflow:hidden}
+  .queue .qh{display:flex;align-items:center;gap:8px;padding:9px 13px;border-bottom:1px solid var(--re-line)}
+  .queue .qh .qt{font-size:12px;font-weight:800;color:#9a3412}
+  .qrail{display:flex;gap:9px;padding:11px 13px;overflow:hidden}
+  .qitem{flex:0 0 216px;background:#fff;border:1px solid var(--re-line);border-radius:10px;padding:9px;display:flex;gap:8px}
+  .qitem .qim{width:52px;height:52px;flex:0 0 52px;border-radius:8px;background:linear-gradient(135deg,#fff7ed,#ffedd5);
+    border:1px solid var(--re-line);display:flex;align-items:center;justify-content:center;font-size:16px;color:#c2410c}
+  .qitem .qm{flex:1;min-width:0;font-size:10.5px;color:var(--muted);line-height:1.5}
+  .qitem .qm b{display:block;color:var(--ink);font-size:11.5px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+
+  /* 필터 칩줄 */
+  .chips{display:flex;gap:6px;align-items:center;flex-wrap:wrap;margin-bottom:11px}
+  .chip{font-size:11.5px;font-weight:700;height:28px;padding:0 11px;display:inline-flex;align-items:center;gap:5px;
+    border-radius:999px;border:1px solid var(--line);background:#fff;color:var(--muted)}
+  .chip.on{background:var(--accent);border-color:var(--accent);color:#fff}
+  .chip.on.re{background:var(--re);border-color:var(--re)}
+  .chip .dot{width:7px;height:7px;border-radius:50%;background:var(--re);display:block}
+  .search{font-size:11.5px;padding:5px 10px;border:1px solid var(--line2);border-radius:8px;background:#fff;color:var(--faint);width:150px}
+  .selbox{font-size:11.5px;padding:5px 10px;border:1px solid var(--line2);border-radius:8px;background:#fff;color:var(--ink)}
+
+  .cap-under{font-size:11.5px;color:var(--faint);margin-top:10px;text-align:center}
+
+  /* 비교표 */
+  table.cmp{width:100%;border-collapse:collapse;font-size:12.5px;background:#fff;border:1px solid var(--line);border-radius:12px;overflow:hidden;margin-top:14px}
+  table.cmp th,table.cmp td{padding:10px 12px;border-bottom:1px solid var(--line);text-align:left;vertical-align:top}
+  table.cmp thead th{background:var(--card2);font-size:11px;color:var(--muted);font-weight:800;white-space:nowrap}
+  table.cmp td:first-child{font-weight:750;white-space:nowrap;color:var(--ink)}
+  table.cmp tr:last-child td{border-bottom:none}
+  .yes{color:#166534;font-weight:800}
+  .no{color:#b42318;font-weight:800}
+  .mid{color:var(--warn);font-weight:800}
+
+  .vswitch{position:sticky;top:0;z-index:9;display:flex;gap:6px;justify-content:center;padding:10px;background:rgba(232,236,243,.93);
+    backdrop-filter:blur(6px);border-bottom:1px solid #d9dfe9}
+  .vswitch a{font-size:12px;font-weight:750;text-decoration:none;color:var(--muted);background:#fff;border:1px solid var(--line);
+    border-radius:8px;padding:5px 12px}
+  .vswitch a.on{background:var(--accent);border-color:var(--accent);color:#fff}
+  @media (max-width:900px){ .recards{grid-template-columns:1fr} .csrow{height:auto;flex-direction:column} .csleft{width:100%} }
+</style>
+</head>
+<body>
+
+<div class="vswitch">
+  <a href="?" id="lv-all">전체 보기</a>
+  <a href="?v=A" id="lv-A">시안 A</a>
+  <a href="?v=B" id="lv-B">시안 B</a>
+  <a href="?v=C" id="lv-C">시안 C</a>
+</div>
+
+<div class="doc">
+
+<header class="hd">
+  <div class="eyebrow">통합 작업대 · 상단 메뉴 정리</div>
+  <h1>이미지 교체요청을 「C/S 문의」 메뉴 안으로 — 구분 방식 시안 3종</h1>
+  <p class="lead">상단 메뉴에서 <b>이미지 교체요청</b>을 빼고 <b>C/S 문의</b> 안으로 넣었을 때,
+     한 화면 안에서 <b>리뷰어 C/S 문의</b>와 <b>이미지 교체요청</b>이 어떻게 구분되어 보일지를
+     실제 화면 그대로 목업했습니다. 어느 안으로 갈지 골라 주시면 그대로 구현합니다.</p>
+  <div class="metachips">
+    <span class="mchip">대상 <b>통합 작업대 workdesk.html</b></span>
+    <span class="mchip">현재 메뉴 <b>11개</b> → 통합 후 <b>10개</b></span>
+    <span class="mchip">구분 색 <b>문의=파랑 · 교체요청=주황</b></span>
+    <span class="mchip">폭 <b>1180px로 축약</b>(실제 상한 1920px)</span>
+  </div>
+</header>
+
+<!-- ══════════════ 먼저 짚어야 할 제약 ══════════════ -->
+<section id="sec-pre">
+  <div class="sec-label">먼저 확인</div>
+  <h2>합치기 전에 걸리는 것 두 가지</h2>
+
+  <div class="callout bad">
+    <div class="ct">① AE(담당자)는 「C/S 문의」 메뉴가 아예 보이지 않습니다 — 그대로 합치면 AE가 교체요청을 못 씁니다</div>
+    <p>지금 두 메뉴는 <b>권한이 다릅니다</b>.</p>
+    <ul>
+      <li><b>C/S 문의</b> = 관리자·마스터 전용. 문의 본문에 리뷰어 실명·연락처·주소·주문정보가 그대로 실려 담당 업체 단위로 나눌 수 없어 AE에게 열지 않았습니다.</li>
+      <li><b>이미지 교체요청</b> = 관리자·마스터 <b>＋ AE</b>. 단 AE에게는 서버가 <b>담당 업체 작업만</b> 걸러서 보냅니다.</li>
+    </ul>
+    <p>그래서 교체요청을 C/S 문의 안에 그냥 넣으면, <b>AE 화면에서는 메뉴째 사라져</b> 지금 하던 교체요청 처리를 못 하게 됩니다.
+       아래 <b>모든 시안은 AE에게도 메뉴를 보여주되 그 안에서 교체요청만 열리는</b> 형태로 그렸습니다(A안 AE 화면 참조).</p>
+  </div>
+
+  <div class="callout warn">
+    <div class="ct">② 두 화면은 정보 구조가 다릅니다 — 문의는 「목록＋대화」, 교체요청은 「카드 격자」</div>
+    <p>C/S 문의는 <b>왼쪽 문의방 목록 + 오른쪽 대화창</b>이고, 교체요청은 <b>기존↔변경 이미지를 나란히 놓고 대조하는 카드</b>를 여러 장 펼쳐 봅니다(이미지 대조라 가로 폭이 필요).
+       그래서 "한 목록에 섞기"(시안 B)는 메뉴는 깔끔해지지만 <b>처리 화면이 좁아집니다</b>. 시안별 장단이 여기서 갈립니다.</p>
+    <p>참고로 <b>교체요청은 이미 리뷰어 대화창 안에도 카드로 뜹니다</b>(승인·반려 버튼 포함). 즉 "대화 안에서 처리"는 이미 되고 있고,
+       전용 탭은 <b>여러 건을 몰아 보는 창구</b> 역할입니다.</p>
+  </div>
+</section>
+
+<!-- ══════════════ 시안 A ══════════════ -->
+<section id="sec-A">
+  <div class="sec-label">시안 A</div>
+  <h2>서브탭(세그먼트)으로 나누기 <span class="tag rec">추천</span></h2>
+  <p class="desc">C/S 문의 메뉴를 열면 화면 맨 위에 <b>[💬 리뷰어 문의] [🖼 이미지 교체요청]</b> 두 개짜리 스위치가 있고,
+     누르는 쪽 화면이 통째로 바뀝니다. <b>지금 두 화면이 그대로 옮겨오기만</b> 하므로 처리 방식·폭·버튼이 하나도 안 바뀝니다.
+     대기 건수는 스위치의 빨간 숫자로 보이고, 상단 메뉴 뱃지(🟠)는 <b>C/S 문의 메뉴 하나로 합쳐</b> 표시합니다.</p>
+  <div class="pros">
+    <span>기존 화면 그대로 = 사고 위험 최소</span>
+    <span>교체요청 처리 폭(카드 격자) 유지</span>
+    <span>대기 건수 한눈에</span>
+    <span class="warn">한 번 더 눌러야 함(클릭 1회 증가)</span>
+  </div>
+
+  <div class="frame">
+    <div class="fbar"><i></i><i></i><i></i><span class="url">workdesk.html — 통합 작업대</span></div>
+    <div class="top">
+      <span class="logo">통합 작업대<span class="tg">TRACK B · 그림자</span></span>
+      <nav class="nav">
+        <button class="navb">작업대</button>
+        <button class="navb">관측</button>
+        <button class="navb">업체관리</button>
+        <button class="navb">리뷰어 로그</button>
+        <button class="navb">작업오더</button>
+        <button class="navb">모집공고</button>
+        <button class="navb on">C/S 문의<span class="bdg">🟠4</span></button>
+        <button class="navb">리뷰검수</button>
+        <button class="navb">등록리뷰어DB</button>
+        <button class="navb">설정</button>
+      </nav>
+      <span class="sp"></span>
+      <span class="rolebadge">admin · 박세희</span>
+      <button class="btn">로그아웃</button>
+    </div>
+    <div class="body">
+      <div class="mh">
+        <div class="seg">
+          <button class="on">💬 리뷰어 문의 <span class="cnt">3</span></button>
+          <button>🖼 이미지 교체요청 <span class="cnt">4</span></button>
+        </div>
+        <span class="sp"></span>
+        <input class="search" value="리뷰어/캠페인 검색..." readonly>
+        <select class="selbox"><option>진행중</option></select>
+        <button class="btn pri">↻ 새로고침</button>
+      </div>
+      <div class="ovnote">리뷰어가 보낸 1:1 문의에 답장합니다. <b>교체요청은 오른쪽 [이미지 교체요청] 탭에서 몰아서 처리할 수 있습니다.</b></div>
+
+      <div class="csrow">
+        <div class="csleft">
+          <div class="grphd"><div class="t"><span class="nm">📣 힙스 골라담기 8월 3주차</span><span class="unread">미확인 2</span></div>
+            <div class="sub">문의 리뷰어 3명</div></div>
+          <div class="room act"><div class="av">양</div>
+            <div class="mid"><div class="nm">양미경 <span class="ph">1234</span></div>
+              <div class="pv">이미지 다시 올렸는데 확인 부탁드려요</div></div>
+            <div class="rt">방금<div><span class="n">2</span></div></div></div>
+          <div class="room"><div class="av">김</div>
+            <div class="mid"><div class="nm">김하늘 <span class="ph">7788</span></div>
+              <div class="pv">배송이 아직 안 왔어요</div></div>
+            <div class="rt">12분 전</div></div>
+          <div class="room"><div class="av">이</div>
+            <div class="mid"><div class="nm">이시현 <span class="ph">0421</span></div>
+              <div class="pv">리뷰 등록 완료했습니다!</div></div>
+            <div class="rt">1시간 전</div></div>
+          <div class="grphd gen"><div class="t"><span class="nm">💬 일반 문의</span></div><div class="sub">문의 리뷰어 1명</div></div>
+          <div class="room"><div class="av">박</div>
+            <div class="mid"><div class="nm">박지우 <span class="ph">9012</span></div>
+              <div class="pv">계좌를 바꾸고 싶습니다</div></div>
+            <div class="rt">어제</div></div>
+        </div>
+
+        <div class="csright">
+          <div class="convhd">
+            <div style="flex:1;min-width:0">
+              <div class="nm">양미경 <span class="ph" style="font-family:var(--mono);color:#94a3b8;font-weight:400;font-size:11px">12341234</span></div>
+              <div class="cap">힙스 골라담기 8월 3주차</div>
+            </div>
+            <button class="btn sm">진행중</button>
+          </div>
+          <div class="ctx"><div>수취인 <b>양미경</b></div><div>주문번호 <b>3902…417</b></div><div>참여 <b>3건</b></div></div>
+          <div class="thread">
+            <div class="bub you"><span class="who">양미경</span>리뷰 이미지를 잘못 올려서 바꾸고 싶어요 🙏</div>
+            <div class="recard">
+              <div class="hd"><span class="ti">🖼 리뷰 이미지 교체요청</span><span class="stbadge st-pending">처리 대기</span>
+                <span class="sp"></span><span style="font-size:10px;color:#9a3412">12행 · 리뷰</span></div>
+              <div class="pair">
+                <div class="thumb"><div class="im">🖼</div><div class="cap">기존</div></div>
+                <div class="thumb new"><div class="im">🖼</div><div class="cap">변경 요청</div></div>
+                <div class="rebody"><b>사유</b><br>별점이 안 나온 화면을 올려서 다시 캡처했습니다.
+                  <div class="reacts"><button class="btn sm re">승인</button><button class="btn sm ghost">반려</button></div></div>
+              </div>
+            </div>
+            <div class="bub me"><span class="who">만두</span>확인 후 처리해 드릴게요!</div>
+          </div>
+          <div class="replybar"><button class="btn sm">🖼</button>
+            <div class="ta">답장 입력... (Shift+Enter 줄바꿈, 사진 붙여넣기·드래그 가능)</div>
+            <button class="btn pri">전송</button></div>
+        </div>
+      </div>
+    </div>
+  </div>
+  <p class="cap-under">A-1. [💬 리뷰어 문의] 쪽 — <b>지금 C/S 화면과 완전히 동일</b>합니다(대화 안 교체요청 카드도 그대로).</p>
+
+  <div class="frame" style="margin-top:22px">
+    <div class="fbar"><i></i><i></i><i></i><span class="url">workdesk.html — 통합 작업대</span></div>
+    <div class="top">
+      <span class="logo">통합 작업대<span class="tg">TRACK B · 그림자</span></span>
+      <nav class="nav">
+        <button class="navb">작업대</button><button class="navb">관측</button><button class="navb">업체관리</button>
+        <button class="navb">리뷰어 로그</button><button class="navb">작업오더</button><button class="navb">모집공고</button>
+        <button class="navb on">C/S 문의<span class="bdg">🟠4</span></button>
+        <button class="navb">리뷰검수</button><button class="navb">등록리뷰어DB</button><button class="navb">설정</button>
+      </nav>
+      <span class="sp"></span><span class="rolebadge">admin · 박세희</span><button class="btn">로그아웃</button>
+    </div>
+    <div class="body">
+      <div class="mh">
+        <div class="seg">
+          <button>💬 리뷰어 문의 <span class="cnt">3</span></button>
+          <button class="on re">🖼 이미지 교체요청 <span class="cnt">4</span></button>
+        </div>
+        <span class="sp"></span>
+        <button class="btn pri">처리 대기</button><button class="btn">승인</button><button class="btn">반려</button><button class="btn">취소</button>
+        <button class="btn">↻ 새로고침</button>
+      </div>
+      <div class="ovnote">리뷰어가 올린 교체 이미지를 확인하고 승인·반려합니다. <b>처리하면 리뷰어 채팅(왼쪽 [리뷰어 문의])에 안내가 자동 전송</b>되므로 따로 연락하지 않아도 됩니다. <span style="color:var(--muted)">· 4건</span></div>
+
+      <div class="recards">
+        <div class="gcard">
+          <div class="gh"><b>힙스 골라담기 8월 3주차</b><span class="sp"></span><span class="mt">양미경 · 1234</span></div>
+          <div class="gin"><div class="recard" style="border:none;background:none;padding:0;max-width:none">
+            <div class="hd"><span class="stbadge st-pending">처리 대기</span><span class="sp"></span><span style="font-size:10px;color:#9a3412">12행</span></div>
+            <div class="pair"><div class="thumb"><div class="im">🖼</div><div class="cap">기존</div></div>
+              <div class="thumb new"><div class="im">🖼</div><div class="cap">변경 요청</div></div></div>
+            <div class="rebody" style="margin-top:8px"><b>사유</b> 별점이 안 나온 화면을 올렸어요
+              <div class="reacts"><button class="btn sm re">승인</button><button class="btn sm ghost">반려</button></div></div>
+          </div></div>
+        </div>
+        <div class="gcard">
+          <div class="gh"><b>콰이어트 데일리세트</b><span class="sp"></span><span class="mt">김하늘 · 7788</span></div>
+          <div class="gin"><div class="recard" style="border:none;background:none;padding:0;max-width:none">
+            <div class="hd"><span class="stbadge st-pending">처리 대기</span><span class="sp"></span><span style="font-size:10px;color:#9a3412">7행</span></div>
+            <div class="pair"><div class="thumb"><div class="im">🖼</div><div class="cap">기존</div></div>
+              <div class="thumb new"><div class="im">🖼</div><div class="cap">변경 요청</div></div></div>
+            <div class="rebody" style="margin-top:8px"><b>사유</b> 상품이 잘려서 다시 찍었습니다
+              <div class="reacts"><button class="btn sm re">승인</button><button class="btn sm ghost">반려</button></div></div>
+          </div></div>
+        </div>
+        <div class="gcard">
+          <div class="gh"><b>어나더 립밤 2세트</b><span class="sp"></span><span class="mt">이시현 · 0421</span></div>
+          <div class="gin"><div class="recard" style="border:none;background:none;padding:0;max-width:none">
+            <div class="hd"><span class="stbadge st-pending">처리 대기</span><span class="sp"></span><span style="font-size:10px;color:#9a3412">21행</span></div>
+            <div class="pair"><div class="thumb"><div class="im">🖼</div><div class="cap">기존</div></div>
+              <div class="thumb new"><div class="im">🖼</div><div class="cap">변경 요청</div></div></div>
+            <div class="rebody" style="margin-top:8px"><b>사유</b> 현금영수증 캡처를 잘못 올렸어요
+              <div class="reacts"><button class="btn sm re">승인</button><button class="btn sm ghost">반려</button></div></div>
+          </div></div>
+        </div>
+      </div>
+    </div>
+  </div>
+  <p class="cap-under">A-2. [🖼 이미지 교체요청] 쪽 — <b>지금 전용 탭 화면 그대로</b>(카드 격자·상태 필터·승인/반려).</p>
+
+  <h3>A안 · AE(담당자) 화면 — 권한 문제를 여기서 해결합니다</h3>
+  <p class="desc">AE에게도 <b>C/S 문의 메뉴가 보이되</b>, 안에서 [💬 리뷰어 문의]는 <b>자물쇠로 잠겨</b> 있고 [🖼 이미지 교체요청]만 열립니다.
+     메뉴를 열면 교체요청 화면이 바로 뜹니다(누를 것이 하나뿐이므로 기본 선택).</p>
+
+  <div class="frame">
+    <div class="fbar"><i></i><i></i><i></i><span class="url">workdesk.html — AE 로그인</span></div>
+    <div class="top">
+      <span class="logo">통합 작업대<span class="tg">TRACK B · 그림자</span></span>
+      <nav class="nav">
+        <button class="navb">작업대</button><button class="navb">업체관리</button><button class="navb">리뷰어 로그</button>
+        <button class="navb">작업오더</button><button class="navb">모집공고</button>
+        <button class="navb on">C/S 문의<span class="bdg">🟠2</span></button>
+        <button class="navb">리뷰검수</button><button class="navb">설정</button>
+      </nav>
+      <span class="sp"></span><span class="rolebadge">staff · 김담당</span><button class="btn">로그아웃</button>
+    </div>
+    <div class="body">
+      <div class="mh">
+        <div class="seg">
+          <button class="lock" title="관리자 전용">🔒 리뷰어 문의</button>
+          <button class="on re">🖼 이미지 교체요청 <span class="cnt">2</span></button>
+        </div>
+        <span class="sp"></span>
+        <button class="btn pri">처리 대기</button><button class="btn">승인</button><button class="btn">반려</button><button class="btn">취소</button>
+      </div>
+      <div class="ovnote">리뷰어가 올린 교체 이미지를 확인하고 승인·반려합니다.
+        <b style="color:var(--muted)">(담당 업체 작업만 표시됩니다)</b> ·
+        <b style="color:var(--muted)">리뷰어 문의 본문은 개인정보가 포함되어 관리자만 열람합니다</b> <span style="color:var(--muted)">· 2건</span></div>
+      <div class="recards" style="grid-template-columns:repeat(2,1fr)">
+        <div class="gcard"><div class="gh"><b>힙스 골라담기 8월 3주차</b><span class="sp"></span><span class="mt">양미경 · 1234</span></div>
+          <div class="gin"><div class="pair"><div class="thumb"><div class="im">🖼</div><div class="cap">기존</div></div>
+            <div class="thumb new"><div class="im">🖼</div><div class="cap">변경 요청</div></div>
+            <div class="rebody"><b>사유</b> 별점이 안 나온 화면을 올렸어요
+              <div class="reacts"><button class="btn sm re">승인</button><button class="btn sm ghost">반려</button></div></div></div></div></div>
+        <div class="gcard"><div class="gh"><b>콰이어트 데일리세트</b><span class="sp"></span><span class="mt">김하늘 · 7788</span></div>
+          <div class="gin"><div class="pair"><div class="thumb"><div class="im">🖼</div><div class="cap">기존</div></div>
+            <div class="thumb new"><div class="im">🖼</div><div class="cap">변경 요청</div></div>
+            <div class="rebody"><b>사유</b> 상품이 잘려서 다시 찍었습니다
+              <div class="reacts"><button class="btn sm re">승인</button><button class="btn sm ghost">반려</button></div></div></div></div></div>
+      </div>
+    </div>
+  </div>
+  <p class="cap-under">A-3. AE 화면 — 메뉴는 보이고, 안에서 문의 쪽만 잠깁니다(지금 AE가 하던 일이 그대로 유지).</p>
+</section>
+
+<!-- ══════════════ 시안 B ══════════════ -->
+<section id="sec-B">
+  <div class="sec-label">시안 B</div>
+  <h2>한 목록에 섞기 — 왼쪽 목록에 교체요청 줄을 함께 <span class="tag">인박스형</span></h2>
+  <p class="desc">왼쪽 목록에 <b>문의방</b>과 <b>교체요청</b>이 같이 나열됩니다. 구분은 <b>①줄 왼쪽 주황 세로띠 ②[교체요청] 배지 ③연한 주황 배경</b> 세 겹으로 줍니다.
+     맨 위 칩으로 <b>[전체] [💬 문의] [🖼 교체요청]</b> 을 걸러 볼 수 있고, 교체요청 줄을 누르면 <b>그 리뷰어 대화방이 열리면서 해당 카드로 스크롤·강조</b>됩니다.</p>
+  <div class="pros">
+    <span>"오늘 처리할 것"이 한 목록에 모임</span>
+    <span>클릭 수 최소 · 메뉴가 가장 단순</span>
+    <span class="warn">교체요청 이미지 대조 폭이 좁아짐(대화창 안)</span>
+    <span class="bad">교체요청만 몰아 보는 격자 화면이 사라짐</span>
+  </div>
+
+  <div class="frame">
+    <div class="fbar"><i></i><i></i><i></i><span class="url">workdesk.html — 통합 작업대</span></div>
+    <div class="top">
+      <span class="logo">통합 작업대<span class="tg">TRACK B · 그림자</span></span>
+      <nav class="nav">
+        <button class="navb">작업대</button><button class="navb">관측</button><button class="navb">업체관리</button>
+        <button class="navb">리뷰어 로그</button><button class="navb">작업오더</button><button class="navb">모집공고</button>
+        <button class="navb on">C/S 문의<span class="bdg">🟠4</span></button>
+        <button class="navb">리뷰검수</button><button class="navb">등록리뷰어DB</button><button class="navb">설정</button>
+      </nav>
+      <span class="sp"></span><span class="rolebadge">admin · 박세희</span><button class="btn">로그아웃</button>
+    </div>
+    <div class="body">
+      <div class="mh"><h1>C/S 문의</h1><span class="sp"></span>
+        <input class="search" value="리뷰어/캠페인 검색..." readonly>
+        <select class="selbox"><option>진행중</option></select>
+        <button class="btn pri">↻ 새로고침</button></div>
+      <div class="chips">
+        <span class="chip on">전체 7</span>
+        <span class="chip">💬 문의 3</span>
+        <span class="chip"><span class="dot"></span>🖼 교체요청 4</span>
+        <span style="font-size:11px;color:var(--faint);margin-left:4px">주황 줄 = 이미지 교체요청 · 회색 줄 = 리뷰어 문의</span>
+      </div>
+
+      <div class="csrow">
+        <div class="csleft">
+          <div class="grphd"><div class="t"><span class="nm">📣 힙스 골라담기 8월 3주차</span><span class="unread">할 일 3</span></div>
+            <div class="sub">문의 2 · 교체요청 2</div></div>
+          <div class="room rekind act"><div class="av" style="background:#ffedd5;color:#c2410c">🖼</div>
+            <div class="mid"><div class="nm">양미경 <span class="ph">1234</span> <span class="kind re">교체요청</span></div>
+              <div class="pv">별점이 안 나온 화면을 올려서 다시 캡처했습니다</div></div>
+            <div class="rt">방금<div><span class="n">1</span></div></div></div>
+          <div class="room rekind"><div class="av" style="background:#ffedd5;color:#c2410c">🖼</div>
+            <div class="mid"><div class="nm">김하늘 <span class="ph">7788</span> <span class="kind re">교체요청</span></div>
+              <div class="pv">상품이 잘려서 다시 찍었습니다</div></div>
+            <div class="rt">8분 전<div><span class="n">1</span></div></div></div>
+          <div class="room"><div class="av">양</div>
+            <div class="mid"><div class="nm">양미경 <span class="ph">1234</span> <span class="kind cs">문의</span></div>
+              <div class="pv">이미지 다시 올렸는데 확인 부탁드려요</div></div>
+            <div class="rt">방금<div><span class="n">2</span></div></div></div>
+          <div class="room"><div class="av">김</div>
+            <div class="mid"><div class="nm">김하늘 <span class="ph">7788</span> <span class="kind cs">문의</span></div>
+              <div class="pv">배송이 아직 안 왔어요</div></div>
+            <div class="rt">12분 전</div></div>
+          <div class="grphd gen"><div class="t"><span class="nm">📣 어나더 립밤 2세트</span></div><div class="sub">교체요청 2</div></div>
+          <div class="room rekind"><div class="av" style="background:#ffedd5;color:#c2410c">🖼</div>
+            <div class="mid"><div class="nm">이시현 <span class="ph">0421</span> <span class="kind re">교체요청</span></div>
+              <div class="pv">현금영수증 캡처를 잘못 올렸어요</div></div>
+            <div class="rt">1시간 전<div><span class="n">1</span></div></div></div>
+        </div>
+
+        <div class="csright">
+          <div class="convhd"><div style="flex:1;min-width:0">
+              <div class="nm">양미경 <span style="font-family:var(--mono);color:#94a3b8;font-weight:400;font-size:11px">12341234</span>
+                <span class="kind re" style="margin-left:5px">교체요청으로 열림</span></div>
+              <div class="cap">힙스 골라담기 8월 3주차</div></div>
+            <button class="btn sm">진행중</button></div>
+          <div class="ctx"><div>수취인 <b>양미경</b></div><div>주문번호 <b>3902…417</b></div><div>참여 <b>3건</b></div></div>
+          <div class="thread">
+            <div style="text-align:center;font-size:10.5px;color:var(--faint)">···  이전 대화 ···</div>
+            <div class="bub you"><span class="who">양미경</span>리뷰 이미지를 잘못 올려서 바꾸고 싶어요 🙏</div>
+            <div class="recard" style="outline:2.5px solid var(--re);outline-offset:2px">
+              <div class="hd"><span class="ti">🖼 리뷰 이미지 교체요청</span><span class="stbadge st-pending">처리 대기</span>
+                <span class="sp"></span><span style="font-size:10px;color:#9a3412">이 카드로 이동됨 ▾</span></div>
+              <div class="pair">
+                <div class="thumb"><div class="im">🖼</div><div class="cap">기존</div></div>
+                <div class="thumb new"><div class="im">🖼</div><div class="cap">변경 요청</div></div>
+                <div class="rebody"><b>사유</b><br>별점이 안 나온 화면을 올려서 다시 캡처했습니다.
+                  <div class="reacts"><button class="btn sm re">승인</button><button class="btn sm ghost">반려</button></div></div>
+              </div>
+            </div>
+          </div>
+          <div class="replybar"><button class="btn sm">🖼</button>
+            <div class="ta">답장 입력...</div><button class="btn pri">전송</button></div>
+        </div>
+      </div>
+    </div>
+  </div>
+  <p class="cap-under">B. 목록에 두 종류가 섞이고, 교체요청 줄은 <b>주황 세로띠 + [교체요청] 배지 + 연주황 배경</b>으로 구분됩니다.</p>
+
+  <div class="callout warn">
+    <div class="ct">B안의 대가</div>
+    <p>이미지 대조가 <b>대화창 폭(최대 860px) 안</b>에서 이뤄집니다. 지금은 카드 격자라 한 화면에 3장씩 놓고 훑을 수 있는데,
+       B안에서는 <b>한 건씩</b> 봅니다. 교체요청이 하루 2~3건이면 문제없지만, 한 캠페인에서 몰려 들어오는 날에는 처리가 느려집니다.</p>
+  </div>
+</section>
+
+<!-- ══════════════ 시안 C ══════════════ -->
+<section id="sec-C">
+  <div class="sec-label">시안 C</div>
+  <h2>문의 화면 위에 「처리 대기 큐」 띠 얹기 <span class="tag">절충</span></h2>
+  <p class="desc">왼쪽 목록·대화창은 <b>지금 그대로</b> 두고, 화면 맨 위에 <b>교체요청 대기 건만 가로로 흐르는 주황 띠</b>를 답니다.
+     띠에서 바로 승인·반려할 수 있고, [모두 보기]를 누르면 지금의 카드 격자가 아래에 펼쳐집니다. 처리할 게 없으면 띠는 <b>접혀서 한 줄로</b> 줄어듭니다.</p>
+  <div class="pros">
+    <span>문의 화면을 건드리지 않음</span>
+    <span>대기 건이 항상 눈에 띔(놓침 방지)</span>
+    <span class="warn">세로 공간을 뺏김(대화창이 짧아짐)</span>
+    <span class="warn">건수가 많으면 가로 스크롤</span>
+  </div>
+
+  <div class="frame">
+    <div class="fbar"><i></i><i></i><i></i><span class="url">workdesk.html — 통합 작업대</span></div>
+    <div class="top">
+      <span class="logo">통합 작업대<span class="tg">TRACK B · 그림자</span></span>
+      <nav class="nav">
+        <button class="navb">작업대</button><button class="navb">관측</button><button class="navb">업체관리</button>
+        <button class="navb">리뷰어 로그</button><button class="navb">작업오더</button><button class="navb">모집공고</button>
+        <button class="navb on">C/S 문의<span class="bdg">🟠4</span></button>
+        <button class="navb">리뷰검수</button><button class="navb">등록리뷰어DB</button><button class="navb">설정</button>
+      </nav>
+      <span class="sp"></span><span class="rolebadge">admin · 박세희</span><button class="btn">로그아웃</button>
+    </div>
+    <div class="body">
+      <div class="mh"><h1>C/S 문의</h1><span class="sp"></span>
+        <input class="search" value="리뷰어/캠페인 검색..." readonly>
+        <select class="selbox"><option>진행중</option></select>
+        <button class="btn pri">↻ 새로고침</button></div>
+
+      <div class="queue">
+        <div class="qh"><span class="qt">🖼 이미지 교체요청 · 처리 대기 4건</span>
+          <span class="sp"></span>
+          <button class="btn sm">모두 보기</button><button class="btn sm ghost">접기 ▴</button></div>
+        <div class="qrail">
+          <div class="qitem"><div class="qim">🖼</div><div class="qm"><b>양미경 · 힙스 8월 3주차</b>별점 미노출 재캡처
+            <div class="reacts" style="margin-top:5px"><button class="btn sm re">승인</button><button class="btn sm ghost">반려</button></div></div></div>
+          <div class="qitem"><div class="qim">🖼</div><div class="qm"><b>김하늘 · 콰이어트</b>상품 잘림 재촬영
+            <div class="reacts" style="margin-top:5px"><button class="btn sm re">승인</button><button class="btn sm ghost">반려</button></div></div></div>
+          <div class="qitem"><div class="qim">🖼</div><div class="qm"><b>이시현 · 어나더 립밤</b>현금영수증 오첨부
+            <div class="reacts" style="margin-top:5px"><button class="btn sm re">승인</button><button class="btn sm ghost">반려</button></div></div></div>
+          <div class="qitem" style="flex:0 0 96px;align-items:center;justify-content:center;color:var(--muted);font-size:11.5px;font-weight:700">＋1건</div>
+        </div>
+      </div>
+
+      <div class="csrow" style="height:358px">
+        <div class="csleft">
+          <div class="grphd"><div class="t"><span class="nm">📣 힙스 골라담기 8월 3주차</span><span class="unread">미확인 2</span></div>
+            <div class="sub">문의 리뷰어 3명</div></div>
+          <div class="room act"><div class="av">양</div>
+            <div class="mid"><div class="nm">양미경 <span class="ph">1234</span></div>
+              <div class="pv">이미지 다시 올렸는데 확인 부탁드려요</div></div>
+            <div class="rt">방금<div><span class="n">2</span></div></div></div>
+          <div class="room"><div class="av">김</div>
+            <div class="mid"><div class="nm">김하늘 <span class="ph">7788</span></div>
+              <div class="pv">배송이 아직 안 왔어요</div></div><div class="rt">12분 전</div></div>
+          <div class="room"><div class="av">이</div>
+            <div class="mid"><div class="nm">이시현 <span class="ph">0421</span></div>
+              <div class="pv">리뷰 등록 완료했습니다!</div></div><div class="rt">1시간 전</div></div>
+        </div>
+        <div class="csright">
+          <div class="convhd"><div style="flex:1;min-width:0">
+              <div class="nm">양미경 <span style="font-family:var(--mono);color:#94a3b8;font-weight:400;font-size:11px">12341234</span></div>
+              <div class="cap">힙스 골라담기 8월 3주차</div></div><button class="btn sm">진행중</button></div>
+          <div class="ctx"><div>수취인 <b>양미경</b></div><div>주문번호 <b>3902…417</b></div><div>참여 <b>3건</b></div></div>
+          <div class="thread">
+            <div class="bub you"><span class="who">양미경</span>리뷰 이미지를 잘못 올려서 바꾸고 싶어요 🙏</div>
+            <div class="bub me"><span class="who">만두</span>확인 후 처리해 드릴게요!</div>
+          </div>
+          <div class="replybar"><button class="btn sm">🖼</button><div class="ta">답장 입력...</div><button class="btn pri">전송</button></div>
+        </div>
+      </div>
+    </div>
+  </div>
+  <p class="cap-under">C. 위 주황 띠 = 교체요청 대기 큐, 아래 = 지금 그대로의 문의 화면. 대기 0건이면 띠는 접힙니다.</p>
+</section>
+
+<!-- ══════════════ 비교 ══════════════ -->
+<section id="sec-cmp">
+  <div class="sec-label">비교</div>
+  <h2>세 안 한눈에</h2>
+  <table class="cmp">
+    <thead><tr><th>항목</th><th>A · 서브탭</th><th>B · 한 목록</th><th>C · 대기 큐 띠</th></tr></thead>
+    <tbody>
+      <tr><td>구분 방식</td><td>화면을 통째로 전환</td><td>줄 색·배지·필터 칩</td><td>영역 분리(위 띠 / 아래 문의)</td></tr>
+      <tr><td>교체요청 처리 폭</td><td class="yes">지금 그대로(격자 3열)</td><td class="no">좁아짐(한 건씩)</td><td class="mid">띠에서 간단 처리 + [모두 보기]로 격자</td></tr>
+      <tr><td>문의 화면 변화</td><td class="yes">없음</td><td class="no">목록에 다른 종류가 섞임</td><td class="yes">없음(세로만 짧아짐)</td></tr>
+      <tr><td>대기 건 인지</td><td class="mid">스위치 숫자</td><td class="yes">목록 안에서 바로</td><td class="yes">항상 눈앞</td></tr>
+      <tr><td>클릭 수</td><td class="mid">＋1회</td><td class="yes">동일</td><td class="yes">동일</td></tr>
+      <tr><td>AE 권한 처리</td><td class="yes">깔끔(문의 세그먼트만 잠금)</td><td class="no">한 목록이라 섞인 화면을 통째로 막아야 함</td><td class="mid">문의 영역을 통째로 숨겨야 함</td></tr>
+      <tr><td>구현 위험</td><td class="yes">낮음(두 화면 이동만)</td><td class="no">높음(목록·필터·스크롤 강조 신규)</td><td class="mid">중간(큐 화면 신규)</td></tr>
+    </tbody>
+  </table>
+
+  <div class="callout ok">
+    <div class="ct">추천 — 시안 A(서브탭)</div>
+    <p>메뉴를 줄이는 것이 목적이라면 <b>A로 충분</b>합니다. 두 화면이 지금 모습 그대로 옮겨오기 때문에
+       <b>처리 절차·폭·버튼이 하나도 바뀌지 않고</b>, AE 권한 문제도 세그먼트 하나 잠그는 것으로 깔끔하게 풀립니다.</p>
+    <p>"교체요청을 놓치는 게 걱정"이라면 <b>A + C를 함께</b> 쓰는 것도 가능합니다 —
+       평소엔 A의 스위치 숫자로 보고, 대기가 쌓이면 [💬 리뷰어 문의] 화면 위에도 주황 띠가 뜨게 하는 방식입니다.
+       B는 "한 인박스"라는 이상적인 그림이지만 <b>교체요청 처리 화면이 좁아지는 대가</b>가 분명해서, 교체요청 건수가 늘면 다시 되돌리게 될 가능성이 큽니다.</p>
+  </div>
+
+  <div class="callout">
+    <div class="ct">확정해 주실 것</div>
+    <ul>
+      <li><b>어느 안</b>으로 갈지 (A / B / C / A+C)</li>
+      <li>메뉴 이름을 <b>「C/S 문의」 그대로</b> 둘지, <b>「C/S」</b>나 <b>「리뷰어 응대」</b>처럼 두 기능을 아우르는 이름으로 바꿀지 (AE에게는 교체요청만 보이므로 "문의"라는 이름이 어색해집니다)</li>
+      <li>상단 메뉴 뱃지를 <b>합칠지</b>(🟠4 = 문의 미확인 + 교체요청 대기) 아니면 <b>교체요청 대기만</b> 표시할지</li>
+    </ul>
+  </div>
+</section>
+
+<footer style="margin-top:56px;padding-top:18px;border-top:1px solid #d9dfe9;font-size:11.5px;color:var(--faint)">
+  시안 문서 · 이미지 교체요청 ↔ C/S 문의 메뉴 통합 · 통합 작업대(workdesk.html) 기준 ·
+  화면은 실제 화면 요소를 재현한 목업이며 데이터는 예시입니다.
+</footer>
+
+</div>
+
+<script>
+  /* ?v=A|B|C 로 한 안만 단독 보기(시안 문서 관용구 — design-campaign-rowview.html 과 동일) */
+  (function(){
+    var v = (new URLSearchParams(location.search).get('v') || '').toUpperCase();
+    var ids = ['A','B','C'];
+    if (ids.indexOf(v) >= 0) {
+      ids.forEach(function(k){ if (k !== v) { var el = document.getElementById('sec-'+k); if (el) el.style.display='none'; } });
+      var cmp = document.getElementById('sec-cmp'); if (cmp) cmp.style.display='none';
+    }
+    var on = document.getElementById(ids.indexOf(v) >= 0 ? ('lv-'+v) : 'lv-all');
+    if (on) on.classList.add('on');
+  })();
+</script>
+</body>
+</html>
