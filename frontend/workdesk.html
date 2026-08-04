@@ -2815,6 +2815,7 @@ function _woEditActions(o){
   if(!STATE.canEdit) return '';
   const acceptable=['submitted','revision','rejected'].includes(o.status);
   return (acceptable?` <button class="btn xs pri" onclick="event.stopPropagation();_woAccept('${esc(o.id)}')">접수</button>`:'')
+    +` <button class="btn xs" onclick="event.stopPropagation();openWtPlan('${esc(o.id)}')" title="작업표 생성 미리보기">📋 작업표</button>`
     +` <button class="btn xs" onclick="event.stopPropagation();_woStatus('${esc(o.id)}')">상태변경</button>`;
 }
 function _woToggle(i){
@@ -2846,6 +2847,114 @@ function _woFillDetail(i){
     <div class="woldoc">${_woDetailHtml(o)}${o.admin_memo?_woKv('관리자메모',o.admin_memo):''}</div>
     ${acts?'':'<div class="wolnote">열람 전용 계정입니다 — 접수·상태변경은 편집 허용명단에 있는 담당자만 할 수 있습니다.</div>'}`;
 }
+/* ══════════════════════════════════════════════════════════════
+   작업표 생성 미리보기 (M2a) — 읽기 전용
+   ★ 화면은 서버 `GET /api/trackb/worktable/plan` 이 준 계획을 **그대로** 그린다.
+     프론트에서 날짜·옵션을 다시 계산하지 않는다 — 그렇게 하면 "미리보기 ≠ 실제 표"가 된다
+     (실제 생성도 같은 서버 함수를 쓴다).
+   ══════════════════════════════════════════════════════════════ */
+let _WTP = null;   // { id, plan, workOrder }
+
+function _wtpEl(){
+  let el=document.getElementById('wtPlanModal');
+  if(el) return el;
+  el=document.createElement('div');
+  el.id='wtPlanModal';
+  el.style.cssText='position:fixed;inset:0;background:rgba(15,23,42,.45);z-index:9000;display:none;align-items:flex-start;justify-content:center;padding:40px 16px;overflow:auto';
+  el.onclick=e=>{ if(e.target===el) closeWtPlan(); };
+  el.innerHTML='<div id="wtPlanBox" style="background:#fff;border-radius:14px;max-width:920px;width:100%;box-shadow:0 20px 60px rgba(0,0,0,.3);overflow:hidden"></div>';
+  document.body.appendChild(el);
+  return el;
+}
+function closeWtPlan(){ const el=document.getElementById('wtPlanModal'); if(el) el.style.display='none'; _WTP=null; }
+
+async function openWtPlan(id){
+  const el=_wtpEl(); el.style.display='flex';
+  document.getElementById('wtPlanBox').innerHTML='<div style="padding:28px;color:#6B7280;font-size:13px">작업표 구성을 계산하는 중…</div>';
+  _WTP={ id };
+  await _wtpLoad();
+}
+async function _wtpLoad(){
+  if(!_WTP) return;
+  const q=new URLSearchParams({ workOrderId:_WTP.id });
+  const f=_WTP.form||{};
+  ['total','daily','startDate'].forEach(k=>{ if(f[k]!=null && f[k]!=='') q.set(k,f[k]); });
+  if(f.skipWeekends===false) q.set('skipWeekends','0');
+  const r=await api('/api/trackb/worktable/plan?'+q.toString());
+  if(!r||!r.ok){ document.getElementById('wtPlanBox').innerHTML=`<div style="padding:28px;color:#B91C1C;font-size:13px">불러오지 못했습니다: ${esc((r&&r.error)||'오류')}<div style="margin-top:14px"><button class="btn" onclick="closeWtPlan()">닫기</button></div></div>`; return; }
+  _WTP.plan=r.data.plan; _WTP.workOrder=r.data.workOrder; _WTP.templateConfigured=r.data.templateConfigured;
+  _wtpRender();
+}
+function _wtpOnEdit(){
+  _WTP.form={
+    total:document.getElementById('wtpTotal').value,
+    daily:document.getElementById('wtpDaily').value,
+    startDate:document.getElementById('wtpStart').value,
+    skipWeekends:document.getElementById('wtpSkipWe').checked,
+  };
+  _wtpLoad();
+}
+function _wtpRender(){
+  const p=_WTP.plan, wo=_WTP.workOrder;
+  const cols=p.columns.map(c=>{
+    const ch=c.origin==='channel';
+    const role=c.label?('시스템 인식: '+c.label):'제출이 값을 쓰지 않는 열';
+    return `<span title="${esc(role)}" style="display:inline-flex;align-items:center;gap:4px;font-size:12px;padding:3px 8px;border-radius:6px;border:1px solid ${ch?'#FDE68A':'#BFDBFE'};background:${ch?'#FFFBEB':'#EFF6FF'};color:${ch?'#92400E':'#1D4ED8'}">${esc(c.name)}${ch?'<i style="font-style:normal;font-size:10px;opacity:.7">채널</i>':''}</span>`;
+  }).join(' ');
+  const days=p.dates.length
+    ? p.dates.map(d=>`<span style="font-size:12px;padding:3px 8px;border-radius:6px;background:#F3F4F6;color:#374151">${esc(d.label)} <b>${d.count}</b></span>`).join(' ')
+    : '<span style="font-size:12.5px;color:#9CA3AF">날짜를 나누지 않았습니다(시작일·일건수 확인)</span>';
+  const opts=p.optionBuckets.length
+    ? p.optionBuckets.map(b=>`<span style="font-size:12px;padding:3px 8px;border-radius:6px;background:#F0FDF4;color:#166534;border:1px solid #BBF7D0">${esc(b.key)} <b>${b.count}</b></span>`).join(' ')
+    : '<span style="font-size:12.5px;color:#9CA3AF">옵션 배분 없음</span>';
+  const msg=(arr,color,bg,edge)=>arr.length?`<div style="margin-top:10px;display:flex;flex-direction:column;gap:5px">${arr.map(m=>`<div style="font-size:12.5px;color:${color};background:${bg};border:1px solid ${edge};border-radius:8px;padding:7px 10px">${esc(m.message)}</div>`).join('')}</div>`:'';
+  const sample=p.rows.slice(0,3).concat(p.rows.length>3?[null]:[]).concat(p.rows.length>3?[p.rows[p.rows.length-1]]:[]);
+  const sampleRows=sample.map(r=>r
+    ? `<tr><td style="padding:4px 8px;border:1px solid #E5E7EB">${r.seq}</td><td style="padding:4px 8px;border:1px solid #E5E7EB">${esc(r.dateLabel||'—')}</td><td style="padding:4px 8px;border:1px solid #E5E7EB">${esc(r.optionKey||'—')}</td><td style="padding:4px 8px;border:1px solid #E5E7EB;color:#9CA3AF">제출이 채웁니다</td></tr>`
+    : `<tr><td colspan="4" style="padding:4px 8px;border:1px solid #E5E7EB;text-align:center;color:#9CA3AF">⋮</td></tr>`).join('');
+
+  document.getElementById('wtPlanBox').innerHTML=`
+    <div style="padding:16px 20px;border-bottom:1px solid #E5E7EB;display:flex;align-items:center;gap:10px">
+      <div style="font-size:15px;font-weight:750">📋 작업표 생성 미리보기</div>
+      <div style="font-size:12.5px;color:#6B7280">${esc(wo.title||'')}</div>
+      <span style="flex:1"></span>
+      <button class="btn xs" onclick="closeWtPlan()">닫기</button>
+    </div>
+    <div style="padding:16px 20px;display:flex;flex-direction:column;gap:14px">
+      ${_WTP.templateConfigured?'':'<div style="font-size:12.5px;color:#92400E;background:#FFFBEB;border:1px solid #FDE68A;border-radius:8px;padding:8px 11px">표준 열이 아직 정해지지 않았습니다 — <b>설정 › 작업표 표준 열</b>에서 먼저 정하세요.</div>'}
+      <div style="display:flex;gap:10px;flex-wrap:wrap;align-items:flex-end">
+        <label style="font-size:12px;color:#6B7280">총 건수<br><input id="wtpTotal" type="number" min="0" value="${p.totals.rows}" onchange="_wtpOnEdit()" style="width:90px;padding:6px 9px;border:1.5px solid #D1D5DB;border-radius:7px;font-size:13px"></label>
+        <label style="font-size:12px;color:#6B7280">일건수<br><input id="wtpDaily" type="number" min="0" value="${p.totals.daily}" onchange="_wtpOnEdit()" style="width:90px;padding:6px 9px;border:1.5px solid #D1D5DB;border-radius:7px;font-size:13px"></label>
+        <label style="font-size:12px;color:#6B7280">시작일<br><input id="wtpStart" type="date" value="${esc(p.startDate||'')}" onchange="_wtpOnEdit()" style="padding:6px 9px;border:1.5px solid #D1D5DB;border-radius:7px;font-size:13px"></label>
+        <label style="font-size:12.5px;color:#374151;display:flex;align-items:center;gap:5px;padding-bottom:7px"><input id="wtpSkipWe" type="checkbox" ${p.skipWeekends?'checked':''} onchange="_wtpOnEdit()"> 주말 제외</label>
+        <span style="flex:1"></span>
+        <span style="font-size:12.5px;color:#6B7280;padding-bottom:7px">구매채널 <b>${esc(p.channelLabel)}</b></span>
+      </div>
+
+      <div><div style="font-size:12.5px;font-weight:700;margin-bottom:5px">표 구성 (${p.columns.length}열)</div>${cols||'<span style="font-size:12.5px;color:#9CA3AF">열이 없습니다</span>'}</div>
+      <div><div style="font-size:12.5px;font-weight:700;margin-bottom:5px">날짜 분배 (${p.totals.days}일)</div>${days}</div>
+      <div><div style="font-size:12.5px;font-weight:700;margin-bottom:5px">옵션 배분</div>${opts}</div>
+
+      <div><div style="font-size:12.5px;font-weight:700;margin-bottom:5px">만들어질 표 (${p.totals.rows}행)</div>
+        <table style="border-collapse:collapse;font-size:12px"><thead><tr>
+          <th style="padding:4px 8px;border:1px solid #E5E7EB;background:#F9FAFB">번호</th>
+          <th style="padding:4px 8px;border:1px solid #E5E7EB;background:#F9FAFB">구매일자</th>
+          <th style="padding:4px 8px;border:1px solid #E5E7EB;background:#F9FAFB">옵션</th>
+          <th style="padding:4px 8px;border:1px solid #E5E7EB;background:#F9FAFB">나머지 열</th>
+        </tr></thead><tbody>${sampleRows}</tbody></table></div>
+
+      ${msg(p.blockers,'#B91C1C','#FEF2F2','#FECACA')}
+      ${msg(p.warnings,'#92400E','#FFFBEB','#FDE68A')}
+
+      <div style="border-top:1px solid #E5E7EB;padding-top:12px;display:flex;align-items:center;gap:10px">
+        <button class="btn" onclick="closeWtPlan()">닫기</button>
+        <button class="btn pri" disabled title="다음 배포에서 열립니다" style="opacity:.5;cursor:default">이 구성으로 만들기</button>
+        <span style="font-size:12px;color:#6B7280">지금은 <b>확인용 미리보기</b>입니다 — 실제 표·시트 생성은 다음 단계에서 열립니다.
+        ${p.canCreate?'':'<b style="color:#B91C1C">지금 구성으로는 만들 수 없습니다(위 빨간 사유).</b>'}</span>
+      </div>
+    </div>`;
+}
+
 async function _woAccept(id){
   if(!confirm('이 작업오더를 접수할까요?\n\n· 작업시트의 탭이 시스템에 등록되고 인덱스가 만들어집니다.\n· 등록 후에는 리뷰어 검색·제출이 열립니다.')) return;
   const r=await api('/api/trackb/work-orders/accept',{method:'POST',body:JSON.stringify({id})});

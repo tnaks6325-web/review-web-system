@@ -293,7 +293,16 @@ GAS(Google Apps Script) 기반 리뷰 관리 시스템을 **Node.js Express + Po
 - ★ **fail-soft catch 안의 logger는 `const { logger } = require(...)`** — 이 모듈은 `{ logger }`를 내보내므로 통째로 받으면 `logger.warn`이 undefined라 **방어하려던 자리에서 TypeError(500)** 가 난다.
 - ★ **NUL 문자(0x00)를 주석에 글자 그대로 적지 말 것** — git이 파일 전체를 바이너리로 취급해 diff·grep이 죽고, **grep 기반 회귀가드가 그 파일에서 무력화**된다(이 작업에서 실제로 밟음). 참고: `search.service.js`·`campaign.routes.js`의 NUL은 **의도된 복합키 구분자**(런타임 동작)이므로 제거 금지 — 대신 그 두 파일엔 grep 가드를 걸지 말 것.
 - ★ **학습은 제안까지만, 확정은 사람이**: 통계는 생성 미리보기의 **기본값**일 뿐이고 실제 표 생성은 담당자가 확인 후 누를 때만 일어난다(옵션 칸이 "상품옵션"인지 "작업지시"인지 헤더로 구분되지 않는다는 교훈과 같은 규율). 채널 추정 실패는 `unknown`(틀린 채널로 분류하지 않음).
-- **다음(M2)**: 템플릿 원장(신규 테이블) + 작업오더 펼침행 [작업표 생성] + 미리보기(열 구성·날짜 분배·옵션 배분·합계 검증) + 행 생성(`prepareRosterSlots` 확장) + 동일 구성 시트 자동 생성(`create-campaign-sheet` 재사용). 날짜 선기입은 063 시트 일정 인식이 그대로 읽어 모집 정원으로 파생(역방향 호환).
+### 작업표 생성 M2a — 계획 산출 + 미리보기 (읽기 전용)
+- **`utils/worktablePlan.js` = 순수함수 단일 출처**: 작업오더 + 표준 열 템플릿 → 열 구성·행 수·날짜 분배·옵션 배분·경고를 계산한다. ★★ **미리보기와 실제 생성(M2b)이 같은 함수를 쓴다** — 사본을 두면 "미리보기 ≠ 실제 표"가 되고 그건 이 기능의 존재 이유를 무너뜨린다(campaign-workdetail.js 공용 렌더러와 같은 규율). DB·시트·`Date.now()` 미접근(결정적).
+- ★★ **구매일자 표기는 `M / D (요일)`** — 063 시트 일정 인식이 그 칸을 읽어 그날 모집 정원을 파생하므로 형식이 어긋나면 정원이 조용히 발행폼 값으로 되돌아간다. ★ **타임존 무관**: `Date` 산술이 아니라 Y-M-D 문자열 + `Date.UTC` 로만 다룬다(서버 TZ가 무엇이든 같은 결과).
+- ★ **채널 판정은 상품 URL의 호스트만** — 전체 URL이면 `coupang.com/...?src=naver_ad`를 네이버로 오판하고 `coupang.com.evil.kr`에 속는다. 카카오는 `makers.kakao.com`만. 판정 실패 = `unknown`(채널 열이 안 붙을 뿐, 틀린 채널로 분류하지 않는다). 채널 목록은 `cashReceiptChannels` 한 벌.
+- ★★ **막을 것(blockers) vs 알릴 것(warnings)**: 잠그는 것은 "그대로 만들면 반드시 잘못된 표가 되는" 경우만(건수 0 · 열 0 · 옵션 합 ≠ 총건수 · 상한 초과). 시작일 없음·채널 미상·역할 중복·상태칸 겹침·옵션열 없음은 **경고만**(오탐으로 정상 생성을 막지 않는다 — 옵션 칸 자동점검이 하드블록을 안 쓰는 것과 같은 판단).
+- ★ 옵션은 **2종 이상일 때만** 배분(선택지가 하나면 기입 의미 없음), `"옵션 없음/단일/해당없음"`류는 서술이라 제외(시트 옵션 칸 오염 방지), 깨진 JSON은 옵션 없음으로 수렴.
+- **미리보기** `GET /api/trackb/worktable/plan?workOrderId=`(authMiddleware + internal + **editorOnly** — 표를 만들 사람이 본다): 읽기 전용, 조정값(total·daily·startDate·skipWeekends)은 **미전송 시 작업오더 값 유지**. 프론트(작업오더 펼침행 [📋 작업표])는 **서버 계획을 그대로 렌더**하고 조정 시 재조회한다(로컬 재계산 금지).
+- ★★ **`getPool()`은 `trackB.routes.js`에 없다** — 이 파일은 `const pool = require('../db/pool')`. 잘못 쓰면 정적 grep은 통과하고 **런타임 500**이 난다(개발 중 실제로 밟았고 런타임 실행 가드가 잡았다).
+- 회귀가드 `tests/worktablePlan.test.js`(48케이스 — 순수함수 실행 + 라우터 스택 실검사 + 프론트 배선). 실브라우저로 모달 렌더·조정 재조회·잠금 표시·XSS 이스케이프 확인.
+- **다음(M2b)**: 실제 생성 — 동일 구성 시트 생성(`create-campaign-sheet` 재사용) + DB 스켈레톤 행. ★★ 스켈레톤은 **seq를 시트 실제 행번호에 맞춰야** 주문이 들어올 때 `importTabFromIndex`의 `ON CONFLICT (sheet_id,tab_name,seq)`가 **제자리 갱신**한다(어긋나면 100행 + 유입행이 겹쳐 보인다). `prepareRosterSlots`는 `_MANUAL_SEQ_BASE=900000` 별도 대역이라 그대로는 못 쓴다. 또 `source='manual'` 이면 `is_submitted/is_paid`가 그 CASE에서 **동결**되므로 상태 칸이 영영 갱신 안 된다 — 새 source 값(예 `worktable`)을 그 CASE에 합류시키되 `_reconcileSeen`(source='import'만 비활성)은 건드리지 않는 설계가 필요하다.
 - 회귀가드 `tests/worktableTemplate.test.js`(39케이스 — 분류기 **실행** 검증(별칭 헤더 추종=사본이면 실패, 분류 ≡ 쓰기 표면 교차확인) + 집계 읽기전용/시트무접촉 + **라우터 스택 실검사** + 시트URL 해제·접수게이트 생존 + 프론트 배선).
 
 ### 현금영수증 안내 (1단계 — 발행방법 노출)

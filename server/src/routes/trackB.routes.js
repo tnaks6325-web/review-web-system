@@ -1268,6 +1268,38 @@ router.get('/worktable/template', authMiddleware, adminOrMasterMiddleware, async
     res.json({ ok: true, data: await getTemplate() });
   } catch (err) { next(err); }
 });
+// 작업표 생성 미리보기 — ★ 읽기 전용(DB·시트 쓰기 0). 실제 생성은 사람이 확인 후 누를 때만(M2b).
+//   권한 = 작업오더 편집 명단(editorOnly) — 표를 만들 사람이 미리보기를 본다.
+router.get('/worktable/plan', authMiddleware, internalMiddleware, editorOnlyMiddleware, async (req, res, next) => {
+  try {
+    const { getTemplate } = require('../services/worktable.service');
+    const { buildWorktablePlan } = require('../utils/worktablePlan');
+    const q = req.query || {};
+    const id = String(q.workOrderId || '').trim();
+    if (!id) return res.json({ ok: false, error: 'workOrderId 가 필요합니다.' });
+
+    const { rows } = await pool.query(
+      `SELECT id, title, start_date, recruit_count, daily_count, product_url,
+              product_option, product_options_json, work_sheet_url, status
+         FROM work_orders WHERE id = $1 AND deleted_at IS NULL LIMIT 1`, [id]);
+    const wo = rows[0];
+    if (!wo) return res.json({ ok: false, error: '작업오더를 찾을 수 없습니다.' });
+
+    // 미리보기에서 사람이 조정한 값만 덮어쓴다(미전송 = 작업오더 값 유지).
+    const opt = {};
+    if (q.total != null && q.total !== '') opt.total = q.total;
+    if (q.daily != null && q.daily !== '') opt.daily = q.daily;
+    if (q.startDate != null && q.startDate !== '') opt.startDate = q.startDate;
+    if (q.skipWeekends != null && q.skipWeekends !== '') opt.skipWeekends = q.skipWeekends !== '0' && q.skipWeekends !== 'false';
+    if (q.channel) opt.channel = String(q.channel);
+    if (q.options) { try { opt.options = JSON.parse(q.options); } catch (_) { /* 깨진 값은 작업오더 파생으로 */ } }
+
+    const template = await getTemplate();
+    const plan = buildWorktablePlan({ workOrder: wo, template, options: opt });
+    res.json({ ok: true, data: { plan, workOrder: { id: wo.id, title: wo.title, status: wo.status, workSheetUrl: wo.work_sheet_url || '' }, templateConfigured: !!template.configured } });
+  } catch (err) { next(err); }
+});
+
 router.post('/worktable/template', authMiddleware, adminOrMasterMiddleware, async (req, res, next) => {
   try {
     const { saveTemplate } = require('../services/worktable.service');
