@@ -1,0 +1,375 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="UTF-8"/>
+<meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+<title>계약 매칭 팝업 결과화면 시안 3종 — 아이에이리뷰</title>
+<style>
+  /* 리뷰웹시스템[3버전] workdesk 토큰과 같은 값(시안이 실물과 어긋나지 않게) */
+  :root{
+    --paper:#F4F6FC; --card:#fff; --ink:#151B26; --mut:#5E6A7C; --faint:#8B96A8;
+    --line:#E2E7F0; --line2:#CFD7E6;
+    --accent:#3182F6; --accent-deep:#1B64DA; --accent-soft:#E9F1FE; --accent-line:#BBD4FB;
+    --ok:#12B886; --warn:#B45309; --warn-soft:#FEF3C7; --warn-line:#F0D69A;
+  }
+  *{box-sizing:border-box;margin:0;padding:0}
+  body{background:#E9EDF6;color:var(--ink);font-family:"Apple SD Gothic Neo","Pretendard","Noto Sans KR","Malgun Gothic",system-ui,sans-serif;line-height:1.55;-webkit-font-smoothing:antialiased}
+  .wrap{max-width:780px;margin:0 auto;padding:0 16px 90px}
+  header.doc{padding:38px 0 6px}
+  .eyebrow{font-size:.72rem;font-weight:800;letter-spacing:.13em;color:var(--accent)}
+  h1{font-size:clamp(1.35rem,4vw,1.8rem);font-weight:800;letter-spacing:-.02em;margin:6px 0 6px}
+  p.lead{color:var(--mut);font-size:.88rem}
+  .meta{display:flex;gap:6px;flex-wrap:wrap;margin-top:12px}
+  .chip{font-size:.7rem;font-weight:700;color:var(--mut);background:var(--card);border:1px solid var(--line);border-radius:999px;padding:4px 10px}
+  .chip b{color:var(--ink)}
+  .vswitch{display:flex;gap:6px;margin-top:14px;flex-wrap:wrap}
+  .vswitch a{font-size:.72rem;font-weight:800;text-decoration:none;padding:5px 12px;border-radius:8px;background:#fff;border:1px solid var(--line);color:var(--mut)}
+  .vswitch a.on{background:var(--accent-deep);border-color:var(--accent-deep);color:#fff}
+
+  section{margin-top:42px}
+  .sec-label{font-size:.7rem;font-weight:800;letter-spacing:.12em;color:var(--accent);margin-bottom:3px}
+  h2{font-size:1.12rem;font-weight:800;letter-spacing:-.015em}
+  .pros{display:flex;gap:5px;flex-wrap:wrap;margin:8px 0 14px}
+  .pros span{font-size:.68rem;font-weight:700;border-radius:7px;padding:3px 8px;background:var(--accent-soft);color:var(--accent-deep)}
+  .pros span.warn{background:var(--warn-soft);color:var(--warn)}
+  .note{font-size:.78rem;color:var(--mut);margin-top:12px;background:#fff;border:1px solid var(--line);border-radius:10px;padding:11px 13px}
+  .note b{color:var(--ink)}
+  .note ul{margin:6px 0 0 16px} .note li{margin-top:3px}
+
+  /* ═══ 모달 프레임(실물 660px 폭 재현) ═══ */
+  .modal{background:var(--card);border-radius:14px;box-shadow:0 18px 44px rgba(17,24,39,.18);overflow:hidden;border:1px solid var(--line)}
+  .mhd{display:flex;align-items:center;gap:10px;padding:13px 16px;border-bottom:1px solid var(--line)}
+  .mhd b{font-size:.95rem}
+  .mhd .tab{font-size:.72rem;color:var(--faint);flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+  .mhd .x{font-size:.7rem;font-weight:700;border:1px solid var(--line);border-radius:7px;padding:4px 10px;color:var(--mut)}
+  .mbd{padding:14px 16px 16px;background:var(--paper)}
+  .scope{display:flex;align-items:center;gap:8px;flex-wrap:wrap;font-size:.73rem;color:var(--mut);margin-bottom:10px}
+  .scope b{font-size:.78rem;color:var(--ink)}
+  .scope .btn{margin-left:auto;font-size:.7rem;font-weight:700;border:1px solid var(--line);background:#fff;border-radius:7px;padding:4px 10px;color:var(--mut)}
+  .tie{font-size:.73rem;color:var(--mut);background:var(--accent-soft);border:1px solid var(--accent-line);border-radius:9px;padding:8px 11px;margin-bottom:10px;line-height:1.5}
+  .tie b{color:var(--ink)}
+
+  /* 공용 부품 */
+  .b-rec{font-size:.62rem;font-weight:900;padding:2px 7px;border-radius:999px;background:var(--accent-deep);color:#fff;white-space:nowrap}
+  .b-sim{font-size:.62rem;font-weight:800;padding:2px 7px;border-radius:999px;background:var(--accent-soft);color:var(--accent-deep);border:1px solid var(--accent-line);white-space:nowrap}
+  .b-sim.lo{background:#fff;color:var(--faint);border-color:var(--line)}
+  .b-off{font-size:.62rem;font-weight:800;padding:2px 7px;border-radius:999px;background:var(--warn-soft);color:var(--warn);border:1px solid var(--warn-line);white-space:nowrap}
+  .cno{font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:.68rem;font-weight:700;color:var(--faint);letter-spacing:.01em}
+  .won{font-variant-numeric:tabular-nums;white-space:nowrap}
+  .why-i{color:var(--ok);font-weight:900}
+
+  /* ── A안: 정보 위계형 ── */
+  .A .row{background:#fff;border:1px solid var(--line);border-radius:11px;padding:12px 14px;margin-bottom:8px;cursor:pointer}
+  .A .row.rec{border-color:var(--accent-line);background:linear-gradient(180deg,#F6FAFF,#fff)}
+  .A .row.off{border-style:dashed;opacity:.9}
+  .A .top{display:flex;align-items:flex-start;gap:12px}
+  .A .ttl{flex:1;min-width:0}
+  .A .badges{display:flex;gap:5px;align-items:center;flex-wrap:wrap;margin-bottom:4px}
+  .A .name{font-size:.95rem;font-weight:800;letter-spacing:-.01em;line-height:1.35;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+  .A .sub{font-size:.73rem;color:var(--mut);margin-top:3px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+  .A .cost{text-align:right;flex:none}
+  .A .cost .k{font-size:.6rem;font-weight:700;color:var(--faint)}
+  .A .cost .v{font-size:1.02rem;font-weight:900;color:var(--accent-deep);letter-spacing:-.02em}
+  .A .why{display:flex;gap:5px;flex-wrap:wrap;margin-top:10px;padding-top:9px;border-top:1px dashed var(--line)}
+  .A .why span{font-size:.68rem;font-weight:700;color:#0B7A5A;background:#E9FAF3;border:1px solid #BFEEDC;border-radius:7px;padding:3px 8px}
+  .A .why span.none{color:var(--faint);background:#fff;border-color:var(--line);font-weight:600}
+
+  /* ── B안: 근거 배너형 ── */
+  .B .row{background:#fff;border:1px solid var(--line);border-radius:11px;margin-bottom:8px;overflow:hidden;cursor:pointer}
+  .B .row.rec{border-color:var(--accent-line);box-shadow:0 0 0 2px rgba(49,130,246,.09)}
+  .B .row.off{border-style:dashed;opacity:.9}
+  .B .head{padding:12px 14px 11px}
+  .B .badges{display:flex;gap:5px;align-items:center;flex-wrap:wrap;margin-bottom:5px}
+  .B .name{font-size:.98rem;font-weight:800;letter-spacing:-.01em;line-height:1.35}
+  .B .line2{display:flex;align-items:baseline;gap:8px;margin-top:5px;flex-wrap:wrap}
+  .B .sub{font-size:.73rem;color:var(--mut);flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+  .B .cost{font-size:.86rem;font-weight:900;color:var(--ink);letter-spacing:-.01em}
+  .B .cost small{font-size:.62rem;font-weight:700;color:var(--faint);margin-right:4px}
+  .B .band{background:#F1FBF7;border-top:1px solid #CFEFE2;padding:8px 14px;display:flex;gap:7px;align-items:center;flex-wrap:wrap}
+  .B .band .lb{font-size:.63rem;font-weight:800;color:#0B7A5A;letter-spacing:.02em}
+  .B .band span.w{font-size:.7rem;font-weight:700;color:#0B7A5A}
+  .B .band.empty{background:#FAFBFD;border-top-color:var(--line)}
+  .B .band.empty .lb,.B .band.empty span.w{color:var(--faint);font-weight:600}
+
+  /* ── C안: 스코어 레일형 ── */
+  .C .row{background:#fff;border:1px solid var(--line);border-radius:11px;margin-bottom:8px;display:flex;overflow:hidden;cursor:pointer}
+  .C .row.rec{border-color:var(--accent-line)}
+  .C .row.off{border-style:dashed;opacity:.9}
+  .C .rail{flex:none;width:78px;background:var(--accent-soft);border-right:1px solid var(--accent-line);display:flex;flex-direction:column;align-items:center;justify-content:center;gap:3px;padding:12px 6px}
+  .C .row.lo .rail{background:#FAFBFD;border-right-color:var(--line)}
+  .C .rail .n{font-size:1.22rem;font-weight:900;color:var(--accent-deep);letter-spacing:-.03em;line-height:1}
+  .C .row.lo .rail .n{color:var(--faint)}
+  .C .rail .k{font-size:.58rem;font-weight:800;color:var(--mut);letter-spacing:.04em}
+  .C .rail .bar{width:44px;height:4px;border-radius:3px;background:#fff;overflow:hidden;margin-top:2px;border:1px solid var(--accent-line)}
+  .C .row.lo .rail .bar{border-color:var(--line)}
+  .C .rail .bar i{display:block;height:100%;background:linear-gradient(90deg,#60A5FA,#1B64DA)}
+  .C .row.lo .rail .bar i{background:#CBD5E1}
+  .C .body{flex:1;min-width:0;padding:11px 14px}
+  .C .badges{display:flex;gap:5px;align-items:center;flex-wrap:wrap;margin-bottom:4px}
+  .C .nm{display:flex;align-items:baseline;gap:9px}
+  .C .name{font-size:.95rem;font-weight:800;letter-spacing:-.01em;flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+  .C .cost{font-size:.84rem;font-weight:900;color:var(--accent-deep);white-space:nowrap}
+  .C .sub{font-size:.72rem;color:var(--mut);margin-top:3px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+  .C .why{margin-top:8px;background:#F7FAFF;border:1px solid #DEE9FB;border-radius:8px;padding:6px 9px;display:flex;gap:9px;flex-wrap:wrap}
+  .C .why span{font-size:.69rem;font-weight:700;color:#1B4F8F}
+  .C .why.none{background:#FAFBFD;border-color:var(--line)}
+  .C .why.none span{color:var(--faint);font-weight:600}
+
+  footer{margin-top:52px;padding-top:18px;border-top:1px solid var(--line2);font-size:.74rem;color:var(--faint)}
+  @media(max-width:640px){ .A .top{flex-direction:column;gap:6px} .A .cost{text-align:left} .C .rail{width:64px} }
+</style>
+</head>
+<body>
+<div class="wrap">
+
+<header class="doc">
+  <div class="eyebrow">DESIGN DRAFT</div>
+  <h1>계약 매칭 팝업 — 결과화면 시안 3종</h1>
+  <p class="lead">리뷰웹시스템[3버전] 작업보드 › 정산 › [계약 매칭] 팝업의 후보 목록. 요청 3가지를 반영했습니다 —
+    <b>① 계약명을 맨 위로</b>(계약고유번호는 보조 표기) · <b>② 그 계약의 총비용 표기</b> · <b>③ 일치근거를 눈에 띄게</b>.</p>
+  <div class="meta">
+    <span class="chip">작업 <b>4/21(쿠팡)엘라비에_선크림 750건</b></span>
+    <span class="chip">업체 <b>어니스트캄</b></span>
+    <span class="chip">후보 <b>24건</b></span>
+    <span class="chip">모달 폭 <b>660px</b></span>
+  </div>
+  <div class="vswitch" id="vsw">
+    <a href="?" data-v="">3안 모두 보기</a>
+    <a href="?v=A" data-v="A">A안만</a>
+    <a href="?v=B" data-v="B">B안만</a>
+    <a href="?v=C" data-v="C">C안만</a>
+  </div>
+</header>
+
+<!-- ══════════════════ A안 ══════════════════ -->
+<section data-variant="A">
+  <div class="sec-label">시안 A</div>
+  <h2>정보 위계형 — 계약명 큰 제목 + 우측 총비용 + 하단 근거 칩</h2>
+  <div class="pros">
+    <span>계약명이 가장 크게 읽힘</span><span>총비용이 금액 열로 정렬돼 24건 비교가 쉬움</span>
+    <span>근거는 점선 아래 초록 칩</span><span class="warn">근거가 4개 이상이면 두 줄로 늘어남</span>
+  </div>
+
+  <div class="modal A">
+    <div class="mhd"><b>계약 매칭</b><span class="tab">4/21(쿠팡)엘라비에_선크림 750건</span><span class="x">닫기</span></div>
+    <div class="mbd">
+      <div class="scope"><b>어니스트캄</b> 업체로 등록된 계약 24건 · 작업명과 비슷한 순<span class="btn">전체 계약에서 찾기</span></div>
+      <div class="tie">작업명과 비슷한 정도가 <b>같은 계약이 둘 이상</b>입니다. 추천을 그대로 믿지 말고 계약 내용을 확인해 주세요.</div>
+
+      <div class="row rec">
+        <div class="top">
+          <div class="ttl">
+            <div class="badges"><span class="b-rec">추천</span><span class="b-sim">유사도 45%</span><span class="cno">C-20260702-010</span></div>
+            <div class="name">4/8(메이커스)엘라비에 마스크팩 마케팅</div>
+            <div class="sub">주식회사 어니스트캄 · 엘라비에 · 2026-04</div>
+          </div>
+          <div class="cost"><div class="k">총비용</div><div class="v won">4,180,000원</div></div>
+        </div>
+        <div class="why"><span>✓ 브랜드·상품 ‘엘라비에’ 일치</span><span>✓ 작업 ‘엘라비에’ 일치</span><span>✓ 계약월 4월 일치</span></div>
+      </div>
+
+      <div class="row">
+        <div class="top">
+          <div class="ttl">
+            <div class="badges"><span class="b-sim">유사도 45%</span><span class="cno">C-20260415-004</span></div>
+            <div class="name">4/15(쿠팡)엘라비에 선크림 체험단</div>
+            <div class="sub">주식회사 어니스트캄 · 엘라비에 · 2026-04</div>
+          </div>
+          <div class="cost"><div class="k">총비용</div><div class="v won">9,350,000원</div></div>
+        </div>
+        <div class="why"><span>✓ 브랜드·상품 ‘엘라비에’ 일치</span><span>✓ 작업 ‘선크림’ 일치</span><span>✓ 계약월 4월 일치</span></div>
+      </div>
+
+      <div class="row">
+        <div class="top">
+          <div class="ttl">
+            <div class="badges"><span class="b-sim lo">유사도 22%</span><span class="cno">C-20260210-031</span></div>
+            <div class="name">2/10(네이버)어니스트캄 블로그 바이럴</div>
+            <div class="sub">주식회사 어니스트캄 · 어니스트캄 · 2026-02</div>
+          </div>
+          <div class="cost"><div class="k">총비용</div><div class="v won">1,200,000원</div></div>
+        </div>
+        <div class="why"><span class="none">일치하는 항목 없음 — 계약 내용을 직접 확인하세요</span></div>
+      </div>
+
+      <div class="row off">
+        <div class="top">
+          <div class="ttl">
+            <div class="badges"><span class="b-sim lo">유사도 18%</span><span class="b-off">다른 업체 계약</span><span class="cno">C-20260405-002</span></div>
+            <div class="name">4/5(쿠팡)라비에르 선크림 마케팅</div>
+            <div class="sub">주식회사 라비에르 · 라비에르 · 2026-04</div>
+          </div>
+          <div class="cost"><div class="k">총비용</div><div class="v won">2,700,000원</div></div>
+        </div>
+        <div class="why"><span>✓ 작업 ‘선크림’ 일치</span><span>✓ 계약월 4월 일치</span></div>
+      </div>
+    </div>
+  </div>
+
+  <div class="note"><b>A안 특징</b>
+    <ul>
+      <li>총비용이 <b>오른쪽 한 열로 정렬</b>돼 24건을 훑을 때 금액 비교가 가장 빠릅니다.</li>
+      <li>계약고유번호는 배지 줄 끝으로 내려 <b>보조 정보</b>가 됩니다(필요할 때만 눈에 들어옴).</li>
+      <li>근거는 <b>체크 칩</b>이라 몇 개가 맞았는지 개수로 바로 읽힙니다.</li>
+    </ul>
+  </div>
+</section>
+
+<!-- ══════════════════ B안 ══════════════════ -->
+<section data-variant="B">
+  <div class="sec-label">시안 B</div>
+  <h2>근거 배너형 — 카드 아래 초록 띠로 일치근거를 통째로 강조</h2>
+  <div class="pros">
+    <span>근거가 가장 강하게 보임</span><span>근거 개수가 늘어도 줄바꿈이 자연스러움</span>
+    <span>근거 없는 계약이 회색 띠로 즉시 구분됨</span><span class="warn">카드 높이가 A안보다 큼(한 화면에 3~4건)</span>
+  </div>
+
+  <div class="modal B">
+    <div class="mhd"><b>계약 매칭</b><span class="tab">4/21(쿠팡)엘라비에_선크림 750건</span><span class="x">닫기</span></div>
+    <div class="mbd">
+      <div class="scope"><b>어니스트캄</b> 업체로 등록된 계약 24건 · 작업명과 비슷한 순<span class="btn">전체 계약에서 찾기</span></div>
+
+      <div class="row rec">
+        <div class="head">
+          <div class="badges"><span class="b-rec">추천</span><span class="b-sim">유사도 45%</span><span class="cno">C-20260702-010</span></div>
+          <div class="name">4/8(메이커스)엘라비에 마스크팩 마케팅</div>
+          <div class="line2"><span class="sub">주식회사 어니스트캄 · 엘라비에 · 2026-04</span>
+            <span class="cost"><small>총비용</small><span class="won">4,180,000원</span></span></div>
+        </div>
+        <div class="band"><span class="lb">일치근거 3</span>
+          <span class="w">✓ 브랜드·상품 ‘엘라비에’</span><span class="w">✓ 작업 ‘엘라비에’</span><span class="w">✓ 계약월 4월</span></div>
+      </div>
+
+      <div class="row">
+        <div class="head">
+          <div class="badges"><span class="b-sim">유사도 45%</span><span class="cno">C-20260415-004</span></div>
+          <div class="name">4/15(쿠팡)엘라비에 선크림 체험단</div>
+          <div class="line2"><span class="sub">주식회사 어니스트캄 · 엘라비에 · 2026-04</span>
+            <span class="cost"><small>총비용</small><span class="won">9,350,000원</span></span></div>
+        </div>
+        <div class="band"><span class="lb">일치근거 3</span>
+          <span class="w">✓ 브랜드·상품 ‘엘라비에’</span><span class="w">✓ 작업 ‘선크림’</span><span class="w">✓ 계약월 4월</span></div>
+      </div>
+
+      <div class="row">
+        <div class="head">
+          <div class="badges"><span class="b-sim lo">유사도 22%</span><span class="cno">C-20260210-031</span></div>
+          <div class="name">2/10(네이버)어니스트캄 블로그 바이럴</div>
+          <div class="line2"><span class="sub">주식회사 어니스트캄 · 어니스트캄 · 2026-02</span>
+            <span class="cost"><small>총비용</small><span class="won">1,200,000원</span></span></div>
+        </div>
+        <div class="band empty"><span class="lb">일치근거 없음</span><span class="w">계약 내용을 직접 확인하세요</span></div>
+      </div>
+
+      <div class="row off">
+        <div class="head">
+          <div class="badges"><span class="b-sim lo">유사도 18%</span><span class="b-off">다른 업체 계약</span><span class="cno">C-20260405-002</span></div>
+          <div class="name">4/5(쿠팡)라비에르 선크림 마케팅</div>
+          <div class="line2"><span class="sub">주식회사 라비에르 · 라비에르 · 2026-04</span>
+            <span class="cost"><small>총비용</small><span class="won">2,700,000원</span></span></div>
+        </div>
+        <div class="band"><span class="lb">일치근거 2</span><span class="w">✓ 작업 ‘선크림’</span><span class="w">✓ 계약월 4월</span></div>
+      </div>
+    </div>
+  </div>
+
+  <div class="note"><b>B안 특징</b>
+    <ul>
+      <li>근거가 <b>카드 폭 전체를 쓰는 띠</b>라 "왜 이게 추천됐나"가 가장 강하게 읽힙니다.</li>
+      <li>근거 <b>개수를 띠 앞에 표기</b>(일치근거 3)해 카드끼리 비교가 쉽습니다.</li>
+      <li>근거가 없으면 <b>회색 띠 + 안내 문구</b>로 바뀌어, 낮은 유사도를 숫자만이 아니라 문장으로 알려줍니다.</li>
+    </ul>
+  </div>
+</section>
+
+<!-- ══════════════════ C안 ══════════════════ -->
+<section data-variant="C">
+  <div class="sec-label">시안 C</div>
+  <h2>스코어 레일형 — 좌측 유사도 레일 + 계약명·총비용 한 줄 + 근거 박스</h2>
+  <div class="pros">
+    <span>유사도 순서가 시각적으로 즉시 보임</span><span>계약명·총비용이 같은 줄이라 세로가 짧음</span>
+    <span>한 화면에 가장 많이 들어감</span><span class="warn">긴 계약명은 총비용 때문에 더 일찍 잘림</span>
+  </div>
+
+  <div class="modal C">
+    <div class="mhd"><b>계약 매칭</b><span class="tab">4/21(쿠팡)엘라비에_선크림 750건</span><span class="x">닫기</span></div>
+    <div class="mbd">
+      <div class="scope"><b>어니스트캄</b> 업체로 등록된 계약 24건 · 작업명과 비슷한 순<span class="btn">전체 계약에서 찾기</span></div>
+
+      <div class="row rec">
+        <div class="rail"><div class="n">45</div><div class="k">유사도 %</div><div class="bar"><i style="width:45%"></i></div></div>
+        <div class="body">
+          <div class="badges"><span class="b-rec">추천</span><span class="cno">C-20260702-010</span></div>
+          <div class="nm"><span class="name">4/8(메이커스)엘라비에 마스크팩 마케팅</span><span class="cost won">4,180,000원</span></div>
+          <div class="sub">주식회사 어니스트캄 · 엘라비에 · 2026-04</div>
+          <div class="why"><span>✓ 브랜드·상품 ‘엘라비에’ 일치</span><span>✓ 작업 ‘엘라비에’ 일치</span><span>✓ 계약월 4월 일치</span></div>
+        </div>
+      </div>
+
+      <div class="row">
+        <div class="rail"><div class="n">45</div><div class="k">유사도 %</div><div class="bar"><i style="width:45%"></i></div></div>
+        <div class="body">
+          <div class="badges"><span class="cno">C-20260415-004</span></div>
+          <div class="nm"><span class="name">4/15(쿠팡)엘라비에 선크림 체험단</span><span class="cost won">9,350,000원</span></div>
+          <div class="sub">주식회사 어니스트캄 · 엘라비에 · 2026-04</div>
+          <div class="why"><span>✓ 브랜드·상품 ‘엘라비에’ 일치</span><span>✓ 작업 ‘선크림’ 일치</span><span>✓ 계약월 4월 일치</span></div>
+        </div>
+      </div>
+
+      <div class="row lo">
+        <div class="rail"><div class="n">22</div><div class="k">유사도 %</div><div class="bar"><i style="width:22%"></i></div></div>
+        <div class="body">
+          <div class="badges"><span class="cno">C-20260210-031</span></div>
+          <div class="nm"><span class="name">2/10(네이버)어니스트캄 블로그 바이럴</span><span class="cost won">1,200,000원</span></div>
+          <div class="sub">주식회사 어니스트캄 · 어니스트캄 · 2026-02</div>
+          <div class="why none"><span>일치하는 항목 없음 — 계약 내용을 직접 확인하세요</span></div>
+        </div>
+      </div>
+
+      <div class="row lo off">
+        <div class="rail"><div class="n">18</div><div class="k">유사도 %</div><div class="bar"><i style="width:18%"></i></div></div>
+        <div class="body">
+          <div class="badges"><span class="b-off">다른 업체 계약</span><span class="cno">C-20260405-002</span></div>
+          <div class="nm"><span class="name">4/5(쿠팡)라비에르 선크림 마케팅</span><span class="cost won">2,700,000원</span></div>
+          <div class="sub">주식회사 라비에르 · 라비에르 · 2026-04</div>
+          <div class="why"><span>✓ 작업 ‘선크림’ 일치</span><span>✓ 계약월 4월 일치</span></div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <div class="note"><b>C안 특징</b>
+    <ul>
+      <li>왼쪽 <b>레일의 숫자·막대</b>로 "얼마나 닮았나"가 목록 전체에서 한눈에 비교됩니다.</li>
+      <li>계약명과 총비용이 <b>같은 줄</b>이라 카드가 가장 낮고, 24건 스크롤이 짧습니다.</li>
+      <li>근거는 연한 파란 박스 — A안 칩보다 덜 튀고 B안 띠보다 조용합니다.</li>
+    </ul>
+  </div>
+</section>
+
+<div class="note" style="margin-top:34px">
+  <b>세 안의 공통 규칙(어느 안을 고르든 유지)</b>
+  <ul>
+    <li><b>계약명</b> = 인트라넷 계약관리의 <b>계약상품상세</b>(없으면 상품명 → 브랜드·상품 순으로 대체). 계약고유번호는 그 위 배지 줄에 작게 둡니다.</li>
+    <li><b>총비용</b> = 계약금액. 견적서 금액이 우선인 <b>정산 카드의 총비용과는 표기 기준이 다를 수 있어</b>, 이 팝업에서는 "계약금액"임을 라벨로 밝힙니다.</li>
+    <li><b>추천은 제안까지만</b> — 자동 매칭은 없고, 최고점이 낮으면 추천 배지 자체가 안 붙습니다. 동점이면 상단 안내 문구가 뜹니다.</li>
+    <li><b>다른 업체 계약</b>은 [전체 계약에서 찾기]에서만 나타나며 점선 테두리 + 경고 배지 + 클릭 시 확인 창을 거칩니다.</li>
+  </ul>
+</div>
+
+<footer>아이에이리뷰 · 계약 매칭 팝업 결과화면 시안 — 확정 후 <code>frontend/workdesk.html</code>의 <code>_lkRender</code> 한 곳에만 반영합니다(렌더 경로 사본 없음).</footer>
+
+</div>
+<script>
+  // ?v=A|B|C 로 한 안만 단독 보기(시안 문서 관용구)
+  (function(){
+    var v=(new URLSearchParams(location.search).get('v')||'').toUpperCase();
+    document.querySelectorAll('#vsw a').forEach(function(a){ if((a.dataset.v||'')===v) a.classList.add('on'); });
+    if(!v) return;
+    document.querySelectorAll('section[data-variant]').forEach(function(s){
+      if(s.dataset.variant!==v) s.remove();
+    });
+  })();
+</script>
+</body>
+</html>

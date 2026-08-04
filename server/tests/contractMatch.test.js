@@ -231,8 +231,32 @@ async function run() {
   assert.ok(/계약 매칭/.test(HTML) && !/>계약 연결</.test(HTML), '7f: 어휘가 "계약 매칭"으로 통일');
   assert.ok(/no_advertiser/.test(HTML) && /no_contracts/.test(HTML), '7g: 폴백 사유를 화면이 설명');
   assert.ok(/전체 계약에서 찾기/.test(HTML), '7h: 전체 검색 탈출구 유지');
-  assert.ok(/유사도 \$\{s\.matchScore\}%/.test(HTML), '7i: 유사도 표기');
   assert.ok(/lkrecb[^]{0,200}추천/.test(HTML), '7j: 추천 배지');
+
+  // 시안 C(사용자 확정) — 행 렌더러를 실제 실행해 요청 3가지가 지켜지는지 본다.
+  const vm = require('vm');
+  const rowSrc = HTML.slice(HTML.indexOf('function _lkRowHtml('), HTML.indexOf('function searchSales('));
+  const sb = { esc: s => String(s == null ? '' : s).replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c])),
+    _wonFmt: n => (Number(n) || 0).toLocaleString('ko-KR') + '원' };
+  vm.createContext(sb); vm.runInContext(rowSrc, sb);
+  const row = sb._lkRowHtml({ salesId: 'a', contractNumber: 'C-20260702-010', businessName: '어니스트캄',
+    brandProduct: '엘라비에', contractDetail: '4/8(메이커스)엘라비에 마스크팩 마케팅', contractMonth: '2026-04',
+    amount: 0, contractAmount: 4180000, matchScore: 45, matchReasons: ['브랜드·상품 일치'], advertiserMatch: true }, 0, 'a');
+  assert.ok(row.indexOf('4/8(메이커스)엘라비에 마스크팩 마케팅') > -1, '7l: 계약명(계약상품상세) 표기');
+  // ★ 계약명이 헤드라인 · 계약고유번호는 보조 — CSS 로 위계를 고정(되돌리면 종전처럼 번호가 제목이 된다).
+  const nameCss = (HTML.match(/\.lkname\{([^}]*)\}/) || [, ''])[1];
+  const cnoCss = (HTML.match(/\.lkcno\{([^}]*)\}/) || [, ''])[1];
+  const px = css => parseFloat((css.match(/font-size:([\d.]+)px/) || [, '0'])[1]);
+  assert.ok(px(nameCss) >= 13 && /font-weight:8/.test(nameCss), '7l2: 계약명이 헤드라인 크기·굵기');
+  assert.ok(px(cnoCss) > 0 && px(cnoCss) < px(nameCss), '7l3: 계약고유번호는 계약명보다 작은 보조 표기');
+  assert.ok(/4,180,000원/.test(row), '7m: 총비용 = amount 없으면 contract_amount 폴백');
+  assert.ok(/lkrail[^]{0,120}>45</.test(row), '7n: 좌측 유사도 레일(시안 C)');
+  assert.ok(/✓ 브랜드·상품 일치/.test(row), '7o: 일치근거를 체크 표기로 강조');
+  const noWhy = sb._lkRowHtml({ salesId: 'b', contractNumber: 'C-2', matchScore: 10, matchReasons: [] }, 1, 'a');
+  assert.ok(/lkwhy none[^]{0,120}일치하는 항목 없음/.test(noWhy), '7p: 근거 없으면 그 사실을 문장으로 말한다');
+  assert.ok(/\(계약명 없음\)/.test(noWhy), '7q: 계약명 후보가 모두 비면 그 사실을 표기(빈칸 금지)');
+  assert.ok(/_lkRowHtml\(s,i,r\.recommendedSalesId\)/.test(HTML), '7r: 행 빌더는 한 벌(사본 금지)');
+  console.log('     시안 C 행 렌더러 실행 검증 ✓');
   // 로딩 자리표시자를 깐 함수는 어떤 경로로도 화면을 종결시킨다(무한 로딩 금지 — 레포 규율)
   assert.ok(/다시 시도/.test(HTML.split('async function _lkLoad')[1].split('function _lkRender')[0]), '7k: 실패 시 [다시 시도]로 종결');
   console.log('  7. 사본 금지 · 프론트 배선 ✓');
