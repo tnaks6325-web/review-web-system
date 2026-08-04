@@ -1118,6 +1118,7 @@ router.post('/notices/read', authMiddleware, async (req, res, next) => {
 // staff 차단(adminOrMasterMiddleware): 시스템 운영 정보
 // ═══════════════════════════════════════════════════════════
 const errorDebug = require('../services/errorDebug.service');
+const { adminUiWhereSql, wantsExclusion } = require('../utils/adminUiErrorFilter');
 
 // status 동기화 헬퍼: status 와 backward-compat 한 resolved 불리언을 함께 갱신
 const VALID_STATUSES = ['new', 'investigating', 'resolved', 'ignored'];
@@ -1152,6 +1153,13 @@ router.get('/error-logs', authMiddleware, adminOrMasterMiddleware, async (req, r
     if (severity) { params.push(severity); where.push(`severity = $${params.length}`); }
     if (flow)     { params.push(flow);     where.push(`flow = $${params.length}`); }
     if (source)   { params.push(source);   where.push(`source = $${params.length}`); }
+    // ── 관리자 대시보드에서 발생한 오류 제외(통합 작업대 전용 · opt-in) ──
+    //   규칙 단일 출처 = utils/adminUiErrorFilter. 기본은 미적용이라 다른 소비처 동작 불변.
+    //   ★ 제외 건수를 함께 세어 화면이 "N건 제외"를 표기한다(조용한 누락 금지).
+    const excludeAdminUi = wantsExclusion(req.query.excludeAdminUi);
+    const statusWhere = where.slice();            // 제외 건수도 같은 상태 필터 기준으로 센다
+    const statusParams = params.slice();
+    if (excludeAdminUi) where.push(adminUiWhereSql(params));
     const whereSql = where.length ? 'WHERE ' + where.join(' AND ') : '';
 
     const listParams = params.slice();
@@ -1176,21 +1184,36 @@ router.get('/error-logs', authMiddleware, adminOrMasterMiddleware, async (req, r
     const total = cntRows[0]?.total || 0;
 
     // 요약: 상태별 분포 + 미해결(신규+확인중) 카테고리/심각도 분포
+    // ★ 제외를 적용했으면 요약도 같은 기준으로 센다 — 목록엔 없는 건이 헤더 뱃지에만 잡히면
+    //   "미해결 12인데 표는 2줄"이 되어 화면이 거짓말을 한다.
+    const sumParams = [];
+    const sumCond = excludeAdminUi ? ' WHERE ' + adminUiWhereSql(sumParams) : '';
     const { rows: stRows } = await pool.query(
-      `SELECT status, COUNT(*)::int AS cnt FROM error_logs GROUP BY status`);
+      `SELECT status, COUNT(*)::int AS cnt FROM error_logs${sumCond} GROUP BY status`, sumParams);
     const byStatus = { new: 0, investigating: 0, resolved: 0, ignored: 0 };
     for (const r of stRows) byStatus[r.status] = r.cnt;
 
+    const sevParams = [];
+    const sevCond = excludeAdminUi ? ' AND ' + adminUiWhereSql(sevParams) : '';
     const { rows: sumRows } = await pool.query(
       `SELECT category, severity, COUNT(*)::int AS cnt, SUM(occurrence_count)::int AS occ
-       FROM error_logs WHERE status IN ('new','investigating') GROUP BY category, severity`);
+       FROM error_logs WHERE status IN ('new','investigating')${sevCond} GROUP BY category, severity`, sevParams);
     const summary = { openCount: byStatus.new + byStatus.investigating, byStatus, byCategory: {}, bySeverity: {} };
     for (const r of sumRows) {
       summary.byCategory[r.category] = (summary.byCategory[r.category] || 0) + r.cnt;
       summary.bySeverity[r.severity] = (summary.bySeverity[r.severity] || 0) + r.cnt;
     }
 
-    res.json({ ok: true, logs, total, page, limit, summary });
+    // 제외 적용 시에만 "몇 건을 가렸는지" 센다(미적용이면 쿼리 순증 0)
+    let excludedCount = 0;
+    if (excludeAdminUi) {
+      statusWhere.push(adminUiWhereSql(statusParams, true));
+      const { rows: exRows } = await pool.query(
+        `SELECT COUNT(*)::int AS n FROM error_logs WHERE ${statusWhere.join(' AND ')}`, statusParams);
+      excludedCount = exRows[0]?.n || 0;
+    }
+
+    res.json({ ok: true, logs, total, page, limit, summary, excludeAdminUi, excludedCount });
   } catch (err) { next(err); }
 });
 

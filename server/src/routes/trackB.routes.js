@@ -1103,6 +1103,42 @@ router.post('/settings/notices/delete', authMiddleware, adminOrMasterMiddleware,
   _setHandlers.noticeDelete(req, res, next));
 
 /* ══════════════════════════════════════════════════════════════
+   시스템 오류로그 — 통합 작업대 「로그」 탭의 두 번째 서브탭
+
+   ★ 데이터는 이미 쌓이고 있는 `error_logs`(마이그레이션 026/028) 그대로다.
+     신규 테이블·신규 수집 경로 0 — 화면만 관리자 대시보드에서 작업대로 옮긴다
+     (사용자 확정 2026-08: 통합 작업대가 메인, 관리자 대시보드 폐기).
+   ★ 로직은 한 줄도 베끼지 않고 기존 `/api/admin/error-logs*` 핸들러에 위임한다.
+   ★ Track B 경로에 두는 이유 = C/S·설정과 같다: 인트라넷 SSO 토큰(`via:'intranet'`)은
+     `/api/admin/*` 에 **도달 자체가 불가능**하다(authMiddleware 격리).
+   ★ 권한은 원본과 1:1 로 **adminOrMaster** — 경로·스택·요청 컨텍스트가 실려
+     AE 의 "담당 탭" 스코프로 나눌 수 있는 데이터가 아니다(등록리뷰어DB와 같은 판단).
+   ★ 목록은 기본으로 **관리자 대시보드에서 난 오류를 제외**한다(utils/adminUiErrorFilter).
+     프론트가 `includeAdminUi=1` 을 주면 그때만 포함 — 제외 건수는 응답이 함께 준다.
+   ══════════════════════════════════════════════════════════════ */
+const _errHandlers = {
+  list:    _delegate(_adminRoutes, 'get',  '/error-logs'),
+  detail:  _delegate(_adminRoutes, 'get',  '/error-logs/detail'),
+  analyze: _delegate(_adminRoutes, 'post', '/error-logs/analyze'),
+  status:  _delegate(_adminRoutes, 'post', '/error-logs/status'),
+  resolve: _delegate(_adminRoutes, 'post', '/error-logs/resolve'),
+};
+router.get('/error-logs', authMiddleware, adminOrMasterMiddleware, (req, res, next) => {
+  // ★ 기본 제외 = 이 화면의 정책. 원본 라우트는 opt-in(기본 미적용)이라 다른 소비처는 무영향.
+  //   `includeAdminUi=1` 이면 원래대로 전부 보여준다(화면의 '제외분 포함해 보기').
+  req.query = { ...req.query, excludeAdminUi: req.query.includeAdminUi ? '' : '1' };
+  return _errHandlers.list(req, res, next);
+});
+router.get('/error-logs/detail', authMiddleware, adminOrMasterMiddleware, (req, res, next) =>
+  _errHandlers.detail(req, res, next));
+router.post('/error-logs/analyze', authMiddleware, adminOrMasterMiddleware, (req, res, next) =>
+  _errHandlers.analyze(req, res, next));
+router.post('/error-logs/status', authMiddleware, adminOrMasterMiddleware, (req, res, next) =>
+  _errHandlers.status(req, res, next));
+router.post('/error-logs/resolve', authMiddleware, adminOrMasterMiddleware, (req, res, next) =>
+  _errHandlers.resolve(req, res, next));
+
+/* ══════════════════════════════════════════════════════════════
    등록리뷰어DB — 통합 작업대 상단탭
 
    ★ **master/admin 전용**(`adminOrMasterMiddleware`). AE(staff)·광고주는 못 본다.

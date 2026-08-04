@@ -559,6 +559,44 @@
   .lgcap img{max-width:280px;max-height:240px;border-radius:8px;border:1px solid var(--line);cursor:zoom-in;display:block;background:#fff}
   .lgcaphint{font-size:11px;color:var(--muted);margin-top:5px}
   .lgexpacts{display:flex;gap:8px;align-items:center;flex-wrap:wrap;width:100%;margin-top:2px}
+  /* ── 「로그」 뷰 서브탭 + 시스템 오류로그 (시안 docs/design-log-tabs.html) ──
+     ★ 알약은 기존 `.seg` 를 그대로 쓴다 — 여기서는 줄바꿈·여백만 잡는다(색·모양 재정의 금지).
+     ★ 클래스는 전부 `sys`/`lgseg` 접두 — 남의 화면 규칙과 겹치지 않게(worow→wol 전례). */
+  .segbar.lgsegs{display:flex;align-items:center;gap:8px;margin:0 0 13px;flex-wrap:wrap;max-width:1300px}
+  .segbar.lgsegs .segsp{flex:1}
+  #syshead .mh{max-width:1300px}
+  #sysbody .lgwrap{max-width:1300px}
+  .lgtable .c-flow{width:180px;white-space:nowrap;font-weight:650}
+  .lgtable .c-flow i{display:block;font-style:normal;font-size:10.5px;font-weight:500;color:var(--faint)}
+  .lgtable .c-cat{width:92px;white-space:nowrap}
+  .lgtable .c-cnt{width:56px;white-space:nowrap;text-align:right;color:var(--muted)}
+  .catchip{font-size:10px;font-weight:750;padding:2px 7px;border-radius:6px;display:inline-block}
+  .ocount{font-size:10.5px;font-weight:800;background:var(--bad-soft);color:var(--bad);padding:1px 6px;border-radius:6px}
+  .ocount.q{background:var(--card2);color:var(--muted)}
+  .aibadge{font-size:10px;font-weight:750;background:var(--adv-soft);color:#5B21B6;padding:1px 7px;border-radius:6px;display:inline-block;margin-top:3px}
+  .syskv{font-family:var(--mono);font-size:11.5px;background:var(--card2);border:1px solid var(--line);border-radius:6px;padding:1px 6px;word-break:break-all}
+  pre.sysstack{margin:8px 0 0;padding:9px 11px;background:#0f172a;color:#cbd5e1;border-radius:8px;font-size:11px;line-height:1.6;overflow:auto;max-height:180px;white-space:pre-wrap;word-break:break-all}
+  /* AI 다중에이전트 분석 모달 — 6역할 진행도 + 역할별 결과 + 이행요청 게이트 */
+  .errstepper{border:1px solid var(--line);border-radius:12px;padding:12px;background:#fbfcfe;margin-bottom:12px}
+  .errstephd{display:flex;align-items:center;gap:8px;margin-bottom:10px;font-size:12.5px;font-weight:750}
+  .errsteprow{display:flex;align-items:flex-start;gap:2px}
+  .erritem{flex:1;text-align:center;min-width:0}
+  .erritem .circ{width:30px;height:30px;border-radius:50%;display:inline-flex;align-items:center;justify-content:center;font-size:12px;font-weight:800;color:#9CA3AF;background:#E5E7EB}
+  .erritem.done .circ{background:var(--safe);color:#fff}
+  .erritem.act .circ{background:#F59E0B;color:#fff;animation:errPulse 1s ease-in-out infinite}
+  @keyframes errPulse{0%,100%{box-shadow:0 0 0 3px #FDE68A}50%{box-shadow:0 0 0 6px #FCD34D}}
+  .erritem .snm{font-size:10.5px;font-weight:750;margin-top:4px}
+  .erritem .sst{font-size:9.5px;font-weight:700;color:var(--faint)}
+  .erritem.done .sst{color:var(--safe)} .erritem.act .sst{color:#D97706}
+  .erritem .sds{font-size:9.5px;color:var(--faint);line-height:1.25}
+  .errsep{align-self:flex-start;margin-top:12px;color:#D1D5DB;font-size:10px;flex:0 0 auto}
+  .errsec{border:1px solid var(--line);border-radius:10px;padding:10px 13px;margin-bottom:8px;background:var(--card)}
+  .errsec h4{margin:0 0 5px;font-size:12.5px;font-weight:800}
+  .errsec p{margin:3px 0;font-size:12.5px;line-height:1.65}
+  .errsec ul{margin:4px 0 0;padding-left:18px;font-size:12.5px} .errsec li{margin:2px 0}
+  .errgate{border-radius:10px;padding:9px 13px;font-size:12.5px}
+  .errgate.ok{border:1px solid color-mix(in srgb,var(--safe) 30%,var(--line));background:var(--safe-soft);color:#14713c;font-weight:700}
+  .errgate.no{border:1px solid color-mix(in srgb,var(--warn) 35%,var(--line));background:var(--warn-soft);color:#8a4b06}
   /* 작업오더 목록 펼침행 — 팝업 대신 행 아래에서 펼친다(리뷰어 로그와 같은 방식).
      ★ 클래스는 전부 `wol`(work-order list) 접두 — `.worow`/`.wodetail`/`.wochip` 은
        이미 작업대 탭의 '작업세부' 패널이 쓰고 있어(위 161~167줄) 이름이 겹치면
@@ -1081,7 +1119,7 @@ function renderShell(){
         <button class="navb" data-v="workdesk" onclick="switchView('workdesk')">작업대</button>
         <button class="navb" data-v="overview" onclick="switchView('overview')">관측</button>
         <button class="navb" data-v="ownership" onclick="switchView('ownership')">업체관리</button>
-        <button class="navb" data-v="logs" onclick="switchView('logs')">리뷰어 로그<span id="lgNavBadge"></span></button>
+        <button class="navb" data-v="logs" onclick="switchView('logs')">로그<span id="lgNavBadge"></span></button>
         <button class="navb" data-v="orders" onclick="switchView('orders')">작업오더<span id="woNavBadge"></span></button>
         <button class="navb" data-v="campaigns" onclick="switchView('campaigns')">모집공고</button>
         <button class="navb" data-v="cs" onclick="switchView('cs')">C/S<span id="csNavBadge"></span></button>
@@ -1093,7 +1131,7 @@ function renderShell(){
       :isStaff?`<nav class="nav">
         <button class="navb" data-v="workdesk" onclick="switchView('workdesk')">작업대</button>
         <button class="navb" data-v="ownership" onclick="switchView('ownership')">업체관리</button>
-        <button class="navb" data-v="logs" onclick="switchView('logs')">리뷰어 로그<span id="lgNavBadge"></span></button>
+        <button class="navb" data-v="logs" onclick="switchView('logs')">로그<span id="lgNavBadge"></span></button>
         <button class="navb" data-v="orders" onclick="switchView('orders')">작업오더<span id="woNavBadge"></span></button>
         <button class="navb" data-v="campaigns" onclick="switchView('campaigns')">모집공고</button>
         <button class="navb" data-v="cs" onclick="switchView('cs')">C/S<span id="csNavBadge"></span></button>
@@ -1116,6 +1154,7 @@ function renderShell(){
   if(isAdmin) _csStartBadgePoll();
   if(isAdmin || isStaff) _reBootBadge();   // 교체요청 대기 건수(AE 는 담당 탭만 서버가 센다)
   if(isAdmin || isStaff) _riBootBadge();   // 리뷰검수 — 손볼 건수(의심+불량)   // 탭을 열지 않아도 미확인 문의 수가 보이게(집계는 서버가 준 값 그대로)
+  if(isAdmin || isStaff) _lgBootBadge();   // 로그 — 리뷰어 비정상 + 시스템 오류(admin/master만) 중요 건수 합
 }
 /* ── C/S 미확인 뱃지 ────────────────────────────────────────
    통합 작업대에는 SSE 가 없어 부팅 1회만 받으면 그 뒤 들어온 문의가 영영 안 보인다
@@ -4134,9 +4173,70 @@ async function _rvDelete(i){
   else _toast('⚠ 삭제 실패'+(r&&r.error?': '+r.error:''));
 }
 
+/* ══════════════════════════════════════════════════════════════
+   「로그」 뷰 — 서브탭 2개 (리뷰어 비정상로그 · 시스템 오류로그)
+
+   ★ 기본 탭은 **리뷰어 비정상로그**(사용자 확정). 시안 = docs/design-log-tabs.html
+   ★ 서브탭은 작업대에 이미 있는 `.seg` 알약을 그대로 쓴다(신규 컴포넌트 0).
+   ★ **시스템 오류로그는 master/admin 전용** — 경로·스택·요청 컨텍스트가 실려 AE 의
+     "담당 탭" 스코프로 나눌 수 있는 데이터가 아니다(서버도 adminOrMaster 로 강제).
+     AE 에게는 알약 자체를 그리지 않는다.
+   ══════════════════════════════════════════════════════════════ */
+function _lgCanSys(){ return STATE.role==='master' || STATE.role==='admin'; }
 async function renderLogsView(){
-  $('#viewroot').innerHTML=`<div class="ovwrap"><div id="lghead"></div><div id="lgbody"><div class="empty">불러오는 중…</div></div></div>`;
-  await _loadLogs();
+  if(!_lgCanSys()) STATE.logTab='reviewer';           // 권한 없으면 언제나 리뷰어 탭
+  const t = (STATE.logTab==='system') ? 'system' : 'reviewer';
+  STATE.logTab = t;
+  $('#viewroot').innerHTML=`<div class="ovwrap">
+    <div class="segbar lgsegs" id="lgsegs"></div>
+    <div id="lgPaneRv" ${t==='system'?'hidden':''}><div id="lghead"></div><div id="lgbody"><div class="empty">불러오는 중…</div></div></div>
+    <div id="lgPaneSys" ${t==='system'?'':'hidden'}><div id="syshead"></div><div id="sysbody"><div class="empty">불러오는 중…</div></div></div>
+  </div>`;
+  _renderLogSegs();
+  if(t==='system') await _loadSysLogs(); else await _loadLogs();
+}
+/** 서브탭 알약 — 두 탭의 미해결/중요 건수를 함께 보여 준다(아직 안 받은 쪽은 숫자 생략). */
+function _renderLogSegs(){
+  const host=$('#lgsegs'); if(!host) return;
+  const t=STATE.logTab==='system'?'system':'reviewer';
+  const rv=STATE.logCounts, sy=STATE.sysCounts;
+  const cnt=(c)=> c?`<span class="cnt">${c.total|0}</span>${(c.critical|0)>0?`<span class="unbmini">${c.critical|0}</span>`:''}`:'';
+  host.innerHTML=`<div class="seg${t==='reviewer'?' on':''}" onclick="switchLogTab('reviewer')">리뷰어 비정상로그 ${cnt(rv)}</div>
+    ${_lgCanSys()?`<div class="seg${t==='system'?' on':''}" onclick="switchLogTab('system')">시스템 오류로그 ${cnt(sy)}</div>`:''}
+    <span class="segsp"></span>
+    <span style="font-size:11px;color:var(--faint)">🔴 = 즉시 손봐야 하는 중요 건수</span>`;
+}
+function switchLogTab(t){
+  if(t==='system' && !_lgCanSys()) return;
+  STATE.logTab = t==='system' ? 'system' : 'reviewer';
+  const a=$('#lgPaneRv'), b=$('#lgPaneSys');
+  if(a) a.hidden = STATE.logTab==='system';
+  if(b) b.hidden = STATE.logTab!=='system';
+  _renderLogSegs();
+  // 그 탭을 처음 열 때만 조회(다시 오면 이미 그려진 표가 그대로 남는다)
+  if(STATE.logTab==='system'){ if(!STATE.sysLogs) _loadSysLogs(); }
+  else if(!STATE.logs) _loadLogs();
+}
+/* nav 뱃지 = 두 탭 중요 건수의 **합** — C/S 뱃지와 같은 규율:
+   두 값은 서로 다른 시점에 도착하므로 각각 기억해 두고 합계만 그린다.
+   한쪽이 아직 null(미조회·조회실패)이면 그쪽은 0으로 접지 말고 빼고 더한다.
+   ★ 둘 다 null 이면 뱃지를 건드리지 않는다(조회 실패로 숫자가 사라지면 "손볼 것 없음"으로 오독). */
+const _NAVLG = { rv:null, sys:null };
+function _lgSyncNavBadge(){
+  const b=$('#lgNavBadge'); if(!b) return;
+  if(_NAVLG.rv===null && _NAVLG.sys===null) return;
+  const n=(_NAVLG.rv|0)+(_NAVLG.sys|0);
+  b.textContent = n>0 ? (' 🔴'+n) : '';
+}
+/** 로그 뷰를 열지 않아도 뱃지가 보이게 — 부팅 시 1회(각 1쿼리 count). 실패는 무시. */
+async function _lgBootBadge(){
+  try{ const r=await api('/api/trackb/reviewer-logs?limit=1&unresolved=1');
+    if(r&&r.ok) _NAVLG.rv=(r.counts&&r.counts.critical)|0; }catch(_){ }
+  if(_lgCanSys()){
+    try{ const r=await api('/api/trackb/error-logs?status=open&limit=1');
+      if(r&&r.ok) _NAVLG.sys=_sysCritical(r); }catch(_){ }
+  }
+  _lgSyncNavBadge();
 }
 async function _loadLogs(){
   const un = STATE.logAll ? '' : '&unresolved=1';
@@ -4144,12 +4244,12 @@ async function _loadLogs(){
   if(!r || !r.ok){ const b=$('#lgbody'); if(b) b.innerHTML=`<div class="empty">로그를 불러오지 못했습니다.</div>`; return; }
   STATE.logs = r.items||[]; STATE.logCounts = r.counts||{total:0,critical:0};
   _renderLogsHead(); _renderLogsBody(STATE.logq||'');
-  const nb=$('#lgNavBadge'); if(nb){ const c=STATE.logCounts.critical|0;
-    nb.textContent = c>0?(' 🔴'+c):''; }
+  _renderLogSegs();
+  _NAVLG.rv = STATE.logCounts.critical|0; _lgSyncNavBadge();
 }
 function _renderLogsHead(){
   const c = STATE.logCounts||{total:0,critical:0};
-  $('#lghead').innerHTML=`<div class="mh"><h1>리뷰어 비정상 로그</h1>
+  $('#lghead').innerHTML=`<div class="mh"><h1>리뷰어 비정상로그</h1>
     <span class="bd ${c.critical>0?'no':'g'}">중요 ${c.critical|0}</span>
     <span class="bd g">미해결 ${c.total|0}</span>
     <span class="sp" style="flex:1"></span>
@@ -4290,6 +4390,305 @@ async function _resolveLog(id){
   const r=await api('/api/trackb/reviewer-logs/resolve',{method:'POST',body:JSON.stringify({id})});
   if(!r||!r.ok){ alert('확인 처리 실패'); return; }
   await _loadLogs();
+}
+
+/* ══════════════════════════════════════════════════════════════
+   시스템 오류로그 (「로그」 뷰 두 번째 서브탭) — error_logs(026/028)
+
+   ★ 데이터·수집 경로는 그대로다. 관리자 대시보드의 「오류디버깅」 화면을 이리로 옮긴 것
+     (사용자 확정 2026-08: 통합 작업대가 메인, 대시보드 폐기 → 창구 단일화).
+   ★ 표는 **리뷰어 비정상로그와 같은 `.lgtable` + 행 펼침**을 쓴다 — 두 탭의 열 의미가
+     1:1 로 대응해야 탭을 옮겨도 읽는 법이 안 바뀐다(모든 오류의 기준 = 통합 작업대).
+   ★ 무거운 **AI 다중에이전트 분석만 모달**로 분리(리뷰검수 상세 팝업과 같은 방식).
+   ★ 서버가 기본으로 관리자 대시보드(`/api/admin/*`)에서 난 오류를 빼고 준다 —
+     제외 건수는 응답의 excludedCount 로 받아 **화면에 표기**한다(조용한 누락 금지).
+   ══════════════════════════════════════════════════════════════ */
+const SYS_CAT_LABELS = { timeout:'로딩시간 초과', quota:'호출한도 초과', network:'네트워크', auth:'인증',
+  permission:'권한', validation:'입력검증', db:'DB', external_api:'외부 API', not_found:'대상 없음', unknown:'알 수 없음' };
+const SYS_CAT_COLORS = { timeout:'#F59E0B', quota:'#EF4444', network:'#3B82F6', auth:'#2563eb',
+  permission:'#2563eb', validation:'#6B7280', db:'#DC2626', external_api:'#0EA5E9', not_found:'#6B7280', unknown:'#6B7280' };
+const SYS_SEV_LABELS = { warn:'경고', error:'에러', critical:'치명' };
+const SYS_STATUS_LABELS = { new:'신규', investigating:'확인중', resolved:'해결', ignored:'무시' };
+const SYS_VERIFY_LABELS = { not_checked:'검증 미확정', likely_reproducible:'재현 가능성 높음', reproduced:'재현됨',
+  not_reproduced_static:'정적 미재현', likely_resolved_by_other_change:'타 변경으로 해결 후보', blocked:'자동재현 차단' };
+const SYS_DECIDER_LABELS = { implement:'바로 수정 가능', implement_after_preflight:'사전 확인 후 수정',
+  needs_more_context:'추가 정보 필요', ignore:'수정 불필요' };
+// 발생 위치(source) — 원장은 enum 으로 저장한다. 화면에 그대로 내보내면 'external_api' 가 보인다.
+const SYS_SRC_LABELS = { server:'서버', external_api:'외부 API', db:'DB', client:'웹 화면' };
+// AI 다중에이전트 6역할(관리자 대시보드와 같은 구성·같은 순서)
+const SYS_AGENTS = [
+  { nm:'오류검증', ic:'🧪', ds:'수정 필요성 점검' }, { nm:'레드팀', ic:'🐞', ds:'오류 상황 제시' },
+  { nm:'블루팀', ic:'🛡', ds:'방어 코드 제시' },     { nm:'감독관', ic:'⚖', ds:'최적안 검토' },
+  { nm:'예방가드', ic:'✋', ds:'새 오류 예방 점검' }, { nm:'결정자', ic:'⚖️', ds:'구현 판단' },
+];
+/** 목록 응답 → 미해결 '치명' 건수(뱃지용). 요약도 제외 규칙이 적용된 값이라 표와 어긋나지 않는다. */
+function _sysCritical(r){ try{ return (r&&r.summary&&r.summary.bySeverity&&r.summary.bySeverity.critical)|0; }catch(_){ return 0; } }
+function _sysRel(iso){
+  if(!iso) return '';
+  const d=Date.now()-new Date(iso).getTime(), m=Math.floor(d/60000);
+  if(m<1) return '방금'; if(m<60) return m+'분 전';
+  const h=Math.floor(m/60); if(h<24) return h+'시간 전';
+  const dd=Math.floor(h/24); return dd<7 ? dd+'일 전' : new Date(iso).toLocaleDateString('ko-KR');
+}
+function _sysTs(iso){ return String(iso||'').replace('T',' ').slice(0,16); }
+/* ★ 로딩 자리표시자를 깐 함수는 **어떤 예외에도 화면을 종결**시킨다 —
+   api() 는 네트워크 오류에서 throw 하므로 try/catch 가 없으면 "불러오는 중…"이 영원히 남는다
+   (리뷰검수 무한로딩 실측 사고와 같은 자리). 실패해도 [다시 시도]로 빠져나갈 수 있게 한다. */
+async function _loadSysLogs(){
+  const fail=(msg)=>{ const b=$('#sysbody');
+    if(b) b.innerHTML=`<div class="empty">시스템 오류로그를 불러오지 못했습니다.${msg?' ('+esc(msg)+')':''}<br><br>
+      <button class="btn" onclick="_loadSysLogs()">다시 시도</button></div>`;
+    try{ _renderSysHead(null); }catch(_){ } };
+  try{
+    const st = STATE.sysStatus || 'open';
+    const cat = STATE.sysCat || '';
+    const inc = STATE.sysIncludeAdminUi ? '&includeAdminUi=1' : '';
+    const r = await api(`/api/trackb/error-logs?status=${encodeURIComponent(st)}${cat?'&category='+encodeURIComponent(cat):''}&limit=200${inc}`);
+    if(!r || !r.ok) return fail(r&&r.error);
+    STATE.sysLogs = r.logs||[]; STATE.sysMeta = r;
+    const open = (r.summary&&r.summary.openCount)|0;
+    STATE.sysCounts = { total: open, critical: _sysCritical(r) };
+    _renderSysHead(r); _renderSysBody(STATE.sysq||'');
+    _renderLogSegs();
+    _NAVLG.sys = STATE.sysCounts.critical; _lgSyncNavBadge();
+  }catch(e){ fail(e&&e.message); }
+}
+function _renderSysHead(r){
+  const s=(r&&r.summary)||{}, sev=s.bySeverity||{};
+  const st=STATE.sysStatus||'open';
+  const opt=(v,l)=>`<option value="${v}"${st===v?' selected':''}>${l}</option>`;
+  const cat=STATE.sysCat||'';
+  const copt=(v,l)=>`<option value="${v}"${cat===v?' selected':''}>${l}</option>`;
+  const ex=(r&&r.excludedCount)|0;
+  $('#syshead').innerHTML=`<div class="mh"><h1>시스템 오류로그</h1>
+    <span class="bd ${(sev.critical|0)>0?'no':'g'}">치명 ${sev.critical|0}</span>
+    <span class="bd g">미해결 ${(s.openCount|0)}</span>
+    <span class="sp" style="flex:1"></span>
+    <select class="ovsearch" style="width:auto" onchange="STATE.sysStatus=this.value;_loadSysLogs()">
+      ${opt('open','미해결(신규＋확인중)')}${opt('new','신규')}${opt('investigating','확인중')}${opt('resolved','해결')}${opt('ignored','무시')}${opt('all','전체')}</select>
+    <select class="ovsearch" style="width:auto" onchange="STATE.sysCat=this.value;_loadSysLogs()">
+      ${copt('','전체 종류')}${Object.keys(SYS_CAT_LABELS).map(k=>copt(k,SYS_CAT_LABELS[k])).join('')}</select>
+    <button class="btn" onclick="_loadSysLogs()">새로고침</button>
+    <input id="sysq" class="ovsearch" placeholder="기능/단계/오류내용 검색" oninput="STATE.sysq=this.value;_renderSysBody(this.value)" value="${esc(STATE.sysq||'')}"></div>
+    <div class="ovnote">서버·DB·외부 API(구글 시트/Drive/AI)에서 발생한 <b>비정상 이벤트</b>를 자동 수집해 한국어 한 문장으로 풀이합니다.
+      같은 유형은 <b>한 줄로 묶고 발생 횟수만 누적</b>합니다(중복 폭주 방지). <b>master/admin 전용</b>입니다.</div>
+    <div class="ovnote" style="margin-bottom:8px;color:var(--muted)">
+      ${STATE.sysIncludeAdminUi
+        ? `※ <b>관리자 대시보드(/api/admin/*)에서 발생한 오류를 포함</b>해 보고 있습니다. <a href="javascript:void(0)" onclick="STATE.sysIncludeAdminUi=false;_loadSysLogs()">기본(제외)으로 돌아가기</a>`
+        : `※ <b>관리자 대시보드(/api/admin/*)에서 발생한 오류 ${ex}건은 제외</b>했습니다 — 통합 작업대가 메인이라 없어질 화면의 오류는 목록을 채우지 않습니다.
+           작업대 <b>로그인·SSO 경로</b>에서 난 오류는 admin 경로여도 그대로 표시합니다.
+           ${ex?`<a href="javascript:void(0)" onclick="STATE.sysIncludeAdminUi=true;_loadSysLogs()">제외분 포함해 보기</a>`:''}`}
+    </div>`;
+}
+function _renderSysBody(q){
+  const kw=String(q||'').trim().toLowerCase();
+  const items=(STATE.sysLogs||[]).filter(l=>!kw
+    || String(l.message_ko||'').toLowerCase().includes(kw)
+    || String(l.message_raw||'').toLowerCase().includes(kw)
+    || String(l.flow_ko||'').toLowerCase().includes(kw)
+    || String(l.step_ko||'').toLowerCase().includes(kw)
+    || String(l.error_code||'').toLowerCase().includes(kw));
+  if(!items.length){ $('#sysbody').innerHTML=`<div class="empty">${kw?'검색 결과가 없습니다.':'표시할 오류가 없습니다. (문제 없음 🎉)'}</div>`; return; }
+  $('#sysbody').innerHTML=`<div class="ovnote" style="margin-bottom:8px">행을 클릭하면 아래로 <b>펼쳐져 원본 메시지·오류코드·발생 위치·스택</b>을 보고 그 자리에서 <b>확인중 / 해결 / 무시</b>로 처리할 수 있습니다.</div>
+    <div class="lgwrap"><table class="lgtable">
+    <thead><tr>
+      <th class="c-btn"></th><th class="c-sev">상태</th><th class="c-ts">최근 발생</th>
+      <th class="c-flow">기능 · 단계</th><th class="c-cat">종류</th><th class="c-cnt">횟수</th>
+      <th class="c-prob">오류내용</th><th class="c-act">조치안내</th>
+    </tr></thead><tbody>`+items.map(l=>{
+    const st=l.status||(l.resolved?'resolved':'new');
+    const closed=(st==='resolved'||st==='ignored');
+    const sevBd = l.severity==='critical' ? '<span class="bd no">치명</span>'
+      : l.severity==='error' ? '<span class="bd" style="background:var(--bad-soft);color:var(--bad);border-color:transparent">에러</span>'
+      : '<span class="bd" style="background:#FEF3C7;color:#92400E;border-color:transparent">경고</span>';
+    const cc=SYS_CAT_COLORS[l.category]||'#6B7280';
+    const occ=(l.occurrence_count|0);
+    const ai = l.has_analysis ? `<div class="aibadge">🤖 분석됨${l.decider_verdict?' · '+esc(SYS_DECIDER_LABELS[l.decider_verdict]||l.decider_verdict):''}</div>` : '';
+    const ctx=(l.context&&typeof l.context==='object')?l.context:{};
+    const acts=[];
+    if(st!=='investigating'&&!closed) acts.push(`<button class="btn xs" onclick="event.stopPropagation();_sysSetStatus(${l.id},'investigating')">확인중으로</button>`);
+    if(st!=='resolved') acts.push(`<button class="btn xs" style="background:#16a34a;color:#fff;border-color:#16a34a" onclick="event.stopPropagation();_sysSetStatus(${l.id},'resolved')">✔ 해결</button>`);
+    if(st!=='ignored') acts.push(`<button class="btn xs" onclick="event.stopPropagation();_sysSetStatus(${l.id},'ignored')">무시</button>`);
+    if(closed) acts.push(`<button class="btn xs" onclick="event.stopPropagation();_sysSetStatus(${l.id},'new')">다시 열기</button>`);
+    acts.push(`<button class="btn xs" onclick="event.stopPropagation();_sysCopy(${l.id})">📋 오류내용 복사</button>`);
+    acts.push(`<button class="btn xs" style="background:#6D28D9;color:#fff;border-color:#6D28D9" onclick="event.stopPropagation();_sysOpenAnalysis(${l.id})">🤖 오류검증 및 분석</button>`);
+    const detail=`<tr class="lgdetail" id="sysdetail-${l.id}" style="display:none"><td colspan="8"><div class="lgexpand">
+        <div class="lgexptext">
+          <b>원본 메시지</b> <span class="syskv">${esc(l.message_raw||'-')}</span><br>
+          ${l.error_code?`<b>오류코드</b> <span class="syskv">${esc(l.error_code)}</span> &nbsp; `:''}<b>발생 위치</b> ${esc(SYS_SRC_LABELS[l.source]||l.source||'')} &nbsp; <b>최초 발생</b> ${esc(_sysTs(l.first_seen_at))}
+          ${(ctx.method||ctx.path)?`<br><b>요청</b> <span class="syskv">${esc([ctx.method,ctx.path].filter(Boolean).join(' '))}</span>`:''}
+          ${ctx.userId?` &nbsp; <b>사용자</b> ${esc(ctx.userId)}`:''}
+          ${l.verify_verdict&&l.verify_verdict!=='not_checked'?`<br><b>검증</b> ${esc(SYS_VERIFY_LABELS[l.verify_verdict]||l.verify_verdict)}`:''}
+          ${closed&&l.resolved_by?`<br><span style="color:var(--faint)">✔ 확인: ${esc(l.resolved_by)}</span>`:''}
+        </div>
+        <div class="lgexpacts">${acts.join('')}</div>
+      </div></td></tr>`;
+    return `<tr class="lgrow ${closed?'lgdone':''}${l.severity==='critical'&&!closed?' lgcrit':''}" onclick="_toggleSysRow(${l.id})">
+      <td class="c-btn"><span class="lgchev" id="syschev-${l.id}">▾</span></td>
+      <td class="c-sev">${sevBd}<div class="lgby">${esc(SYS_STATUS_LABELS[st]||st)}</div></td>
+      <td class="c-ts">${esc(_sysTs(l.last_seen_at))}<div class="lgby">${esc(_sysRel(l.last_seen_at))}</div></td>
+      <td class="c-flow">${esc(l.flow_ko||l.flow||'')}${l.step_ko?`<i>${esc(l.step_ko)}</i>`:''}</td>
+      <td class="c-cat"><span class="catchip" style="background:${cc}22;color:${cc}">${esc(SYS_CAT_LABELS[l.category]||l.category||'')}</span></td>
+      <td class="c-cnt"><span class="ocount${occ>1?'':' q'}">×${occ}</span></td>
+      <td class="c-prob">${esc(l.message_ko||'')}${ai}</td>
+      <td class="c-act">${esc(_sysAdvice(l))}</td>
+    </tr>${detail}`;
+  }).join('')+`</tbody></table></div>`;
+}
+/* 조치안내 — 리뷰어 비정상로그의 action 칸과 같은 자리. 서버가 문장을 주지 않는 원장이라
+   **종류(category)별 한 문장**을 화면이 붙인다. ★ 추측성 진단을 쓰지 않는다(무엇을 확인할지만). */
+function _sysAdvice(l){
+  const c=l&&l.category;
+  if(c==='quota')        return '호출한도 초과 — 큐가 자동 재시도합니다. 반복되면 주문 예약 슬롯·저우선 작업 비중을 확인하세요.';
+  if(c==='timeout')      return '응답 지연 — 대개 자동 재시도로 해소됩니다. 반복되면 외부 서비스 상태를 확인하세요.';
+  if(c==='network')      return '연결 실패 — 일시 장애일 수 있습니다. 반복되면 대상 서비스·네트워크를 확인하세요.';
+  if(c==='db')           return 'DB 오류 — 마이그레이션 적용 여부와 쿼리 대상을 확인하세요.';
+  if(c==='external_api') return '외부 API 오류 — 자격/권한/할당량을 확인하세요.';
+  if(c==='auth')         return '인증 실패 — 토큰 만료·잘못된 자격입니다. 반복되면 로그인 경로를 확인하세요.';
+  if(c==='permission')   return '권한 거부 — 역할 미들웨어·CORS 설정을 확인하세요.';
+  if(c==='validation')   return '입력값 문제 — 어느 값이 거부됐는지 펼쳐서 원본 메시지를 확인하세요.';
+  if(c==='not_found')    return '대상 없음 — 삭제됐거나 경로가 바뀐 대상입니다.';
+  return '펼쳐서 원본 메시지·스택을 확인하세요.';
+}
+function _toggleSysRow(id){
+  const d=document.getElementById('sysdetail-'+id); if(!d) return;
+  const open=d.style.display==='none'; d.style.display=open?'':'none';
+  const ch=document.getElementById('syschev-'+id); if(ch) ch.textContent=open?'▴':'▾';
+}
+async function _sysSetStatus(id,status){
+  if(status==='ignored' && !confirm('이 오류를 무시로 처리할까요?\n\n· 목록 기본(미해결)에서 빠집니다.\n· 같은 유형이 또 발생해도 새 알림을 만들지 않고 횟수만 누적합니다.')) return;
+  const r=await api('/api/trackb/error-logs/status',{method:'POST',body:JSON.stringify({id,status})});
+  if(!r||!r.ok){ alert('상태 변경 실패'+((r&&r.error)?': '+r.error:'')); return; }
+  await _loadSysLogs();
+}
+/** 공유용 진단 정보 복사 — 상태는 바꾸지 않는다(읽기 전용 동작). */
+async function _sysCopy(id){
+  const l=(STATE.sysLogs||[]).find(x=>String(x.id)===String(id)); if(!l) return;
+  const ctx=(l.context&&typeof l.context==='object')?l.context:{};
+  const txt=[`[시스템 오류 #${l.id}] ${l.message_ko||''}`,
+    `심각도 ${SYS_SEV_LABELS[l.severity]||l.severity} · 종류 ${SYS_CAT_LABELS[l.category]||l.category} · 발생 ${l.occurrence_count|0}회`,
+    `기능/단계 ${l.flow_ko||l.flow||''}${l.step_ko?' · '+l.step_ko:''}`,
+    `최초 ${_sysTs(l.first_seen_at)} · 최근 ${_sysTs(l.last_seen_at)}`,
+    (ctx.method||ctx.path)?`요청 ${[ctx.method,ctx.path].filter(Boolean).join(' ')}`:'',
+    l.error_code?`코드 ${l.error_code}`:'',
+    `원본 ${l.message_raw||''}`].filter(Boolean).join('\n');
+  try{ await navigator.clipboard.writeText(txt); _toast('오류내용을 복사했습니다.'); }
+  catch(_){ alert(txt); }
+}
+/* ── AI 다중에이전트 분석 모달 ────────────────────────────────
+   ★ 관리자 대시보드에 있던 기능을 그대로 가져온다(사용자 확정) — 서버는 기존
+     `/error-logs/analyze` 핸들러 그대로다(비파괴: 실제 수정·재현 안 함).
+   ★ 모달은 **body 직속**으로 만든다 — 뷰 안(.ovwrap 스크롤 컨테이너)에 넣으면
+     오버레이가 화면 흐름에 섞인다(모집공고 모달에서 밟은 실측 사고). */
+function _sysModal(){
+  let ov=document.getElementById('sysAiOv');
+  if(!ov){ ov=document.createElement('div'); ov.id='sysAiOv'; ov.className='modalov';
+    ov.addEventListener('click',e=>{ if(e.target===ov) ov.remove(); });
+    document.body.appendChild(ov); }
+  return ov;
+}
+function _sysStepper(mode, step){
+  const total=SYS_AGENTS.length;
+  const doneN = mode==='done' ? total : (mode==='analyzing' ? Math.min(step,total) : 0);
+  const badge = mode==='done' ? '<span class="bd g">분석 완료</span>'
+    : mode==='analyzing' ? '<span class="bd" style="background:#FEF3C7;color:#92400E;border-color:transparent">분석 중…</span>'
+    : '<span class="bd">분석 전</span>';
+  const cells=SYS_AGENTS.map((a,i)=>{
+    const n=i+1;
+    const cls = (mode==='done'||(mode==='analyzing'&&n<step)) ? 'done' : (mode==='analyzing'&&n===step) ? 'act' : 'pend';
+    const ic = cls==='done' ? '✓' : cls==='act' ? '◍' : a.ic;
+    const stt = cls==='done' ? '완료' : cls==='act' ? '분석중' : '대기';
+    return `<div class="erritem ${cls}"><div class="circ">${ic}</div><div class="snm">${esc(a.nm)}</div><div class="sst">${stt}</div><div class="sds">${esc(a.ds)}</div></div>`;
+  }).join('<div class="errsep">›</div>');
+  return `<div class="errstepper"><div class="errstephd">🧩 에이전트 진행도 ${badge}
+      <span class="sp" style="flex:1"></span><span style="font-size:11px;color:var(--faint)">${doneN}/${total} 단계</span></div>
+    <div class="errsteprow">${cells}</div></div>`;
+}
+function _sysSec(title,color,html){ return html?`<div class="errsec"><h4 style="color:${color}">${esc(title)}</h4>${html}</div>`:''; }
+/* 값 앞에 **무엇에 대한 값인지** 라벨을 붙인다 — 라벨 없이 문장만 늘어놓으면
+   "없음"·"해당 없음" 같은 답이 무엇에 대한 답인지 알 수 없다(실측 렌더로 확인). */
+function _sysP(v,label){ const s=String(v==null?'':v).trim();
+  return s?`<p>${label?`<b>${esc(label)}</b> `:''}${esc(s)}</p>`:''; }
+function _sysUl(arr){ return (Array.isArray(arr)&&arr.length)?`<ul>${arr.map(x=>`<li>${esc(String(x))}</li>`).join('')}</ul>`:''; }
+function _sysAnalysisHtml(d){
+  const l=d.log||{}, a=d.analysis||null;
+  const blockers=d.transfer_blockers||[], allowed=!!d.transfer_allowed;
+  const head=`<div style="font-size:13.5px;font-weight:750;margin-bottom:10px">${esc(l.message_ko||'')}</div>`;
+  if(!a) return head+_sysStepper('pending',0)
+    +`<div class="ovnote">아직 분석하지 않은 오류입니다. 아래 <b>[분석 실행]</b>을 누르면 6역할이 차례로 검토합니다(<b>비파괴</b> — 실제 코드 수정·재현은 하지 않습니다).</div>`;
+  const v=a.verify||{}, rt=a.red_team||{}, bt=a.blue_team||{}, sv=a.supervisor||{}, pg=a.prevention_guard||{}, dc=a.decider||{};
+  const vv=v.verdict||l.verify_verdict, dv=dc.verdict||l.decider_verdict;
+  return head+_sysStepper('done',SYS_AGENTS.length)
+    +_sysSec('🧪 오류검증 — 수정이 필요한가','var(--accent-deep)',
+      (vv?`<p><b>판정</b> ${esc(SYS_VERIFY_LABELS[vv]||vv)}</p>`:'')+_sysP(v.evidence,'근거')+_sysUl((a.safety||{}).reasons))
+    +_sysSec('🐞 레드팀 — 언제 터지나','#B91C1C',
+      _sysP(rt.conditions,'발생 조건')+_sysP(rt.user_impact,'사용자 영향')+_sysP(rt.data_risk,'데이터 위험'))
+    +_sysSec('🛡 블루팀 — 어떻게 막나','var(--accent)',
+      _sysP(bt.exception_handling,'방어')+_sysP(bt.guard,'가드')+_sysUl(bt.steps))
+    +_sysSec('⚖ 감독관 — 가장 좁은 수정','#6D28D9', _sysP(sv.narrowest_fix,'수정 범위')+_sysP(sv.note,'비고'))
+    +_sysSec('✋ 예방가드 — 새로 생길 위험','var(--warn)', _sysP(pg.new_risks,'새 위험')+_sysUl(pg.checks))
+    +_sysSec('⚖️ 결정자 — 구현 판단','var(--ink)',
+      (dv?`<p><b>판정</b> ${esc(SYS_DECIDER_LABELS[dv]||dv)}</p>`:'')+_sysP(dc.reason,'사유'))
+    +(allowed
+      ? `<div class="errgate ok">🔓 이행 요청 복사 가능 (모든 게이트 통과)</div>`
+      : `<div class="errgate no"><b>🔒 이행 요청 복사 차단 사유</b>${_sysUl(blockers)}</div>`);
+}
+async function _sysOpenAnalysis(id){
+  const ov=_sysModal();
+  ov.innerHTML=`<div class="modalbox" style="width:940px"><div class="modalhd"><b>🤖 오류검증 및 분석</b>
+      <span class="sp" style="flex:1"></span><button class="btn xs" onclick="document.getElementById('sysAiOv').remove()">닫기</button></div>
+    <div class="modalbd" id="sysAiBody"><div class="empty">불러오는 중…</div></div></div>`;
+  const r=await api('/api/trackb/error-logs/detail?id='+encodeURIComponent(id));
+  const body=document.getElementById('sysAiBody'); if(!body) return;   // 그 사이 닫혔으면 그만
+  if(!r||!r.ok){ body.innerHTML=`<div class="empty">상세를 불러오지 못했습니다.${r&&r.error?' ('+esc(r.error)+')':''}</div>`; return; }
+  _sysRenderAnalysis(id, r);
+}
+function _sysRenderAnalysis(id, d){
+  const body=document.getElementById('sysAiBody'); if(!body) return;
+  const has=!!d.analysis;
+  body.innerHTML=_sysAnalysisHtml(d)
+    +`<div style="display:flex;gap:6px;margin-top:12px;flex-wrap:wrap">
+        <button class="btn" onclick="_sysCopy(${id})">📋 오류내용 복사</button>
+        <button class="btn${d.transfer_allowed?' pri':''}" ${d.transfer_allowed?'':'disabled'} onclick="_sysCopyTransfer(${id})"
+          title="${d.transfer_allowed?'실제 수정 요청문 복사':'게이트 미통과: '+esc((d.transfer_blockers||[]).join(' / '))}">📨 이행 요청 복사</button>
+        <button class="btn" id="sysAiRun" onclick="_sysRunAnalysis(${id})">${has?'🔁 다시 분석':'▶ 분석 실행'}</button>
+        <span class="sp" style="flex:1"></span>
+        <button class="btn" style="background:#16a34a;color:#fff;border-color:#16a34a" onclick="_sysSetStatus(${id},'resolved');document.getElementById('sysAiOv').remove()">✔ 해결로 변경</button>
+      </div>`;
+}
+/** 분석 실행 — 서버가 6역할을 한 번에 돌려주므로 진행도는 화면에서 단계 애니메이션으로 보여 준다. */
+async function _sysRunAnalysis(id){
+  const body=document.getElementById('sysAiBody'); if(!body) return;
+  let step=1;
+  const paint=()=>{ const b=document.getElementById('sysAiBody'); if(b) b.innerHTML=_sysStepper('analyzing',step)
+    +`<div class="ovnote">6역할이 차례로 검토하는 중입니다 — <b>비파괴</b>(실제 코드 수정·재현 없음). 30초 정도 걸릴 수 있습니다.</div>`; };
+  paint();
+  const timer=setInterval(()=>{ if(step<SYS_AGENTS.length){ step++; paint(); } }, 2500);
+  try{
+    const r=await api('/api/trackb/error-logs/analyze',{method:'POST',body:JSON.stringify({id})});
+    clearInterval(timer);
+    if(!document.getElementById('sysAiBody')) return;                  // 그 사이 닫힘
+    if(!r||!r.ok){ document.getElementById('sysAiBody').innerHTML=`<div class="empty">분석에 실패했습니다.${r&&r.error?' ('+esc(r.error)+')':''}</div>`; return; }
+    // 분석 결과만 오므로 상세를 다시 받아 같은 렌더러로 그린다(표시 규칙 사본 금지)
+    const d=await api('/api/trackb/error-logs/detail?id='+encodeURIComponent(id));
+    if(d&&d.ok) _sysRenderAnalysis(id,d);
+    _loadSysLogs();                                                    // 목록의 '분석됨' 배지 갱신
+  }catch(e){ clearInterval(timer);
+    const b=document.getElementById('sysAiBody'); if(b) b.innerHTML=`<div class="empty">분석에 실패했습니다. (${esc(e.message||'')})</div>`; }
+}
+async function _sysCopyTransfer(id){
+  const d=await api('/api/trackb/error-logs/detail?id='+encodeURIComponent(id));
+  if(!d||!d.ok||!d.transfer_allowed){ alert('이행 요청은 게이트를 통과한 오류만 복사할 수 있습니다.'); return; }
+  const l=d.log||{}, a=d.analysis||{};
+  const sv=a.supervisor||{}, bt=a.blue_team||{}, rt=a.red_team||{};
+  const txt=[`[수정 요청] ${l.message_ko||''}`,
+    `대상: ${l.flow_ko||l.flow||''}${l.step_ko?' · '+l.step_ko:''} (오류 #${l.id}, ${l.occurrence_count|0}회)`,
+    `원본: ${l.message_raw||''}`,
+    rt.conditions?`발생 조건: ${rt.conditions}`:'',
+    sv.narrowest_fix?`가장 좁은 수정: ${sv.narrowest_fix}`:(bt.exception_handling?`방어: ${bt.exception_handling}`:''),
+  ].filter(Boolean).join('\n');
+  try{ await navigator.clipboard.writeText(txt); _toast('이행 요청문을 복사했습니다.'); }
+  catch(_){ alert(txt); }
 }
 
 async function renderOverviewView(){
