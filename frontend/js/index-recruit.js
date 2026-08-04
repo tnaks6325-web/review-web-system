@@ -498,6 +498,41 @@ function _optColumnCheckItems() {
 
 /* 채널·담당자 버튼을 값으로 선택 — selectRfBtn(사용자 클릭)과 같은 결과를 만든다.
    버튼이 없는 값(예: 올리브영이 없는 구버전 화면)은 '직접입력'으로 흡수해 값을 잃지 않는다. */
+/**
+ * ★ 086: 이체은행 버튼 선택 복원. 값이 없거나 알 수 없으면 [자동](빈 값) 버튼을 고른다.
+ *   _rfPickBtn 을 재사용하지 않는 이유 = 그쪽은 hidden id 를 channel/manager 로만 매핑하고
+ *   '직접입력' 폴백이 붙어 있어, 은행처럼 값이 고정된 그룹에 쓰면 엉뚱한 분기를 탄다.
+ */
+/**
+ * ★ 086: [자동]일 때 무슨 근거로 어느 은행이 되는지 화면에 보여준다.
+ *   판정 규칙은 서버(payment.service.bankFromGoodsCostType)와 같아야 하므로 문자열도 같이 맞춘다.
+ *   근거를 못 찾으면 기본 안내로 되돌린다(빈 값 = "모른다"를 숨기지 않는다).
+ */
+function _rfTransferHint(goodsCostType) {
+  const el = document.getElementById("rf_transfer_bank_hint");
+  if (!el) return;
+  const base = "현금이체 → 하나은행 · 수수료(세금계산서) → 케이뱅크";
+  const v = String(goodsCostType || "").trim();
+  if (!v) { el.textContent = base; el.style.color = "#8B94A1"; return; }
+  const bank = /현금/.test(v) ? "하나은행" : (/계산서|세금|수수료/.test(v) ? "케이뱅크" : "");
+  if (!bank) { el.textContent = `작업오더 물건비 "${v}" — 은행을 정할 수 없어요. 직접 골라주세요`; el.style.color = "#B3382E"; return; }
+  // 한글 조사 — 받침 있으면 '으로', 없으면 '로'("케이뱅크으로"가 되던 것)
+  const last = bank.charCodeAt(bank.length - 1);
+  const josa = (last >= 0xAC00 && last <= 0xD7A3 && (last - 0xAC00) % 28 !== 0) ? "으로" : "로";
+  el.textContent = `작업오더 물건비 "${v}" → ${bank}${josa} 자동 분류돼요`;
+  el.style.color = "#127A5E";
+}
+
+function _rfPickTransferBank(val) {
+  const box = document.getElementById("rf_transfer_bank_btns");
+  if (!box) return false;
+  const v = (val === "kbank" || val === "hana") ? val : "";
+  const btn = box.querySelector(`.rchan-btn[data-val="${v}"]`);
+  if (!btn) return false;
+  selectRfBtn("transfer_bank", btn);
+  return true;
+}
+
 function _rfPickBtn(group, val) {
   const hidden = document.getElementById(group === "channel" ? "rf_channel" : "rf_manager");
   const btn = document.querySelector(`#rf_${group}_btns .rchan-btn[data-val="${val}"]`);
@@ -1271,6 +1306,10 @@ async function openRecruitModal(id, prefill, woOrderId) {
   const _ivTa = document.getElementById("rf_wd_inflow"); if (_ivTa) _ivTa.dataset.rawHtml = "";
   const _tpv = document.getElementById("rf_thumb_preview"); if (_tpv) _tpv.style.display = "none";
   const _tfi = document.getElementById("rf_thumb_file"); if (_tfi) _tfi.value = "";
+  /* 💸 086 이체 설정 초기화 — 신규 공고 기본 [자동](작업오더 물건비 판정을 계속 따라간다) */
+  _rfPickTransferBank("");
+  { const _tm = document.getElementById("rf_transfer_memo"); if (_tm) _tm.value = ""; }
+  _rfTransferHint(prefill && prefill.goods_cost_type);
 
   if (id) {
     titleEl.innerHTML = `<i class="fas fa-pen"></i> 모집공고 수정`;
@@ -1349,6 +1388,9 @@ async function openRecruitModal(id, prefill, woOrderId) {
           const _rh = document.getElementById("rf_reviewer_hidden");
           if (_rh) _rh.checked = c.reviewer_hidden === true;
         }
+        /* 💸 086 이체 설정 복원 — 저장값 없으면 [자동] 버튼이 선택된다 */
+        _rfPickTransferBank(c.transfer_bank || "");
+        setV("rf_transfer_memo", c.transfer_memo || "");
         const wd = (typeof c.work_detail === "string") ? (() => { try { return JSON.parse(c.work_detail); } catch (_) { return {}; } })() : (c.work_detail || {});
         // 저장 시 escape+<br> 변환의 역변환(S3): <br>→개행, 엔티티 복원 → textarea에 평문으로
         const _fromHtml = s => String(s || "").replace(/<br\s*\/?>/gi, "\n").replace(/&lt;/g, "<").replace(/&gt;/g, ">").replace(/&amp;/g, "&");
@@ -1529,7 +1571,7 @@ function closeRecruitModal() {
 ═══════════════════════════════════════ */
 function selectRfBtn(group, btn) {
   /* 같은 그룹 버튼만 비활성화 */
-  const container = btn.closest('#rf_channel_btns, #rf_manager_btns');
+  const container = btn.closest('#rf_channel_btns, #rf_manager_btns, #rf_transfer_bank_btns');
   if (container) {
     container.querySelectorAll('.rchan-btn').forEach(b => b.classList.remove('active'));
   } else {
@@ -1546,6 +1588,10 @@ function selectRfBtn(group, btn) {
     if (val !== '직접입력') customInput.value = '';
   } else if (group === 'manager') {
     document.getElementById('rf_manager').value = val;
+  } else if (group === 'transfer_bank') {
+    /* ★ 086: 빈 값 = 자동(작업오더 물건비 판정). 서버에서 ''는 NULL 로 되돌아간다. */
+    const el = document.getElementById('rf_transfer_bank');
+    if (el) el.value = val || '';
   }
 }
 
@@ -2015,6 +2061,12 @@ async function saveRecruitPost() {
       /* 🧪 085 리뷰어 미노출 — ★ 토글 UI 있는 페이지에서만 전송(미전송=서버 COALESCE 기존값 유지) */
       if (document.getElementById("rf_reviewer_hidden")) {
         payload.reviewer_hidden = !!document.getElementById("rf_reviewer_hidden").checked;
+      }
+      /* 💸 086 이체 설정 — ★ 같은 원칙(UI 있는 화면에서만 전송).
+         빈 문자열은 서버에서 '자동으로 되돌리기'로 해석된다(CASE 센티널). */
+      if (document.getElementById("rf_transfer_bank_btns")) {
+        payload.transfer_bank = document.getElementById("rf_transfer_bank")?.value || "";
+        payload.transfer_memo = (document.getElementById("rf_transfer_memo")?.value || "").trim();
       }
       const _cbRaw = document.getElementById("rf_close_buffer").value;
       payload.close_buffer_min = _cbRaw === "" ? 10 : Math.max(0, parseInt(_cbRaw, 10) || 0);
