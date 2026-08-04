@@ -1391,6 +1391,7 @@ router.post('/worktable/create', authMiddleware, internalMiddleware, editorOnlyM
       sheetId: b.sheetId || '',
       fileTitle: b.fileTitle || '',
       tabName: b.tabName || '',
+      templateSheetId: b.templateSheetId || '',
       planOptions: b.planOptions || {},
       by: _by(req),
     });
@@ -1418,7 +1419,7 @@ router.post('/worktable/template', authMiddleware, adminOrMasterMiddleware, asyn
   try {
     const { saveTemplate } = require('../services/worktable.service');
     const b = req.body || {};
-    const data = await saveTemplate({ core: b.core, channels: b.channels, by: _by(req) });
+    const data = await saveTemplate({ core: b.core, channels: b.channels, templateSheetId: b.templateSheetId, by: _by(req) });
     res.json({ ok: true, data });
   } catch (err) { next(err); }
 });

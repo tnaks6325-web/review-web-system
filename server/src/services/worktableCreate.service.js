@@ -102,7 +102,7 @@ async function _resolveHeaderRow(sheetId, gid, fallback = 2) {
  *  p.planOptions  미리보기에서 조정한 값(total·daily·startDate·skipWeekends·holidays·options)
  *  p.by           수행자
  */
-async function createWorktable({ workOrderId, mode = 'existing', sheetId = '', fileTitle = '', tabName = '', planOptions = {}, by = 'admin' } = {}) {
+async function createWorktable({ workOrderId, mode = 'existing', sheetId = '', fileTitle = '', tabName = '', templateSheetId: tplSheetId = '', planOptions = {}, by = 'admin' } = {}) {
   const wo = await _loadWorkOrder(workOrderId);
   if (!wo) return { ok: false, error: '작업오더를 찾을 수 없습니다.' };
 
@@ -113,8 +113,11 @@ async function createWorktable({ workOrderId, mode = 'existing', sheetId = '', f
     return { ok: false, error: '지금 구성으로는 만들 수 없습니다.', blockers: plan.blockers };
   }
 
-  const templateSheetId = process.env.TEMPLATE_SHEET_ID || '';
-  if (!templateSheetId) return { ok: false, error: 'TEMPLATE_SHEET_ID 가 설정되지 않았습니다.' };
+  /* 템플릿 시트 = 서식·공지문의 원본. 해석 순서 = 요청값 → **전사 설정**(app_settings) → env.
+     ★ 없어도 만들 수 있다 — 빈 탭으로 만든다(서식·공지문만 없고 열·행은 정확히 같다).
+       하드 의존으로 두면 설정이 안 된 조직에서 기능이 통째로 막힌다(프로덕션에서 실제로 밟았다). */
+  const templateSheetId = require('./worktable.service').normalizeSheetId(
+    tplSheetId || template.templateSheetId || process.env.TEMPLATE_SHEET_ID || '');
 
   const title = String(tabName || wo.title || '').trim().slice(0, 90);
   if (!title) return { ok: false, error: '탭 이름이 비어 있습니다.' };
@@ -122,12 +125,23 @@ async function createWorktable({ workOrderId, mode = 'existing', sheetId = '', f
   let targetSheetId = String(sheetId || '').trim();
   let newGid = null;
   let createdFile = false;
+  let usedTemplate = !!templateSheetId;
 
   try {
     if (mode === 'new') {
-      // 새 파일 = 템플릿 스프레드시트 통째 복사(기존 '새 시트생성' 과 같은 경로).
-      const copied = await sheetsSvc.copySpreadsheet(templateSheetId, String(fileTitle || wo.title || title).slice(0, 90));
-      targetSheetId = copied.id;
+      const newTitle = String(fileTitle || wo.title || title).slice(0, 90);
+      if (templateSheetId) {
+        // 템플릿 스프레드시트 통째 복사(기존 '새 시트생성' 과 같은 경로 — 서식·공지문 유지).
+        const copied = await sheetsSvc.copySpreadsheet(templateSheetId, newTitle);
+        targetSheetId = copied.id;
+      } else {
+        // 템플릿 미설정 = 빈 스프레드시트(열·행은 동일, 서식만 없다).
+        const created = await sheetsSvc.sheets.spreadsheets.create({
+          requestBody: { properties: { title: newTitle }, sheets: [{ properties: { title } }] },
+        });
+        targetSheetId = created.data.spreadsheetId;
+        usedTemplate = false;
+      }
       createdFile = true;
       try { await sheetsSvc.shareSheetWithServiceAccount(targetSheetId); } catch (e) { logger.warn(`[worktable/create] SA 공유 실패(계속): ${e.message}`); }
       const meta = await sheetsSvc.getSpreadsheetMeta(targetSheetId);
@@ -137,17 +151,30 @@ async function createWorktable({ workOrderId, mode = 'existing', sheetId = '', f
       await sheetsSvc.renameSheet(targetSheetId, newGid, title);
     } else {
       if (!targetSheetId) return { ok: false, error: '대상 시트를 선택하세요.' };
-      // 기존 파일에 템플릿 탭을 복사해 붙인다(서식·공지문 유지).
-      const tmplMeta = await sheetsSvc.getSpreadsheetMeta(templateSheetId);
-      const src = (tmplMeta.sheets || [])[0];
-      if (!src) return { ok: false, error: '템플릿 시트에 탭이 없습니다.' };
-      const copiedTab = await sheetsSvc.copySheetToSpreadsheet(templateSheetId, src.properties.sheetId, targetSheetId);
-      newGid = copiedTab.sheetId;
-      await sheetsSvc.renameSheet(targetSheetId, newGid, title);
+      if (templateSheetId) {
+        // 기존 파일에 템플릿 탭을 복사해 붙인다(서식·공지문 유지).
+        const tmplMeta = await sheetsSvc.getSpreadsheetMeta(templateSheetId);
+        const src = (tmplMeta.sheets || [])[0];
+        if (!src) return { ok: false, error: '템플릿 시트에 탭이 없습니다.' };
+        const copiedTab = await sheetsSvc.copySheetToSpreadsheet(templateSheetId, src.properties.sheetId, targetSheetId);
+        newGid = copiedTab.sheetId;
+        await sheetsSvc.renameSheet(targetSheetId, newGid, title);
+      } else {
+        // 템플릿 미설정 = 빈 탭 추가.
+        const added = await sheetsSvc.sheets.spreadsheets.batchUpdate({
+          spreadsheetId: targetSheetId,
+          requestBody: { requests: [{ addSheet: { properties: { title } } }] },
+        });
+        newGid = added.data.replies[0].addSheet.properties.sheetId;
+        usedTemplate = false;
+      }
     }
 
     // ── 열 이름 줄 + 데이터 쓰기 ─────────────────────────────────────────
-    const { row: headerRow, width: tmplWidth } = await _resolveHeaderRow(targetSheetId, newGid);
+    // ★ 빈 탭에는 덮을 메타·공지문이 없으므로 헤더는 1행. 템플릿 복사본만 탐지가 필요하다.
+    const { row: headerRow, width: tmplWidth } = usedTemplate
+      ? await _resolveHeaderRow(targetSheetId, newGid)
+      : { row: 1, width: 0 };
     const { header, body, filled } = planToSheetValues(plan);
 
     /* ★★ `clearSheetValues` 를 쓰지 않는다 — 그 함수는 **gid 를 받지 않아**(범위 문자열만)
@@ -200,7 +227,7 @@ async function createWorktable({ workOrderId, mode = 'existing', sheetId = '', f
     logger.info(`[worktable/create] ${wo.id} → ${title} (${body.length}행, 헤더 ${headerRow}행) by ${by}`);
     return {
       ok: true, sheetId: targetSheetId, gid: newGid, tabName: title, tabUrl, createdFile,
-      headerRow, columns: header, rowsWritten: body.length, filled, slots,
+      headerRow, columns: header, rowsWritten: body.length, filled, slots, usedTemplate,
       warnings: plan.warnings,
     };
   } catch (err) {

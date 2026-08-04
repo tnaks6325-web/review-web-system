@@ -3095,8 +3095,12 @@ async function wtpCreate(){
   if(msg) msg.textContent='시트를 만들고 있습니다. 잠시 기다려 주세요…';
   _wtpSyncForm();
   const f=_WTP.form||{};
+  // ★ 템플릿 시트는 전사 설정(서버)이 우선이고, 없으면 이 브라우저에 저장된 값을 보낸다
+  //   (기존 '새 시트생성' 이 쓰던 localStorage 키 재사용 — 설정 전에도 바로 동작).
+  //   둘 다 없으면 서버가 빈 탭으로 만든다(서식만 없고 열·행은 동일).
+  let _tpl=''; try{ _tpl=localStorage.getItem('rapp_template_sheet_id')||''; }catch(_){}
   const r=await api('/api/trackb/worktable/create',{method:'POST',body:JSON.stringify({
-    workOrderId:_WTP.id, mode, sheetId, tabName,
+    workOrderId:_WTP.id, mode, sheetId, tabName, templateSheetId:_tpl,
     planOptions:{ total:f.total, daily:f.daily, startDate:f.startDate,
                   skipWeekends:f.skipWeekends!==false, holidays:f.holidays||[] },
   })});
@@ -3107,6 +3111,7 @@ async function wtpCreate(){
       : (r.slots?` 작업대 표에도 ${r.slots.created}줄이 준비됐습니다.`:'');
     if(msg) msg.innerHTML=`✅ <b>${esc(r.tabName)}</b> 탭을 만들었습니다 (${r.rowsWritten}행). `
       +`<a href="${esc(r.tabUrl)}" target="_blank" rel="noopener" style="color:#1D4ED8">시트 열기 ↗</a>`
+      +(r.usedTemplate===false?' <b style="color:#B45309">(템플릿 미설정 — 서식 없이 만들었습니다)</b>':'')
       +` · 작업오더에 URL을 연결했습니다.${slotNote} <b>접수는 확인 후 직접</b> 눌러 주세요.`
       +` <button class="btn xs" onclick="wtpDelete()" style="margin-left:6px">작업표 삭제</button>`;
     btn.textContent='만들어짐'; _toast('작업표를 만들었습니다');

@@ -372,9 +372,36 @@ ok('★ 시트 탭을 시스템이 지우지 않는다(되돌리기 어려운 �
 ok('헤더 줄 위치는 가정하지 않고 탐지한다(템플릿이 바뀌어도 따라감)',
   /require\('\.\.\/utils\/sheetHeader'\)/.test(createSrc)
   && /detectSheetHeader\(values \|\| \[\]/.test(createSrc));
-ok('템플릿 미설정·탭이름 공란은 명확히 거부',
-  /TEMPLATE_SHEET_ID 가 설정되지 않았습니다/.test(createSrc)
-  && /탭 이름이 비어 있습니다/.test(createSrc));
+ok('탭 이름 공란은 명확히 거부', /탭 이름이 비어 있습니다/.test(createSrc));
+ok('★★ 템플릿 시트는 **선택** — 없으면 빈 탭으로 만든다(설정 안 된 조직에서 기능이 통째로 막히지 않게)',
+  /빈 스프레드시트\(열·행은 동일, 서식만 없다\)/.test(createSrc)
+  && /addSheet: \{ properties: \{ title \} \}/.test(createSrc)
+  && !/return \{ ok: false, error: 'TEMPLATE_SHEET_ID/.test(createSrc));
+ok('★ 템플릿 해석 순서 = 요청값 → 전사 설정(app_settings) → env',
+  /tplSheetId \|\| template\.templateSheetId \|\| process\.env\.TEMPLATE_SHEET_ID/.test(createSrc));
+ok('★ 빈 탭이면 헤더는 1행(덮을 메타·공지문이 없다) · 템플릿 복사본만 탐지',
+  /usedTemplate\s*\?\s*await _resolveHeaderRow[\s\S]{0,80}\{ row: 1, width: 0 \}/.test(createSrc));
+ok('전사 설정으로 저장·조회된다(브라우저 localStorage 에만 있던 값을 서버로)',
+  (() => {
+    const svc = readS('services/worktable.service.js');
+    return /function normalizeSheetId/.test(svc)
+      && /templateSheetId: ''/.test(svc)
+      && /next\.templateSheetId = normalizeSheetId\(templateSheetId\)/.test(svc);
+  })());
+ok('시트 주소를 붙여넣어도 ID 로 정규화(잘못된 값은 빈 값 — 추측 금지)',
+  (() => {
+    const { normalizeSheetId } = require('../src/services/worktable.service');
+    const id = '1AbC_dEfGh-IjKlMnOpQrStUvWxYz012345';
+    return normalizeSheetId('https://docs.google.com/spreadsheets/d/' + id + '/edit#gid=0') === id
+      && normalizeSheetId(id) === id && normalizeSheetId('짧은값') === '' && normalizeSheetId('') === '';
+  })());
+ok('설정 화면에 템플릿 시트 입력칸이 있고 저장에 실린다',
+  (() => {
+    const set = readF('js/admin-settings.js');
+    return /id="wtTplSheet"/.test(set) && /templateSheetId: tplEl \? tplEl\.value/.test(set);
+  })());
+ok('★ 템플릿 없이 만들면 화면이 그 사실을 말한다(조용한 서식 누락 금지)',
+  /템플릿 미설정 — 서식 없이 만들었습니다/.test(wdesk));
 ok('프론트: 생성 버튼·대상 시트·탭 이름이 붙어 있다',
   /onclick="wtpCreate\(\)"/.test(wdesk) && /id="wtpSheet"/.test(wdesk) && /id="wtpTabName"/.test(wdesk));
 ok('★ 생성 후 접수는 사람이 누른다고 화면이 말한다(등록 관문 유지)',
