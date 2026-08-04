@@ -1,0 +1,785 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="UTF-8"/>
+<meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+<title>모집공고 팝업 재구성 v2 — 배치 커스터마이징 시안 3종</title>
+<style>
+/* ══════════════════════════════════════════════════════════════
+   모집공고 발행·수정 팝업 재구성 v2 (목업 전용 · 제품 코드 아님)
+   전제: ① 참여형이 기본(스위치 제거) ② 섹션 배치 순서 커스터마이징 ③ 워크플로 순 기본 배치
+   ?v=A|B|C 로 한 시안만 단독 열람. 외부 리소스 0(오프라인 열람 가능).
+   ⠿ 핸들 드래그는 실제로 동작한다(체험용 — 저장 없음).
+   화면 재현 목업이라 color-scheme 고정.
+   ══════════════════════════════════════════════════════════════ */
+:root{
+  color-scheme:light;
+  --paper:#EDF1F8; --card:#fff; --ink:#0F172A; --t2:#475569; --t3:#94A3B8; --t4:#B0BAC9;
+  --line:#E2E8F0; --line2:#EDF1F6;
+  --p:#3182F6; --p-deep:#1B64DA; --p-soft:#EEF4FE;
+  --g:#12B886; --g-soft:#F0FBF6; --g-deep:#0B8A64;
+  --w:#B45309; --w-soft:#FFF8ED;
+  --err:#DC2626;
+  --r:12px;
+}
+*{box-sizing:border-box;margin:0;padding:0}
+body{background:var(--paper);color:var(--ink);line-height:1.5;-webkit-font-smoothing:antialiased;
+  font-family:"Apple SD Gothic Neo","Pretendard","Noto Sans KR","Malgun Gothic",system-ui,sans-serif}
+.doc{max-width:1240px;margin:0 auto;padding:34px 18px 90px}
+
+/* ── 문서 헤더 ── */
+.eyebrow{font-size:.7rem;font-weight:800;letter-spacing:.13em;color:var(--p)}
+h1{font-size:1.6rem;font-weight:800;letter-spacing:-.02em;margin:7px 0}
+.lead{color:var(--t2);font-size:.88rem;max-width:860px}
+.chips{display:flex;gap:6px;flex-wrap:wrap;margin-top:13px}
+.chip{font-size:.7rem;font-weight:700;color:var(--t2);background:#fff;border:1px solid var(--line);border-radius:999px;padding:4px 11px}
+.chip b{color:var(--ink)}
+
+/* 공통 규칙 카드 */
+.rules{margin-top:24px;display:grid;grid-template-columns:1fr 1fr 1fr;gap:12px}
+@media (max-width:960px){.rules{grid-template-columns:1fr}}
+.rule{background:#fff;border:1px solid var(--line);border-radius:14px;padding:14px 16px}
+.rule .rt{font-size:.8rem;font-weight:800;margin-bottom:6px}
+.rule p,.rule li{font-size:.75rem;color:var(--t2)}
+.rule ul{margin:4px 0 0 16px}
+.rule li{margin-bottom:3px}
+.rule b{font-weight:800;color:var(--ink)}
+.rule .fix{color:var(--w);font-weight:800}
+.rule .free{color:var(--g-deep);font-weight:800}
+
+/* ── 시안 스위처 ── */
+.switcher{position:sticky;top:0;z-index:60;background:rgba(237,241,248,.93);backdrop-filter:blur(8px);
+  padding:14px 0 10px;margin-top:28px;display:flex;gap:7px;flex-wrap:wrap;align-items:center}
+.switcher a{font-size:.76rem;font-weight:800;text-decoration:none;color:var(--t2);background:#fff;
+  border:1.5px solid var(--line);border-radius:999px;padding:6px 15px}
+.switcher a.on{background:var(--p);border-color:var(--p);color:#fff}
+.switcher span{font-size:.7rem;color:var(--t3);margin-left:4px}
+
+/* ── 시안 블록 ── */
+section.variant{margin-top:26px}
+.vhead{margin-bottom:14px}
+.vtag{font-size:.68rem;font-weight:800;letter-spacing:.11em;color:var(--p)}
+.vhead h2{font-size:1.18rem;font-weight:800;letter-spacing:-.015em;margin:4px 0 6px}
+.vhead p{font-size:.83rem;color:var(--t2);max-width:920px}
+.pros{display:flex;gap:5px;flex-wrap:wrap;margin-top:10px}
+.pros i{font-style:normal;font-size:.68rem;font-weight:700;border-radius:7px;padding:3px 9px;background:var(--p-soft);color:var(--p-deep)}
+.pros i.warn{background:var(--w-soft);color:var(--w)}
+.pros i.ok{background:var(--g-soft);color:var(--g-deep)}
+
+/* ══ 모달 껍데기(공통) ══ */
+.stage{background:#5B6478;border-radius:18px;padding:20px;overflow-x:auto}
+.modal{background:#fff;border-radius:18px;width:1120px;min-width:1120px;box-shadow:0 10px 40px rgba(15,23,42,.22);
+  overflow:hidden;display:flex;flex-direction:column;height:660px}
+.mhead{display:flex;align-items:center;gap:10px;padding:13px 18px;border-bottom:1px solid var(--line);
+  background:linear-gradient(135deg,#F8FAFF,#F0F4FF)}
+.mhead h3{font-size:.95rem;font-weight:800;flex:1}
+.mhead .tool{font-size:.7rem;font-weight:800;color:var(--t2);background:#fff;border:1.5px solid var(--line);
+  border-radius:999px;padding:5px 12px;cursor:pointer}
+.mhead .tool.on{background:var(--p-soft);border-color:var(--p);color:var(--p-deep)}
+.mhead .x{width:30px;height:30px;border-radius:50%;background:rgba(15,23,42,.06);border:1px solid var(--line);
+  color:var(--t2);font-size:.85rem;display:flex;align-items:center;justify-content:center;cursor:pointer}
+.mbody{display:flex;flex:1;min-height:0}
+.mmain{flex:1;min-width:0;overflow-y:auto;padding:14px 18px 20px}
+.mside{width:328px;flex-shrink:0;border-left:1px solid var(--line);background:#F7F9FC;overflow-y:auto;padding:12px 14px 18px}
+.mfoot{display:flex;justify-content:space-between;align-items:center;gap:8px;padding:11px 18px;border-top:1px solid var(--line);background:#FCFDFF}
+.mfoot .hint{font-size:.7rem;color:var(--t3);font-weight:600}
+.btn{padding:8px 17px;border-radius:9px;font-size:.8rem;font-weight:700;cursor:pointer;border:1.5px solid var(--line);background:#fff;color:var(--t2);font-family:inherit}
+.btn.pri{background:var(--p);border-color:var(--p);color:#fff}
+
+/* ══ 폼 원자(공통 — 세 시안이 같은 한 벌) ══ */
+.fld{display:grid;grid-template-columns:82px 1fr;gap:10px;align-items:center;padding:6px 0}
+.fld.top{align-items:start}
+.fld>label{font-size:.73rem;font-weight:700;color:var(--t2);text-align:right;line-height:1.3}
+.fld>label .req{color:var(--err)}
+.fld .sub{font-size:.65rem;color:var(--t3);font-weight:600;display:block;margin-top:1px}
+.in{width:100%;padding:7px 10px;border:1.5px solid var(--line);border-radius:8px;font-size:.79rem;
+  font-family:inherit;color:var(--ink);background:#fff}
+.in::placeholder{color:var(--t4)}
+.in:focus{outline:none;border-color:var(--p)}
+select.in{appearance:none;background-image:linear-gradient(45deg,transparent 50%,var(--t3) 50%),linear-gradient(135deg,var(--t3) 50%,transparent 50%);
+  background-position:calc(100% - 15px) 50%,calc(100% - 10px) 50%;background-size:5px 5px,5px 5px;background-repeat:no-repeat}
+.g2{display:grid;grid-template-columns:1fr 1fr;gap:6px 18px}
+.row{display:flex;gap:6px;align-items:center}
+.row .in{flex:1;min-width:0}
+.rlbl{font-size:.72rem;font-weight:700;color:var(--t2);white-space:nowrap}
+.pill{padding:5px 12px;border:1.5px solid var(--line);border-radius:999px;background:#fff;font-size:.73rem;
+  font-weight:700;color:var(--t2);cursor:pointer;white-space:nowrap;font-family:inherit}
+.pill.on{background:var(--p);border-color:var(--p);color:#fff}
+.pills{display:flex;gap:5px;flex-wrap:wrap}
+.mini{padding:5px 11px;border-radius:8px;border:1.5px solid var(--line);background:#fff;font-size:.71rem;font-weight:700;color:var(--t2);cursor:pointer;font-family:inherit;white-space:nowrap}
+.hintline{font-size:.65rem;color:var(--t3);font-weight:600;margin-top:4px}
+.dim{background:#FAFBFD;color:var(--t2)}
+.num{text-align:right}
+
+/* 섹션 카드 — 헤더 왼쪽 ⠿ 핸들 + 상태 요약 칩 */
+.card{border:1px solid var(--line);border-radius:var(--r);background:#fff;margin-bottom:12px;overflow:hidden}
+.card>.ch{display:flex;align-items:center;gap:8px;padding:9px 13px;background:#F8FAFD;border-bottom:1px solid var(--line)}
+.card>.ch .t{font-size:.78rem;font-weight:800;flex:1}
+.card>.ch .n{font-size:.65rem;font-weight:700;color:var(--t3)}
+.card>.cb{padding:11px 13px}
+.hnd{cursor:grab;color:var(--t4);font-size:.85rem;font-weight:800;letter-spacing:-1px;user-select:none;padding:0 2px}
+.hnd:active{cursor:grabbing}
+.st{font-size:.63rem;font-weight:800;border-radius:6px;padding:2px 7px;background:var(--line2);color:var(--t2)}
+.st.ok{background:var(--g-soft);color:var(--g-deep)}
+.st.warn{background:var(--w-soft);color:var(--w)}
+.pinbadge{font-size:.61rem;font-weight:800;color:var(--t4);border:1px dashed var(--line);border-radius:6px;padding:2px 7px}
+
+/* 스위치 */
+.sw{position:relative;width:38px;height:21px;border-radius:999px;background:#CBD5E1;cursor:pointer;flex-shrink:0;transition:background .15s}
+.sw::after{content:"";position:absolute;top:2px;left:2px;width:17px;height:17px;border-radius:50%;background:#fff;transition:transform .15s;box-shadow:0 1px 3px rgba(0,0,0,.2)}
+.sw.on{background:var(--g)}
+.sw.on::after{transform:translateX(17px)}
+
+/* 표 문법(진행상품·기간별 리뷰비 공통) */
+.thead,.trow{display:grid;gap:6px;align-items:center}
+.thead{font-size:.62rem;font-weight:800;color:var(--t3);padding:0 2px 5px;border-bottom:1px solid var(--line);margin-bottom:6px}
+.trow{margin-bottom:6px}
+.trow .in{font-size:.73rem;padding:6px 8px}
+.t-prod .thead,.t-prod .trow{grid-template-columns:1.5fr 1fr .85fr .6fr .6fr 24px}
+.t-fee .thead,.t-fee .trow{grid-template-columns:1.05fr .8fr 1.3fr 24px}
+.del{border:none;background:none;color:#CBD5E1;font-size:.95rem;font-weight:800;cursor:pointer}
+
+/* 점검 */
+.chk{display:flex;gap:7px;align-items:flex-start;font-size:.71rem;font-weight:700;padding:3px 0}
+.chk.ok{color:var(--g-deep)} .chk.warn{color:var(--w)} .chk.err{color:var(--err)}
+
+/* 미리보기 */
+.pv-t{font-size:.72rem;font-weight:800;color:var(--p);text-align:center;padding:4px 0 9px}
+.pv-lab{font-size:.65rem;color:var(--t4);text-align:center;margin:0 0 6px;font-weight:600}
+.pvcard{border:1px solid var(--line);border-radius:14px;background:#fff;overflow:hidden;margin-bottom:12px;box-shadow:0 1px 5px rgba(15,23,42,.05)}
+.pvcard .th{height:92px;background:repeating-linear-gradient(45deg,#E3EAF5,#E3EAF5 8px,#EDF2FB 8px,#EDF2FB 16px);display:flex;align-items:center;justify-content:center;color:#9AA8BE;font-size:.68rem;font-weight:700;position:relative}
+.pvcard .th .bd{position:absolute;top:7px;right:7px;display:flex;gap:4px}
+.pvcard .th .bd i{font-style:normal;font-size:.6rem;font-weight:800;background:rgba(15,23,42,.66);color:#fff;border-radius:6px;padding:2px 6px}
+.pvcard .bd2{padding:9px 11px}
+.pvcard h5{font-size:.79rem;font-weight:800;line-height:1.3}
+.pvcard .m{font-size:.67rem;color:var(--t3);font-weight:600;margin-top:3px}
+.gauge{height:6px;border-radius:999px;background:#EDF1F6;margin:8px 0 5px;overflow:hidden}
+.gauge>i{display:block;height:100%;width:38%;background:var(--p)}
+.pvbox{background:#fff;border:1px solid var(--line);border-radius:11px;padding:10px;margin-bottom:8px}
+.pvbox .h{font-size:.71rem;font-weight:800;margin-bottom:5px}
+.pvbox .l{font-size:.67rem;color:var(--t2);line-height:1.7}
+.pvghost{border:1px dashed #C7D2E3;border-radius:9px;padding:13px;text-align:center;font-size:.68rem;color:var(--t4);font-weight:600}
+
+/* ── 배치 편집(드래그) 공통 ── */
+.drg.lift{opacity:.45;outline:2px dashed var(--p);outline-offset:2px}
+.demo{margin-top:14px;background:#fff;border:1px solid var(--line);border-radius:14px;padding:14px 16px}
+.demo .dt{font-size:.78rem;font-weight:800;margin-bottom:3px}
+.demo .dd{font-size:.7rem;color:var(--t3);font-weight:600;margin-bottom:10px}
+.presets{display:flex;gap:5px;flex-wrap:wrap;margin-bottom:10px;align-items:center}
+.presets .pt{font-size:.66rem;font-weight:800;color:var(--t3);margin-right:2px}
+
+/* A: 배치 편집 컴팩트 바 */
+.bars{max-width:560px}
+.bar{display:flex;align-items:center;gap:9px;border:1.5px solid var(--line);border-radius:10px;background:#fff;
+  padding:8px 11px;margin-bottom:6px;font-size:.76rem;font-weight:800}
+.bar .n{font-weight:600;color:var(--t3);font-size:.66rem;flex:1;text-align:right}
+.bar.pin,.bar.pinb{background:#F8FAFD;border-style:dashed;color:var(--t2)}
+
+/* B: 위젯 보드 */
+.board{padding:14px 18px 20px;overflow-y:auto;flex:1;min-height:0}
+.bcols{display:grid;grid-template-columns:1fr 1fr;gap:12px;align-items:start}
+.bcol{display:flex;flex-direction:column;min-height:60px}
+.wgt{border:1px solid var(--line);border-radius:var(--r);background:#fff;margin-bottom:12px;overflow:hidden}
+.wgt>.ch{display:flex;align-items:center;gap:8px;padding:8px 12px;background:#F8FAFD;border-bottom:1px solid var(--line)}
+.wgt>.ch .t{font-size:.76rem;font-weight:800;flex:1}
+.wgt>.cb{padding:10px 12px}
+.wgt.pinrow{border-style:solid;margin-bottom:12px}
+
+/* C: 레일 */
+.rail{width:184px;flex-shrink:0;border-right:1px solid var(--line);background:#FAFCFF;padding:12px 9px;overflow-y:auto}
+.rail .rl{font-size:.6rem;font-weight:800;color:var(--t4);letter-spacing:.1em;padding:2px 8px 7px}
+.ritem{display:flex;gap:7px;align-items:center;padding:8px 9px;border-radius:9px;font-size:.74rem;
+  font-weight:700;color:var(--t2);margin-bottom:3px;background:transparent;border:1.5px solid transparent}
+.ritem .no{width:18px;height:18px;border-radius:50%;background:#E7EDF6;color:var(--t3);font-size:.62rem;
+  font-weight:800;display:flex;align-items:center;justify-content:center;flex-shrink:0}
+.ritem .lb{flex:1}
+.ritem .mk{font-size:.62rem;font-weight:800}
+.ritem.on{background:var(--p-soft);color:var(--p-deep);border-color:#CFE0FB}
+.ritem.on .no{background:var(--p);color:#fff}
+.ritem.pin,.ritem.pinb{opacity:.75}
+.ritem.pin .no,.ritem.pinb .no{background:transparent;border:1.5px dashed var(--t4);color:var(--t4)}
+.railtip{margin-top:10px;font-size:.62rem;color:var(--t4);font-weight:600;padding:0 8px;line-height:1.6}
+
+.note{font-size:.78rem;color:var(--t2);margin-top:14px;background:#fff;border:1px solid var(--line);
+  border-left:3px solid var(--p);border-radius:10px;padding:12px 14px}
+.note b{font-weight:800;color:var(--ink)}
+.note ul{margin:6px 0 0 17px} .note li{margin-bottom:3px}
+@media (max-width:900px){ .doc{padding:22px 12px 60px} }
+</style>
+</head>
+<body>
+<div class="doc">
+
+<div class="eyebrow">DESIGN PROPOSAL · V2</div>
+<h1>모집공고 팝업 재구성 — 배치 커스터마이징 시안 3종</h1>
+<p class="lead">
+  모집공고 발행·수정 팝업(<code>js/recruit-modal.js</code>, admin·통합작업대 공유)의 재구성 v2입니다.
+  v1과 전제가 다릅니다: <b>① 참여형 캠페인이 기본</b>이라 참여형 체크(녹색 박스)를 없애고 모집 조건을 1급 섹션으로 승격,
+  <b>② 섹션 배치·나열 순서를 관리자가 직접 커스터마이징</b>(⠿ 드래그 — 아래 목업에서 실제로 동작합니다),
+  <b>③ 기본 배치는 발행 워크플로 순서</b>(연결 → 상품·옵션 → 모집 조건 → 리뷰비 → … → 게시)로 고정합니다.
+</p>
+<div class="chips">
+  <span class="chip">전제 <b>참여형 기본 · 스위치 제거</b></span>
+  <span class="chip">배치 <b>⠿ 드래그 커스터마이징</b></span>
+  <span class="chip">필드 ID <b>65개 불변</b></span>
+  <span class="chip">공유 <b>admin.html · workdesk.html</b></span>
+</div>
+
+<div class="rules">
+  <div class="rule">
+    <div class="rt">🧩 무엇을 움직일 수 있나</div>
+    <p>섹션 7묶음 중 <span class="fix">고정 2</span> + <span class="free">자유 5</span>.</p>
+    <ul>
+      <li><span class="fix">🔗 연결 — 맨 위 고정.</span> 시트·탭 연결이 옵션표 프리필·현영 판정·시트 일정 등 <b>모든 자동값의 전제</b>라 항상 먼저.</li>
+      <li><span class="fix">✅ 게시·점검 — 맨 아래 고정.</span> 자동 점검은 저장 버튼 <b>바로 위</b>여야 읽는 순서와 누르는 순서가 일치.</li>
+      <li><span class="free">자유 5</span>: 진행상품·옵션 / 모집 조건 / 리뷰비 / 상품 정보 / 작업내용</li>
+    </ul>
+  </div>
+  <div class="rule">
+    <div class="rt">💾 어디에 저장되나</div>
+    <ul>
+      <li>순서 배열(예: <code>["prod","cond","fee","info","work"]</code>)을 <b>localStorage</b>에 관리자별 저장 — 서버 변경 0.</li>
+      <li>admin.html·통합작업대가 <b>같은 모듈</b>(recruit-modal.js)을 마운트하므로 같은 브라우저에선 두 화면의 배치가 자동으로 일치.</li>
+      <li>프리셋 2종 + 내 배치: <b>[발행 순서(기본)]</b> · <b>[수정 최적화]</b>(자주 고치는 모집 조건·리뷰비를 위로) · <b>[내 배치]</b>(마지막 드래그 결과).</li>
+    </ul>
+  </div>
+  <div class="rule">
+    <div class="rt">📐 통일 문법(세 시안 공통)</div>
+    <ul>
+      <li>라벨 <b>82px 우측정렬 1종</b> · 컨테이너 <b>흰 카드 1종</b> · 보조문구 <b>1크기 2위치</b> · 토글 <b>스위치 1종</b>.</li>
+      <li>색 박스(녹·보라·주황) 전부 폐기 — 참여형 스위치가 사라지니 녹색 대형 박스도 존재 이유가 없다.</li>
+      <li>카드 헤더에 <b>상태 요약 칩</b>(gid 확인됨 · 옵션 2종 · 8/1~ 1,500원…) — 접혀 있어도 내용이 보인다.</li>
+    </ul>
+  </div>
+</div>
+
+<div class="switcher">
+  <a href="?v=A" id="tA">시안 A — 정렬형 카드 스택</a>
+  <a href="?v=B" id="tB">시안 B — 위젯 보드</a>
+  <a href="?v=C" id="tC">시안 C — 레일 = 배치 편집기</a>
+  <a href="?" id="tAll">전체 보기</a>
+  <span>⠿ 핸들을 잡고 드래그해 보세요 — 목업 안에서 실제로 순서가 바뀝니다</span>
+</div>
+
+<!-- ══════════════════════════════════════════════════════════════
+     시안 A — 정렬형 카드 스택
+     ══════════════════════════════════════════════════════════════ -->
+<section class="variant" id="vA">
+  <div class="vhead">
+    <div class="vtag">시안 A</div>
+    <h2>정렬형 카드 스택 — 한 줄기 스크롤, 헤더의 ⠿로 그 자리에서 드래그</h2>
+    <p>현행과 같은 <b>세로 한 줄기</b>를 유지하되 모든 묶음을 같은 카드로 통일하고, 카드 헤더 왼쪽에 <b>⠿ 핸들</b>을 상시 노출합니다.
+      카드를 그대로 잡아 끌면 순서가 바뀌고(별도 편집 모드 불필요), 헤더의 <b>[🧩 배치]</b>를 누르면 카드가 접혀
+      제목 바만 남아 긴 카드도 한 화면에서 정렬됩니다. 참여형 스위치가 사라진 자리에는 <b>📅 모집 조건</b>이 평범한 카드로 들어옵니다.</p>
+    <div class="pros">
+      <i class="ok">현행 구조와 가장 가까움 · 변경량 최소</i><i class="ok">편집 모드 없이 즉시 드래그</i><i>접기 = 긴 카드 정렬 보조</i><i class="warn">긴 스크롤은 유지</i>
+    </div>
+  </div>
+
+  <div class="stage"><div class="modal">
+    <div class="mhead"><h3>📣 모집공고 수정 — 쿠팡 립밤 리뷰 모집</h3>
+      <span class="tool">🧩 배치</span><span class="tool">👁 리뷰어 화면</span><div class="x">✕</div></div>
+    <div class="mbody">
+      <div class="mmain" id="aStack" data-sortable>
+
+        <div class="card pin" data-key="link">
+          <div class="ch"><span class="pinbadge">고정</span><span class="t">🔗 연결 · 기본</span>
+            <span class="st ok">gid 확인됨</span><span class="n">모든 자동값의 전제 — 항상 맨 위</span></div>
+          <div class="cb"><div class="g2">
+            <div class="fld"><label>시트명 <span class="req">*</span></label><select class="in"><option>2026 상반기 체험단 · A시트</option></select></div>
+            <div class="fld"><label>탭명 <span class="req">*</span></label><select class="in"><option>0804 립밤 100건</option></select></div>
+            <div class="fld"><label>담당자 <span class="req">*</span></label><div class="pills"><span class="pill on">🥟 만두</span><span class="pill">🥭 망고</span></div></div>
+            <div class="fld"><label>구매채널 <span class="req">*</span></label><div class="pills"><span class="pill on">🛒 쿠팡</span><span class="pill">🟢 네이버</span><span class="pill">🫒 올리브영</span><span class="pill">＋</span></div></div>
+            <div class="fld"><label>배송유형</label><select class="in"><option>빈택배</option></select></div>
+            <div class="fld"><label>팀채팅방 <span class="req">*</span></label><input class="in" value="https://open.kakao.com/o/gX8..."></div>
+          </div></div>
+        </div>
+
+        <div class="card drg" data-key="prod">
+          <div class="ch"><span class="hnd">⠿</span><span class="t">📦 진행상품 · 옵션</span>
+            <span class="st ok">옵션 2종 · 총 100명</span><span class="n">작업오더에서 자동 · 정원 자동 산출</span></div>
+          <div class="cb">
+            <div class="t-prod">
+              <div class="thead"><span>상품명</span><span>옵션명</span><span class="num">결제금액</span><span class="num">총인원</span><span class="num">일건수</span><span></span></div>
+              <div class="trow"><input class="in" value="힙스 골라담기"><input class="in" value="콰이어트"><input class="in num" value="28900"><input class="in num" value="60"><input class="in num" value="20"><button class="del">✕</button></div>
+              <div class="trow"><input class="in dim" value="힙스 골라담기"><input class="in" value="어나더"><input class="in num" value="28900"><input class="in num" value="40"><input class="in num" value="10"><button class="del">✕</button></div>
+              <div style="display:flex;justify-content:space-between;align-items:center"><span class="mini">＋ 옵션 추가</span>
+                <span class="hintline">총 100명 · 일 30건 → <b>캠페인 정원 자동 산출</b>(회색 읽기전용으로 모집 조건에 표시)</span></div>
+            </div>
+          </div>
+        </div>
+
+        <div class="card drg" data-key="cond">
+          <div class="ch"><span class="hnd">⠿</span><span class="t">📅 모집 조건</span>
+            <span class="st ok">8/4~8/20 · 14~16시</span><span class="n">언제 · 몇 명 — 참여형 기본이라 항상 있는 카드</span></div>
+          <div class="cb">
+            <div class="g2">
+              <div class="fld"><label>시작일 <span class="req">*</span></label><input class="in" type="date" value="2026-08-04"></div>
+              <div class="fld"><label>종료일</label><input class="in" type="date" value="2026-08-20"></div>
+              <div class="fld"><label>구매시간대<span class="sub">비우면 자율</span></label><div class="row"><input class="in" type="time" value="14:00"><span class="rlbl" style="color:var(--t4)">~</span><input class="in" type="time" value="16:00"></div></div>
+              <div class="fld"><label>시간 표기</label><input class="in" value="두시 ~ 네시"></div>
+              <div class="fld"><label>총 모집<span class="sub">표에서 자동</span></label><input class="in num dim" value="100" readonly></div>
+              <div class="fld"><label>일 건수<span class="sub">표에서 자동</span></label><input class="in num dim" value="30" readonly></div>
+              <div class="fld"><label>타계정 허용</label><div class="row"><div class="sw on"></div><span class="rlbl">하루</span><input class="in num" value="1" style="max-width:54px"><span class="rlbl">건 · 제한</span><input class="in num" value="10" style="max-width:54px"><span class="rlbl">분</span></div></div>
+              <div class="fld"><label>현금영수증<span class="sub">탭 설정</span></label><div style="font-size:.74rem;font-weight:700;color:var(--w)">🧾 발행 필요 <span style="font-weight:600;color:var(--t3);font-size:.68rem">— 탭설정(진행방식)에서 변경</span></div></div>
+              <div class="fld"><label>참여 제한<span class="sub">고급</span></label><div class="row"><input class="in num" value="15" style="max-width:54px"><span class="rlbl">분 · 마감버퍼</span><input class="in num" value="10" style="max-width:54px"><span class="rlbl">분</span></div></div>
+              <div class="fld"><label>랜딩 URL</label><input class="in" placeholder="https:// — 링크유입일 때만"></div>
+            </div>
+          </div>
+        </div>
+
+        <div class="card drg" data-key="fee">
+          <div class="ch"><span class="hnd">⠿</span><span class="t">💰 리뷰비</span>
+            <span class="st ok">8/1~ 1,500원</span><span class="n">기간별 구간 — 참여 시점 금액으로 고정</span></div>
+          <div class="cb">
+            <div class="fld"><label>기본 리뷰비</label><div class="row" style="max-width:190px"><input class="in num" value="1000"><span class="rlbl">원</span></div></div>
+            <div class="fld top"><label>기간별<span class="sub">선택</span></label>
+              <div class="t-fee">
+                <div class="thead"><span>적용 시작일</span><span class="num">리뷰비(원)</span><span>메모(관리자만)</span><span></span></div>
+                <div class="trow"><input class="in" type="date" value="2026-07-01"><input class="in num" value="1000"><input class="in" placeholder="선택"><button class="del">✕</button></div>
+                <div class="trow"><input class="in" type="date" value="2026-08-01"><input class="in num" value="1500"><input class="in" value="8월 인상분"><button class="del">✕</button></div>
+                <div style="display:flex;justify-content:space-between;align-items:center"><span class="mini">＋ 구간 추가</span><span class="hintline">오늘(8/4) 적용 = <b>1,500원</b></span></div>
+              </div></div>
+          </div>
+        </div>
+
+        <div class="card drg" data-key="info">
+          <div class="ch"><span class="hnd">⠿</span><span class="t">🛍 상품 정보</span>
+            <span class="st">배지 2</span><span class="n">URL · 썸네일 · 안내배지</span></div>
+          <div class="cb">
+            <div class="fld"><label>상품 URL</label><div class="row"><input class="in" value="https://www.coupang.com/vp/products/8412..."><span class="mini">가져오기</span><span class="mini">↗</span></div></div>
+            <div class="fld"><label>썸네일</label><div class="row"><input class="in" placeholder="이미지 주소 붙여넣기"><span class="mini">가져오기</span><span class="mini">파일</span></div></div>
+            <div class="fld top"><label>안내배지</label>
+              <div><div class="pills" style="margin-bottom:6px"><span class="mini">＋현영건</span><span class="mini">＋로켓와우</span><span class="mini">＋포토리뷰</span><span class="mini">＋옵션지정</span></div>
+                <div style="border:1.5px solid var(--line);border-radius:8px;padding:6px 9px;display:flex;gap:5px;flex-wrap:wrap;align-items:center;min-height:34px">
+                  <span class="pill on" style="font-size:.7rem;padding:3px 10px">현영건 ✕</span><span class="pill on" style="font-size:.7rem;padding:3px 10px">포토리뷰 ✕</span>
+                  <span style="font-size:.7rem;color:var(--t4)">입력 후 Enter</span></div></div></div>
+          </div>
+        </div>
+
+        <div class="card drg" data-key="work">
+          <div class="ch"><span class="hnd">⠿</span><span class="t">📝 작업내용</span>
+            <span class="st ok">가이드유입</span><span class="n">참여한 리뷰어에게만 공개</span></div>
+          <div class="cb">
+            <div class="fld top"><label>유입가이드</label><div><textarea class="in" rows="2">‘립밤 보습’ 검색 → 2번째 상품</textarea><div class="hintline">입력하면 [상품 페이지 열기] 미노출(가이드유입)</div></div></div>
+            <div class="fld top"><label>리뷰가이드</label><textarea class="in" rows="2" placeholder="별점/포토 비율 등"></textarea></div>
+            <div class="fld top"><label>특이사항<span class="sub">참여자만</span></label><textarea class="in" rows="2" placeholder="선택"></textarea></div>
+          </div>
+        </div>
+
+        <div class="card pinb" data-key="pub">
+          <div class="ch"><span class="pinbadge">고정</span><span class="t">✅ 게시 · 자동 점검</span>
+            <span class="st warn">경고 1</span><span class="n">저장 직전 확인 — 항상 맨 아래</span></div>
+          <div class="cb">
+            <div class="fld"><label>공고 제목 <span class="req">*</span></label><input class="in" value="쿠팡 립밤 리뷰 모집"></div>
+            <div class="fld top"><label>유의사항</label><textarea class="in" rows="2" placeholder="공고 카드에 노출되는 안내문"></textarea></div>
+            <div class="fld"><label>상태</label><div class="row" style="max-width:290px"><select class="in"><option>모집중</option></select><span class="mini">🔥 인기</span><span class="mini">⭐ 고정</span></div></div>
+            <div style="margin-top:8px;border-top:1px solid var(--line2);padding-top:8px">
+              <div class="chk ok">✓ 연결 탭 gid · 일건수 · 시간창 — 활성화 조건 충족</div>
+              <div class="chk ok">✓ 옵션명 중복 없음</div>
+              <div class="chk warn">⚠ 첫 리뷰비 구간(7/1)이 공고 시작일(8/4)보다 빠릅니다 — 게시는 가능</div>
+            </div>
+          </div>
+        </div>
+
+      </div>
+      <aside class="mside">
+        <div class="pv-t">👁 미리보기</div>
+        <div class="pv-lab">홈·목록 카드</div>
+        <div class="pvcard">
+          <div class="th">썸네일<div class="bd"><i>쿠팡</i><i>빈택배</i></div></div>
+          <div class="bd2"><h5>쿠팡 립밤 리뷰 모집</h5>
+            <div class="m">14:00~16:00 · 리뷰비 1,500원</div>
+            <div class="gauge"><i></i></div><div class="m">오늘 11 / 30명 · 총 100명</div></div>
+        </div>
+        <div class="pv-lab">참여 후 화면</div>
+        <div style="background:#F0F2FA;border-radius:14px;padding:10px">
+          <div class="pvbox"><div class="h">📦 상품 · 옵션 · 결제금액</div><div class="l">힙스 골라담기 / 콰이어트 · 28,900원</div></div>
+          <div class="pvbox"><div class="h">🧾 현금영수증</div><div class="l">지출증빙 · 발행방법 이미지(쿠팡)</div></div>
+          <div class="pvbox"><div class="h">🔎 유입가이드</div><div class="l">‘립밤 보습’ 검색 → 2번째 상품</div></div>
+          <div class="pvbox"><div class="h">🧾 구매양식</div><div class="pvghost">연결된 시트의 구매양식</div></div>
+        </div>
+      </aside>
+    </div>
+    <div class="mfoot"><span class="hint">필수 7개 중 7개 입력됨 · 배치: 내 배치(드래그로 변경됨)</span>
+      <div style="display:flex;gap:8px"><span class="btn">취소</span><span class="btn pri">💾 저장</span></div></div>
+  </div></div>
+
+  <div class="demo">
+    <div class="dt">🧩 [배치] 모드 — 카드가 제목 바로 접혀 한 화면에서 정렬</div>
+    <div class="dd">위 모달의 카드도 ⠿로 직접 끌 수 있지만, 긴 카드는 접힌 바에서 정렬하는 쪽이 빠릅니다. 아래를 직접 드래그해 보세요.</div>
+    <div class="presets"><span class="pt">프리셋</span><span class="pill on">발행 순서(기본)</span><span class="pill">수정 최적화</span><span class="pill">내 배치</span><span class="mini" data-reset="#aBars">↺ 기본 순서로</span></div>
+    <div class="bars" id="aBars" data-sortable>
+      <div class="bar pin">🔗 연결 · 기본<span class="n">고정 — 모든 자동값의 전제</span></div>
+      <div class="bar drg"><span class="hnd">⠿</span>📦 진행상품 · 옵션<span class="n">옵션 2종 · 총 100명</span></div>
+      <div class="bar drg"><span class="hnd">⠿</span>📅 모집 조건<span class="n">8/4~8/20 · 14~16시</span></div>
+      <div class="bar drg"><span class="hnd">⠿</span>💰 리뷰비<span class="n">8/1~ 1,500원</span></div>
+      <div class="bar drg"><span class="hnd">⠿</span>🛍 상품 정보<span class="n">배지 2</span></div>
+      <div class="bar drg"><span class="hnd">⠿</span>📝 작업내용<span class="n">가이드유입</span></div>
+      <div class="bar pinb">✅ 게시 · 자동 점검<span class="n">고정 — 저장 직전 확인</span></div>
+    </div>
+  </div>
+
+  <div class="note"><b>A의 요점</b>
+    <ul>
+      <li>참여형 스위치·녹색 박스가 사라지고 <b>📅 모집 조건이 다른 카드와 똑같은 문법</b>의 1급 섹션이 된다 — “여기만 다른 화면” 문제의 소멸.</li>
+      <li>드래그가 <b>본 화면에서 바로</b> 된다(편집 모드 진입 불필요) — 배치 모드는 긴 카드용 보조.</li>
+      <li>DOM 순서만 바꾸면 되므로 <b>구현 리스크 최소</b> — 저장 로직·필드 ID 무변경.</li>
+    </ul>
+  </div>
+</section>
+
+<!-- ══════════════════════════════════════════════════════════════
+     시안 B — 위젯 보드
+     ══════════════════════════════════════════════════════════════ -->
+<section class="variant" id="vB">
+  <div class="vhead">
+    <div class="vtag">시안 B</div>
+    <h2>위젯 보드 — 2열 대시보드, 미리보기까지 위젯으로</h2>
+    <p>넓은 팝업 폭(1120px)을 세로 한 줄기로 쓰지 않고 <b>2열 보드</b>로 씁니다. 섹션이 곧 위젯이고,
+      ⠿로 <b>열 안·열 사이 어디로든</b> 끌어다 놓습니다(왼쪽 = 주력, 오른쪽 = 보조 — 이 구분 자체가 커스터마이징).
+      고정 섹션(연결·게시)은 전폭 바로 위/아래에 못 박히고, <b>👁 미리보기도 위젯</b>이라 자기가 원하는 열에 둘 수 있습니다.
+      스크롤이 절반으로 줄어 통합작업대(QHD)에서 특히 유리합니다.</p>
+    <div class="pros">
+      <i class="ok">스크롤 최소 · 넓은 화면 활용</i><i class="ok">미리보기 위치까지 내 마음대로</i><i>열 배치 = 주력/보조 구분</i><i class="warn">900px 이하는 1열로 강제</i>
+    </div>
+  </div>
+
+  <div class="stage"><div class="modal" style="height:680px">
+    <div class="mhead"><h3>📣 모집공고 수정 — 쿠팡 립밤 리뷰 모집</h3>
+      <span class="tool on">🧩 배치 저장됨</span><span class="mini" data-reset="#bc1,#bc2">↺ 기본</span><div class="x">✕</div></div>
+    <div class="board">
+
+      <div class="wgt pinrow">
+        <div class="ch"><span class="pinbadge">고정</span><span class="t">🔗 연결 · 기본</span><span class="st ok">gid 확인됨</span></div>
+        <div class="cb"><div class="g2" style="grid-template-columns:1fr 1fr 1fr 1fr;gap:6px 14px">
+          <div class="fld" style="grid-template-columns:52px 1fr"><label>시트명</label><select class="in"><option>A시트</option></select></div>
+          <div class="fld" style="grid-template-columns:52px 1fr"><label>탭명</label><select class="in"><option>0804 립밤 100건</option></select></div>
+          <div class="fld" style="grid-template-columns:52px 1fr"><label>담당자</label><div class="pills"><span class="pill on">🥟 만두</span><span class="pill">🥭</span></div></div>
+          <div class="fld" style="grid-template-columns:52px 1fr"><label>채널</label><div class="pills"><span class="pill on">🛒 쿠팡</span><span class="pill">＋</span></div></div>
+        </div></div>
+      </div>
+
+      <div class="bcols">
+        <div class="bcol" id="bc1" data-sortable data-group="b">
+
+          <div class="wgt drg" data-key="prod">
+            <div class="ch"><span class="hnd">⠿</span><span class="t">📦 진행상품 · 옵션</span><span class="st ok">2종 · 총 100명</span></div>
+            <div class="cb"><div class="t-prod">
+              <div class="thead"><span>상품명</span><span>옵션명</span><span class="num">결제금액</span><span class="num">총인원</span><span class="num">일건수</span><span></span></div>
+              <div class="trow"><input class="in" value="힙스 골라담기"><input class="in" value="콰이어트"><input class="in num" value="28900"><input class="in num" value="60"><input class="in num" value="20"><button class="del">✕</button></div>
+              <div class="trow"><input class="in dim" value="힙스 골라담기"><input class="in" value="어나더"><input class="in num" value="28900"><input class="in num" value="40"><input class="in num" value="10"><button class="del">✕</button></div>
+              <div><span class="mini">＋ 옵션 추가</span></div>
+            </div></div>
+          </div>
+
+          <div class="wgt drg" data-key="fee">
+            <div class="ch"><span class="hnd">⠿</span><span class="t">💰 리뷰비</span><span class="st ok">8/1~ 1,500원</span></div>
+            <div class="cb">
+              <div class="fld"><label>기본</label><div class="row" style="max-width:170px"><input class="in num" value="1000"><span class="rlbl">원</span></div></div>
+              <div class="fld top"><label>기간별</label><div class="t-fee">
+                <div class="trow"><input class="in" type="date" value="2026-07-01"><input class="in num" value="1000"><input class="in" placeholder="메모"><button class="del">✕</button></div>
+                <div class="trow"><input class="in" type="date" value="2026-08-01"><input class="in num" value="1500"><input class="in" value="8월 인상분"><button class="del">✕</button></div>
+                <span class="mini">＋ 구간 추가</span></div></div>
+            </div>
+          </div>
+
+          <div class="wgt drg" data-key="work">
+            <div class="ch"><span class="hnd">⠿</span><span class="t">📝 작업내용</span><span class="st ok">가이드유입</span></div>
+            <div class="cb">
+              <div class="fld top"><label>유입가이드</label><textarea class="in" rows="2">‘립밤 보습’ 검색 → 2번째 상품</textarea></div>
+              <div class="fld top"><label>리뷰가이드</label><textarea class="in" rows="2" placeholder="별점/포토 비율 등"></textarea></div>
+            </div>
+          </div>
+
+        </div>
+        <div class="bcol" id="bc2" data-sortable data-group="b">
+
+          <div class="wgt drg" data-key="cond">
+            <div class="ch"><span class="hnd">⠿</span><span class="t">📅 모집 조건</span><span class="st ok">8/4~8/20 · 14~16시</span></div>
+            <div class="cb">
+              <div class="g2" style="gap:6px 12px">
+                <div class="fld"><label>시작일</label><input class="in" type="date" value="2026-08-04"></div>
+                <div class="fld"><label>종료일</label><input class="in" type="date" value="2026-08-20"></div>
+              </div>
+              <div class="fld"><label>구매시간대</label><div class="row"><input class="in" type="time" value="14:00"><span class="rlbl" style="color:var(--t4)">~</span><input class="in" type="time" value="16:00"></div></div>
+              <div class="fld"><label>총/일<span class="sub">표에서 자동</span></label><div class="row"><input class="in num dim" value="100" readonly><input class="in num dim" value="30" readonly></div></div>
+              <div class="fld"><label>타계정</label><div class="row"><div class="sw on"></div><span class="rlbl">하루</span><input class="in num" value="1" style="max-width:52px"><span class="rlbl">건</span></div></div>
+              <div class="fld"><label>현금영수증</label><div style="font-size:.73rem;font-weight:700;color:var(--w)">🧾 발행 필요 <span style="font-weight:600;color:var(--t3);font-size:.66rem">— 탭 설정</span></div></div>
+            </div>
+          </div>
+
+          <div class="wgt drg" data-key="pv">
+            <div class="ch"><span class="hnd">⠿</span><span class="t">👁 미리보기</span><span class="n">위젯이라 위치도 내 마음대로</span></div>
+            <div class="cb">
+              <div class="pvcard" style="margin-bottom:8px">
+                <div class="th">썸네일<div class="bd"><i>쿠팡</i><i>빈택배</i></div></div>
+                <div class="bd2"><h5>쿠팡 립밤 리뷰 모집</h5>
+                  <div class="m">14:00~16:00 · 리뷰비 1,500원</div>
+                  <div class="gauge"><i></i></div><div class="m">오늘 11 / 30명</div></div>
+              </div>
+              <span class="mini" style="width:100%;display:block;text-align:center">전체 화면으로 보기 (참여 전 → 가이드 → 제출)</span>
+            </div>
+          </div>
+
+          <div class="wgt drg" data-key="info">
+            <div class="ch"><span class="hnd">⠿</span><span class="t">🛍 상품 정보</span><span class="st">배지 2</span></div>
+            <div class="cb">
+              <div class="fld"><label>상품 URL</label><div class="row"><input class="in" value="coupang.com/vp/8412..."><span class="mini">가져오기</span></div></div>
+              <div class="fld"><label>썸네일</label><div class="row"><input class="in" placeholder="주소 붙여넣기"><span class="mini">파일</span></div></div>
+              <div class="fld"><label>안내배지</label><div class="pills"><span class="pill on" style="font-size:.68rem;padding:3px 9px">현영건 ✕</span><span class="pill on" style="font-size:.68rem;padding:3px 9px">포토리뷰 ✕</span><span class="mini">＋</span></div></div>
+            </div>
+          </div>
+
+        </div>
+      </div>
+
+      <div class="wgt pinrow" style="margin-bottom:0">
+        <div class="ch"><span class="pinbadge">고정</span><span class="t">✅ 게시 · 자동 점검</span><span class="st warn">경고 1</span></div>
+        <div class="cb">
+          <div class="g2">
+            <div class="fld"><label>공고 제목</label><input class="in" value="쿠팡 립밤 리뷰 모집"></div>
+            <div class="fld"><label>상태</label><div class="row"><select class="in" style="max-width:150px"><option>모집중</option></select><span class="mini">🔥 인기</span><span class="mini">⭐ 고정</span></div></div>
+          </div>
+          <div class="chk ok">✓ 연결 탭 gid · 일건수 · 시간창 충족 &nbsp;&nbsp;<span class="chk warn" style="display:inline-flex;padding:0">⚠ 첫 리뷰비 구간(7/1) &lt; 시작일(8/4) — 게시 가능</span></div>
+        </div>
+      </div>
+
+    </div>
+    <div class="mfoot"><span class="hint">배치는 이 브라우저의 내 계정에 저장됩니다 — admin·통합작업대 공통 적용</span>
+      <div style="display:flex;gap:8px"><span class="btn">취소</span><span class="btn pri">💾 저장</span></div></div>
+  </div></div>
+
+  <div class="note"><b>B의 요점</b>
+    <ul>
+      <li>커스터마이징의 범위가 가장 넓다 — 순서뿐 아니라 <b>어느 열에 둘지(주력/보조)</b>, 미리보기 위치까지.</li>
+      <li>수정 워크플로에 최적: 자주 만지는 위젯(모집 조건·리뷰비)을 첫 화면 상단 좌우에 두면 <b>스크롤 없이 90% 수정</b>이 끝난다.</li>
+      <li>비용: 2열 리플로우 CSS + 열 저장(2배열). 900px 이하는 1열로 접혀 A와 같아진다.</li>
+    </ul>
+  </div>
+</section>
+
+<!-- ══════════════════════════════════════════════════════════════
+     시안 C — 레일 = 배치 편집기
+     ══════════════════════════════════════════════════════════════ -->
+<section class="variant" id="vC">
+  <div class="vhead">
+    <div class="vtag">시안 C</div>
+    <h2>레일 = 배치 편집기 — 목차에서 끌면 본문이 따라온다</h2>
+    <p>왼쪽에 <b>섹션 레일(목차)</b>을 두고, 배치 편집을 본문이 아니라 <b>레일에서</b> 합니다 — 레일 항목을 ⠿로 끌면
+      오른쪽 본문 카드가 <b>즉시 같은 순서로 재배열</b>됩니다(아래 목업에서 실제로 동작). 레일은 동시에
+      <b>진행 상태판</b>이라 필수 미입력(<span style="color:var(--err);font-weight:800">●</span>)·경고(⚠)·완료(✓)가 한눈에 보이고,
+      항목을 누르면 그 카드로 스크롤합니다. 본문은 A와 같은 카드 한 줄기 — 레일이 내비게이션·상태·배치 편집을 한 곳에 모은 시안입니다.</p>
+    <div class="pros">
+      <i class="ok">배치·이동·진행상태가 레일 한 곳에</i><i class="ok">본문 카드는 A와 동일(구현 공유)</i><i>65필드 방향감 최고</i><i class="warn">가로 184px 소모</i>
+    </div>
+  </div>
+
+  <div class="stage"><div class="modal">
+    <div class="mhead"><h3>📣 모집공고 수정 — 쿠팡 립밤 리뷰 모집</h3>
+      <span class="tool">👁 리뷰어 화면</span><div class="x">✕</div></div>
+    <div class="mbody">
+      <nav class="rail">
+        <div class="rl">섹션 — ⠿ 드래그로 배치</div>
+        <div id="cRail" data-sortable data-sync="#cMainC">
+          <div class="ritem pin" data-key="link"><span class="no">📌</span><span class="lb">연결 · 기본</span><span class="mk" style="color:var(--g-deep)">✓</span></div>
+          <div class="ritem on drg" data-key="prod"><span class="hnd">⠿</span><span class="no">1</span><span class="lb">진행상품 · 옵션</span><span class="mk" style="color:var(--g-deep)">✓</span></div>
+          <div class="ritem drg" data-key="cond"><span class="hnd">⠿</span><span class="no">2</span><span class="lb">모집 조건</span><span class="mk" style="color:var(--g-deep)">✓</span></div>
+          <div class="ritem drg" data-key="fee"><span class="hnd">⠿</span><span class="no">3</span><span class="lb">리뷰비</span><span class="mk" style="color:var(--w)">⚠</span></div>
+          <div class="ritem drg" data-key="info"><span class="hnd">⠿</span><span class="no">4</span><span class="lb">상품 정보</span><span class="mk" style="color:var(--err)">●</span></div>
+          <div class="ritem drg" data-key="work"><span class="hnd">⠿</span><span class="no">5</span><span class="lb">작업내용</span><span class="mk" style="color:var(--g-deep)">✓</span></div>
+          <div class="ritem pinb" data-key="pub"><span class="no">📌</span><span class="lb">게시 · 점검</span><span class="mk" style="color:var(--w)">⚠1</span></div>
+        </div>
+        <div class="railtip">● 필수 미입력 · ⚠ 경고 · ✓ 완료<br><br>레일에서 끌면 오른쪽 본문이 같은 순서로 재배열됩니다.<br><br><span style="color:var(--t3)">프리셋:</span></div>
+        <div style="display:flex;flex-direction:column;gap:4px;padding:4px 8px 0">
+          <span class="pill on" style="text-align:center">발행 순서(기본)</span>
+          <span class="pill" style="text-align:center">수정 최적화</span>
+          <span class="mini" data-reset="#cRail" style="text-align:center">↺ 기본 순서로</span>
+        </div>
+      </nav>
+      <div class="mmain" id="cMainC">
+
+        <div class="card" data-key="link">
+          <div class="ch"><span class="pinbadge">고정</span><span class="t">🔗 연결 · 기본</span><span class="st ok">gid 확인됨</span></div>
+          <div class="cb"><div class="g2">
+            <div class="fld"><label>시트명 <span class="req">*</span></label><select class="in"><option>2026 상반기 체험단 · A시트</option></select></div>
+            <div class="fld"><label>탭명 <span class="req">*</span></label><select class="in"><option>0804 립밤 100건</option></select></div>
+            <div class="fld"><label>담당자 <span class="req">*</span></label><div class="pills"><span class="pill on">🥟 만두</span><span class="pill">🥭 망고</span></div></div>
+            <div class="fld"><label>구매채널 <span class="req">*</span></label><div class="pills"><span class="pill on">🛒 쿠팡</span><span class="pill">＋</span></div></div>
+          </div></div>
+        </div>
+
+        <div class="card" data-key="prod">
+          <div class="ch"><span class="t">📦 1 · 진행상품 · 옵션</span><span class="st ok">2종 · 총 100명</span></div>
+          <div class="cb"><div class="t-prod">
+            <div class="thead"><span>상품명</span><span>옵션명</span><span class="num">결제금액</span><span class="num">총인원</span><span class="num">일건수</span><span></span></div>
+            <div class="trow"><input class="in" value="힙스 골라담기"><input class="in" value="콰이어트"><input class="in num" value="28900"><input class="in num" value="60"><input class="in num" value="20"><button class="del">✕</button></div>
+            <div class="trow"><input class="in dim" value="힙스 골라담기"><input class="in" value="어나더"><input class="in num" value="28900"><input class="in num" value="40"><input class="in num" value="10"><button class="del">✕</button></div>
+            <div><span class="mini">＋ 옵션 추가</span></div>
+          </div></div>
+        </div>
+
+        <div class="card" data-key="cond">
+          <div class="ch"><span class="t">📅 2 · 모집 조건</span><span class="st ok">8/4~8/20 · 14~16시</span></div>
+          <div class="cb"><div class="g2">
+            <div class="fld"><label>시작일 <span class="req">*</span></label><input class="in" type="date" value="2026-08-04"></div>
+            <div class="fld"><label>종료일</label><input class="in" type="date" value="2026-08-20"></div>
+            <div class="fld"><label>구매시간대</label><div class="row"><input class="in" type="time" value="14:00"><span class="rlbl" style="color:var(--t4)">~</span><input class="in" type="time" value="16:00"></div></div>
+            <div class="fld"><label>총/일<span class="sub">표에서 자동</span></label><div class="row"><input class="in num dim" value="100" readonly><input class="in num dim" value="30" readonly></div></div>
+            <div class="fld"><label>타계정</label><div class="row"><div class="sw on"></div><span class="rlbl">하루</span><input class="in num" value="1" style="max-width:52px"><span class="rlbl">건</span></div></div>
+            <div class="fld"><label>현금영수증</label><div style="font-size:.73rem;font-weight:700;color:var(--w)">🧾 발행 필요</div></div>
+          </div></div>
+        </div>
+
+        <div class="card" data-key="fee">
+          <div class="ch"><span class="t">💰 3 · 리뷰비</span><span class="st warn">구간 시작 &lt; 공고 시작</span></div>
+          <div class="cb">
+            <div class="fld"><label>기본</label><div class="row" style="max-width:170px"><input class="in num" value="1000"><span class="rlbl">원</span></div></div>
+            <div class="fld top"><label>기간별</label><div class="t-fee">
+              <div class="trow"><input class="in" type="date" value="2026-07-01"><input class="in num" value="1000"><input class="in" placeholder="메모"><button class="del">✕</button></div>
+              <div class="trow"><input class="in" type="date" value="2026-08-01"><input class="in num" value="1500"><input class="in" value="8월 인상분"><button class="del">✕</button></div>
+              <span class="mini">＋ 구간 추가</span></div></div>
+          </div>
+        </div>
+
+        <div class="card" data-key="info">
+          <div class="ch"><span class="t">🛍 4 · 상품 정보</span><span class="st" style="background:#FEECEC;color:var(--err)">썸네일 미입력</span></div>
+          <div class="cb">
+            <div class="fld"><label>상품 URL</label><div class="row"><input class="in" value="https://www.coupang.com/vp/products/8412..."><span class="mini">가져오기</span></div></div>
+            <div class="fld"><label>썸네일 <span class="req">*</span></label><div class="row"><input class="in" placeholder="이미지 주소 붙여넣기"><span class="mini">파일</span></div></div>
+          </div>
+        </div>
+
+        <div class="card" data-key="work">
+          <div class="ch"><span class="t">📝 5 · 작업내용</span><span class="st ok">가이드유입</span></div>
+          <div class="cb">
+            <div class="fld top"><label>유입가이드</label><textarea class="in" rows="2">‘립밤 보습’ 검색 → 2번째 상품</textarea></div>
+            <div class="fld top"><label>리뷰가이드</label><textarea class="in" rows="2" placeholder="별점/포토 비율 등"></textarea></div>
+          </div>
+        </div>
+
+        <div class="card" data-key="pub" style="margin-bottom:0">
+          <div class="ch"><span class="pinbadge">고정</span><span class="t">✅ 게시 · 자동 점검</span><span class="st warn">경고 1</span></div>
+          <div class="cb">
+            <div class="fld"><label>공고 제목 <span class="req">*</span></label><input class="in" value="쿠팡 립밤 리뷰 모집"></div>
+            <div class="chk ok">✓ 연결 탭 gid · 일건수 · 시간창 충족</div>
+            <div class="chk warn">⚠ 첫 리뷰비 구간(7/1)이 공고 시작일(8/4)보다 빠릅니다 — 게시는 가능</div>
+          </div>
+        </div>
+
+      </div>
+      <aside class="mside">
+        <div class="pv-t">👁 미리보기</div>
+        <div class="pv-lab">홈·목록 카드</div>
+        <div class="pvcard">
+          <div class="th">썸네일<div class="bd"><i>쿠팡</i><i>빈택배</i></div></div>
+          <div class="bd2"><h5>쿠팡 립밤 리뷰 모집</h5>
+            <div class="m">14:00~16:00 · 리뷰비 1,500원</div>
+            <div class="gauge"><i></i></div><div class="m">오늘 11 / 30명</div></div>
+        </div>
+        <div class="pv-lab">참여 후 화면</div>
+        <div style="background:#F0F2FA;border-radius:14px;padding:10px">
+          <div class="pvbox"><div class="h">📦 상품 · 옵션 · 결제금액</div><div class="l">힙스 골라담기 / 콰이어트 · 28,900원</div></div>
+          <div class="pvbox"><div class="h">🧾 구매양식</div><div class="pvghost">연결된 시트의 구매양식</div></div>
+        </div>
+      </aside>
+    </div>
+    <div class="mfoot"><span class="hint">필수 1개 남음(썸네일) — 레일의 ● 를 누르면 그 카드로 이동</span>
+      <div style="display:flex;gap:8px"><span class="btn">취소</span><span class="btn pri">💾 저장</span></div></div>
+  </div></div>
+
+  <div class="note"><b>C의 요점</b>
+    <ul>
+      <li>배치 편집·섹션 이동·진행 상태(필수/경고/완료)가 <b>레일 한 곳</b>에 모인다 — 본문을 훑지 않아도 남은 일이 보인다.</li>
+      <li>본문 카드는 <b>A와 완전히 동일한 문법</b> — A로 시작해 레일만 나중에 얹는 단계적 도입이 가능하다.</li>
+      <li>레일 드래그 → 본문 즉시 재배열(위 목업에서 동작)이라 배치 결과를 바로 확인하며 조정한다.</li>
+    </ul>
+  </div>
+</section>
+
+<div class="note" style="margin-top:34px;border-left-color:var(--g)">
+  <b>구현 관점 메모 (세 시안 공통)</b>
+  <ul>
+    <li><b>필드 ID 65개 불변</b> — 섹션을 <code>data-sec</code> 블록으로 감싸고 마운트 시 저장된 순서로 append만 하면 되므로
+      <code>index-recruit.js</code>의 프리필·저장·자동점검 로직 무수정. 회귀가드는 "ID 생존 + 고정 섹션 위치"만 단언 갱신.</li>
+    <li><b>참여형 기본</b> — UI에서 스위치를 없애되 <code>rf_participation</code>은 hidden checked로 유지(저장 페이로드·서버 분기 무변경).
+      기존 <b>레거시(일반) 공고</b>를 열면 모집 조건 카드 자리에 "레거시 공고 — 참여형으로 전환" 안내가 대신 뜬다(레거시 경로는 현행 완전 유지 원칙).</li>
+    <li><b>순서 저장</b> — <code>localStorage.rf_layout_v1</code>(키 배열). 알 수 없는 키는 무시, 빠진 키는 기본 위치에 삽입(버전업 시 새 섹션이 사라지지 않게).
+      B만 2배열(열별). 저장 실패는 기본 순서 폴백(fail-soft).</li>
+    <li><b>드래그</b> — 외부 라이브러리 없이 HTML5 DnD(이 문서의 체험 데모와 같은 ~40줄). 핸들(⠿)을 잡았을 때만 draggable을 켜
+      입력칸 텍스트 선택과 충돌하지 않는다(이 목업이 그 방식).</li>
+    <li><b>권장 경로</b> — A를 기반으로 구현 → 필요 시 C의 레일을 얹기(본문 문법 동일) → B는 통합작업대 전용 옵션으로 검토.</li>
+  </ul>
+</div>
+
+</div>
+<script>
+/* ── 시안 단독 보기 ── */
+(function(){
+  var v=(new URLSearchParams(location.search).get('v')||'').toUpperCase();
+  var ids={A:'vA',B:'vB',C:'vC'};
+  if(ids[v]){ ['A','B','C'].forEach(function(k){ if(k!==v) document.getElementById(ids[k]).style.display='none'; }); }
+  var t=document.getElementById('t'+(ids[v]?v:'All')); if(t) t.className='on';
+})();
+
+/* ── 배치 드래그 체험(HTML5 DnD · 핸들을 잡을 때만 draggable) ──
+   pin=상단 고정, pinb=하단 고정 — 드래그 불가, 드롭도 그 밖으로만.
+   data-group 이 같으면 컨테이너 사이(시안 B의 두 열) 이동 허용.
+   data-sync 가 있으면(시안 C 레일) 대상 컨테이너를 같은 순서로 재배열. */
+(function(){
+  var drag=null;
+  function initSort(list){
+    var group=list.dataset.group||null;
+    Array.prototype.forEach.call(list.children,function(it){
+      if(!it.classList.contains('drg'))return;
+      var h=it.querySelector('.hnd')||it;
+      h.addEventListener('mousedown',function(){it.draggable=true;});
+      it.addEventListener('dragstart',function(){drag=it;setTimeout(function(){it.classList.add('lift');},0);});
+      it.addEventListener('dragend',function(){it.classList.remove('lift');it.draggable=false;drag=null;});
+    });
+    list.addEventListener('dragover',function(e){
+      if(!drag)return;
+      var same=drag.parentNode===list;
+      var xgrp=group&&drag.parentNode.dataset&&drag.parentNode.dataset.group===group;
+      if(!same&&!xgrp)return;
+      e.preventDefault();
+      var els=Array.prototype.filter.call(list.children,function(el){
+        return el!==drag&&(el.classList.contains('drg'));});
+      var after=null;
+      for(var i=0;i<els.length;i++){var r=els[i].getBoundingClientRect();
+        if(e.clientY<r.top+r.height/2){after=els[i];break;}}
+      if(after){list.insertBefore(drag,after);}
+      else{
+        var pinb=null;
+        Array.prototype.forEach.call(list.children,function(el){
+          if(!pinb&&el.classList.contains('pinb'))pinb=el;});
+        if(pinb)list.insertBefore(drag,pinb);else list.appendChild(drag);
+      }
+      if(list.dataset.sync)syncOrder(list,list.dataset.sync);
+    });
+  }
+  function syncOrder(list,sel){
+    var main=document.querySelector(sel);if(!main)return;
+    Array.prototype.forEach.call(list.children,function(it){
+      var k=it.dataset.key;if(!k)return;
+      var t=main.querySelector('[data-key="'+k+'"]');if(t)main.appendChild(t);
+    });
+  }
+  var inits={};
+  Array.prototype.forEach.call(document.querySelectorAll('[data-sortable]'),function(l){
+    if(l.id)inits[l.id]=l.innerHTML;
+    initSort(l);
+  });
+  Array.prototype.forEach.call(document.querySelectorAll('[data-reset]'),function(b){
+    b.addEventListener('click',function(){
+      b.dataset.reset.split(',').forEach(function(sel){
+        var l=document.querySelector(sel);if(!l||!inits[l.id])return;
+        l.innerHTML=inits[l.id];initSort(l);
+        if(l.dataset.sync)syncOrder(l,l.dataset.sync);
+      });
+    });
+  });
+})();
+</script>
+</body>
+</html>
