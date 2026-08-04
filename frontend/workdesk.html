@@ -3197,22 +3197,35 @@ async function renderInspectView(){
   $('#viewroot').innerHTML=`<div class="ovwrap"><div id="rihead"></div><div id="ribody"><div class="empty">불러오는 중…</div></div></div>`;
   await _loadInspect();
 }
+/* ★★ 렌더가 한 번 throw 하면 자리에 남은 "불러오는 중…" 이 **영원히** 남는다(무한로딩).
+     실측 사고: _riRenderHead 가 자기 스코프에 없는 isAdmin 을 참조해 ReferenceError →
+     목록 API 는 200 인데 화면은 계속 로딩 중 — 사용자에게는 서버가 죽은 것처럼 보였다.
+   ★ 그래서 이 함수는 **어떤 예외에도 반드시 화면을 종결**시킨다(교체요청·리뷰어DB 뷰의
+     "불러오지 못했습니다" 종결과 같은 규율). 조용히 매달리는 화면을 만들지 않는다.
+   ★ api() 의 401 경로는 여전히 영구 보류다 — 그건 화면이 로그인으로 교체된 뒤라 의도된 것. */
 async function _loadInspect(){
-  const st = STATE.riStatus || 'open';
-  const t  = STATE.riTab || null;   // {sheetId,tabName} — 미지정이면 전체(담당 범위)
-  let url = '/api/trackb/review-inspect/list?status='+encodeURIComponent(st);
-  if(t) url += '&sheetId='+encodeURIComponent(t.sheetId)+'&tabName='+encodeURIComponent(t.tabName);
-  const r = await api(url);
   const b = $('#ribody');
-  if(!r || !r.ok){ if(b) b.innerHTML=`<div class="empty">검수 목록을 불러오지 못했습니다.${r&&r.error?' ('+esc(r.error)+')':''}</div>`; _riRenderHead(null); return; }
-  STATE.ri = r.items || [];
-  STATE.riSummary = r.summary || null;
-  STATE.riScoped = !!r.scoped;
-  _riRenderHead(r.summary);
-  _riRenderBody();
-  _riSyncNavBadge(Number.isFinite(r.openCount) ? r.openCount : null);
+  try{
+    const st = STATE.riStatus || 'open';
+    const t  = STATE.riTab || null;   // {sheetId,tabName} — 미지정이면 전체(담당 범위)
+    let url = '/api/trackb/review-inspect/list?status='+encodeURIComponent(st);
+    if(t) url += '&sheetId='+encodeURIComponent(t.sheetId)+'&tabName='+encodeURIComponent(t.tabName);
+    const r = await api(url);
+    if(!r || !r.ok){ if(b) b.innerHTML=`<div class="empty">검수 목록을 불러오지 못했습니다.${r&&r.error?' ('+esc(r.error)+')':''}</div>`; _riRenderHead(null); return; }
+    STATE.ri = r.items || [];
+    STATE.riSummary = r.summary || null;
+    STATE.riScoped = !!r.scoped;
+    _riRenderHead(r.summary);
+    _riRenderBody();
+    _riSyncNavBadge(Number.isFinite(r.openCount) ? r.openCount : null);
+  }catch(e){
+    if(b) b.innerHTML=`<div class="empty">검수 목록을 표시하지 못했습니다. (${esc((e&&e.message)||e)})<br>
+      <button class="btn" style="margin-top:8px" onclick="_loadInspect()">다시 시도</button></div>`;
+  }
 }
 function _riRenderHead(sum){
+  // ★ isAdmin 은 renderNav 안의 const 라 여기서는 보이지 않는다 — 다른 렌더 함수들과 같은 방식으로 다시 구한다.
+  const isAdmin = STATE.role==='master' || STATE.role==='admin';
   const st = STATE.riStatus || 'open';
   const chip=(k,l)=>`<button class="btn${st===k?' pri':''}" onclick="STATE.riStatus='${k}';_loadInspect()">${l}</button>`;
   const t = STATE.riTab;
