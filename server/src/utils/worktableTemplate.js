@@ -44,7 +44,7 @@ const _SENTINEL_TO_FIELD = Object.fromEntries(
 );
 
 /**
- * 역할 메타 — 계층(tier)·표시명.
+ * 역할 메타 — 계층(tier)·표시명·제출 매칭 설명(fill).
  *
  * tier 의미:
  *   core    = 거의 모든 작업에 공통, **리뷰어 구매양식 제출이 채운다**(생성 시 빈 칸)
@@ -54,24 +54,45 @@ const _SENTINEL_TO_FIELD = Object.fromEntries(
  *   status  = 진행상태 칸(리뷰제출·입금) — Track B write-back/관리자가 쓴다.
  *             ★ 원칙은 "매퍼와 컬럼 disjoint"지만 헤더 이름이 겹치면(예 '입금일자'←'일자' 규칙)
  *               매퍼도 그 열에 쓸 수 있다 → 그런 열은 `conflict` 로 표시해 드러낸다.
+ *
+ * fill = "리뷰어가 구매양식을 제출하면 이 칸에 무엇이 들어가는가"의 사람용 설명.
+ *   ★ 설정 화면 '공통 열 상세'가 그대로 표시한다 — 역할별 설명을 프론트에 복사하면
+ *     매퍼·매칭이 바뀔 때 화면 설명만 옛말이 되므로 **여기(역할 단일 출처)에만** 둔다.
+ *   구매양식 항목명은 실제 폼 라벨(search-app.js 주문 카드)과 같은 말을 쓴다.
  */
 const ROLE_META = {
-  seq:       { label: '번호',      tier: 'auto',    order: 10 },
-  dateStr:   { label: '구매일자',  tier: 'auto',    order: 20 },
-  option:    { label: '옵션',      tier: 'work',    order: 30 },
-  orderer:   { label: '주문자',    tier: 'core',    order: 40 },
-  recipient: { label: '수취인',    tier: 'core',    order: 50 },
-  userId:    { label: '구매채널ID', tier: 'channel', order: 60 },
-  phone:     { label: '연락처',    tier: 'core',    order: 70 },
-  address:   { label: '배송주소',  tier: 'core',    order: 80 },
-  bank:      { label: '은행',      tier: 'core',    order: 90 },
-  account:   { label: '계좌번호',  tier: 'core',    order: 100 },
-  depositor: { label: '예금주',    tier: 'core',    order: 110 },
-  price:     { label: '결제금액',  tier: 'core',    order: 120 },
-  orderNum:  { label: '주문번호',  tier: 'core',    order: 130 },
-  submit:    { label: '리뷰제출',  tier: 'status',  order: 140 },
-  paid:      { label: '입금',      tier: 'status',  order: 150 },
-  memo:      { label: '비고',      tier: 'core',    order: 160 },
+  seq:       { label: '번호',      tier: 'auto',    order: 10,
+               fill: '제출과 매칭 없음 — 작업표를 만들 때 시스템이 번호를 매깁니다' },
+  dateStr:   { label: '구매일자',  tier: 'auto',    order: 20,
+               fill: '리뷰어가 제출한 날짜를 시스템이 "M / D (요일)" 형식으로 기록합니다(리뷰어 입력 아님)' },
+  option:    { label: '옵션',      tier: 'work',    order: 30,
+               fill: '리뷰어가 참여할 때 고른 옵션명이 들어갑니다(칸이 비어 있을 때만 — 미리 적어둔 작업지시는 보존)' },
+  orderer:   { label: '주문자',    tier: 'core',    order: 40,
+               fill: '구매양식 [주문자] 입력값이 들어갑니다' },
+  recipient: { label: '수취인',    tier: 'core',    order: 50,
+               fill: '구매양식 [수취인] 입력값이 들어갑니다' },
+  userId:    { label: '구매채널ID', tier: 'channel', order: 60,
+               fill: '구매양식 [아이디] 입력값이 들어갑니다(쿠팡+네이버 동시탭은 채널구분 불가로 비워 둠)' },
+  phone:     { label: '연락처',    tier: 'core',    order: 70,
+               fill: '구매양식 [연락처] 입력값이 들어갑니다' },
+  address:   { label: '배송주소',  tier: 'core',    order: 80,
+               fill: '구매양식 [배송주소] 입력값이 들어갑니다' },
+  bank:      { label: '은행',      tier: 'core',    order: 90,
+               fill: '구매양식 [은행] 입력값이 들어갑니다' },
+  account:   { label: '계좌번호',  tier: 'core',    order: 100,
+               fill: '구매양식 [계좌] 입력값이 들어갑니다' },
+  depositor: { label: '예금주',    tier: 'core',    order: 110,
+               fill: '구매양식 [예금주] 입력값이 들어갑니다' },
+  price:     { label: '결제금액',  tier: 'core',    order: 120,
+               fill: '구매양식 [결제금액] 입력값이 들어갑니다' },
+  orderNum:  { label: '주문번호',  tier: 'core',    order: 130,
+               fill: '구매양식 [주문번호] 입력값이 들어갑니다(구매 캡처에서 자동 인식되면 그 값)' },
+  submit:    { label: '리뷰제출',  tier: 'status',  order: 140,
+               fill: '구매양식 제출값 없음 — 리뷰 캡처가 접수되면 시스템·관리자가 표시하는 상태 칸입니다' },
+  paid:      { label: '입금',      tier: 'status',  order: 150,
+               fill: '구매양식 제출값 없음 — 입금 처리 시 표시되는 상태 칸입니다' },
+  memo:      { label: '비고',      tier: 'core',    order: 160,
+               fill: '구매양식 [비고] 입력값이 들어갑니다(시스템 복구 표기가 함께 남을 수 있음)' },
 };
 
 /**
@@ -95,7 +116,7 @@ function _isSeqHeader(h) {
  *        탭 설정의 리뷰제출/입금 칸 이름(tab_configs.submit_col/submit_col2).
  *        ★ 이 두 칸은 매퍼가 쓰지 않으므로(컬럼 disjoint 불변식) 탭 설정으로만 알 수 있다.
  * @returns {Array<{index:number, header:string, role:string|null, tier:string|null,
- *                  label:string|null, conflict:string|null}>}
+ *                  label:string|null, fill:string|null, conflict:string|null}>}
  *          conflict = 상태 칸으로 판정했는데 매퍼도 그 열에 쓰는 경우의 매퍼 역할(없으면 null).
  */
 function classifyHeaders(headers, opts = {}) {
@@ -148,6 +169,7 @@ function classifyHeaders(headers, opts = {}) {
       role,
       tier: meta ? meta.tier : null,
       label: meta ? meta.label : null,
+      fill: meta ? meta.fill : null,
       conflict,
     };
   });

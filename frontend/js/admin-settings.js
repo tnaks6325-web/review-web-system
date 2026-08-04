@@ -722,7 +722,8 @@ function _worktableHtml() {
         <div style="font-size:.82rem;font-weight:700;margin-bottom:4px">열 구성</div>
         <p style="font-size:.75rem;color:var(--t3);margin:0 0 8px;line-height:1.6">
           오른쪽 칸에 이름을 넣고 [＋]로 추가하거나 [▼]로 <b>지금 쓰는 열</b>에서 고릅니다.
-          블록의 ◀▶로 순서를 바꾸고 ✕로 뺍니다.
+          공통 열의 순서·빼기는 <b>작업표 미리보기</b> 칸을 눌러 조절하고,
+          채널 열은 블록의 ◀▶✕로 조절합니다.
         </p>
         <div class="as-wtchbox">${rows}</div>
 
@@ -746,7 +747,7 @@ function _worktableHtml() {
             style="width:100%;max-width:620px;padding:7px 10px;border:1.5px solid #D1D5DB;border-radius:8px;font-size:.82rem;outline:none">
         </div>
 
-        <div style="font-size:.8rem;font-weight:700;margin:14px 0 5px">공통 열 상세 <span style="font-weight:500;color:var(--t3)">— 순서와 시스템 인식</span></div>
+        <div style="font-size:.8rem;font-weight:700;margin:14px 0 5px">공통 열 상세 <span style="font-weight:500;color:var(--t3)">— 시스템 인식과 구매양식 제출값 매칭 (순서·빼기는 위 미리보기에서)</span></div>
         <div id="wtColList" class="as-wtlist"><div class="as-wtempty">불러오는 중…</div></div>
 
         <div style="display:flex;gap:8px;align-items:center;margin-top:14px">
@@ -767,33 +768,76 @@ function _worktableHtml() {
 }
 
 /* ── 코어 열 목록 렌더 ── */
-/* ── 열 구성 한 줄 미리보기 ──────────────────────────────────
+/* ── 열 구성 한 줄 미리보기 = 공통 열 조절 창구 ──────────────
    "이름 블록"만 보면 작업표가 실제로 어떤 표가 되는지 안 그려진다 → 공통 행 바로 아래에
    **표 머리 축소판**을 한 줄로 깐다(칸 = 열 하나, 순서 = 실제 생성 순서).
-   ★ 한 줄에 전부 들어오게 한다: 칸은 `flex:1 1 0 + min-width:0`으로 균등 압축되고 넘치는
-     이름은 말줄임 + title 에 전체 이름을 남긴다(가로 스크롤·줄바꿈 없음 = 한눈에).
+   ★★ 공통 열의 순서·빼기는 **여기서만** 조절한다(사용자 확정 — 종전엔 공통 행 칩·상세 목록·
+     미리보기 세 곳이 같은 배열을 그렸고 그중 둘이 편집까지 돼 창구가 갈렸다).
+     칸을 누르면 선택 → 아래 툴바(◀ ▶ ✕)로 조절. 편집 자체는 기존 단일 경로
+     wtChMove/wtChDel('core')로 위임한다(경로 사본 금지).
+   ★ 한 줄에 전부 들어오게 한다: 칸은 min-width:0 압축 + 넘치는 이름은 말줄임 +
+     title 에 전체 이름(가로 스크롤·줄바꿈 없음 = 한눈에). 툴바는 줄 아래 별도 행.
    ★ 데이터 출처는 _wtTpl.columns 하나 — 아래 '공통 열 상세'와 **같은 배열**을 본다
      (사본을 만들면 미리보기와 목록이 서로 다른 순서를 보여준다).
+   ★ 칸 클릭은 **인덱스만** 넘긴다(onclick 문자열에 열 이름 금지 — 따옴표 탈출 차단).
    ★ 채널 열은 채널마다 달라 특정 채널을 고를 수 없다 → 끝에 점선 '＋채널' 칸으로 "여기에
      그 채널 열이 덧붙는다"만 알린다(틀린 채널을 그리느니 자리만 표시). */
+var _wtPvSel = null;   // 미리보기에서 선택된 공통 열 인덱스(null=선택 없음)
 function _wtRenderPreview() {
   var box = document.getElementById('wtPreview');
   if (!box) return;
   var cols = (_wtTpl && _wtTpl.columns) || [];
+  if (_wtPvSel != null && (_wtPvSel < 0 || _wtPvSel >= cols.length)) _wtPvSel = null;
   if (!cols.length) {
+    _wtPvSel = null;
     box.innerHTML = '<div class="as-wtpvempty">공통 열을 담으면 여기에 작업표 모양이 한 줄로 보입니다.</div>';
     return;
   }
   var cells = cols.map(function (c, i) {
     var tier = String(c.tier || '') || (c.role ? 'core' : '');
     var tip = c.name + (c.role ? ' · 시스템 인식: ' + (c.label || c.role) : ' · 제출이 값을 쓰지 않는 열');
-    return '<span class="as-wtpvc' + (tier ? ' ' + tier : '') + (c.duplicateRole ? ' dup' : '') + '" title="' +
-      escHtml(String(i + 1) + '. ' + tip) + '">' + escHtml(c.name) + '</span>';
+    return '<span class="as-wtpvc' + (tier ? ' ' + tier : '') + (c.duplicateRole ? ' dup' : '') +
+      (i === _wtPvSel ? ' sel' : '') + '" onclick="wtPvSel(' + i + ')" title="' +
+      escHtml(String(i + 1) + '. ' + tip + ' · 클릭하면 순서·빼기 조절') + '">' + escHtml(c.name) + '</span>';
   }).join('');
+  var tool = '';
+  if (_wtPvSel != null) {
+    var s = cols[_wtPvSel];
+    tool = '<div class="as-wtpvtool">' +
+      '<b>' + (_wtPvSel + 1) + '. ' + escHtml(s.name) + '</b>' +
+      '<span class="m">' + (s.role ? '시스템 인식: ' + escHtml(s.label || s.role) : '제출이 값을 쓰지 않는 열') + '</span>' +
+      '<button onclick="wtPvMove(-1)" title="왼쪽으로"' + (_wtPvSel === 0 ? ' disabled' : '') + '>◀ 왼쪽</button>' +
+      '<button onclick="wtPvMove(1)" title="오른쪽으로"' + (_wtPvSel === cols.length - 1 ? ' disabled' : '') + '>오른쪽 ▶</button>' +
+      '<button class="x" onclick="wtPvDel()" title="공통 열에서 빼기">✕ 빼기</button>' +
+      '<button class="c" onclick="wtPvSel(-1)" title="선택 해제">닫기</button>' +
+      '</div>';
+  }
   box.innerHTML =
     '<div class="as-wtpvh">작업표 미리보기 <span>— 공통 ' + cols.length + '열' +
-      ' · 칸 순서가 실제 생성 순서입니다(채널 열은 아래 채널 행이 뒤에 덧붙습니다)</span></div>' +
-    '<div class="as-wtpvrow">' + cells + '<span class="as-wtpvc add" title="채널 행에 담은 열이 여기에 덧붙습니다">＋채널</span></div>';
+      ' · 칸 순서가 실제 생성 순서 · 칸을 누르면 순서·빼기 조절(채널 열은 아래 채널 행이 뒤에 덧붙습니다)</span></div>' +
+    '<div class="as-wtpvrow">' + cells + '<span class="as-wtpvc add" title="채널 행에 담은 열이 여기에 덧붙습니다">＋채널</span></div>' +
+    tool;
+}
+/** 미리보기 칸 선택 토글(-1 또는 같은 칸 재클릭 = 해제). 조절은 아래 wtPvMove/wtPvDel. */
+function wtPvSel(i) {
+  _wtPvSel = (i == null || i < 0 || i === _wtPvSel) ? null : i;
+  _wtRenderPreview();
+}
+/** 선택 열 이동 — 기존 단일 편집 경로(wtChMove)로 위임, 선택은 이동한 열을 따라간다. */
+function wtPvMove(dir) {
+  if (_wtPvSel == null || !_wtTpl) return;
+  var arr = _wtListFor('core');
+  var i = _wtPvSel, j = i + dir;
+  if (j < 0 || j >= arr.length) return;
+  _wtPvSel = j;
+  wtChMove('core', i, dir);
+}
+/** 선택 열 빼기 — 기존 단일 편집 경로(wtChDel)로 위임. */
+function wtPvDel() {
+  if (_wtPvSel == null) return;
+  var i = _wtPvSel;
+  _wtPvSel = null;
+  wtChDel('core', i);
 }
 
 function _wtRenderCols() {
@@ -807,21 +851,29 @@ function _wtRenderCols() {
     box.innerHTML = '<div class="as-wtempty">아직 정한 열이 없습니다. 위에서 <b>통계에서 불러오기</b>를 누르면 우리 시트들이 실제로 쓰는 열로 채워집니다.</div>';
     return;
   }
+  /* ★ 읽기 전용 설명표 — 순서·빼기 버튼을 두지 않는다(조절 창구는 위 '작업표 미리보기' 하나,
+     사용자 확정). 여기의 역할은 "이 열에 시스템이 무엇을 어떻게 넣는가"를 행마다 설명하는 것. */
   box.innerHTML = cols.map(function (c, i) {
     var note = c.role
       ? '<span class="as-wtrole">시스템 인식: ' + escHtml(c.label) + '</span>'
-      : '<span class="as-wtrole none">제출이 값을 쓰지 않는 열</span>';
+      : (c.pending
+          ? '<span class="as-wtrole pending">저장하면 시스템 인식이 판정됩니다</span>'
+          : '<span class="as-wtrole none">제출이 값을 쓰지 않는 열</span>');
     var warn = c.duplicateRole
       ? '<span class="as-wtwarn">⚠ 같은 역할의 열이 둘 이상 — 제출이 두 칸에 같은 값을 씁니다</span>' : '';
+    /* 구매양식 제출값 매칭 — 문장은 서버 단일 출처(ROLE_META.fill)를 그대로 표시한다.
+       역할 없는 열은 매칭 자체가 없다는 사실을 말한다(조용히 비워 두지 않는다). */
+    var fillTxt = c.fill
+      ? c.fill
+      : (c.pending
+          ? '저장하면 이 열이 구매양식의 어느 제출 항목과 매칭되는지 판정해 여기에 표시합니다'
+          : '구매양식 제출 항목과 매칭되지 않습니다 — 상태 표시·관리자 기입용 칸이면 정상입니다');
     return '<div class="as-wtrow">' +
       '<span class="as-wtno">' + (i + 1) + '</span>' +
       '<span class="as-wtname">' + escHtml(c.name) + '</span>' +
       note + warn +
-      '<span class="as-wtbtns">' +
-        '<button onclick="wtMoveCol(' + i + ',-1)" title="위로">↑</button>' +
-        '<button onclick="wtMoveCol(' + i + ',1)" title="아래로">↓</button>' +
-        '<button onclick="wtDelCol(' + i + ')" title="삭제" class="del">✕</button>' +
-      '</span></div>';
+      '<span class="as-wtfill">' + escHtml(fillTxt) + '</span>' +
+      '</div>';
   }).join('');
 }
 
@@ -832,7 +884,8 @@ function _wtSyncColumns() {
   var byName = {};
   ((_wtTpl && _wtTpl.columns) || []).forEach(function (c) { byName[c.name.toLowerCase()] = c; });
   _wtTpl.columns = (_wtTpl.core || []).map(function (n) {
-    return byName[n.toLowerCase()] || { name: n, role: null, label: null, tier: null, duplicateRole: false };
+    // pending = 아직 서버 판정 전(방금 담은 열) — "매칭 없음"과 구분해 안내한다.
+    return byName[n.toLowerCase()] || { name: n, role: null, label: null, tier: null, fill: null, duplicateRole: false, pending: true };
   });
   _wtRenderCols();
   _wtRenderChans();   // 공통 행 블록도 같은 값을 보여준다(두 뷰, 한 벌의 데이터)
@@ -873,7 +926,16 @@ function _wtRenderChans() {
     var box = document.getElementById('wtChips_' + key);
     if (!box) return;
     var arr = _wtListFor(key);
-    var none = key === 'core' ? '공통 열이 없습니다 — [공통을 기본 열로] 를 눌러보세요' : '추가 열 없음';
+    /* ★ 공통 행은 칩을 그리지 않는다 — 바로 아래 '작업표 미리보기'가 같은 배열을 이미 그리고
+       거기서 조절까지 하므로(창구 하나), 칩을 또 두면 같은 정보 두 벌 + 편집 경로 두 개가 된다.
+       이 행에 남는 것은 추가 창구([＋]/[▼])와 현재 개수 요약뿐. */
+    if (key === 'core') {
+      box.innerHTML = arr.length
+        ? '<span class="as-wtchnone">공통 ' + arr.length + '열 — 순서·빼기는 아래 <b>작업표 미리보기</b> 칸을 눌러 조절합니다</span>'
+        : '<span class="as-wtchnone">공통 열이 없습니다 — [공통을 기본 열로] 를 눌러보세요</span>';
+      return;
+    }
+    var none = '추가 열 없음';
     box.innerHTML = arr.length ? arr.map(function (n, i) {
       return '<span class="as-wtchip">' +
         '<button onclick="wtChMove(\'' + key + '\',' + i + ',-1)" title="왼쪽으로"' + (i === 0 ? ' disabled' : '') + '>◀</button>' +
@@ -1368,10 +1430,10 @@ function loadReviewTypeCleanup() { _setNavBadge('reviewtype', '점검'); }
       '.as-wtname{font-size:.85rem;font-weight:650;color:#111827;min-width:90px}' +
       '.as-wtrole{font-size:.72rem;color:#1D4ED8;background:#EFF6FF;border:1px solid #BFDBFE;border-radius:5px;padding:2px 7px}' +
       '.as-wtrole.none{color:#6B7280;background:#F3F4F6;border-color:#E5E7EB}' +
+      '.as-wtrole.pending{color:#B45309;background:#FFFBEB;border-color:#FDE68A}' +
       '.as-wtwarn{font-size:.72rem;color:#B45309;background:#FEF3C7;border:1px solid #FDE68A;border-radius:5px;padding:2px 7px}' +
-      '.as-wtbtns{margin-left:auto;display:flex;gap:4px}' +
-      '.as-wtbtns button{width:26px;height:26px;border:1px solid #D1D5DB;background:#fff;border-radius:6px;cursor:pointer;font-size:.8rem;color:#374151;line-height:1}' +
-      '.as-wtbtns button.del{color:#B91C1C;border-color:#FECACA}' +
+      /* 제출 매칭 설명 — 행 아래 전폭 한 줄(.as-wtrow 가 flex-wrap 이라 basis 100% 로 내려간다) */
+      '.as-wtfill{flex-basis:100%;font-size:.71rem;color:#6B7280;line-height:1.5;padding-left:26px}' +
       '.as-wtsec{font-size:.75rem;font-weight:750;letter-spacing:.03em;color:#6B7280;margin:16px 0 8px}' +
       '.as-wtnote{font-size:.74rem;color:#9CA3AF;line-height:1.6;margin-bottom:8px}' +
       '.as-wtnote b{color:#4B5563}' +
@@ -1424,16 +1486,29 @@ function loadReviewTypeCleanup() { _setNavBadge('reviewtype', '점검'); }
       '.as-wtpvrow{display:flex;align-items:stretch;border:1px solid #DCE3EC;border-radius:7px;overflow:hidden;background:#fff}' +
       /* ★ flex:0 1 auto — 칸을 **내용 너비**로 두고 넘칠 때만 줄인다. `1 1 0`(균등)으로 두면
            열이 15개만 돼도 짧은 이름까지 같이 좁아져 "구매...·계좌...·결제..."로 전부 잘린다(실측). */
-      '.as-wtpvc{flex:0 1 auto;min-width:0;padding:5px 7px;font-size:.68rem;font-weight:650;color:#374151;text-align:center;' +
+      '.as-wtpvc{flex:0 1 auto;min-width:0;padding:5px 7px;font-size:.68rem;font-weight:650;color:#374151;text-align:center;cursor:pointer;' +
         'white-space:nowrap;overflow:hidden;text-overflow:ellipsis;border-right:1px solid #EDF0F4;background:#F8FAFC}' +
       '.as-wtpvc:last-child{border-right:none}' +
+      /* 선택 칸 — 조절 대상 표시(outline 은 안쪽으로 그려 한 줄 높이 불변) */
+      '.as-wtpvc.sel{outline:2px solid #2563EB;outline-offset:-2px}' +
       '.as-wtpvc.core{background:#E9F0F9;color:#2563A8}' +
       '.as-wtpvc.auto{background:#E5F3EE;color:#127A5E}' +
       '.as-wtpvc.channel{background:#FBF2E1;color:#9A6414}' +
       '.as-wtpvc.work{background:#F3E9F9;color:#7A3FA8}' +
       '.as-wtpvc.status{background:#EEF0F3;color:#59626F}' +
       '.as-wtpvc.dup{box-shadow:inset 0 -2px 0 #F59E0B}' +
-      '.as-wtpvc.add{flex:0 0 auto;padding:5px 8px;background:#fff;color:#9CA3AF;font-weight:600;border-left:1px dashed #CBD5E1}' +
+      '.as-wtpvc.add{flex:0 0 auto;padding:5px 8px;background:#fff;color:#9CA3AF;font-weight:600;border-left:1px dashed #CBD5E1;cursor:default}' +
+      /* 선택 열 조절 툴바 — 미리보기 줄 아래 별도 행(줄 자체는 계속 한 줄 유지) */
+      '.as-wtpvtool{display:flex;align-items:center;gap:6px;flex-wrap:wrap;margin-top:7px;padding:6px 9px;' +
+        'border:1px solid #DBEAFE;background:#F5F9FF;border-radius:7px;font-size:.74rem}' +
+      '.as-wtpvtool b{color:#1D4ED8;font-size:.76rem}' +
+      '.as-wtpvtool .m{color:#6B7280}' +
+      '.as-wtpvtool button{border:1px solid #BFDBFE;background:#fff;color:#1D4ED8;border-radius:6px;font-size:.71rem;font-weight:650;padding:3px 9px;cursor:pointer;line-height:1.3}' +
+      '.as-wtpvtool button:hover:not(:disabled){background:#DBEAFE}' +
+      '.as-wtpvtool button:disabled{opacity:.35;cursor:default}' +
+      '.as-wtpvtool button.x{color:#B91C1C;border-color:#FECACA}' +
+      '.as-wtpvtool button.x:hover{background:#FEE2E2}' +
+      '.as-wtpvtool button.c{margin-left:auto;color:#6B7280;border-color:#D1D5DB}' +
       /* 공통 행 — 채널 행보다 한 단계 강조(모든 채널에 들어가는 열이라 성격이 다르다) */
       '.as-wtchgroup.common .as-wtchrow{border-color:#BFDBFE;background:#F8FBFF}' +
       '.as-wtchgroup.common .as-wtchlabel{color:#1D4ED8}' +
@@ -1530,6 +1605,9 @@ function loadReviewTypeCleanup() { _setNavBadge('reviewtype', '점검'); }
   window.wtAddCol = wtAddCol;
   window.wtDelCol = wtDelCol;
   window.wtMoveCol = wtMoveCol;
+  window.wtPvSel = wtPvSel;
+  window.wtPvMove = wtPvMove;
+  window.wtPvDel = wtPvDel;
   window.wtPickToggle = wtPickToggle;
   window.wtPickFilter = wtPickFilter;
   window.wtPickAdd = wtPickAdd;

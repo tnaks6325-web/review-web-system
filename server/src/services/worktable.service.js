@@ -253,6 +253,8 @@ function _annotate(names) {
     role: c.role,
     label: c.label,
     tier: c.tier,
+    // ★ 제출 매칭 설명 — 역할 단일 출처(ROLE_META)의 문장을 그대로 싣는다(프론트 사본 금지).
+    fill: c.fill,
     // ★ 같은 역할이 두 칸 이상 = 제출이 **같은 값을 두 칸에 쓴다**(대개 실수).
     duplicateRole: !!(c.role && roleCount.get(c.role) > 1),
     // 역할 없음 = 제출이 값을 쓰지 않는 열(리뷰제출·입금 같은 상태 칸이나 관리자 메모면 정상).
