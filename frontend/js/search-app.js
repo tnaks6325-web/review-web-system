@@ -56,6 +56,7 @@ const _EMBED_FORM_KEY = (_EMBED_CTX && !_EMBED_CTX.preview && _EMBED_CTX.app) ? 
 /** 외부 쇼핑몰(쿠팡 앱 전환 등) 복귀 시 브라우저가 iframe을 리로드해도 입력값이 살아나도록 저장/복원 */
 function _embedSaveForm() {
   if (!_EMBED_CTX || !_EMBED_FORM_KEY) return;
+  if (_BATCH) return;   // ★ 배치는 명의(phone8) 앵커로 따로 저장한다 — 위치 기반은 카드 수가 변하면 밀린다
   try {
     const scr = document.getElementById("screenOrderForm");
     if (!scr) return;
@@ -67,6 +68,7 @@ function _embedSaveForm() {
 }
 function _embedRestoreForm() {
   if (!_EMBED_CTX || !_EMBED_FORM_KEY) return;
+  if (_BATCH) return;   // ★ 위치 복원이 배치 카드를 밀어 채우면 "남의 명의 주문"이 된다(_batchRestoreForm 이 담당)
   try {
     const raw = sessionStorage.getItem(_EMBED_FORM_KEY);
     if (!raw) return;
@@ -104,6 +106,388 @@ function _lockEmbedOption() {
   return true;
 }
 
+/* ══════════════════════════════════════════════════════════════════════════
+   일괄 제출 모드 (batch) — 타계정 여러 건을 한 화면에서 한 번에 제출
+   ──────────────────────────────────────────────────────────────────────────
+   전부 가산적: 아래 부팅 7조건이 모두 참일 때만 켜지고, 하나라도 어긋나면 null
+   = 기존 단건 동작 100% 불변(fail-closed). 서버 계약(요청 1건 = 홀드 1건)도 그대로다 —
+   카드마다 자기 홀드 문맥을 실어 기존 엔드포인트로 순차 전송한다.
+
+   ★ 이 모드가 묶는 것은 "제출"이지 "구매"가 아니다. 홀드 TTL(본계정 15분·타계정 10분)은
+     그대로이므로, 만료된 홀드는 카드에서 잠기고 페이로드에서도 빠진다.
+   ══════════════════════════════════════════════════════════════════════════ */
+let _BATCH = null;   // { holds:[], byCid:{}, byP8:{}, byApp:{}, files:{}, small:{}, done:{} }
+const _BATCH_DONE_KEY = (_EMBED_CTX && !_EMBED_CTX.preview && _EMBED_CTX.campId) ? ("camp_batch_done_" + _EMBED_CTX.campId) : "";
+function _batchLoadDone() { try { return JSON.parse(sessionStorage.getItem(_BATCH_DONE_KEY) || "{}") || {}; } catch (_) { return {}; } }
+function _batchSaveDone(d) { try { sessionStorage.setItem(_BATCH_DONE_KEY, JSON.stringify(d)); } catch (_) { /* noop */ } }
+
+/** 부팅 판정 — 어떤 예외·미달 조건도 null(단건)로 수렴한다. */
+function _batchBoot() {
+  try {
+    if (!_EMBED_CTX || _PREVIEW_MODE) return null;                  // ★ 관리자 미리보기 절대 금지
+    if (window._ncMode) return null;                                // ★ nc 2카드 고정과 겹치면 배송지 오염
+    if (new URLSearchParams(location.search).get("batch") !== "1") return null;
+    const raw = sessionStorage.getItem("camp_batch_" + (_EMBED_CTX.campId || ""));
+    if (!raw) return null;
+    const arr = JSON.parse(raw);
+    if (!Array.isArray(arr) || arr.length < 2) return null;
+    if (arr.length > MAX_ORDER_CARDS) return null;                  // ★ 조용한 누락 금지 — 전량 단건으로
+    if (!arr.every(h => h && h.app && h.holdToken && String(h.phone8 || "").length === 8)) return null;
+    if (_EMBED_CTX.app && !arr.some(h => String(h.app) === String(_EMBED_CTX.app))) return null; // stale 스냅샷
+    return { holds: arr, byCid: {}, byP8: {}, byApp: {}, files: {}, small: {}, done: _batchLoadDone() };
+  } catch (_) { return null; }
+}
+
+/** 배치 카드 장식: 명의 헤더 · 만료 카운트다운 · 프리필 · sameChk 해제 · 삭제버튼 제거 */
+function _batchDecorateCard(cid, h) {
+  const card = document.getElementById(cid); if (!card) return;
+  // ① 헤더를 명의 이름으로 — "2번째 주문"은 배치에서 의미가 없다
+  const num = card.querySelector(".ofc-badge-num");
+  if (num) num.textContent = (h.isSub ? "👥 " : "⭐ ") + (h.name || ("***" + String(h.phone8).slice(-4)));
+  const hdr = card.querySelector(".ofc-header");
+  if (hdr && !document.getElementById(cid + "_bTtl")) {
+    const s = document.createElement("span");
+    s.id = cid + "_bTtl";
+    s.style.cssText = "margin-left:auto;font-size:.66rem;font-weight:800;color:#6B7280";
+    hdr.appendChild(s);
+  }
+  // ② ★ 삭제 버튼 제거 — 카드가 사라지면 홀드↔카드 매핑이 어긋나 그 명의가 조용히 누락된다
+  const rm = card.querySelector(".ofc-remove-btn"); if (rm) rm.remove();
+  // ③ ★ "1번과 동일" 기본 해제 — 기본 체크면 2~5번 카드의 주문자가 1번 카드 값으로 잠긴다.
+  //    서버 신원게이트는 orderer 를 검증하지 않으므로 잘못된 명의가 그대로 시트에 기록된다.
+  const chk = document.getElementById(cid + "_sameChk");
+  if (chk && chk.checked) { chk.checked = false; try { toggleSameInfo(cid); } catch (_) { /* noop */ } }
+  const row = document.getElementById(cid + "_sameChkRow");
+  if (row) {
+    row.childNodes.forEach(n => { if (n.nodeType === 3 && n.textContent.trim()) n.textContent = " 1번 카드의 계좌정보와 동일하게 사용"; });
+  }
+  // ④ 명의 프리필(빈 칸만 — 사용자가 이미 쓴 값은 절대 덮지 않는다)
+  const set = (sfx, v) => { const el = document.getElementById(cid + sfx); if (el && !el.value && v) el.value = v; };
+  set("_recipient", h.name); set("_orderer", h.name);
+  _batchTickCard(cid, h);
+}
+
+/** 만료 카운트다운 — 임박(3분 미만) 주황, 만료면 카드 잠금 */
+function _batchTickCard(cid, h) {
+  const el = document.getElementById(cid + "_bTtl"); if (!el) return;
+  const end = Date.parse(h.expiresAt || "");
+  const tick = () => {
+    if (!document.getElementById(cid)) return;              // 카드가 사라졌으면 타이머 종료
+    if (!end) { el.textContent = ""; return; }
+    const r = end - Date.now();
+    if (r <= 0) { el.textContent = "⛔ 시간 만료"; el.style.color = "#B91C1C"; _batchMarkExpired(cid); return; }
+    el.textContent = "⏳ " + String(Math.floor(r / 60000)).padStart(2, "0") + ":" + String(Math.floor(r % 60000 / 1000)).padStart(2, "0");
+    el.style.color = r < 180000 ? "#C2410C" : "#6B7280";
+    setTimeout(tick, 1000);
+  };
+  tick();
+}
+function _batchMarkExpired(cid) {
+  const c = document.getElementById(cid); if (!c) return;
+  c.style.opacity = ".55"; c.dataset.batchExpired = "1";
+}
+function _batchMarkDone(cid) {
+  const c = document.getElementById(cid); if (!c) return;
+  c.dataset.batchDone = "1"; c.style.opacity = ".6";
+  c.querySelectorAll("input,select,textarea,button").forEach(el => { el.disabled = true; });
+  if (!c.querySelector(".batch-done-tag")) {
+    const t = document.createElement("div");
+    t.className = "batch-done-tag";
+    t.style.cssText = "background:#ECFDF5;border:1px solid #A7F3D0;color:#065F46;font-weight:800;font-size:.74rem;padding:6px 10px;border-radius:8px;margin:6px 0";
+    t.textContent = "✅ 제출 완료 — 다시 제출되지 않아요";
+    c.insertBefore(t, c.firstChild);
+  }
+}
+
+/** 카드 위 일괄 캡처 드롭존 (파일선택 / 드래그 / Ctrl+V).
+ *  ★ 자동배정(순서 폴백)을 하지 않는다 — 관리자 화면(manual-order)에는 표를 눈으로 대조할 사람이
+ *    있지만 리뷰어 화면에는 없다. 캡처가 남의 홀드로 가면 "남의 명의로 주문 접수"이고 서버는 이를
+ *    막지 않는다(신원게이트는 "내 계정 중 하나인가"만 보므로 같은 소유자의 타계정끼리는 통과).
+ *  대신 ⓐ 붙는 순서를 화면에 명시하고 ⓑ AI 가 읽은 수취인이 그 카드 명의와 다르면 카드를 표시해
+ *  [○○ 카드로 옮기기] / [제가 확인했어요] 중 하나를 사람이 고르게 한다. */
+function _batchMountDropzone() {
+  const host = document.getElementById("ofOrderCardsWrap"); if (!host || !_BATCH) return;
+  if (document.getElementById("batchDropZone")) return;
+  const box = document.createElement("div");
+  box.id = "batchDropZone";
+  box.style.cssText = "border:2px dashed #93C5FD;background:#F8FBFF;border-radius:12px;padding:14px;margin-bottom:12px;text-align:center;cursor:pointer";
+  box.innerHTML = '<div style="font-weight:800;font-size:.86rem;color:#1D4ED8">📸 구매 캡처를 한 번에 올리세요</div>'
+    + '<div style="font-size:.72rem;color:#6B7280;margin-top:4px">고른 순서대로 <b>위 카드부터</b> 들어가요. 사람이 다르면 카드에서 알려드려요.</div>'
+    + '<input type="file" id="batchFiles" accept="image/*" multiple style="display:none">';
+  host.parentNode.insertBefore(box, host);
+  const inp = box.querySelector("#batchFiles");
+  box.onclick = () => inp.click();
+  inp.onchange = () => { const fs = [...(inp.files || [])]; inp.value = ""; _batchTakeFiles(fs); };
+  box.addEventListener("dragover", e => { e.preventDefault(); box.style.background = "#EFF6FF"; });
+  box.addEventListener("dragleave", () => { box.style.background = "#F8FBFF"; });
+  box.addEventListener("drop", e => {
+    e.preventDefault(); box.style.background = "#F8FBFF";
+    _batchTakeFiles([...((e.dataTransfer && e.dataTransfer.files) || [])].filter(f => f.type && f.type.startsWith("image/")));
+  });
+  document.addEventListener("paste", e => {
+    if (!_BATCH) return;
+    const imgs = [...((e.clipboardData && e.clipboardData.items) || [])]
+      .filter(i => i.type && i.type.startsWith("image/")).map(i => i.getAsFile()).filter(Boolean);
+    if (imgs.length) { e.preventDefault(); _batchTakeFiles(imgs); }   // 이미지일 때만 가로챔(텍스트 붙여넣기 보존)
+  });
+}
+
+/** ★ 순차 처리 — 무인증 이미지 API 리미터는 IP당 10/분이라 병렬로 쏘면 바로 429가 난다.
+ *  429로 AI 인식이 절반만 되면 나머지는 사람이 직접 입력해야 하므로 천천히 확실하게 보낸다. */
+async function _batchTakeFiles(files) {
+  if (!_BATCH || !files || !files.length) return;
+  const empty = _orderCardIds.filter(cid => {
+    const h = _BATCH.byCid[cid] || {};
+    if (_BATCH.done[h.app]) return false;
+    const c = document.getElementById(cid);
+    if (c && c.dataset.batchExpired === "1") return false;
+    return !String(document.getElementById(cid + "_imgThumb") && document.getElementById(cid + "_imgThumb").src || "").startsWith("data:");
+  });
+  if (!empty.length) { showToast("모든 카드에 이미 사진이 있어요. 바꾸려면 카드에서 사진을 지우고 다시 올려주세요.", "warning"); return; }
+  const n = Math.min(files.length, empty.length);
+  if (files.length > empty.length) showToast(`빈 카드 ${empty.length}장에만 넣었어요. 나머지는 카드에서 직접 올려주세요.`, "warning");
+  for (let i = 0; i < n; i++) {
+    await _processCardImgFile(files[i], empty[i]);   // ★ 기존 단일 경로 재사용(AI 적용 경로 사본 금지)
+    await new Promise(r => setTimeout(r, 250));      // 리미터 보호
+  }
+}
+
+/** 추출 수취인 ≠ 그 카드의 참여 명의 → 표시 + 사람 해소 유도.
+ *  ★ 서버는 이 사고를 막지 않는다(같은 소유자의 타계정끼리는 신원게이트를 통과한다). 여기가 유일한 방어선이다. */
+function _batchCheckIdentity(cid) {
+  if (!_BATCH) return;
+  const h = _BATCH.byCid[cid];
+  const ex = (_cardAiState[cid] || {}).extracted;
+  const card = document.getElementById(cid);
+  if (!card || !h || !ex || !ex.recipient || !h.name) return;
+  const n = s => String(s || "").replace(/\s+/g, "");
+  const old = document.getElementById(cid + "_bWarn"); if (old) old.remove();
+  if (n(ex.recipient) === n(h.name)) { delete card.dataset.batchMismatch; return; }
+  card.dataset.batchMismatch = "1";
+  const other = _BATCH.holds.find(x => n(x.name) === n(ex.recipient));
+  const otherCid = other ? _BATCH.byP8[other.phone8] : "";
+  const w = document.createElement("div");
+  w.id = cid + "_bWarn";
+  w.style.cssText = "background:#FFFBEB;border:1.5px solid #FCD34D;border-radius:10px;padding:10px;margin:8px 0;font-size:.78rem;text-align:left";
+  w.innerHTML = "⚠️ 이 사진의 수취인은 <b>" + _safeText(ex.recipient) + "</b> 인데, 이 카드는 <b>" + _safeText(h.name) + "</b> 님의 참여예요."
+    + '<div style="margin-top:8px;display:flex;gap:8px;flex-wrap:wrap;align-items:center">'
+    + (otherCid ? '<button type="button" onclick="_batchSwapCapture(\'' + cid + "','" + otherCid + '\')" style="padding:6px 10px;border:1.5px solid #3182f6;background:#EFF6FF;color:#1D4ED8;border-radius:8px;font-weight:800;cursor:pointer;font-family:inherit">' + _safeText(other.name) + " 카드로 옮기기</button>" : "")
+    + '<label style="display:flex;align-items:center;gap:5px;cursor:pointer"><input type="checkbox" id="' + cid + '_xnameChk" onchange="_batchClearMismatch(\'' + cid + '\')"> 제가 확인했어요(그대로 제출)</label></div>';
+  card.insertBefore(w, card.firstChild);
+}
+function _batchClearMismatch(cid) { const c = document.getElementById(cid); if (c) delete c.dataset.batchMismatch; }
+
+/** 사용자가 명시적으로 누를 때만 두 카드의 캡처를 교환한다(자동 재배치 아님). */
+async function _batchSwapCapture(a, b) {
+  if (!_BATCH) return;
+  const fa = _BATCH.files[a], fb = _BATCH.files[b];
+  try { removeCardImg(a); } catch (_) { /* noop */ }
+  try { removeCardImg(b); } catch (_) { /* noop */ }
+  const wa = document.getElementById(a + "_bWarn"); if (wa) wa.remove();
+  const wb = document.getElementById(b + "_bWarn"); if (wb) wb.remove();
+  _BATCH.files[a] = fb; _BATCH.files[b] = fa;
+  if (fb) await _processCardImgFile(fb, a);
+  if (fa) await _processCardImgFile(fa, b);
+}
+
+/** 제출 직전 최종 게이트 — 확인받지 않은 명의 불일치가 남아 있으면 제출하지 않는다. */
+function _batchIdentityGuard() {
+  if (!_BATCH) return true;
+  const bad = _orderCardIds.filter(cid => {
+    const c = document.getElementById(cid);
+    if (!c || c.dataset.batchMismatch !== "1" || c.dataset.batchDone === "1") return false;
+    const chk = document.getElementById(cid + "_xnameChk");
+    return !(chk && chk.checked);
+  });
+  if (!bad.length) return true;
+  showToast("사진의 수취인과 참여 명의가 달라 보이는 카드가 있어요. 카드에서 확인해주세요.", "warning");
+  const el = document.getElementById(bad[0]);
+  if (el) el.scrollIntoView({ behavior: "smooth", block: "center" });
+  return false;
+}
+
+/** 배치는 "1번과 동일"을 기본 해제하므로, 제출 직전 **빈 계좌칸만** 1번 카드에서 채운다.
+ *  (타계정 리뷰비를 본인 공통계좌로 받는 정상 흐름을 보존하면서 주문자는 건드리지 않는다) */
+function _batchFillEmptyBankFromFirst() {
+  if (!_BATCH) return;
+  const src = { _bank: "of_bank", _account: "of_account", _depositor: "of_depositor" };
+  _orderCardIds.forEach((cid, idx) => {
+    if (idx === 0) return;
+    Object.keys(src).forEach(sfx => {
+      const t = document.getElementById(cid + sfx);
+      const s = document.getElementById(src[sfx]);
+      if (t && s && !t.value.trim() && s.value.trim()) t.value = s.value;
+    });
+  });
+}
+
+/** 배치 옵션 잠금 — 카드마다 옵션이 다를 수 있다.
+ *  ★ 전역 피커를 숨기는 것만으로는 부족하다: `_selectedOptKey` 가 null 이면 submitOrderForm 이
+ *    제출을 통째로 차단하므로 반드시 값을 세팅해야 한다(실제 값은 카드별로 payload 에 실린다). */
+function _lockEmbedOptionBatch() {
+  if (!_BATCH) return false;
+  const keys = _BATCH.holds.map(h => h.optionKey).filter(Boolean);
+  if (!keys.length) return false;                        // 옵션 없는 공고 = 기존 동작
+  _selectedOptKey = keys[0];
+  window._preSelectedOptKey = keys[0];
+  _setOrdererDisabled(false);
+  const wrap = document.getElementById("of_option_picker_wrap");
+  if (wrap) {
+    wrap.style.display = "";
+    wrap.innerHTML = '<div class="of-option-picker-title"><i class="fas fa-lock"></i> 참여한 옵션</div>'
+      + _BATCH.holds.map(h => '<div style="display:flex;gap:8px;align-items:center;padding:7px 10px;border:1.5px solid #3182f6;border-radius:9px;background:#e8f1fe;margin-bottom:5px">'
+        + '<b style="flex:1;font-size:.84rem">' + _safeText(h.name || ("***" + String(h.phone8).slice(-4))) + "</b>"
+        + '<span style="font-size:.78rem">' + _safeText(h.optionKey || "-") + "</span></div>").join("")
+      + '<div style="font-size:.62rem;color:#9CA3AF;margin-top:4px">옵션 변경은 위 참여 화면에서 명의별로 할 수 있어요.</div>';
+  }
+  return true;
+}
+
+/* ── 배치 임시저장 · 복원 ─────────────────────────────────────────────────
+   ★ 앵커는 명의 phone8 이다. 기존 `_embedSaveForm` 은 **배열 인덱스 위치**로 저장·복원하는데,
+     배치는 홀드 1건이 만료되면 카드 수가 줄어 위치가 통째로 밀린다 → 2번 카드 자리에 3번 명의의
+     수취인·주소가 들어가고 그대로 제출되면 "남의 명의 주문"이 된다.
+   ★ 텍스트와 사진을 **다른 키**에 저장한다. 한 키에 담으면 사진 용량 초과가 텍스트 저장까지 죽여
+     지금 되던 복원이 회귀한다. */
+const _BFORM_KEY = (_EMBED_CTX && !_EMBED_CTX.preview && _EMBED_CTX.campId) ? ("embedBatchForm_" + _EMBED_CTX.campId) : "";
+const _BCAP_KEY  = (_EMBED_CTX && !_EMBED_CTX.preview && _EMBED_CTX.campId) ? ("embedBatchCap_"  + _EMBED_CTX.campId) : "";
+const _BSFX = ["_orderNumber", "_userId", "_recipient", "_phone", "_address", "_price", "_memo",
+               "_orderer", "_bank", "_account", "_depositor", "_incomeName", "_residentNo"];
+const _BCAP_BUDGET = 2500000;   // 저장할 축소본 총량 상한(문자 수) — 넘는 분은 dropped 로 정직하게 센다
+
+/** 저장 후 되읽어 확인 — 조용한 실패가 복원 배너를 거짓말로 만든다. */
+function _ssWrite(key, obj) {
+  if (!key) return false;
+  let s; try { s = JSON.stringify(obj); } catch (_) { return false; }
+  try { sessionStorage.setItem(key, s); } catch (_) {
+    try { sessionStorage.removeItem(key); } catch (_2) { /* noop */ }
+    return false;
+  }
+  try { return sessionStorage.getItem(key) === s; } catch (_) { return false; }
+}
+
+function _batchSaveForm() {
+  if (!_BATCH || !_BFORM_KEY) return;
+  const out = {};
+  _BATCH.holds.forEach(h => {
+    const cid = _BATCH.byP8[h.phone8]; if (!cid) return;
+    const f = {};
+    _BSFX.forEach(sfx => { const el = document.getElementById(cid + sfx); if (el && el.value) f[sfx] = el.value; });
+    const chk = document.getElementById(cid + "_sameChk"); if (chk) f._same = chk.checked ? "1" : "";
+    out[h.phone8] = f;                                   // ★ p8 앵커 — 카드 수가 변해도 밀리지 않는다
+  });
+  _ssWrite(_BFORM_KEY, out);
+}
+
+/** 캡처 축소본 저장(첨부 시점에 만들어 둔 것만).
+ *  ★ 못 담은 장수를 **저장 시점에 함께 기록**한다 — 복원 시점에는 "원래 몇 장이었는지"를 알 수 없어
+ *    배너가 "전부 되살렸어요"라고 거짓말하게 된다. */
+function _batchSaveCaps() {
+  if (!_BATCH || !_BCAP_KEY) return;
+  const items = {}; let used = 0, dropped = 0;
+  _BATCH.holds.forEach(h => {
+    const cid = _BATCH.byP8[h.phone8]; if (!cid) return;
+    const small = _BATCH.small[cid];
+    if (!small || !small.dataUrl) return;
+    if (used + small.dataUrl.length > _BCAP_BUDGET) { dropped++; return; }
+    used += small.dataUrl.length;
+    items[h.phone8] = small;
+  });
+  // 저장 자체가 실패하면(용량·사파리 프라이빗 등) 담아둔 사진 전부가 복원 불가다 — 그대로 센다.
+  if (!_ssWrite(_BCAP_KEY, { items, dropped })) {
+    _ssWrite(_BCAP_KEY, { items: {}, dropped: dropped + Object.keys(items).length });
+  }
+}
+
+/** dataURL → 축소 dataURL(가로 1080px 상한, JPEG 0.6). 첨부 시점에 **한 번만** 만든다. */
+function _batchShrinkDataUrl(dataUrl) {
+  return new Promise(resolve => {
+    try {
+      const img = new Image();
+      img.onload = () => {
+        try {
+          const scale = Math.min(1, 1080 / (img.width || 1080));
+          const cv = document.createElement("canvas");
+          cv.width = Math.max(1, Math.round((img.width || 1080) * scale));
+          cv.height = Math.max(1, Math.round((img.height || 1080) * scale));
+          cv.getContext("2d").drawImage(img, 0, 0, cv.width, cv.height);
+          resolve(cv.toDataURL("image/jpeg", 0.6));
+        } catch (_) { resolve(""); }
+      };
+      img.onerror = () => resolve("");
+      img.src = dataUrl;
+    } catch (_) { resolve(""); }
+  });
+}
+
+function _batchRestoreCaps() {
+  const r = { ok: 0, dropped: 0 };
+  if (!_BATCH || !_BCAP_KEY) return r;
+  let saved = {}; try { saved = JSON.parse(sessionStorage.getItem(_BCAP_KEY) || "{}") || {}; } catch (_) { saved = {}; }
+  const obj = saved.items || {};
+  r.dropped = Number(saved.dropped) || 0;
+  // 저장된 캡처가 있는 명의 중 이번 화면에 카드가 있는 것만 복원
+  _BATCH.holds.forEach(h => {
+    const cid = _BATCH.byP8[h.phone8]; if (!cid) return;
+    const s = obj[h.phone8];
+    if (!s || !s.dataUrl) return;
+    const thumb = document.getElementById(cid + "_imgThumb");
+    if (!thumb || String(thumb.src || "").startsWith("data:")) return;   // 이미 사진이 있으면 덮지 않음
+    thumb.src = s.dataUrl;
+    const prev = document.getElementById(cid + "_imgPreview"); if (prev) prev.style.display = "flex";
+    const zone = document.getElementById(cid + "_imgZone"); if (zone) zone.style.display = "none";
+    const lbl  = document.getElementById(cid + "_imgLabel"); if (lbl) lbl.textContent = "복원된 사진(축소본)";
+    _BATCH.small[cid] = s;
+    if (!_cardAiState[cid]) _cardAiState[cid] = { abortCtrl: null, countdownId: null, lastBase64: "", lastMime: "", extracted: null };
+    _cardAiState[cid].lastBase64 = String(s.dataUrl).split(",")[1] || "";
+    _cardAiState[cid].lastMime = "image/jpeg";
+    if (s.extracted) _cardAiState[cid].extracted = s.extracted;
+    r.ok++;
+  });
+  return r;
+}
+
+function _batchRestoreForm() {
+  if (!_BATCH || !_BFORM_KEY) return { fields: 0, caps: 0, dropped: 0 };
+  let obj = {}; try { obj = JSON.parse(sessionStorage.getItem(_BFORM_KEY) || "{}") || {}; } catch (_) { obj = {}; }
+  let n = 0;
+  Object.keys(obj).forEach(p8 => {
+    const cid = _BATCH.byP8[p8]; if (!cid) return;        // 사라진 명의 값은 버린다(위치 밀림 금지)
+    Object.keys(obj[p8] || {}).forEach(sfx => {
+      if (sfx === "_same") return;
+      const el = document.getElementById(cid + sfx);
+      if (el && !el.value) { el.value = obj[p8][sfx]; n++; }
+    });
+    const want = obj[p8]._same === "1";
+    const chk = document.getElementById(cid + "_sameChk");
+    if (chk && chk.checked !== want) { chk.checked = want; try { toggleSameInfo(cid); } catch (_) { /* noop */ } }
+  });
+  const c = _batchRestoreCaps();
+  return { fields: n, caps: c.ok, dropped: c.dropped };
+}
+
+function _batchClearDraft() {
+  try { sessionStorage.removeItem(_BFORM_KEY); sessionStorage.removeItem(_BCAP_KEY); } catch (_) { /* noop */ }
+}
+
+/** 복원 배너 — 문구는 실제 복원된 수에서 파생한다(고정 문구 금지: 거짓말이 된다). */
+function _batchRestoreFormWithBanner() {
+  const r = _batchRestoreForm();
+  if (!r.fields && !r.caps && !r.dropped) return;
+  const host = document.getElementById("ofOrderCardsWrap");
+  if (!host || document.getElementById("batchRestoreBanner")) return;
+  const b = document.createElement("div");
+  b.id = "batchRestoreBanner";
+  b.style.cssText = "background:#ECFDF5;border:1.5px solid #6EE7B7;border-radius:12px;padding:12px 14px;margin-bottom:12px;font-size:.8rem;color:#065F46;text-align:left";
+  b.innerHTML = '<b style="display:block;margin-bottom:3px">✍️ 작성하던 내용을 되살렸어요</b>'
+    + "입력값 " + r.fields + "칸" + (r.caps ? " · 사진 " + r.caps + "장" : "")
+    + (r.dropped ? ' <b style="color:#B91C1C">(사진 ' + r.dropped + "장은 용량 때문에 복원하지 못했어요 — 다시 첨부해주세요)</b>" : "")
+    + '<div style="margin-top:8px"><button type="button" id="batchDraftReset" style="padding:6px 12px;border:1px solid #A7F3D0;background:#fff;color:#059669;border-radius:8px;font-weight:800;font-size:.74rem;cursor:pointer;font-family:inherit">새로 작성</button></div>';
+  host.parentNode.insertBefore(b, host);
+  const rs = document.getElementById("batchDraftReset");
+  if (rs) rs.onclick = () => { _batchClearDraft(); location.reload(); };
+}
+
 let _embedHeightTimer = null;
 function _activateEmbedMode() {
   if (!_EMBED_CTX) return;
@@ -136,10 +520,12 @@ function _activateEmbedMode() {
     if (scr && !scr._embedSaveBound) {
       scr._embedSaveBound = true;
       let t = null;
-      scr.addEventListener("input", () => { clearTimeout(t); t = setTimeout(_embedSaveForm, 400); }, true);
-      scr.addEventListener("change", () => { clearTimeout(t); t = setTimeout(_embedSaveForm, 400); }, true);
+      const _save = () => { _embedSaveForm(); _batchSaveForm(); };
+      scr.addEventListener("input", () => { clearTimeout(t); t = setTimeout(_save, 400); }, true);
+      scr.addEventListener("change", () => { clearTimeout(t); t = setTimeout(_save, 400); }, true);
     }
-    setTimeout(_embedRestoreForm, 300); // 카드 렌더 직후 복원(빈 칸만 채움)
+    // 카드 렌더 직후 복원(빈 칸만 채움). 배치는 명의(phone8) 앵커 복원 + 배너를 따로 쓴다.
+    setTimeout(() => { _embedRestoreForm(); _batchRestoreFormWithBanner(); }, 300);
   } catch (_) { /* noop */ }
 }
 const REVIEWER_AUTH_MS   = 12 * 60 * 60 * 1000;  // ★ 12시간 유지
@@ -4256,7 +4642,23 @@ function initOrderFormMode() {
     const addBtnEl = document.getElementById("btnAddOrderCard");
     if (addBtnEl) addBtnEl.style.display = "none";
   } else {
-    addOrderCard(); // 첫 번째 카드 추가
+    // ★ 일괄 제출(batch): 유효 홀드 수만큼 카드를 만들고 카드↔홀드를 결속한다.
+    //   부팅 조건이 하나라도 어긋나면 _batchBoot 가 null → 아래 단건 경로(기존과 동일).
+    _BATCH = _batchBoot();
+    if (_BATCH) {
+      _BATCH.holds.forEach(h => {
+        addOrderCard();
+        const cid = _orderCardIds[_orderCardIds.length - 1];
+        _BATCH.byCid[cid] = h; _BATCH.byP8[h.phone8] = cid; _BATCH.byApp[h.app] = cid;
+        _batchDecorateCard(cid, h);
+        if (_BATCH.done[h.app]) _batchMarkDone(cid);      // 새로고침해도 제출완료 카드는 잠긴 채로
+      });
+      _batchMountDropzone();
+      _embedPost({ type: "batch-mode", active: true, count: _BATCH.holds.length });
+    } else {
+      addOrderCard(); // 첫 번째 카드 추가
+      if (_EMBED_CTX) _embedPost({ type: "batch-mode", active: false });
+    }
     _updateCardCountBadge();
     // 추가 버튼 표시 (★ 참여형 embed는 참여 1건=제출 1건이라 카드 추가 숨김)
     const addBtnEl2 = document.getElementById("btnAddOrderCard");
@@ -4264,7 +4666,9 @@ function initOrderFormMode() {
   }
 
   // ★ 061 참여형 옵션 잠금: campaign.html에서 고른 옵션이 오면 즉시 잠금표시(피커 렌더 전에 확정)
-  if (_EMBED_CTX && _EMBED_CTX.optionKey) _lockEmbedOption();
+  //   배치는 명의마다 옵션이 다를 수 있어 전용 잠금(_lockEmbedOptionBatch)을 쓴다.
+  if (_BATCH) _lockEmbedOptionBatch();
+  else if (_EMBED_CTX && _EMBED_CTX.optionKey) _lockEmbedOption();
 
   // ★ 주문자·아이디 입력란을 즉시 활성화 (GAS 응답 대기 중에도 직접 입력 가능하도록)
   _setOrdererDisabled(false);
@@ -4669,7 +5073,9 @@ window._onPickerDistinctSelect = function(colName, value, btnEl) {
  */
 function _renderOptionPicker() {
   // ★ 061 참여형 옵션 잠금: campaign.html에서 고른 옵션이 오면 시트 피커 대신 잠금표시(피커 무시)
-  if (_EMBED_CTX && _EMBED_CTX.optionKey) { _lockEmbedOption(); return; }
+  //   배치는 명의별 옵션을 한꺼번에 잠금표시한다(옵션 없는 배치 공고는 아래 일반 피커로 진행).
+  if (_BATCH && _lockEmbedOptionBatch()) return;
+  if (!_BATCH && _EMBED_CTX && _EMBED_CTX.optionKey) { _lockEmbedOption(); return; }
   const pickerWrap = document.getElementById("of_option_picker_wrap");
   const tabsEl     = document.getElementById("of_option_tabs");
   if (!pickerWrap || !tabsEl) return;
@@ -6865,22 +7271,38 @@ function removeCardImg(cid) {
   if (priceEl) priceEl.setAttribute("oninput", `formatPriceInput(this);this.classList.remove('ai-filled');this.dataset.userEdited='1';_ofClearError('${cid}_price')`);
 }
 
+/** ★ Promise 반환 — 일괄 첨부가 한 장씩 순차 처리(리미터 보호)하려면 완료를 기다려야 한다.
+ *  기존 호출부(onCardImgSelected/onCardImgDrop)는 반환값을 쓰지 않으므로 동작 불변. */
 function _processCardImgFile(file, cid) {
-  if (file.size > 10 * 1024 * 1024) { showToast("이미지 크기는 10MB 이하여야 합니다.", true); return; }
-  const reader = new FileReader();
-  reader.onload = async function(ev) {
-    const dataUrl = ev.target.result;
-    document.getElementById(cid+"_imgThumb").src = dataUrl;
-    document.getElementById(cid+"_imgPreview").style.display = "flex";
-    document.getElementById(cid+"_imgZone").style.display = "none";
-    document.getElementById(cid+"_aiResult").classList.remove("show");
-    document.getElementById(cid+"_aiError").style.display = "none";
-    const lbl = document.getElementById(cid+"_imgLabel"); if (lbl) lbl.textContent = file.name + " · AI 분석 중…";
-    const base64 = dataUrl.split(",")[1];
-    const mimeType = file.type || "image/jpeg";
-    await _callCardExtractAi(cid, base64, mimeType);
-  };
-  reader.readAsDataURL(file);
+  if (file.size > 10 * 1024 * 1024) { showToast("이미지 크기는 10MB 이하여야 합니다.", true); return Promise.resolve(); }
+  return new Promise(resolve => {
+    const reader = new FileReader();
+    reader.onerror = () => resolve();
+    reader.onload = async function(ev) {
+      try {
+        const dataUrl = ev.target.result;
+        document.getElementById(cid+"_imgThumb").src = dataUrl;
+        document.getElementById(cid+"_imgPreview").style.display = "flex";
+        document.getElementById(cid+"_imgZone").style.display = "none";
+        document.getElementById(cid+"_aiResult").classList.remove("show");
+        document.getElementById(cid+"_aiError").style.display = "none";
+        const lbl = document.getElementById(cid+"_imgLabel"); if (lbl) lbl.textContent = file.name + " · AI 분석 중…";
+        const base64 = dataUrl.split(",")[1];
+        const mimeType = file.type || "image/jpeg";
+        // ★ 배치: 새로고침 복원용 축소본을 첨부 시점에 한 번만 만든다(원본은 10MB까지 가능 = 저장 불가).
+        if (_BATCH) {
+          _BATCH.files[cid] = file;
+          try {
+            const small = await _batchShrinkDataUrl(dataUrl);
+            if (small) { _BATCH.small[cid] = { dataUrl: small, extracted: null }; _batchSaveCaps(); }
+          } catch (_) { /* 축소 실패는 첨부를 막지 않는다 */ }
+        }
+        await _callCardExtractAi(cid, base64, mimeType);
+      } catch (_) { /* 개별 실패가 나머지 일괄 처리를 막지 않게 */ }
+      resolve();
+    };
+    reader.readAsDataURL(file);
+  });
 }
 
 function _retryCardAi(cid) {
@@ -7176,6 +7598,16 @@ function applyCardAiResult(cid) {
   // 적용 후 AI 추출 결과 카드 숨김
   const resultBox = document.getElementById(cid+"_aiResult");
   if (resultBox) resultBox.classList.remove("show");
+
+  // ★ 배치: 이 사진의 수취인이 그 카드의 참여 명의와 다르면 표시하고 사람에게 해소를 맡긴다.
+  //   (자동 재배치는 하지 않는다 — 잘못 옮기면 남의 명의로 주문이 접수된다)
+  if (_BATCH) {
+    try {
+      if (_BATCH.small[cid]) { _BATCH.small[cid].extracted = d; _batchSaveCaps(); }
+      _batchCheckIdentity(cid);
+      _batchSaveForm();
+    } catch (_) { /* 표시 실패가 적용을 되돌리지 않는다 */ }
+  }
 }
 
 /* ─ 하위호환: 기존 단일 카드 함수명 유지 (구 코드 참조 대비) ─ */
@@ -7479,6 +7911,13 @@ async function submitOrderForm() {
   // ── 제출 전 공유값 최종 동기화 ──
   _syncAllSharedBeforeSubmit();
 
+  // ★ 배치: 사진 수취인 ≠ 참여 명의인 카드가 확인 없이 남아 있으면 제출하지 않는다
+  //   (남의 명의로 주문이 접수되면 시트 행·정산 귀속·리뷰 매칭이 통째로 어긋난다)
+  if (!_batchIdentityGuard()) { _resetBtn(); return; }
+  // ★ 배치는 "1번과 동일"이 기본 해제라 빈 계좌칸만 1번 카드에서 채운다(주문자는 건드리지 않는다).
+  //   필수값 검증보다 **먼저** 해야 한다 — 뒤에 두면 빈 계좌칸이 검증 오류로 잡힌다.
+  if (_BATCH) _batchFillEmptyBankFromFirst();
+
   // ── 옵션 검사 (1번 카드 기준) ──
   const pickerWrap = document.getElementById("of_option_picker_wrap");
   if (pickerWrap && pickerWrap.style.display !== "none" && _selectedOptKey === null) {
@@ -7669,6 +8108,7 @@ async function submitOrderForm() {
     }
 
     return {
+      cid,                                    // ★ 배치: 카드↔홀드 앵커(제출 루프가 이 값으로 홀드를 찾는다)
       orderer,
       recipient,
       userId:         gv(cid+"_userId"),
@@ -7677,7 +8117,9 @@ async function submitOrderForm() {
       bank, account, depositor, price,
       orderNum:       gv(cid+"_orderNumber"),
       memo:           gv(cid+"_memo"),
-      selectedOptKey: isFirst ? (_selectedOptKey || _buildReviewerOptKey() || "") : "",
+      // 배치는 카드(=명의)마다 참여 옵션이 다르다 — 홀드에 저장된 옵션을 그대로 싣는다(서버가 최종 권위).
+      selectedOptKey: _BATCH ? ((_BATCH.byCid[cid] || {}).optionKey || "")
+                             : (isFirst ? (_selectedOptKey || _buildReviewerOptKey() || "") : ""),
       imgThumbSrc:    document.getElementById(cid+"_imgThumb")?.src || "",
       mimeType:       (() => { const s=document.getElementById(cid+"_imgThumb")?.src||""; return s.startsWith("data:")?s.split(";")[0].split(":")[1]:""; })(),
       isCoupang:      isCoupangCard,  // GAS에서 쿠팡 컬럼 구분용
@@ -7713,7 +8155,9 @@ async function submitOrderForm() {
   // ★★★ Phase 5: 슬롯 매칭 API 호출 (제출 전) — 15초 타임아웃 ★★★
   let slotInfo = null;
   const slotAuth = window._slotAuth || {};
-  if (slotAuth.name && ctx.sheetId && ctx.tabName) {
+  // ★ 배치는 이 왕복을 생략한다 — 서버가 항상 {mode:'append'} 를 즉시 반환하는 no-op 인데
+  //   카드당 최대 15초 타임아웃이라 총 제출시간이 홀드 TTL 을 그대로 갉아먹는다(후행 건 지각 유발).
+  if (!_BATCH && slotAuth.name && ctx.sheetId && ctx.tabName) {
     try {
       const slotPayload = {
         action: "findSlot",
@@ -7741,13 +8185,25 @@ async function submitOrderForm() {
   let firstCaptureFolderUrl = "";
   const mirrorStatuses = [];   // ★ 제출 응답의 시트반영 상태(queued/failed/pending_no_row) 수집 → 완료화면 즉시 안내용
 
+  const results = [];   // ★ 배치: 명의별 결과(부모 화면이 단수 값 하나로 거짓말하지 않게)
   for (let i = 0; i < orders.length; i++) {
     const o = orders[i];
+    // ★ 배치: 이 카드에 결속된 홀드. 없으면(단건) 기존 _EMBED_CTX 경로 그대로.
+    const bh = _BATCH ? _BATCH.byCid[o.cid] : null;
+    if (bh && _BATCH.done[bh.app]) {           // 이미 제출된 명의(부분 실패 후 재제출) — 건너뛴다
+      results.push({ phone8: bh.phone8, name: bh.name, ok: true, hold: "confirmed", skipped: true });
+      continue;
+    }
+    if (bh && bh.expiresAt && Date.parse(bh.expiresAt) <= Date.now()) {
+      results.push({ phone8: bh.phone8, name: bh.name, ok: false, error: "참여 시간이 만료됐어요(운영자 문의)" });
+      _batchMarkExpired(o.cid);
+      continue;
+    }
     if (btn) btn.innerHTML = `<i class="fas fa-spinner fa-spin"></i> 제출 중... (${i+1}/${orders.length})`;
 
     // ★ Phase 5: 다건 제출 시 2번째+ 주문도 슬롯 매칭 (이전 제출로 캐시 무효화됨)
     let currentSlotInfo = (i === 0) ? slotInfo : null;
-    if (i > 0 && slotAuth.name && ctx.sheetId && ctx.tabName) {
+    if (!_BATCH && i > 0 && slotAuth.name && ctx.sheetId && ctx.tabName) {
       try {
         const slotPayload2 = {
           action: "findSlot",
@@ -7790,12 +8246,18 @@ async function submitOrderForm() {
       extractedAddress:   o.extractedAddress   || "",
       identityConfirmed:  o.identityConfirmed ? "true" : "false",
       // ★ 참여형 캠페인 홀드 확정 문맥(M2) — embed 진입일 때만 전송. 서버가 소유권 3중검증 후 확정
-      ...(_EMBED_CTX && _EMBED_CTX.app ? {
+      //   배치는 **그 카드에 결속된 홀드**를 싣는다(요청 1건 = 홀드 1건이라는 서버 계약 그대로).
+      ...(bh ? {
+        campaignId: _EMBED_CTX.campId,
+        campaignApplicationId: bh.app,
+        holdToken: bh.holdToken,
+        holdPhone8: bh.phone8,
+      } : (_EMBED_CTX && _EMBED_CTX.app ? {
         campaignId: _EMBED_CTX.campId,
         campaignApplicationId: _EMBED_CTX.app,
         holdToken: _EMBED_CTX.holdToken,
         holdPhone8: _EMBED_CTX.holdPhone8,
-      } : {})
+      } : {}))
     };
 
     try {
@@ -7820,6 +8282,7 @@ async function submitOrderForm() {
           try { res = await gasPost(payload, 30000); } catch(_) { throw new Error("서버 연결 실패 (재확인 제출)"); }
         } else {
           showToast(`${i+1}번째 주문은 취소되었습니다. 정보 확인 후 이 주문만 다시 제출해주세요.`, "warning");
+          results.push({ phone8: bh ? bh.phone8 : "", name: bh ? bh.name : "", ok: false, error: "정보 확인이 필요해 제출하지 않았어요" });
           continue;
         }
       } else if (!res.ok && res.code === "NEED_SUB_REGISTER") {
@@ -7832,15 +8295,22 @@ async function submitOrderForm() {
             try { res = await gasPost(payload, 30000); } catch(_) { throw new Error("서버 연결 실패 (타계정 등록 후 재제출)"); }
           } else {
             showToast("타계정 등록 실패 — 이 주문은 건너뜁니다. 내정보에서 등록 후 다시 제출해주세요.", "error");
+            results.push({ phone8: bh ? bh.phone8 : "", name: bh ? bh.name : "", ok: false, error: "타계정 등록에 실패했어요" });
             continue;
           }
         } else {
           showToast(`${i+1}번째 주문은 취소되었습니다.`, "warning");
+          results.push({ phone8: bh ? bh.phone8 : "", name: bh ? bh.name : "", ok: false, error: "타계정 등록을 하지 않아 제출하지 않았어요" });
           continue;
         }
       } else if (!res.ok && res.code === "PROFILE_INCOMPLETE") {
         _showProfileGateBanner(res.profileMissing || []);
         showToast("내정보 미등록으로 제출이 중단되었습니다. 등록 후 다시 제출해주세요.", "error");
+        // ★ 남은 카드도 "실패"로 남긴다 — 결과 목록에서 조용히 사라지면 리뷰어가 제출된 줄 안다.
+        for (let k = i; k < orders.length; k++) {
+          const bk = _BATCH ? _BATCH.byCid[orders[k].cid] : null;
+          results.push({ phone8: bk ? bk.phone8 : "", name: bk ? bk.name : "", ok: false, error: "내정보 등록 후 다시 제출해주세요" });
+        }
         break; // 이후 주문도 동일하게 막히므로 중단
       }
 
@@ -7849,8 +8319,13 @@ async function submitOrderForm() {
       successCount++;
       // ★ DB-first: 이 시점에 주문은 서버 DB에 확정 저장됨. 시트 반영 상태를 수집(완료화면 안내용).
       mirrorStatuses.push(String(res.mirrorStatus || (res.queued ? "queued" : "")));
-      // ★ 임베드(M2): 홀드 확정 결과 수집 — 'confirmed' 외(late/tab_mismatch/error 등)면 부모가 "운영자 확인 중" 안내
-      if (_EMBED_CTX && res.campaignHold !== undefined) window._embedLastCampaignHold = res.campaignHold;
+      // ★ 배치: 명의별 결과를 모은다. 단수 값 하나로 화면을 정하면 5건 중 4건이 지각이어도
+      //   "참여 확정!"이 떠서 리뷰어가 미확정인 줄 모르고 창을 닫는다.
+      results.push({ phone8: bh ? bh.phone8 : ((_EMBED_CTX && _EMBED_CTX.holdPhone8) || ""),
+                     name: bh ? bh.name : "", ok: true, hold: res.campaignHold || null });
+      if (bh) { _BATCH.done[bh.app] = true; _batchSaveDone(_BATCH.done); _batchMarkDone(o.cid); }
+      // ★ 서버 멱등 통과(이미 접수된 홀드) — 캡처를 다시 올리면 Drive 에 중복 파일만 쌓인다.
+      if (res.alreadySubmitted) continue;
 
       // ★ 이미지 업로드는 완전 비동기 (사용자 대기 없음) — 단, 진행/결과는 추적해 완료화면에 표시(③④).
       //   과거엔 실패해도 화면이 '성공'이라 리뷰어가 첨부됐다고 믿고 창을 닫았다.
@@ -7892,8 +8367,9 @@ async function submitOrderForm() {
         })();
       }
     } catch(err) {
+      results.push({ phone8: bh ? bh.phone8 : "", name: bh ? bh.name : "", ok: false, error: err.message });
       // ★ err.message에 서버/AI 자유텍스트가 포함될 수 있어 escape (innerHTML 주입 방어)
-      showCenterAlert(`❌ ${i+1}번째 주문 제출 실패: ${_safeText(err.message)}`);
+      showCenterAlert(`❌ ${bh ? bh.name : (i+1) + "번째 주문"} 제출 실패: ${_safeText(err.message)}`);
       console.error(`[제출 ${i+1}] 오류:`, err);
     }
   }
@@ -7957,6 +8433,19 @@ async function submitOrderForm() {
 
   window._submitOrderFormInProgress = false;
 
+  // ★ 배치 부분 실패: 성공분은 카드가 잠기고 _BATCH.done 에 기록되어 재제출에서 건너뛴다.
+  //   (서버 멱등 게이트가 최종 방어 — 탭을 닫았다 들어와도 중복 원장이 생기지 않는다)
+  const _failedN = results.filter(r => !r.ok).length;
+  if (_BATCH && _failedN) {
+    _resetBtn(`<i class="fas fa-redo"></i> 실패한 ${_failedN}건 다시 제출`);
+    const sb = document.getElementById("btnOrderFormSubmit");
+    if (sb) {
+      sb.style.background = "#DC2626"; sb.style.color = "#fff";
+      sb.scrollIntoView({ behavior: "smooth", block: "center" });
+    }
+    return;
+  }
+
   if (successCount === 0) {
     // ★ 전체 실패 시: 재제출 안내 + 버튼 변경 + 스크롤
     _resetBtn('<i class="fas fa-redo"></i> 재제출');
@@ -8002,8 +8491,14 @@ async function submitOrderForm() {
 
   // ★ 임베드(M2): 부모(campaign.html)에 제출완료 통지 → 확정/운영자확인중 화면 전환. 저장해둔 입력값 정리.
   if (_EMBED_CTX) {
-    try { sessionStorage.removeItem(_EMBED_FORM_KEY); } catch (_) { /* noop */ }
-    _embedPost({ type: "order-submitted", successCount, campaignHold: window._embedLastCampaignHold ?? null });
+    try { sessionStorage.removeItem(_EMBED_FORM_KEY); _batchClearDraft(); } catch (_) { /* noop */ }
+    // ★ 단수 campaignHold 는 "마지막 카드 값"이라 배치에서 항상 거짓말한다 → 성공분에서 파생한다.
+    //   하나라도 confirmed 가 아니면 부모가 "운영자 확인 중"을 안내하도록 그 값을 올린다.
+    const _okr = results.filter(r => r.ok);
+    const _derived = !_okr.length ? null
+      : (_okr.every(r => r.hold === "confirmed") ? "confirmed"
+         : ((_okr.find(r => r.hold && r.hold !== "confirmed") || {}).hold || "late"));
+    _embedPost({ type: "order-submitted", successCount, campaignHold: _derived, results });
   }
 }
 

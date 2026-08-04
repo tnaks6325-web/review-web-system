@@ -358,6 +358,25 @@ function activeP8(){
 }
 function setActiveP8(p8){ if(PREVIEW) return; try{ localStorage.setItem(ACTIVE_KEY, String(p8||'')); }catch(_){} }
 
+/* ═══ 일괄 제출 스냅샷 (batch) ═══
+   구매양식 iframe 이 "지금 유효한 홀드 전부"를 한 화면에 카드로 펼칠 수 있도록 넘기는 값.
+   ★ 유효 홀드만·만료 임박 오름차순. 만료 홀드는 제외한다 — 만료 건까지 카드로 띄우면
+     "다 사고 와서 한 번에" 를 UI 가 부추겨 지각(late) 폭증이 기본값이 된다.
+   ★ 홀드 1건이면 null = batch 미설정 = 기존 단건 동작 100% 불변. */
+const BATCH_KEY = 'camp_batch_' + CAMP_ID;
+function _batchSnapshot(){
+  if(PREVIEW) return null;                                   // 미리보기 2중 방어 ①(iframe 이 ②)
+  const m = _allHolds(), now = CampCards.serverNow();
+  const arr = Object.keys(m).map(k => m[k])
+    .filter(h => h && h.applicationId && h.holdToken && String(h.phone8||'').length === 8)
+    .filter(h => !h.expiresAt || Date.parse(h.expiresAt) > now)
+    .sort((a,b) => Date.parse(a.expiresAt || 0) - Date.parse(b.expiresAt || 0));
+  if(arr.length < 2) return null;                            // 홀드 1건 = 현행 동작 완전 불변
+  return arr.map(h => ({ app:String(h.applicationId), holdToken:h.holdToken, phone8:String(h.phone8),
+                         name:h.name||'', isSub:!!h.isSub, expiresAt:h.expiresAt||'',
+                         optionKey:h.optionKey||'' }));
+}
+
 /** 활성 명의의 홀드(인자로 명의 p8 지정 가능) — 기존 호출부는 무인자로 그대로 동작 */
 function getHold(p8){
   const m = _allHolds();
@@ -806,9 +825,15 @@ async function _doApply(optionKey, sub){
     if(r.ok && j.ok){
       // ★ j.phone8 = "명의" p8(서버 계약) — 홀드 맵의 키이자 work-detail/cancel/embed의 holdPhone8
       setHold({ applicationId: j.applicationId, holdToken: j.holdToken, phone8: j.phone8, expiresAt: j.expiresAt,
+                optionKey: optionKey || (j.optionKey || ''),   // ★ 일괄 제출 카드별 옵션의 유일 출처
                 name: (j.participant && j.participant.name) || (sub && sub.name) || s.name,
                 isSub: !!(j.participant && j.participant.type === 'sub'),
                 ownerPhone8: j.ownerPhone8 || s.phone8 });
+      // ★ 홀드를 2건 이상 잡은 순간 TTL 을 못 박아 알린다 — 일괄 제출은 "제출"을 묶는 기능이지
+      //   "구매"를 묶는 기능이 아니다. 다 사고 와서 한 번에 내면 뒤 건이 만료(지각)된다.
+      if(Object.keys(_allHolds()).length > 1){
+        toast('여러 명의를 잡아뒀어요 — 자리는 곧 만료돼요. 구매를 먼저 끝내고 마지막에 한 번에 제출하세요.');
+      }
       await enterJoined();
       return;
     }
@@ -955,7 +980,18 @@ function _renderJoinedView(j, h){
       // ★ 미리보기: 홀드 문맥(app·holdToken·holdPhone8) 미전달 + preview=1 → 구매양식이 제출을 차단한다.
       //   리뷰어 경로는 기존과 동일하게 홀드 문맥을 싣는다(preview 파라미터 없음 = 동작 불변).
       if(PREVIEW){ qp.set('preview','1'); }
-      else { qp.set('app', String(j.application.id)); qp.set('holdToken', h.holdToken); qp.set('holdPhone8', h.phone8); }
+      else {
+        qp.set('app', String(j.application.id)); qp.set('holdToken', h.holdToken); qp.set('holdPhone8', h.phone8);
+        // ★ 일괄 제출: 유효 홀드가 2건 이상이면 스냅샷을 넘긴다(저장 실패 = batch 미설정 = 단건 fail-closed).
+        //   옵션 공고인데 optionKey 를 모르는 홀드(이 배포 이전에 만들어진 홀드)가 섞여 있으면 배치 금지 —
+        //   틀린 옵션을 보고 구매하게 하느니 단건이 낫다.
+        const snap = _batchSnapshot();
+        const optOk = !(((_camp && _camp.options) || []).length) || (snap || []).every(x => x.optionKey);
+        if(snap && optOk){
+          try{ sessionStorage.setItem(BATCH_KEY, JSON.stringify(snap)); qp.set('batch','1'); }
+          catch(_){ try{ sessionStorage.removeItem(BATCH_KEY); }catch(_2){} }
+        } else { try{ sessionStorage.removeItem(BATCH_KEY); }catch(_){} }
+      }
       // 선택 옵션을 embed에 전달 → 구매양식이 옵션 피커 대신 잠금표시(서버가 최종 권위)
       //   ★ 미리보기는 '선택 가능한' 옵션일 때만 — 마감 옵션을 참여 옵션처럼 고정 표시하면 실제로
       //     리뷰어가 도달할 수 없는 화면을 보여주게 된다.
@@ -1072,17 +1108,68 @@ function renderDone(pendingConfirm){
 }
 
 /* iframe postMessage: 제출완료/높이/로그인 위임 (동일 오리진만 수신) */
+let _batchActive = false;
 window.addEventListener('message', (ev)=>{
   if(ev.origin !== location.origin) return;
   const d = ev.data || {};
+  // ★ 일괄 제출 여부는 iframe 이 실제로 홀드 배열을 읽는 데 성공했을 때 보내는 ack 로만 인정한다.
+  //   부모 HTML 만 새 버전이고 iframe JS 가 캐시된 구버전인 배포 스큐에서, 부모가 혼자
+  //   "5건 제출됐겠지" 로 화면을 정하면 리뷰어가 1건만 낸 채 이탈한다(지금 사고의 재현).
+  if(d.type === 'batch-mode'){
+    _batchActive = !!d.active;
+    if(_batchActive){ const sw = $('acctSwitch'); if(sw) sw.style.display = 'none'; }  // 한 화면에 전부 있음
+    return;
+  }
   if(d.type === 'order-submitted'){
+    if(Array.isArray(d.results) && d.results.length > 1) renderDoneBatch(d.results);
     // ★ 홀드 확정 결과 분기(S1): confirmed 외(late/tab_mismatch/error 등)는 자동 확정이 아님 —
     //   주문은 안전히 접수됐고 운영자 수동확정 대상임을 안내(거짓 "참여 확정!" 금지)
-    renderDone(d.campaignHold && d.campaignHold !== 'confirmed');
+    else renderDone(d.campaignHold && d.campaignHold !== 'confirmed');
   }
   else if(d.type === 'embed-height' && d.height){ $('orderFrame').style.height = Math.min(Math.max(d.height, 400), 4000) + 'px'; }
   else if(d.type === 'embed-need-login'){ needLogin(()=>{ const f=$('orderFrame'); f.src = f.src; }); }
 });
+
+/** 일괄 제출 결과 — 명의별 한 줄. 성공 명의만 홀드를 정리하고, 실패 명의만 [이어서 진행] CTA 대상이 된다.
+ *  ★ 단수 campaignHold 로 화면을 정하면 5건 중 4건이 지각이어도 "참여 확정!" 이 뜬다(거짓 안내). */
+function renderDoneBatch(results){
+  clearInterval(_pollTimer); clearInterval(_holdTick);
+  _ensureDoneChat();
+  const ok   = results.filter(r => r.ok);
+  const fail = results.filter(r => !r.ok);
+  if(!PREVIEW) ok.forEach(r => { try{ if(r.phone8) clearHold(r.phone8); }catch(_){} });
+  const late = ok.filter(r => r.hold && r.hold !== 'confirmed');
+  const nm = r => _escAttr(r.name || ('***' + String(r.phone8||'').slice(-4)));
+  const lines = results.map(r =>
+      '<div style="text-align:left;padding:5px 0;border-bottom:1px solid #F1F5F9">'
+      + (r.ok ? '✅ ' : '⚠️ ') + '<b>' + nm(r) + '</b> — '
+      + (r.ok ? (r.hold === 'confirmed' ? '참여 확정' : '접수됨(운영자 확인 중)')
+              : '제출 실패: ' + _escAttr(r.error || '알 수 없는 오류')) + '</div>').join('');
+  $('vDone').querySelector('.e').textContent = fail.length ? '📨' : '🎉';
+  $('vDone').querySelector('h2').textContent = fail.length ? '일부만 제출됐어요' : '제출이 완료됐어요';
+  $('vDone').querySelector('p').innerHTML =
+      '<b>' + ok.length + '건</b>이 제출됐어요.'
+    + (fail.length ? ' <b style="color:#B91C1C">' + fail.length + '건은 실패</b>했어요.' : '')
+    + '<div style="margin-top:10px">' + lines + '</div>'
+    + (late.length ? '<div class="muted" style="margin-top:8px">일부 건은 제출이 늦게 도착해 <b>운영자 확인 후</b> 확정돼요. <b>다시 제출하지 마세요.</b></div>' : '')
+    + (fail.length ? '<div class="muted" style="margin-top:8px">실패한 건은 아래 [이어서 진행하기]에서 다시 제출할 수 있어요.</div>' : '');
+  // 미제출 명의만 CTA (성공분은 위에서 clearHold 되어 맵에 없다 = 재제출 유도 차단)
+  try{
+    const rest = Object.keys(_allHolds());
+    const sec = $('vDone').querySelector('.sec');
+    const old = $('doneNextBtn'); if(old) old.remove();
+    if(rest.length && sec){
+      const nx = _allHolds()[rest[0]];
+      const b = document.createElement('button');
+      b.id = 'doneNextBtn'; b.className = 'btn';
+      b.style.cssText = 'margin-bottom:8px;background:linear-gradient(135deg,#7C3AED,#6D28D9)';
+      b.textContent = '👥 ' + (nx && nx.name ? nx.name : '다른 명의') + ' 건 이어서 진행하기';
+      b.onclick = async () => { setActiveP8(rest[0]); await enterJoined(); };
+      sec.insertBefore(b, sec.firstChild);
+    }
+  }catch(_){ /* 정리 실패는 화면을 막지 않는다 */ }
+  show('vDone');
+}
 
 // 제출완료 화면의 카톡 버튼: chatUrl이 이미 있으면 노출, 없으면 work-detail 1회 재조회(제출확정 후 서버가 반환)
 async function _ensureDoneChat(){

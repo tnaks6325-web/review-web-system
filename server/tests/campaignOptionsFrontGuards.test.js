@@ -41,7 +41,7 @@ ok('campaign.html: iframe에 optionKey 전달(embed 잠금표시)', /if\(j\.appl
 // ── search-app.js embed 잠금 ──
 ok('search-app: _EMBED_CTX에 optionKey', /optionKey: q\.get\("optionKey"\)/.test(searchApp));
 ok('search-app: _lockEmbedOption(피커 대신 잠금표시)', /function _lockEmbedOption\(\)/.test(searchApp) && /참여한 옵션/.test(searchApp));
-ok('search-app: 옵션 피커 렌더 시 embed optionKey면 잠금(피커 무시)', /if \(_EMBED_CTX && _EMBED_CTX\.optionKey\) \{ _lockEmbedOption\(\); return; \}/.test(searchApp));
+ok('search-app: 옵션 피커 렌더 시 embed optionKey면 잠금(피커 무시)', /if \(!_BATCH && _EMBED_CTX && _EMBED_CTX\.optionKey\) \{ _lockEmbedOption\(\); return; \}/.test(searchApp));
 ok('search-app: 참여형 embed는 주문카드 추가 버튼 숨김', /addBtnEl2\.style\.display = _EMBED_CTX \? "none" : ""/.test(searchApp));
 
 // ── campaign-cards.js ──
