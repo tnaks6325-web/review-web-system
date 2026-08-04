@@ -279,12 +279,34 @@ ok('★ 열 추가 후보 = 헤더 학습 리포트의 열들(역할 변형 + �
   /function _wtBuildCandidates/.test(setJs)
   && /_wtStats \|\| \{\}\)\.roles[\s\S]{0,220}headerVariants/.test(setJs)
   && /_wtStats \|\| \{\}\)\.unmapped/.test(setJs));
-ok('★ 고르기는 코어·채널 양쪽에 있다(같은 함수 한 벌 — key 로 분기)',
-  /function wtPickToggle/.test(setJs) && /function wtPickAdd/.test(setJs) && /function wtPickFilter/.test(setJs)
-  && setJs.includes("wtPickToggle('core')")            // 코어 열 [목록에서]
-  && setJs.includes("wtPickToggle(\\'' + c.key")       // 채널 [▼] (생성 HTML 의 onclick)
-  && setJs.includes("wtPick_' + c.key")                // 채널마다 패널
-  && setJs.includes('id="wtPick_core"'));
+ok('★ 공통 행과 채널 행은 **같은 빌더** 한 벌(_wtRowHtml) — 사본을 두면 버튼 동작이 갈린다',
+  /function _wtRowHtml\(key, label/.test(setJs)
+  && setJs.includes("_wtRowHtml('core'")                       // 공통(모든 채널) 행
+  && /CR_GUIDE_CHANNELS\.map\(function \(c\) \{\s*return _wtRowHtml\(c\.key/.test(setJs)
+  && setJs.includes("wtPickToggle(\\'' + key")                 // [▼] 는 빌더 안에 한 번만
+  && (setJs.match(/id="wtChips_/g) || []).length === 1
+  && (setJs.match(/id="wtPick_/g) || []).length === 1);
+ok('★ 공통 = 표준 열 한 벌(별도 개념 없음) — core 배열을 두 뷰가 함께 본다',
+  /function _wtListFor/.test(setJs)
+  && /key === 'core'\) return \(_wtTpl\.core/.test(setJs)
+  && /function _wtSyncColumns[\s\S]{0,400}_wtRenderChans\(\)/.test(setJs));
+ok('★ 공통에 이미 있는 열을 채널에 또 넣지 못한다(작업표에 같은 열 2번 생성 차단)',
+  /이미 공통 열입니다/.test(setJs));
+ok('공통 기본값 프리셋 15열이 사용자 확정 목록과 일치한다',
+  (() => {
+    const m = /var WT_PRESET_CORE = \[([\s\S]*?)\];/.exec(setJs);
+    if (!m) return false;
+    const got = m[1].split(',').map(x => x.trim().replace(/^'|'$/g, '')).filter(Boolean);
+    const want = ['번호','구매일자','주문자','수취인','ID','연락처','주소','은행','계좌번호',
+                  '예금주','결제금액','주문번호','리뷰제출','입금','비고'];
+    return got.length === want.length && got.every((v, i) => v === want[i]);
+  })());
+ok('★ 프리셋은 버튼으로만 — 저장값이 없을 때 조용히 적용되지 않는다(확정은 사람이)',
+  /function wtLoadPreset/.test(setJs) && /onclick="wtLoadPreset\(\)"/.test(setJs)
+  && !/core = WT_PRESET_CORE[\s\S]{0,80}loadWorktableTemplate/.test(setJs));
+ok('프리셋·통계불러오기는 공통만 바꾼다(채널 행 보존)',
+  /_wtTpl\.core = WT_PRESET_CORE\.slice\(\)/.test(setJs)
+  && !/wtLoadPreset[\s\S]{0,400}_wtTpl\.channels\s*=/.test(setJs));
 ok('★★ 후보 클릭은 **인덱스**로 넘긴다 — onclick 문자열에 열 이름을 넣지 않는다(따옴표 탈출 차단)',
   (() => {
     const m = /onclick="wtPickAdd\([^"]*"/.exec(setJs);
@@ -295,18 +317,24 @@ ok('통계는 지연 로드 + 캐시 한 벌(_wtEnsureStats) — 고르기·리�
   /async function _wtEnsureStats/.test(setJs)
   && (setJs.match(/_wtFetch\(WT_EP\.stats\)/g) || []).length === 1);
 ok('★ 자유 입력은 그대로 — 새 이름도 만들 수 있다(고르기는 보조 수단)',
-  /id="wtNewCol"/.test(setJs) && /onclick="wtAddCol\(\)"/.test(setJs)
-  && /function wtChAdd/.test(setJs) && /id="wtCh_/.test(setJs)
-  && /placeholder="열 이름"/.test(setJs));
+  /function wtChAdd/.test(setJs)
+  && setJs.includes('id="wtCh_')                       // 공용 빌더의 입력칸
+  && setJs.includes("wtChAdd(\\'' + key")              // [＋] 버튼
+  && /placeholder="' \+ placeholder \+ '"/.test(setJs));
 ok('이미 담긴 후보는 비활성(중복 추가 클릭 자체가 불가)',
   /dup \? ' disabled' : ''/.test(setJs) && /as-wtpickchip.*dup/.test(setJs));
 ok('한 번에 한 목록만 열린다(어느 채널에 넣는지 헷갈리지 않게)',
   /\['core'\]\.concat\(CR_GUIDE_CHANNELS\.map/.test(setJs));
 ok('블록 렌더도 escHtml 통과 + 편집 시 dirty 표시(조용한 유실 방지)',
   /escHtml\(n\)/.test(setJs)
-  && /function wtChAdd[\s\S]{0,600}_wtDirty\(true\)/.test(setJs)
-  && /function wtChDel[\s\S]{0,300}_wtDirty\(true\)/.test(setJs)
-  && /function wtChMove[\s\S]{0,400}_wtDirty\(true\)/.test(setJs));
+  // 공통·채널 모든 편집이 _wtAfterEdit 로 수렴하고, 거기서 dirty 가 켜진다
+  && /function _wtAfterEdit[\s\S]{0,300}_wtDirty\(true\)/.test(setJs)
+  && ['wtChAdd', 'wtChDel', 'wtChMove'].every(function (f) {
+       var i = setJs.indexOf('function ' + f + '(');
+       var body = setJs.slice(i, i + 900);
+       return i > -1 && /_wtAfterEdit\(key\)/.test(body);
+     })
+  && /function _wtSyncColumns[\s\S]{0,400}_wtDirty\(true\)/.test(setJs));
 ok('리포트는 펼칠 때 1회만 로드(설정 열 때마다 무거운 집계 금지)',
   /_wtStats\) return _wtRenderReport/.test(setJs));
 ok('편집 중 저장 안 함 경고가 뜬다(조용한 유실 방지)',
