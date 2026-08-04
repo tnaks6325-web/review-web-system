@@ -472,9 +472,10 @@ body{ letter-spacing:-.01em; }
       </div>
       <div class="so-row"><label class="so-lb">상품확인용URL</label>
         <input class="so-in" id="soProductUrl" type="text" placeholder="https://..."></div>
-      <div class="so-row"><label class="so-lb">작업시트탭URL <span class="req">*</span></label>
-        <input class="so-in" id="soSheetUrl" type="text" placeholder="AE가 생성한 작업시트 탭 URL (필수)">
-        <p class="so-hint">시트탭을 먼저 생성한 뒤 그 URL을 넣어주세요. (필수)</p></div>
+      <div class="so-row"><label class="so-lb">작업시트탭URL</label>
+        <input class="so-in" id="soSheetUrl" type="text" placeholder="이미 만든 작업시트 탭 URL (선택)">
+        <p class="so-hint">비워두셔도 됩니다 — 관리자가 접수할 때 <b>작업표를 생성</b>합니다.
+          이미 시트를 만들어 두셨다면 그 탭 주소(…/edit#gid=숫자)를 넣어주세요.</p></div>
       <div class="so-row"><label class="so-lb">리뷰등록가이드</label>
         <textarea class="so-in" id="soGuide" rows="2" placeholder="리뷰 작성/등록 가이드"></textarea></div>
       <div class="so-row"><label class="so-lb">특이사항</label>
@@ -1540,7 +1541,7 @@ async function submitStaffOrder() {
   const title    = v("soTitle");
   const sheetUrl = v("soSheetUrl");
   if (!title)    { showToast("작업명을 입력해주세요.", "error"); document.getElementById("soTitle").focus(); return; }
-  if (!sheetUrl) { showToast("작업시트탭URL은 필수입니다.", "error"); document.getElementById("soSheetUrl").focus(); return; }
+  // ★ 작업시트탭URL은 선택 항목 — 비우면 접수 시 작업표를 생성한다(서버도 필수 검증 없음).
 
   const payload = {
     action: "orderSubmit",
@@ -1614,7 +1615,9 @@ function _renderMyOrderCard(o) {
       <span style="font-size:.7rem;color:#9CA3AF;margin-left:auto">${date}</span>
     </div>
     <div style="margin-top:5px;font-size:.74rem;color:#6B7280;word-break:break-all">
-      <i class="fas fa-link" style="color:#a6c8fb"></i> ${escHtml(o.work_sheet_url||"-")}
+      <i class="fas fa-link" style="color:#a6c8fb"></i> ${o.work_sheet_url
+        ? escHtml(o.work_sheet_url)
+        : '<span style="color:#9CA3AF">시트 미첨부 — 접수 시 작업표 생성</span>'}
     </div>
     ${editBtn ? `<div style="display:flex;margin-top:6px">${editBtn}</div>` : ""}
     ${memo}
@@ -1622,9 +1625,9 @@ function _renderMyOrderCard(o) {
 }
 
 async function editMyOrderSheet(id) {
-  const url = prompt("새 작업시트탭URL을 입력하세요 (비울 수 없음)");
+  // ★ 선택 항목 — 비워서 저장하면 "시트 미첨부"(접수 시 작업표 생성)로 되돌아간다.
+  const url = prompt("새 작업시트탭URL을 입력하세요 (비우면 접수 시 작업표를 생성합니다)");
   if (url === null) return;
-  if (!url.trim()) { showToast("URL은 비울 수 없습니다.", "error"); return; }
   try {
     const r = await gasGet({ action: "orderMyUpdate", id, work_sheet_url: url.trim() });
     if (r && r.ok) { showToast("수정되었습니다.", "success"); loadMyOrders(); }

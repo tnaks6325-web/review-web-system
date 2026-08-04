@@ -73,14 +73,19 @@ const api = async () => ({ ok: true });
 const renderWorkdesk = wd => { opened.push(STATE.cur && STATE.cur.tabName); };
 const loadParity = () => {};
 const closeGColMenu = () => {}, closeGHidMenu = () => {};
+// SPA 히스토리(#447)로 selTab 이 갖게 된 의존 — 스텁을 안 주면 ReferenceError 로 selTab 이
+// 조용히 죽어(async 라 rejection 이 삼켜짐) 아래 상태 전이 단언이 "예전 값 그대로"로 실패한다.
+// ★ selTab/switchView 가 새 전역을 부르게 되면 이 목록도 함께 늘릴 것.
+let navPushed = 0;
+const _navPush = () => { navPushed++; };
 const sheetTitle = sid => (({ S1:'로스터A', S2:'로스터B', S3:'로스터C' })[sid] || sid);
 
 // eslint-disable-next-line no-new-func
 const load = new Function('STATE','$','esc','document','localStorage','refreshUnseen','_favLoad','W_FAV',
-  'api','renderWorkdesk','loadParity','closeGColMenu','closeGHidMenu','sheetTitle','_favSaveLocal','_favPushServer',
+  'api','renderWorkdesk','loadParity','closeGColMenu','closeGHidMenu','sheetTitle','_favSaveLocal','_favPushServer','_navPush',
   bodies + '\n return {' + WANT.join(',') + '};');
 const F = load(STATE, $, esc, document, localStorage, refreshUnseen, _favLoad, W_FAV,
-  api, renderWorkdesk, loadParity, closeGColMenu, closeGHidMenu, sheetTitle, ()=>{}, ()=>{});
+  api, renderWorkdesk, loadParity, closeGColMenu, closeGHidMenu, sheetTitle, ()=>{}, ()=>{}, _navPush);
 // wPickSearch/selTab 은 서로를 호출하므로 추출본끼리 연결(전역 선언과 동일한 관계 재현)
 const selTab = F.selTab;
 
