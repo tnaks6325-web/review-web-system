@@ -1,0 +1,399 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="UTF-8"/>
+<meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+<title>모집공고 4칸 정리 — 원인 진단 &amp; 개선 와이어프레임</title>
+<style>
+/* ══════════════════════════════════════════════════════════════
+   모집공고 텍스트 4칸(유입가이드·리뷰가이드·특이사항·유의사항) 중구난방 문제
+   — 원인 진단 + 개선 와이어프레임 (목업 전용 · 제품 코드 아님)
+   실측 사례: "장수돌침대 26년형 올뉴블랙에디션 …" 공고 (2026-08 운영분)
+   외부 리소스 0(오프라인 열람 가능) · color-scheme 고정
+   ══════════════════════════════════════════════════════════════ */
+:root{
+  color-scheme:light;
+  --paper:#EDF1F8; --ink:#0F172A; --t2:#475569; --t3:#94A3B8; --t4:#B0BAC9;
+  --line:#E2E8F0; --line2:#EDF1F6;
+  --p:#3182F6; --p-deep:#1B64DA; --p-soft:#EEF4FE;
+  --g:#12B886; --g-soft:#F0FBF6; --g-deep:#0B8A64;
+  --w:#B45309; --w-soft:#FFF8ED;
+  --err:#DC2626; --err-soft:#FEECEC;
+}
+*{box-sizing:border-box;margin:0;padding:0}
+body{background:var(--paper);color:var(--ink);line-height:1.55;-webkit-font-smoothing:antialiased;
+  font-family:"Apple SD Gothic Neo","Pretendard","Noto Sans KR","Malgun Gothic",system-ui,sans-serif}
+.doc{max-width:1180px;margin:0 auto;padding:34px 18px 90px}
+
+.eyebrow{font-size:.7rem;font-weight:800;letter-spacing:.13em;color:var(--p)}
+h1{font-size:1.55rem;font-weight:800;letter-spacing:-.02em;margin:7px 0}
+.lead{color:var(--t2);font-size:.88rem;max-width:880px}
+.chips{display:flex;gap:6px;flex-wrap:wrap;margin-top:13px}
+.chip{font-size:.7rem;font-weight:700;color:var(--t2);background:#fff;border:1px solid var(--line);border-radius:999px;padding:4px 11px}
+.chip b{color:var(--ink)}
+
+section{margin-top:34px}
+.sec-t{font-size:.68rem;font-weight:800;letter-spacing:.12em;color:var(--p);margin-bottom:4px}
+h2{font-size:1.15rem;font-weight:800;letter-spacing:-.015em;margin-bottom:10px}
+h3{font-size:.92rem;font-weight:800;margin:18px 0 8px}
+p.d{font-size:.83rem;color:var(--t2);max-width:900px;margin-bottom:10px}
+
+/* 표 */
+.tbl{background:#fff;border:1px solid var(--line);border-radius:14px;overflow:hidden;overflow-x:auto}
+table{width:100%;border-collapse:collapse;font-size:.78rem;min-width:640px}
+td,th{padding:9px 14px;border-bottom:1px solid var(--line2);text-align:left;vertical-align:top}
+th{font-size:.67rem;font-weight:800;color:var(--t3);background:#FCFDFF;white-space:nowrap}
+tr:last-child td{border-bottom:none}
+td.bad{color:var(--err);font-weight:700}
+td.good{color:var(--g-deep);font-weight:700}
+td b{font-weight:800}
+code{background:#F1F5FB;border-radius:5px;padding:1px 5px;font-size:.9em;font-family:ui-monospace,Consolas,monospace}
+
+/* 흐름 다이어그램 */
+.flow{display:flex;gap:0;align-items:stretch;flex-wrap:wrap;margin:14px 0}
+.fnode{background:#fff;border:1px solid var(--line);border-radius:12px;padding:11px 14px;min-width:200px;flex:1}
+.fnode .ft{font-size:.76rem;font-weight:800;margin-bottom:5px}
+.fnode .fd{font-size:.7rem;color:var(--t2);line-height:1.6}
+.fnode.bad{border-color:#F3C1C1;background:#FFFBFB}
+.fnode .fd .rx{color:var(--err);font-weight:800}
+.farrow{display:flex;align-items:center;padding:0 8px;color:var(--t4);font-weight:800;font-size:1.1rem}
+@media (max-width:900px){.flow{flex-direction:column}.farrow{transform:rotate(90deg);justify-content:center;padding:2px 0}}
+
+/* 원인 카드 */
+.causes{display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-top:10px}
+@media (max-width:900px){.causes{grid-template-columns:1fr}}
+.cause{background:#fff;border:1px solid var(--line);border-left:3px solid var(--err);border-radius:12px;padding:13px 15px}
+.cause .no{display:inline-block;font-size:.64rem;font-weight:800;background:var(--err-soft);color:var(--err);border-radius:6px;padding:2px 8px;margin-bottom:6px}
+.cause .no.code{background:#FEE2E2}
+.cause h4{font-size:.84rem;font-weight:800;margin-bottom:5px}
+.cause p{font-size:.75rem;color:var(--t2);line-height:1.65}
+.cause p b{color:var(--ink)}
+
+/* 리뷰어 화면 재현(전/후) */
+.ba{display:grid;grid-template-columns:1fr 1fr;gap:14px;margin-top:12px;align-items:start}
+@media (max-width:900px){.ba{grid-template-columns:1fr}}
+.balab{font-size:.72rem;font-weight:800;padding:5px 12px;border-radius:999px;display:inline-block;margin-bottom:8px}
+.balab.b{background:var(--err-soft);color:var(--err)}
+.balab.a{background:var(--g-soft);color:var(--g-deep)}
+.phone{background:#F0F2FA;border:1px solid var(--line);border-radius:16px;padding:12px;max-width:420px}
+.pvbox{background:#fff;border:1px solid var(--line);border-radius:12px;padding:11px 12px;margin-bottom:9px}
+.pvbox .h{font-size:.73rem;font-weight:800;margin-bottom:6px}
+.pvbox .l{font-size:.7rem;color:var(--t2);line-height:1.7;white-space:pre-wrap;word-break:break-word}
+.pvbox .l .dup{background:#FEE2E2;border-radius:3px;padding:0 2px}
+.pvbox .l .meta{background:#FEF3C7;border-radius:3px;padding:0 2px}
+.pvbox.empty .l{color:var(--t4);font-style:italic}
+.pvcard{border:1px solid var(--line);border-radius:12px;background:#fff;overflow:hidden;margin-bottom:9px}
+.pvcard .th{height:64px;background:repeating-linear-gradient(45deg,#E3EAF5,#E3EAF5 8px,#EDF2FB 8px,#EDF2FB 16px);display:flex;align-items:center;justify-content:center;color:#9AA8BE;font-size:.66rem;font-weight:700}
+.pvcard .bd2{padding:8px 11px}
+.pvcard h5{font-size:.76rem;font-weight:800;line-height:1.3}
+.pvcard .nt{font-size:.68rem;color:var(--t2);margin-top:5px;line-height:1.65;white-space:pre-wrap;word-break:break-word}
+.pvcard .nt .dup{background:#FEE2E2;border-radius:3px;padding:0 2px}
+.cap{font-size:.68rem;color:var(--t3);font-weight:600;margin-top:6px;line-height:1.6}
+.cap b{color:var(--err)}
+
+/* 발행 폼 목업 */
+.modalmock{background:#fff;border:1px solid var(--line);border-radius:14px;padding:14px 16px;max-width:680px;box-shadow:0 2px 10px rgba(15,23,42,.06)}
+.mm-t{font-size:.8rem;font-weight:800;margin-bottom:9px}
+.fld{display:grid;grid-template-columns:82px 1fr;gap:10px;align-items:start;padding:5px 0}
+.fld>label{font-size:.72rem;font-weight:700;color:var(--t2);text-align:right;padding-top:6px}
+.ta{width:100%;border:1.5px solid var(--line);border-radius:8px;font-size:.73rem;padding:7px 9px;color:var(--ink);
+    font-family:inherit;line-height:1.6;background:#fff;white-space:pre-wrap}
+.ta.warn{border-color:#F0B45E;background:#FFFDF8}
+.chk{display:flex;gap:7px;align-items:flex-start;font-size:.72rem;font-weight:700;padding:3px 0}
+.chk.warn{color:var(--w)} .chk.ok{color:var(--g-deep)}
+.btn{display:inline-block;padding:6px 13px;border-radius:8px;font-size:.72rem;font-weight:800;cursor:pointer;border:1.5px solid var(--line);background:#fff;color:var(--t2)}
+.btn.pri{background:var(--p);border-color:var(--p);color:#fff}
+.btn.amber{background:#FEF3C7;border-color:#F59E0B;color:#92400E}
+.diffwrap{border:1.5px dashed #F0B45E;border-radius:10px;background:#FFFDF6;padding:10px 12px;margin-top:8px}
+.diffwrap .dt{font-size:.72rem;font-weight:800;color:#92400E;margin-bottom:6px}
+.diff{display:grid;grid-template-columns:1fr 22px 1fr;gap:8px;align-items:start}
+@media (max-width:700px){.diff{grid-template-columns:1fr}.diff .darr{display:none}}
+.dcol{background:#fff;border:1px solid var(--line);border-radius:8px;padding:8px 10px;font-size:.68rem;line-height:1.7;white-space:pre-wrap;word-break:break-word;color:var(--t2)}
+.dcol .cut{background:#FEE2E2;text-decoration:line-through;border-radius:3px;padding:0 2px}
+.dcol .keep{background:#DCFCE7;border-radius:3px;padding:0 2px}
+.darr{display:flex;align-items:center;justify-content:center;color:var(--t4);font-weight:800}
+.dlab{font-size:.64rem;font-weight:800;color:var(--t3);margin-bottom:4px}
+
+.note{font-size:.78rem;color:var(--t2);margin-top:14px;background:#fff;border:1px solid var(--line);
+  border-left:3px solid var(--p);border-radius:10px;padding:12px 14px}
+.note b{font-weight:800;color:var(--ink)}
+.note ul{margin:6px 0 0 17px} .note li{margin-bottom:4px}
+.note.gr{border-left-color:var(--g)}
+</style>
+</head>
+<body>
+<div class="doc">
+
+<div class="eyebrow">DIAGNOSIS &amp; PROPOSAL</div>
+<h1>모집공고 4칸 정리 — 유입가이드 · 리뷰가이드 · 특이사항 · 유의사항</h1>
+<p class="lead">
+  운영 중인 공고에서 네 칸의 내용이 중구난방으로 섞여 보이는 문제(실측: <b>장수돌침대 26년형 올뉴블랙에디션</b> 공고)의
+  <b>원인 진단</b>과 <b>개선 와이어프레임</b>입니다. 결론부터: 원인은 세 겹 —
+  ① 유의사항 프리필이 작업오더 원문 전체를 주입(현재 코드), ② 이미 발행된 공고는 옛 스냅샷이라 이후 코드 수정이 소급되지 않음,
+  ③ 발주 원문 자체의 칸 혼입(운영 멘트·중복 섹션)을 시스템이 걸러주지 않음.
+</p>
+<div class="chips">
+  <span class="chip">근거 코드 <b>work-order-detail.js `_woCampaignPrefill`</b></span>
+  <span class="chip">실측 공고 <b>장수돌침대 전기매트</b></span>
+  <span class="chip">산출물 <b>원인 4 + 개선 4 + 전/후 목업</b></span>
+</div>
+
+<!-- ═══ 1. 4칸의 역할(계약) — 무엇이 정상인가 ═══ -->
+<section>
+  <div class="sec-t">STEP 1 — 기준</div>
+  <h2>네 칸의 원래 역할 (이 계약과 어긋난 것이 "중구난방"이다)</h2>
+  <div class="tbl"><table>
+    <tr><th style="width:110px">칸</th><th style="width:150px">저장 위치</th><th>누구에게 · 언제 보이나</th><th>들어가야 하는 것</th></tr>
+    <tr><td><b>유입가이드</b></td><td><code>work_detail.inflowGuideHtml</code></td><td>참여한 리뷰어 — 작업가이드 카드 ②</td><td><b>상품에 어떻게 진입하나</b> (검색어·경유 경로·첨부 이미지)</td></tr>
+    <tr><td><b>리뷰가이드</b></td><td><code>work_detail.reviewGuide</code></td><td>참여한 리뷰어 — 작업가이드 카드 ③</td><td><b>리뷰를 어떻게 쓰나</b> (별점·건수·문구 방향)</td></tr>
+    <tr><td><b>특이사항</b></td><td><code>work_detail.specialNotes</code></td><td>참여한 리뷰어 — 작업가이드 카드 ④</td><td><b>참여자만 알아야 할 주의</b> (주소·연락처 정확히 등 운영 멘트는 여기)</td></tr>
+    <tr><td><b>유의사항</b></td><td><code>recruit_campaigns.notes</code></td><td class="bad">참여 전 모두에게 — 공고 카드에 공개</td><td><b>참여 전에 알아야 할 짧은 안내</b> (와우회원 전용 등 1~3줄)</td></tr>
+  </table></div>
+  <p class="d" style="margin-top:8px">유입방식(링크/가이드)·첨부 이미지·옵션·결제금액은 <b>이미 구조 필드</b>(inflowType·이미지 승격·옵션표)로 따로 표시된다 —
+  텍스트 칸에 또 들어가면 전부 <b>이중 표기</b>다.</p>
+</section>
+
+<!-- ═══ 2. 원인 진단 ═══ -->
+<section>
+  <div class="sec-t">STEP 2 — 원인</div>
+  <h2>왜 섞이는가 — 데이터 흐름과 원인 4개</h2>
+
+  <div class="flow">
+    <div class="fnode">
+      <div class="ft">① 인트라넷 발주 (AE 작성)</div>
+      <div class="fd">유입가이드 칸에 <span class="rx">운영 멘트 혼입</span>("택배받을 주소 폰번호 정확하게…")<br>
+        리뷰가이드 원문에 <span class="rx">[유입방식]·[유입가이드]·[첨부 이미지] 섹션 중복 포함</span><br>
+        특이사항 칸은 <span class="rx">빈 채로 제출</span></div>
+    </div>
+    <div class="farrow">→</div>
+    <div class="fnode bad">
+      <div class="ft">② 발행 프리필 (_woCampaignPrefill)</div>
+      <div class="fd"><span class="rx">유의사항 = "유입방식: …" + 리뷰가이드 원문 전체</span>를 통째로 주입(현재 코드)<br>
+        리뷰가이드 = [리뷰등록 가이드]만 추출하지만 <span class="rx">라벨 없는 원문은 전문 폴백</span><br>
+        유입가이드 = 원문 그대로(운영 멘트 미분리)</div>
+    </div>
+    <div class="farrow">→</div>
+    <div class="fnode">
+      <div class="ft">③ 공고 저장 = 스냅샷</div>
+      <div class="fd">work_detail·notes는 발행 시점 <b>스냅샷</b> —<br><span class="rx">이후 프리필 코드를 고쳐도 이미 발행된 공고는 그대로</span>(장수돌침대 건의 리뷰가이드가 이 경우)</div>
+    </div>
+    <div class="farrow">→</div>
+    <div class="fnode">
+      <div class="ft">④ 리뷰어 화면</div>
+      <div class="fd">같은 내용이 유입가이드·리뷰가이드·유의사항에 <b>최대 3중 표기</b>,<br>특이사항은 비고 유의사항(공개)에 내부 원문 덤프</div>
+    </div>
+  </div>
+
+  <div class="causes">
+    <div class="cause">
+      <span class="no code">원인 1 · 코드(현재도 발생)</span>
+      <h4>유의사항 프리필 = 리뷰가이드 원문 전체 주입</h4>
+      <p><code>work-order-detail.js</code> 프리필이 <code>notes</code>(유의사항)에
+      <b>"유입방식: ○○" + review_guide 원문 전체</b>를 붙인다. 유의사항은 <b>참여 전 공고 카드에 공개</b>되는 칸이라
+      쿠팡상품번호·옵션:결제금액·내부 섹션 라벨까지 모두에게 노출된다. — 실측 예시 3번이 정확히 이 경로.</p>
+    </div>
+    <div class="cause">
+      <span class="no">원인 2 · 스냅샷 소급 불가</span>
+      <h4>이미 발행된 공고는 옛 프리필 결과가 박제</h4>
+      <p>리뷰가이드는 지금 <b>[리뷰등록 가이드] 섹션만 추출</b>하도록 고쳐져 있지만, work_detail은 발행 시점 스냅샷이라
+      <b>그 전에 발행된 공고엔 소급되지 않는다</b>. 실측 예시 2번(리뷰가이드에 유입방식·첨부 메타까지)이 이 케이스.
+      또 원문에 [라벨]이 하나도 없으면 <b>전문 폴백</b>이라 지금도 재발 여지가 있다.</p>
+    </div>
+    <div class="cause">
+      <span class="no">원인 3 · 발주 원문 혼입</span>
+      <h4>칸 규칙이 강제되지 않는다 — 사람이 섞어 쓴다</h4>
+      <p>유입가이드 칸에 <b>"택배받을 주소 폰번호 정확하게 입력해주세요!!"</b>(특이사항감 운영 멘트)가 들어오고,
+      리뷰가이드 원문엔 유입 정보가 다시 들어 있으며, 정작 <b>특이사항 칸은 비어</b> 있다.
+      시스템은 어느 칸이 어느 화면으로 가는지 발주·발행 단계 어디에서도 알려주거나 걸러주지 않는다.</p>
+    </div>
+    <div class="cause">
+      <span class="no">원인 4 · 이중 표기 구조</span>
+      <h4>같은 정보의 자리가 두 곳(구조 필드 + 텍스트)</h4>
+      <p>유입방식은 <code>inflowType</code>, 첨부는 이미지 승격, 옵션·금액은 옵션표로 <b>이미 구조화되어 따로 표시</b>된다.
+      그런데 텍스트 원문에도 같은 내용이 남아 "유입방식: 유입가이드"가 유의사항에, [유입가이드 첨부 이미지] 파일명이
+      리뷰가이드에 또 나온다 — 지워도 되는 <b>메타 줄</b>이 지워지지 않는 구조.</p>
+    </div>
+  </div>
+</section>
+
+<!-- ═══ 3. 실측 재현: 전 / 후 ═══ -->
+<section>
+  <div class="sec-t">STEP 3 — 전 / 후</div>
+  <h2>리뷰어 화면 재현 — 장수돌침대 공고 그대로 vs 정리 후</h2>
+  <div class="ba">
+    <div>
+      <span class="balab b">BEFORE — 현재 운영 화면(실측)</span>
+      <div class="phone">
+        <div class="pvcard">
+          <div class="th">공고 카드 (참여 전 · 모두에게 공개)</div>
+          <div class="bd2"><h5>장수돌침대 26년형 올뉴블랙에디션 카본 탄소매트…</h5>
+            <div class="nt">유의사항: <span class="dup">유입방식: 유입가이드
+[유입방식] 유입가이드
+[유입가이드] 장수돌침대 전기매트
+쿠팡상품번호: 9088636838 - 26709533044
+▶옵션:결제금액◀사이즈 멀티싱글 1개 78,000원 색상은 자율
+[리뷰등록 가이드] 전체 별점 5건 - 배송이 빠르다 …</span></div>
+          </div>
+        </div>
+        <div class="pvbox">
+          <div class="h">🔎 유입가이드</div>
+          <div class="l">쿠팡 검색어 :장수돌침대 전기매트 / <span class="meta">택배받을 주소 폰번호 정확하게 입력해주세요 ! !</span></div>
+        </div>
+        <div class="pvbox">
+          <div class="h">📝 리뷰가이드</div>
+          <div class="l"><span class="dup">[유입방식] 유입가이드
+
+[유입가이드]
+장수돌침대 전기매트
+
+[유입가이드 첨부 이미지]
+1. 0722 장수산업 유입.png (29KB, Drive 저장됨)
+https://…railway.app/api/order/guide-image/1mdb…</span>
+
+[리뷰등록 가이드]
+전체 별점 5건
+- 배송이 빠르다
+- 겨울맞이 미리 준비했다 등
+1~2줄 자연스러운 리뷰 작성희망</div>
+        </div>
+        <div class="pvbox empty">
+          <div class="h">⚠️ 특이사항</div>
+          <div class="l">(비어 있음)</div>
+        </div>
+      </div>
+      <div class="cap"><span style="background:#FEE2E2;border-radius:3px;padding:0 4px">빨강</span> = 다른 칸과 중복/내부 원문 덤프 ·
+        <span style="background:#FEF3C7;border-radius:3px;padding:0 4px">노랑</span> = 칸을 잘못 찾은 내용.
+        유입 정보가 <b>3곳</b>에, 운영 멘트가 유입가이드에, 특이사항은 빈 칸.</div>
+    </div>
+    <div>
+      <span class="balab a">AFTER — 계약대로 정리</span>
+      <div class="phone">
+        <div class="pvcard">
+          <div class="th">공고 카드 (참여 전 · 모두에게 공개)</div>
+          <div class="bd2"><h5>장수돌침대 26년형 올뉴블랙에디션 카본 탄소매트…</h5>
+            <div class="nt" style="color:var(--t3)">유의사항 없음 — 자동 주입 폐지. 관리자가 참여 전 공개할 짧은 안내가 있을 때만 직접 입력</div>
+          </div>
+        </div>
+        <div class="pvbox">
+          <div class="h">🔎 유입가이드</div>
+          <div class="l">쿠팡 검색어: 장수돌침대 전기매트
+📎 첨부 이미지 1장 (유입 경로 캡처)</div>
+        </div>
+        <div class="pvbox">
+          <div class="h">📝 리뷰가이드</div>
+          <div class="l">전체 별점 5건
+- 배송이 빠르다
+- 겨울맞이 미리 준비했다 등
+1~2줄 자연스러운 리뷰 작성희망</div>
+        </div>
+        <div class="pvbox">
+          <div class="h">⚠️ 특이사항</div>
+          <div class="l">택배받을 주소·폰번호를 정확하게 입력해주세요!</div>
+        </div>
+      </div>
+      <div class="cap">각 칸에 <b style="color:var(--g-deep)">딱 그 내용만</b>. 유입방식·옵션·금액은 구조 필드(상품 카드·옵션표)가 이미 보여주므로 텍스트에서 제거.
+        운영 멘트는 특이사항으로 이동(자동 분리는 불가 — 발행 폼에서 사람이 확인, 아래 STEP 4).</div>
+    </div>
+  </div>
+</section>
+
+<!-- ═══ 4. 개선 와이어프레임 ═══ -->
+<section>
+  <div class="sec-t">STEP 4 — 개선</div>
+  <h2>개선 4가지 — 프리필 규칙 + 발행 폼 정리 도우미 + 소급 경로</h2>
+
+  <h3>개선 ① 유의사항 자동 주입 폐지 (원인 1의 직접 수정 · 코드 1곳)</h3>
+  <p class="d">프리필의 <code>notes</code>(유의사항)에 review_guide 원문을 붙이는 조립을 제거한다. 유입방식은 이미
+  <code>inflowType</code>으로 판정·표시되므로 "유입방식: ○○" 한 줄도 불필요 — <b>유의사항 프리필 = 빈 값</b>(관리자가 공개용 안내가 있을 때만 직접 작성).
+  기존 저장 로직·서버는 무변경.</p>
+
+  <h3>개선 ② 리뷰가이드 스냅샷의 메타 줄 스트립 강화 (원인 2·4)</h3>
+  <p class="d">섹션 추출([리뷰등록 가이드]) 유지 + <b>라벨이 없어 전문 폴백될 때도</b> 아래 메타 줄은 항상 걷어낸다
+  — 이미 유입가이드 쪽에서 쓰는 <code>_woCleanGuide</code>(첨부 이미지 메타 줄 제거)와 같은 규율의 확장판.</p>
+  <div class="tbl"><table>
+    <tr><th style="width:250px">걷어내는 줄(정규식 휴리스틱)</th><th>이유</th></tr>
+    <tr><td><code>[유입방식]</code> · <code>[유입가이드]</code> 섹션 전체</td><td>유입가이드 칸·inflowType이 담당 — 리뷰가이드에 있으면 이중 표기</td></tr>
+    <tr><td><code>[…첨부 이미지]</code> 라벨 + <code>N. 파일명 (…저장됨)</code> + guide-image/Drive URL 줄</td><td>이미지는 이미 유입가이드로 승격되어 표시됨</td></tr>
+    <tr><td><code>쿠팡상품번호: …</code> · <code>▶옵션:결제금액◀…</code></td><td>상품 카드·옵션표가 담당(참여 후 공개 원칙도 지킴)</td></tr>
+  </table></div>
+
+  <h3>개선 ③ 발행 폼 "원문 덤프 감지 + 🧹 한 번에 정리" (원인 3 — 사람 몫을 시스템이 돕기)</h3>
+  <p class="d">운영 멘트("주소 정확히…")를 자동으로 특이사항에 옮기는 건 오분류 위험이 있어 <b>자동 이동은 하지 않는다</b>.
+  대신 게시 전 자동 점검이 <b>덤프·중복·혼입 패턴을 감지해 경고</b>하고, [🧹 정리]를 누르면 <b>전/후 비교를 보여준 뒤</b> 적용한다(조용한 자동수정 금지 — 슬래시양식 보정 배지와 같은 규율).</p>
+  <div class="modalmock">
+    <div class="mm-t">발행 모달 — 📝 작업내용 카드 (정리 도우미가 켜진 모습)</div>
+    <div class="fld"><label>유입가이드</label>
+      <div>
+        <div class="ta warn">쿠팡 검색어 :장수돌침대 전기매트 / 택배받을 주소 폰번호 정확하게 입력해주세요 ! !</div>
+        <div class="chk warn">⚠ 진입 방법 외의 안내문이 섞여 있는 것 같아요 — 참여자 주의사항이면 <b>특이사항</b>으로 옮겨주세요 <span class="btn" style="margin-left:6px">↘ 특이사항으로 이동</span></div>
+      </div></div>
+    <div class="fld"><label>리뷰가이드</label>
+      <div>
+        <div class="ta warn">[유입방식] 유입가이드
+[유입가이드] 장수돌침대 전기매트
+[유입가이드 첨부 이미지] 1. 0722 장수산업 유입.png …
+[리뷰등록 가이드] 전체 별점 5건 - 배송이 빠르다 …</div>
+        <div class="chk warn">⚠ 유입가이드·첨부 메타가 함께 들어 있어요(리뷰어 화면에 이중 표기) <span class="btn amber" style="margin-left:6px">🧹 리뷰가이드만 남기기</span></div>
+        <div class="diffwrap">
+          <div class="dt">🧹 정리 미리보기 — 확인 후 [적용]</div>
+          <div class="diff">
+            <div><div class="dlab">지금</div><div class="dcol"><span class="cut">[유입방식] 유입가이드</span>
+<span class="cut">[유입가이드] 장수돌침대 전기매트</span>
+<span class="cut">[유입가이드 첨부 이미지] 1. 0722 장수산업 유입.png (29KB…)</span>
+<span class="cut">https://…/guide-image/1mdb…</span>
+<span class="keep">전체 별점 5건
+- 배송이 빠르다
+- 겨울맞이 미리 준비했다 등
+1~2줄 자연스러운 리뷰 작성희망</span></div></div>
+            <div class="darr">→</div>
+            <div><div class="dlab">정리 후</div><div class="dcol">전체 별점 5건
+- 배송이 빠르다
+- 겨울맞이 미리 준비했다 등
+1~2줄 자연스러운 리뷰 작성희망</div></div>
+          </div>
+          <div style="margin-top:8px;display:flex;gap:6px;justify-content:flex-end">
+            <span class="btn">취소</span><span class="btn pri">적용</span>
+          </div>
+        </div>
+      </div></div>
+    <div class="fld"><label>유의사항</label>
+      <div>
+        <div class="ta warn">유입방식: 유입가이드 [유입방식] 유입가이드 … 쿠팡상품번호: 9088636838 …</div>
+        <div class="chk warn">⚠ 공고 카드에 <b>모두에게 공개</b>되는 칸이에요 — 내부 원문(섹션 라벨·상품번호)이 감지됐어요 <span class="btn amber" style="margin-left:6px">🧹 비우기</span></div>
+      </div></div>
+    <div class="fld"><label>자동 점검</label>
+      <div>
+        <div class="chk warn">⚠ 리뷰가이드에 유입가이드와 같은 문장이 있어요(이중 표기)</div>
+        <div class="chk ok">✓ 특이사항 — 참여자 전용 안내로 적절</div>
+      </div></div>
+  </div>
+  <p class="d" style="margin-top:8px"><b>감지 규칙(경고 전용·하드블록 없음)</b>: ⓐ 유의사항에 <code>[라벨]</code>·<code>쿠팡상품번호</code>·<code>결제금액</code> 패턴
+  ⓑ 리뷰가이드에 <code>[유입…]</code> 섹션/첨부 메타 ⓒ 두 칸에 같은 문장 20자+ 중복 ⓓ 유입가이드에 "주소·폰번호·입금" 등 진입과 무관한 키워드.
+  옵션칸 자동점검과 같은 원칙 — <b>틀린 안내가 무서우니 차단 대신 경고 + 사람 확인</b>.</p>
+
+  <h3>개선 ④ 이미 발행된 공고 소급 — 수정 모달이 열릴 때 같은 정리 제안 (원인 2)</h3>
+  <p class="d">스냅샷이라 자동 소급은 없다. 대신 <b>수정 모달을 열면 같은 감지가 돌아</b> 오염된 칸에 ⚠와 [🧹 정리]가 뜬다 —
+  관리자가 공고를 여는 것만으로 정리가 한 번의 클릭이 된다. 관리자 공고 카드에도 <b>"본문 정리 필요"</b> 작은 배지를 달아
+  어떤 공고가 대상인지 목록에서 보이게 한다(선택: 운영 공고 일괄 점검은 그 다음 단계).</p>
+</section>
+
+<!-- ═══ 5. 구현 메모 ═══ -->
+<div class="note gr">
+  <b>구현 관점 메모</b>
+  <ul>
+    <li><b>개선 ①</b> — <code>work-order-detail.js</code> 프리필 <code>notes</code> 조립 1곳 수정(빈 값). 문서 가드
+      <code>tests/woCampaignMapDoc.test.js</code>·<code>작업오더-모집공고_자동반영_와이어프레임.html</code>의 유의사항 항목을 "자동 → 직접 입력"으로 함께 갱신해야 통과.</li>
+    <li><b>개선 ②</b> — 섹션 추출(<code>_woPickSections</code>) 뒤에 메타 줄 스트립을 추가하는 순수함수 확장. 기존
+      <code>_woCleanGuide</code>와 같은 파일·같은 규율(회귀가드에 실측 원문 픽스처로 고정).</li>
+    <li><b>개선 ③</b> — 발행 모달 자동 점검(<code>renderPartCheck</code>)에 경고 항목 추가 + [🧹] 버튼은 전/후 미리보기 필수
+      (조용한 자동수정 금지). 서버 변경 0 — 전부 프론트 텍스트 처리.</li>
+    <li><b>개선 ④</b> — 수정 프리필 후 같은 감지 함수 재사용(사본 금지). 카드 배지는 <code>campaign-cards.js</code> admin 분기에만.</li>
+    <li><b>발주 단계(인트라넷) 개선은 별건</b> — 칸 안내 문구·특이사항 필수화는 인트라넷 폼 소관이라 이 레포 범위 밖.
+      여기서는 리뷰웹이 받는 쪽에서 걸러주는 것까지.</li>
+    <li>정리 로직은 <b>경고·제안 전용</b> — 자동 이동/자동 삭제로 멀쩡한 안내문이 사라지는 사고(옵션칸 blank-only에서 배운 것)를 만들지 않는다.</li>
+  </ul>
+</div>
+
+</div>
+</body>
+</html>
