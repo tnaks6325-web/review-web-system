@@ -1300,6 +1300,8 @@ router.get('/worktable/plan', authMiddleware, internalMiddleware, editorOnlyMidd
     if (q.skipWeekends != null && q.skipWeekends !== '') opt.skipWeekends = q.skipWeekends !== '0' && q.skipWeekends !== 'false';
     if (q.channel) opt.channel = String(q.channel);
     if (q.options) { try { opt.options = JSON.parse(q.options); } catch (_) { /* 깨진 값은 작업오더 파생으로 */ } }
+    // 제외 날짜(공휴일·업체 휴무) — 쉼표 구분 YYYY-MM-DD. 형식 검증은 plan 이 최종 판정한다.
+    if (q.holidays) opt.holidays = String(q.holidays).split(',').map(v => v.trim()).filter(Boolean);
 
     const template = await getTemplate();
     const plan = buildWorktablePlan({ workOrder: wo, template, options: opt });
@@ -1313,6 +1315,84 @@ router.post('/worktable/template', authMiddleware, adminOrMasterMiddleware, asyn
     const b = req.body || {};
     const data = await saveTemplate({ core: b.core, channels: b.channels, by: _by(req) });
     res.json({ ok: true, data });
+  } catch (err) { next(err); }
+});
+
+/* ══════════════════════════════════════════════════════════════
+   입금관리 — 리뷰비 입금 자동화 M1
+     · 입금대상 추출 → 은행별 자동분류 → 다건이체 서식 다운로드 → 회차(잠금) 기록
+
+   ★ 권한 = **master/admin 전용**(adminOrMaster). 계좌번호 전체가 화면·파일에 실리므로
+     등록리뷰어DB 와 같은 규율로 AE(staff)·광고주에게 열지 않는다.
+   ★ 이 블록의 쓰기 표면은 payment_batches / payment_batch_items 두 테이블뿐이다.
+     시트·주문원장·review_index 는 읽기만 한다(시트 입금칸 기록은 M2).
+   설계 문서: frontend/docs/prd-payment-transfer.html
+   ══════════════════════════════════════════════════════════════ */
+const paymentSvc = require('../services/payment.service');
+
+// 오늘 입금해야 할 건 + 은행별 집계
+router.get('/payment/targets', authMiddleware, adminOrMasterMiddleware, async (req, res, next) => {
+  try {
+    const out = await paymentSvc.listPaymentTargets({
+      sheetId: String(req.query.sheetId || '').trim() || undefined,
+      tabName: String(req.query.tabName || '').trim() || undefined,
+    });
+    res.json({ ok: true, items: out.items, summary: out.summary });
+  } catch (err) { next(err); }
+});
+
+// 회차 생성(= 다운로드 잠금). 파일은 아래 /file 로 따로 받는다 —
+// 한 응답에 파일과 경고(skipped)를 같이 실을 수 없기 때문이다.
+router.post('/payment/batch', authMiddleware, adminOrMasterMiddleware, async (req, res, next) => {
+  try {
+    const b = req.body || {};
+    const out = await paymentSvc.createBatch({
+      bank: String(b.bank || '').trim(),
+      rows: Array.isArray(b.rows) ? b.rows : [],
+      by: _by(req),
+    });
+    res.status(out.ok ? 200 : 400).json(out);
+  } catch (err) { next(err); }
+});
+
+// 회차 목록 / 상세
+router.get('/payment/batches', authMiddleware, adminOrMasterMiddleware, async (req, res, next) => {
+  try { res.json({ ok: true, items: await paymentSvc.listBatches(parseInt(req.query.limit, 10) || 50) }); }
+  catch (err) { next(err); }
+});
+router.get('/payment/batch/:id', authMiddleware, adminOrMasterMiddleware, async (req, res, next) => {
+  try {
+    const out = await paymentSvc.getBatch(req.params.id);
+    if (!out) return res.status(404).json({ ok: false, error: '회차를 찾을 수 없습니다.' });
+    res.json({ ok: true, ...out });
+  } catch (err) { next(err); }
+});
+
+// 은행 서식 파일 — 재다운로드도 이력에 남는다(사용자 확정 규칙)
+router.get('/payment/batch/:id/file', authMiddleware, adminOrMasterMiddleware, async (req, res, next) => {
+  try {
+    const out = await paymentSvc.getBatch(req.params.id);
+    if (!out) return res.status(404).json({ ok: false, error: '회차를 찾을 수 없습니다.' });
+    if (out.batch.status === 'cancelled') {
+      return res.status(400).json({ ok: false, error: '취소된 회차는 내려받을 수 없습니다.' });
+    }
+    const live = out.items.filter(i => i.status !== 'cancelled');
+    const buf = await paymentSvc.buildWorkbook(out.batch.bank, live);
+    await paymentSvc.markDownloaded(out.batch.id, _by(req));
+    const name = paymentSvc.batchFileName(out.batch);
+    res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
+    // 한글 파일명 — RFC 5987(filename*)로 보내고 ASCII 폴백을 함께 준다
+    res.setHeader('Content-Disposition',
+      `attachment; filename="payment_${out.batch.seq}.xlsx"; filename*=UTF-8''${encodeURIComponent(name)}`);
+    res.send(buf);
+  } catch (err) { next(err); }
+});
+
+// 회차 취소 — 잠금 해제(항목이 다시 입금대상으로 돌아온다)
+router.post('/payment/batch/:id/cancel', authMiddleware, adminOrMasterMiddleware, async (req, res, next) => {
+  try {
+    const out = await paymentSvc.cancelBatch(req.params.id, _by(req));
+    res.status(out.ok ? 200 : 400).json(out);
   } catch (err) { next(err); }
 });
 

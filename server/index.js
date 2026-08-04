@@ -30,6 +30,8 @@ const REQUIRED_SCHEMA = [
   ['order_submissions', 'review_fee_snapshot'],    // 082 — 홀드확정 전파·review-earnings(없으면 금액이 조용히 0원)
   ['trackb_advertiser_links', 'login_required'],   // 083 — 광고주 링크 로그인 게이트·업체관리 링크/계정 카드
   ['recruit_campaigns', 'reviewer_hidden'],        // 085 — 공개 /list WHERE 절(없으면 리뷰어 공고목록 전면 42703)
+  ['recruit_campaigns', 'transfer_bank'],         // 086 — 공고 create/update INSERT·SET 목록(없으면 공고 발행·수정 전면 42703)
+  ['recruit_campaigns', 'transfer_memo'],         // 086 — 위와 같은 문장에 들어가므로 함께 막아야 한다
 ];
 
 async function _runOneMigration(pool, sql) {

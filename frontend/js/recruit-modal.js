@@ -79,6 +79,25 @@
           <input id="rf_review_fee" type="number" class="rform-input" placeholder="예) 2500" min="0" step="100" oninput="renderFeeSchedule()"></div>
       </div>
 
+      <!-- ── 이체은행 / 받는분 통장표시 (086 — 리뷰비 입금 자동화) ──
+           이체은행은 작업오더 '물건비' 수취방식에서 자동 판정한다(현금→하나 / 계산서→케이뱅크).
+           [자동]으로 두면 계속 작업오더를 따라가고, 은행을 직접 고르면 그 값이 항상 우선한다.
+           통장표시 = 리뷰어 통장에 찍히는 이름(예: 파우더망고) — 한글 8자 이내. -->
+      <div class="rf-grid2">
+        <div class="rf-hrow"><span class="rf-hl">이체은행</span>
+          <div>
+            <div style="display:flex;gap:6px;flex-wrap:wrap" id="rf_transfer_bank_btns">
+              <button class="rchan-btn" data-group="transfer_bank" data-val="" onclick="selectRfBtn('transfer_bank',this)">🔄 자동</button>
+              <button class="rchan-btn" data-group="transfer_bank" data-val="hana" onclick="selectRfBtn('transfer_bank',this)">🟩 하나은행</button>
+              <button class="rchan-btn" data-group="transfer_bank" data-val="kbank" onclick="selectRfBtn('transfer_bank',this)">🟦 케이뱅크</button>
+            </div>
+            <div id="rf_transfer_bank_hint" style="font-size:.66rem;color:#8B94A1;margin-top:4px">현금이체 → 하나은행 · 수수료(세금계산서) → 케이뱅크</div>
+            <input id="rf_transfer_bank" type="hidden">
+          </div></div>
+        <div class="rf-hrow"><span class="rf-hl">통장표시</span>
+          <input id="rf_transfer_memo" type="text" class="rform-input" placeholder="예) 파우더망고" maxlength="8"></div>
+      </div>
+
       <!-- ── 기간별 리뷰비(082) — 날짜마다 다른 금액을 지급할 때만 켠다 ──
            끄면(구간 0개) 위 '리뷰비' 한 값으로 종전과 100% 동일하게 동작한다.
            참여한 리뷰어에겐 **참여 시점 금액이 영구 고정**되므로, 나중에 금액을 올려도

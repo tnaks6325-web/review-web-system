@@ -50,24 +50,48 @@ ok('진입 시 자리표시자는 그대로(로딩 표시 자체는 유지)',
 /* ── B. 런타임 실행 — 프리변수·무한로딩을 실제로 재현·차단 ─────────────── */
 const block = /const _RI_LABEL = \{[\s\S]*?\n(?=\/\*\* 카드의 탭명을 눌러)/.exec(src);
 ok('리뷰검수 렌더 블록을 추출했다', !!block);
+// 상세 팝업 + 좌우 이동 + 키보드 리스너 블록(riOpenDetail ~ keydown 리스너)
+const detailBlock = /function riOpenDetail\(i\)\{[\s\S]*?\n\}\);\n(?=async function riResolve)/.exec(src);
+ok('상세 팝업 블록을 추출했다', !!detailBlock);
 
 /** 아주 작은 DOM 흉내 — innerText 대신 innerHTML 문자열만 본다. */
 function makeSandbox(role, api) {
-  const els = { '#rihead': { innerHTML: '' }, '#ribody': { innerHTML: '<div class="empty">불러오는 중…</div>' }, '#viewroot': { innerHTML: '' } };
+  const modal = { id: 'riModal', className: 'rimodal', style: { display: 'none' }, dataset: {}, innerHTML: '' };
+  const els = {
+    '#rihead': { innerHTML: '' },
+    '#ribody': { innerHTML: '<div class="empty">불러오는 중…</div>' },
+    '#viewroot': { innerHTML: '' },
+    '#riModal': modal,
+  };
+  const keyHandlers = [];
   const sandbox = {
     STATE: { role, riStatus: 'open', riTab: null },
-    els,
+    els, modal, keyHandlers,
     $: (s) => els[s] || null,
     esc: (s) => String(s == null ? '' : s).replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c])),
     api,
     API_BASE: 'https://api.example',
     _riSyncNavBadge: () => {},
+    alert: () => {},
+    document: {
+      addEventListener: (t, fn) => { if (t === 'keydown') keyHandlers.push(fn); },
+      createElement: () => ({ style: {}, dataset: {}, innerHTML: '' }),
+      body: { appendChild: () => {} },
+    },
     console,
     // ★ isAdmin 전역을 **두지 않는다** — 프리변수가 다시 들어오면 여기서 터져야 한다.
   };
   vm.createContext(sandbox);
   vm.runInContext(block[0], sandbox);
+  vm.runInContext(detailBlock[0], sandbox);
   return sandbox;
+}
+/** 키 입력 흉내 — 기본은 본문(BODY)에 포커스가 있는 상태. */
+function press(sb, key, target) {
+  let prevented = false;
+  const ev = { key, target: target || { tagName: 'BODY' }, preventDefault: () => { prevented = true; } };
+  sb.keyHandlers.forEach(h => h(ev));
+  return prevented;
 }
 
 const ITEMS = [
@@ -130,6 +154,102 @@ const OKRES = { ok: true, items: ITEMS, summary: { pass: 1, suspect: 2, fail: 3,
     const sb = makeSandbox('master', async () => ({ ok: true, items: [], summary: { pass: 0, suspect: 0, fail: 0, pending: 0 }, openCount: 0 }));
     await vm.runInContext('_loadInspect()', sb);
     ok('빈 목록도 종결 문구로 끝난다', /검수 건이 없습니다/.test(sb.els['#ribody'].innerHTML));
+  }
+
+  /* ── C. 상세 팝업 좌우 이동(← →) ────────────────────────────────────
+     여러 건을 연달아 훑는 화면이라 "닫고 → 다음 카드 찾고 → 다시 클릭"의 왕복을 없앤다.
+     ★ 끝에서 순환하지 않는다 · ★ 상세일 때만 가로챈다 · ★ 입력 중에는 손대지 않는다. */
+  const MANY = Array.from({ length: 5 }, (_, i) => ({
+    file_id: 'F' + i, sheet_id: 's1', tab_name: '탭', row_index: 100 + i,
+    reviewer_name: '리뷰어' + i, status: i % 2 ? 'suspect' : 'fail', checks: {},
+  }));
+  const loaded = async (role) => {
+    const sb = makeSandbox(role || 'master', async () => ({ ok: true, items: MANY, summary: { pass: 0, suspect: 2, fail: 3, pending: 0 }, openCount: 5 }));
+    await vm.runInContext('_loadInspect()', sb);
+    return sb;
+  };
+
+  ok('★ 리뷰검수 keydown 리스너는 소스에 딱 한 번만 등록된다(열 때마다 걸면 한 번 눌러 여러 칸 건너뛴다)',
+    (src.match(/document\.addEventListener\('keydown'[\s\S]{0,900}?riStepDetail/g) || []).length === 1);
+  ok('★ 그 등록은 최상위다 — 함수 안에 두면 그 함수를 부를 때마다 리스너가 겹쳐 쌓인다',
+    /\ndocument\.addEventListener\('keydown'[\s\S]{0,900}?riStepDetail/.test(src));
+
+  {
+    const sb = await loaded();
+    ok('리스너가 실제로 1개 등록됐다', sb.keyHandlers.length === 1);
+
+    vm.runInContext('riOpenDetail(2)', sb);
+    ok('상세를 열면 현재 위치를 기억한다', sb.STATE.riDetailIdx === 2);
+    ok('★ 상세 팝업임을 표식으로 남긴다(판별 예시 모달과 같은 요소를 재사용하므로)', sb.modal.dataset.riKind === 'detail');
+    ok('헤더에 위치 표시가 있다(몇 번째/전체)', /3 \/ 5/.test(sb.modal.innerHTML));
+    ok('헤더에 이전·다음 버튼이 있다', /riStepDetail\(-1\)/.test(sb.modal.innerHTML) && /riStepDetail\(1\)/.test(sb.modal.innerHTML));
+
+    ok('→ 로 다음 건', press(sb, 'ArrowRight') && sb.STATE.riDetailIdx === 3);
+    ok('← 로 이전 건', press(sb, 'ArrowLeft') && sb.STATE.riDetailIdx === 2);
+    ok('내용도 그 건으로 바뀐다', /리뷰어2/.test(sb.modal.innerHTML));
+
+    press(sb, 'ArrowLeft'); press(sb, 'ArrowLeft');
+    ok('첫 건까지 이동', sb.STATE.riDetailIdx === 0);
+    ok('★ 첫 건에서 ← 는 순환하지 않는다(처음으로 튀면 어디까지 봤는지 잃는다)',
+      (press(sb, 'ArrowLeft'), sb.STATE.riDetailIdx === 0));
+    ok('첫 건에서 [이전] 버튼은 비활성', /riStepDetail\(-1\)[^>]*disabled/.test(sb.modal.innerHTML));
+
+    for (let i = 0; i < 8; i++) press(sb, 'ArrowRight');
+    ok('★ 마지막 건에서 → 는 멈춘다', sb.STATE.riDetailIdx === 4);
+    ok('마지막 건에서 [다음] 버튼은 비활성', /riStepDetail\(1\)[^>]*disabled/.test(sb.modal.innerHTML));
+  }
+
+  // C-2. 닫으면 표식·위치가 함께 정리된다(닫힌 뒤 방향키가 유령 이동을 만들지 않게)
+  {
+    const sb = await loaded();
+    vm.runInContext('riOpenDetail(1)', sb);
+    vm.runInContext('riCloseDetail()', sb);
+    ok('닫으면 팝업이 사라진다', sb.modal.style.display === 'none');
+    ok('닫으면 위치 기억도 지운다', sb.STATE.riDetailIdx === null);
+    ok('★ 닫힌 뒤 방향키는 아무 일도 하지 않는다', !press(sb, 'ArrowRight') && sb.STATE.riDetailIdx === null);
+  }
+
+  // C-3. 판별 예시 모달(같은 #riModal 재사용)에서는 가로채지 않는다
+  {
+    const sb = await loaded();
+    vm.runInContext('riOpenDetail(1)', sb);
+    sb.modal.dataset.riKind = 'samples';   // riOpenSamples 가 세우는 값
+    ok('★ 판별 예시 모달에서는 방향키를 가로채지 않는다(파일 선택칸 조작 보존)',
+      !press(sb, 'ArrowRight') && sb.STATE.riDetailIdx === 1);
+    ok('riOpenSamples 가 표식을 samples 로 세운다', /m\.dataset\.riKind='samples'/.test(src));
+  }
+
+  // C-4. 입력 중·조합키에는 손대지 않는다
+  {
+    const sb = await loaded();
+    vm.runInContext('riOpenDetail(1)', sb);
+    for (const tag of ['INPUT', 'TEXTAREA', 'SELECT']) {
+      ok(`★ ${tag} 안에서는 방향키가 커서 이동으로 남는다`,
+        !press(sb, 'ArrowRight', { tagName: tag }) && sb.STATE.riDetailIdx === 1);
+    }
+    ok('★ contenteditable 에서도 가로채지 않는다',
+      !press(sb, 'ArrowRight', { tagName: 'DIV', isContentEditable: true }) && sb.STATE.riDetailIdx === 1);
+    let prevented = false;
+    sb.keyHandlers.forEach(h => h({ key: 'ArrowRight', ctrlKey: true, target: { tagName: 'BODY' }, preventDefault: () => { prevented = true; } }));
+    ok('★ Ctrl/Alt/Cmd 조합은 브라우저 단축키에 양보한다', !prevented && sb.STATE.riDetailIdx === 1);
+  }
+
+  // C-5. Esc 로 닫기 / 그 밖의 키는 무시
+  {
+    const sb = await loaded();
+    vm.runInContext('riOpenDetail(3)', sb);
+    ok('Esc 로 닫힌다', press(sb, 'Escape') && sb.modal.style.display === 'none');
+    vm.runInContext('riOpenDetail(3)', sb);
+    ok('관계없는 키는 무시한다', !press(sb, 'a') && sb.STATE.riDetailIdx === 3);
+  }
+
+  // C-6. 목록이 비면 이동도 없다(경계)
+  {
+    const sb = makeSandbox('master', async () => ({ ok: true, items: [], summary: { pass: 0, suspect: 0, fail: 0, pending: 0 }, openCount: 0 }));
+    await vm.runInContext('_loadInspect()', sb);
+    vm.runInContext('riOpenDetail(0)', sb);
+    ok('빈 목록에서는 상세가 열리지 않는다', sb.STATE.riDetailIdx == null);
+    ok('빈 목록에서 방향키는 무동작', !press(sb, 'ArrowRight'));
   }
 
   console.log(`\n✅ workdeskInspectView: ${n}개 통과`);

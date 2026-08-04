@@ -1,0 +1,210 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>입금관리 사용 안내 — 입금대상 뽑아 은행에 올리기</title>
+<style>
+  *,*::before,*::after{box-sizing:border-box}
+  :root{
+    --paper:#F4F5F7; --card:#FFFFFF; --ink:#12151A; --muted:#59626F; --faint:#8B94A1;
+    --line:#E1E5EB; --line-soft:#EDF0F4;
+    --acc:#2563A8; --acc-bg:#E9F0F9; --acc-edge:#B7CFE9;
+    --pass:#127A5E; --pass-bg:#E5F3EE; --pass-edge:#A6D6C6;
+    --susp:#9A6414; --susp-bg:#FBF2E1; --susp-edge:#E7D2A3;
+    --fail:#B3382E; --fail-bg:#FAE9E7; --fail-edge:#EAB6B0;
+    --shadow:0 1px 2px rgba(18,21,26,.05), 0 10px 30px rgba(18,21,26,.06);
+    --mono:ui-monospace,SFMono-Regular,"SF Mono",Menlo,Consolas,"D2Coding",monospace;
+    --sans:"Pretendard Variable",Pretendard,-apple-system,BlinkMacSystemFont,"Apple SD Gothic Neo","Malgun Gothic","Noto Sans KR",system-ui,sans-serif;
+  }
+  @media (prefers-color-scheme: dark){
+    :root{
+      --paper:#101317; --card:#171B21; --ink:#E7EBF1; --muted:#98A1AE; --faint:#6E7885;
+      --line:#252B33; --line-soft:#1E232A;
+      --acc:#7FB2E8; --acc-bg:#14263A; --acc-edge:#28486B;
+      --pass:#61C4A4; --pass-bg:#102822; --pass-edge:#22493D;
+      --susp:#E0B571; --susp-bg:#2B2214; --susp-edge:#4C3C1E;
+      --fail:#E79A92; --fail-bg:#321B18; --fail-edge:#5A2E28;
+      --shadow:0 1px 2px rgba(0,0,0,.45), 0 10px 30px rgba(0,0,0,.3);
+    }
+  }
+  :root[data-theme="dark"]{
+    --paper:#101317; --card:#171B21; --ink:#E7EBF1; --muted:#98A1AE; --faint:#6E7885;
+    --line:#252B33; --line-soft:#1E232A;
+    --acc:#7FB2E8; --acc-bg:#14263A; --acc-edge:#28486B;
+    --pass:#61C4A4; --pass-bg:#102822; --pass-edge:#22493D;
+    --susp:#E0B571; --susp-bg:#2B2214; --susp-edge:#4C3C1E;
+    --fail:#E79A92; --fail-bg:#321B18; --fail-edge:#5A2E28;
+    --shadow:0 1px 2px rgba(0,0,0,.45), 0 10px 30px rgba(0,0,0,.3);
+  }
+  :root[data-theme="light"]{
+    --paper:#F4F5F7; --card:#FFFFFF; --ink:#12151A; --muted:#59626F; --faint:#8B94A1;
+    --line:#E1E5EB; --line-soft:#EDF0F4;
+    --acc:#2563A8; --acc-bg:#E9F0F9; --acc-edge:#B7CFE9;
+    --pass:#127A5E; --pass-bg:#E5F3EE; --pass-edge:#A6D6C6;
+    --susp:#9A6414; --susp-bg:#FBF2E1; --susp-edge:#E7D2A3;
+    --fail:#B3382E; --fail-bg:#FAE9E7; --fail-edge:#EAB6B0;
+    --shadow:0 1px 2px rgba(18,21,26,.05), 0 10px 30px rgba(18,21,26,.06);
+  }
+  html{-webkit-text-size-adjust:100%}
+  body{margin:0; background:var(--paper); color:var(--ink); font-family:var(--sans); line-height:1.62; -webkit-font-smoothing:antialiased}
+  .wrap{max-width:1060px; margin:0 auto; padding:40px 20px 90px; display:flex; flex-direction:column; gap:42px}
+  .head{border-bottom:1px solid var(--line); padding-bottom:24px; display:flex; flex-direction:column; gap:12px}
+  .eyebrow{margin:0; font-family:var(--mono); font-size:11px; font-weight:600; letter-spacing:.16em; text-transform:uppercase; color:var(--acc)}
+  h1{margin:0; font-size:clamp(25px,4vw,34px); font-weight:800; letter-spacing:-.028em; line-height:1.18}
+  .lede{margin:0; max-width:70ch; color:var(--muted); font-size:15.5px}
+  .lede b{color:var(--ink)}
+  .chips{display:flex; gap:7px; flex-wrap:wrap}
+  .chip{font-family:var(--mono); font-size:11.5px; font-weight:550; padding:4px 10px; border-radius:7px; border:1px solid var(--line); background:var(--card); color:var(--muted)}
+  .chip.a{border-color:var(--acc-edge); background:var(--acc-bg); color:var(--acc)}
+  section{display:flex; flex-direction:column; gap:14px}
+  .shead{display:flex; align-items:baseline; gap:11px; flex-wrap:wrap}
+  .snum{font-family:var(--mono); font-size:12px; font-weight:650; color:var(--acc); letter-spacing:.08em; border:1px solid var(--acc-edge); background:var(--acc-bg); border-radius:6px; padding:2px 8px; flex:none}
+  h2{margin:0; font-size:20px; font-weight:760; letter-spacing:-.018em}
+  h3{margin:0; font-size:15px; font-weight:720}
+  .sdesc{margin:0; color:var(--muted); font-size:14px; max-width:80ch}
+  .sdesc b, .card b, li b, td b{color:var(--ink); font-weight:700}
+  .card{background:var(--card); border:1px solid var(--line); border-radius:13px; padding:18px 20px; box-shadow:var(--shadow); display:flex; flex-direction:column; gap:11px}
+  ol,ul{margin:0; padding-left:20px; display:flex; flex-direction:column; gap:7px; font-size:14px}
+  li{color:var(--muted)} li::marker{color:var(--faint)}
+  .tblwrap{overflow-x:auto; border:1px solid var(--line); border-radius:11px}
+  table{border-collapse:collapse; width:100%; font-size:13px; background:var(--card)}
+  th{font-size:11.5px; font-weight:650; text-align:left; color:var(--muted); background:var(--paper); padding:8px 12px; border-bottom:1px solid var(--line); white-space:nowrap}
+  td{padding:8px 12px; border-bottom:1px solid var(--line-soft); color:var(--muted); vertical-align:top}
+  tr:last-child td{border-bottom:none}
+  .callout{border-left:3px solid var(--acc); background:var(--acc-bg); border-radius:0 10px 10px 0; padding:12px 16px; font-size:13.5px; color:var(--muted)}
+  .callout.warn{border-left-color:var(--susp); background:var(--susp-bg)}
+  .callout.bad{border-left-color:var(--fail); background:var(--fail-bg)}
+  .callout b{color:var(--ink)}
+  .btn{display:inline-block; font-size:12.5px; font-weight:650; padding:5px 12px; border-radius:8px; border:1px solid var(--line); background:var(--paper); color:var(--muted); white-space:nowrap}
+  .btn.p{background:var(--acc); border-color:var(--acc); color:#fff}
+  .step{display:flex; gap:13px; align-items:flex-start}
+  .step .n{flex:none; width:26px; height:26px; border-radius:50%; background:var(--acc); color:#fff; font-family:var(--mono); font-size:12.5px; font-weight:700; display:grid; place-items:center; margin-top:1px}
+  .step .b{min-width:0}
+  .step .t{font-weight:720; font-size:14.5px; margin-bottom:3px}
+  .step .d{color:var(--muted); font-size:13.5px}
+  footer{border-top:1px solid var(--line); padding-top:18px; color:var(--faint); font-size:12.5px}
+</style>
+</head>
+<body>
+<div class="wrap">
+
+  <header class="head">
+    <p class="eyebrow">직원 안내서</p>
+    <h1>입금관리 사용 안내<br>입금대상 뽑아 은행에 올리기</h1>
+    <p class="lede">
+      <b>통합 작업대 → [입금관리]</b> 탭에서 오늘 입금할 리뷰어를 자동으로 뽑아
+      케이뱅크·하나은행 다건이체 서식으로 내려받습니다. 구글시트를 뒤져 계좌를 손으로 옮겨 적던 일이 사라집니다.
+    </p>
+    <div class="chips">
+      <span class="chip a">master · admin 전용</span>
+      <span class="chip">1단계(M1) — 대상 추출 · 다운로드</span>
+      <span class="chip">2026-08-04</span>
+    </div>
+  </header>
+
+  <!-- 01 -->
+  <section>
+    <div class="shead"><span class="snum">01</span><h2>하루 흐름 — 이렇게 씁니다</h2></div>
+    <div class="card">
+      <div class="step"><div class="n">1</div><div class="b">
+        <div class="t">통합 작업대 → [입금관리] 열기</div>
+        <div class="d">오늘 입금해야 할 건이 이미 뽑혀 있습니다. 위쪽에 <b>대상 건수·합계 금액·은행별 건수</b>가 보입니다.</div></div></div>
+      <div class="step"><div class="n">2</div><div class="b">
+        <div class="t">표를 훑어보고 뺄 건은 체크 해제</div>
+        <div class="d">이번에 보내지 않을 건은 왼쪽 체크를 풀면 됩니다. 체크를 풀면 위 버튼의 건수·금액이 바로 줄어듭니다.</div></div></div>
+      <div class="step"><div class="n">3</div><div class="b">
+        <div class="t"><span class="btn p">⬇ 케이뱅크 서식 다운로드</span> 또는 <span class="btn p">⬇ 하나은행 서식 다운로드</span></div>
+        <div class="d">확인창이 뜨고, [확인]을 누르면 엑셀 파일이 내려받아집니다. <b>이 순간 그 건들은 잠깁니다</b>(다음 목록에 다시 안 나옵니다).</div></div></div>
+      <div class="step"><div class="n">4</div><div class="b">
+        <div class="t">받은 파일을 은행 사이트에 그대로 올리기</div>
+        <div class="d">지금 하시던 것과 똑같습니다. 파일을 열어 고칠 필요 없습니다.</div></div></div>
+      <div class="step"><div class="n">5</div><div class="b">
+        <div class="t">이체 후 — 아래 [이체 회차] 표에서 기록 확인</div>
+        <div class="d">누가·언제·몇 건을 받았는지 남습니다. (은행 결과 파일을 올려 입금일을 자동 기록하는 기능은 <b>다음 단계(2단계)</b>입니다. 지금은 시트 입금칸을 종전대로 적어주세요.)</div></div></div>
+    </div>
+    <div class="callout">
+      <b>대상은 어떻게 뽑히나요?</b> ① 리뷰를 제출했고 ② 아직 입금 안 됐고 ③ <b>한 번도 다운로드에 담긴 적 없는</b> 건만 나옵니다.
+      어제 놓친 건도 자동으로 계속 남아 있으니 따로 챙기지 않아도 됩니다.
+    </div>
+  </section>
+
+  <!-- 02 -->
+  <section>
+    <div class="shead"><span class="snum">02</span><h2>은행은 자동으로 갈립니다</h2></div>
+    <p class="sdesc">어느 은행으로 보낼지는 <b>작업오더의 "물건비" 항목</b>에서 자동으로 정해집니다. 직원이 건별로 고를 필요가 없습니다.</p>
+    <div class="tblwrap"><table>
+      <tr><th>작업오더 물건비</th><th>이체 은행</th></tr>
+      <tr><td><b>현금</b> (현금이체로 받는 작업)</td><td>하나은행 다건이체</td></tr>
+      <tr><td><b>계산서</b> (수수료·세금계산서로 받는 작업)</td><td>케이뱅크 다건이체</td></tr>
+    </table></div>
+    <div class="card">
+      <h3>바꾸고 싶을 때 — 모집공고 수정</h3>
+      <ul>
+        <li>모집공고 수정 창 <b>[이체은행]</b> 에서 <span class="btn">🔄 자동</span> <span class="btn">🟩 하나은행</span> <span class="btn">🟦 케이뱅크</span> 중에 고릅니다.</li>
+        <li><b>[자동]</b>이 기본값입니다 — 작업오더를 계속 따라갑니다. 그 아래에 <b>"작업오더 물건비 '계산서' → 케이뱅크로 자동 분류돼요"</b>처럼 판정 결과가 표시됩니다.</li>
+        <li>은행을 직접 고르면 <b>그 값이 항상 우선</b>합니다(작업오더가 나중에 바뀌어도 안 따라갑니다). 다시 [자동]을 누르면 원래대로 돌아갑니다.</li>
+      </ul>
+    </div>
+  </section>
+
+  <!-- 03 -->
+  <section>
+    <div class="shead"><span class="snum">03</span><h2>통장표시 — 리뷰어 통장에 찍히는 이름</h2></div>
+    <div class="card">
+      <ul>
+        <li>모집공고 수정 창 <b>[통장표시]</b>에 적습니다. 예) <b>파우더망고</b>, <b>쉐이크만두</b> — 지금 쓰시던 방식 그대로(작업 축약명 + 담당자 닉네임).</li>
+        <li><b>한글 8자까지</b>만 들어갑니다(은행 서식 제한). 넘으면 잘립니다.</li>
+        <li>비워두면 입금관리 화면에 <b>"⚠ 통장표시 없음 N건"</b> 경고가 뜹니다. 이체는 되지만 리뷰어가 무슨 돈인지 몰라 문의가 옵니다 — 되도록 채워주세요.</li>
+      </ul>
+    </div>
+  </section>
+
+  <!-- 04 -->
+  <section>
+    <div class="shead"><span class="snum">04</span><h2>"보류"로 표시된 건은 왜 빠졌나요?</h2></div>
+    <p class="sdesc">파일에서 빠진 건은 <b>조용히 사라지지 않고</b> 표에 회색으로 남아 사유가 적힙니다. 사유를 해결하면 다음에 자동으로 다시 잡힙니다.</p>
+    <div class="tblwrap"><table>
+      <tr><th>표시되는 사유</th><th>무슨 뜻인가</th><th>어떻게 해결하나</th></tr>
+      <tr><td><b>이체은행 미지정</b></td><td>연결된 작업오더에 물건비가 없거나, 작업오더 없이 만든 공고</td><td>모집공고 수정 → [이체은행]에서 직접 선택</td></tr>
+      <tr><td><b>계좌 미등록</b></td><td>리뷰어가 내정보에 계좌를 안 넣었다</td><td>리뷰어에게 계좌 등록 안내</td></tr>
+      <tr><td><b>은행명 인식불가</b></td><td>리뷰어가 적은 은행 이름을 시스템이 못 알아본다(오타 등)</td><td>리뷰어에게 은행명 정정 안내 (틀린 은행으로 보내는 것보다 안전하게 일부러 막습니다)</td></tr>
+      <tr><td><b>예금주 미등록</b></td><td>예금주 이름이 비어 있다</td><td>리뷰어에게 예금주 등록 안내</td></tr>
+      <tr><td><b>결제금액 조회안됨</b></td><td>그 행에 연결된 구매양식(주문) 기록이 없어 상품비를 모른다</td><td>주문 기록 확인 — 외부모집 수기 건이면 구매양식 수동제출로 등록</td></tr>
+    </table></div>
+  </section>
+
+  <!-- 05 -->
+  <section>
+    <div class="shead"><span class="snum">05</span><h2>잘못 뽑았을 때 — [회차 취소]</h2></div>
+    <div class="card">
+      <ul>
+        <li>아래 <b>[이체 회차]</b> 표에서 그 회차의 <span class="btn">회차 취소</span> 를 누르면 잠금이 풀려 <b>건들이 다시 입금대상 목록으로 돌아옵니다.</b></li>
+        <li><span class="btn">⬇ 다시 받기</span> 는 같은 회차의 파일을 한 번 더 내려받습니다. <b>다시 받은 것도 기록에 남습니다</b>(몇 회 받았는지 표에 표시).</li>
+      </ul>
+      <div class="callout bad">
+        <b>이미 은행에 올린 회차는 절대 취소하지 마세요.</b> 취소하면 그 건들이 다시 입금대상으로 나와
+        <b>두 번 입금될 수 있습니다.</b> 취소는 "은행에 올리기 전에 잘못 뽑았을 때"만 씁니다.
+      </div>
+    </div>
+  </section>
+
+  <!-- 06 -->
+  <section>
+    <div class="shead"><span class="snum">06</span><h2>알아두실 것</h2></div>
+    <div class="card">
+      <ul>
+        <li><b>같은 사람이 여러 작업에 참여했으면 작업별로 따로 이체됩니다</b>(합치지 않습니다). 통장에도 여러 줄로 들어가고, 작업별 통장표시가 그대로 보입니다.</li>
+        <li><b>이체금액 = 상품비(결제금액) + 리뷰비</b>입니다. 표에서 오른쪽에 <span style="font-family:var(--mono);font-size:12px">25,000+1,900</span> 처럼 내역이 함께 보입니다.</li>
+        <li>이 화면은 <b>계좌번호가 전부 보입니다</b> — 화면 공유·스크린샷에 주의하세요. AE·광고주 계정에는 메뉴 자체가 보이지 않습니다.</li>
+        <li>다운로드 파일은 은행 공식 양식 그대로입니다. <b>열어서 고치지 마세요</b> — 계좌번호 앞의 0이 사라지는 등 엑셀이 값을 바꿀 수 있습니다.</li>
+      </ul>
+    </div>
+  </section>
+
+  <footer>
+    입금관리 사용 안내 v1.0 · 2026-08-04 · 전체 기능 설계는 「리뷰비 입금 자동화 PRD」 문서를 참고하세요.
+  </footer>
+</div>
+</body>
+</html>
