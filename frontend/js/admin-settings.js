@@ -868,11 +868,13 @@ function _wtRenderCols() {
       : (c.pending
           ? '저장하면 이 열이 구매양식의 어느 제출 항목과 매칭되는지 판정해 여기에 표시합니다'
           : '구매양식 제출 항목과 매칭되지 않습니다 — 상태 표시·관리자 기입용 칸이면 정상입니다');
+    /* ★ 설명은 배지 오른쪽 같은 줄(사용자 확정 — 두 줄이면 행이 두꺼워져 훑기 어렵다).
+       넘치는 문장은 말줄임하고 title 에 전체를 남긴다(미리보기 칸과 같은 규칙). */
     return '<div class="as-wtrow">' +
       '<span class="as-wtno">' + (i + 1) + '</span>' +
       '<span class="as-wtname">' + escHtml(c.name) + '</span>' +
       note + warn +
-      '<span class="as-wtfill">' + escHtml(fillTxt) + '</span>' +
+      '<span class="as-wtfill" title="' + escHtml(fillTxt) + '">' + escHtml(fillTxt) + '</span>' +
       '</div>';
   }).join('');
 }
@@ -1432,8 +1434,12 @@ function loadReviewTypeCleanup() { _setNavBadge('reviewtype', '점검'); }
       '.as-wtrole.none{color:#6B7280;background:#F3F4F6;border-color:#E5E7EB}' +
       '.as-wtrole.pending{color:#B45309;background:#FFFBEB;border-color:#FDE68A}' +
       '.as-wtwarn{font-size:.72rem;color:#B45309;background:#FEF3C7;border:1px solid #FDE68A;border-radius:5px;padding:2px 7px}' +
-      /* 제출 매칭 설명 — 행 아래 전폭 한 줄(.as-wtrow 가 flex-wrap 이라 basis 100% 로 내려간다) */
-      '.as-wtfill{flex-basis:100%;font-size:.71rem;color:#6B7280;line-height:1.5;padding-left:26px}' +
+      /* 제출 매칭 설명 — 배지 오른쪽 같은 줄(행 높이 한 줄 유지), 넘치면 말줄임 + title 전체 문장.
+         ★ flex:1 1 0 + min-width:0 이라 설명이 아무리 길어도 행을 두 줄로 밀지 않는다. */
+      '.as-wtfill{flex:1 1 0;min-width:0;font-size:.71rem;color:#6B7280;line-height:1.5;' +
+        'white-space:nowrap;overflow:hidden;text-overflow:ellipsis}' +
+      /* 좁은 화면은 어차피 행이 접히므로 설명을 아랫줄 전폭으로(잘려서 안 보이는 것보다 낫다) */
+      '@media (max-width:640px){.as-wtfill{flex-basis:100%;white-space:normal;padding-left:26px}}' +
       '.as-wtsec{font-size:.75rem;font-weight:750;letter-spacing:.03em;color:#6B7280;margin:16px 0 8px}' +
       '.as-wtnote{font-size:.74rem;color:#9CA3AF;line-height:1.6;margin-bottom:8px}' +
       '.as-wtnote b{color:#4B5563}' +

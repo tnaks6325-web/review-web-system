@@ -407,6 +407,15 @@ ok('★★ 상세 각 행에 구매양식 제출 매칭 설명이 표기된다 �
     return /c\.fill/.test(body) && /escHtml\(fillTxt\)/.test(body)
       && !/\[주문자\]|\[수취인\]|\[배송주소\]/.test(setJs);
   })());
+ok('★ 매칭 설명은 배지 오른쪽 같은 줄(행 높이 한 줄 유지) — 넘치면 말줄임 + title 전체 문장',
+  (() => {
+    const i = setJs.indexOf("'.as-wtfill{");
+    if (i < 0) return false;
+    const rule = setJs.slice(i, setJs.indexOf('}', i));   // 문자열 이어붙임 경계 무시하고 규칙 끝까지
+    return /flex:1 1 0/.test(rule) && /min-width:0/.test(rule) && /white-space:nowrap/.test(rule)
+      && /text-overflow:ellipsis/.test(rule) && !/flex-basis:100%/.test(rule)
+      && /as-wtfill" title="/.test(setJs);
+  })());
 ok('★ ROLE_META 전 역할이 fill 설명을 갖고 classifyHeaders 가 실어 나른다(실행 검증)',
   Object.values(wt.ROLE_META).every(m => typeof m.fill === 'string' && m.fill.length > 0)
   && wt.classifyHeaders(['수취인'], {})[0].fill.includes('[수취인]')
