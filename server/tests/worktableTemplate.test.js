@@ -290,7 +290,7 @@ ok('★ 공통 행과 채널 행은 **같은 빌더** 한 벌(_wtRowHtml) — �
 ok('★ 공통 = 표준 열 한 벌(별도 개념 없음) — core 배열을 두 뷰가 함께 본다',
   /function _wtListFor/.test(setJs)
   && /key === 'core'\) return \(_wtTpl\.core/.test(setJs)
-  && /function _wtSyncColumns[\s\S]{0,400}_wtRenderChans\(\)/.test(setJs));
+  && /function _wtSyncColumns[\s\S]{0,600}_wtRenderChans\(\)/.test(setJs));
 ok('★ 공통에 이미 있는 열을 채널에 또 넣지 못한다(작업표에 같은 열 2번 생성 차단)',
   /이미 공통 열입니다/.test(setJs));
 ok('공통 기본값 프리셋 15열이 사용자 확정 목록과 일치한다',
@@ -335,7 +335,7 @@ ok('블록 렌더도 escHtml 통과 + 편집 시 dirty 표시(조용한 유실 �
        var body = setJs.slice(i, i + 900);
        return i > -1 && /_wtAfterEdit\(key\)/.test(body);
      })
-  && /function _wtSyncColumns[\s\S]{0,400}_wtDirty\(true\)/.test(setJs));
+  && /function _wtSyncColumns[\s\S]{0,600}_wtDirty\(true\)/.test(setJs));
 ok('리포트는 펼칠 때 1회만 로드(설정 열 때마다 무거운 집계 금지)',
   /_wtStats\) return _wtRenderReport/.test(setJs));
 ok('편집 중 저장 안 함 경고가 뜬다(조용한 유실 방지)',
@@ -368,6 +368,53 @@ ok('★★ 한 줄 유지 — 줄바꿈·가로 스크롤 없이 칸만 줄인�
   })());
 ok('★ 채널 열은 특정 채널을 그리지 않고 자리만 알린다(틀린 채널을 그리느니 자리 표시)',
   /as-wtpvc add[\s\S]{0,120}＋채널/.test(setJs));
+
+/* ── 공통 열 조절 창구 단일화 + 제출 매칭 설명(사용자 확정 2026-08-04) ────────
+   종전엔 공통 행 칩·작업표 미리보기·공통 열 상세 세 곳이 같은 배열을 그렸고 그중
+   둘(칩 ◀▶✕ · 상세 ↑↓✕)이 편집까지 돼 창구가 갈렸다 → **조절은 미리보기 하나**,
+   공통 행은 추가 창구만, 상세는 읽기 전용 설명표(시스템 인식 + 구매양식 제출 매칭). */
+ok('★★ 공통 행은 칩을 그리지 않는다 — 요약 + "미리보기에서 조절" 안내만(중복 창구 제거)',
+  (() => {
+    const i = setJs.indexOf('function _wtRenderChans');
+    const body = setJs.slice(i, setJs.indexOf('\nfunction wtChAdd', i));
+    // core 분기가 칩 map 이전에 return 하고, 안내가 미리보기를 가리킨다
+    const core = /if \(key === 'core'\) \{[\s\S]{0,400}?return;\s*\}/.exec(body);
+    return i > -1 && !!core && /작업표 미리보기/.test(core[0]) && !/as-wtchip"/.test(core[0])
+      && body.indexOf(core[0]) < body.indexOf('as-wtchip');
+  })());
+ok('★★ 미리보기 칸 클릭 = 조절(선택 → ◀▶✕) — onclick 은 인덱스만(열 이름 미포함 = 따옴표 탈출 차단)',
+  (() => {
+    const m = /onclick="wtPvSel\([^"]*"/.exec(setJs);
+    return !!m && /\+ i \+/.test(m[0]) && !/name/.test(m[0])
+      && /function wtPvSel/.test(setJs) && /as-wtpvc\.sel/.test(setJs);
+  })());
+ok('★ 툴바 이동·빼기는 기존 단일 편집 경로(wtChMove/wtChDel)로 위임 — 편집 경로 사본 없음',
+  /function wtPvMove[\s\S]{0,400}wtChMove\('core', i, dir\)/.test(setJs)
+  && /function wtPvDel[\s\S]{0,200}wtChDel\('core', i\)/.test(setJs));
+ok('★ onclick 함수 3종은 window 에 노출된다(IIFE 스코프 — 빠지면 클릭이 ReferenceError 로 조용히 죽는다)',
+  ['wtPvSel', 'wtPvMove', 'wtPvDel'].every(f => setJs.includes('window.' + f + ' = ' + f)));
+ok('★★ 공통 열 상세는 읽기 전용 — 행에 조절 버튼이 없다(조절 창구는 미리보기 하나)',
+  (() => {
+    const i = setJs.indexOf('function _wtRenderCols');
+    const body = setJs.slice(i, setJs.indexOf('\nfunction _wtSyncColumns', i));
+    return i > -1 && !/onclick/.test(body) && !/as-wtbtns|wtMoveCol\(|wtDelCol\(/.test(body);
+  })());
+ok('★★ 상세 각 행에 구매양식 제출 매칭 설명이 표기된다 — 문장은 서버 ROLE_META.fill 단일 출처',
+  (() => {
+    const i = setJs.indexOf('function _wtRenderCols');
+    const body = setJs.slice(i, setJs.indexOf('\nfunction _wtSyncColumns', i));
+    // 프론트는 서버 값(c.fill)을 escHtml 로 표시할 뿐, 역할별 매칭 문장 사본이 없다
+    return /c\.fill/.test(body) && /escHtml\(fillTxt\)/.test(body)
+      && !/\[주문자\]|\[수취인\]|\[배송주소\]/.test(setJs);
+  })());
+ok('★ ROLE_META 전 역할이 fill 설명을 갖고 classifyHeaders 가 실어 나른다(실행 검증)',
+  Object.values(wt.ROLE_META).every(m => typeof m.fill === 'string' && m.fill.length > 0)
+  && wt.classifyHeaders(['수취인'], {})[0].fill.includes('[수취인]')
+  && wt.classifyHeaders(['상품명'], {})[0].fill === null);
+ok('★ 템플릿 주석(_annotate)도 fill 을 통과시켜 화면까지 닿는다',
+  /fill: c\.fill/.test(svcSrc));
+ok('저장 전 임시 열은 "저장하면 판정" 안내 — 매칭 없음과 구분(추측 금지)',
+  /pending: true/.test(setJs) && /저장하면 시스템 인식이 판정됩니다/.test(setJs));
 
 console.log(`\n✅ worktableTemplate: ${n}개 통과`);
 // orderLedger.service 를 require 하면 DB 풀 핸들이 열려 프로세스가 안 끝난다(레포 관용구).
