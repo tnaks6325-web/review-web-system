@@ -1,0 +1,380 @@
+<!doctype html>
+<html lang="ko"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>시안 — 업체용(광고주) 뷰어 화면 정돈</title>
+<style>
+:root{
+  color-scheme:light;
+  --paper:#f4f6f9;--card:#ffffff;--card2:#f1f4f8;--ink:#101828;--muted:#667085;--faint:#98a2b3;
+  --line:#e6eaf0;--line2:#d0d9e4;--accent:#2563eb;--accent-soft:#eff4ff;--accent-deep:#1d4ed8;--accent-line:#d7e3fd;
+  --safe:#16a34a;--safe-soft:#e9f7ee;--warn:#b45309;--warn-soft:#fdf6ec;--bad:#e5484d;--bad-soft:#fdf0f0;
+  --adv:#6d5ac9;--adv-soft:#efecfa;
+  --sans:-apple-system,BlinkMacSystemFont,"Apple SD Gothic Neo","Pretendard","Malgun Gothic",sans-serif;
+}
+*{box-sizing:border-box}
+body{margin:0;background:var(--paper);color:var(--ink);font-family:var(--sans);font-size:14px;line-height:1.55;-webkit-font-smoothing:antialiased}
+.page{max-width:1300px;margin:0 auto;padding:26px 20px 90px}
+h1{font-size:21px;font-weight:800;margin:0 0 6px}
+.lead{color:var(--muted);font-size:13px;margin:0 0 24px;max-width:860px}
+.doc{margin-top:38px}
+.doc h2{font-size:15px;font-weight:800;margin:0 0 10px;display:flex;align-items:center;gap:8px}
+.doc h2 .n{width:20px;height:20px;border-radius:6px;background:var(--accent-soft);color:var(--accent-deep);font-size:11px;display:grid;place-items:center;flex:none}
+.note{background:var(--card);border:1px solid var(--line);border-radius:12px;padding:14px 16px;font-size:13px;color:var(--muted)}
+.note b{color:var(--ink)}
+.note ul{margin:6px 0 0;padding-left:18px} .note li{margin-bottom:4px}
+
+/* 비포/애프터 3항목 */
+.cmp{display:grid;grid-template-columns:1fr 1fr;gap:12px}
+@media(max-width:880px){.cmp{grid-template-columns:1fr}}
+.cmp .box{background:var(--card);border:1px solid var(--line);border-radius:12px;padding:13px 15px;font-size:12.5px;color:var(--muted)}
+.cmp .box .lbl{font-size:10.5px;font-weight:750;letter-spacing:.04em;text-transform:uppercase;margin-bottom:7px}
+.cmp .before .lbl{color:var(--bad)} .cmp .after .lbl{color:var(--safe)}
+.cmp .box p{margin:0 0 6px} .cmp .box p:last-child{margin:0}
+.cmp .box b{color:var(--ink)}
+
+/* ── 목업 공통: QHD 뷰포트 안에서 상한이 걸린 앱 프레임 ── */
+.mockcap{font-size:11px;font-weight:750;letter-spacing:.04em;text-transform:uppercase;color:var(--faint);margin:0 0 9px}
+.viewport{border:1px solid var(--line2);border-radius:14px;overflow:hidden;background:
+  repeating-linear-gradient(45deg,#eef1f6 0 10px,#e9edf3 10px 20px);box-shadow:0 2px 10px rgba(16,24,40,.05)}
+.viewport .vhint{font-size:10.5px;color:var(--faint);text-align:right;padding:6px 12px 5px;font-weight:600}
+.appframe{display:flex;flex-direction:column;background:var(--paper);width:88%;min-width:640px;border-right:2px dashed var(--line2)}
+.leftover{position:relative}
+.leftover::after{content:"화면이 아무리 넓어도(QHD·울트라와이드) 본문은 여기서 멈춤 → 남는 폭은 오른쪽 여백";
+  position:absolute;right:10px;top:46%;transform:translateY(-50%);font-size:10.5px;color:var(--faint);max-width:120px;text-align:center;line-height:1.5}
+.vrow{display:flex;align-items:stretch}
+.vrow .leftover{flex:1}
+
+/* 상단 바 */
+.ftop{display:flex;align-items:center;gap:10px;background:var(--card);border-bottom:1px solid var(--line);padding:9px 16px;flex-wrap:wrap}
+.ftop .logo{font-weight:800;font-size:13.5px;letter-spacing:-.02em}
+.ftop .tag{font-size:9.5px;font-weight:800;color:var(--adv);background:var(--adv-soft);border:1px solid color-mix(in srgb,var(--adv) 25%,transparent);padding:2px 8px;border-radius:999px;margin-left:7px;letter-spacing:.05em}
+.ftop .fsp{flex:1}
+.fbtn{font:inherit;font-size:11px;font-weight:700;height:27px;padding:0 11px;border-radius:8px;border:1px solid var(--line);background:var(--card);color:var(--ink);cursor:default;white-space:nowrap}
+.advb{font-size:11px;font-weight:750;color:var(--adv);background:var(--adv-soft);border:1px solid color-mix(in srgb,var(--adv) 25%,transparent);border-radius:999px;padding:4px 11px;white-space:nowrap}
+
+/* 본문 2단: 좌 작업목록 사이드바(업체관리 차용) + 우 패널 */
+.fbody{display:flex;align-items:stretch;min-height:430px}
+.fside{width:206px;flex:none;border-right:1px solid var(--line);background:var(--card);padding:11px 10px;overflow:hidden}
+.fside .sh{font-size:9.5px;font-weight:750;letter-spacing:.05em;text-transform:uppercase;color:var(--faint);margin:3px 6px 8px;display:flex;align-items:center;justify-content:space-between}
+.fside .sh .cnt{font-weight:700;background:var(--card2);border-radius:999px;padding:1px 7px;font-size:10px}
+.witem{display:flex;align-items:center;gap:8px;padding:8px 9px;border-radius:9px;margin-bottom:4px;cursor:pointer;border:1px solid transparent}
+.witem:hover{background:var(--card2)}
+.witem.on{background:var(--adv-soft);border-color:color-mix(in srgb,var(--adv) 35%,transparent)}
+.witem .ava{width:30px;height:30px;border-radius:8px;background:var(--card2);color:var(--muted);display:grid;place-items:center;font-weight:800;font-size:9.5px;flex:none;line-height:1.1;text-align:center}
+.witem.on .ava{background:var(--card);color:var(--adv)}
+.witem .nm{font-size:11.5px;font-weight:650;flex:1;min-width:0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.witem .nm i{display:block;font-size:9.5px;font-style:normal;font-weight:500;color:var(--faint);margin-top:1px}
+.witem .stt{font-size:9px;font-weight:750;border-radius:999px;padding:1px 6px;flex:none}
+.stt.run{background:var(--accent-soft);color:var(--accent-deep)} .stt.done{background:var(--safe-soft);color:var(--safe)}
+.fmain{flex:1;min-width:0;padding:14px 16px;overflow-x:auto}
+
+/* 우 패널 헤더(.mh 대응) — 데이터 폭과 같은 값으로 캡 */
+.fmh{display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin-bottom:11px;max-width:920px}
+.fmh h3{font-size:15px;margin:0;font-weight:800;letter-spacing:-.02em}
+.bd{font-size:10px;font-weight:750;border:1px solid var(--line);border-radius:999px;padding:2px 9px;color:var(--muted);background:var(--card);white-space:nowrap}
+.bd.g{color:var(--safe);border-color:color-mix(in srgb,var(--safe) 30%,var(--line));background:var(--safe-soft)}
+.bd.a{color:var(--adv);border-color:color-mix(in srgb,var(--adv) 28%,var(--line));background:var(--adv-soft)}
+
+/* 요약 스트립(summaryStrip 대응) — 캡 적용 */
+.strip{display:flex;flex-wrap:wrap;gap:7px;margin-bottom:10px;max-width:920px}
+.mcell{background:var(--card);border:1px solid var(--line);border-radius:10px;padding:7px 11px;min-width:96px;flex:1 1 96px}
+.mcell .k{font-size:9px;color:var(--faint);text-transform:uppercase;letter-spacing:.04em;font-weight:700}
+.mcell .v{font-size:12.5px;font-weight:700;margin-top:2px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.mcell.kpi .v{font-size:14.5px}
+.mcell .v small{font-size:10px;font-weight:600;color:var(--faint);margin-left:2px}
+.spct{font-size:9.5px;font-weight:800;padding:1px 6px;border-radius:999px;margin-left:5px;vertical-align:2px;background:var(--accent-soft);color:var(--accent-deep)}
+.spct.safe{background:var(--safe-soft);color:var(--safe)}
+.mcell.kpi.s{border-color:color-mix(in srgb,var(--safe) 28%,var(--line))}
+.mcell.kpi.p{border-color:color-mix(in srgb,var(--accent) 26%,var(--line))}
+
+/* 작업 목록 표(업체관리 owntab 차용 · 광고주 렌즈) */
+.othead,.wrow{display:grid;grid-template-columns:50px minmax(150px,1.3fr) 68px 102px 48px 48px 78px 78px 48px 80px 34px;gap:6px;align-items:center;min-width:790px}
+.othead{font-size:9px;font-weight:750;letter-spacing:.04em;text-transform:uppercase;color:var(--faint);padding:0 12px 5px}
+.wrow{padding:9px 12px;border:1px solid var(--line);border-radius:12px;margin-bottom:7px;cursor:pointer;background:var(--card)}
+.wrow:hover{border-color:var(--accent-line);box-shadow:0 4px 12px rgba(16,24,40,.06)}
+.wrow .odate{font-size:10.5px;font-variant-numeric:tabular-nums}
+.wrow .oname{min-width:0}
+.wrow .oname b{font-size:11.5px;display:block;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.wrow .oname .osub{display:block;font-size:9.5px;color:var(--faint);margin-top:2px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.wrow .och{font-size:10.5px;color:var(--muted)}
+.wrow .ocnt{font-size:10.5px;font-variant-numeric:tabular-nums;white-space:nowrap;color:var(--muted)}
+.wrow .ocnt b{font-weight:700;color:var(--ink)} .wrow .ocnt .c-sub{color:var(--accent)} .wrow .ocnt .c-paid{color:var(--safe)}
+.wrow .omoney{font-size:10.5px;font-variant-numeric:tabular-nums;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.wrow .omoney.rest b{color:var(--warn)} .wrow .omoney.rest.zero b{color:var(--safe)}
+.wrow .openb{font-size:10px;color:var(--accent);font-weight:700;white-space:nowrap;text-align:right}
+.schip{font-size:9px;font-weight:750;border-radius:999px;padding:2px 7px;white-space:nowrap;display:inline-block}
+.schip.ok{background:var(--accent-soft);color:var(--accent-deep)} .schip.safe{background:var(--safe-soft);color:var(--safe)}
+.schip.warn{background:var(--warn-soft);color:var(--warn)} .schip.dim{background:var(--card2);color:var(--faint)}
+
+/* 정산 상세 카드(작업 상세 화면) */
+.setlcard{background:var(--card);border:1px solid var(--line);border-radius:12px;padding:13px 15px;margin-bottom:10px;max-width:920px}
+.setlcard .sct{font-size:10px;font-weight:750;letter-spacing:.04em;text-transform:uppercase;color:var(--faint);margin-bottom:10px;display:flex;gap:8px;align-items:center;flex-wrap:wrap}
+.steps{display:flex;gap:0;flex-wrap:wrap;margin-bottom:12px}
+.stp{display:flex;align-items:center;gap:8px;flex:1;min-width:150px;padding:8px 10px;border:1px solid var(--line);background:var(--card2);position:relative}
+.stp:first-child{border-radius:10px 0 0 10px} .stp:last-child{border-radius:0 10px 10px 0}
+.stp+.stp{border-left:none}
+.stp .ic{width:22px;height:22px;border-radius:50%;display:grid;place-items:center;font-size:11px;font-weight:800;flex:none;background:var(--line2);color:var(--muted)}
+.stp.done .ic{background:var(--safe);color:#fff} .stp.wait .ic{background:var(--warn-soft);color:var(--warn)}
+.stp .sk{font-size:10px;font-weight:750;color:var(--faint)} .stp .sv{font-size:11px;font-weight:650}
+.stp.off .sv{color:var(--faint);font-weight:500}
+.moneyrow{display:grid;grid-template-columns:repeat(auto-fit,minmax(130px,1fr));gap:8px}
+.mbox{border:1px solid var(--line);border-radius:10px;padding:9px 12px;background:var(--card2)}
+.mbox .k{font-size:9.5px;font-weight:750;color:var(--faint);text-transform:uppercase;letter-spacing:.03em}
+.mbox .v{font-size:14.5px;font-weight:800;margin-top:3px;font-variant-numeric:tabular-nums}
+.mbox .v small{font-size:10px;color:var(--faint);font-weight:600;margin-left:3px}
+.mbox.hl{border-color:color-mix(in srgb,var(--warn) 35%,var(--line));background:var(--warn-soft)} .mbox.hl .v{color:var(--warn)}
+.mbox.ok{border-color:color-mix(in srgb,var(--safe) 30%,var(--line))} .mbox.ok .v{color:var(--safe)}
+
+/* 시트 그리드 축약 */
+.gridmini{max-width:920px;border:1px solid var(--line);border-radius:12px;overflow:hidden;background:var(--card)}
+.gridmini table{border-collapse:collapse;width:100%;font-size:10.5px}
+.gridmini th{background:var(--card2);font-size:9px;font-weight:750;letter-spacing:.03em;color:var(--faint);text-transform:uppercase;padding:6px 9px;text-align:left;border-bottom:1px solid var(--line);white-space:nowrap}
+.gridmini td{padding:6px 9px;border-bottom:1px solid var(--line);white-space:nowrap;color:var(--muted);font-variant-numeric:tabular-nums}
+.gridmini tr:last-child td{border-bottom:none}
+.gridmini .gnote{font-size:10px;color:var(--faint);padding:7px 10px;background:var(--card2);border-top:1px solid var(--line)}
+
+/* 규칙 표 */
+table.rules{width:100%;border-collapse:collapse;font-size:12.5px;background:var(--card);border:1px solid var(--line);border-radius:12px;overflow:hidden}
+.rules th,.rules td{padding:9px 12px;border-bottom:1px solid var(--line);text-align:left;vertical-align:top}
+.rules th{background:var(--card2);font-size:11px;font-weight:750;letter-spacing:.03em;color:var(--faint);text-transform:uppercase;white-space:nowrap}
+.rules tr:last-child td{border-bottom:none}
+.rules td b{font-weight:750}
+.rules code{font-family:ui-monospace,Menlo,monospace;font-size:11px;background:var(--card2);border-radius:5px;padding:1px 5px}
+</style></head><body>
+<div class="page">
+  <h1>시안 — 업체용(광고주) 뷰어 화면 정돈</h1>
+  <p class="lead">통합 작업대의 <b>업체(광고주) 전용 열람 화면</b>을 정돈하는 시안입니다.
+  넓은 모니터(QHD·울트라와이드)에서 상단 버튼·작업 탭·요약 카드가 화면 끝까지 무한히 벌어지던 것을 <b>폭 상한</b>으로 고정하고,
+  작업 선택 방식은 <b>업체관리 화면 구성(왼쪽 목록 → 오른쪽 상세)</b>을 그대로 차용합니다.
+  업체가 자신의 진행 업무(시작일·작업명·견적서·세금계산서·총비용·입금액·입금일·남은 입금액·진행상황)를 한눈에 확인할 수 있게 합니다.</p>
+
+  <!-- ══ 0. 문제 → 해결 ══ -->
+  <div class="doc">
+    <h2><span class="n">0</span>무엇이 문제였고, 어떻게 바꾸나</h2>
+    <div class="cmp">
+      <div class="box before"><div class="lbl">Before — 현재 화면</div>
+        <p>① 최상단 행의 FHD/QHD·사이드바 표시·전체화면·접속정보·로그아웃이 <b>화면 오른쪽 끝까지</b> 밀려나 본문과 동떨어져 보임.</p>
+        <p>② 작업 선택이 <b>가로 탭 줄</b>이라 화면 폭만큼 무한히 벌어지고, 작업이 많으면 좌우 스크롤로 찾아야 함.</p>
+        <p>③ 상품/모집/구매시간/배송/참여자/제출완료/입금완료/정산 요약 카드가 <b>제한 없이 늘어나</b> 카드 사이 여백만 벌어짐.</p>
+        <p>④ 정산 칸이 "미연결 · 계약 연결 필요"처럼 <b>내부 용어</b>로 노출되고, 업체가 궁금한 견적서·계산서·입금액·남은 금액이 없음.</p></div>
+      <div class="box after"><div class="lbl">After — 이 시안</div>
+        <p>① 업체용 화면은 <b>앱 전체 폭 상한 1680px</b> 고정(FHD/QHD 토글은 업체에게 불필요 → 미노출). 상단 버튼은 상한 안쪽 오른쪽 끝에 붙음.</p>
+        <p>② 가로 탭 줄 제거 → <b>왼쪽 세로 작업 목록</b>(업체관리 사이드바 차용). 세로 목록이라 화면 폭과 무관.</p>
+        <p>③ 헤더·요약 카드·정산 카드는 <b>본문 데이터 폭과 같은 값(920~1380px)으로 캡</b> — 남는 폭은 오른쪽 여백.</p>
+        <p>④ 접속 직후 기본 화면 = <b>내 작업 목록 표</b>(업체관리 연결탭 표 차용) — 시작일·작업명·진행상황·정산 컬럼을 한 줄에.</p></div>
+    </div>
+  </div>
+
+  <!-- ══ 1. 화면 A: 접속 직후 — 내 작업 목록 ══ -->
+  <div class="doc">
+    <h2><span class="n">1</span>화면 A — 접속 직후 · 내 작업 목록 (업체관리 표 차용)</h2>
+    <p class="lead" style="margin-bottom:12px">업체가 전용 링크/계정으로 접속하면 <b>진행 중인 모든 작업이 표로</b> 먼저 보입니다.
+    업체관리의 "연결된 탭" 표와 같은 구성이며, 업체 렌즈에서는 정산 컬럼(견적서·계산서·총비용·입금액·입금일·남은 입금액)이 핵심입니다.
+    행을 클릭하면 화면 B(작업 상세)로 들어갑니다.</p>
+    <div class="mockcap">목업 · QHD(2560px) 화면 기준 — 빗금 = 화면 여백</div>
+    <div class="viewport">
+      <div class="vhint">← QHD 2560px 모니터 →</div>
+      <div class="vrow">
+      <div class="appframe">
+        <div class="ftop">
+          <span class="logo">통합 작업대<span class="tag">업체 전용</span></span>
+          <span class="fsp"></span>
+          <button class="fbtn">⛶ 전체화면</button>
+          <span class="advb">어니스트캄</span>
+          <button class="fbtn">로그아웃</button>
+        </div>
+        <div class="fbody">
+          <aside class="fside">
+            <div class="sh">내 작업 <span class="cnt">6</span></div>
+            <div class="witem on"><span class="ava">4/21</span><span class="nm">엘라비에_선크림 750건<i>쿠팡 · 진행중</i></span><span class="stt run">진행</span></div>
+            <div class="witem"><span class="ava">4/27</span><span class="nm">좋은상황_상황버섯진액<i>메이커스 · 진행중</i></span><span class="stt run">진행</span></div>
+            <div class="witem"><span class="ava">5/4</span><span class="nm">메디슨벨_마시는샐러드<i>쿠팡 · 진행중</i></span><span class="stt run">진행</span></div>
+            <div class="witem"><span class="ava">5/28</span><span class="nm">서일농원_명인콩불두유 170건<i>쿠팡 · 진행중</i></span><span class="stt run">진행</span></div>
+            <div class="witem"><span class="ava">5/29</span><span class="nm">솔라르프리_수세미 카페/블로그<i>블로그 · 완료</i></span><span class="stt done">완료</span></div>
+            <div class="witem"><span class="ava">4/3</span><span class="nm">오클리앙_밸런스크림 100건<i>메이커스 · 완료</i></span><span class="stt done">완료</span></div>
+          </aside>
+          <main class="fmain">
+            <div class="fmh"><h3>어니스트캄 — 진행 업무 현황</h3><span class="bd a">업체 전용 열람</span><span class="bd">작업 6건</span><span class="bd g">입금 완료 2건</span></div>
+            <div class="othead"><span>시작일</span><span>작업명</span><span>진행상황</span><span>참여·제출·입금</span><span>견적서</span><span>계산서</span><span>총비용</span><span>입금액</span><span>입금일</span><span>남은 입금액</span><span></span></div>
+            <div class="wrow">
+              <span class="odate">4/21</span>
+              <span class="oname"><b>엘라비에_선크림 750건</b><span class="osub">쿠팡 · 어니스트캄_업무시트 1</span></span>
+              <span><span class="schip ok">진행중 90%</span></span>
+              <span class="ocnt"><b>675</b>/750 · <b class="c-sub">651</b> · <b class="c-paid">651</b></span>
+              <span><span class="schip safe">수락</span></span>
+              <span><span class="schip safe">발행</span></span>
+              <span class="omoney"><b>11,250,000</b></span>
+              <span class="omoney"><b>8,000,000</b></span>
+              <span class="odate">6/10</span>
+              <span class="omoney rest"><b>3,250,000</b></span>
+              <span class="openb">열람 ›</span>
+            </div>
+            <div class="wrow">
+              <span class="odate">5/28</span>
+              <span class="oname"><b>서일농원_명인콩불두유 170건</b><span class="osub">쿠팡 · 어니스트캄_업무시트 2</span></span>
+              <span><span class="schip ok">진행중 64%</span></span>
+              <span class="ocnt"><b>109</b>/170 · <b class="c-sub">96</b> · <b class="c-paid">90</b></span>
+              <span><span class="schip safe">수락</span></span>
+              <span><span class="schip warn">미발행</span></span>
+              <span class="omoney"><b>2,550,000</b></span>
+              <span class="omoney"><b>0</b></span>
+              <span class="odate">—</span>
+              <span class="omoney rest"><b>2,550,000</b></span>
+              <span class="openb">열람 ›</span>
+            </div>
+            <div class="wrow">
+              <span class="odate">5/29</span>
+              <span class="oname"><b>솔라르프리_수세미 카페/블로그</b><span class="osub">블로그 · 어니스트캄_업무시트 2</span></span>
+              <span><span class="schip safe">완료</span></span>
+              <span class="ocnt"><b>30</b>/30 · <b class="c-sub">30</b> · <b class="c-paid">30</b></span>
+              <span><span class="schip safe">수락</span></span>
+              <span><span class="schip safe">발행</span></span>
+              <span class="omoney"><b>1,500,000</b></span>
+              <span class="omoney"><b>1,500,000</b></span>
+              <span class="odate">7/1</span>
+              <span class="omoney rest zero"><b>0 ✓</b></span>
+              <span class="openb">열람 ›</span>
+            </div>
+            <div class="wrow">
+              <span class="odate">4/3</span>
+              <span class="oname"><b>오클리앙_밸런스크림 100건</b><span class="osub">메이커스 · 어니스트캄_업무시트 1</span></span>
+              <span><span class="schip safe">완료</span></span>
+              <span class="ocnt"><b>100</b>/100 · <b class="c-sub">100</b> · <b class="c-paid">100</b></span>
+              <span><span class="schip safe">수락</span></span>
+              <span><span class="schip safe">발행</span></span>
+              <span class="omoney"><b>1,900,000</b></span>
+              <span class="omoney"><b>1,900,000</b></span>
+              <span class="odate">5/2</span>
+              <span class="omoney rest zero"><b>0 ✓</b></span>
+              <span class="openb">열람 ›</span>
+            </div>
+          </main>
+        </div>
+      </div>
+      <div class="leftover"></div>
+      </div>
+    </div>
+    <div class="note" style="margin-top:12px"><b>구성 원칙</b>
+      <ul>
+        <li><b>왼쪽 사이드바 = 업체관리의 업체 목록 자리</b>에 "내 작업" 목록이 들어감(같은 아이템 스타일 — 아바타 자리엔 시작일). 세로 목록이라 화면 폭과 무관하게 항상 같은 너비(228px).</li>
+        <li><b>오른쪽 표 = 업체관리 "연결된 탭" 표(<code>.othead</code>/<code>.owntab</code>)와 같은 컬럼 그리드 방식</b> — 고정폭 컬럼 합으로 표 너비가 정해지고, 남는 폭은 여백.</li>
+        <li>남은 입금액 = <b>총비용 − 입금액</b> 파생값. 0원이면 초록 ✓, 남았으면 주황으로 강조.</li>
+        <li>진행상황 칩 = 참여율 기반(진행중 N% / 완료). 내부 용어(미연결·계약 연결 필요·Track B 등)는 업체 화면에 노출하지 않음.</li>
+      </ul>
+    </div>
+  </div>
+
+  <!-- ══ 2. 화면 B: 작업 상세 ══ -->
+  <div class="doc">
+    <h2><span class="n">2</span>화면 B — 작업 상세 (행 클릭 · 사이드바 선택)</h2>
+    <p class="lead" style="margin-bottom:12px">작업을 선택하면 상단 요약 + <b>정산 카드</b> + 시트 그리드(열람 전용) 순서로 보입니다.
+    헤더·요약 카드·정산 카드는 전부 <b>같은 폭 상한</b>으로 캡되어 왼쪽 정렬을 유지합니다.</p>
+    <div class="mockcap">목업 · 같은 QHD 기준</div>
+    <div class="viewport">
+      <div class="vhint">← QHD 2560px 모니터 →</div>
+      <div class="vrow">
+      <div class="appframe">
+        <div class="ftop">
+          <span class="logo">통합 작업대<span class="tag">업체 전용</span></span>
+          <span class="fsp"></span>
+          <button class="fbtn">⛶ 전체화면</button>
+          <span class="advb">어니스트캄</span>
+          <button class="fbtn">로그아웃</button>
+        </div>
+        <div class="fbody">
+          <aside class="fside">
+            <div class="sh">내 작업 <span class="cnt">6</span></div>
+            <div class="witem on"><span class="ava">4/21</span><span class="nm">엘라비에_선크림 750건<i>쿠팡 · 진행중</i></span><span class="stt run">진행</span></div>
+            <div class="witem"><span class="ava">4/27</span><span class="nm">좋은상황_상황버섯진액<i>메이커스 · 진행중</i></span><span class="stt run">진행</span></div>
+            <div class="witem"><span class="ava">5/4</span><span class="nm">메디슨벨_마시는샐러드<i>쿠팡 · 진행중</i></span><span class="stt run">진행</span></div>
+            <div class="witem"><span class="ava">5/28</span><span class="nm">서일농원_명인콩불두유 170건<i>쿠팡 · 진행중</i></span><span class="stt run">진행</span></div>
+            <div class="witem"><span class="ava">5/29</span><span class="nm">솔라르프리_수세미 카페/블로그<i>블로그 · 완료</i></span><span class="stt done">완료</span></div>
+            <div class="witem"><span class="ava">4/3</span><span class="nm">오클리앙_밸런스크림 100건<i>메이커스 · 완료</i></span><span class="stt done">완료</span></div>
+          </aside>
+          <main class="fmain">
+            <div class="fmh"><h3>4/21(쿠팡)엘라비에_선크림 750건</h3><span class="bd a">업체 전용 열람</span><span class="bd g">참여자 675</span><span class="bd">시트 그리드 · 열람</span></div>
+            <div class="strip">
+              <div class="mcell"><div class="k">상품</div><div class="v">어니스트캄_선크림</div></div>
+              <div class="mcell"><div class="k">시작일</div><div class="v">4/21 (월)</div></div>
+              <div class="mcell"><div class="k">구매시간</div><div class="v">자율</div></div>
+              <div class="mcell"><div class="k">배송</div><div class="v">실배송</div></div>
+              <div class="mcell kpi"><div class="k">참여자 / 목표 750</div><div class="v">675<small>/ 750</small><span class="spct">90%</span></div></div>
+              <div class="mcell kpi s"><div class="k">제출완료</div><div class="v">651<small>/ 675</small><span class="spct safe">96%</span></div></div>
+              <div class="mcell kpi p"><div class="k">입금완료</div><div class="v">651<small>/ 675</small><span class="spct">96%</span></div></div>
+            </div>
+            <div class="setlcard">
+              <div class="sct">정산 현황 <span class="schip ok">Q-2026-0412 · 견적 수락</span><span class="schip warn">부분입금</span></div>
+              <div class="steps">
+                <div class="stp done"><span class="ic">✓</span><span><span class="sk">① 마감자료</span><br><span class="sv">6/8 생성</span></span></div>
+                <div class="stp done"><span class="ic">✓</span><span><span class="sk">② 견적서</span><br><span class="sv">Q-2026-0412 수락</span></span></div>
+                <div class="stp done"><span class="ic">✓</span><span><span class="sk">③ 세금계산서</span><br><span class="sv">6/9 발행완료</span></span></div>
+                <div class="stp wait"><span class="ic">…</span><span><span class="sk">④ 입금</span><br><span class="sv">부분입금 (잔금 대기)</span></span></div>
+              </div>
+              <div class="moneyrow">
+                <div class="mbox"><div class="k">총비용 (견적서 기준)</div><div class="v">11,250,000<small>원</small></div></div>
+                <div class="mbox ok"><div class="k">입금액</div><div class="v">8,000,000<small>원</small></div></div>
+                <div class="mbox"><div class="k">입금일 (최근)</div><div class="v">6/10</div></div>
+                <div class="mbox hl"><div class="k">남은 입금액</div><div class="v">3,250,000<small>원</small></div></div>
+              </div>
+            </div>
+            <div class="gridmini">
+              <table>
+                <tr><th>#</th><th>번호</th><th>구매일자</th><th>주문번호</th><th>수취인</th><th>연락처</th><th>결제금액</th><th>리뷰제출일</th><th>입금</th></tr>
+                <tr><td>1</td><td>54</td><td>4/28 (화)</td><td>811001952…</td><td>가민재</td><td>010-****-78**</td><td>16,800</td><td>6/8 07:38</td><td>6/9</td></tr>
+                <tr><td>2</td><td>28</td><td>5/8 (금)</td><td>181001889…</td><td>강경진</td><td>010-****-47**</td><td>16,000</td><td>5/09 22…</td><td>5/12</td></tr>
+                <tr><td>3</td><td>94</td><td>5/28 (목)</td><td>291001936…</td><td>강경태</td><td>010-****-80**</td><td>16,800</td><td>5/29 20:24</td><td>6/2</td></tr>
+              </table>
+              <div class="gnote">시트 그리드(열람 전용) — 지금과 동일: 열 너비는 고정폭 합, 은행·계좌 등 정산 외 개인정보 컬럼은 전송 자체에서 제외(현행 화이트리스트 유지)</div>
+            </div>
+          </main>
+        </div>
+      </div>
+      <div class="leftover"></div>
+      </div>
+    </div>
+    <div class="note" style="margin-top:12px"><b>화면 B 구성 원칙</b>
+      <ul>
+        <li>헤더(작업명 줄)·요약 스트립·정산 카드·시트 그리드가 <b>전부 같은 폭 상한</b>을 공유 — 어떤 요소도 화면 끝까지 늘어나지 않음.</li>
+        <li>요약 스트립에서 내부용 칸(모집 담당자 표기, "원본: 시트" 배지, 정산 미니 셀)은 업체 렌즈에서 제외하고, 대신 <b>시작일</b> 칸을 추가.</li>
+        <li>정산 카드는 접힘 없이 <b>항상 펼쳐서</b> 표시(업체가 이 화면에 들어오는 주된 이유이므로). 4단계 스텝퍼 + 금액 4칸(총비용/입금액/입금일/남은 입금액).</li>
+        <li>정산 미연결 작업은 정산 카드 자리에 "정산 정보 준비 중입니다" 한 줄만(내부 용어 미노출).</li>
+      </ul>
+    </div>
+  </div>
+
+  <!-- ══ 3. 폭 상한 규칙 ══ -->
+  <div class="doc">
+    <h2><span class="n">3</span>폭 상한 규칙 (구현 기준값)</h2>
+    <table class="rules">
+      <tr><th>요소</th><th>현재 (업체 뷰)</th><th>시안</th></tr>
+      <tr><td><b>앱 전체 상한</b></td><td>FHD/QHD 토글(1920/2560) — 업체가 QHD를 켜면 전부 벌어짐</td><td>업체 역할은 <code>--app-max:1680px</code> <b>고정</b>, FHD/QHD 토글·사이드바 표시 버튼 미노출. 기존 <code>padding-inline:max(…)</code> 캡 방식 그대로 재사용</td></tr>
+      <tr><td><b>상단 바 우측 버튼</b></td><td>화면 오른쪽 끝까지 밀림</td><td>상한(1680px) 안쪽 오른쪽 끝에 붙음 — 배경은 전폭 유지(sticky 띠 끊김 방지, 기존 규칙 동일)</td></tr>
+      <tr><td><b>작업 선택</b></td><td>상단 가로 탭 줄(tb2) — 폭 무한 + 좌우 스크롤</td><td>가로 탭 줄 제거 → <b>왼쪽 세로 작업 목록</b>(업체관리 사이드바 차용, 228px 고정)</td></tr>
+      <tr><td><b>헤더(.mh)·요약 스트립·정산 카드</b></td><td>상한 없음 — 카드가 화면 폭만큼 늘어남</td><td><code>max-width</code> 캡(작업오더 1120 · 모집공고 1380과 같은 방식). 시트 그리드가 더 넓으면 그리드 폭(고정폭 합)까지 허용</td></tr>
+      <tr><td><b>시트 그리드</b></td><td>열 고정폭 합(이미 정상)</td><td>변경 없음 — 남는 폭은 오른쪽 여백</td></tr>
+    </table>
+  </div>
+
+  <!-- ══ 4. 표시 항목 ↔ 데이터 출처 ══ -->
+  <div class="doc">
+    <h2><span class="n">4</span>업체에게 보여주는 항목 ↔ 데이터 출처</h2>
+    <table class="rules">
+      <tr><th>항목</th><th>출처</th><th>비고</th></tr>
+      <tr><td><b>작업 시작일</b></td><td>작업오더 <code>start_date</code> → 없으면 탭명 날짜(예: 4/21)</td><td>사이드바 아바타·목록 첫 컬럼</td></tr>
+      <tr><td><b>의뢰한 작업명</b></td><td>탭 표시명 (현행 그대로)</td><td>내부 시트 제목은 보조 표기</td></tr>
+      <tr><td><b>진행상황</b></td><td>참여·제출 집계(현행 counts) — 참여율 %</td><td>진행중 N% / 완료 칩</td></tr>
+      <tr><td><b>견적서</b></td><td>정산 링크 → 인트라넷 견적(Q-번호·상태) — 현행 정산 스텝퍼 ② 그대로</td><td>수락/진행/— 칩</td></tr>
+      <tr><td><b>세금계산서</b></td><td>정산 스텝퍼 ③ (발행일·상태)</td><td>발행/미발행 칩</td></tr>
+      <tr><td><b>총비용</b></td><td>견적서 금액 우선, 계약금액 폴백 (현행 <code>settlementSummary</code> 규칙 동일)</td><td></td></tr>
+      <tr><td><b>입금액 · 입금일</b></td><td>입금매칭 누계 <code>matched_bank_amount</code> · 최근 <code>matched_bank_date</code></td><td></td></tr>
+      <tr><td><b>남은 입금액</b></td><td><b>총비용 − 입금액</b> (화면 파생값 — 신규 저장 없음)</td><td>0원 = ✓ 완납 표시</td></tr>
+    </table>
+    <div class="note" style="margin-top:12px"><b>정보 노출 경계(현행 유지)</b>
+      <ul>
+        <li>정산 정보는 <b>"정산 노출" 토글이 ON인 업체 + 그 탭에 링크된 계약 단건만</b> — 타 업체 계약 도달 불가(현행 <code>settlementForTab</code> 렌즈 그대로).</li>
+        <li>시트 그리드는 현행 화이트리스트 컬럼만(은행·계좌·예금주 등은 서버에서 전송 자체 제외) + 읽기 전용.</li>
+        <li>담당자 실명·내부 관리 용어(Track B·원본·미연결 등)는 업체 화면에 노출하지 않음.</li>
+      </ul>
+    </div>
+  </div>
+</div>
+</body></html>
