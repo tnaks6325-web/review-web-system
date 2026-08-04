@@ -6,8 +6,8 @@
 <title>시안 — 통합 작업대 「로그」 (리뷰어 비정상로그 · 시스템 오류로그)</title>
 <style>
   /* ═══ 통합 작업대(workdesk.html)의 실제 토큰·클래스를 그대로 옮겨 온 시안 ═══
-     색·간격·표 규칙을 새로 만들지 않았다 — 실제 화면과 눈으로 대조하기 위한 목업이라
-     여기서 예뻐 보이고 실제에선 달라지는 일이 없어야 한다. */
+     색·간격·표 규칙을 새로 만들지 않았다 — 실물과 눈으로 대조하기 위한 목업이라
+     여기서만 예뻐 보이고 실제 화면에서 달라지는 일이 없어야 한다. */
   :root{
     --paper:#f4f6f9;--card:#ffffff;--card2:#f1f4f8;--ink:#101828;--muted:#667085;--faint:#98a2b3;
     --line:#e6eaf0;--line2:#d0d9e4;--accent:#2563eb;--accent-soft:#eff4ff;--accent-deep:#1d4ed8;--accent-line:#d7e3fd;
@@ -26,6 +26,8 @@
   .docnote h2{font-size:14px;font-weight:800;margin:0 0 8px}
   .docnote ul{margin:0;padding-left:19px} .docnote li{margin-bottom:5px}
   .docnote b{color:var(--accent-deep)}
+  .docnote .ok{background:var(--safe-soft);border:1px solid #c9e9d5;border-radius:10px;padding:10px 13px;margin-bottom:10px}
+  .docnote .ok b{color:var(--safe)}
   .docnote .q{background:var(--warn-soft);border:1px solid #f0dcc0;border-radius:10px;padding:10px 13px;margin-top:10px}
   .docnote .q b{color:var(--warn)}
   .screenlabel{font-size:11px;font-weight:800;letter-spacing:.06em;text-transform:uppercase;color:var(--faint);margin:22px 0 7px}
@@ -45,6 +47,7 @@
   .btn:hover{border-color:var(--accent-line);background:var(--card2)}
   .btn.pri{background:var(--accent);color:#fff;border-color:var(--accent)}
   .btn.xs{height:24px;padding:0 9px;font-size:11px;border-radius:7px}
+  .btn:disabled{background:var(--card2);color:var(--faint);border-color:var(--card2);cursor:not-allowed}
 
   /* ── 본문 ── */
   .ovwrap{padding:18px 22px;background:var(--paper);min-height:560px}
@@ -57,7 +60,6 @@
   .ovnote{font-size:11.5px;color:var(--faint);margin:-4px 0 14px;line-height:1.5;max-width:1300px}
   .ovnote b{color:var(--muted)}
   .ovsearch{font:inherit;font-size:12.5px;padding:6px 11px;border:1px solid var(--line2);border-radius:8px;background:var(--card);color:var(--ink);width:180px}
-  .empty{color:var(--faint);font-size:13px;text-align:center;padding:40px 10px}
 
   /* ── ★ 서브탭 = 작업대의 .seg 알약(신규 컴포넌트 아님) ── */
   .segbar{display:flex;align-items:center;gap:8px;margin:0 0 13px;flex-wrap:wrap;max-width:1300px}
@@ -96,10 +98,8 @@
   .lgexptext{flex:1;min-width:280px;font-size:12.5px;line-height:1.7}
   .lgexptext b{color:var(--muted);font-weight:750;margin-right:4px}
   .lgexpacts{display:flex;gap:6px;flex-wrap:wrap;align-items:flex-start}
-  .lgcap img{max-width:230px;max-height:180px;border-radius:8px;border:1px solid var(--line);cursor:zoom-in;display:block;background:#fff}
   .lgcaphint{font-size:11px;color:var(--muted);margin-top:5px}
   .mockimg{width:230px;height:150px;border-radius:8px;border:1px solid var(--line);background:
-      linear-gradient(#fff,#fff) padding-box,
       repeating-linear-gradient(135deg,#f4f6f9 0 10px,#eef2f7 10px 20px);
       display:grid;place-items:center;color:var(--faint);font-size:11.5px;font-weight:700}
   /* 시스템 오류로그 전용 미세 보강(같은 표 idiom 안에서만) */
@@ -108,9 +108,34 @@
   .lgtable .c-cat{width:92px;white-space:nowrap}
   .catchip{font-size:10px;font-weight:750;padding:2px 7px;border-radius:6px;display:inline-block}
   .ocount{font-size:10.5px;font-weight:800;background:var(--bad-soft);color:var(--bad);padding:1px 6px;border-radius:6px}
+  .aibadge{font-size:10px;font-weight:750;background:var(--adv-soft);color:#5B21B6;padding:1px 7px;border-radius:6px;display:inline-block;margin-top:3px}
   .kv{font-family:'SF Mono',ui-monospace,monospace;font-size:11.5px;background:var(--card2);border:1px solid var(--line);border-radius:6px;padding:1px 6px}
   pre.stack{margin:8px 0 0;padding:9px 11px;background:#0f172a;color:#cbd5e1;border-radius:8px;font-size:11px;line-height:1.6;overflow:auto;max-height:150px}
   .tabpane[hidden]{display:none}
+
+  /* ── AI 분석 모달(작업대 .modalov/.modalbox 규격) ── */
+  .modalov{position:relative;background:rgba(15,35,42,.5);padding:22px;display:flex;justify-content:center}
+  .modalbox{background:var(--card);border-radius:14px;width:940px;max-width:100%;display:flex;flex-direction:column;overflow:hidden;box-shadow:0 14px 44px rgba(0,0,0,.28)}
+  .modalhd{display:flex;align-items:center;gap:9px;padding:12px 16px;border-bottom:1px solid var(--line);font-size:13.5px;font-weight:750}
+  .modalbd{padding:14px 16px;overflow:auto}
+  .stepper{border:1px solid var(--line);border-radius:12px;padding:12px;background:#fbfcfe;margin-bottom:12px}
+  .stephd{display:flex;align-items:center;gap:8px;margin-bottom:10px;font-size:12.5px;font-weight:750}
+  .steprow{display:flex;align-items:flex-start;gap:2px}
+  .stepitem{flex:1;text-align:center;min-width:0}
+  .stepcirc{width:30px;height:30px;border-radius:50%;display:inline-flex;align-items:center;justify-content:center;font-size:12px;font-weight:800;color:#fff;background:#E5E7EB}
+  .stepitem.done .stepcirc{background:var(--safe)} .stepitem.act .stepcirc{background:#F59E0B;box-shadow:0 0 0 4px #FDE68A}
+  .stepitem.pend .stepcirc{background:#E5E7EB;color:#9CA3AF}
+  .stepitem .snm{font-size:10.5px;font-weight:750;margin-top:4px}
+  .stepitem .sst{font-size:9.5px;font-weight:700;color:var(--faint)}
+  .stepitem.done .sst{color:var(--safe)} .stepitem.act .sst{color:#D97706}
+  .stepitem .sds{font-size:9.5px;color:var(--faint);line-height:1.25}
+  .stepsep{align-self:flex-start;margin-top:12px;color:#D1D5DB;font-size:10px;flex:0 0 auto}
+  .asec{border:1px solid var(--line);border-radius:10px;padding:10px 13px;margin-bottom:8px;background:var(--card)}
+  .asec h4{margin:0 0 5px;font-size:12.5px;font-weight:800}
+  .asec p{margin:3px 0;font-size:12.5px;line-height:1.65}
+  .asec ul{margin:4px 0 0;padding-left:18px;font-size:12.5px} .asec li{margin:2px 0}
+  .gateok{border:1px solid #c9e9d5;background:var(--safe-soft);color:#14713c;border-radius:10px;padding:9px 13px;font-size:12.5px;font-weight:700}
+  .gateno{border:1px solid #f0dcc0;background:var(--warn-soft);color:#8a4b06;border-radius:10px;padding:9px 13px;font-size:12.5px}
 </style>
 </head>
 <body>
@@ -120,24 +145,35 @@
   <div class="sub">「리뷰어 로그」 → <b>「로그」</b>로 이름을 바꾸고, 안에서 <b>리뷰어 비정상로그</b>(기본) / <b>시스템 오류로그</b> 두 탭으로 나눈 화면 목업입니다. 아래 알약을 실제로 눌러 전환·행 펼침까지 확인할 수 있습니다.</div>
 
   <div class="docnote">
-    <h2>이 시안이 정한 것</h2>
+    <div class="ok">
+      <b>확정된 것</b> (2026-08-04 사용자 확정)
+      <ul style="margin-top:6px">
+        <li><b>통합 작업대가 메인</b> — 관리자 대시보드는 더 이상 필요 없습니다. 오류 창구는 작업대 하나로 일원화하고, 관리자 대시보드의 「오류디버깅」 탭은 <b>제거</b>합니다(창구가 둘이면 어느 쪽이 진실인지 갈립니다).</li>
+        <li><b>관리자 대시보드에서 발생한 오류는 가져오지 않습니다</b> — 없어질 화면의 오류가 작업대 목록을 채우면 정작 봐야 할 게 묻힙니다. 판정 기준은 아래 “제외 규칙”.</li>
+        <li><b>AI 다중에이전트 분석은 그대로 유지</b> — 오류검증 · 레드팀 · 블루팀 · 감독관 · 예방가드 · 결정자 6역할과 이행요청 게이트를 작업대 시스템 오류로그에서 그대로 씁니다.</li>
+      </ul>
+    </div>
+    <h2>화면이 정한 것</h2>
     <ul>
       <li><b>메뉴 이름 = 「로그」</b> · 뱃지는 <b>두 탭 미해결 건수의 합</b> 하나로 표시합니다(C/S 뱃지와 같은 방식 — 한쪽만 도착했다고 다른 쪽을 0으로 접지 않습니다).</li>
       <li><b>기본 탭 = 리뷰어 비정상로그.</b> 진입 시 항상 이 탭이 먼저 열립니다(대시보드 중요알림 <span class="kv">#view=logs</span> 딥링크도 동일).</li>
-      <li><b>시스템 오류로그의 데이터 = 이미 쌓이고 있는 <span class="kv">error_logs</span></b>(마이그레이션 026/028 · 관리자 대시보드 “오류디버깅” 탭이 쓰던 원장)입니다. 새 저장소·새 수집 경로를 만들지 않습니다.</li>
-      <li><b>“모든 오류의 기준 = 통합 작업대” 반영</b> — 시스템 오류도 관리자 대시보드의 <i>카드 목록 + 우측 패널</i> 형태가 아니라, <b>작업대의 로그 표(같은 <span class="kv">.lgtable</span>) + 행 펼침</b>으로 통일했습니다. 두 탭의 열 의미(상태 · 발생시점 · 대상 · 오류내용 · 조치안내)가 1:1로 대응해, 탭을 옮겨도 읽는 법이 바뀌지 않습니다.</li>
+      <li><b>시스템 오류로그의 데이터 = 이미 쌓이고 있는 <span class="kv">error_logs</span></b>(마이그레이션 026/028). 새 저장소·새 수집 경로를 만들지 않습니다 — 화면만 작업대로 옮깁니다.</li>
+      <li><b>“모든 오류의 기준 = 통합 작업대”</b> — 시스템 오류도 관리자 대시보드의 <i>카드 목록 + 우측 패널</i>이 아니라 <b>작업대의 로그 표(같은 <span class="kv">.lgtable</span>) + 행 펼침</b>으로 통일했습니다. 두 탭의 열 의미(상태 · 발생시점 · 대상 · 오류내용 · 조치안내)가 1:1로 대응해, 탭을 옮겨도 읽는 법이 바뀌지 않습니다. 무거운 AI 분석만 <b>모달</b>로 분리합니다(리뷰검수 상세 팝업과 같은 방식).</li>
       <li><b>권한</b> — 리뷰어 비정상로그는 지금처럼 내부인 전원(AE는 담당 업체 탭만, 해결 처리는 master/admin). <b>시스템 오류로그 탭은 master/admin에게만 노출</b>합니다(경로·스택·요청 컨텍스트가 실려 담당 스코프로 나눌 수 있는 데이터가 아닙니다 — 등록리뷰어DB와 같은 판단). AE에게는 알약 자체가 안 보입니다.</li>
     </ul>
+
     <div class="q">
-      <b>확인이 필요한 2가지</b> (답을 주시면 그대로 구현합니다)
+      <b>제외 규칙 — “관리자 대시보드에서 발생한 오류”를 어떻게 가려내나</b>
       <ul style="margin-top:6px">
-        <li><b>①</b> 관리자 대시보드의 기존 <b>「오류디버깅」 탭은 그대로 둘까요, 없앨까요?</b> 시안은 <b>남겨두고 작업대에도 추가</b>(같은 원장을 두 화면이 봄)로 그렸습니다. 없애는 쪽이면 그쪽 탭을 제거하고 작업대로 일원화합니다.</li>
-        <li><b>②</b> 시스템 오류로그에 관리자 대시보드에 있던 <b>AI 다중에이전트 분석(오류검증·레드팀·블루팀·감독관·결정자)</b>까지 가져올까요? 시안은 펼침 패널에 <b>[🤖 AI 분석] 버튼만</b> 두고, 눌렀을 때의 진행도 화면은 이번 범위에서 뺐습니다(1차는 <b>보기·상태처리</b>까지).</li>
+        <li>서버는 이미 요청 경로로 오류의 출처를 나눠 저장하고 있습니다: <span class="kv">/api/admin/*</span> 에서 난 오류는 <span class="kv">flow = 'admin'</span> 으로 기록됩니다(<span class="kv">error.middleware.js</span>). <b>관리자 대시보드만 쓰는 표면</b>이라 이 한 줄이 곧 “대시보드에서 난 오류”입니다 — 인트라넷 SSO 토큰은 <span class="kv">/api/admin/*</span> 에 도달 자체가 불가능하므로 작업대 오류가 여기 섞이지 않습니다.</li>
+        <li><b>단, 로그인 4경로는 예외로 남깁니다</b> — <span class="kv">/api/admin/login</span> · <span class="kv">staff-login</span> · <span class="kv">advertiser-login</span> · <span class="kv">intranet-login</span> 은 이름만 admin이지 <b>통합 작업대가 직접 호출하는 로그인 경로</b>입니다(workdesk.html:1025~1028). 통째로 걸러내면 <b>작업대 로그인·SSO 장애가 아무 화면에도 안 뜨는 무신호 상태</b>가 됩니다. → 그래서 “<span class="kv">/api/admin/*</span> 제외, 로그인 4경로는 유지”가 정확한 규칙입니다.</li>
+        <li><b>제외는 조용히 하지 않습니다</b> — 목록 상단에 “<i>관리자 대시보드 경로에서 발생한 N건은 제외했습니다</i>”를 표기하고, 필요하면 그 자리에서 포함해 볼 수 있게 합니다(조용한 누락 금지).</li>
+        <li>시트·Drive·AI·DB·큐·리뷰어 제출 등 <b>공용 인프라 오류는 그대로 남습니다</b> — 관리자 대시보드에서 눌러 났든 작업대에서 눌러 났든 같은 기능의 같은 고장이라 가려내면 손해입니다.</li>
       </ul>
     </div>
   </div>
 
-  <div class="screenlabel">화면 — 통합 작업대 › 로그</div>
+  <div class="screenlabel">화면 1 — 통합 작업대 › 로그</div>
   <div class="screen">
 
     <!-- 상단바 -->
@@ -147,7 +183,7 @@
         <button class="navb">작업대</button>
         <button class="navb">관측</button>
         <button class="navb">업체관리</button>
-        <button class="navb on">로그<span class="nb" id="navBadge">🔴7</span></button>
+        <button class="navb on">로그<span class="nb">🔴7</span></button>
         <button class="navb">작업오더</button>
         <button class="navb">모집공고</button>
         <button class="navb">C/S</button>
@@ -216,7 +252,7 @@
             </div></td></tr>
 
             <tr class="lgrow lgcrit" onclick="ex('a2')">
-              <td class="c-btn"><span class="lgchev" id="ch-a2">▾</span><span class="lgcapdot" title="제출 캡처 있음">🖼</span></td>
+              <td class="c-btn"><span class="lgchev" id="ch-a2">▴</span><span class="lgcapdot" title="제출 캡처 있음">🖼</span></td>
               <td class="c-sev"><span class="bd no">중요</span></td>
               <td class="c-ts">2026-08-04 08:47</td>
               <td class="c-tab" title="콰이어트 7월 재진행">콰이어트 7월 재진행</td>
@@ -301,7 +337,11 @@
           <input class="ovsearch" placeholder="기능/단계/오류내용 검색">
         </div>
         <div class="ovnote">서버·DB·외부 API(구글 시트/Drive/AI)에서 발생한 <b>비정상 이벤트</b>를 자동 수집해 한국어 한 문장으로 풀이합니다. 같은 유형은 <b>한 줄로 묶고 발생 횟수만 누적</b>합니다(중복 폭주 방지). <b>master/admin 전용</b>입니다.</div>
-        <div class="ovnote" style="margin-bottom:8px">행을 클릭하면 아래로 <b>펼쳐져 원본 메시지·오류코드·발생 위치·스택</b>을 보고 그 자리에서 <b>확인중 / 해결 / 무시</b>로 처리할 수 있습니다.</div>
+        <div class="ovnote" style="margin-bottom:8px;color:var(--muted)">
+          ※ <b>관리자 대시보드(<span class="kv">/api/admin/*</span>)에서 발생한 오류 12건은 제외</b>했습니다 — 통합 작업대가 메인이라 없어질 화면의 오류는 목록을 채우지 않습니다.
+          작업대 <b>로그인·SSO 경로</b>에서 난 오류는 admin 경로여도 <b>그대로 표시</b>합니다.
+          <a href="javascript:void(0)" style="color:var(--accent)">제외분 포함해 보기</a>
+        </div>
 
         <div class="lgwrap"><table class="lgtable">
           <thead><tr>
@@ -311,13 +351,13 @@
           </tr></thead>
           <tbody>
             <tr class="lgrow lgcrit" onclick="ex('b1')">
-              <td class="c-btn"><span class="lgchev" id="ch-b1">▾</span></td>
+              <td class="c-btn"><span class="lgchev" id="ch-b1">▴</span></td>
               <td class="c-sev"><span class="bd no">치명</span><div class="lgby">신규</div></td>
               <td class="c-ts">2026-08-04 09:40<div class="lgby">3분 전</div></td>
               <td class="c-flow">시트 기록<i>시트 쓰기</i></td>
               <td class="c-cat"><span class="catchip" style="background:#EF444422;color:#EF4444">호출한도 초과</span></td>
               <td class="c-cnt"><span class="ocount">×34</span></td>
-              <td class="c-prob">시트 기록 시트 쓰기에서 호출한도 초과 에러가 외부 API(구글 등)에서 발생했습니다.</td>
+              <td class="c-prob">시트 기록 시트 쓰기에서 호출한도 초과 에러가 외부 API(구글 등)에서 발생했습니다.<div class="aibadge">🤖 분석됨 · 사전 확인 후 수정</div></td>
               <td class="c-act">구글 시트 분당 쿼터 초과 — 큐가 자동 재시도합니다. 반복되면 <b>주문 예약 슬롯</b>·저우선 작업 비중을 확인하세요.</td>
             </tr>
             <tr class="lgdetail" id="d-b1"><td colspan="8"><div class="lgexpand">
@@ -334,7 +374,8 @@
                 <button class="btn xs">확인중으로</button>
                 <button class="btn xs" style="background:#16a34a;color:#fff;border-color:#16a34a">✔ 해결</button>
                 <button class="btn xs">무시</button>
-                <button class="btn xs" style="border-color:#C4B5FD;color:#6D28D9">🤖 AI 분석</button>
+                <button class="btn xs">📋 오류내용 복사</button>
+                <button class="btn xs" style="background:#6D28D9;color:#fff;border-color:#6D28D9" onclick="event.stopPropagation();document.getElementById('aimodal').scrollIntoView({behavior:'smooth'})">🤖 오류검증 및 분석</button>
               </div>
             </div></td></tr>
 
@@ -358,7 +399,8 @@
                 <button class="btn xs">확인중으로</button>
                 <button class="btn xs" style="background:#16a34a;color:#fff;border-color:#16a34a">✔ 해결</button>
                 <button class="btn xs">무시</button>
-                <button class="btn xs" style="border-color:#C4B5FD;color:#6D28D9">🤖 AI 분석</button>
+                <button class="btn xs">📋 오류내용 복사</button>
+                <button class="btn xs" style="background:#6D28D9;color:#fff;border-color:#6D28D9">🤖 오류검증 및 분석</button>
               </div>
             </div></td></tr>
 
@@ -387,6 +429,68 @@
     </div><!-- /ovwrap -->
   </div><!-- /screen -->
 
+  <div class="screenlabel" id="aimodal">화면 2 — 시스템 오류로그 › [🤖 오류검증 및 분석] (AI 다중에이전트 · 유지)</div>
+  <div class="screen">
+    <div class="modalov">
+      <div class="modalbox">
+        <div class="modalhd">
+          <span>🤖 오류검증 및 분석</span>
+          <span class="bd no">치명</span><span class="bd">호출한도 초과</span><span class="ocount">×34</span>
+          <span style="flex:1"></span>
+          <span style="font-size:11px;color:var(--faint)">‹ 1 / 2 ›</span>
+          <button class="btn xs">닫기</button>
+        </div>
+        <div class="modalbd">
+          <div style="font-size:13.5px;font-weight:750;margin-bottom:10px">시트 기록 시트 쓰기에서 호출한도 초과 에러가 외부 API(구글 등)에서 발생했습니다.</div>
+
+          <div class="stepper">
+            <div class="stephd">🧩 에이전트 진행도
+              <span class="bd g">분석 완료</span>
+              <span style="flex:1"></span><span style="font-size:11px;color:var(--faint)">6/6 단계</span></div>
+            <div class="steprow">
+              <div class="stepitem done"><div class="stepcirc">✓</div><div class="snm">오류검증</div><div class="sst">완료</div><div class="sds">수정 필요성 점검</div></div>
+              <div class="stepsep">›</div>
+              <div class="stepitem done"><div class="stepcirc">✓</div><div class="snm">레드팀</div><div class="sst">완료</div><div class="sds">오류 상황 제시</div></div>
+              <div class="stepsep">›</div>
+              <div class="stepitem done"><div class="stepcirc">✓</div><div class="snm">블루팀</div><div class="sst">완료</div><div class="sds">방어 코드 제시</div></div>
+              <div class="stepsep">›</div>
+              <div class="stepitem done"><div class="stepcirc">✓</div><div class="snm">감독관</div><div class="sst">완료</div><div class="sds">최적안 검토</div></div>
+              <div class="stepsep">›</div>
+              <div class="stepitem done"><div class="stepcirc">✓</div><div class="snm">예방가드</div><div class="sst">완료</div><div class="sds">새 오류 예방 점검</div></div>
+              <div class="stepsep">›</div>
+              <div class="stepitem done"><div class="stepcirc">✓</div><div class="snm">결정자</div><div class="sst">완료</div><div class="sds">구현 판단</div></div>
+            </div>
+            <div style="font-size:11px;color:var(--faint);margin-top:9px">※ 분석 중에는 진행 중인 단계가 <span style="color:#D97706;font-weight:700">주황 펄스</span>로 표시되고 나머지는 회색 대기입니다(관리자 대시보드와 같은 동작).</div>
+          </div>
+
+          <div class="asec"><h4 style="color:var(--accent-deep)">🧪 오류검증 — 수정이 필요한가</h4>
+            <p><b>판정</b> 재현 가능성 높음 &nbsp;·&nbsp; <b>근거</b> 09:12~09:40 사이 34회, 전부 <span class="kv">order_append</span> 큐 배치 구간에 몰려 있음. 같은 시각 리뷰인덱스 빌드가 시트 lane을 37/45까지 점유.</p></div>
+          <div class="asec"><h4 style="color:#B91C1C">🐞 레드팀 — 언제 터지나</h4>
+            <ul><li>오픈 러시(09:00~09:30)에 주문 쓰기와 정기 인덱스빌드가 겹치는 구간</li><li>사용자 영향: 제출은 접수되나 시트 반영이 지연 → 리뷰어 “참여중” 표기가 늦음</li><li>데이터 위험: 없음(큐가 보존·재시도, 주문 손실 0)</li></ul></div>
+          <div class="asec"><h4 style="color:var(--accent)">🛡 블루팀 — 어떻게 막나</h4>
+            <p><span class="kv">SHEETS_ORDER_RESERVE</span> 를 8 → 15로 올려 주문 쓰기 예약 슬롯을 확보하고, <span class="kv">SMARTBUILD_YIELD_THRESHOLD</span> 를 25 → 20으로 낮춰 인덱스빌드가 더 일찍 양보하게 한다(코드 변경 없이 env만).</p></div>
+          <div class="asec"><h4 style="color:#6D28D9">⚖ 감독관 — 가장 좁은 수정</h4>
+            <p>env 2개 조정만으로 해소 가능. 코드 변경·마이그레이션 불필요. 조정 후 24시간 재발 여부로 검증.</p></div>
+          <div class="asec"><h4 style="color:var(--warn)">✋ 예방가드 — 새로 생길 위험</h4>
+            <p>예약 슬롯을 과하게 키우면 인덱스빌드가 굶어 리뷰 내역 갱신이 늦어진다 → 15를 상한으로 두고 관측(throttle 모니터) 후 재조정.</p></div>
+          <div class="asec"><h4>⚖️ 결정자 — 구현 판단</h4>
+            <p><b>사전 확인 후 수정</b> — 운영 시간대를 피해 env 반영, 반영 후 throttle 모니터에서 시트 lane 사용률 확인.</p></div>
+
+          <div class="gateok">🔓 이행 요청 복사 가능 (모든 게이트 통과)</div>
+          <div class="gateno" style="margin-top:8px"><b>🔒 차단 예시</b> — 게이트를 통과하지 못하면 이렇게 사유가 표시되고 [이행 요청 복사]가 잠깁니다: <i>“재현되지 않음(정적 미재현) · 결정자 판정이 ‘추가 정보 필요’”</i></div>
+
+          <div style="display:flex;gap:6px;margin-top:12px;flex-wrap:wrap">
+            <button class="btn">📋 오류내용 복사</button>
+            <button class="btn pri">📨 이행 요청 복사</button>
+            <button class="btn">🔁 다시 분석</button>
+            <span style="flex:1"></span>
+            <button class="btn" style="background:#16a34a;color:#fff;border-color:#16a34a">✔ 해결로 변경</button>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
   <div class="docnote" style="margin-top:20px">
     <h2>두 탭의 열이 1:1로 대응합니다 (탭을 옮겨도 읽는 법이 같습니다)</h2>
     <ul>
@@ -394,7 +498,13 @@
       <li><b>발생시점</b> — 리뷰어: 발생 시각 &nbsp;·&nbsp; 시스템: <b>최근 발생</b>(같은 유형을 묶으므로 “마지막에 언제 또 났나”가 판단 기준)</li>
       <li><b>대상</b> — 리뷰어: 작업명 · 이름 · 전화번호 &nbsp;·&nbsp; 시스템: 기능 · 단계 · 종류 · 횟수</li>
       <li><b>오류내용 / 조치안내</b> — 두 탭 모두 <b>서버가 만든 한국어 한 문장</b>을 그대로 씁니다(화면에서 문장을 새로 만들지 않습니다).</li>
-      <li><b>펼침 패널</b> — 두 탭 모두 “근거 + 그 자리에서 처리”. 리뷰어는 제출 캡처, 시스템은 원본 메시지·스택.</li>
+      <li><b>펼침 패널</b> — 두 탭 모두 “근거 + 그 자리에서 처리”. 리뷰어는 제출 캡처, 시스템은 원본 메시지·스택. 시스템만 여기서 <b>AI 분석 모달</b>로 들어갑니다.</li>
+    </ul>
+    <h2 style="margin-top:12px">구현 시 손대는 곳 (참고)</h2>
+    <ul>
+      <li><b>추가</b> — <span class="kv">workdesk.html</span> 로그 뷰(서브탭·시스템 표·AI 모달) · <span class="kv">trackB.routes.js</span> 에 <span class="kv">/api/trackb/error-logs*</span> 프록시(기존 <span class="kv">admin.routes.js</span> 핸들러 위임 = SQL·로직 복제 0, 인트라넷 SSO 토큰이 <span class="kv">/api/admin/*</span> 에 못 닿으므로 필수)</li>
+      <li><b>제거</b> — <span class="kv">admin.html</span> 「오류디버깅」 탭과 <span class="kv">index-app.js</span> 의 그 화면 코드(창구 단일화)</li>
+      <li><b>안 건드림</b> — <span class="kv">error_logs</span> 스키마 · <span class="kv">logAbnormal</span> 수집 경로 · 리뷰어 비정상로그 API. 마이그레이션 0.</li>
     </ul>
   </div>
 
@@ -412,8 +522,6 @@
     d.hidden = !d.hidden;
     var c=document.getElementById('ch-'+id); if(c) c.textContent = d.hidden ? '▾' : '▴';
   }
-  // 기본 열림 상태를 셰브런에 맞춰 초기화
-  ['a2','b1'].forEach(function(id){ var c=document.getElementById('ch-'+id); if(c) c.textContent='▴'; });
 </script>
 </body>
 </html>
