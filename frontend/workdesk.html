@@ -297,7 +297,7 @@
   .mhsheet{font-size:11.5px;color:var(--muted);background:var(--card2);border:1px solid var(--line);
     border-radius:7px;padding:3px 9px;white-space:nowrap;max-width:340px;overflow:hidden;text-overflow:ellipsis}
   .mh h1{font-size:19px;margin:0;font-weight:800;letter-spacing:-.02em}
-  .bd{font-size:10.5px;font-weight:700;padding:3px 9px;border-radius:6px;background:var(--card2);color:var(--muted);border:1px solid var(--line)} .bd.g{background:var(--safe-soft);color:var(--safe);border-color:transparent} .bd.sot{background:var(--accent-soft);color:var(--accent);border-color:transparent}
+  .bd{font-size:10.5px;font-weight:700;padding:3px 9px;border-radius:6px;background:var(--card2);color:var(--muted);border:1px solid var(--line)} .bd.g{background:var(--safe-soft);color:var(--safe);border-color:transparent} .bd.sot{background:var(--accent-soft);color:var(--accent);border-color:transparent} .bd.w{background:var(--warn-soft);color:var(--warn);border-color:transparent} .bd.ovcov-miss{cursor:pointer}
   .metagrid{display:grid;grid-template-columns:repeat(auto-fill,minmax(150px,1fr));gap:9px;margin-bottom:16px}
   .mf{background:var(--card);border:1px solid var(--line);border-radius:9px;padding:9px 11px}
   .mf .k{font-size:10px;color:var(--faint);text-transform:uppercase;letter-spacing:.03em} .mf .v{font-size:13px;font-weight:600;margin-top:2px}
@@ -4296,14 +4296,58 @@ async function renderOverviewView(){
   $('#viewroot').innerHTML=`<div class="ovwrap"><div id="ovhead"></div><div id="ovbody"><div class="empty">불러오는 중…</div></div></div>`;
   const r=await api('/api/trackb/overview');
   if(!r||!r.ok){ $('#ovbody').innerHTML=`<div class="empty">관측 데이터는 admin/master에서 제공</div>`; return; }
-  STATE.ov=r.items||[]; renderOverviewHead(); renderOverviewBody(STATE.ovq||'');
+  STATE.ov=r.items||[];
+  // 투영 커버리지(읽기 전용 요약). ★ undefined(구버전 백엔드 = 필드 자체가 없음)와 null(조회 실패)을
+  //   구분해 담는다 — 전자는 칩을 아예 안 그리고, 후자는 '?'로 모른다고 말한다(허위 정상 차단).
+  STATE.ovCov = ('coverage' in r) ? (r.coverage||null) : undefined;
+  renderOverviewHead(); renderOverviewBody(STATE.ovq||'');
+}
+// 투영 커버리지 칩 — "투영완료 X / 총 Y" + "미투영 Z"(클릭 시 목록). 읽기 전용, 화면 표시 전용.
+//   ★★ 위의 `투영 N탭`(=목록 행 수)과 다른 수일 수 있다: 목록엔 지금은 비활성/아카이브된 탭의 잔재도
+//      섞이는 반면, 여기 분모는 **현재 투영 대상 활성 탭**이다. 그래서 두 수를 합치지 않고 나란히 둔다.
+function _ovCoverageChips(){
+  const c = STATE.ovCov;
+  if (c === undefined) return '';                                  // 구버전 백엔드 — 아무 말도 하지 않는다
+  if (!c) return `<span class="bd w" title="커버리지 조회에 실패했습니다(관측 목록 자체는 정상). 새로고침해 보세요.">미투영 ?</span>`;
+  const done=Number(c.projected)||0, total=Number(c.total)||0, miss=Number(c.missing)||0;
+  const why=[];
+  if(!c.projectionOn) why.push('자동 투영이 꺼져 있습니다(TRACK_B_PROJECTION≠1) — 크론이 등록되지 않아 미투영이 줄지 않습니다');
+  if(total>Number(c.cronBatchLimit||0)) why.push(`크론 1회 대상은 ${c.cronBatchLimit}탭까지라 나머지는 그 사이클에서 제외됩니다`);
+  if(c.truncated) why.push('활성 탭이 집계 상한을 넘어 총작업수가 잘렸습니다');
+  const tt=`현재 투영 대상 활성 탭 ${total}개 중 ${done}개가 Track B 원장에 투영됨` + (why.length?` · ${why.join(' · ')}`:'');
+  return `<span class="bd" title="${esc(tt)}">투영완료 ${done} / 총 ${total}</span>`
+    + (miss
+        ? `<span class="bd w ovcov-miss" title="미투영 ${miss}탭 — 클릭하면 목록을 봅니다(읽기 전용)" onclick="openCoverageMissing()">미투영 ${miss}${why.length?' ⚠':''}</span>`
+        : `<span class="bd g" title="${esc(tt)}">미투영 0</span>`);
+}
+// 미투영 탭 목록(읽기 전용 모달). 서버가 상한(sample)까지만 보내므로 잘렸으면 그대로 고지한다.
+function openCoverageMissing(){
+  const c = STATE.ovCov; if(!c) return;
+  const list = c.missingTabs||[];
+  // 긴 탭명이 모달을 가로로 밀어내지 않게 자체 스크롤 컨테이너 안에 두고, 셀은 줄바꿈을 허용한다.
+  const rows = list.length
+    ? `<div style="overflow-x:auto"><table class="lgtable" style="table-layout:fixed;width:100%">
+        <thead><tr><th style="width:48%">시트</th><th>탭</th></tr></thead><tbody>${
+        list.map(t=>`<tr><td style="word-break:break-all">${esc(t.spreadsheetTitle||t.sheetId||'')}</td><td style="word-break:break-all">${esc(t.tabName||'')}</td></tr>`).join('')
+      }</tbody></table></div>`
+    : `<div class="empty">미투영 탭이 없습니다</div>`;
+  const more = (Number(c.missing)||0) > list.length
+    ? `<div class="ovnote">전체 ${c.missing}개 중 ${list.length}개만 표시했습니다.</div>` : '';
+  const why=[];
+  if(!c.projectionOn) why.push('자동 투영 스위치가 꺼져 있습니다(<b>TRACK_B_PROJECTION≠1</b>) — 크론이 등록되지 않습니다.');
+  if((Number(c.total)||0)>Number(c.cronBatchLimit||0)) why.push(`크론 1회 투영 대상이 <b>${esc(String(c.cronBatchLimit))}탭</b>까지라 목록 뒤쪽(시트제목·탭명 정렬 기준)은 대상이 되지 않습니다.`);
+  if(c.truncated) why.push('활성 탭이 집계 상한을 넘어 총작업수 자체가 잘렸습니다.');
+  _modal(`미투영 작업 ${c.missing}개 / 총 ${c.total}`,
+    `<div class="ovnote">Track B 원장(<b>campaign_participants</b>)에 아직 행이 없는 활성 탭입니다. 관측 목록에는 <b>뜨지 않습니다</b>.${
+      why.length?`<br>${why.join('<br>')}`:''}</div>${more}${rows}`);
 }
 function renderOverviewHead(){
   const it=STATE.ov||[]; const n=it.length, nM=it.filter(x=>x.countMatch).length, nO=it.filter(x=>x.owned).length, nW=it.filter(x=>x.woLinked).length;
   const nR = it.filter(x=>x.real===0).length, nRk = it.filter(x=>typeof x.real==='number').length;
   const nReady = it.filter(x=>{const v=_cutoverVerdict(x); return v.txt==='✅ 준비';}).length;
   const nDb = it.filter(x=>x.sourceOfTruth==='db').length;
-  $('#ovhead').innerHTML=`<div class="mh"><h1>관측 대시보드</h1><span class="bd g">투영 ${n}탭</span>
+  $('#ovhead').innerHTML=`<div class="mh"><h1>관측 대시보드</h1><span class="bd g" title="아래 목록에 뜨는 탭 수(= 원장에 행이 있는 탭). 현재 활성 여부와 무관한 잔재도 포함될 수 있습니다.">투영 ${n}탭</span>
+    ${_ovCoverageChips()}
     <span class="bd">카운트일치 ${nM}</span><span class="bd">소유 ${nO}</span><span class="bd">발주 ${nW}</span>${nRk?`<span class="bd" title="정밀 계산된 탭 중 진짜 불일치 0">진짜불일치0 ${nR}/${nRk}</span>`:''}<span class="bd g" title="카운트·소유·발주 + 신선한 진짜불일치0(세션 정밀 30분 내 또는 서버 스냅샷 24h 내) 충족 → cutover 가능">cutover 준비 ${nReady}</span>${nDb?`<span class="bd sot" title="이미 Track B 원본으로 전환된 탭">전환됨 ${nDb}</span>`:''}
     <span class="sp" style="flex:1"></span>
     <button class="btn pri" id="paBtn" onclick="runParityAll()" title="투영된 전 탭의 진짜 불일치를 일괄 계산하고 추이 스냅샷 저장">전체 정밀 계산</button>

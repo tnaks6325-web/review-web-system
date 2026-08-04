@@ -94,9 +94,20 @@ router.post('/workdesk/favorites', authMiddleware, async (req, res, next) => {
 });
 
 // ── 관측 대시보드: 투영된 전 탭 롤업(카운트 대조 + 준비도) — adminOrMaster ──
+//   coverage = 투영완료/총작업 · 미투영 요약(읽기 전용). items 는 **투영된 탭만** 담으므로 미투영 탭은
+//   목록에 아예 없다 → 분모를 따로 실어 보내야 화면이 "총 몇 개 중 몇 개"를 말할 수 있다.
+//   ★ 부가 신호라 **fail-soft**: 커버리지 조회가 실패해도 관측 목록 자체는 그대로 뜬다(null = 화면 '?').
+//     필드 부재(구버전 백엔드)와 null(조회 실패)을 프론트가 구분한다 — 배포 스큐 허위 정상 차단.
 router.get('/overview', authMiddleware, adminOrMasterMiddleware, async (req, res, next) => {
-  try { res.json({ ok: true, items: await svc.overview() }); }
-  catch (err) { next(err); }
+  try {
+    const items = await svc.overview();
+    // items 를 재료로 넘겨 "투영완료 = 이 목록에 뜨는 탭"을 구조적으로 보장(+ 중복 조회 제거).
+    const coverage = await svc.projectionCoverage({ projectedTabs: items }).catch(e => {
+      logger.warn(`[trackB] projectionCoverage 실패: ${e.message}`);
+      return null;
+    });
+    res.json({ ok: true, items, coverage });
+  } catch (err) { next(err); }
 });
 // ── 전체 정밀 계산(진짜 불일치 일괄) + 스냅샷 저장 — adminOrMaster ──
 router.post('/parity-all', authMiddleware, adminOrMasterMiddleware, async (req, res, next) => {

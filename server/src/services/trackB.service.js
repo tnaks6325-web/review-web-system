@@ -152,7 +152,11 @@ async function _reconcileSeen({ sheetId, tabName, runStart } = {}) {
 }
 
 // 여러 활성 탭 일괄 투영(플래그 게이트 + best-effort). 라이브 무영향.
-async function projectActive({ limit = 100, by = 'trackB-cron' } = {}) {
+//   ★ 한 사이클에 훑는 탭 수 상한. 크론(cron.js)이 인자 없이 부르므로 이 값이 곧 "1회 투영 대상 수"다 —
+//     활성 탭이 이보다 많으면 목록 뒤쪽(제목·탭명 정렬 기준)은 그 사이클에서 아예 대상이 안 된다.
+//     projectionCoverage() 가 이 상수를 그대로 실어 보내 화면이 미투영 사유를 설명한다(사본 금지).
+const PROJECT_ACTIVE_DEFAULT_LIMIT = 100;
+async function projectActive({ limit = PROJECT_ACTIVE_DEFAULT_LIMIT, by = 'trackB-cron' } = {}) {
   if (process.env.TRACK_B_PROJECTION !== '1') return { skipped: true, reason: 'TRACK_B_PROJECTION!=1' };
   const tabs = await participants.listActiveTabs({ limit });
   let done = 0, errors = 0;
@@ -1222,6 +1226,49 @@ async function overview() {
       cutoverCandidate, cutoverReady,
     };
   });
+}
+
+// ── 투영 커버리지: "투영 대상 활성 탭" 중 B 원장에 행이 아직 없는 탭(=미투영) 집계 · 읽기 전용 ──
+//   ★★ 이 요약이 필요한 이유: overview() 는 **campaign_participants 에서 시작**하므로(위 b CTE)
+//      **한 번도 투영되지 않은 탭은 관측 목록에 아예 안 뜬다**. 그래서 화면만 봐서는 "총 몇 개 중
+//      몇 개가 투영됐는가"를 알 수 없고, 목록이 짧은 것이 "작업이 적어서"인지 "투영이 안 돼서"인지
+//      구분되지 않는다. 여기서 분모(활성 탭 전체)를 따로 세어 그 눈속임을 없앤다.
+//   ★★ 투영 대상 정의는 participants.listActiveTabs() **하나만** 쓴다 — projectActive(크론)가 대상으로
+//      삼는 목록과 같아야 "미투영 = 크론이 아직 안 만든 것"이 성립한다. 여기서 SQL 을 복사하면 화면의
+//      미투영 수와 실제 투영 동작이 조용히 갈라진다(사본 금지).
+//   ★★ 투영 완료 판정은 **overview() 가 돌려준 목록을 그대로** 재료로 쓴다(projectedTabs). overview 의
+//      b CTE 가 이미 `deleted_at IS NULL` 로 묶은 (시트,탭) 집합이라, 이걸 쓰면 "투영완료로 센 탭"과
+//      "아래 목록에 뜨는 탭"이 **구조적으로** 같아진다 — 조건을 두 번 적으면 언젠가 갈라진다.
+//      덤으로 같은 테이블을 한 번 더 훑는 비용도 없앤다(관측 화면 로드 = 쿼리 1개 절약).
+//      단독 호출(테스트·후속 소비처)일 때만 직접 조회로 폴백한다.
+//   ★ 활성 0행(유령)도 "투영은 된 것"이라 미투영이 아니다 — 그건 overview 의 ghost 신호가 다룬다.
+//   ★ 읽기 전용(시트 API 무접촉). 실패는 라우트에서 fail-soft(관측 목록은 그대로 뜬다).
+const _COVERAGE_TAB_CAP = 2000;   // participants.listActiveTabs 의 상한과 같은 값(넘으면 truncated 로 고지)
+async function projectionCoverage({ projectedTabs = null, sample = 200 } = {}) {
+  const tabs = await participants.listActiveTabs({ limit: _COVERAGE_TAB_CAP });
+  let projected = projectedTabs;
+  if (!Array.isArray(projected)) {
+    const { rows } = await getPool().query(
+      `SELECT DISTINCT sheet_id AS "sheetId", tab_name AS "tabName"
+         FROM campaign_participants WHERE deleted_at IS NULL`);
+    projected = rows;
+  }
+  const have = new Set(projected.map(r => String(r.sheetId) + '\u0000' + String(r.tabName)));
+  const missing = tabs.filter(t => !have.has(String(t.sheetId) + '\u0000' + String(t.tabName)));
+  return {
+    total: tabs.length,
+    projected: tabs.length - missing.length,
+    missing: missing.length,
+    // 활성 탭이 상한을 넘으면 분모 자체가 잘린 것 → 화면이 "이상"으로 고지(조용한 절단 금지).
+    truncated: tabs.length >= _COVERAGE_TAB_CAP,
+    // 자동 투영 스위치. OFF 면 크론이 아예 등록되지 않아(cron.js) 미투영이 줄지 않는다 — 사유 표시용.
+    projectionOn: process.env.TRACK_B_PROJECTION === '1',
+    // 크론 1사이클 대상 상한. total 이 이보다 크면 뒤쪽 탭은 그 사이클에서 대상이 안 된다 — 사유 표시용.
+    cronBatchLimit: PROJECT_ACTIVE_DEFAULT_LIMIT,
+    missingTabs: missing.slice(0, sample).map(t => ({
+      sheetId: t.sheetId, tabName: t.tabName, spreadsheetTitle: t.spreadsheetTitle || t.sheetId,
+    })),
+  };
 }
 
 // ══ 진실원천(source_of_truth) 컨트롤 — 옵션 A cutover 스위치 (P1: 기반·관측, 동작은 P2 write-back 엔진) ══
@@ -2510,6 +2557,7 @@ module.exports = {
   _advertiserColumns,   // 광고주 노출 화이트리스트 매핑(테스트/회귀가드용)
   canAccessTab,
   overview,
+  projectionCoverage,
   getSourceOfTruth,
   setSourceOfTruth,
   executeWriteback,
