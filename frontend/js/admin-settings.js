@@ -306,6 +306,139 @@ async function saveCompanyBusinessNo() {
 }
 
 /* ══════════════════════════════════════════════════════════════
+   ★ AI 판별 예시이미지 (현금영수증 · 리뷰) — 자동검수의 "기준 실물"
+   ──────────────────────────────────────────────────────────────
+   위 **발행방법 이미지**와 헷갈리기 쉬운데 용도가 정반대다:
+     · 발행방법(위)  = 리뷰어에게 보여주는 안내 — 결제 전 "이렇게 발행하세요"
+     · 예시(여기)    = AI가 판정에 쓰는 기준 — 리뷰어에게 **보이지 않는다**
+   현금영수증 예시는 제출 캡처의 영수증 슬롯 검수(captureVerify)에, 리뷰 예시는
+   리뷰 화면·채널 판별(1차 필터·2차 검수)에 few-shot 으로 동봉된다.
+
+   ★ 슬롯 목록을 여기에 적어두지 않는다 — **서버 응답 그대로 그린다**.
+     채널 표(utils/cashReceiptChannels.js · utils/reviewSampleChannels.js)의 사본을
+     프론트에 두면 채널을 늘렸을 때 한 칸이 조용히 빠진다(실측: 현영 안내가 2슬롯에 머물렀다).
+   ★ 서버 경로는 재기준(ADMIN_SETTINGS_API)을 쓰지 않는다 — `/api/trackb/review-inspect/samples`
+     는 관리자 대시보드(admin_token)와 통합 작업대(인트라넷 SSO) **양쪽에서 닿는 경로**다
+     (작업표 표준 열 패널과 같은 판단). 통합작업대 리뷰검수 탭의 [🖼 판별 예시] 모달과
+     **같은 저장소**라 어느 쪽에서 올려도 결과가 같다.
+   ══════════════════════════════════════════════════════════════ */
+var SMP_EP = '/api/trackb/review-inspect/samples';
+
+async function _smpFetch(body) {
+  var opt = body ? { method: 'POST', headers: _headers(), body: JSON.stringify(body) } : { headers: _headers() };
+  var r = await fetch(_apiBase() + SMP_EP, opt);
+  var j = await r.json().catch(function () { return null; });
+  if (!j) throw new Error('HTTP ' + r.status);
+  if (j.ok === false) throw new Error(j.error || '요청 실패');
+  return j;
+}
+
+function _aisamplesHtml() {
+  return `
+        <!-- AI 판별 예시이미지 (현금영수증 · 리뷰) -->
+        <div class="admin-section-header">
+          <span style="font-size:.95rem;font-weight:700;color:var(--t1)">
+            <i class="fas fa-robot" style="color:#2563A8;margin-right:6px"></i>AI 판별 예시이미지 (자동검수 기준)
+          </span>
+          <button onclick="loadAiSamples()" style="padding:4px 10px;background:#F3F4F6;color:#374151;border:none;border-radius:7px;font-size:.72rem;font-weight:600;cursor:pointer"><i class="fas fa-sync-alt"></i> 새로고침</button>
+        </div>
+        <p style="font-size:.78rem;color:var(--t3);margin:8px 0 12px;line-height:1.6">
+          리뷰어가 올린 캡처를 AI가 판정할 때 <b>"정상은 이렇게 생겼다"의 기준</b>으로 함께 보는 실물 예시입니다.
+          <b style="color:#B91C1C">리뷰어 화면에는 나가지 않습니다</b>(위 발행방법 이미지와 다릅니다).
+          등록하지 않아도 검수는 동작하며, 채널 판별 정확도만 낮아집니다.
+        </p>
+        <div style="font-size:.85rem;font-weight:700;color:var(--t1);margin:14px 0 6px">
+          🧾 현금영수증 판별 예시 <span style="font-weight:400;color:var(--t3);font-size:.74rem">— 현영 탭의 <b>영수증 캡처 슬롯</b> 검수에 쓰입니다(채널당 1장)</span>
+        </div>
+        <div id="asSmpReceipt" class="as-smpgrid"><div class="as-smpload">불러오는 중…</div></div>
+        <div style="font-size:.85rem;font-weight:700;color:var(--t1);margin:18px 0 6px">
+          🖼 리뷰 판별 예시 <span style="font-weight:400;color:var(--t3);font-size:.74rem">— 리뷰 화면·채널 판별(첨부 즉시 필터 · 제출 후 검수)에 쓰입니다</span>
+        </div>
+        <div id="asSmpReview" class="as-smpgrid"><div class="as-smpload">불러오는 중…</div></div>`;
+}
+
+/** 슬롯 카드 1장. kind = 'receipt' | 'review' (저장 창구가 갈리는 유일한 값) */
+function _smpCardHtml(kind, s) {
+  var id = kind + '_' + s.key;
+  var url = s.imageUrl || '';
+  return '<div class="as-smpcard">' +
+    '<div class="as-smpname">' + escHtml((s.emoji || '') + ' ' + (s.label || s.key)) + '</div>' +
+    (url
+      ? '<img src="' + escHtml(url) + '" alt="" class="as-smpimg">'
+      : '<div class="as-smpnone">등록된 예시가 없습니다</div>') +
+    '<div class="as-smpact">' +
+      '<input type="file" accept="image/*" id="asSmpFile_' + escHtml(id) + '" ' +
+        'onchange="uploadAiSample(\'' + escHtml(kind) + '\',\'' + escHtml(s.key) + '\', this)">' +
+      (url ? '<button class="as-smpdel" onclick="clearAiSample(\'' + escHtml(kind) + '\',\'' + escHtml(s.key) + '\')">제거</button>' : '') +
+    '</div></div>';
+}
+
+function _smpRender(elId, kind, list) {
+  var el = document.getElementById(elId);
+  if (!el) return;
+  if (!list || !list.length) { el.innerHTML = '<div class="as-smpload">등록 가능한 슬롯이 없습니다.</div>'; return; }
+  el.innerHTML = list.map(function (s) { return _smpCardHtml(kind, s); }).join('');
+}
+
+/** 등록 현황 불러오기 — **이미 서버에 올려둔 예시가 그대로 채워진다**(통합작업대에서 올린 것 포함). */
+async function loadAiSamples() {
+  var rc = document.getElementById('asSmpReceipt');
+  if (!rc) return;
+  try {
+    var j = await _smpFetch(null);
+    _smpRender('asSmpReceipt', 'receipt', j.receiptSamples || []);
+    _smpRender('asSmpReview', 'review', j.samples || []);
+  } catch (e) {
+    var msg = '<div class="as-smpload">불러오지 못했습니다: ' + escHtml(e.message) + '</div>';
+    rc.innerHTML = msg;
+    var rv = document.getElementById('asSmpReview');
+    if (rv) rv.innerHTML = msg;
+  }
+}
+
+/** 예시 업로드 — guide-image Drive+프록시 인프라 재사용(발행방법 이미지와 같은 경로). */
+async function uploadAiSample(kind, key, input) {
+  var file = input.files && input.files[0];
+  if (!file) return;
+  if (file.size > 5 * 1024 * 1024) { showToast('이미지는 5MB 이하로 올려주세요.', true); input.value = ''; return; }
+  showToast('예시이미지 업로드 중...');
+  try {
+    var b64 = await new Promise(function (res, rej) {
+      var rd = new FileReader();
+      rd.onload = function () { res(String(rd.result).split(',')[1]); };
+      rd.onerror = rej;
+      rd.readAsDataURL(file);
+    });
+    var uj = await _post('guideImage', {
+      imageBase64: b64, mimeType: file.type || 'image/jpeg',
+      fileName: 'aisample_' + kind + '_' + key + '_' + Date.now(),
+    });
+    if (!uj.ok || !uj.url) throw new Error(uj.error || '업로드 실패');
+    // ★ kind 로 저장 창구를 가른다 — receipt 는 channel, review 는 슬롯 key.
+    await _smpFetch(kind === 'receipt'
+      ? { kind: 'receipt', channel: key, imageUrl: uj.url }
+      : { key: key, imageUrl: uj.url });
+    showToast('✅ 예시이미지가 등록되었습니다.');
+    loadAiSamples();
+  } catch (e) {
+    showToast('❌ 등록 실패: ' + e.message, true);
+  } finally { input.value = ''; }
+}
+
+async function clearAiSample(kind, key) {
+  if (!confirm('이 예시이미지를 제거할까요?\nAI 판정은 계속 동작하며, 그 채널의 판별 정확도만 낮아집니다.')) return;
+  try {
+    await _smpFetch(kind === 'receipt'
+      ? { kind: 'receipt', channel: key, imageUrl: '' }
+      : { key: key, imageUrl: '' });
+    showToast('제거했습니다.');
+    loadAiSamples();
+  } catch (e) {
+    showToast('❌ 제거 실패: ' + e.message, true);
+  }
+}
+
+/* ══════════════════════════════════════════════════════════════
    ★ 리뷰어 소식·공지 관리 (관리자) — 리뷰어 홈 상단 노출
    ══════════════════════════════════════════════════════════════ */
 let _rvNotices = [];
@@ -927,8 +1060,8 @@ function _wtRenderReport(d) {
   /* ── 마운트 ──────────────────────────────────────────────────
      ★ 호스트 테마가 없으면(통합 작업대) `as-standalone` 으로 같은 토큰을 주입한다.
        admin.html 은 테마가 있어 클래스가 붙지 않으므로 **렌더 결과가 그대로**다. */
-  var PANELS = { nickname: _nicknameHtml, business: _businessHtml, worktable: _worktableHtml, notice: _noticeHtml };
-  var LOADERS = { nickname: loadMyNickname, business: loadCompanyBusinessNo, worktable: loadWorktableTemplate, notice: loadReviewerNoticesAdmin };
+  var PANELS = { nickname: _nicknameHtml, business: _businessHtml, aisamples: _aisamplesHtml, worktable: _worktableHtml, notice: _noticeHtml };
+  var LOADERS = { nickname: loadMyNickname, business: loadCompanyBusinessNo, aisamples: loadAiSamples, worktable: loadWorktableTemplate, notice: loadReviewerNoticesAdmin };
   var SEP = '<hr style="margin:28px 0;border:none;border-top:1px solid #E5E7EB">';
 
   function _injectStyles() {
@@ -938,6 +1071,16 @@ function _wtRenderReport(d) {
     st.textContent =
       '.as-standalone{--t1:#0F172A;--t2:#475569;--t3:#94A3B8;--t4:#9CA3AF;--p:#3182f6;--border:#E5E7EB;color:var(--t1)}' +
       '.as-standalone .admin-section-header{display:flex;align-items:center;justify-content:space-between;margin:0 0 4px;padding-bottom:8px;border-bottom:1px solid var(--border)}' +
+      /* AI 판별 예시이미지 — ★ 색·크기 리터럴 고정(호스트 테마 없이도 같은 모양) */
+      '.as-smpgrid{display:flex;gap:12px;flex-wrap:wrap}' +
+      '.as-smpload{font-size:.78rem;color:#9CA3AF;padding:10px 2px}' +
+      '.as-smpcard{flex:1;min-width:190px;max-width:250px;border:1px solid #E5E7EB;border-radius:10px;padding:10px;background:#fff}' +
+      '.as-smpname{font-size:.78rem;font-weight:700;color:#111827;margin-bottom:6px}' +
+      '.as-smpimg{display:block;max-width:100%;max-height:150px;border-radius:8px;border:1px solid #E5E7EB;object-fit:contain;margin-bottom:6px}' +
+      '.as-smpnone{font-size:.72rem;color:#9CA3AF;margin-bottom:6px;padding:14px 0;text-align:center;border:1px dashed #E5E7EB;border-radius:8px}' +
+      '.as-smpact{display:flex;gap:6px;align-items:center}' +
+      '.as-smpact input[type=file]{font-size:.7rem;flex:1;min-width:0}' +
+      '.as-smpdel{padding:6px 10px;background:#FFF5F5;color:#B42318;border:1px solid #F7C9C9;border-radius:7px;font-size:.72rem;font-weight:700;cursor:pointer}' +
       /* 작업표 표준 열 — ★ 색은 리터럴 고정(호스트 테마 변수에 의존하지 않는다).
          admin.html·통합 작업대 어디에 얹혀도 같은 모양으로 뜬다(recruit-modal.js 실측 사고의 교훈). */
       '.as-wtlist{display:flex;flex-direction:column;gap:6px}' +
@@ -1045,6 +1188,9 @@ function _wtRenderReport(d) {
   window.uploadCashReceiptGuide = uploadCashReceiptGuide;
   window.clearCashReceiptGuide = clearCashReceiptGuide;
   window.CR_GUIDE_CHANNELS = CR_GUIDE_CHANNELS;
+  window.loadAiSamples = loadAiSamples;
+  window.uploadAiSample = uploadAiSample;
+  window.clearAiSample = clearAiSample;
   window.loadWorktableTemplate = loadWorktableTemplate;
   window.wtAddCol = wtAddCol;
   window.wtDelCol = wtDelCol;

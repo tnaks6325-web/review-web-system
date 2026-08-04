@@ -1658,9 +1658,13 @@ router.post('/review-upload', imageApiLimiter, async (req, res, next) => {
     let _inspectSamples = [];
     try {
       const _ri = require('../services/reviewInspect.service');
-      if (slot === 'review') {
+      // ★ 슬롯에 맞는 예시를 고른다 — 리뷰 슬롯엔 리뷰 화면, 영수증 슬롯엔 그 채널의
+      //   현금영수증 실물. 반대로 주면 "영수증 자리에 리뷰가 왔다"는 판정이 흔들린다.
+      if (slot === 'review' || slot === 'receipt') {
         const _exp = await _ri.loadTabExpectations({ sheetId, tabName });
-        _inspectSamples = await _ri.loadSamplesFor(_exp.expectedChannel);
+        _inspectSamples = slot === 'review'
+          ? await _ri.loadSamplesFor(_exp.expectedChannel)
+          : await _ri.loadReceiptSamplesFor(_exp.expectedChannel);
       }
     } catch (_) { _inspectSamples = []; }   // 준비 실패 = 예시 없이 진행(동작 불변)
 

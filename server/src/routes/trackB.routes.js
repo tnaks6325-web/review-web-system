@@ -956,10 +956,18 @@ router.get('/review-inspect/export.csv', authMiddleware, _reInternal, async (req
   }
 });
 
-/* 판별 예시이미지 — 조회는 내부인, **저장은 adminOrMaster**(전사 설정이라 AE가 못 바꾼다) */
+/* 판별 예시이미지 — 조회는 내부인, **저장은 adminOrMaster**(전사 설정이라 AE가 못 바꾼다)
+   ★ 리뷰 예시(`kind:'review'`, 기본)와 현금영수증 예시(`kind:'receipt'`)가 **한 창구**를 쓴다 —
+     둘 다 "AI 판정의 기준이 되는 예시"라 화면·권한·검증이 같아야 한다.
+   ★ 기존 호출부(통합작업대 리뷰검수 탭의 [🖼 판별 예시] 모달)는 kind 를 안 보내므로
+     기본값이 review = **동작 불변**. */
 router.get('/review-inspect/samples', authMiddleware, _reInternal, async (req, res) => {
   try {
-    res.json({ ok: true, samples: await _inspectSvc.sampleSettings() });
+    const [samples, receiptSamples] = await Promise.all([
+      _inspectSvc.sampleSettings(),
+      _inspectSvc.receiptSampleSettings(),
+    ]);
+    res.json({ ok: true, samples, receiptSamples });
   } catch (err) {
     res.status(500).json({ ok: false, error: '예시이미지를 불러오지 못했습니다.' });
   }
@@ -967,6 +975,11 @@ router.get('/review-inspect/samples', authMiddleware, _reInternal, async (req, r
 router.post('/review-inspect/samples', authMiddleware, adminOrMasterMiddleware, async (req, res) => {
   try {
     const b = req.body || {};
+    if (String(b.kind || '') === 'receipt') {
+      const channel = String(b.channel || b.key || '');
+      const url = await _inspectSvc.saveReceiptSample({ channel, imageUrl: b.imageUrl });
+      return res.json({ ok: true, kind: 'receipt', channel, imageUrl: url });
+    }
     const url = await _inspectSvc.saveSample({ key: String(b.key || ''), imageUrl: b.imageUrl });
     res.json({ ok: true, key: b.key, imageUrl: url });
   } catch (err) {

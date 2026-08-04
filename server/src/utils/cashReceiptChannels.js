@@ -36,6 +36,20 @@ function cashReceiptSettingKey(channelKey) {
 /** 조회용 키 전체(사업자번호는 호출부에서 합친다). */
 const CASH_RECEIPT_SETTING_KEYS = CASH_RECEIPT_CHANNELS.map(c => cashReceiptSettingKey(c.key));
 
+/**
+ * ★★ 현금영수증 **판별 예시이미지**(AI 기준) — 위 발행방법 이미지와 **다른 슬롯**이다.
+ *   - 발행방법(`cash_receipt_guide_*`) = **리뷰어에게 보여주는 안내**(결제 전 "이렇게 발행하세요").
+ *   - 예시(`cash_receipt_sample_*`)   = **AI가 "이게 그 채널의 현금영수증"으로 삼는 기준**
+ *     (`captureVerify` 의 receipt 슬롯 판정에 few-shot 으로 동봉 — 리뷰어에게 나가지 않는다).
+ *   두 값을 한 칸에 합치면 "리뷰어 안내를 바꿨더니 AI 판정이 흔들리는" 결합이 생긴다.
+ *
+ * ★ 채널 표는 위 하나뿐이므로 채널을 늘리면 발행방법·예시 슬롯이 **함께** 따라온다.
+ */
+function cashReceiptSampleSettingKey(channelKey) {
+  return `cash_receipt_sample_${channelKey}`;
+}
+const CASH_RECEIPT_SAMPLE_SETTING_KEYS = CASH_RECEIPT_CHANNELS.map(c => cashReceiptSampleSettingKey(c.key));
+
 /** 저장 라우트 화이트리스트 — 목록에 없는 채널 키는 거부(임의 app_settings 키 생성 차단). */
 function isCashReceiptChannelKey(k) {
   return CASH_RECEIPT_CHANNELS.some(c => c.key === k);
@@ -61,7 +75,9 @@ function cashReceiptChannelLabel(channelKey) {
 module.exports = {
   CASH_RECEIPT_CHANNELS,
   CASH_RECEIPT_SETTING_KEYS,
+  CASH_RECEIPT_SAMPLE_SETTING_KEYS,
   cashReceiptSettingKey,
+  cashReceiptSampleSettingKey,
   isCashReceiptChannelKey,
   cashReceiptChannelKey,
   cashReceiptChannelLabel,
