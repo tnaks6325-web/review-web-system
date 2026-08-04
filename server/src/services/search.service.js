@@ -1,6 +1,7 @@
 const pool = require('../db/pool');
 const { logger } = require('../utils/logger');
 const { effectiveCaptureSlots } = require('../utils/captureSlots');
+const { reviewTypesForTabs } = require('./reviewTypeContext.service');
 
 /**
  * rowJson (JSON 문자열 또는 객체) → row 객체로 파싱
@@ -369,6 +370,15 @@ async function searchByName(query, phone8, opts = {}) {
       return !archivedSet.has(row.round);
     });
 
+    /* ★ 087 2차: 이 결과에 걸린 탭들의 리뷰타입을 **한 번에** 읽는다(탭당 60초 캐시).
+       슬롯 파생이 리뷰타입을 봐야 하는데 행마다 조회하면 검색 한 번에 왕복이 폭증한다.
+       fail-soft — 조회 실패는 null 이라 슬롯이 종전대로 나온다. */
+    let _rtMap = new Map();
+    try {
+      _rtMap = await reviewTypesForTabs(
+        filteredRows.map(r => ({ sheetId: r.sheetId, tabName: r.tabName })));
+    } catch (_) { _rtMap = new Map(); }
+
     // GAS 호환 결과 변환
     const results = filteredRows.map(row => {
       const rowObj = _parseRowJson(row.rowJson);
@@ -401,7 +411,9 @@ async function searchByName(query, phone8, opts = {}) {
       folderUrl:   row.folderUrl,
       captureFolderUrl: row.captureFolderUrl,
       // 현영 탭은 capture_slots 설정이 없어도 리뷰+현금영수증 2슬롯이 자동 적용된다(공용 유틸)
-      captureSlots: effectiveCaptureSlots(row.captureSlots, row.incomeType),
+      // ★ 087 2차: 구매확정 + 현영이면 리뷰 자리가 구매확정으로 치환된다(단독은 종전 단일 화면).
+      captureSlots: effectiveCaptureSlots(row.captureSlots, row.incomeType, _rtMap.get(`${row.sheetId} ${row.tabName}`) || null),
+      reviewType:  _rtMap.get(`${row.sheetId} ${row.tabName}`) || null,   // 리뷰어 안내문용
       submittedSlots: [],   // 아래에서 다중 슬롯 행에 한해 채움
       // ★ 제출완료 행은 행 전체 JSON을 반환하지 않는다(데이터 최소화 — 완료 탭 표시에 불필요)
       row:         row.isSubmitted ? {} : rowObj,

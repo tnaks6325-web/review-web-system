@@ -343,7 +343,19 @@ GAS(Google Apps Script) 기반 리뷰 관리 시스템을 **Node.js Express + Po
 - ★ **옛 값은 화면에서 지우지 않는다** — 선택지에서 빠진 `실배송·빈박스·믹스` 도 배지 색 맵·CSS 를 남겨 그대로 표시한다(무엇이 설정돼 있었는지 알아야 한다). 정리는 **자동 마이그레이션이 아니라** `POST /api/diag/review-type-cleanup`(dryRun 기본, admin/master) — ★★ 배송유형 이관은 **blank-only**(접수가 채운 값을 덮지 않는다). 안 돌려도 안전(판정에서 null 로 떨어진다).
 - ★ migration 087 은 **컬럼 추가만**(백필 0) · **TEXT**(082 의 42804 계열 회피) · **DB CHECK 없음**(판정을 코드와 DB 에 이중화하면 어휘 확장 때마다 저장이 실패한다).
 - 회귀가드 `tests/reviewType.test.js`(55케이스 — 순수함수·`precheckPolicy` **실행** + 배선 + 권한 경계 + 사본 일치. 변이시험 2종으로 검출 확인). 테마 없는 호스트에서 모달 **실브라우저 렌더** 확인.
-- **다음(2차)**: 제출 슬롯 치환(`captureSlots` + 소비처 4곳 동시) · AI kind `purchase_confirm` 추가(기존 3줄 불변 · 캐시 접두 `classify3:`) · 구매확정 예시이미지(지문 `pc_` 접두) · `captureVerify._expectedKind`.
+- 회귀가드 `tests/reviewType.test.js`(81케이스), 변이시험 5종 검출 확인.
+
+### ★★ 리뷰타입 2차 — 구매확정 제출 슬롯 + AI 판별
+- ★★ **구매확정 단독은 슬롯을 만들지 않는다(완화 금지 · 실측으로 잡은 함정)**: 프론트(`search-app.js:1841`)는 `captureSlots.length > 1` 일 때만 슬롯 UI 를 그리고 단일 첨부 경로는 slotKey 를 안 보내 서버에서 `'review'` 가 된다. 여기서 `[CONFIRM_SLOT]`(길이 1)을 돌려주면 `requiredSlotKeys` 는 `['confirm']` 을 요구하는데 실제 제출은 `'review'` 로 들어와 **완료 판정이 영영 안 된다**(구매확정 제출 전멸). → 슬롯은 종전대로 두고 **기대 화면 종류만** 리뷰타입에서 파생한다.
+- ★★ **기대 종류 = `captureVerify._expectedKind(slotKey, reviewType)`** — 슬롯 key 만으로는 정해지지 않는다. `review`+confirm → `purchase_confirm` / `confirm` 슬롯(현영 2슬롯) → `purchase_confirm` / `receipt` 는 리뷰타입 무관. **reviewType 없으면 종전과 완전히 동일.** ★ 회귀가드가 **동기 호출**로 검증한다 — `verifyCapture`(async)로 간접 확인하면 단언이 `process.exit(0)` 뒤로 밀려 **조용히 실행되지 않는다**(변이시험으로 실측·수정).
+- **현영과 겹칠 때만 2슬롯**: `[구매확정, 현금영수증]`(리뷰 자리를 치환). 관리자 `capture_slots` 명시는 여전히 최우선.
+- ★★ **조회 단일 출처 = `reviewTypeContext.service.js`**(`reviewTypeForTab`, 탭당 60초 캐시) — 소비처 4곳(리뷰어 화면 슬롯 `search.service` · 완료 판정 `submit.routes` · 업로드 폴더 라벨 `diag review-upload` · 교체요청 라벨 `reviewEdit` 2곳)이 각자 SQL 을 쓰면 조용히 갈라진다. 판정 자체는 `utils/reviewType` 에 맡긴다(규칙 사본 0). ★ **조회 실패는 캐시에 넣지 않는다**(일시 장애를 60초 굳히지 않는다). ★ 행 단위(시트 작업옵션 칸)는 여기서 모르므로 **공고 > 탭**까지만 — 혼합 탭은 null 로 떨어져 오늘 동작 그대로.
+- **AI**: `classifySubmissionImage` kind 에 `purchase_confirm` 추가 — ★★ **기존 3줄은 한 글자도 바꾸지 않고** 4번째 줄만 넣었다(오래 검증된 슬롯 검수가 그대로 쓴다). ★★ 캐시 접두 `classify2:`→`classify3:`(옛 캐시가 새 종류를 모른 채 히트하는 것 차단, 가드는 `classify[2-9]\d*:` 로 버전 상향 허용).
+- ★★ **구매확정 갈래는 어떤 판정에도 잠그지 않는다(완화 금지)**: 예시이미지 등록 전에는 정확도가 낮아 오탐이 곧 정상 제출 차단(참여 소각)이다 → pass/warn 만. 킬스위치 `REVIEW_CONFIRM_VERIFY=0`.
+- ★★ **역방향도 경고까지만**: 리뷰 작업 자리에 구매확정 화면이 오면 종전엔 `other` 로 떨어져 차단 대상이었다. 새 종류 도입만으로 **판정이 갑자기 세지면 안 되므로** `purchase_confirm_on_review` warn 으로 둔다 — 잠금은 여전히 `other` 한 갈래뿐(차단 범위를 넓히는 게 아니라 좁히는 방향이라 fail-open 원칙과 맞다).
+- ⚠ **배선 형태가 바뀌어 기존 가드 2종의 패턴을 함께 갱신**했다(`captureSlotVerify`·`reviewInspect` — 검사 의미는 불변).
+- 회귀가드 `tests/reviewType.test.js` 81케이스(슬롯 파생·기대 종류·잠금 범위 **실행** + 소비처 4곳 배선), 변이시험 5종 검출 확인.
+- **다음(3차)**: 구매확정 판별 예시이미지 등록 화면(`utils/purchaseConfirmChannels.js` + 설정탭 — ★ 캐시 지문 `pc_` 접두 필수) · 리뷰어 단일 첨부 화면의 "구매확정 완료 화면을 올려주세요" 안내문(`search.service` 가 이미 `reviewType` 을 내려준다) · 행 단위(시트 작업옵션 칸) 판정.
 
 ### ★★ 리뷰비 입금 자동화 M1 — 입금대상 추출 · 은행별 분류 · 회차(다운로드) 잠금 (migration 086)
 - **배경**: 매일 ① 구글시트에서 새로 리뷰 제출한 사람을 눈으로 찾고 ② 계좌를 다건이체 파일에 옮겨 적고 ③ 이체 후 시트 입금칸에 날짜를 적는 수작업. M1이 ①②를 없앤다(③ = M2).

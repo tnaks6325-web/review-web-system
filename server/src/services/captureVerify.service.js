@@ -19,10 +19,19 @@ const MIN_CONFIDENCE = Number(process.env.CAPTURE_VERIFY_MIN_CONFIDENCE || 0.7);
 const SURE_CONFIDENCE = Number(process.env.CAPTURE_VERIFY_SURE_CONFIDENCE || 0.9);
 const ENABLED = process.env.CAPTURE_VERIFY !== '0';
 
-/** 슬롯 key → 그 슬롯에 와야 할 이미지 종류. 모르는 슬롯은 검수 대상이 아니다(null). */
-function _expectedKind(slotKey) {
-  if (slotKey === 'review') return 'review';
-  if (slotKey === 'receipt') return 'receipt';
+/**
+ * 슬롯 key → 그 슬롯에 와야 할 이미지 종류. 모르는 슬롯은 검수 대상이 아니다(null).
+ *
+ * ★★ 087 2차 — 기대 종류는 **슬롯 key 만으로 정해지지 않는다**. 구매확정 작업의 리뷰어는
+ *   리뷰를 쓰지 않고 '구매확정 완료 화면'을 내는데, 그 제출은 기존 단일 첨부 경로를 타서
+ *   slotKey 가 `'review'` 로 들어온다(`captureSlots` 주석의 함정 참조).
+ *   그래서 리뷰타입을 함께 받아 리뷰 자리의 기대를 바꾼다.
+ * ★ reviewType 이 없으면(미지정·판정 실패) 종전과 **완전히 동일**하다.
+ */
+function _expectedKind(slotKey, reviewType) {
+  if (slotKey === 'receipt') return 'receipt';            // 영수증 자리는 리뷰타입과 무관
+  if (slotKey === 'confirm') return 'purchase_confirm';   // 구매확정 + 현영 2슬롯일 때
+  if (slotKey === 'review') return reviewType === 'confirm' ? 'purchase_confirm' : 'review';
   return null;
 }
 
@@ -32,8 +41,8 @@ function _expectedKind(slotKey) {
  *            confidence:number, message:string, businessNo:string, amount:number}}
  *   status: ok=형식 일치 / mismatch=명백히 다른 형식(경고) / skipped=판정 안 함(통과)
  */
-async function verifyCapture({ base64, mimeType, slotKey, companyBusinessNo, samples } = {}) {
-  const expected = _expectedKind(slotKey);
+async function verifyCapture({ base64, mimeType, slotKey, companyBusinessNo, samples, reviewType } = {}) {
+  const expected = _expectedKind(slotKey, reviewType);
   const skip = (message) => ({ status: 'skipped', expected, got: null, confidence: 0, message, businessNo: '', amount: 0, sure: false });
   if (!ENABLED || !expected || !base64) return skip('');
 
@@ -66,7 +75,8 @@ async function verifyCapture({ base64, mimeType, slotKey, companyBusinessNo, sam
              message, businessNo: r.businessNo, amount: r.amount, sure: false };
   }
 
-  const label = { review: '리뷰 캡처', receipt: '현금영수증 캡처', other: '알 수 없는 이미지' };
+  const label = { review: '리뷰 캡처', receipt: '현금영수증 캡처',
+                  purchase_confirm: '구매확정 완료 화면', other: '알 수 없는 이미지' };
   // 형식 자체가 다른 경우만 "확실히 아님" 후보 — 확신도가 SURE 이상이면 관리자 알림으로 승격.
   const sure = r.confidence >= SURE_CONFIDENCE;
   return {
@@ -163,4 +173,7 @@ async function resolveCaptureMismatch({ sheetId, tabName, slotKey, rowIndex } = 
 module.exports = {
   verifyCapture, logCaptureMismatch, resolveCaptureMismatch,
   MIN_CONFIDENCE, SURE_CONFIDENCE, __setPoolForTest,
+  // ★ 회귀가드가 **동기적으로** 기대 종류를 검증하기 위해 노출한다.
+  //   verifyCapture 를 통해 간접 확인하면 async 단언이 되어 테스트가 조용히 죽는다(실측).
+  _expectedKind,
 };
