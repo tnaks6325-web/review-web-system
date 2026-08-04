@@ -15,7 +15,10 @@ const readF = (p) => fs.readFileSync(path.join(__dirname, '..', '..', 'frontend'
 const readS = (p) => fs.readFileSync(path.join(__dirname, '..', 'src', p), 'utf8');
 
 const doc = readF('docs/작업오더-모집공고_자동반영_와이어프레임.html');
-const app = readF('js/index-app.js');       // woCreateCampaign — prefill 조립
+// ★ 프리필 조립(_woCampaignPrefill)과 채널·옵션 헬퍼는 **공유 모듈**(js/work-order-detail.js)로
+//   이관됐다 — 통합 작업대의 작업오더 탭이 같은 함수를 쓰기 위해서다(사본 금지).
+//   그래서 '프리필 배선'은 두 파일을 합쳐서 본다(검사 의미는 불변).
+const app = readF('js/index-app.js') + '\n' + readF('js/work-order-detail.js');
 const rec = readF('js/index-recruit.js');   // openRecruitModal — prefill 적용
 const ord = readS('routes/order.routes.js');// accept — tab_configs 자동기입
 

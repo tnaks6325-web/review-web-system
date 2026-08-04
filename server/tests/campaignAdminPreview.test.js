@@ -74,7 +74,14 @@ ok('③-3 미리보기는 홀드를 쓰지 않음(저장 경로 4곳 전부 PREV
   && /function clearHold\(p8\)\{\s*\n?\s*if\(PREVIEW\) return;/.test(camp)
   && /function setActiveP8\(p8\)\{ if\(PREVIEW\) return;/.test(camp));
 ok('③-4 미리보기는 폴링하지 않음', /if\(!PREVIEW\) startPolling\(\)/.test(camp));
-ok('③-5 미리보기 진입은 관리자 전용 엔드포인트 + Bearer', /\/api\/campaign\/admin\/'[\s\S]{0,80}\/preview'[\s\S]{0,120}Authorization[\s\S]{0,20}Bearer/.test(camp));
+ok('③-5 미리보기 진입은 관리자 전용 엔드포인트 + Bearer',
+  /_pvGet\('\/api\/campaign\/admin\/' \+ encodeURIComponent\(CAMP_ID\) \+ '\/preview'\)/.test(camp)
+  && /Authorization[\s\S]{0,20}Bearer \' \+ tok/.test(camp));
+/* ★ 통합 작업대(인트라넷 SSO 토큰 via:'intranet')는 `/api/campaign/admin/*` 에 도달 자체가 불가 →
+   같은 핸들러를 위임하는 `/api/trackb/campaigns/:id/preview` 로 **401/403 일 때만** 한 번 더 시도한다.
+   그 외 오류까지 재시도하면 실패 원인이 가려진다(무한 폴백 금지). */
+ok('③-5b Track B 경로 폴백은 401/403 에서만',
+  /if\(r\.status === 401 \|\| r\.status === 403\)\s*\n\s*r = await _pvGet\('\/api\/trackb\/campaigns\/'/.test(camp));
 
 // ── ④ 상태 변경 동작 차단 ──
 for (const [label, re] of [

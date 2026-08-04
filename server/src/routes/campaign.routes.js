@@ -397,8 +397,16 @@ function _decodeReq(req) {
   try { return jwt.verify(token, process.env.JWT_SECRET); } catch (_) { return null; }
 }
 
-/** 유효한 admin/master JWT 요청인지 (무인증 라우트에서 관리자에게만 전체 필드 반환할 때) */
+/** 유효한 admin/master JWT 요청인지 (무인증 라우트에서 관리자에게만 전체 필드 반환할 때)
+ *  ★★ `req._trustedAdminView` = **서버 코드만** 세우는 신뢰 플래그(Track B 위임이 세운다).
+ *     통합 작업대의 편집 허용명단에는 `staff`(AE)도 들어갈 수 있는데, 그 사람은 공고를
+ *     **수정할 수 있으면서** JWT role 이 admin/master 가 아니라 여기서 공개 화이트리스트 뷰를
+ *     받는다 → 수정 모달이 work_detail·연결탭·정원·옵션을 빈 기본값으로 초기화하고,
+ *     그대로 저장하면 기존 설정이 **조용히 0·빈값·options:[] 로 지워진다**(Codex 리뷰 P1).
+ *     플래그는 요청(헤더·쿼리·본문)으로 만들 수 없다 — Express 는 입력을 req 에 그대로 얹지 않는다.
+ *     프로토타입 오염 대비로 **자기 프로퍼티**인지까지 확인한다. */
 function _isAdminReq(req) {
+  if (req && Object.prototype.hasOwnProperty.call(req, '_trustedAdminView') && req._trustedAdminView === true) return true;
   const d = _decodeReq(req);
   return !!(d && ['admin', 'master'].includes(d.role));
 }
