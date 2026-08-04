@@ -92,18 +92,52 @@ router.get('/tabs', authMiddleware, async (req, res, next) => {
       const stats = req.query.stats === '1' ? await svc.tabStatsMap() : null;
       // ★★ 조회 실패를 **응답에 실어** 프론트가 기존 주석을 덮지 않게 한다 — 빈 맵만 주면 프론트가
       //   "아무것도 마감 안 됨"으로 읽어 **마감 작업 전부가 작업보드로 되살아나고 보관함이 빈다**(무신호).
+      // 오늘 완료(전사 공통, migration 089) — 마감과 **다른 상태**다. 마감은 보드에서 빼고,
+      //   오늘 완료는 뒤로 밀고 회색으로만 표시한다(다음날 자동 해제).
+      const daily = await svc.dailyDoneMap();
       if (!fin.ok) out.finishedUnavailable = true;
       if (stats && !stats.ok) out.statsUnavailable = true;
+      if (!daily.ok) out.dailyUnavailable = true;
+      out.kstDate = daily.date;          // 화면이 "오늘"의 기준을 서버 시각으로 잡게(클라 시계 불신)
       for (const t of tabs) {
         // 이름 우선 → gid 폴백(운영 중 탭 리네임으로 마감이 조용히 풀리는 것 방지)
         const g = String(t.tabGid == null ? '' : t.tabGid).trim();
         const f = fin.map[`${t.sheetId}\t${t.tabName}`] || (g ? fin.map[`${t.sheetId}\tgid:${g}`] : null);
         if (f) { t.finished = true; t.finishedAt = f.finishedAt; t.finishedBy = f.finishedBy; }
+        const d = daily.map[`${t.sheetId}\t${t.tabName}`];
+        if (d) { t.todayDone = true; t.todayDoneBy = d.doneBy; }
         // ★ stats 맵은 전 탭 무스코프다 — 응답엔 **이 루프로 걸러진 탭의 값만** 실린다(맵 자체 전달 금지).
         if (stats && stats.map[`${t.sheetId}\t${t.tabName}`]) t.stats = stats.map[`${t.sheetId}\t${t.tabName}`];
       }
     }
     res.json(out);
+  } catch (err) { next(err); }
+});
+
+// ── 열린 작업 줄(개인별·순서 보존) — 작업보드 로그인 사용자 누구나(자기 것만) ──
+//   ★ 즐겨찾기와 같은 골격이되 **별도 원장**: 즐겨찾기는 Set 으로 접혀 순서가 사라진다(migration 089 주석).
+router.get('/workdesk/worktabs', authMiddleware, async (req, res, next) => {
+  try { res.json({ ok: true, tabs: await svc.getWorkdeskWorktabs(_by(req)) }); }
+  catch (err) { next(err); }
+});
+router.post('/workdesk/worktabs', authMiddleware, async (req, res, next) => {
+  try {
+    const out = await svc.setWorkdeskWorktabs(_by(req), (req.body && req.body.tabs));
+    res.status(out.ok ? 200 : 400).json(out);
+  } catch (err) { next(err); }
+});
+
+// ── 오늘 완료 토글(전사 공통) — 마감과 같은 스코프 게이트, 검수 확인은 없다(가벼운 토글) ──
+router.post('/workdesk/tab-daily-done', authMiddleware, async (req, res, next) => {
+  try {
+    const { sheetId, tabName, done } = req.body || {};
+    if (!sheetId || !tabName) return res.status(400).json({ ok: false, error: 'sheetId, tabName 필수' });
+    const scope = await _ensureEditScope(req, sheetId, tabName);
+    if (!scope.ok) return res.status(scope.code || 403).json({ ok: false, error: scope.error });
+    // 해제는 명시적으로만(마감 라우트와 같은 규율 — 'false'·0 을 완료로 오해하지 않는다)
+    const wantDone = !(done === false || done === 'false' || done === 0 || done === '0');
+    const out = await svc.setTabDailyDone({ sheetId, tabName, done: wantDone, by: _by(req) });
+    res.status(out.ok ? 200 : 400).json(out);
   } catch (err) { next(err); }
 });
 

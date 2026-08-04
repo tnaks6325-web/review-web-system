@@ -244,7 +244,9 @@ const stub = (impl) => { SQL = []; pool.query = async (q, p) => { SQL.push({ q: 
 
   /* ── 6) Track A 무접촉 ─────────────────────────────────────── */
   console.log('\n6) Track A 무접촉 (격리)');
-  const finBlock = (SVC_SRC.match(/const _FIN_KEY[\s\S]*?^module\.exports/m) || [''])[0];
+  // ★ M1(마감) 블록만 잘라낸다 — M2(열린 줄·오늘 완료, migration 089)가 뒤에 붙어 module.exports 까지
+  //   긁으면 그쪽 테이블 쓰기가 "마감이 남의 테이블을 건드린다"로 오판된다. 경계는 M2 시작 주석.
+  const finBlock = (SVC_SRC.match(/const _FIN_KEY[\s\S]*?(?=\/\/ ══ M2: 열린 작업 줄|^module\.exports)/m) || [''])[0];
   t('★ 쓰기 표면은 trackb_tab_finished 하나뿐(운영 테이블 무접촉)',
     !/(INSERT INTO|UPDATE|DELETE FROM)\s+(?!trackb_tab_finished)/i.test(finBlock.replace(/--[^\n]*/g, '')),
     (finBlock.match(/(INSERT INTO|UPDATE|DELETE FROM)\s+\w+/gi) || []).join(','));

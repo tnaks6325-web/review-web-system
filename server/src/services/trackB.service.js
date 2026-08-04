@@ -2789,9 +2789,94 @@ async function tabStatsMap({ force = false } = {}) {
   }
 }
 
+// ══ M2: 열린 작업 줄(개인별) + 오늘 완료(전사 공통) — migration 089 ═══════════════════════
+//   PRD: frontend/docs/prd-workboard-worktabs.html §1(두 상태 비교). 마감(088)과 **다른 것**이다.
+
+/** 열린 작업 줄 — 계정당 1행, **순서 있는 배열**(드래그로 정한 탭 배치가 곧 이 순서다).
+ *  ★ 즐겨찾기(`setWorkdeskFavorites`)와 달리 Set 으로 접지 않는다 — 접는 순간 순서가 사라진다. */
+const WORKTAB_CAP = 12;                     // 사용자 확정 ㉤ — 넘으면 화면이 안내(자동으로 닫지 않는다)
+async function getWorkdeskWorktabs(ownerKey) {
+  const k = String(ownerKey || '').trim();
+  if (!k) return [];
+  try {
+    const { rows } = await getPool().query(
+      `SELECT tabs FROM trackb_workdesk_worktabs WHERE owner_key=$1 LIMIT 1`, [k]);
+    const v = rows[0] && rows[0].tabs;
+    return Array.isArray(v) ? v.filter(x => typeof x === 'string') : [];
+  } catch (err) {
+    logger.warn(`[trackB] getWorkdeskWorktabs 실패(빈 줄로 계속): ${err.message}`);
+    return [];
+  }
+}
+async function setWorkdeskWorktabs(ownerKey, tabs) {
+  const k = String(ownerKey || '').trim();
+  if (!k) return { ok: false, error: 'no_owner' };
+  // 중복 제거(첫 등장 순서 유지) + 키 길이·개수 상한. ★ slice 로 자를 뿐 저장을 거부하지 않는다 —
+  //   상한 초과는 "안내하고 사용자가 정리"가 정책이라 서버가 요청을 튕기면 화면이 멈춘다.
+  const seen = new Set();
+  const arr = (Array.isArray(tabs) ? tabs : [])
+    .filter(x => typeof x === 'string' && x.length > 0 && x.length <= 300 && !seen.has(x) && seen.add(x))
+    .slice(0, WORKTAB_CAP);
+  await getPool().query(
+    `INSERT INTO trackb_workdesk_worktabs (owner_key, tabs, updated_at)
+     VALUES ($1, $2::jsonb, NOW())
+     ON CONFLICT (owner_key) DO UPDATE SET tabs=EXCLUDED.tabs, updated_at=NOW()`,
+    [k, JSON.stringify(arr)]);
+  return { ok: true, count: arr.length, cap: WORKTAB_CAP };
+}
+
+/** 오늘(KST) 완료된 탭 → `{ ok, map }`. 키는 `sheetId\ttabName`.
+ *  ★★ 날짜 비교만으로 판정하므로 **자정 리셋 크론이 없다** — 날짜가 바뀌면 어제 행이 저절로 빠진다.
+ *  ★ KST 파생은 `campaignState.kstTodayStr` 재사용(사본 금지 — 날짜 규칙이 두 벌이 되면 갈린다). */
+async function dailyDoneMap() {
+  const today = require('./campaignState.service').kstTodayStr();
+  try {
+    const { rows } = await getPool().query(
+      `SELECT sheet_id AS "sheetId", tab_name AS "tabName", done_by AS "doneBy"
+         FROM trackb_tab_daily_done WHERE done_date = $1::date`, [today]);
+    const map = {};
+    for (const r of rows) map[_FIN_KEY(r.sheetId, r.tabName)] = { doneBy: r.doneBy || '' };
+    return { ok: true, map, date: today };
+  } catch (err) {
+    logger.warn(`[trackB] dailyDoneMap 실패(오늘 완료 표시 없이 계속 — 호출부가 고지한다): ${err.message}`);
+    return { ok: false, map: {}, date: today };
+  }
+}
+
+/** 오늘 완료 토글(전사 공통). 확인창 없는 가벼운 동작이라 검수 게이트 없음(마감과 다르다). */
+async function setTabDailyDone({ sheetId, tabName, done = true, by = '' } = {}) {
+  const s = String(sheetId || '').trim(), t = String(tabName || '').trim();
+  if (!s || !t) return { ok: false, error: 'sheetId, tabName 필수' };
+  const who = String(by || '').slice(0, 100);
+  const today = require('./campaignState.service').kstTodayStr();
+  try {
+    if (done) {
+      const { rows } = await getPool().query(
+        `INSERT INTO trackb_tab_daily_done (sheet_id, tab_name, done_date, done_by)
+         VALUES ($1,$2,$3::date,$4)
+         ON CONFLICT (sheet_id, tab_name, done_date) DO NOTHING RETURNING id`, [s, t, today, who]);
+      return { ok: true, done: true, created: rows.length > 0, date: today };
+    }
+    // 해제는 **오늘 행만** 지운다 — 어제 이력을 지우면 "언제 처리했나"가 사라진다.
+    const { rowCount } = await getPool().query(
+      `DELETE FROM trackb_tab_daily_done WHERE sheet_id=$1 AND tab_name=$2 AND done_date=$3::date`, [s, t, today]);
+    return { ok: true, done: false, cleared: rowCount, date: today };
+  } catch (err) {
+    if (err && err.code === '42P01') {
+      logger.error(`[trackB] trackb_tab_daily_done 테이블 없음(migration 089 미적용): ${err.message}`);
+      return { ok: false, code: 'not_ready', error: '오늘 완료 기능이 아직 준비되지 않았습니다(migration 089 미적용) — 관리자에게 알려주세요.' };
+    }
+    throw err;
+  }
+}
+
 module.exports = {
   getWorkdeskFavorites,
   setWorkdeskFavorites,
+  getWorkdeskWorktabs,
+  setWorkdeskWorktabs,
+  dailyDoneMap,
+  setTabDailyDone,
   finishedTabsMap,
   setTabFinished,
   tabStatsMap,
