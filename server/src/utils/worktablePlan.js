@@ -57,6 +57,13 @@ function channelLabel(key) {
 const DOW = ['일', '월', '화', '수', '목', '금', '토'];
 
 function parseYmd(v) {
+  /* ★★ DB의 DATE 컬럼은 node-pg 가 **Date 객체**로 돌려준다(`work_orders.start_date`).
+     문자열로 가정하면 `String(date).slice(0,10)` 가 'Mon Aug 03' 이 되어 조용히 파싱 실패한다
+     — 프로덕션 실데이터로 잡은 버그. 문자열 테스트만으로는 드러나지 않는다.
+     ★ UTC 로 읽는다: pg 는 DATE 를 UTC 자정으로 주므로 로컬 기준으로 읽으면 서버 TZ 가 음수일 때 하루 밀린다. */
+  if (v instanceof Date && !isNaN(v.getTime())) {
+    return { y: v.getUTCFullYear(), m: v.getUTCMonth() + 1, d: v.getUTCDate() };
+  }
   const s = String(v == null ? '' : v).trim();
   const m = /^(\d{4})-(\d{1,2})-(\d{1,2})/.exec(s);
   if (!m) return null;
@@ -181,8 +188,10 @@ function buildWorktablePlan({ workOrder, template, options: o = {} } = {}) {
   const rawTotal = o.total != null ? o.total : wo.recruit_count;
   const total = Math.max(0, Math.min(parseInt(rawTotal, 10) || 0, MAX_ROWS));
   const daily = Math.max(0, parseInt(o.daily != null ? o.daily : wo.daily_count, 10) || 0);
-  const startDate = o.startDate != null ? o.startDate
-    : (wo.start_date ? String(wo.start_date).slice(0, 10) : '');
+  // ★ 작업오더의 start_date 는 Date 객체일 수 있다 — parseYmd 로 정규화해 Y-M-D 문자열로 통일.
+  const rawStart = o.startDate != null ? o.startDate : (wo.start_date || '');
+  const parsedStart = parseYmd(rawStart);
+  const startDate = parsedStart ? ymdStr(parsedStart) : '';
   const skipWeekends = o.skipWeekends !== false;   // 기본 주말 제외
 
   /* 제외 날짜(공휴일·업체 휴무) — 작업오더에 날짜 필드가 없어 담당자가 미리보기에서 지정한다.
@@ -248,6 +257,11 @@ function buildWorktablePlan({ workOrder, template, options: o = {} } = {}) {
   }
   if (buckets.length && !columns.some(c => c.role === 'option')) {
     warnings.push({ code: 'no_option_column', message: '옵션을 나눴지만 표에 옵션 열이 없어 기입되지 않습니다. 공통 열에 옵션 칸을 추가하세요.' });
+  }
+  /* ★ 날짜를 나눠 놓고 쓸 칸이 없으면 조용히 사라진다 — 게다가 구매일자 칸이 없으면
+     시트 일정 자동 인식이 그날 모집 정원을 파생하지 못한다(발행폼 값 경로로 되돌아간다). */
+  if (days.length && !columns.some(c => c.role === 'dateStr')) {
+    warnings.push({ code: 'no_date_column', message: '날짜를 나눴지만 표에 구매일자 열이 없어 기입되지 않습니다 — 그날 모집 정원도 시트에서 파생되지 않습니다. 공통 열에 구매일자 칸을 추가하세요.' });
   }
 
   return {
