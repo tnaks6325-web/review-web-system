@@ -5,6 +5,7 @@ const driveService = require('../services/drive.service');
 const { getSpreadsheetMeta } = require('../services/sheets.service');
 const pool = require('../db/pool');
 const { logger } = require('../utils/logger');
+const { linkReviewFilesToRows } = require('../services/reviewFileLink.service');
 
 /**
  * 헬퍼: Google Drive URL에서 폴더 ID 추출
@@ -1296,14 +1297,7 @@ router.post('/relocate-orphan-reviews', authMiddleware, async (req, res, next) =
         const b = (r.reviewer_name || '').trim(); if (b) roster.add(b);
       }
     }
-    // 이름 → 인덱스 행(들) 매핑 (reviewer_name/recipient_name 모두 키)
-    const rowsByName = new Map();
-    const addRow = (nm, r) => {
-      const k = (nm || '').trim(); if (!k) return;
-      if (!rowsByName.has(k)) rowsByName.set(k, []);
-      const arr = rowsByName.get(k); if (!arr.includes(r)) arr.push(r);
-    };
-    for (const r of indexRows) { addRow(r.reviewer_name, r); addRow(r.recipient_name, r); }
+    // (이름→행 매핑은 공용 헬퍼 linkReviewFilesToRows 가 내부에서 구성한다)
 
     // ── 5) 후보 검색 (fullText=브랜드 키워드) ──
     const byId = new Map();
@@ -1356,72 +1350,15 @@ router.post('/relocate-orphan-reviews', authMiddleware, async (req, res, next) =
       }
     }
 
-    // ── 8) 결정적 링크 백필(B/A-1) + 제출 원장 적재(A-2) ──
+    // ── 8) 결정적 링크 백필(B/A-1) + 제출 원장 적재(A-2) — 공용 헬퍼(reviewFileLink.service) ──
     //   대상: 이동분 + 이미 [리뷰] 폴더에 있던 분. 모호하면 링크하지 않고 리포트하되
-    //   파일 자체는 review_submissions 원장에 전수 기록(A-2).
-    const linkResult = { linked: 0, ambiguous: 0, unmatched: 0, already: 0, recorded: 0, samples: { ambiguous: [], unmatched: [] } };
+    //   파일 자체는 review_submissions 원장에 전수 기록(A-2). 규칙은 review-folder-backfill 과 한 벌.
+    let linkResult = { linked: 0, ambiguous: 0, unmatched: 0, already: 0, recorded: 0, samples: { ambiguous: [], unmatched: [] } };
     if (doLink) {
-      for (const f of [...toMove, ...linkOnly]) {
-        const nm = (driveService.extractReviewerNameFromFile(f.name) || '').trim();
-        const matchRows = rowsByName.get(nm) || [];
-        const fileUrl = `https://drive.google.com/file/d/${f.id}/view`;
-        let assocRow = null; // A-2 연결 인덱스 행 (확정 가능할 때만)
-
-        if (matchRows.length === 0) {
-          linkResult.unmatched++;
-          if (linkResult.samples.unmatched.length < 30) linkResult.samples.unmatched.push(f.name);
-        } else {
-          const unlinked = matchRows.filter(r => !r.review_file_id);
-          if (unlinked.length === 1) {
-            // A-1: 결정적 매칭 1건 → review_index 링크
-            assocRow = unlinked[0];
-            if (!isDryRun) {
-              try {
-                await pool.query(
-                  `UPDATE review_index
-                      SET review_file_id = $1, review_file_url = $2, review_file_name = $3,
-                          review_file_count = GREATEST(COALESCE(review_file_count, 0), 1),
-                          review_file_at = COALESCE($4::timestamptz, NOW())
-                    WHERE id = $5`,
-                  [f.id, fileUrl, f.name, f.createdTime || null, assocRow.id]
-                );
-              } catch (e) {
-                logger.warn(`[relocate-orphan-reviews] 링크 저장 실패 (${f.name}): ${e.message}`);
-              }
-            }
-            assocRow.review_file_id = f.id; // 메모리 표시 → 같은 이름 추가 파일은 already
-            linkResult.linked++;
-          } else if (unlinked.length === 0) {
-            linkResult.already++;
-            if (matchRows.length === 1) assocRow = matchRows[0]; // 원장 연결은 가능
-          } else {
-            linkResult.ambiguous++;
-            if (linkResult.samples.ambiguous.length < 30) linkResult.samples.ambiguous.push(f.name);
-          }
-        }
-
-        // A-2: 제출 원장 적재 (전 후보 파일, file_id 업서트)
-        if (!isDryRun) {
-          try {
-            await pool.query(
-              `INSERT INTO review_submissions
-                 (sheet_id, tab_name, tab_gid, row_index, reviewer_name, review_index_id,
-                  file_id, file_url, file_name, source, uploaded_at)
-               VALUES ($1,$2,NULL,$3,$4,$5,$6,$7,$8,'backfill',$9::timestamptz)
-               ON CONFLICT (file_id) DO UPDATE
-                 SET file_url = EXCLUDED.file_url, file_name = EXCLUDED.file_name,
-                     row_index = COALESCE(EXCLUDED.row_index, review_submissions.row_index),
-                     review_index_id = COALESCE(EXCLUDED.review_index_id, review_submissions.review_index_id),
-                     reviewer_name = EXCLUDED.reviewer_name`,
-              [sheetId, tabName, assocRow ? assocRow.row_index : null, nm || null,
-               assocRow ? assocRow.id : null, f.id, fileUrl, f.name, f.createdTime || null]
-            );
-            linkResult.recorded++;
-          } catch (e) {
-            logger.warn(`[relocate-orphan-reviews] 제출원장 기록 실패 (${f.name}): ${e.message}`);
-          }
-        }
-      }
+      linkResult = await linkReviewFilesToRows({
+        db: pool, sheetId, tabName, files: [...toMove, ...linkOnly], indexRows,
+        isDryRun, extractName: driveService.extractReviewerNameFromFile, logger,
+      });
     }
 
     res.json({
@@ -1447,6 +1384,75 @@ router.post('/relocate-orphan-reviews', authMiddleware, async (req, res, next) =
       skipped: skipped.slice(0, 100),
       // 진단: 서버 검색이 실제로 몇 건을 반환했는지 (0이면 계정/스코프/가시성 문제)
       diag: { searchFound, reviewFormatCount, searchStats },
+    });
+  } catch (err) {
+    next(err);
+  }
+});
+
+// ═══════════════════════════════════════════════════════════
+// POST /api/drive/review-folder-backfill — 탭 [리뷰] 폴더 스캔 → 파일↔행 링크 백필
+//
+// 배경: 업체 뷰어 리뷰 미리보기는 원장(review_submissions)·대표 이미지(review_index.review_file_*)를
+//   읽는데, 031/032 배포 이전 제출분·직원이 Drive 에 직접 넣은 캡처는 폴더에만 있고 원장이 비어
+//   "리뷰 이미지 미등록"으로 뜬다. 이 엔드포인트가 그 탭의 [리뷰] 폴더를 스캔해 파일명 이름↔행
+//   결정적 매칭으로 백필한다(규칙 = relocate-orphan-reviews 와 공용 헬퍼 한 벌).
+//
+// relocate-orphan-reviews 와의 차이: 저쪽은 "흩어진 파일"을 OCR 전문검색(brandKeywords 필수)으로
+//   찾아 이동+링크, 이쪽은 "이미 폴더에 있는 파일"만 나열해 링크(키워드 불필요·이동 없음·읽기+DB만).
+//
+// body: { sheetId, tabName, folderUrl?, dryRun? (기본 true) }
+//   folderUrl 미지정 시 tab_configs.folder_url → 그것도 없으면 ensureReviewFolderPath 로
+//   기존 폴더를 찾아(없으면 생성) tab_configs 에 연결까지 해 준다("리뷰폴더 매핑").
+// ═══════════════════════════════════════════════════════════
+router.post('/review-folder-backfill', authMiddleware, async (req, res, next) => {
+  try {
+    const { sheetId, tabName, folderUrl, dryRun } = req.body || {};
+    if (!sheetId || !tabName) return res.json({ ok: false, error: 'sheetId, tabName 필요' });
+    const isDryRun = dryRun !== false; // 기본 true — 미리보기 먼저
+
+    // ── 1) [리뷰] 폴더 확보: 직접 지정 → tab_configs → 자동 매핑(기존 폴더 탐색·없으면 생성) ──
+    let targetUrl = String(folderUrl || '').trim();
+    let mapped = false;
+    if (!targetUrl) {
+      const { rows } = await pool.query(
+        'SELECT folder_url, campaign_name FROM tab_configs WHERE sheet_id = $1 AND tab_name = $2 LIMIT 1',
+        [sheetId, tabName]);
+      targetUrl = rows[0]?.folder_url || '';
+      if (!targetUrl) {
+        const rootFolderId = getRootFolderId();
+        if (!rootFolderId) return res.json({ ok: false, error: '폴더 연결이 없고 AI_REVIEW_FOLDER_ID 도 미설정입니다.' });
+        const sheetTitle = await getSheetTitle(sheetId, rows[0]?.campaign_name);
+        const ensured = await driveService.ensureReviewFolderPath(rootFolderId, sheetTitle, tabName);   // idempotent — 있으면 찾고 없으면 생성
+        targetUrl = ensured.url;
+        await pool.query(
+          'UPDATE tab_configs SET folder_url = $1, updated_at = NOW() WHERE sheet_id = $2 AND tab_name = $3',
+          [targetUrl, sheetId, tabName]);
+        mapped = true;
+      }
+    }
+    const targetId = extractFolderId(targetUrl);
+    if (!targetId) return res.json({ ok: false, error: '[리뷰] 폴더 URL 을 해석할 수 없습니다.' });
+
+    // ── 2) 폴더 내 이미지 나열(서브폴더 제외) — 폴더 자체가 스코프라 키워드 불필요 ──
+    const files = await driveService.searchFiles(
+      `'${targetId}' in parents and trashed = false and mimeType contains 'image/'`, { limit: 1000 });
+
+    // ── 3) 인덱스 행 로드 → 공용 헬퍼로 결정적 링크 + 원장 백필 ──
+    const { rows: indexRows } = await pool.query(
+      `SELECT id, row_index, reviewer_name, recipient_name, review_file_id
+         FROM review_index WHERE sheet_id = $1 AND tab_name = $2`, [sheetId, tabName]);
+    const link = await linkReviewFilesToRows({
+      db: pool, sheetId, tabName, files, indexRows,
+      isDryRun, extractName: driveService.extractReviewerNameFromFile, logger,
+    });
+
+    if (!isDryRun) logger.info(`[review-folder-backfill] ${tabName}: 파일 ${files.length} → 링크 ${link.linked} · 원장 ${link.recorded}`);
+    res.json({
+      ok: true, dryRun: isDryRun, mapped,
+      targetFolderUrl: `https://drive.google.com/drive/folders/${targetId}`,
+      fileCount: files.length, indexRowCount: indexRows.length,
+      link,
     });
   } catch (err) {
     next(err);

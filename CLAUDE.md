@@ -33,6 +33,7 @@ GAS(Google Apps Script) 기반 리뷰 관리 시스템을 **Node.js Express + Po
 - `review_index.review_file_*`(031, A-1): 제출 행당 대표 리뷰 이미지 1장(파일ID/URL/이름/개수/시각). `review-upload`가 업로드 즉시 기록.
 - `review_submissions`(032, A-2): 리뷰 이미지 파일 단위 원장(탭/행/리뷰어/파일ID/제출시각/출처). `file_id` 유니크 업서트로 재실행 안전.
 - 과거에 루트로 샌 캡처는 관리자 "리뷰 캡처 정리"(`POST /api/drive/relocate-orphan-reviews`)로 `[리뷰]` 폴더 이동 + 파일명 이름↔행 결정적 링크 백필(모호하면 링크 안 함).
+- **탭 `[리뷰]` 폴더 스캔 백필**(`POST /api/drive/review-folder-backfill {sheetId, tabName, folderUrl?, dryRun?}`): 폴더에는 캡처가 있는데 원장·대표 이미지가 비어 업체 뷰어 미리보기가 "리뷰 이미지 미등록"으로 뜨는 탭용(031/032 이전 제출분·직원 수동 업로드분). 폴더 내 이미지를 나열해 파일명 이름↔행 결정적 매칭으로 백필 — 폴더 미연결 탭은 `ensureReviewFolderPath`로 자동 매핑(기존 폴더 탐색·없으면 생성) 후 `tab_configs.folder_url` 연결. relocate와의 차이 = OCR 키워드 검색·이동 없음(폴더 자체가 스코프). ★★ **링크 규칙 단일 출처 = `reviewFileLink.service.js`(`linkReviewFilesToRows`)** — relocate·백필 두 소비처가 같은 헬퍼를 쓴다(원조 relocate의 인라인 블록을 이관, 사본 금지). dryRun 기본 true. 관리자 UI = "리뷰 캡처 정리" 모달의 [선택 탭 폴더 이미지 연결] 버튼(미리보기→실행 2단계). 회귀가드 `tests/reviewFolderBackfill.test.js`(23케이스 — 스텁 db 실행 + 사본 부재).
 
 ### 리뷰어 홈 "리뷰 내역" 제출대기/제출완료 탭
 - `index.html` 내정보/현황의 리뷰 내역은 `GET /api/search?includeSubmitted=1`로 대기+완료를 한 번에 받아 `isSubmitted`로 좌우 서브탭(기본 [제출대기]) 분리. 완료 카드는 클릭/이동 없음(초록 배지) + `review_index.review_file_at` 기반 제출일 표시 + **입금 데이터가 채워진 행은 "입금완료" 남색 배지 병기**(`isPaid` = `is_submitted2='PAID'` 또는 row_json 입금 키워드 컬럼 값 존재 — 대시보드 집계와 동일 판정, row 비우기 전 서버에서 계산). 다중 캡처 슬롯 부분 제출은 대기 탭에서 "n/m 제출" 배지. bfcache 복귀(pageshow persisted) 시 재조회.
