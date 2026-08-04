@@ -701,8 +701,17 @@ async function _authoritativeHold(ctx) {
   if (!ctx || !ctx.applicationId || !ctx.holdToken) return ctx;
   try {
     const { rows } = await pool.query(
-      `SELECT phone8, option_key FROM campaign_applications
-        WHERE id = $1 AND campaign_id = $2 AND hold_token = $3 AND hold_token <> '' LIMIT 1`,
+      `SELECT ca.phone8, ca.option_key, ca.status,
+              ca.order_submission_id, ca.late_order_id,
+              (so.id IS NOT NULL) AS sub_alive,
+              (lo.id IS NOT NULL) AS late_alive
+         FROM campaign_applications ca
+         LEFT JOIN order_submissions so
+                ON so.id = ca.order_submission_id AND so.deleted_at IS NULL
+         LEFT JOIN order_submissions lo
+                ON lo.id = ca.late_order_id      AND lo.deleted_at IS NULL
+        WHERE ca.id = $1 AND ca.campaign_id = $2
+          AND ca.hold_token = $3 AND ca.hold_token <> '' LIMIT 1`,
       [ctx.applicationId, ctx.campaignId, ctx.holdToken]);
     if (!rows.length) return ctx;                     // 미확인 = 기존 late 경로(오확정 없음)
     const srv = String(rows[0].phone8 || '').replace(/\D/g, '').slice(-8);
@@ -712,6 +721,15 @@ async function _authoritativeHold(ctx) {
       ctx.phone8 = srv;
     }
     ctx.optionKey = rows[0].option_key || null;
+    // ★ 멱등 판정 재료: 이 홀드로 이미 접수된 "살아있는" 주문이 있는가.
+    //   status='submitted' 확정건뿐 아니라 late_order_id(지각 접수)도 포함해야 한다 —
+    //   confirmHoldInTx 의 late UPDATE 는 `late_order_id IS NULL` 조건이라 2회차 재제출은
+    //   링크조차 못 남기고 주문만 새로 생긴다(관제에 흔적 0인 고아 주문).
+    if (rows[0].status === 'submitted' && rows[0].sub_alive) {
+      ctx.doneOrderId = rows[0].order_submission_id; ctx.doneKind = 'confirmed';
+    } else if (rows[0].late_alive) {
+      ctx.doneOrderId = rows[0].late_order_id;       ctx.doneKind = 'late';
+    }
     return ctx;
   } catch (e) {
     logger.warn(`[submit/order] 홀드 서버확정 실패(클라값 유지): ${e.message}`);
@@ -739,6 +757,24 @@ router.post('/order', async (req, res, next) => {
     const _idPhone8 = String(loginPhone8 || '').replace(/[^0-9]/g, '').slice(-8);
     // ★ 참여형 홀드 문맥(단일 출처, 063) — 신원게이트 owner 폴백·옵션 서버권위·확정 문맥 공용(1회 계산)
     const holdCtx = await _authoritativeHold(_campaignHoldCtx(b, loginPhone8));
+
+    // ★★ 홀드 멱등 게이트(중복 원장·중복 시트행 차단) — 일괄 제출(batch) 도입의 선행 조건.
+    //   이 홀드는 이미 주문을 하나 만들었다. 그대로 태우면 createOrderLedgerEntry 가
+    //   order_submissions 를 새로 INSERT 하고(SAVEPOINT 격리라 홀드 확정이 실패해도 주문은 남는다)
+    //   confirmHoldInTx 는 'late' 만 반환한다 → 시트 중복행 + 정원 미차감 + 관제에 흔적 없는 고아 주문.
+    //   ★ ok:true 로 돌려주는 것이 핵심 — "실패"로 보이면 리뷰어가 또 누른다.
+    //   ★ fail-open 유지: 위 조회가 실패하면 doneKind 가 없어 이 분기에 도달하지 않는다.
+    //   ★ 레거시·비참여형·nc모드·관리자 경유 제출은 holdCtx 자체가 null 이라 무영향.
+    if (holdCtx && holdCtx.doneKind) {
+      logger.info(`[submit/order] 멱등 통과(이미 접수된 홀드) app=${holdCtx.applicationId} ` +
+        `kind=${holdCtx.doneKind} os=${holdCtx.doneOrderId}`);
+      return res.json({
+        ok: true, alreadySubmitted: true, dbSaved: true, sheetsWritten: false, queued: false,
+        orderSubmissionId: holdCtx.doneOrderId, mirrorStatus: '',
+        campaignHold: holdCtx.doneKind,     // 'confirmed' | 'late' — 부모 화면이 거짓말하지 않게
+      });
+    }
+
     if (_idPhone8.length === 8) {
       try {
         const { profileMissing, resolveOrderIdentity } = require('../services/identity.service');

@@ -97,7 +97,7 @@ ok('⑤-2 제출 진입점 2곳 모두 조기 차단(confirmOrderSubmit·submitO
   /function confirmOrderSubmit\(\) \{\s*\n\s*if \(_PREVIEW_MODE\)/.test(sapp)
   && /async function submitOrderForm\(\) \{[\s\S]{0,200}?if \(_PREVIEW_MODE\)/.test(sapp));
 ok('⑤-3 리뷰어 경로 iframe URL에는 preview 미포함 · 홀드 문맥만(동작 불변)',
-  /if\(PREVIEW\)\{ qp\.set\('preview','1'\); \}\s*\n\s*else \{ qp\.set\('app'[\s\S]{0,120}holdToken[\s\S]{0,60}holdPhone8/.test(camp));
+  /if\(PREVIEW\)\{ qp\.set\('preview','1'\); \}\s*\n\s*else \{\s*\n?\s*qp\.set\('app'[\s\S]{0,160}holdToken[\s\S]{0,80}holdPhone8/.test(camp));
 ok('⑤-4 미리보기 iframe에는 홀드 문맥(app·holdToken) 미전달', (() => {
   const m = camp.match(/if\(PREVIEW\)\{ qp\.set\('preview','1'\); \}/);
   return !!m && !/qp\.set\('preview','1'\);\s*qp\.set\('app'/.test(camp);

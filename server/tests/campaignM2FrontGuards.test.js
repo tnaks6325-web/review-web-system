@@ -27,7 +27,9 @@ function ok(name, cond) { assert(cond, name); passed++; console.log('  ✓ ' + n
 ok("embed: _EMBED_CTX는 ?embed=1일 때만 생성", /q\.get\("embed"\) !== "1"\) return null/.test(sapp));
 ok('embed: postMessage는 _EMBED_CTX 게이트 뒤에서만', /_embedPost\(msg\) \{\s*\n\s*if \(_EMBED_CTX && window\.parent !== window\)/.test(sapp));
 ok('embed: postMessage 대상 오리진 고정(location.origin)', /parent\.postMessage\(msg, location\.origin\)/.test(sapp));
-ok('embed: 홀드 문맥은 embed+app 있을 때만 제출 body에 spread', /\.\.\.\(_EMBED_CTX && _EMBED_CTX\.app \? \{/.test(sapp));
+// 배치(bh)면 그 카드에 결속된 홀드, 아니면 embed+app 일 때만 — 둘 다 아니면 홀드 문맥 미전송({}).
+ok('embed: 홀드 문맥은 배치 홀드 또는 embed+app 있을 때만 제출 body에 spread',
+  /\.\.\.\(bh \? \{[\s\S]{0,220}\} : \(_EMBED_CTX && _EMBED_CTX\.app \? \{[\s\S]{0,220}\} : \{\}\)\)/.test(sapp));
 ok('embed: 제출완료 시 부모 통지 + 저장 입력값 정리', /order-submitted/.test(sapp) && /sessionStorage\.removeItem\(_EMBED_FORM_KEY\)/.test(sapp));
 ok('embed: 세션 부재 시 부모 위임(embed-need-login) — 자체 로그인 폴백 유지', /embed-need-login/.test(sapp));
 ok('embed: 입력값 복원은 빈 칸만(기존 값 미덮어씀)', /이미 값 있으면 미덮어씀/.test(sapp));

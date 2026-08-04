@@ -135,11 +135,12 @@
 <div class="wrap">
 
   <div class="hero">
-    <span class="tag">개선 제안서 · 리뷰어 화면</span>
+    <span class="tag">✅ 적용 완료 · 리뷰어 화면</span>
     <h1>타계정 여러 건 참여, 5번 반복 대신 한 번에</h1>
     <p>여러 명의(타계정)로 참여하는 리뷰어가 구매양식을 <b>1건씩 5번</b> 작성하느라 30분 가까이 걸리고,
     새로고침하면 작성하던 화면에서 튕겨 나가는 문제를 확인했습니다.
-    이 문서는 현재 방식의 문제, 개선안 유저플로우, 실제 화면 목업을 담고 있습니다.</p>
+    이 문서는 현재 방식의 문제, 개선 내용, 실제 화면 목업을 담고 있습니다.<br>
+    <b>지금은 적용이 끝난 상태</b>이며, 아래 8번 항목에 무엇을 적용했고 무엇을 일부러 만들지 않았는지 정리했습니다.</p>
   </div>
 
   <!-- ══════════ 1. 접수된 피드백 ══════════ -->
@@ -214,9 +215,9 @@
       <div class="farrow">→</div>
       <div class="fstep good"><span class="ic">🛒</span><b>5건 몰아서 구매</b><span>쇼핑몰에서 편하게 연달아 구매</span></div>
       <div class="farrow">→</div>
-      <div class="fstep hl"><span class="ic">📸</span><b>캡처 5장 일괄 첨부</b><span>AI가 5건을 자동으로 나눠 인식</span></div>
+      <div class="fstep hl"><span class="ic">📸</span><b>캡처 5장 일괄 첨부</b><span>고른 순서대로 위 카드부터</span></div>
       <div class="farrow">→</div>
-      <div class="fstep hl"><span class="ic">🪄</span><b>자동 정리 확인</b><span>명의별로 자동 배정·자동 입력</span></div>
+      <div class="fstep hl"><span class="ic">🪄</span><b>자동 입력 · 사람 확인</b><span>AI가 칸을 채우고, 사람이 다르면 알려줌</span></div>
       <div class="farrow">→</div>
       <div class="fstep good"><span class="ic">✅</span><b>부족한 것만 채우고 일괄 제출</b><span>대부분 아이디만 입력</span></div>
     </div>
@@ -241,7 +242,7 @@
             <div class="dropzone">
               <span class="big">📸</span>
               <b>구매 캡처를 한꺼번에 올려주세요</b>
-              <span>여러 장 선택 · 붙여넣기 · 끌어다놓기 모두 가능</span>
+              <span>여러 장 선택 · 붙여넣기 · 끌어다놓기 모두 가능<br>고른 순서대로 위 카드부터 들어갑니다</span>
             </div>
             <div class="thumbs">
               <div class="thumb">🧾<span class="x">×</span></div>
@@ -262,9 +263,9 @@
 
       <!-- M2 자동 분류 -->
       <div class="mockcol">
-        <div class="mocklabel">② 자동 정리 결과<small>캡처 속 수취인·연락처로 명의별 자동 배정</small></div>
+        <div class="mocklabel">② 자동 입력 결과<small>칸은 AI가 채우고, 사람이 다르면 카드가 알려줍니다</small></div>
         <div class="phone"><div class="screen">
-          <div class="appbar"><span class="back">‹</span> 자동 정리 결과 — 5건</div>
+          <div class="appbar"><span class="back">‹</span> 자동 입력 결과 — 5건</div>
           <div class="body" style="gap:8px">
             <div class="ordercard">
               <div class="oc-head"><span class="oc-badge acct">본계정</span><b>최○순</b><span class="oc-badge done">자동입력 완료</span></div>
@@ -290,15 +291,20 @@
               </div>
               <div class="oc-input">🆔 <input placeholder="쇼핑몰 아이디만 입력해주세요"></div>
             </div>
-            <div class="ordercard">
-              <div class="oc-head"><span class="oc-badge acct">타계정</span><b>박○지</b><span class="oc-badge need">확인 필요</span></div>
-              <div class="oc-grid">
-                <div class="oc-item"><span class="ok">✓</span>수취인 박○지</div>
-                <div class="oc-item"><span class="miss">!</span>주소 — 캡처에서 안 보임</div>
+            <div class="ordercard" style="border-color:#FCD34D">
+              <div class="oc-head"><span class="oc-badge acct">타계정</span><b>박○지</b><span class="oc-badge need">사람이 달라요</span></div>
+              <div style="background:#FFFBEB;border:1.5px solid #FCD34D;border-radius:10px;padding:9px;font-size:.72rem;color:#92400E;margin-bottom:7px;line-height:1.5">
+                ⚠️ 이 사진의 수취인은 <b>이○아</b> 인데,<br>이 카드는 <b>박○지</b> 님의 참여예요.
+                <div style="margin-top:7px;display:flex;gap:6px;align-items:center;flex-wrap:wrap">
+                  <span style="border:1.5px solid #3182f6;background:#EFF6FF;color:#1D4ED8;border-radius:8px;padding:4px 8px;font-weight:800;font-size:.68rem">이○아 카드로 옮기기</span>
+                  <span style="font-size:.68rem">☐ 제가 확인했어요</span>
+                </div>
               </div>
-              <div class="oc-input">📍 <input placeholder="캡처에 잘린 주소만 직접 입력"></div>
             </div>
             <div style="font-size:.68rem;color:#9CA3AF;text-align:center">…외 2건 (모두 자동입력 완료)</div>
+            <div style="font-size:.68rem;color:#6B7280;background:#F9FAFB;border:1px solid #E5E7EB;border-radius:9px;padding:8px 10px;line-height:1.5">
+              🔒 사람이 다른 카드는 <b>확인하기 전까지 제출되지 않아요</b> — 다른 분 이름으로 주문이 접수되는 것을 막기 위해서예요.
+            </div>
             <div class="cta">확인했어요 — 다음</div>
           </div>
         </div></div>
@@ -423,29 +429,41 @@
 
   <!-- ══════════ 8. 적용 순서 제안 ══════════ -->
   <section>
-    <h2><span class="num">8</span>적용 순서 제안</h2>
-    <p class="sub">한 번에 다 바꾸지 않고, 효과 대비 안전한 순서로 나눠서 적용하는 것을 제안합니다.</p>
+    <h2><span class="num">8</span>적용 결과</h2>
+    <p class="sub">효과 대비 안전한 순서로 나눠 적용했습니다. 아래 1·2번은 <b>적용 완료</b>, 3번은 <b>일부러 만들지 않았습니다</b>(사유 포함).</p>
     <div class="phases">
       <div class="phase">
         <div class="pn" style="background:#059669">1</div>
-        <div><b class="t">새로고침 복원 보강 (먼저·빠르게)</b>
-        <p>작성 내용·첨부 캡처 자동 보관 + "이어서 작성" 배너 + 작성하던 화면으로 복귀. 화면 구조 변경이 없어 위험이 가장 작고, 문제 ②를 바로 해결합니다.</p></div>
-        <div class="eta">작게·먼저</div>
+        <div><b class="t">새로고침 복원 보강 <span style="color:#059669">— 적용 완료</span></b>
+        <p>작성 내용과 첨부한 사진을 자동 보관하고, 되살렸을 때 <b>"작성하던 내용을 되살렸어요"</b> 배너로 알립니다.
+        사진은 용량 때문에 일부를 못 살릴 수 있는데, 그 경우 <b>"사진 N장은 복원하지 못했어요"</b>라고 정확히 알려줍니다(되살린 척하지 않습니다).</p></div>
+        <div class="eta">✅ 완료</div>
       </div>
       <div class="phase">
         <div class="pn" style="background:#2563EB">2</div>
-        <div><b class="t">캡처 일괄 첨부 + 자동 정리 (핵심)</b>
-        <p>여러 장 첨부 → AI 자동 인식 → 명의별 자동 배정 → 부족한 칸만 입력 → 일괄 제출. 관리자 외부모집 수동제출 화면에서 <b>이미 운영 중인 자동 인식·자동 분배 방식과 같은 원리</b>라 검증된 길을 따라갑니다. 1건씩 제출하는 기존 방식도 그대로 남겨 두어(선택지 추가) 익숙한 리뷰어는 기존대로 쓸 수 있습니다.</p></div>
-        <div class="eta">핵심 개선</div>
+        <div><b class="t">캡처 일괄 첨부 + 한 번에 제출 <span style="color:#059669">— 적용 완료</span></b>
+        <p>참여 중인 명의가 <b>2명 이상</b>이면 구매양식이 명의별 카드로 한 화면에 펼쳐지고, 사진을 여러 장 한꺼번에 올릴 수 있습니다.
+        사진은 <b>고른 순서대로 위 카드부터</b> 들어가고, AI가 읽은 수취인이 그 카드의 명의와 다르면 카드가 알려줍니다.<br>
+        ★ <b>이름으로 자동 배정하지는 않습니다</b> — 자동으로 옮기다 틀리면 <b>다른 분 이름으로 주문이 접수</b>되고, 이건 되돌리기 매우 어렵습니다.
+        그래서 다를 때는 <b>[○○ 카드로 옮기기]</b> 또는 <b>[제가 확인했어요]</b>를 사람이 고르게 했고, 고르기 전에는 그 카드가 제출되지 않습니다.<br>
+        참여 명의가 1명이면 <b>기존 화면 그대로</b>입니다.</p></div>
+        <div class="eta">✅ 완료</div>
       </div>
       <div class="phase">
-        <div class="pn" style="background:#7C3AED">3</div>
-        <div><b class="t">참여도 한 번에 (마무리)</b>
-        <p>참여 단계에서 명의 여러 개를 체크박스로 한 번에 선택. 명의당 1건·하루 한도 등 <b>기존 참여 규칙은 그대로 지키면서</b> 화면 이동 횟수만 줄입니다.</p></div>
-        <div class="eta">마무리</div>
+        <div class="pn" style="background:#9CA3AF">3</div>
+        <div><b class="t">참여도 한 번에 <span style="color:#B45309">— 일부러 만들지 않았습니다</span></b>
+        <p>명의 여러 개를 한 번에 참여시키는 버튼은 <b>만들지 않는 편이 안전</b>하다고 판단했습니다.
+        자리(참여)는 <b>본계정 15분 · 타계정 10분</b>이면 사라지는데, 한 번에 5자리를 잡아두고 5건을 사러 가면
+        <b>돌아왔을 때 뒤쪽 자리가 이미 만료</b>되어 있습니다. 그러면 결제는 했는데 접수가 안 돼 담당자가 하나씩 손으로 처리해야 합니다.<br>
+        그래서 이번 개선은 <b>"이미 잡아둔 자리들의 제출을 묶는 것"</b>까지만 합니다. 만료된 자리는 카드에 <b>⛔ 시간 만료</b>로 표시되고 제출에서 빠집니다.</p></div>
+        <div class="eta">미적용</div>
       </div>
     </div>
     <div class="note">🔒 <b>바뀌지 않는 것</b> — 명의당 1건 규칙, 하루 참여 한도, 본인 확인(수취인·연락처 대조), 옵션별 정원 관리는 지금과 동일하게 유지됩니다. 화면 편의만 개선하고 참여 질서는 그대로입니다.</div>
+    <div class="note warn" style="margin-top:10px">⏱ <b>운영 안내 — 자리 시간(참여 유효시간)</b><br>
+      여러 명의로 참여할 때는 <b>구매를 먼저 다 끝낸 뒤 마지막에 한 번에 제출</b>하도록 안내해 주세요.
+      참여를 2건 이상 잡는 순간 화면에도 같은 안내가 뜹니다.<br>
+      그래도 5건 결제에 10~15분은 빠듯합니다 — 다건 참여가 많은 공고는 <b>공고 설정에서 자리 유효시간을 늘리는 것</b>을 검토해 주세요(이 값은 시스템이 임의로 바꾸지 않았습니다).</div>
   </section>
 
   <footer>리뷰 관리 시스템 · 타계정 다건 참여 일괄 제출 개선안 · 2026-08-04</footer>

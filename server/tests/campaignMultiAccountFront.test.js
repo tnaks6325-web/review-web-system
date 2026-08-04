@@ -42,7 +42,7 @@ ok('PREVIEW: 홀드 쓰기 차단(save/set/clear/active 전부)',
 // ── ③ apply 계약 ──
 ok('apply: 타계정이면 subName/subPhone 전송', /body\.subName = sub\.name; body\.subPhone = sub\.phone;/.test(camp));
 ok('apply 응답: phone8=명의를 홀드 키로 저장 + participant/ownerPhone8 보존',
-  /setHold\(\{ applicationId: j\.applicationId, holdToken: j\.holdToken, phone8: j\.phone8[\s\S]{0,260}ownerPhone8: j\.ownerPhone8/.test(camp));
+  /setHold\(\{ applicationId: j\.applicationId, holdToken: j\.holdToken, phone8: j\.phone8[\s\S]{0,420}ownerPhone8: j\.ownerPhone8/.test(camp));
 for (const r of ['multi_disabled', 'sub_invalid', 'sub_shares_owner_phone', 'sub_not_registered',
                  'sub_is_registered_reviewer', 'owner_hold_cap', 'sub_daily_limit',
                  'blocked_by_other_owner', 'same_phone_other_name']) {
