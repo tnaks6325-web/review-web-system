@@ -141,6 +141,12 @@ router.post('/source-of-truth', authMiddleware, masterOnlyMiddleware, async (req
     res.status(out.ok ? 200 : (out.error === 'parity_not_clean' ? 409 : 400)).json(out);
   } catch (err) { next(err); }
 });
+// ── 일괄 cutover: "전환 가능(candidate)" 탭 전부를 단건 게이트 그대로 순차 플립 — master 전용 ──
+//   ★ force 를 받지도 넘기지도 않는다(일괄 우회 금지). 게이트에 걸린 탭은 사유와 함께 보고만.
+router.post('/source-of-truth/all', authMiddleware, masterOnlyMiddleware, async (req, res, next) => {
+  try { res.json({ ok: true, ...(await svc.cutoverAll({ by: _by(req) })) }); }
+  catch (err) { next(err); }
+});
 
 // ── P2 상태 토글 write-back 관측/수동 트리거 — master 전용 ──
 //   status = held/blocked/written 카운트(관측). run = 즉시 스윕(탭 지정 시 그 탭만). 락으로 cron과 상호배제.
