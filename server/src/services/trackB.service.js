@@ -2545,20 +2545,30 @@ async function setWorkdeskFavorites(ownerKey, favorites) {
 //     홈 "마감 보관함"은 같은 응답에서 마감분을 골라 그리므로, 서버가 걸러버리면 보관함이 영원히 빈다.
 const _FIN_KEY = (sheetId, tabName) => `${sheetId}\t${tabName}`;
 
-/** 활성 마감 맵 { 'sheetId\ttabName': {finishedAt, finishedBy} }.
- *  ★ fail-soft: 테이블이 아직 없거나(배포 스큐) 조회가 실패하면 **빈 맵** = "아무것도 마감되지 않음" =
- *    오늘과 똑같은 화면. 마감 조회 실패로 작업 목록 전체가 죽는 쪽이 훨씬 나쁘다. */
+/** 활성 마감 → `{ ok, map }`. map 키는 `sheetId\ttabName`, gid 가 있으면 `sheetId\tgid:<gid>` 도 함께 싣는다.
+ *  ★★ **성공/실패를 반드시 구분해 돌려준다**(빈 맵만 주면 안 된다): 조회가 실패했을 때 호출부가 그것을
+ *    "아무것도 마감 안 됨"으로 읽으면 **마감된 작업 전부가 작업보드로 되살아나고 보관함이 비는데 화면엔
+ *    아무 신호가 없다**(코드리뷰 지적). 프론트는 ok:false 면 기존 마감 주석을 덮지 않고 고지만 한다.
+ *  ★ **gid 폴백**: 운영 중 탭 리네임이 실재하므로(sync-tab-names·fix-swap) 이름만으로 매칭하면 마감이
+ *    조용히 풀린다. 레포 규율 = "gid 우선 재매칭". 빈 gid 는 키를 만들지 않는다(전부 매칭되는 사고 방지). */
+const _FIN_GKEY = (sheetId, tabGid) => `${sheetId}\tgid:${tabGid}`;
 async function finishedTabsMap() {
   try {
     const { rows } = await getPool().query(
-      `SELECT sheet_id AS "sheetId", tab_name AS "tabName", finished_at AS "finishedAt", finished_by AS "finishedBy"
+      `SELECT sheet_id AS "sheetId", tab_name AS "tabName", tab_gid AS "tabGid",
+              finished_at AS "finishedAt", finished_by AS "finishedBy"
          FROM trackb_tab_finished WHERE deleted_at IS NULL`);
     const map = {};
-    for (const r of rows) map[_FIN_KEY(r.sheetId, r.tabName)] = { finishedAt: r.finishedAt, finishedBy: r.finishedBy || '' };
-    return map;
+    for (const r of rows) {
+      const v = { finishedAt: r.finishedAt, finishedBy: r.finishedBy || '' };
+      map[_FIN_KEY(r.sheetId, r.tabName)] = v;
+      const g = String(r.tabGid == null ? '' : r.tabGid).trim();
+      if (g) map[_FIN_GKEY(r.sheetId, g)] = v;
+    }
+    return { ok: true, map };
   } catch (err) {
-    logger.warn(`[trackB] finishedTabsMap 실패(빈 맵으로 계속): ${err.message}`);
-    return {};
+    logger.warn(`[trackB] finishedTabsMap 실패(마감 주석 없이 계속 — 호출부가 고지한다): ${err.message}`);
+    return { ok: false, map: {} };
   }
 }
 
@@ -2569,31 +2579,48 @@ async function setTabFinished({ sheetId, tabName, tabGid = null, finish = true, 
   if (!s || !t) return { ok: false, error: 'sheetId, tabName 필수' };
   const who = String(by || '').slice(0, 100);
   const db = getPool();
-  if (finish) {
-    // ★ 프론트 체크만 믿지 않는다 — 확인창을 우회한 요청은 여기서 막힌다(필수열람 게이트와 같은 규율).
-    if (!inspected) return { ok: false, error: '리뷰폴더 마감자료 검수 확인이 필요합니다.', code: 'inspect_required' };
-    const { rows } = await db.query(
-      `INSERT INTO trackb_tab_finished (sheet_id, tab_name, tab_gid, finished_by, inspect_confirmed_at)
-       VALUES ($1,$2,$3,$4,NOW())
-       ON CONFLICT (sheet_id, tab_name) WHERE deleted_at IS NULL DO NOTHING
-       RETURNING id, finished_at AS "finishedAt"`,
-      [s, t, tabGid == null ? null : String(tabGid), who]);
-    return { ok: true, finished: true, created: rows.length > 0, finishedAt: rows[0] ? rows[0].finishedAt : null };
+  try {
+    if (finish) {
+      // ★ 프론트 체크만 믿지 않는다 — 확인창을 우회한 요청은 여기서 막힌다(필수열람 게이트와 같은 규율).
+      if (!inspected) return { ok: false, error: '리뷰폴더 마감자료 검수 확인이 필요합니다.', code: 'inspect_required' };
+      const { rows } = await db.query(
+        `INSERT INTO trackb_tab_finished (sheet_id, tab_name, tab_gid, finished_by, inspect_confirmed_at)
+         VALUES ($1,$2,$3,$4,NOW())
+         ON CONFLICT (sheet_id, tab_name) WHERE deleted_at IS NULL DO NOTHING
+         RETURNING id, finished_at AS "finishedAt"`,
+        [s, t, tabGid == null ? null : String(tabGid), who]);
+      logger.info(`[trackB] 작업 마감: ${s}/${t} by ${who}${rows.length ? '' : ' (이미 마감 — no-op)'}`);
+      return { ok: true, finished: true, created: rows.length > 0, finishedAt: rows[0] ? rows[0].finishedAt : null };
+    }
+    const { rowCount } = await db.query(
+      `UPDATE trackb_tab_finished SET deleted_at=NOW(), reopened_by=$3
+        WHERE sheet_id=$1 AND tab_name=$2 AND deleted_at IS NULL`, [s, t, who]);
+    logger.info(`[trackB] 작업 진행중 복귀: ${s}/${t} by ${who}${rowCount ? '' : ' (마감 상태 아님 — no-op)'}`);
+    return { ok: true, finished: false, reopened: rowCount };
+  } catch (err) {
+    // ★ 신규 테이블이라 REQUIRED_SCHEMA 프리플라이트(컬럼만 검사)가 못 잡는다. 그대로 next(err) 로 올리면
+    //   /api/trackb/* 는 isAdminApi 목록 밖이라 프로덕션에서 "서버 오류가 발생했습니다."로 마스킹된 200 이
+    //   나가 관리자가 원인을 알 길이 없다 → 여기서 진단 가능한 문구로 바꾼다(읽기는 fail-soft라 화면은
+    //   정상으로 보이므로 이 경로가 유일한 신호다).
+    if (err && err.code === '42P01') {
+      logger.error(`[trackB] trackb_tab_finished 테이블 없음(migration 088 미적용): ${err.message}`);
+      return { ok: false, code: 'not_ready', error: '마감 기능이 아직 준비되지 않았습니다(migration 088 미적용) — 관리자에게 알려주세요.' };
+    }
+    throw err;
   }
-  const { rowCount } = await db.query(
-    `UPDATE trackb_tab_finished SET deleted_at=NOW(), reopened_by=$3
-      WHERE sheet_id=$1 AND tab_name=$2 AND deleted_at IS NULL`, [s, t, who]);
-  return { ok: true, finished: false, reopened: rowCount };
 }
 
 /** 작업목록 표의 재료(담당자·캠페인명·인원/제출/입금) 맵 — 홈 작업 목록 전용(`?stats=1`).
  *  ★ 관리자 대시보드(/api/tab/dashboard)를 프록시하지 않는다: 그 응답은 **스코프가 없어** staff 에게
  *    담당 밖 데이터가 새고, 폐기 예정 표면에 새 의존이 생긴다. 여기서 읽고 스코프는 호출부가 건다.
- *  ★ 읽기 전용 + fail-soft(실패 시 빈 맵 = 표에 '—'). 30초 프로세스 캐시로 홈 왕복을 상각. */
+ *  ★ 읽기 전용 + fail-soft. **성공 여부를 함께 돌려준다**(빈 맵과 조회 실패를 화면이 구분해야 한다).
+ *  ★★ 이 맵은 **전 탭 무스코프**다 — 절대 응답에 통째로 실지 말 것(누가 `res.json({..., stats})` 를
+ *    추가하는 순간 전 업체 담당자·캠페인명이 staff 에게 샌다). 스코프는 호출부가 tabs 루프로 건다.
+ *  30초 프로세스 캐시로 홈 왕복을 상각. */
 let _tabStatsCache = { at: 0, map: null };
 const _TAB_STATS_TTL_MS = 30 * 1000;
 async function tabStatsMap({ force = false } = {}) {
-  if (!force && _tabStatsCache.map && (Date.now() - _tabStatsCache.at) < _TAB_STATS_TTL_MS) return _tabStatsCache.map;
+  if (!force && _tabStatsCache.map && (Date.now() - _tabStatsCache.at) < _TAB_STATS_TTL_MS) return { ok: true, map: _tabStatsCache.map };
   try {
     const { rows } = await getPool().query(
       `SELECT tc.sheet_id AS "sheetId", tc.tab_name AS "tabName",
@@ -2603,8 +2630,11 @@ async function tabStatsMap({ force = false } = {}) {
               co.closed_date AS "closeoutDate", co.row_count AS "closeoutRows"
          FROM tab_configs tc
          LEFT JOIN index_master im ON im.sheet_id = tc.sheet_id AND im.tab_name = tc.tab_name
-         LEFT JOIN (SELECT sheet_id, tab_name, COUNT(*) FILTER (WHERE is_submitted2 = 'PAID') AS paid_count
-                      FROM review_index GROUP BY sheet_id, tab_name) paid
+         -- ★ WHERE 로 걸러 집계 대상을 줄인다(FILTER 만 쓰면 review_index 전 행을 훑는다). 결과는 동일 —
+         --   입금 0건 탭은 조인이 안 붙고 아래 COALESCE 가 0 으로 받는다. 이 쿼리는 관리자 화면 하나가
+         --   아니라 **모든 내부 사용자의 홈 진입 경로**에 붙으므로 비용 차이가 그대로 체감된다.
+         LEFT JOIN (SELECT sheet_id, tab_name, COUNT(*) AS paid_count
+                      FROM review_index WHERE is_submitted2 = 'PAID' GROUP BY sheet_id, tab_name) paid
            ON paid.sheet_id = tc.sheet_id AND paid.tab_name = tc.tab_name
          -- 마감 확인창의 "마감자료 생성됨/미생성" 표시 재료(기존 정산 원장 재사용 — 신규 엔드포인트 0).
          --   ★ LATERAL LIMIT 1 = 행 곱증식 없음(레포 관용구). 미생성이면 NULL → 화면이 경고만 띄운다(하드블록 아님).
@@ -2622,10 +2652,10 @@ async function tabStatsMap({ force = false } = {}) {
       };
     }
     _tabStatsCache = { at: Date.now(), map };
-    return map;
+    return { ok: true, map };
   } catch (err) {
-    logger.warn(`[trackB] tabStatsMap 실패(통계 없이 계속): ${err.message}`);
-    return {};
+    logger.warn(`[trackB] tabStatsMap 실패(통계 없이 계속 — 호출부가 고지한다): ${err.message}`);
+    return { ok: false, map: {} };
   }
 }
 

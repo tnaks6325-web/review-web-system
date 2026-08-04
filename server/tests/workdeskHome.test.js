@@ -128,6 +128,9 @@ function makeSandbox(role, apiImpl) {
   sb._finRenderListCalls = [];
   sb._finRenderList = () => { sb._finRenderListCalls.push((sb.STATE.tabs || []).length); };
   sb.isFinished = t => !!(t && t.finished);
+  // 목록 응답 흡수(블록 밖 함수) — 여기서는 "응답의 tabs 를 STATE.tabs 에 싣는다"는 계약만 재현한다.
+  //   (실패 플래그를 덮지 않는 규율 자체는 workboardFinish 가드 + 실브라우저 검증이 담당)
+  sb._finAbsorb = r => { (r.tabs || []).forEach(n => { if (!sb.STATE.tabs.some(x => x === n)) sb.STATE.tabs.push(n); }); };
   sb.window = sb; sb.globalThis = sb;
   vm.createContext(sb);
   vm.runInContext(HB.replace(/\/\* ══ 홈 끝 ══ \*\//, ''), sb);

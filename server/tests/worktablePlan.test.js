@@ -426,9 +426,11 @@ ok('★ 생성 후 접수는 사람이 누른다고 화면이 말한다(등록 �
   /접수는 확인 후 직접<\/b> 눌러 주세요/.test(wdesk));
 ok('★ 대상 시트 목록은 기존 /tabs 재사용(신규 엔드포인트 0) · 1회만 로드',
   /api\('\/api\/trackb\/tabs'\)/.test(wdesk) && /_WTP\.sheetsLoaded/.test(wdesk));
+// ★ 라우트가 응답 객체를 변수로 조립하게 바뀌었어도(마감 주석·잘림 고지 추가, migration 088) 검사 의미는
+//   불변 = "목록 키는 tabs 다". 키 이름만 확인하고 리터럴 형태에는 결합하지 않는다.
 ok('★★ /tabs 응답의 목록 키는 `tabs` — `items` 로 읽으면 드롭다운이 항상 비어 새 파일밖에 못 고른다',
   /\(\(r&&\(r\.tabs\|\|r\.items\)\)\|\|\[\]\)\.forEach/.test(wdesk)
-  && /res\.json\(\{ ok: true, count: [\s\S]{0,40}tabs/.test(readS('routes/trackB.routes.js')));
+  && /const out = \{ ok: true, count: tabs\.length, tabs[,\s}]/.test(readS('routes/trackB.routes.js')));
 
 /* ══════════════════════════════════════════════════════════
    J. 작업대 표 스켈레톤(M2b-2) — 줄 번호 정합·상태 추종·되돌리기

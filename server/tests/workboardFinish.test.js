@@ -101,12 +101,27 @@ const stub = (impl) => { SQL = []; pool.query = async (q, p) => { SQL.push({ q: 
     && /SET deleted_at=NOW\(\), reopened_by/.test(SQL[0].q));
   t('★ 복귀에는 검수 확인이 필요 없다(되돌리기는 마찰이 낮아야 한다)', back.reopened === 1);
 
-  // ② fail-soft — 테이블 부재/조회 실패가 목록 전체를 죽이면 안 된다
-  pool.query = async () => { throw new Error('relation "trackb_tab_finished" does not exist'); };
-  t('★ 마감 조회 실패 = 빈 맵(= 아무것도 마감 안 됨 = 오늘과 같은 화면). 목록이 죽지 않는다',
-    JSON.stringify(await svc.finishedTabsMap()) === '{}');
-  t('★ 통계 조회 실패 = 빈 맵(표에 "—" 만 뜨고 목록은 그대로)',
-    JSON.stringify(await svc.tabStatsMap({ force: true })) === '{}');
+  // ①-e 탭 리네임 대비 — 이름이 바뀌어도 gid 로 마감을 다시 찾는다(레포 규율: gid 우선 재매칭)
+  stub(() => ({ rows: [{ sheetId: 'S1', tabName: '옛이름', tabGid: '77', finishedAt: 'X', finishedBy: '만두' }], rowCount: 1 }));
+  const fmap = await svc.finishedTabsMap();
+  t('★ 마감 맵에 gid 키도 함께 실린다(운영 중 탭 리네임으로 마감이 조용히 풀리는 것 방지)',
+    fmap.ok === true && !!fmap.map['S1\t옛이름'] && !!fmap.map['S1\tgid:77']);
+  stub(() => ({ rows: [{ sheetId: 'S1', tabName: 'T', tabGid: '', finishedAt: 'X', finishedBy: '만두' }], rowCount: 1 }));
+  t('★ gid 가 비면 gid 키를 만들지 않는다(빈 값이 전부 매칭되는 사고 방지)',
+    Object.keys((await svc.finishedTabsMap()).map).every(k => !/\tgid:$/.test(k)));
+
+  // ② fail-soft — 목록 전체를 죽이지 않되, **실패했다는 사실은 반드시 알린다**
+  pool.query = async () => { const e = new Error('relation "trackb_tab_finished" does not exist'); e.code = '42P01'; throw e; };
+  const finFail = await svc.finishedTabsMap();
+  t('★ 마감 조회 실패해도 목록은 죽지 않는다(빈 맵)', JSON.stringify(finFail.map) === '{}');
+  t('★★ 실패를 ok:false 로 **구분해 돌려준다** — 빈 맵만 주면 호출부가 "아무것도 마감 안 됨"으로 읽어 마감 작업이 전부 보드로 되살아나고 보관함이 빈다(무신호)',
+    finFail.ok === false);
+  const stFail = await svc.tabStatsMap({ force: true });
+  t('★ 통계 조회 실패도 같은 계약(빈 맵 + ok:false)', JSON.stringify(stFail.map) === '{}' && stFail.ok === false);
+  // ★ 쓰기 경로는 fail-soft 가 아니다 — 다만 42P01 은 진단 가능한 문구로(마스킹된 200 방지)
+  const notReady = await svc.setTabFinished({ sheetId: 'S1', tabName: 'T1', finish: true, inspected: true, by: '만두' });
+  t('★ 마이그레이션 미적용(42P01)은 진단 가능한 메시지로 반환(읽기는 정상처럼 보이므로 이 경로가 유일한 신호)',
+    notReady.ok === false && notReady.code === 'not_ready' && /088/.test(notReady.error));
 
   /* ── 4) 라우트 실행 — 스코프 ───────────────────────────────── */
   console.log('\n4) 스코프 (라우트 실제 호출)');
@@ -157,9 +172,9 @@ const stub = (impl) => { SQL = []; pool.query = async (q, p) => { SQL.push({ q: 
     { sheetId: 'S1', tabName: 'T2', tabGid: '2' },
   ]);
   svc.scopedActiveTabs = async () => FAKE();
-  svc.finishedTabsMap = async () => ({ 'S1\tT2': { finishedAt: 'X', finishedBy: '만두' } });
+  svc.finishedTabsMap = async () => ({ ok: true, map: { 'S1\tT2': { finishedAt: 'X', finishedBy: '만두' } } });
   let statsCalls = 0;
-  svc.tabStatsMap = async () => { statsCalls++; return { 'S1\tT1': { manager: '만두', total: 10, submitted: 3, paid: 1 } }; };
+  svc.tabStatsMap = async () => { statsCalls++; return { ok: true, map: { 'S1\tT1': { manager: '만두', total: 10, submitted: 3, paid: 1 } } }; };
 
   const callTabs = async (admin, query) => {
     let payload = null;
@@ -184,8 +199,48 @@ const stub = (impl) => { SQL = []; pool.query = async (q, p) => { SQL.push({ q: 
   t('★ 광고주 응답엔 마감 주석·통계가 없다(마감자·담당자는 내부 정보 — 데이터 최소화)',
     asAdv.tabs.every(x => x.finished === undefined && !x.stats) && statsCalls === 0);
 
+  // 리네임 대비 gid 폴백이 라우트에서도 실제로 쓰인다
+  svc.finishedTabsMap = async () => ({ ok: true, map: { 'S1\tgid:2': { finishedAt: 'X', finishedBy: '만두' } } });
+  const byGid = await callTabs({ role: 'admin', name: 'a' }, {});
+  t('★ 이름이 바뀐 탭도 gid 로 마감을 되찾는다(이름만 보면 마감이 조용히 풀린다)',
+    byGid.tabs[1].finished === true && byGid.tabs[0].finished === undefined);
+
+  // ★★ 조회 실패를 응답에 실어야 프론트가 기존 마감 표시를 덮지 않는다
+  svc.finishedTabsMap = async () => ({ ok: false, map: {} });
+  svc.tabStatsMap = async () => ({ ok: false, map: {} });
+  const unavail = await callTabs({ role: 'admin', name: 'a' }, { stats: '1' });
+  t('★★ 마감 조회 실패를 응답에 고지(finishedUnavailable) — 없으면 프론트가 전 작업을 진행 중으로 되살린다',
+    unavail.finishedUnavailable === true);
+  t('★ 통계 조회 실패도 고지(statsUnavailable)', unavail.statsUnavailable === true);
+  svc.finishedTabsMap = async () => ({ ok: true, map: {} });
+  svc.tabStatsMap = async () => ({ ok: true, map: {} });
+  const healthy = await callTabs({ role: 'admin', name: 'a' }, { stats: '1' });
+  t('정상일 때는 실패 플래그를 달지 않는다(구버전 백엔드와 구분되게 필드 자체가 없음)',
+    healthy.finishedUnavailable === undefined && healthy.statsUnavailable === undefined);
+
+  // ★ 목록 잘림 고지 — 마감 탭도 limit 을 차지하므로 마감이 쌓이면 진행 중 작업이 조용히 밀려난다
+  svc.scopedActiveTabs = async () => Array.from({ length: 2 }, (_, i) => ({ sheetId: 'S', tabName: 'T' + i, tabGid: String(i) }));
+  const trunc = await callTabs({ role: 'admin', name: 'a' }, { limit: '2' });
+  t('★ 목록이 상한에 닿으면 truncated 로 알린다(잘림을 숨기면 "작업이 적은 것"과 구분되지 않는다)',
+    trunc.truncated === true);
+  const notTrunc = await callTabs({ role: 'admin', name: 'a' }, { limit: '50' });
+  t('상한에 안 닿으면 truncated:false', notTrunc.truncated === false);
+
   svc.scopedActiveTabs = origScoped; svc.finishedTabsMap = origFin; svc.tabStatsMap = origStats;
   pool.query = origQuery;
+
+  /* ── 5b) 복귀 라우트 파싱 ─────────────────────────────────── */
+  const origSet2 = svc.setTabFinished;
+  let lastArgs = null;
+  svc.setTabFinished = async (a) => { lastArgs = a; return { ok: true }; };
+  await call({ role: 'master', name: 'm' }, { sheetId: 'S', tabName: 'T', finish: 'false' });
+  t("★ finish:'false'(문자열)를 마감으로 오해하지 않는다 — 복귀 요청이 마감이 되면 되돌리기가 불가능해진다",
+    lastArgs.finish === false);
+  await call({ role: 'master', name: 'm' }, { sheetId: 'S', tabName: 'T', finish: 0 });
+  t('finish:0 도 복귀로 해석', lastArgs.finish === false);
+  await call({ role: 'master', name: 'm' }, { sheetId: 'S', tabName: 'T', finish: true, inspected: true });
+  t('finish:true 는 마감', lastArgs.finish === true);
+  svc.setTabFinished = origSet2;
 
   /* ── 6) Track A 무접촉 ─────────────────────────────────────── */
   console.log('\n6) Track A 무접촉 (격리)');
@@ -199,6 +254,13 @@ const stub = (impl) => { SQL = []; pool.query = async (q, p) => { SQL.push({ q: 
   t('통계는 읽기 전용(SELECT 만)', /FROM tab_configs tc/.test(finBlock) && !/UPDATE tab_configs/.test(finBlock));
   t('마감자료 표시는 기존 정산 원장 재사용(신규 저장소 0)', /trackb_tab_closeouts/.test(finBlock));
   t('★ LATERAL LIMIT 1 — 마감자료가 여러 건이어도 행 곱증식 없음', /LATERAL[\s\S]{0,220}LIMIT 1/.test(finBlock));
+  t('★ 입금 집계는 WHERE 로 대상을 줄인다(홈 진입마다 review_index 전 행을 훑지 않는다)',
+    /FROM review_index WHERE is_submitted2 = 'PAID' GROUP BY/.test(finBlock));
+  t('마감/복귀는 감사 로그를 남긴다(같은 파일의 다른 전사 공통 쓰기와 같은 관례)',
+    /logger\.info\(`\[trackB\] 작업 마감/.test(finBlock) && /logger\.info\(`\[trackB\] 작업 진행중 복귀/.test(finBlock));
+  // ★★ 이 맵은 전 탭 무스코프 — 응답에 통째로 실으면 전 업체 담당자·캠페인명이 staff 에게 샌다.
+  t('★★ 통계 맵을 응답에 통째로 싣지 않는다(스코프는 tabs 루프가 유일한 방어)',
+    !/res\.json\([^)]*\bstats\b\s*[,}]/.test(ROUTES), (ROUTES.match(/res\.json\([^)]*stats[^)]*\)/g) || []).join(' | '));
 
   /* ── 7) 프론트 배선 ────────────────────────────────────────── */
   console.log('\n7) 프론트 배선 (workdesk.html)');
@@ -241,7 +303,23 @@ const stub = (impl) => { SQL = []; pool.query = async (q, p) => { SQL.push({ q: 
   t('작업바 로드는 stats 를 붙이지 않는다(무거운 집계를 탭 전환마다 돌리지 않는다)',
     /loadTabs\(\)\{[\s\S]{0,200}api\('\/api\/trackb\/tabs\?limit=300'\)/.test(WD));
   t('★ 통계는 배열 교체가 아니라 병합(인덱스=selTab 계약·STATE.cur 동일성 보존)',
-    /_finEnsureStats[\s\S]{0,900}STATE\.tabs\.forEach\(t=>\{ const n=by\[/.test(WD));
+    /function _finAbsorb\(r\)\{[\s\S]{0,700}STATE\.tabs\.forEach\(t=>\{ const n=by\[/.test(WD));
+  // ★★ 코드리뷰가 잡은 무신호 사고 계열 — 조회 실패를 빈 값으로 덮으면 마감이 통째로 풀린 것처럼 보인다
+  t('★★ 마감 조회 실패 응답으로 기존 마감 표시를 덮지 않는다(_finAbsorb)',
+    /if\(!r\.finishedUnavailable\)\{ t\.finished=!!n\.finished/.test(WD));
+  t('★★ loadTabs 도 실패 응답에서 기존 마감 표시를 이월한다(작업보드 부활 차단)',
+    /if\(r\.finishedUnavailable && _prevFin\[k\]\)\{ t\.finished=true/.test(WD));
+  t('★ 통계는 값이 있을 때만 대입(undefined 로 덮으면 마감 후보 배지가 통째로 사라진다)',
+    /if\(n\.stats\) t\.stats=n\.stats;/.test(WD));
+  t('★ 실패·잘림을 화면이 말한다(조용한 정상 위장 금지)',
+    /_finNoticeHtml\(\)\{[\s\S]{0,700}finUnavailable[\s\S]{0,400}statsUnavailable[\s\S]{0,400}finTruncated/.test(WD));
+  t('★ loadTabs 가 홈 목록도 다시 그린다(배열 교체로 목록 인덱스가 stale 이 되면 옆 작업을 마감한다)',
+    /_renderTabList\(\);[\s\S]{0,400}if\(document\.getElementById\('wblMount'\)\) _finRenderList\(\);/.test(WD));
+  t('★ 복귀 확인창에 작업 이름을 넣는다(인덱스가 어긋났을 때 사용자가 알아챌 유일한 장치)',
+    /_finReopen\(tab\)\{[\s\S]{0,700}confirm\(`"\$\{tabName\}"/.test(WD));
+  t('★ 0행 복귀를 "되돌렸습니다"로 꾸미지 않는다', /r\.reopened \? '진행중으로 되돌렸습니다' : '이미 진행중인 작업이었습니다'/.test(WD));
+  t('★ 전부 마감이면 "이 그룹에 작업이 없습니다"가 아니라 보관함으로 안내(그룹 자체가 없는 상태)',
+    /if\(!gs\.length\)\{[\s\S]{0,300}마감 보관함에 있습니다/.test(WD));
 
   /* ── 8) 무결성 — 주석 조기 종료 / 스크립트 파싱 ──────────────── */
   console.log('\n8) CSS·스크립트 무결성');

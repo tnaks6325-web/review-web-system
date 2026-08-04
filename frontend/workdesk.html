@@ -1506,10 +1506,21 @@ async function loadTabs(){
   if(!r||!r.ok){ const b=$('#tb2'); if(b) b.innerHTML=`<span class="b2empty">작업 목록은 관리자 로그인에서 제공됩니다.</span>`; return; }
   // ★ 작업바 로드는 stats=1 을 붙이지 않는다(무거운 집계를 탭 전환마다 돌리지 않는다) — 대신 이미 받아둔
   //   통계를 **이월**해 마감 후보 배지가 화면을 오갈 때마다 사라졌다 나타나지 않게 한다(_finStatsAt 캐시와 정합).
-  const _prevStats={}; (STATE.tabs||[]).forEach(t=>{ if(t.stats) _prevStats[t.sheetId+'\t'+t.tabName]=t.stats; });
+  const _prevStats={}, _prevFin={};
+  (STATE.tabs||[]).forEach(t=>{ const k=t.sheetId+'\t'+t.tabName;
+    if(t.stats) _prevStats[k]=t.stats;
+    if(t.finished) _prevFin[k]={finishedAt:t.finishedAt,finishedBy:t.finishedBy}; });
   STATE.tabs=r.tabs||[];
-  STATE.tabs.forEach(t=>{ if(!t.stats){ const s=_prevStats[t.sheetId+'\t'+t.tabName]; if(s) t.stats=s; } });
+  STATE.finTruncated=!!r.truncated;
+  STATE.finUnavailable=!!r.finishedUnavailable;
+  STATE.tabs.forEach(t=>{ const k=t.sheetId+'\t'+t.tabName;
+    if(!t.stats){ const s=_prevStats[k]; if(s) t.stats=s; }
+    // ★ 마감 조회가 실패한 응답으로 기존 마감 표시를 지우지 않는다(그러면 마감 작업이 보드로 되살아난다)
+    if(r.finishedUnavailable && _prevFin[k]){ t.finished=true; t.finishedAt=_prevFin[k].finishedAt; t.finishedBy=_prevFin[k].finishedBy; } });
   _renderTabList();          // 계정별 캐시로 즉시 렌더
+  // ★ 홈 목록이 떠 있는 채로 이 응답이 도착하면 배열이 교체돼 **목록 DOM 의 인덱스가 stale** 이 된다
+  //   → 옆 작업을 마감/복귀할 수 있다. 같은 배열로 즉시 다시 그려 인덱스를 맞춘다.
+  if(document.getElementById('wblMount')) _finRenderList();
   refreshUnseen();           // 미확인(스레드) 배지 최초 조회 — 도착 시 재렌더
   _favSyncFromServer();      // 서버 원본으로 정렬(개인화·기기 무관) — 도착 시 재렌더
   // 관측 대시보드에서 "열기"로 넘어온 탭 자동 선택
@@ -1757,11 +1768,22 @@ async function _finEnsureStats(force){
   if(!force && STATE._finStatsAt && (Date.now()-STATE._finStatsAt)<60000) return;
   const r=await api('/api/trackb/tabs?limit=300&stats=1').catch(()=>null);
   if(!(r&&r.ok&&Array.isArray(r.tabs))) return;          // fail-soft: 통계 없이도 목록은 그대로 동작
+  _finAbsorb(r);
+  STATE._finStatsAt=Date.now();
+}
+// 목록 응답을 STATE.tabs 에 흡수 — 서버가 "못 불러왔다"고 말한 항목은 **덮지 않는다**.
+//   ★★ 조회 실패를 빈 값으로 덮으면 마감 작업 전부가 작업보드로 되살아나고 보관함이 빈다(무신호 사고).
+//   ★ 통계도 마찬가지 — undefined 로 덮으면 마감 후보 배지가 통째로 사라진다(loadTabs 의 이월과 같은 규율).
+function _finAbsorb(r){
+  STATE.finUnavailable=!!r.finishedUnavailable;
+  STATE.statsUnavailable=!!r.statsUnavailable;
+  STATE.finTruncated=!!r.truncated;
   const by={}; r.tabs.forEach(n=>{ by[n.sheetId+'\t'+n.tabName]=n; });
   STATE.tabs.forEach(t=>{ const n=by[t.sheetId+'\t'+t.tabName]; if(!n) return;
-    t.stats=n.stats; t.finished=!!n.finished; t.finishedAt=n.finishedAt; t.finishedBy=n.finishedBy; });
+    if(n.stats) t.stats=n.stats;
+    if(!r.finishedUnavailable){ t.finished=!!n.finished; t.finishedAt=n.finishedAt; t.finishedBy=n.finishedBy; }
+  });
   r.tabs.forEach(n=>{ if(!STATE.tabs.some(t=>t.sheetId===n.sheetId&&t.tabName===n.tabName)) STATE.tabs.push(n); });
-  STATE._finStatsAt=Date.now();
 }
 // 마감/복귀 후 화면 수렴 — 떠 있는 화면만 갱신(홈 목록·작업바·본문 헤더 바).
 async function _finRefresh(){
@@ -1850,10 +1872,14 @@ async function doFinish(){
 async function _finReopen(tab){
   if(!_finCanEdit()||!tab) return;
   const sheetId=tab.sheetId, tabName=tab.tabName;
-  if(!confirm('이 작업을 진행중으로 되돌릴까요?\n작업보드 목록에 다시 나타납니다.')) return;
+  // ★ 확인 문구에 **작업 이름을 반드시 넣는다** — 목록이 갱신되는 사이 인덱스가 어긋나 옆 작업이 대상이
+  //   됐을 때, 사용자가 그것을 알아챌 수 있는 유일한 장치다(마감 확인창은 이름이 보이지만 여긴 안 보였다).
+  if(!confirm(`"${tabName}"\n\n이 작업을 진행중으로 되돌릴까요?\n작업보드 목록에 다시 나타납니다.`)) return;
   const r=await api('/api/trackb/workdesk/tab-finish',{method:'POST',body:JSON.stringify({sheetId,tabName,finish:false})}).catch(()=>null);
   if(!(r&&r.ok)){ toast((r&&r.error)||'복귀 실패'); return; }
-  toast('진행중으로 되돌렸습니다'); await _finRefresh();
+  // 0행 갱신 = 이미 마감이 아니었다(다른 직원이 먼저 되돌림). "되돌렸습니다"로 꾸미지 않는다.
+  toast(r.reopened ? '진행중으로 되돌렸습니다' : '이미 진행중인 작업이었습니다');
+  await _finRefresh();
 }
 
 /* ── 홈 "작업 목록" 블록(히어로 바로 아래 · 전체폭) — 사용자 확정 ㉢ ────────────────
@@ -1924,8 +1950,18 @@ function _finRenderList(){
         <th>작업명</th><th>담당</th><th>인원/제출</th><th>${fin?'마감일 · 마감자':'입금'}</th><th>상태</th><th></th>
       </tr></thead><tbody>${body}</tbody></table></div>`
       : `<div class="wbl-empty">${fin?'마감한 작업이 없습니다.':(STATE.finQ||STATE.finMgr)?'조건에 맞는 작업이 없습니다.':'진행 중인 작업이 없습니다.'}</div>`}
+    ${_finNoticeHtml()}
     <div class="wbl-note">줄을 클릭하면 그 작업이 작업보드에서 열립니다 · 마감은 전 직원 공통이며 [↩ 진행중으로 복귀]로 되돌릴 수 있습니다.</div>
   </div>`;
+}
+// ★ 조회 실패·목록 잘림을 화면이 **말한다**(조용한 정상 위장 금지 — 관측 뷰 배포 스큐 규칙과 동일).
+//   특히 마감 조회 실패는 "마감 작업이 진행 중으로 보이는" 상태라, 말해주지 않으면 사용자가 오해한다.
+function _finNoticeHtml(){
+  const n=[];
+  if(STATE.finUnavailable) n.push('⚠ 마감 상태를 불러오지 못했습니다 — 마감한 작업이 진행 중으로 보일 수 있습니다(새로고침해 주세요).');
+  if(STATE.statsUnavailable) n.push('⚠ 인원·제출·입금 수치를 불러오지 못했습니다 — 표의 숫자와 마감 후보 배지가 비어 있습니다.');
+  if(STATE.finTruncated) n.push('⚠ 작업이 많아 목록 일부만 표시됩니다 — 마감한 작업을 정리하면 더 보입니다.');
+  return n.length?`<div class="wbl-warn" style="margin:0;border-radius:0;border-left:0;border-right:0">${n.map(esc).join('<br>')}</div>`:'';
 }
 function _finPickTab(v){ STATE.finTab=v; STATE.finMgr=''; _finRenderList(); }
 function _finPickMgr(m){ STATE.finMgr=m; _finRenderList(); }
@@ -1971,6 +2007,10 @@ function _renderTabList(){
   const seghost=$('#segwrap'), tabhost=$('#tb2'); if(!seghost||!tabhost) return;   // 작업보드 뷰가 아닐 때
   const gs=_wGroups();
   if(!STATE.tabs.length){ seghost.innerHTML=''; tabhost.innerHTML=`<span class="b2empty">활성 작업 없음</span>`; return; }
+  // ★ 탭은 있는데 전부 마감이면 그룹이 0개다 — 위 분기(STATE.tabs.length)를 못 타므로 여기서 따로 말한다.
+  //   안 그러면 "이 그룹에 작업이 없습니다"가 뜨는데 그룹 자체가 없어서 문구가 어긋난다.
+  if(!gs.length){ seghost.innerHTML='';
+    tabhost.innerHTML=`<span class="b2empty">진행 중인 작업이 없습니다 — 마감한 작업은 🏠 홈 › 작업 목록 › 마감 보관함에 있습니다.</span>`; return; }
   const seg=_wActiveSeg(gs); STATE.wSeg=seg;
   // innerHTML 교체는 가로 스크롤 위치를 0으로 되감는다 → 업체가 많으면 방금 고른 칩이 화면 밖으로 사라짐.
   //   교체 전 위치를 저장했다가 복원하고, "선택이 실제로 바뀐 경우에만" 활성 항목을 시야로 끌어온다
@@ -4034,7 +4074,7 @@ async function _homeLoad(){
     //   히어로 "진행 중 작업"도 마감분을 뺀 수 = 목록의 [진행 중] 개수와 구조적으로 일치한다.
     api('/api/trackb/tabs?limit=300&stats=1').then(r=>{
       if(!(r && r.ok && Array.isArray(r.tabs))) return;
-      STATE.tabs=r.tabs; STATE._finStatsAt=Date.now();
+      STATE.tabs=[]; _finAbsorb(r); STATE._finStatsAt=Date.now();   // 흡수 = 실패 플래그·잘림 고지까지 함께 반영
       _finRenderList();   // 목록 렌더가 히어로 "진행 중 작업" 숫자까지 함께 쓴다(단일 writer)
     }),
     api('/api/trackb/campaigns/list').then(r=>{
