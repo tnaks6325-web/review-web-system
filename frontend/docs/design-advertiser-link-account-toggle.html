@@ -137,7 +137,7 @@ ul.tight{margin:8px 0 0;padding-left:18px;font-size:12.5px;color:var(--muted)} u
           <button class="btn xs">링크 회전</button>
           <button class="btn xs bad">폐기</button>
         </div>
-        <div class="linkhint" id="mHint">이 링크를 아는 사람은 누구나 이 업체 뷰(소유 탭·마스킹·읽기전용)를 볼 수 있습니다. 오른쪽 <b>광고주 계정</b>을 켜면 로그인 화면이 먼저 뜹니다.</div>
+        <div class="linkhint" id="mHint">이 링크를 아는 사람은 누구나 이 업체 뷰(소유 탭·읽기전용, <b>리뷰어 연락처·주소 포함</b>)를 볼 수 있습니다.</div>
       </div>
 
       <!-- 광고주 계정 카드 (★ 토글 신규) -->
@@ -182,7 +182,7 @@ ul.tight{margin:8px 0 0;padding-left:18px;font-size:12.5px;color:var(--muted)} u
   <h2><span class="n">3</span>링크를 열었을 때 실제 동작</h2>
   <table class="st8">
     <tr><th style="width:150px">계정 토글</th><th style="width:140px">활성 계정</th><th style="width:170px">링크 배지</th><th>광고주가 링크를 열면</th></tr>
-    <tr><td class="k">미사용 (기본)</td><td>없음</td><td><span class="pill open">🔓 공개</span></td><td>바로 그 업체 뷰로 입장 (읽기전용·마스킹·소유 탭만)</td></tr>
+    <tr><td class="k">미사용 (기본)</td><td>없음</td><td><span class="pill open">🔓 공개</span></td><td>바로 그 업체 뷰로 입장 (소유 탭·읽기전용, <b>리뷰어 연락처·주소 포함</b>)</td></tr>
     <tr><td class="k">미사용</td><td>있음</td><td><span class="pill open">🔓 공개</span></td><td><b>바로 입장</b> — 계정이 있어도 막지 않음 <span style="color:var(--bad);font-weight:700">(← 현재와 달라지는 지점)</span></td></tr>
     <tr><td class="k">사용</td><td>있음</td><td><span class="pill lock">🔒 로그인 필요</span></td><td>로그인 화면 → 그 업체 계정으로 로그인해야 입장</td></tr>
     <tr><td class="k">사용</td><td>없음</td><td colspan="2"><b>켤 수 없음</b> — 계정 발급을 먼저 요구(토글 비활성 + 서버 거부). 켠 뒤 계정을 지워 이 상태가 되면 <b>열리지 않고 잠깁니다</b>(보안이 조용히 풀리지 않도록 fail-closed — 토글을 끄거나 계정을 다시 발급해 복구)</td></tr>
@@ -196,7 +196,8 @@ ul.tight{margin:8px 0 0;padding-left:18px;font-size:12.5px;color:var(--muted)} u
     <p style="margin:0 0 8px"><b>서버</b> — 게이트 판정을 "계정 존재"에서 명시 플래그로 이동. <code>trackb_advertiser_links.login_required</code>(기본 <code>FALSE</code>) 1컬럼 추가(migration 083) →
     <code>loginByLinkToken</code>이 <b>이미 SELECT 하던 그 행</b>에서 읽으므로 쿼리 순증 0. 토글 저장은 기존 <code>POST /api/trackb/advertiser-link</code>에 <code>action:'login-required'</code> 하나 추가(신규 엔드포인트 0), <code>adminOrMaster</code> 권한 그대로.</p>
     <p style="margin:0 0 8px"><b>안전장치</b> — 켤 때 활성 계정 0개면 서버가 거부. 끌 때는 계정을 건드리지 않음(비활성·삭제 아님). 켠 뒤 계정이 사라져도 링크는 <b>열리지 않는다</b>(fail-closed — "계정 없으면 통과" 폴백을 두면 켜 둔 보안이 조용히 풀린다).</p>
-    <p style="margin:0 0 8px"><b>기존 업체 이관</b> — 지금 활성 계정이 있어 "로그인 필요"로 동작하던 업체는 마이그레이션에서 <code>TRUE</code>로 1회 백필합니다. <b>배포 순간 광고주가 보는 동작은 그대로</b>(계정 있던 곳은 계속 로그인 요구, 없던 곳은 계속 공개). 앞으로 만드는 업체·계정만 기본 공개. 백필은 <code>login_required IS NULL</code> 인 행만 건드려, 파일이 다시 돌아도 관리자가 꺼 둔 값을 되켜지 않습니다.</p>
+    <p style="margin:0 0 8px"><b>기존 업체 이관</b> — 지금 활성 계정이 있어 "로그인 필요"로 동작하던 업체는 <code>TRUE</code>로 백필합니다(083 = 링크가 이미 발급된 업체 / <b>084 = 계정은 있는데 링크 행이 아직 없는 업체</b> — 링크 행은 관리자가 업체 패널을 열 때 생성되므로 이 경우가 남습니다). <b>배포 순간 광고주가 보는 동작은 그대로</b>이고, 앞으로 만드는 업체·계정만 기본 공개입니다. 백필은 값이 비어 있는 행만 건드려, 파일이 다시 돌아도 관리자가 꺼 둔 값을 되켜지 않습니다(실제 PostgreSQL 16에서 재실행까지 확인).</p>
+    <p style="margin:0 0 8px"><b>알아둘 한계</b> — 토글을 켜도 <b>이미 접속 중인 광고주 세션은 최대 8시간 유지</b>됩니다(링크를 폐기해도 같습니다). 켤 때 안내가 함께 뜹니다.</p>
     <p style="margin:0"><b>회귀가드</b> — <code>server/tests/advertiserLinkLoginToggle.test.js</code>(36케이스) + <code>trackBIntranetSso.test.js</code>에 게이트·토글 케이스 추가.</p>
   </div>
 </div>
@@ -216,7 +217,7 @@ function setSw(on){
   b.textContent = on?'🔒 로그인 필요 — 이 업체 계정으로':'🔓 공개 — 로그인 없이 열람';
   document.getElementById('mHint').innerHTML = on
     ? '이 링크를 열면 로그인 화면이 뜹니다. 링크만으로는 들어갈 수 없습니다.'
-    : '이 링크를 아는 사람은 누구나 이 업체 뷰(소유 탭·마스킹·읽기전용)를 볼 수 있습니다. 오른쪽 <b>광고주 계정</b>을 켜면 로그인 화면이 먼저 뜹니다.';
+    : '이 링크를 아는 사람은 누구나 이 업체 뷰(소유 탭·읽기전용, <b>리뷰어 연락처·주소 포함</b>)를 볼 수 있습니다.';
   document.getElementById('vb0').className = on?'':'on';
   document.getElementById('vb1').className = on?'on':'';
 }

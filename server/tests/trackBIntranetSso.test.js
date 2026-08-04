@@ -194,7 +194,12 @@ async function run() {
     if (/UPDATE trackb_advertiser_links SET active/.test(s)) return { rows: vals[0] === 'adv_nolink' ? [] : [{ token: 'TOK', active: vals[1] }] };
     // 083: 계정 사용 토글 — 활성 계정 유무는 업체 id로 흉내(adv_acct 만 계정 보유)
     if (/SELECT 1 FROM advertiser_users WHERE advertiser_id/.test(s)) return { rows: vals[0] === 'adv_acct' ? [{ 1: 1 }] : [] };
-    if (/UPDATE trackb_advertiser_links SET login_required/.test(s)) return { rows: vals[0] === 'adv_nolink2' ? [] : [{ loginRequired: vals[1] }] };
+    // WHERE EXISTS(활성 계정) 가드를 스텁에서 흉내 — 켜는 요청은 계정 보유 업체(adv_acct)에서만 1행.
+    if (/UPDATE trackb_advertiser_links SET login_required/.test(s)) {
+      if (vals[0] === 'adv_nolink2') return { rows: [] };
+      const hasAcct = vals[0] === 'adv_acct';
+      return { rows: (vals[1] === false || hasAcct) ? [{ loginRequired: vals[1] }] : [] };
+    }
     return { rows: [] };
   } });
   // 거래처 등록검증(인트라넷 광고주DB) 목 — 등록됨/미등록/도달불가 3태를 주입.
@@ -273,7 +278,16 @@ async function run() {
     '2.7-2d: 토글은 계정을 지우거나 비활성화하지 않는다(다시 켜면 그대로 사용)');
   tg = await svc.setAdvertiserLinkLoginRequired({});
   assert.equal(tg.ok, false, '2.7-2e: advertiserId 누락 400'); assert.equal(tg.code, 400, '2.7-2e: 400');
-  console.log('  2.7-2 계정 사용 토글 — 계정 있을 때만 켜기·끄기 자유·계정 무손상·400 ✓');
+  tg = await svc.setAdvertiserLinkLoginRequired({ advertiserId: 'adv_missing', required: false });
+  assert.equal(tg.ok, false, '2.7-2f: 없는 거래처 404(ensure 의 FK 500 이 아니라)'); assert.equal(tg.code, 404, '2.7-2f: 404');
+  // ★★ 회전·폐기·재활성이 login_required 를 건드리면 링크 회전 한 번에 잠금이 조용히 풀린다
+  //    (지금은 UPDATE SET 목록에 그 컬럼이 없어 보존되지만, 전체 컬럼 upsert 로 리팩터하면 깨진다).
+  const wrote = (re) => q.filter(x => re.test(x.s));
+  assert.ok(wrote(/INSERT INTO trackb_advertiser_links/).every(x => !/login_required/.test(x.s)),
+    '2.7-2g: 발급/회전(upsert)이 login_required 를 덮지 않는다');
+  assert.ok(wrote(/UPDATE trackb_advertiser_links SET active/).every(x => !/login_required/.test(x.s)),
+    '2.7-2h: 폐기/재활성이 login_required 를 덮지 않는다');
+  console.log('  2.7-2 계정 사용 토글 — 계정 있을 때만 켜기·끄기 자유·계정 무손상·404/400·회전 시 플래그 보존 ✓');
 
   // ═══ 2.8 loginByLinkToken — 유효 토큰 → advertiser JWT(via:link), 무효/종료/빈값 거부 ═══
   const mkPool = (row, hasAcct) => ({ async query(sql) { const s = String(sql);
