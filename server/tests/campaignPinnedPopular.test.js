@@ -87,7 +87,7 @@ ok('cards: 별표는 진짜 admin_token 또는 관리자 목록만(스코프 토
   && !/const starChip = _adminTok\(\)/.test(cards));
 ok('cards: 별표 클릭은 카드 이동 차단(stopPropagation+preventDefault)', /pstarchip[\s\S]{0,200}stopPropagation\(\);event\.preventDefault\(\);CampCards\.togglePin/.test(cards));
 ok('cards: togglePin — /flags POST + 홈 재렌더(loadRecruitPreview)', /async function togglePin\(campId, on\)/.test(cards) && /loadRecruitPreview === 'function'/.test(cards));
-ok('flags: 토글 직후 /list 캐시 무효화(5초 stale 순서 방지)', /_listCache = \{ at: 0, rows: null, countsMap: null \};[\s\S]{0,200}pinnedAt/.test(routes));
+ok('flags: 토글 직후 /list 캐시 무효화(5초 stale 순서 방지)', /_listCache = \{ at: 0, rows: null, countsMap: null(, feeMap: null)? \};[\s\S]{0,200}pinnedAt/.test(routes));
 
 // ── 관리자 UI ──
 ok('admin.html: 노출 순서(rf_sort_order) 제거', !adminHtml.includes('rf_sort_order'));
