@@ -1483,6 +1483,56 @@ router.post('/image-upload', imageApiLimiter, async (req, res, next) => {
 });
 
 // ═══════════════════════════════════════════════════════════
+// ═══════════════════════════════════════════════════════════
+// POST /api/image/review-precheck — 1차 필터(M0): 첨부 시점 리뷰/채널 판별
+//
+// ★ Drive 업로드 0 · DB 쓰기 0 — 순수 판정만 돌려준다. 리뷰어가 캡처를 **고른 직후**
+//   호출되므로, 잘못된 파일이 저장되거나 제출로 기록되기 **전에** 되돌릴 수 있다.
+//   (사후에 교체요청 → 리뷰어 재제출은 왕복 비용이 커서 실무에서 가장 번거롭다)
+// ★ 무인증 — 리뷰어 제출 화면이 무인증이라 같은 조건. 남용은 imageApiLimiter 로 막고,
+//   같은 이미지는 Gemini 해시 캐시로 상각된다.
+// Body: { base64, mimeType, sheetId, tabName, slotKey }
+// ═══════════════════════════════════════════════════════════
+router.post('/review-precheck', imageApiLimiter, async (req, res) => {
+  // ★★ 이 핸들러는 어떤 경우에도 500 을 내지 않는다 — 1차 필터의 장애가
+  //    리뷰어의 첨부·제출을 막으면 막으려던 사고보다 큰 피해가 된다(fail-open).
+  try {
+    const { base64, mimeType, sheetId, tabName, slotKey } = req.body || {};
+    const inspect = require('../services/reviewInspect.service');
+    const pass = (code) => res.json({ ok: true, verdict: 'skip', code, message: '', blocked: false });
+
+    if (!inspect.PRECHECK_ENABLED) return pass('disabled');
+    if (!base64) return pass('no_image');
+    if (String(slotKey || 'review') !== 'review') return pass('not_review_slot');
+
+    let classified = null;
+    try {
+      const { classifySubmissionImage } = require('../services/gemini.service');
+      classified = await classifySubmissionImage(base64, mimeType || 'image/jpeg');
+    } catch (_) { classified = null; }   // AI 장애 = 무판정 통과
+
+    let expectedChannel = null;
+    try {
+      const exp = await inspect.loadTabExpectations({ sheetId, tabName });
+      expectedChannel = exp.expectedChannel;
+    } catch (_) { /* 채널을 모르면 대조만 생략 */ }
+
+    const v = inspect.precheckPolicy({ classified, expectedChannel, slotKey: slotKey || 'review' });
+    res.json({
+      ok: true,
+      verdict: v.verdict,          // pass | warn | block | skip
+      code: v.code,
+      message: v.message,
+      channel: v.channel,
+      blocked: v.verdict === 'block',
+    });
+  } catch (err) {
+    logger.warn(`[review-precheck] 판정 실패(통과 처리): ${err.message}`);
+    res.json({ ok: true, verdict: 'skip', code: 'error', message: '', blocked: false });
+  }
+});
+
+// ═══════════════════════════════════════════════════════════
 // POST /api/image/review-upload — 리뷰 이미지 Drive 업로드 (새 4단계 구조)
 //
 // 폴더 구조: AI_REVIEW_FOLDER → {시트제목} → {탭명} → [리뷰] → [옵션(선택)]
@@ -1697,25 +1747,44 @@ router.post('/review-upload', imageApiLimiter, async (req, res, next) => {
       }
 
       // A-2: 업로드된 모든 파일을 review_submissions 원장에 적재 (file_id 업서트)
+      //   ★ file_hash 는 여기서 함께 넣는다 — base64 를 이미 쥔 시점이라 계산 비용이 0이고,
+      //     나중에 UPDATE 로 채우면 그 사이 올라온 다른 파일이 중복 대조 대상을 놓친다.
+      const _inspect = require('../services/reviewInspect.service');
       for (const r of uploadResults) {
         if (!r.fileId) continue;
+        const _b64 = (files[r.index - 1] && files[r.index - 1].data) || '';
+        const _hash = _inspect.hashBase64(_b64);
         try {
           const fUrl = r.webViewLink || `https://drive.google.com/file/d/${r.fileId}/view`;
           await pool.query(
             `INSERT INTO review_submissions
                (sheet_id, tab_name, tab_gid, row_index, reviewer_name, review_index_id,
-                file_id, file_url, file_name, source, slot_key, uploaded_at)
-             VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,'upload',$10,NOW())
+                file_id, file_url, file_name, source, slot_key, file_hash, uploaded_at)
+             VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,'upload',$10,$11,NOW())
              ON CONFLICT (file_id) DO UPDATE
                SET file_url = EXCLUDED.file_url, file_name = EXCLUDED.file_name,
                    row_index = EXCLUDED.row_index, review_index_id = EXCLUDED.review_index_id,
-                   reviewer_name = EXCLUDED.reviewer_name, slot_key = EXCLUDED.slot_key`,
+                   reviewer_name = EXCLUDED.reviewer_name, slot_key = EXCLUDED.slot_key,
+                   file_hash = COALESCE(EXCLUDED.file_hash, review_submissions.file_hash)`,
             [sheetId, tabName, gid || null, rowIdx, reviewerName || null, reviewIndexId,
-             r.fileId, fUrl, r.fileName, slot]
+             r.fileId, fUrl, r.fileName, slot, _hash]
           );
         } catch (subErr) {
           logger.warn(`[review-upload] 제출원장 기록 실패 (무시): ${subErr.message}`);
         }
+
+        // ── 2차 검수(M1): 상품명·같은 파일·본문 겹침 대조 후 review_inspections 에 기록 ──
+        //   ★ AI 콜 순증 0 — 바로 위 verifyCapture 가 같은 이미지로 classify 를 이미 돌려
+        //     캐시를 데워 놨으므로 여기서는 캐시 히트다(첨부 시점 1차 필터가 돌았다면 그때부터).
+        //   ★ 절대 throw 하지 않는다(서비스가 내부에서 삼킨다) — 업로드는 이미 끝났고,
+        //     검수 실패가 "파일은 올라갔는데 제출 실패"로 보이면 안 된다.
+        try {
+          await _inspect.inspectSubmission({
+            base64: _b64, mimeType: (files[r.index - 1] && files[r.index - 1].mimeType) || 'image/jpeg',
+            fileId: r.fileId, fileHash: _hash,
+            sheetId, tabName, rowIndex: rowIdx, reviewerName, slotKey: slot,
+          });
+        } catch (_) { /* 위 서비스가 이미 삼키지만 이중 방어 */ }
       }
     }
 

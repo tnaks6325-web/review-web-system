@@ -1,0 +1,263 @@
+/**
+ * reviewInspect.test.js — 리뷰 자동검수(M0 1차 필터 + M1 2차 검수) 회귀가드.
+ * 실행: node tests/reviewInspect.test.js
+ *
+ * 왜 이렇게 짜는가
+ *  - 이 기능은 **리뷰어의 제출을 막을 수 있는** 유일한 검수다. 정책이 한 칸만 느슨해지면
+ *    AI 오판으로 정당한 제출이 차단되고, 그건 "참여 소각"이라 불량 1건을 놓치는 것과
+ *    비교가 안 되는 사고다 → 차단 조건·fail-open·우회로를 **순수함수 실행으로** 고정한다.
+ *  - grep 가드는 "문자열이 있다"만 본다. 정책 분기는 실제로 호출해서 값을 본다.
+ */
+const assert = require('assert');
+const fs = require('fs');
+const path = require('path');
+const readF = (p) => fs.readFileSync(path.join(__dirname, '..', '..', 'frontend', p), 'utf8');
+const readS = (p) => fs.readFileSync(path.join(__dirname, '..', 'src', p), 'utf8');
+
+let n = 0;
+const ok = (name, cond) => { assert(cond, name); n++; console.log('  ✓ ' + name); };
+
+process.env.DATABASE_URL = process.env.DATABASE_URL || 'postgres://u:p@127.0.0.1:1/none';
+const RI = require('../src/services/reviewInspect.service');
+
+/* ═══ ① 1차 필터 정책 — 차단은 한 갈래뿐 ═══════════════════════════ */
+console.log('\n▶ 1차 필터 정책');
+
+const cls = (o) => Object.assign({ kind: 'review', confidence: 0.95, channel: '' }, o);
+
+ok('리뷰 화면이면 통과', RI.precheckPolicy({ classified: cls({ channel: 'coupang' }) }).verdict === 'pass');
+
+ok('★ 리뷰 화면이 아니고 확신이 높으면 잠금 — 유일한 차단 조건',
+  RI.precheckPolicy({ classified: cls({ kind: 'other', confidence: 0.95 }) }).verdict === 'block');
+
+ok('★★ 확신이 낮으면 잠그지 않는다(모르면 통과)',
+  RI.precheckPolicy({ classified: cls({ kind: 'other', confidence: 0.85 }) }).verdict === 'skip');
+
+ok('★★ 채널 불일치는 경고까지만 — 절대 잠그지 않는다',
+  (() => {
+    const v = RI.precheckPolicy({ classified: cls({ channel: 'naver' }), expectedChannel: 'coupang' });
+    return v.verdict === 'warn' && v.blockable === false;
+  })());
+
+ok('채널 정보를 모르는 탭은 대조 자체를 생략',
+  RI.precheckPolicy({ classified: cls({ channel: 'naver' }), expectedChannel: null }).verdict === 'pass');
+
+ok('★★ 카카오메이커스 작업은 잠금 제외(경고까지만) — 별점 없는 피드형이 공존한다',
+  (() => {
+    const v = RI.precheckPolicy({ classified: cls({ kind: 'other', confidence: 0.99 }), expectedChannel: 'kakao' });
+    return v.verdict === 'warn' && v.blockable === false && v.code === 'not_review_exempt';
+  })());
+
+ok('★★ 판정 재료가 없으면 통과 — AI 장애가 제출을 막지 않는다(fail-open)',
+  RI.precheckPolicy({ classified: null }).verdict === 'skip'
+  && RI.precheckPolicy({ classified: undefined }).verdict === 'skip');
+
+ok('영수증을 리뷰 자리에 올린 건 기존 슬롯 검수 담당 — 여기서 중복 경고하지 않는다',
+  RI.precheckPolicy({ classified: cls({ kind: 'receipt', confidence: 0.99 }) }).verdict === 'skip');
+
+ok('1차는 리뷰 슬롯만 — 영수증 슬롯은 대상 아님',
+  RI.precheckPolicy({ classified: cls({ kind: 'other', confidence: 0.99 }), slotKey: 'receipt' }).verdict === 'skip');
+
+ok('★ 잠금 제외 채널 목록에 kakao 가 기본 포함',
+  RI.BLOCK_EXEMPT_CHANNELS.includes('kakao'));
+
+/* ═══ ② 채널 판정 ═══════════════════════════════════════════════ */
+console.log('\n▶ 채널 판정');
+ok('버튼값·커스텀 문자열 모두 판정',
+  RI.expectedChannelKey('쿠팡') === 'coupang'
+  && RI.expectedChannelKey('네이버') === 'naver'
+  && RI.expectedChannelKey('올리브영') === 'oliveyoung'
+  && RI.expectedChannelKey('카카오메이커스') === 'kakao');
+ok('★ 카카오는 "메이커스"를 요구 — 톡스토어·선물하기는 화면이 다르다',
+  RI.expectedChannelKey('카카오톡스토어') === null && RI.expectedChannelKey('카카오선물하기') === null);
+ok('모르는 채널·빈 값은 null(대조 생략)',
+  RI.expectedChannelKey('11번가') === null && RI.expectedChannelKey('') === null
+  && RI.expectedChannelKey(null) === null);
+
+/* ═══ ③ 상품명 대조 ═════════════════════════════════════════════ */
+console.log('\n▶ 상품명 대조');
+ok('정확히 같으면 통과', RI.matchProductName('히말라야 핑크솔트 400g', ['히말라야 핑크솔트 400g']).verdict === 'pass');
+ok('★ 부분 포함도 일치 — 쇼핑몰은 상품명을 줄여 쓴다',
+  RI.matchProductName('히말라야 핑크솔트', ['히말라야 핑크솔트 400g 대용량']).verdict === 'pass');
+ok('공백·괄호·특수문자 차이는 무시',
+  RI.matchProductName('[NEW] 블랑카우 모이스처 리페어', ['블랑카우 모이스처리페어']).verdict === 'pass');
+ok('다른 상품이면 경고(차단 아님)',
+  RI.matchProductName('□□보조배터리 10000mAh', ['히말라야 핑크솔트']).verdict === 'warn');
+ok('★★ 기대 상품명이 없으면 대조 안 함 — 판정 불가를 불량으로 취급하지 않는다',
+  RI.matchProductName('아무 상품', []).verdict === 'skip'
+  && RI.matchProductName('아무 상품', null).verdict === 'skip');
+ok('OCR 이 비면 대조 안 함', RI.matchProductName('', ['히말라야 핑크솔트']).verdict === 'skip');
+
+/* ═══ ④ 종합 상태 산출 ═══════════════════════════════════════════ */
+console.log('\n▶ 종합 상태');
+ok('하나라도 fail 이면 fail',
+  RI.computeStatus({ a: { verdict: 'pass' }, b: { verdict: 'fail' }, c: { verdict: 'warn' } }) === 'fail');
+ok('fail 없이 warn 이 있으면 suspect',
+  RI.computeStatus({ a: { verdict: 'pass' }, b: { verdict: 'warn' } }) === 'suspect');
+ok('전부 통과면 pass', RI.computeStatus({ a: { verdict: 'pass' }, b: { verdict: 'skip' } }) === 'pass');
+ok('전부 판정 불가면 unverifiable',
+  RI.computeStatus({ a: { verdict: 'skip' }, b: { verdict: 'skip' } }) === 'unverifiable');
+
+/* ═══ ⑤ 파일 지문 ═══════════════════════════════════════════════ */
+console.log('\n▶ 파일 지문');
+ok('같은 내용은 같은 지문', RI.hashBase64('QUJD') === RI.hashBase64('QUJD'));
+ok('다른 내용은 다른 지문', RI.hashBase64('QUJD') !== RI.hashBase64('WFla'));
+ok('data: 접두가 붙어도 같은 지문(업로드 경로마다 형태가 다르다)',
+  RI.hashBase64('data:image/png;base64,QUJD') === RI.hashBase64('QUJD'));
+ok('빈 값은 null', RI.hashBase64('') === null && RI.hashBase64(null) === null);
+
+/* ═══ ⑥ 중복·유사도 (스텁 pool 로 실제 실행) ════════════════════ */
+console.log('\n▶ 중복·유사도');
+let _sql = [];
+RI.__setPoolForTest({ query: async (sql, params) => { _sql.push({ sql: String(sql), params }); return { rows: _sql._next || [] }; } });
+
+(async () => {
+  // 중복 — 다른 사람의 같은 파일
+  _sql = []; _sql._next = [{ file_id: 'F9', sheet_id: 'S', tab_name: '△△탭', row_index: 8, reviewer_name: '박제출' }];
+  let d = await RI.findDuplicate({ fileHash: 'h1', fileId: 'F1', sheetId: 'S', tabName: 'T', rowIndex: 12, reviewerName: '김리뷰' });
+  ok('같은 지문이 다른 자리에 있으면 불량', d.verdict === 'fail' && d.matchReviewer === '박제출');
+
+  ok('★★ 같은 (탭·행·리뷰어) 재업로드는 중복에서 제외 — 정상 재제출을 불량으로 만들지 않는다',
+    /NOT \(sheet_id = \$3 AND tab_name = \$4/.test(_sql[0].sql) && /reviewer_name, ''\) = COALESCE\(\$6/.test(_sql[0].sql));
+
+  _sql = []; _sql._next = [];
+  d = await RI.findDuplicate({ fileHash: 'h1', fileId: 'F1', sheetId: 'S', tabName: 'T' });
+  ok('겹치는 게 없으면 통과', d.verdict === 'pass');
+
+  d = await RI.findDuplicate({ fileHash: null });
+  ok('지문이 없으면 대조 안 함', d.verdict === 'skip');
+
+  // 유사도
+  const longText = '아침마다 얼굴에 베개 자국이 오래 남아서 고민하다가 구매했어요. 확실히 바르고 잔 다음 날 피부 탄력이 달라요.';
+  _sql = []; _sql._next = [{ file_id: 'F8', reviewer_name: '정리뷰', row_index: 19, score: 0.93 }];
+  let s = await RI.findSimilarText({ text: longText, fileId: 'F1', sheetId: 'S', tabName: 'T' });
+  ok('임계값 이상이면 의심(경고) — 차단 아님', s.verdict === 'warn' && s.score === 0.93);
+
+  _sql = []; _sql._next = [{ file_id: 'F8', reviewer_name: 'x', row_index: 1, score: 0.31 }];
+  s = await RI.findSimilarText({ text: longText, fileId: 'F1', sheetId: 'S', tabName: 'T' });
+  ok('임계값 미만이면 통과', s.verdict === 'pass');
+
+  s = await RI.findSimilarText({ text: '맛있어요 재구매', fileId: 'F1', sheetId: 'S', tabName: 'T' });
+  ok('★★ 짧은 글은 비교하지 않는다 — 관용구는 누구나 비슷해 오탐이 된다',
+    s.verdict === 'skip' && s.reason === 'too_short');
+
+  // fail-soft: 쿼리가 터져도 통과
+  RI.__setPoolForTest({ query: async () => { throw new Error('boom'); } });
+  ok('★★ 대조 쿼리 실패는 통과 처리(fail-soft)',
+    (await RI.findDuplicate({ fileHash: 'h' })).verdict === 'skip'
+    && (await RI.findSimilarText({ text: longText })).verdict === 'skip');
+
+  ok('★★ 검수 전체가 터져도 throw 하지 않는다 — 업로드 후처리라 예외가 오르면 제출이 실패로 보인다',
+    (await RI.inspectSubmission({ fileId: 'F', sheetId: 'S', tabName: 'T' })) === null
+    || true);
+  RI.__setPoolForTest(null);
+
+  /* ═══ ⑦ 배선 — 서버 ═══════════════════════════════════════════ */
+  console.log('\n▶ 서버 배선');
+  const diag = readS('routes/diag.routes.js');
+  ok('1차 필터 엔드포인트가 리미터 뒤에 등록',
+    /router\.post\('\/review-precheck', imageApiLimiter/.test(diag));
+  ok('★ 1차 필터는 Drive·DB 쓰기 0 — 순수 판정만',
+    !/review-precheck[\s\S]{0,2200}uploadFileBase64/.test(diag)
+    && !/review-precheck[\s\S]{0,2200}INSERT INTO/.test(diag));
+  ok('★★ 판정 실패도 200 통과 응답 — 1차 필터 장애가 첨부를 막지 않는다',
+    /\[review-precheck\][\s\S]{0,220}verdict: 'skip'/.test(diag));
+  ok('업로드 시 파일 지문을 원장에 함께 기록(나중 UPDATE 로 미루지 않는다)',
+    /file_hash\)/.test(diag) && /hashBase64\(_b64\)/.test(diag));
+  ok('업로드 후 2차 검수 호출', /_inspect\.inspectSubmission\(\{/.test(diag));
+
+  const gem = readS('services/gemini.service.js');
+  ok('★★ 기존 슬롯 검수 계약 불변 — kind/confidence/businessNo/amount 그대로 반환',
+    /kind,\s*\n\s*confidence: Math\.max/.test(gem) && /businessNo: String\(p\.businessNo/.test(gem)
+    && /amount: Math\.max\(0, parseInt/.test(gem));
+  ok('★ kind 판정 기준 3줄이 그대로다(이 문구를 바꾸면 오래 검증된 판정이 달라진다)',
+    /- "review": 쇼핑몰 리뷰 화면\. 별점\(★\), 리뷰 본문, 상품평 목록, "리뷰 작성 완료" 같은 UI가 보임\./.test(gem)
+    && /- "other": 둘 다 아님\(상품 사진, 주문내역, 빈 화면 등\)\./.test(gem));
+  ok('★ 캐시 접두를 올려 옛 캐시(새 필드 없음)가 히트하지 않게 했다',
+    /_getCacheKey\('classify2:'/.test(gem) && !/_getCacheKey\('classify:'/.test(gem));
+  ok('채널·본문·상품명·근거 필드 추가', /channel: CH\.includes/.test(gem)
+    && /reviewText: String/.test(gem) && /productName: String/.test(gem) && /signals: Array\.isArray/.test(gem));
+
+  ok('마이그레이션 081 존재',
+    fs.existsSync(path.join(__dirname, '..', 'migrations', '081_review_inspections.sql')));
+  const mig = fs.readFileSync(path.join(__dirname, '..', 'migrations', '081_review_inspections.sql'), 'utf8');
+  ok('★ 비파괴 — 컬럼 추가·신규 테이블만(DROP·삭제 없음)',
+    /ADD COLUMN IF NOT EXISTS file_hash/.test(mig)
+    && /CREATE TABLE IF NOT EXISTS review_inspections/.test(mig)
+    && !/DROP TABLE/i.test(mig) && !/DELETE FROM/i.test(mig));
+  ok('파일 단위 업서트 유니크 + 유사도용 trgm 인덱스',
+    /uq_review_inspect_file/.test(mig) && /gin_trgm_ops/.test(mig));
+
+  /* ═══ ⑧ 배선 — 프론트 ═════════════════════════════════════════ */
+  console.log('\n▶ 프론트 배선');
+  const app = readF('js/search-app.js');
+  ok('★ 첨부 경로 3곳 모두 1차 필터를 탄다(한 곳만 걸면 대부분 탭이 필터 밖에 남는다)',
+    /_preCheckFiles\('slot:' \+ slotKey/.test(app)     // 캡처 슬롯 모드
+    && /_preCheckFiles\('idx:' \+ idx/.test(app)       // 다건 모드
+    && /_preCheckFiles\('single'/.test(app));          // 단일 행 모드
+  ok('파일을 지워도 판정을 다시 한다(지운 뒤에도 옛 경고가 남지 않게)',
+    /function removeFile\(i\) \{[\s\S]{0,220}_preCheckFiles\('single'/.test(app)
+    && /function _csRemoveFile[\s\S]{0,260}_preCheckFiles\('slot:'/.test(app));
+  ok('★★ 제출 게이트 2곳 — 잠긴 첨부가 남아 있으면 제출하지 않는다',
+    (app.match(/if \(_preHasBlock\(\)\) \{/g) || []).length >= 2);
+  ok('★★ 우회로가 살아 있다 — 2회 잠기면 "제가 올린 게 맞습니다"',
+    /_PRE_BLOCK_LIMIT = 2/.test(app) && /제가 올린 게 맞습니다/.test(app)
+    && /function _preOverride/.test(app) && /s\.blocked && !s\.overridden/.test(app));
+  ok('★ 미리보기(관리자)에서는 1차 필터를 돌리지 않는다',
+    /if \(_PREVIEW_MODE \|\| !Array\.isArray\(fileObjs\)/.test(app));
+  ok('★ 네트워크 실패는 무판정 통과(null 반환)',
+    /catch \(_\) \{ return null; \}\s*\/\/ 네트워크 실패/.test(app));
+  ok('★ 안내문 클릭이 파일 선택창을 열지 않는다(우회 체크를 못 누르는 사고 방지)',
+    /addEventListener\('click', \(e\) => e\.stopPropagation\(\)\)/.test(app));
+  ok('제출 흐름 초기화 시 1차 필터 상태도 비운다',
+    /Object\.keys\(_preState\)\.forEach\(k => delete _preState\[k\]\)/.test(app));
+
+  /* ═══ ⑨ 진짜 PG 검증 (PGTEST_URL 있을 때만) ══════════════════════
+     ★★ 스텁 pool 은 SQL 을 해석하지 않는다 — 유사도 판정식은 **실제로 돌려봐야** 안다.
+        개발 중 실측으로 잡은 것: `similarity` 단독은 가장 흔한 복붙 수법
+        (원문 + 문장 한두 개 추가)을 0.859 / 0.718 로 놓친다. word_similarity 를 합쳐야
+        잡히고, 대신 짧은 문구가 긴 글에 포함될 때 오탐이 나므로 길이비 가드가 필요하다.
+        이 조합이 깨지면 기능이 **조용히 무력화**되므로 진짜 PG 로 고정한다.
+        (레포 선례: jsonbCellsIndex.test.js — cells->>$n::int 무음 실패) */
+  if (process.env.PGTEST_URL) {
+    const { Pool } = require('pg');
+    const pg = new Pool({ connectionString: process.env.PGTEST_URL });
+    const BASE = '아침마다 얼굴에 베개 자국이 오래 남아서 고민하다가 구매했어요 확실히 바르고 잔 다음 날 피부 탄력이 달라요';
+    const GENERIC = '배송도 빠르고 상품 상태도 아주 좋았어요 재구매 의사 있습니다';
+    try {
+      console.log('\n▶ 진짜 PG 검증 (PGTEST_URL)');
+      await pg.query(`CREATE EXTENSION IF NOT EXISTS pg_trgm`);
+      await pg.query(`CREATE TABLE IF NOT EXISTS review_inspections (
+        file_id TEXT PRIMARY KEY, sheet_id TEXT, tab_name TEXT, row_index INT,
+        reviewer_name TEXT, status TEXT, ocr_text TEXT)`);
+      await pg.query(`DELETE FROM review_inspections WHERE sheet_id = '__t__'`);
+      await pg.query(`INSERT INTO review_inspections (file_id,sheet_id,tab_name,reviewer_name,status,ocr_text)
+                      VALUES ('__a__','__t__','T','정리뷰','pass',$1)`, [BASE]);
+      await pg.query(`INSERT INTO review_inspections (file_id,sheet_id,tab_name,reviewer_name,status,ocr_text)
+                      VALUES ('__b__','__t__','T','한장문','pass',$1)`,
+        ['아침마다 얼굴에 베개 자국이 오래 남아서 고민하다가 구매했는데 ' + GENERIC + ' 피부 탄력이 확실히 달라졌고 향도 은은해서 마음에 쏙 들어요']);
+      RI.__setPoolForTest(pg);
+      const run = (t) => RI.findSimilarText({ text: t, fileId: '__x__', sheetId: '__t__', tabName: 'T' });
+
+      ok('[PG] 완전 동일 → 의심', (await run(BASE)).verdict === 'warn');
+      ok('★★ [PG] 복붙 + 한 문장 추가를 잡는다 (similarity 단독이면 0.859 로 놓친다)',
+        (await run(BASE + ' 재구매 의사 있어요')).verdict === 'warn');
+      ok('★★ [PG] 복붙 + 두 문장 추가도 잡는다 (similarity 단독이면 0.718)',
+        (await run(BASE + ' 재구매 의사 있어요 배송도 빨라서 좋았습니다')).verdict === 'warn');
+      ok('★★ [PG] 흔한 문구가 긴 글에 포함된 것은 잡지 않는다(길이비 가드) — 오탐 방지',
+        (await run(GENERIC)).verdict === 'pass');
+      ok('[PG] 전혀 다른 글은 통과',
+        (await run('배송이 빠르고 포장이 꼼꼼했으며 가격도 합리적이라 아주 만족합니다 다음에도 이용할게요')).verdict === 'pass');
+
+      await pg.query(`DELETE FROM review_inspections WHERE sheet_id = '__t__'`);
+    } finally {
+      RI.__setPoolForTest(null);
+      await pg.end();
+    }
+  } else {
+    console.log('\n▶ 진짜 PG 검증 — PGTEST_URL 미설정으로 건너뜀');
+    console.log('   ⚠ 유사도 판정식은 실제 PG 로만 검증된다: PGTEST_URL=postgres://... node tests/reviewInspect.test.js');
+  }
+
+  console.log(`\n✅ reviewInspect: ${n}개 통과`);
+})().catch(e => { console.error('\n❌ 실패:', e.message); process.exit(1); });
