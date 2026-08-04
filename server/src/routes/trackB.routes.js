@@ -715,8 +715,16 @@ router.get('/campaigns/:id/applications', authMiddleware, internalMiddleware, (r
    불러도 401 이 아니라 **공개 화이트리스트 뷰**가 온다(토큰이 무시되므로). 그러면 수정 모달이 조용히
    빈 칸으로 열려 "저장했더니 값이 날아간" 것처럼 보인다. 여기서는 authMiddleware 를 태워 `req.admin` 을
    세운 뒤 같은 핸들러에 위임하므로 내부인은 **전체 행**을 받는다. */
-router.get('/campaigns/:id', authMiddleware, internalMiddleware, (req, res, next) =>
-  _campHandlers.detail(req, res, next));
+/* ★★ 편집 권한자에게는 **전체 편집 페이로드**(전체 행 + 원본 옵션 + 리뷰비 구간)를 준다.
+   원본 핸들러는 JWT role 이 admin/master 일 때만 전체 행을 주는데, 편집 허용명단에는
+   `staff`(AE)도 들어갈 수 있다 — 그 사람은 **수정은 되면서** 공개 화이트리스트 뷰를 받아
+   폼이 work_detail·연결탭·정원·옵션을 빈 기본값으로 채우고, 저장하면 기존 설정이 조용히
+   지워진다(0·빈값·options:[]). 그래서 canEdit 이면 신뢰 플래그를 세워 위임한다.
+   ★ 판정 실패는 공개 뷰(fail-closed) — 모르면 더 주지 않는다. 편집은 서버 게이트가 막는다. */
+router.get('/campaigns/:id', authMiddleware, internalMiddleware, async (req, res, next) => {
+  try { if (await canEdit(req.admin)) req._trustedAdminView = true; } catch (_) { /* 공개 뷰로 수렴 */ }
+  return _campHandlers.detail(req, res, next);
+});
 router.post('/campaigns/create', authMiddleware, internalMiddleware, editorOnlyMiddleware, (req, res, next) =>
   _campHandlers.create(req, res, next));
 router.put('/campaigns/:id', authMiddleware, internalMiddleware, editorOnlyMiddleware, (req, res, next) =>

@@ -235,5 +235,72 @@ t('리뷰어 화면 미리보기는 401/403 일 때만 Track B 로 폴백', () =
   assert.ok(/_pvGet\('\/api\/campaign\/admin\/'/.test(CAMP), '관리자 경로가 먼저여야 한다(기존 동작 불변)');
 });
 
-console.log(`\n✅ workdeskOrderActions: ${pass}개 통과\n`);
-process.exit(0);   // trackB.routes 를 require 하면 DB 풀 핸들이 열려 프로세스가 안 끝난다(레포 관용구)
+/* ══════════════════════════════════════════════════════════
+   6. ★★ 편집 권한자 = 전체 편집 페이로드 (Codex 리뷰 P1)
+
+   편집 허용명단에는 `staff`(AE)도 들어갈 수 있다. 그 사람은 공고를 **수정할 수 있는데**
+   JWT role 이 admin/master 가 아니라 원본 핸들러의 `_isAdminReq` 에서 공개 화이트리스트 뷰를
+   받았다 → 수정 모달이 work_detail·연결탭·정원·옵션을 **빈 기본값으로 초기화**하고,
+   그대로 저장하면 기존 설정이 조용히 0·빈값·`options:[]` 로 지워진다.
+   grep 으로는 못 잡는다 → **스텁 pool 로 실제 핸들러를 호출**해 응답 모양을 본다.
+   ══════════════════════════════════════════════════════════ */
+const ROW = {
+  id: 'camp-1', title: '탈취제', status: 'active', participation_mode: true,
+  work_detail: { productLines: '탈취제 - 9,900원' }, linked_sheet_id: 'SHEET1',
+  linked_tab_name: '0803 탈취제', daily_limit: 40, recruit_total: 800,
+  chat_url: 'https://open.kakao.com/o/x', notes: '내부 메모',
+};
+const pool = require('../src/db/pool');
+pool.query = async (sql) => (/FROM recruit_campaigns WHERE id/.test(sql) ? { rows: [ROW] } : { rows: [] });
+const campRouter = require('../src/routes/campaign.routes');
+const detailLayer = campRouter.stack.find(l => l.route && l.route.path === '/:id' && l.route.methods.get);
+assert.ok(detailLayer, 'campaign.routes GET /:id 없음');
+const detail = detailLayer.route.stack[detailLayer.route.stack.length - 1].handle;
+const callDetail = (req) => new Promise((resolve) => {
+  const res = { statusCode: 200, status(c) { this.statusCode = c; return this; },
+                json(b) { resolve({ statusCode: this.statusCode, body: b }); return this; } };
+  Promise.resolve(detail(Object.assign({ params: { id: 'camp-1' }, headers: {}, query: {} }, req), res,
+    (e) => resolve({ next: true, e }))).catch((e) => resolve({ threw: true, e }));
+});
+
+(async () => {
+  console.log('\n6) 편집 권한자에게 전체 편집 페이로드');
+
+  const trusted = await callDetail({ _trustedAdminView: true });
+  t('\u2605\u2605 신뢰 플래그가 있으면 staff 편집자도 전체 행 + 옵션 + 리뷰비 구간을 받는다', () => {
+    assert.ok(trusted.body && trusted.body.ok, '응답 실패: ' + JSON.stringify(trusted).slice(0, 200));
+    assert.ok(trusted.body.data.work_detail, 'work_detail 이 빠졌다 — 저장 시 작업내용이 지워진다');
+    assert.strictEqual(trusted.body.data.linked_tab_name, '0803 탈취제', '연결 탭이 빠졌다');
+    assert.strictEqual(trusted.body.data.daily_limit, 40, '정원이 빠졌다 — 저장 시 0 으로 덮인다');
+    assert.ok('options' in trusted.body && 'feeSchedules' in trusted.body, '옵션·리뷰비 구간 프리필이 없다');
+  });
+
+  const plain = await callDetail({});
+  t('플래그가 없으면 종전대로 공개 화이트리스트 뷰(권한 상승 아님)', () => {
+    assert.ok(plain.body && plain.body.ok);
+    assert.ok(!('work_detail' in plain.body.data), '무권한에 work_detail 이 샜다');
+    assert.ok(!('chat_url' in plain.body.data) && !('notes' in plain.body.data), '무권한에 내부 필드가 샜다');
+  });
+
+  Object.prototype._trustedAdminView = true;                 // 프로토타입 오염 시나리오
+  let polluted; try { polluted = await callDetail({}); } finally { delete Object.prototype._trustedAdminView; }
+  t('\u2605 플래그는 요청으로 만들 수 없다 — 오염 방어(자기 프로퍼티만 인정)', () => {
+    assert.ok(polluted.body && polluted.body.ok);
+    assert.ok(!('work_detail' in polluted.body.data),
+      'Object.prototype 오염만으로 전체 행이 나갔다 — hasOwnProperty 검사가 없다');
+  });
+
+  t('Track B 라우트가 canEdit 일 때만 플래그를 세운다(세우는 곳은 한 곳뿐)', () => {
+    const dir = path.join(__dirname, '..', 'src', 'routes');
+    const tb = fs.readFileSync(path.join(dir, 'trackB.routes.js'), 'utf8');
+    assert.ok(/if \(await canEdit\(req\.admin\)\) req\._trustedAdminView = true;/.test(tb));
+    assert.ok(/catch \(_\) \{ \/\* 공개 뷰로 수렴 \*\/ \}/.test(tb), '판정 실패가 fail-closed 가 아니다');
+    const n = (fs.readdirSync(dir).filter(f => f.endsWith('.js'))
+      .map(f => fs.readFileSync(path.join(dir, f), 'utf8')).join('\n')
+      .match(/_trustedAdminView\s*=\s*true/g) || []).length;
+    assert.strictEqual(n, 1, '_trustedAdminView 를 세우는 곳이 늘었다: ' + n);
+  });
+
+  console.log('\n\u2705 workdeskOrderActions: ' + pass + '개 통과\n');
+  process.exit(0);   // trackB/campaign routes 를 require 하면 DB 풀 핸들이 열려 프로세스가 안 끝난다
+})();
