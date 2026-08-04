@@ -141,7 +141,7 @@ async function run() {
   ok('★ FHD/QHD 토글은 광고주에게 안 그린다', /\$\{isAdv\?'':`<div class="vwsw"/.test(src));
 
   // ── 작업 선택 = 좌측 세로 목록(업체관리 차용) ──
-  ok('광고주 작업대 = awside 사이드바 + advwrap 그리드(가로 탭바 없음)',
+  ok('광고주 작업보드 = awside 사이드바 + advwrap 그리드(가로 탭바 없음)',
     src.includes('class="wrap advwrap') && src.includes('id="awside"') );
   ok('advwrap 3열 그리드(사이드바 224px + 본문 + 레일)', /\.wrap\.advwrap\{grid-template-columns:224px minmax\(0,1fr\) 300px\}/.test(css));
   ok('_renderTabList 광고주 분기 → _renderAdvSidebar(세그먼트/탭바 미참조) + 첫 화면 갱신',

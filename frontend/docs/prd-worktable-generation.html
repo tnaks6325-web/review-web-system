@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>작업표 생성 — 통합작업대 업체별 작업생성 PRD·구현방식 시안</title>
+<title>작업표 생성 — 리뷰웹시스템[3버전] 업체별 작업생성 PRD·구현방식 시안</title>
 <style>
   *,*::before,*::after{box-sizing:border-box}
 
@@ -164,15 +164,15 @@
   <!-- ══════════ 헤더 ══════════ -->
   <header class="head">
     <p class="eyebrow">PRD · Implementation — v1.1 (방향 확정 · M1 착수)</p>
-    <h1>작업표 생성<br>통합작업대에서 업체별 작업을 바로 만든다</h1>
+    <h1>작업표 생성<br>리뷰웹시스템[3버전]에서 업체별 작업을 바로 만든다</h1>
     <p class="lede">
       지금은 100건짜리 작업을 시작하려면 <b>1번부터 100번까지 행이 미리 준비된 구글시트</b>를 만들어
       작업오더에 첨부해야 합니다. 이 문서는 그 시트 준비를 없애고,
-      <b>통합작업대가 100건짜리 작업표를 자동으로 만들어 주는 방식</b>의 기획(PRD)과 구현 방법을 담은 시안입니다.
+      <b>리뷰웹시스템[3버전]이 100건짜리 작업표를 자동으로 만들어 주는 방식</b>의 기획(PRD)과 구현 방법을 담은 시안입니다.
       비개발자도 읽을 수 있게 썼고, 개발 참고용 각주는 회색 상자로 분리했습니다.
     </p>
     <div class="chips">
-      <span class="chip a">통합작업대 (workdesk)</span>
+      <span class="chip a">리뷰웹시스템[3버전] (workdesk)</span>
       <span class="chip">작업오더 연동</span>
       <span class="chip">시트 의존 축소</span>
       <span class="chip">Track B 확장</span>
@@ -211,7 +211,7 @@
   <section>
     <div class="shead"><span class="snum">02</span><h2>무엇으로 바꾸나 — 한 문장 요약</h2></div>
     <p class="sdesc">
-      <b>"100건 작업이면, 통합작업대가 100건짜리 작업표를 미리 만들어 준다."</b>
+      <b>"100건 작업이면, 리뷰웹시스템[3버전]이 100건짜리 작업표를 미리 만들어 준다."</b>
       작업오더에 적힌 모집인원·일건수·옵션만으로 표의 뼈대가 자동으로 완성되고,
       담당자는 미리보기에서 확인·조정만 하면 됩니다.
     </p>
@@ -227,7 +227,7 @@
       </div>
       <div class="callout">
         <div class="tt">핵심 원칙 — 새로 짓지 않고, 이미 있는 것을 잇는다</div>
-        <p>통합작업대에는 이미 <b>작업별 명단 표(참여자 원장)</b>, <b>발주 기준 빈 슬롯 생성 기능</b>,
+        <p>리뷰웹시스템[3버전]에는 이미 <b>작업별 명단 표(참여자 원장)</b>, <b>발주 기준 빈 슬롯 생성 기능</b>,
         <b>행별 메모·커스텀 열</b>, <b>편집 기록 원장</b>이 돌아가고 있습니다.
         작업표 생성은 이 부품들을 "작업 시작 시점"으로 앞당겨 꿰는 일이지, 별도 시스템을 새로 만드는 일이 아닙니다.</p>
       </div>
@@ -350,11 +350,11 @@
   <!-- ══════════ 05 화면 시안 ══════════ -->
   <section>
     <div class="shead"><span class="snum">05</span><h2>화면 시안 (와이어프레임)</h2></div>
-    <p class="sdesc">통합작업대의 기존 화면 구조(작업오더 탭 · 작업대 그리드)에 그대로 얹습니다. 새 화면은 "생성 미리보기" 하나뿐입니다.</p>
+    <p class="sdesc">리뷰웹시스템[3버전]의 기존 화면 구조(작업오더 탭 · 작업보드 그리드)에 그대로 얹습니다. 새 화면은 "생성 미리보기" 하나뿐입니다.</p>
 
     <!-- ① 진입 -->
     <div class="wf">
-      <div class="wf-bar"><span class="dots"><i></i><i></i><i></i></span> 통합작업대 › 작업오더 탭 — 오더 펼침행 (진입 지점)</div>
+      <div class="wf-bar"><span class="dots"><i></i><i></i><i></i></span> 리뷰웹시스템[3버전] › 작업오더 탭 — 오더 펼침행 (진입 지점)</div>
       <div class="wf-body">
         <div style="border:1px solid var(--line); border-radius:10px; padding:12px 14px; background:var(--paper)">
           <div style="display:flex; justify-content:space-between; align-items:center; gap:10px; flex-wrap:wrap">
@@ -423,7 +423,7 @@
 
     <!-- ③ 생성 결과 그리드 -->
     <div class="wf">
-      <div class="wf-bar"><span class="dots"><i></i><i></i><i></i></span> 생성 결과 — 통합작업대 작업 그리드 (발췌)</div>
+      <div class="wf-bar"><span class="dots"><i></i><i></i><i></i></span> 생성 결과 — 리뷰웹시스템[3버전] 작업 그리드 (발췌)</div>
       <div class="wf-body">
         <div class="mini">
           <table>
@@ -438,7 +438,7 @@
           </table>
         </div>
         <p class="wf-note">· 색이 있는 열 머리 = 생성 시 미리 채워진 열(번호·날짜·옵션·작업지시). 흰 열 = 리뷰어 제출이 실시간으로 채우는 열.<br>
-        · 2행은 제출이 이미 들어온 모습 — 지금의 작업대 그리드·행 메모·셀 색·편집 기능이 그대로 적용됩니다.</p>
+        · 2행은 제출이 이미 들어온 모습 — 지금의 작업보드 그리드·행 메모·셀 색·편집 기능이 그대로 적용됩니다.</p>
       </div>
     </div>
   </section>
@@ -451,7 +451,7 @@
       한 번에 끊지 않고, 작업 단위로 안전하게 넘어가는 3개 모드를 둡니다.
     </p>
     <div class="tblwrap"><table class="tbl">
-      <tr><th>모드</th><th>작업표(작업대)</th><th>구글시트</th><th>언제 쓰나</th></tr>
+      <tr><th>모드</th><th>작업표(작업보드)</th><th>구글시트</th><th>언제 쓰나</th></tr>
       <tr>
         <td><b>A. 하이브리드</b><br><span style="font-size:12px">(출시 기본값)</span></td>
         <td>작업표가 먼저 생성됨 (화면·편집의 기준)</td>
@@ -468,7 +468,7 @@
         <td><b>C. 시트 없음</b></td>
         <td>작업표만 존재</td>
         <td>생성 안 함</td>
-        <td>최종 단계. 광고주 열람도 통합작업대 광고주 링크로 대체된 뒤.</td>
+        <td>최종 단계. 광고주 열람도 리뷰웹시스템[3버전] 광고주 링크로 대체된 뒤.</td>
       </tr>
     </table></div>
 
@@ -509,7 +509,7 @@
       <div class="m"><span class="no">M1</span><div class="bd">
         <div class="t">헤더 학습 리포트 (읽기 전용) &nbsp;<span class="wtdone">✓ 배포됨</span></div>
         <div class="d">미러된 전 탭의 열 구성을 집계해 고정/변칙 통계 화면을 만든다. 이 문서의 3계층 분류를 실데이터로 확정.
-          → 통합작업대 <b>[작업표]</b> 탭. 함께 <b>작업오더 시트 URL 필수 해제</b>(Q2 확정) 적용.</div>
+          → 리뷰웹시스템[3버전] <b>[작업표]</b> 탭. 함께 <b>작업오더 시트 URL 필수 해제</b>(Q2 확정) 적용.</div>
         <div class="done">남은 것: 관리자가 리포트를 보고 "우리 표준 코어 열"을 확정 → M2 기본 템플릿으로 고정</div>
       </div></div>
       <div class="m"><span class="no">M2</span><div class="bd">
@@ -592,7 +592,7 @@
       <tr>
         <td><b>Q4. 광고주 열람</b></td>
         <td><b>광고주 링크로 즉시 전환</b></td>
-        <td>하이브리드 기간에도 광고주에게 시트를 새로 공유하지 않는다. 업체별 고유 접속 링크(통합작업대)가 창구.</td>
+        <td>하이브리드 기간에도 광고주에게 시트를 새로 공유하지 않는다. 업체별 고유 접속 링크(리뷰웹시스템[3버전])가 창구.</td>
       </tr>
     </table></div>
 
@@ -621,7 +621,7 @@
       <div class="card">
         <h3>② <b>설정 › 작업표 표준 열</b> — 리포트 + 우리 표준 열 확정</h3>
         <ul class="list">
-          <li><b>어디에 있나</b>: 통합작업대 <b>설정</b> 탭, 그리고 관리자 대시보드 <b>설정</b> 탭 — <b>같은 화면 한 벌</b>이라 어느 쪽에서 바꿔도 결과가 같다. 관리자·마스터만 보인다.</li>
+          <li><b>어디에 있나</b>: 리뷰웹시스템[3버전] <b>설정</b> 탭, 그리고 관리자 대시보드 <b>설정</b> 탭 — <b>같은 화면 한 벌</b>이라 어느 쪽에서 바꿔도 결과가 같다. 관리자·마스터만 보인다.</li>
           <li><b>열 구성 = 한 블록</b>: 맨 위 <b>🌐 공통(모든 채널)</b> 행 + 채널 4행.
             작업표의 열 = <b>공통 + 그 채널 행</b>이라, 채널마다 같은 열을 반복해 넣지 않는다.
             <span class="why">담는 방법 3가지 — ① 직접 입력 + [＋] ② [▼] 지금 쓰는 열에서 고르기 ③ [공통을 기본 15열로] / [통계에서 불러오기]. ③은 공통만 바꾸고 채널 행은 그대로 둔다.</span></li>

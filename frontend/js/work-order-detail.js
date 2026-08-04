@@ -4,13 +4,13 @@
    원래 index-app.js(관리자 대시보드) 안에만 있던 작업오더 상세 본문 렌더와
    그 부속(URL 링크화 · 첨부 이미지 임베드 · 이미지 라이트박스 · 섹션 추출 ·
    작업담당 닉네임 매핑)을 **모듈로 뺐다**.
-   통합 작업대에서도 같은 상세를 펼쳐 보여야 하는데, 사본을 만들면
-   "관리자 화면엔 이미지가 뜨는데 작업대엔 URL만 뜬다" 같은 드리프트가 난다
+   리뷰웹시스템[3버전]에서도 같은 상세를 펼쳐 보여야 하는데, 사본을 만들면
+   "관리자 화면엔 이미지가 뜨는데 작업보드엔 URL만 뜬다" 같은 드리프트가 난다
    (모집공고 모달을 공유 모듈로 뺀 것과 같은 규율).
 
    ★ 함수명·본문은 한 글자도 바꾸지 않았다 — index-app.js 의 호출부 4곳과
      onclick/onerror 문자열(woImageModal · _woImgError), 회귀가드가 이름으로 묶여 있다.
-   ★ escHtml 은 호스트(index-app.js)에 있던 전역이라, 없는 화면(통합 작업대)을 위해
+   ★ escHtml 은 호스트(index-app.js)에 있던 전역이라, 없는 화면(리뷰웹시스템[3버전])을 위해
      모듈이 같은 구현을 자체 보유한다 — 있으면 호스트 것을 그대로 쓴다(동작 불변).
 
    사용: <script src="js/work-order-detail.js"></script> 를 index-app.js **앞에** 로드.
@@ -393,9 +393,9 @@ function _woNormName(v) { return String(v || "").replace(/\s+/g, "").replace(/[(
 /* ══════════════════════════════════════════════════════════════
    작업오더 상태 표기·전이 + 모집공고 프리필 (공유 단일 출처)
 
-   ★ 관리자 대시보드(index-app.js)와 통합 작업대(workdesk.html)가 **같은 표·같은
+   ★ 관리자 대시보드(index-app.js)와 리뷰웹시스템[3버전](workdesk.html)가 **같은 표·같은
      프리필 조립**을 쓴다. 사본을 두면 한 화면에서만 상태 이름이 바뀌거나
-     "관리자에서 만든 공고와 작업대에서 만든 공고의 프리필이 다르다"로 갈라진다
+     "관리자에서 만든 공고와 작업보드에서 만든 공고의 프리필이 다르다"로 갈라진다
      (작업오더 상세 렌더러를 이 모듈로 뺀 것과 같은 규율).
    ★ 상태 라벨은 **비개발자가 읽는 말**이다 — 영문 상태값(submitted/reviewing…)을
      화면에 노출하지 않는다. 전이도 서버 ORDER_TRANSITIONS 와 같은 표만 제시한다.
@@ -680,7 +680,7 @@ function _woCampaignPrefill(o) {
     _woCleanProductOption: _woCleanProductOption, _woGuideUrls: _woGuideUrls, _woNormName: _woNormName,
     _INFLOW_LABEL: _INFLOW_LABEL, WO_MANAGER_MAP: WO_MANAGER_MAP,
     WO_MANAGER_UNDECIDED: WO_MANAGER_UNDECIDED,
-    // ── 상태 표기·전이 + 발행 프리필(관리자 대시보드 ↔ 통합 작업대 공용) ──
+    // ── 상태 표기·전이 + 발행 프리필(관리자 대시보드 ↔ 리뷰웹시스템[3버전] 공용) ──
     WO_LABELS: WO_LABELS, WO_STATUS_HINTS: WO_STATUS_HINTS, WO_COLORS: WO_COLORS,
     WO_TRANSITIONS: WO_TRANSITIONS, WO_ACCEPT_ELIGIBLE: WO_ACCEPT_ELIGIBLE,
     _woAcceptable: _woAcceptable, _woAccepted: _woAccepted,

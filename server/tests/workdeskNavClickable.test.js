@@ -1,5 +1,5 @@
 /**
- * workdeskNavClickable.test.js — 통합 작업대 상단 메뉴가 "보이지 않는 상자"에 막히지 않게 고정.
+ * workdeskNavClickable.test.js — 리뷰웹시스템[3버전] 상단 메뉴가 "보이지 않는 상자"에 막히지 않게 고정.
  *
  * ★★ 실측 사고(이 파일이 생긴 이유):
  *   `#toast` 는 페이지에 **항상 떠 있는** `position:fixed; top:16px; left:50%` 요소인데,

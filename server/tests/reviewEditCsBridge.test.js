@@ -260,13 +260,13 @@ t('★ 대기 큐 — 세 모드 + 공용 카드 렌더러 + 문의 화면 높�
   assert.ok(/function _reFitCsHeight/.test(WD) && /calc\(100vh - 250px - \$\{h\}px\)/.test(WD));
   // ★ 공유 모듈(cs-inquiry.js)은 이 통합으로 바뀌지 않는다 — 관리자 대시보드엔 이 띠가 없다
   assert.ok(!/reQueueMount|requeue|_reFitCsHeight/.test(CSJ),
-    '공유 문의창구 모듈이 통합 작업대 전용 띠를 알고 있다(관리자 대시보드까지 같이 바뀐다)');
+    '공유 문의창구 모듈이 리뷰웹시스템[3버전] 전용 띠를 알고 있다(관리자 대시보드까지 같이 바뀐다)');
 });
 t('★ 처리 후 갱신은 뷰 이름이 아니라 **띠의 존재**로 판정', () => {
   assert.ok(/CS_REVIEW_EDIT_ON_RESOLVED = function\(\)\{ try\{ if\(document\.getElementById\('reQueueMount'\)\)/.test(WD),
     "뷰 이름으로 판정하면 'reedit'→'cs' 같은 이름 변경 때 갱신이 조용히 멈춘다");
 });
-t('경로 재기준 — 통합 작업대만 Track B', () => {
+t('경로 재기준 — 리뷰웹시스템[3버전]만 Track B', () => {
   assert.ok(/window\.REVIEW_EDIT_API_BASE = '\/api\/trackb\/review-edit'/.test(WD));
   assert.ok(!/REVIEW_EDIT_API_BASE\s*=/.test(ADM), 'admin 이 베이스를 바꾸면 기존 경로가 죽는다');
   assert.ok(/'\/api\/review-edit'/.test(CSJ), '기본값이 기존 경로가 아니다');

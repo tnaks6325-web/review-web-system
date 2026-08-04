@@ -1,7 +1,7 @@
 /**
- * Track B — 백그라운드 평행 트랙(통합 작업대의 그림자) 라우트.
+ * Track B — 백그라운드 평행 트랙(리뷰웹시스템[3버전]의 그림자) 라우트.
  *
- * ★ 무영향·격리: 투영/대조/소유/작업대는 master 전용. 작업대 읽기는 advertiser(광고주)에게도
+ * ★ 무영향·격리: 투영/대조/소유/작업보드는 master 전용. 작업보드 읽기는 advertiser(광고주)에게도
  *   "본인 소유 탭만" 열되(스코프 강제 + PII 마스킹), 라이브 검색·주문·시트 흐름을 일절 안 건드린다.
  *   되돌리기 = app.js 마운트 제거.
  */
@@ -81,7 +81,7 @@ router.get('/tabs', authMiddleware, async (req, res, next) => {
   } catch (err) { next(err); }
 });
 
-// ── 작업목록 즐겨찾기(로그인 계정별 개인화·영속) — 작업대 로그인 사용자 누구나(자기 것만) ──
+// ── 작업목록 즐겨찾기(로그인 계정별 개인화·영속) — 작업보드 로그인 사용자 누구나(자기 것만) ──
 router.get('/workdesk/favorites', authMiddleware, async (req, res, next) => {
   try { res.json({ ok: true, favorites: await svc.getWorkdeskFavorites(_by(req)) }); }
   catch (err) { next(err); }
@@ -376,12 +376,12 @@ router.delete('/ownership', authMiddleware, internalMiddleware, async (req, res,
   } catch (err) { next(err); }
 });
 
-// ── 통합 작업대 데이터(읽기): 세부+명단+상태. 역할 렌즈(광고주는 소유 스코프+PII 마스킹) ──
+// ── 리뷰웹시스템[3버전] 데이터(읽기): 세부+명단+상태. 역할 렌즈(광고주는 소유 스코프+PII 마스킹) ──
 router.get('/workdesk', authMiddleware, async (req, res, next) => {
   try {
     // 역할 렌즈: master/admin(전체) · staff(AE, 담당 탭+전체 PII) · advertiser(소유 탭+마스킹). reviewer 차단.
     const role = _role(req);
-    if (!['master', 'admin', 'staff', 'advertiser'].includes(role)) return res.status(403).json({ ok: false, error: '작업대 열람 권한이 없습니다.' });
+    if (!['master', 'admin', 'staff', 'advertiser'].includes(role)) return res.status(403).json({ ok: false, error: '작업보드 열람 권한이 없습니다.' });
     const { sheetId, tabName, tabGid } = req.query;
     if (!sheetId || !tabName) return res.status(400).json({ ok: false, error: 'sheetId, tabName 필수' });
     const advertiserId = (req.admin && req.admin.advertiser_id) || null;
@@ -520,7 +520,7 @@ router.post('/workdesk/unseen', authMiddleware, async (req, res, next) => {
   } catch (err) { next(err); }
 });
 
-// ── 통합 작업대 편집(오버레이) — master/admin 전체 · staff(AE) 담당 탭만 · advertiser 차단(_ensureEditScope). ──
+// ── 리뷰웹시스템[3버전] 편집(오버레이) — master/admin 전체 · staff(AE) 담당 탭만 · advertiser 차단(_ensureEditScope). ──
 //   rowId ∈ (sheetId,tabName) 재검증·앵커 산출·거부조건은 서비스가 수행.
 router.post('/workdesk/edit', authMiddleware, async (req, res, next) => {
   try {
@@ -601,9 +601,9 @@ router.post('/workdesk/cell-color', authMiddleware, async (req, res, next) => {
 });
 
 // ═══════════════════════════════════════════════════════════
-// 리뷰어 비정상 로그(한글 자연어, migration 062) — 통합작업대 "리뷰어 로그" 창 + 관리자 중요알림 소스
+// 리뷰어 비정상 로그(한글 자연어, migration 062) — 리뷰웹시스템[3버전] "리뷰어 로그" 창 + 관리자 중요알림 소스
 //   내부인(master/admin/staff) 전용 — advertiser(외부) 차단. via:'intranet' 토큰도 /api/trackb/*
-//   격리 범위 안이라 인트라넷 SSO 사용자가 통합작업대에서 바로 열람 가능.
+//   격리 범위 안이라 인트라넷 SSO 사용자가 리뷰웹시스템[3버전]에서 바로 열람 가능.
 //   확인(resolve)은 서버 상태가 진실원본 — 어느 화면에서 확인해도 전 관리자 화면에서 사라진다.
 // ═══════════════════════════════════════════════════════════
 // ★ staff(AE) 스코프: 담당 업체(inad_pm) 탭의 로그만 열람 — 전 캠페인 리뷰어 PII 전역 열람 차단
@@ -615,14 +615,14 @@ async function _logScopeTabs(req) {
 }
 
 /* ══════════════════════════════════════════════════════════════
-   작업오더 · 모집공고 — 통합 작업대 상단탭
+   작업오더 · 모집공고 — 리뷰웹시스템[3버전] 상단탭
 
    ★ **열람은 내부인 전원**(master/admin/staff — 광고주 차단), **편집은 이름 명단**
      (`utils/workdeskEditors.js`, env `WORKDESK_EDITORS`)만. 사용자 확정 정책이다.
      작업오더 접수는 시트/탭을 tab_configs·campaigns 에 등록하는 단일 관문이고
      공고 발행·수정은 정원·금액을 바꾸므로, 보는 사람 전부에게 열 수 없다.
    ★ 라우트는 **기존 서비스·핸들러를 그대로 호출**한다(로직 복제 금지) — 여기서는
-     Track B 경로로 노출하면서 권한만 다시 씌운다. 통합 작업대는 /api/trackb/* 하고만
+     Track B 경로로 노출하면서 권한만 다시 씌운다. 리뷰웹시스템[3버전]은 /api/trackb/* 하고만
      통신하고 인트라넷 SSO 토큰도 그 경로로만 격리되기 때문이다.
    ══════════════════════════════════════════════════════════════ */
 const wdEditors = require('../utils/workdeskEditors');
@@ -754,7 +754,7 @@ router.post('/campaigns/:id/dismiss', authMiddleware, internalMiddleware, editor
   _campHandlers.dismiss(req, res, next));
 
 /* ══════════════════════════════════════════════════════════════
-   리뷰이미지 교체요청 — 통합 작업대 전용 탭 + C/S 대화창 카드
+   리뷰이미지 교체요청 — 리뷰웹시스템[3버전] 전용 탭 + C/S 대화창 카드
 
    ★ **AE(staff)도 담당 탭만** 처리할 수 있다(사용자 확정) — C/S 문의 탭은 여전히
      master/admin 전용이므로, AE 는 문의 본문을 보지 못한 채 이 경로로만 교체요청을 처리한다.
@@ -851,7 +851,7 @@ router.post('/review-edit/reject', authMiddleware, _reInternal, async (req, res,
 });
 
 /* ══════════════════════════════════════════════════════════════
-   리뷰검수 — 통합 작업대 상단탭 (M3)
+   리뷰검수 — 리뷰웹시스템[3버전] 상단탭 (M3)
 
    ★ 권한은 **이미지 교체요청 탭과 같다**(`_reInternal`): master/admin 전체,
      staff(AE)는 담당 탭만, 광고주 차단. 검수 근거에 리뷰어 실명과 **리뷰 본문 OCR**이
@@ -985,7 +985,7 @@ router.get('/review-inspect/export.csv', authMiddleware, _reInternal, async (req
 /* 판별 예시이미지 — 조회는 내부인, **저장은 adminOrMaster**(전사 설정이라 AE가 못 바꾼다)
    ★ 리뷰 예시(`kind:'review'`, 기본)와 현금영수증 예시(`kind:'receipt'`)가 **한 창구**를 쓴다 —
      둘 다 "AI 판정의 기준이 되는 예시"라 화면·권한·검증이 같아야 한다.
-   ★ 기존 호출부(통합작업대 리뷰검수 탭의 [🖼 판별 예시] 모달)는 kind 를 안 보내므로
+   ★ 기존 호출부(리뷰웹시스템[3버전] 리뷰검수 탭의 [🖼 판별 예시] 모달)는 kind 를 안 보내므로
      기본값이 review = **동작 불변**. */
 router.get('/review-inspect/samples', authMiddleware, _reInternal, async (req, res) => {
   try {
@@ -1027,7 +1027,7 @@ router.post('/review-inspect/sweep', authMiddleware, adminOrMasterMiddleware, as
 });
 
 /* ══════════════════════════════════════════════════════════════
-   C/S 문의창구 — 통합 작업대 상단탭
+   C/S 문의창구 — 리뷰웹시스템[3버전] 상단탭
 
    ★ **master/admin 전용**(`adminOrMasterMiddleware`) — 기존 `/api/cs/*` 정책을 그대로 옮겼다
      (cs.routes.js 머리말: "staff(영업담당자)·리뷰어는 접근 불가"). 문의 본문에는
@@ -1066,7 +1066,7 @@ router.post('/cs/memo', authMiddleware, adminOrMasterMiddleware, (req, res, next
   _csHandlers.memo(req, res, next));
 
 /* ══════════════════════════════════════════════════════════════
-   설정 — 통합 작업대 상단탭 (내 닉네임 · 회사 사업자번호(제공정보) · 리뷰어 소식·공지)
+   설정 — 리뷰웹시스템[3버전] 상단탭 (내 닉네임 · 회사 사업자번호(제공정보) · 리뷰어 소식·공지)
 
    ★ Track B 경로에 두는 이유 = C/S 문의와 같다: 인트라넷 SSO 토큰(`via:'intranet'`)은
      authMiddleware 가 `/api/trackb/*` 로만 격리하므로 `/api/admin/*`·`/api/tab/*`·
@@ -1114,11 +1114,11 @@ router.post('/settings/notices/delete', authMiddleware, adminOrMasterMiddleware,
   _setHandlers.noticeDelete(req, res, next));
 
 /* ══════════════════════════════════════════════════════════════
-   시스템 오류로그 — 통합 작업대 「로그」 탭의 두 번째 서브탭
+   시스템 오류로그 — 리뷰웹시스템[3버전] 「로그」 탭의 두 번째 서브탭
 
    ★ 데이터는 이미 쌓이고 있는 `error_logs`(마이그레이션 026/028) 그대로다.
-     신규 테이블·신규 수집 경로 0 — 화면만 관리자 대시보드에서 작업대로 옮긴다
-     (사용자 확정 2026-08: 통합 작업대가 메인, 관리자 대시보드 폐기).
+     신규 테이블·신규 수집 경로 0 — 화면만 관리자 대시보드에서 작업보드로 옮긴다
+     (사용자 확정 2026-08: 리뷰웹시스템[3버전]이 메인, 관리자 대시보드 폐기).
    ★ 로직은 한 줄도 베끼지 않고 기존 `/api/admin/error-logs*` 핸들러에 위임한다.
    ★ Track B 경로에 두는 이유 = C/S·설정과 같다: 인트라넷 SSO 토큰(`via:'intranet'`)은
      `/api/admin/*` 에 **도달 자체가 불가능**하다(authMiddleware 격리).
@@ -1150,12 +1150,12 @@ router.post('/error-logs/resolve', authMiddleware, adminOrMasterMiddleware, (req
   _errHandlers.resolve(req, res, next));
 
 /* ══════════════════════════════════════════════════════════════
-   등록리뷰어DB — 통합 작업대 상단탭
+   등록리뷰어DB — 리뷰웹시스템[3버전] 상단탭
 
    ★ **master/admin 전용**(`adminOrMasterMiddleware`). AE(staff)·광고주는 못 본다.
      AE는 "담당 업체 탭"으로만 스코프되는데 리뷰어DB는 담당과 무관한 전사 개인정보라,
      여기만 전체 공개하면 그 스코프 원칙이 깨진다(사용자 확정).
-   ★ Track B 라우트에 두는 이유: 통합 작업대는 `/api/trackb/*` 하고만 통신하고,
+   ★ Track B 라우트에 두는 이유: 리뷰웹시스템[3버전]은 `/api/trackb/*` 하고만 통신하고,
      인트라넷 SSO 토큰(`via:'intranet'`)도 authMiddleware가 그 경로로만 격리한다.
      기존 `/api/reviewer/list`는 전 행을 한 번에 반환(검색·페이지 없음)이라 그대로 쓸 수 없다.
    ══════════════════════════════════════════════════════════════ */

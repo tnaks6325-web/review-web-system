@@ -77,7 +77,7 @@ ok('③-4 미리보기는 폴링하지 않음', /if\(!PREVIEW\) startPolling\(\)
 ok('③-5 미리보기 진입은 관리자 전용 엔드포인트 + Bearer',
   /_pvGet\('\/api\/campaign\/admin\/' \+ encodeURIComponent\(CAMP_ID\) \+ '\/preview'\)/.test(camp)
   && /Authorization[\s\S]{0,20}Bearer \' \+ tok/.test(camp));
-/* ★ 통합 작업대(인트라넷 SSO 토큰 via:'intranet')는 `/api/campaign/admin/*` 에 도달 자체가 불가 →
+/* ★ 리뷰웹시스템[3버전](인트라넷 SSO 토큰 via:'intranet')는 `/api/campaign/admin/*` 에 도달 자체가 불가 →
    같은 핸들러를 위임하는 `/api/trackb/campaigns/:id/preview` 로 **401/403 일 때만** 한 번 더 시도한다.
    그 외 오류까지 재시도하면 실패 원인이 가려진다(무한 폴백 금지). */
 ok('③-5b Track B 경로 폴백은 401/403 에서만',

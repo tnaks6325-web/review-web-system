@@ -1,5 +1,5 @@
 /**
- * workdeskInspectView.test.js — 통합 작업대 "리뷰검수" 탭 무한로딩 회귀가드.
+ * workdeskInspectView.test.js — 리뷰웹시스템[3버전] "리뷰검수" 탭 무한로딩 회귀가드.
  *
  * 사고(신고): 리뷰검수 메뉴를 누르면 **영원히 "불러오는 중…"**. 서버가 죽은 것처럼 보였지만
  *   `GET /api/trackb/review-inspect/list` 는 **200 정상 응답**이었다.

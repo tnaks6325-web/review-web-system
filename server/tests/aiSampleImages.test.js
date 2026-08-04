@@ -145,7 +145,7 @@ console.log('\n2) 서비스 실행');
   const tb = readS('routes/trackB.routes.js');
   ok('GET 이 두 목록을 함께 반환(설정 화면이 한 번에 그린다)',
     /res\.json\(\{ ok: true, samples, receiptSamples \}\)/.test(tb));
-  ok('★ kind 미지정은 기존대로 리뷰 예시 — 통합작업대 [🖼 판별 예시] 모달 동작 불변',
+  ok('★ kind 미지정은 기존대로 리뷰 예시 — 리뷰웹시스템[3버전] [🖼 판별 예시] 모달 동작 불변',
     /String\(b\.kind \|\| ''\) === 'receipt'/.test(tb));
 
   /* ═══ 7) 설정 화면 ═══════════════════════════════════════════ */
@@ -167,10 +167,10 @@ console.log('\n2) 서비스 실행');
   ok('패널 등록(PANELS/LOADERS) + 전역 노출',
     /aisamples: _aisamplesHtml/.test(set) && /aisamples: loadAiSamples/.test(set)
     && /window\.loadAiSamples = loadAiSamples/.test(set));
-  ok('★ 두 화면 모두 같은 패널을 띄운다(관리자 대시보드 · 통합 작업대)',
+  ok('★ 두 화면 모두 같은 패널을 띄운다(관리자 대시보드 · 리뷰웹시스템[3버전])',
     /panels: \[[^\]]*'aisamples'[^\]]*\], autoload: false/.test(adm)
     && /isAdmin \? \[[^\]]*'aisamples'[^\]]*\]/.test(wdk));
-  ok('★ 통합 작업대는 관리자에게만 — 저장이 adminOrMaster 라 AE 에겐 막다른 길이 된다',
+  ok('★ 리뷰웹시스템[3버전]은 관리자에게만 — 저장이 adminOrMaster 라 AE 에겐 막다른 길이 된다',
     !/: \['nickname'[^\]]*'aisamples'/.test(wdk));
   ok('관리자 대시보드 설정 탭 진입 시 값을 불러온다(autoload:false 호스트)',
     /loadAiSamples\(\); \} catch\(_\)\{\}/.test(idx));

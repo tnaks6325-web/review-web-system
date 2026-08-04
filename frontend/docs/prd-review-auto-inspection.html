@@ -141,14 +141,14 @@
 <div class="wrap">
 
   <header class="head">
-    <p class="eyebrow">Review Web System · 통합작업대</p>
+    <p class="eyebrow">Review Web System · 리뷰웹시스템[3버전]</p>
     <h1>리뷰 자동검수 시스템 구현계획서</h1>
     <p class="lede">리뷰어가 제출한 리뷰 캡처가 업체(광고주)에게 전달되기 전에, 시스템이 <b>진짜 리뷰인지 · 우리 상품 리뷰인지 · 재탕/중복이 아닌지</b>를 자동으로 검수한다.
     현재 리뷰이미지 제출 로직과 구글드라이브 폴더 구조를 그대로 활용하며, 이미 운영 중인 AI 검수(3단계 캡처 검수) 인프라를 확장하는 방식으로 설계했다.</p>
     <div class="metachips">
       <span class="mc b">v1.0 계획(구현 전)</span>
       <span class="mc">작성일 2026-08-03</span>
-      <span class="mc">화면: 통합작업대(workdesk) 신규 탭</span>
+      <span class="mc">화면: 리뷰웹시스템[3버전](workdesk) 신규 탭</span>
       <span class="mc">신규 마이그레이션 081</span>
     </div>
   </header>
@@ -249,8 +249,8 @@
         <tr><td><code>drive.service.downloadFile</code> + <code>GET /api/drive/image/:id</code></td><td>이미지 프록시 스트리밍(무인증, 추측불가 fileId)</td><td>배치 백필 시 이미지 다운로드 / 검수 UI 썸네일·원본 표시.</td></tr>
         <tr><td><code>cash_receipt_guide_*</code> 패턴 (app_settings + guide-image 업로드)</td><td>채널별 발행방법 이미지 등록(관리자 설정탭)</td><td><b>채널별 별점 예시이미지 등록</b>을 같은 패턴으로(네이버 빨강별점 / 쿠팡 노란별점).</td></tr>
         <tr><td><code>pg_trgm</code> (migration 004에서 설치)</td><td>한글 이름 유사검색</td><td><b>리뷰 본문 텍스트 유사도</b>(3-gram similarity) 계산 — 별도 엔진 불필요.</td></tr>
-        <tr><td>탭 ↔ 작업오더 링크 (<code>trackb_work_order_links</code> 우선 → <code>work_orders.linked_tab_*</code> 폴백)</td><td>통합작업대 작업세부 표시</td><td><b>기대 상품명 자동 소스</b> — 연결 오더의 <code>title / product_option / product_options_json</code>.</td></tr>
-        <tr><td><code>reviewer_event_logs</code> + SSE</td><td>통합작업대 "리뷰어 로그" + 관리자 빨간 알림</td><td>확실한 불량(critical)만 실시간 알림, 의심(warn)은 로그·검수 탭에만(늑대소년 방지).</td></tr>
+        <tr><td>탭 ↔ 작업오더 링크 (<code>trackb_work_order_links</code> 우선 → <code>work_orders.linked_tab_*</code> 폴백)</td><td>리뷰웹시스템[3버전] 작업세부 표시</td><td><b>기대 상품명 자동 소스</b> — 연결 오더의 <code>title / product_option / product_options_json</code>.</td></tr>
+        <tr><td><code>reviewer_event_logs</code> + SSE</td><td>리뷰웹시스템[3버전] "리뷰어 로그" + 관리자 빨간 알림</td><td>확실한 불량(critical)만 실시간 알림, 의심(warn)은 로그·검수 탭에만(늑대소년 방지).</td></tr>
         <tr><td>이미지 교체요청 + C/S 브리지 (<code>/api/trackb/review-edit/*</code>, <code>csBridge</code>)</td><td>관리자→리뷰어 교체요청·승인/반려 통지</td><td>검수 탭에서 불량 확정 시 <b>기존 교체요청 흐름으로 그대로 연결</b>(신규 통지 채널 0).</td></tr>
       </tbody>
     </table></div>
@@ -517,12 +517,12 @@ CREATE INDEX IF NOT EXISTS idx_review_inspect_status
 
   <!-- ══════════════════ 5. 관리자 UI ══════════════════ -->
   <section>
-    <h2><span class="secno">5</span>관리자 UI — 통합작업대 "리뷰검수" 탭</h2>
-    <p>통합작업대(workdesk.html) 상단 nav에 신규 탭. 위치는 <b>"이미지 교체요청" 옆</b>(리뷰 이미지 관련 업무 인접 배치). API는 인트라넷 SSO 토큰이 도달 가능한 <code>/api/trackb/review-inspect/*</code> 네임스페이스.</p>
+    <h2><span class="secno">5</span>관리자 UI — 리뷰웹시스템[3버전] "리뷰검수" 탭</h2>
+    <p>리뷰웹시스템[3버전](workdesk.html) 상단 nav에 신규 탭. 위치는 <b>"이미지 교체요청" 옆</b>(리뷰 이미지 관련 업무 인접 배치). API는 인트라넷 SSO 토큰이 도달 가능한 <code>/api/trackb/review-inspect/*</code> 네임스페이스.</p>
 
-    <div class="mock" role="img" aria-label="통합작업대 리뷰검수 탭 화면 목업">
+    <div class="mock" role="img" aria-label="리뷰웹시스템[3버전] 리뷰검수 탭 화면 목업">
       <div class="mtop">
-        <span class="mtab">작업대</span><span class="mtab">업체관리</span><span class="mtab">리뷰어 로그</span>
+        <span class="mtab">작업보드</span><span class="mtab">업체관리</span><span class="mtab">리뷰어 로그</span>
         <span class="mtab">작업오더</span><span class="mtab">모집공고</span><span class="mtab">C/S 문의</span>
         <span class="mtab">이미지 교체요청</span><span class="mtab on">리뷰검수 <b style="color:#FFD9D4">4</b></span><span class="mtab">등록리뷰어DB</span>
       </div>
@@ -627,7 +627,7 @@ CREATE INDEX IF NOT EXISTS idx_review_inspect_status
         </ul>
       </div></div>
       <div class="ms"><div class="msno">M3</div><div>
-        <h4>통합작업대 "리뷰검수" 탭 UI</h4>
+        <h4>리뷰웹시스템[3버전] "리뷰검수" 탭 UI</h4>
         <ul>
           <li>workdesk nav 탭 + 필터/카드/상세/나란히 보기 + 미확인 뱃지(폴링 — workdesk엔 SSE 없음)</li>
           <li>[교체요청] → 기존 reviewEdit + csBridge 연동 / [통과 처리] → resolved 종결</li>
@@ -675,7 +675,7 @@ CREATE INDEX IF NOT EXISTS idx_review_inspect_status
         <li><b>제출자명 검수(조건 ③)</b> — 본 계획은 "1단계 보류 + OCR 수집만"을 권고. 이대로 진행해도 되는지? <span class="note">(마스킹·닉네임 때문에 오탐이 크다는 판단 — §2-③)</span></li>
         <li><b>텍스트 유사도 비교 범위</b> — 기본 "같은 탭 내"로 시작 권고. 리뷰어가 <b>다른 캠페인에 같은 글을 돌려쓰는 것</b>까지 잡으려면 전역 비교가 필요(비용↑) — 어느 범위로 시작할지?</li>
         <li><b>불량/의심 시 리뷰어 통지</b> — 권고안: 자동 통지 없음, 관리자가 [교체요청] 버튼으로 확정한 건만 기존 C/S 카드로 통지. <span class="note">의심 단계에서 리뷰어에게 바로 보이게 하면 오탐 마찰이 크다.</span></li>
-        <li><b>광고주(업체) 노출</b> — 1단계는 내부 전용 권고. 이후 "검수 통과율" 같은 요약만 광고주 작업대에 노출할지?</li>
+        <li><b>광고주(업체) 노출</b> — 1단계는 내부 전용 권고. 이후 "검수 통과율" 같은 요약만 광고주 작업보드에 노출할지?</li>
         <li><b>과거분 백필 범위</b> — 최근 30일 권고(그 이전은 이미 업체 전달이 끝난 작업이 대부분). 전량 백필이 필요하면 Drive 다운로드·AI 콜 비용을 별도 산정.</li>
       </ol>
     </div>

@@ -567,7 +567,7 @@ router.post('/submit', authMiddleware, async (req, res, next) => {
       return res.status(400).json({ ok: false, error: '작업명을 입력해주세요.' });
     }
     // ★ 작업시트탭URL은 **선택 항목**(작업표 생성 도입으로 제출 필수 해제 — PRD Q2 확정).
-    //   시트를 미리 만들어 둔 경우엔 그대로 첨부하고, 통합작업대에서 작업표를 생성할 경우 비워 둔다.
+    //   시트를 미리 만들어 둔 경우엔 그대로 첨부하고, 리뷰웹시스템[3버전]에서 작업표를 생성할 경우 비워 둔다.
     //   접수(accept)는 여전히 URL+gid를 요구하므로 "접수된 오더 = linked_tab_* 보유" 불변식은 유지된다.
 
     const data = await _insertWorkOrder(b, req.admin?.name || '');

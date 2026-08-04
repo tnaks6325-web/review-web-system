@@ -1249,7 +1249,7 @@ async function _enterPreview(){
   const tok = _pvToken();
   if(!tok){ _pvFail('관리자 인증이 없어 미리보기를 열 수 없어요.<br/>관리자 대시보드에서 [리뷰어 화면] 버튼으로 다시 열어주세요.'); return; }
   try{
-    /* ★ 경로 2개 — 관리자 대시보드 토큰은 `/api/campaign/admin/*`, 통합 작업대의
+    /* ★ 경로 2개 — 관리자 대시보드 토큰은 `/api/campaign/admin/*`, 리뷰웹시스템[3버전]의
        인트라넷 SSO 토큰(via:'intranet')은 그 경로에 **도달 자체가 불가**(authMiddleware 격리)라
        같은 핸들러를 위임하는 `/api/trackb/campaigns/:id/preview` 로 한 번 더 시도한다.
        ★ 폴백은 401/403 일 때만 — 그 외 오류를 재시도하면 실패 원인이 가려진다. */

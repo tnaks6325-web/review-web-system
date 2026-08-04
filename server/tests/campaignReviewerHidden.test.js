@@ -113,12 +113,12 @@ ok('★ 프리셋이 리뷰어 숨김을 켠다', /chk\("rf_reviewer_hidden", tr
 ok('★ 프리셋이 타계정 허용을 켠다(일괄 제출의 전제)', /chk\("rf_multi_account", true, onMultiAccountToggle\)/.test(recruitJs));
 ok('프리셋이 참여형을 켠다(홀드·배치 경로)', /chk\("rf_participation", true, onParticipationToggle\)/.test(recruitJs));
 ok('프리셋은 기존 발행 모달을 재사용(신규 모달 사본 금지)', /await openRecruitModal\(null\);/.test(recruitJs));
-// ★ 창구는 통합 작업대 하나 — 관리자 대시보드에는 두지 않는다(사용자 확정).
-//   Track B(통합 작업대)가 관리자 대시보드를 대체하는 방향이라 버튼을 양쪽에 두면 창구가 둘이 된다.
-ok('★ [🧪 테스트 공고] 버튼은 통합 작업대에만(편집 권한자에게만)',
+// ★ 창구는 리뷰웹시스템[3버전] 하나 — 관리자 대시보드에는 두지 않는다(사용자 확정).
+//   Track B(리뷰웹시스템[3버전])가 관리자 대시보드를 대체하는 방향이라 버튼을 양쪽에 두면 창구가 둘이 된다.
+ok('★ [🧪 테스트 공고] 버튼은 리뷰웹시스템[3버전]에만(편집 권한자에게만)',
   /STATE\.canEdit\?'<button class="btn" onclick="openTestCampaignModal\(\)"/.test(workdesk));
 ok('★ 관리자 대시보드에는 버튼을 두지 않는다(창구 이중화 금지)', !/openTestCampaignModal/.test(adminHtml));
-// 모달 토글은 공유 모듈이라 양쪽에서 쓴다 — 버튼(창구)만 통합 작업대로 단일화한 것.
+// 모달 토글은 공유 모듈이라 양쪽에서 쓴다 — 버튼(창구)만 리뷰웹시스템[3버전]으로 단일화한 것.
 ok('공고 모달 토글은 공유 모듈에 유지(관리자 대시보드에서도 수정 가능)', /id="rf_reviewer_hidden"/.test(modal));
 
 // ── E. 진짜 PG 로 필터 실행 확인(있을 때만) ──

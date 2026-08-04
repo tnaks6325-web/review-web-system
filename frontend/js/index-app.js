@@ -925,7 +925,7 @@ function openRawMirror() {
   window.open("raw-mirror.html", "_blank");
 }
 
-/* ── Track B 통합 작업대(그림자) 열기 (자동 로그인 핸드오프) ── */
+/* ── Track B 리뷰웹시스템[3버전](그림자) 열기 (자동 로그인 핸드오프) ── */
 function openWorkdesk() {
   const token = sessionStorage.getItem("admin_token") || "";
   if (!token || !isAdminLoggedIn()) {
@@ -1756,7 +1756,7 @@ async function woCreateCampaign(id) {
   if (!o) { showToast("오더 정보를 찾을 수 없습니다. 새로고침 후 다시 시도하세요.", "error"); return; }
   if (typeof openRecruitModal !== "function") { showToast("모집공고 모듈을 불러오지 못했습니다.", "error"); return; }
   /* ★ 프리필 조립은 **공유 모듈**(js/work-order-detail.js `_woCampaignPrefill`)이 한다 —
-     통합 작업대의 작업오더 탭도 같은 함수를 쓰므로 두 화면의 프리필이 갈라질 수 없다(사본 금지). */
+     리뷰웹시스템[3버전]의 작업오더 탭도 같은 함수를 쓰므로 두 화면의 프리필이 갈라질 수 없다(사본 금지). */
   const prefill = _woCampaignPrefill(o);
   switchAdminTab("recruit");
   // recruit 탭의 연결 탭 옵션 로드를 보장한 뒤 모달 오픈 (setTimeout race 제거)
@@ -2053,7 +2053,7 @@ function _onWorkOrderNewSSE(data) {
 /* ═══ 리뷰어 중요알림 (reviewer_event_logs critical, migration 062) ═══
    유령 written(구매양식 시트 소실)·수동입력 필요 등 critical 한글 로그를 좌측하단 빨간 카드로 표시.
    서버 미해결(resolved_at IS NULL) 상태가 진실원본 — [확인]하면 DB에서 resolve 되어 모든 관리자
-   화면·통합작업대 로그 창에서 함께 사라진다(로컬 seen 저장 불필요). 도착 채널 = SSE 'reviewer_alert'
+   화면·리뷰웹시스템[3버전] 로그 창에서 함께 사라진다(로컬 seen 저장 불필요). 도착 채널 = SSE 'reviewer_alert'
    (실시간) + 2분 폴링(폴백) — wo 알림 스택(우측하단)과 겹치지 않게 좌측하단 사용. */
 let _raTimer = null, _raInFlight = false;
 const _RA_POLL_MS = 2 * 60 * 1000;
@@ -2066,7 +2066,7 @@ const _RA_CATS = [
 ];
 
 /**
- * 중요알림 요약 카드 → 통합작업대 **리뷰어 로그 뷰**를 새 탭으로 연다(#view=logs).
+ * 중요알림 요약 카드 → 리뷰웹시스템[3버전] **리뷰어 로그 뷰**를 새 탭으로 연다(#view=logs).
  * 개별 확인·처리·이미지 미리보기는 전부 그 화면에서 한다(대시보드는 유형별 건수만 요약).
  * ★ 토큰은 URL에 안 싣고 기존 `openWorkdesk()`와 같은 `raw_sso` 핸드오프를 재사용한다.
  */
@@ -2126,7 +2126,7 @@ function _raRenderSummary(byType, totalCritical) {
     stack.appendChild(card);
   }
   const lines = rows.map(x =>
-    '<div onclick="openWorkdeskLogs()" title="통합작업대 리뷰어 로그에서 확인·처리" style="display:flex;align-items:center;gap:8px;padding:7px 9px;border-radius:8px;cursor:pointer;background:#fff;border:1px solid #FECACA;margin-top:6px">'
+    '<div onclick="openWorkdeskLogs()" title="리뷰웹시스템[3버전] 리뷰어 로그에서 확인·처리" style="display:flex;align-items:center;gap:8px;padding:7px 9px;border-radius:8px;cursor:pointer;background:#fff;border:1px solid #FECACA;margin-top:6px">'
     + '<span style="font-size:1rem;flex-shrink:0">' + x.icon + '</span>'
     + '<span style="flex:1;min-width:0;font-weight:600">' + escHtml(x.label) + '</span>'
     + '<b style="color:#DC2626;font-size:.92rem;white-space:nowrap">' + x.n + '건 발생</b>'
@@ -2136,7 +2136,7 @@ function _raRenderSummary(byType, totalCritical) {
     '<div style="display:flex;align-items:center;gap:6px;font-weight:800;color:#DC2626"><i class="fas fa-exclamation-triangle"></i> 리뷰어 중요알림'
     + '<span style="margin-left:auto;font-size:.72rem;background:#DC2626;color:#fff;border-radius:999px;padding:1px 9px">총 ' + totalCritical + '건</span></div>'
     + lines
-    + '<button onclick="openWorkdeskLogs()" style="width:100%;margin-top:9px;padding:7px;border:none;background:#DC2626;color:#fff;border-radius:8px;font-size:.78rem;font-weight:700;cursor:pointer">통합작업대에서 처리 ↗</button>';
+    + '<button onclick="openWorkdeskLogs()" style="width:100%;margin-top:9px;padding:7px;border:none;background:#DC2626;color:#fff;border-radius:8px;font-size:.78rem;font-weight:700;cursor:pointer">리뷰웹시스템[3버전]에서 처리 ↗</button>';
 }
 // SSE 'reviewer_alert' 수신 훅 (index-payment.js connectSSE 에서 호출)
 function _onReviewerAlertSSE() {
@@ -11475,8 +11475,8 @@ async function applySheetNoticeBulk() {
 }
 
 /* ── 내 닉네임 · 회사 사업자번호(제공정보) · 현금영수증 발행방법 이미지 ──
-   마크업·로직은 **공유 모듈 js/admin-settings.js** 로 이관했다(통합 작업대와 한 벌).
-   여기 남기면 통합 작업대에 같은 설정을 띄우려고 사본을 만들게 되고, 문구·저장 로직 중
+   마크업·로직은 **공유 모듈 js/admin-settings.js** 로 이관했다(리뷰웹시스템[3버전]과 한 벌).
+   여기 남기면 리뷰웹시스템[3버전]에 같은 설정을 띄우려고 사본을 만들게 되고, 문구·저장 로직 중
    하나만 고쳐도 두 화면이 갈라진다(cs-inquiry.js·recruit-modal.js 와 같은 규율).
    전역 이름(loadMyNickname·saveMyNickname·loadCompanyBusinessNo·saveCompanyBusinessNo·
    uploadCashReceiptGuide·clearCashReceiptGuide·CR_GUIDE_CHANNELS)은 그 모듈이 그대로 노출한다. */
@@ -11703,10 +11703,10 @@ async function loadUnrecognizedTabs() {
   }
 }
 
-/* 오류디버깅(Error Debugging) 화면은 **통합 작업대 「로그」 탭 → 시스템 오류로그**로 이관됐다.
-   (사용자 확정 2026-08: 통합 작업대가 메인 · 관리자 대시보드 폐기 → 창구 단일화)
+/* 오류디버깅(Error Debugging) 화면은 **리뷰웹시스템[3버전] 「로그」 탭 → 시스템 오류로그**로 이관됐다.
+   (사용자 확정 2026-08: 리뷰웹시스템[3버전]이 메인 · 관리자 대시보드 폐기 → 창구 단일화)
    · 데이터·수집 경로(`error_logs` / logAbnormal)는 그대로다 — 화면만 옮겼다.
-   · 서버 API 도 그대로 `/api/admin/error-logs*` 이고, 작업대는 `/api/trackb/error-logs*`
+   · 서버 API 도 그대로 `/api/admin/error-logs*` 이고, 작업보드는 `/api/trackb/error-logs*`
      프록시로 같은 핸들러를 태운다(인트라넷 SSO 토큰이 /api/admin/* 에 못 닿기 때문). */
 
 function _buildUnrecogSampleTable(sampleRows) {
@@ -15714,7 +15714,7 @@ async function _deleteNotice(id) {
 }
 
 /* C/S 문의창구(마크업+화면 코드)는 js/cs-inquiry.js 공유 모듈로 이관 —
-   통합 작업대 상단탭에서 같은 화면을 쓴다(사본 금지). 전역 이름은 그대로라 호출부 무수정. */
+   리뷰웹시스템[3버전] 상단탭에서 같은 화면을 쓴다(사본 금지). 전역 이름은 그대로라 호출부 무수정. */
 
 // ═══════════════════════════════════════════════════════════
 // 리뷰 캡처 정리 — 내 드라이브 루트 등에 흩어진 리뷰 캡처를
@@ -16422,7 +16422,7 @@ async function _relocateApplyTab(i) {
 
 /* ══════════════════════════════════════════════════════════════
    ★ 리뷰어 소식·공지 관리 (관리자) — 리뷰어 홈 상단 노출
-   마크업·로직은 **공유 모듈 js/admin-settings.js** 로 이관했다(통합 작업대와 한 벌).
+   마크업·로직은 **공유 모듈 js/admin-settings.js** 로 이관했다(리뷰웹시스템[3버전]과 한 벌).
    전역 이름(loadReviewerNoticesAdmin·saveReviewerNotice·toggleReviewerNoticeForm·
    editReviewerNotice·cancelReviewerNoticeEdit·toggleReviewerNotice·deleteReviewerNotice)은
    그 모듈이 그대로 노출하므로 여기 호출부(탭 전환 훅)는 변경 없이 동작한다.

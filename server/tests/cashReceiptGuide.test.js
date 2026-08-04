@@ -14,7 +14,7 @@ const readS = (p) => fs.readFileSync(path.join(__dirname, '..', 'src', p), 'utf8
 const camp = readS('routes/campaign.routes.js');
 const tabc = readS('routes/tabconfig.routes.js');
 const wd = readF('js/campaign-workdetail.js');
-/* 설정탭 슬롯·업로드 로직은 공유 모듈(js/admin-settings.js)로 이관 — 통합 작업대와 한 벌.
+/* 설정탭 슬롯·업로드 로직은 공유 모듈(js/admin-settings.js)로 이관 — 리뷰웹시스템[3버전]과 한 벌.
    admin.html 은 마운트 지점만 들고 있으므로 함께 읽는다(검사 의미 불변). */
 const set = readF('js/admin-settings.js');
 const adm = readF('js/recruit-modal.js') + '\n' + readF('admin.html') + '\n' + set;

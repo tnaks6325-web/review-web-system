@@ -134,7 +134,7 @@ t('17. 조치는 펼침 패널로 이동 — 표의 [확인] 버튼 제거, 행 
   assert.ok(/onclick="_toggleLogRow\(/.test(lgBody), '행 클릭 시 펼쳐져야 함');
   assert.ok(/class="lgdetail"/.test(lgBody), '펼침 상세행이 있어야 함');
   assert.ok(!/>확인<\/button>/.test(lgBody), '표 행의 [확인] 버튼은 제거돼야 함');
-  assert.ok(/_logOpenWorkdesk\(/.test(lgBody), '작업대 열기(펼침 패널) 유실');
+  assert.ok(/_logOpenWorkdesk\(/.test(lgBody), '작업보드 열기(펼침 패널) 유실');
   assert.ok(/_cancelLogOrder\(/.test(lgBody), '취소 처리(펼침 패널) 유실');
   assert.ok(/_resolveLog\(/.test(lgBody) && /✔ 해결/.test(lgBody), '해결 버튼(펼침 패널) 유실');
   assert.ok(/_canResolveLog\(\)/.test(lgBody), '해결/취소 권한 게이트 유실(staff가 타 담당 알림을 지움)');

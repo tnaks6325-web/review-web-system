@@ -16,7 +16,7 @@ const path = require('path');
 const readF = (p) => fs.readFileSync(path.join(__dirname, '..', '..', 'frontend', p), 'utf8');
 
 // ★ 모달 마크업·CSS는 admin.html 인라인에서 **공유 모듈**(js/recruit-modal.js)로 옮겼다 —
-//   통합 작업대가 같은 모달로 발행·수정하기 위함(사본 금지). 이 가드가 보던 내용은
+//   리뷰웹시스템[3버전]이 같은 모달로 발행·수정하기 위함(사본 금지). 이 가드가 보던 내용은
 //   전부 그 모듈 안에 있으므로 읽는 대상만 바꾼다(검사 항목은 그대로).
 const modalSrc = readF('js/recruit-modal.js');
 const adm = modalSrc + '\n' + readF('admin.html');
@@ -159,7 +159,7 @@ const stripComments = (css) => css.replace(/\/\*[\s\S]*?\*\//g, '');
     if (bad.length) console.error('    ↳ 외부 선택자 혼입:', bad);
     return bad.length === 0;
   })());
-  ok(`★ ${name} 은 var() 에 폴백을 단다 — admin 테마 없는 화면(통합 작업대)에서 색·테두리가 날아간다`,
+  ok(`★ ${name} 은 var() 에 폴백을 단다 — admin 테마 없는 화면(리뷰웹시스템[3버전])에서 색·테두리가 날아간다`,
     (body.match(/var\(--[a-zA-Z0-9-]+\)/g) || []).length === 0);
 });
 ok('★ 모달 마크업의 인라인 style 도 var() 폴백을 단다', (() => {

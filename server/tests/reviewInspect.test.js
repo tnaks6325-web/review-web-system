@@ -263,7 +263,7 @@ RI.__setPoolForTest({ query: async (sql, params) => { _sql.push({ sql: String(sq
     /scopedActiveTabs\(\{ role: 'staff'/.test(tb) && /allow\.has\(JSON\.stringify\(\[it\.sheet_id, it\.tab_name\]\)\)/.test(tb));
 
   const wdk = readF('workdesk.html');
-  ok('통합 작업대에 리뷰검수 탭 + 뱃지',
+  ok('리뷰웹시스템[3버전]에 리뷰검수 탭 + 뱃지',
     /data-v="inspect"/.test(wdk) && /id="riNavBadge"/.test(wdk)
     && /v==='inspect'\) renderInspectView\(\)/.test(wdk));
   ok('★ 기본 필터가 의심+불량 — 통과 건까지 나열하면 볼 것이 묻힌다',

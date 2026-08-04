@@ -193,7 +193,7 @@ t('11. _renderTabList: 탭 0개 / 호스트 부재 시 크래시 없음', () => 
   reset(); STATE.tabs = [];
   F._renderTabList();
   assert.ok(/활성 작업 없음/.test(els.tb2.innerHTML));
-  els.segwrap = null; els.tb2 = null;      // 작업대 뷰가 아닐 때
+  els.segwrap = null; els.tb2 = null;      // 작업보드 뷰가 아닐 때
   F._renderTabList();                       // throw 하면 실패
 });
 

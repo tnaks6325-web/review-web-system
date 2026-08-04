@@ -1,5 +1,5 @@
 /**
- * workdeskSettingsTab.test.js — 통합 작업대 '설정' 탭 회귀가드
+ * workdeskSettingsTab.test.js — 리뷰웹시스템[3버전] '설정' 탭 회귀가드
  * 실행: node tests/workdeskSettingsTab.test.js
  *
  * 이 화면의 위험은 셋이다.
@@ -7,10 +7,10 @@
  *     게이트가 한 칸만 어긋나면 AE·광고주가 누른다. 그리고 레포가 이미 밟은 함정 —
  *     역할 미들웨어 앞에 `authMiddleware` 를 빠뜨리면 **마스터 포함 전원 403** 이 된다.
  *     → 라우터 스택을 **실제로 검사**한다.
- *  ② **사본 드리프트** — 설정 화면을 통합 작업대용으로 베끼면 관리자 대시보드와 계속 어긋난다.
+ *  ② **사본 드리프트** — 설정 화면을 리뷰웹시스템[3버전]용으로 베끼면 관리자 대시보드와 계속 어긋난다.
  *     → 마크업·로직이 공유 모듈 한 벌인지, 화면들이 마운트만 하는지 고정한다.
  *  ③ **모듈 단독 실행** — 공유 모듈이 호스트 전역(gasGet·escHtml·API_BASE_URL)에 의존하면
- *     통합 작업대에서 조용히 죽는다(work-order-detail.js 를 뺄 때 실제로 밟은 함정).
+ *     리뷰웹시스템[3버전]에서 조용히 죽는다(work-order-detail.js 를 뺄 때 실제로 밟은 함정).
  *     → 전역 0인 가짜 DOM 에서 **실제로 mount() 를 실행**해 본다.
  */
 const assert = require('assert');
@@ -24,7 +24,7 @@ const F = p => fs.readFileSync(path.join(__dirname, '..', '..', 'frontend', p), 
 let pass = 0;
 const t = (name, cond) => { assert(cond, name); pass++; console.log('  ✓ ' + name); };
 
-console.log('\n▶ 통합 작업대 설정 탭 회귀가드\n');
+console.log('\n▶ 리뷰웹시스템[3버전] 설정 탭 회귀가드\n');
 
 /* ── 1) 권한 — 라우터 스택 실검사 ──────────────────────────── */
 console.log('1) 권한 게이트');
@@ -103,8 +103,8 @@ t('탭 전환 훅(호출부)은 그대로 — 로드 타이밍 불변',
   && /tabName === "dashboard"[\s\S]{0,400}loadReviewerNoticesAdmin/.test(app)
   && /autoload: false/.test(adm));
 
-/* ── 4) 통합 작업대 배선 ───────────────────────────────────── */
-console.log('\n4) 통합 작업대 배선');
+/* ── 4) 리뷰웹시스템[3버전] 배선 ───────────────────────────────────── */
+console.log('\n4) 리뷰웹시스템[3버전] 배선');
 t('nav 에 설정 탭(관리자·AE 양쪽)', (wdk.match(/data-v="settings"/g) || []).length === 2);
 t('switchView 분기', /v==='settings'\) renderSettingsView\(\)/.test(wdk));
 t('★ 서버 경로 재기준 — /api/trackb/settings (SSO 토큰이 도달 가능한 유일 경로)',
@@ -149,7 +149,7 @@ const doc = {
 const sandbox = {
   window: {}, document: doc, console: { log() {}, warn() {} },
   sessionStorage: { getItem: () => null }, localStorage: { getItem: () => null },
-  getComputedStyle: () => ({ getPropertyValue: () => '' }),   // 테마 없는 호스트 = 통합 작업대
+  getComputedStyle: () => ({ getPropertyValue: () => '' }),   // 테마 없는 호스트 = 리뷰웹시스템[3버전]
   fetch: () => Promise.reject(new Error('no network in test')),
   FileReader: function () {}, setTimeout, clearTimeout,
 };
